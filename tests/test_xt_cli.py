@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -745,6 +746,281 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual((rc, out), (0, "■ BLOCKED: cần người quyết\n"))
         self.assertTrue(st["active"] and st["blocked"])
         self.assertEqual(st["blocked_reason"], "cần người quyết")
+
+    def decide(self, *extra: str, choice: str = "1") -> tuple[int, str, str]:
+        base = ["--question", "Lưu phiên ở đâu?", "--option", "Cookie HttpOnly", "--option", "localStorage"]
+        return run_main("loop", "decide", *base, "--choice", choice, "--why", "chặn XSS đọc token", *extra)
+
+    def test_decide_creates_log_and_numbers_entries(self):
+        # LOOP-STOP-018: phiên chính tự duyệt, mỗi quyết định một mục D-NNN tăng dần, không cần state autopilot.
+        rc, out, err = self.decide("--revert", "đổi middleware phiên")
+        self.assertEqual((rc, out, err), (0, "✓ D-001 tự duyệt: Cookie HttpOnly → docs/autopilot/DECISIONS.md\n", ""))
+        rc, out, _ = self.decide("--revert", "đổi lại", choice="localStorage")
+        self.assertEqual((rc, out.split(" →")[0]), (0, "✓ D-002 tự duyệt: localStorage"))
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(xt.DECISIONS_HEADER))
+        self.assertEqual(xt.DECISION_ID_RE.findall(text), ["001", "002"])
+        self.assertIn("- Phương án: (1) Cookie HttpOnly · (2) localStorage\n- Chọn: Cookie HttpOnly\n", text)
+        self.assertIn(
+            "- Lý do (tiêu chí chất lượng cuối): chặn XSS đọc token\n- Đường lùi: đổi middleware phiên\n", text
+        )
+        self.assertIsNone(xt.read_state(self.tmp))
+
+    def test_decide_prod_switch_line_only_when_given(self):
+        # Mặc định tự host; đề xuất dịch vụ khi chạy thật nằm trong mục D-NNN để G7 gom bằng một lần tìm.
+        self.decide("--revert", "r", "--prod", "  SES hoặc Postmark\nthay Mailpit ")
+        self.decide("--revert", "r", "--prod", " ")
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertIn(f"- Đường lùi: r\n- {xt.PROD_SWITCH_LABEL} SES hoặc Postmark thay Mailpit\n\n### D-002", text)
+        self.assertEqual(text.count(xt.PROD_SWITCH_LABEL), 1)
+
+    def test_decide_custom_log_continues_after_highest_id(self):
+        log = self.tmp / "DEC.md"
+        log.write_text("# Nhật ký\n\n### D-007 · cũ · q\n### D-003 · cũ · q\n", encoding="utf-8")
+        rc, out, _ = self.decide("--revert", "r", "--log", "DEC.md")
+        self.assertEqual((rc, out), (0, "✓ D-008 tự duyệt: Cookie HttpOnly → DEC.md\n"))
+        self.assertTrue(log.read_text(encoding="utf-8").startswith("# Nhật ký\n\n### D-007"))
+
+    def test_decide_fields_are_single_line(self):
+        # Xuống dòng trong trường không tạo được tiêu đề `### D-…` giả làm lệch số thứ tự.
+        rc, _, _ = run_main(
+            "loop", "decide", "--question", "q\n### D-900 giả", "--option", "a\nb", "--option", "c",
+            "--choice", "a b", "--why", "w", "--revert", "r",
+        )  # fmt: skip
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertEqual((rc, xt.DECISION_ID_RE.findall(text)), (0, ["001"]))
+        self.assertIn("### D-001 · ", text)
+        self.assertIn(" · q ### D-900 giả\n", text)
+        self.assertIn("- Chọn: a b\n", text)
+
+    def test_decide_rejects_bad_input_without_writing(self):
+        cases = {
+            "một phương án": (["--option", "a", "--option", " a ", "--choice", "1"], "cần ≥ 2 phương án"),
+            "choice ngoài khoảng": (["--option", "a", "--option", "b", "--choice", "3"], "--choice phải là"),
+            "choice không khớp": (["--option", "a", "--option", "b", "--choice", "c"], "--choice phải là"),
+            "choice 0": (["--option", "a", "--option", "b", "--choice", "0"], "--choice phải là"),
+        }
+        for name, (argv, msg) in cases.items():
+            with self.subTest(name):
+                rc, out, err = run_main("loop", "decide", "--question", "q", *argv, "--why", "w", "--revert", "r")
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(msg, err)
+        rc, _, err = run_main(
+            "loop", "decide", "--question", " ", "--option", "a", "--option", "b", "--choice", "1",
+            "--why", "w", "--revert", "\n",
+        )  # fmt: skip
+        self.assertEqual(rc, 2)
+        self.assertIn("không được rỗng", err)
+        self.assertFalse((self.tmp / "docs").exists())
+
+    def test_init_single_session_sizes_iterations_from_plan(self):
+        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)) + "- [x] `T-007` xong\n")
+        rc, out, _ = run_main("loop", "init", "--single-session")
+        st = xt.read_state(self.tmp)
+        self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 24, True))
+        self.assertIn("trần=24 vòng · chế độ một phiên", out)
+        self.write_plan()
+        run_main("loop", "init", "--single-session")
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 20)
+        run_main("loop", "init", "--single-session", "--max-iterations", "7")
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 7)
+        run_main("loop", "init")
+        self.assertEqual(
+            (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (50, False)
+        )
+
+    def test_defer_requires_state_and_valid_id(self):
+        rc, out, err = run_main("loop", "defer", "--task", "T-001", "--reason", "r")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("Chưa có vòng lặp", err)
+        for bad in ("T-1", "sec-auth-001", "X"):
+            with self.subTest(bad), redirect_stderr(io.StringIO()) as e, self.assertRaises(SystemExit) as cm:
+                xt.main(["loop", "defer", "--task", bad, "--reason", "r"])
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("ID không hợp lệ", e.getvalue())
+
+    def test_defer_status_hook_stop_and_resume_flow(self):
+        # ADR-0009: việc cần người không chặn cả vòng; hết việc tự làm được → done-pending-human, phiên dừng một lần.
+        self.write_plan("- [ ] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
+        run_main("loop", "init", "--single-session")
+        rc, out, _ = run_main("loop", "defer", "--task", "T-001", "--reason", "cần khoá\nthật")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("⏸ T-001 chờ người: cần khoá thật — làm tiếp việc khác"))
+        run_main("loop", "record", "--task", "T-002", "--", "true")
+        rc, out, _ = run_main("loop", "status")
+        self.assertTrue(out.startswith("verdict: done-pending-human — mọi việc tự làm được đã xong; chờ người 1 việc"))
+        self.assertIn("  · chế độ một phiên: compaction tự nén", out)
+        self.assertIn("  · chờ người: T-001 — cần khoá thật", out)
+        data = json.loads(run_main("loop", "status", "--json")[1])
+        self.assertEqual((data["single_session"], list(data["deferred"])), (True, ["T-001"]))
+        rc, out, _ = run_main("loop", "hook-stop", stdin="{}")
+        st = xt.read_state(self.tmp)
+        self.assertEqual((rc, out, st["active"], st["final_verdict"]["verdict"]), (0, "", False, "done-pending-human"))
+        self.assertIn("đã kết thúc — done-pending-human", run_main("loop", "status")[1])
+        rc, out, _ = run_main("loop", "resume", "--reason", "đã cấu hình khoá")
+        self.assertEqual(rc, 0)
+        self.assertIn("việc chờ người quay lại hàng làm: T-001", out)
+        self.assertNotIn("deferred", xt.read_state(self.tmp))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-001"))
+        rc, out, _ = run_main("loop", "resume")
+        self.assertNotIn("quay lại hàng làm", out)
+
+    def test_hook_stop_records_permission_mode_and_warns(self):
+        self.write_plan()
+        run_main("loop", "init", "--single-session")
+        _, out, _ = run_main("loop", "hook-stop", stdin='{"permission_mode": "default"}')
+        reason = json.loads(out)["reason"]
+        self.assertIn("⚠ Phiên ở chế độ hỏi quyền `default`", reason)
+        self.assertIn("Chế độ một phiên: context đầy thì để compaction tự nén", reason)
+        self.assertIn("loop defer --task <ID>", reason)
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "default")
+        self.assertIn("⚠ Phiên ở chế độ hỏi quyền", run_main("loop", "status")[1])
+        for payload in ('{"permission_mode": "auto"}', "rác {", "[1]", '{"permission_mode": 3}'):
+            with self.subTest(payload):
+                reason = json.loads(run_main("loop", "hook-stop", stdin=payload)[1])["reason"]
+                self.assertNotIn("⚠", reason)
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "auto")
+        run_main("loop", "init")
+        reason = json.loads(run_main("loop", "hook-stop", stdin="{}")[1])["reason"]
+        self.assertNotIn("Chế độ một phiên", reason)
+
+    def test_checkpoint_without_state_is_noop(self):
+        rc, out, err = run_main("loop", "checkpoint", stdin='{"trigger": "auto"}')
+        self.assertEqual((rc, out, err), (0, "", ""))
+        self.assertFalse((self.tmp / ".autopilot").exists())
+
+    def test_checkpoint_records_position_for_session_start(self):
+        self.write_plan("- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `false`\n")
+        run_main("loop", "init", "--single-session")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "record", "--task", "T-002", "--", "false")
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        rc, out, _ = run_main("loop", "checkpoint", stdin='{"trigger": "auto", "permission_mode": "acceptEdits"}')
+        cp = xt.read_state(self.tmp)["checkpoint"]
+        self.assertEqual((rc, out), (0, ""))
+        self.assertEqual((cp["trigger"], cp["task"], cp["verdict"]), ("auto", "T-002", "continue"))
+        self.assertEqual((cp["last_evidence"]["task"], cp["last_evidence"]["exit_code"]), ("T-002", 1))
+        self.assertEqual((cp["same_failure_count"], cp["last_failure_task"]), (1, "T-002"))
+        self.assertIn("docs/", cp["dirty"])
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "acceptEdits")
+        status = run_main("loop", "status")[1]
+        self.assertIn("(auto): đang ở T-002; lệnh kiểm cuối T-002 `false` exit 1; file chưa commit: ", status)
+        self.assertIn("lỗi lặp 1 lần (T-002)", status)
+
+    def test_checkpoint_without_git_or_evidence_and_bad_payload(self):
+        self.write_plan()
+        run_main("loop", "init")
+        rc, _, _ = run_main("loop", "checkpoint", stdin="rác")
+        cp = xt.read_state(self.tmp)["checkpoint"]
+        self.assertEqual((rc, cp["trigger"], cp["dirty"], cp["last_evidence"]), (0, "?", [], None))
+        self.assertNotIn("permission_mode", xt.read_state(self.tmp))
+        self.assertIn(
+            "(?): đang ở T-001; lệnh kiểm cuối — `` exit —; file chưa commit: không; lỗi lặp 0 lần (—)",
+            run_main("loop", "status")[1],
+        )
+
+    def test_checkpoint_exception_and_tty_are_fail_open(self):
+        # PreCompact exit ≠ 0/“block” sẽ chặn compaction → lỗi phải nuốt, luôn exit 0.
+        with unittest.mock.patch.object(xt, "loop_checkpoint", side_effect=RuntimeError("boom")):
+            rc, out, err = run_main("loop", "checkpoint", stdin="{}")
+        self.assertEqual((rc, out), (0, ""))
+        self.assertIn("[xt checkpoint] lỗi, bỏ qua: RuntimeError: boom", err)
+        fake = unittest.mock.Mock()
+        fake.isatty.return_value = True
+        with unittest.mock.patch.object(sys, "stdin", fake), unittest.mock.patch.object(xt, "loop_checkpoint") as lc:
+            self.assertEqual(xt.main(["loop", "checkpoint"]), 0)
+        lc.assert_called_once_with("", self.tmp)
+        fake.read.assert_not_called()
+
+    def test_defer_rejects_empty_reason_unknown_id_and_failing_task(self):
+        # Review ADR-0009: defer gõ nhầm/không lý do/né bế tắc máy phải bị từ chối, không lưu lặng lẽ.
+        self.write_plan("- [ ] `T-001` a — Gate: `false`\n- [ ] `T-002` b — Gate: `true`\n")
+        run_main("loop", "init", "--single-session")
+        cases = {
+            "lý do rỗng": (["--task", "T-002", "--reason", " \n"], "--reason rỗng"),
+            "ID không mở": (["--task", "T-999", "--reason", "r"], "ID không phải task `[ ]`"),
+        }
+        for name, (argv, msg) in cases.items():
+            with self.subTest(name):
+                rc, out, err = run_main("loop", "defer", *argv)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(msg, err)
+        run_main("loop", "record", "--task", "T-001", "--", "false")
+        rc, _, err = run_main("loop", "defer", "--task", "T-001", "--reason", "khó quá")
+        self.assertEqual(rc, 2)
+        self.assertIn("task đang lỗi", err)
+        self.assertNotIn("deferred", xt.read_state(self.tmp))
+        rc, _, _ = run_main("loop", "defer", "--task", "T-002", "--reason", "cần khoá thật")
+        self.assertEqual(rc, 0)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            xt.main(["loop", "defer", "--task", "T-001\n", "--reason", "r"])
+
+    def test_defer_skips_id_check_when_plan_missing(self):
+        xt.write_state({"active": True, "plan": "khong-co.md"}, self.tmp)
+        rc, _, _ = run_main("loop", "defer", "--task", "SEC-AUTH-001", "--reason", "người duyệt")
+        self.assertEqual((rc, list(xt.read_state(self.tmp)["deferred"])), (0, ["SEC-AUTH-001"]))
+
+    def test_decide_choice_prefers_literal_and_ascii_index(self):
+        base = ["loop", "decide", "--question", "q", "--option", "2", "--option", "1", "--why", "w", "--revert", "r"]
+        rc, out, _ = run_main(*base, "--choice", "1")
+        self.assertEqual((rc, out.split(" →")[0]), (0, "✓ D-001 tự duyệt: 1"))
+        rc, _, err = run_main(*base, "--choice", "²")
+        self.assertEqual(rc, 2)
+        self.assertIn("--choice phải là", err)
+
+    def test_decide_log_must_stay_inside_project(self):
+        (self.tmp / "docs").mkdir()
+        for log in ("../thoat.md", "/tmp/tuyet-doi.md", "docs"):
+            with self.subTest(log):
+                rc, out, err = self.decide("--revert", "r", "--log", log)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("--log phải là file trong dự án", err)
+        self.assertFalse((self.tmp.parent / "thoat.md").exists())
+
+    def test_checkpoint_git_quirks_and_evidence_fallback(self):
+        self.write_plan()
+        run_main("loop", "init")
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        (self.tmp / "é.txt").write_text("x", encoding="utf-8")
+        run_main("loop", "checkpoint", stdin="{}")
+        cp = xt.read_state(self.tmp)["checkpoint"]
+        self.assertIn("é.txt", cp["dirty"])  # core.quotePath=false
+        self.assertIsNone(cp["head"])  # repo chưa commit: không ghi "HEAD"
+        with unittest.mock.patch.object(xt, "_git", side_effect=OSError("không có git")):
+            run_main("loop", "checkpoint", stdin="{}")
+        self.assertEqual(xt.read_state(self.tmp)["checkpoint"]["dirty"], [])
+        ev = self.tmp / ".autopilot" / "evidence"
+        run_main("loop", "record", "--task", "BASE-SEC-001", "--", "true")
+        (ev / "T-009.json").write_text("hỏng", encoding="utf-8")
+        os.utime(ev / "T-009.json", (time.time() + 60, time.time() + 60))
+        self.assertEqual(xt._evidence_latest(self.tmp)["task"], "BASE-SEC-001")
+
+    def test_stale_checkpoint_hidden_after_newer_evidence(self):
+        self.write_plan()
+        run_main("loop", "init")
+        st = xt.read_state(self.tmp)
+        st["checkpoint"] = {"at": "2000-01-01T00:00:00+00:00", "trigger": "auto", "task": "T-001"}
+        xt.write_state(st, self.tmp)
+        self.assertIn("checkpoint trước nén", run_main("loop", "status")[1])
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        self.assertNotIn("checkpoint trước nén", run_main("loop", "status")[1])
+
+    def test_single_session_iterations_count_open_blueprint_must(self):
+        self.write_plan()
+        (self.tmp / "BP.md").write_text(
+            "".join(f"- [ ] `AAA-00{i}` **MUST** m → Kiểm: t\n" for i in range(1, 8)), encoding="utf-8"
+        )
+        run_main("loop", "init", "--single-session", "--blueprint", "BP.md")
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 32)  # 4 × (1 task + 7 MUST)
+
+    def test_stop_after_pending_human_reports_stopped(self):
+        self.write_plan()
+        run_main("loop", "init")
+        st = xt.read_state(self.tmp)
+        st["final_verdict"] = {"verdict": "done-pending-human", "reason": "chờ"}
+        xt.write_state(st, self.tmp)
+        run_main("loop", "stop", "--reason", "người tắt")
+        self.assertIn("đã kết thúc — stopped: người tắt", run_main("loop", "status")[1])
 
     def test_resume_without_state_is_exit_2(self):
         rc, out, err = run_main("loop", "resume")

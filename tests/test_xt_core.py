@@ -516,6 +516,49 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["reason"]), ("blocked", "cần người"))
 
+    def test_inactive_reports_final_verdict_of_previous_loop(self):
+        # ADR-0009: phiên sau thấy vòng trước kết thúc thế nào (vd còn việc chờ người).
+        self.activate(active=False, final_verdict={"verdict": "done-pending-human", "reason": "chờ T-002"})
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(
+            (v["verdict"], v["reason"]), ("inactive", "vòng lặp đã kết thúc — done-pending-human: chờ T-002")
+        )
+        self.activate(active=False, final_verdict="hỏng")
+        self.assertEqual(xt.loop_verdict(self.base)["reason"], "vòng lặp chưa bật")
+
+    def test_deferred_task_is_skipped_then_pending_human(self):
+        write(self.plan, "- [ ] `T-001` deploy — Gate: `true`\n- [ ] `T-002` việc — Gate: `true`\n")
+        self.activate(deferred={"T-001": {"reason": "cần khoá thật"}})
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
+        write(self.plan, "- [ ] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
+        self.evidence("T-002", 0, "true")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "done-pending-human")
+        self.assertEqual(v["pending_human"], [{"id": "T-001", "reason": "cần khoá thật"}])
+        self.assertIn("chờ người 1 việc: T-001 (cần khoá thật)", v["reason"])
+        # Người làm xong, agent tick kèm bằng chứng → defer đã thoả, verdict thường.
+        write(self.plan, "- [x] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
+        self.evidence("T-001", 0, "true")
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_deferred_blueprint_must_and_corrupt_deferred(self):
+        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
+        self.evidence("T-001", 0, "true")
+        write(self.base / "BP.md", "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n")
+        self.activate(blueprint="BP.md", deferred={"AAA-001": "không phải object"})
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("continue", "AAA-002"))
+        self.activate(blueprint="BP.md", deferred={"AAA-001": "x", "AAA-002": {"reason": "diễn tập DR thật"}})
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "done-pending-human")
+        self.assertEqual([p["reason"] for p in v["pending_human"]], ["", "diễn tập DR thật"])
+        # deferred hỏng (không phải dict) ≡ không có; ID chờ người đã đóng thì không tính.
+        self.activate(blueprint="BP.md", deferred=["AAA-001"])
+        self.assertEqual(xt.loop_verdict(self.base)["task"], "AAA-001")
+        self.activate(deferred={"T-009": {"reason": "đã xong từ trước"}})
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
     def test_repeated_failure_blocks(self):
         self.activate(same_failure_count=3, last_failure_task="T-001")
         v = xt.loop_verdict(self.base)
