@@ -26,6 +26,13 @@ Lệnh:
   audit plan [--blueprint F] [--status F] [--json]
                                 Dò stack → nhóm audit áp dụng/rút gọn/N/A, công cụ có/thiếu, bằng chứng blueprint cũ, nhóm cần quét lại.
   audit check STATUS [--strict] Kiểm sổ docs/ops/AUDIT-STATUS.md; --strict = Definition of Complete (0 🔴/🟠 mở, mọi nhóm đã quét).
+  feedback add --kind K --id ID --symptom S --fix F [--repro R] [--suggest X]
+                                Dự án đích ghi lỗi do khung + cách khắc phục → docs/xtemplates-feedback/FB-NNN.md.
+  feedback collect [--blueprint F]
+                                Tự gom MUST bị miễn và lý do autopilot bị chặn thành FB-NNN (không trùng).
+  feedback list [DIR] [--json]  Liệt kê phản hồi.
+  feedback aggregate --from DỰ_ÁN=THƯ_MỤC ... [--json]
+                                Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   stats                         Thống kê số module/mục.
 
 Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
@@ -2290,6 +2297,171 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+# --------------------------------------------------------------------------- feedback (dự án đích → khung, ADR-0010)
+
+FEEDBACK_DIR = "docs/xtemplates-feedback"
+FEEDBACK_KINDS = ("cong-cu", "hook-chan-nham", "hook-lot", "muc-sai", "tai-lieu", "mien-tru", "bi-chan")
+FEEDBACK_FIELDS = (
+    ("framework", "Khung"),
+    ("date", "Ngày"),
+    ("kind", "Loại"),
+    ("id", "ID"),
+    ("symptom", "Triệu chứng"),
+    ("repro", "Tái hiện"),
+    ("fix", "Cách khắc phục"),
+    ("suggest", "Đề xuất cho khung"),
+    ("source", "Nguồn"),
+)
+FB_FILE_RE = re.compile(r"^FB-(\d{3,})\.md$")
+FB_LINE_RE = re.compile(r"^- (?P<label>[^:]+): (?P<value>.*)$")
+
+
+def _framework_version(base: Path) -> str:
+    """Phiên bản khung đang cài: `.xtemplates/VERSION` (dự án đích) hoặc `VERSION` (repo khung)."""
+    for p in (base / ".xtemplates" / "VERSION", base / "VERSION"):
+        if p.is_file():
+            return _one_line(p.read_text(encoding="utf-8")) or "?"
+    return "?"
+
+
+def feedback_entries(d: Path) -> List[Dict[str, str]]:
+    """Đọc mọi `FB-NNN.md` trong thư mục → [{file, framework, kind, id, …}] theo số tăng dần; dòng lạ bỏ qua."""
+    labels = {lab: key for key, lab in FEEDBACK_FIELDS}
+    out = []
+    files = sorted((p for p in d.glob("FB-*.md") if FB_FILE_RE.match(p.name)), key=lambda p: int(p.name[3:-3]))
+    for f in files:
+        e = {"file": f.name}
+        for line in f.read_text(encoding="utf-8").splitlines():
+            m = FB_LINE_RE.match(line)
+            if m and m["label"] in labels:
+                e[labels[m["label"]]] = m["value"]
+        out.append(e)
+    return out
+
+
+def write_feedback(base: Path, entry: Dict[str, str]) -> str:
+    """Ghi một phản hồi thành `FB-NNN.md` kế tiếp; mọi trường gộp một dòng và qua `redact` (LOOP-FB-003)."""
+    d = base / FEEDBACK_DIR
+    nums = [int(m[1]) for p in d.glob("FB-*.md") if (m := FB_FILE_RE.match(p.name))] if d.is_dir() else []
+    fid = f"FB-{max(nums, default=0) + 1:03d}"
+    e = {"framework": _framework_version(base), "date": now_iso(), **entry}
+    clean = {k: redact(_one_line(e.get(k, ""))) for k, _ in FEEDBACK_FIELDS}
+    body = "".join(f"- {lab}: {clean[k] or '—'}\n" for k, lab in FEEDBACK_FIELDS)
+    write_atomic(d / f"{fid}.md", f"# {fid} · {clean['kind']} · {clean['id']}\n\n{body}")
+    return fid
+
+
+def _feedback_add(args: argparse.Namespace, base: Path) -> int:
+    if not (_one_line(args.symptom) and _one_line(args.fix)):
+        print("✗ --symptom và --fix không được rỗng", file=sys.stderr)
+        return 2
+    entry = {"kind": args.kind, "id": args.id, "symptom": args.symptom, "repro": args.repro or "", "fix": args.fix}
+    fid = write_feedback(base, {**entry, "suggest": args.suggest or "", "source": "tay"})
+    print(f"✓ {fid} → {FEEDBACK_DIR}/{fid}.md (xem lại trước khi commit: không dữ liệu/mã của dự án)")
+    return 0
+
+
+def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
+    """Tín hiệu máy có sẵn: MUST bị miễn trong blueprint, lý do `blocked`/verdict cuối `blocked` của autopilot."""
+    out = []
+    bp = base / blueprint
+    if bp.is_file():
+        for line in bp.read_text(encoding="utf-8").splitlines():
+            m = ITEM_RE.match(line)
+            if m and m["state"] == "~" and m["level"] == "MUST":
+                why = line.split("Miễn:", 1)[1].strip() if "Miễn:" in line else "(thiếu lý do)"
+                out.append({"kind": "mien-tru", "id": m["id"], "symptom": f"MUST bị miễn: {why}", "fix": "miễn trừ"})
+    st = read_state(base) or {}
+    fv_raw = st.get("final_verdict")
+    fv: Dict[str, Any] = fv_raw if isinstance(fv_raw, dict) else {}
+    reason = st.get("blocked_reason") or (fv.get("reason") if fv.get("verdict") == "blocked" else None)
+    if reason:
+        tid = st.get("last_failure_task") or "loop"
+        out.append({"kind": "bi-chan", "id": str(tid), "symptom": f"autopilot bị chặn: {reason}", "fix": "người xử lý"})
+    return out
+
+
+def _feedback_collect(args: argparse.Namespace, base: Path) -> int:
+    d = base / FEEDBACK_DIR
+    seen = {e.get("source") for e in feedback_entries(d)} if d.is_dir() else set()
+    added = []
+    for c in _collect_candidates(base, args.blueprint):
+        source = f"collect:{c['kind']}:{c['id']}:{_one_line(c['symptom'])[:80]}"
+        if redact(source) in seen:
+            continue
+        added.append(write_feedback(base, {**c, "source": source}))
+        seen.add(redact(source))
+    print(f"✓ Thêm {len(added)} phản hồi tự gom" + (f": {', '.join(added)}" if added else " (không có tín hiệu mới)"))
+    return 0
+
+
+def _feedback_list(args: argparse.Namespace, base: Path) -> int:
+    d = Path(args.dir) if args.dir else base / FEEDBACK_DIR
+    entries = feedback_entries(d) if d.is_dir() else []
+    if args.json:
+        print(json.dumps(entries, ensure_ascii=False))
+    for e in [] if args.json else entries:
+        print(f"{e['file']}  {e.get('kind', '?'):<15} {e.get('id', '?'):<16} {e.get('symptom', '')[:90]}")
+    return 0
+
+
+def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
+    """Gộp phản hồi nhiều dự án theo (loại, ID). `ready` = ≥ 2 dự án cùng báo hoặc có bước tái hiện (ADR-0010)."""
+    groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for project, d in sources:
+        for e in feedback_entries(d) if d.is_dir() else []:
+            key = (e.get("kind", "?"), e.get("id", "?"))
+            g = groups.setdefault(key, {"kind": key[0], "id": key[1], "projects": [], "items": []})
+            g["projects"] = sorted(set(g["projects"]) | {project})
+            g["items"].append({"project": project, **e})
+    out = list(groups.values())
+    for g in out:
+        has_repro = any(i.get("repro", "—") not in ("", "—") for i in g["items"])
+        g["ready"] = len(g["projects"]) >= 2 or has_repro
+    return sorted(out, key=lambda g: (not g["ready"], -len(g["projects"]), g["kind"], g["id"]))
+
+
+def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
+    sources = []
+    for spec in args.source:
+        project, sep, path = spec.partition("=")
+        if not (sep and project and path):
+            print(f"✗ --from phải dạng <dự-án>=<thư mục>: {spec}", file=sys.stderr)
+            return 2
+        sources.append((project, Path(path)))
+    groups = feedback_aggregate(sources)
+    if args.json:
+        print(json.dumps(groups, ensure_ascii=False))
+        return 0
+    print(
+        "| Đủ ngưỡng | Loại | ID | Dự án | Triệu chứng (đầu tiên) | Cách khắc phục (đầu tiên) |\n|---|---|---|---|---|---|"
+    )
+    for g in groups:
+        first = g["items"][0]
+        cells = [
+            "✅" if g["ready"] else "—",
+            g["kind"],
+            f"`{g['id']}`",
+            ", ".join(g["projects"]),
+            first.get("symptom", "").replace("|", "\\|")[:160],
+            first.get("fix", "").replace("|", "\\|")[:160],
+        ]
+        print("| " + " | ".join(cells) + " |")
+    return 0
+
+
+FEEDBACK_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
+    "add": _feedback_add,
+    "collect": _feedback_collect,
+    "list": _feedback_list,
+    "aggregate": _feedback_aggregate,
+}
+
+
+def cmd_feedback(args: argparse.Namespace) -> int:
+    return FEEDBACK_HANDLERS[args.fb_cmd](args, project_dir())
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     docs, _ = load_docs(args.framework)
     by_kind: Dict[str, int] = {}
@@ -2426,6 +2598,24 @@ def build_parser() -> argparse.ArgumentParser:
     achk.add_argument("file", help="docs/ops/AUDIT-STATUS.md")
     achk.add_argument("--strict", action="store_true", help="Definition of Complete: 0 🔴/🟠 mở, mọi nhóm đã quét/N/A")
     pau.set_defaults(fn=cmd_audit)
+    pfb = sub.add_parser("feedback", help="phản hồi lỗi/cách khắc phục từ dự án đích về khung (ADR-0010)")
+    fsub = pfb.add_subparsers(dest="fb_cmd", required=True)
+    fa = fsub.add_parser("add", help="ghi một phản hồi FB-NNN (lỗi do khung, không phải lỗi dự án)")
+    fa.add_argument("--kind", required=True, choices=FEEDBACK_KINDS)
+    fa.add_argument("--id", required=True, help="ID mục checklist, lệnh xt.py hoặc tên hook/skill")
+    fa.add_argument("--symptom", required=True)
+    fa.add_argument("--fix", required=True, help="cách đã khắc phục trong dự án")
+    fa.add_argument("--repro", help="bước tái hiện tối thiểu, không dữ liệu/mã của dự án")
+    fa.add_argument("--suggest", help="đề xuất sửa khung")
+    fc = fsub.add_parser("collect", help="tự gom MUST bị miễn + lý do autopilot bị chặn thành FB-NNN (không trùng)")
+    fc.add_argument("--blueprint", default="BLUEPRINT.md")
+    fl = fsub.add_parser("list")
+    fl.add_argument("dir", nargs="?", help=f"mặc định {FEEDBACK_DIR}")
+    fl.add_argument("--json", action="store_true")
+    fg = fsub.add_parser("aggregate", help="repo khung: gộp phản hồi nhiều dự án theo (loại, ID)")
+    fg.add_argument("--from", dest="source", action="append", required=True, metavar="DỰ_ÁN=THƯ_MỤC")
+    fg.add_argument("--json", action="store_true")
+    pfb.set_defaults(fn=cmd_feedback)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     return p
 

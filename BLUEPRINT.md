@@ -17,7 +17,7 @@ generated: 2026-10-15
 | Mức | Số mục |
 |---|---|
 | MUST | 70 |
-| SHOULD | 799 |
+| SHOULD | 803 |
 
 ### Cấu hình, biến môi trường và bí mật
 
@@ -461,6 +461,15 @@ Nguồn khung: [`11-autonomous-loop/context-and-token-budget.md`](framework/11-a
 - [ ] `LOOP-CTX-018` **SHOULD** Autopilot chạy một phiên tới `done`/`done-pending-human` (`loop init --single-session`): xong một mảng → gate → commit → cập nhật PROGRESS rồi làm tiếp trong cùng phiên; trạng thái trên đĩa đủ để phiên chết bất ngờ vẫn "tiếp tục" được. → Kiểm: `state.json` `single_session: true`; số phiên của một PLAN = 1 trừ khi `budget`/phiên chết. · Nguồn: ADR-0009
 - [ ] `LOOP-CTX-019` **SHOULD** Ước lượng token mỗi task khi lập PLAN, nhân 1.5 dự phòng, để đặt `--max-budget-usd`/`--hours`; tổng vượt ngân sách → thu hẹp phạm vi PLAN theo tiêu chí chất lượng cuối (ghi `D-NNN`), không chia phiên; nâng ngân sách tiền là việc của người. → Kiểm: PLAN có dòng ước lượng; D-NNN cho phần cắt. · Nguồn: stored 21 §10, ADR-0008, ADR-0009
 - [ ] `LOOP-CTX-020` **SHOULD** Autopilot chạy ở chế độ quyền không hỏi (`claude --permission-mode auto`; `bypassPermissions` chỉ trong container dùng một lần; `dontAsk` cho headless) — bật bằng cờ hoặc settings người dùng vì settings dự án bị bỏ qua; hook `deny` vẫn chặn. → Kiểm: `.autopilot/state.json` `permission_mode` (Stop hook ghi) ∉ {`default`, `plan`, `acceptEdits`}; Stop hook nhắc khi vi phạm. · Nguồn: Claude Code permission modes + hooks docs (`permission_mode` trong input Stop, xác minh 2026-10-15), ADR-0009
+
+### Phản hồi về khung từ dự án đích
+
+Nguồn khung: [`11-autonomous-loop/framework-feedback.md`](framework/11-autonomous-loop/framework-feedback.md)
+
+- [ ] `LOOP-FB-001` **SHOULD** Lỗi do khung (công cụ, hook, mục checklist, tài liệu) gặp trong dự án được ghi bằng `xt.py feedback add` ngay khi sửa xong, cùng commit với bản sửa: triệu chứng, cách khắc phục, bước tái hiện tối thiểu nếu có. → Kiểm: `docs/xtemplates-feedback/FB-*.md` có commit trùng commit sửa; `xt.py feedback list` liệt kê. · Nguồn: ADR-0010
+- [ ] `LOOP-FB-002` **SHOULD** Trước khi bàn giao phiên hoặc phát hành, chạy `xt.py feedback collect` để gom MUST bị miễn và lý do autopilot bị chặn (không tạo trùng). → Kiểm: lệnh exit 0 trong báo cáo cuối; mỗi `[~]` MUST trong blueprint có FB `mien-tru` tương ứng. · Nguồn: ADR-0010
+- [ ] `LOOP-FB-003` **SHOULD** Phản hồi không chứa bí mật, dữ liệu người dùng, tên khách hàng hay mã nguồn của dự án — chỉ triệu chứng, bước tái hiện tối thiểu, cách khắc phục; ghi qua `xt.py feedback` (gộp một dòng, `redact`) và người xem lại trước commit. → Kiểm: `gitleaks detect` sạch trên `docs/xtemplates-feedback/`; review PR có mục này. · Nguồn: ADR-0010, `CMP-VN-004`
+- [ ] `LOOP-FB-004` **SHOULD** Dự án đích muốn khung kéo phản hồi về thì đăng ký repo (`owner/repo`) trong `docs/ops/TARGETS.md` của repo khung, hoặc báo tay qua issue template "Phản hồi từ dự án đích". → Kiểm: repo có trong `TARGETS.md` hoặc có issue nhãn `feedback`. · Nguồn: ADR-0010
 
 ### File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 
