@@ -905,7 +905,7 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
 def _git_head(base: Path) -> Optional[str]:
     try:
         r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=base, capture_output=True, text=True, timeout=10)
-        return r.stdout.strip() or None
+        return (r.stdout.strip() or None) if r.returncode == 0 else None  # repo chưa commit: không ghi "HEAD" giả
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -1844,7 +1844,7 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         )
     max_iterations = args.max_iterations
     if max_iterations is None:  # một phiên: trần theo khối lượng PLAN (~4 vòng/task), không theo số mặc định
-        n_open = sum(t["state"] == " " for t in parse_plan(base / args.plan))
+        n_open = len(_still_open(base, {"plan": args.plan, "blueprint": args.blueprint}))  # task [ ] + MUST mở
         max_iterations = max(20, 4 * n_open) if args.single_session else 50
     state = {
         "active": True,
@@ -1868,8 +1868,9 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
-def _status_notes(st: Dict[str, Any]) -> List[str]:
-    """Dòng phụ của `loop status` (SessionStart nạp lại sau compaction): chế độ, việc chờ người, quyền, checkpoint."""
+def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
+    """Dòng phụ của `loop status` (SessionStart nạp lại sau compaction): chế độ, việc chờ người, quyền, checkpoint.
+    Checkpoint cũ hơn bằng chứng mới nhất thì ẩn — công việc đã đi tiếp, in lại sẽ dẫn sai chỗ."""
     notes = ["chế độ một phiên: compaction tự nén, không bàn giao vì context"] if st.get("single_session") else []
     notes += [
         f"chờ người: {i} — {d.get('reason', '') if isinstance(d, dict) else ''}" for i, d in _deferred(st).items()
@@ -1877,7 +1878,8 @@ def _status_notes(st: Dict[str, Any]) -> List[str]:
     warn = _mode_warning(st.get("permission_mode")) if st.get("active") else ""
     notes += [warn.strip()] if warn else []
     cp = st.get("checkpoint")
-    if isinstance(cp, dict):
+    newer = (_evidence_latest(base) or {}).get("finished") or ""
+    if isinstance(cp, dict) and str(newer) <= str(cp.get("at")):
         ev = cp.get("last_evidence") or {}
         notes.append(
             f"checkpoint trước nén {cp.get('at')} ({cp.get('trigger')}): đang ở {cp.get('task') or '—'}; "
@@ -1897,7 +1899,7 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
         print(json.dumps({**v, **extra, "deferred": _deferred(st)}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
-        for n in _status_notes(st):
+        for n in _status_notes(st, base):
             print(f"  · {n}")
     return 0
 
@@ -1934,10 +1936,12 @@ def _one_line(text: str) -> str:
 
 
 def _decision_choice(options: List[str], choice: str) -> Optional[str]:
-    """`--choice` là số thứ tự (từ 1) hoặc nguyên văn một phương án; không khớp → None."""
-    if choice.isdigit() and 1 <= int(choice) <= len(options):
+    """`--choice` là nguyên văn một phương án (ưu tiên, kể cả phương án là số) hoặc số thứ tự ASCII từ 1; không khớp → None."""
+    if choice in options:
+        return choice
+    if re.fullmatch(r"[0-9]+", choice) and 1 <= int(choice) <= len(options):
         return options[int(choice) - 1]
-    return choice if choice in options else None
+    return None
 
 
 def _loop_decide(args: argparse.Namespace, base: Path) -> int:
@@ -1956,7 +1960,10 @@ def _loop_decide(args: argparse.Namespace, base: Path) -> int:
     if problems:
         print("✗ " + "; ".join(problems), file=sys.stderr)
         return 2
-    log = base / args.log
+    log = (base / args.log).resolve()
+    if not log.is_relative_to(base.resolve()) or log.is_dir():  # không ghi ra ngoài dự án / vào thư mục
+        print(f"✗ --log phải là file trong dự án: {args.log}", file=sys.stderr)
+        return 2
     text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
     did = f"D-{max((int(n) for n in DECISION_ID_RE.findall(text)), default=0) + 1:03d}"
     entry = (
@@ -1972,10 +1979,25 @@ def _loop_decide(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+def _defer_problem(st: Dict[str, Any], task: str, reason: str, base: Path) -> Optional[str]:
+    """Lý do từ chối defer: thiếu lý do, ID không còn mở (gõ nhầm/đã xong), hoặc né bế tắc máy (task đang lỗi lặp)."""
+    if not reason:
+        return "--reason rỗng — ghi người cần làm gì"
+    if (base / st.get("plan", "docs/autopilot/PLAN.md")).exists() and task not in _still_open(base, st):
+        return "ID không phải task `[ ]` trong PLAN hay mục MUST mở của blueprint"
+    if st.get("same_failure_count", 0) > 0 and st.get("last_failure_task") == task:
+        return "task đang lỗi — sửa hoặc đổi cách; lỗi lặp lần 3 máy tự BLOCKED, defer không dùng để né"
+    return None
+
+
 def _loop_defer(args: argparse.Namespace, base: Path) -> int:
     cur = read_state(base)
     if not cur:
         print("✗ Chưa có vòng lặp (chạy loop init trước)", file=sys.stderr)
+        return 2
+    problem = _defer_problem(cur, args.task, _one_line(args.reason), base)
+    if problem:
+        print(f"✗ Không defer {args.task}: {problem}", file=sys.stderr)
         return 2
     cur["deferred"] = {**_deferred(cur), args.task: {"reason": _one_line(args.reason), "at": now_iso()}}
     write_state(cur, base)
@@ -1986,8 +2008,8 @@ def _loop_defer(args: argparse.Namespace, base: Path) -> int:
 
 
 def _evidence_latest(base: Path) -> Optional[Dict[str, Any]]:
-    files = sorted((state_dir(base) / "evidence").glob("T-*.json"), key=lambda p: p.stat().st_mtime)
-    ev = _read_json_obj(files[-1]) if files else None
+    files = sorted((state_dir(base) / "evidence").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    ev = next((e for e in map(_read_json_obj, files) if e), None)  # file mới nhất hỏng → lùi về file trước
     return {k: ev.get(k) for k in ("task", "cmd", "exit_code", "finished")} if ev else None
 
 
@@ -1997,7 +2019,13 @@ def loop_checkpoint(stdin_text: str, base: Path) -> None:
     if not st:
         return
     v = loop_verdict(base)
-    dirty = _git(base, "status", "--porcelain").stdout.splitlines() if (base / ".git").exists() else []
+    try:  # quotePath=false: tên file tiếng Việt giữ nguyên; thiếu git trong PATH → bỏ qua, vẫn ghi checkpoint
+        out = (
+            _git(base, "-c", "core.quotePath=false", "status", "--porcelain").stdout if (base / ".git").exists() else ""
+        )
+    except OSError:
+        out = ""
+    dirty = out.splitlines()
     st["checkpoint"] = {
         "at": now_iso(),
         "trigger": _payload_field(stdin_text, "trigger") or "?",
@@ -2053,7 +2081,14 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
 def _loop_stop(args: argparse.Namespace, base: Path) -> int:
     cur = read_state(base)
     if cur:
-        cur.update({"active": False, "ended": now_iso(), "stop_reason": args.reason})
+        cur.update(
+            {
+                "active": False,
+                "ended": now_iso(),
+                "stop_reason": args.reason,
+                "final_verdict": {"verdict": "stopped", "reason": args.reason},
+            }
+        )
         write_state(cur, base)
     print("■ Autopilot tắt.")
     return 0
@@ -2270,7 +2305,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
 
 def _defer_id(value: str) -> str:
-    if not DEFER_ID_RE.match(value):
+    if not DEFER_ID_RE.fullmatch(value):
         raise argparse.ArgumentTypeError(
             f"ID không hợp lệ: {value!r} (cần T-NNN hoặc ID mục blueprint như SEC-AUTH-001)"
         )

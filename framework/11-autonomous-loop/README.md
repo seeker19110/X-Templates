@@ -47,10 +47,10 @@ updated: 2026-10-15
 **Pha 2 — vòng lặp có bằng chứng**
 
 9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` → tạo
-   `.autopilot/state.json` (gitignore; `max_same_failure: 3`; trần vòng tự tính `max(20, 4 × task chưa làm)`, hoặc
+   `.autopilot/state.json` (gitignore; `max_same_failure: 3`; trần vòng tự tính `max(20, 4 × (task chưa làm + MUST mở của blueprint))`, hoặc
    `--max-iterations <N>`). **Một phiên đến khi xong** (ADR-0009): phiên mở bằng `claude --permission-mode auto`
    (settings dự án không đặt được; Stop hook cảnh báo nếu phiên đang ở chế độ hỏi quyền).
-10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task đầu tiên còn `[ ]` → làm task → chạy Gate
+10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task do máy chọn (task `[ ]` đầu tiên chưa `defer`) → làm task → chạy Gate
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit, push nhánh làm việc, cập nhật
@@ -75,7 +75,7 @@ updated: 2026-10-15
 
 | Lệnh | Làm gì |
 |---|---|
-| `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(20, 4 × task chưa làm)` (mặc định 50) |
+| `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(20, 4 × (task chưa làm + MUST mở của blueprint))` (mặc định 50) |
 | `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint |
 | `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |
 | `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |

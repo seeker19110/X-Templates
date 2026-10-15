@@ -31,8 +31,8 @@ argument-hint: "[mô tả yêu cầu hoặc đường dẫn PROJECT.md]"
 
 ## Pha 2 — Vòng lặp có bằng chứng (G5–G7)
 
-9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` (trần vòng tự tính `max(20, 4 × task chưa làm)`; ghi đè bằng `--max-iterations`).
-10. Mỗi vòng: `<XT> loop status` → làm task đầu tiên còn `[ ]` → chạy Gate qua `<XT> loop record --task T-xxx -- <lệnh Gate y nguyên>` → xanh thì tick `[x]` trong PLAN, commit (`feat/fix/...: ...`, nhỏ, qua cổng commit) + push nhánh làm việc → cập nhật `PROGRESS.md` (≤ 8 KB).
+9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` (trần vòng tự tính `max(20, 4 × (task chưa làm + MUST mở của blueprint))`; ghi đè bằng `--max-iterations`).
+10. Mỗi vòng: `<XT> loop status` → làm đúng task mà `loop status` trả về (task `[ ]` đầu tiên chưa `defer`) → chạy Gate qua `<XT> loop record --task T-xxx -- <lệnh Gate y nguyên>` → xanh thì tick `[x]` trong PLAN, commit (`feat/fix/...: ...`, nhỏ, qua cổng commit) + push nhánh làm việc → cập nhật `PROGRESS.md` (≤ 8 KB).
 11. Gate đỏ: sửa; cùng một lỗi **lần 2 → đổi cách tiếp cận** (ghi vào PROGRESS), **lần 3 → máy tự BLOCKED** (dừng để người xem). Không skip/disable test, không nới cấu hình cổng để xanh (hook sẽ hỏi).
 12. Blueprint: tick `[x]` **chỉ khi có bằng chứng** (CI/test/scan/file) ghi ở PR; mục không áp dụng → `[~] — Miễn: <lý do>`.
 13. Giao việc: `executor` cho task rõ phạm vi; `reviewer` (model khác) review diff trước khi merge PR; phiên chính điều phối, **subagent không lồng subagent**.

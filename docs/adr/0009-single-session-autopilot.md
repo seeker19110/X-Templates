@@ -32,8 +32,9 @@ hỏng). SessionStart có `source` = `compact` sau khi nén, nhưng ví dụ inp
 2. **`loop defer`.** Việc cần người (task PLAN hoặc ID mục blueprint) bị bỏ qua để làm việc khác. Hết việc tự làm được
    → verdict `done-pending-human` (Stop hook cho dừng một lần, liệt kê việc chờ). `loop resume` đưa việc chờ lại hàng
    làm. Việc chờ đã được tick kèm bằng chứng (hoặc mục blueprint đã đạt) thì không tính. `loop block` chỉ dùng khi mọi
-   việc còn lại phụ thuộc điểm dừng.
-3. **`loop init --single-session`.** Trần vòng `max(20, 4 × task chưa làm)` nếu không khai `--max-iterations`; Stop
+   việc còn lại phụ thuộc điểm dừng. Máy từ chối defer khi lý do rỗng, ID không còn mở (gõ nhầm/đã xong), hoặc task
+   đang lỗi (`last_failure_task`) — defer không phải lối né trần "lỗi lặp lần 3 → BLOCKED".
+3. **`loop init --single-session`.** Trần vòng `max(20, 4 × (task chưa làm + MUST mở của blueprint))` nếu không khai `--max-iterations`; Stop
    hook nhắc "context đầy → để compaction, không bàn giao".
 4. **Chế độ quyền.** Stop hook ghi `permission_mode` vào state và cảnh báo trong lý do chặn khi là `default`/`plan`/
    `acceptEdits`. Skill `/autopilot` có bước 0 kiểm chế độ và hook. Không tự đổi chế độ: chỉ người bật được (cờ CLI
@@ -64,6 +65,7 @@ hỏng). SessionStart có `source` = `compact` sau khi nén, nhưng ví dụ inp
 
 - Tốt: một PLAN chạy tới `done`/`done-pending-human` trong một phiên khi người bật `--permission-mode auto`; việc cần người
   gom một lần.
-- Xấu/nợ: chất lượng có thể giảm sau nhiều lần nén (đo theo `LOOP-CTX-015`); phiên rất dài tốn tiền — trần tiền
+- Xấu/nợ: máy không phân biệt được việc defer có thật là điểm dừng về hành động hay không (agent có thể defer task khó
+  chưa từng chạy Gate) — kiểm bằng review: báo cáo `done-pending-human` liệt kê từng việc chờ + lý do. Chất lượng có thể giảm sau nhiều lần nén (đo theo `LOOP-CTX-015`); phiên rất dài tốn tiền — trần tiền
   (`--max-budget-usd`) vẫn là cổng. Chưa đo được context đang dùng từ hook (SessionStart có `context_tokens` theo docs,
   chưa dùng). Dự án đã cài khung: chạy lại `install.py` để `merge_hooks` thêm `PreCompact`.

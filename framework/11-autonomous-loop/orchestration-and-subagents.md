@@ -105,7 +105,7 @@ lệnh + exit code · còn treo). Thiếu `acceptance_criteria` → không giao.
 
 ## Nguồn
 
-- Harness thật của repo: `.claude/agents/{researcher,executor,reviewer}.md` (`tools`, `model`, `maxTurns`; không có `Agent` trong `tools`) và `AGENTS.md` §7 — đọc 2026-10-13.
+- Harness thật của repo: `.claude/agents/{researcher,executor,reviewer}.md` (`tools`, `model`, `maxTurns`; không có `Agent` trong `tools`) và `AGENTS.md` §8 (§7 trước ADR-0008) — đọc 2026-10-13.
 - Claude Code docs — subagents (`tools`, `disallowedTools`, `maxTurns`, `isolation: worktree`): <https://code.claude.com/docs/en/sub-agents> · env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` (mặc định 3, `1` = tắt lồng): <https://code.claude.com/docs/en/env-vars> — xác minh 2026-10-13 (`research/2026-10-13-claude-code-hooks-skills.md`).
 - Anthropic, *How we built our multi-agent research system* (ngữ cảnh tách biệt, chi phí ~15× token, chỉ cho việc rộng): <https://www.anthropic.com/engineering/multi-agent-research-system> — theo `research/2026-10-13-ai-agent-research.md` §2.3 [F].
 - `seeker19110/stored` mục 21 §6 (giới hạn song song, hợp đồng giao diện trước), mục 23 §4.3 (chọn worker 2 trục), §4.4 (subagent không lồng, điều phối = phiên chính), §4.5 (trần 5 đồng thời, mô hình nhánh A/B, thất bại 2× đổi cách, 3× hỏi người) — đọc 2026-10-13.
