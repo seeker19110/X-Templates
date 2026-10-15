@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -682,6 +683,159 @@ class ChangelogCheckTest(TmpDirCase):
     def test_repo_changelog_passes(self):
         rc, out, _ = run_main("changelog-check", ROOT / "CHANGELOG.md")
         self.assertEqual(rc, 0, out)
+
+
+class FeedbackTest(TmpDirCase):
+    """ADR-0010: dự án đích ghi lỗi do khung + cách khắc phục; repo khung gộp theo (loại, ID)."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
+        self.fb = self.tmp / "docs" / "xtemplates-feedback"
+
+    def add(self, *extra: str) -> tuple[int, str, str]:
+        base = [
+            "--kind",
+            "hook-chan-nham",
+            "--id",
+            "pre-bash-guard",
+            "--symptom",
+            "rm -rf ./build bị deny",
+            "--fix",
+            "chạy tay",
+        ]
+        return run_main("feedback", "add", *base, *extra)
+
+    def test_add_writes_redacted_single_line_entry_with_framework_version(self):
+        (self.tmp / ".xtemplates").mkdir()
+        (self.tmp / ".xtemplates" / "VERSION").write_text("3.0.0\n", encoding="utf-8")
+        rc, out, _ = self.add("--repro", "token=abc123\n### giả", "--suggest", "cho phép ./build")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("✓ FB-001 → docs/xtemplates-feedback/FB-001.md"))
+        text = (self.fb / "FB-001.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# FB-001 · hook-chan-nham · pre-bash-guard\n\n- Khung: 3.0.0\n"))
+        self.assertIn("- Tái hiện: token=*** ### giả\n", text)
+        self.assertIn("- Đề xuất cho khung: cho phép ./build\n- Nguồn: tay\n", text)
+        self.assertNotIn("abc123", text)
+        self.add()
+        e = xt.feedback_entries(self.fb)[1]
+        self.assertEqual((e["file"], e["repro"], e["suggest"]), ("FB-002.md", "—", "—"))
+
+    def test_add_rejects_empty_symptom_or_fix_and_bad_kind(self):
+        rc, out, err = run_main("feedback", "add", "--kind", "cong-cu", "--id", "x", "--symptom", " ", "--fix", "f")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("--symptom và --fix không được rỗng", err)
+        self.assertFalse(self.fb.exists())
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            xt.main(["feedback", "add", "--kind", "khac", "--id", "x", "--symptom", "s", "--fix", "f"])
+
+    def test_framework_version_fallbacks(self):
+        self.assertEqual(xt._framework_version(self.tmp), "?")
+        (self.tmp / "VERSION").write_text("\n", encoding="utf-8")
+        self.assertEqual(xt._framework_version(self.tmp), "?")
+        (self.tmp / "VERSION").write_text("2.0.0\n", encoding="utf-8")
+        self.assertEqual(xt._framework_version(self.tmp), "2.0.0")
+
+    def test_entries_sorted_numerically_and_ignore_noise(self):
+        self.fb.mkdir(parents=True)
+        for name in ("FB-010.md", "FB-002.md"):
+            (self.fb / name).write_text(
+                f"# x\n- Loại: cong-cu\n- Lạ: bỏ qua\nkhông phải dòng\n- ID: {name}\n", encoding="utf-8"
+            )
+        (self.fb / "FB-x.md").write_text("- Loại: rác\n", encoding="utf-8")
+        entries = xt.feedback_entries(self.fb)
+        self.assertEqual([e["file"] for e in entries], ["FB-002.md", "FB-010.md"])
+        self.assertEqual(entries[0], {"file": "FB-002.md", "kind": "cong-cu", "id": "FB-002.md"})
+        self.add()
+        self.assertTrue((self.fb / "FB-011.md").exists())
+
+    def test_collect_waived_must_and_blocked_without_duplicates(self):
+        (self.tmp / "BLUEPRINT.md").write_text(
+            "- [~] `SEC-AUTH-001` **MUST** a — Miễn: dùng SSO ngoài\n"
+            "- [~] `SEC-AUTH-002` **MUST** b\n"
+            "- [~] `BASE-X-003` **SHOULD** c — Miễn: x\n"
+            "- [x] `BASE-X-004` **MUST** d\n",
+            encoding="utf-8",
+        )
+        xt.write_state({"active": True, "blocked": True, "blocked_reason": "cần khoá thật"}, self.tmp)
+        rc, out, _ = run_main("feedback", "collect")
+        self.assertEqual((rc, out), (0, "✓ Thêm 3 phản hồi tự gom: FB-001, FB-002, FB-003\n"))
+        got = [(e["kind"], e["id"], e["symptom"]) for e in xt.feedback_entries(self.fb)]
+        self.assertEqual(
+            got,
+            [
+                ("mien-tru", "SEC-AUTH-001", "MUST bị miễn: dùng SSO ngoài"),
+                ("mien-tru", "SEC-AUTH-002", "MUST bị miễn: (thiếu lý do)"),
+                ("bi-chan", "loop", "autopilot bị chặn: cần khoá thật"),
+            ],
+        )
+        rc, out, _ = run_main("feedback", "collect")
+        self.assertEqual(out, "✓ Thêm 0 phản hồi tự gom (không có tín hiệu mới)\n")
+
+    def test_collect_final_verdict_variants_and_missing_blueprint(self):
+        cases = [
+            ({"final_verdict": {"verdict": "blocked", "reason": "lỗi lặp"}, "last_failure_task": "T-004"}, 1),
+            ({"final_verdict": {"verdict": "done", "reason": "xong"}}, 0),
+            ({"final_verdict": "hỏng"}, 0),
+        ]
+        for st, n in cases:
+            with self.subTest(st=st):
+                shutil.rmtree(self.fb, ignore_errors=True)
+                xt.write_state({"active": False, **st}, self.tmp)
+                run_main("feedback", "collect", "--blueprint", "khong-co.md")
+                self.assertEqual(len(xt.feedback_entries(self.fb)) if self.fb.exists() else 0, n)
+        shutil.rmtree(self.fb, ignore_errors=True)
+        xt.write_state({"active": False, **cases[0][0]}, self.tmp)
+        run_main("feedback", "collect")
+        self.assertEqual(xt.feedback_entries(self.fb)[0]["id"], "T-004")
+
+    def test_list_text_json_and_missing_dir(self):
+        self.assertEqual(run_main("feedback", "list"), (0, "", ""))
+        self.assertEqual(run_main("feedback", "list", "--json")[1], "[]\n")
+        self.add()
+        out = run_main("feedback", "list")[1]
+        self.assertTrue(out.startswith("FB-001.md  hook-chan-nham  pre-bash-guard   rm -rf ./build bị deny"))
+        data = json.loads(run_main("feedback", "list", str(self.fb), "--json")[1])
+        self.assertEqual(data[0]["fix"], "chạy tay")
+        (self.fb / "FB-002.md").write_text("# rỗng\n", encoding="utf-8")
+        self.assertIn("FB-002.md  ?               ?", run_main("feedback", "list")[1])
+
+    def test_aggregate_groups_projects_and_marks_ready(self):
+        a, b = self.tmp / "a", self.tmp / "b"
+        for d, proj in ((a, "a"), (b, "b")):
+            xt.write_feedback(
+                d.parent / proj, {"kind": "muc-sai", "id": "SEC-AUTH-001", "symptom": "mơ hồ | khó", "fix": "x"}
+            )
+        xt.write_feedback(
+            a, {"kind": "cong-cu", "id": "xt.py loop", "symptom": "crash", "fix": "f", "repro": "xt.py loop x"}
+        )
+        xt.write_feedback(a, {"kind": "tai-lieu", "id": "README", "symptom": "thiếu", "fix": "đọc code"})
+        src = [
+            "--from", f"a={a / 'docs' / 'xtemplates-feedback'}",
+            "--from", f"b={b / 'docs' / 'xtemplates-feedback'}",
+            "--from", f"c={self.tmp / 'khong-co'}",
+        ]  # fmt: skip
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        summary = [(g["kind"], g["id"], g["projects"], g["ready"]) for g in groups]
+        self.assertEqual(
+            summary,
+            [
+                ("muc-sai", "SEC-AUTH-001", ["a", "b"], True),
+                ("cong-cu", "xt.py loop", ["a"], True),
+                ("tai-lieu", "README", ["a"], False),
+            ],
+        )
+        table = run_main("feedback", "aggregate", *src)[1].splitlines()
+        self.assertEqual(table[0].count("|"), 7)
+        self.assertEqual(table[2], "| ✅ | muc-sai | `SEC-AUTH-001` | a, b | mơ hồ \\| khó | x |")
+        self.assertTrue(table[4].startswith("| — | tai-lieu |"))
+
+    def test_aggregate_rejects_bad_source_spec(self):
+        for spec in ("khong-dau-bang", "=thu-muc", "du-an="):
+            with self.subTest(spec):
+                rc, out, err = run_main("feedback", "aggregate", "--from", spec)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("--from phải dạng", err)
 
 
 class LoopCommandsTest(TmpDirCase):

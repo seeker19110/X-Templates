@@ -1,0 +1,66 @@
+name: Phản hồi từ dự án đích
+description: Lỗi do khung (công cụ, hook, mục checklist, tài liệu) gặp khi dùng khung trong một dự án, kèm cách đã khắc phục.
+title: "[feedback] <loại>: <ID>"
+labels: [feedback]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Repo này **public**. Chỉ ghi triệu chứng, bước tái hiện tối thiểu và cách khắc phục — **không** mã nguồn, dữ liệu
+        người dùng, tên khách hàng hay bí mật của dự án (LOOP-FB-003). Dự án đã cài khung có thể dán nội dung file
+        `docs/xtemplates-feedback/FB-NNN.md` do `xt.py feedback add` sinh ra.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Loại
+      options:
+        - cong-cu (xt.py / install.py / dev-task.sh sai hoặc crash)
+        - hook-chan-nham (hook deny/ask việc vô hại)
+        - hook-lot (hook để lọt việc phải chặn/hỏi)
+        - muc-sai (mục checklist sai/mơ hồ/không kiểm được)
+        - tai-lieu (tài liệu/mẫu/skill thiếu hoặc sai)
+        - mien-tru (MUST phải miễn trừ trong dự án)
+    validations:
+      required: true
+  - type: input
+    id: id
+    attributes:
+      label: ID
+      description: ID mục checklist (vd SEC-AUTH-001), lệnh (vd xt.py loop record) hoặc tên hook/skill
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Phiên bản khung
+      description: Nội dung `.xtemplates/VERSION` của dự án
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Triệu chứng
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Tái hiện tối thiểu
+      description: Lệnh/input nhỏ nhất gây lỗi, không dùng dữ liệu thật của dự án
+  - type: textarea
+    id: fix
+    attributes:
+      label: Cách đã khắc phục trong dự án
+    validations:
+      required: true
+  - type: textarea
+    id: suggest
+    attributes:
+      label: Đề xuất sửa khung
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Kiểm trước khi gửi
+      options:
+        - label: Không có mã nguồn, dữ liệu người dùng, tên khách hàng hay bí mật của dự án
+          required: true

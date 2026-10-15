@@ -47,6 +47,7 @@ Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint
 - Đổi cấu trúc khung/công cụ: ADR ở `docs/adr/` (`/adr`), không sửa ADR cũ.
 - Thay đổi `scripts/xt.py`: có test trong `tests/`; giữ chỉ thư viện chuẩn Python ≥ 3.11 (CI kiểm 3.11 và 3.13).
 - Hook/skill/agent trong `.claude/`: là harness được dự án đích copy — giữ fail-open, không hard-code stack, test bằng payload giả (xem `tests/test_hooks.py`).
+- Phản hồi từ dự án đích (ADR-0010): dự án trong `docs/ops/TARGETS.md`; Routine hằng tuần gộp bằng `xt.py feedback aggregate` → PR nháp `docs/ops/feedback/REPORT-<ngày>.md`. Sửa khung theo nhóm đủ ngưỡng (≥ 2 dự án hoặc có tái hiện), mỗi sửa có test + CHANGELOG + trỏ FB gốc; không chép dữ liệu dự án vào repo khung (public).
 
 ## 8. Skill và subagent
 `/autopilot` (tự động đến khi xong) · `/blueprint` (ghép/audit checklist) · `/gate` (cổng + báo cáo) · `/research` (xác minh nguồn sống) · `/audit` (rà 13 nhóm có máy đỡ `xt.py audit plan/check`, dừng chờ duyệt) · `/review` (review theo checklist) · `/adr` · `/handover` (bàn giao phiên).

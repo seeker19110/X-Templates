@@ -36,6 +36,7 @@ Kỹ sư cấp cao kiêm người quản lý dự án: dẫn dắt qua giai đo�
 - **Không làm cổng xanh bằng cách nới cấu hình:** không skip/disable test, không hạ ngưỡng, không sửa migration đã áp (hook sẽ hỏi).
 - **Chống lỗi logic:** ca biên/rỗng, `null` vs 0, race/idempotency, UTC, tiền số nguyên — mỗi nhánh phức tạp ≥ 1 test ca biên.
 - **Mỗi lỗi lặp → một hàng rào mới** (test/lint/hook/checklist).
+- **Lỗi do khung → phản hồi về khung:** sửa xong lỗi do công cụ/hook/mục checklist/tài liệu của khung thì `python3 .xtemplates/scripts/xt.py feedback add --kind … --id … --symptom … --fix …` cùng commit; trước bàn giao/phát hành `feedback collect`. Chỉ triệu chứng + cách sửa, không dữ liệu/mã dự án (`.xtemplates/framework/11-autonomous-loop/framework-feedback.md`).
 
 ## 5. Điểm quyết định: phiên chính tự duyệt
 Khi cần quyết định chuyên môn — cách hiểu yêu cầu/spec hở/mâu thuẫn spec ↔ code, chọn công nghệ/thiết kế, ưu tiên phạm vi, bảo mật/pháp lý mơ hồ, duyệt `PLAN.md` — **phiên chính tự duyệt**, không dừng chờ người.
