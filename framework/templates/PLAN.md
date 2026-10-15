@@ -1,12 +1,12 @@
 ---
 title: Mẫu PLAN
 kind: template
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Mẫu PLAN.md
 
-> **Ai viết:** phiên lập kế hoạch (người + AI) sau G0–G4, trước khi code; người duyệt một lần (cổng duyệt duy nhất của autopilot).
+> **Ai viết:** phiên lập kế hoạch (người + AI) sau G0–G4, trước khi code; phiên chính tự duyệt một lần theo tiêu chí chất lượng cuối và ghi `D-NNN` (cổng duyệt duy nhất của autopilot, ADR-0008); người can thiệp lúc nào cũng được.
 > **Giai đoạn:** G4 → G6. **Cổng dùng:** `xt.py loop init --plan docs/autopilot/PLAN.md`, `xt.py loop status`, `PM-PLAN-*`. **Đường dẫn:** `docs/autopilot/PLAN.md`.
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-001\` <việc> — Gate: \`<lệnh>\`` — ID `T-` + ≥3 chữ số, tăng dần; Gate là lệnh chạy trong repo, exit 0 = đạt. Dòng không đúng dạng này máy bỏ qua.
 > **Trạng thái:** `[ ]` chưa · `[x]` xong (chỉ khi `.autopilot/evidence/T-NNN.json` có `exit_code: 0` và `cmd` đúng Gate) · `[~]` bỏ (ghi lý do).
@@ -15,7 +15,7 @@ updated: 2026-10-14
 ```markdown
 # docs/autopilot/PLAN.md — <Tên dự án> · <mốc/lát>
 
-> Duyệt bởi <tên> ngày <YYYY-MM-DD> · Spec gốc: docs/specs/SPEC-<slug>.md (F-<NNN>) · Blueprint: BLUEPRINT.md
+> Duyệt: D-<NNN> (phiên chính tự duyệt) hoặc <tên> ngày <YYYY-MM-DD> · Spec gốc: docs/specs/SPEC-<slug>.md (F-<NNN>) · Blueprint: BLUEPRINT.md
 
 ## Mục tiêu của kế hoạch này
 <1–2 câu: lát dọc nào chạy được khi xong; chỉ số nào đo được>
@@ -32,11 +32,11 @@ updated: 2026-10-14
 | Hạn thật | <ngày> | <hợp đồng/luật/sự kiện> | cắt Could → Should, không hạ cổng |
 | Hạn mong muốn | <ngày> | nội bộ | re-plan |
 
-## Điểm dừng bắt buộc (dừng và hỏi người — `xt.py loop block --reason "..."`)
+## Điểm dừng bắt buộc về hành động (dừng và hỏi người — `xt.py loop block --reason "..."`)
 - Xoá/đổi dữ liệu thật, migration phá vỡ, drop cột/bảng
 - Tiền thật, thanh toán, gửi thông báo ra ngoài, deploy production
 - Secret, quyền, ruleset, cấu hình cổng/CI/hook
-- Spec hở hoặc mâu thuẫn với code hiện có
+- (Spec hở, mâu thuẫn với code, chọn công nghệ/thiết kế **không** dừng: phiên chính tự quyết, `xt.py loop decide` → D-NNN)
 - <điểm dừng riêng của dự án>
 
 ## Thứ tự & lý do

@@ -1,13 +1,13 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
 
 > Mảng này mô tả cách một agent **chạy tự động đến khi xong mà vẫn dừng đúng chỗ**: lập kế hoạch một lần, MỘT cổng
-> duyệt, rồi vòng lặp mà mỗi vòng kết thúc bằng **bằng chứng máy** (`xt.py loop record`) và Stop hook đọc bằng chứng
+> duyệt (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008), rồi vòng lặp mà mỗi vòng kết thúc bằng **bằng chứng máy** (`xt.py loop record`) và Stop hook đọc bằng chứng
 > đó để quyết cho dừng hay làm tiếp. Mọi lệnh ở đây là lệnh thật trong `scripts/xt.py` và harness `.claude/`; hệ
 > agentic **làm sản phẩm** (đa agent chạy runtime) ở [`../13-ai-engineering/agentic-systems.md`](../13-ai-engineering/agentic-systems.md).
 
@@ -15,7 +15,7 @@ updated: 2026-10-14
 |---|---|---|
 | [`loop-design.md`](loop-design.md) | Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng | Trước khi bật autopilot lần đầu; khi chọn tầng vòng lặp (hook/`/loop`/headless) |
 | [`harness-files.md`](harness-files.md) | File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state | Khi viết PLAN.md, PROGRESS.md; khi hỏi "file nào commit, file nào không" |
-| [`stop-points-and-escalation.md`](stop-points-and-escalation.md) | Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang | Khi quyết hành động nào agent được tự làm; khi cấu hình allow/ask/deny |
+| [`stop-points-and-escalation.md`](stop-points-and-escalation.md) | Điểm quyết định tự duyệt (tiêu chí chất lượng cuối), điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang | Khi cần quyết định; khi quyết hành động nào agent được tự làm; khi cấu hình allow/ask/deny |
 | [`orchestration-and-subagents.md`](orchestration-and-subagents.md) | Điều phối: subagent, worktree, song song, không lồng | Khi tách việc cho `researcher`/`executor`/`reviewer`; khi muốn chạy song song |
 | [`self-healing-ci.md`](self-healing-ci.md) | Agent tự sửa CI/review: giới hạn, cấm, bằng chứng | Khi CI đỏ trong autopilot; khi cấu hình workflow có agent là tác giả |
 | [`context-and-token-budget.md`](context-and-token-budget.md) | Ngân sách context/token, compaction, bàn giao phiên | Khi phiên dài, gần hết ngân sách; khi viết bàn giao |
@@ -33,12 +33,16 @@ updated: 2026-10-14
    `<XT> compose --profile <p> [--industry <i>] --scale <S|M|L> [--add <module>] --out BLUEPRINT.md`
    (`--add` để ghép module ngoài hồ sơ, vd web app có tính năng LLM thêm `13-ai-engineering/llm-app-foundations`).
 4. **G2 Research** → `researcher` xác minh phiên bản/chuẩn/luật từ nguồn sống, ghi ngày; ADR chọn stack.
-5. **G3 Specify** → `SPEC-*.md` cho từng tính năng (Given/When/Then + ca biên); spec hở → dừng hỏi.
+5. **G3 Specify** → `SPEC-*.md` cho từng tính năng (Given/When/Then + ca biên); spec hở → phiên chính quyết tường minh (`<XT> loop decide`, D-NNN).
+   **Mọi điểm quyết định** (cách hiểu spec, công nghệ, thiết kế, bảo mật/pháp lý mơ hồ) đi theo tiêu chí chất lượng cuối ở
+   [`stop-points-and-escalation.md`](stop-points-and-escalation.md) — tự duyệt, ghi lại, không chờ người.
 6. **G4 Design** → sơ đồ, schema, `API-CONTRACT.md`, `THREAT-MODEL.md` (≥ M).
 7. **Viết `docs/autopilot/PLAN.md`** theo [`../templates/PLAN.md`](../templates/PLAN.md): mỗi task một dòng
    `- [ ] \`T-NNN\` <việc> — Gate: \`<lệnh>\`` (regex thật: `TASK_RE`/`GATE_RE` trong xt.py), ≤ 1 ngày/task; 4 con số
    theo [`LOOP-DESIGN-001`](loop-design.md) (trần vòng · ngân sách tiền/token · timeout mỗi lệnh kiểm · hạn chót); danh sách điểm dừng dự kiến.
-8. **MỘT cổng duyệt**: tóm tắt ≤ 30 dòng (MUST/SHOULD của blueprint, stack + phiên bản, task, rủi ro, điểm dừng) → chờ người. Sau duyệt không hỏi lại trừ điểm dừng bắt buộc.
+8. **MỘT cổng duyệt — phiên chính tự duyệt**: tóm tắt ≤ 30 dòng (MUST/SHOULD của blueprint, stack + phiên bản, task, rủi ro, điểm dừng)
+   ghi vào đầu PLAN; soát theo tiêu chí chất lượng cuối, ghi `<XT> loop decide --question "Duyệt PLAN …"`, báo người tóm tắt rồi
+   **làm tiếp không chờ** (người can thiệp lúc nào cũng được). Sau đó không hỏi lại trừ điểm dừng bắt buộc về hành động.
 
 **Pha 2 — vòng lặp có bằng chứng**
 
@@ -53,12 +57,12 @@ updated: 2026-10-14
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`.
-13. **Điểm dừng bắt buộc** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
-    hành động đối ngoại, mâu thuẫn spec): `<XT> loop block --reason "..."` rồi dừng; hook `pre-bash-guard.sh`/
+13. **Điểm dừng bắt buộc về hành động** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
+    hành động đối ngoại; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng; hook `pre-bash-guard.sh`/
     `pre-edit-guard.sh` deny/ask là lưới thứ hai. Người đọc lý do, xử lý, rồi `loop resume --reason "..."` để tiếp (giữ số vòng và bằng chứng; `loop init` lại chỉ khi đổi PLAN/ngân sách).
 14. **Gần hết ngân sách** (≥ 80% vòng/giờ hoặc context lớn): ghi mục "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
 15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict` (cổng phát hành G7) không còn MUST mở
-    → `GO-NO-GO.md`, PR cuối, báo cáo ≤ 20 dòng (đã làm · bằng chứng · còn treo · đề xuất). `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
+    → `GO-NO-GO.md`, PR cuối, báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
 
 ## Lệnh thật (`scripts/xt.py`)
 
@@ -67,7 +71,8 @@ updated: 2026-10-14
 | `loop init --plan P [--blueprint B] [--max-iterations 50] [--hours H]` | Tạo `.autopilot/state.json`, bật vòng |
 | `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` |
 | `loop record --task T-NNN -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence, cập nhật chữ ký lỗi |
-| `loop block --reason "..."` | Đặt `blocked=true` (điểm dừng bắt buộc) |
+| `loop block --reason "..."` | Đặt `blocked=true` (điểm dừng bắt buộc về hành động) |
+| `loop decide --question Q --option A --option B --choice N --why W --revert R [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý lý do `blocked`: bỏ chặn, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON, quyết block/cho dừng; fail-open khi lỗi |

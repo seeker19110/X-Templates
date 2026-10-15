@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng
@@ -22,8 +22,8 @@ updated: 2026-10-14
    ngân sách và điểm dừng; subagent lồng tạo ngữ cảnh mà không ai thấy toàn bộ.
 2. **Ủy quyền chỉ thu hẹp, không mở rộng** (`research/2026-10-13-ai-agent-research.md` §2.3 — handoff schema):
    quyền, tool, ngân sách, mức tin cậy của subagent ⊆ của người giao; subagent không tự nâng tier T0–T4.
-3. **Chọn worker theo hai trục**: độ phức tạp × độ khép kín của spec (stored 23 §4.3). Spec hở → không giao,
-   quay về G3 hỏi người.
+3. **Chọn worker theo hai trục**: độ phức tạp × độ khép kín của spec (stored 23 §4.3). Spec hở → không giao;
+   phiên chính quyết tường minh (D-NNN, [`LOOP-STOP-018`](stop-points-and-escalation.md)) rồi mới giao.
 4. **Người review không phải người viết**: `reviewer` dùng model khác `executor`, chỉ đọc + chạy lệnh kiểm, chỉ nhận
    diff + SPEC, không nhận lý luận của người viết (`.claude/agents/reviewer.md`).
 5. **Song song chỉ khi độc lập về file**: hai task chạm cùng file/schema/port → nối tiếp. Hợp đồng giao diện
@@ -88,7 +88,7 @@ lệnh + exit code · còn treo). Thiếu `acceptance_criteria` → không giao.
 | Tin báo cáo "test pass" của subagent | Tick task không có bằng chứng; Stop hook trả `verify` muộn | Phiên chính `loop record` lại Gate |
 | Hai executor cùng sửa `schema.prisma`/migration | Xung đột merge, migration lệch số | Khai `files:` trong PLAN; serial hoá task chạm schema |
 | Reviewer cùng model, nhận cả lý luận của executor | Cùng điểm mù, review "xanh" rỗng | Model khác; chỉ đưa diff + SPEC |
-| Giao task spec hở để "subagent tự lấp" | Subagent bịa yêu cầu, làm việc khác hẳn | Spec hở → về G3, hỏi người |
+| Giao task spec hở để "subagent tự lấp" | Subagent bịa yêu cầu, làm việc khác hẳn | Spec hở → phiên chính quyết D-NNN trước khi giao; subagent trả câu hỏi về, không tự lấp |
 | Mở 10 subagent song song trên máy 8 GB | OOM, timeout giả, chữ ký lỗi nhiễu | Trần 5; giảm khi máy yếu |
 | Subagent được quyền push/publish | Hành động đối ngoại không qua điểm dừng | Chỉ phiên chính push, qua hook `ask` |
 | Đưa transcript subagent nguyên văn vào context chính | Context phình, compaction sớm | Báo cáo ≤ 25 dòng, link file/log |

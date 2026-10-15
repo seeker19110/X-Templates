@@ -12,7 +12,9 @@ Lệnh:
   loop status [--json]          Verdict máy tính từ PLAN + bằng chứng (không do model tự khai).
   loop record --task T-001 -- <lệnh...>
                                 Chạy lệnh kiểm của task, ghi bằng chứng (exit code, thời gian, đuôi output).
-  loop block --reason TEXT      Đánh dấu BLOCKED (cần người).
+  loop block --reason TEXT      Đánh dấu BLOCKED (điểm dừng an toàn — cần người).
+  loop decide --question Q --option A --option B --choice N --why W --revert R [--prod TEXT] [--log FILE]
+                                Phiên chính tự duyệt điểm quyết định, ghi D-NNN vào docs/autopilot/DECISIONS.md.
   loop resume [--reason TEXT]   Người đã xử lý → bỏ BLOCKED, đặt lại đếm lỗi lặp, giữ số vòng/bằng chứng.
   loop stop [--reason TEXT]     Tắt vòng lặp.
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
@@ -1805,6 +1807,60 @@ def _loop_block(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+DECISION_ID_RE = re.compile(r"^### D-(\d{3,})\b", re.M)
+PROD_SWITCH_LABEL = "Khi chạy thật (đề xuất, chủ dự án quyết ở G7):"
+DECISIONS_HEADER = (
+    "# Nhật ký quyết định tự duyệt\n\n"
+    "> Ghi bởi `xt.py loop decide`. Phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối "
+    "(`LOOP-STOP-018`, ADR-0008 của khung). Người xem lại bất cứ lúc nào; đổi ý → quyết định mới ghi "
+    '"thay D-NNN", không sửa mục cũ.\n'
+)
+
+
+def _one_line(text: str) -> str:
+    """Gộp khoảng trắng/xuống dòng: một trường = một dòng, không chèn được tiêu đề Markdown giả."""
+    return " ".join(text.split())
+
+
+def _decision_choice(options: List[str], choice: str) -> Optional[str]:
+    """`--choice` là số thứ tự (từ 1) hoặc nguyên văn một phương án; không khớp → None."""
+    if choice.isdigit() and 1 <= int(choice) <= len(options):
+        return options[int(choice) - 1]
+    return choice if choice in options else None
+
+
+def _loop_decide(args: argparse.Namespace, base: Path) -> int:
+    options = list(dict.fromkeys(o for o in map(_one_line, args.option) if o))
+    question, why, revert = _one_line(args.question), _one_line(args.why), _one_line(args.revert)
+    chosen = _decision_choice(options, _one_line(args.choice))
+    problems = [
+        msg
+        for bad, msg in (
+            (len(options) < 2, "cần ≥ 2 phương án khác nhau (--option)"),
+            (chosen is None, "--choice phải là số thứ tự hoặc nguyên văn một --option"),
+            (not (question and why and revert), "--question, --why, --revert không được rỗng"),
+        )
+        if bad
+    ]
+    if problems:
+        print("✗ " + "; ".join(problems), file=sys.stderr)
+        return 2
+    log = base / args.log
+    text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
+    did = f"D-{max((int(n) for n in DECISION_ID_RE.findall(text)), default=0) + 1:03d}"
+    entry = (
+        f"\n### {did} · {now_iso()} · {question}\n\n"
+        f"- Phương án: " + " · ".join(f"({i}) {o}" for i, o in enumerate(options, 1)) + "\n"
+        f"- Chọn: {chosen}\n- Lý do (tiêu chí chất lượng cuối): {why}\n- Đường lùi: {revert}\n"
+    )
+    prod = _one_line(args.prod or "")
+    if prod:  # mặc định tự host khi phát triển; đề xuất dịch vụ cho chạy thật gom ở đây cho G7 (ADR-0008)
+        entry += f"- {PROD_SWITCH_LABEL} {prod}\n"
+    write_atomic(log, text.rstrip("\n") + "\n" + entry)
+    print(f"✓ {did} tự duyệt: {chosen} → {args.log}")
+    return 0
+
+
 def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     cur = read_state(base)
     if not cur:
@@ -1856,6 +1912,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "status": _loop_status,
     "record": _loop_record,
     "block": _loop_block,
+    "decide": _loop_decide,
     "resume": _loop_resume,
     "stop": _loop_stop,
     "hook-stop": _loop_hook_stop,
@@ -2114,6 +2171,14 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("cmd", nargs=argparse.REMAINDER)
     lb = lsub.add_parser("block")
     lb.add_argument("--reason", required=True)
+    ld = lsub.add_parser("decide", help="phiên chính tự duyệt một điểm quyết định, ghi nhật ký D-NNN (LOOP-STOP-018)")
+    ld.add_argument("--question", required=True)
+    ld.add_argument("--option", action="append", required=True, help="một phương án; lặp ≥ 2 lần")
+    ld.add_argument("--choice", required=True, help="số thứ tự (từ 1) hoặc nguyên văn phương án chọn")
+    ld.add_argument("--why", required=True, help="lý do theo tiêu chí chất lượng cuối")
+    ld.add_argument("--revert", required=True, help="đường lùi nếu người đổi ý")
+    ld.add_argument("--prod", help="đề xuất chuyển sang dịch vụ khác khi chạy thật (phương án chọn là tự host)")
+    ld.add_argument("--log", default="docs/autopilot/DECISIONS.md")
     lrs = lsub.add_parser("resume")
     lrs.add_argument("--reason", default="người đã xử lý điểm dừng")
     lst = lsub.add_parser("stop")

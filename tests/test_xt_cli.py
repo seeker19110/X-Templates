@@ -746,6 +746,72 @@ class LoopCommandsTest(TmpDirCase):
         self.assertTrue(st["active"] and st["blocked"])
         self.assertEqual(st["blocked_reason"], "cần người quyết")
 
+    def decide(self, *extra: str, choice: str = "1") -> tuple[int, str, str]:
+        base = ["--question", "Lưu phiên ở đâu?", "--option", "Cookie HttpOnly", "--option", "localStorage"]
+        return run_main("loop", "decide", *base, "--choice", choice, "--why", "chặn XSS đọc token", *extra)
+
+    def test_decide_creates_log_and_numbers_entries(self):
+        # LOOP-STOP-018: phiên chính tự duyệt, mỗi quyết định một mục D-NNN tăng dần, không cần state autopilot.
+        rc, out, err = self.decide("--revert", "đổi middleware phiên")
+        self.assertEqual((rc, out, err), (0, "✓ D-001 tự duyệt: Cookie HttpOnly → docs/autopilot/DECISIONS.md\n", ""))
+        rc, out, _ = self.decide("--revert", "đổi lại", choice="localStorage")
+        self.assertEqual((rc, out.split(" →")[0]), (0, "✓ D-002 tự duyệt: localStorage"))
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(xt.DECISIONS_HEADER))
+        self.assertEqual(xt.DECISION_ID_RE.findall(text), ["001", "002"])
+        self.assertIn("- Phương án: (1) Cookie HttpOnly · (2) localStorage\n- Chọn: Cookie HttpOnly\n", text)
+        self.assertIn(
+            "- Lý do (tiêu chí chất lượng cuối): chặn XSS đọc token\n- Đường lùi: đổi middleware phiên\n", text
+        )
+        self.assertIsNone(xt.read_state(self.tmp))
+
+    def test_decide_prod_switch_line_only_when_given(self):
+        # Mặc định tự host; đề xuất dịch vụ khi chạy thật nằm trong mục D-NNN để G7 gom bằng một lần tìm.
+        self.decide("--revert", "r", "--prod", "  SES hoặc Postmark\nthay Mailpit ")
+        self.decide("--revert", "r", "--prod", " ")
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertIn(f"- Đường lùi: r\n- {xt.PROD_SWITCH_LABEL} SES hoặc Postmark thay Mailpit\n\n### D-002", text)
+        self.assertEqual(text.count(xt.PROD_SWITCH_LABEL), 1)
+
+    def test_decide_custom_log_continues_after_highest_id(self):
+        log = self.tmp / "DEC.md"
+        log.write_text("# Nhật ký\n\n### D-007 · cũ · q\n### D-003 · cũ · q\n", encoding="utf-8")
+        rc, out, _ = self.decide("--revert", "r", "--log", "DEC.md")
+        self.assertEqual((rc, out), (0, "✓ D-008 tự duyệt: Cookie HttpOnly → DEC.md\n"))
+        self.assertTrue(log.read_text(encoding="utf-8").startswith("# Nhật ký\n\n### D-007"))
+
+    def test_decide_fields_are_single_line(self):
+        # Xuống dòng trong trường không tạo được tiêu đề `### D-…` giả làm lệch số thứ tự.
+        rc, _, _ = run_main(
+            "loop", "decide", "--question", "q\n### D-900 giả", "--option", "a\nb", "--option", "c",
+            "--choice", "a b", "--why", "w", "--revert", "r",
+        )  # fmt: skip
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertEqual((rc, xt.DECISION_ID_RE.findall(text)), (0, ["001"]))
+        self.assertIn("### D-001 · ", text)
+        self.assertIn(" · q ### D-900 giả\n", text)
+        self.assertIn("- Chọn: a b\n", text)
+
+    def test_decide_rejects_bad_input_without_writing(self):
+        cases = {
+            "một phương án": (["--option", "a", "--option", " a ", "--choice", "1"], "cần ≥ 2 phương án"),
+            "choice ngoài khoảng": (["--option", "a", "--option", "b", "--choice", "3"], "--choice phải là"),
+            "choice không khớp": (["--option", "a", "--option", "b", "--choice", "c"], "--choice phải là"),
+            "choice 0": (["--option", "a", "--option", "b", "--choice", "0"], "--choice phải là"),
+        }
+        for name, (argv, msg) in cases.items():
+            with self.subTest(name):
+                rc, out, err = run_main("loop", "decide", "--question", "q", *argv, "--why", "w", "--revert", "r")
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(msg, err)
+        rc, _, err = run_main(
+            "loop", "decide", "--question", " ", "--option", "a", "--option", "b", "--choice", "1",
+            "--why", "w", "--revert", "\n",
+        )  # fmt: skip
+        self.assertEqual(rc, 2)
+        self.assertIn("không được rỗng", err)
+        self.assertFalse((self.tmp / "docs").exists())
+
     def test_resume_without_state_is_exit_2(self):
         rc, out, err = run_main("loop", "resume")
         self.assertEqual((rc, out), (2, ""))
