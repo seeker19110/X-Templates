@@ -547,6 +547,36 @@ class StopAndSessionTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["decision"], "block")
 
+    def project_with_loop(self) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
+        (tmp / "docs" / "autopilot").mkdir(parents=True)
+        (tmp / "docs" / "autopilot" / "PLAN.md").write_text("- [ ] `T-001` việc — Gate: `true`\n", encoding="utf-8")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
+        cmd = [sys.executable, str(tmp / "scripts" / "xt.py"), "loop", "init", "--single-session"]
+        subprocess.run(cmd, check=True, env=env, capture_output=True)
+        return tmp
+
+    def test_pre_compact_checkpoint_reaches_session_start_after_compact(self):
+        # ADR-0009: PreCompact ghi vị trí; SessionStart(compact) nạp lại qua `loop status`. Không bao giờ chặn nén.
+        tmp = self.project_with_loop()
+        code, out, err = run_hook("pre-compact.sh", {"hook_event_name": "PreCompact", "trigger": "auto"}, tmp)
+        self.assertEqual((code, out, err), (0, "", ""))
+        st = json.loads((tmp / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual((st["checkpoint"]["trigger"], st["checkpoint"]["task"]), ("auto", "T-001"))
+        code, out, _ = run_hook("session-start.sh", {"hook_event_name": "SessionStart", "source": "compact"}, tmp)
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("checkpoint trước nén", ctx)
+        self.assertIn("chế độ một phiên", ctx)
+
+    def test_pre_compact_never_blocks_when_xt_breaks(self):
+        tmp = self.project_with_loop()
+        (tmp / "scripts" / "xt.py").write_text('import sys\nprint(\'{"decision": "block"}\')\nsys.exit(2)\n')
+        code, out, _ = run_hook("pre-compact.sh", {"trigger": "manual"}, tmp)
+        self.assertEqual((code, out), (0, ""))
+
     def test_session_start_outputs_context(self):
         code, out, _ = run_hook("session-start.sh", {"hook_event_name": "SessionStart"})
         self.assertEqual(code, 0)
@@ -604,7 +634,14 @@ class PreEditGateFilesTest(unittest.TestCase):
 class HookFailOpenTest(unittest.TestCase):
     """LOOP-HARNESS-018: mọi hook fail-open về luồng với stdin rỗng/rác; không có biến tắt riêng."""
 
-    HOOK_FILES = ("session-start.sh", "pre-bash-guard.sh", "pre-edit-guard.sh", "auto-format.sh", "stop-guard.sh")
+    HOOK_FILES = (
+        "session-start.sh",
+        "pre-bash-guard.sh",
+        "pre-edit-guard.sh",
+        "auto-format.sh",
+        "stop-guard.sh",
+        "pre-compact.sh",
+    )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
         # Dự án tạm có xt.py thật (chưa `loop init`) để stop-guard/session-start chạy tới nhánh gọi xt.py.

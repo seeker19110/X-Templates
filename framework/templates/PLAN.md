@@ -21,7 +21,7 @@ updated: 2026-10-15
 <1–2 câu: lát dọc nào chạy được khi xong; chỉ số nào đo được>
 
 ## Ngân sách (4 con số)
-- Số vòng tối đa: <N> (`--max-iterations`)
+- Số vòng tối đa: <N> (`--max-iterations`; bỏ trống với `--single-session` = max(20, 4 × task chưa làm))
 - Ngân sách: <token hoặc tiền> 
 - Timeout mỗi lệnh Gate: <giây> (`XT_RECORD_TIMEOUT`)
 - Ngày hết hạn: <YYYY-MM-DDThh:mm:ssZ> (`--hours`)
@@ -37,6 +37,7 @@ updated: 2026-10-15
 - Tiền thật, thanh toán, gửi thông báo ra ngoài, deploy production
 - Secret, quyền, ruleset, cấu hình cổng/CI/hook
 - (Spec hở, mâu thuẫn với code, chọn công nghệ/thiết kế **không** dừng: phiên chính tự quyết, `xt.py loop decide` → D-NNN)
+- (Còn việc khác làm được thì **không** `block`: `xt.py loop defer --task <ID> --reason "..."`, gom cho người cuối phiên)
 - <điểm dừng riêng của dự án>
 
 ## Thứ tự & lý do

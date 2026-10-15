@@ -3,11 +3,11 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-15 · Nhánh: claude/pensive-dirac-s6icry
 
 ## Đang làm
-- ADR-0008 trên nhánh `claude/pensive-dirac-s6icry` (chưa PR): phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối, mặc định tự host + đề xuất dịch vụ khi chạy thật (`--prod`); `xt.py loop decide` ghi `docs/autopilot/DECISIONS.md` (D-001…D-003 của chính thay đổi này). #43 (ADR-0007) và #44 đã merge. Còn: mở PR khi người muốn; quét lại audit theo delta sau merge.
+- ADR-0008 + ADR-0009 trên nhánh `claude/pensive-dirac-s6icry` (chưa PR): phiên chính tự duyệt quyết định + mặc định tự host; autopilot một phiên đến khi xong (`loop init --single-session`, hook PreCompact → `loop checkpoint`, `loop defer` → `done-pending-human`, Stop hook cảnh báo chế độ hỏi quyền). D-001…D-006 ở `docs/autopilot/DECISIONS.md`. Còn: mở PR khi người muốn; quét lại audit theo delta sau merge.
 
 ## Tiếp theo
 1. Cần người chọn: một dự án sản phẩm thật (web/api, quy mô M) để thử khung, đo mục MUST hay bị miễn trừ.
-2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `AGENTS.md`/skill `*.xtemplates-new` theo ADR-0008) từ X-Templates để chuyển `.xstored/`→`.xtemplates/`, `xs.yaml`→`xt.yaml` (ADR-0007) + nhận guard/hook mới (#35, #36) + `changelog-check` + `progress-check` xét `MERGE_HEAD` (#41).
+2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `AGENTS.md`/skill `*.xtemplates-new` theo ADR-0008) từ X-Templates để chuyển `.xstored/`→`.xtemplates/`, `xs.yaml`→`xt.yaml` (ADR-0007) + nhận guard/hook mới (#35, #36) + `changelog-check` + `progress-check` xét `MERGE_HEAD` (#41) + hook `PreCompact` (ADR-0009, `merge_hooks` tự thêm).
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong `eval`/alias/biến chứa cờ (CHANGELOG); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
@@ -37,6 +37,7 @@
 - 2026-10-15 Bằng chứng blueprint trích máy kiểm/test, không trích file trạng thái viết lại mỗi phiên (PROGRESS.md, PLAN) — nếu không `audit plan` cờ cũ sau mọi phiên (AUD-HAR-019).
 
 - 2026-10-15 Phiên chính tự duyệt điểm quyết định chuyên môn (5 tiêu chí: đúng & an toàn · đường lùi · bền lâu · trải nghiệm · tốc độ phá hoà), ghi `loop decide` D-NNN; hành động vẫn dừng có hook; mặc định tự host, dịch vụ thật quyết ở G7 — ADR-0008 (repo khung + dự án đích).
+- 2026-10-15 Autopilot một phiên đến khi xong: context đầy → compaction + checkpoint (không bàn giao); bàn giao chỉ khi ≥ 80% trần vòng/giờ/tiền; việc cần người `loop defer`, gom cuối phiên; chạy bằng `claude --permission-mode auto` — ADR-0009.
 ## Bàn giao phiên
 - 2026-10-15 · Commit cuối trên `main`: `8e64aac` (#41); tag `v2.0.0` → `55de4d1`; SHA quét audit `8e64aac` (trừ DEP/CFG/PERF cũ hơn, không file đổi).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (đọc `xt.yaml`; `pip install --require-hashes -r requirements-dev.txt`, cần shellcheck).

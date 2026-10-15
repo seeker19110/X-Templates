@@ -143,6 +143,7 @@ Ngoại lệ cứng: **xác thực/phân quyền · thanh toán · mật mã lu�
 - [ ] `LOOP-STOP-018` **MUST@L** Điểm quyết định chuyên môn (duyệt PLAN, spec hở/nhiều cách hiểu/mâu thuẫn, chọn công nghệ, đánh đổi thiết kế, bảo mật/pháp lý mơ hồ) → phiên chính tự duyệt theo 5 tiêu chí chất lượng cuối, ghi bằng `xt.py loop decide` (≥ 2 phương án, lý do, đường lùi) rồi làm tiếp; không `loop block`, không chờ người; subagent không tự quyết. → Kiểm: `docs/autopilot/DECISIONS.md` có mục `D-NNN` cho mỗi quyết định, commit cùng thay đổi; `state.json.blocked_reason` không phải câu hỏi chuyên môn. · Nguồn: ADR-0008
 - [ ] `LOOP-STOP-019` **SHOULD** Báo cáo cuối việc/bàn giao liệt kê các `D-NNN` mới trong kỳ để người xem lại; người đổi ý → quyết định mới ghi "thay D-NNN", không sửa mục cũ. → Kiểm: báo cáo cuối/PR có dòng "Quyết định tự duyệt: D-…"; `git log -p docs/autopilot/DECISIONS.md` chỉ thêm dòng. · Nguồn: ADR-0008
 - [ ] `LOOP-STOP-020` **SHOULD** Phương án cần thông tin/tài khoản/khoá chỉ chủ dự án có → chọn phương án tự host chạy được trong repo (giấy phép OSI) và ghi đề xuất dịch vụ cho lúc chạy thật bằng `loop decide --prod`; không dừng xin khoá khi phát triển. → Kiểm: `docker compose up` (hoặc lệnh `xt.yaml`) chạy đủ phụ thuộc không cần khoá ngoài; `GO-NO-GO.md` liệt kê mọi dòng "Khi chạy thật" của `DECISIONS.md`. · Nguồn: ADR-0008
+- [ ] `LOOP-STOP-021` **SHOULD** Việc cần người (điểm dừng về hành động) **không chặn cả vòng**: `xt.py loop defer --task <T-NNN|ID blueprint> --reason …` rồi làm việc độc lập khác; `loop block` chỉ khi mọi việc còn lại phụ thuộc nó; hết việc tự làm được → verdict `done-pending-human`, người xử lý gom một lần rồi `loop resume`. → Kiểm: `state.json.deferred` có lý do; `loop status` liệt kê "chờ người"; test `test_defer_status_hook_stop_and_resume_flow`. · Nguồn: ADR-0009
 
 ## Bẫy thường gặp
 
@@ -167,6 +168,7 @@ Ngoại lệ cứng: **xác thực/phân quyền · thanh toán · mật mã lu�
 | `pre-edit-guard.sh` | PreToolUse(Edit\|Write) | `.claude/settings.json` | deny file bí mật; ask cấu hình cổng, migration cũ |
 | `permissions.deny/ask` | `claude -p --permission-mode dontAsk` trong CI | settings | deny thắng allow |
 | `xt.py loop block` | `xt.py loop block --reason "..."` | Agent khi gặp điểm dừng an toàn | verdict `blocked` |
+| `xt.py loop defer` | `xt.py loop defer --task ID --reason …` | Agent khi việc cần người mà còn việc khác làm được | verdict `done-pending-human` khi hết việc tự làm |
 | `xt.py loop decide` | `xt.py loop decide --question … --option … --option … --choice N --why … --revert …` | Phiên chính ở điểm quyết định | exit 2 khi < 2 phương án, chọn không khớp, thiếu lý do/đường lùi |
 | Phân làn | script đọc `git diff --numstat` + đường dẫn + `risk_tags` | CI `pr-policy` | 5 điều kiện; mặc định làn chuẩn |
 | Ruleset | `.github/rulesets/main.json` | GitHub | PR bắt buộc, required check `quality` + `protection-guard` + `gitleaks` + `dep-audit`, không bypass |

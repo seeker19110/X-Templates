@@ -812,6 +812,125 @@ class LoopCommandsTest(TmpDirCase):
         self.assertIn("không được rỗng", err)
         self.assertFalse((self.tmp / "docs").exists())
 
+    def test_init_single_session_sizes_iterations_from_plan(self):
+        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)) + "- [x] `T-007` xong\n")
+        rc, out, _ = run_main("loop", "init", "--single-session")
+        st = xt.read_state(self.tmp)
+        self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 24, True))
+        self.assertIn("trần=24 vòng · chế độ một phiên", out)
+        self.write_plan()
+        run_main("loop", "init", "--single-session")
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 20)
+        run_main("loop", "init", "--single-session", "--max-iterations", "7")
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 7)
+        run_main("loop", "init")
+        self.assertEqual(
+            (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (50, False)
+        )
+
+    def test_defer_requires_state_and_valid_id(self):
+        rc, out, err = run_main("loop", "defer", "--task", "T-001", "--reason", "r")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("Chưa có vòng lặp", err)
+        for bad in ("T-1", "sec-auth-001", "X"):
+            with self.subTest(bad), redirect_stderr(io.StringIO()) as e, self.assertRaises(SystemExit) as cm:
+                xt.main(["loop", "defer", "--task", bad, "--reason", "r"])
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("ID không hợp lệ", e.getvalue())
+
+    def test_defer_status_hook_stop_and_resume_flow(self):
+        # ADR-0009: việc cần người không chặn cả vòng; hết việc tự làm được → done-pending-human, phiên dừng một lần.
+        self.write_plan("- [ ] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
+        run_main("loop", "init", "--single-session")
+        rc, out, _ = run_main("loop", "defer", "--task", "T-001", "--reason", "cần khoá\nthật")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("⏸ T-001 chờ người: cần khoá thật — làm tiếp việc khác"))
+        run_main("loop", "record", "--task", "T-002", "--", "true")
+        rc, out, _ = run_main("loop", "status")
+        self.assertTrue(out.startswith("verdict: done-pending-human — mọi việc tự làm được đã xong; chờ người 1 việc"))
+        self.assertIn("  · chế độ một phiên: compaction tự nén", out)
+        self.assertIn("  · chờ người: T-001 — cần khoá thật", out)
+        data = json.loads(run_main("loop", "status", "--json")[1])
+        self.assertEqual((data["single_session"], list(data["deferred"])), (True, ["T-001"]))
+        rc, out, _ = run_main("loop", "hook-stop", stdin="{}")
+        st = xt.read_state(self.tmp)
+        self.assertEqual((rc, out, st["active"], st["final_verdict"]["verdict"]), (0, "", False, "done-pending-human"))
+        self.assertIn("đã kết thúc — done-pending-human", run_main("loop", "status")[1])
+        rc, out, _ = run_main("loop", "resume", "--reason", "đã cấu hình khoá")
+        self.assertEqual(rc, 0)
+        self.assertIn("việc chờ người quay lại hàng làm: T-001", out)
+        self.assertNotIn("deferred", xt.read_state(self.tmp))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-001"))
+        rc, out, _ = run_main("loop", "resume")
+        self.assertNotIn("quay lại hàng làm", out)
+
+    def test_hook_stop_records_permission_mode_and_warns(self):
+        self.write_plan()
+        run_main("loop", "init", "--single-session")
+        _, out, _ = run_main("loop", "hook-stop", stdin='{"permission_mode": "default"}')
+        reason = json.loads(out)["reason"]
+        self.assertIn("⚠ Phiên ở chế độ hỏi quyền `default`", reason)
+        self.assertIn("Chế độ một phiên: context đầy thì để compaction tự nén", reason)
+        self.assertIn("loop defer --task <ID>", reason)
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "default")
+        self.assertIn("⚠ Phiên ở chế độ hỏi quyền", run_main("loop", "status")[1])
+        for payload in ('{"permission_mode": "auto"}', "rác {", "[1]", '{"permission_mode": 3}'):
+            with self.subTest(payload):
+                reason = json.loads(run_main("loop", "hook-stop", stdin=payload)[1])["reason"]
+                self.assertNotIn("⚠", reason)
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "auto")
+        run_main("loop", "init")
+        reason = json.loads(run_main("loop", "hook-stop", stdin="{}")[1])["reason"]
+        self.assertNotIn("Chế độ một phiên", reason)
+
+    def test_checkpoint_without_state_is_noop(self):
+        rc, out, err = run_main("loop", "checkpoint", stdin='{"trigger": "auto"}')
+        self.assertEqual((rc, out, err), (0, "", ""))
+        self.assertFalse((self.tmp / ".autopilot").exists())
+
+    def test_checkpoint_records_position_for_session_start(self):
+        self.write_plan("- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `false`\n")
+        run_main("loop", "init", "--single-session")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "record", "--task", "T-002", "--", "false")
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        rc, out, _ = run_main("loop", "checkpoint", stdin='{"trigger": "auto", "permission_mode": "acceptEdits"}')
+        cp = xt.read_state(self.tmp)["checkpoint"]
+        self.assertEqual((rc, out), (0, ""))
+        self.assertEqual((cp["trigger"], cp["task"], cp["verdict"]), ("auto", "T-002", "continue"))
+        self.assertEqual((cp["last_evidence"]["task"], cp["last_evidence"]["exit_code"]), ("T-002", 1))
+        self.assertEqual((cp["same_failure_count"], cp["last_failure_task"]), (1, "T-002"))
+        self.assertIn("docs/", cp["dirty"])
+        self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "acceptEdits")
+        status = run_main("loop", "status")[1]
+        self.assertIn("(auto): đang ở T-002; lệnh kiểm cuối T-002 `false` exit 1; file chưa commit: ", status)
+        self.assertIn("lỗi lặp 1 lần (T-002)", status)
+
+    def test_checkpoint_without_git_or_evidence_and_bad_payload(self):
+        self.write_plan()
+        run_main("loop", "init")
+        rc, _, _ = run_main("loop", "checkpoint", stdin="rác")
+        cp = xt.read_state(self.tmp)["checkpoint"]
+        self.assertEqual((rc, cp["trigger"], cp["dirty"], cp["last_evidence"]), (0, "?", [], None))
+        self.assertNotIn("permission_mode", xt.read_state(self.tmp))
+        self.assertIn(
+            "(?): đang ở T-001; lệnh kiểm cuối — `` exit —; file chưa commit: không; lỗi lặp 0 lần (—)",
+            run_main("loop", "status")[1],
+        )
+
+    def test_checkpoint_exception_and_tty_are_fail_open(self):
+        # PreCompact exit ≠ 0/“block” sẽ chặn compaction → lỗi phải nuốt, luôn exit 0.
+        with unittest.mock.patch.object(xt, "loop_checkpoint", side_effect=RuntimeError("boom")):
+            rc, out, err = run_main("loop", "checkpoint", stdin="{}")
+        self.assertEqual((rc, out), (0, ""))
+        self.assertIn("[xt checkpoint] lỗi, bỏ qua: RuntimeError: boom", err)
+        fake = unittest.mock.Mock()
+        fake.isatty.return_value = True
+        with unittest.mock.patch.object(sys, "stdin", fake), unittest.mock.patch.object(xt, "loop_checkpoint") as lc:
+            self.assertEqual(xt.main(["loop", "checkpoint"]), 0)
+        lc.assert_called_once_with("", self.tmp)
+        fake.read.assert_not_called()
+
     def test_resume_without_state_is_exit_2(self):
         rc, out, err = run_main("loop", "resume")
         self.assertEqual((rc, out), (2, ""))

@@ -1,6 +1,6 @@
 ---
 name: handover
-description: Bàn giao phiên khi gần hết ngân sách/context hoặc kết thúc ngày — cập nhật PROGRESS.md (≤ 8 KB, 4 mục), commit + push, để phiên sau chỉ cần nhắn "tiếp tục". Dùng khi người dùng nói "bàn giao", "dừng ở đây", "wind-down", hoặc gõ /handover.
+description: Bàn giao phiên khi gần hết trần vòng/giờ/tiền hoặc kết thúc ngày (autopilot một phiên không bàn giao vì context — compaction có checkpoint, ADR-0009) — cập nhật PROGRESS.md (≤ 8 KB, 4 mục), commit + push, để phiên sau chỉ cần nhắn "tiếp tục". Dùng khi người dùng nói "bàn giao", "dừng ở đây", "wind-down", hoặc gõ /handover.
 ---
 
 # /handover — để phiên sau tiếp tục đúng chỗ

@@ -46,8 +46,10 @@ updated: 2026-10-15
 
 **Pha 2 — vòng lặp có bằng chứng**
 
-9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --max-iterations <N> --hours <H>` → tạo
-   `.autopilot/state.json` (gitignore; `max_same_failure: 3`).
+9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` → tạo
+   `.autopilot/state.json` (gitignore; `max_same_failure: 3`; trần vòng tự tính `max(20, 4 × task chưa làm)`, hoặc
+   `--max-iterations <N>`). **Một phiên đến khi xong** (ADR-0009): phiên mở bằng `claude --permission-mode auto`
+   (settings dự án không đặt được; Stop hook cảnh báo nếu phiên đang ở chế độ hỏi quyền).
 10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task đầu tiên còn `[ ]` → làm task → chạy Gate
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
@@ -57,25 +59,32 @@ updated: 2026-10-15
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`.
-13. **Điểm dừng bắt buộc về hành động** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
-    hành động đối ngoại; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng; hook `pre-bash-guard.sh`/
+13. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <T-NNN|ID blueprint> --reason "..."` rồi làm việc
+    độc lập khác; hết việc tự làm được → verdict `done-pending-human` (Stop hook cho dừng một lần, gom mọi việc cho người).
+    **Điểm dừng bắt buộc về hành động** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
+    hành động đối ngoại; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng — chỉ khi **mọi** việc còn lại phụ thuộc nó (còn việc khác thì `defer`); hook `pre-bash-guard.sh`/
     `pre-edit-guard.sh` deny/ask là lưới thứ hai. Người đọc lý do, xử lý, rồi `loop resume --reason "..."` để tiếp (giữ số vòng và bằng chứng; `loop init` lại chỉ khi đổi PLAN/ngân sách).
-14. **Gần hết ngân sách** (≥ 80% vòng/giờ hoặc context lớn): ghi mục "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
+14. **Context đầy** → compaction tự nén, không bàn giao: hook PreCompact ghi checkpoint (`<XT> loop checkpoint`), SessionStart(compact) in lại
+    `loop status` (task đang làm, lệnh kiểm cuối, file chưa commit, việc chờ người). **Gần hết trần máy** (≥ 80% vòng/giờ/tiền):
+    ghi "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
 15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict` (cổng phát hành G7) không còn MUST mở
-    → `GO-NO-GO.md`, PR cuối, báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
+    → `GO-NO-GO.md`, PR cuối, báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `done-pending-human` → báo cáo như `done` + danh sách việc chờ người (ID, lý do, cách làm),
+    người xử lý rồi `loop resume`. `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
 
 ## Lệnh thật (`scripts/xt.py`)
 
 | Lệnh | Làm gì |
 |---|---|
-| `loop init --plan P [--blueprint B] [--max-iterations 50] [--hours H]` | Tạo `.autopilot/state.json`, bật vòng |
-| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` |
+| `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(20, 4 × task chưa làm)` (mặc định 50) |
+| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint |
+| `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |
+| `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |
 | `loop record --task T-NNN -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence, cập nhật chữ ký lỗi |
 | `loop block --reason "..."` | Đặt `blocked=true` (điểm dừng bắt buộc về hành động) |
 | `loop decide --question Q --option A --option B --choice N --why W --revert R [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
-| `loop resume [--reason "..."]` | Sau khi người xử lý lý do `blocked`: bỏ chặn, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
+| `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
-| `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON, quyết block/cho dừng; fail-open khi lỗi |
+| `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
 | `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`) |
 | `audit plan [--blueprint B] [--status S] [--json]` | Lập kế hoạch audit 13 nhóm từ blueprint + `docs/ops/AUDIT-STATUS.md` (skill `/audit`) |

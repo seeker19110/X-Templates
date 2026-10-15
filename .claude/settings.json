@@ -84,6 +84,13 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-compact.sh\"", "timeout": 30 }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
