@@ -21,6 +21,7 @@ import os
 import posixpath
 import re
 import shlex
+import subprocess
 import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
@@ -161,7 +162,10 @@ def edit_decision(path: str, root: str) -> Tuple[str, str]:
 # --------------------------------------------------------------------------- tách lệnh
 
 
-HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# `<<<` là here-string (không có thân, không có dấu kết) — chỉ `<<`/`<<-` đứng riêng mới là heredoc.
+HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# Ký tự kết thúc một từ trong bash: `#` đứng ngay sau chúng (hoặc đầu chuỗi) mới mở comment.
+WORD_END = set(" \t\r\n;&|()<>")
 
 
 def strip_heredocs(cmd: str) -> str:
@@ -179,12 +183,37 @@ def strip_heredocs(cmd: str) -> str:
     return "\n".join(out)
 
 
+def strip_comments(cmd: str) -> str:
+    """Bỏ comment kiểu bash: `#` ở ĐẦU một từ (đầu chuỗi, sau khoảng trắng hoặc toán tử), ngoài nháy, tới hết dòng.
+    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
+    out: List[str] = []
+    quote, word_start, i = "", True, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "#" and word_start and not quote:
+            eol = cmd.find("\n", i)
+            i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
+            continue
+        if c == "\\" and quote != "'" and i + 1 < len(cmd):
+            out.append(cmd[i : i + 2])
+            word_start, i = False, i + 2
+            continue
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        out.append(c)
+        word_start = not quote and c in WORD_END
+        i += 1
+    return "".join(out)
+
+
 def tokenize(cmd: str) -> List[str]:
     cmd = strip_heredocs(cmd.replace("\\\n", ""))
-    lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
+    lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
-    lex.commenters = "#"
+    lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
         return list(lex)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ)
@@ -294,6 +323,14 @@ def _git_C_dirs(argv: List[str]) -> List[str]:
     return dirs
 
 
+def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
+    """Thư mục repo mà lệnh git (`git -C a -C b …`) tác động: `cwd` đi qua các `-C`; không biết (biến, `cd -`) → None."""
+    gdir = cwd
+    for d in _git_C_dirs(argv):
+        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and "$" not in d else None
+    return gdir
+
+
 def _cd_target(n: List[str], cwd: Optional[str]) -> Optional[str]:
     """Thư mục sau `cd <dir>`; `cd`, `cd -`, `cd` kèm tuỳ chọn hay biến → None (không biết, hook dùng gốc dự án)."""
     args = n[1:]
@@ -366,6 +403,12 @@ def _rm_target(t: str) -> str:
     return t[:-2] if t.endswith("/*") and len(t) > 2 else t
 
 
+def _dangerous_rm_target(t: str) -> bool:
+    """Đích `rm -rf` không được xoá: gốc/home/cwd/glob, hoặc thư mục `.git` ở bất kỳ đâu (mất toàn bộ lịch sử)."""
+    r = _rm_target(t)
+    return r in DANGEROUS_RM_TARGETS or posixpath.basename(r) == ".git"
+
+
 # --------------------------------------------------------------------------- luật
 
 
@@ -395,10 +438,27 @@ GitRule = Callable[[List[str]], Tuple[str, str]]
 DISCARD_WHOLE_TREE_WHY = "{} . vứt toàn bộ thay đổi chưa commit"
 
 
-def _push_ref_rule(ref: str, deleting: bool) -> Tuple[str, str]:
-    """Một refspec của push: đích là nhánh chính → deny nếu xoá, ask nếu đẩy thẳng."""
+def _current_branch(cwd: Optional[str]) -> str:
+    """Nhánh đang checkout ở `cwd` (`git symbolic-ref --short -q HEAD`); lỗi/detached/không phải repo/quá hạn → rỗng."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd or ".", "symbolic-ref", "--short", "-q", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple[str, str]:
+    """Một refspec của push: đích là nhánh chính → deny nếu xoá, ask nếu đẩy thẳng. Đích `HEAD`/`@` = nhánh hiện tại."""
     dst = ref.split(":", 1)[1] if ":" in ref else ref
     dst = dst.removeprefix("refs/heads/")
+    if dst in ("HEAD", "@"):
+        dst = _current_branch(cwd)
     if dst not in MAIN_BRANCHES:
         return "", ""
     if deleting or ref.startswith(":"):
@@ -406,16 +466,17 @@ def _push_ref_rule(ref: str, deleting: bool) -> Tuple[str, str]:
     return "ask", "push thẳng nhánh chính — khung yêu cầu đi qua PR"
 
 
-def _git_push(args: List[str]) -> Tuple[str, str]:
-    """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính."""
+def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
+    """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
+    refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính."""
     flags = _short_flags(args)
     force = any(x.startswith("--force") or x == "--mirror" for x in args) or "f" in flags
     refs = _positionals(args, ("-o", "--push-option", "--repo", "--receive-pack", "--exec"))
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
     deleting = "--delete" in args or "d" in flags
-    for r in refs[1:]:
-        verdict = _push_ref_rule(r, deleting)
+    for r in refs[1:] or ["HEAD"]:  # không refspec: đẩy nhánh hiện tại
+        verdict = _push_ref_rule(r, deleting, cwd)
         if verdict[0]:
             return verdict
     return "", ""
@@ -453,6 +514,13 @@ def _git_checkout(args: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
+def _git_switch(args: List[str]) -> Tuple[str, str]:
+    """switch: deny -f/--force/--discard-changes (vứt thay đổi như `checkout -f`); `-C` là force-create, không tính."""
+    if "f" in _short_flags(args) or "--force" in args or "--discard-changes" in args:
+        return "deny", "switch -f/--discard-changes vứt thay đổi"
+    return "", ""
+
+
 def _git_restore(args: List[str]) -> Tuple[str, str]:
     """restore: deny restore cả cây, trừ khi chỉ bỏ khỏi index (`--staged` không kèm worktree)."""
     index_only = "--staged" in args and "--worktree" not in args and "W" not in _short_flags(args)
@@ -478,20 +546,22 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 
 
 GIT_RULES: Dict[str, GitRule] = {
-    "push": _git_push,
     "reset": _git_reset,
     "clean": _git_clean,
     "checkout": _git_checkout,
+    "switch": _git_switch,
     "restore": _git_restore,
     "stash": _git_stash,
     "branch": _git_branch,
 }
 
 
-def git_rules(n: List[str]) -> Tuple[str, str]:
-    """Luật theo lệnh con của git (bảng GIT_RULES); lệnh con không có luật → cho qua."""
+def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
+    """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua."""
     if len(n) < 2:
         return "", ""
+    if n[1] == "push":
+        return _git_push(n[2:], cwd)
     rule = GIT_RULES.get(n[1])
     return rule(n[2:]) if rule else ("", "")
 
@@ -517,18 +587,26 @@ ASK_CMDS: Dict[str, Optional[Tuple[str, ...]]] = {
 INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 
-def command_rules(n: List[str], root: str) -> Tuple[str, str]:
+def _rm_rule(args: List[str]) -> Tuple[str, str]:
+    """rm: deny --no-preserve-root và rm -rf trên đích nguy hiểm (gốc, home, cwd, glob, thư mục `.git`)."""
+    flags = _short_flags(args)
+    recursive = "r" in flags or "R" in flags or "--recursive" in args
+    force = "f" in flags or "--force" in args
+    if "--no-preserve-root" in args or (
+        recursive and force and any(_dangerous_rm_target(t) for t in _positionals(args))
+    ):
+        return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
+    return "", ""
+
+
+def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[str, str]:
     name, args = n[0], n[1:]
     if name in ("sudo", "doas"):
         return "deny", "sudo/doas"
     if name == "rm":
-        flags = _short_flags(args)
-        recursive = "r" in flags or "R" in flags or "--recursive" in args
-        force = "f" in flags or "--force" in args
-        if "--no-preserve-root" in args or (
-            recursive and force and any(_rm_target(t) in DANGEROUS_RM_TARGETS for t in _positionals(args))
-        ):
-            return "deny", "rm -rf trên /, ~, $HOME, ., .., *"
+        verdict = _rm_rule(args)
+        if verdict[0]:
+            return verdict
     if name == "dd" and any(x.startswith("if=") for x in args):
         return "deny", "dd ghi thô"
     if name.startswith("mkfs"):
@@ -536,7 +614,7 @@ def command_rules(n: List[str], root: str) -> Tuple[str, str]:
     if name == "chmod" and "777" in args:
         return "deny", "chmod 777"
     if name == "git":
-        return git_rules(n)
+        return git_rules(n, cwd)
     if name in ASK_CMDS and not (set(args) and set(args) <= INFO_ONLY):
         subs = ASK_CMDS[name]
         if (
@@ -694,7 +772,10 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
     return out
 
 
-COMMIT_OPTS_WITH_VALUE = ("-m", "--message", "-F", "--file", "-c", "-C", "--author", "--date", "-t", "--template")
+COMMIT_LONG_OPTS_WITH_VALUE = ("--message", "--file", "--author", "--date", "--template", "--reuse-message")
+# Cờ ngắn có giá trị: `-m`/`-F`/`-c`/`-C`/`-t` lấy token sau (hoặc phần dính liền: `-m"x"`, `-am"x"`);
+# `-u<mode>`/`-S<keyid>` chỉ nhận giá trị dính liền. Phần từ chữ đó trở đi là dữ liệu, không phải cờ (`-uno` ≠ `-n`).
+COMMIT_SHORT_VALUE_RE = re.compile(r"-([A-Za-z]*?)([mFcCtuS])")
 
 
 def _commit_flag_args(args: List[str]) -> List[str]:
@@ -702,10 +783,15 @@ def _commit_flag_args(args: List[str]) -> List[str]:
     out: List[str] = []
     skip = False
     for x in args:
+        m = COMMIT_SHORT_VALUE_RE.match(x)
         if skip:
             skip = False
-        elif x in COMMIT_OPTS_WITH_VALUE:
+        elif x in COMMIT_LONG_OPTS_WITH_VALUE:
             skip = True
+        elif m:
+            skip = m.end() == len(x) and m.group(2) not in "uS"  # giá trị ở token kế
+            if m.group(1):
+                out.append("-" + m.group(1))
         else:
             out.append(x)
     return out
@@ -742,7 +828,9 @@ def _scan_command(
     n = normalize(argv)
     if not n:
         return None
-    decision, why = command_rules(n, root)
+    # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
+    gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
+    decision, why = command_rules(n, root, gdir or root)
     if decision == "deny":
         return f"Lệnh bị khung chặn ({why}): {' '.join(argv)[:300]}. Muốn làm thật thì người dùng tự chạy."
     if decision == "ask":
@@ -753,10 +841,7 @@ def _scan_command(
     asks.extend(_write_asks(n, argv, root))
     if n[:2] == ["git", "commit"]:
         # Cổng chạy ở repo NHẬN commit (`cd ../khac && git commit`, `git -C ../khac commit`), không phải gốc phiên.
-        cdir = cwd
-        for d in _git_C_dirs(argv):
-            cdir = posixpath.normpath(posixpath.join(cdir, posixpath.expanduser(d))) if cdir and "$" not in d else None
-        res["commit_dir"] = cdir or ""
+        res["commit_dir"] = gdir or ""
         return _scan_commit(n[2:], res, asks)
     return None
 

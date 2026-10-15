@@ -184,6 +184,22 @@ class SessionStartUtf8Test(unittest.TestCase):
         self.assertIn("Đang làm", ctx)
         self.assertFalse(any("\ud800" <= ch <= "\udfff" or ch == "\ufffd" for ch in ctx), "ký tự UTF-8 bị cắt dở")
 
+    def test_session_start_reads_nfd_progress_sections(self):
+        # PROGRESS.md dạng NFD (macOS): awk so byte nên từng chỉ còn dòng tiêu đề, mất cả 4 mục.
+        import unicodedata
+
+        tmp = Path(tempfile.mkdtemp())
+        text = "# PROGRESS\n## Đang làm\n- việc A\n## Bàn giao phiên\n- SHA abc\n## Ghi chú\n- bỏ qua\n"
+        (tmp / "PROGRESS.md").write_text(unicodedata.normalize("NFD", text), encoding="utf-8")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
+        r = subprocess.run(
+            ["bash", str(HOOKS / "session-start.sh")], input="{}", capture_output=True, text=True, env=env
+        )
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("## Đang làm\n- việc A", ctx)
+        self.assertIn("- SHA abc", ctx)
+        self.assertNotIn("bỏ qua", ctx)
+
 
 @unittest.skipIf(shutil.which("bash") is None or shutil.which("python3") is None, "cần bash + python3")
 class GuardMatrixTest(unittest.TestCase):
@@ -518,6 +534,184 @@ class GuardMatrixTest(unittest.TestCase):
             )
         self.assertEqual(self.g.rel_path("a/b.txt", self.root), "a/b.txt")
         self.assertEqual(self.g.rel_path("../ngoai.txt", self.root), os.path.realpath(self.root + "/../ngoai.txt"))
+
+    def test_guard_hash_is_comment_only_at_word_start(self):
+        # `#` giữa từ (`${#A[@]}`, URL `/#/x`, `a#b.ts`) không mở comment — trước đây shlex nuốt phần còn lại của dòng
+        # nên lệnh nguy hiểm đứng sau bị bỏ sót.
+        self.assertIn("rm", self.g.tokenize("echo ${#FILES[@]}; rm -rf ~"))
+        self.check(
+            "deny",
+            [
+                "echo ${#FILES[@]}; rm -rf ~",
+                "open http://localhost:3000/#/rooms && git push --force origin main",
+                "echo a#b; sudo ls",
+                "echo $#; sudo ls",
+                "echo '#' ; sudo ls",  # `#` trong nháy là chữ thường
+                'echo "# x"; sudo ls',
+                "echo \\# ; sudo ls",  # `\#` là chữ thường
+                'echo "a\\"#b"; sudo ls',
+                "echo a # chú thích\nsudo ls",  # comment chỉ tới hết dòng
+                "echo 'a\\' # sudo x\nsudo ls",  # trong nháy đơn `\` là chữ thường: nháy đóng, rồi mới tới comment
+            ],
+        )
+        # Comment thật (`#` đầu từ, ngoài nháy) vẫn là dữ liệu, kể cả sau toán tử.
+        self.check(
+            "",
+            [
+                "ls # rm -rf /",
+                "ls #rm -rf /",
+                "# sudo ls",
+                "echo hi;# sudo ls",
+                "echo hi &&# sudo ls",
+                "echo 'a' # sudo x\nls",
+                "ls #",
+            ],
+        )
+        self.assertIsNotNone(self.g.tokenize("echo a\\"))  # `\` cuối chuỗi: shlex lỗi → tách thô, không văng
+        res = self.g.bash_decision("git add src/a#b.ts && git commit -m x", self.root)
+        self.assertEqual((res["decision"], res["commit"]), ("", True))
+
+    def test_guard_here_string_is_not_heredoc(self):
+        # `<<<` là here-string (không có thân): dòng sau là lệnh thật, không bị cắt như thân heredoc.
+        self.assertEqual(
+            self.g.strip_heredocs("wc -w <<< hello\ngit reset --hard"), "wc -w <<< hello\ngit reset --hard"
+        )
+        self.check("deny", ["wc -w <<< hello\ngit reset --hard", "cat <<<EOF\nsudo ls", "wc <<< a\nrm -rf ~"])
+        self.check("", ["cat > n.md <<EOF\ngit reset --hard\nEOF", "cat <<-EOF\n\tsudo ls\n\tEOF", "wc -w <<< hello"])
+
+    def make_repo(self, branch: str) -> str:
+        path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, path, True)
+        subprocess.run(["git", "init", "-q", path], check=True)
+        subprocess.run(["git", "-C", path, "symbolic-ref", "HEAD", f"refs/heads/{branch}"], check=True)
+        return path
+
+    def test_guard_push_without_refspec_follows_current_branch(self):
+        main_repo, feat_repo = self.make_repo("main"), self.make_repo("feat/x")
+        master_repo = self.make_repo("master")
+
+        def dec_in(cmd: str, cwd: str, root: str | None = None) -> object:
+            return self.g.bash_decision(cmd, root or self.root, cwd)["decision"]
+
+        for cmd in (
+            "git push",
+            "git push origin",
+            "git push -u origin",
+            "git push origin HEAD",
+            "git push origin HEAD:HEAD",
+            "git push origin @",
+            "git push origin HEAD:main",
+            "git push origin HEAD:refs/heads/main",
+            "env X=1 git push",
+        ):
+            self.assertEqual(dec_in(cmd, main_repo), "ask", cmd)
+            self.assertEqual(dec_in(cmd, master_repo), "ask", cmd)
+        for cmd in ("git push", "git push origin", "git push -u origin", "git push origin HEAD", "git push origin @"):
+            self.assertEqual(dec_in(cmd, feat_repo), "", cmd)
+            self.assertEqual(dec_in(cmd, self.root), "", cmd)  # không phải repo git → không biết → giữ hành vi cũ
+            self.assertEqual(dec_in(cmd, "/khong/ton/tai"), "", cmd)
+        # Refspec rõ ràng giữ luật cũ, không phụ thuộc nhánh hiện tại.
+        for cmd in ("git push origin feat", "git push origin feat:feat", "git push -u origin feat/x"):
+            self.assertEqual(dec_in(cmd, main_repo), "", cmd)
+        self.assertEqual(dec_in("git push origin main", feat_repo), "ask")
+        self.assertEqual(dec_in("git push origin --delete HEAD", main_repo), "deny")
+        self.assertEqual(
+            dec_in("git push origin :HEAD", main_repo), "deny"
+        )  # xoá ref `HEAD` khi đang ở main: chặn cho chắc
+        self.assertEqual(dec_in("git push origin :HEAD", feat_repo), "")
+        self.assertEqual(dec_in("git push --force", main_repo), "deny")
+        # Thư mục chạy theo `cd` / `git -C`; không rõ (biến, `cd -`) → gốc dự án.
+        self.assertEqual(dec_in(f"cd {main_repo} && git push", feat_repo), "ask")
+        self.assertEqual(dec_in(f"cd {feat_repo} && git push", main_repo), "")
+        self.assertEqual(dec_in(f"git -C {main_repo} push", feat_repo), "ask")
+        self.assertEqual(dec_in(f"git -C {feat_repo} push", main_repo), "")
+        self.assertEqual(dec_in('cd "$D" && git push', feat_repo, root=main_repo), "ask")
+        self.assertEqual(dec_in('git -C "$D" push', feat_repo, root=main_repo), "ask")
+        self.assertEqual(dec_in("cd - && git push", main_repo, root=feat_repo), "")
+        self.assertEqual(self.g.bash_decision("git push", main_repo)["decision"], "ask")  # không có cwd → gốc dự án
+        self.assertEqual(self.g.git_rules(["git", "push"]), ("", ""))  # không truyền thư mục: không biết nhánh
+
+    def test_guard_current_branch_errors_are_unknown(self):
+        repo = self.make_repo("main")
+        self.assertEqual(self.g._current_branch(repo), "main")
+        self.assertEqual(self.g._current_branch("/khong/ton/tai"), "")
+        for exc in (subprocess.TimeoutExpired("git", 5), FileNotFoundError("git")):
+            with mock.patch.object(self.g.subprocess, "run", side_effect=exc):
+                self.assertEqual(self.g._current_branch(repo), "", exc)
+                self.assertEqual(self.g.bash_decision("git push", repo)["decision"], "")
+
+    def test_guard_push_main_ask_through_hook_with_cwd(self):
+        repo = self.make_repo("main")
+        code, out, _ = run_hook(
+            "pre-bash-guard.sh", {"tool_input": {"command": "git push"}, "cwd": repo}, Path(self.root)
+        )
+        self.assertEqual((code, decision(out)), (0, "ask"))
+
+    def test_guard_git_switch_force_is_discard(self):
+        self.check(
+            "deny",
+            [
+                "git switch -f main",
+                "git switch --force main",
+                "git switch --discard-changes main",
+                "git -C /p switch -f x",
+                "git switch -fc feat/x",
+            ],
+        )
+        self.check("", ["git switch main", "git switch -c feat/x", "git switch -C feat/x", "git switch --detach HEAD"])
+
+    def test_guard_rm_dot_git(self):
+        self.check(
+            "deny",
+            [
+                "rm -rf .git",
+                "rm -rf ./.git",
+                "rm -rf sub/.git",
+                "rm -rf .git/",
+                "rm -rf .git/*",
+                "rm -rf /w/app/.git",
+                'rm -rf "$D/.git"',
+                "rm -r -f .git",
+            ],
+        )
+        self.check("", ["rm -rf .github", "rm -rf .gitignore", "rm -rf build/.cache", "rm -f .git", "rm -rf a.git"])
+
+    def test_guard_commit_attached_values_are_data(self):
+        def flags(cmd: str) -> tuple[object, object, object]:
+            r = self.g.bash_decision(cmd, self.root)
+            return r["commit"], r["no_verify"], r["decision"]
+
+        for cmd in (
+            'git commit -m"init"',
+            'git commit -am"done"',
+            "git commit -Fnotes.txt",
+            "git commit -Fnotes",
+            "git commit -m x --message=-n",
+            "git commit --message=nope -a",
+            "git commit -c HEAD -m x",
+            "git commit -cnone",
+            "git commit -Snkey -m x",
+            "git commit -uno -m x",
+            "git commit -m -n",
+            "git commit -m x -- nfile",
+            "git commit -a -m 'no -n here'",
+            "git commit -am-n",
+            "git commit --message -n",
+            "git commit --author n -m x",
+        ):
+            self.assertEqual(flags(cmd), (True, False, ""), cmd)
+        for cmd in (
+            "git commit -nm x",
+            'git commit -nm"x"',
+            "git commit -am x -n",
+            "git commit -m x --no-verify",
+            "git commit -an -m x",
+            "git commit -vm a -n",
+        ):
+            self.assertEqual(flags(cmd), (True, True, "ask"), cmd)
+        self.assertEqual(
+            self.g._commit_flag_args(["-nm", "x", "-am-n", "-S", "--no-verify"]), ["-n", "-a", "--no-verify"]
+        )
 
     def run_guard(self, args: list[str], stdin: str) -> tuple[int, str]:
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.root)

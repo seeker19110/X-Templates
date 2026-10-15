@@ -78,13 +78,21 @@ ITEM_RE = re.compile(
 )
 # Dòng "giống mục checklist" nhưng sai định dạng -> báo lỗi thay vì bỏ qua im lặng.
 ITEM_LIKE_RE = re.compile(r"^- \[[ xX~]\] `[A-Z][A-Z0-9-]*`")
+# Rộng hơn, cho BLUEPRINT/PLAN của dự án: thụt lề, ô lạ (`[-]`), thiếu backtick — dòng như vậy mà không khớp ITEM_RE/TASK_RE
+# thì báo lỗi; trước đây bị bỏ qua im lặng nên xoá/sửa hỏng mục MUST vẫn ra "0 MUST mở".
+LOOSE_ITEM_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*`?(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)\b")
+MUST_COUNT_RE = re.compile(r"^\|\s*MUST\s*\|\s*(\d+)\s*\|\s*$", re.M)
+# Lý do miễn trừ: `— Miễn: <lý do>` (hoặc `(Miễn: …)`) ở phần ghi chú — sau `· Nguồn:` cuối nếu có, vì chữ của mục có thể
+# tự chứa "— Miễn:" (LOOP-HARNESS-007).
+WAIVER_RE = re.compile(r"(?:[—–-]|\()\s*Miễn\s*:\s*[^\s)]")
+LOOSE_NOTE_RE = re.compile(r"\s(?:[—–-]{1,2}\s*|\()(?:Bằng chứng|Miễn|Thiếu)\s*:.*$")
+PLAN_SKIP_RE = re.compile(r"(?i)(?:Bỏ|Miễn|Lý do)\s*:\s*\S")
 PREFIX_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LINK_SUB_RE = re.compile(r"(\[[^\]]*\])\(([^)\s]+)\)")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 TASK_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{3,}$")
-NOTE_RE = re.compile(r"\s—\s(?:Bằng chứng|Miễn|Thiếu):.*$")
 SECRET_RE = re.compile(r"(?i)\b(\w*(?:token|secret|passw(?:or)?d|api[_-]?key)\w*)(\s*[=:]\s*)\S+")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
@@ -561,22 +569,46 @@ def compose(
     return "\n".join(header) + "\n" + "\n\n".join(sections) + "\n"
 
 
-def carry_states(old: str, new: str) -> Tuple[str, int]:
-    """Chuyển ô trạng thái + ghi chú (— Bằng chứng/Miễn/Thiếu: …) từ blueprint cũ sang bản ghép mới theo ID."""
+def _note_segment(line: str) -> str:
+    """Phần ghi chú của dòng mục: sau `· Nguồn:` cuối (chữ của mục có thể tự chứa "— Miễn:"), không có thì cả dòng."""
+    i = line.rfind("· Nguồn:")
+    return line[i:] if i >= 0 else line
+
+
+def _carried_note(old_line: str, new_line: str) -> str:
+    """Ghi chú dự án thêm sau chữ của mục: chữ không đổi → giữ NGUYÊN phần đuôi (mọi định dạng); chữ đổi → tìm ghi chú
+    `— Bằng chứng/Miễn/Thiếu:` (cả `-`, `–`, `(Miễn: …)`) trong phần ghi chú."""
+    old_body, new_body = old_line[5:], new_line[5:]
+    if old_body.startswith(new_body):
+        return old_body[len(new_body) :]
+    seg = _note_segment(old_line)
+    nm = LOOSE_NOTE_RE.search(seg)
+    return nm.group(0) if nm else ""
+
+
+def carry_states(old: str, new: str, framework_ids: Optional[Set[str]] = None) -> Tuple[str, int]:
+    """Chuyển ô trạng thái + ghi chú (— Bằng chứng/Miễn/Thiếu: …) từ blueprint cũ sang bản ghép mới theo ID.
+    Có `framework_ids`: mục cũ có ID KHÔNG thuộc khung (mục riêng của dự án) được giữ nguyên ở cuối, không mất im lặng."""
     prev: Dict[str, Tuple[str, str]] = {}
     for line in unicodedata.normalize("NFC", old).splitlines():
         m = ITEM_RE.match(line)
         if m:
-            nm = NOTE_RE.search(line)
-            prev[m["id"]] = (m["state"], nm.group(0) if nm else "")
-    kept, lines = 0, []
+            prev[m["id"]] = (m["state"], line)
+    kept, lines, new_ids = 0, [], set()
     for line in new.splitlines():
         m = ITEM_RE.match(line)
-        if m and prev.get(m["id"], (" ", "")) != (" ", ""):
-            state, note = prev[m["id"]]
-            line = f"- [{state}]{line[5:]}{note}"
-            kept += 1
+        if m:
+            new_ids.add(m["id"])
+        if m and m["id"] in prev:
+            state, old_line = prev[m["id"]]
+            note = _carried_note(old_line, line)
+            if (state, note) != (" ", ""):
+                line = f"- [{state}]{line[5:]}{note}"
+                kept += 1
         lines.append(line)
+    own = [ln for i, (_, ln) in prev.items() if framework_ids is not None and i not in new_ids | framework_ids]
+    if own:
+        lines += ["", "## Mục riêng của dự án (giữ từ bản trước khi ghép lại)", "", *own]
     return "\n".join(lines) + "\n", kept
 
 
@@ -609,10 +641,13 @@ def blueprint_status_text(raw: str) -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
     open_must: List[str] = []
+    bad_lines: List[str] = []
     text = unicodedata.normalize("NFC", raw)
     for n, line in enumerate(text.splitlines(), start=1):
         m = ITEM_RE.match(line)
         if not m:
+            if LOOSE_ITEM_RE.match(line):  # ô lạ/thụt lề/thiếu backtick: không đếm được → không được coi là "không có"
+                bad_lines.append(f"dòng {n}: {line.strip()[:60]}")
             continue
         st = m["state"]
         lv = m["level"]
@@ -622,11 +657,16 @@ def blueprint_status_text(raw: str) -> Dict[str, Any]:
                 open_must.append(m["id"])
         elif st == "~":
             total[lv]["waived"] += 1
-            if "Miễn:" not in line:
+            if not WAIVER_RE.search(_note_segment(line)):
                 bad_waivers.append(f"{m['id']} (dòng {n})")
         else:
             total[lv]["done"] += 1
-    return {"levels": total, "open_must": open_must, "bad_waivers": bad_waivers}
+    hm = MUST_COUNT_RE.search(text)
+    expected = int(hm.group(1)) if hm else None
+    counted = sum(total["MUST"].values())
+    if expected is not None and counted < expected:  # mục MUST bị xoá khỏi file: bảng đầu trang vẫn nhớ tổng
+        bad_lines.append(f"chỉ thấy {counted}/{expected} mục MUST so với bảng đầu trang (mục bị xoá?)")
+    return {"levels": total, "open_must": open_must, "bad_waivers": bad_waivers, "bad_lines": bad_lines}
 
 
 # --------------------------------------------------------------------------- loop (autopilot)
@@ -711,6 +751,7 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
                 "state": m["state"].lower(),
                 "gate": g.group(1) if g else None,
                 "title": m["rest"].strip(" —-")[:120],
+                "rest": m["rest"],
             }
         )
     return tasks
@@ -748,16 +789,26 @@ def _deferred(st: Dict[str, Any]) -> Dict[str, Any]:
     return d if isinstance(d, dict) else {}
 
 
-def _verdict_task(t: Dict[str, Any], base: Path, deferred: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Một task trong PLAN: chưa làm → continue (trừ khi đang chờ người); đã tick mà thiếu/lệch bằng chứng → verify;
-    ổn (hoặc miễn) thì None."""
+def _verdict_task(
+    t: Dict[str, Any], base: Path, deferred: Dict[str, Any], started: str = ""
+) -> Optional[Dict[str, Any]]:
+    """Một task trong PLAN: chưa làm → continue (trừ khi đang chờ người); đã tick mà thiếu/lệch/cũ bằng chứng → verify;
+    bỏ `[~]` phải ghi lý do; ổn thì None. `started`: lúc `loop init` — bằng chứng cũ hơn là của vòng trước (PLAN cũ)."""
     if t["state"] == " " and t["id"] in deferred:
         return None
     if t["state"] == " ":
         return {"verdict": "continue", "task": t["id"], "reason": f"làm task {t['id']}: {t['title']}"}
     if t["state"] != "x":
-        return None
+        if PLAN_SKIP_RE.search(t["rest"]):
+            return None
+        return {"verdict": "verify", "task": t["id"], "reason": f"task {t['id']} bỏ `[~]` mà không ghi `— Bỏ: <lý do>`"}
     ev = read_evidence(t["id"], base)
+    if ev is not None and started and str(ev.get("finished") or "") < started:
+        return {
+            "verdict": "verify",
+            "task": t["id"],
+            "reason": f"bằng chứng {t['id']} có từ trước lần loop init này (vòng/PLAN trước) — chạy lại loop record",
+        }
     if ev is None or ev.get("exit_code") != 0:
         return {
             "verdict": "verify",
@@ -770,7 +821,7 @@ def _verdict_task(t: Dict[str, Any], base: Path, deferred: Dict[str, Any]) -> Op
             "task": t["id"],
             "reason": f"task {t['id']} không có Gate máy kiểm — thêm `Gate:` + lệnh trong backtick vào PLAN rồi `loop record`",
         }
-    if not same_command(ev.get("cmd") or "", t["gate"]):
+    if not same_command(ev.get("cmd") or "", redact(t["gate"])):  # bằng chứng lưu lệnh đã che bí mật
         return {
             "verdict": "verify",
             "task": t["id"],
@@ -787,9 +838,19 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tasks = parse_plan(plan)
     if not tasks:
         return {"verdict": "blocked", "reason": "PLAN không có task dạng - [ ] `T-001` ..."}
+    bad = [
+        f"dòng {n}"
+        for n, ln in enumerate(plan.read_text(encoding="utf-8").splitlines(), start=1)
+        if LOOSE_ITEM_RE.match(ln) and not TASK_RE.match(ln)
+    ]
+    if bad:  # thụt lề/thiếu backtick/ID lạ: task bị bỏ qua im lặng thì vòng lặp khai "xong" sớm
+        return {
+            "verdict": "verify",
+            "reason": "PLAN có dòng task sai định dạng (cần - [ ] `T-NNN` …): " + ", ".join(bad[:5]),
+        }
     deferred = _deferred(st)
     for t in tasks:
-        v = _verdict_task(t, base, deferred)
+        v = _verdict_task(t, base, deferred, str(st.get("started") or ""))
         if v:
             return v
     return None
@@ -813,6 +874,11 @@ def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
         }
     if s["bad_waivers"]:
         return {"verdict": "continue", "reason": "mục miễn trừ thiếu lý do: " + ", ".join(s["bad_waivers"][:5])}
+    if s["bad_lines"]:
+        return {
+            "verdict": "continue",
+            "reason": "blueprint có dòng mục sai định dạng: " + "; ".join(s["bad_lines"][:3]),
+        }
     return {"verdict": "done", "reason": "mọi task có bằng chứng xanh và blueprint không còn MUST mở"}
 
 
@@ -1823,8 +1889,13 @@ def cmd_compose(args: argparse.Namespace) -> int:
     if args.out:
         out_path = Path(args.out)
         if out_path.exists():  # ghép lại: giữ tick/miễn trừ/bằng chứng theo ID, không mất công audit
-            out, kept = carry_states(out_path.read_text(encoding="utf-8"), out)
+            fw_ids = {it.id for d in load_docs(args.framework)[0] for it in d.items}
+            old = out_path.read_text(encoding="utf-8")
+            out, kept = carry_states(old, out, fw_ids)
             print(f"↺ Giữ trạng thái {kept} mục theo ID từ bản cũ", file=sys.stderr)
+            own = [m["id"] for m in map(ITEM_RE.match, out.splitlines()) if m and m["id"] not in fw_ids]
+            if own:
+                print(f"↺ Giữ {len(own)} mục riêng của dự án ở cuối: {', '.join(own[:10])}", file=sys.stderr)
         write_atomic(out_path, out)
         print(f"✓ Đã ghi {args.out}")
     else:
@@ -1834,8 +1905,8 @@ def cmd_compose(args: argparse.Namespace) -> int:
 
 def cmd_blueprint_status(args: argparse.Namespace) -> int:
     s = blueprint_status_text(sys.stdin.read()) if args.file == "-" else blueprint_status(Path(args.file))
-    ok = not s["open_must"] and not s["bad_waivers"]
-    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "ok"}
+    ok = not s["open_must"] and not s["bad_waivers"] and not s["bad_lines"]
+    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "ok"}
         print(json.dumps({**s, "ok": ok}, ensure_ascii=False))
         return 0 if ok or not args.strict else 1
     for lv in LEVELS:
@@ -1843,6 +1914,8 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
         print(f"{lv:<7} đạt {c['done']:>4} · miễn {c['waived']:>4} · chưa {c['open']:>4}")
     if s["bad_waivers"]:
         print("✗ Miễn trừ thiếu lý do: " + ", ".join(s["bad_waivers"]))
+    for b in s["bad_lines"]:
+        print(f"✗ Sai định dạng/thiếu mục: {b}")
     if s["open_must"]:
         print(f"Còn {len(s['open_must'])} mục MUST chưa đạt: " + ", ".join(s["open_must"][:15]))
     return 0 if ok or not args.strict else 1
@@ -2547,7 +2620,7 @@ def build_parser() -> argparse.ArgumentParser:
     pb = sub.add_parser("blueprint-status")
     pb.add_argument("file", help="BLUEPRINT.md, hoặc - để đọc stdin")
     pb.add_argument("--strict", action="store_true", help="exit 1 khi còn MUST mở hoặc miễn trừ thiếu lý do")
-    pb.add_argument("--json", action="store_true", help="in JSON (levels, open_must, bad_waivers, ok)")
+    pb.add_argument("--json", action="store_true", help="in JSON (levels, open_must, bad_waivers, bad_lines, ok)")
     pb.set_defaults(fn=cmd_blueprint_status)
     plp = sub.add_parser("loop")
     lsub = plp.add_subparsers(dest="loop_cmd", required=True)
