@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # `edited`: sửa tiêu đề PR thì chạy lại bước kiểm tiêu đề (payload chụp tiêu đề lúc sự kiện; re-run dùng payload cũ).
+    types: [opened, synchronize, reopened, edited]
 
 # Mặc định tối thiểu cho MỌI job (GITHUB_TOKEN chỉ đọc). Job nào cần hơn tự khai ở job-level.
 permissions:
