@@ -378,6 +378,13 @@ class ComposeTest(unittest.TestCase):
         self.assertIn("(.xtemplates/framework/01-baseline/security.md#a)", out)
         self.assertIn("(https://x.y)", out)
 
+    def test_compose_header_points_to_xt_beside_framework(self):
+        # Dự án đích gọi xt.py ở `.xtemplates/scripts/` — header từng ghi `scripts/xt.py` (không có ở dự án đích).
+        for link, cmd in ((".xtemplates/framework", ".xtemplates/scripts/xt.py"), ("framework", "scripts/xt.py")):
+            with self.subTest(link=link), unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_LINK": link}):
+                out = xt.compose(self.fw, "web-app", [], "M", include_may=False)
+                self.assertIn(f"`python3 {cmd} blueprint-status BLUEPRINT.md --strict`", out)
+
     def test_compose_unknown_profile(self):
         with self.assertRaises(SystemExit):
             xt.compose(self.fw, "khong-co", [], "M", include_may=False)

@@ -505,9 +505,12 @@ def _compose_header(
     today: str,
     counts: Dict[str, int],
     include_may: bool,
+    link_root: str,
 ) -> List[str]:
     """Frontmatter + đầu trang + bảng đếm mục của BLUEPRINT.md (các dòng, chưa nối)."""
     ind_names = ", ".join(ind_slugs) or "(không)"
+    # xt.py nằm cạnh framework/ theo cùng gốc liên kết: dự án đích `.xtemplates/scripts/xt.py`, repo khung `scripts/xt.py`.
+    xt_cmd = posixpath.join(posixpath.dirname(link_root), "scripts", "xt.py")
     header = [
         "---",
         "title: Blueprint dự án",
@@ -523,7 +526,7 @@ def _compose_header(
         "",
         f"> Sinh bởi `xt.py compose` ngày {today} — hồ sơ **{profile}**, ngành **{ind_names}**, quy mô **{scale}**.",
         "> Trạng thái: `[ ]` chưa · `[x]` đạt (kèm bằng chứng ở PR/CI) · `[~]` miễn trừ — bắt buộc ghi `— Miễn: <lý do>`.",
-        "> Kiểm tiến độ: `python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict` (còn MUST chưa đạt → exit 1).",
+        f"> Kiểm tiến độ: `python3 {xt_cmd} blueprint-status BLUEPRINT.md --strict` (còn MUST chưa đạt → exit 1).",
         "",
         "| Mức | Số mục |",
         "|---|---|",
@@ -554,7 +557,7 @@ def compose(
     today = today or _dt.date.today().isoformat()
     sections, counts = _compose_sections(root, ordered, scale, include_may)
     ind_slugs = [str(i.meta.get("slug")) for i in inds]
-    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may)
+    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, _rel_link(root))
     return "\n".join(header) + "\n" + "\n\n".join(sections) + "\n"
 
 
@@ -873,11 +876,17 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
     started = now_iso()
     # Một đối số = chuỗi shell nguyên văn (cho phép `a && b`, ống); nhiều đối số = argv, ghép bằng shlex để giữ nháy (AUD-HAR-002).
     cmd_str = cmd[0] if len(cmd) == 1 else shlex.join(cmd)
+    # bash -o pipefail, không phải /bin/sh của shell=True: `test | tee log` phải đỏ khi test đỏ — sh lấy exit của
+    # lệnh cuối ống nên từng ghi bằng chứng exit 0 cho Gate đỏ (xanh giả, FB từ dự án đích).
     try:
-        proc = subprocess.run(cmd_str, shell=True, cwd=base, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(
+            ["bash", "-o", "pipefail", "-c", cmd_str], cwd=base, capture_output=True, text=True, timeout=timeout
+        )
         code, out = proc.returncode, (proc.stdout or "") + (proc.stderr or "")
     except subprocess.TimeoutExpired as exc:
         code, out = 124, f"timeout: {exc}"
+    except FileNotFoundError:
+        code, out = 127, "bash: không có trong PATH — loop record cần bash (như hook và dev-task.sh)"
     ev: Dict[str, Any] = {
         "task": task,
         "cmd": redact(cmd_str),

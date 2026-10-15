@@ -2,7 +2,8 @@
 """guard.py — phân tích lệnh/đường dẫn cho hook PreToolUse của khung X-Templates (chỉ thư viện chuẩn).
 
 Dùng (payload JSON của Claude Code trên stdin, kết quả JSON trên stdout):
-  guard.py bash   → {"decision": "deny"|"ask"|"", "reason": "...", "commit": true|false, "no_verify": true|false}
+  guard.py bash   → {"decision": "deny"|"ask"|"", "reason": "...", "commit": true|false, "no_verify": true|false,
+                     "commit_dir": "<thư mục git commit chạy, rỗng nếu không biết>"}
   guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}
 
 Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
@@ -280,6 +281,56 @@ def _strip_git_global_opts(a: List[str]) -> List[str]:
     while i < len(rest) and rest[i].startswith("-"):
         i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
     return ["git", *rest[i:]]
+
+
+def _git_C_dirs(argv: List[str]) -> List[str]:
+    """Giá trị các `-C <dir>` (tuỳ chọn toàn cục của git, theo thứ tự) — commit rơi vào repo ở đó, không phải cwd."""
+    a = _strip_prefixes(argv)
+    rest, dirs, i = a[1:], [], 0
+    while i < len(rest) and rest[i].startswith("-"):
+        if rest[i] == "-C":  # chỉ gọi khi lệnh là `git … commit`: sau `-C` luôn còn token
+            dirs.append(rest[i + 1])
+        i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
+    return dirs
+
+
+def _cd_target(n: List[str], cwd: Optional[str]) -> Optional[str]:
+    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `cd` kèm tuỳ chọn hay biến → None (không biết, hook dùng gốc dự án)."""
+    args = n[1:]
+    if cwd is None or len(args) != 1 or args[0].startswith("-") or "$" in args[0]:
+        return None
+    return posixpath.normpath(posixpath.join(cwd, posixpath.expanduser(args[0])))
+
+
+def _commands_with_cwd(tokens: List[str], start: str) -> List[Tuple[List[str], Optional[str]]]:
+    """Mỗi lệnh đơn kèm thư mục nó chạy: `cd`/`pushd` dời thư mục; `(`…`)` và `$(`…`)` là subshell — ra khỏi đó
+    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None."""
+    out: List[Tuple[List[str], Optional[str]]] = []
+    stack: List[Optional[str]] = []
+    here: Optional[str] = start
+    cur: List[str] = []
+
+    def flush() -> None:
+        nonlocal here
+        if cur:
+            n = normalize(cur)
+            if n[:1] in (["cd"], ["pushd"]):
+                here = _cd_target(n, here)
+            elif n[:1] == ["popd"]:
+                here = None
+            out.append((list(cur), here))
+            cur.clear()
+
+    for t in tokens:
+        if _is_punct(t) and not _is_redirect(t):
+            flush()
+            stack.extend([here] * t.count("("))
+            for _ in range(t.count(")")):
+                here = stack.pop() if stack else None
+        else:
+            cur.append(t)
+    flush()
+    return out
 
 
 def normalize(argv: List[str]) -> List[str]:
@@ -684,8 +735,10 @@ def _scan_commit(args: List[str], res: Dict[str, object], asks: List[str]) -> Op
     return None
 
 
-def _scan_command(argv: List[str], root: str, res: Dict[str, object], asks: List[str]) -> Optional[str]:
-    """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit vào `res`; trả lý do deny nếu phải chặn."""
+def _scan_command(
+    argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
+) -> Optional[str]:
+    """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
     n = normalize(argv)
     if not n:
         return None
@@ -699,14 +752,20 @@ def _scan_command(argv: List[str], root: str, res: Dict[str, object], asks: List
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
     asks.extend(_write_asks(n, argv, root))
     if n[:2] == ["git", "commit"]:
+        # Cổng chạy ở repo NHẬN commit (`cd ../khac && git commit`, `git -C ../khac commit`), không phải gốc phiên.
+        cdir = cwd
+        for d in _git_C_dirs(argv):
+            cdir = posixpath.normpath(posixpath.join(cdir, posixpath.expanduser(d))) if cdir and "$" not in d else None
+        res["commit_dir"] = cdir or ""
         return _scan_commit(n[2:], res, asks)
     return None
 
 
-def bash_decision(cmd: str, root: str) -> Dict[str, object]:
-    """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit` và `no_verify` cho hook cổng commit."""
+def bash_decision(cmd: str, root: str, cwd: Optional[str] = None) -> Dict[str, object]:
+    """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
+    `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào."""
     tokens = tokenize(cmd)
-    res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False}
+    res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
     rx = remote_exec(cmd, tokens)
     if rx:
         res.update(
@@ -715,8 +774,8 @@ def bash_decision(cmd: str, root: str) -> Dict[str, object]:
         )
         return res
     asks: List[str] = []
-    for argv in split_commands(tokens):
-        deny_reason = _scan_command(argv, root, res, asks)
+    for argv, here in _commands_with_cwd(tokens, cwd or root):
+        deny_reason = _scan_command(argv, root, res, asks, here)
         if deny_reason:
             res.update(decision="deny", reason=deny_reason)
             return res
@@ -733,7 +792,9 @@ def main() -> int:
         root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
         if mode == "bash":
             cmd = tool_input.get("command")
-            out: Dict[str, object] = bash_decision(cmd, root) if isinstance(cmd, str) and cmd else {"decision": ""}
+            cwd = payload.get("cwd")
+            cwd = cwd if isinstance(cwd, str) and posixpath.isabs(cwd) else None
+            out: Dict[str, object] = bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
         elif mode == "edit":
             path = tool_input.get("file_path")
             d, r = edit_decision(path, root) if isinstance(path, str) and path else ("", "")

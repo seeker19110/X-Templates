@@ -750,6 +750,23 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual(st["same_failure_count"], 0)
         self.assertIsNone(st["last_failure_signature"])
 
+    def test_pipeline_failure_is_not_green(self):
+        # pipefail: Gate `test | tee log` đỏ khi test đỏ — /bin/sh lấy exit của `tee` → từng ghi exit 0 (xanh giả).
+        code, _, _ = self.record(["false | cat"])
+        self.assertEqual(code, 1)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 1)
+        self.assertEqual(self.record(["true | cat"])[0], 0)
+
+    def test_missing_bash_records_127(self):
+        with (
+            unittest.mock.patch("xt.subprocess.run", side_effect=FileNotFoundError("bash")),
+            unittest.mock.patch("xt._git_head", return_value=None),
+        ):
+            code, out, _ = self.record(["true"])
+        self.assertEqual(code, 127)
+        self.assertIn("cần bash", out)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 127)
+
     def test_record_without_state_still_writes_evidence(self):
         bare = self.tmpdir()
         with redirect_stdout(io.StringIO()):

@@ -13,6 +13,12 @@ from pathlib import Path
 import unittest.mock as mock
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def posixpath_expand(p: str) -> str:
+    return os.path.normpath(os.path.expanduser(p))
+
+
 HOOKS = ROOT / ".claude" / "hooks"
 
 
@@ -110,6 +116,53 @@ class PreBashGuardTest(unittest.TestCase):
             self.assertEqual(code, 2, (msg, out, err))
         code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": "echo git commit"}}, tmp)
         self.assertEqual((code, decision(out)), (0, None))
+
+
+@unittest.skipIf(shutil.which("bash") is None or shutil.which("git") is None, "cần bash + git")
+class CommitGateRepoTest(unittest.TestCase):
+    """Cổng commit chạy ở repo NHẬN commit: từng chạy cổng của dự án phiên cho `cd ../repo-khac && git commit`."""
+
+    def repo(self, path: Path, test_cmd: str | None) -> Path:
+        path.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(path)], check=True)
+        if test_cmd is not None:
+            (path / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts" / "dev-task.sh", path / "scripts" / "dev-task.sh")
+            (path / "xt.yaml").write_text(f"test: {test_cmd}\n", encoding="utf-8")
+        return path
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.proj = self.repo(self.tmp / "proj", "echo GATE-PROJ")
+        self.other = self.repo(self.tmp / "other", "sh -c 'echo GATE-OTHER; exit 1'")
+
+    def hook(self, cmd: str) -> tuple[int, str, str]:
+        return run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}, "cwd": str(self.proj)}, self.proj)
+
+    def test_gate_runs_in_committed_repo(self):
+        for cmd in (f"cd {self.other} && git commit -m x", "git -C ../other commit -m x"):
+            code, _, err = self.hook(cmd)
+            self.assertEqual(code, 2, (cmd, err))
+            self.assertIn("GATE-OTHER", err)
+            self.assertNotIn("GATE-PROJ", err)
+        code, _, err = self.hook("git commit -m x")
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+
+    def test_nested_repo_without_xt_uses_project_gate(self):
+        sub = self.repo(self.proj / "apps" / "web", None)
+        code, _, err = self.hook(f"cd {sub} && git commit -m x")
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+
+    def test_foreign_repo_without_xt_autodetects_there(self):
+        bare = self.repo(self.tmp / "bare", None)
+        (bare / "Makefile").write_text("test:\n\techo GATE-BARE; exit 1\n", encoding="utf-8")
+        code, _, err = self.hook(f"cd {bare} && git commit -m x")
+        self.assertEqual(code, 2, err)
+        self.assertIn("GATE-BARE", err)
+        self.assertNotIn("GATE-PROJ", err)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -326,6 +379,34 @@ class GuardMatrixTest(unittest.TestCase):
         self.check("", ["X=1", "A=1 B=2; FOO=bar", "env"])
         res = self.g.bash_decision("X=1; git commit -m x", self.root)
         self.assertEqual((res["decision"], res["commit"]), ("", True))
+
+    def test_guard_commit_dir_follows_cd_and_git_C(self):
+        # Commit rơi vào repo ở `cd …`/`git -C …`, không phải gốc phiên — hook chạy cổng của repo đó.
+        def cdir(cmd: str, cwd: str | None = "/w/a") -> object:
+            return self.g.bash_decision(cmd, "/w/a", cwd)["commit_dir"]
+
+        self.assertEqual(cdir("git commit -m x"), "/w/a")
+        self.assertEqual(cdir("git commit -m x", None), "/w/a")  # payload thiếu cwd → gốc dự án
+        self.assertEqual(cdir("cd ../b && git add -A && git commit -m x"), "/w/b")
+        self.assertEqual(cdir("cd /w/c; cd sub && git commit -m x"), "/w/c/sub")
+        self.assertEqual(cdir("git -C ../b commit -m x"), "/w/b")
+        self.assertEqual(cdir("cd /w/c && git -C d -C e commit -m x"), "/w/c/d/e")
+        self.assertEqual(cdir("cd ~ && git commit -m x"), posixpath_expand("~"))
+        for unknown in ("cd && git commit -m x", "cd - && git commit -m x", "cd -P /x && git commit -m x"):
+            self.assertEqual(cdir(unknown), "", unknown)  # không biết → hook dùng gốc dự án như cũ
+        self.assertEqual(cdir('cd "$D" && git commit -m x'), "")
+        self.assertEqual(cdir('git -C "$D" commit -m x'), "")
+        self.assertEqual(cdir("cd $D && git -C b commit -m x"), "")
+        self.assertEqual(cdir("git -C commit"), "")  # `-C` thiếu giá trị: không phải commit
+        self.assertEqual(cdir("git -c user.name=x commit -m x"), "/w/a")
+        # Subshell: `cd` trong `( … )`/`$( … )` không dời thư mục của lệnh sau.
+        self.assertEqual(cdir("(cd ../b && git pull); git commit -m x"), "/w/a")
+        self.assertEqual(cdir("x=$(cd ../b; pwd) && git commit -m x"), "/w/a")
+        self.assertEqual(cdir("(cd ../b && git commit -m x)"), "/w/b")
+        self.assertEqual(cdir("pushd ../b && git commit -m x"), "/w/b")
+        self.assertEqual(cdir("pushd ../b; popd; git commit -m x"), "")
+        self.assertEqual(cdir(") git commit -m x"), "")  # `)` lẻ: không biết thư mục
+        self.assertEqual(self.g.bash_decision("ls", "/w/a")["commit_dir"], "")
 
     def test_guard_bare_git_and_system_commands(self):
         self.assertEqual(self.g.git_rules(["git"]), ("", ""))
@@ -613,6 +694,13 @@ class DevTaskTest(unittest.TestCase):
             r = self.run_task("format-file", str(evil))
             self.assertFalse((self.tmp / "INJECTED").exists(), tmpl)
             self.assertNotIn("unexpected EOF", r.stderr, tmpl)
+
+    def test_declared_pipeline_failure_fails_gate(self):
+        # `set -o pipefail` của dev-task.sh không truyền vào `bash -c` — lệnh khai báo có ống từng xanh giả.
+        (self.tmp / "xt.yaml").write_text('test: "false | cat"\nlint: "true | cat"\n', encoding="utf-8")
+        self.assertNotEqual(self.run_task("test").returncode, 0)
+        self.assertEqual(self.run_task("lint").returncode, 0)
+        self.assertNotEqual(self.run_task("gate").returncode, 0)
 
     def test_empty_declared_command_skips_autodetect(self):
         (self.tmp / "xt.yaml").write_text('test: ""\n', encoding="utf-8")
