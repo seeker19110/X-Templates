@@ -26,6 +26,13 @@ updated: 2026-10-15
 `<XT>` = `python3 .xtemplates/scripts/xt.py` trong dự án đích (hoặc `python3 scripts/xt.py` trong repo khung). Skill
 `/autopilot` (`.claude/skills/autopilot/SKILL.md`) là bản rút gọn của giao thức này.
 
+**Pha 0 — audit khung trước khi làm** (`LOOP-HARNESS-020`)
+
+0. `<XT> doctor --fix` là việc **đầu tiên** của mỗi lần `/autopilot`: kiểm khung đã cài (runtime, hook + file hook + cú pháp,
+   skill/subagent, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state, khung hợp lệ, `PROGRESS.md`) và sửa phần an toàn,
+   đảo ngược được. Còn ✗ (hook/settings/khung cài lệch) → báo người lệnh `install.py` một lần — đổi hook là điểm dừng;
+   `loop init` cũng chạy phần nhanh của audit và cảnh báo trên stderr khi còn lỗi (không chặn, ADR-0002 fail-open về luồng).
+
 **Pha 1 — lập kế hoạch, không code**
 
 1. **Nhận yêu cầu, đọc repo trước**: dò stack/CI/test từ file thật (`package.json`, `pyproject`, workflow); không hỏi điều đã có trong code.
@@ -76,6 +83,7 @@ updated: 2026-10-15
 
 | Lệnh | Làm gì |
 |---|---|
+| `doctor [--fix] [--json]` | Audit khung đã cài trước autopilot; `--fix` sửa phần an toàn (không đụng hook/settings); exit 1 khi còn lỗi ✗ |
 | `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(20, 4 × (task chưa làm + MUST mở của blueprint))` (mặc định 50) |
 | `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint |
 | `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |

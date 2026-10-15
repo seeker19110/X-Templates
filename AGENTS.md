@@ -33,6 +33,7 @@ Tự duyệt không mở các điểm này: thao tác không đảo ngược (xo
 | Việc | Lệnh |
 |---|---|
 | Kiểm quy ước khung | `python3 scripts/xt.py validate` |
+| Audit khung đã cài + sửa an toàn (việc đầu tiên của `/autopilot`) | `python3 scripts/xt.py doctor --fix` |
 | Test | `python3 -m unittest discover -s tests` |
 | Link toàn repo | `python3 scripts/check-links.py` |
 | Cổng commit (hook tự chạy) | `scripts/dev-task.sh gate` (đọc `xt.yaml`) |

@@ -386,7 +386,8 @@ def install(target: Path, force_harness: bool, no_harness: bool, label: str | No
         )
 
     log(
-        "Xong. Bước tiếp: đọc AGENTS.md, điền xt.yaml, rồi `python3 .xtemplates/scripts/xt.py list profiles` → compose BLUEPRINT.md."
+        "Xong. Bước tiếp: `python3 .xtemplates/scripts/xt.py doctor` (audit khung vừa cài), đọc AGENTS.md, điền xt.yaml, "
+        "rồi `python3 .xtemplates/scripts/xt.py list profiles` → compose BLUEPRINT.md."
     )
     return 0
 

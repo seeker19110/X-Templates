@@ -1,0 +1,311 @@
+"""Test cho `xt.py doctor` — audit khung đã cài trước /autopilot (và cảnh báo của `loop init`).
+
+Dự án đích giả = cài thật bằng install.py vào thư mục tạm, rồi làm hỏng từng phần.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+import unittest.mock
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import install
+import xt
+
+FILLED_YAML = "lint: ruff check .\ntypecheck: pyright\ntest: pytest -q\nbuild: ''\n"
+
+
+class DoctorCase(unittest.TestCase):
+    """Dự án đích vừa cài khung (git init), xt.py chạy như bản `.xtemplates/scripts/xt.py` của dự án đó."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.base = self.tmp / "app"
+        self.base.mkdir()
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(install.install(self.base, False, False, "test"), 0)
+        subprocess.run(["git", "init", "-q", str(self.base)], check=True)
+        self.fw = self.base / ".xtemplates" / "framework"
+        self.enterContext(
+            unittest.mock.patch.dict(
+                os.environ, {"CLAUDE_PROJECT_DIR": str(self.base), "GIT_CEILING_DIRECTORIES": str(self.tmp)}
+            )
+        )
+        self.enterContext(unittest.mock.patch.object(xt, "SCRIPT_DIR", self.base / ".xtemplates" / "scripts"))
+
+    def run_doctor(self, *args: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = xt.main(["--framework", str(self.fw), "doctor", *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def doctor_json(self, *args: str) -> tuple[int, dict]:
+        rc, out, _ = self.run_doctor("--json", *args)
+        return rc, json.loads(out)
+
+    def findings(self, deep: bool = True) -> list[xt.Finding]:
+        return xt.doctor_findings(self.base, self.fw, deep=deep)
+
+    def codes(self, level: str = "error", deep: bool = True) -> list[str]:
+        return [f.code for f in self.findings(deep) if f.level == level]
+
+    def write(self, rel: str, text: str) -> Path:
+        p = self.base / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+
+class DoctorHealthyTest(DoctorCase):
+    def test_fresh_install_is_ready_with_warnings(self):
+        rc, doc = self.doctor_json()
+        self.assertEqual(rc, 0)
+        self.assertTrue(doc["ok"])
+        self.assertEqual(doc["base"], str(self.base))
+        self.assertEqual(doc["version"], "test")
+        self.assertEqual(doc["fixed"], [])
+        levels = {f["level"] for f in doc["findings"]}
+        self.assertEqual(levels, {"warn"})
+        msgs = " ".join(f["msg"] for f in doc["findings"])
+        self.assertIn("cổng commit đang là no-op", msgs)  # mẫu xt.yaml để trống cả 4 khoá
+
+    def test_text_output_ready(self):
+        rc, out, _ = self.run_doctor()
+        self.assertEqual(rc, 0)
+        self.assertIn(f"Audit khung — {self.base} (khung test)", out)
+        self.assertIn("✓ Sẵn sàng cho autopilot: 0 lỗi", out)
+
+    def test_filled_xt_yaml_and_partial_blank(self):
+        self.write("xt.yaml", FILLED_YAML)
+        msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("để trống build", msgs[0])
+        self.assertNotIn("no-op", msgs[0])
+        self.write("xt.yaml", "lint: ruff check .\ntest: pytest\n")
+        msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
+        self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
+
+    def test_repo_khung_itself_is_clean(self):
+        with unittest.mock.patch.object(xt, "SCRIPT_DIR", ROOT / "scripts"):
+            errors = [f.msg for f in xt.doctor_findings(ROOT, ROOT / "framework", deep=False) if f.level == "error"]
+        self.assertEqual(errors, [])
+
+
+class DoctorFixTest(DoctorCase):
+    def test_fix_repairs_safe_parts_and_keeps_hook_errors(self):
+        (self.base / ".gitignore").unlink()
+        (self.base / "CLAUDE.md").unlink()
+        (self.base / ".claude" / "hooks" / "_lib.sh").unlink()
+        self.write(".claude/hooks/guard.py", "def (:\n")
+        self.write(".autopilot/state.json", "[1]\n")
+        rc, out, _ = self.run_doctor()
+        self.assertEqual(rc, 1)
+        self.assertIn("(sửa được: `xt.py doctor --fix`)", out)
+        self.assertIn("✗ Chưa sẵn sàng cho autopilot: 5 lỗi", out)
+        rc, out, _ = self.run_doctor("--fix")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("sửa được", out)
+        self.assertIn("🔧 đã sửa: tạo CLAUDE.md từ mẫu khung", out)
+        self.assertIn("🔧 đã sửa: thêm `.autopilot/` vào .gitignore", out)
+        self.assertIn("✗ Chưa sẵn sàng cho autopilot: 2 lỗi · 2 cảnh báo · 3 đã sửa", out)
+        self.assertIn("_lib.sh nhưng file không có", out)
+        self.assertIn("guard.py lỗi cú pháp", out)
+        self.assertIn(".autopilot/\n", (self.base / ".gitignore").read_text(encoding="utf-8"))
+        self.assertIn("@AGENTS.md", (self.base / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.assertFalse((self.base / ".autopilot" / "state.json").exists())
+        self.assertEqual(len(list((self.base / ".autopilot").glob("state.json.hong-*"))), 1)
+
+    def test_claude_md_without_import_gets_line_appended(self):
+        self.write("CLAUDE.md", "# CLAUDE.md\n```\n@AGENTS.md\n```")
+        self.assertIn("docs", self.codes())
+        rc, doc = self.doctor_json("--fix")
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["fixed"], ["thêm dòng `@AGENTS.md` vào cuối CLAUDE.md"])
+        self.assertTrue((self.base / "CLAUDE.md").read_text(encoding="utf-8").endswith("```\n@AGENTS.md\n"))
+
+    def test_missing_template_is_not_fixable(self):
+        (self.base / "AGENTS.md").unlink()
+        (self.base / "PROGRESS.md").unlink()
+        (self.fw / "templates" / "AGENTS.md").unlink()
+        rc, doc = self.doctor_json("--fix")
+        self.assertEqual(rc, 1)
+        rows = {f["msg"].split(" — ")[0]: f for f in doc["findings"] if f["code"] == "docs"}
+        self.assertEqual(rows["thiếu AGENTS.md"]["fixable"], False)
+        self.assertEqual(doc["fixed"], ["tạo PROGRESS.md từ mẫu khung"])
+        self.assertIn("## Bàn giao phiên", (self.base / "PROGRESS.md").read_text(encoding="utf-8"))
+
+    def test_xt_yaml_from_template_or_legacy(self):
+        (self.base / "xt.yaml").unlink()
+        self.assertIn("xt-yaml", self.codes())
+        self.assertEqual(self.doctor_json("--fix")[1]["fixed"], ["tạo xt.yaml từ mẫu khung"])
+        self.assertIn("lint:", (self.base / "xt.yaml").read_text(encoding="utf-8"))
+        (self.base / "xt.yaml").rename(self.base / "xs.yaml")
+        self.assertEqual(self.doctor_json("--fix")[1]["fixed"], ["đổi tên xs.yaml → xt.yaml (ADR-0007)"])
+        self.assertFalse((self.base / "xs.yaml").exists())
+
+    def test_failed_fix_becomes_error(self):
+        boom = unittest.mock.Mock(side_effect=PermissionError("chỉ đọc"))
+        fixed, failed = xt.doctor_fix([xt.Finding("x", "warn", "m", boom), xt.Finding("y", "warn", "n")])
+        self.assertEqual(fixed, [])
+        self.assertEqual([(f.code, f.level) for f in failed], [("x", "error")])
+        self.assertIn("sửa thất bại (m): chỉ đọc", failed[0].msg)
+
+    def test_template_body_matches_install(self):
+        for src in sorted((ROOT / "framework" / "templates").glob("*")):
+            if src.name in install.ROOT_TEMPLATES:
+                text = src.read_text(encoding="utf-8")
+                self.assertEqual(xt.template_body(text), install.template_body(text), src.name)
+
+
+class DoctorHooksTest(DoctorCase):
+    def test_settings_missing_or_broken(self):
+        settings = self.base / ".claude" / "settings.json"
+        settings.write_text("{bad", encoding="utf-8")
+        self.assertIn("settings.json hỏng", " ".join(f.msg for f in self.findings()))
+        settings.unlink()
+        msgs = [f.msg for f in self.findings() if f.code == "hooks"]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("không có .claude/settings.json", msgs[0])
+
+    def test_missing_events_and_odd_structure(self):
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        hooks = data["hooks"]
+        del hooks["Stop"], hooks["PostToolUse"]
+        hooks["Notification"] = "lạ"
+        hooks["SubagentStop"] = ["lạ", {"hooks": None}, {"hooks": ["lạ", {"type": "command"}]}]
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        found = [(f.level, f.msg.split(";")[0]) for f in self.findings() if f.code == "hooks"]
+        self.assertEqual(
+            found, [("error", "settings.json thiếu hook Stop"), ("warn", "settings.json thiếu hook PostToolUse")]
+        )
+
+    def test_shell_syntax_and_other_suffixes(self):
+        self.write(".claude/hooks/stop-guard.sh", "if then\n")
+        self.write(".claude/hooks/sub/note.txt", "x")
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        data["hooks"]["Notification"] = [
+            {"hooks": [{"type": "command", "command": 'cat "$CLAUDE_PROJECT_DIR/.claude/hooks/sub/note.txt"'}]}
+        ]
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        msgs = [f.msg for f in self.findings() if f.code == "hooks"]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("stop-guard.sh lỗi cú pháp", msgs[0])
+        self.assertEqual(self.codes(deep=False), [])  # loop init: không kiểm cú pháp
+        empty_err = subprocess.CompletedProcess([], 2, "", "")
+        with unittest.mock.patch.object(xt.subprocess, "run", return_value=empty_err):
+            self.assertEqual(xt._syntax_error(self.base / ".claude" / "hooks" / "x.sh"), "bash -n exit 2")
+        with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
+            self.assertIsNone(xt._syntax_error(self.base / ".claude" / "hooks" / "stop-guard.sh"))
+
+    def test_python_hook_with_null_byte(self):
+        p = self.base / ".claude" / "hooks" / "guard.py"
+        p.write_bytes(b"x = 1\x00\n")
+        self.assertIsNotNone(xt._syntax_error(p))
+
+    def test_skills_agents_and_pending_new(self):
+        shutil.rmtree(self.base / ".claude" / "skills" / "gate")
+        (self.base / ".claude" / "agents" / "reviewer.md").unlink()
+        self.write(".claude/hooks/stop-guard.sh.xtemplates-new", "x")
+        self.write("AGENTS.md.xtemplates-new", "x")
+        msgs = [f.msg for f in self.findings() if f.code == "harness"]
+        self.assertEqual(len(msgs), 2)
+        self.assertIn("thiếu skills/gate/SKILL.md, agents/reviewer.md", msgs[0])
+        self.assertIn(".claude/hooks/stop-guard.sh.xtemplates-new, AGENTS.md.xtemplates-new", msgs[1])
+
+
+class DoctorStateAndEnvTest(DoctorCase):
+    def test_state_blocked_and_missing_plan(self):
+        xt.write_state(
+            {"active": True, "plan": "docs/autopilot/PLAN.md", "blocked": True, "blocked_reason": "cần khoá"}, self.base
+        )
+        msgs = [f.msg for f in self.findings() if f.code == "state"]
+        self.assertEqual(len(msgs), 2)
+        self.assertIn("BLOCKED: cần khoá", msgs[0])
+        self.assertIn("không còn PLAN `docs/autopilot/PLAN.md`", msgs[1])
+        self.write("docs/autopilot/PLAN.md", "")
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md", "blocked": True}, self.base)
+        self.assertEqual(
+            [f.msg for f in self.findings() if f.code == "state"][0].split(" — ")[0], "autopilot đang BLOCKED: ?"
+        )
+        xt.write_state({"active": False}, self.base)
+        self.assertNotIn("state", [f.code for f in self.findings()])
+
+    def test_legacy_and_not_git(self):
+        (self.base / ".xstored").mkdir()
+        self.write("xs.yaml", "lint: x\n")
+        shutil.rmtree(self.base / ".git")
+        codes = [(f.code, f.level) for f in self.findings()]
+        self.assertEqual(codes.count(("legacy", "warn")), 2)
+        self.assertIn(("git", "warn"), codes)
+
+    def test_runtime_tools_and_python(self):
+        with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
+            self.assertEqual([f.code for f in xt._doctor_runtime()], ["runtime", "runtime"])
+            self.assertEqual(xt._doctor_git(self.base), [])
+        with unittest.mock.patch.object(sys, "version_info", (3, 10, 0)):
+            self.assertIn("< 3.11", xt._doctor_runtime()[0].msg)
+
+    def test_scripts_and_version(self):
+        (self.base / ".xtemplates" / "scripts" / "dev-task.sh").unlink()
+        (self.base / ".xtemplates" / "VERSION").unlink()
+        found = [(f.code, f.level) for f in self.findings()]
+        self.assertIn(("scripts", "error"), found)
+        self.assertIn(("scripts", "warn"), found)
+
+    def test_framework_missing_or_invalid(self):
+        self.write(".xtemplates/framework/hong.md", "không frontmatter\n")
+        msg = next(f.msg for f in self.findings() if f.code == "framework")
+        self.assertIn("khung lệch quy ước (1 lỗi, vd: hong.md: thiếu frontmatter", msg)
+        self.assertEqual(xt._doctor_framework(self.tmp / "khong-co")[0].code, "framework")
+
+    def test_progress_variants(self):
+        with unittest.mock.patch.object(xt, "progress_check", side_effect=OSError("git hỏng")):
+            self.assertEqual(
+                xt._doctor_progress(self.base)[0].msg, "PROGRESS.md: git hỏng — xem `xt.py progress-check`"
+            )
+        with unittest.mock.patch.object(xt, "progress_check", return_value=["a", "b", "c"]):
+            self.assertIn("a (+2 lỗi khác)", xt._doctor_progress(self.base)[0].msg)
+        with unittest.mock.patch.object(xt, "progress_check", return_value=[]):
+            self.assertEqual(xt._doctor_progress(self.base), [])
+        (self.base / "PROGRESS.md").unlink()
+        self.assertEqual(xt._doctor_progress(self.base), [])
+
+
+class LoopInitDoctorTest(DoctorCase):
+    def loop_init(self) -> str:
+        self.write("docs/autopilot/PLAN.md", "- [ ] `T-001` việc — Gate: `true`\n")
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(xt.main(["--framework", str(self.fw), "loop", "init"]), 0)
+        return err.getvalue()
+
+    def test_clean_project_has_no_warning(self):
+        self.assertEqual(self.loop_init(), "")
+
+    def test_errors_are_warned_but_not_blocking(self):
+        shutil.rmtree(self.base / ".claude")
+        (self.base / "CLAUDE.md").unlink()
+        err = self.loop_init()
+        self.assertTrue(err.startswith("⚠ Audit khung còn 2 lỗi — chạy `xt.py doctor --fix`: "))
+        (self.base / "AGENTS.md").unlink()
+        (self.base / "xt.yaml").unlink()
+        err = self.loop_init()
+        self.assertTrue(err.startswith("⚠ Audit khung còn 4 lỗi"))
+        self.assertTrue(err.rstrip().endswith("(+1)"))
+        self.assertTrue(xt.read_state(self.base)["active"])
+
+
+if __name__ == "__main__":
+    unittest.main()

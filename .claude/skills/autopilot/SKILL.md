@@ -11,8 +11,11 @@ argument-hint: "[mô tả yêu cầu hoặc đường dẫn PROJECT.md]"
 
 **Mục tiêu: xong trong MỘT phiên** (ADR-0009) — không bàn giao vì context, việc cần người không chặn cả vòng.
 
-## Bước 0 — Kiểm điều kiện chạy một phiên
+## Bước 0 — Audit khung + sửa, rồi kiểm điều kiện chạy một phiên
 
+- **Việc đầu tiên, trước mọi việc khác**: `<XT> doctor --fix` (audit khung đã cài: Python/git/bash, hook trong `.claude/settings.json` + file hook và file chúng nạp + cú pháp, skill/subagent, `*.xtemplates-new` chưa gộp, `AGENTS.md`/`CLAUDE.md` có `@AGENTS.md`, `xt.yaml` đủ khoá, `.autopilot/` trong `.gitignore`, state hỏng/BLOCKED, khung `validate` xanh, `PROGRESS.md`). `--fix` chỉ sửa phần an toàn, đảo ngược được (tạo file thiếu từ mẫu, thêm dòng `@AGENTS.md`/`.gitignore`, đổi tên tệp lệnh của bản ≤ 2.x sang `xt.yaml`, chuyển state hỏng sang bản sao lưu) — **không** đụng hook/settings.
+  - Exit 0 → làm tiếp; cảnh báo ⚠ là việc của phiên (vd `xt.yaml` trống → task đầu PLAN điền lệnh thật theo stack; PROGRESS sai luật → sửa tay).
+  - Exit 1 → lỗi ✗ còn lại cần người (thiếu/hỏng hook, settings, khung cài lệch): báo người **một lần** lệnh sửa (`install.py`, gộp `*.xtemplates-new`) — đổi hook là điểm dừng, không tự sửa; vẫn làm Pha 1. Trước `loop init` chạy lại `<XT> doctor`; còn ✗ về hook → `loop init` vẫn chạy (cảnh báo trên stderr) nhưng ghi rõ trong báo cáo cuối rằng vòng thiếu máy kiểm, và gom vào việc chờ người.
 - **Chế độ quyền**: phiên phải chạy không hỏi quyền — `claude --permission-mode auto` (container dùng một lần: `bypassPermissions`; headless: `dontAsk`). Settings dự án không đặt được. Đang ở chế độ hỏi (`default`/`plan`/`acceptEdits`) thì báo người một lần câu lệnh mở lại phiên, rồi vẫn làm; Stop hook nhắc lại mỗi vòng (`permission_mode` ghi ở `.autopilot/state.json`).
 - **Hook**: `.claude/settings.json` có `PreCompact` (checkpoint trước nén), `SessionStart`, `Stop`. Thiếu → báo người chạy lại `install.py` (đổi hook là điểm dừng).
 
