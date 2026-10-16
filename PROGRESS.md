@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Sửa audit 2026-10-16 theo 5 đợt (chủ repo đã duyệt; `docs/ops/AUDIT-REPORT-2026-10-16.md` §5): đã merge #58 (đợt 1), #59 (đợt 2, ADR-0014); đang mở #60 (đợt 3, guard Bash), #61 (đợt 4, bằng chứng/redact), đợt 5 tài liệu (5a làn nhanh, 5b luật agent). PR chồng: PR đáy merge → đổi đích về `main`, merge `main` vào, rồi merge (người merge làn chuẩn).
+- Sửa audit 2026-10-16 xong: #58–#64 đã/đang merge, `audit check --strict` exit 0 (0 🟠 mở; 23 🟢 nợ). Luật L3 (#65, ADR-0015): mở PR là bật auto-merge, cho repo khung và mẫu dự án đích. Việc kế: quét lại delta sau #58–#66; nợ 🟢 (giới hạn guard phân tích tĩnh, PERF test 80 s).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
