@@ -107,29 +107,38 @@ LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 TASK_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{3,}$")
 SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential)"
-SECRET_RE = re.compile(rf"(?i)\b(\w*{SECRET_WORDS}\w*)(\s*[=:]\s*)\S+")
+# Tên khoá chứa bí mật: chứa SECRET_WORDS (nhìn trước rồi ăn trọn từ — `\w++` không quay lui nên tuyến tính cả với từ
+# dài lặp từ khoá, AUD-CODE-009), hoặc kết thúc bằng `_pwd`/`_pass`/`_passphrase` (`MYSQL_PWD`, `DB_PASS`) hay đúng là
+# `pass`/`passphrase` (AUD-CFG-008) — không bắt `PWD` (thư mục hiện tại) hay `bypass`.
+SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w++|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
+SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
-    # `(?<!\w)` neo đầu từ: không có nó `\w*` thử mọi vị trí → bậc hai trên dòng dài (reviewer #61).
-    (re.compile(rf"(?i)((?<!\w)[\"']?\w*{SECRET_WORDS}\w*[\"']?\s*[=:]\s*)([\"'])[^\"'\n]*\2"), r"\1\2***\2"),
+    # Mỗi loại nháy một mẫu: nháy loại kia nằm trong giá trị (`"it's a b"`) và nháy chưa đóng (tới hết dòng) cũng che hết
+    # (AUD-CFG-006). `(?<!\w)` neo đầu từ: không có nó `\w*` thử mọi vị trí → bậc hai trên dòng dài (reviewer #61).
+    (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)\"[^\"\n]*(?:\"|$)"), r'\1"***"'),
+    (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)'[^'\n]*(?:'|$)"), r"\1'***'"),
     (re.compile(r"(?i)\b(bearer|basic|token)(\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1\2***"),
     (re.compile(r"(?i)(--(?:password|passwd|token|secret|api-key)[= ])(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
     # AUD-CFG-002: user rỗng (`redis://:pw@`); token làm user (`https://<key>@`); `curl -u u:p`; `mysql -pPW`; JWT;
     # tiền tố khoá npm/PyPI/Hugging Face/Google/Stripe restricted.
     (re.compile(r"(://[^/\s:@]*:)[^@\s/]+@"), r"\1***@"),
     (re.compile(r"(://)[A-Za-z0-9_-]{16,}@"), r"\1***@"),
-    (re.compile(r"(\s(?:-u|--user)[= ]?\s*[^\s:]+:)\S+"), r"\1***"),
+    (re.compile(r"(\s(?:-u|--user)[= ]?\s*(?!\d+:\d+\b)[^\s:]+:)\S+"), r"\1***"),  # `-u 1000:1000` = uid:gid (CFG-007)
     (re.compile(r"(\b(?:mysql|mysqldump|mariadb)\b[^\n]{0,200}?\s-p)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"), "eyJ***"),
     (re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"), r"\1***"),
     (
         re.compile(
-            r"\b(gh[pousr]_|github_pat_|xox[abpr]-|sk_live_|sk_test_|rk_live_|rk_test_|sk-|glpat-|npm_|pypi-|hf_|AIza)"
+            r"\b(gh[pousr]_|github_pat_|xox[abpr]-|sk_live_|sk_test_|rk_live_|rk_test_|sk-|glpat-|AIza)"
             r"[A-Za-z0-9_-]{8,}"
         ),
         r"\1***",
     ),
+    # npm/Hugging Face/PyPI: đúng dạng khoá (độ dài, bảng chữ) — `npm_config_cache`, `hf_hub_download` là định danh
+    # thường, từng bị che (AUD-CFG-007).
+    (re.compile(r"\b(npm_)[A-Za-z0-9]{36}\b|\b(hf_)[A-Za-z0-9]{20,}\b|\b(pypi-AgE)[A-Za-z0-9_-]{8,}"), r"\1\2\3***"),
     (
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
         "-----BEGIN PRIVATE KEY----- ***",
@@ -926,6 +935,15 @@ def _evidence_time_problem(ev: Optional[Dict[str, Any]]) -> str:
     return ""
 
 
+def _evidence_before(ev: Dict[str, Any], started: str) -> bool:
+    """Bằng chứng kết thúc trước `loop init` — so thời điểm, không so chuỗi (offset khác nhau, AUD-CODE-008)."""
+    raw = str(ev.get("finished") or "")
+    if not started or not raw:
+        return bool(started)  # không ghi lúc kết thúc → coi là cũ
+    fin, init = _parse_iso(raw), _parse_iso(started)
+    return fin is not None and init is not None and fin < init  # không đọc được → `_evidence_time_problem` báo
+
+
 def _parse_iso(text: str) -> Optional[_dt.datetime]:
     """ISO 8601 → datetime có múi giờ (không ghi múi = UTC) để so đúng giữa các offset; không đọc được → None."""
     try:
@@ -949,7 +967,7 @@ def _verdict_task(
             return None
         return {"verdict": "verify", "task": t["id"], "reason": f"task {t['id']} bỏ `[~]` mà không ghi `— Bỏ: <lý do>`"}
     ev = read_evidence(t["id"], base)
-    if ev is not None and started and str(ev.get("finished") or "") < started:
+    if ev is not None and _evidence_before(ev, started):
         return {
             "verdict": "verify",
             "task": t["id"],
