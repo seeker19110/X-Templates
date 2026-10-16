@@ -140,6 +140,16 @@ class MergeDecisionTest(unittest.TestCase):
         self.assertEqual((d["verdict"], d["lane"]), ("human", "nhanh"))
         self.assertIn("mức tự chủ L1", d["reasons"][0])
 
+    def test_l3_merges_standard_lane_and_reports_autonomy(self):
+        """ADR-0015: L3 tự merge cả làn chuẩn khi CI xanh; người vẫn quyết khi ruleset đòi review; PR chồng → wait."""
+        hot = pr(files=[{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}])
+        self.assertEqual(xt.merge_decision(hot, 2)["verdict"], "human")
+        d = xt.merge_decision(hot, 3)
+        self.assertEqual((d["verdict"], d["lane"], d["autonomy"], d["stacked"]), ("merge", "chuẩn", 3, False))
+        self.assertEqual(xt.merge_decision(pr(reviewDecision="REVIEW_REQUIRED"), 3)["verdict"], "human")
+        st = xt.merge_decision(pr(baseRefName="feat/a", defaultBranch="main"), 3)
+        self.assertEqual((st["verdict"], st["stacked"]), ("wait", True))
+
     def test_state_order(self):
         cases = {
             "đóng": (pr(state="MERGED"), "closed", "PR đã MERGED"),

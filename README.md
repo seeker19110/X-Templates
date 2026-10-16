@@ -123,6 +123,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   SHOULD/MAY ở `BLUEPRINT-BACKLOG.md`; trần vòng một phiên chỉ đếm task.
 - [ADR-0013](docs/adr/0013-machine-decides-when-to-merge.md): `xt.py merge-check` quyết khi nào merge PR; guard chỉ cho
   tự merge làn nhanh ở L2 với lệnh ghim head.
+- [ADR-0015](docs/adr/0015-auto-merge-on-open-l3.md): mức `merge_autonomy: L3` (mặc định, chủ repo yêu cầu) — mở PR là bật
+  auto-merge của GitHub cho mọi làn; GitHub merge khi required check xanh.
 - [ADR-0014](docs/adr/0014-pr-per-slice-and-machine-merge.md): mỗi lát code một PR; máy tự merge khi `merge-check` cho
   phép bằng lệnh ghim head (`gh pr merge`, REST `PUT …/merge` có `sha`, MCP `merge_pull_request` có `expectedHeadSha`).
 

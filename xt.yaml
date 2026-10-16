@@ -7,6 +7,6 @@ lint: python3 scripts/xt.py validate && python3 scripts/check-links.py && python
 typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/install.py scripts/check-links.py .claude/hooks/guard.py
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -m coverage run -m unittest discover -s tests && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
-# Merge PR (ADR-0013, ADR-0014): chủ repo yêu cầu 2026-10-16 "tạo PR và auto merge theo từng lát code" → L2: máy tự merge
-# làn nhanh khi `xt.py merge-check` = merge (lệnh ghim head); làn chuẩn (.claude/, CI, cổng, AGENTS.md…) vẫn để người.
-merge_autonomy: L2
+# Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: mở PR là bật auto-merge
+# của GitHub cho mọi làn (merge khi required check xanh); L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
+merge_autonomy: L3

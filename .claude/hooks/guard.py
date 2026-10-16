@@ -758,6 +758,12 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
 def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     """`gh pr merge` (ADR-0013): mặc định hỏi người; `allow` chỉ khi `xt.py merge-check` = merge VÀ lệnh ghim đúng
     head đã kiểm (`--match-head-commit`). `--admin` (vượt ruleset) và `--repo` (repo khác) luôn hỏi."""
+    if "--auto" in args and not any(a.startswith("--admin") for a in args):
+        flags = sorted({a.split("=", 1)[0] for a in args if a.startswith("-")} - MERGE_ALLOW_FLAGS - {"--auto"})
+        selector = _positionals(args, GH_MERGE_VALUE_FLAGS)
+        if flags or len(selector) > 1 or not all(MERGE_SELECTOR_RE.fullmatch(s) for s in selector):
+            return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ nhận số PR/nhánh và cờ merge thường"
+        return _auto_merge_verdict(selector[:1], root)
     sha = _flag_value(args, "--match-head-commit")
     if sum(a == "--match-head-commit" or a.startswith("--match-head-commit=") for a in args) > 1:
         sha = None  # gh lấy lần cuối, guard đã kiểm lần đầu — hai pin là không pin
@@ -852,9 +858,37 @@ MCP_MERGE_RE = re.compile(r"mcp__.+__\w*(merge_pull_request|auto_merge)\w*")
 MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_method", "commit_title", "commit_message"}
 
 
+MCP_AUTO_KEYS = {"owner", "repo", "pullNumber", "mergeMethod"}
+
+
+def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple[str, str]:
+    """Bật auto-merge của GitHub (ADR-0015): allow khi `merge_autonomy` ≥ L3, PR còn mở, không phải PR chồng (nhắm nhánh
+    khác nhánh mặc định) và (MCP) đúng repo. GitHub vẫn chỉ merge khi required check/ruleset đạt; không ghim head."""
+    d = merge_check(selector, root)
+    level = d.get("autonomy")
+    if not isinstance(level, int) or level < 3:
+        return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ khi xt.yaml `merge_autonomy` ≥ L3 (ADR-0015)"
+    if d.get("verdict") in ("closed", "lỗi") or d.get("stacked"):
+        return "ask", f"{EXTERNAL_ASK} — không bật auto-merge: PR {d.get('verdict')}/PR chồng (nhắm nhánh sắp bị xoá)"
+    if repo and str(d.get("repo", "")).lower() != repo.lower():
+        return "ask", f"{EXTERNAL_ASK} — merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}"
+    return "allow", f"merge_autonomy L{level}: bật auto-merge (GitHub merge khi required check xanh)"
+
+
+def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
+    n, owner, repo = tool_input.get("pullNumber"), tool_input.get("owner"), tool_input.get("repo")
+    ok = not set(tool_input) - MCP_AUTO_KEYS and type(n) is int and n > 0
+    ok = ok and isinstance(owner, str) and isinstance(repo, str)
+    if not ok or tool_input.get("mergeMethod", "SQUASH") not in ("SQUASH", "MERGE", "REBASE"):
+        return "ask", f"{EXTERNAL_ASK} — bật auto-merge qua MCP cần owner/repo/pullNumber hợp lệ"
+    return _auto_merge_verdict([str(n)], root, f"{owner}/{repo}")
+
+
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
     if not MCP_MERGE_RE.fullmatch(tool_name):
         return "", ""
+    if tool_name == "mcp__github__enable_pr_auto_merge":
+        return _mcp_auto_merge(tool_input, root)
     ask = "ask", f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) cần `expectedHeadSha` + `xt.py merge-check` = merge"
     n, sha = tool_input.get("pullNumber"), tool_input.get("expectedHeadSha")
     owner, repo = tool_input.get("owner"), tool_input.get("repo")

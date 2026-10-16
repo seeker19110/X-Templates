@@ -11,6 +11,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (AUD-HAR-031); `AGENTS.md` §6 liệt kê đủ thành phần cổng `lint` (AUD-DOC-029); skill `/audit` §6 trong autopilot tự
   duyệt kế hoạch sửa (ADR-0008), việc cần người `loop defer` trước `loop block` (AUD-HAR-032); ADR-0009 ghi công thức trần
   vòng bị ADR-0012 thay (AUD-DOC-026).
+- **Mở PR là bật auto-merge — mức `merge_autonomy: L3`** (ADR-0015, D-011; chủ repo yêu cầu 2026-10-16, cho cả repo
+  khung lẫn dự án đích). Mặc định của `xt.yaml` repo khung và mẫu `templates/xt.yaml` thành **L3** (trước: L2 / L1).
+  `merge-check` ở L3 trả `merge` cho cả làn chuẩn và thêm `autonomy`, `stacked`; guard cho phép `gh pr merge <N> --auto`
+  và MCP `enable_pr_auto_merge` khi L3, PR còn mở, không phải PR chồng, đúng repo, không `--admin`/cờ lạ. Mục (ID, mức
+  giữ): `WF-REVIEW-007` thêm ngoại lệ L3 kèm ghi miễn trừ; `LOOP-STOP-002`, `LOOP-STOP-009`, `LOOP-STOP-022`,
+  `LOOP-DESIGN-020` ghi L3. Đánh đổi (ADR-0015 §Hệ quả): mất ghim head và vị từ làn nhanh khi merge. Dự án đích: chạy
+  lại `install.py`, bật "Allow auto-merge" + ruleset có required check; muốn người merge làn chuẩn thì đặt L2.
 - **Áp hết ADR-0008 vào tài liệu** (audit 2026-10-16 đợt 5, AUD-DOC-023): `PM-PLAN-005` (ID, mức MUST giữ) bỏ "mâu thuẫn
   spec" khỏi danh sách cần người duyệt, thêm publish/deploy; nguyên tắc 6 của `planning-and-estimation.md`, bảng ca của
   `spec-driven-development.md`, bảng tách việc của `orchestration-and-subagents.md` và README (mục "Chạy tự động") ghi
