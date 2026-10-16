@@ -156,6 +156,22 @@ class CommitGateRepoTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("GATE-PROJ", err)
 
+    def test_project_dir_behind_symlink(self):
+        # macOS: /var → /private/var; git trả gốc vật lý, CLAUDE_PROJECT_DIR là đường dẫn qua symlink.
+        sub = self.repo(self.proj / "apps" / "web", None)
+        link = self.tmp / "link"
+        link.symlink_to(self.proj)
+        payload = {"tool_input": {"command": f"cd {link}/apps/web && git commit -m x"}, "cwd": str(link)}
+        code, _, err = run_hook("pre-bash-guard.sh", payload, link)
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+        code, _, err = run_hook(
+            "pre-bash-guard.sh", {"tool_input": {"command": "git commit -m x"}, "cwd": str(link)}, link
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+        self.assertTrue(sub.exists())
+
     def test_foreign_repo_without_xt_autodetects_there(self):
         bare = self.repo(self.tmp / "bare", None)
         (bare / "Makefile").write_text("test:\n\techo GATE-BARE; exit 1\n", encoding="utf-8")
