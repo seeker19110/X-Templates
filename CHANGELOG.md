@@ -182,6 +182,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- CI `quality` đỏ mãi trên `main` (từ #49), xanh trên PR: `test_guard_push_without_refspec_follows_current_branch`
+  gọi `git_rules(["git", "push"])` không truyền thư mục nên guard đọc nhánh ở thư mục tiến trình — CI push lên `main`
+  checkout đúng nhánh `main` → `ask`. Test chạy phần đó ở thư mục không phải repo.
 - **Bằng chứng autopilot, cổng có comment, redact** (audit 2026-10-16 đợt 4). AUD-HAR-024: guard hỏi khi Edit/Write/Bash
   ghi hoặc xoá tay `.autopilot/` (bằng chứng, trạng thái vòng — chỉ `xt.py loop …` ghi); verdict không nhận bằng chứng có
   thời điểm kết thúc ở tương lai hoặc trước lúc bắt đầu. AUD-HAR-025: `dev-task.sh` (`yaml_get`) và `xt.py`
