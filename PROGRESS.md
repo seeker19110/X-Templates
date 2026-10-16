@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-15 · Nhánh: claude/pensive-dirac-s6icry
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Không có việc dở. Đã merge: #49 (sửa xanh giả, cổng commit nhầm repo, guard lọt lệnh), #50 (`xt.py doctor`).
+- Audit delta #43–#57 (`docs/ops/AUDIT-REPORT-2026-10-16.md`): 0 🔴 · 15 🟠 · 35 🟢 mở — **chờ chủ repo duyệt kế hoạch 5 đợt** (§5). Đợt 1–2 = bịt merge vòng qua `merge-check` rồi luật mới "PR + auto-merge theo lát" (chủ repo yêu cầu 2026-10-16, §7).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
@@ -42,7 +42,7 @@
 - 2026-10-16 Audit khung trước `/autopilot`: `xt.py doctor --fix` là việc đầu tiên; `--fix` chỉ sửa phần đảo ngược được, hook/settings để người (`install.py`); `loop init` cảnh báo, không chặn (fail-open về luồng) — `LOOP-HARNESS-020`.
 - 2026-10-16 CI: `portability.yml` (macOS bash 3.2) không chạy trên PR, chỉ khi push vào `main` (chủ repo yêu cầu); đỏ sau merge thì sửa bằng PR mới.
 ## Bàn giao phiên
-- 2026-10-16 · Commit cuối trên `main`: `d3548fe` (#50); tag `v2.0.0` → `55de4d1`; SHA quét audit `8e64aac` (sau đó có #43–#50: cần quét lại theo delta).
+- 2026-10-16 · Commit cuối trên `main`: `58b8c8b` (#57); tag `v2.0.0` → `55de4d1`; SHA quét audit `58b8c8b` (delta #43–#57 đã quét).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (đọc `xt.yaml`; `pip install --require-hashes -r requirements-dev.txt`, cần shellcheck).
 - Autopilot: PLAN T-601…T-602 (xác minh lại bằng chứng sau #41). Đang chặn: không. Nhánh `claude/vibrant-davinci-mbt518` trên remote giữ lịch sử trước squash của #41 (cây trùng `main`; hook chặn force-push) — đã merge vào nhánh, không đổi nội dung.
 - Câu hỏi cần người: Tiếp theo 1 (`x-hotel-manager`).
