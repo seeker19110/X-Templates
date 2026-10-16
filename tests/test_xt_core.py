@@ -6,6 +6,7 @@ Bổ sung cho test_xt.py: phủ các nhánh lỗi/biên. Chạy: python3 -m unit
 from __future__ import annotations
 
 import io
+import datetime as _dt
 import json
 import os
 import subprocess
@@ -622,6 +623,29 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("trước lần loop init", v["reason"])
         self.activate(started="2026-09-30T00:00:00+00:00")
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_evidence_tamper(self):
+        """AUD-HAR-024: bằng chứng ghi tay có thời điểm tương lai hoặc kết thúc trước khi bắt đầu → verify, không done."""
+        write(self.plan, "- [x] `T-001` việc — Gate: `npm test`\n")
+        ev = self.base / ".autopilot" / "evidence" / "T-001.json"
+        self.activate(started="2026-09-30T00:00:00+00:00")
+        soon = (_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-12))) + _dt.timedelta(hours=10)).isoformat()
+        for bad in (
+            {"finished": "2099-01-01T00:00:00+00:00"},
+            {"started": "2026-10-10T00:00:00+00:00", "finished": "2026-10-09T00:00:00+00:00"},
+            {"finished": soon},  # tương lai viết ở múi giờ khác (reviewer #61: so chuỗi ISO lệch theo offset)
+            {"finished": "hôm qua"},
+        ):
+            with self.subTest(bad):
+                write(ev, json.dumps({"task": "T-001", "exit_code": 0, "cmd": "npm test", **bad}))
+                v = xt.loop_verdict(self.base)
+                self.assertEqual((v["verdict"], v.get("task")), ("verify", "T-001"))
+                self.assertIn("thời điểm", v["reason"])
+
+    def test_evidence_time_other_offset_is_fine(self):
+        """Thời điểm thật viết ở múi giờ khác (+07:00) không bị coi là tương lai."""
+        now7 = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=7))).replace(microsecond=0).isoformat()
+        self.assertEqual(xt._evidence_time_problem({"started": now7, "finished": now7}), "")
 
     def test_gate_with_dev_credentials_matches_redacted_evidence(self):
         # Bằng chứng lưu lệnh đã che bí mật; so với Gate thô thì `verify` mãi, đốt hết ngân sách vòng.

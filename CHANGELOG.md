@@ -177,6 +177,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI `quality` đỏ mãi trên `main` (từ #49), xanh trên PR: `test_guard_push_without_refspec_follows_current_branch`
   gọi `git_rules(["git", "push"])` không truyền thư mục nên guard đọc nhánh ở thư mục tiến trình — CI push lên `main`
   checkout đúng nhánh `main` → `ask`. Test chạy phần đó ở thư mục không phải repo.
+- **Bằng chứng autopilot, cổng có comment, redact** (audit 2026-10-16 đợt 4). AUD-HAR-024: guard hỏi khi Edit/Write/Bash
+  ghi hoặc xoá tay `.autopilot/` (bằng chứng, trạng thái vòng — chỉ `xt.py loop …` ghi); verdict không nhận bằng chứng có
+  thời điểm kết thúc ở tương lai hoặc trước lúc bắt đầu. AUD-HAR-025: `dev-task.sh` (`yaml_get`) và `xt.py`
+  (`yaml_scalar`, dùng chung cho `gate_noop_keys`, `merge_config`) bỏ comment YAML `#` ngoài nháy — `lint: # TODO` là
+  rỗng và `lint: true  # x` là no-op → cổng ĐỎ trong vòng (ADR-0011) thay vì "GATE XANH". AUD-CFG-002: `redact` che
+  thêm DSN user rỗng (`redis://:pw@`), token làm user (`https://<key>@`), `curl -u u:p`, `mysql -pPW`, JWT, tiền tố
+  `npm_`/`pypi-`/`hf_`/`AIza`/`rk_live_`, giá trị trong nháy có khoảng trắng, `*ACCESS_KEY*`/`*PRIVATE_KEY*`/
+  `*credential*`; `feedback aggregate` che lại mọi trường trước khi in (FB sửa tay).
+  Sau review #61: giá trị trong nháy che trước dạng `\S+` (cả `--password="a b"`, `-p"a b"`); mẫu neo đầu từ nên chạy
+  tuyến tính trên dòng dài (trước bậc hai: 50.000 ký tự mất hàng chục giây); thời điểm bằng chứng so bằng datetime có
+  múi giờ, không so chuỗi.
 - `xt.py merge-check` chỉ tính check-run **mới nhất** mỗi tên trên head: chạy lại `quality` (sửa tiêu đề PR) từng để
   lần đỏ cũ che lần xanh mới → `fix` dù CI xanh (gặp ở #58).
 - `dev-task.sh format-file` khôi phục file JSON khi formatter khai báo làm hỏng nó (AUD-HAR-037: `format_file: ruff
@@ -287,6 +298,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Guard Bash: shell lồng, publish/deploy, gỡ hook/cổng/test** (audit 2026-10-16 đợt 3; AUD-SEC-015, SEC-017, SEC-018,
+  SEC-019, HAR-026, HAR-027). Luật deny/ask áp đệ quy cho lệnh trong `sh -c`/`bash -lc` (cả lồng nhiều tầng, quá 3 tầng
+  → hỏi), heredoc vào shell và `echo/printf … | sh` (luật hook-bypass riêng cho `-c` gộp vào đây). publish/deploy nhận
+  lệnh con ở mọi vị trí (`pnpm -r publish`, `yarn npm publish`, `dotnet nuget push`, `docker build --push`), qua
+  `python -m twine` và trình chạy gói (`npx wrangler deploy`); thêm `uv/poetry/bun/gem/helm/flyctl/wrangler/firebase/
+  netlify`, `gh workflow run`, `gh repo edit/sync`, `gh variable set`. `mv`/`git mv` (cả nguồn), `git rm`, `perl -i`,
+  `cp -t`, đích là thư mục cổng, `&>>` lên file hook/cổng → hỏi; `rm -f <file>` không còn bị cờ `-f` nuốt đường dẫn.
+  Bash xoá/dời/sửa tại chỗ file test **đã có** → hỏi (`LOOP-CI-001`). Thiếu `.claude/hooks/guard.py` → hỏi mọi lệnh tới
+  khi khôi phục. Commit vào repo **ngoài** dự án → hỏi, không chạy cổng (mã) của repo đó trước bước hỏi quyền (trước đây
+  cổng chạy ở repo nhận commit — AUD-HAR-013 — kể cả repo lạ). `GATE_PATTERNS` thêm `pytest.ini`, `tox.ini`,
+  `noxfile.py`, `conftest.py`, `vite.config.*`, `.flake8`, `.golangci.y*ml`, `.nycrc*`, `.c8rc*`, `phpunit.xml*`,
+  `karma.conf.*`, `.mocharc*` (cùng vào `MERGE_GATE_GLOBS`).
 - **Đóng các đường merge vòng qua `xt.py merge-check`** (audit 2026-10-16, ADR-0013; AUD-SEC-016, SEC-020, SEC-021,
   HAR-021, HAR-022, HAR-023). Guard chỉ `allow` lệnh `gh pr merge` *trơn*: một dòng, không `$(…)`/backtick/nháy/heredoc/
   chuyển hướng/gán biến đầu lệnh, chỉ số PR hoặc tên nhánh, chỉ cờ `--squash/--merge/--rebase/--delete-branch/

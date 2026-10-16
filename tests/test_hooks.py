@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -145,14 +146,24 @@ class CommitGateRepoTest(unittest.TestCase):
         return run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}, "cwd": str(self.proj)}, self.proj)
 
     def test_gate_runs_in_committed_repo(self):
+        # Repo NGOÀI dự án: không chạy cổng của dự án (AUD-HAR-013) và cũng không chạy cổng (mã) của repo đó — hỏi
+        # người (AUD-SEC-015).
         for cmd in (f"cd {self.other} && git commit -m x", "git -C ../other commit -m x"):
-            code, _, err = self.hook(cmd)
-            self.assertEqual(code, 2, (cmd, err))
-            self.assertIn("GATE-OTHER", err)
+            code, out, err = self.hook(cmd)
+            self.assertEqual((code, decision(out)), (0, "ask"), (cmd, err))
+            self.assertIn("repo ngoài dự án", out)
+            self.assertNotIn("GATE-OTHER", err)
             self.assertNotIn("GATE-PROJ", err)
         code, _, err = self.hook("git commit -m x")
         self.assertEqual(code, 0, err)
         self.assertIn("GATE-PROJ", err)
+
+    def test_nested_repo_with_own_xt_runs_its_gate(self):
+        sub = self.repo(self.proj / "packages" / "lib", "sh -c 'echo GATE-SUB; exit 1'")
+        code, _, err = self.hook(f"cd {sub} && git commit -m x")
+        self.assertEqual(code, 2, err)
+        self.assertIn("GATE-SUB", err)
+        self.assertNotIn("GATE-PROJ", err)
 
     def test_nested_repo_without_xt_uses_project_gate(self):
         sub = self.repo(self.proj / "apps" / "web", None)
@@ -176,12 +187,12 @@ class CommitGateRepoTest(unittest.TestCase):
         self.assertIn("GATE-PROJ", err)
         self.assertTrue(sub.exists())
 
-    def test_foreign_repo_without_xt_autodetects_there(self):
+    def test_foreign_repo_without_xt_is_not_autodetected(self):
         bare = self.repo(self.tmp / "bare", None)
         (bare / "Makefile").write_text("test:\n\techo GATE-BARE; exit 1\n", encoding="utf-8")
-        code, _, err = self.hook(f"cd {bare} && git commit -m x")
-        self.assertEqual(code, 2, err)
-        self.assertIn("GATE-BARE", err)
+        code, out, err = self.hook(f"cd {bare} && git commit -m x")
+        self.assertEqual((code, decision(out)), (0, "ask"), err)
+        self.assertNotIn("GATE-BARE", err)
         self.assertNotIn("GATE-PROJ", err)
 
 
@@ -982,6 +993,21 @@ class DevTaskTest(unittest.TestCase):
         self.run_task("format-file", "s.json")  # đường dẫn tương đối theo gốc dự án; JSON mới hợp lệ thì giữ
         self.assertEqual(f.read_text(encoding="utf-8"), "[1]")
 
+    def test_noop_trailing_comment(self):
+        """AUD-HAR-025: comment cuối dòng trong xt.yaml không phải lệnh — `lint: # TODO` là rỗng, `true  # x` là no-op."""
+        (self.tmp / ".autopilot").mkdir()
+        (self.tmp / ".autopilot" / "state.json").write_text('{"active": true}', encoding="utf-8")
+        for val in ("# TODO điền", "true  # TODO", "'true' # x", ""):
+            with self.subTest(val):
+                (self.tmp / "xt.yaml").write_text(f"lint: {val}\ntest: python3 -c 'print(1)'\n", encoding="utf-8")
+                self.assertNotEqual(self.run_task("gate").returncode, 0)
+        (self.tmp / "xt.yaml").write_text(
+            "lint: python3 -c 'print(\"#ok\")'  # kiểm\ntest: python3 -c 'print(1)'\n", encoding="utf-8"
+        )
+        r = self.run_task("lint")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("#ok", r.stdout + r.stderr)  # `#` trong nháy là dữ liệu
+
     def test_declared_pipeline_failure_fails_gate(self):
         # `set -o pipefail` của dev-task.sh không truyền vào `bash -c` — lệnh khai báo có ống từng xanh giả.
         (self.tmp / "xt.yaml").write_text('test: "false | cat"\nlint: "true | cat"\n', encoding="utf-8")
@@ -1367,6 +1393,186 @@ class MergeGuardTest(unittest.TestCase):
         dec, why = self.d("gh pr merge --match-head-commit abc1234def")
         self.assertEqual(dec, "ask")
         self.assertIn("merge-check không chạy được", why)
+
+
+class GuardBashWave3Test(unittest.TestCase):
+    """Audit 2026-10-16 đợt 3: lệnh lồng shell, publish/deploy, gỡ hook/cổng/test qua Bash (gọi guard trong tiến trình)."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.guard = guard
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_a.py").write_text("def test_x():\n    assert 1\n", encoding="utf-8")
+
+    def dec(self, cmd: str) -> str:
+        return str(self.guard.bash_decision(cmd, str(self.root))["decision"])
+
+    def test_guard_shell_c_deny(self):
+        """AUD-SEC-017: luật deny/ask áp cả cho lệnh trong `sh -c`, heredoc và pipe vào shell."""
+        for cmd in (
+            "bash -c 'git push --force origin x'",
+            'sh -c "rm -rf ~"',
+            "zsh -c 'git push -f origin main'",
+            "bash -lc 'git reset --hard HEAD~3'",
+            "env bash -c 'sudo ls'",
+            "bash <<'E'\ngit reset --hard\nE",
+            "sh <<E\nrm -rf ~\nE",
+            "echo 'git reset --hard' | bash",
+            "printf 'git push --force origin x' | sh",
+            "bash -c \"bash -c 'git reset --hard'\"",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "deny")
+        self.assertEqual(self.dec("bash -c 'npm publish'"), "ask")
+        self.assertEqual(self.dec("bash -x -c 'git reset --hard'"), "deny")  # cờ khác đứng trước `-c`
+        deep = "true"
+        for _ in range(5):
+            deep = "bash -c " + shlex.quote(deep)
+        res = self.guard.bash_decision(deep, str(self.root))
+        self.assertEqual(res["decision"], "ask")
+        self.assertIn("lồng quá sâu", str(res["reason"]))
+        for cmd in ("bash -c 'ls -la'", "cat <<'E' > n.md\ngit reset --hard\nE", "echo 'git reset --hard' > notes.txt"):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "")  # thân heredoc vào file / chuỗi echo vào file là dữ liệu
+
+    def test_guard_publish_variants(self):
+        """AUD-SEC-018: publish/deploy ở mọi vị trí lệnh con, qua `python -m` và trình chạy gói."""
+        for cmd in (
+            "pnpm -r publish",
+            "pnpm --filter x publish",
+            "yarn npm publish",
+            "npm --workspace a publish",
+            "bun publish",
+            "uv publish",
+            "poetry publish --build",
+            "python3 -m twine upload dist/*",
+            "gem push x.gem",
+            "dotnet nuget push x.nupkg",
+            "docker buildx build --push -t x .",
+            "docker build --push .",
+            "docker image push x",
+            "helm upgrade --install r c",
+            "helm install r c",
+            "flyctl deploy",
+            "npx wrangler deploy",
+            "npx vercel deploy --prod",
+            "firebase deploy",
+            "gh workflow run release.yml",
+            "gh repo edit --visibility public",
+            "gh variable set X --body 1",
+            "gh repo sync --force",
+            "npm dist-tag add x@1 latest",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        for cmd in (
+            "pnpm -r build",
+            "docker build -t x .",
+            "helm template c",
+            "uv sync",
+            "poetry install",
+            "npm run lint",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "")
+
+    def test_guard_gate_file_removal(self):
+        """AUD-SEC-019: xoá/dời/sửa tại chỗ file hook, settings, workflow qua Bash → hỏi; `rm -f` không nuốt đường dẫn."""
+        for cmd in (
+            "mv .claude/hooks/guard.py /tmp/x",
+            "git rm .claude/hooks/pre-bash-guard.sh",
+            "git rm -f .claude/settings.json",
+            "git mv .github/workflows/ci.yml x",
+            "perl -pi -e s/a/b/ .github/workflows/ci.yml",
+            "rm -f .github/workflows/ci.yml",
+            "rm -f .claude/hooks/guard.py",
+            "cp -t .claude/hooks evil.sh",
+            "echo x &>> xt.yaml",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        self.assertEqual(self.dec("mv src/a.py src/b.py"), "")
+
+    def test_guard_bash_test_weakening(self):
+        """AUD-HAR-026: Bash xoá/dời/sửa tại chỗ file test ĐÃ CÓ → hỏi (LOOP-CI-001); tạo test mới thì không."""
+        for cmd in (
+            "rm -f tests/test_a.py",
+            "rm tests/test_a.py",
+            "git rm tests/test_a.py",
+            "mv tests/test_a.py /tmp/x",
+            "sed -i /assert/d tests/test_a.py",
+            "echo '' > tests/test_a.py",
+            "truncate -s 0 tests/test_a.py",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        self.assertEqual(self.dec("cat > tests/test_new.py <<'E'\ndef test_y():\n    assert 2\nE"), "")
+
+    def test_evidence_tamper(self):
+        """AUD-HAR-024: ghi/xoá tay `.autopilot/` (bằng chứng, trạng thái vòng) → hỏi; chỉ `xt.py loop …` được ghi."""
+        for cmd in (
+            "echo '{}' > .autopilot/evidence/T-001.json",
+            "tee .autopilot/state.json",
+            "sed -i s/false/true/ .autopilot/state.json",
+            "rm -rf .autopilot",
+            "rm -f .autopilot/evidence/T-001.json",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        for rel in (".autopilot/evidence/T-001.json", ".autopilot/state.json"):
+            with self.subTest(rel):
+                self.assertEqual(self.guard.edit_decision(rel, str(self.root))[0], "ask")
+        self.assertEqual(self.dec("python3 scripts/xt.py loop record --task T-001 -- true"), "")
+
+    def test_guard_gate_patterns(self):
+        """AUD-HAR-027: file cổng phổ biến được bảo vệ khi sửa."""
+        for rel in ("pytest.ini", "tox.ini", "vite.config.ts", "conftest.py", "noxfile.py", ".flake8", ".golangci.yml"):
+            with self.subTest(rel):
+                self.assertEqual(self.guard.classify_path(rel), "gate")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class CommitGateForeignRepoTest(unittest.TestCase):
+    def test_commit_gate_foreign_repo(self):
+        """AUD-SEC-015: commit vào repo NGOÀI dự án → hỏi, không chạy cổng (mã) của repo đó trước bước hỏi."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        proj, foreign = tmp / "proj", tmp / "foreign"
+        for d in (proj, foreign):
+            (d / "scripts").mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(d)], check=True)
+        mark = tmp / "PWNED"
+        (foreign / "scripts" / "dev-task.sh").write_text(f"#!/bin/sh\ntouch {mark}\n", encoding="utf-8")
+        (foreign / "scripts" / "dev-task.sh").chmod(0o755)
+        (foreign / "xt.yaml").write_text(f"test: touch {mark}\n", encoding="utf-8")
+        for cmd in (f"cd {foreign} && git commit -m x", f"git -C {foreign} commit -m x"):
+            with self.subTest(cmd):
+                code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, proj)
+                self.assertEqual(code, 0)
+                self.assertEqual(decision(out), "ask")
+                self.assertFalse(mark.exists())
+
+    def test_missing_guard_asks(self):
+        """AUD-SEC-019: guard.py bị dời/xoá → hook không im lặng cho qua mọi lệnh."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        hooks = tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, hooks / f)
+        r = subprocess.run(
+            ["bash", str(hooks / "pre-bash-guard.sh")],
+            input=json.dumps({"tool_input": {"command": "git push --force origin main"}}),
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp)),
+            timeout=60,
+        )
+        self.assertEqual((r.returncode, decision(r.stdout)), (0, "ask"))
 
 
 if __name__ == "__main__":
