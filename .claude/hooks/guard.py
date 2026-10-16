@@ -28,7 +28,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
@@ -732,6 +732,7 @@ ASK_CMDS: Dict[str, Optional[Tuple[str, ...]]] = {
 # `gh <nhóm> <lệnh>` đối ngoại (đổi repo/CI/biến/bí mật); `gh release`, `gh secret` ở mọi lệnh con.
 GH_ASK = {("release",), ("secret",), ("workflow", "run"), ("variable", "set"), ("variable", "delete")}
 GH_ASK |= {("repo", "edit"), ("repo", "sync"), ("repo", "rename"), ("repo", "archive"), ("repo", "delete")}
+GH_ASK |= {("repo", "set-default")}  # đổi repo mà `gh pr merge`/`{owner}/{repo}` trỏ tới, như `-R` (AUD-SEC-030)
 INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 
@@ -983,18 +984,19 @@ def _gh_api_writes(args: List[str]) -> bool:
     khi có trường; endpoint `graphql`: mutation, hoặc query không đọc được tại chỗ (`@file`, `--input`, `$(…)`)."""
     methods = _gh_api_methods(args)
     fields = _gh_api_field_values(args)
+    has_input = any(a.split("=", 1)[0] == "--input" for a in args)
     if _positionals(args, GH_API_VALUE_FLAGS)[:1] == ["graphql"]:
-        indirect = any(a.split("=", 1)[0] == "--input" for a in args) or any("$(" in a or "`" in a for a in args)
+        indirect = has_input or any("$(" in a or "`" in a for a in args)
         return (
             indirect or any(v.partition("=")[2].startswith("@") for v in fields) or "mutation" in " ".join(args).lower()
         )
     if len(set(methods)) > 1:
         return True
-    return (methods[-1] if methods else ("POST" if fields else "GET")) != "GET"
+    return (methods[-1] if methods else ("POST" if fields or has_input else "GET")) != "GET"  # AUD-SEC-029
 
 
-# Tool MCP merge/bật auto-merge PR (vd `mcp__github__merge_pull_request`). Bật auto-merge của GitHub không ghim được
-# head (commit đẩy sau vẫn tự merge) → luôn hỏi; merge ghim `expectedHeadSha` mà merge-check cho phép → allow (ADR-0014).
+# Tool MCP merge/bật auto-merge PR (vd `mcp__github__merge_pull_request`). Merge ghim `expectedHeadSha` mà merge-check
+# cho phép → allow (ADR-0014); bật auto-merge (không ghim head) chỉ allow ở `merge_autonomy` L3 (ADR-0015), dưới L3 hỏi.
 MCP_MERGE_RE = re.compile(r"mcp__.+__\w*(merge_pull_request|auto_merge)\w*")
 MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_method", "commit_title", "commit_message"}
 
@@ -1377,27 +1379,36 @@ MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"
 
 
 SHELL_OPTS_WITH_VALUE = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+# Đường dẫn tới chính stdin: `bash /dev/stdin <<E` đọc lệnh từ heredoc như `bash <<E` (AUD-SEC-028).
+STDIN_SCRIPTS = {"/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"}
+
+
+def _shell_opt_width(a: str) -> int:
+    """Số token một cờ shell chiếm (`-o pipefail`/`-eo pipefail` = 2, `--norc`/`-e`/`+x` = 1); 0 = không phải cờ."""
+    if a in SHELL_OPTS_WITH_VALUE or (len(a) > 2 and a[0] in "-+" and a[1] != "-" and a[-1] in "oO"):
+        return 2
+    return 1 if len(a) > 1 and a[0] in "-+" else 0
 
 
 def _shell_script_arg(n: List[str]) -> Tuple[bool, Optional[str]]:
-    """Duyệt cờ của shell (`-o pipefail`, `-O extglob`, `--norc`, `--login`, cờ gộp `-eo`): (có `-c`, chuỗi sau `-c`
-    hoặc tên file script; None khi đọc stdin). Reviewer #60: dừng ở cờ dài/`-o` từng làm lọt `bash -o pipefail -c`."""
+    """Duyệt cờ của shell như bash: (có `-c`, đối số không-phải-cờ ĐẦU TIÊN = chuỗi lệnh khi có `-c`, tên file script
+    khi không; None khi đọc stdin). Cờ đứng SAU `-c` vẫn là cờ (`bash -c -e '…'`), `--`/`-` kết thúc tuỳ chọn, `-s` đọc
+    stdin (AUD-SEC-028). Reviewer #60: dừng ở cờ dài/`-o` từng làm lọt `bash -o pipefail -c`."""
+    has_c = has_s = False
     i = 1
     while i < len(n):
         a = n[i]
-        if a in SHELL_OPTS_WITH_VALUE or (len(a) > 2 and a[0] in "-+" and a[1] != "-" and a[-1] in "oO"):
-            i += 2  # `-o pipefail`, `-eo pipefail`
-            continue
-        if a.startswith("--") or (a[:1] == "+" and len(a) > 1):
+        if a in ("--", "-"):
             i += 1
-            continue
-        if a.startswith("-") and len(a) > 1:
-            if "c" in a[1:]:
-                return True, n[i + 1] if i + 1 < len(n) else None
-            i += 1
-            continue
-        return False, a  # file script
-    return False, None
+            break
+        width = _shell_opt_width(a)
+        if not width:
+            break
+        if width == 1 and a[0] == "-" and a[1] != "-":
+            has_c, has_s = has_c or "c" in a[1:], has_s or "s" in a[1:]
+        i += width
+    script = n[i] if i < len(n) else None
+    return has_c, None if has_s and not has_c else script
 
 
 def _stdin_shell(argv: List[str]) -> bool:
@@ -1407,7 +1418,8 @@ def _stdin_shell(argv: List[str]) -> bool:
         return False
     rest = [a for i, a in enumerate(n) if not _is_redirect(a) and not (i > 0 and _is_redirect(n[i - 1]))]
     has_c, script = _shell_script_arg(rest)
-    return not has_c and script is None and "-n" not in rest  # `bash -n`: chỉ kiểm cú pháp
+    stdin = script is None or script in STDIN_SCRIPTS
+    return not has_c and stdin and "-n" not in rest  # `bash -n`: chỉ kiểm cú pháp
 
 
 def _shell_c_script(argv: List[str]) -> Optional[str]:
@@ -1436,6 +1448,24 @@ def _heredoc_scripts(cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell)
             if any(pred(c) for c in split_commands(tokenize(opener))):
                 out.append("\n".join(body))
     return out
+
+
+def _echoed_scripts(src: List[str]) -> List[str]:
+    """Chuỗi `echo …`/`printf …` sẽ thành lệnh khi vào shell. printf có `%`: định dạng và từng đối số được quét riêng
+    (`printf '%s\\n' 'rm -rf ~' | sh`, AUD-SEC-028); `\\n` trong định dạng là xuống dòng."""
+    words = src[1:]
+    if src[0] == "printf":
+        if words and "%" in words[0]:
+            return [words[0].replace("\\n", "\n"), *words[1:]]
+        return [" ".join(words).replace("\\n", "\n")]
+    while words and words[0] in ("-n", "-e", "-E", "-ne", "-en"):
+        words = words[1:]  # cờ của echo; phần còn lại (kể cả `--hard`) là lệnh sẽ chạy
+    return [" ".join(words)]
+
+
+def _here_strings(tokens: List[str]) -> List[str]:
+    """Here-string vào shell (`bash <<< '…'`): chuỗi là lệnh (AUD-SEC-028)."""
+    return [c[i + 1] for c in split_commands(tokens) if _stdin_shell(c) for i, t in enumerate(c[:-1]) if t == "<<<"]
 
 
 def _backtick_scripts(cmd: str) -> List[str]:
@@ -1467,22 +1497,38 @@ def _eval_scripts(tokens: List[str]) -> List[str]:
 
 
 def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
-    """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc vào shell, `echo/printf '…' | sh`, `eval '…'`, backtick."""
+    """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc/here-string vào shell, `echo/printf '…' | sh`, `eval '…'`,
+    backtick."""
     out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
     out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(cmd))
     for pipe in pipelines(tokens):
         for up, down in zip(pipe, pipe[1:]):
             src = normalize(up)
             if src[:1] in (["echo"], ["printf"]) and _stdin_shell(down):
-                words = src[1:]
-                while src[0] == "echo" and words and words[0] in ("-n", "-e", "-E", "-ne", "-en"):
-                    words = words[1:]  # cờ của echo; phần còn lại (kể cả `--hard`) là lệnh sẽ chạy
-                out.append(" ".join(words))
-    return out + _heredoc_scripts(cmd)
+                out += _echoed_scripts(src)
+    return out + _here_strings(tokens) + _heredoc_scripts(cmd)
+
+
+def _opaque_shells(tokens: List[str]) -> List[str]:
+    """Shell chạy lệnh guard không đọc được (AUD-SEC-028): ống từ nguồn khác echo/printf/heredoc vào shell
+    (`… | tee /dev/null | bash`, `cat run.sh | bash`), `bash -c` không kèm chuỗi lệnh (`xargs bash -c`)."""
+    asks: List[str] = []
+    for pipe in pipelines(tokens):
+        for up, down in zip(pipe, pipe[1:]):
+            src = normalize(up)
+            known = src[:1] in (["echo"], ["printf"]) or "<<" in up
+            if _stdin_shell(down) and not known:
+                asks.append(f"shell đọc lệnh từ ống `{' '.join(up)[:80]}` — guard không thấy lệnh sẽ chạy")
+    for c in split_commands(tokens):
+        n = normalize(c)
+        if n and n[0] in SHELLS and _shell_script_arg(n) == (True, None):
+            asks.append("`sh -c` không kèm chuỗi lệnh (lệnh đến từ stdin/xargs) — guard không thấy lệnh sẽ chạy")
+    return asks
 
 
 def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
     """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`."""
+    asks += _opaque_shells(tokens)
     for script in _nested_scripts(cmd, tokens):
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
@@ -1641,8 +1687,24 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
     return res
 
 
+# Lệnh merge/ghi GitHub: guard lỗi giữa chừng với lệnh này thì hỏi thay vì cho qua (fail-closed cho merge).
+MERGE_CMD_RE = re.compile(r"\bgh\s+(pr\b.*\bmerge|api)\b", re.S)
+
+
+def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, object]:
+    """Quyết định khi guard ném lỗi: fail-open về luồng (ADR-0002), trừ merge/`gh api` và tool MCP merge (payload đọc
+    được — stdin rác không phải lời gọi tool, LOOP-HARNESS-018) → hỏi."""
+    if (mode == "mcp" and isinstance(payload, dict)) or (
+        mode == "bash" and isinstance(cmd, str) and MERGE_CMD_RE.search(cmd)
+    ):
+        return {"decision": "ask", "reason": "guard lỗi khi kiểm merge/ghi GitHub — cần người xác nhận"}
+    return {"decision": ""}
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    payload: Any = None
+    cmd: object = None
     try:
         payload = json.loads(sys.stdin.read() or "{}")
         tool_input = payload.get("tool_input") or {}
@@ -1662,8 +1724,8 @@ def main() -> int:
             out = {"decision": d, "reason": r}
         else:
             out = {"decision": ""}
-    except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên
-        out = {"decision": ""}
+    except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên — trừ merge (AUD-SEC-032)
+        out = _failure_decision(mode, payload, cmd)
     sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
 

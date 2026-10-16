@@ -9,21 +9,26 @@ set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
 payload="$(cat)"
+# Lệnh merge/ghi GitHub trong payload (regex của bash, không cần grep/python3): `gh  pr merge`, `gh\tpr`, `gh pr -R o/r
+# merge` (AUD-SEC-031). JSON mã hoá tab thành `\t`.
+merge_re='gh([[:space:]]|\\t)+(pr([[:space:]]|\\t).*merge|api)'
+merge_like() { [[ $payload =~ $merge_re ]]; }
 # Không có python3 thì guard không chạy (fail-open về luồng) — riêng merge/ghi GitHub vẫn hỏi người, vì settings không còn
 # luật ask cho `gh pr merge` (ADR-0013; AUD-SEC-021). In JSON bằng printf: _lib.sh cũng cần python3.
 if ! command -v python3 >/dev/null 2>&1; then
-  case "$payload" in
-  *"gh pr merge"* | *"gh api"*)
+  if merge_like; then
     printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": "Khung cần xác nhận: không có python3 nên guard không kiểm được merge/ghi GitHub"}}'
-    ;;
-  esac
+  fi
   exit 0
 fi
 # guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → hỏi mọi lệnh tới khi
 # khôi phục (AUD-SEC-019). guard.py có mà lỗi giữa chừng → vẫn fail-open về luồng (ADR-0002).
 [ -f "$(dirname "$0")/guard.py" ] || pretool_decision ask "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào không chạy; khôi phục (git checkout hoặc install.py) rồi làm tiếp"
-res="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$XT_ROOT" python3 "$(dirname "$0")/guard.py" bash 2>/dev/null)" || exit 0
-[ -n "$res" ] || exit 0
+res="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$XT_ROOT" python3 "$(dirname "$0")/guard.py" bash 2>/dev/null)" || res=""
+if [ -z "$res" ]; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` hỏi (AUD-HAR-040)
+  merge_like && pretool_decision ask "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
+  exit 0
+fi
 decision="$(json_field "$res" decision)"
 [ "$decision" = "deny" ] && pretool_decision deny "$(json_field "$res" reason)"
 

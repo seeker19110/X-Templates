@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import re
@@ -1829,6 +1830,150 @@ class CommitGateForeignRepoTest(unittest.TestCase):
             timeout=60,
         )
         self.assertEqual((r.returncode, decision(r.stdout)), (0, "ask"))
+
+
+class GuardDeltaAuditTest(unittest.TestCase):
+    """Audit delta 2026-10-16 (#58–#66) đợt A: shell lồng, `gh api --input`, guard lỗi khi merge."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.guard = guard
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def dec(self, cmd: str) -> str:
+        return str(self.guard.bash_decision(cmd, str(self.root))["decision"])
+
+    def test_nested_shell_variants(self):
+        """AUD-SEC-028: here-string, cờ sau `-c`, `bash -`/`/dev/stdin`, `printf '%s'` vào shell; nguồn ống không đọc
+        được hoặc `bash -c` không có lệnh → hỏi."""
+        for cmd in (
+            "bash <<< 'git reset --hard HEAD'",
+            'sh <<<"git push --force origin main"',
+            "bash -c -- 'git push --force origin main'",
+            "bash -c -e 'git reset --hard'",
+            "bash -c -x 'rm -rf ~'",
+            "bash - <<'E'\ngit reset --hard\nE",
+            "bash /dev/stdin <<'E'\ngit reset --hard\nE",
+            "bash -s <<'E'\ngit reset --hard\nE",
+            "bash -s -- a b <<'E'\ngit reset --hard\nE",
+            "printf '%s\\n' 'rm -rf ~' | sh",
+            "printf 'git reset --hard\\n' | bash",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "deny")
+        for cmd in (
+            "bash -c -e 'gh pr merge 7 --admin'",
+            "echo 'git reset --hard' | tee /dev/null | bash",
+            "cat run.sh | bash",
+            "echo x | xargs -0 bash -c",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        for cmd in (
+            "bash script.sh",
+            "bash -- script.sh",
+            "wc -w <<< hello",
+            "cat <<'E' | bash\nls\nE",
+            "bash -c -- 'ls'",
+            "echo hello | bash -n",
+            "grep -c x <<< 'git reset --hard'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "")
+
+    def test_gh_api_input_is_write(self):
+        """AUD-SEC-029: `gh api … --input` là POST ngầm → ghi lên GitHub → hỏi; `gh repo set-default` đổi repo → hỏi."""
+        for cmd in (
+            "gh api repos/{owner}/{repo}/rulesets --input f.json",
+            "gh api repos/o/r/merges --input b.json",
+            "gh api --input=b.json repos/o/r/git/refs",
+            "gh api repos/o/r/releases --input -",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/5/merge -f sha=abc --input b.json",
+            "gh repo set-default evil/repo",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        for cmd in ("gh api repos/o/r/pulls/5", "gh api -X GET search/issues --input q.json", "gh repo view"):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "")
+
+    def _main(self, mode: str, payload: object) -> dict:
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["guard.py", mode]),
+            mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))),
+            mock.patch.object(sys, "stdout", out),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.root)}),
+        ):
+            self.assertEqual(self.guard.main(), 0)
+        return dict(json.loads(out.getvalue()))
+
+    def test_guard_error_fails_closed_for_merge(self):
+        """AUD-SEC-032, AUD-HAR-040: guard lỗi giữa chừng → merge/`gh api`/MCP merge hỏi; lệnh khác vẫn fail-open."""
+        self.assertEqual(
+            self._main("bash", {"tool_input": {"command": "gh pr merge 7 --admin > a\x00b"}})["decision"], "ask"
+        )
+        with mock.patch.object(self.guard, "bash_decision", side_effect=RuntimeError("x")):
+            self.assertEqual(
+                self._main("bash", {"tool_input": {"command": "gh api repos/o/r/merges"}})["decision"], "ask"
+            )
+            self.assertEqual(self._main("bash", {"tool_input": {"command": "ls"}})["decision"], "")
+        payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": [1]}
+        self.assertEqual(self._main("mcp", payload)["decision"], "ask")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class MergeHookFailClosedTest(unittest.TestCase):
+    """AUD-HAR-040, AUD-SEC-031: hook merge không im lặng cho qua khi guard vắng/lỗi hoặc thiếu python3."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.hooks = self.tmp / ".claude" / "hooks"
+        self.hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "pre-mcp-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, self.hooks / f)
+
+    def hook(self, name: str, payload: dict, env: dict | None = None) -> str | None:
+        r = subprocess.run(
+            [shutil.which("bash") or "bash", str(self.hooks / name)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env=env or dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp)),
+            timeout=60,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return decision(r.stdout)
+
+    def test_mcp_hook_missing_or_broken_guard_asks(self):
+        mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
+        self.assertEqual(self.hook("pre-mcp-guard.sh", mcp), "ask")
+        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        self.assertEqual(self.hook("pre-mcp-guard.sh", mcp), "ask")
+        self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --auto"}}), "ask")
+        self.assertIsNone(self.hook("pre-bash-guard.sh", {"tool_input": {"command": "ls"}}))
+
+    def test_no_python_fallback_regex(self):
+        nopy = self.tmp / "nopy"
+        nopy.mkdir()
+        for tool in ("cat", "dirname", "printf"):
+            src = shutil.which(tool)
+            if src:
+                (nopy / tool).symlink_to(src)
+        env = {"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.tmp)}
+        for cmd, want in (
+            ("gh  pr merge 7 --admin", "ask"),
+            ("gh\tpr merge 7", "ask"),
+            ("gh pr --repo o/r merge 7 --admin", "ask"),
+            ("gh pr view 7", None),
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
 
 
 if __name__ == "__main__":
