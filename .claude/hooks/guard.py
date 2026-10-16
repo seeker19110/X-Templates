@@ -688,6 +688,11 @@ MERGE_SELECTOR_RE = re.compile(r"#?\d+|[A-Za-z0-9._/-]+")
 PLAIN_MERGE_RE = re.compile(r"gh[ \t]+pr[ \t]+merge([ \t]+[A-Za-z0-9_./#:=@+-]+)*")
 # `gh api` ghi (khác GET; `-f`/`-F`/`--input` ngầm là POST) = hành động đối ngoại, kể cả merge qua REST (AUD-SEC-020).
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
+GH_API_VALUE_FLAGS: Tuple[str, ...] = (
+    *GH_API_FIELD_FLAGS,
+    *("-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "-p", "--preview", "--cache", "--hostname"),
+)
+HELP_FLAGS = {"--help", "-h"}
 
 
 def _flag_value(args: List[str], flag: str) -> Optional[str]:
@@ -724,6 +729,8 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     """`gh pr merge` (ADR-0013): mặc định hỏi người; `allow` chỉ khi `xt.py merge-check` = merge VÀ lệnh ghim đúng
     head đã kiểm (`--match-head-commit`). `--admin` (vượt ruleset) và `--repo` (repo khác) luôn hỏi."""
     sha = _flag_value(args, "--match-head-commit")
+    if sum(a == "--match-head-commit" or a.startswith("--match-head-commit=") for a in args) > 1:
+        sha = None  # gh lấy lần cuối, guard đã kiểm lần đầu — hai pin là không pin
     other_repo = any(a == "-R" or a.startswith(("-R", "--repo")) for a in args)
     if not sha or any(a.startswith("--admin") for a in args) or other_repo:
         return (
@@ -774,14 +781,45 @@ def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[s
     return _external_rule(name, args, root)
 
 
+def _gh_api_methods(args: List[str]) -> List[str]:
+    """Mọi giá trị `-X`/`--method` theo thứ tự (`-X PUT`, `-XPUT`, `-X=PUT`, `--method=PUT`) — gh lấy giá trị CUỐI."""
+    out: List[str] = []
+    for i, a in enumerate(args):
+        if a in ("-X", "--method") and i + 1 < len(args):
+            out.append(args[i + 1])
+        elif a.startswith("--method="):
+            out.append(a.split("=", 1)[1])
+        elif a.startswith("-X") and len(a) > 2:
+            out.append(a[2:].lstrip("="))
+    return [m.upper() for m in out]
+
+
+def _gh_api_field_values(args: List[str]) -> List[str]:
+    """Giá trị `key=value` của `-f`/`-F`/`--field`/`--raw-field` (cả dạng dính `-fk=v`, `--field=k=v`)."""
+    out: List[str] = []
+    for i, a in enumerate(args):
+        if a in ("-f", "-F", "--field", "--raw-field") and i + 1 < len(args):
+            out.append(args[i + 1])
+        elif a.startswith(("--field=", "--raw-field=")):
+            out.append(a.split("=", 1)[1])
+        elif a[:2] in ("-f", "-F") and len(a) > 2:
+            out.append(a[2:])
+    return out
+
+
 def _gh_api_writes(args: List[str]) -> bool:
-    """`gh api` ghi lên GitHub: phương thức khác GET (`-X`/`--method`, mặc định POST khi có trường), hoặc mutation GraphQL."""
-    method = _flag_value(args, "--method") or _flag_value(args, "-X")
-    method = method or next((a[2:] for a in args if a.startswith("-X") and len(a) > 2), None)
-    has_fields = any(a.split("=", 1)[0] in GH_API_FIELD_FLAGS or a[:2] in ("-f", "-F") for a in args)
-    if "graphql" in _positionals(args, GH_API_FIELD_FLAGS + ("-X", "--method", "-H", "--header")):
-        return "mutation" in " ".join(args).lower()
-    return (method or ("POST" if has_fields else "GET")).upper() != "GET"
+    """`gh api` ghi lên GitHub: phương thức khác GET (cờ cuối thắng; nhiều phương thức khác nhau = ghi), mặc định POST
+    khi có trường; endpoint `graphql`: mutation, hoặc query không đọc được tại chỗ (`@file`, `--input`, `$(…)`)."""
+    methods = _gh_api_methods(args)
+    fields = _gh_api_field_values(args)
+    if _positionals(args, GH_API_VALUE_FLAGS)[:1] == ["graphql"]:
+        indirect = any(a.split("=", 1)[0] == "--input" for a in args) or any("$(" in a or "`" in a for a in args)
+        return (
+            indirect or any(v.partition("=")[2].startswith("@") for v in fields) or "mutation" in " ".join(args).lower()
+        )
+    if len(set(methods)) > 1:
+        return True
+    return (methods[-1] if methods else ("POST" if fields else "GET")) != "GET"
 
 
 # Tool MCP merge/bật auto-merge PR (vd `mcp__github__merge_pull_request`): chưa có đường kiểm merge-check → hỏi người.
@@ -796,8 +834,12 @@ def mcp_decision(tool_name: str) -> Tuple[str, str]:
 
 def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     """Hành động đối ngoại/triển khai thật → ask; `gh pr merge` qua `xt.py merge-check` (ADR-0013)."""
-    if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & INFO_ONLY:
+    if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & HELP_FLAGS:
         return gh_pr_merge_rule(args[2:], root)
+    if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
+        return "ask", f"{EXTERNAL_ASK} — `gh pr <cờ> merge` (repo khác) không tự merge"
+    if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
+        return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return "ask", f"{EXTERNAL_ASK} — `gh api` ghi lên GitHub (merge/cấu hình phải qua lệnh có kiểm)"
     if name in ASK_CMDS and not (set(args) and set(args) <= INFO_ONLY):

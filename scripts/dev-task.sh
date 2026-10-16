@@ -182,7 +182,9 @@ case "$TASK" in
     # hợp lệ mà sau format không còn hợp lệ thì khôi phục bản trước (AUD-HAR-037).
     F="$P"; case "$F" in /*) ;; *) F="$ROOT/$F" ;; esac
     keep=""
-    case "$F" in *.json) json_ok "$F" && keep="$(mktemp)" && cp -p -- "$F" "$keep" ;; esac
+    case "$F" in
+      *.json | *.JSON) json_ok "$F" && keep="$(mktemp)" && { cp -p -- "$F" "$keep" || { rm -f -- "$keep"; keep=""; }; } ;;
+    esac
     ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
     if [ -n "$keep" ]; then
       json_ok "$F" || { cp -p -- "$keep" "$F"; log "format-file: formatter làm hỏng JSON '$P' → khôi phục bản trước"; }

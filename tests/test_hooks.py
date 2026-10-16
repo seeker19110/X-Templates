@@ -1206,6 +1206,10 @@ class MergeGuardTest(unittest.TestCase):
             f"gh pr merge 7 --squash {pin} --body-file /etc/passwd",
             f"gh pr merge 7 --squash {pin} > /tmp/o",
             f"gh pr merge 7 --squash {pin} <<E\n$(touch /tmp/x)\nE",
+            f"gh pr merge 7 --squash {pin} --match-head-commit def",  # gh lấy lần cuối
+            f"gh pr merge 7 --squash {pin} --match-head-commit=",
+            f"gh pr merge version --admin {pin}",  # `version`/`help` là selector, không phải hỏi trợ giúp
+            f"gh pr -R o/r merge 7 --admin {pin}",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
@@ -1219,6 +1223,17 @@ class MergeGuardTest(unittest.TestCase):
             "gh api --method=PUT repos/o/r/pulls/5/merge",
             "gh api repos/o/r/issues/1/comments -f body=x",
             "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+            "gh api repos/o/r/pulls/7/merge -X GET -X PUT",  # gh lấy cờ phương thức cuối
+            "gh api repos/o/r/pulls/7/merge --method GET --method PUT",
+            "gh api repos/o/r/pulls/7/merge -X GET -XPUT",
+            "gh api -X PUT repos/o/r/pulls/7/merge --template graphql",  # `graphql` là giá trị cờ, không phải endpoint
+            "gh api -X PUT repos/o/r/pulls/7/merge -q graphql",
+            "gh api graphql -F query=@m.graphql",  # mutation trong file/stdin
+            "gh api graphql --field=query=@m.graphql",
+            "gh api graphql -Fquery=@m.graphql",
+            "gh api graphql --input m.json",
+            'gh api graphql -f query="$(cat m.graphql)"',
+            "gh alias set m 'pr merge --admin'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
@@ -1226,6 +1241,9 @@ class MergeGuardTest(unittest.TestCase):
             "gh api repos/o/r/pulls/5",
             "gh api -X GET repos/o/r/pulls",
             "gh api graphql -f query='query{viewer{login}}'",
+            "gh api graphql -f query='query{viewer{login}}' --jq .data",
+            "gh api repos/o/r/pulls --paginate -q '.[].number'",
+            "gh alias list",
         ):
             with self.subTest(cmd):
                 self.assertIsNone(self.d(cmd)[0])
