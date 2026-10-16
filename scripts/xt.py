@@ -2710,6 +2710,13 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     statuses = [
         s for s in _gh_one(f"{repo}/commits/{sha}/status?per_page=100").get("statuses") or [] if isinstance(s, dict)
     ]
+    # Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên: chỉ lần mới nhất (id lớn
+    # nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58).
+    latest: Dict[str, Dict[str, Any]] = {}
+    for c in runs:
+        key = str(c.get("name"))
+        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
+            latest[key] = c
     rollup = [
         {
             "__typename": "CheckRun",
@@ -2717,7 +2724,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
         }
-        for c in runs
+        for c in latest.values()
     ]
     rollup += [
         {"__typename": "StatusContext", "context": s.get("context"), "state": str(s.get("state", "")).upper()}

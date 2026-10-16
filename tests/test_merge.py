@@ -387,6 +387,21 @@ class MergeCheckCliTest(unittest.TestCase):
             got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
         self.assertEqual((got["verdict"], got["reasons"]), ("fix", ["CI đỏ: ci/old"]))
 
+    def test_rerun_check_uses_latest_run(self):
+        """#58: sửa tiêu đề PR chạy lại `quality` trên CÙNG head — lần cũ đỏ không được che lần mới xanh (như GitHub)."""
+        runs = [
+            {"id": 1, "name": "quality", "status": "completed", "conclusion": "failure"},
+            {"id": 2, "name": "quality", "status": "completed", "conclusion": "success"},
+        ]
+        with FakeGh(runs=runs).patch():
+            got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
+        self.assertEqual(got["verdict"], "merge")
+        with FakeGh(runs=list(reversed(runs)), statuses=[]).patch():  # thứ tự trả về không quyết định
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "merge")
+        newer_red = [{**runs[0], "id": 3}, runs[1]]
+        with FakeGh(runs=newer_red).patch():
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "fix")
+
     def test_review_decision_from_latest_review_per_user(self):
         def rv(user: str, state: str) -> dict:
             return {"user": {"login": user}, "state": state}
