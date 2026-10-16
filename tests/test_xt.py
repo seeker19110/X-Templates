@@ -534,6 +534,22 @@ class LoopTest(unittest.TestCase):
             self.assertNotIn(leak, out, name)
         self.assertIn("redis://:***@cache", out)
 
+    def test_redact_quoted_flag_values_and_linear_time(self):
+        """Reviewer #61: giá trị trong nháy sau cờ (`--password="a b"`, `-p"a b"`) che hết; dòng dài không chạy bậc hai."""
+        j = "".join
+        pw = j(["my se", "cret pw"])
+        for raw in (f'--password="{pw}" x', f"--token='{pw}' y", f'mysql -u root -p"{pw}" -e x'):
+            with self.subTest(raw):
+                out = xt.redact(raw)
+                self.assertNotIn("cret", out)
+        import time
+
+        for blob in ("a" * 50_000, "mysql " * 20_000, ("token" + "f" * 40 + " ") * 2_000):
+            with self.subTest(blob[:12]):
+                t0 = time.monotonic()
+                xt.redact(blob)
+                self.assertLess(time.monotonic() - t0, 2.0)
+
     def test_redact_applies_to_evidence_cmd(self):
         with redirect_stdout(io.StringIO()):
             xt.loop_record("T-009", ["echo --token SUPERSECRETVALUE; exit 1"], self.base)
