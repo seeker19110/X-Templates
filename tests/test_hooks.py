@@ -1346,6 +1346,43 @@ class MergeGuardTest(unittest.TestCase):
         (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
         self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")
 
+    def test_l3_enables_auto_merge_on_open(self):
+        """ADR-0015 (chủ repo 2026-10-16): ở L3 mở PR là bật auto-merge — `gh pr merge --auto`/MCP được allow cho PR nhắm
+        nhánh mặc định; L2, PR chồng, `--admin`, repo khác → hỏi."""
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+
+        def mcp(inp: dict) -> str | None:
+            code, out, _ = run_hook(
+                "pre-mcp-guard.sh",
+                {"tool_name": "mcp__github__enable_pr_auto_merge", "tool_input": inp},
+                self.proj,
+                env,
+            )
+            return decision(out)
+
+        good = {"owner": "o", "repo": "r", "pullNumber": 7, "mergeMethod": "SQUASH"}
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # setUp: L2
+        self.assertEqual(mcp(good), "ask")
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")
+        self.assertEqual(mcp(good), "allow")
+        for cmd in ("gh pr merge 7 --auto --squash --admin", "gh pr merge 7 --auto -b x", "gh pr merge 7 --auto && ls"):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "ask")
+        for inp in (
+            {**good, "owner": "evil"},
+            {**good, "pullNumber": "7"},
+            {**good, "mergeMethod": "FAST"},
+            {**good, "x": 1},
+        ):
+            with self.subTest(inp):
+                self.assertEqual(mcp(inp), "ask")
+        self.fake_gh({**FAST_PR, "files": [{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}]})
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")  # L3: cả làn chuẩn
+        self.assertEqual(self.d("gh pr merge 7 --squash --match-head-commit abc1234def")[0], "allow")
+        self.fake_gh({**FAST_PR, "state": "CLOSED"})
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # PR đã đóng
+
     def test_merge_without_python_asks(self):
         """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""
         nopy = self.proj / "nopy"

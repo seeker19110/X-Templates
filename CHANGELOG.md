@@ -6,6 +6,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Mở PR là bật auto-merge — mức `merge_autonomy: L3`** (ADR-0015, D-011; chủ repo yêu cầu 2026-10-16, cho cả repo
+  khung lẫn dự án đích). Mặc định của `xt.yaml` repo khung và mẫu `templates/xt.yaml` thành **L3** (trước: L2 / L1).
+  `merge-check` ở L3 trả `merge` cho cả làn chuẩn và thêm `autonomy`, `stacked`; guard cho phép `gh pr merge <N> --auto`
+  và MCP `enable_pr_auto_merge` khi L3, PR còn mở, không phải PR chồng, đúng repo, không `--admin`/cờ lạ. Mục (ID, mức
+  giữ): `WF-REVIEW-007` thêm ngoại lệ L3 kèm ghi miễn trừ; `LOOP-STOP-002`, `LOOP-STOP-009`, `LOOP-STOP-022`,
+  `LOOP-DESIGN-020` ghi L3. Đánh đổi (ADR-0015 §Hệ quả): mất ghim head và vị từ làn nhanh khi merge. Dự án đích: chạy
+  lại `install.py`, bật "Allow auto-merge" + ruleset có required check; muốn người merge làn chuẩn thì đặt L2.
 - **Hook hỏi khi test đã có bị làm yếu** (`LOOP-CI-001`). `guard.py edit` (qua `pre-edit-guard.sh`, Edit/Write/MultiEdit)
   trả `ask` khi lần sửa một file test **đã có** (`test_*.py`, `*.test.*`, `*.spec.*`, `*_test.go`, `tests/`, `__tests__/`…)
   thêm dấu skip/only/xfail/`@flaky` hoặc bớt lời gọi kiểm (`assert*`, `expect(`, `t.Error`…). File test mới, file không
