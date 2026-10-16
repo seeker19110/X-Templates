@@ -713,7 +713,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.activate(blueprint="BP.md")
         v = xt.loop_verdict(self.base)
         self.assertEqual(v["verdict"], "continue")
-        self.assertIn("mục miễn trừ thiếu lý do: AAA-001 (dòng 1)", v["reason"])
+        self.assertIn("mục miễn trừ không hợp lệ: AAA-001 (dòng 1)", v["reason"])
 
     def test_blueprint_clean_or_missing_is_done(self):
         write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
@@ -761,6 +761,98 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.evidence("T-001", 0, "true")  # task chưa làm thắng blueprint còn MUST mở
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
+
+
+# --------------------------------------------------------------------------- loop verify (LOOP-DESIGN-022)
+
+
+class LoopVerifyTest(TmpMixin, unittest.TestCase):
+    """Kiểm lại cuối: chạy lại mọi Gate trên cây hiện tại trước khi Stop hook nhận `done`."""
+
+    def git(self, *args: str) -> None:
+        subprocess.run(["git", "-C", str(self.base), *args], check=True, capture_output=True)
+
+    def setUp(self):
+        self.base = self.tmpdir()
+        self.git("init", "-q")
+        for k, v in (("user.email", "t@x"), ("user.name", "t"), ("commit.gpgsign", "false")):
+            self.git("config", k, v)
+        write(self.base / ".gitignore", ".autopilot/\n")
+        write(self.base / "ok.txt", "1\n")
+        self.plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        write(self.plan, "- [x] `T-001` a — Gate: `test -f ok.txt`\n- [x] `T-002` b — Gate: `test  -f ok.txt`\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "init")
+        for t in ("T-001", "T-002"):
+            write(
+                self.base / ".autopilot" / "evidence" / f"{t}.json",
+                json.dumps({"task": t, "exit_code": 0, "cmd": "test -f ok.txt"}),
+            )
+        xt.write_state(
+            {"active": True, "iterations": 0, "max_iterations": 50, "plan": "docs/autopilot/PLAN.md"}, self.base
+        )
+
+    def verify(self) -> tuple[int, str]:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = xt.loop_verify(self.base)
+        return rc, buf.getvalue()
+
+    def test_stop_requires_final_verify_then_passes(self):
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")  # bằng chứng từng task vẫn đủ
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertIn("loop verify", json.loads(out)["reason"])
+        rc, text = self.verify()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("XANH (1 Gate)", text)  # hai task cùng lệnh (khác khoảng trắng) → chạy một lần
+        self.assertEqual(xt.hook_stop("{}", self.base), ("", 0))
+        self.assertFalse(xt.read_state(self.base)["active"])
+
+    def test_tree_change_after_verify_invalidates(self):
+        self.assertEqual(self.verify()[0], 0)
+        write(self.base / "new.txt", "x\n")  # file chưa track đổi cây
+        self.assertIn("chưa kiểm lại cuối", xt.final_check(self.base) or "")
+        self.assertEqual(self.verify()[0], 0)
+        self.assertIsNone(xt.final_check(self.base))
+        write(self.base / "ok.txt", "2\n")  # sửa file đã track
+        self.assertIsNotNone(xt.final_check(self.base))
+
+    def test_red_gate_blocks_with_failing_task(self):
+        (self.base / "ok.txt").unlink()
+        rc, text = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("ĐỎ", text)
+        self.assertIn("kiểm lại cuối ĐỎ (T-001)", xt.final_check(self.base) or "")
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertEqual(json.loads(out)["decision"], "block")
+
+    def test_gate_that_changes_tree_is_not_ok(self):
+        write(self.plan, "- [x] `T-001` a — Gate: `echo y >> ok.txt`\n")
+        self.git("commit", "-qam", "plan")
+        rc, text = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("Gate làm đổi cây", text)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual((rec["ok"], rec["stable"]), (False, False))
+        self.assertIn("kiểm lại cuối ĐỎ (cây đổi khi chạy Gate)", xt.final_check(self.base) or "")
+
+    def test_big_untracked_file_and_bad_timeout(self):
+        with unittest.mock.patch.object(xt, "FINGERPRINT_MAX_FILE", 1):
+            write(self.base / "big.bin", "xyz")
+            self.assertIsNotNone(xt.tree_fingerprint(self.base))
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}), redirect_stderr(io.StringIO()):
+            self.assertEqual(xt.loop_verify(self.base), 2)
+
+    def test_no_git_or_no_plan_and_cli(self):
+        other = self.tmpdir()
+        self.assertIsNone(xt.tree_fingerprint(other))
+        self.assertIsNone(xt.final_check(other))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.loop_verify(other), 0)  # không có PLAN: 0 Gate, xanh rỗng
+        buf = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}), redirect_stdout(buf):
+            self.assertEqual(xt.main(["loop", "verify"]), 0)
+        self.assertIn("kiểm lại cuối: XANH", buf.getvalue())
 
 
 # --------------------------------------------------------------------------- loop record / helpers

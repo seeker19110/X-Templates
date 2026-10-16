@@ -715,9 +715,22 @@ class AuditRegressionTest(unittest.TestCase):
         # Chữ của mục có thể tự chứa "— Miễn:" (LOOP-HARNESS-007) — không được tính là lý do miễn.
         text = "- [~] `L-007` **MUST** a → Kiểm: chỉ khác cột trạng thái và `— Miễn:`. · Nguồn: x"
         self.assertEqual(xt.blueprint_status_text(text)["bad_waivers"], ["L-007 (dòng 1)"])
-        for note in (" — Miễn: không áp dụng", " (Miễn: không áp dụng — D-004)", " - Miễn: V1 chưa cần"):
+        ok_notes = (
+            " — Không áp dụng: không có thanh toán",
+            " (Không áp dụng: CLI cục bộ — D-004)",
+            ' - Miễn: V1 chưa cần — Duyệt: "ok, V1 bỏ" 2026-10-16',
+            " — Miễn: hoãn — Duyệt: https://github.com/o/r/issues/7",
+            " — Miễn: hoãn — Duyệt: “đồng ý” (2026-10-16)",
+        )
+        for note in ok_notes:
             self.assertEqual(xt.blueprint_status_text(text + note)["bad_waivers"], [], note)
         self.assertEqual(xt.blueprint_status_text(text + " — Miễn: ")["bad_waivers"], ["L-007 (dòng 1)"])
+        # LOOP-STOP-024: MUST có áp dụng mà bỏ cần lời chủ dự án; câu tự viết "chủ dự án duyệt" không phải bằng chứng
+        need = ["L-007 (dòng 1: MUST `Miễn` thiếu `Duyệt:` của chủ dự án)"]
+        for note in (" — Miễn: không áp dụng", " — Miễn: chủ dự án duyệt 2026-10-15", ' — Miễn: x — Duyệt: "ok"'):
+            self.assertEqual(xt.blueprint_status_text(text + note)["bad_waivers"], need, note)
+        should = text.replace("**MUST**", "**SHOULD**") + " — Miễn: V1 chưa cần"
+        self.assertEqual(xt.blueprint_status_text(should)["bad_waivers"], [])
 
     def test_carry_states_keeps_any_note_and_own_items(self):
         new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b mới. · Nguồn: y\n"
@@ -746,7 +759,12 @@ class AuditRegressionTest(unittest.TestCase):
 
         bp = self.tmp / "BP.md"
         bp.write_text(
-            unicodedata.normalize("NFD", "- [~] `X-001` **MUST** a — Miễn: không áp dụng\n"), encoding="utf-8"
+            unicodedata.normalize(
+                "NFD",
+                "- [~] `X-001` **MUST** a — Không áp dụng: không có thanh toán\n"
+                '- [~] `X-002` **MUST** b — Miễn: hoãn V2 — Duyệt: "được, để V2" 2026-10-16\n',
+            ),
+            encoding="utf-8",
         )
         self.assertEqual(xt.blueprint_status(bp)["bad_waivers"], [])
 
