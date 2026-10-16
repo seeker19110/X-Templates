@@ -63,6 +63,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- `11-autonomous-loop/harness-files.md`, bảng "Context vs memory vs tài liệu": thêm dòng **Memory tra cứu (tuỳ chọn)** và quyết định "một hay nhiều công cụ memory ngoài": **tối đa một**, nguồn sự thật vẫn là file harness; đề xuất mặc định engram (agent ghi có chủ đích, khớp `AI-AGENT-009`/`PRF-AGENT-013`), claude-mem khi muốn ghi tự động, agentmemory khi chấp nhận engine ELv2. Không đổi ID/mức.
 - `LOOP-HARNESS-021` **SHOULD** (mới) từ catalog `seeker19110/stored` 10 §4c (engram), bổ sung cho `LOOP-HARNESS-019`: chỉ bật một công cụ memory ngoài; kho memory ngoài repo, quyền chỉ chủ, coi là nhạy cảm vì có công cụ lưu nguyên văn prompt; đồng bộ memory vào repo (`.engram/`) tắt ở repo công khai, repo riêng phải quét bí mật. Dự án đích: chạy lại `compose`.
 - **Máy quyết khi nào merge PR đã mở** (ADR-0013). `xt.py merge-check [--pr N] [--pr-json F] [--json]` đọc `gh pr view`
   và trả `merge` · `wait` (nháp, CI đang chạy, mergeable chưa tính) · `update` (tụt sau nhánh đích → `gh pr update-branch`)
