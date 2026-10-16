@@ -1976,6 +1976,9 @@ YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
 LOOP_GATE_KEYS = ("lint", "test")  # ADR-0011: trong vòng autopilot, hai khoá này rỗng/no-op thì dev-task.sh ĐỎ
 GATE_NOOP_RE = re.compile(r"true|:|exit( 0)?|(echo|printf)(\s.*)?")  # khớp is_noop() trong dev-task.sh
 AUTOPILOT_IGNORES = (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot")
+# Công cụ memory ngoài cho coding agent (LOOP-HARNESS-021); khớp theo token trong tên plugin/MCP server.
+MEMORY_TOOLS = ("engram", "claude-mem", "agentmemory", "mem0", "openmemory", "basic-memory")
+MEMORY_TOOL_RE = re.compile(r"(?<![a-z0-9])(" + "|".join(re.escape(t) for t in MEMORY_TOOLS) + r")(?![a-z0-9])")
 INSTALL_HINT = "người chạy lại `python3 <bản clone X-Templates>/scripts/install.py <gốc dự án>`"
 
 
@@ -2322,12 +2325,72 @@ def _doctor_merge(base: Path) -> List[Finding]:
     return [Finding("merge", "warn", msg + "; người xoá dòng đó để guard + `xt.py merge-check` quyết (ADR-0013)")]
 
 
+def _claude_user_paths() -> Optional[Tuple[Path, Path]]:
+    """(settings.json, .claude.json) cấp người dùng của Claude Code; `CLAUDE_CONFIG_DIR` dời cả hai (cách engram tìm).
+    None khi không xác định được home (HOME trống, không có passwd): bỏ phần cấp người dùng, không làm vỡ `loop init`."""
+    root = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if root:
+        cfg = Path(root).expanduser()
+        return cfg / "settings.json", cfg / ".claude.json"
+    try:
+        home = Path.home()
+    except RuntimeError:
+        return None
+    return home / ".claude" / "settings.json", home / ".claude.json"
+
+
+def _enabled_plugins(base: Path, user_settings: Optional[Path]) -> List[str]:
+    """Plugin bật hiệu lực: `enabledPlugins` cấp người dùng → dự án → cục bộ, cấp sau thắng cấp trước."""
+    state: Dict[str, bool] = {}
+    files = (user_settings, base / ".claude" / "settings.json", base / ".claude" / "settings.local.json")
+    for p in [f for f in files if f is not None]:
+        plugins = (_read_json_obj(p) or {}).get("enabledPlugins")
+        if isinstance(plugins, dict):
+            state.update({str(k): v is True for k, v in plugins.items()})
+    return [k for k, on in state.items() if on]
+
+
+def _mcp_servers(base: Path, user_json: Optional[Path]) -> List[str]:
+    """Tên MCP server: `.claude.json` (gốc = cấp người dùng, `projects.<dự án>` = cấp cục bộ) và `.mcp.json` của dự án."""
+    cfg = (_read_json_obj(user_json) if user_json else None) or {}
+    projects = cfg.get("projects")
+    local = projects.get(str(base)) if isinstance(projects, dict) else None
+    sources = [cfg.get("mcpServers"), local.get("mcpServers") if isinstance(local, dict) else None]
+    sources.append((_read_json_obj(base / ".mcp.json") or {}).get("mcpServers"))
+    return sorted({str(k) for s in sources if isinstance(s, dict) for k in s})
+
+
+def _doctor_memory(base: Path) -> List[Finding]:
+    """LOOP-HARNESS-021: bật tối đa một công cụ memory ngoài; `.engram/` (Git Sync của engram) không nằm trong git.
+    Chỉ đọc tên plugin/server, không in giá trị cấu hình."""
+    user = _claude_user_paths()
+    names = [f"plugin {p}" for p in _enabled_plugins(base, user[0] if user else None)]
+    names += [f"MCP {s}" for s in _mcp_servers(base, user[1] if user else None)]
+    found: Dict[str, List[str]] = {}
+    for name in names:
+        for tool in sorted(set(MEMORY_TOOL_RE.findall(name.lower()))):
+            found.setdefault(tool, []).append(name)
+    out = []
+    if len(found) > 1:
+        seen = "; ".join(f"{t} ({', '.join(w)})" for t, w in sorted(found.items()))
+        msg = (
+            f"đang bật {len(found)} công cụ memory ngoài: {seen} — cùng hook đầu phiên/mỗi prompt nên context nhân lên"
+        )
+        out.append(Finding("memory", "warn", msg + "; giữ tối đa một, tắt phần còn lại (LOOP-HARNESS-021)"))
+    if shutil.which("git") and _git(base, "ls-files", "--", ".engram").stdout.strip():
+        msg = "`.engram/` (Git Sync của engram) đang nằm trong git — repo công khai: tắt `engram sync` và gỡ khỏi git"
+        out.append(
+            Finding("memory", "warn", msg + "; repo riêng: gitleaks quét `.engram/` trước commit (LOOP-HARNESS-021)")
+        )
+    return out
+
+
 def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
     (validate khung, cú pháp hook, progress-check) — dùng ở `loop init`."""
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gitignore(base)
-    out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base)
+    out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
     if deep:
         out += _doctor_framework(fw) + _doctor_progress(base)
     return out

@@ -38,7 +38,13 @@ class DoctorCase(unittest.TestCase):
         self.fw = self.base / ".xtemplates" / "framework"
         self.enterContext(
             unittest.mock.patch.dict(
-                os.environ, {"CLAUDE_PROJECT_DIR": str(self.base), "GIT_CEILING_DIRECTORIES": str(self.tmp)}
+                os.environ,
+                {
+                    "CLAUDE_PROJECT_DIR": str(self.base),
+                    "GIT_CEILING_DIRECTORIES": str(self.tmp),
+                    # cấu hình Claude cấp người dùng của máy chạy test không lọt vào kiểm memory
+                    "CLAUDE_CONFIG_DIR": str(self.tmp / "claude-cfg"),
+                },
             )
         )
         self.enterContext(unittest.mock.patch.object(xt, "SCRIPT_DIR", self.base / ".xtemplates" / "scripts"))
@@ -308,6 +314,113 @@ class LoopInitDoctorTest(DoctorCase):
         self.assertTrue(err.startswith("⚠ Audit khung còn 4 lỗi"))
         self.assertTrue(err.rstrip().endswith("(+1)"))
         self.assertTrue(xt.read_state(self.base)["active"])
+
+
+class DoctorMemoryTest(DoctorCase):
+    """LOOP-HARNESS-021: tối đa một công cụ memory ngoài; `.engram/` không nằm trong git."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = self.tmp / "claude-cfg"
+
+    def json_at(self, path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def plugins(self, rel: str, plugins: dict) -> None:
+        """Gộp `enabledPlugins` vào settings của dự án (giữ hook của bản cài)."""
+        p = self.base / rel
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        data["enabledPlugins"] = plugins
+        self.json_at(p, data)
+
+    def memory(self) -> list[xt.Finding]:
+        return [f for f in self.findings(deep=False) if f.code == "memory"]
+
+    def test_fresh_install_has_no_memory_finding(self):
+        self.assertEqual(self.memory(), [])
+
+    def test_one_tool_in_several_places_is_fine(self):
+        self.json_at(self.cfg / "settings.json", {"enabledPlugins": {"engram@engram": True}})
+        self.json_at(self.cfg / ".claude.json", {"mcpServers": {"engram": {"command": "engram"}}})
+        self.json_at(self.base / ".mcp.json", {"mcpServers": {"plugin_engram_engram": {}}})
+        self.assertEqual(self.memory(), [])
+
+    def test_two_tools_warn_with_names_and_where(self):
+        self.plugins(".claude/settings.json", {"claude-mem@thedotmack": True})
+        self.json_at(self.base / ".mcp.json", {"mcpServers": {"engram": {"command": "engram", "env": {"K": "bí-mật"}}}})
+        [f] = self.memory()
+        self.assertEqual(f.level, "warn")
+        self.assertIsNone(f.fix)
+        for part in (
+            "2 công cụ",
+            "claude-mem (plugin claude-mem@thedotmack)",
+            "engram (MCP engram)",
+            "LOOP-HARNESS-021",
+        ):
+            self.assertIn(part, f.msg)
+        self.assertNotIn("bí-mật", f.msg)  # chỉ in tên, không in giá trị cấu hình
+        rc, doc = self.doctor_json()
+        [row] = [r for r in doc["findings"] if r["code"] == "memory"]
+        self.assertEqual((row["level"], row["fixable"]), ("warn", False))
+
+    def test_local_settings_override_and_local_scope_mcp(self):
+        self.plugins(".claude/settings.json", {"agentmemory@rohitg00": True, "x@y": False})
+        self.plugins(".claude/settings.local.json", {"agentmemory@rohitg00": False})
+        self.json_at(self.cfg / ".claude.json", {"projects": {str(self.base): {"mcpServers": {"engram": {}}}}})
+        self.assertEqual(self.memory(), [])  # agentmemory bị tắt ở cấp cục bộ → chỉ còn engram
+        self.json_at(self.cfg / "settings.json", {"enabledPlugins": {"mem0@mem0ai": True}})
+        [f] = self.memory()
+        self.assertIn("mem0 (plugin mem0@mem0ai)", f.msg)
+        self.assertIn("engram (MCP engram)", f.msg)
+
+    def test_malformed_configs_fail_open(self):
+        self.plugins(".claude/settings.json", ["engram@engram"])
+        self.json_at(self.cfg / ".claude.json", {"mcpServers": ["claude-mem"], "projects": {str(self.base): "hỏng"}})
+        self.write(".mcp.json", "{không phải json")
+        self.assertEqual(self.memory(), [])
+        self.json_at(self.cfg / ".claude.json", {"projects": ["hỏng"]})
+        self.assertEqual(self.memory(), [])
+
+    def test_matching_is_by_token(self):
+        self.plugins(".claude/settings.json", {"claude-memory@x": True, "engrams@y": True, "MEM0-pro@z": True})
+        self.json_at(self.base / ".mcp.json", {"mcpServers": {"basic-memory": {}}})
+        [f] = self.memory()  # chỉ mem0 (không phân biệt hoa thường) và basic-memory khớp
+        self.assertIn("basic-memory (MCP basic-memory)", f.msg)
+        self.assertIn("mem0 (plugin MEM0-pro@z)", f.msg)
+        self.assertNotIn("claude-memory", f.msg)
+        self.assertNotIn("engrams", f.msg)
+
+    def test_home_default_without_config_dir(self):
+        home = self.tmp / "home"
+        self.json_at(home / ".claude" / "settings.json", {"enabledPlugins": {"engram@engram": True}})
+        self.json_at(home / ".claude.json", {"mcpServers": {"claude-mem": {}}})
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            unittest.mock.patch("pathlib.Path.home", return_value=home),
+        ):
+            [f] = self.memory()
+        self.assertIn("claude-mem (MCP claude-mem)", f.msg)
+        self.assertIn("engram (plugin engram@engram)", f.msg)
+
+    def test_unknown_home_skips_user_level_without_crashing(self):
+        self.plugins(".claude/settings.json", {"engram@engram": True, "claude-mem@thedotmack": True})
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            unittest.mock.patch("pathlib.Path.home", side_effect=RuntimeError("Could not determine home directory")),
+        ):
+            [f] = self.memory()  # cấp dự án vẫn được kiểm
+        self.assertIn("2 công cụ", f.msg)
+
+    def test_engram_dir_tracked_in_git_warns(self):
+        self.write(".engram/chunk-001.jsonl.gz", "x")
+        self.assertEqual(self.memory(), [])  # chưa vào git
+        subprocess.run(["git", "-C", str(self.base), "add", ".engram"], check=True)
+        [f] = self.memory()
+        self.assertIn("`.engram/`", f.msg)
+        self.assertIn("gitleaks", f.msg)
 
 
 if __name__ == "__main__":
