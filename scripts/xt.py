@@ -2619,14 +2619,15 @@ def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
 
 def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None) -> Dict[str, Any]:
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
-    `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2; lệnh merge ghim `--match-head-commit` (có commit mới → lệch)."""
+    `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn — chủ dự án chọn, ADR-0015); lệnh merge ghim
+    `--match-head-commit` (có commit mới → lệch)."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
     if blocked:
         verdict, reasons = blocked
-    elif lane_reasons:
+    elif lane_reasons and autonomy < 3:
         verdict, reasons = "human", lane_reasons
     elif autonomy < 2:
         verdict, reasons = (
@@ -2652,6 +2653,9 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         "head": pr.get("headRefOid", ""),
         "verdict": verdict,
         "lane": lane,
+        # L3 (ADR-0015): guard cho bật auto-merge của GitHub ngay khi mở PR — trừ PR chồng (nhắm nhánh sắp bị xoá).
+        "autonomy": autonomy,
+        "stacked": _stacked_blocker(pr) is not None,
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
