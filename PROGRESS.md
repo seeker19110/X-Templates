@@ -3,11 +3,11 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-15 · Nhánh: claude/pensive-dirac-s6icry
 
 ## Đang làm
-- Nhánh `claude/youthful-tesla-x2zshi`: audit khung trước `/autopilot` — `xt.py doctor [--fix] [--json]` (hook + file hook + cú pháp, skill, AGENTS/CLAUDE, `xt.yaml`, `.gitignore`, state, `validate`, PROGRESS; `--fix` chỉ sửa phần an toàn, không đụng hook/settings), skill `/autopilot` bước 0 chạy đầu tiên, `loop init` cảnh báo khi còn lỗi, mục `LOOP-HARNESS-020`. ADR-0010 đã merge ở #48.
+- Không có việc dở. Đã merge: #49 (sửa xanh giả, cổng commit nhầm repo, guard lọt lệnh), #50 (`xt.py doctor`).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
-2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `AGENTS.md`/skill `*.xtemplates-new` theo ADR-0008) từ X-Templates để chuyển `.xstored/`→`.xtemplates/`, `xs.yaml`→`xt.yaml` (ADR-0007) + nhận guard/hook mới (#35, #36) + `changelog-check` + `progress-check` xét `MERGE_HEAD` (#41) + hook `PreCompact` (ADR-0009, `merge_hooks` tự thêm).
+2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `AGENTS.md`/skill `*.xtemplates-new` theo ADR-0008) từ X-Templates để chuyển `.xstored/`→`.xtemplates/`, `xs.yaml`→`xt.yaml` (ADR-0007) + nhận guard/hook mới (#35, #36) + `changelog-check` + `progress-check` xét `MERGE_HEAD` (#41) + hook `PreCompact` (ADR-0009, `merge_hooks` tự thêm) + `xt.py doctor` (#50) — cài xong chạy `python3 .xtemplates/scripts/xt.py doctor --fix`.
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong `eval`/alias/biến chứa cờ (CHANGELOG); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
@@ -39,8 +39,10 @@
 - 2026-10-15 Phiên chính tự duyệt điểm quyết định chuyên môn (5 tiêu chí: đúng & an toàn · đường lùi · bền lâu · trải nghiệm · tốc độ phá hoà), ghi `loop decide` D-NNN; hành động vẫn dừng có hook; mặc định tự host, dịch vụ thật quyết ở G7 — ADR-0008 (repo khung + dự án đích).
 - 2026-10-15 Autopilot một phiên đến khi xong: context đầy → compaction + checkpoint (không bàn giao); bàn giao chỉ khi ≥ 80% trần vòng/giờ/tiền; việc cần người `loop defer`, gom cuối phiên; chạy bằng `claude --permission-mode auto` — ADR-0009.
 - 2026-10-15 Phản hồi dự án đích → khung: dự án ghi `docs/xtemplates-feedback/FB-NNN.md` (`redact`), khung kéo về bằng Routine hằng tuần → PR nháp, đủ ngưỡng khi ≥ 2 dự án hoặc có tái hiện; người duyệt trước khi công khai — ADR-0010.
+- 2026-10-16 Audit khung trước `/autopilot`: `xt.py doctor --fix` là việc đầu tiên; `--fix` chỉ sửa phần đảo ngược được, hook/settings để người (`install.py`); `loop init` cảnh báo, không chặn (fail-open về luồng) — `LOOP-HARNESS-020`.
+- 2026-10-16 CI: `portability.yml` (macOS bash 3.2) không chạy trên PR, chỉ khi push vào `main` (chủ repo yêu cầu); đỏ sau merge thì sửa bằng PR mới.
 ## Bàn giao phiên
-- 2026-10-15 · Commit cuối trên `main`: `0cab236` (#47); tag `v2.0.0` → `55de4d1`; SHA quét audit `8e64aac` (sau đó có #43–#47: cần quét lại theo delta).
+- 2026-10-16 · Commit cuối trên `main`: `d3548fe` (#50); tag `v2.0.0` → `55de4d1`; SHA quét audit `8e64aac` (sau đó có #43–#50: cần quét lại theo delta).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (đọc `xt.yaml`; `pip install --require-hashes -r requirements-dev.txt`, cần shellcheck).
 - Autopilot: PLAN T-601…T-602 (xác minh lại bằng chứng sau #41). Đang chặn: không. Nhánh `claude/vibrant-davinci-mbt518` trên remote giữ lịch sử trước squash của #41 (cây trùng `main`; hook chặn force-push) — đã merge vào nhánh, không đổi nội dung.
 - Câu hỏi cần người: Tiếp theo 1 (`x-hotel-manager`).
