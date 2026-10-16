@@ -378,6 +378,13 @@ class ComposeTest(unittest.TestCase):
         self.assertIn("(.xtemplates/framework/01-baseline/security.md#a)", out)
         self.assertIn("(https://x.y)", out)
 
+    def test_compose_header_points_to_xt_beside_framework(self):
+        # Dự án đích gọi xt.py ở `.xtemplates/scripts/` — header từng ghi `scripts/xt.py` (không có ở dự án đích).
+        for link, cmd in ((".xtemplates/framework", ".xtemplates/scripts/xt.py"), ("framework", "scripts/xt.py")):
+            with self.subTest(link=link), unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_LINK": link}):
+                out = xt.compose(self.fw, "web-app", [], "M", include_may=False)
+                self.assertIn(f"`python3 {cmd} blueprint-status BLUEPRINT.md --strict`", out)
+
     def test_compose_unknown_profile(self):
         with self.assertRaises(SystemExit):
             xt.compose(self.fw, "khong-co", [], "M", include_may=False)
@@ -620,6 +627,52 @@ class AuditRegressionTest(unittest.TestCase):
         r = self.cli("blueprint-status", str(self.tmp / "khong-co.md"))
         self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
+
+    def test_blueprint_status_rejects_malformed_and_deleted_items(self):
+        # Mục MUST bị đổi ô lạ/thụt lề/xoá từng ra "0 MUST mở" và --strict exit 0.
+        head = "| Mức | Số mục |\n|---|---|\n| MUST | 3 |\n\n"
+        good = "- [x] `A-001` **MUST** a\n- [x] `A-002` **MUST** b\n- [x] `A-003` **MUST** c\n"
+        self.assertEqual(xt.blueprint_status_text(head + good)["bad_lines"], [])
+        for bad in ("- [-] `A-003` **MUST** c", "  - [ ] `A-003` **MUST** c", "- [ ] A-003 **MUST** c"):
+            with self.subTest(bad=bad):
+                s = xt.blueprint_status_text(head + good.replace("- [x] `A-003` **MUST** c", bad))
+                self.assertEqual(s["open_must"], [])
+                self.assertTrue(any("dòng 7" in b for b in s["bad_lines"]), s["bad_lines"])
+                self.assertTrue(any("2/3" in b for b in s["bad_lines"]), s["bad_lines"])
+        s = xt.blueprint_status_text(head + good.replace("- [x] `A-003` **MUST** c\n", ""))
+        self.assertEqual(s["bad_lines"], ["chỉ thấy 2/3 mục MUST so với bảng đầu trang (mục bị xoá?)"])
+        extra = head + good + "- [x] `HM-001` **MUST** mục riêng\n"  # dự án thêm mục: không báo
+        self.assertEqual(xt.blueprint_status_text(extra)["bad_lines"], [])
+
+    def test_waiver_reason_must_be_in_note(self):
+        # Chữ của mục có thể tự chứa "— Miễn:" (LOOP-HARNESS-007) — không được tính là lý do miễn.
+        text = "- [~] `L-007` **MUST** a → Kiểm: chỉ khác cột trạng thái và `— Miễn:`. · Nguồn: x"
+        self.assertEqual(xt.blueprint_status_text(text)["bad_waivers"], ["L-007 (dòng 1)"])
+        for note in (" — Miễn: không áp dụng", " (Miễn: không áp dụng — D-004)", " - Miễn: V1 chưa cần"):
+            self.assertEqual(xt.blueprint_status_text(text + note)["bad_waivers"], [], note)
+        self.assertEqual(xt.blueprint_status_text(text + " — Miễn: ")["bad_waivers"], ["L-007 (dòng 1)"])
+
+    def test_carry_states_keeps_any_note_and_own_items(self):
+        new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b mới. · Nguồn: y\n"
+        old = (
+            "- [x] `A-001` **MUST** a. · Nguồn: x - Bằng chứng: PR #7\n"
+            "- [~] `A-002` **MUST** b cũ. · Nguồn: y (Miễn: không áp dụng — D-004)\n"
+            "- [x] `HM-001` **MUST** mục riêng của dự án — Bằng chứng: test\n"
+            "- [x] `OLD-001` **MUST** mục khung đã ngừng dùng\n"
+        )
+        out, kept = xt.carry_states(old, new, {"A-001", "A-002", "OLD-001"})
+        self.assertEqual(kept, 2)
+        self.assertIn("- [x] `A-001` **MUST** a. · Nguồn: x - Bằng chứng: PR #7\n", out)  # chữ không đổi: giữ đuôi
+        self.assertIn("- [~] `A-002` **MUST** b mới. · Nguồn: y (Miễn: không áp dụng — D-004)\n", out)
+        self.assertIn("## Mục riêng của dự án", out)
+        self.assertIn("- [x] `HM-001` **MUST** mục riêng của dự án — Bằng chứng: test\n", out)
+        self.assertNotIn("OLD-001", out)  # khung bỏ có chủ đích
+        self.assertNotIn("Mục riêng", xt.carry_states(old, new)[0])  # không biết ID khung → hành vi cũ
+        changed = "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x\n"
+        self.assertEqual(
+            xt.carry_states(old, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x - Bằng chứng: PR #7\n"
+        )
+        self.assertEqual(xt.carry_states("- [x] `A-001` **MUST** cũ\n", changed)[0], changed)
 
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
