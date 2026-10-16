@@ -1178,7 +1178,9 @@ class DevTaskTest(unittest.TestCase):
         for val in ("# TODO điền", "true  # TODO", "'true' # x", ""):
             with self.subTest(val):
                 (self.tmp / "xt.yaml").write_text(f"lint: {val}\ntest: python3 -c 'print(1)'\n", encoding="utf-8")
-                self.assertNotEqual(self.run_task("gate").returncode, 0)
+                r = self.run_task("gate")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("ĐỎ: autopilot đang chạy mà 'lint'", r.stderr)  # đỏ vì no-op, không vì lý do khác
         (self.tmp / "xt.yaml").write_text(
             "lint: python3 -c 'print(\"#ok\")'  # kiểm\ntest: python3 -c 'print(1)'\n", encoding="utf-8"
         )

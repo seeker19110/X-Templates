@@ -6,6 +6,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- `loop status`: bằng chứng "cũ hơn `loop init`" so thời điểm thay vì so chuỗi ISO (offset khác nhau từng cho kết quả
+  sai, AUD-CODE-008); test no-op của `dev-task.sh` kiểm cả thông điệp đỏ (AUD-TEST-006).
 - **`AI-AGENT-013` nâng mức SHOULD → MUST@L** (ID giữ): mỗi tool khai thêm `tier` và `cost_class` (free/compute/llm/gpu),
   dựng catalog thất bại nếu thiếu; tool khai `readOnly` phải qua test hành vi (chạy trên snapshot rồi diff); không suy quyền
   từ tên tool. Dự án đích: ghép lại blueprint để nhận mức và chữ mới.
@@ -368,6 +370,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **`redact` che kín hơn, bớt che nhầm** (audit delta đợt C; AUD-CFG-006, CFG-007, CFG-008, CODE-009). Giá trị trong
+  nháy chứa nháy loại kia (`password: "it's a b"`) hoặc nháy chưa đóng không còn lộ phần sau; khoá `*_PWD`, `*_PASS`,
+  `pass`, `passphrase` (`MYSQL_PWD`, `DB_PASS`) được che, `PWD`/`bypass` thì không; `npm_`/`hf_`/`pypi-` chỉ che khi
+  đúng dạng khoá (`npm_config_cache`, `hf_hub_download` giữ nguyên), `-u 1000:1000` (uid:gid) giữ nguyên. Tên khoá dò
+  bằng nhìn trước + `\w++` (không quay lui) — từ dài lặp từ khoá (`"token" * 10000`) hết bậc hai (21 s → tức thì).
+  Dữ liệu đi qua `redact`: bằng chứng `loop record`, `feedback add/aggregate` (PR nháp repo public).
 - **Guard: đóng các đường vòng tìm thấy khi quét lại delta #58–#66** (audit delta đợt A; AUD-SEC-028, SEC-029,
   SEC-031, SEC-032, HAR-040; một phần SEC-030). Shell lồng: cờ đứng sau `-c` (`bash -c -e '…'`, `bash -c -- '…'`),
   here-string `bash <<< '…'`, `bash -`/`-s`/`/dev/stdin` + heredoc, `printf '%s\n' '…' | sh` đều được quét như lệnh;
