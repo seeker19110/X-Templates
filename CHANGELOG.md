@@ -324,6 +324,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Guard: đóng các đường vòng tìm thấy khi quét lại delta #58–#66** (audit delta đợt A; AUD-SEC-028, SEC-029,
+  SEC-031, SEC-032, HAR-040; một phần SEC-030). Shell lồng: cờ đứng sau `-c` (`bash -c -e '…'`, `bash -c -- '…'`),
+  here-string `bash <<< '…'`, `bash -`/`-s`/`/dev/stdin` + heredoc, `printf '%s\n' '…' | sh` đều được quét như lệnh;
+  ống từ nguồn guard không đọc được vào shell (`… | tee /dev/null | bash`, `cat run.sh | bash`) và `bash -c` không kèm
+  lệnh (`xargs bash -c`) → hỏi. `gh api … --input` (POST ngầm: tạo ruleset/ref/release, `/merges`) là ghi → hỏi;
+  `gh repo set-default` → hỏi. Guard lỗi giữa chừng (cả NUL trong lệnh) với `gh pr merge`/`gh api`/tool MCP merge →
+  hỏi thay vì cho qua; `pre-mcp-guard.sh` hỏi khi thiếu/lỗi `guard.py`; nhánh không có python3 của
+  `pre-bash-guard.sh` nhận `gh  pr merge`, tab, `gh pr -R o/r merge` bằng regex. Lệnh khác vẫn fail-open (ADR-0002).
+  Dự án đích: chạy lại `install.py` để nhận hook mới.
 - **Guard Bash: shell lồng, publish/deploy, gỡ hook/cổng/test** (audit 2026-10-16 đợt 3; AUD-SEC-015, SEC-017, SEC-018,
   SEC-019, HAR-026, HAR-027). Luật deny/ask áp đệ quy cho lệnh trong `sh -c`/`bash -lc` (cả lồng nhiều tầng, quá 3 tầng
   → hỏi), heredoc vào shell và `echo/printf … | sh` (luật hook-bypass riêng cho `-c` gộp vào đây). publish/deploy nhận
