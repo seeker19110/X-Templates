@@ -47,6 +47,76 @@ def pr(**over: Any) -> dict:
     return base
 
 
+class FakeGh:
+    """Giả `gh api` (REST) theo đường dẫn; mặc định trả đúng PR của fixture `pr()` (files và check-run chia 2 trang)."""
+
+    SHA = "abc1234def"
+    REPO = "repos/{owner}/{repo}"
+
+    def __init__(
+        self,
+        pull: dict | None = None,
+        reviews: list | None = None,
+        runs: list | None = None,
+        statuses: list | None = None,
+        open_prs: list | None = None,
+        raw: dict | None = None,
+    ):
+        self.pull = {
+            "number": 7,
+            "state": "open",
+            "merged": False,
+            "draft": False,
+            "mergeable": True,
+            "mergeable_state": "clean",
+            "head": {"sha": self.SHA},
+            "labels": [],
+            **(pull or {}),
+        }
+        self.reviews = reviews or []
+        self.runs = (
+            runs
+            if runs is not None
+            else [
+                {"name": "test", "status": "completed", "conclusion": "success"},
+                {"name": "lint", "status": "completed", "conclusion": "skipped"},
+            ]
+        )
+        self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
+        self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
+        self.raw = raw or {}
+        self.calls: list[list[str]] = []
+
+    def paths(self) -> list[str]:
+        return [c[-1] for c in self.calls]
+
+    def respond(self, cmd: list[str], **_: Any) -> subprocess.CompletedProcess:
+        self.calls.append(cmd)
+        path = cmd[-1]
+        files = [
+            {"filename": f["path"], "additions": f["additions"], "deletions": f["deletions"]} for f in pr()["files"]
+        ]
+        routes = {
+            f"{self.REPO}/pulls/7": json.dumps(self.pull),
+            f"{self.REPO}/pulls/7/files?per_page=100": json.dumps(files[:2]) + json.dumps(files[2:]),
+            f"{self.REPO}/pulls/7/reviews?per_page=100": json.dumps(self.reviews),
+            f"{self.REPO}/commits/{self.SHA}/check-runs?per_page=100": json.dumps({"check_runs": self.runs[:1]})
+            + "\n"
+            + json.dumps({"check_runs": self.runs[1:]}),
+            f"{self.REPO}/commits/{self.SHA}/status?per_page=100": json.dumps({"statuses": self.statuses}),
+        }
+        if path in self.raw:
+            out = self.raw[path]
+        elif "/pulls?head=" in path:
+            out = json.dumps(self.open_prs)
+        else:
+            out = routes[path]
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    def patch(self) -> Any:
+        return unittest.mock.patch.object(xt.subprocess, "run", side_effect=self.respond)
+
+
 def run_main(*args: str, stdin: str | None = None) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
@@ -203,16 +273,86 @@ class MergeCheckCliTest(unittest.TestCase):
         self.assertIn("HUMAN · PR #7 · làn nhanh", out)
         self.assertIn("merge_autonomy 'L9' không hợp lệ", out)
 
-    def test_fetches_with_gh(self):
-        done = subprocess.CompletedProcess([], 0, json.dumps(pr()), "")
-        with unittest.mock.patch.object(xt.subprocess, "run", return_value=done) as run:
-            rc, _, _ = run_main("merge-check", "--pr", "7")
-        self.assertEqual(rc, 0)
-        self.assertEqual(run.call_args[0][0][:4], ["gh", "pr", "view", "7"])
-        self.assertIn("statusCheckRollup", run.call_args[0][0][5])
-        with unittest.mock.patch.object(xt.subprocess, "run", return_value=done) as run:
-            run_main("merge-check")
-        self.assertEqual(run.call_args[0][0][:4], ["gh", "pr", "view", "--json"])
+    def test_fetches_with_rest_only(self):
+        gh = FakeGh()
+        with gh.patch():
+            rc, out, err = run_main("merge-check", "--pr", "7")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("MERGE · PR #7 · làn nhanh", out)
+        self.assertIn("--match-head-commit abc1234def", out)
+        self.assertTrue(all(c[:2] == ["gh", "api"] for c in gh.calls))  # không gh pr view, không GraphQL
+        self.assertFalse(any("graphql" in " ".join(c) for c in gh.calls))
+        self.assertIn("repos/{owner}/{repo}/commits/abc1234def/check-runs?per_page=100", gh.paths())
+
+    def test_rest_is_mapped_like_gh_pr_view(self):
+        gh = FakeGh()
+        with gh.patch():
+            self.assertEqual(xt._pr_rest("7"), pr(reviewDecision=""))  # cùng dict với fixture `gh pr view`
+        cases = {
+            "merged": ({"merged": True, "state": "closed"}, "state", "MERGED"),
+            "đang tính": ({"mergeable": None, "mergeable_state": "unknown"}, "mergeable", "UNKNOWN"),
+            "xung đột": ({"mergeable": False, "mergeable_state": "dirty"}, "mergeStateStatus", "DIRTY"),
+            "nháp": ({"draft": True}, "isDraft", True),
+        }
+        for name, (over, key, want) in cases.items():
+            with self.subTest(name), FakeGh(pull=over).patch():
+                self.assertEqual(xt._pr_rest("7")[key], want)
+        runs = [{"name": "e2e", "status": "in_progress", "conclusion": None}]
+        with FakeGh(runs=runs, statuses=[{"context": "ci/old", "state": "failure"}]).patch():
+            got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
+        self.assertEqual((got["verdict"], got["reasons"]), ("fix", ["CI đỏ: ci/old"]))
+
+    def test_review_decision_from_latest_review_per_user(self):
+        def rv(user: str, state: str) -> dict:
+            return {"user": {"login": user}, "state": state}
+
+        cases = {
+            "không review": ([], "clean", ""),
+            "duyệt": ([rv("a", "COMMENTED"), rv("a", "APPROVED")], "clean", "APPROVED"),
+            "đòi sửa còn hiệu lực": ([rv("a", "APPROVED"), rv("b", "CHANGES_REQUESTED")], "clean", "CHANGES_REQUESTED"),
+            "đòi sửa rồi duyệt": ([rv("b", "CHANGES_REQUESTED"), rv("b", "APPROVED")], "clean", "APPROVED"),
+            "đòi sửa bị dismiss": ([rv("b", "CHANGES_REQUESTED"), rv("b", "DISMISSED")], "clean", ""),
+            "bị chặn bởi protection": ([rv("a", "COMMENTED")], "blocked", "REVIEW_REQUIRED"),
+            "thiếu user": ([{"state": "CHANGES_REQUESTED"}], "clean", ""),
+        }
+        for name, (reviews, state, want) in cases.items():
+            with self.subTest(name), FakeGh(reviews=reviews, pull={"mergeable_state": state}).patch():
+                self.assertEqual(xt._pr_rest("7")["reviewDecision"], want)
+        with FakeGh(pull={"mergeable_state": "blocked"}).patch():
+            got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
+        self.assertEqual((got["verdict"], got["reasons"]), ("human", ["ruleset đòi review của người"]))
+
+    def test_pr_target_number_url_branch(self):
+        gh = FakeGh()
+        with gh.patch():
+            self.assertEqual(xt._pr_target("#7"), ("repos/{owner}/{repo}", "7"))
+            self.assertEqual(xt._pr_target("https://github.com/o/r/pull/9"), ("repos/o/r", "9"))
+            self.assertEqual(xt._pr_target("feat/x y"), ("repos/{owner}/{repo}", "7"))
+            self.assertEqual(xt._pr_target(None), ("repos/{owner}/{repo}", "7"))
+        lookups = [p for p in gh.paths() if "/pulls?head=" in p]
+        self.assertEqual(
+            lookups,
+            [
+                "repos/{owner}/{repo}/pulls?head={owner}:feat/x%20y&state=open&per_page=100",
+                "repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open&per_page=100",
+            ],
+        )
+        with FakeGh(open_prs=[]).patch():
+            rc, _, err = run_main("merge-check")
+        self.assertEqual(rc, 2)
+        self.assertIn("không có PR mở cho nhánh hiện tại", err)
+
+    def test_rest_bad_data_is_exit_2(self):
+        with FakeGh(pull={"head": None}).patch():
+            rc, _, err = run_main("merge-check", "--pr", "7")
+        self.assertEqual(rc, 2)
+        self.assertIn("thiếu `head`", err)
+        with FakeGh(raw={"repos/{owner}/{repo}/pulls/7": "[]"}).patch():  # không phải object → {} → thiếu head
+            self.assertEqual(run_main("merge-check", "--pr", "7")[0], 2)
+        with FakeGh(raw={"repos/{owner}/{repo}/pulls/7": "{hỏng"}).patch():
+            rc, _, err = run_main("merge-check", "--pr", "7")
+        self.assertEqual(rc, 2)
+        self.assertIn("JSON của PR không đọc được", err)
 
     def test_gh_and_input_errors_are_exit_2(self):
         fail = subprocess.CompletedProcess([], 1, "", "no pull requests found\n")

@@ -1055,9 +1055,42 @@ class MergeGuardTest(unittest.TestCase):
         self.fake_gh(FAST_PR)
 
     def fake_gh(self, pr: dict | None) -> None:
+        """`gh` giả trả JSON REST cho `gh api <đường dẫn>` (merge-check chỉ dùng REST), dựng từ PR dạng `gh pr view`."""
         gh = self.bin / "gh"
-        body = f"cat <<'JSON'\n{json.dumps(pr)}\nJSON" if pr is not None else "echo 'gh: lỗi mạng' >&2; exit 1"
-        gh.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        if pr is None:
+            gh.write_text("#!/bin/sh\necho 'gh: lỗi mạng' >&2; exit 1\n", encoding="utf-8")
+        else:
+            repo, n, sha = "repos/{owner}/{repo}", pr["number"], pr["headRefOid"]
+            runs = [
+                {"name": c["name"], "status": c["status"].lower(), "conclusion": c["conclusion"].lower()}
+                for c in pr["statusCheckRollup"]
+            ]
+            routes = {
+                f"{repo}/pulls/{n}": {
+                    "number": n,
+                    "state": pr["state"].lower(),
+                    "draft": pr["isDraft"],
+                    "mergeable": pr["mergeable"] == "MERGEABLE",
+                    "mergeable_state": pr["mergeStateStatus"].lower(),
+                    "head": {"sha": sha},
+                    "labels": pr["labels"],
+                },
+                f"{repo}/pulls/{n}/files?per_page=100": [
+                    {"filename": f["path"], "additions": f["additions"], "deletions": f["deletions"]}
+                    for f in pr["files"]
+                ],
+                f"{repo}/pulls/{n}/reviews?per_page=100": [],
+                f"{repo}/commits/{sha}/check-runs?per_page=100": {"check_runs": runs},
+                f"{repo}/commits/{sha}/status?per_page=100": {"statuses": []},
+                f"{repo}/pulls?head={{owner}}:{{branch}}&state=open&per_page=100": [{"number": n}],
+            }
+            script = (
+                f"#!{sys.executable}\nimport json, sys\nROUTES = json.loads({json.dumps(json.dumps(routes))})\n"
+                "if sys.argv[1] != 'api' or sys.argv[-1] not in ROUTES:\n"
+                "    sys.exit('gh giả: không có đường dẫn ' + sys.argv[-1])\n"
+                "print(json.dumps(ROUTES[sys.argv[-1]]))\n"
+            )
+            gh.write_text(script, encoding="utf-8")
         gh.chmod(0o755)
 
     def d(self, cmd: str) -> tuple[str | None, str]:
