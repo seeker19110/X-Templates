@@ -62,6 +62,7 @@ import tempfile
 import sys
 import traceback
 import unicodedata
+import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -2579,23 +2580,127 @@ class PrInputError(Exception):
     """Không lấy/đọc được JSON của PR — `merge-check` thoát 2."""
 
 
-def _pr_text(args: argparse.Namespace) -> str:
-    if args.pr_json:
-        return sys.stdin.read() if args.pr_json == "-" else Path(args.pr_json).read_text(encoding="utf-8")
-    cmd = ["gh", "pr", "view", *([args.pr] if args.pr else []), "--json", MERGE_FIELDS]
+def _gh_api(path: str, paginate: bool = False) -> List[Any]:
+    """`gh api` (REST, không GraphQL — phiên Claude Code chặn GraphQL) → danh sách giá trị JSON; `--paginate` in mỗi
+    trang một giá trị liền nhau (`[…][…]`) nên đọc lần lượt. `{owner}`/`{repo}`/`{branch}` do gh thay theo repo hiện tại."""
+    cmd = ["gh", "api", *(["--paginate"] if paginate else []), path]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PrInputError(f"không chạy được gh ({exc}) — cài/đăng nhập gh hoặc dùng --pr-json") from exc
     if r.returncode != 0:
-        raise PrInputError(f"gh pr view lỗi: {_one_line(r.stderr)}")
-    return r.stdout
+        raise PrInputError(f"gh api {path} lỗi: {_one_line(r.stderr)}")
+    dec, rest, out = json.JSONDecoder(), r.stdout.strip(), []
+    while rest:
+        val, end = dec.raw_decode(rest)
+        out.append(val)
+        rest = rest[end:].lstrip()
+    return out
+
+
+def _gh_one(path: str) -> Dict[str, Any]:
+    vals = _gh_api(path)
+    return vals[0] if vals and isinstance(vals[0], dict) else {}
+
+
+def _gh_items(path: str) -> List[Dict[str, Any]]:
+    """Mọi phần tử object của các trang mảng (`--paginate`)."""
+    return [x for page in _gh_api(path, True) if isinstance(page, list) for x in page if isinstance(x, dict)]
+
+
+PR_URL_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)")
+
+
+def _pr_target(pr_arg: Optional[str]) -> Tuple[str, str]:
+    """(tiền tố REST `repos/<chủ>/<repo>`, số PR) từ số (`7`, `#7`), URL PR, hoặc tên nhánh (mặc định nhánh hiện tại)."""
+    repo = "repos/{owner}/{repo}"
+    if pr_arg and pr_arg.lstrip("#").isdigit():
+        return repo, pr_arg.lstrip("#")
+    m = PR_URL_RE.search(pr_arg or "")
+    if m:
+        return f"repos/{m[1]}/{m[2]}", m[3]
+    head = urllib.parse.quote(pr_arg or "{branch}", safe="/{}")
+    found = _gh_items(f"{repo}/pulls?head={{owner}}:{head}&state=open&per_page=100")
+    if not found:
+        raise PrInputError(f"không có PR mở cho nhánh {pr_arg or 'hiện tại'}")
+    return repo, str(found[0].get("number", ""))
+
+
+def _review_decision(reviews: List[Dict[str, Any]], merge_state: str) -> str:
+    """Như `reviewDecision` của GraphQL: review mới nhất của mỗi người (bỏ COMMENTED; DISMISSED xoá). REST không cho biết
+    ruleset/branch protection đòi review, nên `mergeable_state` BLOCKED (GitHub tính cả protection cổ điển) → cần người."""
+    latest: Dict[str, str] = {}
+    for rv in reviews:
+        user, st = (rv.get("user") or {}).get("login"), str(rv.get("state", "")).upper()
+        if user and st in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[str(user)] = st
+    states = set(latest.values())
+    if "CHANGES_REQUESTED" in states:
+        return "CHANGES_REQUESTED"
+    if merge_state == "BLOCKED":
+        return "REVIEW_REQUIRED"
+    return "APPROVED" if "APPROVED" in states else ""
+
+
+def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
+    """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
+    repo, n = _pr_target(pr_arg)
+    pr = _gh_one(f"{repo}/pulls/{n}")
+    head = pr.get("head")
+    if not isinstance(head, dict):
+        raise PrInputError(f"JSON của PR #{n} không đọc được: thiếu `head`")
+    sha = str(head.get("sha", ""))
+    merge_state = str(pr.get("mergeable_state") or "unknown").upper()
+    reviews = _gh_items(f"{repo}/pulls/{n}/reviews?per_page=100")
+    runs = [
+        c
+        for page in _gh_api(f"{repo}/commits/{sha}/check-runs?per_page=100", True)
+        if isinstance(page, dict)
+        for c in page.get("check_runs") or []
+        if isinstance(c, dict)
+    ]
+    statuses = [
+        s for s in _gh_one(f"{repo}/commits/{sha}/status?per_page=100").get("statuses") or [] if isinstance(s, dict)
+    ]
+    rollup = [
+        {
+            "__typename": "CheckRun",
+            "name": c.get("name"),
+            "status": str(c.get("status", "")).upper(),
+            "conclusion": str(c.get("conclusion") or "").upper(),
+        }
+        for c in runs
+    ]
+    rollup += [
+        {"__typename": "StatusContext", "context": s.get("context"), "state": str(s.get("state", "")).upper()}
+        for s in statuses
+    ]
+    files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
+    mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
+    return {
+        "number": pr.get("number", n),
+        "state": "MERGED" if pr.get("merged") else str(pr.get("state", "")).upper(),
+        "isDraft": bool(pr.get("draft")),
+        "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
+        "mergeStateStatus": merge_state,
+        "reviewDecision": _review_decision(reviews, merge_state),
+        "headRefOid": sha,
+        "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
+        "statusCheckRollup": rollup,
+        "files": [
+            {"path": f.get("filename", ""), "additions": f.get("additions", 0), "deletions": f.get("deletions", 0)}
+            for f in files
+        ],
+    }
 
 
 def load_pr(args: argparse.Namespace) -> Dict[str, Any]:
-    """JSON của PR: `--pr-json FILE|-` hoặc `gh pr view [PR] --json …`; lỗi → PrInputError."""
+    """JSON của PR: `--pr-json FILE|-` (định dạng `gh pr view --json MERGE_FIELDS`) hoặc lấy qua REST; lỗi → PrInputError."""
     try:
-        data = json.loads(_pr_text(args))
+        if not args.pr_json:
+            return _pr_rest(args.pr)
+        text = sys.stdin.read() if args.pr_json == "-" else Path(args.pr_json).read_text(encoding="utf-8")
+        data = json.loads(text)
     except (OSError, json.JSONDecodeError) as exc:
         raise PrInputError(f"JSON của PR không đọc được: {exc}") from exc
     if not isinstance(data, dict):
@@ -3462,7 +3567,10 @@ def build_parser() -> argparse.ArgumentParser:
     pc.set_defaults(fn=cmd_compose)
     pm = sub.add_parser("merge-check", help="máy quyết khi nào merge PR đã mở (ADR-0013)")
     pm.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
-    pm.add_argument("--pr-json", help="đọc JSON `gh pr view --json …` từ FILE hoặc - (stdin) thay vì gọi gh")
+    pm.add_argument(
+        "--pr-json",
+        help=f"đọc JSON `gh pr view --json {MERGE_FIELDS}` từ FILE hoặc - (stdin) thay vì gọi REST qua `gh api`",
+    )
     pm.add_argument("--json", action="store_true", help="in JSON (pr, verdict, lane, reasons, next, notes)")
     pm.set_defaults(fn=cmd_merge_check)
     pb = sub.add_parser("blueprint-status")
