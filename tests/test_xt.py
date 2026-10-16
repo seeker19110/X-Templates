@@ -550,6 +550,39 @@ class LoopTest(unittest.TestCase):
                 xt.redact(blob)
                 self.assertLess(time.monotonic() - t0, 2.0)
 
+    def test_redact_audit_delta_wave_c(self):
+        """Audit delta đợt C: nháy loại kia trong giá trị (AUD-CFG-006), `pwd`/`pass` (CFG-008), không che nhầm định danh
+        thường (CFG-007), từ dài lặp từ khoá không chạy bậc hai (CODE-009)."""
+        j = "".join
+        tail = j(["sec", "ret phrase"])
+        for raw in (
+            f'password: "it\'s a {tail}"',
+            f"password = 'my \"quoted\" {tail}'",
+            f'password: "unterminated {tail}',
+            f"MYSQL_PWD={tail}",
+            f"DB_PASS={tail}",
+            f"passphrase: {tail}",
+        ):
+            with self.subTest(raw):
+                self.assertNotIn("ret phrase", xt.redact(raw))
+        for raw in (
+            "npm_config_cache=/home/u/.npm npm_lifecycle_event=test",
+            "from huggingface_hub import hf_hub_download",
+            "docker run -u 1000:1000 img",
+            "PWD=/home/u/proj",
+            "bypass=1",
+        ):
+            with self.subTest(raw):
+                self.assertEqual(xt.redact(raw), raw)
+        self.assertIn("***", xt.redact("npm_" + "a1B2" * 9))
+        import time
+
+        for blob in ("token" * 10_000, "_token_" * 8_000):
+            with self.subTest(blob[:8]):
+                t0 = time.monotonic()
+                xt.redact(blob)
+                self.assertLess(time.monotonic() - t0, 2.0)
+
     def test_redact_applies_to_evidence_cmd(self):
         with redirect_stdout(io.StringIO()):
             xt.loop_record("T-009", ["echo --token SUPERSECRETVALUE; exit 1"], self.base)
