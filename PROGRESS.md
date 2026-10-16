@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Audit delta #58–#66 đóng: 4 đợt sửa #69 (guard), #72 (L3 giữ ngoại lệ cứng, ADR-0016), #73 (`redact`), đợt D (sổ, blueprint, PROGRESS); `audit check --strict` exit 0 (0 🟠; 28 🟢 nợ, gồm AUD-HAR-045 cờ `stale_evidence` báo nhầm ~83%). Việc kế: nợ 🟢; dự án thật đầu tiên (Tiếp theo 1).
+- Audit delta #58–#66 đóng: 4 đợt sửa #69 (guard), #72 (L3 giữ ngoại lệ cứng, ADR-0016), #73 (`redact`), #75 (sổ, blueprint, PROGRESS); `audit check --strict` exit 0 (0 🟠; 26 🟢 nợ, gồm AUD-HAR-045 cờ `stale_evidence` báo nhầm ~83%). Việc kế: nợ 🟢; dự án thật đầu tiên (Tiếp theo 1).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
