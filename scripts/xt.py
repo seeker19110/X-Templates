@@ -33,6 +33,8 @@ Lệnh:
   feedback list [DIR] [--json]  Liệt kê phản hồi.
   feedback aggregate --from DỰ_ÁN=THƯ_MỤC ... [--json]
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
+  doctor [--fix] [--json]       Audit khung đã cài trước /autopilot (Python/git, hook + file hook, skill, AGENTS/CLAUDE,
+                                xt.yaml, .gitignore, state, khung hợp lệ); --fix sửa phần an toàn, exit 1 khi còn lỗi.
   stats                         Thống kê số module/mục.
 
 Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
@@ -1856,6 +1858,368 @@ def audit_check(
     return errors, counts
 
 
+# --------------------------------------------------------------------------- doctor (audit khung trước /autopilot)
+
+# Hook bắt buộc cho autopilot một phiên (ADR-0002/0009): thiếu Stop = vòng không có máy kiểm; PostToolUse chỉ format.
+DOCTOR_HOOK_EVENTS = {
+    "SessionStart": "error",
+    "PreCompact": "error",
+    "PreToolUse": "error",
+    "Stop": "error",
+    "PostToolUse": "warn",
+}
+DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
+DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
+DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
+HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
+HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/([\w.-]+)')  # file hook nạp/gọi cạnh nó (_lib.sh, guard.py)
+YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
+AUTOPILOT_IGNORES = (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot")
+INSTALL_HINT = "người chạy lại `python3 <bản clone X-Templates>/scripts/install.py <gốc dự án>`"
+
+
+@dataclass
+class Finding:
+    """Một phát hiện của `xt.py doctor`; `fix` là sửa an toàn, đảo ngược được (None = cần người/agent sửa tay)."""
+
+    code: str
+    level: str  # "error" | "warn"
+    msg: str
+    fix: Optional[Callable[[], str]] = None
+
+
+def template_body(text: str) -> str:
+    """Như `install.py`: bỏ frontmatter; mẫu bọc nội dung trong khối ```markdown thì chỉ lấy phần trong khối."""
+    lines = text.splitlines()
+    opened = bool(lines) and lines[0].strip() == "---"
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None) if opened else None
+    if close is not None:
+        text = "\n".join(lines[close + 1 :]).lstrip("\n") + "\n"
+        lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == "```markdown"), None)
+    if start is None:
+        return text
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() == "```"), len(lines))
+    return "\n".join(lines[start + 1 : end]).strip("\n") + "\n"
+
+
+def _fix_template(base: Path, fw: Path, name: str) -> Optional[Callable[[], str]]:
+    """Sửa = tạo `name` từ mẫu khung (copy-if-absent như install.py); mẫu không có → không sửa được."""
+    src = fw / "templates" / name
+    if not src.is_file():
+        return None
+
+    def fix() -> str:
+        with (base / name).open("x", encoding="utf-8") as fh:  # "x": file vừa xuất hiện thì lỗi, không đè
+            fh.write(template_body(src.read_text(encoding="utf-8")))
+        return f"tạo {name} từ mẫu khung"
+
+    return fix
+
+
+def _fix_append(path: Path, block: str, what: str) -> Callable[[], str]:
+    def fix() -> str:
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(block)
+        return what
+
+    return fix
+
+
+def _fix_rename(src: Path, dst: Path, what: str) -> Callable[[], str]:
+    def fix() -> str:
+        src.rename(dst)
+        return what
+
+    return fix
+
+
+def _doctor_runtime() -> List[Finding]:
+    out = []
+    if sys.version_info < (3, 11):
+        out.append(Finding("runtime", "error", f"Python {sys.version.split()[0]} < 3.11 — xt.py và hook cần ≥ 3.11"))
+    out += [
+        Finding("runtime", "error", f"thiếu `{t}` trên PATH — hook, cổng commit và commit/push của autopilot cần nó")
+        for t in ("git", "bash")
+        if not shutil.which(t)
+    ]
+    return out
+
+
+def _doctor_scripts() -> List[Finding]:
+    out = []
+    if not (SCRIPT_DIR / "dev-task.sh").is_file():
+        out.append(
+            Finding("scripts", "error", f"thiếu {SCRIPT_DIR / 'dev-task.sh'} — cổng commit không chạy; {INSTALL_HINT}")
+        )
+    if framework_version() == "unknown":
+        out.append(
+            Finding("scripts", "warn", f"thiếu file VERSION của khung — không biết bản đang cài; {INSTALL_HINT}")
+        )
+    return out
+
+
+def _doctor_framework(fw: Path) -> List[Finding]:
+    if not fw.is_dir():
+        return [Finding("framework", "error", f"không thấy thư mục khung {fw}; {INSTALL_HINT}")]
+    errors = validate(fw)
+    if not errors:
+        return []
+    return [
+        Finding(
+            "framework",
+            "error",
+            f"khung lệch quy ước ({len(errors)} lỗi, vd: {errors[0]}) — xem `xt.py validate`; "
+            f"bản cài `.xtemplates/` không sửa tay: {INSTALL_HINT}",
+        )
+    ]
+
+
+def _hook_commands(hooks: Dict[str, Any]) -> Iterator[str]:
+    """Mọi chuỗi `command` trong khoá `hooks` của settings.json; cấu trúc lạ thì bỏ qua."""
+    for groups in hooks.values():
+        for g in groups if isinstance(groups, list) else []:
+            for h in (g.get("hooks") if isinstance(g, dict) else None) or []:
+                if isinstance(h, dict) and isinstance(h.get("command"), str):
+                    yield h["command"]
+
+
+def _syntax_error(p: Path) -> Optional[str]:
+    """Lỗi cú pháp của file hook (.py: compile; .sh: `bash -n`); None nếu ổn hoặc không kiểm được."""
+    if p.suffix == ".py":
+        try:
+            compile(p.read_text(encoding="utf-8"), str(p), "exec")
+        except (SyntaxError, ValueError) as exc:
+            return str(exc)
+        return None
+    if p.suffix != ".sh" or not shutil.which("bash"):
+        return None
+    r = subprocess.run(["bash", "-n", str(p)], capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT)
+    return (r.stderr.strip() or f"bash -n exit {r.returncode}") if r.returncode else None
+
+
+def _doctor_hook_files(base: Path, hooks: Dict[str, Any], deep: bool) -> List[Finding]:
+    """File hook settings.json trỏ tới (và file chúng nạp cạnh nó) phải có — hook fail-open nên thiếu file = mất hàng rào
+    mà không ai thấy; `deep` thì kiểm cả cú pháp."""
+    hook_dir = base / ".claude" / "hooks"
+    direct = {m for cmd in _hook_commands(hooks) for m in HOOK_REF_RE.findall(cmd)}
+    present = [hook_dir / n for n in sorted(direct) if (hook_dir / n).is_file()]
+    siblings = {s for p in present for s in HOOK_SIBLING_RE.findall(p.read_text(encoding="utf-8", errors="replace"))}
+    names = sorted(direct | siblings)
+    out = [
+        Finding(
+            "hooks", "error", f"hook cần .claude/hooks/{n} nhưng file không có — hook lặng lẽ cho qua; {INSTALL_HINT}"
+        )
+        for n in names
+        if not (hook_dir / n).is_file()
+    ]
+    for n in names if deep else []:
+        err = _syntax_error(hook_dir / n) if (hook_dir / n).is_file() else None
+        if err:
+            out.append(Finding("hooks", "error", f".claude/hooks/{n} lỗi cú pháp: {_one_line(err)[:200]}"))
+    return out
+
+
+def _doctor_settings(base: Path, deep: bool) -> List[Finding]:
+    p = base / ".claude" / "settings.json"
+    if not p.is_file():
+        return [
+            Finding("hooks", "error", f"không có .claude/settings.json — autopilot chạy không hook; {INSTALL_HINT}")
+        ]
+    hooks = (_read_json_obj(p) or {}).get("hooks")
+    if not isinstance(hooks, dict):
+        return [Finding("hooks", "error", f".claude/settings.json hỏng hoặc không có khoá `hooks`; {INSTALL_HINT}")]
+    out = [
+        Finding("hooks", lv, f"settings.json thiếu hook {ev}; {INSTALL_HINT} (`merge_hooks` tự thêm, giữ hook riêng)")
+        for ev, lv in DOCTOR_HOOK_EVENTS.items()
+        if not hooks.get(ev)
+    ]
+    return out + _doctor_hook_files(base, hooks, deep)
+
+
+def _doctor_harness_parts(base: Path) -> List[Finding]:
+    claude = base / ".claude"
+    missing = [f"skills/{s}/SKILL.md" for s in DOCTOR_SKILLS if not (claude / "skills" / s / "SKILL.md").is_file()]
+    missing += [f"agents/{a}.md" for a in DOCTOR_AGENTS if not (claude / "agents" / f"{a}.md").is_file()]
+    pending = sorted(
+        p.relative_to(base).as_posix() for p in (*base.glob("*.xtemplates-new"), *claude.rglob("*.xtemplates-new"))
+    )
+    out = []
+    if missing:
+        out.append(Finding("harness", "warn", f".claude/ thiếu {', '.join(missing)}; {INSTALL_HINT}"))
+    if pending:
+        out.append(
+            Finding(
+                "harness",
+                "warn",
+                f"bản mới của khung chưa gộp: {', '.join(pending)} — so sánh, gộp vào file gốc rồi xoá bản `*.xtemplates-new` "
+                "(file trong .claude/hooks hoặc settings là điểm dừng: để người gộp)",
+            )
+        )
+    return out
+
+
+def _imports_agents(text: str) -> bool:
+    return any(line.strip() == "@AGENTS.md" for _, line in _lines_outside_fences(text, 1))
+
+
+def _doctor_docs(base: Path, fw: Path) -> List[Finding]:
+    out = [
+        Finding(
+            "docs",
+            "warn" if name == "PROGRESS.md" else "error",
+            f"thiếu {name} — luật/trạng thái phiên không được nạp",
+            _fix_template(base, fw, name),
+        )
+        for name in ("AGENTS.md", "CLAUDE.md", "PROGRESS.md")
+        if not (base / name).exists()
+    ]
+    claude = base / "CLAUDE.md"
+    if claude.is_file() and not _imports_agents(claude.read_text(encoding="utf-8", errors="replace")):
+        out.append(
+            Finding(
+                "docs",
+                "error",
+                "CLAUDE.md không có dòng `@AGENTS.md` ngoài code block — Claude Code không nạp AGENTS.md (XC-DOCAI-002)",
+                _fix_append(claude, "\n@AGENTS.md\n", "thêm dòng `@AGENTS.md` vào cuối CLAUDE.md"),
+            )
+        )
+    return out
+
+
+def _yaml_blank(value: str) -> bool:
+    return value in ("", '""', "''")
+
+
+def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
+    p, legacy = base / "xt.yaml", base / "xs.yaml"
+    if not p.is_file():
+        fix = (
+            _fix_rename(legacy, p, "đổi tên xs.yaml → xt.yaml (ADR-0007)")
+            if legacy.is_file()
+            else _fix_template(base, fw, "xt.yaml")
+        )
+        msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
+        return [Finding("xt-yaml", "error", msg, fix)]
+    keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
+    out = []
+    missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
+    if missing:
+        out.append(
+            Finding(
+                "xt-yaml", "warn", f"xt.yaml thiếu khoá {', '.join(missing)} — khai đủ, chuỗi rỗng nếu không áp dụng"
+            )
+        )
+    blank = [k for k in DOCTOR_YAML_KEYS if k in keys and _yaml_blank(keys[k])]
+    if blank:
+        noop = " — cổng commit đang là no-op" if len(blank) == len(DOCTOR_YAML_KEYS) else ""
+        out.append(
+            Finding(
+                "xt-yaml",
+                "warn",
+                f"xt.yaml để trống {', '.join(blank)}{noop}: điền lệnh thật theo stack trước khi tick task (task đầu PLAN)",
+            )
+        )
+    return out
+
+
+def _doctor_gitignore(base: Path) -> List[Finding]:
+    gi = base / ".gitignore"
+    lines = gi.read_text(encoding="utf-8", errors="replace").splitlines() if gi.is_file() else []
+    if any(ln.strip() in AUTOPILOT_IGNORES for ln in lines):
+        return []
+    block = "\n# X-Templates: trạng thái autopilot cục bộ\n.autopilot/\n"
+    return [
+        Finding(
+            "gitignore",
+            "error",
+            "`.autopilot/` chưa nằm trong .gitignore — state/bằng chứng cục bộ có thể bị commit (LOOP-HARNESS-006)",
+            _fix_append(gi, block, "thêm `.autopilot/` vào .gitignore"),
+        )
+    ]
+
+
+def _doctor_state(base: Path) -> List[Finding]:
+    p = state_dir(base) / "state.json"
+    if not p.exists():
+        return []
+    st = read_state(base)
+    if st is None:
+        backup = p.with_name("state.json.hong-" + _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+        return [
+            Finding(
+                "state",
+                "error",
+                ".autopilot/state.json hỏng (không phải JSON object) — verdict của vòng lặp sẽ sai",
+                _fix_rename(p, backup, f"chuyển state hỏng sang {backup.name} (`loop init` tạo lại)"),
+            )
+        ]
+    out = []
+    if st.get("blocked"):
+        reason = st.get("blocked_reason") or "?"
+        out.append(Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — người xử lý rồi `loop resume`"))
+    plan = st.get("plan")
+    if st.get("active") and plan and not (base / str(plan)).is_file():
+        out.append(Finding("state", "warn", f"vòng lặp đang bật nhưng không còn PLAN `{plan}` — `loop init` lại"))
+    return out
+
+
+def _doctor_legacy(base: Path) -> List[Finding]:
+    out = []
+    if (base / ".xstored").is_dir():
+        out.append(Finding("legacy", "warn", f"còn `.xstored/` của bản ≤ 2.x (ADR-0007); {INSTALL_HINT} để chuyển"))
+    if (base / "xs.yaml").is_file() and (base / "xt.yaml").is_file():
+        out.append(
+            Finding("legacy", "warn", "có cả xs.yaml và xt.yaml — dev-task chỉ đọc xt.yaml; gộp tay rồi xoá xs.yaml")
+        )
+    return out
+
+
+def _doctor_git(base: Path) -> List[Finding]:
+    if shutil.which("git") and _git(base, "rev-parse", "--git-dir").returncode != 0:
+        return [Finding("git", "warn", "không phải repo git — autopilot cần commit + push từng task")]
+    return []
+
+
+def _doctor_progress(base: Path) -> List[Finding]:
+    p = base / "PROGRESS.md"
+    if not p.is_file():
+        return []
+    try:
+        errors = progress_check(p)
+    except OSError as exc:
+        errors = [str(exc)]
+    if not errors:
+        return []
+    more = f" (+{len(errors) - 1} lỗi khác)" if len(errors) > 1 else ""
+    return [Finding("progress", "warn", f"PROGRESS.md: {_one_line(errors[0])}{more} — xem `xt.py progress-check`")]
+
+
+def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
+    """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
+    (validate khung, cú pháp hook, progress-check) — dùng ở `loop init`."""
+    out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
+    out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gitignore(base)
+    out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base)
+    if deep:
+        out += _doctor_framework(fw) + _doctor_progress(base)
+    return out
+
+
+def doctor_fix(findings: List[Finding]) -> Tuple[List[str], List[Finding]]:
+    """Chạy các sửa an toàn; trả (mô tả đã sửa, phát hiện mới cho sửa thất bại)."""
+    fixed: List[str] = []
+    failed: List[Finding] = []
+    for f in findings:
+        if f.fix is None:
+            continue
+        try:
+            fixed.append(f.fix())
+        except OSError as exc:
+            failed.append(Finding(f.code, "error", f"sửa thất bại ({f.msg}): {exc}"))
+    return fixed, failed
+
+
 # --------------------------------------------------------------------------- CLI
 
 
@@ -1949,6 +2313,13 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "blocked": False,
     }
     write_state(state, base)
+    issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
+    if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
+        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
+        print(
+            f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
+            file=sys.stderr,
+        )
     print(
         f"✓ Autopilot bật: plan={args.plan} trần={max_iterations} vòng"
         + (f", hạn {deadline}" if deadline else "")
@@ -2544,6 +2915,38 @@ def cmd_feedback(args: argparse.Namespace) -> int:
     return FEEDBACK_HANDLERS[args.fb_cmd](args, project_dir())
 
 
+def _print_doctor(base: Path, findings: List[Finding], fixed: List[str], fixing: bool) -> None:
+    print(f"Audit khung — {base} (khung {framework_version()})")
+    for what in fixed:
+        print(f"🔧 đã sửa: {what}")
+    for f in sorted(findings, key=lambda f: f.level != "error"):
+        hint = "  (sửa được: `xt.py doctor --fix`)" if f.fix and not fixing else ""
+        print(f"{'✗' if f.level == 'error' else '⚠'} [{f.code}] {f.msg}{hint}")
+    n_err = sum(f.level == "error" for f in findings)
+    tail = f"{n_err} lỗi · {len(findings) - n_err} cảnh báo · {len(fixed)} đã sửa"
+    if n_err:
+        print(f"✗ Chưa sẵn sàng cho autopilot: {tail} — sửa lỗi ✗ trước `loop init`")
+    else:
+        print(f"✓ Sẵn sàng cho autopilot: {tail}")
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    base = project_dir()
+    findings = doctor_findings(base, args.framework)
+    fixed: List[str] = []
+    if args.fix:
+        fixed, failed = doctor_fix(findings)
+        findings = doctor_findings(base, args.framework) + failed
+    errors = sum(f.level == "error" for f in findings)
+    if args.json:  # hợp đồng máy đọc: {"ok", "base", "version", "fixed", "findings": [{code, level, msg, fixable}]}
+        rows = [{"code": f.code, "level": f.level, "msg": f.msg, "fixable": f.fix is not None} for f in findings]
+        doc = {"ok": not errors, "base": str(base), "version": framework_version(), "fixed": fixed, "findings": rows}
+        print(json.dumps(doc, ensure_ascii=False))
+    else:
+        _print_doctor(base, findings, fixed, args.fix)
+    return 1 if errors else 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     docs, _ = load_docs(args.framework)
     by_kind: Dict[str, int] = {}
@@ -2698,6 +3101,10 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--from", dest="source", action="append", required=True, metavar="DỰ_ÁN=THƯ_MỤC")
     fg.add_argument("--json", action="store_true")
     pfb.set_defaults(fn=cmd_feedback)
+    pdr = sub.add_parser("doctor", help="audit khung đã cài (harness, xt.yaml, khung, state) trước /autopilot")
+    pdr.add_argument("--fix", action="store_true", help="sửa an toàn, đảo ngược được (không đụng hook/settings)")
+    pdr.add_argument("--json", action="store_true")
+    pdr.set_defaults(fn=cmd_doctor)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     return p
 

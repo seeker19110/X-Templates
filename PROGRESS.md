@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-15 · Nhánh: claude/pensive-dirac-s6icry
 
 ## Đang làm
-- ADR-0010 trên nhánh `claude/pensive-dirac-s6icry`: phản hồi từ dự án đích về khung (`xt.py feedback add/collect/list/aggregate`, module `LOOP-FB`, `docs/ops/TARGETS.md`, issue template, Routine hằng tuần → PR nháp). ADR-0008/0009 đã merge ở #47.
+- Nhánh `claude/youthful-tesla-x2zshi`: audit khung trước `/autopilot` — `xt.py doctor [--fix] [--json]` (hook + file hook + cú pháp, skill, AGENTS/CLAUDE, `xt.yaml`, `.gitignore`, state, `validate`, PROGRESS; `--fix` chỉ sửa phần an toàn, không đụng hook/settings), skill `/autopilot` bước 0 chạy đầu tiên, `loop init` cảnh báo khi còn lỗi, mục `LOOP-HARNESS-020`. ADR-0010 đã merge ở #48.
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.

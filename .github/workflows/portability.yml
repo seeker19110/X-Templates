@@ -2,10 +2,8 @@ name: Portability
 
 # Hook và script được dự án đích chạy trên máy dev: macOS dùng bash 3.2 + sed/awk BSD.
 # Chạy test hook/installer với /bin/bash của macOS để chặn cú pháp chỉ có ở bash 4+/GNU (vd mapfile, sed '\n').
+# Không chạy trên PR (runner macOS chậm, không phải required check) — chỉ sau khi merge vào main; đỏ thì sửa bằng PR mới.
 on:
-  pull_request:
-    branches: [main]
-    paths: [".claude/hooks/**", "scripts/**", "tests/**", ".github/workflows/portability.yml"]
   push:
     branches: [main]
     paths: [".claude/hooks/**", "scripts/**", "tests/**", ".github/workflows/portability.yml"]
