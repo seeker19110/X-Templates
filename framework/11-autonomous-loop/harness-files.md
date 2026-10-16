@@ -60,6 +60,17 @@ Mẫu đầy đủ: [`../templates/PLAN.md`](../templates/PLAN.md); PROGRESS: [`
 | Trạng thái việc | `PLAN.md`, `PROGRESS.md`, `.autopilot/` | Code + agent | Task nào xong, chữ ký lỗi |
 | Memory dài hạn | File trong repo (`docs/`, `TRAPS.md`, ADR) qua đề xuất → người duyệt → ghi | Người duyệt | Quy ước, bẫy, quyết định |
 | Tài liệu tham chiếu | `.xtemplates/framework/` | Chỉ qua PR vào khung | Checklist có ID |
+| Memory tra cứu (tuỳ chọn) | **Tối đa một** công cụ ngoài, kho ngoài repo ([`LOOP-HARNESS-019`](#checklist), [`LOOP-HARNESS-021`](#checklist)) | Agent ghi có chủ đích qua tool; không thay ba dòng trên | "Lần trước sửa lỗi X thế nào" qua nhiều phiên |
+
+**Một hay nhiều công cụ memory ngoài? Một, hoặc không cần.** Nguồn sự thật của dự án vẫn là file harness ở trên, vì máy kiểm được (`progress-check`, Gate, evidence). Công cụ ngoài chỉ thêm khả năng tìm lại qua nhiều phiên. Không cài nhiều công cụ cùng lúc: engram, claude-mem, agentmemory đều hook SessionStart/UserPromptSubmit nên context chèn mỗi lượt nhân lên, chỉ thị của chúng chồng nhau, cùng một sự việc có nhiều bản ghi không rõ bản nào đúng, và mỗi công cụ giữ thêm một bản prompt nhạy cảm. Khi cần một công cụ:
+
+| Công cụ | Chọn khi | Lưu ý |
+|---|---|---|
+| **engram** (MIT) — đề xuất mặc định | Muốn agent **ghi có chủ đích** qua tool `mem_save`, khớp [`AI-AGENT-009`](../13-ai-engineering/agents-and-tools.md) (ghi qua pipeline có nguồn) và [`PRF-AGENT-013`](../02-profiles/ai-agent.md) (ghi có cấu trúc qua tool tường minh); một binary Go, SQLite FTS5 tất định, chỉ nghe loopback, 14 agent | Hook lưu nguyên văn prompt và chèn chỉ thị mỗi lượt; Git Sync ghi `.engram/` vào repo — cấu hình theo `LOOP-HARNESS-021` |
+| claude-mem (Apache-2.0) | Muốn ghi **tự động** mọi phiên, chấp nhận AI nén nội dung | Nội dung memory do AI chọn, khó duyệt trước khi ghi; thêm vector store |
+| agentmemory (Apache-2.0) | Cần benchmark truy xuất, chấp nhận engine riêng | Engine iii theo Elastic License 2.0, không phải OSI |
+
+Nguồn: catalog `seeker19110/stored` 10 §4b (agentmemory), §4c (engram), 03 §8b (claude-mem) — đọc 2026-10-16.
 
 ## Checklist
 
