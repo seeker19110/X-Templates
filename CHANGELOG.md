@@ -194,6 +194,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
+  - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
+    trên PostgreSQL 17.
+  - Hai mục nay hướng dẫn dùng hàm bọc IMMUTABLE `f_unaccent`, hoặc cấu hình text search `vi` có `unaccent`
+    (`to_tsvector('vi'::regconfig, …)`); thêm một dòng Bẫy.
+  - **Dự án đích:** ghép lại blueprint; migration đang dùng `unaccent()` trực tiếp trong index sẽ lỗi khi chạy.
 - Guard sau review #60: dự án là thư mục con của repo cha (monorepo `apps/web`) không còn bị hỏi "repo ngoài dự án" khi
   commit — chạy cổng của dự án như trước; cờ shell trước `-c` (`-o pipefail`, `-eo`, `-O extglob`, `--norc`, `--login`)
   không còn làm lọt quét lệnh lồng và luật hook-bypass; `echo git reset --hard | bash` (không nháy) và `bash --norc` đọc
@@ -324,6 +330,46 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Rà `seeker19110/stored` 2026-10-16, nhóm A: lỗ thật trong harness, đã tái hiện bằng lệnh** (chủ repo duyệt sửa hook
+  và cấu hình cổng):
+  - **Guard quét thêm** (`LOOP-STOP-001`, ID và mức giữ; *Kiểm* mở rộng):
+    - **deny** `eval '…'`, backtick, `{ …; }` và từ khoá `if/then/do/!` đứng đầu lệnh. Trước đây lệnh phía sau lọt,
+      ví dụ `{ rm -rf ~; }`.
+    - `find … -delete` / `-exec rm … {}` trên `/`, `~` → **deny**; gốc ngoài dự án → **ask**. Lệnh trong `-exec` được
+      quét như lệnh thường.
+    - Xoá đệ quy ra ngoài gốc dự án (trừ thư mục tạm) → **ask**, cả sau `cd`.
+    - Gửi file bí mật hay biến môi trường ra mạng → **deny**, gồm `curl -d @.env`, `-F f=@.env`, `-T .env`,
+      `wget --post-file`, `cat .env | curl -d @-` và `env | curl …`.
+    - Script trình thông dịch ghi hoặc xoá file bí mật, cổng, bằng chứng autopilot, năng lực agent → **ask**, gồm
+      `python3 -c "open('.autopilot/…','w')"` và heredoc vào `python3 -`.
+    - Cập nhật snapshot (`playwright/jest/vitest -u`) → **ask**. File cổng mới: `.stylelintrc*`,
+      `stylelint.config.*`, `*-snapshots/`, `__snapshots__/`.
+  - **`LOOP-STOP-023` (MUST@L, mới)**: agent không tự thêm năng lực giữa phiên. `claude mcp add*`,
+    `claude plugin install|enable`, `claude plugin marketplace add`, `codex mcp add`, `gemini extensions install`,
+    `npx skills add` → ask. Sửa `.mcp.json`, `mcp.json`, `~/.claude.json`, `.claude-plugin/`, `.codex/config.toml`,
+    `.gemini/` → ask; sửa `.claude/{agents,skills,commands}/` → ask ở dự án đích (có `.xtemplates/`). Làn merge coi các
+    file đó là cổng. Thêm hai nhóm đường dẫn nhạy cảm: **nguồn gói** (`.npmrc`, `.yarnrc*`, `.pypirc`, `pip.conf`,
+    `uv.toml`, `bunfig.toml`) và **ảnh/container** (`Dockerfile*`, `Containerfile*`, `compose*.yaml`). Trước đây PR chỉ
+    đổi các file này kèm một test vào làn nhanh.
+  - **`LOOP-STOP-024` (MUST@L, mới)**: `[~]` có hai nghĩa.
+    - `— Không áp dụng: <điều kiện>`: mục không áp vào dự án.
+    - `— Miễn: <lý do>`: mục có áp dụng mà bỏ. Ở mức MUST phải kèm `Duyệt: "<lời chủ dự án>" <YYYY-MM-DD>` hoặc link;
+      thiếu thì `blueprint-status --strict` đỏ và autopilot không ra `done`.
+    - Ghi chú `Không áp dụng:` được `compose` giữ khi ghép lại.
+    - BLUEPRINT của repo khung đổi 8 mục MUST `Miễn` (thật ra không áp dụng) thành `Không áp dụng`.
+    - **Dự án đích:** mục MUST `Miễn` cũ phải chọn một trong hai: đổi thành `Không áp dụng:` nếu đúng là không áp dụng,
+      hoặc xin câu duyệt thật của chủ dự án.
+  - **`LOOP-DESIGN-022` (MUST@L, mới) + `xt.py loop verify`**: kiểm lại cuối.
+    - Khi mọi task có bằng chứng xanh, Stop hook chỉ cho dừng sau `loop verify`.
+    - `loop verify` chạy lại mọi Gate của task đã tick (một lần mỗi lệnh) trên cây hiện tại, ghi
+      `.autopilot/verified.json` kèm dấu vân tay cây: sha256 của HEAD, diff và file chưa track, trừ `.autopilot/`.
+    - Cây đổi sau đó, hoặc Gate làm đổi cây, thì phải chạy lại.
+    - Lợi ích: bắt bằng chứng bị sửa tay, và bắt task sau làm hỏng Gate của task trước.
+    - Ngoài repo git thì bỏ qua bước này.
+  - `templates/GO-NO-GO.md`:
+    - thêm cột **Nhãn bằng chứng** (`real-path` / `faithful-fixture` / `asserted-not-measured`), là cột mà `QA-STRAT-012`
+      (MUST@L) đòi nhưng mẫu chưa có;
+    - thêm mục **2b. Bằng chứng chưa chứng minh** (adapter giả, chưa có thiết bị/dữ liệu/quy mô thật).
 - **Guard Bash: shell lồng, publish/deploy, gỡ hook/cổng/test** (audit 2026-10-16 đợt 3; AUD-SEC-015, SEC-017, SEC-018,
   SEC-019, HAR-026, HAR-027). Luật deny/ask áp đệ quy cho lệnh trong `sh -c`/`bash -lc` (cả lồng nhiều tầng, quá 3 tầng
   → hỏi), heredoc vào shell và `echo/printf … | sh` (luật hook-bypass riêng cho `-c` gộp vào đây). publish/deploy nhận

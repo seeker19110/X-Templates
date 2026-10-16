@@ -642,7 +642,7 @@ class BlueprintStatusTextTest(TmpDirCase):
         self.assertIn("MUST    đạt    0 · miễn    0 · chưa    1", out)
         self.assertIn("SHOULD  đạt    0 · miễn    1 · chưa    0", out)
         self.assertIn("MAY     đạt    1 · miễn    0 · chưa    0", out)
-        self.assertIn("✗ Miễn trừ thiếu lý do: A-002 (dòng 2)", out)
+        self.assertIn("✗ Miễn trừ không hợp lệ (thiếu lý do; MUST `Miễn` cần `Duyệt:`): A-002 (dòng 2)", out)
         self.assertIn("Còn 1 mục MUST chưa đạt: A-001", out)
         rc, _, _ = run_main("blueprint-status", f, "--strict")
         self.assertEqual(rc, 1)

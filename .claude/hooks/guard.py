@@ -11,13 +11,15 @@ Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
 - tách lệnh theo token shell (`shlex`): `|`/`;` trong nháy không phải ranh giới, thân heredoc là dữ liệu;
 - chuẩn hoá trước khi so luật: bỏ gán biến đầu lệnh, `command`/`env`/`nohup`/`time`, tuỳ chọn toàn cục của git (`-C`, `-c`, …);
 - đọc payload qua stdin, không qua argv (lệnh rất dài không còn làm hook lỗi rồi cho qua).
-Hàng rào này chống TAI NẠN (agent gõ nhầm), không phải sandbox: lệnh cố ý né (eval chuỗi ghép, base64…) không nằm trong phạm vi.
+Hàng rào này chống TAI NẠN (agent gõ nhầm), không phải sandbox: lệnh cố ý né (chuỗi ghép lúc chạy, base64…) không nằm
+trong phạm vi — `eval '…'`, backtick, `{ …; }` có chữ nguyên văn thì vẫn được quét (rà stored 2026-10-16).
 Lỗi bất ngờ → in quyết định rỗng (fail-open về luồng); luật deny là fail-closed về hành động đã nhận ra.
 """
 
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import posixpath
@@ -25,6 +27,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
@@ -105,7 +108,19 @@ GATE_PATTERNS = (
     # AUD-HAR-027: cấu hình test/lint phổ biến khác (vite.config chứa cấu hình vitest; conftest.py bỏ/đổi test được)
     *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*", ".flake8", ".golangci.y*ml"),
     *(".nycrc*", ".c8rc*", "phpunit.xml*", "karma.conf.*", ".mocharc*"),
+    # Rà stored 2026-10-16: cổng của UX-DS-002/005 (stylelint) và baseline ảnh/snapshot — agent tự cập nhật baseline
+    # là làm cổng visual xanh bằng cách đổi đáp án.
+    *(".stylelintrc*", "stylelint.config.*", "*-snapshots/*", "__snapshots__/*"),
 )
+# Năng lực của agent (LOOP-STOP-023): cấu hình MCP server, plugin, tiện ích — thêm/đổi giữa phiên là tự cấp quyền mới
+# cho chính mình (plugin/MCP chạy với quyền người dùng; `.mcp.json` ở gốc plugin tự đăng ký server từ xa — stored 19 §1d).
+CAPABILITY_PATTERNS = (
+    *(".mcp.json", "mcp.json", ".claude.json", ".claude-plugin/*", ".codex/config.toml", ".gemini/settings.json"),
+    ".gemini/extensions/*",
+)
+# Agent/skill/lệnh tắt của Claude Code: ở dự án đích (có `.xtemplates/`) là harness đã cài → hỏi; ở repo khung là sản
+# phẩm đang phát triển → không hỏi (sửa hằng ngày).
+TARGET_CAPABILITY_PATTERNS = (".claude/agents/*", ".claude/skills/*", ".claude/commands/*")
 MIGRATION_RE = re.compile(r"(^|/)(migrations?|migrate)/|(^|/)db/schema\.|(^|/)prisma/schema\.prisma$")
 
 # File test (đa ngôn ngữ). Sửa test ĐÃ CÓ theo hướng làm yếu bài kiểm = nới cổng (LOOP-CI-001): agent đang sửa lỗi
@@ -169,16 +184,36 @@ def _match_any(rel: str, patterns: Tuple[str, ...]) -> bool:
 
 
 def classify_path(rel: str) -> str:
-    """'secret' | 'gate' | 'evidence' | 'migration' | ''."""
+    """'secret' | 'gate' | 'evidence' | 'capability' | 'migration' | ''."""
     if rel == ".autopilot" or rel.startswith(".autopilot/"):
         return "evidence"  # bằng chứng + trạng thái vòng: chỉ `xt.py loop …` ghi (AUD-HAR-024)
     if _match_any(rel, SECRET_PATTERNS) and not rel.endswith((".example", ".sample", ".template")):
         return "secret"
     if _match_any(rel, GATE_PATTERNS):
         return "gate"
+    if _match_any(rel, CAPABILITY_PATTERNS):
+        return "capability"
     if MIGRATION_RE.search(rel):
         return "migration"
     return ""
+
+
+def is_target_project(root: str) -> bool:
+    """Dự án đích (khung cài ở `.xtemplates/`), không phải repo khung."""
+    return os.path.isdir(os.path.join(root, ".xtemplates"))
+
+
+def path_kind(rel: str, root: str) -> str:
+    """classify_path + agent/skill/lệnh của Claude Code ở dự án đích là 'capability'."""
+    kind = classify_path(rel)
+    if not kind and is_target_project(root) and _match_any(rel, TARGET_CAPABILITY_PATTERNS):
+        return "capability"
+    return kind
+
+
+CAPABILITY_WHY = (
+    "thêm/đổi năng lực agent ({}) — MCP server/plugin/skill mới chạy với quyền người dùng; người duyệt (LOOP-STOP-023)"
+)
 
 
 def weakens_test(old: str, new: str) -> str:
@@ -220,7 +255,9 @@ def _test_weakening(rel: str, root: str, tool_input: Optional[Dict[str, object]]
 
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
-    kind = classify_path(rel)
+    kind = path_kind(rel, root)
+    if kind == "capability":
+        return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
     if kind == "secret":
         return "deny", f"Không ghi file bí mật qua agent: {rel} (dùng secret manager/biến môi trường)."
     if kind == "gate":
@@ -374,12 +411,19 @@ def _skip_env_args_keep_assigns(a: List[str]) -> None:
             a.pop(0)
 
 
+# Từ khoá/nhóm lệnh của shell đứng đầu lệnh đơn (`{ rm -rf ~; }`, `if …; then rm …`, `! cmd`) — rà stored 2026-10-16:
+# trước đây `{`/`then` bị hiểu là tên lệnh nên lệnh thật phía sau lọt.
+SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "while", "until", "do"}
+
+
 def _strip_prefixes(argv: List[str]) -> List[str]:
-    """Bỏ gán biến đầu lệnh và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật."""
+    """Bỏ từ khoá shell, gán biến đầu lệnh và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật."""
     a = list(argv)
     while a:
         head = a[0]
-        if ENV_ASSIGN_RE.fullmatch(head):
+        if head in SHELL_KEYWORDS:
+            a.pop(0)
+        elif ENV_ASSIGN_RE.fullmatch(head):
             a.pop(0)
         elif posixpath.basename(head) == "env":
             a.pop(0)
@@ -780,24 +824,121 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     return _merge_verdict(selector[:1], sha, root)
 
 
-def _rm_rule(args: List[str]) -> Tuple[str, str]:
-    """rm: deny --no-preserve-root và rm -rf trên đích nguy hiểm (gốc, home, cwd, glob, thư mục `.git`)."""
+def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tuple[str, str]:
+    """rm: deny --no-preserve-root và rm -rf trên đích nguy hiểm (gốc, home, cwd, glob, thư mục `.git`); xoá đệ quy
+    ra ngoài gốc dự án (trừ thư mục tạm) → ask (xoá dữ liệu là điểm dừng bắt buộc — stored 01 §3c: `rm -rf ~/x`)."""
     flags = _short_flags(args)
     recursive = "r" in flags or "R" in flags or "--recursive" in args
     force = "f" in flags or "--force" in args
-    if "--no-preserve-root" in args or (
-        recursive and force and any(_dangerous_rm_target(t) for t in _positionals(args))
-    ):
+    targets = _positionals(args)
+    if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
         return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
+    outside = [t for t in targets if recursive and root and _outside_project(t, root, cwd)]
+    if outside:
+        return "ask", f"xoá đệ quy ngoài thư mục dự án ({outside[0]}) — xoá dữ liệu cần người duyệt"
     return "", ""
+
+
+TEMP_DIRS = ("/tmp", "/var/tmp", "/private/tmp", "/private/var/folders")
+
+
+def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
+    """Đích (đã mở `~`/`$HOME`) nằm ngoài gốc dự án và ngoài thư mục tạm; biến khác/không rõ → False (fail-open)."""
+    t = re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", "~", target)
+    if "$" in t or "`" in t:
+        return False
+    p = os.path.realpath(os.path.join(cwd or root, os.path.expanduser(t)))
+    temps = [os.path.realpath(d) for d in (*TEMP_DIRS, tempfile.gettempdir(), os.environ.get("TMPDIR", "/tmp"))]
+    inside = [os.path.realpath(root), *temps]
+    return not any(p == d or p.startswith(d.rstrip("/") + "/") for d in inside)
+
+
+FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+
+
+def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
+    """`find <gốc…> -delete` / `-exec rm … {}`: xoá các file khớp dưới gốc — gốc là `/`, `~` → deny; gốc ngoài dự án
+    → ask. Lệnh trong `-exec … ;|+` còn được quét như lệnh thường (`{}` = một file tìm thấy)."""
+    i = 0
+    while i < len(args) and not args[i].startswith(("-", "(", "!")):
+        i += 1
+    roots = args[:i] or ["."]
+    deleting = "-delete" in args[i:]
+    for k, a in enumerate(args):
+        if a not in FIND_EXEC:
+            continue
+        sub = [
+            FIND_FOUND if t == "{}" else t for t in itertools.takewhile(lambda t: t not in (";", "+"), args[k + 1 :])
+        ]
+        verdict = bash_decision(shlex.join(sub), root, cwd, MAX_NEST - 1)
+        if verdict["decision"] in ("deny", "ask"):
+            return str(verdict["decision"]), f"find {a}: {verdict['reason']}"
+        deleting = deleting or bool(sub) and posixpath.basename(sub[0]) in ("rm", "shred", "unlink")
+    if not deleting:
+        return "", ""
+    if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
+        return "deny", "find xoá file dưới /, ~, $HOME"
+    outside = [r for r in roots if _outside_project(r, root, cwd)]
+    return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
+
+
+FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
+SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
+
+
+SKILL_RUNNER_NAMES = {"skills"}
+
+
+def _capability_rule(n: List[str]) -> Tuple[str, str]:
+    """Lệnh cài MCP server/plugin/skill cho agent (`claude mcp add`, `claude plugin install`, `npx skills add`…) → ask."""
+    claude = _claude_args(n)
+    words = [a for a in (claude or n[1:]) if not a.startswith("-")]
+    hit = ""
+    if claude is not None and (
+        words[:2] in (["mcp", "add"], ["mcp", "add-json"], ["mcp", "add-from-claude-desktop"])
+        or words[:2] in (["plugin", "install"], ["plugin", "enable"])
+        or words[:3] == ["plugin", "marketplace", "add"]
+    ):
+        hit = "claude " + " ".join(words[:3] if words[1:2] == ["marketplace"] else words[:2])
+    elif n[0] in ("codex", "gemini") and (words[:2] == ["mcp", "add"] or words[:2] == ["extensions", "install"]):
+        hit = f"{n[0]} {' '.join(words[:2])}"
+    else:
+        idx = _runner_target(n)
+        target = posixpath.basename(n[idx]) if idx >= 0 else n[0]
+        rest = n[idx + 1 :] if idx >= 0 else n[1:]
+        if target in SKILL_RUNNER_NAMES and rest[:1] == ["add"]:
+            hit = f"{target} add"
+    return ("ask", CAPABILITY_WHY.format(hit)) if hit else ("", "")
+
+
+SNAPSHOT_RUNNERS = ("playwright", "jest", "vitest")
+SNAPSHOT_UPDATE_FLAGS = {"-u", "--update-snapshots", "--updateSnapshot", "--update"}
+
+
+def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
+    """Chạy test kèm cập nhật snapshot/baseline ảnh → ask: đổi đáp án để cổng visual xanh (LOOP-DESIGN-021)."""
+    if any(r in posixpath.basename(t) for t in n for r in SNAPSHOT_RUNNERS) and (
+        set(n) & SNAPSHOT_UPDATE_FLAGS or any(t.startswith("--update-snapshots=") for t in n)
+    ):
+        return "ask", "cập nhật snapshot/baseline ảnh = đổi đáp án của cổng visual; kèm ảnh trước/sau cho người duyệt"
+    return "", ""
+
+
+def _delete_rule(name: str, args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
+    if name == "rm":
+        return _rm_rule(args, root, cwd)
+    return _find_rule(args, root, cwd) if name == "find" else ("", "")
 
 
 def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[str, str]:
     name, args = n[0], n[1:]
     if name in ("sudo", "doas"):
         return "deny", "sudo/doas"
-    if name == "rm":
-        verdict = _rm_rule(args)
+    verdict = _delete_rule(name, args, root, cwd)
+    if verdict[0]:
+        return verdict
+    for rule in (_capability_rule, _snapshot_update_rule):
+        verdict = rule(n)
         if verdict[0]:
             return verdict
     if name == "dd" and any(x.startswith("if=") for x in args):
@@ -1159,6 +1300,8 @@ def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
             asks.append(f"sửa cấu hình cổng/CI/harness/migration qua Bash ({target}) — nói rõ lý do")
         elif kind == "evidence":
             asks.append(f"ghi/xoá tay bằng chứng autopilot qua Bash ({target}) — chỉ `xt.py loop …` được ghi (P1)")
+        elif kind == "capability":
+            asks.append(CAPABILITY_WHY.format(f"ghi {target} qua Bash"))
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
     return asks
@@ -1169,7 +1312,7 @@ def _target_kind(target: str, root: str) -> str:
     if not target or target.startswith("/dev/"):
         return ""
     rel = rel_path(target, root).rstrip("/")
-    return classify_path(rel) or ("gate" if _dir_holds_gate(rel, root) else "")
+    return path_kind(rel, root) or ("gate" if _dir_holds_gate(rel, root) else "")
 
 
 def _dir_holds_gate(rel: str, root: str) -> bool:
@@ -1211,7 +1354,8 @@ def _scan_command(
         return None
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
-    decision, why = command_rules(n, root, gdir or root)
+    # Lệnh khác git (rm/find) xét đích theo thư mục đang đứng sau `cd` (`cd ~ && rm -rf projects`).
+    decision, why = command_rules(n, root, (gdir if n[0] == "git" else cwd) or root)
     if decision == "deny":
         return f"Lệnh bị khung chặn ({why}): {' '.join(argv)[:300]}. Muốn làm thật thì người dùng tự chạy."
     if decision == "ask":
@@ -1275,8 +1419,8 @@ def _shell_c_script(argv: List[str]) -> Optional[str]:
     return script if has_c else None
 
 
-def _heredoc_scripts(cmd: str) -> List[str]:
-    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`) — là lệnh, không phải dữ liệu."""
+def _heredoc_scripts(cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell) -> List[str]:
+    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`; `pred` chọn lệnh nhận) — là lệnh, không phải dữ liệu."""
     out: List[str] = []
     lines = cmd.replace("\\\n", "").split("\n")
     i = 0
@@ -1289,14 +1433,43 @@ def _heredoc_scripts(cmd: str) -> List[str]:
                 body.append(lines[i])
                 i += 1
             i += 1
-            if any(_stdin_shell(c) for c in split_commands(tokenize(opener))):
+            if any(pred(c) for c in split_commands(tokenize(opener))):
                 out.append("\n".join(body))
     return out
 
 
+def _backtick_scripts(cmd: str) -> List[str]:
+    """Thân `` `…` `` (thay lệnh kiểu cũ) ngoài nháy đơn — shlex không tách backtick nên lệnh bên trong từng lọt."""
+    out: List[str] = []
+    quote, start, i = "", -1, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and quote != "'":
+            i += 2
+            continue
+        if c == "'" and start < 0 and quote != '"':
+            quote = "" if quote == "'" else "'"
+        elif c == '"' and quote != "'" and start < 0:
+            quote = "" if quote == '"' else '"'
+        elif c == "`" and quote != "'":
+            if start < 0:
+                start = i + 1
+            else:
+                out.append(cmd[start:i])
+                start = -1
+        i += 1
+    return out
+
+
+def _eval_scripts(tokens: List[str]) -> List[str]:
+    """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
+    return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+
+
 def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
-    """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc vào shell, `echo/printf '…' | sh`."""
+    """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc vào shell, `echo/printf '…' | sh`, `eval '…'`, backtick."""
     out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
+    out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(cmd))
     for pipe in pipelines(tokens):
         for up, down in zip(pipe, pipe[1:]):
             src = normalize(up)
@@ -1322,6 +1495,113 @@ def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], dep
     return ""
 
 
+# --------------------------------------------------------------------------- rà stored 2026-10-16
+
+INTERP_RE = re.compile(r"(python|node|perl|ruby|php|deno|bun)[0-9.]*")
+INTERP_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "-p", "--print", "-r"}
+# Dấu hiệu script GHI/XOÁ file (đọc thì không hỏi): open(..., "w"), .write_text(, os.remove, shutil.*, fs.writeFileSync…
+WRITE_HINT_RE = re.compile(
+    r"open\([^)]*,\s*(?:mode\s*=\s*)?[rbt]?['\"][rbt]?[wax+]|\.(?:write_text|write_bytes|unlink|rmdir|rename|replace|touch)\("
+    r"|\b(?:os\.(?:remove|unlink|rename|replace|truncate)|shutil\.\w+|writeFile\w*|appendFile\w*|rmSync|unlinkSync"
+    r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|unlink)\b"
+)
+STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")
+GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
+
+
+def _stdin_interp(argv: List[str]) -> bool:
+    n = normalize(argv)
+    return bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS
+
+
+def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
+    """Script trình thông dịch viết ngay trong lệnh: `python3 -c '…'`, `node -e '…'`, `python3 - <<'PY'` … `PY`."""
+    out: List[str] = []
+    for c in split_commands(tokens):
+        n = normalize(c)
+        if n and INTERP_RE.fullmatch(n[0]):
+            out += [n[i + 1] for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS]
+    return out + _heredoc_scripts(cmd, _stdin_interp)
+
+
+def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
+    """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
+    (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn."""
+    asks: List[str] = []
+    for script in _interp_scripts(cmd, tokens):
+        if not WRITE_HINT_RE.search(script):
+            continue
+        for lit in STR_LITERAL_RE.findall(script):
+            kind = path_kind(rel_path(lit, root), root) if ("/" in lit or "." in lit) and lit not in ("..",) else ""
+            if kind in GUARDED_KINDS:
+                asks.append(f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt")
+    return asks
+
+
+CURL_FILE_FLAGS = {"-T", "--upload-file", "--post-file", "--body-file"}  # giá trị là đường dẫn file
+CURL_DATA_FLAGS = {"-d", "--data", "--data-binary", "--data-urlencode", "--json", "-F", "--form"}
+
+
+def _fetch_values(args: List[str]) -> List[Tuple[str, str]]:
+    """(cờ, giá trị) của các cờ gửi dữ liệu/tải lên của curl/wget: `-d @f`, `-d@f`, `--data=@f`, `-F a=@f`, `-T f`."""
+    out: List[Tuple[str, str]] = []
+    flags = CURL_FILE_FLAGS | CURL_DATA_FLAGS
+    for i, a in enumerate(args):
+        if a in flags and i + 1 < len(args):
+            out.append((a, args[i + 1]))
+        elif a.startswith("--") and "=" in a and a.split("=", 1)[0] in flags:
+            out.append(tuple(a.split("=", 1)))  # type: ignore[arg-type]
+        elif a[:2] in ("-d", "-F", "-T") and len(a) > 2 and not a.startswith("--"):
+            out.append((a[:2], a[2:]))
+    return out
+
+
+def _fetch_files(args: List[str]) -> List[str]:
+    """File mà curl/wget đọc để gửi đi (`-` = stdin)."""
+    files: List[str] = []
+    for flag, val in _fetch_values(args):
+        if flag in CURL_FILE_FLAGS:
+            files.append(val)
+        elif flag in ("-F", "--form"):
+            part = val.split("=", 1)[-1]
+            files += [part[1:].split(";")[0]] if part[:1] in ("@", "<") else []
+        elif flag == "--data-urlencode" and "@" in val:
+            files.append(val.split("@", 1)[1])
+        elif val.startswith("@"):
+            files.append(val[1:])
+    redirect_in = [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
+    return files + redirect_in
+
+
+def _is_secret_file(path: str, root: str) -> bool:
+    return path not in ("-", "") and classify_path(rel_path(path, root)) == "secret"
+
+
+def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
+    """Gửi file bí mật/biến môi trường ra mạng: `curl -d @.env …`, `curl -T .env …`, `cat .env | curl -d @- …`,
+    `env | curl --data-binary @- …` (rà stored 2026-10-16: Read(.env) bị chặn nhưng Bash thì không)."""
+    for group in pipelines(tokens):
+        for i, c in enumerate(group):
+            n = normalize(c)
+            if not n or n[0] not in FETCHERS:
+                continue
+            files = _fetch_files(c[1:])
+            leaked = [f for f in files if _is_secret_file(f, root)]
+            if not leaked and "-" in files:  # đọc stdin: xem lệnh phía trước trong ống
+                for up in group[:i]:
+                    head = posixpath.basename(up[0]) if up else ""
+                    nu = normalize(up)
+                    if (
+                        (head == "env" and not nu)
+                        or head == "printenv"
+                        or any(_is_secret_file(a, root) for a in up[1:])
+                    ):
+                        leaked.append(" ".join(up)[:60])
+            if leaked:
+                return f"gửi bí mật ra mạng ({leaked[0]})"
+    return None
+
+
 def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
@@ -1335,7 +1615,11 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
             reason=f"Cấm chạy script tải từ mạng ({rx}): tải về, kiểm checksum rồi mới chạy. Lệnh: {cmd[:300]}",
         )
         return res
-    asks: List[str] = []
+    leak = secret_exfil(tokens, root)
+    if leak:
+        res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
+        return res
+    asks: List[str] = interp_write_asks(cmd, tokens, root)
     nested_deny = _scan_nested(cmd, tokens, root, cwd, depth, asks)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
