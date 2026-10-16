@@ -168,7 +168,9 @@ class MergeDecisionTest(unittest.TestCase):
         self.assertEqual(xt.merge_decision(pr(statusCheckRollup=running), 2)["reasons"], ["CI đang chạy: build"])
         self.assertEqual(xt.merge_decision(pr(statusCheckRollup=waiting), 2)["verdict"], "wait")
         none = xt.merge_decision(pr(statusCheckRollup=[]), 2)
-        self.assertEqual((none["verdict"], none["reasons"]), ("human", ["không có check CI nào — không có bằng chứng"]))
+        self.assertEqual(
+            (none["verdict"], none["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
+        )
 
     def test_standard_lane_reasons(self):
         f = [{"path": "tests/test_x.py", "additions": 1, "deletions": 0}]
@@ -197,6 +199,65 @@ class MergeDecisionTest(unittest.TestCase):
         self.assertEqual(d["reasons"], ["nhãn rủi ro: risk:payment"])
         d = xt.merge_decision(pr(), 2, risk_paths=["src/cart/*"])
         self.assertEqual(d["reasons"], ["đường dẫn nhạy cảm (merge_risk_paths): src/cart/total.py"])
+
+    def test_merge_gate_paths(self):
+        """AUD-HAR-021: luật agent và file cổng (cả ở thư mục con) luôn để người merge — cùng danh sách với guard."""
+        f = [{"path": "tests/test_x.py", "additions": 1, "deletions": 0}]
+        for path in (
+            "AGENTS.md",
+            "CLAUDE.md",
+            "packages/api/AGENTS.md",
+            "scripts/dev-task.sh",
+            "vitest.config.ts",
+            ".pre-commit-config.yaml",
+            ".gitleaks.toml",
+            "ruff.toml",
+            "apps/web/tsconfig.json",
+            ".claude/skills/gate/SKILL.md",
+        ):
+            with self.subTest(path):
+                d = xt.merge_decision(pr(files=[{"path": path, "additions": 2, "deletions": 1}, *f]), 2)
+                self.assertEqual((d["verdict"], d["lane"]), ("human", "chuẩn"))
+                self.assertIn("(cổng/CI)", " · ".join(d["reasons"]))
+
+    def test_merge_gate_paths_cover_guard(self):
+        """Một khái niệm hai nhà phải khớp: mọi mẫu cổng của guard (hỏi khi sửa) cũng là đường dẫn nhạy cảm khi merge."""
+        sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+        import guard
+
+        self.assertEqual(sorted(set(guard.GATE_PATTERNS) - set(xt.MERGE_GATE_GLOBS)), [])
+
+    def test_merge_renamed_risk_path(self):
+        """AUD-HAR-022: đổi tên file nhạy cảm ra ngoài vùng nhạy cảm vẫn là làn chuẩn (xét cả tên cũ)."""
+        moved = [
+            {
+                "path": "scripts/quality.yml.off",
+                "previous": ".github/workflows/quality.yml",
+                "additions": 0,
+                "deletions": 0,
+            },
+            {"path": "tests/test_x.py", "additions": 1, "deletions": 0},
+        ]
+        d = xt.merge_decision(pr(files=moved), 2)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn(".github/workflows/quality.yml", " · ".join(d["reasons"]))
+        renamed = {"filename": "x.off", "previous_filename": ".github/workflows/ci.yml", "additions": 0, "deletions": 0}
+        raw = {"repos/{owner}/{repo}/pulls/7/files?per_page=100": json.dumps([renamed])}
+        with FakeGh(raw=raw).patch():
+            files = xt._pr_rest("7")["files"]
+        self.assertEqual(
+            files, [{"path": "x.off", "previous": ".github/workflows/ci.yml", "additions": 0, "deletions": 0}]
+        )
+
+    def test_merge_skipped_only(self):
+        """AUD-HAR-023: chỉ có check SKIPPED/NEUTRAL không phải bằng chứng CI xanh."""
+        for concl in ("SKIPPED", "NEUTRAL"):
+            with self.subTest(concl):
+                rollup = [{"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": concl}]
+                d = xt.merge_decision(pr(statusCheckRollup=rollup), 2)
+                self.assertEqual(
+                    (d["verdict"], d["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
+                )
 
     def test_lockfiles_and_docs_do_not_count_as_size_or_package(self):
         files = [

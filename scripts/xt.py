@@ -2425,7 +2425,7 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("thanh toán", re.compile(r"(^|[/_.-])(payment|billing|checkout|invoice|refund)", re.I)),
     ("mật mã", re.compile(r"(^|[/_.-])(crypt|signing|jwt)", re.I)),
     ("schema", re.compile(r"(^|/)migrations?/|(^|/)schema\.|\.sql$|(^|/)prisma/", re.I)),
-    ("cổng/CI", re.compile(r"^(\.github/|\.claude/|\.xtemplates/|xt\.yaml$)|ruleset", re.I)),
+    ("cổng/CI", re.compile(r"(^|/)(\.github|\.claude|\.xtemplates)/|ruleset", re.I)),
     (
         "phụ thuộc",
         re.compile(
@@ -2434,6 +2434,27 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         ),
     ),
 )
+# File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
+# `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
+MERGE_GATE_GLOBS = (
+    *(".github/workflows/*", ".github/rulesets/*", ".github/dependabot.yml", ".gitlab-ci.yml"),
+    *(".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/*", ".xtemplates/*"),
+    *("eslint.config.*", ".eslintrc*", "biome.json*", ".oxlintrc*", "tsconfig*.json", "jsconfig*.json"),
+    *("vitest.config.*", "jest.config.*", "playwright.config.*", "lighthouserc*", ".lighthouserc*"),
+    *("pyproject.toml", "setup.cfg", "mypy.ini", "pyrightconfig.json", "ruff.toml", ".coveragerc"),
+    *("codecov.yml", ".codecov.yml", ".pre-commit-config.yaml", ".husky/*", "lefthook.yml", ".lintstagedrc*"),
+    *("commitlint.config.*", "xt.yaml", "dev-task.sh", "Makefile", "justfile", ".gitleaks.toml", ".gitleaksignore"),
+    *(".semgrep*", "sonar-project.properties", "requirements-dev.txt"),
+    *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*"),
+    *("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*"),
+)
+
+
+def _gate_path(path: str) -> bool:
+    parts = path.split("/")
+    return any(fnmatch.fnmatchcase("/".join(parts[i:]), g) for i in range(len(parts)) for g in MERGE_GATE_GLOBS)
+
+
 LOCKFILE_RE = re.compile(
     r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
 )
@@ -2444,10 +2465,12 @@ CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STAR
 CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 
 
-def _ci_buckets(rollup: List[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
-    """(check đỏ, check đang chạy) từ `statusCheckRollup` (CheckRun: status/conclusion; StatusContext: state)."""
+def _ci_buckets(rollup: List[Dict[str, Any]]) -> Tuple[List[str], List[str], List[str]]:
+    """(check đỏ, check đang chạy, check xanh) từ `statusCheckRollup` (CheckRun: status/conclusion; StatusContext:
+    state). Xanh = SUCCESS; SKIPPED/NEUTRAL không thuộc nhóm nào — không phải bằng chứng (AUD-HAR-023)."""
     red: List[str] = []
     pending: List[str] = []
+    green: List[str] = []
     for c in rollup:
         name = str(c.get("name") or c.get("context") or "?")
         if c.get("__typename") == "StatusContext":
@@ -2458,7 +2481,9 @@ def _ci_buckets(rollup: List[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
             red.append(name)
         elif st in CI_PENDING:
             pending.append(name)
-    return red, pending
+        elif st == "SUCCESS":
+            green.append(name)
+    return red, pending, green
 
 
 def _package_of(path: str) -> str:
@@ -2473,14 +2498,16 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     mã không đổi test. Tài liệu không tính gói/test; lockfile không tính dòng (nhưng tính rủi ro phụ thuộc)."""
     files = [f for f in pr.get("files") or [] if isinstance(f, dict)]
     paths = [str(f.get("path", "")) for f in files]
+    # Đổi tên: tên cũ cũng xét rủi ro (dời workflow ra khỏi `.github/` = tắt CI — AUD-HAR-022).
+    risky = paths + [str(f["previous"]) for f in files if f.get("previous")]
     out = [
         f"nhãn rủi ro: {n}" for n in (str(lb.get("name", "")) for lb in pr.get("labels") or []) if n.startswith("risk:")
     ]
     for tag, rx in RISK_PATH_RES:
-        hit = [p for p in paths if rx.search(p)]
+        hit = [p for p in risky if rx.search(p) or (tag == "cổng/CI" and _gate_path(p))]
         if hit:
             out.append(f"đường dẫn nhạy cảm ({tag}): {', '.join(hit[:3])}")
-    own = [p for p in paths if any(fnmatch.fnmatch(p, g) for g in risk_paths)]
+    own = [p for p in risky if any(fnmatch.fnmatch(p, g) for g in risk_paths)]
     if own:
         out.append(f"đường dẫn nhạy cảm (merge_risk_paths): {', '.join(own[:3])}")
     lines = sum(
@@ -2507,13 +2534,13 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         return "wait", ["PR nháp"]
     if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
         return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
-    red, pending = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
+    red, pending, green = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
     if red:
         return "fix", [f"CI đỏ: {', '.join(red)}"]
     if pending:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
-    if not pr.get("statusCheckRollup"):
-        return "human", ["không có check CI nào — không có bằng chứng"]
+    if not green:
+        return "human", ["không có check CI nào xanh — không có bằng chứng"]
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "fix", ["reviewer yêu cầu sửa"]
     if pr.get("mergeStateStatus") == "BEHIND":
@@ -2688,7 +2715,12 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
         "files": [
-            {"path": f.get("filename", ""), "additions": f.get("additions", 0), "deletions": f.get("deletions", 0)}
+            {
+                "path": f.get("filename", ""),
+                **({"previous": f["previous_filename"]} if f.get("previous_filename") else {}),
+                "additions": f.get("additions", 0),
+                "deletions": f.get("deletions", 0),
+            }
             for f in files
         ],
     }

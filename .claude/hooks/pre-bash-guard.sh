@@ -4,11 +4,21 @@
 #  2) ASK lệnh "hành động đối ngoại" (riêng `gh pr merge` qua `xt.py merge-check` → có thể ALLOW, ADR-0013), nới hàng rào, ghi file cổng/bí mật qua Bash (điểm dừng bắt buộc — 11-autonomous-loop).
 #  3) Khi là `git commit`: chạy cổng chất lượng qua dev-task.sh gate; đỏ → chặn (exit 2).
 # Phân tích lệnh nằm ở guard.py (tách theo token shell, chuẩn hoá wrapper/tuỳ chọn git — audit AUD-SEC-001…010).
-# Payload đi qua stdin, không qua argv. guard.py lỗi/thiếu python3 → cho qua (fail-open về luồng).
+# Payload đi qua stdin, không qua argv. guard.py lỗi/thiếu python3 → cho qua (fail-open về luồng), trừ merge/`gh api`.
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
 payload="$(cat)"
+# Không có python3 thì guard không chạy (fail-open về luồng) — riêng merge/ghi GitHub vẫn hỏi người, vì settings không còn
+# luật ask cho `gh pr merge` (ADR-0013; AUD-SEC-021). In JSON bằng printf: _lib.sh cũng cần python3.
+if ! command -v python3 >/dev/null 2>&1; then
+  case "$payload" in
+  *"gh pr merge"* | *"gh api"*)
+    printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": "Khung cần xác nhận: không có python3 nên guard không kiểm được merge/ghi GitHub"}}'
+    ;;
+  esac
+  exit 0
+fi
 res="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$XT_ROOT" python3 "$(dirname "$0")/guard.py" bash 2>/dev/null)" || exit 0
 [ -n "$res" ] || exit 0
 decision="$(json_field "$res" decision)"

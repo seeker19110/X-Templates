@@ -84,7 +84,7 @@ chuyên môn; hook `ask`/`deny` vẫn cưỡng chế bất kể chính sách tro
 | Tiền thật | Thanh toán, hoàn tiền, đổi giá, gọi API thu phí ngoài sandbox | `loop block --reason` + SPEC phải có ca test | Chủ sản phẩm |
 | Dữ liệu người dùng thật | Migration trên DB production, export PII, xoá tài khoản | `pre-edit-guard.sh` ask khi sửa migration đã tồn tại; deploy → ask | Người trực + chủ dữ liệu |
 | Đổi quyền / nới cổng | Sửa `eslint`/`tsconfig`/coverage/workflows/ruleset/`.claude/settings.json`/`.xtemplates/` | `pre-edit-guard.sh` → **ask** kèm lý do | Tech lead |
-| Hành động đối ngoại | `gh pr merge` (trừ làn nhanh qua `xt.py merge-check`, `LOOP-STOP-022`), `gh release`, `npm publish`, `docker push`, `terraform apply`, gửi email/thông báo, đăng bài | `pre-bash-guard.sh` → **ask**; Routine chỉ đề xuất | Người duyệt T4 |
+| Hành động đối ngoại | `gh pr merge` (trừ làn nhanh qua `xt.py merge-check`, `LOOP-STOP-022`), `gh api` ghi (khác GET, mutation GraphQL), tool MCP merge PR (`pre-mcp-guard.sh`), `gh release`, `npm publish`, `docker push`, `terraform apply`, gửi email/thông báo, đăng bài | `pre-bash-guard.sh` → **ask**; Routine chỉ đề xuất | Người duyệt T4 |
 | Merge thay đổi rủi ro cao | Chạm auth, mật mã, dữ liệu nhạy cảm, luật ngành | Luôn làn kiến trúc; `risk_tags` ≠ rỗng → thêm review bảo mật (`LOOP-STOP-005`) | Người phê duyệt bảo mật |
 | Bế tắc máy | Cùng chữ ký lỗi lần 3, ngân sách/hạn hết | `loop record` tự đặt `blocked`; verdict `budget` | Người xem rồi `loop resume` |
 

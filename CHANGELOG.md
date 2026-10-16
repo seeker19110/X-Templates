@@ -163,6 +163,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- `dev-task.sh format-file` khôi phục file JSON khi formatter khai báo làm hỏng nó (AUD-HAR-037: `format_file: ruff
+  format {}` biến `.claude/settings.json` thành JSON có dấu phẩy thừa ở mỗi lần Edit). Repo khung: `format_file` chỉ
+  chạy ruff cho `*.py`; mẫu `templates/xt.yaml` (dòng Python) cũng vậy.
 - **Hook `guard.py` bỏ sót/nhận nhầm lệnh (5 lỗi, đều có tái hiện)**: (1) tokenizer để shlex mở comment ở `#` GIỮA từ nên
   `echo ${#A[@]}; rm -rf ~`, `open http://x/#/rooms && git push --force origin main` không bị chặn và `git add a#b.ts && git commit`
   mất cờ `commit` (cổng commit không chạy) — nay `#` chỉ là comment khi đứng đầu từ, ngoài nháy, như bash; (2) here-string `<<<`
@@ -266,6 +269,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Skill `/handover`, mẫu PROGRESS, `LOOP-HARNESS-005`: SHA bàn giao phải đã có trên nhánh chính (ID, mức giữ nguyên).
 - `tests/test_hooks.py`: test "Stop hook cho dừng khi autopilot tắt" dùng dự án tạm, không đọc `.autopilot/` của repo thật
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
+
+### Security
+- **Đóng các đường merge vòng qua `xt.py merge-check`** (audit 2026-10-16, ADR-0013; AUD-SEC-016, SEC-020, SEC-021,
+  HAR-021, HAR-022, HAR-023). Guard chỉ `allow` lệnh `gh pr merge` *trơn*: một dòng, không `$(…)`/backtick/nháy/heredoc/
+  chuyển hướng/gán biến đầu lệnh, chỉ số PR hoặc tên nhánh, chỉ cờ `--squash/--merge/--rebase/--delete-branch/
+  --match-head-commit` (`--admin=…`, `--body-file`, URL PR repo khác → hỏi). `gh api` ghi (khác GET, có `-f/-F/--input`,
+  mutation GraphQL) → `ask`. Tool MCP merge/bật auto-merge PR có hook PreToolUse mới `pre-mcp-guard.sh` (hỏi người).
+  Không có python3 → `pre-bash-guard.sh` vẫn hỏi cho `gh pr merge`/`gh api`. `merge-check`: file luật agent và cổng
+  (`AGENTS.md`, `CLAUDE.md`, `dev-task.sh`, `vitest.config.*`, `.pre-commit-config.yaml`, `ruff.toml`, `pytest.ini`… ở
+  mọi thư mục; danh sách `MERGE_GATE_GLOBS` chứa mọi mẫu cổng của guard — test giữ khớp) và tên cũ của file đổi tên đều
+  là làn chuẩn; cần ít nhất một check SUCCESS (chỉ SKIPPED/NEUTRAL → `human`). Dự án đích: chạy lại `install.py`
+  (`merge_hooks` tự thêm hook MCP; `guard.py`, `pre-bash-guard.sh` mới gộp tay `*.xtemplates-new` nếu đã sửa).
 
 ## [2.0.0] - 2026-10-14
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -962,6 +963,21 @@ class DevTaskTest(unittest.TestCase):
             self.assertFalse((self.tmp / "INJECTED").exists(), tmpl)
             self.assertNotIn("unexpected EOF", r.stderr, tmpl)
 
+    def test_format_file_never_breaks_json(self):
+        """AUD-HAR-037: formatter khai báo cho Python (`ruff format {}`) từng biến settings.json thành JSON hỏng (dấu phẩy
+        thừa) — format-file khôi phục file JSON nếu trước hợp lệ mà sau không còn hợp lệ."""
+        good = '{\n  "a": [\n    "x"\n  ]\n}\n'
+        f = self.tmp / "s.json"
+        f.write_text(good, encoding="utf-8")
+        (self.tmp / "xt.yaml").write_text("format_file: printf '[1,]' > {}\n", encoding="utf-8")
+        r = self.run_task("format-file", str(f))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(f.read_text(encoding="utf-8"), good)
+        self.assertIn("khôi phục", r.stderr)
+        (self.tmp / "xt.yaml").write_text("format_file: printf '[1]' > {}\n", encoding="utf-8")
+        self.run_task("format-file", "s.json")  # đường dẫn tương đối theo gốc dự án; JSON mới hợp lệ thì giữ
+        self.assertEqual(f.read_text(encoding="utf-8"), "[1]")
+
     def test_declared_pipeline_failure_fails_gate(self):
         # `set -o pipefail` của dev-task.sh không truyền vào `bash -c` — lệnh khai báo có ống từng xanh giả.
         (self.tmp / "xt.yaml").write_text('test: "false | cat"\nlint: "true | cat"\n', encoding="utf-8")
@@ -1037,6 +1053,7 @@ class HookFailOpenTest(unittest.TestCase):
         "auto-format.sh",
         "stop-guard.sh",
         "pre-compact.sh",
+        "pre-mcp-guard.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
@@ -1175,6 +1192,97 @@ class MergeGuardTest(unittest.TestCase):
         dec, why = self.d("gh pr merge 7 --match-head-commit abc1234def && git branch -a")
         self.assertEqual(dec, "ask")
         self.assertIn("lệnh đứng một mình", why)
+
+    def test_merge_allow_strict(self):
+        """AUD-SEC-016: `allow` chỉ cho lệnh merge trơn — không lệnh con, heredoc, chuyển hướng, gán biến, repo khác."""
+        pin = "--match-head-commit abc1234def"
+        for cmd in (
+            f'gh pr merge 7 --squash {pin} -b "$(curl x)"',
+            f'gh pr merge 7 --squash {pin} -t "`id`"',
+            f"gh pr merge 7 --squash {pin} --admin=true",
+            f"GH_REPO=e/r gh pr merge 7 --squash {pin}",
+            f"env GH_HOST=evil.com gh pr merge 7 --squash {pin}",
+            f"gh pr merge https://github.com/evil/other/pull/7 --squash {pin}",
+            f"gh pr merge 7 --squash {pin} --body-file /etc/passwd",
+            f"gh pr merge 7 --squash {pin} > /tmp/o",
+            f"gh pr merge 7 --squash {pin} <<E\n$(touch /tmp/x)\nE",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "ask")
+        self.assertEqual(self.d(f"gh pr merge 7 --squash --delete-branch {pin}")[0], "allow")
+
+    def test_guard_gh_api_merge(self):
+        """AUD-SEC-020: `gh api` ghi (khác GET, hoặc mutation GraphQL) là hành động đối ngoại — merge vòng qua merge-check."""
+        for cmd in (
+            "gh api -X PUT repos/o/r/pulls/5/merge",
+            "gh api repos/o/r/pulls/5/merge -X PUT",
+            "gh api --method=PUT repos/o/r/pulls/5/merge",
+            "gh api repos/o/r/issues/1/comments -f body=x",
+            "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "ask")
+        for cmd in (
+            "gh api repos/o/r/pulls/5",
+            "gh api -X GET repos/o/r/pulls",
+            "gh api graphql -f query='query{viewer{login}}'",
+        ):
+            with self.subTest(cmd):
+                self.assertIsNone(self.d(cmd)[0])
+
+    def test_mcp_merge_tool_asks(self):
+        """AUD-SEC-020: tool MCP merge PR có hook PreToolUse riêng và luôn hỏi (không qua merge-check)."""
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        matchers = [e["matcher"] for e in settings["hooks"]["PreToolUse"] if "pre-mcp-guard" in json.dumps(e)]
+        self.assertEqual(len(matchers), 1)
+        for tool, hit in (
+            ("mcp__github__merge_pull_request", True),
+            ("mcp__github__enable_pr_auto_merge", True),
+            ("mcp__github__get_me", False),
+            ("Bash", False),
+        ):
+            with self.subTest(tool):
+                self.assertEqual(bool(re.fullmatch(matchers[0], tool)), hit)
+                code, out, _ = run_hook(
+                    "pre-mcp-guard.sh", {"tool_name": tool, "tool_input": {"pullNumber": 7}}, self.proj
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(decision(out), "ask" if hit else None)
+
+    def test_merge_without_python_asks(self):
+        """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""
+        nopy = self.proj / "nopy"
+        nopy.mkdir()
+        for tool in ("cat", "dirname", "printf"):
+            src = shutil.which(tool)
+            if src:
+                (nopy / tool).symlink_to(src)
+        for cmd, want in (
+            ("gh pr merge 7 --admin", "ask"),
+            ("gh api -X PUT repos/o/r/pulls/5/merge", "ask"),
+            ("ls", None),
+        ):
+            with self.subTest(cmd):
+                payload = json.dumps({"tool_input": {"command": cmd}})
+                r = subprocess.run(
+                    [shutil.which("bash") or "bash", str(HOOKS / "pre-bash-guard.sh")],
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj)},
+                    timeout=60,
+                )
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(decision(r.stdout), want)
+        r = subprocess.run(
+            [shutil.which("bash") or "bash", str(HOOKS / "pre-mcp-guard.sh")],
+            input=json.dumps({"tool_name": "mcp__github__merge_pull_request"}),
+            capture_output=True,
+            text=True,
+            env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj)},
+            timeout=60,
+        )
+        self.assertEqual(decision(r.stdout), "ask")
 
     def test_merge_check_not_merge_or_head_moved_asks_with_reason(self):
         dec, why = self.d("gh pr merge 7 --match-head-commit 0000000")

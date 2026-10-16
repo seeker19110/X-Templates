@@ -142,6 +142,9 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
 }
 
 # --- format-file: format ĐÚNG file vừa sửa (dùng cho auto-format hook) --------
+json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
+  command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
+}
 declared_format_file() {
   if yaml_has format_file; then yaml_get format_file; return 0; fi
   [ -f "$DECL" ] || return 0
@@ -174,7 +177,17 @@ case "$TASK" in
     P="${2:-}"; [ -n "$P" ] || { log "format-file: thiếu path"; exit 0; }
     C="$(resolve_format_file "$P")"
     [ -n "$C" ] || { log "skip format-file: không có per-file formatter cho '$P'"; exit 0; }
-    log "format-file: $C  (\$1=$P)"; ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
+    log "format-file: $C  (\$1=$P)"
+    # Formatter khai báo cho ngôn ngữ khác (vd `ruff format {}` với file .json) có thể làm hỏng JSON — file JSON đang
+    # hợp lệ mà sau format không còn hợp lệ thì khôi phục bản trước (AUD-HAR-037).
+    F="$P"; case "$F" in /*) ;; *) F="$ROOT/$F" ;; esac
+    keep=""
+    case "$F" in *.json) json_ok "$F" && keep="$(mktemp)" && cp -p -- "$F" "$keep" ;; esac
+    ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
+    if [ -n "$keep" ]; then
+      json_ok "$F" || { cp -p -- "$keep" "$F"; log "format-file: formatter làm hỏng JSON '$P' → khôi phục bản trước"; }
+      rm -f -- "$keep"
+    fi
     exit 0 ;;
   gate)
     rc=0
