@@ -18,6 +18,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   mảng 11 thống nhất chữ L3 (AUD-DOC-031/032/036); `updated` của mẫu `AGENTS.md`/`CLAUDE.md` (AUD-DOC-037); ADR-0014 §1
   đọc lại với `delete_branch_on_merge` (GitHub tự đổi đích PR chồng — xác minh 2026-10-16, AUD-DOC-034). Dự án đích:
   chạy lại `install.py`, ghép lại blueprint để nhận chữ mới.
+- **`AI-AGENT-013` nâng mức SHOULD → MUST@L** (ID giữ): mỗi tool khai thêm `tier` và `cost_class` (free/compute/llm/gpu),
+  dựng catalog thất bại nếu thiếu; tool khai `readOnly` phải qua test hành vi (chạy trên snapshot rồi diff); không suy quyền
+  từ tên tool. Dự án đích: ghép lại blueprint để nhận mức và chữ mới.
 - Tài liệu harness khớp mã (audit 2026-10-16 đợt 5b): mô tả hook PreToolUse ở `CLAUDE.md` và `templates/CLAUDE.md` thêm
   hỏi khi làm yếu/xoá test, ghi tay `.autopilot/`, merge qua `gh api`/MCP, quét lệnh lồng, cổng trước `git commit`
   (AUD-HAR-031); `AGENTS.md` §6 liệt kê đủ thành phần cổng `lint` (AUD-DOC-029); skill `/audit` §6 trong autopilot tự
@@ -105,6 +108,41 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Mục nhóm C từ đợt rà `seeker19110/stored` (2026-10-16)** — 19 mục mới (kèm một module mới), mọi mục có *Kiểm* và nguồn
+  stored. Dự án đích: ghép lại blueprint để nhận các ID mới.
+  - Bảo mật/bí mật: `SEC-WEB-027` (MUST@L, xuất CSV/XLSX vô hiệu công thức), `SEC-SECRET-022` (secret tích hợp write-only,
+    đổi đích thì bỏ secret), `BE-AUTH-025` (MUST@L, nhận lời mời chỉ sau khi xác minh email bằng token; xem *Ghi chú mức* dưới).
+  - Quy trình/kiểm thử/khung: `WF-REVIEW-020` ("Rà cùng khuôn" trong PR `fix:`), `QA-INT-020` (chạy bộ test chuẩn chính thức,
+    `known-gaps.txt` chỉ giảm), `LOOP-FB-005` (bảng "đích × bản khung × số tuần chậm" trong REPORT; không đổi `xt.py`).
+  - AI: `AI-OBS-018` (SHOULD, MUST@L khi có dữ liệu cá nhân: `docs/ai/data-flows.md` + job egress deny-all),
+    `AI-AGENT-021` (MUST@L, xoá memory lan tới dữ liệu phái sinh), `AI-AGENT-022` (bank memory phân vùng, đo p95 recall),
+    `IND-SAAS-024` (trạng thái AI thích nghi khoá theo tenant), `CMP-LIC-020` (license model theo model card + revision).
+  - Tài liệu/profile/UX: `XC-DOCAI-020` (`DESIGN.md` theo spec, token sinh từ nguồn gốc), `PRF-LIB-020` (hướng dẫn cho agent
+    của bên dùng nằm trong tarball), `UX-A11Y-028` (tương phản theo trạng thái hover/focus/active/selected),
+    `BASE-DOC-017` (số công bố khớp file kết quả), `BASE-DOC-018` (`docs/limitations.md`).
+  - Module mới `06-design-ux/data-visualization.md` (prefix `UX-VIZ`): `UX-VIZ-001` (MUST@L, số từ một hàm dữ liệu có test +
+    fixture "trông hợp lý nhưng sai"), `UX-VIZ-002` (MUST, bảng/mô tả thay thế, không chỉ màu, ≥ 3:1), `UX-VIZ-003`
+    (SHOULD, trục từ 0, `vi-VN`, tiền số nguyên); README mảng 06 thêm dòng và prefix.
+  - Ghi chú mức: `BE-AUTH-025` yêu cầu ban đầu là MUST nhưng `authn-authz.md` đã đủ 4 MUST hiệu lực ở quy mô M (ADR-0004,
+    `xt.py validate` chặn), nên đặt MUST@L; `AI-OBS-018` ghi mức MUST@L khi có dữ liệu cá nhân trong câu yêu cầu (cột mức
+    máy đọc là SHOULD).
+- **Mục nhóm B từ rà kho `stored` 2026-10-16** (11 ID mới, không đổi ID/mức cũ): `SEC-AI-027` MUST@L (text-to-SQL: vai
+  trò CSDL chỉ đọc chịu RLS + AST allowlist trước DB) · `WF-CI-023` MUST@L (workflow `pull_request` không chạm secret
+  ngoài `GITHUB_TOKEN` trừ job có `environment:`) · `AI-EVAL-018` MUST@L (n, runs, CI 95%, ngưỡng cổng > nhiễu đo) ·
+  `AI-EVAL-019` SHOULD (eval bộ phân loại/định tuyến theo từng tác vụ: accuracy, đổi đáp án khi đảo thứ tự, ECE,
+  coverage@risk; trần leo thang) · `AI-RAG-019` MUST@L (kiểm trích dẫn tất định ở server) · `DB-SEARCH-020` MUST@L
+  (bảng mặc định ngôn ngữ của mọi thành phần tìm kiếm/RAG/memory; `preprocess_version`) · `UX-DS-019` MUST@L (dùng
+  component design system; lint chặn primitive/thẻ gốc ngoài `components/ui/**`) · `QA-STATIC-021` SHOULD (fixture xấu/
+  tốt cho luật tự viết) · `LOOP-DESIGN-021` SHOULD (task UI do agent: ảnh chụp theo SHA, kỳ vọng + falsifier,
+  `measured`/`unmeasured`) · `LOOP-HARNESS-022` SHOULD (sandbox OS/egress allowlist cho phiên không người trực; tên
+  khoá settings sandbox của Claude Code: chưa xác minh) · `LOOP-STOP-025` MUST@L (`deny`/`ask` bị từ chối là kết luận,
+  không lách). `WF-CI-023` và `LOOP-STOP-025` đặt MUST@L (không phải MUST@M/MUST) vì module đã đủ 4 MUST ở quy mô M
+  (ADR-0004; `xt.py validate` chặn). `AGENTS.md` gốc và `framework/templates/AGENTS.md` thêm một gạch luật bất biến
+  "Bị chặn là kết luận". `xt.py ci-check` thêm luật `WF-CI-023` (job không `environment:` trong workflow có
+  `pull_request`/`pull_request_target` chứa `secrets.X` ≠ `GITHUB_TOKEN`, `secrets[...]`, `toJSON(secrets)` hoặc
+  `secrets: inherit` → lỗi; ngoại lệ `# ci-check-allow: <lý do>`); workflow `secret-scan.yml` của khung khai ngoại lệ cho
+  khoá giấy phép quét. Dự án đích: ghép lại blueprint để nhận mục mới; chạy lại `install.py` để nhận `xt.py` mới, rồi
+  `xt.py ci-check` — workflow nào đưa secret vào job `pull_request` sẽ đỏ.
 - **PR theo lát + máy tự merge** (ADR-0014, D-010; chủ repo yêu cầu 2026-10-16). Mục mới `LOOP-DESIGN-020` (SHOULD): mỗi
   lát dọc chạy được là một nhánh + một PR nhỏ, mở ngay khi Gate của lát xanh (bỏ "PR cuối"); lát phụ thuộc PR chưa merge
   thì chồng nhánh, merge theo FIFO; PR đã mở được `merge-check` quyết mỗi vòng. Guard thêm hai đường merge ghim head
@@ -206,6 +244,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
+  - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
+    trên PostgreSQL 17.
+  - Hai mục nay hướng dẫn dùng hàm bọc IMMUTABLE `f_unaccent`, hoặc cấu hình text search `vi` có `unaccent`
+    (`to_tsvector('vi'::regconfig, …)`); thêm một dòng Bẫy.
+  - **Dự án đích:** ghép lại blueprint; migration đang dùng `unaccent()` trực tiếp trong index sẽ lỗi khi chạy.
 - Guard sau review #60: dự án là thư mục con của repo cha (monorepo `apps/web`) không còn bị hỏi "repo ngoài dự án" khi
   commit — chạy cổng của dự án như trước; cờ shell trước `-c` (`-o pipefail`, `-eo`, `-O extglob`, `--norc`, `--login`)
   không còn làm lọt quét lệnh lồng và luật hook-bypass; `echo git reset --hard | bash` (không nháy) và `bash --norc` đọc
@@ -336,6 +380,46 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Rà `seeker19110/stored` 2026-10-16, nhóm A: lỗ thật trong harness, đã tái hiện bằng lệnh** (chủ repo duyệt sửa hook
+  và cấu hình cổng):
+  - **Guard quét thêm** (`LOOP-STOP-001`, ID và mức giữ; *Kiểm* mở rộng):
+    - **deny** `eval '…'`, backtick, `{ …; }` và từ khoá `if/then/do/!` đứng đầu lệnh. Trước đây lệnh phía sau lọt,
+      ví dụ `{ rm -rf ~; }`.
+    - `find … -delete` / `-exec rm … {}` trên `/`, `~` → **deny**; gốc ngoài dự án → **ask**. Lệnh trong `-exec` được
+      quét như lệnh thường.
+    - Xoá đệ quy ra ngoài gốc dự án (trừ thư mục tạm) → **ask**, cả sau `cd`.
+    - Gửi file bí mật hay biến môi trường ra mạng → **deny**, gồm `curl -d @.env`, `-F f=@.env`, `-T .env`,
+      `wget --post-file`, `cat .env | curl -d @-` và `env | curl …`.
+    - Script trình thông dịch ghi hoặc xoá file bí mật, cổng, bằng chứng autopilot, năng lực agent → **ask**, gồm
+      `python3 -c "open('.autopilot/…','w')"` và heredoc vào `python3 -`.
+    - Cập nhật snapshot (`playwright/jest/vitest -u`) → **ask**. File cổng mới: `.stylelintrc*`,
+      `stylelint.config.*`, `*-snapshots/`, `__snapshots__/`.
+  - **`LOOP-STOP-023` (MUST@L, mới)**: agent không tự thêm năng lực giữa phiên. `claude mcp add*`,
+    `claude plugin install|enable`, `claude plugin marketplace add`, `codex mcp add`, `gemini extensions install`,
+    `npx skills add` → ask. Sửa `.mcp.json`, `mcp.json`, `~/.claude.json`, `.claude-plugin/`, `.codex/config.toml`,
+    `.gemini/` → ask; sửa `.claude/{agents,skills,commands}/` → ask ở dự án đích (có `.xtemplates/`). Làn merge coi các
+    file đó là cổng. Thêm hai nhóm đường dẫn nhạy cảm: **nguồn gói** (`.npmrc`, `.yarnrc*`, `.pypirc`, `pip.conf`,
+    `uv.toml`, `bunfig.toml`) và **ảnh/container** (`Dockerfile*`, `Containerfile*`, `compose*.yaml`). Trước đây PR chỉ
+    đổi các file này kèm một test vào làn nhanh.
+  - **`LOOP-STOP-024` (MUST@L, mới)**: `[~]` có hai nghĩa.
+    - `— Không áp dụng: <điều kiện>`: mục không áp vào dự án.
+    - `— Miễn: <lý do>`: mục có áp dụng mà bỏ. Ở mức MUST phải kèm `Duyệt: "<lời chủ dự án>" <YYYY-MM-DD>` hoặc link;
+      thiếu thì `blueprint-status --strict` đỏ và autopilot không ra `done`.
+    - Ghi chú `Không áp dụng:` được `compose` giữ khi ghép lại.
+    - BLUEPRINT của repo khung đổi 8 mục MUST `Miễn` (thật ra không áp dụng) thành `Không áp dụng`.
+    - **Dự án đích:** mục MUST `Miễn` cũ phải chọn một trong hai: đổi thành `Không áp dụng:` nếu đúng là không áp dụng,
+      hoặc xin câu duyệt thật của chủ dự án.
+  - **`LOOP-DESIGN-022` (MUST@L, mới) + `xt.py loop verify`**: kiểm lại cuối.
+    - Khi mọi task có bằng chứng xanh, Stop hook chỉ cho dừng sau `loop verify`.
+    - `loop verify` chạy lại mọi Gate của task đã tick (một lần mỗi lệnh) trên cây hiện tại, ghi
+      `.autopilot/verified.json` kèm dấu vân tay cây: sha256 của HEAD, diff và file chưa track, trừ `.autopilot/`.
+    - Cây đổi sau đó, hoặc Gate làm đổi cây, thì phải chạy lại.
+    - Lợi ích: bắt bằng chứng bị sửa tay, và bắt task sau làm hỏng Gate của task trước.
+    - Ngoài repo git thì bỏ qua bước này.
+  - `templates/GO-NO-GO.md`:
+    - thêm cột **Nhãn bằng chứng** (`real-path` / `faithful-fixture` / `asserted-not-measured`), là cột mà `QA-STRAT-012`
+      (MUST@L) đòi nhưng mẫu chưa có;
+    - thêm mục **2b. Bằng chứng chưa chứng minh** (adapter giả, chưa có thiết bị/dữ liệu/quy mô thật).
 - **Guard Bash: shell lồng, publish/deploy, gỡ hook/cổng/test** (audit 2026-10-16 đợt 3; AUD-SEC-015, SEC-017, SEC-018,
   SEC-019, HAR-026, HAR-027). Luật deny/ask áp đệ quy cho lệnh trong `sh -c`/`bash -lc` (cả lồng nhiều tầng, quá 3 tầng
   → hỏi), heredoc vào shell và `echo/printf … | sh` (luật hook-bypass riêng cho `-c` gộp vào đây). publish/deploy nhận

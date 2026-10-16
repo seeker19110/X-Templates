@@ -85,3 +85,10 @@
 - Chọn: Giữ ngoại lệ cứng ở L3: merge-check trả human + trường hard cho đường dẫn bí mật/auth/thanh toán/mật mã, nhãn risk:auth/payment/pii/crypto/admin/secret và merge_risk_paths; guard không bật auto-merge cho PR đó; làn chuẩn còn lại vẫn auto-merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn, cách hiểu chặt hơn với bảo mật/tiền/dữ liệu): yêu cầu 'mở PR kèm auto-merge' của chủ repo nói chung, không nói bỏ chốt người cho tiền/auth; LOOP-STOP-005 là MUST và ruleset không có review bắt buộc nên phương án 2 bỏ chốt người duy nhất. Repo khung không có mã auth/thanh toán nên yêu cầu của chủ repo giữ nguyên ở đây; dự án đích giữ người duyệt đúng chỗ rủi ro.
 - Đường lùi: Bỏ nhánh hard trong merge_decision và guard._auto_merge_verdict (ADR-0016), ghi miễn trừ LOOP-STOP-005 vào BLUEPRINT dự án
+
+### D-013 · 2026-10-16T22:55:56+00:00 · Duyệt PLAN T-701…T-704 (sửa audit delta #58–#66, 4 đợt)
+
+- Phương án: (1) Duyệt PLAN 4 task như viết, mỗi đợt một PR kèm auto-merge, xung đột giải bằng merge main · (2) Gộp B+C+D thành một PR để tránh xung đột lặp
+- Chọn: Duyệt PLAN 4 task như viết, mỗi đợt một PR kèm auto-merge, xung đột giải bằng merge main
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: chủ repo đã duyệt 4 đợt và luật mỗi lát một PR (ADR-0014); PR nhỏ dễ review và dễ lùi; xung đột với phiên song song giải được bằng merge main, không cần gộp
+- Đường lùi: Đóng PR đợt chưa merge, gộp nhánh còn lại thành một PR
