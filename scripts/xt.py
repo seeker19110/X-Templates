@@ -2445,7 +2445,8 @@ MERGE_GATE_GLOBS = (
     *("codecov.yml", ".codecov.yml", ".pre-commit-config.yaml", ".husky/*", "lefthook.yml", ".lintstagedrc*"),
     *("commitlint.config.*", "xt.yaml", "dev-task.sh", "Makefile", "justfile", ".gitleaks.toml", ".gitleaksignore"),
     *(".semgrep*", "sonar-project.properties", "requirements-dev.txt"),
-    *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*"),
+    *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*", ".flake8", ".golangci.y*ml"),
+    *(".nycrc*", ".c8rc*", "phpunit.xml*", "karma.conf.*", ".mocharc*"),
     *("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*"),
 )
 
