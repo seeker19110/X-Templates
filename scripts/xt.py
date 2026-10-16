@@ -2710,23 +2710,48 @@ def _package_of(path: str) -> str:
     return parts[0] if len(parts) > 1 else "."
 
 
-def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
-    """Lý do PR KHÔNG thuộc làn nhanh (rỗng = làn nhanh): đường dẫn nhạy cảm, nhãn `risk:`, > 150 dòng, > 1 gói, đổi
-    mã không đổi test. Tài liệu không tính gói/test; lockfile không tính dòng (nhưng tính rủi ro phụ thuộc)."""
+# Ngoại lệ cứng (`LOOP-STOP-005`, "Ngoại lệ cứng" của stop-points-and-escalation.md): tiền thật, dữ liệu người dùng
+# thật, xác thực/phân quyền, mật mã, bí mật — luôn người merge, kể cả ở L3 (ADR-0016, D-012; AUD-HAR-042).
+HARD_RISK_TAGS = ("bí mật", "auth", "thanh toán", "mật mã")
+HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "risk:admin", "risk:secret"}
+
+
+def _risky_paths(pr: Dict[str, Any]) -> List[str]:
+    """Đường dẫn của PR kể cả tên cũ khi đổi tên (dời workflow ra khỏi `.github/` = tắt CI — AUD-HAR-022)."""
     files = [f for f in pr.get("files") or [] if isinstance(f, dict)]
-    paths = [str(f.get("path", "")) for f in files]
-    # Đổi tên: tên cũ cũng xét rủi ro (dời workflow ra khỏi `.github/` = tắt CI — AUD-HAR-022).
-    risky = paths + [str(f["previous"]) for f in files if f.get("previous")]
-    out = [
-        f"nhãn rủi ro: {n}" for n in (str(lb.get("name", "")) for lb in pr.get("labels") or []) if n.startswith("risk:")
-    ]
+    return [str(f.get("path", "")) for f in files] + [str(f["previous"]) for f in files if f.get("previous")]
+
+
+def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
+    """Lý do thuộc ngoại lệ cứng (rỗng = không): nhãn `HARD_RISK_LABELS`, đường dẫn bí mật/auth/thanh toán/mật mã,
+    `merge_risk_paths` của dự án (chủ dự án tự khai là nhạy cảm)."""
+    risky = _risky_paths(pr)
+    labels = [str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict)]
+    out = [f"nhãn rủi ro: {n}" for n in labels if n in HARD_RISK_LABELS]
     for tag, rx in RISK_PATH_RES:
-        hit = [p for p in risky if rx.search(p) or (tag == "cổng/CI" and _gate_path(p))]
-        if hit:
+        hit = [p for p in risky if rx.search(p)]
+        if tag in HARD_RISK_TAGS and hit:
             out.append(f"đường dẫn nhạy cảm ({tag}): {', '.join(hit[:3])}")
     own = [p for p in risky if any(fnmatch.fnmatch(p, g) for g in risk_paths)]
     if own:
         out.append(f"đường dẫn nhạy cảm (merge_risk_paths): {', '.join(own[:3])}")
+    return out
+
+
+def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
+    """Lý do PR KHÔNG thuộc làn nhanh (rỗng = làn nhanh): ngoại lệ cứng, nhãn `risk:` khác, đường dẫn schema/cổng/phụ
+    thuộc, > 150 dòng, > 1 gói, đổi mã không đổi test. Tài liệu không tính gói/test; lockfile không tính dòng (nhưng
+    tính rủi ro phụ thuộc)."""
+    files = [f for f in pr.get("files") or [] if isinstance(f, dict)]
+    paths = [str(f.get("path", "")) for f in files]
+    risky = _risky_paths(pr)
+    out = merge_hard_reasons(pr, risk_paths)
+    labels = [str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict)]
+    out += [f"nhãn rủi ro: {n}" for n in labels if n.startswith("risk:") and n not in HARD_RISK_LABELS]
+    for tag, rx in RISK_PATH_RES:
+        hit = [p for p in risky if rx.search(p) or (tag == "cổng/CI" and _gate_path(p))]
+        if tag not in HARD_RISK_TAGS and hit:
+            out.append(f"đường dẫn nhạy cảm ({tag}): {', '.join(hit[:3])}")
     lines = sum(
         int(f.get("additions", 0)) + int(f.get("deletions", 0))
         for f in files
@@ -2780,14 +2805,18 @@ def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
 
 def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None) -> Dict[str, Any]:
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
-    `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn — chủ dự án chọn, ADR-0015); lệnh merge ghim
-    `--match-head-commit` (có commit mới → lệch)."""
+    `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
+    ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
+    PR còn chờ CI để guard không bật auto-merge cho nó ngay lúc mở PR."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
+    hard = merge_hard_reasons(pr, risk_paths or [])
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
     if blocked:
         verdict, reasons = blocked
+    elif hard:
+        verdict, reasons = "human", [f"ngoại lệ cứng (LOOP-STOP-005): {'; '.join(hard)}", *lane_reasons[len(hard) :]]
     elif lane_reasons and autonomy < 3:
         verdict, reasons = "human", lane_reasons
     elif autonomy < 2:
@@ -2797,6 +2826,8 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         )
     elif pr.get("reviewDecision") == "REVIEW_REQUIRED":
         verdict, reasons = "human", ["ruleset đòi review của người"]
+    elif lane_reasons:  # L3 (ADR-0015): làn chuẩn tự merge — ghi đúng làn (AUD-CODE-010)
+        verdict, reasons = "merge", [f"L3 (ADR-0015): làn chuẩn, CI xanh, không xung đột — {'; '.join(lane_reasons)}"]
     else:
         verdict, reasons = "merge", ["làn nhanh, CI xanh, không xung đột"]
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
@@ -2817,6 +2848,7 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         # L3 (ADR-0015): guard cho bật auto-merge của GitHub ngay khi mở PR — trừ PR chồng (nhắm nhánh sắp bị xoá).
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
+        "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -2931,11 +2963,13 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     statuses = [
         s for s in _gh_one(f"{repo}/commits/{sha}/status?per_page=100").get("statuses") or [] if isinstance(s, dict)
     ]
-    # Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên: chỉ lần mới nhất (id lớn
-    # nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58).
+    # Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên, cùng app: chỉ lần mới nhất
+    # (id lớn nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58). Khoá gồm app: check cùng tên
+    # của app khác là check khác, không được che nhau (AUD-CODE-007).
     latest: Dict[str, Dict[str, Any]] = {}
     for c in runs:
-        key = str(c.get("name"))
+        app = c.get("app")
+        key = f"{app.get('id') if isinstance(app, dict) else ''}/{c.get('name')}"
         if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
             latest[key] = c
     rollup = [
