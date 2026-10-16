@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- Tài liệu harness khớp mã (audit 2026-10-16 đợt 5b): mô tả hook PreToolUse ở `CLAUDE.md` và `templates/CLAUDE.md` thêm
+  hỏi khi làm yếu/xoá test, ghi tay `.autopilot/`, merge qua `gh api`/MCP, quét lệnh lồng, cổng trước `git commit`
+  (AUD-HAR-031); `AGENTS.md` §6 liệt kê đủ thành phần cổng `lint` (AUD-DOC-029); skill `/audit` §6 trong autopilot tự
+  duyệt kế hoạch sửa (ADR-0008), việc cần người `loop defer` trước `loop block` (AUD-HAR-032); ADR-0009 ghi công thức trần
+  vòng bị ADR-0012 thay (AUD-DOC-026).
 - **Áp hết ADR-0008 vào tài liệu** (audit 2026-10-16 đợt 5, AUD-DOC-023): `PM-PLAN-005` (ID, mức MUST giữ) bỏ "mâu thuẫn
   spec" khỏi danh sách cần người duyệt, thêm publish/deploy; nguyên tắc 6 của `planning-and-estimation.md`, bảng ca của
   `spec-driven-development.md`, bảng tách việc của `orchestration-and-subagents.md` và README (mục "Chạy tự động") ghi
