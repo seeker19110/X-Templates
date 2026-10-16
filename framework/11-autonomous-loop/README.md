@@ -94,7 +94,7 @@ updated: 2026-10-16
 | `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |
 | `loop record --task T-NNN -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence, cập nhật chữ ký lỗi |
 | `loop block --reason "..."` | Đặt `blocked=true` (điểm dừng bắt buộc về hành động) |
-| `loop decide --question Q --option A --option B --choice N --why W --revert R [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
+| `loop decide --question Q --option A --option B --choice N --why W --revert R [--prod P] [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
