@@ -2580,6 +2580,7 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
     }[verdict]
     return {
         "pr": n,
+        "repo": pr.get("repo", ""),  # `chủ/repo` (REST) — guard so với owner/repo của tool MCP merge
         "head": pr.get("headRefOid", ""),
         "verdict": verdict,
         "lane": lane,
@@ -2704,7 +2705,11 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     ]
     files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
     mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
+    base_repo = (
+        ((pr.get("base") or {}).get("repo") or {}).get("full_name") if isinstance(pr.get("base"), dict) else None
+    )
     return {
+        **({"repo": str(base_repo)} if base_repo else {}),
         "number": pr.get("number", n),
         "state": "MERGED" if pr.get("merged") else str(pr.get("state", "")).upper(),
         "isDraft": bool(pr.get("draft")),

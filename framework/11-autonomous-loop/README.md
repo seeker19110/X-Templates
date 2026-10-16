@@ -62,7 +62,10 @@ updated: 2026-10-16
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit, push nhánh làm việc, cập nhật
-    `PROGRESS.md` (≤ 8 KB). Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi PROGRESS); lần 3 → máy đặt
+    `PROGRESS.md` (≤ 8 KB). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
+    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → `<XT> merge-check --pr <N>` →
+    làm đúng `next` (`merge` = lệnh merge ghim head; `human` = `loop defer`); vòng sau chạy lại `merge-check` cho PR còn
+    mở, theo FIFO. Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi PROGRESS); lần 3 → máy đặt
     `blocked`. Không skip test, không nới cổng (hook `pre-edit-guard.sh` sẽ hỏi).
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
@@ -76,7 +79,7 @@ updated: 2026-10-16
     `loop status` (task đang làm, lệnh kiểm cuối, file chưa commit, việc chờ người). **Gần hết trần máy** (≥ 80% vòng/giờ/tiền):
     ghi "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
 15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict` (cổng phát hành G7) không còn MUST mở
-    → `GO-NO-GO.md`, PR cuối, báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `done-pending-human` → báo cáo như `done` + danh sách việc chờ người (ID, lý do, cách làm),
+    → `GO-NO-GO.md` (PR của lát cuối; PR làn nhanh đã merge, PR làn chuẩn liệt kê chờ người), báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `done-pending-human` → báo cáo như `done` + danh sách việc chờ người (ID, lý do, cách làm),
     người xử lý rồi `loop resume`. `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
 
 ## Lệnh thật (`scripts/xt.py`)
@@ -93,6 +96,7 @@ updated: 2026-10-16
 | `loop decide --question Q --option A --option B --choice N --why W --revert R [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
+| `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
 | `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`) |
