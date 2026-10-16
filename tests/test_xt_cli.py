@@ -505,6 +505,13 @@ class FrameworkCommandsTest(TmpDirCase):
         self.assertNotIn("BE-CLI-001", out)
         self.assertNotIn("BE-API-999", out)
 
+    def test_blueprint_status_prints_bad_lines(self):
+        bp = self.tmp / "BP.md"
+        bp.write_text("| MUST | 2 |\n- [x] `A-001` **MUST** a\n", encoding="utf-8")
+        rc, out, _ = run_main("blueprint-status", bp, "--strict")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ Sai định dạng/thiếu mục: chỉ thấy 1/2 mục MUST", out)
+
     def test_compose_to_file_then_recompose_keeps_state(self):
         target = self.tmp / "BLUEPRINT.md"
         rc, out, _ = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--out", target)
@@ -517,6 +524,12 @@ class FrameworkCommandsTest(TmpDirCase):
         self.assertEqual(rc, 0)
         self.assertIn("Giữ trạng thái 1 mục", err)
         self.assertIn("- [x] `BE-API-001`", target.read_text(encoding="utf-8"))
+        with target.open("a", encoding="utf-8") as f:
+            f.write("\n- [ ] `HM-MONEY-001` **MUST** mục riêng của dự án\n")
+        rc, out, err = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--out", target)
+        self.assertEqual(rc, 0)
+        self.assertIn("Giữ 1 mục riêng của dự án ở cuối: HM-MONEY-001", err)
+        self.assertIn("- [ ] `HM-MONEY-001`", target.read_text(encoding="utf-8"))
 
     def test_stats(self):
         rc, out, _ = run_main("--framework", self.fw, "stats")

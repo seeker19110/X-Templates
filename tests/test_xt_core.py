@@ -591,15 +591,71 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("PLAN không có task", v["reason"])
 
     def test_waived_task_is_skipped_and_next_open_is_continue(self):
-        write(self.plan, "- [~] `T-001` bỏ qua\n- [ ] `T-002` làm tiếp — Gate: `true`\n")
+        write(self.plan, "- [~] `T-001` bỏ qua — Bỏ: trùng T-002\n- [ ] `T-002` làm tiếp — Gate: `true`\n")
         self.activate()
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
 
     def test_only_waived_tasks_is_done(self):
-        write(self.plan, "- [~] `T-001` bỏ qua\n")
+        write(self.plan, "- [~] `T-001` bỏ qua — Bỏ: khách huỷ yêu cầu\n")
         self.activate()
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_waived_task_without_reason_is_verify(self):
+        # PLAN: `[~]` bỏ phải ghi lý do — trước đây bỏ không lý do vẫn tính "xong".
+        write(self.plan, "- [~] `T-001` báo cáo công nợ — Gate: `true`\n")
+        self.activate()
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
+        self.assertIn("Bỏ: <lý do>", v["reason"])
+
+    def test_evidence_older_than_loop_init_is_verify(self):
+        # Bằng chứng của vòng trước (PLAN cũ cùng ID) không được tính cho PLAN mới.
+        write(self.plan, "- [x] `T-001` việc mới — Gate: `npm test`\n")
+        write(
+            self.base / ".autopilot" / "evidence" / "T-001.json",
+            json.dumps({"task": "T-001", "exit_code": 0, "cmd": "npm test", "finished": "2026-10-01T00:00:00+00:00"}),
+        )
+        self.activate(started="2026-10-15T00:00:00+00:00")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
+        self.assertIn("trước lần loop init", v["reason"])
+        self.activate(started="2026-09-30T00:00:00+00:00")
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_gate_with_dev_credentials_matches_redacted_evidence(self):
+        # Bằng chứng lưu lệnh đã che bí mật; so với Gate thô thì `verify` mãi, đốt hết ngân sách vòng.
+        gate = "DATABASE_URL=postgres://app:app@localhost:5432/test true"
+        write(self.plan, f"- [x] `T-001` db — Gate: `{gate}`\n")
+        self.activate()
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.loop_record("T-001", [gate], self.base), 0)
+        self.assertIn("***", xt.read_evidence("T-001", self.base)["cmd"])
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_blueprint_bad_lines_keep_loop_going(self):
+        write(self.plan, "- [x] `T-001` xong — Gate: `echo ok`\n")
+        self.evidence("T-001", 0, "echo ok")
+        write(self.base / "BLUEPRINT.md", "| MUST | 2 |\n- [x] `A-001` **MUST** a\n- [-] `A-002` **MUST** b\n")
+        self.activate(blueprint="BLUEPRINT.md")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "continue")
+        self.assertIn("sai định dạng", v["reason"])
+
+    def test_malformed_plan_task_lines_are_verify(self):
+        for bad in (
+            "- [ ] T-002 thiếu backtick",
+            "  - [ ] `T-003` thụt lề",
+            "- [ ] `T-04` ID ngắn",
+            "- [-] `T-005` ô lạ",
+        ):
+            with self.subTest(bad=bad):
+                write(self.plan, f"- [x] `T-001` xong — Gate: `echo ok`\n{bad}\n")
+                self.evidence("T-001", 0, "echo ok")
+                self.activate()
+                v = xt.loop_verdict(self.base)
+                self.assertEqual(v["verdict"], "verify")
+                self.assertIn("sai định dạng", v["reason"])
 
     def test_ticked_task_evidence_paths(self):
         write(self.plan, "- [x] `T-001` xong — Gate: `echo ok`\n")
@@ -749,6 +805,23 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         st = xt.read_state(self.base)
         self.assertEqual(st["same_failure_count"], 0)
         self.assertIsNone(st["last_failure_signature"])
+
+    def test_pipeline_failure_is_not_green(self):
+        # pipefail: Gate `test | tee log` đỏ khi test đỏ — /bin/sh lấy exit của `tee` → từng ghi exit 0 (xanh giả).
+        code, _, _ = self.record(["false | cat"])
+        self.assertEqual(code, 1)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 1)
+        self.assertEqual(self.record(["true | cat"])[0], 0)
+
+    def test_missing_bash_records_127(self):
+        with (
+            unittest.mock.patch("xt.subprocess.run", side_effect=FileNotFoundError("bash")),
+            unittest.mock.patch("xt._git_head", return_value=None),
+        ):
+            code, out, _ = self.record(["true"])
+        self.assertEqual(code, 127)
+        self.assertIn("cần bash", out)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 127)
 
     def test_record_without_state_still_writes_evidence(self):
         bare = self.tmpdir()
