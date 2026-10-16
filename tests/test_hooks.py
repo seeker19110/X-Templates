@@ -785,6 +785,61 @@ class GuardMatrixTest(unittest.TestCase):
         )
         self.assertEqual(decision(out), "ask")
 
+    def test_weakens_test(self):
+        w = self.g.weakens_test
+        for old, new in [
+            ("def test_a():\n    assert f() == 1", "@pytest.mark.skip\ndef test_a():\n    assert f() == 1"),
+            ("it('a', () => { expect(f()).toBe(1) })", "it.skip('a', () => { expect(f()).toBe(1) })"),
+            ("describe('a', () => {})", "describe.only('a', () => {})"),
+            ('func TestA(t *testing.T) { t.Errorf("x") }', 'func TestA(t *testing.T) { t.Skip(); t.Errorf("x") }'),
+            ("test('a @smoke', async () => {})", "test('a @smoke @flaky', async () => {})"),
+            ("@Test void a() { assertEquals(1, f()); }", "@Disabled @Test void a() { assertEquals(1, f()); }"),
+        ]:
+            self.assertEqual(w(old, new), "thêm skip/only/xfail/flaky", new)
+        self.assertEqual(w("self.assertEqual(a, 1)\nself.assertTrue(b)", "self.assertEqual(a, 1)"), "bớt assertion")
+        self.assertEqual(w("expect(a).toBe(1); expect(b).toBe(2)", "expect(a).toBe(1)"), "bớt assertion")
+        for old, new in [
+            ("assert f() == 1", "assert f() == 2"),  # sửa giá trị kỳ vọng: cùng số assertion, không có dấu skip
+            ("assert a", "assert a\nassert b"),  # thêm assertion
+            ("it.skip('a')", "it('a')"),  # bỏ skip là làm MẠNH bài test
+            ("", "def test_new():\n    assert g()"),
+        ]:
+            self.assertEqual(w(old, new), "", new)
+
+    def test_edit_guard_existing_tests(self):
+        root = Path(self.root)
+        (root / "tests").mkdir()
+        (root / "tests" / "test_a.py").write_text("def test_a():\n    assert f() == 1\n", encoding="utf-8")
+        (root / "src").mkdir()
+        (root / "src" / "a.py").write_text("assert x\n", encoding="utf-8")
+        (root / "web.test.ts").mkdir()  # khớp mẫu test nhưng là thư mục → không đọc
+        skip = {"old_string": "def test_a():", "new_string": "@pytest.mark.skip\ndef test_a():"}
+
+        def ed(rel: str, tool_input: object) -> tuple[str, str]:
+            return self.g.edit_decision(str(root / rel), str(root), tool_input)
+
+        d, why = ed("tests/test_a.py", skip)
+        self.assertEqual(d, "ask")
+        self.assertIn("LOOP-CI-001", why)
+        self.assertIn("tests/test_a.py", why)
+        self.assertEqual(ed("tests/test_a.py", {"content": "def test_a():\n    pass\n"})[0], "ask")  # Write bỏ assert
+        self.assertEqual(ed("tests/test_a.py", {"content": "def test_a():\n    assert f() == 2\n"})[0], "")
+        multi = {"edits": ["lạ", {"old_string": "assert f() == 1", "new_string": "pass"}, {"new_string": 3}]}
+        self.assertEqual(ed("tests/test_a.py", multi)[0], "ask")  # MultiEdit; mục lạ bỏ qua
+        self.assertEqual(ed("tests/test_a.py", {"old_string": "x", "new_string": "y"})[0], "")
+        self.assertEqual(ed("tests/test_a.py", None), ("", ""))  # không có payload sửa → chỉ luật đường dẫn
+        self.assertEqual(ed("tests/test_new.py", skip)[0], "")  # file test MỚI: không có gì để làm yếu
+        self.assertEqual(ed("src/a.py", {"old_string": "assert x", "new_string": "pass"})[0], "")  # không phải test
+        self.assertEqual(ed("web.test.ts", {"content": "x"})[0], "")  # không phải file thường → bỏ qua
+        with mock.patch("builtins.open", side_effect=PermissionError("x")):
+            self.assertEqual(ed("tests/test_a.py", {"content": "pass"}), ("", ""))  # đọc lỗi → fail-open
+        code, out, _ = run_hook(
+            "pre-edit-guard.sh", {"tool_input": {"file_path": str(root / "tests" / "test_a.py"), **skip}}, root
+        )
+        self.assertEqual(decision(out), "ask")
+        code, out = self.run_guard(["edit"], json.dumps({"tool_input": {"file_path": "tests/test_a.py", **skip}}))
+        self.assertEqual(json.loads(out)["decision"], "ask")
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class PreEditGuardTest(unittest.TestCase):
