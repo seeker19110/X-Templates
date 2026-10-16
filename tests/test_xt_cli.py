@@ -920,6 +920,19 @@ class FeedbackTest(TmpDirCase):
         self.assertEqual(table[2], "| ✅ | muc-sai | `SEC-AUTH-001` | a, b | mơ hồ \\| khó | x |")
         self.assertTrue(table[4].startswith("| — | tai-lieu |"))
 
+    def test_aggregate_redacts_hand_edited_entries(self):
+        """AUD-CFG-002: FB sửa tay sau `feedback add` vẫn được che trước khi ra PR nháp (repo khung public)."""
+        d = self.tmp / "p" / "docs" / "xtemplates-feedback"
+        d.mkdir(parents=True)
+        pw = "".join(["hun", "ter2"])
+        (d / "FB-001.md").write_text(
+            f"---\nkind: cong-cu\nid: X-1\n---\n\n- Triệu chứng: password={pw}\n- Cách sửa: x\n", encoding="utf-8"
+        )
+        for args in (["--json"], []):
+            with self.subTest(args):
+                out = run_main("feedback", "aggregate", "--from", f"p={d}", *args)[1]
+                self.assertNotIn(pw, out)
+
     def test_aggregate_rejects_bad_source_spec(self):
         for spec in ("khong-dau-bang", "=thu-muc", "du-an="):
             with self.subTest(spec):
@@ -964,6 +977,11 @@ class LoopCommandsTest(TmpDirCase):
         self.assertNotIn("ADR-0011", run_main("loop", "init")[2])
         (self.tmp / "xt.yaml").unlink()
         self.assertNotIn("ADR-0011", run_main("loop", "init")[2])  # thiếu xt.yaml: dev-task tự dò, doctor đã báo
+        # AUD-HAR-025: comment cuối dòng không phải lệnh
+        (self.tmp / "xt.yaml").write_text("lint: true  # TODO\ntest: # TODO điền\n", encoding="utf-8")
+        self.assertEqual(xt.gate_noop_keys(self.tmp), ["lint", "test"])
+        (self.tmp / "xt.yaml").write_text('lint: ruff check .  # kiểm\ntest: "pytest -q # x"\n', encoding="utf-8")
+        self.assertEqual(xt.gate_noop_keys(self.tmp), [])
 
     def test_init_then_status_text_and_json(self):
         self.write_plan()

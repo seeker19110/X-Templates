@@ -37,8 +37,23 @@ fi
 
 # --- 1) Lệnh KHAI BÁO (escape hatch cho mọi dự án đặc thù) --------------------
 yaml_has() { [ -f "$YAML" ] && grep -Eq "^$1:" "$YAML"; }
-yaml_get() { # giá trị khoá $1 trong xt.yaml; bỏ nháy chỉ khi bọc cả hai đầu ("..." hoặc '...')
-  grep -E "^$1:" "$YAML" | head -1 | sed -E "s/^$1:[[:space:]]*//; s/[[:space:]]+\$//; s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
+strip_comment() { # bỏ comment YAML: `#` ở đầu giá trị hoặc sau khoảng trắng, ngoài nháy (AUD-HAR-025)
+  local s="$1" out="" q="" c prev=" " i
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    if [ -z "$q" ] && [ "$c" = "#" ] && { [ "$prev" = " " ] || [ "$prev" = $'\t' ]; }; then break; fi
+    if [ "$c" = "'" ] || [ "$c" = '"' ]; then
+      if [ -z "$q" ]; then q="$c"; elif [ "$q" = "$c" ]; then q=""; fi
+    fi
+    out+="$c"
+    prev="$c"
+  done
+  printf '%s' "$out"
+}
+yaml_get() { # giá trị khoá $1 trong xt.yaml; bỏ comment, rồi bỏ nháy chỉ khi bọc cả hai đầu ("..." hoặc '...')
+  local v
+  v="$(grep -E "^$1:" "$YAML" | head -1 | sed -E "s/^$1:[[:space:]]*//")"
+  strip_comment "$v" | sed -E "s/[[:space:]]+\$//; s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
 }
 declared_cmd() {
   # In ra lệnh khai báo cho $1 nếu có, ngược lại rỗng. xt.yaml (phẳng) ưu tiên hơn file bash.

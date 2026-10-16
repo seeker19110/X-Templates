@@ -506,6 +506,50 @@ class LoopTest(unittest.TestCase):
             self.assertNotIn(leak if name != "aws" else leak[4:], out, name)
         self.assertIn("postgres://admin:***@db/x", out)
 
+    def test_redact_more_secrets(self):
+        """AUD-CFG-002: các dạng bí mật hay gặp trong triệu chứng/cách sửa của phản hồi (ra repo public)."""
+        j = "".join
+        fake = {
+            "redis": j(["hunter", "2pass"]),
+            "npm": j(["npm_", "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"]),
+            "jwt": j(["eyJ", "hbGciOiJIUzI1NiJ9", ".", "eyJzdWIiOiIxMjMifQ", ".", "c2lnbmF0dXJlMTIz"]),
+            "mysql": j(["my", "sqlpw9"]),
+            "curl": j(["cu", "rlpw77"]),
+            "google": j(["AIza", "SyA1234567890abcdefghijklmnopqrstu"]),
+            "hf": j(["hf_", "abcdefghijklmnopqrstuvwx"]),
+            "pypi": j(["pypi-", "AgEIcHlwaS5vcmcCJDEyMzQ"]),
+            "rk": j(["rk_live_", "abcdefghijklmnop"]),
+            "spaced": j(["two ", "words"]),
+            "access": j(["AKIAZZ", "ZZsecretvalue"]),
+            "dsn": j(["0123456789abcdef", "0123456789abcdef"]),
+        }
+        raw = (
+            f"REDIS_URL=redis://:{fake['redis']}@cache:6379 {fake['npm']} {fake['jwt']}\n"
+            f"mysql -u root -p{fake['mysql']} db\ncurl -u admin:{fake['curl']} https://x\n"
+            f"{fake['google']} {fake['hf']} {fake['pypi']} {fake['rk']}\n"
+            f"password: '{fake['spaced']}'\nAWS_ACCESS_KEY={fake['access']}\nhttps://{fake['dsn']}@sentry.io/1\n"
+        )
+        out = xt.redact(raw)
+        for name, leak in fake.items():
+            self.assertNotIn(leak, out, name)
+        self.assertIn("redis://:***@cache", out)
+
+    def test_redact_quoted_flag_values_and_linear_time(self):
+        """Reviewer #61: giá trị trong nháy sau cờ (`--password="a b"`, `-p"a b"`) che hết; dòng dài không chạy bậc hai."""
+        j = "".join
+        pw = j(["my se", "cret pw"])
+        for raw in (f'--password="{pw}" x', f"--token='{pw}' y", f'mysql -u root -p"{pw}" -e x'):
+            with self.subTest(raw):
+                out = xt.redact(raw)
+                self.assertNotIn("cret", out)
+        import time
+
+        for blob in ("a" * 50_000, "mysql " * 20_000, ("token" + "f" * 40 + " ") * 2_000):
+            with self.subTest(blob[:12]):
+                t0 = time.monotonic()
+                xt.redact(blob)
+                self.assertLess(time.monotonic() - t0, 2.0)
+
     def test_redact_applies_to_evidence_cmd(self):
         with redirect_stdout(io.StringIO()):
             xt.loop_record("T-009", ["echo --token SUPERSECRETVALUE; exit 1"], self.base)
