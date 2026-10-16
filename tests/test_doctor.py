@@ -292,6 +292,9 @@ class LoopInitDoctorTest(DoctorCase):
         return err.getvalue()
 
     def test_clean_project_has_no_warning(self):
+        # Bản cài mới để xt.yaml trống → cổng sẽ đỏ trong vòng (ADR-0011); khai lệnh thật thì im.
+        self.assertIn("Cổng sẽ ĐỎ trong vòng (ADR-0011)", self.loop_init())
+        self.write("xt.yaml", "lint: ruff check .\ntypecheck: mypy .\ntest: pytest -q\nbuild: ''\n")
         self.assertEqual(self.loop_init(), "")
 
     def test_errors_are_warned_but_not_blocking(self):

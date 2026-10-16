@@ -4,8 +4,9 @@
 Lệnh:
   validate                      Kiểm quy ước toàn khung (frontmatter, ID, liên kết, hồ sơ/gói ngành).
   list [profiles|industries|modules]
-  compose --profile P [--industry I ...] [--scale S|M|L] [--include-may] [--add MODULE ...] [--out FILE]
-                                Ghép baseline + hồ sơ + gói ngành thành BLUEPRINT.md cho dự án.
+  compose --profile P [--industry I ...] [--scale S|M|L] [--include-may] [--add MODULE ...] [--out FILE] [--full]
+                                Ghép baseline + hồ sơ + gói ngành thành BLUEPRINT.md (MUST theo quy mô) + <tên>-BACKLOG.md
+                                (SHOULD/MAY) cho dự án; --full: một file như trước ADR-0012.
   blueprint-status FILE [--strict]
                                 Đếm mục đạt/chưa/miễn; --strict: còn MUST chưa đạt -> exit 1.
   loop init --plan FILE [--blueprint FILE] [--max-iterations N] [--hours H] [--single-session]
@@ -84,6 +85,8 @@ ITEM_LIKE_RE = re.compile(r"^- \[[ xX~]\] `[A-Z][A-Z0-9-]*`")
 # thì báo lỗi; trước đây bị bỏ qua im lặng nên xoá/sửa hỏng mục MUST vẫn ra "0 MUST mở".
 LOOSE_ITEM_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*`?(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)\b")
 MUST_COUNT_RE = re.compile(r"^\|\s*MUST\s*\|\s*(\d+)\s*\|\s*$", re.M)
+FRONT_BLOCK_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+BACKLOG_KEY_RE = re.compile(r"^backlog:[ \t]*(\S+)[ \t]*$", re.M)  # BLUEPRINT.md khai file SHOULD/MAY (ADR-0012)
 # Lý do miễn trừ: `— Miễn: <lý do>` (hoặc `(Miễn: …)`) ở phần ghi chú — sau `· Nguồn:` cuối nếu có, vì chữ của mục có thể
 # tự chứa "— Miễn:" (LOOP-HARNESS-007).
 WAIVER_RE = re.compile(r"(?:[—–-]|\()\s*Miễn\s*:\s*[^\s)]")
@@ -487,9 +490,10 @@ def _compose_order(docs: List[Doc], profile: str, prof: Doc, inds: List[Doc], ex
 
 
 def _compose_sections(
-    root: Path, ordered: List[Doc], scale: str, include_may: bool
+    root: Path, ordered: List[Doc], scale: str, include_may: bool, levels: Tuple[str, ...] = LEVELS
 ) -> Tuple[List[str], Dict[str, int]]:
-    """Mỗi tài liệu có mục thành một phần `### tiêu đề` + danh sách mục ở mức hiệu lực theo quy mô; đếm theo mức."""
+    """Mỗi tài liệu có mục thành một phần `### tiêu đề` + danh sách mục ở mức hiệu lực theo quy mô; đếm theo mức.
+    `levels`: chỉ in mục ở các mức này (đếm vẫn đủ); phần không còn mục nào thì bỏ."""
     counts = {lv: 0 for lv in LEVELS}
     sections: List[str] = []
     for d in ordered:
@@ -499,7 +503,8 @@ def _compose_sections(
             if lv == "MAY" and not include_may:
                 continue
             counts[lv] += 1
-            rows.append(f"- [ ] `{it.id}` **{lv}** {_rebase_links(it.text, d.rel, _rel_link(root))}")
+            if lv in levels:
+                rows.append(f"- [ ] `{it.id}` **{lv}** {_rebase_links(it.text, d.rel, _rel_link(root))}")
         if not rows:
             continue
         link = f"{_rel_link(root)}/{d.rel}.md"
@@ -516,8 +521,9 @@ def _compose_header(
     counts: Dict[str, int],
     include_may: bool,
     link_root: str,
+    backlog: Optional[str] = None,
 ) -> List[str]:
-    """Frontmatter + đầu trang + bảng đếm mục của BLUEPRINT.md (các dòng, chưa nối)."""
+    """Frontmatter + đầu trang + bảng đếm mục của BLUEPRINT.md (các dòng, chưa nối). `backlog`: tên file SHOULD/MAY."""
     ind_names = ", ".join(ind_slugs) or "(không)"
     # xt.py nằm cạnh framework/ theo cùng gốc liên kết: dự án đích `.xtemplates/scripts/xt.py`, repo khung `scripts/xt.py`.
     xt_cmd = posixpath.join(posixpath.dirname(link_root), "scripts", "xt.py")
@@ -530,6 +536,7 @@ def _compose_header(
         f"extra: [{', '.join(extra)}]",
         f"scale: {scale}",
         f"generated: {today}",
+        *([f"backlog: {backlog}"] if backlog else []),
         "---",
         "",
         "# Blueprint dự án",
@@ -537,6 +544,14 @@ def _compose_header(
         f"> Sinh bởi `xt.py compose` ngày {today} — hồ sơ **{profile}**, ngành **{ind_names}**, quy mô **{scale}**.",
         "> Trạng thái: `[ ]` chưa · `[x]` đạt (kèm bằng chứng ở PR/CI) · `[~]` miễn trừ — bắt buộc ghi `— Miễn: <lý do>`.",
         f"> Kiểm tiến độ: `python3 {xt_cmd} blueprint-status BLUEPRINT.md --strict` (còn MUST chưa đạt → exit 1).",
+        *(
+            [
+                f"> File này chỉ chứa MUST ở quy mô {scale}; SHOULD/MAY ở [`{backlog}`]({backlog}) — không chặn verdict,"
+                " `blueprint-status` đọc cả hai, ghép lại thì mục chuyển file theo ID (ADR-0012)."
+            ]
+            if backlog
+            else []
+        ),
         "",
         "| Mức | Số mục |",
         "|---|---|",
@@ -558,17 +573,64 @@ def compose(
     today: Optional[str] = None,
     extra: Optional[List[str]] = None,
 ) -> str:
+    extra = extra or []
+    ordered, ind_slugs = _compose_sources(root, profile, industries, extra)
+    today = today or _dt.date.today().isoformat()
+    sections, counts = _compose_sections(root, ordered, scale, include_may)
+    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, _rel_link(root))
+    return "\n".join(header) + "\n" + "\n\n".join(sections) + "\n"
+
+
+def _compose_sources(root: Path, profile: str, industries: List[str], extra: List[str]) -> Tuple[List[Doc], List[str]]:
+    """Tài liệu theo thứ tự ghép + slug gói ngành; khung lỗi/hồ sơ lạ → SystemExit."""
     docs, errors = load_docs(root)
     if errors:
         raise SystemExit("Khung có lỗi, chạy 'xt.py validate' trước:\n  " + "\n  ".join(errors[:20]))
     prof, inds = _pick_sources(docs, profile, industries)
+    return _compose_order(docs, profile, prof, inds, extra), [str(i.meta.get("slug")) for i in inds]
+
+
+def compose_split(
+    root: Path,
+    profile: str,
+    industries: List[str],
+    scale: str,
+    include_may: bool,
+    today: Optional[str] = None,
+    extra: Optional[List[str]] = None,
+    backlog_name: str = "BLUEPRINT-BACKLOG.md",
+) -> Tuple[str, str]:
+    """ADR-0012: (BLUEPRINT.md chỉ MUST hiệu lực ở quy mô, backlog SHOULD/MAY). Agent đọc file chính mỗi vòng; quy mô
+    chỉ đổi nhãn nên bản một file nặng như nhau ở S/M/L (web-app + ecommerce ~690 KB), MUST ở S chỉ ~40 KB."""
     extra = extra or []
-    ordered = _compose_order(docs, profile, prof, inds, extra)
+    ordered, ind_slugs = _compose_sources(root, profile, industries, extra)
     today = today or _dt.date.today().isoformat()
-    sections, counts = _compose_sections(root, ordered, scale, include_may)
-    ind_slugs = [str(i.meta.get("slug")) for i in inds]
-    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, _rel_link(root))
-    return "\n".join(header) + "\n" + "\n\n".join(sections) + "\n"
+    link_root = _rel_link(root)
+    must, counts = _compose_sections(root, ordered, scale, include_may, ("MUST",))
+    rest, _ = _compose_sections(root, ordered, scale, include_may, ("SHOULD", "MAY"))
+    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, link_root, backlog_name)
+    bl_header = [
+        "---",
+        "title: Blueprint dự án — backlog SHOULD/MAY",
+        "kind: blueprint-backlog",
+        f"scale: {scale}",
+        f"generated: {today}",
+        "---",
+        "",
+        "# Blueprint dự án — backlog SHOULD/MAY",
+        "",
+        f"> Sinh cùng blueprint chính bởi `xt.py compose` ngày {today}, quy mô **{scale}** (ADR-0012). Mục ở đây không",
+        "> chặn verdict; làm khi còn ngân sách. Trạng thái như blueprint chính: `[x]` đạt kèm bằng chứng · `[~]` miễn",
+        "> trừ ghi `— Miễn: <lý do>`. Đổi quy mô thì ghép lại: mục chuyển file theo ID, giữ trạng thái.",
+        "",
+        "| Mức | Số mục |",
+        "|---|---|",
+        f"| SHOULD | {counts['SHOULD']} |",
+        *([f"| MAY | {counts['MAY']} |"] if include_may else []),
+        "",
+    ]
+    main = "\n".join(header) + "\n" + "\n\n".join(must) + "\n"
+    return main, "\n".join(bl_header) + "\n" + "\n\n".join(rest) + "\n"
 
 
 def _note_segment(line: str) -> str:
@@ -635,11 +697,42 @@ def _rel_link(root: Path) -> str:
 # --------------------------------------------------------------------------- blueprint-status
 
 
+def blueprint_backlog(path: Path, raw: str) -> Optional[Path]:
+    """File SHOULD/MAY khai ở frontmatter `backlog:` của blueprint (ADR-0012), tính từ thư mục của blueprint."""
+    fm = FRONT_BLOCK_RE.match(raw)
+    m = BACKLOG_KEY_RE.search(fm[1]) if fm else None
+    return path.parent / m[1] if m else None
+
+
+def blueprint_files(path: Path) -> List[Path]:
+    """Blueprint + file backlog nó khai (nếu có) — mọi file mang mục có trạng thái/bằng chứng."""
+    try:
+        bl = blueprint_backlog(path, path.read_text(encoding="utf-8"))
+    except OSError:
+        return [path]
+    return [path, bl] if bl else [path]
+
+
 def blueprint_status(path: Path) -> Dict[str, Any]:
-    return blueprint_status_text(path.read_text(encoding="utf-8"))
+    """Đếm blueprint + backlog nó khai; khai mà mất file → `bad_lines` (mục SHOULD/MAY không được mất im lặng)."""
+    raw = path.read_text(encoding="utf-8")
+    s = blueprint_status_text(raw)
+    bl = blueprint_backlog(path, raw)
+    if bl is None:
+        return s
+    if not bl.is_file():
+        s["bad_lines"].append(f"thiếu file backlog {bl.name} khai ở frontmatter")
+        return s
+    b = blueprint_status_text(bl.read_text(encoding="utf-8"), where=f"{bl.name} ")
+    for lv in LEVELS:
+        for k, v in b["levels"][lv].items():
+            s["levels"][lv][k] += v
+    for key in ("open_must", "bad_waivers", "bad_lines"):
+        s[key] += b[key]
+    return s
 
 
-def blueprint_status_text(raw: str) -> Dict[str, Any]:
+def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
     open_must: List[str] = []
@@ -649,7 +742,7 @@ def blueprint_status_text(raw: str) -> Dict[str, Any]:
         m = ITEM_RE.match(line)
         if not m:
             if LOOSE_ITEM_RE.match(line):  # ô lạ/thụt lề/thiếu backtick: không đếm được → không được coi là "không có"
-                bad_lines.append(f"dòng {n}: {line.strip()[:60]}")
+                bad_lines.append(f"{where}dòng {n}: {line.strip()[:60]}")
             continue
         st = m["state"]
         lv = m["level"]
@@ -660,7 +753,7 @@ def blueprint_status_text(raw: str) -> Dict[str, Any]:
         elif st == "~":
             total[lv]["waived"] += 1
             if not WAIVER_RE.search(_note_segment(line)):
-                bad_waivers.append(f"{m['id']} (dòng {n})")
+                bad_waivers.append(f"{m['id']} ({where}dòng {n})")
         else:
             total[lv]["done"] += 1
     hm = MUST_COUNT_RE.search(text)
@@ -1693,7 +1786,11 @@ def audit_plan(root: Path, blueprint: Optional[Path] = None, status: Optional[Pa
             for no, code, name in AUDIT_GROUPS
         ],
         "tools": {str(k): v for k, v in audit_tools(root, sig, appl).items()},
-        "stale_evidence": blueprint_stale_evidence(root, blueprint, files) if blueprint else [],
+        "stale_evidence": (
+            [e for f in blueprint_files(blueprint) for e in blueprint_stale_evidence(root, f, files)]
+            if blueprint
+            else []
+        ),
         "rescan": {str(k): v for k, v in audit_rescan(root, status).items()} if status and status.exists() else None,
     }
     return plan
@@ -1874,6 +1971,8 @@ DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/([\w.-]+)')  # file hook nạp/gọi cạnh nó (_lib.sh, guard.py)
 YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
+LOOP_GATE_KEYS = ("lint", "test")  # ADR-0011: trong vòng autopilot, hai khoá này rỗng/no-op thì dev-task.sh ĐỎ
+GATE_NOOP_RE = re.compile(r"true|:|exit( 0)?|(echo|printf)(\s.*)?")  # khớp is_noop() trong dev-task.sh
 AUTOPILOT_IGNORES = (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot")
 INSTALL_HINT = "người chạy lại `python3 <bản clone X-Templates>/scripts/install.py <gốc dự án>`"
 
@@ -2091,6 +2190,18 @@ def _yaml_blank(value: str) -> bool:
     return value in ("", '""', "''")
 
 
+def gate_noop_keys(base: Path) -> List[str]:
+    """Khoá `lint`/`test` khai trong xt.yaml mà rỗng hoặc không kiểm gì — dev-task.sh sẽ ĐỎ trong vòng (ADR-0011).
+    Khoá vắng không tính: dev-task.sh còn tự dò theo stack."""
+    p = base / "xt.yaml"
+    if not p.is_file():
+        return []
+    keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
+    unquote = re.compile(r"^([\"'])(.*)\1$")
+    vals = {k: unquote.sub(r"\2", keys[k]).strip() for k in LOOP_GATE_KEYS if k in keys}
+    return [k for k, v in vals.items() if not v or GATE_NOOP_RE.fullmatch(v)]
+
+
 def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     p, legacy = base / "xt.yaml", base / "xs.yaml"
     if not p.is_file():
@@ -2248,22 +2359,48 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backlog_path(out: Path) -> Path:
+    return out.with_name(f"{out.stem}-BACKLOG{out.suffix}")
+
+
+def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Ghép lại: giữ tick/miễn trừ/bằng chứng theo ID từ mọi file cũ (bản một file hoặc chính + backlog), mục chuyển
+    file khi đổi quy mô vẫn giữ trạng thái; mục riêng của dự án về cuối file chính."""
+    fw_ids = {it.id for d in load_docs(fw)[0] for it in d.items}
+    old = "\n".join(p.read_text(encoding="utf-8") for p in olds)
+    main, kept = carry_states(old, main, fw_ids)
+    if backlog is not None:
+        backlog, kept_bl = carry_states(old, backlog)
+        kept += kept_bl
+    print(f"↺ Giữ trạng thái {kept} mục theo ID từ bản cũ", file=sys.stderr)
+    own = [m["id"] for m in map(ITEM_RE.match, main.splitlines()) if m and m["id"] not in fw_ids]
+    if own:
+        print(f"↺ Giữ {len(own)} mục riêng của dự án ở cuối: {', '.join(own[:10])}", file=sys.stderr)
+    return main, backlog
+
+
 def cmd_compose(args: argparse.Namespace) -> int:
-    out = compose(args.framework, args.profile, args.industry or [], args.scale, args.include_may, extra=args.add or [])
-    if args.out:
-        out_path = Path(args.out)
-        if out_path.exists():  # ghép lại: giữ tick/miễn trừ/bằng chứng theo ID, không mất công audit
-            fw_ids = {it.id for d in load_docs(args.framework)[0] for it in d.items}
-            old = out_path.read_text(encoding="utf-8")
-            out, kept = carry_states(old, out, fw_ids)
-            print(f"↺ Giữ trạng thái {kept} mục theo ID từ bản cũ", file=sys.stderr)
-            own = [m["id"] for m in map(ITEM_RE.match, out.splitlines()) if m and m["id"] not in fw_ids]
-            if own:
-                print(f"↺ Giữ {len(own)} mục riêng của dự án ở cuối: {', '.join(own[:10])}", file=sys.stderr)
-        write_atomic(out_path, out)
-        print(f"✓ Đã ghi {args.out}")
+    out_path = Path(args.out) if args.out else None
+    bl_path = _backlog_path(out_path or Path("BLUEPRINT.md"))
+    src = (args.framework, args.profile, args.industry or [], args.scale, args.include_may)
+    backlog: Optional[str] = None
+    if args.full:
+        main = compose(*src, extra=args.add or [])
     else:
-        sys.stdout.write(out)
+        main, backlog = compose_split(*src, extra=args.add or [], backlog_name=bl_path.name)
+    if out_path is None:
+        sys.stdout.write(main)
+        if backlog is not None:
+            n = sum(1 for ln in backlog.splitlines() if ITEM_RE.match(ln))
+            print(f"ℹ {n} mục SHOULD/MAY không in — dùng --out (ghi kèm {bl_path.name}) hoặc --full", file=sys.stderr)
+        return 0
+    olds = [p for p in (out_path, bl_path) if p.exists()]
+    if olds:
+        main, backlog = _carry_into(args.framework, olds, main, backlog)
+    write_atomic(out_path, main)
+    if backlog is not None:
+        write_atomic(bl_path, backlog)
+    print(f"✓ Đã ghi {args.out}" + (f" + {bl_path.name}" if backlog is not None else ""))
     return 0
 
 
@@ -2297,7 +2434,8 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         )
     max_iterations = args.max_iterations
     if max_iterations is None:  # một phiên: trần theo khối lượng PLAN (~4 vòng/task), không theo số mặc định
-        n_open = len(_still_open(base, {"plan": args.plan, "blueprint": args.blueprint}))  # task [ ] + MUST mở
+        # ADR-0012: chỉ đếm task `[ ]` — MUST của blueprint đã gom vào task, cộng thêm là đếm hai lần
+        n_open = sum(t["state"] == " " for t in parse_plan(base / args.plan))
         max_iterations = max(20, 4 * n_open) if args.single_session else 50
     state = {
         "active": True,
@@ -2318,6 +2456,13 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
         print(
             f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
+            file=sys.stderr,
+        )
+    noop = gate_noop_keys(base)
+    if noop:  # PLAN thường điền xt.yaml ở task đầu nên không chặn init, nhưng cổng đỏ tới khi điền
+        print(
+            f"⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để {', '.join(noop)} rỗng/no-op"
+            " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
             file=sys.stderr,
         )
     print(
@@ -3018,7 +3163,10 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MODULE",
         help="ghép thêm module/glob ngoài hồ sơ (vd 13-ai-engineering/*), bỏ lọc applies_to",
     )
-    pc.add_argument("--out")
+    pc.add_argument(
+        "--out", help="ghi FILE (MUST theo quy mô) + <tên>-BACKLOG.md (SHOULD/MAY) cạnh nó; ghép lại giữ trạng thái"
+    )
+    pc.add_argument("--full", action="store_true", help="một file chứa mọi mức như trước ADR-0012 (không tách backlog)")
     pc.set_defaults(fn=cmd_compose)
     pb = sub.add_parser("blueprint-status")
     pb.add_argument("file", help="BLUEPRINT.md, hoặc - để đọc stdin")

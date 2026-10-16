@@ -312,6 +312,29 @@ class ComposeTest(unittest.TestCase):
         self.assertIn("`BE-API-001` **SHOULD**", out)  # module chuyên sâu: S hạ SHOULD
         self.assertIn("`BASE-SEC-002` **SHOULD**", out)  # MUST@L vẫn hạ
 
+    def test_compose_split_keeps_only_must_in_main(self):
+        # ADR-0012: BLUEPRINT.md chỉ chứa MUST theo quy mô; SHOULD/MAY sang backlog, ID và trạng thái giữ nguyên.
+        main, backlog = xt.compose_split(
+            self.fw, "web-app", ["fintech"], "M", include_may=True, today="2026-10-13", backlog_name="BP-BACKLOG.md"
+        )
+        for mid in ("BASE-SEC-001", "BE-API-001", "IND-FIN-001"):
+            self.assertIn(f"`{mid}` **MUST**", main)
+            self.assertNotIn(mid, backlog)
+        for sid in ("`BASE-SEC-002` **SHOULD**", "`PRF-WEB-001` **SHOULD**", "`BASE-SEC-003` **MAY**"):
+            self.assertIn(sid, backlog)
+            self.assertNotIn(sid.split()[0], main)
+        self.assertIn("backlog: BP-BACKLOG.md", main)
+        self.assertIn("| MUST | 3 |\n| SHOULD | 2 |\n| MAY | 1 |", main)  # bảng đếm vẫn đủ ba mức
+        self.assertIn("[`BP-BACKLOG.md`](BP-BACKLOG.md)", main)
+        self.assertNotIn("### Web app", main)  # phần không còn MUST nào thì không in
+        self.assertIn("kind: blueprint-backlog", backlog)
+        self.assertNotIn("**MUST**", backlog)
+        self.assertNotIn("| MUST |", backlog)  # bảng MUST chỉ ở file chính (blueprint-status đếm mục bị xoá theo nó)
+        main_s, backlog_s = xt.compose_split(self.fw, "web-app", ["fintech"], "S", include_may=False)
+        self.assertIn("`BE-API-001` **SHOULD**", backlog_s)  # module ở S hạ SHOULD → ra backlog
+        self.assertNotIn("BE-API-001", main_s)
+        self.assertIn("backlog: BLUEPRINT-BACKLOG.md", main_s)
+
     def test_compose_scale_l_keeps_must(self):
         out = xt.compose(self.fw, "web-app", [], "L", include_may=True, today="2026-10-13")
         self.assertIn("`BASE-SEC-002` **MUST**", out)

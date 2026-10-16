@@ -919,6 +919,47 @@ class DevTaskTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((self.tmp / "RAN").exists())
 
+    def autopilot(self, active=True):
+        (self.tmp / ".autopilot").mkdir(exist_ok=True)
+        (self.tmp / ".autopilot" / "state.json").write_text(
+            json.dumps({"active": active, "plan": "docs/autopilot/PLAN.md"}, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def test_autopilot_gate_red_when_test_or_lint_blank(self):
+        # Mẫu xt.yaml để trống mọi khoá → gate "skip, exit 0" → `loop record` ghi bằng chứng xanh cho cổng không
+        # chạy test nào (ADR-0011). Ngoài autopilot vẫn fail-open (test trên); trong vòng lặp thì đỏ.
+        self.autopilot()
+        for yaml, ten in (('lint: "true | cat"\ntest: ""\n', "test"), ('lint: ""\ntest: "true | cat"\n', "lint")):
+            (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+            r = self.run_task("gate")
+            self.assertNotEqual(r.returncode, 0, ten)
+            self.assertIn(f"'{ten}'", r.stderr)
+            self.assertIn("xt.yaml", r.stderr)
+
+    def test_autopilot_gate_red_when_nothing_resolves(self):
+        self.autopilot()
+        r = self.run_task("gate")
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+
+    def test_autopilot_noop_commands_count_as_blank(self):
+        self.autopilot()
+        for noop in ("true", ":", "exit 0", "echo ok", "  printf 'xong'  "):
+            (self.tmp / "xt.yaml").write_text(f'lint: "true | cat"\ntest: "{noop}"\n', encoding="utf-8")
+            self.assertNotEqual(self.run_task("test").returncode, 0, noop)
+
+    def test_autopilot_real_commands_still_green(self):
+        self.autopilot()
+        (self.tmp / "xt.yaml").write_text('lint: "test -d ."\ntest: "true | cat"\nbuild: ""\n', encoding="utf-8")
+        r = self.run_task("gate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_inactive_autopilot_keeps_fail_open(self):
+        self.autopilot(active=False)
+        (self.tmp / "xt.yaml").write_text('lint: ""\ntest: ""\n', encoding="utf-8")
+        r = self.run_task("gate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no-op", r.stderr)
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class PreEditGateFilesTest(unittest.TestCase):
