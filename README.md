@@ -129,6 +129,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   phép bằng lệnh ghim head (`gh pr merge`, REST `PUT …/merge` có `sha`, MCP `merge_pull_request` có `expectedHeadSha`).
 - [ADR-0016](docs/adr/0016-l3-keeps-hard-exceptions.md): ở L3 PR chạm tiền/dữ liệu người dùng thật/auth/mật mã/bí mật
   vẫn người merge (`merge-check` trả `hard`, guard không bật auto-merge).
+- [ADR-0017](docs/adr/0017-allow-all-bash-behind-fences.md): `permissions.allow` gồm `Bash` — mọi lệnh Bash không hỏi;
+  hàng rào là `deny`/`ask` của settings và hook guard.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

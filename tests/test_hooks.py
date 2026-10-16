@@ -1305,6 +1305,18 @@ class SettingsJsonTest(unittest.TestCase):
                     self.assertTrue((ROOT / path).exists(), f"{event}: thiếu {path}")
         self.assertNotIn("defaultMode", s.get("permissions", {}))  # bị Claude Code bỏ qua ở project settings
 
+    def test_bash_allowed_except_fences(self):
+        """ADR-0017: mọi lệnh Bash chạy không hỏi; hàng rào còn lại là deny/ask + hook guard."""
+        s = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        perms = s["permissions"]
+        self.assertIn("Bash", perms["allow"])
+        self.assertEqual([r for r in perms["allow"] if r.startswith("Bash(")], [])  # thừa khi đã allow cả Bash
+        for rule in ("Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(sudo *)", "Read(**/.env)"):
+            self.assertIn(rule, perms["deny"])
+        for rule in ("Bash(git merge *)", "Bash(git rebase *)", "Bash(npm publish*)"):
+            self.assertIn(rule, perms["ask"])
+        self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))
+
 
 FAST_PR = {
     "number": 7,

@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Mọi lệnh Bash chạy không hỏi quyền** (ADR-0017; chủ repo yêu cầu 2026-10-16). `.claude/settings.json`
+  `permissions.allow` gồm `Bash` thay danh sách `Bash(...)` hẹp (trước: `git push`, `git checkout <nhánh>`… vẫn hỏi ở chế
+  độ `default`). Giữ nguyên `deny` (force-push, `reset --hard`, `git clean`, sudo, đọc `.env`/khoá…), `ask` (`git merge`,
+  `git rebase`, publish) và hook guard. Mẫu `CLAUDE.md` ghi cách lấy lại lớp hỏi. Dự án đích: chạy lại `install.py`
+  (`settings.json` đã có chỉ được gộp khoá `hooks`, quyền riêng giữ nguyên — muốn thì thêm tay `"Bash"` vào `allow`).
 - **L3 vẫn để người merge ngoại lệ cứng** (ADR-0016, D-012; audit delta đợt B, AUD-HAR-042). `merge-check` trả thêm
   `hard` — lý do ngoại lệ cứng (đường dẫn bí mật/auth/thanh toán/mật mã, nhãn `risk:auth|payment|pii|crypto|admin|secret`,
   `merge_risk_paths`), tính cả khi CI còn chạy — và verdict `human` cho PR đó ở mọi mức; guard không bật auto-merge
