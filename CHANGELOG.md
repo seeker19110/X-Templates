@@ -93,6 +93,23 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Mục nhóm B từ rà kho `stored` 2026-10-16** (11 ID mới, không đổi ID/mức cũ): `SEC-AI-027` MUST@L (text-to-SQL: vai
+  trò CSDL chỉ đọc chịu RLS + AST allowlist trước DB) · `WF-CI-023` MUST@L (workflow `pull_request` không chạm secret
+  ngoài `GITHUB_TOKEN` trừ job có `environment:`) · `AI-EVAL-018` MUST@L (n, runs, CI 95%, ngưỡng cổng > nhiễu đo) ·
+  `AI-EVAL-019` SHOULD (eval bộ phân loại/định tuyến theo từng tác vụ: accuracy, đổi đáp án khi đảo thứ tự, ECE,
+  coverage@risk; trần leo thang) · `AI-RAG-019` MUST@L (kiểm trích dẫn tất định ở server) · `DB-SEARCH-020` MUST@L
+  (bảng mặc định ngôn ngữ của mọi thành phần tìm kiếm/RAG/memory; `preprocess_version`) · `UX-DS-019` MUST@L (dùng
+  component design system; lint chặn primitive/thẻ gốc ngoài `components/ui/**`) · `QA-STATIC-021` SHOULD (fixture xấu/
+  tốt cho luật tự viết) · `LOOP-DESIGN-021` SHOULD (task UI do agent: ảnh chụp theo SHA, kỳ vọng + falsifier,
+  `measured`/`unmeasured`) · `LOOP-HARNESS-022` SHOULD (sandbox OS/egress allowlist cho phiên không người trực; tên
+  khoá settings sandbox của Claude Code: chưa xác minh) · `LOOP-STOP-025` MUST@L (`deny`/`ask` bị từ chối là kết luận,
+  không lách). `WF-CI-023` và `LOOP-STOP-025` đặt MUST@L (không phải MUST@M/MUST) vì module đã đủ 4 MUST ở quy mô M
+  (ADR-0004; `xt.py validate` chặn). `AGENTS.md` gốc và `framework/templates/AGENTS.md` thêm một gạch luật bất biến
+  "Bị chặn là kết luận". `xt.py ci-check` thêm luật `WF-CI-023` (job không `environment:` trong workflow có
+  `pull_request`/`pull_request_target` chứa `secrets.X` ≠ `GITHUB_TOKEN`, `secrets[...]`, `toJSON(secrets)` hoặc
+  `secrets: inherit` → lỗi; ngoại lệ `# ci-check-allow: <lý do>`); workflow `secret-scan.yml` của khung khai ngoại lệ cho
+  khoá giấy phép quét. Dự án đích: ghép lại blueprint để nhận mục mới; chạy lại `install.py` để nhận `xt.py` mới, rồi
+  `xt.py ci-check` — workflow nào đưa secret vào job `pull_request` sẽ đỏ.
 - **PR theo lát + máy tự merge** (ADR-0014, D-010; chủ repo yêu cầu 2026-10-16). Mục mới `LOOP-DESIGN-020` (SHOULD): mỗi
   lát dọc chạy được là một nhánh + một PR nhỏ, mở ngay khi Gate của lát xanh (bỏ "PR cuối"); lát phụ thuộc PR chưa merge
   thì chồng nhánh, merge theo FIFO; PR đã mở được `merge-check` quyết mỗi vòng. Guard thêm hai đường merge ghim head

@@ -101,7 +101,7 @@ updated: 2026-10-16
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
-| `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`) |
+| `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`, không secret ngoài `GITHUB_TOKEN` trong job chạy trên `pull_request`) |
 | `audit plan [--blueprint B] [--status S] [--json]` | Lập kế hoạch audit 13 nhóm từ blueprint + `docs/ops/AUDIT-STATUS.md` (skill `/audit`) |
 | `feedback add/collect/list/aggregate` | Phản hồi về khung (`docs/xtemplates-feedback/FB-NNN.md`) — luật ở [`framework-feedback.md`](framework-feedback.md) |
 | `audit check [--strict] <AUDIT-STATUS.md>` | Kiểm sổ audit; `--strict` = 0 🔴/🟠 mở, mọi nhóm đã quét/N/A |

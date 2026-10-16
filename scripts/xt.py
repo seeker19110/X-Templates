@@ -23,7 +23,7 @@ Lệnh:
   loop stop [--reason TEXT]     Tắt vòng lặp.
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
-  ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error).
+  ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
   audit plan [--blueprint F] [--status F] [--json]
                                 Dò stack → nhóm audit áp dụng/rút gọn/N/A, công cụ có/thiếu, bằng chứng blueprint cũ, nhóm cần quét lại.
   audit check STATUS [--strict] Kiểm sổ docs/ops/AUDIT-STATUS.md; --strict = Definition of Complete (0 🔴/🟠 mở, mọi nhóm đã quét).
@@ -1402,6 +1402,12 @@ PINNED_RE = re.compile(r"@[0-9a-f]{40}$")
 DOCKER_PINNED_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 BLOCK_SCALAR_RE = re.compile(r":\s*[|>][-+0-9]*\s*(?:#.*)?$")
 CI_ALLOW = "ci-check-allow:"
+ON_KEY_RE = re.compile(r"""^['"]?on['"]?\s*:""")
+PR_TRIGGER_RE = re.compile(r"(?<![\w-])pull_request(?:_target)?(?![\w-])")
+# `secrets.X` (X khác GITHUB_TOKEN), `secrets[...]`, `toJSON(secrets)`, `secrets: inherit`.
+SECRET_REF_RE = re.compile(
+    r"\bsecrets\.(?!GITHUB_TOKEN\b)[A-Za-z_]|\bsecrets\[|\(\s*secrets\s*\)|^\s*(?:-\s+)?secrets:\s*inherit\b"
+)
 
 
 def _indent(line: str) -> int:
@@ -1486,11 +1492,45 @@ def _ci_timeout_errors(lines: List[Tuple[int, str]]) -> List[str]:
     return errors
 
 
+def _ci_on_pull_request(lines: List[Tuple[int, str]]) -> bool:
+    """Khối `on:` cấp workflow có trigger `pull_request` (hoặc `pull_request_target`), mọi dạng khai (chuỗi/mảng/map)."""
+    in_on = False
+    for _, ln in lines:
+        if _indent(ln) == 0:
+            in_on = bool(ON_KEY_RE.match(ln))
+        if in_on and PR_TRIGGER_RE.search(ln.split(" #", 1)[0]):
+            return True
+    return False
+
+
+def _ci_pr_secret_errors(lines: List[Tuple[int, str]]) -> List[str]:
+    """WF-CI-023: workflow chạy trên PR thì job không có `environment:` không được chạm secret ngoài `GITHUB_TOKEN`.
+
+    Ngoại lệ có chủ đích: `# ci-check-allow: <lý do>` trên dòng đó. Chỉ thấy dòng ngoài block scalar (`run: |`).
+    """
+    if not _ci_on_pull_request(lines):
+        return []
+    errors: List[str] = []
+    for jno, name, job_lines in _ci_jobs(lines):
+        child = min((_indent(x) for x in job_lines), default=0)
+        if any(_indent(x) == child and x.strip().startswith("environment:") for x in job_lines):
+            continue
+        for ln in job_lines:
+            if SECRET_REF_RE.search(ln.split(" #", 1)[0]) and not _allowed(ln):
+                errors.append(
+                    f"job `{name}` (dòng {jno}) chạm secret ngoài `GITHUB_TOKEN` trong workflow có `pull_request` — "
+                    f"chuyển sang push nhánh chính/`workflow_dispatch` hoặc job có `environment:` kèm reviewer"
+                )
+                break  # một lỗi mỗi job
+    return errors
+
+
 def ci_check_text(text: str) -> List[str]:
     """Fitness function cho một workflow GitHub Actions (đọc theo dòng, chỉ thư viện chuẩn).
 
     Luật: `permissions:` cấp workflow · không `write-all` · `uses:` ngoài ghim SHA 40 ký tự (`docker://` ghim `@sha256:`) ·
-    mọi job có `timeout-minutes` (trừ job gọi reusable workflow) · không `continue-on-error`.
+    mọi job có `timeout-minutes` (trừ job gọi reusable workflow) · không `continue-on-error` · workflow có `pull_request`
+    thì job không `environment:` không chạm secret ngoài `GITHUB_TOKEN` (WF-CI-023).
     Bỏ qua nội dung block scalar (`run: |`) để script shell không gây báo nhầm.
     """
     lines = _ci_lines(text)
@@ -1499,7 +1539,7 @@ def ci_check_text(text: str) -> List[str]:
         errors.append("thiếu `permissions:` cấp workflow (mặc định `contents: read`)")
     for no, line in lines:
         errors += _ci_line_errors(no, line)
-    return errors + _ci_timeout_errors(lines)
+    return errors + _ci_timeout_errors(lines) + _ci_pr_secret_errors(lines)
 
 
 def ci_check(workflows: Path) -> Dict[str, List[str]]:
@@ -3453,7 +3493,9 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
     if not bad:
-        print(f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error.")
+        print(
+            f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error, không secret trên PR."
+        )
     return 1 if bad else 0
 
 

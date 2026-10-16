@@ -63,6 +63,7 @@ updated: 2026-10-16
 - [ ] `DB-SEARCH-017` **MAY** Binary quantization/`halfvec` để giảm kích thước index ở quy mô lớn, luôn rerank bằng vector gốc. → Kiểm: index trên `bit`/`halfvec` + bước rerank; recall đo lại.
 - [ ] `DB-SEARCH-018` **MAY** SQLite FTS5 cho công cụ cục bộ/bộ nhớ agent nhỏ; nâng lên Postgres khi nhiều người dùng. → Kiểm: bảng FTS5 virtual; ADR khi chuyển.
 - [ ] `DB-SEARCH-019` **MAY** Gợi ý/autocomplete bằng `pg_trgm` GIN hoặc Meilisearch prefix thay vì vector cho truy vấn ngắn. → Kiểm: endpoint autocomplete có p95 riêng trong eval.
+- [ ] `DB-SEARCH-020` **MUST@L** Mọi thành phần tìm kiếm/RAG/memory, kể cả thư viện bên thứ ba, có bảng mặc định ngôn ngữ (text search config, embedding model, reranker, tokenizer); mặc định `english` hoặc model `-en` phải được thay, hoặc ghi lý do (ADR). Pipeline tiền xử lý (NFC, tách từ, bỏ dấu) có phiên bản và giống hệt nhau lúc index và lúc query. → Kiểm: test truy vấn tiếng Việt chạy qua đúng đường code của thư viện (không gọi hàm nội bộ đi tắt); metadata index có `preprocess_version`, truy vấn từ chối khi lệch. · Nguồn: stored 10 §4d.2–4d.3 (Hindsight: mặc định `english` và `bge-small-en`), stored 18 §4c (PhoBERT cần tách từ; embedding tiếng Việt chỉ benchmark trên một miền)
 
 ## Bẫy thường gặp
 
@@ -77,6 +78,7 @@ updated: 2026-10-16
 - **GraphRAG trước hybrid** → tốn chi phí index mà chưa chứng minh cần. Tránh: DB-SEARCH-010, catalog 10 §3b.
 - **`OFFSET 10000` trên truy vấn vector** → quét/xếp hạng lại toàn bộ. Tránh: DB-SEARCH-011.
 - **Elasticsearch "open source lại"** nhưng AGPL là một lựa chọn trong ba; bản phân phối có thể còn ELv2 (x-pack). Tránh: đọc LICENSE.txt, ghi ADR (DB-SEARCH-016).
+- **Thư viện bên thứ ba mang mặc định tiếng Anh** (`english` stem, embedding/reranker `-en`) → nội dung tiếng Việt bị stem/embed sai mà không báo lỗi. Tránh: bảng mặc định ngôn ngữ + test truy vấn tiếng Việt qua đường code thật; tiền xử lý index = query (`DB-SEARCH-020`).
 
 ## Cổng tự động
 
@@ -91,6 +93,7 @@ updated: 2026-10-16
 | Chiều vector/model | ràng buộc `vector(n)` + cột model | test chèn sai chiều | CI | bị từ chối |
 | Meilisearch/OpenSearch | Meilisearch 1.55.0 MIT · OpenSearch 3.9.0 Apache-2.0 (testcontainers) | test tích hợp | CI | xanh |
 | Giấy phép engine | bảng license/SBOM (xem [`../12-security/supply-chain.md`](../12-security/supply-chain.md)) | theo module đó | CI | không có license cấm |
+| Mặc định ngôn ngữ + tiền xử lý | test truy vấn tiếng Việt qua đúng đường code thư viện; so `preprocess_version` index ↔ query | CI | mặc định `english`/`-en` chưa thay (hoặc chưa ghi lý do) = đỏ; lệch phiên bản = từ chối |
 
 ## Nguồn
 
@@ -102,3 +105,4 @@ updated: 2026-10-16
 - Elasticsearch 9.5.5: <https://endoflife.date/api/elasticsearch.json>; LICENSE.txt (AGPL-3.0 / SSPL v1 / ELv2; x-pack ELv2): <https://raw.githubusercontent.com/elastic/elasticsearch/main/LICENSE.txt> — xác minh 2026-10-13.
 - Catalog `seeker19110/stored` 10 §2 (pgvector ma sát > 10–50M vector; pgvectorscale; benchmark mâu thuẫn → đo trên dữ liệu mình), 10 §3b (hybrid + rerank + lọc quyền trước GraphRAG), 10 §4 (SQLite FTS5 đủ cho bộ nhớ nhỏ; X-Agents không pgvector), 23 §4.1 (dhcb ADR-0015: FTS + `unaccent` + embedding, không pgvector vì không phải trusted extension) — đọc 2026-10-13. Mâu thuẫn nguồn ghi ở `research/2026-10-13-stored-catalog-extraction.md` ("không dùng pgvector" gán cho X-Agents ở 10 §4 và cho dhcb ở 23 §4.1 — cả hai repo đều chọn không dùng, không loại trừ nhau).
 - pgvectorscale: giấy phép **(chưa xác minh — trang blog chuyển hướng sang tigerdata.com, chưa đọc ngày 2026-10-13)**; Qdrant/Milvus/Weaviate: phiên bản **(chưa xác minh)**.
+- Catalog `seeker19110/stored` mục 10 §4d.2–4d.3 (vectorize-io/hindsight: embedding mặc định `BAAI/bge-small-en-v1.5`, reranker `ms-marco-MiniLM-L-6-v2`; full-text `native` mặc định ngôn ngữ `english` nên nội dung tiếng Việt bị stem theo tiếng Anh) và mục 18 §4c (PhoBERT: input cần tách từ trước, theo README, chưa tự kiểm; bi-encoder BKAI chủ yếu huấn luyện trên dữ liệu dịch máy, chỉ test trên dữ liệu pháp luật) — đọc 2026-10-16.
