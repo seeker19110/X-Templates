@@ -3,13 +3,13 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Sửa audit 2026-10-16 xong: #58–#64 đã/đang merge, `audit check --strict` exit 0 (0 🟠 mở; 23 🟢 nợ). Luật L3 (#65, ADR-0015): mở PR là bật auto-merge, cho repo khung và mẫu dự án đích. Việc kế: quét lại delta sau #58–#66; nợ 🟢 (giới hạn guard phân tích tĩnh, PERF test 80 s).
+- Audit delta #58–#66 đóng: 4 đợt sửa #69 (guard), #72 (L3 giữ ngoại lệ cứng, ADR-0016), #73 (`redact`), #75 (sổ, blueprint, PROGRESS); `audit check --strict` exit 0 (0 🟠; 26 🟢 nợ, gồm AUD-HAR-045 cờ `stale_evidence` báo nhầm ~83%). Việc kế: nợ 🟢; dự án thật đầu tiên (Tiếp theo 1).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
 2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `AGENTS.md`/skill `*.xtemplates-new` theo ADR-0008) từ X-Templates để chuyển `.xstored/`→`.xtemplates/`, `xs.yaml`→`xt.yaml` (ADR-0007) + nhận guard/hook mới (#35, #36) + `changelog-check` + `progress-check` xét `MERGE_HEAD` (#41) + hook `PreCompact` (ADR-0009, `merge_hooks` tự thêm) + `xt.py doctor` (#50) — cài xong chạy `python3 .xtemplates/scripts/xt.py doctor --fix`.
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
-4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong `eval`/alias/biến chứa cờ (CHANGELOG); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
+4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ (`eval`/backtick đã quét từ #68); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
 
 ## Quyết định
@@ -43,9 +43,10 @@
 - 2026-10-16 CI: `portability.yml` (macOS bash 3.2) không chạy trên PR, chỉ khi push vào `main` (chủ repo yêu cầu); đỏ sau merge thì sửa bằng PR mới.
 - 2026-10-16 Trong vòng autopilot, `lint`/`test` rỗng hoặc no-op (kể cả chỉ có comment) làm cổng đỏ — ADR-0011.
 - 2026-10-16 Blueprint chỉ MUST theo quy mô, SHOULD/MAY ở BACKLOG; trần vòng một phiên chỉ đếm task — ADR-0012.
-- 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR, tự merge làn nhanh bằng lệnh ghim head (gh/REST/MCP), không dùng auto-merge của GitHub; repo khung `merge_autonomy: L2` (chủ repo yêu cầu) — ADR-0013, ADR-0014, D-010.
+- 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR — ADR-0013, ADR-0014, D-010.
+- 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012.
 ## Bàn giao phiên
-- 2026-10-16 · Commit cuối trên `main`: `bce2792` (#59); tag `v2.0.0` → `55de4d1`; SHA quét audit `58b8c8b` (delta #43–#57 đã quét; sau các đợt sửa: quét lại theo delta).
+- 2026-10-16 · Commit cuối trên `main`: `dc8fe1a` (#72); tag `v2.0.0` → `55de4d1`; SHA quét audit `541e81f` (delta #58–#66 đã quét và sửa).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (đọc `xt.yaml`; `pip install --require-hashes -r requirements-dev.txt`, cần shellcheck).
-- Autopilot: không chạy (PLAN T-601…T-602 đã xong). Đang chặn: không.
+- Autopilot: PLAN T-701…T-704 (sửa audit delta, 4 đợt). Đang chặn: không.
 - Câu hỏi cần người: Tiếp theo 1 (`x-hotel-manager`).
