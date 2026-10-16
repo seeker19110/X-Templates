@@ -43,7 +43,13 @@ if [ "$(json_field "$res" commit)" = "true" ] && [ "$(json_field "$res" no_verif
   if [ -n "$top" ] && [ "$top" != "$xroot" ]; then
     case "$top/" in
     "$xroot"/*) { [ -e "$top/xt.yaml" ] || [ -d "$top/.xtemplates" ]; } && groot="$top" ;;
-    *) pretool_decision ask "Khung cần xác nhận: commit vào repo ngoài dự án ($top) — cổng của repo đó không chạy tự động (là mã của repo đó); chạy cổng của nó trước rồi xác nhận" ;;
+    *)
+      # Dự án nằm TRONG repo cha (monorepo `apps/web`, phiên mở ở thư mục con): commit của chính dự án → cổng dự án.
+      case "$xroot/" in
+      "$top"/*) ;;
+      *) pretool_decision ask "Khung cần xác nhận: commit vào repo ngoài dự án ($top) — cổng của repo đó không chạy tự động (là mã của repo đó); chạy cổng của nó trước rồi xác nhận" ;;
+      esac
+      ;;
     esac
   fi
   gate=""

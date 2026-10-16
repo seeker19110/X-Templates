@@ -187,6 +187,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- Guard sau review #60: dự án là thư mục con của repo cha (monorepo `apps/web`) không còn bị hỏi "repo ngoài dự án" khi
+  commit — chạy cổng của dự án như trước; cờ shell trước `-c` (`-o pipefail`, `-eo`, `-O extglob`, `--norc`, `--login`)
+  không còn làm lọt quét lệnh lồng và luật hook-bypass; `echo git reset --hard | bash` (không nháy) và `bash --norc` đọc
+  stdin được quét; `bash -n` (chỉ kiểm cú pháp) không bị chặn; xoá/dời cả thư mục chứa file cổng (`rm -rf .claude`,
+  `mv scripts …`, `git rm -r .github`) và chuyển hướng `>|` → hỏi. Giới hạn đã biết (phân tích tĩnh, chưa xử lý): `bash
+  <<< '…'`, `find -exec sh -c`, `$'…'`, lệnh trong `if/for/{ }`, `python -c`/`node -e`.
 - CI `quality` đỏ mãi trên `main` (từ #49), xanh trên PR: `test_guard_push_without_refspec_follows_current_branch`
   gọi `git_rules(["git", "push"])` không truyền thư mục nên guard đọc nhánh ở thư mục tiến trình — CI push lên `main`
   checkout đúng nhánh `main` → `ask`. Test chạy phần đó ở thư mục không phải repo.
