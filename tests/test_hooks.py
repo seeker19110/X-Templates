@@ -704,7 +704,8 @@ class GuardMatrixTest(unittest.TestCase):
                 "rm -r -f .git",
             ],
         )
-        self.check("", ["rm -rf .github", "rm -rf .gitignore", "rm -rf build/.cache", "rm -f .git", "rm -rf a.git"])
+        self.check("", ["rm -rf .gitignore", "rm -rf build/.cache", "rm -f .git", "rm -rf a.git"])
+        self.check("ask", ["rm -rf .github"])  # không phải `.git` (không deny) nhưng xoá workflow CI = gỡ cổng (#60)
 
     def test_guard_commit_attached_values_are_data(self):
         def flags(cmd: str) -> tuple[object, object, object]:
@@ -1495,6 +1496,33 @@ class GuardBashWave3Test(unittest.TestCase):
                 self.assertEqual(self.dec(cmd), "ask")
         self.assertEqual(self.dec("cat > tests/test_new.py <<'E'\ndef test_y():\n    assert 2\nE"), "")
 
+    def test_guard_review_60_gaps(self):
+        """Reviewer #60: `bash -o pipefail -c`, echo không nháy vào shell, `bash --norc`, xoá cả thư mục hàng rào, `>|`."""
+        (self.root / ".claude" / "hooks").mkdir(parents=True)
+        (self.root / ".claude" / "hooks" / "guard.py").write_text("", encoding="utf-8")
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts" / "dev-task.sh").write_text("", encoding="utf-8")
+        for cmd, want in (
+            ("bash -o pipefail -c 'git reset --hard'", "deny"),
+            ("bash -eo pipefail -c 'npm publish'", "ask"),
+            ("bash --norc -c 'claude --bare -p x'", "ask"),
+            ("bash --login -c 'git push --force origin x'", "deny"),
+            ("bash -O extglob -c 'git reset --hard'", "deny"),
+            ("echo git reset --hard | bash", "deny"),
+            ("echo -n git reset --hard | sh", "deny"),
+            ("echo 'git reset --hard' | bash --norc", "deny"),
+            ("rm -rf .claude", "ask"),
+            ("mv .claude .claude.bak", "ask"),
+            ("git rm -r .github", "ask"),
+            ("rm -rf scripts", "ask"),
+            ("echo x >| .claude/hooks/guard.py", "ask"),
+            ("rm -rf node_modules dist", ""),
+            ("bash -o pipefail -c 'ls'", ""),
+            ("echo hello | bash -n", ""),
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), want)
+
     def test_guard_gate_patterns(self):
         """AUD-HAR-027: file cổng phổ biến được bảo vệ khi sửa."""
         for rel in ("pytest.ini", "tox.ini", "vite.config.ts", "conftest.py", "noxfile.py", ".flake8", ".golangci.yml"):
@@ -1521,6 +1549,21 @@ class CommitGateForeignRepoTest(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(decision(out), "ask")
                 self.assertFalse(mark.exists())
+
+    def test_project_inside_parent_repo_runs_project_gate(self):
+        """Reviewer #60 (A1): dự án là thư mục con của repo cha (monorepo `apps/web`) → chạy cổng của dự án, không hỏi."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        mono = tmp / "mono"
+        subprocess.run(["git", "init", "-q", str(mono)], check=True)
+        proj = mono / "apps" / "web"
+        (proj / "scripts").mkdir(parents=True)
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", proj / "scripts" / "dev-task.sh")
+        (proj / "xt.yaml").write_text("test: echo GATE-WEB\n", encoding="utf-8")
+        code, out, err = run_hook(
+            "pre-bash-guard.sh", {"tool_input": {"command": "git commit -m x"}, "cwd": str(proj)}, proj
+        )
+        self.assertEqual((code, decision(out)), (0, None), err)
+        self.assertIn("GATE-WEB", err)
 
     def test_missing_guard_asks(self):
         """AUD-SEC-019: guard.py bị dời/xoá → hook không im lặng cho qua mọi lệnh."""

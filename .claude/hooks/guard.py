@@ -17,6 +17,7 @@ Lỗi bất ngờ → in quyết định rỗng (fail-open về luồng); luật
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import posixpath
@@ -308,7 +309,8 @@ def _is_punct(t: str) -> bool:
 
 
 def _is_redirect(t: str) -> bool:
-    return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and "|" not in t
+    """`>`, `>>`, `<`, `&>`, `>|` (ghi đè noclobber) — `|`, `<(`, `>(` không phải chuyển hướng."""
+    return _is_punct(t) and ("<" in t or ">" in t) and "(" not in t and ("|" not in t or t == ">|")
 
 
 def split_commands(tokens: List[str]) -> List[List[str]]:
@@ -1123,8 +1125,18 @@ def _target_kind(target: str, root: str) -> str:
     """classify_path của đích ghi; đích là THƯ MỤC cổng (`cp x .claude/hooks/`) cũng là cổng."""
     if not target or target.startswith("/dev/"):
         return ""
-    rel = rel_path(target, root)
-    return classify_path(rel) or ("gate" if classify_path(rel.rstrip("/") + "/_") == "gate" else "")
+    rel = rel_path(target, root).rstrip("/")
+    return classify_path(rel) or ("gate" if _dir_holds_gate(rel, root) else "")
+
+
+def _dir_holds_gate(rel: str, root: str) -> bool:
+    """Đích là THƯ MỤC chứa file cổng (`cp x .claude/hooks/`, `rm -rf .claude`, `mv scripts …`) — reviewer #60."""
+    if classify_path(rel + "/_") == "gate" or any(p.startswith(rel + "/") for p in GATE_PATTERNS):
+        return True
+    d, names = os.path.join(root, rel), []
+    with contextlib.suppress(OSError):  # không đọc được thư mục → coi như không chứa file cổng
+        names = os.listdir(d) if os.path.isdir(d) and not os.path.islink(d) else []
+    return any(classify_path(f"{rel}/{name}") == "gate" for name in names)
 
 
 def _existing_test(target: str, root: str) -> bool:
@@ -1177,26 +1189,47 @@ def _scan_command(
 MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi
 
 
+SHELL_OPTS_WITH_VALUE = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+
+def _shell_script_arg(n: List[str]) -> Tuple[bool, Optional[str]]:
+    """Duyệt cờ của shell (`-o pipefail`, `-O extglob`, `--norc`, `--login`, cờ gộp `-eo`): (có `-c`, chuỗi sau `-c`
+    hoặc tên file script; None khi đọc stdin). Reviewer #60: dừng ở cờ dài/`-o` từng làm lọt `bash -o pipefail -c`."""
+    i = 1
+    while i < len(n):
+        a = n[i]
+        if a in SHELL_OPTS_WITH_VALUE or (len(a) > 2 and a[0] in "-+" and a[1] != "-" and a[-1] in "oO"):
+            i += 2  # `-o pipefail`, `-eo pipefail`
+            continue
+        if a.startswith("--") or (a[:1] == "+" and len(a) > 1):
+            i += 1
+            continue
+        if a.startswith("-") and len(a) > 1:
+            if "c" in a[1:]:
+                return True, n[i + 1] if i + 1 < len(n) else None
+            i += 1
+            continue
+        return False, a  # file script
+    return False, None
+
+
 def _stdin_shell(argv: List[str]) -> bool:
     """Shell đọc script từ stdin: tên shell, không `-c`, không file script (bỏ chuyển hướng `<<E`, `< f` cùng đích)."""
     n = normalize(argv)
     if not n or n[0] not in SHELLS:
         return False
-    rest = [a for i, a in enumerate(n[1:], 1) if not _is_redirect(a) and not (i > 1 and _is_redirect(n[i - 1]))]
-    return all(a.startswith("-") and "c" not in a.lstrip("-") for a in rest)
+    rest = [a for i, a in enumerate(n) if not _is_redirect(a) and not (i > 0 and _is_redirect(n[i - 1]))]
+    has_c, script = _shell_script_arg(rest)
+    return not has_c and script is None and "-n" not in rest  # `bash -n`: chỉ kiểm cú pháp
 
 
 def _shell_c_script(argv: List[str]) -> Optional[str]:
-    """Chuỗi lệnh của `sh -c '<lệnh>'` (cả cờ gộp `-lc`, `-ec`); None nếu không phải."""
+    """Chuỗi lệnh của `sh -c '<lệnh>'` (cả cờ gộp `-lc`, `-ec`, sau `-o pipefail`, `--norc`…); None nếu không phải."""
     n = normalize(argv)
     if not n or n[0] not in SHELLS:
         return None
-    for i, a in enumerate(n[1:], 1):
-        if not a.startswith("-") or a.startswith("--"):
-            return None
-        if "c" in a[1:]:
-            return n[i + 1] if i + 1 < len(n) else None
-    return None
+    has_c, script = _shell_script_arg(n)
+    return script if has_c else None
 
 
 def _heredoc_scripts(cmd: str) -> List[str]:
@@ -1225,7 +1258,10 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
         for up, down in zip(pipe, pipe[1:]):
             src = normalize(up)
             if src[:1] in (["echo"], ["printf"]) and _stdin_shell(down):
-                out.append(" ".join(_positionals(src[1:])))
+                words = src[1:]
+                while src[0] == "echo" and words and words[0] in ("-n", "-e", "-E", "-ne", "-en"):
+                    words = words[1:]  # cờ của echo; phần còn lại (kể cả `--hard`) là lệnh sẽ chạy
+                out.append(" ".join(words))
     return out + _heredoc_scripts(cmd)
 
 
