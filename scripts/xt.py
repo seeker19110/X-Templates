@@ -101,15 +101,29 @@ LINK_SUB_RE = re.compile(r"(\[[^\]]*\])\(([^)\s]+)\)")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 TASK_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{3,}$")
-SECRET_RE = re.compile(r"(?i)\b(\w*(?:token|secret|passw(?:or)?d|api[_-]?key)\w*)(\s*[=:]\s*)\S+")
+SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential)"
+SECRET_RE = re.compile(rf"(?i)\b(\w*{SECRET_WORDS}\w*)(\s*[=:]\s*)\S+")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
     (re.compile(r"(?i)\b(bearer|basic|token)(\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1\2***"),
     (re.compile(r"(?i)([\"']?\w*(?:token|secret|passw(?:or)?d|api[_-]?key)\w*[\"']?\s*:\s*)\"[^\"]*\""), r'\1"***"'),
     (re.compile(r"(?i)(--(?:password|passwd|token|secret|api-key)[= ])\S+"), r"\1***"),
-    (re.compile(r"(://[^/\s:@]+:)[^@\s/]+@"), r"\1***@"),
+    # AUD-CFG-002: giá trị trong nháy có khoảng trắng; user rỗng (`redis://:pw@`); token làm user (`https://<key>@`);
+    # `curl -u u:p`; `mysql -pPW`; JWT; tiền tố khoá npm/PyPI/Hugging Face/Google/Stripe restricted.
+    (re.compile(rf"(?i)(\w*{SECRET_WORDS}\w*\s*[=:]\s*)(['\"])[^'\"\n]*\2"), r"\1\2***\2"),
+    (re.compile(r"(://[^/\s:@]*:)[^@\s/]+@"), r"\1***@"),
+    (re.compile(r"(://)[A-Za-z0-9_-]{16,}@"), r"\1***@"),
+    (re.compile(r"(\s(?:-u|--user)[= ]?\s*[^\s:]+:)\S+"), r"\1***"),
+    (re.compile(r"(\b(?:mysql|mysqldump|mariadb)\b[^\n]*?\s-p)\S+"), r"\1***"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"), "eyJ***"),
     (re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"), r"\1***"),
-    (re.compile(r"\b(gh[pousr]_|github_pat_|xox[abpr]-|sk_live_|sk_test_|sk-|glpat-)[A-Za-z0-9_-]{8,}"), r"\1***"),
+    (
+        re.compile(
+            r"\b(gh[pousr]_|github_pat_|xox[abpr]-|sk_live_|sk_test_|rk_live_|rk_test_|sk-|glpat-|npm_|pypi-|hf_|AIza)"
+            r"[A-Za-z0-9_-]{8,}"
+        ),
+        r"\1***",
+    ),
     (
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
         "-----BEGIN PRIVATE KEY----- ***",
@@ -887,6 +901,19 @@ def _deferred(st: Dict[str, Any]) -> Dict[str, Any]:
     return d if isinstance(d, dict) else {}
 
 
+def _evidence_time_problem(ev: Optional[Dict[str, Any]]) -> str:
+    """Bằng chứng ghi tay (AUD-HAR-024): thời điểm kết thúc ở tương lai hoặc trước lúc bắt đầu → không tin."""
+    if not ev:
+        return ""
+    started, finished = str(ev.get("started") or ""), str(ev.get("finished") or "")
+    soon = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=5)).replace(microsecond=0).isoformat()
+    if finished > soon:
+        return f"có thời điểm kết thúc ở tương lai ({finished})"
+    if started and finished and finished < started:
+        return f"có thời điểm kết thúc ({finished}) trước lúc bắt đầu ({started})"
+    return ""
+
+
 def _verdict_task(
     t: Dict[str, Any], base: Path, deferred: Dict[str, Any], started: str = ""
 ) -> Optional[Dict[str, Any]]:
@@ -907,6 +934,9 @@ def _verdict_task(
             "task": t["id"],
             "reason": f"bằng chứng {t['id']} có từ trước lần loop init này (vòng/PLAN trước) — chạy lại loop record",
         }
+    odd = _evidence_time_problem(ev)
+    if odd:
+        return {"verdict": "verify", "task": t["id"], "reason": f"bằng chứng {t['id']} {odd} — chạy lại loop record"}
     if ev is None or ev.get("exit_code") != 0:
         return {
             "verdict": "verify",
@@ -2202,10 +2232,23 @@ def gate_noop_keys(base: Path) -> List[str]:
     p = base / "xt.yaml"
     if not p.is_file():
         return []
-    keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
-    unquote = re.compile(r"^([\"'])(.*)\1$")
-    vals = {k: unquote.sub(r"\2", keys[k]).strip() for k in LOOP_GATE_KEYS if k in keys}
+    keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
+    vals = {k: keys[k].strip() for k in LOOP_GATE_KEYS if k in keys}
     return [k for k, v in vals.items() if not v or GATE_NOOP_RE.fullmatch(v)]
+
+
+def yaml_scalar(raw: str) -> str:
+    """Giá trị YAML phẳng như dev-task.sh `yaml_get`: bỏ comment `#` (đầu giá trị hoặc sau khoảng trắng, ngoài nháy —
+    AUD-HAR-025), rồi bỏ nháy khi bọc cả hai đầu."""
+    out, quote, prev = [], "", " "
+    for c in raw:
+        if c == "#" and not quote and prev in " \t":
+            break
+        if c in "'\"" and (not quote or quote == c):
+            quote = "" if quote else c
+        out.append(c)
+        prev = c
+    return re.sub(r"^([\"'])(.*)\1$", r"\2", "".join(out).strip())
 
 
 def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
@@ -2615,7 +2658,7 @@ def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
     `merge_risk_paths: "glob, glob"`. Giá trị lạ → L1 (an toàn) kèm ghi chú."""
     p = base / "xt.yaml"
     raw = p.read_text(encoding="utf-8") if p.is_file() else ""
-    keys = {m[1]: re.sub(r"^([\"'])(.*)\1$", r"\2", m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
+    keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
     level = keys.get("merge_autonomy", "L1")
     notes: List[str] = []
     if not re.fullmatch(r"L[0-4]", level):
@@ -3462,7 +3505,8 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
             key = (e.get("kind", "?"), e.get("id", "?"))
             g = groups.setdefault(key, {"kind": key[0], "id": key[1], "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})
-            g["items"].append({"project": project, **e})
+            # FB có thể đã sửa tay sau `feedback add` → che lại trước khi ra PR nháp ở repo khung public (AUD-CFG-002).
+            g["items"].append({"project": project, **{k: redact(v) if isinstance(v, str) else v for k, v in e.items()}})
     out = list(groups.values())
     for g in out:
         has_repro = any(i.get("repro", "—") not in ("", "—") for i in g["items"])
