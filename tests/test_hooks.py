@@ -1316,9 +1316,13 @@ class MergeGuardTest(unittest.TestCase):
             "số PR dạng chuỗi": {**good, "pullNumber": "7"},
             "phương thức lạ": {**good, "merge_method": "fast"},
             "khoá lạ": {**good, "admin": True},
+            "số PR bool": {**good, "pullNumber": True},
+            "số PR âm": {**good, "pullNumber": -7},
+            "chủ không phải chuỗi": {**good, "owner": 1},
         }.items():
             with self.subTest(name):
                 self.assertEqual(dec("mcp__github__merge_pull_request", inp), "ask")
+        self.assertEqual(dec("mcp__gitlab__merge_pull_request", good), "ask")  # server khác: host khác
         self.assertEqual(dec("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 7}), "ask")
         (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
         self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")

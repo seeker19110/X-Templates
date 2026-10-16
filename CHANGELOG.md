@@ -80,7 +80,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cho phiên chặn GraphQL: `gh api -X PUT repos/{owner}/{repo}/pulls/N/merge -f sha=<head> [-f merge_method=…]` và tool
   MCP `merge_pull_request` có `expectedHeadSha` (owner/repo phải trùng `repo` mà `merge-check` trả — trường mới) →
   `allow` khi verdict `merge`; bật auto-merge của GitHub (`enable_pr_auto_merge`, `--auto`) luôn hỏi vì không ghim được
-  head. `LOOP-STOP-022` (ID, mức giữ) ghi ba đường merge; giao thức autopilot (README mảng 11 bước 11, 15; skill
+  head. `merge-check` trả thêm `repo`, `next_rest` (merge REST ghim head) và `wait` cho PR chồng nhắm nhánh khác nhánh
+  mặc định (`baseRefName`/`defaultBranch` từ REST); `update` gợi ý `git merge origin/<đích>` (không cần GraphQL). Allow
+  MCP chỉ cho server `mcp__github__`. `LOOP-STOP-022`, `LOOP-STOP-002` (*Kiểm*; ID, mức giữ) ghi ba đường merge; giao thức autopilot (README mảng 11 bước 11, 15; skill
   `/autopilot` bước 10, 13) theo PR từng lát; bảng lệnh mảng 11 thêm `merge-check`. Repo khung bật `merge_autonomy: L2`;
   mẫu dự án đích giữ L1. Dự án đích: chạy lại `install.py` (guard, `pre-mcp-guard.sh` mới) và ghép lại blueprint.
 - `LOOP-DESIGN-019` **SHOULD** (mới): vòng bảo trì G8 → task mới kích hoạt bằng ngưỡng tất định (script so chỉ số với
@@ -172,6 +174,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- `xt.py merge-check` chỉ tính check-run **mới nhất** mỗi tên trên head: chạy lại `quality` (sửa tiêu đề PR) từng để
+  lần đỏ cũ che lần xanh mới → `fix` dù CI xanh (gặp ở #58).
 - `dev-task.sh format-file` khôi phục file JSON khi formatter khai báo làm hỏng nó (AUD-HAR-037: `format_file: ruff
   format {}` biến `.claude/settings.json` thành JSON có dấu phẩy thừa ở mỗi lần Edit). Repo khung: `format_file` chỉ
   chạy ruff cho `*.py`; mẫu `templates/xt.yaml` (dòng Python) cũng vậy.

@@ -2551,13 +2551,24 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
+def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
+    """PR chồng (ADR-0014): nhắm nhánh khác nhánh mặc định → merge vào đó là merge vào nhánh sắp chết (squash) → chờ."""
+    base, default = pr.get("baseRefName"), pr.get("defaultBranch")
+    if base and default and base != default:
+        return "wait", [
+            f"PR nhắm `{base}`, không phải nhánh mặc định `{default}` — PR chồng: chờ PR đáy merge, đổi đích về "
+            f"`{default}`, merge `{default}` vào nhánh này rồi chạy lại merge-check"
+        ]
+    return None
+
+
 def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None) -> Dict[str, Any]:
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2; lệnh merge ghim `--match-head-commit` (có commit mới → lệch)."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     lane = "chuẩn" if lane_reasons else "nhanh"
-    blocked = _merge_blockers(pr)
+    blocked = _merge_blockers(pr) or _stacked_blocker(pr)
     if blocked:
         verdict, reasons = blocked
     elif lane_reasons:
@@ -2571,9 +2582,10 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         verdict, reasons = "human", ["ruleset đòi review của người"]
     else:
         verdict, reasons = "merge", ["làn nhanh, CI xanh, không xung đột"]
+    base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
     nxt = {
-        "merge": f"gh pr merge {n} --squash --match-head-commit {pr.get('headRefOid', '')}",
-        "update": f"gh pr update-branch {n}",
+        "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
+        "update": f"git fetch origin {base} && git merge origin/{base} && git push (hoặc gh pr update-branch {n})",
         "wait": "chờ rồi chạy lại merge-check",
         "fix": "sửa, push, chạy lại merge-check",
         "human": "để người merge; báo cáo lý do",
@@ -2587,6 +2599,14 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         "lane": lane,
         "reasons": reasons,
         "next": nxt,
+        # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
+        **(
+            {
+                "next_rest": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/merge -f sha={head} -f merge_method=squash"
+            }
+            if verdict == "merge"
+            else {}
+        ),
     }
 
 
@@ -2691,6 +2711,13 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     statuses = [
         s for s in _gh_one(f"{repo}/commits/{sha}/status?per_page=100").get("statuses") or [] if isinstance(s, dict)
     ]
+    # Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên: chỉ lần mới nhất (id lớn
+    # nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58).
+    latest: Dict[str, Dict[str, Any]] = {}
+    for c in runs:
+        key = str(c.get("name"))
+        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
+            latest[key] = c
     rollup = [
         {
             "__typename": "CheckRun",
@@ -2698,7 +2725,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
         }
-        for c in runs
+        for c in latest.values()
     ]
     rollup += [
         {"__typename": "StatusContext", "context": s.get("context"), "state": str(s.get("state", "")).upper()}
@@ -2706,11 +2733,20 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     ]
     files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
     mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
-    base_repo = (
-        ((pr.get("base") or {}).get("repo") or {}).get("full_name") if isinstance(pr.get("base"), dict) else None
-    )
+    raw_base = pr.get("base")
+    base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
+    base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
+    extra = {
+        k: str(v)
+        for k, v in (
+            ("repo", base_repo.get("full_name")),
+            ("baseRefName", base.get("ref")),
+            ("defaultBranch", base_repo.get("default_branch")),
+        )
+        if v
+    }
     return {
-        **({"repo": str(base_repo)} if base_repo else {}),
+        **extra,
         "number": pr.get("number", n),
         "state": "MERGED" if pr.get("merged") else str(pr.get("state", "")).upper(),
         "isDraft": bool(pr.get("draft")),

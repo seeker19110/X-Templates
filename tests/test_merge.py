@@ -156,7 +156,31 @@ class MergeDecisionTest(unittest.TestCase):
                 d = xt.merge_decision(p, autonomy=2)
                 self.assertEqual(d["verdict"], verdict)
                 self.assertIn(reason, " · ".join(d["reasons"]))
-        self.assertEqual(xt.merge_decision(pr(mergeStateStatus="BEHIND"), 2)["next"], "gh pr update-branch 7")
+        # `update` bằng git (gh pr update-branch cần GraphQL — phiên Claude Code chặn)
+        self.assertEqual(
+            xt.merge_decision(pr(mergeStateStatus="BEHIND", baseRefName="dev"), 2)["next"],
+            "git fetch origin dev && git merge origin/dev && git push (hoặc gh pr update-branch 7)",
+        )
+
+    def test_stacked_pr_waits_for_bottom(self):
+        """Reviewer #59: PR chồng nhắm nhánh khác nhánh mặc định → chờ, không merge vào nhánh sắp chết."""
+        d = xt.merge_decision(pr(baseRefName="feat/a", defaultBranch="main"), 2)
+        self.assertEqual(d["verdict"], "wait")
+        self.assertIn("PR chồng", d["reasons"][0])
+        ok = xt.merge_decision(pr(baseRefName="main", defaultBranch="main"), 2)
+        self.assertEqual(ok["verdict"], "merge")
+        self.assertEqual(
+            ok["next_rest"], "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f merge_method=squash"
+        )
+        self.assertNotIn("next_rest", d)
+        raw = {
+            "repos/{owner}/{repo}/pulls/7": json.dumps(
+                {**FakeGh().pull, "base": {"ref": "feat/a", "repo": {"full_name": "o/r", "default_branch": "main"}}}
+            )
+        }
+        with FakeGh(raw=raw).patch():
+            got = xt._pr_rest("7")
+        self.assertEqual((got["repo"], got["baseRefName"], got["defaultBranch"]), ("o/r", "feat/a", "main"))
 
     def test_ci_states(self):
         red = [*GREEN, {"__typename": "CheckRun", "name": "e2e", "status": "COMPLETED", "conclusion": "FAILURE"}]
@@ -362,6 +386,21 @@ class MergeCheckCliTest(unittest.TestCase):
         with FakeGh(runs=runs, statuses=[{"context": "ci/old", "state": "failure"}]).patch():
             got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
         self.assertEqual((got["verdict"], got["reasons"]), ("fix", ["CI đỏ: ci/old"]))
+
+    def test_rerun_check_uses_latest_run(self):
+        """#58: sửa tiêu đề PR chạy lại `quality` trên CÙNG head — lần cũ đỏ không được che lần mới xanh (như GitHub)."""
+        runs = [
+            {"id": 1, "name": "quality", "status": "completed", "conclusion": "failure"},
+            {"id": 2, "name": "quality", "status": "completed", "conclusion": "success"},
+        ]
+        with FakeGh(runs=runs).patch():
+            got = xt.merge_decision(xt._pr_rest("7"), autonomy=2)
+        self.assertEqual(got["verdict"], "merge")
+        with FakeGh(runs=list(reversed(runs)), statuses=[]).patch():  # thứ tự trả về không quyết định
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "merge")
+        newer_red = [{**runs[0], "id": 3}, runs[1]]
+        with FakeGh(runs=newer_red).patch():
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "fix")
 
     def test_review_decision_from_latest_review_per_user(self):
         def rv(user: str, state: str) -> dict:
