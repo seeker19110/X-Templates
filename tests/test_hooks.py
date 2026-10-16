@@ -1145,6 +1145,7 @@ class MergeGuardTest(unittest.TestCase):
                     "mergeable": pr["mergeable"] == "MERGEABLE",
                     "mergeable_state": pr["mergeStateStatus"].lower(),
                     "head": {"sha": sha},
+                    "base": {"repo": {"full_name": "o/r"}},
                     "labels": pr["labels"],
                 },
                 f"{repo}/pulls/{n}/files?per_page=100": [
@@ -1266,6 +1267,54 @@ class MergeGuardTest(unittest.TestCase):
                 )
                 self.assertEqual(code, 0)
                 self.assertEqual(decision(out), "ask" if hit else None)
+
+    def test_rest_merge_pinned_allows(self):
+        """ADR-0014: phiên chặn GraphQL merge qua REST — allow chỉ khi đúng repo hiện tại, ghim sha = head đã kiểm."""
+        ok = "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f merge_method=squash"
+        self.assertEqual(self.d(ok)[0], "allow")
+        self.assertEqual(self.d("gh api --method PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def")[0], "allow")
+        for cmd in (
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=0000000",  # head đã đổi
+            "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc1234def",  # repo ghi cứng: không chắc là repo đã kiểm
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -F sha=abc1234def",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f commit_title=x",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=1 -f sha=abc1234def",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f merge_method=fast",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def --hostname x.com",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def && echo x",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "ask")
+
+    def test_mcp_merge_pinned_allows(self):
+        """ADR-0014: tool MCP `merge_pull_request` ghim `expectedHeadSha`, đúng repo đã kiểm → allow; bật auto-merge → hỏi."""
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        good = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def", "merge_method": "squash"}
+
+        def dec(tool: str, inp: dict) -> str | None:
+            code, out, _ = run_hook("pre-mcp-guard.sh", {"tool_name": tool, "tool_input": inp}, self.proj, env)
+            self.assertEqual(code, 0)
+            return decision(out)
+
+        self.assertEqual(dec("mcp__github__merge_pull_request", good), "allow")
+        for name, inp in {
+            "repo khác": {**good, "owner": "evil"},
+            "không ghim": {k: v for k, v in good.items() if k != "expectedHeadSha"},
+            "head đổi": {**good, "expectedHeadSha": "0000000"},
+            "số PR dạng chuỗi": {**good, "pullNumber": "7"},
+            "phương thức lạ": {**good, "merge_method": "fast"},
+            "khoá lạ": {**good, "admin": True},
+            "số PR bool": {**good, "pullNumber": True},
+            "số PR âm": {**good, "pullNumber": -7},
+            "chủ không phải chuỗi": {**good, "owner": 1},
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(dec("mcp__github__merge_pull_request", inp), "ask")
+        self.assertEqual(dec("mcp__gitlab__merge_pull_request", good), "ask")  # server khác: host khác
+        self.assertEqual(dec("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 7}), "ask")
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
+        self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")
 
     def test_merge_without_python_asks(self):
         """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""

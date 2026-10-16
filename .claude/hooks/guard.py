@@ -5,7 +5,7 @@ Dùng (payload JSON của Claude Code trên stdin, kết quả JSON trên stdout
   guard.py bash   → {"decision": "deny"|"ask"|"", "reason": "...", "commit": true|false, "no_verify": true|false,
                      "commit_dir": "<thư mục git commit chạy, rỗng nếu không biết>"}
   guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}  (file bí mật/cổng/migration; test ĐÃ CÓ bị làm yếu)
-  guard.py mcp    → {"decision": "ask"|"", "reason": "..."}  (tool MCP merge PR: không qua `xt.py merge-check`)
+  guard.py mcp    → {"decision": "allow"|"ask"|"", "reason": "..."}  (tool MCP merge PR: allow chỉ khi merge-check cho phép)
 
 Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
 - tách lệnh theo token shell (`shlex`): `|`/`;` trong nháy không phải ranh giới, thân heredoc là dữ liệu;
@@ -685,7 +685,10 @@ MERGE_ALLOW_FLAGS = {
 }
 MERGE_SELECTOR_RE = re.compile(r"#?\d+|[A-Za-z0-9._/-]+")
 # Lệnh merge "trơn": một dòng, chỉ chữ/số/dấu an toàn — không `$(…)`, backtick, nháy, heredoc, chuyển hướng, gán biến.
-PLAIN_MERGE_RE = re.compile(r"gh[ \t]+pr[ \t]+merge([ \t]+[A-Za-z0-9_./#:=@+-]+)*")
+PLAIN_MERGE_RE = re.compile(r"gh[ \t]+(pr[ \t]+merge|api)([ \t]+[A-Za-z0-9_./#:=@+{}-]+)*")
+# Merge qua REST (phiên chặn GraphQL — `gh pr merge` không chạy được): đúng repo hiện tại, ghim `sha` (409 nếu lệch).
+REST_MERGE_PATH_RE = re.compile(r"repos/\{owner\}/\{repo\}/pulls/(\d+)/merge")
+MERGE_METHODS = {"squash", "merge", "rebase"}
 # `gh api` ghi (khác GET; `-f`/`-F`/`--input` ngầm là POST) = hành động đối ngoại, kể cả merge qua REST (AUD-SEC-020).
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
 GH_API_VALUE_FLAGS: Tuple[str, ...] = (
@@ -741,13 +744,7 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     selector = _positionals(args, GH_MERGE_VALUE_FLAGS)
     if flags or len(selector) > 1 or not all(MERGE_SELECTOR_RE.fullmatch(s) for s in selector):
         return "ask", f"{EXTERNAL_ASK} — tự merge chỉ nhận số PR/nhánh và cờ {', '.join(sorted(MERGE_ALLOW_FLAGS))}"
-    d = merge_check(selector[:1], root)
-    reasons = "; ".join(str(x) for x in d.get("reasons") or [])  # type: ignore[attr-defined]
-    if d.get("verdict") != "merge":
-        return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
-    if d.get("head") != sha:
-        return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác --match-head-commit {sha}"
-    return "allow", f"merge-check: {reasons}"
+    return _merge_verdict(selector[:1], sha, root)
 
 
 def _rm_rule(args: List[str]) -> Tuple[str, str]:
@@ -822,14 +819,59 @@ def _gh_api_writes(args: List[str]) -> bool:
     return (methods[-1] if methods else ("POST" if fields else "GET")) != "GET"
 
 
-# Tool MCP merge/bật auto-merge PR (vd `mcp__github__merge_pull_request`): chưa có đường kiểm merge-check → hỏi người.
+# Tool MCP merge/bật auto-merge PR (vd `mcp__github__merge_pull_request`). Bật auto-merge của GitHub không ghim được
+# head (commit đẩy sau vẫn tự merge) → luôn hỏi; merge ghim `expectedHeadSha` mà merge-check cho phép → allow (ADR-0014).
 MCP_MERGE_RE = re.compile(r"mcp__.+__\w*(merge_pull_request|auto_merge)\w*")
+MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_method", "commit_title", "commit_message"}
 
 
-def mcp_decision(tool_name: str) -> Tuple[str, str]:
-    if MCP_MERGE_RE.fullmatch(tool_name):
-        return "ask", f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) không qua `xt.py merge-check`"
-    return "", ""
+def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
+    if not MCP_MERGE_RE.fullmatch(tool_name):
+        return "", ""
+    ask = "ask", f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) cần `expectedHeadSha` + `xt.py merge-check` = merge"
+    n, sha = tool_input.get("pullNumber"), tool_input.get("expectedHeadSha")
+    owner, repo = tool_input.get("owner"), tool_input.get("repo")
+    # Chỉ server GitHub chính (`mcp__github__…`): server khác cùng tên tool có thể trỏ host khác với repo merge-check đọc.
+    if tool_name != "mcp__github__merge_pull_request" or set(tool_input) - MCP_MERGE_KEYS:
+        return ask
+    if not (type(n) is int and n > 0 and isinstance(sha, str) and sha):
+        return ask
+    if not (isinstance(owner, str) and isinstance(repo, str)):
+        return ask
+    if tool_input.get("merge_method", "squash") not in MERGE_METHODS:
+        return ask
+    return _merge_verdict([str(n)], sha, root, f"{owner}/{repo}")
+
+
+def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> Tuple[str, str]:
+    """`allow` khi `xt.py merge-check` (PR theo selector; rỗng = nhánh hiện tại) trả merge, head đã kiểm = `sha` (và repo
+    trùng nếu có); không thì ask."""
+    d = merge_check(selector, root)
+    raw = d.get("reasons")
+    reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
+    if d.get("verdict") != "merge":
+        return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
+    if d.get("head") != sha:
+        return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác {sha}"
+    if repo and str(d.get("repo", "")).lower() != repo.lower():
+        return "ask", f"{EXTERNAL_ASK} — merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}"
+    return "allow", f"merge-check: {reasons}"
+
+
+def _gh_api_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
+    """`gh api` ghi → ask; trừ merge REST ghim head (`-X PUT repos/{owner}/{repo}/pulls/N/merge -f sha=… [-f
+    merge_method=…]`, mỗi khoá một lần, không `@file`) mà merge-check cho phép (LOOP-STOP-022)."""
+    ask = "ask", f"{EXTERNAL_ASK} — `gh api` ghi lên GitHub (merge/cấu hình phải qua lệnh có kiểm)"
+    pos = _positionals(args, GH_API_VALUE_FLAGS)
+    m = REST_MERGE_PATH_RE.fullmatch(pos[0]) if len(pos) == 1 else None
+    pairs = [v.partition("=") for v in _gh_api_field_values(args)]
+    fields = {k: v for k, _, v in pairs}
+    flags = {a.split("=", 1)[0] for a in args if a.startswith("-")} - {"-X", "--method", "-f", "--raw-field"}
+    if not m or _gh_api_methods(args) != ["PUT"] or flags or len(fields) != len(pairs) or not fields.get("sha"):
+        return ask
+    if set(fields) - {"sha", "merge_method"} or fields.get("merge_method", "squash") not in MERGE_METHODS:
+        return ask
+    return _merge_verdict([m[1]], fields["sha"], root)
 
 
 def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
@@ -841,7 +883,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
-        return "ask", f"{EXTERNAL_ASK} — `gh api` ghi lên GitHub (merge/cấu hình phải qua lệnh có kiểm)"
+        return _gh_api_merge_rule(args[1:], root)
     if name in ASK_CMDS and not (set(args) and set(args) <= INFO_ONLY):
         subs = ASK_CMDS[name]
         if (
@@ -1122,7 +1164,7 @@ def main() -> int:
             out = {"decision": d, "reason": r}
         elif mode == "mcp":
             name = payload.get("tool_name")
-            d, r = mcp_decision(name) if isinstance(name, str) else ("", "")
+            d, r = mcp_decision(name, tool_input, root) if isinstance(name, str) else ("", "")
             out = {"decision": d, "reason": r}
         else:
             out = {"decision": ""}
