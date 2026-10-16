@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Audit delta #43–#57 (`docs/ops/AUDIT-REPORT-2026-10-16.md`): 0 🔴 · 15 🟠 · 35 🟢 mở — **chờ chủ repo duyệt kế hoạch 5 đợt** (§5). Đợt 1–2 = bịt merge vòng qua `merge-check` rồi luật mới "PR + auto-merge theo lát" (chủ repo yêu cầu 2026-10-16, §7).
+- Sửa audit 2026-10-16 theo 5 đợt (chủ repo đã duyệt; `docs/ops/AUDIT-REPORT-2026-10-16.md` §5): đã merge #58 (đợt 1), #59 (đợt 2, ADR-0014); đang mở #60 (đợt 3, guard Bash), #61 (đợt 4, bằng chứng/redact), đợt 5 tài liệu (5a làn nhanh, 5b luật agent). PR chồng: PR đáy merge → đổi đích về `main`, merge `main` vào, rồi merge (người merge làn chuẩn).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
@@ -41,8 +41,11 @@
 - 2026-10-15 Phản hồi dự án đích → khung: dự án ghi `docs/xtemplates-feedback/FB-NNN.md` (`redact`), khung kéo về bằng Routine hằng tuần → PR nháp, đủ ngưỡng khi ≥ 2 dự án hoặc có tái hiện; người duyệt trước khi công khai — ADR-0010.
 - 2026-10-16 Audit khung trước `/autopilot`: `xt.py doctor --fix` là việc đầu tiên; `--fix` chỉ sửa phần đảo ngược được, hook/settings để người (`install.py`); `loop init` cảnh báo, không chặn (fail-open về luồng) — `LOOP-HARNESS-020`.
 - 2026-10-16 CI: `portability.yml` (macOS bash 3.2) không chạy trên PR, chỉ khi push vào `main` (chủ repo yêu cầu); đỏ sau merge thì sửa bằng PR mới.
+- 2026-10-16 Trong vòng autopilot, `lint`/`test` rỗng hoặc no-op (kể cả chỉ có comment) làm cổng đỏ — ADR-0011.
+- 2026-10-16 Blueprint chỉ MUST theo quy mô, SHOULD/MAY ở BACKLOG; trần vòng một phiên chỉ đếm task — ADR-0012.
+- 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR, tự merge làn nhanh bằng lệnh ghim head (gh/REST/MCP), không dùng auto-merge của GitHub; repo khung `merge_autonomy: L2` (chủ repo yêu cầu) — ADR-0013, ADR-0014, D-010.
 ## Bàn giao phiên
-- 2026-10-16 · Commit cuối trên `main`: `58b8c8b` (#57); tag `v2.0.0` → `55de4d1`; SHA quét audit `58b8c8b` (delta #43–#57 đã quét).
+- 2026-10-16 · Commit cuối trên `main`: `bce2792` (#59); tag `v2.0.0` → `55de4d1`; SHA quét audit `58b8c8b` (delta #43–#57 đã quét; sau các đợt sửa: quét lại theo delta).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (đọc `xt.yaml`; `pip install --require-hashes -r requirements-dev.txt`, cần shellcheck).
-- Autopilot: PLAN T-601…T-602 (xác minh lại bằng chứng sau #41). Đang chặn: không. Nhánh `claude/vibrant-davinci-mbt518` trên remote giữ lịch sử trước squash của #41 (cây trùng `main`; hook chặn force-push) — đã merge vào nhánh, không đổi nội dung.
+- Autopilot: không chạy (PLAN T-601…T-602 đã xong). Đang chặn: không.
 - Câu hỏi cần người: Tiếp theo 1 (`x-hotel-manager`).
