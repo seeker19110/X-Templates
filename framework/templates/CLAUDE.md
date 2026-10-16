@@ -1,7 +1,7 @@
 ---
 title: Mẫu CLAUDE.md cho dự án
 kind: template
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # CLAUDE.md

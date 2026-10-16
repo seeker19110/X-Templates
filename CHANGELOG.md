@@ -6,6 +6,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **L3 vẫn để người merge ngoại lệ cứng** (ADR-0016, D-012; audit delta đợt B, AUD-HAR-042). `merge-check` trả thêm
+  `hard` — lý do ngoại lệ cứng (đường dẫn bí mật/auth/thanh toán/mật mã, nhãn `risk:auth|payment|pii|crypto|admin|secret`,
+  `merge_risk_paths`), tính cả khi CI còn chạy — và verdict `human` cho PR đó ở mọi mức; guard không bật auto-merge
+  (`gh pr merge --auto`, MCP `enable_pr_auto_merge`) khi có `hard`. Làn chuẩn còn lại vẫn auto-merge ở L3, lý do ghi
+  "L3: làn chuẩn" thay vì "làn nhanh" (AUD-CODE-010). Check-run cùng tên của app khác không còn bị gộp, chỉ lần chạy lại
+  cùng app thay lần cũ (AUD-CODE-007). Mục (ID, mức giữ): `LOOP-STOP-005` ghi "kể cả L3" + *Kiểm* `hard`;
+  `LOOP-STOP-002` *Kiểm* bật auto-merge hỏi dưới L3 hoặc khi có `hard`, `gh api --input` (AUD-DOC-035); `LOOP-STOP-009`,
+  `LOOP-STOP-022`, `LOOP-DESIGN-020` trừ PR có `hard`; `WF-REVIEW-007` miễn ở L3 chỉ cho `.github/`/hook/ruleset/migration.
+  Bảng mức tự chủ ghi L3 do chủ dự án chọn bỏ qua bậc thang (AUD-DOC-033); skill `/autopilot`, mẫu `AGENTS.md`, README,
+  mảng 11 thống nhất chữ L3 (AUD-DOC-031/032/036); `updated` của mẫu `AGENTS.md`/`CLAUDE.md` (AUD-DOC-037); ADR-0014 §1
+  đọc lại với `delete_branch_on_merge` (GitHub tự đổi đích PR chồng — xác minh 2026-10-16, AUD-DOC-034). Dự án đích:
+  chạy lại `install.py`, ghép lại blueprint để nhận chữ mới.
 - Tài liệu harness khớp mã (audit 2026-10-16 đợt 5b): mô tả hook PreToolUse ở `CLAUDE.md` và `templates/CLAUDE.md` thêm
   hỏi khi làm yếu/xoá test, ghi tay `.autopilot/`, merge qua `gh api`/MCP, quét lệnh lồng, cổng trước `git commit`
   (AUD-HAR-031); `AGENTS.md` §6 liệt kê đủ thành phần cổng `lint` (AUD-DOC-029); skill `/audit` §6 trong autopilot tự
