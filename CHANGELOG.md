@@ -6,6 +6,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Hook hỏi khi test đã có bị làm yếu** (`LOOP-CI-001`). `guard.py edit` (qua `pre-edit-guard.sh`, Edit/Write/MultiEdit)
+  trả `ask` khi lần sửa một file test **đã có** (`test_*.py`, `*.test.*`, `*.spec.*`, `*_test.go`, `tests/`, `__tests__/`…)
+  thêm dấu skip/only/xfail/`@flaky` hoặc bớt lời gọi kiểm (`assert*`, `expect(`, `t.Error`…). File test mới, file không
+  phải test, file không đọc được → không hỏi (fail-open). Từ playbook AI-native SDLC của Anthropic (stage Test: agent sửa
+  lỗi không được làm yếu bài kiểm của chính đoạn code nó sửa). `LOOP-CI-001` thêm *Kiểm* cho hook (ID, mức giữ).
+  Dự án đích: chạy lại `install.py` để nhận `guard.py` mới (hook copy-if-absent → gộp tay `*.xtemplates-new`).
+- **Gắn `@flaky`/cách ly test là nới cổng** (`LOOP-CI-012`, ID và mức SHOULD giữ): agent ghi bằng chứng (run đỏ và xanh
+  cùng SHA) và mở issue; gắn nhãn/cách ly khỏi cổng đi qua người duyệt (`loop defer`), không tự làm trong vòng tự động.
+  Trước đây bảng "Loại lỗi CI" cho agent tự đánh dấu flaky, trái với nguyên tắc 1 của chính module. Bảng, nguyên tắc 1,
+  bẫy và cổng tự động của `self-healing-ci.md` cập nhật theo.
 - `xt.py merge-check` lấy dữ liệu PR qua **REST** (`gh api`: `pulls/N`, `pulls/N/files`, `pulls/N/reviews`, `commits/SHA/check-runs`, `commits/SHA/status`, tra PR theo nhánh bằng `pulls?head=`) thay cho `gh pr view` (GraphQL), vì phiên Claude Code chặn GraphQL (HTTP 403). Dữ liệu được dựng lại đúng dạng `gh pr view --json` nên logic quyết định và `--pr-json` không đổi. REST không có `reviewDecision`: suy từ review mới nhất của mỗi người (DISMISSED xoá), và `mergeable_state` BLOCKED (GitHub tính cả branch protection) → `REVIEW_REQUIRED` → `human` — chặt hơn, không lỏng hơn (D-009). `--pr` nhận số, `#số`, URL PR hoặc tên nhánh. `LOOP-STOP-022` cập nhật mô tả (ID, mức giữ).
 - **Cổng không xanh khi không kiểm gì** (ADR-0011). Khi autopilot đang chạy (`.autopilot/state.json` `"active": true`),
   `dev-task.sh` coi `lint`/`test` rỗng hoặc no-op (`true`, `:`, `exit 0`, `echo …`, `printf …`) là ĐỎ (exit 3); ngoài
@@ -64,6 +74,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- `LOOP-DESIGN-019` **SHOULD** (mới): vòng bảo trì G8 → task mới kích hoạt bằng ngưỡng tất định (script so chỉ số với
+  baseline), quyền agent theo bậc lệch (1σ log · 2σ chẩn đoán read-only · 3σ chỉ mở PR/issue hoặc runbook đã duyệt),
+  không bậc nào merge/deploy; thêm dòng "Trigger theo ngưỡng" vào bảng chọn tầng và một bẫy trong `loop-design.md`.
+  Nguồn: playbook AI-native SDLC của Anthropic (2026-08-21) stage 6, qua catalog `seeker19110/stored` 21 §10c.
 - `xt.py doctor` thêm kiểm `memory` (mức `warn`, không tự sửa) cho `LOOP-HARNESS-021`: cảnh báo khi bật > 1 công cụ memory ngoài (engram, claude-mem, agentmemory, mem0, openmemory, basic-memory; khớp theo token trong tên) qua `enabledPlugins` ở `~/.claude/settings.json` → `.claude/settings.json` → `.claude/settings.local.json` (cấp sau thắng) và MCP server ở `~/.claude.json` (gốc và `projects.<dự án>`) + `.mcp.json`; theo `CLAUDE_CONFIG_DIR`; và khi `.engram/` nằm trong git. Chỉ đọc tên, không in giá trị cấu hình; không xác định được home thì bỏ phần cấp người dùng (fail-open, không làm vỡ `loop init`). Vì sao đọc cả cấp người dùng: `engram setup claude-code` đăng ký MCP vào `~/.claude.json` (D-008). Phần *Kiểm* của `LOOP-HARNESS-021` trỏ lệnh này (ID, mức giữ).
 - `11-autonomous-loop/harness-files.md`, bảng "Context vs memory vs tài liệu": thêm dòng **Memory tra cứu (tuỳ chọn)** và quyết định "một hay nhiều công cụ memory ngoài": **tối đa một**, nguồn sự thật vẫn là file harness; đề xuất mặc định engram (agent ghi có chủ đích, khớp `AI-AGENT-009`/`PRF-AGENT-013`), claude-mem khi muốn ghi tự động, agentmemory khi chấp nhận engine ELv2. Không đổi ID/mức.
 - `LOOP-HARNESS-021` **SHOULD** (mới) từ catalog `seeker19110/stored` 10 §4c (engram), bổ sung cho `LOOP-HARNESS-019`: chỉ bật một công cụ memory ngoài; kho memory ngoài repo, quyền chỉ chủ, coi là nhạy cảm vì có công cụ lưu nguyên văn prompt; đồng bộ memory vào repo (`.engram/`) tắt ở repo công khai, repo riêng phải quét bí mật. Dự án đích: chạy lại `compose`.

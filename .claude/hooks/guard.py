@@ -4,7 +4,7 @@
 Dùng (payload JSON của Claude Code trên stdin, kết quả JSON trên stdout):
   guard.py bash   → {"decision": "deny"|"ask"|"", "reason": "...", "commit": true|false, "no_verify": true|false,
                      "commit_dir": "<thư mục git commit chạy, rỗng nếu không biết>"}
-  guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}
+  guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}  (file bí mật/cổng/migration; test ĐÃ CÓ bị làm yếu)
 
 Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
 - tách lệnh theo token shell (`shlex`): `|`/`;` trong nháy không phải ranh giới, thân heredoc là dữ liệu;
@@ -103,6 +103,39 @@ GATE_PATTERNS = (
 )
 MIGRATION_RE = re.compile(r"(^|/)(migrations?|migrate)/|(^|/)db/schema\.|(^|/)prisma/schema\.prisma$")
 
+# File test (đa ngôn ngữ). Sửa test ĐÃ CÓ theo hướng làm yếu bài kiểm = nới cổng (LOOP-CI-001): agent đang sửa lỗi
+# không được làm yếu chính bài kiểm đoạn code nó sửa (Anthropic AI-native SDLC playbook 2026-08-21, stage Test).
+TEST_PATTERNS = (
+    "test_*.py",
+    "*_test.py",
+    "*_test.go",
+    "*.test.*",
+    "*.spec.*",
+    "*_spec.rb",
+    "*Test.java",
+    "*Tests.java",
+    "*Test.kt",
+    "*Tests.cs",
+    "tests/*",
+    "test/*",
+    "__tests__/*",
+    "spec/*",
+)
+# Dấu bỏ qua / chỉ chạy một phần / chấp nhận đỏ / flaky: thêm mới = bớt phần được kiểm.
+TEST_SKIP_RE = re.compile(
+    r"\b(?:it|test|describe|context|suite)\.(?:skip|only|todo|fixme)\b"  # Jest/Vitest/Mocha/Playwright
+    r"|\bx(?:it|test|describe)\s*\(|\bf(?:it|describe)\s*\("  # xit/fit của Jasmine/Jest
+    r"|@pytest\.mark\.(?:skip|skipif|xfail|flaky)\b|\bpytest\.(?:skip|xfail)\s*\("
+    r"|@unittest\.(?:skip\w*|expectedFailure)\b|\.skipTest\s*\("
+    r"|\bt\.Skip(?:Now|f)?\s*\("  # Go
+    r"|@(?:Disabled|Ignore)\b|\bSkip\s*="  # JUnit, xUnit
+    r"|@flaky\b"  # nhãn flaky (QA-STRAT-009)
+)
+# Lời gọi kiểm: bớt đi = bài test kiểm ít hơn.
+TEST_ASSERT_RE = re.compile(
+    r"\bassert\w*\b|\bexpect\s*\(|\.should\b|\bt\.(?:Error|Fatal)f?\s*\(|\brequire\.\w+\s*\(|\bAssert\.\w+\s*\("
+)
+
 
 # --------------------------------------------------------------------------- đường dẫn
 
@@ -141,7 +174,44 @@ def classify_path(rel: str) -> str:
     return ""
 
 
-def edit_decision(path: str, root: str) -> Tuple[str, str]:
+def weakens_test(old: str, new: str) -> str:
+    """Lý do nếu `new` làm yếu bài test so với `old` (thêm dấu skip/only/xfail/flaky, hoặc bớt lời gọi kiểm); không thì ''."""
+    if len(TEST_SKIP_RE.findall(new)) > len(TEST_SKIP_RE.findall(old)):
+        return "thêm skip/only/xfail/flaky"
+    if len(TEST_ASSERT_RE.findall(new)) < len(TEST_ASSERT_RE.findall(old)):
+        return "bớt assertion"
+    return ""
+
+
+def _text(v: object) -> str:
+    return v if isinstance(v, str) else ""
+
+
+def _edit_texts(tool_input: Dict[str, object], full: str) -> Tuple[str, str]:
+    """(trước, sau) của lần sửa: Edit `old_string`/`new_string`, MultiEdit `edits`, Write `content` (trước = file trên đĩa)."""
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(_text(e.get("old_string")), _text(e.get("new_string"))) for e in edits if isinstance(e, dict)]
+        return "\n".join(p[0] for p in pairs), "\n".join(p[1] for p in pairs)
+    if "content" in tool_input:
+        with open(full, encoding="utf-8", errors="replace") as f:
+            return f.read(), _text(tool_input.get("content"))
+    return _text(tool_input.get("old_string")), _text(tool_input.get("new_string"))
+
+
+def _test_weakening(rel: str, root: str, tool_input: Optional[Dict[str, object]]) -> str:
+    """Lý do nếu lần sửa làm yếu một file test ĐÃ CÓ; file mới, không phải test, không đọc được → ''."""
+    full = os.path.join(root, rel)
+    if not tool_input or not _match_any(rel, TEST_PATTERNS) or not os.path.isfile(full):
+        return ""
+    try:
+        old, new = _edit_texts(tool_input, full)
+    except OSError:  # fail-open: không đọc được file thì không kết luận
+        return ""
+    return weakens_test(old, new)
+
+
+def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
     kind = classify_path(rel)
     if kind == "secret":
@@ -155,6 +225,12 @@ def edit_decision(path: str, root: str) -> Tuple[str, str]:
         return "ask", (
             f"Sửa migration/schema ĐÃ TỒN TẠI ({rel}). Migration đã áp không được sửa — tạo migration mới. "
             "Nếu chưa áp ở đâu, xác nhận rồi tiếp."
+        )
+    weak = _test_weakening(rel, root, tool_input)
+    if weak:
+        return "ask", (
+            f"Sửa test ĐÃ CÓ theo hướng làm yếu bài kiểm ({weak}: {rel}). Khung coi đây là nới cổng (LOOP-CI-001): "
+            "sửa code thay vì sửa test; chỉ sửa test khi test sai so với SPEC — nêu SPEC rồi xác nhận."
         )
     return "", ""
 
@@ -955,7 +1031,7 @@ def main() -> int:
             out: Dict[str, object] = bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
         elif mode == "edit":
             path = tool_input.get("file_path")
-            d, r = edit_decision(path, root) if isinstance(path, str) and path else ("", "")
+            d, r = edit_decision(path, root, tool_input) if isinstance(path, str) and path else ("", "")
             out = {"decision": d, "reason": r}
         else:
             out = {"decision": ""}
