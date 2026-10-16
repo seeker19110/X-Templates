@@ -38,6 +38,7 @@ Tự duyệt không mở các điểm này: thao tác không đảo ngược (xo
 | Link toàn repo | `python3 scripts/check-links.py` |
 | Cổng commit (hook tự chạy) | `scripts/dev-task.sh gate` (đọc `xt.yaml`) |
 | Ghép blueprint mẫu | `python3 scripts/xt.py compose --profile web-app --industry ecommerce --scale M` |
+| Quyết khi nào merge PR đã mở (ADR-0013) | `python3 scripts/xt.py merge-check --pr <N>` |
 | Thống kê | `python3 scripts/xt.py stats` |
 
 Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint · test (lint nên gồm kiểm format; ở repo này `lint` trong `xt.yaml` gồm validate · link · progress-check · ci-check · ruff · shell syntax) + tự review diff + conventional commit. Cổng merge: thêm CI xanh, review, cập nhật `CHANGELOG.md` khi đổi mục/ID/công cụ.

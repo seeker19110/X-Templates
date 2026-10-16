@@ -587,6 +587,64 @@ ASK_CMDS: Dict[str, Optional[Tuple[str, ...]]] = {
 INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 
+EXTERNAL_ASK = "hành động đối ngoại/triển khai thật (điểm dừng bắt buộc)"
+# Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
+GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
+    *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
+    *("-A", "--author-email", "-R", "--repo"),
+)
+MERGE_CHECK_TIMEOUT = 90
+
+
+def _flag_value(args: List[str], flag: str) -> Optional[str]:
+    for i, a in enumerate(args):
+        if a == flag and i + 1 < len(args):
+            return args[i + 1]
+        if a.startswith(flag + "="):
+            return a.split("=", 1)[1]
+    return None
+
+
+def merge_check(selector: List[str], root: str) -> Dict[str, object]:
+    """Chạy `xt.py merge-check --json` cài CÙNG khung với hook này (không theo PATH/biến môi trường agent đặt được)."""
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    xt = next(
+        (
+            p
+            for p in (os.path.join(here, ".xtemplates", "scripts", "xt.py"), os.path.join(here, "scripts", "xt.py"))
+            if os.path.isfile(p)
+        ),
+        "",
+    )
+    cmd = [sys.executable, xt, "merge-check", "--json", *(["--pr", selector[0]] if selector else [])]
+    try:
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=MERGE_CHECK_TIMEOUT, env=env, check=False)
+        data: Dict[str, object] = json.loads(r.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}
+    return data
+
+
+def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
+    """`gh pr merge` (ADR-0013): mặc định hỏi người; `allow` chỉ khi `xt.py merge-check` = merge VÀ lệnh ghim đúng
+    head đã kiểm (`--match-head-commit`). `--admin` (vượt ruleset) và `--repo` (repo khác) luôn hỏi."""
+    sha = _flag_value(args, "--match-head-commit")
+    other_repo = any(a == "-R" or a.startswith(("-R", "--repo")) for a in args)
+    if not sha or "--admin" in args or other_repo:
+        return (
+            "ask",
+            f"{EXTERNAL_ASK} — tự merge cần `--match-head-commit <sha>` từ `xt.py merge-check`, không --admin/--repo",
+        )
+    d = merge_check(_positionals(args, GH_MERGE_VALUE_FLAGS)[:1], root)
+    reasons = "; ".join(str(x) for x in d.get("reasons") or [])  # type: ignore[attr-defined]
+    if d.get("verdict") != "merge":
+        return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
+    if d.get("head") != sha:
+        return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác --match-head-commit {sha}"
+    return "allow", f"merge-check: {reasons}"
+
+
 def _rm_rule(args: List[str]) -> Tuple[str, str]:
     """rm: deny --no-preserve-root và rm -rf trên đích nguy hiểm (gốc, home, cwd, glob, thư mục `.git`)."""
     flags = _short_flags(args)
@@ -615,15 +673,22 @@ def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[s
         return "deny", "chmod 777"
     if name == "git":
         return git_rules(n, cwd)
+    return _external_rule(name, args, root)
+
+
+def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
+    """Hành động đối ngoại/triển khai thật → ask; `gh pr merge` qua `xt.py merge-check` (ADR-0013)."""
+    if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & INFO_ONLY:
+        return gh_pr_merge_rule(args[2:], root)
     if name in ASK_CMDS and not (set(args) and set(args) <= INFO_ONLY):
         subs = ASK_CMDS[name]
         if (
             subs is None
             or (args and args[0] in subs)
-            or (name == "gh" and args[:2] in (["repo", "delete"], ["pr", "merge"]))
+            or (name == "gh" and args[:2] == ["repo", "delete"])
             or (name == "vercel" and "--prod" in args)
         ):
-            return "ask", "hành động đối ngoại/triển khai thật (điểm dừng bắt buộc)"
+            return "ask", EXTERNAL_ASK
     return "", ""
 
 
@@ -835,6 +900,8 @@ def _scan_command(
         return f"Lệnh bị khung chặn ({why}): {' '.join(argv)[:300]}. Muốn làm thật thì người dùng tự chạy."
     if decision == "ask":
         asks.append(f"{why}: {' '.join(argv)[:200]}")
+    if decision == "allow":  # chỉ hiệu lực khi cả lệnh Bash là đúng một lệnh này (bash_decision)
+        res["allow"] = why
     bypass = hook_bypass(argv, n)
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
@@ -859,13 +926,19 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None) -> Dict[str, o
         )
         return res
     asks: List[str] = []
-    for argv, here in _commands_with_cwd(tokens, cwd or root):
+    commands = _commands_with_cwd(tokens, cwd or root)
+    for argv, here in commands:
         deny_reason = _scan_command(argv, root, res, asks, here)
         if deny_reason:
             res.update(decision="deny", reason=deny_reason)
             return res
+    allow = res.pop("allow", "")
+    if allow and len(commands) > 1:  # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình
+        asks.append(f"{EXTERNAL_ASK} — tự merge chỉ khi lệnh đứng một mình")
     if asks:
         res.update(decision="ask", reason="Khung cần xác nhận: " + "; ".join(dict.fromkeys(asks)))
+    elif allow:
+        res.update(decision="allow", reason=f"Khung cho tự merge (ADR-0013) — {allow}")
     return res
 
 
