@@ -6,6 +6,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **`AI-AGENT-013` nâng mức SHOULD → MUST@L** (ID giữ): mỗi tool khai thêm `tier` và `cost_class` (free/compute/llm/gpu),
+  dựng catalog thất bại nếu thiếu; tool khai `readOnly` phải qua test hành vi (chạy trên snapshot rồi diff); không suy quyền
+  từ tên tool. Dự án đích: ghép lại blueprint để nhận mức và chữ mới.
 - Tài liệu harness khớp mã (audit 2026-10-16 đợt 5b): mô tả hook PreToolUse ở `CLAUDE.md` và `templates/CLAUDE.md` thêm
   hỏi khi làm yếu/xoá test, ghi tay `.autopilot/`, merge qua `gh api`/MCP, quét lệnh lồng, cổng trước `git commit`
   (AUD-HAR-031); `AGENTS.md` §6 liệt kê đủ thành phần cổng `lint` (AUD-DOC-029); skill `/audit` §6 trong autopilot tự
@@ -93,6 +96,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Mục nhóm C từ đợt rà `seeker19110/stored` (2026-10-16)** — 19 mục mới (kèm một module mới), mọi mục có *Kiểm* và nguồn
+  stored. Dự án đích: ghép lại blueprint để nhận các ID mới.
+  - Bảo mật/bí mật: `SEC-WEB-027` (MUST@L, xuất CSV/XLSX vô hiệu công thức), `SEC-SECRET-022` (secret tích hợp write-only,
+    đổi đích thì bỏ secret), `BE-AUTH-025` (MUST@L, nhận lời mời chỉ sau khi xác minh email bằng token; xem *Ghi chú mức* dưới).
+  - Quy trình/kiểm thử/khung: `WF-REVIEW-020` ("Rà cùng khuôn" trong PR `fix:`), `QA-INT-020` (chạy bộ test chuẩn chính thức,
+    `known-gaps.txt` chỉ giảm), `LOOP-FB-005` (bảng "đích × bản khung × số tuần chậm" trong REPORT; không đổi `xt.py`).
+  - AI: `AI-OBS-018` (SHOULD, MUST@L khi có dữ liệu cá nhân: `docs/ai/data-flows.md` + job egress deny-all),
+    `AI-AGENT-021` (MUST@L, xoá memory lan tới dữ liệu phái sinh), `AI-AGENT-022` (bank memory phân vùng, đo p95 recall),
+    `IND-SAAS-024` (trạng thái AI thích nghi khoá theo tenant), `CMP-LIC-020` (license model theo model card + revision).
+  - Tài liệu/profile/UX: `XC-DOCAI-020` (`DESIGN.md` theo spec, token sinh từ nguồn gốc), `PRF-LIB-020` (hướng dẫn cho agent
+    của bên dùng nằm trong tarball), `UX-A11Y-028` (tương phản theo trạng thái hover/focus/active/selected),
+    `BASE-DOC-017` (số công bố khớp file kết quả), `BASE-DOC-018` (`docs/limitations.md`).
+  - Module mới `06-design-ux/data-visualization.md` (prefix `UX-VIZ`): `UX-VIZ-001` (MUST@L, số từ một hàm dữ liệu có test +
+    fixture "trông hợp lý nhưng sai"), `UX-VIZ-002` (MUST, bảng/mô tả thay thế, không chỉ màu, ≥ 3:1), `UX-VIZ-003`
+    (SHOULD, trục từ 0, `vi-VN`, tiền số nguyên); README mảng 06 thêm dòng và prefix.
+  - Ghi chú mức: `BE-AUTH-025` yêu cầu ban đầu là MUST nhưng `authn-authz.md` đã đủ 4 MUST hiệu lực ở quy mô M (ADR-0004,
+    `xt.py validate` chặn), nên đặt MUST@L; `AI-OBS-018` ghi mức MUST@L khi có dữ liệu cá nhân trong câu yêu cầu (cột mức
+    máy đọc là SHOULD).
 - **Mục nhóm B từ rà kho `stored` 2026-10-16** (11 ID mới, không đổi ID/mức cũ): `SEC-AI-027` MUST@L (text-to-SQL: vai
   trò CSDL chỉ đọc chịu RLS + AST allowlist trước DB) · `WF-CI-023` MUST@L (workflow `pull_request` không chạm secret
   ngoài `GITHUB_TOKEN` trừ job có `environment:`) · `AI-EVAL-018` MUST@L (n, runs, CI 95%, ngưỡng cổng > nhiễu đo) ·
