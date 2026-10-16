@@ -4,7 +4,8 @@
 - **Trạng thái triển khai:** Đã triển khai (`scripts/xt.py` `merge-check`, `merge_decision`, `merge_lane_reasons`,
   `merge_config`, `_doctor_merge`; `.claude/hooks/guard.py` `gh_pr_merge_rule`; `pre-bash-guard.sh` trả `allow`;
   `.claude/settings.json` bỏ `Bash(gh pr merge *)` khỏi `permissions.ask`; test `tests/test_merge.py`,
-  `tests/test_hooks.py::MergeGuardTest`)
+  `tests/test_hooks.py::MergeGuardTest`); từ #56 đọc PR qua REST (`gh api`) thay cho `gh pr view` (D-009); mở rộng bởi
+  ADR-0014 (merge ghim head qua REST/MCP)
 - **Ngày:** 2026-10-16
 
 ## Bối cảnh
