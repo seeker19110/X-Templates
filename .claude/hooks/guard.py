@@ -1006,13 +1006,16 @@ MCP_AUTO_KEYS = {"owner", "repo", "pullNumber", "mergeMethod"}
 
 def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple[str, str]:
     """Bật auto-merge của GitHub (ADR-0015): allow khi `merge_autonomy` ≥ L3, PR còn mở, không phải PR chồng (nhắm nhánh
-    khác nhánh mặc định) và (MCP) đúng repo. GitHub vẫn chỉ merge khi required check/ruleset đạt; không ghim head."""
+    khác nhánh mặc định), không thuộc ngoại lệ cứng (`hard`, ADR-0016) và (MCP) đúng repo. GitHub vẫn chỉ merge khi
+    required check/ruleset đạt; không ghim head."""
     d = merge_check(selector, root)
     level = d.get("autonomy")
     if not isinstance(level, int) or level < 3:
         return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ khi xt.yaml `merge_autonomy` ≥ L3 (ADR-0015)"
     if d.get("verdict") in ("closed", "lỗi") or d.get("stacked"):
         return "ask", f"{EXTERNAL_ASK} — không bật auto-merge: PR {d.get('verdict')}/PR chồng (nhắm nhánh sắp bị xoá)"
+    if d.get("hard"):  # tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge, kể cả L3 (ADR-0016, AUD-HAR-042)
+        return "ask", f"{EXTERNAL_ASK} — ngoại lệ cứng (LOOP-STOP-005): người merge, không bật auto-merge"
     if repo and str(d.get("repo", "")).lower() != repo.lower():
         return "ask", f"{EXTERNAL_ASK} — merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}"
     return "allow", f"merge_autonomy L{level}: bật auto-merge (GitHub merge khi required check xanh)"

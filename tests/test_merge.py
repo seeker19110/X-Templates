@@ -230,9 +230,11 @@ class MergeDecisionTest(unittest.TestCase):
                 self.assertEqual((d["verdict"], d["lane"]), ("human", "chuẩn"))
                 self.assertIn(reason, " · ".join(d["reasons"]))
         d = xt.merge_decision(pr(labels=[{"name": "risk:payment"}, {"name": "ui"}]), 2)
-        self.assertEqual(d["reasons"], ["nhãn rủi ro: risk:payment"])
+        self.assertEqual(d["reasons"], ["ngoại lệ cứng (LOOP-STOP-005): nhãn rủi ro: risk:payment"])
         d = xt.merge_decision(pr(), 2, risk_paths=["src/cart/*"])
-        self.assertEqual(d["reasons"], ["đường dẫn nhạy cảm (merge_risk_paths): src/cart/total.py"])
+        self.assertEqual(
+            d["reasons"], ["ngoại lệ cứng (LOOP-STOP-005): đường dẫn nhạy cảm (merge_risk_paths): src/cart/total.py"]
+        )
 
     def test_merge_gate_paths(self):
         """AUD-HAR-021: luật agent và file cổng (cả ở thư mục con) luôn để người merge — cùng danh sách với guard."""
@@ -513,6 +515,76 @@ class MergeCheckCliTest(unittest.TestCase):
         rc, _, err = run_main("merge-check", "--pr-json", str(self.base / "khong-co.json"))
         self.assertEqual(rc, 2)
         self.assertIn("JSON của PR không đọc được", err)
+
+
+class HardExceptionL3Test(unittest.TestCase):
+    """Audit delta đợt B (AUD-HAR-042, D-012, ADR-0016): L3 vẫn để người merge ngoại lệ cứng của `LOOP-STOP-005`."""
+
+    def test_l3_hard_exceptions(self):
+        for files, labels in (
+            ([{"path": "src/auth/login.py", "additions": 1, "deletions": 0}], []),
+            ([{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], []),
+            ([{"path": "src/util/jwt.py", "additions": 1, "deletions": 0}], []),
+            ([{"path": "config/.env.production", "additions": 1, "deletions": 0}], []),
+            (pr()["files"], [{"name": "risk:pii"}]),
+            (pr()["files"], [{"name": "risk:admin"}]),
+        ):
+            with self.subTest(files[0]["path"], labels=labels):
+                d = xt.merge_decision(pr(files=files, labels=labels), 3)
+                self.assertEqual((d["verdict"], d["lane"]), ("human", "chuẩn"))
+                self.assertTrue(d["hard"])
+                self.assertIn("LOOP-STOP-005", d["reasons"][0])
+        pending = [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]
+        early = xt.merge_decision(
+            pr(files=[{"path": "src/auth/x.py", "additions": 1, "deletions": 0}], statusCheckRollup=pending), 3
+        )
+        self.assertEqual((early["verdict"], bool(early["hard"])), ("wait", True))  # guard đọc `hard` ngay lúc mở PR
+
+    def test_l3_soft_standard_lane_still_merges_with_honest_reason(self):
+        """AUD-CODE-010: ở L3 làn chuẩn (không ngoại lệ cứng) vẫn merge, lý do ghi đúng làn."""
+        for files, labels in (
+            ([{"path": ".github/workflows/ci.yml", "additions": 3, "deletions": 1}], []),
+            (pr()["files"], [{"name": "risk:upload"}]),
+        ):
+            d = xt.merge_decision(pr(files=files, labels=labels), 3)
+            self.assertEqual((d["verdict"], d["lane"], d["hard"]), ("merge", "chuẩn", []))
+            self.assertIn("L3", d["reasons"][0])
+            self.assertNotIn("làn nhanh", d["reasons"][0])
+        self.assertEqual(xt.merge_decision(pr(), 3)["reasons"], ["làn nhanh, CI xanh, không xung đột"])
+
+    def test_merge_risk_paths_are_hard(self):
+        d = xt.merge_decision(pr(), 3, ["src/cart/*"])
+        self.assertEqual(d["verdict"], "human")
+        self.assertTrue(d["hard"])
+
+    def test_same_name_check_from_other_app_not_hidden(self):
+        """AUD-CODE-007: check-run cùng tên từ app khác không bị gộp (chỉ lần chạy lại cùng app mới thay lần cũ)."""
+        runs = [
+            {"id": 10, "name": "test", "status": "completed", "conclusion": "failure", "app": {"id": 1}},
+            {"id": 11, "name": "test", "status": "completed", "conclusion": "success", "app": {"id": 2}},
+        ]
+        with FakeGh(runs=runs).patch():
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "fix")
+        rerun = [{**runs[0], "app": {"id": 2}}, runs[1]]
+        with FakeGh(runs=rerun).patch():
+            self.assertEqual(xt.merge_decision(xt._pr_rest("7"), autonomy=2)["verdict"], "merge")
+
+
+class GuardHardExceptionTest(unittest.TestCase):
+    """ADR-0016: guard không bật auto-merge (L3) cho PR thuộc ngoại lệ cứng — kể cả lúc mới mở, CI còn chạy."""
+
+    def test_guard_auto_merge_refuses_hard_exception(self):
+        sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+        import guard
+
+        base = {"verdict": "wait", "autonomy": 3, "stacked": False, "repo": "o/r", "hard": []}
+        with unittest.mock.patch.object(guard, "merge_check", return_value=base):
+            self.assertEqual(guard._auto_merge_verdict(["7"], ".", "o/r")[0], "allow")
+        hard = {**base, "hard": ["đường dẫn nhạy cảm (auth): src/auth/x.py"]}
+        with unittest.mock.patch.object(guard, "merge_check", return_value=hard):
+            dec, why = guard._auto_merge_verdict(["7"], ".", "o/r")
+        self.assertEqual(dec, "ask")
+        self.assertIn("LOOP-STOP-005", why)
 
 
 if __name__ == "__main__":

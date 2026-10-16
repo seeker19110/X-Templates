@@ -59,7 +59,7 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 
 1. Agent lập kế hoạch G0–G4: `PROJECT.md`, `BLUEPRINT.md`, nghiên cứu phiên bản, spec, thiết kế, `PLAN.md` có task và lệnh kiểm.
 2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
-3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR; `xt.py merge-check` tự merge làn nhanh (ADR-0014). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
+3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR mở kèm auto-merge ở L3 (ADR-0015), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã (ADR-0016). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
 4. Dừng khi xong có bằng chứng, khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
    thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, deploy/publish, đổi cấu hình cổng (mâu thuẫn spec không
    còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`).
@@ -77,7 +77,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py blueprint-status FILE --strict [--json]` | Đếm đạt/miễn/chưa; dòng mục sai định dạng, mục MUST ít hơn bảng đầu trang hay miễn trừ thiếu lý do ở phần ghi chú = lỗi; cổng phát hành; `FILE` là `-` thì đọc stdin |
 | `python3 scripts/xt.py doctor [--fix] [--json]` | Audit khung đã cài trước `/autopilot`: Python/git/bash, hook + file hook + cú pháp, skill/subagent, `*.xtemplates-new` chưa gộp, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state, khung `validate`, `PROGRESS.md`; `--fix` sửa phần an toàn (không đụng hook/settings), exit 1 khi còn lỗi |
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
-| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; tự merge chỉ làn nhanh ở `merge_autonomy: L2` (ADR-0013) |
+| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge khi mở PR trừ ngoại lệ cứng, L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
 | `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
@@ -127,6 +127,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   auto-merge của GitHub cho mọi làn; GitHub merge khi required check xanh.
 - [ADR-0014](docs/adr/0014-pr-per-slice-and-machine-merge.md): mỗi lát code một PR; máy tự merge khi `merge-check` cho
   phép bằng lệnh ghim head (`gh pr merge`, REST `PUT …/merge` có `sha`, MCP `merge_pull_request` có `expectedHeadSha`).
+- [ADR-0016](docs/adr/0016-l3-keeps-hard-exceptions.md): ở L3 PR chạm tiền/dữ liệu người dùng thật/auth/mật mã/bí mật
+  vẫn người merge (`merge-check` trả `hard`, guard không bật auto-merge).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
