@@ -26,7 +26,8 @@ Dữ kiện (xác minh 2026-10-16):
 
 1. **Lát = đơn vị PR.** Mỗi lát dọc chạy được (một task hoặc nhóm task PLAN có Gate xanh) có nhánh riêng tách từ nhánh
    đích mới nhất và một PR nhỏ, mở ngay khi Gate của lát xanh. Bỏ "PR cuối". Lát phụ thuộc PR chưa merge → nhánh chồng
-   lên nhánh đó, PR nhắm nhánh đó (GitHub đổi đích khi nhánh dưới merge và bị xoá); merge theo FIFO (`LOOP-ORCH-013`).
+   lên nhánh đó, PR nhắm nhánh đó; merge theo FIFO (`LOOP-ORCH-013`). Không xoá nhánh khi merge (xoá nhánh là điểm dừng),
+   nên GitHub không tự đổi đích: sau khi PR đáy merge: đổi đích PR chồng về nhánh mặc định (`gh pr edit <N> --base main` hoặc API), `git fetch origin main && git merge origin/main` vào nhánh chồng (squash để lại commit trùng của lát đáy; merge, không rebase/force-push), push, chạy lại `merge-check` — PR còn nhắm nhánh khác nhánh mặc định thì `merge-check` trả `wait`.
 2. **Máy tự merge, không dùng auto-merge của GitHub.** Sau khi mở PR và ở mỗi vòng/sự kiện PR: `xt.py merge-check --pr N`;
    `merge` → chạy lệnh merge ghim head; `wait`/`update`/`fix` → làm theo `next` rồi làm lát khác; `human` → `loop defer`.
    Auto-merge của GitHub bị loại: bật xong thì commit đẩy sau vẫn tự merge mà không qua vị từ làn nhanh.

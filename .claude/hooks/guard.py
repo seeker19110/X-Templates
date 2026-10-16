@@ -831,9 +831,12 @@ def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tu
     ask = "ask", f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) cần `expectedHeadSha` + `xt.py merge-check` = merge"
     n, sha = tool_input.get("pullNumber"), tool_input.get("expectedHeadSha")
     owner, repo = tool_input.get("owner"), tool_input.get("repo")
-    if not tool_name.endswith("__merge_pull_request") or set(tool_input) - MCP_MERGE_KEYS:
+    # Chỉ server GitHub chính (`mcp__github__…`): server khác cùng tên tool có thể trỏ host khác với repo merge-check đọc.
+    if tool_name != "mcp__github__merge_pull_request" or set(tool_input) - MCP_MERGE_KEYS:
         return ask
-    if not (isinstance(n, int) and isinstance(sha, str) and sha and isinstance(owner, str) and isinstance(repo, str)):
+    if not (type(n) is int and n > 0 and isinstance(sha, str) and sha):
+        return ask
+    if not (isinstance(owner, str) and isinstance(repo, str)):
         return ask
     if tool_input.get("merge_method", "squash") not in MERGE_METHODS:
         return ask
