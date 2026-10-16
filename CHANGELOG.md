@@ -6,6 +6,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Cổng không xanh khi không kiểm gì** (ADR-0011). Khi autopilot đang chạy (`.autopilot/state.json` `"active": true`),
+  `dev-task.sh` coi `lint`/`test` rỗng hoặc no-op (`true`, `:`, `exit 0`, `echo …`, `printf …`) là ĐỎ (exit 3); ngoài
+  vòng giữ fail-open. `xt.py loop init` cảnh báo `Cổng sẽ ĐỎ trong vòng` khi `xt.yaml` để hai khoá đó rỗng/no-op (không
+  chặn). Mục checklist: `LOOP-HARNESS-008` thêm câu về ADR-0011 và *Kiểm* `loop init` không in cảnh báo (ID, mức giữ).
+  Mẫu `templates/xt.yaml` ghi luật mới. Dự án đích: chạy lại `install.py` để nhận `dev-task.sh` mới.
+- **Blueprint gọn theo quy mô** (ADR-0012). `compose --out F` ghi `F` chỉ chứa MUST hiệu lực ở quy mô + `F-BACKLOG.md`
+  chứa SHOULD/MAY (frontmatter `backlog:`); web-app + ecommerce: 41 KB ở S, 229 KB ở M, 483 KB ở L thay vì ~690 KB.
+  Ghép lại giữ trạng thái theo ID qua cả hai file (kể cả từ bản một file cũ, kể cả khi đổi quy mô). `blueprint-status`,
+  verdict và `audit plan` đọc cả backlog; khai backlog mà mất file → `--strict` đỏ. `--full` giữ một file như cũ. Trần
+  vòng `loop init --single-session` đổi thành `max(20, 4 × task chưa làm)` (bỏ cộng MUST mở — đã gom vào task; thay
+  công thức ở ADR-0009). Dự án đích: ghép lại `compose ... --out BLUEPRINT.md` rồi commit cả hai file.
 - CI: workflow `portability.yml` (job `macos-bash32`, bash 3.2/BSD) bỏ trigger `pull_request`, chỉ chạy khi push vào `main` —
   PR không còn chờ runner macOS; job không phải required check nên ruleset không đổi.
 - **Autopilot chạy một phiên đến khi xong** (ADR-0009). Context đầy → compaction có checkpoint, không bàn giao; bàn giao
@@ -52,6 +63,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Máy quyết khi nào merge PR đã mở** (ADR-0013). `xt.py merge-check [--pr N] [--pr-json F] [--json]` đọc `gh pr view`
+  và trả `merge` · `wait` (nháp, CI đang chạy, mergeable chưa tính) · `update` (tụt sau nhánh đích → `gh pr update-branch`)
+  · `fix` (xung đột, CI đỏ, reviewer đòi sửa) · `human` (làn chuẩn, không có CI, ruleset đòi review, mức tự chủ < L2) ·
+  `closed`; exit 0 chỉ khi `merge`. Vị từ làn nhanh của `LOOP-STOP-009` thành mã: không đường dẫn nhạy cảm (bí mật, auth,
+  thanh toán, mật mã, schema, cổng/CI, phụ thuộc + `merge_risk_paths`), không nhãn `risk:`, ≤ 150 dòng (không tính tài
+  liệu/lockfile), ≤ 1 gói, đổi mã thì có đổi test. Guard: `gh pr merge` vẫn hỏi người, chỉ `allow` khi lệnh đứng một mình,
+  ghim `--match-head-commit` đúng head đã kiểm, không `--admin`/`--repo`, và `merge-check` = `merge`. `xt.yaml` thêm
+  `merge_autonomy` (mặc định `L1` = người merge mọi PR) và `merge_risk_paths`. `.claude/settings.json` bỏ `Bash(gh pr merge *)`
+  khỏi `permissions.ask` (luật ask luôn hỏi kể cả khi hook `allow`); `doctor` cảnh báo khi L2 mà dự án còn dòng đó. Mục
+  checklist: mới **`LOOP-STOP-022`** (SHOULD); `LOOP-STOP-002` thêm ngoại lệ merge làn nhanh và đổi *Kiểm*; `LOOP-STOP-009`
+  *Kiểm* trỏ `merge-check` (ID, mức giữ). Dự án đích: chạy lại `install.py`; muốn tự merge thì người đặt
+  `merge_autonomy: L2` và xoá `Bash(gh pr merge *)` khỏi `permissions.ask`.
 - **Audit khung trước `/autopilot`**: `xt.py doctor [--fix] [--json]` kiểm khung đã cài trong dự án (hoặc repo khung) —
   Python ≥ 3.11/git/bash, hook bắt buộc trong `.claude/settings.json` (SessionStart · PreCompact · PreToolUse · Stop; thiếu
   PostToolUse chỉ cảnh báo), file hook và file chúng nạp (`_lib.sh`, `guard.py`) tồn tại + đúng cú pháp (`bash -n`/`compile`),

@@ -340,6 +340,17 @@ class StaleEvidenceTest(TmpRepoCase):
             ],
         )
 
+    def test_audit_plan_checks_backlog_evidence_too(self):
+        self.init_repo()
+        main = "---\nkind: blueprint\nbacklog: BLUEPRINT-BACKLOG.md\n---\n- [x] `A-001` **MUST** a → Kiểm: x — Bằng chứng: b.py\n"
+        bl = "- [x] `A-002` **SHOULD** s → Kiểm: x — Bằng chứng: lib/a.py\n"
+        self.commit_files(
+            {"lib/a.py": "1", "b.py": "1", "BLUEPRINT.md": main, "BLUEPRINT-BACKLOG.md": bl}, 1_700_000_000
+        )
+        self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
+        plan = xt.audit_plan(self.repo, self.repo / "BLUEPRINT.md")
+        self.assertEqual(plan["stale_evidence"], [{"id": "A-002", "kind": "Bằng chứng", "files": ["lib/a.py"]}])
+
     def test_blueprint_not_tracked_is_skipped(self):
         self.init_repo()
         self.commit_files({"lib/a.py": "1"}, 1_700_000_000)
@@ -531,6 +542,54 @@ class FrameworkCommandsTest(TmpDirCase):
         self.assertIn("Giữ 1 mục riêng của dự án ở cuối: HM-MONEY-001", err)
         self.assertIn("- [ ] `HM-MONEY-001`", target.read_text(encoding="utf-8"))
 
+    def test_compose_out_splits_backlog_and_carries_states(self):
+        # ADR-0012: --out ghi BLUEPRINT.md (MUST) + BLUEPRINT-BACKLOG.md (SHOULD/MAY); ghép lại giữ trạng thái cả hai file,
+        # kể cả từ bản cũ một file (trước ADR-0012) và khi đổi quy mô làm mục chuyển file.
+        target, backlog = self.tmp / "BLUEPRINT.md", self.tmp / "BLUEPRINT-BACKLOG.md"
+        full = xt.compose(self.fw, "web-app", [], "M", include_may=False)
+        target.write_text(full.replace("- [ ] `PRF-WEB-001`", "- [~] `PRF-WEB-001`", 1) + "", encoding="utf-8")
+        with target.open("a", encoding="utf-8") as f:
+            f.write("\n- [ ] `HM-MONEY-001` **MUST** mục riêng của dự án\n")
+        rc, out, err = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--out", target)
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"✓ Đã ghi {target} + {backlog.name}", out)
+        self.assertIn("- [~] `PRF-WEB-001`", backlog.read_text(encoding="utf-8"))
+        self.assertNotIn("PRF-WEB-001", target.read_text(encoding="utf-8"))
+        self.assertIn("HM-MONEY-001", target.read_text(encoding="utf-8"))
+        self.assertNotIn("HM-MONEY-001", backlog.read_text(encoding="utf-8"))
+        target.write_text(
+            target.read_text(encoding="utf-8").replace("- [ ] `BE-API-001`", "- [x] `BE-API-001`"), "utf-8"
+        )
+        rc, _, err = run_main(
+            "--framework", self.fw, "compose", "--profile", "web-app", "--scale", "S", "--out", target
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertIn("- [x] `BE-API-001` **SHOULD**", backlog.read_text(encoding="utf-8"))  # MUST ở M → SHOULD ở S
+        self.assertIn("- [~] `PRF-WEB-001`", backlog.read_text(encoding="utf-8"))
+        self.assertEqual(xt.blueprint_status(target)["levels"]["SHOULD"]["done"], 1)
+
+    def test_compose_full_keeps_one_file_and_stdout_notes_backlog(self):
+        target = self.tmp / "BP.md"
+        rc, _, _ = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--full", "--out", target)
+        self.assertEqual(rc, 0)
+        self.assertIn("`PRF-WEB-001` **SHOULD**", target.read_text(encoding="utf-8"))
+        self.assertNotIn("backlog:", target.read_text(encoding="utf-8"))
+        self.assertFalse((self.tmp / "BP-BACKLOG.md").exists())
+        target.write_text(
+            target.read_text(encoding="utf-8").replace("- [ ] `PRF-WEB-001`", "- [x] `PRF-WEB-001`"), "utf-8"
+        )
+        rc, _, err = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--full", "--out", target)
+        self.assertEqual(rc, 0)
+        self.assertIn("Giữ trạng thái 1 mục", err)
+        self.assertIn("- [x] `PRF-WEB-001` **SHOULD**", target.read_text(encoding="utf-8"))
+        rc, out, err = run_main("--framework", self.fw, "compose", "--profile", "web-app", "--full")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("`PRF-WEB-001` **SHOULD**", out)
+        rc, out, err = run_main("--framework", self.fw, "compose", "--profile", "web-app")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("PRF-WEB-001", out)
+        self.assertIn("2 mục SHOULD/MAY không in", err)
+
     def test_stats(self):
         rc, out, _ = run_main("--framework", self.fw, "stats")
         self.assertEqual(rc, 0)
@@ -552,6 +611,24 @@ class FrameworkCommandsTest(TmpDirCase):
 
 
 class BlueprintStatusTextTest(TmpDirCase):
+    def test_status_reads_declared_backlog(self):
+        # ADR-0012: blueprint-status đọc cả file backlog khai ở frontmatter; khai mà mất file → lỗi, không im lặng.
+        main = self.tmp / "BLUEPRINT.md"
+        main.write_text(
+            "---\nkind: blueprint\nbacklog: BL.md\n---\n| MUST | 1 |\n- [x] `A-001` **MUST** xong\n", encoding="utf-8"
+        )
+        (self.tmp / "BL.md").write_text(
+            "- [ ] `A-002` **SHOULD** mở\n- [~] `A-003` **SHOULD** miễn thiếu lý do\n", encoding="utf-8"
+        )
+        s = xt.blueprint_status(main)
+        self.assertEqual(s["levels"]["SHOULD"], {"open": 1, "done": 0, "waived": 1})
+        self.assertEqual((s["open_must"], s["bad_lines"]), ([], []))
+        self.assertEqual(s["bad_waivers"], ["A-003 (BL.md dòng 2)"])
+        (self.tmp / "BL.md").unlink()
+        self.assertEqual(xt.blueprint_status(main)["bad_lines"], ["thiếu file backlog BL.md khai ở frontmatter"])
+        rc, _, _ = run_main("blueprint-status", main, "--strict")
+        self.assertEqual(rc, 1)
+
     def test_text_output_with_open_must_and_bad_waiver(self):
         f = self.tmp / "BLUEPRINT.md"
         f.write_text(
@@ -876,6 +953,18 @@ class LoopCommandsTest(TmpDirCase):
         self.assertIn("✗ Không thấy TYPO.md", err)
         self.assertIsNone(xt.read_state(self.tmp))
 
+    def test_init_warns_when_gate_lint_or_test_is_noop(self):
+        # ADR-0011: xt.yaml để `lint`/`test` rỗng hoặc no-op thì cổng ĐỎ trong vòng — báo ngay khi bật, không chặn.
+        self.write_plan()
+        (self.tmp / "xt.yaml").write_text('lint: "echo ok"\ntypecheck: ""\ntest: ""\nbuild: ""\n', encoding="utf-8")
+        rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để lint, test rỗng/no-op", err)
+        (self.tmp / "xt.yaml").write_text("lint: ruff check .\ntest: 'pytest -q'\n", encoding="utf-8")
+        self.assertNotIn("ADR-0011", run_main("loop", "init")[2])
+        (self.tmp / "xt.yaml").unlink()
+        self.assertNotIn("ADR-0011", run_main("loop", "init")[2])  # thiếu xt.yaml: dev-task tự dò, doctor đã báo
+
     def test_init_then_status_text_and_json(self):
         self.write_plan()
         rc, out, _ = run_main("loop", "init", "--max-iterations", "7")
@@ -1172,13 +1261,15 @@ class LoopCommandsTest(TmpDirCase):
         run_main("loop", "record", "--task", "T-001", "--", "true")
         self.assertNotIn("checkpoint trước nén", run_main("loop", "status")[1])
 
-    def test_single_session_iterations_count_open_blueprint_must(self):
+    def test_single_session_iterations_ignore_open_blueprint_must(self):
         self.write_plan()
         (self.tmp / "BP.md").write_text(
             "".join(f"- [ ] `AAA-00{i}` **MUST** m → Kiểm: t\n" for i in range(1, 8)), encoding="utf-8"
         )
+        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)))
         run_main("loop", "init", "--single-session", "--blueprint", "BP.md")
-        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 32)  # 4 × (1 task + 7 MUST)
+        # ADR-0012: chỉ tính task — MUST đã gom vào task, cộng thêm là đếm hai lần (M ≈ 480 MUST → ~2000 vòng)
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 24)
 
     def test_stop_after_pending_human_reports_stopped(self):
         self.write_plan()

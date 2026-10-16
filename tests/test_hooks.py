@@ -22,8 +22,10 @@ def posixpath_expand(p: str) -> str:
 HOOKS = ROOT / ".claude" / "hooks"
 
 
-def run_hook(name: str, payload: dict | str, project_dir: Path | None = None) -> tuple[int, str, str]:
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project_dir or ROOT))
+def run_hook(
+    name: str, payload: dict | str, project_dir: Path | None = None, extra_env: dict | None = None
+) -> tuple[int, str, str]:
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project_dir or ROOT), **(extra_env or {}))
     data = payload if isinstance(payload, str) else json.dumps(payload)
     r = subprocess.run(["bash", str(HOOKS / name)], input=data, capture_output=True, text=True, env=env, timeout=120)
     return r.returncode, r.stdout, r.stderr
@@ -919,6 +921,47 @@ class DevTaskTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((self.tmp / "RAN").exists())
 
+    def autopilot(self, active=True):
+        (self.tmp / ".autopilot").mkdir(exist_ok=True)
+        (self.tmp / ".autopilot" / "state.json").write_text(
+            json.dumps({"active": active, "plan": "docs/autopilot/PLAN.md"}, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def test_autopilot_gate_red_when_test_or_lint_blank(self):
+        # Mẫu xt.yaml để trống mọi khoá → gate "skip, exit 0" → `loop record` ghi bằng chứng xanh cho cổng không
+        # chạy test nào (ADR-0011). Ngoài autopilot vẫn fail-open (test trên); trong vòng lặp thì đỏ.
+        self.autopilot()
+        for yaml, ten in (('lint: "true | cat"\ntest: ""\n', "test"), ('lint: ""\ntest: "true | cat"\n', "lint")):
+            (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+            r = self.run_task("gate")
+            self.assertNotEqual(r.returncode, 0, ten)
+            self.assertIn(f"'{ten}'", r.stderr)
+            self.assertIn("xt.yaml", r.stderr)
+
+    def test_autopilot_gate_red_when_nothing_resolves(self):
+        self.autopilot()
+        r = self.run_task("gate")
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+
+    def test_autopilot_noop_commands_count_as_blank(self):
+        self.autopilot()
+        for noop in ("true", ":", "exit 0", "echo ok", "  printf 'xong'  "):
+            (self.tmp / "xt.yaml").write_text(f'lint: "true | cat"\ntest: "{noop}"\n', encoding="utf-8")
+            self.assertNotEqual(self.run_task("test").returncode, 0, noop)
+
+    def test_autopilot_real_commands_still_green(self):
+        self.autopilot()
+        (self.tmp / "xt.yaml").write_text('lint: "test -d ."\ntest: "true | cat"\nbuild: ""\n', encoding="utf-8")
+        r = self.run_task("gate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_inactive_autopilot_keeps_fail_open(self):
+        self.autopilot(active=False)
+        (self.tmp / "xt.yaml").write_text('lint: ""\ntest: ""\n', encoding="utf-8")
+        r = self.run_task("gate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no-op", r.stderr)
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class PreEditGateFilesTest(unittest.TestCase):
@@ -981,6 +1024,82 @@ class SettingsJsonTest(unittest.TestCase):
                     path = cmd.split("${CLAUDE_PROJECT_DIR}/", 1)[1].rstrip('"')
                     self.assertTrue((ROOT / path).exists(), f"{event}: thiếu {path}")
         self.assertNotIn("defaultMode", s.get("permissions", {}))  # bị Claude Code bỏ qua ở project settings
+
+
+FAST_PR = {
+    "number": 7,
+    "state": "OPEN",
+    "isDraft": False,
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "reviewDecision": "",
+    "headRefOid": "abc1234def",
+    "labels": [],
+    "statusCheckRollup": [{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+    "files": [
+        {"path": "src/a.py", "additions": 3, "deletions": 0},
+        {"path": "tests/test_a.py", "additions": 5, "deletions": 0},
+    ],
+}
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class MergeGuardTest(unittest.TestCase):
+    """ADR-0013: `gh pr merge` hỏi người, trừ khi `xt.py merge-check` = merge và lệnh ghim đúng head."""
+
+    def setUp(self):
+        self.proj = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+        self.bin = self.proj / "bin"
+        self.bin.mkdir()
+        self.fake_gh(FAST_PR)
+
+    def fake_gh(self, pr: dict | None) -> None:
+        gh = self.bin / "gh"
+        body = f"cat <<'JSON'\n{json.dumps(pr)}\nJSON" if pr is not None else "echo 'gh: lỗi mạng' >&2; exit 1"
+        gh.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        gh.chmod(0o755)
+
+    def d(self, cmd: str) -> tuple[str | None, str]:
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, self.proj, env)
+        self.assertEqual(code, 0, out)
+        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out.strip() else ""
+        return decision(out), reason
+
+    def test_merge_check_green_allows_pinned_merge(self):
+        dec, why = self.d("gh pr merge 7 --squash --match-head-commit abc1234def")
+        self.assertEqual(dec, "allow")
+        self.assertIn("merge-check", why)
+        self.assertEqual(self.d("gh pr merge 7 --squash --match-head-commit=abc1234def")[0], "allow")
+
+    def test_unpinned_admin_repo_or_compound_still_ask(self):
+        for cmd in (
+            "gh pr merge 7 --squash",
+            "gh pr merge 7 --squash --admin --match-head-commit abc1234def",
+            "gh pr merge 7 -R o/r --match-head-commit abc1234def",
+            "gh pr merge 7 --repo=o/r --match-head-commit abc1234def",
+        ):
+            with self.subTest(cmd):
+                dec, why = self.d(cmd)
+                self.assertEqual(dec, "ask")
+                self.assertIn("--match-head-commit", why)
+        dec, why = self.d("gh pr merge 7 --match-head-commit abc1234def && git branch -a")
+        self.assertEqual(dec, "ask")
+        self.assertIn("lệnh đứng một mình", why)
+
+    def test_merge_check_not_merge_or_head_moved_asks_with_reason(self):
+        dec, why = self.d("gh pr merge 7 --match-head-commit 0000000")
+        self.assertEqual(dec, "ask")
+        self.assertIn("head", why)
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
+        dec, why = self.d("gh pr merge 7 --match-head-commit abc1234def")
+        self.assertEqual(dec, "ask")
+        self.assertIn("merge-check: human", why)
+        self.fake_gh(None)
+        dec, why = self.d("gh pr merge --match-head-commit abc1234def")
+        self.assertEqual(dec, "ask")
+        self.assertIn("merge-check không chạy được", why)
 
 
 if __name__ == "__main__":
