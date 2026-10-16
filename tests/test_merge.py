@@ -260,6 +260,29 @@ class MergeDecisionTest(unittest.TestCase):
         import guard
 
         self.assertEqual(sorted(set(guard.GATE_PATTERNS) - set(xt.MERGE_GATE_GLOBS)), [])
+        # Năng lực agent (LOOP-STOP-023): mọi mẫu của guard là đường dẫn nhạy cảm khi merge (glob rộng hơn được)
+        for pat in (*guard.CAPABILITY_PATTERNS, *guard.TARGET_CAPABILITY_PATTERNS):
+            path = pat.replace("*", "x")
+            reasons = xt.merge_lane_reasons(pr(files=[{"path": path, "additions": 1, "deletions": 0}]), [])
+            self.assertIn(f"(cổng/CI): {path}", " · ".join(reasons))
+
+    def test_merge_capability_and_infra_paths(self):
+        """Rà stored 2026-10-16: PR chỉ đổi cấu hình MCP/plugin, nguồn gói hay ảnh container + một test không vào làn nhanh."""
+        test = [{"path": "tests/test_a.py", "additions": 1, "deletions": 0}]
+        cases = {
+            ".mcp.json": "cổng/CI",
+            "apps/web/.codex/config.toml": "cổng/CI",
+            "skills/x/SKILL.md": "cổng/CI",
+            "e2e/home.spec.ts-snapshots/a.png": "cổng/CI",
+            ".npmrc": "nguồn gói",
+            "pip.conf": "nguồn gói",
+            "Dockerfile.prod": "ảnh/container",
+            "deploy/compose.yaml": "ảnh/container",
+        }
+        for path, tag in cases.items():
+            with self.subTest(path):
+                reasons = xt.merge_lane_reasons(pr(files=[{"path": path, "additions": 1, "deletions": 0}, *test]), [])
+                self.assertIn(f"({tag}): {path}", " · ".join(reasons))
 
     def test_merge_renamed_risk_path(self):
         """AUD-HAR-022: đổi tên file nhạy cảm ra ngoài vùng nhạy cảm vẫn là làn chuẩn (xét cả tên cũ)."""

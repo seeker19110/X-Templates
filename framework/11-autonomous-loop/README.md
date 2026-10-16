@@ -70,7 +70,8 @@ updated: 2026-10-16
     `blocked`. Không skip test, không nới cổng (hook `pre-edit-guard.sh` sẽ hỏi).
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
-    `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`.
+    `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`;
+    đủ bằng chứng mà chưa kiểm lại cuối → chạy `<XT> loop verify` (mọi Gate trên cây hiện tại, `LOOP-DESIGN-022`).
 13. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <T-NNN|ID blueprint> --reason "..."` rồi làm việc
     độc lập khác; hết việc tự làm được → verdict `done-pending-human` (Stop hook cho dừng một lần, gom mọi việc cho người).
     **Điểm dừng bắt buộc về hành động** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
@@ -100,7 +101,7 @@ updated: 2026-10-16
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
-| `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`) |
+| `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`, không secret ngoài `GITHUB_TOKEN` trong job chạy trên `pull_request`) |
 | `audit plan [--blueprint B] [--status S] [--json]` | Lập kế hoạch audit 13 nhóm từ blueprint + `docs/ops/AUDIT-STATUS.md` (skill `/audit`) |
 | `feedback add/collect/list/aggregate` | Phản hồi về khung (`docs/xtemplates-feedback/FB-NNN.md`) — luật ở [`framework-feedback.md`](framework-feedback.md) |
 | `audit check [--strict] <AUDIT-STATUS.md>` | Kiểm sổ audit; `--strict` = 0 🔴/🟠 mở, mọi nhóm đã quét/N/A |

@@ -715,9 +715,22 @@ class AuditRegressionTest(unittest.TestCase):
         # Chữ của mục có thể tự chứa "— Miễn:" (LOOP-HARNESS-007) — không được tính là lý do miễn.
         text = "- [~] `L-007` **MUST** a → Kiểm: chỉ khác cột trạng thái và `— Miễn:`. · Nguồn: x"
         self.assertEqual(xt.blueprint_status_text(text)["bad_waivers"], ["L-007 (dòng 1)"])
-        for note in (" — Miễn: không áp dụng", " (Miễn: không áp dụng — D-004)", " - Miễn: V1 chưa cần"):
+        ok_notes = (
+            " — Không áp dụng: không có thanh toán",
+            " (Không áp dụng: CLI cục bộ — D-004)",
+            ' - Miễn: V1 chưa cần — Duyệt: "ok, V1 bỏ" 2026-10-16',
+            " — Miễn: hoãn — Duyệt: https://github.com/o/r/issues/7",
+            " — Miễn: hoãn — Duyệt: “đồng ý” (2026-10-16)",
+        )
+        for note in ok_notes:
             self.assertEqual(xt.blueprint_status_text(text + note)["bad_waivers"], [], note)
         self.assertEqual(xt.blueprint_status_text(text + " — Miễn: ")["bad_waivers"], ["L-007 (dòng 1)"])
+        # LOOP-STOP-024: MUST có áp dụng mà bỏ cần lời chủ dự án; câu tự viết "chủ dự án duyệt" không phải bằng chứng
+        need = ["L-007 (dòng 1: MUST `Miễn` thiếu `Duyệt:` của chủ dự án)"]
+        for note in (" — Miễn: không áp dụng", " — Miễn: chủ dự án duyệt 2026-10-15", ' — Miễn: x — Duyệt: "ok"'):
+            self.assertEqual(xt.blueprint_status_text(text + note)["bad_waivers"], need, note)
+        should = text.replace("**MUST**", "**SHOULD**") + " — Miễn: V1 chưa cần"
+        self.assertEqual(xt.blueprint_status_text(should)["bad_waivers"], [])
 
     def test_carry_states_keeps_any_note_and_own_items(self):
         new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b mới. · Nguồn: y\n"
@@ -746,7 +759,12 @@ class AuditRegressionTest(unittest.TestCase):
 
         bp = self.tmp / "BP.md"
         bp.write_text(
-            unicodedata.normalize("NFD", "- [~] `X-001` **MUST** a — Miễn: không áp dụng\n"), encoding="utf-8"
+            unicodedata.normalize(
+                "NFD",
+                "- [~] `X-001` **MUST** a — Không áp dụng: không có thanh toán\n"
+                '- [~] `X-002` **MUST** b — Miễn: hoãn V2 — Duyệt: "được, để V2" 2026-10-16\n',
+            ),
+            encoding="utf-8",
         )
         self.assertEqual(xt.blueprint_status(bp)["bad_waivers"], [])
 
@@ -1063,6 +1081,64 @@ class CiCheckTest(unittest.TestCase):
         self.assertEqual(len(self.errs(base.format("      - uses: docker://alpine:3\n"))), 1)
         digest = "docker://alpine@sha256:" + "a" * 64
         self.assertEqual(self.errs(base.format(f"      - uses: {digest}\n")), [])
+
+    def pr_workflow(self, trigger: str, job_extra: str) -> str:
+        return GOOD_WORKFLOW.replace("on: [push]", trigger).replace(
+            "    timeout-minutes: 10\n", "    timeout-minutes: 10\n" + job_extra, 1
+        )
+
+    def test_ci_check_pr_secret_flagged(self):
+        env = "    env:\n      TOKEN: ${{ secrets.DEPLOY_KEY }}\n"
+        for trigger in (
+            "on: [push, pull_request]",
+            "on: pull_request",
+            "on:\n  push:\n  pull_request:\n    branches: [main]",
+            "on: {pull_request: {branches: [main]}}",
+            "on:\n  pull_request_target:",
+        ):
+            errs = self.errs(self.pr_workflow(trigger, env))
+            self.assertEqual(len(errs), 1, trigger)
+            self.assertIn("job `quality`", errs[0])
+            self.assertIn("secret ngoài `GITHUB_TOKEN`", errs[0])
+        for ref in ("${{ secrets['K'] }}", "${{ toJSON(secrets) }}"):
+            self.assertEqual(len(self.errs(self.pr_workflow("on: pull_request", f"    env:\n      T: {ref}\n"))), 1)
+        inherit = self.pr_workflow("on: pull_request", "").replace(
+            f"    uses: org/repo/.github/workflows/x.yml@{SHA40}\n",
+            f"    uses: org/repo/.github/workflows/x.yml@{SHA40}\n    secrets: inherit\n",
+        )
+        errs = self.errs(inherit)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("job `call`", errs[0])
+
+    def test_ci_check_pr_secret_valid_cases(self):
+        secret = "    env:\n      TOKEN: ${{ secrets.DEPLOY_KEY }}\n"
+        # không có trigger PR (push/dispatch) → secret hợp lệ
+        self.assertEqual(self.errs(self.pr_workflow("on: [push, workflow_dispatch]", secret)), [])
+        # `pull_request` chỉ gần giống/ngoài khối `on:` → không phải trigger
+        self.assertEqual(self.errs(self.pr_workflow("on:\n  pull_request_review:\n  push:", secret)), [])
+        self.assertEqual(self.errs(self.pr_workflow("on: [push] # pull_request sau", secret)), [])
+        body = "    env:\n      NOTE: pull_request\n"
+        self.assertEqual(self.errs(self.pr_workflow("on: [push]", body)), [])
+        # PR + chỉ GITHUB_TOKEN (kể cả nhắc trong comment) → hợp lệ
+        ok = "    env:\n      GH: ${{ secrets.GITHUB_TOKEN }} # không phải secrets.X\n"
+        self.assertEqual(self.errs(self.pr_workflow("on: pull_request", ok)), [])
+        # ngoại lệ có lý do trên dòng; thiếu lý do vẫn báo
+        allowed = "    env:\n      T: ${{ secrets.LICENSE }} # ci-check-allow: licence quét, action ghim SHA\n"
+        self.assertEqual(self.errs(self.pr_workflow("on: pull_request", allowed)), [])
+        bare = allowed.replace("licence quét, action ghim SHA", "")
+        self.assertEqual(len(self.errs(self.pr_workflow("on: pull_request", bare))), 1)
+
+    def test_ci_check_pr_secret_with_environment(self):
+        # job có `environment:` (reviewer cấu hình ở GitHub) → hợp lệ; job khác không có vẫn bị báo
+        env_job = "    environment: production\n    env:\n      TOKEN: ${{ secrets.DEPLOY_KEY }}\n"
+        self.assertEqual(self.errs(self.pr_workflow("on: pull_request", env_job)), [])
+        two = self.pr_workflow("on: pull_request", env_job).replace(
+            "env:\n  A: b\n",
+            "  other:\n    timeout-minutes: 3\n    env:\n      T: ${{ secrets.OTHER }}\nenv:\n  A: b\n",
+        )
+        errs = self.errs(two)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("job `other`", errs[0])
 
     def test_ci_check_cli(self):
         with tempfile.TemporaryDirectory() as d:
