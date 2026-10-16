@@ -6,6 +6,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Áp hết ADR-0008 vào tài liệu** (audit 2026-10-16 đợt 5, AUD-DOC-023): `PM-PLAN-005` (ID, mức MUST giữ) bỏ "mâu thuẫn
+  spec" khỏi danh sách cần người duyệt, thêm publish/deploy; nguyên tắc 6 của `planning-and-estimation.md`, bảng ca của
+  `spec-driven-development.md`, bảng tách việc của `orchestration-and-subagents.md` và README (mục "Chạy tự động") ghi
+  phiên chính tự duyệt kế hoạch/mâu thuẫn spec, ghi `D-NNN`. Dự án đích: ghép lại blueprint để nhận chữ mới của
+  `PM-PLAN-005`. Đồng bộ khác: README số file mảng 00/11/templates, danh sách ADR thêm 0008–0010 (AUD-DOC-024/025);
+  ADR-0013 ghi phần mở rộng (AUD-DOC-027); bảng lệnh mảng 11 thêm `loop decide --prod`
+  (AUD-DOC-028).
 - **Hook hỏi khi test đã có bị làm yếu** (`LOOP-CI-001`). `guard.py edit` (qua `pre-edit-guard.sh`, Edit/Write/MultiEdit)
   trả `ask` khi lần sửa một file test **đã có** (`test_*.py`, `*.test.*`, `*.spec.*`, `*_test.go`, `tests/`, `__tests__/`…)
   thêm dấu skip/only/xfail/`@flaky` hoặc bớt lời gọi kiểm (`assert*`, `expect(`, `t.Error`…). File test mới, file không
@@ -92,7 +99,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `xt.py doctor` thêm kiểm `memory` (mức `warn`, không tự sửa) cho `LOOP-HARNESS-021`: cảnh báo khi bật > 1 công cụ memory ngoài (engram, claude-mem, agentmemory, mem0, openmemory, basic-memory; khớp theo token trong tên) qua `enabledPlugins` ở `~/.claude/settings.json` → `.claude/settings.json` → `.claude/settings.local.json` (cấp sau thắng) và MCP server ở `~/.claude.json` (gốc và `projects.<dự án>`) + `.mcp.json`; theo `CLAUDE_CONFIG_DIR`; và khi `.engram/` nằm trong git. Chỉ đọc tên, không in giá trị cấu hình; không xác định được home thì bỏ phần cấp người dùng (fail-open, không làm vỡ `loop init`). Vì sao đọc cả cấp người dùng: `engram setup claude-code` đăng ký MCP vào `~/.claude.json` (D-008). Phần *Kiểm* của `LOOP-HARNESS-021` trỏ lệnh này (ID, mức giữ).
 - `11-autonomous-loop/harness-files.md`, bảng "Context vs memory vs tài liệu": thêm dòng **Memory tra cứu (tuỳ chọn)** và quyết định "một hay nhiều công cụ memory ngoài": **tối đa một**, nguồn sự thật vẫn là file harness; đề xuất mặc định engram (agent ghi có chủ đích, khớp `AI-AGENT-009`/`PRF-AGENT-013`), claude-mem khi muốn ghi tự động, agentmemory khi chấp nhận engine ELv2. Không đổi ID/mức.
 - `LOOP-HARNESS-021` **SHOULD** (mới) từ catalog `seeker19110/stored` 10 §4c (engram), bổ sung cho `LOOP-HARNESS-019`: chỉ bật một công cụ memory ngoài; kho memory ngoài repo, quyền chỉ chủ, coi là nhạy cảm vì có công cụ lưu nguyên văn prompt; đồng bộ memory vào repo (`.engram/`) tắt ở repo công khai, repo riêng phải quét bí mật. Dự án đích: chạy lại `compose`.
-- **Máy quyết khi nào merge PR đã mở** (ADR-0013). `xt.py merge-check [--pr N] [--pr-json F] [--json]` đọc `gh pr view`
+- **Máy quyết khi nào merge PR đã mở** (ADR-0013). `xt.py merge-check [--pr N] [--pr-json F] [--json]` đọc PR (bản đầu
+  qua `gh pr view`; nay qua REST — mục `merge-check` ở trên)
   và trả `merge` · `wait` (nháp, CI đang chạy, mergeable chưa tính) · `update` (tụt sau nhánh đích → `gh pr update-branch`)
   · `fix` (xung đột, CI đỏ, reviewer đòi sửa) · `human` (làn chuẩn, không có CI, ruleset đòi review, mức tự chủ < L2) ·
   `closed`; exit 0 chỉ khi `merge`. Vị từ làn nhanh của `LOOP-STOP-009` thành mã: không đường dẫn nhạy cảm (bí mật, auth,
@@ -180,6 +188,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   stdin được quét; `bash -n` (chỉ kiểm cú pháp) không bị chặn; xoá/dời cả thư mục chứa file cổng (`rm -rf .claude`,
   `mv scripts …`, `git rm -r .github`) và chuyển hướng `>|` → hỏi. Giới hạn đã biết (phân tích tĩnh, chưa xử lý): `bash
   <<< '…'`, `find -exec sh -c`, `$'…'`, lệnh trong `if/for/{ }`, `python -c`/`node -e`.
+- CI `quality` đỏ mãi trên `main` (từ #49), xanh trên PR: `test_guard_push_without_refspec_follows_current_branch`
+  gọi `git_rules(["git", "push"])` không truyền thư mục nên guard đọc nhánh ở thư mục tiến trình — CI push lên `main`
+  checkout đúng nhánh `main` → `ask`. Test chạy phần đó ở thư mục không phải repo.
+- **Bằng chứng autopilot, cổng có comment, redact** (audit 2026-10-16 đợt 4). AUD-HAR-024: guard hỏi khi Edit/Write/Bash
+  ghi hoặc xoá tay `.autopilot/` (bằng chứng, trạng thái vòng — chỉ `xt.py loop …` ghi); verdict không nhận bằng chứng có
+  thời điểm kết thúc ở tương lai hoặc trước lúc bắt đầu. AUD-HAR-025: `dev-task.sh` (`yaml_get`) và `xt.py`
+  (`yaml_scalar`, dùng chung cho `gate_noop_keys`, `merge_config`) bỏ comment YAML `#` ngoài nháy — `lint: # TODO` là
+  rỗng và `lint: true  # x` là no-op → cổng ĐỎ trong vòng (ADR-0011) thay vì "GATE XANH". AUD-CFG-002: `redact` che
+  thêm DSN user rỗng (`redis://:pw@`), token làm user (`https://<key>@`), `curl -u u:p`, `mysql -pPW`, JWT, tiền tố
+  `npm_`/`pypi-`/`hf_`/`AIza`/`rk_live_`, giá trị trong nháy có khoảng trắng, `*ACCESS_KEY*`/`*PRIVATE_KEY*`/
+  `*credential*`; `feedback aggregate` che lại mọi trường trước khi in (FB sửa tay).
+  Sau review #61: giá trị trong nháy che trước dạng `\S+` (cả `--password="a b"`, `-p"a b"`); mẫu neo đầu từ nên chạy
+  tuyến tính trên dòng dài (trước bậc hai: 50.000 ký tự mất hàng chục giây); thời điểm bằng chứng so bằng datetime có
+  múi giờ, không so chuỗi.
 - `xt.py merge-check` chỉ tính check-run **mới nhất** mỗi tên trên head: chạy lại `quality` (sửa tiêu đề PR) từng để
   lần đỏ cũ che lần xanh mới → `fix` dù CI xanh (gặp ở #58).
 - `dev-task.sh format-file` khôi phục file JSON khi formatter khai báo làm hỏng nó (AUD-HAR-037: `format_file: ruff

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -659,7 +660,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(dec_in('git -C "$D" push', feat_repo, root=main_repo), "ask")
         self.assertEqual(dec_in("cd - && git push", main_repo, root=feat_repo), "")
         self.assertEqual(self.g.bash_decision("git push", main_repo)["decision"], "ask")  # không có cwd → gốc dự án
-        self.assertEqual(self.g.git_rules(["git", "push"]), ("", ""))  # không truyền thư mục: không biết nhánh
+        # Không truyền thư mục → guard đọc nhánh ở thư mục tiến trình; chạy ở thư mục không phải repo để kết quả không
+        # phụ thuộc môi trường (CI push lên `main` checkout đúng nhánh `main` → từng đỏ mãi trên main, xanh trên PR).
+        with tempfile.TemporaryDirectory() as bare, contextlib.chdir(bare):
+            self.assertEqual(self.g.git_rules(["git", "push"]), ("", ""))  # không biết nhánh
 
     def test_guard_current_branch_errors_are_unknown(self):
         repo = self.make_repo("main")
@@ -989,6 +993,21 @@ class DevTaskTest(unittest.TestCase):
         (self.tmp / "xt.yaml").write_text("format_file: printf '[1]' > {}\n", encoding="utf-8")
         self.run_task("format-file", "s.json")  # đường dẫn tương đối theo gốc dự án; JSON mới hợp lệ thì giữ
         self.assertEqual(f.read_text(encoding="utf-8"), "[1]")
+
+    def test_noop_trailing_comment(self):
+        """AUD-HAR-025: comment cuối dòng trong xt.yaml không phải lệnh — `lint: # TODO` là rỗng, `true  # x` là no-op."""
+        (self.tmp / ".autopilot").mkdir()
+        (self.tmp / ".autopilot" / "state.json").write_text('{"active": true}', encoding="utf-8")
+        for val in ("# TODO điền", "true  # TODO", "'true' # x", ""):
+            with self.subTest(val):
+                (self.tmp / "xt.yaml").write_text(f"lint: {val}\ntest: python3 -c 'print(1)'\n", encoding="utf-8")
+                self.assertNotEqual(self.run_task("gate").returncode, 0)
+        (self.tmp / "xt.yaml").write_text(
+            "lint: python3 -c 'print(\"#ok\")'  # kiểm\ntest: python3 -c 'print(1)'\n", encoding="utf-8"
+        )
+        r = self.run_task("lint")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("#ok", r.stdout + r.stderr)  # `#` trong nháy là dữ liệu
 
     def test_declared_pipeline_failure_fails_gate(self):
         # `set -o pipefail` của dev-task.sh không truyền vào `bash -c` — lệnh khai báo có ống từng xanh giả.
@@ -1522,6 +1541,22 @@ class GuardBashWave3Test(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), want)
+
+    def test_evidence_tamper(self):
+        """AUD-HAR-024: ghi/xoá tay `.autopilot/` (bằng chứng, trạng thái vòng) → hỏi; chỉ `xt.py loop …` được ghi."""
+        for cmd in (
+            "echo '{}' > .autopilot/evidence/T-001.json",
+            "tee .autopilot/state.json",
+            "sed -i s/false/true/ .autopilot/state.json",
+            "rm -rf .autopilot",
+            "rm -f .autopilot/evidence/T-001.json",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "ask")
+        for rel in (".autopilot/evidence/T-001.json", ".autopilot/state.json"):
+            with self.subTest(rel):
+                self.assertEqual(self.guard.edit_decision(rel, str(self.root))[0], "ask")
+        self.assertEqual(self.dec("python3 scripts/xt.py loop record --task T-001 -- true"), "")
 
     def test_guard_gate_patterns(self):
         """AUD-HAR-027: file cổng phổ biến được bảo vệ khi sửa."""

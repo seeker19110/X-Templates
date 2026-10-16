@@ -169,7 +169,9 @@ def _match_any(rel: str, patterns: Tuple[str, ...]) -> bool:
 
 
 def classify_path(rel: str) -> str:
-    """'secret' | 'gate' | 'migration' | ''."""
+    """'secret' | 'gate' | 'evidence' | 'migration' | ''."""
+    if rel == ".autopilot" or rel.startswith(".autopilot/"):
+        return "evidence"  # bằng chứng + trạng thái vòng: chỉ `xt.py loop …` ghi (AUD-HAR-024)
     if _match_any(rel, SECRET_PATTERNS) and not rel.endswith((".example", ".sample", ".template")):
         return "secret"
     if _match_any(rel, GATE_PATTERNS):
@@ -225,6 +227,11 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
         return (
             "ask",
             f"Sửa cấu hình cổng/CI/harness ({rel}). Khung coi đây là điểm dừng: nói rõ lý do trước khi nới hàng rào.",
+        )
+    if kind == "evidence":
+        return "ask", (
+            f"Ghi tay bằng chứng/trạng thái autopilot ({rel}) = bằng chứng giả (P1). Dùng `xt.py loop record/…`; "
+            "chỉ sửa tay khi người yêu cầu."
         )
     if kind == "migration" and os.path.exists(os.path.join(root, rel)):
         return "ask", (
@@ -1116,6 +1123,8 @@ def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
             asks.append(f"ghi file bí mật qua Bash: {target}")
         elif kind in ("gate", "migration"):
             asks.append(f"sửa cấu hình cổng/CI/harness/migration qua Bash ({target}) — nói rõ lý do")
+        elif kind == "evidence":
+            asks.append(f"ghi/xoá tay bằng chứng autopilot qua Bash ({target}) — chỉ `xt.py loop …` được ghi (P1)")
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
     return asks

@@ -8,18 +8,18 @@
 
 | Mảng | Nội dung | Số file |
 |---|---|---|
-| [`00-method`](framework/00-method/README.md) | Nguyên tắc P1–P12, vòng đời G0–G8, quy ước module, cách ghép blueprint, luật bằng chứng | 5 |
+| [`00-method`](framework/00-method/README.md) | Nguyên tắc P1–P12, vòng đời G0–G8, quy ước module, cách ghép blueprint, luật bằng chứng, audit | 6 |
 | [`01-baseline`](framework/01-baseline/README.md) | Thứ **mọi** phần mềm đều cần: repo, cổng chất lượng, bảo mật tối thiểu, lỗi/log, cấu hình, tài liệu, đúng dữ liệu, phụ thuộc | 8 |
 | [`02-profiles`](framework/02-profiles/README.md) | 14 hồ sơ loại phần mềm: web, mobile, desktop, site tĩnh, API, CLI, thư viện, data/ML, **AI agent**, **hệ agentic**, game, blockchain, IoT, monorepo | 14 |
 | [`03-industries`](framework/03-industries/README.md) | 8 gói ngành có khung pháp lý Việt Nam + quốc tế: fintech, y tế, giáo dục, TMĐT, chính phủ, SaaS đa tenant, truyền thông, logistics | 8 |
 | [`04-standards`](framework/04-standards/README.md) | Tiêu chuẩn: bảo mật, tiếp cận, API/web, dữ liệu, quy trình, AI — phiên bản hiện hành và cách chứng minh | 6 |
 | [`05`](framework/05-architecture/README.md)–[`09`](framework/09-database/README.md) | Kiến trúc · Thiết kế & UI/UX · Frontend · Backend · Cơ sở dữ liệu | 34 |
 | [`10-workflow`](framework/10-workflow/README.md) | Git, review, CI/CD, phát hành, môi trường, spec-driven, tài liệu, đội & WIP | 8 |
-| [`11-autonomous-loop`](framework/11-autonomous-loop/README.md) | Vòng lặp tự động: 4 con số, bằng chứng, điểm dừng, điều phối subagent, tự sửa CI, ngân sách context | 6 |
+| [`11-autonomous-loop`](framework/11-autonomous-loop/README.md) | Vòng lặp tự động: 4 con số, bằng chứng, điểm dừng, điều phối subagent, tự sửa CI, ngân sách context, phản hồi từ dự án đích | 7 |
 | [`12-security`](framework/12-security/README.md) | Threat model, AppSec, bí mật, chuỗi cung ứng, hạ tầng, bảo mật AI, log & audit | 7 |
 | [`13-ai-engineering`](framework/13-ai-engineering/README.md) | LLM app, RAG, agent & tool, hệ agentic, eval, guardrail, MCP/A2A, quan sát & chi phí, dữ liệu | 9 |
 | [`14`](framework/14-testing-quality/README.md)–[`18`](framework/18-cross-cutting/README.md) | Kiểm thử · Vận hành · Tuân thủ & quyền riêng tư · Sản phẩm & dự án · Xuyên suốt (i18n, hiệu năng, DX, tài liệu cho AI, đơn vị/tiền/thời gian, bền vững, OSS) | 37 |
-| [`templates`](framework/templates/README.md) | PROJECT, PLAN, PROGRESS, SPEC, ADR, THREAT-MODEL, RUNBOOK, POST-MORTEM, DPIA, GO-NO-GO, RELEASE-NOTES, API-CONTRACT, AGENTS, CLAUDE, xt.yaml | 15 |
+| [`templates`](framework/templates/README.md) | PROJECT, PLAN, PROGRESS, SPEC, ADR, THREAT-MODEL, RUNBOOK, POST-MORTEM, DPIA, GO-NO-GO, RELEASE-NOTES, API-CONTRACT, AGENTS, CLAUDE, xt.yaml, AUDIT-STATUS, AUDIT-REPORT | 17 |
 
 Mỗi yêu cầu là một dòng có **ID ổn định**, mức **MUST/SHOULD/MAY**, cách **Kiểm** bằng máy và **Nguồn**:
 
@@ -58,10 +58,11 @@ Ghép thêm module ngoài hồ sơ bằng `--add`, ví dụ web app có tính n�
 Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 
 1. Agent lập kế hoạch G0–G4: `PROJECT.md`, `BLUEPRINT.md`, nghiên cứu phiên bản, spec, thiết kế, `PLAN.md` có task và lệnh kiểm.
-2. Bạn duyệt **một lần**.
-3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, push. Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
+2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
+3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR; `xt.py merge-check` tự merge làn nhanh (ADR-0014). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
 4. Dừng khi xong có bằng chứng, khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
-   thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, deploy/publish, đổi cấu hình cổng, spec mâu thuẫn.
+   thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, deploy/publish, đổi cấu hình cổng (mâu thuẫn spec không
+   còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`).
 
 Hook trong [`.claude/`](.claude/settings.json) chặn lệnh phá huỷ và `curl | sh`, hỏi trước khi deploy hoặc nới cấu hình cổng,
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
@@ -111,6 +112,12 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0005](docs/adr/0005-audit-with-machine-support.md): audit có máy đỡ — sổ máy đọc, `xt.py audit plan/check`.
 - [ADR-0007](docs/adr/0007-rename-technical-identifiers-to-xtemplates.md): định danh kỹ thuật theo tên X-Templates
   (`.xtemplates/`, `xt.py`, `xt.yaml`, `XT_*`); `install.py` tự chuyển dự án đã cài bản ≤ 2.x. Thay ADR-0006.
+- [ADR-0008](docs/adr/0008-main-session-self-approves-decisions.md): phiên chính tự duyệt điểm quyết định chuyên môn
+  theo tiêu chí chất lượng cuối, ghi `D-NNN`; điểm dừng về hành động vẫn hỏi người.
+- [ADR-0009](docs/adr/0009-single-session-autopilot.md): autopilot chạy một phiên đến khi xong (compaction có checkpoint),
+  việc cần người `loop defer` gom cuối phiên.
+- [ADR-0010](docs/adr/0010-feedback-from-target-projects.md): phản hồi từ dự án đích về khung qua `FB-NNN` + Routine gộp
+  → PR nháp, người duyệt trước khi công khai.
 - [ADR-0011](docs/adr/0011-gate-fail-closed-in-autopilot.md): trong vòng autopilot, `lint`/`test` rỗng hoặc no-op làm cổng đỏ.
 - [ADR-0012](docs/adr/0012-blueprint-by-scale-and-task-iteration-cap.md): `BLUEPRINT.md` chỉ chứa MUST theo quy mô,
   SHOULD/MAY ở `BLUEPRINT-BACKLOG.md`; trần vòng một phiên chỉ đếm task.
