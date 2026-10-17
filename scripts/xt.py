@@ -910,7 +910,8 @@ def _verdict_loop_state(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if st.get("iterations", 0) >= st.get("max_iterations", 50):
         return {"verdict": "budget", "reason": f"đã chạm trần {st.get('max_iterations')} vòng"}
     deadline = st.get("deadline")
-    if deadline and now_iso() > deadline:
+    due = _parse_iso(deadline) if isinstance(deadline, str) else None
+    if due and _dt.datetime.now(_dt.timezone.utc) >= due:  # tới hạn là hết (`--hours 0`), so thời điểm, không so chuỗi
         return {"verdict": "budget", "reason": f"quá hạn {deadline}"}
     return None
 
@@ -2430,7 +2431,7 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
         return [Finding("xt-yaml", "error", msg, fix)]
     keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
-    out = []
+    out = _doctor_gate_tools(keys)
     missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
     if missing:
         out.append(
@@ -2449,6 +2450,27 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
             )
         )
     return out
+
+
+# Lệnh ở vị trí đầu một lệnh đơn trong chuỗi shell của `xt.yaml`; từ khoá/builtin của shell không phải công cụ.
+GATE_CMD_RE = re.compile(r"(?:^|&&|\|\||[;|]|\bdo\b|\bthen\b)\s*([A-Za-z][\w.+-]*)(?![\w.+-]*=)")
+GATE_MODULE_RE = re.compile(r"\bpython[0-9.]*\s+-m\s+([A-Za-z_][\w]*)")
+SHELL_BUILTINS = {"for", "do", "done", "if", "then", "else", "elif", "fi", "while", "until", "case", "esac", "in"}
+SHELL_BUILTINS |= {"exit", "export", "cd", "true", "false", "test", "echo", "printf", "set", "unset", "return"}
+
+
+def _doctor_gate_tools(keys: Dict[str, str]) -> List[Finding]:
+    """Công cụ/mô-đun mà lệnh cổng gọi nhưng không có trên máy (AUD-HAR-034: thiếu `shellcheck` chỉ biết khi cổng đỏ)."""
+    missing: List[str] = []
+    for k in DOCTOR_YAML_KEYS:
+        cmd = yaml_scalar(keys.get(k, ""))
+        tools = {t for t in GATE_CMD_RE.findall(cmd) if t not in SHELL_BUILTINS and not shutil.which(t)}
+        mods = {m for m in GATE_MODULE_RE.findall(cmd) if importlib.util.find_spec(m) is None}
+        missing += [f"{t} ({k})" for t in sorted(tools | mods)]
+    if not missing:
+        return []
+    msg = f"công cụ cổng không có trên máy: {', '.join(missing)} — cài trước khi chạy cổng (cổng sẽ đỏ)"
+    return [Finding("gate-tools", "warn", msg)]
 
 
 def _doctor_gitignore(base: Path) -> List[Finding]:
@@ -3690,6 +3712,9 @@ def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
 
 
 def _feedback_collect(args: argparse.Namespace, base: Path) -> int:
+    if (base / "framework/00-method/conventions.md").is_file() and (base / "scripts/xt.py").is_file():
+        print("· Bỏ qua: đây là repo khung — phản hồi tự gom dành cho dự án đích (ADR-0010, AUD-HAR-048)")
+        return 0
     d = base / FEEDBACK_DIR
     seen = {e.get("source") for e in feedback_entries(d)} if d.is_dir() else set()
     added = []

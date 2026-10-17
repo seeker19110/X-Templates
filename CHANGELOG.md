@@ -257,6 +257,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- `xt.py doctor` cảnh báo `gate-tools` khi lệnh cổng trong `xt.yaml` gọi công cụ/mô-đun không có trên máy (vd
+  `shellcheck`, `python3 -m mypy`) — trước chỉ biết khi cổng đỏ (AUD-HAR-034). `feedback collect` bỏ qua trong repo khung
+  (phản hồi tự gom dành cho dự án đích, AUD-HAR-048). `loop status` hết hạn đúng lúc tới hạn chót (`--hours 0` trước vẫn
+  `continue` trong cùng giây), so thời điểm thay vì chuỗi (AUD-TEST-004); test không rò stderr (AUD-TEST-003).
 - Guard bịt thêm (trả nợ audit, AUD-SEC-023/024/042): git tuỳ chọn dài viết tắt (`reset --ha`, `clean --fo`,
   `push --mirr`, `push --forc`) coi như tuỳ chọn đầy đủ; `push --all/--tags` hỏi; `find . -delete` không lọc bị chặn như
   `rm -rf .`; `xargs rm -rf` (đích từ stdin) hỏi; `exec -a <tên> …`, `env -S '<lệnh>'` bóc ra lệnh thật;

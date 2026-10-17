@@ -101,6 +101,21 @@ class DoctorHealthyTest(DoctorCase):
         msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
         self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
 
+    def test_gate_tools_missing_warns(self):  # AUD-HAR-034
+        self.write(
+            "xt.yaml",
+            "lint: xt-no-such-tool-1 . && for f in a; do bash -n $f || exit 1; done\n"
+            "typecheck: python3 -m xt_no_such_mod_2 src\ntest: d=1 && git --version\nbuild: ''\n",
+        )
+        msgs = [f.msg for f in self.findings() if f.code == "gate-tools"]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("xt-no-such-tool-1 (lint)", msgs[0])
+        self.assertIn("xt_no_such_mod_2 (typecheck)", msgs[0])
+        for word in ("bash", "git", "for", "exit", "d="):
+            self.assertNotIn(f" {word} (", msgs[0])
+        self.write("xt.yaml", "lint: git status && python3 -m json.tool x\ntypecheck: ''\ntest: ''\nbuild: ''\n")
+        self.assertEqual([f for f in self.findings() if f.code == "gate-tools"], [])
+
     def test_repo_khung_itself_is_clean(self):
         with unittest.mock.patch.object(xt, "SCRIPT_DIR", ROOT / "scripts"):
             errors = [f.msg for f in xt.doctor_findings(ROOT, ROOT / "framework", deep=False) if f.level == "error"]

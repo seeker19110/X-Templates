@@ -862,6 +862,17 @@ class FeedbackTest(TmpDirCase):
         rc, out, _ = run_main("feedback", "collect")
         self.assertEqual(out, "✓ Thêm 0 phản hồi tự gom (không có tín hiệu mới)\n")
 
+    def test_collect_skips_in_framework_repo(self):  # AUD-HAR-048: luồng phản hồi dành cho dự án đích
+        (self.tmp / "BLUEPRINT.md").write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: x\n", encoding="utf-8")
+        (self.tmp / "framework" / "00-method").mkdir(parents=True)
+        (self.tmp / "framework" / "00-method" / "conventions.md").write_text("x", encoding="utf-8")
+        (self.tmp / "scripts").mkdir()
+        (self.tmp / "scripts" / "xt.py").write_text("x", encoding="utf-8")
+        rc, out, _ = run_main("feedback", "collect")
+        self.assertEqual(rc, 0)
+        self.assertIn("repo khung", out)
+        self.assertFalse(self.fb.exists())
+
     def test_collect_final_verdict_variants_and_missing_blueprint(self):
         cases = [
             ({"final_verdict": {"verdict": "blocked", "reason": "lỗi lặp"}, "last_failure_task": "T-004"}, 1),
