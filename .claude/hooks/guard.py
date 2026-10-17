@@ -1389,6 +1389,43 @@ def _sensitive_mount(spec: str) -> str:
     return src if hit or any(p in src for p in SENSITIVE_MOUNT_PARTS) else ""
 
 
+# `docker exec`/`docker compose exec|run`: cờ ăn giá trị trước tên container/dịch vụ (lệnh bên trong vẫn ra mạng thật).
+EXEC_VALUE_FLAGS: Tuple[str, ...] = (
+    "-u",
+    "--user",
+    "-w",
+    "--workdir",
+    "-e",
+    "--env",
+    "--env-file",
+    "--detach-keys",
+    "--entrypoint",
+)
+EXEC_VALUE_FLAGS += ("-v", "--volume", "-p", "--publish", "--name", "-l", "--label", "--index")
+COMPOSE_VALUE_FLAGS = ("-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory")
+
+
+def _skip_opts(rest: List[str], value_flags: Tuple[str, ...]) -> int:
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):
+        i += 2 if rest[i] in value_flags else 1
+    return i
+
+
+def _exec_inner(args: List[str]) -> List[str]:
+    """Lệnh chạy trong container: `docker exec [cờ] <ctr> <lệnh>`, `docker compose [cờ] exec|run [cờ] <dv> <lệnh>`."""
+    if args[:1] == ["compose"]:
+        i = _skip_opts(args[1:], COMPOSE_VALUE_FLAGS) + 1
+        if args[i : i + 1] not in (["exec"], ["run"]):
+            return []
+    elif args[:1] != ["exec"]:
+        return []
+    else:
+        i = 0
+    rest = args[i + 1 :]
+    return normalize(rest[_skip_opts(rest, EXEC_VALUE_FLAGS) + 1 :])
+
+
 def _container_rule(args: List[str]) -> str:
     """`docker|podman` điều khiển daemon máy khác (`-H`, `--context`), hoặc `[container] run|create` có quyền máy chủ:
     privileged, namespace của host, cap nguy hiểm, thiết bị, unconfined, mount gốc/home/bí mật/socket."""
@@ -1397,6 +1434,10 @@ def _container_rule(args: List[str]) -> str:
         return f"{EGRESS_ASK} — container trên daemon máy khác"
     if args[:1] == ["container"]:
         args = args[1:]
+    inner = _exec_inner(args)
+    if inner:
+        verdict = egress_rule(inner[0], inner[1:])
+        return f"{verdict[1]} (trong container)" if verdict[0] else ""
     if args[:1] not in (["run"], ["create"]):
         return ""
     opts = args[1:]

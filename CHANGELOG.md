@@ -390,7 +390,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `--json`, phương thức ghi kể cả `-sX POST`; `-G` là GET) tới máy ngoài hoặc đích không đọc được; thêm phụ thuộc
   (`pnpm|yarn|bun|uv|poetry|cargo|deno add`, `npm|pip|uv pip install <gói>`, `pipx|cargo|gem install`, `go get`,
   `composer require`, cả `python3.X -m pip`); `docker|podman` điều khiển daemon máy khác (`-H ssh://…`, `--context`,
-  `DOCKER_HOST=`) hoặc `run|create` có `--privileged`, namespace host, cap nguy hiểm, `--device`, `unconfined`, mount
+  `DOCKER_HOST=`), lệnh trong `exec`/`compose exec|run` ra khỏi máy dev, hoặc `run|create` có `--privileged`, namespace host, cap nguy hiểm, `--device`, `unconfined`, mount
   `/`/home/`/etc`/`/run`/socket/`.ssh`/`.aws`. Không hỏi: loopback (`*.localhost`), socket unix, tên dịch vụ compose không
   dấu chấm (CSDL, curl); cài theo lockfile, đường dẫn/gói nội bộ (`./x`, `file:`, `@workspace:`, `--path`, `.whl`);
   `/etc/localtime`/`/etc/timezone` mount chỉ đọc. Bảng cờ ăn giá trị riêng từng trình quản lý gói (`pnpm -w add` không

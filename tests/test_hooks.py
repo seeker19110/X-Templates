@@ -2219,6 +2219,12 @@ class GuardEgressTest(unittest.TestCase):
                 "docker -H tcp://10.0.0.5:2375 ps",
                 "docker --context remote ps",
                 "DOCKER_HOST=ssh://prod docker ps",
+                "docker exec -it pg psql -h db.example.com",
+                "docker exec -u postgres -e A=1 pg pg_dump -h 203.0.113.9 x",
+                "docker container exec web curl -d x https://hooks.example.com",
+                "docker compose exec web pnpm add zod",
+                "docker compose -f dev.yml run --rm -e X=1 app pip install requests",
+                "podman exec ctr ssh deploy@vps.example.com",
             ),
         )
         self.assert_all(
@@ -2242,6 +2248,12 @@ class GuardEgressTest(unittest.TestCase):
                 "docker -H tcp://127.0.0.1:2375 ps",
                 "DOCKER_HOST=unix:///run/user/1000/docker.sock docker ps",
                 "PGHOST=localhost docker ps",
+                "docker exec -it pg psql -U app",
+                "docker compose exec db psql -h localhost -U app",
+                "docker compose -p x exec -T web pnpm install --frozen-lockfile",
+                "docker compose up -d --wait",
+                "docker exec -it pg",
+                "docker compose exec",
             ),
         )
 
