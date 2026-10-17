@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Hook guard không hỏi người nữa** (ADR-0018; chủ repo yêu cầu 2026-10-17). `guard.py` `apply_policy`: lệnh đang hỏi mà
+  nguy hiểm/không đảo ngược (push thẳng `main`, `push --all/--tags`, xoá ngoài dự án, `stash drop/clear`,
+  `gh repo delete|archive`, `gh secret`, `kubectl delete`, `terraform|tofu|pulumi destroy`, container có quyền máy chủ,
+  tắt hook, ghi file bí mật qua Bash) → chặn; còn lại (publish, deploy, merge PR, `ssh`, cài gói, sửa cấu hình cổng…) →
+  cho chạy. `permissions.ask` rỗng. `XT_GUARD_POLICY=strict` giữ hành vi cũ.
 - **Mọi lệnh Bash chạy không hỏi quyền** (ADR-0017; chủ repo yêu cầu 2026-10-16). `.claude/settings.json`
   `permissions.allow` gồm `Bash` thay danh sách `Bash(...)` hẹp (trước: `git push`, `git checkout <nhánh>`… vẫn hỏi ở chế
   độ `default`). Giữ nguyên `deny` (force-push, `reset --hard`, `git clean`, sudo, đọc `.env`/khoá…), `ask` (`git merge`,

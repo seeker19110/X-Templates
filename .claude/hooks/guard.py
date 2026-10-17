@@ -764,10 +764,19 @@ ASK_CMDS: Dict[str, Optional[Tuple[str, ...]]] = {
 GH_ASK = {("release",), ("secret",), ("workflow", "run"), ("variable", "set"), ("variable", "delete")}
 GH_ASK |= {("repo", "edit"), ("repo", "sync"), ("repo", "rename"), ("repo", "archive"), ("repo", "delete")}
 GH_ASK |= {("repo", "set-default")}  # đổi repo mà `gh pr merge`/`{owner}/{repo}` trỏ tới, như `-R` (AUD-SEC-030)
+GH_DESTROY = {("secret",), ("repo", "delete"), ("repo", "archive")}
+# Lệnh con huỷ/xoá hạ tầng không đảo ngược: vẫn ask ở bộ luật, nhưng mang lý do DESTROY_ASK để `apply_policy` chặn.
+DESTROY_CMDS: Dict[str, Tuple[str, ...]] = {
+    "kubectl": ("delete",),
+    "terraform": ("destroy",),
+    "tofu": ("destroy",),
+    "pulumi": ("destroy",),
+}
 INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 
 EXTERNAL_ASK = "hành động đối ngoại/triển khai thật (điểm dừng bắt buộc)"
+DESTROY_ASK = "huỷ/xoá repo, bí mật hoặc hạ tầng (không đảo ngược)"
 # Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
 GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
     *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
@@ -1144,11 +1153,14 @@ def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
         return "", ""
     if name == "gh":
         hit = tuple(args[:1]) in GH_ASK or tuple(args[:2]) in GH_ASK
-        return ("ask", EXTERNAL_ASK) if hit else ("", "")
+        destroy = tuple(args[:1]) in GH_DESTROY or tuple(args[:2]) in GH_DESTROY
+        return ("ask", DESTROY_ASK if destroy else EXTERNAL_ASK) if hit else ("", "")
     if name not in ASK_CMDS:
         return "", ""
     subs = ASK_CMDS[name]
     words = set(_positionals(args)) | {a for a in args if a.startswith("--")}
+    if words & set(DESTROY_CMDS.get(name, ())):
+        return "ask", DESTROY_ASK
     return ("ask", EXTERNAL_ASK) if subs is None or words & set(subs) else ("", "")
 
 
@@ -2322,6 +2334,35 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
     return res
 
 
+# Chính sách đầu ra (ADR-0018, chủ repo 2026-10-17): chỉ CẤM lệnh nguy hiểm/không đảo ngược, còn lại cho chạy. Bộ luật
+# ở trên vẫn tính `ask` đầy đủ; `XT_GUARD_POLICY=strict` giữ hành vi cũ (hỏi). Ask mang dấu dưới đây → deny, khác → cho qua.
+DANGER_MARKERS = (
+    "push thẳng nhánh chính",
+    "push --all/--tags",
+    "xoá đệ quy ngoài thư mục dự án",
+    "rm -rf không có đích",
+    "find xoá file ngoài thư mục dự án",
+    "xoá thay đổi đã cất",
+    DESTROY_ASK,
+    "container có quyền máy chủ",
+    "xoá thư mục gắn từ máy",
+    "tắt hook của khung",
+    "bỏ qua hook của dự án",
+    "ghi file bí mật qua Bash",
+)
+
+
+def apply_policy(out: Dict[str, object]) -> Dict[str, object]:
+    """ask nguy hiểm (DANGER_MARKERS) → deny; ask khác → cho qua (quyết định rỗng); deny/allow/rỗng giữ nguyên."""
+    if out.get("decision") != "ask":
+        return out
+    reason = str(out.get("reason", "")).removeprefix(ASK_PREFIX)
+    hit = next((m for m in DANGER_MARKERS if m in reason), "")
+    if hit:
+        return {**out, "decision": "deny", "reason": f"Lệnh bị khung chặn (nguy hiểm — {hit}): {reason[:400]}"}
+    return {**out, "decision": "", "reason": ""}
+
+
 # Lệnh merge/ghi GitHub: guard lỗi giữa chừng với lệnh này thì hỏi thay vì cho qua (fail-closed cho merge).
 MERGE_CMD_RE = re.compile(r"\bgh\s+(pr\b.*\bmerge|api)\b", re.S)
 
@@ -2361,6 +2402,9 @@ def main() -> int:
             out = {"decision": ""}
     except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên — trừ merge (AUD-SEC-032)
         out = _failure_decision(mode, payload, cmd)
+    # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
+    if os.environ.get("XT_GUARD_POLICY") != "strict":
+        out = apply_policy(out)
     sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
 

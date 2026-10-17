@@ -18,6 +18,9 @@ from pathlib import Path
 import unittest.mock as mock
 
 ROOT = Path(__file__).resolve().parent.parent
+# Test bộ luật ở chế độ strict (hỏi); chính sách mặc định — ask nguy hiểm → deny, còn lại cho qua (ADR-0018) — test riêng ở
+# GuardPolicyTest.
+os.environ["XT_GUARD_POLICY"] = "strict"
 
 
 def posixpath_expand(p: str) -> str:
@@ -1321,9 +1324,8 @@ class SettingsJsonTest(unittest.TestCase):
         self.assertEqual([r for r in perms["allow"] if r.startswith("Bash(")], [])  # thừa khi đã allow cả Bash
         for rule in ("Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(sudo *)", "Read(**/.env)"):
             self.assertIn(rule, perms["deny"])
-        for rule in ("Bash(git rebase *)", "Bash(npm publish*)"):
-            self.assertIn(rule, perms["ask"])
-        self.assertNotIn("Bash(git merge *)", perms["ask"])  # chủ repo yêu cầu gỡ: merge cục bộ đảo ngược được
+        # ADR-0018: không hỏi — nguy hiểm thì deny (settings + guard), còn lại cho chạy.
+        self.assertEqual(perms["ask"], [])
         self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))
 
 
@@ -2649,6 +2651,59 @@ class GuardEgressAuditTest(EgressCase):
         self.assertEqual(self.guard._url_hosts("a" * 200_000), [])
         self.assertEqual(self.guard._url_hosts("x" * 100_000 + "postgres://u@h.example.com/d"), ["h.example.com"])
         self.assertLess(time.monotonic() - start, 1.0)
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class GuardPolicyTest(unittest.TestCase):
+    """ADR-0018: mặc định không hỏi — ask nguy hiểm/không đảo ngược thành deny, ask khác cho qua."""
+
+    DEFAULT = {"XT_GUARD_POLICY": ""}
+
+    def bash(self, cmd: str) -> str | None:
+        code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, extra_env=self.DEFAULT)
+        self.assertEqual(code, 0, out)
+        return decision(out)
+
+    def test_dangerous_asks_become_deny(self):
+        for cmd in (
+            "git push origin main",
+            "git push --tags",
+            "git stash drop",
+            "gh repo delete o/r --yes",
+            "gh secret set TOKEN",
+            "kubectl delete pod x",
+            "terraform destroy",
+            "rm -rf /opt/data",
+            "docker run --privileged img",
+            "claude --bare -p hi",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+
+    def test_other_asks_pass(self):
+        for cmd in (
+            "npm publish",
+            "gh release create v1",
+            "terraform apply",
+            "ssh prod uptime",
+            "pip install requests",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_edit_gate_file_passes(self):
+        payload = {"tool_input": {"file_path": str(ROOT / ".github" / "workflows" / "ci.yml")}}
+        code, out, _ = run_hook("pre-edit-guard.sh", payload, extra_env=self.DEFAULT)
+        self.assertEqual((code, decision(out)), (0, None))
+
+    def test_secret_edit_still_denied(self):
+        code, out, _ = run_hook("pre-edit-guard.sh", {"tool_input": {"file_path": ".env"}}, extra_env=self.DEFAULT)
+        self.assertEqual((code, decision(out)), (0, "deny"))
+
+    def test_apply_policy_keeps_non_ask(self):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        for out in ({"decision": "deny", "reason": "x"}, {"decision": "allow", "reason": "y"}, {"decision": ""}):
+            self.assertEqual(guard.apply_policy(out), out)
 
 
 if __name__ == "__main__":
