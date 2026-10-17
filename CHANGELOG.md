@@ -382,6 +382,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Guard hỏi khi ra khỏi máy dev** (đề xuất chủ repo 2026-10-17): phiên chạy không hỏi quyền (`--permission-mode auto`,
+  allow rộng ở settings người dùng) chỉ còn guard làm lớp hỏi, nên PreToolUse hỏi thêm khi `ssh`/`sftp`/`mosh`, `scp`/`rsync`
+  chép với máy khác; client CSDL (`psql`, `pg_dump`, `mysql`, `mongosh`, `redis-cli`…) tới máy chủ không cục bộ (cờ host,
+  URI, conninfo `host=`, `PGHOST=`/`…_URL=` gán đầu lệnh); `curl`/`wget` gửi dữ liệu (`-d`/`-F`/`-T`/`--json`, phương thức
+  ghi) tới máy ngoài hoặc đích không đọc được; thêm phụ thuộc (`pnpm|yarn|bun|uv|poetry|cargo|deno add`, `npm|pip install
+  <gói>`, `go get`, `gem install`, `composer require`); `docker|podman run|create` có `--privileged`, namespace host, cap
+  nguy hiểm, `--device`, `unconfined`, mount `/`/home/`/etc`/socket docker/`.ssh`/`.aws`. Cục bộ không hỏi: loopback,
+  socket unix, tên dịch vụ compose không dấu chấm; cài theo lockfile/đường dẫn cục bộ. `curl -d @file` tới máy ngoài nay
+  hỏi (trước cho qua). Giới hạn: biến chứa đích (`psql "$DATABASE_URL"`) không đọc được nên không hỏi — guard chống tai
+  nạn, không phải sandbox. Dự án đích: chạy lại `install.py`.
 - **`redact` che kín hơn, bớt che nhầm** (audit delta đợt C; AUD-CFG-006, CFG-007, CFG-008, CODE-009). Giá trị trong
   nháy chứa nháy loại kia (`password: "it's a b"`) hoặc nháy chưa đóng không còn lộ phần sau; khoá `*_PWD`, `*_PASS`,
   `pass`, `passphrase` (`MYSQL_PWD`, `DB_PASS`) được che, `PWD`/`bypass` thì không; `npm_`/`hf_`/`pypi-` chỉ che khi
