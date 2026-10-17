@@ -245,6 +245,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (`coverage report --fail-under=100` — ratchet `BASE-GATE-013`); `coverage` 7.16.2 (Apache-2.0) khoá kèm hash.
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
+### Removed
+- **Workflow `portability.yml` (job `macos-bash32`)** — chủ repo yêu cầu gỡ macOS khỏi CI (2026-10-17). CI repo khung chỉ
+  còn chạy Ubuntu: không còn máy kiểm bash 3.2, sed/awk BSD hay `python3` 3.9 hệ thống của macOS cho hook/installer;
+  AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
+
 ### Fixed
 - **`xt.py` lại chạy được với `python3` hệ thống của macOS (3.9)**: `redact` (#73) dùng `\w++` (chỉ có từ Python 3.11)
   nên `xt.py` lỗi `re.error` ngay khi nạp; hook gọi `python3` của máy dev → merge-check "không chạy được" (merge luôn hỏi),
