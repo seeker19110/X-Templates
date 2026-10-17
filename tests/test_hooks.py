@@ -3295,6 +3295,28 @@ class GuardReview97Test(unittest.TestCase):
             hard=False,
         )
 
+    def test_review_97_round_2(self):  # review lần 2 của #97
+        self.check(
+            "deny",
+            (
+                "git -cremote.origin.push=a:main push",
+                "git --config-env=remote.origin.push=X push",
+                "git --config-env=push.default=X push",
+                "gh api repos/o/r/environments/x/secrets/K -X PUT",
+                "gh api repos/o/r/environments/prod -X PUT",
+                "gh api repos/o/r/keys -X POST -f key=x",
+                "gh api user/keys -X POST -f key=x",
+                "gh api repos/o/r/actions/variables/X -X PATCH -f value=y",
+                "gh api graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            ("git -cuser.name=x push origin feat", "gh api repos/o/r/keys", "gh api repos/o/r/environments"),
+            hard=False,
+        )
+
     def test_download_into_fence_dir(self):
         self.check(
             "deny",

@@ -25,7 +25,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `wget -P` ghép thư mục vào đích ghi (AUD-SEC-055); `git push origin heads/main` (AUD-SEC-056); `$(…)` trong nháy kép
   và trong heredoc dấu kết không nháy được quét (AUD-SEC-059); cấu hình push chỉ tính khi giá trị lan ra nhiều nhánh
   (`push.default=matching`, `remote.*.push|mirror`) và lệnh không có refspec, chỉ cho `git push` (AUD-SEC-052,
-  AUD-HAR-055); thiếu guard.py: `restore_re` không nhận `python3 -c … install.py`, `--output` (AUD-SEC-057).
+  AUD-HAR-055); thiếu guard.py: `restore_re` không nhận `python3 -c … install.py`, `--output` (AUD-SEC-057). Vòng 2: `git -ck=v`, `--config-env` (AUD-SEC-061);
+  `gh api` environment/deploy key/khoá tài khoản/biến Actions, graphql `deleteRepository|transferRepository|archiveRepository`
+  (AUD-SEC-062).
 - **Dự án con**: hook cổng commit/auto-format dùng `.xtemplates/scripts/dev-task.sh` trước `scripts/dev-task.sh` riêng của
   dự án (AUD-HAR-049); `doctor` báo lỗi khi hook/settings còn `*.xtemplates-new` (AUD-HAR-050); `feedback aggregate
   --from p=<gốc repo>` tự nối `docs/xtemplates-feedback`, thư mục thiếu thì cảnh báo (AUD-HAR-051); install nói đúng khi

@@ -483,6 +483,16 @@ PUSH_SPREAD_RE = re.compile(r"push\.default=matching|remote\..+\.mirror=(true|ye
 PUSH_CONFIG_FLAG = "--xt-push-config"
 
 
+def _push_spread_opt(opt: str, nxt: str) -> bool:
+    """Tuỳ chọn toàn cục đặt cấu hình push lan nhiều nhánh: `-c k=v`, `-ck=v` (viết liền), `--config-env[=]k=ENV` —
+    giá trị nằm trong biến môi trường, guard không đọc được → khoá push nào cũng tính (review #97)."""
+    if opt in ("-c", "--config-env") or opt.startswith("--config-env="):
+        val = nxt if opt in ("-c", "--config-env") else opt.split("=", 1)[1]
+        env = opt.startswith("--config-env")
+        return bool((PUSH_CONFIG_RE if env else PUSH_SPREAD_RE).fullmatch(val))
+    return opt.startswith("-c") and len(opt) > 2 and bool(PUSH_SPREAD_RE.fullmatch(opt[2:]))
+
+
 def _strip_git_global_opts(a: List[str]) -> List[str]:
     """`git -C p -c k=v --no-pager sub …` → `git sub …` (tuỳ chọn có giá trị ăn thêm một token); `-c` cấu hình push →
     `git sub --xt-push-config …`."""
@@ -491,7 +501,7 @@ def _strip_git_global_opts(a: List[str]) -> List[str]:
     push_cfg = False
     while i < len(rest) and rest[i].startswith("-"):
         nxt = rest[i + 1] if i + 1 < len(rest) else ""
-        push_cfg = push_cfg or (rest[i] in ("-c", "--config-env") and bool(PUSH_SPREAD_RE.fullmatch(nxt)))
+        push_cfg = push_cfg or _push_spread_opt(rest[i], nxt)
         i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
     out = ["git", *rest[i:]]
     return [*out[:2], PUSH_CONFIG_FLAG, *out[2:]] if push_cfg and out[1:2] == ["push"] else out
@@ -1348,7 +1358,12 @@ GH_API_GUARDED_RE = re.compile(
     r"/?(repos|orgs)/[^/\s]+(/[^/\s]+)?/(actions|dependabot|codespaces)/secrets(/.*)?"
     r"|/?repos/[^/\s]+/[^/\s]+/(branches/[^\s]+/protection(/.*)?|rulesets(/.*)?|hooks(/.*)?|collaborators/.+|transfer)/?"
     r"|/?orgs/[^/\s]+/(rulesets|hooks|members|memberships)(/.*)?"
+    # review #97 lần 2: environment (bí mật/biến/luật bảo vệ), deploy key, khoá SSH/GPG của tài khoản, biến Actions
+    r"|/?repos/[^/\s]+/[^/\s]+/(environments/[^/\s]+(/.*)?|keys(/.*)?|actions/variables(/.*)?)/?"
+    r"|/?orgs/[^/\s]+/actions/variables(/.*)?|/?user/(keys|gpg_keys|ssh_signing_keys)(/.*)?"
 )
+# Mutation graphql huỷ/chuyển repo — như `gh repo delete|archive`.
+GRAPHQL_DESTROY_RE = re.compile(r"\b(deleteRepository|transferRepository|archiveRepository)\b")
 
 
 def _gh_api_destroy(args: List[str]) -> bool:
@@ -1356,7 +1371,12 @@ def _gh_api_destroy(args: List[str]) -> bool:
     methods = _gh_api_methods(args)
     implicit = "POST" if _gh_api_field_values(args) or any(a.split("=", 1)[0] == "--input" for a in args) else "GET"
     method, path = (methods[-1] if methods else implicit), (_api_path(pos[0]) if len(pos) == 1 else "")
-    if method != "GET" and GH_API_GUARDED_RE.fullmatch(path):
+    if (
+        method != "GET"
+        and GH_API_GUARDED_RE.fullmatch(path)
+        or path == "graphql"
+        and GRAPHQL_DESTROY_RE.search(" ".join(args))
+    ):
         return True
     if method == "DELETE":
         return bool(GH_API_REPO_RE.fullmatch(path) or GH_API_MAIN_REF_RE.fullmatch(path))
