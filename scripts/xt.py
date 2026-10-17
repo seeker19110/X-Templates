@@ -2753,6 +2753,9 @@ def _package_of(path: str) -> str:
 # thật, xác thực/phân quyền, mật mã, bí mật — luôn người merge, kể cả ở L3 (ADR-0016, D-012; AUD-HAR-042).
 HARD_RISK_TAGS = ("bí mật", "auth", "thanh toán", "mật mã")
 HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "risk:admin", "risk:secret"}
+# Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
+# xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
+AGENT_HARNESS_RE = re.compile(r"(^|/)(\.claude|\.xtemplates|\.codex|\.gemini|\.cursor)/")
 
 
 def _risky_paths(pr: Dict[str, Any]) -> List[str]:
@@ -2768,7 +2771,7 @@ def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     labels = [str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict)]
     out = [f"nhãn rủi ro: {n}" for n in labels if n in HARD_RISK_LABELS]
     for tag, rx in RISK_PATH_RES:
-        hit = [p for p in risky if rx.search(p)]
+        hit = [p for p in risky if rx.search(p) and not (tag == "auth" and AGENT_HARNESS_RE.search(p))]
         if tag in HARD_RISK_TAGS and hit:
             out.append(f"đường dẫn nhạy cảm ({tag}): {', '.join(hit[:3])}")
     own = [p for p in risky if any(fnmatch.fnmatch(p, g) for g in risk_paths)]

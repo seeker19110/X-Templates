@@ -206,6 +206,26 @@ class MergeDecisionTest(unittest.TestCase):
             (none["verdict"], none["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
         )
 
+    def test_agent_harness_session_is_not_hard_auth(self):
+        """D-020: `session`/`permission` trong harness agent là phiên/quyền của agent, không phải auth của ứng dụng — không
+        thuộc ngoại lệ cứng, vẫn làn chuẩn (cổng/CI); code phiên của ứng dụng và bí mật trong harness vẫn là ngoại lệ cứng."""
+
+        def files(*paths: str) -> list[dict]:
+            return [{"path": x, "additions": 1, "deletions": 0} for x in paths]
+
+        harness = pr(files=files(".claude/hooks/session-start.sh", ".xtemplates/framework/permissions.md"))
+        self.assertEqual(xt.merge_hard_reasons(harness, []), [])
+        reasons = xt.merge_lane_reasons(harness, [])
+        self.assertTrue(any("(cổng/CI)" in r for r in reasons), reasons)
+        self.assertFalse(any("(auth)" in r for r in reasons), reasons)
+        for path, tag in (
+            ("src/session_store.py", "(auth)"),
+            ("app/.claude-like/session.ts", "(auth)"),
+            (".claude/.env", "(bí mật)"),
+        ):
+            with self.subTest(path):
+                self.assertIn(tag, " ".join(xt.merge_hard_reasons(pr(files=files(path)), [])))
+
     def test_standard_lane_reasons(self):
         f = [{"path": "tests/test_x.py", "additions": 1, "deletions": 0}]
         cases = {

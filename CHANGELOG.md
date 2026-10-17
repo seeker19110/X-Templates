@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **`merge-check` không còn xếp file harness agent vào ngoại lệ cứng "auth"** (D-020): mẫu đường dẫn auth khớp tiền tố
+  `session`/`permission` nên `.claude/hooks/session-start.sh` (phiên agent) bị coi là xác thực → guard chặn agent
+  merge/bật auto-merge (#93 phải người merge). Nay `.claude/`, `.xtemplates/`, `.codex/`, `.gemini/`, `.cursor/` miễn
+  nhóm "auth" (vẫn làn chuẩn qua "cổng/CI"); code phiên/đăng nhập của ứng dụng và file bí mật trong harness vẫn là
+  ngoại lệ cứng.
 - Test hook: bảng ca của `PreBashGuardTest`, `PreEditGuardTest`, `GuardPolicyTest` gọi `guard` trong tiến trình test
   (`guard_decision`), mỗi loại quyết định giữ ca qua hook thật; `MergeGuardTest` chạy `xt.py merge-check` trong tiến
   trình, `test_merge_check_real_subprocess` giữ đường tiến trình con. `test_hooks` 41 → 29 s, cổng 1m03s → 50s dưới

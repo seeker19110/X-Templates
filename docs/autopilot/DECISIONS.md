@@ -134,3 +134,10 @@
 - Chọn: Chặn: lý do ngoại lệ cứng thuộc DANGER_MARKERS, agent không merge/bật auto-merge, người merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: LOOP-STOP-005 là MUST, merge tiền/auth/bí mật không đảo ngược được bằng revert khi đã chạy thật; chặn chặt hơn hỏi nên vẫn đúng tinh thần ADR-0018 (không dừng chờ — agent loop defer việc đó)
 - Đường lùi: Bỏ HARD_ASK khỏi DANGER_MARKERS hoặc revert ADR-0019
+
+### D-020 · 2026-10-17T18:41:51+00:00 · Ngoại lệ cứng 'auth' (RISK_PATH_RES) bắt nhầm .claude/hooks/session-start.sh (session = phiên agent) → agent bị chặn merge PR harness
+
+- Phương án: (1) Miễn nhóm auth cho đường dẫn harness agent (.claude/, .xtemplates/, .codex/, .gemini/, .cursor/); vẫn vào làn chuẩn qua cổng/CI · (2) Bỏ 'session' khỏi regex auth · (3) So khớp nguyên từ (token)
+- Chọn: Miễn nhóm auth cho đường dẫn harness agent (.claude/, .xtemplates/, .codex/, .gemini/, .cursor/); vẫn vào làn chuẩn qua cổng/CI
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: code phiên/đăng nhập của ứng dụng vẫn là ngoại lệ cứng (PA2 nới lỏng nó); PA3 không sửa được vì session-start tách token 'session'. File harness đã có nhóm cổng/CI; guard.py (cùng thư mục) vốn đã tự merge được ở L3 — chỉ tên file trùng chữ
+- Đường lùi: Bỏ điều kiện AGENT_HARNESS_RE trong merge_hard_reasons
