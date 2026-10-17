@@ -2472,7 +2472,6 @@ class GuardEgressAuditTest(EgressCase):
                 "docker compose run --entrypoint sh app -c 'pnpm test'",
                 "uv run bash -c 'pytest -q'",
                 "docker run --rm alpine sh",
-                "docker exec ctr bash -lc 'rm -rf /'",
             ),
         )
         self.assertEqual(self.dec("uv run bash -c 'rm -rf ~'"), "deny")
@@ -2506,6 +2505,34 @@ class GuardEgressAuditTest(EgressCase):
                 "nix-shell --run 'make test'",
             ),
         )
+
+    def test_review_83_gaps(self):  # review #83: đối ngoại trong container, bind mount, gốc là home, `npm exec -c`
+        self.assert_all(
+            "ask",
+            (
+                'docker run img sh -c "npm publish"',
+                'docker run img sh -c "gh pr merge 1"',
+                'docker run img sh -c "gh api -X PUT repos/o/r/pulls/1/merge"',
+                'docker run img sh -c "git push --force origin main"',
+                "docker run img npm publish",
+                "docker exec ctr gh pr merge 1",
+                'docker run -v "$PWD":/w img sh -c "rm -rf /w/.git"',
+                'docker run -v .:/w img sh -c "rm -rf /w"',
+                "docker exec ctr bash -lc 'rm -rf /'",
+                'npm exec -c "pip install evil"',
+                'npm exec --call="pip install evil"',
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "docker compose exec web sh -c 'cd /app && rm -rf node_modules dist && pnpm i'",
+                "docker run --rm -v data:/var/lib/x img sh -c 'rm -rf /tmp/cache'",
+                'npm exec -c "vitest run"',
+            ),
+        )
+        home = self.guard.bash_decision("docker run -v /home/user/.ssh:/s img true", "/home/user", "/home/user")
+        self.assertEqual(home["decision"], "ask")
 
     def test_guard_mount_absolute_inside_project(self):  # AUD-HAR-047
         root = str(self.root)

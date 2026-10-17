@@ -1480,7 +1480,9 @@ def _sensitive_mount(spec: str, root: str = "") -> str:
     hit = hit or (absolute and norm.startswith(SENSITIVE_MOUNT_PREFIXES))
     home_based = absolute or src.startswith(("~", "$HOME", "${HOME}")) or ".." in src.split("/")  # `../.ssh` ra ngoài
     base = root.rstrip("/")
-    home_based = home_based and not (absolute and base and (norm == base or norm.startswith(base + "/")))
+    # Gốc dự án là home (`~`, `/home/u`) thì không miễn: `~/.ssh` "nằm trong dự án" vẫn là bí mật (review #83).
+    exempt = base and not (base in SENSITIVE_MOUNTS or HOME_DIR_RE.fullmatch(base) or base == os.path.expanduser("~"))
+    home_based = home_based and not (absolute and exempt and (norm == base or norm.startswith(base + "/")))
     return src if hit or (home_based and any(p in norm + "/" for p in SENSITIVE_MOUNT_PARTS)) else ""
 
 
@@ -2021,48 +2023,61 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     return asks
 
 
-def _container_shell(argv: List[str]) -> List[str]:
-    """Lệnh chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run --entrypoint sh
-    dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
+def _container_exec(argv: List[str]) -> Tuple[List[str], List[str]]:
+    """(cờ, lệnh) chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run
+    --entrypoint sh dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
     n = normalize(argv)
     if n[:1] not in (["docker"], ["podman"]):
-        return []
+        return [], []
     args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
     opts, inner = _exec_split(args[1:] if args[:1] == ["container"] else args)
     entry = [posixpath.basename(e) for e in _flag_values(opts, ("--entrypoint",))]
-    return [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
+    return opts, [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
 
 
-def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[str]]:
-    """`sh -c` sau lệnh bọc chạy trên máy (`uv run bash -c …`) và trong container (AUD-SEC-041): (máy, container)."""
+def _binds_host(opts: List[str]) -> bool:
+    """Container gắn thư mục máy (`-v $PWD:/w`, `-v .:/w`, `--mount type=bind,src=…`) — xoá trong đó là xoá trên máy."""
+    srcs = [_mount_source(v) for v in _flag_values(opts, ("-v", "--volume", "--mount"))]
+    return any(src.startswith(("/", ".", "~", "$")) for src in srcs)
+
+
+# Gốc giả cho lệnh trong container không gắn thư mục máy: luật xoá/ghi "ngoài dự án" không áp, luật đối ngoại vẫn áp.
+CONTAINER_ROOT = "/"
+
+
+def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, bool]]]:
+    """Lệnh lồng sau lệnh bọc chạy trên máy (`uv run bash -c …`, `npm exec -c …`, `nix-shell --run …`) và trong container
+    (AUD-SEC-041; review #83: cả lệnh gọi thẳng, kèm cờ có gắn thư mục máy): (máy, [(container, gắn máy)])."""
     host: List[str] = []
-    ctr: List[str] = []
+    ctr: List[Tuple[str, bool]] = []
     for c in split_commands(tokens):
         n = normalize(c)
         if not n:
             continue
-        inner = _container_shell(c)
+        opts, inner = _container_exec(c)
+        if inner:
+            ctr.append((_shell_c_script(inner) or shlex.join(inner), _binds_host(opts)))
+            continue
         name, args = _unwrap(n[0], n[1:])
-        script = _shell_c_script(inner) if inner else _shell_c_script([name, *args]) if name != n[0] else None
-        (ctr if inner else host).extend([script] if script else [])
+        script = _shell_c_script([name, *args]) if name != n[0] else None
+        host += [script] if script else []
         if n[0] == "nix-shell":
             host += _flag_values(n[1:], ("--run", "--command"))
+        if n[0] in ("npm", "pnpm") and n[1:2] == ["exec"]:
+            host += _flag_values(n[2:], ("-c", "--call"))
     return host, ctr
 
 
-def _container_asks(script: str, depth: int) -> List[str]:
-    """Lệnh trong container: chỉ xét việc ra khỏi máy dev (mạng, thêm gói, daemon khác) — đường dẫn trong container
-    không phải đường dẫn máy nên luật xoá/ghi file của máy không áp; `sh -c` lồng tiếp được quét đệ quy."""
-    if depth >= MAX_NEST:
+def _container_asks(ctr: List[Tuple[str, bool]], root: str, cwd: Optional[str], depth: int) -> List[str]:
+    """Lệnh trong container quét bằng đủ luật (đối ngoại, merge, tải-rồi-chạy); không gắn thư mục máy thì đường dẫn là
+    của container (gốc giả `/`). Chặn/hỏi của nó thành hỏi."""
+    if ctr and depth >= MAX_NEST:
         return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
-    tokens = tokenize(script)
     out: List[str] = []
-    for c in split_commands(tokens):
-        n = normalize(c)
-        verdict = egress_rule(n[0], n[1:]) if n else ("", "")
-        out += [verdict[1]] if verdict[0] else []
-        inner = _shell_c_script(c) or _shell_c_script(_container_shell(c)) if n else None
-        out += _container_asks(inner, depth + 1) if inner else []
+    for script, binds in ctr:
+        base = root if binds else CONTAINER_ROOT
+        sub = bash_decision(script, base, (cwd or root) if binds else CONTAINER_ROOT, depth + 1)
+        out += [f"lệnh trong container: {sub['reason']}"] if sub["decision"] in ("deny", "ask") else []
     return out
 
 
@@ -2071,8 +2086,7 @@ def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], dep
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens)
     host, ctr = _wrapped_scripts(tokens)
-    for script in ctr:  # mọi lệnh, không cắt theo số lượng (review #82)
-        asks += [f"lệnh trong container: {why}" for why in _container_asks(script, depth)]
+    asks += _container_asks(ctr, root, cwd, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
     for script in _nested_scripts(cmd, tokens) + host:
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
