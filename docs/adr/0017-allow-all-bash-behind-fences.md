@@ -5,6 +5,8 @@
   `tests/test_hooks.py::SettingsJsonTest::test_bash_allowed_except_fences`)
 - **Ngày:** 2026-10-16
 - **Làm rõ:** ADR-0002 (harness fail-closed về hành động nguy hiểm) — không thay
+- **Thay một phần bởi:** ADR-0018 (§2: `ask` rỗng); §3 — từ 2026-10-17 `install.py` `merge_permissions` gộp `Bash`,
+  `deny` của khung vào `settings.json` đã có của dự án đích và gỡ `ask` mặc định cũ (quyền riêng giữ nguyên)
 
 ## Bối cảnh
 

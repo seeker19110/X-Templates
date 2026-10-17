@@ -127,3 +127,10 @@
 - Chọn: Ask nguy hiểm → deny, còn lại cho qua (lớp chính sách ở đầu ra guard)
 - Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu không dừng chờ; việc không đảo ngược vẫn bị chặn; ít code, giữ bộ luật làm đường lùi (strict)
 - Đường lùi: XT_GUARD_POLICY=strict hoặc revert ADR-0018
+
+### D-019 · 2026-10-17T11:53:48+00:00 · PR ngoại lệ cứng (ADR-0016) dưới chính sách không hỏi (ADR-0018) xử lý thế nào?
+
+- Phương án: (1) Chặn: lý do ngoại lệ cứng thuộc DANGER_MARKERS, agent không merge/bật auto-merge, người merge · (2) Cho qua: chấp nhận agent tự merge, sửa ADR-0016 và LOOP-STOP-005
+- Chọn: Chặn: lý do ngoại lệ cứng thuộc DANGER_MARKERS, agent không merge/bật auto-merge, người merge
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: LOOP-STOP-005 là MUST, merge tiền/auth/bí mật không đảo ngược được bằng revert khi đã chạy thật; chặn chặt hơn hỏi nên vẫn đúng tinh thần ADR-0018 (không dừng chờ — agent loop defer việc đó)
+- Đường lùi: Bỏ HARD_ASK khỏi DANGER_MARKERS hoặc revert ADR-0019
