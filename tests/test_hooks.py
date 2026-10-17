@@ -1476,11 +1476,13 @@ class MergeGuardTest(unittest.TestCase):
         import xt
 
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            try:
-                xt.main(["merge-check", "--json", *(["--pr", selector[0]] if selector else [])])
-            except SystemExit:
-                pass
+        # Bản thật chỉ đọc stdout, bỏ qua mã thoát: argparse/`sys.exit` của xt không được kết thúc tiến trình test.
+        with (
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.suppress(SystemExit),
+        ):
+            xt.main(["merge-check", "--json", *(["--pr", selector[0]] if selector else [])])
         try:
             return dict(json.loads(out.getvalue()))
         except ValueError:
