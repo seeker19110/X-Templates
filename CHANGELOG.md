@@ -382,6 +382,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Cổng commit tự chạy mã của repo lồng** (code scanning trên PR cài khung ở dự án đích; nối AUD-SEC-015): repo git lồng
+  trong dự án có `xt.yaml`/`.xtemplates` riêng (vd repo bên thứ ba clone vào `vendor/`) → `git commit` ở đó chạy
+  `scripts/dev-task.sh` của repo ấy TRƯỚC bước hỏi quyền. Nay `pre-bash-guard.sh` chỉ tự chạy cổng của chính dự án
+  (`CLAUDE_PROJECT_DIR`); repo lồng có cổng riêng được hỏi như repo ngoài dự án (repo lồng không có khung riêng như
+  submodule, `apps/web` → cổng dự án như cũ). Test: `test_commit_gate_nested_cloned_repo`,
+  `test_nested_repo_with_own_xt_asks_without_running_its_gate` (đỏ trước, xanh sau). Dự án đích: chạy lại `install.py`.
 - **Guard hỏi khi ra khỏi máy dev** (đề xuất chủ repo 2026-10-17): phiên chạy không hỏi quyền (`--permission-mode auto`,
   allow rộng ở settings người dùng) chỉ còn guard làm lớp hỏi, nên PreToolUse hỏi thêm khi: `ssh`/`sftp`/`mosh`/`telnet`
   vào máy không loopback, `scp`/`rsync` chép với máy không loopback (alias `~/.ssh/config` như `prod` cũng tính); client
