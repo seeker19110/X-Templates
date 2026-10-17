@@ -1092,7 +1092,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return _gh_api_merge_rule(args[1:], root)
     verdict = _publish_rule(name, args)
-    return verdict if verdict[0] else egress_rule(name, args)
+    return verdict if verdict[0] else egress_rule(name, args, root)
 
 
 def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
@@ -1467,9 +1467,9 @@ def _mount_source(spec: str) -> str:
     return spec.split(":", 1)[0] if ":" in spec else ""
 
 
-def _sensitive_mount(spec: str) -> str:
-    """Nguồn mount nhạy cảm sau khi chuẩn hoá (`//`, `/tmp/..`, `/home/u/../..` → `/`). Đường dẫn tương đối/`$PWD` nằm
-    trong dự án (`./.docker/nginx.conf`, `./deploy/etc/x`) không xét theo mảnh tên."""
+def _sensitive_mount(spec: str, root: str = "") -> str:
+    """Nguồn mount nhạy cảm sau khi chuẩn hoá (`//`, `/tmp/..`, `/home/u/../..` → `/`). Đường dẫn trong dự án — tương
+    đối, `$PWD`, hay tuyệt đối dưới gốc dự án (`./.docker/nginx.conf`, `<gốc>/etc/x`) — không xét theo mảnh tên."""
     src = _mount_source(spec)
     absolute = src.startswith("/")
     norm = posixpath.normpath(re.sub("/+", "/", src)) if absolute else src.rstrip("/") or src
@@ -1478,6 +1478,8 @@ def _sensitive_mount(spec: str) -> str:
     hit = norm in SENSITIVE_MOUNTS or HOME_DIR_RE.fullmatch(norm) or norm.endswith(".sock")
     hit = hit or (absolute and norm.startswith(SENSITIVE_MOUNT_PREFIXES))
     home_based = absolute or src.startswith(("~", "$HOME", "${HOME}")) or ".." in src.split("/")  # `../.ssh` ra ngoài
+    base = root.rstrip("/")
+    home_based = home_based and not (absolute and base and (norm == base or norm.startswith(base + "/")))
     return src if hit or (home_based and any(p in norm + "/" for p in SENSITIVE_MOUNT_PARTS)) else ""
 
 
@@ -1530,7 +1532,7 @@ def _exec_split(args: List[str]) -> Tuple[List[str], List[str]]:
     return rest[:k], normalize(rest[k + 1 :])
 
 
-def _host_power(opts: List[str]) -> str:
+def _host_power(opts: List[str], root: str = "") -> str:
     """Cờ trao quyền máy chủ: privileged, namespace của host, cap nguy hiểm, thiết bị, unconfined, mount nhạy cảm."""
     why = ""
     if "--privileged" in opts or any(a.startswith("--privileged=") and a != "--privileged=false" for a in opts):
@@ -1541,11 +1543,11 @@ def _host_power(opts: List[str]) -> str:
     why = why or ("--device" if _flag_values(opts, ("--device",)) else "")
     unconfined = any("unconfined" in v for v in _flag_values(opts, ("--security-opt",)))
     why = why or ("--security-opt unconfined" if unconfined else "")
-    mounts = [m for m in map(_sensitive_mount, _flag_values(opts, ("-v", "--volume", "--mount"))) if m]
+    mounts = [m for v in _flag_values(opts, ("-v", "--volume", "--mount")) for m in [_sensitive_mount(v, root)] if m]
     return why or (f"mount {mounts[0]}" if mounts else "")
 
 
-def _container_rule(args: List[str]) -> str:
+def _container_rule(args: List[str], root: str = "") -> str:
     """`docker|podman` điều khiển daemon máy khác (`-H`, `--context`), container có quyền máy chủ (`run|create`,
     `compose run`, `exec --privileged`), hoặc lệnh trong container ra khỏi máy dev."""
     k = _skip_opts(args, DOCKER_GLOBAL_VALUE_FLAGS)
@@ -1556,10 +1558,10 @@ def _container_rule(args: List[str]) -> str:
     if args[:1] == ["container"]:
         args = args[1:]
     opts, inner = _exec_split(args)
-    why = _host_power(opts)
+    why = _host_power(opts, root)
     if why:
         return f"container có quyền máy chủ ({why})"
-    verdict = egress_rule(inner[0], inner[1:]) if inner else ("", "")
+    verdict = egress_rule(inner[0], inner[1:], root) if inner else ("", "")
     return f"{verdict[1]} (trong container)" if verdict[0] else ""
 
 
@@ -1579,7 +1581,7 @@ def _unwrap(name: str, args: List[str]) -> Tuple[str, List[str]]:
     return name, args
 
 
-def egress_rule(name: str, args: List[str]) -> Tuple[str, str]:
+def egress_rule(name: str, args: List[str], root: str = "") -> Tuple[str, str]:
     """Kết nối/gửi ra máy khác, thêm phụ thuộc, container có quyền máy chủ → ask (không deny: việc hợp lệ khi người duyệt)."""
     name, args = _unwrap(name, args)
     why = ""
@@ -1592,7 +1594,7 @@ def egress_rule(name: str, args: List[str]) -> Tuple[str, str]:
     elif name in PKG_ADD:
         why = _pkg_rule(name, args)
     elif name in ("docker", "podman"):
-        why = _container_rule(args)
+        why = _container_rule(args, root)
     return ("ask", why) if why else ("", "")
 
 

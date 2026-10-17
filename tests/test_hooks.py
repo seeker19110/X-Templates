@@ -2477,6 +2477,25 @@ class GuardEgressAuditTest(EgressCase):
         )
         self.assertEqual(self.dec("uv run bash -c 'rm -rf ~'"), "deny")
 
+    def test_guard_mount_absolute_inside_project(self):  # AUD-HAR-047
+        root = str(self.root)
+        self.assert_all(
+            "",
+            (
+                f"docker run --rm -v {root}/.docker:/d alpine",
+                f"docker run --rm -v {root}/deploy/etc/app.ini:/app.ini alpine",
+                f"docker run --rm -v {root}:/w alpine",
+            ),
+        )
+        self.assert_all(
+            "ask",
+            (
+                f"docker run --rm -v {root}/../.ssh:/s alpine",
+                f"docker run --rm -v {root}x/.ssh:/s alpine",
+                "docker run --rm -v /home/u/.docker:/d alpine",
+            ),
+        )
+
     def test_url_re_linear(self):  # AUD-CODE-011
         start = time.monotonic()  # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
         self.assertEqual(self.guard._url_hosts("a" * 200_000), [])
