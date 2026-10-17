@@ -2971,6 +2971,8 @@ class GuardFenceTest(unittest.TestCase):
             "rm -rf .claude/hooks",
             "unlink .claude/settings.local.json",
             "sed -i 's/deny/x/' .claude/hooks/guard.py",
+            "python3 -c \"import os; os.remove('.claude/hooks/guard.py')\"",
+            "python3 -c \"from pathlib import Path; Path('.claude/settings.json').write_text('{}')\"",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.bash(cmd), "deny")
@@ -2980,6 +2982,7 @@ class GuardFenceTest(unittest.TestCase):
             "python3 -m ruff format .claude/hooks/guard.py",
             "cp .claude/hooks/guard.py /tmp/g.py",
             "rm -rf .claude/worktrees/x",
+            "python3 -c \"import pathlib; s=open('.claude/hooks/guard.py').read(); pathlib.Path('o.txt').write_text(s)\"",
         ):
             with self.subTest(ok=cmd):
                 self.assertEqual(self.bash(cmd), "")
@@ -3041,6 +3044,126 @@ class MissingGuardTest(unittest.TestCase):
         ):
             with self.subTest(ok=cmd):
                 self.assertIsNone(dec(cmd))
+
+
+class GuardWave1017Test(unittest.TestCase):
+    """AUD-SEC-047…049: biến thể push nhánh chính, lệnh huỷ, ghi file bí mật qua Bash lọt chính sách ADR-0018."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def check(self, want: str, cmds: tuple[str, ...]) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd), mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+                self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"], want)
+
+    def test_guard_push_glob_refspec(self):
+        self.check(
+            "deny",
+            (
+                "git push origin 'refs/heads/*:refs/heads/*'",
+                "git push origin '*:*'",
+                "git push origin :",
+                "git push --branches",
+                "git -c push.default=matching push origin",
+                "git -c remote.origin.push=refs/heads/feat:refs/heads/main push",
+                "git -c remote.origin.mirror=true push origin",
+                "git config remote.origin.push refs/heads/feat:refs/heads/main",
+                "git config --add remote.origin.push 'refs/heads/*'",
+                "git config push.default matching",
+                "git config set remote.origin.push HEAD:main",
+                "git remote add --mirror=push backup https://example.com/r.git",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "git push origin feat",
+                "git push -u origin HEAD:feat",
+                "git -c user.name=x push origin feat",
+                "git config user.name x",
+                "git config --get remote.origin.push",
+                "git remote add up https://example.com/r.git",
+            ),
+        )
+
+    def test_guard_destroy_variants(self):
+        self.check(
+            "deny",
+            (
+                "gh api -X DELETE repos/o/r",
+                "gh api --method DELETE /repos/o/r/",
+                "gh api -X DELETE repos/{owner}/{repo}",
+                "gh api -X DELETE repos/o/r/git/refs/heads/main",
+                "gh api -X PATCH repos/o/r -F archived=true",
+                "terraform apply -destroy",
+                "terraform apply -auto-approve -destroy",
+                "tofu apply --destroy",
+                "pulumi down",
+                "pulumi down --yes",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "gh api -X DELETE repos/o/r/issues/comments/1",
+                "gh api -X DELETE repos/o/r/git/refs/heads/feat",
+                "gh api -X PATCH repos/o/r -f description=x",
+                "terraform plan -destroy",
+                "terraform apply",
+                "pulumi preview",
+            ),
+        )
+
+    def test_guard_secret_write_variants(self):
+        self.check(
+            "deny",
+            (
+                "curl -o .env http://localhost/x",
+                "curl --output .env http://localhost/x",
+                "curl --output=.env http://localhost/x",
+                "curl -sSo .env http://localhost/x",
+                "curl -O http://localhost/x/.env",
+                "wget -O .env http://localhost/x",
+                "wget --output-document=.env http://localhost/x",
+                "wget http://localhost/x/.env",
+                "git checkout other -- .env",
+                "git checkout other .env",
+                "git restore --source=other .env",
+                "git restore -s other -- secrets/k.pem",
+                "rsync /tmp/x .env",
+                "patch .env /tmp/p",
+                "python3 -c \"open('.env','w').write('x')\"",
+                "node -e \"require('fs').writeFileSync('.env','x')\"",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "curl -o out.json http://localhost/x",
+                "curl -O http://localhost/x/data.json",
+                "wget http://localhost/x/data.json",
+                "git checkout main",
+                "git checkout -- src/a.py",
+                "git restore .claude/hooks/guard.py",
+                "rsync -a src/ dst/",
+                "python3 -c \"print(open('.env.example').read())\"",
+                "python3 -c \"names = ['.env']; open('out.txt', 'w').write(str(names))\"",
+                # heredoc thuộc lệnh sở hữu `<<`, không thuộc trình thông dịch khác trên cùng dòng (gặp khi commit)
+                "python3 a.py 2>&1 | tail -1; git commit -F - <<'EOF'\nopen('.env','w')\nEOF",
+            ),
+        )
+        self.check(
+            "deny",
+            (
+                "cat <<'E' | python3\nopen('.env','w').write('x')\nE",
+                "ls && python3 - <<'E'\nopen('.env','w').write('x')\nE",
+            ),
+        )
 
 
 if __name__ == "__main__":

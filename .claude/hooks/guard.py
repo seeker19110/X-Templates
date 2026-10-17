@@ -473,13 +473,24 @@ def _strip_prefixes(argv: List[str]) -> List[str]:
     return a
 
 
+# Cấu hình làm `git push` đẩy nhiều nhánh/nhánh chính mà lệnh không ghi refspec (AUD-SEC-047): `push.default=matching`,
+# `remote.<r>.push`, `remote.<r>.mirror`. Đặt qua `git -c` → `normalize` chèn PUSH_CONFIG_FLAG sau lệnh con.
+PUSH_CONFIG_RE = re.compile(r"(push\.default|remote\..+\.(push|mirror))(=.*)?", re.I)
+PUSH_CONFIG_FLAG = "--xt-push-config"
+
+
 def _strip_git_global_opts(a: List[str]) -> List[str]:
-    """`git -C p -c k=v --no-pager sub …` → `git sub …` (tuỳ chọn có giá trị ăn thêm một token)."""
+    """`git -C p -c k=v --no-pager sub …` → `git sub …` (tuỳ chọn có giá trị ăn thêm một token); `-c` cấu hình push →
+    `git sub --xt-push-config …`."""
     rest = a[1:]
     i = 0
+    push_cfg = False
     while i < len(rest) and rest[i].startswith("-"):
+        nxt = rest[i + 1] if i + 1 < len(rest) else ""
+        push_cfg = push_cfg or (rest[i] in ("-c", "--config-env") and bool(PUSH_CONFIG_RE.fullmatch(nxt)))
         i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
-    return ["git", *rest[i:]]
+    out = ["git", *rest[i:]]
+    return [*out[:2], PUSH_CONFIG_FLAG, *out[2:]] if push_cfg and len(out) > 1 else out
 
 
 def _git_C_dirs(argv: List[str]) -> List[str]:
@@ -623,6 +634,39 @@ def _current_branch(cwd: Optional[str]) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+PUSH_ALL_WHY = (
+    "push --all/--tags đẩy mọi nhánh/tag (gồm nhánh chính, tag phát hành; refspec glob/`:`/cấu hình push) — người duyệt"
+)
+GIT_CONFIG_READ = {
+    "--get",
+    "--get-all",
+    "--get-regexp",
+    "--list",
+    "-l",
+    "get",
+    "list",
+    "--unset",
+    "--unset-all",
+    "unset",
+}
+
+
+def _git_config(args: List[str]) -> Tuple[str, str]:
+    """config: đặt `push.default`/`remote.<r>.push|mirror` = push nhánh chính ngầm cho mọi `git push` sau (AUD-SEC-047)."""
+    if set(args) & GIT_CONFIG_READ:
+        return "", ""
+    if any(PUSH_CONFIG_RE.fullmatch(a) for a in _positionals(args)):
+        return "ask", f"đặt cấu hình push — {PUSH_ALL_WHY}"
+    return "", ""
+
+
+def _git_remote(args: List[str]) -> Tuple[str, str]:
+    """remote add --mirror=push: mọi `git push` tới remote đó là `--mirror` (ghi đè/xoá nhánh chính)."""
+    if args[:1] == ["add"] and any(a.startswith("--mirror") for a in args):
+        return "ask", f"remote --mirror — {PUSH_ALL_WHY}"
+    return "", ""
+
+
 def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple[str, str]:
     """Một refspec của push: đích là nhánh chính → deny nếu xoá, ask nếu đẩy thẳng. Đích `HEAD`/`@` = nhánh hiện tại."""
     dst = ref.split(":", 1)[1] if ":" in ref else ref
@@ -644,8 +688,9 @@ def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     refs = _positionals(args, ("-o", "--push-option", "--repo", "--receive-pack", "--exec"))
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
-    if "--all" in args or "--tags" in args:
-        return "ask", "push --all/--tags đẩy mọi nhánh/tag (gồm nhánh chính, tag phát hành) — người duyệt"
+    spread = any("*" in r or r == ":" for r in refs[1:])  # refspec glob, `:` = matching (AUD-SEC-047)
+    if spread or {"--all", "--branches", "--tags", PUSH_CONFIG_FLAG} & set(args):
+        return "ask", PUSH_ALL_WHY
     deleting = "--delete" in args or "d" in flags
     for r in refs[1:] or ["HEAD"]:  # không refspec: đẩy nhánh hiện tại
         verdict = _push_ref_rule(r, deleting, cwd)
@@ -725,12 +770,14 @@ GIT_RULES: Dict[str, GitRule] = {
     "restore": _git_restore,
     "stash": _git_stash,
     "branch": _git_branch,
+    "config": _git_config,
+    "remote": _git_remote,
 }
 
 
 # git nhận tuỳ chọn dài viết tắt (`reset --ha`, `push --mirr`, `clean --fo`): viết tắt của tuỳ chọn nguy hiểm → coi là
 # tuỳ chọn đó (AUD-SEC-023). Thứ tự: ngắn trước, để `--forc` thành `--force`.
-GIT_DANGER_LONG = ("--all", "--hard", "--tags", "--force", "--delete", "--mirror", "--discard-changes")
+GIT_DANGER_LONG = ("--all", "--hard", "--tags", "--force", "--delete", "--mirror", "--branches", "--discard-changes")
 
 
 def _git_long(a: str) -> str:
@@ -792,8 +839,10 @@ DESTROY_CMDS: Dict[str, Tuple[str, ...]] = {
     "kubectl": ("delete",),
     "terraform": ("destroy",),
     "tofu": ("destroy",),
-    "pulumi": ("destroy",),
+    "pulumi": ("destroy", "down"),
 }
+# `terraform|tofu apply -destroy` = destroy (AUD-SEC-048); `plan -destroy` chỉ in kế hoạch.
+APPLY_DESTROY = {"-destroy", "--destroy", "-destroy=true", "--destroy=true"}
 INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 
@@ -1249,9 +1298,25 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
-        return _gh_api_merge_rule(args[1:], root)
+        return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)
     verdict = _publish_rule(name, args)
     return verdict if verdict[0] else egress_rule(name, args, root)
+
+
+# `gh api` huỷ repo/nhánh chính (AUD-SEC-048): DELETE repo hay ref nhánh chính, PATCH `archived=true` — như `gh repo
+# delete|archive`.
+GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
+GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
+
+
+def _gh_api_destroy(args: List[str]) -> bool:
+    pos = _positionals(args, GH_API_VALUE_FLAGS)
+    methods = _gh_api_methods(args)
+    method, path = (methods[-1] if methods else ""), (pos[0] if len(pos) == 1 else "")
+    if method == "DELETE":
+        return bool(GH_API_REPO_RE.fullmatch(path) or GH_API_MAIN_REF_RE.fullmatch(path))
+    archive = any(v.replace(" ", "").lower() == "archived=true" for v in _gh_api_field_values(args))
+    return method == "PATCH" and archive and bool(GH_API_REPO_RE.fullmatch(path))
 
 
 def _pr_flag_merge(args: List[str], i: int) -> Tuple[List[str], str]:
@@ -1277,6 +1342,8 @@ def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
         return "", ""
     subs = ASK_CMDS[name]
     words = set(_positionals(args)) | {a for a in args if a.startswith("--")}
+    if name in ("terraform", "tofu") and "apply" in words and set(args) & APPLY_DESTROY:
+        words.add("destroy")
     if words & set(DESTROY_CMDS.get(name, ())):
         return "ask", DESTROY_ASK
     return ("ask", EXTERNAL_ASK) if subs is None or words & set(subs) else ("", "")
@@ -1905,6 +1972,62 @@ def _inplace_targets(name: str, args: List[str]) -> List[str]:
     return []
 
 
+def _url_name(u: str) -> str:
+    """Tên file mà `curl -O`/`wget` lưu: phần cuối đường dẫn của URL (bỏ query/fragment)."""
+    path = u.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0]
+    return posixpath.basename(path.rstrip("/")) if "/" in path else ""
+
+
+def _curl_outputs(args: List[str]) -> List[str]:
+    """Đích ghi của curl: `-o f`, `--output f|=f`, cờ gộp `-sSo f`; `-O`/`--remote-name` = tên cuối URL (AUD-SEC-049)."""
+    out = _flag_values(args, ("--output",))
+    remote = "--remote-name" in args or "--remote-name-all" in args
+    for i, a in enumerate(args):
+        for j, c in enumerate(a[1:] if a.startswith("-") and not a.startswith("--") else "", 1):
+            remote = remote or c == "O"
+            if c in CURL_SHORT_VALUE:
+                if c == "o":
+                    out.append(a[j + 1 :] or (args[i + 1] if i + 1 < len(args) else ""))
+                break
+    return out + ([_url_name(u) for u in args if "://" in u] if remote else [])
+
+
+def _wget_outputs(args: List[str]) -> List[str]:
+    """Đích ghi của wget: `-O f`/`-qO f`/`--output-document=f`; không có thì tên cuối của từng URL (AUD-SEC-049)."""
+    out = _flag_values(args, ("-O", "--output-document"))
+    out += [
+        args[i + 1] for i, a in enumerate(args[:-1]) if a[:1] == "-" and a[1:2] != "-" and len(a) > 2 and a[-1] == "O"
+    ]
+    return out or [_url_name(u) for u in args if "://" in u]
+
+
+def _rsync_dest(args: List[str]) -> List[str]:
+    pos = _positionals(args, REMOTE_VALUE_FLAGS)
+    return pos[-1:] if len(pos) >= 2 and ":" not in pos[-1] else []
+
+
+def _patch_targets(args: List[str]) -> List[str]:
+    """patch [tuỳ chọn] [file gốc [file patch]]: file gốc bị sửa tại chỗ; `-o f` ghi ra f."""
+    pos = _positionals(args, ("-i", "-o", "-d", "-B", "-r", "-z", "-V", "-D", "-F", "-g", "--output", "--input"))
+    return pos[:1] + _flag_values(args, ("-o", "--output"))
+
+
+FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
+    "curl": _curl_outputs,
+    "wget": _wget_outputs,
+    "rsync": _rsync_dest,
+    "patch": _patch_targets,
+}
+
+
+def _git_file_targets(n: List[str]) -> List[str]:
+    """File mà `git checkout <rev> -- f`/`git restore -s <rev> f` ghi đè từ commit khác — chỉ xét bí mật: khôi phục file
+    cổng/hàng rào bằng git là đường lùi chuẩn, không chặn."""
+    if n[:2] in (["git", "checkout"], ["git", "restore"]):
+        return _positionals(n[2:], ("-s", "--source", "-b", "-B", "--orphan", "--conflict", "--pathspec-from-file"))
+    return []
+
+
 def write_targets(n: List[str], argv: List[str]) -> List[str]:
     """File mà lệnh có thể ghi/xoá: chuyển hướng, `sed -i`/`perl -i`, `tee`, cp/mv/install/ln, truncate/rm, `git rm/mv`."""
     out = [argv[i + 1] for i, t in enumerate(argv[:-1]) if t in REDIRECTS]
@@ -1919,6 +2042,8 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
         return out + _positionals(args)  # `-f` của rm là cờ, không ăn giá trị (từng nuốt đường dẫn)
     if name == "truncate":
         return out + _positionals(args, ("-s", "--size", "-r", "--reference"))
+    if name in FILE_WRITERS:
+        return out + FILE_WRITERS[name](args)
     return out + _inplace_targets(name, args)
 
 
@@ -1978,7 +2103,8 @@ def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
             asks.append(CAPABILITY_WHY.format(f"ghi {target} qua Bash"))
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
-    return asks
+    secrets = [t for t in _git_file_targets(n) if _target_kind(t, root) == "secret"]
+    return asks + [f"ghi file bí mật qua Bash (git lấy từ commit khác): {t}" for t in secrets]
 
 
 def _target_kind(target: str, root: str) -> str:
@@ -2115,17 +2241,29 @@ def _heredoc_scripts(cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell)
     lines = cmd.replace("\\\n", "").split("\n")
     i = 0
     while i < len(lines):
-        delims = [m.group(2) for m in HEREDOC_RE.finditer(lines[i])]
         opener, i = lines[i], i + 1
-        for d in delims:
+        for m in HEREDOC_RE.finditer(opener):
             body: List[str] = []
-            while i < len(lines) and lines[i].strip() != d:
+            while i < len(lines) and lines[i].strip() != m.group(2):
                 body.append(lines[i])
                 i += 1
             i += 1
-            if any(pred(c) for c in split_commands(tokenize(opener))):
+            if any(pred(c) for c in split_commands(tokenize(_pipeline_at(opener, m.start())))):
                 out.append("\n".join(body))
     return out
+
+
+# Ranh giới giữa các pipeline trên một dòng: `;`, `&&`, `||`, `&` đứng riêng (không phải `&>`, `>&`, `|&`).
+LIST_SEP_RE = re.compile(r";|&&|\|\||(?<![>|&])&(?![>&])")
+
+
+def _pipeline_at(line: str, pos: int) -> str:
+    """Pipeline chứa vị trí `pos` của dòng: heredoc chỉ đi vào lệnh của pipeline đó (`cat <<E | bash` → bash chạy thân),
+    không vào lệnh khác trên cùng dòng (`python3 a.py; git commit -F - <<E` — thân là dữ liệu của commit)."""
+    seps = [(s.start(), s.end()) for s in LIST_SEP_RE.finditer(line)]
+    start = max((e for s, e in seps if e <= pos), default=0)
+    end = min((s for s, e in seps if s >= pos), default=len(line))
+    return line[start:end]
 
 
 def _echoed_scripts(src: List[str]) -> List[str]:
@@ -2357,9 +2495,30 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
             continue
         for lit in STR_LITERAL_RE.findall(script):
             kind = path_kind(rel_path(lit, root), root) if ("/" in lit or "." in lit) and lit not in ("..",) else ""
-            if kind in GUARDED_KINDS:
+            direct = _direct_write(script, lit)
+            if direct and _is_fence(lit, root):
+                asks.append(FENCE_WHY.format(f"{lit} — script trình thông dịch"))
+            elif direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
+                asks.append(f"ghi file bí mật qua Bash (script trình thông dịch): {lit}")
+            elif kind in GUARDED_KINDS:
                 asks.append(f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt")
     return asks
+
+
+# Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,
+# `shutil.copy(a, '…')`, `fs.writeFileSync('…'`): chỉ khi đó mới CHẶN — script chỉ nhắc tên file (ghi file khác) vẫn
+# theo hỏi/cho qua, tránh chặn oan script sửa tài liệu/test có nhắc `.env` hay `.claude/hooks/…`.
+DIRECT_WRITE_FMT = (
+    r"open\(\s*{q}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
+    r"|(?:\bos\.(?:remove|unlink|rename|replace|truncate)|\bshutil\.\w+|writeFile\w*|appendFile\w*|unlinkSync|rmSync"
+    r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|\bunlink)\(\s*(?:[^)]*,\s*)?{q}"
+    r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
+)
+
+
+def _direct_write(script: str, lit: str) -> bool:
+    q = "['\"]" + re.escape(lit) + "['\"]"
+    return bool(re.search(DIRECT_WRITE_FMT.format(q=q), script))
 
 
 CURL_FILE_FLAGS = {"-T", "--upload-file", "--post-file", "--body-file"}  # giá trị là đường dẫn file
