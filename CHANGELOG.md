@@ -10,7 +10,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   nguy hiểm/không đảo ngược (push thẳng `main`, `push --all/--tags`, xoá ngoài dự án, `stash drop/clear`,
   `gh repo delete|archive`, `gh secret`, `kubectl delete`, `terraform|tofu|pulumi destroy`, container có quyền máy chủ,
   tắt hook, ghi file bí mật qua Bash) → chặn; còn lại (publish, deploy, merge PR, `ssh`, cài gói, sửa cấu hình cổng…) →
-  cho chạy. `permissions.ask` rỗng. `XT_GUARD_POLICY=strict` giữ hành vi cũ.
+  cho chạy. `permissions.ask` rỗng. Nhánh lỗi hạ tầng của hook (thiếu python3/`guard.py`, guard lỗi khi merge, commit
+  vào repo ngoài dự án) cũng không hỏi (`_lib.sh` `ask_strict`). `XT_GUARD_POLICY=strict` giữ hành vi cũ.
 - **Mọi lệnh Bash chạy không hỏi quyền** (ADR-0017; chủ repo yêu cầu 2026-10-16). `.claude/settings.json`
   `permissions.allow` gồm `Bash` thay danh sách `Bash(...)` hẹp (trước: `git push`, `git checkout <nhánh>`… vẫn hỏi ở chế
   độ `default`). Giữ nguyên `deny` (force-push, `reset --hard`, `git clean`, sudo, đọc `.env`/khoá…), `ask` (`git merge`,
