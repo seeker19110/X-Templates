@@ -237,6 +237,7 @@ class Doc:
     body_offset: int
     items: List[Item] = field(default_factory=list)
     headings: List[str] = field(default_factory=list)
+    link_lines: List[Tuple[int, str]] = field(default_factory=list)  # dòng ngoài fence có `](` — `_check_links` đọc
 
     @property
     def kind(self) -> str:
@@ -270,14 +271,19 @@ def load_docs(root: Path) -> Tuple[List[Doc], List[str]]:
             continue
         doc = Doc(path=path, rel=rel, meta=meta, body=body, body_offset=offset)
         for n, line in _lines_outside_fences(body, offset + 1):
-            m = ITEM_RE.match(line)
-            if m:
-                doc.items.append(Item(m["id"], m["level"], m["scale"], m["text"].strip(), m["state"], n))
-            elif ITEM_LIKE_RE.match(line):
-                errors.append(f"{rel}.md:{n}: mục checklist sai định dạng (xem conventions.md §3): {line[:90]}")
-            h = HEADING_RE.match(line)
-            if h:
-                doc.headings.append(h.group(2))
+            # ITEM_RE/ITEM_LIKE_RE neo `- [`, HEADING_RE neo `#`: lọc tiền tố trước, khỏi chạy 3 regex trên mọi dòng
+            if line.startswith("- ["):
+                m = ITEM_RE.match(line)
+                if m:
+                    doc.items.append(Item(m["id"], m["level"], m["scale"], m["text"].strip(), m["state"], n))
+                elif ITEM_LIKE_RE.match(line):
+                    errors.append(f"{rel}.md:{n}: mục checklist sai định dạng (xem conventions.md §3): {line[:90]}")
+            elif line.startswith("#"):
+                h = HEADING_RE.match(line)
+                if h:
+                    doc.headings.append(h.group(2))
+            if "](" in line:  # LINK_RE cần `](`
+                doc.link_lines.append((n, line))
         docs.append(doc)
     return docs, errors
 
@@ -297,7 +303,8 @@ def resolve_modules(patterns: Iterable[str], by_rel: Dict[str, Doc]) -> Tuple[Li
     seen = set()
     for pat in patterns:
         if "*" in pat:
-            hits = sorted(r for r in by_rel if fnmatch.fnmatch(r, pat) and not r.endswith("README"))
+            # `filter` biên dịch mẫu một lần (`fnmatch` từng gọi ~34k lần mỗi `validate`)
+            hits = sorted(r for r in fnmatch.filter(by_rel, pat) if not r.endswith("README"))
             if not hits:
                 missing.append(pat)
         else:
@@ -416,15 +423,20 @@ def _check_slug_modules(d: Doc, where: str, slugs: Dict[Tuple[str, str], str], b
     return errors
 
 
-def _check_links(d: Doc, where: str) -> List[str]:
-    """Liên kết nội bộ tương đối (ngoài code fence) phải trỏ tới file có thật."""
+def _check_links(d: Doc, where: str, seen: Dict[str, bool]) -> List[str]:
+    """Liên kết nội bộ tương đối (ngoài code fence) phải trỏ tới file có thật. `seen`: kết quả theo đường dẫn ghép (một
+    lần `validate`) — nửa số liên kết của khung trùng nhau, `resolve()` đi từng thành phần đường dẫn."""
     errors: List[str] = []
-    for n, line in _lines_outside_fences(d.body, d.body_offset + 1):
+    base = os.fspath(d.path.parent)  # chuỗi thay `Path` cho từng liên kết: realpath như `Path.resolve()`, nhẹ hơn
+    for n, line in d.link_lines:
         for target in LINK_RE.findall(line):
             if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith("#"):
                 continue
             path_part = target.split("#", 1)[0]  # không rỗng: target bắt đầu bằng `#` đã bỏ qua ở trên
-            if not (d.path.parent / path_part).resolve().exists():
+            key = os.path.join(base, path_part)
+            if key not in seen:
+                seen[key] = os.path.exists(os.path.realpath(key))
+            if not seen[key]:
                 errors.append(f"{where}:{n}: liên kết hỏng -> {target}")
     return errors
 
@@ -446,6 +458,7 @@ def validate(root: Path) -> List[str]:
     prefixes: Dict[str, str] = {}
     slugs: Dict[Tuple[str, str], str] = {}
     profile_slugs = {str(d.meta.get("slug")) for d in docs if d.kind == "profile"}
+    links: Dict[str, bool] = {}
 
     for d in docs:
         where = f"{d.rel}.md"
@@ -456,7 +469,7 @@ def validate(root: Path) -> List[str]:
         errors += _check_sections(d, where)
         errors += _check_applies_to(d, where, profile_slugs)
         errors += _check_slug_modules(d, where, slugs, by_rel)
-        errors += _check_links(d, where)
+        errors += _check_links(d, where, links)
     return errors + _check_readmes(root)
 
 
@@ -2754,6 +2767,9 @@ def _package_of(path: str) -> str:
 # thật, xác thực/phân quyền, mật mã, bí mật — luôn người merge, kể cả ở L3 (ADR-0016, D-012; AUD-HAR-042).
 HARD_RISK_TAGS = ("bí mật", "auth", "thanh toán", "mật mã")
 HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "risk:admin", "risk:secret"}
+# Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
+# xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
+AGENT_HARNESS_RE = re.compile(r"(^|/)(\.claude|\.xtemplates|\.codex|\.gemini|\.cursor)/")
 
 
 def _risky_paths(pr: Dict[str, Any]) -> List[str]:
@@ -2769,7 +2785,7 @@ def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     labels = [str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict)]
     out = [f"nhãn rủi ro: {n}" for n in labels if n in HARD_RISK_LABELS]
     for tag, rx in RISK_PATH_RES:
-        hit = [p for p in risky if rx.search(p)]
+        hit = [p for p in risky if rx.search(p) and not (tag == "auth" and AGENT_HARNESS_RE.search(p))]
         if tag in HARD_RISK_TAGS and hit:
             out.append(f"đường dẫn nhạy cảm ({tag}): {', '.join(hit[:3])}")
     own = [p for p in risky if any(fnmatch.fnmatch(p, g) for g in risk_paths)]

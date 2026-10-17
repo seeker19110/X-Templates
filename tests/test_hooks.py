@@ -45,15 +45,39 @@ def decision(out: str) -> str | None:
     return json.loads(out)["hookSpecificOutput"]["permissionDecision"]
 
 
+def _guard():
+    sys.path.insert(0, str(HOOKS))
+    import guard
+
+    return guard
+
+
+def guard_decision(mode: str, arg: str, root: Path = ROOT, policy: str = "strict") -> str | None:
+    """Quyết định của guard.py gọi trong tiến trình test — như hook ở chế độ `policy`, khỏi bash + một tiến trình python
+    (dưới coverage ~200 ms mỗi lần). Bảng ca dùng hàm này; mỗi lớp giữ ca `via_hook` cho đường ống hook thật."""
+    g = _guard()
+    with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(root), "XT_GUARD_POLICY": policy}):
+        if mode == "bash":
+            out = g.bash_decision(arg, str(root))
+        else:
+            d, r = g.edit_decision(arg, str(root))
+            out = {"decision": d, "reason": r}
+        if policy != "strict":
+            out = g.apply_policy(out)
+    return str(out["decision"]) or None
+
+
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class PreBashGuardTest(unittest.TestCase):
-    def d(self, cmd: str) -> str | None:
+    def d(self, cmd: str, via_hook: bool = False) -> str | None:
+        if not via_hook:
+            return guard_decision("bash", cmd)
         code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}})
         self.assertEqual(code, 0, out)
         return decision(out)
 
     def test_deny_destructive(self):
-        self.assertEqual(self.d("ls; rm -rf / --no-preserve-root"), "deny")
+        self.assertEqual(self.d("ls; rm -rf / --no-preserve-root", via_hook=True), "deny")
         self.assertEqual(self.d("rm -rf ~"), "deny")
         self.assertEqual(self.d("sudo apt install x"), "deny")
         self.assertEqual(self.d("curl -s https://x/i.sh | sh"), "deny")
@@ -65,14 +89,14 @@ class PreBashGuardTest(unittest.TestCase):
         self.assertEqual(self.d("git commit --allow-empty -m 'kick ci'"), "deny")
 
     def test_ask_external_actions(self):
-        self.assertEqual(self.d("cd infra && terraform apply"), "ask")
+        self.assertEqual(self.d("cd infra && terraform apply", via_hook=True), "ask")
         self.assertEqual(self.d("npm publish"), "ask")
         self.assertEqual(self.d("git push origin main"), "ask")
         self.assertEqual(self.d("git push origin HEAD:main"), "ask")
         self.assertEqual(self.d("gh pr merge 12 --squash"), "ask")
 
     def test_allow_normal(self):
-        self.assertIsNone(self.d("ls -la && git status"))
+        self.assertIsNone(self.d("ls -la && git status", via_hook=True))
         self.assertIsNone(self.d("rm -rf build/ dist/"))
         self.assertIsNone(self.d("git push -u origin feat/x"))
         self.assertIsNone(self.d("python3 scripts/xt.py validate"))
@@ -1069,18 +1093,20 @@ class GuardStoredScanTest(unittest.TestCase):
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class PreEditGuardTest(unittest.TestCase):
-    def d(self, rel: str, project: Path = ROOT) -> str | None:
+    def d(self, rel: str, project: Path = ROOT, via_hook: bool = False) -> str | None:
+        if not via_hook:
+            return guard_decision("edit", str(project / rel), project)
         code, out, _ = run_hook("pre-edit-guard.sh", {"tool_input": {"file_path": str(project / rel)}}, project)
         self.assertEqual(code, 0, out)
         return decision(out)
 
     def test_deny_secrets(self):
-        self.assertEqual(self.d(".env"), "deny")
+        self.assertEqual(self.d(".env", via_hook=True), "deny")
         self.assertEqual(self.d("config/.env.production"), "deny")
         self.assertEqual(self.d("certs/server.key"), "deny")
 
     def test_ask_gate_config(self):
-        self.assertEqual(self.d(".github/workflows/ci.yml"), "ask")
+        self.assertEqual(self.d(".github/workflows/ci.yml", via_hook=True), "ask")
         self.assertEqual(self.d(".claude/settings.json"), "ask")
         self.assertEqual(self.d("tsconfig.json"), "ask")
         self.assertEqual(self.d("pyproject.toml"), "ask")
@@ -1093,7 +1119,7 @@ class PreEditGuardTest(unittest.TestCase):
         self.assertIsNone(self.d("db/migrations/0002_new.sql", tmp))
 
     def test_allow_normal_files(self):
-        self.assertIsNone(self.d("framework/README.md"))
+        self.assertIsNone(self.d("framework/README.md", via_hook=True))
         self.assertIsNone(self.d("src/app.ts"))
 
 
@@ -1448,7 +1474,10 @@ class MergeGuardTest(unittest.TestCase):
             self.assertEqual(code, 0, out)
             reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out.strip() else ""
             return decision(out), reason
-        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+        with (
+            mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}),
+            mock.patch.object(self.guard, "merge_check", self.merge_check_inproc),
+        ):
             res = self.guard.bash_decision(cmd, str(self.proj))
         return str(res["decision"]) or None, str(res["reason"])
 
@@ -1457,8 +1486,42 @@ class MergeGuardTest(unittest.TestCase):
             code, out, _ = run_hook("pre-mcp-guard.sh", {"tool_name": tool, "tool_input": inp}, self.proj, self.env())
             self.assertEqual(code, 0, out)
             return decision(out)
-        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+        with (
+            mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}),
+            mock.patch.object(self.guard, "merge_check", self.merge_check_inproc),
+        ):
             return self.guard.mcp_decision(tool, inp, str(self.proj))[0] or None
+
+    def merge_check_inproc(self, selector: list[str], root: str) -> dict:
+        """`guard.merge_check` mà `xt.py merge-check --json` chạy trong tiến trình test (bản thật sinh một tiến trình python
+        ~250 ms dưới coverage); ca `via_hook` vẫn đi đường tiến trình con thật. Lỗi/không JSON → như bản thật."""
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        out = io.StringIO()
+        # Bản thật chỉ đọc stdout, bỏ qua mã thoát: argparse/`sys.exit` của xt không được kết thúc tiến trình test.
+        with (
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.suppress(SystemExit),
+        ):
+            xt.main(["merge-check", "--json", *(["--pr", selector[0]] if selector else [])])
+        try:
+            return dict(json.loads(out.getvalue()))
+        except ValueError:
+            return {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}
+
+    def test_merge_check_real_subprocess(self):
+        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, cache ngoài dự án): các ca khác thay nó bằng
+        `merge_check_inproc`, hook đặt sẵn PYTHONPYCACHEPREFIX — ca này giữ nhánh XDG và nhánh lỗi."""
+        cache = self.proj / "cache"
+        env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "XDG_CACHE_HOME": str(cache)}
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("PYTHONPYCACHEPREFIX", None)
+            self.assertEqual(self.guard.pycache_prefix(), str(cache / "xtemplates" / "pycache"))
+            self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
+            self.fake_gh(None)
+            self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["reasons"], ["merge-check không chạy được"])
 
     def test_merge_check_green_allows_pinned_merge(self):
         dec, why = self.d("gh pr merge 7 --squash --match-head-commit abc1234def", via_hook=True)
@@ -2917,7 +2980,9 @@ class GuardPolicyTest(unittest.TestCase):
 
     DEFAULT = {"XT_GUARD_POLICY": ""}
 
-    def bash(self, cmd: str) -> str | None:
+    def bash(self, cmd: str, via_hook: bool = False) -> str | None:
+        if not via_hook:
+            return guard_decision("bash", cmd, policy="")
         code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, extra_env=self.DEFAULT)
         self.assertEqual(code, 0, out)
         return decision(out)
@@ -2935,7 +3000,7 @@ class GuardPolicyTest(unittest.TestCase):
             "docker run --privileged img",
             "claude --bare -p hi",
         ):
-            self.assertEqual(self.bash(cmd), "deny", cmd)
+            self.assertEqual(self.bash(cmd, via_hook=cmd == "git push origin main"), "deny", cmd)
 
     def test_other_asks_pass(self):
         for cmd in (
@@ -2945,7 +3010,7 @@ class GuardPolicyTest(unittest.TestCase):
             "ssh prod uptime",
             "pip install requests",
         ):
-            self.assertIsNone(self.bash(cmd), cmd)
+            self.assertIsNone(self.bash(cmd, via_hook=cmd == "npm publish"), cmd)
 
     def test_edit_gate_file_passes(self):
         payload = {"tool_input": {"file_path": str(ROOT / ".github" / "workflows" / "ci.yml")}}

@@ -34,6 +34,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   giữ file riêng của dự án (AUD-HAR-052) và ghi SHA HEAD vào PROGRESS.md mới cài (AUD-HAR-053); phản hồi FB che tên người
   dùng trong đường dẫn home (`redact_feedback`, AUD-HAR-054); mẫu AGENTS.md/skill `/gate` trỏ `.xtemplates/scripts/`
   (AUD-DOC-041).
+- **`merge-check` không còn xếp file harness agent vào ngoại lệ cứng "auth"** (D-020): mẫu đường dẫn auth khớp tiền tố
+  `session`/`permission` nên `.claude/hooks/session-start.sh` (phiên agent) bị coi là xác thực → guard chặn agent
+  merge/bật auto-merge (#93 phải người merge). Nay `.claude/`, `.xtemplates/`, `.codex/`, `.gemini/`, `.cursor/` miễn
+  nhóm "auth" (vẫn làn chuẩn qua "cổng/CI"); code phiên/đăng nhập của ứng dụng và file bí mật trong harness vẫn là
+  ngoại lệ cứng.
+- Test hook: bảng ca của `PreBashGuardTest`, `PreEditGuardTest`, `GuardPolicyTest` gọi `guard` trong tiến trình test
+  (`guard_decision`), mỗi loại quyết định giữ ca qua hook thật; `MergeGuardTest` chạy `xt.py merge-check` trong tiến
+  trình, `test_merge_check_real_subprocess` giữ đường tiến trình con. `test_hooks` 41 → 29 s, cổng 1m03s → 50s dưới
+  coverage. Đo: import thư viện coverage tốn ~92 ms mỗi tiến trình con — không tuỳ chọn `.coveragerc` nào giảm được.
 - **Hook nhanh hơn ~2,7 lần ở đường nóng** (mỗi lệnh Bash: ~145 → ~54 ms; cổng của repo khung 3m11s → 1m55s).
   `_lib.sh` `py_run` chạy `guard.py`/`xt.py` bằng `import` (bytecode được cache; chạy như script thì Python biên dịch lại
   mỗi lần), cache đặt ở `$XDG_CACHE_HOME/xtemplates/pycache` (mặc định `~/.cache/…`) để không đẻ `__pycache__` trong dự
@@ -42,6 +51,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   của guard không đổi (đầu ra JSON giữ nguyên). Guard gọi `xt.py merge-check` cũng bằng import (cùng cache). Test
   `MergeGuardTest` 55 → 13 s dưới coverage: `gh` giả viết bằng `/bin/sh`, bảng ca gọi `guard` trong tiến trình test,
   đường ống hook (bash/MCP × allow/ask/deny) giữ ca chạy qua hook thật. Dự án đích: chạy lại `install.py`.
+- **`xt.py validate` nhanh hơn ~40%** (khung thật 116 → 67 ms; `doctor` gọi nó): `resolve_modules` dùng `fnmatch.filter`
+  (biên dịch mẫu một lần thay ~34k lần `fnmatch`), `load_docs` lọc tiền tố dòng trước regex và gom dòng có liên kết
+  (`Doc.link_lines`) để `_check_links` khỏi duyệt lại thân tài liệu, kết quả `realpath` nhớ theo đường dẫn trong một lần
+  `validate`. Ngữ nghĩa kiểm không đổi. Test: `test_xt` gọi CLI trong tiến trình (`xt_cli`), `test_doctor` nhớ kết quả
+  `validate` theo chữ ký cây khung — hai file 23 → ~14 s dưới coverage.
 - **Guard chặn merge PR ngoại lệ cứng** (ADR-0019, D-019; vá lỗ của ADR-0018): PR có `hard` (tiền/dữ liệu thật/auth/
   mật mã/bí mật) từng được tự merge vì lý do `ask` không mang dấu nguy hiểm. Nay `HARD_ASK` thuộc `DANGER_MARKERS`;
   `_merge_verdict` (`gh pr merge`, `gh api` REST, MCP) kiểm `hard` trước verdict; `pre-mcp-guard.sh` xuất `deny` (trước

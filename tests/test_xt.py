@@ -12,12 +12,29 @@ import tempfile
 import textwrap
 import unittest
 import unittest.mock
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import xt
+
+
+def xt_cli(*args: str, cwd: Path | str | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+    """`xt.py <args>` chạy trong tiến trình test (mỗi tiến trình python con dưới coverage ~200 ms); đường `__main__`
+    qua tiến trình con giữ ở CliContractTest. `SystemExit` → mã thoát như python."""
+    out, err = io.StringIO(), io.StringIO()
+    with (
+        unittest.mock.patch.dict(os.environ, env or {}),
+        chdir(cwd or os.getcwd()),
+        redirect_stdout(out),
+        redirect_stderr(err),
+    ):
+        try:
+            rc = xt.main(list(args))
+        except SystemExit as exc:
+            rc = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    return subprocess.CompletedProcess(["xt.py", *args], rc, out.getvalue(), err.getvalue())
 
 
 def write(path: Path, text: str) -> None:
@@ -701,13 +718,7 @@ class AuditRegressionTest(unittest.TestCase):
         self.fw = make_framework(self.tmp)
 
     def cli(self, *args, env=None) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "xt.py"), *args],
-            capture_output=True,
-            text=True,
-            cwd=self.tmp,
-            env=dict(os.environ, **(env or {})),
-        )
+        return xt_cli(*args, cwd=self.tmp, env=env)
 
     def test_compose_out_keeps_existing_states_by_id(self):
         bp = self.tmp / "BP.md"
@@ -1017,14 +1028,7 @@ class ProgressCheckTest(unittest.TestCase):
     def test_progress_cli_exit_codes(self):
         f = self.repo / "PROGRESS.md"
         f.write_text(GOOD_PROGRESS.format(sha="deadbeef"), encoding="utf-8")
-        run = lambda *a: (
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "xt.py"), "progress-check", *a],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).returncode
-        )
+        run = lambda *a: xt_cli("progress-check", *a).returncode
         self.assertEqual(run(str(f)), 1)
         f.write_text(GOOD_PROGRESS.format(sha=self.base), encoding="utf-8")
         self.assertEqual(run(str(f)), 0)
@@ -1187,15 +1191,7 @@ class CiCheckTest(unittest.TestCase):
             wf = Path(d) / "wf"
             wf.mkdir()
             (wf / "ci.yml").write_text(GOOD_WORKFLOW, encoding="utf-8")
-            run = lambda *a: (
-                subprocess.run(
-                    [sys.executable, str(ROOT / "scripts" / "xt.py"), "ci-check", *a],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    cwd=d,
-                ).returncode
-            )
+            run = lambda *a: xt_cli("ci-check", *a, cwd=d).returncode
             self.assertEqual(run(str(wf)), 0)
             (wf / "bad.yaml").write_text(GOOD_WORKFLOW.replace("@" + SHA40 + " # v4", "@v4"), encoding="utf-8")
             self.assertEqual(run(str(wf)), 1)
@@ -1234,7 +1230,7 @@ class GitTimeoutTest(unittest.TestCase):
             fake.chmod(0o755)
             with (
                 unittest.mock.patch.dict(os.environ, {"PATH": f"{d}:{os.environ['PATH']}"}),
-                unittest.mock.patch.object(xt, "GIT_TIMEOUT", 1),
+                unittest.mock.patch.object(xt, "GIT_TIMEOUT", 0.1),
             ):
                 r = xt._git(Path(d), "status")
         self.assertEqual(r.returncode, 124)
@@ -1453,14 +1449,7 @@ class AuditCheckTest(GitRepoMixin, unittest.TestCase):
         d = Path(self.enterContext(tempfile.TemporaryDirectory()))
         f = d / "S.md"
         f.write_text(audit_status_text(findings=[self.GOOD]), encoding="utf-8")
-        run = lambda *a: (
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts" / "xt.py"), "audit", "check", *a],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).returncode
-        )
+        run = lambda *a: xt_cli("audit", "check", *a).returncode
         self.assertEqual(run(str(f)), 0)
         self.assertEqual(run(str(f), "--strict"), 1)
         self.assertEqual(run(str(d / "khong-co.md")), 2)

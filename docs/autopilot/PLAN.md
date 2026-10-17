@@ -3,7 +3,7 @@
 > Lập ngày 2026-10-17. Chủ repo gọi `/autopilot` ngay sau `/audit` (báo cáo `docs/ops/AUDIT-REPORT-2026-10-17-subprojects.md`).
 > Kế hoạch trước (T-901…T-904) xong ở #84.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-020)
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-021)
 - Blueprint repo khung: không đổi mục; mục tiêu `audit check --strict` exit 0 sau khi sửa 🔴/🟠 (ARCH quét lại cuối).
 - Stack: Python ≥ 3.11 stdlib (`guard.py`, `xt.py`, `install.py`), bash hook; không phụ thuộc mới.
 - Phạm vi: guard merge ngoại lệ cứng fail-closed (AUD-SEC-044/045); chặn gỡ hàng rào (AUD-SEC-046); push refspec glob,
