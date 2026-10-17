@@ -180,6 +180,77 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((outside / "pwn.md").exists())
         self.assertTrue((self.target / "CLAUDE.md").is_symlink())
 
+    def install_quiet(self) -> str:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(self.run_install(), 0)
+        return err.getvalue()
+
+    def test_symlinked_framework_files_are_replaced_not_followed(self):
+        # AUD-CFG-003: VERSION, scripts/*, README trong .xtemplates/ là symlink ra ngoài → thay bằng file thật.
+        self.install_quiet()
+        outside = Path(tempfile.mkdtemp())
+        xt_dir = self.target / ".xtemplates"
+        for rel in ("VERSION", "scripts/xt.py", "README.md"):
+            link = xt_dir / rel
+            link.unlink()
+            (outside / link.name).write_text("NGOAI\n", encoding="utf-8")
+            link.symlink_to(outside / link.name)
+        err = self.install_quiet()
+        for name in ("VERSION", "xt.py", "README.md"):
+            self.assertEqual((outside / name).read_text(encoding="utf-8"), "NGOAI\n", name)
+        self.assertEqual((xt_dir / "VERSION").read_text(encoding="utf-8"), "test\n")
+        self.assertFalse((xt_dir / "scripts" / "xt.py").is_symlink())
+        self.assertEqual((xt_dir / "scripts" / "xt.py").read_bytes(), (ROOT / "scripts" / "xt.py").read_bytes())
+        self.assertIn("thay symlink", err)
+
+    def test_symlinked_framework_dirs_are_replaced_not_followed(self):
+        outside = Path(tempfile.mkdtemp())
+        xt_dir = self.target / ".xtemplates"
+        xt_dir.mkdir()
+        for name in ("framework", "framework.tmp", "scripts", "research"):
+            (outside / name).mkdir()
+            (outside / name / "giu.txt").write_text("NGOAI\n", encoding="utf-8")
+            (xt_dir / name).symlink_to(outside / name, target_is_directory=True)
+        self.install_quiet()
+        self.assertEqual(sorted(p.name for p in outside.rglob("*") if p.is_file()), ["giu.txt"] * 4)
+        for name in ("framework", "scripts", "research"):
+            self.assertFalse((xt_dir / name).is_symlink(), name)
+        self.assertTrue((xt_dir / "scripts" / "xt.py").is_file())
+
+    def test_symlinked_xtemplates_dir_is_replaced_not_followed(self):
+        outside = Path(tempfile.mkdtemp())
+        (self.target / ".xtemplates").symlink_to(outside, target_is_directory=True)
+        self.install_quiet()
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertTrue((self.target / ".xtemplates" / "VERSION").is_file())
+
+    def test_symlinked_gitignore_is_skipped(self):
+        outside = Path(tempfile.mkdtemp())
+        (outside / "gi").write_text("node_modules\n", encoding="utf-8")
+        gi = self.target / ".gitignore"
+        gi.symlink_to(outside / "gi")
+        err = self.install_quiet()
+        self.assertEqual((outside / "gi").read_text(encoding="utf-8"), "node_modules\n")
+        self.assertTrue(gi.is_symlink())
+        self.assertIn("bỏ qua symlink", err)
+        gi.unlink()
+        gi.symlink_to(outside / "chua-co")  # symlink treo: không được tạo file ngoài thư mục dự án
+        self.install_quiet()
+        self.assertFalse((outside / "chua-co").exists())
+
+    def test_gitignore_autopilot_variants_are_one_shared_rule(self):
+        # AUD-ARCH-001: install và doctor nhận diện `.autopilot/` bằng cùng một luật (xt.autopilot_ignored).
+        self.assertIs(install.autopilot_ignored, xt.autopilot_ignored)
+        gi = self.target / ".gitignore"
+        for line in (".autopilot", "/.autopilot/", "/.autopilot", "  .autopilot/  "):
+            gi.write_text(f"node_modules\n{line}\n", encoding="utf-8")
+            self.install_quiet()
+            self.assertEqual(gi.read_text(encoding="utf-8"), f"node_modules\n{line}\n", line)
+        gi.write_text("node_modules\n# .autopilot/\n", encoding="utf-8")
+        self.install_quiet()
+        self.assertEqual(gi.read_text(encoding="utf-8").count("\n.autopilot/\n"), 1)  # chú thích không tính
+
     def test_with_github_warns_required_checks(self):
         # AUD-CI-003: ruleset mẫu đòi check mà workflow không được copy.
         err = io.StringIO()

@@ -36,6 +36,8 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
+from xt import autopilot_ignored  # MỘT luật nhận diện `.autopilot/` trong .gitignore, dùng chung với `xt.py doctor`
+
 SRC = Path(__file__).resolve().parent.parent
 HARNESS_FILES = ["settings.json"]
 HARNESS_DIRS = ["hooks", "skills", "agents"]
@@ -77,9 +79,19 @@ def template_body(text: str) -> str:
     return "\n".join(lines[start + 1 : end]).strip("\n") + "\n"
 
 
+def detach_symlink(path: Path) -> None:
+    """Đích là symlink → gỡ chính liên kết (không đụng cái nó trỏ tới) để ghi file thật; không ghi xuyên ra ngoài
+    thư mục dự án (AUD-CFG-003, cùng tinh thần AUD-HAR-010)."""
+    if path.is_symlink():
+        path.unlink()
+        log(f"  ⚠ {path} là symlink — thay symlink bằng file/thư mục thật, không ghi xuyên liên kết")
+
+
 def copy_tree_replace(src: Path, dst: Path) -> None:
     """Copy vào thư mục tạm rồi mới thay: lỗi giữa chừng không để dst mất/dở."""
     tmp = dst.with_name(dst.name + ".tmp")
+    detach_symlink(tmp)
+    detach_symlink(dst)
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     if dst.exists():
@@ -212,11 +224,15 @@ def install_framework(xt_dir: Path, label: str | None) -> None:
     # research/ đi kèm vì module trong framework/ trỏ tới nguồn nghiên cứu bằng đường dẫn tương đối.
     if (SRC / "research").is_dir():
         copy_tree_replace(SRC / "research", xt_dir / "research")
+    detach_symlink(xt_dir / "scripts")
     (xt_dir / "scripts").mkdir(exist_ok=True)
     for f in ("xt.py", "dev-task.sh", "check-links.py"):
+        detach_symlink(xt_dir / "scripts" / f)
         shutil.copy2(SRC / "scripts" / f, xt_dir / "scripts" / f)
     (xt_dir / "scripts" / "dev-task.sh").chmod(0o755)
     version = framework_label(label)
+    detach_symlink(xt_dir / "VERSION")
+    detach_symlink(xt_dir / "README.md")
     (xt_dir / "VERSION").write_text(version + "\n", encoding="utf-8")
     (xt_dir / "README.md").write_text(
         "# .xtemplates/\n\nBản sao khung X-Templates (chỉ đọc). Cập nhật: chạy lại `install.py` từ bản khung mới.\n"
@@ -313,17 +329,19 @@ def install_github(target: Path) -> None:
 
 
 def ensure_gitignore(target: Path) -> None:
-    """Bước 4: .gitignore thêm `.autopilot/` nếu thiếu (tạo mới nếu chưa có file)."""
+    """Bước 4: .gitignore thêm `.autopilot/` nếu thiếu (tạo mới nếu chưa có file). .gitignore là symlink → bỏ qua
+    (file của người dùng, có thể nằm ngoài dự án; `xt.py doctor` sẽ báo nếu `.autopilot/` vẫn chưa được loại)."""
     gi = target / ".gitignore"
-    line = ".autopilot/"
-    if gi.exists():
-        if line not in gi.read_text(encoding="utf-8").splitlines():
-            with gi.open("a", encoding="utf-8") as fh:
-                fh.write(f"\n# X-Templates: trạng thái autopilot cục bộ\n{line}\n")
-            log("  .gitignore: thêm .autopilot/")
-    else:
-        gi.write_text(f"# X-Templates: trạng thái autopilot cục bộ\n{line}\n", encoding="utf-8")
+    block = "# X-Templates: trạng thái autopilot cục bộ\n.autopilot/\n"
+    if gi.is_symlink():
+        log(f"  ⚠ bỏ qua symlink {gi} (không ghi xuyên liên kết) — tự thêm `.autopilot/` vào file đó")
+    elif not gi.exists():
+        gi.write_text(block, encoding="utf-8")
         log("  .gitignore: tạo mới")
+    elif not autopilot_ignored(gi.read_text(encoding="utf-8", errors="replace").splitlines()):
+        with gi.open("a", encoding="utf-8") as fh:
+            fh.write("\n" + block)
+        log("  .gitignore: thêm .autopilot/")
 
 
 def migrate_legacy(target: Path) -> None:
@@ -368,6 +386,7 @@ def install(target: Path, force_harness: bool, no_harness: bool, label: str | No
         log(error)
         return 2
     xt_dir = target / ".xtemplates"
+    detach_symlink(xt_dir)
     xt_dir.mkdir(exist_ok=True)
 
     migrate_legacy(target)
