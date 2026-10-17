@@ -1204,6 +1204,7 @@ PKG_ADD: Dict[str, Dict[str, bool]] = {
 }
 # Lệnh bọc chạy lệnh khác (`uv run pip install x`, `npx pnpm add x`): xét lệnh bên trong.
 PKG_WRAPPERS = {"uv": "run", "poetry": "run", "pdm": "run", "pipenv": "run", "hatch": "run", "corepack": "", "npx": ""}
+PKG_WRAPPERS.update({"pnpm": "exec", "npm": "exec", "yarn": "exec", "bunx": ""})
 WRAPPER_VALUE_FLAGS: Tuple[str, ...] = ("--python", "-p", "--with", "--with-requirements", "--project", "--package")
 WRAPPER_VALUE_FLAGS += ("--directory",)
 WRAPPER_VALUE_FLAGS += ("--env-file", "--extra", "--group", "-c", "--call", "-e", "--env")
@@ -1575,7 +1576,7 @@ def _unwrap(name: str, args: List[str]) -> Tuple[str, List[str]]:
             return _unwrap(args[k + 1], args[k + 2 :])
     if name in PKG_WRAPPERS and (not PKG_WRAPPERS[name] or args[:1] == [PKG_WRAPPERS[name]]):
         rest = args[1:] if PKG_WRAPPERS[name] else args
-        rest = rest[_skip_opts(rest, WRAPPER_VALUE_FLAGS) :]
+        rest = normalize(rest[_skip_opts(rest, WRAPPER_VALUE_FLAGS) :])  # `/bin/bash`, `env bash` → `bash`
         if rest and (rest[0] in PKG_ADD or rest[0] in INTERPRETERS or PYTHON_RE.fullmatch(rest[0])):
             return _unwrap(rest[0], rest[1:])
     return name, args
@@ -2028,7 +2029,7 @@ def _container_shell(argv: List[str]) -> List[str]:
         return []
     args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
     opts, inner = _exec_split(args[1:] if args[:1] == ["container"] else args)
-    entry = _flag_values(opts, ("--entrypoint",))
+    entry = [posixpath.basename(e) for e in _flag_values(opts, ("--entrypoint",))]
     return [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
 
 
@@ -2044,7 +2045,25 @@ def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[str]]:
         name, args = _unwrap(n[0], n[1:])
         script = _shell_c_script(inner) if inner else _shell_c_script([name, *args]) if name != n[0] else None
         (ctr if inner else host).extend([script] if script else [])
+        if n[0] == "nix-shell":
+            host += _flag_values(n[1:], ("--run", "--command"))
     return host, ctr
+
+
+def _container_asks(script: str, depth: int) -> List[str]:
+    """Lệnh trong container: chỉ xét việc ra khỏi máy dev (mạng, thêm gói, daemon khác) — đường dẫn trong container
+    không phải đường dẫn máy nên luật xoá/ghi file của máy không áp; `sh -c` lồng tiếp được quét đệ quy."""
+    if depth >= MAX_NEST:
+        return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
+    tokens = tokenize(script)
+    out: List[str] = []
+    for c in split_commands(tokens):
+        n = normalize(c)
+        verdict = egress_rule(n[0], n[1:]) if n else ("", "")
+        out += [verdict[1]] if verdict[0] else []
+        inner = _shell_c_script(c) or _shell_c_script(_container_shell(c)) if n else None
+        out += _container_asks(inner, depth + 1) if inner else []
+    return out
 
 
 def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
@@ -2052,10 +2071,8 @@ def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], dep
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens)
     host, ctr = _wrapped_scripts(tokens)
-    for script in ctr[: max(0, MAX_NEST - depth)]:
-        sub = bash_decision(script, root, cwd, depth + 1)
-        if sub["decision"] in ("deny", "ask"):
-            asks.append(f"lệnh trong container: {sub['reason']}")
+    for script in ctr:  # mọi lệnh, không cắt theo số lượng (review #82)
+        asks += [f"lệnh trong container: {why}" for why in _container_asks(script, depth)]
     for script in _nested_scripts(cmd, tokens) + host:
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
