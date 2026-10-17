@@ -257,6 +257,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- **Guard "ra khỏi máy dev" (#76) bịt lỗ** (audit delta 2026-10-17 đợt 1). Các lệnh dưới đây trước chạy không hỏi, nay
+  hỏi: `ssh` có cờ ăn giá trị mang giá trị loopback (`-L/-R/-D/-b/-W…`, AUD-SEC-033); `curl` viết cờ liền giá trị
+  (`-d@f`, `-d'{…}'`, `-Fa=b`, `-Tf`) và `-G` kèm upload, phương thức ghi, `@file` hay `$VAR` (AUD-SEC-034); `ssh` tới
+  loopback mà chạy lệnh, `-J` hay `-o ProxyCommand/ProxyJump` (AUD-SEC-035); thêm phụ thuộc qua `uv run`/`poetry run`/
+  `corepack`/`npx <pm>`, cờ trình thông dịch trước `-m`, `bundle add`, `conda|mamba install`, `uv tool install`
+  (AUD-SEC-038); docker có cờ toàn cục trước lệnh con, `compose run` mount nhạy cảm, `exec --privileged`, lệnh sau image
+  của `run`, mount `//`, `/tmp/..`, `/proc/…`, `-v=/:/h` (AUD-SEC-039); IP viết số thuần và `127.<tên miền>`
+  (AUD-SEC-040). Mount tương đối trong dự án (`./.docker/nginx.conf`, `$PWD/etc/x`) không còn bị hỏi oan (AUD-HAR-046).
+  Vòng review: mount `../.ssh` (ra ngoài dự án) vẫn hỏi; `curl -G -sd@f`; cờ ăn giá trị của wrapper (`uv run --python
+  3.12 pip install x`) và trình thông dịch (`python3 -W ignore -m pip`); ssh loopback mở đường hầm tới máy ngoài
+  (`-W`/`-L`/`-R`), `-o RemoteCommand`, `-F <file>`; `ssh -Q cipher` (không có máy đích) không còn hỏi oan.
+  **Hành vi mới:** lệnh sau image của `docker run` được xét như `docker exec` (`docker run --rm node:20 npm install
+  lodash` nay hỏi). `URL_RE` tuyến tính (AUD-CODE-011); `_db_rule` bỏ tham số không dùng (AUD-CODE-012). Dự án đích:
+  chạy lại `install.py`.
 - **`xt.py` lại chạy được với `python3` hệ thống của macOS (3.9)**: `redact` (#73) dùng `\w++` (chỉ có từ Python 3.11)
   nên `xt.py` lỗi `re.error` ngay khi nạp; hook gọi `python3` của máy dev → merge-check "không chạy được" (merge luôn hỏi),
   Stop/PreCompact hook im lặng cho qua. Job Portability đỏ từ #73. Nay dùng `\w+` sau lookahead (vẫn tuyến tính,
