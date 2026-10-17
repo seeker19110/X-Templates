@@ -6,6 +6,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **`install.py` gộp quyền ADR-0018 vào `.claude/settings.json` đã có của dự án** (trước: chỉ gộp khoá `hooks`, dự án đã
+  cài vẫn dừng hỏi): thêm `Bash` vào `allow`, thêm `deny` của khung còn thiếu, gỡ `ask` mặc định cũ của khung
+  (`git merge`, `git rebase`, `gh release`, `npm publish`, `docker push`); quyền riêng của dự án giữ nguyên. `CLAUDE.md`
+  gốc và mẫu ghi theo ADR-0018, phiên cloud chọn chế độ Auto. Dự án đích: chạy lại `install.py`.
 - **Hook guard không hỏi người nữa** (ADR-0018; chủ repo yêu cầu 2026-10-17). `guard.py` `apply_policy`: lệnh đang hỏi mà
   nguy hiểm/không đảo ngược (push thẳng `main`, `push --all/--tags`, xoá ngoài dự án, `stash drop/clear`,
   `gh repo delete|archive`, `gh secret`, `kubectl delete`, `terraform|tofu|pulumi destroy`, container có quyền máy chủ,
