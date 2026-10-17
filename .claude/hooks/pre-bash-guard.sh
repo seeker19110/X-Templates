@@ -24,24 +24,23 @@ fi
 # guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → hỏi mọi lệnh tới khi
 # khôi phục (AUD-SEC-019). guard.py có mà lỗi giữa chừng → vẫn fail-open về luồng (ADR-0002).
 [ -f "$(dirname "$0")/guard.py" ] || ask_strict "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào không chạy; khôi phục (git checkout hoặc install.py) rồi làm tiếp"
-res="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$XT_ROOT" python3 "$(dirname "$0")/guard.py" bash 2>/dev/null)" || res=""
-if [ -z "$res" ]; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` hỏi (AUD-HAR-040)
+if ! guard_fields bash <<<"$payload"; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` hỏi (AUD-HAR-040)
   merge_like && ask_strict "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
   exit 0
 fi
-decision="$(json_field "$res" decision)"
-[ "$decision" = "deny" ] && pretool_decision deny "$(json_field "$res" reason)"
+decision="$XG_DECISION"
+[ "$decision" = "deny" ] && pretool_decision deny "$XG_REASON"
 
 # ---- 3) Cổng trước commit (chạy TRƯỚC khi hỏi người — ask không được bỏ cổng, AUD-HAR-013) ----
 # `--no-verify` là chính câu hỏi "bỏ cổng?" → không chạy cổng, để người quyết.
-if [ "$(json_field "$res" commit)" = "true" ] && [ "$(json_field "$res" no_verify)" != "true" ]; then
+if [ "$XG_COMMIT" = "true" ] && [ "$XG_NO_VERIFY" != "true" ]; then
   # Gốc cổng = repo NHẬN commit (`cd ../repo-khac && git commit`, `git -C …`), không mặc định gốc phiên: từng chạy
   # cổng của dự án phiên cho commit ở repo khác (đỏ/xanh không liên quan). Chỉ tự chạy cổng của CHÍNH dự án: repo git
   # lồng trong dự án mà không có xt.yaml/.xtemplates riêng (submodule, apps/web) → cổng của dự án. Repo NGOÀI dự án,
   # hoặc repo lồng CÓ cổng riêng (repo bên thứ ba clone vào dự án) → hỏi người, không chạy cổng của nó: cổng là mã của
   # repo đó và hook chạy TRƯỚC bước hỏi quyền (AUD-SEC-015).
   groot="$XT_ROOT"
-  cdir="$(json_field "$res" commit_dir)"
+  cdir="$XG_COMMIT_DIR"
   top=""
   [ -n "$cdir" ] && top="$(git -C "$cdir" rev-parse --show-toplevel 2>/dev/null)"
   # git trả đường dẫn vật lý; gốc dự án có thể đi qua symlink (macOS: /var → /private/var) → so theo `pwd -P`.
@@ -81,7 +80,7 @@ if [ "$(json_field "$res" commit)" = "true" ] && [ "$(json_field "$res" no_verif
     echo "💡 Diff staged lớn (${files} file, ~${lines} dòng). Cân nhắc chia nhỏ commit hoặc chạy /review trước." >&2
   fi
 fi
-[ "$decision" = "ask" ] && pretool_decision ask "$(json_field "$res" reason)"
+[ "$decision" = "ask" ] && pretool_decision ask "$XG_REASON"
 # allow chỉ do guard.py trả cho `gh pr merge` đứng một mình đã qua `xt.py merge-check` (ADR-0013).
-[ "$decision" = "allow" ] && pretool_decision allow "$(json_field "$res" reason)"
+[ "$decision" = "allow" ] && pretool_decision allow "$XG_REASON"
 exit 0

@@ -6,6 +6,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Hook nhanh hơn ~2,7 lần ở đường nóng** (mỗi lệnh Bash: ~145 → ~54 ms; cổng của repo khung 3m11s → 1m55s).
+  `_lib.sh` `py_run` chạy `guard.py`/`xt.py` bằng `import` (bytecode được cache; chạy như script thì Python biên dịch lại
+  mỗi lần), cache đặt ở `$XDG_CACHE_HOME/xtemplates/pycache` (mặc định `~/.cache/…`) để không đẻ `__pycache__` trong dự
+  án đích; `guard_fields` đọc kết quả `guard.py <mode> nul` một lần thay vì một tiến trình python cho mỗi trường JSON.
+  Áp cho `pre-bash-guard`, `pre-edit-guard`, `pre-mcp-guard`, `stop-guard`, `pre-compact`, `session-start`. Quyết định
+  của guard không đổi (đầu ra JSON giữ nguyên). Dự án đích: chạy lại `install.py`.
 - **Guard chặn merge PR ngoại lệ cứng** (ADR-0019, D-019; vá lỗ của ADR-0018): PR có `hard` (tiền/dữ liệu thật/auth/
   mật mã/bí mật) từng được tự merge vì lý do `ask` không mang dấu nguy hiểm. Nay `HARD_ASK` thuộc `DANGER_MARKERS`;
   `_merge_verdict` (`gh pr merge`, `gh api` REST, MCP) kiểm `hard` trước verdict; `pre-mcp-guard.sh` xuất `deny` (trước

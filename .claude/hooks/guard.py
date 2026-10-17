@@ -6,6 +6,8 @@ Dùng (payload JSON của Claude Code trên stdin, kết quả JSON trên stdout
                      "commit_dir": "<thư mục git commit chạy, rỗng nếu không biết>"}
   guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}  (file bí mật/cổng/migration; test ĐÃ CÓ bị làm yếu)
   guard.py mcp    → {"decision": "allow"|"ask"|"", "reason": "..."}  (tool MCP merge PR: allow chỉ khi merge-check cho phép)
+  guard.py <mode> nul → cùng kết quả, dạng `ok\0<decision>\0<reason>\0<commit>\0<no_verify>\0<commit_dir>\0` để hook đọc
+                     bằng `read -d ''` (bash 3.2 được), khỏi sinh thêm tiến trình python chỉ để tách trường JSON.
 
 Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
 - tách lệnh theo token shell (`shlex`): `|`/`;` trong nháy không phải ranh giới, thân heredoc là dữ liệu;
@@ -2387,6 +2389,16 @@ def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, obje
     return {"decision": ""}
 
 
+NUL_FIELDS = ("decision", "reason", "commit", "no_verify", "commit_dir")
+
+
+def _sh_field(v: object) -> str:
+    """Giá trị cho hook bash: bool → `true`/`false` (như `json_field` cũ), thiếu → rỗng; NUL trong chuỗi bị bỏ."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return "" if v is None else str(v).replace("\0", "")
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     payload: Any = None
@@ -2415,7 +2427,10 @@ def main() -> int:
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
-    sys.stdout.write(json.dumps(out, ensure_ascii=False))
+    if sys.argv[2:3] == ["nul"]:
+        sys.stdout.write("".join(f"{v}\0" for v in ["ok", *(_sh_field(out.get(k)) for k in NUL_FIELDS)]))
+    else:
+        sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
 
 

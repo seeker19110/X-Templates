@@ -2066,6 +2066,70 @@ class MergeHookFailClosedTest(unittest.TestCase):
             self.assertIsNone(self.hook(name, payload, default), name)
 
 
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class HookRunnerTest(unittest.TestCase):
+    """Hook gọi guard.py/xt.py bằng import (bytecode cache) và đọc kết quả `nul` một lần — không đẻ `__pycache__` trong
+    dự án đích, kết quả giữ nguyên ký tự xuống dòng/tiếng Việt."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.hooks = self.tmp / ".claude" / "hooks"
+        shutil.copytree(HOOKS, self.hooks, ignore=shutil.ignore_patterns("__pycache__"))
+        self.cache = self.tmp / "cache"
+        self.env = {k: v for k, v in os.environ.items() if k != "PYTHONPYCACHEPREFIX"}
+        self.env.update(CLAUDE_PROJECT_DIR=str(self.tmp), XDG_CACHE_HOME=str(self.cache), XT_GUARD_POLICY="")
+
+    def test_nul_fields_and_no_pycache_in_project(self):
+        r = subprocess.run(
+            ["bash", str(self.hooks / "pre-bash-guard.sh")],
+            input=json.dumps({"tool_input": {"command": "sudo ls"}}),
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=60,
+        )
+        self.assertEqual(decision(r.stdout), "deny", r.stderr)
+        self.assertFalse((self.hooks / "__pycache__").exists())
+        self.assertTrue(list((self.cache / "xtemplates" / "pycache").rglob("guard*.pyc")))
+
+    def test_guard_fields_reads_every_field(self):
+        (self.hooks / "guard.py").write_text(
+            "import sys\ndef main():\n    sys.stdout.write('ok\\0ask\\0dòng 1\\ndòng 2\\0true\\0false\\0/a b\\0')\n",
+            encoding="utf-8",
+        )
+        script = (
+            f'. "{self.hooks}/_lib.sh"; guard_fields bash <<<"{{}}" && '
+            'printf "%s|%s|%s|%s|%s" "$XG_DECISION" "$XG_REASON" "$XG_COMMIT" "$XG_NO_VERIFY" "$XG_COMMIT_DIR"'
+        )
+        # $0 = đường dẫn hook giả cạnh guard.py (như Claude Code gọi `bash .claude/hooks/<hook>.sh`).
+        r = subprocess.run(
+            ["bash", "-c", script, str(self.hooks / "x.sh")], capture_output=True, text=True, env=self.env, timeout=60
+        )
+        self.assertEqual(r.stdout, "ask|dòng 1\ndòng 2|true|false|/a b", r.stderr)
+
+    def test_guard_nul_output(self):
+        payload = json.dumps({"tool_input": {"command": "git commit -m x"}, "cwd": str(self.tmp)})
+        r = subprocess.run(
+            [sys.executable, str(self.hooks / "guard.py"), "bash", "nul"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=60,
+        )
+        self.assertEqual(r.stdout.split("\0"), ["ok", "", "", "true", "false", str(self.tmp), ""])
+        r = subprocess.run(
+            [sys.executable, str(self.hooks / "guard.py"), "edit", "nul"],
+            input=json.dumps({"tool_input": {"file_path": ".env"}}),
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=60,
+        )
+        fields = r.stdout.split("\0")
+        self.assertEqual((fields[0], fields[1], fields[3:]), ("ok", "deny", ["", "", "", ""]))
+
+
 class EgressCase(unittest.TestCase):
     """Khung chung cho test luật ra khỏi máy dev: gọi `guard.bash_decision` trong thư mục tạm."""
 
