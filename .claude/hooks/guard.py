@@ -39,6 +39,7 @@ WRAPPER_OPTS_WITH_VALUE: Dict[str, Set[str]] = {
     | {"--arg-file"},  # `--replace`/`--eof`/`--max-lines`: giá trị chỉ đi dạng `--opt=v`, token sau là lệnh
     "time": {"-f", "-o", "--format", "--output"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "exec": {"-a"},  # `exec -a <tên> git push --force` (AUD-SEC-024)
 }
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
 INTERPRETERS = SHELLS | {"python", "python3", "node", "perl", "ruby", "php", "deno", "bun", "pwsh"}
@@ -385,10 +386,16 @@ ENV_ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
 
 
 def _skip_env_args(a: List[str]) -> None:
-    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C`/`-S` kèm một giá trị)."""
+    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C` kèm một giá trị); `-S '<lệnh>'` tách chuỗi thành lệnh
+    thật (`env -S "git push --force"`, AUD-SEC-024)."""
     while a and (a[0].startswith("-") or "=" in a[0]):
         opt = a.pop(0)
-        if opt in ("-u", "-C", "-S") and a:
+        split = opt.split("=", 1)[1] if opt.startswith("--split-string=") else opt[2:] if opt[:2] == "-S" else None
+        if opt in ("-S", "--split-string") and a:
+            split = a.pop(0)
+        if split:
+            a[:0] = shlex.split(split)
+        elif opt in ("-u", "-C") and a:
             a.pop(0)
 
 
@@ -601,12 +608,14 @@ def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple
 
 def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
-    refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính."""
+    refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
     flags = _short_flags(args)
     force = any(x.startswith("--force") or x == "--mirror" for x in args) or "f" in flags
     refs = _positionals(args, ("-o", "--push-option", "--repo", "--receive-pack", "--exec"))
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
+    if "--all" in args or "--tags" in args:
+        return "ask", "push --all/--tags đẩy mọi nhánh/tag (gồm nhánh chính, tag phát hành) — người duyệt"
     deleting = "--delete" in args or "d" in flags
     for r in refs[1:] or ["HEAD"]:  # không refspec: đẩy nhánh hiện tại
         verdict = _push_ref_rule(r, deleting, cwd)
@@ -689,14 +698,28 @@ GIT_RULES: Dict[str, GitRule] = {
 }
 
 
+# git nhận tuỳ chọn dài viết tắt (`reset --ha`, `push --mirr`, `clean --fo`): viết tắt của tuỳ chọn nguy hiểm → coi là
+# tuỳ chọn đó (AUD-SEC-023). Thứ tự: ngắn trước, để `--forc` thành `--force`.
+GIT_DANGER_LONG = ("--all", "--hard", "--tags", "--force", "--delete", "--mirror", "--discard-changes")
+
+
+def _git_long(a: str) -> str:
+    key, eq, val = a.partition("=")
+    if not key.startswith("--") or len(key) < 4 or key in GIT_DANGER_LONG:
+        return a
+    full = next((d for d in GIT_DANGER_LONG if d.startswith(key)), "")
+    return full + eq + val if full else a
+
+
 def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua."""
     if len(n) < 2:
         return "", ""
+    args = [_git_long(a) for a in n[2:]]
     if n[1] == "push":
-        return _git_push(n[2:], cwd)
+        return _git_push(args, cwd)
     rule = GIT_RULES.get(n[1])
-    return rule(n[2:]) if rule else ("", "")
+    return rule(args) if rule else ("", "")
 
 
 # Hành động đối ngoại: lệnh → lệnh con (ở BẤT KỲ vị trí positional: `pnpm -r publish`, `yarn npm publish`,
@@ -834,6 +857,8 @@ def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tupl
     targets = _positionals(args)
     if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
         return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
+    if recursive and force and not targets:  # `xargs rm -rf`, `… | xargs rm -rf`: đích đến từ stdin (AUD-SEC-024)
+        return "ask", "rm -rf không có đích trên dòng lệnh (đích từ xargs/stdin) — xoá dữ liệu cần người duyệt"
     outside = [t for t in targets if recursive and root and _outside_project(t, root, cwd)]
     if outside:
         return "ask", f"xoá đệ quy ngoài thư mục dự án ({outside[0]}) — xoá dữ liệu cần người duyệt"
@@ -879,10 +904,13 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
+    if set(args[i:]) <= FIND_NO_FILTER and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
+        return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
+FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race"}
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
 
@@ -1593,8 +1621,8 @@ def egress_rule(name: str, args: List[str], root: str = "") -> Tuple[str, str]:
         why = _fetch_rule(name, args)
     elif name in PKG_ADD:
         why = _pkg_rule(name, args)
-    elif name in ("docker", "podman"):
-        why = _container_rule(args, root)
+    elif name in ("docker", "podman", "nerdctl", "docker-compose", "podman-compose"):
+        why = _container_rule(_container_cli([name, *args])[1:], root)
     return ("ask", why) if why else ("", "")
 
 
@@ -2020,10 +2048,19 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     return asks
 
 
+def _container_cli(n: List[str]) -> List[str]:
+    """CLI container cùng cú pháp docker: `docker-compose …`/`podman-compose …` → `docker compose …`, `nerdctl` → docker."""
+    if n[:1] in (["docker-compose"], ["podman-compose"]):
+        return ["docker", "compose", *n[1:]]
+    return ["docker", *n[1:]] if n[:1] == ["nerdctl"] else n
+
+
 def _container_exec(argv: List[str]) -> Tuple[List[str], List[str]]:
     """(cờ, lệnh) chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run
     --entrypoint sh dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
-    n = normalize(argv)
+    n = _container_cli(normalize(argv))
+    if n[:1] == ["kubectl"]:  # `kubectl exec [cờ] pod -- <lệnh>` (AUD-SEC-042)
+        return [], n[n.index("--") + 1 :] if "exec" in n[1:3] and "--" in n else []
     if n[:1] not in (["docker"], ["podman"]):
         return [], []
     args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
