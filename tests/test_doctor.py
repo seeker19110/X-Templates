@@ -423,5 +423,98 @@ class DoctorMemoryTest(DoctorCase):
         self.assertIn("gitleaks", f.msg)
 
 
+class DoctorGateToolsTest(DoctorCase):
+    """AUD-HAR-034: công cụ mà lệnh cổng trong xt.yaml gọi phải có trên PATH (cảnh báo, không phải lỗi)."""
+
+    def gate_tool_msgs(self) -> list[str]:
+        return [f.msg for f in self.findings() if f.code == "gate-tool"]
+
+    def test_missing_tool_in_gate_warns(self):
+        self.write("xt.yaml", "lint: xt-no-such-tool --check && python3 -m ruff\ntypecheck: ''\ntest: ''\nbuild: ''\n")
+        self.assertEqual(self.gate_tool_msgs(), ["cổng `lint` gọi `xt-no-such-tool` mà PATH không có"])
+        levels = {f.level for f in self.findings() if f.code == "gate-tool"}
+        self.assertEqual(levels, {"warn"})
+        rc, out, _ = self.run_doctor()
+        self.assertEqual(rc, 0)  # cảnh báo, không chặn autopilot
+        self.assertIn("⚠ [gate-tool] cổng `lint` gọi `xt-no-such-tool` mà PATH không có", out)
+
+    def test_present_tools_and_empty_gate_are_quiet(self):
+        self.write("xt.yaml", "lint: python3 -m ruff check .\ntypecheck: bash -n x\ntest: ''\nbuild: ls -l\n")
+        self.assertEqual(self.gate_tool_msgs(), [])
+        (self.base / "xt.yaml").unlink()
+        self.assertEqual(self.gate_tool_msgs(), [])  # thiếu xt.yaml: đã có finding xt-yaml riêng
+
+    def test_each_missing_tool_reported_once_per_gate(self):
+        self.write("xt.yaml", "lint: xt-aaa a | xt-bbb && xt-aaa b\ntypecheck: ''\ntest: xt-aaa\nbuild: ''\n")
+        self.assertEqual(
+            self.gate_tool_msgs(),
+            [
+                "cổng `lint` gọi `xt-aaa` mà PATH không có",
+                "cổng `lint` gọi `xt-bbb` mà PATH không có",
+                "cổng `test` gọi `xt-aaa` mà PATH không có",
+            ],
+        )
+
+    def test_relative_script_path_is_checked_against_project(self):
+        self.write("xt.yaml", "lint: ./tools/check.sh\ntypecheck: ''\ntest: ''\nbuild: ''\n")
+        self.assertEqual(self.gate_tool_msgs(), ["cổng `lint` gọi `./tools/check.sh` mà PATH không có"])
+        self.write("tools/check.sh", "#!/bin/sh\n")
+        self.assertEqual(self.gate_tool_msgs(), [])
+
+
+class GateCommandWordsTest(unittest.TestCase):
+    def words(self, cmd: str) -> list[str]:
+        return xt.gate_command_words(cmd)
+
+    def test_separators(self):
+        self.assertEqual(self.words("a x && b y || c; d | e"), ["a", "b", "c", "d", "e"])
+        self.assertEqual(self.words("(cd sub && make) & wait"), ["cd", "make", "wait"])
+
+    def test_assignments_keywords_and_redirects(self):
+        cmd = 'd="$(mktemp -d)" && export K="$d/x" && FOO=1 pytest -q >/dev/null 2>&1; rc=$?; rm -rf "$d"; exit $rc'
+        self.assertEqual(self.words(cmd), ["export", "pytest", "rm", "exit"])
+        loop = 'for f in a/*.sh b; do bash -n "$f" || exit 1; done && if [ -f x ]; then tool1; else tool2; fi'
+        self.assertEqual(self.words(loop), ["bash", "exit", "[", "tool1", "tool2"])
+        case = "case {} in *.py) python3 -m ruff format {} ;; esac"
+        self.assertEqual(self.words(case), ["python3"])
+        self.assertEqual(self.words("echo hi >> out.txt < in.txt"), ["echo"])
+
+    def test_unparseable_or_dynamic_words_are_skipped(self):
+        self.assertEqual(self.words("echo 'chưa đóng nháy"), [])
+        self.assertEqual(self.words("$CMD --x && ${TOOL} y && `which z`"), [])
+        self.assertEqual(self.words(""), [])
+
+
+class XtYamlDuplicateKeyTest(DoctorCase):
+    """AUD-XFEAT-002: khoá trùng → dòng ĐẦU thắng ở mọi nơi (như dev-task.sh), doctor cảnh báo."""
+
+    def test_first_duplicate_wins_everywhere(self):
+        self.write("xt.yaml", "lint: ruff check .\nlint: true\ntest: pytest\nmerge_autonomy: L2\nmerge_autonomy: L0\n")
+        keys, dups = xt.read_xt_yaml(self.base)
+        self.assertEqual((keys["lint"], dups), ("ruff check .", ["lint", "merge_autonomy"]))
+        self.assertEqual(xt.gate_noop_keys(self.base), [])  # `lint: true` đứng sau không phải cái cổng chạy
+        self.assertEqual(xt.merge_config(self.base)[0], 2)
+        dup = [f for f in self.findings() if f.code == "xt-yaml" and "trùng" in f.msg]
+        self.assertEqual([f.level for f in dup], ["warn"])
+        self.assertIn("lint, merge_autonomy", dup[0].msg)
+
+    def test_agrees_with_dev_task(self):
+        self.write("xt.yaml", "lint: touch first-ran\nlint: touch second-ran\n")
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.base)}
+        script = self.base / ".xtemplates" / "scripts" / "dev-task.sh"
+        r = subprocess.run(["bash", str(script), "lint"], env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            (xt.read_xt_yaml(self.base)[0]["lint"], (self.base / "first-ran").exists()), ("touch first-ran", True)
+        )
+        self.assertFalse((self.base / "second-ran").exists())
+
+    def test_no_file_and_quoted_values(self):
+        (self.base / "xt.yaml").unlink()
+        self.assertEqual(xt.read_xt_yaml(self.base), ({}, []))
+        self.write("xt.yaml", "lint: \"ruff check .\"  # ghi chú\ntest: ''\n")
+        self.assertEqual(xt.read_xt_yaml(self.base)[0], {"lint": "ruff check .", "test": ""})
+
+
 if __name__ == "__main__":
     unittest.main()

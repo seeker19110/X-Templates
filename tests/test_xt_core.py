@@ -528,24 +528,24 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual(xt.loop_verdict(self.base)["reason"], "vòng lặp chưa bật")
 
     def test_deferred_task_is_skipped_then_pending_human(self):
-        write(self.plan, "- [ ] `T-001` deploy — Gate: `true`\n- [ ] `T-002` việc — Gate: `true`\n")
+        write(self.plan, "- [ ] `T-001` deploy — Gate: `test -d .`\n- [ ] `T-002` việc — Gate: `test -d .`\n")
         self.activate(deferred={"T-001": {"reason": "cần khoá thật"}})
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
-        write(self.plan, "- [ ] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
-        self.evidence("T-002", 0, "true")
+        write(self.plan, "- [ ] `T-001` deploy — Gate: `test -d .`\n- [x] `T-002` việc — Gate: `test -d .`\n")
+        self.evidence("T-002", 0, "test -d .")
         v = xt.loop_verdict(self.base)
         self.assertEqual(v["verdict"], "done-pending-human")
         self.assertEqual(v["pending_human"], [{"id": "T-001", "reason": "cần khoá thật"}])
         self.assertIn("chờ người 1 việc: T-001 (cần khoá thật)", v["reason"])
         # Người làm xong, agent tick kèm bằng chứng → defer đã thoả, verdict thường.
-        write(self.plan, "- [x] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
-        self.evidence("T-001", 0, "true")
+        write(self.plan, "- [x] `T-001` deploy — Gate: `test -d .`\n- [x] `T-002` việc — Gate: `test -d .`\n")
+        self.evidence("T-001", 0, "test -d .")
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
 
     def test_deferred_blueprint_must_and_corrupt_deferred(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
-        self.evidence("T-001", 0, "true")
+        write(self.plan, "- [x] `T-001` xong — Gate: `test -d .`\n")
+        self.evidence("T-001", 0, "test -d .")
         write(self.base / "BP.md", "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n")
         self.activate(blueprint="BP.md", deferred={"AAA-001": "không phải object"})
         v = xt.loop_verdict(self.base)
@@ -573,7 +573,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("trần 2 vòng", v["reason"])
 
     def test_budget_deadline_passed_and_future(self):
-        write(self.plan, "- [ ] `T-001` việc — Gate: `true`\n")
+        write(self.plan, "- [ ] `T-001` việc — Gate: `test -d .`\n")
         self.activate(deadline="2000-01-01T00:00:00+00:00")
         v = xt.loop_verdict(self.base)
         self.assertEqual(v["verdict"], "budget")
@@ -592,7 +592,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("PLAN không có task", v["reason"])
 
     def test_waived_task_is_skipped_and_next_open_is_continue(self):
-        write(self.plan, "- [~] `T-001` bỏ qua — Bỏ: trùng T-002\n- [ ] `T-002` làm tiếp — Gate: `true`\n")
+        write(self.plan, "- [~] `T-001` bỏ qua — Bỏ: trùng T-002\n- [ ] `T-002` làm tiếp — Gate: `test -d .`\n")
         self.activate()
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
@@ -604,7 +604,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
 
     def test_waived_task_without_reason_is_verify(self):
         # PLAN: `[~]` bỏ phải ghi lý do — trước đây bỏ không lý do vẫn tính "xong".
-        write(self.plan, "- [~] `T-001` báo cáo công nợ — Gate: `true`\n")
+        write(self.plan, "- [~] `T-001` báo cáo công nợ — Gate: `test -d .`\n")
         self.activate()
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
@@ -678,8 +678,8 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
 
     def test_blueprint_bad_lines_keep_loop_going(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `echo ok`\n")
-        self.evidence("T-001", 0, "echo ok")
+        write(self.plan, "- [x] `T-001` xong — Gate: `ls ok`\n")
+        self.evidence("T-001", 0, "ls ok")
         write(self.base / "BLUEPRINT.md", "| MUST | 2 |\n- [x] `A-001` **MUST** a\n- [-] `A-002` **MUST** b\n")
         self.activate(blueprint="BLUEPRINT.md")
         v = xt.loop_verdict(self.base)
@@ -694,29 +694,29 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
             "- [-] `T-005` ô lạ",
         ):
             with self.subTest(bad=bad):
-                write(self.plan, f"- [x] `T-001` xong — Gate: `echo ok`\n{bad}\n")
-                self.evidence("T-001", 0, "echo ok")
+                write(self.plan, f"- [x] `T-001` xong — Gate: `ls ok`\n{bad}\n")
+                self.evidence("T-001", 0, "ls ok")
                 self.activate()
                 v = xt.loop_verdict(self.base)
                 self.assertEqual(v["verdict"], "verify")
                 self.assertIn("sai định dạng", v["reason"])
 
     def test_ticked_task_evidence_paths(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `echo ok`\n")
+        write(self.plan, "- [x] `T-001` xong — Gate: `ls ok`\n")
         self.activate()
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
         self.assertIn("chưa có bằng chứng xanh", v["reason"])
-        self.evidence("T-001", 1, "echo ok")
+        self.evidence("T-001", 1, "ls ok")
         self.assertIn("chưa có bằng chứng xanh", xt.loop_verdict(self.base)["reason"])
-        self.evidence("T-001", 0, "echo khac")
+        self.evidence("T-001", 0, "ls khac")
         self.assertIn("bằng chứng chạy lệnh khác", xt.loop_verdict(self.base)["reason"])
-        self.evidence("T-001", 0, "echo   'ok'")
+        self.evidence("T-001", 0, "ls   'ok'")
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
 
     def test_blueprint_open_must_continues(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
-        self.evidence("T-001", 0, "true")
+        write(self.plan, "- [x] `T-001` xong — Gate: `test -d .`\n")
+        self.evidence("T-001", 0, "test -d .")
         write(
             self.base / "BP.md",
             "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n- [ ] `AAA-003` **SHOULD** c\n",
@@ -727,8 +727,8 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("còn 2 mục MUST", v["reason"])
 
     def test_blueprint_bad_waiver_continues(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
-        self.evidence("T-001", 0, "true")
+        write(self.plan, "- [x] `T-001` xong — Gate: `test -d .`\n")
+        self.evidence("T-001", 0, "test -d .")
         write(self.base / "BP.md", "- [~] `AAA-001` **MUST** a → Kiểm: t\n- [x] `AAA-002` **MUST** b → Kiểm: t\n")
         self.activate(blueprint="BP.md")
         v = xt.loop_verdict(self.base)
@@ -736,8 +736,8 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("mục miễn trừ không hợp lệ: AAA-001 (dòng 1)", v["reason"])
 
     def test_blueprint_clean_or_missing_is_done(self):
-        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
-        self.evidence("T-001", 0, "true")
+        write(self.plan, "- [x] `T-001` xong — Gate: `test -d .`\n")
+        self.evidence("T-001", 0, "test -d .")
         write(self.base / "BP.md", "- [x] `AAA-001` **MUST** a\n- [~] `AAA-002` **MAY** b — Miễn: không cần\n")
         self.activate(blueprint="BP.md")
         v = xt.loop_verdict(self.base)
@@ -775,10 +775,10 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.activate(deadline=past)  # PLAN chưa có nhưng hạn đã quá: budget thắng blocked-vì-thiếu-PLAN
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "budget")
         write(self.base / "BP.md", "- [ ] `AAA-001` **MUST** a → Kiểm: t\n")
-        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n- [ ] `T-002` làm — Gate: `true`\n")
+        write(self.plan, "- [x] `T-001` xong — Gate: `test -d .`\n- [ ] `T-002` làm — Gate: `test -d .`\n")
         self.activate(blueprint="BP.md")  # task tick thiếu bằng chứng đứng trước task chưa làm
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "verify")
-        self.evidence("T-001", 0, "true")  # task chưa làm thắng blueprint còn MUST mở
+        self.evidence("T-001", 0, "test -d .")  # task chưa làm thắng blueprint còn MUST mở
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["verdict"], v["task"]), ("continue", "T-002"))
 
@@ -836,6 +836,15 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertIsNone(xt.final_check(self.base))
         write(self.base / "ok.txt", "2\n")  # sửa file đã track
         self.assertIsNotNone(xt.final_check(self.base))
+
+    def test_head_moving_after_verify_invalidates(self):
+        # AUD-CODE-006: HEAD đi xa sau bằng chứng/kiểm cuối (cây làm việc sạch, chỉ có commit mới) vẫn bị bắt.
+        self.assertEqual(self.verify()[0], 0)
+        self.assertIsNone(xt.final_check(self.base))
+        self.git("commit", "-q", "--allow-empty", "-m", "sau kiểm cuối")
+        self.assertIn("chưa kiểm lại cuối", xt.final_check(self.base) or "")
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertIn("loop verify", json.loads(out)["reason"])
 
     def test_red_gate_blocks_with_failing_task(self):
         (self.base / "ok.txt").unlink()

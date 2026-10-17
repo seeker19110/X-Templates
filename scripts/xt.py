@@ -982,19 +982,21 @@ def _verdict_task(
             "task": t["id"],
             "reason": f"task {t['id']} đã tick nhưng chưa có bằng chứng xanh — chạy: xt.py loop record --task {t['id']} -- <lệnh kiểm>",
         }
+    return _verdict_gate(t, ev)
+
+
+def _verdict_gate(t: Dict[str, Any], ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Task đã tick có bằng chứng xanh: Gate phải có, không no-op (AUD-HAR-029) và đúng lệnh đã chạy; ổn thì None."""
+    tid = t["id"]
     if not t["gate"]:
-        return {
-            "verdict": "verify",
-            "task": t["id"],
-            "reason": f"task {t['id']} không có Gate máy kiểm — thêm `Gate:` + lệnh trong backtick vào PLAN rồi `loop record`",
-        }
-    if not same_command(ev.get("cmd") or "", redact(t["gate"])):  # bằng chứng lưu lệnh đã che bí mật
-        return {
-            "verdict": "verify",
-            "task": t["id"],
-            "reason": f"task {t['id']} khai Gate `{t['gate']}` nhưng bằng chứng chạy lệnh khác",
-        }
-    return None
+        why = f"task {tid} không có Gate máy kiểm — thêm `Gate:` + lệnh trong backtick vào PLAN rồi `loop record`"
+    elif GATE_NOOP_RE.fullmatch(t["gate"].strip()):  # khớp is_noop() của dev-task.sh
+        why = f"task {tid}: Gate no-op không phải bằng chứng (ADR-0011) — khai lệnh thật kiểm kết quả"
+    elif not same_command(ev.get("cmd") or "", redact(t["gate"])):  # bằng chứng lưu lệnh đã che bí mật
+        why = f"task {tid} khai Gate `{t['gate']}` nhưng bằng chứng chạy lệnh khác"
+    else:
+        return None
+    return {"verdict": "verify", "task": tid, "reason": why}
 
 
 def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1854,7 +1856,9 @@ def audit_tools(root: Path, sig: Dict[str, Any], appl: Dict[int, Tuple[str, str]
     return out
 
 
-EVIDENCE_REF_RE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,5})(?::\d+(?:[-,]\d+)*)?")
+EVIDENCE_REF_RE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,5})(:\d+(?:[-,]\d+)*)?")
+EVIDENCE_IDENT_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})(?:\(\))?`")  # tên hàm/test/lớp trong câu bằng chứng
+STALE_LINE_REASON = "file đổi sau khi ghi dòng bằng chứng (tham chiếu có số dòng)"
 
 
 def _resolve_ref(ref: str, files: List[str]) -> Optional[str]:
@@ -1885,33 +1889,77 @@ def _files_changed_after(root: Path, refs: Iterable[str], written: int, mtime_ca
     return changed
 
 
+def _evidence_refs(note: str, files: List[str], rel_bp: str) -> Tuple[Set[str], Set[str]]:
+    """File được trích trong câu bằng chứng: (có số dòng `file:NN`, chỉ nhắc tên). File có cả hai → coi là có số dòng."""
+    lined: Set[str] = set()
+    named: Set[str] = set()
+    for ref, lines in EVIDENCE_REF_RE.findall(note):
+        resolved = _resolve_ref(ref, files)
+        if resolved and resolved != rel_bp:
+            (lined if lines else named).add(resolved)
+    return lined, named - lined
+
+
+def _text_at_head(root: Path, rel: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
+    """Nội dung file ở HEAD (có đệm); không đọc được → None."""
+    if rel not in cache:
+        r = _git(root, "show", f"HEAD:{rel}")
+        cache[rel] = r.stdout if r.returncode == 0 else None
+    return cache[rel]
+
+
+def _missing_identifiers(root: Path, refs: Set[str], note: str, cache: Dict[str, Optional[str]]) -> List[str]:
+    """Định danh trong backtick của câu bằng chứng không còn xuất hiện (nguyên từ) trong file nào được trích ở HEAD.
+    Không đọc được file nào → không kết luận (rỗng)."""
+    idents = sorted(set(EVIDENCE_IDENT_RE.findall(note)))
+    texts = [t for t in (_text_at_head(root, r, cache) for r in sorted(refs)) if t is not None]
+    if not texts:
+        return []
+    return [i for i in idents if not any(re.search(rf"(?<![A-Za-z0-9_]){i}(?![A-Za-z0-9_])", t) for t in texts)]
+
+
+class _StaleCtx:
+    """Bộ nhớ đệm dùng chung khi quét một blueprint: thời gian commit của file, nội dung file ở HEAD."""
+
+    def __init__(self, root: Path, rel_bp: str, files: List[str]) -> None:
+        self.root, self.rel_bp, self.files = root, rel_bp, files
+        self.mtimes: Dict[str, int] = {}
+        self.texts: Dict[str, Optional[str]] = {}
+
+
+def _stale_entry(ctx: _StaleCtx, no: int, item_id: str, kind: str, note: str) -> Optional[Dict[str, Any]]:
+    """Một mục [x]/[~] có đáng ngờ lỗi thời không (AUD-HAR-045): tham chiếu có số dòng → file đổi sau khi ghi dòng;
+    tham chiếu chỉ tên file → chỉ khi định danh trong backtick đã biến mất khỏi mọi file được trích."""
+    lined, named = _evidence_refs(note, ctx.files, ctx.rel_bp)
+    changed: List[str] = []
+    written = _line_written_at(ctx.root, ctx.rel_bp, no) if lined else None
+    if written is not None:
+        changed = _files_changed_after(ctx.root, sorted(lined), written, ctx.mtimes)
+    gone = _missing_identifiers(ctx.root, lined | named, note, ctx.texts) if named else []
+    reasons = ([STALE_LINE_REASON] if changed else []) + (
+        ["định danh " + ", ".join(f"`{i}`" for i in gone) + " không còn trong file được trích"] if gone else []
+    )
+    if not reasons:
+        return None
+    files = sorted(set(changed) | (named if gone else set()))
+    return {"id": item_id, "kind": kind, "files": files, "reason": "; ".join(reasons)}
+
+
 def blueprint_stale_evidence(root: Path, blueprint: Path, files: List[str]) -> List[Dict[str, Any]]:
-    """Mục [x]/[~] trích file mà file đó đổi SAU commit ghi dòng bằng chứng/miễn trừ → cần xác minh lại."""
+    """Mục [x]/[~] có bằng chứng/miễn trừ nghi lỗi thời → cần xác minh lại (luật ở `_stale_entry`)."""
     try:
         lines = blueprint.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
-    rel_bp = os.path.relpath(blueprint.resolve(), root.resolve()).replace(os.sep, "/")
-    mtime_cache: Dict[str, int] = {}
+    ctx = _StaleCtx(root, os.path.relpath(blueprint.resolve(), root.resolve()).replace(os.sep, "/"), files)
     out = []
     for no, line in enumerate(lines, 1):
         m = ITEM_RE.match(line)
-        if not m or m.group("state") not in "xX~":
-            continue
-        note = re.search(r"\s—\s(Bằng chứng|Miễn|Không áp dụng):(.*)$", line)
-        if not note:
-            continue
-        refs = {
-            r for r in (_resolve_ref(x, files) for x in EVIDENCE_REF_RE.findall(note.group(2))) if r and r != rel_bp
-        }
-        if not refs:
-            continue
-        written = _line_written_at(root, rel_bp, no)
-        if written is None:
-            continue
-        changed = _files_changed_after(root, sorted(refs), written, mtime_cache)
-        if changed:
-            out.append({"id": m.group("id"), "kind": note.group(1), "files": changed})
+        note = re.search(r"\s—\s(Bằng chứng|Miễn|Không áp dụng):(.*)$", line) if m else None
+        if m and note and m.group("state") in "xX~":
+            entry = _stale_entry(ctx, no, m.group("id"), note.group(1), note.group(2))
+            if entry:
+                out.append(entry)
     return out
 
 
@@ -2389,19 +2437,94 @@ def _doctor_docs(base: Path, fw: Path) -> List[Finding]:
     return out
 
 
-def _yaml_blank(value: str) -> bool:
-    return value in ("", '""', "''")
-
-
 def gate_noop_keys(base: Path) -> List[str]:
     """Khoá `lint`/`test` khai trong xt.yaml mà rỗng hoặc không kiểm gì — dev-task.sh sẽ ĐỎ trong vòng (ADR-0011).
     Khoá vắng không tính: dev-task.sh còn tự dò theo stack."""
-    p = base / "xt.yaml"
-    if not p.is_file():
-        return []
-    keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
+    keys = read_xt_yaml(base)[0]
     vals = {k: keys[k].strip() for k in LOOP_GATE_KEYS if k in keys}
     return [k for k, v in vals.items() if not v or GATE_NOOP_RE.fullmatch(v)]
+
+
+def read_xt_yaml(base: Path) -> Tuple[Dict[str, str], List[str]]:
+    """Đọc xt.yaml phẳng → (khoá → giá trị đã bỏ comment/nháy, các khoá bị khai trùng). Khoá trùng: dòng ĐẦU thắng
+    như `yaml_get` của dev-task.sh (`head -1`) — cái cổng thật chạy (AUD-XFEAT-002). Không có file → ({}, [])."""
+    p = base / "xt.yaml"
+    keys: Dict[str, str] = {}
+    dups: List[str] = []
+    for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else []):
+        if m and m[1] not in keys:
+            keys[m[1]] = yaml_scalar(m[2])
+        elif m and m[1] not in dups:
+            dups.append(m[1])
+    return keys, dups
+
+
+SHELL_PUNCT = frozenset("();<>|&")
+SHELL_BUILTINS = frozenset(
+    "cd echo printf test [ [[ exit export true false : . source set unset read eval exec pwd ulimit trap shift return "
+    "local declare typeset alias wait kill let type command umask".split()
+)
+SHELL_KEEP_FIRST = frozenset(
+    "do then else elif if while until { } ! time done fi esac".split()
+)  # sau từ này vẫn là lệnh
+SHELL_NO_COMMAND = frozenset("for case select function in".split())  # phần còn lại của câu không phải lệnh
+SHELL_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*=.*", re.S)
+
+
+def _shell_step(tok: str, first: bool, skip: bool) -> Tuple[bool, bool, str]:
+    """Một bước duyệt token của `gate_command_words` → (đang ở vị trí lệnh, bỏ token kế, từ lệnh nếu có)."""
+    if skip:
+        return first, False, ""
+    if set(tok) <= SHELL_PUNCT:
+        return (first, True, "") if set(tok) & set("<>") else (True, False, "")  # chuyển hướng vs ngăn lệnh
+    if not first:
+        return False, False, ""
+    if tok in SHELL_KEEP_FIRST or SHELL_ASSIGN_RE.fullmatch(tok):
+        return True, False, ""
+    dynamic = tok in SHELL_NO_COMMAND or "$" in tok or "`" in tok
+    return False, False, "" if dynamic else tok
+
+
+def gate_command_words(cmd: str) -> List[str]:
+    """Từ đầu của từng lệnh đơn trong một dòng shell (tách theo `&&` `||` `;` `|` `&` `(` `)`; bỏ gán biến, từ khoá
+    `for/do/done/if/then/case…`, chuyển hướng, từ động `$x`/backtick). Không phân tích được (nháy lệch) → rỗng."""
+    lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        toks = list(lexer)
+    except ValueError:
+        return []
+    words: List[str] = []
+    first, skip = True, False
+    for tok in toks:
+        first, skip, word = _shell_step(tok, first, skip)
+        if word:
+            words.append(word)
+    return words
+
+
+def autopilot_ignored(lines: Iterable[str]) -> bool:
+    """`.gitignore` đã loại `.autopilot/` chưa — MỘT luật cho `doctor` và `install.py` (AUD-ARCH-001)."""
+    return any(ln.strip() in AUTOPILOT_IGNORES for ln in lines)
+
+
+def _tool_missing(tok: str, base: Path) -> bool:
+    if "/" in tok:  # đường dẫn tới script: tính từ gốc dự án (cổng chạy ở đó)
+        return not (base / tok).exists()
+    return tok not in SHELL_BUILTINS and not shutil.which(tok)
+
+
+def _doctor_gate_tools(base: Path, keys: Dict[str, str]) -> List[Finding]:
+    """AUD-HAR-034: công cụ mà lệnh cổng gọi mà PATH không có → cổng sẽ đỏ `command not found` (cảnh báo, máy khác có thể có)."""
+    out = []
+    for key in DOCTOR_YAML_KEYS:
+        tools = dict.fromkeys(gate_command_words(keys.get(key, "")))
+        out += [
+            Finding("gate-tool", "warn", f"cổng `{key}` gọi `{t}` mà PATH không có")
+            for t in tools
+            if _tool_missing(t, base)
+        ]
+    return out
 
 
 def yaml_scalar(raw: str) -> str:
@@ -2428,8 +2551,16 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         )
         msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
         return [Finding("xt-yaml", "error", msg, fix)]
-    keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
-    out = []
+    keys, dups = read_xt_yaml(base)
+    out = _doctor_gate_tools(base, keys)
+    if dups:
+        out.append(
+            Finding(
+                "xt-yaml",
+                "warn",
+                f"xt.yaml khai trùng khoá {', '.join(dups)} — chỉ dòng ĐẦU có hiệu lực (như dev-task.sh); xoá dòng thừa",
+            )
+        )
     missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
     if missing:
         out.append(
@@ -2437,7 +2568,7 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
                 "xt-yaml", "warn", f"xt.yaml thiếu khoá {', '.join(missing)} — khai đủ, chuỗi rỗng nếu không áp dụng"
             )
         )
-    blank = [k for k in DOCTOR_YAML_KEYS if k in keys and _yaml_blank(keys[k])]
+    blank = [k for k in DOCTOR_YAML_KEYS if k in keys and not keys[k]]
     if blank:
         noop = " — cổng commit đang là no-op" if len(blank) == len(DOCTOR_YAML_KEYS) else ""
         out.append(
@@ -2453,7 +2584,7 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
 def _doctor_gitignore(base: Path) -> List[Finding]:
     gi = base / ".gitignore"
     lines = gi.read_text(encoding="utf-8", errors="replace").splitlines() if gi.is_file() else []
-    if any(ln.strip() in AUTOPILOT_IGNORES for ln in lines):
+    if autopilot_ignored(lines):
         return []
     block = "\n# X-Templates: trạng thái autopilot cục bộ\n.autopilot/\n"
     return [
@@ -2865,9 +2996,7 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
 def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
     """(mức tự chủ, glob nhạy cảm riêng, ghi chú) từ xt.yaml: `merge_autonomy: L0..L4` (mặc định L1),
     `merge_risk_paths: "glob, glob"`. Giá trị lạ → L1 (an toàn) kèm ghi chú."""
-    p = base / "xt.yaml"
-    raw = p.read_text(encoding="utf-8") if p.is_file() else ""
-    keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
+    keys = read_xt_yaml(base)[0]
     level = keys.get("merge_autonomy", "L1")
     notes: List[str] = []
     if not re.fullmatch(r"L[0-4]", level):
@@ -3584,7 +3713,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             )
             stale = plan["stale_evidence"]
             for e in stale[:25]:
-                print(f"  {e['id']:<18} {e['kind']:<10} ← {', '.join(e['files'])}")
+                print(f"  {e['id']:<18} {e['kind']:<10} ← {', '.join(e['files'])}  ({e['reason']})")
             if len(stale) > 25:
                 print(f"  … và {len(stale) - 25} mục nữa (--json để xem hết)")
         if plan["rescan"] is not None:
@@ -3712,12 +3841,21 @@ def _feedback_list(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+def _feedback_key(e: Dict[str, str]) -> Tuple[str, str, str]:
+    """Khoá gộp: (loại, ID). `bi-chan` mang ID task CỤC BỘ của từng dự án (`T-003` ở dự án này ≠ `T-003` ở dự án kia)
+    nên khoá thêm lý do đã chuẩn hoá (hoa/thường, khoảng trắng) — hai dự án khác lý do không gộp thành "2 dự án" (AUD-CODE-004)."""
+    kind = e.get("kind", "?")
+    reason = re.sub(r"\s+", " ", e.get("symptom", "")).strip().casefold() if kind == "bi-chan" else ""
+    return kind, e.get("id", "?"), reason
+
+
 def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
-    """Gộp phản hồi nhiều dự án theo (loại, ID). `ready` = ≥ 2 dự án cùng báo hoặc có bước tái hiện (ADR-0010)."""
-    groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    """Gộp phản hồi nhiều dự án theo (loại, ID; `bi-chan` thêm lý do). `ready` = ≥ 2 dự án cùng báo hoặc có bước tái hiện
+    (ADR-0010). `symptoms` = mọi triệu chứng khác nhau của nhóm, theo thứ tự gặp."""
+    groups: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     for project, d in sources:
         for e in feedback_entries(d) if d.is_dir() else []:
-            key = (e.get("kind", "?"), e.get("id", "?"))
+            key = _feedback_key(e)
             g = groups.setdefault(key, {"kind": key[0], "id": key[1], "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})
             # FB có thể đã sửa tay sau `feedback add` → che lại trước khi ra PR nháp ở repo khung public (AUD-CFG-002).
@@ -3726,6 +3864,7 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
     for g in out:
         has_repro = any(i.get("repro", "—") not in ("", "—") for i in g["items"])
         g["ready"] = len(g["projects"]) >= 2 or has_repro
+        g["symptoms"] = list(dict.fromkeys(i.get("symptom", "") for i in g["items"]))
     return sorted(out, key=lambda g: (not g["ready"], -len(g["projects"]), g["kind"], g["id"]))
 
 
@@ -3742,17 +3881,16 @@ def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
         print(json.dumps(groups, ensure_ascii=False))
         return 0
     print(
-        "| Đủ ngưỡng | Loại | ID | Dự án | Triệu chứng (đầu tiên) | Cách khắc phục (đầu tiên) |\n|---|---|---|---|---|---|"
+        "| Đủ ngưỡng | Loại | ID | Dự án | Triệu chứng (mọi biến thể) | Cách khắc phục (đầu tiên) |\n|---|---|---|---|---|---|"
     )
     for g in groups:
-        first = g["items"][0]
         cells = [
             "✅" if g["ready"] else "—",
             g["kind"],
             f"`{g['id']}`",
             ", ".join(g["projects"]),
-            first.get("symptom", "").replace("|", "\\|")[:160],
-            first.get("fix", "").replace("|", "\\|")[:160],
+            "<br>".join(s.replace("|", "\\|")[:160] for s in g["symptoms"]),
+            g["items"][0].get("fix", "").replace("|", "\\|")[:160],
         ]
         print("| " + " | ".join(cells) + " |")
     return 0

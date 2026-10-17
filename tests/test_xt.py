@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import unittest
 import unittest.mock
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -435,7 +435,7 @@ class LoopTest(unittest.TestCase):
             """
             # PLAN
             - [ ] `T-001` Viết hàm cộng — Gate: `python3 -c "import sys; sys.exit(0)"`
-            - [ ] `T-002` Viết test — Gate: `true`
+            - [ ] `T-002` Viết test — Gate: `test -d .`
             """,
         )
         self.env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.base))
@@ -449,8 +449,14 @@ class LoopTest(unittest.TestCase):
             os.environ["CLAUDE_PROJECT_DIR"] = self._old
 
     def run_cli(self, *args) -> int:
-        with redirect_stdout(io.StringIO()):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):  # AUD-TEST-003: stderr không rò ra cổng
             return xt.main(list(args))
+
+    def test_run_cli_captures_stderr(self):
+        leaked = io.StringIO()
+        with redirect_stderr(leaked):
+            rc = self.run_cli("feedback", "add", "--kind", "cong-cu", "--id", "X", "--symptom", " ", "--fix", "f")
+        self.assertEqual((rc, leaked.getvalue()), (2, ""))
 
     def test_gateless_task_needs_gate(self):
         # AUD-HAR-008: task tick mà không có Gate thì không được tính xong chỉ vì một lệnh xanh bất kỳ.
@@ -462,12 +468,32 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(v["verdict"], "verify")
         self.assertIn("không có Gate", v["reason"])
 
+    def test_noop_gate_is_not_evidence(self):
+        # AUD-HAR-029 / ADR-0011: Gate no-op (`true`, `:`, `exit 0`, `echo …`) không kiểm gì → không phải bằng chứng.
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        write(plan, "- [ ] `T-001` x\n")
+        self.assertEqual(self.run_cli("loop", "init"), 0)
+        for gate in ("true", ":", "exit 0", "echo ok", "printf x"):
+            write(plan, f"- [x] `T-001` x — Gate: `{gate}`\n")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(xt.loop_record("T-001", [gate], self.base), 0)
+            v = xt.loop_verdict(self.base)
+            self.assertEqual((gate, v["verdict"]), (gate, "verify"))
+            self.assertIn("Gate no-op không phải bằng chứng (ADR-0011)", v["reason"])
+        write(plan, "- [x] `T-001` x — Gate: `test -d .`\n")  # đối chứng: Gate thật xanh vẫn được tính
+        with redirect_stdout(io.StringIO()):
+            xt.loop_record("T-001", ["test -d ."], self.base)
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
     def test_record_quoting_and_double_dash(self):
         # AUD-HAR-002: argv có nháy/`--` thứ hai phải chạy và khớp Gate nguyên vẹn.
-        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [x] `T-001` x — Gate: `echo ok -- --run`\n")
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md", "- [x] `T-001` x — Gate: `python3 -c 'print(1)' -- --run`\n"
+        )
         self.assertEqual(self.run_cli("loop", "init"), 0)
-        self.assertEqual(self.run_cli("loop", "record", "--task", "T-001", "--", "echo", "ok", "--", "--run"), 0)
-        self.assertEqual(xt.read_evidence("T-001", self.base)["cmd"], "echo ok -- --run")
+        argv = ["python3", "-c", "print(1)", "--", "--run"]
+        self.assertEqual(self.run_cli("loop", "record", "--task", "T-001", "--", *argv), 0)
+        self.assertEqual(xt.read_evidence("T-001", self.base)["cmd"], "python3 -c 'print(1)' -- --run")
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
         self.assertEqual(
             self.run_cli("loop", "record", "--task", "T-002", "--", "python3", "-c", "print('hi there')"), 0
@@ -619,7 +645,7 @@ class LoopTest(unittest.TestCase):
 
         plan.write_text(plan.read_text(encoding="utf-8").replace("- [ ] `T-002`", "- [x] `T-002`"), encoding="utf-8")
         with redirect_stdout(io.StringIO()):
-            xt.loop_record("T-002", ["true"], self.base)
+            xt.loop_record("T-002", ["test -d ."], self.base)
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
         out, code = xt.hook_stop("{}", self.base)
         self.assertEqual((out, code), ("", 0))
@@ -815,7 +841,14 @@ class AuditRegressionTest(unittest.TestCase):
         write(self.tmp / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` x\n")
         env = {"CLAUDE_PROJECT_DIR": str(self.tmp)}
         self.cli("loop", "init", "--hours", "0", env=env)
-        self.assertIsNotNone(xt.read_state(self.tmp)["deadline"])
+        deadline = xt.read_state(self.tmp)["deadline"]
+        self.assertIsNotNone(deadline)
+        # Hạn tính theo giây: ngay trong giây đó chưa "quá hạn". Dịch đồng hồ 1 giây để kiểm verdict (AUD-TEST-004).
+        later = (xt._parse_iso(deadline) + xt._dt.timedelta(seconds=1)).isoformat()
+        with unittest.mock.patch.object(xt, "now_iso", return_value=later):
+            v = xt.loop_verdict(self.tmp)
+        self.assertEqual(v["verdict"], "budget")
+        self.assertIn(deadline, v["reason"])
 
     def test_evidence_redacts_secret_like_values(self):
         write(self.tmp / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` x\n")
@@ -1308,7 +1341,9 @@ class AuditPlanTest(GitRepoMixin, unittest.TestCase):
         self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
         files = xt._repo_files(self.repo)
         stale = xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", files)
-        self.assertEqual(stale, [{"id": "A-001", "kind": "Bằng chứng", "files": ["lib/a.py"]}])
+        # Tham chiếu có số dòng (`lib/a.py:1`) → luật cũ: file đổi sau khi ghi dòng blueprint. `b.py` chỉ nhắc tên → không cờ.
+        self.assertEqual([(e["id"], e["kind"], e["files"]) for e in stale], [("A-001", "Bằng chứng", ["lib/a.py"])])
+        self.assertIn("đổi sau khi ghi dòng", stale[0]["reason"])
 
     def test_audit_plan_rescan_from_status(self):
         self.init_repo()

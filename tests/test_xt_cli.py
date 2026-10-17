@@ -322,41 +322,106 @@ class StaleEvidenceTest(TmpRepoCase):
             "- [x] `A-002` **MUST** không ghi chú\n"
             "- [x] `A-003` **MUST** file lạ → Kiểm: x — Bằng chứng: khong-co.py:3 ghi chú\n"
             "- [x] `A-004` **MUST** lib đổi → Kiểm: x — Bằng chứng: lib/a.py:1\n"
-            "- [~] `A-005` **MUST** lib đổi nữa → Kiểm: x — Miễn: lib/a.py không dùng\n"
-            "- [x] `A-006` **MUST** file không đổi → Kiểm: x — Bằng chứng: b.py\n"
+            "- [~] `A-005` **MUST** lib đổi nữa → Kiểm: x — Miễn: lib/a.py:3 không dùng\n"
+            "- [x] `A-006` **MUST** file không đổi → Kiểm: x — Bằng chứng: b.py:1\n"
         )
         self.commit_files({"lib/a.py": "1", "b.py": "1", "BLUEPRINT.md": bp}, 1_700_000_000)
         self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
         # dòng chưa commit: blame trả hash toàn số 0 → bỏ qua
         with (self.repo / "BLUEPRINT.md").open("a", encoding="utf-8") as f:
-            f.write("- [x] `A-007` **MUST** mới sửa → Kiểm: x — Bằng chứng: lib/a.py\n")
+            f.write("- [x] `A-007` **MUST** mới sửa → Kiểm: x — Bằng chứng: lib/a.py:1\n")
         files = xt._repo_files(self.repo)
         stale = xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", files)
         self.assertEqual(
-            stale,
-            [
-                {"id": "A-004", "kind": "Bằng chứng", "files": ["lib/a.py"]},
-                {"id": "A-005", "kind": "Miễn", "files": ["lib/a.py"]},
-            ],
+            [(e["id"], e["kind"], e["files"]) for e in stale],
+            [("A-004", "Bằng chứng", ["lib/a.py"]), ("A-005", "Miễn", ["lib/a.py"])],
         )
+        self.assertTrue(all("đổi sau khi ghi dòng" in e["reason"] for e in stale))
 
     def test_audit_plan_checks_backlog_evidence_too(self):
         self.init_repo()
         main = "---\nkind: blueprint\nbacklog: BLUEPRINT-BACKLOG.md\n---\n- [x] `A-001` **MUST** a → Kiểm: x — Bằng chứng: b.py\n"
-        bl = "- [x] `A-002` **SHOULD** s → Kiểm: x — Bằng chứng: lib/a.py\n"
+        bl = "- [x] `A-002` **SHOULD** s → Kiểm: x — Bằng chứng: lib/a.py:1\n"
         self.commit_files(
             {"lib/a.py": "1", "b.py": "1", "BLUEPRINT.md": main, "BLUEPRINT-BACKLOG.md": bl}, 1_700_000_000
         )
         self.commit_files({"lib/a.py": "2"}, 1_700_000_100)
         plan = xt.audit_plan(self.repo, self.repo / "BLUEPRINT.md")
-        self.assertEqual(plan["stale_evidence"], [{"id": "A-002", "kind": "Bằng chứng", "files": ["lib/a.py"]}])
+        self.assertEqual([(e["id"], e["files"]) for e in plan["stale_evidence"]], [("A-002", ["lib/a.py"])])
 
     def test_blueprint_not_tracked_is_skipped(self):
         self.init_repo()
         self.commit_files({"lib/a.py": "1"}, 1_700_000_000)
         bp = self.repo / "BLUEPRINT.md"  # chưa git add → blame lỗi
-        bp.write_text("- [x] `A-001` **MUST** x → Kiểm: y — Bằng chứng: lib/a.py\n", encoding="utf-8")
+        bp.write_text("- [x] `A-001` **MUST** x → Kiểm: y — Bằng chứng: lib/a.py:1\n", encoding="utf-8")
         self.assertEqual(xt.blueprint_stale_evidence(self.repo, bp, xt._repo_files(self.repo)), [])
+
+    # AUD-HAR-045: tham chiếu chỉ tên file chỉ cờ khi định danh trong backtick biến mất khỏi file được trích.
+    def stale_for(self, evidence: str, files: dict[str, str], later: dict[str, str], listed: list[str] | None = None):
+        self.init_repo()
+        bp = f"- [x] `A-001` **MUST** a → Kiểm: x — Bằng chứng: {evidence}\n"
+        self.commit_files({**files, "BLUEPRINT.md": bp}, 1_700_000_000)
+        self.commit_files(later, 1_700_000_100)
+        return xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", listed or xt._repo_files(self.repo))
+
+    def test_name_only_ref_is_not_flagged_when_file_changes(self):
+        self.assertEqual(self.stale_for("lib/a.py", {"lib/a.py": "1"}, {"lib/a.py": "2"}), [])
+
+    def test_identifier_still_present_is_not_flagged(self):
+        stale = self.stale_for(
+            "lib/a.py `parse_plan()` và `ProgressCheckTest`",
+            {"lib/a.py": "def parse_plan(): pass\n"},
+            {"lib/a.py": "class ProgressCheckTest: pass\ndef parse_plan(): pass\n"},
+        )
+        self.assertEqual(stale, [])
+
+    def test_identifier_gone_is_flagged_with_reason(self):
+        stale = self.stale_for(
+            "lib/a.py `old_func` xử lý, `keep_me` còn",
+            {"lib/a.py": "def old_func(): pass\ndef keep_me(): pass\n"},
+            {"lib/a.py": "def keep_me(): pass\n"},
+        )
+        self.assertEqual([(e["id"], e["kind"], e["files"]) for e in stale], [("A-001", "Bằng chứng", ["lib/a.py"])])
+        self.assertIn("`old_func`", stale[0]["reason"])
+        self.assertNotIn("keep_me", stale[0]["reason"])
+
+    def test_identifier_found_in_any_cited_file(self):
+        files = {"lib/a.py": "x = 1\n", "b.py": "def moved_func(): pass\n"}
+        self.assertEqual(self.stale_for("lib/a.py và b.py `moved_func`", files, {"lib/a.py": "x = 2\n"}), [])
+
+    def test_identifier_match_is_whole_word(self):
+        stale = self.stale_for(
+            "lib/a.py `test_x`", {"lib/a.py": "def test_x(): pass\n"}, {"lib/a.py": "def test_xyz(): pass\n"}
+        )
+        self.assertEqual(len(stale), 1)  # `test_xyz` không phải `test_x`
+
+    def test_backticks_that_are_not_identifiers_are_ignored(self):
+        stale = self.stale_for("lib/a.py `xt.py` `loop verify` `ab` `$(x)`", {"lib/a.py": "1"}, {"lib/a.py": "2"})
+        self.assertEqual(stale, [])
+
+    def test_unreadable_cited_file_does_not_flag(self):
+        stale = self.stale_for("ghost.py `gone_func`", {"lib/a.py": "1"}, {"lib/a.py": "2"}, listed=["ghost.py"])
+        self.assertEqual(stale, [])
+
+    def test_head_text_is_cached_across_items(self):
+        self.init_repo()
+        bp = (
+            "- [x] `A-001` **MUST** a → Kiểm: x — Bằng chứng: lib/a.py `gone_one`\n"
+            "- [x] `A-002` **MUST** b → Kiểm: x — Bằng chứng: lib/a.py `gone_two`\n"
+        )
+        self.commit_files({"lib/a.py": "def other(): pass\n", "BLUEPRINT.md": bp}, 1_700_000_000)
+        stale = xt.blueprint_stale_evidence(self.repo, self.repo / "BLUEPRINT.md", xt._repo_files(self.repo))
+        self.assertEqual([e["id"] for e in stale], ["A-001", "A-002"])
+
+    def test_line_ref_and_missing_identifier_combine(self):
+        stale = self.stale_for(
+            "lib/a.py:1 và b.py `gone_func`",
+            {"lib/a.py": "1", "b.py": "def other(): pass\n"},
+            {"lib/a.py": "2"},
+        )
+        self.assertEqual(stale[0]["files"], ["b.py", "lib/a.py"])
+        self.assertIn("đổi sau khi ghi dòng", stale[0]["reason"])
+        self.assertIn("`gone_func`", stale[0]["reason"])
 
 
 # --------------------------------------------------------------------------- audit check
@@ -920,6 +985,54 @@ class FeedbackTest(TmpDirCase):
         self.assertEqual(table[2], "| ✅ | muc-sai | `SEC-AUTH-001` | a, b | mơ hồ \\| khó | x |")
         self.assertTrue(table[4].startswith("| — | tai-lieu |"))
 
+    def aggregate_sources(self, entries: dict[str, list[dict[str, str]]]) -> list[str]:
+        src = []
+        for proj, items in entries.items():
+            for e in items:
+                xt.write_feedback(self.tmp / proj, {"fix": "người xử lý", **e})
+            src += ["--from", f"{proj}={self.tmp / proj / 'docs' / 'xtemplates-feedback'}"]
+        return src
+
+    def test_aggregate_bi_chan_is_keyed_by_reason_not_local_task_id(self):
+        """AUD-CODE-004: `T-003` là ID cục bộ của từng dự án — hai lý do khác nhau không được gộp thành "2 dự án"."""
+        bc = {"kind": "bi-chan", "id": "T-003"}
+        src = self.aggregate_sources(
+            {
+                "a": [{**bc, "symptom": "autopilot bị chặn: cần khoá thanh toán"}],
+                "b": [{**bc, "symptom": "autopilot bị chặn: hết hạn ngạch CI"}],
+            }
+        )
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        self.assertEqual(sorted((g["projects"], g["ready"]) for g in groups), [(["a"], False), (["b"], False)])
+        rows = run_main("feedback", "aggregate", *src)[1].splitlines()[2:]
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(r.startswith("| — | bi-chan | `T-003` |") for r in rows))
+
+    def test_aggregate_bi_chan_same_reason_still_merges(self):
+        bc = {"kind": "bi-chan", "id": "T-003"}
+        src = self.aggregate_sources(
+            {
+                "a": [{**bc, "symptom": "autopilot bị chặn: Cần  khoá thanh toán"}],
+                "b": [{**bc, "symptom": "autopilot bị chặn: cần khoá thanh toán"}],
+            }
+        )
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        self.assertEqual([(g["projects"], g["ready"]) for g in groups], [(["a", "b"], True)])
+
+    def test_aggregate_report_lists_every_distinct_symptom(self):
+        base = {"kind": "cong-cu", "id": "xt.py loop"}
+        src = self.aggregate_sources(
+            {
+                "a": [{**base, "symptom": "crash khi PLAN rỗng"}],
+                "b": [{**base, "symptom": "treo khi hết đĩa"}, {**base, "symptom": "crash khi PLAN rỗng"}],
+            }
+        )
+        [group] = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        self.assertEqual(group["symptoms"], ["crash khi PLAN rỗng", "treo khi hết đĩa"])
+        row = run_main("feedback", "aggregate", *src)[1].splitlines()[2]
+        self.assertIn("crash khi PLAN rỗng<br>treo khi hết đĩa", row)
+        self.assertEqual(row.count("|"), 7)
+
     def test_aggregate_redacts_hand_edited_entries(self):
         """AUD-CFG-002: FB sửa tay sau `feedback add` vẫn được che trước khi ra PR nháp (repo khung public)."""
         d = self.tmp / "p" / "docs" / "xtemplates-feedback"
@@ -947,7 +1060,7 @@ class LoopCommandsTest(TmpDirCase):
         self.env = self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
         os.environ.pop("XT_DEBUG", None)
 
-    def write_plan(self, text: str = "- [ ] `T-001` làm gì đó — Gate: `true`\n") -> None:
+    def write_plan(self, text: str = "- [ ] `T-001` làm gì đó — Gate: `test -d .`\n") -> None:
         p = self.tmp / "docs" / "autopilot" / "PLAN.md"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
@@ -1009,7 +1122,7 @@ class LoopCommandsTest(TmpDirCase):
         self.assertFalse((self.tmp / ".autopilot" / "evidence").exists())
 
     def test_record_runs_command_and_writes_evidence(self):
-        rc, out, _ = run_main("loop", "record", "--task", "T-001", "--", "true")
+        rc, out, _ = run_main("loop", "record", "--task", "T-001", "--", "test", "-d", ".")
         self.assertEqual(rc, 0)
         self.assertIn("T-001: exit 0", out)
         self.assertEqual(xt.read_evidence("T-001", self.tmp)["exit_code"], 0)
@@ -1088,7 +1201,9 @@ class LoopCommandsTest(TmpDirCase):
         self.assertFalse((self.tmp / "docs").exists())
 
     def test_init_single_session_sizes_iterations_from_plan(self):
-        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)) + "- [x] `T-007` xong\n")
+        self.write_plan(
+            "".join(f"- [ ] `T-00{i}` việc — Gate: `test -d .`\n" for i in range(1, 7)) + "- [x] `T-007` xong\n"
+        )
         rc, out, _ = run_main("loop", "init", "--single-session")
         st = xt.read_state(self.tmp)
         self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 24, True))
@@ -1115,12 +1230,12 @@ class LoopCommandsTest(TmpDirCase):
 
     def test_defer_status_hook_stop_and_resume_flow(self):
         # ADR-0009: việc cần người không chặn cả vòng; hết việc tự làm được → done-pending-human, phiên dừng một lần.
-        self.write_plan("- [ ] `T-001` deploy — Gate: `true`\n- [x] `T-002` việc — Gate: `true`\n")
+        self.write_plan("- [ ] `T-001` deploy — Gate: `test -d .`\n- [x] `T-002` việc — Gate: `test -d .`\n")
         run_main("loop", "init", "--single-session")
         rc, out, _ = run_main("loop", "defer", "--task", "T-001", "--reason", "cần khoá\nthật")
         self.assertEqual(rc, 0)
         self.assertTrue(out.startswith("⏸ T-001 chờ người: cần khoá thật — làm tiếp việc khác"))
-        run_main("loop", "record", "--task", "T-002", "--", "true")
+        run_main("loop", "record", "--task", "T-002", "--", "test", "-d", ".")
         rc, out, _ = run_main("loop", "status")
         self.assertTrue(out.startswith("verdict: done-pending-human — mọi việc tự làm được đã xong; chờ người 1 việc"))
         self.assertIn("  · chế độ một phiên: compaction tự nén", out)
@@ -1164,9 +1279,9 @@ class LoopCommandsTest(TmpDirCase):
         self.assertFalse((self.tmp / ".autopilot").exists())
 
     def test_checkpoint_records_position_for_session_start(self):
-        self.write_plan("- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `false`\n")
+        self.write_plan("- [x] `T-001` a — Gate: `test -d .`\n- [ ] `T-002` b — Gate: `false`\n")
         run_main("loop", "init", "--single-session")
-        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "record", "--task", "T-001", "--", "test", "-d", ".")
         run_main("loop", "record", "--task", "T-002", "--", "false")
         subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
         rc, out, _ = run_main("loop", "checkpoint", stdin='{"trigger": "auto", "permission_mode": "acceptEdits"}')
@@ -1208,7 +1323,7 @@ class LoopCommandsTest(TmpDirCase):
 
     def test_defer_rejects_empty_reason_unknown_id_and_failing_task(self):
         # Review ADR-0009: defer gõ nhầm/không lý do/né bế tắc máy phải bị từ chối, không lưu lặng lẽ.
-        self.write_plan("- [ ] `T-001` a — Gate: `false`\n- [ ] `T-002` b — Gate: `true`\n")
+        self.write_plan("- [ ] `T-001` a — Gate: `false`\n- [ ] `T-002` b — Gate: `test -d .`\n")
         run_main("loop", "init", "--single-session")
         cases = {
             "lý do rỗng": (["--task", "T-002", "--reason", " \n"], "--reason rỗng"),
@@ -1276,7 +1391,7 @@ class LoopCommandsTest(TmpDirCase):
         st["checkpoint"] = {"at": "2000-01-01T00:00:00+00:00", "trigger": "auto", "task": "T-001"}
         xt.write_state(st, self.tmp)
         self.assertIn("checkpoint trước nén", run_main("loop", "status")[1])
-        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "record", "--task", "T-001", "--", "test", "-d", ".")
         self.assertNotIn("checkpoint trước nén", run_main("loop", "status")[1])
 
     def test_single_session_iterations_ignore_open_blueprint_must(self):
@@ -1284,7 +1399,7 @@ class LoopCommandsTest(TmpDirCase):
         (self.tmp / "BP.md").write_text(
             "".join(f"- [ ] `AAA-00{i}` **MUST** m → Kiểm: t\n" for i in range(1, 8)), encoding="utf-8"
         )
-        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)))
+        self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `test -d .`\n" for i in range(1, 7)))
         run_main("loop", "init", "--single-session", "--blueprint", "BP.md")
         # ADR-0012: chỉ tính task — MUST đã gom vào task, cộng thêm là đếm hai lần (M ≈ 480 MUST → ~2000 vòng)
         self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 24)
@@ -1415,7 +1530,9 @@ class AuditPlanCliTest(TmpRepoCase):
 
         def fake(*a, **k):
             plan = real(*a, **k)
-            plan["stale_evidence"] = [{"id": f"A-{i:03d}", "kind": "Miễn", "files": ["a.py"]} for i in range(1, 28)]
+            plan["stale_evidence"] = [
+                {"id": f"A-{i:03d}", "kind": "Miễn", "files": ["a.py"], "reason": "r"} for i in range(1, 28)
+            ]
             return plan
 
         with unittest.mock.patch.object(xt, "audit_plan", side_effect=fake):

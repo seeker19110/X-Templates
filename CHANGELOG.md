@@ -6,6 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- Test: `run_cli` bọc cả stderr (AUD-TEST-003); `test_hours_zero_sets_deadline` kiểm verdict `budget` (AUD-TEST-004).
 - `loop status`: bằng chứng "cũ hơn `loop init`" so thời điểm thay vì so chuỗi ISO (offset khác nhau từng cho kết quả
   sai, AUD-CODE-008); test no-op của `dev-task.sh` kiểm cả thông điệp đỏ (AUD-TEST-006).
 - **L3 vẫn để người merge ngoại lệ cứng** (ADR-0016, D-012; audit delta đợt B, AUD-HAR-042). `merge-check` trả thêm
@@ -246,6 +247,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
 ### Fixed
+- **`audit plan` bớt báo nhầm `stale_evidence`** (AUD-HAR-045): tham chiếu có số dòng (`file:NN`) giữ luật cũ (file đổi
+  sau khi ghi dòng); tham chiếu chỉ tên file chỉ cờ khi định danh trong backtick (hàm/test/lớp) không còn ở file được
+  trích tại HEAD. Kết quả thêm `reason`.
+- Gate no-op của task trong PLAN (`true`, `:`, `exit 0`, `echo …`) không còn là bằng chứng: `loop verdict` trả `verify`
+  (AUD-HAR-029, ADR-0011). `loop verify`/Stop hook đã bắt HEAD đi xa sau bằng chứng nhờ dấu vân tay cây (AUD-CODE-006,
+  thêm test).
+- `doctor` cảnh báo `gate-tool` khi lệnh cổng trong `xt.yaml` gọi công cụ mà PATH không có (AUD-HAR-034) và cảnh báo
+  khoá trùng; `xt.yaml` khoá trùng: mọi nơi lấy dòng ĐẦU như `dev-task.sh` qua `read_xt_yaml` (AUD-XFEAT-002).
+- `feedback aggregate`: `bi-chan` gộp theo (ID, lý do chuẩn hoá), báo cáo liệt kê mọi triệu chứng khác nhau
+  (AUD-CODE-004).
+- `install.py` không ghi xuyên symlink trong `.xtemplates/` (thay bằng file/thư mục thật) và bỏ qua `.gitignore` là
+  symlink (AUD-CFG-003); nhận diện `.autopilot/` trong `.gitignore` dùng chung `xt.autopilot_ignored` giữa doctor và
+  install (AUD-ARCH-001, một phần).
 - **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
   - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
     trên PostgreSQL 17.
