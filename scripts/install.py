@@ -34,6 +34,7 @@ import sys
 import tempfile
 from collections import Counter
 from collections.abc import Callable
+from typing import Any
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent
@@ -150,8 +151,31 @@ def copy_if_absent(
     return status
 
 
+# Luật `ask` mặc định của khung cũ (≤ ADR-0017); ADR-0018 bỏ hỏi người → install gỡ chúng, `ask` riêng của dự án giữ.
+OLD_FRAMEWORK_ASK = {"Bash(git merge *)", "Bash(git rebase *)", "Bash(gh release *)", "Bash(npm publish*)"}
+OLD_FRAMEWORK_ASK |= {"Bash(docker push *)"}
+
+
+def merge_permissions(ours: dict[str, Any], theirs: dict[str, Any]) -> int:
+    """ADR-0018: `allow` có `Bash`, thêm `deny` của khung còn thiếu, gỡ `ask` mặc định cũ; trả số thay đổi."""
+    src, perms = ours.get("permissions", {}), theirs.setdefault("permissions", {})
+    changed = 0
+    for key in ("allow", "deny"):
+        rules = perms.setdefault(key, [])
+        missing = [r for r in src.get(key, []) if r not in rules and (key == "deny" or r == "Bash")]
+        rules.extend(missing)
+        changed += len(missing)
+    ask = perms.get("ask", [])
+    kept = [r for r in ask if r not in OLD_FRAMEWORK_ASK]
+    if len(kept) != len(ask):
+        perms["ask"] = kept
+        changed += len(ask) - len(kept)
+    return changed
+
+
 def merge_hooks(src: Path, dst: Path) -> str:
-    """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ nguyên permissions và hook riêng).
+    """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ hook riêng) và gộp quyền theo
+    ADR-0018 (`merge_permissions`; quyền riêng của dự án giữ nguyên).
 
     Trước đây file có sẵn chỉ sinh `.xtemplates-new` nên hook đã copy mà không chạy (AUD-HAR-003).
     """
@@ -175,6 +199,7 @@ def merge_hooks(src: Path, dst: Path) -> str:
             if not any(c in have for c in cmds):
                 hooks.setdefault(event, []).append(entry)
                 added += 1
+    added += merge_permissions(ours, theirs)
     if not added:
         return "kept"
     write_atomic(dst, json.dumps(theirs, ensure_ascii=False, indent=2) + "\n")
@@ -233,7 +258,9 @@ def install_settings(target: Path, force_harness: bool, stats: Counter[str]) -> 
         r = merge_hooks(SRC / ".claude" / "settings.json", settings)
         stats[r] += 1
         if r == "merged-hooks":
-            log("  .claude/settings.json: đã thêm khoá hooks của khung (giữ nguyên quyền và hook riêng)")
+            log(
+                "  .claude/settings.json: đã gộp hooks + quyền của khung (allow Bash, deny, gỡ ask mặc định cũ — ADR-0018)"
+            )
     else:
         stats[copy_if_absent(SRC / ".claude" / "settings.json", settings, force_harness)] += 1
 
