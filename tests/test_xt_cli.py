@@ -862,6 +862,17 @@ class FeedbackTest(TmpDirCase):
         rc, out, _ = run_main("feedback", "collect")
         self.assertEqual(out, "✓ Thêm 0 phản hồi tự gom (không có tín hiệu mới)\n")
 
+    def test_collect_skips_in_framework_repo(self):  # AUD-HAR-048: luồng phản hồi dành cho dự án đích
+        (self.tmp / "BLUEPRINT.md").write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: x\n", encoding="utf-8")
+        (self.tmp / "framework" / "00-method").mkdir(parents=True)
+        (self.tmp / "framework" / "00-method" / "conventions.md").write_text("x", encoding="utf-8")
+        (self.tmp / "scripts").mkdir()
+        (self.tmp / "scripts" / "xt.py").write_text("x", encoding="utf-8")
+        rc, out, _ = run_main("feedback", "collect")
+        self.assertEqual(rc, 0)
+        self.assertIn("repo khung", out)
+        self.assertFalse(self.fb.exists())
+
     def test_collect_final_verdict_variants_and_missing_blueprint(self):
         cases = [
             ({"final_verdict": {"verdict": "blocked", "reason": "lỗi lặp"}, "last_failure_task": "T-004"}, 1),
@@ -919,6 +930,28 @@ class FeedbackTest(TmpDirCase):
         self.assertEqual(table[0].count("|"), 7)
         self.assertEqual(table[2], "| ✅ | muc-sai | `SEC-AUTH-001` | a, b | mơ hồ \\| khó | x |")
         self.assertTrue(table[4].startswith("| — | tai-lieu |"))
+
+    def test_aggregate_local_ids_group_by_symptom(self):  # AUD-CODE-004: `T-003`/`loop` là ID cục bộ của từng dự án
+        dirs = {p: self.tmp / p for p in ("a", "b", "c")}
+        for proj, why in (("a", "cần khoá thật"), ("b", "CI đỏ lặp"), ("c", "Cần  khoá thật")):
+            xt.write_feedback(dirs[proj], {"kind": "bi-chan", "id": "T-003", "symptom": why, "fix": "người"})
+        xt.write_feedback(dirs["a"], {"kind": "muc-sai", "id": "SEC-AUTH-001", "symptom": "s1", "fix": "x"})
+        xt.write_feedback(dirs["b"], {"kind": "muc-sai", "id": "SEC-AUTH-001", "symptom": "s2", "fix": "y"})
+        src = [x for p, d in dirs.items() for x in ("--from", f"{p}={d / 'docs' / 'xtemplates-feedback'}")]
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        summary = sorted((g["kind"], g["projects"], g["ready"]) for g in groups)
+        self.assertEqual(
+            summary,
+            [("bi-chan", ["a", "c"], True), ("bi-chan", ["b"], False), ("muc-sai", ["a", "b"], True)],
+        )
+        table = "\n".join(run_main("feedback", "aggregate", *src)[1].splitlines())
+        self.assertIn("s1; s2", table)  # mọi triệu chứng khác nhau, không chỉ cái đầu
+        empty = {p: self.tmp / f"e{p}" for p in ("a", "b")}  # review #84: triệu chứng rỗng không gộp chung
+        for proj, tid in (("a", "T-001"), ("b", "T-007")):
+            xt.write_feedback(empty[proj], {"kind": "bi-chan", "id": tid, "symptom": "", "fix": "người"})
+        src = [x for p, d in empty.items() for x in ("--from", f"{p}={d / 'docs' / 'xtemplates-feedback'}")]
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        self.assertEqual(sorted((g["projects"], g["ready"]) for g in groups), [(["a"], False), (["b"], False)])
 
     def test_aggregate_redacts_hand_edited_entries(self):
         """AUD-CFG-002: FB sửa tay sau `feedback add` vẫn được che trước khi ra PR nháp (repo khung public)."""

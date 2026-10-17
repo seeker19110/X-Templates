@@ -113,3 +113,10 @@
 - Chọn: Xếp T-802, T-803 làm commit riêng trên cùng nhánh → vào PR #82; reviewer rà thêm diff mới trước khi bật auto-merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: luật phiên cấm push nhánh khác; mỗi lát vẫn là commit riêng dễ revert; review vẫn chạy trước merge
 - Đường lùi: git revert từng commit lát trên main
+
+### D-017 · 2026-10-17T07:31:07+00:00 · Duyệt PLAN T-901…T-904 (trả nợ 🟢 audit tự làm được)
+
+- Phương án: (1) Duyệt 4 task chỉ mã/test; mục chạm hook/settings/CI và chính sách npx để người · (2) Gồm cả sửa matcher settings/CI (điểm dừng)
+- Chọn: Duyệt 4 task chỉ mã/test; mục chạm hook/settings/CI và chính sách npx để người
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2: đổi hook/settings/CI là điểm dừng bắt buộc; phần mã/test có test đỏ trước, đảo ngược được
+- Đường lùi: git revert từng commit lát
