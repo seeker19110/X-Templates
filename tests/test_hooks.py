@@ -159,12 +159,16 @@ class CommitGateRepoTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("GATE-PROJ", err)
 
-    def test_nested_repo_with_own_xt_runs_its_gate(self):
+    def test_nested_repo_with_own_xt_asks_without_running_its_gate(self):
+        # Repo lồng có cổng riêng = mã của repo đó (có thể là repo bên thứ ba vừa clone vào dự án) — hook chạy TRƯỚC bước
+        # hỏi quyền nên không tự chạy, hỏi người như repo ngoài dự án (AUD-SEC-015, code scanning xboss#661).
         sub = self.repo(self.proj / "packages" / "lib", "sh -c 'echo GATE-SUB; exit 1'")
-        code, _, err = self.hook(f"cd {sub} && git commit -m x")
-        self.assertEqual(code, 2, err)
-        self.assertIn("GATE-SUB", err)
-        self.assertNotIn("GATE-PROJ", err)
+        for cmd in (f"cd {sub} && git commit -m x", "git -C packages/lib commit -m x"):
+            code, out, err = self.hook(cmd)
+            self.assertEqual((code, decision(out)), (0, "ask"), (cmd, err))
+            self.assertIn("repo lồng có cổng riêng", out)
+            self.assertNotIn("GATE-SUB", err)
+            self.assertNotIn("GATE-PROJ", err)
 
     def test_nested_repo_without_xt_uses_project_gate(self):
         sub = self.repo(self.proj / "apps" / "web", None)
@@ -1798,6 +1802,25 @@ class CommitGateForeignRepoTest(unittest.TestCase):
         for cmd in (f"cd {foreign} && git commit -m x", f"git -C {foreign} commit -m x"):
             with self.subTest(cmd):
                 code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, proj)
+                self.assertEqual(code, 0)
+                self.assertEqual(decision(out), "ask")
+                self.assertFalse(mark.exists())
+
+    def test_commit_gate_nested_cloned_repo(self):
+        """AUD-SEC-015 (repo lồng): repo lạ clone vào trong dự án, có `xt.yaml` + `scripts/dev-task.sh` → hỏi, không chạy."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        proj = tmp / "proj"
+        nested = proj / "vendor" / "lib"
+        for d in (proj, nested):
+            (d / "scripts").mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(d)], check=True)
+        mark = tmp / "PWNED"
+        (nested / "scripts" / "dev-task.sh").write_text(f"#!/bin/sh\ntouch {mark}\n", encoding="utf-8")
+        (nested / "scripts" / "dev-task.sh").chmod(0o755)
+        (nested / "xt.yaml").write_text(f"test: touch {mark}\n", encoding="utf-8")
+        for cmd in (f"cd {nested} && git commit -m x", "git -C vendor/lib commit -m x"):
+            with self.subTest(cmd):
+                code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}, "cwd": str(proj)}, proj)
                 self.assertEqual(code, 0)
                 self.assertEqual(decision(out), "ask")
                 self.assertFalse(mark.exists())
