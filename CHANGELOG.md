@@ -11,7 +11,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   mỗi lần), cache đặt ở `$XDG_CACHE_HOME/xtemplates/pycache` (mặc định `~/.cache/…`) để không đẻ `__pycache__` trong dự
   án đích; `guard_fields` đọc kết quả `guard.py <mode> nul` một lần thay vì một tiến trình python cho mỗi trường JSON.
   Áp cho `pre-bash-guard`, `pre-edit-guard`, `pre-mcp-guard`, `stop-guard`, `pre-compact`, `session-start`. Quyết định
-  của guard không đổi (đầu ra JSON giữ nguyên). Dự án đích: chạy lại `install.py`.
+  của guard không đổi (đầu ra JSON giữ nguyên). Guard gọi `xt.py merge-check` cũng bằng import (cùng cache). Test
+  `MergeGuardTest` 55 → 13 s dưới coverage: `gh` giả viết bằng `/bin/sh`, bảng ca gọi `guard` trong tiến trình test,
+  đường ống hook (bash/MCP × allow/ask/deny) giữ ca chạy qua hook thật. Dự án đích: chạy lại `install.py`.
 - **Guard chặn merge PR ngoại lệ cứng** (ADR-0019, D-019; vá lỗ của ADR-0018): PR có `hard` (tiền/dữ liệu thật/auth/
   mật mã/bí mật) từng được tự merge vì lý do `ask` không mang dấu nguy hiểm. Nay `HARD_ASK` thuộc `DANGER_MARKERS`;
   `_merge_verdict` (`gh pr merge`, `gh api` REST, MCP) kiểm `hard` trước verdict; `pre-mcp-guard.sh` xuất `deny` (trước

@@ -1348,7 +1348,17 @@ FAST_PR = {
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class MergeGuardTest(unittest.TestCase):
-    """ADR-0013: `gh pr merge` hỏi người, trừ khi `xt.py merge-check` = merge và lệnh ghim đúng head."""
+    """ADR-0013: `gh pr merge` hỏi người, trừ khi `xt.py merge-check` = merge và lệnh ghim đúng head.
+
+    Bảng ca gọi `guard` trong tiến trình test (`d`, `mcp_d`): mỗi ca qua hook thật tốn bash + một tiến trình python (có
+    coverage) mà chỉ kiểm lại cùng một đường ống. Đường ống hook (bash/MCP × allow/ask/deny) giữ ca `via_hook=True`."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.guard = guard
 
     def setUp(self):
         self.proj = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1388,24 +1398,47 @@ class MergeGuardTest(unittest.TestCase):
                 f"{repo}/commits/{sha}/status?per_page=100": {"statuses": []},
                 f"{repo}/pulls?head={{owner}}:{{branch}}&state=open&per_page=100": [{"number": n}],
             }
+            # `/bin/sh` thay python: merge-check gọi `gh` ~6 lần mỗi hook, mỗi tiến trình python con (cả coverage của
+            # `patch = subprocess`) từng chiếm phần lớn thời gian của lớp test này.
+            out = self.bin / "routes"
+            out.mkdir(exist_ok=True)
+            arms = []
+            for i, (path, body) in enumerate(routes.items()):
+                (out / f"{i}.json").write_text(json.dumps(body), encoding="utf-8")
+                arms.append(f"  {shlex.quote(path)}) exec cat {shlex.quote(str(out / f'{i}.json'))} ;;\n")
             script = (
-                f"#!{sys.executable}\nimport json, sys\nROUTES = json.loads({json.dumps(json.dumps(routes))})\n"
-                "if sys.argv[1] != 'api' or sys.argv[-1] not in ROUTES:\n"
-                "    sys.exit('gh giả: không có đường dẫn ' + sys.argv[-1])\n"
-                "print(json.dumps(ROUTES[sys.argv[-1]]))\n"
+                '#!/bin/sh\nfor a; do last=$a; done\n[ "$1" = api ] || { echo "gh giả: chỉ có api" >&2; exit 1; }\n'
+                'case "$last" in\n'
+                + "".join(arms)
+                + '  *) echo "gh giả: không có đường dẫn $last" >&2; exit 1 ;;\nesac\n'
             )
             gh.write_text(script, encoding="utf-8")
         gh.chmod(0o755)
 
-    def d(self, cmd: str) -> tuple[str | None, str]:
-        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
-        code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, self.proj, env)
-        self.assertEqual(code, 0, out)
-        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out.strip() else ""
-        return decision(out), reason
+    def env(self) -> dict:
+        """PATH có `gh` giả; `run_hook` tự đặt CLAUDE_PROJECT_DIR."""
+        return {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+
+    def d(self, cmd: str, via_hook: bool = False) -> tuple[str | None, str]:
+        if via_hook:
+            code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, self.proj, self.env())
+            self.assertEqual(code, 0, out)
+            reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out.strip() else ""
+            return decision(out), reason
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            res = self.guard.bash_decision(cmd, str(self.proj))
+        return str(res["decision"]) or None, str(res["reason"])
+
+    def mcp_d(self, tool: str, inp: dict, via_hook: bool = False) -> str | None:
+        if via_hook:
+            code, out, _ = run_hook("pre-mcp-guard.sh", {"tool_name": tool, "tool_input": inp}, self.proj, self.env())
+            self.assertEqual(code, 0, out)
+            return decision(out)
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            return self.guard.mcp_decision(tool, inp, str(self.proj))[0] or None
 
     def test_merge_check_green_allows_pinned_merge(self):
-        dec, why = self.d("gh pr merge 7 --squash --match-head-commit abc1234def")
+        dec, why = self.d("gh pr merge 7 --squash --match-head-commit abc1234def", via_hook=True)
         self.assertEqual(dec, "allow")
         self.assertIn("merge-check", why)
         self.assertEqual(self.d("gh pr merge 7 --squash --match-head-commit=abc1234def")[0], "allow")
@@ -1520,15 +1553,9 @@ class MergeGuardTest(unittest.TestCase):
 
     def test_mcp_merge_pinned_allows(self):
         """ADR-0014: tool MCP `merge_pull_request` ghim `expectedHeadSha`, đúng repo đã kiểm → allow; bật auto-merge → hỏi."""
-        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         good = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def", "merge_method": "squash"}
-
-        def dec(tool: str, inp: dict) -> str | None:
-            code, out, _ = run_hook("pre-mcp-guard.sh", {"tool_name": tool, "tool_input": inp}, self.proj, env)
-            self.assertEqual(code, 0)
-            return decision(out)
-
-        self.assertEqual(dec("mcp__github__merge_pull_request", good), "allow")
+        dec = self.mcp_d
+        self.assertEqual(dec("mcp__github__merge_pull_request", good, via_hook=True), "allow")
         for name, inp in {
             "repo khác": {**good, "owner": "evil"},
             "không ghim": {k: v for k, v in good.items() if k != "expectedHeadSha"},
@@ -1550,23 +1577,16 @@ class MergeGuardTest(unittest.TestCase):
     def test_l3_enables_auto_merge_on_open(self):
         """ADR-0015 (chủ repo 2026-10-16): ở L3 mở PR là bật auto-merge — `gh pr merge --auto`/MCP được allow cho PR nhắm
         nhánh mặc định; L2, PR chồng, `--admin`, repo khác → hỏi."""
-        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
 
-        def mcp(inp: dict) -> str | None:
-            code, out, _ = run_hook(
-                "pre-mcp-guard.sh",
-                {"tool_name": "mcp__github__enable_pr_auto_merge", "tool_input": inp},
-                self.proj,
-                env,
-            )
-            return decision(out)
+        def mcp(inp: dict, via_hook: bool = False) -> str | None:
+            return self.mcp_d("mcp__github__enable_pr_auto_merge", inp, via_hook)
 
         good = {"owner": "o", "repo": "r", "pullNumber": 7, "mergeMethod": "SQUASH"}
         self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # setUp: L2
         self.assertEqual(mcp(good), "ask")
         (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")
-        self.assertEqual(mcp(good), "allow")
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash", via_hook=True)[0], "allow")
+        self.assertEqual(mcp(good, via_hook=True), "allow")
         for cmd in ("gh pr merge 7 --auto --squash --admin", "gh pr merge 7 --auto -b x", "gh pr merge 7 --auto && ls"):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
@@ -1648,7 +1668,7 @@ class MergeGuardTest(unittest.TestCase):
         self.assertEqual(decision(r.stdout), "ask")
 
     def test_merge_check_not_merge_or_head_moved_asks_with_reason(self):
-        dec, why = self.d("gh pr merge 7 --match-head-commit 0000000")
+        dec, why = self.d("gh pr merge 7 --match-head-commit 0000000", via_hook=True)
         self.assertEqual(dec, "ask")
         self.assertIn("head", why)
         (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")

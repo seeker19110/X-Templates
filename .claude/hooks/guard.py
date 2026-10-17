@@ -823,6 +823,22 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
+# Như `py_run` của _lib.sh: chạy xt.py bằng import để dùng bytecode cache (chạy như script thì biên dịch lại ~4.000 dòng
+# mỗi lần); sys.path[0] = thư mục của file, không lấy cwd.
+IMPORT_RUNNER = (
+    "import sys; d, _, f = sys.argv[1].rpartition('/'); sys.path[0] = d or '.'; sys.argv = sys.argv[1:]; "
+    "sys.exit(__import__(f[:-3]).main())"
+)
+
+
+def pycache_prefix() -> str:
+    """Thư mục cache bytecode ngoài dự án (như `_lib.sh`): giữ `PYTHONPYCACHEPREFIX` có sẵn, nếu không thì XDG/~/.cache."""
+    if os.environ.get("PYTHONPYCACHEPREFIX"):
+        return os.environ["PYTHONPYCACHEPREFIX"]
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "xtemplates", "pycache")
+
+
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
     """Chạy `xt.py merge-check --json` cài CÙNG khung với hook này (không theo PATH/biến môi trường agent đặt được)."""
     here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -834,9 +850,17 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
         ),
         "",
     )
-    cmd = [sys.executable, xt, "merge-check", "--json", *(["--pr", selector[0]] if selector else [])]
+    cmd = [
+        sys.executable,
+        "-c",
+        IMPORT_RUNNER,
+        xt,
+        "merge-check",
+        "--json",
+        *(["--pr", selector[0]] if selector else []),
+    ]
     try:
-        env = dict(os.environ, CLAUDE_PROJECT_DIR=root)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, PYTHONPYCACHEPREFIX=pycache_prefix())
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=MERGE_CHECK_TIMEOUT, env=env, check=False)
         data: Dict[str, object] = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
