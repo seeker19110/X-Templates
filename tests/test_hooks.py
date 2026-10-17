@@ -198,6 +198,29 @@ class CommitGateRepoTest(unittest.TestCase):
             self.assertNotIn("GATE-SUB", err)
             self.assertNotIn("GATE-PROJ", err)
 
+    def test_target_project_prefers_framework_gate(self):  # AUD-HAR-049
+        fw = self.proj / ".xtemplates" / "scripts"
+        fw.mkdir(parents=True)
+        shutil.move(str(self.proj / "scripts" / "dev-task.sh"), str(fw / "dev-task.sh"))
+        own = self.proj / "scripts" / "dev-task.sh"
+        own.write_text("#!/bin/sh\necho PROJ-SCRIPT >&2; exit 1\n", encoding="utf-8")
+        own.chmod(0o755)
+        code, _, err = self.hook("git commit -m x")
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+        self.assertNotIn("PROJ-SCRIPT", err)
+
+    def test_auto_format_prefers_framework_dev_task(self):  # AUD-HAR-049
+        log = self.proj / "log"
+        for d, tag in ((self.proj / ".xtemplates" / "scripts", "FW"), (self.proj / "scripts", "PROJ")):
+            d.mkdir(parents=True, exist_ok=True)
+            s = d / "dev-task.sh"
+            s.write_text(f'#!/bin/sh\necho {tag} >> "{log}"\n', encoding="utf-8")
+            s.chmod(0o755)
+        code, _, err = run_hook("auto-format.sh", {"tool_input": {"file_path": str(self.proj / "a.py")}}, self.proj)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(log.read_text(encoding="utf-8").split(), ["FW"])
+
     def test_nested_repo_without_xt_uses_project_gate(self):
         sub = self.repo(self.proj / "apps" / "web", None)
         code, _, err = self.hook(f"cd {sub} && git commit -m x")
@@ -1695,6 +1718,97 @@ class MergeGuardTest(unittest.TestCase):
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {**env, "XT_GUARD_POLICY": policy})
                 self.assertEqual((code, decision(out)), (0, want), out)
 
+    def policy(self, cmd: str) -> str | None:
+        """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            res = self.guard.apply_policy(self.guard.bash_decision(cmd, str(self.proj)))
+        return str(res["decision"]) or None
+
+    def mcp_policy(self, tool: str, inp: dict) -> str | None:
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            d, r = self.guard.mcp_decision(tool, inp, str(self.proj))
+        return str(self.guard.apply_policy({"decision": d, "reason": r})["decision"]) or None
+
+    def test_guard_hard_merge_unpinned(self):
+        """AUD-SEC-044: PR ngoại lệ cứng — merge không ghim head, cờ lạ, `-R` cùng repo, REST, MCP thiếu ghim/khoá lạ
+        → deny ở mọi mức tự chủ; tắt auto-merge vẫn được (LOOP-STOP-005); PR thường giữ hành vi ADR-0018."""
+        self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
+        for level in ("L2", "L3"):
+            (self.proj / "xt.yaml").write_text(f"merge_autonomy: {level}\n", encoding="utf-8")
+            for cmd in (
+                "gh pr merge 7 --squash",
+                "gh pr merge 7",
+                "gh pr merge 7 --admin --squash",
+                "gh pr merge 7 --squash -b x --match-head-commit abc1234def",
+                "gh pr merge 7 --auto --squash",
+                "gh pr merge 7 --auto -b x",
+                "gh pr merge 7 -R o/r --squash",
+                "gh pr -R o/r merge 7",
+                "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+                "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc1234def",
+                "gh api --method PUT repos/o/r/pulls/7/merge -f merge_method=squash",
+            ):
+                with self.subTest(level=level, cmd=cmd):
+                    self.assertEqual(self.policy(cmd), "deny")
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7}
+        for tool, inp in (
+            ("mcp__github__merge_pull_request", mcp),
+            ("mcp__github__merge_pull_request", {**mcp, "expectedHeadSha": "abc1234def", "admin": True}),
+            ("mcp__github__enable_pr_auto_merge", {**mcp, "x": 1}),
+        ):
+            with self.subTest(tool=tool, inp=inp):
+                self.assertEqual(self.mcp_policy(tool, inp), "deny")
+        self.assertIsNone(self.policy("gh pr merge 7 --disable-auto"))
+        self.assertIsNone(self.mcp_policy("mcp__github__disable_pr_auto_merge", mcp))
+        self.fake_gh(FAST_PR)
+        for cmd in ("gh pr merge 7 --squash", "gh pr -R o/r merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(normal=cmd):
+                self.assertIsNone(self.policy(cmd))
+        self.assertIsNone(self.mcp_policy("mcp__github__merge_pull_request", mcp))
+
+    def test_guard_merge_check_error_denies(self):
+        """AUD-SEC-045: không xác minh được ngoại lệ cứng (merge-check lỗi, repo khác, PR không đọc được số, graphql
+        merge, server MCP khác) → deny thay vì cho qua; tắt auto-merge vẫn được."""
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        mutation = "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'"
+        self.fake_gh(None)
+        for cmd in (
+            "gh pr merge 7 --squash --match-head-commit abc1234def",
+            "gh pr merge 7 --auto --squash",
+            "gh pr merge 7 --squash",
+            "gh pr merge --squash",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.policy(cmd), "deny")
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7}
+        self.assertEqual(self.mcp_policy("mcp__github__merge_pull_request", {**mcp, "expectedHeadSha": "a"}), "deny")
+        self.assertEqual(self.mcp_policy("mcp__github__enable_pr_auto_merge", mcp), "deny")
+        self.assertIsNone(self.policy("gh pr merge 7 --disable-auto"))
+        self.fake_gh(FAST_PR)
+        for cmd in (
+            "gh pr -R x/y merge 7",
+            "gh pr merge 7 --repo x/y --squash",
+            "gh api -X PUT repos/x/y/pulls/7/merge",
+            "gh pr merge https://github.com/x/y/pull/7",
+            "gh pr merge 7 8",
+            mutation,
+            "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.policy(cmd), "deny")
+        self.assertIsNone(
+            self.policy("gh api graphql -f query='mutation { disablePullRequestAutoMerge(input: {}) { x } }'")
+        )
+        self.assertIsNone(self.policy("gh api -X POST repos/o/r/issues/7/comments -f body=x"))
+        for tool, inp in (
+            ("mcp__gitlab__merge_pull_request", {**mcp, "expectedHeadSha": "abc1234def"}),
+            ("mcp__github__merge_pull_request", {**mcp, "pullNumber": "7"}),
+            ("mcp__github__enable_pr_auto_merge", {**mcp, "owner": "x"}),
+        ):
+            with self.subTest(tool=tool, inp=inp):
+                self.assertEqual(self.mcp_policy(tool, inp), "deny")
+
     def test_merge_without_python_asks(self):
         """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""
         nopy = self.proj / "nopy"
@@ -2083,6 +2197,8 @@ class GuardDeltaAuditTest(unittest.TestCase):
             self.assertEqual(self._main("bash", {"tool_input": {"command": "ls"}})["decision"], "")
         payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": [1]}
         self.assertEqual(self._main("mcp", payload)["decision"], "ask")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):  # mặc định: không kiểm được → chặn (AUD-SEC-045)
+            self.assertEqual(self._main("mcp", payload)["decision"], "deny")
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -2132,21 +2248,31 @@ class MergeHookFailClosedTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
-        # ADR-0018: mặc định không hỏi khi thiếu python3 / guard.py lỗi — luồng đi tiếp, `deny` của settings vẫn chặn.
+        # Mặc định (ADR-0018) thiếu python3 / guard.py vắng hoặc lỗi: lệnh thường đi tiếp, nhưng merge không kiểm được
+        # ngoại lệ cứng → chặn (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005).
         env["XT_GUARD_POLICY"] = ""
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
-        for name, payload in (
-            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
-            ("pre-mcp-guard.sh", mcp),
-        ):
-            self.assertIsNone(self.hook(name, payload, env), name)
-        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
+        cases = (
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}, "deny"),
+            ("pre-mcp-guard.sh", mcp, "deny"),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --disable-auto"}}, None),
+            ("pre-mcp-guard.sh", off, None),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr view 7"}}, None),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --admin --body '--disable-auto'"}}, "deny"),
+        )
+        for name, payload, want in cases:
+            with self.subTest(nopy=payload):
+                self.assertEqual(self.hook(name, payload, env), want)
         default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
-        for name, payload in (
-            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
-            ("pre-mcp-guard.sh", mcp),
-        ):
-            self.assertIsNone(self.hook(name, payload, default), name)
+        for name, payload, want in cases:  # thiếu guard.py: Bash chặn cả lệnh thường (MissingGuardTest)
+            with self.subTest(missing=payload):
+                view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
+                self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
+        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        for name, payload, want in cases:  # guard.py lỗi
+            with self.subTest(broken=payload):
+                self.assertEqual(self.hook(name, payload, default), want)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -2901,6 +3027,395 @@ class GuardPolicyTest(unittest.TestCase):
 
         for out in ({"decision": "deny", "reason": "x"}, {"decision": "allow", "reason": "y"}, {"decision": ""}):
             self.assertEqual(guard.apply_policy(out), out)
+
+
+class GuardFenceTest(unittest.TestCase):
+    """AUD-SEC-046: hàng rào không gỡ được bằng lệnh được phép (ADR-0018 chặn "tắt/bỏ qua hook")."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def bash(self, cmd: str) -> str:
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            return str(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"])
+
+    def edit(self, path: str, tool_input: dict) -> str:
+        d, r = self.g.edit_decision(path, str(ROOT), {"file_path": path, **tool_input})
+        return str(self.g.apply_policy({"decision": d, "reason": r})["decision"])
+
+    def test_guard_hook_tamper_denied(self):
+        for cmd in (
+            "rm .claude/hooks/guard.py",
+            "rm -f .claude/hooks/pre-bash-guard.sh",
+            "mv .claude/hooks/guard.py /tmp/g.py",
+            "git rm .claude/hooks/_lib.sh",
+            "echo 'exit 0' > .claude/hooks/pre-bash-guard.sh",
+            "cp /tmp/x .claude/hooks/guard.py",
+            "truncate -s 0 .claude/settings.json",
+            "rm -rf .claude",
+            "rm -rf .claude/hooks",
+            "unlink .claude/settings.local.json",
+            "sed -i 's/deny/x/' .claude/hooks/guard.py",
+            "python3 -c \"import os; os.remove('.claude/hooks/guard.py')\"",
+            "python3 -c \"from pathlib import Path; Path('.claude/settings.json').write_text('{}')\"",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.bash(cmd), "deny")
+        for cmd in (
+            "git checkout -- .claude/hooks/guard.py",
+            "cat .claude/hooks/guard.py",
+            "python3 -m ruff format .claude/hooks/guard.py",
+            "cp .claude/hooks/guard.py /tmp/g.py",
+            "rm -rf .claude/worktrees/x",
+            "python3 -c \"import pathlib; s=open('.claude/hooks/guard.py').read(); pathlib.Path('o.txt').write_text(s)\"",
+        ):
+            with self.subTest(ok=cmd):
+                self.assertEqual(self.bash(cmd), "")
+
+    def test_edit_disable_all_hooks_denied(self):
+        on = '{"disableAllHooks": true}'
+        for path, inp in (
+            (".claude/settings.local.json", {"content": on}),
+            (".claude/settings.json", {"old_string": "{", "new_string": '{"disableAllHooks":true,'}),
+            (".claude/settings.json", {"edits": [{"old_string": "a", "new_string": on}]}),
+            ("/home/u/.claude/settings.json", {"content": on}),
+            (".claude/settings.local.json", {"content": '{"env": {"CLAUDE_CODE_SIMPLE": "1"}}'}),
+        ):
+            with self.subTest(path=path, inp=inp):
+                self.assertEqual(self.edit(path, inp), "deny")
+        for path, inp in (
+            (".claude/settings.json", {"old_string": "a", "new_string": "b"}),
+            ("docs/notes.md", {"content": "disableAllHooks là công tắc của Claude Code"}),
+            (".claude/settings.json", {"content": '{"disableAllHooks": false}'}),
+        ):
+            with self.subTest(ok=path, inp=inp):
+                self.assertEqual(self.edit(path, inp), "")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class MissingGuardTest(unittest.TestCase):
+    """AUD-SEC-046: guard.py vắng = hàng rào bị gỡ → chặn mọi lệnh Bash trừ lệnh xem/khôi phục (strict: hỏi)."""
+
+    def test_missing_guard_denies_until_restored(self):
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        hooks = tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, hooks / f)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+
+        def dec(cmd: str, extra: dict | None = None) -> str | None:
+            r = subprocess.run(
+                ["bash", str(hooks / "pre-bash-guard.sh")],
+                input=json.dumps({"tool_input": {"command": cmd}}),
+                capture_output=True,
+                text=True,
+                env={**env, **(extra or {})},
+                timeout=60,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return decision(r.stdout)
+
+        for cmd in (
+            "git push origin main",
+            "gh repo delete o/r --yes",
+            "rm -rf ~",
+            "ls; rm -rf ~",
+            "echo hi",
+            "python3 -c \"__import__('os').system('id')\" install.py",  # review #97
+            "git diff --output=/tmp/x",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(dec(cmd), "deny")
+        self.assertEqual(dec("echo hi", {"XT_GUARD_POLICY": "strict"}), "ask")
+        for cmd in (
+            "git checkout -- .claude/hooks/guard.py",
+            "git restore .claude/hooks/guard.py",
+            "git status",
+            "ls .claude/hooks",
+            "python3 .xtemplates/scripts/install.py .",
+        ):
+            with self.subTest(ok=cmd):
+                self.assertIsNone(dec(cmd))
+
+
+class GuardWave1017Test(unittest.TestCase):
+    """AUD-SEC-047…049: biến thể push nhánh chính, lệnh huỷ, ghi file bí mật qua Bash lọt chính sách ADR-0018."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def check(self, want: str, cmds: tuple[str, ...]) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd), mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+                self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"], want)
+
+    def test_guard_push_glob_refspec(self):
+        self.check(
+            "deny",
+            (
+                "git push origin 'refs/heads/*:refs/heads/*'",
+                "git push origin '*:*'",
+                "git push origin :",
+                "git push --branches",
+                "git -c push.default=matching push origin",
+                "git -c remote.origin.push=refs/heads/feat:refs/heads/main push",
+                "git -c remote.origin.mirror=true push origin",
+                "git config remote.origin.push refs/heads/feat:refs/heads/main",
+                "git config --add remote.origin.push 'refs/heads/*'",
+                "git config push.default matching",
+                "git config set remote.origin.push HEAD:main",
+                "git remote add --mirror=push backup https://example.com/r.git",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "git push origin feat",
+                "git push -u origin HEAD:feat",
+                "git -c user.name=x push origin feat",
+                "git config user.name x",
+                "git config --get remote.origin.push",
+                "git remote add up https://example.com/r.git",
+            ),
+        )
+
+    def test_guard_destroy_variants(self):
+        self.check(
+            "deny",
+            (
+                "gh api -X DELETE repos/o/r",
+                "gh api --method DELETE /repos/o/r/",
+                "gh api -X DELETE repos/{owner}/{repo}",
+                "gh api -X DELETE repos/o/r/git/refs/heads/main",
+                "gh api -X PATCH repos/o/r -F archived=true",
+                "terraform apply -destroy",
+                "terraform apply -auto-approve -destroy",
+                "tofu apply --destroy",
+                "pulumi down",
+                "pulumi down --yes",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "gh api -X DELETE repos/o/r/issues/comments/1",
+                "gh api -X DELETE repos/o/r/git/refs/heads/feat",
+                "gh api -X PATCH repos/o/r -f description=x",
+                "terraform plan -destroy",
+                "terraform apply",
+                "pulumi preview",
+            ),
+        )
+
+    def test_guard_secret_write_variants(self):
+        self.check(
+            "deny",
+            (
+                "curl -o .env http://localhost/x",
+                "curl --output .env http://localhost/x",
+                "curl --output=.env http://localhost/x",
+                "curl -sSo .env http://localhost/x",
+                "curl -O http://localhost/x/.env",
+                "wget -O .env http://localhost/x",
+                "wget --output-document=.env http://localhost/x",
+                "wget http://localhost/x/.env",
+                "git checkout other -- .env",
+                "git checkout other .env",
+                "git restore --source=other .env",
+                "git restore -s other -- secrets/k.pem",
+                "rsync /tmp/x .env",
+                "patch .env /tmp/p",
+                "python3 -c \"open('.env','w').write('x')\"",
+                "node -e \"require('fs').writeFileSync('.env','x')\"",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "curl -o out.json http://localhost/x",
+                "curl -O http://localhost/x/data.json",
+                "wget http://localhost/x/data.json",
+                "git checkout main",
+                "git checkout -- src/a.py",
+                "git restore .claude/hooks/guard.py",
+                "rsync -a src/ dst/",
+                "python3 -c \"print(open('.env.example').read())\"",
+                "python3 -c \"names = ['.env']; open('out.txt', 'w').write(str(names))\"",
+                # heredoc thuộc lệnh sở hữu `<<`, không thuộc trình thông dịch khác trên cùng dòng (gặp khi commit)
+                "python3 a.py 2>&1 | tail -1; git commit -F - <<'EOF'\nopen('.env','w')\nEOF",
+            ),
+        )
+        self.check(
+            "deny",
+            (
+                "cat <<'E' | python3\nopen('.env','w').write('x')\nE",
+                "ls && python3 - <<'E'\nopen('.env','w').write('x')\nE",
+            ),
+        )
+
+
+class GuardReview97Test(unittest.TestCase):
+    """Review #97: cờ toàn cục của gh trước `pr`, cờ giả rò sang lệnh git khác, graphql/REST merge viết lệch, `gh api`
+    đổi bí mật/quyền/ruleset, tải file vào thư mục hàng rào, `$(…)` trong nháy kép/heredoc không trích."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def check(self, want: str, cmds: tuple[str, ...], hard: bool = True) -> None:
+        d = {"verdict": "human", "hard": ["auth"] if hard else [], "repo": "o/r", "head": "a", "autonomy": 3}
+        for cmd in cmds:
+            with (
+                self.subTest(cmd),
+                mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}),
+                mock.patch.object(self.g, "merge_check", return_value=d),
+            ):
+                self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"], want)
+
+    def test_gh_global_repo_flag_before_pr(self):
+        self.check(
+            "deny",
+            (
+                "gh -R o/r pr merge 7 --squash",
+                "gh --repo=o/r pr merge 7",
+                "gh -Ro/r pr merge 7 --auto",
+                "gh --repo o/r pr merge 7 --auto --squash",
+                "gh -R x/y pr merge 7",
+            ),
+        )
+        self.check("", ("gh -R o/r pr merge 7 --squash", "gh -R o/r pr view 7"), hard=False)
+
+    def test_push_config_flag_only_for_push(self):
+        self.check("deny", ("git -c push.default=current stash drop", "git -c push.default=matching stash clear"))
+        self.check(
+            "",
+            (
+                "git -c push.default=current push origin feat",
+                "git -c push.default=simple push",
+                "git -c remote.origin.push=HEAD:feat push origin feat",
+                "git push origin feat --force-if-includes",
+                "git config push.default simple",
+            ),
+        )
+        self.check(
+            "deny",
+            (
+                "git -c push.default=matching push",
+                "git -c remote.origin.push=HEAD:main push",
+                "git push origin heads/main",
+            ),
+        )
+
+    def test_api_merge_spelled_differently(self):
+        self.check(
+            "deny",
+            (
+                "gh api graphql -F query=@q.graphql",
+                "gh api graphql --input q.json",
+                'gh api graphql -f query="$Q"',
+                "gh api -X PUT 'repos/o/r/pulls/7/merge?x=1'",
+                "gh api -X PUT repos/o/r/pulls/7/%6Derge",
+            ),
+        )
+
+    def test_api_secrets_permissions_rulesets(self):
+        self.check(
+            "deny",
+            (
+                "gh api -X PUT repos/o/r/actions/secrets/X -f encrypted_value=x",
+                "gh api -X DELETE repos/o/r/actions/secrets/X",
+                "gh api -X PUT orgs/o/actions/secrets/X",
+                "gh api -X PUT repos/o/r/branches/main/protection --input p.json",
+                "gh api -X DELETE repos/o/r/branches/main/protection",
+                "gh api -X DELETE repos/o/r/rulesets/1",
+                "gh api -X POST repos/o/r/rulesets --input r.json",
+                "gh api -X DELETE repos/o/r/hooks/1",
+                "gh api -X PUT repos/o/r/collaborators/u",
+                "gh api -X POST repos/o/r/transfer -f new_owner=x",
+                "gh release delete v1 --yes",
+                "gh repo edit --visibility public",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            (
+                "gh api repos/o/r/rulesets",
+                "gh api -X POST repos/o/r/issues/7/labels -f labels[]=x",
+                "gh release view v1",
+                "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=$N -f owner=$OWNER",
+            ),
+            hard=False,
+        )
+
+    def test_review_97_round_2(self):  # review lần 2 của #97
+        self.check(
+            "deny",
+            (
+                "git -cremote.origin.push=a:main push",
+                "git --config-env=remote.origin.push=X push",
+                "git --config-env=push.default=X push",
+                "gh api repos/o/r/environments/x/secrets/K -X PUT",
+                "gh api repos/o/r/environments/prod -X PUT",
+                "gh api repos/o/r/keys -X POST -f key=x",
+                "gh api user/keys -X POST -f key=x",
+                "gh api repos/o/r/actions/variables/X -X PATCH -f value=y",
+                "gh api graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            ("git -cuser.name=x push origin feat", "gh api repos/o/r/keys", "gh api repos/o/r/environments"),
+            hard=False,
+        )
+
+    def test_download_into_fence_dir(self):
+        self.check(
+            "deny",
+            (
+                "curl -O --output-dir .claude/hooks https://x.example.com/guard.py",
+                "curl --output-dir=.claude/hooks -O https://x.example.com/guard.py",
+                "wget -P .claude/hooks https://x.example.com/guard.py",
+                "wget --directory-prefix=.claude/hooks https://x.example.com/guard.py",
+            ),
+            hard=False,
+        )
+        self.check("", ("curl -O --output-dir build https://x.example.com/a.json",), hard=False)
+
+    def test_command_substitution_in_quotes_and_heredoc(self):
+        self.check(
+            "deny",
+            (
+                'git commit -m "$(rm -rf ~)"',
+                'echo "x $(git push --force origin main) y"',
+                "cat <<A\n$(rm -rf ~)\nA",
+                "cat <<A > n.md\n`rm -rf ~`\nA",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            (
+                "git commit -m 'literal $(rm -rf ~)'",
+                "cat <<'A' > n.md\n$(rm -rf ~)\nA",
+                'echo "$((1 + 2))"',
+                'git commit -m "$(cat msg.txt)"',
+            ),
+            hard=False,
+        )
 
 
 if __name__ == "__main__":

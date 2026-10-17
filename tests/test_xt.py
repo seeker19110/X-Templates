@@ -523,6 +523,14 @@ class LoopTest(unittest.TestCase):
             self.assertNotIn(leak if name != "aws" else leak[4:], out, name)
         self.assertIn("postgres://admin:***@db/x", out)
 
+    def test_redact_home_paths(self):  # AUD-HAR-054: tên người dùng/máy không lọt vào báo cáo repo khung public
+        self.assertEqual(xt.redact_feedback("lỗi ở /home/alice/proj/x.py"), "lỗi ở /home/<user>/proj/x.py")
+        self.assertEqual(
+            xt.redact_feedback("/Users/bob/src và C:\\Users\\carol\\a"), "/Users/<user>/src và C:\\Users\\<user>\\a"
+        )
+        self.assertEqual(xt.redact_feedback("/home/<user>/p"), "/home/<user>/p")
+        self.assertEqual(xt.redact_feedback("ở /home/bob, rồi"), "ở /home/<user>, rồi")
+
     def test_redact_more_secrets(self):
         """AUD-CFG-002: các dạng bí mật hay gặp trong triệu chứng/cách sửa của phản hồi (ra repo public)."""
         j = "".join

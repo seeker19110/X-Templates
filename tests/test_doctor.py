@@ -276,10 +276,15 @@ class DoctorHooksTest(DoctorCase):
         (self.base / ".claude" / "agents" / "reviewer.md").unlink()
         self.write(".claude/hooks/stop-guard.sh.xtemplates-new", "x")
         self.write("AGENTS.md.xtemplates-new", "x")
-        msgs = [f.msg for f in self.findings() if f.code == "harness"]
-        self.assertEqual(len(msgs), 2)
-        self.assertIn("thiếu skills/gate/SKILL.md, agents/reviewer.md", msgs[0])
-        self.assertIn(".claude/hooks/stop-guard.sh.xtemplates-new, AGENTS.md.xtemplates-new", msgs[1])
+        found = [(f.level, f.msg) for f in self.findings() if f.code == "harness"]
+        self.assertEqual(len(found), 3)
+        self.assertIn("thiếu skills/gate/SKILL.md, agents/reviewer.md", found[0][1])
+        # AUD-HAR-050: hook/settings chưa gộp = hàng rào của khung có thể không chạy → lỗi, không chỉ cảnh báo.
+        self.assertEqual(found[1][0], "error")
+        self.assertIn(".claude/hooks/stop-guard.sh.xtemplates-new", found[1][1])
+        self.assertEqual(found[2], ("warn", found[2][1]))
+        self.assertIn("AGENTS.md.xtemplates-new", found[2][1])
+        self.assertNotIn("stop-guard", found[2][1])
 
 
 class DoctorStateAndEnvTest(DoctorCase):

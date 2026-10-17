@@ -1,33 +1,35 @@
-# PLAN.md — Khung X-Templates · trả nợ 🟢 audit tự làm được
+# PLAN.md — Khung X-Templates · sửa audit dự án con (2026-10-17)
 
-> Lập ngày 2026-10-17. Chủ repo gọi lại `/autopilot` sau khi PLAN T-801…T-804 xong (#82, #83).
-> Nguồn: `docs/ops/AUDIT-STATUS.md` (28 🟢 mở). Kế hoạch trước (T-801…T-804) xong ở #82/#83.
+> Lập ngày 2026-10-17. Chủ repo gọi `/autopilot` ngay sau `/audit` (báo cáo `docs/ops/AUDIT-REPORT-2026-10-17-subprojects.md`).
+> Kế hoạch trước (T-901…T-904) xong ở #84.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-017)
-- Blueprint repo khung: không đổi mục; `audit check --strict` exit 0 (0 🟠 mở) — đây là trả nợ 🟢.
-- Stack: Python ≥ 3.11 stdlib (`guard.py`, `xt.py`); không phụ thuộc mới.
-- Phạm vi (chỉ mã/test, không chạm hook/settings/CI): guard git lọt (AUD-SEC-023/024), CLI container khác (AUD-SEC-042);
-  `doctor` kiểm công cụ cổng (AUD-HAR-034); `feedback collect` không sinh phản hồi trong chính repo khung (AUD-HAR-048, mới);
-  test sạch (AUD-TEST-003/004); `feedback aggregate` gộp đúng (AUD-CODE-004).
-- Ngoài phạm vi, cần người (đổi cấu hình hook/settings/CI — điểm dừng): AUD-HAR-036/041 (matcher settings), AUD-SEC-026
-  (timeout hook), AUD-CI-006/007/009 (workflow). Cần quyết chính sách: AUD-SEC-043 (`npx`/`dlx`).
-- Nhánh: phiên chỉ push một nhánh → lát xếp nối thành commit riêng (D-016); bắt đầu sau khi #83 merge.
-- Rủi ro: guard hỏi oan mới → test cả ca không hỏi; reviewer khác rà diff trước bật auto-merge.
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-021)
+- Blueprint repo khung: không đổi mục; mục tiêu `audit check --strict` exit 0 sau khi sửa 🔴/🟠 (ARCH quét lại cuối).
+- Stack: Python ≥ 3.11 stdlib (`guard.py`, `xt.py`, `install.py`), bash hook; không phụ thuộc mới.
+- Phạm vi: guard merge ngoại lệ cứng fail-closed (AUD-SEC-044/045); chặn gỡ hàng rào (AUD-SEC-046); push refspec glob,
+  huỷ đi đường khác, ghi `.env` qua Bash (AUD-SEC-047…049); dự án con: dev-task.sh ưu tiên `.xtemplates`, doctor lỗi khi
+  hook chưa gộp, `feedback aggregate` nhận gốc repo, mẫu AGENTS/PROGRESS, tài liệu lệch (AUD-HAR-049…053, AUD-DOC-041…043).
+- Không làm: thay đổi chính sách ADR-0018 (sửa nội dung hook qua Edit vẫn được — ADR-0018 cho phép); AUD-SEC-050
+  (entrypoint git trong image, cùng nhóm AUD-SEC-042); AUD-HAR-054 nếu không nhỏ; mục chờ chủ repo cũ (HAR-036/041…).
+- Giữ: `--disable-auto` và MCP `disable_pr_auto_merge` KHÔNG bị chặn (LOOP-STOP-005 đòi tắt auto-merge khi chạm `hard`).
+- Nhánh: phiên chỉ push một nhánh → mỗi lát một commit trên `claude/blissful-thompson-4een2c`, một PR (D-016).
+- Rủi ro: chặn oan merge hợp lệ khi merge-check lỗi mạng → chấp nhận (fail-closed riêng merge, ADR-0019), agent `loop defer`.
 
 ## Ngân sách (4 con số)
 - Số vòng tối đa: 20 (`max(20, 4 × task)`)
 - Chi phí: 0 đồng ngoài phiên (không phụ thuộc mới)
 - Timeout mỗi lệnh Gate: 600 giây
-- Ngày hết hạn: 4 giờ sau `loop init` (`--hours 4`)
+- Ngày hết hạn: 6 giờ sau `loop init` (`--hours 6`)
 
 ## Điểm dừng bắt buộc (`loop defer`; `loop block` khi mọi việc còn lại phụ thuộc)
-- Đổi cấu hình hook/settings/CI (các mục ngoài phạm vi ở trên) — chờ chủ repo
-- Merge PR thuộc ngoại lệ cứng (ADR-0016) — không có trong kế hoạch này
+- Merge PR nếu `merge-check` trả `hard` (sửa guard bí mật có thể bị coi là bí mật/auth) — người merge
 - Force-push, xoá nhánh, đổi quyền/ruleset repo
 
 ## Task
 
-- [x] `T-901` Guard: git tuỳ chọn dài viết tắt (`reset --ha`, `push --mirr`), `push --all/--tags`, `dd of=/dev/…`, `find -delete`, `xargs rm -rf`, `exec -a` (AUD-SEC-023/024); `docker-compose`/`podman-compose`/`nerdctl`/`kubectl exec` (AUD-SEC-042) — Gate: `python3 -m unittest tests.test_hooks`
-- [x] `T-902` `doctor` cảnh báo công cụ cổng thiếu trong PATH (AUD-HAR-034); `feedback collect` bỏ qua ở repo khung (AUD-HAR-048); test không rò stderr, kiểm verdict `budget` (AUD-TEST-003/004) — Gate: `python3 -m unittest tests.test_xt tests.test_xt_core tests.test_xt_cli tests.test_doctor`
-- [x] `T-903` `feedback aggregate` gộp theo loại + ID + lý do chuẩn hoá, không theo ID task cục bộ; báo cáo in mọi triệu chứng khác nhau (AUD-CODE-004) — Gate: `python3 -m unittest tests.test_xt tests.test_xt_core`
-- [x] `T-904` Sổ audit đánh dấu đã sửa (#PR), PROGRESS, cổng đầy đủ — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 scripts/xt.py progress-check && scripts/dev-task.sh gate`
+- [x] `T-1001` Guard: mọi lệnh merge/bật auto-merge (gh pr merge, gh pr -R … merge, gh api REST/graphql, MCP) kiểm `hard` qua merge-check kể cả không ghim head; merge-check lỗi/guard chết → deny; `--disable-auto`/disable MCP không bị chặn (AUD-SEC-044/045) — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-1002` Guard: Bash ghi/xoá/dời file hàng rào (`.claude/hooks/*`, `.claude/settings*.json`) → deny; Edit/Write ghi `disableAllHooks` → deny; thiếu guard.py → deny Bash trừ lệnh khôi phục (AUD-SEC-046) — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-1003` Guard: push refspec glob/`:`/`push.default=matching`/`remote.*.push`; `gh api -X DELETE repos/…`, `terraform|tofu apply -destroy`, `pulumi down`; ghi file bí mật qua `curl -o/-O`, `wget -O`, `git checkout/restore … -- <bí mật>`, interpreter (AUD-SEC-047…049) — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-1004` Dự án con: hook ưu tiên `.xtemplates/scripts/dev-task.sh`; doctor `error` khi hook `.xtemplates-new` chưa gộp; `feedback aggregate` nhận gốc repo, thư mục thiếu → exit 2; PROGRESS mẫu qua progress-check; nhãn install lần đầu; mẫu AGENTS/skill gate/CLAUDE.md §; comment hook + ADR-0019 (AUD-HAR-049…053, AUD-DOC-041…043) — Gate: `python3 -m unittest discover -s tests`
+- [x] `T-1005` Sổ audit đánh dấu đã sửa, quét lại ARCH, CHANGELOG, PROGRESS, cổng đầy đủ — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md && python3 scripts/xt.py progress-check && scripts/dev-task.sh gate`
+- [x] `T-1006` Sửa phát hiện review #97: cờ `-R` của gh trước `pr`, cờ giả chỉ cho push, graphql/REST merge viết lệch, `gh api` bí mật/quyền/ruleset, tải vào thư mục hàng rào, `$(…)` trong nháy kép/heredoc, `restore_re`, progress/redact — Gate: `python3 -m unittest discover -s tests`

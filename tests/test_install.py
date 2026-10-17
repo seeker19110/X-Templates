@@ -49,6 +49,31 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(text.startswith("# PROGRESS.md"), text[:80])
         self.assertEqual(tuple(n for n, _ in xt.progress_sections(text)), xt.PROGRESS_SECTIONS)
 
+    def test_progress_gets_head_sha_in_git_repo(self):  # AUD-HAR-053
+        subprocess.run(["git", "init", "-q", str(self.target)], check=True)
+        (self.target / "a.txt").write_text("a\n", encoding="utf-8")
+        git = ["git", "-C", str(self.target), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "add", "a.txt"], check=True)
+        subprocess.run([*git, "commit", "-qm", "init"], check=True)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        self.run_install()
+        text = (self.target / "PROGRESS.md").read_text(encoding="utf-8")
+        self.assertIn(f"`{head}`", text)
+        self.assertNotIn("<SHA đầy đủ>", text)
+        # nhánh PR / dự án lồng trong repo cha: không ghi HEAD (review #97)
+        sub = self.target / "apps" / "web"
+        sub.mkdir(parents=True)
+        self.assertEqual(install.progress_with_head("`<SHA đầy đủ>`", sub), "`<SHA đầy đủ>`")
+        subprocess.run([*git, "checkout", "-qb", "feat"], check=True)
+        self.assertEqual(install.progress_with_head("`<SHA đầy đủ>`", self.target), "`<SHA đầy đủ>`")
+
+    def test_progress_keeps_placeholder_without_commits(self):
+        self.run_install()
+        self.assertIn("<SHA đầy đủ>", (self.target / "PROGRESS.md").read_text(encoding="utf-8"))
+        for exc in (OSError("không có git"), subprocess.TimeoutExpired("git", 10)):
+            with mock.patch.object(install.subprocess, "run", side_effect=exc):
+                self.assertEqual(install.progress_with_head("`<SHA đầy đủ>`", self.target), "`<SHA đầy đủ>`")
+
     def test_dev_task_root_in_target_project(self):
         # AUD-HAR-001: thiếu CLAUDE_PROJECT_DIR, .xtemplates/scripts/dev-task.sh từng lấy gốc = .xtemplates/ → "xanh giả".
         self.run_install()
@@ -409,6 +434,17 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertFalse((self.target / ".xtemplates" / "harness.sha256.json").exists())
         self.assertTrue((self.target / ".xtemplates" / "framework").is_dir())
         self.assertTrue((self.target / "AGENTS.md").exists())
+
+    def test_own_root_file_message_is_not_edited_old_copy(self):  # AUD-HAR-052
+        (self.target / "AGENTS.md").write_text("# luật riêng\n", encoding="utf-8")
+        hook = self.target / ".claude" / "hooks" / "guard.py"
+        hook.parent.mkdir(parents=True)
+        hook.write_text("# của tôi\n", encoding="utf-8")
+        code, err = self.install_quiet()
+        self.assertEqual(code, 0)
+        self.assertNotIn("bạn đã sửa bản cũ", err)
+        self.assertIn("AGENTS.md: giữ file của dự án", err)
+        self.assertIn("hàng rào", err)
 
     def test_preexisting_modified_hook_gets_new_file_and_no_manifest_entry(self):
         hook = self.target / ".claude" / "hooks" / "stop-guard.sh"

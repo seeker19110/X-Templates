@@ -6,6 +6,34 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Guard đóng các lỗ của audit dự án con** (#97, `AUDIT-REPORT-2026-10-17-subprojects.md`). Merge/bật auto-merge
+  PR ngoại lệ cứng qua MỌI đường (`gh pr merge` không ghim head, `gh pr -R … merge`, `gh api` REST/graphql, MCP thiếu
+  `expectedHeadSha`) bị chặn; không xác minh được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql merge,
+  server MCP khác, guard.py lỗi/vắng, thiếu python3) cũng chặn (`UNVERIFIED_ASK`) — AUD-SEC-044/045. Tắt auto-merge
+  (`--disable-auto`, MCP disable) không bị chặn. Gỡ hàng rào: Bash ghi/xoá/dời `.claude/hooks/*`/`.claude/settings*.json`,
+  Edit/Write ghi `disableAllHooks: true`/`CLAUDE_CODE_SIMPLE` → chặn; thiếu `guard.py` → chặn mọi lệnh Bash trừ lệnh một
+  dòng để xem/khôi phục (AUD-SEC-046). Push nhánh chính ngầm (refspec glob/`:`, `--branches`, `push.default`/
+  `remote.*.push|mirror` qua `-c`/`git config`, `remote add --mirror`), huỷ đi đường khác (`gh api -X DELETE repos/…`,
+  `PATCH archived=true`, `apply -destroy`, `pulumi down`), ghi bí mật qua `curl -o/-O`, `wget`, `rsync`, `patch`,
+  `git checkout|restore <rev> -- <bí mật>`, script trình thông dịch ghi thẳng vào file → chặn (AUD-SEC-047…049). Heredoc
+  chỉ thuộc pipeline chứa `<<` (trước: message commit cùng dòng với `python3 …` bị coi là script). Dự án đích: chạy lại
+  `install.py`.
+- **Guard — sửa theo review #97**: cờ `-R/--repo` của gh đứng trước lệnh con (`gh -R o/r pr merge`) đưa về sau để
+  luật merge thấy (AUD-SEC-051); merge qua graphql đọc query từ `@file`/`--input`/`query=$Q` và REST viết lệch
+  (`?x=1`, `%6Derge`) chặn như không xác minh được (AUD-SEC-053); `gh api` ghi bí mật/bảo vệ nhánh/ruleset/webhook/
+  collaborator/transfer, `gh release delete`, `gh repo edit --visibility` = huỷ (AUD-SEC-054); `curl --output-dir`,
+  `wget -P` ghép thư mục vào đích ghi (AUD-SEC-055); `git push origin heads/main` (AUD-SEC-056); `$(…)` trong nháy kép
+  và trong heredoc dấu kết không nháy được quét (AUD-SEC-059); cấu hình push chỉ tính khi giá trị lan ra nhiều nhánh
+  (`push.default=matching`, `remote.*.push|mirror`) và lệnh không có refspec, chỉ cho `git push` (AUD-SEC-052,
+  AUD-HAR-055); thiếu guard.py: `restore_re` không nhận `python3 -c … install.py`, `--output` (AUD-SEC-057). Vòng 2: `git -ck=v`, `--config-env` (AUD-SEC-061);
+  `gh api` environment/deploy key/khoá tài khoản/biến Actions, graphql `deleteRepository|transferRepository|archiveRepository`
+  (AUD-SEC-062).
+- **Dự án con**: hook cổng commit/auto-format dùng `.xtemplates/scripts/dev-task.sh` trước `scripts/dev-task.sh` riêng của
+  dự án (AUD-HAR-049); `doctor` báo lỗi khi hook/settings còn `*.xtemplates-new` (AUD-HAR-050); `feedback aggregate
+  --from p=<gốc repo>` tự nối `docs/xtemplates-feedback`, thư mục thiếu thì cảnh báo (AUD-HAR-051); install nói đúng khi
+  giữ file riêng của dự án (AUD-HAR-052) và ghi SHA HEAD vào PROGRESS.md mới cài (AUD-HAR-053); phản hồi FB che tên người
+  dùng trong đường dẫn home (`redact_feedback`, AUD-HAR-054); mẫu AGENTS.md/skill `/gate` trỏ `.xtemplates/scripts/`
+  (AUD-DOC-041).
 - **`merge-check` không còn xếp file harness agent vào ngoại lệ cứng "auth"** (D-020): mẫu đường dẫn auth khớp tiền tố
   `session`/`permission` nên `.claude/hooks/session-start.sh` (phiên agent) bị coi là xác thực → guard chặn agent
   merge/bật auto-merge (#93 phải người merge). Nay `.claude/`, `.xtemplates/`, `.codex/`, `.gemini/`, `.cursor/` miễn

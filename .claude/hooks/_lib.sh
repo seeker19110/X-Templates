@@ -76,6 +76,12 @@ ask_strict() { # $1=lý do
   exit 0
 }
 
+# Không kiểm được thứ phải kiểm (merge khi guard vắng/lỗi — ADR-0019, AUD-SEC-045): strict hỏi, mặc định CHẶN. Luôn exit 0.
+fence_closed() { # $1=lý do
+  [ "${XT_GUARD_POLICY:-}" = strict ] && pretool_decision ask "$1"
+  pretool_decision deny "${1#Khung cần xác nhận: }"
+}
+
 # Cắt stdin tối đa $1 byte KHÔNG cắt giữa ký tự UTF-8 (head -c từng làm hỏng tiếng Việt — AUD-HAR-011).
 utf8_head() {
   python3 -c 'import sys; sys.stdout.write(sys.stdin.buffer.read()[: int(sys.argv[1])].decode("utf-8", "ignore"))' "$1" 2>/dev/null
