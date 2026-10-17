@@ -2178,9 +2178,10 @@ class MergeHookFailClosedTest(unittest.TestCase):
             with self.subTest(nopy=payload):
                 self.assertEqual(self.hook(name, payload, env), want)
         default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
-        for name, payload, want in cases:  # thiếu guard.py
+        for name, payload, want in cases:  # thiếu guard.py: Bash chặn cả lệnh thường (MissingGuardTest)
             with self.subTest(missing=payload):
-                self.assertEqual(self.hook(name, payload, default), want)
+                view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
+                self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
         (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
         for name, payload, want in cases:  # guard.py lỗi
             with self.subTest(broken=payload):
@@ -2937,6 +2938,109 @@ class GuardPolicyTest(unittest.TestCase):
 
         for out in ({"decision": "deny", "reason": "x"}, {"decision": "allow", "reason": "y"}, {"decision": ""}):
             self.assertEqual(guard.apply_policy(out), out)
+
+
+class GuardFenceTest(unittest.TestCase):
+    """AUD-SEC-046: hàng rào không gỡ được bằng lệnh được phép (ADR-0018 chặn "tắt/bỏ qua hook")."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def bash(self, cmd: str) -> str:
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            return str(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"])
+
+    def edit(self, path: str, tool_input: dict) -> str:
+        d, r = self.g.edit_decision(path, str(ROOT), {"file_path": path, **tool_input})
+        return str(self.g.apply_policy({"decision": d, "reason": r})["decision"])
+
+    def test_guard_hook_tamper_denied(self):
+        for cmd in (
+            "rm .claude/hooks/guard.py",
+            "rm -f .claude/hooks/pre-bash-guard.sh",
+            "mv .claude/hooks/guard.py /tmp/g.py",
+            "git rm .claude/hooks/_lib.sh",
+            "echo 'exit 0' > .claude/hooks/pre-bash-guard.sh",
+            "cp /tmp/x .claude/hooks/guard.py",
+            "truncate -s 0 .claude/settings.json",
+            "rm -rf .claude",
+            "rm -rf .claude/hooks",
+            "unlink .claude/settings.local.json",
+            "sed -i 's/deny/x/' .claude/hooks/guard.py",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.bash(cmd), "deny")
+        for cmd in (
+            "git checkout -- .claude/hooks/guard.py",
+            "cat .claude/hooks/guard.py",
+            "python3 -m ruff format .claude/hooks/guard.py",
+            "cp .claude/hooks/guard.py /tmp/g.py",
+            "rm -rf .claude/worktrees/x",
+        ):
+            with self.subTest(ok=cmd):
+                self.assertEqual(self.bash(cmd), "")
+
+    def test_edit_disable_all_hooks_denied(self):
+        on = '{"disableAllHooks": true}'
+        for path, inp in (
+            (".claude/settings.local.json", {"content": on}),
+            (".claude/settings.json", {"old_string": "{", "new_string": '{"disableAllHooks":true,'}),
+            (".claude/settings.json", {"edits": [{"old_string": "a", "new_string": on}]}),
+            ("/home/u/.claude/settings.json", {"content": on}),
+            (".claude/settings.local.json", {"content": '{"env": {"CLAUDE_CODE_SIMPLE": "1"}}'}),
+        ):
+            with self.subTest(path=path, inp=inp):
+                self.assertEqual(self.edit(path, inp), "deny")
+        for path, inp in (
+            (".claude/settings.json", {"old_string": "a", "new_string": "b"}),
+            ("docs/notes.md", {"content": "disableAllHooks là công tắc của Claude Code"}),
+            (".claude/settings.json", {"content": '{"disableAllHooks": false}'}),
+        ):
+            with self.subTest(ok=path, inp=inp):
+                self.assertEqual(self.edit(path, inp), "")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class MissingGuardTest(unittest.TestCase):
+    """AUD-SEC-046: guard.py vắng = hàng rào bị gỡ → chặn mọi lệnh Bash trừ lệnh xem/khôi phục (strict: hỏi)."""
+
+    def test_missing_guard_denies_until_restored(self):
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        hooks = tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, hooks / f)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+
+        def dec(cmd: str, extra: dict | None = None) -> str | None:
+            r = subprocess.run(
+                ["bash", str(hooks / "pre-bash-guard.sh")],
+                input=json.dumps({"tool_input": {"command": cmd}}),
+                capture_output=True,
+                text=True,
+                env={**env, **(extra or {})},
+                timeout=60,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return decision(r.stdout)
+
+        for cmd in ("git push origin main", "gh repo delete o/r --yes", "rm -rf ~", "ls; rm -rf ~", "echo hi"):
+            with self.subTest(cmd):
+                self.assertEqual(dec(cmd), "deny")
+        self.assertEqual(dec("echo hi", {"XT_GUARD_POLICY": "strict"}), "ask")
+        for cmd in (
+            "git checkout -- .claude/hooks/guard.py",
+            "git restore .claude/hooks/guard.py",
+            "git status",
+            "ls .claude/hooks",
+            "python3 .xtemplates/scripts/install.py .",
+        ):
+            with self.subTest(ok=cmd):
+                self.assertIsNone(dec(cmd))
 
 
 if __name__ == "__main__":

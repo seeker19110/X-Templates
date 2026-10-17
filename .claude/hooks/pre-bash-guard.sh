@@ -26,11 +26,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   fi
   exit 0
 fi
-# guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → hỏi mọi lệnh tới khi
-# khôi phục (AUD-SEC-019). guard.py có mà lỗi giữa chừng → vẫn fail-open về luồng (ADR-0002).
+# guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → chặn mọi lệnh (strict:
+# hỏi) trừ lệnh một dòng để xem/khôi phục và tắt auto-merge, tới khi khôi phục (AUD-SEC-019/046). guard.py có mà lỗi
+# giữa chừng → vẫn fail-open về luồng (ADR-0002).
 if [ ! -f "$(dirname "$0")/guard.py" ]; then
-  merge_like && fence_closed "Khung cần xác nhận: thiếu .claude/hooks/guard.py — không kiểm được merge/ghi GitHub"
-  ask_strict "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào không chạy; khôi phục (git checkout hoặc install.py) rồi làm tiếp"
+  cmd="$(json_field "$payload" tool_input.command)"
+  restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]][^;&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
+  [[ $cmd != *$'\n'* && $cmd =~ $restore_re ]] && exit 0
+  fence_closed "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
 fi
 if ! guard_fields bash <<<"$payload"; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"

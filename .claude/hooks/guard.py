@@ -256,9 +256,29 @@ def _test_weakening(rel: str, root: str, tool_input: Optional[Dict[str, object]]
     return weakens_test(old, new)
 
 
+# Công tắc tắt hook ghi qua Edit/Write vào settings/`.env`/rc (AUD-SEC-046) — như `hook_bypass` cho Bash.
+BYPASS_ON_RE = re.compile(r'"disableAllHooks"\s*:\s*true|\b(?:CLAUDE_CODE_SIMPLE|CLAUDE_CODE_SAFE_MODE)\b["\']?\s*[:=]')
+
+
+def _bypass_edit(path: str, tool_input: Optional[Dict[str, object]]) -> str:
+    """Công tắc tắt hook trong nội dung MỚI ghi vào file cấu hình (settings*.json, `.env`, rc của shell); không thì ''."""
+    b = posixpath.basename(path)
+    if not tool_input or not (b.endswith((".json", ".env")) or b in RC_FILES):
+        return ""
+    texts = [_text(tool_input.get("new_string")), _text(tool_input.get("content"))]
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        texts += [_text(e.get("new_string")) for e in edits if isinstance(e, dict)]
+    m = BYPASS_ON_RE.search("\n".join(texts))
+    return m.group(0) if m else ""
+
+
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
     kind = path_kind(rel, root)
+    bypass = _bypass_edit(path, tool_input)
+    if bypass:
+        return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
     if kind == "secret":
@@ -1927,12 +1947,28 @@ def _commit_flag_args(args: List[str]) -> List[str]:
     return out
 
 
+# Hàng rào của harness (AUD-SEC-046): Bash ghi đè/xoá/dời = gỡ hàng rào mà không để lại diff đọc được → chặn. Sửa hook
+# bằng Edit/Write vẫn được (ADR-0018: sửa cấu hình hook cho chạy, nêu lý do); khôi phục bằng `git checkout -- <file>`.
+FENCE_PATTERNS = (".claude/hooks/*", ".claude/settings.json", ".claude/settings.local.json")
+FENCE_DIRS = {".claude", ".claude/hooks"}
+FENCE_WHY = "ghi/xoá hàng rào qua Bash ({}) — tắt hook của khung; sửa bằng Edit/Write, khôi phục bằng git checkout"
+
+
+def _is_fence(target: str, root: str) -> bool:
+    if not target or target.startswith("/dev/"):
+        return False
+    rel = rel_path(target, root).rstrip("/")
+    return rel in FENCE_DIRS or _match_any(rel, FENCE_PATTERNS)
+
+
 def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
-    """Câu hỏi xác nhận cho file bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
+    """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
     asks: List[str] = []
     for target in write_targets(n, argv):
         kind = _target_kind(target, root)
-        if kind == "secret":
+        if _is_fence(target, root):
+            asks.append(FENCE_WHY.format(target))
+        elif kind == "secret":
             asks.append(f"ghi file bí mật qua Bash: {target}")
         elif kind in ("gate", "migration"):
             asks.append(f"sửa cấu hình cổng/CI/harness/migration qua Bash ({target}) — nói rõ lý do")
