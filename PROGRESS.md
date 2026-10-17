@@ -3,7 +3,8 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Audit delta #68–#80 đóng (#81–#83); trả nợ 🟢 #84 (guard git/container, `doctor` gate-tools, feedback); `audit check --strict` exit 0 (21 🟢 nợ). Chờ chủ repo: AUD-HAR-036/041, SEC-026, CI-006/007/009 (hook/settings/CI), SEC-043 (chính sách `npx`).
+- Audit dự án con (`AUDIT-REPORT-2026-10-17-subprojects.md`): 🔴 AUD-SEC-044, 🟠 SEC-045…049, 10 🟢 — chờ duyệt 4 đợt. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043.
+
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
