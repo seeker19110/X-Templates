@@ -174,6 +174,29 @@ class CommitGateRepoTest(unittest.TestCase):
             self.assertNotIn("GATE-SUB", err)
             self.assertNotIn("GATE-PROJ", err)
 
+    def test_target_project_prefers_framework_gate(self):  # AUD-HAR-049
+        fw = self.proj / ".xtemplates" / "scripts"
+        fw.mkdir(parents=True)
+        shutil.move(str(self.proj / "scripts" / "dev-task.sh"), str(fw / "dev-task.sh"))
+        own = self.proj / "scripts" / "dev-task.sh"
+        own.write_text("#!/bin/sh\necho PROJ-SCRIPT >&2; exit 1\n", encoding="utf-8")
+        own.chmod(0o755)
+        code, _, err = self.hook("git commit -m x")
+        self.assertEqual(code, 0, err)
+        self.assertIn("GATE-PROJ", err)
+        self.assertNotIn("PROJ-SCRIPT", err)
+
+    def test_auto_format_prefers_framework_dev_task(self):  # AUD-HAR-049
+        log = self.proj / "log"
+        for d, tag in ((self.proj / ".xtemplates" / "scripts", "FW"), (self.proj / "scripts", "PROJ")):
+            d.mkdir(parents=True, exist_ok=True)
+            s = d / "dev-task.sh"
+            s.write_text(f'#!/bin/sh\necho {tag} >> "{log}"\n', encoding="utf-8")
+            s.chmod(0o755)
+        code, _, err = run_hook("auto-format.sh", {"tool_input": {"file_path": str(self.proj / "a.py")}}, self.proj)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(log.read_text(encoding="utf-8").split(), ["FW"])
+
     def test_nested_repo_without_xt_uses_project_gate(self):
         sub = self.repo(self.proj / "apps" / "web", None)
         code, _, err = self.hook(f"cd {sub} && git commit -m x")

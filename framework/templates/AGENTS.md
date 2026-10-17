@@ -52,7 +52,7 @@ Trong autopilot: còn việc khác làm được → `python3 .xtemplates/script
 Autopilot bắt đầu bằng `python3 .xtemplates/scripts/xt.py doctor --fix` (audit khung đã cài, sửa phần an toàn; còn lỗi hook/settings → báo người chạy lại `install.py`). Autopilot chạy **một phiên đến khi xong**: mở phiên ở chế độ quyền Auto (phiên cloud: chọn **Auto** ở bộ chọn chế độ quyền; CLI: `claude --permission-mode auto`), `loop init --single-session`; context đầy để compaction tự nén (hook PreCompact ghi checkpoint), chỉ bàn giao khi gần trần vòng/giờ/tiền.
 
 ## 7. Cổng
-- **Trước commit** (`/gate`): `scripts/dev-task.sh gate` (đọc `xt.yaml`) → build · typecheck · lint · test xanh (lint nên gồm kiểm format); tự review diff; không rác/bí mật; conventional commit.
+- **Trước commit** (`/gate`): `.xtemplates/scripts/dev-task.sh gate` (đọc `xt.yaml`) → build · typecheck · lint · test xanh (lint nên gồm kiểm format); tự review diff; không rác/bí mật; conventional commit.
 - **Trước merge:** thời điểm do `python3 .xtemplates/scripts/xt.py merge-check --pr <N>` quyết — `merge` → chạy lệnh merge ghim head trong `next` (dưới L3 không bật auto-merge của GitHub), `human` → để người; `merge_autonomy`: L3 (mặc định) = mở PR là bật auto-merge của GitHub mọi làn trừ ngoại lệ cứng (`hard`), L2 = máy chỉ tự merge làn nhanh, L1 = người merge mọi PR (ADR-0015, ADR-0016). Điều kiện: + toàn bộ test, nhánh cập nhật với `main`, tiêu chí chấp nhận trong SPEC, mục blueprint liên quan tick kèm bằng chứng, review (người hoặc `reviewer` model khác), CI xanh.
 - **Phát hành (G7):** `python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict` = 0 MUST mở + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết từng đề xuất "Khi chạy thật" trong `docs/autopilot/DECISIONS.md`.
 

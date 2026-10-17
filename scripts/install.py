@@ -298,7 +298,10 @@ def install_harness(target: Path, force_harness: bool) -> None:
     write_atomic(target / MANIFEST, json.dumps(new_manifest, indent=2, sort_keys=True) + "\n")
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
     if stats.get("updated-new"):
-        log("  ⚠ có file .xtemplates-new: bạn đã sửa bản cũ — so sánh và gộp tay bản mới của khung")
+        log(
+            "  ⚠ có file .xtemplates-new: file sẵn có của dự án khác bản khung — so sánh và gộp tay; hook/settings chưa "
+            "gộp thì hàng rào của khung có thể không chạy (`xt.py doctor` báo lỗi)"
+        )
 
 
 def install_root_templates(target: Path) -> None:
@@ -307,8 +310,25 @@ def install_root_templates(target: Path) -> None:
         tsrc = SRC / "framework" / "templates" / tmpl
         if not tsrc.exists():
             continue
-        r = copy_if_absent(tsrc, target / name, False, transform=template_body)
-        log(f"  {name}: {r}")
+        body = template_body if name != "PROGRESS.md" else lambda t: progress_with_head(template_body(t), target)
+        r = copy_if_absent(tsrc, target / name, False, transform=body)
+        if r == "updated-new":  # AUD-HAR-052: file của dự án (không phải bản khung cũ) — chỉ nói điều đúng
+            log(f"  {name}: giữ file của dự án; mẫu khung ở {name}.xtemplates-new — gộp phần của khung vào")
+        else:
+            log(f"  {name}: {r}")
+
+
+def progress_with_head(text: str, target: Path) -> str:
+    """PROGRESS mới cài ghi SHA HEAD thật của dự án (repo đã có commit) để `xt.py progress-check` xanh ngay (AUD-HAR-053);
+    repo chưa có commit/không phải git → giữ chỗ trống của mẫu."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return text
+    head = r.stdout.strip()
+    return text.replace("<SHA đầy đủ>", head) if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", head) else text
 
 
 def ruleset_required_checks() -> list[str]:

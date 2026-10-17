@@ -32,7 +32,7 @@ Lệnh:
   feedback collect [--blueprint F]
                                 Tự gom MUST bị miễn và lý do autopilot bị chặn thành FB-NNN (không trùng).
   feedback list [DIR] [--json]  Liệt kê phản hồi.
-  feedback aggregate --from DỰ_ÁN=THƯ_MỤC ... [--json]
+  feedback aggregate --from DỰ_ÁN=GỐC_REPO|THƯ_MỤC ... [--json]
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   merge-check [--pr PR] [--pr-json F] [--json]
                                 Máy quyết khi nào merge PR: merge · wait · update · fix · human · closed (exit 0 = merge).
@@ -147,10 +147,20 @@ SECRET_PATTERNS = (
 )
 
 
+# Thư mục home chứa tên người dùng/máy (AUD-HAR-054): FB đi vào repo khung public (LOOP-FB-003).
+HOME_PATH_RE = re.compile(r"(/home/|/Users/|[A-Za-z]:\\Users\\)(?!<user>)[^/\\\s]+")
+
+
 def redact(text: str) -> str:
     for rx, repl in SECRET_PATTERNS:
         text = rx.sub(repl, text)
     return SECRET_RE.sub(r"\1\2***", text)
+
+
+def redact_feedback(text: str) -> str:
+    """`redact` + che tên người dùng trong đường dẫn home — cho phản hồi đi ra repo khung public (bằng chứng cục bộ thì
+    giữ đường dẫn thật để tái hiện)."""
+    return HOME_PATH_RE.sub(r"\1<user>", redact(text))
 
 
 TASK_RE = re.compile(r"^- \[(?P<state>[ xX~])\] `(?P<id>T-\d{3,})`(?P<rest>.*)$")
@@ -2348,16 +2358,20 @@ def _doctor_harness_parts(base: Path) -> List[Finding]:
     pending = sorted(
         p.relative_to(base).as_posix() for p in (*base.glob("*.xtemplates-new"), *claude.rglob("*.xtemplates-new"))
     )
+    fence = [p for p in pending if p.startswith(".claude/hooks/") or p.startswith(".claude/settings")]
+    rest = [p for p in pending if p not in fence]
     out = []
     if missing:
         out.append(Finding("harness", "warn", f".claude/ thiếu {', '.join(missing)}; {INSTALL_HINT}"))
-    if pending:
+    if fence:  # AUD-HAR-050: hook cũ/riêng còn chạy thay bản khung (vd guard.py riêng) → hàng rào có thể không chặn gì
+        msg = f"hook/settings của khung chưa gộp: {', '.join(fence)} — hàng rào có thể không chạy; người gộp rồi xoá bản mới"
+        out.append(Finding("harness", "error", msg))
+    if rest:
         out.append(
             Finding(
                 "harness",
                 "warn",
-                f"bản mới của khung chưa gộp: {', '.join(pending)} — so sánh, gộp vào file gốc rồi xoá bản `*.xtemplates-new` "
-                "(file trong .claude/hooks hoặc settings là điểm dừng: để người gộp)",
+                f"bản mới của khung chưa gộp: {', '.join(rest)} — so sánh, gộp vào file gốc rồi xoá bản `*.xtemplates-new`",
             )
         )
     return out
@@ -3677,7 +3691,7 @@ def write_feedback(base: Path, entry: Dict[str, str]) -> str:
     nums = [int(m[1]) for p in d.glob("FB-*.md") if (m := FB_FILE_RE.match(p.name))] if d.is_dir() else []
     fid = f"FB-{max(nums, default=0) + 1:03d}"
     e = {"framework": _framework_version(base), "date": now_iso(), **entry}
-    clean = {k: redact(_one_line(e.get(k, ""))) for k, _ in FEEDBACK_FIELDS}
+    clean = {k: redact_feedback(_one_line(e.get(k, ""))) for k, _ in FEEDBACK_FIELDS}
     body = "".join(f"- {lab}: {clean[k] or '—'}\n" for k, lab in FEEDBACK_FIELDS)
     write_atomic(d / f"{fid}.md", f"# {fid} · {clean['kind']} · {clean['id']}\n\n{body}")
     return fid
@@ -3764,7 +3778,9 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
             g = groups.setdefault(key, {"kind": key[0], "id": e.get("id", "?"), "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})
             # FB có thể đã sửa tay sau `feedback add` → che lại trước khi ra PR nháp ở repo khung public (AUD-CFG-002).
-            g["items"].append({"project": project, **{k: redact(v) if isinstance(v, str) else v for k, v in e.items()}})
+            g["items"].append(
+                {"project": project, **{k: redact_feedback(v) if isinstance(v, str) else v for k, v in e.items()}}
+            )
     out = list(groups.values())
     for g in out:
         has_repro = any(i.get("repro", "—") not in ("", "—") for i in g["items"])
@@ -3779,7 +3795,11 @@ def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
         if not (sep and project and path):
             print(f"✗ --from phải dạng <dự-án>=<thư mục>: {spec}", file=sys.stderr)
             return 2
-        sources.append((project, Path(path)))
+        d = Path(path)
+        d = d / FEEDBACK_DIR if (d / FEEDBACK_DIR).is_dir() else d  # gốc repo dự án (AUD-HAR-051)
+        if not d.is_dir():
+            print(f"⚠ {project}: không có thư mục phản hồi {d} — bỏ qua", file=sys.stderr)
+        sources.append((project, d))
     groups = feedback_aggregate(sources)
     if args.json:
         print(json.dumps(groups, ensure_ascii=False))
@@ -4028,7 +4048,7 @@ def build_parser() -> argparse.ArgumentParser:
     fl.add_argument("dir", nargs="?", help=f"mặc định {FEEDBACK_DIR}")
     fl.add_argument("--json", action="store_true")
     fg = fsub.add_parser("aggregate", help="repo khung: gộp phản hồi nhiều dự án theo (loại, ID)")
-    fg.add_argument("--from", dest="source", action="append", required=True, metavar="DỰ_ÁN=THƯ_MỤC")
+    fg.add_argument("--from", dest="source", action="append", required=True, metavar="DỰ_ÁN=GỐC_REPO|THƯ_MỤC")
     fg.add_argument("--json", action="store_true")
     pfb.set_defaults(fn=cmd_feedback)
     pdr = sub.add_parser("doctor", help="audit khung đã cài (harness, xt.yaml, khung, state) trước /autopilot")

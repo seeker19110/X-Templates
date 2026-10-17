@@ -73,8 +73,9 @@ if [ "$XG_COMMIT" = "true" ] && [ "$XG_NO_VERIFY" != "true" ]; then
     esac
   fi
   gate=""
-  for g in "$groot/scripts/dev-task.sh" "$groot/.xtemplates/scripts/dev-task.sh" \
-    "$XT_ROOT/scripts/dev-task.sh" "$XT_ROOT/.xtemplates/scripts/dev-task.sh"; do
+  # Bản của khung trước (như `xt_py`): `scripts/dev-task.sh` riêng của dự án đích không thay cổng khung (AUD-HAR-049).
+  for g in "$groot/.xtemplates/scripts/dev-task.sh" "$groot/scripts/dev-task.sh" \
+    "$XT_ROOT/.xtemplates/scripts/dev-task.sh" "$XT_ROOT/scripts/dev-task.sh"; do
     [ -x "$g" ] && { gate="$g"; break; }
   done
   if [ -n "$gate" ]; then

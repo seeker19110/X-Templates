@@ -931,6 +931,17 @@ class FeedbackTest(TmpDirCase):
         self.assertEqual(table[2], "| ✅ | muc-sai | `SEC-AUTH-001` | a, b | mơ hồ \\| khó | x |")
         self.assertTrue(table[4].startswith("| — | tai-lieu |"))
 
+    def test_aggregate_accepts_repo_root_and_warns_missing(self):  # AUD-HAR-051
+        a = self.tmp / "a"
+        xt.write_feedback(a, {"kind": "muc-sai", "id": "SEC-AUTH-001", "symptom": "s", "fix": "x"})
+        code, out, err = run_main(
+            "feedback", "aggregate", "--from", f"a={a}", "--from", f"b={self.tmp / 'b'}", "--json"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual([g["id"] for g in json.loads(out)], ["SEC-AUTH-001"])
+        self.assertIn("b", err)
+        self.assertIn("không có", err)
+
     def test_aggregate_local_ids_group_by_symptom(self):  # AUD-CODE-004: `T-003`/`loop` là ID cục bộ của từng dự án
         dirs = {p: self.tmp / p for p in ("a", "b", "c")}
         for proj, why in (("a", "cần khoá thật"), ("b", "CI đỏ lặp"), ("c", "Cần  khoá thật")):
