@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-16
+updated: 2026-10-17
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -36,7 +36,7 @@ updated: 2026-10-16
 | `.autopilot/evidence/T-NNN.json` | `task, cmd, exit_code, started, finished, head, output_tail` (40 dòng) | `xt.py loop record` | Không (bằng chứng cục bộ); bằng chứng chia sẻ = link CI/PR | `loop_verdict` so `cmd` với Gate |
 | `xt.yaml` | Khoá `format · lint · typecheck · test · build · format_file` (dev-task chạy) + khoá khai báo khác (`install`, `dev`, `e2e`, `migrate`, `init`, `smoke`, `audit`…) cho agent đọc | Người/agent ở G5 | Có | `dev-task.sh gate` đọc được (xem `LOOP-HARNESS-008`) |
 | `AGENTS.md` (+ `CLAUDE.md` chứa `@AGENTS.md`) | Luật agent, lệnh, cấu trúc, điểm dừng | Người | Có | Script so bản gốc trong `docs/agents/` ([`XC-DOCAI-007`](../18-cross-cutting/docs-for-ai-agents.md)) |
-| `.claude/settings.json` + `.claude/hooks/*.sh` | Quyền allow/ask/deny, 4 hook | Người; agent sửa phải qua `ask` | Có | `bash -n`, test hook |
+| `.claude/settings.json` + `.claude/hooks/*.sh` | Quyền allow/ask/deny, 4 hook | Người; agent sửa được (ADR-0018 — `strict` thì `ask`), nêu lý do ở commit/PR, tắt/bỏ qua hook bị deny | Có | `bash -n`, test hook |
 | `docs/adr/`, `docs/SPEC-*.md`, `THREAT-MODEL.md` | Quyết định, đặc tả, mối đe doạ | Agent soạn, người duyệt | Có | Link từ PR `feat:` |
 | `TRAPS.md` (tuỳ chọn) | Bẫy đã mắc thật: triệu chứng → cách rà → chốt chặn → ngày/PR | Agent sau mỗi lỗi lặp | Có | Mỗi `fix:` lặp lại phải trỏ TRAPS |
 
