@@ -1121,6 +1121,26 @@ EGRESS_ASK = "ra khỏi máy dev (điểm dừng bắt buộc)"
 REMOTE_SHELLS = {"ssh", "sftp", "mosh", "telnet"}
 REMOTE_COPY = {"scp", "rsync"}
 REMOTE_VALUE_FLAGS = ("-e", "-i", "-P", "-p", "-F", "-o", "-J", "-l", "--rsh", "--port", "--exclude", "--include")
+# Cờ ăn giá trị chỉ của ssh/sftp (`-L`/`-R`/`-D` của rsync là cờ boolean) — thiếu thì giá trị loopback bị lấy làm máy đích.
+SSH_VALUE_FLAGS = (
+    *REMOTE_VALUE_FLAGS,
+    "-L",
+    "-R",
+    "-D",
+    "-b",
+    "-B",
+    "-c",
+    "-E",
+    "-I",
+    "-m",
+    "-O",
+    "-Q",
+    "-S",
+    "-W",
+    "-w",
+)
+# `-o` của ssh chạy lệnh cục bộ hoặc đi qua máy khác dù đích là loopback.
+SSH_INDIRECT_OPTS = ("proxycommand", "proxyjump", "localcommand", "permitlocalcommand", "knownhostscommand")
 # Client CSDL → cờ chỉ máy chủ (`-h` của mongosh là trợ giúp nên không có); cờ chứa URI/conninfo.
 DB_CLIENTS: Dict[str, Tuple[str, ...]] = {
     **dict.fromkeys(("psql", "pg_dump", "pg_dumpall", "pg_restore", "pg_basebackup"), ("-h", "--host")),
@@ -1131,7 +1151,7 @@ DB_URI_FLAGS = ("-d", "--dbname", "-u", "--uri")
 DB_VALUE_FLAGS = ("-c", "--command", "-f", "--file", "-e", "--execute", "--eval", "-U", "-p", "--port", "-o", "-v")
 DB_HOST_ENV = {"PGHOST", "PGHOSTADDR", "MYSQL_HOST"}
 LOCAL_HOSTS = {"localhost", "0.0.0.0", "::1", "host.docker.internal", "host.containers.internal"}
-URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]*")
+URL_RE = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]*")  # lookbehind: tuyến tính
 CONNINFO_HOST_RE = re.compile(r"(?:^|\s)host\s*=\s*([^\s'\"]+)")
 SCP_REMOTE_RE = re.compile(r"(?:[^/@:\s]+@)?(\[[^\]]+\]|[^/:\s]+):")
 PYTHON_RE = re.compile(r"python[0-9.]*")
@@ -1177,7 +1197,12 @@ PKG_ADD: Dict[str, Dict[str, bool]] = {
     "gem": {"install": True},
     "composer": {"require": True},
     "deno": {"add": True, "install": False},
+    "bundle": {"add": True},
+    "conda": {"install": False},
+    "mamba": {"install": False},
 }
+# Lệnh bọc chạy lệnh khác (`uv run pip install x`, `npx pnpm add x`): xét lệnh bên trong.
+PKG_WRAPPERS = {"uv": "run", "poetry": "run", "pdm": "run", "pipenv": "run", "hatch": "run", "corepack": "", "npx": ""}
 # Cờ ăn giá trị theo TỪNG trình quản lý (`-w` của npm là workspace, của pnpm là cờ boolean; `-r` của pip là file).
 NODE_VALUE_FLAGS: Tuple[str, ...] = (
     "--filter",
@@ -1226,19 +1251,23 @@ SENSITIVE_MOUNTS |= {"/run", "/var/run", "/var/lib/docker"}
 SENSITIVE_MOUNT_PARTS = ("/.ssh", "/.aws", "/.kube", "/.docker", "/.gnupg", "/etc/", "/.config/gh", "/.claude")
 HOME_DIR_RE = re.compile(r"/(home|Users)/[^/]+")
 SAFE_RO_MOUNTS = {"/etc/localtime", "/etc/timezone"}
+SENSITIVE_MOUNT_PREFIXES = ("/proc/", "/sys/", "/boot/", "/var/lib/docker/")
 
 
 def _is_loopback(host: str) -> bool:
     h = host.strip().strip("[]").lower()
-    return h in LOCAL_HOSTS or h.startswith("127.") or h == "localhost." or h.endswith(".localhost")
+    if h.startswith("127."):  # chỉ địa chỉ IPv4 thật — `127.0.0.1.nip.io` là tên miền ngoài
+        return all(p.isdigit() and int(p) < 256 for p in h.split(".")) and h.count(".") == 3
+    return h in LOCAL_HOSTS or h == "localhost." or h.endswith(".localhost")
 
 
 def _is_local_host(host: str) -> bool:
-    """Máy cục bộ: loopback, socket unix, tên không có dấu chấm (dịch vụ compose/container: `db`, `postgres`)."""
+    """Máy cục bộ: loopback, socket unix, tên không có dấu chấm (dịch vụ compose/container: `db`, `postgres`); số thuần
+    (`3627733118`, `0x7f000001`) là địa chỉ IP viết gọn, không phải tên dịch vụ."""
     h = host.strip().strip("[]").lower()
     if not h or h.startswith("/") or _is_loopback(h):
         return True
-    return "." not in h and ":" not in h
+    return "." not in h and ":" not in h and not h.isdigit() and not h.startswith("0x")
 
 
 def _url_hosts(text: str) -> List[str]:
@@ -1284,10 +1313,10 @@ def _docker_remote(endpoint: str) -> bool:
     return endpoint.startswith("ssh://") or not all(_is_loopback(h) for h in _url_hosts(endpoint) or [endpoint])
 
 
-def _db_rule(name: str, args: List[str], env: Optional[List[str]] = None) -> str:
-    """Client CSDL tới máy chủ không cục bộ: cờ host, URI/conninfo ở đối số vị trí hoặc `-d`, `PGHOST=`/`…_URL=` gán đầu
-    lệnh. Câu SQL (`-c`, `-f`) là dữ liệu, không quét."""
-    hosts = _flag_values(args, DB_CLIENTS[name]) + _env_hosts(env or [])
+def _db_rule(name: str, args: List[str]) -> str:
+    """Client CSDL tới máy chủ không cục bộ: cờ host, URI/conninfo ở đối số vị trí hoặc `-d` (`PGHOST=`/`…_URL=` gán đầu
+    lệnh xét ở `_scan_command`). Câu SQL (`-c`, `-f`) là dữ liệu, không quét."""
+    hosts = _flag_values(args, DB_CLIENTS[name])
     for a in _positionals(args, (*DB_CLIENTS[name], *DB_URI_FLAGS, *DB_VALUE_FLAGS)) + _flag_values(args, DB_URI_FLAGS):
         hosts += _url_hosts(a) + CONNINFO_HOST_RE.findall(a)
     remote = next((h for h in hosts if not h.startswith("$") and not _is_local_host(h)), "")
@@ -1297,11 +1326,17 @@ def _db_rule(name: str, args: List[str], env: Optional[List[str]] = None) -> str
 def _remote_rule(name: str, args: List[str]) -> str:
     """ssh/sftp/mosh/telnet vào máy không loopback; scp/rsync chép với máy không loopback (alias `~/.ssh/config` như
     `prod` không có dấu chấm vẫn là máy khác)."""
-    pos = _positionals(args, REMOTE_VALUE_FLAGS)
+    pos = _positionals(args, SSH_VALUE_FLAGS if name in ("ssh", "sftp") else REMOTE_VALUE_FLAGS)
     if name in REMOTE_SHELLS:
-        if set(args) <= INFO_ONLY | {"-V"} or (pos and _is_loopback(pos[0].rsplit("@", 1)[-1])):
+        if set(args) <= INFO_ONLY | {"-V"}:
             return ""
-        return f"{EGRESS_ASK} — {name} vào máy khác"
+        if not (pos and _is_loopback(pos[0].rsplit("@", 1)[-1])):
+            return f"{EGRESS_ASK} — {name} vào máy khác"
+        opts = [o.lower().replace(" ", "=") for o in _flag_values(args, ("-o",))]
+        indirect = _flag_values(args, ("-J",)) or [o for o in opts if o.startswith(SSH_INDIRECT_OPTS)]
+        if indirect or (name == "ssh" and len(pos) > 1):  # loopback vẫn là shell thật: lệnh bên trong không qua guard
+            return f"{EGRESS_ASK} — {name} loopback chạy lệnh/ProxyCommand/ProxyJump"
+        return ""
     for p in pos:
         if p.startswith(("/", ".", "~")):
             continue
@@ -1322,17 +1357,39 @@ def _curl_methods(args: List[str]) -> List[str]:
     return [m.upper() for m in out]
 
 
+CURL_SHORT_VALUE = {f[1] for f in CURL_VALUE_FLAGS if len(f) == 2}
+
+
+def _curl_short_send(a: str) -> str:
+    """Chữ gửi dữ liệu trong cờ ngắn gộp của curl (`-sSd@a.json`, `-d'{…}'`, `-Fa=b`): đọc từng chữ tới cờ ăn giá trị
+    đầu tiên; `-o-d` là tên file `-d`, không phải cờ."""
+    if not a.startswith("-") or a.startswith("--"):
+        return ""
+    for c in a[1:]:
+        if c in CURL_SEND_SHORT:
+            return c
+        if c in CURL_SHORT_VALUE:
+            return ""
+    return ""
+
+
+def _curl_get_leaks(args: List[str]) -> bool:
+    """`-G` đổi dữ liệu thành query string của GET — vẫn là gửi khi kèm upload/phương thức ghi, hoặc dữ liệu là nội
+    dung file (`@f`, `name@f`) hay biến môi trường (`$TOKEN`)."""
+    if any(a.startswith("--upload-file") or _curl_short_send(a) == "T" for a in args):
+        return True
+    data = _flag_values(args, ("-d", *CURL_SEND_LONG))
+    return any(re.match(r"[^=]*@", v) or "$" in v for v in data) or any(m in WRITE_METHODS for m in _curl_methods(args))
+
+
 def _sends_data(name: str, args: List[str]) -> bool:
     if name == "wget":
         methods = _flag_values(args, ("--method",))
         return any(a.split("=", 1)[0] in WGET_SEND for a in args) or any(m.upper() != "GET" for m in methods)
-    if "-G" in args or "--get" in args:  # dữ liệu thành query string của GET
-        return False
-    for a in args:
-        if a.split("=", 1)[0] in CURL_SEND_LONG:
-            return True
-        if re.fullmatch(r"-[A-Za-z]+", a) and CURL_SEND_SHORT & set(a[1:].split("X", 1)[0]):
-            return True
+    if "-G" in args or "--get" in args:
+        return _curl_get_leaks(args)
+    if any(a.split("=", 1)[0] in CURL_SEND_LONG or _curl_short_send(a) for a in args):
+        return True
     return any(m in WRITE_METHODS for m in _curl_methods(args))
 
 
@@ -1359,8 +1416,8 @@ def _is_local_pkg(p: str) -> bool:
 def _pkg_rule(name: str, args: List[str]) -> str:
     """Thêm phụ thuộc mới (chuỗi cung ứng — /research trước); cài theo lockfile/đường dẫn/gói nội bộ không hỏi."""
     subs = PKG_ADD[name]
-    if name == "uv" and args[:2] == ["pip", "install"]:
-        name, subs, args = "uv pip", {"install": False}, args[1:]
+    if name == "uv" and args[:2] in (["pip", "install"], ["tool", "install"]):
+        name, subs, args = f"uv {args[0]}", {"install": args[0] == "tool"}, args[1:]
     if name == "cargo" and "--path" in args:
         return ""
     pos = _positionals(args, PKG_VALUE_FLAGS.get(name.split()[0], ()))
@@ -1374,6 +1431,7 @@ def _pkg_rule(name: str, args: List[str]) -> str:
 
 
 def _mount_source(spec: str) -> str:
+    spec = spec.removeprefix("=")  # `-v=/:/h` (pflag nhận `-v=`)
     if spec.startswith(("type=", "source=", "src=")) or ",source=" in spec or ",src=" in spec:
         kv = dict(p.split("=", 1) for p in spec.split(",") if "=" in p)
         return kv.get("source") or kv.get("src") or ""
@@ -1381,12 +1439,17 @@ def _mount_source(spec: str) -> str:
 
 
 def _sensitive_mount(spec: str) -> str:
+    """Nguồn mount nhạy cảm sau khi chuẩn hoá (`//`, `/tmp/..`, `/home/u/../..` → `/`). Đường dẫn tương đối/`$PWD` nằm
+    trong dự án (`./.docker/nginx.conf`, `./deploy/etc/x`) không xét theo mảnh tên."""
     src = _mount_source(spec)
-    norm = src.rstrip("/") or src
+    absolute = src.startswith("/")
+    norm = posixpath.normpath(re.sub("/+", "/", src)) if absolute else src.rstrip("/") or src
     if norm in SAFE_RO_MOUNTS and (spec.endswith(":ro") or ",readonly" in spec or ",ro" in spec):
         return ""
     hit = norm in SENSITIVE_MOUNTS or HOME_DIR_RE.fullmatch(norm) or norm.endswith(".sock")
-    return src if hit or any(p in src for p in SENSITIVE_MOUNT_PARTS) else ""
+    hit = hit or (absolute and norm.startswith(SENSITIVE_MOUNT_PREFIXES))
+    home_based = absolute or src.startswith(("~", "$HOME", "${HOME}"))
+    return src if hit or (home_based and any(p in norm + "/" for p in SENSITIVE_MOUNT_PARTS)) else ""
 
 
 # `docker exec`/`docker compose exec|run`: cờ ăn giá trị trước tên container/dịch vụ (lệnh bên trong vẫn ra mạng thật).
@@ -1403,6 +1466,14 @@ EXEC_VALUE_FLAGS: Tuple[str, ...] = (
 )
 EXEC_VALUE_FLAGS += ("-v", "--volume", "-p", "--publish", "--name", "-l", "--label", "--index")
 COMPOSE_VALUE_FLAGS = ("-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory")
+# `docker run|create` thêm cờ ăn giá trị trước image (để tìm đúng image rồi lệnh chạy trong container).
+RUN_VALUE_FLAGS: Tuple[str, ...] = (*EXEC_VALUE_FLAGS, *CONTAINER_HOST_NS, "--cap-add", "--cap-drop", "--security-opt")
+RUN_VALUE_FLAGS += ("--device", "--mount", "-m", "--memory", "--cpus", "-h", "--hostname", "--add-host", "--dns")
+RUN_VALUE_FLAGS += ("--platform", "--restart", "--pull", "--runtime", "--gpus", "--tmpfs", "--shm-size", "--ulimit")
+RUN_VALUE_FLAGS += ("--group-add", "--log-driver", "--log-opt", "--cidfile", "--stop-signal", "--stop-timeout")
+# Cờ toàn cục của docker/podman ăn giá trị (đứng trước lệnh con: `docker -l debug --context prod ps`).
+DOCKER_GLOBAL_VALUE_FLAGS: Tuple[str, ...] = ("-H", "--host", "-c", "--context", "-l", "--log-level", "--config")
+DOCKER_GLOBAL_VALUE_FLAGS += ("--tlscacert", "--tlscert", "--tlskey", "--url", "--connection", "--root", "--runroot")
 
 
 def _skip_opts(rest: List[str], value_flags: Tuple[str, ...]) -> int:
@@ -1412,35 +1483,24 @@ def _skip_opts(rest: List[str], value_flags: Tuple[str, ...]) -> int:
     return i
 
 
-def _exec_inner(args: List[str]) -> List[str]:
-    """Lệnh chạy trong container: `docker exec [cờ] <ctr> <lệnh>`, `docker compose [cờ] exec|run [cờ] <dv> <lệnh>`."""
+def _exec_split(args: List[str]) -> Tuple[List[str], List[str]]:
+    """(cờ, lệnh bên trong) của `docker exec|run|create [cờ] <ctr|image> <lệnh>` và `docker compose [cờ] exec|run [cờ]
+    <dv> <lệnh>`; lệnh con khác → ([], [])."""
     if args[:1] == ["compose"]:
         i = _skip_opts(args[1:], COMPOSE_VALUE_FLAGS) + 1
         if args[i : i + 1] not in (["exec"], ["run"]):
-            return []
-    elif args[:1] != ["exec"]:
-        return []
+            return [], []
+    elif args[:1] not in (["exec"], ["run"], ["create"]):
+        return [], []
     else:
         i = 0
     rest = args[i + 1 :]
-    return normalize(rest[_skip_opts(rest, EXEC_VALUE_FLAGS) + 1 :])
+    k = _skip_opts(rest, RUN_VALUE_FLAGS)
+    return rest[:k], normalize(rest[k + 1 :])
 
 
-def _container_rule(args: List[str]) -> str:
-    """`docker|podman` điều khiển daemon máy khác (`-H`, `--context`), hoặc `[container] run|create` có quyền máy chủ:
-    privileged, namespace của host, cap nguy hiểm, thiết bị, unconfined, mount gốc/home/bí mật/socket."""
-    remote = any(_docker_remote(h) for h in _flag_values(args[:2], ("-H", "--host")))
-    if remote or _flag_values(args[:2], ("--context", "-c")):
-        return f"{EGRESS_ASK} — container trên daemon máy khác"
-    if args[:1] == ["container"]:
-        args = args[1:]
-    inner = _exec_inner(args)
-    if inner:
-        verdict = egress_rule(inner[0], inner[1:])
-        return f"{verdict[1]} (trong container)" if verdict[0] else ""
-    if args[:1] not in (["run"], ["create"]):
-        return ""
-    opts = args[1:]
+def _host_power(opts: List[str]) -> str:
+    """Cờ trao quyền máy chủ: privileged, namespace của host, cap nguy hiểm, thiết bị, unconfined, mount nhạy cảm."""
     why = ""
     if "--privileged" in opts or any(a.startswith("--privileged=") and a != "--privileged=false" for a in opts):
         why = "--privileged"
@@ -1451,14 +1511,38 @@ def _container_rule(args: List[str]) -> str:
     unconfined = any("unconfined" in v for v in _flag_values(opts, ("--security-opt",)))
     why = why or ("--security-opt unconfined" if unconfined else "")
     mounts = [m for m in map(_sensitive_mount, _flag_values(opts, ("-v", "--volume", "--mount"))) if m]
-    why = why or (f"mount {mounts[0]}" if mounts else "")
-    return f"container có quyền máy chủ ({why})" if why else ""
+    return why or (f"mount {mounts[0]}" if mounts else "")
+
+
+def _container_rule(args: List[str]) -> str:
+    """`docker|podman` điều khiển daemon máy khác (`-H`, `--context`), container có quyền máy chủ (`run|create`,
+    `compose run`, `exec --privileged`), hoặc lệnh trong container ra khỏi máy dev."""
+    k = _skip_opts(args, DOCKER_GLOBAL_VALUE_FLAGS)
+    glob, args = args[:k], args[k:]
+    remote = any(_docker_remote(h) for h in _flag_values(glob, ("-H", "--host")))
+    if remote or _flag_values(glob, ("--context", "-c")):
+        return f"{EGRESS_ASK} — container trên daemon máy khác"
+    if args[:1] == ["container"]:
+        args = args[1:]
+    opts, inner = _exec_split(args)
+    why = _host_power(opts)
+    if why:
+        return f"container có quyền máy chủ ({why})"
+    verdict = egress_rule(inner[0], inner[1:]) if inner else ("", "")
+    return f"{verdict[1]} (trong container)" if verdict[0] else ""
 
 
 def egress_rule(name: str, args: List[str]) -> Tuple[str, str]:
     """Kết nối/gửi ra máy khác, thêm phụ thuộc, container có quyền máy chủ → ask (không deny: việc hợp lệ khi người duyệt)."""
-    if (name in INTERPRETERS or PYTHON_RE.fullmatch(name)) and args[:1] == ["-m"] and len(args) > 1:
-        name, args = args[1], args[2:]
+    if name in INTERPRETERS or PYTHON_RE.fullmatch(name):  # `python3 -I -u -m pip …`: bỏ cờ trình thông dịch
+        k = next((i for i, a in enumerate(args) if not a.startswith("-") or a == "-m"), len(args))
+        if args[k : k + 1] == ["-m"] and len(args) > k + 1:
+            name, args = args[k + 1], args[k + 2 :]
+    if name in PKG_WRAPPERS and (not PKG_WRAPPERS[name] or args[:1] == [PKG_WRAPPERS[name]]):
+        rest = args[1:] if PKG_WRAPPERS[name] else args
+        rest = rest[_skip_opts(rest, ()) :]
+        if rest and (rest[0] in PKG_ADD or rest[0] in INTERPRETERS or PYTHON_RE.fullmatch(rest[0])):
+            return egress_rule(rest[0], rest[1:])
     why = ""
     if name in REMOTE_SHELLS or name in REMOTE_COPY:
         why = _remote_rule(name, args)
