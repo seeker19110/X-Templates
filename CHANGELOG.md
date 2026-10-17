@@ -65,7 +65,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   vòng `loop init --single-session` đổi thành `max(20, 4 × task chưa làm)` (bỏ cộng MUST mở — đã gom vào task; thay
   công thức ở ADR-0009). Dự án đích: ghép lại `compose ... --out BLUEPRINT.md` rồi commit cả hai file.
 - CI: workflow `portability.yml` (job `macos-bash32`, bash 3.2/BSD) bỏ trigger `pull_request`, chỉ chạy khi push vào `main` —
-  PR không còn chờ runner macOS; job không phải required check nên ruleset không đổi.
+  PR không còn chờ runner macOS; job không phải required check nên ruleset không đổi. (Sau đó gỡ hẳn — xem `### Removed`.)
 - **Autopilot chạy một phiên đến khi xong** (ADR-0009). Context đầy → compaction có checkpoint, không bàn giao; bàn giao
   chỉ khi ≥ 80% trần vòng/giờ/tiền. Việc cần người không chặn cả vòng (`loop defer`), gom cuối phiên. Mục checklist:
   `LOOP-CTX-003` → `MAY` Ngừng dùng, thay bằng **`LOOP-CTX-017`** (MUST, mới); `LOOP-CTX-008` → `MAY`, thay bằng
@@ -257,6 +257,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- Guard: mount đường dẫn tuyệt đối nằm dưới gốc dự án (`-v <gốc>/.docker:/d`, `<gốc>/deploy/etc/x`) không còn hỏi oan
+  theo mảnh tên; `<gốc>/../.ssh` vẫn hỏi (AUD-HAR-047).
+- Audit delta 2026-10-17 đợt 2 (tài liệu): README đếm 35 file mảng 05–09 (AUD-DOC-038); dòng `portability.yml` trong
+  `[Unreleased]` ghi đã gỡ (AUD-DOC-039); nguồn `QA-STRAT-023` ghi "chưa xác minh toàn văn" (AUD-DOC-040). `LOOP-STOP-005`
+  (ID, mức MUST giữ) *Kiểm* thêm: sau mỗi push vào PR đang auto-merge chạy lại `merge-check`, có `hard` thì tắt
+  auto-merge rồi `loop defer`; skill `/autopilot` bước 10 cùng luật (AUD-SEC-036, D-015). Dự án đích: chạy lại
+  `install.py`, ghép lại blueprint để nhận chữ mới.
 - Guard quét `sh -c` sau lệnh bọc và trong container (AUD-SEC-041): `uv run bash -c '…'`, `poetry run sh -c '…'`
   quét như `sh -c` trên máy; `docker exec ctr sh -c '…'`, `docker run img bash -c '…'`, `compose run --entrypoint sh
   dv -c '…'` quét lệnh bên trong, chặn/hỏi của nó thành hỏi (không đụng file máy, nhưng ra mạng/thêm gói vẫn thật).
