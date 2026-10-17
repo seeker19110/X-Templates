@@ -131,6 +131,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   vẫn người merge (`merge-check` trả `hard`, guard không bật auto-merge).
 - [ADR-0017](docs/adr/0017-allow-all-bash-behind-fences.md): `permissions.allow` gồm `Bash` — mọi lệnh Bash không hỏi;
   hàng rào là `deny`/`ask` của settings và hook guard.
+- [ADR-0018](docs/adr/0018-deny-dangerous-allow-rest.md): guard không hỏi người — lệnh nguy hiểm/không đảo ngược bị
+  chặn, còn lại cho chạy; `XT_GUARD_POLICY=strict` giữ hành vi hỏi cũ.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

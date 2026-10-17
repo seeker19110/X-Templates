@@ -11,12 +11,7 @@
       "WebSearch",
       "Bash"
     ],
-    "ask": [
-      "Bash(git rebase *)",
-      "Bash(gh release *)",
-      "Bash(npm publish*)",
-      "Bash(docker push *)"
-    ],
+    "ask": [],
     "deny": [
       "Bash(sudo *)",
       "Bash(rm -rf /*)",

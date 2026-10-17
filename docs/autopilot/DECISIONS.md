@@ -120,3 +120,10 @@
 - Chọn: Duyệt 4 task chỉ mã/test; mục chạm hook/settings/CI và chính sách npx để người
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2: đổi hook/settings/CI là điểm dừng bắt buộc; phần mã/test có test đỏ trước, đảo ngược được
 - Đường lùi: git revert từng commit lát
+
+### D-018 · 2026-10-17T10:39:51+00:00 · Bỏ lớp hỏi người của guard thế nào?
+
+- Phương án: (1) Bỏ toàn bộ ask, giữ deny cũ · (2) Ask nguy hiểm → deny, còn lại cho qua (lớp chính sách ở đầu ra guard) · (3) Sửa từng luật
+- Chọn: Ask nguy hiểm → deny, còn lại cho qua (lớp chính sách ở đầu ra guard)
+- Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu không dừng chờ; việc không đảo ngược vẫn bị chặn; ít code, giữ bộ luật làm đường lùi (strict)
+- Đường lùi: XT_GUARD_POLICY=strict hoặc revert ADR-0018
