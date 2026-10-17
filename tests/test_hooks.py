@@ -1321,8 +1321,9 @@ class SettingsJsonTest(unittest.TestCase):
         self.assertEqual([r for r in perms["allow"] if r.startswith("Bash(")], [])  # thừa khi đã allow cả Bash
         for rule in ("Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(sudo *)", "Read(**/.env)"):
             self.assertIn(rule, perms["deny"])
-        for rule in ("Bash(git merge *)", "Bash(git rebase *)", "Bash(npm publish*)"):
+        for rule in ("Bash(git rebase *)", "Bash(npm publish*)"):
             self.assertIn(rule, perms["ask"])
+        self.assertNotIn("Bash(git merge *)", perms["ask"])  # chủ repo yêu cầu gỡ: merge cục bộ đảo ngược được
         self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))
 
 
