@@ -1604,7 +1604,7 @@ class MergeGuardTest(unittest.TestCase):
                     input=payload,
                     capture_output=True,
                     text=True,
-                    env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj)},
+                    env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj), "XT_GUARD_POLICY": "strict"},
                     timeout=60,
                 )
                 self.assertEqual(r.returncode, 0, r.stderr)
@@ -1614,7 +1614,7 @@ class MergeGuardTest(unittest.TestCase):
             input=json.dumps({"tool_name": "mcp__github__merge_pull_request"}),
             capture_output=True,
             text=True,
-            env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj)},
+            env={"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.proj), "XT_GUARD_POLICY": "strict"},
             timeout=60,
         )
         self.assertEqual(decision(r.stdout), "ask")
@@ -1821,6 +1821,11 @@ class CommitGateForeignRepoTest(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(decision(out), "ask")
                 self.assertFalse(mark.exists())
+                # ADR-0018 mặc định: không hỏi, vẫn không chạy cổng (mã) của repo lạ.
+                payload = {"tool_input": {"command": cmd}}
+                code, out, _ = run_hook("pre-bash-guard.sh", payload, proj, {"XT_GUARD_POLICY": ""})
+                self.assertEqual((code, decision(out)), (0, None))
+                self.assertFalse(mark.exists())
 
     def test_commit_gate_nested_cloned_repo(self):
         """AUD-SEC-015 (repo lồng): repo lạ clone vào trong dự án, có `xt.yaml` + `scripts/dev-task.sh` → hỏi, không chạy."""
@@ -2007,7 +2012,7 @@ class MergeHookFailClosedTest(unittest.TestCase):
             src = shutil.which(tool)
             if src:
                 (nopy / tool).symlink_to(src)
-        env = {"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.tmp)}
+        env = {"PATH": str(nopy), "CLAUDE_PROJECT_DIR": str(self.tmp), "XT_GUARD_POLICY": "strict"}
         for cmd, want in (
             ("gh  pr merge 7 --admin", "ask"),
             ("gh\tpr merge 7", "ask"),
@@ -2016,6 +2021,21 @@ class MergeHookFailClosedTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
+        # ADR-0018: mặc định không hỏi khi thiếu python3 / guard.py lỗi — luồng đi tiếp, `deny` của settings vẫn chặn.
+        env["XT_GUARD_POLICY"] = ""
+        mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
+        for name, payload in (
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
+            ("pre-mcp-guard.sh", mcp),
+        ):
+            self.assertIsNone(self.hook(name, payload, env), name)
+        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
+        for name, payload in (
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
+            ("pre-mcp-guard.sh", mcp),
+        ):
+            self.assertIsNone(self.hook(name, payload, default), name)
 
 
 class EgressCase(unittest.TestCase):
