@@ -257,6 +257,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- `xt.py feedback aggregate`: phản hồi có ID cục bộ của dự án (`T-003`, `loop`, mọi `bi-chan`) gộp theo triệu chứng
+  chuẩn hoá thay vì theo ID — hai dự án khác lý do không còn bị tính "đủ ngưỡng"; bảng in mọi triệu chứng khác nhau
+  thay vì chỉ cái đầu (AUD-CODE-004).
 - `xt.py doctor` cảnh báo `gate-tools` khi lệnh cổng trong `xt.yaml` gọi công cụ/mô-đun không có trên máy (vd
   `shellcheck`, `python3 -m mypy`) — trước chỉ biết khi cổng đỏ (AUD-HAR-034). `feedback collect` bỏ qua trong repo khung
   (phản hồi tự gom dành cho dự án đích, AUD-HAR-048). `loop status` hết hạn đúng lúc tới hạn chót (`--hours 0` trước vẫn

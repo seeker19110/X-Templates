@@ -3738,13 +3738,26 @@ def _feedback_list(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+LOCAL_FEEDBACK_ID_RE = re.compile(r"T-\d+|loop")
+
+
+def _feedback_key(e: Dict[str, str]) -> Tuple[str, str]:
+    """(loại, ID) — trừ ID cục bộ của từng dự án (`T-003`, `loop`, mọi `bi-chan`): gộp theo triệu chứng chuẩn hoá,
+    nếu không hai dự án khác lý do vẫn bị tính "đủ ngưỡng" (AUD-CODE-004)."""
+    kind, fid = e.get("kind", "?"), e.get("id", "?")
+    if kind == "bi-chan" or LOCAL_FEEDBACK_ID_RE.fullmatch(fid):
+        return kind, " ".join(e.get("symptom", "").lower().split())[:120]
+    return kind, fid
+
+
 def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
-    """Gộp phản hồi nhiều dự án theo (loại, ID). `ready` = ≥ 2 dự án cùng báo hoặc có bước tái hiện (ADR-0010)."""
+    """Gộp phản hồi nhiều dự án theo (loại, ID) hoặc (loại, triệu chứng) với ID cục bộ. `ready` = ≥ 2 dự án cùng báo
+    hoặc có bước tái hiện (ADR-0010)."""
     groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for project, d in sources:
         for e in feedback_entries(d) if d.is_dir() else []:
-            key = (e.get("kind", "?"), e.get("id", "?"))
-            g = groups.setdefault(key, {"kind": key[0], "id": key[1], "projects": [], "items": []})
+            key = _feedback_key(e)
+            g = groups.setdefault(key, {"kind": key[0], "id": e.get("id", "?"), "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})
             # FB có thể đã sửa tay sau `feedback add` → che lại trước khi ra PR nháp ở repo khung public (AUD-CFG-002).
             g["items"].append({"project": project, **{k: redact(v) if isinstance(v, str) else v for k, v in e.items()}})
@@ -3768,7 +3781,7 @@ def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
         print(json.dumps(groups, ensure_ascii=False))
         return 0
     print(
-        "| Đủ ngưỡng | Loại | ID | Dự án | Triệu chứng (đầu tiên) | Cách khắc phục (đầu tiên) |\n|---|---|---|---|---|---|"
+        "| Đủ ngưỡng | Loại | ID | Dự án | Triệu chứng (mọi bản khác nhau) | Cách khắc phục (đầu tiên) |\n|---|---|---|---|---|---|"
     )
     for g in groups:
         first = g["items"][0]
@@ -3777,7 +3790,7 @@ def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
             g["kind"],
             f"`{g['id']}`",
             ", ".join(g["projects"]),
-            first.get("symptom", "").replace("|", "\\|")[:160],
+            "; ".join(dict.fromkeys(i.get("symptom", "") for i in g["items"])).replace("|", "\\|")[:300],
             first.get("fix", "").replace("|", "\\|")[:160],
         ]
         print("| " + " | ".join(cells) + " |")
