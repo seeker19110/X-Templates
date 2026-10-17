@@ -382,6 +382,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Guard hỏi khi ra khỏi máy dev** (đề xuất chủ repo 2026-10-17): phiên chạy không hỏi quyền (`--permission-mode auto`,
+  allow rộng ở settings người dùng) chỉ còn guard làm lớp hỏi, nên PreToolUse hỏi thêm khi: `ssh`/`sftp`/`mosh`/`telnet`
+  vào máy không loopback, `scp`/`rsync` chép với máy không loopback (alias `~/.ssh/config` như `prod` cũng tính); client
+  CSDL (`psql`, `pg_dump`, `mysql`, `mongosh`, `redis-cli`…) tới máy chủ không cục bộ (cờ host, URI/conninfo ở đối số vị
+  trí hoặc `-d`, `PGHOST=`/`…_URL=` gán đầu lệnh; câu SQL `-c`/`-f` không quét); `curl`/`wget` gửi dữ liệu (`-d`/`-F`/`-T`/
+  `--json`, phương thức ghi kể cả `-sX POST`; `-G` là GET) tới máy ngoài hoặc đích không đọc được; thêm phụ thuộc
+  (`pnpm|yarn|bun|uv|poetry|cargo|deno add`, `npm|pip|uv pip install <gói>`, `pipx|cargo|gem install`, `go get`,
+  `composer require`, cả `python3.X -m pip`); `docker|podman` điều khiển daemon máy khác (`-H ssh://…`, `--context`,
+  `DOCKER_HOST=`), lệnh trong `exec`/`compose exec|run` ra khỏi máy dev, hoặc `run|create` có `--privileged`, namespace host, cap nguy hiểm, `--device`, `unconfined`, mount
+  `/`/home/`/etc`/`/run`/socket/`.ssh`/`.aws`. Không hỏi: loopback (`*.localhost`), socket unix, tên dịch vụ compose không
+  dấu chấm (CSDL, curl); cài theo lockfile, đường dẫn/gói nội bộ (`./x`, `file:`, `@workspace:`, `--path`, `.whl`);
+  `/etc/localtime`/`/etc/timezone` mount chỉ đọc. Bảng cờ ăn giá trị riêng từng trình quản lý gói (`pnpm -w add` không
+  lọt). `curl -d @file` tới máy ngoài nay hỏi (trước cho qua). Giới hạn: biến chứa đích (`psql "$DATABASE_URL"`) không
+  đọc được nên không hỏi — guard chống tai nạn, không phải sandbox. Dự án đích: chạy lại `install.py`.
 - **`redact` che kín hơn, bớt che nhầm** (audit delta đợt C; AUD-CFG-006, CFG-007, CFG-008, CODE-009). Giá trị trong
   nháy chứa nháy loại kia (`password: "it's a b"`) hoặc nháy chưa đóng không còn lộ phần sau; khoá `*_PWD`, `*_PASS`,
   `pass`, `passphrase` (`MYSQL_PWD`, `DB_PASS`) được che, `PWD`/`bypass` thì không; `npm_`/`hf_`/`pypi-` chỉ che khi
