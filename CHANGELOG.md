@@ -110,6 +110,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Phân loại test đỏ, chọn tầng theo rủi ro, ba mặt cắt ngang** (`test-strategy.md`; nguồn: `seeker19110/stored` mục 09 §3).
+  Mục mới (ID, mức): `QA-STRAT-021` SHOULD (test đỏ vào một trong bốn nguyên nhân: bug thật giữ test, kỳ vọng sai trích SPEC,
+  bó vào cài đặt, flaky/môi trường), `QA-STRAT-022` SHOULD (tầng test theo rủi ro thay đổi), `QA-STRAT-023` SHOULD (vùng
+  `critical`: người viết test độc lập ngữ cảnh với người viết code, test viết từ SPEC). `LOOP-CI` bảng loại lỗi trỏ tới
+  `QA-STRAT-021`. Không thêm agent hoặc hook: bốn nguyên nhân khớp hook `pre-edit-guard.sh` hiện có và vai độc lập dùng
+  lại `executor` ngữ cảnh khác. Dự án đích: ghép lại blueprint để nhận ID mới.
 - **Mục nhóm C từ đợt rà `seeker19110/stored` (2026-10-16)** — 19 mục mới (kèm một module mới), mọi mục có *Kiểm* và nguồn
   stored. Dự án đích: ghép lại blueprint để nhận các ID mới.
   - Bảo mật/bí mật: `SEC-WEB-027` (MUST@L, xuất CSV/XLSX vô hiệu công thức), `SEC-SECRET-022` (secret tích hợp write-only,
