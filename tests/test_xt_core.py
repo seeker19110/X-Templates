@@ -134,12 +134,15 @@ class LoadDocsTest(TmpMixin, unittest.TestCase):
     def test_item_like_line_and_fence(self):
         body = (
             "# T\n\n- [ ] `BAD` **MUST** thiếu số thứ tự\n\n```\n- [ ] `X-001` **MUST** trong fence\n```\n\n"
-            "- [ ] `OK-001` **SHOULD** hợp lệ\n"
+            "- [ ] `OK-001` **SHOULD** hợp lệ\n#hashtag không phải tiêu đề\n\n## Nguồn\n- [a](a.md)\n"
+            "```\n[b](b.md)\n```\n"
         )
         fw = make_fw(self.tmpdir(), {"08-backend/m.md": md({"prefix": "OK"}, body)})
         docs, errors = xt.load_docs(fw)
         doc = next(d for d in docs if d.rel == "08-backend/m")
         self.assertEqual([i.id for i in doc.items], ["OK-001"])
+        self.assertEqual(doc.headings, ["T", "Nguồn"])  # `#hashtag` (thiếu khoảng trắng) không phải tiêu đề
+        self.assertEqual([line for _, line in doc.link_lines], ["- [a](a.md)"])  # liên kết trong fence bỏ qua
         self.assertEqual(len(errors), 1)
         self.assertIn("mục checklist sai định dạng", errors[0])
 
