@@ -46,8 +46,12 @@ Tiêu chí: **sản phẩm sau cùng đạt chất lượng cao nhất**, xét t
 Dữ kiện trước, ≥ 2 phương án, rồi ghi `python3 .xtemplates/scripts/xt.py loop decide --question … --option … --option … --choice N --why … --revert … [--prod …]` (`docs/autopilot/DECISIONS.md`, D-NNN; kiến trúc thì thêm ADR), làm tiếp. Subagent không tự quyết — trả phương án về phiên chính.
 Chi tiết: `.xtemplates/framework/11-autonomous-loop/stop-points-and-escalation.md`. [ĐIỀN nếu dự án muốn người duyệt một loại quyết định cụ thể — mặc định: không.]
 
-## 6. Điểm dừng bắt buộc về hành động (hỏi người, kể cả khi đang tự động)
-Tự duyệt không mở các điểm này: thao tác không đảo ngược · tiền thật/thanh toán · dữ liệu người dùng thật · publish/deploy production/gửi thông báo ra ngoài · đăng ký dịch vụ trả phí/nhập khoá thật · đổi quyền/ruleset/cấu hình cổng-CI-hook · bế tắc máy (cùng lỗi lần 3, hết ngân sách).
+## 6. Điểm dừng bắt buộc về hành động (máy chặn, không hỏi — ADR-0018, ADR-0019 của khung)
+Tự duyệt không mở các điểm này; guard không hỏi người mà chia ba nhóm:
+- **Máy chặn** (`deny` ở mọi chế độ, danh sách ở `CLAUDE.md`): thao tác không đảo ngược (lệnh phá huỷ, push thẳng nhánh chính, xoá ngoài dự án, huỷ repo/bí mật/hạ tầng, ghi ruleset qua `gh api`) · tắt/bỏ qua hook · merge/bật auto-merge PR ngoại lệ cứng. Bị chặn là kết luận.
+- **Cho chạy** (đường lùi: revert, CI, ruleset nhánh, review): deploy/publish, merge PR khác, sửa cấu hình cổng/CI/hook (nêu lý do trong commit/PR), thêm phụ thuộc/MCP/plugin, ra khỏi máy dev.
+- **Vẫn cần người** (máy không chặn hết — agent tự dừng việc đó): PR ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật — `merge-check` trả `hard`) · thao tác trên tiền thật/dữ liệu người dùng thật (thanh toán thật, xoá/xuất/migration phá vỡ trên dữ liệu production, gửi tin tới người dùng thật) · đăng ký dịch vụ trả phí/nhập khoá thật · bế tắc máy (cùng lỗi lần 3, hết ngân sách). [ĐIỀN điểm dừng riêng của dự án — mặc định: không.]
+
 Trong autopilot: còn việc khác làm được → `python3 .xtemplates/scripts/xt.py loop defer --task <ID> --reason "..."` rồi làm tiếp (gom cho người cuối phiên, verdict `done-pending-human`); mọi việc còn lại phụ thuộc nó → `loop block --reason "..."` rồi dừng. Ngoài các điểm trên **không hỏi lại** — tự làm đến khi có bằng chứng xong.
 Autopilot bắt đầu bằng `python3 .xtemplates/scripts/xt.py doctor --fix` (audit khung đã cài, sửa phần an toàn; còn lỗi hook/settings → báo người chạy lại `install.py`). Autopilot chạy **một phiên đến khi xong**: mở phiên ở chế độ quyền Auto (phiên cloud: chọn **Auto** ở bộ chọn chế độ quyền; CLI: `claude --permission-mode auto`), `loop init --single-session`; context đầy để compaction tự nén (hook PreCompact ghi checkpoint), chỉ bàn giao khi gần trần vòng/giờ/tiền.
 

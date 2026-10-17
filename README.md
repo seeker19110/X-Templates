@@ -113,7 +113,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0007](docs/adr/0007-rename-technical-identifiers-to-xtemplates.md): định danh kỹ thuật theo tên X-Templates
   (`.xtemplates/`, `xt.py`, `xt.yaml`, `XT_*`); `install.py` tự chuyển dự án đã cài bản ≤ 2.x. Thay ADR-0006.
 - [ADR-0008](docs/adr/0008-main-session-self-approves-decisions.md): phiên chính tự duyệt điểm quyết định chuyên môn
-  theo tiêu chí chất lượng cuối, ghi `D-NNN`; điểm dừng về hành động vẫn hỏi người.
+  theo tiêu chí chất lượng cuối, ghi `D-NNN`; điểm dừng về hành động không tự duyệt (cơ chế sau: ADR-0018).
 - [ADR-0009](docs/adr/0009-single-session-autopilot.md): autopilot chạy một phiên đến khi xong (compaction có checkpoint),
   việc cần người `loop defer` gom cuối phiên.
 - [ADR-0010](docs/adr/0010-feedback-from-target-projects.md): phản hồi từ dự án đích về khung qua `FB-NNN` + Routine gộp

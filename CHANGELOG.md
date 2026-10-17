@@ -6,6 +6,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Tài liệu điểm dừng khớp ADR-0018/0019** (D-023): `AGENTS.md` §5, mẫu `templates/AGENTS.md` §6 và `templates/PLAN.md`,
+  skill `/autopilot`, mảng `11-autonomous-loop` bỏ mô tả "hook hỏi người" đã cũ, chia ba nhóm: máy chặn (`deny`) · cho
+  chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua
+  `loop defer` (PR ngoại lệ cứng, tiền thật, dữ liệu người dùng thật, dịch vụ trả phí/khoá thật, bế tắc máy). Đổi lời
+  phần Kiểm, không đổi mức: `LOOP-STOP-001` (xoá đệ quy ngoài dự án → deny), `LOOP-STOP-002`, `LOOP-STOP-003`,
+  `LOOP-STOP-005`, `LOOP-STOP-023`, `LOOP-CI-001`, `LOOP-CI-007` — `ask` chỉ còn ở `XT_GUARD_POLICY=strict`.
 - **Guard đóng các lỗ của audit dự án con** (#97, `AUDIT-REPORT-2026-10-17-subprojects.md`). Merge/bật auto-merge
   PR ngoại lệ cứng qua MỌI đường (`gh pr merge` không ghim head, `gh pr -R … merge`, `gh api` REST/graphql, MCP thiếu
   `expectedHeadSha`) bị chặn; không xác minh được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql merge,

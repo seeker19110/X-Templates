@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-16
+updated: 2026-10-17
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -68,16 +68,16 @@ updated: 2026-10-16
     cứng, ADR-0016 → `loop defer`); dưới L3 `<XT> merge-check --pr <N>` →
     làm đúng `next` (`merge` = lệnh merge ghim head; `human` = `loop defer`); vòng sau chạy lại `merge-check` cho PR còn
     mở, theo FIFO; PR chồng chỉ merge sau khi đổi đích về nhánh mặc định và merge nhánh đó vào (`LOOP-DESIGN-020`). Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi PROGRESS); lần 3 → máy đặt
-    `blocked`. Không skip test, không nới cổng (hook `pre-edit-guard.sh` sẽ hỏi).
+    `blocked`. Không skip test, không nới cổng (`AGENTS.md` §3 — hook không chặn việc này, ADR-0018).
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`;
     đủ bằng chứng mà chưa kiểm lại cuối → chạy `<XT> loop verify` (mọi Gate trên cây hiện tại, `LOOP-DESIGN-022`).
 13. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <T-NNN|ID blueprint> --reason "..."` rồi làm việc
     độc lập khác; hết việc tự làm được → verdict `done-pending-human` (Stop hook cho dừng một lần, gom mọi việc cho người).
-    **Điểm dừng bắt buộc về hành động** (thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, đổi quyền/cấu hình cổng,
-    hành động đối ngoại; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng — chỉ khi **mọi** việc còn lại phụ thuộc nó (còn việc khác thì `defer`); hook `pre-bash-guard.sh`/
-    `pre-edit-guard.sh` deny/ask là lưới thứ hai. Người đọc lý do, xử lý, rồi `loop resume --reason "..."` để tiếp (giữ số vòng và bằng chứng; `loop init` lại chỉ khi đổi PLAN/ngân sách).
+    **Điểm dừng bắt buộc về hành động** (merge PR ngoại lệ cứng, tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập
+    khoá thật — ADR-0018/0019, D-023; deploy/publish, sửa cổng kèm lý do thì cho chạy; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng — chỉ khi **mọi** việc còn lại phụ thuộc nó (còn việc khác thì `defer`); hook `pre-bash-guard.sh`/
+    `pre-edit-guard.sh` deny việc không đảo ngược là lưới thứ hai. Người đọc lý do, xử lý, rồi `loop resume --reason "..."` để tiếp (giữ số vòng và bằng chứng; `loop init` lại chỉ khi đổi PLAN/ngân sách).
 14. **Context đầy** → compaction tự nén, không bàn giao: hook PreCompact ghi checkpoint (`<XT> loop checkpoint`), SessionStart(compact) in lại
     `loop status` (task đang làm, lệnh kiểm cuối, file chưa commit, việc chờ người). **Gần hết trần máy** (≥ 80% vòng/giờ/tiền):
     ghi "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).

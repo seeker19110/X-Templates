@@ -155,3 +155,10 @@
 - Chọn: Mở một PR khi T-1005 xong (mọi lát là commit riêng), reviewer khác rà toàn diff, rồi merge-check/auto-merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: tránh PR đã merge bị đẩy thêm commit; mỗi lát vẫn là commit riêng, revert được; review một lần trên diff hoàn chỉnh (D-016)
 - Đường lùi: git revert từng commit lát
+
+### D-023 · 2026-10-17T23:48:07+00:00 · Đồng bộ tài liệu điểm dừng với ADR-0018/0019: việc máy cho chạy nhưng chạm tiền thật/dữ liệu người dùng thật/gửi tin tới người dùng thật xếp vào đâu?
+
+- Phương án: (1) Ba nhóm: máy chặn (deny) · cho chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua loop defer (merge ngoại lệ cứng, thao tác trên tiền thật/dữ liệu người dùng thật kể cả gửi tin tới người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật, bế tắc máy) · (2) Hai nhóm: chỉ máy chặn và cho chạy; bỏ hẳn danh sách việc cần người khỏi AGENTS.md
+- Chọn: Ba nhóm: máy chặn (deny) · cho chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua loop defer (merge ngoại lệ cứng, thao tác trên tiền thật/dữ liệu người dùng thật kể cả gửi tin tới người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật, bế tắc máy)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: ADR-0018 chỉ mở việc có đường lùi (revert, unpublish, CI); thanh toán thật, xoá/xuất dữ liệu người dùng thật, tin đã gửi không thu hồi được và trùng ngoại lệ cứng ADR-0016/0019 (LOOP-STOP-005 MUST); PA2 bỏ chốt người duy nhất của nhóm rủi ro cao nhất mà ADR không quyết
+- Đường lùi: Bỏ nhóm 'vẫn cần người' trong AGENTS.md §5 và mẫu dự án đích; ADR-0018 không đổi
