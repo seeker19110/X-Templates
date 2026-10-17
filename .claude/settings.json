@@ -12,7 +12,6 @@
       "Bash"
     ],
     "ask": [
-      "Bash(git merge *)",
       "Bash(git rebase *)",
       "Bash(gh release *)",
       "Bash(npm publish*)",
