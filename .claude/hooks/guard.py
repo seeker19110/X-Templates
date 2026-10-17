@@ -1092,7 +1092,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return _gh_api_merge_rule(args[1:], root)
     verdict = _publish_rule(name, args)
-    return verdict if verdict[0] else egress_rule(name, args)
+    return verdict if verdict[0] else egress_rule(name, args, root)
 
 
 def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
@@ -1204,6 +1204,7 @@ PKG_ADD: Dict[str, Dict[str, bool]] = {
 }
 # Lệnh bọc chạy lệnh khác (`uv run pip install x`, `npx pnpm add x`): xét lệnh bên trong.
 PKG_WRAPPERS = {"uv": "run", "poetry": "run", "pdm": "run", "pipenv": "run", "hatch": "run", "corepack": "", "npx": ""}
+PKG_WRAPPERS.update({"pnpm": "exec", "npm": "exec", "yarn": "exec", "bunx": ""})
 WRAPPER_VALUE_FLAGS: Tuple[str, ...] = ("--python", "-p", "--with", "--with-requirements", "--project", "--package")
 WRAPPER_VALUE_FLAGS += ("--directory",)
 WRAPPER_VALUE_FLAGS += ("--env-file", "--extra", "--group", "-c", "--call", "-e", "--env")
@@ -1467,9 +1468,9 @@ def _mount_source(spec: str) -> str:
     return spec.split(":", 1)[0] if ":" in spec else ""
 
 
-def _sensitive_mount(spec: str) -> str:
-    """Nguồn mount nhạy cảm sau khi chuẩn hoá (`//`, `/tmp/..`, `/home/u/../..` → `/`). Đường dẫn tương đối/`$PWD` nằm
-    trong dự án (`./.docker/nginx.conf`, `./deploy/etc/x`) không xét theo mảnh tên."""
+def _sensitive_mount(spec: str, root: str = "") -> str:
+    """Nguồn mount nhạy cảm sau khi chuẩn hoá (`//`, `/tmp/..`, `/home/u/../..` → `/`). Đường dẫn trong dự án — tương
+    đối, `$PWD`, hay tuyệt đối dưới gốc dự án (`./.docker/nginx.conf`, `<gốc>/etc/x`) — không xét theo mảnh tên."""
     src = _mount_source(spec)
     absolute = src.startswith("/")
     norm = posixpath.normpath(re.sub("/+", "/", src)) if absolute else src.rstrip("/") or src
@@ -1478,6 +1479,10 @@ def _sensitive_mount(spec: str) -> str:
     hit = norm in SENSITIVE_MOUNTS or HOME_DIR_RE.fullmatch(norm) or norm.endswith(".sock")
     hit = hit or (absolute and norm.startswith(SENSITIVE_MOUNT_PREFIXES))
     home_based = absolute or src.startswith(("~", "$HOME", "${HOME}")) or ".." in src.split("/")  # `../.ssh` ra ngoài
+    base = root.rstrip("/")
+    # Gốc dự án là home (`~`, `/home/u`) thì không miễn: `~/.ssh` "nằm trong dự án" vẫn là bí mật (review #83).
+    exempt = base and not (base in SENSITIVE_MOUNTS or HOME_DIR_RE.fullmatch(base) or base == os.path.expanduser("~"))
+    home_based = home_based and not (absolute and exempt and (norm == base or norm.startswith(base + "/")))
     return src if hit or (home_based and any(p in norm + "/" for p in SENSITIVE_MOUNT_PARTS)) else ""
 
 
@@ -1530,7 +1535,7 @@ def _exec_split(args: List[str]) -> Tuple[List[str], List[str]]:
     return rest[:k], normalize(rest[k + 1 :])
 
 
-def _host_power(opts: List[str]) -> str:
+def _host_power(opts: List[str], root: str = "") -> str:
     """Cờ trao quyền máy chủ: privileged, namespace của host, cap nguy hiểm, thiết bị, unconfined, mount nhạy cảm."""
     why = ""
     if "--privileged" in opts or any(a.startswith("--privileged=") and a != "--privileged=false" for a in opts):
@@ -1541,11 +1546,11 @@ def _host_power(opts: List[str]) -> str:
     why = why or ("--device" if _flag_values(opts, ("--device",)) else "")
     unconfined = any("unconfined" in v for v in _flag_values(opts, ("--security-opt",)))
     why = why or ("--security-opt unconfined" if unconfined else "")
-    mounts = [m for m in map(_sensitive_mount, _flag_values(opts, ("-v", "--volume", "--mount"))) if m]
+    mounts = [m for v in _flag_values(opts, ("-v", "--volume", "--mount")) for m in [_sensitive_mount(v, root)] if m]
     return why or (f"mount {mounts[0]}" if mounts else "")
 
 
-def _container_rule(args: List[str]) -> str:
+def _container_rule(args: List[str], root: str = "") -> str:
     """`docker|podman` điều khiển daemon máy khác (`-H`, `--context`), container có quyền máy chủ (`run|create`,
     `compose run`, `exec --privileged`), hoặc lệnh trong container ra khỏi máy dev."""
     k = _skip_opts(args, DOCKER_GLOBAL_VALUE_FLAGS)
@@ -1555,12 +1560,9 @@ def _container_rule(args: List[str]) -> str:
         return f"{EGRESS_ASK} — container trên daemon máy khác"
     if args[:1] == ["container"]:
         args = args[1:]
-    opts, inner = _exec_split(args)
-    why = _host_power(opts)
-    if why:
-        return f"container có quyền máy chủ ({why})"
-    verdict = egress_rule(inner[0], inner[1:]) if inner else ("", "")
-    return f"{verdict[1]} (trong container)" if verdict[0] else ""
+    opts, _ = _exec_split(args)
+    why = _host_power(opts, root)  # lệnh bên trong quét ở `_container_asks` (đủ luật, gốc giả)
+    return f"container có quyền máy chủ ({why})" if why else ""
 
 
 def _unwrap(name: str, args: List[str]) -> Tuple[str, List[str]]:
@@ -1573,13 +1575,13 @@ def _unwrap(name: str, args: List[str]) -> Tuple[str, List[str]]:
             return _unwrap(args[k + 1], args[k + 2 :])
     if name in PKG_WRAPPERS and (not PKG_WRAPPERS[name] or args[:1] == [PKG_WRAPPERS[name]]):
         rest = args[1:] if PKG_WRAPPERS[name] else args
-        rest = rest[_skip_opts(rest, WRAPPER_VALUE_FLAGS) :]
+        rest = normalize(rest[_skip_opts(rest, WRAPPER_VALUE_FLAGS) :])  # `/bin/bash`, `env bash` → `bash`
         if rest and (rest[0] in PKG_ADD or rest[0] in INTERPRETERS or PYTHON_RE.fullmatch(rest[0])):
             return _unwrap(rest[0], rest[1:])
     return name, args
 
 
-def egress_rule(name: str, args: List[str]) -> Tuple[str, str]:
+def egress_rule(name: str, args: List[str], root: str = "") -> Tuple[str, str]:
     """Kết nối/gửi ra máy khác, thêm phụ thuộc, container có quyền máy chủ → ask (không deny: việc hợp lệ khi người duyệt)."""
     name, args = _unwrap(name, args)
     why = ""
@@ -1592,7 +1594,7 @@ def egress_rule(name: str, args: List[str]) -> Tuple[str, str]:
     elif name in PKG_ADD:
         why = _pkg_rule(name, args)
     elif name in ("docker", "podman"):
-        why = _container_rule(args)
+        why = _container_rule(args, root)
     return ("ask", why) if why else ("", "")
 
 
@@ -2018,31 +2020,88 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     return asks
 
 
-def _container_shell(argv: List[str]) -> List[str]:
-    """Lệnh chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run --entrypoint sh
-    dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
+def _container_exec(argv: List[str]) -> Tuple[List[str], List[str]]:
+    """(cờ, lệnh) chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run
+    --entrypoint sh dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
     n = normalize(argv)
     if n[:1] not in (["docker"], ["podman"]):
-        return []
+        return [], []
     args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
     opts, inner = _exec_split(args[1:] if args[:1] == ["container"] else args)
-    entry = _flag_values(opts, ("--entrypoint",))
-    return [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
+    entry = [posixpath.basename(e) for e in _flag_values(opts, ("--entrypoint",))]
+    return opts, [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
 
 
-def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[str]]:
-    """`sh -c` sau lệnh bọc chạy trên máy (`uv run bash -c …`) và trong container (AUD-SEC-041): (máy, container)."""
+BIND_SRC_PREFIXES = ("/", ".", "~", "$PWD", "${PWD}", "$(pwd)", "$HOME", "${HOME}")
+
+
+def _bind_dests(opts: List[str]) -> List[str]:
+    """Đích trong container của mount thư mục máy (`-v $PWD:/w`, `-v .:/w`, `--mount type=bind,src=…,dst=…`); named
+    volume (`data`, `$VOLNAME`) không tính."""
+    out: List[str] = []
+    for v in _flag_values(opts, ("-v", "--volume", "--mount")):
+        v = v.removeprefix("=")
+        if not _mount_source(v).startswith(BIND_SRC_PREFIXES):
+            continue
+        kv = dict(p.split("=", 1) for p in v.split(",") if "=" in p)
+        dst = kv.get("target") or kv.get("dst") or kv.get("destination") or (v.split(":")[1] if v.count(":") else "")
+        out += [posixpath.normpath(dst)] if dst.startswith("/") else []
+    return out
+
+
+def _wipes_bind(script: str, dests: List[str]) -> str:
+    """`rm -r` đúng thư mục gắn máy (`rm -rf /app` khi `-v $PWD:/app`) — xoá cả dự án trên máy."""
+    for c in split_commands(tokenize(script)):
+        n = normalize(c)
+        recursive = any(a == "--recursive" or (a[:1] == "-" and a[1:2] != "-" and set(a[1:]) & {"r", "R"}) for a in n)
+        hit = (
+            [t for t in _positionals(n[1:]) if posixpath.normpath(t) in dests] if n[:1] == ["rm"] and recursive else []
+        )
+        if hit:
+            return f"xoá thư mục gắn từ máy ({hit[0]}) trong container"
+    return ""
+
+
+# Gốc giả cho lệnh trong container: đường dẫn là của container (luật xoá/ghi "ngoài dự án" không áp), luật đối ngoại,
+# merge, tải-rồi-chạy, `rm -rf /`/`.git` vẫn áp; xoá đúng thư mục gắn từ máy thì hỏi riêng (`_wipes_bind`).
+# Giới hạn: mount khai trong compose yaml, `docker exec` vào container đang chạy, `--volumes-from` — guard không thấy.
+CONTAINER_ROOT = "/"
+
+
+def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
+    """Lệnh lồng sau lệnh bọc chạy trên máy (`uv run bash -c …`, `npm exec -c …`, `nix-shell --run …`) và trong container
+    (AUD-SEC-041; review #83: cả lệnh gọi thẳng, kèm đích mount thư mục máy): (máy, [(container, đích gắn máy)])."""
     host: List[str] = []
-    ctr: List[str] = []
+    ctr: List[Tuple[str, List[str]]] = []
     for c in split_commands(tokens):
         n = normalize(c)
         if not n:
             continue
-        inner = _container_shell(c)
+        opts, inner = _container_exec(c)
+        if inner:
+            ctr.append((_shell_c_script(inner) or shlex.join(inner), _bind_dests(opts)))
+            continue
         name, args = _unwrap(n[0], n[1:])
-        script = _shell_c_script(inner) if inner else _shell_c_script([name, *args]) if name != n[0] else None
-        (ctr if inner else host).extend([script] if script else [])
+        script = _shell_c_script([name, *args]) if name != n[0] else None
+        host += [script] if script else []
+        if n[0] == "nix-shell":
+            host += _flag_values(n[1:], ("--run", "--command"))
+        if n[0] in ("npm", "pnpm") and n[1:2] == ["exec"]:
+            host += _flag_values(n[2:], ("-c", "--call"))
     return host, ctr
+
+
+def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int) -> List[str]:
+    """Lệnh trong container quét bằng đủ luật với gốc giả `/`; chặn/hỏi của nó thành hỏi."""
+    if ctr and depth >= MAX_NEST:
+        return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
+    out: List[str] = []
+    for script, dests in ctr:
+        sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1)
+        why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
+        why = why or _wipes_bind(script, dests)
+        out += [f"lệnh trong container: {why}"] if why else []
+    return out
 
 
 def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
@@ -2050,10 +2109,7 @@ def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], dep
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens)
     host, ctr = _wrapped_scripts(tokens)
-    for script in ctr[: max(0, MAX_NEST - depth)]:
-        sub = bash_decision(script, root, cwd, depth + 1)
-        if sub["decision"] in ("deny", "ask"):
-            asks.append(f"lệnh trong container: {sub['reason']}")
+    asks += _container_asks(ctr, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
     for script in _nested_scripts(cmd, tokens) + host:
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
@@ -2173,6 +2229,9 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
     return None
 
 
+ASK_PREFIX = "Khung cần xác nhận: "
+
+
 def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
@@ -2206,7 +2265,7 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):
         asks.append(f"{EXTERNAL_ASK} — tự merge chỉ khi lệnh đứng một mình")
     if asks:
-        res.update(decision="ask", reason="Khung cần xác nhận: " + "; ".join(dict.fromkeys(asks)))
+        res.update(decision="ask", reason=ASK_PREFIX + "; ".join(dict.fromkeys(asks)))
     elif allow:
         res.update(decision="allow", reason=f"Khung cho tự merge (ADR-0013) — {allow}")
     return res

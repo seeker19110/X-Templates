@@ -106,3 +106,10 @@
 - Chọn: Quy trình: skill /autopilot + LOOP-STOP-005 bắt chạy lại merge-check sau mỗi push vào PR đang auto-merge, có hard thì tắt auto-merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: đúng chỗ phát sinh (sau push), không thêm gọi mạng vào hook mỗi push; ruleset vẫn là chốt chặn; nửa sau (GitHub giữ auto-merge) chưa xác minh nên không đáng mã guard
 - Đường lùi: Thêm kiểm vào guard ở lát sau nếu dự án thật gặp
+
+### D-016 · 2026-10-17T06:22:13+00:00 · Lát T-802/T-803 khi phiên chỉ được push một nhánh và PR #82 (T-801) đang chờ review
+
+- Phương án: (1) Xếp T-802, T-803 làm commit riêng trên cùng nhánh → vào PR #82; reviewer rà thêm diff mới trước khi bật auto-merge · (2) Chờ #82 merge rồi mới commit T-802/T-803 (cây làm việc bẩn, Stop hook đòi commit)
+- Chọn: Xếp T-802, T-803 làm commit riêng trên cùng nhánh → vào PR #82; reviewer rà thêm diff mới trước khi bật auto-merge
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: luật phiên cấm push nhánh khác; mỗi lát vẫn là commit riêng dễ revert; review vẫn chạy trước merge
+- Đường lùi: git revert từng commit lát trên main
