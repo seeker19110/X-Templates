@@ -110,7 +110,7 @@ SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|privat
 # Tên khoá chứa bí mật: chứa SECRET_WORDS (nhìn trước rồi ăn trọn từ — lookahead của `re` là nguyên tử nên `\w+` sau nó
 # chỉ quay lui tuyến tính cả với từ dài lặp từ khoá, AUD-CODE-009), hoặc kết thúc bằng `_pwd`/`_pass`/`_passphrase`
 # (`MYSQL_PWD`, `DB_PASS`) hay đúng là `pass`/`passphrase` (AUD-CFG-008) — không bắt `PWD` (thư mục hiện tại) hay `bypass`.
-# Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9) — job Portability.
+# Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9).
 SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
