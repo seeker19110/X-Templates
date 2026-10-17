@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Guard chặn merge PR ngoại lệ cứng** (ADR-0019, D-019; vá lỗ của ADR-0018): PR có `hard` (tiền/dữ liệu thật/auth/
+  mật mã/bí mật) từng được tự merge vì lý do `ask` không mang dấu nguy hiểm. Nay `HARD_ASK` thuộc `DANGER_MARKERS`;
+  `_merge_verdict` (`gh pr merge`, `gh api` REST, MCP) kiểm `hard` trước verdict; `pre-mcp-guard.sh` xuất `deny` (trước
+  bỏ qua). Mẫu và gốc `AGENTS.md` ghi theo ADR-0018: hook không hỏi, bị chặn gồm bộ phân loại của chế độ Auto, autopilot
+  mở phiên ở chế độ Auto (phiên cloud chọn Auto, CLI `--permission-mode auto`). Dự án đích: chạy lại `install.py`.
 - **`install.py` gộp quyền ADR-0018 vào `.claude/settings.json` đã có của dự án** (trước: chỉ gộp khoá `hooks`, dự án đã
   cài vẫn dừng hỏi): thêm `Bash` vào `allow`, thêm `deny` của khung còn thiếu, gỡ `ask` mặc định cũ của khung
   (`git merge`, `git rebase`, `gh release`, `npm publish`, `docker push`); quyền riêng của dự án giữ nguyên. `CLAUDE.md`

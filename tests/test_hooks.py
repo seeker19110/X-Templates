@@ -1584,6 +1584,34 @@ class MergeGuardTest(unittest.TestCase):
         self.fake_gh({**FAST_PR, "state": "CLOSED"})
         self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # PR đã đóng
 
+    def test_hard_exception_merge_denied_by_default(self):
+        """ADR-0019: PR thuộc ngoại lệ cứng (ADR-0016) — strict hỏi, mặc định (ADR-0018) chặn cả merge ghim head,
+        bật auto-merge, merge REST và MCP, kể cả ở L3."""
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        cmds = (
+            "gh pr merge 7 --squash --match-head-commit abc1234def",
+            "gh pr merge 7 --auto --squash",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def",
+        )
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def"}
+        for policy, want in (("strict", "ask"), ("", "deny")):
+            for cmd in cmds:
+                with self.subTest(policy=policy, cmd=cmd):
+                    code, out, _ = run_hook(
+                        "pre-bash-guard.sh",
+                        {"tool_input": {"command": cmd}},
+                        self.proj,
+                        {**env, "XT_GUARD_POLICY": policy},
+                    )
+                    self.assertEqual((code, decision(out)), (0, want), out)
+                    self.assertIn("ngoại lệ cứng", out)
+            with self.subTest(policy=policy, tool="mcp"):
+                payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": mcp}
+                code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {**env, "XT_GUARD_POLICY": policy})
+                self.assertEqual((code, decision(out)), (0, want), out)
+
     def test_merge_without_python_asks(self):
         """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""
         nopy = self.proj / "nopy"

@@ -4,7 +4,9 @@
 - **Trạng thái triển khai:** Đã triển khai — `guard.py` (`apply_policy`, `DANGER_MARKERS`), `.claude/settings.json`
   `permissions.ask` rỗng, `_lib.sh` `ask_strict` cho nhánh lỗi hạ tầng của `pre-bash-guard.sh`/`pre-mcp-guard.sh`
   (thiếu python3/`guard.py`, guard lỗi khi merge, commit vào repo ngoài dự án: cho qua, không chạy cổng của repo lạ);
-  test `tests/test_hooks.py::GuardPolicyTest`, `MergeHookFailClosedTest`, `CommitGateForeignRepoTest`.
+  test `tests/test_hooks.py::GuardPolicyTest`, `MergeHookFailClosedTest`, `CommitGateForeignRepoTest`; dự án đích nhận
+  quyền qua `install.py` `merge_permissions` (`tests/test_install.py`).
+- **Làm rõ bởi:** ADR-0019 (merge ngoại lệ cứng thuộc nhóm bị chặn)
 - **Ngày:** 2026-10-17
 - **Thay một phần:** ADR-0017 §2 (giữ `ask`), ADR-0002 (hỏi ở điểm dừng hành động) — với hook guard của khung
 
