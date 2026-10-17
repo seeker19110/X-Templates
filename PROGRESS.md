@@ -47,7 +47,7 @@
 - 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012.
 - 2026-10-17 Guard: lệnh trong container chỉ xét luật ra khỏi máy dev; push vào PR đang auto-merge → chạy lại `merge-check` (D-015).
 ## Bàn giao phiên
-- 2026-10-17 · Commit cuối trên `main`: `f57d273` (#83); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-17 · Commit cuối trên `main`: `0b1aaa6` (#74); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-901…T-904 (trả nợ 🟢). Đang chặn: không.
 - Câu hỏi cần người: mục hook/settings/CI ở Đang làm; Tiếp theo 1 (`x-hotel-manager`).
