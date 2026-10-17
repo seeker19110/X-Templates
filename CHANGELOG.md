@@ -6,6 +6,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Guard đóng các lỗ của audit dự án con** (#97, `AUDIT-REPORT-2026-10-17-subprojects.md`). Merge/bật auto-merge
+  PR ngoại lệ cứng qua MỌI đường (`gh pr merge` không ghim head, `gh pr -R … merge`, `gh api` REST/graphql, MCP thiếu
+  `expectedHeadSha`) bị chặn; không xác minh được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql merge,
+  server MCP khác, guard.py lỗi/vắng, thiếu python3) cũng chặn (`UNVERIFIED_ASK`) — AUD-SEC-044/045. Tắt auto-merge
+  (`--disable-auto`, MCP disable) không bị chặn. Gỡ hàng rào: Bash ghi/xoá/dời `.claude/hooks/*`/`.claude/settings*.json`,
+  Edit/Write ghi `disableAllHooks: true`/`CLAUDE_CODE_SIMPLE` → chặn; thiếu `guard.py` → chặn mọi lệnh Bash trừ lệnh một
+  dòng để xem/khôi phục (AUD-SEC-046). Push nhánh chính ngầm (refspec glob/`:`, `--branches`, `push.default`/
+  `remote.*.push|mirror` qua `-c`/`git config`, `remote add --mirror`), huỷ đi đường khác (`gh api -X DELETE repos/…`,
+  `PATCH archived=true`, `apply -destroy`, `pulumi down`), ghi bí mật qua `curl -o/-O`, `wget`, `rsync`, `patch`,
+  `git checkout|restore <rev> -- <bí mật>`, script trình thông dịch ghi thẳng vào file → chặn (AUD-SEC-047…049). Heredoc
+  chỉ thuộc pipeline chứa `<<` (trước: message commit cùng dòng với `python3 …` bị coi là script). Dự án đích: chạy lại
+  `install.py`.
+- **Dự án con**: hook cổng commit/auto-format dùng `.xtemplates/scripts/dev-task.sh` trước `scripts/dev-task.sh` riêng của
+  dự án (AUD-HAR-049); `doctor` báo lỗi khi hook/settings còn `*.xtemplates-new` (AUD-HAR-050); `feedback aggregate
+  --from p=<gốc repo>` tự nối `docs/xtemplates-feedback`, thư mục thiếu thì cảnh báo (AUD-HAR-051); install nói đúng khi
+  giữ file riêng của dự án (AUD-HAR-052) và ghi SHA HEAD vào PROGRESS.md mới cài (AUD-HAR-053); phản hồi FB che tên người
+  dùng trong đường dẫn home (`redact_feedback`, AUD-HAR-054); mẫu AGENTS.md/skill `/gate` trỏ `.xtemplates/scripts/`
+  (AUD-DOC-041).
 - **Hook nhanh hơn ~2,7 lần ở đường nóng** (mỗi lệnh Bash: ~145 → ~54 ms; cổng của repo khung 3m11s → 1m55s).
   `_lib.sh` `py_run` chạy `guard.py`/`xt.py` bằng `import` (bytecode được cache; chạy như script thì Python biên dịch lại
   mỗi lần), cache đặt ở `$XDG_CACHE_HOME/xtemplates/pycache` (mặc định `~/.cache/…`) để không đẻ `__pycache__` trong dự

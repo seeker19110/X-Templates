@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
 
 ## Đang làm
-- Audit dự án con (`AUDIT-REPORT-2026-10-17-subprojects.md`): 🔴 AUD-SEC-044, 🟠 SEC-045…049, 10 🟢 — chờ duyệt 4 đợt. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043.
+- Audit dự án con: sửa ở PR #97 (🔴 SEC-044, 🟠 SEC-045…049, 🟢 HAR-049…054/DOC-041…043); `audit check --strict` exit 0. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043.
 
 
 ## Tiếp theo
