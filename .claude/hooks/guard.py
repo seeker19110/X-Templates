@@ -2018,10 +2018,43 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     return asks
 
 
+def _container_shell(argv: List[str]) -> List[str]:
+    """Lệnh chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run --entrypoint sh
+    dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
+    n = normalize(argv)
+    if n[:1] not in (["docker"], ["podman"]):
+        return []
+    args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
+    opts, inner = _exec_split(args[1:] if args[:1] == ["container"] else args)
+    entry = _flag_values(opts, ("--entrypoint",))
+    return [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
+
+
+def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[str]]:
+    """`sh -c` sau lệnh bọc chạy trên máy (`uv run bash -c …`) và trong container (AUD-SEC-041): (máy, container)."""
+    host: List[str] = []
+    ctr: List[str] = []
+    for c in split_commands(tokens):
+        n = normalize(c)
+        if not n:
+            continue
+        inner = _container_shell(c)
+        name, args = _unwrap(n[0], n[1:])
+        script = _shell_c_script(inner) if inner else _shell_c_script([name, *args]) if name != n[0] else None
+        (ctr if inner else host).extend([script] if script else [])
+    return host, ctr
+
+
 def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
-    """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`."""
+    """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
+    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens)
-    for script in _nested_scripts(cmd, tokens):
+    host, ctr = _wrapped_scripts(tokens)
+    for script in ctr[: max(0, MAX_NEST - depth)]:
+        sub = bash_decision(script, root, cwd, depth + 1)
+        if sub["decision"] in ("deny", "ask"):
+            asks.append(f"lệnh trong container: {sub['reason']}")
+    for script in _nested_scripts(cmd, tokens) + host:
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
             break
