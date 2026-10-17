@@ -26,6 +26,30 @@ import xt
 FILLED_YAML = "lint: ruff check .\ntypecheck: pyright\ntest: pytest -q\nbuild: ''\n"
 
 
+_REAL_VALIDATE = xt.validate
+_VALIDATE_MEMO: dict[tuple, list[str]] = {}
+
+
+def _memo_validate(root: Path) -> list[str]:
+    """`xt.validate` nhớ theo chữ ký cây: mỗi test cài một bản sao khung giống hệt (install giữ mtime) nên validate thật
+    chạy một lần thay vì ~30 lần. Trong khung: đường dẫn, kích thước, mtime của file. Ngoài khung (`.xtemplates/`, đích
+    liên kết `../../research/`): validate chỉ cần file có hay không → chỉ đường dẫn (install ghi mới VERSION/README mỗi
+    lần). Test sửa khung đổi chữ ký → validate thật chạy lại; validate tự nó được test ở test_xt."""
+    tree = root.parent
+    sig = []
+    for p in tree.rglob("*"):
+        rel = p.relative_to(tree).as_posix()
+        if p.is_file() and p.is_relative_to(root):
+            st = p.stat()
+            sig.append((rel, st.st_size, st.st_mtime_ns))
+        else:
+            sig.append((rel,))
+    key = (root.name, *sorted(sig))
+    if key not in _VALIDATE_MEMO:
+        _VALIDATE_MEMO[key] = _REAL_VALIDATE(root)
+    return list(_VALIDATE_MEMO[key])
+
+
 class DoctorCase(unittest.TestCase):
     """Dự án đích vừa cài khung (git init), xt.py chạy như bản `.xtemplates/scripts/xt.py` của dự án đó."""
 
@@ -49,6 +73,7 @@ class DoctorCase(unittest.TestCase):
             )
         )
         self.enterContext(unittest.mock.patch.object(xt, "SCRIPT_DIR", self.base / ".xtemplates" / "scripts"))
+        self.enterContext(unittest.mock.patch.object(xt, "validate", _memo_validate))
 
     def run_doctor(self, *args: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
