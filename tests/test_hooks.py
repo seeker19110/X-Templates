@@ -1632,6 +1632,97 @@ class MergeGuardTest(unittest.TestCase):
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {**env, "XT_GUARD_POLICY": policy})
                 self.assertEqual((code, decision(out)), (0, want), out)
 
+    def policy(self, cmd: str) -> str | None:
+        """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            res = self.guard.apply_policy(self.guard.bash_decision(cmd, str(self.proj)))
+        return str(res["decision"]) or None
+
+    def mcp_policy(self, tool: str, inp: dict) -> str | None:
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            d, r = self.guard.mcp_decision(tool, inp, str(self.proj))
+        return str(self.guard.apply_policy({"decision": d, "reason": r})["decision"]) or None
+
+    def test_guard_hard_merge_unpinned(self):
+        """AUD-SEC-044: PR ngoại lệ cứng — merge không ghim head, cờ lạ, `-R` cùng repo, REST, MCP thiếu ghim/khoá lạ
+        → deny ở mọi mức tự chủ; tắt auto-merge vẫn được (LOOP-STOP-005); PR thường giữ hành vi ADR-0018."""
+        self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
+        for level in ("L2", "L3"):
+            (self.proj / "xt.yaml").write_text(f"merge_autonomy: {level}\n", encoding="utf-8")
+            for cmd in (
+                "gh pr merge 7 --squash",
+                "gh pr merge 7",
+                "gh pr merge 7 --admin --squash",
+                "gh pr merge 7 --squash -b x --match-head-commit abc1234def",
+                "gh pr merge 7 --auto --squash",
+                "gh pr merge 7 --auto -b x",
+                "gh pr merge 7 -R o/r --squash",
+                "gh pr -R o/r merge 7",
+                "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+                "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc1234def",
+                "gh api --method PUT repos/o/r/pulls/7/merge -f merge_method=squash",
+            ):
+                with self.subTest(level=level, cmd=cmd):
+                    self.assertEqual(self.policy(cmd), "deny")
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7}
+        for tool, inp in (
+            ("mcp__github__merge_pull_request", mcp),
+            ("mcp__github__merge_pull_request", {**mcp, "expectedHeadSha": "abc1234def", "admin": True}),
+            ("mcp__github__enable_pr_auto_merge", {**mcp, "x": 1}),
+        ):
+            with self.subTest(tool=tool, inp=inp):
+                self.assertEqual(self.mcp_policy(tool, inp), "deny")
+        self.assertIsNone(self.policy("gh pr merge 7 --disable-auto"))
+        self.assertIsNone(self.mcp_policy("mcp__github__disable_pr_auto_merge", mcp))
+        self.fake_gh(FAST_PR)
+        for cmd in ("gh pr merge 7 --squash", "gh pr -R o/r merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(normal=cmd):
+                self.assertIsNone(self.policy(cmd))
+        self.assertIsNone(self.mcp_policy("mcp__github__merge_pull_request", mcp))
+
+    def test_guard_merge_check_error_denies(self):
+        """AUD-SEC-045: không xác minh được ngoại lệ cứng (merge-check lỗi, repo khác, PR không đọc được số, graphql
+        merge, server MCP khác) → deny thay vì cho qua; tắt auto-merge vẫn được."""
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        mutation = "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'"
+        self.fake_gh(None)
+        for cmd in (
+            "gh pr merge 7 --squash --match-head-commit abc1234def",
+            "gh pr merge 7 --auto --squash",
+            "gh pr merge 7 --squash",
+            "gh pr merge --squash",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.policy(cmd), "deny")
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7}
+        self.assertEqual(self.mcp_policy("mcp__github__merge_pull_request", {**mcp, "expectedHeadSha": "a"}), "deny")
+        self.assertEqual(self.mcp_policy("mcp__github__enable_pr_auto_merge", mcp), "deny")
+        self.assertIsNone(self.policy("gh pr merge 7 --disable-auto"))
+        self.fake_gh(FAST_PR)
+        for cmd in (
+            "gh pr -R x/y merge 7",
+            "gh pr merge 7 --repo x/y --squash",
+            "gh api -X PUT repos/x/y/pulls/7/merge",
+            "gh pr merge https://github.com/x/y/pull/7",
+            "gh pr merge 7 8",
+            mutation,
+            "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.policy(cmd), "deny")
+        self.assertIsNone(
+            self.policy("gh api graphql -f query='mutation { disablePullRequestAutoMerge(input: {}) { x } }'")
+        )
+        self.assertIsNone(self.policy("gh api -X POST repos/o/r/issues/7/comments -f body=x"))
+        for tool, inp in (
+            ("mcp__gitlab__merge_pull_request", {**mcp, "expectedHeadSha": "abc1234def"}),
+            ("mcp__github__merge_pull_request", {**mcp, "pullNumber": "7"}),
+            ("mcp__github__enable_pr_auto_merge", {**mcp, "owner": "x"}),
+        ):
+            with self.subTest(tool=tool, inp=inp):
+                self.assertEqual(self.mcp_policy(tool, inp), "deny")
+
     def test_merge_without_python_asks(self):
         """AUD-SEC-021: guard không chạy được (thiếu python3) → `gh pr merge`/`gh api` vẫn hỏi (fail-closed cho merge)."""
         nopy = self.proj / "nopy"
@@ -2020,6 +2111,8 @@ class GuardDeltaAuditTest(unittest.TestCase):
             self.assertEqual(self._main("bash", {"tool_input": {"command": "ls"}})["decision"], "")
         payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": [1]}
         self.assertEqual(self._main("mcp", payload)["decision"], "ask")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):  # mặc định: không kiểm được → chặn (AUD-SEC-045)
+            self.assertEqual(self._main("mcp", payload)["decision"], "deny")
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -2069,21 +2162,29 @@ class MergeHookFailClosedTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
-        # ADR-0018: mặc định không hỏi khi thiếu python3 / guard.py lỗi — luồng đi tiếp, `deny` của settings vẫn chặn.
+        # Mặc định (ADR-0018) thiếu python3 / guard.py vắng hoặc lỗi: lệnh thường đi tiếp, nhưng merge không kiểm được
+        # ngoại lệ cứng → chặn (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005).
         env["XT_GUARD_POLICY"] = ""
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
-        for name, payload in (
-            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
-            ("pre-mcp-guard.sh", mcp),
-        ):
-            self.assertIsNone(self.hook(name, payload, env), name)
-        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
+        cases = (
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}, "deny"),
+            ("pre-mcp-guard.sh", mcp, "deny"),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --disable-auto"}}, None),
+            ("pre-mcp-guard.sh", off, None),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr view 7"}}, None),
+        )
+        for name, payload, want in cases:
+            with self.subTest(nopy=payload):
+                self.assertEqual(self.hook(name, payload, env), want)
         default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
-        for name, payload in (
-            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}),
-            ("pre-mcp-guard.sh", mcp),
-        ):
-            self.assertIsNone(self.hook(name, payload, default), name)
+        for name, payload, want in cases:  # thiếu guard.py
+            with self.subTest(missing=payload):
+                self.assertEqual(self.hook(name, payload, default), want)
+        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+        for name, payload, want in cases:  # guard.py lỗi
+            with self.subTest(broken=payload):
+                self.assertEqual(self.hook(name, payload, default), want)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")

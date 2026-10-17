@@ -781,6 +781,9 @@ EXTERNAL_ASK = "hành động đối ngoại/triển khai thật (điểm dừng
 DESTROY_ASK = "huỷ/xoá repo, bí mật hoặc hạ tầng (không đảo ngược)"
 # Ngoại lệ cứng (ADR-0016): tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge — ADR-0019 giữ chặn dưới ADR-0018.
 HARD_ASK = "ngoại lệ cứng (LOOP-STOP-005): người merge"
+# Merge/bật auto-merge mà guard không đọc được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql) → chặn như
+# ngoại lệ cứng: không xác minh được thì không cho qua (AUD-SEC-044/045).
+UNVERIFIED_ASK = "không xác minh được ngoại lệ cứng (ADR-0019): người merge"
 # Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
 GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
     *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
@@ -871,26 +874,25 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
 def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     """`gh pr merge` (ADR-0013): mặc định hỏi người; `allow` chỉ khi `xt.py merge-check` = merge VÀ lệnh ghim đúng
     head đã kiểm (`--match-head-commit`). `--admin` (vượt ruleset) và `--repo` (repo khác) luôn hỏi."""
+    selector = _positionals(args, GH_MERGE_VALUE_FLAGS)
+    repo = _flag_value(args, "-R") or _flag_value(args, "--repo") or next((a[2:] for a in args if a[:2] == "-R"), "")
+    if args and set(args) - set(selector) == {"--disable-auto"}:  # tắt auto-merge: LOOP-STOP-005 đòi, không chặn
+        return "ask", f"{EXTERNAL_ASK} — tắt auto-merge"
     if "--auto" in args and not any(a.startswith("--admin") for a in args):
         flags = sorted({a.split("=", 1)[0] for a in args if a.startswith("-")} - MERGE_ALLOW_FLAGS - {"--auto"})
-        selector = _positionals(args, GH_MERGE_VALUE_FLAGS)
-        if flags or len(selector) > 1 or not all(MERGE_SELECTOR_RE.fullmatch(s) for s in selector):
-            return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ nhận số PR/nhánh và cờ merge thường"
-        return _auto_merge_verdict(selector[:1], root)
+        if flags or repo:
+            return _merge_ask(
+                f"{EXTERNAL_ASK} — bật auto-merge chỉ nhận số PR/nhánh và cờ merge thường", selector, root, repo
+            )
+        return _auto_merge_verdict(selector, root)
     sha = _flag_value(args, "--match-head-commit")
     if sum(a == "--match-head-commit" or a.startswith("--match-head-commit=") for a in args) > 1:
         sha = None  # gh lấy lần cuối, guard đã kiểm lần đầu — hai pin là không pin
-    other_repo = any(a == "-R" or a.startswith(("-R", "--repo")) for a in args)
-    if not sha or any(a.startswith("--admin") for a in args) or other_repo:
-        return (
-            "ask",
-            f"{EXTERNAL_ASK} — tự merge cần `--match-head-commit <sha>` từ `xt.py merge-check`, không --admin/--repo",
-        )
     flags = sorted({a.split("=", 1)[0] for a in args if a.startswith("-")} - MERGE_ALLOW_FLAGS)
-    selector = _positionals(args, GH_MERGE_VALUE_FLAGS)
-    if flags or len(selector) > 1 or not all(MERGE_SELECTOR_RE.fullmatch(s) for s in selector):
-        return "ask", f"{EXTERNAL_ASK} — tự merge chỉ nhận số PR/nhánh và cờ {', '.join(sorted(MERGE_ALLOW_FLAGS))}"
-    return _merge_verdict(selector[:1], sha, root)
+    if not sha or flags or repo:
+        why = "tự merge cần `--match-head-commit <sha>` từ `xt.py merge-check`, chỉ cờ"
+        return _merge_ask(f"{EXTERNAL_ASK} — {why} {', '.join(sorted(MERGE_ALLOW_FLAGS))}", selector, root, repo)
+    return _merge_verdict(selector, sha, root)
 
 
 def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tuple[str, str]:
@@ -1083,16 +1085,14 @@ def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple
     """Bật auto-merge của GitHub (ADR-0015): allow khi `merge_autonomy` ≥ L3, PR còn mở, không phải PR chồng (nhắm nhánh
     khác nhánh mặc định), không thuộc ngoại lệ cứng (`hard`, ADR-0016) và (MCP) đúng repo. GitHub vẫn chỉ merge khi
     required check/ruleset đạt; không ghim head."""
-    d = merge_check(selector, root)
+    d, gate = _hard_gate(selector, root, repo)
+    if gate[0]:  # tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge, kể cả L3 (ADR-0016, AUD-HAR-042)
+        return gate
     level = d.get("autonomy")
     if not isinstance(level, int) or level < 3:
         return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ khi xt.yaml `merge_autonomy` ≥ L3 (ADR-0015)"
-    if d.get("verdict") in ("closed", "lỗi") or d.get("stacked"):
+    if d.get("verdict") == "closed" or d.get("stacked"):
         return "ask", f"{EXTERNAL_ASK} — không bật auto-merge: PR {d.get('verdict')}/PR chồng (nhắm nhánh sắp bị xoá)"
-    if d.get("hard"):  # tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge, kể cả L3 (ADR-0016, AUD-HAR-042)
-        return "ask", f"{EXTERNAL_ASK} — {HARD_ASK}, không bật auto-merge: {_hard_reasons(d)}"
-    if repo and str(d.get("repo", "")).lower() != repo.lower():
-        return "ask", f"{EXTERNAL_ASK} — merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}"
     return "allow", f"merge_autonomy L{level}: bật auto-merge (GitHub merge khi required check xanh)"
 
 
@@ -1101,28 +1101,39 @@ def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]
     ok = not set(tool_input) - MCP_AUTO_KEYS and type(n) is int and n > 0
     ok = ok and isinstance(owner, str) and isinstance(repo, str)
     if not ok or tool_input.get("mergeMethod", "SQUASH") not in ("SQUASH", "MERGE", "REBASE"):
-        return "ask", f"{EXTERNAL_ASK} — bật auto-merge qua MCP cần owner/repo/pullNumber hợp lệ"
+        return _mcp_merge_ask(
+            f"{EXTERNAL_ASK} — bật auto-merge qua MCP cần owner/repo/pullNumber hợp lệ", tool_input, root
+        )
     return _auto_merge_verdict([str(n)], root, f"{owner}/{repo}")
 
 
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
     if not MCP_MERGE_RE.fullmatch(tool_name):
         return "", ""
+    if "disable" in tool_name:  # tắt auto-merge: LOOP-STOP-005 đòi khi chạm ngoại lệ cứng — không chặn
+        return "ask", f"{EXTERNAL_ASK} — tắt auto-merge qua MCP ({tool_name})"
+    # Chỉ server GitHub chính (`mcp__github__…`): server khác cùng tên tool có thể trỏ host khác với repo merge-check đọc.
+    if not tool_name.startswith("mcp__github__"):
+        return "ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge qua server MCP khác ({tool_name})"
     if tool_name == "mcp__github__enable_pr_auto_merge":
         return _mcp_auto_merge(tool_input, root)
-    ask = "ask", f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) cần `expectedHeadSha` + `xt.py merge-check` = merge"
+    ask = f"{EXTERNAL_ASK} — merge PR qua MCP ({tool_name}) cần `expectedHeadSha` + `xt.py merge-check` = merge"
     n, sha = tool_input.get("pullNumber"), tool_input.get("expectedHeadSha")
     owner, repo = tool_input.get("owner"), tool_input.get("repo")
-    # Chỉ server GitHub chính (`mcp__github__…`): server khác cùng tên tool có thể trỏ host khác với repo merge-check đọc.
-    if tool_name != "mcp__github__merge_pull_request" or set(tool_input) - MCP_MERGE_KEYS:
-        return ask
-    if not (type(n) is int and n > 0 and isinstance(sha, str) and sha):
-        return ask
-    if not (isinstance(owner, str) and isinstance(repo, str)):
-        return ask
-    if tool_input.get("merge_method", "squash") not in MERGE_METHODS:
-        return ask
-    return _merge_verdict([str(n)], sha, root, f"{owner}/{repo}")
+    ok = tool_name == "mcp__github__merge_pull_request" and not set(tool_input) - MCP_MERGE_KEYS
+    ok = ok and type(n) is int and n > 0 and isinstance(sha, str) and bool(sha)
+    ok = ok and isinstance(owner, str) and isinstance(repo, str)
+    if not ok or tool_input.get("merge_method", "squash") not in MERGE_METHODS:
+        return _mcp_merge_ask(ask, tool_input, root)
+    return _merge_verdict([str(n)], str(sha), root, f"{owner}/{repo}")
+
+
+def _mcp_merge_ask(why: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
+    """Tool MCP merge mà guard không tự cho phép: vẫn kiểm `hard` khi đọc được PR (số nguyên dương + owner/repo)."""
+    n, owner, repo = tool_input.get("pullNumber"), tool_input.get("owner"), tool_input.get("repo")
+    if type(n) is int and n > 0 and isinstance(owner, str) and isinstance(repo, str):
+        return _merge_ask(why, [str(n)], root, f"{owner}/{repo}")
+    return "ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: tool MCP merge không rõ PR/repo"
 
 
 def _hard_reasons(d: Dict[str, object]) -> str:
@@ -1130,20 +1141,46 @@ def _hard_reasons(d: Dict[str, object]) -> str:
     return "; ".join(str(x) for x in raw) if isinstance(raw, list) else str(raw)
 
 
+def _hard_gate(selector: List[str], root: str, repo: str = "") -> Tuple[Dict[str, object], Tuple[str, str]]:
+    """(kết quả merge-check, chặn): `hard` → ask mang `HARD_ASK`; không xác minh được — selector lạ (URL, nhiều PR),
+    merge-check không trả `hard` (lỗi mạng/không đọc được PR), repo khác repo merge-check kiểm — → ask mang
+    `UNVERIFIED_ASK`; cả hai thành deny ở chính sách mặc định (ADR-0019). Không ngoại lệ cứng → ('', '')."""
+    if len(selector) > 1 or not all(MERGE_SELECTOR_RE.fullmatch(s) for s in selector):
+        return {}, ("ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: PR không rõ ({' '.join(selector)[:80]})")
+    d = merge_check(selector, root)
+    if d.get("hard"):  # ADR-0019: kiểm trước verdict để chính sách ADR-0018 chặn thay vì cho qua
+        return d, ("ask", f"{EXTERNAL_ASK} — {HARD_ASK}: {_hard_reasons(d)}")
+    raw = d.get("reasons")
+    if "hard" not in d:
+        why = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
+        return d, ("ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge-check {d.get('verdict')}: {why}")
+    if repo and str(d.get("repo", "")).lower() != repo.lower():
+        return d, (
+            "ask",
+            f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}",
+        )
+    return d, ("", "")
+
+
+def _merge_ask(why: str, selector: List[str], root: str, repo: str = "") -> Tuple[str, str]:
+    """Merge mà guard không tự cho phép (thiếu ghim, cờ lạ, repo khác…): ask `why` — trừ khi chạm/không xác minh được
+    ngoại lệ cứng thì ask mang dấu chặn (AUD-SEC-044)."""
+    gate = _hard_gate(selector, root, repo)[1]
+    return gate if gate[0] else ("ask", why)
+
+
 def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> Tuple[str, str]:
     """`allow` khi `xt.py merge-check` (PR theo selector; rỗng = nhánh hiện tại) trả merge, head đã kiểm = `sha` (và repo
-    trùng nếu có), không thuộc ngoại lệ cứng (`hard` → ask mang `HARD_ASK`, mặc định thành deny — ADR-0019); không thì ask."""
-    d = merge_check(selector, root)
+    trùng nếu có), không thuộc/không mù ngoại lệ cứng (`_hard_gate` — mặc định thành deny, ADR-0019); không thì ask."""
+    d, gate = _hard_gate(selector, root, repo)
+    if gate[0]:
+        return gate
     raw = d.get("reasons")
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
-    if d.get("hard"):  # ADR-0019: kiểm trước verdict để chính sách ADR-0018 chặn thay vì cho qua
-        return "ask", f"{EXTERNAL_ASK} — {HARD_ASK}: {_hard_reasons(d)}"
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
     if d.get("head") != sha:
         return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác {sha}"
-    if repo and str(d.get("repo", "")).lower() != repo.lower():
-        return "ask", f"{EXTERNAL_ASK} — merge-check kiểm repo {d.get('repo') or '?'}, không phải {repo}"
     return "allow", f"merge-check: {reasons}"
 
 
@@ -1156,11 +1193,29 @@ def _gh_api_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     pairs = [v.partition("=") for v in _gh_api_field_values(args)]
     fields = {k: v for k, _, v in pairs}
     flags = {a.split("=", 1)[0] for a in args if a.startswith("-")} - {"-X", "--method", "-f", "--raw-field"}
-    if not m or _gh_api_methods(args) != ["PUT"] or flags or len(fields) != len(pairs) or not fields.get("sha"):
+    bad = not m or _gh_api_methods(args) != ["PUT"] or flags or len(fields) != len(pairs) or not fields.get("sha")
+    if bad or set(fields) - {"sha", "merge_method"} or fields.get("merge_method", "squash") not in MERGE_METHODS:
+        return _gh_api_merge_like(args, pos, ask, root)
+    return _merge_verdict([m[1]], fields["sha"], root) if m else ask
+
+
+# Merge/bật auto-merge qua `gh api`: REST `repos/<chủ>/<repo>/pulls/N/merge` (cả `{owner}/{repo}`), mutation graphql.
+ANY_REST_MERGE_RE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge/?")
+GRAPHQL_MERGE_RE = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b")
+
+
+def _gh_api_merge_like(args: List[str], pos: List[str], ask: Tuple[str, str], root: str) -> Tuple[str, str]:
+    """`gh api` ghi không đúng dạng merge REST có kiểm: là merge (REST/graphql) → vẫn kiểm `hard` (AUD-SEC-044);
+    graphql merge không ánh xạ được số PR → chặn như không xác minh được; ghi khác → `ask` (đối ngoại)."""
+    if pos[:1] == ["graphql"]:
+        if GRAPHQL_MERGE_RE.search(" ".join(args)):
+            return "ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge qua graphql (không đọc được số PR)"
         return ask
-    if set(fields) - {"sha", "merge_method"} or fields.get("merge_method", "squash") not in MERGE_METHODS:
+    m = ANY_REST_MERGE_RE.fullmatch(pos[0]) if len(pos) == 1 else None
+    if not m:
         return ask
-    return _merge_verdict([m[1]], fields["sha"], root)
+    repo = "" if m[1] == "{owner}/{repo}" else m[1]
+    return _merge_ask(ask[1], [m[2]], root, repo)
 
 
 def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
@@ -1168,13 +1223,21 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & HELP_FLAGS:
         return gh_pr_merge_rule(args[2:], root)
     if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
-        return "ask", f"{EXTERNAL_ASK} — `gh pr <cờ> merge` (repo khác) không tự merge"
+        i = args.index("merge", 2)
+        selector, repo = _pr_flag_merge(args, i)
+        return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
     if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return _gh_api_merge_rule(args[1:], root)
     verdict = _publish_rule(name, args)
     return verdict if verdict[0] else egress_rule(name, args, root)
+
+
+def _pr_flag_merge(args: List[str], i: int) -> Tuple[List[str], str]:
+    """(selector, repo) của `gh pr <cờ…> merge <selector> …`: repo từ `-R`/`--repo` trước hoặc sau `merge`."""
+    repo = _flag_value(args, "-R") or _flag_value(args, "--repo") or next((a[2:] for a in args if a[:2] == "-R"), "")
+    return _positionals(args[i + 1 :], GH_MERGE_VALUE_FLAGS), repo
 
 
 def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
@@ -2380,6 +2443,7 @@ DANGER_MARKERS = (
     "xoá thay đổi đã cất",
     DESTROY_ASK,
     HARD_ASK,
+    UNVERIFIED_ASK,
     "container có quyền máy chủ",
     "xoá thư mục gắn từ máy",
     "tắt hook của khung",
@@ -2409,7 +2473,7 @@ def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, obje
     if (mode == "mcp" and isinstance(payload, dict)) or (
         mode == "bash" and isinstance(cmd, str) and MERGE_CMD_RE.search(cmd)
     ):
-        return {"decision": "ask", "reason": "guard lỗi khi kiểm merge/ghi GitHub — cần người xác nhận"}
+        return {"decision": "ask", "reason": f"guard lỗi khi kiểm merge/ghi GitHub — {UNVERIFIED_ASK}"}
     return {"decision": ""}
 
 

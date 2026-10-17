@@ -134,3 +134,10 @@
 - Chọn: Chặn: lý do ngoại lệ cứng thuộc DANGER_MARKERS, agent không merge/bật auto-merge, người merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: LOOP-STOP-005 là MUST, merge tiền/auth/bí mật không đảo ngược được bằng revert khi đã chạy thật; chặn chặt hơn hỏi nên vẫn đúng tinh thần ADR-0018 (không dừng chờ — agent loop defer việc đó)
 - Đường lùi: Bỏ HARD_ASK khỏi DANGER_MARKERS hoặc revert ADR-0019
+
+### D-020 · 2026-10-17T18:48:50+00:00 · Duyệt PLAN T-1001…T-1005 (sửa audit dự án con: 1 🔴, 5 🟠, 🟢 tự làm được)
+
+- Phương án: (1) Sửa cả guard/hook (đợt 1–3) + install/doctor/feedback/mẫu (đợt 4); chủ repo gọi /autopilot ngay sau báo cáo nêu đợt 1–2 chạm hook = duyệt; ADR-0018 cho agent sửa hook kèm lý do · (2) Chỉ làm đợt 4, để đợt 1–3 (hook) chờ người
+- Chọn: Sửa cả guard/hook (đợt 1–3) + install/doctor/feedback/mẫu (đợt 4); chủ repo gọi /autopilot ngay sau báo cáo nêu đợt 1–2 chạm hook = duyệt; ADR-0018 cho agent sửa hook kèm lý do
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: 🔴 SEC-044 là lỗ ngoại lệ cứng đang mở trên main của mọi dự án con; chủ repo gọi /autopilot sau báo cáo; mọi sửa chỉ CHẶT hơn (deny), có test đỏ trước, đảo ngược bằng revert
+- Đường lùi: git revert từng commit lát; XT_GUARD_POLICY không đổi
