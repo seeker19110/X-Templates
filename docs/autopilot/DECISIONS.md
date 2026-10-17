@@ -92,3 +92,31 @@
 - Chọn: Duyệt PLAN 4 task như viết, mỗi đợt một PR kèm auto-merge, xung đột giải bằng merge main
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: chủ repo đã duyệt 4 đợt và luật mỗi lát một PR (ADR-0014); PR nhỏ dễ review và dễ lùi; xung đột với phiên song song giải được bằng merge main, không cần gộp
 - Đường lùi: Đóng PR đợt chưa merge, gộp nhánh còn lại thành một PR
+
+### D-014 · 2026-10-17T06:16:30+00:00 · Duyệt PLAN T-801…T-804 (đóng audit delta #68–#80 sau đợt 1)
+
+- Phương án: (1) Duyệt 4 task như viết: 2 lát guard + 1 lát tài liệu + sổ; mỗi lát một PR kèm auto-merge; AUD-CI-009 defer cho chủ repo · (2) Gộp mọi việc còn lại thành một PR
+- Chọn: Duyệt 4 task như viết: 2 lát guard + 1 lát tài liệu + sổ; mỗi lát một PR kèm auto-merge; AUD-CI-009 defer cho chủ repo
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: chủ repo đã duyệt kế hoạch đợt; mỗi lát một PR (ADR-0014) dễ review và dễ lùi; CI-009 đổi cấu hình CI là điểm dừng nên defer
+- Đường lùi: Đóng PR lát chưa merge, gộp nhánh còn lại
+
+### D-015 · 2026-10-17T06:16:30+00:00 · Sửa AUD-SEC-036 (auto-merge vẫn bật khi push sau chạm ngoại lệ cứng) bằng gì
+
+- Phương án: (1) Quy trình: skill /autopilot + LOOP-STOP-005 bắt chạy lại merge-check sau mỗi push vào PR đang auto-merge, có hard thì tắt auto-merge · (2) Guard tự gọi merge-check mỗi git push (mạng mỗi lần push, chậm, fail-open khi lỗi) · (3) Chỉ ghi giới hạn, giữ mở
+- Chọn: Quy trình: skill /autopilot + LOOP-STOP-005 bắt chạy lại merge-check sau mỗi push vào PR đang auto-merge, có hard thì tắt auto-merge
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: đúng chỗ phát sinh (sau push), không thêm gọi mạng vào hook mỗi push; ruleset vẫn là chốt chặn; nửa sau (GitHub giữ auto-merge) chưa xác minh nên không đáng mã guard
+- Đường lùi: Thêm kiểm vào guard ở lát sau nếu dự án thật gặp
+
+### D-016 · 2026-10-17T06:22:13+00:00 · Lát T-802/T-803 khi phiên chỉ được push một nhánh và PR #82 (T-801) đang chờ review
+
+- Phương án: (1) Xếp T-802, T-803 làm commit riêng trên cùng nhánh → vào PR #82; reviewer rà thêm diff mới trước khi bật auto-merge · (2) Chờ #82 merge rồi mới commit T-802/T-803 (cây làm việc bẩn, Stop hook đòi commit)
+- Chọn: Xếp T-802, T-803 làm commit riêng trên cùng nhánh → vào PR #82; reviewer rà thêm diff mới trước khi bật auto-merge
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: luật phiên cấm push nhánh khác; mỗi lát vẫn là commit riêng dễ revert; review vẫn chạy trước merge
+- Đường lùi: git revert từng commit lát trên main
+
+### D-017 · 2026-10-17T07:31:07+00:00 · Duyệt PLAN T-901…T-904 (trả nợ 🟢 audit tự làm được)
+
+- Phương án: (1) Duyệt 4 task chỉ mã/test; mục chạm hook/settings/CI và chính sách npx để người · (2) Gồm cả sửa matcher settings/CI (điểm dừng)
+- Chọn: Duyệt 4 task chỉ mã/test; mục chạm hook/settings/CI và chính sách npx để người
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2: đổi hook/settings/CI là điểm dừng bắt buộc; phần mã/test có test đỏ trước, đảo ngược được
+- Đường lùi: git revert từng commit lát

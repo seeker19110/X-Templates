@@ -70,7 +70,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   vòng `loop init --single-session` đổi thành `max(20, 4 × task chưa làm)` (bỏ cộng MUST mở — đã gom vào task; thay
   công thức ở ADR-0009). Dự án đích: ghép lại `compose ... --out BLUEPRINT.md` rồi commit cả hai file.
 - CI: workflow `portability.yml` (job `macos-bash32`, bash 3.2/BSD) bỏ trigger `pull_request`, chỉ chạy khi push vào `main` —
-  PR không còn chờ runner macOS; job không phải required check nên ruleset không đổi.
+  PR không còn chờ runner macOS; job không phải required check nên ruleset không đổi. (Sau đó gỡ hẳn — xem `### Removed`.)
 - **Autopilot chạy một phiên đến khi xong** (ADR-0009). Context đầy → compaction có checkpoint, không bàn giao; bàn giao
   chỉ khi ≥ 80% trần vòng/giờ/tiền. Việc cần người không chặn cả vòng (`loop defer`), gom cuối phiên. Mục checklist:
   `LOOP-CTX-003` → `MAY` Ngừng dùng, thay bằng **`LOOP-CTX-017`** (MUST, mới); `LOOP-CTX-008` → `MAY`, thay bằng
@@ -115,6 +115,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   Dự án đích: chạy lại `compose --out BLUEPRINT.md` — trạng thái giữ theo ID.
 
 ### Added
+- **Phân loại test đỏ, chọn tầng theo rủi ro, ba mặt cắt ngang** (`test-strategy.md`; nguồn: `seeker19110/stored` mục 09 §3).
+  Mục mới (ID, mức): `QA-STRAT-021` SHOULD (test đỏ vào một trong bốn nguyên nhân: bug thật giữ test, kỳ vọng sai trích SPEC,
+  bó vào cài đặt, flaky/môi trường), `QA-STRAT-022` SHOULD (tầng test theo rủi ro thay đổi), `QA-STRAT-023` SHOULD (vùng
+  `critical`: người viết test độc lập ngữ cảnh với người viết code, test viết từ SPEC). `LOOP-CI` bảng loại lỗi trỏ tới
+  `QA-STRAT-021`. Không thêm agent hoặc hook: bốn nguyên nhân khớp hook `pre-edit-guard.sh` hiện có và vai độc lập dùng
+  lại `executor` ngữ cảnh khác. Dự án đích: ghép lại blueprint để nhận ID mới.
 - **Mục nhóm C từ đợt rà `seeker19110/stored` (2026-10-16)** — 19 mục mới (kèm một module mới), mọi mục có *Kiểm* và nguồn
   stored. Dự án đích: ghép lại blueprint để nhận các ID mới.
   - Bảo mật/bí mật: `SEC-WEB-027` (MUST@L, xuất CSV/XLSX vô hiệu công thức), `SEC-SECRET-022` (secret tích hợp write-only,
@@ -250,7 +256,59 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (`coverage report --fail-under=100` — ratchet `BASE-GATE-013`); `coverage` 7.16.2 (Apache-2.0) khoá kèm hash.
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
+### Removed
+- **Workflow `portability.yml` (job `macos-bash32`)** — chủ repo yêu cầu gỡ macOS khỏi CI (2026-10-17). CI repo khung chỉ
+  còn chạy Ubuntu: không còn máy kiểm bash 3.2, sed/awk BSD hay `python3` 3.9 hệ thống của macOS cho hook/installer;
+  AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
+
 ### Fixed
+- `xt.py feedback aggregate`: phản hồi có ID cục bộ của dự án (`T-003`, `loop`, mọi `bi-chan`) gộp theo triệu chứng
+  chuẩn hoá thay vì theo ID — hai dự án khác lý do không còn bị tính "đủ ngưỡng"; bảng in mọi triệu chứng khác nhau
+  thay vì chỉ cái đầu (AUD-CODE-004).
+- `xt.py doctor` cảnh báo `gate-tools` khi lệnh cổng trong `xt.yaml` gọi công cụ/mô-đun không có trên máy (vd
+  `shellcheck`, `python3 -m mypy`) — trước chỉ biết khi cổng đỏ (AUD-HAR-034). `feedback collect` bỏ qua trong repo khung
+  (phản hồi tự gom dành cho dự án đích, AUD-HAR-048). `loop status` hết hạn đúng lúc tới hạn chót (`--hours 0` trước vẫn
+  `continue` trong cùng giây), so thời điểm thay vì chuỗi (AUD-TEST-004); test không rò stderr (AUD-TEST-003).
+- Guard bịt thêm (trả nợ audit, AUD-SEC-023/024/042): git tuỳ chọn dài viết tắt (`reset --ha`, `clean --fo`,
+  `push --mirr`, `push --forc`) coi như tuỳ chọn đầy đủ; `push --all/--tags` hỏi; `find . -delete` không lọc bị chặn như
+  `rm -rf .`; `xargs rm -rf` (đích từ stdin) hỏi; `exec -a <tên> …`, `env -S '<lệnh>'` bóc ra lệnh thật;
+  `docker-compose`/`podman-compose`/`nerdctl` theo luật docker, `kubectl [cờ toàn cục] exec … -- <lệnh>` quét lệnh trong
+  pod. Review #84: `env -S` có nháy lẻ không làm guard ném lỗi (trước làm cả lệnh Bash lọt, kể cả phần `git push --force`
+  phía sau); `find . -mindepth 1 -delete` bị chặn; `doctor` không báo nhầm công cụ gọi theo đường dẫn, `|`/`do` trong nháy;
+  `feedback aggregate` không gộp các phản hồi có triệu chứng rỗng.
+- Guard: mount đường dẫn tuyệt đối nằm dưới gốc dự án (`-v <gốc>/.docker:/d`, `<gốc>/deploy/etc/x`) không còn hỏi oan
+  theo mảnh tên; `<gốc>/../.ssh` vẫn hỏi (AUD-HAR-047).
+- Audit delta 2026-10-17 đợt 2 (tài liệu): README đếm 35 file mảng 05–09 (AUD-DOC-038); dòng `portability.yml` trong
+  `[Unreleased]` ghi đã gỡ (AUD-DOC-039); nguồn `QA-STRAT-023` ghi "chưa xác minh toàn văn" (AUD-DOC-040). `LOOP-STOP-005`
+  (ID, mức MUST giữ) *Kiểm* thêm: sau mỗi push vào PR đang auto-merge chạy lại `merge-check`, có `hard` thì tắt
+  auto-merge rồi `loop defer`; skill `/autopilot` bước 10 cùng luật (AUD-SEC-036, D-015). Dự án đích: chạy lại
+  `install.py`, ghép lại blueprint để nhận chữ mới.
+- Guard quét `sh -c` sau lệnh bọc và trong container (AUD-SEC-041): `uv run bash -c '…'`, `poetry run sh -c '…'`
+  quét như `sh -c` trên máy; `docker exec ctr sh -c '…'`, `docker run img bash -c '…'`, `compose run --entrypoint sh
+  dv -c '…'` quét lệnh bên trong, chặn/hỏi của nó thành hỏi. Review #82/#83: quét mọi lệnh (không cắt sau 3), quá sâu
+  thì hỏi; lệnh gọi thẳng (`docker run img npm publish`) cũng quét; lệnh trong container dùng đủ luật (publish/deploy/
+  merge/`gh api`/push/tải-rồi-chạy vẫn hỏi) với gốc giả `/` (đường dẫn là của container: `rm -rf node_modules`, `rm -rf
+  /app/dist` không hỏi); xoá đúng thư mục gắn từ máy (`-v $PWD:/w … rm -rf /w`) hoặc `.git` thì hỏi; shell gọi bằng đường dẫn/`env`
+  (`uv run /bin/bash -c`), `pnpm|npm|yarn exec` (cả `-c`/`--call`), `bunx`, `nix-shell --run`, `--entrypoint /bin/sh`;
+  gốc dự án là thư mục home không miễn `~/.ssh` (AUD-HAR-047).
+- **Guard "ra khỏi máy dev" (#76) bịt lỗ** (audit delta 2026-10-17 đợt 1). Các lệnh dưới đây trước chạy không hỏi, nay
+  hỏi: `ssh` có cờ ăn giá trị mang giá trị loopback (`-L/-R/-D/-b/-W…`, AUD-SEC-033); `curl` viết cờ liền giá trị
+  (`-d@f`, `-d'{…}'`, `-Fa=b`, `-Tf`) và `-G` kèm upload, phương thức ghi, `@file` hay `$VAR` (AUD-SEC-034); `ssh` tới
+  loopback mà chạy lệnh, `-J` hay `-o ProxyCommand/ProxyJump` (AUD-SEC-035); thêm phụ thuộc qua `uv run`/`poetry run`/
+  `corepack`/`npx <pm>`, cờ trình thông dịch trước `-m`, `bundle add`, `conda|mamba install`, `uv tool install`
+  (AUD-SEC-038); docker có cờ toàn cục trước lệnh con, `compose run` mount nhạy cảm, `exec --privileged`, lệnh sau image
+  của `run`, mount `//`, `/tmp/..`, `/proc/…`, `-v=/:/h` (AUD-SEC-039); IP viết số thuần và `127.<tên miền>`
+  (AUD-SEC-040). Mount tương đối trong dự án (`./.docker/nginx.conf`, `$PWD/etc/x`) không còn bị hỏi oan (AUD-HAR-046).
+  Vòng review: mount `../.ssh` (ra ngoài dự án) vẫn hỏi; `curl -G -sd@f`; cờ ăn giá trị của wrapper (`uv run --python
+  3.12 pip install x`) và trình thông dịch (`python3 -W ignore -m pip`); ssh loopback mở đường hầm tới máy ngoài
+  (`-W`/`-L`/`-R`), `-o RemoteCommand`, `-F <file>`; `ssh -Q cipher` (không có máy đích) không còn hỏi oan.
+  **Hành vi mới:** lệnh sau image của `docker run` được xét như `docker exec` (`docker run --rm node:20 npm install
+  lodash` nay hỏi). `URL_RE` tuyến tính (AUD-CODE-011); `_db_rule` bỏ tham số không dùng (AUD-CODE-012). Dự án đích:
+  chạy lại `install.py`.
+- **`xt.py` lại chạy được với `python3` hệ thống của macOS (3.9)**: `redact` (#73) dùng `\w++` (chỉ có từ Python 3.11)
+  nên `xt.py` lỗi `re.error` ngay khi nạp; hook gọi `python3` của máy dev → merge-check "không chạy được" (merge luôn hỏi),
+  Stop/PreCompact hook im lặng cho qua. Job Portability đỏ từ #73. Nay dùng `\w+` sau lookahead (vẫn tuyến tính,
+  AUD-CODE-009).
 - **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
   - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
     trên PostgreSQL 17.
@@ -387,6 +445,26 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (trước đó đỏ khi autopilot đang bật trên chính repo — đúng lúc cổng commit chạy).
 
 ### Security
+- **Cổng commit tự chạy mã của repo lồng** (code scanning trên PR cài khung ở dự án đích; nối AUD-SEC-015): repo git lồng
+  trong dự án có `xt.yaml`/`.xtemplates` riêng (vd repo bên thứ ba clone vào `vendor/`) → `git commit` ở đó chạy
+  `scripts/dev-task.sh` của repo ấy TRƯỚC bước hỏi quyền. Nay `pre-bash-guard.sh` chỉ tự chạy cổng của chính dự án
+  (`CLAUDE_PROJECT_DIR`); repo lồng có cổng riêng được hỏi như repo ngoài dự án (repo lồng không có khung riêng như
+  submodule, `apps/web` → cổng dự án như cũ). Test: `test_commit_gate_nested_cloned_repo`,
+  `test_nested_repo_with_own_xt_asks_without_running_its_gate` (đỏ trước, xanh sau). Dự án đích: chạy lại `install.py`.
+- **Guard hỏi khi ra khỏi máy dev** (đề xuất chủ repo 2026-10-17): phiên chạy không hỏi quyền (`--permission-mode auto`,
+  allow rộng ở settings người dùng) chỉ còn guard làm lớp hỏi, nên PreToolUse hỏi thêm khi: `ssh`/`sftp`/`mosh`/`telnet`
+  vào máy không loopback, `scp`/`rsync` chép với máy không loopback (alias `~/.ssh/config` như `prod` cũng tính); client
+  CSDL (`psql`, `pg_dump`, `mysql`, `mongosh`, `redis-cli`…) tới máy chủ không cục bộ (cờ host, URI/conninfo ở đối số vị
+  trí hoặc `-d`, `PGHOST=`/`…_URL=` gán đầu lệnh; câu SQL `-c`/`-f` không quét); `curl`/`wget` gửi dữ liệu (`-d`/`-F`/`-T`/
+  `--json`, phương thức ghi kể cả `-sX POST`; `-G` là GET) tới máy ngoài hoặc đích không đọc được; thêm phụ thuộc
+  (`pnpm|yarn|bun|uv|poetry|cargo|deno add`, `npm|pip|uv pip install <gói>`, `pipx|cargo|gem install`, `go get`,
+  `composer require`, cả `python3.X -m pip`); `docker|podman` điều khiển daemon máy khác (`-H ssh://…`, `--context`,
+  `DOCKER_HOST=`), lệnh trong `exec`/`compose exec|run` ra khỏi máy dev, hoặc `run|create` có `--privileged`, namespace host, cap nguy hiểm, `--device`, `unconfined`, mount
+  `/`/home/`/etc`/`/run`/socket/`.ssh`/`.aws`. Không hỏi: loopback (`*.localhost`), socket unix, tên dịch vụ compose không
+  dấu chấm (CSDL, curl); cài theo lockfile, đường dẫn/gói nội bộ (`./x`, `file:`, `@workspace:`, `--path`, `.whl`);
+  `/etc/localtime`/`/etc/timezone` mount chỉ đọc. Bảng cờ ăn giá trị riêng từng trình quản lý gói (`pnpm -w add` không
+  lọt). `curl -d @file` tới máy ngoài nay hỏi (trước cho qua). Giới hạn: biến chứa đích (`psql "$DATABASE_URL"`) không
+  đọc được nên không hỏi — guard chống tai nạn, không phải sandbox. Dự án đích: chạy lại `install.py`.
 - **`redact` che kín hơn, bớt che nhầm** (audit delta đợt C; AUD-CFG-006, CFG-007, CFG-008, CODE-009). Giá trị trong
   nháy chứa nháy loại kia (`password: "it's a b"`) hoặc nháy chưa đóng không còn lộ phần sau; khoá `*_PWD`, `*_PASS`,
   `pass`, `passphrase` (`MYSQL_PWD`, `DB_PASS`) được che, `PWD`/`bypass` thì không; `npm_`/`hf_`/`pypi-` chỉ che khi

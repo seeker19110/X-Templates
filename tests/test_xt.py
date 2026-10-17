@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import unittest
 import unittest.mock
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -449,7 +449,7 @@ class LoopTest(unittest.TestCase):
             os.environ["CLAUDE_PROJECT_DIR"] = self._old
 
     def run_cli(self, *args) -> int:
-        with redirect_stdout(io.StringIO()):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):  # AUD-TEST-003: không rò cảnh báo doctor
             return xt.main(list(args))
 
     def test_gateless_task_needs_gate(self):
@@ -816,6 +816,7 @@ class AuditRegressionTest(unittest.TestCase):
         env = {"CLAUDE_PROJECT_DIR": str(self.tmp)}
         self.cli("loop", "init", "--hours", "0", env=env)
         self.assertIsNotNone(xt.read_state(self.tmp)["deadline"])
+        self.assertEqual(xt.loop_verdict(self.tmp)["verdict"], "budget")  # AUD-TEST-004
 
     def test_evidence_redacts_secret_like_values(self):
         write(self.tmp / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` x\n")
