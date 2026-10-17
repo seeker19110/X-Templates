@@ -147,10 +147,15 @@ class InstallTest(unittest.TestCase):
         # AUD-HAR-003: settings.json có sẵn từng chỉ sinh .xtemplates-new → hook copy mà không chạy.
         settings = self.target / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
-        settings.write_text('{"permissions": {"allow": ["Bash(make *)"]}}\n', encoding="utf-8")
+        perms = {"allow": ["Bash(make *)"], "ask": ["Bash(git merge *)", "Bash(make deploy*)"], "deny": ["Bash(rm *)"]}
+        settings.write_text(json.dumps({"permissions": perms}), encoding="utf-8")
         self.run_install()
         d = json.loads(settings.read_text(encoding="utf-8"))
-        self.assertEqual(d["permissions"], {"allow": ["Bash(make *)"]})
+        # ADR-0018: thêm `Bash` + deny của khung, gỡ ask mặc định cũ; quyền riêng của dự án giữ.
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
+        self.assertEqual(d["permissions"]["allow"], ["Bash(make *)", "Bash"])
+        self.assertEqual(d["permissions"]["ask"], ["Bash(make deploy*)"])
+        self.assertEqual(d["permissions"]["deny"], ["Bash(rm *)", *ours["deny"]])
         self.assertIn("PreToolUse", d["hooks"])
         before = settings.read_text(encoding="utf-8")
         self.run_install()  # chạy lại: không nhân đôi hook
