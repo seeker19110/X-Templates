@@ -1560,12 +1560,9 @@ def _container_rule(args: List[str], root: str = "") -> str:
         return f"{EGRESS_ASK} — container trên daemon máy khác"
     if args[:1] == ["container"]:
         args = args[1:]
-    opts, inner = _exec_split(args)
-    why = _host_power(opts, root)
-    if why:
-        return f"container có quyền máy chủ ({why})"
-    verdict = egress_rule(inner[0], inner[1:], root) if inner else ("", "")
-    return f"{verdict[1]} (trong container)" if verdict[0] else ""
+    opts, _ = _exec_split(args)
+    why = _host_power(opts, root)  # lệnh bên trong quét ở `_container_asks` (đủ luật, gốc giả)
+    return f"container có quyền máy chủ ({why})" if why else ""
 
 
 def _unwrap(name: str, args: List[str]) -> Tuple[str, List[str]]:
@@ -2035,28 +2032,54 @@ def _container_exec(argv: List[str]) -> Tuple[List[str], List[str]]:
     return opts, [entry[-1], *inner] if entry and entry[-1] in SHELLS else inner
 
 
-def _binds_host(opts: List[str]) -> bool:
-    """Container gắn thư mục máy (`-v $PWD:/w`, `-v .:/w`, `--mount type=bind,src=…`) — xoá trong đó là xoá trên máy."""
-    srcs = [_mount_source(v) for v in _flag_values(opts, ("-v", "--volume", "--mount"))]
-    return any(src.startswith(("/", ".", "~", "$")) for src in srcs)
+BIND_SRC_PREFIXES = ("/", ".", "~", "$PWD", "${PWD}", "$(pwd)", "$HOME", "${HOME}")
 
 
-# Gốc giả cho lệnh trong container không gắn thư mục máy: luật xoá/ghi "ngoài dự án" không áp, luật đối ngoại vẫn áp.
+def _bind_dests(opts: List[str]) -> List[str]:
+    """Đích trong container của mount thư mục máy (`-v $PWD:/w`, `-v .:/w`, `--mount type=bind,src=…,dst=…`); named
+    volume (`data`, `$VOLNAME`) không tính."""
+    out: List[str] = []
+    for v in _flag_values(opts, ("-v", "--volume", "--mount")):
+        v = v.removeprefix("=")
+        if not _mount_source(v).startswith(BIND_SRC_PREFIXES):
+            continue
+        kv = dict(p.split("=", 1) for p in v.split(",") if "=" in p)
+        dst = kv.get("target") or kv.get("dst") or kv.get("destination") or (v.split(":")[1] if v.count(":") else "")
+        out += [posixpath.normpath(dst)] if dst.startswith("/") else []
+    return out
+
+
+def _wipes_bind(script: str, dests: List[str]) -> str:
+    """`rm -r` đúng thư mục gắn máy (`rm -rf /app` khi `-v $PWD:/app`) — xoá cả dự án trên máy."""
+    for c in split_commands(tokenize(script)):
+        n = normalize(c)
+        recursive = any(a == "--recursive" or (a[:1] == "-" and a[1:2] != "-" and set(a[1:]) & {"r", "R"}) for a in n)
+        hit = (
+            [t for t in _positionals(n[1:]) if posixpath.normpath(t) in dests] if n[:1] == ["rm"] and recursive else []
+        )
+        if hit:
+            return f"xoá thư mục gắn từ máy ({hit[0]}) trong container"
+    return ""
+
+
+# Gốc giả cho lệnh trong container: đường dẫn là của container (luật xoá/ghi "ngoài dự án" không áp), luật đối ngoại,
+# merge, tải-rồi-chạy, `rm -rf /`/`.git` vẫn áp; xoá đúng thư mục gắn từ máy thì hỏi riêng (`_wipes_bind`).
+# Giới hạn: mount khai trong compose yaml, `docker exec` vào container đang chạy, `--volumes-from` — guard không thấy.
 CONTAINER_ROOT = "/"
 
 
-def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, bool]]]:
+def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, List[str]]]]:
     """Lệnh lồng sau lệnh bọc chạy trên máy (`uv run bash -c …`, `npm exec -c …`, `nix-shell --run …`) và trong container
-    (AUD-SEC-041; review #83: cả lệnh gọi thẳng, kèm cờ có gắn thư mục máy): (máy, [(container, gắn máy)])."""
+    (AUD-SEC-041; review #83: cả lệnh gọi thẳng, kèm đích mount thư mục máy): (máy, [(container, đích gắn máy)])."""
     host: List[str] = []
-    ctr: List[Tuple[str, bool]] = []
+    ctr: List[Tuple[str, List[str]]] = []
     for c in split_commands(tokens):
         n = normalize(c)
         if not n:
             continue
         opts, inner = _container_exec(c)
         if inner:
-            ctr.append((_shell_c_script(inner) or shlex.join(inner), _binds_host(opts)))
+            ctr.append((_shell_c_script(inner) or shlex.join(inner), _bind_dests(opts)))
             continue
         name, args = _unwrap(n[0], n[1:])
         script = _shell_c_script([name, *args]) if name != n[0] else None
@@ -2068,16 +2091,16 @@ def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, bool
     return host, ctr
 
 
-def _container_asks(ctr: List[Tuple[str, bool]], root: str, cwd: Optional[str], depth: int) -> List[str]:
-    """Lệnh trong container quét bằng đủ luật (đối ngoại, merge, tải-rồi-chạy); không gắn thư mục máy thì đường dẫn là
-    của container (gốc giả `/`). Chặn/hỏi của nó thành hỏi."""
+def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int) -> List[str]:
+    """Lệnh trong container quét bằng đủ luật với gốc giả `/`; chặn/hỏi của nó thành hỏi."""
     if ctr and depth >= MAX_NEST:
         return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
     out: List[str] = []
-    for script, binds in ctr:
-        base = root if binds else CONTAINER_ROOT
-        sub = bash_decision(script, base, (cwd or root) if binds else CONTAINER_ROOT, depth + 1)
-        out += [f"lệnh trong container: {sub['reason']}"] if sub["decision"] in ("deny", "ask") else []
+    for script, dests in ctr:
+        sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1)
+        why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
+        why = why or _wipes_bind(script, dests)
+        out += [f"lệnh trong container: {why}"] if why else []
     return out
 
 
@@ -2086,7 +2109,7 @@ def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], dep
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens)
     host, ctr = _wrapped_scripts(tokens)
-    asks += _container_asks(ctr, root, cwd, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
+    asks += _container_asks(ctr, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
     for script in _nested_scripts(cmd, tokens) + host:
         if depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
@@ -2206,6 +2229,9 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
     return None
 
 
+ASK_PREFIX = "Khung cần xác nhận: "
+
+
 def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
@@ -2239,7 +2265,7 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):
         asks.append(f"{EXTERNAL_ASK} — tự merge chỉ khi lệnh đứng một mình")
     if asks:
-        res.update(decision="ask", reason="Khung cần xác nhận: " + "; ".join(dict.fromkeys(asks)))
+        res.update(decision="ask", reason=ASK_PREFIX + "; ".join(dict.fromkeys(asks)))
     elif allow:
         res.update(decision="allow", reason=f"Khung cho tự merge (ADR-0013) — {allow}")
     return res

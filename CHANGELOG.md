@@ -268,8 +268,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   quét như `sh -c` trên máy; `docker exec ctr sh -c '…'`, `docker run img bash -c '…'`, `compose run --entrypoint sh
   dv -c '…'` quét lệnh bên trong, chặn/hỏi của nó thành hỏi. Review #82/#83: quét mọi lệnh (không cắt sau 3), quá sâu
   thì hỏi; lệnh gọi thẳng (`docker run img npm publish`) cũng quét; lệnh trong container dùng đủ luật (publish/deploy/
-  merge/`gh api`/push/tải-rồi-chạy vẫn hỏi) với gốc giả `/` khi không gắn thư mục máy (`rm -rf node_modules` trong
-  container không hỏi), gốc thật khi có bind mount (`-v $PWD:/w … rm -rf /w` hỏi); shell gọi bằng đường dẫn/`env`
+  merge/`gh api`/push/tải-rồi-chạy vẫn hỏi) với gốc giả `/` (đường dẫn là của container: `rm -rf node_modules`, `rm -rf
+  /app/dist` không hỏi); xoá đúng thư mục gắn từ máy (`-v $PWD:/w … rm -rf /w`) hoặc `.git` thì hỏi; shell gọi bằng đường dẫn/`env`
   (`uv run /bin/bash -c`), `pnpm|npm|yarn exec` (cả `-c`/`--call`), `bunx`, `nix-shell --run`, `--entrypoint /bin/sh`;
   gốc dự án là thư mục home không miễn `~/.ssh` (AUD-HAR-047).
 - **Guard "ra khỏi máy dev" (#76) bịt lỗ** (audit delta 2026-10-17 đợt 1). Các lệnh dưới đây trước chạy không hỏi, nay

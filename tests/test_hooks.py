@@ -2531,6 +2531,18 @@ class GuardEgressAuditTest(EgressCase):
                 'npm exec -c "vitest run"',
             ),
         )
+        self.assert_all(  # review cuối: có bind mount vẫn là đường dẫn container; chỉ xoá đúng thư mục gắn máy thì hỏi
+            "",
+            (
+                'docker run --rm -v $PWD:/app -w /app node:24 sh -c "cd /app && rm -rf dist node_modules && pnpm build"',
+                "docker run --rm -v $PWD:/app -w /app node:24 rm -rf /app/dist",
+                'docker run --rm -v "$(pwd)":/app img rm -rf /etc',
+                "docker run --rm -v $VOLNAME:/data img rm -rf /data/x",
+            ),
+        )
+        self.assert_all("ask", ("docker run --rm -v $PWD:/app img rm -rf /app", "docker run -v .:/w img rm -r /w/"))
+        reason = str(self.guard.bash_decision("docker run --rm img pnpm add lodash", str(self.root))["reason"])
+        self.assertEqual(reason.count("thêm phụ thuộc mới"), 1)
         home = self.guard.bash_decision("docker run -v /home/user/.ssh:/s img true", "/home/user", "/home/user")
         self.assertEqual(home["decision"], "ask")
 
