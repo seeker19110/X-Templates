@@ -28,6 +28,7 @@ import posixpath
 import re
 import shlex
 import subprocess
+import urllib.parse
 import sys
 import tempfile
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -476,6 +477,9 @@ def _strip_prefixes(argv: List[str]) -> List[str]:
 # Cấu hình làm `git push` đẩy nhiều nhánh/nhánh chính mà lệnh không ghi refspec (AUD-SEC-047): `push.default=matching`,
 # `remote.<r>.push`, `remote.<r>.mirror`. Đặt qua `git -c` → `normalize` chèn PUSH_CONFIG_FLAG sau lệnh con.
 PUSH_CONFIG_RE = re.compile(r"(push\.default|remote\..+\.(push|mirror))(=.*)?", re.I)
+# Giá trị làm push lan ra nhiều nhánh: `push.default=matching`, `remote.<r>.mirror=true`, `remote.<r>.push=<bất kỳ>`
+# (`simple`/`current`/`upstream`/`nothing` chỉ đẩy nhánh hiện tại — luật refspec đã xét).
+PUSH_SPREAD_RE = re.compile(r"push\.default=matching|remote\..+\.mirror=(true|yes|on|1)|remote\..+\.push=.*", re.I)
 PUSH_CONFIG_FLAG = "--xt-push-config"
 
 
@@ -487,10 +491,10 @@ def _strip_git_global_opts(a: List[str]) -> List[str]:
     push_cfg = False
     while i < len(rest) and rest[i].startswith("-"):
         nxt = rest[i + 1] if i + 1 < len(rest) else ""
-        push_cfg = push_cfg or (rest[i] in ("-c", "--config-env") and bool(PUSH_CONFIG_RE.fullmatch(nxt)))
+        push_cfg = push_cfg or (rest[i] in ("-c", "--config-env") and bool(PUSH_SPREAD_RE.fullmatch(nxt)))
         i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
     out = ["git", *rest[i:]]
-    return [*out[:2], PUSH_CONFIG_FLAG, *out[2:]] if push_cfg and len(out) > 1 else out
+    return [*out[:2], PUSH_CONFIG_FLAG, *out[2:]] if push_cfg and out[1:2] == ["push"] else out
 
 
 def _git_C_dirs(argv: List[str]) -> List[str]:
@@ -655,7 +659,8 @@ def _git_config(args: List[str]) -> Tuple[str, str]:
     """config: đặt `push.default`/`remote.<r>.push|mirror` = push nhánh chính ngầm cho mọi `git push` sau (AUD-SEC-047)."""
     if set(args) & GIT_CONFIG_READ:
         return "", ""
-    if any(PUSH_CONFIG_RE.fullmatch(a) for a in _positionals(args)):
+    pos = [a for a in _positionals(args) if a not in ("set", "--add")]
+    if pos[:1] and PUSH_SPREAD_RE.fullmatch("=".join(pos[:2]) if len(pos) > 1 else pos[0] + "=true"):
         return "ask", f"đặt cấu hình push — {PUSH_ALL_WHY}"
     return "", ""
 
@@ -670,7 +675,7 @@ def _git_remote(args: List[str]) -> Tuple[str, str]:
 def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple[str, str]:
     """Một refspec của push: đích là nhánh chính → deny nếu xoá, ask nếu đẩy thẳng. Đích `HEAD`/`@` = nhánh hiện tại."""
     dst = ref.split(":", 1)[1] if ":" in ref else ref
-    dst = dst.removeprefix("refs/heads/")
+    dst = dst.removeprefix("refs/").removeprefix("heads/")  # git phân giải `heads/main` thành refs/heads/main
     if dst in ("HEAD", "@"):
         dst = _current_branch(cwd)
     if dst not in MAIN_BRANCHES:
@@ -684,12 +689,13 @@ def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
     refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
     flags = _short_flags(args)
-    force = any(x.startswith("--force") or x == "--mirror" for x in args) or "f" in flags
+    force = any(x.startswith("--force") and x != "--force-if-includes" or x == "--mirror" for x in args) or "f" in flags
     refs = _positionals(args, ("-o", "--push-option", "--repo", "--receive-pack", "--exec"))
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
     spread = any("*" in r or r == ":" for r in refs[1:])  # refspec glob, `:` = matching (AUD-SEC-047)
-    if spread or {"--all", "--branches", "--tags", PUSH_CONFIG_FLAG} & set(args):
+    spread = spread or (PUSH_CONFIG_FLAG in args and not refs[1:])  # cấu hình push chỉ có hiệu lực khi không có refspec
+    if spread or {"--all", "--branches", "--tags"} & set(args):
         return "ask", PUSH_ALL_WHY
     deleting = "--delete" in args or "d" in flags
     for r in refs[1:] or ["HEAD"]:  # không refspec: đẩy nhánh hiện tại
@@ -833,7 +839,7 @@ ASK_CMDS: Dict[str, Optional[Tuple[str, ...]]] = {
 GH_ASK = {("release",), ("secret",), ("workflow", "run"), ("variable", "set"), ("variable", "delete")}
 GH_ASK |= {("repo", "edit"), ("repo", "sync"), ("repo", "rename"), ("repo", "archive"), ("repo", "delete")}
 GH_ASK |= {("repo", "set-default")}  # đổi repo mà `gh pr merge`/`{owner}/{repo}` trỏ tới, như `-R` (AUD-SEC-030)
-GH_DESTROY = {("secret",), ("repo", "delete"), ("repo", "archive")}
+GH_DESTROY = {("secret",), ("repo", "delete"), ("repo", "archive"), ("release", "delete")}
 # Lệnh con huỷ/xoá hạ tầng không đảo ngược: vẫn ask ở bộ luật, nhưng mang lý do DESTROY_ASK để `apply_policy` chặn.
 DESTROY_CMDS: Dict[str, Tuple[str, ...]] = {
     "kubectl": ("delete",),
@@ -1132,10 +1138,7 @@ def _gh_api_writes(args: List[str]) -> bool:
     fields = _gh_api_field_values(args)
     has_input = any(a.split("=", 1)[0] == "--input" for a in args)
     if _positionals(args, GH_API_VALUE_FLAGS)[:1] == ["graphql"]:
-        indirect = has_input or any("$(" in a or "`" in a for a in args)
-        return (
-            indirect or any(v.partition("=")[2].startswith("@") for v in fields) or "mutation" in " ".join(args).lower()
-        )
+        return _graphql_opaque(args) or "mutation" in " ".join(args).lower()
     if len(set(methods)) > 1:
         return True
     return (methods[-1] if methods else ("POST" if fields or has_input else "GET")) != "GET"  # AUD-SEC-029
@@ -1258,7 +1261,7 @@ def _gh_api_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     merge_method=…]`, mỗi khoá một lần, không `@file`) mà merge-check cho phép (LOOP-STOP-022)."""
     ask = "ask", f"{EXTERNAL_ASK} — `gh api` ghi lên GitHub (merge/cấu hình phải qua lệnh có kiểm)"
     pos = _positionals(args, GH_API_VALUE_FLAGS)
-    m = REST_MERGE_PATH_RE.fullmatch(pos[0]) if len(pos) == 1 else None
+    m = REST_MERGE_PATH_RE.fullmatch(pos[0]) if len(pos) == 1 else None  # dạng chuẩn: không giải mã
     pairs = [v.partition("=") for v in _gh_api_field_values(args)]
     fields = {k: v for k, _, v in pairs}
     flags = {a.split("=", 1)[0] for a in args if a.startswith("-")} - {"-X", "--method", "-f", "--raw-field"}
@@ -1273,22 +1276,53 @@ ANY_REST_MERGE_RE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge/?")
 GRAPHQL_MERGE_RE = re.compile(r"\b(mergePullRequest|enablePullRequestAutoMerge)\b")
 
 
+def _api_path(p: str) -> str:
+    """Đường dẫn REST như GitHub hiểu: giải mã `%xx`, bỏ query/fragment (`…/%6Derge?x=1` = `…/merge`)."""
+    return urllib.parse.unquote(p.split("?", 1)[0].split("#", 1)[0])
+
+
+def _graphql_opaque(args: List[str]) -> bool:
+    """Query graphql guard không đọc được tại chỗ: `--input`, trường `@file`, giá trị là cả một biến shell (`query=$Q`),
+    thay lệnh (`$(…)`, backtick). `$n` bên trong query là biến GraphQL — đọc được, không tính."""
+    pairs = [v.partition("=") for v in _gh_api_field_values(args)]
+    indirect = any(a.split("=", 1)[0] == "--input" for a in args) or any("$(" in a or "`" in a for a in args)
+    return indirect or any(v.startswith("@") or (k == "query" and v.startswith("$")) for k, _, v in pairs)
+
+
 def _gh_api_merge_like(args: List[str], pos: List[str], ask: Tuple[str, str], root: str) -> Tuple[str, str]:
     """`gh api` ghi không đúng dạng merge REST có kiểm: là merge (REST/graphql) → vẫn kiểm `hard` (AUD-SEC-044);
     graphql merge không ánh xạ được số PR → chặn như không xác minh được; ghi khác → `ask` (đối ngoại)."""
-    if pos[:1] == ["graphql"]:
-        if GRAPHQL_MERGE_RE.search(" ".join(args)):
-            return "ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge qua graphql (không đọc được số PR)"
+    if pos[:1] == ["graphql"]:  # mutation merge, hoặc query guard không đọc được (`@file`, `--input`, biến)
+        if GRAPHQL_MERGE_RE.search(" ".join(args)) or _graphql_opaque(args):
+            return "ask", f"{EXTERNAL_ASK} — {UNVERIFIED_ASK}: merge qua graphql (không đọc được số PR/nội dung)"
         return ask
-    m = ANY_REST_MERGE_RE.fullmatch(pos[0]) if len(pos) == 1 else None
+    m = ANY_REST_MERGE_RE.fullmatch(_api_path(pos[0])) if len(pos) == 1 else None
     if not m:
         return ask
     repo = "" if m[1] == "{owner}/{repo}" else m[1]
     return _merge_ask(ask[1], [m[2]], root, repo)
 
 
+GH_REPO_FLAGS = ("-R", "--repo")
+
+
+def _gh_lift_repo(args: List[str]) -> List[str]:
+    """`gh -R o/r pr merge …` / `gh --repo=o/r …`: chuyển cờ repo đứng TRƯỚC lệnh con ra sau (`pr merge … -R o/r`) để
+    luật của lệnh con thấy repo (review #97: từng lọt cổng ngoại lệ cứng)."""
+    moved: List[str] = []
+    while args[:1] and args[0].split("=", 1)[0] in GH_REPO_FLAGS or args[:1] and args[0][:2] == "-R":
+        a = args[0]
+        if a in GH_REPO_FLAGS:
+            moved, args = [*moved, "-R", *args[1:2]], args[2:]
+        else:
+            moved, args = [*moved, "-R", a.split("=", 1)[1] if "=" in a else a[2:]], args[1:]
+    return [*args, *moved]
+
+
 def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
     """Hành động đối ngoại/triển khai thật → ask; `gh pr merge` qua `xt.py merge-check` (ADR-0013)."""
+    if name == "gh":
+        args = _gh_lift_repo(args)
     if name == "gh" and args[:2] == ["pr", "merge"] and not set(args[2:]) & HELP_FLAGS:
         return gh_pr_merge_rule(args[2:], root)
     if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
@@ -1309,10 +1343,21 @@ GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
 GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
 
 
+# Ghi lên bí mật, quyền, bảo vệ nhánh, ruleset, webhook, chuyển chủ repo (review #97) — như `gh secret`/đổi ruleset.
+GH_API_GUARDED_RE = re.compile(
+    r"/?(repos|orgs)/[^/\s]+(/[^/\s]+)?/(actions|dependabot|codespaces)/secrets(/.*)?"
+    r"|/?repos/[^/\s]+/[^/\s]+/(branches/[^\s]+/protection(/.*)?|rulesets(/.*)?|hooks(/.*)?|collaborators/.+|transfer)/?"
+    r"|/?orgs/[^/\s]+/(rulesets|hooks|members|memberships)(/.*)?"
+)
+
+
 def _gh_api_destroy(args: List[str]) -> bool:
     pos = _positionals(args, GH_API_VALUE_FLAGS)
     methods = _gh_api_methods(args)
-    method, path = (methods[-1] if methods else ""), (pos[0] if len(pos) == 1 else "")
+    implicit = "POST" if _gh_api_field_values(args) or any(a.split("=", 1)[0] == "--input" for a in args) else "GET"
+    method, path = (methods[-1] if methods else implicit), (_api_path(pos[0]) if len(pos) == 1 else "")
+    if method != "GET" and GH_API_GUARDED_RE.fullmatch(path):
+        return True
     if method == "DELETE":
         return bool(GH_API_REPO_RE.fullmatch(path) or GH_API_MAIN_REF_RE.fullmatch(path))
     archive = any(v.replace(" ", "").lower() == "archived=true" for v in _gh_api_field_values(args))
@@ -1337,6 +1382,7 @@ def _publish_rule(name: str, args: List[str]) -> Tuple[str, str]:
     if name == "gh":
         hit = tuple(args[:1]) in GH_ASK or tuple(args[:2]) in GH_ASK
         destroy = tuple(args[:1]) in GH_DESTROY or tuple(args[:2]) in GH_DESTROY
+        destroy = destroy or (args[:2] == ["repo", "edit"] and any(a.startswith("--visibility") for a in args))
         return ("ask", DESTROY_ASK if destroy else EXTERNAL_ASK) if hit else ("", "")
     if name not in ASK_CMDS:
         return "", ""
@@ -1989,7 +2035,9 @@ def _curl_outputs(args: List[str]) -> List[str]:
                 if c == "o":
                     out.append(a[j + 1 :] or (args[i + 1] if i + 1 < len(args) else ""))
                 break
-    return out + ([_url_name(u) for u in args if "://" in u] if remote else [])
+    names = [_url_name(u) for u in args if "://" in u] if remote else []
+    d = (_flag_values(args, ("--output-dir",)) or [""])[-1]  # `--output-dir D` ghép với tên của `-O`/`-o`
+    return [posixpath.join(d, f) for f in out + names] if d else out + names
 
 
 def _wget_outputs(args: List[str]) -> List[str]:
@@ -1998,7 +2046,9 @@ def _wget_outputs(args: List[str]) -> List[str]:
     out += [
         args[i + 1] for i, a in enumerate(args[:-1]) if a[:1] == "-" and a[1:2] != "-" and len(a) > 2 and a[-1] == "O"
     ]
-    return out or [_url_name(u) for u in args if "://" in u]
+    d = (_flag_values(args, ("-P", "--directory-prefix")) or [""])[-1]
+    names = out or [_url_name(u) for u in args if "://" in u]
+    return [posixpath.join(d, f) for f in names] if d else names
 
 
 def _rsync_dest(args: List[str]) -> List[str]:
@@ -2307,6 +2357,48 @@ def _backtick_scripts(cmd: str) -> List[str]:
     return out
 
 
+def _dollar_scripts(cmd: str) -> List[str]:
+    """Thân `$(…)` ngoài nháy đơn — kể cả trong nháy kép (`git commit -m "$(rm -rf ~)"`), nơi shlex coi là chữ; bỏ
+    `$((…))` (số học)."""
+    out: List[str] = []
+    quote, i = "", 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and quote != "'":
+            i += 2
+            continue
+        if c in "'\"" and quote in ("", c) and (c == '"' or quote != '"'):
+            quote = "" if quote == c else c
+        elif quote != "'" and cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+            depth, j = 1, i + 2
+            while j < len(cmd) and depth:
+                depth += {"(": 1, ")": -1}.get(cmd[j], 0)
+                j += 1
+            out.append(cmd[i + 2 : j - 1])
+            i = j
+            continue
+        i += 1
+    return out
+
+
+def _expanded_heredocs(cmd: str) -> List[str]:
+    """Thân heredoc có dấu kết KHÔNG nháy (`<<A`): bash thay `$(…)`/backtick trong thân trước khi đưa vào lệnh."""
+    out: List[str] = []
+    lines = cmd.replace("\\\n", "").split("\n")
+    i = 0
+    while i < len(lines):
+        opener, i = lines[i], i + 1
+        for m in HEREDOC_RE.finditer(opener):
+            body: List[str] = []
+            while i < len(lines) and lines[i].strip() != m.group(2):
+                body.append(lines[i])
+                i += 1
+            i += 1
+            if not m.group(1):
+                out.append("\n".join(body))
+    return out
+
+
 def _eval_scripts(tokens: List[str]) -> List[str]:
     """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
     return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
@@ -2316,7 +2408,8 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc/here-string vào shell, `echo/printf '…' | sh`, `eval '…'`,
     backtick."""
     out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
-    out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(cmd))
+    out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(cmd)) + _dollar_scripts(strip_heredocs(cmd))
+    out += [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
     for pipe in pipelines(tokens):
         for up, down in zip(pipe, pipe[1:]):
             src = normalize(up)

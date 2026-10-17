@@ -148,7 +148,7 @@ SECRET_PATTERNS = (
 
 
 # Thư mục home chứa tên người dùng/máy (AUD-HAR-054): FB đi vào repo khung public (LOOP-FB-003).
-HOME_PATH_RE = re.compile(r"(/home/|/Users/|[A-Za-z]:\\Users\\)(?!<user>)[^/\\\s]+")
+HOME_PATH_RE = re.compile(r"(/home/|/Users/|[A-Za-z]:\\Users\\)(?!<user>)[A-Za-z0-9._-]+")
 
 
 def redact(text: str) -> str:
@@ -3797,8 +3797,8 @@ def _feedback_aggregate(args: argparse.Namespace, base: Path) -> int:
             return 2
         d = Path(path)
         d = d / FEEDBACK_DIR if (d / FEEDBACK_DIR).is_dir() else d  # gốc repo dự án (AUD-HAR-051)
-        if not d.is_dir():
-            print(f"⚠ {project}: không có thư mục phản hồi {d} — bỏ qua", file=sys.stderr)
+        if not (d.is_dir() and any(d.glob("FB-*.md"))):  # gốc repo chưa có FB nào cũng báo (review #97)
+            print(f"⚠ {project}: không có phản hồi FB-*.md ở {d}", file=sys.stderr)
         sources.append((project, d))
     groups = feedback_aggregate(sources)
     if args.json:

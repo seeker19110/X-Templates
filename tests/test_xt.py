@@ -512,6 +512,7 @@ class LoopTest(unittest.TestCase):
             xt.redact_feedback("/Users/bob/src và C:\\Users\\carol\\a"), "/Users/<user>/src và C:\\Users\\<user>\\a"
         )
         self.assertEqual(xt.redact_feedback("/home/<user>/p"), "/home/<user>/p")
+        self.assertEqual(xt.redact_feedback("ở /home/bob, rồi"), "ở /home/<user>, rồi")
 
     def test_redact_more_secrets(self):
         """AUD-CFG-002: các dạng bí mật hay gặp trong triệu chứng/cách sửa của phản hồi (ra repo public)."""

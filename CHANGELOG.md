@@ -18,6 +18,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `git checkout|restore <rev> -- <bí mật>`, script trình thông dịch ghi thẳng vào file → chặn (AUD-SEC-047…049). Heredoc
   chỉ thuộc pipeline chứa `<<` (trước: message commit cùng dòng với `python3 …` bị coi là script). Dự án đích: chạy lại
   `install.py`.
+- **Guard — sửa theo review #97**: cờ `-R/--repo` của gh đứng trước lệnh con (`gh -R o/r pr merge`) đưa về sau để
+  luật merge thấy (AUD-SEC-051); merge qua graphql đọc query từ `@file`/`--input`/`query=$Q` và REST viết lệch
+  (`?x=1`, `%6Derge`) chặn như không xác minh được (AUD-SEC-053); `gh api` ghi bí mật/bảo vệ nhánh/ruleset/webhook/
+  collaborator/transfer, `gh release delete`, `gh repo edit --visibility` = huỷ (AUD-SEC-054); `curl --output-dir`,
+  `wget -P` ghép thư mục vào đích ghi (AUD-SEC-055); `git push origin heads/main` (AUD-SEC-056); `$(…)` trong nháy kép
+  và trong heredoc dấu kết không nháy được quét (AUD-SEC-059); cấu hình push chỉ tính khi giá trị lan ra nhiều nhánh
+  (`push.default=matching`, `remote.*.push|mirror`) và lệnh không có refspec, chỉ cho `git push` (AUD-SEC-052,
+  AUD-HAR-055); thiếu guard.py: `restore_re` không nhận `python3 -c … install.py`, `--output` (AUD-SEC-057).
 - **Dự án con**: hook cổng commit/auto-format dùng `.xtemplates/scripts/dev-task.sh` trước `scripts/dev-task.sh` riêng của
   dự án (AUD-HAR-049); `doctor` báo lỗi khi hook/settings còn `*.xtemplates-new` (AUD-HAR-050); `feedback aggregate
   --from p=<gốc repo>` tự nối `docs/xtemplates-feedback`, thư mục thiếu thì cảnh báo (AUD-HAR-051); install nói đúng khi

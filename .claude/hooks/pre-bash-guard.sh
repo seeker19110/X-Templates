@@ -14,7 +14,9 @@ payload="$(cat)"
 # merge` (AUD-SEC-031). JSON mã hoá tab thành `\t`.
 merge_re='gh([[:space:]]|\\t)+(pr([[:space:]]|\\t).*merge|api)'
 # `--disable-auto` (tắt auto-merge) là việc LOOP-STOP-005 đòi khi chạm ngoại lệ cứng — không chặn kể cả khi guard vắng.
-merge_like() { [[ $payload =~ $merge_re ]] && [[ $payload != *--disable-auto* ]]; }
+# Chỉ đúng dạng `gh pr merge <số> --disable-auto` cả lệnh (chuỗi `--disable-auto` trong `--body` không tính — review #97).
+disable_re='"command"[[:space:]]*:[[:space:]]*"[[:space:]]*gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto[[:space:]]*"'
+merge_like() { [[ $payload =~ $merge_re ]] && ! [[ $payload =~ $disable_re ]]; }
 # Không có python3 thì guard không chạy (fail-open về luồng) — riêng merge/ghi GitHub: không kiểm được ngoại lệ cứng →
 # chặn (strict: hỏi), vì settings không còn luật ask cho `gh pr merge` (ADR-0013, ADR-0019; AUD-SEC-021/045). In JSON
 # bằng printf: _lib.sh cũng cần python3.
@@ -31,8 +33,9 @@ fi
 # giữa chừng → vẫn fail-open về luồng (ADR-0002).
 if [ ! -f "$(dirname "$0")/guard.py" ]; then
   cmd="$(json_field "$payload" tool_input.command)"
-  restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]][^;&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
-  [[ $cmd != *$'\n'* && $cmd =~ $restore_re ]] && exit 0
+  # `install.py` phải là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
+  restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]]+[^[:space:];&|`$<>-][^[:space:];&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
+  [[ $cmd != *$'\n'* && $cmd != *--output* && $cmd =~ $restore_re ]] && exit 0
   fence_closed "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
 fi
 if ! guard_fields bash <<<"$payload"; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` chặn (AUD-HAR-040/SEC-045)

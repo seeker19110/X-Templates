@@ -319,16 +319,18 @@ def install_root_templates(target: Path) -> None:
 
 
 def progress_with_head(text: str, target: Path) -> str:
-    """PROGRESS mới cài ghi SHA HEAD thật của dự án (repo đã có commit) để `xt.py progress-check` xanh ngay (AUD-HAR-053);
-    repo chưa có commit/không phải git → giữ chỗ trống của mẫu."""
+    """PROGRESS mới cài ghi SHA HEAD thật của dự án (AUD-HAR-053) để `xt.py progress-check` xanh ngay — chỉ khi đích là
+    GỐC repo git riêng và đang ở nhánh chính (mẫu cấm SHA của nhánh PR; dự án lồng trong repo cha không lấy HEAD của
+    cha — review #97); không thì giữ chỗ trống của mẫu."""
+    cmd = ["git", "-C", str(target), "rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]
     try:
-        r = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, check=False
-        )
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return text
-    head = r.stdout.strip()
-    return text.replace("<SHA đầy đủ>", head) if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", head) else text
+    out = r.stdout.split("\n")
+    top, head, branch = (out + ["", "", ""])[:3]
+    ok = r.returncode == 0 and Path(top).resolve() == target.resolve() and branch in ("main", "master")
+    return text.replace("<SHA đầy đủ>", head) if ok and re.fullmatch(r"[0-9a-f]{40}", head) else text
 
 
 def ruleset_required_checks() -> list[str]:

@@ -60,6 +60,12 @@ class InstallTest(unittest.TestCase):
         text = (self.target / "PROGRESS.md").read_text(encoding="utf-8")
         self.assertIn(f"`{head}`", text)
         self.assertNotIn("<SHA đầy đủ>", text)
+        # nhánh PR / dự án lồng trong repo cha: không ghi HEAD (review #97)
+        sub = self.target / "apps" / "web"
+        sub.mkdir(parents=True)
+        self.assertEqual(install.progress_with_head("`<SHA đầy đủ>`", sub), "`<SHA đầy đủ>`")
+        subprocess.run([*git, "checkout", "-qb", "feat"], check=True)
+        self.assertEqual(install.progress_with_head("`<SHA đầy đủ>`", self.target), "`<SHA đầy đủ>`")
 
     def test_progress_keeps_placeholder_without_commits(self):
         self.run_install()
