@@ -245,6 +245,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (`coverage report --fail-under=100` — ratchet `BASE-GATE-013`); `coverage` 7.16.2 (Apache-2.0) khoá kèm hash.
 - CI repo: `concurrency` chỉ hủy run cũ của PR, không hủy run trên `main` (`WF-CI-008`).
 
+### Removed
+- **Workflow `portability.yml` (job `macos-bash32`)** — chủ repo yêu cầu gỡ macOS khỏi CI (2026-10-17). CI repo khung chỉ
+  còn chạy Ubuntu: không còn máy kiểm bash 3.2, sed/awk BSD hay `python3` 3.9 hệ thống của macOS cho hook/installer;
+  AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
+
 ### Fixed
 - **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
   - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
