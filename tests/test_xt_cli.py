@@ -946,6 +946,12 @@ class FeedbackTest(TmpDirCase):
         )
         table = "\n".join(run_main("feedback", "aggregate", *src)[1].splitlines())
         self.assertIn("s1; s2", table)  # mọi triệu chứng khác nhau, không chỉ cái đầu
+        empty = {p: self.tmp / f"e{p}" for p in ("a", "b")}  # review #84: triệu chứng rỗng không gộp chung
+        for proj, tid in (("a", "T-001"), ("b", "T-007")):
+            xt.write_feedback(empty[proj], {"kind": "bi-chan", "id": tid, "symptom": "", "fix": "người"})
+        src = [x for p, d in empty.items() for x in ("--from", f"{p}={d / 'docs' / 'xtemplates-feedback'}")]
+        groups = json.loads(run_main("feedback", "aggregate", *src, "--json")[1])
+        self.assertEqual(sorted((g["projects"], g["ready"]) for g in groups), [(["a"], False), (["b"], False)])
 
     def test_aggregate_redacts_hand_edited_entries(self):
         """AUD-CFG-002: FB sửa tay sau `feedback add` vẫn được che trước khi ra PR nháp (repo khung public)."""

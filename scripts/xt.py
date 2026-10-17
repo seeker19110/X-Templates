@@ -2453,7 +2453,10 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
 
 
 # Lệnh ở vị trí đầu một lệnh đơn trong chuỗi shell của `xt.yaml`; từ khoá/builtin của shell không phải công cụ.
-GATE_CMD_RE = re.compile(r"(?:^|&&|\|\||[;|]|\bdo\b|\bthen\b)\s*([A-Za-z][\w.+-]*)(?![\w.+-]*=)")
+# Tên công cụ trọn token: không theo sau `=` (gán biến) hay `/` (công cụ theo đường dẫn `node_modules/.bin/x`, kiểm riêng
+# thì báo nhầm); lookahead một ký tự để không quay lui bậc hai trên token dài.
+GATE_CMD_RE = re.compile(r"(?:^|&&|\|\||[;|]|\bdo\b|\bthen\b)\s*([A-Za-z][\w.+-]*)(?![\w.+=/-])")
+QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")  # `|`/`do` trong nháy không phải ranh giới lệnh
 GATE_MODULE_RE = re.compile(r"\bpython[0-9.]*\s+-m\s+([A-Za-z_][\w]*)")
 SHELL_BUILTINS = {"for", "do", "done", "if", "then", "else", "elif", "fi", "while", "until", "case", "esac", "in"}
 SHELL_BUILTINS |= {"exit", "export", "cd", "true", "false", "test", "echo", "printf", "set", "unset", "return"}
@@ -2463,7 +2466,7 @@ def _doctor_gate_tools(keys: Dict[str, str]) -> List[Finding]:
     """Công cụ/mô-đun mà lệnh cổng gọi nhưng không có trên máy (AUD-HAR-034: thiếu `shellcheck` chỉ biết khi cổng đỏ)."""
     missing: List[str] = []
     for k in DOCTOR_YAML_KEYS:
-        cmd = yaml_scalar(keys.get(k, ""))
+        cmd = QUOTED_RE.sub("''", yaml_scalar(keys.get(k, "")))
         tools = {t for t in GATE_CMD_RE.findall(cmd) if t not in SHELL_BUILTINS and not shutil.which(t)}
         mods = {m for m in GATE_MODULE_RE.findall(cmd) if importlib.util.find_spec(m) is None}
         missing += [f"{t} ({k})" for t in sorted(tools | mods)]
@@ -3741,12 +3744,13 @@ def _feedback_list(args: argparse.Namespace, base: Path) -> int:
 LOCAL_FEEDBACK_ID_RE = re.compile(r"T-\d+|loop")
 
 
-def _feedback_key(e: Dict[str, str]) -> Tuple[str, str]:
+def _feedback_key(e: Dict[str, str], project: str) -> Tuple[str, str]:
     """(loại, ID) — trừ ID cục bộ của từng dự án (`T-003`, `loop`, mọi `bi-chan`): gộp theo triệu chứng chuẩn hoá,
-    nếu không hai dự án khác lý do vẫn bị tính "đủ ngưỡng" (AUD-CODE-004)."""
+    nếu không hai dự án khác lý do vẫn bị tính "đủ ngưỡng" (AUD-CODE-004); triệu chứng rỗng thì không gộp với ai."""
     kind, fid = e.get("kind", "?"), e.get("id", "?")
     if kind == "bi-chan" or LOCAL_FEEDBACK_ID_RE.fullmatch(fid):
-        return kind, " ".join(e.get("symptom", "").lower().split())[:120]
+        symptom = " ".join(e.get("symptom", "").lower().split())[:120].strip("—- ")  # rỗng được ghi thành `—`
+        return kind, symptom or f"{project}:{fid}"
     return kind, fid
 
 
@@ -3756,7 +3760,7 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
     groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for project, d in sources:
         for e in feedback_entries(d) if d.is_dir() else []:
-            key = _feedback_key(e)
+            key = _feedback_key(e, project)
             g = groups.setdefault(key, {"kind": key[0], "id": e.get("id", "?"), "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})
             # FB có thể đã sửa tay sau `feedback add` → che lại trước khi ra PR nháp ở repo khung public (AUD-CFG-002).

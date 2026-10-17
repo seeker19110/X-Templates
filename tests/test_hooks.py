@@ -2579,6 +2579,25 @@ class GuardEgressAuditTest(EgressCase):
             ),
         )
 
+    def test_review_84_gaps(self):  # review #84: `env -S` nháy lẻ, kubectl cờ toàn cục, `find -mindepth 1 -delete`
+        self.assert_all(
+            "deny",
+            (
+                'env -S "echo it\'s"; git push --force origin main',
+                'env -S "echo it\'s" && rm -rf /',
+                "find . -mindepth 1 -delete",
+                'env -S "git push --force origin main #\'"',  # GNU env coi `#` là chú thích → lệnh chạy thật
+            ),
+        )
+        self.assert_all(
+            "ask",
+            (
+                "kubectl -n prod exec pod -- sh -c 'pip install x'",
+                "kubectl --context prod exec pod -- sh -c 'git push --force'",
+            ),
+        )
+        self.assert_all("", ("find . -mindepth 1 -name '*.pyc' -delete", "kubectl -n prod get pods"))
+
     def test_guard_other_container_clis(self):  # AUD-SEC-042
         self.assert_all(
             "ask",

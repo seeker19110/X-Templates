@@ -267,7 +267,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Guard bịt thêm (trả nợ audit, AUD-SEC-023/024/042): git tuỳ chọn dài viết tắt (`reset --ha`, `clean --fo`,
   `push --mirr`, `push --forc`) coi như tuỳ chọn đầy đủ; `push --all/--tags` hỏi; `find . -delete` không lọc bị chặn như
   `rm -rf .`; `xargs rm -rf` (đích từ stdin) hỏi; `exec -a <tên> …`, `env -S '<lệnh>'` bóc ra lệnh thật;
-  `docker-compose`/`podman-compose`/`nerdctl` theo luật docker, `kubectl exec … -- <lệnh>` quét lệnh trong pod.
+  `docker-compose`/`podman-compose`/`nerdctl` theo luật docker, `kubectl [cờ toàn cục] exec … -- <lệnh>` quét lệnh trong
+  pod. Review #84: `env -S` có nháy lẻ không làm guard ném lỗi (trước làm cả lệnh Bash lọt, kể cả phần `git push --force`
+  phía sau); `find . -mindepth 1 -delete` bị chặn; `doctor` không báo nhầm công cụ gọi theo đường dẫn, `|`/`do` trong nháy;
+  `feedback aggregate` không gộp các phản hồi có triệu chứng rỗng.
 - Guard: mount đường dẫn tuyệt đối nằm dưới gốc dự án (`-v <gốc>/.docker:/d`, `<gốc>/deploy/etc/x`) không còn hỏi oan
   theo mảnh tên; `<gốc>/../.ssh` vẫn hỏi (AUD-HAR-047).
 - Audit delta 2026-10-17 đợt 2 (tài liệu): README đếm 35 file mảng 05–09 (AUD-DOC-038); dòng `portability.yml` trong

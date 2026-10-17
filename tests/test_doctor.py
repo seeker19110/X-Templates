@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -113,6 +114,16 @@ class DoctorHealthyTest(DoctorCase):
         self.assertIn("xt_no_such_mod_2 (typecheck)", msgs[0])
         for word in ("bash", "git", "for", "exit", "d="):
             self.assertNotIn(f" {word} (", msgs[0])
+        self.write(  # review #84: công cụ theo đường dẫn, `|`/`do` trong nháy không phải lệnh
+            "xt.yaml",
+            "lint: node_modules/.bin/eslint src && scripts/dev-task.sh lint\n"
+            'typecheck: grep -rE "TODO|FIXME" src && exit 1 || true\n'
+            "test: git -C . log -1 && python3 -m json.tool -h 'do something'\nbuild: ''\n",
+        )
+        self.assertEqual([f.msg for f in self.findings() if f.code == "gate-tools"], [])
+        start = time.monotonic()  # không bậc hai với token dài có `=` cuối
+        self.assertEqual(xt._doctor_gate_tools({"lint": "git && " + "b" * 50000 + "="}), [])
+        self.assertLess(time.monotonic() - start, 1.0)
         self.write("xt.yaml", "lint: git status && python3 -m json.tool x\ntypecheck: ''\ntest: ''\nbuild: ''\n")
         self.assertEqual([f for f in self.findings() if f.code == "gate-tools"], [])
 

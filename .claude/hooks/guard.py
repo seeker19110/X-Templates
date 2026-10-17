@@ -385,6 +385,14 @@ def pipelines(tokens: List[str]) -> List[List[List[str]]]:
 ENV_ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
 
 
+def _split_words(text: str) -> List[str]:
+    """`shlex.split`, nháy lẻ (`env -S "echo it's"`) thì tách theo khoảng trắng — ném lỗi ở đây làm cả hook cho qua."""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
 def _skip_env_args(a: List[str]) -> None:
     """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C` kèm một giá trị); `-S '<lệnh>'` tách chuỗi thành lệnh
     thật (`env -S "git push --force"`, AUD-SEC-024)."""
@@ -394,7 +402,7 @@ def _skip_env_args(a: List[str]) -> None:
         if opt in ("-S", "--split-string") and a:
             split = a.pop(0)
         if split:
-            a[:0] = shlex.split(split)
+            a[:0] = _split_words(split)
         elif opt in ("-u", "-C") and a:
             a.pop(0)
 
@@ -904,13 +912,15 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
-    if set(args[i:]) <= FIND_NO_FILTER and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
+    if {a for a in args[i:] if not a.isdigit()} <= FIND_NO_FILTER and any(
+        _dangerous_rm_target(r) for r in roots
+    ):  # `find . -delete` = `rm -rf .`
         return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
-FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race"}
+FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race", "-mindepth", "-maxdepth"}
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
 
@@ -2048,6 +2058,9 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     return asks
 
 
+KUBECTL_VALUE_FLAGS = ("-n", "--namespace", "--context", "--kubeconfig", "--cluster", "--user", "-s", "--server")
+
+
 def _container_cli(n: List[str]) -> List[str]:
     """CLI container cùng cú pháp docker: `docker-compose …`/`podman-compose …` → `docker compose …`, `nerdctl` → docker."""
     if n[:1] in (["docker-compose"], ["podman-compose"]):
@@ -2059,8 +2072,9 @@ def _container_exec(argv: List[str]) -> Tuple[List[str], List[str]]:
     """(cờ, lệnh) chạy trong container: `docker exec ctr sh -c …`, `docker run img bash -c …`, `compose run
     --entrypoint sh dv -c …` (entrypoint shell nhận phần còn lại làm đối số)."""
     n = _container_cli(normalize(argv))
-    if n[:1] == ["kubectl"]:  # `kubectl exec [cờ] pod -- <lệnh>` (AUD-SEC-042)
-        return [], n[n.index("--") + 1 :] if "exec" in n[1:3] and "--" in n else []
+    if n[:1] == ["kubectl"]:  # `kubectl [cờ toàn cục] exec [cờ] pod -- <lệnh>` (AUD-SEC-042)
+        k = 1 + _skip_opts(n[1:], KUBECTL_VALUE_FLAGS)
+        return [], n[n.index("--") + 1 :] if n[k : k + 1] == ["exec"] and "--" in n else []
     if n[:1] not in (["docker"], ["podman"]):
         return [], []
     args = n[1:][_skip_opts(n[1:], DOCKER_GLOBAL_VALUE_FLAGS) :]
