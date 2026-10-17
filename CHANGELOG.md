@@ -251,6 +251,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- **`xt.py` lại chạy được với `python3` hệ thống của macOS (3.9)**: `redact` (#73) dùng `\w++` (chỉ có từ Python 3.11)
+  nên `xt.py` lỗi `re.error` ngay khi nạp; hook gọi `python3` của máy dev → merge-check "không chạy được" (merge luôn hỏi),
+  Stop/PreCompact hook im lặng cho qua. Job Portability đỏ từ #73. Nay dùng `\w+` sau lookahead (vẫn tuyến tính,
+  AUD-CODE-009).
 - **`unaccent` trong index biểu thức/cột generated** (`DB-MODEL-016`, `DB-SEARCH-005`; ID và mức giữ, chữ đổi).
   - Lỗi: hàm của extension là STABLE, nên PostgreSQL từ chối `lower(unaccent(col))` mà hai mục hướng dẫn. Đã tái hiện
     trên PostgreSQL 17.
