@@ -46,6 +46,7 @@
 - 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR — ADR-0013, ADR-0014, D-010.
 - 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012.
 - 2026-10-17 Guard: lệnh trong container chỉ xét luật ra khỏi máy dev; push vào PR đang auto-merge → chạy lại `merge-check` (D-015).
+- 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 ## Bàn giao phiên
 - 2026-10-17 · Commit cuối trên `main`: `0b1aaa6` (#74); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).

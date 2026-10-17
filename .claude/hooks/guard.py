@@ -6,6 +6,8 @@ Dùng (payload JSON của Claude Code trên stdin, kết quả JSON trên stdout
                      "commit_dir": "<thư mục git commit chạy, rỗng nếu không biết>"}
   guard.py edit   → {"decision": "deny"|"ask"|"", "reason": "..."}  (file bí mật/cổng/migration; test ĐÃ CÓ bị làm yếu)
   guard.py mcp    → {"decision": "allow"|"ask"|"", "reason": "..."}  (tool MCP merge PR: allow chỉ khi merge-check cho phép)
+  guard.py <mode> nul → cùng kết quả, dạng `ok\0<decision>\0<reason>\0<commit>\0<no_verify>\0<commit_dir>\0` để hook đọc
+                     bằng `read -d ''` (bash 3.2 được), khỏi sinh thêm tiến trình python chỉ để tách trường JSON.
 
 Vì sao Python thay regex trong bash (audit 2026-10-14, AUD-SEC-001…010):
 - tách lệnh theo token shell (`shlex`): `|`/`;` trong nháy không phải ranh giới, thân heredoc là dữ liệu;
@@ -821,6 +823,22 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
+# Như `py_run` của _lib.sh: chạy xt.py bằng import để dùng bytecode cache (chạy như script thì biên dịch lại ~4.000 dòng
+# mỗi lần); sys.path[0] = thư mục của file, không lấy cwd.
+IMPORT_RUNNER = (
+    "import sys; d, _, f = sys.argv[1].rpartition('/'); sys.path[0] = d or '.'; sys.argv = sys.argv[1:]; "
+    "sys.exit(__import__(f[:-3]).main())"
+)
+
+
+def pycache_prefix() -> str:
+    """Thư mục cache bytecode ngoài dự án (như `_lib.sh`): giữ `PYTHONPYCACHEPREFIX` có sẵn, nếu không thì XDG/~/.cache."""
+    if os.environ.get("PYTHONPYCACHEPREFIX"):
+        return os.environ["PYTHONPYCACHEPREFIX"]
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "xtemplates", "pycache")
+
+
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
     """Chạy `xt.py merge-check --json` cài CÙNG khung với hook này (không theo PATH/biến môi trường agent đặt được)."""
     here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -832,9 +850,17 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
         ),
         "",
     )
-    cmd = [sys.executable, xt, "merge-check", "--json", *(["--pr", selector[0]] if selector else [])]
+    cmd = [
+        sys.executable,
+        "-c",
+        IMPORT_RUNNER,
+        xt,
+        "merge-check",
+        "--json",
+        *(["--pr", selector[0]] if selector else []),
+    ]
     try:
-        env = dict(os.environ, CLAUDE_PROJECT_DIR=root)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, PYTHONPYCACHEPREFIX=pycache_prefix())
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=MERGE_CHECK_TIMEOUT, env=env, check=False)
         data: Dict[str, object] = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -2387,6 +2413,16 @@ def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, obje
     return {"decision": ""}
 
 
+NUL_FIELDS = ("decision", "reason", "commit", "no_verify", "commit_dir")
+
+
+def _sh_field(v: object) -> str:
+    """Giá trị cho hook bash: bool → `true`/`false` (như `json_field` cũ), thiếu → rỗng; NUL trong chuỗi bị bỏ."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return "" if v is None else str(v).replace("\0", "")
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     payload: Any = None
@@ -2415,7 +2451,10 @@ def main() -> int:
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
-    sys.stdout.write(json.dumps(out, ensure_ascii=False))
+    if sys.argv[2:3] == ["nul"]:
+        sys.stdout.write("".join(f"{v}\0" for v in ["ok", *(_sh_field(out.get(k)) for k in NUL_FIELDS)]))
+    else:
+        sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0
 
 
