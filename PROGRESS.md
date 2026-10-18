@@ -1,10 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-16 · Nhánh: claude/intelligent-meitner-vzr6r5
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-18 · Nhánh: seeker/quirky-knuth-v0uphi
 
 ## Đang làm
-- Audit dự án con: sửa ở PR #97 (🔴 SEC-044, 🟠 SEC-045…049, 🟢 HAR-049…054/DOC-041…043); `audit check --strict` exit 0. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043.
-
+- Tối ưu autopilot xong (#106–#110, PLAN T-1101…T-1104, `loop verify` xanh trên `c52276c`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
@@ -12,6 +11,8 @@
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ; CLI container ngoài docker/podman (`kubectl exec`, `nerdctl`, AUD-SEC-042); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
+
+6. Nợ 🟢 từ review #110: `pr reviewed --pr <URL>` chỉ bắt `/pull/(\d+)` (URL `#issuecomment-…`, `/files` ghi khoá rác — an toàn, đòi rà lại); danh sách hành động ở `LOOP-STOP-022` thêm `merge`, `closed`; `xt.py … | head` in `Broken pipe` (bắt SIGPIPE). Chưa làm: sàn quyền token (chủ repo), đóng gói `xt.pyz` (ADR-0010 cần ≥ 2 dự án).
 
 ## Quyết định
 - 2026-10-13 Khung v2 = thư viện yêu cầu có ID + máy ghép blueprint + máy kiểm "xong" — ADR-0001.
@@ -25,8 +26,6 @@
 - 2026-10-14 PROGRESS chỉ ghi SHA trên `main`: squash-merge làm SHA của nhánh PR không còn là tổ tiên HEAD — `xt.py progress-check` trong cổng `lint` sẽ đỏ.
 - 2026-10-14 Audit có máy đỡ: sổ `docs/ops/AUDIT-STATUS.md` máy đọc, `audit check --strict` = Definition of Complete — ADR-0005.
 - Nợ kỹ thuật chấp nhận: chọn 4 MUST/module là phán đoán, chờ dữ liệu miễn trừ từ dự án thật; số điều cụ thể của NĐ 356/2025 chưa đối chiếu bản gốc — trả khi audit dự án thật.
-- 2026-10-14 Sửa audit 5 đợt (#20–#24): `dev-task.sh` lấy gốc dự án đúng ở `.xstored/`; hook phân tích lệnh bằng `guard.py` (shlex); install gộp hook + manifest hash; công cụ cổng khoá hash + `dep-audit`; WF-DOC-004 bỏ điều kiện "nhánh còn trên remote" (xung đột squash).
-- 2026-10-14 9 mục trùng chủ đề chuyển `MAY` "gộp vào" nhà (ID giữ, CHANGELOG).
 - 2026-10-14 Repo khung: cổng `typecheck` = `mypy --strict`; cổng `test` đòi coverage dòng + nhánh 100% (cả subprocess) — mã chết thì xoá, không dùng `pragma: no cover` trừ khi không thể chạy tới.
 - 2026-10-14 Repo đổi tên X-stored → X-Templates; giữ `.xstored/`, `xs.py`, `XS_*` — ADR-0006 (bị thay bởi ADR-0007).
 - 2026-10-15 Định danh kỹ thuật theo tên mới: `.xtemplates/`, `xt.py`, `xt.yaml`, `XT_*`; `install.py` tự chuyển bản ≤ 2.x, liệt kê file còn tên cũ; tài liệu lịch sử giữ tên cũ; bản kế tiếp 3.0.0 — ADR-0007.
@@ -35,21 +34,21 @@
 - 2026-10-15 Tag phát hành tạo bằng workflow `release-tag.yml` (proxy chặn push tag từ phiên agent); `v2.0.0` → `55de4d1`.
 - 2026-10-15 Guard hỏi khi mở phiên Claude bỏ qua hook (`--bare`, `--settings`, `disableAllHooks`…); cổng commit chạy trước khi hỏi người.
 - 2026-10-15 `xt.py changelog-check` trong cổng `lint`; gốc dự án: `CLAUDE_PROJECT_DIR` → cha `.xtemplates` → dấu hiệu khung → `.git` → cwd.
-- 2026-10-15 Bằng chứng blueprint trích máy kiểm/test, không trích file trạng thái viết lại mỗi phiên (PROGRESS.md, PLAN) — nếu không `audit plan` cờ cũ sau mọi phiên (AUD-HAR-019).
 
-- 2026-10-15 Phiên chính tự duyệt điểm quyết định chuyên môn (5 tiêu chí: đúng & an toàn · đường lùi · bền lâu · trải nghiệm · tốc độ phá hoà), ghi `loop decide` D-NNN; hành động vẫn dừng có hook; mặc định tự host, dịch vụ thật quyết ở G7 — ADR-0008 (repo khung + dự án đích).
+- 2026-10-15 Phiên chính tự duyệt điểm quyết định chuyên môn theo 5 tiêu chí, ghi `loop decide` D-NNN; mặc định tự host — ADR-0008.
 - 2026-10-15 Autopilot một phiên đến khi xong: context đầy → compaction + checkpoint (không bàn giao); bàn giao chỉ khi ≥ 80% trần vòng/giờ/tiền; việc cần người `loop defer`, gom cuối phiên; chạy bằng `claude --permission-mode auto` — ADR-0009.
-- 2026-10-15 Phản hồi dự án đích → khung: dự án ghi `docs/xtemplates-feedback/FB-NNN.md` (`redact`), khung kéo về bằng Routine hằng tuần → PR nháp, đủ ngưỡng khi ≥ 2 dự án hoặc có tái hiện; người duyệt trước khi công khai — ADR-0010.
+- 2026-10-15 Phản hồi dự án đích → khung qua `FB-NNN` + Routine tuần → PR nháp, đủ ngưỡng ≥ 2 dự án hoặc tái hiện — ADR-0010.
 - 2026-10-16 Audit khung trước `/autopilot`: `xt.py doctor --fix` là việc đầu tiên; `--fix` chỉ sửa phần đảo ngược được, hook/settings để người (`install.py`); `loop init` cảnh báo, không chặn (fail-open về luồng) — `LOOP-HARNESS-020`.
 - 2026-10-17 CI: gỡ `portability.yml` (macOS bash 3.2, chỉ chạy sau merge từ 2026-10-16) theo yêu cầu chủ repo — CI không còn kiểm macOS (bash 3.2, sed/awk BSD, `python3` 3.9 hệ thống).
 - 2026-10-16 Trong vòng autopilot, `lint`/`test` rỗng hoặc no-op (kể cả chỉ có comment) làm cổng đỏ — ADR-0011.
 - 2026-10-16 Blueprint chỉ MUST theo quy mô, SHOULD/MAY ở BACKLOG; trần vòng một phiên chỉ đếm task — ADR-0012.
 - 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR — ADR-0013, ADR-0014, D-010.
-- 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012; bỏ được bằng `merge_hard_exceptions: auto` (ADR-0020).
+- 2026-10-16 L3 auto-merge (ADR-0015); ngoại lệ cứng người merge (ADR-0016), bỏ được bằng `merge_hard_exceptions: auto` (ADR-0020); nay merge theo làn (ADR-0024/0025).
 - 2026-10-17 Guard: lệnh trong container chỉ xét luật ra khỏi máy dev; push vào PR đang auto-merge → chạy lại `merge-check` (D-015).
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
+- 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-17 · Commit cuối trên `main`: `0b1aaa6` (#74); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `c52276c` (#110); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
-- Autopilot: PLAN T-901…T-904 (trả nợ 🟢). Đang chặn: không.
-- Câu hỏi cần người: mục hook/settings/CI ở Đang làm; Tiếp theo 1 (`x-hotel-manager`).
+- Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
+- Câu hỏi cần người: mục chờ chủ repo ở Đang làm; Tiếp theo 1 (`x-hotel-manager`), 6 (quyền token).
