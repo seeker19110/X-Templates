@@ -339,3 +339,17 @@
 - Chọn: Bản viết lại CÙNG lệnh (thay biến, hậu tố đối số của lệnh bọc) quét ở cùng độ sâu; lệnh bọc nhận theo danh sách + thử mọi hậu tố của đối số; chuỗi trong lời gọi thực thi (os.system, subprocess, execSync) là lệnh
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bản viết lại không phải shell lồng nên không nên tốn độ sâu (var_eval + env đẩy chạm trần 3 và thành ask → lọt); hậu tố thay bảng cờ vì tuỳ chọn mỗi lệnh khác nhau và bảng sai là lỗ mới; ask thì cho qua nên không chặn gì. Chặn chỉ tính trên lệnh sẽ bị chặn nếu chạy trực tiếp nên không thêm chặn nhầm
 - Đường lùi: Bỏ _var_scripts/_runner_scripts/_procsub_scripts/_exec_api_scripts khỏi _scan_nested, expand_ansi_c/IFS_RE khỏi tokenize; ca trong GuardRemainingGapsTest chuyển lại KNOWN_GAPS
+
+### D-048 · 2026-10-18T14:03:18+00:00 · Cổng render UI lấy từ XIAS (vendor mã MIT, giữ ghi chú bản quyền) hay tự viết mẫu?
+
+- Phương án: (1) Chép verify_states/target_size/overflow/axe_audit của plugin87/ux-ui-agent-skills (MIT) vào khung, giữ ghi chú bản quyền · (2) Tự viết mẫu verify-render.mjs (Playwright + axe) theo ý tưởng, không chép mã, chạy thử trên fixture; ghi XIAS là nguồn ý tưởng · (3) Chỉ ghi vào checklist, không kèm mã
+- Chọn: Tự viết mẫu verify-render.mjs (Playwright + axe) theo ý tưởng, không chép mã, chạy thử trên fixture; ghi XIAS là nguồn ý tưởng
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: stored §7d.2 thấy XIAS chép dữ liệu từ hai kho MIT khác không ghi nguồn và cổng gọi chromium channel 'chrome' (fail ở sandbox, 49/52 khi tự chạy); chép nguyên kéo theo nghĩa vụ bản quyền + lỗi môi trường. Mẫu tự viết nhỏ (≈100 dòng), dùng Chromium của Playwright, đã chạy: tốt exit 0, xấu exit 1 (hover 1,76:1, tràn ngang, primary 4,10:1), thiếu đích/Chromium exit 2
+- Đường lùi: Xoá framework/templates/ui-gates/ và dòng bảng ở templates/README.md, UX-A11Y-028/029 và Cổng tự động trong accessibility.md trở về chỉ mô tả Playwright
+
+### D-049 · 2026-10-18T14:03:18+00:00 · Kiểm tương phản token và license vendor: viết trong xt.py (stdlib Python) hay thành script Node/gói riêng?
+
+- Phương án: (1) Thêm xt.py contrast và xt.py vendor-check (stdlib, có test, 100% coverage), danh sách theo dõi license ở JSON trong framework/ · (2) Script Node check-contrast.mjs chép vào từng dự án (như checklist cũ gợi ý) · (3) Dùng linter DESIGN.md của Google cho mọi việc tương phản
+- Chọn: Thêm xt.py contrast và xt.py vendor-check (stdlib, có test, 100% coverage), danh sách theo dõi license ở JSON trong framework/
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: khung chỉ phụ thuộc stdlib Python, mọi dự án đích đã có xt.py (không cần Node cho dự án không có frontend), test được và đo coverage; DESIGN.md lint chỉ phủ khi có DESIGN.md và tương phản chỉ là warning exit 0 nên không thay được cổng token CSS. Giữ lint DESIGN.md làm mục riêng UX-DS-021. Danh sách theo dõi license để JSON có ngày xác minh nên sửa không cần đổi mã
+- Đường lùi: Xoá cmd_contrast, cmd_vendor_check và hằng liên quan khỏi xt.py, tests/test_ui_gates.py, ui-vendor-watchlist.json; đổi Kiểm của UX-DS-003/011/020, UX-A11Y-002, CMP-LIC-022, FE-START-* về lệnh mô tả
