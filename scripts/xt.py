@@ -2891,7 +2891,7 @@ def merge_decision(
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
-    PR còn chờ CI để guard không bật auto-merge cho nó ngay lúc mở PR. `hard_auto` (`merge_hard_exceptions: auto`,
+    PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0024: làn chuẩn bật sau review sạch, làn nhanh khi mở). `hard_auto` (`merge_hard_exceptions: auto`,
     ADR-0020): ngoại lệ cứng không giữ người — lý do chuyển sang `hard_waived`, `hard` rỗng."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
@@ -2935,7 +2935,7 @@ def merge_decision(
         "head": pr.get("headRefOid", ""),
         "verdict": verdict,
         "lane": lane,
-        # L3 (ADR-0015): guard cho bật auto-merge của GitHub ngay khi mở PR — trừ PR chồng (nhắm nhánh sắp bị xoá).
+        # L3 (ADR-0015, ADR-0024): guard cho bật auto-merge của GitHub (làn chuẩn sau review sạch, làn nhanh khi mở) — trừ PR chồng (nhắm nhánh sắp bị xoá).
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
@@ -2996,39 +2996,47 @@ PLAN_PATH_SUFFIX = "docs/autopilot/PLAN.md"
 
 def _plan_grants(repo: str, path: str, ref: Optional[str]) -> Optional[Dict[str, Dict[str, str]]]:
     """Ủy quyền production trong PLAN.md ở `ref` (REST contents; `ref=None` = nhánh mặc định). `{}` = file vắng (404)
-    hoặc không có grant; None = không đọc được hay không xác minh được (đóng khi thiếu). `ref` rỗng thì REST lấy nhánh
-    mặc định — không dùng cho PR, coi là không đọc được."""
+    hoặc không có grant; None = không đọc được hay không xác minh được (đóng khi thiếu)."""
+    return _plan_read(repo, path, ref)[0]
+
+
+def _plan_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[Dict[str, Dict[str, str]]], bool]:
+    """(ủy quyền như `_plan_grants`, file vắng?). Vắng chỉ khi gh báo `Not Found (HTTP 404)` — `No commit found for the
+    ref … (HTTP 404)` là ref sai, không phải file vắng (review lần bốn). `ref` rỗng thì REST lấy nhánh mặc định — không
+    dùng cho PR, coi là không đọc được."""
     if ref == "":
-        return None
+        return None, False
     try:
         d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}" + (f"?ref={ref}" if ref else ""))
         # Chỉ đúng file đó: API contents đi theo symlink và trả file ĐÍCH (type file, path khác) — `docs/autopilot/PLAN.md`
         # là symlink tới file ngoài tầm gác thì không xác minh được. File lớn: content rỗng + encoding none.
         if d.get("type") != "file" or d.get("path") != path or d.get("encoding") != "base64":
-            return None
+            return None, False
         raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
-        return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8"))
+        return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8")), False
     except PrInputError as exc:
-        # File vắng ở ref đó ≠ không đọc được. Chỉ tin mã HTTP trong phần stderr của gh (sau ` lỗi: `): thông điệp còn
-        # chứa đường dẫn có sha, sha chứa chữ `404` không được làm lỗi mạng thành "file vắng".
-        return {} if "(HTTP 404)" in str(exc).split(" lỗi: ", 1)[-1] else None
+        # File vắng ở ref đó ≠ không đọc được. Chỉ tin phần stderr của gh (sau ` lỗi: `): thông điệp còn chứa đường dẫn
+        # có sha, sha chứa chữ `404` không được làm lỗi mạng thành "file vắng".
+        absent = "Not Found (HTTP 404)" in str(exc).split(" lỗi: ", 1)[-1]
+        return ({} if absent else None), absent
     except ValueError:  # lỗi base64 và UnicodeDecodeError
-        return None
+        return None, False
 
 
 def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
     """So HIỆU LỰC ủy quyền (`parse_grants`) ở đáy PR với đầu PR cho TỪNG đường PLAN.md mà file đụng tới (đường mới và
     đường cũ khi đổi tên/sao chép); đường vắng ở một đầu là `{}`. Không soi dòng diff (fence, viết hoa, xoá dòng lọt regex)
     và không lấy tên file cũ làm đáy: đổi tên/sao chép file có grant vào PLAN.md cũng đổi hiệu lực (review ADR-0022).
-    Không đọc được → coi như đổi."""
+    Không đọc được → coi như đổi. Vắng ở CẢ HAI đầu cũng coi như đổi: file nằm trong diff thì phải có ở ít nhất một đầu,
+    nên hai lần 404 nghĩa là token không đọc được contents (GitHub trả 404 thay 403) — review lần bốn."""
     paths = [
         n
         for n in (f.get("filename"), f.get("previous_filename"))
         if isinstance(n, str) and n.endswith(PLAN_PATH_SUFFIX)
     ]
     for path in paths:
-        before, after = _plan_grants(repo, path, base_sha), _plan_grants(repo, path, head_sha)
-        if before is None or after is None or before != after:
+        (before, gone_before), (after, gone_after) = _plan_read(repo, path, base_sha), _plan_read(repo, path, head_sha)
+        if before is None or after is None or before != after or (gone_before and gone_after):
             return True
     return False
 

@@ -17,6 +17,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `install.py --with-github` copy thêm `merge-gate.yml` (copy-if-absent; cảnh báo required check không còn liệt kê
   `merge-gate`). Lý do đổi cổng/CI: lời dặn `LOOP-STOP-005` thành cơ chế. **Chủ repo:** thêm `merge-gate` vào ruleset
   `main` đang chạy sau khi job chạy trên một PR. Dự án đích: chạy lại `install.py --with-github`, rồi thêm context.
+- **Merge theo làn: PR quan trọng review sạch rồi bật auto-merge, PR khác bật khi mở** (ADR-0024, D-030, D-031; chủ repo
+  yêu cầu cho khung và dự án đích): mở PR → `merge-check` báo làn `nhanh` thì bật auto-merge ngay; làn `chuẩn` (PR quan
+  trọng: vùng nhạy cảm, nhãn `risk:`, > 150 dòng, nhiều gói, đổi mã không đổi test) → `reviewer` (model khác) rà diff →
+  không còn lỗi chặn và `merge-check` không `hard` thì bật auto-merge; GitHub báo PR đã sẵn sàng thì merge bằng lệnh ghim head trong `next`. Review gắn với commit H đã rà:
+  chỉ bật/merge khi head = H; PR đang bật auto-merge thì tắt TRƯỚC mỗi push, chạy lại `merge-check`, làn chuẩn thì rà lại H..head (merge nhánh đích: rà phần
+  giải xung đột). Sửa `AGENTS.md`, mẫu
+  `AGENTS.md`, skill `/autopilot`, `LOOP-STOP-005`, `LOOP-STOP-009`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007`, skill `/gate` (lời, không đổi
+  mức). Repo khung khai `merge_risk_paths` (`scripts/*`, `framework/11-autonomous-loop/*`, `code-review.md`, `framework/templates/*`,
+  `docs/adr/*`): PR nhỏ sửa bộ máy merge/ủy quyền hay luật vòng tự động vẫn vào làn chuẩn. Siết
+  `grant-check`/`merge-check` theo review lần bốn của #102: chỉ `Not Found (HTTP 404)` là file vắng (`No commit found for the
+  ref` thì không), và file trong diff mà 404 ở cả đáy lẫn đầu PR (token không đọc được contents) thì là `hard`.
 - **Tối ưu thời gian check e2e**: 7 mục `SHOULD` mới ở `14-testing-quality/e2e-and-accessibility.md` — `QA-E2E-020` shard song
   song + gộp báo cáo blob, `QA-E2E-021` build một lần dùng lại, `QA-E2E-022` đăng nhập một lần (`storageState`), `QA-E2E-023` chọn
   test theo ảnh hưởng ở PR (suite đầy đủ trên `main`/trước deploy), `QA-E2E-024` đỏ sớm + huỷ run cũ, `QA-E2E-025` timeout ngắn

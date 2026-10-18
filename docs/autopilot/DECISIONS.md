@@ -204,3 +204,20 @@
 - Chọn: Đỏ khi merge-check báo hard VÀ PR đang bật auto-merge (REST auto_merge); chạy lại khi bật/tắt auto-merge (pull_request_target auto_merge_enabled/disabled); PR hard không auto-merge thì xanh kèm cảnh báo để người merge tay
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng, an toàn): lỗ là auto-merge bật trước rồi push commit hard — PA1 bắt đúng đường đó bằng máy trên head hiện tại; merge tay của agent đã có guard ghim head (merge-check lúc merge), merge tay của người là chốt người theo thiết kế ADR-0016/0022. PA2 làm hỏng chốt người (người không merge được nếu không sửa ruleset). PA3 nới mọi cổng khác. Tiêu chí 3: logic ở xt.py merge-gate có test, workflow chỉ gọi lệnh
 - Đường lùi: Đổi điều kiện trong cmd_merge_gate thành chỉ xét hard (PA2) kèm thêm bypass vào ruleset (PA3), hoặc bỏ merge-gate khỏi ruleset và xoá merge-gate.yml
+
+### D-030 · 2026-10-18T01:48:48+00:00 · Chủ repo: 'bật auto-merge khi review sạch, không bật được thì tự merge, áp cho mọi PR, cả dự án đích' — cài vào khung thế nào?
+
+- Phương án: (1) Mọi PR: mở → reviewer (model khác) rà diff → không còn lỗi chặn (nên sửa đã sửa/trả lời) và merge-check không hard → bật auto-merge; enable lỗi (PR đã sẵn sàng/repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim head trong next của merge-check; còn lỗi chặn → sửa, đẩy, rà lại; ghi ở AGENTS.md, mẫu AGENTS.md, skill /autopilot, LOOP-STOP-022, LOOP-DESIGN-020 · (2) Chỉ PR làn chuẩn chờ review, làn nhanh bật auto-merge khi mở
+- Chọn: Mọi PR: mở → reviewer (model khác) rà diff → không còn lỗi chặn (nên sửa đã sửa/trả lời) và merge-check không hard → bật auto-merge; enable lỗi (PR đã sẵn sàng/repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim head trong next của merge-check; còn lỗi chặn → sửa, đẩy, rà lại; ghi ở AGENTS.md, mẫu AGENTS.md, skill /autopilot, LOOP-STOP-022, LOOP-DESIGN-020
+- Lý do (tiêu chí chất lượng cuối): Chủ repo chọn rõ 'áp cho mọi PR'; tiêu chí 1: đã thấy ở #102 mỗi vòng review bắt thêm lỗ an ninh thật trước khi merge; merge trực tiếp chỉ qua lệnh ghim head nên không merge commit chưa được rà; không đổi code guard (merge-check verdict merge vẫn là điều kiện)
+- Đường lùi: Về 'mở PR là bật auto-merge' (ADR-0015) trong 5 chỗ tài liệu
+
+### D-031 · 2026-10-18T02:24:00+00:00 · Chủ repo đổi quy tắc: 'chỉ review lại trước những PR quan trọng, rồi sau đó tạo PR auto merge, còn lại bật auto merge tự động' — 'PR quan trọng' xác định thế nào?
+
+- Phương án: (1) PR quan trọng = merge-check báo làn chuẩn (vị từ máy LOOP-STOP-009: đường dẫn nhạy cảm cổng/CI/hook/schema/phụ thuộc, nhãn risk:, ngoại lệ cứng, > 150 dòng, nhiều gói, đổi mã không đổi test): review ở commit H rồi mới bật auto-merge; làn nhanh bật auto-merge ngay khi mở; tắt auto-merge trước mỗi push rồi chạy lại merge-check (làn đổi sang chuẩn thì rà) · (2) Agent tự phán đoán PR nào quan trọng theo nội dung diff · (3) Chỉ PR có ngoại lệ cứng (hard) là quan trọng
+- Chọn: PR quan trọng = merge-check báo làn chuẩn (vị từ máy LOOP-STOP-009: đường dẫn nhạy cảm cổng/CI/hook/schema/phụ thuộc, nhãn risk:, ngoại lệ cứng, > 150 dòng, nhiều gói, đổi mã không đổi test): review ở commit H rồi mới bật auto-merge; làn nhanh bật auto-merge ngay khi mở; tắt auto-merge trước mỗi push rồi chạy lại merge-check (làn đổi sang chuẩn thì rà)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1+3: vị từ máy có sẵn, test được, không phụ thuộc phán đoán; bắt rộng có chủ đích (báo oan chỉ tốn một lượt review); gồm mọi vùng từng lộ lỗ an ninh ở #102 (xt.py cổng/CI, nhiều gói); phương án 3 bỏ sót sửa guard/CI; phương án 2 không kiểm được
+- Đường lùi: Về D-030 (review mọi PR) hoặc ADR-0015 (bật khi mở) trong cùng các chỗ tài liệu
+- Đính chính (review lần bốn #103): vị từ chung KHÔNG coi `scripts/xt.py` của repo khung là nhạy cảm — PR nhỏ sửa nó
+  từng vào làn nhanh. Vá: `xt.yaml` của repo khai `merge_risk_paths` (`scripts/*`, luật vòng tự động, mẫu, ADR); test
+  `test_framework_repo_risk_paths`.
