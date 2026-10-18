@@ -554,7 +554,7 @@ class GuardRemainingGapsTest(unittest.TestCase):
             with self.subTest(cmd[:40]):
                 self.assertIn(self.dec(cmd), ("", "deny"))
         self.assertEqual(self.dec(doubling + "; rm -rf ~"), "deny")
-        self.assertLess(time.monotonic() - start, 6.0)
+        self.assertLess(time.monotonic() - start, 15.0)  # CI dưới coverage chậm ~3 lần; trước bản vá: hàng trăm giây
 
     def test_scan_budget_exhaustion_is_deny(self) -> None:
         nested = "sh -c 'sh -c \"sh -c ls\"'"

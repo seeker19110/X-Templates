@@ -2908,6 +2908,7 @@ def _scan_command(
 SCAN_CALLS = 600  # số lệnh con tối đa MỖI quyết định (lệnh bình thường dùng < 20)
 SCAN_SECONDS = 8.0  # hạn giờ quét một quyết định; hook có timeout 600 s — quá hạn thì lệnh chạy không qua guard
 MAX_REWRITE = 4  # số lần viết lại CÙNG lệnh (thay biến, lệnh bọc) lồng nhau trước khi coi là quá sâu
+REWRITE_MAX_CHARS = 65536  # bản viết lại dài hơn (biến 4 KB nhân lên nhiều lần) → chặn, không quét chậm hay bỏ qua
 
 
 class ScanBudget:
@@ -3386,6 +3387,8 @@ def _scan_scripts(
             break
         if script in budget.seen:
             continue
+        if not deeper and len(script) > REWRITE_MAX_CHARS:
+            return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
         budget.seen.add(script)
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
