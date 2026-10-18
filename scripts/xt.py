@@ -5236,18 +5236,28 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
     return out
 
 
+def _perf_is_ignore_file(path: str) -> bool:
+    return path.rpartition("/")[2] == ".gitignore"
+
+
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     """(file đổi gồm file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
-    (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` TRONG cây — đổi file đó hiện
-    trong diff (perf_guard báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được mà không để dấu nên không dùng."""
+    (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` đã có ở `ref` — có `.gitignore`
+    đổi/mới thì kiểm khoá trên MỌI file chưa theo dõi (perf_guard còn báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được
+    mà không để dấu nên không dùng."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
     untracked = _perf_git_names(base, *PERF_UNTRACKED)
+    scanned = untracked
+    if any(
+        _perf_is_ignore_file(f) for f in names + untracked
+    ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
+        untracked = _perf_git_names(base, "ls-files", "-z", "--others")
     text = _perf_git(
         base,
         *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, untracked)
+    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
 
 
 def perf_known(base: Path) -> List[str]:
@@ -5350,7 +5360,7 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
     for f in touched:
         print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
     for s in suspect:
-        print(f"⚠ dòng thêm đáng ngờ (cache/sleep/đổi đồng hồ/soi stack) — reviewer phải rà: {s}")
+        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore) — reviewer phải rà: {s}")
     if not touched and not suspect:
         print(f"✓ {len(files)} file đổi, không đụng file khoá, không dòng đáng ngờ")
     return 1 if touched or (suspect and args.strict) else 0
