@@ -13,3 +13,7 @@ merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
+# PR quan trọng riêng của repo khung (D-031, review #103): bộ máy merge/ủy quyền/cổng (`scripts/`), luật vòng tự động,
+# ADR, mẫu dự án đích — vào làn chuẩn (review trước khi bật auto-merge) dù nhỏ hay chỉ đổi tài liệu. Ở dự án đích
+# `.xtemplates/` đã vào làn chuẩn qua nhóm cổng/CI. Khi `merge_hard_exceptions: human` các đường dẫn này thành ngoại lệ cứng.
+merge_risk_paths: "scripts/*, framework/11-autonomous-loop/*, framework/templates/*, docs/adr/*"

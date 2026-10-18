@@ -387,6 +387,23 @@ class MergeConfigTest(unittest.TestCase):
             xt.merge_config(self.base), (1, [], ["merge_autonomy 'tự động' không hợp lệ (L0–L4) — dùng L1"])
         )
 
+    def test_framework_repo_risk_paths(self):
+        """D-031 (review #103): ở repo khung, PR nhỏ sửa bộ máy merge (`scripts/xt.py` + test) hay chỉ đổi luật vòng tự
+        động vẫn vào làn chuẩn (review trước khi bật auto-merge) — `merge_risk_paths` của `xt.yaml` repo."""
+        _, globs, _ = xt.merge_config(ROOT)
+        small = [
+            {"path": "scripts/xt.py", "additions": 20, "deletions": 4},
+            {"path": "tests/test_xt_core.py", "additions": 20, "deletions": 0},
+        ]
+        self.assertEqual(xt.merge_decision(pr(files=small), 3, [], hard_auto=True)["lane"], "nhanh")
+        for files in (
+            small,
+            [{"path": "framework/11-autonomous-loop/loop-design.md", "additions": 300, "deletions": 0}],
+        ):
+            d = xt.merge_decision(pr(files=files), 3, globs, hard_auto=True)
+            self.assertEqual((d["lane"], d["hard"]), ("chuẩn", []))
+            self.assertTrue(d["hard_waived"])
+
     def test_hard_mode(self):
         """ADR-0020: khoá đọc ở nhánh đích đã commit; không có ref/thiếu khoá → human; giá trị lạ → human kèm ghi chú;
         cây làm việc sửa tại chỗ không đổi kết quả (agent không tự gỡ được chốt)."""

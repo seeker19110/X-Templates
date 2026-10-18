@@ -3,7 +3,7 @@ title: Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằ
 kind: module
 prefix: LOOP-DESIGN
 applies_to: [all]
-updated: 2026-10-16
+updated: 2026-10-18
 ---
 
 # Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng

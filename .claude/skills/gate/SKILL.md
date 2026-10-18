@@ -20,7 +20,7 @@ argument-hint: "[commit|merge]"
 5. Đối chiếu tiêu chí chấp nhận trong SPEC + mục blueprint liên quan (tick kèm bằng chứng).
 6. Nếu đổi schema: migration có phiên bản + đường lùi. Nếu đổi API: hợp đồng + CHANGELOG.
 7. Rà bảo mật nhanh: quyền kiểm ở server, không lộ dữ liệu, không nới cấu hình cổng.
-8. CI xanh trên head hiện tại; review (người hoặc `reviewer` model khác) đã xong.
+8. CI xanh trên head hiện tại; PR làn chuẩn: review (người hoặc `reviewer` model khác) sạch ở head hiện tại (làn nhanh không chờ review — `LOOP-STOP-022`).
 
 ## Báo cáo xác thực (xuất nguyên dạng)
 ```

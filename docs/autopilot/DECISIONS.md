@@ -218,3 +218,6 @@
 - Chọn: PR quan trọng = merge-check báo làn chuẩn (vị từ máy LOOP-STOP-009: đường dẫn nhạy cảm cổng/CI/hook/schema/phụ thuộc, nhãn risk:, ngoại lệ cứng, > 150 dòng, nhiều gói, đổi mã không đổi test): review ở commit H rồi mới bật auto-merge; làn nhanh bật auto-merge ngay khi mở; tắt auto-merge trước mỗi push rồi chạy lại merge-check (làn đổi sang chuẩn thì rà)
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1+3: vị từ máy có sẵn, test được, không phụ thuộc phán đoán; bắt rộng có chủ đích (báo oan chỉ tốn một lượt review); gồm mọi vùng từng lộ lỗ an ninh ở #102 (xt.py cổng/CI, nhiều gói); phương án 3 bỏ sót sửa guard/CI; phương án 2 không kiểm được
 - Đường lùi: Về D-030 (review mọi PR) hoặc ADR-0015 (bật khi mở) trong cùng các chỗ tài liệu
+- Đính chính (review lần bốn #103): vị từ chung KHÔNG coi `scripts/xt.py` của repo khung là nhạy cảm — PR nhỏ sửa nó
+  từng vào làn nhanh. Vá: `xt.yaml` của repo khai `merge_risk_paths` (`scripts/*`, luật vòng tự động, mẫu, ADR); test
+  `test_framework_repo_risk_paths`.
