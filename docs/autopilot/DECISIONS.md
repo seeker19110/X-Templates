@@ -325,3 +325,10 @@
 - Chọn: pr reviewed --clean bắt khai --reviewer-model/--author-model, cùng họ thì từ chối, ghi vào sổ
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bắt đúng lỗi thật (reviewer ghim opus khi phiên chính là Opus), ghi vết soát được, stdlib có test; transcript là định dạng nội bộ dễ đổi; lời dặn đã thất bại
 - Đường lùi: Bỏ _review_models_error, để --reviewer-model/--author-model tuỳ chọn
+
+### D-046 · 2026-10-18T12:54:52+00:00 · Ghi/xoá tay .autopilot/ (bằng chứng, verified.json, sổ review): hỏi rồi cho qua như ADR-0018, hay chặn?
+
+- Phương án: (1) Chặn ở chính sách mặc định (dấu 'tay bằng chứng' trong DANGER_MARKERS), chỉ xt.py ghi; người sửa tay hoặc loop init --force · (2) Giữ hỏi→cho qua, dựa vào loop verify chạy lại Gate · (3) Ký HMAC evidence bằng khoá ngoài agent
+- Chọn: Chặn ở chính sách mặc định (dấu 'tay bằng chứng' trong DANGER_MARKERS), chỉ xt.py ghi; người sửa tay hoặc loop init --force
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bằng chứng ghi tay là đúng thứ P1 cấm và Stop hook đọc chính các file này; guard đã nhận diện sẵn, chỉ thiếu dấu; HMAC cần khoá agent không đọc được — chưa có chỗ giữ trong phiên agent
+- Đường lùi: Bỏ 'tay bằng chứng' khỏi DANGER_MARKERS (ADR-0026 → bị thay)
