@@ -2016,25 +2016,31 @@ def _bypass_marker(argv: List[str], n: List[str], claude: List[str]) -> str:
 
 
 # CLI agent KHÁC Claude Code không chạy hook của khung; chạy nó với cờ tự duyệt = đường vòng quanh guard (LOOP-STOP-028,
-# stored 01 §3g.4). Claude Code lồng vẫn nạp hook của dự án nên chỉ xét cờ tắt hook ở trên. Cờ dạng `--x giá-trị` so
-# cả cặp `--x=giá-trị`. Nguồn từng cờ: CHANGELOG mục LOOP-STOP-028.
-AGENT_CLI_PKGS = {"@openai/codex": "codex", "@google/gemini-cli": "gemini", "@github/copilot": "copilot"}
+# stored 01 §3g.4). Claude Code lồng vẫn nạp hook của dự án nên chỉ xét cờ tắt hook ở trên (bypass vẫn chịu hook exit 2
+# và deny — docs permission-modes). Cờ dạng `--x giá-trị` so cả cặp `--x=giá-trị`. Đọc 2026-10-18 từ docs/mã nguồn:
+# Codex (learn.chatgpt.com developer-commands, codex-rs shared_options.rs), Gemini CLI docs/cli/cli-reference.md,
+# Copilot CLI command reference, opencode.ai/docs/cli, aider.chat config options, cursor.com/docs/cli/reference/parameters
+# (tên binary `cursor-agent` chưa xác minh), Amp: docs E2B/SDK (`--dangerously-allow-all`, chưa thấy ở docs chính thức).
+AGENT_CLI_PKGS = {
+    "@openai/codex": "codex",
+    "@google/gemini-cli": "gemini",
+    "@github/copilot": "copilot",
+    "opencode-ai": "opencode",
+}
 AGENT_SELF_APPROVE = {
+    # `--full-auto` đã gỡ ở bản hiện hành — giữ để chặn bản cũ.
     "codex": {
-        "--full-auto",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--yolo",
-        "--sandbox=danger-full-access",
-        "-s=danger-full-access",
-        "--ask-for-approval=never",
-        "-a=never",
+        *("--dangerously-bypass-approvals-and-sandbox", "--yolo", "--approve-for-me", "--not-so-yolo", "--full-auto"),
+        *("--sandbox=danger-full-access", "-s=danger-full-access", "--ask-for-approval=never", "-a=never"),
     },
-    "gemini": {"--yolo", "-y", "--approval-mode=yolo"},
+    "gemini": {"--approval-mode=yolo", "--yolo", "-y"},  # `--yolo`/`-y` deprecated, vẫn chạy
     "copilot": {"--allow-all-tools", "--allow-all", "--yolo"},
+    "opencode": {"--auto"},
     "aider": {"--yes-always"},
-    "cursor-agent": {"--force", "-f"},
+    "cursor-agent": {"--force", "-f", "--yolo", "--approve-mcps"},
     "amp": {"--dangerously-allow-all"},
 }
+AGENT_SELF_APPROVE_ENV = {"copilot": "COPILOT_ALLOW_ALL", "aider": "AIDER_YES_ALWAYS"}
 
 
 def _agent_cli(n: List[str]) -> Tuple[str, List[str]]:
@@ -2047,10 +2053,13 @@ def _agent_cli(n: List[str]) -> Tuple[str, List[str]]:
     return (name, n[i:]) if name in AGENT_SELF_APPROVE else ("", [])
 
 
-def agent_self_approve(n: List[str]) -> str:
-    """Lý do chặn khi lệnh mở CLI agent khác với cờ tự duyệt mọi công cụ; chuỗi rỗng nếu không."""
+def agent_self_approve(argv: List[str], n: List[str]) -> str:
+    """Lý do chặn khi lệnh mở CLI agent khác với cờ (hoặc biến môi trường) tự duyệt mọi công cụ; rỗng nếu không."""
     name, args = _agent_cli(n)
     flags = AGENT_SELF_APPROVE.get(name, set())
+    env = AGENT_SELF_APPROVE_ENV.get(name, "")
+    if env and env in _env_assigns(argv):
+        return f"CLI agent `{name}` với `{env}` tự duyệt mọi lệnh ngoài guard — bỏ qua hook của dự án (LOOP-STOP-028)"
     for k, a in enumerate(args):
         if a == "--":
             break
@@ -2072,7 +2081,7 @@ def hook_bypass(argv: List[str], n: List[str]) -> str:
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
-    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else agent_self_approve(n)
+    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else agent_self_approve(argv, n)
 
 
 def _git_hooks_off(n: List[str]) -> bool:

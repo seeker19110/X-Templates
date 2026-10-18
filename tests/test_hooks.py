@@ -3491,6 +3491,13 @@ class GuardStored1018Test(unittest.TestCase):
             "aider --yes-always",
             "cursor-agent -p x --force",
             "amp --dangerously-allow-all -x y",
+            "codex exec --yolo x",
+            "codex exec --approve-for-me x",
+            "opencode run --auto x",
+            "npx opencode-ai run --auto x",
+            "cursor-agent -p x --yolo",
+            "COPILOT_ALLOW_ALL=true copilot -p x",
+            "AIDER_YES_ALWAYS=1 aider",
         ):
             self.assertEqual(self.bash(cmd), "deny", cmd)
 
@@ -3501,6 +3508,8 @@ class GuardStored1018Test(unittest.TestCase):
             "gemini -p x",
             "aider -- --yes-always",
             "codex exec -a",
+            "opencode run x",
+            "COPILOT_ALLOW_ALL=true gemini -p x",
             "npx -y some-tool --yolo",
             "claude -p hi",
             "echo gemini --yolo",
