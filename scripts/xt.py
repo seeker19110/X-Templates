@@ -1288,7 +1288,11 @@ def loop_verify(base: Optional[Path] = None) -> int:
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / VERIFIED_FILE, json.dumps(rec, ensure_ascii=False, indent=2) + "\n")
     if not stable:
-        print("✗ Gate làm đổi cây làm việc (format/sinh file?) — commit thay đổi rồi chạy lại `loop verify`")
+        print(
+            "✗ Gate/lệnh sàn làm đổi cây làm việc (format ghi file? artefact như `.coverage`, `c.out`?) — lệnh kiểm không"
+            " được ghi vào repo: ghi artefact ra thư mục tạm (`mktemp`) hoặc thêm vào .gitignore; thay đổi thật thì commit,"
+            " rồi chạy lại `loop verify`"
+        )
     more = f" + {len(checks)} lệnh kiểm blueprint" if checks else ""
     print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({len(results)} Gate{more}) — .autopilot/{VERIFIED_FILE}")
     return 0 if ok else 1
@@ -2610,9 +2614,10 @@ def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
     """([(khoá, mô tả)] sàn đòi ở quy mô hiện tại, giá trị xt.yaml); S/không blueprint/không xt.yaml → ([], {})."""
     scale, profile = blueprint_scale(base)
     p = base / "xt.yaml"
-    if scale not in ("M", "L") or not p.is_file():
+    if scale not in ("M", "L"):
         return [], {}
-    rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines())
+    # Thiếu cả xt.yaml ở M/L = mọi khoá sàn đều thiếu (không phải "không áp" — review #107).
+    rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else [])
     keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
     need = list(FLOOR_ALWAYS)
     markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
@@ -2628,7 +2633,7 @@ def gate_floor_issues(base: Path) -> List[str]:
     scale, _ = blueprint_scale(base)
     need, keys = gate_floor_keys(base)
     bad = [(k, why) for k, why in need if not keys.get(k) or GATE_NOOP_RE.fullmatch(keys[k])]
-    return [f"quy mô {scale}: xt.yaml thiếu `{k}` — {why}" for k, why in bad]
+    return [f"quy mô {scale}: xt.yaml thiếu hoặc no-op `{k}` — {why}" for k, why in bad]
 
 
 def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:

@@ -371,7 +371,11 @@ class DoctorGateFloorTest(DoctorCase):
         self.assertEqual(xt.blueprint_scale(self.base), ("", "web-app"))
         self.write("BLUEPRINT.md", BP_M_WEB)
         (self.base / "xt.yaml").unlink()
-        self.assertEqual((xt.gate_floor_issues(self.base), xt.gate_floor_commands(self.base)), ([], []))
+        # Quy mô M mà thiếu cả xt.yaml: mọi khoá sàn đều thiếu, không lặng lẽ tắt sàn (review #107).
+        self.assertEqual(
+            [m.split("`")[1] for m in xt.gate_floor_issues(self.base)], ["format_check", "coverage", "e2e"]
+        )
+        self.assertEqual(xt.gate_floor_commands(self.base), [])
 
     def test_scale_read_like_yaml(self):
         # `scale: m`, nháy, comment, CRLF: không được lặng lẽ bỏ sàn (review #107).
@@ -387,7 +391,7 @@ class DoctorGateFloorTest(DoctorCase):
         self.write("go.mod", "module x\n")
         msgs = self.floor()
         self.assertEqual([m.split("`")[1] for m in msgs], ["format_check", "coverage", "build", "e2e"], msgs)
-        self.assertTrue(msgs[0].startswith("quy mô M: xt.yaml thiếu `format_check` — kiểm format"))
+        self.assertTrue(msgs[0].startswith("quy mô M: xt.yaml thiếu hoặc no-op `format_check` — kiểm format"))
         self.assertIn("kiểm kiểu/biên dịch vì repo có tsconfig.json, go.mod", msgs[2])
         self.assertIn("hồ sơ web-app", msgs[3])
         self.assertTrue(all(m.endswith("— sàn Gate M/L (LOOP-HARNESS-023)") for m in msgs))
@@ -431,7 +435,7 @@ class LoopInitDoctorTest(DoctorCase):
         self.write("BLUEPRINT.md", BP_M_WEB)  # quy mô M: sàn Gate chưa đạt được nhắc ngay ở loop init
         err = self.loop_init()
         self.assertIn(
-            "⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): quy mô M: xt.yaml thiếu `format_check`",
+            "⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): quy mô M: xt.yaml thiếu hoặc no-op `format_check`",
             err,
         )
 
