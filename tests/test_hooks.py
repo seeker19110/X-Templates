@@ -3782,6 +3782,39 @@ class GuardAiAttributionTest(unittest.TestCase):
         self.assertEqual(self.decide(cmd.format(strict), loose), "deny")
         self.assertEqual(self.decide(cmd.format(loose), strict), "")
 
+    def test_review_125_cases(self):
+        # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
+        # cục trước `commit`, biến thể tên model.
+        d = self.repo("ai_attribution: forbid\n")
+        os.makedirs(os.path.join(d, ".git"))
+        sub, other = os.path.join(d, "sub"), os.path.join(d, "o")
+        os.makedirs(sub)
+        os.makedirs(other)
+        Path(other, "m.txt").write_text("Claude-Session: x\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            self.assertEqual(self.g.bash_decision('git commit -m "Claude Opus 5"', d, sub)["decision"], "deny")
+            self.assertEqual(self.g.bash_decision("git -C ../o commit -F m.txt", d, sub)["decision"], "deny")
+        for cmd in (
+            'git commit -m fix --trailer "Claude-Session: https://claude.ai/code/session_x"',
+            "git commit -m fix --trailer='Co-authored-by: Claude Opus 5 <n@a.com>'",
+            "git commit -m fix --author='Claude Sonnet 5 <n@a.com>'",
+            "git --no-pager commit -F - <<E\nClaude Opus 5\nE",
+            'git -C "." commit -F - <<E\nClaude Opus 5\nE',
+            'git commit -m "claude-3-5-sonnet-20241022"',
+            'git commit -m "Claude  Opus"',
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d), "deny")
+        os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
+        self.assertEqual(self.decide("git commit -F p", d), "")
+        nogit = self.repo("ai_attribution: forbid\n")  # không có `.git` ở đâu cả → xt.yaml ở thư mục lệnh
+        with mock.patch.object(self.g.os.path, "exists", return_value=False):
+            self.assertEqual(self.g._git_top(nogit), nogit)
+        with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp, dùng thư mục lệnh
+            self.assertEqual(self.g._git_top(sub), sub)
+        with mock.patch("builtins.open", side_effect=PermissionError):  # file thường mà không đọc được → rỗng
+            self.assertEqual(self.g._read_head(os.path.join(other, "m.txt")), "")
+
     def test_repo_framework_forbids(self):
         # Repo khung tự áp luật của mình (AGENTS.md §3, AUD-HAR-017).
         self.assertRegex((ROOT / "xt.yaml").read_text(encoding="utf-8"), r"(?m)^ai_attribution: forbid")

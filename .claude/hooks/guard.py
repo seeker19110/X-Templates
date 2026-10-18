@@ -2466,15 +2466,19 @@ def _scan_commit(args: List[str], res: Dict[str, object], asks: List[str]) -> Op
 # → commit mà message có tên model hay URL phiên AI bị chặn. Message = `-m`/`--message`, file của `-F`/`--file`, thân
 # heredoc trong cùng lệnh Bash (`-F - <<E`, `-m "$(cat <<E …)"` — tokenize bỏ thân heredoc nên đọc từ chuỗi gốc).
 AI_ATTRIBUTION_RE = re.compile(
-    r"claude-session\s*:|claude\.ai/code/session_|\bclaude[ -](?:opus|sonnet|haiku|fable|instant)\b", re.I
+    r"claude-session\s*:|claude\.ai/code/session_|"
+    r"\bclaude(?:[\s_-]+[\d.]+)*[\s_-]+(?:opus|sonnet|haiku|fable|instant)\b",  # `Claude Opus 5`, `claude-3-5-sonnet`
+    re.I,
 )
 AI_ATTRIBUTION_KEY_RE = re.compile(r"^ai_attribution:[ \t]*([\"']?)forbid\1[ \t]*(?:#.*)?$", re.M)
 COMMIT_TEXT_MAX = 1 << 16  # đọc tối đa 64 KiB mỗi file (xt.yaml, file message)
-COMMIT_MSG_OPTS = {"-m": "m", "--message": "m", "-F": "F", "--file": "F"}
+COMMIT_MSG_OPTS = {"-m": "m", "--message": "m", "--trailer": "m", "--author": "m", "-F": "F", "--file": "F"}
 
 
 def _read_head(path: str) -> str:
-    """Tối đa COMMIT_TEXT_MAX ký tự đầu file; không đọc được → rỗng (fail-open về luồng)."""
+    """Tối đa COMMIT_TEXT_MAX ký tự đầu FILE THƯỜNG; không đọc được/FIFO/thiết bị → rỗng (fail-open, không treo hook)."""
+    if not os.path.isfile(path):
+        return ""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read(COMMIT_TEXT_MAX)
@@ -2491,14 +2495,18 @@ def _commit_msg_args(args: List[str]) -> List[Tuple[str, str]]:
         m = COMMIT_SHORT_VALUE_RE.match(x)
         if x in COMMIT_MSG_OPTS:
             out.append((COMMIT_MSG_OPTS[x], nxt))
-        elif key in ("--message", "--file") and sep:
+        elif key in ("--message", "--file", "--trailer", "--author") and sep:
             out.append((COMMIT_MSG_OPTS[key], val))
         elif m and m.group(2) in "mF" and not x.startswith("--"):
             out.append((m.group(2), x[m.end() :] or nxt))
     return out
 
 
-GIT_COMMIT_TEXT_RE = re.compile(r"\bgit(?:\s+-[Cc]\s+\S+)*\s+commit\b")
+# `git [cờ toàn cục…] commit`: `-C "a b"`, `-c k=v`, `--no-pager`, `--git-dir=…` (văn bản thô — `$(cat <<E` chưa đóng nháy).
+GIT_COMMIT_TEXT_RE = re.compile(
+    r"\bgit(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
+)
+GIT_TOP_MAX = 64  # số cấp thư mục cha tối đa khi tìm gốc repo
 
 
 def _heredoc_bodies(cmd: str) -> List[str]:
@@ -2520,14 +2528,31 @@ def _heredoc_bodies(cmd: str) -> List[str]:
     return out
 
 
+def _git_top(d: str) -> str:
+    """Gốc repo chứa `d` (thư mục cha gần nhất có `.git`, như `git rev-parse --show-toplevel`); không thấy → `d`."""
+    cur = os.path.abspath(d)
+    for _ in range(GIT_TOP_MAX):
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return d
+
+
 def ai_attribution(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: str) -> str:
-    """Lý do chặn khi lệnh commit vào repo cấm ghi công AI mà message chứa tên model/URL phiên; không thì rỗng."""
+    """Lý do chặn khi lệnh commit vào repo cấm ghi công AI mà message chứa tên model/URL phiên; không thì rỗng.
+    Chỉ xét `git commit` qua Bash, message thấy được lúc quyết định — không thấy: `echo … | git commit -F -`, file `-F`
+    do lệnh trước trong chuỗi tạo, commit qua tool MCP/`git merge -m`/`git tag -m` (LOOP-HARNESS-027)."""
     for argv, here in commands:
         n = normalize(argv)
-        repo = (_git_dir(argv, here) if n[:2] == ["git", "commit"] else None) or root
-        if n[:2] != ["git", "commit"] or not AI_ATTRIBUTION_KEY_RE.search(_read_head(os.path.join(repo, "xt.yaml"))):
+        gdir = (_git_dir(argv, here) if n[:2] == ["git", "commit"] else None) or root
+        xt_yaml = os.path.join(_git_top(gdir), "xt.yaml")
+        if n[:2] != ["git", "commit"] or not AI_ATTRIBUTION_KEY_RE.search(_read_head(xt_yaml)):
             continue
-        texts = [v if k == "m" else _read_head(posixpath.join(here or root, v)) for k, v in _commit_msg_args(n[2:])]
+        # `-F` tương đối tính từ thư mục git chạy (sau `-C`), như git.
+        texts = [v if k == "m" else _read_head(posixpath.join(gdir, v)) for k, v in _commit_msg_args(n[2:])]
         hit = next(
             (m.group(0) for t in [*texts, *_heredoc_bodies(cmd)] for m in [AI_ATTRIBUTION_RE.search(t)] if m), ""
         )
