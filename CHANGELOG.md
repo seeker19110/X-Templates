@@ -10,13 +10,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   pháp shell (đơn: đủ; cặp: mẫu tất định 4000/22141, toàn bộ chạy tay xanh) phải `deny`, và 49 lệnh hợp lệ agent hay
   chạy không bị chặn nhầm.
 
+### Changed
+- `xt.py pr reviewed --clean` cần `--reviewer-model` và `--author-model`, từ chối khi cùng họ model (opus/sonnet/haiku/
+  fable…) — `LOOP-STOP-022` "reviewer khác model" trước đây chỉ là lời dặn (phiên 2026-10-18: `reviewer.md` ghim `opus`
+  trong khi phiên chính chuyển sang Opus). Sổ `.autopilot/reviews.json` ghi cả hai model. `--blocking` không cần khai.
+  Dự án đích: chạy lại `install.py` (xt.py, mẫu AGENTS.md, skill autopilot).
+
 ### Fixed
 - Guard (bộ tấn công tìm ra): heredoc vào shell nằm TRONG `sh -c "…"`/backtick từng bị cắt thân trước khi quét script lồng
   (`strip_heredocs` nay chỉ nhận `<<` ngoài nháy); `find … -exec bash <<E` (shell thừa hưởng stdin của find) từng lọt;
   `\\` + xuống dòng (gạch chéo đã escape) từng bị nối như nối dòng nên `sh -c "docker \\` ↵ `run --privileged …"` lọt
   (nối dòng nay theo bash: chỉ khi dãy `\` lẻ); tách pipeline quanh heredoc theo dấu nối ngoài nháy/escape (`\;`).
-  Chặn nhầm: `curl … | python3 -m json.tool` (python/node/ruby/perl có `-m`/`-c`/`-e` hoặc file script đọc stdin là dữ
-  liệu). Dự án đích: chạy lại `install.py` (hook `guard.py`).
+  Chặn nhầm: `curl … | python3 -m json.tool` (stdin là dữ liệu chỉ khi lệnh là file script đứng đầu hoặc
+  `python3 -m json.tool`; `-c`/`-e`/cờ khác vẫn chặn — fail-closed). Dự án đích: chạy lại `install.py` (hook `guard.py`).
 
 ## [3.2.0] - 2026-10-18
 

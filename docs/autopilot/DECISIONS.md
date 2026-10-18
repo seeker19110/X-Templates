@@ -318,3 +318,10 @@
 - Chọn: Làm ngay: sinh biến thể tất định từ lệnh hạt giống + bộ lệnh hợp lệ chống chặn nhầm
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3/5: #125/#127/#128 mỗi vòng review đều tìm lỗ mới qua cổng xanh 100%; máy sinh biến thể bắt trước reviewer, bộ hợp lệ giữ không chặn nhầm; chỉ thêm test, rẻ
 - Đường lùi: Xoá tests/test_guard_corpus.py
+
+### D-045 · 2026-10-18T12:31:38+00:00 · Máy kiểm 'reviewer khác model' (LOOP-STOP-022) thế nào khi không có biến môi trường cho biết model phiên chính?
+
+- Phương án: (1) pr reviewed --clean bắt khai --reviewer-model/--author-model, cùng họ thì từ chối, ghi vào sổ · (2) Đọc model từ transcript của phiên qua hook · (3) Giữ lời dặn trong tài liệu
+- Chọn: pr reviewed --clean bắt khai --reviewer-model/--author-model, cùng họ thì từ chối, ghi vào sổ
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bắt đúng lỗi thật (reviewer ghim opus khi phiên chính là Opus), ghi vết soát được, stdlib có test; transcript là định dạng nội bộ dễ đổi; lời dặn đã thất bại
+- Đường lùi: Bỏ _review_models_error, để --reviewer-model/--author-model tuỳ chọn
