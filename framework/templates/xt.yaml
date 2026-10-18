@@ -17,7 +17,8 @@ format_file: ""
 # xanh (cần bật "Allow auto-merge" + ruleset có required check; ghi miễn trừ WF-REVIEW-007); L2 = máy chỉ tự merge làn nhanh
 # (`xt.py merge-check`); L1 = người merge mọi PR.
 # merge_risk_paths: glob thêm vào danh sách đường dẫn nhạy cảm (ngoại lệ cứng), cách nhau dấu phẩy; `merge-check` lấy
-# hợp của cây làm việc và bản đã commit ở nhánh đích (checkout cũ không làm rơi glob).
+# hợp của cây làm việc và bản đã commit ở nhánh đích (checkout cũ không làm rơi glob). `merge_autonomy`: `merge-check`
+# dùng mức THẤP hơn giữa cây làm việc và nhánh đích — nâng mức phải qua PR đã merge (PR đó được quyết ở mức cũ).
 # merge_hard_exceptions: ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật, merge_risk_paths) — human (mặc
 # định) = người merge (ADR-0016); auto = agent merge như PR khác khi CI xanh (ADR-0020). Đọc ở nhánh đích đã commit, không
 # ở cây làm việc; PR đổi khoá này luôn người merge — merge PR đó là lời chủ dự án chấp nhận rủi ro (LOOP-STOP-005).

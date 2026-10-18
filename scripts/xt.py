@@ -2993,12 +2993,26 @@ def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
     """(mức tự chủ, glob nhạy cảm riêng, ghi chú) từ xt.yaml: `merge_autonomy: L0..L4` (mặc định L1),
     `merge_risk_paths: "glob, glob"`. Giá trị lạ → L1 (an toàn) kèm ghi chú."""
     keys = _xt_keys(base)
+    level, notes = _autonomy(keys)
+    return level, _risk_globs(keys), notes
+
+
+def _autonomy(keys: Dict[str, str], where: str = "") -> Tuple[int, List[str]]:
     level = keys.get("merge_autonomy", "L1")
-    notes: List[str] = []
     if not re.fullmatch(r"L[0-4]", level):
-        notes.append(f"merge_autonomy '{level}' không hợp lệ (L0–L4) — dùng L1")
-        level = "L1"
-    return int(level[1]), _risk_globs(keys), notes
+        return 1, [f"merge_autonomy '{level}' không hợp lệ (L0–L4){where} — dùng L1"]
+    return int(level[1]), []
+
+
+def merge_autonomy_level(base: Path, ref: str) -> Tuple[int, List[str]]:
+    """(mức tự chủ, ghi chú) cho `merge-check`: mức THẤP hơn giữa cây làm việc và xt.yaml đã commit ở `ref` (nhánh
+    đích) — sửa tại chỗ chỉ hạ được, nâng mức phải qua PR đã merge vào nhánh đích (khi đó chính PR nâng mức được quyết ở
+    mức cũ). Không đọc được ref hay thiếu khoá → L1."""
+    work, notes = _autonomy(_xt_keys(base))
+    committed, more = _autonomy(_committed_xt_keys(base, ref), " ở nhánh đích")
+    if committed < work:
+        more.append(f"merge_autonomy ở {ref} là L{committed} < cây làm việc L{work} — dùng L{committed}")
+    return min(work, committed), notes + more
 
 
 class PrInputError(Exception):
@@ -3044,20 +3058,46 @@ def _plan_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[Dict[
     return (None if text is None else parse_grants(text)), absent
 
 
+def _grant_lines(text: str) -> List[Tuple[bool, str]]:
+    """Mọi dòng `- grant:` (cùng `GRANT_LINE_RE`/luật fence với `parse_grants`) theo thứ tự, kèm cờ nằm trong fence."""
+    out: List[Tuple[bool, str]] = []
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif GRANT_LINE_RE.match(line.strip()):
+            out.append((fenced, line.strip()))
+    return out
+
+
+def _grants_ambiguous(lines: List[Tuple[bool, str]]) -> bool:
+    """Grant trong fence hoặc nhóm lặp: dòng bị che/bị tắt có thể lộ ra sau merge 3 chiều (review #105)."""
+    groups = [str(m[1]).lower() for _, line in lines if (m := GRANT_LINE_RE.match(line))]
+    return any(fenced for fenced, _ in lines) or len(groups) != len(set(groups))
+
+
 def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
-    """So HIỆU LỰC ủy quyền (`parse_grants`) ở đáy PR với đầu PR cho TỪNG đường PLAN.md mà file đụng tới (đường mới và
-    đường cũ khi đổi tên/sao chép); đường vắng ở một đầu là `{}`. Không soi dòng diff (fence, viết hoa, xoá dòng lọt regex)
-    và không lấy tên file cũ làm đáy: đổi tên/sao chép file có grant vào PLAN.md cũng đổi hiệu lực (review ADR-0022).
-    Không đọc được → coi như đổi. Vắng ở CẢ HAI đầu cũng coi như đổi: file nằm trong diff thì phải có ở ít nhất một đầu,
-    nên hai lần 404 nghĩa là token không đọc được contents (GitHub trả 404 thay 403) — review lần bốn."""
+    """So danh sách dòng ủy quyền (`_grant_lines`: mọi dòng `- grant:` theo thứ tự, kèm cờ fence) ở đáy (merge-base) với
+    đầu PR cho TỪNG đường PLAN.md mà file đụng tới (đường mới và đường cũ khi đổi tên/sao chép); đường vắng ở một đầu là
+    rỗng. Không soi dòng diff (fence, viết hoa, xoá dòng lọt regex) và không lấy tên file cũ làm đáy: đổi tên/sao chép file
+    có grant vào PLAN.md cũng đổi (review ADR-0022). Không chỉ so hiệu lực: grant lặp bị dòng sau che hay dời dòng vẫn
+    đổi được kết quả sau merge 3 chiều, nên đầu PR có grant trong fence hoặc nhóm lặp cũng là đổi (review #105). Không đọc
+    được → đổi. Vắng ở CẢ HAI đầu cũng là đổi: file nằm trong diff thì phải có ở ít nhất một đầu, nên hai lần 404 nghĩa
+    là token không đọc được contents (GitHub trả 404 thay 403) — review lần bốn."""
     paths = [
         n
         for n in (f.get("filename"), f.get("previous_filename"))
         if isinstance(n, str) and n.endswith(PLAN_PATH_SUFFIX)
     ]
     for path in paths:
-        (before, gone_before), (after, gone_after) = _plan_read(repo, path, base_sha), _plan_read(repo, path, head_sha)
-        if before is None or after is None or before != after or (gone_before and gone_after):
+        (before, gone_before), (after, gone_after) = (
+            _contents_read(repo, path, base_sha),
+            _contents_read(repo, path, head_sha),
+        )
+        if before is None or after is None or (gone_before and gone_after):
+            return True
+        lines = _grant_lines(after)
+        if _grant_lines(before) != lines or _grants_ambiguous(lines):
             return True
     return False
 
@@ -3079,7 +3119,9 @@ def _hard_key_changed(repo: str, base_sha: str, head_sha: str) -> bool:
     )
     if before is None or after is None or (gone_before and gone_after):
         return True
-    return _hard_key_lines(before) != _hard_key_lines(after)
+    lines = _hard_key_lines(after)
+    # Khoá lặp ở đầu PR: dời từng dòng (danh sách mỗi PR không đổi) vẫn đảo được thứ tự sau merge 3 chiều (review #105).
+    return _hard_key_lines(before) != lines or len(lines) > 1
 
 
 def _gated_file(f: Dict[str, Any]) -> bool:
@@ -4053,7 +4095,7 @@ def _print_doctor(base: Path, findings: List[Finding], fixed: List[str], fixing:
 def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`."""
     ref = f"origin/{pr.get('baseRefName') or 'main'}"
-    autonomy, _, notes = merge_config(project_dir())
+    autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
     return merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
 

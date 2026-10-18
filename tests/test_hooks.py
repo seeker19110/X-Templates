@@ -1411,10 +1411,17 @@ class MergeGuardTest(unittest.TestCase):
 
     def setUp(self):
         self.proj = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L2\n")
         self.bin = self.proj / "bin"
         self.bin.mkdir()
         self.fake_gh(FAST_PR)
+
+    def set_xt(self, text: str) -> None:
+        """xt.yaml đã commit ở `origin/main` của repo tạm: `merge-check` đọc mức tự chủ ở nhánh đích (D-033)."""
+        sys.path.insert(0, str(ROOT / "tests"))
+        from test_merge import commit_base_xt
+
+        commit_base_xt(self.proj, text)
 
     def fake_gh(self, pr: dict | None) -> None:
         """`gh` giả trả JSON REST cho `gh api <đường dẫn>` (merge-check chỉ dùng REST), dựng từ PR dạng `gh pr view`."""
@@ -1662,7 +1669,7 @@ class MergeGuardTest(unittest.TestCase):
                 self.assertEqual(dec("mcp__github__merge_pull_request", inp), "ask")
         self.assertEqual(dec("mcp__gitlab__merge_pull_request", good), "ask")  # server khác: host khác
         self.assertEqual(dec("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 7}), "ask")
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L1\n")
         self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")
 
     def test_l3_enables_auto_merge_on_open(self):
@@ -1675,7 +1682,7 @@ class MergeGuardTest(unittest.TestCase):
         good = {"owner": "o", "repo": "r", "pullNumber": 7, "mergeMethod": "SQUASH"}
         self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # setUp: L2
         self.assertEqual(mcp(good), "ask")
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L3\n")
         self.assertEqual(self.d("gh pr merge 7 --auto --squash", via_hook=True)[0], "allow")
         self.assertEqual(mcp(good, via_hook=True), "allow")
         for cmd in ("gh pr merge 7 --auto --squash --admin", "gh pr merge 7 --auto -b x", "gh pr merge 7 --auto && ls"):
@@ -1698,7 +1705,7 @@ class MergeGuardTest(unittest.TestCase):
     def test_hard_exception_merge_denied_by_default(self):
         """ADR-0019: PR thuộc ngoại lệ cứng (ADR-0016) — strict hỏi, mặc định (ADR-0018) chặn cả merge ghim head,
         bật auto-merge, merge REST và MCP, kể cả ở L3."""
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L3\n")
         self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         cmds = (
@@ -1802,7 +1809,7 @@ class MergeGuardTest(unittest.TestCase):
     def test_guard_merge_check_error_denies(self):
         """AUD-SEC-045: không xác minh được ngoại lệ cứng (merge-check lỗi, repo khác, PR không đọc được số, graphql
         merge, server MCP khác) → deny thay vì cho qua; tắt auto-merge vẫn được."""
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L3\n")
         mutation = "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'"
         self.fake_gh(None)
         for cmd in (
@@ -1881,7 +1888,7 @@ class MergeGuardTest(unittest.TestCase):
         dec, why = self.d("gh pr merge 7 --match-head-commit 0000000", via_hook=True)
         self.assertEqual(dec, "ask")
         self.assertIn("head", why)
-        (self.proj / "xt.yaml").write_text("merge_autonomy: L1\n", encoding="utf-8")
+        self.set_xt("merge_autonomy: L1\n")
         dec, why = self.d("gh pr merge 7 --match-head-commit abc1234def")
         self.assertEqual(dec, "ask")
         self.assertIn("merge-check: human", why)

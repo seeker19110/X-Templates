@@ -231,3 +231,10 @@
 - Đính chính (review #105): "khớp nghĩa tuyệt đối" sai — giá trị sau merge do merge 3 chiều theo dòng quyết định,
   khoá lặp bị dòng sau che lọt qua phép so giá trị hiệu lực. Sửa: so danh sách MỌI dòng khoá theo thứ tự; đáy là
   merge-base (REST compare) thay `base.sha`, áp cả ủy quyền PLAN.md.
+
+### D-033 · 2026-10-18T03:09:25+00:00 · Đóng tiếp lỗ chốt merge (review #105 + yêu cầu chủ repo 'sửa luôn merge_autonomy đọc từ nhánh đích'): mức tự chủ lấy từ đâu, và ủy quyền PLAN.md/khoá lặp lọt qua merge 3 chiều thì chặn thế nào?
+
+- Phương án: (1) merge_autonomy = min(cây làm việc, nhánh đích đã commit), không đọc được → L1; PLAN.md: so danh sách mọi dòng grant theo thứ tự kèm cờ fence ở merge-base/head, đầu PR có grant trong fence hoặc nhóm lặp → hard; xt.yaml: đầu PR có > 1 dòng khoá → hard · (2) merge_autonomy chỉ đọc nhánh đích; PLAN.md giữ so hiệu lực, cấm thêm dòng grant qua PR làn nhanh
+- Chọn: merge_autonomy = min(cây làm việc, nhánh đích đã commit), không đọc được → L1; PLAN.md: so danh sách mọi dòng grant theo thứ tự kèm cờ fence ở merge-base/head, đầu PR có grant trong fence hoặc nhóm lặp → hard; xt.yaml: đầu PR có > 1 dòng khoá → hard
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: min không bao giờ cao hơn nhánh đích (nâng mức phải qua PR đã merge, PR đó quyết ở mức cũ), vẫn cho chủ hạ tại chỗ; mỗi nhóm grant một dòng, không fence và cùng chuỗi dòng ở mọi bên thì merge 3 chiều chỉ ra tập con của merge-base — chặt hơn, không nới; so hiệu lực bị tái hiện lọt (PR chèn live bị sandbox che + PR dời sandbox = live)
+- Đường lùi: merge_autonomy về merge_config(project_dir()); _plan_grants_changed về so parse_grants
