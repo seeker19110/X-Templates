@@ -311,3 +311,10 @@
 - Chọn: Phát hành 3.2.0 ngay với phần đã review sạch; đợt nâng cấp ra bản sau
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 2/5: 3.2.0 có ba thay đổi đã review sạch mà dự án đích cần (guard ghi công AI, LOOP-OPT, perf); gộp thêm phải review lại, chậm bản mà không tăng an toàn; đợt sau ra vài giờ sau
 - Đường lùi: Cắt bản kế tiếp (3.2.1/3.3.0) chứa đợt nâng cấp
+
+### D-044 · 2026-10-18T12:19:52+00:00 · Bộ test tấn công guard: làm ngay sinh biến thể + bộ lệnh hợp lệ, hay để sau đợt nâng autopilot?
+
+- Phương án: (1) Làm ngay: sinh biến thể tất định từ lệnh hạt giống + bộ lệnh hợp lệ chống chặn nhầm · (2) Để sau đợt 1 (reviewer khác model, LOOP-DESIGN-022)
+- Chọn: Làm ngay: sinh biến thể tất định từ lệnh hạt giống + bộ lệnh hợp lệ chống chặn nhầm
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3/5: #125/#127/#128 mỗi vòng review đều tìm lỗ mới qua cổng xanh 100%; máy sinh biến thể bắt trước reviewer, bộ hợp lệ giữ không chặn nhầm; chỉ thêm test, rẻ
+- Đường lùi: Xoá tests/test_guard_corpus.py
