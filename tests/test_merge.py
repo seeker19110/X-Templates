@@ -408,6 +408,19 @@ class MergeConfigTest(unittest.TestCase):
         self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
         self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
 
+    def test_touches_grant_lines_in_plan(self):
+        """ADR-0022: PLAN.md chỉ chạm chốt khi dòng `- grant:` bị thêm/sửa/xoá — tick task, dòng ngữ cảnh thì không."""
+        plan = "docs/autopilot/PLAN.md"
+        add = "@@ -1,2 +1,3 @@\n ## Ủy quyền production\n+- grant: payments | mode=live | max_per_txn=500\n"
+        edit = "@@ -4 +4 @@\n-- grant: payments | mode=sandbox\n+- grant: payments | mode=live\n"
+        tick = "@@ -9,3 +9,3 @@\n - grant: payments | mode=sandbox\n-- [ ] `T-001` việc\n+- [x] `T-001` việc\n"
+        self.assertTrue(xt._touches_hard_key({"filename": plan, "patch": add}))
+        self.assertTrue(xt._touches_hard_key({"filename": plan, "patch": edit}))
+        self.assertFalse(xt._touches_hard_key({"filename": plan, "patch": tick}))
+        self.assertTrue(xt._touches_hard_key({"filename": plan}))  # diff lớn không có patch → không xác minh được
+        self.assertTrue(xt._touches_hard_key({"filename": "x/PLAN.md", "previous_filename": plan, "patch": add}))
+        self.assertFalse(xt._touches_hard_key({"filename": "docs/other/PLAN.md", "patch": add}))
+
 
 class MergeDoctorTest(unittest.TestCase):
     def test_warns_when_l2_but_settings_still_asks_merge(self):

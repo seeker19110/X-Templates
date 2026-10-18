@@ -1135,16 +1135,16 @@ class LoopCommandsTest(TmpDirCase):
         self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)) + "- [x] `T-007` xong\n")
         rc, out, _ = run_main("loop", "init", "--single-session")
         st = xt.read_state(self.tmp)
-        self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 24, True))
-        self.assertIn("trần=24 vòng · chế độ một phiên", out)
+        self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 48, True))
+        self.assertIn("trần=48 vòng · chế độ một phiên", out)
         self.write_plan()
         run_main("loop", "init", "--single-session")
-        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 20)
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 40)
         run_main("loop", "init", "--single-session", "--max-iterations", "7")
         self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 7)
         run_main("loop", "init")
         self.assertEqual(
-            (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (50, False)
+            (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (100, False)
         )
 
     def test_defer_requires_state_and_valid_id(self):
@@ -1331,7 +1331,7 @@ class LoopCommandsTest(TmpDirCase):
         self.write_plan("".join(f"- [ ] `T-00{i}` việc — Gate: `true`\n" for i in range(1, 7)))
         run_main("loop", "init", "--single-session", "--blueprint", "BP.md")
         # ADR-0012: chỉ tính task — MUST đã gom vào task, cộng thêm là đếm hai lần (M ≈ 480 MUST → ~2000 vòng)
-        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 24)
+        self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 48)
 
     def test_stop_after_pending_human_reports_stopped(self):
         self.write_plan()
@@ -1370,7 +1370,7 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual((rc, err), (0, ""))
         decision = json.loads(out)
         self.assertEqual(decision["decision"], "block")
-        self.assertIn("autopilot vòng 1/50", decision["reason"])
+        self.assertIn("autopilot vòng 1/100", decision["reason"])
         self.assertEqual(xt.read_state(self.tmp)["iterations"], 1)
 
     def test_hook_stop_allows_stop_when_inactive(self):

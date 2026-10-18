@@ -50,7 +50,7 @@ updated: 2026-10-16
 | `verify` | Task `[x]` nhưng không có evidence, `exit_code ≠ 0`, `cmd ≠ Gate` khai trong PLAN, hoặc evidence có từ trước lần `loop init` này (vòng/PLAN trước) · task `[~]` không ghi `— Bỏ: <lý do>` · dòng task sai định dạng · (ở Stop hook) đủ bằng chứng nhưng chưa `loop verify` xanh trên cây hiện tại | **Chặn dừng**, yêu cầu `loop record` / `loop verify` lại |
 | `done` | Mọi task có bằng chứng xanh đúng Gate và blueprint 0 MUST mở (blueprint khai ở `loop init` phải tồn tại; biến mất giữa chừng thì PLAN là nguồn sự thật và lý do verdict ghi rõ blueprint không được kiểm) | Cho dừng, `active=false` |
 
-Mặc định khuyến nghị: `--max-iterations` 30–50 cho một PLAN ≤ 10 task; `--hours` ≤ 8; headless thêm `--max-turns`
+Mặc định khuyến nghị: `--max-iterations` 60–100 cho một PLAN ≤ 10 task; `--hours` ≤ 16; headless thêm `--max-turns`
 và `--max-budget-usd`. Tăng trần chỉ bằng `loop init` lại có chủ đích, không sửa tay `state.json`.
 
 ## Checklist

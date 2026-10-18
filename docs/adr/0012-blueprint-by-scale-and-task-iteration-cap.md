@@ -6,6 +6,7 @@
   `tests/test_xt.py::ComposeTest`, `tests/test_xt_cli.py`)
 - **Ngày:** 2026-10-16
 - **Thay một phần:** ADR-0009 §Quyết định 3 (công thức trần vòng).
+- **Làm rõ bởi:** ADR-0022 (hệ số trần vòng x2: `max(40, 8 × task chưa làm)`, D-027)
 
 ## Bối cảnh
 
