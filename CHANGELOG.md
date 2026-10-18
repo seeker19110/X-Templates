@@ -5,6 +5,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `install.py --with-github` chép mẫu PR và Dependabot **cho dự án đích** (`framework/templates/PULL-REQUEST.md`,
+  `framework/templates/dependabot.yml`) thay vì bản của chính repo khung: mẫu PR cũ hỏi "module/hồ sơ/ngành" và
+  `xt.py validate`; Dependabot cũ khai hệ `pip` cho `requirements-dev.txt` mà dự án đích không có (Dependabot báo lỗi mỗi
+  lượt). Dự án đã cài 3.0.0 với `--with-github`: so `.github/pull_request_template.md`, `.github/dependabot.yml` với hai mẫu
+  mới, thay nếu chưa tuỳ biến.
+- `merge-gate.yml`: chú thích `# zizmor: ignore[dangerous-triggers]` kèm lý do ở dòng `pull_request_target` — dự án đích
+  chạy zizmor (WF-CI-004) đỏ mức high khi cài workflow này dù job không checkout code PR, token chỉ đọc, không secret.
+
 ## [3.0.0] - 2026-10-18
 
 > **Dự án đích cần làm khi nâng từ 2.x** (chi tiết ở từng mục dưới):

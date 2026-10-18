@@ -224,7 +224,15 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.run_install("--with-github"), 0)
         rs = self.target / ".github" / "rulesets" / "main.json"
         self.assertTrue(rs.exists())
-        self.assertTrue((self.target / ".github" / "pull_request_template.md").exists())
+        # Mẫu PR và Dependabot là bản cho dự án đích (khối ```markdown của mẫu, chỉ hệ github-actions), không phải bản của
+        # repo khung (mục "module/hồ sơ/ngành", hệ pip cho requirements-dev.txt mà dự án đích không có).
+        pr = (self.target / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+        self.assertTrue(pr.startswith("<!-- Tiêu đề PR"), pr[:80])
+        self.assertNotIn("```", pr)
+        self.assertNotIn("xt.py validate", pr)
+        dep = (self.target / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn("package-ecosystem: github-actions", dep)
+        self.assertNotIn("package-ecosystem: pip", dep)
         # ADR-0023: ruleset mẫu đòi `merge-gate` → workflow của nó đi kèm, không cảnh báo phải tự viết
         self.assertTrue((self.target / ".github" / "workflows" / "merge-gate.yml").exists())
         rs.write_text("{}\n", encoding="utf-8")
@@ -324,7 +332,7 @@ class LegacyMigrationTest(unittest.TestCase):
 
 
 def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
-    """Khung giả tối thiểu: không research/, không templates/, không VERSION — để chạm nhánh 'thiếu'."""
+    """Khung giả tối thiểu: không research/, không VERSION, templates/ chỉ có mẫu GitHub (khi có ruleset) — để chạm nhánh 'thiếu'."""
     src = base / "khung"
     (src / "framework").mkdir(parents=True)
     (src / "framework" / "x.md").write_text("x\n", encoding="utf-8")
@@ -338,8 +346,9 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
     if ruleset is not None:
         (src / ".github" / "rulesets").mkdir(parents=True)
         (src / ".github" / "rulesets" / "main.json").write_text(ruleset, encoding="utf-8")
-        (src / ".github" / "pull_request_template.md").write_text("pr\n", encoding="utf-8")
-        (src / ".github" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
+        (src / "framework" / "templates").mkdir(parents=True, exist_ok=True)
+        (src / "framework" / "templates" / "PULL-REQUEST.md").write_text("pr\n", encoding="utf-8")
+        (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
         (src / ".github" / "workflows").mkdir()
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
     return src

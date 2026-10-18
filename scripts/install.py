@@ -50,14 +50,15 @@ ROOT_TEMPLATES = {
 LEGACY_DIR = ".xstored"
 LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
-# --with-github: hàng rào GitHub mẫu của khung (copy-if-absent). Workflow KHÔNG copy vì job quality phụ thuộc stack — trừ
-# `merge-gate.yml`: không phụ thuộc stack (chỉ python3 + gh) và ruleset mẫu đòi check của nó (ADR-0023).
-GITHUB_FILES = [
-    ".github/rulesets/main.json",
-    ".github/pull_request_template.md",
-    ".github/dependabot.yml",
-    ".github/workflows/merge-gate.yml",
-]
+# --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Workflow KHÔNG copy vì job quality phụ thuộc
+# stack — trừ `merge-gate.yml`: không phụ thuộc stack (chỉ python3 + gh) và ruleset mẫu đòi check của nó (ADR-0023). Mẫu PR
+# và Dependabot lấy từ framework/templates: bản ở `.github/` của khung là của riêng repo khung (module/hồ sơ, pip).
+GITHUB_FILES = {
+    ".github/rulesets/main.json": ".github/rulesets/main.json",
+    ".github/pull_request_template.md": "framework/templates/PULL-REQUEST.md",
+    ".github/dependabot.yml": "framework/templates/dependabot.yml",
+    ".github/workflows/merge-gate.yml": ".github/workflows/merge-gate.yml",
+}
 
 
 def log(msg: str) -> None:
@@ -356,8 +357,8 @@ def ruleset_required_checks() -> list[str]:
 def install_github(target: Path) -> None:
     """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow `merge-gate` (copy-if-absent), cảnh
     báo required check mà dự án phải tự có job."""
-    for gh in GITHUB_FILES:
-        r = copy_if_absent(SRC / gh, target / gh, False)
+    for gh, src in GITHUB_FILES.items():
+        r = copy_if_absent(SRC / src, target / gh, False, transform=template_body if src.endswith(".md") else None)
         log(f"  {gh}: {r}")
     checks = [c for c in ruleset_required_checks() if c != "merge-gate"]  # job đã copy cùng ruleset
     # AUD-CI-003: workflow không được copy (phụ thuộc stack) → import ruleset trước khi có job sẽ khoá merge
