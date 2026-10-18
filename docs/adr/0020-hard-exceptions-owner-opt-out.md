@@ -1,6 +1,7 @@
 # ADR-0020: Chủ dự án tắt được chốt người của ngoại lệ cứng (`merge_hard_exceptions: auto`)
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận — cách nhận diện "PR chạm khoá" (§2) đổi từ dò chuỗi trong patch sang so giá trị đã
+  parse ở đáy/đầu PR (D-032, 2026-10-18; CHANGELOG)
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `merge_hard_mode`, `merge_decision(hard_auto=…)` trả
   `hard` rỗng + `hard_waived`, `HARD_KEY_REASON`/`_touches_hard_key`; `xt.yaml` đặt `merge_hard_exceptions: auto`,
   `framework/templates/xt.yaml` đặt `human` (D-025); test

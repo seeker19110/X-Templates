@@ -221,3 +221,10 @@
 - Đính chính (review lần bốn #103): vị từ chung KHÔNG coi `scripts/xt.py` của repo khung là nhạy cảm — PR nhỏ sửa nó
   từng vào làn nhanh. Vá: `xt.yaml` của repo khai `merge_risk_paths` (`scripts/*`, luật vòng tự động, mẫu, ADR); test
   `test_framework_repo_risk_paths`.
+
+### D-032 · 2026-10-18T02:49:04+00:00 · Hai lỗ của merge-check từ review #103: merge_risk_paths đọc ở cây làm việc (checkout cũ làm rơi glob); khoá merge_hard_exceptions dò bằng chuỗi trong patch (báo hard nhầm) — sửa thế nào?
+
+- Phương án: (1) Glob = hợp cây làm việc và xt.yaml đã commit ở nhánh đích; khoá: so giá trị hiệu lực đã parse (cùng bộ đọc merge_hard_mode, thiếu = human) ở đáy/đầu PR qua REST contents, không đọc được hay vắng cả hai đầu → hard · (2) Glob chỉ đọc ở nhánh đích; khoá giữ dò chuỗi nhưng chỉ trên dòng +/- của patch
+- Chọn: Glob = hợp cây làm việc và xt.yaml đã commit ở nhánh đích; khoá: so giá trị hiệu lực đã parse (cùng bộ đọc merge_hard_mode, thiếu = human) ở đáy/đầu PR qua REST contents, không đọc được hay vắng cả hai đầu → hard
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hợp glob không bao giờ ít hơn nguồn nào (sửa tại chỗ chỉ chặt hơn, gỡ glob phải qua PR làn chuẩn); so giá trị parse bằng đúng bộ đọc của merge_hard_mode nên khớp nghĩa tuyệt đối, vẫn đóng khi không xác minh được; dò dòng +/- vẫn sai với khoá lặp/viết lại và còn phụ thuộc patch (thiếu khi diff lớn)
+- Đường lùi: Về dò chuỗi patch (_touches_hard_key cũ) và merge_config(project_dir()) ở _merge_eval

@@ -6,6 +6,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **`merge-check` đọc chốt merge từ dữ liệu đã commit** (D-032; review #103): `merge_risk_paths` = hợp của cây làm việc
+  và `xt.yaml` đã commit ở nhánh đích (`merge_risk_globs`) — checkout cũ hay sửa tại chỗ không làm rơi glob, PR quan
+  trọng không lọt làn nhanh. "PR chạm khoá `merge_hard_exceptions`" (`HARD_KEY_REASON`, ADR-0020) giờ so giá trị hiệu
+  lực đã parse (thiếu = human) của `xt.yaml` gốc ở đáy/đầu PR qua REST contents (`_hard_key_changed`), không dò chuỗi
+  trong patch: dòng ngữ cảnh/comment nhắc tên khoá không còn báo `hard` nhầm; không đọc được một đầu hoặc vắng cả hai đầu
+  → vẫn `hard`. Đọc contents dùng chung `_contents_read` với ủy quyền PLAN.md.
 - **Required check `merge-gate` — máy chặn auto-merge của PR ngoại lệ cứng trên head hiện tại** (ADR-0023, D-029; đóng
   giới hạn "auto-merge không ghim head" của ADR-0022). Lệnh mới `xt.py merge-gate [--pr N] [--pr-json F] [--head SHA]
   [--json]` dùng lại đường quyết định của `merge-check`: exit 1 khi `hard` ≠ rỗng **và** PR đang bật auto-merge (REST

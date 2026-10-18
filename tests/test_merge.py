@@ -419,11 +419,55 @@ class MergeConfigTest(unittest.TestCase):
             (False, ["merge_hard_exceptions 'off' không hợp lệ (human|auto) — dùng human"]),
         )
 
+    def test_risk_globs_union_with_base(self):
+        """Checkout cũ/sửa tại chỗ không làm rơi `merge_risk_paths` của nhánh đích; glob thêm tại chỗ vẫn giữ (chặt hơn)."""
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), [])  # không có repo/ref, không có xt.yaml
+        commit_base_xt(self.base, 'merge_risk_paths: "scripts/*, docs/adr/*"\n', working="lint: x\n")
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), ["scripts/*", "docs/adr/*"])
+        (self.base / "xt.yaml").write_text('merge_risk_paths: "infra/*, scripts/*"\n', encoding="utf-8")
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), ["infra/*", "scripts/*", "docs/adr/*"])
+
+    def test_merge_eval_reads_risk_paths_from_base(self):
+        """Đường thật của `merge-check`: PR nhỏ sửa `scripts/xt.py` + test, cây làm việc cũ chưa có glob → vẫn làn chuẩn."""
+        commit_base_xt(self.base, 'merge_autonomy: L3\nmerge_risk_paths: "scripts/*"\n', working="merge_autonomy: L3\n")
+        small = [
+            {"path": "scripts/xt.py", "additions": 5, "deletions": 1},
+            {"path": "tests/test_xt_core.py", "additions": 5, "deletions": 0},
+        ]
+        with unittest.mock.patch.object(xt, "project_dir", return_value=self.base):
+            d, _ = xt._merge_eval(pr(files=small, baseRefName="main"))
+        self.assertEqual((d["lane"], d["hard"]), ("chuẩn", ["đường dẫn nhạy cảm (merge_risk_paths): scripts/xt.py"]))
+
     def test_touches_hard_key(self):
-        """Diff xt.yaml chạm khoá, hoặc thiếu patch (diff lớn — không xác minh được) → chạm; file khác → không."""
-        self.assertTrue(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+merge_hard_exceptions: auto"}))
-        self.assertTrue(xt._touches_hard_key({"filename": "x.yml", "previous_filename": "xt.yaml"}))
-        self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
+        """So giá trị hiệu lực `merge_hard_exceptions` (thiếu = human) của xt.yaml gốc ở đáy/đầu PR, không dò chuỗi patch
+        (review #103: dòng ngữ cảnh/comment nhắc tên khoá báo nhầm); không xác minh được → chạm; file khác → không."""
+        auto, human = "merge_hard_exceptions: auto\n", "merge_hard_exceptions: human\n"
+        mod = {"filename": "xt.yaml", "status": "modified", "patch": " merge_hard_exceptions: auto\n+lint: y"}
+        cases = {
+            "chỉ ngữ cảnh/comment nhắc khoá": (
+                auto + "lint: x\n",
+                auto + "lint: y\n# merge_hard_exceptions: human\n",
+                False,
+            ),
+            "auto → human": (auto, human, True),
+            "human → auto": (human, auto, True),
+            "thêm auto": ("lint: x\n", "lint: x\n" + auto, True),
+            "xoá auto": (auto, "lint: x\n", True),
+            "thêm human tường minh": ("lint: x\n", human, False),
+            "đổi cách viết": (auto, "merge_hard_exceptions: 'auto'  # giữ\n", False),
+            "khoá lặp, dòng sau thắng": (auto, auto + "merge_hard_exceptions: human\n", True),
+        }
+        for name, (before, after, want) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.changed(mod, {("xt.yaml", "base"): before, ("xt.yaml", "head"): after}), want)
+        both = {("xt.yaml", "base"): auto, ("xt.yaml", "head"): auto}
+        self.assertTrue(self.changed(mod, both, broken=("base",)))  # lỗi đọc ≠ vắng → coi như đổi
+        self.assertTrue(self.changed(mod, both, broken=("head",)))
+        self.assertTrue(self.changed(mod, {}))  # vắng ở cả hai đầu mà nằm trong diff → token không đọc được
+        moved = {"filename": "x.yml", "previous_filename": "xt.yaml", "status": "renamed"}
+        self.assertTrue(self.changed(moved, {("xt.yaml", "base"): auto}))  # dời đi: auto → (vắng) human
+        self.assertFalse(self.changed(moved, {("xt.yaml", "base"): "lint: x\n"}))  # vẫn human
+        self.assertTrue(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))  # thiếu repo/sha
         self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
 
     PLAN_FILE = "docs/autopilot/PLAN.md"

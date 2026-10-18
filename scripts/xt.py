@@ -2962,16 +2962,31 @@ def _xt_keys(base: Path) -> Dict[str, str]:
     return _yaml_keys(p.read_text(encoding="utf-8") if p.is_file() else "")
 
 
+def _committed_xt_keys(base: Path, ref: str) -> Dict[str, str]:
+    """Khoá của xt.yaml **đã commit ở `ref`** (nhánh đích); không đọc được → rỗng."""
+    r = _git(base, "show", f"{ref}:./xt.yaml")
+    return _yaml_keys(r.stdout if r.returncode == 0 else "")
+
+
 def merge_hard_mode(base: Path, ref: str) -> Tuple[bool, List[str]]:
     """(ngoại lệ cứng không giữ người?, ghi chú) từ `merge_hard_exceptions: human|auto` (ADR-0020) trong xt.yaml **đã
     commit ở `ref`** (nhánh đích), không phải cây làm việc: agent sửa file tại chỗ không tự gỡ được chốt; đổi khoá phải
     qua PR mà `HARD_KEY_REASON` giữ cho người merge. Không đọc được ref hay thiếu khoá → human; giá trị lạ → human kèm
     ghi chú."""
-    r = _git(base, "show", f"{ref}:./xt.yaml")
-    mode = _yaml_keys(r.stdout if r.returncode == 0 else "").get(HARD_KEY, "human")
+    mode = _committed_xt_keys(base, ref).get(HARD_KEY, "human")
     if mode in ("human", "auto"):
         return mode == "auto", []
     return False, [f"{HARD_KEY} '{mode}' không hợp lệ (human|auto) — dùng human"]
+
+
+def _risk_globs(keys: Dict[str, str]) -> List[str]:
+    return [g.strip() for g in keys.get("merge_risk_paths", "").split(",") if g.strip()]
+
+
+def merge_risk_globs(base: Path, ref: str) -> List[str]:
+    """`merge_risk_paths` của cây làm việc HỢP với bản đã commit ở `ref` (nhánh đích): checkout cũ hay sửa tại chỗ không
+    làm rơi glob của nhánh đích (bỏ glob phải qua PR sửa xt.yaml — làn chuẩn, D-031); glob thêm tại chỗ chỉ chặt hơn."""
+    return list(dict.fromkeys([*_risk_globs(_xt_keys(base)), *_risk_globs(_committed_xt_keys(base, ref))]))
 
 
 def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
@@ -2983,8 +2998,7 @@ def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
     if not re.fullmatch(r"L[0-4]", level):
         notes.append(f"merge_autonomy '{level}' không hợp lệ (L0–L4) — dùng L1")
         level = "L1"
-    globs = [g.strip() for g in keys.get("merge_risk_paths", "").split(",") if g.strip()]
-    return int(level[1]), globs, notes
+    return int(level[1]), _risk_globs(keys), notes
 
 
 class PrInputError(Exception):
@@ -3000,10 +3014,11 @@ def _plan_grants(repo: str, path: str, ref: Optional[str]) -> Optional[Dict[str,
     return _plan_read(repo, path, ref)[0]
 
 
-def _plan_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[Dict[str, Dict[str, str]]], bool]:
-    """(ủy quyền như `_plan_grants`, file vắng?). Vắng chỉ khi gh báo `Not Found (HTTP 404)` — `No commit found for the
-    ref … (HTTP 404)` là ref sai, không phải file vắng (review lần bốn). `ref` rỗng thì REST lấy nhánh mặc định — không
-    dùng cho PR, coi là không đọc được."""
+def _contents_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[str], bool]:
+    """(nội dung UTF-8 của `path` ở `ref` qua REST contents, file vắng?): vắng → ("", True); không đọc được hay không xác
+    minh được → (None, False). Vắng chỉ khi gh báo `Not Found (HTTP 404)` — `No commit found for the ref … (HTTP 404)`
+    là ref sai, không phải file vắng (review lần bốn). `ref` rỗng thì REST lấy nhánh mặc định — không dùng cho PR, coi
+    là không đọc được."""
     if ref == "":
         return None, False
     try:
@@ -3013,14 +3028,20 @@ def _plan_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[Dict[
         if d.get("type") != "file" or d.get("path") != path or d.get("encoding") != "base64":
             return None, False
         raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
-        return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8")), False
+        return base64.b64decode(raw, validate=True).decode("utf-8"), False
     except PrInputError as exc:
         # File vắng ở ref đó ≠ không đọc được. Chỉ tin phần stderr của gh (sau ` lỗi: `): thông điệp còn chứa đường dẫn
         # có sha, sha chứa chữ `404` không được làm lỗi mạng thành "file vắng".
         absent = "Not Found (HTTP 404)" in str(exc).split(" lỗi: ", 1)[-1]
-        return ({} if absent else None), absent
+        return ("" if absent else None), absent
     except ValueError:  # lỗi base64 và UnicodeDecodeError
         return None, False
+
+
+def _plan_read(repo: str, path: str, ref: Optional[str]) -> Tuple[Optional[Dict[str, Dict[str, str]]], bool]:
+    """(ủy quyền như `_plan_grants`, file vắng?) — đọc qua `_contents_read`."""
+    text, absent = _contents_read(repo, path, ref)
+    return (None if text is None else parse_grants(text)), absent
 
 
 def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
@@ -3041,13 +3062,26 @@ def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: 
     return False
 
 
+def _hard_key_changed(repo: str, base_sha: str, head_sha: str) -> bool:
+    """So GIÁ TRỊ hiệu lực của `merge_hard_exceptions` (cùng bộ đọc với `merge_hard_mode`, thiếu khoá = human) trong
+    xt.yaml gốc ở đáy với đầu PR — không dò chuỗi trong patch: dòng ngữ cảnh hay comment nhắc tên khoá không còn báo nhầm
+    (review #103). Không đọc được một đầu, hoặc vắng ở CẢ HAI đầu (file trong diff mà hai lần 404 = token không đọc được
+    contents, như `_plan_grants_changed`) → coi như đổi."""
+    (before, gone_before), (after, gone_after) = (
+        _contents_read(repo, "xt.yaml", base_sha),
+        _contents_read(repo, "xt.yaml", head_sha),
+    )
+    if before is None or after is None or (gone_before and gone_after):
+        return True
+    return _yaml_keys(before).get(HARD_KEY, "human") != _yaml_keys(after).get(HARD_KEY, "human")
+
+
 def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
-    """Diff chạm chốt người của ngoại lệ cứng: khoá `merge_hard_exceptions` ở xt.yaml (diff có khoá, hoặc thiếu `patch` —
-    diff lớn, không xác minh được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022)."""
+    """Diff chạm chốt người của ngoại lệ cứng: giá trị `merge_hard_exceptions` của xt.yaml gốc đổi (hoặc không xác minh
+    được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022)."""
     names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
     if "xt.yaml" in names:
-        patch = f.get("patch")
-        return not isinstance(patch, str) or HARD_KEY in patch
+        return _hard_key_changed(repo, base_sha, head_sha)
     if any(n.endswith(PLAN_PATH_SUFFIX) for n in names):
         return _plan_grants_changed(f, repo, base_sha, head_sha)
     return False
@@ -3988,9 +4022,10 @@ def _print_doctor(base: Path, findings: List[Finding], fixed: List[str], fixing:
 
 def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`."""
-    autonomy, risk_paths, notes = merge_config(project_dir())
-    hard_auto, hard_notes = merge_hard_mode(project_dir(), f"origin/{pr.get('baseRefName') or 'main'}")
-    return merge_decision(pr, autonomy, risk_paths, hard_auto), notes + hard_notes
+    ref = f"origin/{pr.get('baseRefName') or 'main'}"
+    autonomy, _, notes = merge_config(project_dir())
+    hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
+    return merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
