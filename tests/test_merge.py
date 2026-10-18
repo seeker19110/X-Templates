@@ -1238,6 +1238,8 @@ class PrNextCliTest(unittest.TestCase):
             rc, _, err = run_main("pr", "reviewed", "--pr", bad, "--head", self.head, "--clean")
             self.assertEqual(rc, 2, bad)
             self.assertIn("--pr phải là số PR, #N hoặc URL …/pull/N", err)
+        for ref in ("08", "８"):  # số 0 đầu, chữ số Unicode → cùng khoá "8" với `pr next` (review #112)
+            self.assertEqual(run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean")[0], 0)
         self.assertEqual(sorted(xt.read_reviews(self.base)), ["7", "8"])
         rc, _, err = run_main("pr", "next", "--pr-json", "-", stdin="[1]")
         self.assertEqual(rc, 2)

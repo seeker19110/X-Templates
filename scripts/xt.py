@@ -4507,7 +4507,7 @@ def _watch_final(d: Dict[str, Any]) -> int:
 def cmd_merge_watch(args: argparse.Namespace) -> int:
     """Gọi `merge-check` mỗi `--interval` giây (mặc định 30) tới khi verdict ≠ wait (ADR-0021). Chạy nền (`run_in_background`): thoát
     thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (update/fix/human/
-    đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ."""
+    đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ, 141 bên đọc đóng ống."""
     deadline = time.monotonic() + args.max_minutes * 60
     errors = 0
     while True:
@@ -4662,7 +4662,7 @@ def cmd_pr(args: argparse.Namespace) -> int:
         if num is None:
             print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {args.pr!r}", file=sys.stderr)
             return 2
-        key = num[1] or num[2]
+        key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
         rec = _pr_record(data, key)
         reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
         reviews.append({"head": args.head, "clean": args.clean, "at": now_iso()})
