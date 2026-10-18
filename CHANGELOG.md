@@ -5,6 +5,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-18
+
+> **Dự án đích cần làm khi nâng từ 2.x** (chi tiết ở từng mục dưới): (1) chạy lại `install.py` từ bản này (`--with-github`
+> nếu dùng workflow mẫu), gộp tay các file `*.xtemplates-new`, rồi `python3 .xtemplates/scripts/xt.py doctor --fix`;
+> định danh kỹ thuật đổi sang `.xtemplates/`, `xt.py`, `xt.yaml`, `XT_*` (ADR-0007 — thay đổi phá vỡ, `install.py` tự
+> chuyển bản ≤ 2.x); (2) thêm `merge-gate` vào required check của ruleset `main` sau khi job chạy trên một PR (ADR-0023);
+> (3) quy mô M/L: khai `format_check`, `coverage` (và `e2e` theo hồ sơ) trong `xt.yaml` (`LOOP-HARNESS-023`); (4) mục
+> blueprint đã tick: thêm dần `— Kiểm: \`<lệnh>\`` (`LOOP-DESIGN-023`); (5) muốn agent merge ngoại lệ cứng hay chạy
+> production: PR đặt `merge_hard_exceptions: auto` / mục "Ủy quyền production" trong PLAN, do người merge (ADR-0020, ADR-0022).
+
 ### Changed
 - **`xt.py doctor` cảnh báo khi khung đã cài cũ hơn bản phát hành mới nhất** (D-040; `LOOP-HARNESS-020` SHOULD, không đổi
   mức). Ở dự án đích, chế độ đầy đủ đọc tag `vX.Y.Z` mới nhất của repo khung qua `gh api repos/<repo>/tags` (mặc định
