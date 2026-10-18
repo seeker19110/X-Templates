@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `LOOP-HARNESS-024` SHOULD: `loop init` từ chối ghi đè vòng autopilot đang chạy (exit 2), `--force` khi cố ý — hai phiên cùng
+  dự án từng xoá trạng thái của nhau (rà stored 01 §3h). Ai gọi `loop init` lại để đổi PLAN/ngân sách: thêm `--force`.
+- `LOOP-HARNESS-025` SHOULD: `xt.py doctor` thử guard bằng lệnh nguy hiểm mẫu; guard có mà không chặn → lỗi `hooks` (rà stored
+  03 §8b).
+- `LOOP-HARNESS-026` MAY: khoá `xt.yaml` `claude_min_version`; `doctor` cảnh báo khi Claude Code thấp hơn; tổ chức ép bằng
+  managed settings `requiredMinimumVersion` (docs Claude Code đọc 2026-10-18).
+
 ### Security
 - Rà `seeker19110/stored` 2026-10-18 (mục 01 §3g, §3g.4; 03 §8c), mỗi lỗ đã tái hiện bằng payload thật trên guard:
   - **`LOOP-STOP-027`** (mới, MUST@L — harness cưỡng chế ở mọi quy mô): lệnh Gate (`PLAN.md`), `— Kiểm:` (blueprint), sàn Gate (`xt.yaml`) do model viết mà
