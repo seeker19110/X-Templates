@@ -5,7 +5,7 @@
   bước 10, `framework/11-autonomous-loop/README.md`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007`; không đổi code
   guard (`merge-check` vẫn quyết `merge`/`hard`; merge trực tiếp chỉ qua lệnh ghim head mà guard đã cho phép)
 - **Ngày:** 2026-10-18
-- **Thay một phần:** ADR-0015 (thời điểm bật auto-merge) ("mở PR là bật auto-merge") — quyết định D-030
+- **Thay một phần:** ADR-0015 — thời điểm bật auto-merge ("mở PR là bật auto-merge"); quyết định D-030
 
 ## Bối cảnh
 
