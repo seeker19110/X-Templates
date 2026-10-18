@@ -144,6 +144,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check`) tới khi PR đã merge hoặc cần hành động.
 - [ADR-0022](docs/adr/0022-production-grants-in-plan.md): duyệt kế hoạch = một lần người duyệt mục Ủy quyền production
   (`- grant:` trong PLAN.md, máy kiểm `xt.py grant-check`); PR đổi grant/khoá luôn người merge; hạn mức autopilot mặc định x2.
+- [ADR-0023](docs/adr/0023-auto-merge-after-clean-review.md): mọi PR — `reviewer` rà sạch mới bật auto-merge; không bật
+  được thì merge trực tiếp bằng lệnh ghim head của `merge-check`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

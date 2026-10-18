@@ -6,6 +6,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Bật auto-merge khi review sạch, không bật được thì merge trực tiếp ghim head — mọi PR** (ADR-0023, D-029; chủ repo yêu
+  cầu cho khung và dự án đích): mở PR → `reviewer` (model khác) rà diff → không còn lỗi chặn và `merge-check` không `hard`
+  thì bật auto-merge; GitHub báo PR đã sẵn sàng thì merge bằng lệnh ghim head trong `next`. Sửa `AGENTS.md`, mẫu
+  `AGENTS.md`, skill `/autopilot`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007` (lời, không đổi mức). Siết
+  `grant-check`/`merge-check` theo review lần bốn của #102: chỉ `Not Found (HTTP 404)` là file vắng (`No commit found for the
+  ref` thì không), và file trong diff mà 404 ở cả đáy lẫn đầu PR (token không đọc được contents) thì là `hard`.
 - **Tối ưu thời gian check e2e**: 7 mục `SHOULD` mới ở `14-testing-quality/e2e-and-accessibility.md` — `QA-E2E-020` shard song
   song + gộp báo cáo blob, `QA-E2E-021` build một lần dùng lại, `QA-E2E-022` đăng nhập một lần (`storageState`), `QA-E2E-023` chọn
   test theo ảnh hưởng ở PR (suite đầy đủ trên `main`/trước deploy), `QA-E2E-024` đỏ sớm + huỷ run cũ, `QA-E2E-025` timeout ngắn

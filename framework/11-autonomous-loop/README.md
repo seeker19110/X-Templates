@@ -63,8 +63,8 @@ updated: 2026-10-18
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit, push nhánh làm việc, cập nhật
     `PROGRESS.md` (≤ 8 KB). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
-    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` bật auto-merge ngay
-    (`gh pr merge <N> --auto --squash` / MCP `enable_pr_auto_merge`, ADR-0015) trừ PR `merge-check` báo `hard` (ngoại lệ
+    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → `reviewer` (model khác) rà diff, không còn lỗi chặn thì ở `merge_autonomy: L3` bật auto-merge
+    (`gh pr merge <N> --auto --squash` / MCP `enable_pr_auto_merge`, ADR-0015/0023; không bật được → merge trực tiếp ghim head) trừ PR `merge-check` báo `hard` (ngoại lệ
     cứng, ADR-0016 → `loop defer`); dưới L3 `<XT> merge-check --pr <N>` →
     làm đúng `next` (`merge` = lệnh merge ghim head; `human` = `loop defer`); vòng sau chạy lại `merge-check` cho PR còn
     mở, theo FIFO; PR chồng chỉ merge sau khi đổi đích về nhánh mặc định và merge nhánh đó vào (`LOOP-DESIGN-020`). Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi PROGRESS); lần 3 → máy đặt

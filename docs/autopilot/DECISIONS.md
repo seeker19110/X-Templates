@@ -197,3 +197,10 @@
 - Chọn: Mục 'Ủy quyền production' trong PLAN.md dạng máy đọc (- grant: <nhóm> | khoá=giá trị …); xt.py grant-check kiểm đóng việc đang làm có nằm trong ủy quyền (thiếu = ngoài); PR đổi dòng grant hoặc khoá merge_hard_exceptions luôn người merge, nên người merge PR duyệt kế hoạch = lời chấp nhận rủi ro duy nhất
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: PLAN do phiên chính tự duyệt (ADR-0008) nên tự cấp ủy quyền cho chính mình là lỗ; bắt PR đổi grant cần người merge vá lỗ đó mà chỉ đòi người một lần; grant-check đóng khi thiếu nên mặc định không cho gì; PA3 là lời dặn không phải cơ chế
 - Đường lùi: Bỏ nhánh PLAN.md khỏi _touches_hard_key và xoá cmd_grant_check; AGENTS.md §5 về như D-023
+
+### D-029 · 2026-10-18T01:48:48+00:00 · Chủ repo: 'bật auto-merge khi review sạch, không bật được thì tự merge, áp cho mọi PR, cả dự án đích' — cài vào khung thế nào?
+
+- Phương án: (1) Mọi PR: mở → reviewer (model khác) rà diff → không còn lỗi chặn (nên sửa đã sửa/trả lời) và merge-check không hard → bật auto-merge; enable lỗi (PR đã sẵn sàng/repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim head trong next của merge-check; còn lỗi chặn → sửa, đẩy, rà lại; ghi ở AGENTS.md, mẫu AGENTS.md, skill /autopilot, LOOP-STOP-022, LOOP-DESIGN-020 · (2) Chỉ PR làn chuẩn chờ review, làn nhanh bật auto-merge khi mở
+- Chọn: Mọi PR: mở → reviewer (model khác) rà diff → không còn lỗi chặn (nên sửa đã sửa/trả lời) và merge-check không hard → bật auto-merge; enable lỗi (PR đã sẵn sàng/repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim head trong next của merge-check; còn lỗi chặn → sửa, đẩy, rà lại; ghi ở AGENTS.md, mẫu AGENTS.md, skill /autopilot, LOOP-STOP-022, LOOP-DESIGN-020
+- Lý do (tiêu chí chất lượng cuối): Chủ repo chọn rõ 'áp cho mọi PR'; tiêu chí 1: đã thấy ở #102 mỗi vòng review bắt thêm lỗ an ninh thật trước khi merge; merge trực tiếp chỉ qua lệnh ghim head nên không merge commit chưa được rà; không đổi code guard (merge-check verdict merge vẫn là điều kiện)
+- Đường lùi: Về 'mở PR là bật auto-merge' (ADR-0015) trong 5 chỗ tài liệu
