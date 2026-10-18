@@ -849,6 +849,32 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         out, _ = xt.hook_stop("{}", self.base)
         self.assertEqual(json.loads(out)["decision"], "block")
 
+    def test_blueprint_checks_run_in_final_verify(self):
+        # LOOP-DESIGN-023: `loop verify` chạy cả `— Kiểm: `…`` của mục [x] trong blueprint khai ở loop init.
+        write(self.base / "BP.md", "- [x] `A-001` **MUST** a — Kiểm: `test -f ok.txt`\n- [x] `A-002` **MUST** b\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "bp")
+        st = xt.read_state(self.base)
+        st["blueprint"] = "BP.md"
+        xt.write_state(st, self.base)
+        rc, text = self.verify()
+        self.assertEqual(rc, 0, text)
+        self.assertIn("[xt] verify blueprint A-001: exit 0", text)
+        self.assertIn("XANH (1 Gate + 1 lệnh kiểm blueprint)", text)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual([(r["id"], r["exit_code"]) for r in rec["blueprint"]], [("A-001", 0)])
+        write(self.base / "BP.md", "- [x] `A-001` **MUST** a — Kiểm: `test -f khong-co.txt`\n")
+        self.git("commit", "-qam", "bp đỏ")
+        rc, text = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("ĐỎ (1 Gate + 1 lệnh kiểm blueprint)", text)
+        self.assertIn("kiểm lại cuối ĐỎ (A-001)", xt.final_check(self.base) or "")
+        st["blueprint"] = "khong-co.md"  # blueprint mất giữa chừng: không kiểm được, không khai sạch
+        xt.write_state(st, self.base)
+        rc, text = self.verify()
+        self.assertEqual(rc, 0)
+        self.assertNotIn("lệnh kiểm blueprint", text)
+
     def test_gate_that_changes_tree_is_not_ok(self):
         write(self.plan, "- [x] `T-001` a — Gate: `echo y >> ok.txt`\n")
         self.git("commit", "-qam", "plan")

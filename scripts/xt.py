@@ -112,7 +112,11 @@ WAIVER_RE = re.compile(r"(?:[—–-]|\()\s*Miễn\s*:\s*[^\s)]")
 # `Duyệt: "<trích nguyên văn>" <YYYY-MM-DD>` hoặc link tới comment/issue. Im lặng không phải duyệt.
 NA_RE = re.compile(r"(?:[—–-]|\()\s*Không áp dụng\s*:\s*[^\s)]")
 APPROVAL_RE = re.compile(r"Duyệt\s*:\s*(?:[\"“][^\"”]{3,}[\"”]\s*\(?\d{4}-\d{2}-\d{2}|https?://\S+)")
-LOOSE_NOTE_RE = re.compile(r"\s(?:[—–-]{1,2}\s*|\()(?:Bằng chứng|Miễn|Không áp dụng|Thiếu)\s*:.*$")
+LOOSE_NOTE_RE = re.compile(r"\s(?:[—–-]{1,2}\s*|\()(?:Bằng chứng|Miễn|Không áp dụng|Thiếu|Kiểm)\s*:.*$")
+# Lệnh kiểm máy của mục `[x]` trong blueprint dự án: `— Kiểm: `<lệnh>`` ở phần ghi chú (sau `· Nguồn:` cuối) —
+# `blueprint-status --run`/`loop verify` chạy lại, exit ≠ 0 = mục chưa đạt dù đã tick (LOOP-DESIGN-023). Chữ của mục
+# dùng `→ Kiểm:` (mũi tên) nên không nhầm với ghi chú của dự án.
+CHECK_CMD_RE = re.compile(r"(?:[—–-]|\()\s*Kiểm\s*:\s*`([^`\n]+)`")
 PLAN_SKIP_RE = re.compile(r"(?i)(?:Bỏ|Miễn|Lý do)\s*:\s*\S")
 PREFIX_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -612,9 +616,11 @@ def _compose_header(
         "# Blueprint dự án",
         "",
         f"> Sinh bởi `xt.py compose` ngày {today} — hồ sơ **{profile}**, ngành **{ind_names}**, quy mô **{scale}**.",
-        "> Trạng thái: `[ ]` chưa · `[x]` đạt (kèm bằng chứng ở PR/CI) · `[~]` kèm `— Không áp dụng: <điều kiện>` hoặc",
+        "> Trạng thái: `[ ]` chưa · `[x]` đạt kèm `— Kiểm: `<lệnh chạy lại được>`` (không có lệnh thì `— Bằng chứng: <file|URL>`)",
+        "> · `[~]` kèm `— Không áp dụng: <điều kiện>` hoặc",
         '> `— Miễn: <lý do>` (MUST thêm `Duyệt: "<lời chủ dự án>" <ngày>` hoặc link — LOOP-STOP-024).',
-        f"> Kiểm tiến độ: `python3 {xt_cmd} blueprint-status BLUEPRINT.md --strict` (còn MUST chưa đạt → exit 1).",
+        f"> Kiểm tiến độ: `python3 {xt_cmd} blueprint-status BLUEPRINT.md --strict --run` (còn MUST chưa đạt hoặc lệnh kiểm",
+        "> đỏ → exit 1; `loop verify` chạy lại cùng các lệnh trước khi autopilot dừng — LOOP-DESIGN-023).",
         *(
             [
                 f"> File này chỉ chứa MUST ở quy mô {scale}; SHOULD/MAY ở [`{backlog}`]({backlog}) — không chặn verdict,"
@@ -801,6 +807,43 @@ def blueprint_status(path: Path) -> Dict[str, Any]:
     for key in ("open_must", "bad_waivers", "bad_lines"):
         s[key] += b[key]
     return s
+
+
+def blueprint_checks(path: Path) -> Dict[str, Any]:
+    """Mục `[x]` của blueprint (+ backlog nó khai) có `— Kiểm: `<lệnh>``: `checks` [{"id","level","cmd","file"}] theo thứ
+    tự mục; `unchecked_must`: ID MUST `[x]` không có lệnh kiểm — tick bằng lời/bằng chứng tĩnh, máy không chạy lại được."""
+    checks: List[Dict[str, Any]] = []
+    unchecked: List[str] = []
+    for f in blueprint_files(path):
+        try:
+            raw = f.read_text(encoding="utf-8")
+        except OSError:  # thiếu file backlog: blueprint_status đã báo ở bad_lines
+            continue
+        for line in unicodedata.normalize("NFC", raw).splitlines():
+            m = ITEM_RE.match(line)
+            if not m or m["state"] not in "xX":
+                continue
+            c = CHECK_CMD_RE.search(_note_segment(line))
+            if c:
+                checks.append({"id": m["id"], "level": m["level"], "cmd": c[1].strip(), "file": f.name})
+            elif m["level"] == "MUST":
+                unchecked.append(m["id"])
+    return {"checks": checks, "unchecked_must": unchecked}
+
+
+def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int) -> List[Dict[str, Any]]:
+    """Chạy lệnh kiểm của các mục trong thư mục `base` (mỗi lệnh một lần, mục cùng lệnh dùng chung kết quả):
+    [{"id","cmd","exit_code","output_tail"}] theo thứ tự mục; `cmd`/`output_tail` đã qua `redact`."""
+    done: List[Tuple[str, int, str]] = []
+    out: List[Dict[str, Any]] = []
+    for c in checks:
+        hit = next(((code, tail) for cmd, code, tail in done if same_command(cmd, c["cmd"])), None)
+        if hit is None:
+            code, text = run_gate_shell(c["cmd"], base, timeout)
+            hit = (code, redact("\n".join(text.strip().splitlines()[-20:])))
+            done.append((c["cmd"], *hit))
+        out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
+    return out
 
 
 def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
@@ -1202,19 +1245,40 @@ def loop_verify(base: Optional[Path] = None) -> int:
         tail = redact("\n".join(out.strip().splitlines()[-20:]))
         results.append({"task": t["id"], "gate": t["gate"], "exit_code": code, "output_tail": tail})
         print(f"[xt] verify {t['id']}: exit {code}")
+    checks = _verify_blueprint(base, st, timeout)
     after = tree_fingerprint(base)
     stable = before == after
-    ok = stable and all(r["exit_code"] == 0 for r in results)
+    ok = stable and all(r["exit_code"] == 0 for r in results + checks)
     for r in results:
         r["gate"] = redact(r["gate"])
-    rec = {"fingerprint": after, "ok": ok, "stable": stable, "finished": now_iso(), "results": results}
+    rec = {
+        "fingerprint": after,
+        "ok": ok,
+        "stable": stable,
+        "finished": now_iso(),
+        "results": results,
+        "blueprint": checks,
+    }
     d = state_dir(base)
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / VERIFIED_FILE, json.dumps(rec, ensure_ascii=False, indent=2) + "\n")
     if not stable:
         print("✗ Gate làm đổi cây làm việc (format/sinh file?) — commit thay đổi rồi chạy lại `loop verify`")
-    print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({len(results)} Gate) — .autopilot/{VERIFIED_FILE}")
+    more = f" + {len(checks)} lệnh kiểm blueprint" if checks else ""
+    print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({len(results)} Gate{more}) — .autopilot/{VERIFIED_FILE}")
     return 0 if ok else 1
+
+
+def _verify_blueprint(base: Path, st: Dict[str, Any], timeout: int) -> List[Dict[str, Any]]:
+    """Lệnh kiểm `— Kiểm: `…`` của mục `[x]` trong blueprint khai ở `loop init` (LOOP-DESIGN-023); không khai/mất file → []."""
+    bp = st.get("blueprint")
+    bpp = base / bp if bp else None
+    if bpp is None or not bpp.exists():
+        return []
+    out = run_blueprint_checks(blueprint_checks(bpp)["checks"], base, timeout)
+    for r in out:
+        print(f"[xt] verify blueprint {r['id']}: exit {r['exit_code']}")
+    return out
 
 
 def final_check(base: Path) -> Optional[str]:
@@ -1226,7 +1290,8 @@ def final_check(base: Path) -> Optional[str]:
     if rec.get("fingerprint") == fp and rec.get("ok") is True:
         return None
     if rec.get("fingerprint") == fp:
-        red = [str(r.get("task")) for r in rec.get("results", []) if isinstance(r, dict) and r.get("exit_code") != 0]
+        runs = rec.get("results", []) + rec.get("blueprint", [])
+        red = [str(r.get("task") or r.get("id")) for r in runs if isinstance(r, dict) and r.get("exit_code") != 0]
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
@@ -3287,11 +3352,43 @@ def cmd_compose(args: argparse.Namespace) -> int:
     return 0
 
 
+def _blueprint_run(path: Path) -> Optional[Dict[str, Any]]:
+    """`--run`: chạy lệnh kiểm của mục `[x]` trong thư mục chứa blueprint → {"checks", "failed_checks", "unchecked_must"};
+    None khi không chạy được (đã in lỗi)."""
+    timeout = _record_timeout()
+    if timeout is None:
+        return None
+    bp = path.resolve()
+    found = blueprint_checks(bp)
+    runs = run_blueprint_checks(found["checks"], bp.parent, timeout)
+    failed = [r["id"] for r in runs if r["exit_code"] != 0]
+    return {"checks": runs, "failed_checks": failed, "unchecked_must": found["unchecked_must"]}
+
+
+def _print_blueprint_run(run: Dict[str, Any]) -> None:
+    for r in run["checks"]:
+        print(f"{'✓' if r['exit_code'] == 0 else '✗'} Kiểm {r['id']}: exit {r['exit_code']} `{r['cmd']}`")
+    if run["failed_checks"]:
+        print("✗ Lệnh kiểm ĐỎ — mục đã tick nhưng chưa đạt: " + ", ".join(run["failed_checks"]))
+    if run["unchecked_must"]:
+        ids = run["unchecked_must"]
+        print(f"ℹ {len(ids)} mục MUST đạt không có lệnh kiểm máy (ghi `— Kiểm: `<lệnh>``): " + ", ".join(ids[:15]))
+
+
 def cmd_blueprint_status(args: argparse.Namespace) -> int:
+    if args.run and args.file == "-":
+        print(
+            "✗ --run cần file blueprint thật (lệnh kiểm chạy trong thư mục chứa nó), không đọc được từ stdin",
+            file=sys.stderr,
+        )
+        return 2
     s = blueprint_status_text(sys.stdin.read()) if args.file == "-" else blueprint_status(Path(args.file))
-    ok = not s["open_must"] and not s["bad_waivers"] and not s["bad_lines"]
-    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "ok"}
-        print(json.dumps({**s, "ok": ok}, ensure_ascii=False))
+    run = _blueprint_run(Path(args.file)) if args.run else {"checks": [], "failed_checks": [], "unchecked_must": []}
+    if run is None:
+        return 2
+    ok = not s["open_must"] and not s["bad_waivers"] and not s["bad_lines"] and not run["failed_checks"]
+    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "checks", "failed_checks", "unchecked_must", "ok"}
+        print(json.dumps({**s, **run, "ok": ok}, ensure_ascii=False))
         return 0 if ok or not args.strict else 1
     for lv in LEVELS:
         c = s["levels"][lv]
@@ -3302,6 +3399,8 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
         print(f"✗ Sai định dạng/thiếu mục: {b}")
     if s["open_must"]:
         print(f"Còn {len(s['open_must'])} mục MUST chưa đạt: " + ", ".join(s["open_must"][:15]))
+    if args.run:
+        _print_blueprint_run(run)
     return 0 if ok or not args.strict else 1
 
 
@@ -4322,7 +4421,14 @@ def build_parser() -> argparse.ArgumentParser:
     pb = sub.add_parser("blueprint-status")
     pb.add_argument("file", help="BLUEPRINT.md, hoặc - để đọc stdin")
     pb.add_argument("--strict", action="store_true", help="exit 1 khi còn MUST mở hoặc miễn trừ thiếu lý do")
-    pb.add_argument("--json", action="store_true", help="in JSON (levels, open_must, bad_waivers, bad_lines, ok)")
+    pb.add_argument(
+        "--json", action="store_true", help="in JSON (levels, open_must, bad_waivers, bad_lines, checks, ok)"
+    )
+    pb.add_argument(
+        "--run",
+        action="store_true",
+        help="chạy lệnh `— Kiểm: `<lệnh>`` của mục [x] trong thư mục chứa blueprint; đỏ = mục chưa đạt (LOOP-DESIGN-023)",
+    )
     pb.set_defaults(fn=cmd_blueprint_status)
     plp = sub.add_parser("loop")
     lsub = plp.add_subparsers(dest="loop_cmd", required=True)

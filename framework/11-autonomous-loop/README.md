@@ -82,7 +82,7 @@ updated: 2026-10-18
 14. **Context đầy** → compaction tự nén, không bàn giao: hook PreCompact ghi checkpoint (`<XT> loop checkpoint`), SessionStart(compact) in lại
     `loop status` (task đang làm, lệnh kiểm cuối, file chưa commit, việc chờ người). **Gần hết trần máy** (≥ 80% vòng/giờ/tiền):
     ghi "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
-15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict` (cổng phát hành G7) không còn MUST mở
+15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict --run` (cổng phát hành G7) không còn MUST mở, không lệnh `— Kiểm:` đỏ
     → `GO-NO-GO.md` (PR của lát cuối; PR đã merge, PR `merge-check` = `human` liệt kê chờ người), báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `done-pending-human` → báo cáo như `done` + danh sách việc chờ người (ID, lý do, cách làm),
     người xử lý rồi `loop resume`. `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
 

@@ -221,3 +221,10 @@
 - Đính chính (review lần bốn #103): vị từ chung KHÔNG coi `scripts/xt.py` của repo khung là nhạy cảm — PR nhỏ sửa nó
   từng vào làn nhanh. Vá: `xt.yaml` của repo khai `merge_risk_paths` (`scripts/*`, luật vòng tự động, mẫu, ADR); test
   `test_framework_repo_risk_paths`.
+
+### D-032 · 2026-10-18T03:10:09+00:00 · Blueprint tick là lời khai (blueprint_status chỉ đếm ô [x]) — biến thành bằng chứng máy thế nào?
+
+- Phương án: (1) Ghi chú — Kiểm: `<lệnh>` trên mục [x]; blueprint-status --run và loop verify chạy lại; đỏ = chưa đạt; MUST tick không có lệnh chỉ báo (unchecked_must), không đỏ · (2) Bắt buộc mọi MUST [x] có lệnh kiểm, thiếu là đỏ ngay · (3) Thêm trường check: máy đọc vào mục khung (framework), compose sinh lệnh
+- Chọn: Ghi chú — Kiểm: `<lệnh>` trên mục [x]; blueprint-status --run và loop verify chạy lại; đỏ = chưa đạt; MUST tick không có lệnh chỉ báo (unchecked_must), không đỏ
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: lệnh do dự án khai nên đúng stack, máy chạy lại được và test được; đi qua loop verify có sẵn nên Stop hook chặn 'done' sai mà không thêm luật mới; PA2 làm hỏng blueprint đã tick của dự án đang chạy (hotel-manager) và nhiều mục chỉ kiểm bằng tài liệu/URL; PA3 không khả thi vì phần Kiểm của khung là văn xuôi theo nhiều stack. Đường lùi giữ: siết PA2 sau khi unchecked_must có số đo
+- Đường lùi: Bỏ cờ --run và _verify_blueprint; CHECK_CMD_RE/ghi chú — Kiểm: vẫn vô hại như ghi chú thường

@@ -6,6 +6,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-032).
+  Ghi `— Kiểm: \`<lệnh>\`` ở cuối dòng mục đã tick (phần ghi chú sau `· Nguồn:`); `xt.py blueprint-status --run` chạy lại
+  mọi lệnh trong thư mục chứa blueprint (mỗi lệnh một lần, timeout `XT_RECORD_TIMEOUT`), in `✓/✗ Kiểm <ID>`, JSON thêm
+  `checks`, `failed_checks`, `unchecked_must` (MUST tick không có lệnh — chỉ báo, không đỏ); `--strict --run` exit 1 khi
+  có lệnh đỏ; `--run` với stdin `-` → exit 2. `xt.py loop verify` chạy thêm các lệnh này (ghi `verified.json.blueprint`;
+  `final_check` nêu ID đỏ) nên Stop hook không nhận `done` khi blueprint tick sai. `carry_states` giữ ghi chú `— Kiểm:` khi
+  ghép lại; header blueprint sinh ra và `LOOP-DESIGN-022`, bảng cổng `loop-design.md`/`harness-files.md`, README mảng 11,
+  `composition.md` bước 2, mẫu `AGENTS.md`/`GO-NO-GO.md`, skill `/autopilot` bước 12, `/blueprint` ghi `--strict --run`.
+  Dự án đích: chạy lại `install.py`; mục đã tick chưa có lệnh hiện ở `unchecked_must`, thêm dần khi rà.
 - **Required check `merge-gate` — máy chặn auto-merge của PR ngoại lệ cứng trên head hiện tại** (ADR-0023, D-029; đóng
   giới hạn "auto-merge không ghim head" của ADR-0022). Lệnh mới `xt.py merge-gate [--pr N] [--pr-json F] [--head SHA]
   [--json]` dùng lại đường quyết định của `merge-check`: exit 1 khi `hard` ≠ rỗng **và** PR đang bật auto-merge (REST
