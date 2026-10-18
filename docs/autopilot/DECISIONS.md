@@ -332,3 +332,17 @@
 - Chọn: Chặn ở chính sách mặc định (dấu 'tay bằng chứng' trong DANGER_MARKERS), chỉ xt.py ghi; người sửa tay hoặc loop init --force
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bằng chứng ghi tay là đúng thứ P1 cấm và Stop hook đọc chính các file này; guard đã nhận diện sẵn, chỉ thiếu dấu; HMAC cần khoá agent không đọc được — chưa có chỗ giữ trong phiên agent
 - Đường lùi: Bỏ 'tay bằng chứng' khỏi DANGER_MARKERS (ADR-0026 → bị thay)
+
+### D-048 · 2026-10-18T14:03:18+00:00 · Cổng render UI lấy từ XIAS (vendor mã MIT, giữ ghi chú bản quyền) hay tự viết mẫu?
+
+- Phương án: (1) Chép verify_states/target_size/overflow/axe_audit của plugin87/ux-ui-agent-skills (MIT) vào khung, giữ ghi chú bản quyền · (2) Tự viết mẫu verify-render.mjs (Playwright + axe) theo ý tưởng, không chép mã, chạy thử trên fixture; ghi XIAS là nguồn ý tưởng · (3) Chỉ ghi vào checklist, không kèm mã
+- Chọn: Tự viết mẫu verify-render.mjs (Playwright + axe) theo ý tưởng, không chép mã, chạy thử trên fixture; ghi XIAS là nguồn ý tưởng
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: stored §7d.2 thấy XIAS chép dữ liệu từ hai kho MIT khác không ghi nguồn và cổng gọi chromium channel 'chrome' (fail ở sandbox, 49/52 khi tự chạy); chép nguyên kéo theo nghĩa vụ bản quyền + lỗi môi trường. Mẫu tự viết nhỏ (≈100 dòng), dùng Chromium của Playwright, đã chạy: tốt exit 0, xấu exit 1 (hover 1,76:1, tràn ngang, primary 4,10:1), thiếu đích/Chromium exit 2
+- Đường lùi: Xoá framework/templates/ui-gates/ và dòng bảng ở templates/README.md, UX-A11Y-028/029 và Cổng tự động trong accessibility.md trở về chỉ mô tả Playwright
+
+### D-049 · 2026-10-18T14:03:18+00:00 · Kiểm tương phản token và license vendor: viết trong xt.py (stdlib Python) hay thành script Node/gói riêng?
+
+- Phương án: (1) Thêm xt.py contrast và xt.py vendor-check (stdlib, có test, 100% coverage), danh sách theo dõi license ở JSON trong framework/ · (2) Script Node check-contrast.mjs chép vào từng dự án (như checklist cũ gợi ý) · (3) Dùng linter DESIGN.md của Google cho mọi việc tương phản
+- Chọn: Thêm xt.py contrast và xt.py vendor-check (stdlib, có test, 100% coverage), danh sách theo dõi license ở JSON trong framework/
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: khung chỉ phụ thuộc stdlib Python, mọi dự án đích đã có xt.py (không cần Node cho dự án không có frontend), test được và đo coverage; DESIGN.md lint chỉ phủ khi có DESIGN.md và tương phản chỉ là warning exit 0 nên không thay được cổng token CSS. Giữ lint DESIGN.md làm mục riêng UX-DS-021. Danh sách theo dõi license để JSON có ngày xác minh nên sửa không cần đổi mã
+- Đường lùi: Xoá cmd_contrast, cmd_vendor_check và hằng liên quan khỏi xt.py, tests/test_ui_gates.py, ui-vendor-watchlist.json; đổi Kiểm của UX-DS-003/011/020, UX-A11Y-002, CMP-LIC-022, FE-START-* về lệnh mô tả

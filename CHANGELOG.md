@@ -5,6 +5,26 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Đề xuất UI từ `stored` 06 §7c/§7d/§7g/§7h, đối chiếu ba cột ở [`research/2026-10-18-stored-ui-extraction.md`](research/2026-10-18-stored-ui-extraction.md):
+  - **`xt.py contrast`** (D-049): tương phản WCAG của cặp token CSS ở mọi theme (`:root`, `.dark`,
+    `[data-theme=dark]`, `prefers-color-scheme`; màu `#hex`/`rgb`/`hsl`/`oklch`/bộ ba trần của shadcn, `var()`); tự suy cặp
+    `--X-foreground`/`--on-X`/`--text-on-X` trên `--X`, `--foreground` trên `--background`, `--ring` ≥ 3:1; `--pairs` cho
+    cặp khác; không làm tròn lên; không có cặp nào để kiểm = đỏ. Đỏ khi `--primary`/`--destructive` thiếu token chữ.
+  - **`xt.py vendor-check`**: thư mục vendor có `LICENSE`/`NOTICE`/`SOURCE`, không điều khoản hạn chế (Commons Clause,
+    phi thương mại, Fair Use, BUSL, SSPL…); dò danh sách theo dõi `16-compliance-privacy/ui-vendor-watchlist.json`
+    (Preline, magic-portfolio CC BY-NC, React Bits Commons Clause, Tailwind Plus) trong `package.json` và ghi nguồn.
+  - **Mẫu cổng render** `framework/templates/ui-gates/verify-render.mjs` (D-048): axe (tag `wcag22aa`), tràn ngang 320/280 px,
+    tương phản chữ mặc định/hover/focus; tự viết (không chép mã XIAS), đã chạy trên trang tốt (exit 0) và xấu (exit 1).
+  - Mục mới: `UX-DS-020` (MUST@L, token chữ `on-primary` đi kèm nền hành động), `UX-DS-021` (lint `DESIGN.md` bằng
+    `@google/design.md@0.4.0`, đọc `summary` vì tương phản chỉ là cảnh báo), `UX-DS-022` (skill thẩm mỹ chỉ là gợi ý, token
+    khởi đầu qua cổng), `UX-A11Y-029` (MAY, thử căng 280 px — không phải chuẩn), `UX-RESP-021` (breakpoint theo nền tảng:
+    window size classes compact/medium/expanded/large/extra-large; size class iOS), `CMP-LIC-022` (mã UI vendor ghi nguồn +
+    license), module mới `FE-START-001…005` (`07-frontend/starter-layouts.md`: starter theo loại dự án, mẫu ngừng cập nhật,
+    license không thuần OSI). `UX-DS-003/011` và `UX-A11Y-002/028` đổi `Kiểm` sang `xt.py contrast`/mẫu cổng render.
+  - Dự án đích: chạy lại `install.py` rồi `compose` lại blueprint để nhận ID mới (`UX-DS-020` là `MUST@L`, còn lại SHOULD/MAY
+    vào backlog); không đổi ID cũ.
+
 ## [3.3.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.2.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`, mẫu `AGENTS.md`/`CLAUDE.md`, skill
