@@ -252,6 +252,9 @@
 - Chọn: gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: răng đặt ở loop verify — điểm máy đã chặn done — nên không thêm luồng mới, logic Python có test và chạy chung cho mọi stack; PA2 phải dò stack bằng bash ở mọi commit, chậm và khó test, lại chặn cả commit sửa tài liệu; PA3 là lời dặn, chính là lỗ đang vá. Chỉ áp M/L vì S là sàn baseline (ADR-0003); sàn là dấu hiệu tất định, ngưỡng thấp vẫn qua — review bù
 - Đường lùi: Xoá _doctor_gate_floor khỏi doctor_findings và nhánh floor trong loop_verify/_loop_init; hằng FLOOR_* không ảnh hưởng gì khác
+- Đính chính (review #107): dò tên công cụ bằng regex đỏ oan với stack lạ (deno, dotnet, gradle, dart) và lọt với cờ
+  trùng tên (`black -l`, `go test -cover`, `fail_under` khi không bật coverage). Thay bằng khoá khai báo `format_check`,
+  `coverage` (+ `typecheck`/`build`, `e2e` theo stack/hồ sơ) phải khác rỗng/no-op và `loop verify` chạy chúng; bỏ mọi regex tên công cụ.
 
 ### D-036 · 2026-10-18T03:56:29+00:00 · Phạm vi /autopilot không đối số sau việc 1–2: làm tiếp những đề xuất nào (3 máy trạng thái merge, 4 sàn quyền token, 5 số đo vòng, 6 đóng gói xt.pyz)?
 
