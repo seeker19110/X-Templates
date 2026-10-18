@@ -6,6 +6,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Máy trạng thái "merge theo làn" trong code: `xt.py pr next` + `pr reviewed`** (ADR-0025, D-038; thay một phần
+  cách thực thi của ADR-0024, luật giữ nguyên). `pr next --pr N [--json]` là hàm thuần trên quyết định `merge-check`,
+  trạng thái auto-merge của PR và sổ `.autopilot/reviews.json`, trả MỘT hành động (`enable-auto-merge`,
+  `disable-auto-merge`, `review`, `fix`, `update`, `retarget`, `defer-human`, `merge`, `wait`, `done`, `closed`) kèm `do` và
+  `fallback` (merge ghim head, cả `next_rest`); dưới L3 không bao giờ bật auto-merge (trả `merge` ghim head khi `merge-check` =
+  `merge`); verdict `human` khi auto-merge đang bật → tắt trước; không gọi GitHub, guard vẫn là lớp chặn. `pr reviewed --pr N --head <SHA 40 ký tự>
+  --clean|--blocking` ghi review gắn với commit đã rà; PR từng vào làn chuẩn được nhớ (`standard_seen`). Văn xuôi bảy
+  bước ở `AGENTS.md` §3, mẫu `AGENTS.md` §7, skill `/autopilot` bước 10/13, README mảng 11, `LOOP-STOP-022` (SHOULD),
+  `LOOP-DESIGN-020` (SHOULD) rút về "chạy `pr next`, làm đúng `do`" (không đổi mức). Dự án đích: chạy lại `install.py`.
 - **Số đo vòng autopilot: `.autopilot/runs.jsonl` + `xt.py loop stats`** (`LOOP-DESIGN-024`, mục mới SHOULD; D-037).
   `evidence/T-xxx.json` bị ghi đè mỗi lần `loop record` nên không thấy các lần Gate đỏ trước khi xanh. Nay mỗi lần record
   nối một dòng (task, exit, chữ ký lỗi, thời điểm, HEAD, vòng) vào `runs.jsonl` (cục bộ, `.autopilot/` đã gitignore);
