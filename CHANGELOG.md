@@ -5,6 +5,27 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+Mục checklist từ đợt rà `seeker19110/stored` 2026-10-18 (stored `10ecf8b..a1a1f51`; chi tiết ở
+`research/2026-10-18-stored-delta-extraction.md`). Dự án đích: ghép lại blueprint để nhận các ID mới.
+- `SEC-SUPPLY-027` SHOULD: mục "Đánh giá" của PR thêm phụ thuộc/skill/plugin ghi SHA đã đọc, `git log --follow -- LICENSE*` (kể cả license tải lúc chạy), repo trùng tên đã loại, số tự công bố đã đo lại hay chưa — rà seeker19110/stored 2026-10-18.
+- `CMP-LIC-021` SHOULD: thành phần tải lúc cài/chạy (engine, image `pull`, weights, `postinstall`) khai ở `THIRD_PARTY_NOTICES`, kể cả license không-OSI tầng dưới — rà seeker19110/stored 2026-10-18.
+- `WF-DOC-019` SHOULD: lệnh cài ghim phiên bản trong README/docs/`SKILL.md` phải trỏ bản đã phát hành (kiểm qua registry npm/PyPI/crates.io/Go) — rà seeker19110/stored 2026-10-18.
+- `QA-E2E-027` MAY: test có bước agent chỉ phát lại cache đã kiểm ở job required, cache miss/stale = đỏ — rà seeker19110/stored 2026-10-18.
+- `QA-E2E-028` SHOULD: dữ liệu E2E tổng hợp; `gitleaks dir` quét report/video/cache agent trước `upload-artifact` — rà seeker19110/stored 2026-10-18.
+- `AI-EVAL-020` SHOULD: bảng so sánh chỉ đặt cạnh nhau số cùng benchmark/metric/cấu hình, ghi nguồn `vendor`/`tự đo` — rà seeker19110/stored 2026-10-18.
+- `AI-AGENT-023` SHOULD: tool ghi/sửa nhận `expected_version`, lệch → `CONFLICT` không ghi, mỗi lần ghi một phiên bản mới — rà seeker19110/stored 2026-10-18.
+- `PRF-DESK-018` MUST: helper nâng quyền chỉ nhận hành động định sẵn (cấm `exec "$@"`/`sh -c`), polkit không `*_keep` cho action phá huỷ, XPC `setCodeSigningRequirement` — rà seeker19110/stored 2026-10-18.
+- `PRF-CLI-021` SHOULD: CLI tự nâng quyền theo allowlist hành động, trỏ `PRF-DESK-018` — rà seeker19110/stored 2026-10-18.
+- `LOOP-ORCH-018` SHOULD: `reviewer` rà Gate của PLAN (hành vi theo SPEC, không lệnh đối ngoại/phá huỷ) trước `loop decide` duyệt PLAN — rà seeker19110/stored 2026-10-18.
+- `CMP-AUDIT-020` MAY: điểm/huy hiệu công cụ tự chấm chỉ là tín hiệu tư vấn, không vào cột bằng chứng GO-NO-GO — rà seeker19110/stored 2026-10-18.
+- `IND-MEDIA-022` SHOULD: pipeline media trả phí validate/dry-run trước lệnh trả phí, sha256 đầu vào, đầu vào đổi → `stale` — rà seeker19110/stored 2026-10-18.
+- `PRF-AGENT-022` MAY: sản phẩm nhúng CLI agent đặt thư mục cấu hình riêng, installer không ghi vào cấu hình công cụ khác — rà seeker19110/stored 2026-10-18.
+- Skill `/research` và subagent `researcher`: phương pháp đánh giá nguồn bên thứ ba (chính chủ qua hai phép thử, license tầng dưới, repo trùng tên, tuyên bố → tự đo, huy hiệu tĩnh, affiliate, SHA đã đọc); bảng đầu ra của `researcher` thêm cột "SHA đã đọc" và "Số tuyên bố → tự đo" — rà seeker19110/stored 2026-10-18.
+
+### Changed
+- `BASE-DOC-017` (SHOULD, không đổi mức): thêm tuyên bố năng lực ("accessible", "offline", "no telemetry") và cách số do CI sinh giữa marker `<!-- ci:value:NAME -->`; thay cho mục `WF-DOC-020` định thêm (trùng nhà `BASE-DOC-017`/`BASE-DOC-018`) — rà seeker19110/stored 2026-10-18.
+
 ### Security
 - Rà `seeker19110/stored` 2026-10-18 (mục 01 §3g, §3g.4; 03 §8c), mỗi lỗ đã tái hiện bằng payload thật trên guard:
   - **`LOOP-STOP-027`** (mới, MUST@L — harness cưỡng chế ở mọi quy mô): lệnh Gate (`PLAN.md`), `— Kiểm:` (blueprint), sàn Gate (`xt.yaml`) do model viết mà
@@ -31,7 +52,6 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     vào commit nên không có dấu vết PR. `git -c core.hooksPath=…`/`GIT_CONFIG_KEY_n` khi commit = `--no-verify` (strict hỏi).
   - Ghi đích tương đối sau `cd` nay tính từ thư mục đó (trước: `cd .claude/hooks && echo x > guard.py` lọt — có từ trước).
   Dự án đích: chạy lại `install.py` để nhận `guard.py`, `pre-bash-guard.sh`, `xt.py` mới.
-
 ## [3.0.1] - 2026-10-18
 
 > **Dự án đích đã cài với `--with-github` (mọi bản, kể cả ≤ 2.x):** chạy lại `install.py --with-github`, rồi thay
