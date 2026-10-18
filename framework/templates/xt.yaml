@@ -9,7 +9,7 @@
 #   Node:   lint: npm run lint · typecheck: npm run typecheck · test: npm test -- --run · build: npm run build · format: npm run format · format_file: npx --no-install prettier --write "{}"
 #           format_check: npx --no-install prettier --check . · coverage: npx --no-install vitest run --coverage (ngưỡng ở `test.coverage.thresholds`)
 #   Python: lint: ruff check . · typecheck: pyright · test: pytest -q · build: "" · format: ruff format . · format_file: case "{}" in *.py) ruff format "{}" ;; esac
-#           format_check: ruff format --check . · coverage: COVERAGE_FILE="$(mktemp)" pytest -p no:cacheprovider --cov --cov-fail-under=80
+#           format_check: ruff format --check . · coverage: COVERAGE_FILE="$(mktemp)" PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider --cov --cov-fail-under=80
 #   Go:     lint: go vet ./... · typecheck: "" · test: go test ./... · build: go build ./... · format: gofmt -l -w . · format_file: gofmt -w "{}"
 #           format_check: test -z "$(gofmt -l .)" · coverage: f="$(mktemp)" && go test -coverprofile="$f" ./... && go tool cover -func="$f" | awk '/^total:/{exit ($3+0 < 80)}'
 lint: ""

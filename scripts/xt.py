@@ -2581,7 +2581,12 @@ def yaml_scalar(raw: str) -> str:
 # `loop verify` CHẠY chúng — đỏ thì autopilot không ra `done`. `doctor` cảnh báo, `loop init` nhắc.
 FLOOR_ALWAYS = (
     ("format_check", "kiểm format không ghi file, đỏ khi lệch (vd `ruff format --check .`, `npx prettier --check .`)"),
-    ("coverage", "chạy test có ngưỡng coverage, đỏ khi dưới ngưỡng (vd `pytest --cov --cov-fail-under=80`)"),
+    (
+        "coverage",
+        "chạy test có ngưỡng coverage, đỏ khi dưới ngưỡng, artefact ra file tạm"
+        ' (vd `COVERAGE_FILE="$(mktemp)" PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider --cov --cov-fail-under=80`;'
+        " mẫu theo stack ở .xtemplates/framework/templates/xt.yaml)",
+    ),
 )
 FLOOR_TYPED_MARKERS = {  # dấu hiệu stack có kiểm kiểu → khoá xt.yaml phải khai lệnh thật
     "tsconfig.json": "typecheck",
