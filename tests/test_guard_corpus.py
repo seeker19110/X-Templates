@@ -251,6 +251,18 @@ class GuardCorpusFixesTest(unittest.TestCase):
         self.assertEqual(guard.join_continuations("a \\\\\\\nb"), "a \\\\b")
         self.assertEqual(guard.join_continuations("x\\"), "x\\")
 
+    def test_heredoc_opener_in_comment_or_single_quote_does_not_swallow(self) -> None:
+        # Review #130 (có sẵn): `<<` trong comment/nháy đơn từng nuốt các dòng sau, heredoc thật vào shell bị bỏ sót.
+        for cmd in (
+            "echo x # <<E\nbash <<F\ngit reset --hard HEAD~3\nF",
+            "echo x;#c <<E\nbash <<F\ngit reset --hard HEAD~3\nF",
+            "echo '<<E'\nbash <<F\ngit reset --hard HEAD~3\nF",
+            'sh -c "echo; # <<E\nbash <<E\ngit reset --hard HEAD~3\nE\n"',
+            "bash <<E\ngit reset --hard HEAD~3",  # thiếu dấu kết: như bash, phần còn lại là thân
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), "deny")
+
     def test_runs_stdin(self) -> None:
         cases = {
             "python3": True,

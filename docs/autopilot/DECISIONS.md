@@ -318,3 +318,10 @@
 - Chọn: Làm ngay: sinh biến thể tất định từ lệnh hạt giống + bộ lệnh hợp lệ chống chặn nhầm
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3/5: #125/#127/#128 mỗi vòng review đều tìm lỗ mới qua cổng xanh 100%; máy sinh biến thể bắt trước reviewer, bộ hợp lệ giữ không chặn nhầm; chỉ thêm test, rẻ
 - Đường lùi: Xoá tests/test_guard_corpus.py
+
+### D-045 · 2026-10-18T12:54:52+00:00 · Ghi/xoá tay .autopilot/ (bằng chứng, verified.json, sổ review): hỏi rồi cho qua như ADR-0018, hay chặn?
+
+- Phương án: (1) Chặn ở chính sách mặc định (dấu 'tay bằng chứng' trong DANGER_MARKERS), chỉ xt.py ghi; người sửa tay hoặc loop init --force · (2) Giữ hỏi→cho qua, dựa vào loop verify chạy lại Gate · (3) Ký HMAC evidence bằng khoá ngoài agent
+- Chọn: Chặn ở chính sách mặc định (dấu 'tay bằng chứng' trong DANGER_MARKERS), chỉ xt.py ghi; người sửa tay hoặc loop init --force
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bằng chứng ghi tay là đúng thứ P1 cấm và Stop hook đọc chính các file này; guard đã nhận diện sẵn, chỉ thiếu dấu; HMAC cần khoá agent không đọc được — chưa có chỗ giữ trong phiên agent
+- Đường lùi: Bỏ 'tay bằng chứng' khỏi DANGER_MARKERS (ADR-0026 → bị thay)

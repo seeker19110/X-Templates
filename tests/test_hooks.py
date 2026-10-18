@@ -2060,6 +2060,24 @@ class GuardBashWave3Test(unittest.TestCase):
                 self.assertEqual(self.guard.edit_decision(rel, str(self.root))[0], "ask")
         self.assertEqual(self.dec("python3 scripts/xt.py loop record --task T-001 -- true"), "")
 
+    def test_evidence_tamper_denied_by_default_policy(self):
+        """ADR-0026: dưới chính sách mặc định, ghi/xoá tay `.autopilot/` bị CHẶN (trước là hỏi → cho qua)."""
+        for cmd in (
+            "echo '{\"ok\": true}' > .autopilot/verified.json",
+            "tee .autopilot/reviews.json",
+            "cp /tmp/x.json .autopilot/evidence/T-001.json",
+            "rm -rf .autopilot",
+            "python3 -c \"open('.autopilot/verified.json','w').write('{}')\"",
+            "python3 - <<'PY'\nopen('.autopilot/evidence/T-1.json','w').write('{}')\nPY",
+        ):
+            with self.subTest(cmd):
+                out = self.guard.apply_policy(self.guard.bash_decision(cmd, str(self.root)))
+                self.assertEqual(out["decision"], "deny")
+        d, why = self.guard.edit_decision(".autopilot/verified.json", str(self.root))
+        self.assertEqual(self.guard.apply_policy({"decision": d, "reason": why})["decision"], "deny")
+        for ok in ("python3 scripts/xt.py loop verify", "cat .autopilot/state.json", "ls .autopilot/evidence"):
+            self.assertEqual(self.guard.apply_policy(self.guard.bash_decision(ok, str(self.root)))["decision"], "")
+
     def test_guard_gate_patterns(self):
         """AUD-HAR-027: file cổng phổ biến được bảo vệ khi sửa."""
         for rel in ("pytest.ini", "tox.ini", "vite.config.ts", "conftest.py", "noxfile.py", ".flake8", ".golangci.yml"):

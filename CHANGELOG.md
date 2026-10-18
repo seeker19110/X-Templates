@@ -11,6 +11,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chạy không bị chặn nhầm.
 
 ### Fixed
+- Guard: `<<` trong comment hoặc nháy đơn (`echo x # <<E`, `echo '<<E'`) từng bị coi là heredoc và nuốt các dòng sau,
+  nên heredoc thật vào shell ở dòng kế (`bash <<F` ↵ `git reset --hard`) lọt — nay bỏ qua `<<` ở đó (`_heredocs` dùng chung
+  cho quét script và quét message commit); `<<` trong nháy kép/backtick vẫn xét (`-m "$(cat <<'EOF'`).
+- Guard (ADR-0026, thay một phần ADR-0018): ghi/xoá tay `.autopilot/` (bằng chứng, `verified.json`, `reviews.json`, trạng
+  thái vòng) qua Edit/Write, chuyển hướng, `tee`/`cp`/`rm`/`sed -i` hay `python3 -c "open(…)"` bị **chặn** thay vì hỏi rồi
+  cho qua — trước đây agent viết được bằng chứng xanh mà không chạy Gate. Dự án đích: chạy lại `install.py` (hook
+  `guard.py`, mẫu `CLAUDE.md`).
 - Guard (bộ tấn công tìm ra): heredoc vào shell nằm TRONG `sh -c "…"`/backtick từng bị cắt thân trước khi quét script lồng
   (`strip_heredocs` nay chỉ nhận `<<` ngoài nháy); `find … -exec bash <<E` (shell thừa hưởng stdin của find) từng lọt;
   `\\` + xuống dòng (gạch chéo đã escape) từng bị nối như nối dòng nên `sh -c "docker \\` ↵ `run --privileged …"` lọt
