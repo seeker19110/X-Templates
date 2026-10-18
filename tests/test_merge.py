@@ -419,6 +419,41 @@ class MergeConfigTest(unittest.TestCase):
             (False, ["merge_hard_exceptions 'off' không hợp lệ (human|auto) — dùng human"]),
         )
 
+    def test_merge_base(self):
+        """Đáy của PR = merge-base từ REST compare; thiếu sha, lỗi đọc hay JSON lạ → "" (không xác minh được → hard)."""
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"merge_base_commit": {"sha": "mb"}}) as one:
+            self.assertEqual(xt._merge_base("repos/o/r", "tip", "head"), "mb")
+            self.assertEqual(one.call_args.args, ("repos/o/r/compare/tip...head?per_page=1",))
+            self.assertEqual(xt._merge_base("repos/o/r", "", "head"), "")
+        for side in ({"merge_base_commit": None}, {"merge_base_commit": {}}, xt.PrInputError("gh api lỗi: 502")):
+            with self.subTest(side), unittest.mock.patch.object(xt, "_gh_one", side_effect=[side]):
+                self.assertEqual(xt._merge_base("repos/o/r", "tip", "head"), "")
+
+    def test_pr_rest_compares_against_merge_base(self):
+        """Review #105: nhánh đích đổi sau lần đồng bộ cuối (base.sha = tip cũ) — so với merge-base, không với tip."""
+
+        def enc(text: str) -> str:
+            body = base64.b64encode(text.encode()).decode()
+            return json.dumps({"type": "file", "path": "xt.yaml", "encoding": "base64", "content": body})
+
+        repo = FakeGh.REPO
+        files = json.dumps([{"filename": "xt.yaml", "additions": 1, "deletions": 1}])
+        raw = {
+            f"{repo}/pulls/7/files?per_page=100": files,
+            f"{repo}/compare/tip...{FakeGh.SHA}?per_page=1": json.dumps({"merge_base_commit": {"sha": "mb"}}),
+            f"{repo}/contents/xt.yaml?ref=mb": enc("merge_hard_exceptions: human\n"),
+            f"{repo}/contents/xt.yaml?ref=tip": enc("merge_hard_exceptions: auto\n"),
+            f"{repo}/contents/xt.yaml?ref={FakeGh.SHA}": enc("merge_hard_exceptions: auto\n"),
+        }
+        gh = FakeGh(pull={"base": {"sha": "tip", "ref": "main"}}, raw=raw)
+        with gh.patch():
+            self.assertTrue(xt._pr_rest("7")["files"][0].get("hard_key"))
+        self.assertNotIn(f"{repo}/contents/xt.yaml?ref=tip", gh.paths())
+        plain = FakeGh(pull={"base": {"sha": "tip", "ref": "main"}})
+        with plain.patch():
+            xt._pr_rest("7")
+        self.assertFalse([p for p in plain.paths() if "/compare/" in p])  # không có file cần so → không hỏi merge-base
+
     def test_risk_globs_union_with_base(self):
         """Checkout cũ/sửa tại chỗ không làm rơi `merge_risk_paths` của nhánh đích; glob thêm tại chỗ vẫn giữ (chặt hơn)."""
         self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), [])  # không có repo/ref, không có xt.yaml
@@ -453,7 +488,9 @@ class MergeConfigTest(unittest.TestCase):
             "human → auto": (human, auto, True),
             "thêm auto": ("lint: x\n", "lint: x\n" + auto, True),
             "xoá auto": (auto, "lint: x\n", True),
-            "thêm human tường minh": ("lint: x\n", human, False),
+            "thêm human tường minh": ("lint: x\n", human, True),  # chặt hơn: mọi dòng khoá đổi là chạm
+            "thêm auto bị dòng sau che": (human, auto + human, True),  # review #105: merge 3 chiều làm lộ ra
+            "xoá human thừa": ("lint: x\n" + human, "lint: x\n", True),
             "đổi cách viết": (auto, "merge_hard_exceptions: 'auto'  # giữ\n", False),
             "khoá lặp, dòng sau thắng": (auto, auto + "merge_hard_exceptions: human\n", True),
         }

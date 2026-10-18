@@ -228,3 +228,6 @@
 - Chọn: Glob = hợp cây làm việc và xt.yaml đã commit ở nhánh đích; khoá: so giá trị hiệu lực đã parse (cùng bộ đọc merge_hard_mode, thiếu = human) ở đáy/đầu PR qua REST contents, không đọc được hay vắng cả hai đầu → hard
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hợp glob không bao giờ ít hơn nguồn nào (sửa tại chỗ chỉ chặt hơn, gỡ glob phải qua PR làn chuẩn); so giá trị parse bằng đúng bộ đọc của merge_hard_mode nên khớp nghĩa tuyệt đối, vẫn đóng khi không xác minh được; dò dòng +/- vẫn sai với khoá lặp/viết lại và còn phụ thuộc patch (thiếu khi diff lớn)
 - Đường lùi: Về dò chuỗi patch (_touches_hard_key cũ) và merge_config(project_dir()) ở _merge_eval
+- Đính chính (review #105): "khớp nghĩa tuyệt đối" sai — giá trị sau merge do merge 3 chiều theo dòng quyết định,
+  khoá lặp bị dòng sau che lọt qua phép so giá trị hiệu lực. Sửa: so danh sách MỌI dòng khoá theo thứ tự; đáy là
+  merge-base (REST compare) thay `base.sha`, áp cả ủy quyền PLAN.md.

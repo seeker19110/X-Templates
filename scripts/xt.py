@@ -3062,27 +3062,53 @@ def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: 
     return False
 
 
+def _hard_key_lines(text: str) -> List[str]:
+    """Mọi lần xuất hiện của khoá `merge_hard_exceptions` (cùng `YAML_KEY_RE`/`yaml_scalar` với `merge_hard_mode`), theo
+    thứ tự — không chỉ giá trị hiệu lực: khoá lặp bị dòng sau che vẫn đổi được kết quả sau merge 3 chiều (review #105)."""
+    return [yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, text.splitlines()) if m and m[1] == HARD_KEY]
+
+
 def _hard_key_changed(repo: str, base_sha: str, head_sha: str) -> bool:
-    """So GIÁ TRỊ hiệu lực của `merge_hard_exceptions` (cùng bộ đọc với `merge_hard_mode`, thiếu khoá = human) trong
-    xt.yaml gốc ở đáy với đầu PR — không dò chuỗi trong patch: dòng ngữ cảnh hay comment nhắc tên khoá không còn báo nhầm
-    (review #103). Không đọc được một đầu, hoặc vắng ở CẢ HAI đầu (file trong diff mà hai lần 404 = token không đọc được
-    contents, như `_plan_grants_changed`) → coi như đổi."""
+    """So danh sách lần xuất hiện của `merge_hard_exceptions` (`_hard_key_lines`) trong xt.yaml gốc ở đáy (merge-base)
+    với đầu PR — không dò chuỗi trong patch: dòng ngữ cảnh hay comment nhắc tên khoá không còn báo nhầm (review #103);
+    thêm/xoá/sửa bất kỳ dòng khoá nào vẫn bị bắt, kể cả dòng bị che (review #105). Không đọc được một đầu, hoặc vắng
+    ở CẢ HAI đầu (file trong diff mà hai lần 404 = token không đọc được contents, như `_plan_grants_changed`) → đổi."""
     (before, gone_before), (after, gone_after) = (
         _contents_read(repo, "xt.yaml", base_sha),
         _contents_read(repo, "xt.yaml", head_sha),
     )
     if before is None or after is None or (gone_before and gone_after):
         return True
-    return _yaml_keys(before).get(HARD_KEY, "human") != _yaml_keys(after).get(HARD_KEY, "human")
+    return _hard_key_lines(before) != _hard_key_lines(after)
+
+
+def _gated_file(f: Dict[str, Any]) -> bool:
+    """File mà `_touches_hard_key` phải đọc nội dung (xt.yaml gốc, PLAN.md) — chỉ khi đó mới cần merge-base."""
+    names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
+    return "xt.yaml" in names or any(n.endswith(PLAN_PATH_SUFFIX) for n in names)
+
+
+def _merge_base(repo: str, base_sha: str, head_sha: str) -> str:
+    """merge-base của PR (REST compare ba chấm) — đáy thật của danh sách file PR; `base.sha` chỉ là đầu nhánh đích lúc PR
+    đồng bộ gần nhất, nhánh đích lùi/đổi sau đó thì so với nó lọt thay đổi (review #105). Không đọc được → "" (đáy
+    rỗng: phép so coi là không xác minh được → hard)."""
+    if not (base_sha and head_sha):
+        return ""
+    try:
+        d = _gh_one(f"{repo}/compare/{base_sha}...{head_sha}?per_page=1")
+    except PrInputError:
+        return ""
+    mb = d.get("merge_base_commit")
+    return str(mb.get("sha") or "") if isinstance(mb, dict) else ""
 
 
 def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
-    """Diff chạm chốt người của ngoại lệ cứng: giá trị `merge_hard_exceptions` của xt.yaml gốc đổi (hoặc không xác minh
-    được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022)."""
+    """Diff chạm chốt người của ngoại lệ cứng: dòng khoá `merge_hard_exceptions` của xt.yaml gốc đổi (hoặc không xác minh
+    được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022). `base_sha` là đáy của PR — merge-base."""
     names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
     if "xt.yaml" in names:
         return _hard_key_changed(repo, base_sha, head_sha)
-    if any(n.endswith(PLAN_PATH_SUFFIX) for n in names):
+    if _gated_file(f):
         return _plan_grants_changed(f, repo, base_sha, head_sha)
     return False
 
@@ -3196,6 +3222,9 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     raw_base = pr.get("base")
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
+    # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
+    gated = any(isinstance(f, dict) and _gated_file(f) for f in files)
+    bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
     extra = {
         k: str(v)
         for k, v in (
@@ -3226,8 +3255,9 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
                 **({"previous": f["previous_filename"]} if f.get("previous_filename") else {}),
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
-                # Diff xt.yaml chạm khoá ngoại lệ cứng (thiếu patch — diff lớn — thì coi như chạm: không xác minh được).
-                **({"hard_key": True} if _touches_hard_key(f, repo, str(base.get("sha", "")), sha) else {}),
+                # xt.yaml đổi dòng khoá ngoại lệ cứng / PLAN.md đổi hiệu lực ủy quyền, so merge-base với head; không
+                # xác minh được → chạm.
+                **({"hard_key": True} if _touches_hard_key(f, repo, bottom, sha) else {}),
             }
             for f in files
         ],
