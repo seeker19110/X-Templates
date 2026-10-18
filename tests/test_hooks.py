@@ -3328,6 +3328,8 @@ class GuardReview97Test(unittest.TestCase):
                 self.subTest(cmd),
                 mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}),
                 mock.patch.object(self.g, "merge_check", return_value=d),
+                # `git push` không refspec theo nhánh đang checkout: cố định để test không đỏ khi chạy trên `main` (CI push).
+                mock.patch.object(self.g, "_current_branch", return_value="feat"),
             ):
                 self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, str(ROOT)))["decision"], want)
 
