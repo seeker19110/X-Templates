@@ -419,6 +419,61 @@ class DoctorGateFloorTest(DoctorCase):
         )
 
 
+class DoctorVersionTest(DoctorCase):
+    """D-040: dự án đích biết khung đã cài lỗi thời — so `.xtemplates/VERSION` với tag `vX.Y.Z` mới nhất (fail-open)."""
+
+    def gh(self, rc: int = 0, out: str = "[]", exc: BaseException | None = None):
+        def run(cmd, **kw):
+            self.assertEqual(cmd[:2], ["gh", "api"])
+            if exc:
+                raise exc
+            return subprocess.CompletedProcess(cmd, rc, out, "")
+
+        return unittest.mock.patch("xt.subprocess.run", side_effect=run)
+
+    def test_latest_tag_parsing_and_fail_open(self):
+        tags = json.dumps(
+            [{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "v10.1.0"}, {"name": "nope"}, "x", {"name": 3}]
+        )
+        with self.gh(out=tags):
+            self.assertEqual(xt.latest_framework_tag(), (10, 1, 0))  # so số, không so chuỗi; pre-release bỏ
+        cases = (
+            {"rc": 1},
+            {"out": "{hỏng"},
+            {"out": "{}"},
+            {"out": "[]"},
+            {"exc": FileNotFoundError("gh")},
+            {"exc": subprocess.TimeoutExpired("gh", 10)},
+        )
+        for kw in cases:
+            with self.subTest(kw=kw), self.gh(**kw):
+                self.assertIsNone(xt.latest_framework_tag())
+        with unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_REPO": "fork/khung"}), self.gh() as run:
+            xt.latest_framework_tag()
+        self.assertEqual(run.call_args[0][0][2], "repos/fork/khung/tags?per_page=100")
+
+    def test_doctor_warns_only_when_installed_is_older(self):
+        def msgs(latest):
+            with unittest.mock.patch.object(xt, "latest_framework_tag", return_value=latest):
+                return [f.msg for f in self.findings() if f.code == "version"]
+
+        self.assertEqual(msgs((3, 0, 0)), [])  # nhãn "test" không phải SemVer → bỏ qua
+        self.write(".xtemplates/VERSION", "2.0.0 (55de4d1)\n")
+        got = msgs((3, 0, 0))
+        self.assertEqual(len(got), 1)
+        self.assertTrue(
+            got[0].startswith("khung đã cài 2.0.0 cũ hơn bản phát hành mới nhất v3.0.0 — chạy lại `install.py`")
+        )
+        self.assertEqual(
+            (msgs((2, 0, 0)), msgs((1, 9, 9)), msgs(None)), ([], [], [])
+        )  # bằng, mới hơn, không đọc được tag
+        with unittest.mock.patch.object(xt, "latest_framework_tag") as latest:
+            self.assertNotIn("version", [f.code for f in self.findings(deep=False)])  # loop init: không gọi mạng
+        latest.assert_not_called()
+        (self.base / ".xtemplates" / "VERSION").unlink()
+        self.assertEqual(xt._doctor_version(self.base), [])  # repo khung / chưa cài
+
+
 class LoopInitDoctorTest(DoctorCase):
     def loop_init(self) -> str:
         self.write("docs/autopilot/PLAN.md", "- [ ] `T-001` việc — Gate: `true`\n")

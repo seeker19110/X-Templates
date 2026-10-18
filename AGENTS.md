@@ -54,6 +54,7 @@ Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint
 - Thêm/sửa mục: giữ ID cũ; mục bỏ → `MAY` + "Ngừng dùng"; cập nhật `updated`; ghi `CHANGELOG.md`.
 - Thêm module/hồ sơ/ngành: đúng `conventions.md` (frontmatter, prefix duy nhất, `## Checklist`, `## Nguồn`), cập nhật README chỉ mục của mảng; `xt.py validate` xanh.
 - Đổi cấu trúc khung/công cụ: ADR ở `docs/adr/` (`/adr`), không sửa ADR cũ.
+- Phát hành: thay đổi buộc dự án đích làm gì (CHANGELOG có "Dự án đích: chạy lại `install.py`") → cắt bản sớm (`VERSION` + `## [X.Y.Z]` trong CHANGELOG qua PR, rồi chạy workflow `release-tag.yml`); `xt.py doctor` ở dự án đích so bản đã cài với tag mới nhất và cảnh báo khi cũ (D-040).
 - Thay đổi `scripts/xt.py`: có test trong `tests/`; giữ chỉ thư viện chuẩn Python ≥ 3.11 (CI kiểm 3.11 và 3.13).
 - Hook/skill/agent trong `.claude/`: là harness được dự án đích copy — giữ fail-open, không hard-code stack, test bằng payload giả (xem `tests/test_hooks.py`).
 - Phản hồi từ dự án đích (ADR-0010): dự án trong `docs/ops/TARGETS.md`; Routine hằng tuần gộp bằng `xt.py feedback aggregate` → PR nháp `docs/ops/feedback/REPORT-<ngày>.md`. Sửa khung theo nhóm đủ ngưỡng (≥ 2 dự án hoặc có tái hiện), mỗi sửa có test + CHANGELOG + trỏ FB gốc; không chép dữ liệu dự án vào repo khung (public).

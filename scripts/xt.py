@@ -2942,14 +2942,61 @@ def _doctor_memory(base: Path) -> List[Finding]:
     return out
 
 
+FRAMEWORK_REPO = "seeker19110/X-Templates"  # nguồn bản phát hành của khung; fork đặt XT_FRAMEWORK_REPO=chủ/repo
+SEMVER_PREFIX_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")  # đầu nhãn `.xtemplates/VERSION`: "3.0.0 (abc1234)"
+RELEASE_TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")  # tag phát hành (release-tag.yml); pre-release không tính
+VERSION_CHECK_TIMEOUT = 10
+
+
+def latest_framework_tag() -> Optional[Tuple[int, int, int]]:
+    """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST). Fail-open: không có gh, lỗi mạng/quyền, JSON lạ → None."""
+    repo = os.environ.get("XT_FRAMEWORK_REPO") or FRAMEWORK_REPO
+    try:
+        r = subprocess.run(
+            ["gh", "api", f"repos/{repo}/tags?per_page=100"],
+            capture_output=True,
+            text=True,
+            timeout=VERSION_CHECK_TIMEOUT,
+        )
+        tags = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+    names = [t.get("name") for t in tags if isinstance(t, dict)] if isinstance(tags, list) else []
+    found = [RELEASE_TAG_RE.fullmatch(n) for n in names if isinstance(n, str)]
+    vers = [(int(m[1]), int(m[2]), int(m[3])) for m in found if m]
+    return max(vers) if vers else None
+
+
+def _doctor_version(base: Path) -> List[Finding]:
+    """Khung đã cài (`.xtemplates/VERSION`) cũ hơn bản phát hành mới nhất → cảnh báo chạy lại `install.py`
+    (LOOP-HARNESS-020, D-040). Chỉ ở dự án đích; nhãn không phải SemVer hay không đọc được tag → bỏ qua (fail-open)."""
+    try:
+        label = (base / ".xtemplates" / "VERSION").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    m = SEMVER_PREFIX_RE.match(label.strip())
+    latest = latest_framework_tag() if m else None
+    if not m or latest is None:
+        return []
+    installed = (int(m[1]), int(m[2]), int(m[3]))
+    if installed >= latest:
+        return []
+    have, want = ".".join(map(str, installed)), ".".join(map(str, latest))
+    msg = (
+        f"khung đã cài {have} cũ hơn bản phát hành mới nhất v{want} — chạy lại `install.py` từ bản mới rồi làm các bước"
+        f" 'Dự án đích' trong CHANGELOG từ {have} tới {want}"
+    )
+    return [Finding("version", "warn", msg)]
+
+
 def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
-    (validate khung, cú pháp hook, progress-check) — dùng ở `loop init`."""
+    (validate khung, cú pháp hook, progress-check, đọc tag phát hành qua mạng) — dùng ở `loop init`."""
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
     if deep:
-        out += _doctor_framework(fw) + _doctor_progress(base)
+        out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base)
     return out
 
 

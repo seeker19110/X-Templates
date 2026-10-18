@@ -6,6 +6,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **`xt.py doctor` cảnh báo khi khung đã cài cũ hơn bản phát hành mới nhất** (D-040; `LOOP-HARNESS-020` SHOULD, không đổi
+  mức). Ở dự án đích, chế độ đầy đủ đọc tag `vX.Y.Z` mới nhất của repo khung qua `gh api repos/<repo>/tags` (mặc định
+  `seeker19110/X-Templates`, fork đặt `XT_FRAMEWORK_REPO`), so với đầu nhãn `.xtemplates/VERSION`; cũ hơn → cảnh báo
+  `version` "chạy lại `install.py`". Fail-open: không có `gh`, lỗi mạng/quyền, JSON lạ, nhãn không phải SemVer → bỏ qua;
+  `loop init` (chế độ nhanh) không gọi mạng; tag pre-release không tính. `AGENTS.md` §7 thêm luật cắt bản sớm khi thay
+  đổi buộc dự án đích làm gì.
 - **Máy trạng thái "merge theo làn" trong code: `xt.py pr next` + `pr reviewed`** (ADR-0025, D-038; thay một phần
   cách thực thi của ADR-0024, luật giữ nguyên). `pr next --pr N [--json]` là hàm thuần trên quyết định `merge-check`,
   trạng thái auto-merge của PR và sổ `.autopilot/reviews.json`, trả MỘT hành động (`enable-auto-merge`,
