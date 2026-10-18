@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Số đo vòng autopilot: `.autopilot/runs.jsonl` + `xt.py loop stats`** (`LOOP-DESIGN-024`, mục mới SHOULD; D-037).
+  `evidence/T-xxx.json` bị ghi đè mỗi lần `loop record` nên không thấy các lần Gate đỏ trước khi xanh. Nay mỗi lần record
+  nối một dòng (task, exit, chữ ký lỗi, thời điểm, HEAD, vòng) vào `runs.jsonl` (cục bộ, `.autopilot/` đã gitignore);
+  `loop stats [--json] [--all]` tính số lần chạy/task, lần xanh đầu, tỉ lệ xanh lần đầu, task cần ≥ 3 lần, task chưa
+  xanh, vòng đã dùng, việc chờ người (mặc định chỉ vòng hiện tại). Skill `/autopilot`: báo cáo cuối trích số này.
 - **Sàn Gate theo quy mô M/L — máy kiểm thay cho kỷ luật** (`LOOP-HARNESS-023`, mục mới MUST@L; D-035). ADR-0011 chỉ chặn
   cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Hàm mới `gate_floor_issues` đọc `scale:`/`profile:` ở
   frontmatter `BLUEPRINT.md` (đường khai ở state autopilot, không thì gốc) và `xt.yaml`: ở M/L đòi `typecheck` khác rỗng khi

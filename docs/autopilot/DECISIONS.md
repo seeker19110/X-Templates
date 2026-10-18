@@ -252,3 +252,31 @@
 - Chọn: gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: răng đặt ở loop verify — điểm máy đã chặn done — nên không thêm luồng mới, logic Python có test và chạy chung cho mọi stack; PA2 phải dò stack bằng bash ở mọi commit, chậm và khó test, lại chặn cả commit sửa tài liệu; PA3 là lời dặn, chính là lỗ đang vá. Chỉ áp M/L vì S là sàn baseline (ADR-0003); sàn là dấu hiệu tất định, ngưỡng thấp vẫn qua — review bù
 - Đường lùi: Xoá _doctor_gate_floor khỏi doctor_findings và nhánh floor trong loop_verify/_loop_init; hằng FLOOR_* không ảnh hưởng gì khác
+
+### D-036 · 2026-10-18T03:56:29+00:00 · Phạm vi /autopilot không đối số sau việc 1–2: làm tiếp những đề xuất nào (3 máy trạng thái merge, 4 sàn quyền token, 5 số đo vòng, 6 đóng gói xt.pyz)?
+
+- Phương án: (1) Làm 5 (số đo vòng) và 3 (máy trạng thái merge theo làn trong code, rút văn xuôi), cộng đưa #108 về main; 4 và 6 không làm trong lượt này · (2) Làm cả 3, 4, 5, 6 · (3) Chỉ đưa #108 về main
+- Chọn: Làm 5 (số đo vòng) và 3 (máy trạng thái merge theo làn trong code, rút văn xuôi), cộng đưa #108 về main; 4 và 6 không làm trong lượt này
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: 5 và 3 chỉ sửa xt.py có test, giảm lỗi thực thi (văn xuôi merge theo làn 7 nhánh lồng, sửa 9 file mỗi lần đổi luật); 5 làm trước để có số đo cho mọi tinh chỉnh sau. 4 cần chủ repo đổi quyền token/tài khoản — không làm được từ repo. 6 đổi hợp đồng cài đặt của dự án đích: ADR-0010 đòi đủ ngưỡng phản hồi (≥ 2 dự án hoặc có tái hiện), hiện mới 1 dự án đích
+- Đường lùi: Thêm task 4/6 vào PLAN sau khi có dữ liệu từ dự án đích hoặc chủ repo quyết quyền token
+
+### D-037 · 2026-10-18T03:56:29+00:00 · Số đo vòng autopilot (LOOP-DESIGN-016/018) lấy từ đâu khi evidence/T-xxx.json bị ghi đè mỗi lần record?
+
+- Phương án: (1) loop record nối một dòng vào .autopilot/runs.jsonl (task, exit, chữ ký lỗi, thời điểm, head); lệnh mới xt.py loop stats tính số lần chạy/task, tỉ lệ xanh lần đầu, task bị blocked/defer, vòng đã dùng · (2) Đọc git log + PLAN để suy ra · (3) Gửi số đo ra dịch vụ ngoài
+- Chọn: loop record nối một dòng vào .autopilot/runs.jsonl (task, exit, chữ ký lỗi, thời điểm, head); lệnh mới xt.py loop stats tính số lần chạy/task, tỉ lệ xanh lần đầu, task bị blocked/defer, vòng đã dùng
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: chỉ ghi nối cục bộ (.autopilot/ đã gitignore, không lộ ra repo), tất định, test được; git log không thấy lần Gate đỏ; dịch vụ ngoài cần tài khoản (mặc định tự host)
+- Đường lùi: Bỏ dòng ghi runs.jsonl trong loop_record và xoá _loop_stats
+
+### D-038 · 2026-10-18T03:56:29+00:00 · Quy trình merge theo làn (7 bước văn xuôi, chép ở AGENTS/skill/LOOP-STOP-022/mẫu) đưa vào code thế nào mà guard vẫn là người chặn?
+
+- Phương án: (1) Lệnh xt.py pr next --pr N: hàm thuần đọc merge-check JSON + sổ review .autopilot/reviews.json (pr reviewed --pr N --head H --clean|--blocking) và trả MỘT hành động kế tiếp (bật/tắt auto-merge, rà H..head, merge ghim head, chờ, đổi đích, defer); không tự gọi GitHub; văn xuôi các nơi rút về 'chạy pr next, làm đúng next' · (2) Lệnh tự thực thi (gọi gh/MCP bật auto-merge, merge) · (3) Giữ văn xuôi, thêm checklist
+- Chọn: Lệnh xt.py pr next --pr N: hàm thuần đọc merge-check JSON + sổ review .autopilot/reviews.json (pr reviewed --pr N --head H --clean|--blocking) và trả MỘT hành động kế tiếp (bật/tắt auto-merge, rà H..head, merge ghim head, chờ, đổi đích, defer); không tự gọi GitHub; văn xuôi các nơi rút về 'chạy pr next, làm đúng next'
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: quyết định tất định có test thay cho 7 nhánh lồng mà model phải nhớ; không tự thực thi nên guard/MCP vẫn là lớp chặn và phiên chặn GraphQL vẫn dùng được; PA2 trùng đường merge của guard và cần token; PA3 không giảm lỗi
+- Đường lùi: Giữ lệnh nhưng trả văn xuôi cũ ở AGENTS/skill/LOOP-STOP-022 (ADR-0024)
+
+### D-039 · 2026-10-18T03:56:50+00:00 · Duyệt PLAN 2026-10-18 (T-1101…T-1104: #108 về main, số đo vòng, máy trạng thái merge pr next)
+
+- Phương án: (1) Duyệt như viết: 4 task, 3 lát, mỗi lát một PR, 40 vòng/8 giờ · (2) Gộp B và C một PR
+- Chọn: Duyệt như viết: 4 task, 3 lát, mỗi lát một PR, 40 vòng/8 giờ
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: mỗi task có Gate máy kiểm, lát nhỏ độc lập về hành vi, không phụ thuộc mới, không đụng điểm dừng; mỗi lát một PR theo ADR-0014
+- Đường lùi: Sửa PLAN và loop init lại

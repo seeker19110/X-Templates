@@ -1016,6 +1016,33 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("cần bash", out)
         self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 127)
 
+    def test_runs_log_and_stats(self):
+        # LOOP-DESIGN-024: evidence bị ghi đè, runs.jsonl giữ mọi lần chạy → loop stats đếm được lần đỏ trước khi xanh.
+        st = xt.read_state(self.base)
+        st.update({"started": "2026-10-18T00:00:00+00:00", "iterations": 5, "max_iterations": 40})
+        st["deferred"] = {"T-009": {"reason": "người"}}
+        xt.write_state(st, self.base)
+        for task, cmd in (("T-001", ["false"]), ("T-001", ["false"]), ("T-001", ["true"]), ("T-002", ["true"])):
+            self.record(cmd, task)
+        self.record(["false"], "T-003")
+        runs = self.base / ".autopilot" / xt.RUNS_FILE
+        with open(runs, "a", encoding="utf-8") as fh:  # dòng hỏng, không phải object, vòng trước: bỏ qua
+            fh.write("{hỏng\n[1]\n" + json.dumps({"task": "T-001", "exit_code": 0, "loop": "cũ"}) + "\n")
+        rows = xt.read_runs(self.base)
+        self.assertEqual(len(rows), 6)
+        self.assertIsNone(rows[2]["signature"])
+        self.assertEqual(len(rows[0]["signature"]), 16)
+        s = xt.loop_stats(self.base)
+        self.assertEqual(s["tasks"]["T-001"], {"runs": 3, "failed": 2, "runs_to_green": 3})
+        self.assertEqual((s["task_count"], s["runs"], s["failed_runs"]), (3, 5, 3))
+        self.assertEqual(s["first_pass_rate"], 0.333)
+        self.assertEqual((s["needs_3_plus"], s["never_green"]), (["T-001"], ["T-003"]))
+        self.assertEqual((s["iterations"], s["max_iterations"], s["deferred"], s["blocked"]), (5, 40, ["T-009"], False))
+        self.assertEqual(xt.loop_stats(self.base, all_loops=True)["tasks"]["T-001"]["runs"], 4)
+        empty = self.tmpdir()
+        self.assertEqual(xt.read_runs(empty), [])
+        self.assertIsNone(xt.loop_stats(empty)["first_pass_rate"])
+
     def test_record_without_state_still_writes_evidence(self):
         bare = self.tmpdir()
         with redirect_stdout(io.StringIO()):

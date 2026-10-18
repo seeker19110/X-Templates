@@ -1158,6 +1158,24 @@ class LoopCommandsTest(TmpDirCase):
         self.assertIn("T-001: exit 0", out)
         self.assertEqual(xt.read_evidence("T-001", self.tmp)["exit_code"], 0)
 
+    def test_stats_text_and_json(self):
+        rc, out, _ = run_main("loop", "stats")
+        self.assertEqual(rc, 0)
+        self.assertIn("Task đã chạy Gate: 0 · lần chạy: 0 (đỏ 0) · xanh lần đầu: —", out)
+        self.assertIn("Vòng: 0/— · chờ người: 0 · blocked: False", out)
+        for cmd in ("false", "false", "true"):
+            run_main("loop", "record", "--task", "T-001", "--", cmd)
+        run_main("loop", "record", "--task", "T-002", "--", "true")
+        rc, out, _ = run_main("loop", "stats")
+        self.assertIn("lần chạy: 4 (đỏ 2) · xanh lần đầu: 50%", out)
+        self.assertIn("  T-001: 3 lần · xanh ở lần 3", out)
+        self.assertIn("⚠ Task cần ≥ 3 lần chạy (spec/Gate sai? — LOOP-DESIGN-011): T-001", out)
+        run_main("loop", "record", "--task", "T-003", "--", "false")
+        rc, out, _ = run_main("loop", "stats", "--json", "--all")
+        data = json.loads(out)
+        self.assertEqual((rc, data["runs"], data["never_green"]), (0, 5, ["T-003"]))
+        self.assertIn("  T-003: 1 lần · chưa xanh", run_main("loop", "stats")[1])
+
     def test_block_without_state_creates_blocked_state(self):
         rc, out, _ = run_main("loop", "block", "--reason", "cần người quyết")
         st = xt.read_state(self.tmp)

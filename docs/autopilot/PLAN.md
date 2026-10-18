@@ -1,35 +1,39 @@
-# PLAN.md — Khung X-Templates · sửa audit dự án con (2026-10-17)
+# PLAN.md — Khung X-Templates · số đo vòng + máy trạng thái merge (2026-10-18)
 
-> Lập ngày 2026-10-17. Chủ repo gọi `/autopilot` ngay sau `/audit` (báo cáo `docs/ops/AUDIT-REPORT-2026-10-17-subprojects.md`).
-> Kế hoạch trước (T-901…T-904) xong ở #84.
+> Lập ngày 2026-10-18. Chủ repo gọi `/autopilot` (không đối số) sau khi làm việc 1–2 của đề xuất tối ưu autopilot
+> (#106 blueprint mang lệnh kiểm, #107 sàn Gate; bản sửa #107 ở #108). Kế hoạch trước (T-1001…T-1006) xong ở #97.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-021)
-- Blueprint repo khung: không đổi mục; mục tiêu `audit check --strict` exit 0 sau khi sửa 🔴/🟠 (ARCH quét lại cuối).
-- Stack: Python ≥ 3.11 stdlib (`guard.py`, `xt.py`, `install.py`), bash hook; không phụ thuộc mới.
-- Phạm vi: guard merge ngoại lệ cứng fail-closed (AUD-SEC-044/045); chặn gỡ hàng rào (AUD-SEC-046); push refspec glob,
-  huỷ đi đường khác, ghi `.env` qua Bash (AUD-SEC-047…049); dự án con: dev-task.sh ưu tiên `.xtemplates`, doctor lỗi khi
-  hook chưa gộp, `feedback aggregate` nhận gốc repo, mẫu AGENTS/PROGRESS, tài liệu lệch (AUD-HAR-049…053, AUD-DOC-041…043).
-- Không làm: thay đổi chính sách ADR-0018 (sửa nội dung hook qua Edit vẫn được — ADR-0018 cho phép); AUD-SEC-050
-  (entrypoint git trong image, cùng nhóm AUD-SEC-042); AUD-HAR-054 nếu không nhỏ; mục chờ chủ repo cũ (HAR-036/041…).
-- Giữ: `--disable-auto` và MCP `disable_pr_auto_merge` KHÔNG bị chặn (LOOP-STOP-005 đòi tắt auto-merge khi chạm `hard`).
-- Nhánh: phiên chỉ push một nhánh → mỗi lát một commit trên `claude/blissful-thompson-4een2c`, một PR (D-016).
-- Rủi ro: chặn oan merge hợp lệ khi merge-check lỗi mạng → chấp nhận (fail-closed riêng merge, ADR-0019), agent `loop defer`.
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-039)
+- Blueprint repo khung: không đổi mục ngoài phạm vi; mục mới chỉ khi cần (`LOOP-DESIGN-024` số đo vòng).
+- Stack: Python ≥ 3.11 stdlib (`xt.py`), không phụ thuộc mới; cổng `scripts/dev-task.sh gate` (mypy --strict, coverage 100%).
+- Phạm vi (D-036): (A) đưa bản sửa sàn Gate #108 về `main`; (B) số đo vòng — `loop record` ghi nối `.autopilot/runs.jsonl`,
+  lệnh `xt.py loop stats` (D-037); (C) máy trạng thái merge theo làn `xt.py pr next` + sổ review `pr reviewed` (D-038,
+  ADR-0025), rút văn xuôi ở AGENTS.md, mẫu AGENTS.md, skill `/autopilot`, `LOOP-STOP-022`, `LOOP-DESIGN-020` về "chạy
+  `pr next`, làm đúng `next`".
+- Không làm: sàn quyền token (cần chủ repo đổi tài khoản/token); đóng gói `xt.pyz` (ADR-0010 đòi ≥ 2 dự án đích).
+- Nhánh: mỗi lát một PR; lát B, C trên `seeker/quirky-knuth-v0uphi` tạo lại từ `main` (PR trước đã merge), nối tiếp.
+- Rủi ro: `pr next` lệch với guard (guard vẫn là lớp chặn, `pr next` chỉ khuyến nghị) — test bảng trạng thái đủ 7 bước
+  ADR-0024; văn xuôi rút gọn mà dự án đích bản cũ chưa có lệnh → mẫu AGENTS.md nêu `install.py`.
 
 ## Ngân sách (4 con số)
-- Số vòng tối đa: 20 (`max(20, 4 × task)`)
+- Số vòng tối đa: 40 (`max(40, 8 × task chưa làm)`)
 - Chi phí: 0 đồng ngoài phiên (không phụ thuộc mới)
-- Timeout mỗi lệnh Gate: 600 giây
-- Ngày hết hạn: 6 giờ sau `loop init` (`--hours 6`)
+- Timeout mỗi lệnh Gate: 1800 giây (`XT_RECORD_TIMEOUT` mặc định)
+- Ngày hết hạn: 8 giờ sau `loop init` (`--hours 8`)
 
 ## Điểm dừng bắt buộc (`loop defer`; `loop block` khi mọi việc còn lại phụ thuộc)
-- Merge PR nếu `merge-check` trả `hard` (sửa guard bí mật có thể bị coi là bí mật/auth) — người merge
+- Merge PR nếu `merge-check` trả `hard` (repo đặt `merge_hard_exceptions: auto` → không có `hard`)
+- Ruleset đòi review của người (`merge-check` = `human`) → báo chủ repo, làm lát khác
 - Force-push, xoá nhánh, đổi quyền/ruleset repo
 
 ## Task
 
-- [x] `T-1001` Guard: mọi lệnh merge/bật auto-merge (gh pr merge, gh pr -R … merge, gh api REST/graphql, MCP) kiểm `hard` qua merge-check kể cả không ghim head; merge-check lỗi/guard chết → deny; `--disable-auto`/disable MCP không bị chặn (AUD-SEC-044/045) — Gate: `python3 -m unittest tests.test_hooks`
-- [x] `T-1002` Guard: Bash ghi/xoá/dời file hàng rào (`.claude/hooks/*`, `.claude/settings*.json`) → deny; Edit/Write ghi `disableAllHooks` → deny; thiếu guard.py → deny Bash trừ lệnh khôi phục (AUD-SEC-046) — Gate: `python3 -m unittest tests.test_hooks`
-- [x] `T-1003` Guard: push refspec glob/`:`/`push.default=matching`/`remote.*.push`; `gh api -X DELETE repos/…`, `terraform|tofu apply -destroy`, `pulumi down`; ghi file bí mật qua `curl -o/-O`, `wget -O`, `git checkout/restore … -- <bí mật>`, interpreter (AUD-SEC-047…049) — Gate: `python3 -m unittest tests.test_hooks`
-- [x] `T-1004` Dự án con: hook ưu tiên `.xtemplates/scripts/dev-task.sh`; doctor `error` khi hook `.xtemplates-new` chưa gộp; `feedback aggregate` nhận gốc repo, thư mục thiếu → exit 2; PROGRESS mẫu qua progress-check; nhãn install lần đầu; mẫu AGENTS/skill gate/CLAUDE.md §; comment hook + ADR-0019 (AUD-HAR-049…053, AUD-DOC-041…043) — Gate: `python3 -m unittest discover -s tests`
-- [x] `T-1005` Sổ audit đánh dấu đã sửa, quét lại ARCH, CHANGELOG, PROGRESS, cổng đầy đủ — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md && python3 scripts/xt.py progress-check && scripts/dev-task.sh gate`
-- [x] `T-1006` Sửa phát hiện review #97: cờ `-R` của gh trước `pr`, cờ giả chỉ cho push, graphql/REST merge viết lệch, `gh api` bí mật/quyền/ruleset, tải vào thư mục hàng rào, `$(…)` trong nháy kép/heredoc, `restore_re`, progress/redact — Gate: `python3 -m unittest discover -s tests`
+### Lát A — sàn Gate dùng khoá khai báo (#108)
+- [ ] `T-1101` Review sạch rồi đưa #108 về `main` (merge ghim head đã rà) — Gate: `git fetch -q origin main && git show origin/main:scripts/xt.py | grep -q 'def gate_floor_commands'`
+
+### Lát B — số đo vòng (D-037)
+- [x] `T-1102` `loop record` ghi nối `.autopilot/runs.jsonl`; `xt.py loop stats [--json]`: số lần chạy mỗi task, tỉ lệ xanh lần đầu, task cần ≥ 3 lần, blocked/defer, vòng đã dùng; mục `LOOP-DESIGN-024` — Gate: `python3 -m unittest tests.test_xt_core tests.test_xt_cli`
+
+### Lát C — máy trạng thái merge theo làn (D-038, ADR-0025)
+- [ ] `T-1103` `xt.py pr reviewed --pr N --head SHA (--clean|--blocking)` ghi sổ `.autopilot/reviews.json`; `xt.py pr next --pr N [--json]` trả một hành động theo 7 bước ADR-0024 (hàm thuần trên merge-check JSON + sổ review + trạng thái auto-merge) — Gate: `python3 -m unittest tests.test_merge`
+- [ ] `T-1104` Rút văn xuôi merge theo làn về `pr next` ở AGENTS.md §3, mẫu `AGENTS.md`, skill `/autopilot` bước 10/13, `LOOP-STOP-022`, `LOOP-DESIGN-020`; ADR-0025; CHANGELOG — Gate: `scripts/dev-task.sh gate`
