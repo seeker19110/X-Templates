@@ -1234,6 +1234,9 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("cùng họ model", err)
         self.assertNotIn("7", xt.read_reviews(self.base))  # bị từ chối: không ghi gì vào sổ
+        rc, _, err = run("--clean", "--reviewer-model", "  ", "--author-model", "opus")
+        self.assertEqual(rc, 2)
+        self.assertIn("không nhận diện được tên model", err)
         self.assertEqual(run("--blocking")[0], 0)  # báo lỗi chặn không cần khai model
         self.assertEqual(run("--clean", *MODELS)[0], 0)
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]

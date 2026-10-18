@@ -4906,6 +4906,8 @@ def _review_models_error(args: argparse.Namespace) -> Optional[str]:
         return None
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-STOP-022: reviewer phải khác model người viết)"
+    if not model_family(args.reviewer_model) or not model_family(args.author_model):
+        return "không nhận diện được tên model (cần chữ, vd sonnet, claude-opus-5-5)"
     if model_family(args.reviewer_model) == model_family(args.author_model):
         return (
             f"reviewer ({args.reviewer_model}) cùng họ model với người viết ({args.author_model}) — "
