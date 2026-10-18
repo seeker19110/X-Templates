@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.3.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`, mẫu `CLAUDE.md`, khung — gộp
+> `*.xtemplates-new`) rồi `compose` lại blueprint để nhận ID mới (`UX-DS-020` là MUST@L; `UX-DS-021/022`, `UX-A11Y-029`,
+> `UX-RESP-021`, `CMP-LIC-022`, `FE-START-001…005` vào backlog). Guard nay **chặn** lệnh quá phức tạp để quét (lệnh > 256 KB,
+> lệnh bọc/thay biến lồng quá sâu, > 600 lệnh con) — chia nhỏ lệnh hoặc dùng Write thay heredoc khổng lồ.
+
 ### Added
 - Đề xuất UI từ `stored` 06 §7c/§7d/§7g/§7h, đối chiếu ba cột ở [`research/2026-10-18-stored-ui-extraction.md`](research/2026-10-18-stored-ui-extraction.md):
   - **`xt.py contrast`** (D-049): tương phản WCAG của cặp token CSS ở mọi theme (`:root`, `.dark`,
