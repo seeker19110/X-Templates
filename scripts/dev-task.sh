@@ -149,7 +149,9 @@ loop_noop() { # $1=task $2=lệnh -> true (kèm log) nếu autopilot đang chạ
 guard_ok() { # $1=lệnh -> 0 nếu được chạy
   local xt; xt="$(dirname "$0")/xt.py"
   [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || return 0
+  # Chỉ exit 126 (guard cấm) là chặn; xt.py sập (python cũ…) → chạy như cũ (fail-open về luồng, ADR-0002).
   CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check -- "$1"
+  [ "$?" -ne 126 ]
 }
 
 RAN=0

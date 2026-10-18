@@ -2125,7 +2125,7 @@ def hook_bypass(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -
         return f"lệnh đặt `{hit}` (tắt hook của khung)"
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
-    key = _git_exec_config(n)
+    key = _git_exec_config(n, argv) if n[:1] == ["git"] else ""
     if key:
         return f"cấu hình git `{key}` chạy lệnh ngầm ngoài guard — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
@@ -2141,11 +2141,57 @@ GIT_EXEC_KEY_RE = re.compile(
 )
 
 
+GIT_CONFIG_VALUE_OPTS = ("-f", "--file", "--blob", "--type", "--default", "--comment", "--value")
+# Giá trị an toàn của khoá "chạy lệnh": chương trình quen thuộc, không ký tự shell (`core.pager cat`, `core.editor
+# "code --wait"`, `core.sshCommand "ssh -i ~/.ssh/k"`, `core.fsmonitor true`) — review #117.
+GIT_SAFE_PROGRAMS = {
+    "cat",
+    "less",
+    "more",
+    "true",
+    "false",
+    "ssh",
+    "code",
+    "vim",
+    "vi",
+    "nano",
+    "emacs",
+    "nvim",
+    "delta",
+}
+SHELL_META_RE = re.compile(r"[;&|`$<>()!\\\n]")
+SSH_EXEC_OPT_RE = re.compile(r"proxycommand|localcommand|knownhostscommand|proxyusefdpass", re.I)
+
+
 def _git_config_write(n: List[str]) -> List[str]:
-    """[khoá, giá trị…] của lệnh `git config` GHI (cả `--unset`); [] nếu không phải hoặc chỉ đọc."""
+    """[khoá, giá trị…] của lệnh `git config` GHI (cả `--unset`; `-f <tệp>` không phải khoá); [] nếu chỉ đọc."""
     if n[:2] != ["git", "config"] or set(n[2:]) & (GIT_CONFIG_READ - GIT_CONFIG_UNSET):
         return []
-    return [a for a in _positionals(n[2:]) if a not in ("set", "--add", "unset")]
+    return [a for a in _positionals(n[2:], GIT_CONFIG_VALUE_OPTS) if a not in ("set", "--add", "unset")]
+
+
+def _git_config_file(n: List[str]) -> str:
+    """Tệp cấu hình mà `git config -f/--file <tệp>` ghi (`.git/config` → đích ghi hàng rào); rỗng nếu không."""
+    if n[:2] != ["git", "config"]:
+        return ""
+    for k, a in enumerate(n[2:-1], start=2):
+        if a in ("-f", "--file"):
+            return n[k + 1]
+    return next((a.split("=", 1)[1] for a in n[2:] if a.startswith("--file=")), "")
+
+
+def _git_exec_value_unsafe(key: str, value: str) -> bool:
+    """Giá trị của khoá chạy lệnh có chạy lệnh tuỳ ý: `alias.*` chỉ khi `!…`; `credential.helper` khi `!…` hoặc đường
+    dẫn (git chạy thẳng); khác: trừ chương trình quen thuộc không ký tự shell."""
+    low, v = key.lower(), value.strip()
+    if low.startswith("alias."):
+        return v.startswith("!")
+    if low.startswith("credential"):
+        return v.startswith("!") or "/" in v
+    words = v.split()
+    if not words or posixpath.basename(words[0]) not in GIT_SAFE_PROGRAMS:
+        return True
+    return bool(SHELL_META_RE.search(v) or SSH_EXEC_OPT_RE.search(v))  # `ssh -o ProxyCommand=…` chạy lệnh tuỳ ý
 
 
 def _git_hooks_off(n: List[str]) -> bool:
@@ -2155,15 +2201,17 @@ def _git_hooks_off(n: List[str]) -> bool:
     return bool(pos) and pos[0].lower() == "core.hookspath" and (len(pos) > 1 or bool(set(n) & GIT_CONFIG_UNSET))
 
 
-def _git_exec_config(n: List[str]) -> str:
-    """Khoá git chạy lệnh ngầm khi đặt giá trị (alias/credential chỉ khi giá trị bắt đầu `!` = lệnh shell); rỗng nếu không."""
+def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
+    """Khoá git chạy lệnh tuỳ ý: đặt bằng `git config` hoặc một lần qua `git -c k=v …`; rỗng nếu không."""
     pos = _git_config_write(n)
-    if len(pos) < 2 or not GIT_EXEC_KEY_RE.fullmatch(pos[0]):
-        return ""
-    lowered = pos[0].lower()
-    if (lowered.startswith("alias.") or lowered.startswith("credential")) and not pos[1].lstrip().startswith("!"):
-        return ""
-    return pos[0]
+    if len(pos) >= 2 and GIT_EXEC_KEY_RE.fullmatch(pos[0]) and _git_exec_value_unsafe(pos[0], pos[1]):
+        return pos[0]
+    one_shot = argv or []
+    for k, a in enumerate(one_shot[:-1]):
+        key, _, val = one_shot[k + 1].partition("=") if a == "-c" else ("", "", "")
+        if key and GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
+            return key
+    return ""
 
 
 REDIRECTS = (">", ">>", ">|", "&>", "&>>")
@@ -2325,7 +2373,8 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
             for t in _positionals(n[1:])
             if _match_any(rel_path(_at(t, cwd), root), GIT_HOOK_PATTERNS)
         ]
-    for target in (_at(t, cwd) for t in write_targets(n, argv)):
+    cfg = _git_config_file(n)
+    for target in (_at(t, cwd) for t in [*write_targets(n, argv), *([cfg] if cfg else [])]):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))

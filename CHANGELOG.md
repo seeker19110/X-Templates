@@ -11,7 +11,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     `xt.py` chạy (`loop record`/`loop verify`/`blueprint-status --run`) nay qua guard của dự án trước khi chạy — bị cấm thì
     exit 126, không chạy (`xt.py guard_block`). Trước đây `loop record --task T-001 -- rm -rf ~/x` và Gate `git push --force
     origin main` chạy ngoài hàng rào, kể cả khi Stop hook buộc `loop verify`. Lệnh `xt.yaml` ở `dev-task.sh` (cổng commit,
-    `/gate`, `format_file`) cũng qua lệnh mới `xt.py guard-check`. Guard lấy ở dự án rồi ở bản cài `xt.py`; harness đã cài
+    `/gate`, `format_file`) cũng qua lệnh mới `xt.py guard-check`. Kiểm bằng guard của dự án VÀ của bản cài `xt.py` (một cái
+    chặn là chặn); harness đã cài
     mà thiếu guard → chặn; guard lỗi → `_failure_decision` như hook.
   - **`LOOP-STOP-028`** (mới, MUST@L): guard chặn CLI agent khác Claude Code với cờ/biến tự duyệt — agent lồng không chạy
     hook của khung. Cờ đọc 2026-10-18 từ docs/mã nguồn: Codex (`--yolo`, `--dangerously-bypass-approvals-and-sandbox`,
@@ -24,7 +25,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     lẽ**: hook chỉ chạy cổng khi không có `--no-verify`, còn câu hỏi bị chính sách mặc định (ADR-0018) bỏ đi. Nay cổng
     vẫn chạy; chỉ `XT_GUARD_POLICY=strict` để người quyết.
   - Ghi `.git/hooks`, `.git/config` (Edit, Bash, kể cả sau `cd` và `chmod`), đặt/bỏ `core.hooksPath`, khoá git chạy lệnh
-    ngầm (`core.fsmonitor`, `core.sshCommand`, `diff.external`, `filter.*.smudge`, `alias.*` bắt đầu `!`…) bị chặn — không
+    tuỳ ý (`core.fsmonitor`, `core.sshCommand` có `ProxyCommand`, `diff.external`, `filter.*.smudge`, `alias.*` bắt đầu `!`,
+    `credential.helper` là đường dẫn…; qua `git config`, `-f .git/config` hay một lần `git -c`) bị chặn — không
     vào commit nên không có dấu vết PR. `git -c core.hooksPath=…`/`GIT_CONFIG_KEY_n` khi commit = `--no-verify` (strict hỏi).
   - Ghi đích tương đối sau `cd` nay tính từ thư mục đó (trước: `cd .claude/hooks && echo x > guard.py` lọt — có từ trước).
   Dự án đích: chạy lại `install.py` để nhận `guard.py`, `pre-bash-guard.sh`, `xt.py` mới.

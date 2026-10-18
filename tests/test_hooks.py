@@ -3552,6 +3552,31 @@ class GuardStored1018Test(unittest.TestCase):
         for cmd in ("git config alias.st status", "git config user.email a@b", "git config --unset user.name"):
             self.assertIsNone(self.bash(cmd), cmd)
 
+    def test_git_config_file_and_one_shot(self):
+        # review #117 lần 2: `-f <tệp>` không phải khoá; giá trị an toàn cho qua; `git -c k=v` chạy một lần cũng xét.
+        for cmd in (
+            "git config -f .git/config core.hooksPath /dev/null",
+            "git config --file .git/config core.fsmonitor 'touch /tmp/p'",
+            "git config --file=.git/config user.name x",
+            'git config core.pager "less; touch /tmp/p"',
+            "git -c core.fsmonitor='touch /tmp/p' status",
+            "git -c alias.x='!touch /tmp/p' x",
+            "git config credential.helper /tmp/evil.sh",
+            "git config core.editor \"vim -c '!touch /tmp/p'\"",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in (
+            "git config -f ~/.gitconfig user.name x",
+            "git config core.pager cat",
+            'git config --global core.editor "code --wait"',
+            'git config core.sshCommand "ssh -i ~/.ssh/deploy"',
+            "git -c core.pager=cat log",
+            "git config credential.helper store",
+            "git config core.fsmonitor true",
+            "git config -f x.cfg --type bool a.b true",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
     def test_relative_targets_and_chmod(self):
         for cmd in (
             "cd .git/hooks && echo x > pre-commit",
@@ -3631,6 +3656,14 @@ class GuardStored1018Test(unittest.TestCase):
         )
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue(canary.exists())
+        (tmp / "scripts" / "xt.py").write_text("import sys\nsys.exit(1)\n", encoding="utf-8")  # xt.py sập → không chặn
+        (tmp / "xt.yaml").write_text(f"test: touch {canary}.2\n", encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(Path(f"{canary}.2").exists())
+        shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
         (tmp / "xt.yaml").write_text('format_file: "git push origin main"\n', encoding="utf-8")
         r = subprocess.run(
             ["bash", str(tmp / "scripts" / "dev-task.sh"), "format-file", "a.txt"],

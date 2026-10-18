@@ -1251,17 +1251,21 @@ def guard_block(cmd_str: str, base: Path) -> str:
     trước đây chạy ngoài guard (rà stored 01 §3g). Không có guard ở dự án lẫn bản cài: dự án có `.claude/settings.json`
     (harness đã cài mà guard bị gỡ) → chặn như hook (AUD-SEC-019); không có harness → cho chạy.
     `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
-    path = next((p for p in guard_paths(base) if p.is_file()), None)
-    if path is None:
+    paths = list(dict.fromkeys(p.resolve() for p in guard_paths(base) if p.is_file()))
+    if not paths:
         return (
             "thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục bằng install.py"
             if (base / ".claude" / "settings.json").is_file()
             else ""
         )
     strict = os.environ.get("XT_GUARD_POLICY") == "strict"
-    out = _guard_verdict(path, cmd_str, base, strict)
-    blocked = out.get("decision") == "deny" or (strict and out.get("decision") == "ask")
-    return str(out.get("reason") or "guard chặn") if blocked else ""
+    for (
+        path
+    ) in paths:  # guard của dự án VÀ của bản cài: một cái chặn là chặn (guard giả ở dự án không thắng — review #117)
+        out = _guard_verdict(path, cmd_str, base, strict)
+        if out.get("decision") == "deny" or (strict and out.get("decision") == "ask"):
+            return str(out.get("reason") or "guard chặn")
+    return ""
 
 
 def cmd_guard_check(args: argparse.Namespace) -> int:

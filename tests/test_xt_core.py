@@ -1161,6 +1161,15 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertTrue(xt.guard_block("git push origin main", self.base))
         self.assertIn(ROOT / xt.GUARD_FILE, xt.guard_paths(self.base))
 
+    def test_permissive_project_guard_does_not_win(self):
+        # guard giả ở dự án (cho qua mọi thứ) không thắng guard của bản cài (review #117 lần 2).
+        (self.base / xt.GUARD_FILE).write_text(
+            "def bash_decision(c, r, w):\n    return {'decision': ''}\n\ndef apply_policy(o):\n    return o\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(xt.guard_block("git push origin main", self.base))
+        self.assertEqual(xt.guard_block("pytest -q", self.base), "")
+
     def test_missing_guard_everywhere(self):
         self.only_base_guard()
         self.assertEqual(xt.guard_block("git push origin main", self.base), "")  # chưa cài harness → chạy
