@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.2.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`, mẫu `AGENTS.md`/`CLAUDE.md`, skill
+> autopilot — gộp `*.xtemplates-new`). `pr reviewed --clean` nay cần `--reviewer-model` và `--author-model`; ghi/xoá tay
+> `.autopilot/` bị chặn (dùng `xt.py loop …`, gỡ vòng hỏng bằng `loop init --force`).
+
 ### Added
 - `tests/test_guard_corpus.py` (D-044): bộ tấn công sinh biến thể cho guard — 19 lệnh hạt giống × 35 phép biến đổi cú
   pháp shell (đơn: đủ; cặp: mẫu tất định 4000/22141, toàn bộ chạy tay xanh) phải `deny`, và 49 lệnh hợp lệ agent hay
