@@ -13,6 +13,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   theo yêu cầu chủ repo (2026-10-17); mẫu `templates/xt.yaml` đặt `human` (D-025). `LOOP-STOP-005` (MUST, không đổi mức) thêm điều
   kiện "trừ khi `merge_hard_exceptions: auto` + ghi chấp nhận rủi ro"; lời `LOOP-STOP-002`, `LOOP-STOP-009` cập nhật. Dự án đích muốn
   `auto`: mở PR thêm khoá, người merge.
+- **Guard chặn đổi repo sang public qua `gh api`**: `gh api -X PATCH repos/<chủ>/<repo>` với `private=`/`visibility=`
+  (mọi giá trị, như `gh repo edit --visibility`) hoặc thân `--input` (không xác minh được, như `archived=true`) → deny;
+  PATCH endpoint con (`…/issues/1`) và `gh api repos/o/r` (GET) vẫn cho chạy. Dự án đích: chạy lại `install.py`.
 - **Tài liệu điểm dừng khớp ADR-0018/0019** (D-023): `AGENTS.md` §5, mẫu `templates/AGENTS.md` §6 và `templates/PLAN.md`,
   skill `/autopilot`, mảng `11-autonomous-loop` bỏ mô tả "hook hỏi người" đã cũ, chia ba nhóm: máy chặn (`deny`) · cho
   chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua
