@@ -1188,6 +1188,9 @@ class PrNextTest(unittest.TestCase):
                 self.assertEqual((r["action"], r["strict"]), ("review", True))
 
 
+MODELS = ("--reviewer-model", "sonnet", "--author-model", "claude-opus-5-5")
+
+
 class PrNextCliTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1205,13 +1208,13 @@ class PrNextCliTest(unittest.TestCase):
         self.assertTrue(out.startswith(f"REVIEW · PR #7 · head {self.head[:7]} — làn chuẩn: rà cả PR"))
         self.assertIn(f"→ giao reviewer (model khác) rà cả PR; xong: xt.py pr reviewed --pr 7 --head {self.head}", out)
         self.assertTrue(xt.read_reviews(self.base)["7"]["standard_seen"])
-        rc, _, err = run_main("pr", "reviewed", "--pr", "7", "--head", "abc1234", "--clean")
+        rc, _, err = run_main("pr", "reviewed", "--pr", "7", "--head", "abc1234", "--clean", *MODELS)
         self.assertEqual(rc, 2)
         self.assertIn("SHA đủ 40 ký tự", err)
         rc, out, _ = run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         self.assertEqual((rc, out), (0, f"✓ PR #7: review còn lỗi chặn ở {self.head[:7]}\n"))
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
-        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean")
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
         rc, out, _ = self.nxt(self.big)
         self.assertIn("ENABLE-AUTO-MERGE · PR #7", out)
         self.assertIn("→ gh pr merge 7 --auto --squash", out)
@@ -1219,6 +1222,24 @@ class PrNextCliTest(unittest.TestCase):
             f"  không được thì: gh pr merge 7 --squash --match-head-commit {self.head} · REST: gh api -X PUT", out
         )
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
+
+    def test_clean_review_needs_a_different_model(self):
+        def run(*extra: str) -> tuple:
+            return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, *extra)
+
+        rc, _, err = run("--clean")
+        self.assertEqual(rc, 2)
+        self.assertIn("--clean cần --reviewer-model và --author-model", err)
+        rc, _, err = run("--clean", "--reviewer-model", "Opus 5.5", "--author-model", "claude-opus-5-5")
+        self.assertEqual(rc, 2)
+        self.assertIn("cùng họ model", err)
+        self.assertNotIn("7", xt.read_reviews(self.base))  # bị từ chối: không ghi gì vào sổ
+        self.assertEqual(run("--blocking")[0], 0)  # báo lỗi chặn không cần khai model
+        self.assertEqual(run("--clean", *MODELS)[0], 0)
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual((last["reviewer_model"], last["author_model"]), ("sonnet", "claude-opus-5-5"))
+        self.assertEqual(xt.model_family("claude-sonnet-5-5"), "sonnet")
+        self.assertEqual(xt.model_family("My-Model 2"), "mymodel")
 
     def test_small_pr_after_standard_stays_strict_and_bad_input(self):
         self.nxt(self.big)  # ghi standard_seen
@@ -1228,18 +1249,18 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("ENABLE-AUTO-MERGE · PR #8", out)
         self.assertIn("  không được thì: gh pr merge 8 --squash --match-head-commit abc1234def", out)  # CI đã xanh
         url = "https://github.com/o/r/pull/8/"  # URL → cùng khoá số PR với `pr next`
-        rc, out, _ = run_main("pr", "reviewed", "--pr", url, "--head", self.head, "--clean")
+        rc, out, _ = run_main("pr", "reviewed", "--pr", url, "--head", self.head, "--clean", *MODELS)
         self.assertEqual(out, f"✓ PR #8: review sạch ở {self.head[:7]}\n")
         self.assertIn("8", xt.read_reviews(self.base))
         for ref in ("#8", "https://github.com/o/r/pull/8#issuecomment-1", "https://github.com/o/r/pull/8/files"):
-            rc, out, _ = run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean")
+            rc, out, _ = run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean", *MODELS)
             self.assertEqual((rc, out), (0, f"✓ PR #8: review sạch ở {self.head[:7]}\n"), ref)
         for bad in ("https://github.com/o/r/issues/9", "abc", "8a"):  # không ghi khoá rác vào sổ (nợ review #110)
-            rc, _, err = run_main("pr", "reviewed", "--pr", bad, "--head", self.head, "--clean")
+            rc, _, err = run_main("pr", "reviewed", "--pr", bad, "--head", self.head, "--clean", *MODELS)
             self.assertEqual(rc, 2, bad)
             self.assertIn("--pr phải là số PR, #N hoặc URL …/pull/N", err)
         for ref in ("08", "８"):  # số 0 đầu, chữ số Unicode → cùng khoá "8" với `pr next` (review #112)
-            self.assertEqual(run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean")[0], 0)
+            self.assertEqual(run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean", *MODELS)[0], 0)
         self.assertEqual(sorted(xt.read_reviews(self.base)), ["7", "8"])
         rc, _, err = run_main("pr", "next", "--pr-json", "-", stdin="[1]")
         self.assertEqual(rc, 2)

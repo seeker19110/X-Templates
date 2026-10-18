@@ -311,3 +311,10 @@
 - Chọn: Phát hành 3.2.0 ngay với phần đã review sạch; đợt nâng cấp ra bản sau
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 2/5: 3.2.0 có ba thay đổi đã review sạch mà dự án đích cần (guard ghi công AI, LOOP-OPT, perf); gộp thêm phải review lại, chậm bản mà không tăng an toàn; đợt sau ra vài giờ sau
 - Đường lùi: Cắt bản kế tiếp (3.2.1/3.3.0) chứa đợt nâng cấp
+
+### D-045 · 2026-10-18T12:31:38+00:00 · Máy kiểm 'reviewer khác model' (LOOP-STOP-022) thế nào khi không có biến môi trường cho biết model phiên chính?
+
+- Phương án: (1) pr reviewed --clean bắt khai --reviewer-model/--author-model, cùng họ thì từ chối, ghi vào sổ · (2) Đọc model từ transcript của phiên qua hook · (3) Giữ lời dặn trong tài liệu
+- Chọn: pr reviewed --clean bắt khai --reviewer-model/--author-model, cùng họ thì từ chối, ghi vào sổ
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bắt đúng lỗi thật (reviewer ghim opus khi phiên chính là Opus), ghi vết soát được, stdlib có test; transcript là định dạng nội bộ dễ đổi; lời dặn đã thất bại
+- Đường lùi: Bỏ _review_models_error, để --reviewer-model/--author-model tuỳ chọn

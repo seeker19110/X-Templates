@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- `xt.py pr reviewed --clean` cần `--reviewer-model` và `--author-model`, từ chối khi cùng họ model (opus/sonnet/haiku/
+  fable…) — `LOOP-STOP-022` "reviewer khác model" trước đây chỉ là lời dặn (phiên 2026-10-18: `reviewer.md` ghim `opus`
+  trong khi phiên chính chuyển sang Opus). Sổ `.autopilot/reviews.json` ghi cả hai model. `--blocking` không cần khai.
+  Dự án đích: chạy lại `install.py` (xt.py, mẫu AGENTS.md, skill autopilot).
+
 ## [3.2.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.1.1:** chạy lại `install.py` (hook `guard.py`, mẫu `xt.yaml`/`CLAUDE.md` đổi — gộp
