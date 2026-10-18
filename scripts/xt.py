@@ -4516,6 +4516,150 @@ def cmd_merge_watch(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+# --------------------------------------------------------------------------- pr next (ADR-0025)
+
+REVIEWS_FILE = "reviews.json"  # sổ review theo PR: commit H đã rà + sạch/còn lỗi chặn — nguồn của `pr next` (ADR-0025)
+FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def read_reviews(base: Path) -> Dict[str, Any]:
+    """{số PR: {"reviews": [{"head", "clean", "at"}], "standard_seen": bool}}; không có/hỏng → {}."""
+    return _read_json_obj(state_dir(base) / REVIEWS_FILE) or {}
+
+
+def _write_reviews(base: Path, data: Dict[str, Any]) -> None:
+    d = state_dir(base)
+    d.mkdir(parents=True, exist_ok=True)
+    write_atomic(d / REVIEWS_FILE, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+
+def _pr_record(data: Dict[str, Any], pr: str) -> Dict[str, Any]:
+    rec = data.get(pr)
+    return rec if isinstance(rec, dict) else {}
+
+
+PrAct = Callable[..., Dict[str, Any]]
+
+
+def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: str) -> Optional[Dict[str, Any]]:
+    """Bước không phụ thuộc review: PR đã đóng, ngoại lệ cứng (7), PR chồng, cần push (3), cần người."""
+    n, verdict, why = d.get("pr", ""), d.get("verdict"), "; ".join(d.get("reasons", []))
+    if verdict == "closed":
+        return act("done" if "MERGED" in why else "closed", why)
+    if d.get("hard"):  # ngoại lệ cứng: không auto-merge; đang bật thì tắt trước (merge-gate đỏ — ADR-0023)
+        if auto_merge:
+            return act("disable-auto-merge", "ngoại lệ cứng mà auto-merge đang bật (ADR-0023)", disable)
+        return act(
+            "defer-human", "ngoại lệ cứng — người merge (ADR-0016)", f"xt.py loop defer --task <ID> --reason 'PR #{n}'"
+        )
+    if d.get("stacked"):
+        if auto_merge:
+            return act("disable-auto-merge", "PR chồng không được bật auto-merge", disable)
+        return act(
+            "retarget", why, "chờ PR đáy merge → đổi đích về nhánh mặc định, merge nhánh đó vào đây, push, pr next"
+        )
+    if verdict in ("update", "fix"):  # cần push: tắt auto-merge TRƯỚC khi push
+        if auto_merge:
+            return act("disable-auto-merge", f"cần push ({verdict}) — tắt auto-merge trước (bước 3)", disable)
+        return act(str(verdict), why, str(d.get("next", "")))
+    if verdict == "human":
+        return act("defer-human", why, f"báo người: {why}")
+    return None
+
+
+def _pr_next_review(
+    d: Dict[str, Any], auto_merge: bool, last: Optional[Dict[str, Any]], act: PrAct, disable: str
+) -> Optional[Dict[str, Any]]:
+    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại."""
+    n, head = d.get("pr", ""), str(d.get("head", ""))
+    if last is None or last.get("head") != head:
+        since = f"{last.get('head')}..{head}" if last else "cả PR"
+        if auto_merge:
+            return act("disable-auto-merge", f"head {head[:7]} chưa được rà mà auto-merge đang bật", disable)
+        return act(
+            "review",
+            f"làn chuẩn: rà {since} (merge nhánh đích: `git show --remerge-diff`), rồi `xt.py pr reviewed`",
+            f"giao reviewer (model khác) rà {since}; xong: xt.py pr reviewed --pr {n} --head {head} --clean|--blocking",
+        )
+    if not last.get("clean"):
+        if auto_merge:
+            return act("disable-auto-merge", "review ở head báo lỗi chặn mà auto-merge đang bật", disable)
+        return act("fix", "review ở head còn lỗi chặn — sửa, push, rà lại", "sửa lỗi chặn, push, chạy lại pr next")
+    return None
+
+
+def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[str, Any]:
+    """MỘT hành động kế tiếp cho PR theo "merge theo làn" (ADR-0024 → ADR-0025), hàm thuần.
+
+    `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
+    GitHub: agent làm đúng `do`, guard vẫn là lớp chặn. Hành động: done · closed · disable-auto-merge · defer-human ·
+    retarget · update · fix · review · enable-auto-merge · wait."""
+    n, head = d.get("pr", ""), str(d.get("head", ""))
+    reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+    # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
+    strict = d.get("lane") == "chuẩn" or bool(rec.get("standard_seen")) or any(not r.get("clean") for r in reviews)
+    disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
+
+    def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:
+        return {"pr": n, "head": head, "action": action, "why": why, "do": do, "fallback": fallback, "strict": strict}
+
+    early = _pr_next_blocked(d, auto_merge, act, disable)
+    if early is None and strict:
+        early = _pr_next_review(d, auto_merge, reviews[-1] if reviews else None, act, disable)
+    if early is not None:
+        return early
+    if auto_merge:  # đã bật: GitHub merge khi required check xanh
+        return act("wait", "auto-merge đang bật — chờ required check", f"chạy nền xt.py merge-watch --pr {n}")
+    merge_cmd = str(d.get("next", "")) if d.get("verdict") == "merge" else ""
+    fallback = f"{merge_cmd} (MCP merge_pull_request expectedHeadSha={head})" if merge_cmd else ""
+    return act(
+        "enable-auto-merge",
+        f"{'review sạch ở head' if strict else 'làn nhanh'} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
+        f"gh pr merge {n} --auto --squash (MCP enable_pr_auto_merge)",
+        fallback,
+    )
+
+
+def cmd_pr(args: argparse.Namespace) -> int:
+    base = project_dir()
+    if args.pr_cmd == "reviewed":
+        if not FULL_SHA_RE.fullmatch(args.head):
+            print(
+                "✗ --head phải là SHA đủ 40 ký tự (git rev-parse <commit>) — review gắn với đúng commit đã rà",
+                file=sys.stderr,
+            )
+            return 2
+        data = read_reviews(base)
+        rec = _pr_record(data, str(args.pr))
+        reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+        reviews.append({"head": args.head, "clean": args.clean, "at": now_iso()})
+        data[str(args.pr)] = {**rec, "reviews": reviews}
+        _write_reviews(base, data)
+        print(f"✓ PR #{args.pr}: review {'sạch' if args.clean else 'còn lỗi chặn'} ở {args.head[:7]}")
+        return 0
+    try:
+        pr = load_pr(args)
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    d, _ = _merge_eval(pr)
+    data = read_reviews(base)
+    rec = _pr_record(data, str(d["pr"]))
+    if d["lane"] == "chuẩn" and not rec.get("standard_seen"):  # nhớ làn chuẩn: push sau đó không hạ PR về làn nhanh
+        rec = {**rec, "standard_seen": True}
+        data[str(d["pr"])] = rec
+        _write_reviews(base, data)
+    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec)
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+    print(f"{out['action'].upper()} · PR #{out['pr']} · head {out['head'][:7]} — {out['why']}")
+    for k in ("do", "fallback"):
+        if out[k]:
+            print(f"→ {out[k]}" if k == "do" else f"  không được thì: {out[k]}")
+    return 0
+
+
 # --------------------------------------------------------------------------- grant-check (ADR-0022)
 
 GRANT_LINE_RE = re.compile(r"^- grant:\s*([a-z_]+)\s*((?:\|\s*[a-z_]+\s*=[^|]*)*)$", re.I)
@@ -4706,6 +4850,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pm.add_argument("--json", action="store_true", help="in JSON (pr, verdict, lane, reasons, next, notes)")
     pm.set_defaults(fn=cmd_merge_check)
+    ppr = sub.add_parser("pr", help="merge theo làn: bước kế tiếp cho PR đã mở + sổ review (ADR-0025)")
+    prsub = ppr.add_subparsers(dest="pr_cmd", required=True)
+    pnx = prsub.add_parser("next", help="MỘT hành động kế tiếp: bật/tắt auto-merge, rà, merge ghim head, chờ, defer")
+    pnx.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
+    pnx.add_argument("--pr-json", help="đọc JSON PR từ FILE hoặc - như merge-check")
+    pnx.add_argument("--json", action="store_true")
+    prv = prsub.add_parser("reviewed", help="ghi kết quả review ở commit H vào .autopilot/reviews.json")
+    prv.add_argument("--pr", required=True)
+    prv.add_argument("--head", required=True, help="SHA đủ 40 ký tự của commit đã rà")
+    pres = prv.add_mutually_exclusive_group(required=True)
+    pres.add_argument(
+        "--clean", dest="clean", action="store_true", help="không còn lỗi chặn; mục nên sửa đã sửa/trả lời"
+    )
+    pres.add_argument("--blocking", dest="clean", action="store_false", help="còn lỗi chặn")
+    ppr.set_defaults(fn=cmd_pr)
     pq = sub.add_parser("merge-gate", help="required check: đỏ khi PR ngoại lệ cứng đang bật auto-merge (ADR-0023)")
     pq.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pq.add_argument("--pr-json", help="đọc JSON `gh pr view --json …` từ FILE hoặc - thay vì gọi REST")
