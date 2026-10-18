@@ -432,6 +432,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   AUD-CI-008 (job chỉ chạy sau merge) không còn áp dụng.
 
 ### Fixed
+- **Ba nợ 🟢 từ review #110**: `xt.py pr reviewed --pr` chỉ nhận số PR, `#N` hoặc URL `…/pull/N[/files][#…]` — dạng khác
+  exit 2 thay vì ghi khoá rác vào `.autopilot/reviews.json`; `xt.py … | head` (bên đọc đóng ống) im lặng, exit 141 như
+  lệnh Unix thay vì in `✗ [Errno 32] Broken pipe`; danh sách hành động của `pr next` ở `LOOP-STOP-022` (SHOULD, không đổi
+  mức) thêm `merge` (dưới L3) và `closed` cho khớp ADR-0025.
 - `xt.py feedback aggregate`: phản hồi có ID cục bộ của dự án (`T-003`, `loop`, mọi `bi-chan`) gộp theo triệu chứng
   chuẩn hoá thay vì theo ID — hai dự án khác lý do không còn bị tính "đủ ngưỡng"; bảng in mọi triệu chứng khác nhau
   thay vì chỉ cái đầu (AUD-CODE-004).

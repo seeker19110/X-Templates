@@ -12,7 +12,7 @@
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ; CLI container ngoài docker/podman (`kubectl exec`, `nerdctl`, AUD-SEC-042); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
 
-6. Nợ 🟢 từ review #110: `pr reviewed --pr <URL>` chỉ bắt `/pull/(\d+)` (URL `#issuecomment-…`, `/files` ghi khoá rác — an toàn, đòi rà lại); danh sách hành động ở `LOOP-STOP-022` thêm `merge`, `closed`; `xt.py … | head` in `Broken pipe` (bắt SIGPIPE). Chưa làm: sàn quyền token (chủ repo), đóng gói `xt.pyz` (ADR-0010 cần ≥ 2 dự án).
+6. Chưa làm từ đề xuất tối ưu autopilot: sàn quyền token (chủ repo đổi quyền token/tài khoản), đóng gói `xt.pyz` (ADR-0010 cần ≥ 2 dự án đích). Nợ 🟢 review #110 đã sửa.
 
 ## Quyết định
 - 2026-10-13 Khung v2 = thư viện yêu cầu có ID + máy ghép blueprint + máy kiểm "xong" — ADR-0001.

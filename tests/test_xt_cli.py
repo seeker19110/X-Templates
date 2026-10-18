@@ -608,6 +608,28 @@ class FrameworkCommandsTest(TmpDirCase):
                 self.assertIn("Không thấy thư mục khung", err)
 
 
+class BrokenPipeTest(unittest.TestCase):
+    """`xt.py … | head`: bên đọc đóng ống → im lặng, exit 141 như lệnh Unix (nợ review #110), không in `✗ Broken pipe`."""
+
+    def test_broken_pipe_is_silent_141(self):
+        with unittest.mock.patch.object(xt, "cmd_stats", side_effect=BrokenPipeError):
+            rc, out, err = run_main("stats")  # stdout là StringIO: không có fd thật → bỏ qua dup2
+        self.assertEqual((rc, out, err), (141, "", ""))
+        fake = unittest.mock.MagicMock()
+        fake.fileno.return_value = 1
+        with (
+            unittest.mock.patch.object(xt, "cmd_stats", side_effect=BrokenPipeError),
+            unittest.mock.patch.object(sys, "stdout", fake),
+            unittest.mock.patch("xt.os.open", return_value=99) as op,
+            unittest.mock.patch("xt.os.dup2") as dup2,
+            unittest.mock.patch("xt.os.close") as close,
+        ):
+            self.assertEqual(xt.main(["stats"]), 141)
+        op.assert_called_once_with(os.devnull, os.O_WRONLY)
+        dup2.assert_called_once_with(99, 1)
+        close.assert_called_once_with(99)  # fd devnull đóng sau dup2 (CodeQL #112)
+
+
 # --------------------------------------------------------------------------- blueprint-status
 
 

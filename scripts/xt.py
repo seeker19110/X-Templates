@@ -4507,7 +4507,7 @@ def _watch_final(d: Dict[str, Any]) -> int:
 def cmd_merge_watch(args: argparse.Namespace) -> int:
     """Gọi `merge-check` mỗi `--interval` giây (mặc định 30) tới khi verdict ≠ wait (ADR-0021). Chạy nền (`run_in_background`): thoát
     thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (update/fix/human/
-    đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ."""
+    đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ, 141 bên đọc đóng ống."""
     deadline = time.monotonic() + args.max_minutes * 60
     errors = 0
     while True:
@@ -4533,6 +4533,7 @@ def cmd_merge_watch(args: argparse.Namespace) -> int:
 
 REVIEWS_FILE = "reviews.json"  # sổ review theo PR: commit H đã rà + sạch/còn lỗi chặn — nguồn của `pr next` (ADR-0025)
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
+PR_REF_RE = re.compile(r"#?(\d+)|https?://\S+?/pull/(\d+)(?:[/?#]\S*)?")  # số PR, #N, URL …/pull/N[/files][#…]
 
 
 def read_reviews(base: Path) -> Dict[str, Any]:
@@ -4657,8 +4658,11 @@ def cmd_pr(args: argparse.Namespace) -> int:
             )
             return 2
         data = read_reviews(base)
-        num = re.search(r"(\d+)/?$", str(args.pr))  # URL/…/pull/7 → "7": cùng khoá với số PR mà `pr next` dùng
-        key = num[1] if num else str(args.pr)
+        num = PR_REF_RE.fullmatch(str(args.pr).strip())  # 7 · #7 · …/pull/7[/files][#…]: cùng khoá số PR với `pr next`
+        if num is None:
+            print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {args.pr!r}", file=sys.stderr)
+            return 2
+        key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
         rec = _pr_record(data, key)
         reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
         reviews.append({"head": args.head, "clean": args.clean, "at": now_iso()})
@@ -5035,7 +5039,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     try:
         rc: int = args.fn(args)
+        sys.stdout.flush()  # lỗi ống ở lần xả cuối cũng rơi vào nhánh dưới, không thành "Exception ignored"
         return rc
+    except BrokenPipeError:  # `xt.py … | head`: bên đọc đóng ống — im lặng như lệnh Unix (128 + SIGPIPE)
+        try:
+            fd = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(fd, sys.stdout.fileno())  # lần xả lúc thoát ghi vào devnull, không ném lỗi ống lần nữa
+            finally:
+                os.close(fd)
+        except (OSError, ValueError):  # stdout không có fd thật (test, thư viện) — không còn gì để xả
+            pass
+        return 141
     except OSError as exc:  # file thiếu/không đọc được: một dòng dễ hiểu; XT_DEBUG=1 để xem traceback
         if os.environ.get("XT_DEBUG"):
             raise
