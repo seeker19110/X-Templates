@@ -101,14 +101,30 @@ class PerfSampleTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "quá"):
                 xt.perf_sample(["sh", "-c", script], runs=1, warmup=0, timeout=1)
             pid = int(pidfile.read_text())
+        self.assert_dead(pid)
+
+    def assert_dead(self, pid: int) -> None:
         for _ in range(50):
             try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
+                state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+            except OSError:  # đã biến mất (hoặc không có /proc: thử kill 0)
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return
+                state = "?"
+            if state == "Z":  # zombie chưa được init thu dọn vẫn là đã chết
                 return
             time.sleep(0.1)
         os.kill(pid, 9)
-        self.fail("tiến trình cháu vẫn chạy sau khi quá giờ")
+        self.fail("tiến trình cháu vẫn chạy")
+
+    def test_background_leftovers_are_killed_after_normal_exit(self):
+        with tempfile.TemporaryDirectory() as d:
+            pidfile = Path(d) / "pid"
+            xt.perf_sample(["sh", "-c", f"sleep 30 & echo $! > {pidfile}; exit 0"], runs=1, warmup=0, timeout=30)
+            pid = int(pidfile.read_text())
+        self.assert_dead(pid)
 
     def test_interrupt_kills_and_reraises(self):
         real_wait = subprocess.Popen.wait
@@ -217,6 +233,26 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual([f for f, _ in added], [xt.PERF_ODD_NAME] * 2)
         touched, _ = xt.perf_guard(files, added, ["bench/*"])
         self.assertEqual(sorted(touched), sorted(names))
+
+    def test_untracked_symlink_to_fifo_does_not_hang(self):
+        d = self.make_repo()
+        fifo = d.parent / (d.name + ".fifo")
+        os.mkfifo(fifo)
+        self.addCleanup(lambda: fifo.unlink())
+        os.symlink(fifo, d / "bench" / "l")
+        done = []
+        th = __import__("threading").Thread(target=lambda: done.append(xt.perf_diff(d, "HEAD")), daemon=True)
+        th.start()
+        th.join(10)
+        self.assertEqual(len(done), 1, "perf_diff treo trên symlink → FIFO")
+        files, added = done[0]
+        self.assertEqual(files, ["bench/l"])
+        self.assertEqual(added, [("bench/l", str(fifo))])  # quét chuỗi đích, không đọc nội dung đích
+
+    def test_untracked_non_regular_and_vanished(self):
+        d = self.make_repo()
+        self.assertEqual(xt._perf_untracked_lines(d, ["bench"]), [])  # thư mục: không phải file thường
+        self.assertEqual(xt._perf_untracked_lines(d, ["no-such"]), [])  # biến mất giữa hai lệnh git
 
     def test_untracked_files_are_checked(self):
         d = self.make_repo()
@@ -330,6 +366,8 @@ class PerfCliTest(unittest.TestCase):
     def test_runs_must_be_positive(self):
         for argv in (
             ("perf", "sample", "--out", self.p("s.json"), "--runs", "0", "--", "true"),
+            ("perf", "sample", "--out", self.p("s.json"), "--warmup", "-1", "--", "true"),
+            ("perf", "sample", "--out", self.p("s.json"), "--warmup", "x", "--", "true"),
             ("perf", "compare", self.p("slow.json"), self.p("fast.json"), "--min-runs", "0"),
             ("perf", "compare", self.p("slow.json"), self.p("fast.json"), "--min-runs", "x"),
         ):

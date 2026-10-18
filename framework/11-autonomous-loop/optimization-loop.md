@@ -28,14 +28,16 @@ Mỗi task tối ưu là một dòng `T-NNN` thường trong `PLAN.md` (parser k
 7. **Ghi sổ, siết ratchet:** thử nào cũng vào `docs/autopilot/PERF-LOG.md` (giữ hay bỏ); giữ thì commit baseline/ngân sách mới, không nới.
 8. **Dừng:** đạt mục tiêu thì dừng (không tối ưu vượt mục tiêu); 3 lần thử liên tiếp không `improved` trên cùng điểm nóng → đổi điểm nóng hoặc `loop defer`.
 
-Gate ví dụ (`scripts/perf-gate.sh`, dự án tự viết, `set -e`):
+Gate ví dụ. **Script Gate và công cụ chấm cũng là bộ đo khoá:** agent sửa được `xt.py` hay chính script thì `perf compare` nói gì cũng được. Vì vậy Gate trong `PLAN.md` lấy script từ commit gốc —
+``Gate: `bash <(git show origin/main:scripts/perf-gate.sh)` `` — và script dùng `xt.py` của commit gốc trong worktree:
 
 ```bash
-XT="python3 .xtemplates/scripts/xt.py"
+# scripts/perf-gate.sh (dự án tự viết, set -e)
 base=origin/main
-$XT perf guard --base "$base" --locked 'bench/*' --locked 'tests/equiv/*' --strict
 wt="$(mktemp -d)"; trap 'git worktree remove --force "$wt"' EXIT
 git worktree add -q --detach "$wt" "$base"
+XT="python3 $wt/.xtemplates/scripts/xt.py"          # công cụ chấm của commit gốc, không phải của cây agent sửa
+$XT perf guard --base "$base" --locked 'bench/*' --locked 'tests/equiv/*' --locked 'scripts/perf-gate.sh' --strict
 (cd "$wt" && $XT perf sample --out "$OLDPWD/before.json" -- ./bench/run.sh)   # baseline trên commit gốc, cùng lượt
 $XT perf sample --out after.json -- ./bench/run.sh
 $XT perf compare before.json after.json
@@ -51,12 +53,12 @@ Vị trí trong vòng đời: **G5** khoá bộ đo + baseline · **G6** mỗi t
 | `perf compare B A [--exact] [--no-regress] [--higher-is-better] [--min-effect 0.02] [--json]` | so hai bộ mẫu bằng Mann-Whitney U + sàn nhiễu MAD; `--exact` cho đại lượng tất định | 0 = `improved` (`--no-regress`: cả `neutral`) · 1 còn lại · 2 file hỏng |
 | `perf guard --base REF [--locked GLOB…] [--strict]` | worktree so với `REF`, gồm cả file chưa theo dõi: file khoá bị đụng/xoá → đỏ; dòng thêm đáng ngờ (cache/memoize, `sleep`, gán đè/patch đồng hồ, `_getframe`/`inspect.stack`, `-O3`) → ⚠ (`--strict`: đỏ) | 0 · 1 · 2 `git diff` lỗi hoặc glob khoá không khớp file nào |
 
-File mẫu: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy. `--locked` khớp kiểu `fnmatch` (`*` đi qua `/`: `bench/*` khoá cả cây; `**/` nhận cả không thư mục con; bỏ `./` đầu). Giới hạn đã biết: p dùng xấp xỉ chuẩn nên **bảo thủ** với mẫu nhỏ (n = 10) so với p chính xác của `benchstat`, và sàn nhiễu theo MAD là cách của `criterion`; file bị `.gitignore` không được `guard` thấy; `guard` bắt dấu hiệu, không chứng minh vô tội — reviewer vẫn phải rà.
+File mẫu: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy. `--locked` khớp kiểu `fnmatch` (`*` đi qua `/`: `bench/*` khoá cả cây; `**/` nhận cả không thư mục con; bỏ `./` đầu). Giới hạn đã biết: p dùng xấp xỉ chuẩn nên **bảo thủ** với mẫu nhỏ (n = 10) so với p chính xác của `benchstat`, và sàn nhiễu theo MAD là cách của `criterion`; file bị `.gitignore` không được `guard` thấy; file chưa theo dõi chỉ quét 1 MiB đầu, symlink chỉ quét chuỗi đích; `perf sample` giết cả nhóm tiến trình khi xong/quá giờ/Ctrl-C nhưng không bắt SIGTERM gửi thẳng cho `xt.py`; `guard` bắt dấu hiệu, không chứng minh vô tội — reviewer vẫn phải rà.
 
 ## Checklist
 
 - [ ] `LOOP-OPT-001` **MUST** Task tối ưu chỉ mở khi có **mục tiêu số kèm điều kiện đo** ([`XC-PERF-001`](../18-cross-cutting/performance-engineering.md)) hoặc ngân sách đang bị vượt; không có số thì không tối ưu. → Kiểm: dòng task trong `PLAN.md` nêu mục tiêu số và Gate chứa `perf compare`. · Nguồn: ý "ngân sách trước, đo sau" của `QA-PERF`.
-- [ ] `LOOP-OPT-002` **MUST** **Bộ đo khoá:** harness đo, bộ test tương đương hành vi và input đo nằm ngoài quyền sửa của agent trong task tối ưu; Gate chạy `perf guard --locked …` và đỏ khi diff đụng chúng (kể cả xoá). → Kiểm: `xt.py perf guard --base origin/main --locked '<glob bộ đo>'` exit 0 trong Gate. · Nguồn: autoresearch (`prepare.py` "không sửa"); METR 2025-06-05 (hàm chấm bị ghi đè/thay stub).
+- [ ] `LOOP-OPT-002` **MUST** **Bộ đo khoá:** harness đo, bộ test tương đương hành vi, input đo, **script Gate và công cụ chấm (`xt.py perf`)** nằm ngoài quyền sửa của agent trong task tối ưu — Gate chạy bản của commit gốc; Gate chạy `perf guard --locked …` và đỏ khi diff đụng chúng (kể cả xoá). → Kiểm: Gate lấy từ commit gốc (`git show <base>:…`) và chạy `perf guard --base <base> --locked '<glob bộ đo>' --locked '<script Gate>'` exit 0 bằng `xt.py` của commit gốc. · Nguồn: autoresearch (`prepare.py` "không sửa"); METR 2025-06-05 (hàm chấm bị ghi đè/thay stub).
 - [ ] `LOOP-OPT-003` **MUST** **Máy quyết giữ hay hoàn tác:** chỉ giữ thay đổi khi `perf compare` = `improved` trên ≥ 10 mẫu mỗi bên (hoặc `--exact` cho đại lượng tất định), baseline đo lại trên commit gốc cùng lượt và cùng máy, **và** toàn bộ test xanh; còn lại hoàn tác — agent không tự nhận "nhanh hơn". → Kiểm: evidence `loop record` của Gate có exit 0 từ `perf compare`; Gate không đọc baseline từ file agent sửa được. · Nguồn: benchstat (Mann-Whitney U, α = 0,05, ≥ 10 lần); autoresearch (giữ nếu metric tốt hơn).
 - [ ] `LOOP-OPT-004` **MUST@M** **Một giả thuyết, một thay đổi, một lần đo:** ghi kỳ vọng và falsifier trước khi đo ([`LOOP-DESIGN-021`](loop-design.md) áp dụng cho số đo); gộp nhiều thay đổi thì không biết cái nào có tác dụng, cái nào gây hại. → Kiểm: mô tả PR/`PERF-LOG.md` có giả thuyết + falsifier có trước số đo (đối chiếu thứ tự commit).
 - [ ] `LOOP-OPT-005` **MUST@L** **Chống gian lận số đo:** mọi dòng `perf guard` báo ⚠ phải được `reviewer` (model khác người viết) trả lời từng dòng trước khi giữ; ngoài ra reviewer **tự rà** các kiểu máy không bắt được — hard-code shape/giá trị input, thoát sớm, tắt đồng bộ, hàm kiểm bị thay bằng stub, kết quả tái dùng giữa các lần đo. Lời nhắc "đừng gian lận" không đủ — chỉ giảm tỉ lệ, không loại bỏ. → Kiểm: `pr reviewed --clean` có ghi chú trả lời từng ⚠ và từng kiểu tự rà. · Nguồn: METR 2025-06-05 (30,4 % lượt RE-Bench có hack; nhắc không gian lận chỉ giảm nhẹ); GSO/SWE-fficiency (memoize, hard-code shape/dtype, monkey-patch).

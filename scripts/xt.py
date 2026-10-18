@@ -75,6 +75,7 @@ import posixpath
 import re
 import shlex
 import shutil
+import stat
 import statistics
 import subprocess
 import tempfile
@@ -5155,15 +5156,15 @@ def _perf_report(doc: Dict[str, Any]) -> str:
 
 
 def _perf_run(cmd: List[str], timeout: float) -> int:
-    """Chạy `cmd` trong nhóm tiến trình riêng; quá giờ hoặc bị ngắt thì giết cả nhóm (không để tiến trình cháu nhiễu lần đo sau)."""
+    """Chạy `cmd` trong nhóm tiến trình riêng và giết cả nhóm khi xong, quá giờ hoặc bị Ctrl-C — tiến trình nền/cháu không
+    được sống tiếp làm nhiễu lần đo sau. (SIGTERM gửi thẳng cho xt.py không được bắt: giới hạn đã biết.)"""
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
         return proc.wait(timeout=timeout)
-    except BaseException:
+    finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, 9)
         proc.wait()
-        raise
 
 
 def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[float]:
@@ -5206,13 +5207,23 @@ def _perf_diff_lines(text: str) -> List[Tuple[str, str]]:
     return added
 
 
+def _perf_untracked_text(path: Path) -> str:
+    """Thứ git sẽ commit: symlink → chuỗi đích (không đi theo: có thể trỏ FIFO/thiết bị/file ngoài repo); file thường → ≤ 1 MiB; còn lại rỗng."""
+    mode = os.lstat(path).st_mode
+    if stat.S_ISLNK(mode):
+        return os.readlink(path)
+    if not stat.S_ISREG(mode):
+        return ""
+    with open(path, "rb") as fh:
+        return fh.read(PERF_UNTRACKED_MAX).decode("utf-8", "replace")
+
+
 def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
     for name in names:
         try:
-            with open(base / name, "rb") as fh:
-                text = fh.read(PERF_UNTRACKED_MAX).decode("utf-8", "replace")
-        except OSError:  # thư mục/FIFO/symlink hỏng: chỉ tính là file đổi, không có dòng để quét
+            text = _perf_untracked_text(base / name)
+        except OSError:  # file biến mất giữa hai lệnh git: vẫn tính là file đổi, không có dòng để quét
             continue
         out.extend((name, ln) for ln in text.splitlines())
     return out
@@ -5286,7 +5297,7 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
-    sha = _git(project_dir(), "rev-parse", "HEAD")
+    sha = _git(Path.cwd(), "rev-parse", "HEAD")  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
     doc = {
         "samples": samples,
         "unit": "s",
@@ -5347,6 +5358,12 @@ def cmd_stats(args: argparse.Namespace) -> int:
 def _positive_int(value: str) -> int:
     if not value.isdigit() or int(value) < 1:
         raise argparse.ArgumentTypeError(f"cần số nguyên ≥ 1, không phải {value!r}")
+    return int(value)
+
+
+def _nonneg_int(value: str) -> int:
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(f"cần số nguyên ≥ 0, không phải {value!r}")
     return int(value)
 
 
@@ -5585,7 +5602,7 @@ def build_parser() -> argparse.ArgumentParser:
     psa = ppsub.add_parser("sample", help="chạy lệnh nhiều lần, ghi thời gian tường ra file mẫu")
     psa.add_argument("--out", required=True)
     psa.add_argument("--runs", type=_positive_int, default=PERF_MIN_RUNS)
-    psa.add_argument("--warmup", type=int, default=2)
+    psa.add_argument("--warmup", type=_nonneg_int, default=2)
     psa.add_argument("--timeout", type=float, default=300.0)
     psa.add_argument("cmd", nargs=argparse.REMAINDER)
     pgu = ppsub.add_parser("guard", help="diff so với --base không được đụng file khoá; báo dòng đáng ngờ")
