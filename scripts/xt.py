@@ -1246,9 +1246,12 @@ def loop_verify(base: Optional[Path] = None) -> int:
         results.append({"task": t["id"], "gate": t["gate"], "exit_code": code, "output_tail": tail})
         print(f"[xt] verify {t['id']}: exit {code}")
     checks = _verify_blueprint(base, st, timeout)
+    floor = gate_floor_issues(base)
+    for issue in floor:
+        print(f"[xt] verify sàn Gate: {issue}")
     after = tree_fingerprint(base)
     stable = before == after
-    ok = stable and all(r["exit_code"] == 0 for r in results + checks)
+    ok = stable and not floor and all(r["exit_code"] == 0 for r in results + checks)
     for r in results:
         r["gate"] = redact(r["gate"])
     rec = {
@@ -1258,6 +1261,7 @@ def loop_verify(base: Optional[Path] = None) -> int:
         "finished": now_iso(),
         "results": results,
         "blueprint": checks,
+        "gate_floor": floor,
     }
     d = state_dir(base)
     d.mkdir(parents=True, exist_ok=True)
@@ -1292,6 +1296,7 @@ def final_check(base: Path) -> Optional[str]:
     if rec.get("fingerprint") == fp:
         runs = rec.get("results", []) + rec.get("blueprint", [])
         red = [str(r.get("task") or r.get("id")) for r in runs if isinstance(r, dict) and r.get("exit_code") != 0]
+        red += ["sàn Gate M/L chưa đạt (LOOP-HARNESS-023)"] if rec.get("gate_floor") else []
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
@@ -2526,6 +2531,104 @@ def yaml_scalar(raw: str) -> str:
     return re.sub(r"^([\"'])(.*)\1$", r"\2", "".join(out).strip())
 
 
+# Sàn Gate theo quy mô (LOOP-HARNESS-023, D-033): ở M/L, cổng do agent tự khai phải đạt mức tối thiểu — ADR-0011 chỉ chặn
+# cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Máy chỉ dò dấu hiệu tất định trong xt.yaml + file cấu
+# hình; thiếu → `doctor` cảnh báo, `loop init` nhắc, `loop verify` ĐỎ (autopilot không ra `done` khi sàn chưa đạt).
+FLOOR_TYPED_MARKERS = {  # dấu hiệu stack có kiểm kiểu → khoá xt.yaml phải khác rỗng
+    "tsconfig.json": "typecheck",
+    "pyproject.toml": "typecheck",
+    "setup.cfg": "typecheck",
+    "go.mod": "build",
+    "Cargo.toml": "build",
+}
+FLOOR_FORMAT_RE = re.compile(
+    r"\b(?:prettier|biome|dprint|black|isort|rustfmt|gofmt|ruff\s+format|cargo\s+fmt|npm\s+run\s+format"
+    r"|pnpm\s+(?:run\s+)?format|yarn\s+format|format)\b[^&|;]*?(?:--check|\s-c\b|\s-l\b|--diff|\bci\b|\bcheck\b)"
+)
+FLOOR_COVERAGE_RE = re.compile(
+    r"fail[-_]under|coverageThreshold|thresholds|check-coverage|--cover(?:age)?-threshold|\s-cover\b"
+)
+FLOOR_COVERAGE_FILES = (
+    "pyproject.toml",
+    ".coveragerc",
+    "setup.cfg",
+    "tox.ini",
+    "package.json",
+    ".nycrc",
+    ".nycrc.json",
+    ".c8rc.json",
+    "vitest.config.ts",
+    "vitest.config.js",
+    "vitest.config.mts",
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mts",
+    "jest.config.ts",
+    "jest.config.js",
+    "jest.config.cjs",
+    "jest.config.mjs",
+    "codecov.yml",
+    ".codecov.yml",
+)
+FLOOR_E2E_PROFILES = ("web-app", "mobile-app", "desktop-app", "static-site", "game")
+
+
+def blueprint_scale(base: Path) -> Tuple[str, str]:
+    """(quy mô, hồ sơ) từ frontmatter BLUEPRINT.md (khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc); không có/không
+    đọc được → ("", "")."""
+    st = read_state(base) or {}
+    bp = base / str(st.get("blueprint") or "BLUEPRINT.md")
+    try:
+        fm = FRONT_BLOCK_RE.match(bp.read_text(encoding="utf-8"))
+    except OSError:
+        return "", ""
+    text = fm[1] if fm else ""
+    scale = re.search(r"^scale:[ \t]*([SML])\s*$", text, re.M)
+    profile = re.search(r"^profile:[ \t]*(\S+)\s*$", text, re.M)
+    return (scale[1] if scale else ""), (profile[1] if profile else "")
+
+
+def _floor_has_coverage(base: Path, test_cmd: str) -> bool:
+    if FLOOR_COVERAGE_RE.search(test_cmd):
+        return True
+    for name in FLOOR_COVERAGE_FILES:
+        try:
+            if FLOOR_COVERAGE_RE.search((base / name).read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def gate_floor_issues(base: Path) -> List[str]:
+    """Sàn Gate chưa đạt ở quy mô M/L (mỗi dòng một thiếu sót kèm cách sửa); S hoặc không có blueprint/xt.yaml → []."""
+    scale, profile = blueprint_scale(base)
+    p = base / "xt.yaml"
+    if scale not in ("M", "L") or not p.is_file():
+        return []
+    rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines())
+    keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
+    out: List[str] = []
+    markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
+    for key in sorted({FLOOR_TYPED_MARKERS[f] for f in markers}):
+        if not keys.get(key):
+            why = "kiểm kiểu" if key == "typecheck" else "biên dịch (trình biên dịch kiểm kiểu)"
+            out.append(f"`{key}` rỗng dù repo có stack {why} ({', '.join(markers)})")
+    if not FLOOR_FORMAT_RE.search(keys.get("lint", "")):
+        out.append("`lint` chưa kiểm format (vd `ruff format --check`, `prettier --check`, `gofmt -l`)")
+    if not _floor_has_coverage(base, keys.get("test", "")):
+        out.append(
+            "`test` chưa có ngưỡng coverage (vd `--cov-fail-under`, `coverage report --fail-under`, `coverageThreshold`)"
+        )
+    if profile in FLOOR_E2E_PROFILES and not keys.get("e2e"):
+        out.append(f"`e2e` rỗng dù hồ sơ {profile} (PLAN cần task cuối Gate = `e2e`, QA-E2E-023)")
+    return [f"quy mô {scale}: {o}" for o in out]
+
+
+def _doctor_gate_floor(base: Path) -> List[Finding]:
+    return [Finding("gate-floor", "warn", f"{i} — sàn Gate M/L (LOOP-HARNESS-023)") for i in gate_floor_issues(base)]
+
+
 def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     p, legacy = base / "xt.yaml", base / "xs.yaml"
     if not p.is_file():
@@ -2732,7 +2835,7 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
     (validate khung, cú pháp hook, progress-check) — dùng ở `loop init`."""
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
-    out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gitignore(base)
+    out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
     if deep:
         out += _doctor_framework(fw) + _doctor_progress(base)
@@ -3447,6 +3550,8 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
             " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
             file=sys.stderr,
         )
+    for issue in gate_floor_issues(base):  # loop verify sẽ ĐỎ tới khi đạt sàn — đưa vào task PLAN ngay
+        print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
     print(
         f"✓ Autopilot bật: plan={args.plan} trần={max_iterations} vòng"
         + (f", hạn {deadline}" if deadline else "")

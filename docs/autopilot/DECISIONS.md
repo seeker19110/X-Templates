@@ -228,3 +228,10 @@
 - Chọn: Ghi chú — Kiểm: `<lệnh>` trên mục [x]; blueprint-status --run và loop verify chạy lại; đỏ = chưa đạt; MUST tick không có lệnh chỉ báo (unchecked_must), không đỏ
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: lệnh do dự án khai nên đúng stack, máy chạy lại được và test được; đi qua loop verify có sẵn nên Stop hook chặn 'done' sai mà không thêm luật mới; PA2 làm hỏng blueprint đã tick của dự án đang chạy (hotel-manager) và nhiều mục chỉ kiểm bằng tài liệu/URL; PA3 không khả thi vì phần Kiểm của khung là văn xuôi theo nhiều stack. Đường lùi giữ: siết PA2 sau khi unchecked_must có số đo
 - Đường lùi: Bỏ cờ --run và _verify_blueprint; CHECK_CMD_RE/ghi chú — Kiểm: vẫn vô hại như ghi chú thường
+
+### D-033 · 2026-10-18T03:20:01+00:00 · Gate do agent tự khai không có sàn (ADR-0011 chỉ chặn rỗng/no-op) — đặt sàn ở đâu để có răng mà ít code?
+
+- Phương án: (1) gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình · (2) Mở rộng is_noop trong dev-task.sh để cổng commit đỏ ngay khi dưới sàn · (3) Chỉ ghi luật vào AGENTS.md/skill, không máy kiểm
+- Chọn: gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: răng đặt ở loop verify — điểm máy đã chặn done — nên không thêm luồng mới, logic Python có test và chạy chung cho mọi stack; PA2 phải dò stack bằng bash ở mọi commit, chậm và khó test, lại chặn cả commit sửa tài liệu; PA3 là lời dặn, chính là lỗ đang vá. Chỉ áp M/L vì S là sàn baseline (ADR-0003); sàn là dấu hiệu tất định, ngưỡng thấp vẫn qua — review bù
+- Đường lùi: Xoá _doctor_gate_floor khỏi doctor_findings và nhánh floor trong loop_verify/_loop_init; hằng FLOOR_* không ảnh hưởng gì khác

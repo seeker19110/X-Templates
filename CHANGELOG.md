@@ -6,6 +6,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Sàn Gate theo quy mô M/L — máy kiểm thay cho kỷ luật** (`LOOP-HARNESS-023`, mục mới MUST@L; D-033). ADR-0011 chỉ chặn
+  cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Hàm mới `gate_floor_issues` đọc `scale:`/`profile:` ở
+  frontmatter `BLUEPRINT.md` (đường khai ở state autopilot, không thì gốc) và `xt.yaml`: ở M/L đòi `typecheck` khác rỗng khi
+  có `tsconfig.json`/`pyproject.toml`/`setup.cfg` (`build` với `go.mod`/`Cargo.toml`), `lint` gồm kiểm format, `test` có
+  ngưỡng coverage trong lệnh hoặc file cấu hình, hồ sơ có UI có `e2e`. `xt.py doctor` cảnh báo `gate-floor`, `loop init`
+  nhắc trên stderr, `loop verify` ĐỎ (ghi `verified.json.gate_floor`, `final_check` nêu lý do) nên autopilot không ra
+  `done` khi dưới sàn. S hoặc không có blueprint: không áp. Sửa `LOOP-HARNESS-008`, bảng cổng `harness-files.md`, mẫu
+  `xt.yaml`, skill `/autopilot` bước 0.
 - **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-032).
   Ghi `— Kiểm: \`<lệnh>\`` ở cuối dòng mục đã tick (phần ghi chú sau `· Nguồn:`); `xt.py blueprint-status --run` chạy lại
   mọi lệnh trong thư mục chứa blueprint (mỗi lệnh một lần, timeout `XT_RECORD_TIMEOUT`), in `✓/✗ Kiểm <ID>`, JSON thêm
