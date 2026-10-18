@@ -1278,14 +1278,38 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual((rc, st["max_iterations"], st["single_session"]), (0, 48, True))
         self.assertIn("trần=48 vòng · chế độ một phiên", out)
         self.write_plan()
-        run_main("loop", "init", "--single-session")
+        run_main("loop", "init", "--single-session", "--force")
         self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 40)
-        run_main("loop", "init", "--single-session", "--max-iterations", "7")
+        run_main("loop", "init", "--single-session", "--max-iterations", "7", "--force")
         self.assertEqual(xt.read_state(self.tmp)["max_iterations"], 7)
-        run_main("loop", "init")
+        run_main("loop", "init", "--force")
         self.assertEqual(
             (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (100, False)
         )
+
+    def test_init_refuses_live_loop(self):
+        # LOOP-HARNESS-024 (rà stored 01 §3h): phiên thứ hai không xoá trạng thái vòng đang chạy của phiên kia.
+        self.write_plan()
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        st = xt.read_state(self.tmp)
+        st["iterations"] = 5
+        xt.write_state(st, self.tmp)
+        rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 2)
+        self.assertIn("LOOP-HARNESS-024", err)
+        self.assertEqual(xt.read_state(self.tmp)["iterations"], 5)  # không ghi đè
+        st["deadline"] = "2000-01-01T00:00:00+00:00"  # vòng đã hết hạn → khởi tạo lại được
+        xt.write_state(st, self.tmp)
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        self.assertEqual(run_main("loop", "init", "--force")[0], 0)
+        st = xt.read_state(self.tmp)
+        st["active"] = False
+        xt.write_state(st, self.tmp)
+        self.assertEqual(run_main("loop", "init")[0], 0)  # vòng đã kết thúc
+        xt.write_state(
+            {"active": "yes", "iterations": "x"}, self.tmp
+        )  # sai kiểu: không đọc được → ghi đè (review #119)
+        self.assertEqual(run_main("loop", "init")[0], 0)
 
     def test_defer_requires_state_and_valid_id(self):
         rc, out, err = run_main("loop", "defer", "--task", "T-001", "--reason", "r")
@@ -1338,7 +1362,7 @@ class LoopCommandsTest(TmpDirCase):
                 reason = json.loads(run_main("loop", "hook-stop", stdin=payload)[1])["reason"]
                 self.assertNotIn("⚠", reason)
         self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "auto")
-        run_main("loop", "init")
+        run_main("loop", "init", "--force")
         reason = json.loads(run_main("loop", "hook-stop", stdin="{}")[1])["reason"]
         self.assertNotIn("Chế độ một phiên", reason)
 

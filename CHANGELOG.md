@@ -22,10 +22,15 @@ Mục checklist từ đợt rà `seeker19110/stored` 2026-10-18 (stored `10ecf8b
 - `IND-MEDIA-022` SHOULD: pipeline media trả phí validate/dry-run trước lệnh trả phí, sha256 đầu vào, đầu vào đổi → `stale` — rà seeker19110/stored 2026-10-18.
 - `PRF-AGENT-022` MAY: sản phẩm nhúng CLI agent đặt thư mục cấu hình riêng, installer không ghi vào cấu hình công cụ khác — rà seeker19110/stored 2026-10-18.
 - Skill `/research` và subagent `researcher`: phương pháp đánh giá nguồn bên thứ ba (chính chủ qua hai phép thử, license tầng dưới, repo trùng tên, tuyên bố → tự đo, huy hiệu tĩnh, affiliate, SHA đã đọc); bảng đầu ra của `researcher` thêm cột "SHA đã đọc" và "Số tuyên bố → tự đo" — rà seeker19110/stored 2026-10-18.
+- `LOOP-HARNESS-024` SHOULD: `loop init` từ chối ghi đè vòng autopilot đang chạy (exit 2), `--force` khi cố ý — hai phiên cùng
+  dự án từng xoá trạng thái của nhau (rà stored 01 §3h). Ai gọi `loop init` lại để đổi PLAN/ngân sách: thêm `--force`.
+- `LOOP-HARNESS-025` SHOULD: `xt.py doctor` thử guard bằng lệnh nguy hiểm mẫu; guard có mà không chặn → lỗi `hooks` (rà stored
+  03 §8b).
+- `LOOP-HARNESS-026` MAY: khoá `xt.yaml` `claude_min_version`; `doctor` cảnh báo khi Claude Code thấp hơn; tổ chức ép bằng
+  managed settings `requiredMinimumVersion` (docs Claude Code đọc 2026-10-18).
 
 ### Changed
 - `BASE-DOC-017` (SHOULD, không đổi mức): thêm tuyên bố năng lực ("accessible", "offline", "no telemetry") và cách số do CI sinh giữa marker `<!-- ci:value:NAME -->`; thay cho mục `WF-DOC-020` định thêm (trùng nhà `BASE-DOC-017`/`BASE-DOC-018`) — rà seeker19110/stored 2026-10-18.
-
 ### Security
 - Rà `seeker19110/stored` 2026-10-18 (mục 01 §3g, §3g.4; 03 §8c), mỗi lỗ đã tái hiện bằng payload thật trên guard:
   - **`LOOP-STOP-027`** (mới, MUST@L — harness cưỡng chế ở mọi quy mô): lệnh Gate (`PLAN.md`), `— Kiểm:` (blueprint), sàn Gate (`xt.yaml`) do model viết mà
@@ -52,6 +57,7 @@ Mục checklist từ đợt rà `seeker19110/stored` 2026-10-18 (stored `10ecf8b
     vào commit nên không có dấu vết PR. `git -c core.hooksPath=…`/`GIT_CONFIG_KEY_n` khi commit = `--no-verify` (strict hỏi).
   - Ghi đích tương đối sau `cd` nay tính từ thư mục đó (trước: `cd .claude/hooks && echo x > guard.py` lọt — có từ trước).
   Dự án đích: chạy lại `install.py` để nhận `guard.py`, `pre-bash-guard.sh`, `xt.py` mới.
+
 ## [3.0.1] - 2026-10-18
 
 > **Dự án đích đã cài với `--with-github` (mọi bản, kể cả ≤ 2.x):** chạy lại `install.py --with-github`, rồi thay

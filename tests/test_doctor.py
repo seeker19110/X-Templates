@@ -488,7 +488,7 @@ class LoopInitDoctorTest(DoctorCase):
         self.write("docs/autopilot/PLAN.md", "- [ ] `T-001` việc — Gate: `true`\n")
         err = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            self.assertEqual(xt.main(["--framework", str(self.fw), "loop", "init"]), 0)
+            self.assertEqual(xt.main(["--framework", str(self.fw), "loop", "init", "--force"]), 0)
         return err.getvalue()
 
     def test_clean_project_has_no_warning(self):
@@ -621,6 +621,69 @@ class DoctorMemoryTest(DoctorCase):
         [f] = self.memory()
         self.assertIn("`.engram/`", f.msg)
         self.assertIn("gitleaks", f.msg)
+
+
+class DoctorGuardAndClaudeVersionTest(DoctorCase):
+    """LOOP-HARNESS-025 (guard chặn lệnh mẫu) và LOOP-HARNESS-026 (`claude_min_version`) — rà stored 2026-10-18."""
+
+    def test_installed_guard_blocks_canaries(self):
+        self.assertEqual(xt._doctor_guard_canary(self.base), [])
+
+    def test_permissive_guard_is_error(self):
+        stub = "def bash_decision(c, r, w):\n    return {'decision': ''}\n\ndef apply_policy(o):\n    return o\n"
+        (self.base / xt.GUARD_FILE).write_text(stub, encoding="utf-8")
+        got = xt._doctor_guard_canary(self.base)
+        self.assertEqual([(f.code, f.level) for f in got], [("hooks", "error")])
+        self.assertIn("KHÔNG chặn lệnh nguy hiểm mẫu", got[0].msg)
+
+    def test_canary_uses_project_guard_only(self):
+        # xt.py của bản cài khác (guard thật) không được che guard dự án cho qua mọi lệnh (review #119).
+        stub = "def bash_decision(c, r, w):\n    return {'decision': ''}\n\ndef apply_policy(o):\n    return o\n"
+        (self.base / xt.GUARD_FILE).write_text(stub, encoding="utf-8")
+        real = ROOT / xt.GUARD_FILE
+        with unittest.mock.patch.object(xt, "guard_paths", lambda b: [b / xt.GUARD_FILE, real]):
+            self.assertEqual(len(xt._doctor_guard_canary(self.base)), 1)
+            self.assertTrue(xt.guard_block("git push --force origin main", self.base))  # chốt chặn vẫn dùng cả hai
+
+    def test_no_guard_left_to_hook_checks(self):
+        (self.base / xt.GUARD_FILE).write_text("def x(:\n", encoding="utf-8")  # lỗi cú pháp: phần hook báo
+        self.assertEqual(xt._doctor_guard_canary(self.base), [])
+        (self.base / xt.GUARD_FILE).unlink()
+        self.assertEqual(xt._doctor_guard_canary(self.base), [])
+
+    def test_env_patch_restores(self):
+        with unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            with xt._env_patch("XT_GUARD_POLICY", ""):
+                self.assertEqual(os.environ["XT_GUARD_POLICY"], "")
+            self.assertEqual(os.environ["XT_GUARD_POLICY"], "strict")
+        os.environ.pop("XT_TMP_KEY", None)
+        with xt._env_patch("XT_TMP_KEY", "1"):
+            self.assertEqual(os.environ["XT_TMP_KEY"], "1")
+        self.assertNotIn("XT_TMP_KEY", os.environ)
+
+    def test_claude_version_parse(self):
+        ok = subprocess.CompletedProcess([], 0, stdout="2.1.302 (Claude Code)\n", stderr="")
+        with unittest.mock.patch.object(xt.shutil, "which", return_value="/bin/claude"):
+            with unittest.mock.patch.object(xt.subprocess, "run", return_value=ok):
+                self.assertEqual(xt._claude_version(), (2, 1, 302))
+            bad = subprocess.CompletedProcess([], 0, stdout="?", stderr="")
+            with unittest.mock.patch.object(xt.subprocess, "run", return_value=bad):
+                self.assertIsNone(xt._claude_version())
+            with unittest.mock.patch.object(xt.subprocess, "run", side_effect=OSError):
+                self.assertIsNone(xt._claude_version())
+        with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
+            self.assertIsNone(xt._claude_version())
+
+    def test_claude_min_version(self):
+        self.assertEqual(xt._doctor_claude_version(self.base), [])  # không khai khoá → không kiểm
+        self.write("xt.yaml", "test: pytest\nclaude_min_version: 2.1.200\n")
+        with unittest.mock.patch.object(xt, "_claude_version", return_value=(2, 1, 150)):
+            got = xt._doctor_claude_version(self.base)
+        self.assertEqual([(f.code, f.level) for f in got], [("runtime", "warn")])
+        self.assertIn("requiredMinimumVersion", got[0].msg)
+        for have in ((2, 1, 200), None):
+            with unittest.mock.patch.object(xt, "_claude_version", return_value=have):
+                self.assertEqual(xt._doctor_claude_version(self.base), [])
 
 
 if __name__ == "__main__":
