@@ -11,7 +11,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 2
-    # Không nâng bản phát hành chưa đủ hai tuần (cập nhật bảo mật không bị cooldown).
+    # Không nâng bản phát hành chưa đủ hai tuần (cập nhật bảo mật không bị cooldown). BASE-DEP-016 nêu 3–7 ngày làm ví dụ;
+    # mẫu chọn 14 cho action vì action chạy với token của CI — bản bị rút/tiêm mã thường lộ ra trong tuần đầu.
     cooldown:
       default-days: 14
     groups:

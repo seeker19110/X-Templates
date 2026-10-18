@@ -35,8 +35,8 @@ auth · mật mã · bí mật · `merge_risk_paths` trong xt.yaml: gắn nhãn 
 - [ ] Có migration: file mới (không sửa migration đã áp), có đường lùi, chạy được trên dữ liệu có sẵn
 
 ## Phụ thuộc mới
-<!-- Mỗi gói một dòng: `tên · phiên bản ghim · giấy phép · lý do · phương án thay thế đã xét`. Không có thì ghi "không có". -->
-không có
+<!-- Mỗi gói một dòng: `tên · phiên bản ghim · giấy phép · lý do · phương án thay thế đã xét`. Không có thì ghi "không có"
+(để trống mục này, không điền sẵn — CI so lockfile có thể đỏ khi mục trống mà có gói mới, BASE-DEP-006). -->
 
 ## Hỗ trợ AI
 <!-- WF-REVIEW-019: phần nào do AI sinh, phần nào người đã tự kiểm và kiểm thế nào, phần nào chỉ máy/AI kiểm. Không ghi tên model/phiên. -->

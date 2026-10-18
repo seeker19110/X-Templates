@@ -276,6 +276,7 @@ class DoctorHooksTest(DoctorCase):
         (self.base / ".claude" / "agents" / "reviewer.md").unlink()
         self.write(".claude/hooks/stop-guard.sh.xtemplates-new", "x")
         self.write("AGENTS.md.xtemplates-new", "x")
+        self.write(".github/workflows/merge-gate.yml.xtemplates-new", "x")
         found = [(f.level, f.msg) for f in self.findings() if f.code == "harness"]
         self.assertEqual(len(found), 3)
         self.assertIn("thiếu skills/gate/SKILL.md, agents/reviewer.md", found[0][1])
@@ -284,6 +285,7 @@ class DoctorHooksTest(DoctorCase):
         self.assertIn(".claude/hooks/stop-guard.sh.xtemplates-new", found[1][1])
         self.assertEqual(found[2], ("warn", found[2][1]))
         self.assertIn("AGENTS.md.xtemplates-new", found[2][1])
+        self.assertIn(".github/workflows/merge-gate.yml.xtemplates-new", found[2][1])
         self.assertNotIn("stop-guard", found[2][1])
 
 
