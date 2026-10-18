@@ -5,6 +5,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `tests/test_guard_corpus.py` (D-044): bộ tấn công sinh biến thể cho guard — 19 lệnh hạt giống × 35 phép biến đổi cú
+  pháp shell (đơn: đủ; cặp: mẫu tất định 4000/22141, toàn bộ chạy tay xanh) phải `deny`, và 49 lệnh hợp lệ agent hay
+  chạy không bị chặn nhầm.
+
+### Fixed
+- Guard (bộ tấn công tìm ra): heredoc vào shell nằm TRONG `sh -c "…"`/backtick từng bị cắt thân trước khi quét script lồng
+  (`strip_heredocs` nay chỉ nhận `<<` ngoài nháy); `find … -exec bash <<E` (shell thừa hưởng stdin của find) từng lọt;
+  `\\` + xuống dòng (gạch chéo đã escape) từng bị nối như nối dòng nên `sh -c "docker \\` ↵ `run --privileged …"` lọt
+  (nối dòng nay theo bash: chỉ khi dãy `\` lẻ); tách pipeline quanh heredoc theo dấu nối ngoài nháy/escape (`\;`).
+  Chặn nhầm: `curl … | python3 -m json.tool` (python/node/ruby/perl có `-m`/`-c`/`-e` hoặc file script đọc stdin là dữ
+  liệu). Dự án đích: chạy lại `install.py` (hook `guard.py`).
+
 ## [3.2.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.1.1:** chạy lại `install.py` (hook `guard.py`, mẫu `xt.yaml`/`CLAUDE.md` đổi — gộp
