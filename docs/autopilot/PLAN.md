@@ -29,11 +29,11 @@
 ## Task
 
 ### Lát A — sàn Gate dùng khoá khai báo (#108)
-- [ ] `T-1101` Review sạch rồi đưa #108 về `main` (merge ghim head đã rà) — Gate: `git fetch -q origin main && git show origin/main:scripts/xt.py | grep -q 'def gate_floor_commands'`
+- [x] `T-1101` Review sạch rồi đưa #108 về `main` (merge ghim head đã rà) — Gate: `git fetch -q origin main && git grep -q 'def gate_floor_commands' origin/main -- scripts/xt.py`
 
 ### Lát B — số đo vòng (D-037)
 - [x] `T-1102` `loop record` ghi nối `.autopilot/runs.jsonl`; `xt.py loop stats [--json]`: số lần chạy mỗi task, tỉ lệ xanh lần đầu, task cần ≥ 3 lần, blocked/defer, vòng đã dùng; mục `LOOP-DESIGN-024` — Gate: `python3 -m unittest tests.test_xt_core tests.test_xt_cli`
 
 ### Lát C — máy trạng thái merge theo làn (D-038, ADR-0025)
 - [x] `T-1103` `xt.py pr reviewed --pr N --head SHA (--clean|--blocking)` ghi sổ `.autopilot/reviews.json`; `xt.py pr next --pr N [--json]` trả một hành động theo 7 bước ADR-0024 (hàm thuần trên merge-check JSON + sổ review + trạng thái auto-merge) — Gate: `python3 -m unittest tests.test_merge`
-- [ ] `T-1104` Rút văn xuôi merge theo làn về `pr next` ở AGENTS.md §3, mẫu `AGENTS.md`, skill `/autopilot` bước 10/13, `LOOP-STOP-022`, `LOOP-DESIGN-020`; ADR-0025; CHANGELOG — Gate: `scripts/dev-task.sh gate`
+- [x] `T-1104` Rút văn xuôi merge theo làn về `pr next` ở AGENTS.md §3, mẫu `AGENTS.md`, skill `/autopilot` bước 10/13, `LOOP-STOP-022`, `LOOP-DESIGN-020`; ADR-0025; CHANGELOG — Gate: `scripts/dev-task.sh gate`
