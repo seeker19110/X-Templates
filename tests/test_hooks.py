@@ -3465,10 +3465,6 @@ class GuardReview97Test(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GuardStored1018Test(unittest.TestCase):
     """Rà stored 2026-10-18 (01 §3g, §3g.4): CLI agent khác với cờ tự duyệt (LOOP-STOP-028), git hook của dự án."""
 
@@ -3516,6 +3512,65 @@ class GuardStored1018Test(unittest.TestCase):
         ):
             self.assertIsNone(self.bash(cmd), cmd)
 
+    def test_review_117_bypasses_closed(self):
+        for cmd in (
+            "npx opencode-ai@latest run --auto x",
+            "npx -y opencode-ai@0.15.0 run --auto x",
+            "npm exec @openai/codex -- --yolo",
+            "npx @openai/codex -- --yolo",
+            "codex -c approval_policy=never -c sandbox_mode=danger-full-access exec x",
+            "codex exec -c 'sandbox_mode=\"danger-full-access\"' x",
+            "codex exec --config=approval_policy=never x",
+            "export COPILOT_ALLOW_ALL=1; copilot -p x",
+            "export COPILOT_ALLOW_ALL=1 && copilot -p x",
+            "uvx aider-chat --yes-always",
+            "uvx --from aider-chat aider --yes-always",
+            "pipx run aider-chat --yes-always",
+            "aider --yes",
+            "gemini -yp x",
+            "cursor-agent -fp x",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in (
+            "codex exec -c model=o3 x",
+            "aider --model x",
+            "gemini -p x",
+            "uvx ruff check",
+            "export A=1; copilot -p x",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_git_exec_config(self):
+        for cmd in (
+            'git config core.fsmonitor "echo pwned"',
+            "git config --global core.sshCommand 'ssh -o ProxyCommand=x'",
+            "git config alias.x '!echo pwned'",
+            "git config filter.lfs.smudge 'sh x'",
+            "git config --unset core.hooksPath",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in ("git config alias.st status", "git config user.email a@b", "git config --unset user.name"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_relative_targets_and_chmod(self):
+        for cmd in (
+            "cd .git/hooks && echo x > pre-commit",
+            "cd .git && echo y > config",
+            "cd .claude/hooks && echo x > guard.py",
+            "chmod -x .git/hooks/pre-commit",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        self.assertIsNone(self.bash("chmod +x scripts/a.sh"))
+
+    def test_hooks_path_commit_asks_in_strict(self):
+        g = _guard()
+        for cmd in (
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+        ):
+            r = g.bash_decision(cmd, str(ROOT))
+            self.assertEqual((r["no_verify"], r["decision"]), (True, "ask"), cmd)  # strict: người quyết (review #117)
+
     def test_git_hooks_path(self):
         self.assertEqual(self.bash("git config core.hooksPath /dev/null"), "deny")
         self.assertEqual(self.bash("git config --local core.hooksPath .nohooks"), "deny")
@@ -3540,9 +3595,52 @@ class GuardStored1018Test(unittest.TestCase):
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
         (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
-        for cmd in ("git commit --no-verify -m x", "git -c core.hooksPath=/dev/null commit -m x"):
+        for cmd in (
+            "git commit --no-verify -m x",
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+        ):
             code, out, err = run_hook(
                 "pre-bash-guard.sh", {"tool_input": {"command": cmd}}, tmp, extra_env={"XT_GUARD_POLICY": ""}
             )
             self.assertEqual(code, 2, cmd + out + err)  # cổng đỏ chặn — trước đây bỏ cổng lặng lẽ
             self.assertIn("ĐỎ", err)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_dev_task_runs_xt_yaml_through_guard(self):
+        # Lệnh xt.yaml do model viết: dev-task.sh (cổng commit, /gate) hỏi guard trước khi chạy (review #117).
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        for f in ("dev-task.sh", "xt.py"):
+            shutil.copy(ROOT / "scripts" / f, tmp / "scripts" / f)
+        (tmp / ".claude" / "hooks").mkdir(parents=True)
+        shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", tmp / ".claude" / "hooks" / "guard.py")
+        canary = tmp / "ran"
+        (tmp / "xt.yaml").write_text(f'test: "touch {canary} && git push origin main"\n', encoding="utf-8")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("LOOP-STOP-027", r.stderr)
+        self.assertFalse(canary.exists())
+        (tmp / "xt.yaml").write_text(f"test: touch {canary}\n", encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(canary.exists())
+        (tmp / "xt.yaml").write_text('format_file: "git push origin main"\n', encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "format-file", "a.txt"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(r.returncode, 0)  # PostToolUse không chặn lượt sửa, chỉ không chạy formatter bị cấm
+        self.assertIn("LOOP-STOP-027", r.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

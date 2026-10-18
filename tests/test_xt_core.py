@@ -1102,12 +1102,8 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertRegex(head or "", r"^[0-9a-f]{40}$")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GuardChokePointTest(TmpMixin, unittest.TestCase):
-    """LOOP-STOP-027 (rà stored 01 §3g): lệnh Gate/`Kiểm:`/sàn do model viết mà harness chạy phải qua guard của dự án."""
+    """LOOP-STOP-027 (rà stored 01 §3g): lệnh Gate/`Kiểm:`/xt.yaml do model viết mà harness chạy phải qua guard."""
 
     def setUp(self):
         self.base = self.tmpdir()
@@ -1117,8 +1113,18 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def only_base_guard(self) -> None:
+        """Chỉ guard của dự án tạm (bỏ guard cùng bản cài xt.py của repo này)."""
+        p = unittest.mock.patch.object(xt, "guard_paths", lambda base: [base / xt.GUARD_FILE])
+        p.start()
+        self.addCleanup(p.stop)
+
     def use_real_guard(self) -> None:
         (self.base / xt.GUARD_FILE).write_bytes((ROOT / xt.GUARD_FILE).read_bytes())
+
+    def fake_guard(self, body: str) -> None:
+        self.only_base_guard()
+        (self.base / xt.GUARD_FILE).write_text(textwrap.dedent(body), encoding="utf-8")
 
     def test_denied_command_is_not_run(self):
         self.use_real_guard()
@@ -1149,16 +1155,63 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         os.environ["XT_GUARD_POLICY"] = ""
         self.assertEqual(xt.guard_block("npm publish", self.base), "")  # mặc định: ask không nguy hiểm → cho chạy
 
-    def test_missing_or_broken_guard_fails_open(self):
+    def test_falls_back_to_install_guard(self):
+        # CLAUDE_PROJECT_DIR trỏ thư mục không có guard → vẫn kiểm bằng guard cùng bản cài xt.py (review #117).
         (self.base / ".claude" / "hooks").rmdir()
-        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
-        (self.base / ".claude" / "hooks").mkdir()
-        (self.base / xt.GUARD_FILE).write_text("def bash_decision(:\n", encoding="utf-8")
-        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+        self.assertTrue(xt.guard_block("git push origin main", self.base))
+        self.assertIn(ROOT / xt.GUARD_FILE, xt.guard_paths(self.base))
 
-    def test_deny_without_reason_has_default(self):
-        (self.base / xt.GUARD_FILE).write_text(
-            "def bash_decision(c, r, w):\n    return {'decision': 'deny'}\n\ndef apply_policy(o):\n    return o\n",
-            encoding="utf-8",
+    def test_missing_guard_everywhere(self):
+        self.only_base_guard()
+        self.assertEqual(xt.guard_block("git push origin main", self.base), "")  # chưa cài harness → chạy
+        (self.base / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.assertIn("thiếu .claude/hooks/guard.py", xt.guard_block("true", self.base))  # harness có, guard bị gỡ
+
+    def test_guard_errors_follow_failure_decision(self):
+        self.fake_guard(
+            """
+            def bash_decision(c, r, w):
+                raise RuntimeError("hỏng")
+
+            def _failure_decision(mode, payload, cmd):
+                return {"decision": "deny" if "gh pr merge" in cmd else "", "reason": "lỗi merge"}
+
+            def apply_policy(o):
+                return o
+            """
+        )
+        self.assertEqual(xt.guard_block("gh pr merge 1", self.base), "lỗi merge")  # merge: đóng như hook
+        self.assertEqual(xt.guard_block("pytest", self.base), "")  # lệnh khác: fail-open về luồng
+
+    def test_broken_guard_module_fails_open(self):
+        self.fake_guard("def bash_decision(:\n")
+        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+        self.fake_guard("def bash_decision(c, r, w):\n    raise RuntimeError()\n")  # không có _failure_decision
+        self.assertEqual(xt.guard_block("x", self.base), "")
+
+    def test_apply_policy_error_keeps_raw_decision(self):
+        self.fake_guard(
+            """
+            def bash_decision(c, r, w):
+                return {"decision": "deny"}
+
+            def apply_policy(o):
+                raise RuntimeError()
+            """
         )
         self.assertEqual(xt.guard_block("x", self.base), "guard chặn")
+
+    def test_guard_check_command(self):
+        self.use_real_guard()
+        env = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)})
+        env.start()
+        self.addCleanup(env.stop)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(xt.main(["guard-check", "--", "git", "push", "origin", "main"]), 126)
+            self.assertEqual(xt.main(["guard-check", "pytest -q"]), 0)
+        self.assertIn("LOOP-STOP-027", err.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

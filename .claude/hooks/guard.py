@@ -2026,7 +2026,14 @@ AGENT_CLI_PKGS = {
     "@google/gemini-cli": "gemini",
     "@github/copilot": "copilot",
     "opencode-ai": "opencode",
+    "aider-chat": "aider",
 }
+# Trình chạy gói Python (gói npm ở PKG_RUNNERS): `uvx aider-chat …`, `pipx run aider-chat …`.
+AGENT_PY_RUNNERS = {("uvx",), ("uv", "tool", "run"), ("pipx", "run")}
+# Codex `-c/--config key=value` ghi đè cấu hình = cờ tự duyệt (`approval_policy=never`, `sandbox_mode=danger-full-access`).
+CODEX_CONFIG_RE = re.compile(r"""(approval_policy|sandbox_mode)\s*=\s*['"]?(never|danger-full-access)['"]?""")
+# CLI dùng argparse (cho viết tắt tiền tố cờ dài: `aider --yes` = `--yes-always`).
+AGENT_PREFIX_ABBREV = {"aider"}
 AGENT_SELF_APPROVE = {
     # `--full-auto` đã gỡ ở bản hiện hành — giữ để chặn bản cũ.
     "codex": {
@@ -2043,28 +2050,66 @@ AGENT_SELF_APPROVE = {
 AGENT_SELF_APPROVE_ENV = {"copilot": "COPILOT_ALLOW_ALL", "aider": "AIDER_YES_ALWAYS"}
 
 
+def _pkg_base(t: str) -> str:
+    """Tên gói bỏ hậu tố phiên bản: `@openai/codex@0.5` → `@openai/codex`, `opencode-ai@latest` → `opencode-ai`."""
+    if t.startswith("@"):
+        return "@" + t[1:].partition("@")[0]
+    return t.partition("@")[0]
+
+
+def _py_runner_target(n: List[str]) -> int:
+    """Chỉ số gói được `uvx`/`uv tool run`/`pipx run` chạy (bỏ qua cờ, `--from <gói>` → lệnh sau nó); -1 nếu không."""
+    for prefix in AGENT_PY_RUNNERS:
+        if tuple(n[: len(prefix)]) == prefix:
+            i = len(prefix)
+            while i < len(n) and n[i].startswith("-"):
+                i += 2 if n[i] in ("--from", "--with", "--python", "-p", "--spec") else 1
+            return i if i < len(n) else -1
+    return -1
+
+
 def _agent_cli(n: List[str]) -> Tuple[str, List[str]]:
-    """(tên CLI agent, tham số) khi lệnh gọi một CLI agent khác Claude Code (trực tiếp hoặc qua npx/pnpm dlx…)."""
+    """(tên CLI agent, tham số) khi lệnh gọi một CLI agent khác Claude Code (trực tiếp hoặc qua npx/uvx/pipx…)."""
     name, i = posixpath.basename(n[0]), 1
-    t = _runner_target(n)
+    t = max(_runner_target(n), _py_runner_target(n))
     if t >= 0:
         name, i = n[t], t + 1
-    name = AGENT_CLI_PKGS.get(name.rsplit("@", 1)[0] if name.count("@") > 1 else name, name)
-    return (name, n[i:]) if name in AGENT_SELF_APPROVE else ("", [])
+    name = AGENT_CLI_PKGS.get(_pkg_base(name), _pkg_base(name))
+    args = n[i:]
+    if t >= 0 and args[:1] == ["--"]:  # `npx <gói> -- <args>`: `--` của trình chạy, không phải của CLI
+        args = args[1:]
+    return (name, args) if name in AGENT_SELF_APPROVE else ("", [])
 
 
-def agent_self_approve(argv: List[str], n: List[str]) -> str:
-    """Lý do chặn khi lệnh mở CLI agent khác với cờ (hoặc biến môi trường) tự duyệt mọi công cụ; rỗng nếu không."""
+def _self_approve_flag(name: str, a: str, nxt: str) -> str:
+    """Cờ tự duyệt khớp với token `a` (kèm giá trị `nxt` cho dạng `--x giá-trị`); rỗng nếu không."""
+    flags = AGENT_SELF_APPROVE[name]
+    pair = a if "=" in a or not nxt else f"{a}={nxt}"
+    if a in flags or pair in flags:
+        return a if a in flags else pair
+    if name == "codex" and a.split("=", 1)[0] in ("-c", "--config"):
+        val = a.split("=", 1)[1] if "=" in a else nxt
+        return f"{a} {val}".strip() if CODEX_CONFIG_RE.search(val) else ""
+    if a.startswith("--") and len(a) >= 5 and name in AGENT_PREFIX_ABBREV:
+        return next((f for f in sorted(flags) if f.startswith(a.split("=", 1)[0])), "")
+    if len(a) > 2 and a[0] == "-" and a[1] != "-":  # cụm cờ ngắn `-yp` (yargs/commander)
+        return next((f"-{c}" for c in a[1:] if f"-{c}" in flags), "")
+    return ""
+
+
+def agent_self_approve(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -> str:
+    """Lý do chặn khi lệnh mở CLI agent khác với cờ (hoặc biến môi trường — gán trong lệnh hoặc `export` trước đó trong
+    cùng chuỗi lệnh) tự duyệt mọi công cụ; rỗng nếu không."""
     name, args = _agent_cli(n)
-    flags = AGENT_SELF_APPROVE.get(name, set())
+    if not name:
+        return ""
     env = AGENT_SELF_APPROVE_ENV.get(name, "")
-    if env and env in _env_assigns(argv):
+    if env and (env in _env_assigns(argv) or env in exported):
         return f"CLI agent `{name}` với `{env}` tự duyệt mọi lệnh ngoài guard — bỏ qua hook của dự án (LOOP-STOP-028)"
     for k, a in enumerate(args):
         if a == "--":
             break
-        pair = a if "=" in a or k + 1 >= len(args) else f"{a}={args[k + 1]}"
-        hit = a if a in flags else (pair if pair in flags else "")
+        hit = _self_approve_flag(name, a, args[k + 1] if k + 1 < len(args) else "")
         if hit:
             return (
                 f"CLI agent `{name}` với `{hit}` tự duyệt mọi lệnh ngoài guard — bỏ qua hook của dự án (LOOP-STOP-028)"
@@ -2072,7 +2117,7 @@ def agent_self_approve(argv: List[str], n: List[str]) -> str:
     return ""
 
 
-def hook_bypass(argv: List[str], n: List[str]) -> str:
+def hook_bypass(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -> str:
     """Lý do hỏi nếu lệnh tắt/bỏ qua hook của dự án; chuỗi rỗng nếu không."""
     claude = _claude_args(n) or []
     hit = _bypass_marker(argv, n, claude)
@@ -2080,16 +2125,45 @@ def hook_bypass(argv: List[str], n: List[str]) -> str:
         return f"lệnh đặt `{hit}` (tắt hook của khung)"
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
+    key = _git_exec_config(n)
+    if key:
+        return f"cấu hình git `{key}` chạy lệnh ngầm ngoài guard — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
-    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else agent_self_approve(argv, n)
+    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else agent_self_approve(argv, n, exported)
+
+
+GIT_CONFIG_UNSET = {"--unset", "--unset-all", "unset"}
+# Khoá git chạy lệnh ngầm ở các lệnh git sau (fsmonitor chạy ở `git status`…): ghi = hoãn lệnh ra ngoài guard.
+GIT_EXEC_KEY_RE = re.compile(
+    r"core\.(fsmonitor|sshcommand|pager|editor|askpass)|sequence\.editor|diff\.external|gpg\.program"
+    r"|(diff|filter|merge)\..+\.(textconv|clean|smudge|process|driver)|(alias|credential(\..+)?)\.(.+|helper)",
+    re.I,
+)
+
+
+def _git_config_write(n: List[str]) -> List[str]:
+    """[khoá, giá trị…] của lệnh `git config` GHI (cả `--unset`); [] nếu không phải hoặc chỉ đọc."""
+    if n[:2] != ["git", "config"] or set(n[2:]) & (GIT_CONFIG_READ - GIT_CONFIG_UNSET):
+        return []
+    return [a for a in _positionals(n[2:]) if a not in ("set", "--add", "unset")]
 
 
 def _git_hooks_off(n: List[str]) -> bool:
-    """`git config [--global|--local] core.hooksPath <x>` (ghi): git hook của dự án thôi chạy cho mọi commit sau."""
-    if n[:2] != ["git", "config"] or set(n[2:]) & GIT_CONFIG_READ:
-        return False
-    pos = [a for a in _positionals(n[2:]) if a not in ("set", "--add")]
-    return bool(pos) and pos[0].lower() == "core.hookspath" and len(pos) > 1
+    """`git config [--global] core.hooksPath <x>` hoặc `--unset core.hooksPath` (husky `.husky/_` mất): git hook của dự
+    án thôi chạy cho mọi commit sau."""
+    pos = _git_config_write(n)
+    return bool(pos) and pos[0].lower() == "core.hookspath" and (len(pos) > 1 or bool(set(n) & GIT_CONFIG_UNSET))
+
+
+def _git_exec_config(n: List[str]) -> str:
+    """Khoá git chạy lệnh ngầm khi đặt giá trị (alias/credential chỉ khi giá trị bắt đầu `!` = lệnh shell); rỗng nếu không."""
+    pos = _git_config_write(n)
+    if len(pos) < 2 or not GIT_EXEC_KEY_RE.fullmatch(pos[0]):
+        return ""
+    lowered = pos[0].lower()
+    if (lowered.startswith("alias.") or lowered.startswith("credential")) and not pos[1].lstrip().startswith("!"):
+        return ""
+    return pos[0]
 
 
 REDIRECTS = (">", ">>", ">|", "&>", "&>>")
@@ -2235,10 +2309,23 @@ def _is_fence(target: str, root: str) -> bool:
     return rel in FENCE_DIRS or _match_any(rel, FENCE_PATTERNS)
 
 
-def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
+def _at(target: str, cwd: Optional[str]) -> str:
+    """Đích ghi tương đối tính từ thư mục lệnh đang đứng (`cd .claude/hooks && echo x > guard.py`)."""
+    if not cwd or not target or target.startswith(("/", "~", "$")):
+        return target
+    return posixpath.normpath(posixpath.join(cwd, target))
+
+
+def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
     asks: List[str] = []
-    for target in write_targets(n, argv):
+    if n and n[0] in ("chmod", "chown", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
+        asks += [
+            GIT_HOOK_WHY.format(t)
+            for t in _positionals(n[1:])
+            if _match_any(rel_path(_at(t, cwd), root), GIT_HOOK_PATTERNS)
+        ]
+    for target in (_at(t, cwd) for t in write_targets(n, argv)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
@@ -2284,6 +2371,14 @@ def _existing_test(target: str, root: str) -> bool:
     return _match_any(rel, TEST_PATTERNS) and os.path.isfile(os.path.join(root, rel))
 
 
+def _commit_hooks_path(argv: List[str]) -> bool:
+    """Lệnh commit đặt `core.hooksPath` qua `-c` hoặc biến `GIT_CONFIG_KEY_<n>` (git ≥ 2.31)."""
+    low = [a.lower() for a in argv]
+    return any(a.startswith("core.hookspath=") for a in low) or any(
+        re.fullmatch(r"git_config_key_\d+=core\.hookspath", a) for a in low
+    )
+
+
 def _scan_commit(args: List[str], res: Dict[str, object], asks: List[str]) -> Optional[str]:
     """`git commit`: --allow-empty → trả lý do deny; còn lại đánh dấu commit, --no-verify thì thêm câu hỏi."""
     if "--allow-empty" in args:
@@ -2294,6 +2389,16 @@ def _scan_commit(args: List[str], res: Dict[str, object], asks: List[str]) -> Op
         res["no_verify"] = True
         asks.append("commit --no-verify bỏ qua cổng chất lượng — cần người xác nhận lý do")
     return None
+
+
+def _track_exports(res: Dict[str, object], argv: List[str], n: List[str]) -> Tuple[str, ...]:
+    """Biến đã `export`/`declare` ở lệnh trước trong cùng chuỗi (`export X=1; cmd`), cộng lệnh hiện tại nếu là export."""
+    prev = res.get("exported")
+    names = tuple(str(x) for x in prev) if isinstance(prev, tuple) else ()
+    if n[0] in DECLARE_CMDS:
+        names += tuple(_env_assigns(argv))
+        res["exported"] = names
+    return names
 
 
 def _scan_command(
@@ -2313,18 +2418,21 @@ def _scan_command(
         asks.append(f"{why}: {' '.join(argv)[:200]}")
     if decision == "allow":  # chỉ hiệu lực khi cả lệnh Bash là đúng một lệnh này (bash_decision)
         res["allow"] = why
-    bypass = hook_bypass(argv, n)
+    bypass = hook_bypass(argv, n, _track_exports(res, argv, n))
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
-    asks.extend(_write_asks(n, argv, root))
+    asks.extend(_write_asks(n, argv, root, cwd))
     if n[0] in (*DB_CLIENTS, "docker", "podman") and decision != "ask":  # `PGHOST=… psql`: normalize đã bóc phần gán
         assigns = [t for t in argv[: len(argv) - len(n)] if ENV_ASSIGN_RE.fullmatch(t)]
         docker = [v for k, _, v in (a.partition("=") for a in assigns) if k == "DOCKER_HOST" and _docker_remote(v)]
         remote = next((h for h in _env_hosts(assigns) if not _is_local_host(h)), "") or next(iter(docker), "")
         if remote:
             asks.append(f"{EGRESS_ASK} — {n[0]} tới máy chủ {remote}: {' '.join(argv)[:200]}")
-    if n[:2] == ["git", "commit"] and any(a.lower().startswith("core.hookspath=") for a in argv):
-        res["no_verify"] = True  # `git -c core.hooksPath=… commit` = --no-verify: git hook của dự án không chạy
+    if n[:2] == ["git", "commit"] and _commit_hooks_path(argv):
+        # `git -c core.hooksPath=… commit`, `GIT_CONFIG_KEY_n=core.hooksPath … git commit` = --no-verify: git hook của
+        # dự án không chạy — cùng câu hỏi như --no-verify (strict hỏi người; mặc định cổng của khung vẫn chạy).
+        res["no_verify"] = True
+        asks.append("commit với `core.hooksPath` bỏ qua git hook — cần người xác nhận lý do")
     if n[:2] == ["git", "commit"]:
         # Cổng chạy ở repo NHẬN commit (`cd ../khac && git commit`, `git -C ../khac commit`), không phải gốc phiên.
         res["commit_dir"] = gdir or ""
@@ -2812,6 +2920,7 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
         if deny_reason:
             res.update(decision="deny", reason=deny_reason)
             return res
+    res.pop("exported", None)
     allow = res.pop("allow", "")
     # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình và trơn (không gì shell còn mở rộng/chạy thêm).
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):

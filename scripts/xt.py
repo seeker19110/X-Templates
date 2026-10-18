@@ -1214,30 +1214,64 @@ def _record_timeout() -> Optional[int]:
 GUARD_FILE = ".claude/hooks/guard.py"
 
 
-def guard_block(cmd_str: str, base: Path) -> str:
-    """Lý do guard của dự án CẤM lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng nếu cho chạy.
-    Lệnh Gate (PLAN), `— Kiểm:` (BLUEPRINT), sàn Gate (xt.yaml) do model viết mà harness chạy — trước đây chạy ngoài guard
-    (rà stored 01 §3g). Không có guard/guard lỗi → rỗng (fail-open về luồng như hook, ADR-0002; doctor báo thiếu hook).
-    `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
-    path = base / GUARD_FILE
-    if not path.is_file():
-        return ""
+def guard_paths(base: Path) -> List[Path]:
+    """Guard của dự án `base`, rồi guard cùng bản cài với `xt.py` này (repo khung: `scripts/` → gốc; dự án đích:
+    `.xtemplates/scripts/` → gốc dự án) — đổi `CLAUDE_PROJECT_DIR` sang thư mục không có guard không thoát được kiểm."""
+    return [base / GUARD_FILE, SCRIPT_DIR.parent / GUARD_FILE, SCRIPT_DIR.parent.parent / GUARD_FILE]
+
+
+def _guard_verdict(path: Path, cmd_str: str, base: Path, strict: bool) -> Dict[str, Any]:
+    """Quyết định của guard `path` cho lệnh (như hook: chính sách mặc định trừ strict). Guard ném lỗi → `_failure_decision`
+    của nó (merge/`gh api` hỏi → bị chặn; lệnh khác cho qua — fail-open về luồng, ADR-0002)."""
     keep = sys.dont_write_bytecode
     sys.dont_write_bytecode = True  # không để `__pycache__` trong `.claude/hooks` (loop verify so dấu vân tay cây)
+    mod: Any = None
     try:
         spec = importlib.util.spec_from_file_location("xt_project_guard", path)
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        out = mod.bash_decision(cmd_str, str(base), str(base))
-        strict = os.environ.get("XT_GUARD_POLICY") == "strict"
-        out = out if strict else mod.apply_policy(out)
-    except Exception:  # guard hỏng không kẹt vòng lặp — giống hook (fail-open), doctor/hook báo riêng
-        return ""
+        out: Dict[str, Any] = mod.bash_decision(cmd_str, str(base), str(base))
+    except Exception:
+        try:
+            out = mod._failure_decision("bash", {}, cmd_str) if mod is not None else {"decision": ""}
+        except Exception:  # guard hỏng tới mức không có cả `_failure_decision`
+            out = {"decision": ""}
     finally:
         sys.dont_write_bytecode = keep
+    try:
+        return out if strict or mod is None else dict(mod.apply_policy(out))
+    except Exception:
+        return out
+
+
+def guard_block(cmd_str: str, base: Path) -> str:
+    """Lý do guard CẤM lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng nếu cho chạy.
+    Lệnh Gate (PLAN), `— Kiểm:` (blueprint), lệnh `xt.yaml` (sàn Gate, `dev-task.sh`) do model viết mà harness chạy —
+    trước đây chạy ngoài guard (rà stored 01 §3g). Không có guard ở dự án lẫn bản cài: dự án có `.claude/settings.json`
+    (harness đã cài mà guard bị gỡ) → chặn như hook (AUD-SEC-019); không có harness → cho chạy.
+    `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
+    path = next((p for p in guard_paths(base) if p.is_file()), None)
+    if path is None:
+        return (
+            "thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục bằng install.py"
+            if (base / ".claude" / "settings.json").is_file()
+            else ""
+        )
+    strict = os.environ.get("XT_GUARD_POLICY") == "strict"
+    out = _guard_verdict(path, cmd_str, base, strict)
     blocked = out.get("decision") == "deny" or (strict and out.get("decision") == "ask")
     return str(out.get("reason") or "guard chặn") if blocked else ""
+
+
+def cmd_guard_check(args: argparse.Namespace) -> int:
+    """`xt.py guard-check -- <lệnh>`: exit 126 + lý do nếu guard cấm (dùng cho `dev-task.sh` trước lệnh xt.yaml)."""
+    cmd = " ".join(args.command[1:] if args.command[:1] == ["--"] else args.command)
+    why = guard_block(cmd, project_dir())
+    if why:
+        print(f"✗ guard chặn, không chạy (LOOP-STOP-027): {why}", file=sys.stderr)
+        return 126
+    return 0
 
 
 def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
@@ -4968,6 +5002,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pc.add_argument("--full", action="store_true", help="một file chứa mọi mức như trước ADR-0012 (không tách backlog)")
     pc.set_defaults(fn=cmd_compose)
+    pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
+    pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
+    pg.set_defaults(fn=cmd_guard_check)
     pm = sub.add_parser("merge-check", help="máy quyết khi nào merge PR đã mở (ADR-0013)")
     pm.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pm.add_argument(
