@@ -3465,5 +3465,257 @@ class GuardReview97Test(unittest.TestCase):
         )
 
 
+class GuardStored1018Test(unittest.TestCase):
+    """Rà stored 2026-10-18 (01 §3g, §3g.4): CLI agent khác với cờ tự duyệt (LOOP-STOP-028), git hook của dự án."""
+
+    def bash(self, cmd: str) -> str | None:
+        return guard_decision("bash", cmd, policy="")
+
+    def test_agent_cli_self_approve_denied(self):
+        for cmd in (
+            'codex exec --full-auto "fix"',
+            "codex exec --dangerously-bypass-approvals-and-sandbox x",
+            "codex exec --sandbox danger-full-access x",
+            "codex -a never exec x",
+            "codex --ask-for-approval=never exec x",
+            "gemini --yolo -p x",
+            "gemini -y -p x",
+            "gemini --approval-mode=yolo -p x",
+            "npx -y @google/gemini-cli --yolo",
+            "npx @openai/codex@0.5.0 exec --full-auto x",
+            "copilot -p x --allow-all-tools",
+            "aider --yes-always",
+            "cursor-agent -p x --force",
+            "amp --dangerously-allow-all -x y",
+            "codex exec --yolo x",
+            "codex exec --approve-for-me x",
+            "opencode run --auto x",
+            "npx opencode-ai run --auto x",
+            "cursor-agent -p x --yolo",
+            "COPILOT_ALLOW_ALL=true copilot -p x",
+            "AIDER_YES_ALWAYS=1 aider",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+
+    def test_agent_cli_without_self_approve_passes(self):
+        for cmd in (
+            'codex exec "x"',
+            "codex exec --sandbox read-only x",
+            "gemini -p x",
+            "aider -- --yes-always",
+            "codex exec -a",
+            "opencode run x",
+            "COPILOT_ALLOW_ALL=true gemini -p x",
+            "npx -y some-tool --yolo",
+            "claude -p hi",
+            "echo gemini --yolo",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_review_117_bypasses_closed(self):
+        for cmd in (
+            "npx opencode-ai@latest run --auto x",
+            "npx -y opencode-ai@0.15.0 run --auto x",
+            "npm exec @openai/codex -- --yolo",
+            "npx @openai/codex -- --yolo",
+            "codex -c approval_policy=never -c sandbox_mode=danger-full-access exec x",
+            "codex exec -c 'sandbox_mode=\"danger-full-access\"' x",
+            "codex exec --config=approval_policy=never x",
+            "export COPILOT_ALLOW_ALL=1; copilot -p x",
+            "export COPILOT_ALLOW_ALL=1 && copilot -p x",
+            "uvx aider-chat --yes-always",
+            "uvx --from aider-chat aider --yes-always",
+            "pipx run aider-chat --yes-always",
+            "aider --yes",
+            "gemini -yp x",
+            "cursor-agent -fp x",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in (
+            "codex exec -c model=o3 x",
+            "aider --model x",
+            "gemini -p x",
+            "uvx ruff check",
+            "export A=1; copilot -p x",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_git_exec_config(self):
+        for cmd in (
+            'git config core.fsmonitor "echo pwned"',
+            "git config --global core.sshCommand 'ssh -o ProxyCommand=x'",
+            "git config alias.x '!echo pwned'",
+            "git config filter.lfs.smudge 'sh x'",
+            "git config --unset core.hooksPath",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in ("git config alias.st status", "git config user.email a@b", "git config --unset user.name"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_git_config_file_and_one_shot(self):
+        # review #117 lần 2: `-f <tệp>` không phải khoá; giá trị an toàn cho qua; `git -c k=v` chạy một lần cũng xét.
+        for cmd in (
+            "git config -f .git/config core.hooksPath /dev/null",
+            "git config --file .git/config core.fsmonitor 'touch /tmp/p'",
+            "git config --file=.git/config user.name x",
+            'git config core.pager "less; touch /tmp/p"',
+            "git -c core.fsmonitor='touch /tmp/p' status",
+            "git -c alias.x='!touch /tmp/p' x",
+            "git config credential.helper /tmp/evil.sh",
+            "git config core.editor \"vim -c '!touch /tmp/p'\"",
+            # review #117 lần 3: khoá theo mẫu + giá trị so nguyên văn
+            "git config include.path /tmp/evil.cfg",
+            "git config includeIf.gitdir:~/.path /tmp/evil.cfg",
+            "git -c include.path=/tmp/evil.cfg status",
+            "git config core.gitProxy /tmp/evil.sh",
+            "git config mergetool.x.cmd 'touch /tmp/p'",
+            "git config gpg.ssh.program /tmp/evil",
+            "git config remote.origin.uploadpack /tmp/evil",
+            "git config protocol.ext.allow always",
+            'git config core.editor "vim -S /tmp/evil.vim"',
+            'git config core.sshCommand "ssh -F /tmp/evil_cfg"',
+            "git -c core.sshCommand='ssh -F /tmp/evil' fetch",
+            # lần 4: ext:: và khoá chạy lệnh ít gặp
+            "git config protocol.ext.allow user",
+            "git -c protocol.ext.allow=user fetch 'ext::sh -c touch% /tmp/p'",
+            "git remote add x 'ext::sh -c x'",
+            "git config url.ext::sh.insteadOf https://x",
+            "git config protocol.allow always",
+            "git config submodule.a.update '!touch /tmp/p'",
+            "git config mergetool.x.path /tmp/evil",
+            "git config sendemail.tocmd /tmp/x",
+            "git config sendemail.smtpServer /tmp/evil",
+            "git config init.templateDir /tmp/t",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in (
+            "git config -f ~/.gitconfig user.name x",
+            "git config core.pager cat",
+            'git config --global core.editor "code --wait"',
+            'git config core.sshCommand "ssh -i ~/.ssh/deploy"',
+            "git -c core.pager=cat log",
+            "git config credential.helper store",
+            "git config core.fsmonitor true",
+            "git config -f x.cfg --type bool a.b true",
+            "git config credential.helper /usr/lib/git-core/git-credential-libsecret",
+            'git config credential.helper "cache --timeout=3600"',
+            'git config core.pager "less -R"',
+            "git config pager.log false",
+            'git config core.sshCommand "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes"',
+            "git config remote.origin.url git@github.com:a/b.git",
+            "git config protocol.version 2",
+            "git config protocol.https.allow always",
+            "git config submodule.a.update rebase",
+            "git config sendemail.smtpServer smtp.gmail.com",
+            "git config merge.ours.driver true",
+            "git config gpg.program gpg2",
+            'git config core.pager "delta --dark"',
+            'git config core.editor "nano -w"',
+            'git config core.sshCommand "ssh -o StrictHostKeyChecking=no -i ~/.ssh/k"',
+            "git config credential.helper 'cache --timeout 3600'",
+            "git config credential.helper '!gh auth git-credential'",
+            "git clone https://github.com/a/b",
+            'git commit -m "chặn URL ext:: ở lệnh git"',
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_relative_targets_and_chmod(self):
+        for cmd in (
+            "cd .git/hooks && echo x > pre-commit",
+            "cd .git && echo y > config",
+            "cd .claude/hooks && echo x > guard.py",
+            "chmod -x .git/hooks/pre-commit",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        self.assertIsNone(self.bash("chmod +x scripts/a.sh"))
+
+    def test_hooks_path_commit_asks_in_strict(self):
+        g = _guard()
+        for cmd in (
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+        ):
+            r = g.bash_decision(cmd, str(ROOT))
+            self.assertEqual((r["no_verify"], r["decision"]), (True, "ask"), cmd)  # strict: người quyết (review #117)
+
+    def test_git_hooks_path(self):
+        self.assertEqual(self.bash("git config core.hooksPath /dev/null"), "deny")
+        self.assertEqual(self.bash("git config --local core.hooksPath .nohooks"), "deny")
+        for cmd in ("git config --get core.hooksPath", "git config core.hooksPath", "git config user.name x"):
+            self.assertIsNone(self.bash(cmd), cmd)
+        g = _guard()
+        r = g.bash_decision("git -c core.hooksPath=/dev/null commit -m x", str(ROOT))
+        self.assertEqual((r["commit"], r["no_verify"]), (True, True))
+
+    def test_git_hook_files(self):
+        self.assertEqual(self.bash("cp x .git/hooks/pre-commit"), "deny")
+        self.assertEqual(self.bash("cp -r myhooks .git/hooks"), "deny")
+        self.assertEqual(self.bash("echo '[core]' > .git/config"), "deny")
+        self.assertIsNone(self.bash("echo cp x .git/hooks/pre-commit"))
+        for rel in (".git/hooks/pre-commit", ".git/config"):
+            self.assertEqual(guard_decision("edit", str(ROOT / rel), policy=""), "deny", rel)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_no_verify_still_runs_gate_by_default(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
+        (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
+        for cmd in (
+            "git commit --no-verify -m x",
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+        ):
+            code, out, err = run_hook(
+                "pre-bash-guard.sh", {"tool_input": {"command": cmd}}, tmp, extra_env={"XT_GUARD_POLICY": ""}
+            )
+            self.assertEqual(code, 2, cmd + out + err)  # cổng đỏ chặn — trước đây bỏ cổng lặng lẽ
+            self.assertIn("ĐỎ", err)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_dev_task_runs_xt_yaml_through_guard(self):
+        # Lệnh xt.yaml do model viết: dev-task.sh (cổng commit, /gate) hỏi guard trước khi chạy (review #117).
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        for f in ("dev-task.sh", "xt.py"):
+            shutil.copy(ROOT / "scripts" / f, tmp / "scripts" / f)
+        (tmp / ".claude" / "hooks").mkdir(parents=True)
+        shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", tmp / ".claude" / "hooks" / "guard.py")
+        canary = tmp / "ran"
+        (tmp / "xt.yaml").write_text(f'test: "touch {canary} && git push origin main"\n', encoding="utf-8")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("LOOP-STOP-027", r.stderr)
+        self.assertFalse(canary.exists())
+        (tmp / "xt.yaml").write_text(f"test: touch {canary}\n", encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(canary.exists())
+        (tmp / "scripts" / "xt.py").write_text("import sys\nsys.exit(1)\n", encoding="utf-8")  # xt.py sập → không chặn
+        (tmp / "xt.yaml").write_text(f"test: touch {canary}.2\n", encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "gate"], capture_output=True, text=True, env=env
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(Path(f"{canary}.2").exists())
+        shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
+        (tmp / "xt.yaml").write_text('format_file: "git push origin main"\n', encoding="utf-8")
+        r = subprocess.run(
+            ["bash", str(tmp / "scripts" / "dev-task.sh"), "format-file", "a.txt"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(r.returncode, 0)  # PostToolUse không chặn lượt sửa, chỉ không chạy formatter bị cấm
+        self.assertIn("LOOP-STOP-027", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
