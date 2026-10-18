@@ -6,7 +6,7 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Nâng hotel-manager, X-Company (đang 3.0.x) lên 3.1.0 — khi chủ repo cho phép; làm theo khối "Dự án đích" của CHANGELOG 3.1.0.
+1. Nâng lên 3.1.0: X-Company xong (X-Company#9); hotel-manager#52 chờ chủ repo merge (ngoại lệ cứng). Ghép lại blueprint ở 3.1.0 làm mất ghi chú `· Bằng chứng:` của mục đổi chữ — sửa ở #121 (`30c1408`, chưa phát hành); dự án đích ghép lại bằng 3.1.0 thì so trạng thái với bản cũ. Tiếp: `WAIVER_RE`/`NA_RE`/`CHECK_CMD_RE` chưa nhận dấu `·` (compose mang theo nhưng `blueprint-status`/`loop verify` không đọc) — thống nhất bộ dấu ghi chú; ghi chú khác loại đứng trước ghi chú nhận được vẫn mất không báo.
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
 4. Giới hạn đã biết của guard: lệnh trong alias/biến/trình thông dịch; cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*`); `find -exec chmod`; `delta.*.pager`; CLI container ngoài docker/podman (AUD-SEC-042); merge PR repo khác từ phiên repo này bị chặn có chủ đích.
@@ -47,7 +47,7 @@
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `5d2f5b5` (#119); tag `v3.1.0` (sau PR này), `v3.0.1` → `d3fd5a9`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `30c1408` (#121); tag `v3.1.0` → `fd34718`, `v3.0.1` → `d3fd5a9`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
