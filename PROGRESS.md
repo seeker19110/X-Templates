@@ -1,12 +1,12 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.1.1 — tag sau PR phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.2.0 — tag sau PR phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
 
 ## Đang làm
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Sửa hai chỗ guard bỏ sót ở `LOOP-HARNESS-027` (reviewer #125, chỉ làm lọt): `;`/`&&` trong `-m "…"` trước heredoc cùng dòng làm thân heredoc không bị quét; cửa sổ 4 KiB lấy phần đầu pipeline nên commit nằm sau lọt — quét cả dòng mở, cửa sổ quanh heredoc, thêm test. Cắt bản phát hành mới (hook `guard.py`, mẫu `xt.yaml`/`CLAUDE.md` đổi → dự án đích chạy lại `install.py`). Tiếp: `WAIVER_RE`/`NA_RE`/`CHECK_CMD_RE` chưa nhận dấu `·` (compose mang theo nhưng `blueprint-status`/`loop verify` không đọc) — thống nhất bộ dấu ghi chú; ghi chú khác loại đứng trước ghi chú nhận được vẫn mất không báo.
+1. Nâng autopilot (đề xuất 2026-10-18, D-043): reviewer khác model có máy kiểm (`reviewer.md` ghim `opus`, phiên chính cũng Opus); `LOOP-DESIGN-022` → `MUST@M` (evidence ghi tay được); ghi công AI qua MCP/PR (máy chủ tự gắn URL phiên vào thân PR); kiểm tiêu đề PR ≤ 72 cục bộ; task `[perf]` trong `loop`; bộ ca tấn công guard; trần vòng review/PR. Guard: thân heredoc nháy kết thúc `\` làm commit dòng sau lọt (`strip_heredocs`). Nâng hotel-manager, X-Company lên 3.2.0.
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
 4. Giới hạn đã biết của guard: lệnh trong alias/biến/trình thông dịch; cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*`); `find -exec chmod`; `delta.*.pager`; CLI container ngoài docker/podman (AUD-SEC-042); merge PR repo khác từ phiên repo này bị chặn có chủ đích.
@@ -45,9 +45,10 @@
 - 2026-10-16 L3 auto-merge (ADR-0015); ngoại lệ cứng người merge (ADR-0016), bỏ được bằng `merge_hard_exceptions: auto` (ADR-0020); nay merge theo làn (ADR-0024/0025).
 - 2026-10-17 Guard: lệnh trong container chỉ xét luật ra khỏi máy dev; push vào PR đang auto-merge → chạy lại `merge-check` (D-015).
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
+- 2026-10-18 Vòng tối ưu hiệu năng có máy quyết (`LOOP-OPT`, `xt.py perf`, D-041/042).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `130c83c` (#125); tag `v3.1.1` → `3a1c379` (hotel-manager#54, X-Company#10 đã lên 3.1.1), `v3.1.0` → `fd34718`, `v3.0.1` → `d3fd5a9`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `d115139` (#128); tag `v3.2.0` (sau PR này), `v3.1.1` → `3a1c379`, `v3.1.0` → `fd34718`, `v3.0.1` → `d3fd5a9`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
