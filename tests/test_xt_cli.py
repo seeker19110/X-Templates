@@ -1306,6 +1306,10 @@ class LoopCommandsTest(TmpDirCase):
         st["active"] = False
         xt.write_state(st, self.tmp)
         self.assertEqual(run_main("loop", "init")[0], 0)  # vòng đã kết thúc
+        xt.write_state(
+            {"active": "yes", "iterations": "x"}, self.tmp
+        )  # sai kiểu: không đọc được → ghi đè (review #119)
+        self.assertEqual(run_main("loop", "init")[0], 0)
 
     def test_defer_requires_state_and_valid_id(self):
         rc, out, err = run_main("loop", "defer", "--task", "T-001", "--reason", "r")

@@ -1245,13 +1245,13 @@ def _guard_verdict(path: Path, cmd_str: str, base: Path, strict: bool) -> Dict[s
         return out
 
 
-def guard_block(cmd_str: str, base: Path) -> str:
+def guard_block(cmd_str: str, base: Path, only: Optional[List[Path]] = None) -> str:
     """Lý do guard CẤM lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng nếu cho chạy.
     Lệnh Gate (PLAN), `— Kiểm:` (blueprint), lệnh `xt.yaml` (sàn Gate, `dev-task.sh`) do model viết mà harness chạy —
     trước đây chạy ngoài guard (rà stored 01 §3g). Không có guard ở dự án lẫn bản cài: dự án có `.claude/settings.json`
     (harness đã cài mà guard bị gỡ) → chặn như hook (AUD-SEC-019); không có harness → cho chạy.
     `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
-    paths = list(dict.fromkeys(p.resolve() for p in guard_paths(base) if p.is_file()))
+    paths = list(dict.fromkeys(p.resolve() for p in (only or guard_paths(base)) if p.is_file()))
     if not paths:
         return (
             "thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục bằng install.py"
@@ -3085,12 +3085,14 @@ GUARD_CANARIES = (
 def _doctor_guard_canary(base: Path) -> List[Finding]:
     """Thử guard bằng lệnh nguy hiểm mẫu: file hook có và đúng cú pháp vẫn có thể không chặn gì (guard hỏng, bị thay,
     fail-open giữa chừng) — rà stored 03 §8b ("hook hỏng thì lặng lẽ tụt mức"). Không có guard → để phần hook báo."""
-    found = [p for p in guard_paths(base) if p.is_file()]
+    # Chỉ guard của dự án (hook chạy guard này) — guard của bản cài xt.py khác (repo khung chạy trên dự án đích) không
+    # được che guard hỏng của dự án (review #119).
+    found = [p for p in guard_paths(base)[:1] if p.is_file()]
     if not found or any(_syntax_error(p) for p in found):  # thiếu/lỗi cú pháp: phần hook đã báo, không báo trùng
         return []
     with contextlib.ExitStack() as stack:
         stack.enter_context(_env_patch("XT_GUARD_POLICY", ""))
-        missed = [c for c in GUARD_CANARIES if not guard_block(c, base)]
+        missed = [c for c in GUARD_CANARIES if not guard_block(c, base, found)]
     if not missed:
         return []
     msg = f"guard KHÔNG chặn lệnh nguy hiểm mẫu: {', '.join(missed)} — hàng rào không hoạt động; {INSTALL_HINT}"
@@ -3939,7 +3941,10 @@ def _live_loop(base: Path) -> str:
     rỗng nếu không có. `state.json` từng bị ghi đè vô điều kiện: hai phiên cùng dự án xoá trạng thái của nhau
     (rà stored 01 §3h: "gậy" chỉ là quy ước, không phải khoá)."""
     prev = read_state(base) or {}
-    if not prev.get("active") or (_verdict_loop_state(prev) or {}).get("verdict") == "budget":
+    try:
+        if not prev.get("active") or (_verdict_loop_state(prev) or {}).get("verdict") == "budget":
+            return ""
+    except (TypeError, ValueError, AttributeError):  # state.json sai kiểu: không phải vòng đọc được → ghi đè như trước
         return ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
 

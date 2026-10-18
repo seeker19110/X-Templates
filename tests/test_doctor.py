@@ -636,6 +636,15 @@ class DoctorGuardAndClaudeVersionTest(DoctorCase):
         self.assertEqual([(f.code, f.level) for f in got], [("hooks", "error")])
         self.assertIn("KHÔNG chặn lệnh nguy hiểm mẫu", got[0].msg)
 
+    def test_canary_uses_project_guard_only(self):
+        # xt.py của bản cài khác (guard thật) không được che guard dự án cho qua mọi lệnh (review #119).
+        stub = "def bash_decision(c, r, w):\n    return {'decision': ''}\n\ndef apply_policy(o):\n    return o\n"
+        (self.base / xt.GUARD_FILE).write_text(stub, encoding="utf-8")
+        real = ROOT / xt.GUARD_FILE
+        with unittest.mock.patch.object(xt, "guard_paths", lambda b: [b / xt.GUARD_FILE, real]):
+            self.assertEqual(len(xt._doctor_guard_canary(self.base)), 1)
+            self.assertTrue(xt.guard_block("git push --force origin main", self.base))  # chốt chặn vẫn dùng cả hai
+
     def test_no_guard_left_to_hook_checks(self):
         (self.base / xt.GUARD_FILE).write_text("def x(:\n", encoding="utf-8")  # lỗi cú pháp: phần hook báo
         self.assertEqual(xt._doctor_guard_canary(self.base), [])

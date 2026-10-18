@@ -6,7 +6,7 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Cắt 3.1.0 (CHANGELOG có "Dự án đích: chạy lại `install.py`"); rồi nâng hotel-manager, X-Company (cả hai đã 3.0.x).
+1. Cắt 3.1.0 (CHANGELOG có "Dự án đích: chạy lại `install.py`"); rồi nâng hotel-manager, X-Company (cả hai đã 3.0.x) — khi chủ repo cho phép.
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
 4. Giới hạn đã biết của guard: lệnh trong alias/biến/trình thông dịch; cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*`); `find -exec chmod`; `delta.*.pager`; CLI container ngoài docker/podman (AUD-SEC-042); merge PR repo khác từ phiên repo này bị chặn có chủ đích.
