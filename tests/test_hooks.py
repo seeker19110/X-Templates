@@ -3805,6 +3805,9 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "deny")
+        t0 = time.monotonic()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
+        self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
+        self.assertLess(time.monotonic() - t0, 1.0)
         os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
         self.assertEqual(self.decide("git commit -F p", d), "")
         nogit = self.repo("ai_attribution: forbid\n")  # không có `.git` ở đâu cả → xt.yaml ở thư mục lệnh

@@ -2503,8 +2503,9 @@ def _commit_msg_args(args: List[str]) -> List[Tuple[str, str]]:
 
 
 # `git [cờ toàn cục…] commit`: `-C "a b"`, `-c k=v`, `--no-pager`, `--git-dir=…` (văn bản thô — `$(cat <<E` chưa đóng nháy).
+# Các nhánh tách bạch (giá trị không nháy không mở đầu bằng nháy) — trùng nhau thì backtrack hàm mũ (CodeQL, #125).
 GIT_COMMIT_TEXT_RE = re.compile(
-    r"\bgit(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
+    r"\bgit(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']\S*)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
 )
 GIT_TOP_MAX = 64  # số cấp thư mục cha tối đa khi tìm gốc repo
 
