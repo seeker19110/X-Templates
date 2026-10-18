@@ -869,6 +869,13 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("ĐỎ (1 Gate + 1 lệnh kiểm blueprint)", text)
         self.assertIn("kiểm lại cuối ĐỎ (A-001)", xt.final_check(self.base) or "")
+        # Blueprint ở thư mục con: lệnh chạy trong thư mục chứa nó, cùng cwd với `blueprint-status --run` (review #106).
+        write(self.base / "docs" / "BP.md", "- [x] `A-001` **MUST** a — Kiểm: `test -f BP.md && test ! -f ok.txt`\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "bp con")
+        st["blueprint"] = "docs/BP.md"
+        xt.write_state(st, self.base)
+        self.assertEqual(self.verify()[0], 0)
         st["blueprint"] = "khong-co.md"  # blueprint mất giữa chừng: không kiểm được, không khai sạch
         xt.write_state(st, self.base)
         rc, text = self.verify()

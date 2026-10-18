@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import xt
 
+REAL_RUN = subprocess.run
+
 GREEN = [
     {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"},
     {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SKIPPED"},
@@ -56,7 +58,7 @@ def commit_base_xt(base: Path, committed: str, working: str | None = None) -> No
     for args in (
         ["init", "-q"],
         ["add", "xt.yaml"],
-        ["commit", "-qm", "x"],
+        ["commit", "-qm", "x", "--allow-empty"],
         ["update-ref", "refs/remotes/origin/main", "HEAD"],
     ):
         subprocess.run([*git, *args], check=True, capture_output=True)
@@ -78,6 +80,7 @@ class FakeGh:
         statuses: list | None = None,
         open_prs: list | None = None,
         raw: dict | None = None,
+        real_git: bool = False,
     ):
         self.pull = {
             "number": 7,
@@ -102,13 +105,16 @@ class FakeGh:
         self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
         self.raw = raw or {}
+        self.real_git = real_git
         self.calls: list[list[str]] = []
 
     def paths(self) -> list[str]:
         return [c[-1] for c in self.calls]
 
-    def respond(self, cmd: list[str], **_: Any) -> subprocess.CompletedProcess:
-        if cmd[0] == "git":  # merge_hard_mode đọc xt.yaml ở nhánh đích — không có repo → human
+    def respond(self, cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
+        if cmd[0] == "git":  # xt.yaml ở nhánh đích: mặc định không có repo → human/L1; `real_git` = repo tạm của test
+            if self.real_git:
+                return REAL_RUN(cmd, **kw)
             return subprocess.CompletedProcess(cmd, 128, "", "not a git repository")
         self.calls.append(cmd)
         path = cmd[-1]
@@ -419,11 +425,113 @@ class MergeConfigTest(unittest.TestCase):
             (False, ["merge_hard_exceptions 'off' không hợp lệ (human|auto) — dùng human"]),
         )
 
+    def test_merge_base(self):
+        """Đáy của PR = merge-base từ REST compare; thiếu sha, lỗi đọc hay JSON lạ → "" (không xác minh được → hard)."""
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"merge_base_commit": {"sha": "mb"}}) as one:
+            self.assertEqual(xt._merge_base("repos/o/r", "tip", "head"), "mb")
+            self.assertEqual(one.call_args.args, ("repos/o/r/compare/tip...head?per_page=1",))
+            self.assertEqual(xt._merge_base("repos/o/r", "", "head"), "")
+        for side in ({"merge_base_commit": None}, {"merge_base_commit": {}}, xt.PrInputError("gh api lỗi: 502")):
+            with self.subTest(side), unittest.mock.patch.object(xt, "_gh_one", side_effect=[side]):
+                self.assertEqual(xt._merge_base("repos/o/r", "tip", "head"), "")
+
+    def test_pr_rest_compares_against_merge_base(self):
+        """Review #105: nhánh đích đổi sau lần đồng bộ cuối (base.sha = tip cũ) — so với merge-base, không với tip."""
+
+        def enc(text: str) -> str:
+            body = base64.b64encode(text.encode()).decode()
+            return json.dumps({"type": "file", "path": "xt.yaml", "encoding": "base64", "content": body})
+
+        repo = FakeGh.REPO
+        files = json.dumps([{"filename": "xt.yaml", "additions": 1, "deletions": 1}])
+        raw = {
+            f"{repo}/pulls/7/files?per_page=100": files,
+            f"{repo}/compare/tip...{FakeGh.SHA}?per_page=1": json.dumps({"merge_base_commit": {"sha": "mb"}}),
+            f"{repo}/contents/xt.yaml?ref=mb": enc("merge_hard_exceptions: human\n"),
+            f"{repo}/contents/xt.yaml?ref=tip": enc("merge_hard_exceptions: auto\n"),
+            f"{repo}/contents/xt.yaml?ref={FakeGh.SHA}": enc("merge_hard_exceptions: auto\n"),
+        }
+        gh = FakeGh(pull={"base": {"sha": "tip", "ref": "main"}}, raw=raw)
+        with gh.patch():
+            self.assertTrue(xt._pr_rest("7")["files"][0].get("hard_key"))
+        self.assertNotIn(f"{repo}/contents/xt.yaml?ref=tip", gh.paths())
+        plain = FakeGh(pull={"base": {"sha": "tip", "ref": "main"}})
+        with plain.patch():
+            xt._pr_rest("7")
+        self.assertFalse([p for p in plain.paths() if "/compare/" in p])  # không có file cần so → không hỏi merge-base
+
+    def test_autonomy_is_min_of_working_tree_and_base(self):
+        """D-033: sửa tại chỗ chỉ hạ được mức tự chủ; nâng phải qua PR đã merge vào nhánh đích; không có ref → L1."""
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
+        level, notes = xt.merge_autonomy_level(self.base, "origin/main")  # chưa có repo/ref
+        self.assertEqual((level, notes), (1, ["không đọc được xt.yaml ở origin/main < cây làm việc L3 — dùng L1"]))
+        commit_base_xt(self.base, "merge_autonomy: L1\n", working="merge_autonomy: L3\n")
+        self.assertEqual(
+            xt.merge_autonomy_level(self.base, "origin/main"),
+            (1, ["merge_autonomy ở origin/main là L1 < cây làm việc L3 — dùng L1"]),
+        )
+        commit_base_xt(self.base, "merge_autonomy: L3\n", working="merge_autonomy: L2\n")
+        self.assertEqual(xt.merge_autonomy_level(self.base, "origin/main"), (2, []))  # hạ tại chỗ được
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+        self.assertEqual(xt.merge_autonomy_level(self.base, "origin/main"), (3, []))
+        commit_base_xt(self.base, "merge_autonomy: x\n", working="merge_autonomy: L1\n")
+        self.assertEqual(
+            xt.merge_autonomy_level(self.base, "origin/main"),
+            (1, ["merge_autonomy 'x' không hợp lệ (L0–L4) ở nhánh đích — dùng L1"]),
+        )
+
+    def test_risk_globs_union_with_base(self):
+        """Checkout cũ/sửa tại chỗ không làm rơi `merge_risk_paths` của nhánh đích; glob thêm tại chỗ vẫn giữ (chặt hơn)."""
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), [])  # không có repo/ref, không có xt.yaml
+        commit_base_xt(self.base, 'merge_risk_paths: "scripts/*, docs/adr/*"\n', working="lint: x\n")
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), ["scripts/*", "docs/adr/*"])
+        (self.base / "xt.yaml").write_text('merge_risk_paths: "infra/*, scripts/*"\n', encoding="utf-8")
+        self.assertEqual(xt.merge_risk_globs(self.base, "origin/main"), ["infra/*", "scripts/*", "docs/adr/*"])
+
+    def test_merge_eval_reads_risk_paths_from_base(self):
+        """Đường thật của `merge-check`: PR nhỏ sửa `scripts/xt.py` + test, cây làm việc cũ chưa có glob → vẫn làn chuẩn."""
+        commit_base_xt(self.base, 'merge_autonomy: L3\nmerge_risk_paths: "scripts/*"\n', working="merge_autonomy: L3\n")
+        small = [
+            {"path": "scripts/xt.py", "additions": 5, "deletions": 1},
+            {"path": "tests/test_xt_core.py", "additions": 5, "deletions": 0},
+        ]
+        with unittest.mock.patch.object(xt, "project_dir", return_value=self.base):
+            d, _ = xt._merge_eval(pr(files=small, baseRefName="main"))
+        self.assertEqual((d["lane"], d["hard"]), ("chuẩn", ["đường dẫn nhạy cảm (merge_risk_paths): scripts/xt.py"]))
+
     def test_touches_hard_key(self):
-        """Diff xt.yaml chạm khoá, hoặc thiếu patch (diff lớn — không xác minh được) → chạm; file khác → không."""
-        self.assertTrue(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+merge_hard_exceptions: auto"}))
-        self.assertTrue(xt._touches_hard_key({"filename": "x.yml", "previous_filename": "xt.yaml"}))
-        self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
+        """So giá trị hiệu lực `merge_hard_exceptions` (thiếu = human) của xt.yaml gốc ở đáy/đầu PR, không dò chuỗi patch
+        (review #103: dòng ngữ cảnh/comment nhắc tên khoá báo nhầm); không xác minh được → chạm; file khác → không."""
+        auto, human = "merge_hard_exceptions: auto\n", "merge_hard_exceptions: human\n"
+        mod = {"filename": "xt.yaml", "status": "modified", "patch": " merge_hard_exceptions: auto\n+lint: y"}
+        cases = {
+            "chỉ ngữ cảnh/comment nhắc khoá": (
+                auto + "lint: x\n",
+                auto + "lint: y\n# merge_hard_exceptions: human\n",
+                False,
+            ),
+            "auto → human": (auto, human, True),
+            "human → auto": (human, auto, True),
+            "thêm auto": ("lint: x\n", "lint: x\n" + auto, True),
+            "xoá auto": (auto, "lint: x\n", True),
+            "thêm human tường minh": ("lint: x\n", human, True),  # chặt hơn: mọi dòng khoá đổi là chạm
+            "thêm auto bị dòng sau che": (human, auto + human, True),  # review #105: merge 3 chiều làm lộ ra
+            "xoá human thừa": ("lint: x\n" + human, "lint: x\n", True),
+            "đổi cách viết": (auto, "merge_hard_exceptions: 'auto'  # giữ\n", False),
+            "khoá lặp, dòng sau thắng": (auto, auto + "merge_hard_exceptions: human\n", True),
+            "khoá lặp có sẵn, chỉ dời dòng": (auto + "a: 1\n" + human, "a: 1\n" + auto + human, True),  # review #105
+        }
+        for name, (before, after, want) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.changed(mod, {("xt.yaml", "base"): before, ("xt.yaml", "head"): after}), want)
+        both = {("xt.yaml", "base"): auto, ("xt.yaml", "head"): auto}
+        self.assertTrue(self.changed(mod, both, broken=("base",)))  # lỗi đọc ≠ vắng → coi như đổi
+        self.assertTrue(self.changed(mod, both, broken=("head",)))
+        self.assertTrue(self.changed(mod, {}))  # vắng ở cả hai đầu mà nằm trong diff → token không đọc được
+        moved = {"filename": "x.yml", "previous_filename": "xt.yaml", "status": "renamed"}
+        self.assertTrue(self.changed(moved, {("xt.yaml", "base"): auto}))  # dời đi: auto → (vắng) human
+        self.assertFalse(self.changed(moved, {("xt.yaml", "base"): "lint: x\n"}))  # vẫn human
+        self.assertTrue(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))  # thiếu repo/sha
         self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
 
     PLAN_FILE = "docs/autopilot/PLAN.md"
@@ -465,6 +573,11 @@ class MergeConfigTest(unittest.TestCase):
             "thêm fence mở": (sand, "```\n" + sand, True),
             "đảo fence": (sand + "```\n" + live + "```\n", "```\n" + sand + "```\n" + live + "```\n", True),
             "chỉ tick task": (sand + "- [ ] `T-001` việc\n", sand + "- [x] `T-001` việc\n", False),
+            # review #105: grant lặp bị dòng sau che / dời dòng — hiệu lực không đổi nhưng merge 3 chiều lật được
+            "chèn live bị sandbox che": ("x\n" + sand, live + "x\n" + sand, True),
+            "dời dòng grant duy nhất": ("x\n" + sand, sand + "x\n", False),  # mỗi nhóm một dòng: merge chỉ ra tập con
+            "grant trong fence ở đầu PR": ("```\n" + live + "```\n", "```\n" + live + "```\n# ghi chú\n", True),
+            "grant lặp có sẵn": (sand + sand, sand + sand + "# ghi chú\n", True),
             "thêm ghi chú": (sand, "# ghi chú\n" + sand, False),
         }
         for name, (before, after, want) in cases.items():
@@ -584,7 +697,7 @@ class MergeCheckCliTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
-        (self.base / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+        commit_base_xt(self.base, "merge_autonomy: L2\n")  # mức tự chủ đọc ở nhánh đích đã commit (D-033)
 
     def test_hard_auto_from_xt_yaml(self):
         hot = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}])
@@ -619,7 +732,7 @@ class MergeCheckCliTest(unittest.TestCase):
         self.assertIn("merge_autonomy 'L9' không hợp lệ", out)
 
     def test_fetches_with_rest_only(self):
-        gh = FakeGh()
+        gh = FakeGh(real_git=True)
         with gh.patch():
             rc, out, err = run_main("merge-check", "--pr", "7")
         self.assertEqual((rc, err), (0, ""))
@@ -838,7 +951,7 @@ class MergeWatchTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
-        (self.base / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+        commit_base_xt(self.base, "merge_autonomy: L2\n")  # mức tự chủ đọc ở nhánh đích đã commit (D-033)
         self.clock = [0.0]
         self.sleeps: list[int] = []
 
@@ -895,7 +1008,7 @@ class MergeWatchTest(unittest.TestCase):
 
     def test_merge_check_json_reuses_merge_check_path(self):
         """Đường thật: `_merge_check_json` = `merge-check --json` (xt.yaml, REST) — không có luật riêng."""
-        with FakeGh().patch():
+        with FakeGh(real_git=True).patch():
             rc, d, err = xt._merge_check_json("7")
         self.assertEqual((rc, d["verdict"], err), (0, "merge", ""))
         with unittest.mock.patch.object(xt, "load_pr", side_effect=xt.PrInputError("hỏng")):

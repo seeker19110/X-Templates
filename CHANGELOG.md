@@ -6,7 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
-- **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-032).
+- **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-034).
   Ghi `— Kiểm: \`<lệnh>\`` ở cuối dòng mục đã tick (phần ghi chú sau `· Nguồn:`); `xt.py blueprint-status --run` chạy lại
   mọi lệnh trong thư mục chứa blueprint (mỗi lệnh một lần, timeout `XT_RECORD_TIMEOUT`), in `✓/✗ Kiểm <ID>`, JSON thêm
   `checks`, `failed_checks`, `unchecked_must` (MUST tick không có lệnh — chỉ báo, không đỏ); `--strict --run` exit 1 khi
@@ -15,6 +15,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   ghép lại; header blueprint sinh ra và `LOOP-DESIGN-022`, bảng cổng `loop-design.md`/`harness-files.md`, README mảng 11,
   `composition.md` bước 2, mẫu `AGENTS.md`/`GO-NO-GO.md`, skill `/autopilot` bước 12, `/blueprint` ghi `--strict --run`.
   Dự án đích: chạy lại `install.py`; mục đã tick chưa có lệnh hiện ở `unchecked_must`, thêm dần khi rà.
+- **`merge-check` đọc chốt merge từ dữ liệu đã commit** (D-032, D-033; review #103/#105; chủ repo yêu cầu đọc
+  `merge_autonomy` từ nhánh đích). `merge_risk_paths` = hợp của cây làm việc và `xt.yaml` đã commit ở nhánh đích
+  (`merge_risk_globs`): checkout cũ hay sửa tại chỗ không làm rơi glob. `merge_autonomy` = mức THẤP hơn giữa cây làm việc
+  và nhánh đích (`merge_autonomy_level`; guard và `merge-gate` dùng cùng đường): sửa tại chỗ không nâng được, nâng mức
+  phải qua PR đã merge (chính PR đó được quyết ở mức cũ); không đọc được nhánh đích → L1 kèm ghi chú (`doctor` vẫn đọc
+  cây làm việc; lời `LOOP-STOP-009` cập nhật, không đổi mức). "PR chạm khoá `merge_hard_exceptions`" (`HARD_KEY_REASON`, ADR-0020) giờ so danh sách mọi dòng khoá theo
+  thứ tự (`_hard_key_lines`, cùng bộ đọc với `merge_hard_mode`) của `xt.yaml` gốc, không dò chuỗi trong patch: comment
+  hay dòng ngữ cảnh nhắc tên khoá không còn báo `hard` nhầm; đầu PR có > 1 dòng khoá cũng là `hard`. Ủy quyền PLAN.md
+  (ADR-0022) so danh sách mọi dòng `- grant:` theo thứ tự kèm cờ fence (`_grant_lines`) thay vì hiệu lực; đầu PR có grant
+  trong fence hoặc nhóm lặp là `hard` — hai PR song song (chèn `live` bị dòng `sandbox` sau che + dời dòng `sandbox`)
+  từng lật `payments` sang `live` mà không PR nào bị bắt. Đáy của cả hai phép so là merge-base (REST compare,
+  `_merge_base`), không phải `base.sha`; không lấy được merge-base, không đọc được một đầu hoặc vắng ở cả hai đầu → `hard`.
 - **Required check `merge-gate` — máy chặn auto-merge của PR ngoại lệ cứng trên head hiện tại** (ADR-0023, D-029; đóng
   giới hạn "auto-merge không ghim head" của ADR-0022). Lệnh mới `xt.py merge-gate [--pr N] [--pr-json F] [--head SHA]
   [--json]` dùng lại đường quyết định của `merge-check`: exit 1 khi `hard` ≠ rỗng **và** PR đang bật auto-merge (REST
