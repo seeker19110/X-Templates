@@ -2508,7 +2508,41 @@ GIT_COMMIT_TEXT_RE = re.compile(
     r"(?<![\w-])git(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']\S*)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
 )
 GIT_TOP_MAX = 64  # số cấp thư mục cha tối đa khi tìm xt.yaml
-COMMIT_LINE_MAX = 4096  # regex trên dòng mở heredoc: cắt để thời gian có trần (review #125)
+COMMIT_LINE_MAX = 4096  # regex quanh heredoc trên dòng mở: mỗi phía tối đa chừng này để thời gian có trần (review #125)
+
+
+def _unquoted_seps(line: str) -> List[Tuple[int, int]]:
+    """Vị trí `;`/`&&`/`||`/`&` nằm NGOÀI nháy: `git commit -m "fix: a; b" -m "$(cat <<E` vẫn là một pipeline."""
+    seps: List[Tuple[int, int]] = []
+    i, q, n = 0, "", len(line)
+    while i < n:
+        c = line[i]
+        if q == "'":
+            q = "" if c == "'" else q
+        elif c == "\\":
+            i += 2
+            continue
+        elif q:
+            q = "" if c == '"' else q
+        elif c in "'\"":
+            q = c
+        else:
+            sep = LIST_SEP_RE.match(line, i)
+            if sep:
+                seps.append(sep.span())
+                i = sep.end()
+                continue
+        i += 1
+    return seps
+
+
+def _commit_window(line: str, pos: int) -> str:
+    """Pipeline chứa heredoc ở `pos` (tách theo dấu nối ngoài nháy), cắt còn ≤ COMMIT_LINE_MAX mỗi phía QUANH heredoc —
+    lệnh commit thường ngay trước heredoc, nên tiền tố dài (`X=…4 KiB… git commit -F - <<E`) không đẩy nó ra ngoài."""
+    seps = _unquoted_seps(line)
+    start = max((e for s, e in seps if e <= pos), default=0)
+    end = min((s for s, e in seps if s >= pos), default=len(line))
+    return line[max(start, pos - COMMIT_LINE_MAX) : min(end, pos + COMMIT_LINE_MAX)]
 
 
 def _heredoc_bodies(cmd: str) -> List[str]:
@@ -2524,7 +2558,7 @@ def _heredoc_bodies(cmd: str) -> List[str]:
             while i < len(lines) and lines[i].strip() != m.group(2):
                 body.append(lines[i])
                 i += 1
-            if GIT_COMMIT_TEXT_RE.search(_pipeline_at(opener, m.start())[:COMMIT_LINE_MAX]):
+            if GIT_COMMIT_TEXT_RE.search(_commit_window(opener, m.start())):
                 out.append("\n".join(body))
         i += 1
     return out

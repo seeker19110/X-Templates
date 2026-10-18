@@ -3782,6 +3782,26 @@ class GuardAiAttributionTest(unittest.TestCase):
         self.assertEqual(self.decide(cmd.format(strict), loose), "deny")
         self.assertEqual(self.decide(cmd.format(loose), strict), "")
 
+    def test_separator_inside_quotes_and_long_prefix(self):
+        # Review #125 (sau merge): `;`/`&&` trong `-m "…"` trước heredoc từng cắt mất `git commit` khỏi đoạn quét;
+        # tiền tố > 4 KiB trước `git commit` từng đẩy lệnh ra ngoài cửa sổ.
+        d = self.repo("ai_attribution: forbid\n")
+        for cmd in (
+            'git commit -m "fix: a; b" -m "$(cat <<\'EOF\'\nClaude-Session: x\nEOF\n)"',
+            'git commit -m "fix: a && b" -m "$(cat <<\'EOF\'\nClaude Opus 5\nEOF\n)"',
+            "git commit -m 'a; b' -F - <<'EOF'\nClaude Opus 5\nEOF",
+            "git commit -m a\\; -F - <<'EOF'\nClaude Opus 5\nEOF",
+            "X=" + "a" * 4100 + " git commit -F - <<'EOF'\nClaude Opus 5\nEOF",
+        ):
+            with self.subTest(cmd[:60]):
+                self.assertEqual(self.decide(cmd, d), "deny")
+        # heredoc của lệnh khác trên cùng dòng vẫn là dữ liệu của lệnh đó
+        self.assertEqual(self.decide("python3 - <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
+        self.assertEqual(self.g._unquoted_seps("a \"b;c\" 'd&&e' f\\;g; h"), [(19, 20)])
+        t0 = time.monotonic()
+        self.g._heredoc_bodies("a;" * 200000 + " git commit -F - <<E\nb\nE")
+        self.assertLess(time.monotonic() - t0, 2.0)
+
     def test_review_125_cases(self):
         # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
         # cục trước `commit`, biến thể tên model.

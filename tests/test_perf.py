@@ -451,6 +451,28 @@ class PerfCliTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("sub/a.py", out)
 
+    def test_guard_ignores_git_env_pointing_elsewhere(self):
+        d = Path(tempfile.mkdtemp())
+        clean = Path(tempfile.mkdtemp())
+        for p in (d, clean):
+            self.addCleanup(lambda p=p: __import__("shutil").rmtree(p, ignore_errors=True))
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(d, *args)
+        git(d, "config", "commit.gpgsign", "false")
+        (d / "bench.py").write_text("x\n")
+        git(d, "add", ".")
+        git(d, "commit", "-qm", "i")
+        subprocess.run(["git", "clone", "-q", str(d), str(clean)], check=True, env={**os.environ, **ISOLATED})
+        (d / "bench.py").write_text("y\n")  # cây agent sửa file khoá; GIT_DIR/GIT_WORK_TREE trỏ clone sạch
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(d)
+        env = {**ISOLATED, "GIT_DIR": str(clean / ".git"), "GIT_WORK_TREE": str(clean)}
+        with unittest.mock.patch.dict("os.environ", env):
+            rc, out, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "bench.py")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ đụng file khoá", out)
+
     def test_guard_cli(self):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))

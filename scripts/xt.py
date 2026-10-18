@@ -1636,10 +1636,10 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
-def _git(cwd: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+def _git(cwd: Path, *args: str, env: Optional[Dict[str, str]] = None) -> "subprocess.CompletedProcess[str]":
     cmd = ["git", "-C", str(cwd), *args]
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT)
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 124, "", f"git quá {GIT_TIMEOUT} s")
 
@@ -5047,6 +5047,7 @@ PERF_MIN_EFFECT = 0.02  # sàn 2 %: ngưỡng cảnh báo của Mozilla cho benc
 PERF_DIFF_HEAD = "diff --git "
 PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
+PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõi khi quét dòng đáng ngờ
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
@@ -5183,8 +5184,13 @@ def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[
     return out
 
 
+def _perf_env() -> Dict[str, str]:
+    """Môi trường cho git của `perf`: bỏ biến trỏ repo/worktree/index khác — đặt sẵn chúng là lái guard sang một clone sạch."""
+    return {k: v for k, v in os.environ.items() if k not in PERF_GIT_ENV}
+
+
 def _perf_git(base: Path, *args: str) -> str:
-    r = _git(base, *args)
+    r = _git(base, *args, env=_perf_env())
     if r.returncode != 0:
         raise RuntimeError(f"git {args[0]} lỗi: {r.stderr.strip() or r.returncode}")
     return r.stdout
@@ -5316,7 +5322,7 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
 def perf_repo() -> Path:
     """Gốc repo git của thư mục ĐANG ĐỨNG — không phải `project_dir()`: chạy bằng `xt.py` của worktree gốc, guard vẫn phải
     rà cây agent sửa chứ không rà chính worktree sạch đó."""
-    r = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+    r = _git(Path.cwd(), "rev-parse", "--show-toplevel", env=_perf_env())
     if r.returncode != 0:
         raise RuntimeError(f"không ở trong repo git: {r.stderr.strip() or r.returncode}")
     return Path(r.stdout.strip())

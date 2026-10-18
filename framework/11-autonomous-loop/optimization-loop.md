@@ -29,7 +29,7 @@ Mỗi task tối ưu là một dòng `T-NNN` thường trong `PLAN.md` (parser k
 8. **Dừng:** đạt mục tiêu thì dừng (không tối ưu vượt mục tiêu); 3 lần thử liên tiếp không `improved` trên cùng điểm nóng → đổi điểm nóng hoặc `loop defer`.
 
 Gate ví dụ. **Script Gate và công cụ chấm cũng là bộ đo khoá:** agent sửa được `xt.py` hay chính script thì `perf compare` nói gì cũng được. Vì vậy Gate trong `PLAN.md` lấy script từ commit gốc —
-``Gate: `bash <(git show origin/main:scripts/perf-gate.sh)` `` — và script dùng `xt.py` của commit gốc trong worktree (commit gốc phải đã có khung ở `.xtemplates/`; repo khung dùng `scripts/xt.py`). `perf guard`/`perf sample` luôn làm việc trên **thư mục đang đứng** (gốc repo git của cwd), không theo `CLAUDE_PROJECT_DIR`, nên script chạy từ cây agent sửa thì rà đúng cây đó:
+``Gate: `bash <(git show origin/main:scripts/perf-gate.sh)` `` — và script dùng `xt.py` của commit gốc trong worktree (commit gốc phải đã có khung ở `.xtemplates/`; repo khung dùng `scripts/xt.py`). `perf guard`/`perf sample` luôn làm việc trên **thư mục đang đứng** (gốc repo git của cwd), không theo `CLAUDE_PROJECT_DIR` và bỏ qua `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` đặt sẵn, nên script chạy từ cây agent sửa thì rà đúng cây đó:
 
 ```bash
 # scripts/perf-gate.sh (dự án tự viết)
