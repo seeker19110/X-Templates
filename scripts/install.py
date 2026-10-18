@@ -8,7 +8,7 @@ Kết quả trong dự án đích:
   .xtemplates/scripts/dev-task.sh
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
-  .github/rulesets/main.json, pull_request_template.md, dependabot.yml   chỉ khi --with-github (copy-if-absent)
+  .github/rulesets/main.json, pull_request_template.md, dependabot.yml, workflows/merge-gate.yml   chỉ khi --with-github (copy-if-absent)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
 
 Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): chạy lại install là chuyển sang tên mới (ADR-0007) —
@@ -50,8 +50,14 @@ ROOT_TEMPLATES = {
 LEGACY_DIR = ".xstored"
 LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
-# --with-github: hàng rào GitHub mẫu của khung (copy-if-absent). Workflow KHÔNG copy vì job quality phụ thuộc stack.
-GITHUB_FILES = [".github/rulesets/main.json", ".github/pull_request_template.md", ".github/dependabot.yml"]
+# --with-github: hàng rào GitHub mẫu của khung (copy-if-absent). Workflow KHÔNG copy vì job quality phụ thuộc stack — trừ
+# `merge-gate.yml`: không phụ thuộc stack (chỉ python3 + gh) và ruleset mẫu đòi check của nó (ADR-0023).
+GITHUB_FILES = [
+    ".github/rulesets/main.json",
+    ".github/pull_request_template.md",
+    ".github/dependabot.yml",
+    ".github/workflows/merge-gate.yml",
+]
 
 
 def log(msg: str) -> None:
@@ -348,11 +354,12 @@ def ruleset_required_checks() -> list[str]:
 
 
 def install_github(target: Path) -> None:
-    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot (copy-if-absent), cảnh báo required check."""
+    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow `merge-gate` (copy-if-absent), cảnh
+    báo required check mà dự án phải tự có job."""
     for gh in GITHUB_FILES:
         r = copy_if_absent(SRC / gh, target / gh, False)
         log(f"  {gh}: {r}")
-    checks = ruleset_required_checks()
+    checks = [c for c in ruleset_required_checks() if c != "merge-gate"]  # job đã copy cùng ruleset
     # AUD-CI-003: workflow không được copy (phụ thuộc stack) → import ruleset trước khi có job sẽ khoá merge
     if checks:
         log(
@@ -448,7 +455,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-harness", action="store_true", help="không copy .claude/")
     p.add_argument("--label", help="nhãn phiên bản ghi vào .xtemplates/VERSION (mặc định: git SHA)")
     p.add_argument(
-        "--with-github", action="store_true", help="copy ruleset mẫu, PR template, Dependabot vào .github/ (không đè)"
+        "--with-github",
+        action="store_true",
+        help="copy ruleset mẫu, PR template, Dependabot, workflow merge-gate vào .github/ (không đè)",
     )
     a = p.parse_args(argv)
     return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github)

@@ -216,6 +216,7 @@ class InstallTest(unittest.TestCase):
         with redirect_stderr(err):
             self.assertEqual(self.run_install("--with-github"), 0)
         self.assertIn("required check: quality", err.getvalue())
+        self.assertNotIn("merge-gate", err.getvalue().split("required check:")[1].split("\n")[0])
 
     def test_with_github_copies_guardrails_without_overwrite(self):
         self.assertEqual(self.run_install(), 0)
@@ -224,6 +225,8 @@ class InstallTest(unittest.TestCase):
         rs = self.target / ".github" / "rulesets" / "main.json"
         self.assertTrue(rs.exists())
         self.assertTrue((self.target / ".github" / "pull_request_template.md").exists())
+        # ADR-0023: ruleset mẫu đòi `merge-gate` → workflow của nó đi kèm, không cảnh báo phải tự viết
+        self.assertTrue((self.target / ".github" / "workflows" / "merge-gate.yml").exists())
         rs.write_text("{}\n", encoding="utf-8")
         self.run_install("--with-github")
         self.assertEqual(rs.read_text(encoding="utf-8"), "{}\n")
@@ -337,6 +340,8 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
         (src / ".github" / "rulesets" / "main.json").write_text(ruleset, encoding="utf-8")
         (src / ".github" / "pull_request_template.md").write_text("pr\n", encoding="utf-8")
         (src / ".github" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
+        (src / ".github" / "workflows").mkdir()
+        (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
     return src
 
 

@@ -101,6 +101,7 @@ updated: 2026-10-18
 | `loop stop` | Tắt vòng (`active=false`) |
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
 | `grant-check GROUP [KHOÁ=GIÁ_TRỊ …] [--plan F] [--json]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không (ADR-0022): exit 0 trong ủy quyền, 1 ngoài hoặc thiếu mục → `loop defer`, 2 tham số sai |
+| `merge-gate [--pr N] [--head SHA] [--json]` | Required check `merge-gate` (ADR-0023): exit 1 khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge (auto-merge không ghim head); `hard` không auto-merge → exit 0 kèm cảnh báo (người merge tay); 2 lỗi đọc PR; 3 head khác `--head` |
 | `merge-watch [--pr N] [--interval 30] [--max-minutes 240]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
