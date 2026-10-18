@@ -2859,14 +2859,18 @@ def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
-def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None) -> Dict[str, Any]:
+def merge_decision(
+    pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
+) -> Dict[str, Any]:
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
-    PR còn chờ CI để guard không bật auto-merge cho nó ngay lúc mở PR."""
+    PR còn chờ CI để guard không bật auto-merge cho nó ngay lúc mở PR. `hard_auto` (`merge_hard_exceptions: auto`,
+    ADR-0020): ngoại lệ cứng không giữ người — lý do chuyển sang `hard_waived`, `hard` rỗng."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     hard = merge_hard_reasons(pr, risk_paths or [])
+    waived, hard = (hard, []) if hard_auto else ([], hard)
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
     if blocked:
@@ -2884,6 +2888,10 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         verdict, reasons = "human", ["ruleset đòi review của người"]
     elif lane_reasons:  # L3 (ADR-0015): làn chuẩn tự merge — ghi đúng làn (AUD-CODE-010)
         verdict, reasons = "merge", [f"L3 (ADR-0015): làn chuẩn, CI xanh, không xung đột — {'; '.join(lane_reasons)}"]
+        if waived:
+            reasons.append(
+                f"ngoại lệ cứng không giữ người (merge_hard_exceptions: auto, ADR-0020): {'; '.join(waived)}"
+            )
     else:
         verdict, reasons = "merge", ["làn nhanh, CI xanh, không xung đột"]
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
@@ -2905,6 +2913,7 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
+        "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -2918,12 +2927,25 @@ def merge_decision(pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[L
     }
 
 
+def _xt_keys(base: Path) -> Dict[str, str]:
+    p = base / "xt.yaml"
+    raw = p.read_text(encoding="utf-8") if p.is_file() else ""
+    return {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
+
+
+def merge_hard_mode(base: Path) -> Tuple[bool, List[str]]:
+    """(ngoại lệ cứng không giữ người?, ghi chú) từ xt.yaml `merge_hard_exceptions: human|auto` (ADR-0020). Thiếu
+    khoá → human (bản cài cũ giữ hành vi ADR-0016); giá trị lạ → human (an toàn) kèm ghi chú."""
+    mode = _xt_keys(base).get("merge_hard_exceptions", "human")
+    if mode in ("human", "auto"):
+        return mode == "auto", []
+    return False, [f"merge_hard_exceptions '{mode}' không hợp lệ (human|auto) — dùng human"]
+
+
 def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
     """(mức tự chủ, glob nhạy cảm riêng, ghi chú) từ xt.yaml: `merge_autonomy: L0..L4` (mặc định L1),
     `merge_risk_paths: "glob, glob"`. Giá trị lạ → L1 (an toàn) kèm ghi chú."""
-    p = base / "xt.yaml"
-    raw = p.read_text(encoding="utf-8") if p.is_file() else ""
-    keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
+    keys = _xt_keys(base)
     level = keys.get("merge_autonomy", "L1")
     notes: List[str] = []
     if not re.fullmatch(r"L[0-4]", level):
@@ -3872,7 +3894,9 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     autonomy, risk_paths, notes = merge_config(project_dir())
-    d = merge_decision(pr, autonomy, risk_paths)
+    hard_auto, hard_notes = merge_hard_mode(project_dir())
+    notes += hard_notes
+    d = merge_decision(pr, autonomy, risk_paths, hard_auto)
     if args.json:
         print(json.dumps({**d, "notes": notes}, ensure_ascii=False))
     else:

@@ -45,7 +45,7 @@
 - 2026-10-16 Trong vòng autopilot, `lint`/`test` rỗng hoặc no-op (kể cả chỉ có comment) làm cổng đỏ — ADR-0011.
 - 2026-10-16 Blueprint chỉ MUST theo quy mô, SHOULD/MAY ở BACKLOG; trần vòng một phiên chỉ đếm task — ADR-0012.
 - 2026-10-16 Máy quyết khi nào merge (`xt.py merge-check`, REST); mỗi lát code một PR — ADR-0013, ADR-0014, D-010.
-- 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012.
+- 2026-10-16 Mở PR là bật auto-merge (`merge_autonomy: L3`, mặc định repo khung + mẫu dự án đích; chủ repo yêu cầu) — ADR-0015, D-011; ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) vẫn người merge ở L3 (`merge-check` trả `hard`) — ADR-0016, D-012; bỏ được bằng `merge_hard_exceptions: auto` (ADR-0020).
 - 2026-10-17 Guard: lệnh trong container chỉ xét luật ra khỏi máy dev; push vào PR đang auto-merge → chạy lại `merge-check` (D-015).
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 ## Bàn giao phiên

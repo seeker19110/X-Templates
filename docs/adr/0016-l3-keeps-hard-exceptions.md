@@ -1,6 +1,6 @@
 # ADR-0016: Ở `merge_autonomy: L3` vẫn để người merge ngoại lệ cứng (tiền, dữ liệu thật, auth, mật mã, bí mật)
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận — thay một phần bởi ADR-0020 (`merge_hard_exceptions: auto`)
 - **Trạng thái triển khai:** Đã triển khai (`scripts/xt.py` `merge_hard_reasons`, `merge_decision` trả `hard`;
   `.claude/hooks/guard.py` `_auto_merge_verdict`; test `tests/test_merge.py::HardExceptionL3Test`,
   `GuardHardExceptionTest`)

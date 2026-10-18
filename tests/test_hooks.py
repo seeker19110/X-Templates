@@ -1718,6 +1718,21 @@ class MergeGuardTest(unittest.TestCase):
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {**env, "XT_GUARD_POLICY": policy})
                 self.assertEqual((code, decision(out)), (0, want), out)
 
+    def test_hard_exception_auto_lets_merge_through(self):
+        """ADR-0020: chủ dự án đặt `merge_hard_exceptions: auto` → PR ngoại lệ cứng merge/bật auto-merge như PR khác."""
+        (self.proj / "xt.yaml").write_text("merge_autonomy: L3\nmerge_hard_exceptions: auto\n", encoding="utf-8")
+        self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "XT_GUARD_POLICY": ""}
+        code, out, _ = run_hook(
+            "pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --auto --squash"}}, self.proj, env
+        )
+        self.assertEqual(code, 0, out)
+        self.assertNotEqual(decision(out), "deny", out)
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def"}
+        payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": mcp}
+        code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, env)
+        self.assertEqual((code, decision(out)), (0, "allow"), out)
+
     def policy(self, cmd: str) -> str | None:
         """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
         with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):

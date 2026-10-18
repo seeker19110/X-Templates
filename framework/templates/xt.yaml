@@ -16,9 +16,12 @@ format_file: ""
 # Merge PR (ADR-0013/0014/0015, LOOP-STOP-022): L3 (mặc định) = mở PR là bật auto-merge của GitHub, merge khi required check
 # xanh (cần bật "Allow auto-merge" + ruleset có required check; ghi miễn trừ WF-REVIEW-007); L2 = máy chỉ tự merge làn nhanh
 # (`xt.py merge-check`); L1 = người merge mọi PR.
-# merge_risk_paths: glob thêm vào danh sách đường dẫn nhạy cảm (luôn để người merge), cách nhau dấu phẩy.
+# merge_risk_paths: glob thêm vào danh sách đường dẫn nhạy cảm (ngoại lệ cứng), cách nhau dấu phẩy.
+# merge_hard_exceptions: ngoại lệ cứng (tiền, dữ liệu người dùng thật, auth, mật mã, bí mật, merge_risk_paths) — auto (mặc định
+# mẫu, ADR-0020) = agent merge như PR khác khi CI xanh; human = người merge (ADR-0016). Thiếu khoá = human.
 merge_autonomy: L3
 merge_risk_paths: ""
+merge_hard_exceptions: auto
 # Tuỳ chọn, agent đọc và chạy trực tiếp (dev-task không chạy): e2e, audit (dependency), perf (k6/lighthouse), migrate (áp migration local), install, dev, init, smoke
 e2e: ""
 audit: ""

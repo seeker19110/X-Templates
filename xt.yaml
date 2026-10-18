@@ -10,3 +10,6 @@ build: python3 scripts/xt.py stats
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: mở PR là bật auto-merge
 # của GitHub cho mọi làn (merge khi required check xanh); L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
+# Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
+# agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
+merge_hard_exceptions: auto

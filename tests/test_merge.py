@@ -368,6 +368,18 @@ class MergeConfigTest(unittest.TestCase):
             xt.merge_config(self.base), (1, [], ["merge_autonomy 'tự động' không hợp lệ (L0–L4) — dùng L1"])
         )
 
+    def test_hard_mode(self):
+        """ADR-0020: thiếu khoá → human; giá trị lạ → human kèm ghi chú."""
+        self.assertEqual(xt.merge_hard_mode(self.base), (False, []))
+        for raw, want in (("auto", (True, [])), ("human", (False, []))):
+            (self.base / "xt.yaml").write_text(f"merge_hard_exceptions: {raw}\n", encoding="utf-8")
+            self.assertEqual(xt.merge_hard_mode(self.base), want)
+        (self.base / "xt.yaml").write_text("merge_hard_exceptions: off\n", encoding="utf-8")
+        self.assertEqual(
+            xt.merge_hard_mode(self.base),
+            (False, ["merge_hard_exceptions 'off' không hợp lệ (human|auto) — dùng human"]),
+        )
+
 
 class MergeDoctorTest(unittest.TestCase):
     def test_warns_when_l2_but_settings_still_asks_merge(self):
@@ -392,6 +404,18 @@ class MergeCheckCliTest(unittest.TestCase):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         (self.base / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+
+    def test_hard_auto_from_xt_yaml(self):
+        hot = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}])
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmerge_hard_exceptions: auto\n", encoding="utf-8")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot))
+        d = json.loads(out)
+        self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (0, "merge", [], []))
+        self.assertTrue(d["hard_waived"])
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmerge_hard_exceptions: x\n", encoding="utf-8")
+        rc, out, _ = run_main("merge-check", "--pr-json", "-", stdin=json.dumps(hot))
+        self.assertEqual(rc, 1)
+        self.assertIn("merge_hard_exceptions 'x' không hợp lệ", out)
 
     def test_pr_json_from_stdin_text_and_json(self):
         rc, out, err = run_main("merge-check", "--pr-json", "-", stdin=json.dumps(pr()))
@@ -576,6 +600,17 @@ class HardExceptionL3Test(unittest.TestCase):
         d = xt.merge_decision(pr(), 3, ["src/cart/*"])
         self.assertEqual(d["verdict"], "human")
         self.assertTrue(d["hard"])
+
+    def test_hard_auto_merges_and_keeps_reasons(self):
+        """ADR-0020: `merge_hard_exceptions: auto` — ngoại lệ cứng không giữ người ở L3; lý do còn ở `hard_waived`."""
+        auth = pr(files=[{"path": "src/auth/login.py", "additions": 1, "deletions": 0}], labels=[{"name": "risk:pii"}])
+        d = xt.merge_decision(auth, 3, hard_auto=True)
+        self.assertEqual((d["verdict"], d["lane"], d["hard"]), ("merge", "chuẩn", []))
+        self.assertEqual(len(d["hard_waived"]), 2)
+        self.assertIn("ADR-0020", d["reasons"][-1])
+        self.assertEqual(xt.merge_decision(auth, 2, hard_auto=True)["verdict"], "human")  # dưới L3 vẫn làn chuẩn
+        self.assertEqual(xt.merge_decision(pr(), 3, hard_auto=True)["hard_waived"], [])
+        self.assertEqual(xt.merge_decision(auth, 3)["hard_waived"], [])
 
     def test_same_name_check_from_other_app_not_hidden(self):
         """AUD-CODE-007: check-run cùng tên từ app khác không bị gộp (chỉ lần chạy lại cùng app mới thay lần cũ)."""

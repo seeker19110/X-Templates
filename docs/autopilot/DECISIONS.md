@@ -162,3 +162,10 @@
 - Chọn: Ba nhóm: máy chặn (deny) · cho chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua loop defer (merge ngoại lệ cứng, thao tác trên tiền thật/dữ liệu người dùng thật kể cả gửi tin tới người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật, bế tắc máy)
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: ADR-0018 chỉ mở việc có đường lùi (revert, unpublish, CI); thanh toán thật, xoá/xuất dữ liệu người dùng thật, tin đã gửi không thu hồi được và trùng ngoại lệ cứng ADR-0016/0019 (LOOP-STOP-005 MUST); PA2 bỏ chốt người duy nhất của nhóm rủi ro cao nhất mà ADR không quyết
 - Đường lùi: Bỏ nhóm 'vẫn cần người' trong AGENTS.md §5 và mẫu dự án đích; ADR-0018 không đổi
+
+### D-024 · 2026-10-17T23:59:47+00:00 · Chủ repo chọn 'bỏ toàn bộ ngoại lệ cứng' (2026-10-17) — cài thế nào?
+
+- Phương án: (1) Khoá xt.yaml merge_hard_exceptions: human|auto; thiếu khoá = human; repo khung + mẫu dự án đích đặt auto; merge-check vẫn liệt kê lý do (hard_waived) nhưng hard rỗng nên guard cho merge/auto-merge · (2) Xoá hẳn HARD_ASK và merge_hard_reasons khỏi code · (3) Dùng L4 làm mức bỏ ngoại lệ cứng
+- Chọn: Khoá xt.yaml merge_hard_exceptions: human|auto; thiếu khoá = human; repo khung + mẫu dự án đích đặt auto; merge-check vẫn liệt kê lý do (hard_waived) nhưng hard rỗng nên guard cho merge/auto-merge
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 2 (đường lùi): đổi một dòng xt.yaml là bật lại chốt người, bản cài cũ thiếu khoá giữ hành vi an toàn; PA2 mất đường lùi và vết lý do; PA3 trái nghĩa L4 'làn kiến trúc luôn có người' trong bảng L0–L4. Lớp đỡ còn lại: required check gitleaks/CodeQL/dep-audit, guard deny việc không đảo ngược
+- Đường lùi: merge_hard_exceptions: human trong xt.yaml (hoặc xoá khoá)

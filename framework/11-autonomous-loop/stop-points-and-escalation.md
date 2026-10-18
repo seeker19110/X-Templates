@@ -3,7 +3,7 @@ title: Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
 kind: module
 prefix: LOOP-STOP
 applies_to: [all]
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
 # Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
@@ -84,13 +84,13 @@ chuyên môn. Guard **không hỏi người** (ADR-0018): bộ luật vẫn tín
 | Nhóm | Ví dụ | Cơ chế thật trong khung (mặc định) | Ai mở khoá |
 |---|---|---|---|
 | Thao tác không đảo ngược | `rm -rf`, `git push --force`, `reset --hard`, push thẳng nhánh chính, xoá đệ quy ngoài dự án, `gh repo delete`, ghi ruleset qua `gh api`, `kubectl delete`, `terraform destroy`, drop/alter phá vỡ, xoá dữ liệu | `pre-bash-guard.sh` → **deny**; `permissions.deny` | Người tự chạy tay |
-| Tiền thật | Thanh toán, hoàn tiền, đổi giá, gọi API thu phí ngoài sandbox, đăng ký dịch vụ trả phí | `loop defer`/`loop block --reason` + SPEC phải có ca test; PR chạm tiền → `merge-check` `hard` → merge bị **deny** | Chủ sản phẩm |
-| Dữ liệu người dùng thật | Migration phá vỡ trên DB production, export PII, xoá tài khoản, gửi tin tới người dùng thật | `loop defer`; PR `risk:pii` → `hard` → merge bị **deny**; sửa migration đã tồn tại: cho chạy, §3 AGENTS.md cấm sửa migration đã áp | Người trực + chủ dữ liệu |
+| Tiền thật | Thanh toán, hoàn tiền, đổi giá, gọi API thu phí ngoài sandbox, đăng ký dịch vụ trả phí | `loop defer`/`loop block --reason` + SPEC phải có ca test; PR chạm tiền → `merge-check` `hard` → merge bị **deny** (`merge_hard_exceptions: human`) | Chủ sản phẩm |
+| Dữ liệu người dùng thật | Migration phá vỡ trên DB production, export PII, xoá tài khoản, gửi tin tới người dùng thật | `loop defer`; PR `risk:pii` → `hard` → merge bị **deny** (`human`); sửa migration đã tồn tại: cho chạy, §3 AGENTS.md cấm sửa migration đã áp | Người trực + chủ dữ liệu |
 | Đổi quyền / nới cổng | Sửa `eslint`/`tsconfig`/coverage/workflows/`.claude/settings.json`/`.xtemplates/`, cập nhật snapshot/baseline ảnh | `pre-edit-guard.sh` → cho chạy, lý do ghi ở commit/PR, PR không vào làn nhanh; tắt/bỏ qua hook → **deny** | Review PR |
 | Tự thêm năng lực agent | `claude mcp add`, `claude plugin install`, `npx skills add`, sửa `.mcp.json`/`.claude-plugin/` (`LOOP-STOP-023`) | `pre-bash-guard.sh`/`pre-edit-guard.sh` → cho chạy; PR chỉ đổi các file đó không vào làn nhanh | Review PR |
-| Hành động đối ngoại | `gh pr merge`/`gh api` merge/tool MCP merge (`pre-mcp-guard.sh`), `gh api` ghi khác, `gh release`, `npm publish`, `docker push`, `terraform apply`, đăng bài | Cho chạy; merge PR `hard` → **deny** (ADR-0019); Routine chỉ đề xuất (`LOOP-STOP-014`) | CI + ruleset nhánh; người cho PR `hard` |
+| Hành động đối ngoại | `gh pr merge`/`gh api` merge/tool MCP merge (`pre-mcp-guard.sh`), `gh api` ghi khác, `gh release`, `npm publish`, `docker push`, `terraform apply`, đăng bài | Cho chạy; merge PR `hard` → **deny** (ADR-0019; `auto` không còn `hard`, ADR-0020); Routine chỉ đề xuất (`LOOP-STOP-014`) | CI + ruleset nhánh; người cho PR `hard` khi `human` |
 | Ra khỏi máy dev | `ssh`/`scp`/`rsync` tới máy khác, `psql`/`mysql` tới máy chủ không cục bộ, `curl`/`wget` gửi dữ liệu ra ngoài, thêm phụ thuộc (`pnpm add`, `pip install <gói>`), container trên daemon máy khác | Cho chạy; gửi file bí mật/biến môi trường ra mạng, container có quyền máy chủ → **deny** | Review PR |
-| Merge thay đổi rủi ro cao | Chạm auth, mật mã, dữ liệu nhạy cảm, luật ngành | Luôn làn kiến trúc; `merge-check` `hard` → agent merge/bật auto-merge bị **deny**; `risk_tags` ≠ rỗng → thêm review bảo mật (`LOOP-STOP-005`) | Người phê duyệt bảo mật |
+| Merge thay đổi rủi ro cao | Chạm auth, mật mã, dữ liệu nhạy cảm, luật ngành | Luôn làn kiến trúc; `merge-check` `hard` → agent merge/bật auto-merge bị **deny** (`merge_hard_exceptions: auto` → CI + reviewer máy, ADR-0020); `risk_tags` ≠ rỗng → thêm review bảo mật (`LOOP-STOP-005`) | Người phê duyệt bảo mật |
 | Bế tắc máy | Cùng chữ ký lỗi lần 3, ngân sách/hạn hết | `loop record` tự đặt `blocked`; verdict `budget` | Người xem rồi `loop resume` |
 
 ### Thang tin cậy T0–T4 cho mỗi việc giao (stored 23 §4.5)
@@ -112,13 +112,13 @@ Subagent **không tự nâng tier**; `external_side_effects` là enum trong task
 | L0 Trợ lý | Nháp spec/plan/diff | Mọi thứ | Có baseline 8 tuần |
 | L1 Sinh PR | Chạy trọn tới PR + test + review report | Review và merge mọi PR | `first_pass_gate_rate ≥ 70 %` 4 tuần, lỗi lọt ≤ baseline |
 | L2 Tự chủ làn nhanh | Tự merge **làn nhanh** khi cổng xanh | Duyệt spec, review mẫu ≥ 10 %, làn kiến trúc | 200 merge làn nhanh liên tiếp không lỗi nghiêm trọng (đội 1 người: 60) |
-| L3 Tự chủ làn chuẩn | Trọn tính năng làn chuẩn | Chốt spec, chốt phát hành nhạy cảm, ngoại lệ cứng | 8 tuần ở L2, `change_failure_rate ≤` baseline, can thiệp ≤ 15 % — hoặc chủ dự án chọn thẳng (`merge_autonomy: L3`, ADR-0015) |
+| L3 Tự chủ làn chuẩn | Trọn tính năng làn chuẩn | Chốt spec, chốt phát hành nhạy cảm, ngoại lệ cứng (trừ khi `merge_hard_exceptions: auto`) | 8 tuần ở L2, `change_failure_rate ≤` baseline, can thiệp ≤ 15 % — hoặc chủ dự án chọn thẳng (`merge_autonomy: L3`, ADR-0015) |
 | L4 Trong hàng rào | Phát hành canary | Spec, giám sát, kill switch; làn kiến trúc luôn có người | Chỉ hệ rủi ro thấp, có phê duyệt quản trị |
 
 **Đường lùi tự động:** 2 tuần liên tiếp lỗi lọt xấu hơn baseline, hoặc 1 vi phạm phân tách đặc quyền ⇒ hạ một mức.
 
 Cột "Điều kiện lên mức" là lộ trình đo được; `merge_autonomy` trong `xt.yaml` là lựa chọn của chủ dự án — mẫu dự án đích
-mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở mọi mức, ngoại lệ cứng dưới đây vẫn người merge (ADR-0016).
+mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở mọi mức, ngoại lệ cứng dưới đây vẫn người merge (ADR-0016) — trừ khi chủ dự án đặt `merge_hard_exceptions: auto` (ADR-0020; repo khung và mẫu đặt `auto`).
 
 ### Vị từ "làn nhanh" (được tự merge ở L2) — đủ cả 5, thiếu một là làn chuẩn
 
@@ -129,14 +129,16 @@ mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở
 5. Có test phủ nhánh sửa và toàn bộ CI xanh.
 Ngoại lệ cứng: **xác thực/phân quyền · thanh toán · mật mã luôn là làn kiến trúc**, kể cả diff 1 dòng và kể cả ở L3
 (`xt.py merge-check` trả `hard`: thêm bí mật, nhãn `risk:pii`/`risk:admin`/`risk:secret`, `merge_risk_paths` — ADR-0016).
+`xt.yaml` `merge_hard_exceptions: auto` (ADR-0020): `merge-check` vẫn liệt kê lý do ở `hard_waived` nhưng `hard` rỗng —
+PR vẫn làn chuẩn, ở L3 merge khi CI xanh như PR khác; thiếu khoá hoặc giá trị lạ = `human`.
 
 ## Checklist
 
 - [ ] `LOOP-STOP-001` **MUST** Lệnh phá huỷ/không đảo ngược bị **deny** ở PreToolUse (không chỉ `ask`), sau khi tách lệnh nối `; && | ||`. Lệnh lồng cũng được quét: `sh -c`/`bash -c`, `eval '…'`, backtick, `{ …; }`, `if …; then …`, heredoc/ống vào shell, `find … -delete`/`-exec rm` (gốc `/`, `~` → deny); xoá đệ quy ra ngoài gốc dự án (trừ thư mục tạm) → deny (`XT_GUARD_POLICY=strict`: ask). → Kiểm: hook trả `permissionDecision: deny` cho `ls; rm -rf /`, `git push --force`, `eval 'rm -rf ~'`, `` echo `rm -rf ~` ``, `{ rm -rf ~; }`, `find / -exec rm -rf {} +`; deny cho `rm -rf ~/x` (strict: ask); test hook xanh (`tests/test_hooks.py` `GuardStoredScanTest`). · Nguồn: stored 12 §4 quy tắc 6
-- [ ] `LOOP-STOP-002` **MUST** Hành động đối ngoại (merge, release, publish, deploy, gửi thông báo) đi qua guard: bộ luật đánh dấu mọi lệnh đối ngoại; không đảo ngược (huỷ repo/bí mật/hạ tầng, push nhánh chính) và merge/bật auto-merge PR ngoại lệ cứng → **deny**; còn lại mặc định cho chạy, lớp đỡ là CI, ruleset nhánh, review (ADR-0018, ADR-0019); `XT_GUARD_POLICY=strict` → `ask`. Việc chạm tiền/dữ liệu người dùng thật → `loop defer` (D-023). Merge PR: làn nhanh khi `xt.py merge-check` trả `merge` ở mức tự chủ ≥ L2, hoặc bật auto-merge của GitHub ở L3 cho mọi PR trừ ngoại lệ cứng (`LOOP-STOP-022`, ADR-0015, ADR-0016). → Kiểm: `.claude/settings.json` `permissions.ask` rỗng; mặc định guard trả `deny` cho `gh repo delete`, `git push origin main`, merge PR `hard` (`GuardPolicyTest`, `MergeGuardTest`); ở `strict` guard trả `ask` cho `gh pr merge` không ghim `--match-head-commit`, có `--admin`/`--repo`, hoặc `merge-check` ≠ `merge` — cùng luật cho `gh api -X PUT …/pulls/N/merge` (ghim `sha`) và tool MCP `merge_pull_request` (ghim `expectedHeadSha`), mọi `gh api` ghi khác (cả `--input`) luôn `ask`, bật auto-merge `ask` dưới L3 hoặc khi `merge-check` có `hard`; log phiên không có lệnh đối ngoại nào khác chạy tự động.
+- [ ] `LOOP-STOP-002` **MUST** Hành động đối ngoại (merge, release, publish, deploy, gửi thông báo) đi qua guard: bộ luật đánh dấu mọi lệnh đối ngoại; không đảo ngược (huỷ repo/bí mật/hạ tầng, push nhánh chính) và merge/bật auto-merge PR ngoại lệ cứng (`merge_hard_exceptions: human`) → **deny**; còn lại mặc định cho chạy, lớp đỡ là CI, ruleset nhánh, review (ADR-0018, ADR-0019); `XT_GUARD_POLICY=strict` → `ask`. Việc chạm tiền/dữ liệu người dùng thật → `loop defer` (D-023). Merge PR: làn nhanh khi `xt.py merge-check` trả `merge` ở mức tự chủ ≥ L2, hoặc bật auto-merge của GitHub ở L3 cho mọi PR trừ ngoại lệ cứng (`LOOP-STOP-022`, ADR-0015, ADR-0016; `merge_hard_exceptions: auto` gồm cả ngoại lệ cứng — ADR-0020). → Kiểm: `.claude/settings.json` `permissions.ask` rỗng; mặc định guard trả `deny` cho `gh repo delete`, `git push origin main`, merge PR `hard` (`GuardPolicyTest`, `MergeGuardTest`); ở `strict` guard trả `ask` cho `gh pr merge` không ghim `--match-head-commit`, có `--admin`/`--repo`, hoặc `merge-check` ≠ `merge` — cùng luật cho `gh api -X PUT …/pulls/N/merge` (ghim `sha`) và tool MCP `merge_pull_request` (ghim `expectedHeadSha`), mọi `gh api` ghi khác (cả `--input`) luôn `ask`, bật auto-merge `ask` dưới L3 hoặc khi `merge-check` có `hard`; log phiên không có lệnh đối ngoại nào khác chạy tự động.
 - [ ] `LOOP-STOP-003` **MUST** Sửa cấu hình cổng (lint/type/coverage/workflows/ruleset/hook) và migration đã tồn tại được guard đánh dấu — mặc định cho chạy (ADR-0018), `XT_GUARD_POLICY=strict` → `ask` — và **lý do ghi ở commit/PR**; PR đó không vào làn nhanh; tắt/bỏ qua hook → deny. → Kiểm: `pre-edit-guard.sh` trả `ask` ở `strict` cho `.github/workflows/x.yml` và file trong `migrations/` đã có; PR mô tả lý do. · Nguồn: stored 23 §4.3
 - [ ] `LOOP-STOP-004` **MAY** Ngừng dùng 2026-10-15 — thay bằng `LOOP-STOP-018` (ADR-0008: mâu thuẫn spec/nhiều cách hiểu là điểm quyết định, phiên chính tự duyệt và ghi lại thay vì `loop block`).
-- [ ] `LOOP-STOP-005` **MUST** Việc chạm tiền thật, dữ liệu người dùng thật, xác thực/phân quyền, mật mã luôn có người duyệt trước merge (T4/làn kiến trúc), ở mọi mức `merge_autonomy` kể cả L3 (ADR-0016). → Kiểm: PR có nhãn `risk:` tương ứng và required review của người; CI chặn merge khi thiếu; `xt.py merge-check` trả `hard` + `human` và guard không bật auto-merge cho PR đó; sau **mỗi push** vào PR đang bật auto-merge chạy lại `merge-check` — có `hard` (commit sau chạm auth/tiền, thêm nhãn `risk:`) thì tắt auto-merge (MCP `disable_pr_auto_merge` hoặc `gh pr merge <N> --disable-auto`) rồi `loop defer` (AUD-SEC-036).
+- [ ] `LOOP-STOP-005` **MUST** Việc chạm tiền thật, dữ liệu người dùng thật, xác thực/phân quyền, mật mã luôn có người duyệt trước merge (T4/làn kiến trúc), ở mọi mức `merge_autonomy` kể cả L3 (ADR-0016) — trừ khi chủ dự án đặt `merge_hard_exceptions: auto` trong `xt.yaml` và ghi việc chấp nhận rủi ro (ADR/D-NNN của dự án; ADR-0020). → Kiểm: PR có nhãn `risk:` tương ứng và required review của người; CI chặn merge khi thiếu; `xt.py merge-check` trả `hard` + `human` và guard không bật auto-merge cho PR đó; sau **mỗi push** vào PR đang bật auto-merge chạy lại `merge-check` — có `hard` (commit sau chạm auth/tiền, thêm nhãn `risk:`) thì tắt auto-merge (MCP `disable_pr_auto_merge` hoặc `gh pr merge <N> --disable-auto`) rồi `loop defer` (AUD-SEC-036).
 - [ ] `LOOP-STOP-006` **MUST@L** Mỗi task giao cho subagent ghi `model_tier` (T0–T4) và `external_side_effects`; subagent không tự nâng tier. → Kiểm: task pack có hai trường; test từ chối task thiếu trường. · Nguồn: stored 23 §4.5
 - [ ] `LOOP-STOP-007` **MUST@L** Cổng chờ người có hạn (mặc định 24 h) và nhắc giữa hạn; quá hạn **không tự pass, không tự huỷ**. → Kiểm: cấu hình `gate_timeout_hours: 24`; test quá hạn → trạng thái `escalated`. · Nguồn: spec cũ ASC-FR-14
 - [ ] `LOOP-STOP-008` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`LOOP-DESIGN-005`](loop-design.md) (trần rework 3 vòng/việc → `blocked`, người xem).

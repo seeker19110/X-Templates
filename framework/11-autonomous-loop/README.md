@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -75,7 +75,7 @@ updated: 2026-10-17
     đủ bằng chứng mà chưa kiểm lại cuối → chạy `<XT> loop verify` (mọi Gate trên cây hiện tại, `LOOP-DESIGN-022`).
 13. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <T-NNN|ID blueprint> --reason "..."` rồi làm việc
     độc lập khác; hết việc tự làm được → verdict `done-pending-human` (Stop hook cho dừng một lần, gom mọi việc cho người).
-    **Điểm dừng bắt buộc về hành động** (merge PR ngoại lệ cứng, tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập
+    **Điểm dừng bắt buộc về hành động** (merge PR ngoại lệ cứng khi `merge_hard_exceptions: human`, tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập
     khoá thật — ADR-0018/0019, D-023; deploy/publish, sửa cổng kèm lý do thì cho chạy; mâu thuẫn spec **không** còn là điểm dừng — tự quyết, ghi D-NNN): `<XT> loop block --reason "..."` rồi dừng — chỉ khi **mọi** việc còn lại phụ thuộc nó (còn việc khác thì `defer`); hook `pre-bash-guard.sh`/
     `pre-edit-guard.sh` deny việc không đảo ngược là lưới thứ hai. Người đọc lý do, xử lý, rồi `loop resume --reason "..."` để tiếp (giữ số vòng và bằng chứng; `loop init` lại chỉ khi đổi PLAN/ngân sách).
 14. **Context đầy** → compaction tự nén, không bàn giao: hook PreCompact ghi checkpoint (`<XT> loop checkpoint`), SessionStart(compact) in lại

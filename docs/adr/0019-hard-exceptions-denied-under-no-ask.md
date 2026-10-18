@@ -1,6 +1,6 @@
 # ADR-0019: Dưới chính sách không hỏi, merge ngoại lệ cứng bị chặn
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận — thay một phần bởi ADR-0020 (`merge_hard_exceptions: auto`)
 - **Trạng thái triển khai:** Đã triển khai — `guard.py` `HARD_ASK` (thuộc `DANGER_MARKERS`), `_merge_verdict` kiểm
   `hard` trước verdict, `_auto_merge_verdict` dùng `HARD_ASK`; `pre-mcp-guard.sh` xuất `deny`; test
   `tests/test_hooks.py::MergeGuardTest::test_hard_exception_merge_denied_by_default`
