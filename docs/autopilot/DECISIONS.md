@@ -290,3 +290,24 @@
 - Chọn: Cắt bản phát hành 3.0.0 (ADR-0007 đã định) qua release-tag.yml; doctor (đầy đủ) đọc tag vX.Y.Z mới nhất qua gh api, cảnh báo khi .xtemplates/VERSION cũ hơn; fail-open khi không có gh/mạng; luật cắt bản khi thay đổi buộc dự án đích làm gì ghi ở AGENTS.md §7
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: giải đúng chỗ đau (không biết mình cũ) bằng vài chục dòng có test, không đổi đường nạp guard; fail-open nên không chặn phiên offline; 3.0.0 vì ADR-0007 đổi định danh là phá vỡ. xt.pyz đổi cấu trúc khi mới 1 dự án đích (ADR-0010); nhắc bằng lời là lời khai
 - Đường lùi: Bỏ _doctor_version khỏi doctor_findings; tag đã cắt giữ nguyên
+
+### D-041 · 2026-10-18T11:57:47+00:00 · Vòng tối ưu hiệu năng trong autopilot: đưa vào khung thế nào?
+
+- Phương án: (1) Module LOOP-OPT + công cụ xt.py perf sample/compare/guard (thống kê Mann-Whitney + sàn nhiễu, khoá bộ đo, Gate lấy công cụ từ commit gốc) · (2) Chỉ thêm văn xuôi vào XC-PERF, không máy đỡ · (3) Tích hợp sâu vào loop (kiểu task [perf], loop init kiểm Gate)
+- Chọn: Module LOOP-OPT + công cụ xt.py perf sample/compare/guard (thống kê Mann-Whitney + sàn nhiễu, khoá bộ đo, Gate lấy công cụ từ commit gốc)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: số đo là tín hiệu agent dễ làm giả nhất (METR, GSO, SWE-fficiency) nên cần máy quyết giữ/hoàn tác và khoá bộ đo; stdlib, có test; tích hợp loop để sau khi có dữ liệu dùng thật
+- Đường lùi: Bỏ mục LOOP-OPT (đổi MAY + Ngừng dùng) và lệnh perf; không đụng lệnh khác
+
+### D-042 · 2026-10-18T11:57:47+00:00 · perf guard: file chưa theo dõi lọc ignore thế nào để vừa không lọt file khoá mới vừa không đỏ oan vì file sinh khi đo?
+
+- Phương án: (1) Không lọc ignore (mọi file chưa theo dõi) · (2) Lọc theo --exclude-standard (gồm core.excludesFile, .git/info/exclude) · (3) Lọc theo .gitignore trong cây; có .gitignore đổi/mới thì kiểm khoá trên mọi file chưa theo dõi
+- Chọn: Lọc theo .gitignore trong cây; có .gitignore đổi/mới thì kiểm khoá trên mọi file chưa theo dõi
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3/4: (1) đỏ oan __pycache__/.venv dẫn agent nới --locked; (2) excludesFile/info/exclude đổi được không để dấu; (3) chỉ tin .gitignore đã commit ở base, đổi nó thì quay về kiểm toàn bộ
+- Đường lùi: Đổi PERF_UNTRACKED và nhánh _perf_is_ignore_file trong perf_diff
+
+### D-043 · 2026-10-18T11:57:47+00:00 · Phát hành 3.2.0 ngay, hay gộp đợt nâng cấp autopilot (reviewer khác model có máy kiểm, LOOP-DESIGN-022 thành MUST@M) vào cùng bản?
+
+- Phương án: (1) Phát hành 3.2.0 ngay với phần đã review sạch; đợt nâng cấp ra bản sau · (2) Gộp đợt nâng cấp vào 3.2.0
+- Chọn: Phát hành 3.2.0 ngay với phần đã review sạch; đợt nâng cấp ra bản sau
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 2/5: 3.2.0 có ba thay đổi đã review sạch mà dự án đích cần (guard ghi công AI, LOOP-OPT, perf); gộp thêm phải review lại, chậm bản mà không tăng an toàn; đợt sau ra vài giờ sau
+- Đường lùi: Cắt bản kế tiếp (3.2.1/3.3.0) chứa đợt nâng cấp

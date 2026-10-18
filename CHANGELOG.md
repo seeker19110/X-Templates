@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.1.1:** chạy lại `install.py` (hook `guard.py`, mẫu `xt.yaml`/`CLAUDE.md` đổi — gộp
+> `*.xtemplates-new`), rồi ghép lại blueprint bằng `compose` để nhận `LOOP-OPT-*`. Muốn chặn ghi tên model/URL phiên AI
+> trong commit thì khai `ai_attribution: forbid` trong `xt.yaml`.
+
 ### Added
 - `LOOP-HARNESS-027` MAY: `xt.yaml` `ai_attribution: forbid` → guard chặn `git commit` mà message (`-m`, `--trailer`, `--author`, file
   `-F`, heredoc của lệnh commit) ghi tên model hay URL/trailer phiên AI (`Claude-Session:`, `claude.ai/code/session_…`,
