@@ -2536,10 +2536,9 @@ def _unquoted_seps(line: str) -> List[Tuple[int, int]]:
     return seps
 
 
-def _commit_window(line: str, pos: int) -> str:
+def _commit_window(line: str, pos: int, seps: List[Tuple[int, int]]) -> str:
     """Pipeline chứa heredoc ở `pos` (tách theo dấu nối ngoài nháy), cắt còn ≤ COMMIT_LINE_MAX mỗi phía QUANH heredoc —
     lệnh commit thường ngay trước heredoc, nên tiền tố dài (`X=…4 KiB… git commit -F - <<E`) không đẩy nó ra ngoài."""
-    seps = _unquoted_seps(line)
     start = max((e for s, e in seps if e <= pos), default=0)
     end = min((s for s, e in seps if s >= pos), default=len(line))
     return line[max(start, pos - COMMIT_LINE_MAX) : min(end, pos + COMMIT_LINE_MAX)]
@@ -2549,16 +2548,17 @@ def _heredoc_bodies(cmd: str) -> List[str]:
     """Thân heredoc thuộc pipeline có `git commit` (`git commit -F - <<E`, `-m "$(cat <<E`, `cat <<E | git commit -F -`);
     heredoc của lệnh khác trong cùng chuỗi (`python3 - <<E …; git commit`) là dữ liệu của lệnh đó, không quét."""
     out: List[str] = []
-    lines, i = cmd.split("\n"), 0
+    lines, i = cmd.replace("\\\n", "").split("\n"), 0  # nối dòng `\` như shell (`git commit \` ↵ `-F - <<E`)
     while i < len(lines):
         opener = lines[i]
+        seps = _unquoted_seps(opener) if "<<" in opener else []  # một lần mỗi dòng, không mỗi heredoc
         for m in HEREDOC_RE.finditer(opener):
             body: List[str] = []
             i += 1
             while i < len(lines) and lines[i].strip() != m.group(2):
                 body.append(lines[i])
                 i += 1
-            if GIT_COMMIT_TEXT_RE.search(_commit_window(opener, m.start())):
+            if GIT_COMMIT_TEXT_RE.search(_commit_window(opener, m.start(), seps)):
                 out.append("\n".join(body))
         i += 1
     return out

@@ -3792,6 +3792,7 @@ class GuardAiAttributionTest(unittest.TestCase):
             "git commit -m 'a; b' -F - <<'EOF'\nClaude Opus 5\nEOF",
             "git commit -m a\\; -F - <<'EOF'\nClaude Opus 5\nEOF",
             "X=" + "a" * 4100 + " git commit -F - <<'EOF'\nClaude Opus 5\nEOF",
+            "git commit \\\n  -F - <<'E'\nClaude Opus 5\nE",  # lệnh nhiều dòng nối bằng `\`
         ):
             with self.subTest(cmd[:60]):
                 self.assertEqual(self.decide(cmd, d), "deny")

@@ -5236,23 +5236,23 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
 
 
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
-    """(file đổi gồm cả file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
-    (không phụ thuộc tiền tố diff hay cách quote); file bị gitignore không được thấy."""
+    """(file đổi gồm MỌI file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
+    (không phụ thuộc tiền tố diff hay cách quote). Kiểm khoá dùng file chưa theo dõi KHÔNG lọc ignore — `.gitignore`/
+    `core.excludesFile` agent sửa được không được giấu file mới trong vùng khoá; quét dòng đáng ngờ chỉ đọc phần không bị ignore."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
-    untracked = _perf_git_names(base, "ls-files", "-z", "--others", "--exclude-standard")
+    untracked = _perf_git_names(base, "ls-files", "-z", "--others")
+    scanned = _perf_git_names(base, "ls-files", "-z", "--others", "--exclude-standard")
     text = _perf_git(
         base,
         *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, untracked)
+    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
 
 
 def perf_known(base: Path) -> List[str]:
     """File đang theo dõi + chưa theo dõi: để báo glob khoá không khớp gì (gõ sai = tắt khoá lặng lẽ)."""
-    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(
-        base, "ls-files", "-z", "--others", "--exclude-standard"
-    )
+    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(base, "ls-files", "-z", "--others")
 
 
 def perf_match(path: str, glob: str) -> bool:
@@ -5303,7 +5303,7 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
-    sha = _git(Path.cwd(), "rev-parse", "HEAD")  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
+    sha = _git(Path.cwd(), "rev-parse", "HEAD", env=_perf_env())  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
     doc = {
         "samples": samples,
         "unit": "s",

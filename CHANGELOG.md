@@ -24,9 +24,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ### Fixed
 - Guard ghi công AI (`LOOP-HARNESS-027`): `;`/`&&` nằm trong nháy (`git commit -m "fix: a; b" -m "$(cat <<'EOF' …`) từng cắt
   `git commit` khỏi đoạn quét nên thân heredoc lọt; tiền tố > 4 KiB trước `git commit` cùng dòng cũng lọt. Nay tách
-  pipeline theo dấu nối ngoài nháy và lấy cửa sổ 4 KiB mỗi phía quanh heredoc. Dự án đích: chạy lại `install.py` (hook `guard.py`).
+  pipeline theo dấu nối ngoài nháy, nối dòng `\` như shell, và lấy cửa sổ 4 KiB mỗi phía quanh heredoc. Dự án đích: chạy lại `install.py` (hook `guard.py`).
 - `xt.py perf guard`: bỏ `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`… đặt sẵn khỏi môi trường git — trỏ chúng vào một clone
   sạch từng làm guard báo "0 file đổi" dù cây đang làm việc đụng file khoá.
+  File mới trong vùng khoá bị bắt cả khi `.gitignore`/`core.excludesFile` ignore nó.
 - `release-tag.yml`: kiểm mục `## [x.y.z]` đọc CHANGELOG từ file, không qua `git show | grep -q` — CHANGELOG > 64 KB làm
   `git show` nhận SIGPIPE, `pipefail` đỏ, tag `v3.1.1` không tạo được. Repo khung, dự án đích không phải làm gì.
 - Test guard `GuardReview97Test` cố định nhánh hiện tại: `git push` không refspec chạy trên checkout `main` (CI sau merge)
