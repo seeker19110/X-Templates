@@ -15,19 +15,22 @@ production) trước khi merge; nếu bật auto-merge ngay khi mở PR như ADR
 
 ## Quyết định
 
-1. Mọi PR (mọi làn): mở PR → `reviewer` (model khác người viết) rà diff. **Review sạch** = báo cáo không còn lỗi chặn,
-   mọi mục "nên sửa" đã sửa hoặc trả lời lý do.
-2. Review sạch và `merge-check` không có `hard` (và không phải PR chồng) → bật auto-merge của GitHub.
+1. Mọi PR (mọi làn): mở PR → `reviewer` (model khác người viết) rà diff ở commit H (ghi H trong báo cáo). **Review sạch
+   ở H** = báo cáo không còn lỗi chặn, mọi mục "nên sửa" đã sửa hoặc trả lời lý do. Mọi push sau H (kể cả push sửa mục
+   "nên sửa") → rà lại diff H..head; head mới thành H.
+2. Review sạch ở H, `merge-check` = `merge` với `head` = H, không có `hard` và không phải PR chồng → bật auto-merge của
+   GitHub. Đã bật mà có push mới → tắt auto-merge, rà lại, chạy lại `merge-check`.
 3. Không bật được (GitHub báo PR đã sẵn sàng — "clean status", hoặc repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim
    head trong `next` của `merge-check` (`gh pr merge --match-head-commit` hoặc MCP `merge_pull_request` có
-   `expectedHeadSha` bằng đúng commit đã được rà).
+   `expectedHeadSha`) — chỉ khi sha trong `next` = H; `merge-check` = `wait` (CI còn chạy) thì chờ, không merge.
 4. Còn lỗi chặn → sửa, đẩy, chờ CI, rà lại; không bật auto-merge giữa chừng.
 5. PR `hard` vẫn do người merge (ADR-0016/0019/0020/0022).
 
 ## Lý do
 
 - Chủ repo chọn rõ "mọi PR". Tiêu chí 1: review độc lập trước merge đã chứng minh giá trị ở #102.
-- Merge trực tiếp chỉ qua lệnh ghim head nên không thể merge commit chưa được rà; guard vẫn đòi `merge-check` = `merge`.
+- Lệnh `next` ghim head **tại lúc chạy `merge-check`**, không phải commit đã rà (review lần đầu của PR này bắt lỗi khẳng
+  định ngược). Vì vậy quy trình buộc so `head` với H và rà lại khi khác; guard vẫn đòi `merge-check` = `merge`.
 
 ## Các phương án đã cân nhắc
 

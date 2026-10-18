@@ -525,6 +525,8 @@ class MergeConfigTest(unittest.TestCase):
         self.assertEqual(err(f"gh api {path} lỗi: gh: Not Found (HTTP 404)"), {})
         # Review lần bốn: 404 do ref sai không phải "file vắng"
         self.assertIsNone(err(f"gh api {path} lỗi: gh: No commit found for the ref {sha} (HTTP 404)"))
+        # Chỉ phần stderr sau ` lỗi: ` được tin: chuỗi 404 nằm trong phần lệnh/đường dẫn không làm 502 thành "vắng"
+        self.assertIsNone(err("gh api x/Not Found (HTTP 404)/y lỗi: gh: Server Error (HTTP 502)"))
 
     def test_plan_absent_at_both_ends_is_hard(self):
         """Review lần bốn: file trong diff mà 404 ở cả đáy lẫn đầu = token không đọc được contents (404 thay 403)."""
