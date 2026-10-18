@@ -5,6 +5,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `LOOP-HARNESS-027` MAY: `xt.yaml` `ai_attribution: forbid` → guard chặn `git commit` mà message (`-m`, file `-F`,
+  heredoc của lệnh commit) ghi tên model hay URL/trailer phiên AI (`Claude-Session:`, `claude.ai/code/session_…`,
+  `Claude Opus …`); `Co-authored-by: Claude <…>` chung vẫn được. Repo khung bật khoá này (AGENTS.md §3, AUD-HAR-017).
+  Dự án đích: chạy lại `install.py` (hook `guard.py`; mẫu `xt.yaml`, `CLAUDE.md` thêm dòng — gộp `*.xtemplates-new`),
+  muốn chặn thì khai `ai_attribution: forbid`.
+- CI `quality`: test Python 3.11 chạy trên checkout mang tên nhánh `main` như CI sau merge — bắt test phụ thuộc nhánh
+  ngay ở PR (đỏ trên `main`, xanh ở PR: AUD-TEST-005, #124).
+
 ### Fixed
 - `release-tag.yml`: kiểm mục `## [x.y.z]` đọc CHANGELOG từ file, không qua `git show | grep -q` — CHANGELOG > 64 KB làm
   `git show` nhận SIGPIPE, `pipefail` đỏ, tag `v3.1.1` không tạo được. Repo khung, dự án đích không phải làm gì.
