@@ -432,9 +432,8 @@ class DoctorVersionTest(DoctorCase):
         return unittest.mock.patch("xt.subprocess.run", side_effect=run)
 
     def test_latest_tag_parsing_and_fail_open(self):
-        tags = json.dumps(
-            [{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "v10.1.0"}, {"name": "nope"}, "x", {"name": 3}]
-        )
+        page1 = json.dumps([{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "nope"}, "x", {"name": 3}])
+        tags = page1 + "\n" + json.dumps([{"name": "v10.1.0"}])  # --paginate: trang sau vẫn được đọc
         with self.gh(out=tags):
             self.assertEqual(xt.latest_framework_tag(), (10, 1, 0))  # so số, không so chuỗi; pre-release bỏ
         cases = (
@@ -444,13 +443,16 @@ class DoctorVersionTest(DoctorCase):
             {"out": "[]"},
             {"exc": FileNotFoundError("gh")},
             {"exc": subprocess.TimeoutExpired("gh", 10)},
+            {"exc": UnicodeDecodeError("utf-8", b"\xe9", 0, 1, "x")},  # trang chặn của proxy, không phải UTF-8
+            {"out": '{"message": "Not Found"}'},
         )
         for kw in cases:
             with self.subTest(kw=kw), self.gh(**kw):
                 self.assertIsNone(xt.latest_framework_tag())
         with unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_REPO": "fork/khung"}), self.gh() as run:
             xt.latest_framework_tag()
-        self.assertEqual(run.call_args[0][0][2], "repos/fork/khung/tags?per_page=100")
+        want = ["gh", "api", "--hostname", "github.com", "--paginate", "repos/fork/khung/tags?per_page=100"]
+        self.assertEqual(run.call_args[0][0], want)
 
     def test_doctor_warns_only_when_installed_is_older(self):
         def msgs(latest):
@@ -470,6 +472,11 @@ class DoctorVersionTest(DoctorCase):
         with unittest.mock.patch.object(xt, "latest_framework_tag") as latest:
             self.assertNotIn("version", [f.code for f in self.findings(deep=False)])  # loop init: không gọi mạng
         latest.assert_not_called()
+        self.write(".xtemplates/VERSION", "3.0.0-rc1\n")  # pre-release cũ hơn bản cùng số (SemVer §11)
+        got = msgs((3, 0, 0))
+        self.assertEqual(len(got), 1)
+        self.assertIn("khung đã cài 3.0.0-rc1 cũ hơn", got[0])
+        self.assertEqual(msgs((2, 9, 9)), [])
         (self.base / ".xtemplates" / "VERSION").unlink()
         self.assertEqual(xt._doctor_version(self.base), [])  # repo khung / chưa cài
 
