@@ -4427,28 +4427,63 @@ CONTRAST_REQUIRE_ON = "primary,destructive"
 RGB = Tuple[float, float, float, float]  # r, g, b, alpha — đều 0..1
 
 
-def _css_blocks(text: str, ctx: str = "") -> List[Tuple[str, str, str]]:
-    """(ngữ cảnh at-rule, selector, thân) của mọi khối quy tắc; vào trong `@media`/`@layer`/`@supports`; thân `@theme` /
-    `@theme inline` của Tailwind v4 là khai báo token gốc (selector `:root`)."""
+def _css_blocks(text: str, ctx: str = "", parent: str = "") -> List[Tuple[str, str, str]]:
+    """(ngữ cảnh at-rule, selector, khai báo) của mọi khối quy tắc; vào trong `@media`/`@layer`/`@supports`; thân `@theme` /
+    `@theme inline` của Tailwind v4 là khai báo token gốc (selector `:root`). CSS lồng (`:root { &.dark {…} }`,
+    `.dark { .card {…} }`): khối con mang selector đã ghép với cha, khai báo của nó không lẫn vào khối cha."""
     out: List[Tuple[str, str, str]] = []
+    for prelude, body in _css_rules(text):
+        if prelude.split(" ")[0] == "@theme" and not parent:
+            out.append((ctx, ":root", body))
+        elif prelude.startswith("@"):
+            inner = f"{ctx} {prelude}".strip()
+            if parent and _css_flat(body).strip():  # khai báo trần trong `@media` lồng thuộc selector cha
+                out.append((inner, parent, _css_flat(body)))
+            out += _css_blocks(body, inner, parent)
+        else:
+            sel = _css_nest(prelude, parent)
+            out.append((ctx, sel, _css_flat(body)))
+            out += _css_blocks(body, ctx, sel) if "{" in body else []
+    return out
+
+
+def _css_rules(text: str) -> List[Tuple[str, str]]:
+    """(prelude, thân) của các khối cấp ngoài cùng trong `text`."""
+    out: List[Tuple[str, str]] = []
     pos = 0
-    while True:
-        i = text.find("{", pos)
-        if i < 0:
-            return out
+    while (i := text.find("{", pos)) >= 0:
         depth, j = 1, i + 1
         while j < len(text) and depth:
             depth += {"{": 1, "}": -1}.get(text[j], 0)
             j += 1
-        prelude = text[pos:i].rsplit(";", 1)[-1].rsplit("}", 1)[-1].strip()
-        body = text[i + 1 : j - 1]
-        if prelude.split(" ")[0] == "@theme":
-            out.append((ctx, ":root", body))
-        elif prelude.startswith("@"):
-            out += _css_blocks(body, f"{ctx} {prelude}".strip())
-        else:
-            out.append((ctx, prelude, body))
+        out.append((text[pos:i].rsplit(";", 1)[-1].rsplit("}", 1)[-1].strip(), text[i + 1 : j - 1]))
         pos = j
+    return out
+
+
+def _css_flat(body: str) -> str:
+    """Thân khối bỏ các khối lồng (và selector của chúng): chỉ khai báo của chính khối."""
+    out: List[str] = []
+    pos = 0
+    while (i := body.find("{", pos)) >= 0:
+        seg = body[pos:i]
+        out.append(seg[: max(seg.rfind(";"), seg.rfind("}")) + 1])
+        depth, j = 1, i + 1
+        while j < len(body) and depth:
+            depth += {"{": 1, "}": -1}.get(body[j], 0)
+            j += 1
+        pos = j
+    return "".join(out) + body[pos:]
+
+
+def _css_nest(selector: str, parent: str) -> str:
+    """Selector lồng ghép với cha: `&` thay bằng cha, không có `&` thì là con cháu (`cha con`)."""
+    if not parent:
+        return selector
+    parts = [c.strip() for c in selector.split(",")]
+    return ", ".join(
+        c.replace("&", p.strip()) if "&" in c else f"{p.strip()} {c}" for p in parent.split(",") for c in parts
+    )
 
 
 def _theme_kind(selector: str) -> str:

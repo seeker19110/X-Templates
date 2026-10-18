@@ -5,6 +5,23 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- Guard (D-052) — bịt mục "Còn lọt" của 3.4.0:
+  - Biến gán từ nguồn guard tính được: `x=$(echo|printf '…')`, `` x=`echo …` ``, `read [-r] x y <<< '…'`, `${y:-…}`/`${y=…}`
+    được thay giá trị rồi quét (`x=$(echo 'rm -rf ~'); $x`, `read x <<< '…'; eval "$x"` nay bị chặn).
+  - Lệnh mã hoá/nén vào shell: `echo … | base64 -d|xxd -r|openssl base64 -d|rev | sh` được giải và quét lệnh thật; nguồn
+    không giải được trong guard (`cat f | base64 -d | sh`, `… | gunzip | sh`, sai định dạng) bị chặn thay vì chỉ hỏi.
+  - Ghi `.autopilot/` (ADR-0026) qua `sort -o`, `sed 'w f'`/`s/…/…/w f`, `awk -i inplace`, `awk 'print > "f"'`, perl
+    `unlink`/`open(F, '>', …)`/`open(F, ">f")` (cả cờ gộp `-ne`/`-pe`), `git restore|checkout`, `tar -C`, `unzip -d`,
+    `split`/`csplit` bị chặn.
+  - `bash -c "$(cat <<'E'` ↵ … ↵ `E` ↵ `)"` và `eval "$(cat <<E …)"`: thân heredoc được quét như lệnh.
+  - Không còn chặn nhầm code span trong thân heredoc `<<'EOF'` của message commit (bash không thay backtick ở đó).
+  - Vòng `for` thử từng giá trị KHÁC NHAU (từ trùng không chiếm chỗ); hơn 64 giá trị khác nhau → chặn (quá phức tạp).
+  - Còn lọt (ghi ở `KNOWN_GAPS`): ghép chuỗi tên hàm lúc chạy (`getattr(os, 'sys' + 'tem')`) — né cố ý, ngoài phạm vi
+    guard chống tai nạn (D-051).
+- `xt.py contrast` (D-053): CSS lồng — `:root { &.dark {…} }`, `html { &[data-theme=dark] {…} }` là khối tối, `.dark { .card
+  {…} }` là component; khai báo của khối con không còn rò sang theme sáng của khối cha.
+
 ## [3.4.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.3.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`, mẫu `CLAUDE.md`, khung — gộp
