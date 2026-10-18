@@ -1,7 +1,7 @@
 ---
 title: Mẫu PLAN
 kind: template
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
 # Mẫu PLAN.md
@@ -35,7 +35,7 @@ updated: 2026-10-17
 ## Điểm dừng bắt buộc về hành động (việc cần người — `xt.py loop defer`/`loop block`; ADR-0018, ADR-0019 của khung)
 - Xoá/đổi/xuất dữ liệu người dùng thật, migration phá vỡ trên production, drop cột/bảng
 - Tiền thật, thanh toán thật, đăng ký dịch vụ trả phí/nhập khoá thật, gửi tin tới người dùng thật
-- Merge PR ngoại lệ cứng (`merge-check` trả `hard`: tiền, dữ liệu người dùng thật, auth, mật mã, bí mật)
+- Merge PR ngoại lệ cứng (`merge-check` trả `hard`: tiền, dữ liệu người dùng thật, auth, mật mã, bí mật) khi `merge_hard_exceptions: human` (ADR-0020)
 - (Deploy/publish, sửa cấu hình cổng/CI/hook kèm lý do, thêm phụ thuộc **không** dừng: guard cho chạy; lệnh không đảo ngược guard chặn)
 - (Spec hở, mâu thuẫn với code, chọn công nghệ/thiết kế **không** dừng: phiên chính tự quyết, `xt.py loop decide` → D-NNN)
 - (Còn việc khác làm được thì **không** `block`: `xt.py loop defer --task <ID> --reason "..."`, gom cho người cuối phiên)
