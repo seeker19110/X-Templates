@@ -58,6 +58,17 @@ class CssParseTest(unittest.TestCase):
         attr = '[data-theme="dark"] { --a: #000 } :root { --a: #fff }'
         self.assertEqual(xt.css_themes(attr)["dark"]["--a"], "#000")
         self.assertEqual(xt._css_blocks("no braces here"), [])
+        # :not(.dark) vẫn là khối sáng; khối của component và `.dark-mode` không phải theme
+        light = xt.css_themes(":root:not(.dark){--a:#fff} html:not(.dark){--b:#fff} .dark{--a:#000}")
+        self.assertEqual((light["light"]["--a"], light["dark"]["--a"], light["light"]["--b"]), ("#fff", "#000", "#fff"))
+        comp = xt.css_themes(
+            ":root{--a:#fff} .btn{--a:#000} .dark .card{--a:#111} .dark-mode{--a:#222} *{--s:#333} .theme-x{--t:#444}"
+        )
+        self.assertEqual(comp["light"], {"--a": "#fff", "--s": "#333", "--t": "#444"})
+        self.assertEqual(list(comp), ["light"])
+        # Tailwind v4: thân @theme / @theme inline là token gốc
+        tw = xt.css_themes("@theme inline { --color-primary: #1677ff; } @theme { --color-background: #fff; }")
+        self.assertEqual(tw["light"], {"--color-primary": "#1677ff", "--color-background": "#fff"})
 
     def test_var_resolution(self) -> None:
         env = {"--a": "var(--b)", "--b": "#123", "--loop": "var(--loop)"}
@@ -65,6 +76,7 @@ class CssParseTest(unittest.TestCase):
         self.assertEqual(xt._css_vars("var(--zz, #fff)", env), "#fff")
         self.assertEqual(xt._css_vars("var(--zz)", env), "var(--zz)")
         self.assertEqual(xt._css_vars("var(--loop)", env), "var(--loop)")  # tự tham chiếu: dừng ở 8 tầng
+        self.assertEqual(xt._css_vars("var(--zz, rgb(0 0 0))", env), "rgb(0 0 0)")  # dự phòng có ngoặc
 
     def test_colors(self) -> None:
         env: dict[str, str] = {}
@@ -121,6 +133,16 @@ class ContrastPairsTest(unittest.TestCase):
             "--ring": "#000",
         }
         auto = xt.auto_contrast_pairs(env)
+        tw = {
+            "--color-foreground": "#000",
+            "--color-background": "#fff",
+            "--color-primary": "#000",
+            "--color-primary-foreground": "#fff",
+        }
+        self.assertEqual(
+            xt.auto_contrast_pairs(tw),
+            [("--color-primary-foreground", "--color-primary", 4.5), ("--color-foreground", "--color-background", 4.5)],
+        )
         self.assertEqual(
             auto,
             [("--p-foreground", "--p", 4.5), ("--foreground", "--background", 4.5), ("--ring", "--background", 3.0)],
@@ -166,6 +188,19 @@ class ContrastCliTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("✗ --primary: không có token chữ đi kèm", out)
         rc, out, _ = run("contrast", "m.css", "--require-on", "", cwd=self.dir)
+        self.assertEqual(rc, 0, out)
+
+    def test_tailwind_theme_and_binary_css(self) -> None:
+        (self.dir / "tw.css").write_text(
+            "@theme{--color-primary:#1677ff;--color-primary-foreground:#fff;--color-background:#fff;--color-foreground:#111}",
+            encoding="utf-8",
+        )
+        rc, out, _ = run("contrast", "tw.css", cwd=self.dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ [light] --color-primary-foreground trên --color-primary  4.1:1", out)
+        self.assertIn("✓ [light] --color-foreground trên --color-background", out)
+        (self.dir / "bin.css").write_bytes(b"/* \xff\xfe */:root{--background:#fff;--foreground:#000}")
+        rc, out, _ = run("contrast", "bin.css", cwd=self.dir)
         self.assertEqual(rc, 0, out)
 
     def test_json_and_skip_and_no_pairs(self) -> None:
@@ -219,7 +254,7 @@ class VendorCheckTest(unittest.TestCase):
     def test_watchlist_hits(self) -> None:
         self.put("package.json", json.dumps({"dependencies": {"preline": "^2"}, "devDependencies": "bad"}))
         self.put("NOTICE", "Template từ once-ui-system/magic-portfolio")
-        self.put("vendor/kit/SOURCE", "react-bits copy")
+        self.put("vendor/kit/SOURCE", "copied from https://github.com/DavidHDev/react-bits")
         rc, out, _ = run("vendor-check", cwd=self.dir)
         self.assertEqual(rc, 1)  # magic-portfolio = deny
         self.assertIn("✗ magic-portfolio (CC BY-NC 4.0)", out)
@@ -234,6 +269,38 @@ class VendorCheckTest(unittest.TestCase):
         self.assertEqual(data["errors"], [])
         self.assertEqual(len(data["warnings"]), 2)
         self.assertEqual(data["checked"], "2026-10-18")
+
+    def test_no_false_positives_and_aliases(self) -> None:
+        self.put("vendor/foo/LICENSE", "BSD 3-Clause\nCopyright (c) 2020, Foo\nAll rights reserved.\n")
+        self.put("vendor/foo/code.js", "// mentions https://github.com/DavidHDev/react-bits and magic-portfolio")
+        pkg = {"name": "my-magic-portfolio-notes", "description": "react-bits and Tailwind UI notes"}
+        self.put("package.json", json.dumps(pkg))
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertEqual((rc, out.strip()), (0, "✓ vendor UI: không vấn đề."))
+        aliases = {"x": "npm:preline@3", "y": "npm:@tailwindplus/elements@1", "z": "^1"}
+        self.put("package.json", json.dumps({"dependencies": aliases}))
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertIn("⚠ Preline", out)
+        self.assertIn("⚠ Tailwind Plus", out)
+
+    def test_monorepo_packages_and_node_modules(self) -> None:
+        self.put("apps/web/package.json", json.dumps({"dependencies": {"preline": "1"}}))
+        self.put("node_modules/dep/package.json", json.dumps({"dependencies": {"react-bits": "1"}}))
+        self.put("packages/ui/lib/package.json", json.dumps({"dependencies": {"react-bits": "1"}}))  # sâu 3 cấp: bỏ qua
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ Preline", out)
+        self.assertNotIn("React Bits", out)
+
+    def test_dangling_symlink_and_outside_dirs(self) -> None:
+        self.put("vendor/LICENSE", "MIT")
+        (self.dir / "vendor" / "x.js").symlink_to("/nonexistent/target")
+        (self.dir / "vendor" / "loop").symlink_to("/nonexistent/dir")
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertEqual((rc, out.strip()), (0, "✓ vendor UI: không vấn đề."))
+        rc, out, _ = run("vendor-check", "--dirs", "../x,vendor", cwd=self.dir)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ --dirs ../x: nằm ngoài dự án", out)
 
     def test_npm_pattern_and_bad_json(self) -> None:
         self.put("package.json", json.dumps({"dependencies": {"@tailwindplus/elements": "1"}}))

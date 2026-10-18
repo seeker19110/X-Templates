@@ -46,7 +46,7 @@ updated: 2026-10-18
 
 ## Bẫy thường gặp
 
-- **Starter "miễn phí" nhưng trang hoàn chỉnh trả phí**: Preline (204 block trên trang web, trong repo chỉ 29 plugin JS + 5 template), Flowbite Blocks, daisyUI store, TailAdmin Pro — kiểm số block thật trong repo trước khi hứa tiến độ.
+- **Starter "miễn phí" nhưng trang hoàn chỉnh trả phí**: Preline (theo stored 2026-10-18, chưa tự đếm lại: 204 block trên trang web, trong repo chỉ 29 plugin JS + 5 template), Flowbite Blocks, daisyUI store, TailAdmin Pro — kiểm số block thật trong repo trước khi hứa tiến độ.
 - **License khác nhau giữa các phần của cùng một tổ chức**: Once UI core MIT nhưng `magic-portfolio` CC BY-NC; Tremor component Apache-2.0, repo blocks MIT.
 - **Mẫu đẹp, token xấu**: bộ style mẫu có màu primary không đạt 4,5:1 với chữ trắng (stored: 40/67) — chạy `xt.py contrast` trước khi chép màu.
 - **Layout chọn theo thiết bị**: `UIDevice`/`Build.MODEL` để chọn bố cục vỡ trên máy gập, split-screen, iPad đa cửa sổ — dùng size class/window size class (`UX-RESP-021`).

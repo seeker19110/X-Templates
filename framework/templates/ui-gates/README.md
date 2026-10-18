@@ -13,7 +13,7 @@ updated: 2026-10-18
 
 | File | Việc |
 |---|---|
-| `verify-render.mjs` | Chạy `node verify-render.mjs <url\|file.html>… [--widths 320,280] [--limit 60] [--tags …]`; exit 0 đạt · 1 vi phạm · 2 không chạy được |
+| `verify-render.mjs` | Chạy `node verify-render.mjs <url\|file.html>… [--widths 320,280] [--limit 60] [--tags …] [--strict]`; exit 0 đạt · 1 vi phạm (hoặc UNMEASURED khi `--strict`) · 2 không chạy được (goto lỗi, không mở được Chromium) |
 
 ## Cách dùng
 
@@ -22,7 +22,7 @@ updated: 2026-10-18
    Sandbox đã có Chromium khác bản Playwright: đặt `XT_CHROMIUM=/đường/dẫn/chromium` thay vì cài lại.
 3. Thêm vào CI sau bước build/dev-server: `node scripts/verify-render.mjs http://localhost:3000/ http://localhost:3000/login`
    (mỗi trang chính, cả trạng thái lỗi/dialog — `UX-A11Y-001`).
-4. Điều khiển có nền ảnh/gradient in `UNMEASURED` (không đo được, không tính là đạt) — đo tay và ghi vào PR.
+4. Phép đo không thực hiện được — nền ảnh/gradient, điều khiển bị che nên không hover được — in `UNMEASURED` và dòng kết quả không ghi "đạt"; mặc định exit 0, thêm `--strict` để đỏ. Đo tay và ghi vào PR.
 
 ## Giới hạn đã biết
 

@@ -10,12 +10,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   - **`xt.py contrast`** (D-049): tương phản WCAG của cặp token CSS ở mọi theme (`:root`, `.dark`,
     `[data-theme=dark]`, `prefers-color-scheme`; màu `#hex`/`rgb`/`hsl`/`oklch`/bộ ba trần của shadcn, `var()`); tự suy cặp
     `--X-foreground`/`--on-X`/`--text-on-X` trên `--X`, `--foreground` trên `--background`, `--ring` ≥ 3:1; `--pairs` cho
-    cặp khác; không làm tròn lên; không có cặp nào để kiểm = đỏ. Đỏ khi `--primary`/`--destructive` thiếu token chữ.
+    cặp khác; đọc cả `@theme` của Tailwind v4; không làm tròn lên; không có cặp nào để kiểm = đỏ. Đỏ khi `--primary`/`--destructive` thiếu token chữ.
   - **`xt.py vendor-check`**: thư mục vendor có `LICENSE`/`NOTICE`/`SOURCE`, không điều khoản hạn chế (Commons Clause,
     phi thương mại, Fair Use, BUSL, SSPL…); dò danh sách theo dõi `16-compliance-privacy/ui-vendor-watchlist.json`
     (Preline, magic-portfolio CC BY-NC, React Bits Commons Clause, Tailwind Plus) trong `package.json` và ghi nguồn.
   - **Mẫu cổng render** `framework/templates/ui-gates/verify-render.mjs` (D-048): axe (tag `wcag22aa`), tràn ngang 320/280 px,
-    tương phản chữ mặc định/hover/focus; tự viết (không chép mã XIAS), đã chạy trên trang tốt (exit 0) và xấu (exit 1).
+    tương phản chữ mặc định/hover/focus; tự viết (không chép mã XIAS), đã chạy trên trang tốt (exit 0) và xấu (exit 1); goto lỗi = exit 2; phép đo không làm được in `UNMEASURED` (`--strict` để đỏ).
   - Mục mới: `UX-DS-020` (MUST@L, token chữ `on-primary` đi kèm nền hành động), `UX-DS-021` (lint `DESIGN.md` bằng
     `@google/design.md@0.4.0`, đọc `summary` vì tương phản chỉ là cảnh báo), `UX-DS-022` (skill thẩm mỹ chỉ là gợi ý, token
     khởi đầu qua cổng), `UX-A11Y-029` (MAY, thử căng 280 px — không phải chuẩn), `UX-RESP-021` (breakpoint theo nền tảng:

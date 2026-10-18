@@ -3,10 +3,11 @@
 //   1. axe-core theo tag WCAG (gồm `target-size` của WCAG 2.2) — 0 vi phạm.
 //   2. Tràn ngang ở từng bề rộng (mặc định 320 và 280 px) — scrollWidth <= innerWidth.
 //   3. Tương phản chữ của điều khiển ở trạng thái mặc định, hover, focus-visible (>= 4,5:1; chữ lớn >= 3:1).
-// Dùng:  node verify-render.mjs <url|file.html>... [--widths 320,280] [--limit 60] [--tags wcag2a,wcag2aa,wcag21aa,wcag22aa]
+// Dùng:  node verify-render.mjs <url|file.html>... [--widths 320,280] [--limit 60] [--tags wcag2a,wcag2aa,wcag21aa,wcag22aa] [--strict]
 // Cài:   npm i -D playwright@1.64.0 @axe-core/playwright@4.13.0 && npx playwright install chromium
 // Chromium có sẵn nhưng khác bản Playwright (sandbox/CI tự dựng): đặt XT_CHROMIUM=/đường/dẫn/chromium.
-// Exit: 0 đạt · 1 có vi phạm · 2 không chạy được. Điều khoản không đo được in "UNMEASURED" — không tính là đạt.
+// Exit: 0 đạt · 1 có vi phạm (hoặc có UNMEASURED khi --strict) · 2 không chạy được (goto lỗi, không mở được Chromium).
+// Phép đo không thực hiện được (nền ảnh/gradient, điều khiển bị che) in "UNMEASURED" và dòng kết quả không ghi "đạt".
 // Mã tự viết cho khung X-Templates (không chép mã của dự án khác); ý tưởng cổng "đo bản render" tham khảo stored 06 §7d.
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
@@ -15,7 +16,7 @@ import { resolve } from 'node:path';
 
 const argv = process.argv.slice(2);
 const opt = (name, def) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : def);
-const targets = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
+const targets = argv.filter((a, i) => !a.startsWith('--') && (a === '' || !(argv[i - 1]?.startsWith('--') && argv[i - 1] !== '--strict')));
 const widths = opt('--widths', '320,280').split(',').map(Number);
 const limit = Number(opt('--limit', '60'));
 const tags = opt('--tags', 'wcag2a,wcag2aa,wcag21aa,wcag22aa').split(',');
@@ -54,33 +55,48 @@ const fails = [];
 let unmeasured = 0;
 process.on('unhandledRejection', (e) => { console.error('Lỗi khi chạy cổng:', e?.message ?? e); process.exit(2); });
 const browser = await chromium.launch({ executablePath: process.env.XT_CHROMIUM || undefined }).catch((e) => { console.error('Không mở được Chromium:', e.message); process.exit(2); });
-for (const target of targets) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); // axe đòi page từ newContext()
-  const page = await context.newPage();
-  await page.goto(toUrl(target));
-  const axe = await new AxeBuilder({ page }).withTags(tags).analyze();
-  for (const v of axe.violations) fails.push(`${target}: axe ${v.id} (${v.impact}) — ${v.nodes.length} phần tử`);
-  for (const w of widths) {
-    await page.setViewportSize({ width: w, height: 800 });
-    const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    if (over > 0) fails.push(`${target}: tràn ngang +${over}px ở ${w}px`);
-  }
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const els = (await page.locator(INTERACTIVE).all()).slice(0, limit);
-  for (const el of els) {
-    if (!(await el.isVisible())) continue;
-    for (const state of ['mặc định', 'hover', 'focus']) {
-      if (state === 'hover') await el.hover({ timeout: 2000 }).catch(() => {});
-      if (state === 'focus') { await page.mouse.move(0, 0); await el.focus().catch(() => {}); } // bỏ hover trước khi đo focus
-      const m = await el.evaluate(measure);
-      if (m.unmeasured) { unmeasured++; break; }
-      if (m.ratio < m.need) fails.push(`${target}: "${m.label}" ${state} ${(Math.floor(m.ratio * 100) / 100).toFixed(2)}:1 < ${m.need}:1`);
+let fatal = '';
+try {
+  for (const target of targets) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); // axe đòi page từ newContext()
+    try {
+      const page = await context.newPage();
+      await page.goto(toUrl(target));
+      const axe = await new AxeBuilder({ page }).withTags(tags).analyze();
+      for (const v of axe.violations) fails.push(`${target}: axe ${v.id} (${v.impact}) — ${v.nodes.length} phần tử`);
+      for (const w of widths) {
+        await page.setViewportSize({ width: w, height: 800 });
+        const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (over > 0) fails.push(`${target}: tràn ngang +${over}px ở ${w}px`);
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const els = (await page.locator(INTERACTIVE).all()).slice(0, limit);
+      for (const el of els) {
+        if (!(await el.isVisible())) continue;
+        for (const state of ['mặc định', 'hover', 'focus']) {
+          if (state === 'hover') {
+            // hover không tới được (bị che bởi header dính/overlay): không đo giả bằng trạng thái mặc định
+            try { await el.hover({ timeout: 1000 }); } catch { unmeasured++; continue; }
+          }
+          if (state === 'focus') { await page.mouse.move(0, 0); await el.focus().catch(() => {}); } // bỏ hover trước khi đo focus
+          const m = await el.evaluate(measure);
+          if (m.unmeasured) { unmeasured++; break; }
+          if (m.ratio < m.need) fails.push(`${target}: "${m.label}" ${state} ${(Math.floor(m.ratio * 100) / 100).toFixed(2)}:1 < ${m.need}:1`);
+        }
+      }
+    } finally {
+      await context.close();
     }
   }
-  await context.close();
+} catch (e) {
+  fatal = `Không chạy được cổng: ${e?.message ?? e}`; // goto lỗi (server chưa lên), Chromium chết…: exit 2, không phải "có vi phạm"
+} finally {
+  await browser.close();
 }
-await browser.close();
-if (unmeasured) console.log(`UNMEASURED: ${unmeasured} điều khiển có nền ảnh/gradient — đo tay.`);
+if (fatal) { console.error(fatal); process.exit(2); }
+if (unmeasured) console.log(`UNMEASURED: ${unmeasured} phép đo không thực hiện được (nền ảnh/gradient, hoặc điều khiển bị che nên không hover được) — đo tay.`);
 for (const f of fails) console.log('✗ ' + f);
-console.log(fails.length ? `${fails.length} vi phạm.` : `✓ ${targets.length} trang đạt (axe, tràn ngang ${widths.join('/')}px, tương phản theo trạng thái).`);
-process.exit(fails.length ? 1 : 0);
+const strict = argv.includes('--strict') && unmeasured > 0; // --strict: phép đo không thực hiện được cũng làm đỏ
+if (!fails.length) console.log(unmeasured ? `⚠ phần đo được đạt; ${unmeasured} phép đo chưa thực hiện (UNMEASURED).` : `✓ ${targets.length} trang đạt (axe, tràn ngang ${widths.join('/')}px, tương phản theo trạng thái).`);
+else console.log(`${fails.length} vi phạm.`);
+process.exit(fails.length || strict ? 1 : 0);
