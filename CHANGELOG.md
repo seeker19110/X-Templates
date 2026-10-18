@@ -7,13 +7,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [3.0.0] - 2026-10-18
 
-> **Dự án đích cần làm khi nâng từ 2.x** (chi tiết ở từng mục dưới): (1) chạy lại `install.py` từ bản này (`--with-github`
-> nếu dùng workflow mẫu), gộp tay các file `*.xtemplates-new`, rồi `python3 .xtemplates/scripts/xt.py doctor --fix`;
-> định danh kỹ thuật đổi sang `.xtemplates/`, `xt.py`, `xt.yaml`, `XT_*` (ADR-0007 — thay đổi phá vỡ, `install.py` tự
-> chuyển bản ≤ 2.x); (2) thêm `merge-gate` vào required check của ruleset `main` sau khi job chạy trên một PR (ADR-0023);
-> (3) quy mô M/L: khai `format_check`, `coverage` (và `e2e` theo hồ sơ) trong `xt.yaml` (`LOOP-HARNESS-023`); (4) mục
-> blueprint đã tick: thêm dần `— Kiểm: \`<lệnh>\`` (`LOOP-DESIGN-023`); (5) muốn agent merge ngoại lệ cứng hay chạy
-> production: PR đặt `merge_hard_exceptions: auto` / mục "Ủy quyền production" trong PLAN, do người merge (ADR-0020, ADR-0022).
+> **Dự án đích cần làm khi nâng từ 2.x** (chi tiết ở từng mục dưới):
+> 1. Chạy lại `install.py` từ bản này (`--with-github` nếu dùng workflow mẫu). Định danh kỹ thuật đổi sang `.xtemplates/`,
+>    `xt.py`, `xt.yaml`, `XT_*` (ADR-0007, thay đổi phá vỡ): `install.py` đổi `xs.yaml` → `xt.yaml`, xoá `.xstored/` và
+>    liệt kê file còn tên cũ — sửa tay các file đó và biến `XS_*` đặt ngoài `.github/workflows/`.
+> 2. **Gộp harness ngay, trước commit kế tiếp.** Bản 2.0.0 không ghi `harness.sha256.json` nên mọi file hook, skill, agent
+>    thành `*.xtemplates-new`, kể cả file chưa sửa (`.claude/settings.json` được gộp hooks + quyền tự động); hook cũ còn trỏ
+>    `.xstored/` đã xoá nên cổng commit lặng lẽ không chạy tới khi gộp. Gộp tay từng `*.xtemplates-new` (thay file cũ bằng
+>    bản mới nếu chưa tuỳ biến). `install.py --force-harness` thay hết một lần nhưng ghi đè cả `.claude/settings.json` —
+>    mất quyền riêng của dự án; chỉ dùng khi settings chưa tuỳ biến. Rồi `python3 .xtemplates/scripts/xt.py doctor --fix`
+>    phải không còn ✗.
+> 3. Ghép lại blueprint (`xt.py compose … --out BLUEPRINT.md`, giữ trạng thái theo ID; quy mô M: phần vượt 4 MUST/module
+>    thành `MUST@L`, ADR-0004). Mục MUST `[~] — Miễn:` cũ giờ đỏ `blueprint-status --strict` (`LOOP-STOP-024`): đổi sang
+>    `— Không áp dụng: <điều kiện>` hoặc thêm `Duyệt: "<lời chủ dự án>" <ngày>`.
+> 4. Thêm `merge-gate` vào required check của ruleset `main` sau khi job chạy trên một PR (ADR-0023).
+> 5. Quy mô M/L: khai `format_check`, `coverage` (và `e2e` theo hồ sơ) trong `xt.yaml` (`LOOP-HARNESS-023`).
+> 6. Mục blueprint đã tick: thêm dần `— Kiểm: \`<lệnh>\`` (`LOOP-DESIGN-023`).
+> 7. Muốn agent merge ngoại lệ cứng hay chạy production: PR đặt `merge_hard_exceptions: auto` / mục "Ủy quyền production"
+>    trong PLAN, do người merge (ADR-0020, ADR-0022).
 
 ### Changed
 - **`xt.py doctor` cảnh báo khi khung đã cài cũ hơn bản phát hành mới nhất** (D-040; `LOOP-HARNESS-020` SHOULD, không đổi
