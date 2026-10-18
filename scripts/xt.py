@@ -4575,7 +4575,9 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
         if auto_merge:
             return act("disable-auto-merge", f"cần push ({verdict}) — tắt auto-merge trước (bước 3)", disable)
         return act(str(verdict), why, str(d.get("next", "")))
-    if verdict == "human":
+    if verdict == "human":  # PR dành cho người: auto-merge đang bật thì GitHub tự merge — tắt trước (review #110)
+        if auto_merge:
+            return act("disable-auto-merge", f"PR cần người ({why}) mà auto-merge đang bật", disable)
         return act("defer-human", why, f"báo người: {why}")
     return None
 
@@ -4606,7 +4608,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`, guard vẫn là lớp chặn. Hành động: done · closed · disable-auto-merge · defer-human ·
-    retarget · update · fix · review · enable-auto-merge · wait."""
+    retarget · update · fix · review · enable-auto-merge · merge (dưới L3) · wait."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -4621,15 +4623,27 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
         early = _pr_next_review(d, auto_merge, reviews[-1] if reviews else None, act, disable)
     if early is not None:
         return early
+    return _pr_next_final(d, auto_merge, strict, act, disable)
+
+
+def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct, disable: str) -> Dict[str, Any]:
+    """Đã qua mọi chốt: L3 bật auto-merge (chờ nếu đã bật); dưới L3 không bao giờ bật — auto-merge không ghim head —
+    mà merge bằng lệnh ghim head khi `merge-check` = `merge` (ADR-0013/0015, review #110)."""
+    n, head, verdict = d.get("pr", ""), str(d.get("head", "")), d.get("verdict")
+    pinned = f"{d.get('next', '')} · REST: {d.get('next_rest', '')} · MCP merge_pull_request expectedHeadSha={head}"
+    if int(d.get("autonomy") or 1) < 3:
+        if auto_merge:
+            return act("disable-auto-merge", "dưới L3 không bật auto-merge của GitHub (không ghim head)", disable)
+        if verdict == "merge":
+            return act("merge", "dưới L3: merge-check = merge — merge ghim head", pinned)
+        return act("wait", "; ".join(d.get("reasons", [])), f"chạy nền xt.py merge-watch --pr {n}")
     if auto_merge:  # đã bật: GitHub merge khi required check xanh
         return act("wait", "auto-merge đang bật — chờ required check", f"chạy nền xt.py merge-watch --pr {n}")
-    merge_cmd = str(d.get("next", "")) if d.get("verdict") == "merge" else ""
-    fallback = f"{merge_cmd} (MCP merge_pull_request expectedHeadSha={head})" if merge_cmd else ""
     return act(
         "enable-auto-merge",
         f"{'review sạch ở head' if strict else 'làn nhanh'} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
         f"gh pr merge {n} --auto --squash (MCP enable_pr_auto_merge)",
-        fallback,
+        pinned if verdict == "merge" else "",
     )
 
 
@@ -4643,12 +4657,14 @@ def cmd_pr(args: argparse.Namespace) -> int:
             )
             return 2
         data = read_reviews(base)
-        rec = _pr_record(data, str(args.pr))
+        num = re.search(r"(\d+)/?$", str(args.pr))  # URL/…/pull/7 → "7": cùng khoá với số PR mà `pr next` dùng
+        key = num[1] if num else str(args.pr)
+        rec = _pr_record(data, key)
         reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
         reviews.append({"head": args.head, "clean": args.clean, "at": now_iso()})
-        data[str(args.pr)] = {**rec, "reviews": reviews}
+        data[key] = {**rec, "reviews": reviews}
         _write_reviews(base, data)
-        print(f"✓ PR #{args.pr}: review {'sạch' if args.clean else 'còn lỗi chặn'} ở {args.head[:7]}")
+        print(f"✓ PR #{key}: review {'sạch' if args.clean else 'còn lỗi chặn'} ở {args.head[:7]}")
         return 0
     try:
         pr = load_pr(args)

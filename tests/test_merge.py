@@ -1116,7 +1116,7 @@ class PrNextTest(unittest.TestCase):
             "hard": [],
             "reasons": ["CI"],
         }
-        base["next"] = "chờ"
+        base.update({"next": "chờ", "autonomy": 3})
         base.update(over)
         return base
 
@@ -1135,12 +1135,20 @@ class PrNextTest(unittest.TestCase):
             r = self.act(verdict=v, next="làm đi")
             self.assertEqual((r["action"], r["do"]), (v, "làm đi"))
         self.assertEqual(self.act(verdict="human", reasons=["ruleset đòi review của người"])["action"], "defer-human")
+        # Review #110: PR dành cho người mà auto-merge đang bật → GitHub sẽ tự merge; tắt trước.
+        self.assertEqual(self.act(True, verdict="human")["action"], "disable-auto-merge")
 
     def test_fast_lane_enables_on_open(self):
         r = self.act(lane="nhanh")
         self.assertEqual((r["action"], r["strict"], r["fallback"]), ("enable-auto-merge", False, ""))
-        r = self.act(lane="nhanh", verdict="merge", next=f"gh pr merge 7 --squash --match-head-commit {self.H}")
+        r = self.act(
+            lane="nhanh",
+            verdict="merge",
+            next=f"gh pr merge 7 --squash --match-head-commit {self.H}",
+            next_rest="gh api X",
+        )
         self.assertIn(f"expectedHeadSha={self.H}", r["fallback"])  # (5) PR đã clean: merge ghim head
+        self.assertIn("REST: gh api X", r["fallback"])  # phiên chặn GraphQL
         self.assertEqual(self.act(True, lane="nhanh")["action"], "wait")
 
     def test_standard_lane_needs_clean_review_at_head(self):
@@ -1158,6 +1166,19 @@ class PrNextTest(unittest.TestCase):
         clean = {"reviews": [{"head": self.H2, "clean": False}, {"head": self.H, "clean": True}]}
         self.assertEqual(self.act(rec=clean)["action"], "enable-auto-merge")  # (4)
         self.assertEqual(self.act(True, rec=clean)["action"], "wait")
+
+    def test_below_l3_never_enables_auto_merge(self):
+        # Review #110: dưới L3 không bật auto-merge (không ghim head) — merge ghim head khi merge-check = merge, còn lại chờ.
+        for level in (1, 2):
+            with self.subTest(level=level):
+                self.assertEqual(self.act(lane="nhanh", autonomy=level)["action"], "wait")
+                r = self.act(lane="nhanh", autonomy=level, verdict="merge", next="gh pr merge 7 --match-head-commit x")
+                self.assertEqual(
+                    (r["action"], r["do"].split(" · ")[0]), ("merge", "gh pr merge 7 --match-head-commit x")
+                )
+                self.assertEqual(self.act(True, lane="nhanh", autonomy=level)["action"], "disable-auto-merge")
+        clean = {"reviews": [{"head": self.H, "clean": True}]}
+        self.assertEqual(self.act(rec=clean, autonomy=2)["action"], "wait")  # L2 làn chuẩn: merge-check vốn trả human
 
     def test_once_standard_or_blocking_stays_strict(self):
         # (3): PR từng vào làn chuẩn / từng có review báo lỗi chặn → làn nhanh hiện tại vẫn cần review sạch ở head.
@@ -1194,7 +1215,9 @@ class PrNextCliTest(unittest.TestCase):
         rc, out, _ = self.nxt(self.big)
         self.assertIn("ENABLE-AUTO-MERGE · PR #7", out)
         self.assertIn("→ gh pr merge 7 --auto --squash", out)
-        self.assertIn(f"  không được thì: gh pr merge 7 --squash --match-head-commit {self.head}", out)
+        self.assertIn(
+            f"  không được thì: gh pr merge 7 --squash --match-head-commit {self.head} · REST: gh api -X PUT", out
+        )
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
     def test_small_pr_after_standard_stays_strict_and_bad_input(self):
@@ -1204,6 +1227,10 @@ class PrNextCliTest(unittest.TestCase):
         rc, out, _ = self.nxt(pr(number=8))  # PR khác, làn nhanh, chưa từng chuẩn
         self.assertIn("ENABLE-AUTO-MERGE · PR #8", out)
         self.assertIn("  không được thì: gh pr merge 8 --squash --match-head-commit abc1234def", out)  # CI đã xanh
+        url = "https://github.com/o/r/pull/8/"  # URL → cùng khoá số PR với `pr next`
+        rc, out, _ = run_main("pr", "reviewed", "--pr", url, "--head", self.head, "--clean")
+        self.assertEqual(out, f"✓ PR #8: review sạch ở {self.head[:7]}\n")
+        self.assertIn("8", xt.read_reviews(self.base))
         rc, _, err = run_main("pr", "next", "--pr-json", "-", stdin="[1]")
         self.assertEqual(rc, 2)
         self.assertIn("không phải object", err)
