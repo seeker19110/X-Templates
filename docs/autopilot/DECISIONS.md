@@ -169,3 +169,10 @@
 - Chọn: Khoá xt.yaml merge_hard_exceptions: human|auto; thiếu khoá = human; repo khung + mẫu dự án đích đặt auto; merge-check vẫn liệt kê lý do (hard_waived) nhưng hard rỗng nên guard cho merge/auto-merge
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 2 (đường lùi): đổi một dòng xt.yaml là bật lại chốt người, bản cài cũ thiếu khoá giữ hành vi an toàn; PA2 mất đường lùi và vết lý do; PA3 trái nghĩa L4 'làn kiến trúc luôn có người' trong bảng L0–L4. Lớp đỡ còn lại: required check gitleaks/CodeQL/dep-audit, guard deny việc không đảo ngược
 - Đường lùi: merge_hard_exceptions: human trong xt.yaml (hoặc xoá khoá)
+
+### D-025 · 2026-10-18T00:15:49+00:00 · Reviewer: mẫu templates/xt.yaml đặt merge_hard_exceptions: auto làm mọi dự án đích mới tự bỏ chốt người mà chưa ghi chấp nhận rủi ro (LOOP-STOP-005 MUST) — giữ auto hay về human?
+
+- Phương án: (1) Mẫu về human; repo khung giữ auto (chủ repo chọn); dự án đích bật bằng một PR đổi khoá — PR đó luôn người merge (HARD_KEY_REASON) = lời chấp nhận rủi ro có dấu vết · (2) Giữ mẫu auto, doctor cảnh báo khi thiếu D-NNN
+- Chọn: Mẫu về human; repo khung giữ auto (chủ repo chọn); dự án đích bật bằng một PR đổi khoá — PR đó luôn người merge (HARD_KEY_REASON) = lời chấp nhận rủi ro có dấu vết
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: dự án đích có tiền/dữ liệu người dùng thật (vd hotel-manager); mặc định auto vi phạm MUST ngay khi cài và trái 'thiếu khoá = human'; PA1 vẫn cho chủ repo bật ở dự án của mình bằng một lần merge
+- Đường lùi: Đặt merge_hard_exceptions: auto trong framework/templates/xt.yaml

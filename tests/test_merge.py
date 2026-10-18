@@ -47,6 +47,22 @@ def pr(**over: Any) -> dict:
     return base
 
 
+def commit_base_xt(base: Path, committed: str, working: str | None = None) -> None:
+    """Repo git tạm: `origin/main` có xt.yaml = `committed`; cây làm việc = `working` (mặc định như commit) — ADR-0020
+    đọc khoá ở nhánh đích, không ở cây làm việc."""
+    (base / "xt.yaml").write_text(committed, encoding="utf-8")
+    git = ["git", "-C", str(base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+    for args in (
+        ["init", "-q"],
+        ["add", "xt.yaml"],
+        ["commit", "-qm", "x"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+    ):
+        subprocess.run([*git, *args], check=True, capture_output=True)
+    if working is not None:
+        (base / "xt.yaml").write_text(working, encoding="utf-8")
+
+
 class FakeGh:
     """Giả `gh api` (REST) theo đường dẫn; mặc định trả đúng PR của fixture `pr()` (files và check-run chia 2 trang)."""
 
@@ -91,6 +107,8 @@ class FakeGh:
         return [c[-1] for c in self.calls]
 
     def respond(self, cmd: list[str], **_: Any) -> subprocess.CompletedProcess:
+        if cmd[0] == "git":  # merge_hard_mode đọc xt.yaml ở nhánh đích — không có repo → human
+            return subprocess.CompletedProcess(cmd, 128, "", "not a git repository")
         self.calls.append(cmd)
         path = cmd[-1]
         files = [
@@ -369,16 +387,26 @@ class MergeConfigTest(unittest.TestCase):
         )
 
     def test_hard_mode(self):
-        """ADR-0020: thiếu khoá → human; giá trị lạ → human kèm ghi chú."""
-        self.assertEqual(xt.merge_hard_mode(self.base), (False, []))
+        """ADR-0020: khoá đọc ở nhánh đích đã commit; không có ref/thiếu khoá → human; giá trị lạ → human kèm ghi chú;
+        cây làm việc sửa tại chỗ không đổi kết quả (agent không tự gỡ được chốt)."""
+        self.assertEqual(xt.merge_hard_mode(self.base, "origin/main"), (False, []))  # không có repo/ref
+        commit_base_xt(self.base, "lint: x\n", working="merge_hard_exceptions: auto\n")
+        self.assertEqual(xt.merge_hard_mode(self.base, "origin/main"), (False, []))
         for raw, want in (("auto", (True, [])), ("human", (False, []))):
-            (self.base / "xt.yaml").write_text(f"merge_hard_exceptions: {raw}\n", encoding="utf-8")
-            self.assertEqual(xt.merge_hard_mode(self.base), want)
-        (self.base / "xt.yaml").write_text("merge_hard_exceptions: off\n", encoding="utf-8")
+            commit_base_xt(self.base, f"merge_hard_exceptions: {raw}\n")
+            self.assertEqual(xt.merge_hard_mode(self.base, "origin/main"), want)
+        commit_base_xt(self.base, "merge_hard_exceptions: off\n")
         self.assertEqual(
-            xt.merge_hard_mode(self.base),
+            xt.merge_hard_mode(self.base, "origin/main"),
             (False, ["merge_hard_exceptions 'off' không hợp lệ (human|auto) — dùng human"]),
         )
+
+    def test_touches_hard_key(self):
+        """Diff xt.yaml chạm khoá, hoặc thiếu patch (diff lớn — không xác minh được) → chạm; file khác → không."""
+        self.assertTrue(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+merge_hard_exceptions: auto"}))
+        self.assertTrue(xt._touches_hard_key({"filename": "x.yml", "previous_filename": "xt.yaml"}))
+        self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
+        self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
 
 
 class MergeDoctorTest(unittest.TestCase):
@@ -407,12 +435,12 @@ class MergeCheckCliTest(unittest.TestCase):
 
     def test_hard_auto_from_xt_yaml(self):
         hot = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}])
-        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmerge_hard_exceptions: auto\n", encoding="utf-8")
+        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot))
         d = json.loads(out)
         self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (0, "merge", [], []))
         self.assertTrue(d["hard_waived"])
-        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmerge_hard_exceptions: x\n", encoding="utf-8")
+        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: x\n")
         rc, out, _ = run_main("merge-check", "--pr-json", "-", stdin=json.dumps(hot))
         self.assertEqual(rc, 1)
         self.assertIn("merge_hard_exceptions 'x' không hợp lệ", out)
@@ -608,7 +636,12 @@ class HardExceptionL3Test(unittest.TestCase):
         self.assertEqual((d["verdict"], d["lane"], d["hard"]), ("merge", "chuẩn", []))
         self.assertEqual(len(d["hard_waived"]), 2)
         self.assertIn("ADR-0020", d["reasons"][-1])
-        self.assertEqual(xt.merge_decision(auth, 2, hard_auto=True)["verdict"], "human")  # dưới L3 vẫn làn chuẩn
+        low = xt.merge_decision(auth, 2, hard_auto=True)
+        self.assertEqual(low["verdict"], "human")  # dưới L3 vẫn làn chuẩn
+        self.assertIn("ADR-0020", low["reasons"][-1])  # lý do miễn hiện cả khi chưa merge
+        key = pr(files=[{"path": "xt.yaml", "additions": 1, "deletions": 0, "hard_key": True}])
+        d = xt.merge_decision(key, 3, hard_auto=True)  # PR đổi chính khoá: không tự miễn
+        self.assertEqual((d["verdict"], d["hard"], d["hard_waived"]), ("human", [xt.HARD_KEY_REASON], []))
         self.assertEqual(xt.merge_decision(pr(), 3, hard_auto=True)["hard_waived"], [])
         self.assertEqual(xt.merge_decision(auth, 3)["hard_waived"], [])
 

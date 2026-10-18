@@ -864,7 +864,8 @@ INFO_ONLY = {"--version", "-v", "version", "--help", "-h", "help"}
 
 EXTERNAL_ASK = "hành động đối ngoại/triển khai thật (điểm dừng bắt buộc)"
 DESTROY_ASK = "huỷ/xoá repo, bí mật hoặc hạ tầng (không đảo ngược)"
-# Ngoại lệ cứng (ADR-0016): tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge — ADR-0019 giữ chặn dưới ADR-0018.
+# Ngoại lệ cứng (ADR-0016): tiền/dữ liệu thật/auth/mật mã/bí mật người merge — ADR-0019 giữ chặn dưới ADR-0018; nhánh
+# đích commit `merge_hard_exceptions: auto` thì merge-check không trả `hard` (ADR-0020).
 HARD_ASK = "ngoại lệ cứng (LOOP-STOP-005): người merge"
 # Merge/bật auto-merge mà guard không đọc được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql) → chặn như
 # ngoại lệ cứng: không xác minh được thì không cho qua (AUD-SEC-044/045).
@@ -1168,7 +1169,7 @@ def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple
     khác nhánh mặc định), không thuộc ngoại lệ cứng (`hard`, ADR-0016) và (MCP) đúng repo. GitHub vẫn chỉ merge khi
     required check/ruleset đạt; không ghim head."""
     d, gate = _hard_gate(selector, root, repo)
-    if gate[0]:  # tiền/dữ liệu thật/auth/mật mã/bí mật luôn người merge, kể cả L3 (ADR-0016, AUD-HAR-042)
+    if gate[0]:  # tiền/dữ liệu thật/auth/mật mã/bí mật người merge kể cả L3 (ADR-0016, AUD-HAR-042; trừ ADR-0020)
         return gate
     level = d.get("autonomy")
     if not isinstance(level, int) or level < 3:

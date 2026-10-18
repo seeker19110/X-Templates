@@ -2,12 +2,13 @@
 
 - **Trạng thái:** Đã chấp nhận
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `merge_hard_mode`, `merge_decision(hard_auto=…)` trả
-  `hard` rỗng + `hard_waived`; `xt.yaml` và `framework/templates/xt.yaml` đặt `merge_hard_exceptions: auto`; test
-  `tests/test_merge.py::HardExceptionL3Test::test_hard_auto_merges_and_keeps_reasons`, `MergeConfigTest::test_hard_mode`,
+  `hard` rỗng + `hard_waived`, `HARD_KEY_REASON`/`_touches_hard_key`; `xt.yaml` đặt `merge_hard_exceptions: auto`,
+  `framework/templates/xt.yaml` đặt `human` (D-025); test
+  `tests/test_merge.py::HardExceptionL3Test::test_hard_auto_merges_and_keeps_reasons`, `MergeConfigTest::test_hard_mode`, `test_touches_hard_key`,
   `MergeCheckCliTest::test_hard_auto_from_xt_yaml`, `tests/test_hooks.py::MergeGuardTest::test_hard_exception_auto_lets_merge_through`
 - **Ngày:** 2026-10-18
 - **Thay một phần:** ADR-0016 (ngoại lệ cứng người merge "ở mọi mức") và ADR-0019 (merge ngoại lệ cứng bị chặn) — chỉ
-  khi khoá là `auto`; quyết định D-024
+  khi khoá là `auto`; quyết định D-024, D-025
 
 ## Bối cảnh
 
@@ -18,12 +19,16 @@ liệu người dùng thật, auth, mật mã, bí mật (`merge-check` trả `h
 
 ## Quyết định
 
-1. Khoá `xt.yaml` `merge_hard_exceptions: human|auto`. Thiếu khoá hoặc giá trị lạ → `human` (hành vi ADR-0016/0019;
-   giá trị lạ kèm ghi chú).
-2. `auto`: `merge-check` vẫn tính lý do ngoại lệ cứng nhưng trả `hard: []` và ghi lý do vào `hard_waived` + một dòng
+1. Khoá `xt.yaml` `merge_hard_exceptions: human|auto`, đọc ở **nhánh đích đã commit** (`git show origin/<base>:./xt.yaml`),
+   không ở cây làm việc — agent sửa file tại chỗ không tự gỡ được chốt. Không đọc được, thiếu khoá hoặc giá trị lạ →
+   `human` (hành vi ADR-0016/0019; giá trị lạ kèm ghi chú).
+2. PR có diff `xt.yaml` chạm khoá (hoặc diff thiếu patch) luôn là ngoại lệ cứng không miễn được (`HARD_KEY_REASON`):
+   bật/tắt khoá phải do người merge — đó là lời chủ dự án chấp nhận rủi ro mà `LOOP-STOP-005` đòi.
+3. `auto`: `merge-check` vẫn tính lý do ngoại lệ cứng nhưng trả `hard: []` và ghi lý do vào `hard_waived` + một dòng
    `reasons` (người đọc lại được). PR vẫn ở làn chuẩn: dưới L3 vẫn `human`; ở L3 merge khi CI xanh.
-3. Repo khung và mẫu `templates/xt.yaml` đặt `auto` theo yêu cầu chủ repo (như ADR-0015 đặt L3).
-4. Guard không đổi: nó chỉ đọc `hard` của `merge-check`. Mọi luật `deny` khác (không đảo ngược, tắt hook, ghi bí mật,
+4. Repo khung đặt `auto` theo yêu cầu chủ repo; mẫu `templates/xt.yaml` đặt `human` (D-025): dự án đích có tiền/dữ
+   liệu người dùng thật, mặc định `auto` vi phạm `LOOP-STOP-005` ngay khi cài. Chủ dự án bật bằng một PR đổi khoá.
+5. Guard không đổi: nó chỉ đọc `hard` của `merge-check`. Mọi luật `deny` khác (không đảo ngược, tắt hook, ghi bí mật,
    gửi bí mật ra mạng) giữ nguyên.
 
 ## Lý do
@@ -36,6 +41,7 @@ liệu người dùng thật, auth, mật mã, bí mật (`merge-check` trả `h
 ## Các phương án đã cân nhắc
 
 - **Xoá hẳn `merge_hard_reasons`/`HARD_ASK`**: mất đường lùi và vết lý do trong `merge-check`. Loại.
+- **Mẫu dự án đích cũng `auto`**: dự án mới bỏ chốt khi chưa ai chấp nhận rủi ro (reviewer, D-025). Loại.
 - **Dùng L4 cho mức này**: trái nghĩa L4 trong bảng L0–L4 ("làn kiến trúc luôn có người"). Loại.
 - **Chỉ bỏ auth + mật mã, giữ tiền/dữ liệu thật/bí mật**: chủ repo không chọn.
 
@@ -45,4 +51,6 @@ liệu người dùng thật, auth, mật mã, bí mật (`merge-check` trả `h
   chủ dự án chấp nhận rủi ro, ghi bằng ADR/D-NNN của dự án.
 - Thao tác lúc chạy trên tiền thật/dữ liệu người dùng thật (thanh toán thật, xoá/xuất dữ liệu production, gửi tin tới
   người dùng thật) vẫn là việc cần người (AGENTS.md §5, D-023) — khoá này chỉ nói về merge code.
-- Dự án đích nhận khoá khi chạy lại `install.py`; tới lúc đó giữ `human`.
+- Dự án đích đã có `xt.yaml`: `install.py` giữ file, chỉ sinh `xt.yaml.xtemplates-new` (có khoá `human`); thiếu khoá vẫn
+  là `human`. Muốn `auto`: mở PR thêm `merge_hard_exceptions: auto`, người merge.
+- PR này (đặt `auto` ở repo khung) chạm khoá nên chính nó cần người merge.

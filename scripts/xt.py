@@ -2764,11 +2764,14 @@ def _package_of(path: str) -> str:
 
 
 # Ngoại lệ cứng (`LOOP-STOP-005`, "Ngoại lệ cứng" của stop-points-and-escalation.md): tiền thật, dữ liệu người dùng
-# thật, xác thực/phân quyền, mật mã, bí mật — luôn người merge, kể cả ở L3 (ADR-0016, D-012; AUD-HAR-042).
+# thật, xác thực/phân quyền, mật mã, bí mật — người merge kể cả ở L3 (ADR-0016, D-012; AUD-HAR-042), trừ khi nhánh đích
+# đã commit `merge_hard_exceptions: auto` (ADR-0020). PR đổi chính khoá đó luôn người merge (`HARD_KEY_REASON`).
 HARD_RISK_TAGS = ("bí mật", "auth", "thanh toán", "mật mã")
 HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "risk:admin", "risk:secret"}
 # Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
 # xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
+HARD_KEY = "merge_hard_exceptions"
+HARD_KEY_REASON = f"đổi `{HARD_KEY}` trong xt.yaml (ADR-0020) — luôn người merge"
 AGENT_HARNESS_RE = re.compile(r"(^|/)(\.claude|\.xtemplates|\.codex|\.gemini|\.cursor)/")
 
 
@@ -2791,6 +2794,8 @@ def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     own = [p for p in risky if any(fnmatch.fnmatch(p, g) for g in risk_paths)]
     if own:
         out.append(f"đường dẫn nhạy cảm (merge_risk_paths): {', '.join(own[:3])}")
+    if any(isinstance(f, dict) and f.get("hard_key") for f in pr.get("files") or []):
+        out.append(HARD_KEY_REASON)
     return out
 
 
@@ -2870,7 +2875,9 @@ def merge_decision(
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     hard = merge_hard_reasons(pr, risk_paths or [])
-    waived, hard = (hard, []) if hard_auto else ([], hard)
+    # Khoá tự miễn cho chính PR đổi nó thì chốt vô nghĩa — lý do này không miễn được.
+    waived = [r for r in hard if r != HARD_KEY_REASON] if hard_auto else []
+    hard = [r for r in hard if r not in waived]
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
     if blocked:
@@ -2888,12 +2895,10 @@ def merge_decision(
         verdict, reasons = "human", ["ruleset đòi review của người"]
     elif lane_reasons:  # L3 (ADR-0015): làn chuẩn tự merge — ghi đúng làn (AUD-CODE-010)
         verdict, reasons = "merge", [f"L3 (ADR-0015): làn chuẩn, CI xanh, không xung đột — {'; '.join(lane_reasons)}"]
-        if waived:
-            reasons.append(
-                f"ngoại lệ cứng không giữ người (merge_hard_exceptions: auto, ADR-0020): {'; '.join(waived)}"
-            )
     else:
         verdict, reasons = "merge", ["làn nhanh, CI xanh, không xung đột"]
+    if waived:
+        reasons.append(f"ngoại lệ cứng không giữ người ({HARD_KEY}: auto, ADR-0020): {'; '.join(waived)}")
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
     nxt = {
         "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
@@ -2927,19 +2932,25 @@ def merge_decision(
     }
 
 
-def _xt_keys(base: Path) -> Dict[str, str]:
-    p = base / "xt.yaml"
-    raw = p.read_text(encoding="utf-8") if p.is_file() else ""
+def _yaml_keys(raw: str) -> Dict[str, str]:
     return {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, raw.splitlines()) if m}
 
 
-def merge_hard_mode(base: Path) -> Tuple[bool, List[str]]:
-    """(ngoại lệ cứng không giữ người?, ghi chú) từ xt.yaml `merge_hard_exceptions: human|auto` (ADR-0020). Thiếu
-    khoá → human (bản cài cũ giữ hành vi ADR-0016); giá trị lạ → human (an toàn) kèm ghi chú."""
-    mode = _xt_keys(base).get("merge_hard_exceptions", "human")
+def _xt_keys(base: Path) -> Dict[str, str]:
+    p = base / "xt.yaml"
+    return _yaml_keys(p.read_text(encoding="utf-8") if p.is_file() else "")
+
+
+def merge_hard_mode(base: Path, ref: str) -> Tuple[bool, List[str]]:
+    """(ngoại lệ cứng không giữ người?, ghi chú) từ `merge_hard_exceptions: human|auto` (ADR-0020) trong xt.yaml **đã
+    commit ở `ref`** (nhánh đích), không phải cây làm việc: agent sửa file tại chỗ không tự gỡ được chốt; đổi khoá phải
+    qua PR mà `HARD_KEY_REASON` giữ cho người merge. Không đọc được ref hay thiếu khoá → human; giá trị lạ → human kèm
+    ghi chú."""
+    r = _git(base, "show", f"{ref}:./xt.yaml")
+    mode = _yaml_keys(r.stdout if r.returncode == 0 else "").get(HARD_KEY, "human")
     if mode in ("human", "auto"):
         return mode == "auto", []
-    return False, [f"merge_hard_exceptions '{mode}' không hợp lệ (human|auto) — dùng human"]
+    return False, [f"{HARD_KEY} '{mode}' không hợp lệ (human|auto) — dùng human"]
 
 
 def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
@@ -2957,6 +2968,13 @@ def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
 
 class PrInputError(Exception):
     """Không lấy/đọc được JSON của PR — `merge-check` thoát 2."""
+
+
+def _touches_hard_key(f: Dict[str, Any]) -> bool:
+    if "xt.yaml" not in (f.get("filename"), f.get("previous_filename")):
+        return False
+    patch = f.get("patch")
+    return not isinstance(patch, str) or HARD_KEY in patch
 
 
 def _gh_api(path: str, paginate: bool = False) -> List[Any]:
@@ -3094,6 +3112,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
                 **({"previous": f["previous_filename"]} if f.get("previous_filename") else {}),
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
+                # Diff xt.yaml chạm khoá ngoại lệ cứng (thiếu patch — diff lớn — thì coi như chạm: không xác minh được).
+                **({"hard_key": True} if _touches_hard_key(f) else {}),
             }
             for f in files
         ],
@@ -3894,7 +3914,7 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     autonomy, risk_paths, notes = merge_config(project_dir())
-    hard_auto, hard_notes = merge_hard_mode(project_dir())
+    hard_auto, hard_notes = merge_hard_mode(project_dir(), f"origin/{pr.get('baseRefName') or 'main'}")
     notes += hard_notes
     d = merge_decision(pr, autonomy, risk_paths, hard_auto)
     if args.json:

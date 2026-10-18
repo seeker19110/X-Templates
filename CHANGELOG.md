@@ -7,11 +7,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Changed
 - **Chủ dự án tắt được chốt người của ngoại lệ cứng** (ADR-0020, D-024): khoá `xt.yaml` `merge_hard_exceptions: human|auto`
-  (thiếu khoá/giá trị lạ = `human`). `auto`: `xt.py merge-check` trả `hard: []`, lý do chuyển sang `hard_waived` + một dòng
-  `reasons`; PR vẫn làn chuẩn, ở L3 merge/bật auto-merge khi CI xanh, guard không chặn nữa. Repo khung và mẫu
-  `templates/xt.yaml` đặt `auto` theo yêu cầu chủ repo (2026-10-17). `LOOP-STOP-005` (MUST, không đổi mức) thêm điều
-  kiện "trừ khi `merge_hard_exceptions: auto` + ghi chấp nhận rủi ro"; lời `LOOP-STOP-002` cập nhật. Dự án đích: chạy
-  lại `install.py` để nhận khoá.
+  đọc ở nhánh đích đã commit, không ở cây làm việc (thiếu/lạ/không đọc được = `human`). `auto`: `xt.py merge-check` trả
+  `hard: []`, lý do chuyển sang `hard_waived` + một dòng `reasons`; PR vẫn làn chuẩn, ở L3 merge/bật auto-merge khi CI
+  xanh, guard không chặn nữa. PR có diff `xt.yaml` chạm khoá luôn người merge (không tự miễn). Repo khung đặt `auto`
+  theo yêu cầu chủ repo (2026-10-17); mẫu `templates/xt.yaml` đặt `human` (D-025). `LOOP-STOP-005` (MUST, không đổi mức) thêm điều
+  kiện "trừ khi `merge_hard_exceptions: auto` + ghi chấp nhận rủi ro"; lời `LOOP-STOP-002`, `LOOP-STOP-009` cập nhật. Dự án đích muốn
+  `auto`: mở PR thêm khoá, người merge.
 - **Tài liệu điểm dừng khớp ADR-0018/0019** (D-023): `AGENTS.md` §5, mẫu `templates/AGENTS.md` §6 và `templates/PLAN.md`,
   skill `/autopilot`, mảng `11-autonomous-loop` bỏ mô tả "hook hỏi người" đã cũ, chia ba nhóm: máy chặn (`deny`) · cho
   chạy (deploy/publish, merge thường, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc/MCP, ra mạng) · vẫn cần người qua
