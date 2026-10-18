@@ -1,13 +1,14 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-18 · Nhánh: seeker/quirky-knuth-v0uphi
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.0.1 phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
 
 ## Đang làm
-- Phát hành 3.0.0 (tag `v3.0.0`) + 3.0.1 (#115: mẫu PR/Dependabot cho dự án đích, merge-gate qua zizmor, doctor quét `.github/`). hotel-manager đã nâng 3.0.0 (hotel-manager#49, D-069 của dự án); x-company: chủ repo không cài. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
+- Phát hành 3.0.0 (tag `v3.0.0`) + 3.0.1 (#115: mẫu PR/Dependabot cho dự án đích, merge-gate qua zizmor, doctor quét `.github/`). hotel-manager đã nâng 3.0.0 (hotel-manager#49, D-069 của dự án); X-Company: chủ repo tự cài 3.0.0 (X-Company#2) — agent không cài (#3 đóng). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check của ruleset `main` trên GitHub; khi nâng 3.0.1 thì giữ mẫu PR/Dependabot riêng (đã tuỳ biến), `merge-gate.yml` đã trùng bản 3.0.1.
+   X-Company (bản 3.0.0 có lỗi #115: Dependabot khai `pip` không có manifest, mẫu PR của repo khung, merge-gate thiếu chú thích zizmor): khi chủ repo cho phép, chạy lại `install.py --with-github` từ 3.0.1 và thay ba file bằng `*.xtemplates-new`.
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ; CLI container ngoài docker/podman (`kubectl exec`, `nerdctl`, AUD-SEC-042); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
