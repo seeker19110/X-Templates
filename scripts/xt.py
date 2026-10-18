@@ -2942,14 +2942,70 @@ def _doctor_memory(base: Path) -> List[Finding]:
     return out
 
 
+FRAMEWORK_REPO = "seeker19110/X-Templates"  # nguồn bản phát hành của khung; fork đặt XT_FRAMEWORK_REPO=chủ/repo
+# Đầu nhãn `.xtemplates/VERSION`: "3.0.0 (abc1234)"; đuôi pre-release ("3.0.0-rc1") nhỏ hơn bản cùng số (SemVer §11).
+SEMVER_PREFIX_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?")
+RELEASE_TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")  # tag phát hành (release-tag.yml); pre-release không tính
+VERSION_CHECK_TIMEOUT = 10
+
+
+def _json_values(text: str) -> List[Any]:
+    """Các giá trị JSON liền nhau (`gh api --paginate` in mỗi trang một mảng: `[…][…]`); hỏng → ValueError."""
+    dec, rest, out = json.JSONDecoder(), text.strip(), []
+    while rest:
+        val, end = dec.raw_decode(rest)
+        out.append(val)
+        rest = rest[end:].lstrip()
+    return out
+
+
+def latest_framework_tag() -> Optional[Tuple[int, int, int]]:
+    """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST, mọi trang, host github.com). Fail-open: không có gh, lỗi
+    mạng/quyền, thân không phải UTF-8/JSON (trang chặn của proxy) → None — `doctor` là bước đầu của `/autopilot`."""
+    repo = os.environ.get("XT_FRAMEWORK_REPO") or FRAMEWORK_REPO
+    cmd = ["gh", "api", "--hostname", "github.com", "--paginate", f"repos/{repo}/tags?per_page=100"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=VERSION_CHECK_TIMEOUT)
+        pages = _json_values(r.stdout) if r.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):  # ValueError gồm UnicodeDecodeError, JSONDecodeError
+        return None
+    tags = [t for page in pages if isinstance(page, list) for t in page]
+    names = [t.get("name") for t in tags if isinstance(t, dict)]
+    found = [RELEASE_TAG_RE.fullmatch(n) for n in names if isinstance(n, str)]
+    vers = [(int(m[1]), int(m[2]), int(m[3])) for m in found if m]
+    return max(vers) if vers else None
+
+
+def _doctor_version(base: Path) -> List[Finding]:
+    """Khung đã cài (`.xtemplates/VERSION`) cũ hơn bản phát hành mới nhất → cảnh báo chạy lại `install.py`
+    (LOOP-HARNESS-020, D-040). Chỉ ở dự án đích; nhãn không phải SemVer hay không đọc được tag → bỏ qua (fail-open)."""
+    try:
+        label = (base / ".xtemplates" / "VERSION").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    m = SEMVER_PREFIX_RE.match(label.strip())
+    latest = latest_framework_tag() if m else None
+    if not m or latest is None:
+        return []
+    installed = (int(m[1]), int(m[2]), int(m[3]))
+    if installed > latest or (installed == latest and not m[4]):  # 3.0.0-rc1 < 3.0.0
+        return []
+    have, want = ".".join(map(str, installed)) + (m[4] or ""), ".".join(map(str, latest))
+    msg = (
+        f"khung đã cài {have} cũ hơn bản phát hành mới nhất v{want} — chạy lại `install.py` từ bản mới rồi làm các bước"
+        f" 'Dự án đích' trong CHANGELOG từ {have} tới {want}"
+    )
+    return [Finding("version", "warn", msg)]
+
+
 def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     """Audit khung đã cài trong dự án (hoặc repo khung) trước khi chạy autopilot. `deep=False` bỏ phần chậm
-    (validate khung, cú pháp hook, progress-check) — dùng ở `loop init`."""
+    (validate khung, cú pháp hook, progress-check, đọc tag phát hành qua mạng) — dùng ở `loop init`."""
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
     if deep:
-        out += _doctor_framework(fw) + _doctor_progress(base)
+        out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base)
     return out
 
 

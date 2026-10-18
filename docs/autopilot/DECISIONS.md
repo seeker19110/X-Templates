@@ -283,3 +283,10 @@
 - Chọn: Duyệt như viết: 4 task, 3 lát, mỗi lát một PR, 40 vòng/8 giờ
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: mỗi task có Gate máy kiểm, lát nhỏ độc lập về hành vi, không phụ thuộc mới, không đụng điểm dừng; mỗi lát một PR theo ADR-0014
 - Đường lùi: Sửa PLAN và loop init lại
+
+### D-040 · 2026-10-18T05:22:04+00:00 · Dự án đích không biết khung đã cài lỗi thời (VERSION 2.0.0 trong khi 58 commit, 35 mục CHANGELOG đòi chạy lại install.py) — làm gì rẻ mà chắc?
+
+- Phương án: (1) Cắt bản phát hành 3.0.0 (ADR-0007 đã định) qua release-tag.yml; doctor (đầy đủ) đọc tag vX.Y.Z mới nhất qua gh api, cảnh báo khi .xtemplates/VERSION cũ hơn; fail-open khi không có gh/mạng; luật cắt bản khi thay đổi buộc dự án đích làm gì ghi ở AGENTS.md §7 · (2) Đóng gói xt.pyz tự cập nhật · (3) Chỉ ghi nhắc trong CHANGELOG
+- Chọn: Cắt bản phát hành 3.0.0 (ADR-0007 đã định) qua release-tag.yml; doctor (đầy đủ) đọc tag vX.Y.Z mới nhất qua gh api, cảnh báo khi .xtemplates/VERSION cũ hơn; fail-open khi không có gh/mạng; luật cắt bản khi thay đổi buộc dự án đích làm gì ghi ở AGENTS.md §7
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: giải đúng chỗ đau (không biết mình cũ) bằng vài chục dòng có test, không đổi đường nạp guard; fail-open nên không chặn phiên offline; 3.0.0 vì ADR-0007 đổi định danh là phá vỡ. xt.pyz đổi cấu trúc khi mới 1 dự án đích (ADR-0010); nhắc bằng lời là lời khai
+- Đường lùi: Bỏ _doctor_version khỏi doctor_findings; tag đã cắt giữ nguyên
