@@ -43,8 +43,14 @@ jobs:
       - name: Cổng chuẩn — đúng lệnh trong xt.yaml (build · typecheck · lint · test)
         run: scripts/dev-task.sh gate
 
-      - name: Test trên Python 3.11 (sàn hỗ trợ)
-        run: python3.11 -m unittest discover -s tests
+      # Cổng ở trên chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
+      # thuộc nhánh (guard: `git push` không refspec trên `main`) từng xanh ở PR mà đỏ trên `main` (AUD-TEST-005, #124).
+      - name: Test trên Python 3.11 (sàn hỗ trợ), checkout mang tên nhánh `main`
+        run: |
+          set -euo pipefail
+          git checkout -q -B main
+          test "$(git symbolic-ref --short HEAD)" = main
+          python3.11 -m unittest discover -s tests
 
       - name: Ghép thử blueprint cho MỌI hồ sơ × gói ngành (smoke)
         run: |

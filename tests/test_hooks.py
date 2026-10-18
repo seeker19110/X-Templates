@@ -3719,5 +3719,128 @@ class GuardStored1018Test(unittest.TestCase):
         self.assertIn("LOOP-STOP-027", r.stderr)
 
 
+class GuardAiAttributionTest(unittest.TestCase):
+    """LOOP-HARNESS-027: repo khai `ai_attribution: forbid` → commit có tên model/URL phiên AI bị chặn (AGENTS.md §3)."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def repo(self, xt: str) -> str:
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        Path(d, "xt.yaml").write_text(f'lint: ""\n{xt}', encoding="utf-8")
+        return d
+
+    def decide(self, cmd: str, d: str) -> object:
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            return self.g.apply_policy(self.g.bash_decision(cmd, d, d))["decision"]
+
+    def test_every_message_source_is_scanned(self):
+        d = self.repo("ai_attribution: forbid  # AGENTS.md §3\n")
+        Path(d, "m.txt").write_text("fix: x\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n", "utf-8")
+        for cmd in (
+            'git commit -m "fix: a" -m "Claude-Session: https://claude.ai/code/session_x"',
+            "git commit -q -F - <<'EOF'\nfix: a\n\nCo-Authored-By: Claude Sonnet 5 <n@a.com>\nEOF",
+            "cat <<'EOF' | git -C . commit -F -\nfix: a\n\nClaude-Session: x\nEOF",
+            "git add . && git commit -m \"$(cat <<'EOF'\nfix: a\n\nhttps://claude.ai/code/session_01\nEOF\n)\"",
+            "git commit -F m.txt",
+            "git commit --file=m.txt",
+            'git commit -am"chore: claude-opus-5-5"',
+            'git commit -nm "Claude Haiku 4"',
+            'git commit --message="Claude Fable 5"',
+            "git commit --message 'claude instant'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d), "deny")
+                self.assertIn("LOOP-HARNESS-027", self.g.bash_decision(cmd, d, d)["reason"])
+
+    def test_generic_trailer_other_commands_and_unreadable_files_pass(self):
+        d = self.repo('ai_attribution: "forbid"\n')
+        for cmd in (
+            'git commit -m "fix: a" -m "Co-authored-by: Claude <noreply@anthropic.com>"',
+            'git commit -C HEAD -m "fix: Claude Code hook"',
+            "git commit -F khong-co.txt",
+            "git commit -F -",
+            'grep -n "Claude Opus" x; git status',
+            "cat > note.md <<'EOF'\nClaude Opus\nEOF",
+            "python3 - <<'EOF'\nprint('Claude-Session: x')\nEOF\ngit commit -m 'fix: a'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d), "")
+
+    def test_only_repos_that_forbid(self):
+        for xt in ("", "ai_attribution: allow\n", "# ai_attribution: forbid\n"):
+            with self.subTest(xt):
+                self.assertEqual(self.decide('git commit -m "Claude-Session: x"', self.repo(xt)), "")
+        # Repo nhận commit quyết định (`git -C khac commit`), không phải gốc phiên.
+        strict, loose = self.repo("ai_attribution: forbid\n"), self.repo("")
+        cmd = 'git -C {} commit -m "Claude-Session: x"'
+        self.assertEqual(self.decide(cmd.format(strict), loose), "deny")
+        self.assertEqual(self.decide(cmd.format(loose), strict), "")
+
+    def test_review_125_cases(self):
+        # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
+        # cục trước `commit`, biến thể tên model.
+        d = self.repo("ai_attribution: forbid\n")
+        os.makedirs(os.path.join(d, ".git"))
+        sub, other = os.path.join(d, "sub"), os.path.join(d, "o")
+        os.makedirs(sub)
+        os.makedirs(other)
+        Path(other, "m.txt").write_text("Claude-Session: x\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            self.assertEqual(self.g.bash_decision('git commit -m "Claude Opus 5"', d, sub)["decision"], "deny")
+            self.assertEqual(self.g.bash_decision("git -C ../o commit -F m.txt", d, sub)["decision"], "deny")
+        for cmd in (
+            'git commit -m fix --trailer "Claude-Session: https://claude.ai/code/session_x"',
+            "git commit -m fix --trailer='Co-authored-by: Claude Opus 5 <n@a.com>'",
+            "git commit -m fix --author='Claude Sonnet 5 <n@a.com>'",
+            "git --no-pager commit -F - <<E\nClaude Opus 5\nE",
+            'git -C "." commit -F - <<E\nClaude Opus 5\nE',
+            'git commit -m "claude-3-5-sonnet-20241022"',
+            'git commit -m "Claude  Opus"',
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d), "deny")
+        t0 = time.monotonic()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
+        self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
+        long_line = "git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"  # bậc hai nếu không cắt dòng
+        self.assertEqual(self.g._heredoc_bodies(long_line), [])
+        self.assertLess(time.monotonic() - t0, 1.0)
+        os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
+        self.assertEqual(self.decide("git commit -F p", d), "")
+        with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp
+            self.assertEqual(self.g._xt_yaml_for(sub), "")
+        self.assertEqual(self.g._xt_yaml_for("/"), "")  # tới gốc hệ thống tệp mà không có xt.yaml
+        # Review #125: dự án trong repo cha (monorepo `apps/web`, xt.yaml ở gốc dự án, `.git` ở trên) và cwd qua symlink.
+        mono = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, mono, True)
+        web = os.path.join(mono, "apps", "web")
+        os.makedirs(os.path.join(mono, ".git"))
+        os.makedirs(os.path.join(web, "src"))
+        Path(web, "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        lnk = os.path.join(mono, "lnk")
+        os.symlink(os.path.join(web, "src"), lnk)
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            for here in (web, os.path.join(web, "src"), lnk):
+                with self.subTest(here):
+                    self.assertEqual(
+                        self.g.bash_decision('git commit -m "Claude Opus 5"', web, here)["decision"], "deny"
+                    )
+            # xt.yaml ở trên gốc repo không áp vào repo con.
+            inner = os.path.join(web, "inner")
+            os.makedirs(os.path.join(inner, ".git"))
+            self.assertEqual(self.g.bash_decision('git commit -m "Claude Opus 5"', inner, inner)["decision"], "")
+        with mock.patch("builtins.open", side_effect=PermissionError):  # file thường mà không đọc được → rỗng
+            self.assertEqual(self.g._read_head(os.path.join(other, "m.txt")), "")
+
+    def test_repo_framework_forbids(self):
+        # Repo khung tự áp luật của mình (AGENTS.md §3, AUD-HAR-017).
+        self.assertRegex((ROOT / "xt.yaml").read_text(encoding="utf-8"), r"(?m)^ai_attribution: forbid")
+
+
 if __name__ == "__main__":
     unittest.main()
