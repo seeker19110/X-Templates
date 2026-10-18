@@ -8,7 +8,7 @@ typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -m coverage run -m unittest discover -s tests && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: auto-merge
-# của GitHub cho mọi làn sau khi review sạch (ADR-0024) (merge khi required check xanh); L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
+# của GitHub cho mọi làn — làn nhanh khi mở PR, làn chuẩn sau khi review sạch (ADR-0024) — merge khi required check xanh; L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).

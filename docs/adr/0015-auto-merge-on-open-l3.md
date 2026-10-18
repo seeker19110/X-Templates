@@ -1,6 +1,6 @@
 # ADR-0015: Mở PR là bật auto-merge (mức `merge_autonomy: L3`) — repo khung và dự án đích
 
-- **Trạng thái:** Đã chấp nhận — bị thay một phần bởi ADR-0024 (thời điểm bật auto-merge: sau review sạch, không khi vừa mở); §1 (L3 merge cả làn chuẩn) và §4 (miễn `WF-REVIEW-007`) bị thay một phần bởi ADR-0016 —
+- **Trạng thái:** Đã chấp nhận — bị thay một phần bởi ADR-0024 (thời điểm bật auto-merge: làn chuẩn sau review sạch; làn nhanh vẫn khi vừa mở); §1 (L3 merge cả làn chuẩn) và §4 (miễn `WF-REVIEW-007`) bị thay một phần bởi ADR-0016 —
   ngoại lệ cứng (tiền, dữ liệu thật, auth, mật mã, bí mật) vẫn người merge ở L3
 - **Trạng thái triển khai:** Đã triển khai (`scripts/xt.py` `merge_decision` — L3 bỏ chặn làn chuẩn, trả `autonomy`,
   `stacked`; `.claude/hooks/guard.py` `_auto_merge_verdict`, `gh_pr_merge_rule` nhận `--auto`, `_mcp_auto_merge` cho

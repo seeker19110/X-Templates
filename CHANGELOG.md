@@ -17,10 +17,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `install.py --with-github` copy thêm `merge-gate.yml` (copy-if-absent; cảnh báo required check không còn liệt kê
   `merge-gate`). Lý do đổi cổng/CI: lời dặn `LOOP-STOP-005` thành cơ chế. **Chủ repo:** thêm `merge-gate` vào ruleset
   `main` đang chạy sau khi job chạy trên một PR. Dự án đích: chạy lại `install.py --with-github`, rồi thêm context.
-- **Bật auto-merge khi review sạch, không bật được thì merge trực tiếp ghim head — mọi PR** (ADR-0024, D-030; chủ repo yêu
-  cầu cho khung và dự án đích): mở PR → `reviewer` (model khác) rà diff → không còn lỗi chặn và `merge-check` không `hard`
-  thì bật auto-merge; GitHub báo PR đã sẵn sàng thì merge bằng lệnh ghim head trong `next`. Review gắn với commit H đã rà:
-  chỉ bật/merge khi head = H; PR đang bật auto-merge thì tắt TRƯỚC mỗi push rồi rà lại H..head (merge nhánh đích: rà phần
+- **Merge theo làn: PR quan trọng review sạch rồi bật auto-merge, PR khác bật khi mở** (ADR-0024, D-030, D-031; chủ repo
+  yêu cầu cho khung và dự án đích): mở PR → `merge-check` báo làn `nhanh` thì bật auto-merge ngay; làn `chuẩn` (PR quan
+  trọng: vùng nhạy cảm, nhãn `risk:`, > 150 dòng, nhiều gói, đổi mã không đổi test) → `reviewer` (model khác) rà diff →
+  không còn lỗi chặn và `merge-check` không `hard` thì bật auto-merge; GitHub báo PR đã sẵn sàng thì merge bằng lệnh ghim head trong `next`. Review gắn với commit H đã rà:
+  chỉ bật/merge khi head = H; PR đang bật auto-merge thì tắt TRƯỚC mỗi push, chạy lại `merge-check`, làn chuẩn thì rà lại H..head (merge nhánh đích: rà phần
   giải xung đột). Sửa `AGENTS.md`, mẫu
   `AGENTS.md`, skill `/autopilot`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007` (lời, không đổi mức). Siết
   `grant-check`/`merge-check` theo review lần bốn của #102: chỉ `Not Found (HTTP 404)` là file vắng (`No commit found for the

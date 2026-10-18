@@ -1,47 +1,52 @@
-# ADR-0024: Bật auto-merge khi review sạch; không bật được thì merge trực tiếp ghim head — mọi PR
+# ADR-0024: Merge theo làn — PR quan trọng review sạch rồi bật auto-merge, PR khác bật khi mở
 
 - **Trạng thái:** Đã chấp nhận
 - **Trạng thái triển khai:** Đã triển khai — quy định ở `AGENTS.md` §3, `framework/templates/AGENTS.md`, skill `/autopilot`
   bước 10, `framework/11-autonomous-loop/README.md`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007`; không đổi code
   guard (`merge-check` vẫn quyết `merge`/`hard`; merge trực tiếp chỉ qua lệnh ghim head mà guard đã cho phép)
 - **Ngày:** 2026-10-18
-- **Thay một phần:** ADR-0015 — thời điểm bật auto-merge ("mở PR là bật auto-merge"); quyết định D-030
+- **Thay một phần:** ADR-0015 — thời điểm bật auto-merge ("mở PR là bật auto-merge"); quyết định D-030, D-031
 
 ## Bối cảnh
 
 Chủ repo yêu cầu (2026-10-18): "bật auto-merge khi review sạch, không bật được thì tự merge, áp dụng cho cả dự án đích
-sau này", rồi "áp luôn cho mọi PR". Ở PR #102, bốn vòng `reviewer` độc lập bắt được ba lỗ an ninh thật (tự cấp ủy quyền
+sau này", rồi "áp luôn cho mọi PR"; cùng ngày đổi lại: "chỉ review lại trước những PR quan trọng, rồi sau đó tạo PR auto
+merge, còn lại bật auto merge tự động". Ở PR #102, bốn vòng `reviewer` độc lập bắt được ba lỗ an ninh thật (tự cấp ủy quyền
 production) trước khi merge; nếu bật auto-merge ngay khi mở PR như ADR-0015 thì PR đã merge từ vòng đầu.
 
 ## Quyết định
 
-Mọi PR (mọi làn): (1) mở PR → chạy nền `merge-watch`; `reviewer` (model khác người viết) rà diff ở commit H, ghi H trong báo cáo.
+(1) mở PR → chạy nền `merge-watch`, chạy `merge-check`: `hard` → (7); PR chồng → bật sau khi đổi đích về nhánh mặc định; làn `nhanh` → **bật auto-merge ngay** (`gh pr merge <N> --auto --squash`/MCP `enable_pr_auto_merge`), không chờ review; làn `chuẩn` = **PR quan trọng** (đường dẫn nhạy cảm cổng/CI/hook/schema/phụ thuộc, nhãn `risk:`, > 150 dòng, nhiều gói, đổi mã không đổi test — vị từ `LOOP-STOP-009`) → chưa bật, `reviewer` (model khác người viết) rà diff ở commit H, ghi H trong báo cáo.
 
 (2) **review sạch ở H** = không còn lỗi chặn, mọi mục "nên sửa" đã sửa hoặc trả lời lý do.
 
-(3) cần push sau H (sửa mục nên sửa, sửa CI, merge nhánh đích): PR đang bật auto-merge thì **tắt auto-merge TRƯỚC khi push** (`gh pr merge <N> --disable-auto`/MCP `disable_pr_auto_merge`), push, rà lại diff H..head (push chỉ là merge nhánh đích thì rà phần giải xung đột: `git show --remerge-diff`), head mới thành H.
+(3) cần push (sửa mục nên sửa, sửa CI, merge nhánh đích): PR đang bật auto-merge thì **tắt auto-merge TRƯỚC khi push** (`gh pr merge <N> --disable-auto`/MCP `disable_pr_auto_merge`), push, chạy lại `merge-check`: vẫn làn `nhanh` → bật lại; làn `chuẩn` → rà diff H..head (chưa rà lần nào thì rà cả PR; push chỉ là merge nhánh đích thì rà phần giải xung đột: `git show --remerge-diff`), head mới thành H.
 
-(4) review sạch ở H và `merge-check` có `head` = H, không `hard`, không phải PR chồng, verdict `wait` (CI còn chạy — ca thường) hoặc `merge` → bật auto-merge (`gh pr merge <N> --auto --squash`/MCP `enable_pr_auto_merge`).
+(4) làn `chuẩn`: review sạch ở H và `merge-check` có `head` = H, không `hard`, không phải PR chồng, verdict `wait` (CI còn chạy — ca thường) hoặc `merge` → bật auto-merge.
 
-(5) không bật được — GitHub báo PR đã "clean status" (CI đã xanh, verdict `merge`) hoặc repo tắt auto-merge — thì khi verdict `merge` chạy đúng lệnh `next` (ghim `--match-head-commit H`/MCP `expectedHeadSha` H), khi `wait` thì chờ `merge-watch` rồi chạy lại `merge-check`.
+(5) không bật được — GitHub báo PR đã "clean status" (CI đã xanh, verdict `merge`) hoặc repo tắt auto-merge — thì khi verdict `merge` chạy đúng lệnh `next` (ghim head `--match-head-commit`/MCP `expectedHeadSha`; làn `chuẩn` chỉ khi head = H), khi `wait` thì chờ `merge-watch` rồi chạy lại `merge-check`.
 
-(6) `merge-watch` thoát 0 trước khi review sạch → chưa làm gì, review sạch xong chạy lại `merge-check` rồi làm (4)/(5).
+(6) làn `chuẩn`: `merge-watch` thoát 0 trước khi review sạch → chưa làm gì, review sạch xong chạy lại `merge-check` rồi làm (4)/(5).
 
 (7) `hard` → người merge (`loop defer`; job CI `merge-gate` đỏ khi PR `hard` đang bật auto-merge — ADR-0023); còn lỗi chặn → sửa theo (3), rà lại.
 
 ## Lý do
 
-- Chủ repo chọn rõ "mọi PR". Tiêu chí 1: review độc lập trước merge đã chứng minh giá trị ở #102.
+- Chủ repo chọn rõ: review trước chỉ cho PR quan trọng. "Quan trọng" = làn `chuẩn` của `merge-check` (D-031): vị từ
+  máy có sẵn, test được, bắt rộng có chủ đích (báo oan chỉ tốn một lượt review) và gồm mọi chỗ từng lộ lỗ an ninh ở #102
+  (`xt.py` cổng/CI, nhiều gói). PR nhỏ một gói, có test, không chạm vùng nhạy cảm bật auto-merge khi mở như ADR-0015.
 - Lệnh `next` ghim head **tại lúc chạy `merge-check`**, không phải commit đã rà (review lần đầu của PR này bắt lỗi khẳng
   định ngược). Vì vậy quy trình buộc so `head` với H và rà lại khi khác; guard vẫn đòi `merge-check` = `merge`.
 
 ## Các phương án đã cân nhắc
 
-- **Chỉ PR làn chuẩn chờ review, làn nhanh bật khi mở**: rẻ hơn nhưng chủ repo chọn mọi PR. Loại.
+- **Mọi PR chờ review** (D-030): chậm và tốn mọi PR nhỏ; chủ repo đổi sang chỉ PR quan trọng. Loại.
+- **Agent tự phán đoán PR nào quan trọng**: không kiểm được. **Chỉ PR `hard`**: bỏ sót sửa guard/CI. Loại.
 - **Giữ ADR-0015 (bật khi mở)**: PR tự merge trước khi review xong. Loại.
 
 ## Hệ quả
 
-- Mỗi PR thêm một lượt `reviewer` (vài phút, tốn token); dồn việc nhỏ vào một lát hợp lý để giảm số PR.
+- Mỗi PR làn chuẩn thêm một lượt `reviewer` (vài phút, tốn token); PR làn nhanh merge ngay khi CI xanh.
+- Push vào PR làn nhanh có thể đổi nó sang làn chuẩn: vì vậy (3) tắt auto-merge trước push và chạy lại `merge-check`.
 - Auto-merge không ghim head (`gh pr merge --auto` không nhận head): vì vậy bước (3) tắt auto-merge TRƯỚC mỗi push; PR
   `hard` còn có job CI `merge-gate` đỏ khi đang bật auto-merge (ADR-0023).
