@@ -7,14 +7,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Changed
 - **Sàn Gate theo quy mô M/L — máy kiểm thay cho kỷ luật** (`LOOP-HARNESS-023`, mục mới MUST@L; D-035). ADR-0011 chỉ chặn
-  cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Hàm mới `gate_floor_issues` đọc `scale:`/`profile:` ở
-  frontmatter `BLUEPRINT.md` (đường khai ở state autopilot, không thì gốc) và `xt.yaml`: ở M/L đòi `typecheck` khác rỗng khi
-  có `tsconfig.json`/`pyproject.toml`/`setup.cfg` (`build` với `go.mod`/`Cargo.toml`), `lint` gồm kiểm format, `test` có
-  ngưỡng coverage trong lệnh hoặc file cấu hình, hồ sơ có UI có `e2e`. `xt.py doctor` cảnh báo `gate-floor`, `loop init`
-  nhắc trên stderr, `loop verify` ĐỎ (ghi `verified.json.gate_floor`, `final_check` nêu lý do) nên autopilot không ra
-  `done` khi dưới sàn. S hoặc không có blueprint: không áp. Sửa `LOOP-HARNESS-008`, bảng cổng `harness-files.md`, mẫu
-  `xt.yaml`, skill `/autopilot` bước 0.
-- **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-032).
+  cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Sàn không đoán tên công cụ: ở quy mô M/L (đọc `scale:`/
+  `profile:` ở frontmatter `BLUEPRINT.md` như giá trị YAML — nháy, comment, chữ thường) `xt.yaml` phải khai lệnh thật,
+  không rỗng/no-op, cho khoá mới `format_check` (kiểm format không ghi file) và `coverage` (test có ngưỡng, đỏ khi dưới
+  ngưỡng), `typecheck` khi repo có `tsconfig.json`/`pyproject.toml`/`setup.cfg` (`build` với `go.mod`/`Cargo.toml`), `e2e`
+  khi hồ sơ web-app/mobile-app/desktop-app/static-site/game. `xt.py doctor` cảnh báo `gate-floor`, `loop init` nhắc,
+  `loop verify` ĐỎ khi thiếu khoá và **chạy** các lệnh sàn (trừ lệnh trùng Gate; ghi `verified.json.gate_floor`/
+  `gate_floor_runs`, `final_check` nêu khoá đỏ) nên autopilot không ra `done` khi dưới sàn. S hoặc không có blueprint:
+  không áp. Mẫu `xt.yaml` thêm hai khoá và mẫu theo stack đạt sàn; sửa `LOOP-HARNESS-008`, bảng cổng `harness-files.md`,
+  skill `/autopilot` bước 0. Dự án đích ở M/L: khai `format_check`, `coverage` (và `e2e` theo hồ sơ) trước `loop verify`.
+- **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-034).
   Ghi `— Kiểm: \`<lệnh>\`` ở cuối dòng mục đã tick (phần ghi chú sau `· Nguồn:`); `xt.py blueprint-status --run` chạy lại
   mọi lệnh trong thư mục chứa blueprint (mỗi lệnh một lần, timeout `XT_RECORD_TIMEOUT`), in `✓/✗ Kiểm <ID>`, JSON thêm
   `checks`, `failed_checks`, `unchecked_must` (MUST tick không có lệnh — chỉ báo, không đỏ); ghi chú `Kiểm:` sai dạng
