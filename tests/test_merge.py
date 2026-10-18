@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -407,6 +408,132 @@ class MergeConfigTest(unittest.TestCase):
         self.assertTrue(xt._touches_hard_key({"filename": "x.yml", "previous_filename": "xt.yaml"}))
         self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
         self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
+
+    PLAN_FILE = "docs/autopilot/PLAN.md"
+    NOT_FOUND = "gh api … lỗi: gh: Not Found (HTTP 404)"
+
+    @staticmethod
+    def contents(files: dict, broken: tuple = ()):
+        """`_gh_one` giả cho REST contents theo (đường, ref): vắng → 404 như gh; ref trong `broken` → lỗi khác (timeout)."""
+
+        def fake(api_path: str) -> dict:
+            path, ref = api_path.split("/contents/", 1)[1].rsplit("?ref=", 1)
+            if ref in broken:
+                raise xt.PrInputError("gh api lỗi: timeout")
+            if (path, ref) not in files:
+                raise xt.PrInputError(MergeConfigTest.NOT_FOUND)
+            body = base64.b64encode(files[path, ref].encode()).decode()
+            return {"type": "file", "path": path, "encoding": "base64", "content": body}
+
+        return fake
+
+    def changed(self, f: dict, files: dict, broken: tuple = ()) -> bool:
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=self.contents(files, broken)):
+            return xt._touches_hard_key(f, "repos/o/r", "base", "head")
+
+    def modified(self, before: str, after: str) -> bool:
+        files = {(self.PLAN_FILE, "base"): before, (self.PLAN_FILE, "head"): after}
+        return self.changed({"filename": self.PLAN_FILE, "status": "modified"}, files)
+
+    def test_plan_grant_effect_changes_are_hard(self):
+        """ADR-0022: so HIỆU LỰC ủy quyền đáy/đầu PR — fence, viết hoa, xoá dòng đều bị bắt (review: regex trên patch lọt)."""
+        sand = "- grant: payments | mode=sandbox | max_per_txn=0\n"
+        live = "- grant: payments | mode=live | max_per_txn=1e9\n"
+        cases = {
+            "thêm dòng": (sand, sand + "- grant: secrets | read_values=false\n", True),
+            "sửa dòng": (sand, live, True),
+            "viết hoa": (sand, live.replace("grant", "GRANT").replace("mode", "MODE"), True),
+            "xoá dòng": (sand, "", True),
+            "bỏ fence": ("```\n" + sand + "```\n", sand, True),
+            "thêm fence mở": (sand, "```\n" + sand, True),
+            "đảo fence": (sand + "```\n" + live + "```\n", "```\n" + sand + "```\n" + live + "```\n", True),
+            "chỉ tick task": (sand + "- [ ] `T-001` việc\n", sand + "- [x] `T-001` việc\n", False),
+            "thêm ghi chú": (sand, "# ghi chú\n" + sand, False),
+        }
+        for name, (before, after, want) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.modified(before, after), want)
+
+    def test_rename_or_copy_into_plan_is_hard(self):
+        """Review lần hai: đáy là CHÍNH đường PLAN, không phải tên file cũ — chuỗi PR dời file có grant vào PLAN.md bị bắt."""
+        live = "- grant: payments | mode=live | max_per_txn=1000000\n"
+        for status in ("renamed", "copied"):
+            with self.subTest(status):
+                f = {"filename": self.PLAN_FILE, "previous_filename": "docs/notes.md", "status": status}
+                files = {("docs/notes.md", "base"): live, (self.PLAN_FILE, "head"): live}  # PLAN.md chưa có ở đáy
+                self.assertTrue(self.changed(f, files))
+        moved_away = {"filename": "docs/PLAN2.md", "previous_filename": self.PLAN_FILE, "status": "renamed"}
+        self.assertTrue(self.changed(moved_away, {(self.PLAN_FILE, "base"): live}))  # dời đi = grant biến mất
+        self.assertFalse(self.changed(moved_away, {(self.PLAN_FILE, "base"): "# PLAN\n"}))  # không có grant nào
+
+    def test_plan_added_removed_and_unreadable(self):
+        g = "- grant: payments | mode=sandbox | max_per_txn=0\n"
+        add = {"filename": self.PLAN_FILE, "status": "added"}
+        rm = {"filename": self.PLAN_FILE, "status": "removed"}
+        self.assertTrue(self.changed(add, {(self.PLAN_FILE, "head"): g}))
+        self.assertFalse(self.changed(add, {(self.PLAN_FILE, "head"): "# PLAN\n"}))
+        self.assertTrue(self.changed(rm, {(self.PLAN_FILE, "base"): g}))
+        self.assertFalse(self.changed(rm, {(self.PLAN_FILE, "base"): "# PLAN\n"}))
+        mod = {"filename": self.PLAN_FILE, "status": "modified"}
+        both = {(self.PLAN_FILE, "base"): g, (self.PLAN_FILE, "head"): g}
+        self.assertFalse(self.changed(mod, both))
+        self.assertTrue(self.changed(mod, both, broken=("base",)))  # lỗi đọc ≠ vắng → coi như đổi
+        self.assertTrue(self.changed(mod, both, broken=("head",)))
+        self.assertTrue(xt._touches_hard_key({"filename": self.PLAN_FILE}, "repos/o/r", "", "head"))  # thiếu sha đáy
+        self.assertFalse(xt._touches_hard_key({"filename": "docs/other/NOTES.md"}, "repos/o/r", "base", "head"))
+
+    def test_plan_grants_reader_rejects_bad_content(self):
+        ok = {"type": "file", "path": self.PLAN_FILE, "encoding": "base64"}
+
+        def read(resp: dict):
+            with unittest.mock.patch.object(xt, "_gh_one", return_value=resp):
+                return xt._plan_grants("repos/o/r", self.PLAN_FILE, "head")
+
+        body = base64.b64encode(b"- grant: secrets | read_values=false\n").decode()
+        for name, bad in {
+            "base64 hỏng": {**ok, "content": "!!!"},
+            "file lớn": {**ok, "content": "", "encoding": "none"},
+            "thiếu encoding": {"type": "file", "path": self.PLAN_FILE, "content": "e30="},
+            "không phải UTF-8": {**ok, "content": base64.b64encode(b"\xff\xfe").decode()},
+            # Review lần ba: API contents đi theo symlink và trả file ĐÍCH (type file, path khác) → không xác minh được
+            "symlink tới file khác": {**ok, "path": "docs/notes.md", "content": body},
+            "symlink chưa theo": {"type": "symlink", "path": self.PLAN_FILE, "target": "../notes.md"},
+            "thư mục": {"type": "dir", "path": self.PLAN_FILE},
+        }.items():
+            with self.subTest(name):
+                self.assertIsNone(read(bad))
+        wrapped = base64.encodebytes(b"- grant: secrets | read_values=false\n" * 3).decode()  # có xuống dòng như GitHub
+        self.assertEqual(read({**ok, "content": wrapped}), {"secrets": {"read_values": "false"}})
+        with unittest.mock.patch.object(xt, "_gh_one") as one:
+            self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, ""))  # ref rỗng = nhánh mặc định: không dùng
+            one.assert_not_called()
+            one.return_value = {**ok, "content": base64.b64encode(b"").decode()}
+            self.assertEqual(xt._plan_grants("repos/o/r", self.PLAN_FILE, None), {})  # ref=None: nhánh mặc định
+            self.assertEqual(one.call_args.args, (f"repos/o/r/contents/{self.PLAN_FILE}",))  # không có ?ref=
+
+    def test_404_only_from_gh_http_status(self):
+        """Review lần ba: chỉ tin `(HTTP 404)` ở phần stderr của gh — sha có chữ `404` không biến lỗi 502 thành "file vắng"."""
+        sha = "a404cccc" + "0" * 32
+
+        def err(msg: str):
+            with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError(msg)):
+                return xt._plan_grants("repos/o/r", self.PLAN_FILE, sha)
+
+        path = f"repos/o/r/contents/{self.PLAN_FILE}?ref={sha}"
+        self.assertIsNone(err(f"gh api {path} lỗi: gh: Server Error (HTTP 502)"))
+        self.assertIsNone(err(f"không chạy được gh (timeout {path})"))
+        self.assertEqual(err(f"gh api {path} lỗi: gh: Not Found (HTTP 404)"), {})
+
+    def test_truncated_file_list_is_hard_and_unwaivable(self):
+        """Review lần hai: REST cắt danh sách file ở 3000 → PLAN.md/xt.yaml có thể lọt → luôn người merge, kể cả `auto`."""
+        self.assertEqual(xt.merge_hard_reasons(pr(filesTruncated=True), []), [xt.TRUNCATED_REASON])
+        d = xt.merge_decision(pr(filesTruncated=True), 3, hard_auto=True)
+        self.assertEqual((d["verdict"], d["hard"], d["hard_waived"]), ("human", [xt.TRUNCATED_REASON], []))
+        gh = FakeGh(pull={"changed_files": 4000})
+        with gh.patch():
+            self.assertTrue(xt._pr_rest("7")["filesTruncated"])
+        with FakeGh(pull={"changed_files": 3}).patch():
+            self.assertNotIn("filesTruncated", xt._pr_rest("7"))  # 3 file trả về = changed_files
 
 
 class MergeDoctorTest(unittest.TestCase):

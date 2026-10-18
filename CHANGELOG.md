@@ -6,6 +6,22 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Tối ưu thời gian check e2e**: 7 mục `SHOULD` mới ở `14-testing-quality/e2e-and-accessibility.md` — `QA-E2E-020` shard song
+  song + gộp báo cáo blob, `QA-E2E-021` build một lần dùng lại, `QA-E2E-022` đăng nhập một lần (`storageState`), `QA-E2E-023` chọn
+  test theo ảnh hưởng ở PR (suite đầy đủ trên `main`/trước deploy), `QA-E2E-024` đỏ sớm + huỷ run cũ, `QA-E2E-025` timeout ngắn
+  và bớt việc thừa, `QA-E2E-026` ngân sách thời gian (PR ≤ 5 phút khi đã shard, trần cứng `QA-E2E-013` ≤ 10) và đo mỗi run.
+  Mẫu `templates/xt.yaml` thêm khoá `e2e_affected`. Cờ Playwright xác minh 2026-10-18 từ playwright.dev.
+- **Ủy quyền production trong PLAN + `xt.py grant-check`; hạn mức autopilot mặc định x2** (ADR-0022, D-027, D-028; chủ repo yêu cầu
+  bật tự động tới production khi duyệt kế hoạch). Mẫu `templates/PLAN.md` có mục "Ủy quyền production" (dòng
+  `- grant: <nhóm> | khoá=giá trị`, mặc định chỉ sandbox); lệnh mới `grant-check <nhóm> khoá=giá trị` exit 0 trong ủy quyền, 1 ngoài
+  hoặc thiếu mục (→ `loop defer`), 2 tham số sai; đọc PLAN.md ở nhánh mặc định trên GitHub qua REST (không đọc cây làm việc hay ref cục bộ; `--plan` phải là
+  `…/docs/autopilot/PLAN.md`), đòi khai đủ mọi khoá, từ chối số âm/`nan`/`inf`. PR đổi hiệu lực ủy quyền ở PLAN.md (so
+  `parse_grants` đáy/đầu PR cho từng đường PLAN, kể cả đổi tên/sao chép vào; danh sách file bị cắt cũng tính) luôn do người
+  merge, kể cả `merge_hard_exceptions: auto` (cùng chốt với khoá); PLAN.md là symlink (API trả file đích) hay mã lỗi khác
+  `(HTTP 404)` = không đọc được. Giới hạn còn lại ghi ở ADR-0022 (auto-merge không ghim head; repo `gh` theo môi trường). Mục mới `LOOP-STOP-026` (SHOULD). `AGENTS.md` §5, mẫu `AGENTS.md`, skill `/autopilot` ghi "trừ việc
+  nằm trong ủy quyền". Mặc định x2 khi PLAN bỏ trống số: trần vòng `max(40, 8 × task chưa làm)` (trước `max(20, 4 × task)`), 100
+  vòng khi không `--single-session` (trước 50), `merge-watch --max-minutes` 240 (trước 120), khuyến nghị `--hours` ≤ 16. Sửa lỗi
+  định dạng bước 13 của skill `/autopilot` (dấu nháy lặp quanh `<XT>`).
 - **Mở PR xong chạy nền `xt.py merge-watch` (30 giây/lần)** (ADR-0021, D-026; chủ repo yêu cầu cho khung và dự án
   đích): lệnh mới gọi lại đúng `merge-check` mỗi `--interval` giây (mặc định 30, `--max-minutes` 120) tới khi verdict ≠
   `wait`; exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ. Thành bước bắt buộc trong

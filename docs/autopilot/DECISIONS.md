@@ -183,3 +183,17 @@
 - Chọn: Lệnh xt.py merge-watch (mặc định 30 s): vòng lặp trong tiến trình gọi lại merge-check, chạy nền, thoát khi verdict khác wait → agent được đánh thức; mọi harness dùng được; quy định thành bước bắt buộc sau khi mở PR
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 3 (bền, đơn giản, test được): poll tất định nằm trong code, không tốn token mỗi 30 s, test được bằng giả đồng hồ, dùng lại nguyên đường merge-check nên không có luật thứ hai; PA2 tốn token và chỉ một harness; PA3 trái yêu cầu chủ repo. Thêm: 30 s × ~6 lệnh REST mỗi lần ≈ 720 yêu cầu/giờ/PR, dưới hạn 5000/giờ của gh đã đăng nhập; nhiều PR song song thì nâng --interval
 - Đường lùi: Bỏ bước merge-watch khỏi AGENTS.md/skill/mẫu; lệnh vẫn dùng được thủ công hoặc xoá cmd_merge_watch
+
+### D-027 · 2026-10-18T00:53:38+00:00 · Hạn mức chạy autopilot 'x2, nếu không có thì x2 sau khi duyệt ở dự án đích' — hiểu và cài thế nào?
+
+- Phương án: (1) Số mặc định nhân đôi (trần vòng max(40, 8×task chưa làm), 100 vòng khi không --single-session, merge-watch tối đa 240 phút, khuyến nghị --hours ≤ 16); chỉ áp khi PLAN bỏ trống số; số PLAN khai (--max-iterations, --hours) vẫn ưu tiên; có hiệu lực ở loop init = ngay sau duyệt PLAN ở dự án đích · (2) Chỉ nhân đôi ở dự án đích, repo khung giữ số cũ · (3) Nhân đôi cả số PLAN đã khai tường minh
+- Chọn: Số mặc định nhân đôi (trần vòng max(40, 8×task chưa làm), 100 vòng khi không --single-session, merge-watch tối đa 240 phút, khuyến nghị --hours ≤ 16); chỉ áp khi PLAN bỏ trống số; số PLAN khai (--max-iterations, --hours) vẫn ưu tiên; có hiệu lực ở loop init = ngay sau duyệt PLAN ở dự án đích
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: số tường minh là ý định đã ghi của chủ dự án nên không tự đổi; mặc định đổi ở một chỗ (loop init) nên dự án đích và repo khung dùng chung, không rẽ nhánh; PLAN trong mẫu đã nói 'bỏ trống = mặc định' nên khớp câu 'nếu không có thì x2'. Không nới hàng rào an toàn: breaker 80/90/100% và same_failure_count 3 giữ nguyên
+- Đường lùi: Trả max(20, 4×task)/50/120 phút/--hours ≤ 8 trong xt.py, tài liệu và test
+
+### D-028 · 2026-10-18T00:53:38+00:00 · Làm sao 'duyệt kế hoạch' bật tự động tới production mà vẫn có chốt người đúng một lần?
+
+- Phương án: (1) Mục 'Ủy quyền production' trong PLAN.md dạng máy đọc (- grant: <nhóm> | khoá=giá trị …); xt.py grant-check kiểm đóng việc đang làm có nằm trong ủy quyền (thiếu = ngoài); PR đổi dòng grant hoặc khoá merge_hard_exceptions luôn người merge, nên người merge PR duyệt kế hoạch = lời chấp nhận rủi ro duy nhất · (2) Khoá cấu hình trong xt.yaml cho từng nhóm · (3) Chỉ dặn trong AGENTS.md, không máy kiểm
+- Chọn: Mục 'Ủy quyền production' trong PLAN.md dạng máy đọc (- grant: <nhóm> | khoá=giá trị …); xt.py grant-check kiểm đóng việc đang làm có nằm trong ủy quyền (thiếu = ngoài); PR đổi dòng grant hoặc khoá merge_hard_exceptions luôn người merge, nên người merge PR duyệt kế hoạch = lời chấp nhận rủi ro duy nhất
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: PLAN do phiên chính tự duyệt (ADR-0008) nên tự cấp ủy quyền cho chính mình là lỗ; bắt PR đổi grant cần người merge vá lỗ đó mà chỉ đòi người một lần; grant-check đóng khi thiếu nên mặc định không cho gì; PA3 là lời dặn không phải cơ chế
+- Đường lùi: Bỏ nhánh PLAN.md khỏi _touches_hard_key và xoá cmd_grant_check; AGENTS.md §5 về như D-023

@@ -36,7 +36,10 @@ Lệnh:
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   merge-check [--pr PR] [--pr-json F] [--json]
                                 Máy quyết khi nào merge PR: merge · wait · update · fix · human · closed (exit 0 = merge).
-  merge-watch [--pr PR] [--interval 30] [--max-minutes 120]
+  grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
+                                Việc production có nằm trong mục Ủy quyền production của PLAN.md không (exit 0 =
+                                trong ủy quyền; 1 = ngoài → loop defer; thiếu mục = ngoài).
+  merge-watch [--pr PR] [--interval 30] [--max-minutes 240]
                                 Gọi merge-check mỗi `interval` giây tới khi verdict ≠ wait (exit 0 = đã merge/merge,
                                 1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
   doctor [--fix] [--json]       Audit khung đã cài trước /autopilot (Python/git, hook + file hook, skill, AGENTS/CLAUDE,
@@ -49,6 +52,7 @@ Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import datetime as _dt
 import fnmatch
@@ -57,6 +61,7 @@ import importlib.util
 import io
 import itertools
 import json
+import math
 import os
 import posixpath
 import re
@@ -2777,7 +2782,11 @@ HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "ris
 # Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
 # xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
 HARD_KEY = "merge_hard_exceptions"
-HARD_KEY_REASON = f"đổi `{HARD_KEY}` trong xt.yaml (ADR-0020) — luôn người merge"
+HARD_KEY_REASON = f"đổi `{HARD_KEY}` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022) — luôn người merge"
+TRUNCATED_REASON = (
+    "danh sách file của PR bị cắt (quá giới hạn REST) — không xác minh được ủy quyền/khoá, luôn người merge"
+)
+UNWAIVABLE = (HARD_KEY_REASON, TRUNCATED_REASON)  # `merge_hard_exceptions: auto` không miễn được hai lý do này
 AGENT_HARNESS_RE = re.compile(r"(^|/)(\.claude|\.xtemplates|\.codex|\.gemini|\.cursor)/")
 
 
@@ -2802,6 +2811,8 @@ def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
         out.append(f"đường dẫn nhạy cảm (merge_risk_paths): {', '.join(own[:3])}")
     if any(isinstance(f, dict) and f.get("hard_key") for f in pr.get("files") or []):
         out.append(HARD_KEY_REASON)
+    if pr.get("filesTruncated"):
+        out.append(TRUNCATED_REASON)
     return out
 
 
@@ -2882,7 +2893,7 @@ def merge_decision(
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     hard = merge_hard_reasons(pr, risk_paths or [])
     # Khoá tự miễn cho chính PR đổi nó thì chốt vô nghĩa — lý do này không miễn được.
-    waived = [r for r in hard if r != HARD_KEY_REASON] if hard_auto else []
+    waived = [r for r in hard if r not in UNWAIVABLE] if hard_auto else []
     hard = [r for r in hard if r not in waived]
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
@@ -2976,11 +2987,58 @@ class PrInputError(Exception):
     """Không lấy/đọc được JSON của PR — `merge-check` thoát 2."""
 
 
-def _touches_hard_key(f: Dict[str, Any]) -> bool:
-    if "xt.yaml" not in (f.get("filename"), f.get("previous_filename")):
-        return False
-    patch = f.get("patch")
-    return not isinstance(patch, str) or HARD_KEY in patch
+PLAN_PATH_SUFFIX = "docs/autopilot/PLAN.md"
+
+
+def _plan_grants(repo: str, path: str, ref: Optional[str]) -> Optional[Dict[str, Dict[str, str]]]:
+    """Ủy quyền production trong PLAN.md ở `ref` (REST contents; `ref=None` = nhánh mặc định). `{}` = file vắng (404)
+    hoặc không có grant; None = không đọc được hay không xác minh được (đóng khi thiếu). `ref` rỗng thì REST lấy nhánh
+    mặc định — không dùng cho PR, coi là không đọc được."""
+    if ref == "":
+        return None
+    try:
+        d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}" + (f"?ref={ref}" if ref else ""))
+        # Chỉ đúng file đó: API contents đi theo symlink và trả file ĐÍCH (type file, path khác) — `docs/autopilot/PLAN.md`
+        # là symlink tới file ngoài tầm gác thì không xác minh được. File lớn: content rỗng + encoding none.
+        if d.get("type") != "file" or d.get("path") != path or d.get("encoding") != "base64":
+            return None
+        raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
+        return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8"))
+    except PrInputError as exc:
+        # File vắng ở ref đó ≠ không đọc được. Chỉ tin mã HTTP trong phần stderr của gh (sau ` lỗi: `): thông điệp còn
+        # chứa đường dẫn có sha, sha chứa chữ `404` không được làm lỗi mạng thành "file vắng".
+        return {} if "(HTTP 404)" in str(exc).split(" lỗi: ", 1)[-1] else None
+    except ValueError:  # lỗi base64 và UnicodeDecodeError
+        return None
+
+
+def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
+    """So HIỆU LỰC ủy quyền (`parse_grants`) ở đáy PR với đầu PR cho TỪNG đường PLAN.md mà file đụng tới (đường mới và
+    đường cũ khi đổi tên/sao chép); đường vắng ở một đầu là `{}`. Không soi dòng diff (fence, viết hoa, xoá dòng lọt regex)
+    và không lấy tên file cũ làm đáy: đổi tên/sao chép file có grant vào PLAN.md cũng đổi hiệu lực (review ADR-0022).
+    Không đọc được → coi như đổi."""
+    paths = [
+        n
+        for n in (f.get("filename"), f.get("previous_filename"))
+        if isinstance(n, str) and n.endswith(PLAN_PATH_SUFFIX)
+    ]
+    for path in paths:
+        before, after = _plan_grants(repo, path, base_sha), _plan_grants(repo, path, head_sha)
+        if before is None or after is None or before != after:
+            return True
+    return False
+
+
+def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
+    """Diff chạm chốt người của ngoại lệ cứng: khoá `merge_hard_exceptions` ở xt.yaml (diff có khoá, hoặc thiếu `patch` —
+    diff lớn, không xác minh được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022)."""
+    names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
+    if "xt.yaml" in names:
+        patch = f.get("patch")
+        return not isinstance(patch, str) or HARD_KEY in patch
+    if any(n.endswith(PLAN_PATH_SUFFIX) for n in names):
+        return _plan_grants_changed(f, repo, base_sha, head_sha)
+    return False
 
 
 def _gh_api(path: str, paginate: bool = False) -> List[Any]:
@@ -3112,6 +3170,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
+        # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
+        **({"filesTruncated": True} if int(pr.get("changed_files") or 0) > len(files) else {}),
         "files": [
             {
                 "path": f.get("filename", ""),
@@ -3119,7 +3179,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
                 # Diff xt.yaml chạm khoá ngoại lệ cứng (thiếu patch — diff lớn — thì coi như chạm: không xác minh được).
-                **({"hard_key": True} if _touches_hard_key(f) else {}),
+                **({"hard_key": True} if _touches_hard_key(f, repo, str(base.get("sha", "")), sha) else {}),
             }
             for f in files
         ],
@@ -3242,10 +3302,10 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
             (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(hours=args.hours)).replace(microsecond=0).isoformat()
         )
     max_iterations = args.max_iterations
-    if max_iterations is None:  # một phiên: trần theo khối lượng PLAN (~4 vòng/task), không theo số mặc định
+    if max_iterations is None:  # một phiên: trần theo khối lượng PLAN (~8 vòng/task, D-027), không theo số mặc định
         # ADR-0012: chỉ đếm task `[ ]` — MUST của blueprint đã gom vào task, cộng thêm là đếm hai lần
         n_open = sum(t["state"] == " " for t in parse_plan(base / args.plan))
-        max_iterations = max(20, 4 * n_open) if args.single_session else 50
+        max_iterations = max(40, 8 * n_open) if args.single_session else 100
     state = {
         "active": True,
         "started": now_iso(),
@@ -3979,6 +4039,95 @@ def cmd_merge_watch(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+# --------------------------------------------------------------------------- grant-check (ADR-0022)
+
+GRANT_LINE_RE = re.compile(r"^- grant:\s*([a-z_]+)\s*((?:\|\s*[a-z_]+\s*=[^|]*)*)$", re.I)
+
+
+def parse_grants(text: str) -> Dict[str, Dict[str, str]]:
+    """Mục "Ủy quyền production" của PLAN.md: mỗi dòng `- grant: <nhóm> | khoá=giá trị | …` (ngoài code fence; nhóm lặp →
+    dòng sau thắng). Giá trị hạ chữ thường. Không có dòng nào → không có ủy quyền nào (đóng khi thiếu)."""
+    grants: Dict[str, Dict[str, str]] = {}
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        m = None if fenced else GRANT_LINE_RE.match(line.strip())
+        if m:
+            pairs = (kv.split("=", 1) for kv in m[2].split("|") if "=" in kv)
+            grants[m[1].lower()] = {k.strip().lower(): v.strip().lower() for k, v in pairs}
+    return grants
+
+
+def _grant_violation(grant: Dict[str, str], key: str, value: str) -> str:
+    """Lý do `key=value` vượt ủy quyền của nhóm (rỗng = trong ủy quyền). `max_<khoá>` = trần số; còn lại: `true` cho
+    phép cả hai, `false` chỉ nhận `false`, danh sách `a,b` chỉ nhận giá trị trong đó."""
+    cap = grant.get(f"max_{key}")
+    if cap is not None:
+        try:
+            n, limit = float(value), float(cap)
+        except ValueError:
+            return f"{key}={value} hoặc max_{key}={cap} không phải số"
+        if not math.isfinite(n) or n < 0:
+            return f"{key}={value} không phải số hữu hạn ≥ 0"
+        return "" if n <= limit else f"{key}={value} vượt max_{key}={cap}"
+    allowed = grant.get(key)
+    if allowed is None:
+        return f"`{key}` không có trong ủy quyền của nhóm"
+    if allowed == "true":
+        return "" if value in ("true", "false") else f"{key}={value} không phải true/false"
+    return "" if value in [a.strip() for a in allowed.split(",")] else f"{key}={value} ngoài ủy quyền ({allowed})"
+
+
+def grant_violations(grants: Dict[str, Dict[str, str]], group: str, requested: Dict[str, str]) -> List[str]:
+    """Lý do việc yêu cầu KHÔNG nằm trong ủy quyền production (rỗng = được làm)."""
+    grant = grants.get(group.lower())
+    if grant is None:
+        return [f"nhóm `{group}` không có trong mục Ủy quyền production của PLAN.md"]
+    req = {k.lower(): v.lower() for k, v in requested.items()}
+    # Khai đủ mọi khoá ủy quyền ràng buộc (kể cả `max_<khoá>` → `<khoá>`): khoá không khai không được coi là trong hạn.
+    missing = sorted({k.removeprefix("max_") for k in grant} - set(req))
+    out = [f"thiếu khoá `{k}` (ủy quyền ràng buộc nó — khai đủ mọi khoá của nhóm)" for k in missing]
+    return out + [why for k, v in req.items() if (why := _grant_violation(grant, k, v))]
+
+
+def cmd_grant_check(args: argparse.Namespace) -> int:
+    """Việc production đang định làm có nằm trong ủy quyền của PLAN.md **ở nhánh mặc định trên GitHub** không (ADR-0022)
+    — cùng nguồn REST với `merge-check`, không đọc cây làm việc hay nhánh/ref cục bộ (agent tạo được) nên không tự cấp
+    hay giữ lại ủy quyền đã thu hồi; ủy quyền chỉ có hiệu lực sau khi PR duyệt kế hoạch (do người merge) vào nhánh mặc
+    định. exit 0 = trong ủy quyền; 1 = ngoài hoặc không đọc được (ghi `loop defer`, không tự làm); 2 = tham số sai."""
+    requested = {}
+    for item in args.params:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            print(f"✗ tham số `{item}` phải dạng khoá=giá trị", file=sys.stderr)
+            return 2
+        requested[key.lower()] = value
+    # Chỉ đường PLAN mà `merge-check` giữ cho người merge, tương đối và không `..`/`//`/`.` (gh gửi đường dẫn thô).
+    parts = args.plan.split("/")
+    if not args.plan.endswith(PLAN_PATH_SUFFIX) or any(x in ("", ".", "..") for x in parts):
+        print(
+            f"✗ --plan phải là đường tương đối kết thúc bằng {PLAN_PATH_SUFFIX}, không có `..`, `.`, `//`",
+            file=sys.stderr,
+        )
+        return 2
+    grants = _plan_grants("repos/{owner}/{repo}", args.plan, None)
+    why = grant_violations(grants or {}, args.group, requested)
+    if grants is None:
+        why.insert(0, "không đọc được PLAN.md ở nhánh mặc định (gh, mạng, quyền, file lớn) — coi như chưa có ủy quyền")
+    if args.json:
+        print(json.dumps({"group": args.group, "ok": not why, "reasons": why}, ensure_ascii=False))
+    elif why:
+        print(f"✗ NGOÀI ủy quyền production: {args.group}", *[f"  - {w}" for w in why], sep="\n")
+        print('→ `xt.py loop defer --task <ID> --reason "<việc + lý do ngoài ủy quyền>"` rồi làm việc khác')
+    else:
+        print(
+            f"✓ trong ủy quyền production: {args.group} {' '.join(f'{k}={v}' for k, v in requested.items())}".rstrip()
+        )
+    return 1 if why else 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     base = project_dir()
     findings = doctor_findings(base, args.framework)
@@ -4083,8 +4232,26 @@ def build_parser() -> argparse.ArgumentParser:
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")
-    pw.add_argument("--max-minutes", type=int, default=120, help="tổng thời gian chờ tối đa (mặc định 120)")
+    pw.add_argument("--max-minutes", type=int, default=240, help="tổng thời gian chờ tối đa (mặc định 240)")
     pw.set_defaults(fn=cmd_merge_watch)
+    pg = sub.add_parser(
+        "grant-check", help="việc production có nằm trong Ủy quyền production của PLAN.md không (ADR-0022)"
+    )
+    pg.add_argument(
+        "group", help="nhóm: payments · data_delete · data_export · outbound_messages · auth_crypto · secrets"
+    )
+    pg.add_argument(
+        "params",
+        nargs="*",
+        help="khoá=giá trị của việc định làm (vd per_txn=30 mode=live refund=false); thiếu khoá = ngoài",
+    )
+    pg.add_argument(
+        "--plan",
+        default=PLAN_PATH_SUFFIX,
+        help="đường PLAN.md ở nhánh mặc định (phải kết thúc bằng docs/autopilot/PLAN.md)",
+    )
+    pg.add_argument("--json", action="store_true", help="in JSON (group, ok, reasons)")
+    pg.set_defaults(fn=cmd_grant_check)
     pb = sub.add_parser("blueprint-status")
     pb.add_argument("file", help="BLUEPRINT.md, hoặc - để đọc stdin")
     pb.add_argument("--strict", action="store_true", help="exit 1 khi còn MUST mở hoặc miễn trừ thiếu lý do")
@@ -4096,7 +4263,7 @@ def build_parser() -> argparse.ArgumentParser:
     li.add_argument("--plan", default="docs/autopilot/PLAN.md")
     li.add_argument("--blueprint")
     li.add_argument(
-        "--max-iterations", type=int, help="mặc định 50; với --single-session: max(20, 4 × số task chưa làm)"
+        "--max-iterations", type=int, help="mặc định 100; với --single-session: max(40, 8 × số task chưa làm)"
     )
     li.add_argument(
         "--single-session",

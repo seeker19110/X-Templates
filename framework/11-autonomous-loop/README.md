@@ -55,7 +55,7 @@ updated: 2026-10-18
 **Pha 2 — vòng lặp có bằng chứng**
 
 9. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` → tạo
-   `.autopilot/state.json` (gitignore; `max_same_failure: 3`; trần vòng tự tính `max(20, 4 × task chưa làm)`, hoặc
+   `.autopilot/state.json` (gitignore; `max_same_failure: 3`; trần vòng tự tính `max(40, 8 × task chưa làm)`, hoặc
    `--max-iterations <N>`). **Một phiên đến khi xong** (ADR-0009): phiên mở bằng `claude --permission-mode auto`
    (settings dự án không đặt được; Stop hook cảnh báo nếu phiên đang ở chế độ hỏi quyền).
 10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task do máy chọn (task `[ ]` đầu tiên chưa `defer`) → làm task → chạy Gate
@@ -90,7 +90,7 @@ updated: 2026-10-18
 | Lệnh | Làm gì |
 |---|---|
 | `doctor [--fix] [--json]` | Audit khung đã cài trước autopilot; `--fix` sửa phần an toàn (không đụng hook/settings); exit 1 khi còn lỗi ✗ |
-| `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(20, 4 × task chưa làm)` (mặc định 50) |
+| `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(40, 8 × task chưa làm)` (mặc định 100) |
 | `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint |
 | `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |
 | `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |
@@ -100,7 +100,8 @@ updated: 2026-10-18
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
-| `merge-watch [--pr N] [--interval 30] [--max-minutes 120]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
+| `grant-check GROUP [KHOÁ=GIÁ_TRỊ …] [--plan F] [--json]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không (ADR-0022): exit 0 trong ủy quyền, 1 ngoài hoặc thiếu mục → `loop defer`, 2 tham số sai |
+| `merge-watch [--pr N] [--interval 30] [--max-minutes 240]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
 | `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`, không secret ngoài `GITHUB_TOKEN` trong job chạy trên `pull_request`) |
