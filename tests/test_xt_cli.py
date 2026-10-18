@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -711,6 +712,13 @@ class BlueprintStatusTextTest(TmpDirCase):
         self.assertEqual(rc, 1)
         self.assertIn("thiếu file backlog", out)
 
+    def test_xt_compiles_without_warnings(self):
+        # Chuỗi thường có `\`` từng làm `python3 xt.py` in SyntaxWarning ở mọi lần gọi (review #106).
+        src = Path(xt.__file__).read_text(encoding="utf-8")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(src, xt.__file__, "exec")
+
     def test_run_needs_real_file_and_valid_timeout(self):
         rc, _, err = run_main("blueprint-status", "-", "--run", stdin="- [x] `A-001` **MUST** x\n")
         self.assertEqual(rc, 2)
@@ -732,7 +740,10 @@ class BlueprintStatusTextTest(TmpDirCase):
             "- [x] `A-002` **MUST** b — Kiểm: `echo  x  >>  dem.txt`\n"
             "- [x] `A-003` **MUST** c — Kiểm: `sleep 5`\n"
             "- [x] `A-004` **MUST** d — Kiểm: `echo token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 && false`\n"
-            "- [x] `A-005` **MUST** e — Kiểm: chạy `false`\n",  # ghi chú Kiểm: không có lệnh ngay sau dấu hai chấm
+            "- [x] `A-005` **MUST** e — Kiểm: chạy `false`\n"  # ghi chú Kiểm: không có lệnh ngay sau dấu hai chấm
+            "- [x] `A-006` **MUST** f — Kiểm: `true` `false`\n"  # cặp backtick thứ hai từng bị bỏ im lặng (xanh giả)
+            "- [x] `A-007` **MUST** g — Kiểm: `true` — Kiểm: `false`\n"
+            "- [x] `A-008` **MUST** h — Kiểm: `true` — Bằng chứng: `ci.yml` job quality\n",  # ghi chú khác có backtick: được
             encoding="utf-8",
         )
         with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "1"}):
@@ -744,8 +755,9 @@ class BlueprintStatusTextTest(TmpDirCase):
         self.assertEqual(by_id["A-003"]["exit_code"], 124)
         self.assertNotIn("ghp_", by_id["A-004"]["cmd"] + by_id["A-004"]["output_tail"])
         self.assertEqual((by_id["A-005"]["exit_code"], by_id["A-005"]["cmd"]), (2, ""))
-        self.assertIn("không có lệnh trong một cặp backtick", by_id["A-005"]["output_tail"])
-        self.assertEqual(doc["failed_checks"], ["A-003", "A-004", "A-005"])
+        self.assertIn("phải có đúng một lệnh trong một cặp backtick", by_id["A-005"]["output_tail"])
+        self.assertEqual((by_id["A-008"]["cmd"], by_id["A-008"]["exit_code"]), ("true", 0))
+        self.assertEqual(doc["failed_checks"], ["A-003", "A-004", "A-005", "A-006", "A-007"])
         self.assertEqual(doc["unchecked_must"], [])
 
 

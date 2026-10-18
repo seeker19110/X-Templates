@@ -8,7 +8,7 @@ Lệnh:
                                 Ghép baseline + hồ sơ + gói ngành thành BLUEPRINT.md (MUST theo quy mô) + <tên>-BACKLOG.md
                                 (SHOULD/MAY) cho dự án; --full: một file như trước ADR-0012.
   blueprint-status FILE [--strict] [--run] [--json]
-                                Đếm mục đạt/chưa/miễn; --run: chạy lại lệnh `— Kiểm: \`…\`` của mục [x] trong thư mục
+                                Đếm mục đạt/chưa/miễn; --run: chạy lại lệnh ghi chú `— Kiểm:` của mục [x] trong thư mục
                                 chứa FILE; --strict: còn MUST chưa đạt hoặc lệnh kiểm đỏ -> exit 1.
   loop init --plan FILE [--blueprint FILE] [--max-iterations N] [--hours H] [--single-session]
   loop status [--json]          Verdict máy tính từ PLAN + bằng chứng (không do model tự khai).
@@ -118,6 +118,7 @@ LOOSE_NOTE_RE = re.compile(r"\s(?:[—–-]{1,2}\s*|\()(?:Bằng chứng|Miễn|
 # `blueprint-status --run`/`loop verify` chạy lại, exit ≠ 0 = mục chưa đạt dù đã tick (LOOP-DESIGN-023). Chữ của mục
 # dùng `→ Kiểm:` (mũi tên) nên không nhầm với ghi chú của dự án.
 CHECK_CMD_RE = re.compile(r"(?:[—–-]|\()\s*Kiểm\s*:\s*`([^`\n]+)`")
+CHECK_NOTE_END_RE = re.compile(r"\s(?:[—–-]{1,2}|\()\s*(?:Bằng chứng|Miễn|Không áp dụng|Thiếu)\s*:")  # ghi chú kế
 CHECK_NOTE_RE = re.compile(
     r"(?:[—–-]|\()\s*Kiểm\s*:"
 )  # có ghi chú Kiểm: mà không có lệnh trong backtick → lỗi, không im lặng
@@ -828,12 +829,22 @@ def blueprint_checks(path: Path) -> Dict[str, Any]:
             if not m or m["state"] not in "xX":
                 continue
             seg = _note_segment(line)
-            c = CHECK_CMD_RE.search(seg)
-            if c or CHECK_NOTE_RE.search(seg):  # `cmd` rỗng = ghi chú Kiểm: sai dạng → run_blueprint_checks trả exit 2
-                checks.append({"id": m["id"], "level": m["level"], "cmd": c[1].strip() if c else "", "file": f.name})
+            if CHECK_NOTE_RE.search(seg):  # `cmd` rỗng = ghi chú Kiểm: sai dạng → run_blueprint_checks trả exit 2
+                checks.append({"id": m["id"], "level": m["level"], "cmd": _check_cmd(seg), "file": f.name})
             elif m["level"] == "MUST":
                 unchecked.append(m["id"])
     return {"checks": checks, "unchecked_must": unchecked}
+
+
+def _check_cmd(seg: str) -> str:
+    """Lệnh của ghi chú `— Kiểm: `<lệnh>``; "" (= đỏ khi chạy) khi sai dạng: không có lệnh trong backtick, nhiều ghi chú
+    `Kiểm:`, hoặc thêm cặp backtick sau lệnh trong cùng ghi chú — chỉ chạy cặp đầu thì phần sau bị bỏ im lặng (xanh giả,
+    review #106)."""
+    c = CHECK_CMD_RE.search(seg)
+    if c is None or len(CHECK_NOTE_RE.findall(seg)) > 1:
+        return ""
+    rest = CHECK_NOTE_END_RE.split(seg[c.end() :], maxsplit=1)[0]
+    return "" if "`" in rest else c[1].strip()
 
 
 def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int) -> List[Dict[str, Any]]:
@@ -845,7 +856,7 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
     for c in checks:
         hit = next(((code, tail) for cmd, code, tail in done if same_command(cmd, c["cmd"])), None)
         if not c["cmd"]:
-            hit = (2, "ghi chú `Kiểm:` không có lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
+            hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
         elif hit is None:
             code, text = run_gate_shell(c["cmd"], base, timeout)
             hit = (code, redact("\n".join(text.strip().splitlines()[-20:])))
