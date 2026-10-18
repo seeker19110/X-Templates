@@ -264,6 +264,37 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual(len(touched), 2)
         self.assertEqual(len(suspect), 1)
 
+    def test_ignore_rules_cannot_hide_new_locked_files(self):
+        d = self.make_repo()
+        (d / "bench" / "new.py").write_text("x\n")
+        ex = d.parent / (d.name + ".ex")
+        ex.write_text("*\n")
+        self.addCleanup(ex.unlink)
+        (d / ".git" / "info").mkdir(exist_ok=True)
+        (d / ".git" / "info" / "exclude").write_text("bench/\n")
+        env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile", "GIT_CONFIG_VALUE_0": str(ex)}
+        with unittest.mock.patch.dict(os.environ, env):
+            files, added = xt.perf_diff(d, "HEAD")
+            known = xt.perf_known(d)
+        touched, _ = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(touched, ["bench/new.py"])  # excludesFile/info/exclude không giấu được
+        self.assertIn("bench/new.py", known)
+        (d / ".gitignore").write_text("bench/new.py\n")  # .gitignore mới ở thư mục cha không khoá: không giấu được
+        files, added = xt.perf_diff(d, "HEAD")
+        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(touched, ["bench/new.py"])
+        self.assertEqual(suspect, [".gitignore: đổi luật ignore — có thể giấu file mới trong vùng khoá"])
+
+    def test_generated_files_ignored_in_tree_are_not_lock_touches(self):
+        d = self.make_repo()
+        (d / ".gitignore").write_text("__pycache__/\n")
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore")
+        (d / "bench" / "__pycache__").mkdir()
+        (d / "bench" / "__pycache__" / "run.cpython-313.pyc").write_bytes(b"\x00")
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(xt.perf_guard(files, added, ["bench/*"]), ([], []))
+
     def test_known_and_match(self):
         d = self.make_repo()
         (d / "new.py").write_text("x\n")
@@ -394,6 +425,34 @@ class PerfCliTest(unittest.TestCase):
         self.assertIn("commit", doc)
         self.assertEqual(len(xt.perf_load(out_file)), 3)
 
+    def test_sample_commit_ignores_git_env(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(d, *args)
+        git(d, "config", "commit.gpgsign", "false")
+        git(d, "commit", "-q", "--allow-empty", "-m", "i")
+        head = subprocess.run(["git", "-C", str(d), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(d)
+        with unittest.mock.patch.dict(os.environ, {"GIT_DIR": str(self.tmp)}):
+            rc, _, _ = run_main(
+                "perf",
+                "sample",
+                "--out",
+                self.p("s.json"),
+                "--runs",
+                "1",
+                "--warmup",
+                "0",
+                sys.executable,
+                "-c",
+                "pass",
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(Path(self.p("s.json")).read_text())["commit"], head)
+
     def test_sample_errors(self):
         rc, _, err = run_main("perf", "sample", "--out", self.p("s.json"))
         self.assertEqual(rc, 2)
@@ -450,6 +509,28 @@ class PerfCliTest(unittest.TestCase):
             rc, out, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "sub/a.py")
         self.assertEqual(rc, 1)
         self.assertIn("sub/a.py", out)
+
+    def test_guard_ignores_git_env_pointing_elsewhere(self):
+        d = Path(tempfile.mkdtemp())
+        clean = Path(tempfile.mkdtemp())
+        for p in (d, clean):
+            self.addCleanup(lambda p=p: __import__("shutil").rmtree(p, ignore_errors=True))
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(d, *args)
+        git(d, "config", "commit.gpgsign", "false")
+        (d / "bench.py").write_text("x\n")
+        git(d, "add", ".")
+        git(d, "commit", "-qm", "i")
+        subprocess.run(["git", "clone", "-q", str(d), str(clean)], check=True, env={**os.environ, **ISOLATED})
+        (d / "bench.py").write_text("y\n")  # cây agent sửa file khoá; GIT_DIR/GIT_WORK_TREE trỏ clone sạch
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(d)
+        env = {**ISOLATED, "GIT_DIR": str(clean / ".git"), "GIT_WORK_TREE": str(clean)}
+        with unittest.mock.patch.dict("os.environ", env):
+            rc, out, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "bench.py")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ đụng file khoá", out)
 
     def test_guard_cli(self):
         d = Path(tempfile.mkdtemp())

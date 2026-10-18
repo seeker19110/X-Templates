@@ -1636,10 +1636,10 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
-def _git(cwd: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+def _git(cwd: Path, *args: str, env: Optional[Dict[str, str]] = None) -> "subprocess.CompletedProcess[str]":
     cmd = ["git", "-C", str(cwd), *args]
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT)
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 124, "", f"git quá {GIT_TIMEOUT} s")
 
@@ -5047,6 +5047,8 @@ PERF_MIN_EFFECT = 0.02  # sàn 2 %: ngưỡng cảnh báo của Mozilla cho benc
 PERF_DIFF_HEAD = "diff --git "
 PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
+PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+PERF_UNTRACKED = ("ls-files", "-z", "--others", "--exclude-per-directory=.gitignore")
 PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõi khi quét dòng đáng ngờ
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
@@ -5183,8 +5185,13 @@ def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[
     return out
 
 
+def _perf_env() -> Dict[str, str]:
+    """Môi trường cho git của `perf`: bỏ biến trỏ repo/worktree/index khác — đặt sẵn chúng là lái guard sang một clone sạch."""
+    return {k: v for k, v in os.environ.items() if k not in PERF_GIT_ENV}
+
+
 def _perf_git(base: Path, *args: str) -> str:
-    r = _git(base, *args)
+    r = _git(base, *args, env=_perf_env())
     if r.returncode != 0:
         raise RuntimeError(f"git {args[0]} lỗi: {r.stderr.strip() or r.returncode}")
     return r.stdout
@@ -5229,24 +5236,33 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
     return out
 
 
+def _perf_is_ignore_file(path: str) -> bool:
+    return path.rpartition("/")[2] == ".gitignore"
+
+
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
-    """(file đổi gồm cả file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
-    (không phụ thuộc tiền tố diff hay cách quote); file bị gitignore không được thấy."""
+    """(file đổi gồm file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
+    (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` đã có ở `ref` — có `.gitignore`
+    đổi/mới thì kiểm khoá trên MỌI file chưa theo dõi (perf_guard còn báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được
+    mà không để dấu nên không dùng."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
-    untracked = _perf_git_names(base, "ls-files", "-z", "--others", "--exclude-standard")
+    untracked = _perf_git_names(base, *PERF_UNTRACKED)
+    scanned = untracked
+    if any(
+        _perf_is_ignore_file(f) for f in names + untracked
+    ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
+        untracked = _perf_git_names(base, "ls-files", "-z", "--others")
     text = _perf_git(
         base,
         *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, untracked)
+    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
 
 
 def perf_known(base: Path) -> List[str]:
     """File đang theo dõi + chưa theo dõi: để báo glob khoá không khớp gì (gõ sai = tắt khoá lặng lẽ)."""
-    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(
-        base, "ls-files", "-z", "--others", "--exclude-standard"
-    )
+    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(base, *PERF_UNTRACKED)
 
 
 def perf_match(path: str, glob: str) -> bool:
@@ -5258,7 +5274,12 @@ def perf_match(path: str, glob: str) -> bool:
 def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]) -> Tuple[List[str], List[str]]:
     """(file khoá bị đụng, dòng thêm đáng ngờ) — bộ đo/test tương đương không phải thứ agent được sửa để 'đạt'."""
     touched = [f for f in files if any(perf_match(f, g) for g in locked)]
-    suspect = [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
+    suspect = [
+        f"{f}: đổi luật ignore — có thể giấu file mới trong vùng khoá"
+        for f in files
+        if f.rpartition("/")[2] == ".gitignore"
+    ]
+    suspect += [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
     return touched, suspect
 
 
@@ -5297,7 +5318,7 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
-    sha = _git(Path.cwd(), "rev-parse", "HEAD")  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
+    sha = _git(Path.cwd(), "rev-parse", "HEAD", env=_perf_env())  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
     doc = {
         "samples": samples,
         "unit": "s",
@@ -5316,7 +5337,7 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
 def perf_repo() -> Path:
     """Gốc repo git của thư mục ĐANG ĐỨNG — không phải `project_dir()`: chạy bằng `xt.py` của worktree gốc, guard vẫn phải
     rà cây agent sửa chứ không rà chính worktree sạch đó."""
-    r = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+    r = _git(Path.cwd(), "rev-parse", "--show-toplevel", env=_perf_env())
     if r.returncode != 0:
         raise RuntimeError(f"không ở trong repo git: {r.stderr.strip() or r.returncode}")
     return Path(r.stdout.strip())
@@ -5339,7 +5360,7 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
     for f in touched:
         print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
     for s in suspect:
-        print(f"⚠ dòng thêm đáng ngờ (cache/sleep/đổi đồng hồ/soi stack) — reviewer phải rà: {s}")
+        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore) — reviewer phải rà: {s}")
     if not touched and not suspect:
         print(f"✓ {len(files)} file đổi, không đụng file khoá, không dòng đáng ngờ")
     return 1 if touched or (suspect and args.strict) else 0
