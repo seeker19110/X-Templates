@@ -45,7 +45,7 @@ argument-hint: "[mô tả yêu cầu hoặc đường dẫn PROJECT.md]"
 ## Kết thúc
 
 - `done`: mọi task có bằng chứng xanh + `<XT> blueprint-status BLUEPRINT.md --strict --run` = 0 MUST mở, 0 lệnh kiểm đỏ → viết `GO-NO-GO.md` (PR của lát cuối; PR đã merge, PR `merge-check` = `human` — làn chuẩn dưới L3, ngoại lệ cứng khi `merge_hard_exceptions: human` — liệt kê chờ người), báo cáo ≤ 20 dòng (đã làm / bằng chứng / quyết định tự duyệt D-NNN + đề xuất "Khi chạy thật" / còn treo / đề xuất).
-- Trước báo cáo cuối (mọi kết cục): `<XT> feedback collect`; lỗi do khung đã sửa trong phiên → `<XT> feedback add` (`<FW>/11-autonomous-loop/framework-feedback.md`).
+- Trước báo cáo cuối (mọi kết cục): `<XT> loop stats` (số lần chạy/task, xanh lần đầu — đưa vào báo cáo, `LOOP-DESIGN-024`); `<XT> feedback collect`; lỗi do khung đã sửa trong phiên → `<XT> feedback add` (`<FW>/11-autonomous-loop/framework-feedback.md`).
 - `done-pending-human`: như `done` cho phần tự làm được, kèm **danh sách việc chờ người** (ID, lý do, cách làm từng bước) — người làm một lần rồi `<XT> loop resume`.
 - `blocked`/`budget`: báo rõ lý do + bước kế tiếp; không tự khai "xong".
 - Không bao giờ: force-push, rewrite history nhánh người khác, empty commit để kích CI, merge khi CI đỏ.

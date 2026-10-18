@@ -22,6 +22,7 @@ Lệnh:
                                 Phiên chính tự duyệt điểm quyết định, ghi D-NNN vào docs/autopilot/DECISIONS.md.
   loop resume [--reason TEXT]   Người đã xử lý → bỏ BLOCKED, đặt lại đếm lỗi lặp, giữ số vòng/bằng chứng.
   loop stop [--reason TEXT]     Tắt vòng lặp.
+  loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
   ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
@@ -1383,10 +1384,95 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
                 st["last_failure_signature"] = sig
             st["last_failure_task"] = task
         write_state(st, base)
+    _append_run(base, st, ev, None if code == 0 else failure_signature(task, code, out))  # sau state: số đo không chặn
     print(f"[xt] {task}: exit {code} — bằng chứng: .autopilot/evidence/{task}.json")
     if code != 0:
         print(ev["output_tail"][-2000:])
     return code
+
+
+RUNS_FILE = "runs.jsonl"  # nhật ký chỉ ghi nối mọi lần `loop record` — nguồn của `loop stats` (LOOP-DESIGN-024, D-037)
+
+
+def _append_run(base: Path, st: Dict[str, Any], ev: Dict[str, Any], signature: Optional[str]) -> None:
+    """Nối một dòng vào `.autopilot/runs.jsonl`: evidence/T-xxx.json bị ghi đè mỗi lần nên không thấy các lần đỏ trước.
+    Fail-open (AGENTS.md §7): ghi lỗi chỉ cảnh báo — bằng chứng và đếm lỗi lặp đã ghi trước đó. Không đi theo symlink
+    đặt sẵn (O_NOFOLLOW, như `write_atomic` — AUD-HAR-009)."""
+    row = {k: ev[k] for k in ("task", "exit_code", "started", "finished", "head")}
+    row.update({"signature": signature, "loop": st.get("started")})
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(state_dir(base) / RUNS_FILE, flags, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"⚠ không ghi được .autopilot/{RUNS_FILE} (số đo vòng, LOOP-DESIGN-024): {exc}", file=sys.stderr)
+
+
+def read_runs(base: Path) -> List[Dict[str, Any]]:
+    """Các dòng hợp lệ của runs.jsonl (dòng hỏng/không phải object bị bỏ qua); không có file → []."""
+    try:
+        lines = (state_dir(base) / RUNS_FILE).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("task"), str) and isinstance(row.get("exit_code"), int):
+            rows.append(row)
+    return rows
+
+
+def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
+    """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
+    ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
+    st = read_state(base) or {}
+    rows = [r for r in read_runs(base) if all_loops or r.get("loop") == st.get("started")]
+    per: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        t = per.setdefault(r["task"], {"runs": 0, "failed": 0, "runs_to_green": None})
+        t["runs"] += 1
+        t["failed"] += r["exit_code"] != 0
+        if r["exit_code"] == 0 and t["runs_to_green"] is None:
+            t["runs_to_green"] = t["runs"]
+    first_pass = [k for k, t in per.items() if t["runs_to_green"] == 1]
+    hard = [k for k, t in per.items() if (t["runs_to_green"] or t["runs"]) >= 3]
+    return {
+        "tasks": per,
+        "task_count": len(per),
+        "runs": len(rows),
+        "failed_runs": sum(t["failed"] for t in per.values()),
+        "first_pass_rate": round(len(first_pass) / len(per), 3) if per else None,
+        "needs_3_plus": sorted(hard),
+        "never_green": sorted(k for k, t in per.items() if t["runs_to_green"] is None),
+        "iterations": st.get("iterations", 0),
+        "max_iterations": st.get("max_iterations"),
+        "deferred": sorted(_deferred(st)),
+        "blocked": bool(st.get("blocked")),
+    }
+
+
+def _loop_stats(args: argparse.Namespace, base: Path) -> int:
+    s = loop_stats(base, args.all)
+    if args.json:
+        print(json.dumps(s, ensure_ascii=False))
+        return 0
+    rate = "—" if s["first_pass_rate"] is None else f"{s['first_pass_rate']:.0%}"
+    print(
+        f"Task đã chạy Gate: {s['task_count']} · lần chạy: {s['runs']} (đỏ {s['failed_runs']}) · xanh lần đầu: {rate}"
+    )
+    print(
+        f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    for k, t in sorted(s["tasks"].items()):
+        green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"
+        print(f"  {k}: {t['runs']} lần · {green}")
+    if s["needs_3_plus"]:
+        print("⚠ Task cần ≥ 3 lần chạy (spec/Gate sai? — LOOP-DESIGN-011): " + ", ".join(s["needs_3_plus"]))
+    return 0
 
 
 def _git_head(base: Path) -> Optional[str]:
@@ -3946,6 +4032,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "stop": _loop_stop,
     "hook-stop": _loop_hook_stop,
     "verify": lambda args, base: loop_verify(base),
+    "stats": _loop_stats,
 }
 
 
@@ -4697,6 +4784,11 @@ def build_parser() -> argparse.ArgumentParser:
     lde.add_argument("--task", required=True, type=_defer_id, help="T-NNN trong PLAN hoặc ID mục blueprint")
     lde.add_argument("--reason", required=True)
     lsub.add_parser("checkpoint", help="dùng bởi PreCompact hook: ghi vị trí làm việc trước khi nén; luôn exit 0")
+    lsta = lsub.add_parser(
+        "stats", help="số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu (LOOP-DESIGN-024)"
+    )
+    lsta.add_argument("--json", action="store_true")
+    lsta.add_argument("--all", action="store_true", help="tính cả các vòng trước (mặc định: chỉ vòng hiện tại)")
     lsub.add_parser("verify", help="kiểm lại cuối: chạy lại mọi Gate trên cây hiện tại (Stop hook đòi trước khi done)")
     ld = lsub.add_parser("decide", help="phiên chính tự duyệt một điểm quyết định, ghi nhật ký D-NNN (LOOP-STOP-018)")
     ld.add_argument("--question", required=True)
