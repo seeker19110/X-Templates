@@ -134,7 +134,8 @@ ALLOW = (
     "bash -n scripts/dev-task.sh",
     "curl -sS https://example.com -o /tmp/page.html",
     "curl -s https://api.github.com/repos/o/r | python3 -m json.tool",
-    "curl -s https://x | node -e 'process.stdin.pipe(process.stdout)'",
+    "curl -s https://x | xargs echo",
+    "# don't do this\ncat > /tmp/f <<'EOF'\nrm -rf ~\nEOF",
     "curl -s https://x | python3 parse.py",
     "docker run --rm alpine echo hi",
     "kubectl get pods",
@@ -186,6 +187,31 @@ class GuardCorpusTest(unittest.TestCase):
         self.assertEqual(wrong, [])
 
 
+# Lỗ ĐÃ BIẾT, guard chưa chặn (review #130, có sẵn trước bộ tấn công): ghi lại để không im lặng. Khi guard chặn được một
+# dòng, test dưới đỏ → chuyển nó sang SEEDS/ca chặn. Nhóm biến/eval biến/mã trong ngôn ngữ khác về nguyên tắc không
+# chặn hết bằng quét chuỗi — lớp đỡ là review và chế độ quyền.
+KNOWN_GAPS = (
+    "sh -c $'rm -rf ~'",
+    "x='rm -rf ~'; eval \"$x\"",
+    "rm${IFS}-rf${IFS}~",
+    "watch 'rm -rf ~'",
+    "script -qc 'rm -rf ~' /dev/null",
+    "flock /tmp/l rm -rf ~",
+    "coproc rm -rf ~",
+    "busybox sh -c 'rm -rf ~'",
+    "su -c 'rm -rf ~'",
+    "sh <(echo 'rm -rf ~')",
+    "python3 -c \"import os; os.system('rm -rf ~')\"",
+)
+
+
+class GuardKnownGapsTest(unittest.TestCase):
+    def test_known_gaps_are_still_gaps(self) -> None:
+        root = tempfile.mkdtemp()
+        closed = [c for c in KNOWN_GAPS if guard.apply_policy(guard.bash_decision(c, root))["decision"] == "deny"]
+        self.assertEqual(closed, [], "guard đã chặn — chuyển các dòng này khỏi KNOWN_GAPS sang ca phải chặn")
+
+
 class GuardCorpusFixesTest(unittest.TestCase):
     """Lỗ bộ tấn công tìm ra lần đầu (2026-10-18) và chặn nhầm `curl … | python3 -m json.tool`."""
 
@@ -213,6 +239,9 @@ class GuardCorpusFixesTest(unittest.TestCase):
         quoted = "sh -c \"bash <<'E'\nbody\nE\""
         self.assertEqual(guard.strip_heredocs(quoted), quoted)
         self.assertEqual(guard.strip_heredocs("echo 'it''s' \\x <<E\nbody\nE"), "echo 'it''s' \\x <<E")
+        # comment: `'` trong `# don't` không mở nháy; `<<E` trong comment không phải heredoc (review #130)
+        self.assertEqual(guard.strip_heredocs("# don't\ncat <<E\nbody\nE"), "# don't\ncat <<E")
+        self.assertEqual(guard.strip_heredocs("echo hi # <<E\nls"), "echo hi # <<E\nls")
 
     def test_line_continuation_follows_bash(self) -> None:
         # `\\\\` + xuống dòng trong `sh -c "…"`: shell ngoài để lại `\\` + xuống dòng, shell trong nối thành `docker run`.
@@ -229,15 +258,28 @@ class GuardCorpusFixesTest(unittest.TestCase):
             "python3 /dev/stdin": True,
             "python3 -u": True,
             "python3 -m json.tool": False,
-            "python3 -c 'print(1)'": False,
+            "python3 -m json.tool --indent 2": False,
             "python3 parse.py": False,
-            "node -e x": False,
-            "node": True,
-            "perl -e 1": False,
-            "ruby script.rb": False,
+            "ruby ./x.rb": False,
+            "node tools/fmt.mjs": False,
+            # mã đọc stdin rồi chạy, cờ có giá trị, module chạy stdin: fail-closed (review #130)
+            "python3 -c '$(cat)'": True,
+            "python3 -c 'import sys;exec(sys.stdin.read())'": True,
+            "python3 -W ignore": True,
+            "python3 -E": True,
+            "python3 -m code": True,
+            "python3 -m pip install -r /dev/stdin": True,
+            "python3 -m": True,
+            "node -e x": True,
+            "node --require ./x": True,
+            "perl -I lib": True,
+            "ruby -r json": True,
             "sh": True,
-            "sh -c 'cat > f'": True,  # shell: giữ chặt như trước
+            "sh -c 'cat > f'": True,
             "sudo tee f": True,
+            "xargs python3 -c": True,
+            "xargs -n1 sh -c": True,
+            "xargs echo": False,
             "cat": False,
             "": False,
         }

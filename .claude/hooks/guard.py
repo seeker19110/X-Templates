@@ -331,6 +331,9 @@ def _unquoted_positions(line: str, q: str) -> Tuple[List[bool], str]:
     i = 0
     while i < len(line):
         c = line[i]
+        if not q and c == "#" and (i == 0 or line[i - 1] in WORD_END):  # comment: `# don't` không mở nháy
+            out += [False] * (len(line) - i)
+            break
         out.append(not q)
         if q == "'":
             q = "" if c == "'" else q
@@ -661,21 +664,24 @@ def _dangerous_rm_target(t: str) -> bool:
 
 
 SCRIPT_LANG_RE = re.compile(r"(python|ruby|perl|node)[0-9.]*")
-CODE_FLAGS = {"-m", "-c", "-e", "-E", "-p", "-r", "--eval", "--print"}
+SCRIPT_FILE_RE = re.compile(r"[\w./-]+\.(py|rb|pl|js|mjs|cjs)")
+DATA_MODULES = {
+    "json.tool"
+}  # `python3 -m json.tool`: chỉ định dạng JSON — module khác (code, pdb, runpy, pip…) chạy được stdin
 
 
 def _runs_stdin(argv: List[str]) -> bool:
-    """Lệnh sau ống có chạy stdin như mã không: shell/`sudo`/trình thông dịch khác → có (giữ chặt); python/ruby/perl/node
-    có `-m`/`-c`/`-e`… hoặc file script → stdin là dữ liệu (`curl … | python3 -m json.tool`); không đối số hay `-` → chạy."""
+    """Lệnh sau ống có chạy stdin như mã không. Chỉ nới theo danh sách cho phép (fail-closed): python/ruby/perl/node mà đối
+    số ĐẦU là file script (`python3 parse.py`) hoặc `python3 -m json.tool` → stdin là dữ liệu; còn lại — `-c`/`-e` (mã có
+    thể `exec(sys.stdin.read())`, `"$(cat)"`), cờ có giá trị (`-W ignore`), shell, `sudo` → coi là chạy mã (`xargs python3 -c` đã được `normalize` bỏ tiền tố `xargs`)."""
     n = normalize(argv)
     if not n:
         return False
     if SCRIPT_LANG_RE.fullmatch(n[0]):
         args = n[1:]
-        if any(a in CODE_FLAGS for a in args):
+        if args[:1] and SCRIPT_FILE_RE.fullmatch(args[0]):
             return False
-        script = next((a for a in args if not a.startswith("-")), None)
-        return script is None or script == "-" or script in STDIN_SCRIPTS
+        return not (args[:1] == ["-m"] and args[1:2] and args[1] in DATA_MODULES)
     return n[0] in INTERPRETERS or n[0] == "sudo"
 
 
