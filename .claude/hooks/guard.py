@@ -1348,7 +1348,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
 
 
 # `gh api` huỷ repo/nhánh chính (AUD-SEC-048): DELETE repo hay ref nhánh chính, PATCH `archived=true` — như `gh repo
-# delete|archive`.
+# delete|archive`; PATCH `private=`/`visibility=` hoặc thân `--input` — như `gh repo edit --visibility`.
 GH_API_REPO_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/?")
 GH_API_MAIN_REF_RE = re.compile(r"/?repos/[^/\s]+/[^/\s]+/git/refs/heads/(main|master)/?")
 
@@ -1380,8 +1380,12 @@ def _gh_api_destroy(args: List[str]) -> bool:
         return True
     if method == "DELETE":
         return bool(GH_API_REPO_RE.fullmatch(path) or GH_API_MAIN_REF_RE.fullmatch(path))
-    archive = any(v.replace(" ", "").lower() == "archived=true" for v in _gh_api_field_values(args))
-    return method == "PATCH" and archive and bool(GH_API_REPO_RE.fullmatch(path))
+    fields = [v.replace(" ", "").lower() for v in _gh_api_field_values(args)]
+    # Như `gh repo edit --visibility <bất kỳ>`: đổi `private`/`visibility` (kể cả sang private) là chặn; thân `--input`
+    # không đọc được tại chỗ nên không xác minh được → chặn như `archived=true`.
+    exposes = any(v == "archived=true" or v.startswith(("private=", "visibility=")) for v in fields)
+    opaque = any(a.split("=", 1)[0] == "--input" for a in args)
+    return method == "PATCH" and (exposes or opaque) and bool(GH_API_REPO_RE.fullmatch(path))
 
 
 def _pr_flag_merge(args: List[str], i: int) -> Tuple[List[str], str]:
