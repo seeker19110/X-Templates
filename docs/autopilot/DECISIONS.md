@@ -353,3 +353,10 @@
 - Chọn: Thêm xt.py contrast và xt.py vendor-check (stdlib, có test, 100% coverage), danh sách theo dõi license ở JSON trong framework/
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: khung chỉ phụ thuộc stdlib Python, mọi dự án đích đã có xt.py (không cần Node cho dự án không có frontend), test được và đo coverage; DESIGN.md lint chỉ phủ khi có DESIGN.md và tương phản chỉ là warning exit 0 nên không thay được cổng token CSS. Giữ lint DESIGN.md làm mục riêng UX-DS-021. Danh sách theo dõi license để JSON có ngày xác minh nên sửa không cần đổi mã
 - Đường lùi: Xoá cmd_contrast, cmd_vendor_check và hằng liên quan khỏi xt.py, tests/test_ui_gates.py, ui-vendor-watchlist.json; đổi Kiểm của UX-DS-003/011/020, UX-A11Y-002, CMP-LIC-022, FE-START-* về lệnh mô tả
+
+### D-050 · 2026-10-18T14:20:18+00:00 · Quét guard bị nổ tổ hợp (biến nhân đôi, lệnh bọc lồng) làm hook quá hạn và lệnh chạy không qua guard: xử lý thế nào?
+
+- Phương án: (1) Ngân sách quét mỗi quyết định (600 lệnh con, 8 giây, tập script đã quét, 4 lần viết lại lồng) — hết thì CHẶN · (2) Chỉ cắt độ dài giá trị biến và số hậu tố, không có ngân sách chung · (3) Bỏ quét biến/lệnh bọc (về trạng thái 3.3.0)
+- Chọn: Ngân sách quét mỗi quyết định (600 lệnh con, 8 giây, tập script đã quét, 4 lần viết lại lồng) — hết thì CHẶN
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: reviewer #134 tái hiện N=21 lần nhân đôi mất 177 s, N=22 vượt timeout hook 600 s nên rm -rf ~ chạy không qua guard; cắt từng chỗ để lại các đường nổ khác (flock lồng, biến chuỗi) — ngân sách chung là hàng rào duy nhất bảo đảm kết thúc; hết ngân sách thì chặn (fail-closed) vì lệnh bình thường dùng < 20 lệnh con; tập script đã quét biến nổ tổ hợp thành đa thức
+- Đường lùi: Bỏ ScanBudget và tham số budget/rewrites khỏi bash_decision/_scan_scripts/_scan_nested; hạn chế bằng VAR_VALUE_MAX và RUNNER_SUFFIXES

@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -245,7 +246,7 @@ class GuardCorpusTest(unittest.TestCase):
 # chặn hết bằng quét chuỗi — lớp đỡ là review và chế độ quyền.
 KNOWN_GAPS = (
     "x=$(echo 'rm -rf ~'); $x",  # biến gán từ thay lệnh
-    'for d in ~; do rm -rf "$d"; done',  # biến vòng lặp
+    "x=${y:-rm}; $x -rf ~",  # mở rộng tham số có giá trị mặc định
     "read x <<< 'rm -rf ~'; eval \"$x\"",  # biến từ `read`
     "python3 -c \"import os; getattr(os, 'sys' + 'tem')('rm -rf ~')\"",  # ghép chuỗi tên hàm
     "echo cm0gLXJmIH4K | base64 -d | sh",  # shell đọc từ ống không phải echo/printf: chỉ hỏi (ADR-0018 cho chạy)
@@ -496,6 +497,105 @@ class GuardRemainingGapsTest(unittest.TestCase):
         for quote in ('"', "'"):
             guard._exec_api_scripts([f"os.system({quote}" + "\\a" * 20000])
         self.assertLess(time.monotonic() - start, 2.0)
+        # chuỗi đầu của lời gọi chuỗi-lệnh; list → ghép thành một lệnh; chuỗi ngoài lời gọi/đối số sau là dữ liệu
+        self.assertEqual(guard._exec_api_scripts(["os.system('a b', \"c d\")"]), ["a b"])
+        self.assertEqual(guard._exec_api_scripts(["subprocess.run(['ls', 'a b']); print('x y')"]), ["ls 'a b'"])
+        self.assertEqual(guard._exec_api_scripts(["os.system(x)", "os.system(  'q \\\" r')"]), ['q " r'])
         self.assertEqual(
-            guard._exec_api_scripts(['os.system(\'a b\', "c \\" d")']), ["a b", 'c " d', "'a b' 'c \" d'", 'a b c " d']
+            guard._exec_api_scripts(["exec(" + "(" * 5 + "'a'"]), ["a"]
+        )  # ngoặc không đóng: tới hết cửa sổ
+
+    def test_reviewer_134_cases(self) -> None:
+        """Reviewer #134: biến + cd, vòng for, biến qua ống, bộ lọc find đổi hoa/thường, `$PWD`; hết chặn nhầm lệnh bọc."""
+        self.assert_all(
+            "deny",
+            (
+                "D=.autopilot; cd $D; echo x > v",
+                "D=.autopilot; cd $D && rm verified.json",
+                "for D in .autopilot; do rm -rf $D; done",
+                "for d in a b ~; do rm -rf $d; done",
+                'cmd="rm -rf ~"; echo "$cmd" | sh',
+                'cmd="rm -rf ~"; echo "$cmd" | bash',
+                'cmd="rm -rf ~"; source <(echo $cmd)',
+                "find . -name '*autopilot*' -delete",
+                "find . -iname 'VERIFIED.JSON' -delete",
+                "find . -iname '.AUTOPILOT' -delete",
+                'find . -name "*.json" -path "*autopilot*" -delete',
+                "find .Autopilot -print0 | xargs -0 rm",
+                "rm -rf $PWD/.autopilot",
+                "rm -rf ${PWD}/.autopilot",
+                'rm -rf "$(pwd)/.autopilot"',
+                "rm -rf $CLAUDE_PROJECT_DIR/.autopilot",
+                "watch -n 5 'rm -rf ~'",
+                "ionice -c 3 sh -c 'rm -rf ~'",
+            ),
         )
+        self.assert_all(
+            "",
+            (
+                'flock /tmp/l git commit -m "rm -rf ~ is bad"',
+                'flock /tmp/l git commit -m "git reset --hard docs"',
+                'ionice -c3 npm test -- -t "git reset --hard"',
+                'parallel -j4 echo ::: "rm -rf ~"',
+                "python3 -c \"import subprocess; subprocess.run(['ls']); print('git reset --hard')\"",
+                "python3 -c \"import subprocess;subprocess.run(['grep','-r','rm -rf','.'])\"",
+                "python3 - <<'PY'\nopen('a.txt', 'w').write(\"os.system('rm -rf ~')\")\nPY",
+                'for d in a b; do echo "$d"; done',
+            ),
+        )
+
+    def test_scan_budget_blocks_instead_of_hanging(self) -> None:
+        """Reviewer #134 🔴: nhân đôi biến / lệnh bọc lồng làm guard quá hạn rồi lệnh chạy không qua guard."""
+        doubling = "a=x; " + "; ".join(['a="$a$a"'] * 40) + "; ls"
+        flocks = "flock /tmp/l " * 40 + "ls"
+        chain = "v0=a; " + "; ".join(f'v{i + 1}="$v{i}$v{i}"' for i in range(40)) + '; eval "$v40"'
+        loops = "x='flock l flock l '; " + "; ".join(["$x"] * 60)
+        selfref = "x='x='\"'\"'echo hi'\"'\"'; bash -c \"$x\"'; eval \"$x\""
+        start = time.monotonic()
+        for cmd in (doubling, flocks, chain, loops, selfref, doubling + "; rm -rf ~"):
+            with self.subTest(cmd[:40]):
+                self.assertIn(self.dec(cmd), ("", "deny"))
+        self.assertEqual(self.dec(doubling + "; rm -rf ~"), "deny")
+        self.assertLess(time.monotonic() - start, 15.0)  # CI dưới coverage chậm ~3 lần; trước bản vá: hàng trăm giây
+
+    def test_scan_budget_exhaustion_is_deny(self) -> None:
+        nested = "sh -c 'sh -c \"sh -c ls\"'"
+        self.assertEqual(self.dec(nested), "")
+        with unittest.mock.patch.object(guard, "SCAN_CALLS", 2):
+            out = guard.apply_policy(guard.bash_decision(nested, self.root))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("ngân sách", str(out["reason"]))
+        with unittest.mock.patch.object(guard, "SCAN_SECONDS", -1.0):
+            self.assertEqual(self.dec("ls"), "deny")
+        budget = guard.ScanBudget()
+        self.assertFalse(budget.exhausted())
+
+    def test_reviewer_136_cases(self) -> None:
+        """Reviewer #136: vượt trần viết lại phải chặn (không chỉ hỏi), `for` nhiều từ, lệnh quá dài, chuỗi có tiền tố."""
+        self.assert_all(
+            "deny",
+            (
+                "flock /tmp/l " * 10 + "rm -rf ~",
+                "flock /tmp/l " * 30 + "touch .git/hooks/x",
+                "for d in a b c d e f g h i ~; do rm -rf $d; done",
+                "echo " + "a" * (guard.CMD_MAX_CHARS + 1),
+                "python3 -c \"import os; os.system(f'rm -rf ~')\"",
+                "python3 -c \"import os; os.system(b'rm -rf ~')\"",
+                "python3 -c \"import os; os.system(r'rm -rf ~')\"",
+                "python3 -c \"import os; os.system('''rm -rf ~''')\"",
+                "python3 -c \"import os; os.system('rm' + ' -rf ~')\"",
+                "python3 -c \"import os; os.system('rm' ' -rf ~')\"",
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "flock /tmp/l " * 3 + "ls",
+                "for f in a b c d e f g h i j; do echo $f; done",
+                "python3 -c \"import subprocess; subprocess.run('git status', shell=True); print('git reset --hard')\"",
+                "python3 -c \"import subprocess; subprocess.run(['ls', '-la'], check=True)\"",
+            ),
+        )
+        self.assertEqual(guard._first_arg("'a', 'b'"), "'a'")
+        self.assertEqual(guard._first_arg("x)"), "x")  # ngoặc đóng của lời gọi
+        self.assertEqual(guard._first_arg("('a', 'b')"), "('a', 'b')")

@@ -31,6 +31,7 @@ import subprocess
 import urllib.parse
 import sys
 import tempfile
+import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
@@ -1268,7 +1269,8 @@ def _find_name_hints(expr: List[str]) -> List[str]:
     out: List[str] = []
     for k, a in enumerate(expr[:-1]):
         val = expr[k + 1]
-        if a in FIND_NAME_TESTS and (".autopilot" in val or posixpath.basename(val) in EVIDENCE_NAMES):
+        low = val.lower()
+        if a in FIND_NAME_TESTS and ("autopilot" in low or posixpath.basename(low) in EVIDENCE_NAMES):
             out.append(posixpath.join(".autopilot", posixpath.basename(val) or "x"))
     return out
 
@@ -2626,6 +2628,17 @@ def _at(target: str, cwd: Optional[str]) -> str:
 EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
 
 
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)(?=/|$)")
+PROJECT_REF_RE = re.compile(r"^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})(?=/|$)")
+
+
+def _resolve_target(t: str, root: str, cwd: Optional[str]) -> str:
+    """Đích ghi với `$PWD`/`$(pwd)`/`$CLAUDE_PROJECT_DIR` đứng đầu được mở ra thư mục thật, rồi tính từ thư mục đang đứng
+    (`rm -rf $PWD/.autopilot` từng lọt: dấu `$` làm đích bị coi là không rõ)."""
+    t = PROJECT_REF_RE.sub(lambda _: root, PWD_REF_RE.sub(lambda _: cwd or root, t, count=1), count=1)
+    return _at(t, cwd)
+
+
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
     asks: List[str] = []
@@ -2640,10 +2653,10 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
     asks += [
         EVIDENCE_WHY.format(t)
-        for t in (_at(t, cwd) for t in find_evidence)
+        for t in (_resolve_target(t, root, cwd) for t in find_evidence)
         if t not in targets and _target_kind(t, root) == "evidence"
     ]
-    for target in (_at(t, cwd) for t in targets):
+    for target in (_resolve_target(t, root, cwd) for t in targets):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
@@ -2892,6 +2905,27 @@ def _scan_command(
     return None
 
 
+SCAN_CALLS = 600  # số lệnh con tối đa MỖI quyết định (lệnh bình thường dùng < 20)
+SCAN_SECONDS = 8.0  # hạn giờ quét một quyết định; hook có timeout 600 s — quá hạn thì lệnh chạy không qua guard
+MAX_REWRITE = 8  # số lần viết lại CÙNG lệnh (thay biến, lệnh bọc) lồng nhau; vượt → chặn (`flock l ` ×10 + lệnh)
+CMD_MAX_CHARS = 262144  # lệnh dài hơn → chặn: quét gần bậc hai theo độ dài (4 MB từng mất > 600 s, quá timeout hook)
+REWRITE_MAX_CHARS = 65536  # bản viết lại dài hơn (biến 4 KB nhân lên nhiều lần) → chặn, không quét chậm hay bỏ qua
+
+
+class ScanBudget:
+    """Ngân sách quét MỘT quyết định: số lệnh con, hạn giờ, tập script đã quét (chặn nổ tổ hợp của bản viết lại như
+    `a="$a$a"` lặp, `flock l flock l …`). Hết ngân sách → chặn (fail-closed), không để guard chạy quá hạn rồi bị bỏ qua."""
+
+    def __init__(self) -> None:
+        self.calls = SCAN_CALLS
+        self.deadline = time.monotonic() + SCAN_SECONDS
+        self.seen: Set[str] = set()
+
+    def exhausted(self) -> bool:
+        self.calls -= 1
+        return self.calls < 0 or time.monotonic() > self.deadline
+
+
 MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi
 
 
@@ -3096,7 +3130,7 @@ def _xargs_evidence(tokens: List[str]) -> List[str]:
                 posixpath.basename(down[0]) == "xargs"
                 and inner[:1]
                 and posixpath.basename(inner[0]) in XARGS_WRITERS
-                and any(".autopilot" in t or posixpath.basename(t) in EVIDENCE_NAMES for t in up)
+                and any(".autopilot" in t.lower() or posixpath.basename(t.lower()) in EVIDENCE_NAMES for t in up)
             ):
                 asks.append(EVIDENCE_WHY.format(f"đích từ ống `{' '.join(up)[:60]}` vào xargs {inner[0]}"))
     return asks
@@ -3115,35 +3149,63 @@ def _sub_vars(text: str, env: Dict[str, str]) -> str:
     return VAR_REF_RE.sub(lambda m: env.get(m.group(1) or m.group(2), m.group(0)), text)
 
 
-def _record_assigns(c: List[str], env: Dict[str, str]) -> None:
-    """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau."""
+VAR_VALUE_MAX = 4096  # giá trị biến dài hơn không được ghi nhận (chặn nhân đôi `a="$a$a"`)
+VAR_FOR_PICKS = 64  # số từ tối đa của `for x in …` được thử làm giá trị của x (nhiều hơn → chỉ 64 từ đầu)
+
+
+def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
+    """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau; `for x in a b`: x lấy từ thứ
+    `pick` của danh sách."""
     c = [t for t in c if t not in SHELL_KEYWORDS] if c[0] in SHELL_KEYWORDS else c  # `then x=…`, `do x=…`, `{ x=…`
+    if c[:1] == ["for"] and len(c) > 3 and c[2] == "in":
+        env[c[1]] = _sub_vars(c[3:][min(pick, len(c) - 4)], env)[:VAR_VALUE_MAX]
+        return
     words = c[1:] if c[:1] and c[0] in DECLARE_CMDS else c
     if words and all(ASSIGN_ANY_RE.fullmatch(t) for t in words):
         for t in words:
             k, _, v = t.partition("=")
-            env[k] = _sub_vars(v, env)
+            val = _sub_vars(v, env)
+            if len(val) <= VAR_VALUE_MAX:
+                env[k] = val
 
 
-def _var_variants(c: List[str], env: Dict[str, str]) -> List[List[str]]:
-    """Lệnh `c` sau khi thay biến đã gán: một bản giữ nguyên chuỗi (`bash -c "$x"`), một bản tách từ khi cả token là
-    `$x` (`$x`, `rm $x`: shell tách theo khoảng trắng). Tách không được → chỉ bản đầu."""
-    whole = [_sub_vars(t, env) for t in c]
-    split: List[str] = []
-    for t, w in zip(c, whole):
-        split += _split_words(w) if VAR_REF_RE.fullmatch(t) and w != t else [w]
-    return [whole] if split == whole else [whole, split]
+def _for_words(c: List[str]) -> int:
+    """Số từ trong danh sách của `for x in a b c` (0 nếu không phải vòng for)."""
+    c = [t for t in c if t not in SHELL_KEYWORDS] if c[:1] and c[0] in SHELL_KEYWORDS else c
+    return len(c) - 3 if c[:1] == ["for"] and len(c) > 3 and c[2] == "in" else 0
+
+
+def _expand_tokens(tokens: List[str], pick: int, split: bool) -> List[str]:
+    """Dòng token với biến đã gán thay bằng giá trị theo thứ tự xuất hiện; dấu `;`/`&&`/`|`/chuyển hướng giữ nguyên nên
+    `cd $D`, `echo "$x" | sh` còn đủ ngữ cảnh. `split`: token chỉ là `$x` được tách từ như shell không nháy."""
+    env: Dict[str, str] = {}
+    out: List[str] = []
+    cur: List[str] = []
+    for t in tokens:
+        if _is_punct(t) and not _is_redirect(t):
+            if cur:
+                _record_assigns(cur, env, pick)
+            cur = []
+            out.append(t)
+            continue
+        cur.append(t)
+        sub = _sub_vars(t, env) if env else t
+        out += _split_words(sub) if split and VAR_REF_RE.fullmatch(t) and sub != t else [sub]
+    return out
 
 
 def _var_scripts(tokens: List[str]) -> List[str]:
-    """Lệnh có biến đã gán bằng chữ nguyên văn trước đó (`x='rm -rf ~'; eval "$x"`, `$x`): thay biến rồi quét lại. Chỉ
-    thấy gán trực tiếp (không `read`, vòng lặp, thay lệnh) — giới hạn đã biết của quét chuỗi."""
-    env: Dict[str, str] = {}
+    """Cả dòng lệnh sau khi thay biến đã gán bằng chữ nguyên văn (`x='rm -rf ~'; eval "$x"`, `D=.autopilot; cd $D`,
+    `cmd=…; echo "$cmd" | sh`, `for d in a b; do rm $d`): quét lại như một lệnh. Không thấy gán từ `read`/thay lệnh."""
+    base = _join_tokens(tokens)
+    picks = min(VAR_FOR_PICKS, max([1, *(_for_words(c) for c in split_commands(tokens))]))
+    seen = {base}
     out: List[str] = []
-    for c in split_commands(tokens):
-        if env:
-            out += [_join_tokens(v) for v in _var_variants(c, env) if v != c]
-        _record_assigns(c, env)
+    for pick, split in itertools.product(range(picks), (False, True)):
+        script = _join_tokens(_expand_tokens(tokens, pick, split))
+        if script not in seen:
+            seen.add(script)
+            out.append(script)
     return out
 
 
@@ -3156,14 +3218,25 @@ RUNNERS = {
 RUNNER_SUFFIXES = 12  # số hậu tố đối số tối đa mỗi lệnh (chặn số lần quét lồng)
 
 
+RUNNER_CMD_FLAG_RE = re.compile(r"-[A-Za-z]*c|--command|--run")  # `-c`, `-qc`, `-lc`: đối số kế tiếp là chuỗi lệnh
+
+
 def _runner_scripts(tokens: List[str]) -> List[str]:
+    """Phần còn lại của lệnh bọc quét như một lệnh (mọi hậu tố đối số). Một đối số chứa khoảng trắng chỉ coi là CHUỖI LỆNH
+    khi nó đứng đầu (sau các cờ/số) hoặc ngay sau cờ `-c`: `watch 'rm -rf ~'`, `script -qc '…'` — còn `-m "rm -rf ~ x"`,
+    `-t "…"`, `::: "…"` là dữ liệu (reviewer #134: chặn nhầm `flock l git commit -m "rm -rf ~ is bad"`)."""
     out: List[str] = []
     for c in split_commands(tokens):
         a = _strip_prefixes(c)
         if a and posixpath.basename(a[0]) in RUNNERS:
             rest = a[1:]
             for k in range(min(len(rest), RUNNER_SUFFIXES)):
-                out += [rest[k], _join_tokens(rest[k:]), " ".join(rest[k:])]
+                out.append(_join_tokens(rest[k:]))
+                lead = all(t.startswith("-") or t.isdigit() for t in rest[:k]) or bool(
+                    k and RUNNER_CMD_FLAG_RE.fullmatch(rest[k - 1])
+                )
+                if lead and re.search(r"\s", rest[k]):
+                    out += [rest[k], " ".join(rest[k:])]
     return out
 
 
@@ -3289,27 +3362,44 @@ def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, List
     return host, ctr
 
 
-def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int) -> List[str]:
+def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Optional[ScanBudget] = None) -> List[str]:
     """Lệnh trong container quét bằng đủ luật với gốc giả `/`; chặn/hỏi của nó thành hỏi."""
     if ctr and depth >= MAX_NEST:
         return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
     out: List[str] = []
     for script, dests in ctr:
-        sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1)
+        sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
         why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
         why = why or _wipes_bind(script, dests)
         out += [f"lệnh trong container: {why}"] if why else []
     return out
 
 
-def _scan_scripts(scripts: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str], deeper: int) -> str:
+def _scan_scripts(
+    scripts: List[str],
+    root: str,
+    cwd: Optional[str],
+    depth: int,
+    asks: List[str],
+    deeper: int,
+    budget: ScanBudget,
+    rewrites: int = 0,
+) -> str:
     """Quét từng script con ở độ sâu `depth + deeper`; trả lý do deny (rỗng nếu không). `deeper=0` cho bản viết lại CÙNG
-    lệnh (thay biến, hậu tố của lệnh bọc) — không phải shell lồng, không tốn độ sâu."""
+    lệnh (thay biến, hậu tố của lệnh bọc) — không phải shell lồng, không tốn độ sâu nhưng tốn `rewrites`. Script đã quét
+    trong quyết định này bị bỏ qua (cùng chuỗi → cùng kết quả)."""
     for script in scripts:
         if deeper and depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
             break
-        sub = bash_decision(script, root, cwd, depth + deeper)
+        if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
+            return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
+        if script in budget.seen:
+            continue
+        if not deeper and len(script) > REWRITE_MAX_CHARS:
+            return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
+        budget.seen.add(script)
+        sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
             return str(sub["reason"])
         if sub["decision"] in ("ask", "allow") or sub["commit"]:
@@ -3317,15 +3407,26 @@ def _scan_scripts(scripts: List[str], root: str, cwd: Optional[str], depth: int,
     return ""
 
 
-def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
+def _scan_nested(
+    cmd: str,
+    tokens: List[str],
+    root: str,
+    cwd: Optional[str],
+    depth: int,
+    asks: List[str],
+    budget: ScanBudget,
+    rewrites: int,
+) -> str:
     """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
     đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
     asks += _opaque_shells(tokens) + _xargs_evidence(tokens)
     host, ctr = _wrapped_scripts(tokens)
-    asks += _container_asks(ctr, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
+    asks += _container_asks(ctr, depth, budget)  # mọi lệnh, không cắt theo số lượng (review #82)
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens))
-    return _scan_scripts(rewritten, root, cwd, depth, asks, 0) or _scan_scripts(nested, root, cwd, depth, asks, 1)
+    return _scan_scripts(rewritten, root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
+        nested, root, cwd, depth, asks, 1, budget
+    )
 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
@@ -3363,23 +3464,68 @@ EXEC_CALL_RE = re.compile(
     r"\b(?:os\.(?:system|popen|exec\w*|spawn\w*)|subprocess\.\w+|Popen|check_output|check_call|getoutput"
     r"|execSync|execFileSync|spawnSync|execFile|spawn|exec|system|popen)\s*\("
 )
+# Chuỗi nguồn của Python/JS/Ruby: tiền tố r/b/f/u, nháy ba trước nháy đơn; mỗi nhánh khớp tuyến tính.
+LITERAL_RE = re.compile(
+    r"""[rRbBfFuU]{0,2}(?:'\'\'(.*?)'\'\'|\"\"\"(.*?)\"\"\"|'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")""", re.S
+)
 STR_ANY_RE = re.compile(
     r"""'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)\"""", re.S
 )  # mỗi ký tự khớp đúng một nhánh: không backtracking lũy thừa
 EXEC_ARG_WINDOW = 400
 
 
+def _balanced(text: str, start: int, opener: str, closer: str) -> str:
+    """Phần `text[start:]` tới `closer` khớp với `opener` đã mở trước `start` (bỏ qua ngoặc nằm trong chuỗi), tối đa
+    EXEC_ARG_WINDOW ký tự; không khớp → phần còn lại trong cửa sổ."""
+    depth, i, end = 1, start, min(len(text), start + EXEC_ARG_WINDOW)
+    while i < end:
+        m = STR_ANY_RE.match(text, i)
+        if m:
+            i = m.end()
+            continue
+        depth += (text[i] == opener) - (text[i] == closer)
+        if not depth:
+            return text[start:i]
+        i += 1
+    return text[start:end]
+
+
+def _literal(m: "re.Match[str]") -> str:
+    return ANSI_ESCAPE_RE.sub(_ansi_c_char, m.group(m.lastindex or 0))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
+
+
+def _first_arg(args: str) -> str:
+    """Đối số đầu của lời gọi (tới dấu phẩy ngoài ngoặc/chuỗi): `'rm' + ' -rf ~', shell=True` → `'rm' + ' -rf ~'`."""
+    depth, i = 0, 0
+    while i < len(args):
+        m = LITERAL_RE.match(args, i) if args[i] in "'\"rRbBfFuU" else None
+        if m and m.end() > i + 1:
+            i = m.end()
+            continue
+        depth += (args[i] in "([{") - (args[i] in ")]}")
+        if depth < 0 or (args[i] == "," and not depth):
+            return args[:i]
+        i += 1
+    return args
+
+
 def _exec_api_scripts(scripts: List[str]) -> List[str]:
+    """Chuỗi lệnh trong đối số ĐẦU của lời gọi thực thi: `os.system('…')` (kể cả `f'…'`, `r'…'`, nháy ba, ghép
+    `'rm' + ' -rf ~'`) → lệnh shell; `subprocess.run([…])` → các phần tử ghép thành một lệnh. Chuỗi khác trong script
+    (`print('…')`, đối số sau) là dữ liệu, không quét."""
     out: List[str] = []
     for script in scripts:
+        spans = [x.span() for x in STR_ANY_RE.finditer(script)]
         for m in EXEC_CALL_RE.finditer(script):
-            lits = [
-                ANSI_ESCAPE_RE.sub(
-                    _ansi_c_char, x.group(x.lastindex or 0)
-                )  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
-                for x in STR_ANY_RE.finditer(script[m.end() : m.end() + EXEC_ARG_WINDOW])
-            ]
-            out += [*lits, shlex.join(lits), " ".join(lits)] if lits else []
+            if any(
+                a <= m.start() < b for a, b in spans
+            ):  # `.write("os.system('…')")`: chữ trong chuỗi, không phải lời gọi
+                continue
+            first = _first_arg(_balanced(script, m.end(), "(", ")").lstrip())
+            if first[:1] == "[":
+                out.append(shlex.join(_literal(x) for x in LITERAL_RE.finditer(_balanced(first, 1, "[", "]"))))
+            elif LITERAL_RE.search(first):
+                out.append("".join(_literal(x) for x in LITERAL_RE.finditer(first)))
     return out
 
 
@@ -3487,12 +3633,23 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
 ASK_PREFIX = "Khung cần xác nhận: "
 
 
-def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0) -> Dict[str, object]:
+def bash_decision(
+    cmd: str,
+    root: str,
+    cwd: Optional[str] = None,
+    depth: int = 0,
+    budget: Optional[ScanBudget] = None,
+    rewrites: int = 0,
+) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
-    tokens = tokenize(cmd)
+    budget = budget or ScanBudget()
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
+    if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:
+        res.update(decision="deny", reason=f"Lệnh quá phức tạp để guard quét hết (vượt ngân sách quét): {cmd[:200]}")
+        return res
+    tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)
     if rx:
         res.update(
@@ -3505,7 +3662,7 @@ def bash_decision(cmd: str, root: str, cwd: Optional[str] = None, depth: int = 0
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root)
-    nested_deny = _scan_nested(cmd, tokens, root, cwd, depth, asks)
+    nested_deny = _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
