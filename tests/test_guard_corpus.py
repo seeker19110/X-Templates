@@ -46,6 +46,25 @@ SEEDS = (
 )
 
 COMPOUND = set("|;&\n{}()")
+# `$x` chỉ tách từ, không phân tích lại cú pháp: chỉ lệnh đơn toàn chữ mới đúng nghĩa khi bọc bằng biến.
+SIMPLE_WORDS = re.compile(r"[\w./~=@:+-]+( [\w./~=@:+-]+)*")
+# Gán biến chỉ có hiệu lực cho lệnh sau khi đứng một mình (hoặc trong khối `{ }`/`if`/`for`/hàm); bọc bằng lệnh tiền tố
+# (`env x=… ; …`, `time x=…`, `command x=…`) thì gán không còn trong shell → hoán vị đó không phải một tấn công.
+VAR_WRAPS = {"var_eval", "var_bash_c", "var_word"}
+PREFIX_WRAPS = {
+    "env",
+    "assign",
+    "command",
+    "exec",
+    "nohup",
+    "timeout",
+    "nice",
+    "xargs",
+    "time",
+    "sudo",
+    "flock",
+    "ionice",
+}
 
 
 def _find_exec(c: str) -> Optional[str]:
@@ -90,6 +109,21 @@ TRANSFORMS: Dict[str, Callable[[str], Optional[str]]] = {
     "sudo": lambda c: f"sudo {c}",
     "cd_first": lambda c: f"cd /tmp && {c}",
     "find_exec": _find_exec,
+    # Bọc thêm (D-047): chuỗi lệnh sau cờ `-c`, lệnh chạy phần còn lại, biến đã gán, ANSI-C, thay tiến trình
+    "ansi_c": lambda c: "sh -c $'" + c.replace("\\", "\\\\").replace("'", "\\'") + "'",
+    "ifs": lambda c: c.replace(" ", "${IFS}") if "'" not in c and '"' not in c else None,
+    "var_eval": lambda c: f'x={shlex.quote(c)}; eval "$x"',
+    "var_bash_c": lambda c: f'x={shlex.quote(c)}; bash -c "$x"',
+    "var_word": lambda c: f"x={shlex.quote(c)}; $x" if SIMPLE_WORDS.fullmatch(c) else None,
+    "watch": lambda c: f"watch {shlex.quote(c)}",
+    "script_c": lambda c: f"script -qc {shlex.quote(c)} /dev/null",
+    "su_c": lambda c: f"su -c {shlex.quote(c)}",
+    "flock": lambda c: f"flock /tmp/l {c}" if not COMPOUND & set(c) else None,
+    "ionice": lambda c: f"ionice -c 3 {c}" if not COMPOUND & set(c) else None,
+    "busybox_sh": lambda c: f"busybox sh -c {shlex.quote(c)}",
+    "coproc": lambda c: f"coproc {c}" if not COMPOUND & set(c) else None,
+    "procsub": lambda c: f"sh <(echo {shlex.quote(c)})",
+    "python_system": lambda c: f"python3 -c {shlex.quote('import os; os.system(' + repr(c) + ')')}",
 }
 
 PAIR_SAMPLE = 4000  # cặp biến đổi × hạt giống, chọn tất định; toàn bộ ~22k cặp chạy được bằng tay khi sửa guard
@@ -146,6 +180,22 @@ ALLOW = (
     "sh -c 'echo hi'",
     "bash -c 'npm test'",
     "echo `date`",
+    "find . -name '*.py' -exec python3 -m black {} +",
+    "find .autopilot -name '*.json'",
+    "find .autopilot -type f -exec cat {} \\;",
+    "find build -delete",
+    "ls .autopilot/evidence | xargs cat",
+    "find src -name '*.tmp' -print0 | xargs -0 rm",
+    "watch -n 5 git status",
+    "flock /tmp/l make build",
+    "su -c 'ls -la'",
+    "x='hello world'; echo $x",
+    "msg='fix: rm -rf ~ docs'; git status",
+    "python3 -c \"import subprocess; subprocess.run(['ls', '-la'])\"",
+    'echo "<<E" > /tmp/f',
+    'git commit -q -m "docs: nhắc <<E và \\$IFS"',
+    "touch /tmp/x",
+    "echo $'a\\tb'",
 )
 
 
@@ -177,6 +227,8 @@ class GuardCorpusTest(unittest.TestCase):
         missed = []
         for s, (a, b) in random.Random(2026).sample(pairs, PAIR_SAMPLE):
             inner = TRANSFORMS[a](s)
+            if a in VAR_WRAPS and b in PREFIX_WRAPS:
+                continue
             c = TRANSFORMS[b](inner) if inner is not None else None
             if c is not None and self.dec(c) != "deny":
                 missed.append(f"{a}+{b}: {c!r}")
@@ -191,17 +243,11 @@ class GuardCorpusTest(unittest.TestCase):
 # dòng, test dưới đỏ → chuyển nó sang SEEDS/ca chặn. Nhóm biến/eval biến/mã trong ngôn ngữ khác về nguyên tắc không
 # chặn hết bằng quét chuỗi — lớp đỡ là review và chế độ quyền.
 KNOWN_GAPS = (
-    "sh -c $'rm -rf ~'",
-    "x='rm -rf ~'; eval \"$x\"",
-    "rm${IFS}-rf${IFS}~",
-    "watch 'rm -rf ~'",
-    "script -qc 'rm -rf ~' /dev/null",
-    "flock /tmp/l rm -rf ~",
-    "coproc rm -rf ~",
-    "busybox sh -c 'rm -rf ~'",
-    "su -c 'rm -rf ~'",
-    "sh <(echo 'rm -rf ~')",
-    "python3 -c \"import os; os.system('rm -rf ~')\"",
+    "x=$(echo 'rm -rf ~'); $x",  # biến gán từ thay lệnh
+    'for d in ~; do rm -rf "$d"; done',  # biến vòng lặp
+    "read x <<< 'rm -rf ~'; eval \"$x\"",  # biến từ `read`
+    "python3 -c \"import os; getattr(os, 'sys' + 'tem')('rm -rf ~')\"",  # ghép chuỗi tên hàm
+    "echo cm0gLXJmIH4K | base64 -d | sh",  # shell đọc từ ống không phải echo/printf: chỉ hỏi (ADR-0018 cho chạy)
 )
 
 
@@ -302,3 +348,143 @@ class GuardCorpusFixesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuardRemainingGapsTest(unittest.TestCase):
+    """Các lỗ còn lại sau #132 (reviewer #132 + `KNOWN_GAPS` cũ), D-047."""
+
+    def setUp(self) -> None:
+        self.root = tempfile.mkdtemp()
+
+    def dec(self, cmd: str) -> str:
+        return str(guard.apply_policy(guard.bash_decision(cmd, self.root))["decision"])
+
+    def assert_all(self, want: str, cmds: tuple[str, ...]) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd):
+                self.assertEqual(self.dec(cmd), want)
+
+    def test_dquote_and_backtick_heredoc_opener_does_not_swallow(self) -> None:
+        body = "\nbash <<F\ngit reset --hard HEAD~3\nF"
+        self.assert_all(
+            "deny",
+            (
+                'echo "<<E"' + body,
+                'echo "a <<E b"' + body,
+                'echo "x\n<<E\ny"' + body,  # nháy kép mở từ dòng trước
+                "echo `echo <<E`" + body,  # backtick đóng cùng dòng: thân rỗng
+                'echo "$(cat <<E)"' + body,  # `$(` đóng cùng dòng
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "git commit -q -m \"$(cat <<'EOF'\nrevert: git reset --hard\nEOF\n)\"",
+                'echo "$(cat <<E\nx git reset --hard\nE\n)"',
+                'echo "$(\ncat <<E\nx git reset --hard\nE\n)"',  # `$(` ở dòng trước
+                "echo `cat <<E\nx git reset --hard\nE\n`",  # backtick còn mở: thân thật
+            ),
+        )
+
+    def test_find_hits_autopilot_in_every_form(self) -> None:
+        self.assert_all(
+            "deny",
+            (
+                "find -L .autopilot -delete",
+                "find -H -L .autopilot -type f -exec rm {} \\;",
+                "find -D tree .autopilot -delete",
+                "find -O2 .autopilot -delete",
+                "find . -path './.autopilot/*' -delete",
+                "find . -name verified.json -delete",
+                "find . -iname 'reviews.json' -exec mv {} /tmp \\;",
+                "find .autopilot -exec mv {} /tmp \\;",
+                "find .autopilot -exec sed -i s/a/b/ {} \\;",
+                "find .autopilot -exec sh -c 'rm {}' \\;",
+                "find . -name x -fprint .autopilot/verified.json",
+                "find .autopilot -print0 | xargs -0 rm",
+                "ls .autopilot/evidence | xargs -I{} mv {} /tmp",
+                "touch .autopilot/verified.json",
+                "touch -d 2020-01-01 .autopilot/state.json",
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "find .autopilot -name '*.json'",
+                "find .autopilot -type f -exec cat {} \\;",
+                "find .autopilot -type f -exec grep -l ok {} +",
+                "find . -name '*.py' -exec python3 -m black {} +",
+                "find docs -name evidence -delete",
+                "find build -delete",
+                "find . -name '*.pyc' -delete",
+                "find . -name x -fprint /tmp/out.txt",
+                "find .autopilot -print0 | xargs -0 cat",
+                "find src -name '*.tmp' -print0 | xargs -0 rm",
+                "touch /tmp/x",
+                "touch -d 2020-01-01 build/x",
+            ),
+        )
+
+    def test_variables_runners_and_quoting_forms_of_the_old_known_gaps(self) -> None:
+        self.assert_all(
+            "deny",
+            (
+                "sh -c $'rm -rf ~'",
+                "bash -c $'echo hi\\nrm -rf ~'",
+                "x='rm -rf ~'; eval \"$x\"",
+                "x='rm -rf ~'; $x",
+                "x=rm; y='-rf ~'; $x $y",
+                "x='rm -rf ~'; bash -c \"$x\"",
+                "export x='git reset --hard'; sh -c \"$x\"",
+                "if true; then x='rm -rf ~'; eval \"$x\"; fi",
+                "x='bash <<E\ngit reset --hard\nE'; eval \"$x\"",
+                "rm${IFS}-rf${IFS}~",
+                "rm$IFS-rf$IFS~",
+                "watch 'rm -rf ~'",
+                "script -qc 'rm -rf ~' /dev/null",
+                "flock /tmp/l rm -rf ~",
+                "flock -c 'rm -rf ~' /tmp/l",
+                "coproc rm -rf ~",
+                "busybox sh -c 'rm -rf ~'",
+                "su -c 'rm -rf ~'",
+                "ionice -c 3 nice -n 5 rm -rf ~",
+                "sh <(echo 'rm -rf ~')",
+                "bash < <(printf 'rm -rf ~')",
+                "source <(echo 'git reset --hard')",
+                "python3 -c \"import os; os.system('rm -rf ~')\"",
+                "python3 -c \"import subprocess; subprocess.run(['rm', '-rf', '~'])\"",
+                "node -e \"require('child_process').execSync('git reset --hard')\"",
+                "python3 - <<'PY'\nimport os\nos.system(\"git push --force origin main\")\nPY",
+                "D=.autopilot; echo x > $D/verified.json",
+                "D=.autopilot; rm -rf $D",
+                "f=.autopilot/verified.json; printf '{}' > \"$f\"",
+                "flock /tmp/l sh -c 'echo x' > .autopilot/verified.json",
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "echo $'it\\'s fine'",
+                "git commit -q -m $'feat: x\\n\\nbody'",
+                "x='hello world'; echo $x",
+                "msg='fix: rm -rf ~ docs'; git status",
+                "python3 -c \"print('rm -rf ~')\"",
+                "python3 -c \"import subprocess; subprocess.run(['ls', '-la'])\"",
+                "python3 - <<'PY'\nmsg = 'rm -rf ~ is dangerous'\nprint(msg)\nPY",
+                "watch -n 5 git status",
+                "flock /tmp/l make build",
+                "su -c 'ls -la'",
+                "diff <(git show HEAD:a) a",
+                "bash <(cat scripts/run.sh)",  # nguồn không phải echo/printf: guard không thấy script (cho qua, ADR-0018)
+            ),
+        )
+
+    def test_ansi_c_decoding(self) -> None:
+        self.assertEqual(guard.expand_ansi_c("a $'x\\ty' b"), "a 'x\ty' b")
+        self.assertEqual(guard.expand_ansi_c("$'\\x41\\101\\u00e9\\q'"), "'AAéq'")
+        self.assertEqual(guard.expand_ansi_c("$'it\\'s'"), "'it'\\''s'")
+        self.assertEqual(guard.expand_ansi_c("'$'x '$y'"), "'$'x '$y'")  # trong nháy đơn: giữ nguyên
+        self.assertEqual(guard.expand_ansi_c("echo \"$'\" $'z"), "echo \"$'\" 'z'")
+        self.assertEqual(guard.expand_ansi_c("$'abc"), "'abc'")  # không đóng
+        self.assertEqual(guard.expand_ansi_c("a\\$'x'"), "a\\$'x'")  # `\$` đã escape
+        self.assertEqual(guard.expand_ansi_c("$'\\U00110000'"), "''")  # ngoài Unicode

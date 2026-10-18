@@ -356,22 +356,53 @@ def _unquoted_positions(line: str, q: str) -> Tuple[List[bool], str]:
     return [not st for st in states], q
 
 
+SUBST_OPEN_RE = re.compile(r"\$\((?!\()")
+
+
+def _subst_depth(text: str, depth: int) -> int:
+    """Độ sâu `$(…)` sau khi đọc `text` (xuất phát từ `depth`); `$((…))` là số học, không tính."""
+    return depth + len(SUBST_OPEN_RE.findall(text)) - text.count(")")
+
+
+def _dq_run_start(states: List[str], pos: int) -> int:
+    start = pos
+    while start > 0 and states[start - 1] == '"':
+        start -= 1
+    return start
+
+
+def _opens_body(line: str, states: List[str], m: "re.Match[str]", carried: int) -> bool:
+    """`<<TAG` nằm TRONG nháy kép/backtick: có thật sự mở heredoc (thân ở các dòng sau) không? Trong `"…"` chỉ khi nó
+    nằm trong `$(…)` còn mở sau cả dòng (`-m "$(cat <<'EOF'`); trong backtick chỉ khi backtick chưa đóng cùng dòng
+    (bash phân tích riêng thân backtick: `` echo `cat <<E` `` đóng ngay thì thân rỗng, dòng sau là lệnh thật). `echo
+    "<<E"` chỉ là chữ."""
+    if states[m.start()] == "`":
+        return "`" not in line[m.end() :]
+    start = _dq_run_start(states, m.start())
+    depth = _subst_depth(line[start : m.start()], carried if start == 0 else 0)
+    return depth > 0 and _subst_depth(line[m.end() :], depth) > 0
+
+
 def _heredocs(cmd: str) -> List[Tuple[str, "re.Match[str]", List[str]]]:
-    """(dòng mở, match, thân) của mọi heredoc có thể thật: bỏ `<<` trong comment/nháy đơn (không bao giờ mở heredoc);
-    giữ trong nháy kép/backtick (`-m "$(cat <<'EOF'`). Không thấy dấu kết → thân là phần còn lại, như bash."""
+    """(dòng mở, match, thân) của mọi heredoc có thể thật: bỏ `<<` trong comment/nháy đơn và trong nháy kép ngoài `$(…)`
+    (không mở heredoc); giữ trong `$(…)`/backtick (`-m "$(cat <<'EOF'`). Không thấy dấu kết → thân là phần còn lại."""
     out: List[Tuple[str, "re.Match[str]", List[str]]] = []
     lines = cmd.split("\n")
-    q, i = "", 0
+    q, i, carried = "", 0, 0
     while i < len(lines):
         line, i = lines[i], i + 1
         states, q = _quote_states(line, q)
         for m in HEREDOC_RE.finditer(line):
-            if states[m.start()] in ("#", "'"):
+            if states[m.start()] in ("#", "'") or (
+                states[m.start()] in ('"', "`") and not _opens_body(line, states, m, carried)
+            ):
                 continue
             # không thấy dấu kết: như bash, thân là phần còn lại (`bash <<E` ↵ `rm -rf ~` vẫn chạy)
             end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), len(lines))
             out.append((line, m, lines[i:end]))
             i = end + 1
+        run = _dq_run_start(states, len(states))
+        carried = _subst_depth(line[run:], carried if run == 0 else 0) if q == '"' else 0
     return out
 
 
@@ -439,8 +470,47 @@ def strip_comments(cmd: str) -> str:
     return "".join(out)
 
 
+ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
+ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
+IFS_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")
+
+
+def _ansi_c_char(m: "re.Match[str]") -> str:
+    e = m.group(1)
+    if e[0] in "xuU" and len(e) > 1:
+        return chr(int(e[1:], 16)) if int(e[1:], 16) < 0x110000 else ""
+    if e[0] in "01234567":
+        return chr(int(e, 8) % 256)
+    return ANSI_ESCAPES.get(e, e)
+
+
+def expand_ansi_c(cmd: str) -> str:
+    """`$'…'` (ANSI-C quoting) ngoài nháy → chuỗi nháy đơn đã giải mã (`sh -c $'rm -rf ~'`: shlex đọc `$` là chữ và
+    giữ nguyên chuỗi nên lệnh bên trong lọt)."""
+    out: List[str] = []
+    i, q = 0, ""
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and q != "'":
+            out.append(cmd[i : i + 2])
+            i += 2
+        elif not q and cmd.startswith("$'", i):
+            j = i + 2
+            while j < len(cmd) and cmd[j] != "'":
+                j += 2 if cmd[j] == "\\" else 1
+            body = ANSI_ESCAPE_RE.sub(_ansi_c_char, cmd[i + 2 : j])
+            out.append("'" + body.replace("'", "'\\''") + "'")
+            i = j + 1
+        else:
+            if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
+                q = "" if q else c
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def tokenize(cmd: str) -> List[str]:
-    cmd = strip_heredocs(join_continuations(cmd))
+    cmd = IFS_RE.sub(" ", expand_ansi_c(strip_heredocs(join_continuations(cmd))))
     lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -1119,10 +1189,7 @@ FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
 def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
     """`find <gốc…> -delete` / `-exec rm … {}`: xoá các file khớp dưới gốc — gốc là `/`, `~` → deny; gốc ngoài dự án
     → ask. Lệnh trong `-exec … ;|+` còn được quét như lệnh thường (`{}` = một file tìm thấy)."""
-    i = 0
-    while i < len(args) and not args[i].startswith(("-", "(", "!")):
-        i += 1
-    roots = args[:i] or ["."]
+    roots, i = _find_parts(args)
     deleting = "-delete" in args[i:]
     for k, a in enumerate(args):
         if a not in FIND_EXEC:
@@ -1146,16 +1213,76 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
+def _find_parts(args: List[str]) -> Tuple[List[str], int]:
+    """(gốc, vị trí bắt đầu biểu thức) của `find`: bỏ tuỳ chọn toàn cục đứng trước gốc (`-H`/`-L`/`-P`, `-D <opt>`,
+    `-O<n>`) — `find -L .autopilot -delete` từng bị đọc thành gốc `.` (reviewer #132)."""
+    i = 0
+    while i < len(args) and (args[i] in ("-H", "-L", "-P") or re.fullmatch(r"-O\d", args[i])):
+        i += 1
+    if args[i : i + 1] == ["-D"]:
+        i += 2
+    j = i
+    while j < len(args) and not args[j].startswith(("-", "(", "!")):
+        j += 1
+    return args[i:j] or ["."], j
+
+
 def _find_delete_roots(args: List[str]) -> List[str]:
     """Gốc của `find … -delete` / `-exec rm|shred|unlink …`: lệnh xoá file dưới các gốc này (reviewer #132)."""
-    i = 0
-    while i < len(args) and not args[i].startswith(("-", "(", "!")):
-        i += 1
+    roots, i = _find_parts(args)
     deleting = "-delete" in args[i:] or any(
-        a in FIND_EXEC and k + 1 < len(args) and posixpath.basename(args[k + 1]) in ("rm", "shred", "unlink")
-        for k, a in enumerate(args)
+        sub and posixpath.basename(sub[0]) in ("rm", "shred", "unlink") for sub in _find_exec_argvs(["find", *args[i:]])
     )
-    return (args[:i] or ["."]) if deleting else []
+    return roots if deleting else []
+
+
+# `find … -exec <lệnh>` chỉ ĐỌC file thì không đụng bằng chứng; lệnh khác (mv, sed -i, sh -c, tee…) coi là có thể ghi.
+FIND_READONLY_EXEC = {
+    *(
+        "cat",
+        "grep",
+        "egrep",
+        "fgrep",
+        "head",
+        "tail",
+        "ls",
+        "wc",
+        "stat",
+        "file",
+        "jq",
+        "diff",
+        "cmp",
+        "echo",
+        "printf",
+    ),
+    *("sha256sum", "sha1sum", "md5sum", "basename", "dirname", "readlink", "realpath", "du", "test", "["),
+}
+FIND_FILE_OUT = {"-fprint", "-fprint0", "-fprintf", "-fls"}  # ghi kết quả vào file (đối số kế tiếp)
+FIND_NAME_TESTS = {"-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-name", "-iname", "-lname"}
+EVIDENCE_NAMES = {"verified.json", "runs.jsonl", "reviews.json"}  # tên đặc thù của file trong `.autopilot/`
+
+
+def _find_name_hints(expr: List[str]) -> List[str]:
+    """`-path './.autopilot/*'`, `-name verified.json`: gốc `.` nhưng bộ lọc chỉ trúng bằng chứng — trả đường dẫn giả
+    `.autopilot/<tên>` để xét như đích ghi."""
+    out: List[str] = []
+    for k, a in enumerate(expr[:-1]):
+        val = expr[k + 1]
+        if a in FIND_NAME_TESTS and (".autopilot" in val or posixpath.basename(val) in EVIDENCE_NAMES):
+            out.append(posixpath.join(".autopilot", posixpath.basename(val) or "x"))
+    return out
+
+
+def _find_evidence_targets(args: List[str]) -> List[str]:
+    """Đích mà `find` có thể ghi/sửa ngoài việc xoá: `-exec` chạy lệnh không chỉ-đọc dưới các gốc (kể cả bộ lọc trúng
+    bằng chứng), `-fprint FILE`. Chỉ dùng để xét `.autopilot/` (ADR-0026) — gốc `.` thường không phải cổng."""
+    roots, i = _find_parts(args)
+    expr = args[i:]
+    out = [expr[k + 1] for k, a in enumerate(expr[:-1]) if a in FIND_FILE_OUT]
+    execs = _find_exec_argvs(["find", *expr])
+    if "-delete" in expr or any(sub and posixpath.basename(sub[0]) not in FIND_READONLY_EXEC for sub in execs):
+        out += [*roots, *_find_name_hints(expr)]
+    return out
 
 
 FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race", "-mindepth", "-maxdepth"}
@@ -2443,6 +2570,8 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
         return out + _find_delete_roots(args)
     if name == "truncate":
         return out + _positionals(args, ("-s", "--size", "-r", "--reference"))
+    if name == "touch":
+        return out + _positionals(args, ("-d", "-t", "-r", "--date", "--reference"))
     if name in FILE_WRITERS:
         return out + FILE_WRITERS[name](args)
     return out + _inplace_targets(name, args)
@@ -2494,6 +2623,9 @@ def _at(target: str, cwd: Optional[str]) -> str:
     return posixpath.normpath(posixpath.join(cwd, target))
 
 
+EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
+
+
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
     asks: List[str] = []
@@ -2504,7 +2636,14 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
             if _match_any(rel_path(_at(t, cwd), root), GIT_HOOK_PATTERNS)
         ]
     cfg = _git_config_file(n)
-    for target in (_at(t, cwd) for t in [*write_targets(n, argv), *([cfg] if cfg else [])]):
+    find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
+    targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
+    asks += [
+        EVIDENCE_WHY.format(t)
+        for t in (_at(t, cwd) for t in find_evidence)
+        if t not in targets and _target_kind(t, root) == "evidence"
+    ]
+    for target in (_at(t, cwd) for t in targets):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
@@ -2515,7 +2654,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         elif kind in ("gate", "migration"):
             asks.append(f"sửa cấu hình cổng/CI/harness/migration qua Bash ({target}) — nói rõ lý do")
         elif kind == "evidence":
-            asks.append(f"ghi/xoá tay bằng chứng autopilot qua Bash ({target}) — chỉ `xt.py loop …` được ghi (P1)")
+            asks.append(EVIDENCE_WHY.format(target))
         elif kind == "capability":
             asks.append(CAPABILITY_WHY.format(f"ghi {target} qua Bash"))
         elif _existing_test(target, root):
@@ -2929,6 +3068,7 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
     backtick."""
     out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
     out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(cmd)) + _dollar_scripts(strip_heredocs(cmd))
+    out += _procsub_scripts(tokens)
     out += [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
     for pipe in pipelines(tokens):
         for up, down in zip(pipe, pipe[1:]):
@@ -2936,6 +3076,116 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
             if src[:1] in (["echo"], ["printf"]) and _stdin_shell(down):
                 out += _echoed_scripts(src)
     return out + _here_strings(tokens) + _heredoc_scripts(cmd)
+
+
+# Lệnh có thể ghi/xoá file khi đích đến từ stdin qua `xargs` (`find .autopilot -print0 | xargs -0 rm`).
+XARGS_WRITERS = {
+    *("rm", "mv", "cp", "shred", "truncate", "unlink", "tee", "sed", "install", "ln", "dd", "touch", "perl", "ruby"),
+    *("sh", "bash", "zsh", "dash", "ksh", "python", "python3", "node"),
+}
+
+
+def _xargs_evidence(tokens: List[str]) -> List[str]:
+    """`<nguồn nhắc .autopilot> | xargs <lệnh ghi/xoá>`: đích đến từ stdin nên guard không thấy file — nguồn đã nói rõ
+    là bằng chứng của autopilot thì chặn như ghi tay (ADR-0026)."""
+    asks: List[str] = []
+    for pipe in pipelines(tokens):
+        for up, down in zip(pipe, pipe[1:]):
+            inner = normalize(down)
+            if (
+                posixpath.basename(down[0]) == "xargs"
+                and inner[:1]
+                and posixpath.basename(inner[0]) in XARGS_WRITERS
+                and any(".autopilot" in t or posixpath.basename(t) in EVIDENCE_NAMES for t in up)
+            ):
+                asks.append(EVIDENCE_WHY.format(f"đích từ ống `{' '.join(up)[:60]}` vào xargs {inner[0]}"))
+    return asks
+
+
+def _join_tokens(words: List[str]) -> str:
+    """Ghép argv lại thành dòng lệnh: token dấu câu (chuyển hướng `>`, `<`…) để trần, từ khác được trích nháy."""
+    return " ".join(t if _is_punct(t) else shlex.quote(t) for t in words)
+
+
+ASSIGN_ANY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)  # giá trị có thể nhiều dòng (`x='bash <<E …'`)
+VAR_REF_RE = re.compile(r"\$(\w+)|\$\{(\w+)\}")
+
+
+def _sub_vars(text: str, env: Dict[str, str]) -> str:
+    return VAR_REF_RE.sub(lambda m: env.get(m.group(1) or m.group(2), m.group(0)), text)
+
+
+def _record_assigns(c: List[str], env: Dict[str, str]) -> None:
+    """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau."""
+    c = [t for t in c if t not in SHELL_KEYWORDS] if c[0] in SHELL_KEYWORDS else c  # `then x=…`, `do x=…`, `{ x=…`
+    words = c[1:] if c[:1] and c[0] in DECLARE_CMDS else c
+    if words and all(ASSIGN_ANY_RE.fullmatch(t) for t in words):
+        for t in words:
+            k, _, v = t.partition("=")
+            env[k] = _sub_vars(v, env)
+
+
+def _var_variants(c: List[str], env: Dict[str, str]) -> List[List[str]]:
+    """Lệnh `c` sau khi thay biến đã gán: một bản giữ nguyên chuỗi (`bash -c "$x"`), một bản tách từ khi cả token là
+    `$x` (`$x`, `rm $x`: shell tách theo khoảng trắng). Tách không được → chỉ bản đầu."""
+    whole = [_sub_vars(t, env) for t in c]
+    split: List[str] = []
+    for t, w in zip(c, whole):
+        split += _split_words(w) if VAR_REF_RE.fullmatch(t) and w != t else [w]
+    return [whole] if split == whole else [whole, split]
+
+
+def _var_scripts(tokens: List[str]) -> List[str]:
+    """Lệnh có biến đã gán bằng chữ nguyên văn trước đó (`x='rm -rf ~'; eval "$x"`, `$x`): thay biến rồi quét lại. Chỉ
+    thấy gán trực tiếp (không `read`, vòng lặp, thay lệnh) — giới hạn đã biết của quét chuỗi."""
+    env: Dict[str, str] = {}
+    out: List[str] = []
+    for c in split_commands(tokens):
+        if env:
+            out += [_join_tokens(v) for v in _var_variants(c, env) if v != c]
+        _record_assigns(c, env)
+    return out
+
+
+# Lệnh chạy phần còn lại của dòng lệnh (hoặc một chuỗi lệnh sau cờ `-c`) — tuỳ chọn mỗi lệnh khác nhau nên quét MỌI
+# hậu tố của đối số như một lệnh (cả dạng ghép chuỗi: `script -qc 'rm -rf ~' /dev/null`, `watch 'rm -rf ~'`).
+RUNNERS = {
+    *("flock", "watch", "script", "su", "busybox", "coproc", "ionice", "chrt", "taskset", "fakeroot", "unshare"),
+    *("nsenter", "runuser", "systemd-run", "pkexec", "strace", "ltrace", "chroot", "sg", "newgrp", "at", "parallel"),
+}
+RUNNER_SUFFIXES = 12  # số hậu tố đối số tối đa mỗi lệnh (chặn số lần quét lồng)
+
+
+def _runner_scripts(tokens: List[str]) -> List[str]:
+    out: List[str] = []
+    for c in split_commands(tokens):
+        a = _strip_prefixes(c)
+        if a and posixpath.basename(a[0]) in RUNNERS:
+            rest = a[1:]
+            for k in range(min(len(rest), RUNNER_SUFFIXES)):
+                out += [rest[k], _join_tokens(rest[k:]), " ".join(rest[k:])]
+    return out
+
+
+def _procsub_scripts(tokens: List[str]) -> List[str]:
+    """`sh <(echo '…')`, `source <(printf '…')`, `bash < <(echo '…')`: shell đọc script do lệnh trong `<( )` sinh ra."""
+    out: List[str] = []
+    for i, t in enumerate(tokens):
+        if t != "<(":
+            continue
+        j = i - 1
+        while j >= 0 and (tokens[j].startswith("-") or tokens[j] == "<"):
+            j -= 1
+        if j < 0 or posixpath.basename(tokens[j]) not in {*SHELLS, "source", "."}:
+            continue
+        depth, k = 1, i + 1
+        while k < len(tokens) and depth:
+            depth += tokens[k].count("(") - tokens[k].count(")") if _is_punct(tokens[k]) else 0
+            k += 1
+        inner = normalize(tokens[i + 1 : k - 1])
+        if inner[:1] in (["echo"], ["printf"]):
+            out += _echoed_scripts(inner)
+    return out
 
 
 def _opaque_shells(tokens: List[str]) -> List[str]:
@@ -3052,22 +3302,30 @@ def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int) -> List[str]:
     return out
 
 
-def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
-    """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
-    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
-    asks += _opaque_shells(tokens)
-    host, ctr = _wrapped_scripts(tokens)
-    asks += _container_asks(ctr, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
-    for script in _nested_scripts(cmd, tokens) + host:
-        if depth >= MAX_NEST:
+def _scan_scripts(scripts: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str], deeper: int) -> str:
+    """Quét từng script con ở độ sâu `depth + deeper`; trả lý do deny (rỗng nếu không). `deeper=0` cho bản viết lại CÙNG
+    lệnh (thay biến, hậu tố của lệnh bọc) — không phải shell lồng, không tốn độ sâu."""
+    for script in scripts:
+        if deeper and depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
             break
-        sub = bash_decision(script, root, cwd, depth + 1)
+        sub = bash_decision(script, root, cwd, depth + deeper)
         if sub["decision"] == "deny":
             return str(sub["reason"])
         if sub["decision"] in ("ask", "allow") or sub["commit"]:
             asks.append(f"lệnh lồng trong shell: {str(sub['reason']) or 'git commit (cổng commit không chạy được)'}")
     return ""
+
+
+def _scan_nested(cmd: str, tokens: List[str], root: str, cwd: Optional[str], depth: int, asks: List[str]) -> str:
+    """Quét đệ quy lệnh lồng; trả lý do deny (rỗng nếu không), thêm câu hỏi vào `asks`. Lệnh trong container không
+    đụng file máy → chặn/hỏi của nó thành hỏi (ra mạng, thêm gói vẫn là việc thật)."""
+    asks += _opaque_shells(tokens) + _xargs_evidence(tokens)
+    host, ctr = _wrapped_scripts(tokens)
+    asks += _container_asks(ctr, depth)  # mọi lệnh, không cắt theo số lượng (review #82)
+    rewritten = _var_scripts(tokens) + _runner_scripts(tokens)
+    nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens))
+    return _scan_scripts(rewritten, root, cwd, depth, asks, 0) or _scan_scripts(nested, root, cwd, depth, asks, 1)
 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
@@ -3097,6 +3355,28 @@ def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
         if n and INTERP_RE.fullmatch(n[0]):
             out += [n[i + 1] for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS]
     return out + _heredoc_scripts(cmd, _stdin_interp)
+
+
+# Lời gọi chạy lệnh shell từ trình thông dịch (`os.system('…')`, `subprocess.run(['rm','-rf','~'])`, `execSync('…')`):
+# chuỗi nguyên văn trong đối số là lệnh thật. Chỉ xét chuỗi nằm trong lời gọi này (không phải mọi chuỗi trong script).
+EXEC_CALL_RE = re.compile(
+    r"\b(?:os\.(?:system|popen|exec\w*|spawn\w*)|subprocess\.\w+|Popen|check_output|check_call|getoutput"
+    r"|execSync|execFileSync|spawnSync|execFile|spawn|exec|system|popen)\s*\("
+)
+STR_ANY_RE = re.compile(r"""(['"])((?:\\.|(?!\1).)*)\1""")
+EXEC_ARG_WINDOW = 400
+
+
+def _exec_api_scripts(scripts: List[str]) -> List[str]:
+    out: List[str] = []
+    for script in scripts:
+        for m in EXEC_CALL_RE.finditer(script):
+            lits = [
+                ANSI_ESCAPE_RE.sub(_ansi_c_char, x.group(2))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
+                for x in STR_ANY_RE.finditer(script[m.end() : m.end() + EXEC_ARG_WINDOW])
+            ]
+            out += [*lits, shlex.join(lits), " ".join(lits)] if lits else []
+    return out
 
 
 def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
