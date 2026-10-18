@@ -5,6 +5,22 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Security
+- Rà `seeker19110/stored` 2026-10-18 (mục 01 §3g, §3g.4; 03 §8c), mỗi lỗ đã tái hiện bằng payload thật trên guard:
+  - **`LOOP-STOP-027`** (mới, MUST@L — harness cưỡng chế ở mọi quy mô): lệnh Gate (`PLAN.md`), `— Kiểm:` (blueprint), sàn Gate (`xt.yaml`) do model viết mà
+    `xt.py` chạy (`loop record`/`loop verify`/`blueprint-status --run`) nay qua guard của dự án trước khi chạy — bị cấm thì
+    exit 126, không chạy (`xt.py guard_block`). Trước đây `loop record --task T-001 -- rm -rf ~/x` và Gate `git push --force
+    origin main` chạy ngoài hàng rào, kể cả khi Stop hook buộc `loop verify`.
+  - **`LOOP-STOP-028`** (mới, MUST@L): guard chặn CLI agent khác Claude Code với cờ tự duyệt (`codex --full-auto`/`-a never`/
+    `--sandbox danger-full-access`, `gemini --yolo`/`--approval-mode yolo`, `copilot --allow-all-tools`, `aider
+    --yes-always`, `cursor-agent --force`, `amp --dangerously-allow-all`) — agent lồng không chạy hook của khung.
+  - `git commit --no-verify` (và `git -c core.hooksPath=… commit`) ở chính sách mặc định **bỏ qua cổng của khung lặng
+    lẽ**: hook chỉ chạy cổng khi không có `--no-verify`, còn câu hỏi bị chính sách mặc định (ADR-0018) bỏ đi. Nay cổng
+    vẫn chạy; chỉ `XT_GUARD_POLICY=strict` để người quyết.
+  - Ghi `.git/hooks/*`, `.git/config` (Edit hoặc Bash) và `git config core.hooksPath <x>` bị chặn (bỏ qua hook của dự án,
+    không vào commit nên không có dấu vết PR).
+  Dự án đích: chạy lại `install.py` để nhận `guard.py`, `pre-bash-guard.sh`, `xt.py` mới.
+
 ## [3.0.1] - 2026-10-18
 
 > **Dự án đích đã cài với `--with-github` (mọi bản, kể cả ≤ 2.x):** chạy lại `install.py --with-github`, rồi thay

@@ -274,12 +274,19 @@ def _bypass_edit(path: str, tool_input: Optional[Dict[str, object]]) -> str:
     return m.group(0) if m else ""
 
 
+# Git hook và cấu hình git của repo: không nằm trong commit (không có dấu vết PR) — sửa = tắt/bỏ qua hook của dự án.
+GIT_HOOK_PATTERNS = (".git/hooks", ".git/hooks/*", ".git/config")
+GIT_HOOK_WHY = "ghi {} — git hook/cấu hình git không vào commit, sửa là bỏ qua hook của dự án; người làm tay"
+
+
 def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] = None) -> Tuple[str, str]:
     rel = rel_path(path, root)
     kind = path_kind(rel, root)
     bypass = _bypass_edit(path, tool_input)
     if bypass:
         return "deny", f"Không ghi công tắc tắt hook (`{bypass}`) vào {rel} — hàng rào của khung (ADR-0018)."
+    if _match_any(rel, GIT_HOOK_PATTERNS):
+        return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
     if kind == "secret":
@@ -2008,14 +2015,72 @@ def _bypass_marker(argv: List[str], n: List[str], claude: List[str]) -> str:
     return ""
 
 
+# CLI agent KHÁC Claude Code không chạy hook của khung; chạy nó với cờ tự duyệt = đường vòng quanh guard (LOOP-STOP-028,
+# stored 01 §3g.4). Claude Code lồng vẫn nạp hook của dự án nên chỉ xét cờ tắt hook ở trên. Cờ dạng `--x giá-trị` so
+# cả cặp `--x=giá-trị`. Nguồn từng cờ: CHANGELOG mục LOOP-STOP-028.
+AGENT_CLI_PKGS = {"@openai/codex": "codex", "@google/gemini-cli": "gemini", "@github/copilot": "copilot"}
+AGENT_SELF_APPROVE = {
+    "codex": {
+        "--full-auto",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--yolo",
+        "--sandbox=danger-full-access",
+        "-s=danger-full-access",
+        "--ask-for-approval=never",
+        "-a=never",
+    },
+    "gemini": {"--yolo", "-y", "--approval-mode=yolo"},
+    "copilot": {"--allow-all-tools", "--allow-all", "--yolo"},
+    "aider": {"--yes-always"},
+    "cursor-agent": {"--force", "-f"},
+    "amp": {"--dangerously-allow-all"},
+}
+
+
+def _agent_cli(n: List[str]) -> Tuple[str, List[str]]:
+    """(tên CLI agent, tham số) khi lệnh gọi một CLI agent khác Claude Code (trực tiếp hoặc qua npx/pnpm dlx…)."""
+    name, i = posixpath.basename(n[0]), 1
+    t = _runner_target(n)
+    if t >= 0:
+        name, i = n[t], t + 1
+    name = AGENT_CLI_PKGS.get(name.rsplit("@", 1)[0] if name.count("@") > 1 else name, name)
+    return (name, n[i:]) if name in AGENT_SELF_APPROVE else ("", [])
+
+
+def agent_self_approve(n: List[str]) -> str:
+    """Lý do chặn khi lệnh mở CLI agent khác với cờ tự duyệt mọi công cụ; chuỗi rỗng nếu không."""
+    name, args = _agent_cli(n)
+    flags = AGENT_SELF_APPROVE.get(name, set())
+    for k, a in enumerate(args):
+        if a == "--":
+            break
+        pair = a if "=" in a or k + 1 >= len(args) else f"{a}={args[k + 1]}"
+        hit = a if a in flags else (pair if pair in flags else "")
+        if hit:
+            return (
+                f"CLI agent `{name}` với `{hit}` tự duyệt mọi lệnh ngoài guard — bỏ qua hook của dự án (LOOP-STOP-028)"
+            )
+    return ""
+
+
 def hook_bypass(argv: List[str], n: List[str]) -> str:
     """Lý do hỏi nếu lệnh tắt/bỏ qua hook của dự án; chuỗi rỗng nếu không."""
     claude = _claude_args(n) or []
     hit = _bypass_marker(argv, n, claude)
     if hit:
         return f"lệnh đặt `{hit}` (tắt hook của khung)"
+    if _git_hooks_off(n):
+        return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
-    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else ""
+    return f"phiên Claude với `{flag}` có thể bỏ qua hook của dự án" if flag else agent_self_approve(n)
+
+
+def _git_hooks_off(n: List[str]) -> bool:
+    """`git config [--global|--local] core.hooksPath <x>` (ghi): git hook của dự án thôi chạy cho mọi commit sau."""
+    if n[:2] != ["git", "config"] or set(n[2:]) & GIT_CONFIG_READ:
+        return False
+    pos = [a for a in _positionals(n[2:]) if a not in ("set", "--add")]
+    return bool(pos) and pos[0].lower() == "core.hookspath" and len(pos) > 1
 
 
 REDIRECTS = (">", ">>", ">|", "&>", "&>>")
@@ -2168,6 +2233,8 @@ def _write_asks(n: List[str], argv: List[str], root: str) -> List[str]:
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
+        elif target and _match_any(rel_path(target, root), GIT_HOOK_PATTERNS):
+            asks.append(GIT_HOOK_WHY.format(target))
         elif kind == "secret":
             asks.append(f"ghi file bí mật qua Bash: {target}")
         elif kind in ("gate", "migration"):
@@ -2247,6 +2314,8 @@ def _scan_command(
         remote = next((h for h in _env_hosts(assigns) if not _is_local_host(h)), "") or next(iter(docker), "")
         if remote:
             asks.append(f"{EGRESS_ASK} — {n[0]} tới máy chủ {remote}: {' '.join(argv)[:200]}")
+    if n[:2] == ["git", "commit"] and any(a.lower().startswith("core.hookspath=") for a in argv):
+        res["no_verify"] = True  # `git -c core.hooksPath=… commit` = --no-verify: git hook của dự án không chạy
     if n[:2] == ["git", "commit"]:
         # Cổng chạy ở repo NHẬN commit (`cd ../khac && git commit`, `git -C ../khac commit`), không phải gốc phiên.
         res["commit_dir"] = gdir or ""

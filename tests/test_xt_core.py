@@ -1104,3 +1104,61 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuardChokePointTest(TmpMixin, unittest.TestCase):
+    """LOOP-STOP-027 (rà stored 01 §3g): lệnh Gate/`Kiểm:`/sàn do model viết mà harness chạy phải qua guard của dự án."""
+
+    def setUp(self):
+        self.base = self.tmpdir()
+        (self.base / ".claude" / "hooks").mkdir(parents=True)
+        self.canary = self.base / "ran"
+        patcher = unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def use_real_guard(self) -> None:
+        (self.base / xt.GUARD_FILE).write_bytes((ROOT / xt.GUARD_FILE).read_bytes())
+
+    def test_denied_command_is_not_run(self):
+        self.use_real_guard()
+        code, out = xt.run_gate_shell(f"touch {self.canary} && git push origin main", self.base, 30)
+        self.assertEqual(code, 126)
+        self.assertIn("LOOP-STOP-027", out)
+        self.assertFalse(self.canary.exists())
+        self.assertFalse((self.base / ".claude" / "hooks" / "__pycache__").exists())  # không bẩn cây (loop verify)
+
+    def test_restores_dont_write_bytecode(self):
+        self.use_real_guard()
+        keep = sys.dont_write_bytecode
+        self.addCleanup(setattr, sys, "dont_write_bytecode", keep)
+        sys.dont_write_bytecode = False
+        xt.guard_block("true", self.base)
+        self.assertFalse(sys.dont_write_bytecode)
+
+    def test_allowed_command_runs(self):
+        self.use_real_guard()
+        code, _ = xt.run_gate_shell(f"touch {self.canary}", self.base, 30)
+        self.assertEqual(code, 0)
+        self.assertTrue(self.canary.exists())
+
+    def test_strict_policy_blocks_ask(self):
+        self.use_real_guard()
+        os.environ["XT_GUARD_POLICY"] = "strict"
+        self.assertTrue(xt.guard_block("npm publish", self.base))  # ask ở strict → harness không hỏi được → chặn
+        os.environ["XT_GUARD_POLICY"] = ""
+        self.assertEqual(xt.guard_block("npm publish", self.base), "")  # mặc định: ask không nguy hiểm → cho chạy
+
+    def test_missing_or_broken_guard_fails_open(self):
+        (self.base / ".claude" / "hooks").rmdir()
+        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+        (self.base / ".claude" / "hooks").mkdir()
+        (self.base / xt.GUARD_FILE).write_text("def bash_decision(:\n", encoding="utf-8")
+        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+
+    def test_deny_without_reason_has_default(self):
+        (self.base / xt.GUARD_FILE).write_text(
+            "def bash_decision(c, r, w):\n    return {'decision': 'deny'}\n\ndef apply_policy(o):\n    return o\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(xt.guard_block("x", self.base), "guard chặn")

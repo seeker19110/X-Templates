@@ -3467,3 +3467,73 @@ class GuardReview97Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GuardStored1018Test(unittest.TestCase):
+    """Rà stored 2026-10-18 (01 §3g, §3g.4): CLI agent khác với cờ tự duyệt (LOOP-STOP-028), git hook của dự án."""
+
+    def bash(self, cmd: str) -> str | None:
+        return guard_decision("bash", cmd, policy="")
+
+    def test_agent_cli_self_approve_denied(self):
+        for cmd in (
+            'codex exec --full-auto "fix"',
+            "codex exec --dangerously-bypass-approvals-and-sandbox x",
+            "codex exec --sandbox danger-full-access x",
+            "codex -a never exec x",
+            "codex --ask-for-approval=never exec x",
+            "gemini --yolo -p x",
+            "gemini -y -p x",
+            "gemini --approval-mode=yolo -p x",
+            "npx -y @google/gemini-cli --yolo",
+            "npx @openai/codex@0.5.0 exec --full-auto x",
+            "copilot -p x --allow-all-tools",
+            "aider --yes-always",
+            "cursor-agent -p x --force",
+            "amp --dangerously-allow-all -x y",
+        ):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+
+    def test_agent_cli_without_self_approve_passes(self):
+        for cmd in (
+            'codex exec "x"',
+            "codex exec --sandbox read-only x",
+            "gemini -p x",
+            "aider -- --yes-always",
+            "codex exec -a",
+            "npx -y some-tool --yolo",
+            "claude -p hi",
+            "echo gemini --yolo",
+        ):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_git_hooks_path(self):
+        self.assertEqual(self.bash("git config core.hooksPath /dev/null"), "deny")
+        self.assertEqual(self.bash("git config --local core.hooksPath .nohooks"), "deny")
+        for cmd in ("git config --get core.hooksPath", "git config core.hooksPath", "git config user.name x"):
+            self.assertIsNone(self.bash(cmd), cmd)
+        g = _guard()
+        r = g.bash_decision("git -c core.hooksPath=/dev/null commit -m x", str(ROOT))
+        self.assertEqual((r["commit"], r["no_verify"]), (True, True))
+
+    def test_git_hook_files(self):
+        self.assertEqual(self.bash("cp x .git/hooks/pre-commit"), "deny")
+        self.assertEqual(self.bash("cp -r myhooks .git/hooks"), "deny")
+        self.assertEqual(self.bash("echo '[core]' > .git/config"), "deny")
+        self.assertIsNone(self.bash("echo cp x .git/hooks/pre-commit"))
+        for rel in (".git/hooks/pre-commit", ".git/config"):
+            self.assertEqual(guard_decision("edit", str(ROOT / rel), policy=""), "deny", rel)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_no_verify_still_runs_gate_by_default(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
+        (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
+        for cmd in ("git commit --no-verify -m x", "git -c core.hooksPath=/dev/null commit -m x"):
+            code, out, err = run_hook(
+                "pre-bash-guard.sh", {"tool_input": {"command": cmd}}, tmp, extra_env={"XT_GUARD_POLICY": ""}
+            )
+            self.assertEqual(code, 2, cmd + out + err)  # cổng đỏ chặn — trước đây bỏ cổng lặng lẽ
+            self.assertIn("ĐỎ", err)

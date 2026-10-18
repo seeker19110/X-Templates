@@ -1211,9 +1211,42 @@ def _record_timeout() -> Optional[int]:
         return None
 
 
+GUARD_FILE = ".claude/hooks/guard.py"
+
+
+def guard_block(cmd_str: str, base: Path) -> str:
+    """Lý do guard của dự án CẤM lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng nếu cho chạy.
+    Lệnh Gate (PLAN), `— Kiểm:` (BLUEPRINT), sàn Gate (xt.yaml) do model viết mà harness chạy — trước đây chạy ngoài guard
+    (rà stored 01 §3g). Không có guard/guard lỗi → rỗng (fail-open về luồng như hook, ADR-0002; doctor báo thiếu hook).
+    `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
+    path = base / GUARD_FILE
+    if not path.is_file():
+        return ""
+    keep = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True  # không để `__pycache__` trong `.claude/hooks` (loop verify so dấu vân tay cây)
+    try:
+        spec = importlib.util.spec_from_file_location("xt_project_guard", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        out = mod.bash_decision(cmd_str, str(base), str(base))
+        strict = os.environ.get("XT_GUARD_POLICY") == "strict"
+        out = out if strict else mod.apply_policy(out)
+    except Exception:  # guard hỏng không kẹt vòng lặp — giống hook (fail-open), doctor/hook báo riêng
+        return ""
+    finally:
+        sys.dont_write_bytecode = keep
+    blocked = out.get("decision") == "deny" or (strict and out.get("decision") == "ask")
+    return str(out.get("reason") or "guard chặn") if blocked else ""
+
+
 def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
     """Chạy lệnh Gate: bash -o pipefail, không phải /bin/sh của shell=True — `test | tee log` phải đỏ khi test đỏ
-    (sh lấy exit của lệnh cuối ống nên từng ghi bằng chứng exit 0 cho Gate đỏ — xanh giả, FB từ dự án đích)."""
+    (sh lấy exit của lệnh cuối ống nên từng ghi bằng chứng exit 0 cho Gate đỏ — xanh giả, FB từ dự án đích).
+    Trước khi chạy, lệnh qua guard của dự án: bị cấm → exit 126, không chạy (LOOP-STOP-027)."""
+    why = guard_block(cmd_str, base)
+    if why:
+        return 126, f"guard chặn, không chạy (LOOP-STOP-027): {why}"
     try:
         proc = subprocess.run(
             ["bash", "-o", "pipefail", "-c", cmd_str], cwd=base, capture_output=True, text=True, timeout=timeout
