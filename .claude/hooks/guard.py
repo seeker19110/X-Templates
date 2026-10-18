@@ -3363,7 +3363,9 @@ EXEC_CALL_RE = re.compile(
     r"\b(?:os\.(?:system|popen|exec\w*|spawn\w*)|subprocess\.\w+|Popen|check_output|check_call|getoutput"
     r"|execSync|execFileSync|spawnSync|execFile|spawn|exec|system|popen)\s*\("
 )
-STR_ANY_RE = re.compile(r"""(['"])((?:\\.|(?!\1).)*)\1""")
+STR_ANY_RE = re.compile(
+    r"""'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)\"""", re.S
+)  # mỗi ký tự khớp đúng một nhánh: không backtracking lũy thừa
 EXEC_ARG_WINDOW = 400
 
 
@@ -3372,7 +3374,9 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     for script in scripts:
         for m in EXEC_CALL_RE.finditer(script):
             lits = [
-                ANSI_ESCAPE_RE.sub(_ansi_c_char, x.group(2))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
+                ANSI_ESCAPE_RE.sub(
+                    _ansi_c_char, x.group(x.lastindex or 0)
+                )  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
                 for x in STR_ANY_RE.finditer(script[m.end() : m.end() + EXEC_ARG_WINDOW])
             ]
             out += [*lits, shlex.join(lits), " ".join(lits)] if lits else []

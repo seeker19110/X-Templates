@@ -14,6 +14,7 @@ import re
 import shlex
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -488,3 +489,13 @@ class GuardRemainingGapsTest(unittest.TestCase):
         self.assertEqual(guard.expand_ansi_c("$'abc"), "'abc'")  # không đóng
         self.assertEqual(guard.expand_ansi_c("a\\$'x'"), "a\\$'x'")  # `\$` đã escape
         self.assertEqual(guard.expand_ansi_c("$'\\U00110000'"), "''")  # ngoài Unicode
+
+    def test_exec_api_literals_are_linear_time(self) -> None:
+        """CodeQL #134: regex chuỗi nguồn không được backtracking lũy thừa trên `\\a` lặp lại sau một dấu nháy."""
+        start = time.monotonic()
+        for quote in ('"', "'"):
+            guard._exec_api_scripts([f"os.system({quote}" + "\\a" * 20000])
+        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertEqual(
+            guard._exec_api_scripts(['os.system(\'a b\', "c \\" d")']), ["a b", 'c " d', "'a b' 'c \" d'", 'a b c " d']
+        )
