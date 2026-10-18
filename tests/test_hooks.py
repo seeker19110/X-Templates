@@ -3575,6 +3575,17 @@ class GuardStored1018Test(unittest.TestCase):
             'git config core.editor "vim -S /tmp/evil.vim"',
             'git config core.sshCommand "ssh -F /tmp/evil_cfg"',
             "git -c core.sshCommand='ssh -F /tmp/evil' fetch",
+            # lần 4: ext:: và khoá chạy lệnh ít gặp
+            "git config protocol.ext.allow user",
+            "git -c protocol.ext.allow=user fetch 'ext::sh -c touch% /tmp/p'",
+            "git remote add x 'ext::sh -c x'",
+            "git config url.ext::sh.insteadOf https://x",
+            "git config protocol.allow always",
+            "git config submodule.a.update '!touch /tmp/p'",
+            "git config mergetool.x.path /tmp/evil",
+            "git config sendemail.tocmd /tmp/x",
+            "git config sendemail.smtpServer /tmp/evil",
+            "git config init.templateDir /tmp/t",
         ):
             self.assertEqual(self.bash(cmd), "deny", cmd)
         for cmd in (
@@ -3593,6 +3604,18 @@ class GuardStored1018Test(unittest.TestCase):
             'git config core.sshCommand "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes"',
             "git config remote.origin.url git@github.com:a/b.git",
             "git config protocol.version 2",
+            "git config protocol.https.allow always",
+            "git config submodule.a.update rebase",
+            "git config sendemail.smtpServer smtp.gmail.com",
+            "git config merge.ours.driver true",
+            "git config gpg.program gpg2",
+            'git config core.pager "delta --dark"',
+            'git config core.editor "nano -w"',
+            'git config core.sshCommand "ssh -o StrictHostKeyChecking=no -i ~/.ssh/k"',
+            "git config credential.helper 'cache --timeout 3600'",
+            "git config credential.helper '!gh auth git-credential'",
+            "git clone https://github.com/a/b",
+            'git commit -m "chặn URL ext:: ở lệnh git"',
         ):
             self.assertIsNone(self.bash(cmd), cmd)
 

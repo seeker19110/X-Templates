@@ -2137,11 +2137,15 @@ GIT_CONFIG_UNSET = {"--unset", "--unset-all", "unset"}
 # `git -c`: ghi = lệnh chạy ngoài guard. Liệt kê theo MẪU (hậu tố `.cmd`/`.program`/`.command`/`.helper`…) vì danh sách
 # từng khoá cứ sót (review #117: `include.path`, `core.gitProxy`, `mergetool.*.cmd`, `gpg.ssh.program`, `uploadpack`).
 GIT_EXEC_KEY_RE = re.compile(
-    r"include(if\..+)?\.path|core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass)|sequence\.editor"
+    r"core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor"
     r"|diff\.external|pager\..+|alias\..+|protocol(\..+)?\.allow|gpg(\..+)?\.(program|defaultkeycommand)"
-    r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack)",
+    r"|sendemail\.(\w*cmd|smtpserver)|init\.templatedir|uploadpack\.packobjectshook|submodule\..+\.update|delta\.pager"
+    r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack|path)",
     re.I,
 )
+# Giao thức `ext::` chạy lệnh tuỳ ý (git mặc định cấm); URL `ext::` ở bất kỳ lệnh git nào → chặn.
+GIT_URL_SUBCMDS = {"fetch", "clone", "pull", "push", "ls-remote", "remote", "submodule", "archive", "config"}
+GIT_EXT_URL_RE = re.compile(r"(^|[=\s'\".])ext::", re.I)
 # Giá trị cho qua theo loại khoá — so NGUYÊN VĂN, không theo tên chương trình (`vim -S x.vim`, `ssh -F cfg` chạy lệnh
 # tuỳ ý qua đối số). Không khớp → chặn; giá trị khác thì người đặt tay.
 GIT_SAFE_VALUES: Tuple[Tuple["re.Pattern[str]", "re.Pattern[str]"], ...] = (
@@ -2149,20 +2153,35 @@ GIT_SAFE_VALUES: Tuple[Tuple["re.Pattern[str]", "re.Pattern[str]"], ...] = (
     (
         re.compile(r"credential(\..+)?\.helper", re.I),
         re.compile(
-            r"|store|cache( --timeout=\d+)?|osxkeychain|wincred|manager(-core)?|libsecret"
-            r"|/usr/[\w/.-]*git-credential-[\w-]+"
+            r"|store|cache( --timeout[= ]\d+)?|osxkeychain|wincred|manager(-core)?|libsecret"
+            r"|/usr/[\w/.-]*git-credential-[\w-]+|!(/usr/(local/)?bin/)?gh auth git-credential"
         ),
     ),
-    (re.compile(r"core\.pager|pager\..+", re.I), re.compile(r"|cat|less|less -[FRSXK]+|more|delta|true|false")),
-    (re.compile(r"core\.editor|sequence\.editor", re.I), re.compile(r"vim?|nvim|nano|emacs|code (--wait|-w)|true|:")),
+    (
+        re.compile(r"core\.pager|pager\..+", re.I),
+        re.compile(r"|cat|less( -[FRSXK]+)*|more|delta( --[\w-]+)*|true|false"),
+    ),
+    (
+        re.compile(r"core\.editor|sequence\.editor", re.I),
+        re.compile(r"vim?|nvim|nano( -w)?|emacs|code (--wait|-w)|subl( -[nw])*|true|:"),
+    ),
     (
         re.compile(r"core\.sshcommand", re.I),
         re.compile(
-            r"ssh( -i [\w~/.@-]+)?( -o ?(StrictHostKeyChecking|UserKnownHostsFile|IdentitiesOnly|BatchMode)=[\w~/.-]+)*"
+            r"ssh( -i [\w~/.@-]+| -o ?(StrictHostKeyChecking|UserKnownHostsFile|IdentitiesOnly|BatchMode)=[\w~/.-]+)*"
         ),
     ),
     (re.compile(r"core\.fsmonitor", re.I), re.compile(r"true|false")),
-    (re.compile(r"protocol(\..+)?\.allow", re.I), re.compile(r"never|user")),
+    (re.compile(r"merge\..+\.driver", re.I), re.compile(r"true")),
+    (re.compile(r"submodule\..+\.update", re.I), re.compile(r"checkout|rebase|merge|none")),
+    (
+        re.compile(r"sendemail\.smtpserver", re.I),
+        re.compile(r"[\w.-]+"),
+    ),  # tên máy; đường dẫn = chương trình  # chiến lược "ours" của .gitattributes
+    (re.compile(r"gpg\.program", re.I), re.compile(r"gpg2?")),
+    # `user`/`always` chỉ cho giao thức thường — `ext::` (chạy lệnh) không bao giờ (review #117 lần 4).
+    (re.compile(r"protocol\.(https?|ssh|git|file)\.allow", re.I), re.compile(r"never|user|always")),
+    (re.compile(r"protocol(\..+)?\.allow", re.I), re.compile(r"never")),
 )
 
 
@@ -2205,6 +2224,11 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
     if len(pos) >= 2 and GIT_EXEC_KEY_RE.fullmatch(pos[0]) and _git_exec_value_unsafe(pos[0], pos[1]):
         return pos[0]
     one_shot = argv or []
+    # URL `ext::` chỉ ở lệnh con nhận URL/cấu hình và ở giá trị `-c` — không quét `commit -m "… ext:: …"`.
+    scan = n[2:] if n[1:2] and n[1] in GIT_URL_SUBCMDS else []
+    scan += [one_shot[k + 1] for k, a in enumerate(one_shot[:-1]) if a == "-c"]
+    if any(GIT_EXT_URL_RE.search(a) for a in scan):  # `git fetch ext::…`, `remote add x ext::…`, `insteadOf`
+        return "ext::"
     for k, a in enumerate(one_shot[:-1]):
         key, _, val = one_shot[k + 1].partition("=") if a == "-c" else ("", "", "")
         if key and GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
