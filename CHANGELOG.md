@@ -5,6 +5,22 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.0.x:**
+> 1. Chạy lại `install.py` (hook, `guard.py`, `pre-bash-guard.sh`, `xt.py`, `dev-task.sh` cập nhật tại chỗ nếu chưa sửa;
+>    file đã tuỳ biến thành `*.xtemplates-new` — gộp tay). Rồi `python3 .xtemplates/scripts/xt.py doctor` phải không còn ✗
+>    (doctor nay thử guard bằng lệnh nguy hiểm mẫu — `LOOP-HARNESS-025`).
+> 2. Guard chặt hơn (`LOOP-STOP-027/028`): lệnh Gate/`Kiểm:`/`xt.yaml` bị guard cấm thì không chạy (exit 126) — rà Gate
+>    trong PLAN và lệnh `xt.yaml` có lệnh đối ngoại/phá huỷ không; `git config` khoá chạy lệnh (pager/editor/sshCommand…)
+>    chỉ cho giá trị an toàn — giá trị khác người đặt tay; husky/lefthook cài bằng công cụ, không `git config
+>    core.hooksPath` tay.
+> 3. Script/skill gọi `loop init` lại trên vòng còn chạy: thêm `--force` (`LOOP-HARNESS-024`).
+> 4. Ghép lại blueprint (`xt.py compose …`) để nhận mục mới: `SEC-SUPPLY-027`, `CMP-LIC-021`, `WF-DOC-019`, `QA-E2E-027/028`,
+>    `AI-EVAL-020`, `AI-AGENT-023`, `PRF-DESK-018`, `PRF-CLI-021`, `LOOP-ORCH-018`, `CMP-AUDIT-020`, `IND-MEDIA-022`,
+>    `PRF-AGENT-022`, `LOOP-STOP-027/028`, `LOOP-HARNESS-024/025/026`.
+> 5. Tuỳ chọn: khai `claude_min_version` trong `xt.yaml` (`LOOP-HARNESS-026`).
+
 ### Added
 Mục checklist từ đợt rà `seeker19110/stored` 2026-10-18 (stored `10ecf8b..a1a1f51`; chi tiết ở
 `research/2026-10-18-stored-delta-extraction.md`). Dự án đích: ghép lại blueprint để nhận các ID mới.
