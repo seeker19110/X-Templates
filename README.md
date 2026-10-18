@@ -89,7 +89,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py ci-check [DIR]` | Fitness function cho workflow CI: `permissions:` cấp workflow, không `write-all`, `uses:` ghim SHA 40 ký tự (`docker://` ghim `@sha256:`), job có `timeout-minutes`, không `continue-on-error`, workflow có `pull_request` thì job không `environment:` không chạm `secrets.*` ngoài `GITHUB_TOKEN` (`WF-CI-023`; ngoại lệ `# ci-check-allow: <lý do>`) |
 | `python3 scripts/xt.py perf sample --out F [--runs N --warmup W] -- <lệnh>` | Chạy lệnh nhiều lần, ghi mẫu thời gian tường + commit + môi trường (vòng tối ưu, `LOOP-OPT-*`) |
 | `python3 scripts/xt.py perf compare TRƯỚC SAU [--exact] [--no-regress] [--json]` | So hai bộ mẫu bằng Mann-Whitney U + sàn nhiễu: `improved`/`regressed`/`neutral`/`insufficient` (exit 0 = `improved`) |
-| `python3 scripts/xt.py perf guard --base REF [--locked GLOB…] [--strict]` | Diff không được đụng/xoá bộ đo, test tương đương; báo dòng đáng ngờ (cache/memoize, `sleep`, đổi đồng hồ, soi stack) |
+| `python3 scripts/xt.py perf guard --base REF [--locked GLOB…] [--strict]` | Worktree (cả file chưa theo dõi) không được đụng/xoá bộ đo, test tương đương; báo dòng đáng ngờ (cache/memoize, `sleep`, đổi đồng hồ, soi stack) |
 | `python3 scripts/xt.py audit plan [--blueprint F] [--status F] [--json]` | Dò stack → nhóm audit áp dụng/rút gọn/N/A kèm lý do, công cụ có/thiếu, bằng chứng blueprint trỏ file đã đổi sau khi ghi, nhóm cần quét lại theo `docs/ops/AUDIT-STATUS.md` |
 | `python3 scripts/xt.py audit check STATUS [--strict]` | Kiểm sổ audit (schema phát hiện, SHA quét là tổ tiên HEAD, chấp nhận rủi ro có chủ + hạn); `--strict` = Definition of Complete |
 | `python3 scripts/xt.py stats` | Đếm file theo loại và mục theo mức |

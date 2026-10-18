@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -82,6 +84,8 @@ class PerfStatsTest(unittest.TestCase):
         self.assertEqual(xt.perf_compare([900.0], [1000.0], exact=True)["verdict"], "regressed")
         self.assertEqual(xt.perf_compare([1000.0], [995.0], exact=True)["verdict"], "neutral")
         self.assertIsNone(xt.perf_compare([1.0], [2.0], exact=True)["p"])
+        # không đổi gì thì không thể là cải thiện, kể cả khi sàn = 0
+        self.assertEqual(xt.perf_compare([5.0], [5.0], exact=True, min_effect=0)["verdict"], "neutral")
 
     def test_compare_zero_median(self):
         z = [0.0] * 12
@@ -90,6 +94,42 @@ class PerfStatsTest(unittest.TestCase):
 
 
 class PerfSampleTest(unittest.TestCase):
+    def test_timeout_kills_the_whole_process_group(self):
+        with tempfile.TemporaryDirectory() as d:
+            pidfile = Path(d) / "pid"
+            script = f"sleep 30 & echo $! > {pidfile}; wait"
+            with self.assertRaisesRegex(RuntimeError, "quá"):
+                xt.perf_sample(["sh", "-c", script], runs=1, warmup=0, timeout=1)
+            pid = int(pidfile.read_text())
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        os.kill(pid, 9)
+        self.fail("tiến trình cháu vẫn chạy sau khi quá giờ")
+
+    def test_interrupt_kills_and_reraises(self):
+        real_wait = subprocess.Popen.wait
+        calls: list[int] = []
+
+        def wait(proc, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise KeyboardInterrupt
+            return real_wait(proc, timeout)
+
+        with unittest.mock.patch.object(subprocess.Popen, "wait", wait):
+            with self.assertRaises(KeyboardInterrupt):
+                xt._perf_run([sys.executable, "-c", "import time; time.sleep(30)"], 30)
+        self.assertEqual(len(calls), 2)  # sau khi giết nhóm vẫn wait để không để zombie
+
+    def test_group_already_gone(self):
+        with unittest.mock.patch.object(os, "killpg", side_effect=ProcessLookupError):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                xt._perf_run([sys.executable, "-c", "import time; time.sleep(1)"], 0.1)
+
     def test_sample_runs_and_discards_warmup(self):
         out = xt.perf_sample([sys.executable, "-c", "pass"], runs=3, warmup=1, timeout=60)
         self.assertEqual(len(out), 3)
@@ -104,17 +144,29 @@ class PerfSampleTest(unittest.TestCase):
             xt.perf_sample([sys.executable, "-c", "import time; time.sleep(5)"], runs=1, warmup=0, timeout=0.2)
 
 
+ISOLATED = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+}  # không để cấu hình git của máy lọt vào test
+
+
 def git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, env={**os.environ, **ISOLATED})
 
 
 class PerfGuardTest(unittest.TestCase):
+    def setUp(self):
+        patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_repo(self) -> Path:
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         git(d, "init", "-q", "-b", "main")
         git(d, "config", "user.email", "t@t")
         git(d, "config", "user.name", "t")
+        git(d, "config", "commit.gpgsign", "false")
         (d / "bench").mkdir()
         (d / "dir with space").mkdir()
         (d / "dir with space" / "b é.py").write_text("x\n")
@@ -140,9 +192,55 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual(len(files), 4)
         self.assertIn(("app.py", "    return x + 1"), added)
 
+    def test_diff_independent_of_user_git_config(self):
+        d = self.make_repo()
+        (d / "bench" / "run.py").write_text("print(2)\n")
+        for key in ("diff.noprefix", "diff.mnemonicPrefix"):
+            with unittest.mock.patch.dict(
+                os.environ, {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": key, "GIT_CONFIG_VALUE_0": "true"}
+            ):
+                files, added = xt.perf_diff(d, "HEAD")
+            self.assertEqual(files, ["bench/run.py"], key)
+            self.assertEqual(added, [("bench/run.py", "print(2)")], key)
+
+    def test_diff_quoted_names_are_listed(self):
+        d = self.make_repo()
+        names = ['bench/q"x.py', "bench/back\\slash.py"]
+        for n in names:
+            (d / n).write_text("x\n")
+        git(d, "add", ".")
+        git(d, "commit", "-qm", "odd")
+        for n in names:
+            (d / n).write_text("print(2)\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(sorted(files), sorted(names))
+        self.assertEqual([f for f, _ in added], [xt.PERF_ODD_NAME] * 2)
+        touched, _ = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(sorted(touched), sorted(names))
+
+    def test_untracked_files_are_checked(self):
+        d = self.make_repo()
+        (d / "bench" / "sitecustomize.py").write_text("import functools\nf = functools.lru_cache\n")
+        os.symlink(d / "gone", d / "bench" / "dangling")  # symlink hỏng: tính là file đổi, không có dòng để quét
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(sorted(files), ["bench/dangling", "bench/sitecustomize.py"])
+        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(len(touched), 2)
+        self.assertEqual(len(suspect), 1)
+
+    def test_known_and_match(self):
+        d = self.make_repo()
+        (d / "new.py").write_text("x\n")
+        self.assertEqual(sorted(xt.perf_known(d)), ["app.py", "bench/run.py", "dir with space/b é.py", "new.py"])
+        self.assertTrue(xt.perf_match("bench/run.py", "bench/*"))
+        self.assertTrue(xt.perf_match("bench/a/b.py", "bench/*"))  # `*` đi qua `/`: khoá cả cây
+        self.assertTrue(xt.perf_match("bench/run.py", "bench/**/*.py"))  # `**/` nhận cả không thư mục con
+        self.assertTrue(xt.perf_match("bench/a/run.py", "./bench/**/*.py"))
+        self.assertFalse(xt.perf_match("app.py", "bench/*"))
+
     def test_diff_bad_ref(self):
         d = self.make_repo()
-        with self.assertRaisesRegex(RuntimeError, "git diff nonexistent lỗi"):
+        with self.assertRaisesRegex(RuntimeError, "git diff lỗi"):
             xt.perf_diff(d, "nonexistent")
 
     def test_guard_locked_and_suspect(self):
@@ -160,6 +258,17 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual(touched, ["bench/run.py", "tests/equiv/t.py"])
         self.assertEqual(len(suspect), 5)
         self.assertEqual(xt.perf_guard(files, [], [])[0], [])
+
+    def test_suspect_regex_new_forms(self):
+        for line in (
+            "time.perf_counter_ns = fake",
+            "time.perf_counter =",
+            'mock.patch("time.perf_counter")',
+            'setattr(time, "perf_counter", f)',
+        ):
+            self.assertTrue(xt.PERF_SUSPECT_RE.search(line), line)
+        for line in ("@functools.cached_property", "if perf_counter == 3:", "monkeypatch.setenv('A', 'b')"):
+            self.assertFalse(xt.PERF_SUSPECT_RE.search(line), line)
 
     def test_guard_regex_is_linear(self):
         line = "perf_counter" + " " * 50000 + "x"
@@ -203,6 +312,30 @@ class PerfCliTest(unittest.TestCase):
         rc, out, _ = run_main("perf", "compare", self.p("one.txt"), self.p("two.txt"))
         self.assertEqual(rc, 1)
         self.assertIn("thiếu mẫu", out)
+
+    def test_compare_refuses_different_commands(self):
+        for name, cmd in (("a.json", ["x"]), ("b.json", ["y"]), ("c.json", ["x"])):
+            (self.tmp / name).write_text(json.dumps({"samples": SLOW, "cmd": cmd}))
+        rc, _, err = run_main("perf", "compare", self.p("a.json"), self.p("b.json"))
+        self.assertEqual(rc, 2)
+        self.assertIn("hai lệnh khác nhau", err)
+        rc, _, _ = run_main("perf", "compare", self.p("a.json"), self.p("c.json"), "--no-regress")
+        self.assertEqual(rc, 0)
+        rc, _, _ = run_main("perf", "compare", self.p("a.json"), self.p("slow.json"), "--no-regress")
+        self.assertEqual(rc, 0)  # một bên không ghi lệnh (tay làm): không chặn
+        self.assertIsNone(xt.perf_cmd_of(self.p("slow.json")))  # mảng JSON, không phải đối tượng
+        (self.tmp / "t.txt").write_text("1 2 3")
+        self.assertIsNone(xt.perf_cmd_of(self.p("t.txt")))
+
+    def test_runs_must_be_positive(self):
+        for argv in (
+            ("perf", "sample", "--out", self.p("s.json"), "--runs", "0", "--", "true"),
+            ("perf", "compare", self.p("slow.json"), self.p("fast.json"), "--min-runs", "0"),
+            ("perf", "compare", self.p("slow.json"), self.p("fast.json"), "--min-runs", "x"),
+        ):
+            with self.assertRaises(SystemExit) as cm, unittest.mock.patch.object(sys, "stderr", io.StringIO()):
+                run_main(*argv)
+            self.assertEqual(cm.exception.code, 2)
 
     def test_compare_bad_file(self):
         (self.tmp / "bad").write_text("abc")
@@ -262,7 +395,8 @@ class PerfCliTest(unittest.TestCase):
         (d / "app.py").write_text("x = 1\n")
         git(d, "add", ".")
         git(d, "commit", "-qm", "init")
-        env = {"CLAUDE_PROJECT_DIR": str(d)}
+        git(d, "config", "commit.gpgsign", "false")
+        env = {"CLAUDE_PROJECT_DIR": str(d), **ISOLATED}
         with unittest.mock.patch.dict("os.environ", env):
             rc, out, _ = run_main("perf", "guard", "--base", "HEAD")
             self.assertEqual(rc, 0)
@@ -277,9 +411,14 @@ class PerfCliTest(unittest.TestCase):
             rc, out, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "bench.py")
             self.assertEqual(rc, 1)
             self.assertIn("✗ đụng file khoá", out)
+            rc, _, err = run_main("perf", "guard", "--base", "HEAD", "--locked", "bech/*")
+            self.assertEqual(rc, 2)
+            self.assertIn("không khớp file nào", err)
+            rc, _, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "./**/bench.py")
+            self.assertEqual(rc, 1)
             rc, _, err = run_main("perf", "guard", "--base", "no-such-ref")
             self.assertEqual(rc, 2)
-            self.assertIn("git diff no-such-ref lỗi", err)
+            self.assertIn("git diff lỗi", err)
 
 
 if __name__ == "__main__":

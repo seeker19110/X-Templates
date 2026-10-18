@@ -14,8 +14,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `LOOP-OPT-001…015` (mới, `framework/11-autonomous-loop/optimization-loop.md`): vòng tối ưu hiệu năng trong autopilot — mục tiêu
   số, bộ đo khoá, máy quyết giữ/hoàn tác, một giả thuyết một thay đổi, chống gian lận số đo, profile/Amdahl, held-out,
   chỉ số phụ, sổ thử, ratchet. MUST hiệu lực ở quy mô M: 001–004. Công cụ mới `xt.py perf sample|compare|guard`
-  (Mann-Whitney U + sàn nhiễu MAD như `benchstat`; `guard` đỏ khi diff đụng/xoá file khoá, ⚠ với cache/memoize, đổi đồng hồ,
-  soi call stack). Dự án đích: ghép lại blueprint (`compose`) để nhận mục mới; không bắt buộc đổi mã.
+  (Mann-Whitney U + sàn nhiễu MAD; `guard` đỏ khi diff đụng/xoá file khoá kể cả file chưa theo dõi, ⚠ với cache/memoize,
+  đổi đồng hồ, soi call stack; không phụ thuộc cấu hình diff của git). Dự án đích: ghép lại blueprint (`compose`) để nhận mục mới; không bắt buộc đổi mã.
 
 ### Changed
 - CI `quality`: test Python 3.11 chạy trên checkout mang tên nhánh `main` như CI sau merge — bắt test phụ thuộc nhánh
