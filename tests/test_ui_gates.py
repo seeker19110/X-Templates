@@ -298,6 +298,7 @@ class VendorCheckTest(unittest.TestCase):
         (self.dir / "vendor" / "loop").symlink_to("/nonexistent/dir")
         rc, out, _ = run("vendor-check", cwd=self.dir)
         self.assertEqual((rc, out.strip()), (0, "✓ vendor UI: không vấn đề."))
+        self.assertEqual(xt._vendor_notices(self.dir / "khong-co"), [])  # iterdir lỗi → không có file ghi nguồn
         rc, out, _ = run("vendor-check", "--dirs", "../x,vendor", cwd=self.dir)
         self.assertEqual(rc, 1)
         self.assertIn("✗ --dirs ../x: nằm ngoài dự án", out)
