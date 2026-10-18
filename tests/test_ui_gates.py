@@ -81,6 +81,11 @@ class CssParseTest(unittest.TestCase):
         self.assertEqual(xt._css_nest("a, &.b", ".p, .q"), ".p a, .p.b, .q a, .q.b")
         self.assertEqual(xt._css_flat("--a:1; x{--b:2} --c:3"), "--a:1; --c:3")
         self.assertEqual(xt._css_blocks("a{ @media print { b{--x:1} } }")[-1], ("@media print", "a b", "--x:1"))
+        # dấu phẩy trong `:is()`/`[…]` không tách selector; lồng quá sâu/selector quá dài bị bỏ qua (review #138)
+        self.assertEqual(xt._css_nest("&:is(.dark, [x=y])", ":root"), ":root:is(.dark, [x=y])")
+        self.assertEqual(xt._css_nest("&.x", "[data-theme='a,b'], .p"), "[data-theme='a,b'].x, .p.x")
+        self.assertEqual(len(xt._css_blocks("a{" * 100 + "}" * 100)), xt.CSS_NEST_MAX + 1)
+        self.assertEqual(len(xt._css_blocks("a,b{" * 18 + "--x:1" + "}" * 18)), 7)
 
     def test_var_resolution(self) -> None:
         env = {"--a": "var(--b)", "--b": "#123", "--loop": "var(--loop)"}

@@ -397,7 +397,7 @@ def literal_bodies_masked(cmd: str) -> str:
     """Dòng lệnh bỏ thân heredoc có dấu kết trong nháy (`<<'EOF'`): bash không thay `` `…` ``/`$(…)` trong thân đó —
     code span trong message commit (`-m "$(cat <<'EOF'` ↵ ``chặn `rm -rf ~` `` ↵ `EOF`) là chữ, không phải lệnh."""
     lines = cmd.split("\n")
-    drop = {j for _, m, a, b in _heredoc_spans(lines) if m.group(1) for j in range(a, b)}
+    drop = {j for _, m, a, b in _heredoc_spans(lines) if m.group(1) for j in range(a, b)}  # giữ dòng dấu kết
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
@@ -2555,7 +2555,8 @@ def _patch_targets(args: List[str]) -> List[str]:
     return pos[:1] + _flag_values(args, ("-o", "--output"))
 
 
-SED_WRITE_RE = re.compile(r"(?:^|[;\n{}]|/[gpIiMme0-9]*)[ \t]*w[ \t]+([^;\n}]+)")  # `w f`, `s/a/b/w f`: sed ghi file
+# `w f`, `1w f`, `$w f`, `/a/!w f`, `s/a/b/w f`, `s|a|b|w f`: lệnh `w` của sed (sau địa chỉ/cờ của `s`) ghi file
+SED_WRITE_RE = re.compile(r"(?:^|[0-9]|[^\w\s][gpIiMme0-9]*)[ \t]*w[ \t]+([^;\n}]+)")
 AWK_WRITE_RE = re.compile(r">>?[ \t]*\"([^\"\n]+)\"")  # `print > "f"` trong chương trình awk
 
 
@@ -2578,9 +2579,13 @@ def _awk_targets(args: List[str]) -> List[str]:
     return out + (pos[len(prog) :] if inplace else [])
 
 
-def _extract_dirs(args: List[str]) -> List[str]:
-    """Thư mục giải nén/tách file: `tar -x … -C d`, `unzip … -d d`, `split … <prefix>` (tiền tố có thể là thư mục)."""
-    return _flag_values(args, ("-C", "--directory", "-d"))
+def _tar_dest(args: List[str]) -> List[str]:
+    """Thư mục giải nén của `tar -x … -C d` (tạo/liệt kê lưu trữ với `-C` chỉ đọc thư mục đó)."""
+    short = "".join(a[1:] for a in args if a[:1] == "-" and a[1:2] != "-") + (
+        args[0] if args and args[0][:1] != "-" else ""
+    )
+    extract = "x" in short or any(a in ("--extract", "--get") for a in args)
+    return _flag_values(args, ("-C", "--directory")) if extract else []
 
 
 FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
@@ -2591,7 +2596,7 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "sort": lambda a: _flag_values(a, ("-o", "--output")),
     "awk": _awk_targets,
     "gawk": _awk_targets,
-    "tar": _extract_dirs,
+    "tar": _tar_dest,
     "unzip": lambda a: _flag_values(a, ("-d",)),
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
@@ -2601,6 +2606,8 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
 def _git_file_targets(n: List[str]) -> List[str]:
     """File mà `git checkout <rev> -- f`/`git restore -s <rev> f` ghi đè từ commit khác — chỉ xét bí mật và bằng chứng:
     khôi phục file cổng/hàng rào bằng git là đường lùi chuẩn, không chặn."""
+    if n[:2] == ["git", "restore"] and "--staged" in n and not {"--worktree", "-W"} & set(n):
+        return []  # chỉ đổi chỉ mục, không ghi cây làm việc
     if n[:2] in (["git", "checkout"], ["git", "restore"]):
         return _positionals(n[2:], ("-s", "--source", "-b", "-B", "--orphan", "--conflict", "--pathspec-from-file"))
     return []
@@ -3164,7 +3171,7 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc/here-string vào shell, `echo/printf '…' | sh`, `eval '…'`,
     backtick."""
     out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
-    out += _eval_scripts(tokens) + _backtick_scripts(literal_bodies_masked(strip_heredocs(cmd)))
+    out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(literal_bodies_masked(cmd)))
     out += _dollar_scripts(strip_heredocs(cmd))
     out += [b for sc in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens)
@@ -3616,7 +3623,7 @@ WRITE_HINT_RE = re.compile(
     r"open\([^)]*,\s*(?:mode\s*=\s*)?[rbt]?['\"][rbt]?[wax+]|\.(?:write_text|write_bytes|unlink|rmdir|rename|replace|touch)\("
     r"|\b(?:os\.(?:remove|unlink|rename|replace|truncate)|shutil\.\w+|writeFile\w*|appendFile\w*|rmSync|unlinkSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|unlink|rename|truncate)\b"
-    r"|\bopen\b[^;\n]*['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")`
+    r"|\bopen\b[^;\n]{0,200}['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")` (trần độ dài: tuyến tính)
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")

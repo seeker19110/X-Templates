@@ -688,6 +688,13 @@ class GuardGaps341Test(unittest.TestCase):
                 "sort --output=.autopilot/state.json x",
                 "sed -n 'w .autopilot/verified.json' x",
                 "sed 's/a/b/w .autopilot/runs.jsonl' x",
+                "sed -n '1w .autopilot/z' f",
+                "sed -n '$w .autopilot/z' f",
+                "sed -n '/a/!w .autopilot/z' f",
+                "sed 's|a|b|w .autopilot/z' f",
+                "tar xf a.tar -C .autopilot",
+                "tar --extract -f a.tar -C .autopilot",
+                "git restore --staged --worktree .autopilot/z",
                 "sed -e 's/a/b/' -e 'w .autopilot/x' f",
                 "awk -i inplace '{print}' .autopilot/state.json",
                 "awk '{print > \".autopilot/state.json\"}' x",
@@ -719,6 +726,10 @@ class GuardGaps341Test(unittest.TestCase):
                 "git restore src/a.py",
                 "git checkout main",
                 "tar -czf a.tgz -C src .",
+                "tar -czf /tmp/ev.tgz -C .autopilot .",  # đóng gói bằng chứng: chỉ đọc
+                "tar -tf a.tar -C .autopilot",
+                "git restore --staged .autopilot/z",  # chỉ đổi chỉ mục
+                "sed 's/foo/bar w x/' f",
                 "perl -ne 'print if /unlink/' .autopilot/state.json",
                 "perl -e 'open(F, \"<.autopilot/state.json\")'",
                 "perl -e 'open(F, \">out.txt\")'",
@@ -736,6 +747,9 @@ class GuardGaps341Test(unittest.TestCase):
                 "eval \"$(cat <<'E'\nrm -rf ~\nE\n)\"",
                 'git commit -m "$(cat <<EOF\nfix: `rm -rf ~`\nEOF\n)"',  # dấu kết không nháy: backtick chạy thật
                 "echo \"<<'E'\"\n`rm -rf ~`\nE",  # `<<` trong chuỗi không mở heredoc
+                # lệnh SAU heredoc `<<'E'` vẫn được quét backtick (review #138)
+                "cat <<'E'\nx\nE\necho `rm -rf ~`",
+                "cat <<'E' > f\nhello\nE\nls `rm -rf ~`",
             ),
         )
         self.assert_all(

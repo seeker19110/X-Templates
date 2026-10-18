@@ -4427,11 +4427,17 @@ CONTRAST_REQUIRE_ON = "primary,destructive"
 RGB = Tuple[float, float, float, float]  # r, g, b, alpha — đều 0..1
 
 
-def _css_blocks(text: str, ctx: str = "", parent: str = "") -> List[Tuple[str, str, str]]:
+CSS_NEST_MAX = 32  # độ sâu lồng tối đa được đọc (CSS thật < 5); sâu hơn bỏ qua, không đệ quy tới tràn ngăn xếp
+CSS_SELECTOR_MAX = 4096  # selector ghép dài hơn bỏ qua (`a,b{` lồng nhiều tầng nhân đôi độ dài)
+
+
+def _css_blocks(text: str, ctx: str = "", parent: str = "", depth: int = 0) -> List[Tuple[str, str, str]]:
     """(ngữ cảnh at-rule, selector, khai báo) của mọi khối quy tắc; vào trong `@media`/`@layer`/`@supports`; thân `@theme` /
     `@theme inline` của Tailwind v4 là khai báo token gốc (selector `:root`). CSS lồng (`:root { &.dark {…} }`,
     `.dark { .card {…} }`): khối con mang selector đã ghép với cha, khai báo của nó không lẫn vào khối cha."""
     out: List[Tuple[str, str, str]] = []
+    if depth > CSS_NEST_MAX:
+        return out
     for prelude, body in _css_rules(text):
         if prelude.split(" ")[0] == "@theme" and not parent:
             out.append((ctx, ":root", body))
@@ -4439,11 +4445,13 @@ def _css_blocks(text: str, ctx: str = "", parent: str = "") -> List[Tuple[str, s
             inner = f"{ctx} {prelude}".strip()
             if parent and _css_flat(body).strip():  # khai báo trần trong `@media` lồng thuộc selector cha
                 out.append((inner, parent, _css_flat(body)))
-            out += _css_blocks(body, inner, parent)
+            out += _css_blocks(body, inner, parent, depth + 1)
         else:
             sel = _css_nest(prelude, parent)
+            if len(sel) > CSS_SELECTOR_MAX:
+                continue
             out.append((ctx, sel, _css_flat(body)))
-            out += _css_blocks(body, ctx, sel) if "{" in body else []
+            out += _css_blocks(body, ctx, sel, depth + 1) if "{" in body else []
     return out
 
 
@@ -4480,10 +4488,30 @@ def _css_nest(selector: str, parent: str) -> str:
     """Selector lồng ghép với cha: `&` thay bằng cha, không có `&` thì là con cháu (`cha con`)."""
     if not parent:
         return selector
-    parts = [c.strip() for c in selector.split(",")]
-    return ", ".join(
-        c.replace("&", p.strip()) if "&" in c else f"{p.strip()} {c}" for p in parent.split(",") for c in parts
-    )
+    parts = _css_split(selector)
+    return ", ".join(c.replace("&", p) if "&" in c else f"{p} {c}" for p in _css_split(parent) for c in parts)
+
+
+def _css_split(selector: str) -> List[str]:
+    """Selector tách theo dấu phẩy cấp ngoài (không tách trong `:is(.a, .b)`, `[x='a,b']`)."""
+    out: List[str] = []
+    cur: List[str] = []
+    depth, quote = 0, ""
+    for ch in selector:
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append("".join(cur).strip())
+            cur = []
+            continue
+        cur.append(ch)
+    return [*out, "".join(cur).strip()]
 
 
 def _theme_kind(selector: str) -> str:

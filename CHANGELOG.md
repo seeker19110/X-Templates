@@ -12,7 +12,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   - Lệnh mã hoá/nén vào shell: `echo … | base64 -d|xxd -r|openssl base64 -d|rev | sh` được giải và quét lệnh thật; nguồn
     không giải được trong guard (`cat f | base64 -d | sh`, `… | gunzip | sh`, sai định dạng) bị chặn thay vì chỉ hỏi.
   - Ghi `.autopilot/` (ADR-0026) qua `sort -o`, `sed 'w f'`/`s/…/…/w f`, `awk -i inplace`, `awk 'print > "f"'`, perl
-    `unlink`/`open(F, '>', …)`/`open(F, ">f")` (cả cờ gộp `-ne`/`-pe`), `git restore|checkout`, `tar -C`, `unzip -d`,
+    `unlink`/`open(F, '>', …)`/`open(F, ">f")` (cả cờ gộp `-ne`/`-pe`), `git restore|checkout` (trừ `restore --staged`), `tar -x … -C`, `unzip -d`,
     `split`/`csplit` bị chặn.
   - `bash -c "$(cat <<'E'` ↵ … ↵ `E` ↵ `)"` và `eval "$(cat <<E …)"`: thân heredoc được quét như lệnh.
   - Không còn chặn nhầm code span trong thân heredoc `<<'EOF'` của message commit (bash không thay backtick ở đó).
