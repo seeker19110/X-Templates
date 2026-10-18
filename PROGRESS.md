@@ -3,17 +3,15 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.0.1 phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
 
 ## Đang làm
-- Phát hành 3.0.0 (tag `v3.0.0`) + 3.0.1 (#115: mẫu PR/Dependabot cho dự án đích, merge-gate qua zizmor, doctor quét `.github/`). hotel-manager đã nâng 3.0.0 (hotel-manager#49, D-069 của dự án); X-Company: chủ repo tự cài 3.0.0 (X-Company#2) — agent không cài (#3 đóng). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
+- Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
-2. hotel-manager: chủ repo thêm `merge-gate` vào required check của ruleset `main` trên GitHub; khi nâng 3.0.1 thì giữ mẫu PR/Dependabot riêng (đã tuỳ biến), `merge-gate.yml` đã trùng bản 3.0.1.
-   X-Company (bản 3.0.0 có lỗi #115: Dependabot khai `pip` không có manifest, mẫu PR của repo khung, merge-gate thiếu chú thích zizmor): khi chủ repo cho phép, chạy lại `install.py --with-github` từ 3.0.1 và thay ba file bằng `*.xtemplates-new`.
-3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
-4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ; CLI container ngoài docker/podman (`kubectl exec`, `nerdctl`, AUD-SEC-042); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
-5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
-
-6. Chưa làm từ đề xuất tối ưu autopilot: sàn quyền token (chủ repo đổi quyền token/tài khoản), đóng gói `xt.pyz` (ADR-0010 cần ≥ 2 dự án đích). Nợ 🟢 review #110 đã sửa.
+1. Cắt 3.1.0 (CHANGELOG có "Dự án đích: chạy lại `install.py`"); rồi nâng hotel-manager, X-Company (cả hai đã 3.0.x).
+2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
+3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
+4. Giới hạn đã biết của guard: lệnh trong alias/biến/trình thông dịch; cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*`); `find -exec chmod`; `delta.*.pager`; CLI container ngoài docker/podman (AUD-SEC-042); merge PR repo khác từ phiên repo này bị chặn có chủ đích.
+5. Admin: Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main`.
+6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — không `noqa`/pragma.
 
 ## Quyết định
 - 2026-10-13 Khung v2 = thư viện yêu cầu có ID + máy ghép blueprint + máy kiểm "xong" — ADR-0001.
@@ -49,7 +47,7 @@
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `f3a855f` (#115); tag `v3.0.0` → `0f49e9f`, `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `cbdeabc` (#118); tag `v3.0.1` → `d3fd5a9`, `v3.0.0` → `0f49e9f`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
-- Câu hỏi cần người: mục chờ chủ repo ở Đang làm; Tiếp theo 1 (`x-hotel-manager`), 6 (quyền token).
+- Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
