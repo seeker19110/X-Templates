@@ -2962,10 +2962,14 @@ def _xt_keys(base: Path) -> Dict[str, str]:
     return _yaml_keys(p.read_text(encoding="utf-8") if p.is_file() else "")
 
 
-def _committed_xt_keys(base: Path, ref: str) -> Dict[str, str]:
-    """Khoá của xt.yaml **đã commit ở `ref`** (nhánh đích); không đọc được → rỗng."""
+def _committed_xt_text(base: Path, ref: str) -> Optional[str]:
+    """xt.yaml **đã commit ở `ref`** (nhánh đích); không đọc được (không có repo/ref/file) → None."""
     r = _git(base, "show", f"{ref}:./xt.yaml")
-    return _yaml_keys(r.stdout if r.returncode == 0 else "")
+    return r.stdout if r.returncode == 0 else None
+
+
+def _committed_xt_keys(base: Path, ref: str) -> Dict[str, str]:
+    return _yaml_keys(_committed_xt_text(base, ref) or "")
 
 
 def merge_hard_mode(base: Path, ref: str) -> Tuple[bool, List[str]]:
@@ -3009,9 +3013,11 @@ def merge_autonomy_level(base: Path, ref: str) -> Tuple[int, List[str]]:
     đích) — sửa tại chỗ chỉ hạ được, nâng mức phải qua PR đã merge vào nhánh đích (khi đó chính PR nâng mức được quyết ở
     mức cũ). Không đọc được ref hay thiếu khoá → L1."""
     work, notes = _autonomy(_xt_keys(base))
-    committed, more = _autonomy(_committed_xt_keys(base, ref), " ở nhánh đích")
+    text = _committed_xt_text(base, ref)
+    committed, more = _autonomy(_yaml_keys(text or ""), " ở nhánh đích")
     if committed < work:
-        more.append(f"merge_autonomy ở {ref} là L{committed} < cây làm việc L{work} — dùng L{committed}")
+        why = f"không đọc được xt.yaml ở {ref}" if text is None else f"merge_autonomy ở {ref} là L{committed}"
+        more.append(f"{why} < cây làm việc L{work} — dùng L{committed}")
     return min(work, committed), notes + more
 
 

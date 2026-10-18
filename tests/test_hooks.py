@@ -1774,7 +1774,7 @@ class MergeGuardTest(unittest.TestCase):
         → deny ở mọi mức tự chủ; tắt auto-merge vẫn được (LOOP-STOP-005); PR thường giữ hành vi ADR-0018."""
         self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
         for level in ("L2", "L3"):
-            (self.proj / "xt.yaml").write_text(f"merge_autonomy: {level}\n", encoding="utf-8")
+            self.set_xt(f"merge_autonomy: {level}\n")  # mức đã commit ở nhánh đích (min với cây làm việc — D-033)
             for cmd in (
                 "gh pr merge 7 --squash",
                 "gh pr merge 7",

@@ -464,9 +464,12 @@ class MergeConfigTest(unittest.TestCase):
         """D-033: sửa tại chỗ chỉ hạ được mức tự chủ; nâng phải qua PR đã merge vào nhánh đích; không có ref → L1."""
         (self.base / "xt.yaml").write_text("merge_autonomy: L3\n", encoding="utf-8")
         level, notes = xt.merge_autonomy_level(self.base, "origin/main")  # chưa có repo/ref
-        self.assertEqual((level, notes), (1, ["merge_autonomy ở origin/main là L1 < cây làm việc L3 — dùng L1"]))
+        self.assertEqual((level, notes), (1, ["không đọc được xt.yaml ở origin/main < cây làm việc L3 — dùng L1"]))
         commit_base_xt(self.base, "merge_autonomy: L1\n", working="merge_autonomy: L3\n")
-        self.assertEqual(xt.merge_autonomy_level(self.base, "origin/main")[0], 1)
+        self.assertEqual(
+            xt.merge_autonomy_level(self.base, "origin/main"),
+            (1, ["merge_autonomy ở origin/main là L1 < cây làm việc L3 — dùng L1"]),
+        )
         commit_base_xt(self.base, "merge_autonomy: L3\n", working="merge_autonomy: L2\n")
         self.assertEqual(xt.merge_autonomy_level(self.base, "origin/main"), (2, []))  # hạ tại chỗ được
         commit_base_xt(self.base, "merge_autonomy: L3\n")
