@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.1.0:** chạy lại `install.py` (`.xtemplates/` thay toàn bộ; mẫu và hook `.claude/` không đổi so
+> với 3.1.0). Đã ghép lại blueprint bằng 3.1.0 mà nối ghi chú bằng `·` → ghép lại từ bản blueprint trước lần nâng (vd
+> `git show <commit trước>:BLUEPRINT.md`) bằng bản này, rồi so trạng thái/ghi chú theo ID; `compose` nay cảnh báo mục
+> `[x]`/`[~]` không mang được ghi chú.
+
 ### Fixed
 - `xt.py compose` ghép lại: ghi chú dự án nối bằng `·` (`· Nguồn: … · Bằng chứng: …`) nay được mang theo cả khi chữ mục
   đổi — trước đây bị bỏ im lặng, mục `[x]` mất bằng chứng (gặp ở hotel-manager khi nâng lên 3.1.0: 7 mục). Mục `[x]`/`[~]`
