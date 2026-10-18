@@ -35,7 +35,7 @@ production) trước khi merge; nếu bật auto-merge ngay khi mở PR như ADR
 - Chủ repo chọn rõ: review trước chỉ cho PR quan trọng. "Quan trọng" = làn `chuẩn` của `merge-check` (D-031): vị từ
   máy có sẵn, test được, bắt rộng có chủ đích (báo oan chỉ tốn một lượt review). Vị từ chung không coi `scripts/xt.py`
   của repo khung là nhạy cảm (ở dự án đích nó nằm trong `.xtemplates/`, đã là cổng/CI): repo khung khai
-  `merge_risk_paths` (`scripts/*`, `framework/11-autonomous-loop/*`, `framework/templates/*`, `docs/adr/*`) để PR nhỏ
+  `merge_risk_paths` (`scripts/*`, `framework/11-autonomous-loop/*`, `framework/10-workflow/code-review.md`, `framework/templates/*`, `docs/adr/*`) để PR nhỏ
   sửa bộ máy merge/ủy quyền hay luật vòng tự động — loại lỗ #102 bắt được — vẫn phải review. PR nhỏ một gói, có test, không chạm vùng nhạy cảm bật auto-merge khi mở như ADR-0015.
 - Lệnh `next` ghim head **tại lúc chạy `merge-check`**, không phải commit đã rà (review lần đầu của PR này bắt lỗi khẳng
   định ngược). Vì vậy quy trình buộc so `head` với H và rà lại khi khác; guard vẫn đòi `merge-check` = `merge`.

@@ -7,13 +7,13 @@ lint: python3 scripts/xt.py validate && python3 scripts/check-links.py && python
 typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/install.py scripts/check-links.py .claude/hooks/guard.py
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -m coverage run -m unittest discover -s tests && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
+# PR quan trọng riêng của repo khung (D-031, review #103): bộ máy merge/ủy quyền/cổng (`scripts/`), luật vòng tự động,
+# ADR, mẫu dự án đích — vào làn chuẩn (review trước khi bật auto-merge) dù nhỏ hay chỉ đổi tài liệu. Ở dự án đích
+# `.xtemplates/` đã vào làn chuẩn qua nhóm cổng/CI. Khi ngoại lệ cứng giữ người (ADR-0020) các đường dẫn này thành ngoại lệ cứng.
+merge_risk_paths: "scripts/*, framework/11-autonomous-loop/*, framework/10-workflow/code-review.md, framework/templates/*, docs/adr/*"
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: auto-merge
 # của GitHub cho mọi làn — làn nhanh khi mở PR, làn chuẩn sau khi review sạch (ADR-0024) — merge khi required check xanh; L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
-# PR quan trọng riêng của repo khung (D-031, review #103): bộ máy merge/ủy quyền/cổng (`scripts/`), luật vòng tự động,
-# ADR, mẫu dự án đích — vào làn chuẩn (review trước khi bật auto-merge) dù nhỏ hay chỉ đổi tài liệu. Ở dự án đích
-# `.xtemplates/` đã vào làn chuẩn qua nhóm cổng/CI. Khi `merge_hard_exceptions: human` các đường dẫn này thành ngoại lệ cứng.
-merge_risk_paths: "scripts/*, framework/11-autonomous-loop/*, framework/templates/*, docs/adr/*"

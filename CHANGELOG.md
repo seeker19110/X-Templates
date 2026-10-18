@@ -24,7 +24,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chỉ bật/merge khi head = H; PR đang bật auto-merge thì tắt TRƯỚC mỗi push, chạy lại `merge-check`, làn chuẩn thì rà lại H..head (merge nhánh đích: rà phần
   giải xung đột). Sửa `AGENTS.md`, mẫu
   `AGENTS.md`, skill `/autopilot`, `LOOP-STOP-005`, `LOOP-STOP-009`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007`, skill `/gate` (lời, không đổi
-  mức). Repo khung khai `merge_risk_paths` (`scripts/*`, `framework/11-autonomous-loop/*`, `framework/templates/*`,
+  mức). Repo khung khai `merge_risk_paths` (`scripts/*`, `framework/11-autonomous-loop/*`, `code-review.md`, `framework/templates/*`,
   `docs/adr/*`): PR nhỏ sửa bộ máy merge/ủy quyền hay luật vòng tự động vẫn vào làn chuẩn. Siết
   `grant-check`/`merge-check` theo review lần bốn của #102: chỉ `Not Found (HTTP 404)` là file vắng (`No commit found for the
   ref` thì không), và file trong diff mà 404 ở cả đáy lẫn đầu PR (token không đọc được contents) thì là `hard`.
