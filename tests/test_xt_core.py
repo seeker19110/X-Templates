@@ -883,24 +883,29 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertNotIn("lệnh kiểm blueprint", text)
 
     def test_gate_floor_blocks_final_verify(self):
-        # LOOP-HARNESS-023: quy mô M mà cổng xt.yaml dưới sàn → kiểm lại cuối ĐỎ, Stop hook không cho `done`.
+        # LOOP-HARNESS-023: quy mô M — khoá sàn thiếu → kiểm lại cuối ĐỎ; khai rồi thì `loop verify` CHẠY lệnh sàn.
         write(self.base / "BLUEPRINT.md", "---\nkind: blueprint\nprofile: cli-tool\nscale: M\n---\n")
-        write(self.base / "xt.yaml", "lint: ruff check .\ntypecheck: ''\ntest: pytest\nbuild: ''\n")
+        write(self.base / "xt.yaml", "lint: ruff check .\ntest: pytest\n")
         self.git("add", "-A")
         self.git("commit", "-qm", "bp")
         rc, text = self.verify()
         self.assertEqual(rc, 1)
-        self.assertIn("[xt] verify sàn Gate: quy mô M: `lint` chưa kiểm format", text)
+        self.assertIn("[xt] verify sàn Gate: quy mô M: xt.yaml thiếu `format_check`", text)
         rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
-        self.assertEqual(len(rec["gate_floor"]), 2)
+        self.assertEqual((len(rec["gate_floor"]), rec["gate_floor_runs"]), (2, []))
         self.assertIn("kiểm lại cuối ĐỎ (sàn Gate M/L chưa đạt (LOOP-HARNESS-023))", xt.final_check(self.base) or "")
         out, _ = xt.hook_stop("{}", self.base)
         self.assertEqual(json.loads(out)["decision"], "block")
-        write(
-            self.base / "xt.yaml",
-            "lint: ruff format --check .\ntypecheck: ''\ntest: pytest --cov-fail-under=80\nbuild: ''\n",
-        )
+        # Khai đủ: lệnh trùng Gate không chạy lại; lệnh đỏ làm kiểm lại cuối ĐỎ và nêu khoá.
+        write(self.base / "xt.yaml", "format_check: test -f ok.txt\ncoverage: test -f cov.txt\n")
         self.git("commit", "-qam", "sàn")
+        rc, text = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("[xt] verify sàn Gate `coverage`: exit 1", text)
+        self.assertNotIn("sàn Gate `format_check`", text)  # trùng Gate `test -f ok.txt` của T-001
+        self.assertIn("kiểm lại cuối ĐỎ (sàn `coverage`)", xt.final_check(self.base) or "")
+        write(self.base / "xt.yaml", "format_check: test -f ok.txt\ncoverage: test -f xt.yaml\n")
+        self.git("commit", "-qam", "cov")
         self.assertEqual(self.verify()[0], 0)
 
     def test_gate_that_changes_tree_is_not_ok(self):
