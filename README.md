@@ -79,7 +79,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
 | `python3 scripts/xt.py grant-check GROUP [KHOÁ=GIÁ_TRỊ …]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không: exit 0 làm, 1 `loop defer` (ADR-0022) |
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
-| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge sau khi review sạch (ADR-0023) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
+| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge sau khi review sạch (ADR-0024) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
 | `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
@@ -126,7 +126,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0013](docs/adr/0013-machine-decides-when-to-merge.md): `xt.py merge-check` quyết khi nào merge PR; guard chỉ cho
   tự merge làn nhanh ở L2 với lệnh ghim head.
 - [ADR-0015](docs/adr/0015-auto-merge-on-open-l3.md): mức `merge_autonomy: L3` (mặc định, chủ repo yêu cầu) — auto-merge
-  của GitHub cho mọi làn; GitHub merge khi required check xanh (bật sau review sạch — ADR-0023).
+  của GitHub cho mọi làn; GitHub merge khi required check xanh (bật sau review sạch — ADR-0024).
 - [ADR-0014](docs/adr/0014-pr-per-slice-and-machine-merge.md): mỗi lát code một PR; máy tự merge khi `merge-check` cho
   phép bằng lệnh ghim head (`gh pr merge`, REST `PUT …/merge` có `sha`, MCP `merge_pull_request` có `expectedHeadSha`).
 - [ADR-0016](docs/adr/0016-l3-keeps-hard-exceptions.md): ở L3 PR chạm tiền/dữ liệu người dùng thật/auth/mật mã/bí mật
@@ -144,7 +144,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check`) tới khi PR đã merge hoặc cần hành động.
 - [ADR-0022](docs/adr/0022-production-grants-in-plan.md): duyệt kế hoạch = một lần người duyệt mục Ủy quyền production
   (`- grant:` trong PLAN.md, máy kiểm `xt.py grant-check`); PR đổi grant/khoá luôn người merge; hạn mức autopilot mặc định x2.
-- [ADR-0023](docs/adr/0023-auto-merge-after-clean-review.md): mọi PR — `reviewer` rà sạch mới bật auto-merge; không bật
+- [ADR-0024](docs/adr/0024-auto-merge-after-clean-review.md): mọi PR — `reviewer` rà sạch mới bật auto-merge; không bật
   được thì merge trực tiếp bằng lệnh ghim head của `merge-check`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,

@@ -6,10 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
-- **Bật auto-merge khi review sạch, không bật được thì merge trực tiếp ghim head — mọi PR** (ADR-0023, D-029; chủ repo yêu
+- **Bật auto-merge khi review sạch, không bật được thì merge trực tiếp ghim head — mọi PR** (ADR-0024, D-030; chủ repo yêu
   cầu cho khung và dự án đích): mở PR → `reviewer` (model khác) rà diff → không còn lỗi chặn và `merge-check` không `hard`
   thì bật auto-merge; GitHub báo PR đã sẵn sàng thì merge bằng lệnh ghim head trong `next`. Review gắn với commit H đã rà:
-  head khác H thì rà lại, chỉ bật/merge khi head = H; đã bật mà có push mới thì tắt auto-merge rồi rà lại. Sửa `AGENTS.md`, mẫu
+  chỉ bật/merge khi head = H; PR đang bật auto-merge thì tắt TRƯỚC mỗi push rồi rà lại H..head (merge nhánh đích: rà phần
+  giải xung đột). Sửa `AGENTS.md`, mẫu
   `AGENTS.md`, skill `/autopilot`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007` (lời, không đổi mức). Siết
   `grant-check`/`merge-check` theo review lần bốn của #102: chỉ `Not Found (HTTP 404)` là file vắng (`No commit found for the
   ref` thì không), và file trong diff mà 404 ở cả đáy lẫn đầu PR (token không đọc được contents) thì là `hard`.

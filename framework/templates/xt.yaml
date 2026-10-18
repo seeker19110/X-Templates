@@ -13,7 +13,7 @@ test: ""
 build: ""
 format: ""
 format_file: ""
-# Merge PR (ADR-0013/0014/0015, LOOP-STOP-022): L3 (mặc định) = review sạch (ADR-0023) rồi bật auto-merge của GitHub, merge khi required check
+# Merge PR (ADR-0013/0014/0015, LOOP-STOP-022): L3 (mặc định) = review sạch (ADR-0024) rồi bật auto-merge của GitHub, merge khi required check
 # xanh (cần bật "Allow auto-merge" + ruleset có required check; ghi miễn trừ WF-REVIEW-007); L2 = máy chỉ tự merge làn nhanh
 # (`xt.py merge-check`); L1 = người merge mọi PR.
 # merge_risk_paths: glob thêm vào danh sách đường dẫn nhạy cảm (ngoại lệ cứng), cách nhau dấu phẩy.

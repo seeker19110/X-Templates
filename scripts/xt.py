@@ -2887,7 +2887,7 @@ def merge_decision(
     """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
-    PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0023: agent bật sau review sạch). `hard_auto` (`merge_hard_exceptions: auto`,
+    PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0024: agent bật sau review sạch). `hard_auto` (`merge_hard_exceptions: auto`,
     ADR-0020): ngoại lệ cứng không giữ người — lý do chuyển sang `hard_waived`, `hard` rỗng."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
@@ -2931,7 +2931,7 @@ def merge_decision(
         "head": pr.get("headRefOid", ""),
         "verdict": verdict,
         "lane": lane,
-        # L3 (ADR-0015, ADR-0023): guard cho bật auto-merge của GitHub (agent bật sau review sạch) — trừ PR chồng (nhắm nhánh sắp bị xoá).
+        # L3 (ADR-0015, ADR-0024): guard cho bật auto-merge của GitHub (agent bật sau review sạch) — trừ PR chồng (nhắm nhánh sắp bị xoá).
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
