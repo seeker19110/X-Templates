@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `xt.py compose` ghép lại: ghi chú dự án nối bằng `·` (`· Nguồn: … · Bằng chứng: …`) nay được mang theo cả khi chữ mục
+  đổi — trước đây bị bỏ im lặng, mục `[x]` mất bằng chứng (gặp ở hotel-manager khi nâng lên 3.1.0: 7 mục). Mục `[x]`/`[~]`
+  đổi chữ mà vẫn không tìm được ghi chú để mang → cảnh báo kèm danh sách ID. Dự án đích: ghép lại blueprint bằng bản này
+  rồi so trạng thái với bản cũ.
+
 ## [3.1.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.0.x:**

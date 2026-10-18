@@ -810,6 +810,12 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertEqual(
             xt.carry_states(old_check, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x — Kiểm: `test -f ok`\n"
         )
+        # Ghi chú nối bằng `·` như chữ của khung (hotel-manager): chữ mục đổi vẫn mang theo, không mất im lặng.
+        old_dot = "- [x] `A-001` **MUST** a. · Nguồn: x · Bằng chứng: `ci.yml`\n- [x] `A-002` **MUST** b cũ.\n"
+        dropped: list[str] = []
+        out, _ = xt.carry_states(old_dot, changed + "- [ ] `A-002` **MUST** b mới.\n", dropped=dropped)
+        self.assertIn("- [x] `A-001` **MUST** a đã sửa. · Nguồn: x · Bằng chứng: `ci.yml`\n", out)
+        self.assertEqual(dropped, ["A-002"])  # đã tick, chữ đổi, không có ghi chú để mang → người gọi cảnh báo
 
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
