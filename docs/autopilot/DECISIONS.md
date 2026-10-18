@@ -222,14 +222,31 @@
   từng vào làn nhanh. Vá: `xt.yaml` của repo khai `merge_risk_paths` (`scripts/*`, luật vòng tự động, mẫu, ADR); test
   `test_framework_repo_risk_paths`.
 
-### D-032 · 2026-10-18T03:10:09+00:00 · Blueprint tick là lời khai (blueprint_status chỉ đếm ô [x]) — biến thành bằng chứng máy thế nào?
+### D-032 · 2026-10-18T02:49:04+00:00 · Hai lỗ của merge-check từ review #103: merge_risk_paths đọc ở cây làm việc (checkout cũ làm rơi glob); khoá merge_hard_exceptions dò bằng chuỗi trong patch (báo hard nhầm) — sửa thế nào?
+
+- Phương án: (1) Glob = hợp cây làm việc và xt.yaml đã commit ở nhánh đích; khoá: so giá trị hiệu lực đã parse (cùng bộ đọc merge_hard_mode, thiếu = human) ở đáy/đầu PR qua REST contents, không đọc được hay vắng cả hai đầu → hard · (2) Glob chỉ đọc ở nhánh đích; khoá giữ dò chuỗi nhưng chỉ trên dòng +/- của patch
+- Chọn: Glob = hợp cây làm việc và xt.yaml đã commit ở nhánh đích; khoá: so giá trị hiệu lực đã parse (cùng bộ đọc merge_hard_mode, thiếu = human) ở đáy/đầu PR qua REST contents, không đọc được hay vắng cả hai đầu → hard
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hợp glob không bao giờ ít hơn nguồn nào (sửa tại chỗ chỉ chặt hơn, gỡ glob phải qua PR làn chuẩn); so giá trị parse bằng đúng bộ đọc của merge_hard_mode nên khớp nghĩa tuyệt đối, vẫn đóng khi không xác minh được; dò dòng +/- vẫn sai với khoá lặp/viết lại và còn phụ thuộc patch (thiếu khi diff lớn)
+- Đường lùi: Về dò chuỗi patch (_touches_hard_key cũ) và merge_config(project_dir()) ở _merge_eval
+- Đính chính (review #105): "khớp nghĩa tuyệt đối" sai — giá trị sau merge do merge 3 chiều theo dòng quyết định,
+  khoá lặp bị dòng sau che lọt qua phép so giá trị hiệu lực. Sửa: so danh sách MỌI dòng khoá theo thứ tự; đáy là
+  merge-base (REST compare) thay `base.sha`, áp cả ủy quyền PLAN.md.
+
+### D-033 · 2026-10-18T03:09:25+00:00 · Đóng tiếp lỗ chốt merge (review #105 + yêu cầu chủ repo 'sửa luôn merge_autonomy đọc từ nhánh đích'): mức tự chủ lấy từ đâu, và ủy quyền PLAN.md/khoá lặp lọt qua merge 3 chiều thì chặn thế nào?
+
+- Phương án: (1) merge_autonomy = min(cây làm việc, nhánh đích đã commit), không đọc được → L1; PLAN.md: so danh sách mọi dòng grant theo thứ tự kèm cờ fence ở merge-base/head, đầu PR có grant trong fence hoặc nhóm lặp → hard; xt.yaml: đầu PR có > 1 dòng khoá → hard · (2) merge_autonomy chỉ đọc nhánh đích; PLAN.md giữ so hiệu lực, cấm thêm dòng grant qua PR làn nhanh
+- Chọn: merge_autonomy = min(cây làm việc, nhánh đích đã commit), không đọc được → L1; PLAN.md: so danh sách mọi dòng grant theo thứ tự kèm cờ fence ở merge-base/head, đầu PR có grant trong fence hoặc nhóm lặp → hard; xt.yaml: đầu PR có > 1 dòng khoá → hard
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: min không bao giờ cao hơn nhánh đích (nâng mức phải qua PR đã merge, PR đó quyết ở mức cũ), vẫn cho chủ hạ tại chỗ; mỗi nhóm grant một dòng, không fence và cùng chuỗi dòng ở mọi bên thì merge 3 chiều chỉ ra tập con của merge-base — chặt hơn, không nới; so hiệu lực bị tái hiện lọt (PR chèn live bị sandbox che + PR dời sandbox = live)
+- Đường lùi: merge_autonomy về merge_config(project_dir()); _plan_grants_changed về so parse_grants
+
+### D-034 · 2026-10-18T03:10:09+00:00 · Blueprint tick là lời khai (blueprint_status chỉ đếm ô [x]) — biến thành bằng chứng máy thế nào?
 
 - Phương án: (1) Ghi chú — Kiểm: `<lệnh>` trên mục [x]; blueprint-status --run và loop verify chạy lại; đỏ = chưa đạt; MUST tick không có lệnh chỉ báo (unchecked_must), không đỏ · (2) Bắt buộc mọi MUST [x] có lệnh kiểm, thiếu là đỏ ngay · (3) Thêm trường check: máy đọc vào mục khung (framework), compose sinh lệnh
 - Chọn: Ghi chú — Kiểm: `<lệnh>` trên mục [x]; blueprint-status --run và loop verify chạy lại; đỏ = chưa đạt; MUST tick không có lệnh chỉ báo (unchecked_must), không đỏ
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: lệnh do dự án khai nên đúng stack, máy chạy lại được và test được; đi qua loop verify có sẵn nên Stop hook chặn 'done' sai mà không thêm luật mới; PA2 làm hỏng blueprint đã tick của dự án đang chạy (hotel-manager) và nhiều mục chỉ kiểm bằng tài liệu/URL; PA3 không khả thi vì phần Kiểm của khung là văn xuôi theo nhiều stack. Đường lùi giữ: siết PA2 sau khi unchecked_must có số đo
 - Đường lùi: Bỏ cờ --run và _verify_blueprint; CHECK_CMD_RE/ghi chú — Kiểm: vẫn vô hại như ghi chú thường
 
-### D-033 · 2026-10-18T03:20:01+00:00 · Gate do agent tự khai không có sàn (ADR-0011 chỉ chặn rỗng/no-op) — đặt sàn ở đâu để có răng mà ít code?
+### D-035 · 2026-10-18T03:20:01+00:00 · Gate do agent tự khai không có sàn (ADR-0011 chỉ chặn rỗng/no-op) — đặt sàn ở đâu để có răng mà ít code?
 
 - Phương án: (1) gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình · (2) Mở rộng is_noop trong dev-task.sh để cổng commit đỏ ngay khi dưới sàn · (3) Chỉ ghi luật vào AGENTS.md/skill, không máy kiểm
 - Chọn: gate_floor_issues trong xt.py: doctor cảnh báo + loop init nhắc + loop verify ĐỎ ở M/L (kiểm kiểu, kiểm format, ngưỡng coverage, e2e theo hồ sơ), dấu hiệu tất định từ xt.yaml + file cấu hình

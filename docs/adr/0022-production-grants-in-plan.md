@@ -1,6 +1,7 @@
 # ADR-0022: Duyệt kế hoạch = một lần người duyệt Ủy quyền production; hạn mức autopilot mặc định x2
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận — phép so "PR đổi hiệu lực ủy quyền" đổi sang so danh sách dòng grant kèm cờ fence ở
+  merge-base/đầu PR, grant trong fence/nhóm lặp ở đầu PR là `hard` (D-033, 2026-10-18; CHANGELOG)
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `parse_grants`, `grant_violations`, `cmd_grant_check`,
   `_touches_hard_key` (PLAN.md), trần vòng `max(40, 8 × task)`; mẫu `templates/PLAN.md` mục "Ủy quyền production";
   `AGENTS.md` §5, mẫu `AGENTS.md` §6, skill `/autopilot` bước 8/9/13/14, `LOOP-STOP-026`; test `tests/test_grants.py`,

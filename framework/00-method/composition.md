@@ -47,7 +47,7 @@ python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict --run
 
 1. **Commit `BLUEPRINT.md` vào repo dự án** (G1). Đây là phạm vi chất lượng đã thống nhất.
 2. **Tick bằng bằng chứng máy chạy lại được** (`LOOP-DESIGN-023`): chỉ đổi `[ ]` → `[x]` khi phần "→ Kiểm" của mục
-   chạy được bằng lệnh, và ghi lệnh đó ở cuối dòng: `— Kiểm: \`<lệnh exit 0 = đạt>\`` (vd `— Kiểm: \`test -f .env.example && git check-ignore -q .env\``).
+   chạy được bằng lệnh, và ghi lệnh đó ở cuối dòng: `— Kiểm: \`<lệnh exit 0 = đạt>\`` — một cặp backtick, nhiều lệnh gộp bằng `&&` (vd `— Kiểm: \`test -f .env.example && git check-ignore -q .env\``).
    `blueprint-status --run` và `loop verify` chạy lại mọi lệnh này; đỏ = mục **chưa đạt** dù đã tick. Mục không có cách
    kiểm bằng lệnh (tài liệu, quyết định) ghi `— Bằng chứng: <file:dòng | URL job CI>`; `--run` liệt kê số MUST tick kiểu
    này để reviewer soát. Mục còn thiếu có thể ghi `— Thiếu: <việc cần làm>`. Ghi bằng chứng ở PR tương ứng.
