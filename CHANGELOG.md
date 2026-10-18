@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Mở PR xong chạy nền `xt.py merge-watch` (30 giây/lần)** (ADR-0021, D-026; chủ repo yêu cầu cho khung và dự án
+  đích): lệnh mới gọi lại đúng `merge-check` mỗi `--interval` giây (mặc định 30, `--max-minutes` 120) tới khi verdict ≠
+  `wait`; exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ. Thành bước bắt buộc trong
+  `AGENTS.md`, mẫu `templates/AGENTS.md`, skill `/autopilot` bước 13; `LOOP-STOP-022` (SHOULD, không đổi mức) thêm
+  `merge-watch` vào phần Kiểm. Dự án đích: chạy lại `install.py` để nhận lệnh.
 - **Guard chặn đổi repo sang public qua `gh api`**: `gh api -X PATCH repos/<chủ>/<repo>` với `private=`/`visibility=`
   (mọi giá trị, như `gh repo edit --visibility`) hoặc thân `--input` (không xác minh được, như `archived=true`) → deny;
   PATCH endpoint con (`…/issues/1`) và `gh api repos/o/r` (GET) vẫn cho chạy. Dự án đích: chạy lại `install.py`.

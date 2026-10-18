@@ -36,6 +36,9 @@ Lệnh:
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   merge-check [--pr PR] [--pr-json F] [--json]
                                 Máy quyết khi nào merge PR: merge · wait · update · fix · human · closed (exit 0 = merge).
+  merge-watch [--pr PR] [--interval 30] [--max-minutes 120]
+                                Gọi merge-check mỗi `interval` giây tới khi verdict ≠ wait (exit 0 = đã merge/merge,
+                                1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
   doctor [--fix] [--json]       Audit khung đã cài trước /autopilot (Python/git, hook + file hook, skill, AGENTS/CLAUDE,
                                 xt.yaml, .gitignore, state, khung hợp lệ); --fix sửa phần an toàn, exit 1 khi còn lỗi.
   stats                         Thống kê số module/mục.
@@ -46,10 +49,12 @@ Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import fnmatch
 import hashlib
 import importlib.util
+import io
 import itertools
 import json
 import os
@@ -60,6 +65,7 @@ import shutil
 import subprocess
 import tempfile
 import sys
+import time
 import traceback
 import unicodedata
 import urllib.parse
@@ -3884,6 +3890,51 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
     return 0 if d["verdict"] == "merge" else 1
 
 
+WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)
+
+
+def _merge_check_json(pr: Optional[str]) -> Tuple[int, Dict[str, Any], str]:
+    """`cmd_merge_check --json` chạy trong tiến trình: (exit, JSON, stderr). Dùng lại đúng đường quyết định của
+    `merge-check` (cấu hình xt.yaml, ngoại lệ cứng…) nên `merge-watch` không có luật riêng."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = cmd_merge_check(argparse.Namespace(pr=pr, pr_json=None, json=True))
+    return rc, (json.loads(out.getvalue()) if rc != 2 else {}), err.getvalue()
+
+
+def _watch_final(d: Dict[str, Any]) -> int:
+    """In bước kế và trả exit khi verdict ≠ wait: 0 = PR đã merge hoặc đủ điều kiện merge, 1 = cần hành động/người."""
+    if d["next"]:
+        print(f"→ {d['next']}", flush=True)
+    merged = d["verdict"] == "closed" and "PR đã MERGED" in d["reasons"][0]
+    return 0 if merged or d["verdict"] == "merge" else 1
+
+
+def cmd_merge_watch(args: argparse.Namespace) -> int:
+    """Gọi `merge-check` mỗi `--interval` giây (mặc định 30) tới khi verdict ≠ wait (ADR-0021). Chạy nền (`run_in_background`): thoát
+    thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (update/fix/human/
+    đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ."""
+    deadline = time.monotonic() + args.max_minutes * 60
+    errors = 0
+    while True:
+        rc, d, err = _merge_check_json(args.pr)
+        stamp = _dt.datetime.now().strftime("%H:%M:%S")
+        if rc == 2:
+            errors += 1
+            print(f"[{stamp}] lỗi đọc PR ({errors}/{WATCH_ERROR_LIMIT}): {err.strip()}", flush=True)
+            if errors >= WATCH_ERROR_LIMIT:
+                return 2
+        else:
+            errors = 0
+            print(f"[{stamp}] {d['verdict'].upper()} · PR #{d['pr']} — {'; '.join(d['reasons'])}", flush=True)
+            if d["verdict"] != "wait":
+                return _watch_final(d)
+        if time.monotonic() + args.interval > deadline:
+            print(f"[{stamp}] hết {args.max_minutes} phút mà PR vẫn chờ — chạy lại merge-watch", flush=True)
+            return 3
+        time.sleep(args.interval)
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     base = project_dir()
     findings = doctor_findings(base, args.framework)
@@ -3985,6 +4036,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pm.add_argument("--json", action="store_true", help="in JSON (pr, verdict, lane, reasons, next, notes)")
     pm.set_defaults(fn=cmd_merge_check)
+    pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
+    pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
+    pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")
+    pw.add_argument("--max-minutes", type=int, default=120, help="tổng thời gian chờ tối đa (mặc định 120)")
+    pw.set_defaults(fn=cmd_merge_watch)
     pb = sub.add_parser("blueprint-status")
     pb.add_argument("file", help="BLUEPRINT.md, hoặc - để đọc stdin")
     pb.add_argument("--strict", action="store_true", help="exit 1 khi còn MUST mở hoặc miễn trừ thiếu lý do")

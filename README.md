@@ -77,6 +77,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py blueprint-status FILE --strict [--json]` | Đếm đạt/miễn/chưa; dòng mục sai định dạng, mục MUST ít hơn bảng đầu trang hay miễn trừ thiếu lý do ở phần ghi chú = lỗi; cổng phát hành; `FILE` là `-` thì đọc stdin |
 | `python3 scripts/xt.py doctor [--fix] [--json]` | Audit khung đã cài trước `/autopilot`: Python/git/bash, hook + file hook + cú pháp, skill/subagent, `*.xtemplates-new` chưa gộp, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state, khung `validate`, `PROGRESS.md`; `--fix` sửa phần an toàn (không đụng hook/settings), exit 1 khi còn lỗi |
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
+| `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge khi mở PR trừ ngoại lệ cứng, L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
 | `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích |
@@ -135,6 +136,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   chặn, còn lại cho chạy; `XT_GUARD_POLICY=strict` giữ hành vi hỏi cũ.
 - [ADR-0019](docs/adr/0019-hard-exceptions-denied-under-no-ask.md): dưới chính sách không hỏi, merge/bật auto-merge PR
   ngoại lệ cứng (`hard`) bị chặn — người merge.
+- [ADR-0021](docs/adr/0021-merge-watch-after-opening-pr.md): mở PR xong chạy nền `xt.py merge-watch` (30 giây/lần, gọi lại
+  `merge-check`) tới khi PR đã merge hoặc cần hành động.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
