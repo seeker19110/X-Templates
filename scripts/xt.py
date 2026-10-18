@@ -5043,7 +5043,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return rc
     except BrokenPipeError:  # `xt.py … | head`: bên đọc đóng ống — im lặng như lệnh Unix (128 + SIGPIPE)
         try:
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            fd = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(fd, sys.stdout.fileno())  # lần xả lúc thoát ghi vào devnull, không ném lỗi ống lần nữa
+            finally:
+                os.close(fd)
         except (OSError, ValueError):  # stdout không có fd thật (test, thư viện) — không còn gì để xả
             pass
         return 141

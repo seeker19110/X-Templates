@@ -622,10 +622,12 @@ class BrokenPipeTest(unittest.TestCase):
             unittest.mock.patch.object(sys, "stdout", fake),
             unittest.mock.patch("xt.os.open", return_value=99) as op,
             unittest.mock.patch("xt.os.dup2") as dup2,
+            unittest.mock.patch("xt.os.close") as close,
         ):
             self.assertEqual(xt.main(["stats"]), 141)
         op.assert_called_once_with(os.devnull, os.O_WRONLY)
         dup2.assert_called_once_with(99, 1)
+        close.assert_called_once_with(99)  # fd devnull đóng sau dup2 (CodeQL #112)
 
 
 # --------------------------------------------------------------------------- blueprint-status
