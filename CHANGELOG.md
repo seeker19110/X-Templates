@@ -17,7 +17,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - **Blueprint không còn là lời khai: mục `[x]` mang lệnh kiểm máy chạy lại được** (`LOOP-DESIGN-023`, mục mới MUST@L; D-032).
   Ghi `— Kiểm: \`<lệnh>\`` ở cuối dòng mục đã tick (phần ghi chú sau `· Nguồn:`); `xt.py blueprint-status --run` chạy lại
   mọi lệnh trong thư mục chứa blueprint (mỗi lệnh một lần, timeout `XT_RECORD_TIMEOUT`), in `✓/✗ Kiểm <ID>`, JSON thêm
-  `checks`, `failed_checks`, `unchecked_must` (MUST tick không có lệnh — chỉ báo, không đỏ); `--strict --run` exit 1 khi
+  `checks`, `failed_checks`, `unchecked_must` (MUST tick không có lệnh — chỉ báo, không đỏ); ghi chú `Kiểm:` sai dạng
+  (không có lệnh trong backtick, thêm cặp backtick hoặc ghi chú `Kiểm:` thứ hai) = đỏ, exit 2; `--strict --run` exit 1 khi
   có lệnh đỏ; `--run` với stdin `-` → exit 2. `xt.py loop verify` chạy thêm các lệnh này (ghi `verified.json.blueprint`;
   `final_check` nêu ID đỏ) nên Stop hook không nhận `done` khi blueprint tick sai. `carry_states` giữ ghi chú `— Kiểm:` khi
   ghép lại; header blueprint sinh ra và `LOOP-DESIGN-022`, bảng cổng `loop-design.md`/`harness-files.md`, README mảng 11,
