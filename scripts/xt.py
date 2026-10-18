@@ -1269,9 +1269,10 @@ def loop_verify(base: Optional[Path] = None) -> int:
     floor = gate_floor_issues(base)
     for issue in floor:
         print(f"[xt] verify sàn Gate: {issue}")
+    floor_runs = _verify_floor(base, results, timeout)
     after = tree_fingerprint(base)
     stable = before == after
-    ok = stable and not floor and all(r["exit_code"] == 0 for r in results + checks)
+    ok = stable and not floor and all(r["exit_code"] == 0 for r in results + checks + floor_runs)
     for r in results:
         r["gate"] = redact(r["gate"])
     rec = {
@@ -1282,15 +1283,35 @@ def loop_verify(base: Optional[Path] = None) -> int:
         "results": results,
         "blueprint": checks,
         "gate_floor": floor,
+        "gate_floor_runs": floor_runs,
     }
     d = state_dir(base)
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / VERIFIED_FILE, json.dumps(rec, ensure_ascii=False, indent=2) + "\n")
     if not stable:
-        print("✗ Gate làm đổi cây làm việc (format/sinh file?) — commit thay đổi rồi chạy lại `loop verify`")
+        print(
+            "✗ Gate/lệnh sàn làm đổi cây làm việc (format ghi file? artefact như `.coverage`, `c.out`?) — lệnh kiểm không"
+            " được ghi vào repo: ghi artefact ra thư mục tạm (`mktemp`) hoặc thêm vào .gitignore; thay đổi thật thì commit,"
+            " rồi chạy lại `loop verify`"
+        )
     more = f" + {len(checks)} lệnh kiểm blueprint" if checks else ""
     print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({len(results)} Gate{more}) — .autopilot/{VERIFIED_FILE}")
     return 0 if ok else 1
+
+
+def _verify_floor(base: Path, gates: List[Dict[str, Any]], timeout: int) -> List[Dict[str, Any]]:
+    """Chạy lệnh sàn Gate đã khai (LOOP-HARNESS-023), trừ lệnh trùng Gate vừa chạy: [{"key","cmd","exit_code","output_tail"}]."""
+    out: List[Dict[str, Any]] = []
+    for key, cmd in gate_floor_commands(base):
+        if any(same_command(cmd, r["gate"]) for r in gates) or any(same_command(cmd, r["cmd"]) for r in out):
+            continue
+        code, text = run_gate_shell(cmd, base, timeout)
+        tail = redact("\n".join(text.strip().splitlines()[-20:]))
+        out.append({"key": key, "cmd": cmd, "exit_code": code, "output_tail": tail})
+        print(f"[xt] verify sàn Gate `{key}`: exit {code}")
+    for r in out:
+        r["cmd"] = redact(r["cmd"])
+    return out
 
 
 def _verify_blueprint(base: Path, st: Dict[str, Any], timeout: int) -> List[Dict[str, Any]]:
@@ -1314,8 +1335,12 @@ def final_check(base: Path) -> Optional[str]:
     if rec.get("fingerprint") == fp and rec.get("ok") is True:
         return None
     if rec.get("fingerprint") == fp:
-        runs = rec.get("results", []) + rec.get("blueprint", [])
-        red = [str(r.get("task") or r.get("id")) for r in runs if isinstance(r, dict) and r.get("exit_code") != 0]
+        runs = rec.get("results", []) + rec.get("blueprint", []) + rec.get("gate_floor_runs", [])
+        red = [
+            str(r.get("task") or r.get("id") or f"sàn `{r.get('key')}`")
+            for r in runs
+            if isinstance(r, dict) and r.get("exit_code") != 0
+        ]
         red += ["sàn Gate M/L chưa đạt (LOOP-HARNESS-023)"] if rec.get("gate_floor") else []
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
@@ -2636,98 +2661,76 @@ def yaml_scalar(raw: str) -> str:
     return re.sub(r"^([\"'])(.*)\1$", r"\2", "".join(out).strip())
 
 
-# Sàn Gate theo quy mô (LOOP-HARNESS-023, D-033): ở M/L, cổng do agent tự khai phải đạt mức tối thiểu — ADR-0011 chỉ chặn
-# cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Máy chỉ dò dấu hiệu tất định trong xt.yaml + file cấu
-# hình; thiếu → `doctor` cảnh báo, `loop init` nhắc, `loop verify` ĐỎ (autopilot không ra `done` khi sàn chưa đạt).
-FLOOR_TYPED_MARKERS = {  # dấu hiệu stack có kiểm kiểu → khoá xt.yaml phải khác rỗng
+# Sàn Gate theo quy mô (LOOP-HARNESS-023, D-035): ở M/L, cổng do agent tự khai phải đạt mức tối thiểu — ADR-0011 chỉ chặn
+# cổng rỗng/no-op nên `test: pytest tests/smoke.py` vẫn "xanh". Sàn KHÔNG đoán tên công cụ (đoán thì đỏ oan với stack lạ
+# và lọt với cờ trùng tên — review #107): dự án khai lệnh tường minh trong xt.yaml, máy đòi khoá khác rỗng/no-op và
+# `loop verify` CHẠY chúng — đỏ thì autopilot không ra `done`. `doctor` cảnh báo, `loop init` nhắc.
+FLOOR_ALWAYS = (
+    ("format_check", "kiểm format không ghi file, đỏ khi lệch (vd `ruff format --check .`, `npx prettier --check .`)"),
+    (
+        "coverage",
+        "chạy test có ngưỡng coverage, đỏ khi dưới ngưỡng, artefact ra file tạm"
+        ' (vd `COVERAGE_FILE="$(mktemp)" PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider --cov --cov-fail-under=80`;'
+        " mẫu theo stack ở .xtemplates/framework/templates/xt.yaml)",
+    ),
+)
+FLOOR_TYPED_MARKERS = {  # dấu hiệu stack có kiểm kiểu → khoá xt.yaml phải khai lệnh thật
     "tsconfig.json": "typecheck",
     "pyproject.toml": "typecheck",
     "setup.cfg": "typecheck",
     "go.mod": "build",
     "Cargo.toml": "build",
 }
-FLOOR_FORMAT_RE = re.compile(
-    r"\b(?:prettier|biome|dprint|black|isort|rustfmt|gofmt|ruff\s+format|cargo\s+fmt|npm\s+run\s+format"
-    r"|pnpm\s+(?:run\s+)?format|yarn\s+format|format)\b[^&|;]*?(?:--check|\s-c\b|\s-l\b|--diff|\bci\b|\bcheck\b)"
-)
-FLOOR_COVERAGE_RE = re.compile(
-    r"fail[-_]under|coverageThreshold|thresholds|check-coverage|--cover(?:age)?-threshold|\s-cover\b"
-)
-FLOOR_COVERAGE_FILES = (
-    "pyproject.toml",
-    ".coveragerc",
-    "setup.cfg",
-    "tox.ini",
-    "package.json",
-    ".nycrc",
-    ".nycrc.json",
-    ".c8rc.json",
-    "vitest.config.ts",
-    "vitest.config.js",
-    "vitest.config.mts",
-    "vite.config.ts",
-    "vite.config.js",
-    "vite.config.mts",
-    "jest.config.ts",
-    "jest.config.js",
-    "jest.config.cjs",
-    "jest.config.mjs",
-    "codecov.yml",
-    ".codecov.yml",
-)
 FLOOR_E2E_PROFILES = ("web-app", "mobile-app", "desktop-app", "static-site", "game")
+FLOOR_SCALE_RE = re.compile(r"^scale:(.*)$", re.M)
+FLOOR_PROFILE_RE = re.compile(r"^profile:(.*)$", re.M)
 
 
 def blueprint_scale(base: Path) -> Tuple[str, str]:
-    """(quy mô, hồ sơ) từ frontmatter BLUEPRINT.md (khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc); không có/không
-    đọc được → ("", "")."""
+    """(quy mô S/M/L, hồ sơ) từ frontmatter BLUEPRINT.md (đường khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc);
+    giá trị đọc như xt.yaml (nháy, comment, chữ thường); không có/không đọc được → ("", "")."""
     st = read_state(base) or {}
     bp = base / str(st.get("blueprint") or "BLUEPRINT.md")
     try:
-        fm = FRONT_BLOCK_RE.match(bp.read_text(encoding="utf-8"))
+        fm = FRONT_BLOCK_RE.match(bp.read_text(encoding="utf-8").replace("\r\n", "\n"))
     except OSError:
         return "", ""
     text = fm[1] if fm else ""
-    scale = re.search(r"^scale:[ \t]*([SML])\s*$", text, re.M)
-    profile = re.search(r"^profile:[ \t]*(\S+)\s*$", text, re.M)
-    return (scale[1] if scale else ""), (profile[1] if profile else "")
+    sm, pm = FLOOR_SCALE_RE.search(text), FLOOR_PROFILE_RE.search(text)
+    scale = yaml_scalar(sm[1]).strip().upper() if sm else ""
+    return (scale if scale in SCALES else ""), (yaml_scalar(pm[1]).strip() if pm else "")
 
 
-def _floor_has_coverage(base: Path, test_cmd: str) -> bool:
-    if FLOOR_COVERAGE_RE.search(test_cmd):
-        return True
-    for name in FLOOR_COVERAGE_FILES:
-        try:
-            if FLOOR_COVERAGE_RE.search((base / name).read_text(encoding="utf-8", errors="replace")):
-                return True
-        except OSError:
-            continue
-    return False
+def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
+    """([(khoá, mô tả)] sàn đòi ở quy mô hiện tại, giá trị xt.yaml); S/không blueprint/không xt.yaml → ([], {})."""
+    scale, profile = blueprint_scale(base)
+    p = base / "xt.yaml"
+    if scale not in ("M", "L"):
+        return [], {}
+    # Thiếu cả xt.yaml ở M/L = mọi khoá sàn đều thiếu (không phải "không áp" — review #107).
+    rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else [])
+    keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
+    need = list(FLOOR_ALWAYS)
+    markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
+    for key in sorted({FLOOR_TYPED_MARKERS[f] for f in markers}):
+        need.append((key, f"kiểm kiểu/biên dịch vì repo có {', '.join(markers)}"))
+    if profile in FLOOR_E2E_PROFILES:
+        need.append(("e2e", f"suite e2e đầy đủ vì hồ sơ {profile} (QA-E2E-023)"))
+    return need, keys
 
 
 def gate_floor_issues(base: Path) -> List[str]:
-    """Sàn Gate chưa đạt ở quy mô M/L (mỗi dòng một thiếu sót kèm cách sửa); S hoặc không có blueprint/xt.yaml → []."""
-    scale, profile = blueprint_scale(base)
-    p = base / "xt.yaml"
-    if scale not in ("M", "L") or not p.is_file():
-        return []
-    rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines())
-    keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
-    out: List[str] = []
-    markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
-    for key in sorted({FLOOR_TYPED_MARKERS[f] for f in markers}):
-        if not keys.get(key):
-            why = "kiểm kiểu" if key == "typecheck" else "biên dịch (trình biên dịch kiểm kiểu)"
-            out.append(f"`{key}` rỗng dù repo có stack {why} ({', '.join(markers)})")
-    if not FLOOR_FORMAT_RE.search(keys.get("lint", "")):
-        out.append("`lint` chưa kiểm format (vd `ruff format --check`, `prettier --check`, `gofmt -l`)")
-    if not _floor_has_coverage(base, keys.get("test", "")):
-        out.append(
-            "`test` chưa có ngưỡng coverage (vd `--cov-fail-under`, `coverage report --fail-under`, `coverageThreshold`)"
-        )
-    if profile in FLOOR_E2E_PROFILES and not keys.get("e2e"):
-        out.append(f"`e2e` rỗng dù hồ sơ {profile} (PLAN cần task cuối Gate = `e2e`, QA-E2E-023)")
-    return [f"quy mô {scale}: {o}" for o in out]
+    """Khoá sàn Gate ở quy mô M/L còn thiếu, rỗng hoặc no-op (mỗi dòng một khoá kèm cách sửa)."""
+    scale, _ = blueprint_scale(base)
+    need, keys = gate_floor_keys(base)
+    bad = [(k, why) for k, why in need if not keys.get(k) or GATE_NOOP_RE.fullmatch(keys[k])]
+    return [f"quy mô {scale}: xt.yaml thiếu hoặc no-op `{k}` — {why}" for k, why in bad]
+
+
+def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:
+    """[(khoá, lệnh)] sàn đã khai hợp lệ — `loop verify` chạy lại; khoá thiếu đã nằm ở `gate_floor_issues`."""
+    need, keys = gate_floor_keys(base)
+    return [(k, keys[k]) for k, _ in need if keys.get(k) and not GATE_NOOP_RE.fullmatch(keys[k])]
 
 
 def _doctor_gate_floor(base: Path) -> List[Finding]:
