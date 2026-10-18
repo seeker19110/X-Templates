@@ -1,15 +1,15 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.3.0 — tag sau PR phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.4.0 — tag sau PR phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
 
 ## Đang làm
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Nâng hotel-manager, X-Company lên 3.3.0. Đợt nâng autopilot còn lại (D-043): ghi công AI qua MCP/PR (máy chủ tự gắn URL phiên vào thân PR); kiểm tiêu đề PR ≤ 72 cục bộ; task `[perf]` trong `loop`; trần vòng review/PR. Guard (rà #132): `<<` trong nháy kép ngoài `$(` vẫn nuốt dòng sau (có từ trước); `find -L|-H|-P` trước gốc, `find . -path …/.autopilot` và `-exec sh -c rm` lọt; các lỗ ở `KNOWN_GAPS` của `tests/test_guard_corpus.py`.
+1. Nâng hotel-manager, X-Company lên 3.4.0. Còn (D-043): ghi công AI qua MCP/PR (máy chủ gắn URL phiên vào thân PR); kiểm tiêu đề PR ≤ 72 cục bộ; task `[perf]` trong `loop`. 🟢 review #135/#136: `:root{&.dark{}}` rò theme sáng; `for` > 64 từ; `subprocess.run([..]+[..])`.
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
-4. Giới hạn đã biết của guard: lệnh trong alias/biến/trình thông dịch; cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*`); `find -exec chmod`; `delta.*.pager`; CLI container ngoài docker/podman (AUD-SEC-042); merge PR repo khác từ phiên repo này bị chặn có chủ đích.
+4. Giới hạn đã biết của guard (CHANGELOG 3.4.0 "Còn lọt"): biến từ `$(…)`/`read`; `sort -o`/`sed w`/`awk -i inplace`/`git restore` vào `.autopilot/`; `base64 -d | sh` (chỉ hỏi); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042).
 5. Admin: Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main`.
 6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — không `noqa`/pragma.
 
@@ -47,9 +47,10 @@
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 - 2026-10-18 Vòng tối ưu hiệu năng có máy quyết (`LOOP-OPT`, `xt.py perf`, D-041/042).
 - 2026-10-18 Bộ tấn công guard (D-044); `pr reviewed --clean` đòi reviewer khác họ model (D-045); ghi tay `.autopilot/` bị chặn — ADR-0026 (D-046).
+- 2026-10-18 Guard: ngân sách quét (vượt trần → chặn, D-050); cổng UI `xt.py contrast`/`vendor-check` + mẫu `verify-render` (D-048/049).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `db5ad0d` (#132); tag `v3.3.0` (sau PR này), `v3.2.0` → `94858f7`, `v3.1.1` → `3a1c379`, `v3.1.0` → `fd34718`, `v3.0.1` → `d3fd5a9`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `396d39a` (#136); tag `v3.4.0` (sau PR này), `v3.3.0` → `27e6bc3`, `v3.2.0` → `94858f7`, `v3.1.1` → `3a1c379`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
