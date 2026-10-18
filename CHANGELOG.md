@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-10-18
+
+> **Dự án đích khi nâng từ 3.4.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`). Guard nay chặn thêm: lệnh mã hoá/nén
+> vào shell mà guard không giải được, vòng `for` hơn 64 giá trị khác nhau.
+
 ### Fixed
 - Guard (D-052) — bịt mục "Còn lọt" của 3.4.0:
   - Biến gán từ nguồn guard tính được: `x=$(echo|printf '…')`, `` x=`echo …` ``, `read [-r] x y <<< '…'`, `${y:-…}`/`${y=…}`
