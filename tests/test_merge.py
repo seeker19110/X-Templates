@@ -677,3 +677,75 @@ class GuardHardExceptionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergeWatchTest(unittest.TestCase):
+    """ADR-0021: `merge-watch` gọi merge-check định kỳ (mặc định 30 s) tới khi verdict ≠ wait."""
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        (self.base / "xt.yaml").write_text("merge_autonomy: L2\n", encoding="utf-8")
+        self.clock = [0.0]
+        self.sleeps: list[int] = []
+
+        def sleep(sec: int) -> None:
+            self.sleeps.append(sec)
+            self.clock[0] += sec
+
+        self.enterContext(unittest.mock.patch.object(xt.time, "sleep", side_effect=sleep))
+        self.enterContext(unittest.mock.patch.object(xt.time, "monotonic", side_effect=lambda: self.clock[0]))
+
+    def watch(self, results: list, *extra: str) -> tuple[int, str]:
+        """Chạy merge-watch với chuỗi kết quả merge-check giả: (rc, data, err) hoặc verdict ngắn gọn."""
+        seq = iter(results)
+        with unittest.mock.patch.object(xt, "_merge_check_json", side_effect=lambda pr: next(seq)):
+            rc, out, _ = run_main("merge-watch", "--pr", "7", *extra)
+        return rc, out
+
+    @staticmethod
+    def d(verdict: str, reason: str = "x", nxt: str = "") -> tuple[int, dict, str]:
+        return 0, {"pr": 7, "verdict": verdict, "reasons": [reason], "next": nxt}, ""
+
+    def test_waits_every_thirty_seconds_then_merge(self):
+        rc, out = self.watch([self.d("wait", "CI đang chạy: test")] * 2 + [self.d("merge", "xanh", "gh pr merge 7")])
+        self.assertEqual((rc, self.sleeps), (0, [30, 30]))
+        self.assertIn("WAIT · PR #7 — CI đang chạy: test", out)
+        self.assertIn("→ gh pr merge 7", out)
+
+    def test_merged_exits_zero_without_next_step(self):
+        rc, out = self.watch([self.d("wait"), self.d("closed", "PR đã MERGED")])
+        self.assertEqual((rc, self.sleeps), (0, [30]))
+        self.assertNotIn("→", out)
+
+    def test_action_verdicts_exit_one(self):
+        for verdict, reason in (("fix", "CI đỏ: e2e"), ("human", "ngoại lệ cứng"), ("closed", "PR đã CLOSED")):
+            with self.subTest(verdict):
+                self.sleeps.clear()
+                rc, _ = self.watch([self.d(verdict, reason, "làm gì đó")])
+                self.assertEqual((rc, self.sleeps), (1, []))
+
+    def test_read_errors_retry_then_give_up(self):
+        err = (2, {}, "✗ lỗi mạng\n")
+        rc, out = self.watch([err, err, self.d("merge")])  # hồi phục giữa chừng → đếm lại từ đầu
+        self.assertEqual((rc, self.sleeps), (0, [30, 30]))
+        self.assertIn("lỗi đọc PR (2/3): ✗ lỗi mạng", out)
+        self.sleeps.clear()
+        rc, out = self.watch([err, err, err])
+        self.assertEqual((rc, self.sleeps), (2, [30, 30]))
+        self.assertIn("(3/3)", out)
+
+    def test_timeout_exits_three_and_flags_override(self):
+        rc, out = self.watch([self.d("wait")] * 10, "--interval", "60", "--max-minutes", "3")
+        self.assertEqual((rc, self.sleeps), (3, [60, 60, 60]))  # kiểm ở phút 0,1,2,3; ngủ thêm là quá hạn 3 phút
+        self.assertIn("hết 3 phút", out)
+
+    def test_merge_check_json_reuses_merge_check_path(self):
+        """Đường thật: `_merge_check_json` = `merge-check --json` (xt.yaml, REST) — không có luật riêng."""
+        with FakeGh().patch():
+            rc, d, err = xt._merge_check_json("7")
+        self.assertEqual((rc, d["verdict"], err), (0, "merge", ""))
+        with unittest.mock.patch.object(xt, "load_pr", side_effect=xt.PrInputError("hỏng")):
+            rc, d, err = xt._merge_check_json("7")
+        self.assertEqual((rc, d), (2, {}))
+        self.assertIn("hỏng", err)

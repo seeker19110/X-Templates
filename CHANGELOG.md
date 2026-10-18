@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Mở PR xong chạy nền `xt.py merge-watch` (30 giây/lần)** (ADR-0021, D-026; chủ repo yêu cầu cho khung và dự án
+  đích): lệnh mới gọi lại đúng `merge-check` mỗi `--interval` giây (mặc định 30, `--max-minutes` 120) tới khi verdict ≠
+  `wait`; exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ. Thành bước bắt buộc trong
+  `AGENTS.md`, mẫu `templates/AGENTS.md`, skill `/autopilot` bước 13; `LOOP-STOP-022` (SHOULD, không đổi mức) thêm
+  `merge-watch` vào phần Kiểm. Dự án đích: chạy lại `install.py` để nhận lệnh.
 - **Chủ dự án tắt được chốt người của ngoại lệ cứng** (ADR-0020, D-024): khoá `xt.yaml` `merge_hard_exceptions: human|auto`
   đọc ở nhánh đích đã commit, không ở cây làm việc (thiếu/lạ/không đọc được = `human`). `auto`: `xt.py merge-check` trả
   `hard: []`, lý do chuyển sang `hard_waived` + một dòng `reasons`; PR vẫn làn chuẩn, ở L3 merge/bật auto-merge khi CI

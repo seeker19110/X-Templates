@@ -176,3 +176,10 @@
 - Chọn: Mẫu về human; repo khung giữ auto (chủ repo chọn); dự án đích bật bằng một PR đổi khoá — PR đó luôn người merge (HARD_KEY_REASON) = lời chấp nhận rủi ro có dấu vết
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: dự án đích có tiền/dữ liệu người dùng thật (vd hotel-manager); mặc định auto vi phạm MUST ngay khi cài và trái 'thiếu khoá = human'; PA1 vẫn cho chủ repo bật ở dự án của mình bằng một lần merge
 - Đường lùi: Đặt merge_hard_exceptions: auto trong framework/templates/xt.yaml
+
+### D-026 · 2026-10-18T00:34:11+00:00 · Cách làm 'mỗi PR kiểm merge mỗi 30 giây' (chủ repo: 2 phút rồi đổi 30 giây) — dùng gì, cho khung và dự án đích?
+
+- Phương án: (1) Lệnh xt.py merge-watch (mặc định 30 s): vòng lặp trong tiến trình gọi lại merge-check, chạy nền, thoát khi verdict khác wait → agent được đánh thức; mọi harness dùng được; quy định thành bước bắt buộc sau khi mở PR · (2) /loop 30s trong phiên: mỗi lần kiểm là một lượt model, đốt token, chỉ chạy ở Claude Code, hết hạn 7 ngày · (3) Chỉ dựa vào sự kiện GitHub + auto-merge, không poll
+- Chọn: Lệnh xt.py merge-watch (mặc định 30 s): vòng lặp trong tiến trình gọi lại merge-check, chạy nền, thoát khi verdict khác wait → agent được đánh thức; mọi harness dùng được; quy định thành bước bắt buộc sau khi mở PR
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3 (bền, đơn giản, test được): poll tất định nằm trong code, không tốn token mỗi 30 s, test được bằng giả đồng hồ, dùng lại nguyên đường merge-check nên không có luật thứ hai; PA2 tốn token và chỉ một harness; PA3 trái yêu cầu chủ repo. Thêm: 30 s × ~6 lệnh REST mỗi lần ≈ 720 yêu cầu/giờ/PR, dưới hạn 5000/giờ của gh đã đăng nhập; nhiều PR song song thì nâng --interval
+- Đường lùi: Bỏ bước merge-watch khỏi AGENTS.md/skill/mẫu; lệnh vẫn dùng được thủ công hoặc xoá cmd_merge_watch

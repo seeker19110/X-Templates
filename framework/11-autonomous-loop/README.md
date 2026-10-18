@@ -100,6 +100,7 @@ updated: 2026-10-18
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
 | `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
+| `merge-watch [--pr N] [--interval 30] [--max-minutes 120]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
 | `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`, không secret ngoài `GITHUB_TOKEN` trong job chạy trên `pull_request`) |
