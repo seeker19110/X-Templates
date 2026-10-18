@@ -1,13 +1,11 @@
-"""ADR-0022: `xt.py grant-check` — việc production có nằm trong mục Ủy quyền production (PLAN.md đã commit) không."""
+"""ADR-0022: `xt.py grant-check` — việc production có nằm trong mục Ủy quyền production (PLAN.md ở nhánh mặc định) không."""
 
 from __future__ import annotations
 
+import base64
 import io
 import json
-import os
-import subprocess
 import sys
-import tempfile
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -44,23 +42,6 @@ def run_main(*args: str) -> tuple[int, str, str]:
     with redirect_stdout(out), redirect_stderr(err):
         rc = xt.main([str(a) for a in args])
     return rc, out.getvalue(), err.getvalue()
-
-
-def commit_plan(base: Path, committed: str, working: str | None = None, branch: str = "main") -> None:
-    """Repo git tạm: `origin/<branch>` có PLAN.md = `committed`; cây làm việc = `working` (mặc định như commit)."""
-    plan = base / "docs" / "autopilot" / "PLAN.md"
-    plan.parent.mkdir(parents=True, exist_ok=True)
-    plan.write_text(committed, encoding="utf-8")
-    git = ["git", "-C", str(base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
-    for args in (
-        ["init", "-q"],
-        ["add", "-A"],
-        ["commit", "-qm", "x"],
-        ["update-ref", f"refs/remotes/origin/{branch}", "HEAD"],
-    ):
-        subprocess.run([*git, *args], check=True, capture_output=True)
-    if working is not None:
-        plan.write_text(working, encoding="utf-8")
 
 
 class ParseGrantsTest(unittest.TestCase):
@@ -128,61 +109,81 @@ class ViolationsTest(unittest.TestCase):
         self.assertEqual(len(self.v("payments", per_txn="99", mode="prod")), 2)
 
 
+def fake_default_branch(plans: dict[str, str]):
+    """`_gh_one` giả: chỉ có nội dung REST của NHÁNH MẶC ĐỊNH (không `?ref=`); đường vắng → 404 như gh."""
+
+    def fake(path: str) -> dict:
+        key = path.split("/contents/", 1)[1]
+        assert "?ref=" not in key, "grant-check không được đọc ref cục bộ/tuỳ chọn"
+        if key not in plans:
+            raise xt.PrInputError(f"gh api {path} lỗi: gh: Not Found (HTTP 404)")
+        return {"encoding": "base64", "content": base64.b64encode(plans[key].encode()).decode()}
+
+    return fake
+
+
+PLAN_PATH = "docs/autopilot/PLAN.md"
+
+
 class GrantCheckCliTest(unittest.TestCase):
-    def setUp(self):
-        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+    def use(self, plans: dict[str, str] | None = None, **kw):
+        """Giả REST nhánh mặc định; trả mock để xem lời gọi."""
+        side = fake_default_branch(plans if plans is not None else {PLAN_PATH: PLAN})
+        return self.enterContext(unittest.mock.patch.object(xt, "_gh_one", side_effect=kw.get("side", side)))
 
     def check(self, group: str, *params: str, extra: tuple[str, ...] = ()) -> tuple[int, str, str]:
         return run_main("grant-check", group, *params, *extra)
 
-    def test_within_grant(self):
-        commit_plan(self.base, PLAN)
+    def test_within_grant_reads_default_branch_via_rest(self):
+        one = self.use()
         rc, out, _ = self.check("payments", "per_txn=30", "mode=live", "refund=false")
         self.assertEqual((rc, out), (0, "✓ trong ủy quyền production: payments per_txn=30 mode=live refund=false\n"))
+        self.assertEqual(one.call_args.args, (f"repos/{{owner}}/{{repo}}/contents/{PLAN_PATH}",))  # không ref
         self.assertEqual(self.check("secrets", "read_values=false")[0], 0)
 
     def test_outside_grant_says_defer(self):
-        commit_plan(self.base, PLAN)
+        self.use()
         rc, out, _ = self.check("payments", "per_txn=500", "mode=sandbox", "refund=false")
         self.assertEqual(rc, 1)
         self.assertIn("NGOÀI ủy quyền production: payments", out)
         self.assertIn("per_txn=500 vượt max_per_txn=50", out)
         self.assertIn("loop defer", out)
 
-    def test_reads_committed_branch_not_working_tree(self):
-        """Lỗ review ADR-0022: agent sửa PLAN.md tại chỗ (chưa commit) không được tự cấp ủy quyền."""
-        sandbox = "- grant: payments | mode=sandbox | max_per_txn=0 | refund=false\n"
-        live = "- grant: payments | mode=live | max_per_txn=1e9 | refund=true\n"
-        commit_plan(self.base, sandbox, working=live)
-        rc, out, _ = self.check("payments", "mode=live", "per_txn=5000", "refund=true")
-        self.assertEqual(rc, 1)
-        self.assertIn("mode=live ngoài ủy quyền (sandbox)", out)
-        self.assertEqual(self.check("payments", "mode=sandbox", "per_txn=0", "refund=false")[0], 0)
-
-    def test_missing_branch_file_or_section_denies(self):
-        rc, out, _ = self.check("payments")  # không phải repo git
+    def test_missing_file_or_section_denies(self):
+        self.use({})  # PLAN.md chưa có ở nhánh mặc định (PR duyệt kế hoạch chưa merge)
+        rc, out, _ = self.check("payments", "mode=sandbox")
         self.assertEqual(rc, 1)
         self.assertIn("không có trong mục Ủy quyền production", out)
-        commit_plan(self.base, "# PLAN\n- [ ] `T-001` việc — Gate: `true`\n")  # có PLAN, không có mục
+        self.assertNotIn("không đọc được", out)  # 404 là "vắng", không phải lỗi đọc
+        self.use({PLAN_PATH: "# PLAN\n- [ ] `T-001` việc — Gate: `true`\n"})  # có PLAN, không có mục
         self.assertEqual(self.check("payments", "mode=sandbox")[0], 1)
 
-    def test_plan_path_and_ref_flags_and_default_ref(self):
-        commit_plan(self.base, PLAN, branch="master")
-        self.assertEqual(self.check("secrets", "read_values=false")[0], 1)  # origin/main không tồn tại
-        self.assertEqual(self.check("secrets", "read_values=false", extra=("--ref", "origin/master"))[0], 0)
-        subprocess.run(
-            ["git", "-C", str(self.base), "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"],
-            check=True,
-            capture_output=True,
-        )
-        self.assertEqual(xt._default_ref(self.base), "origin/master")
-        self.assertEqual(self.check("secrets", "read_values=false")[0], 0)  # theo origin/HEAD
-        self.assertEqual(self.check("secrets", "read_values=false", extra=("--plan", "../PLAN.md"))[0], 1)
-        self.assertEqual(self.check("secrets", "read_values=false", extra=("--plan", "no/such.md"))[0], 1)
+    def test_unreadable_denies_and_says_so(self):
+        """gh/mạng lỗi, hoặc file lớn (content rỗng + encoding none) → không xác minh được → ngoài ủy quyền."""
+
+        def boom(path: str) -> dict:
+            raise xt.PrInputError("gh api lỗi: timeout")
+
+        self.use(side=boom)
+        rc, out, _ = self.check("secrets", "read_values=false")
+        self.assertEqual(rc, 1)
+        self.assertIn("không đọc được PLAN.md ở nhánh mặc định", out)
+        self.use(side=lambda path: {"content": "", "encoding": "none"})
+        rc, out, _ = self.check("secrets", "read_values=false")
+        self.assertEqual(rc, 1)
+        self.assertIn("không đọc được PLAN.md ở nhánh mặc định", out)
+
+    def test_plan_flag_locked_to_plan_path(self):
+        """Chỉ đường PLAN mà merge-check giữ cho người merge; file khác (docs/notes.md) không được dùng làm nguồn ủy quyền."""
+        self.use({"docs/notes.md": PLAN, f"sub/{PLAN_PATH}": PLAN, PLAN_PATH: "# PLAN\n"})
+        rc, _, err = self.check("secrets", "read_values=false", extra=("--plan", "docs/notes.md"))
+        self.assertEqual(rc, 2)
+        self.assertIn("--plan phải kết thúc bằng docs/autopilot/PLAN.md", err)
+        self.assertEqual(self.check("secrets", "read_values=false", extra=("--plan", f"sub/{PLAN_PATH}"))[0], 0)
+        self.assertEqual(self.check("secrets", "read_values=false")[0], 1)  # PLAN mặc định không có grant
 
     def test_json_and_bad_param(self):
-        commit_plan(self.base, PLAN)
+        self.use()
         rc, out, _ = run_main("grant-check", "payments", "mode=prod", "per_txn=0", "refund=false", "--json")
         d = json.loads(out)
         self.assertEqual(
@@ -194,10 +195,6 @@ class GrantCheckCliTest(unittest.TestCase):
             rc, _, err = self.check("payments", bad)
             self.assertEqual(rc, 2)
             self.assertIn("phải dạng khoá=giá trị", err)
-
-    def test_default_ref_without_origin_head(self):
-        commit_plan(self.base, PLAN)
-        self.assertEqual(xt._default_ref(self.base), "origin/main")
 
 
 if __name__ == "__main__":

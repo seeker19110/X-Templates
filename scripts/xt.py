@@ -2782,9 +2782,11 @@ HARD_RISK_LABELS = {"risk:auth", "risk:payment", "risk:pii", "risk:crypto", "ris
 # Harness agent: "session"/"permission" ở đây là phiên/quyền của agent (`.claude/hooks/session-start.sh`), không phải
 # xác thực của ứng dụng — miễn nhóm "auth"; vẫn vào làn chuẩn qua "cổng/CI" (D-020).
 HARD_KEY = "merge_hard_exceptions"
-HARD_KEY_REASON = (
-    f"đổi `{HARD_KEY}` trong xt.yaml hoặc dòng `- grant:` trong PLAN.md (ADR-0020, ADR-0022) — luôn người merge"
+HARD_KEY_REASON = f"đổi `{HARD_KEY}` trong xt.yaml hoặc hiệu lực ủy quyền production trong PLAN.md (ADR-0020, ADR-0022) — luôn người merge"
+TRUNCATED_REASON = (
+    "danh sách file của PR bị cắt (quá giới hạn REST) — không xác minh được ủy quyền/khoá, luôn người merge"
 )
+UNWAIVABLE = (HARD_KEY_REASON, TRUNCATED_REASON)  # `merge_hard_exceptions: auto` không miễn được hai lý do này
 AGENT_HARNESS_RE = re.compile(r"(^|/)(\.claude|\.xtemplates|\.codex|\.gemini|\.cursor)/")
 
 
@@ -2809,6 +2811,8 @@ def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
         out.append(f"đường dẫn nhạy cảm (merge_risk_paths): {', '.join(own[:3])}")
     if any(isinstance(f, dict) and f.get("hard_key") for f in pr.get("files") or []):
         out.append(HARD_KEY_REASON)
+    if pr.get("filesTruncated"):
+        out.append(TRUNCATED_REASON)
     return out
 
 
@@ -2889,7 +2893,7 @@ def merge_decision(
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     hard = merge_hard_reasons(pr, risk_paths or [])
     # Khoá tự miễn cho chính PR đổi nó thì chốt vô nghĩa — lý do này không miễn được.
-    waived = [r for r in hard if r != HARD_KEY_REASON] if hard_auto else []
+    waived = [r for r in hard if r not in UNWAIVABLE] if hard_auto else []
     hard = [r for r in hard if r not in waived]
     lane = "chuẩn" if lane_reasons else "nhanh"
     blocked = _merge_blockers(pr) or _stacked_blocker(pr)
@@ -2986,27 +2990,39 @@ class PrInputError(Exception):
 PLAN_PATH_SUFFIX = "docs/autopilot/PLAN.md"
 
 
-def _plan_grants(repo: str, path: str, ref: str) -> Optional[Dict[str, Dict[str, str]]]:
-    """Ủy quyền production trong PLAN.md ở `ref` (REST contents); None = không đọc được (đóng khi thiếu). `ref` rỗng thì
-    REST lấy nhánh mặc định — không dùng, coi là không đọc được."""
-    if not ref:
+def _plan_grants(repo: str, path: str, ref: Optional[str]) -> Optional[Dict[str, Dict[str, str]]]:
+    """Ủy quyền production trong PLAN.md ở `ref` (REST contents; `ref=None` = nhánh mặc định). `{}` = file vắng (404)
+    hoặc không có grant; None = không đọc được hay không xác minh được (đóng khi thiếu). `ref` rỗng thì REST lấy nhánh
+    mặc định — không dùng cho PR, coi là không đọc được."""
+    if ref == "":
         return None
     try:
-        d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}?ref={ref}")
+        d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}" + (f"?ref={ref}" if ref else ""))
+        if d.get("encoding") != "base64":  # file lớn: content rỗng + encoding none; thư mục/symlink không có encoding
+            return None
         raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
         return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8"))
-    except (PrInputError, ValueError):  # ValueError gồm lỗi base64 và UnicodeDecodeError
+    except PrInputError as exc:
+        return {} if "404" in str(exc) else None  # file vắng ở ref đó ≠ không đọc được
+    except ValueError:  # lỗi base64 và UnicodeDecodeError
         return None
 
 
 def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
-    """So HIỆU LỰC ủy quyền (`parse_grants`) của PLAN.md ở đáy PR với đầu PR — không soi dòng diff: thêm/xoá dòng code
-    fence, viết hoa, xoá dòng đều đổi hiệu lực mà regex trên patch bỏ sót (review ADR-0022). Không đọc được → coi như đổi."""
-    status = f.get("status")
-    old = str(f.get("previous_filename") or f.get("filename"))
-    before = {} if status == "added" else _plan_grants(repo, old, base_sha)
-    after = {} if status == "removed" else _plan_grants(repo, str(f.get("filename")), head_sha)
-    return before is None or after is None or before != after
+    """So HIỆU LỰC ủy quyền (`parse_grants`) ở đáy PR với đầu PR cho TỪNG đường PLAN.md mà file đụng tới (đường mới và
+    đường cũ khi đổi tên/sao chép); đường vắng ở một đầu là `{}`. Không soi dòng diff (fence, viết hoa, xoá dòng lọt regex)
+    và không lấy tên file cũ làm đáy: đổi tên/sao chép file có grant vào PLAN.md cũng đổi hiệu lực (review ADR-0022).
+    Không đọc được → coi như đổi."""
+    paths = [
+        n
+        for n in (f.get("filename"), f.get("previous_filename"))
+        if isinstance(n, str) and n.endswith(PLAN_PATH_SUFFIX)
+    ]
+    for path in paths:
+        before, after = _plan_grants(repo, path, base_sha), _plan_grants(repo, path, head_sha)
+        if before is None or after is None or before != after:
+            return True
+    return False
 
 
 def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
@@ -3150,6 +3166,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
+        # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
+        **({"filesTruncated": True} if int(pr.get("changed_files") or 0) > len(files) else {}),
         "files": [
             {
                 "path": f.get("filename", ""),
@@ -4070,17 +4088,11 @@ def grant_violations(grants: Dict[str, Dict[str, str]], group: str, requested: D
     return out + [why for k, v in req.items() if (why := _grant_violation(grant, k, v))]
 
 
-def _default_ref(base: Path) -> str:
-    """Nhánh mặc định ở remote (`origin/HEAD`); không có thì `origin/main`."""
-    r = _git(base, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "origin/main"
-
-
 def cmd_grant_check(args: argparse.Namespace) -> int:
-    """Việc production đang định làm có nằm trong ủy quyền của PLAN.md **đã commit ở nhánh mặc định** không (ADR-0022) —
-    không đọc cây làm việc nên agent sửa PLAN tại chỗ không tự cấp được; ủy quyền chỉ có hiệu lực sau khi PR duyệt kế
-    hoạch (do người merge) vào nhánh mặc định. exit 0 = trong ủy quyền; 1 = ngoài (ghi `loop defer`, không tự làm);
-    2 = tham số sai."""
+    """Việc production đang định làm có nằm trong ủy quyền của PLAN.md **ở nhánh mặc định trên GitHub** không (ADR-0022)
+    — cùng nguồn REST với `merge-check`, không đọc cây làm việc hay nhánh/ref cục bộ (agent tạo được) nên không tự cấp
+    hay giữ lại ủy quyền đã thu hồi; ủy quyền chỉ có hiệu lực sau khi PR duyệt kế hoạch (do người merge) vào nhánh mặc
+    định. exit 0 = trong ủy quyền; 1 = ngoài hoặc không đọc được (ghi `loop defer`, không tự làm); 2 = tham số sai."""
     requested = {}
     for item in args.params:
         key, sep, value = item.partition("=")
@@ -4088,10 +4100,13 @@ def cmd_grant_check(args: argparse.Namespace) -> int:
             print(f"✗ tham số `{item}` phải dạng khoá=giá trị", file=sys.stderr)
             return 2
         requested[key.lower()] = value
-    base = project_dir()
-    shown = _git(base, "show", f"{args.ref or _default_ref(base)}:./{args.plan}")
-    grants = parse_grants(shown.stdout) if shown.returncode == 0 else {}
-    why = grant_violations(grants, args.group, requested)
+    if not args.plan.endswith(PLAN_PATH_SUFFIX):  # chỉ đường PLAN mà `merge-check` giữ cho người merge
+        print(f"✗ --plan phải kết thúc bằng {PLAN_PATH_SUFFIX}", file=sys.stderr)
+        return 2
+    grants = _plan_grants("repos/{owner}/{repo}", args.plan, None)
+    why = grant_violations(grants or {}, args.group, requested)
+    if grants is None:
+        why.insert(0, "không đọc được PLAN.md ở nhánh mặc định (gh, mạng, quyền, file lớn) — coi như chưa có ủy quyền")
     if args.json:
         print(json.dumps({"group": args.group, "ok": not why, "reasons": why}, ensure_ascii=False))
     elif why:
@@ -4221,8 +4236,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="khoá=giá trị của việc định làm (vd per_txn=30 mode=live refund=false); thiếu khoá = ngoài",
     )
-    pg.add_argument("--plan", default="docs/autopilot/PLAN.md", help="đường dẫn trong repo của PLAN.md chứa `- grant:`")
-    pg.add_argument("--ref", help="nhánh đọc PLAN.md đã commit (mặc định origin/HEAD, không có thì origin/main)")
+    pg.add_argument(
+        "--plan",
+        default=PLAN_PATH_SUFFIX,
+        help="đường PLAN.md ở nhánh mặc định (phải kết thúc bằng docs/autopilot/PLAN.md)",
+    )
     pg.add_argument("--json", action="store_true", help="in JSON (group, ok, reasons)")
     pg.set_defaults(fn=cmd_grant_check)
     pb = sub.add_parser("blueprint-status")

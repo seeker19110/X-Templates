@@ -22,13 +22,17 @@ production thật (`AGENTS.md` §5, D-023) — nhóm sau chưa có cách bật t
    `data_delete`, `data_export`, `outbound_messages`, `auth_crypto`, `secrets`). `max_<khoá>` là trần số; `true` cho phép cả
    hai giá trị, `false` chỉ nhận `false`, `a,b` chỉ nhận giá trị trong danh sách. Mẫu mặc định chỉ sandbox.
 2. **`xt.py grant-check <nhóm> khoá=giá trị …`**: exit 0 = trong ủy quyền, 1 = ngoài (kể cả nhóm vắng, thiếu mục,
-   không đọc được — đóng khi thiếu) → agent `loop defer`, 2 = tham số sai. Đọc PLAN.md **đã commit ở nhánh mặc định**
-   (`origin/HEAD`, `--ref` đổi được; `git show`), không đọc cây làm việc — agent sửa PLAN tại chỗ không tự cấp được; ủy quyền
-   chỉ có hiệu lực sau khi PR duyệt kế hoạch được người merge. Phải khai đủ mọi khoá mà ủy quyền ràng buộc (khoá thiếu
+   không đọc được — đóng khi thiếu) → agent `loop defer`, 2 = tham số sai. Đọc PLAN.md **ở nhánh mặc định trên GitHub**
+   (REST contents không `ref`, cùng nguồn với `merge-check`), không đọc cây làm việc hay nhánh/ref cục bộ (agent tạo
+   được, và ref cũ làm ủy quyền đã thu hồi vẫn dùng được) — agent sửa PLAN tại chỗ không tự cấp được; ủy quyền chỉ có
+   hiệu lực sau khi PR duyệt kế hoạch được người merge. `--plan` phải kết thúc bằng `docs/autopilot/PLAN.md` (đường
+   mà `merge-check` giữ cho người merge); không có `--ref`. Phải khai đủ mọi khoá mà ủy quyền ràng buộc (khoá thiếu
    không tính là trong hạn); trần `max_<khoá>` từ chối giá trị âm, `nan`, `inf`. Dòng trong code fence không tính.
 3. **Chốt người đúng một lần**: PR đổi **hiệu lực** ủy quyền của `docs/autopilot/PLAN.md` (so `parse_grants` của đáy và
-   đầu PR qua REST contents; khác hoặc không đọc được thì coi là đổi — thêm/xoá/sửa dòng, viết hoa, đổi code fence đều bị
-   bắt) hoặc đổi khoá `merge_hard_exceptions` luôn là ngoại lệ cứng không miễn được (`HARD_KEY_REASON`, `_touches_hard_key`). PLAN do
+   đầu PR qua REST contents cho TỪNG đường PLAN mà file đụng tới, đường vắng là `{}`; khác hoặc không đọc được (kể cả
+   `encoding` khác `base64`) thì coi là đổi — thêm/xoá/sửa dòng, viết hoa, đổi code fence, đổi tên/sao chép file có grant
+   vào PLAN.md đều bị bắt; danh sách file của PR bị REST cắt (`changed_files` > số file nhận được) cũng là hard) hoặc đổi khoá `merge_hard_exceptions` luôn là ngoại lệ cứng không miễn được, kể cả `merge_hard_exceptions: auto` (`HARD_KEY_REASON`,
+   `TRUNCATED_REASON`, `UNWAIVABLE`). PLAN do
    phiên chính tự duyệt (ADR-0008), nên không có chốt này agent tự cấp ủy quyền cho chính nó. Người merge PR duyệt kế hoạch
    là lời chấp nhận rủi ro duy nhất của dự án.
 4. **Refactor phía sản phẩm** (hạn mức theo thời gian không do agent giữ): idempotency + sổ cái + hạn mức mỗi giao dịch/ngày +
