@@ -1043,6 +1043,22 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual(xt.read_runs(empty), [])
         self.assertIsNone(xt.loop_stats(empty)["first_pass_rate"])
 
+    def test_runs_log_is_fail_open_and_does_not_follow_symlink(self):
+        # Review #109: runs.jsonl hỏng (là thư mục) không làm vỡ loop record, đếm lỗi lặp vẫn tăng; symlink không bị ghi theo.
+        (self.base / ".autopilot" / xt.RUNS_FILE).mkdir(parents=True)
+        code, _, err = self.record(["false"])
+        self.assertEqual(code, 1)
+        self.assertIn("⚠ không ghi được .autopilot/runs.jsonl", err)
+        self.assertEqual(xt.read_state(self.base)["same_failure_count"], 1)
+        (self.base / ".autopilot" / xt.RUNS_FILE).rmdir()
+        victim = self.base / "victim.txt"
+        victim.write_text("gốc\n", encoding="utf-8")
+        (self.base / ".autopilot" / xt.RUNS_FILE).symlink_to(victim)
+        code, _, err = self.record(["true"])
+        self.assertEqual(code, 0)
+        self.assertIn("⚠ không ghi được", err)
+        self.assertEqual(victim.read_text(encoding="utf-8"), "gốc\n")
+
     def test_record_without_state_still_writes_evidence(self):
         bare = self.tmpdir()
         with redirect_stdout(io.StringIO()):
