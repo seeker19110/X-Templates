@@ -2067,6 +2067,8 @@ class GuardBashWave3Test(unittest.TestCase):
             "tee .autopilot/reviews.json",
             "cp /tmp/x.json .autopilot/evidence/T-001.json",
             "rm -rf .autopilot",
+            "find .autopilot -delete",
+            "find .autopilot/evidence -type f -exec rm {} \\;",
             "python3 -c \"open('.autopilot/verified.json','w').write('{}')\"",
             "python3 - <<'PY'\nopen('.autopilot/evidence/T-1.json','w').write('{}')\nPY",
         ):
@@ -2075,7 +2077,13 @@ class GuardBashWave3Test(unittest.TestCase):
                 self.assertEqual(out["decision"], "deny")
         d, why = self.guard.edit_decision(".autopilot/verified.json", str(self.root))
         self.assertEqual(self.guard.apply_policy({"decision": d, "reason": why})["decision"], "deny")
-        for ok in ("python3 scripts/xt.py loop verify", "cat .autopilot/state.json", "ls .autopilot/evidence"):
+        for ok in (
+            "python3 scripts/xt.py loop verify",
+            "cat .autopilot/state.json",
+            "ls .autopilot/evidence",
+            "find .autopilot -name '*.json'",
+            "find build -delete",
+        ):
             self.assertEqual(self.guard.apply_policy(self.guard.bash_decision(ok, str(self.root)))["decision"], "")
 
     def test_guard_gate_patterns(self):

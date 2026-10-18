@@ -17,7 +17,7 @@ Stop hook (`final_check`) đọc chính các file đó. Rà autopilot 2026-10-18
 
 ## Quyết định
 
-Ghi/xoá `.autopilot/` qua Edit/Write hoặc Bash (chuyển hướng, `tee`, `cp`/`mv`, `rm`, `sed -i`…) bị **chặn** ở chính sách mặc
+Ghi/xoá `.autopilot/` qua Edit/Write hoặc Bash (chuyển hướng, `tee`, `cp`/`mv`, `rm`, `find -delete`/`-exec rm`, `sed -i`…) bị **chặn** ở chính sách mặc
 định: thêm dấu "tay bằng chứng" vào `DANGER_MARKERS`. Chỉ `xt.py` (chạy như một lệnh, guard không thấy file nó ghi) được
 ghi. Cần sửa tay (gỡ vòng hỏng) thì người làm, hoặc `xt.py loop init --force`.
 

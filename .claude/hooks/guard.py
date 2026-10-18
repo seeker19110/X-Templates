@@ -1146,6 +1146,18 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
+def _find_delete_roots(args: List[str]) -> List[str]:
+    """Gốc của `find … -delete` / `-exec rm|shred|unlink …`: lệnh xoá file dưới các gốc này (reviewer #132)."""
+    i = 0
+    while i < len(args) and not args[i].startswith(("-", "(", "!")):
+        i += 1
+    deleting = "-delete" in args[i:] or any(
+        a in FIND_EXEC and k + 1 < len(args) and posixpath.basename(args[k + 1]) in ("rm", "shred", "unlink")
+        for k, a in enumerate(args)
+    )
+    return (args[:i] or ["."]) if deleting else []
+
+
 FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race", "-mindepth", "-maxdepth"}
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
@@ -2427,6 +2439,8 @@ def write_targets(n: List[str], argv: List[str]) -> List[str]:
         return out + _copy_targets(name, args)
     if name in ("rm", "unlink", "shred"):
         return out + _positionals(args)  # `-f` của rm là cờ, không ăn giá trị (từng nuốt đường dẫn)
+    if name == "find":
+        return out + _find_delete_roots(args)
     if name == "truncate":
         return out + _positionals(args, ("-s", "--size", "-r", "--reference"))
     if name in FILE_WRITERS:
