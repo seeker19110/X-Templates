@@ -1346,7 +1346,6 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
     d = state_dir(base) / "evidence"
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")
-    _append_run(base, st, ev, None if code == 0 else failure_signature(task, code, out))
     if st:
         if code == 0:
             st["same_failure_count"] = 0
@@ -1360,6 +1359,7 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
                 st["last_failure_signature"] = sig
             st["last_failure_task"] = task
         write_state(st, base)
+    _append_run(base, st, ev, None if code == 0 else failure_signature(task, code, out))  # sau state: số đo không chặn
     print(f"[xt] {task}: exit {code} — bằng chứng: .autopilot/evidence/{task}.json")
     if code != 0:
         print(ev["output_tail"][-2000:])
@@ -1370,11 +1370,18 @@ RUNS_FILE = "runs.jsonl"  # nhật ký chỉ ghi nối mọi lần `loop record`
 
 
 def _append_run(base: Path, st: Dict[str, Any], ev: Dict[str, Any], signature: Optional[str]) -> None:
-    """Nối một dòng vào `.autopilot/runs.jsonl`: evidence/T-xxx.json bị ghi đè mỗi lần nên không thấy các lần đỏ trước."""
+    """Nối một dòng vào `.autopilot/runs.jsonl`: evidence/T-xxx.json bị ghi đè mỗi lần nên không thấy các lần đỏ trước.
+    Fail-open (AGENTS.md §7): ghi lỗi chỉ cảnh báo — bằng chứng và đếm lỗi lặp đã ghi trước đó. Không đi theo symlink
+    đặt sẵn (O_NOFOLLOW, như `write_atomic` — AUD-HAR-009)."""
     row = {k: ev[k] for k in ("task", "exit_code", "started", "finished", "head")}
     row.update({"signature": signature, "loop": st.get("started")})
-    with open(state_dir(base) / RUNS_FILE, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(state_dir(base) / RUNS_FILE, flags, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"⚠ không ghi được .autopilot/{RUNS_FILE} (số đo vòng, LOOP-DESIGN-024): {exc}", file=sys.stderr)
 
 
 def read_runs(base: Path) -> List[Dict[str, Any]]:
