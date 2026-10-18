@@ -360,3 +360,24 @@
 - Chọn: Ngân sách quét mỗi quyết định (600 lệnh con, 8 giây, tập script đã quét, 4 lần viết lại lồng) — hết thì CHẶN
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: reviewer #134 tái hiện N=21 lần nhân đôi mất 177 s, N=22 vượt timeout hook 600 s nên rm -rf ~ chạy không qua guard; cắt từng chỗ để lại các đường nổ khác (flock lồng, biến chuỗi) — ngân sách chung là hàng rào duy nhất bảo đảm kết thúc; hết ngân sách thì chặn (fail-closed) vì lệnh bình thường dùng < 20 lệnh con; tập script đã quét biến nổ tổ hợp thành đa thức
 - Đường lùi: Bỏ ScanBudget và tham số budget/rewrites khỏi bash_decision/_scan_scripts/_scan_nested; hạn chế bằng VAR_VALUE_MAX và RUNNER_SUFFIXES
+
+### D-051 · 2026-10-18T23:12:57+00:00 · Duyệt PLAN 3.4.1 (bịt Còn lọt của guard + contrast CSS lồng)
+
+- Phương án: (1) Làm cả guard và contrast, 3 PR, giữ getattr ghép chuỗi ngoài phạm vi · (2) Chỉ vá base64 và .autopilot, để phần còn lại
+- Chọn: Làm cả guard và contrast, 3 PR, giữ getattr ghép chuỗi ngoài phạm vi
+- Lý do (tiêu chí chất lượng cuối): Chủ repo đã nhận đề xuất làm hết; ghép chuỗi lúc chạy là né cố ý, ngoài phạm vi guard chống tai nạn
+- Đường lùi: revert từng PR
+
+### D-052 · 2026-10-18T23:22:42+00:00 · Guard: xử lý biến từ thay lệnh/read và lệnh mã hoá vào shell thế nào
+
+- Phương án: (1) Tính giá trị khi nguồn là chữ (echo/printf/read <<<, base64/xxd/rev) rồi quét; nguồn mã hoá không giải được thì chặn · (2) Chặn mọi biến không rõ giá trị dùng làm lệnh · (3) Giữ hỏi (cho qua theo ADR-0018)
+- Chọn: Tính giá trị khi nguồn là chữ (echo/printf/read <<<, base64/xxd/rev) rồi quét; nguồn mã hoá không giải được thì chặn
+- Lý do (tiêu chí chất lượng cuối): Bịt đúng ca tai nạn có chữ nguyên văn mà không chặn nhầm $(git …)/read từ biến; lệnh mã hoá không giải được không có lý do hợp lệ để agent chạy
+- Đường lùi: revert PR guard 3.4.1
+
+### D-053 · 2026-10-18T23:22:42+00:00 · contrast: xử lý CSS lồng (&.dark) thế nào
+
+- Phương án: (1) Ghép selector con với cha (& thay bằng cha, không & là con cháu), khai báo con tách khỏi cha · (2) Bỏ qua khối lồng
+- Chọn: Ghép selector con với cha (& thay bằng cha, không & là con cháu), khai báo con tách khỏi cha
+- Lý do (tiêu chí chất lượng cuối): Đúng ngữ nghĩa CSS Nesting; bỏ qua làm mất token tối và vẫn rò khai báo
+- Đường lùi: revert PR contrast

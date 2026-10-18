@@ -70,6 +70,23 @@ class CssParseTest(unittest.TestCase):
         tw = xt.css_themes("@theme inline { --color-primary: #1677ff; } @theme { --color-background: #fff; }")
         self.assertEqual(tw["light"], {"--color-primary": "#1677ff", "--color-background": "#fff"})
 
+    def test_nested_css(self) -> None:
+        # CSS lồng (D-053): khai báo của `&.dark` không rò sang theme sáng; con cháu của `.dark` là component
+        nested = xt.css_themes(
+            ":root{--bg:#fff; --fg:#000; &.dark{--bg:#000} @media (prefers-color-scheme: dark){--fg:#eee}}"
+            " .dark{ .card{--bg:red} } html{ &[data-theme=dark], &.x { --fg:#ddd } }"
+        )
+        self.assertEqual(nested["light"], {"--bg": "#fff", "--fg": "#000"})
+        self.assertEqual(nested["dark"], {"--bg": "#000", "--fg": "#ddd"})
+        self.assertEqual(xt._css_nest("a, &.b", ".p, .q"), ".p a, .p.b, .q a, .q.b")
+        self.assertEqual(xt._css_flat("--a:1; x{--b:2} --c:3"), "--a:1; --c:3")
+        self.assertEqual(xt._css_blocks("a{ @media print { b{--x:1} } }")[-1], ("@media print", "a b", "--x:1"))
+        # dấu phẩy trong `:is()`/`[…]` không tách selector; lồng quá sâu/selector quá dài bị bỏ qua (review #138)
+        self.assertEqual(xt._css_nest("&:is(.dark, [x=y])", ":root"), ":root:is(.dark, [x=y])")
+        self.assertEqual(xt._css_nest("&.x", "[data-theme='a,b'], .p"), "[data-theme='a,b'].x, .p.x")
+        self.assertEqual(len(xt._css_blocks("a{" * 100 + "}" * 100)), xt.CSS_NEST_MAX + 1)
+        self.assertEqual(len(xt._css_blocks("a,b{" * 18 + "--x:1" + "}" * 18)), 7)
+
     def test_var_resolution(self) -> None:
         env = {"--a": "var(--b)", "--b": "#123", "--loop": "var(--loop)"}
         self.assertEqual(xt._css_vars("var(--a)", env), "#123")
