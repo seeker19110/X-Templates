@@ -6,6 +6,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Changed
+- **Required check `merge-gate` — máy chặn auto-merge của PR ngoại lệ cứng trên head hiện tại** (ADR-0023, D-029; đóng
+  giới hạn "auto-merge không ghim head" của ADR-0022). Lệnh mới `xt.py merge-gate [--pr N] [--pr-json F] [--head SHA]
+  [--json]` dùng lại đường quyết định của `merge-check`: exit 1 khi `hard` ≠ rỗng **và** PR đang bật auto-merge (REST
+  `auto_merge`, trường `autoMergeRequest`), `hard` không auto-merge → exit 0 kèm cảnh báo (người merge tay), 2 lỗi đọc PR,
+  3 head khác `--head`. Workflow mới `.github/workflows/merge-gate.yml` trên `pull_request_target` (workflow + `xt.py` của
+  nhánh mặc định — PR không sửa được cổng; không checkout code PR; token chỉ đọc), chạy lại khi push, đổi nhãn, đổi đích,
+  bật/tắt auto-merge. Ruleset mẫu thêm context `merge-gate` (5 required check); `WF-CI-001` (MUST, không đổi mức) đổi
+  "4" → "5 required check" và sửa phần Kiểm "đúng 3" → "đúng 5"; `LOOP-STOP-005`, `LOOP-STOP-026` ghi máy đỡ mới.
+  `install.py --with-github` copy thêm `merge-gate.yml` (copy-if-absent; cảnh báo required check không còn liệt kê
+  `merge-gate`). Lý do đổi cổng/CI: lời dặn `LOOP-STOP-005` thành cơ chế. **Chủ repo:** thêm `merge-gate` vào ruleset
+  `main` đang chạy sau khi job chạy trên một PR. Dự án đích: chạy lại `install.py --with-github`, rồi thêm context.
 - **Tối ưu thời gian check e2e**: 7 mục `SHOULD` mới ở `14-testing-quality/e2e-and-accessibility.md` — `QA-E2E-020` shard song
   song + gộp báo cáo blob, `QA-E2E-021` build một lần dùng lại, `QA-E2E-022` đăng nhập một lần (`storageState`), `QA-E2E-023` chọn
   test theo ảnh hưởng ở PR (suite đầy đủ trên `main`/trước deploy), `QA-E2E-024` đỏ sớm + huỷ run cũ, `QA-E2E-025` timeout ngắn

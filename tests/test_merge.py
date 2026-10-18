@@ -876,3 +876,86 @@ class MergeWatchTest(unittest.TestCase):
             rc, d, err = xt._merge_check_json("7")
         self.assertEqual((rc, d), (2, {}))
         self.assertIn("hỏng", err)
+
+
+class MergeGateTest(unittest.TestCase):
+    """ADR-0023 (D-029): required check `merge-gate` đỏ khi `merge-check` báo `hard` trên head hiện tại VÀ PR đang bật
+    auto-merge — commit đẩy sau khi bật auto-merge không lọt nhờ auto-merge không ghim head."""
+
+    AUTO = {"enabledBy": {"login": "a"}, "mergeMethod": "SQUASH"}
+    KEY = [{"path": "docs/autopilot/PLAN.md", "additions": 1, "deletions": 0, "hard_key": True}]
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
+
+    def gate(self, p: dict, *extra: str) -> tuple[int, str, str]:
+        return run_main("merge-gate", *extra, "--pr-json", "-", stdin=json.dumps(p))
+
+    def test_hard_head_with_auto_merge_is_red(self):
+        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO))
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge", out)
+        self.assertIn(xt.HARD_KEY_REASON, out)  # grant/khoá: `auto` không miễn được
+        self.assertIn("→ tắt auto-merge (`gh pr merge 7 --disable-auto`", out)
+        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--json")
+        d = json.loads(out)
+        self.assertEqual((rc, d["gate"], d["auto_merge"], d["hard"]), (1, "block", True, [xt.HARD_KEY_REASON]))
+
+    def test_hard_without_auto_merge_stays_green_for_human_merge(self):
+        rc, out, _ = self.gate(pr(files=self.KEY))
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ ngoại lệ cứng — người merge tay", out)
+        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=None), "--json")
+        self.assertEqual((rc, json.loads(out)["gate"]), (0, "warn"))
+
+    def test_harmless_or_waived_pr_is_green_even_with_auto_merge(self):
+        rc, out, _ = self.gate(pr(autoMergeRequest=self.AUTO))
+        self.assertEqual((rc, out), (0, "✓ không có ngoại lệ cứng · PR #7 · head abc1234def\n"))
+        payment = pr(
+            files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO
+        )
+        rc, out, _ = self.gate(payment, "--json")  # `merge_hard_exceptions: auto` ở nhánh đích miễn đường dẫn tiền
+        self.assertEqual((rc, json.loads(out)["gate"]), (0, "pass"))
+        commit_base_xt(self.base, "merge_autonomy: L3\n")  # không khoá → human: đường dẫn tiền là hard
+        self.assertEqual(self.gate(payment)[0], 1)
+
+    def test_head_pin_and_read_errors(self):
+        rc, out, err = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--head", "khac")
+        self.assertEqual((rc, out), (3, ""))
+        self.assertIn("head của PR là `abc1234def`, không phải `khac`", err)
+        self.assertEqual(self.gate(pr(), "--head", "abc1234def")[0], 0)
+        rc, _, err = run_main("merge-gate", "--pr-json", "-", stdin="không phải json")
+        self.assertEqual(rc, 2)
+        self.assertIn("JSON của PR không đọc được", err)
+
+    def test_rest_reads_auto_merge(self):
+        with FakeGh(pull={"auto_merge": self.AUTO}).patch():
+            self.assertEqual(xt._pr_rest("7")["autoMergeRequest"], self.AUTO)
+        with FakeGh(pull={"auto_merge": None}).patch():
+            self.assertNotIn("autoMergeRequest", xt._pr_rest("7"))
+        # Qua REST, không có xt.yaml đã commit (FakeGh: git lỗi → human) + nhãn rủi ro + auto-merge → đỏ
+        with FakeGh(pull={"auto_merge": self.AUTO, "labels": [{"name": "risk:payment"}]}).patch():
+            rc, out, _ = run_main("merge-gate", "--pr", "7", "--head", FakeGh.SHA)
+        self.assertEqual(rc, 1)
+        self.assertIn("nhãn rủi ro: risk:payment", out)
+
+    def test_workflow_runs_base_code_only(self):
+        """Workflow lấy từ nhánh mặc định (`pull_request_target`), không checkout/chạy code PR, token chỉ đọc."""
+        wf = (ROOT / ".github" / "workflows" / "merge-gate.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request_target:", wf)
+        for event in ("synchronize", "auto_merge_enabled", "auto_merge_disabled", "labeled", "unlabeled"):
+            self.assertIn(event, wf)
+        self.assertNotIn("ref:", wf.split("actions/checkout", 1)[1].split("- name:", 1)[0])
+        self.assertNotIn("write", wf.split("permissions:", 2)[2].split("steps:", 1)[0])
+        self.assertIn('merge-gate --pr "$PR" --head "$HEAD_SHA"', wf)
+        self.assertEqual(xt.ci_check_text(wf), [])
+        rules = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))["rules"]
+        checks = [
+            c["context"]
+            for r in rules
+            if r["type"] == "required_status_checks"
+            for c in r["parameters"]["required_status_checks"]
+        ]
+        self.assertIn("merge-gate", checks)
