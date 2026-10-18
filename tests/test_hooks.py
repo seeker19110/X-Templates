@@ -3563,6 +3563,18 @@ class GuardStored1018Test(unittest.TestCase):
             "git -c alias.x='!touch /tmp/p' x",
             "git config credential.helper /tmp/evil.sh",
             "git config core.editor \"vim -c '!touch /tmp/p'\"",
+            # review #117 lần 3: khoá theo mẫu + giá trị so nguyên văn
+            "git config include.path /tmp/evil.cfg",
+            "git config includeIf.gitdir:~/.path /tmp/evil.cfg",
+            "git -c include.path=/tmp/evil.cfg status",
+            "git config core.gitProxy /tmp/evil.sh",
+            "git config mergetool.x.cmd 'touch /tmp/p'",
+            "git config gpg.ssh.program /tmp/evil",
+            "git config remote.origin.uploadpack /tmp/evil",
+            "git config protocol.ext.allow always",
+            'git config core.editor "vim -S /tmp/evil.vim"',
+            'git config core.sshCommand "ssh -F /tmp/evil_cfg"',
+            "git -c core.sshCommand='ssh -F /tmp/evil' fetch",
         ):
             self.assertEqual(self.bash(cmd), "deny", cmd)
         for cmd in (
@@ -3574,6 +3586,13 @@ class GuardStored1018Test(unittest.TestCase):
             "git config credential.helper store",
             "git config core.fsmonitor true",
             "git config -f x.cfg --type bool a.b true",
+            "git config credential.helper /usr/lib/git-core/git-credential-libsecret",
+            'git config credential.helper "cache --timeout=3600"',
+            'git config core.pager "less -R"',
+            "git config pager.log false",
+            'git config core.sshCommand "ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes"',
+            "git config remote.origin.url git@github.com:a/b.git",
+            "git config protocol.version 2",
         ):
             self.assertIsNone(self.bash(cmd), cmd)
 

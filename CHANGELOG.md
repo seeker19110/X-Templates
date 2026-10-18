@@ -25,8 +25,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     lẽ**: hook chỉ chạy cổng khi không có `--no-verify`, còn câu hỏi bị chính sách mặc định (ADR-0018) bỏ đi. Nay cổng
     vẫn chạy; chỉ `XT_GUARD_POLICY=strict` để người quyết.
   - Ghi `.git/hooks`, `.git/config` (Edit, Bash, kể cả sau `cd` và `chmod`), đặt/bỏ `core.hooksPath`, khoá git chạy lệnh
-    tuỳ ý (`core.fsmonitor`, `core.sshCommand` có `ProxyCommand`, `diff.external`, `filter.*.smudge`, `alias.*` bắt đầu `!`,
-    `credential.helper` là đường dẫn…; qua `git config`, `-f .git/config` hay một lần `git -c`) bị chặn — không
+    tuỳ ý (nhận theo mẫu: `include*.path`, `core.fsmonitor`/`sshCommand`/`gitProxy`/`pager`/`editor`, `pager.*`, `alias.*`,
+    `protocol.*.allow`, đuôi `.cmd`/`.program`/`.helper`/`.smudge`…; qua `git config`, `-f .git/config` hay một lần `git -c`;
+    giá trị chỉ cho qua khi khớp nguyên văn tập an toàn như `core.pager cat`, `ssh -i <khoá>`) bị chặn — không
     vào commit nên không có dấu vết PR. `git -c core.hooksPath=…`/`GIT_CONFIG_KEY_n` khi commit = `--no-verify` (strict hỏi).
   - Ghi đích tương đối sau `cd` nay tính từ thư mục đó (trước: `cd .claude/hooks && echo x > guard.py` lọt — có từ trước).
   Dự án đích: chạy lại `install.py` để nhận `guard.py`, `pre-bash-guard.sh`, `xt.py` mới.

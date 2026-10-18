@@ -2133,34 +2133,40 @@ def hook_bypass(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -
 
 
 GIT_CONFIG_UNSET = {"--unset", "--unset-all", "unset"}
-# Khoá git chạy lệnh ngầm ở các lệnh git sau (fsmonitor chạy ở `git status`…): ghi = hoãn lệnh ra ngoài guard.
+# Khoá git chạy lệnh tuỳ ý ở các lệnh git sau (fsmonitor chạy ở `git status`…), đặt bằng `git config` hoặc một lần qua
+# `git -c`: ghi = lệnh chạy ngoài guard. Liệt kê theo MẪU (hậu tố `.cmd`/`.program`/`.command`/`.helper`…) vì danh sách
+# từng khoá cứ sót (review #117: `include.path`, `core.gitProxy`, `mergetool.*.cmd`, `gpg.ssh.program`, `uploadpack`).
 GIT_EXEC_KEY_RE = re.compile(
-    r"core\.(fsmonitor|sshcommand|pager|editor|askpass)|sequence\.editor|diff\.external|gpg\.program"
-    r"|(diff|filter|merge)\..+\.(textconv|clean|smudge|process|driver)|(alias|credential(\..+)?)\.(.+|helper)",
+    r"include(if\..+)?\.path|core\.(fsmonitor|sshcommand|gitproxy|pager|editor|askpass)|sequence\.editor"
+    r"|diff\.external|pager\..+|alias\..+|protocol(\..+)?\.allow|gpg(\..+)?\.(program|defaultkeycommand)"
+    r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack)",
     re.I,
+)
+# Giá trị cho qua theo loại khoá — so NGUYÊN VĂN, không theo tên chương trình (`vim -S x.vim`, `ssh -F cfg` chạy lệnh
+# tuỳ ý qua đối số). Không khớp → chặn; giá trị khác thì người đặt tay.
+GIT_SAFE_VALUES: Tuple[Tuple["re.Pattern[str]", "re.Pattern[str]"], ...] = (
+    (re.compile(r"alias\..+", re.I), re.compile(r"[^!].*|", re.S)),  # alias không bắt đầu `!` = lệnh git
+    (
+        re.compile(r"credential(\..+)?\.helper", re.I),
+        re.compile(
+            r"|store|cache( --timeout=\d+)?|osxkeychain|wincred|manager(-core)?|libsecret"
+            r"|/usr/[\w/.-]*git-credential-[\w-]+"
+        ),
+    ),
+    (re.compile(r"core\.pager|pager\..+", re.I), re.compile(r"|cat|less|less -[FRSXK]+|more|delta|true|false")),
+    (re.compile(r"core\.editor|sequence\.editor", re.I), re.compile(r"vim?|nvim|nano|emacs|code (--wait|-w)|true|:")),
+    (
+        re.compile(r"core\.sshcommand", re.I),
+        re.compile(
+            r"ssh( -i [\w~/.@-]+)?( -o ?(StrictHostKeyChecking|UserKnownHostsFile|IdentitiesOnly|BatchMode)=[\w~/.-]+)*"
+        ),
+    ),
+    (re.compile(r"core\.fsmonitor", re.I), re.compile(r"true|false")),
+    (re.compile(r"protocol(\..+)?\.allow", re.I), re.compile(r"never|user")),
 )
 
 
 GIT_CONFIG_VALUE_OPTS = ("-f", "--file", "--blob", "--type", "--default", "--comment", "--value")
-# Giá trị an toàn của khoá "chạy lệnh": chương trình quen thuộc, không ký tự shell (`core.pager cat`, `core.editor
-# "code --wait"`, `core.sshCommand "ssh -i ~/.ssh/k"`, `core.fsmonitor true`) — review #117.
-GIT_SAFE_PROGRAMS = {
-    "cat",
-    "less",
-    "more",
-    "true",
-    "false",
-    "ssh",
-    "code",
-    "vim",
-    "vi",
-    "nano",
-    "emacs",
-    "nvim",
-    "delta",
-}
-SHELL_META_RE = re.compile(r"[;&|`$<>()!\\\n]")
-SSH_EXEC_OPT_RE = re.compile(r"proxycommand|localcommand|knownhostscommand|proxyusefdpass", re.I)
 
 
 def _git_config_write(n: List[str]) -> List[str]:
@@ -2181,17 +2187,9 @@ def _git_config_file(n: List[str]) -> str:
 
 
 def _git_exec_value_unsafe(key: str, value: str) -> bool:
-    """Giá trị của khoá chạy lệnh có chạy lệnh tuỳ ý: `alias.*` chỉ khi `!…`; `credential.helper` khi `!…` hoặc đường
-    dẫn (git chạy thẳng); khác: trừ chương trình quen thuộc không ký tự shell."""
-    low, v = key.lower(), value.strip()
-    if low.startswith("alias."):
-        return v.startswith("!")
-    if low.startswith("credential"):
-        return v.startswith("!") or "/" in v
-    words = v.split()
-    if not words or posixpath.basename(words[0]) not in GIT_SAFE_PROGRAMS:
-        return True
-    return bool(SHELL_META_RE.search(v) or SSH_EXEC_OPT_RE.search(v))  # `ssh -o ProxyCommand=…` chạy lệnh tuỳ ý
+    """Giá trị đặt cho khoá chạy lệnh có thể chạy lệnh tuỳ ý: chỉ giá trị khớp nguyên văn `GIT_SAFE_VALUES` là an toàn."""
+    v = value.strip()
+    return not any(k.fullmatch(key) and ok.fullmatch(v) for k, ok in GIT_SAFE_VALUES)
 
 
 def _git_hooks_off(n: List[str]) -> bool:
