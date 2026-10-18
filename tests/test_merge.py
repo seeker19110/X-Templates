@@ -422,7 +422,8 @@ class MergeConfigTest(unittest.TestCase):
                 raise xt.PrInputError("gh api lỗi: timeout")
             if (path, ref) not in files:
                 raise xt.PrInputError(MergeConfigTest.NOT_FOUND)
-            return {"encoding": "base64", "content": base64.b64encode(files[path, ref].encode()).decode()}
+            body = base64.b64encode(files[path, ref].encode()).decode()
+            return {"type": "file", "path": path, "encoding": "base64", "content": body}
 
         return fake
 
@@ -482,23 +483,46 @@ class MergeConfigTest(unittest.TestCase):
         self.assertFalse(xt._touches_hard_key({"filename": "docs/other/NOTES.md"}, "repos/o/r", "base", "head"))
 
     def test_plan_grants_reader_rejects_bad_content(self):
-        for bad in ({"content": "!!!", "encoding": "base64"}, {"content": "", "encoding": "none"}, {"content": "e30="}):
-            with self.subTest(bad), unittest.mock.patch.object(xt, "_gh_one", return_value=bad):
-                self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"))  # hỏng/không phải base64
-        non_utf8 = {"content": base64.b64encode(b"\xff\xfe").decode(), "encoding": "base64"}
-        with unittest.mock.patch.object(xt, "_gh_one", return_value=non_utf8):
-            self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"))
+        ok = {"type": "file", "path": self.PLAN_FILE, "encoding": "base64"}
+
+        def read(resp: dict):
+            with unittest.mock.patch.object(xt, "_gh_one", return_value=resp):
+                return xt._plan_grants("repos/o/r", self.PLAN_FILE, "head")
+
+        body = base64.b64encode(b"- grant: secrets | read_values=false\n").decode()
+        for name, bad in {
+            "base64 hỏng": {**ok, "content": "!!!"},
+            "file lớn": {**ok, "content": "", "encoding": "none"},
+            "thiếu encoding": {"type": "file", "path": self.PLAN_FILE, "content": "e30="},
+            "không phải UTF-8": {**ok, "content": base64.b64encode(b"\xff\xfe").decode()},
+            # Review lần ba: API contents đi theo symlink và trả file ĐÍCH (type file, path khác) → không xác minh được
+            "symlink tới file khác": {**ok, "path": "docs/notes.md", "content": body},
+            "symlink chưa theo": {"type": "symlink", "path": self.PLAN_FILE, "target": "../notes.md"},
+            "thư mục": {"type": "dir", "path": self.PLAN_FILE},
+        }.items():
+            with self.subTest(name):
+                self.assertIsNone(read(bad))
         wrapped = base64.encodebytes(b"- grant: secrets | read_values=false\n" * 3).decode()  # có xuống dòng như GitHub
-        with unittest.mock.patch.object(xt, "_gh_one", return_value={"content": wrapped, "encoding": "base64"}):
-            self.assertEqual(
-                xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"), {"secrets": {"read_values": "false"}}
-            )
+        self.assertEqual(read({**ok, "content": wrapped}), {"secrets": {"read_values": "false"}})
         with unittest.mock.patch.object(xt, "_gh_one") as one:
             self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, ""))  # ref rỗng = nhánh mặc định: không dùng
             one.assert_not_called()
-            one.return_value = {"content": base64.b64encode(b"").decode(), "encoding": "base64"}
+            one.return_value = {**ok, "content": base64.b64encode(b"").decode()}
             self.assertEqual(xt._plan_grants("repos/o/r", self.PLAN_FILE, None), {})  # ref=None: nhánh mặc định
             self.assertEqual(one.call_args.args, (f"repos/o/r/contents/{self.PLAN_FILE}",))  # không có ?ref=
+
+    def test_404_only_from_gh_http_status(self):
+        """Review lần ba: chỉ tin `(HTTP 404)` ở phần stderr của gh — sha có chữ `404` không biến lỗi 502 thành "file vắng"."""
+        sha = "a404cccc" + "0" * 32
+
+        def err(msg: str):
+            with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError(msg)):
+                return xt._plan_grants("repos/o/r", self.PLAN_FILE, sha)
+
+        path = f"repos/o/r/contents/{self.PLAN_FILE}?ref={sha}"
+        self.assertIsNone(err(f"gh api {path} lỗi: gh: Server Error (HTTP 502)"))
+        self.assertIsNone(err(f"không chạy được gh (timeout {path})"))
+        self.assertEqual(err(f"gh api {path} lỗi: gh: Not Found (HTTP 404)"), {})
 
     def test_truncated_file_list_is_hard_and_unwaivable(self):
         """Review lần hai: REST cắt danh sách file ở 3000 → PLAN.md/xt.yaml có thể lọt → luôn người merge, kể cả `auto`."""

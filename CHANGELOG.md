@@ -17,7 +17,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   hoặc thiếu mục (→ `loop defer`), 2 tham số sai; đọc PLAN.md ở nhánh mặc định trên GitHub qua REST (không đọc cây làm việc hay ref cục bộ; `--plan` phải là
   `…/docs/autopilot/PLAN.md`), đòi khai đủ mọi khoá, từ chối số âm/`nan`/`inf`. PR đổi hiệu lực ủy quyền ở PLAN.md (so
   `parse_grants` đáy/đầu PR cho từng đường PLAN, kể cả đổi tên/sao chép vào; danh sách file bị cắt cũng tính) luôn do người
-  merge, kể cả `merge_hard_exceptions: auto` (cùng chốt với khoá). Mục mới `LOOP-STOP-026` (SHOULD). `AGENTS.md` §5, mẫu `AGENTS.md`, skill `/autopilot` ghi "trừ việc
+  merge, kể cả `merge_hard_exceptions: auto` (cùng chốt với khoá); PLAN.md là symlink (API trả file đích) hay mã lỗi khác
+  `(HTTP 404)` = không đọc được. Giới hạn còn lại ghi ở ADR-0022 (auto-merge không ghim head; repo `gh` theo môi trường). Mục mới `LOOP-STOP-026` (SHOULD). `AGENTS.md` §5, mẫu `AGENTS.md`, skill `/autopilot` ghi "trừ việc
   nằm trong ủy quyền". Mặc định x2 khi PLAN bỏ trống số: trần vòng `max(40, 8 × task chưa làm)` (trước `max(20, 4 × task)`), 100
   vòng khi không `--single-session` (trước 50), `merge-watch --max-minutes` 240 (trước 120), khuyến nghị `--hours` ≤ 16. Sửa lỗi
   định dạng bước 13 của skill `/autopilot` (dấu nháy lặp quanh `<XT>`).

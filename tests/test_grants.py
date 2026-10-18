@@ -117,7 +117,8 @@ def fake_default_branch(plans: dict[str, str]):
         assert "?ref=" not in key, "grant-check không được đọc ref cục bộ/tuỳ chọn"
         if key not in plans:
             raise xt.PrInputError(f"gh api {path} lỗi: gh: Not Found (HTTP 404)")
-        return {"encoding": "base64", "content": base64.b64encode(plans[key].encode()).decode()}
+        body = base64.b64encode(plans[key].encode()).decode()
+        return {"type": "file", "path": key, "encoding": "base64", "content": body}
 
     return fake
 
@@ -178,9 +179,22 @@ class GrantCheckCliTest(unittest.TestCase):
         self.use({"docs/notes.md": PLAN, f"sub/{PLAN_PATH}": PLAN, PLAN_PATH: "# PLAN\n"})
         rc, _, err = self.check("secrets", "read_values=false", extra=("--plan", "docs/notes.md"))
         self.assertEqual(rc, 2)
-        self.assertIn("--plan phải kết thúc bằng docs/autopilot/PLAN.md", err)
+        self.assertIn("kết thúc bằng docs/autopilot/PLAN.md", err)
         self.assertEqual(self.check("secrets", "read_values=false", extra=("--plan", f"sub/{PLAN_PATH}"))[0], 0)
         self.assertEqual(self.check("secrets", "read_values=false")[0], 1)  # PLAN mặc định không có grant
+        for bad in (f"../{PLAN_PATH}", f"a/../{PLAN_PATH}", f"a//{PLAN_PATH}", f"./{PLAN_PATH}", f"/{PLAN_PATH}"):
+            with self.subTest(bad):
+                rc, _, err = self.check("secrets", "read_values=false", extra=("--plan", bad))
+                self.assertEqual(rc, 2)
+                self.assertIn("không có `..`", err)
+
+    def test_symlinked_plan_is_unreadable(self):
+        """Review lần ba: PLAN.md là symlink → API trả file đích (path khác) → không xác minh được → ngoài ủy quyền."""
+        body = base64.b64encode(PLAN.encode()).decode()
+        self.use(side=lambda path: {"type": "file", "path": "docs/notes.md", "encoding": "base64", "content": body})
+        rc, out, _ = self.check("secrets", "read_values=false")
+        self.assertEqual(rc, 1)
+        self.assertIn("không đọc được PLAN.md ở nhánh mặc định", out)
 
     def test_json_and_bad_param(self):
         self.use()

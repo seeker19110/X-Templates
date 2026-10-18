@@ -2998,12 +2998,16 @@ def _plan_grants(repo: str, path: str, ref: Optional[str]) -> Optional[Dict[str,
         return None
     try:
         d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}" + (f"?ref={ref}" if ref else ""))
-        if d.get("encoding") != "base64":  # file lớn: content rỗng + encoding none; thư mục/symlink không có encoding
+        # Chỉ đúng file đó: API contents đi theo symlink và trả file ĐÍCH (type file, path khác) — `docs/autopilot/PLAN.md`
+        # là symlink tới file ngoài tầm gác thì không xác minh được. File lớn: content rỗng + encoding none.
+        if d.get("type") != "file" or d.get("path") != path or d.get("encoding") != "base64":
             return None
         raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
         return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8"))
     except PrInputError as exc:
-        return {} if "404" in str(exc) else None  # file vắng ở ref đó ≠ không đọc được
+        # File vắng ở ref đó ≠ không đọc được. Chỉ tin mã HTTP trong phần stderr của gh (sau ` lỗi: `): thông điệp còn
+        # chứa đường dẫn có sha, sha chứa chữ `404` không được làm lỗi mạng thành "file vắng".
+        return {} if "(HTTP 404)" in str(exc).split(" lỗi: ", 1)[-1] else None
     except ValueError:  # lỗi base64 và UnicodeDecodeError
         return None
 
@@ -4100,8 +4104,13 @@ def cmd_grant_check(args: argparse.Namespace) -> int:
             print(f"✗ tham số `{item}` phải dạng khoá=giá trị", file=sys.stderr)
             return 2
         requested[key.lower()] = value
-    if not args.plan.endswith(PLAN_PATH_SUFFIX):  # chỉ đường PLAN mà `merge-check` giữ cho người merge
-        print(f"✗ --plan phải kết thúc bằng {PLAN_PATH_SUFFIX}", file=sys.stderr)
+    # Chỉ đường PLAN mà `merge-check` giữ cho người merge, tương đối và không `..`/`//`/`.` (gh gửi đường dẫn thô).
+    parts = args.plan.split("/")
+    if not args.plan.endswith(PLAN_PATH_SUFFIX) or any(x in ("", ".", "..") for x in parts):
+        print(
+            f"✗ --plan phải là đường tương đối kết thúc bằng {PLAN_PATH_SUFFIX}, không có `..`, `.`, `//`",
+            file=sys.stderr,
+        )
         return 2
     grants = _plan_grants("repos/{owner}/{repo}", args.plan, None)
     why = grant_violations(grants or {}, args.group, requested)

@@ -30,7 +30,8 @@ production thật (`AGENTS.md` §5, D-023) — nhóm sau chưa có cách bật t
    không tính là trong hạn); trần `max_<khoá>` từ chối giá trị âm, `nan`, `inf`. Dòng trong code fence không tính.
 3. **Chốt người đúng một lần**: PR đổi **hiệu lực** ủy quyền của `docs/autopilot/PLAN.md` (so `parse_grants` của đáy và
    đầu PR qua REST contents cho TỪNG đường PLAN mà file đụng tới, đường vắng là `{}`; khác hoặc không đọc được (kể cả
-   `encoding` khác `base64`) thì coi là đổi — thêm/xoá/sửa dòng, viết hoa, đổi code fence, đổi tên/sao chép file có grant
+   `encoding` khác `base64`, hay `type`/`path` trả về khác `file`/đường hỏi — PLAN.md là symlink thì API trả file đích)
+   thì coi là đổi — thêm/xoá/sửa dòng, viết hoa, đổi code fence, đổi tên/sao chép file có grant
    vào PLAN.md đều bị bắt; danh sách file của PR bị REST cắt (`changed_files` > số file nhận được) cũng là hard) hoặc đổi khoá `merge_hard_exceptions` luôn là ngoại lệ cứng không miễn được, kể cả `merge_hard_exceptions: auto` (`HARD_KEY_REASON`,
    `TRUNCATED_REASON`, `UNWAIVABLE`). PLAN do
    phiên chính tự duyệt (ADR-0008), nên không có chốt này agent tự cấp ủy quyền cho chính nó. Người merge PR duyệt kế hoạch
@@ -63,3 +64,11 @@ production thật (`AGENTS.md` §5, D-023) — nhóm sau chưa có cách bật t
 - Dự án đích có mục ủy quyền mặc định chỉ sandbox; muốn live phải mở PR sửa dòng `- grant:` và tự merge.
 - Hạn mức theo thời gian (mỗi ngày/giờ) nằm ở code sản phẩm; `grant-check` chỉ kiểm trần một thao tác agent định làm.
 - Dự án đích nhận lệnh và mục mẫu khi chạy lại `install.py` (gộp tay `*.xtemplates-new`).
+- **Giới hạn còn lại (review lần ba), chưa phải cưỡng chế bằng máy:**
+  - Bật auto-merge không ghim head (`guard.py` `_auto_merge_verdict`): push thêm commit đổi grant SAU khi đã bật
+    auto-merge cho PR vô hại thì GitHub vẫn merge khi check xanh, vì CI chưa có job chạy `merge-check`. Đỡ hiện có là kỷ
+    luật `LOOP-STOP-005` (chạy lại `merge-check` sau mỗi push vào PR đang auto-merge, có `hard` thì tắt) và review. Hướng
+    sửa: job CI bắt buộc chạy `merge-check` bằng mã của nhánh đích, đỏ khi `hard` (việc riêng, đổi workflow + ruleset).
+  - `grant-check` gọi `gh api repos/{owner}/{repo}/…`; `{owner}/{repo}` do `gh` lấy theo môi trường cục bộ (`GH_REPO`,
+    `gh repo set-default`, remote) nên agent đổi được repo được đọc. `grant-check` là bước tự kiểm của agent, guard không
+    cưỡng chế nó; cưỡng chế thật nằm ở code sản phẩm (hạn mức) và chốt người khi merge.
