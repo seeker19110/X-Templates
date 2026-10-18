@@ -882,6 +882,27 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn("lệnh kiểm blueprint", text)
 
+    def test_gate_floor_blocks_final_verify(self):
+        # LOOP-HARNESS-023: quy mô M mà cổng xt.yaml dưới sàn → kiểm lại cuối ĐỎ, Stop hook không cho `done`.
+        write(self.base / "BLUEPRINT.md", "---\nkind: blueprint\nprofile: cli-tool\nscale: M\n---\n")
+        write(self.base / "xt.yaml", "lint: ruff check .\ntypecheck: ''\ntest: pytest\nbuild: ''\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "bp")
+        rc, text = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("[xt] verify sàn Gate: quy mô M: `lint` chưa kiểm format", text)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(len(rec["gate_floor"]), 2)
+        self.assertIn("kiểm lại cuối ĐỎ (sàn Gate M/L chưa đạt (LOOP-HARNESS-023))", xt.final_check(self.base) or "")
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertEqual(json.loads(out)["decision"], "block")
+        write(
+            self.base / "xt.yaml",
+            "lint: ruff format --check .\ntypecheck: ''\ntest: pytest --cov-fail-under=80\nbuild: ''\n",
+        )
+        self.git("commit", "-qam", "sàn")
+        self.assertEqual(self.verify()[0], 0)
+
     def test_gate_that_changes_tree_is_not_ok(self):
         write(self.plan, "- [x] `T-001` a — Gate: `echo y >> ok.txt`\n")
         self.git("commit", "-qam", "plan")

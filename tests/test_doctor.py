@@ -345,6 +345,76 @@ class DoctorStateAndEnvTest(DoctorCase):
         self.assertEqual(xt._doctor_progress(self.base), [])
 
 
+BP_M_WEB = "---\ntitle: Blueprint\nkind: blueprint\nprofile: web-app\nscale: M\n---\n"
+
+
+class DoctorGateFloorTest(DoctorCase):
+    """Sàn Gate theo quy mô (LOOP-HARNESS-023): ở M/L cổng tự khai phải có kiểm kiểu, kiểm format, ngưỡng coverage, e2e."""
+
+    def floor(self) -> list[str]:
+        return [f.msg for f in self.findings(deep=False) if f.code == "gate-floor"]
+
+    def test_no_blueprint_or_scale_s_has_no_floor(self):
+        self.write("xt.yaml", FILLED_YAML)
+        self.assertEqual(self.floor(), [])  # không có BLUEPRINT.md → không biết quy mô
+        self.write("BLUEPRINT.md", "# không có frontmatter\n")
+        self.assertEqual((xt.blueprint_scale(self.base), self.floor()), (("", ""), []))
+        self.write("BLUEPRINT.md", BP_M_WEB.replace("scale: M", "scale: S"))
+        self.assertEqual((xt.blueprint_scale(self.base), self.floor()), (("S", "web-app"), []))
+        self.write("BLUEPRINT.md", BP_M_WEB)
+        (self.base / "xt.yaml").unlink()
+        self.assertEqual(xt.gate_floor_issues(self.base), [])  # thiếu xt.yaml: doctor đã báo lỗi riêng
+
+    def test_scale_m_reports_each_missing_floor(self):
+        self.write("BLUEPRINT.md", BP_M_WEB)
+        self.write("xt.yaml", FILLED_YAML)  # typecheck có, build rỗng, lint/test tối thiểu, không e2e
+        self.write("tsconfig.json", "{}")
+        self.write("go.mod", "module x\n")
+        msgs = self.floor()
+        self.assertEqual(len(msgs), 4, msgs)
+        self.assertTrue(msgs[0].startswith("quy mô M: `build` rỗng dù repo có stack biên dịch"))
+        self.assertIn("(tsconfig.json, go.mod)", msgs[0])
+        self.assertIn("`lint` chưa kiểm format", msgs[1])
+        self.assertIn("`test` chưa có ngưỡng coverage", msgs[2])
+        self.assertIn("`e2e` rỗng dù hồ sơ web-app", msgs[3])
+        self.assertTrue(all(m.endswith("— sàn Gate M/L (LOOP-HARNESS-023)") for m in msgs))
+        (self.base / "go.mod").unlink()
+        self.write("xt.yaml", "lint: eslint .\ntypecheck: ''\ntest: vitest run\nbuild: npm run build\n")
+        msgs = self.floor()
+        self.assertIn("`typecheck` rỗng dù repo có stack kiểm kiểu (tsconfig.json)", msgs[0])
+        # Ngưỡng coverage có thể nằm ở file cấu hình; file không đọc được (thư mục) bỏ qua.
+        (self.base / "package.json").mkdir()
+        self.write("vitest.config.ts", "export default { test: { coverage: { thresholds: { lines: 90 } } } }\n")
+        self.assertFalse(any("coverage" in m for m in self.floor()))
+
+    def test_floor_met_is_silent_and_scale_from_state(self):
+        self.write(
+            "docs/BP.md", BP_M_WEB.replace("profile: web-app", "profile: cli-tool").replace("scale: M", "scale: L")
+        )
+        xt.write_state({"active": True, "blueprint": "docs/BP.md"}, self.base)
+        self.assertEqual(xt.blueprint_scale(self.base), ("L", "cli-tool"))
+        self.write("pyproject.toml", "[project]\nname='x'\n")
+        self.write(
+            "xt.yaml",
+            "lint: ruff check . && ruff format --check .\ntypecheck: mypy .\ntest: pytest --cov-fail-under=90\nbuild: ''\n",
+        )
+        self.assertEqual(self.floor(), [])  # cli-tool không cần e2e; pyproject cần typecheck (có)
+        self.write(
+            "xt.yaml",
+            "lint: prettier -c . && eslint .\ntypecheck: tsc --noEmit\ntest: go test -cover ./...\nbuild: ''\n",
+        )
+        self.assertEqual(self.floor(), [])
+        self.write("xt.yaml", "lint: biome ci .\ntypecheck: tsc\ntest: pytest\nbuild: ''\ne2e: ''\n")
+        self.write("docs/BP.md", BP_M_WEB.replace("scale: M", "scale: L"))
+        msgs = self.floor()
+        self.assertEqual(len(msgs), 2, msgs)
+        self.assertTrue(msgs[0].startswith("quy mô L: `test` chưa có ngưỡng coverage"))
+        self.assertIn("`e2e` rỗng", msgs[1])
+        self.write("xt.yaml", "lint: biome ci .\ntypecheck: tsc\ntest: pytest\nbuild: ''\ne2e: npx playwright test\n")
+        self.write("setup.cfg", "[coverage:report]\nfail_under = 95\n")
+        self.assertEqual(self.floor(), [])
+
+
 class LoopInitDoctorTest(DoctorCase):
     def loop_init(self) -> str:
         self.write("docs/autopilot/PLAN.md", "- [ ] `T-001` việc — Gate: `true`\n")
@@ -358,6 +428,12 @@ class LoopInitDoctorTest(DoctorCase):
         self.assertIn("Cổng sẽ ĐỎ trong vòng (ADR-0011)", self.loop_init())
         self.write("xt.yaml", "lint: ruff check .\ntypecheck: mypy .\ntest: pytest -q\nbuild: ''\n")
         self.assertEqual(self.loop_init(), "")
+        self.write("BLUEPRINT.md", BP_M_WEB)  # quy mô M: sàn Gate chưa đạt được nhắc ngay ở loop init
+        err = self.loop_init()
+        self.assertIn(
+            "⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): quy mô M: `lint` chưa kiểm format",
+            err,
+        )
 
     def test_errors_are_warned_but_not_blocking(self):
         shutil.rmtree(self.base / ".claude")
