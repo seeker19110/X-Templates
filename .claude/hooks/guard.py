@@ -2505,9 +2505,10 @@ def _commit_msg_args(args: List[str]) -> List[Tuple[str, str]]:
 # `git [cờ toàn cục…] commit`: `-C "a b"`, `-c k=v`, `--no-pager`, `--git-dir=…` (văn bản thô — `$(cat <<E` chưa đóng nháy).
 # Các nhánh tách bạch (giá trị không nháy không mở đầu bằng nháy) — trùng nhau thì backtrack hàm mũ (CodeQL, #125).
 GIT_COMMIT_TEXT_RE = re.compile(
-    r"\bgit(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']\S*)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
+    r"(?<![\w-])git(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|[^\s\"']\S*)|--[\w-]+(?:=\S+)?|-[pP]))*\s+commit\b"
 )
-GIT_TOP_MAX = 64  # số cấp thư mục cha tối đa khi tìm gốc repo
+GIT_TOP_MAX = 64  # số cấp thư mục cha tối đa khi tìm xt.yaml
+COMMIT_LINE_MAX = 4096  # regex trên dòng mở heredoc: cắt để thời gian có trần (review #125)
 
 
 def _heredoc_bodies(cmd: str) -> List[str]:
@@ -2523,23 +2524,24 @@ def _heredoc_bodies(cmd: str) -> List[str]:
             while i < len(lines) and lines[i].strip() != m.group(2):
                 body.append(lines[i])
                 i += 1
-            if GIT_COMMIT_TEXT_RE.search(_pipeline_at(opener, m.start())):
+            if GIT_COMMIT_TEXT_RE.search(_pipeline_at(opener, m.start())[:COMMIT_LINE_MAX]):
                 out.append("\n".join(body))
         i += 1
     return out
 
 
-def _git_top(d: str) -> str:
-    """Gốc repo chứa `d` (thư mục cha gần nhất có `.git`, như `git rev-parse --show-toplevel`); không thấy → `d`."""
-    cur = os.path.abspath(d)
+def _xt_yaml_for(d: str) -> str:
+    """`xt.yaml` gần nhất từ `d` đi lên (đường dẫn thật — symlink theo git), dừng ở gốc repo (thư mục có `.git`, tính cả
+    nó): dự án trong repo cha (monorepo `apps/web`) và commit từ thư mục con đều thấy khoá. Không có → rỗng."""
+    cur = os.path.realpath(d)
     for _ in range(GIT_TOP_MAX):
-        if os.path.exists(os.path.join(cur, ".git")):
-            return cur
+        if os.path.isfile(os.path.join(cur, "xt.yaml")):
+            return os.path.join(cur, "xt.yaml")
         parent = os.path.dirname(cur)
-        if parent == cur:
+        if os.path.exists(os.path.join(cur, ".git")) or parent == cur:
             break
         cur = parent
-    return d
+    return ""
 
 
 def ai_attribution(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: str) -> str:
@@ -2549,8 +2551,7 @@ def ai_attribution(cmd: str, commands: List[Tuple[List[str], Optional[str]]], ro
     for argv, here in commands:
         n = normalize(argv)
         gdir = (_git_dir(argv, here) if n[:2] == ["git", "commit"] else None) or root
-        xt_yaml = os.path.join(_git_top(gdir), "xt.yaml")
-        if n[:2] != ["git", "commit"] or not AI_ATTRIBUTION_KEY_RE.search(_read_head(xt_yaml)):
+        if n[:2] != ["git", "commit"] or not AI_ATTRIBUTION_KEY_RE.search(_read_head(_xt_yaml_for(gdir))):
             continue
         # `-F` tương đối tính từ thư mục git chạy (sau `-C`), như git.
         texts = [v if k == "m" else _read_head(posixpath.join(gdir, v)) for k, v in _commit_msg_args(n[2:])]

@@ -3807,14 +3807,33 @@ class GuardAiAttributionTest(unittest.TestCase):
                 self.assertEqual(self.decide(cmd, d), "deny")
         t0 = time.monotonic()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
         self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
+        long_line = "git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"  # bậc hai nếu không cắt dòng
+        self.assertEqual(self.g._heredoc_bodies(long_line), [])
         self.assertLess(time.monotonic() - t0, 1.0)
         os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
         self.assertEqual(self.decide("git commit -F p", d), "")
-        nogit = self.repo("ai_attribution: forbid\n")  # không có `.git` ở đâu cả → xt.yaml ở thư mục lệnh
-        with mock.patch.object(self.g.os.path, "exists", return_value=False):
-            self.assertEqual(self.g._git_top(nogit), nogit)
-        with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp, dùng thư mục lệnh
-            self.assertEqual(self.g._git_top(sub), sub)
+        with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp
+            self.assertEqual(self.g._xt_yaml_for(sub), "")
+        self.assertEqual(self.g._xt_yaml_for("/"), "")  # tới gốc hệ thống tệp mà không có xt.yaml
+        # Review #125: dự án trong repo cha (monorepo `apps/web`, xt.yaml ở gốc dự án, `.git` ở trên) và cwd qua symlink.
+        mono = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, mono, True)
+        web = os.path.join(mono, "apps", "web")
+        os.makedirs(os.path.join(mono, ".git"))
+        os.makedirs(os.path.join(web, "src"))
+        Path(web, "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        lnk = os.path.join(mono, "lnk")
+        os.symlink(os.path.join(web, "src"), lnk)
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            for here in (web, os.path.join(web, "src"), lnk):
+                with self.subTest(here):
+                    self.assertEqual(
+                        self.g.bash_decision('git commit -m "Claude Opus 5"', web, here)["decision"], "deny"
+                    )
+            # xt.yaml ở trên gốc repo không áp vào repo con.
+            inner = os.path.join(web, "inner")
+            os.makedirs(os.path.join(inner, ".git"))
+            self.assertEqual(self.g.bash_decision('git commit -m "Claude Opus 5"', inner, inner)["decision"], "")
         with mock.patch("builtins.open", side_effect=PermissionError):  # file thường mà không đọc được → rỗng
             self.assertEqual(self.g._read_head(os.path.join(other, "m.txt")), "")
 
