@@ -78,6 +78,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py doctor [--fix] [--json]` | Audit khung đã cài trước `/autopilot`: Python/git/bash, hook + file hook + cú pháp, skill/subagent, `*.xtemplates-new` chưa gộp, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state, khung `validate`, `PROGRESS.md`; `--fix` sửa phần an toàn (không đụng hook/settings), exit 1 khi còn lỗi |
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
 | `python3 scripts/xt.py grant-check GROUP [KHOÁ=GIÁ_TRỊ …]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không: exit 0 làm, 1 `loop defer` (ADR-0022) |
+| `python3 scripts/xt.py merge-gate --pr N --head SHA` | Required check `merge-gate` (job `.github/workflows/merge-gate.yml`): exit 1 khi `merge-check` báo `hard` mà PR đang bật auto-merge, 3 khi head khác `--head` (ADR-0023) |
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge sau khi review sạch (ADR-0024) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
@@ -144,6 +145,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check`) tới khi PR đã merge hoặc cần hành động.
 - [ADR-0022](docs/adr/0022-production-grants-in-plan.md): duyệt kế hoạch = một lần người duyệt mục Ủy quyền production
   (`- grant:` trong PLAN.md, máy kiểm `xt.py grant-check`); PR đổi grant/khoá luôn người merge; hạn mức autopilot mặc định x2.
+- [ADR-0023](docs/adr/0023-merge-gate-required-check.md): required check `merge-gate` (`pull_request_target`, mã của
+  nhánh mặc định) đỏ khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge — auto-merge không ghim head.
 - [ADR-0024](docs/adr/0024-auto-merge-after-clean-review.md): mọi PR — `reviewer` rà sạch mới bật auto-merge; không bật
   được thì merge trực tiếp bằng lệnh ghim head của `merge-check`.
 

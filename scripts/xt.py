@@ -39,6 +39,9 @@ Lệnh:
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
                                 Việc production có nằm trong mục Ủy quyền production của PLAN.md không (exit 0 =
                                 trong ủy quyền; 1 = ngoài → loop defer; thiếu mục = ngoài).
+  merge-gate [--pr PR] [--pr-json F] [--head SHA] [--json]
+                                Required check (ADR-0023): exit 1 khi merge-check báo `hard` mà PR đang bật auto-merge
+                                (2 = lỗi đọc PR, 3 = head khác --head → chạy lại).
   merge-watch [--pr PR] [--interval 30] [--max-minutes 240]
                                 Gọi merge-check mỗi `interval` giây tới khi verdict ≠ wait (exit 0 = đã merge/merge,
                                 1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
@@ -2688,7 +2691,8 @@ def doctor_fix(findings: List[Finding]) -> Tuple[List[str], List[Finding]]:
 # --------------------------------------------------------------------------- merge-check (ADR-0013)
 
 MERGE_FIELDS = (
-    "number,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,labels,statusCheckRollup,files"
+    "number,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,labels,statusCheckRollup,files,"
+    "autoMergeRequest"
 )
 FAST_LANE_MAX_LINES = 150  # vị từ làn nhanh, 11-autonomous-loop/stop-points-and-escalation.md
 GH_TIMEOUT = 60
@@ -3178,6 +3182,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
+        # Auto-merge đang bật (REST `auto_merge`: object hoặc null) — `merge-gate` đỏ khi bật trên PR ngoại lệ cứng.
+        **({"autoMergeRequest": pr["auto_merge"]} if pr.get("auto_merge") else {}),
         # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
         **({"filesTruncated": True} if int(pr.get("changed_files") or 0) > len(files) else {}),
         "files": [
@@ -3980,6 +3986,13 @@ def _print_doctor(base: Path, findings: List[Finding], fixed: List[str], fixing:
         print(f"✓ Sẵn sàng cho autopilot: {tail}")
 
 
+def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`."""
+    autonomy, risk_paths, notes = merge_config(project_dir())
+    hard_auto, hard_notes = merge_hard_mode(project_dir(), f"origin/{pr.get('baseRefName') or 'main'}")
+    return merge_decision(pr, autonomy, risk_paths, hard_auto), notes + hard_notes
+
+
 def cmd_merge_check(args: argparse.Namespace) -> int:
     """Máy quyết khi nào merge PR đã mở (ADR-0013). exit 0 chỉ khi verdict = merge."""
     try:
@@ -3987,10 +4000,7 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
     except PrInputError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
-    autonomy, risk_paths, notes = merge_config(project_dir())
-    hard_auto, hard_notes = merge_hard_mode(project_dir(), f"origin/{pr.get('baseRefName') or 'main'}")
-    notes += hard_notes
-    d = merge_decision(pr, autonomy, risk_paths, hard_auto)
+    d, notes = _merge_eval(pr)
     if args.json:
         print(json.dumps({**d, "notes": notes}, ensure_ascii=False))
     else:
@@ -4000,6 +4010,49 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
         if d["next"]:
             print(f"→ {d['next']}")
     return 0 if d["verdict"] == "merge" else 1
+
+
+def cmd_merge_gate(args: argparse.Namespace) -> int:
+    """Required check `merge-gate` (ADR-0023): auto-merge của GitHub không ghim head, nên commit đẩy SAU khi bật auto-merge
+    phải được máy chặn trên head hiện tại. exit 1 khi `merge-check` báo `hard` VÀ PR đang bật auto-merge; `hard` mà không
+    auto-merge thì exit 0 kèm cảnh báo (người merge tay — chốt người của ADR-0016/0022, merge tay của agent đã có guard ghim
+    head). exit 2 = không đọc được PR; exit 3 = head của PR khác `--head` (REST chưa thấy push mới, hoặc đã có push
+    mới hơn) — workflow chờ rồi chạy lại."""
+    try:
+        pr = load_pr(args)
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    head = str(pr.get("headRefOid", ""))
+    if args.head and head != args.head:
+        print(f"✗ head của PR là `{head}`, không phải `{args.head}` (sự kiện) — chờ rồi chạy lại", file=sys.stderr)
+        return 3
+    d, notes = _merge_eval(pr)
+    auto = bool(pr.get("autoMergeRequest"))
+    gate = "block" if d["hard"] and auto else "warn" if d["hard"] else "pass"
+    if args.json:
+        print(
+            json.dumps(
+                {"pr": d["pr"], "head": head, "gate": gate, "auto_merge": auto, "hard": d["hard"], "notes": notes},
+                ensure_ascii=False,
+            )
+        )
+        return 1 if gate == "block" else 0
+    msg = {
+        "block": "✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023)",
+        "warn": "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ",
+        "pass": "✓ không có ngoại lệ cứng",
+    }[gate]
+    print(f"{msg} · PR #{d['pr']} · head {head}")
+    for r in [*d["hard"], *notes]:
+        print(f"  - {r}")
+    if gate == "block":
+        n = d["pr"]
+        print(
+            f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;"
+        )
+        print("  người merge tay")
+    return 1 if gate == "block" else 0
 
 
 WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)
@@ -4237,6 +4290,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pm.add_argument("--json", action="store_true", help="in JSON (pr, verdict, lane, reasons, next, notes)")
     pm.set_defaults(fn=cmd_merge_check)
+    pq = sub.add_parser("merge-gate", help="required check: đỏ khi PR ngoại lệ cứng đang bật auto-merge (ADR-0023)")
+    pq.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
+    pq.add_argument("--pr-json", help="đọc JSON `gh pr view --json …` từ FILE hoặc - thay vì gọi REST")
+    pq.add_argument("--head", help="SHA head của sự kiện CI; PR có head khác → exit 3 (chờ rồi chạy lại)")
+    pq.add_argument("--json", action="store_true", help="in JSON (pr, head, gate, auto_merge, hard, notes)")
+    pq.set_defaults(fn=cmd_merge_gate)
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")

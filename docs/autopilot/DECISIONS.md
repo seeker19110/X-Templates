@@ -198,6 +198,13 @@
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/2/3: PLAN do phiên chính tự duyệt (ADR-0008) nên tự cấp ủy quyền cho chính mình là lỗ; bắt PR đổi grant cần người merge vá lỗ đó mà chỉ đòi người một lần; grant-check đóng khi thiếu nên mặc định không cho gì; PA3 là lời dặn không phải cơ chế
 - Đường lùi: Bỏ nhánh PLAN.md khỏi _touches_hard_key và xoá cmd_grant_check; AGENTS.md §5 về như D-023
 
+### D-029 · 2026-10-18T01:44:29+00:00 · Job CI bắt buộc merge-gate (đóng lỗ auto-merge không ghim head, ADR-0022): đỏ khi nào để chốt người vẫn merge được?
+
+- Phương án: (1) Đỏ khi merge-check báo hard VÀ PR đang bật auto-merge (REST auto_merge); chạy lại khi bật/tắt auto-merge (pull_request_target auto_merge_enabled/disabled); PR hard không auto-merge thì xanh kèm cảnh báo để người merge tay · (2) Luôn đỏ khi hard: người cũng không merge được vì ruleset không có bypass_actors và tác giả PR là chủ repo (không tự approve được) — PR đổi grant/khoá thành không merge được · (3) Luôn đỏ khi hard + thêm bypass (vai trò admin) vào ruleset: người merge bằng bypass, nhưng bypass vượt MỌI required check (quality, gitleaks…)
+- Chọn: Đỏ khi merge-check báo hard VÀ PR đang bật auto-merge (REST auto_merge); chạy lại khi bật/tắt auto-merge (pull_request_target auto_merge_enabled/disabled); PR hard không auto-merge thì xanh kèm cảnh báo để người merge tay
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng, an toàn): lỗ là auto-merge bật trước rồi push commit hard — PA1 bắt đúng đường đó bằng máy trên head hiện tại; merge tay của agent đã có guard ghim head (merge-check lúc merge), merge tay của người là chốt người theo thiết kế ADR-0016/0022. PA2 làm hỏng chốt người (người không merge được nếu không sửa ruleset). PA3 nới mọi cổng khác. Tiêu chí 3: logic ở xt.py merge-gate có test, workflow chỉ gọi lệnh
+- Đường lùi: Đổi điều kiện trong cmd_merge_gate thành chỉ xét hard (PA2) kèm thêm bypass vào ruleset (PA3), hoặc bỏ merge-gate khỏi ruleset và xoá merge-gate.yml
+
 ### D-030 · 2026-10-18T01:48:48+00:00 · Chủ repo: 'bật auto-merge khi review sạch, không bật được thì tự merge, áp cho mọi PR, cả dự án đích' — cài vào khung thế nào?
 
 - Phương án: (1) Mọi PR: mở → reviewer (model khác) rà diff → không còn lỗi chặn (nên sửa đã sửa/trả lời) và merge-check không hard → bật auto-merge; enable lỗi (PR đã sẵn sàng/repo tắt auto-merge) → merge trực tiếp bằng lệnh ghim head trong next của merge-check; còn lỗi chặn → sửa, đẩy, rà lại; ghi ở AGENTS.md, mẫu AGENTS.md, skill /autopilot, LOOP-STOP-022, LOOP-DESIGN-020 · (2) Chỉ PR làn chuẩn chờ review, làn nhanh bật auto-merge khi mở
