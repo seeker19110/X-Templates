@@ -423,6 +423,34 @@ class PerfCliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(Path(self.p("s.json")).read_text())["commit"], "")
 
+    def test_guard_outside_git_repo(self):
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(self.tmp)
+        with unittest.mock.patch.dict("os.environ", {**ISOLATED, "GIT_CEILING_DIRECTORIES": str(self.tmp.parent)}):
+            rc, _, err = run_main("perf", "guard", "--base", "HEAD")
+        self.assertEqual(rc, 2)
+        self.assertIn("không ở trong repo git", err)
+
+    def test_guard_works_from_subdirectory(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(d, *args)
+        git(d, "config", "commit.gpgsign", "false")
+        (d / "sub").mkdir()
+        (d / "sub" / "a.py").write_text("x\n")
+        git(d, "add", ".")
+        git(d, "commit", "-qm", "i")
+        (d / "sub" / "a.py").write_text("y\n")
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(d / "sub")
+        with unittest.mock.patch.dict("os.environ", ISOLATED):
+            rc, out, _ = run_main("perf", "guard", "--base", "HEAD", "--locked", "sub/a.py")
+        self.assertEqual(rc, 1)
+        self.assertIn("sub/a.py", out)
+
     def test_guard_cli(self):
         d = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
@@ -434,7 +462,11 @@ class PerfCliTest(unittest.TestCase):
         git(d, "add", ".")
         git(d, "commit", "-qm", "init")
         git(d, "config", "commit.gpgsign", "false")
-        env = {"CLAUDE_PROJECT_DIR": str(d), **ISOLATED}
+        # CLAUDE_PROJECT_DIR trỏ chỗ khác (như khi chạy xt.py của worktree gốc): guard vẫn rà thư mục đang đứng
+        env = {"CLAUDE_PROJECT_DIR": str(self.tmp), **ISOLATED}
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(d)
         with unittest.mock.patch.dict("os.environ", env):
             rc, out, _ = run_main("perf", "guard", "--base", "HEAD")
             self.assertEqual(rc, 0)

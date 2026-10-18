@@ -5313,10 +5313,19 @@ def _perf_sample_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def perf_repo() -> Path:
+    """Gốc repo git của thư mục ĐANG ĐỨNG — không phải `project_dir()`: chạy bằng `xt.py` của worktree gốc, guard vẫn phải
+    rà cây agent sửa chứ không rà chính worktree sạch đó."""
+    r = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+    if r.returncode != 0:
+        raise RuntimeError(f"không ở trong repo git: {r.stderr.strip() or r.returncode}")
+    return Path(r.stdout.strip())
+
+
 def _perf_guard_cmd(args: argparse.Namespace) -> int:
     locked: List[str] = args.locked or []
-    base = project_dir()
     try:
+        base = perf_repo()
         files, added = perf_diff(base, args.base)
         known = perf_known(base) if locked else []
     except RuntimeError as exc:
