@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -659,6 +660,105 @@ class BlueprintStatusTextTest(TmpDirCase):
         rc, out, _ = run_main("blueprint-status", "-", "--json", "--strict", stdin="- [ ] `A-001` **MUST** mở\n")
         self.assertEqual(rc, 1)
         self.assertFalse(json.loads(out)["ok"])
+
+    def test_run_executes_check_commands(self):
+        # LOOP-DESIGN-023: mục [x] có `— Kiểm: `<lệnh>`` được chạy lại trong thư mục chứa blueprint; đỏ = chưa đạt dù đã tick.
+        (self.tmp / "ok.txt").write_text("1\n", encoding="utf-8")
+        main = self.tmp / "BLUEPRINT.md"
+        main.write_text(
+            "---\nkind: blueprint\nbacklog: BL.md\n---\n"
+            "- [x] `A-001` **MUST** xong → Kiểm: lời. · Nguồn: x — Kiểm: `test -f ok.txt`\n"
+            "- [x] `A-002` **MUST** tick bằng lời — Bằng chứng: PR #7\n"
+            "- [ ] `A-003` **MUST** mở — Kiểm: `test -f ok.txt`\n"
+            "- [~] `A-004` **MUST** bỏ — Không áp dụng: không có — Kiểm: `false`\n"
+            "- [X] `A-005` **MUST** cùng lệnh, khác khoảng trắng (Kiểm: `test  -f ok.txt`)\n",
+            encoding="utf-8",
+        )
+        (self.tmp / "BL.md").write_text(
+            "- [x] `A-006` **SHOULD** tick bằng lời\n- [x] `A-007` **SHOULD** đỏ — Kiểm: `echo ERR >&2; false`\n",
+            encoding="utf-8",
+        )
+        found = xt.blueprint_checks(main)
+        self.assertEqual([c["id"] for c in found["checks"]], ["A-001", "A-005", "A-007"])
+        self.assertEqual(
+            found["checks"][2], {"id": "A-007", "level": "SHOULD", "cmd": "echo ERR >&2; false", "file": "BL.md"}
+        )
+        self.assertEqual(found["unchecked_must"], ["A-002"])
+        rc, out, _ = run_main("blueprint-status", main, "--run")
+        self.assertEqual(rc, 0)  # không --strict: chỉ báo
+        self.assertIn("✓ Kiểm A-001: exit 0 `test -f ok.txt`", out)
+        self.assertIn("✓ Kiểm A-005: exit 0", out)
+        self.assertIn("✗ Kiểm A-007: exit 1", out)
+        self.assertIn("✗ Lệnh kiểm ĐỎ — mục đã tick nhưng chưa đạt: A-007", out)
+        self.assertIn("ℹ 1 mục MUST đạt không có lệnh kiểm máy (ghi `— Kiểm: `<lệnh>``): A-002", out)
+        rc, out, _ = run_main("blueprint-status", main, "--run", "--strict", "--json")
+        self.assertEqual(rc, 1)
+        doc = json.loads(out)
+        self.assertEqual(
+            (doc["ok"], doc["open_must"], doc["failed_checks"], doc["unchecked_must"]),
+            (False, ["A-003"], ["A-007"], ["A-002"]),
+        )
+        self.assertEqual([(c["id"], c["exit_code"]) for c in doc["checks"]], [("A-001", 0), ("A-005", 0), ("A-007", 1)])
+        self.assertEqual(doc["checks"][2]["output_tail"], "ERR")
+        # Sửa xong (lệnh xanh, mục mở đã tick) → strict xanh; backlog mất → bỏ qua lệnh ở đó, blueprint_status đã báo.
+        (self.tmp / "BL.md").write_text("- [x] `A-007` **SHOULD** xanh — Kiểm: `true`\n", encoding="utf-8")
+        main.write_text(main.read_text(encoding="utf-8").replace("- [ ] `A-003`", "- [x] `A-003`"), encoding="utf-8")
+        rc, out, _ = run_main("blueprint-status", main, "--run", "--strict")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("✗", out)
+        (self.tmp / "BL.md").unlink()
+        self.assertEqual([c["id"] for c in xt.blueprint_checks(main)["checks"]], ["A-001", "A-003", "A-005"])
+        rc, out, _ = run_main("blueprint-status", main, "--run", "--strict")
+        self.assertEqual(rc, 1)
+        self.assertIn("thiếu file backlog", out)
+
+    def test_xt_compiles_without_warnings(self):
+        # Chuỗi thường có `\`` từng làm `python3 xt.py` in SyntaxWarning ở mọi lần gọi (review #106).
+        src = Path(xt.__file__).read_text(encoding="utf-8")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(src, xt.__file__, "exec")
+
+    def test_run_needs_real_file_and_valid_timeout(self):
+        rc, _, err = run_main("blueprint-status", "-", "--run", stdin="- [x] `A-001` **MUST** x\n")
+        self.assertEqual(rc, 2)
+        self.assertIn("--run cần file blueprint thật", err)
+        f = self.tmp / "BLUEPRINT.md"
+        f.write_text("- [x] `A-001` **MUST** x — Kiểm: `true`\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}):
+            rc, _, err = run_main("blueprint-status", f, "--run")
+        self.assertEqual(rc, 2)
+        self.assertIn("XT_RECORD_TIMEOUT", err)
+        rc, out, _ = run_main("blueprint-status", f, "--run", "--strict")  # mọi MUST tick đều có lệnh: không dòng ℹ
+        self.assertEqual(rc, 0)
+        self.assertNotIn("ℹ", out)
+
+    def test_run_once_per_command_timeout_redact_and_bad_note(self):
+        f = self.tmp / "BLUEPRINT.md"
+        f.write_text(
+            "- [x] `A-001` **MUST** a — Kiểm: `echo x >> dem.txt`\n"
+            "- [x] `A-002` **MUST** b — Kiểm: `echo  x  >>  dem.txt`\n"
+            "- [x] `A-003` **MUST** c — Kiểm: `sleep 5`\n"
+            "- [x] `A-004` **MUST** d — Kiểm: `echo token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 && false`\n"
+            "- [x] `A-005` **MUST** e — Kiểm: chạy `false`\n"  # ghi chú Kiểm: không có lệnh ngay sau dấu hai chấm
+            "- [x] `A-006` **MUST** f — Kiểm: `true` `false`\n"  # cặp backtick thứ hai từng bị bỏ im lặng (xanh giả)
+            "- [x] `A-007` **MUST** g — Kiểm: `true` — Kiểm: `false`\n"
+            "- [x] `A-008` **MUST** h — Kiểm: `true` — Bằng chứng: `ci.yml` job quality\n",  # ghi chú khác có backtick: được
+            encoding="utf-8",
+        )
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "1"}):
+            rc, out, _ = run_main("blueprint-status", f, "--run", "--strict", "--json")
+        self.assertEqual(rc, 1)
+        doc = json.loads(out)
+        self.assertEqual((self.tmp / "dem.txt").read_text(encoding="utf-8"), "x\n")  # cùng lệnh: chạy một lần
+        by_id = {c["id"]: c for c in doc["checks"]}
+        self.assertEqual(by_id["A-003"]["exit_code"], 124)
+        self.assertNotIn("ghp_", by_id["A-004"]["cmd"] + by_id["A-004"]["output_tail"])
+        self.assertEqual((by_id["A-005"]["exit_code"], by_id["A-005"]["cmd"]), (2, ""))
+        self.assertIn("phải có đúng một lệnh trong một cặp backtick", by_id["A-005"]["output_tail"])
+        self.assertEqual((by_id["A-008"]["cmd"], by_id["A-008"]["exit_code"]), ("true", 0))
+        self.assertEqual(doc["failed_checks"], ["A-003", "A-004", "A-005", "A-006", "A-007"])
+        self.assertEqual(doc["unchecked_must"], [])
 
 
 # --------------------------------------------------------------------------- loop

@@ -41,8 +41,8 @@ cd /đường/dẫn/dự-án
 python3 .xtemplates/scripts/xt.py list profiles
 python3 .xtemplates/scripts/xt.py compose --profile web-app --industry ecommerce --scale M --out BLUEPRINT.md
 
-# 3) Theo dõi; --strict trả exit 1 khi còn MUST chưa đạt (dùng làm cổng phát hành)
-python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict
+# 3) Theo dõi; --strict trả exit 1 khi còn MUST chưa đạt hoặc lệnh `— Kiểm:` của mục đã tick đỏ (--run; cổng phát hành)
+python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict --run
 ```
 
 Dự án đã cài bản ≤ 2.x (thư mục `.xstored/`, `xs.py`, `xs.yaml`): chạy lại bước 1 — `install.py` tự chuyển sang
@@ -74,7 +74,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 |---|---|
 | `python3 scripts/xt.py validate` · `python3 scripts/xt.py list profiles` | Kiểm quy ước toàn khung: frontmatter, ID duy nhất, MUST có cách kiểm, liên kết |
 | `python3 scripts/xt.py compose ...` | Ghép blueprint theo hồ sơ, ngành, quy mô; ghép lại vào file có sẵn thì giữ trạng thái theo ID |
-| `python3 scripts/xt.py blueprint-status FILE --strict [--json]` | Đếm đạt/miễn/chưa; dòng mục sai định dạng, mục MUST ít hơn bảng đầu trang hay miễn trừ thiếu lý do ở phần ghi chú = lỗi; cổng phát hành; `FILE` là `-` thì đọc stdin |
+| `python3 scripts/xt.py blueprint-status FILE --strict [--run] [--json]` | Đếm đạt/miễn/chưa; dòng mục sai định dạng, mục MUST ít hơn bảng đầu trang hay miễn trừ thiếu lý do ở phần ghi chú = lỗi; `--run` chạy lại lệnh `— Kiểm: \`…\`` của mục đã tick trong thư mục chứa FILE, đỏ = chưa đạt (`LOOP-DESIGN-023`); cổng phát hành; `FILE` là `-` thì đọc stdin (không `--run`) |
 | `python3 scripts/xt.py doctor [--fix] [--json]` | Audit khung đã cài trước `/autopilot`: Python/git/bash, hook + file hook + cú pháp, skill/subagent, `*.xtemplates-new` chưa gộp, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state, khung `validate`, `PROGRESS.md`; `--fix` sửa phần an toàn (không đụng hook/settings), exit 1 khi còn lỗi |
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
 | `python3 scripts/xt.py grant-check GROUP [KHOÁ=GIÁ_TRỊ …]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không: exit 0 làm, 1 `loop defer` (ADR-0022) |

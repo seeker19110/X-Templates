@@ -423,7 +423,7 @@ class ComposeTest(unittest.TestCase):
         for link, cmd in ((".xtemplates/framework", ".xtemplates/scripts/xt.py"), ("framework", "scripts/xt.py")):
             with self.subTest(link=link), unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_LINK": link}):
                 out = xt.compose(self.fw, "web-app", [], "M", include_may=False)
-                self.assertIn(f"`python3 {cmd} blueprint-status BLUEPRINT.md --strict`", out)
+                self.assertIn(f"`python3 {cmd} blueprint-status BLUEPRINT.md --strict --run`", out)
 
     def test_compose_unknown_profile(self):
         with self.assertRaises(SystemExit):
@@ -805,6 +805,11 @@ class AuditRegressionTest(unittest.TestCase):
             xt.carry_states(old, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x - Bằng chứng: PR #7\n"
         )
         self.assertEqual(xt.carry_states("- [x] `A-001` **MUST** cũ\n", changed)[0], changed)
+        # Lệnh kiểm máy (LOOP-DESIGN-023) là ghi chú của dự án: chữ mục đổi vẫn giữ.
+        old_check = "- [x] `A-001` **MUST** a. · Nguồn: x — Kiểm: `test -f ok`\n"
+        self.assertEqual(
+            xt.carry_states(old_check, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x — Kiểm: `test -f ok`\n"
+        )
 
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
