@@ -25,6 +25,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   - Dự án đích: chạy lại `install.py` rồi `compose` lại blueprint để nhận ID mới (`UX-DS-020` là `MUST@L`, còn lại SHOULD/MAY
     vào backlog); không đổi ID cũ.
 
+### Fixed
+- Guard (D-047) — bịt các lỗ còn lại sau 3.3.0:
+  - `<<` trong nháy kép ngoài `$(…)` hay trong backtick đã đóng cùng dòng không còn nuốt các dòng sau
+    (`echo "<<E"` ↵ `bash <<F` ↵ `git reset --hard` lọt); `-m "$(cat <<'EOF'` vẫn là heredoc thật.
+  - `.autopilot/` (ADR-0026): `find -L|-H|-P`, bộ lọc `-path/-name` trúng `.autopilot` hay tên `verified.json`/
+    `reviews.json`/`runs.jsonl` dưới gốc `.`, `-exec` chạy lệnh không chỉ-đọc (`mv`, `sed -i`, `sh -c`…), `-fprint`,
+    `… .autopilot… | xargs <lệnh ghi/xoá>`, `touch`, và gán biến chữ nguyên văn (`D=.autopilot; echo x > $D/v`) đều bị chặn.
+  - Lọt trong `KNOWN_GAPS` cũ, nay chặn: `sh -c $'…'` (ANSI-C), `rm${IFS}-rf${IFS}~`, `x='…'; eval "$x"`/`$x`/`bash -c "$x"`
+    (kể cả trong `if`/`for`/hàm), `sh <(echo '…')`, lệnh bọc `flock`/`watch`/`script -c`/`su -c`/`busybox`/`coproc`/
+    `ionice`/`unshare`/`nsenter`/…, và chuỗi trong `os.system`/`subprocess.*`/`execSync`/`spawn` của `python -c`/`node -e`/heredoc.
+    Bản viết lại cùng lệnh (thay biến, hậu tố của lệnh bọc) quét ở cùng độ sâu, không tốn trần lồng 3.
+  - Còn lọt (ghi ở `KNOWN_GAPS`): biến từ `$(…)`/`read`/vòng lặp, ghép chuỗi tên hàm, `base64 -d | sh` (chỉ hỏi).
+  Dự án đích: chạy lại `install.py` (hook `guard.py`, mẫu `CLAUDE.md`).
+
 ## [3.3.0] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.2.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`, mẫu `AGENTS.md`/`CLAUDE.md`, skill

@@ -333,6 +333,13 @@
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bằng chứng ghi tay là đúng thứ P1 cấm và Stop hook đọc chính các file này; guard đã nhận diện sẵn, chỉ thiếu dấu; HMAC cần khoá agent không đọc được — chưa có chỗ giữ trong phiên agent
 - Đường lùi: Bỏ 'tay bằng chứng' khỏi DANGER_MARKERS (ADR-0026 → bị thay)
 
+### D-047 · 2026-10-18T13:45:07+00:00 · Bịt lỗ guard còn lại (biến gán chữ, lệnh bọc flock/watch/script/su/busybox/coproc, $'…', ${IFS}, <( ), os.system, find/xargs vào .autopilot/): quét ở độ sâu nào và nhận diện lệnh bọc thế nào?
+
+- Phương án: (1) Bản viết lại CÙNG lệnh (thay biến, hậu tố đối số của lệnh bọc) quét ở cùng độ sâu; lệnh bọc nhận theo danh sách + thử mọi hậu tố của đối số; chuỗi trong lời gọi thực thi (os.system, subprocess, execSync) là lệnh · (2) Tăng MAX_NEST để vừa độ sâu mới; nhận lệnh bọc bằng bảng cờ riêng từng lệnh · (3) Hạ các dạng này xuống ask (opaque) — để cho qua theo ADR-0018
+- Chọn: Bản viết lại CÙNG lệnh (thay biến, hậu tố đối số của lệnh bọc) quét ở cùng độ sâu; lệnh bọc nhận theo danh sách + thử mọi hậu tố của đối số; chuỗi trong lời gọi thực thi (os.system, subprocess, execSync) là lệnh
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: bản viết lại không phải shell lồng nên không nên tốn độ sâu (var_eval + env đẩy chạm trần 3 và thành ask → lọt); hậu tố thay bảng cờ vì tuỳ chọn mỗi lệnh khác nhau và bảng sai là lỗ mới; ask thì cho qua nên không chặn gì. Chặn chỉ tính trên lệnh sẽ bị chặn nếu chạy trực tiếp nên không thêm chặn nhầm
+- Đường lùi: Bỏ _var_scripts/_runner_scripts/_procsub_scripts/_exec_api_scripts khỏi _scan_nested, expand_ansi_c/IFS_RE khỏi tokenize; ca trong GuardRemainingGapsTest chuyển lại KNOWN_GAPS
+
 ### D-048 · 2026-10-18T14:03:18+00:00 · Cổng render UI lấy từ XIAS (vendor mã MIT, giữ ghi chú bản quyền) hay tự viết mẫu?
 
 - Phương án: (1) Chép verify_states/target_size/overflow/axe_audit của plugin87/ux-ui-agent-skills (MIT) vào khung, giữ ghi chú bản quyền · (2) Tự viết mẫu verify-render.mjs (Playwright + axe) theo ý tưởng, không chép mã, chạy thử trên fixture; ghi XIAS là nguồn ý tưởng · (3) Chỉ ghi vào checklist, không kèm mã
