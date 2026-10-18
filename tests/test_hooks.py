@@ -1439,7 +1439,12 @@ class MergeGuardTest(unittest.TestCase):
                     "labels": pr["labels"],
                 },
                 f"{repo}/pulls/{n}/files?per_page=100": [
-                    {"filename": f["path"], "additions": f["additions"], "deletions": f["deletions"]}
+                    {
+                        "filename": f["path"],
+                        "additions": f["additions"],
+                        "deletions": f["deletions"],
+                        **({"patch": f["patch"]} if "patch" in f else {}),
+                    }
                     for f in pr["files"]
                 ],
                 f"{repo}/pulls/{n}/reviews?per_page=100": [],
@@ -1717,6 +1722,34 @@ class MergeGuardTest(unittest.TestCase):
                 payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": mcp}
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {**env, "XT_GUARD_POLICY": policy})
                 self.assertEqual((code, decision(out)), (0, want), out)
+
+    def test_hard_exception_auto_lets_merge_through(self):
+        """ADR-0020: nhánh đích đã commit `merge_hard_exceptions: auto` → PR ngoại lệ cứng merge/bật auto-merge như PR
+        khác. Đối chứng: chỉ sửa cây làm việc (agent tự đặt khoá) hoặc PR đổi chính khoá → vẫn chặn."""
+        sys.path.insert(0, str(ROOT / "tests"))
+        from test_merge import commit_base_xt
+
+        auto = "merge_autonomy: L3\nmerge_hard_exceptions: auto\n"
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "XT_GUARD_POLICY": ""}
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def"}
+        payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": mcp}
+        auth = {**FAST_PR, "labels": [{"name": "risk:auth"}]}
+        key = {**FAST_PR, "files": [{"path": "xt.yaml", "additions": 1, "deletions": 0, "patch": "+" + auto}]}
+        for name, committed, working, pr, want in (
+            ("auto đã commit", auto, None, auth, "allow"),
+            ("chỉ cây làm việc", "merge_autonomy: L3\n", auto, auth, "deny"),
+            ("PR đổi khoá", auto, None, key, "deny"),
+        ):
+            with self.subTest(name):
+                shutil.rmtree(self.proj / ".git", ignore_errors=True)
+                commit_base_xt(self.proj, committed, working)
+                self.fake_gh(pr)
+                code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, env)
+                self.assertEqual((code, decision(out)), (0, want), out)
+        code, out, _ = run_hook(
+            "pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --auto --squash"}}, self.proj, env
+        )
+        self.assertEqual((code, decision(out)), (0, "deny"), out)  # PR đổi khoá, qua Bash
 
     def policy(self, cmd: str) -> str | None:
         """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
