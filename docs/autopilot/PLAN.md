@@ -33,4 +33,4 @@
 - [x] `T-1205` `xt.py contrast`: khối lồng `:root{&.dark{…}}` (CSS nesting) thuộc theme tối, không rò sang theme sáng — Gate: `python3 -m unittest tests.test_ui_gates`
 
 ### Lát C — phát hành
-- [ ] `T-1206` VERSION 3.4.1 + CHANGELOG `[3.4.1]` + PROGRESS; tag `v3.4.1` — Gate: `scripts/dev-task.sh gate`
+- [x] `T-1206` VERSION 3.4.1 + CHANGELOG `[3.4.1]` + PROGRESS; tag `v3.4.1` — Gate: `scripts/dev-task.sh gate`
