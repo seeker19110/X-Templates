@@ -1,13 +1,14 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung v2 đã phát hành) · Cập nhật: 2026-10-18 · Nhánh: seeker/quirky-knuth-v0uphi
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.0.1 phát hành) · Cập nhật: 2026-10-18 · Nhánh: main
 
 ## Đang làm
-- Tối ưu autopilot xong (#106–#110, PLAN T-1101…T-1104, `loop verify` xanh trên `c52276c`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
+- Phát hành 3.0.0 (tag `v3.0.0`) + 3.0.1 (#115: mẫu PR/Dependabot cho dự án đích, merge-gate qua zizmor, doctor quét `.github/`). hotel-manager đã nâng 3.0.0 (hotel-manager#49, D-069 của dự án); X-Company: chủ repo tự cài 3.0.0 (X-Company#2) — agent không cài (#3 đóng). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (audit dự án con #97).
 
 ## Tiếp theo
 1. Dự án thật đầu tiên: `seeker19110/hotel-manager` (đã cài `.xtemplates/`) — đo MUST hay bị miễn qua `feedback collect` + Routine. `seeker19110/x-hotel-manager` chỉ chứa bản sao lịch sử khung: chờ chủ repo quyết dọn hay tạo repo mới, và mô tả dự án con.
-2. Dự án đã cài khung: chạy lại `install.py` (gộp tay `*.xtemplates-new`, ADR-0008) để nhận `.xtemplates/`/`xt.yaml` (ADR-0007), guard/hook mới, `PreCompact`, `doctor`; rồi `python3 .xtemplates/scripts/xt.py doctor --fix`.
+2. hotel-manager: chủ repo thêm `merge-gate` vào required check của ruleset `main` trên GitHub; khi nâng 3.0.1 thì giữ mẫu PR/Dependabot riêng (đã tuỳ biến), `merge-gate.yml` đã trùng bản 3.0.1.
+   X-Company (bản 3.0.0 có lỗi #115: Dependabot khai `pip` không có manifest, mẫu PR của repo khung, merge-gate thiếu chú thích zizmor): khi chủ repo cho phép, chạy lại `install.py --with-github` từ 3.0.1 và thay ba file bằng `*.xtemplates-new`.
 3. Admin: tự kiểm Dependabot security updates (proxy chặn API); ô "extra approval for unattributed changes" của ruleset `main` còn bật — khác `.github/rulesets/main.json`, vô hại khi 0 approval.
 4. Giới hạn đã biết, chưa sửa: guard không thấy lệnh trong alias/biến chứa cờ; CLI container ngoài docker/podman (`kubectl exec`, `nerdctl`, AUD-SEC-042); `xt.py` có thể lấy `$HOME` dotfiles (`.git`) làm gốc khi dự án chưa có dấu hiệu khung (README).
 5. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — hàm mới vượt thì tách, không `noqa`/pragma.
@@ -48,7 +49,7 @@
 - 2026-10-17 Hook nạp guard/xt bằng import, pycache ở `~/.cache/xtemplates` (#93).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `c52276c` (#110); tag `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-18 · Commit cuối trên `main`: `f3a855f` (#115); tag `v3.0.0` → `0f49e9f`, `v2.0.0` → `55de4d1`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1101…T-1104 done, `loop stats`: 4 task, 10 lần chạy, xanh lần đầu 4/4. Đang chặn: không.
 - Câu hỏi cần người: mục chờ chủ repo ở Đang làm; Tiếp theo 1 (`x-hotel-manager`), 6 (quyền token).

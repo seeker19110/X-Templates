@@ -5,6 +5,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-18
+
 > **Dự án đích đã cài với `--with-github` (mọi bản, kể cả ≤ 2.x):** chạy lại `install.py --with-github`, rồi thay
 > `.github/workflows/merge-gate.yml`, `.github/pull_request_template.md`, `.github/dependabot.yml` bằng bản
 > `*.xtemplates-new` tương ứng nếu chưa tuỳ biến (đã tuỳ biến: gộp tay — `merge-gate.yml` chỉ cần chú thích zizmor ở dòng
