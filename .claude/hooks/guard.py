@@ -2907,7 +2907,8 @@ def _scan_command(
 
 SCAN_CALLS = 600  # số lệnh con tối đa MỖI quyết định (lệnh bình thường dùng < 20)
 SCAN_SECONDS = 8.0  # hạn giờ quét một quyết định; hook có timeout 600 s — quá hạn thì lệnh chạy không qua guard
-MAX_REWRITE = 4  # số lần viết lại CÙNG lệnh (thay biến, lệnh bọc) lồng nhau trước khi coi là quá sâu
+MAX_REWRITE = 8  # số lần viết lại CÙNG lệnh (thay biến, lệnh bọc) lồng nhau; vượt → chặn (`flock l ` ×10 + lệnh)
+CMD_MAX_CHARS = 262144  # lệnh dài hơn → chặn: quét gần bậc hai theo độ dài (4 MB từng mất > 600 s, quá timeout hook)
 REWRITE_MAX_CHARS = 65536  # bản viết lại dài hơn (biến 4 KB nhân lên nhiều lần) → chặn, không quét chậm hay bỏ qua
 
 
@@ -3149,7 +3150,7 @@ def _sub_vars(text: str, env: Dict[str, str]) -> str:
 
 
 VAR_VALUE_MAX = 4096  # giá trị biến dài hơn không được ghi nhận (chặn nhân đôi `a="$a$a"`)
-VAR_FOR_PICKS = 8  # số từ tối đa của `for x in …` được thử làm giá trị của x
+VAR_FOR_PICKS = 64  # số từ tối đa của `for x in …` được thử làm giá trị của x (nhiều hơn → chỉ 64 từ đầu)
 
 
 def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
@@ -3166,6 +3167,12 @@ def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
             val = _sub_vars(v, env)
             if len(val) <= VAR_VALUE_MAX:
                 env[k] = val
+
+
+def _for_words(c: List[str]) -> int:
+    """Số từ trong danh sách của `for x in a b c` (0 nếu không phải vòng for)."""
+    c = [t for t in c if t not in SHELL_KEYWORDS] if c[:1] and c[0] in SHELL_KEYWORDS else c
+    return len(c) - 3 if c[:1] == ["for"] and len(c) > 3 and c[2] == "in" else 0
 
 
 def _expand_tokens(tokens: List[str], pick: int, split: bool) -> List[str]:
@@ -3191,7 +3198,7 @@ def _var_scripts(tokens: List[str]) -> List[str]:
     """Cả dòng lệnh sau khi thay biến đã gán bằng chữ nguyên văn (`x='rm -rf ~'; eval "$x"`, `D=.autopilot; cd $D`,
     `cmd=…; echo "$cmd" | sh`, `for d in a b; do rm $d`): quét lại như một lệnh. Không thấy gán từ `read`/thay lệnh."""
     base = _join_tokens(tokens)
-    picks = VAR_FOR_PICKS if "for" in tokens else 1
+    picks = min(VAR_FOR_PICKS, max([1, *(_for_words(c) for c in split_commands(tokens))]))
     seen = {base}
     out: List[str] = []
     for pick, split in itertools.product(range(picks), (False, True)):
@@ -3382,9 +3389,11 @@ def _scan_scripts(
     lệnh (thay biến, hậu tố của lệnh bọc) — không phải shell lồng, không tốn độ sâu nhưng tốn `rewrites`. Script đã quét
     trong quyết định này bị bỏ qua (cùng chuỗi → cùng kết quả)."""
     for script in scripts:
-        if deeper and depth >= MAX_NEST or not deeper and rewrites >= MAX_REWRITE:
+        if deeper and depth >= MAX_NEST:
             asks.append("shell lồng quá sâu — guard không quét hết")
             break
+        if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
+            return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
         if script in budget.seen:
             continue
         if not deeper and len(script) > REWRITE_MAX_CHARS:
@@ -3455,6 +3464,10 @@ EXEC_CALL_RE = re.compile(
     r"\b(?:os\.(?:system|popen|exec\w*|spawn\w*)|subprocess\.\w+|Popen|check_output|check_call|getoutput"
     r"|execSync|execFileSync|spawnSync|execFile|spawn|exec|system|popen)\s*\("
 )
+# Chuỗi nguồn của Python/JS/Ruby: tiền tố r/b/f/u, nháy ba trước nháy đơn; mỗi nhánh khớp tuyến tính.
+LITERAL_RE = re.compile(
+    r"""[rRbBfFuU]{0,2}(?:'\'\'(.*?)'\'\'|\"\"\"(.*?)\"\"\"|'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")""", re.S
+)
 STR_ANY_RE = re.compile(
     r"""'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)\"""", re.S
 )  # mỗi ký tự khớp đúng một nhánh: không backtracking lũy thừa
@@ -3481,9 +3494,25 @@ def _literal(m: "re.Match[str]") -> str:
     return ANSI_ESCAPE_RE.sub(_ansi_c_char, m.group(m.lastindex or 0))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
 
 
+def _first_arg(args: str) -> str:
+    """Đối số đầu của lời gọi (tới dấu phẩy ngoài ngoặc/chuỗi): `'rm' + ' -rf ~', shell=True` → `'rm' + ' -rf ~'`."""
+    depth, i = 0, 0
+    while i < len(args):
+        m = LITERAL_RE.match(args, i) if args[i] in "'\"rRbBfFuU" else None
+        if m and m.end() > i + 1:
+            i = m.end()
+            continue
+        depth += (args[i] in "([{") - (args[i] in ")]}")
+        if depth < 0 or (args[i] == "," and not depth):
+            return args[:i]
+        i += 1
+    return args
+
+
 def _exec_api_scripts(scripts: List[str]) -> List[str]:
-    """Chuỗi lệnh trong đối số của lời gọi thực thi: `os.system('…')` → chuỗi đầu là lệnh shell; `subprocess.run([…])` →
-    các phần tử ghép thành một lệnh. Chuỗi khác trong script (`print('…')`, đối số sau) là dữ liệu, không quét."""
+    """Chuỗi lệnh trong đối số ĐẦU của lời gọi thực thi: `os.system('…')` (kể cả `f'…'`, `r'…'`, nháy ba, ghép
+    `'rm' + ' -rf ~'`) → lệnh shell; `subprocess.run([…])` → các phần tử ghép thành một lệnh. Chuỗi khác trong script
+    (`print('…')`, đối số sau) là dữ liệu, không quét."""
     out: List[str] = []
     for script in scripts:
         spans = [x.span() for x in STR_ANY_RE.finditer(script)]
@@ -3492,11 +3521,11 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
                 a <= m.start() < b for a, b in spans
             ):  # `.write("os.system('…')")`: chữ trong chuỗi, không phải lời gọi
                 continue
-            args = _balanced(script, m.end(), "(", ")").lstrip()
-            if args[:1] == "[":
-                out.append(shlex.join(_literal(x) for x in STR_ANY_RE.finditer(_balanced(args, 1, "[", "]"))))
-            elif STR_ANY_RE.match(args):
-                out.append(_literal(STR_ANY_RE.match(args)))  # type: ignore[arg-type]
+            first = _first_arg(_balanced(script, m.end(), "(", ")").lstrip())
+            if first[:1] == "[":
+                out.append(shlex.join(_literal(x) for x in LITERAL_RE.finditer(_balanced(first, 1, "[", "]"))))
+            elif LITERAL_RE.search(first):
+                out.append("".join(_literal(x) for x in LITERAL_RE.finditer(first)))
     return out
 
 
@@ -3617,7 +3646,7 @@ def bash_decision(
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
     budget = budget or ScanBudget()
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
-    if budget.exhausted():
+    if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:
         res.update(decision="deny", reason=f"Lệnh quá phức tạp để guard quét hết (vượt ngân sách quét): {cmd[:200]}")
         return res
     tokens = tokenize(cmd)

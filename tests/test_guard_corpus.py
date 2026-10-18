@@ -501,7 +501,9 @@ class GuardRemainingGapsTest(unittest.TestCase):
         self.assertEqual(guard._exec_api_scripts(["os.system('a b', \"c d\")"]), ["a b"])
         self.assertEqual(guard._exec_api_scripts(["subprocess.run(['ls', 'a b']); print('x y')"]), ["ls 'a b'"])
         self.assertEqual(guard._exec_api_scripts(["os.system(x)", "os.system(  'q \\\" r')"]), ['q " r'])
-        self.assertEqual(guard._exec_api_scripts(["exec(" + "(" * 5 + "'a'"]), [])  # ngoặc không đóng: cửa sổ
+        self.assertEqual(
+            guard._exec_api_scripts(["exec(" + "(" * 5 + "'a'"]), ["a"]
+        )  # ngoặc không đóng: tới hết cửa sổ
 
     def test_reviewer_134_cases(self) -> None:
         """Reviewer #134: biến + cd, vòng for, biến qua ống, bộ lọc find đổi hoa/thường, `$PWD`; hết chặn nhầm lệnh bọc."""
@@ -567,3 +569,33 @@ class GuardRemainingGapsTest(unittest.TestCase):
             self.assertEqual(self.dec("ls"), "deny")
         budget = guard.ScanBudget()
         self.assertFalse(budget.exhausted())
+
+    def test_reviewer_136_cases(self) -> None:
+        """Reviewer #136: vượt trần viết lại phải chặn (không chỉ hỏi), `for` nhiều từ, lệnh quá dài, chuỗi có tiền tố."""
+        self.assert_all(
+            "deny",
+            (
+                "flock /tmp/l " * 10 + "rm -rf ~",
+                "flock /tmp/l " * 30 + "touch .git/hooks/x",
+                "for d in a b c d e f g h i ~; do rm -rf $d; done",
+                "echo " + "a" * (guard.CMD_MAX_CHARS + 1),
+                "python3 -c \"import os; os.system(f'rm -rf ~')\"",
+                "python3 -c \"import os; os.system(b'rm -rf ~')\"",
+                "python3 -c \"import os; os.system(r'rm -rf ~')\"",
+                "python3 -c \"import os; os.system('''rm -rf ~''')\"",
+                "python3 -c \"import os; os.system('rm' + ' -rf ~')\"",
+                "python3 -c \"import os; os.system('rm' ' -rf ~')\"",
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "flock /tmp/l " * 3 + "ls",
+                "for f in a b c d e f g h i j; do echo $f; done",
+                "python3 -c \"import subprocess; subprocess.run('git status', shell=True); print('git reset --hard')\"",
+                "python3 -c \"import subprocess; subprocess.run(['ls', '-la'], check=True)\"",
+            ),
+        )
+        self.assertEqual(guard._first_arg("'a', 'b'"), "'a'")
+        self.assertEqual(guard._first_arg("x)"), "x")  # ngoặc đóng của lời gọi
+        self.assertEqual(guard._first_arg("('a', 'b')"), "('a', 'b')")

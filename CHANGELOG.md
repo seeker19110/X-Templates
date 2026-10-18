@@ -27,18 +27,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Fixed
 - Guard — vá sau review #134 (D-050; **đính chính D-047**: "không thêm chặn nhầm" là sai, xem dưới):
-  - 🔴 **Ngân sách quét** mỗi quyết định (600 lệnh con, 8 giây, mỗi script chỉ quét một lần, 4 lần viết lại cùng lệnh lồng
-    nhau): `a="$a$a"` lặp 21 lần mất 177 s và 22 lần vượt timeout 600 s của hook nên lệnh chạy không qua guard;
+  - 🔴 **Ngân sách quét** mỗi quyết định (600 lệnh con, 8 giây, mỗi script chỉ quét một lần, tối đa 8 lần viết lại cùng
+    lệnh lồng nhau, bản thay biến ≤ 64 KB, lệnh ≤ 256 KB — vượt bất kỳ trần nào cũng **chặn**, không chỉ hỏi): `a="$a$a"` lặp 21 lần mất 177 s và 22 lần vượt timeout 600 s của hook nên lệnh chạy không qua guard;
     `flock /tmp/l` lồng 10 lớp mất 22 s. Hết ngân sách → **chặn** ("Lệnh quá phức tạp để guard quét hết"). Giá trị biến dài
     hơn 4 KB không được ghi nhận.
   - Thay biến viết lại **cả dòng token** (không còn từng lệnh riêng): `D=.autopilot; cd $D; echo x > v`,
-    `cmd="rm -rf ~"; echo "$cmd" | sh`, `for d in a .autopilot; do rm -rf $d` (thử tới 8 từ đầu của `for … in`) nay bị chặn.
+    `cmd="rm -rf ~"; echo "$cmd" | sh`, `for d in a .autopilot; do rm -rf $d` (thử tới 64 từ của `for … in`) nay bị chặn.
   - `find` đổi hoa/thường và dạng glob (`-iname VERIFIED.JSON`, `-name '*autopilot*'`); đích `$PWD`/`${PWD}`/`$(pwd)`/
     `$CLAUDE_PROJECT_DIR` được mở ra thư mục thật (`rm -rf $PWD/.autopilot` từng lọt).
   - Hết chặn nhầm: chuỗi chứa khoảng trắng sau lệnh bọc chỉ là *chuỗi lệnh* khi đứng đầu hoặc ngay sau `-c`
     (`flock l git commit -m "rm -rf ~ is bad"`, `ionice -c3 npm test -- -t "…"`, `parallel … ::: "rm -rf ~"` không còn
-    bị chặn); lời gọi `os.system`/`subprocess.*` chỉ lấy chuỗi/list trong đối số của chính nó, và bỏ qua lời gọi nằm trong
-    chuỗi (`.write("os.system('rm -rf ~')")`, `print('git reset --hard')`).
+    bị chặn); lời gọi `os.system`/`subprocess.*` chỉ lấy đối số ĐẦU của chính nó — chuỗi (kể cả `f'…'`, `r'…'`, `b'…'`,
+    nháy ba, ghép `'rm' + ' -rf ~'`) hoặc list — và bỏ qua lời gọi nằm trong chuỗi (`.write("os.system('rm -rf ~')")`,
+    `print('git reset --hard')`). Lệnh hợp lệ dùng < 20 lệnh con; ~200 lệnh bọc hoặc ~300 `$(…)` trong một lệnh sẽ bị chặn.
   - Còn lọt (ghi nhận, chưa vá): `sort -o`, `sed -n 'w …'`, `awk -i inplace`, `perl -e unlink`, `git restore .autopilot` vào
     `.autopilot/`; `bash -c "$(cat <<'E' … E)"`; mã trong code span backtick của thân heredoc `<<'EOF'` của commit message
     bị chặn nhầm (đã có từ 3.2); biến từ `$(…)`/`read`; `base64 -d | sh` (chỉ hỏi).
