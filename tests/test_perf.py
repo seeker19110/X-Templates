@@ -266,20 +266,34 @@ class PerfGuardTest(unittest.TestCase):
 
     def test_ignore_rules_cannot_hide_new_locked_files(self):
         d = self.make_repo()
-        (d / ".gitignore").write_text("bench/new.py\nignored.py\n")
         (d / "bench" / "new.py").write_text("x\n")
-        (d / "ignored.py").write_text("f = functools.lru_cache\n")  # bị ignore: không quét dòng (build/venv…)
         ex = d.parent / (d.name + ".ex")
         ex.write_text("*\n")
         self.addCleanup(ex.unlink)
+        (d / ".git" / "info").mkdir(exist_ok=True)
+        (d / ".git" / "info" / "exclude").write_text("bench/\n")
         env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile", "GIT_CONFIG_VALUE_0": str(ex)}
         with unittest.mock.patch.dict(os.environ, env):
             files, added = xt.perf_diff(d, "HEAD")
             known = xt.perf_known(d)
-        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
-        self.assertEqual(touched, ["bench/new.py"])
-        self.assertEqual(suspect, [])
+        touched, _ = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(touched, ["bench/new.py"])  # excludesFile/info/exclude không giấu được
         self.assertIn("bench/new.py", known)
+        (d / ".gitignore").write_text("bench/new.py\n")  # giấu bằng .gitignore trong cây: hiện trong diff, báo ⚠
+        files, added = xt.perf_diff(d, "HEAD")
+        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(touched, [])
+        self.assertEqual(suspect, [".gitignore: đổi luật ignore — có thể giấu file mới trong vùng khoá"])
+
+    def test_generated_files_ignored_in_tree_are_not_lock_touches(self):
+        d = self.make_repo()
+        (d / ".gitignore").write_text("__pycache__/\n")
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore")
+        (d / "bench" / "__pycache__").mkdir()
+        (d / "bench" / "__pycache__" / "run.cpython-313.pyc").write_bytes(b"\x00")
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(xt.perf_guard(files, added, ["bench/*"]), ([], []))
 
     def test_known_and_match(self):
         d = self.make_repo()

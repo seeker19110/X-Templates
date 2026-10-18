@@ -27,7 +27,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   pipeline theo dấu nối ngoài nháy, nối dòng `\` như shell, và lấy cửa sổ 4 KiB mỗi phía quanh heredoc. Dự án đích: chạy lại `install.py` (hook `guard.py`).
 - `xt.py perf guard`: bỏ `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`… đặt sẵn khỏi môi trường git — trỏ chúng vào một clone
   sạch từng làm guard báo "0 file đổi" dù cây đang làm việc đụng file khoá.
-  File mới trong vùng khoá bị bắt cả khi `.gitignore`/`core.excludesFile` ignore nó.
+  File chưa theo dõi chỉ lọc theo `.gitignore` trong cây: `core.excludesFile`/`.git/info/exclude` không còn giấu được
+  file khoá mới, đổi `.gitignore` bị báo ⚠. `perf sample` ghi commit cũng bỏ `GIT_*` đặt sẵn.
 - `release-tag.yml`: kiểm mục `## [x.y.z]` đọc CHANGELOG từ file, không qua `git show | grep -q` — CHANGELOG > 64 KB làm
   `git show` nhận SIGPIPE, `pipefail` đỏ, tag `v3.1.1` không tạo được. Repo khung, dự án đích không phải làm gì.
 - Test guard `GuardReview97Test` cố định nhánh hiện tại: `git push` không refspec chạy trên checkout `main` (CI sau merge)

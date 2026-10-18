@@ -5048,6 +5048,7 @@ PERF_DIFF_HEAD = "diff --git "
 PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
 PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+PERF_UNTRACKED = ("ls-files", "-z", "--others", "--exclude-per-directory=.gitignore")
 PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõi khi quét dòng đáng ngờ
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
@@ -5236,23 +5237,22 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
 
 
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
-    """(file đổi gồm MỌI file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
-    (không phụ thuộc tiền tố diff hay cách quote). Kiểm khoá dùng file chưa theo dõi KHÔNG lọc ignore — `.gitignore`/
-    `core.excludesFile` agent sửa được không được giấu file mới trong vùng khoá; quét dòng đáng ngờ chỉ đọc phần không bị ignore."""
+    """(file đổi gồm file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
+    (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` TRONG cây — đổi file đó hiện
+    trong diff (perf_guard báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được mà không để dấu nên không dùng."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
-    untracked = _perf_git_names(base, "ls-files", "-z", "--others")
-    scanned = _perf_git_names(base, "ls-files", "-z", "--others", "--exclude-standard")
+    untracked = _perf_git_names(base, *PERF_UNTRACKED)
     text = _perf_git(
         base,
         *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
+    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, untracked)
 
 
 def perf_known(base: Path) -> List[str]:
     """File đang theo dõi + chưa theo dõi: để báo glob khoá không khớp gì (gõ sai = tắt khoá lặng lẽ)."""
-    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(base, "ls-files", "-z", "--others")
+    return _perf_git_names(base, "ls-files", "-z") + _perf_git_names(base, *PERF_UNTRACKED)
 
 
 def perf_match(path: str, glob: str) -> bool:
@@ -5264,7 +5264,12 @@ def perf_match(path: str, glob: str) -> bool:
 def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]) -> Tuple[List[str], List[str]]:
     """(file khoá bị đụng, dòng thêm đáng ngờ) — bộ đo/test tương đương không phải thứ agent được sửa để 'đạt'."""
     touched = [f for f in files if any(perf_match(f, g) for g in locked)]
-    suspect = [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
+    suspect = [
+        f"{f}: đổi luật ignore — có thể giấu file mới trong vùng khoá"
+        for f in files
+        if f.rpartition("/")[2] == ".gitignore"
+    ]
+    suspect += [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
     return touched, suspect
 
 
