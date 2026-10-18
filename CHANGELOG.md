@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `release-tag.yml`: kiểm mục `## [x.y.z]` đọc CHANGELOG từ file, không qua `git show | grep -q` — CHANGELOG > 64 KB làm
+  `git show` nhận SIGPIPE, `pipefail` đỏ, tag `v3.1.1` không tạo được. Repo khung, dự án đích không phải làm gì.
+- Test guard `GuardReview97Test` cố định nhánh hiện tại: `git push` không refspec chạy trên checkout `main` (CI sau merge)
+  bị chặn đúng luật nên test đỏ trên `main` dù xanh trên nhánh PR.
+
 ## [3.1.1] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.1.0:** chạy lại `install.py` (`.xtemplates/` thay toàn bộ; mẫu và hook `.claude/` không đổi so

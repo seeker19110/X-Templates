@@ -38,7 +38,9 @@ jobs:
           git merge-base --is-ancestor "$target" "$GITHUB_SHA" || { echo "::error::$target không thuộc lịch sử main"; exit 1; }
           v=$(git show "$target:VERSION" | tr -d '[:space:]')
           echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::VERSION không phải SemVer: $v"; exit 1; }
-          git show "$target:CHANGELOG.md" | grep -q "^## \[$v\]" || { echo "::error::CHANGELOG.md tại $target thiếu mục ## [$v]"; exit 1; }
+          # Không `git show | grep -q`: grep thoát sớm, `git show` nhận SIGPIPE (141) khi CHANGELOG > bộ đệm ống, pipefail đỏ.
+          git show "$target:CHANGELOG.md" > "$RUNNER_TEMP/CHANGELOG.md"
+          grep -q "^## \[$v\]" "$RUNNER_TEMP/CHANGELOG.md" || { echo "::error::CHANGELOG.md tại $target thiếu mục ## [$v]"; exit 1; }
           if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then echo "::error::Tag v$v đã tồn tại"; exit 1; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
