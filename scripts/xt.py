@@ -2943,25 +2943,34 @@ def _doctor_memory(base: Path) -> List[Finding]:
 
 
 FRAMEWORK_REPO = "seeker19110/X-Templates"  # nguồn bản phát hành của khung; fork đặt XT_FRAMEWORK_REPO=chủ/repo
-SEMVER_PREFIX_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")  # đầu nhãn `.xtemplates/VERSION`: "3.0.0 (abc1234)"
+# Đầu nhãn `.xtemplates/VERSION`: "3.0.0 (abc1234)"; đuôi pre-release ("3.0.0-rc1") nhỏ hơn bản cùng số (SemVer §11).
+SEMVER_PREFIX_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?")
 RELEASE_TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")  # tag phát hành (release-tag.yml); pre-release không tính
 VERSION_CHECK_TIMEOUT = 10
 
 
+def _json_values(text: str) -> List[Any]:
+    """Các giá trị JSON liền nhau (`gh api --paginate` in mỗi trang một mảng: `[…][…]`); hỏng → ValueError."""
+    dec, rest, out = json.JSONDecoder(), text.strip(), []
+    while rest:
+        val, end = dec.raw_decode(rest)
+        out.append(val)
+        rest = rest[end:].lstrip()
+    return out
+
+
 def latest_framework_tag() -> Optional[Tuple[int, int, int]]:
-    """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST). Fail-open: không có gh, lỗi mạng/quyền, JSON lạ → None."""
+    """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST, mọi trang, host github.com). Fail-open: không có gh, lỗi
+    mạng/quyền, thân không phải UTF-8/JSON (trang chặn của proxy) → None — `doctor` là bước đầu của `/autopilot`."""
     repo = os.environ.get("XT_FRAMEWORK_REPO") or FRAMEWORK_REPO
+    cmd = ["gh", "api", "--hostname", "github.com", "--paginate", f"repos/{repo}/tags?per_page=100"]
     try:
-        r = subprocess.run(
-            ["gh", "api", f"repos/{repo}/tags?per_page=100"],
-            capture_output=True,
-            text=True,
-            timeout=VERSION_CHECK_TIMEOUT,
-        )
-        tags = json.loads(r.stdout) if r.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=VERSION_CHECK_TIMEOUT)
+        pages = _json_values(r.stdout) if r.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):  # ValueError gồm UnicodeDecodeError, JSONDecodeError
         return None
-    names = [t.get("name") for t in tags if isinstance(t, dict)] if isinstance(tags, list) else []
+    tags = [t for page in pages if isinstance(page, list) for t in page]
+    names = [t.get("name") for t in tags if isinstance(t, dict)]
     found = [RELEASE_TAG_RE.fullmatch(n) for n in names if isinstance(n, str)]
     vers = [(int(m[1]), int(m[2]), int(m[3])) for m in found if m]
     return max(vers) if vers else None
@@ -2979,9 +2988,9 @@ def _doctor_version(base: Path) -> List[Finding]:
     if not m or latest is None:
         return []
     installed = (int(m[1]), int(m[2]), int(m[3]))
-    if installed >= latest:
+    if installed > latest or (installed == latest and not m[4]):  # 3.0.0-rc1 < 3.0.0
         return []
-    have, want = ".".join(map(str, installed)), ".".join(map(str, latest))
+    have, want = ".".join(map(str, installed)) + (m[4] or ""), ".".join(map(str, latest))
     msg = (
         f"khung đã cài {have} cũ hơn bản phát hành mới nhất v{want} — chạy lại `install.py` từ bản mới rồi làm các bước"
         f" 'Dự án đích' trong CHANGELOG từ {have} tới {want}"
