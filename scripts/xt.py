@@ -75,6 +75,7 @@ import posixpath
 import re
 import shlex
 import shutil
+import statistics
 import subprocess
 import tempfile
 import sys
@@ -5039,6 +5040,215 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+PERF_MIN_RUNS = 10  # benchstat: ≥ 10 lần/benchmark
+PERF_ALPHA = 0.05
+PERF_MIN_EFFECT = 0.02  # sàn 2 %: ngưỡng cảnh báo của Mozilla cho benchmark nhiễu
+PERF_DIFF_HEAD = "diff --git a/"
+PERF_SUSPECT_RE = re.compile(
+    r"lru_cache|functools\.cache|@cache\b|memoi[sz]e|time\.sleep\(|"
+    r"(?:perf_counter|process_time|monotonic|time\.time|performance\.now|Date\.now)\s*=[^=]|"
+    r"monkeypatch|_getframe|inspect\.stack|-O3"
+)
+
+
+def perf_load(path: str) -> List[float]:
+    """Mẫu đo từ file: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy."""
+    text = Path(path).read_text(encoding="utf-8")
+    try:
+        data: Any = json.loads(text)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        data = data.get("samples")
+    if not isinstance(data, list):
+        data = [t for t in re.split(r"[\s,]+", text.strip()) if t]
+    out: List[float] = []
+    for v in data:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"{path}: không phải số: {v!r}") from None
+        if not math.isfinite(x):
+            raise ValueError(f"{path}: giá trị không hữu hạn: {v!r}")
+        out.append(x)
+    return out
+
+
+def _mean_ranks(sorted_vals: List[float]) -> Tuple[Dict[float, float], float]:
+    """Hạng trung bình của từng giá trị (đã sắp) và tổng Σ(t³ − t) của các nhóm trùng để hiệu chỉnh phương sai."""
+    ranks: Dict[float, float] = {}
+    tie_term, i, n = 0.0, 0, len(sorted_vals)
+    while i < n:
+        j = i
+        while j < n and sorted_vals[j] == sorted_vals[i]:
+            j += 1
+        ranks[sorted_vals[i]] = (i + 1 + j) / 2
+        tie_term += (j - i) ** 3 - (j - i)
+        i = j
+    return ranks, tie_term
+
+
+def mann_whitney_p(a: List[float], b: List[float]) -> float:
+    """p hai phía của kiểm định Mann-Whitney U (xấp xỉ chuẩn, hiệu chỉnh trùng hạng và liên tục) — như `benchstat`."""
+    n1, n2 = len(a), len(b)
+    n = n1 + n2
+    ranks, tie_term = _mean_ranks(sorted(a + b))
+    u1 = sum(ranks[x] for x in a) - n1 * (n1 + 1) / 2
+    var = n1 * n2 / 12 * ((n + 1) - tie_term / (n * (n - 1)))
+    if var <= 0:  # mọi giá trị bằng nhau
+        return 1.0
+    z = max(abs(u1 - n1 * n2 / 2) - 0.5, 0.0) / math.sqrt(var)
+    return math.erfc(z / math.sqrt(2))
+
+
+def _rel_change(before: float, after: float) -> float:
+    if before:
+        return (after - before) / abs(before)
+    return 0.0 if after == before else math.copysign(math.inf, after - before)
+
+
+def perf_compare(
+    before: List[float],
+    after: List[float],
+    higher_is_better: bool = False,
+    alpha: float = PERF_ALPHA,
+    min_effect: float = PERF_MIN_EFFECT,
+    min_runs: int = PERF_MIN_RUNS,
+    exact: bool = False,
+) -> Dict[str, Any]:
+    """So hai bộ mẫu đo. `improved`/`regressed` chỉ khi khác biệt có ý nghĩa (p < alpha) VÀ đủ lớn: ≥ max(min_effect,
+    MAD/trung vị của bộ trước) — nhiễu của chính máy đo là sàn. `exact`: đại lượng tất định (số lệnh, byte), không cần p."""
+    need = 1 if exact else min_runs
+    doc: Dict[str, Any] = {"runs_before": len(before), "runs_after": len(after), "exact": exact}
+    if min(len(before), len(after)) < need:
+        doc["verdict"] = "insufficient"
+        doc["reason"] = f"cần ≥ {need} mẫu mỗi bên"
+        return doc
+    mb, ma = statistics.median(before), statistics.median(after)
+    mad = statistics.median([abs(x - mb) for x in before])
+    delta = _rel_change(mb, ma)
+    gain = delta if higher_is_better else -delta
+    threshold = min_effect if exact or not mb else max(min_effect, mad / abs(mb))
+    p = None if exact else mann_whitney_p(before, after)
+    significant = p is None or p < alpha
+    doc.update(median_before=mb, median_after=ma, change=delta, p=p, threshold=threshold)
+    if significant and gain >= threshold:
+        doc["verdict"] = "improved"
+    elif significant and -gain >= threshold:
+        doc["verdict"] = "regressed"
+    else:
+        doc["verdict"] = "neutral"
+    return doc
+
+
+def _perf_report(doc: Dict[str, Any]) -> str:
+    if doc["verdict"] == "insufficient":
+        return f"? thiếu mẫu: {doc['reason']} (trước {doc['runs_before']}, sau {doc['runs_after']})"
+    p = "tất định" if doc["p"] is None else f"p={doc['p']:.4f}"
+    return (
+        f"{doc['verdict']}: trung vị {doc['median_before']:.6g} → {doc['median_after']:.6g} "
+        f"({doc['change']:+.2%}, ngưỡng {doc['threshold']:.2%}, {p}, {doc['runs_before']}/{doc['runs_after']} mẫu)"
+    )
+
+
+def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[float]:
+    """Chạy `cmd` warmup + runs lần, trả thời gian tường (giây) của các lần đo; lệnh thoát khác 0 → RuntimeError."""
+    out: List[float] = []
+    for i in range(warmup + runs):
+        t0 = time.perf_counter()
+        try:
+            rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"lệnh quá {timeout:g} s ở lần {i + 1}") from None
+        if rc != 0:
+            raise RuntimeError(f"lệnh thoát {rc} ở lần {i + 1} — không đo trên lệnh lỗi")
+        if i >= warmup:
+            out.append(time.perf_counter() - t0)
+    return out
+
+
+def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """(file đổi, [(file, dòng thêm)]) của worktree so với `ref`."""
+    r = _git(base, "-c", "core.quotepath=off", "diff", "--unified=0", "--no-color", "--no-renames", ref, "--")
+    if r.returncode != 0:
+        raise RuntimeError(f"git diff {ref} lỗi: {r.stderr.strip() or r.returncode}")
+    files: List[str] = []
+    added: List[Tuple[str, str]] = []
+    for line in r.stdout.splitlines():
+        if line.startswith(PERF_DIFF_HEAD):  # tên từ tiêu đề (`a/P b/P`, không đổi tên) để file bị XOÁ cũng được tính
+            rest = line[len(PERF_DIFF_HEAD) :]
+            files.append(rest[: (len(rest) - 3) // 2])
+        elif line.startswith("+") and not line.startswith("+++ ") and files:
+            added.append((files[-1], line[1:]))
+    return files, added
+
+
+def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]) -> Tuple[List[str], List[str]]:
+    """(file khoá bị đụng, dòng thêm đáng ngờ) — bộ đo/test tương đương không phải thứ agent được sửa để 'đạt'."""
+    touched = [f for f in files if any(fnmatch.fnmatch(f, g) for g in locked)]
+    suspect = [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
+    return touched, suspect
+
+
+def _perf_compare_cmd(args: argparse.Namespace) -> int:
+    try:
+        before, after = perf_load(args.before), perf_load(args.after)
+    except ValueError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    doc = perf_compare(before, after, args.higher_is_better, args.alpha, args.min_effect, args.min_runs, args.exact)
+    print(json.dumps(doc, ensure_ascii=False) if args.json else _perf_report(doc))
+    ok = doc["verdict"] == "improved" or (args.no_regress and doc["verdict"] == "neutral")
+    return 0 if ok else 1
+
+
+def _perf_sample_cmd(args: argparse.Namespace) -> int:
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not cmd:
+        print("✗ thiếu lệnh cần đo: xt.py perf sample --out F -- <lệnh>", file=sys.stderr)
+        return 2
+    try:
+        samples = perf_sample(cmd, args.runs, args.warmup, args.timeout)
+    except RuntimeError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 1
+    sha = _git(project_dir(), "rev-parse", "HEAD")
+    doc = {
+        "samples": samples,
+        "unit": "s",
+        "cmd": cmd,
+        "runs": args.runs,
+        "warmup": args.warmup,
+        "commit": sha.stdout.strip() if sha.returncode == 0 else "",
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+    }
+    Path(args.out).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"✓ {len(samples)} mẫu → {args.out} (trung vị {statistics.median(samples):.6g} s)")
+    return 0
+
+
+def _perf_guard_cmd(args: argparse.Namespace) -> int:
+    try:
+        files, added = perf_diff(project_dir(), args.base)
+    except RuntimeError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    touched, suspect = perf_guard(files, added, args.locked or [])
+    for f in touched:
+        print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
+    for s in suspect:
+        print(f"⚠ dòng thêm đáng ngờ (cache/sleep/đổi đồng hồ/soi stack) — reviewer phải rà: {s}")
+    if not touched and not suspect:
+        print(f"✓ {len(files)} file đổi, không đụng file khoá, không dòng đáng ngờ")
+    return 1 if touched or (suspect and args.strict) else 0
+
+
+def cmd_perf(args: argparse.Namespace) -> int:
+    handlers = {"compare": _perf_compare_cmd, "sample": _perf_sample_cmd, "guard": _perf_guard_cmd}
+    return handlers[args.perf_cmd](args)
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     docs, _ = load_docs(args.framework)
     by_kind: Dict[str, int] = {}
@@ -5271,6 +5481,31 @@ def build_parser() -> argparse.ArgumentParser:
     pdr.add_argument("--fix", action="store_true", help="sửa an toàn, đảo ngược được (không đụng hook/settings)")
     pdr.add_argument("--json", action="store_true")
     pdr.set_defaults(fn=cmd_doctor)
+    pp = sub.add_parser("perf", help="đo và so hiệu năng có thống kê, chặn gian lận số đo (LOOP-OPT-*)")
+    ppsub = pp.add_subparsers(dest="perf_cmd", required=True)
+    pc = ppsub.add_parser("compare", help="so hai bộ mẫu: improved/regressed/neutral/insufficient (exit 0 = improved)")
+    pc.add_argument("before")
+    pc.add_argument("after")
+    pc.add_argument(
+        "--higher-is-better", action="store_true", help="đại lượng càng cao càng tốt (mặc định càng thấp càng tốt)"
+    )
+    pc.add_argument("--alpha", type=float, default=PERF_ALPHA)
+    pc.add_argument("--min-effect", type=float, default=PERF_MIN_EFFECT, help="sàn thay đổi tương đối (mặc định 0.02)")
+    pc.add_argument("--min-runs", type=int, default=PERF_MIN_RUNS)
+    pc.add_argument("--exact", action="store_true", help="đại lượng tất định (số lệnh, byte): không cần kiểm định")
+    pc.add_argument("--no-regress", action="store_true", help="cổng chống hồi quy: neutral cũng exit 0")
+    pc.add_argument("--json", action="store_true")
+    psa = ppsub.add_parser("sample", help="chạy lệnh nhiều lần, ghi thời gian tường ra file mẫu")
+    psa.add_argument("--out", required=True)
+    psa.add_argument("--runs", type=int, default=PERF_MIN_RUNS)
+    psa.add_argument("--warmup", type=int, default=2)
+    psa.add_argument("--timeout", type=float, default=300.0)
+    psa.add_argument("cmd", nargs=argparse.REMAINDER)
+    pgu = ppsub.add_parser("guard", help="diff so với --base không được đụng file khoá; báo dòng đáng ngờ")
+    pgu.add_argument("--base", required=True, help="ref gốc (vd origin/main)")
+    pgu.add_argument("--locked", action="append", metavar="GLOB", help="file khoá (lặp được): bộ đo, test tương đương")
+    pgu.add_argument("--strict", action="store_true", help="dòng đáng ngờ cũng làm exit 1")
+    pp.set_defaults(fn=cmd_perf)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     return p
 
