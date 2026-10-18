@@ -14,8 +14,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - **Ủy quyền production trong PLAN + `xt.py grant-check`; hạn mức autopilot mặc định x2** (ADR-0022, D-027, D-028; chủ repo yêu cầu
   bật tự động tới production khi duyệt kế hoạch). Mẫu `templates/PLAN.md` có mục "Ủy quyền production" (dòng
   `- grant: <nhóm> | khoá=giá trị`, mặc định chỉ sandbox); lệnh mới `grant-check <nhóm> khoá=giá trị` exit 0 trong ủy quyền, 1 ngoài
-  hoặc thiếu mục (→ `loop defer`), 2 tham số sai. PR đổi dòng `- grant:` ở PLAN.md luôn do người merge (cùng chốt với khoá
-  `merge_hard_exceptions`). Mục mới `LOOP-STOP-026` (SHOULD). `AGENTS.md` §5, mẫu `AGENTS.md`, skill `/autopilot` ghi "trừ việc
+  hoặc thiếu mục (→ `loop defer`), 2 tham số sai; đọc PLAN.md đã commit ở nhánh mặc định (không đọc cây làm việc), đòi khai đủ
+  mọi khoá, từ chối số âm/`nan`/`inf`. PR đổi hiệu lực ủy quyền ở PLAN.md (so `parse_grants` đáy/đầu PR) luôn do người merge
+  (cùng chốt với khoá `merge_hard_exceptions`). Mục mới `LOOP-STOP-026` (SHOULD). `AGENTS.md` §5, mẫu `AGENTS.md`, skill `/autopilot` ghi "trừ việc
   nằm trong ủy quyền". Mặc định x2 khi PLAN bỏ trống số: trần vòng `max(40, 8 × task chưa làm)` (trước `max(20, 4 × task)`), 100
   vòng khi không `--single-session` (trước 50), `merge-watch --max-minutes` 240 (trước 120), khuyến nghị `--hours` ≤ 16. Sửa lỗi
   định dạng bước 13 của skill `/autopilot` (dấu nháy lặp quanh `<XT>`).

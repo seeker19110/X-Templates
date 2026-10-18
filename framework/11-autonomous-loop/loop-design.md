@@ -45,7 +45,7 @@ updated: 2026-10-16
 |---|---|---|
 | `inactive` | Chưa `loop init` hoặc đã tắt | Cho dừng |
 | `blocked` | `loop block` đã gọi · `same_failure_count ≥ 3` · không thấy PLAN · PLAN không có task | Cho dừng, `active=false`, ghi `final_verdict` |
-| `budget` | `iterations ≥ max_iterations` (mặc định 50) · quá `deadline` (`--hours`) | Cho dừng, `active=false` |
+| `budget` | `iterations ≥ max_iterations` (mặc định 100; một phiên `max(40, 8 × task chưa làm)`) · quá `deadline` (`--hours`) | Cho dừng, `active=false` |
 | `continue` | Còn task `[ ]`, hoặc blueprint còn MUST mở / miễn trừ không hợp lệ (thiếu lý do, MUST `Miễn` thiếu `Duyệt:`) / dòng mục sai định dạng hoặc bị xoá | **Chặn dừng**, `iterations += 1`, nêu task kế |
 | `verify` | Task `[x]` nhưng không có evidence, `exit_code ≠ 0`, `cmd ≠ Gate` khai trong PLAN, hoặc evidence có từ trước lần `loop init` này (vòng/PLAN trước) · task `[~]` không ghi `— Bỏ: <lý do>` · dòng task sai định dạng · (ở Stop hook) đủ bằng chứng nhưng chưa `loop verify` xanh trên cây hiện tại | **Chặn dừng**, yêu cầu `loop record` / `loop verify` lại |
 | `done` | Mọi task có bằng chứng xanh đúng Gate và blueprint 0 MUST mở (blueprint khai ở `loop init` phải tồn tại; biến mất giữa chừng thì PLAN là nguồn sự thật và lý do verdict ghi rõ blueprint không được kiểm) | Cho dừng, `active=false` |

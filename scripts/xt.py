@@ -52,6 +52,7 @@ Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import datetime as _dt
 import fnmatch
@@ -60,6 +61,7 @@ import importlib.util
 import io
 import itertools
 import json
+import math
 import os
 import posixpath
 import re
@@ -2981,18 +2983,41 @@ class PrInputError(Exception):
     """Không lấy/đọc được JSON của PR — `merge-check` thoát 2."""
 
 
-GRANT_CHANGE_RE = re.compile(r"^[+-]\s*-\s*grant:", re.M)  # dòng ủy quyền bị thêm/sửa/xoá (không tính dòng ngữ cảnh)
+PLAN_PATH_SUFFIX = "docs/autopilot/PLAN.md"
 
 
-def _touches_hard_key(f: Dict[str, Any]) -> bool:
-    """Diff chạm chốt người của ngoại lệ cứng: khoá `merge_hard_exceptions` ở xt.yaml hoặc dòng `- grant:` ở PLAN.md
-    (ADR-0022). Thiếu `patch` (diff lớn) thì coi như chạm — không xác minh được."""
+def _plan_grants(repo: str, path: str, ref: str) -> Optional[Dict[str, Dict[str, str]]]:
+    """Ủy quyền production trong PLAN.md ở `ref` (REST contents); None = không đọc được (đóng khi thiếu). `ref` rỗng thì
+    REST lấy nhánh mặc định — không dùng, coi là không đọc được."""
+    if not ref:
+        return None
+    try:
+        d = _gh_one(f"{repo}/contents/{urllib.parse.quote(path)}?ref={ref}")
+        raw = "".join(str(d.get("content", "")).split())  # GitHub chèn xuống dòng trong base64
+        return parse_grants(base64.b64decode(raw, validate=True).decode("utf-8"))
+    except (PrInputError, ValueError):  # ValueError gồm lỗi base64 và UnicodeDecodeError
+        return None
+
+
+def _plan_grants_changed(f: Dict[str, Any], repo: str, base_sha: str, head_sha: str) -> bool:
+    """So HIỆU LỰC ủy quyền (`parse_grants`) của PLAN.md ở đáy PR với đầu PR — không soi dòng diff: thêm/xoá dòng code
+    fence, viết hoa, xoá dòng đều đổi hiệu lực mà regex trên patch bỏ sót (review ADR-0022). Không đọc được → coi như đổi."""
+    status = f.get("status")
+    old = str(f.get("previous_filename") or f.get("filename"))
+    before = {} if status == "added" else _plan_grants(repo, old, base_sha)
+    after = {} if status == "removed" else _plan_grants(repo, str(f.get("filename")), head_sha)
+    return before is None or after is None or before != after
+
+
+def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
+    """Diff chạm chốt người của ngoại lệ cứng: khoá `merge_hard_exceptions` ở xt.yaml (diff có khoá, hoặc thiếu `patch` —
+    diff lớn, không xác minh được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022)."""
     names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
-    patch = f.get("patch")
     if "xt.yaml" in names:
+        patch = f.get("patch")
         return not isinstance(patch, str) or HARD_KEY in patch
-    if any(n.endswith("docs/autopilot/PLAN.md") for n in names):
-        return not isinstance(patch, str) or bool(GRANT_CHANGE_RE.search(patch))
+    if any(n.endswith(PLAN_PATH_SUFFIX) for n in names):
+        return _plan_grants_changed(f, repo, base_sha, head_sha)
     return False
 
 
@@ -3132,7 +3157,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
                 # Diff xt.yaml chạm khoá ngoại lệ cứng (thiếu patch — diff lớn — thì coi như chạm: không xác minh được).
-                **({"hard_key": True} if _touches_hard_key(f) else {}),
+                **({"hard_key": True} if _touches_hard_key(f, repo, str(base.get("sha", "")), sha) else {}),
             }
             for f in files
         ],
@@ -4019,9 +4044,12 @@ def _grant_violation(grant: Dict[str, str], key: str, value: str) -> str:
     cap = grant.get(f"max_{key}")
     if cap is not None:
         try:
-            return "" if float(value) <= float(cap) else f"{key}={value} vượt max_{key}={cap}"
+            n, limit = float(value), float(cap)
         except ValueError:
             return f"{key}={value} hoặc max_{key}={cap} không phải số"
+        if not math.isfinite(n) or n < 0:
+            return f"{key}={value} không phải số hữu hạn ≥ 0"
+        return "" if n <= limit else f"{key}={value} vượt max_{key}={cap}"
     allowed = grant.get(key)
     if allowed is None:
         return f"`{key}` không có trong ủy quyền của nhóm"
@@ -4035,21 +4063,34 @@ def grant_violations(grants: Dict[str, Dict[str, str]], group: str, requested: D
     grant = grants.get(group.lower())
     if grant is None:
         return [f"nhóm `{group}` không có trong mục Ủy quyền production của PLAN.md"]
-    return [why for k, v in requested.items() if (why := _grant_violation(grant, k, v.lower()))]
+    req = {k.lower(): v.lower() for k, v in requested.items()}
+    # Khai đủ mọi khoá ủy quyền ràng buộc (kể cả `max_<khoá>` → `<khoá>`): khoá không khai không được coi là trong hạn.
+    missing = sorted({k.removeprefix("max_") for k in grant} - set(req))
+    out = [f"thiếu khoá `{k}` (ủy quyền ràng buộc nó — khai đủ mọi khoá của nhóm)" for k in missing]
+    return out + [why for k, v in req.items() if (why := _grant_violation(grant, k, v))]
+
+
+def _default_ref(base: Path) -> str:
+    """Nhánh mặc định ở remote (`origin/HEAD`); không có thì `origin/main`."""
+    r = _git(base, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "origin/main"
 
 
 def cmd_grant_check(args: argparse.Namespace) -> int:
-    """Việc production đang định làm có nằm trong ủy quyền của PLAN.md không (ADR-0022). exit 0 = trong ủy quyền; 1 = ngoài
-    (ghi `loop defer`, không tự làm); 2 = tham số sai."""
+    """Việc production đang định làm có nằm trong ủy quyền của PLAN.md **đã commit ở nhánh mặc định** không (ADR-0022) —
+    không đọc cây làm việc nên agent sửa PLAN tại chỗ không tự cấp được; ủy quyền chỉ có hiệu lực sau khi PR duyệt kế
+    hoạch (do người merge) vào nhánh mặc định. exit 0 = trong ủy quyền; 1 = ngoài (ghi `loop defer`, không tự làm);
+    2 = tham số sai."""
     requested = {}
     for item in args.params:
         key, sep, value = item.partition("=")
         if not sep or not key:
             print(f"✗ tham số `{item}` phải dạng khoá=giá trị", file=sys.stderr)
             return 2
-        requested[key] = value
-    plan = project_dir() / args.plan
-    grants = parse_grants(plan.read_text(encoding="utf-8")) if plan.is_file() else {}
+        requested[key.lower()] = value
+    base = project_dir()
+    shown = _git(base, "show", f"{args.ref or _default_ref(base)}:./{args.plan}")
+    grants = parse_grants(shown.stdout) if shown.returncode == 0 else {}
     why = grant_violations(grants, args.group, requested)
     if args.json:
         print(json.dumps({"group": args.group, "ok": not why, "reasons": why}, ensure_ascii=False))
@@ -4176,9 +4217,12 @@ def build_parser() -> argparse.ArgumentParser:
         "group", help="nhóm: payments · data_delete · data_export · outbound_messages · auth_crypto · secrets"
     )
     pg.add_argument(
-        "params", nargs="*", help="khoá=giá trị của việc định làm (vd amount=30 mode=live); thiếu khoá = ngoài"
+        "params",
+        nargs="*",
+        help="khoá=giá trị của việc định làm (vd per_txn=30 mode=live refund=false); thiếu khoá = ngoài",
     )
-    pg.add_argument("--plan", default="docs/autopilot/PLAN.md", help="PLAN.md chứa các dòng `- grant:`")
+    pg.add_argument("--plan", default="docs/autopilot/PLAN.md", help="đường dẫn trong repo của PLAN.md chứa `- grant:`")
+    pg.add_argument("--ref", help="nhánh đọc PLAN.md đã commit (mặc định origin/HEAD, không có thì origin/main)")
     pg.add_argument("--json", action="store_true", help="in JSON (group, ok, reasons)")
     pg.set_defaults(fn=cmd_grant_check)
     pb = sub.add_parser("blueprint-status")

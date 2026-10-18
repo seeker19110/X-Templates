@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -408,18 +409,73 @@ class MergeConfigTest(unittest.TestCase):
         self.assertFalse(xt._touches_hard_key({"filename": "xt.yaml", "patch": "+lint: x"}))
         self.assertFalse(xt._touches_hard_key({"filename": "src/merge_hard_exceptions.py"}))
 
-    def test_touches_grant_lines_in_plan(self):
-        """ADR-0022: PLAN.md chỉ chạm chốt khi dòng `- grant:` bị thêm/sửa/xoá — tick task, dòng ngữ cảnh thì không."""
-        plan = "docs/autopilot/PLAN.md"
-        add = "@@ -1,2 +1,3 @@\n ## Ủy quyền production\n+- grant: payments | mode=live | max_per_txn=500\n"
-        edit = "@@ -4 +4 @@\n-- grant: payments | mode=sandbox\n+- grant: payments | mode=live\n"
-        tick = "@@ -9,3 +9,3 @@\n - grant: payments | mode=sandbox\n-- [ ] `T-001` việc\n+- [x] `T-001` việc\n"
-        self.assertTrue(xt._touches_hard_key({"filename": plan, "patch": add}))
-        self.assertTrue(xt._touches_hard_key({"filename": plan, "patch": edit}))
-        self.assertFalse(xt._touches_hard_key({"filename": plan, "patch": tick}))
-        self.assertTrue(xt._touches_hard_key({"filename": plan}))  # diff lớn không có patch → không xác minh được
-        self.assertTrue(xt._touches_hard_key({"filename": "x/PLAN.md", "previous_filename": plan, "patch": add}))
-        self.assertFalse(xt._touches_hard_key({"filename": "docs/other/PLAN.md", "patch": add}))
+    PLAN_FILE = "docs/autopilot/PLAN.md"
+
+    @staticmethod
+    def contents(by_ref: dict):
+        """`_gh_one` giả cho REST contents: {ref: nội dung PLAN.md}; ref vắng → PrInputError (như 404)."""
+
+        def fake(path: str) -> dict:
+            ref = path.rsplit("?ref=", 1)[1]
+            if ref not in by_ref:
+                raise xt.PrInputError("404")
+            return {"content": base64.b64encode(by_ref[ref].encode()).decode()}
+
+        return fake
+
+    def changed(self, f: dict, base: str | None, head: str | None) -> bool:
+        by_ref = {k: v for k, v in (("base", base), ("head", head)) if v is not None}
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=self.contents(by_ref)):
+            return xt._touches_hard_key({"filename": self.PLAN_FILE, **f}, "repos/o/r", "base", "head")
+
+    def test_plan_grant_effect_changes_are_hard(self):
+        """ADR-0022: so HIỆU LỰC ủy quyền đáy/đầu PR — fence, viết hoa, xoá dòng đều bị bắt (review: regex trên patch lọt)."""
+        sand = "- grant: payments | mode=sandbox | max_per_txn=0\n"
+        live = "- grant: payments | mode=live | max_per_txn=1e9\n"
+        cases = {
+            "thêm dòng": (sand, sand + "- grant: secrets | read_values=false\n", True),
+            "sửa dòng": (sand, live, True),
+            "viết hoa": (sand, live.replace("grant", "GRANT").replace("mode", "MODE"), True),
+            "xoá dòng": (sand, "", True),
+            "bỏ fence": ("```\n" + sand + "```\n", sand, True),
+            "thêm fence mở": (sand, "```\n" + sand, True),
+            "đảo fence": (sand + "```\n" + live + "```\n", "```\n" + sand + "```\n" + live + "```\n", True),
+            "chỉ tick task": (sand + "- [ ] `T-001` việc\n", sand + "- [x] `T-001` việc\n", False),
+            "thêm ghi chú": (sand, "# ghi chú\n" + sand, False),
+        }
+        for name, (before, after, want) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.changed({"status": "modified"}, before, after), want)
+
+    def test_plan_status_rename_and_unreadable(self):
+        g = "- grant: payments | mode=sandbox | max_per_txn=0\n"
+        self.assertTrue(self.changed({"status": "added"}, None, g))  # file mới có grant
+        self.assertFalse(self.changed({"status": "added"}, None, "# PLAN\n"))  # file mới không grant
+        self.assertTrue(self.changed({"status": "removed"}, g, None))
+        self.assertFalse(self.changed({"status": "removed"}, "# PLAN\n", None))
+        self.assertFalse(self.changed({"status": "renamed", "previous_filename": "old/PLAN.md"}, g, g))
+        self.assertTrue(self.changed({"status": "modified"}, None, g))  # đáy không đọc được → coi như đổi
+        self.assertTrue(self.changed({"status": "modified"}, g, None))  # đầu không đọc được → coi như đổi
+        moved = {"filename": "docs/x.md", "previous_filename": self.PLAN_FILE, "status": "renamed"}
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=self.contents({"base": g, "head": g})):
+            self.assertFalse(xt._touches_hard_key(moved, "repos/o/r", "base", "head"))  # dời đi mà grant y nguyên
+        self.assertTrue(xt._touches_hard_key({"filename": self.PLAN_FILE}, "repos/o/r", "", "head"))  # thiếu sha đáy
+        self.assertFalse(xt._touches_hard_key({"filename": "docs/other/NOTES.md"}, "repos/o/r", "base", "head"))
+
+    def test_plan_grants_reader_rejects_bad_content(self):
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"content": "!!!"}):
+            self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"))  # base64 hỏng
+        wrapped = base64.encodebytes(b"- grant: secrets | read_values=false\n" * 3).decode()  # có xuống dòng như GitHub
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"content": wrapped}):
+            self.assertEqual(
+                xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"), {"secrets": {"read_values": "false"}}
+            )
+        bad = base64.b64encode(b"\xff\xfe").decode()
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"content": bad}):
+            self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, "head"))  # không phải UTF-8
+        with unittest.mock.patch.object(xt, "_gh_one") as one:
+            self.assertIsNone(xt._plan_grants("repos/o/r", self.PLAN_FILE, ""))  # ref rỗng = nhánh mặc định: không dùng
+            one.assert_not_called()
 
 
 class MergeDoctorTest(unittest.TestCase):
