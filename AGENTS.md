@@ -64,4 +64,4 @@ Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint
 Subagent: `researcher` (tra cứu, read-only) · `executor` (task rõ phạm vi) · `reviewer` (model khác, read-only). Phiên chính điều phối; **subagent không lồng subagent**; song song chỉ khi việc độc lập về file.
 
 ## 9. Giao tiếp
-Tiếng Việt có dấu, ngắn, dẫn đầu bằng kết quả. Báo cáo cuối việc: đã làm · bằng chứng (lệnh + exit code) · quyết định tự duyệt (D-NNN) · còn treo · đề xuất. Không khai "xong" khi chưa có bằng chứng; sai thì đính chính, không xoá dấu vết.
+Tên phiên: `<Tên repo> — <tên nhánh>` (nhánh do agent tự đặt `<type>/<mô-tả-ngắn>`; Claude Code `/rename`, phiên cloud `set_session_title`; hook SessionStart in gợi ý — `LOOP-HARNESS-028`). Tiếng Việt có dấu, ngắn, dẫn đầu bằng kết quả. Báo cáo cuối việc: đã làm · bằng chứng (lệnh + exit code) · quyết định tự duyệt (D-NNN) · còn treo · đề xuất. Không khai "xong" khi chưa có bằng chứng; sai thì đính chính, không xoá dấu vết.
