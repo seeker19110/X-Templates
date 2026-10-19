@@ -9,19 +9,28 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Security
 - Guard (audit 2026-10-19, chính sách mặc định ADR-0018):
-  - shell lồng quá 3 lớp (`bash -c` ×4 quanh `rm -rf ~`) nay **chặn** thay vì cho qua im lặng (AUD-SEC-063);
-  - brace expansion được bung (≤ 64 biến thể, quá → chặn) và quét từng biến thể: `git push origin {feat/x,main}`,
-    `rm -rf {dist,~/.cache}`, `gh repo {delete,} o/r` bị chặn (AUD-SEC-064);
+  - shell lồng quá 4 lớp (`bash -c` ×5 quanh `rm -rf ~`) nay **chặn** thay vì cho qua im lặng; `find -exec` còn quét
+    được hai lớp shell bên trong (AUD-SEC-063);
+  - brace expansion: guard quét bản bung thật như bash (`git push origin {feat/x,main}` → `… feat/x main`),
+    `rm -rf {dist,~/.cache}`, `gh repo {delete,} o/r` bị chặn; dò nhóm tuyến tính có trần (> 512 `{` ngoài nháy hoặc bản
+    bung > 64 KB → chặn) (AUD-SEC-064);
+  - `rm -rf build 2>/dev/null` không còn bị coi là xoá `/dev/null` (đích chuyển hướng không phải đối số);
   - hook chạy `python3 -I` (bỏ `PYTHONPATH`/`PYTHONPYCACHEPREFIX`/user-site `usercustomize.py`), bytecode cache chuyển từ
     `~/.cache/xtemplates/pycache` vào `.autopilot/pycache` của dự án (đã rào ghi tay) — mã agent đặt ngoài dự án không
     chạy thay guard (AUD-SEC-065);
   - `pre-mcp-guard.sh`: lối tắt "tắt auto-merge" chỉ khi payload có đúng một khoá `tool_name` (AUD-SEC-066);
-  - gửi file bí mật ra mạng qua `scp`/`rsync`/`sftp` tới máy khác, `nc`/`ncat`/`socat`/`telnet`/`ssh`, `gh gist
-    create|edit`, `gh release upload`, `--body-file`, ghi vào `/dev/tcp/…` → chặn (AUD-SEC-067);
-  - xoá/huỷ ngoài dự án qua `rsync --delete` (đích local), `shred`, `mv` chuyển thứ ngoài dự án đi nơi khác ngoài dự án,
-    `rmtree`/`remove_tree` trong script → chặn (AUD-SEC-068);
-  - dấu review `xt-review v1` đăng tay qua `gh pr|issue comment|review|edit`, `gh api` hoặc tool MCP comment → chặn —
-    chỉ `xt.py pr reviewed` đăng (ADR-0027, AUD-SEC-069); matcher hook MCP thêm tool comment/review.
+  - gửi file bí mật ra mạng qua `scp`/`rsync`/`sftp` tới máy khác (`host:`, `scp://`), `aws s3`/`gsutil`/`rclone`,
+    `nc`/`ncat`/`socat`/`telnet`/`ssh`, `gh gist create|edit`, `gh release upload`, `--body-file`, ghi vào `/dev/tcp/…`
+    → chặn; giá trị tuỳ chọn (`scp -i key.pem`, `rsync -e "ssh -i k"`, `--exclude .env`) và khoá `.pub` không tính
+    (AUD-SEC-067). Giới hạn: thư mục/glob chứa bí mật (`scp -r . h:`), `tar c . | ssh` không bị bắt;
+  - xoá/huỷ ngoài dự án qua `rsync --delete` (đích local) / `--remove-source-files`, `shred`, `mv` gốc/home hoặc thư
+    mục ngoài dự án đi nơi khác ngoài dự án, `rmtree`/`remove_tree` trong script (cả `Path.home()`) → chặn
+    (AUD-SEC-068);
+  - dấu review (đúng dạng `xt-review v1 head=<40 hex> verdict=…`) đăng tay qua `gh pr|issue comment|review|create|edit`,
+    `gh api` ghi hoặc tool MCP comment/review/PR → chặn — chỉ `xt.py pr reviewed` đăng (ADR-0027, AUD-SEC-069); matcher
+    hook MCP thêm tool comment/review. Giới hạn (gờ giảm tốc, không phải kiểm soát): dấu ghi vào file rồi
+    `--body-file`, ghép lúc chạy (`$(…)`), `curl`/script gọi REST không bị bắt — lớp thật là steward chỉ tin tác giả có
+    quyền ghi.
 
 ### Changed
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120

@@ -1551,6 +1551,9 @@ class MergeGuardTest(unittest.TestCase):
         env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "PYTHONPYCACHEPREFIX": str(cache)}
         with mock.patch.dict(os.environ, env):
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
+            self.assertFalse((self.proj / ".autopilot").exists())  # chưa có .autopilot/: không ghi bytecode (-B)
+            (self.proj / ".autopilot").mkdir()
+            self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
             self.assertTrue(list((self.proj / ".autopilot" / "pycache").rglob("xt*.pyc")))
             self.assertFalse(cache.exists())  # PYTHONPYCACHEPREFIX của môi trường bị bỏ qua
             self.fake_gh(None)
@@ -2396,6 +2399,7 @@ class HookRunnerTest(unittest.TestCase):
         self.env.update(CLAUDE_PROJECT_DIR=str(self.tmp), XDG_CACHE_HOME=str(self.cache), XT_GUARD_POLICY="")
 
     def test_nul_fields_and_no_pycache_in_project(self):
+        (self.tmp / ".autopilot").mkdir()  # cache bytecode chỉ khi .autopilot/ đã có (đã ignore)
         r = subprocess.run(
             ["bash", str(self.hooks / "pre-bash-guard.sh")],
             input=json.dumps({"tool_input": {"command": "sudo ls"}}),

@@ -16,10 +16,13 @@ xt_py() {
 # dịch lại mỗi lần (guard.py ~25 ms, xt.py ~50 ms — trả ở MỌI lệnh Bash/Edit). sys.path[0] = thư mục của file như khi
 # chạy script (không lấy cwd). `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở
 # đó không chạy trước guard (AUD-SEC-065). Cache bytecode ở `.autopilot/pycache` của dự án (đã ignore, guard chặn ghi
-# tay cả Bash lẫn Edit — ADR-0026), không ở `~/.cache` agent ghi được; không đẻ `__pycache__` cạnh hook; thư mục cache
-# không ghi được thì Python bỏ qua (chỉ chậm như cũ).
+# tay cả Bash lẫn Edit — ADR-0026), không ở `~/.cache` agent ghi được; chỉ khi `.autopilot/` đã có (install/doctor đã
+# ignore nó) — chưa có thì `-B` không ghi bytecode (dự án chưa ignore không bị đẻ file — review #159); không đẻ
+# `__pycache__` cạnh hook; thư mục cache không ghi được thì Python bỏ qua (chỉ chậm như cũ).
 py_run() { # $1=đường dẫn .py (có main()) $2…=đối số
-  python3 -I -X "pycache_prefix=$XT_ROOT/.autopilot/pycache" -c '
+  local cache=(-B)
+  [ -d "$XT_ROOT/.autopilot" ] && cache=(-X "pycache_prefix=$XT_ROOT/.autopilot/pycache")
+  python3 -I "${cache[@]}" -c '
 import sys
 d, _, f = sys.argv[1].rpartition("/")
 sys.path.insert(0, d or ".")

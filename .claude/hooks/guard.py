@@ -525,7 +525,8 @@ def expand_ansi_c(cmd: str) -> str:
     return "".join(out)
 
 
-BRACE_MAX_VARIANTS = 64  # biến thể brace expansion tối đa được quét; hơn → chặn (AUD-SEC-064)
+BRACE_MAX_OPEN = 512  # `{` ngoài nháy tối đa được dò; hơn → không quét hết → chặn (review #159: chống bậc hai)
+BRACE_SCAN_MAX = 1024  # độ dài tối đa một nhóm `{…}` được dò
 BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.-?\d+)?")
 WORD_END = set(" \t\n;&|()<>")
 
@@ -549,10 +550,11 @@ def _unquoted(s: str, i: int = 0) -> Iterator[Tuple[int, str]]:
 
 def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
     """Nhóm `{a,b}`/`{x..y}` bắt đầu ở `s[i]`: (vị trí `}`, các phương án) — dãy `x..y` lấy hai đầu mút. Khoảng trắng
-    ngoài nháy, không dấu phẩy cấp đầu, không đóng → không phải brace expansion (`{ cmd; }`, `{}` của `find`)."""
+    ngoài nháy, không dấu phẩy cấp đầu, không đóng trong `BRACE_SCAN_MAX` ký tự → không phải brace expansion (`{ cmd; }`,
+    `{}` của `find`)."""
     depth, start, parts = 0, i + 1, []
     for j, c in _unquoted(s, i):
-        if c.isspace():
+        if c.isspace() or j - i > BRACE_SCAN_MAX:
             return None
         depth += {"{": 1, "}": -1}.get(c, 0)
         if depth == 0:
@@ -569,16 +571,16 @@ def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
     return (j, [m.group(1), m.group(2)]) if m else None
 
 
-def _first_brace(s: str) -> Optional[Tuple[int, int, List[str]]]:
-    """Nhóm brace expansion đầu tiên ngoài nháy (bỏ `${…}` và `\\{`)."""
-    for i, c in _unquoted(s):
+def _first_brace(s: str, start: int = 0) -> Optional[Tuple[int, int, List[str]]]:
+    """Nhóm brace expansion đầu tiên ngoài nháy từ `start` (bỏ `${…}` và `\\{`)."""
+    for i, c in _unquoted(s, start):
         if c == "{" and s[i - 1 : i] != "$" and (g := _brace_group(s, i)):
             return i, g[0], g[1]
     return None
 
 
-def _brace_word(t: str, i: int, end: int, alts: List[str]) -> str:
-    """Bản bung thật của từ chứa nhóm: `p{a,b}s` → `pas pbs` (phương án rỗng của từ rỗng bị bỏ như bash)."""
+def _brace_word(t: str, i: int, end: int, alts: List[str]) -> Tuple[str, int]:
+    """(lệnh sau khi bung từ chứa nhóm, vị trí đầu từ): `p{a,b}s` → `pas pbs` (từ rỗng bị bỏ như bash)."""
     lo = i
     while lo > 0 and t[lo - 1] not in WORD_END:
         lo -= 1
@@ -586,25 +588,24 @@ def _brace_word(t: str, i: int, end: int, alts: List[str]) -> str:
     while hi < len(t) and t[hi] not in WORD_END:
         hi += 1
     words = [w for a in alts if (w := t[lo:i] + a + t[end + 1 : hi])]
-    return t[:lo] + " ".join(words) + t[hi:]
+    return t[:lo] + " ".join(words) + t[hi:], lo
 
 
 def brace_variants(cmd: str) -> Optional[List[str]]:
-    """Các lệnh bash sẽ chạy sau brace expansion (`git push origin {feat/x,main}`): mỗi nhóm lấy từng phương án và bản
-    bung thật. Không có nhóm → []; quá `BRACE_MAX_VARIANTS` → None (không quét hết). Heredoc/comment là dữ liệu."""
+    """Lệnh bash thật sự chạy sau brace expansion (`git push origin {feat/x,main}` → `git push origin feat/x main`):
+    `[bản bung]`; không có nhóm → []; quá nhiều `{` hoặc bản bung dài quá `REWRITE_MAX_CHARS` → None (không quét hết
+    → chặn). Dò một lượt từ trái sang (nhóm lồng lộ ra sau khi bung nhóm ngoài). Heredoc/comment là dữ liệu."""
     s = strip_comments(strip_heredocs(join_continuations(cmd)))
-    todo, done = [s], []
-    while todo:
-        t = todo.pop()
-        f = _first_brace(t)
-        if not f:
-            done += [t] if t != s else []
-            continue
-        i, end, alts = f
-        todo += [t[:i] + a + t[end + 1 :] for a in alts] + [_brace_word(t, i, end, alts)]
-        if len(todo) + len(done) > BRACE_MAX_VARIANTS:
+    if "{" not in s:
+        return []
+    if sum(c == "{" for _, c in _unquoted(s)) > BRACE_MAX_OPEN:
+        return None
+    t, pos = s, 0
+    while f := _first_brace(t, pos):
+        t, pos = _brace_word(t, *f)
+        if len(t) > REWRITE_MAX_CHARS:
             return None
-    return done
+    return [t] if t != s else []
 
 
 def tokenize(cmd: str) -> List[str]:
@@ -1190,8 +1191,11 @@ IMPORT_RUNNER = (
 
 
 def isolated_python(root: str) -> List[str]:
-    """Đầu lệnh python cho tiến trình con của guard: cách ly, cache bytecode trong dự án (đã rào ghi tay)."""
-    return [sys.executable, "-I", "-X", f"pycache_prefix={os.path.join(root, '.autopilot', 'pycache')}"]
+    """Đầu lệnh python cho tiến trình con của guard: cách ly, cache bytecode trong `.autopilot/` của dự án (đã rào ghi
+    tay) khi thư mục đó đã có; chưa có thì không ghi bytecode (`-B`) — như `py_run` của _lib.sh."""
+    autopilot = os.path.join(root, ".autopilot")
+    cache = ["-X", f"pycache_prefix={os.path.join(autopilot, 'pycache')}"] if os.path.isdir(autopilot) else ["-B"]
+    return [sys.executable, "-I", *cache]
 
 
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
@@ -1292,7 +1296,8 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         sub = [
             FIND_FOUND if t == "{}" else t for t in itertools.takewhile(lambda t: t not in (";", "+"), args[k + 1 :])
         ]
-        verdict = bash_decision(shlex.join(sub), root, cwd, MAX_NEST - 1)
+        # lệnh của -exec bắt đầu ở độ sâu 2: còn hai lớp shell lồng (`bash -c '… sh -c "…"'`, review #159)
+        verdict = bash_decision(shlex.join(sub), root, cwd, MAX_NEST - 2)
         if verdict["decision"] in ("deny", "ask"):
             return str(verdict["decision"]), f"find {a}: {verdict['reason']}"
         deleting = deleting or bool(sub) and posixpath.basename(sub[0]) in ("rm", "shred", "unlink")
@@ -1424,21 +1429,56 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
-RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-\w+)?|remove-source-files)(?:=.*)?")
+RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-\w+)?)(?:=.*)?")
+HOME_ROOT_TARGETS = {"/", "~", "$HOME", "${HOME}"}  # dời đi đâu cũng là mất (`mv ~ ./x`)
+MV_VALUE_OPTS = ("-t", "--target-directory", "-S", "--suffix")
+
+
+def _drop_redirects(args: List[str]) -> List[str]:
+    """Bỏ chuyển hướng và đích của nó (`2>/dev/null`, `>/dev/null 2>&1`, `&>f`) — không phải đối số của lệnh (review
+    #159: `rm -rf build 2>/dev/null` từng bị coi là xoá `/dev/null`)."""
+    out: List[str] = []
+    skip = False
+    for i, a in enumerate(args):
+        if skip or _is_redirect(a):
+            skip = not skip and _is_redirect(a)
+            continue
+        if not (a.isdigit() and i + 1 < len(args) and _is_redirect(args[i + 1])):
+            out.append(a)
+    return out
+
+
+def _rsync_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """`rsync --delete` lên đích local ngoài dự án; `--remove-source-files` xoá nguồn ngoài dự án."""
+    pos = _positionals(args, COPY_VALUE_OPTS["rsync"])
+    out = [s for s in pos[:-1] if _outside_project(s, root, cwd)] if "--remove-source-files" in args else []
+    deleting = pos and any(RSYNC_DELETE_RE.fullmatch(a) for a in args) and not REMOTE_SPEC_RE.match(pos[-1])
+    return out + ([pos[-1]] if deleting and _outside_project(pos[-1], root, cwd) else [])
+
+
+def _mv_wipes(args: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """`mv` dời gốc/home (đi đâu cũng mất) hoặc dời thư mục ngoài dự án sang chỗ khác ngoài dự án (`mv ~/x /tmp/y`);
+    dời một file ngoài dự án (`mv ~/Downloads/a.zip /tmp/`) là đổi chỗ, không phải xoá."""
+    pos = _positionals(args, MV_VALUE_OPTS)
+    target = _flag_value(args, "-t") or _flag_value(args, "--target-directory")
+    srcs, dest = (pos, target) if target else (pos[:-1], pos[-1] if pos else "")
+    away = bool(dest) and not _inside_root(dest, root, cwd)
+    return [
+        s
+        for s in srcs
+        if _rm_target(s) in HOME_ROOT_TARGETS
+        or (away and _outside_project(s, root, cwd) and os.path.isdir(os.path.join(cwd or root, os.path.expanduser(s))))
+    ]
 
 
 def _wipe_outside(name: str, args: List[str], root: str, cwd: Optional[str]) -> List[str]:
-    """Đích ngoài dự án mà lệnh khác `rm`/`find` xoá/huỷ (AUD-SEC-068): `rsync --delete … <đích local>`, `shred`, `mv`
-    chuyển thứ ngoài dự án đi chỗ khác ngoài dự án (`mv ~ /tmp/x`)."""
-    pos = _positionals(args)
-    if name == "rsync" and any(RSYNC_DELETE_RE.fullmatch(a) for a in args) and pos:
-        local = not REMOTE_SPEC_RE.match(pos[-1])
-        return [pos[-1]] if local and _outside_project(pos[-1], root, cwd) else []
+    """Đích ngoài dự án mà lệnh khác `rm`/`find` xoá/huỷ (AUD-SEC-068): `rsync --delete`/`--remove-source-files`,
+    `shred`, `mv` gốc/home hoặc thư mục ngoài dự án đi chỗ khác ngoài dự án."""
+    if name == "rsync":
+        return _rsync_wipes(args, root, cwd)
     if name == "shred":
-        return [t for t in pos if _outside_project(t, root, cwd)]
-    if name == "mv" and len(pos) > 1 and not _inside_root(pos[-1], root, cwd):
-        return [t for t in pos[:-1] if _outside_project(t, root, cwd) or _dangerous_rm_target(t)]
-    return []
+        return [t for t in _positionals(args) if _outside_project(t, root, cwd)]
+    return _mv_wipes(args, root, cwd) if name == "mv" else []
 
 
 def _inside_root(target: str, root: str, cwd: Optional[str]) -> bool:
@@ -1448,6 +1488,7 @@ def _inside_root(target: str, root: str, cwd: Optional[str]) -> bool:
 
 
 def _delete_rule(name: str, args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
+    args = _drop_redirects(args)
     if name == "rm":
         return _rm_rule(args, root, cwd)
     wiped = _wipe_outside(name, args, root, cwd) if root else []
@@ -1554,8 +1595,19 @@ def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]
 
 # Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
 # python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer khác họ model" (D-045, AUD-SEC-069).
-REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review\s+v1\b")  # đúng dạng dấu; nhắc tên dấu trong văn bản thì không
-GH_POST_RE = re.compile(r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)|api)\b", re.S)
+# Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`): mã nguồn/tài liệu nhắc dạng dấu (`head={head}`) không khớp.
+REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review\s+v1\s+head=[0-9a-f]{40}\s+verdict=(?:clean|blocking)")
+# `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
+GH_POST_RE = re.compile(
+    r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)\b"
+    r"|api\b.*?(?:\s-[fF]\b|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
+    re.S,
+)
+# Tool MCP đăng chữ lên PR/issue mà steward đọc dấu từ đó (commit file nhắc dấu thì không — review #159).
+MCP_REVIEW_POST_RE = re.compile(
+    r"mcp__.+__\w*(?:issue_comment|pull_request_review_write|comment_to_pending_review|reply_to_pull_request_comment"
+    r"|create_pull_request|update_pull_request)\w*"
+)
 REVIEW_FORGE_WHY = (
     "ghi tay bằng chứng review (dấu `xt-review v1` trên PR) — chỉ `xt.py pr reviewed` đăng (ADR-0026/0027)"
 )
@@ -1571,7 +1623,7 @@ def _forges_review(argv: List[str]) -> bool:
 
 
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
-    if REVIEW_MARK_RE.search(json.dumps(tool_input, ensure_ascii=False)):
+    if MCP_REVIEW_POST_RE.fullmatch(tool_name) and REVIEW_MARK_RE.search(json.dumps(tool_input, ensure_ascii=False)):
         return "deny", f"Lệnh bị khung chặn ({REVIEW_FORGE_WHY}): {tool_name}"
     hit = mcp_attribution(tool_name, tool_input, root)
     if hit:
@@ -3175,7 +3227,9 @@ class ScanBudget:
         return self.calls < 0 or time.monotonic() > self.deadline
 
 
-MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi (mặc định: chặn — AUD-SEC-063)
+# Độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi (mặc định: chặn — AUD-SEC-063). 4: `find -exec`
+# tốn một bậc, `find … -exec bash -c '… sh -c "…"'` thật vẫn quét được (review #159).
+MAX_NEST = 4
 NEST_ASK = "shell lồng quá sâu"
 
 
@@ -3817,6 +3871,9 @@ WRITE_HINT_RE = re.compile(
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
+HOME_EXPR_RE = re.compile(
+    r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ\[\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
+)
 STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")
 GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
 
@@ -3917,6 +3974,8 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
             for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])
             if lit[:1] in ("/", "~", "$") and _outside_project(lit, root, None)
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
+        if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
+            asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
         if not WRITE_HINT_RE.search(script):
             continue
         for raw in STR_LITERAL_RE.findall(script):
@@ -3991,7 +4050,8 @@ def _is_secret_file(path: str, root: str) -> bool:
     return path not in ("-", "") and classify_path(rel_path(path, root)) == "secret"
 
 
-REMOTE_SPEC_RE = re.compile(r"(?:[\w.-]+@)?[\w.-]+:(?!//)")  # `host:`, `u@h:path` của scp/rsync
+# `host:`, `u@h:path` của scp/rsync, URL `scp://`/`sftp://`/`rsync://` (review #159).
+REMOTE_SPEC_RE = re.compile(r"(?:[\w.-]+@)?[\w.-]+:(?!//)|(?:scp|sftp|rsync)://")
 STREAM_SENDERS = {"nc", "ncat", "netcat", "socat", "telnet", "ssh"}
 GH_UPLOADS = (("gist", "create"), ("gist", "edit"), ("release", "upload"))
 NET_REDIRECT_RE = re.compile(r"/dev/(?:tcp|udp)/")
@@ -4008,14 +4068,41 @@ def _gh_upload_files(args: List[str]) -> List[str]:
     return files + [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--body-file", "-F")]
 
 
+# Tuỳ chọn ăn một giá trị (giá trị không phải file gửi đi: `scp -i key.pem`, `rsync -e "ssh -i k"`, `--exclude .env`).
+COPY_VALUE_OPTS = {
+    "scp": ("-c", "-F", "-i", "-J", "-l", "-o", "-P", "-S", "-D", "-X"),
+    "sftp": ("-c", "-F", "-i", "-J", "-l", "-o", "-P", "-S", "-D", "-B", "-R", "-s"),
+    "rsync": (
+        *("-e", "--rsh", "--exclude", "--include", "--filter", "-f", "--exclude-from", "--include-from"),
+        *("--files-from", "--port", "--password-file", "--log-file", "--partial-dir", "--temp-dir", "-T"),
+        *("--compare-dest", "--link-dest", "--copy-dest", "--backup-dir", "--suffix", "--chmod", "--chown", "-M"),
+        *("--remote-option", "--out-format", "--info", "--debug", "--timeout", "--contimeout", "--bwlimit"),
+        *("--max-size", "--min-size", "--rsync-path", "--usermap", "--groupmap"),
+    ),
+}
+CLOUD_URL_RE = re.compile(r"(?:s3|gs|az|r2|b2)://")
+CLOUD_COPIERS = ("aws", "gsutil", "rclone", "gcloud", "azcopy")
+
+
+def _copy_files(n: List[str]) -> Optional[List[str]]:
+    """File scp/rsync/sftp gửi tới máy khác (`host:`, `scp://`) hoặc lệnh cloud tải lên (`aws s3 cp f s3://…`,
+    `rclone copy f remote:`); None nếu không gửi đi đâu."""
+    pos = _positionals(n[1:], COPY_VALUE_OPTS.get(n[0], ()))
+    if n[0] in COPY_VALUE_OPTS and any(REMOTE_SPEC_RE.match(a) for a in pos):
+        return pos
+    if n[0] in CLOUD_COPIERS and any(CLOUD_URL_RE.match(a) or REMOTE_SPEC_RE.match(a) for a in pos):
+        return pos
+    return None
+
+
 def _net_files(c: List[str], n: List[str]) -> Optional[List[str]]:
     """File một lệnh gửi ra mạng (`-` = stdin của nó), None nếu lệnh không gửi ra mạng (AUD-SEC-067): curl/wget,
-    scp/rsync tới `host:`, nc/socat/ssh (stdin, `<`, `FILE:`), `gh gist|release upload`, ghi vào `/dev/tcp/…`."""
+    scp/rsync tới máy khác, lệnh cloud, nc/socat/ssh (stdin, `<`, `FILE:`), `gh gist|release upload`, `/dev/tcp/…`."""
     args = c[1:]
     if n[0] in FETCHERS:
         return _fetch_files(args)
-    if n[0] in ("scp", "rsync", "sftp") and any(REMOTE_SPEC_RE.match(a) for a in _positionals(n[1:])):
-        return _positionals(n[1:])
+    if n[0] in COPY_VALUE_OPTS or n[0] in CLOUD_COPIERS:
+        return _copy_files(n)
     if n[0] in STREAM_SENDERS:
         return ["-", *_redirect_targets(args, ("<",)), *[a.split(":", 1)[1] for a in n[1:] if ":" in a]]
     if n[0] == "gh":
@@ -4035,7 +4122,7 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
             files = _net_files(c, n) if n else None
             if files is None:
                 continue
-            leaked = [f for f in files if _is_secret_file(f, root)]
+            leaked = [f for f in files if _is_secret_file(f, root) and not f.endswith(".pub")]  # khoá công khai
             if not leaked and "-" in files:  # đọc stdin: xem lệnh phía trước trong ống
                 for up in group[:i]:
                     head = posixpath.basename(up[0]) if up else ""
