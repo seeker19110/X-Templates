@@ -84,6 +84,7 @@ class FakeGh:
         comments: list | None = None,
         raw: dict | None = None,
         rules: list | None = None,
+        branch: dict | None = None,
         real_git: bool = False,
     ):
         self.pull = {
@@ -110,6 +111,7 @@ class FakeGh:
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
         self.comments = comments or []
         self.rules = rules or []
+        self.branch = branch or {}
         self.raw = raw or {}
         self.real_git = real_git
         self.calls: list[list[str]] = []
@@ -133,6 +135,7 @@ class FakeGh:
             f"{self.REPO}/pulls/7/reviews?per_page=100": json.dumps(self.reviews),
             f"{self.REPO}/issues/7/comments?per_page=100": json.dumps(self.comments),
             f"{self.REPO}/rules/branches/main": json.dumps(self.rules),
+            f"{self.REPO}/branches/main": json.dumps(self.branch),
             f"{self.REPO}/commits/{self.SHA}/check-runs?per_page=100": json.dumps({"check_runs": self.runs[:1]})
             + "\n"
             + json.dumps({"check_runs": self.runs[1:]}),
@@ -1492,11 +1495,20 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.assertEqual([w[2] for w in gh.writes], ["merge"])
 
 
+REQUIRED_TEST = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
+
+
 class StewardGh(FakeGh):
     """FakeGh + lệnh ghi (POST/PUT, `gh pr merge`): ghi lại, trả mã theo `fail` (tiền tố lệnh → stderr lỗi)."""
 
     def __init__(self, fail: dict | None = None, **kw: Any):
-        kw["pull"] = {"author_association": "OWNER", "user": {"login": "chu"}, **(kw.get("pull") or {})}
+        kw["pull"] = {
+            "author_association": "OWNER",
+            "user": {"login": "chu"},
+            "base": {"ref": "main"},
+            **(kw.get("pull") or {}),
+        }
+        kw.setdefault("rules", REQUIRED_TEST)  # nhánh đích có check bắt buộc: steward được bật auto-merge
         super().__init__(**{"real_git": True, **kw})  # xt.yaml ở nhánh đích (L3) đọc từ repo tạm của test
         self.fail = fail or {}
         self.writes: list[list[str]] = []
@@ -1624,6 +1636,42 @@ class PrStewardTest(unittest.TestCase):
             ["repos/{owner}/{repo}/pulls/7/merge", "-f", "merge_method=squash", "-f", f"sha={FakeGh.SHA}"],
         )
 
+    def test_steward_needs_required_checks_to_enable_auto_merge(self):
+        # T-1107 (hotel-manager): nhánh đích không có check bắt buộc → auto-merge của GitHub merge NGAY lúc bật
+        gh = StewardGh(rules=[{"type": "pull_request"}])
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertIn("không có check bắt buộc", out)
+        # PR đã sẵn sàng (CI xanh, merge-check = merge): không bật auto-merge, chỉ merge ghim head
+        self.assertEqual([w[:3] for w in gh.writes], [["gh", "api", "-X"]])
+        self.assertTrue(gh.writes[0][4].endswith("/pulls/7/merge"))
+        # branch protection cổ điển có check bắt buộc → được bật
+        gh = StewardGh(
+            rules=[{"type": "pull_request"}], branch={"protection": {"required_status_checks": {"contexts": ["test"]}}}
+        )
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual((rc, gh.writes[0][:3]), (0, ["gh", "pr", "merge"]))
+        # GitHub báo PR đã sẵn sàng (fallback): bỏ lệnh bật auto-merge, giữ merge ghim head
+        cmds = [["gh", "pr", "merge", "7", "--auto"], ["gh", "api", "-X", "PUT", "x/merge"]]
+        with (
+            unittest.mock.patch.object(xt, "_steward_command", return_value=cmds),
+            unittest.mock.patch.object(xt, "_base_has_required", return_value=False),
+            unittest.mock.patch.object(xt, "_steward_run", return_value="") as run,
+            StewardGh().patch(),
+        ):
+            run_main("pr", "steward", "--apply")
+        self.assertEqual(run.call_args[0][0], [["gh", "api", "-X", "PUT", "x/merge"]])
+        # không đọc được rule/nhánh, hoặc PR không có nhánh đích → coi như không có (chiều chặt)
+        xt._REQUIRED_CACHE.clear()
+        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
+            with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
+                self.assertFalse(xt._base_has_required("repos/o/r", "main"))
+        self.assertFalse(xt._base_has_required("repos/o/r", ""))
+        with unittest.mock.patch.object(xt, "_required_checks", side_effect=AssertionError("cache")):
+            self.assertFalse(xt._base_has_required("repos/o/r", "main"))
+
     def test_steward_errors_and_other_actions(self):
         gh = StewardGh(fail={"gh pr merge": "x", "gh api -X PUT": "y"})
         with gh.patch():
@@ -1652,7 +1700,10 @@ class PrStewardTest(unittest.TestCase):
                 cmds = xt._steward_command({"pr": 7, "head": self.H, **over}, "repos/o/r")
                 self.assertEqual(len(cmds) if isinstance(want, int) else cmds, want)
         self.assertEqual(xt._steward_run([]), "không có lệnh")
-        listing = {"repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}])}
+        listing = {
+            "repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}]),
+            "repos/o/r/rules/branches/main": json.dumps(REQUIRED_TEST),
+        }
         one = {"pr": 7, "head": self.H, "action": "wait", "why": "chờ", "applied": False}
         with StewardGh(raw=listing).patch(), unittest.mock.patch.object(xt, "_steward_one", return_value=one) as m:
             self.assertEqual(run_main("pr", "steward", "--repo", "o/r")[1], "#7 wait — chờ\n")
@@ -1712,13 +1763,18 @@ class PrStewardTrustTest(unittest.TestCase):
         self.assertEqual(json.loads(out)["action"], "review")
 
     def test_repo_flag_pins_gh_pr_merge_and_is_validated(self):
-        listing = {"repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}])}
+        listing = {
+            "repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}]),
+            "repos/o/r/rules/branches/main": json.dumps(REQUIRED_TEST),
+        }
         gh = StewardGh(raw=listing)
         one = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "x", "fallback": ""}
         self.assertEqual(xt._steward_command(one, "repos/o/r")[0][:3], ["gh", "pr", "merge"])
         with (
             unittest.mock.patch.object(
-                xt, "_pr_rest", return_value={**pr(), "author": "chu", "authorAssociation": "OWNER"}
+                xt,
+                "_pr_rest",
+                return_value={**pr(), "author": "chu", "authorAssociation": "OWNER", "baseRefName": "main"},
             ),
             gh.patch(),
         ):

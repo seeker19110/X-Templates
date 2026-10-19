@@ -3781,6 +3781,26 @@ def _required_checks(repo: str, branch: str) -> List[str]:
     return out
 
 
+_REQUIRED_CACHE: Dict[Tuple[str, str], bool] = {}
+
+
+def _base_has_required(repo: str, branch: str) -> bool:
+    """Nhánh đích có check bắt buộc không — ruleset (REST `rules/branches`) hoặc branch protection cổ điển (REST
+    `branches/<b>`, trường `protection.required_status_checks.contexts`). Không đọc được → False (chiều chặt). Nhớ theo
+    (repo, nhánh) trong một lượt steward."""
+    key = (repo, branch)
+    if key not in _REQUIRED_CACHE:
+        found = bool(branch) and bool(_required_checks(repo, branch))
+        if branch and not found:
+            try:
+                prot = _gh_one(f"{repo}/branches/{urllib.parse.quote(branch, safe='')}").get("protection") or {}
+            except PrInputError:
+                prot = {}
+            found = bool(((prot.get("required_status_checks") or {}).get("contexts")) or [])
+        _REQUIRED_CACHE[key] = found
+    return _REQUIRED_CACHE[key]
+
+
 BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
 COMPARE_FILES_MAX = 300  # REST compare cắt danh sách file ở 300: nhiều hơn thì không mang review sang
 _CHAIN_CACHE: Dict[Tuple[str, str, str], List[str]] = {}
@@ -5805,6 +5825,15 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
+    if (
+        apply
+        and out["action"] == "enable-auto-merge"
+        and not _base_has_required(repo, str(pr.get("baseRefName") or ""))
+    ):
+        # auto-merge của GitHub chỉ chờ CI khi nhánh đích có check bắt buộc; không có thì merge NGAY lúc bật (T-1107 của
+        # hotel-manager) — bỏ lệnh bật, giữ merge ghim head (chỉ có khi merge-check đã thấy CI xanh)
+        cmds = [c for c in cmds if "--auto" not in c]
+        out["warn"] = "nhánh đích không có check bắt buộc — không bật auto-merge (import ruleset có required check)"
     return _steward_apply(out, d, repo, cmds if apply else [])
 
 
@@ -5849,6 +5878,7 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     target = (lambda n: f"https://github.com/{args.repo}/pull/{n}") if args.repo else (lambda n: n)
+    _REQUIRED_CACHE.clear()
     results = [_steward_one(target(n), repo, project_dir(), args.apply, gh_repo) for n in nums]
     lines = [
         f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' → ' + r['then'] if r.get('then') else ''}"

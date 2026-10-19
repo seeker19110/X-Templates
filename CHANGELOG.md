@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- `pr steward --apply`: nhánh đích không có check bắt buộc (ruleset `rules/branches` hoặc branch protection cổ điển) thì
+  không bật auto-merge — GitHub sẽ merge ngay lúc bật, trước khi CI chạy xong (sự cố hotel-manager#84/#85, chốt T-1107
+  của dự án đưa vào khung); tắt auto-merge và merge ghim head khi `merge-check` đã thấy CI xanh vẫn chạy; báo cảnh báo
+  ra summary. Không đọc được rule → coi như không có (`LOOP-STOP-029`, D-062).
+
 ## [3.7.0] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.6.0:** chạy lại `install.py --with-github` (hook `session-start.sh` mới, `xt.py` mới); chép
