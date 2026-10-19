@@ -5740,11 +5740,11 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
     )
 
 
-# Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới từ: `graphic`/`commander` không phải tên model
-# (review #162).
+# Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI (không phải `\b`: `phi4`, `glm4.5`,
+# `command_r`, `o3mini` là tên thẻ thật) — `graphic`/`commander`/`novaX` không phải tên model (review #162, #164).
 MODEL_FAMILY_RE = re.compile(
     r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral"
-    r"|\b(?:kimi|glm|phi|command|nova|o\d)\b",
+    r"|(?<![a-z])(?:kimi|glm|phi|command|nova)(?![a-z])|(?<![a-z0-9])o\d",
     re.I,
 )
 

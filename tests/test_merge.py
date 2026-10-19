@@ -1326,9 +1326,10 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last["reviewer_model"], last["author_model"]), ("sonnet", "claude-opus-5-5"))
         self.assertEqual(xt.model_family("claude-sonnet-5-5"), "sonnet")
         self.assertEqual(xt.model_family("My-Model 2"), "mymodel")
-        self.assertEqual(
-            (xt.model_family("phi-4"), xt.model_family("o3-mini"), xt.model_family("GLM 4.5")), ("phi", "o3", "glm")
-        )
+        for name, fam in (("phi-4", "phi"), ("o3-mini", "o3"), ("GLM 4.5", "glm"), ("phi4", "phi"), ("glm4.5", "glm")):
+            self.assertEqual(xt.model_family(name), fam, name)
+        for name in ("command_r", "nova_pro", "o3mini", "GLM_4"):  # review #164: thẻ thật không có dấu ngăn
+            self.assertTrue(xt.MODEL_FAMILY_RE.search(name), name)
 
     def test_small_pr_after_standard_stays_strict_and_bad_input(self):
         self.nxt(self.big)  # ghi standard_seen
