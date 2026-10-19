@@ -5,6 +5,50 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không
+  workflow nào sinh, vd `dast`) nay báo đúng "thiếu check bắt buộc: <tên> — thêm job đúng tên hoặc bỏ khỏi ruleset" thay vì
+  "ruleset đòi review của người"; đọc REST `rules/branches/<nhánh>` chỉ khi BLOCKED, không đọc được thì giữ hành vi cũ
+  (`LOOP-STOP-022`, D-060).
+
+## [3.6.0] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.5.1:** chạy lại `install.py` để có `xt.py vendor-check` mới; dự án có skill chép vào
+> `.claude/skills/` thêm `xt.py vendor-check --dirs .claude/skills [--own …] --strict` vào CI (`UX-DS-022`).
+> CI đang chạy `vendor-check --strict` có thể đỏ vì cảnh báo mới: file `SOURCE`/`ORIGIN` tự viết thiếu dòng `License:`
+> (cho phép `**License:**`) hoặc URL repo gốc — thêm hai thông tin đó vào file ghi nguồn.
+
+### Added
+- Bàn giao UI/UX từ `stored` 06 §7i (`anti-slop`), đối chiếu ba cột ở `research/2026-10-19-stored-ui-7i.md`:
+  - bảng chọn skill (`design-system-and-tokens.md`) thêm `antislop-copywriting`/`antislop-code`; `UX-DS-022` đòi `SOURCE.md`
+    có `License:`, đặt sẵn câu hỏi chặn phiên của skill trước khi chạy tự động, ngưỡng tương phản trong skill khớp WCAG;
+    hai bẫy mới (nạp cả bộ luật ~58 KB; đọc huy hiệu "Skills 32K" là số người dùng);
+  - mẫu `AGENTS.md` §9 có dòng "UI" (DESIGN.md định hướng, giá trị từ token, token chữ `on-*`, `xt.py contrast` xanh mới
+    báo xong).
+- `xt.py vendor-check --own a,b`; `--dirs .claude/skills` bỏ qua skill do khung cài (manifest `install.py`) — D-059.
+
+### Changed
+- `UX-A11Y-002`: định nghĩa chữ lớn (≥ 24 px, hoặc ≥ 18,66 px và đậm) + bẫy "coi 18 px là chữ lớn".
+- `xt.py vendor-check`: nhận mã SPDX `CC-BY-NC-*`/`CC-BY-SA-NC` và "Tailwind Plus/UI License" là điều khoản hạn chế; file
+  `SOURCE`/`ORIGIN` tự viết thiếu dòng `License:` hoặc URL nguồn → cảnh báo (đỏ khi `--strict`) — `CMP-LIC-022`.
+
+## [3.5.1] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.5.0:** chạy lại `install.py --with-github` (`xt.py`, workflow `pr-steward.yml`). Repo thuộc
+> org nay dùng được `pr-steward` (trước đây mọi PR bị `defer-human`).
+
+### Fixed
+- `pr steward`/`pr next` ở repo thuộc org (D-058): tác giả PR và người đăng dấu review là `MEMBER` được tin khi REST
+  `collaborators/<login>/permission` trả `admin`/`write` (không hỏi được → không tin); workflow `pr-steward` chạy cả khi
+  MEMBER comment dấu review. Trước đây mọi PR ở repo org bị `defer-human`.
+- `pr_title_check: off` chỉ có hiệu lực khi cả xt.yaml ở nhánh đích lẫn cây làm việc đều `off` — PR không tự tắt luật
+  tiêu đề cho chính nó (D-058).
+- `pr steward --apply` không gắn được nhãn `xt-standard-lane` → dòng báo `⚠` (cả trong summary của run) và exit 1, thay vì
+  im lặng; lượt đó không bật auto-merge/merge (lượt sau gắn lại nhãn rồi mới bật) — tắt auto-merge vẫn chạy. `MERGE_FIELDS` (`--pr-json` từ
+  `gh pr view`) có thêm `author` để miễn tiêu đề cho PR của bot.
+- Quyền ghi của MEMBER đọc cả `role_name` (`maintain` tính là ghi) và được nhớ 5 phút trong một tiến trình (`merge-watch`
+  hỏi 30 giây/lần không tốn thêm request mỗi lượt); lỗi khi hỏi không được nhớ. ADR-0027 ghi chú sửa đổi ở dòng trạng thái.
+
 ## [3.5.0] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.4.1:** chạy lại `install.py --with-github` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của

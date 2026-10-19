@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -81,6 +82,7 @@ class FakeGh:
         open_prs: list | None = None,
         comments: list | None = None,
         raw: dict | None = None,
+        rules: list | None = None,
         real_git: bool = False,
     ):
         self.pull = {
@@ -106,6 +108,7 @@ class FakeGh:
         self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
         self.comments = comments or []
+        self.rules = rules or []
         self.raw = raw or {}
         self.real_git = real_git
         self.calls: list[list[str]] = []
@@ -128,6 +131,7 @@ class FakeGh:
             f"{self.REPO}/pulls/7/files?per_page=100": json.dumps(files[:2]) + json.dumps(files[2:]),
             f"{self.REPO}/pulls/7/reviews?per_page=100": json.dumps(self.reviews),
             f"{self.REPO}/issues/7/comments?per_page=100": json.dumps(self.comments),
+            f"{self.REPO}/rules/branches/main": json.dumps(self.rules),
             f"{self.REPO}/commits/{self.SHA}/check-runs?per_page=100": json.dumps({"check_runs": self.runs[:1]})
             + "\n"
             + json.dumps({"check_runs": self.runs[1:]}),
@@ -1282,6 +1286,61 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("không phải object", err)
 
 
+class MissingRequiredCheckTest(unittest.TestCase):
+    """BLOCKED vì ruleset đòi check không có trên head (không workflow nào sinh) — không phải "cần review" (X-Company#23)."""
+
+    RULES = [
+        {"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [{"context": "test"}, {"context": "dast"}, {"context": "dast"}, {}]
+            },
+        },
+    ]
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def rest(self, **kw):
+        with FakeGh(real_git=True, **kw).patch():
+            return xt._pr_rest("7")
+
+    def test_blocked_by_missing_check_is_not_review(self):
+        p = self.rest(pull={"mergeable_state": "blocked"}, rules=self.RULES)
+        self.assertEqual(p["missingRequired"], ["dast"])
+        self.assertNotEqual(p["reviewDecision"], "REVIEW_REQUIRED")
+        d = xt.merge_decision(p, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("ruleset đòi check bắt buộc không có trên head: dast", d["reasons"][0])
+        self.assertIn("không phải vì thiếu review", d["reasons"][0])
+
+    def test_blocked_without_missing_check_stays_review(self):
+        rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
+        p = self.rest(pull={"mergeable_state": "blocked"}, rules=rules)
+        self.assertNotIn("missingRequired", p)
+        self.assertEqual(p["reviewDecision"], "REVIEW_REQUIRED")
+        self.assertEqual(xt.merge_decision(p, 3)["reasons"], ["ruleset đòi review của người"])
+
+    def test_not_blocked_does_not_read_rules_and_pending_wins(self):
+        gh = FakeGh(real_git=True, rules=self.RULES)
+        with gh.patch():
+            p = xt._pr_rest("7")
+        self.assertNotIn("missingRequired", p)
+        self.assertFalse(any("rules/branches" in c for c in gh.paths()))
+        pending = {**pr(), "missingRequired": ["dast"]}
+        pending["statusCheckRollup"] = [{"__typename": "CheckRun", "name": "x", "status": "IN_PROGRESS"}]
+        self.assertEqual(xt.merge_decision(pending, 3)["verdict"], "wait")  # còn check chạy: chờ, chưa kết luận
+
+    def test_rules_unreadable_falls_back(self):
+        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
+            self.assertEqual(xt._required_checks("repos/o/r", "main"), [])
+        with FakeGh(raw={"repos/{owner}/{repo}/rules/branches/rel%2F1": json.dumps([{"type": "x"}])}).patch():
+            self.assertEqual(xt._required_checks("repos/{owner}/{repo}", "rel/1"), [])
+
+
 class StewardGh(FakeGh):
     """FakeGh + lệnh ghi (POST/PUT, `gh pr merge`): ghi lại, trả mã theo `fail` (tiền tố lệnh → stderr lỗi)."""
 
@@ -1519,6 +1578,111 @@ class PrStewardTrustTest(unittest.TestCase):
         self.assertIn("--repo phải dạng owner/repo", err)
 
 
+class StewardFollowupTest(unittest.TestCase):
+    """Mục 🟢 sau #140/#141: MEMBER của org có quyền ghi; lỗi gắn nhãn hiện ra summary."""
+
+    PERM = "repos/{owner}/{repo}/collaborators/chu/permission"
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+        xt._WRITER_CACHE.clear()
+        self.addCleanup(xt._WRITER_CACHE.clear)
+
+    def steward(self, permission: str, **kw: Any) -> tuple[int, str, StewardGh]:
+        raw = {self.PERM: json.dumps({"permission": permission}), **kw.pop("raw", {})}
+        gh = StewardGh(pull={"author_association": "MEMBER", "user": {"login": "chu"}}, raw=raw, **kw)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        return rc, out, gh
+
+    def test_org_member_with_write_access_is_trusted(self):
+        for perm in ("admin", "write"):
+            with self.subTest(perm):
+                xt._WRITER_CACHE.clear()
+                rc, out, gh = self.steward(perm)
+                self.assertIn("#7 enable-auto-merge ✓", out)
+                self.assertIn(self.PERM, gh.paths())
+        xt._WRITER_CACHE.clear()
+        rc, out, gh = self.steward("read")
+        self.assertEqual(gh.writes, [])
+        self.assertIn("#7 defer-human — tác giả chu (MEMBER)", out)
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
+            self.assertFalse(xt.repo_writer("repos/o/r", "chu"))  # không hỏi được quyền → không tin
+        self.assertIsNone(xt._member_can_write("repos/o/r", "CONTRIBUTOR", "chu"))  # không hỏi khi không phải MEMBER
+
+    def test_permission_roles_and_cache(self):
+        cases = {  # (permission cũ, role_name) → quyền ghi
+            ("write", "maintain"): True,
+            ("read", "maintain"): True,  # role_name mới đủ
+            ("read", "triage"): False,
+            ("none", ""): False,
+        }
+        for (perm, role), want in cases.items():
+            with (
+                self.subTest(role=role),
+                unittest.mock.patch.object(xt, "_gh_one", return_value={"permission": perm, "role_name": role}),
+            ):
+                xt._WRITER_CACHE.clear()
+                self.assertIs(xt.repo_writer("repos/o/r", "chu"), want)
+        xt._WRITER_CACHE.clear()
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")) as one:
+            xt.repo_writer("repos/o/r", "chu")
+            xt.repo_writer("repos/o/r", "chu")
+        self.assertEqual(one.call_count, 2)  # lỗi không được nhớ
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"permission": "write"}) as one:
+            self.assertTrue(xt.repo_writer("repos/o/r", "chu"))
+            self.assertTrue(xt.repo_writer("repos/o/r", "chu"))
+            self.assertEqual(one.call_count, 1)  # nhớ trong WRITER_TTL
+            with unittest.mock.patch.object(xt.time, "monotonic", return_value=time.monotonic() + xt.WRITER_TTL + 1):
+                xt.repo_writer("repos/o/r", "chu")
+            self.assertEqual(one.call_count, 2)  # hết hạn → hỏi lại
+
+    def test_member_review_marks_count_only_with_write_access(self):
+        def member(login: str) -> dict:
+            return {**mark("a" * 40, "clean", "2026-10-19T01:00:00Z", "MEMBER"), "user": {"login": login}}
+
+        raw = {
+            "repos/{owner}/{repo}/collaborators/ghi/permission": json.dumps({"permission": "write"}),
+            "repos/{owner}/{repo}/collaborators/doc/permission": json.dumps({"permission": "read"}),
+        }
+        with FakeGh(raw=raw, comments=[member("ghi"), member("doc"), member("")]).patch():
+            got = xt._published_marks("repos/{owner}/{repo}", "7")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(xt.published_reviews([member("ghi")], {"ghi"})[0]["head"], "a" * 40)
+        self.assertEqual(xt.published_reviews([member("ghi")]), [])
+
+    def test_label_failure_is_reported(self):
+        big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]
+        summary = self.base / "summary.md"
+        raw = {"repos/{owner}/{repo}/pulls/7/files?per_page=100": json.dumps(big)}
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertIn("⚠ không gắn được nhãn xt-standard-lane: HTTP 403", out)
+        self.assertIn("không gắn được nhãn", summary.read_text(encoding="utf-8"))
+        # review đã sạch nhưng nhãn lỗi: lượt này không bật auto-merge (lượt sau gắn lại nhãn rồi mới bật)
+        ready = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "sạch", "fallback": ""}
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=ready):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertEqual([w[3] for w in gh.writes], ["POST"])  # chỉ lần gắn nhãn, không `gh pr merge`
+        self.assertIn("#7 enable-auto-merge — sạch ⚠", out)
+        hold = {**ready, "action": "disable-auto-merge"}  # giữ PR lại vẫn chạy dù nhãn lỗi
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=hold):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertEqual(gh.writes[-1], ["gh", "pr", "merge", "7", "--disable-auto"])
+
+    def test_merge_fields_include_author(self):
+        self.assertIn("author", xt.MERGE_FIELDS.split(","))
+
+
 class PrTitleExemptTest(unittest.TestCase):
     """Review #140: tiêu đề do máy đặt (bot, nút Revert) được miễn; `pr_title_check: off` tắt luật ở dự án."""
 
@@ -1539,5 +1703,12 @@ class PrTitleExemptTest(unittest.TestCase):
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
         self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
         commit_base_xt(base, "merge_autonomy: L2\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")
+        # PR tự thêm `off` vào xt.yaml trên nhánh của nó (cây làm việc) không tắt được luật — nhánh đích quyết
+        commit_base_xt(base, "merge_autonomy: L2\n", "merge_autonomy: L2\npr_title_check: off\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")
+        commit_base_xt(base, "merge_autonomy: L2\npr_title_check: off\n", "merge_autonomy: L2\n")  # sửa tại chỗ: chặt
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
         self.assertEqual(json.loads(out)["verdict"], "fix")

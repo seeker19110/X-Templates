@@ -409,3 +409,25 @@
 - Chọn: Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: một chỗ quyết MCP (mcp_decision), một hook; fail-open về luồng cho tool không nguy hiểm (ADR-0002), fail-closed giữ nguyên cho merge
 - Đường lùi: Matcher về mcp__.*(merge_pull_request|auto_merge).*
+
+### D-058 · 2026-10-19T03:51:24+00:00 · Steward ở repo thuộc org: tin MEMBER thế nào; pr_title_check: off đọc ở đâu?
+
+- Phương án: (1) Giữ chỉ OWNER/COLLABORATOR (repo org luôn defer-human) · (2) Tin mọi MEMBER · (3) MEMBER tin khi REST collaborators/<login>/permission trả admin/write; không hỏi được thì không tin. pr_title_check off cần cả nhánh đích lẫn cây làm việc
+- Chọn: MEMBER tin khi REST collaborators/<login>/permission trả admin/write; không hỏi được thì không tin. pr_title_check off cần cả nhánh đích lẫn cây làm việc
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: MEMBER có thể chỉ có quyền đọc nên không tin mặc định, nhưng hỏi quyền thật thì repo org vẫn dùng được steward; luật nới chỉ hiệu lực khi đã merge vào nhánh đích như merge_autonomy
+- Đường lùi: Bỏ nhánh MEMBER trong steward_untrusted/published_reviews và MEMBER khỏi trigger workflow
+
+### D-059 · 2026-10-19T05:04:02+00:00 · vendor-check có quét skill chép vào .claude/skills không, và phân biệt skill của khung/tự viết thế nào?
+
+- Phương án: (1) Không quét; chỉ ghi tài liệu · (2) Quét .claude/skills khi --dirs chỉ định; bỏ qua skill có trong manifest harness của install.py; skill tự viết khai --own · (3) Đòi mọi skill (kể cả của khung) có LICENSE
+- Chọn: Quét .claude/skills khi --dirs chỉ định; bỏ qua skill có trong manifest harness của install.py; skill tự viết khai --own
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: UX-DS-022 đòi skill chép có SOURCE/LICENSE nhưng trước đây máy không kiểm được; manifest là nguồn sự thật về file khung cài, nên không báo nhầm; skill tự viết khai tường minh
+- Đường lùi: Bỏ nhánh SKILLS_DIR/--own trong cmd_vendor_check
+- Giới hạn chấp nhận (review #148): manifest là file trong repo nên ai sửa được CI/manifest thì cũng bỏ qua được skill (như `--own`); skill vendor trùng tên skill của khung bị bỏ qua.
+
+### D-060 · 2026-10-19T06:07:33+00:00 · merge-check gặp mergeable_state BLOCKED: phân biệt thiếu check bắt buộc với cần review thế nào?
+
+- Phương án: (1) Giữ: BLOCKED luôn = cần review · (2) Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ · (3) Gọi GraphQL mergeStateStatus/required checks
+- Chọn: Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ
+- Lý do (tiêu chí chất lượng cuối): Đúng: X-Company#23 bị báo cần review trong khi ruleset đòi 0 review và chỉ thiếu job dast; REST chạy được ở phiên chặn GraphQL; chỉ gọi thêm khi BLOCKED; fail về hành vi cũ
+- Đường lùi: Bỏ _required_checks và nhánh missingRequired

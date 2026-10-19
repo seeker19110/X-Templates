@@ -268,6 +268,62 @@ class VendorCheckTest(unittest.TestCase):
         rc, out, _ = run("vendor-check", "--dirs", "vendor", cwd=self.dir)
         self.assertNotIn("third_party", out)
 
+    def test_restricted_license_ids(self) -> None:
+        self.put("vendor/a/LICENSE", "SPDX-License-Identifier: CC-BY-NC-4.0")
+        self.put("vendor/b/LICENSE", "CC BY-SA-NC 2.0")
+        self.put("vendor/c/LICENSE.md", "Tailwind Plus License")
+        self.put("vendor/d/LICENSE", "Creative Commons CC-BY-4.0")  # không NC: được
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertEqual(rc, 1)
+        for name in ("vendor/a/LICENSE", "vendor/b/LICENSE", "vendor/c/LICENSE.md"):
+            self.assertIn(f"✗ {name}: license có điều khoản hạn chế", out)
+        self.assertNotIn("vendor/d", out)
+
+    def test_source_file_needs_license_and_url(self) -> None:
+        self.put("vendor/ok/SOURCE.md", "- Repo: https://github.com/o/r (commit abc, 2026-10-19)\n- License: MIT\n")
+        self.put("vendor/nourl/SOURCE.md", "License: MIT")
+        self.put("vendor/nolic/ORIGIN", "https://github.com/o/r")
+        self.put("vendor/lic/LICENSE", "MIT License")  # LICENSE gốc: không cần dòng `License:`
+        self.put("vendor/bold/SOURCE.md", "- **License:** MIT\n- Repo: https://github.com/o/r")
+        self.put("vendor/bold2/SOURCES", "__License__: MIT https://github.com/o/r")
+        self.put("vendor/orig/ORIGINAL-LICENSE", "MIT License")  # tên bắt đầu ORIGIN nhưng là LICENSE gốc
+        rc, out, _ = run("vendor-check", cwd=self.dir)
+        self.assertEqual(rc, 0)  # chỉ cảnh báo
+        self.assertIn("⚠ vendor/nourl/SOURCE.md: ghi nguồn thiếu dòng `License:` hoặc URL", out)
+        self.assertIn("⚠ vendor/nolic/ORIGIN: ghi nguồn thiếu", out)
+        self.assertNotIn("vendor/ok", out)
+        self.assertNotIn("vendor/lic", out)
+        for ok in ("vendor/bold/", "vendor/bold2/", "vendor/orig/"):
+            self.assertNotIn(ok, out)
+        self.assertEqual(run("vendor-check", "--strict", cwd=self.dir)[0], 1)
+
+    def test_claude_skills_skip_framework_and_own(self) -> None:
+        manifest = {".claude/skills/autopilot/SKILL.md": "x", ".claude/hooks/guard.py": "y"}
+        self.put(".xtemplates/harness.sha256.json", json.dumps(manifest))
+        self.put(".claude/skills/autopilot/SKILL.md")  # của khung: bỏ qua
+        self.put(".claude/skills/mine/SKILL.md", "nhắc Commons Clause trong tài liệu")  # tự viết: --own
+        self.put(".claude/skills/refactoring-ui/SKILL.md")
+        self.put(".claude/skills/refactoring-ui/LICENSE", "MIT License")
+        self.put(
+            ".claude/skills/refactoring-ui/SOURCE.md",
+            "Repo: https://github.com/s0xDk/refactoring-ui-skill\nLicense: MIT",
+        )
+        self.put(".claude/skills/copied/SKILL.md")
+        rc, out, _ = run("vendor-check", "--dirs", "./.claude/skills/", "--own", "mine", cwd=self.dir)
+        self.assertEqual(rc, 1)
+        self.assertEqual(
+            out.strip(), "✗ .claude/skills/copied: không có LICENSE/NOTICE/SOURCE ghi nguồn và license của mã vendor"
+        )
+        self.put(".claude/skills/mine/NOTICE", "Commons Clause")  # --own: không đọc cả file ghi nguồn
+        self.put(".claude/skills/mine/SOURCE", "không có gì")
+        rc, out, _ = run("vendor-check", "--dirs", ".claude/skills", "--own", "mine,copied", cwd=self.dir)
+        self.assertEqual((rc, out.strip()), (0, "✓ vendor UI: không vấn đề."))
+        self.put(".xtemplates/harness.sha256.json", "[không phải json")
+        rc, out, _ = run("vendor-check", "--dirs", ".claude/skills", "--own", "mine,copied", cwd=self.dir)
+        self.assertIn("✗ .claude/skills/autopilot: không có LICENSE", out)  # manifest hỏng: không bỏ qua gì
+        self.put(".xtemplates/harness.sha256.json", "[]")
+        self.assertEqual(xt._harness_skills(self.dir), set())
+
     def test_watchlist_hits(self) -> None:
         self.put("package.json", json.dumps({"dependencies": {"preline": "^2"}, "devDependencies": "bad"}))
         self.put("NOTICE", "Template từ once-ui-system/magic-portfolio")
@@ -284,7 +340,7 @@ class VendorCheckTest(unittest.TestCase):
         rc, out, _ = run("vendor-check", "--json", "--allow", "magic-portfolio", cwd=self.dir)
         data = json.loads(out)
         self.assertEqual(data["errors"], [])
-        self.assertEqual(len(data["warnings"]), 2)
+        self.assertEqual(len(data["warnings"]), 3)  # Preline, React Bits, SOURCE thiếu `License:`
         self.assertEqual(data["checked"], "2026-10-18")
 
     def test_no_false_positives_and_aliases(self) -> None:
