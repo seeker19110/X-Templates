@@ -5738,8 +5738,12 @@ def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
 
 def _steward_can_update() -> bool:
     """`XT_STEWARD_UPDATE=off` (workflow chạy bằng GITHUB_TOKEN): commit cập nhật nhánh do GITHUB_TOKEN tạo không kích
-    workflow `pull_request` → head mới không có check, PR kẹt chờ check bắt buộc (review #153) — chỉ báo."""
-    return os.environ.get("XT_STEWARD_UPDATE", "").strip().lower() != "off"
+    workflow `pull_request` → head mới không có check, PR kẹt chờ check bắt buộc (review #153) — chỉ báo. Không đặt biến
+    mà đang chạy trong GitHub Actions (workflow `pr-steward.yml` cũ của dự án đích, chưa chép bản mới) → coi như `off`."""
+    flag = os.environ.get("XT_STEWARD_UPDATE", "").strip().lower()
+    if flag in ("on", "off"):
+        return flag == "on"
+    return os.environ.get("GITHUB_ACTIONS", "").strip().lower() != "true"
 
 
 def _update_branch_cmd(repo: str, n: str, head: str) -> List[str]:

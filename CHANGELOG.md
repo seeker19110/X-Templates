@@ -5,8 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-> **Dự án đích:** chạy lại `install.py` (hook `session-start.sh` mới); thêm dòng "Tên phiên" vào §9 `AGENTS.md` của dự án
-> (file copy-if-absent — mẫu mới chỉ áp cho dự án mới).
+## [3.7.0] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.6.0:** chạy lại `install.py --with-github` (hook `session-start.sh` mới, `xt.py` mới); chép
+> `.github/workflows/pr-steward.yml.xtemplates-new` đè bản cũ (biến `XT_STEWARD_UPDATE`) — chưa chép thì steward trong
+> Actions chỉ báo PR tụt nhánh, không tự cập nhật; muốn tự cập nhật nhánh thì đặt secret `XT_STEWARD_TOKEN`. Thêm dòng
+> "Tên phiên" vào §9 `AGENTS.md` của dự án (file copy-if-absent — mẫu mới chỉ áp cho dự án mới).
 
 ### Added
 - `LOOP-HARNESS-028` (SHOULD): tên phiên agent `<Tên repo> — <tên nhánh>` (nhánh agent tự đặt `<type>/<mô-tả-ngắn>`);
@@ -21,6 +25,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   nào của PR — tối đa 5 merge liên tiếp; khác đi thì review lại. Workflow `pr-steward` chỉ tự cập nhật nhánh khi có
   `XT_STEWARD_TOKEN` (commit do GITHUB_TOKEN tạo không kích CI; `XT_STEWARD_UPDATE=off` thì chỉ báo) (`LOOP-STOP-029`,
   D-061).
+- `pr steward` chạy trong GitHub Actions mà không có `XT_STEWARD_UPDATE` (workflow cũ của dự án đích) thì không cập nhật
+  nhánh — tránh head mới không có CI (D-061).
 
 ### Fixed
 - `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không
