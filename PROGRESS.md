@@ -1,13 +1,13 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.4.1 — tag sau PR phát hành) · Cập nhật: 2026-10-19 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.5.0 — tag sau PR phát hành) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 PLAN 3.5.0 (T-1301…T-1304, D-055…056; `loop init --force` vì đổi PLAN, vòng 3.4.1 đã xong): guard ghi công AI qua `gh pr`/MCP + `merge-check` kiểm tiêu đề PR.
+- 2026-10-19 3.5.0: guard ghi công AI qua `gh pr`/MCP + `merge-check` kiểm tiêu đề PR (#140, D-055…057); PR steward trên GitHub (#141, ADR-0027, D-054).
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Nâng hotel-manager, X-Company lên 3.5.0 (đang ở nhánh `chore/xtemplates-3.4.1`). Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
+1. Nâng hotel-manager, X-Company lên 3.5.0 (`install.py --with-github` cho `pr-steward.yml`). 🟢 #140/#141: `MERGE_FIELDS` thiếu `author`; `pr_title_check` đọc cây làm việc; steward ở org (MEMBER). Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
 4. Giới hạn đã biết của guard: ghép tên hàm lúc chạy, giải mã qua `$(…)` (né cố ý, D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042).
@@ -51,7 +51,7 @@
 - 2026-10-18 Guard: ngân sách quét (vượt trần → chặn, D-050); biến tính được giá trị + lệnh mã hoá vào shell (D-052); cổng UI `xt.py contrast`/`vendor-check` + mẫu `verify-render` (D-048/049).
 - 2026-10-18 Autopilot bớt lời khai: blueprint `[x]` mang `— Kiểm:` chạy lại (LOOP-DESIGN-023, D-034); sàn Gate M/L bằng khoá khai báo `format_check`/`coverage` (LOOP-HARNESS-023, D-035); số đo `loop stats` (LOOP-DESIGN-024, D-037); merge theo làn trong code `pr next` (ADR-0025, D-038). Chủ repo đừng merge tay PR đang chờ review (#107 merge ở commit cũ → #108).
 ## Bàn giao phiên
-- 2026-10-18 · Commit cuối trên `main`: `2a4f4fe` (#138); tag `v3.4.1` (sau PR này), `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`, `v3.2.0` → `94858f7`, `v3.1.1` → `3a1c379`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-19 · Commit cuối trên `main`: `3fe2d8c` (#140); tag `v3.5.0` (sau PR này), `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: PLAN T-1201…T-1206 (3.4.1, D-051…053). Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.

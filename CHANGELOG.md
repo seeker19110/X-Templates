@@ -5,9 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-> **Dự án đích:** chạy lại `install.py` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của hook MCP trong
-> `.claude/settings.json` — `install.py` nay cập nhật matcher của hook khung đã đăng ký, `xt.py`). PR có tiêu đề sai
-> `<type>(scope): mô tả` hoặc > 72 ký tự nay bị `merge-check` trả `fix`.
+## [3.5.0] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.4.1:** chạy lại `install.py --with-github` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của
+> hook MCP trong `.claude/settings.json` — `install.py` nay cập nhật matcher của hook khung đã đăng ký, `xt.py`, workflow
+> `pr-steward.yml` mới). PR có tiêu đề sai `<type>(scope): mô tả` hoặc > 72 ký tự nay bị `merge-check` trả `fix` (tắt
+> bằng `pr_title_check: off`). PR đủ tiêu chuẩn tự vào nhánh chính qua `pr-steward` — repo cần bật "Allow auto-merge".
 
 ### Added
 - **PR steward** (ADR-0027, D-054, `LOOP-STOP-029`): PR đủ tiêu chuẩn tự vào nhánh chính kể cả khi không còn phiên agent
