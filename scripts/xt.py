@@ -3393,7 +3393,7 @@ def _ci_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
-    if not [g for g in green if g not in NON_CI_CHECKS]:
+    if not [g for g in green if g.lower() not in NON_CI_CHECKS]:
         return "human", [f"chỉ có check không kiểm mã xanh ({', '.join(green)}) — không có bằng chứng CI"]
     return None
 
@@ -4928,7 +4928,7 @@ def cmd_contrast(args: argparse.Namespace) -> int:
     bad = [r for r in rows if r["status"] == "fail"]
     skipped = [] if args.allow_skip else [r for r in rows if r["status"] == "skip"]
     if args.json:
-        print(json.dumps({"pairs": rows, "missing_on": missing}, ensure_ascii=False, indent=2))
+        print(json.dumps({"pairs": rows, "missing_on": missing, "skipped": len(skipped)}, ensure_ascii=False, indent=2))
     else:
         for r in rows:
             mark = {"ok": "✓", "fail": "✗", "skip": "–"}[str(r["status"])]
@@ -4956,12 +4956,21 @@ def cmd_contrast(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- vendor-check (CMP-LIC-022)
 
 VENDOR_DIRS = ("vendor", "third_party", "third-party", "external")
-# Khớp NGUYÊN tên file: `LICENSE`, `LICENSE-MIT`, `license.md`, `COPYING.LESSER`, `NOTICE.txt`, `SOURCE.md`… — file mã
-# `SourceSelect.tsx`/`Notice.tsx` không phải file ghi nguồn (AUD-XFEAT-007). Tiền/hậu tố (`ORIGINAL-`, `THIRD-PARTY-`, `-MIT`, `.LESSER`) viết hoa.
+# Khớp NGUYÊN tên file: `LICENSE`, `LICENSE-MIT`, `license-apache.txt`, `COPYING.LESSER`, `THIRD-PARTY-NOTICES`,
+# `SOURCE.md`… (từ khoá đứng riêng giữa các dấu `-_.`); file mã (`SourceSelect.tsx`, `Notice.tsx`, `LICENSE.d.ts`) không
+# phải file ghi nguồn (AUD-XFEAT-007, review #162).
 VENDOR_NOTICE_RE = re.compile(
-    r"(?:[A-Z0-9]+[-_.])*(?i:LICEN[CS]E|COPYING|NOTICE|SOURCE|ORIGIN)S?(?:[-.][A-Z0-9]+)*(?i:\.(?:md|txt|rst))?"
-    r"|(?i:README\.vendor(?:\.(?:md|txt))?)"
+    r"(?:[a-z0-9]+[-_.])*(?:licen[cs]es?|copying|notices?|sources?|origins?)(?:[-_.][a-z0-9]+)*"
+    r"|readme\.vendor(?:\.(?:md|txt))?",
+    re.I,
 )
+CODE_EXT_RE = re.compile(r"\.(?:[cm]?[jt]sx?|json|css|scss|vue|svelte|py|go|rs|java|kt|swift|rb|php|html?)$", re.I)
+
+
+def vendor_notice_name(name: str) -> bool:
+    return bool(VENDOR_NOTICE_RE.fullmatch(name)) and not CODE_EXT_RE.search(name)
+
+
 VENDOR_RISKY_RE = re.compile(
     r"Commons Clause|Non-?Commercial|\bCC[- ]BY(?:[- ]SA)?[- ]NC\b|Fair Use License|Tailwind (?:Plus|UI) License"
     r"|\bBUSL\b|\bSSPL\b|Elastic License",
@@ -4980,7 +4989,7 @@ NPM_DEP_KEYS = ("dependencies", "devDependencies", "optionalDependencies", "peer
 
 def _vendor_notices(d: Path) -> List[Path]:
     try:
-        return sorted(p for p in d.iterdir() if p.is_file() and VENDOR_NOTICE_RE.fullmatch(p.name))
+        return sorted(p for p in d.iterdir() if p.is_file() and vendor_notice_name(p.name))
     except OSError:  # symlink treo, không đủ quyền: không có file ghi nguồn đọc được
         return []
 
@@ -5721,7 +5730,11 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
     )
 
 
-MODEL_FAMILY_RE = re.compile(r"opus|sonnet|haiku|fable|mythos|gpt|gemini|codex|grok|llama|qwen|deepseek|mistral", re.I)
+MODEL_FAMILY_RE = re.compile(
+    r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral|kimi|glm|phi|command|nova"
+    r"|\bo\d",
+    re.I,
+)
 
 
 def model_family(name: str) -> str:
@@ -6248,6 +6261,22 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
     return [n for n in _perf_git(base, *args).split("\0") if n]
 
 
+def _perf_self_hidden_ignores(base: Path) -> List[str]:
+    """`.gitignore` chưa theo dõi mà chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005): bị ignore nhưng thư
+    mục chứa nó thì không. `.gitignore` trong thư mục đã ignore sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới
+    (review #162)."""
+    hidden = _perf_git_names(
+        base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".gitignore", "**/.gitignore"
+    )
+    parents = sorted({h.rpartition("/")[0] + "/" for h in hidden if "/" in h})
+    # `-z` của check-ignore chỉ đi với `--stdin`: đọc từng dòng, tên không quote (`core.quotePath=off`).
+    r = _git(base, "-c", "core.quotePath=off", "check-ignore", "--", *parents, env=_perf_env()) if parents else None
+    if r is not None and r.returncode not in (0, 1):  # 1 = không đường nào bị ignore
+        raise RuntimeError(f"git check-ignore lỗi: {r.stderr.strip() or r.returncode}")
+    ignored_dirs = set(r.stdout.splitlines()) if r else set()
+    return [h for h in hidden if "/" not in h or h.rpartition("/")[0] + "/" not in ignored_dirs]
+
+
 def _perf_diff_lines(text: str) -> List[Tuple[str, str]]:
     """Dòng thêm của `git diff --unified=0` kèm file; tên bị git quote (có `"`, `\\`, ký tự điều khiển) ghi là PERF_ODD_NAME."""
     added: List[Tuple[str, str]] = []
@@ -6295,8 +6324,7 @@ def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
     untracked = _perf_git_names(base, *PERF_UNTRACKED)
     scanned = untracked
-    # `.gitignore` chưa theo dõi tìm KHÔNG qua bộ lọc ignore: `.gitignore` chứa `*` tự che chính nó (AUD-XFEAT-005).
-    new_ignores = _perf_git_names(base, "ls-files", "-z", "--others", "--", ".gitignore", "**/.gitignore")
+    new_ignores = _perf_self_hidden_ignores(base)
     if any(
         _perf_is_ignore_file(f) for f in names + untracked + new_ignores
     ):  # luật ignore đổi trong lượt này: không tin nó để giấu file

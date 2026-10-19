@@ -268,7 +268,7 @@ class MergeDecisionTest(unittest.TestCase):
         bằng chứng CI (dự án đích chưa có CI riêng từng được merge khi chưa test nào chạy)."""
         gate = {"__typename": "CheckRun", "name": "merge-gate", "status": "COMPLETED", "conclusion": "SUCCESS"}
         steward = {**gate, "name": "pr-steward"}
-        for rollup in ([gate], [gate, steward]):
+        for rollup in ([gate], [gate, steward], [{**gate, "name": "Merge-Gate"}]):
             d = xt.merge_decision(pr(statusCheckRollup=rollup), 3)
             self.assertEqual(d["verdict"], "human")
             self.assertIn("không kiểm mã", d["reasons"][0])
@@ -1314,6 +1314,7 @@ class PrNextCliTest(unittest.TestCase):
         rc, _, err = run("--clean", "--reviewer-model", "  ", "--author-model", "opus")
         self.assertEqual(rc, 2)
         self.assertIn("không nhận diện được tên model", err)
+        self.assertEqual(run("--clean", "--reviewer-model", "o3", "--author-model", "claude-opus-5-5")[0], 0)  # #162
         for vague in ("claude", "reviewer", "Claude Code"):  # AUD-HAR-064: tên không lộ họ model → không so được
             rc, _, err = run("--clean", "--reviewer-model", vague, "--author-model", "claude-opus-5-5")
             self.assertEqual(rc, 2, vague)

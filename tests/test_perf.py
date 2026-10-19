@@ -297,6 +297,32 @@ class PerfGuardTest(unittest.TestCase):
         self.assertIn("bench/.gitignore", touched)
         self.assertTrue(suspect)
 
+    def test_perf_guard_ignored_dir_gitignore_is_not_a_rule_change(self):
+        """Review #162: `.gitignore` nằm trong thư mục đã bị ignore (`.venv/.gitignore` do venv sinh, gói trong
+        `node_modules/`) không phải luật ignore mới — không báo ⚠, không kéo mọi file chưa theo dõi vào danh sách đổi."""
+        d = self.make_repo()
+        (d / ".gitignore").write_text(".venv/\nnode_modules/\n")
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore")
+        (d / ".venv").mkdir()
+        (d / ".venv" / ".gitignore").write_text("*\n")
+        (d / "node_modules" / "pkg").mkdir(parents=True)
+        (d / "node_modules" / "pkg" / ".gitignore").write_text("dist\n")
+        (d / "node_modules" / "pkg" / "x.js").write_text("1\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(xt.perf_guard(files, added, ["bench/*"]), ([], []))
+        self.assertEqual(xt._perf_self_hidden_ignores(d), [])
+
+    def test_perf_self_hidden_root_and_git_error(self):
+        d = self.make_repo()
+        (d / ".gitignore").write_text("*\n")  # `.gitignore` gốc chưa theo dõi tự che: vẫn là luật ignore mới
+        self.assertEqual(xt._perf_self_hidden_ignores(d), [".gitignore"])
+        fail = subprocess.CompletedProcess([], 128, "", "fatal: x")
+        with unittest.mock.patch.object(xt, "_perf_git_names", return_value=["a/.gitignore"]):
+            with unittest.mock.patch.object(xt, "_git", return_value=fail):
+                with self.assertRaises(RuntimeError):
+                    xt._perf_self_hidden_ignores(d)
+
     def test_generated_files_ignored_in_tree_are_not_lock_touches(self):
         d = self.make_repo()
         (d / ".gitignore").write_text("__pycache__/\n")

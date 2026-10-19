@@ -248,6 +248,8 @@ class ContrastSkipTest(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("không đọc được", out + err)
         self.assertEqual(run("contrast", "c.css", "--allow-skip", cwd=d)[0], 0)
+        rc, out, _ = run("contrast", "c.css", "--json", cwd=d)
+        self.assertEqual((rc, json.loads(out)["skipped"]), (1, 1))
         (d / "n.css").write_text(":root{--x:rgb(0 0 0 / none);--x-foreground:#fff;--y:#000;--y-foreground:#fff}")
         rc, out, err = run("contrast", "n.css", cwd=d)
         self.assertNotIn("Traceback", err)
@@ -276,12 +278,21 @@ class VendorCheckTest(unittest.TestCase):
         self.put("vendor/ok/LICENSE-MIT", "MIT License")
         self.put("vendor/ok2/a.js")
         self.put("vendor/ok2/license.md", "MIT License")
+        self.put("vendor/ok3/a.js")
+        self.put("vendor/ok3/license-apache.txt", "Apache License")  # review #162: hậu tố chữ thường
+        self.put("vendor/ok4/b.js")
+        self.put("vendor/ok4/LICENSE_MIT", "MIT License")
+        self.put("vendor/bad2/c.js")
+        self.put("vendor/bad2/LICENSE.d.ts")  # file mã, không phải ghi nguồn
         self.put("vendor/.gitkeep", "")
         rc, out, _ = run("vendor-check", "--strict", cwd=self.dir)
         self.assertEqual(rc, 1, out)
         self.assertIn("vendor/ui-kit: không có LICENSE", out)
         self.assertNotIn("vendor/ok:", out)
         self.assertNotIn("vendor/ok2", out)
+        self.assertNotIn("vendor/ok3", out)
+        self.assertNotIn("vendor/ok4", out)
+        self.assertIn("vendor/bad2: không có LICENSE", out)
         self.assertNotIn(".gitkeep", out)
 
     def test_clean_project(self) -> None:
