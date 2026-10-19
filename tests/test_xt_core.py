@@ -1088,6 +1088,10 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         diff += (("true | cat", "true '|' cat"), ("echo (a)", "echo '(a)'"), ("echo a#b", "echo a '#b'"))
         same += (("echo a#b", "echo 'a#b'"),)  # `#` giữa từ không mở comment
         # review #167 (vòng 2): ranh giới giữa các ký tự toán tử và số fd phải còn; xuống dòng ngoài nháy là dấu ngăn lệnh
+        # review #167 (vòng 4): đối số rỗng có nháy trước toán tử vẫn là một đối số
+        diff += (("a ''|b", "a |b"), ('a "";b', "a ;b"), ("a ''&&b", "a &&b"), ("a ''(b)", "a (b)"), ("a ''>f", "a >f"))
+        diff += (("a 2''>f", "a 2>f"),)
+        same += (('a 2"">f', "a 2 >f"),)
         # review #167 (vòng 3): chỉ chữ số KHÔNG nháy là số fd; cặp cùng nghĩa vẫn True; cặp đối kháng mới khoá hành vi
         diff += (
             ("echo '2'>f", "echo 2>f"),

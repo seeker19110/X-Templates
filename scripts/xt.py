@@ -1253,7 +1253,7 @@ def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]
 
 
 def _shell_op_token(
-    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], fd_ok: bool, in_op: bool
+    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], has: bool, fd_ok: bool, in_op: bool
 ) -> None:
     """Toán tử điều khiển/chuyển hướng ngoài nháy `c` thành token "sống": ký tự toán tử liền nhau gộp một token (`&>` ≠ `& >`);
     từ toàn chữ số KHÔNG nháy dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`; `'2'>f` thì không)."""
@@ -1262,7 +1262,7 @@ def _shell_op_token(
     elif fd_ok and c in "<>":
         tokens.append(tuple(cur) + ((c, True),))
     else:
-        if cur:
+        if has:  # kể cả token rỗng có nháy (`''`): là một đối số, `a ''|b` ≠ `a |b`
             tokens.append(tuple(cur))
         tokens.append(((c, True),))
 
@@ -1290,7 +1290,7 @@ def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
             i += 1
         elif c in SHELL_OPERATORS:
             fd_ok = bool(cur) and not quoted and all(ch.isdigit() for ch, _ in cur)
-            _shell_op_token(c, tokens, cur, fd_ok, in_op)
+            _shell_op_token(c, tokens, cur, has_token, fd_ok, in_op)
             cur, has_token, quoted, was_op = [], False, False, True
         elif c.isspace():
             if has_token:
