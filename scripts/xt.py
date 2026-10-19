@@ -4285,7 +4285,8 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         for s in statuses
     ]
     files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
-    marks = _published_marks(repo, n)
+    cfg = review_config(project_dir(), f"origin/{(pr.get('base') or {}).get('ref') or 'main'}")
+    marks = _published_marks(repo, n, cfg.get("review_identity", ""))
     mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
     raw_base = pr.get("base")
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
@@ -4965,6 +4966,10 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
         for e in errors:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
+    cfg_err = review_family_config_error(_xt_keys(project_dir()))
+    if cfg_err:
+        print(f"✗ {cfg_err}")
+        bad += 1
     if not bad:
         print(
             f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error, không secret trên PR."
@@ -5993,19 +5998,28 @@ def _comment_login(c: Dict[str, Any]) -> str:
     return str(user.get("login") or "") if isinstance(user, dict) else ""
 
 
-def published_reviews(comments: List[Dict[str, Any]], writers: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+def published_reviews(
+    comments: List[Dict[str, Any]], writers: Optional[Set[str]] = None, identity: str = ""
+) -> List[Dict[str, Any]]:
     """Review đã đăng trên PR, theo thứ tự thời gian: [{"head", "clean", "at"}] từ comment của người có quyền ghi —
-    OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi."""
+    OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi. `identity` (xt.yaml
+    `review_identity`, T-1508): khi cấu hình, CHỈ comment của đúng tài khoản reviewer đó là review — tác giả PR (cùng tài
+    khoản với phiên agent) đăng dấu không còn mở được merge."""
     out = []
     for c in comments:
         m = REVIEW_MARK_RE.search(str(c.get("body") or ""))
         assoc = str(c.get("author_association", "")).upper()
-        if m and (assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))):
+        trusted = (
+            _comment_login(c).lower() == identity.lower()
+            if identity
+            else assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))
+        )
+        if m and trusted:
             out.append({"head": m[1], "clean": m[2] == "clean", "at": str(c.get("created_at", ""))})
     return sorted(out, key=lambda r: r["at"])
 
 
-def _published_marks(repo: str, n: str) -> List[Dict[str, Any]]:
+def _published_marks(repo: str, n: str, identity: str = "") -> List[Dict[str, Any]]:
     """Review đã đăng trên PR; không đọc được comment (token thiếu quyền, mạng) → [] — thiếu dấu chỉ làm PR làn chuẩn
     chờ review (chặt hơn), không làm merge-check lỗi."""
     try:
@@ -6017,7 +6031,7 @@ def _published_marks(repo: str, n: str) -> List[Dict[str, Any]]:
         for c in comments
         if str(c.get("author_association", "")).upper() == "MEMBER" and REVIEW_MARK_RE.search(str(c.get("body") or ""))
     }
-    return published_reviews(comments, {u for u in members if u and repo_writer(repo, u)})
+    return published_reviews(comments, {u for u in members if u and repo_writer(repo, u)}, identity)
 
 
 WRITE_PERMISSIONS = {"admin", "write"}  # REST `permission` (cũ): maintain tính là write, triage là read
@@ -6164,10 +6178,41 @@ def model_family(name: str) -> str:
     return m.group(0).lower() if m else re.sub(r"[^a-z]+", "", name.lower())
 
 
-def _review_models_error(args: argparse.Namespace) -> Optional[str]:
-    """Review sạch phải do model KHÁC người viết (LOOP-STOP-022): khai cả hai, cùng họ thì từ chối."""
+REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family")
+
+
+def review_config(base: Path, ref: str) -> Dict[str, str]:
+    """`review_identity`, `author_model_family`, `reviewer_model_family` từ xt.yaml **đã commit ở `ref`** (nhánh đích): danh
+    tính reviewer là gốc tin cậy nên PR không tự đổi được (T-1508, AUD-HAR-066). Thiếu khoá/không đọc được → vắng."""
+    keys = _committed_xt_keys(base, ref)
+    return {k: keys[k] for k in REVIEW_KEYS if keys.get(k)}
+
+
+def review_family_config_error(keys: Dict[str, str]) -> Optional[str]:
+    """Cấu hình `author_model_family`/`reviewer_model_family` (xt.yaml): khai cả hai thì phải nhận diện được và KHÁC họ
+    (D-045 kiểm theo cấu hình, vì PR không mang dữ liệu model của tác giả); `ci-check` từ chối cấu hình trùng họ."""
+    a, r = keys.get("author_model_family", ""), keys.get("reviewer_model_family", "")
+    if not (a and r):
+        return None
+    if not (MODEL_FAMILY_RE.search(a) and MODEL_FAMILY_RE.search(r)):
+        return f"xt.yaml: author_model_family '{a}' / reviewer_model_family '{r}' không nhận diện được họ model"
+    if model_family(a) == model_family(r):
+        return f"xt.yaml: reviewer_model_family '{r}' cùng họ với author_model_family '{a}' — D-045 (LOOP-STOP-022)"
+    return None
+
+
+def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Review sạch phải do model KHÁC người viết (LOOP-STOP-022): khai cả hai, cùng họ thì từ chối. Không truyền
+    `--reviewer-model`/`--author-model` thì lấy họ model từ cấu hình xt.yaml (workflow `pr-review`, T-1508) — cấu hình
+    trùng họ bị từ chối; nhận diện/so sánh như khi khai tay."""
     if not args.clean:
         return None
+    cfg = cfg or {}
+    bad_cfg = review_family_config_error(cfg)
+    if bad_cfg:
+        return bad_cfg
+    args.reviewer_model = args.reviewer_model or cfg.get("reviewer_model_family")
+    args.author_model = args.author_model or cfg.get("author_model_family")
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-STOP-022: reviewer phải khác model người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
@@ -6192,7 +6237,7 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
             file=sys.stderr,
         )
         return 2
-    err = _review_models_error(args)
+    err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2

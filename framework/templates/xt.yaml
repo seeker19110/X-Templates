@@ -34,6 +34,12 @@ format_file: ""
 merge_autonomy: L3
 merge_risk_paths: ""
 merge_hard_exceptions: human
+# review_identity / author_model_family / reviewer_model_family (tuỳ chọn, T-1508): đọc ở nhánh đích đã commit. Có
+# review_identity thì CHỈ dấu review của đúng tài khoản đó mở được merge (tác giả PR không tự đăng được); hai họ model khai
+# cùng nhau phải KHÁC họ (`xt.py ci-check` từ chối trùng). Dùng với workflow `pr-review` (cần secret của chủ repo).
+# review_identity: ten-tai-khoan-reviewer
+# author_model_family: opus
+# reviewer_model_family: gpt
 # Tuỳ chọn, agent đọc và chạy trực tiếp (dev-task không chạy): e2e, audit (dependency), perf (k6/lighthouse), migrate (áp migration local), install, dev, init, smoke
 # e2e_affected: lệnh chạy CHỈ spec của lát/PR đang làm (vd `npx playwright test --grep @smoke e2e/<luồng>.spec.ts`); Gate mỗi task
 # dùng nó; suite đầy đủ `e2e` chạy khi push main / trước phát hành, và PLAN có task cuối Gate = `e2e` (`loop verify` chỉ

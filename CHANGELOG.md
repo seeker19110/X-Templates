@@ -12,6 +12,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head` (không fetch ở repo nông; `merge-gate` ở CI không kiểm
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
+- Reviewer độc lập trên GitHub (AUTO-03, T-1508): workflow `pr-review.yml` (`claude-code-action` ghim SHA, công cụ chỉ-đọc,
+  `--json-schema`, trần turn/tiền, không checkout code PR) gọi `pr reviewed` bằng token của tài khoản reviewer; xt.yaml khai
+  `review_identity` (chỉ dấu của tài khoản đó được tin), `author_model_family`/`reviewer_model_family` (`ci-check` từ chối
+  trùng họ; `pr reviewed --clean` lấy họ từ cấu hình khi không truyền cờ). Mặc định TẮT tới khi chủ repo cấp
+  `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
+
 ### Changed
 - Một điều kiện "được merge" ([ADR-0028](docs/adr/0028-single-merge-eligibility.md), REC-03, T-1507): hàm thuần `review_gate`/
   `merge_eligibility` dùng chung cho `merge-check` (`--json` thêm `review`, `eligible`, `auto_merge_ok`), `pr next`, `merge-gate`,

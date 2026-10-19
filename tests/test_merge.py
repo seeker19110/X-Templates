@@ -2279,6 +2279,51 @@ class StewardFollowupTest(unittest.TestCase):
         self.assertEqual(xt.published_reviews([member("ghi")], {"ghi"})[0]["head"], "a" * 40)
         self.assertEqual(xt.published_reviews([member("ghi")]), [])
 
+    def test_published_reviews_identity(self):
+        def by(login: str, assoc: str = TRUSTED) -> dict:
+            return {**mark("a" * 40, "clean", "2026-10-19T01:00:00Z", assoc), "user": {"login": login}}
+
+        # có `review_identity`: chỉ đúng tài khoản reviewer (không phân biệt hoa/thường); chủ repo/tác giả đăng dấu không tính
+        got = xt.published_reviews([by("Rev-Bot", "NONE"), by("chu")], identity="rev-bot")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(xt.published_reviews([by("chu")], identity="rev-bot"), [])
+        self.assertEqual(xt.published_reviews([{**by("x"), "user": None}], identity="rev-bot"), [])
+        # không cấu hình: giữ hành vi theo author_association
+        self.assertEqual(len(xt.published_reviews([by("chu")])), 1)
+        with FakeGh(comments=[by("chu"), by("rev-bot", "NONE")]).patch():
+            self.assertEqual(len(xt._published_marks("repos/{owner}/{repo}", "7", "rev-bot")), 1)
+
+    def test_review_identity_read_from_committed_xt_yaml(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        commit_base_xt(
+            base, "review_identity: rev-bot\nauthor_model_family: opus\nreviewer_model_family: gpt\n", "x: 1\n"
+        )
+        cfg = xt.review_config(base, "HEAD")
+        self.assertEqual(
+            cfg, {"review_identity": "rev-bot", "author_model_family": "opus", "reviewer_model_family": "gpt"}
+        )
+        self.assertEqual(xt.review_config(base, "origin/nope"), {})  # không đọc được ref → vắng
+
+    def test_same_family_rejected(self):
+        keys = {"author_model_family": "claude-opus-5-5", "reviewer_model_family": "Opus 5.5"}
+        self.assertIn("cùng họ", xt.review_family_config_error(keys) or "")
+        self.assertIn("không nhận diện", xt.review_family_config_error({**keys, "reviewer_model_family": "xyz"}) or "")
+        self.assertIsNone(xt.review_family_config_error({**keys, "reviewer_model_family": "gpt-5"}))
+        self.assertIsNone(xt.review_family_config_error({"author_model_family": "opus"}))  # khai thiếu → không kiểm
+        ns = unittest.mock.Mock(clean=True, reviewer_model=None, author_model=None)
+        self.assertIn("cùng họ", xt._review_models_error(ns, keys) or "")
+        ns = unittest.mock.Mock(clean=True, reviewer_model=None, author_model=None)
+        self.assertIsNone(xt._review_models_error(ns, {**keys, "reviewer_model_family": "gpt-5"}))
+        self.assertEqual((ns.reviewer_model, ns.author_model), ("gpt-5", "claude-opus-5-5"))  # lấy họ từ cấu hình
+
+    def test_same_family_rejected_by_ci_check(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (base / "xt.yaml").write_text("author_model_family: opus\nreviewer_model_family: opus\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
+            rc, out, _ = run_main("ci-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("cùng họ", out)
+
     def test_label_failure_is_reported(self):
         big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]
         summary = self.base / "summary.md"
