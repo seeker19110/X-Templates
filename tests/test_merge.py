@@ -68,6 +68,9 @@ def commit_base_xt(base: Path, committed: str, working: str | None = None) -> No
         (base / "xt.yaml").write_text(working, encoding="utf-8")
 
 
+REQUIRED_TEST = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
+
+
 class FakeGh:
     """Giả `gh api` (REST) theo đường dẫn; mặc định trả đúng PR của fixture `pr()` (files và check-run chia 2 trang)."""
 
@@ -95,6 +98,7 @@ class FakeGh:
             "mergeable": True,
             "mergeable_state": "clean",
             "head": {"sha": self.SHA},
+            "base": {"ref": "main"},
             "labels": [],
             **(pull or {}),
         }
@@ -110,11 +114,13 @@ class FakeGh:
         self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
         self.comments = comments or []
-        self.rules = rules or []
+        self.rules = rules if rules is not None else REQUIRED_TEST  # nhánh đích có check bắt buộc (D-062)
         self.branch = branch or {}
         self.raw = raw or {}
         self.real_git = real_git
         self.calls: list[list[str]] = []
+        xt._REQUIRED_CACHE.clear()  # cache theo thời gian của xt: mỗi FakeGh một bộ dữ liệu giả
+        xt._CHAIN_CACHE.clear()
 
     def paths(self) -> list[str]:
         return [c[-1] for c in self.calls]
@@ -149,6 +155,10 @@ class FakeGh:
             out = routes[path]
         elif "/compare/" in path or re.fullmatch(r".*/commits/[0-9a-zA-Z]+", path):
             out = "{}"  # không có compare/commit giả: không mang review sang head mới (D-061)
+        elif "/rules/branches/" in path:
+            out = "[]"  # nhánh đích khác `main` trong test: không có ruleset
+        elif "/branches/" in path:
+            out = "{}"
         else:
             out = routes[path]
         return subprocess.CompletedProcess(cmd, 0, out, "")
@@ -767,7 +777,9 @@ class MergeCheckCliTest(unittest.TestCase):
     def test_rest_is_mapped_like_gh_pr_view(self):
         gh = FakeGh()
         with gh.patch():
-            self.assertEqual(xt._pr_rest("7"), pr(reviewDecision=""))  # cùng dict với fixture `gh pr view`
+            self.assertEqual(
+                xt._pr_rest("7"), pr(reviewDecision="", baseHasRequired=True, baseRefName="main")
+            )  # như fixture `gh pr view`
         cases = {
             "merged": ({"merged": True, "state": "closed"}, "state", "MERGED"),
             "đang tính": ({"mergeable": None, "mergeable_state": "unknown"}, "mergeable", "UNKNOWN"),
@@ -1340,7 +1352,8 @@ class MissingRequiredCheckTest(unittest.TestCase):
         with gh.patch():
             p = xt._pr_rest("7")
         self.assertNotIn("missingRequired", p)
-        self.assertFalse(any("rules/branches" in c for c in gh.paths()))
+        # rules chỉ đọc một lần (baseHasRequired, D-062) — không đọc thêm để tìm check thiếu khi không BLOCKED
+        self.assertEqual(sum("rules/branches" in c for c in gh.paths()), 1)
         pending = {**pr(), "missingRequired": ["dast"]}
         pending["statusCheckRollup"] = [{"__typename": "CheckRun", "name": "x", "status": "IN_PROGRESS"}]
         self.assertEqual(xt.merge_decision(pending, 3)["verdict"], "wait")  # còn check chạy: chờ, chưa kết luận
@@ -1495,9 +1508,6 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.assertEqual([w[2] for w in gh.writes], ["merge"])
 
 
-REQUIRED_TEST = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
-
-
 class StewardGh(FakeGh):
     """FakeGh + lệnh ghi (POST/PUT, `gh pr merge`): ghi lại, trả mã theo `fail` (tiền tố lệnh → stderr lỗi)."""
 
@@ -1505,10 +1515,8 @@ class StewardGh(FakeGh):
         kw["pull"] = {
             "author_association": "OWNER",
             "user": {"login": "chu"},
-            "base": {"ref": "main"},
             **(kw.get("pull") or {}),
         }
-        kw.setdefault("rules", REQUIRED_TEST)  # nhánh đích có check bắt buộc: steward được bật auto-merge
         super().__init__(**{"real_git": True, **kw})  # xt.yaml ở nhánh đích (L3) đọc từ repo tạm của test
         self.fail = fail or {}
         self.writes: list[list[str]] = []
@@ -1641,11 +1649,18 @@ class PrStewardTest(unittest.TestCase):
         gh = StewardGh(rules=[{"type": "pull_request"}])
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
-        self.assertEqual(rc, 0)  # cấu hình bền: báo ⚠, run không đỏ
-        self.assertIn("⚠ nhánh đích không có check bắt buộc", out)
+        self.assertEqual(rc, 0)  # cấu hình bền: không làm run đỏ
+        self.assertIn("#7 merge ✓ — nhánh đích không có check bắt buộc", out)
         # PR đã sẵn sàng (CI xanh, merge-check = merge): không bật auto-merge, chỉ merge ghim head
         self.assertEqual([w[:3] for w in gh.writes], [["gh", "api", "-X"]])
         self.assertTrue(gh.writes[0][4].endswith("/pulls/7/merge"))
+        # CI còn chạy: chờ, không bật auto-merge
+        running = [{"name": "test", "status": "in_progress", "conclusion": None}]
+        gh = StewardGh(rules=[{"type": "pull_request"}], runs=running)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual((rc, gh.writes), (0, []))
+        self.assertIn("#7 wait — nhánh đích không có check bắt buộc", out)
         # branch protection cổ điển có check bắt buộc → được bật
         gh = StewardGh(
             rules=[{"type": "pull_request"}], branch={"protection": {"required_status_checks": {"contexts": ["test"]}}}
@@ -1657,16 +1672,6 @@ class PrStewardTest(unittest.TestCase):
         xt._REQUIRED_CACHE.clear()
         with StewardGh(rules=[{"type": "pull_request"}], branch=off).patch():
             self.assertFalse(xt._base_has_required("repos/{owner}/{repo}", "main"))  # protection tắt: không tính
-        # GitHub báo PR đã sẵn sàng (fallback): bỏ lệnh bật auto-merge, giữ merge ghim head
-        cmds = [["gh", "pr", "merge", "7", "--auto"], ["gh", "api", "-X", "PUT", "x/merge"]]
-        with (
-            unittest.mock.patch.object(xt, "_steward_command", return_value=cmds),
-            unittest.mock.patch.object(xt, "_base_has_required", return_value=False),
-            unittest.mock.patch.object(xt, "_steward_run", return_value="") as run,
-            StewardGh().patch(),
-        ):
-            run_main("pr", "steward", "--apply")
-        self.assertEqual(run.call_args[0][0], [["gh", "api", "-X", "PUT", "x/merge"]])
         # không đọc được rule/nhánh, hoặc PR không có nhánh đích → coi như không có (chiều chặt)
         xt._REQUIRED_CACHE.clear()
         with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
@@ -1675,6 +1680,34 @@ class PrStewardTest(unittest.TestCase):
         self.assertFalse(xt._base_has_required("repos/o/r", ""))
         with unittest.mock.patch.object(xt, "_required_checks", side_effect=AssertionError("cache")):
             self.assertFalse(xt._base_has_required("repos/o/r", "main"))
+        # hết hạn cache (import ruleset giữa lúc merge-watch chạy) thì đọc lại
+        with (
+            unittest.mock.patch.object(xt.time, "monotonic", return_value=time.monotonic() + xt.WRITER_TTL + 1),
+            unittest.mock.patch.object(xt, "_required_checks", return_value=["test"]),
+        ):
+            self.assertTrue(xt._base_has_required("repos/o/r", "main"))
+
+    def test_pr_next_merges_when_eligible(self):
+        # D-063: đủ điều kiện (merge-check = merge) là merge ghim head, không chờ GitHub mãi
+        d = xt.merge_decision(pr(), 3)
+        self.assertEqual(d["verdict"], "merge")
+        got = xt.pr_next(d, True, {})
+        self.assertEqual(
+            (got["action"], got["why"]), ("merge", "auto-merge đang bật mà merge-check đã = merge — merge ghim head")
+        )
+        self.assertIn(f"expectedHeadSha={d['head']}", got["do"])
+        pending = xt.merge_decision(
+            pr(statusCheckRollup=[{"__typename": "CheckRun", "name": "x", "status": "IN_PROGRESS"}]), 3
+        )
+        self.assertEqual(xt.pr_next(pending, True, {})["action"], "wait")
+        # nhánh đích không có check bắt buộc: không bao giờ bảo bật auto-merge
+        no_req = xt.merge_decision(pr(baseHasRequired=False), 3)
+        self.assertEqual(no_req["base_has_required"], False)
+        self.assertEqual(xt.pr_next(no_req, False, {})["action"], "merge")
+        pend_no_req = {**pending, "base_has_required": False}
+        self.assertEqual(xt.pr_next(pend_no_req, False, {})["action"], "wait")
+        self.assertIsNone(xt.merge_decision(pr(baseHasRequired="có"), 3)["base_has_required"])  # không rõ: như cũ
+        self.assertEqual(xt.pr_next(xt.merge_decision(pr(), 3), False, {})["action"], "enable-auto-merge")
 
     def test_steward_errors_and_other_actions(self):
         gh = StewardGh(fail={"gh pr merge": "x", "gh api -X PUT": "y"})

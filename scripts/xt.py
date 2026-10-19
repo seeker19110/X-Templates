@@ -3473,6 +3473,7 @@ def merge_decision(
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "base_merge_of": [str(x) for x in pr.get("baseMergeOf") or [] if isinstance(x, str)],
+        "base_has_required": pr.get("baseHasRequired") if isinstance(pr.get("baseHasRequired"), bool) else None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "reasons": reasons,
@@ -3781,15 +3782,16 @@ def _required_checks(repo: str, branch: str) -> List[str]:
     return out
 
 
-_REQUIRED_CACHE: Dict[Tuple[str, str], bool] = {}
+_REQUIRED_CACHE: Dict[Tuple[str, str], Tuple[float, bool]] = {}
 
 
 def _base_has_required(repo: str, branch: str) -> bool:
     """Nhánh đích có check bắt buộc không — ruleset (REST `rules/branches`) hoặc branch protection cổ điển (REST
     `branches/<b>`, trường `protection.required_status_checks.contexts`). Không đọc được → False (chiều chặt). Nhớ theo
-    (repo, nhánh) trong một lượt steward."""
-    key = (repo, branch)
-    if key not in _REQUIRED_CACHE:
+    (repo, nhánh) trong `WRITER_TTL` giây (`merge-watch` hỏi 30 giây/lần; import ruleset giữa chừng thì hết hạn là thấy)."""
+    key, now = (repo, branch), time.monotonic()
+    hit = _REQUIRED_CACHE.get(key)
+    if hit is None or now - hit[0] >= WRITER_TTL:
         found = bool(branch) and bool(_required_checks(repo, branch))
         if branch and not found:
             try:
@@ -3798,8 +3800,8 @@ def _base_has_required(repo: str, branch: str) -> bool:
                 prot = {}
             req = prot.get("required_status_checks") or {}
             found = bool(req.get("contexts") or req.get("checks")) and req.get("enforcement_level") != "off"
-        _REQUIRED_CACHE[key] = found
-    return _REQUIRED_CACHE[key]
+        _REQUIRED_CACHE[key] = (now, found)
+    return _REQUIRED_CACHE[key][1]
 
 
 BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
@@ -3961,6 +3963,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         **({"missingRequired": missing} if missing else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
         **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
+        # Nhánh đích có check bắt buộc không: không có thì auto-merge của GitHub merge NGAY lúc bật (D-062, D-063).
+        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or "")),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
@@ -5654,7 +5658,16 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
             return act("merge", "dưới L3: merge-check = merge — merge ghim head", pinned)
         return act("wait", "; ".join(d.get("reasons", [])), f"chạy nền xt.py merge-watch --pr {n}")
     if auto_merge:  # đã bật: GitHub merge khi required check xanh
+        if verdict == "merge":  # đã đủ điều kiện mà GitHub chưa merge (PR treo): merge ghim head, không chờ mãi (D-063)
+            return act("merge", "auto-merge đang bật mà merge-check đã = merge — merge ghim head", pinned)
         return act("wait", "auto-merge đang bật — chờ required check", f"chạy nền xt.py merge-watch --pr {n}")
+    if d.get("base_has_required") is False:
+        # không có check bắt buộc: auto-merge của GitHub merge NGAY lúc bật, trước khi CI xong (D-062) — merge ghim head
+        # khi merge-check thấy CI xanh, không bật auto-merge
+        why = "nhánh đích không có check bắt buộc — không bật auto-merge (GitHub merge ngay lúc bật)"
+        if verdict == "merge":
+            return act("merge", f"{why}; merge-check = merge — merge ghim head", pinned)
+        return act("wait", f"{why}; chờ CI xanh rồi merge ghim head", f"chạy nền xt.py merge-watch --pr {n}")
     return act(
         "enable-auto-merge",
         f"{'review sạch ở head' if strict else 'làn nhanh'} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
@@ -5826,16 +5839,6 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    if (
-        apply
-        and out["action"] == "enable-auto-merge"
-        and not _base_has_required(repo, str(pr.get("baseRefName") or ""))
-    ):
-        # auto-merge của GitHub chỉ chờ CI khi nhánh đích có check bắt buộc; không có thì merge NGAY lúc bật (T-1107 của
-        # hotel-manager) — bỏ lệnh bật, giữ merge ghim head (chỉ có khi merge-check đã thấy CI xanh)
-        cmds = [c for c in cmds if "--auto" not in c]
-        # trạng thái cấu hình bền, không phải lỗi của lượt: báo ⚠ nhưng không làm run đỏ mỗi 10 phút (review #155)
-        out["note"] = "nhánh đích không có check bắt buộc — không bật auto-merge (import ruleset có required check)"
     return _steward_apply(out, d, repo, cmds if apply else [])
 
 
