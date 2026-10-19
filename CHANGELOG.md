@@ -9,7 +9,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `merge-check`/`pr next`/steward: xung đột với nhánh đích kiểm **cục bộ** bằng `git merge-tree --write-tree` khi GitHub
   chưa tính xong `mergeable` (null tới vài chục giây sau push) hoặc báo xung đột — `localConflicts` liệt kê file xung đột,
   verdict `fix` kèm lệnh `git fetch origin <base> && git merge origin/<base>`; cục bộ thấy merge sạch thì không còn `wait`
-  chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head`; không kiểm được (git < 2.38, không phải repo) → như cũ.
+  chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head` (không fetch ở repo nông; `merge-gate` ở CI không kiểm
+  cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
 - `vendor-check`: đuôi file ghi nguồn theo danh sách cho phép (md/txt/rst/adoc/html, đoạn viết hoa/số) — `data_source.c`,

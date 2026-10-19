@@ -1648,7 +1648,14 @@ def _git(
     cmd = ["git", "-C", str(cwd), *args]
     try:
         return subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env, input=stdin
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",  # tên file không phải UTF-8 (`merge-tree -z`) không được làm sập cổng (review #165)
+            check=False,
+            timeout=GIT_TIMEOUT,
+            env=env,
+            input=stdin,
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 124, "", f"git quá {GIT_TIMEOUT} s")

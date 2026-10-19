@@ -335,6 +335,43 @@ class MergeDecisionTest(unittest.TestCase):
         empty = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.assertIsNone(xt.local_merge_conflicts("base", base_bad, head, "7", empty))  # không phải repo git
 
+    def test_local_merge_conflicts_non_utf8_name_and_real_shallow_clone(self):
+        """Review #165: tên file KHÔNG phải UTF-8 (`lat\\xe9`) ở xung đột — `-z` in byte thô, không được sập
+        UnicodeDecodeError (steward/merge-watch chết); clone nông thật: commit đã có nhưng merge-base ngoài ranh → None."""
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+        def git(*a: str) -> str:
+            r = subprocess.run(
+                ["git", "-C", str(d), "-c", "user.name=t", "-c", "user.email=t@x", *a], capture_output=True, text=True
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+
+        git("init", "-q")
+        name = os.fsdecode(b"lat\xe9")
+        (d / name).write_text("1")
+        git("add", "-A")
+        git("commit", "-qm", "r")
+        root = git("rev-parse", "HEAD")
+        git("checkout", "-q", "-b", "m")
+        (d / name).write_text("2")
+        git("commit", "-qam", "m")
+        main = git("rev-parse", "HEAD")
+        git("checkout", "-q", "-b", "b", root)
+        (d / name).write_text("3")
+        git("commit", "-qam", "b")
+        head = git("rev-parse", "HEAD")
+        got = xt.local_merge_conflicts("m", main, head, "1", d)
+        self.assertEqual(len(got or []), 1)
+        self.assertTrue(got and got[0].startswith("lat"))
+        clone = Path(self.enterContext(tempfile.TemporaryDirectory())) / "c"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", "--no-local", f"file://{d}", str(clone)],
+            check=True,
+            capture_output=True,
+        )
+        self.assertIsNone(xt.local_merge_conflicts("m", main, head, "1", clone))  # nông: không fetch, không kiểm được
+
     def test_merge_gate_skips_local_conflict_check(self):
         """Review #164: `merge-gate` chạy ở CI checkout nông — chỉ cần ngoại lệ cứng, không kiểm xung đột cục bộ."""
         with FakeGh(pull={"mergeable": None, "mergeable_state": "unknown"}).patch():
