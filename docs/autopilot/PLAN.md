@@ -44,9 +44,9 @@
 - [x] `T-1411` Review chặn ở đúng head hiện tại thắng review sạch mang sang (AUD-HAR-059) — Gate: `python3 -m unittest discover -s tests -k blocking_at_head_wins`
 
 ### Lát D — cổng máy xanh giả (AUD-XFEAT-005…009)
-- [ ] `T-1412` `perf guard` thấy file ignore tự che trong vùng khoá (AUD-XFEAT-005) — Gate: `python3 -m unittest discover -s tests -k perf_guard_self_ignored`
-- [ ] `T-1413` `contrast`: cặp không đọc được là đỏ; alpha `none` không sập (AUD-XFEAT-006/008) — Gate: `python3 -m unittest discover -s tests -k contrast_skip_is_red`
-- [ ] `T-1414` `vendor-check` khớp nguyên tên file ghi nguồn, bỏ file ẩn (AUD-XFEAT-007/009) — Gate: `python3 -m unittest discover -s tests -k vendor_notice_fullname`
+- [x] `T-1412` `perf guard` thấy file ignore tự che trong vùng khoá (AUD-XFEAT-005) — Gate: `python3 -m unittest discover -s tests -k perf_guard_self_ignored`
+- [x] `T-1413` `contrast`: cặp không đọc được là đỏ; alpha `none` không sập (AUD-XFEAT-006/008) — Gate: `python3 -m unittest discover -s tests -k contrast_skip_is_red`
+- [x] `T-1414` `vendor-check` khớp nguyên tên file ghi nguồn, bỏ file ẩn (AUD-XFEAT-007/009) — Gate: `python3 -m unittest discover -s tests -k vendor_notice_fullname`
 
 ### Lát E — tài liệu, bằng chứng blueprint, sổ audit, phát hành
 - [ ] `T-1415` Tài liệu + bằng chứng blueprint (AUD-DOC-044/045, AUD-HAR-060/061/062, 🟢 DOC-046…050, HAR-068/069) — Gate: `scripts/dev-task.sh lint`

@@ -285,6 +285,18 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual(touched, ["bench/new.py"])
         self.assertEqual(suspect, [".gitignore: đổi luật ignore — có thể giấu file mới trong vùng khoá"])
 
+    def test_perf_guard_self_ignored(self):
+        """AUD-XFEAT-005: `.gitignore` mới tự che chính nó (`*`) trong vùng khoá vẫn bị thấy — file chưa theo dõi đổi phép
+        đo (`bench/conftest.py`) không lọt."""
+        d = self.make_repo()
+        (d / "bench" / ".gitignore").write_text("*\n")
+        (d / "bench" / "conftest.py").write_text("import functools\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertIn("bench/conftest.py", touched)
+        self.assertIn("bench/.gitignore", touched)
+        self.assertTrue(suspect)
+
     def test_generated_files_ignored_in_tree_are_not_lock_touches(self):
         d = self.make_repo()
         (d / ".gitignore").write_text("__pycache__/\n")

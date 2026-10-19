@@ -4808,8 +4808,9 @@ def _hex_color(value: str) -> Optional[RGB]:
 
 def _func_color(value: str) -> Optional[RGB]:
     fn, a = _color_args(value)
-    alpha = _css_num(a[3]) if len(a) > 3 else 1.0
     try:
+        # alpha `none` (CSS Color 4) vẽ như 0 — trước đây sập lệnh vì nằm ngoài try (AUD-XFEAT-008)
+        alpha = (0.0 if a[3] == "none" else _css_num(a[3])) if len(a) > 3 else 1.0
         if fn in ("rgb", "rgba") and len(a) >= 3:
             r, g, b = (_css_num(t, 1.0) if t.endswith("%") else float(t) / 255 for t in a[:3])
             return r, g, b, alpha
@@ -4925,6 +4926,7 @@ def cmd_contrast(args: argparse.Namespace) -> int:
     rows, missing = contrast_check(css, pairs_text, args.require_on)
     judged = [r for r in rows if r["status"] != "skip"]
     bad = [r for r in rows if r["status"] == "fail"]
+    skipped = [] if args.allow_skip else [r for r in rows if r["status"] == "skip"]
     if args.json:
         print(json.dumps({"pairs": rows, "missing_on": missing}, ensure_ascii=False, indent=2))
     else:
@@ -4942,13 +4944,24 @@ def cmd_contrast(args: argparse.Namespace) -> int:
         return 1
     if not args.json:
         print(f"{len(judged)} cặp đã kiểm, {len(bad)} đỏ, {len(missing)} thiếu token chữ.")
-    return 1 if bad or missing else 0
+    if skipped:  # cặp không phán được không phải cặp đạt (UX-DS-003 "mọi cặp", AUD-XFEAT-006)
+        print(
+            f"✗ {len(skipped)} cặp không đọc được màu (color-mix/lab/color()/nền trong suốt): khai màu đọc được, "
+            "hoặc --allow-skip và ghi lý do ở PR",
+            file=sys.stderr,
+        )
+    return 1 if bad or missing or skipped else 0
 
 
 # --------------------------------------------------------------------------- vendor-check (CMP-LIC-022)
 
 VENDOR_DIRS = ("vendor", "third_party", "third-party", "external")
-VENDOR_NOTICE_RE = re.compile(r"(LICEN[CS]E|COPYING|NOTICE|SOURCE|ORIGIN|README\.vendor)", re.I)
+# Khớp NGUYÊN tên file: `LICENSE`, `LICENSE-MIT`, `license.md`, `COPYING.LESSER`, `NOTICE.txt`, `SOURCE.md`… — file mã
+# `SourceSelect.tsx`/`Notice.tsx` không phải file ghi nguồn (AUD-XFEAT-007). Tiền/hậu tố (`ORIGINAL-`, `THIRD-PARTY-`, `-MIT`, `.LESSER`) viết hoa.
+VENDOR_NOTICE_RE = re.compile(
+    r"(?:[A-Z0-9]+[-_.])*(?i:LICEN[CS]E|COPYING|NOTICE|SOURCE|ORIGIN)S?(?:[-.][A-Z0-9]+)*(?i:\.(?:md|txt|rst))?"
+    r"|(?i:README\.vendor(?:\.(?:md|txt))?)"
+)
 VENDOR_RISKY_RE = re.compile(
     r"Commons Clause|Non-?Commercial|\bCC[- ]BY(?:[- ]SA)?[- ]NC\b|Fair Use License|Tailwind (?:Plus|UI) License"
     r"|\bBUSL\b|\bSSPL\b|Elastic License",
@@ -4967,7 +4980,7 @@ NPM_DEP_KEYS = ("dependencies", "devDependencies", "optionalDependencies", "peer
 
 def _vendor_notices(d: Path) -> List[Path]:
     try:
-        return sorted(p for p in d.iterdir() if p.is_file() and VENDOR_NOTICE_RE.match(p.name))
+        return sorted(p for p in d.iterdir() if p.is_file() and VENDOR_NOTICE_RE.fullmatch(p.name))
     except OSError:  # symlink treo, không đủ quyền: không có file ghi nguồn đọc được
         return []
 
@@ -4997,7 +5010,7 @@ def vendor_dir_problems(base: Path, name: str, own: Set[str]) -> List[str]:
     shared = _vendor_notices(root)
     out: List[str] = []
     for child in sorted(root.iterdir()):
-        if child in shared or child.name in own:
+        if child in shared or child.name in own or child.name.startswith("."):  # `.gitkeep`/`.DS_Store` (AUD-XFEAT-009)
             continue
         notices = _vendor_notices(child) if child.is_dir() else shared
         if not notices:
@@ -6282,8 +6295,10 @@ def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
     untracked = _perf_git_names(base, *PERF_UNTRACKED)
     scanned = untracked
+    # `.gitignore` chưa theo dõi tìm KHÔNG qua bộ lọc ignore: `.gitignore` chứa `*` tự che chính nó (AUD-XFEAT-005).
+    new_ignores = _perf_git_names(base, "ls-files", "-z", "--others", "--", ".gitignore", "**/.gitignore")
     if any(
-        _perf_is_ignore_file(f) for f in names + untracked
+        _perf_is_ignore_file(f) for f in names + untracked + new_ignores
     ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
         untracked = _perf_git_names(base, "ls-files", "-z", "--others")
     text = _perf_git(
@@ -6638,6 +6653,9 @@ def build_parser() -> argparse.ArgumentParser:
     pct.add_argument("--pairs", help="file cặp tường minh: mỗi dòng `FG on BG [min N]`")
     pct.add_argument("--require-on", default=CONTRAST_REQUIRE_ON, help="token nền phải có token chữ đi kèm (phẩy)")
     pct.add_argument("--json", action="store_true")
+    pct.add_argument(
+        "--allow-skip", action="store_true", help="cặp không đọc được màu không làm đỏ (ghi lý do ở PR; mặc định đỏ)"
+    )
     pct.set_defaults(fn=cmd_contrast)
     pvc = sub.add_parser(
         "vendor-check", help="mã UI vendor có ghi nguồn + license, không dính license hạn chế (CMP-LIC-022)"

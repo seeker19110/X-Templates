@@ -41,6 +41,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (`project_prefix`, AUD-XFEAT-003/004).
 - `pr next`: review ở đúng head hiện tại quyết; review sạch đến muộn ở head cũ (mang qua merge nhánh đích) không còn che
   review báo lỗi chặn ở head hiện tại (AUD-HAR-059).
+- `perf guard`: `.gitignore` mới tự che chính nó (`*`) trong vùng khoá không còn giấu file chưa theo dõi đổi phép đo
+  (AUD-XFEAT-005).
+- `contrast`: cặp không đọc được màu (`color-mix`/`lab`/`color()`/nền trong suốt) nay làm đỏ (UX-DS-003 "mọi cặp") —
+  `--allow-skip` để bỏ qua có chủ đích (ghi lý do ở PR); alpha `none` không còn làm sập lệnh (AUD-XFEAT-006/008).
+- `vendor-check`: file ghi nguồn khớp NGUYÊN tên (`LICENSE`, `LICENSE-MIT`, `NOTICE.txt`, `SOURCE.md`,
+  `THIRD-PARTY-NOTICES`…) — file mã `SourceSelect.tsx`/`Notice.tsx` không còn được tính là ghi nguồn; file ẩn
+  (`.gitkeep`) không bị báo thiếu license (AUD-XFEAT-007/009).
 - `pr reviewed --clean`: tên model không lộ họ (`claude`, `reviewer`, `Claude Code`) bị từ chối — so "khác họ" với tên
   mơ hồ luôn đúng (D-045, AUD-HAR-064).
 
