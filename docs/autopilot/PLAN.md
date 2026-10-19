@@ -39,9 +39,9 @@
 - [ ] `T-1408` Dấu `xt-review v1` đăng tay qua `gh pr comment|review`/`gh api` → deny (AUD-SEC-069) — Gate: `python3 -m unittest discover -s tests -k review_marker_forge_denied`
 
 ### Lát C — merge/steward (AUD-HAR-058/059, AUD-XFEAT-003/004)
-- [ ] `T-1409` `merge-gate` (và check không kiểm mã) không là bằng chứng CI xanh (AUD-HAR-058) — Gate: `python3 -m unittest discover -s tests -k merge_gate_not_ci_evidence`
-- [ ] `T-1410` Dự án con: khoá `xt.yaml` và `merge_risk_paths` tính theo tiền tố dự án (AUD-XFEAT-003/004) — Gate: `python3 -m unittest discover -s tests -k subproject`
-- [ ] `T-1411` Review chặn ở đúng head hiện tại thắng review sạch mang sang (AUD-HAR-059) — Gate: `python3 -m unittest discover -s tests -k blocking_at_head_wins`
+- [x] `T-1409` `merge-gate` (và check không kiểm mã) không là bằng chứng CI xanh (AUD-HAR-058) — Gate: `python3 -m unittest discover -s tests -k merge_gate_not_ci_evidence`
+- [x] `T-1410` Dự án con: khoá `xt.yaml` và `merge_risk_paths` tính theo tiền tố dự án (AUD-XFEAT-003/004) — Gate: `python3 -m unittest discover -s tests -k subproject`
+- [x] `T-1411` Review chặn ở đúng head hiện tại thắng review sạch mang sang (AUD-HAR-059) — Gate: `python3 -m unittest discover -s tests -k blocking_at_head_wins`
 
 ### Lát D — cổng máy xanh giả (AUD-XFEAT-005…009)
 - [ ] `T-1412` `perf guard` thấy file ignore tự che trong vùng khoá (AUD-XFEAT-005) — Gate: `python3 -m unittest discover -s tests -k perf_guard_self_ignored`

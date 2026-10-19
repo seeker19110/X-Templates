@@ -263,6 +263,46 @@ class MergeDecisionTest(unittest.TestCase):
             (none["verdict"], none["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
         )
 
+    def test_merge_gate_not_ci_evidence(self):
+        """AUD-HAR-058: `merge-gate`/`pr-steward` chỉ xét auto-merge, không kiểm mã — một mình chúng xanh không phải
+        bằng chứng CI (dự án đích chưa có CI riêng từng được merge khi chưa test nào chạy)."""
+        gate = {"__typename": "CheckRun", "name": "merge-gate", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        steward = {**gate, "name": "pr-steward"}
+        for rollup in ([gate], [gate, steward]):
+            d = xt.merge_decision(pr(statusCheckRollup=rollup), 3)
+            self.assertEqual(d["verdict"], "human")
+            self.assertIn("không kiểm mã", d["reasons"][0])
+        self.assertEqual(xt.merge_decision(pr(statusCheckRollup=[*GREEN, gate]), 2)["verdict"], "merge")
+
+    def test_subproject_hard_key_and_risk_paths(self):
+        """AUD-XFEAT-003/004: khung cài ở dự án con (`apps/web`) — xt.yaml của dự án con là khoá ngoại lệ cứng, glob
+        `merge_risk_paths` viết theo gốc dự án vẫn khớp đường file của PR (tính từ gốc repo)."""
+        repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        web = repo / "apps" / "web"
+        web.mkdir(parents=True)
+        (web / "xt.yaml").write_text('merge_risk_paths: "src/exports/*"\n', encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(web)}):
+            self.assertEqual(xt.project_prefix(), "apps/web/")
+            self.assertTrue(xt._gated_file({"filename": "apps/web/xt.yaml"}, "apps/web/"))
+            self.assertFalse(xt._gated_file({"filename": "xt.yaml"}, "apps/web/"))  # xt.yaml gốc repo không áp vào
+            with unittest.mock.patch.object(xt, "_hard_key_changed", return_value=True) as changed:
+                self.assertTrue(xt._touches_hard_key({"filename": "apps/web/xt.yaml"}, "o/r", "a", "b", "apps/web/"))
+                changed.assert_called_once_with("o/r", "a", "b", "apps/web/")
+            with unittest.mock.patch.object(
+                xt, "_contents_read", return_value=("merge_hard_exceptions: human\n", False)
+            ) as rd:
+                xt._hard_key_changed("o/r", "a", "b", "apps/web/")
+                self.assertEqual(rd.call_args_list[0].args[1], "apps/web/xt.yaml")
+            globs = xt.merge_risk_globs(web, "origin/main")
+            self.assertEqual(globs, ["src/exports/*", "apps/web/src/exports/*"])
+            d = xt.merge_decision(pr(files=[{"path": "apps/web/src/exports/c.ts", "additions": 1}]), 3, globs)
+            self.assertIn("merge_risk_paths", " ".join(d["hard"]))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(repo / "khong-git")}):
+            (repo / "khong-git").mkdir()
+            with unittest.mock.patch.object(xt, "_git", return_value=subprocess.CompletedProcess([], 128, "", "")):
+                self.assertEqual(xt.project_prefix(), "")
+
     def test_agent_harness_session_is_not_hard_auth(self):
         """D-020: `session`/`permission` trong harness agent là phiên/quyền của agent, không phải auth của ứng dụng — không
         thuộc ngoại lệ cứng, vẫn làn chuẩn (cổng/CI); code phiên của ứng dụng và bí mật trong harness vẫn là ngoại lệ cứng."""
@@ -1274,6 +1314,10 @@ class PrNextCliTest(unittest.TestCase):
         rc, _, err = run("--clean", "--reviewer-model", "  ", "--author-model", "opus")
         self.assertEqual(rc, 2)
         self.assertIn("không nhận diện được tên model", err)
+        for vague in ("claude", "reviewer", "Claude Code"):  # AUD-HAR-064: tên không lộ họ model → không so được
+            rc, _, err = run("--clean", "--reviewer-model", vague, "--author-model", "claude-opus-5-5")
+            self.assertEqual(rc, 2, vague)
+            self.assertIn("không nhận diện được họ model", err)
         self.assertEqual(run("--blocking")[0], 0)  # báo lỗi chặn không cần khai model
         self.assertEqual(run("--clean", *MODELS)[0], 0)
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]
@@ -1451,6 +1495,23 @@ class BaseMergeCarryTest(unittest.TestCase):
         dirty = {"reviews": [{"head": self.H, "clean": False}]}
         self.assertEqual(xt.pr_next(d, False, dirty)["action"], "review")  # review báo lỗi không mang sang
         self.assertEqual(xt.pr_next({**d, "base_merge_of": []}, False, clean)["action"], "review")
+
+    def test_blocking_at_head_wins(self):
+        """AUD-HAR-059: review báo lỗi chặn ở đúng head hiện tại không bị review sạch đến muộn ở head cũ (mang qua merge
+        nhánh đích) che; review mới hơn ở cùng head vẫn thắng review cũ ở head đó."""
+        head, old = "b" * 40, "a" * 40
+        d = {"pr": 7, "head": head, "lane": "chuẩn", "verdict": "merge", "autonomy": 3, "base_merge_of": [old]}
+        d["base_has_required"] = True
+        late_clean = {
+            "reviews": [
+                {"head": head, "clean": False, "at": "2026-10-19T10:00:00Z"},
+                {"head": old, "clean": True, "at": "2026-10-19T10:05:00Z"},
+            ]
+        }
+        self.assertEqual(xt.pr_next(d, False, late_clean)["action"], "fix")
+        fixed = {"reviews": [*late_clean["reviews"], {"head": head, "clean": True, "at": "2026-10-19T10:09:00Z"}]}
+        self.assertEqual(xt.pr_next(d, False, fixed)["action"], "enable-auto-merge")
+        self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "enable-auto-merge")
 
     def test_steward_updates_branch(self):
         cmds = xt._steward_command({"pr": 7, "head": "h", "action": "update"}, "repos/o/r")

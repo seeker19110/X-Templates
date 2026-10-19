@@ -3379,13 +3379,13 @@ def _pr_shape_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     ]
 
 
-def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
-    """Trạng thái chặn merge bất kể làn, theo thứ tự: đóng → nháp → tiêu đề → xung đột → CI → review đòi sửa → tụt sau → chưa tính."""
-    early = _pr_shape_blocker(pr)
-    if early:
-        return early
-    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
-        return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
+# Check của chính bộ máy merge (ADR-0023/0027): chỉ xét auto-merge/review, không chạy test — một mình chúng xanh không
+# phải bằng chứng CI (AUD-HAR-058: dự án đích cài `--with-github` mà chưa có CI riêng).
+NON_CI_CHECKS = {"merge-gate", "pr-steward"}
+
+
+def _ci_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
+    """CI đỏ → fix; đang chạy → wait; không check xanh nào kiểm mã → human (không có bằng chứng)."""
     red, pending, green = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
     if red:
         return "fix", [f"CI đỏ: {', '.join(red)}"]
@@ -3393,6 +3393,21 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
+    if not [g for g in green if g not in NON_CI_CHECKS]:
+        return "human", [f"chỉ có check không kiểm mã xanh ({', '.join(green)}) — không có bằng chứng CI"]
+    return None
+
+
+def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
+    """Trạng thái chặn merge bất kể làn, theo thứ tự: đóng → nháp → tiêu đề → xung đột → CI → review đòi sửa → tụt sau → chưa tính."""
+    early = _pr_shape_blocker(pr)
+    if early:
+        return early
+    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
+        return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
+    ci = _ci_blocker(pr)
+    if ci:
+        return ci
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "fix", ["reviewer yêu cầu sửa"]
     if pr.get("mergeStateStatus") == "BEHIND":
@@ -3526,7 +3541,9 @@ def _risk_globs(keys: Dict[str, str]) -> List[str]:
 def merge_risk_globs(base: Path, ref: str) -> List[str]:
     """`merge_risk_paths` của cây làm việc HỢP với bản đã commit ở `ref` (nhánh đích): checkout cũ hay sửa tại chỗ không
     làm rơi glob của nhánh đích (bỏ glob phải qua PR sửa xt.yaml — làn chuẩn, D-031); glob thêm tại chỗ chỉ chặt hơn."""
-    return list(dict.fromkeys([*_risk_globs(_xt_keys(base)), *_risk_globs(_committed_xt_keys(base, ref))]))
+    globs = [*_risk_globs(_xt_keys(base)), *_risk_globs(_committed_xt_keys(base, ref))]
+    prefix = project_prefix()  # dự án con: glob viết theo gốc dự án, đường file của PR theo gốc repo (AUD-XFEAT-004)
+    return list(dict.fromkeys([*globs, *(prefix + g for g in globs if prefix and not g.startswith(prefix))]))
 
 
 def merge_config(base: Path) -> Tuple[int, List[str], List[str]]:
@@ -3650,14 +3667,21 @@ def _hard_key_lines(text: str) -> List[str]:
     return [yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, text.splitlines()) if m and m[1] == HARD_KEY]
 
 
-def _hard_key_changed(repo: str, base_sha: str, head_sha: str) -> bool:
+def project_prefix() -> str:
+    """Đường dẫn gốc dự án tính từ gốc repo git (`apps/web/`; rỗng khi dự án ở gốc) — đường file của PR tính từ gốc repo,
+    còn xt.yaml/glob của dự án tính từ gốc dự án (AUD-XFEAT-003/004)."""
+    r = _git(project_dir(), "rev-parse", "--show-prefix")
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _hard_key_changed(repo: str, base_sha: str, head_sha: str, prefix: str = "") -> bool:
     """So danh sách lần xuất hiện của `merge_hard_exceptions` (`_hard_key_lines`) trong xt.yaml gốc ở đáy (merge-base)
     với đầu PR — không dò chuỗi trong patch: dòng ngữ cảnh hay comment nhắc tên khoá không còn báo nhầm (review #103);
     thêm/xoá/sửa bất kỳ dòng khoá nào vẫn bị bắt, kể cả dòng bị che (review #105). Không đọc được một đầu, hoặc vắng
     ở CẢ HAI đầu (file trong diff mà hai lần 404 = token không đọc được contents, như `_plan_grants_changed`) → đổi."""
     (before, gone_before), (after, gone_after) = (
-        _contents_read(repo, "xt.yaml", base_sha),
-        _contents_read(repo, "xt.yaml", head_sha),
+        _contents_read(repo, prefix + "xt.yaml", base_sha),
+        _contents_read(repo, prefix + "xt.yaml", head_sha),
     )
     if before is None or after is None or (gone_before and gone_after):
         return True
@@ -3666,10 +3690,11 @@ def _hard_key_changed(repo: str, base_sha: str, head_sha: str) -> bool:
     return _hard_key_lines(before) != lines or len(lines) > 1
 
 
-def _gated_file(f: Dict[str, Any]) -> bool:
-    """File mà `_touches_hard_key` phải đọc nội dung (xt.yaml gốc, PLAN.md) — chỉ khi đó mới cần merge-base."""
+def _gated_file(f: Dict[str, Any], prefix: str = "") -> bool:
+    """File mà `_touches_hard_key` phải đọc nội dung (xt.yaml của dự án — `prefix` = `project_prefix()`, PLAN.md) — chỉ
+    khi đó mới cần merge-base."""
     names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
-    return "xt.yaml" in names or any(n.endswith(PLAN_PATH_SUFFIX) for n in names)
+    return prefix + "xt.yaml" in names or any(n.endswith(PLAN_PATH_SUFFIX) for n in names)
 
 
 def _merge_base(repo: str, base_sha: str, head_sha: str) -> str:
@@ -3686,13 +3711,15 @@ def _merge_base(repo: str, base_sha: str, head_sha: str) -> str:
     return str(mb.get("sha") or "") if isinstance(mb, dict) else ""
 
 
-def _touches_hard_key(f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "") -> bool:
+def _touches_hard_key(
+    f: Dict[str, Any], repo: str = "", base_sha: str = "", head_sha: str = "", prefix: str = ""
+) -> bool:
     """Diff chạm chốt người của ngoại lệ cứng: dòng khoá `merge_hard_exceptions` của xt.yaml gốc đổi (hoặc không xác minh
     được) hoặc ủy quyền production của PLAN.md đổi hiệu lực (ADR-0022). `base_sha` là đáy của PR — merge-base."""
     names = [n for n in (f.get("filename"), f.get("previous_filename")) if isinstance(n, str)]
-    if "xt.yaml" in names:
-        return _hard_key_changed(repo, base_sha, head_sha)
-    if _gated_file(f):
+    if prefix + "xt.yaml" in names:
+        return _hard_key_changed(repo, base_sha, head_sha, prefix)
+    if _gated_file(f, prefix):
         return _plan_grants_changed(f, repo, base_sha, head_sha)
     return False
 
@@ -3932,7 +3959,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     )
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
-    gated = any(isinstance(f, dict) and _gated_file(f) for f in files)
+    prefix = project_prefix()
+    gated = any(isinstance(f, dict) and _gated_file(f, prefix) for f in files)
     bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
     raw_user = pr.get("user")
     user: Dict[str, Any] = raw_user if isinstance(raw_user, dict) else {}
@@ -3982,7 +4010,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
                 "deletions": f.get("deletions", 0),
                 # xt.yaml đổi dòng khoá ngoại lệ cứng / PLAN.md đổi hiệu lực ủy quyền, so merge-base với head; không
                 # xác minh được → chạm.
-                **({"hard_key": True} if _touches_hard_key(f, repo, bottom, sha) else {}),
+                **({"hard_key": True} if _touches_hard_key(f, repo, bottom, sha, prefix) else {}),
             }
             for f in files
         ],
@@ -5639,8 +5667,12 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
         return {"pr": n, "head": head, "action": action, "why": why, "do": do, "fallback": fallback, "strict": strict}
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
+    # Review ở đúng head hiện tại quyết (mới nhất ở head đó); chỉ khi chưa có mới xét review mang qua merge nhánh đích —
+    # review sạch đến muộn ở head cũ không che lỗi chặn ở head hiện tại (AUD-HAR-059).
+    at_head = [r for r in reviews if r.get("head") == head]
+    last = at_head[-1] if at_head else reviews[-1] if reviews else None
     if early is None and strict:
-        early = _pr_next_review(d, auto_merge, reviews[-1] if reviews else None, act, disable)
+        early = _pr_next_review(d, auto_merge, last, act, disable)
     if early is not None:
         return early
     return _pr_next_final(d, auto_merge, strict, act, disable)
@@ -5693,6 +5725,11 @@ def _review_models_error(args: argparse.Namespace) -> Optional[str]:
         return "--clean cần --reviewer-model và --author-model (LOOP-STOP-022: reviewer phải khác model người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
         return "không nhận diện được tên model (cần chữ, vd sonnet, claude-opus-5-5)"
+    vague = [m for m in (args.reviewer_model, args.author_model) if not MODEL_FAMILY_RE.search(m)]
+    if vague:  # `claude`, `reviewer`: tên không lộ họ thì "khác họ" luôn đúng — né vô ý D-045 (AUD-HAR-064)
+        return (
+            f"không nhận diện được họ model của '{vague[0]}' — ghi tên đủ (vd claude-sonnet-5-5, gpt-5, gemini-2.5-pro)"
+        )
     if model_family(args.reviewer_model) == model_family(args.author_model):
         return (
             f"reviewer ({args.reviewer_model}) cùng họ model với người viết ({args.author_model}) — "

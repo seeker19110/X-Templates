@@ -32,6 +32,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     `--body-file`, ghép lúc chạy (`$(…)`), `curl`/script gọi REST không bị bắt — lớp thật là steward chỉ tin tác giả có
     quyền ghi.
 
+### Fixed
+- `merge-check`: check `merge-gate`/`pr-steward` (chỉ xét auto-merge, không chạy test) một mình xanh không còn là bằng
+  chứng CI → `human` thay vì `merge` — dự án đích cài `--with-github` chưa có CI riêng từng được merge khi chưa test nào
+  chạy (AUD-HAR-058).
+- Khung cài ở dự án con (`apps/web`): khoá `merge_hard_exceptions` đọc ở `apps/web/xt.yaml` nay là file được canh (PR
+  đổi nó luôn người merge, ADR-0020) và glob `merge_risk_paths` viết theo gốc dự án khớp cả đường file tính từ gốc repo
+  (`project_prefix`, AUD-XFEAT-003/004).
+- `pr next`: review ở đúng head hiện tại quyết; review sạch đến muộn ở head cũ (mang qua merge nhánh đích) không còn che
+  review báo lỗi chặn ở head hiện tại (AUD-HAR-059).
+- `pr reviewed --clean`: tên model không lộ họ (`claude`, `reviewer`, `Claude Code`) bị từ chối — so "khác họ" với tên
+  mơ hồ luôn đúng (D-045, AUD-HAR-064).
+
 ### Changed
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
   (audit 2026-10-19: 4/5 subagent `reviewer` dừng ở trần 40 lượt trước khi kịp trả báo cáo). Dự án đích: chạy lại
