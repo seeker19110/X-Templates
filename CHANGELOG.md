@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Kế hoạch khắc phục và nâng cấp tự động hóa sau đánh giá ngày 2026-10-19:
+  [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](docs/ops/REMEDIATION-PLAN-2026-10-19.md).
+  Gồm bằng chứng, ưu tiên, ánh xạ task audit hiện có, tiêu chí nghiệm thu, migration và chỉ số chất lượng;
+  đây là đề xuất tài liệu, chưa thay đổi hành vi công cụ.
+
 ### Changed
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
   (audit 2026-10-19: 4/5 subagent `reviewer` dừng ở trần 40 lượt trước khi kịp trả báo cáo). Dự án đích: chạy lại

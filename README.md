@@ -162,4 +162,6 @@ AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được
 ## Đóng góp
 
 Xem [`CONTRIBUTING.md`](CONTRIBUTING.md) và [`framework/00-method/conventions.md`](framework/00-method/conventions.md).
+Bản đề xuất [khắc phục và nâng cấp tự động hóa ngày 2026-10-19](docs/ops/REMEDIATION-PLAN-2026-10-19.md)
+gồm ưu tiên, quan hệ với kế hoạch audit đang thực thi, tiêu chí nghiệm thu và chỉ số giữ chất lượng khi tăng tự chủ.
 Báo lỗ hổng: [`SECURITY.md`](SECURITY.md). Giấy phép: [MIT](LICENSE).
