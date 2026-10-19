@@ -39,6 +39,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
 
 ### Changed
+- Cổng `test` của repo khung chạy **mỗi lớp test một tiến trình, song song theo số CPU** (D-079): danh sách lớp từ
+  `unittest` discover (không lớp rỗng → không "Ran 0 tests"), `coverage parallel=True` combine rồi vẫn đòi 100 % dòng + nhánh —
+  cùng tập test, cùng ngưỡng; `scripts/dev-task.sh gate` 195 s → 68 s trên 4 CPU (test 180 s → 66 s), CI `quality` nhanh theo.
+  Không đổi mẫu `xt.yaml` của dự án đích.
 - Một điều kiện "được merge" ([ADR-0028](docs/adr/0028-single-merge-eligibility.md), REC-03, T-1507): hàm thuần `review_gate`/
   `merge_eligibility` dùng chung cho `merge-check` (`--json` thêm `review`, `eligible`, `auto_merge_ok`), `pr next`, `merge-gate`,
   guard `gh`/MCP và steward. `merge-gate` nay đỏ cả khi PR làn chuẩn đang bật auto-merge mà chưa có review sạch ở đúng head
