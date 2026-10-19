@@ -13,6 +13,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   hook SessionStart in gợi ý tên đúng theo remote `origin` + nhánh hiện tại (đang ở `main` thì nhắc tạo nhánh trước);
   AGENTS.md của khung và mẫu `AGENTS.md` §9 có dòng "Tên phiên".
 
+### Changed
+- `pr steward --apply`: PR tụt sau base (ruleset đòi nhánh cập nhật) được cập nhật nhánh bằng REST
+  `pulls/<N>/update-branch -f expected_head_sha=<head>` (đang bật auto-merge thì tắt trước rồi cập nhật trong cùng lượt);
+  `pr next`/`merge-check` gợi ý cùng lệnh. Review sạch mang sang head mới khi head là merge commit có cha đầu là head đã
+  review và tập thay đổi của PR so với base (tên file, tên cũ, trạng thái, blob sha) không đổi — tối đa 5 merge liên tiếp;
+  merge có giải xung đột hay đổi file của PR thì review lại (`LOOP-STOP-029`, D-061).
+
 ### Fixed
 - `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không
   workflow nào sinh, vd `dast`) nay báo đúng "thiếu check bắt buộc: <tên> — thêm job đúng tên hoặc bỏ khỏi ruleset" thay vì

@@ -3457,7 +3457,7 @@ def merge_decision(
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
     nxt = {
         "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
-        "update": f"git fetch origin {base} && git merge origin/{base} && git push (hoặc gh pr update-branch {n})",
+        "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
         "wait": "chờ rồi chạy lại merge-check",
         "fix": "sửa, push, chạy lại merge-check",
         "human": "để người merge; báo cáo lý do",
@@ -3472,6 +3472,7 @@ def merge_decision(
         # L3 (ADR-0015, ADR-0024): guard cho bật auto-merge của GitHub (làn chuẩn sau review sạch, làn nhanh khi mở) — trừ PR chồng (nhắm nhánh sắp bị xoá).
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
+        "base_merge_of": [str(x) for x in pr.get("baseMergeOf") or [] if isinstance(x, str)],
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "reasons": reasons,
@@ -3780,6 +3781,53 @@ def _required_checks(repo: str, branch: str) -> List[str]:
     return out
 
 
+BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
+COMPARE_FILES_MAX = 300  # REST compare cắt danh sách file ở 300: nhiều hơn thì không mang review sang
+
+
+def _pr_change_set(repo: str, base_sha: str, sha: str) -> Optional[Set[Tuple[str, str, str, str]]]:
+    """Thay đổi của nhánh so với nhánh đích (compare ba chấm: tính từ merge-base) dạng {(file, file cũ, trạng thái, blob
+    SHA)}; không đọc được hoặc bị cắt → None."""
+    try:
+        cmp = _gh_one(f"{repo}/compare/{base_sha}...{sha}")
+    except PrInputError:
+        return None
+    files = [f for f in cmp.get("files") or [] if isinstance(f, dict)]
+    if not files or len(files) >= COMPARE_FILES_MAX:
+        return None
+    return {
+        (str(f.get("filename")), str(f.get("previous_filename") or ""), str(f.get("status")), str(f.get("sha")))
+        for f in files
+    }
+
+
+def _commit_parents(repo: str, sha: str) -> List[str]:
+    try:
+        got = _gh_one(f"{repo}/commits/{sha}").get("parents") or []
+    except PrInputError:
+        return []
+    return [str(x.get("sha")) for x in got if isinstance(x, dict)]
+
+
+def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
+    """Các head trước đó mà head hiện tại chỉ là "cập nhật nhánh" sạch của chúng (ADR-0027, D-061): head là merge commit,
+    cha đầu là head cũ, và thay đổi của PR so với nhánh đích (file + blob SHA) giữ nguyên — merge không sửa gì trong phần
+    của PR, không giải xung đột. Review sạch ở head cũ khi đó vẫn đúng cho head mới. Lỗi đọc → [] (phải rà lại). Chỉ hỏi
+    `compare` khi head là merge commit (`merge-watch` gọi 30 giây/lần)."""
+    chain: List[str] = []
+    cur, cur_set = head, None
+    while base_sha and len(chain) < BASE_MERGE_HOPS:
+        parents = _commit_parents(repo, cur)
+        if len(parents) != 2:
+            break
+        cur_set = cur_set if cur_set is not None else _pr_change_set(repo, base_sha, cur)
+        if cur_set is None or _pr_change_set(repo, base_sha, parents[0]) != cur_set:
+            break
+        chain.append(parents[0])
+        cur = parents[0]
+    return chain
+
+
 def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
@@ -3865,6 +3913,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "mergeStateStatus": merge_state,
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
+        # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
+        **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
@@ -5412,7 +5462,8 @@ def _pr_next_review(
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
-    if last is None or last.get("head") != head:
+    carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
+    if last is None or (last.get("head") != head and not carried):
         since = f"{last.get('head')}..{head}" if last else "cả PR"
         if auto_merge:
             return act("disable-auto-merge", f"head {head[:7]} chưa được rà mà auto-merge đang bật", disable)
@@ -5655,7 +5706,13 @@ def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
         return [auto, merge] if out.get("fallback") else [auto]
     if action == "disable-auto-merge":
         return [["gh", "pr", "merge", n, "--disable-auto"]]
+    if action == "update":  # nhánh tụt sau nhánh đích: GitHub tạo merge commit (lỗi khi xung đột), ghim head đang thấy
+        return [_update_branch_cmd(repo, n, head)]
     return []
+
+
+def _update_branch_cmd(repo: str, n: str, head: str) -> List[str]:
+    return ["gh", "api", "-X", "PUT", f"{repo}/pulls/{n}/update-branch", "-f", f"expected_head_sha={head}"]
 
 
 def _steward_run(cmds: List[List[str]]) -> str:
@@ -5715,6 +5772,12 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     if cmds:
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
+        # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
+        if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update":
+            up_err = _steward_run([_update_branch_cmd(repo, str(d["pr"]), str(out["head"]))])
+            out["then"] = "update" + (f" ✗ {up_err}" if up_err else " ✓")
+            if up_err:
+                out["error"] = up_err
     return out
 
 
@@ -5741,7 +5804,8 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
     target = (lambda n: f"https://github.com/{args.repo}/pull/{n}") if args.repo else (lambda n: n)
     results = [_steward_one(target(n), repo, project_dir(), args.apply, gh_repo) for n in nums]
     lines = [
-        f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' ✗ ' + r['error'] if r.get('error') else ''}"
+        f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' → ' + r['then'] if r.get('then') else ''}"
+        f"{' ✗ ' + r['error'] if r.get('error') and not r.get('then') else ''}"
         f" — {r['why']}{' ⚠ ' + r['warn'] if r.get('warn') else ''}"
         for r in results
     ]

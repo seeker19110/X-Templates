@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -141,6 +142,10 @@ class FakeGh:
             out = self.raw[path]
         elif "/pulls?head=" in path or "/pulls?state=open" in path:
             out = json.dumps(self.open_prs)
+        elif path in routes:
+            out = routes[path]
+        elif "/compare/" in path or re.fullmatch(r".*/commits/[0-9a-zA-Z]+", path):
+            out = "{}"  # không có compare/commit giả: không mang review sang head mới (D-061)
         else:
             out = routes[path]
         return subprocess.CompletedProcess(cmd, 0, out, "")
@@ -207,7 +212,8 @@ class MergeDecisionTest(unittest.TestCase):
         # `update` bằng git (gh pr update-branch cần GraphQL — phiên Claude Code chặn)
         self.assertEqual(
             xt.merge_decision(pr(mergeStateStatus="BEHIND", baseRefName="dev"), 2)["next"],
-            "git fetch origin dev && git merge origin/dev && git push (hoặc gh pr update-branch 7)",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/update-branch -f expected_head_sha=abc1234def"
+            " (hoặc git merge origin/dev && git push)",
         )
 
     def test_stacked_pr_waits_for_bottom(self):
@@ -1339,6 +1345,92 @@ class MissingRequiredCheckTest(unittest.TestCase):
             self.assertEqual(xt._required_checks("repos/o/r", "main"), [])
         with FakeGh(raw={"repos/{owner}/{repo}/rules/branches/rel%2F1": json.dumps([{"type": "x"}])}).patch():
             self.assertEqual(xt._required_checks("repos/{owner}/{repo}", "rel/1"), [])
+
+
+class BaseMergeCarryTest(unittest.TestCase):
+    """D-061: head chỉ là "cập nhật nhánh" sạch của head đã review → review mang sang; steward tự cập nhật nhánh."""
+
+    R = "repos/{owner}/{repo}"
+    H, M1 = "1" * 40, "2" * 40
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def files(self, blob: str = "b1") -> str:
+        return json.dumps({"files": [{"filename": "a.py", "status": "modified", "sha": blob}]})
+
+    def raw(self, **over: str) -> dict:
+        r = self.R
+        out = {
+            f"{r}/commits/{FakeGh.SHA}": json.dumps({"parents": [{"sha": self.M1}, {"sha": "b0"}]}),
+            f"{r}/commits/{self.M1}": json.dumps({"parents": [{"sha": self.H}, {"sha": "b9"}]}),
+            f"{r}/commits/{self.H}": json.dumps({"parents": [{"sha": "x"}]}),
+            f"{r}/compare/base...{FakeGh.SHA}": self.files(),
+            f"{r}/compare/base...{self.M1}": self.files(),
+            f"{r}/compare/base...{self.H}": self.files(),
+        }
+        return {**out, **over}
+
+    def chain(self, **over: str) -> list:
+        with FakeGh(raw=self.raw(**over)).patch():
+            return xt._base_merge_chain(self.R, "base", FakeGh.SHA)
+
+    def test_chain_rules(self):
+        self.assertEqual(self.chain(), [self.M1, self.H])  # hai lần cập nhật nhánh liên tiếp
+        self.assertEqual(self.chain(**{f"{self.R}/compare/base...{self.H}": self.files("khac")}), [self.M1])
+        self.assertEqual(self.chain(**{f"{self.R}/compare/base...{self.M1}": self.files("khac")}), [])  # đổi phần PR
+        self.assertEqual(self.chain(**{f"{self.R}/commits/{FakeGh.SHA}": json.dumps({"parents": [{"sha": "p"}]})}), [])
+        many = json.dumps({"files": [{"filename": f"f{i}", "sha": "s"} for i in range(xt.COMPARE_FILES_MAX)]})
+        self.assertEqual(self.chain(**{f"{self.R}/compare/base...{FakeGh.SHA}": many}), [])  # bị cắt: không tin
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
+            self.assertEqual(xt._base_merge_chain(self.R, "base", FakeGh.SHA), [])
+        self.assertEqual(xt._base_merge_chain(self.R, "", FakeGh.SHA), [])  # không biết nhánh đích: không hỏi
+        with unittest.mock.patch.object(
+            xt, "_gh_one", side_effect=[{"parents": [{"sha": "a"}, {"sha": "b"}]}, xt.PrInputError("x")]
+        ):
+            self.assertEqual(xt._base_merge_chain(self.R, "base", FakeGh.SHA), [])
+
+    def test_pr_rest_and_pr_next_carry_review(self):
+        pull = {"base": {"sha": "base", "ref": "main"}}
+        with FakeGh(pull=pull, raw=self.raw()).patch():
+            p = xt._pr_rest("7")
+        self.assertEqual(p["baseMergeOf"], [self.M1, self.H])
+        d = xt.merge_decision({**p, "files": [{"path": "src/a.py", "additions": 400, "deletions": 0}]}, 3)
+        self.assertEqual(d["lane"], "chuẩn")
+        clean = {"reviews": [{"head": self.H, "clean": True}]}
+        self.assertEqual(xt.pr_next(d, False, clean)["action"], "enable-auto-merge")  # review ở H mang sang head
+        dirty = {"reviews": [{"head": self.H, "clean": False}]}
+        self.assertEqual(xt.pr_next(d, False, dirty)["action"], "review")  # review báo lỗi không mang sang
+        self.assertEqual(xt.pr_next({**d, "base_merge_of": []}, False, clean)["action"], "review")
+
+    def test_steward_updates_branch(self):
+        cmds = xt._steward_command({"pr": 7, "head": "h", "action": "update"}, "repos/o/r")
+        self.assertEqual(
+            cmds, [["gh", "api", "-X", "PUT", "repos/o/r/pulls/7/update-branch", "-f", "expected_head_sha=h"]]
+        )
+        behind = {"mergeable_state": "behind"}
+        gh = StewardGh(pull=behind)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 0)
+        self.assertIn("#7 update ✓", out)
+        self.assertEqual(gh.writes[-1][4], f"{self.R}/pulls/7/update-branch")
+        # auto-merge đang bật: tắt rồi cập nhật trong cùng lượt
+        gh = StewardGh(pull={**behind, "auto_merge": {"merge_method": "squash"}})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 disable-auto-merge ✓ → update ✓", out)
+        self.assertEqual(
+            [w[2] if w[1] == "pr" else w[4] for w in gh.writes], ["merge", f"{self.R}/pulls/7/update-branch"]
+        )
+        gh = StewardGh(pull={**behind, "auto_merge": {"merge_method": "squash"}}, fail={"gh api -X PUT": "conflict"})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertIn("→ update ✗ conflict", out)
 
 
 class StewardGh(FakeGh):

@@ -431,3 +431,10 @@
 - Chọn: Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ
 - Lý do (tiêu chí chất lượng cuối): Đúng: X-Company#23 bị báo cần review trong khi ruleset đòi 0 review và chỉ thiếu job dast; REST chạy được ở phiên chặn GraphQL; chỉ gọi thêm khi BLOCKED; fail về hành vi cũ
 - Đường lùi: Bỏ _required_checks và nhánh missingRequired
+
+### D-061 · 2026-10-19T07:22:23+00:00 · PR tụt sau main (ruleset đòi nhánh cập nhật) bị kẹt tới khi phiên agent cập nhật nhánh và review lại — steward xử lý thế nào?
+
+- Phương án: (1) Giữ: người/phiên agent update-branch, review lại ở head mới · (2) Steward gọi REST update-branch ghim expected_head_sha; review sạch mang sang head mới khi head là merge commit có cha đầu là head đã review và tập thay đổi so với base (tên file, tên cũ, trạng thái, blob sha) không đổi — tối đa 5 bước · (3) Steward update-branch và bỏ yêu cầu review lại cho mọi merge base
+- Chọn: Steward gọi REST update-branch ghim expected_head_sha; review sạch mang sang head mới khi head là merge commit có cha đầu là head đã review và tập thay đổi so với base (tên file, tên cũ, trạng thái, blob sha) không đổi — tối đa 5 bước
+- Lý do (tiêu chí chất lượng cuối): Đúng: merge base sạch không đổi nội dung PR (so blob sha từng file qua REST compare) nên review cũ vẫn phủ đúng mã; merge có xung đột hoặc đổi file nào thì tập thay đổi khác → review lại; ghim expected_head_sha tránh ghi đè push mới; hôm nay kẹt 4 lần (X-Company#23 ×2, hotel-manager#87, X-Templates#151)
+- Đường lùi: Bỏ baseMergeOf trong _pr_rest và nhánh update trong _steward_command/_steward_one
