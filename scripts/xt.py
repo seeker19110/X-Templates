@@ -6478,7 +6478,8 @@ def build_parser() -> argparse.ArgumentParser:
         "  xt.py compose --profile web-app --industry fintech --scale M --out BLUEPRINT.md\n"
         "  xt.py blueprint-status BLUEPRINT.md --strict\n"
         "  xt.py loop record --task T-001 -- python3 -m unittest\n\n"
-        "mã thoát: 0 ổn · 1 vi phạm/chưa đạt · 2 sai cách dùng hoặc không đọc được file/thư mục",
+        "mã thoát: 0 ổn · 1 vi phạm/chưa đạt · 2 sai cách dùng hoặc không đọc được file/thư mục · 3 lỗi GitHub/"
+        "hết giờ (`merge-gate`, `merge-watch`, `pr reviewed`) · 126 guard cấm lệnh (`guard-check`, Gate — LOOP-STOP-027)",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {framework_version()}")
     p.add_argument(

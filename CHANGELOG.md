@@ -52,6 +52,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   mơ hồ luôn đúng (D-045, AUD-HAR-064).
 
 ### Changed
+- `LOOP-STOP-002` (MUST, chữ): ở L3 auto-merge bật theo làn — làn chuẩn chỉ sau review sạch ở đúng head (`xt.py pr
+  next`), khớp `LOOP-STOP-009` và ADR-0024 (trước ghi "cho mọi PR", AUD-DOC-045). `PRF-MONO-006`, `FE-BUILD-010`,
+  `QA-STATIC-014` và bảng Ruleset/CI ghi đủ 5 required check gồm `merge-gate` (ADR-0023, AUD-DOC-044).
+- `xt.py --help` ghi đủ mã thoát (3 lỗi GitHub/hết giờ, 126 guard cấm — `PRF-CLI-001`, AUD-HAR-062); bảng lệnh mảng 11
+  thêm `pr next/reviewed/steward`, `guard-check`, `contrast`, `vendor-check`.
+- Mẫu dự án đích: `PLAN.md` T-001 Gate `.xtemplates/scripts/dev-task.sh gate` (đường dẫn ở dự án đích) và điền lệnh thật
+  ở `xt.yaml`; chú thích `AGENTS.md`/`xt.yaml` trỏ `.xtemplates/` (AUD-HAR-068).
+- README: biến môi trường đủ (`XT_GUARD_POLICY`, `XT_FRAMEWORK_REPO`, `XT_STEWARD_UPDATE`), ADR-0025…0027, số liệu
+  mảng/MUST; dòng trạng thái ADR-0009/0012/0018/0021 theo ADR thay thế (AUD-DOC-047…050, AUD-HAR-060).
+- `BLUEPRINT.md` của repo khung: 13 bằng chứng/miễn trừ lỗi thời viết lại; `BASE-GATE-009` bỏ tick, chờ chủ repo quyết
+  (AUD-HAR-061, AUD-HAR-069).
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
   (audit 2026-10-19: 4/5 subagent `reviewer` dừng ở trần 40 lượt trước khi kịp trả báo cáo). Dự án đích: chạy lại
   `install.py` để nhận `.claude/agents/*.md` mới.
