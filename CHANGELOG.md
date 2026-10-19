@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không
+  workflow nào sinh, vd `dast`) nay báo đúng "thiếu check bắt buộc: <tên> — thêm job đúng tên hoặc bỏ khỏi ruleset" thay vì
+  "ruleset đòi review của người"; đọc REST `rules/branches/<nhánh>` chỉ khi BLOCKED, không đọc được thì giữ hành vi cũ
+  (`LOOP-STOP-022`, D-060).
+
 ## [3.6.0] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.5.1:** chạy lại `install.py` để có `xt.py vendor-check` mới; dự án có skill chép vào
