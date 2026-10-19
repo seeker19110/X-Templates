@@ -1406,6 +1406,8 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.assertEqual(self.chain(**{f"{self.R}/compare/{self.H}...base": touch}), [self.M1])
         renamed = json.dumps({"files": [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}]})
         self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...base": renamed}), [])
+        # base.sha của API cũ hơn base thật đã merge vào head: xét cả cha thứ hai của merge commit
+        self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...b0": touch}), [])
         other = json.dumps({"files": [{"filename": "z.py", "status": "modified", "sha": "z"}]})
         self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...base": other}), [self.M1, self.H])
         many = json.dumps({"files": [{"filename": f"f{i}", "sha": "s"} for i in range(xt.COMPARE_FILES_MAX)]})

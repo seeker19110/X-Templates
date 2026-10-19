@@ -3843,7 +3843,8 @@ def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
         if cur_set is None or _pr_change_set(repo, base_sha, parents[0]) != cur_set:
             break
         names = {x for f in cur_set for x in f[:2] if x}
-        if _base_touches(repo, parents[0], base_sha, names):
+        # cả nhánh đích hiện tại lẫn cha thứ hai thật của merge (không phụ thuộc `base.sha` của API còn cũ — review #153)
+        if _base_touches(repo, parents[0], base_sha, names) or _base_touches(repo, parents[0], parents[1], names):
             break
         chain.append(parents[0])
         cur = parents[0]
