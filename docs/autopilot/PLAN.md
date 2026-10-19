@@ -15,7 +15,7 @@
 - Dự án đích chạy lại `install.py` (hook/guard/xt.py đổi) → bản minor 3.8.0.
 
 ## Ngân sách (4 con số)
-- Số vòng tối đa: 120 (`max(40, 8 × 15 task)`)
+- Số vòng tối đa: 136 (`max(40, 8 × 17 task)` — `loop init` tính)
 - Chi phí: 0 đồng ngoài phiên (không phụ thuộc mới)
 - Timeout mỗi lệnh Gate: 1800 giây (`XT_RECORD_TIMEOUT` mặc định)
 - Ngày hết hạn: 12 giờ sau `loop init` (`--hours 12`)
@@ -32,23 +32,23 @@
 ### Lát B — guard 🔴/🟠 (AUD-SEC-063…069, + 🟢 SEC-070/071 nếu rẻ)
 - [x] `T-1402` Shell lồng quá `MAX_NEST` → deny (AUD-SEC-063) — Gate: `python3 -m unittest discover -s tests -k nest_too_deep_denied`
 - [x] `T-1403` Brace expansion: bung hữu hạn rồi xét từng biến thể; vượt trần → deny (AUD-SEC-064) — Gate: `python3 -m unittest discover -s tests -k brace_expansion`
-- [ ] `T-1404` Hook chạy python cách ly (`-I`), pycache không nằm ở chỗ agent ghi được ngoài dự án (AUD-SEC-065) — Gate: `python3 -m unittest discover -s tests -k guard_cache_tamper`
-- [ ] `T-1405` `pre-mcp-guard.sh` so `tool_name` cấp đầu đã parse (AUD-SEC-066) — Gate: `python3 -m unittest discover -s tests -k mcp_disable_regex_scoped`
-- [ ] `T-1406` Gửi file bí mật qua `scp`/`rsync`/`nc`/`socat`/`gh gist` → deny (AUD-SEC-067) — Gate: `python3 -m unittest discover -s tests -k secret_exfil_other_channels`
-- [ ] `T-1407` Xoá/huỷ ngoài dự án (`rsync --delete`, `shred`, `mv ~`) → deny (AUD-SEC-068) — Gate: `python3 -m unittest discover -s tests -k delete_outside_project`
-- [ ] `T-1408` Dấu `xt-review v1` đăng tay qua `gh pr comment|review`/`gh api` → deny (AUD-SEC-069) — Gate: `python3 -m unittest discover -s tests -k review_marker_forge_denied`
+- [x] `T-1404` Hook chạy python cách ly (`-I`), pycache không nằm ở chỗ agent ghi được ngoài dự án (AUD-SEC-065) — Gate: `python3 -m unittest discover -s tests -k guard_cache_tamper`
+- [x] `T-1405` `pre-mcp-guard.sh` so `tool_name` cấp đầu đã parse (AUD-SEC-066) — Gate: `python3 -m unittest discover -s tests -k mcp_disable_regex_scoped`
+- [x] `T-1406` Gửi file bí mật qua `scp`/`rsync`/`nc`/`socat`/`gh gist` → deny (AUD-SEC-067) — Gate: `python3 -m unittest discover -s tests -k secret_exfil_other_channels`
+- [x] `T-1407` Xoá/huỷ ngoài dự án (`rsync --delete`, `shred`, `mv ~`) → deny (AUD-SEC-068) — Gate: `python3 -m unittest discover -s tests -k delete_outside_project`
+- [x] `T-1408` Dấu `xt-review v1` đăng tay qua `gh pr comment|review`/`gh api` → deny (AUD-SEC-069) — Gate: `python3 -m unittest discover -s tests -k review_marker_forge_denied`
 
 ### Lát C — merge/steward (AUD-HAR-058/059, AUD-XFEAT-003/004)
-- [ ] `T-1409` `merge-gate` (và check không kiểm mã) không là bằng chứng CI xanh (AUD-HAR-058) — Gate: `python3 -m unittest discover -s tests -k merge_gate_not_ci_evidence`
-- [ ] `T-1410` Dự án con: khoá `xt.yaml` và `merge_risk_paths` tính theo tiền tố dự án (AUD-XFEAT-003/004) — Gate: `python3 -m unittest discover -s tests -k subproject`
-- [ ] `T-1411` Review chặn ở đúng head hiện tại thắng review sạch mang sang (AUD-HAR-059) — Gate: `python3 -m unittest discover -s tests -k blocking_at_head_wins`
+- [x] `T-1409` `merge-gate` (và check không kiểm mã) không là bằng chứng CI xanh (AUD-HAR-058) — Gate: `python3 -m unittest discover -s tests -k merge_gate_not_ci_evidence`
+- [x] `T-1410` Dự án con: khoá `xt.yaml` và `merge_risk_paths` tính theo tiền tố dự án (AUD-XFEAT-003/004) — Gate: `python3 -m unittest discover -s tests -k subproject`
+- [x] `T-1411` Review chặn ở đúng head hiện tại thắng review sạch mang sang (AUD-HAR-059) — Gate: `python3 -m unittest discover -s tests -k blocking_at_head_wins`
 
 ### Lát D — cổng máy xanh giả (AUD-XFEAT-005…009)
-- [ ] `T-1412` `perf guard` thấy file ignore tự che trong vùng khoá (AUD-XFEAT-005) — Gate: `python3 -m unittest discover -s tests -k perf_guard_self_ignored`
-- [ ] `T-1413` `contrast`: cặp không đọc được là đỏ; alpha `none` không sập (AUD-XFEAT-006/008) — Gate: `python3 -m unittest discover -s tests -k contrast_skip_is_red`
-- [ ] `T-1414` `vendor-check` khớp nguyên tên file ghi nguồn, bỏ file ẩn (AUD-XFEAT-007/009) — Gate: `python3 -m unittest discover -s tests -k vendor_notice_fullname`
+- [x] `T-1412` `perf guard` thấy file ignore tự che trong vùng khoá (AUD-XFEAT-005) — Gate: `python3 -m unittest discover -s tests -k perf_guard_self_ignored`
+- [x] `T-1413` `contrast`: cặp không đọc được là đỏ; alpha `none` không sập (AUD-XFEAT-006/008) — Gate: `python3 -m unittest discover -s tests -k contrast_skip_is_red`
+- [x] `T-1414` `vendor-check` khớp nguyên tên file ghi nguồn, bỏ file ẩn (AUD-XFEAT-007/009) — Gate: `python3 -m unittest discover -s tests -k vendor_notice_fullname`
 
 ### Lát E — tài liệu, bằng chứng blueprint, sổ audit, phát hành
-- [ ] `T-1415` Tài liệu + bằng chứng blueprint (AUD-DOC-044/045, AUD-HAR-060/061/062, 🟢 DOC-046…050, HAR-068/069) — Gate: `scripts/dev-task.sh lint`
-- [ ] `T-1416` Sổ audit: phát hiện đã sửa kèm PR, quét lại nhóm bị chạm — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
+- [x] `T-1415` Tài liệu + bằng chứng blueprint (AUD-DOC-044/045, AUD-HAR-060/061/062, 🟢 DOC-046…050, HAR-068/069) — Gate: `scripts/dev-task.sh lint`
+- [x] `T-1416` Sổ audit: phát hiện đã sửa kèm PR, quét lại nhóm bị chạm — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 - [ ] `T-1417` VERSION 3.8.0 + CHANGELOG `[3.8.0]` + PROGRESS; tag `v3.8.0` qua `release-tag.yml` — Gate: `scripts/dev-task.sh gate`

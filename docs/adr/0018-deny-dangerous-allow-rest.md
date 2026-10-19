@@ -1,6 +1,6 @@
 # ADR-0018: Không hỏi người — nguy hiểm thì chặn, còn lại cho chạy
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; thay một phần bởi ADR-0026 (ghi tay `.autopilot/` chặn, không chỉ hỏi)
 - **Trạng thái triển khai:** Đã triển khai — `guard.py` (`apply_policy`, `DANGER_MARKERS`), `.claude/settings.json`
   `permissions.ask` rỗng, `_lib.sh` `ask_strict` cho nhánh lỗi hạ tầng của `pre-bash-guard.sh`/`pre-mcp-guard.sh`
   (thiếu python3/`guard.py`, guard lỗi khi merge, commit vào repo ngoài dự án: cho qua, không chạy cổng của repo lạ);

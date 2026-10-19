@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -105,6 +105,9 @@ updated: 2026-10-18
 | `grant-check GROUP [KHOÁ=GIÁ_TRỊ …] [--plan F] [--json]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không (ADR-0022): exit 0 trong ủy quyền, 1 ngoài hoặc thiếu mục → `loop defer`, 2 tham số sai |
 | `merge-gate [--pr N] [--head SHA] [--json]` | Required check `merge-gate` (ADR-0023): exit 1 khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge (auto-merge không ghim head); `hard` không auto-merge → exit 0 kèm cảnh báo (người merge tay); 2 lỗi đọc PR; 3 head khác `--head` |
 | `merge-watch [--pr N] [--interval 30] [--max-minutes 240]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
+| `pr next --pr N` · `pr reviewed --pr N --head H --clean\|--blocking --reviewer-model M --author-model M` · `pr steward [--apply]` | Merge theo làn (ADR-0024/0025/0027): `next` trả MỘT hành động kế tiếp (`do` là lệnh chạy); `reviewed` ghi kết quả review ở đúng head và đăng dấu lên PR (`--clean` đòi reviewer khác họ model, D-045); `steward` là việc của workflow `pr-steward`; exit 3 khi không đăng được dấu |
+| `guard-check -- <lệnh>` | Hỏi guard của dự án về đúng một lệnh (`dev-task.sh` gọi trước lệnh `xt.yaml`); exit 126 khi guard cấm (LOOP-STOP-027) |
+| `contrast <css…> [--pairs F] [--allow-skip]` · `vendor-check [--strict]` | Cổng UI: tương phản WCAG mọi cặp token (cặp không đọc được là đỏ trừ `--allow-skip` — UX-DS-003/020); mã vendor có ghi nguồn + license (CMP-LIC-022) |
 | `loop hook-stop` | Dùng bởi Stop hook; đọc stdin JSON (ghi `permission_mode`, cảnh báo chế độ hỏi quyền), quyết block/cho dừng; fail-open khi lỗi |
 | `progress-check [file]` | Kiểm `PROGRESS.md`: ≤ 8192 byte, 4 mục, SHA ở Bàn giao là tổ tiên HEAD và của nhánh chính (luật: [`LOOP-HARNESS-004`/`005`](harness-files.md)) |
 | `ci-check [dir]` | Fitness function cho workflow GitHub Actions (`permissions`, ghim SHA, `timeout-minutes`, không `continue-on-error`, không secret ngoài `GITHUB_TOKEN` trong job chạy trên `pull_request`) |

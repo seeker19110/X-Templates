@@ -5,7 +5,7 @@
   định ở `AGENTS.md`, `framework/templates/AGENTS.md`, skill `/autopilot` bước 13, `LOOP-STOP-022`; test
   `tests/test_merge.py::MergeWatchTest`
 - **Ngày:** 2026-10-18
-- **Làm rõ bởi:** ADR-0022 (`--max-minutes` mặc định 120 → 240, D-027)
+- **Thay một phần bởi:** ADR-0022 (`--max-minutes` mặc định 120 → 240, D-027) — số 120 trong thân ADR này là bản cũ
 - **Làm rõ:** ADR-0013 (máy quyết khi nào merge), ADR-0015 (auto-merge) — quyết định D-026
 
 ## Bối cảnh

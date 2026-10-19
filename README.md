@@ -13,13 +13,13 @@
 | [`02-profiles`](framework/02-profiles/README.md) | 14 hồ sơ loại phần mềm: web, mobile, desktop, site tĩnh, API, CLI, thư viện, data/ML, **AI agent**, **hệ agentic**, game, blockchain, IoT, monorepo | 14 |
 | [`03-industries`](framework/03-industries/README.md) | 8 gói ngành có khung pháp lý Việt Nam + quốc tế: fintech, y tế, giáo dục, TMĐT, chính phủ, SaaS đa tenant, truyền thông, logistics | 8 |
 | [`04-standards`](framework/04-standards/README.md) | Tiêu chuẩn: bảo mật, tiếp cận, API/web, dữ liệu, quy trình, AI — phiên bản hiện hành và cách chứng minh | 6 |
-| [`05`](framework/05-architecture/README.md)–[`09`](framework/09-database/README.md) | Kiến trúc · Thiết kế & UI/UX · Frontend · Backend · Cơ sở dữ liệu | 35 |
+| [`05`](framework/05-architecture/README.md)–[`09`](framework/09-database/README.md) | Kiến trúc · Thiết kế & UI/UX · Frontend · Backend · Cơ sở dữ liệu | 36 |
 | [`10-workflow`](framework/10-workflow/README.md) | Git, review, CI/CD, phát hành, môi trường, spec-driven, tài liệu, đội & WIP | 8 |
-| [`11-autonomous-loop`](framework/11-autonomous-loop/README.md) | Vòng lặp tự động: 4 con số, bằng chứng, điểm dừng, điều phối subagent, tự sửa CI, ngân sách context, phản hồi từ dự án đích | 7 |
+| [`11-autonomous-loop`](framework/11-autonomous-loop/README.md) | Vòng lặp tự động: 4 con số, bằng chứng, điểm dừng, điều phối subagent, tự sửa CI, ngân sách context, phản hồi từ dự án đích, vòng tối ưu hiệu năng | 8 |
 | [`12-security`](framework/12-security/README.md) | Threat model, AppSec, bí mật, chuỗi cung ứng, hạ tầng, bảo mật AI, log & audit | 7 |
 | [`13-ai-engineering`](framework/13-ai-engineering/README.md) | LLM app, RAG, agent & tool, hệ agentic, eval, guardrail, MCP/A2A, quan sát & chi phí, dữ liệu | 9 |
 | [`14`](framework/14-testing-quality/README.md)–[`18`](framework/18-cross-cutting/README.md) | Kiểm thử · Vận hành · Tuân thủ & quyền riêng tư · Sản phẩm & dự án · Xuyên suốt (i18n, hiệu năng, DX, tài liệu cho AI, đơn vị/tiền/thời gian, bền vững, OSS) | 37 |
-| [`templates`](framework/templates/README.md) | PROJECT, PLAN, PROGRESS, SPEC, ADR, THREAT-MODEL, RUNBOOK, POST-MORTEM, DPIA, GO-NO-GO, RELEASE-NOTES, API-CONTRACT, AGENTS, CLAUDE, xt.yaml, AUDIT-STATUS, AUDIT-REPORT | 17 |
+| [`templates`](framework/templates/README.md) | PROJECT, PLAN, PROGRESS, SPEC, ADR, THREAT-MODEL, RUNBOOK, POST-MORTEM, DPIA, GO-NO-GO, RELEASE-NOTES, API-CONTRACT, AGENTS, CLAUDE, xt.yaml, AUDIT-STATUS, AUDIT-REPORT, PULL-REQUEST, dependabot.yml, ui-gates/ | 20 |
 
 Mỗi yêu cầu là một dòng có **ID ổn định**, mức **MUST/SHOULD/MAY**, cách **Kiểm** bằng máy và **Nguồn**:
 
@@ -48,7 +48,7 @@ python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict --run
 Dự án đã cài bản ≤ 2.x (thư mục `.xstored/`, `xs.py`, `xs.yaml`): chạy lại bước 1 — `install.py` tự chuyển sang
 `.xtemplates/`, `xt.py`, `xt.yaml` và liệt kê file còn nhắc tên cũ để sửa tay ([ADR-0007](docs/adr/0007-rename-technical-identifiers-to-xtemplates.md)).
 
-Quy mô quyết định khối lượng: `web-app` có 70 MUST ở **S** (prototype), 468 ở **M** (production), 1.124 ở **L** (đo 2026-10-14).
+Quy mô quyết định khối lượng: `web-app` có 70 MUST ở **S** (prototype), 473 ở **M** (production), 1.146 ở **L** (đo 2026-10-19).
 `--out BLUEPRINT.md` ghi file chính chỉ chứa MUST theo quy mô (web-app + ecommerce: 41 KB ở S thay vì ~690 KB) và
 `BLUEPRINT-BACKLOG.md` chứa SHOULD/MAY ([ADR-0012](docs/adr/0012-blueprint-by-scale-and-task-iteration-cap.md)).
 Ghép thêm module ngoài hồ sơ bằng `--add`, ví dụ web app có tính năng AI: `--add "13-ai-engineering/*"`.
@@ -64,7 +64,7 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
    thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, deploy/publish, đổi cấu hình cổng (mâu thuẫn spec không
    còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`).
 
-Hook trong [`.claude/`](.claude/settings.json) chặn lệnh phá huỷ và `curl | sh`, hỏi trước khi deploy hoặc nới cấu hình cổng,
+Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/không đảo ngược (lệnh phá huỷ, `curl | sh`, push nhánh chính…) mà không hỏi người (ADR-0018),
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
 [`framework/11-autonomous-loop/README.md`](framework/11-autonomous-loop/README.md).
 
@@ -102,7 +102,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 Biến môi trường (đều tuỳ chọn): `XT_FRAMEWORK` (thư mục khung, mặc định cạnh `scripts/`) · `XT_FRAMEWORK_LINK` (gốc liên kết
 trong blueprint, mặc định `.xtemplates/framework`) · `XT_RECORD_TIMEOUT` (giây, mặc định 1800) · `XT_PROGRESS_BASE` (nhánh chính cho `progress-check`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; rỗng = tắt) · `CLAUDE_PROJECT_DIR` (gốc dự án cho
 `loop`; không đặt thì: bản cài `.xtemplates/scripts/xt.py` → cha của `.xtemplates`; nếu không, thư mục cha gần nhất có
-`.autopilot`/`xt.yaml`/`.xtemplates`, rồi gần nhất có `.git` — thư mục cha là repo khác (vd `$HOME` dotfiles) sẽ thắng; không thấy thì cwd) · `CLAUDE_CONFIG_DIR` (thư mục cấu hình người dùng của Claude Code mà `doctor`/`loop init` đọc; mặc định `~/.claude` + `~/.claude.json`) · `XT_DEBUG=1` (in traceback khi lỗi).
+`.autopilot`/`xt.yaml`/`.xtemplates`, rồi gần nhất có `.git` — thư mục cha là repo khác (vd `$HOME` dotfiles) sẽ thắng; không thấy thì cwd) · `CLAUDE_CONFIG_DIR` (thư mục cấu hình người dùng của Claude Code mà `doctor`/`loop init` đọc; mặc định `~/.claude` + `~/.claude.json`) · `XT_DEBUG=1` (in traceback khi lỗi) · `XT_GUARD_POLICY=strict` (hook hỏi người như trước ADR-0018; mặc định không hỏi) · `XT_FRAMEWORK_REPO` (repo GitHub để `doctor` so bản phát hành mới nhất, mặc định `seeker19110/X-Templates`) · `XT_STEWARD_UPDATE=off` (`pr steward` không tự cập nhật nhánh tụt base — workflow chạy bằng `GITHUB_TOKEN`).
 
 Kiểm tra trước khi đóng góp (cần Python ≥ 3.11 và shellcheck; ruff/mypy/coverage khoá kèm hash ở `requirements-dev.txt`):
 
@@ -130,8 +130,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0011](docs/adr/0011-gate-fail-closed-in-autopilot.md): trong vòng autopilot, `lint`/`test` rỗng hoặc no-op làm cổng đỏ.
 - [ADR-0012](docs/adr/0012-blueprint-by-scale-and-task-iteration-cap.md): `BLUEPRINT.md` chỉ chứa MUST theo quy mô,
   SHOULD/MAY ở `BLUEPRINT-BACKLOG.md`; trần vòng một phiên chỉ đếm task.
-- [ADR-0013](docs/adr/0013-machine-decides-when-to-merge.md): `xt.py merge-check` quyết khi nào merge PR; guard chỉ cho
-  tự merge làn nhanh ở L2 với lệnh ghim head.
+- [ADR-0013](docs/adr/0013-machine-decides-when-to-merge.md): `xt.py merge-check` quyết khi nào merge PR; tự merge chỉ
+  bằng lệnh ghim head (mức tự chủ: ADR-0015/0024).
 - [ADR-0015](docs/adr/0015-auto-merge-on-open-l3.md): mức `merge_autonomy: L3` (mặc định, chủ repo yêu cầu) — auto-merge
   của GitHub cho mọi làn; GitHub merge khi required check xanh (làn chuẩn bật sau review sạch — ADR-0024).
 - [ADR-0014](docs/adr/0014-pr-per-slice-and-machine-merge.md): mỗi lát code một PR; máy tự merge khi `merge-check` cho
@@ -155,6 +155,12 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   nhánh mặc định) đỏ khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge — auto-merge không ghim head.
 - [ADR-0024](docs/adr/0024-auto-merge-after-clean-review.md): merge theo làn — PR quan trọng (làn chuẩn) `reviewer` rà sạch
   mới bật auto-merge, PR làn nhanh bật khi mở; không bật được thì merge bằng lệnh ghim head của `merge-check`.
+- [ADR-0025](docs/adr/0025-merge-by-lane-state-machine-in-code.md): luật merge theo làn nằm trong code — `xt.py pr next`
+  trả một hành động kế tiếp, `pr reviewed` ghi kết quả review ở đúng head.
+- [ADR-0026](docs/adr/0026-autopilot-evidence-write-denied.md): ghi/xoá tay `.autopilot/` (bằng chứng, trạng thái vòng,
+  sổ review) bị chặn, không chỉ hỏi.
+- [ADR-0027](docs/adr/0027-pr-steward-on-github.md): workflow `pr-steward` trên GitHub bật auto-merge/merge ghim head cho
+  PR đủ tiêu chuẩn khi không còn phiên agent; `pr reviewed` đăng kết quả review lên PR.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

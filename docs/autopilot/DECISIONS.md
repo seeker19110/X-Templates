@@ -503,3 +503,10 @@
 - Chọn: Python stdlib trong xt.py (loop next/dispatch) gọi claude -p --output-format json như subprocess
 - Lý do (tiêu chí chất lượng cuối): AGENTS §7: xt.py chỉ stdlib ≥ 3.11, CI 3.11/3.13; claude -p là đường tài liệu hỗ trợ cho ngôn ngữ khác; đơn giản, test được bằng subprocess giả
 - Đường lùi: Thêm Agent SDK khi cần callback canUseTool hoặc stream
+
+### D-071 · 2026-10-19T12:26:11+00:00 · Lát C (merge), D (cổng máy), E (tài liệu + sổ audit) đã commit và qua cổng ở nhánh cục bộ trong lúc chờ #159 — mở 3 PR tuần tự hay một PR
+
+- Phương án: (1) Ba PR tuần tự trên cùng tên nhánh (D-065) · (2) Một PR gộp C+D+E, commit tách theo lát
+- Chọn: Một PR gộp C+D+E, commit tách theo lát
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn như nhau (mỗi lát một commit có test đỏ trước, cổng xanh trên cây gộp, reviewer khác model rà cả diff); ràng buộc một tên nhánh buộc ba PR chờ nối tiếp nhau (mỗi vòng CI + review), gộp giữ đường lùi bằng revert từng commit
+- Đường lùi: Revert commit của lát cần bỏ; hoặc tách lại PR theo commit

@@ -1,7 +1,7 @@
 ---
 title: Mẫu PLAN
 kind: template
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Mẫu PLAN.md
@@ -61,7 +61,7 @@ updated: 2026-10-18
 ## Task
 
 ### Lát 1 — Walking skeleton (F-<NNN>)
-- [ ] `T-001` Dựng khung repo + CI chạy lint/test rỗng (F-000) — Gate: `scripts/dev-task.sh gate`
+- [ ] `T-001` Dựng khung repo + CI + điền lệnh thật ở `xt.yaml` (lint/test rỗng làm cổng đỏ — ADR-0011 của khung) (F-000) — Gate: `.xtemplates/scripts/dev-task.sh gate`
 - [ ] `T-002` Luồng mỏng nhất UI → API → DB cho <luồng A> (F-<NNN>, S-001) — Gate: `npm test -- --run tests/slice-a.test.ts`
 - [ ] `T-003` Deploy staging + smoke (F-000) — Gate: `scripts/smoke.sh https://staging.<domain>`
 

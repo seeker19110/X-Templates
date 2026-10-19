@@ -1,6 +1,6 @@
 # ADR-0009: Autopilot chạy một phiên đến khi xong — compaction có checkpoint, việc cần người dồn cuối phiên
 
-- **Trạng thái:** Đã chấp nhận; công thức trần vòng (§Quyết định 3) bị thay bởi ADR-0012 (`max(20, 4 × task chưa làm)`)
+- **Trạng thái:** Đã chấp nhận; công thức trần vòng (§Quyết định 3) bị thay bởi ADR-0012 rồi ADR-0022 (hiện hành `max(40, 8 × task chưa làm)`)
 - **Trạng thái triển khai:** Đã triển khai (`scripts/xt.py` `loop defer`, `loop checkpoint`, `loop init --single-session`,
   verdict `done-pending-human`, `hook-stop` đọc `permission_mode`; `.claude/hooks/pre-compact.sh` + `PreCompact` trong
   `.claude/settings.json`; test `tests/test_xt_cli.py`, `tests/test_xt_core.py`, `tests/test_hooks.py`)

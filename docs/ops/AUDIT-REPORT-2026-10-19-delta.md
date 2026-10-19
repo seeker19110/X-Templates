@@ -4,7 +4,7 @@
 > và PR steward (ADR-0024/0025/0027, D-045…063), ủy quyền production (ADR-0022), vòng tối ưu hiệu năng, cổng UI `contrast`/`vendor-check`.
 > SHA quét `main` `9433792`. Người quét: phiên chính (cổng, công cụ, blueprint) + 6 subagent `reviewer` (guard/SEC+CFG; xt.py;
 > CI/cài đặt; tài liệu; 2 lượt xác minh 70 bằng chứng blueprint).
-> Xác minh đối kháng: 3 `reviewer` **model khác** (Sonnet) tái hiện độc lập mọi 🔴/🟠 — không mục nào bị bác bỏ hoàn toàn;
+> Xác minh đối kháng: 3 `reviewer` **khác họ model với phiên chính** tái hiện độc lập mọi 🔴/🟠 — không mục nào bị bác bỏ hoàn toàn;
 > hạ 🔴 → 🟠: SEC-065, HAR-058; hạ 🟠 → 🟢: SEC-070, HAR-063/064/065/066, DOC-046, BASE-CFG-007 (trong HAR-069).
 > Sổ: `docs/ops/AUDIT-STATUS.md` (ID mới AUD-SEC-063…071, AUD-HAR-058…072, AUD-XFEAT-003…009, AUD-DOC-044…050, AUD-CI-010/011,
 > AUD-CODE-013, AUD-DEP-004). `audit check` exit 0; `--strict` chưa vì còn 🔴/🟠 mở.

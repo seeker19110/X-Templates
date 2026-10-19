@@ -876,6 +876,8 @@ class CliContractTest(unittest.TestCase):
         out = self.run_xt("--help").stdout
         self.assertIn("ví dụ:", out)
         self.assertIn("mã thoát:", out)
+        self.assertIn("3 lỗi GitHub", out)  # PRF-CLI-001: mọi mã thoát xt.py trả đều ghi trong --help (AUD-HAR-062)
+        self.assertIn("126 guard cấm", out)
 
     def test_blueprint_status_json_from_stdin(self):
         bp = "- [x] `A-001` **MUST** a\n- [ ] `A-002` **MUST** b\n- [~] `A-003` **SHOULD** c\n"

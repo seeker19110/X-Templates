@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng

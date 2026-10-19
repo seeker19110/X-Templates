@@ -3,7 +3,7 @@
 # Khi autopilot đang chạy, lint/test để "" hoặc lệnh không kiểm gì (true, :, exit 0, echo …) = cổng ĐỎ (ADR-0011): điền ở task đầu PLAN.
 # Quy mô M/L còn có SÀN (LOOP-HARNESS-023, `xt.py doctor` báo `gate-floor`; `loop verify` CHẠY các lệnh sàn và đỏ khi thiếu/đỏ):
 # format_check + coverage luôn có; typecheck khi stack có kiểm kiểu (build với Go/Rust); e2e khi hồ sơ có UI. Lệnh thật, không no-op.
-# Nhà của bộ khoá: LOOP-HARNESS-008 (framework/11-autonomous-loop/harness-files.md). `scripts/dev-task.sh` CHỈ chạy các khoá format · lint · typecheck · test · build · format_file
+# Nhà của bộ khoá: LOOP-HARNESS-008 (framework/11-autonomous-loop/harness-files.md). `.xtemplates/scripts/dev-task.sh` CHỈ chạy các khoá format · lint · typecheck · test · build · format_file
 # (`gate` = build → typecheck → lint → test; lint nên gồm kiểm format). Khoá khác (install, dev, e2e, migrate, init, smoke, audit…) là lệnh KHAI BÁO để agent ĐỌC và chạy trực tiếp; dev-task không chạy.
 # Mẫu theo stack (giữ MỘT bộ, xoá phần còn lại):
 #   Node:   lint: npm run lint · typecheck: npm run typecheck · test: npm test -- --run · build: npm run build · format: npm run format · format_file: npx --no-install prettier --write "{}"

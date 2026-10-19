@@ -227,13 +227,34 @@ class ContrastCliTest(unittest.TestCase):
         self.assertTrue(any(r["status"] == "fail" for r in data["pairs"]))
         (self.dir / "s.css").write_text(":root{--a:lab(1 2 3);--b:#fff;--x:#000;--x-foreground:#fff}", encoding="utf-8")
         (self.dir / "p2.txt").write_text("a on b\n", encoding="utf-8")
-        rc, out, _ = run("contrast", "s.css", "--pairs", "p2.txt", cwd=self.dir)
+        rc, out, _ = run("contrast", "s.css", "--pairs", "p2.txt", "--allow-skip", cwd=self.dir)
         self.assertEqual(rc, 0, out)
         self.assertIn("– [light] --a trên --b  màu không đọc được", out)
         (self.dir / "e.css").write_text(":root{--a:#fff}", encoding="utf-8")
         rc, _, err = run("contrast", "e.css", cwd=self.dir)
         self.assertEqual(rc, 1)
         self.assertIn("Không có cặp nào để kiểm", err)
+
+
+class ContrastSkipTest(unittest.TestCase):
+    """AUD-XFEAT-006/008: cặp không đọc được (color-mix/lab/nền trong suốt) là đỏ trừ khi `--allow-skip`; alpha `none`
+    (CSS Color 4) không làm sập lệnh."""
+
+    def test_contrast_skip_is_red(self) -> None:
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        css = ":root{--primary:#1d4ed8;--primary-foreground:color-mix(in srgb,#fff 90%,#3b82f6);--x:#000;--x-foreground:#fff}"
+        (d / "c.css").write_text(css, encoding="utf-8")
+        rc, out, err = run("contrast", "c.css", cwd=d)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("không đọc được", out + err)
+        self.assertEqual(run("contrast", "c.css", "--allow-skip", cwd=d)[0], 0)
+        rc, out, _ = run("contrast", "c.css", "--json", cwd=d)
+        self.assertEqual((rc, json.loads(out)["skipped"]), (1, 1))
+        (d / "n.css").write_text(":root{--x:rgb(0 0 0 / none);--x-foreground:#fff;--y:#000;--y-foreground:#fff}")
+        rc, out, err = run("contrast", "n.css", cwd=d)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(rc, 1, out)  # nền alpha none = trong suốt → không phán được → đỏ
+        self.assertEqual(xt.parse_css_color("rgb(255 255 255 / none)", {}), (1.0, 1.0, 1.0, 0.0))
 
 
 class VendorCheckTest(unittest.TestCase):
@@ -245,6 +266,34 @@ class VendorCheckTest(unittest.TestCase):
         p = self.dir / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
+
+    def test_vendor_notice_fullname(self) -> None:
+        """AUD-XFEAT-007/009: file mã tên bắt đầu bằng Source/Notice/License… không phải file ghi nguồn; file ẩn
+        (`.gitkeep`) không phải mục vendor."""
+        self.put("vendor/ui-kit/Button.tsx")
+        self.put("vendor/ui-kit/SourceSelect.tsx")
+        self.put("vendor/ui-kit/NoticeBanner.tsx")
+        self.put("vendor/ui-kit/Notice.tsx")
+        self.put("vendor/ok/index.js")
+        self.put("vendor/ok/LICENSE-MIT", "MIT License")
+        self.put("vendor/ok2/a.js")
+        self.put("vendor/ok2/license.md", "MIT License")
+        self.put("vendor/ok3/a.js")
+        self.put("vendor/ok3/license-apache.txt", "Apache License")  # review #162: hậu tố chữ thường
+        self.put("vendor/ok4/b.js")
+        self.put("vendor/ok4/LICENSE_MIT", "MIT License")
+        self.put("vendor/bad2/c.js")
+        self.put("vendor/bad2/LICENSE.d.ts")  # file mã, không phải ghi nguồn
+        self.put("vendor/.gitkeep", "")
+        rc, out, _ = run("vendor-check", "--strict", cwd=self.dir)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("vendor/ui-kit: không có LICENSE", out)
+        self.assertNotIn("vendor/ok:", out)
+        self.assertNotIn("vendor/ok2", out)
+        self.assertNotIn("vendor/ok3", out)
+        self.assertNotIn("vendor/ok4", out)
+        self.assertIn("vendor/bad2: không có LICENSE", out)
+        self.assertNotIn(".gitkeep", out)
 
     def test_clean_project(self) -> None:
         rc, out, _ = run("vendor-check", cwd=self.dir)
