@@ -3407,8 +3407,13 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     early = _pr_shape_blocker(pr)
     if early:
         return early
-    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
-        return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
+    conflicts = pr.get("localConflicts")
+    local_files = [str(f) for f in conflicts] if isinstance(conflicts, list) else None
+    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY" or local_files:
+        where = (
+            f" ở {', '.join(local_files[:8])}" if local_files else ""
+        )  # GitHub báo xung đột mà cục bộ sạch: vẫn tin GitHub
+        return "fix", [f"xung đột với nhánh đích{where} — merge nhánh đích vào rồi giải"]
     ci = _ci_blocker(pr)
     if ci:
         return ci
@@ -3422,7 +3427,7 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
             f"ruleset đòi check bắt buộc không có trên head: {', '.join(missing)} — thêm job đúng tên đó vào workflow hoặc "
             "bỏ khỏi ruleset (GitHub báo BLOCKED vì thiếu check; ruleset còn đòi review thì vẫn cần người duyệt)"
         ]
-    if pr.get("mergeable") != "MERGEABLE":
+    if pr.get("mergeable") != "MERGEABLE" and local_files is None:  # cục bộ đã thấy merge sạch thì không chờ GitHub
         return "wait", ["GitHub chưa tính xong mergeable"]
     return None
 
@@ -3478,7 +3483,11 @@ def merge_decision(
         "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
         "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
         "wait": "chờ rồi chạy lại merge-check",
-        "fix": "sửa, push, chạy lại merge-check",
+        "fix": (
+            f"git fetch origin {base} && git merge origin/{base} → giải xung đột, chạy cổng, push, chạy lại merge-check"
+            if reasons and reasons[0].startswith("xung đột với nhánh đích")
+            else "sửa, push, chạy lại merge-check"
+        ),
         "human": "để người merge; báo cáo lý do",
         "closed": "",
     }[verdict]
@@ -3907,6 +3916,38 @@ def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
     return chain
 
 
+def local_merge_conflicts(
+    base_ref: str, base_sha: str, head: str, number: str = "", cwd: Optional[Path] = None
+) -> Optional[List[str]]:
+    """Xung đột tính CỤC BỘ bằng `git merge-tree --write-tree` (git ≥ 2.38), không chờ GitHub tính `mergeable`
+    (null tới vài chục giây sau push; `merge-watch` hỏi 30 giây/lần): [] = merge sạch · [file…] = xung đột ở các file đó ·
+    None = không kiểm được (không phải repo git, git cũ, không lấy được commit — fail-open về `mergeable` của GitHub).
+    Commit chưa có cục bộ → `git fetch origin <nhánh đích> refs/pull/N/head` (không đổi nhánh/cây làm việc)."""
+    cwd = cwd or project_dir()
+    if not (base_sha and head):
+        return None
+    missing = [c for c in (base_sha, head) if _git(cwd, "cat-file", "-e", f"{c}^{{commit}}").returncode != 0]
+    if missing:
+        refs = [base_ref] if base_ref else []
+        refs += [f"refs/pull/{number}/head"] if number else []
+        if not refs or _git(cwd, "fetch", "-q", "--no-tags", "origin", *refs).returncode != 0:
+            return None
+        if any(_git(cwd, "cat-file", "-e", f"{c}^{{commit}}").returncode != 0 for c in missing):
+            return None
+    r = _git(cwd, "merge-tree", "--write-tree", "--name-only", "--no-messages", base_sha, head)
+    if r.returncode == 0:
+        return []
+    if r.returncode != 1:  # 2+ = lỗi (git cũ không có --write-tree, commit hỏng…)
+        return None
+    # --name-only --no-messages: dòng 1 = tree, rồi mỗi dòng một file xung đột (tới dòng trống nếu có)
+    files: List[str] = []
+    for ln in r.stdout.splitlines()[1:]:
+        if not ln.strip():
+            break
+        files.append(ln)
+    return files or None  # exit 1 mà không có file: định dạng lạ → không kiểm được
+
+
 def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
@@ -3966,6 +4007,12 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     prefix = project_prefix()
     gated = any(isinstance(f, dict) and _gated_file(f, prefix) for f in files)
     bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
+    # GitHub chưa tính xong / báo xung đột → kiểm cục bộ để biết ngay sạch hay xung đột ở file nào (không đợi `wait`).
+    local = (
+        local_merge_conflicts(str(base.get("ref") or ""), str(base.get("sha") or ""), sha, str(n))
+        if mergeable is not True
+        else None
+    )
     raw_user = pr.get("user")
     user: Dict[str, Any] = raw_user if isinstance(raw_user, dict) else {}
     raw_head_repo = head.get("repo")
@@ -3991,6 +4038,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "isDraft": bool(pr.get("draft")),
         "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
         "mergeStateStatus": merge_state,
+        # Xung đột tính cục bộ (`git merge-tree`): [] sạch, [file…] xung đột; vắng = không kiểm được / GitHub đã khẳng định.
+        **({"localConflicts": local} if local is not None else {}),
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
