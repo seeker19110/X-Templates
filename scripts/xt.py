@@ -1303,11 +1303,26 @@ def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
         proc = subprocess.run(
             ["bash", "-o", "pipefail", "-c", cmd_str], cwd=base, capture_output=True, text=True, timeout=timeout
         )
-        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        return zero_tests_red(proc.returncode, (proc.stdout or "") + (proc.stderr or ""))
     except subprocess.TimeoutExpired as exc:
         return 124, f"timeout: {exc}"
     except FileNotFoundError:
         return 127, "bash: không có trong PATH — loop record cần bash (như hook và dev-task.sh)"
+
+
+# unittest trên Python 3.11 exit 0 khi KHÔNG test nào chạy (`-k` sai tên, module không import được): từ 3.12 exit 5
+# (`NO_TESTS_RAN`). Gate `-k <tên>` là mẫu phổ biến của PLAN → "Ran 0 tests" + exit 0 là xanh giả (REC-01, T-1501).
+# Không bắt `0 passed`/`no tests ran` của pytest: pytest tự exit 5. Chỉ dòng tổng kết ở đầu dòng, không bắt trong tên test.
+ZERO_TESTS_RE = re.compile(r"^Ran 0 tests\b", re.M)
+ZERO_TESTS_EXIT = 5  # cùng mã với unittest 3.12+ để một ca cùng một chữ ký lỗi trên mọi bản Python
+ZERO_TESTS_MARK = "[xt] zero_tests_red: Gate exit 0 nhưng `Ran 0 tests` — không test nào chạy, coi là đỏ (exit 5)"
+
+
+def zero_tests_red(code: int, out: str) -> Tuple[int, str]:
+    """Exit 0 mà output có `Ran 0 tests` → exit 5 kèm dòng lý do; exit ≠ 0 giữ nguyên (3.12+ đã trả 5)."""
+    if code == 0 and ZERO_TESTS_RE.search(out):
+        return ZERO_TESTS_EXIT, out.rstrip("\n") + "\n" + ZERO_TESTS_MARK + "\n"
+    return code, out
 
 
 VERIFIED_FILE = "verified.json"
@@ -1456,6 +1471,8 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
         "head": _git_head(base),
         "output_tail": redact("\n".join(out.strip().splitlines()[-40:])),
     }
+    if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
+        ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
     d = state_dir(base) / "evidence"
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")

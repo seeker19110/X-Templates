@@ -821,6 +821,19 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
             rc = xt.loop_verify(self.base)
         return rc, buf.getvalue()
 
+    def test_zero_tests_red_in_verify_and_blueprint_checks(self):
+        """`loop verify` và lệnh `— Kiểm:` của blueprint đi cùng `run_gate_shell`: `Ran 0 tests` + exit 0 là đỏ (T-1501)."""
+        write(self.plan, "- [x] `T-001` a — Gate: `echo 'Ran 0 tests'`\n")
+        self.git("commit", "-qam", "plan")
+        rc, out = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("verify T-001: exit 5", out)
+        rec = json.loads((self.base / ".autopilot" / "verified.json").read_text())
+        self.assertEqual(rec["results"][0]["exit_code"], 5)
+        self.assertIn(xt.ZERO_TESTS_MARK, rec["results"][0]["output_tail"])
+        checks = xt.run_blueprint_checks([{"id": "X-001", "cmd": "echo 'Ran 0 tests'"}], self.base, 30)
+        self.assertEqual(checks[0]["exit_code"], 5)
+
     def test_stop_requires_final_verify_then_passes(self):
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")  # bằng chứng từng task vẫn đủ
         out, _ = xt.hook_stop("{}", self.base)
@@ -1003,6 +1016,26 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         st = xt.read_state(self.base)
         self.assertEqual(st["same_failure_count"], 0)
         self.assertIsNone(st["last_failure_signature"])
+
+    def test_zero_tests_red_exit0_with_ran_0_tests_is_red(self):
+        """REC-01/T-1501: unittest 3.11 exit 0 khi `-k` không khớp test nào (`Ran 0 tests`) — xanh giả; nay exit 5 (như
+        3.12+), evidence ghi `zero_tests_red` + lý do; `Ran N tests` (N > 0) và `0 passed` của pytest (tự exit 5) không bắt."""
+        code, out, _ = self.record(["echo 'Ran 0 tests in 0.001s'; echo OK"])
+        self.assertEqual(code, xt.ZERO_TESTS_EXIT)
+        self.assertIn("zero_tests_red", out)
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual((ev["exit_code"], ev["zero_tests_red"]), (5, True))
+        self.assertIn("Ran 0 tests", ev["output_tail"])
+        self.assertIn(xt.ZERO_TESTS_MARK, ev["output_tail"])
+        self.assertEqual(xt.read_state(self.base)["same_failure_count"], 1)
+        self.assertEqual(self.record(["echo 'Ran 10 tests in 0.1s'; echo OK"])[0], 0)
+        self.assertNotIn("zero_tests_red", xt.read_evidence("T-001", self.base))
+        self.assertEqual(self.record(["echo '0 passed in 0.01s'"])[0], 0)  # pytest: tự exit 5 khi không test
+        self.assertEqual(self.record(["echo '  Ran 0 tests'"])[0], 0)  # chỉ dòng tổng kết ở đầu dòng
+        self.assertEqual(self.record(["echo 'Ran 0 tests'; exit 5"])[0], 5)  # 3.12+: giữ nguyên, không có dấu
+        self.assertNotIn("zero_tests_red", xt.read_evidence("T-001", self.base))
+        self.assertEqual(xt.zero_tests_red(0, "x\nRan 0 tests\n"), (5, f"x\nRan 0 tests\n{xt.ZERO_TESTS_MARK}\n"))
+        self.assertEqual(xt.zero_tests_red(1, "Ran 0 tests"), (1, "Ran 0 tests"))
 
     def test_pipeline_failure_is_not_green(self):
         # pipefail: Gate `test | tee log` đỏ khi test đỏ — /bin/sh lấy exit của `tee` → từng ghi exit 0 (xanh giả).

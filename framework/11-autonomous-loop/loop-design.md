@@ -3,7 +3,7 @@ title: Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằ
 kind: module
 prefix: LOOP-DESIGN
 applies_to: [all]
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng
@@ -19,7 +19,9 @@ updated: 2026-10-18
 2. **Mọi vòng lặp có 4 con số:** trần số vòng · ngân sách (token/tiền) · timeout mỗi lệnh · hạn chót. Thiếu một số là
    demo, không phải workflow tự trị (stored 21 §10).
 3. **Bằng chứng, không lời khai** (P1): task chỉ được tick khi `loop record` ghi `exit_code: 0` với **đúng lệnh Gate**.
-   `<promise>COMPLETE</promise>`, `/goal`, "tôi đã chạy test" đều là lời khai.
+   `<promise>COMPLETE</promise>`, `/goal`, "tôi đã chạy test" đều là lời khai. Gate exit 0 mà đầu ra có `Ran 0 tests`
+   (unittest Python 3.11 khi `-k` không khớp test nào; 3.12+ tự exit 5) → `loop record`/`loop verify`/lệnh `— Kiểm:`
+   ghi exit 5 và `zero_tests_red` — không test nào chạy không phải bằng chứng (REC-01).
 4. **Lỗi lặp là tín hiệu đặc tả sai, không phải code sai:** cùng một chữ ký lỗi 3 lần → `blocked`, người xem.
 5. **Harness có hạn sử dụng:** mỗi hàng rào mã hoá một giả định về điểm yếu của model tại thời điểm viết; ghi ngày và
    xét lại khi đổi model (Anthropic harness design 2026-03-24).
