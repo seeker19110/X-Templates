@@ -288,6 +288,9 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 d, _ = guard.mcp_decision(f"mcp__github__{tool}", {"body": f"ok {MARK}"}, str(ROOT))
                 self.assertEqual(d, "deny")
         self.assertEqual(guard.mcp_decision("mcp__github__add_issue_comment", {"body": "LGTM"}, str(ROOT))[0], "")
+        mention = {"body": "dấu `xt-review v1` qua `gh pr comment` bị chặn"}  # thân PR nói về luật, không mang dấu
+        self.assertEqual(guard.mcp_decision("mcp__github__create_pull_request", mention, str(ROOT))[0], "")
+        self.assertEqual(final("gh pr create -t x -b 'dấu `xt-review v1` bị chặn'"), "")
 
 
 if __name__ == "__main__":

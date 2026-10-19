@@ -1554,7 +1554,7 @@ def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]
 
 # Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
 # python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer khác họ model" (D-045, AUD-SEC-069).
-REVIEW_MARK_RE = re.compile(r"xt-review\s+v1")
+REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review\s+v1\b")  # đúng dạng dấu; nhắc tên dấu trong văn bản thì không
 GH_POST_RE = re.compile(r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)|api)\b", re.S)
 REVIEW_FORGE_WHY = (
     "ghi tay bằng chứng review (dấu `xt-review v1` trên PR) — chỉ `xt.py pr reviewed` đăng (ADR-0026/0027)"
