@@ -1234,6 +1234,7 @@ def failure_signature(task: str, code: int, output: str) -> str:
 # đơn không gì sống. `echo '$X'` ≠ `echo "$X"` ≠ `echo $X` dù shlex.split cho cùng token (REC-01, T-1502).
 SHELL_LIVE_OUTSIDE = frozenset("$`\\!*?[~{}")
 SHELL_LIVE_DOUBLE = frozenset("$`\\!")
+SHELL_OPERATORS = frozenset(";&|<>()")  # ngoài nháy là toán tử điều khiển/chuyển hướng (ranh giới token, review #167)
 
 
 def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]) -> Tuple[str, int]:
@@ -1271,12 +1272,16 @@ def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
             cur.append((nxt, False))
             has_token = True
             i += 1
-        elif c.isspace():
+        elif c.isspace() or c in SHELL_OPERATORS:
             if has_token:
                 tokens.append(tuple(cur))
             cur, has_token = [], False
+            if (
+                not c.isspace()
+            ):  # toán tử điều khiển (`&&`, `;`, `|`, `>`…) ngoài nháy: token "sống" riêng, `'&&'` thì không
+                tokens.append(((c, True),))
         else:
-            cur.append((c, c in SHELL_LIVE_OUTSIDE))
+            cur.append((c, c in SHELL_LIVE_OUTSIDE or (c == "#" and not has_token)))  # `#` đầu từ mở comment
             has_token = True
     if quote:
         raise ValueError("No closing quotation")
