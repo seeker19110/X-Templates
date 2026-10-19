@@ -1443,7 +1443,7 @@ class MergeGuardTest(unittest.TestCase):
 
         commit_base_xt(self.proj, text)
 
-    def fake_gh(self, pr: dict | None) -> None:
+    def fake_gh(self, pr: dict | None, reviewed: str = "") -> None:
         """`gh` giả trả JSON REST cho `gh api <đường dẫn>` (merge-check chỉ dùng REST), dựng từ PR dạng `gh pr view`."""
         gh = self.bin / "gh"
         if pr is None:
@@ -1475,7 +1475,17 @@ class MergeGuardTest(unittest.TestCase):
                     for f in pr["files"]
                 ],
                 f"{repo}/pulls/{n}/reviews?per_page=100": [],
-                f"{repo}/issues/{n}/comments?per_page=100": [],
+                f"{repo}/issues/{n}/comments?per_page=100": (
+                    [
+                        {
+                            "author_association": "OWNER",
+                            "created_at": "2026-10-19T10:00:00Z",
+                            "body": f"<!-- xt-review v1 head={reviewed} verdict=clean -->",
+                        }
+                    ]
+                    if reviewed
+                    else []
+                ),
                 f"{repo}/commits/{sha}/check-runs?per_page=100": {"check_runs": runs},
                 f"{repo}/commits/{sha}/status?per_page=100": {"statuses": []},
                 f"{repo}/pulls?head={{owner}}:{{branch}}&state=open&per_page=100": [{"number": n}],
@@ -1735,9 +1745,17 @@ class MergeGuardTest(unittest.TestCase):
         ):
             with self.subTest(inp):
                 self.assertEqual(mcp(inp), "ask")
-        self.fake_gh({**FAST_PR, "files": [{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}]})
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")  # L3: cả làn chuẩn
-        self.assertEqual(self.d("gh pr merge 7 --squash --match-head-commit abc1234def")[0], "allow")
+        std = {**FAST_PR, "files": [{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}]}
+        sha40 = "a" * 40
+        std = {**std, "headRefOid": sha40}
+        self.fake_gh(std)  # làn chuẩn, chưa có review đã đăng ở head: bật auto-merge/merge đều hỏi (ADR-0024/0028)
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")
+        self.assertEqual(self.d(f"gh pr merge 7 --squash --match-head-commit {sha40}")[0], "ask")
+        self.fake_gh(std, reviewed="b" * 40)  # review sạch nhưng ở head khác (cũ) → vẫn hỏi
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")
+        self.fake_gh(std, reviewed=sha40)  # review sạch ở đúng head → L3 cho cả làn chuẩn
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")
+        self.assertEqual(self.d(f"gh pr merge 7 --squash --match-head-commit {sha40}")[0], "allow")
         self.fake_gh({**FAST_PR, "state": "CLOSED"})
         self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # PR đã đóng
 
@@ -1777,10 +1795,17 @@ class MergeGuardTest(unittest.TestCase):
 
         auto = "merge_autonomy: L3\nmerge_hard_exceptions: auto\n"
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "XT_GUARD_POLICY": ""}
-        mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def"}
+        sha40 = (
+            "c" * 40
+        )  # dấu review chỉ nhận head 40 hex; PR ngoại lệ cứng vào làn chuẩn nên cần review ở head (ADR-0028)
+        mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": sha40}
         payload = {"tool_name": "mcp__github__merge_pull_request", "tool_input": mcp}
-        auth = {**FAST_PR, "labels": [{"name": "risk:auth"}]}
-        key = {**FAST_PR, "files": [{"path": "xt.yaml", "additions": 1, "deletions": 0, "patch": "+" + auto}]}
+        auth = {**FAST_PR, "labels": [{"name": "risk:auth"}], "headRefOid": sha40}
+        key = {
+            **FAST_PR,
+            "headRefOid": sha40,
+            "files": [{"path": "xt.yaml", "additions": 1, "deletions": 0, "patch": "+" + auto}],
+        }
         for name, committed, working, pr, want in (
             ("auto đã commit", auto, None, auth, "allow"),
             ("chỉ cây làm việc", "merge_autonomy: L3\n", auto, auth, "deny"),
@@ -1789,7 +1814,7 @@ class MergeGuardTest(unittest.TestCase):
             with self.subTest(name):
                 shutil.rmtree(self.proj / ".git", ignore_errors=True)
                 commit_base_xt(self.proj, committed, working)
-                self.fake_gh(pr)
+                self.fake_gh(pr, reviewed=sha40)
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, env)
                 self.assertEqual((code, decision(out)), (0, want), out)
         code, out, _ = run_hook(

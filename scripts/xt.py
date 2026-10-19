@@ -5760,7 +5760,13 @@ def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         pr = {k: v for k, v in pr.items() if k != "title"}
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
-    return merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
+    d = merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto)
+    # Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
+    # với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác).
+    marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
+    elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
+    d = {**d, "review": elig["review"], "eligible": elig["eligible"], "auto_merge_ok": elig["auto_merge_ok"]}
+    return d, notes + hard_notes
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -5799,29 +5805,46 @@ def cmd_merge_gate(args: argparse.Namespace) -> int:
         return 3
     d, notes = _merge_eval(pr)
     auto = bool(pr.get("autoMergeRequest"))
-    gate = "block" if d["hard"] and auto else "warn" if d["hard"] else "pass"
+    review_bad = d["review"] in ("missing", "blocking")
+    gate = "block" if auto and (d["hard"] or review_bad) else "warn" if d["hard"] else "pass"
     if args.json:
         print(
             json.dumps(
-                {"pr": d["pr"], "head": head, "gate": gate, "auto_merge": auto, "hard": d["hard"], "notes": notes},
+                {
+                    "pr": d["pr"],
+                    "head": head,
+                    "gate": gate,
+                    "auto_merge": auto,
+                    "hard": d["hard"],
+                    "review": d["review"],
+                    "notes": notes,
+                },
                 ensure_ascii=False,
             )
         )
         return 1 if gate == "block" else 0
-    msg = {
-        "block": "✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023)",
-        "warn": "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ",
-        "pass": "✓ không có ngoại lệ cứng",
-    }[gate]
-    print(f"{msg} · PR #{d['pr']} · head {head}")
+    n = d["pr"]
+    if gate == "block":
+        why = "ngoại lệ cứng" if d["hard"] else f"chưa có review sạch ở head ({d['review']})"
+        print(
+            f"✗ {why} trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023, ADR-0028) · PR #{n} · head {head}"
+        )
+    else:
+        print(
+            (
+                "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ"
+                if gate == "warn"
+                else "✓ không có ngoại lệ cứng"
+            )
+            + f" · PR #{n} · head {head}"
+        )
     for r in [*d["hard"], *notes]:
         print(f"  - {r}")
     if gate == "block":
-        n = d["pr"]
         print(
             f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;"
         )
-        print("  người merge tay")
+        print("  review: `xt.py pr reviewed` (reviewer khác họ model) rồi bật lại auto-merge; hoặc người merge tay")
     return 1 if gate == "block" else 0
 
 
@@ -5925,12 +5948,11 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
 
 
 def _pr_next_review(
-    d: Dict[str, Any], auto_merge: bool, last: Optional[Dict[str, Any]], act: PrAct, disable: str
+    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str
 ) -> Optional[Dict[str, Any]]:
-    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại."""
-    n, head = d.get("pr", ""), str(d.get("head", ""))
-    carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
-    if last is None or (last.get("head") != head and not carried):
+    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`)."""
+    n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
+    if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
         if auto_merge:
             return act("disable-auto-merge", f"head {head[:7]} chưa được rà mà auto-merge đang bật", disable)
@@ -5940,7 +5962,7 @@ def _pr_next_review(
             f"giao reviewer (model khác) rà {since}; xong: xt.py pr reviewed --pr {n} --head {head} --clean|--blocking"
             " --reviewer-model <M> --author-model <M>",
         )
-    if not last.get("clean"):
+    if gate["state"] == "blocking":
         if auto_merge:
             return act("disable-auto-merge", "review ở head báo lỗi chặn mà auto-merge đang bật", disable)
         return act("fix", "review ở head còn lỗi chặn — sửa, push, rà lại", "sửa lỗi chặn, push, chạy lại pr next")
@@ -6040,6 +6062,39 @@ def with_published(rec: Dict[str, Any], marks: object) -> Dict[str, Any]:
     return {**rec, "reviews": sorted([*local, *pub], key=lambda r: _iso_key(r.get("at", "")))}
 
 
+def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
+    """Điều kiện review MỘT NHÀ (REC-03, ADR-0028), hàm thuần: PR cần review sạch ở đúng head khi `strict` (làn chuẩn, từng vào
+    làn chuẩn — nhãn/sổ — hoặc từng có review báo lỗi chặn). `state`: `na` (không strict) · `ok` · `missing` (chưa rà head này,
+    review sạch ở head cũ chỉ mang qua khi head là "cập nhật nhánh" sạch — `base_merge_of`) · `blocking` (review ở head còn lỗi
+    chặn). Review ở đúng head hiện tại quyết trước (mới nhất ở head đó); chưa có mới xét review mang qua (AUD-HAR-059)."""
+    head = str(d.get("head", ""))
+    strict = d.get("lane") == "chuẩn" or standard_seen or any(not r.get("clean") for r in reviews)
+    at_head = [r for r in reviews if r.get("head") == head]
+    last = at_head[-1] if at_head else reviews[-1] if reviews else None
+    carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
+    if not strict:
+        state = "na"
+    elif last is None or (last.get("head") != head and not carried):
+        state = "missing"
+    else:
+        state = "ok" if last.get("clean") else "blocking"
+    return {"strict": strict, "state": state, "last": last}
+
+
+def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
+    """MỘT điều kiện "được merge/được bật auto-merge" cho `merge-check`, `pr next`, `merge-gate`, guard (`gh`/MCP) và steward
+    (REC-03, ADR-0028), hàm thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` =
+    không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật."""
+    g = review_gate(d, reviews, standard_seen)
+    review_ok = g["state"] in ("na", "ok")
+    return {
+        "strict": g["strict"],
+        "review": g["state"],
+        "eligible": d.get("verdict") == "merge" and review_ok,
+        "auto_merge_ok": not d.get("hard") and review_ok,
+    }
+
+
 def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[str, Any]:
     """MỘT hành động kế tiếp cho PR theo "merge theo làn" (ADR-0024 → ADR-0025), hàm thuần.
 
@@ -6049,19 +6104,16 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
-    strict = d.get("lane") == "chuẩn" or bool(rec.get("standard_seen")) or any(not r.get("clean") for r in reviews)
+    gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
+    strict = gate["strict"]
     disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
 
     def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:
         return {"pr": n, "head": head, "action": action, "why": why, "do": do, "fallback": fallback, "strict": strict}
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
-    # Review ở đúng head hiện tại quyết (mới nhất ở head đó); chỉ khi chưa có mới xét review mang qua merge nhánh đích —
-    # review sạch đến muộn ở head cũ không che lỗi chặn ở head hiện tại (AUD-HAR-059).
-    at_head = [r for r in reviews if r.get("head") == head]
-    last = at_head[-1] if at_head else reviews[-1] if reviews else None
-    if early is None and strict:
-        early = _pr_next_review(d, auto_merge, last, act, disable)
+    if early is None and strict:  # review ở head hiện tại quyết trước review mang qua (AUD-HAR-059): xem `review_gate`
+        early = _pr_next_review(d, auto_merge, gate, act, disable)
     if early is not None:
         return early
     return _pr_next_final(d, auto_merge, strict, act, disable)

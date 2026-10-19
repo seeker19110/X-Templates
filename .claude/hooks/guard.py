@@ -1594,6 +1594,8 @@ def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple
         return "ask", f"{EXTERNAL_ASK} — bật auto-merge chỉ khi xt.yaml `merge_autonomy` ≥ L3 (ADR-0015)"
     if d.get("verdict") == "closed" or d.get("stacked"):
         return "ask", f"{EXTERNAL_ASK} — không bật auto-merge: PR {d.get('verdict')}/PR chồng (nhắm nhánh sắp bị xoá)"
+    if d.get("auto_merge_ok") is False:  # làn chuẩn: chỉ bật sau review sạch ở head (ADR-0024/0028)
+        return "ask", f"{EXTERNAL_ASK} — bật auto-merge sau review sạch ở head ({d.get('review')}): `xt.py pr reviewed`"
     return "allow", f"merge_autonomy L{level}: bật auto-merge (GitHub merge khi required check xanh)"
 
 
@@ -1717,6 +1719,10 @@ def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> 
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
+    if (
+        d.get("eligible") is False
+    ):  # điều kiện merge một nhà (ADR-0028): thiếu review sạch ở head → như merge-check chưa cho
+        return "ask", f"{EXTERNAL_ASK} — chưa có review sạch ở head ({d.get('review')}): `xt.py pr reviewed` rồi merge"
     if d.get("head") != sha:
         return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác {sha}"
     return "allow", f"merge-check: {reasons}"

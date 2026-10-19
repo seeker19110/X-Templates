@@ -12,6 +12,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head` (không fetch ở repo nông; `merge-gate` ở CI không kiểm
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
+### Changed
+- Một điều kiện "được merge" ([ADR-0028](docs/adr/0028-single-merge-eligibility.md), REC-03, T-1507): hàm thuần `review_gate`/
+  `merge_eligibility` dùng chung cho `merge-check` (`--json` thêm `review`, `eligible`, `auto_merge_ok`), `pr next`, `merge-gate`,
+  guard `gh`/MCP và steward. `merge-gate` nay đỏ cả khi PR làn chuẩn đang bật auto-merge mà chưa có review sạch ở đúng head
+  (trước đây chỉ `hard`); guard hỏi khi bật auto-merge/merge PR làn chuẩn thiếu review đã đăng ở head. **Dự án đích:** chạy lại
+  `install.py` (guard + `xt.py` đổi).
+
 ### Fixed
 - `audit plan`/`audit check --strict`: nhóm sổ ghi **N/A** được đối chiếu lại với tín hiệu repo hiện tại — repo từng không có UI/CSDL
   rồi có (nhóm A11Y/DATA) trước đây không bao giờ được quét lại; nay `audit_rescan` báo "N/A→áp dụng: …" và `--strict` đỏ tới

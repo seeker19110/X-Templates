@@ -1386,10 +1386,68 @@ class MergeGateTest(unittest.TestCase):
         payment = pr(
             files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO
         )
-        rc, out, _ = self.gate(payment, "--json")  # `merge_hard_exceptions: auto` ở nhánh đích miễn đường dẫn tiền
-        self.assertEqual((rc, json.loads(out)["gate"]), (0, "pass"))
+        # `merge_hard_exceptions: auto` miễn đường dẫn tiền; làn chuẩn + auto-merge cần review sạch ở head (ADR-0028)
+        reviewed = {**payment, "xtReviews": [{"head": "abc1234def", "clean": True, "at": "2026-10-19T10:00:00Z"}]}
+        rc, out, _ = self.gate(reviewed, "--json")
+        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (0, "pass", "ok"))
         commit_base_xt(self.base, "merge_autonomy: L3\n")  # không khoá → human: đường dẫn tiền là hard
-        self.assertEqual(self.gate(payment)[0], 1)
+        self.assertEqual(self.gate(reviewed)[0], 1)
+
+    def test_merge_gate_missing_review(self):
+        """T-1507 (REC-03, ADR-0028): làn chuẩn + auto-merge bật mà chưa có review sạch ở ĐÚNG head → đỏ (như `pr next` bảo
+        tắt auto-merge); review chặn ở head → đỏ; review sạch → xanh; review sạch ở head cũ mang qua chỉ khi `baseMergeOf`."""
+        std = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO)
+
+        def mark(head: str, clean: bool, at: str) -> dict:
+            return {"head": head, "clean": clean, "at": at}
+
+        rc, out, _ = self.gate(std)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ chưa có review sạch ở head (missing) trên head này mà PR đang bật auto-merge", out)
+        self.assertIn("xt.py pr reviewed", out)
+        rc, out, _ = self.gate({**std, "xtReviews": [mark("abc1234def", False, "2026-10-19T10:00:00Z")]}, "--json")
+        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (1, "block", "blocking"))
+        clean = {**std, "xtReviews": [mark("abc1234def", True, "2026-10-19T10:00:00Z")]}
+        self.assertEqual(self.gate(clean)[0], 0)
+        old = {**std, "xtReviews": [mark("old0000000", True, "2026-10-19T10:00:00Z")]}
+        self.assertEqual(self.gate(old)[0], 1)  # review sạch ở head cũ, head mới không phải "cập nhật nhánh" sạch
+        self.assertEqual(self.gate({**old, "baseMergeOf": ["old0000000"]})[0], 0)  # mang qua merge nhánh đích sạch
+        # không bật auto-merge: không chặn (người/agent merge ghim head, guard kiểm `eligible`)
+        self.assertEqual(self.gate({**std, "autoMergeRequest": None})[0], 0)
+        # làn nhanh không cần review
+        self.assertEqual(self.gate(pr(autoMergeRequest=self.AUTO))[0], 0)
+        d, _ = xt._merge_eval({**std, "xtReviews": clean["xtReviews"]})
+        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("ok", True, True))
+        d, _ = xt._merge_eval(std)
+        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("missing", False, False))
+
+    def test_single_merge_condition(self):
+        """`merge_eligibility` là MỘT hàm thuần cho merge-check/pr next/merge-gate/guard/steward: pr_next và merge-gate/guard
+        đọc cùng `review_gate` nên không thể lệch nhau về "đã đủ review ở head chưa"."""
+        d = {"head": "H3", "lane": "chuẩn", "verdict": "merge", "hard": [], "base_merge_of": ["H2"]}
+        r = lambda head, clean, at: {"head": head, "clean": clean, "at": at}  # noqa: E731
+        cases = {
+            "thiếu": ([], "missing", False, False),
+            "sạch ở head": ([r("H3", True, "1")], "ok", True, True),
+            "chặn ở head": ([r("H3", False, "1")], "blocking", False, False),
+            "sạch mang qua": ([r("H2", True, "1")], "ok", True, True),
+            "chặn ở head thắng sạch mang qua": ([r("H3", False, "1"), r("H2", True, "2")], "blocking", False, False),
+            "sạch ở head cũ khác": ([r("H1", True, "1")], "missing", False, False),
+        }
+        for name, (reviews, state, eligible, auto_ok) in cases.items():
+            with self.subTest(name):
+                e = xt.merge_eligibility(d, reviews)
+                self.assertEqual((e["review"], e["eligible"], e["auto_merge_ok"]), (state, eligible, auto_ok))
+                rec = {"reviews": reviews}  # `pr next` đi cùng cổng: thiếu → review, chặn → fix, ok → bật auto-merge
+                act = xt.pr_next({**d, "pr": 7, "autonomy": 3, "base_has_required": True}, False, rec)["action"]
+                self.assertEqual(act, {"missing": "review", "blocking": "fix", "ok": "enable-auto-merge"}[state])
+        fast = {**d, "lane": "nhanh"}  # làn nhanh không strict: bỏ qua review (trừ khi từng có review chặn)
+        self.assertEqual(xt.merge_eligibility(fast, [])["review"], "na")
+        self.assertEqual(xt.merge_eligibility(fast, [r("H0", False, "1")])["review"], "missing")
+        self.assertEqual(xt.merge_eligibility(fast, [], standard_seen=True)["review"], "missing")
+        hard = {**d, "hard": ["x"], "verdict": "human"}
+        e = xt.merge_eligibility(hard, [r("H3", True, "1")])
+        self.assertEqual((e["eligible"], e["auto_merge_ok"]), (False, False))
 
     def test_head_pin_and_read_errors(self):
         rc, out, err = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--head", "khac")
