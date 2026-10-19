@@ -601,3 +601,10 @@
 - Chọn: b: đòi mode=all trước done (giữ LOOP-DESIGN-022), một phần chỉ giữa vòng
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: files: khai thiếu làm lọt hồi quy; làm trong T-1514 (đụng Stop hook) + sửa tài liệu loop-design/README/SKILL
 - Đường lùi: bỏ đòi mode trong final_check
+
+### D-085 · 2026-10-19T23:31:24+00:00 · install.py: đường nâng cấp một lần cho ask cũ chưa có manifest?
+
+- Phương án: (1) giữ và báo ask_unproven, không suy diễn · (2) thêm cờ adopt-legacy-ask
+- Chọn: giữ và báo ask_unproven, không suy diễn
+- Lý do (tiêu chí chất lượng cuối): REC-09 cấm suy diễn nguồn gốc; ghi CHANGELOG; thêm cờ khi có dự án đích cần
+- Đường lùi: thêm cờ adopt-legacy-ask sau
