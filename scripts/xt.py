@@ -3393,16 +3393,16 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
-    missing = [str(m) for m in pr.get("missingRequired") or []]
-    if missing:  # mọi check đã xong mà check bắt buộc vẫn vắng: sẽ không bao giờ tự xuất hiện
-        return "human", [
-            f"ruleset đòi check bắt buộc không có trên head: {', '.join(missing)} — thêm job đúng tên đó vào workflow hoặc "
-            "bỏ khỏi ruleset (GitHub báo BLOCKED vì thiếu check, không phải vì thiếu review)"
-        ]
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "fix", ["reviewer yêu cầu sửa"]
     if pr.get("mergeStateStatus") == "BEHIND":
         return "update", ["nhánh tụt sau nhánh đích — cập nhật rồi chờ CI chạy lại"]
+    missing = [str(m) for m in pr.get("missingRequired") or []]
+    if missing:  # mọi check đã xong mà check bắt buộc vẫn vắng: sẽ không bao giờ tự xuất hiện
+        return "human", [
+            f"ruleset đòi check bắt buộc không có trên head: {', '.join(missing)} — thêm job đúng tên đó vào workflow hoặc "
+            "bỏ khỏi ruleset (GitHub báo BLOCKED vì thiếu check; ruleset còn đòi review thì vẫn cần người duyệt)"
+        ]
     if pr.get("mergeable") != "MERGEABLE":
         return "wait", ["GitHub chưa tính xong mergeable"]
     return None
