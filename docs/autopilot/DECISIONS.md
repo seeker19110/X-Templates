@@ -440,3 +440,10 @@
 - Lý do (tiêu chí chất lượng cuối): Đúng: merge base sạch không đổi nội dung PR (so blob sha từng file qua REST compare) nên review cũ vẫn phủ đúng mã; merge có xung đột hoặc đổi file nào thì tập thay đổi khác → review lại; ghim expected_head_sha tránh ghi đè push mới; hôm nay kẹt 4 lần (X-Company#23 ×2, hotel-manager#87, X-Templates#151)
 - Đường lùi: Bỏ baseMergeOf trong _pr_rest và nhánh update trong _steward_command/_steward_one
 - Bổ sung (review #153): không mang review khi nhánh đích, kể từ merge-base với head đã review, chạm file nào của PR (merge "giữ bản của mình" giữ blob phía PR nhưng gỡ thay đổi của nhánh đích); steward chạy bằng GITHUB_TOKEN (`XT_STEWARD_UPDATE=off`) không cập nhật nhánh vì commit đó không kích CI. Giới hạn chấp nhận: so blob không thấy đổi quyền file (`chmod`) trong merge commit.
+
+### D-062 · 2026-10-19T08:52:23+00:00 · pr-steward bật auto-merge khi nhánh đích không có check bắt buộc thì GitHub merge ngay lúc bật (trước khi CI chạy xong) — chốt ở đâu?
+
+- Phương án: (1) Chốt trong workflow như hotel-manager T-1107: đếm required check bằng gh api, không có thì bỏ --apply · (2) Chốt trong xt.py pr steward: nhánh đích không có check bắt buộc (ruleset hoặc branch protection cổ điển) thì bỏ lệnh bật auto-merge, vẫn tắt auto-merge/merge ghim head khi merge-check đã thấy CI xanh
+- Chọn: Chốt trong xt.py pr steward: nhánh đích không có check bắt buộc (ruleset hoặc branch protection cổ điển) thì bỏ lệnh bật auto-merge, vẫn tắt auto-merge/merge ghim head khi merge-check đã thấy CI xanh
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: chỉ chặn đúng lệnh nguy hiểm (auto-merge không chờ CI), giữ hành động an toàn (tắt auto-merge, merge ghim head sau khi CI xanh); test được bằng unittest thay vì bash trong YAML; mọi dự án đích nhận qua install.py không phải sửa workflow; đọc cả branch protection cổ điển; không đọc được → coi như không có (chiều chặt)
+- Đường lùi: Bỏ _base_has_required và nhánh lọc --auto trong _steward_one
