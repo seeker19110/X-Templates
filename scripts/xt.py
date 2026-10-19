@@ -745,32 +745,69 @@ def _carried_note(old_line: str, new_line: str) -> str:
     return nm.group(0) if nm else ""
 
 
+NORM_TAIL_RE = re.compile(r"\s+(?:→\s*Kiểm:|·\s*Nguồn:)")
+STALE_NOTE_RE = re.compile(r"— Cũ \(rev ([0-9a-f]{8}), trước đó \[([x~])\]\)")
+
+
+def _normative(m: "re.Match[str]") -> str:
+    """Phần quy phạm của mục: chữ yêu cầu TRƯỚC `→ Kiểm:`/`· Nguồn:` — đổi chữ là đổi yêu cầu (REC-06). Mức MUST/SHOULD và
+    ngưỡng quy mô KHÔNG tính (đổi quy mô chuyển mức mà yêu cầu giữ nguyên — ADR-0012: bằng chứng cũ vẫn đúng); đổi cách
+    kiểm hoặc nguồn cũng không làm bằng chứng cũ hết giá trị."""
+    return NORM_TAIL_RE.split(m["text"], maxsplit=1)[0].strip()
+
+
+def _norm_rev(norm: str) -> str:
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:8]
+
+
+def _carry_line(
+    line: str,
+    m: "re.Match[str]",
+    old: Tuple[str, str, str],
+    dropped: Optional[List[str]],
+    stale: Optional[List[str]],
+) -> Tuple[str, int]:
+    """Một mục có ở cả hai bản: (dòng mới đã mang trạng thái/ghi chú, 1 nếu có mang). `old` = (ô, dòng cũ, phần quy phạm cũ)."""
+    state, old_line, old_norm = old
+    if state != " " and old_norm != _normative(m):  # đổi yêu cầu: không mang `[x]`/`[~]` sang (REC-06)
+        if stale is not None:
+            stale.append(m["id"])
+        return f"{line} — Cũ (rev {_norm_rev(old_norm)}, trước đó [{state.lower()}])", 1
+    note = _carried_note(old_line, line)
+    if dropped is not None and state != " " and not note and old_line[5:] != line[5:]:
+        dropped.append(m["id"])
+    if (state, note) != (" ", ""):
+        return f"- [{state}]{line[5:]}{note}", 1
+    return line, 0
+
+
 def carry_states(
-    old: str, new: str, framework_ids: Optional[Set[str]] = None, dropped: Optional[List[str]] = None
+    old: str,
+    new: str,
+    framework_ids: Optional[Set[str]] = None,
+    dropped: Optional[List[str]] = None,
+    stale: Optional[List[str]] = None,
 ) -> Tuple[str, int]:
     """Chuyển ô trạng thái + ghi chú (— Bằng chứng/Miễn/Thiếu: …) từ blueprint cũ sang bản ghép mới theo ID.
     Có `framework_ids`: mục cũ có ID KHÔNG thuộc khung (mục riêng của dự án) được giữ nguyên ở cuối, không mất im lặng.
-    Có `dropped`: thêm ID mục `[x]`/`[~]` mà chữ đổi và không tìm được ghi chú để mang theo — người gọi cảnh báo."""
-    prev: Dict[str, Tuple[str, str]] = {}
+    Có `dropped`: thêm ID mục `[x]`/`[~]` mà chữ đổi và không tìm được ghi chú để mang theo — người gọi cảnh báo.
+    Chữ yêu cầu (phần quy phạm) đổi (REC-06, T-1505): mục `[x]`/`[~]` KHÔNG mang trạng thái sang — về `[ ]` kèm
+    `— Cũ (rev <8 hex của chữ yêu cầu cũ>, trước đó [x|~])`, ID vào `stale` (bằng chứng cũ không chứng minh yêu cầu mới)."""
+    prev: Dict[str, Tuple[str, str, str]] = {}
     for line in unicodedata.normalize("NFC", old).splitlines():
         m = ITEM_RE.match(line)
         if m:
-            prev[m["id"]] = (m["state"], line)
+            prev[m["id"]] = (m["state"], line, _normative(m))
     kept, lines, new_ids = 0, [], set()
     for line in new.splitlines():
         m = ITEM_RE.match(line)
         if m:
             new_ids.add(m["id"])
-        if m and m["id"] in prev:
-            state, old_line = prev[m["id"]]
-            note = _carried_note(old_line, line)
-            if dropped is not None and state != " " and not note and old_line[5:] != line[5:]:
-                dropped.append(m["id"])
-            if (state, note) != (" ", ""):
-                line = f"- [{state}]{line[5:]}{note}"
-                kept += 1
+            if m["id"] in prev:
+                line, hit = _carry_line(line, m, prev[m["id"]], dropped, stale)
+                kept += hit
         lines.append(line)
-    own = [ln for i, (_, ln) in prev.items() if framework_ids is not None and i not in new_ids | framework_ids]
+    own = [ln for i, (_, ln, _n) in prev.items() if framework_ids is not None and i not in new_ids | framework_ids]
     if own:
         lines += ["", "## Mục riêng của dự án (giữ từ bản trước khi ghép lại)", "", *own]
     return "\n".join(lines) + "\n", kept
@@ -827,7 +864,7 @@ def blueprint_status(path: Path) -> Dict[str, Any]:
     for lv in LEVELS:
         for k, v in b["levels"][lv].items():
             s["levels"][lv][k] += v
-    for key in ("open_must", "bad_waivers", "bad_lines"):
+    for key in ("open_must", "bad_waivers", "bad_lines", "stale"):
         s[key] += b[key]
     return s
 
@@ -883,6 +920,13 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
     return out
 
 
+def _stale_ids(text: str) -> List[str]:
+    """Mục còn `[ ]` mang `— Cũ (rev …)`: yêu cầu đổi so với bản đã tick (`carry_states`), chưa làm lại theo yêu cầu mới."""
+    return [
+        m["id"] for m in map(ITEM_RE.match, text.splitlines()) if m and m["state"] == " " and STALE_NOTE_RE.search(m[0])
+    ]
+
+
 def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
@@ -915,7 +959,13 @@ def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     counted = sum(total["MUST"].values())
     if expected is not None and counted < expected:  # mục MUST bị xoá khỏi file: bảng đầu trang vẫn nhớ tổng
         bad_lines.append(f"chỉ thấy {counted}/{expected} mục MUST so với bảng đầu trang (mục bị xoá?)")
-    return {"levels": total, "open_must": open_must, "bad_waivers": bad_waivers, "bad_lines": bad_lines}
+    return {
+        "levels": total,
+        "open_must": open_must,
+        "bad_waivers": bad_waivers,
+        "bad_lines": bad_lines,
+        "stale": _stale_ids(text),
+    }
 
 
 # --------------------------------------------------------------------------- loop (autopilot)
@@ -4330,11 +4380,18 @@ def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -
     fw_ids = {it.id for d in load_docs(fw)[0] for it in d.items}
     old = "\n".join(p.read_text(encoding="utf-8") for p in olds)
     dropped: List[str] = []
-    main, kept = carry_states(old, main, fw_ids, dropped)
+    stale: List[str] = []
+    main, kept = carry_states(old, main, fw_ids, dropped, stale)
     if backlog is not None:
-        backlog, kept_bl = carry_states(old, backlog, dropped=dropped)
+        backlog, kept_bl = carry_states(old, backlog, dropped=dropped, stale=stale)
         kept += kept_bl
-    print(f"↺ Giữ trạng thái {kept} mục theo ID từ bản cũ", file=sys.stderr)
+    print(f"↺ Giữ trạng thái {kept - len(stale)} mục theo ID từ bản cũ", file=sys.stderr)
+    if stale:
+        print(
+            f"⚠ {len(stale)} mục đổi chữ yêu cầu — đã đặt lại [ ] kèm `— Cũ (rev …)`, "
+            f"cần làm/kiểm lại theo yêu cầu mới: {', '.join(stale)}",
+            file=sys.stderr,
+        )
     if dropped:
         print(
             f"⚠ {len(dropped)} mục [x]/[~] đổi chữ mà không mang được ghi chú (Bằng chứng/Kiểm/Miễn) — so với bản cũ, "
@@ -4407,7 +4464,7 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
     if run is None:
         return 2
     ok = not s["open_must"] and not s["bad_waivers"] and not s["bad_lines"] and not run["failed_checks"]
-    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "checks", "failed_checks", "unchecked_must", "ok"}
+    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "stale", "checks", "failed_checks", "unchecked_must", "ok"}
         print(json.dumps({**s, **run, "ok": ok}, ensure_ascii=False))
         return 0 if ok or not args.strict else 1
     for lv in LEVELS:
@@ -4419,6 +4476,8 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
         print(f"✗ Sai định dạng/thiếu mục: {b}")
     if s["open_must"]:
         print(f"Còn {len(s['open_must'])} mục MUST chưa đạt: " + ", ".join(s["open_must"][:15]))
+    if s["stale"]:
+        print(f"⚠ {len(s['stale'])} mục đổi yêu cầu (`— Cũ (rev …)`), chưa làm lại: " + ", ".join(s["stale"][:15]))
     if args.run:
         _print_blueprint_run(run)
     return 0 if ok or not args.strict else 1

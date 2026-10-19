@@ -785,37 +785,86 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertEqual(xt.blueprint_status_text(should)["bad_waivers"], [])
 
     def test_carry_states_keeps_any_note_and_own_items(self):
-        new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b mới. · Nguồn: y\n"
+        new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b. · Nguồn: y\n"
         old = (
             "- [x] `A-001` **MUST** a. · Nguồn: x - Bằng chứng: PR #7\n"
-            "- [~] `A-002` **MUST** b cũ. · Nguồn: y (Miễn: không áp dụng — D-004)\n"
+            "- [~] `A-002` **MUST** b. · Nguồn: z (Miễn: không áp dụng — D-004)\n"
             "- [x] `HM-001` **MUST** mục riêng của dự án — Bằng chứng: test\n"
             "- [x] `OLD-001` **MUST** mục khung đã ngừng dùng\n"
         )
         out, kept = xt.carry_states(old, new, {"A-001", "A-002", "OLD-001"})
         self.assertEqual(kept, 2)
         self.assertIn("- [x] `A-001` **MUST** a. · Nguồn: x - Bằng chứng: PR #7\n", out)  # chữ không đổi: giữ đuôi
-        self.assertIn("- [~] `A-002` **MUST** b mới. · Nguồn: y (Miễn: không áp dụng — D-004)\n", out)
+        # chỉ nguồn đổi (chữ yêu cầu y nguyên): vẫn mang ghi chú miễn trừ
+        self.assertIn("- [~] `A-002` **MUST** b. · Nguồn: y (Miễn: không áp dụng — D-004)\n", out)
         self.assertIn("## Mục riêng của dự án", out)
         self.assertIn("- [x] `HM-001` **MUST** mục riêng của dự án — Bằng chứng: test\n", out)
         self.assertNotIn("OLD-001", out)  # khung bỏ có chủ đích
         self.assertNotIn("Mục riêng", xt.carry_states(old, new)[0])  # không biết ID khung → hành vi cũ
-        changed = "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x\n"
-        self.assertEqual(
-            xt.carry_states(old, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x - Bằng chứng: PR #7\n"
-        )
-        self.assertEqual(xt.carry_states("- [x] `A-001` **MUST** cũ\n", changed)[0], changed)
-        # Lệnh kiểm máy (LOOP-DESIGN-023) là ghi chú của dự án: chữ mục đổi vẫn giữ.
+        # Lệnh kiểm máy (LOOP-DESIGN-023) là ghi chú của dự án: nguồn đổi, chữ yêu cầu giữ → vẫn mang theo.
         old_check = "- [x] `A-001` **MUST** a. · Nguồn: x — Kiểm: `test -f ok`\n"
         self.assertEqual(
-            xt.carry_states(old_check, changed)[0], "- [x] `A-001` **MUST** a đã sửa. · Nguồn: x — Kiểm: `test -f ok`\n"
+            xt.carry_states(old_check, "- [x] `A-001` **MUST** a. · Nguồn: z\n")[0],
+            "- [x] `A-001` **MUST** a. · Nguồn: z — Kiểm: `test -f ok`\n",
         )
-        # Ghi chú nối bằng `·` như chữ của khung (hotel-manager): chữ mục đổi vẫn mang theo, không mất im lặng.
-        old_dot = "- [x] `A-001` **MUST** a. · Nguồn: x · Bằng chứng: `ci.yml`\n- [x] `A-002` **MUST** b cũ.\n"
+        # Ghi chú nối bằng `·` như chữ của khung (hotel-manager): nguồn đổi vẫn mang theo, không mất im lặng.
+        old_dot = "- [x] `A-001` **MUST** a. · Nguồn: x · Bằng chứng: `ci.yml`\n- [x] `A-002` **MUST** b.\n"
         dropped: list[str] = []
-        out, _ = xt.carry_states(old_dot, changed + "- [ ] `A-002` **MUST** b mới.\n", dropped=dropped)
-        self.assertIn("- [x] `A-001` **MUST** a đã sửa. · Nguồn: x · Bằng chứng: `ci.yml`\n", out)
-        self.assertEqual(dropped, ["A-002"])  # đã tick, chữ đổi, không có ghi chú để mang → người gọi cảnh báo
+        new_dot = "- [ ] `A-001` **MUST** a. · Nguồn: w\n- [ ] `A-002` **MUST** b. · Nguồn: n\n"
+        out, _ = xt.carry_states(old_dot, new_dot, dropped=dropped)
+        self.assertIn("- [x] `A-001` **MUST** a. · Nguồn: w · Bằng chứng: `ci.yml`\n", out)
+        self.assertEqual(dropped, ["A-002"])  # đã tick, đuôi đổi, không có ghi chú để mang → người gọi cảnh báo
+
+    def test_requirement_revision_resets_changed_text_and_reports_stale(self):
+        """T-1505 (REC-06): chữ yêu cầu (phần quy phạm) đổi → mục `[x]`/`[~]` về `[ ]` kèm `— Cũ (rev …, trước đó [x|~])`,
+        ID vào `stale`; đổi mức/quy mô, Kiểm, Nguồn không phải đổi yêu cầu; `[ ]` đổi chữ không gắn nhãn; `blueprint-status`
+        và `compose` báo mục còn stale."""
+        old = (
+            "- [x] `A-001` **MUST** a cũ. → Kiểm: t1. · Nguồn: x — Bằng chứng: PR #7\n"
+            "- [~] `A-002` **MUST** b. · Nguồn: y (Miễn: không áp dụng — D-004)\n"
+            "- [x] `A-003` **MUST** c. → Kiểm: t3.\n"
+            "- [x] `A-004` **SHOULD** d.\n"
+            "- [ ] `A-005` **MUST** e cũ.\n"
+        )
+        new = (
+            "- [ ] `A-001` **MUST** a mới. → Kiểm: t1. · Nguồn: x\n"
+            "- [ ] `A-002` **MUST@M** b đổi. · Nguồn: y\n"
+            "- [ ] `A-003` **MUST** c. → Kiểm: lệnh khác.\n"
+            "- [ ] `A-004` **MUST@L** d.\n"
+            "- [ ] `A-005` **MUST** e mới.\n"
+        )
+        stale: list[str] = []
+        out, kept = xt.carry_states(old, new, stale=stale)
+        lines = {ln.split("`")[1]: ln for ln in out.splitlines()}
+        rev1, rev2 = xt._norm_rev("a cũ."), xt._norm_rev("b.")
+        self.assertEqual(stale, ["A-001", "A-002"])
+        self.assertEqual(
+            lines["A-001"], f"- [ ] `A-001` **MUST** a mới. → Kiểm: t1. · Nguồn: x — Cũ (rev {rev1}, trước đó [x])"
+        )
+        self.assertEqual(lines["A-002"], f"- [ ] `A-002` **MUST@M** b đổi. · Nguồn: y — Cũ (rev {rev2}, trước đó [~])")
+        self.assertTrue(lines["A-003"].startswith("- [x] `A-003` **MUST** c. → Kiểm: lệnh khác."))  # Kiểm đổi: giữ
+        self.assertTrue(lines["A-004"].startswith("- [x] `A-004` **MUST@L** d."))  # mức/quy mô đổi, chữ y nguyên: giữ
+        self.assertEqual(lines["A-005"], "- [ ] `A-005` **MUST** e mới.")  # chưa tick: không có gì để mất
+        self.assertEqual(kept, 4)  # A-001, A-002 (stale) + A-003, A-004
+        # không truyền `stale` vẫn đặt lại (người gọi không cần danh sách); mục mới hẳn không có bản cũ → giữ nguyên
+        plain, _ = xt.carry_states(old, new + "- [ ] `A-009` **MUST** mới hẳn.\n")
+        self.assertIn("- [ ] `A-009` **MUST** mới hẳn.\n", plain)
+        self.assertIn("— Cũ (rev ", next(ln for ln in plain.splitlines() if "`A-001`" in ln))
+        # `blueprint-status`: mục còn `[ ]` mang `— Cũ` được báo; tick lại (bỏ ghi chú) thì hết
+        st = xt.blueprint_status_text(out)
+        self.assertEqual(st["stale"], ["A-001", "A-002"])
+        done = out.replace("- [ ] `A-001`", "- [x] `A-001`")
+        self.assertEqual(xt.blueprint_status_text(done)["stale"], ["A-002"])
+        self.assertEqual(xt.blueprint_status_text(new)["stale"], [])
+        # chạy lại carry trên bản đã có `— Cũ`: chữ không đổi, mục vẫn `[ ]` giữ nguyên ghi chú (chưa làm lại)
+        again, _ = xt.carry_states(out, new)
+        self.assertEqual(
+            xt.blueprint_status_text(again)["stale"], ["A-001", "A-002"]
+        )  # ghi chú đuôi được giữ tới khi tick lại
+        # trạng thái cũ ở dạng X hoa cũng thành `[x]` trong ghi chú
+        cap, st2 = "- [X] `A-001` **MUST** a.\n", []
+        self.assertIn("trước đó [x])", xt.carry_states(cap, "- [ ] `A-001` **MUST** b.\n", stale=st2)[0])
+        self.assertEqual(st2, ["A-001"])
 
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
