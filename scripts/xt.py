@@ -3773,9 +3773,16 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
     gated = any(isinstance(f, dict) and _gated_file(f) for f in files)
     bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
+    raw_user = pr.get("user")
+    user: Dict[str, Any] = raw_user if isinstance(raw_user, dict) else {}
+    raw_head_repo = head.get("repo")
+    head_repo: Dict[str, Any] = raw_head_repo if isinstance(raw_head_repo, dict) else {}
     extra = {
         k: str(v)
         for k, v in (
+            ("author", user.get("login")),
+            ("authorAssociation", pr.get("author_association")),
+            ("headRepo", head_repo.get("full_name")),
             ("repo", base_repo.get("full_name")),
             ("baseRefName", base.get("ref")),
             ("defaultBranch", base_repo.get("default_branch")),
@@ -5303,9 +5310,14 @@ def _pr_next_review(
 
 # Sổ review dùng chung (ADR-0027): `pr reviewed` đăng kết quả lên PR dưới dạng comment có dấu máy đọc; `pr next` và
 # `pr steward` (workflow pr-steward) gộp các dấu này với sổ cục bộ. Chỉ tin comment của người có quyền ghi repo (OWNER,
-# MEMBER, COLLABORATOR) — người ngoài comment dấu giả không mở được merge. Dấu không mang tên model (ai_attribution).
+# COLLABORATOR) — người ngoài comment dấu giả không mở được merge. Dấu không mang tên model (ai_attribution).
 REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review v1 head=([0-9a-f]{40}) verdict=(clean|blocking)\s*-->")
-TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+# MEMBER không đủ: thành viên org có thể chỉ có quyền đọc repo (review #141).
+TRUSTED_ASSOCIATIONS = {"OWNER", "COLLABORATOR"}
+STANDARD_LABEL = (
+    "xt-standard-lane"  # PR từng vào làn chuẩn — nhãn bền trên GitHub thay `standard_seen` cục bộ (review #141)
+)
+TRUSTED_BOTS = {"dependabot[bot]"}  # bot cùng repo được steward xử lý như người có quyền ghi
 
 
 def review_comment_body(head: str, clean: bool) -> str:
@@ -5462,7 +5474,7 @@ def _publish_review(pr_arg: str, key: str, head: str, clean: bool) -> int:
             file=sys.stderr,
         )
         return 3
-    print(f"✓ đã đăng review lên PR #{key} — pr-steward sẽ bật auto-merge khi đủ điều kiện (ADR-0027)")
+    print(f"✓ đã đăng review lên PR #{key} — phiên khác và pr-steward thấy kết quả này (ADR-0027)")
     return 0
 
 
@@ -5499,25 +5511,56 @@ def _steward_run(cmds: List[List[str]]) -> str:
     return err
 
 
-def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool) -> Dict[str, Any]:
+def steward_untrusted(pr: Dict[str, Any]) -> str:
+    """Lý do steward KHÔNG tự xử lý PR (rỗng = được): PR từ fork, hoặc tác giả không có quyền ghi repo — người ngoài
+    mở PR tài liệu "làn nhanh" không được tự vào nhánh chính khi không ai xem (review #141)."""
+    if pr.get("headRepo") and pr.get("repo") and pr["headRepo"] != pr["repo"]:
+        return f"PR từ fork {pr['headRepo']} — người merge"
+    author, assoc = str(pr.get("author", "")), str(pr.get("authorAssociation", "")).upper()
+    if assoc in TRUSTED_ASSOCIATIONS or author in TRUSTED_BOTS:
+        return ""
+    return f"tác giả {author or '?'} ({assoc or 'không rõ'}) không có quyền ghi repo — người merge"
+
+
+def _standard_seen(pr: Dict[str, Any]) -> bool:
+    return any(lb.get("name") == STANDARD_LABEL for lb in pr.get("labels") or [] if isinstance(lb, dict))
+
+
+def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[str]) -> Dict[str, Any]:
     try:
         pr = _pr_rest(pr_arg)
     except PrInputError as exc:
         return {"pr": pr_arg, "head": "", "action": "error", "why": str(exc), "applied": False}
     d, _ = _merge_eval(pr)
     rec = with_published(_pr_record(read_reviews(base), str(d["pr"])), pr.get("xtReviews"))
+    if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
+        rec = {**rec, "standard_seen": True}
     out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec), "applied": False}
-    cmds = _steward_command(out, repo) if apply else []
+    why_not = steward_untrusted(pr)
+    if why_not and out["action"] not in ("done", "closed", "disable-auto-merge"):
+        return {**out, "action": "defer-human", "why": why_not}
+    if apply and d["lane"] == "chuẩn" and not _standard_seen(pr):
+        n = str(d["pr"])
+        _steward_run([["gh", "api", "-X", "POST", f"{repo}/issues/{n}/labels", "-f", f"labels[]={STANDARD_LABEL}"]])
+    cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
+    cmds = cmds if apply else []
     if cmds:
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
     return out
 
 
+REPO_SLUG_RE = re.compile(r"[\w.-]+/[\w.-]+")
+
+
 def cmd_pr_steward(args: argparse.Namespace) -> int:
     """Quản PR không cần phiên agent (ADR-0027): mọi PR mở (hoặc `--pr`) → `pr next`; `--apply` thì tự bật/tắt
     auto-merge, merge ghim head. Việc cần người/agent (review, sửa, cập nhật nhánh) chỉ báo."""
+    if args.repo and not REPO_SLUG_RE.fullmatch(args.repo):
+        print(f"✗ --repo phải dạng owner/repo, không phải {args.repo!r}", file=sys.stderr)
+        return 2
     repo = f"repos/{args.repo}" if args.repo else "repos/{owner}/{repo}"
+    gh_repo = ["-R", args.repo] if args.repo else []  # `gh pr merge` trên đúng repo đã đánh giá (review #141)
     try:
         nums = (
             [str(args.pr)]
@@ -5528,7 +5571,7 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     target = (lambda n: f"https://github.com/{args.repo}/pull/{n}") if args.repo else (lambda n: n)
-    results = [_steward_one(target(n), repo, project_dir(), args.apply) for n in nums]
+    results = [_steward_one(target(n), repo, project_dir(), args.apply, gh_repo) for n in nums]
     lines = [
         f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' ✗ ' + r['error'] if r.get('error') else ''}"
         f" — {r['why']}"
@@ -5563,6 +5606,7 @@ def cmd_pr(args: argparse.Namespace) -> int:
         rec = {**rec, "standard_seen": True}
         data[str(d["pr"])] = rec
         _write_reviews(base, data)
+    rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
     out = pr_next(d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews")))
     if args.json:
         print(json.dumps(out, ensure_ascii=False))

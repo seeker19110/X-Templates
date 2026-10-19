@@ -1279,6 +1279,7 @@ class StewardGh(FakeGh):
     """FakeGh + lệnh ghi (POST/PUT, `gh pr merge`): ghi lại, trả mã theo `fail` (tiền tố lệnh → stderr lỗi)."""
 
     def __init__(self, fail: dict | None = None, **kw: Any):
+        kw["pull"] = {"author_association": "OWNER", "user": {"login": "chu"}, **(kw.get("pull") or {})}
         super().__init__(**{"real_git": True, **kw})  # xt.yaml ở nhánh đích (L3) đọc từ repo tạm của test
         self.fail = fail or {}
         self.writes: list[list[str]] = []
@@ -1325,11 +1326,15 @@ class PrStewardTest(unittest.TestCase):
         comments = [
             mark("e" * 40, "clean", "2026-10-19T02:00:00Z"),
             mark(self.H, "blocking", "2026-10-19T01:00:00Z", "MEMBER"),
+            mark("d" * 40, "blocking", "2026-10-19T01:30:00Z", "COLLABORATOR"),
             mark(self.H, "clean", "2026-10-19T03:00:00Z", "NONE"),  # người ngoài: bỏ
             {"body": None, "author_association": TRUSTED},
         ]
         got = xt.published_reviews(comments)
-        self.assertEqual([(r["head"][0], r["clean"]) for r in got], [("d", False), ("e", True)])
+        # MEMBER của org có thể chỉ có quyền đọc: dấu lúc 01:00 bỏ, của COLLABORATOR lúc 01:30 giữ
+        self.assertEqual(
+            [(r["head"][0], r["clean"], r["at"][11:16]) for r in got], [("d", False, "01:30"), ("e", True, "02:00")]
+        )
         rec = {"reviews": [{"head": "f" * 40, "clean": True, "at": "2026-10-19T02:30:00+00:00"}]}
         merged = xt.with_published(rec, got)
         self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e", "f"])
@@ -1435,3 +1440,73 @@ class PrStewardTest(unittest.TestCase):
         with StewardGh(raw=listing).patch(), unittest.mock.patch.object(xt, "_steward_one", return_value=one) as m:
             self.assertEqual(run_main("pr", "steward", "--repo", "o/r")[1], "#7 wait — chờ\n")
         self.assertEqual(m.call_args[0][:2], ("https://github.com/o/r/pull/7", "repos/o/r"))
+
+
+class PrStewardTrustTest(unittest.TestCase):
+    """Review #141: steward không tự merge PR từ fork/người ngoài; nhãn làn chuẩn bền; `-R` khi --repo."""
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def steward(self, pull: dict, *extra: str) -> tuple[int, str, StewardGh]:
+        gh = StewardGh(pull=pull)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply", *extra)
+        return rc, out, gh
+
+    def test_untrusted_prs_are_left_to_humans(self):
+        fork = {
+            "head": {"sha": FakeGh.SHA, "repo": {"full_name": "la/r"}},
+            "base": {"repo": {"full_name": "o/r", "default_branch": "main"}, "ref": "main"},
+        }
+        cases = {
+            "fork": (fork, "PR từ fork la/r"),
+            "người ngoài": ({"author_association": "CONTRIBUTOR", "user": {"login": "x"}}, "tác giả x (CONTRIBUTOR)"),
+            "không rõ": ({"author_association": None, "user": None}, "tác giả ? (không rõ)"),
+        }
+        for name, (pull, why) in cases.items():
+            with self.subTest(name):
+                rc, out, gh = self.steward(pull)
+                self.assertEqual((rc, gh.writes), (0, []))
+                self.assertIn(f"#7 defer-human — {why}", out)
+        rc, out, gh = self.steward({"author_association": "NONE", "user": {"login": "dependabot[bot]"}})
+        self.assertIn("#7 enable-auto-merge ✓", out)
+        self.assertEqual(xt.steward_untrusted({"headRepo": "o/r", "repo": "o/r", "authorAssociation": "owner"}), "")
+
+    def test_standard_label_is_added_and_keeps_pr_strict(self):
+        big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]
+        raw = {"repos/{owner}/{repo}/pulls/7/files?per_page=100": json.dumps(big)}
+        gh = StewardGh(raw=raw)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 review", out)
+        self.assertEqual(gh.writes[0][4:], ["repos/{owner}/{repo}/issues/7/labels", "-f", "labels[]=xt-standard-lane"])
+        # nhãn có rồi: diff nhỏ lại (làn nhanh) vẫn cần review sạch ở head — không bật auto-merge
+        gh = StewardGh(pull={"labels": [{"name": "xt-standard-lane"}]})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 review", out)
+        self.assertEqual(gh.writes, [])
+        p = pr(labels=[{"name": "xt-standard-lane"}])
+        rc, out, _ = run_main("pr", "next", "--json", "--pr-json", "-", stdin=json.dumps(p))
+        self.assertEqual(json.loads(out)["action"], "review")
+
+    def test_repo_flag_pins_gh_pr_merge_and_is_validated(self):
+        listing = {"repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}])}
+        gh = StewardGh(raw=listing)
+        one = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "x", "fallback": ""}
+        self.assertEqual(xt._steward_command(one, "repos/o/r")[0][:3], ["gh", "pr", "merge"])
+        with (
+            unittest.mock.patch.object(
+                xt, "_pr_rest", return_value={**pr(), "author": "chu", "authorAssociation": "OWNER"}
+            ),
+            gh.patch(),
+        ):
+            rc, out, _ = run_main("pr", "steward", "--apply", "--repo", "o/r")
+        self.assertEqual(gh.writes[0][:5], ["gh", "pr", "merge", "-R", "o/r"])
+        rc, _, err = run_main("pr", "steward", "--repo", "https://github.com/o/r")
+        self.assertEqual(rc, 2)
+        self.assertIn("--repo phải dạng owner/repo", err)

@@ -23,11 +23,14 @@ Chủ repo thấy PR đủ tiêu chuẩn mà không tự vào `main`. Nguyên nh
 1. **Sổ review dùng chung trên PR.** `xt.py pr reviewed` ngoài sổ cục bộ còn đăng một comment lên PR: một dòng cho
    người đọc và dấu máy đọc `<!-- xt-review v1 head=<SHA> verdict=clean|blocking -->`. Dấu không mang tên model (luật
    `ai_attribution`) — việc kiểm "reviewer khác model" vẫn làm trước khi ghi. `pr next` đọc thêm các dấu này
-   (REST `issues/N/comments`), chỉ tin comment của người có quyền ghi repo (`OWNER`, `MEMBER`, `COLLABORATOR`).
+   (REST `issues/N/comments`), chỉ tin comment của `OWNER`/`COLLABORATOR` (`MEMBER` của org có thể chỉ có quyền đọc).
 2. **`xt.py pr steward [--apply]`**: với mọi PR mở (hoặc `--pr`), chạy đúng `pr next` rồi tự làm phần máy làm được:
    `enable-auto-merge` (bật; GitHub báo PR đã sẵn sàng thì merge ghim head qua REST), `merge` (merge ghim head),
    `disable-auto-merge`. Việc cần người hoặc agent (`review`, `fix`, `update`, `retarget`, `defer-human`) chỉ báo trong
-   bản tóm tắt của run.
+   bản tóm tắt của run. **Chỉ PR cùng repo của tác giả có quyền ghi** (`OWNER`/`COLLABORATOR`, hoặc Dependabot):
+   PR từ fork hay của người ngoài → `defer-human` — người ngoài mở PR tài liệu làn nhanh không được tự vào nhánh chính
+   khi không ai xem. PR từng vào làn chuẩn được gắn nhãn `xt-standard-lane` (thay `standard_seen` của sổ cục bộ, mà CI
+   không có) nên thu nhỏ diff sau đó vẫn cần review sạch ở head.
 3. **Workflow `pr-steward.yml`** chạy `pr steward --apply` mỗi 10 phút, khi có comment review (của người có quyền
    ghi), và khi chạy tay. Không trigger `pull_request*`, chỉ checkout nhánh mặc định — code của PR không chạy với quyền
    ghi. Token: `XT_STEWARD_TOKEN` nếu có (merge kích workflow `push` trên nhánh chính), không thì `GITHUB_TOKEN`.
@@ -49,5 +52,6 @@ lưới an toàn khi không còn phiên nào.
 - Merge bằng `GITHUB_TOKEN` không kích workflow `push` trên nhánh chính (GitHub chặn đệ quy) — muốn CI chạy sau merge
   thì đặt secret `XT_STEWARD_TOKEN` (fine-grained PAT hoặc GitHub App: contents + pull requests: write).
 - Độ trễ tối đa ~10 phút (lịch của GitHub có thể chậm hơn khi tải cao); comment review kích ngay.
-- Ai có quyền ghi repo cũng đăng được dấu review sạch — cùng mức tin như sổ cục bộ (agent ghi). Người ngoài không được.
+- Ai có quyền ghi repo cũng đăng được dấu review sạch, và gỡ được nhãn `xt-standard-lane` — cùng mức tin như sổ cục bộ
+  (agent ghi). Người ngoài không được, và PR của họ không bao giờ được steward tự merge.
 - PR chưa có review vẫn nằm chờ — đó là đúng luật; bản tóm tắt của run liệt kê để người/phiên sau xử lý.

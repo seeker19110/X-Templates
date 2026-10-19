@@ -9,9 +9,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - **PR steward** (ADR-0027, D-054, `LOOP-STOP-029`): PR đủ tiêu chuẩn tự vào nhánh chính kể cả khi không còn phiên agent
   (phiên dừng, container khởi động lại, PR do phiên khác mở).
   - `xt.py pr reviewed` đăng kết quả review lên PR (comment có dấu `xt-review v1 head=… verdict=…`, không tên model);
-    `--no-publish` chỉ ghi sổ cục bộ. `pr next` đọc thêm các dấu này — chỉ của người có quyền ghi repo.
+    `--no-publish` chỉ ghi sổ cục bộ. `pr next` đọc thêm các dấu này — chỉ của OWNER/COLLABORATOR.
   - `xt.py pr steward [--pr N] [--repo o/r] [--apply] [--json]`: mọi PR mở → `pr next`; `--apply` tự bật/tắt auto-merge,
-    merge ghim head; việc cần người/agent chỉ báo.
+    merge ghim head; việc cần người/agent chỉ báo. Chỉ PR cùng repo của tác giả có quyền ghi (OWNER/COLLABORATOR,
+    Dependabot) — PR từ fork/người ngoài để người merge; PR từng vào làn chuẩn gắn nhãn `xt-standard-lane` để giữ chặt.
   - Workflow `.github/workflows/pr-steward.yml` (mỗi 10 phút, khi có comment review, chạy tay); `install.py --with-github`
     copy vào dự án đích. Token `XT_STEWARD_TOKEN` (tuỳ chọn) để merge kích workflow `push`; repo cần bật "Allow auto-merge".
 
