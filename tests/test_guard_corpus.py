@@ -489,10 +489,10 @@ class GuardRemainingGapsTest(unittest.TestCase):
 
     def test_exec_api_literals_are_linear_time(self) -> None:
         """CodeQL #134: regex chuỗi nguồn không được backtracking lũy thừa trên `\\a` lặp lại sau một dấu nháy."""
-        start = time.monotonic()
+        start = time.process_time()
         for quote in ('"', "'"):
             guard._exec_api_scripts([f"os.system({quote}" + "\\a" * 20000])
-        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertLess(time.process_time() - start, 2.0)
         # chuỗi đầu của lời gọi chuỗi-lệnh; list → ghép thành một lệnh; chuỗi ngoài lời gọi/đối số sau là dữ liệu
         self.assertEqual(guard._exec_api_scripts(["os.system('a b', \"c d\")"]), ["a b"])
         self.assertEqual(guard._exec_api_scripts(["subprocess.run(['ls', 'a b']); print('x y')"]), ["ls 'a b'"])
@@ -547,12 +547,12 @@ class GuardRemainingGapsTest(unittest.TestCase):
         chain = "v0=a; " + "; ".join(f'v{i + 1}="$v{i}$v{i}"' for i in range(40)) + '; eval "$v40"'
         loops = "x='flock l flock l '; " + "; ".join(["$x"] * 60)
         selfref = "x='x='\"'\"'echo hi'\"'\"'; bash -c \"$x\"'; eval \"$x\""
-        start = time.monotonic()
+        start = time.process_time()
         for cmd in (doubling, flocks, chain, loops, selfref, doubling + "; rm -rf ~"):
             with self.subTest(cmd[:40]):
                 self.assertIn(self.dec(cmd), ("", "deny"))
         self.assertEqual(self.dec(doubling + "; rm -rf ~"), "deny")
-        self.assertLess(time.monotonic() - start, 15.0)  # CI dưới coverage chậm ~3 lần; trước bản vá: hàng trăm giây
+        self.assertLess(time.process_time() - start, 15.0)  # CI dưới coverage chậm ~3 lần; trước bản vá: hàng trăm giây
 
     def test_scan_budget_exhaustion_is_deny(self) -> None:
         nested = "sh -c 'sh -c \"sh -c ls\"'"

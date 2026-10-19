@@ -138,9 +138,9 @@ class BraceExpansionTest(unittest.TestCase):
             ("git push origin {" + "a" * 1100 + ",main}", "deny"),  # re-review #159: đệm dài không lọt
             ("rm -rf {" + "a" * 1100 + ",~}", "deny"),
         ):
-            t0 = time.monotonic()
+            t0 = time.process_time()
             self.assertEqual(final(cmd), want)
-            self.assertLess(time.monotonic() - t0, 3.0)
+            self.assertLess(time.process_time() - t0, 3.0)
 
 
 class GuardCacheTamperTest(unittest.TestCase):

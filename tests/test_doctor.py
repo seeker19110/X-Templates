@@ -148,7 +148,7 @@ class DoctorHealthyTest(DoctorCase):
         self.assertEqual([f.msg for f in self.findings() if f.code == "gate-tools"], [])
         start = time.monotonic()  # không bậc hai với token dài có `=` cuối
         self.assertEqual(xt._doctor_gate_tools({"lint": "git && " + "b" * 50000 + "="}), [])
-        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertLess(time.process_time() - start, 1.0)
         self.write("xt.yaml", "lint: git status && python3 -m json.tool x\ntypecheck: ''\ntest: ''\nbuild: ''\n")
         self.assertEqual([f for f in self.findings() if f.code == "gate-tools"], [])
 

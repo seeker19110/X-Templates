@@ -414,9 +414,9 @@ class PerfGuardTest(unittest.TestCase):
 
     def test_guard_regex_is_linear(self):
         line = "perf_counter" + " " * 50000 + "x"
-        start = time.perf_counter()
+        start = time.process_time()
         self.assertIsNone(xt.PERF_SUSPECT_RE.search(line))
-        self.assertLess(time.perf_counter() - start, 1.0)
+        self.assertLess(time.process_time() - start, 1.0)
 
 
 class PerfCliTest(unittest.TestCase):

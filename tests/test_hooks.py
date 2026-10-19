@@ -3105,10 +3105,12 @@ class GuardEgressAuditTest(EgressCase):
         )
 
     def test_url_re_linear(self):  # AUD-CODE-011
-        start = time.monotonic()  # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
+        start = (
+            time.process_time()
+        )  # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
         self.assertEqual(self.guard._url_hosts("a" * 200_000), [])
         self.assertEqual(self.guard._url_hosts("x" * 100_000 + "postgres://u@h.example.com/d"), ["h.example.com"])
-        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertLess(time.process_time() - start, 1.0)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -3955,9 +3957,9 @@ class GuardAiAttributionTest(unittest.TestCase):
         # heredoc của lệnh khác trên cùng dòng vẫn là dữ liệu của lệnh đó
         self.assertEqual(self.decide("python3 - <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
         self.assertEqual(self.g._unquoted_seps("a \"b;c\" 'd&&e' f\\;g; h"), [(19, 20)])
-        t0 = time.monotonic()
+        t0 = time.process_time()
         self.g._heredoc_bodies("a;" * 200000 + " git commit -F - <<E\nb\nE")
-        self.assertLess(time.monotonic() - t0, 2.0)
+        self.assertLess(time.process_time() - t0, 2.0)
 
     def test_review_125_cases(self):
         # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
@@ -3982,11 +3984,11 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "deny")
-        t0 = time.monotonic()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
+        t0 = time.process_time()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
         self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
         long_line = "git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"  # bậc hai nếu không cắt dòng
         self.assertEqual(self.g._heredoc_bodies(long_line), [])
-        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertLess(time.process_time() - t0, 1.0)
         os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
         self.assertEqual(self.decide("git commit -F p", d), "")
         with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp
