@@ -710,6 +710,174 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
 
 
+class EvidenceV2Test(unittest.TestCase):
+    """AUTO-02 (T-1513): evidence ghi `cmd_sha256`, `scope`, `req_rev`, `files_digest`; `loop verify` chỉ chạy lại Gate có
+    đầu vào đổi, `--all` chạy hết; evidence cũ thiếu trường → chạy lại."""
+
+    PLAN = (
+        "- [x] `T-001` sửa a (files: src/a.txt) — Gate: `test -f src/a.txt`\n"
+        "- [x] `T-002` sửa b (files: lib/) — Gate: `test -d lib`\n"
+    )
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN)
+        write(self.base / "src" / "a.txt", "a\n")
+        write(self.base / "lib" / "b.txt", "b\n")
+        patcher = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(self.cli("loop", "init")[0], 0)
+
+    def cli(self, *args: str) -> tuple[int, str]:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            rc = xt.main(list(args))
+        return rc, out.getvalue()
+
+    def record_all(self) -> None:
+        self.assertEqual(self.cli("loop", "record", "--task", "T-001", "--", "test -f src/a.txt")[0], 0)
+        self.assertEqual(self.cli("loop", "record", "--task", "T-002", "--", "test -d lib")[0], 0)
+
+    def task(self, tid: str) -> dict:
+        return next(t for t in xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md") if t["id"] == tid)
+
+    def test_evidence_v2_record_writes_fields(self):
+        self.record_all()
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual(ev["cmd_sha256"], xt.cmd_sha256("test -f src/a.txt"))
+        self.assertEqual(ev["scope"], ["src/a.txt"])
+        self.assertEqual(ev["req_rev"], xt.task_req_rev(self.task("T-001")))
+        self.assertEqual(len(ev["req_rev"]), 16)
+        self.assertEqual(ev["files_digest"], xt.files_digest(self.base, ["src/a.txt"]))
+        self.assertRegex(ev["files_digest"], r"^[0-9a-f]{64}$")
+        # Task ngoài PLAN: không có phạm vi/yêu cầu để gắn → trường có mặt nhưng rỗng (verify luôn chạy lại).
+        self.assertEqual(self.cli("loop", "record", "--task", "T-099", "--", "true")[0], 0)
+        ev = xt.read_evidence("T-099", self.base)
+        self.assertEqual((ev["scope"], ev["req_rev"], ev["files_digest"]), ([], None, None))
+
+    def test_evidence_v2_verify_reruns_only_changed_gate(self):
+        self.record_all()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: giữ", out)
+        self.assertIn("verify T-002: giữ", out)
+        self.assertIn("XANH (0 Gate, giữ 2 Gate có evidence v2 khớp)", out)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(rec["mode"], "changed")
+        self.assertEqual([r.get("kept") for r in rec["results"]], [True, True])
+        write(self.base / "lib" / "sub" / "c.txt", "mới\n")  # file mới trong thư mục phạm vi T-002
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: giữ", out)
+        self.assertIn("verify T-002: exit 0 (file trong phạm vi đổi (files_digest))", out)
+        rc, out = self.cli("loop", "verify", "--all")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (--all)", out)
+        self.assertIn("verify T-002: exit 0 (--all)", out)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(rec["mode"], "all")
+        # Digest đổi mà Gate giờ đỏ → kiểm lại cuối ĐỎ (không giữ kết quả xanh cũ).
+        (self.base / "src" / "a.txt").unlink()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 1)
+        self.assertIn("verify T-001: exit 1", out)
+
+    def test_evidence_v2_old_evidence_without_fields_reruns(self):
+        for t, cmd in (("T-001", "test -f src/a.txt"), ("T-002", "test -d lib")):
+            write(
+                self.base / ".autopilot" / "evidence" / f"{t}.json",
+                json.dumps({"task": t, "exit_code": 0, "cmd": cmd, "cmd_sha256": xt.cmd_sha256(cmd)}),
+            )
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (evidence cũ thiếu scope, req_rev, files_digest)", out)
+        self.assertIn("XANH (2 Gate)", out)
+
+    def test_evidence_v2_shared_gate_runs_once_when_any_task_stale(self):
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [x] `T-001` a (files: src/a.txt) — Gate: `test -f src/a.txt`\n"
+            "- [x] `T-002` b (files: lib/) — Gate: `test  -f src/a.txt`\n",
+        )
+        self.assertEqual(self.cli("loop", "record", "--task", "T-001", "--", "test -f src/a.txt")[0], 0)
+        self.assertEqual(self.cli("loop", "record", "--task", "T-002", "--", "test  -f src/a.txt")[0], 0)
+        self.assertIn("verify T-001: giữ", self.cli("loop", "verify")[1])
+        write(self.base / "lib" / "b.txt", "đổi\n")  # chỉ phạm vi T-002 đổi; lệnh chung → chạy một lần
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (file trong phạm vi đổi (files_digest))", out)
+        self.assertNotIn("verify T-002", out)
+
+    def test_evidence_v2_floor_not_skipped_by_kept_gate(self):
+        # Lệnh sàn là kiểm toàn repo: trùng một Gate được giữ thì vẫn phải chạy (chỉ bỏ khi trùng Gate vừa chạy).
+        write(self.base / "BLUEPRINT.md", "---\nkind: blueprint\nprofile: cli-tool\nscale: M\n---\n")
+        write(self.base / "xt.yaml", "format_check: test -f src/a.txt\ncoverage: test -d lib\n")
+        self.record_all()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify sàn Gate `format_check`: exit 0", out)
+        self.assertIn("verify sàn Gate `coverage`: exit 0", out)
+        rc, out = self.cli("loop", "verify", "--all")
+        self.assertNotIn("verify sàn Gate", out)  # Gate vừa chạy lại trùng lệnh sàn → không chạy hai lần
+
+    def test_evidence_v2_stale_reasons(self):
+        self.record_all()
+        t1 = self.task("T-001")
+        self.assertEqual(xt.evidence_stale(t1, self.base), "")
+        ev_path = self.base / ".autopilot" / "evidence" / "T-001.json"
+        good = json.loads(ev_path.read_text(encoding="utf-8"))
+
+        def stale_with(**changes: object) -> str:
+            write(ev_path, json.dumps({**good, **changes}))
+            return xt.evidence_stale(t1, self.base)
+
+        self.assertEqual(stale_with(exit_code=1), "chưa có evidence xanh")
+        self.assertEqual(stale_with(finished="2999-01-01T00:00:00+00:00"), "evidence có thời điểm bất thường")
+        self.assertEqual(stale_with(cmd_sha256="0" * 64), "lệnh Gate đổi")
+        self.assertEqual(stale_with(scope=["src/"]), "phạm vi `files:` đổi")
+        self.assertEqual(stale_with(req_rev="0" * 16), "đoạn spec của task đổi (req_rev)")
+        self.assertEqual(stale_with(files_digest="0" * 64), "file trong phạm vi đổi (files_digest)")
+        write(ev_path, json.dumps(good))
+        with unittest.mock.patch.object(xt.hashlib, "file_digest", side_effect=OSError("đọc lỗi")):
+            self.assertEqual(xt.evidence_stale(t1, self.base), "file trong phạm vi đổi (files_digest)")
+        ev_path.unlink()
+        self.assertEqual(xt.evidence_stale(t1, self.base), "chưa có evidence xanh")
+        # Spec đổi chữ trong PLAN (Gate giữ nguyên) → req_rev khác.
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            self.PLAN.replace("sửa b", "sửa b theo yêu cầu mới").replace("(files: lib/) ", ""),
+        )
+        t2 = self.task("T-002")
+        self.assertEqual(xt.evidence_stale(t2, self.base), "phạm vi `files:` đổi")
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN.replace("sửa b", "sửa b mới"))
+        self.assertEqual(xt.evidence_stale(self.task("T-002"), self.base), "đoạn spec của task đổi (req_rev)")
+        # Task không khai `files:` → không có gì để giữ, luôn chạy lại.
+        bare = {**t2, "files": []}
+        ev2 = self.base / ".autopilot" / "evidence" / "T-002.json"
+        write(
+            ev2,
+            json.dumps({**json.loads(ev2.read_text(encoding="utf-8")), "scope": [], "req_rev": xt.task_req_rev(bare)}),
+        )
+        self.assertEqual(xt.evidence_stale(bare, self.base), "task không khai `files:` — không có digest để giữ")
+
+    def test_evidence_v2_files_digest_tree(self):
+        d = xt.files_digest(self.base, ["lib/"])
+        self.assertIsNone(xt.files_digest(self.base, []))
+        self.assertEqual(d, xt.files_digest(self.base, ["lib", "lib/"]))  # dấu `/` cuối và trùng lặp không đổi digest
+        write(self.base / "lib" / "__pycache__" / "x.pyc", "rác\n")  # sinh khi chạy → không tính
+        self.assertEqual(d, xt.files_digest(self.base, ["lib/"]))
+        write(self.base / "lib" / "b.txt", "khác\n")
+        self.assertNotEqual(d, xt.files_digest(self.base, ["lib/"]))
+        missing = xt.files_digest(self.base, ["khong-co"])
+        write(self.base / "khong-co", "")
+        self.assertNotEqual(missing, xt.files_digest(self.base, ["khong-co"]))  # mất file ≠ file rỗng
+        self.assertEqual(xt.task_spec({"rest": " — viết hàm (files: a) — Gate: `true`"}), "viết hàm (files: a)")
+        self.assertEqual(xt.task_spec({"rest": "chỉ mô tả"}), "chỉ mô tả")
+
+
 class AuditRegressionTest(unittest.TestCase):
     """Lỗi tái hiện khi dogfood khung trên chính repo (2026-10-14)."""
 

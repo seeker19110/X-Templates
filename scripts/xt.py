@@ -1532,6 +1532,85 @@ def cmd_sha256(cmd: str) -> str:
     return hashlib.sha256(cmd.encode("utf-8")).hexdigest()
 
 
+# Evidence v2 (AUTO-02, T-1513): bằng chứng tự hết hiệu lực khi đầu vào đổi. `scope` = `files:` của task trong PLAN lúc
+# ghi, `req_rev` = sha256[:16] đoạn spec của task (trước `Gate:`), `files_digest` = sha256 cây các đường dẫn trong
+# `scope` lúc BẮT ĐẦU chạy Gate (task không khai `files:` / đọc lỗi → None: không có gì để giữ, verify luôn chạy lại).
+EVIDENCE_V2_KEYS = ("cmd_sha256", "scope", "req_rev", "files_digest")
+DIGEST_SKIP_PARTS = frozenset({".git", ".autopilot", "__pycache__"})  # sinh ra khi chạy, không phải đầu vào
+
+
+def task_spec(t: Dict[str, Any]) -> str:
+    """Đoạn spec của task: phần mô tả trước `Gate:` (lệnh Gate có `cmd_sha256` riêng)."""
+    g = GATE_RE.search(t["rest"])
+    return str(t["rest"][: g.start()] if g else t["rest"]).strip(" —-")
+
+
+def task_req_rev(t: Dict[str, Any]) -> str:
+    """Revision nội dung yêu cầu của task: đổi chữ spec trong PLAN → evidence cũ không chứng minh yêu cầu mới."""
+    return hashlib.sha256(task_spec(t).encode("utf-8")).hexdigest()[:16]
+
+
+def _digest_members(root: Path) -> List[Path]:
+    if root.is_file():
+        return [root]
+    return sorted(f for f in root.rglob("*") if f.is_file() and not DIGEST_SKIP_PARTS & set(f.relative_to(root).parts))
+
+
+def files_digest(base: Path, files: List[str]) -> Optional[str]:
+    """sha256 cây của `files:` (tên + loại + nội dung từng file, thư mục duyệt đệ quy theo thứ tự tên); không khai
+    `files:` hoặc đọc lỗi → None (không chứng minh được gì không đổi)."""
+    if not files:
+        return None
+    h = hashlib.sha256()
+    try:
+        for rel in sorted({f.rstrip("/") for f in files}):
+            root = base / rel
+            h.update(rel.encode("utf-8") + (b"\0d\0" if root.is_dir() else b"\0f\0" if root.is_file() else b"\0-\0"))
+            for f in _digest_members(root) if root.exists() else []:
+                with f.open("rb") as fh:
+                    h.update(
+                        f.relative_to(root).as_posix().encode("utf-8")
+                        + b"\0"
+                        + hashlib.file_digest(fh, "sha256").digest()
+                    )
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def evidence_meta(base: Path, st: Dict[str, Any], task: str) -> Dict[str, Any]:
+    """Trường v2 (trừ `cmd_sha256`) cho evidence của `task` theo PLAN của vòng; task không có trong PLAN → rỗng/None."""
+    t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
+    files: List[str] = list(t["files"]) if t else []
+    return {"scope": files, "req_rev": task_req_rev(t) if t else None, "files_digest": files_digest(base, files)}
+
+
+def _digest_changed(base: Path, files: List[str], old: Any) -> bool:
+    cur = files_digest(base, files)
+    return cur is None or cur != old
+
+
+def evidence_stale(t: Dict[str, Any], base: Path) -> str:
+    """Lý do `loop verify` phải chạy lại Gate của task `[x]` `t`; rỗng = evidence v2 xanh còn khớp lệnh, phạm vi, yêu cầu
+    và digest file → giữ kết quả. Evidence cũ thiếu trường v2 → chạy lại (AUTO-02)."""
+    ev = read_evidence(t["id"], base)
+    if ev is None or ev.get("exit_code") != 0:
+        return "chưa có evidence xanh"
+    got: Dict[str, Any] = ev
+    missing = [k for k in EVIDENCE_V2_KEYS if k not in got]
+    if missing:
+        return "evidence cũ thiếu " + ", ".join(missing)
+    checks: List[Tuple[str, Callable[[], bool]]] = [
+        ("evidence có thời điểm bất thường", lambda: bool(_evidence_time_problem(got))),
+        ("lệnh Gate đổi", lambda: got["cmd_sha256"] != cmd_sha256(str(t["gate"]))),
+        ("phạm vi `files:` đổi", lambda: got["scope"] != t["files"]),
+        ("đoạn spec của task đổi (req_rev)", lambda: got["req_rev"] != task_req_rev(t)),
+        ("task không khai `files:` — không có digest để giữ", lambda: not t["files"]),
+        ("file trong phạm vi đổi (files_digest)", lambda: _digest_changed(base, t["files"], got["files_digest"])),
+    ]
+    return next((why for why, bad in checks if bad()), "")
+
+
 def _record_timeout() -> Optional[int]:
     try:
         return int(os.environ.get("XT_RECORD_TIMEOUT", "1800"))
@@ -1663,9 +1742,32 @@ def tree_fingerprint(base: Path) -> Optional[str]:
     return h.hexdigest()
 
 
-def loop_verify(base: Optional[Path] = None) -> int:
-    """Kiểm lại cuối (LOOP-DESIGN-022): chạy lại MỌI Gate của task đã tick trên cây hiện tại, một lần cho mỗi lệnh,
-    ghi `.autopilot/verified.json` kèm dấu vân tay cây. Stop hook chỉ nhận `done` khi file này xanh và khớp cây: bắt cả
+def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all: bool) -> List[Dict[str, Any]]:
+    """Gate của task `[x]`, một lần mỗi lệnh: chạy lại khi `run_all` hoặc evidence v2 của MỘT task dùng lệnh đó không còn
+    khớp (`evidence_stale`); mọi task cùng lệnh đều khớp → giữ (`kept`, exit 0 của evidence) — AUTO-02, T-1513."""
+    why = {t["id"]: "--all" if run_all else evidence_stale(t, base) for t in tasks}
+    results: List[Dict[str, Any]] = []
+    for t in tasks:
+        if any(same_command(t["gate"], r["gate"]) for r in results):
+            continue
+        reasons = [why[x["id"]] for x in tasks if why[x["id"]] and same_command(x["gate"], t["gate"])]
+        if not reasons:
+            results.append({"task": t["id"], "gate": t["gate"], "exit_code": 0, "kept": True, "output_tail": ""})
+            print(f"[xt] verify {t['id']}: giữ — evidence v2 khớp lệnh, phạm vi, yêu cầu, digest file")
+            continue
+        code, out = run_gate_shell(t["gate"], base, timeout)
+        tail = redact("\n".join(out.strip().splitlines()[-20:]))
+        results.append(
+            {"task": t["id"], "gate": t["gate"], "exit_code": code, "rerun": reasons[0], "output_tail": tail}
+        )
+        print(f"[xt] verify {t['id']}: exit {code} ({reasons[0]})")
+    return results
+
+
+def loop_verify(base: Optional[Path] = None, run_all: bool = False) -> int:
+    """Kiểm lại cuối (LOOP-DESIGN-022): chạy lại Gate của task đã tick trên cây hiện tại, một lần cho mỗi lệnh — Gate có
+    evidence v2 còn khớp (lệnh, `files:`, spec, digest file) được giữ, `run_all` (`--all`) chạy hết (AUTO-02) — ghi
+    `.autopilot/verified.json` kèm dấu vân tay cây. Stop hook chỉ nhận `done` khi file này xanh và khớp cây: bắt cả
     bằng chứng sửa tay lẫn task sau làm hỏng Gate của task trước."""
     base = base or project_dir()
     timeout = _record_timeout()
@@ -1675,19 +1777,12 @@ def loop_verify(base: Optional[Path] = None) -> int:
     plan = base / st.get("plan", "docs/autopilot/PLAN.md")
     tasks = [t for t in parse_plan(plan) if t["state"] == "x" and t["gate"]] if plan.exists() else []
     before = tree_fingerprint(base)
-    results: List[Dict[str, Any]] = []
-    for t in tasks:
-        if any(same_command(t["gate"], r["gate"]) for r in results):
-            continue
-        code, out = run_gate_shell(t["gate"], base, timeout)
-        tail = redact("\n".join(out.strip().splitlines()[-20:]))
-        results.append({"task": t["id"], "gate": t["gate"], "exit_code": code, "output_tail": tail})
-        print(f"[xt] verify {t['id']}: exit {code}")
+    results = _verify_gates(base, tasks, timeout, run_all)
     checks = _verify_blueprint(base, st, timeout)
     floor = gate_floor_issues(base)
     for issue in floor:
         print(f"[xt] verify sàn Gate: {issue}")
-    floor_runs = _verify_floor(base, results, timeout)
+    floor_runs = _verify_floor(base, [r for r in results if not r.get("kept")], timeout)  # sàn là kiểm toàn repo
     after = tree_fingerprint(base)
     stable = before == after
     ok = stable and not floor and all(r["exit_code"] == 0 for r in results + checks + floor_runs)
@@ -1697,6 +1792,7 @@ def loop_verify(base: Optional[Path] = None) -> int:
         "fingerprint": after,
         "ok": ok,
         "stable": stable,
+        "mode": "all" if run_all else "changed",
         "finished": now_iso(),
         "results": results,
         "blueprint": checks,
@@ -1712,8 +1808,11 @@ def loop_verify(base: Optional[Path] = None) -> int:
             " được ghi vào repo: ghi artefact ra thư mục tạm (`mktemp`) hoặc thêm vào .gitignore; thay đổi thật thì commit,"
             " rồi chạy lại `loop verify`"
         )
+    kept = sum(1 for r in results if r.get("kept"))
     more = f" + {len(checks)} lệnh kiểm blueprint" if checks else ""
-    print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({len(results)} Gate{more}) — .autopilot/{VERIFIED_FILE}")
+    more += f", giữ {kept} Gate có evidence v2 khớp" if kept else ""
+    ran = len(results) - kept
+    print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({ran} Gate{more}) — .autopilot/{VERIFIED_FILE}")
     return 0 if ok else 1
 
 
@@ -1763,7 +1862,7 @@ def final_check(base: Path) -> Optional[str]:
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
-        "`python3 .xtemplates/scripts/xt.py loop verify` (chạy lại mọi Gate một lần; LOOP-DESIGN-022)"
+        "`python3 .xtemplates/scripts/xt.py loop verify` (chạy lại Gate có đầu vào đổi, `--all` chạy hết; LOOP-DESIGN-022)"
     )
 
 
@@ -1780,6 +1879,7 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor
             file=sys.stderr,
         )
         return 2
+    meta = evidence_meta(base, st, task)  # digest file TRƯỚC khi chạy: đầu vào mà Gate đã kiểm (AUTO-02)
     started = now_iso()
     # Một đối số = chuỗi shell nguyên văn (cho phép `a && b`, ống); nhiều đối số = argv, ghép bằng shlex để giữ nháy (AUD-HAR-002).
     cmd_str = cmd[0] if len(cmd) == 1 else shlex.join(cmd)
@@ -1788,6 +1888,7 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor
         "task": task,
         "cmd": redact(cmd_str),
         "cmd_sha256": cmd_sha256(cmd_str),
+        **meta,
         "exit_code": code,
         "started": started,
         "finished": now_iso(),
@@ -4861,8 +4962,7 @@ def _tree_bytes(p: Path) -> Optional[int]:
 
 def context_pack(t: Dict[str, Any], base: Path) -> Dict[str, Any]:
     """Gói ngữ cảnh một task (REC-11): ID yêu cầu, đoạn spec, Gate, phạm vi file, số byte phải đọc/đưa cho executor."""
-    g = GATE_RE.search(t["rest"])
-    spec = (t["rest"][: g.start()] if g else t["rest"]).strip(" —-")
+    spec = task_spec(t)
     reqs = [r for r in dict.fromkeys(REQ_ID_RE.findall(spec)) if not re.fullmatch(r"T-\d+", r)]
     sizes = {f: _tree_bytes(base / f) for f in t["files"]}
     spec_bytes = len(spec.encode("utf-8"))
@@ -5120,7 +5220,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "resume": _loop_resume,
     "stop": _loop_stop,
     "hook-stop": _loop_hook_stop,
-    "verify": lambda args, base: loop_verify(base),
+    "verify": lambda args, base: loop_verify(base, run_all=args.all),
     "stats": _loop_stats,
 }
 
@@ -7588,7 +7688,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lsta.add_argument("--json", action="store_true")
     lsta.add_argument("--all", action="store_true", help="tính cả các vòng trước (mặc định: chỉ vòng hiện tại)")
-    lsub.add_parser("verify", help="kiểm lại cuối: chạy lại mọi Gate trên cây hiện tại (Stop hook đòi trước khi done)")
+    lv = lsub.add_parser(
+        "verify", help="kiểm lại cuối: chạy lại Gate có đầu vào đổi trên cây hiện tại (Stop hook đòi trước khi done)"
+    )
+    lv.add_argument("--all", action="store_true", help="chạy lại MỌI Gate, bỏ qua evidence v2 còn khớp (AUTO-02)")
     ld = lsub.add_parser("decide", help="phiên chính tự duyệt một điểm quyết định, ghi nhật ký D-NNN (LOOP-STOP-018)")
     ld.add_argument("--question", required=True)
     ld.add_argument("--option", action="append", required=True, help="một phương án; lặp ≥ 2 lần")

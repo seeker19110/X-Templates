@@ -7,6 +7,7 @@ Kết quả trong dự án đích:
   .xtemplates/scripts/xt.py     công cụ compose / blueprint-status / loop
   .xtemplates/scripts/dev-task.sh
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
+  .xtemplates/manifest.json     hash file harness + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml, workflows/{merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
@@ -15,7 +16,8 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
 
 Dùng:
-  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--label v1.0.0]
+  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--label v1.0.0] [--plan]
+  --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ), không ghi gì (REC-09)
   (chạy từ bản clone của X-Templates; hoặc: python3 -c "$(curl ...)" KHÔNG được khuyến khích — tải về, kiểm checksum rồi chạy)
 Thoát 0 = ổn; 2 = lỗi tham số.
 """
@@ -98,6 +100,7 @@ def copy_tree_replace(src: Path, dst: Path) -> None:
 
 
 MANIFEST = ".xtemplates/harness.sha256.json"
+MANIFEST_V2 = ".xtemplates/manifest.json"  # REC-09: hash file + rule do khung đặt + chính sách
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -124,6 +127,39 @@ def load_manifest(target: Path) -> dict[str, str]:
     return data if isinstance(data, dict) else {}
 
 
+def load_rules(target: Path) -> dict[str, list[str]]:
+    """Rule do khung đặt theo `.xtemplates/manifest.json` (rỗng nếu thiếu/hỏng — khi đó không gỡ `ask` nào, REC-09)."""
+    try:
+        rules = json.loads((target / MANIFEST_V2).read_text(encoding="utf-8")).get("rules", {})
+        return {k: [r for r in rules.get(k, []) if isinstance(r, str)] for k in RULE_KEYS}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {k: [] for k in RULE_KEYS}
+
+
+def classify_copy(
+    src: Path,
+    dst: Path,
+    force: bool = False,
+    transform: Callable[[str], str] | None = None,
+    installed_hash: str | None = None,
+) -> tuple[str, bytes]:
+    """Quyết định (không ghi gì) cho một file khung: ('copied' | 'kept' | 'updated' | 'updated-new' | 'skipped-symlink',
+    nội dung bản khung). Dùng chung cho `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
+    data = src.read_bytes()
+    if transform:
+        data = transform(data.decode("utf-8")).encode("utf-8")
+    if dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
+        return "skipped-symlink", data
+    if dst.exists() and not force:
+        current = dst.read_bytes()
+        if current == data:
+            return "kept", data
+        if installed_hash is None or sha256(current) != installed_hash:
+            return "updated-new", data
+        return "updated", data
+    return "copied", data
+
+
 def copy_if_absent(
     src: Path,
     dst: Path,
@@ -137,93 +173,122 @@ def copy_if_absent(
     (`installed_hash`, người dùng chưa sửa) thì cập nhật tại chỗ — bản sửa hook tới được dự án đã cài (AUD-HAR-004).
     Đích là symlink → bỏ qua, không đi theo (AUD-HAR-010).
     """
-    data = src.read_bytes()
-    if transform:
-        data = transform(data.decode("utf-8")).encode("utf-8")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    new = dst.with_name(dst.name + ".xtemplates-new")
-    if dst.is_symlink() or new.is_symlink():
+    status, data = classify_copy(src, dst, force, transform, installed_hash)
+    if status == "skipped-symlink":
         log(f"  ⚠ bỏ qua symlink {dst} (không ghi qua liên kết)")
-        return "skipped-symlink"
-    status = "copied"
-    if dst.exists() and not force:
-        current = dst.read_bytes()
-        if current == data:
-            return "kept"
-        if installed_hash is None or sha256(current) != installed_hash:
-            new.write_bytes(data)
-            return "updated-new"
-        status = "updated"
-    dst.write_bytes(data)
-    if src.suffix == ".sh":
-        dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+    elif status == "updated-new":
+        dst.with_name(dst.name + ".xtemplates-new").write_bytes(data)
+    elif status != "kept":
+        dst.write_bytes(data)
+        if src.suffix == ".sh":
+            dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
     return status
 
 
-# Luật `ask` mặc định của khung cũ (≤ ADR-0017); ADR-0018 bỏ hỏi người → install gỡ chúng, `ask` riêng của dự án giữ.
+# Luật `ask` mặc định của khung cũ (≤ ADR-0017); ADR-0018 bỏ hỏi người. REC-09: chỉ gỡ khi manifest.json chứng minh khung
+# đã đặt; chuỗi trùng mà không có nguồn gốc là rule của dự án → giữ và báo (danh sách này chỉ dùng để báo).
 OLD_FRAMEWORK_ASK = {"Bash(git merge *)", "Bash(git rebase *)", "Bash(gh release *)", "Bash(npm publish*)"}
 OLD_FRAMEWORK_ASK |= {"Bash(docker push *)"}
+RULE_KEYS = ("allow", "ask", "deny")
 
 
-def merge_permissions(ours: dict[str, Any], theirs: dict[str, Any]) -> int:
-    """ADR-0018: `allow` có `Bash`, thêm `deny` của khung còn thiếu, gỡ `ask` mặc định cũ; trả số thay đổi."""
+def merge_permissions(
+    ours: dict[str, Any], theirs: dict[str, Any], prov: dict[str, list[str]] | None = None
+) -> dict[str, list[str]]:
+    """ADR-0018: `allow` có `Bash`, thêm `deny` của khung còn thiếu; gỡ `ask` mà manifest (`prov`) chứng minh do khung đặt
+    và khung không còn đặt. Trả báo cáo `allow_add`/`deny_add`/`ask_remove`/`ask_unproven` (tổng độ dài = số thay đổi)."""
     src, perms = ours.get("permissions", {}), theirs.setdefault("permissions", {})
-    changed = 0
+    report: dict[str, list[str]] = {"allow_add": [], "deny_add": [], "ask_remove": [], "ask_unproven": []}
     for key in ("allow", "deny"):
         rules = perms.setdefault(key, [])
         missing = [r for r in src.get(key, []) if r not in rules and (key == "deny" or r == "Bash")]
         rules.extend(missing)
-        changed += len(missing)
+        report[f"{key}_add"] = missing
     ask = perms.get("ask", [])
-    kept = [r for r in ask if r not in OLD_FRAMEWORK_ASK]
-    if len(kept) != len(ask):
-        perms["ask"] = kept
-        changed += len(ask) - len(kept)
-    return changed
+    now = set(src.get("ask", []))
+    proven = set((prov or {}).get("ask", [])) - now
+    report["ask_remove"] = [r for r in ask if r in proven]
+    report["ask_unproven"] = [r for r in ask if r in OLD_FRAMEWORK_ASK and r not in proven and r not in now]
+    if report["ask_remove"]:
+        perms["ask"] = [r for r in ask if r not in proven]
+    return report
 
 
-def _sync_matcher(theirs: list[dict[str, Any]], entry: dict[str, Any], cmds: set[object]) -> int:
+def _sync_matcher(theirs: list[dict[str, Any]], entry: dict[str, Any], cmds: set[object]) -> list[dict[str, Any]]:
     """Hook của khung đã đăng ký mà matcher cũ (vd pre-mcp-guard thêm tool ghi PR — D-057): cập nhật matcher của mục
-    CHỈ gồm lệnh của khung; mục dự án gộp thêm lệnh riêng thì giữ nguyên (gộp tay). Trả số mục đã đổi."""
-    changed = 0
+    CHỈ gồm lệnh của khung; mục dự án gộp thêm lệnh riêng thì giữ nguyên (gộp tay). Trả danh sách mục đã đổi."""
+    changed = []
     for e in theirs:
         mine = {h.get("command") for h in e.get("hooks", [])}
         if mine and mine <= cmds and "matcher" in entry and e.get("matcher") != entry["matcher"]:
+            changed.append({"matcher_from": e.get("matcher"), "matcher_to": entry["matcher"]})
             e["matcher"] = entry["matcher"]
-            changed += 1
     return changed
 
 
-def merge_hooks(src: Path, dst: Path) -> str:
-    """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ hook riêng) và gộp quyền theo
-    ADR-0018 (`merge_permissions`; quyền riêng của dự án giữ nguyên).
-
-    Trước đây file có sẵn chỉ sinh `.xtemplates-new` nên hook đã copy mà không chạy (AUD-HAR-003).
-    """
-    if dst.is_symlink():
-        log(f"  ⚠ bỏ qua symlink {dst}")
-        return "skipped-symlink"
-    try:
-        ours = json.loads(src.read_text(encoding="utf-8"))
-        theirs = json.loads(dst.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        log(
-            f"  ⚠ {dst}: không đọc được JSON ({exc}) — HOOK CHƯA ĐĂNG KÝ, gộp tay từ .claude/settings.json.xtemplates-new"
-        )
-        return "invalid-json"
+def _merge_hook_events(
+    ours: dict[str, Any], theirs: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Gộp `hooks` của khung vào `theirs` (giữ hook riêng); trả (mục thêm, mục đổi matcher), mỗi mục kèm `event`."""
     hooks = theirs.setdefault("hooks", {})
-    added = 0
+    added: list[dict[str, Any]] = []
+    synced: list[dict[str, Any]] = []
     for event, entries in ours.get("hooks", {}).items():
         have = {h.get("command") for e in hooks.get(event, []) for h in e.get("hooks", [])}
         for entry in entries:
             cmds = [h.get("command") for h in entry.get("hooks", [])]
             if not any(c in have for c in cmds):
                 hooks.setdefault(event, []).append(entry)
-                added += 1
+                added.append({"event": event, "matcher": entry.get("matcher"), "commands": cmds})
             else:
-                added += _sync_matcher(hooks.get(event, []), entry, set(cmds))
-    added += merge_permissions(ours, theirs)
-    if not added:
+                synced += [
+                    {"event": event, "commands": cmds, **m}
+                    for m in _sync_matcher(hooks.get(event, []), entry, set(cmds))
+                ]
+    return added, synced
+
+
+def settings_changes(ours: dict[str, Any], theirs: dict[str, Any], prov: dict[str, list[str]]) -> dict[str, Any]:
+    """Gộp `ours` vào `theirs` tại chỗ (bộ nhớ) và trả báo cáo: `permissions`, `hooks_added`, `hooks_matcher_updated`,
+    `changes` (tổng số thay đổi; 0 = không cần ghi)."""
+    added, synced = _merge_hook_events(ours, theirs)
+    perms = merge_permissions(ours, theirs, prov)
+    total = len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove"))
+    return {"permissions": perms, "hooks_added": added, "hooks_matcher_updated": synced, "changes": total}
+
+
+def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, Any]] | str:
+    """(settings khung, settings dự án) hoặc 'skipped-symlink' | 'invalid-json' (đã log lý do)."""
+    if dst.is_symlink():
+        log(f"  ⚠ bỏ qua symlink {dst}")
+        return "skipped-symlink"
+    try:
+        return json.loads(src.read_text(encoding="utf-8")), json.loads(dst.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log(
+            f"  ⚠ {dst}: không đọc được JSON ({exc}) — HOOK CHƯA ĐĂNG KÝ, gộp tay từ .claude/settings.json.xtemplates-new"
+        )
+        return "invalid-json"
+
+
+def merge_hooks(
+    src: Path, dst: Path, prov: dict[str, list[str]] | None = None, report: dict[str, Any] | None = None
+) -> str:
+    """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ hook riêng) và gộp quyền theo
+    ADR-0018 (`merge_permissions`; quyền riêng của dự án giữ nguyên). `prov` = rule khung đã đặt (manifest.json);
+    `report` (nếu truyền) được điền báo cáo `settings_changes`.
+
+    Trước đây file có sẵn chỉ sinh `.xtemplates-new` nên hook đã copy mà không chạy (AUD-HAR-003).
+    """
+    pair = read_settings_pair(src, dst)
+    if isinstance(pair, str):
+        return pair
+    ours, theirs = pair
+    rep = settings_changes(ours, theirs, prov or {})
+    if report is not None:
+        report.update(rep)
+    if not rep["changes"]:
         return "kept"
     write_atomic(dst, json.dumps(theirs, ensure_ascii=False, indent=2) + "\n")
     return "merged-hooks"
@@ -274,18 +339,42 @@ def install_framework(xt_dir: Path, label: str | None) -> None:
     log(f"✓ .xtemplates/framework + scripts (phiên bản {version})")
 
 
-def install_settings(target: Path, force_harness: bool, stats: Counter[str]) -> None:
-    """settings.json của harness: dự án đã có (không --force-harness) thì gộp khoá hooks, chưa có thì copy."""
+def our_rules() -> dict[str, list[str]]:
+    """Rule `permissions` của settings.json khung (allow/ask/deny)."""
+    perms = json.loads((SRC / ".claude" / "settings.json").read_text(encoding="utf-8")).get("permissions", {})
+    return {k: list(perms.get(k, [])) for k in RULE_KEYS}
+
+
+def update_provenance(prov: dict[str, list[str]], report: dict[str, Any]) -> dict[str, list[str]]:
+    """Rule do khung đặt sau lần gộp: cũ + vừa thêm (`allow_add`/`deny_add`), bớt `ask` vừa gỡ. Rule người dùng đã có
+    sẵn (không do khung thêm) không bao giờ vào danh sách này."""
+    perms = report.get("permissions", {})
+    out = {k: [*prov.get(k, []), *perms.get(f"{k}_add", [])] for k in RULE_KEYS}
+    out["ask"] = [r for r in out["ask"] if r not in perms.get("ask_remove", [])]
+    return out
+
+
+def install_settings(
+    target: Path, force_harness: bool, stats: Counter[str], prov: dict[str, list[str]]
+) -> dict[str, list[str]]:
+    """settings.json của harness: dự án đã có (không --force-harness) thì gộp khoá hooks, chưa có thì copy.
+    Trả rule do khung đặt (ghi vào manifest.json)."""
     settings = target / ".claude" / "settings.json"
     if settings.exists() and not force_harness:
-        r = merge_hooks(SRC / ".claude" / "settings.json", settings)
+        report: dict[str, Any] = {}
+        r = merge_hooks(SRC / ".claude" / "settings.json", settings, prov, report)
         stats[r] += 1
         if r == "merged-hooks":
             log(
-                "  .claude/settings.json: đã gộp hooks + quyền của khung (allow Bash, deny, gỡ ask mặc định cũ — ADR-0018)"
+                "  .claude/settings.json: đã gộp hooks + quyền của khung (allow Bash, deny, gỡ ask do khung đặt — ADR-0018)"
             )
-    else:
-        stats[copy_if_absent(SRC / ".claude" / "settings.json", settings, force_harness)] += 1
+        unproven = report.get("permissions", {}).get("ask_unproven", [])
+        if unproven:
+            log(f"  ⚠ giữ `ask` trùng chuỗi rule cũ của khung nhưng manifest không chứng minh khung đặt: {unproven}")
+        return update_provenance(prov, report)
+    r = copy_if_absent(SRC / ".claude" / "settings.json", settings, force_harness)
+    stats[r] += 1
+    return our_rules() if r == "copied" else prov
 
 
 def harness_sources() -> list[Path]:
@@ -313,12 +402,14 @@ def copy_harness_files(
 
 
 def install_harness(target: Path, force_harness: bool) -> None:
-    """Bước 2: harness .claude/ — copy-if-absent, ghi manifest hash, báo thống kê."""
+    """Bước 2: harness .claude/ — copy-if-absent, ghi manifest hash (+ manifest.json có rule khung), báo thống kê."""
     stats: Counter[str] = Counter()
     manifest = load_manifest(target)
-    install_settings(target, force_harness, stats)
+    rules = install_settings(target, force_harness, stats, load_rules(target))
     new_manifest = copy_harness_files(target, force_harness, manifest, stats)
     write_atomic(target / MANIFEST, json.dumps(new_manifest, indent=2, sort_keys=True) + "\n")
+    doc = {"schema": 1, "files": new_manifest, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
+    write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
     if stats.get("updated-new"):
         log(
@@ -327,13 +418,20 @@ def install_harness(target: Path, force_harness: bool) -> None:
         )
 
 
-def install_root_templates(target: Path) -> None:
-    """Bước 3: file gốc từ framework/templates — copy-if-absent, bỏ frontmatter."""
+def root_template_jobs(target: Path) -> list[tuple[str, Path, Callable[[str], str]]]:
+    """(tên, mẫu nguồn, hàm biến đổi) của file gốc từ framework/templates có mặt trong khung."""
+    jobs: list[tuple[str, Path, Callable[[str], str]]] = []
     for name, tmpl in ROOT_TEMPLATES.items():
         tsrc = SRC / "framework" / "templates" / tmpl
-        if not tsrc.exists():
-            continue
-        body = template_body if name != "PROGRESS.md" else lambda t: progress_with_head(template_body(t), target)
+        if tsrc.exists():
+            body = template_body if name != "PROGRESS.md" else lambda t: progress_with_head(template_body(t), target)
+            jobs.append((name, tsrc, body))
+    return jobs
+
+
+def install_root_templates(target: Path) -> None:
+    """Bước 3: file gốc từ framework/templates — copy-if-absent, bỏ frontmatter."""
+    for name, tsrc, body in root_template_jobs(target):
         r = copy_if_absent(tsrc, target / name, False, transform=body)
         if r == "updated-new":  # AUD-HAR-052: file của dự án (không phải bản khung cũ) — chỉ nói điều đúng
             log(f"  {name}: giữ file của dự án; mẫu khung ở {name}.xtemplates-new — gộp phần của khung vào")
@@ -434,6 +532,61 @@ def legacy_refs(target: Path) -> list[str]:
     return sorted(hits)
 
 
+def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]]) -> dict[str, Any]:
+    """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi matcher (không ghi gì)."""
+    src, dst = SRC / ".claude" / "settings.json", target / ".claude" / "settings.json"
+    if dst.exists() and not force_harness:
+        pair = read_settings_pair(src, dst)
+        if isinstance(pair, str):
+            return {"action": pair}
+        rep = settings_changes(pair[0], pair[1], prov)
+        action = "merged-hooks" if rep.pop("changes") else "kept"
+        return {"action": action, **rep}
+    return {"action": classify_copy(src, dst, force_harness)[0]}
+
+
+def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github: bool) -> list[dict[str, str]]:
+    """Hành động dự kiến cho từng file harness/gốc/GitHub: copied | kept | updated | updated-new | skipped-symlink."""
+    manifest = load_manifest(target)
+    jobs: list[tuple[Path, str, bool, Callable[[str], str] | None]] = []
+    if not no_harness:
+        for src in harness_sources():
+            rel = src.relative_to(SRC).as_posix()
+            jobs.append((src, rel, force_harness, None))
+    jobs += [(tsrc, name, False, body) for name, tsrc, body in root_template_jobs(target)]
+    if with_github:
+        for gh, gsrc in GITHUB_FILES.items():
+            jobs.append((SRC / gsrc, gh, False, template_body if gsrc.endswith(".md") else None))
+    return [
+        {"path": rel, "action": classify_copy(src, target / rel, force, tf, manifest.get(rel))[0]}
+        for src, rel, force, tf in jobs
+    ]
+
+
+def install_plan(target: Path, force_harness: bool, no_harness: bool, with_github: bool = False) -> int:
+    """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
+    target = target.resolve()
+    error = target_error(target)
+    if error:
+        log(error)
+        return 2
+    plan: dict[str, Any] = {
+        "schema": 1,
+        "target": str(target),
+        "framework": {"action": "replace", "path": ".xtemplates/framework"},
+        "legacy_migration": (target / LEGACY_DIR).is_dir() or (target / LEGACY_YAML).is_file(),
+        "settings": {"action": "skipped"} if no_harness else plan_settings(target, force_harness, load_rules(target)),
+        "files": plan_files(target, force_harness, no_harness, with_github),
+        "manifest": {
+            "path": MANIFEST_V2,
+            "present": (target / MANIFEST_V2).is_file(),
+            "policy": {"ask_removal": "manifest-only"},
+        },
+    }
+    print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def install(target: Path, force_harness: bool, no_harness: bool, label: str | None, with_github: bool = False) -> int:
     target = target.resolve()
     error = target_error(target)
@@ -476,7 +629,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="copy ruleset mẫu, PR template, Dependabot, workflow merge-gate + pr-steward vào .github/ (không đè)",
     )
+    p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")
     a = p.parse_args(argv)
+    if a.plan:
+        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github)
     return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github)
 
 

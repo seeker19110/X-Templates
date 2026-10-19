@@ -11,8 +11,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (`cycles` trong `--json`). `framework/templates/PLAN.md` mô tả cú pháp. Dự án đích: chạy lại `install.py`.
 - Gói ngữ cảnh task (T-1512, REC-11): `xt.py context --task T-NNNN [--json] [--plan FILE]` trả ID yêu cầu, đoạn spec, Gate,
   `files:`, file thiếu và số byte (spec + file/thư mục trong phạm vi). Dự án đích: chạy lại `install.py`.
+- Evidence v2 (T-1513, AUTO-02): `loop record` ghi thêm `scope` (`files:` của task), `req_rev` (sha256[:16] đoạn spec
+  của task) và `files_digest` (sha256 cây các đường dẫn trong `files:`, lấy trước khi chạy Gate); `loop verify` chỉ chạy
+  lại Gate có lệnh/phạm vi/spec/digest đổi, giữ Gate còn khớp (`kept` trong `verified.json`, `mode: changed`), `--all`
+  chạy hết. Evidence cũ thiếu trường, task không khai `files:` hoặc digest đọc lỗi → chạy lại; lệnh sàn Gate vẫn chạy
+  khi chỉ trùng Gate được giữ. Dự án đích: chạy lại `install.py`.
+- Nâng khung có kế hoạch (T-1516, REC-09): `install.py <dự-án> --plan` in JSON diff (quyền thêm/bớt, `ask` trùng chuỗi
+  nhưng không chứng minh được, hook thêm/đổi matcher, hành động từng file) và không ghi gì; `.xtemplates/manifest.json` ghi
+  hash file harness + rule do khung đặt + chính sách. Dự án đích: chạy lại `install.py`.
 
 ### Changed
+- `install.py` chỉ gỡ `ask` khi `.xtemplates/manifest.json` chứng minh khung đã đặt (trước: gỡ mọi `ask` trùng chuỗi
+  `OLD_FRAMEWORK_ASK`, có thể xoá rule của dự án); chuỗi trùng không có nguồn gốc → giữ và báo. Dự án cài trước bản này
+  chưa có manifest → `ask` cũ của khung không tự gỡ nữa (xoá tay nếu muốn).
 - `xt.yaml` `merge_risk_paths` thêm `docs/autopilot/PLAN*.md` (file PLAN chứa lệnh Gate harness chạy → PR đi làn chuẩn).
 
 ## [3.9.0] - 2026-10-19

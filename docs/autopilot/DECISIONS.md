@@ -594,3 +594,10 @@
 - Chọn: Gộp vào mốc 3.10.0; bây giờ chỉ review khác họ model diff T-1509 (phần guard)
 - Lý do (tiêu chí chất lượng cuối): sổ rescan tại a4f929c còn chờ duyệt và đã phủ phần lớn; diff mốc nhỏ (T-1501…1509 đã qua Gate + coverage 100%); rủi ro cao nhất là guard nên review riêng
 - Đường lùi: chạy audit plan/check đủ nhóm trước T-1511
+
+### D-084 · 2026-10-19T23:30:13+00:00 · final_check/release-check có đòi lần verify cuối là mode=all?
+
+- Phương án: (1) a: nhận cả verify một phần · (2) b: đòi mode=all trước done (giữ LOOP-DESIGN-022), một phần chỉ giữa vòng
+- Chọn: b: đòi mode=all trước done (giữ LOOP-DESIGN-022), một phần chỉ giữa vòng
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: files: khai thiếu làm lọt hồi quy; làm trong T-1514 (đụng Stop hook) + sửa tài liệu loop-design/README/SKILL
+- Đường lùi: bỏ đòi mode trong final_check

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import unittest.mock as mock
 
@@ -174,9 +174,14 @@ class InstallTest(unittest.TestCase):
         settings.parent.mkdir(parents=True)
         perms = {"allow": ["Bash(make *)"], "ask": ["Bash(git merge *)", "Bash(make deploy*)"], "deny": ["Bash(rm *)"]}
         settings.write_text(json.dumps({"permissions": perms}), encoding="utf-8")
+        # REC-09: chỉ gỡ ask khi manifest.json chứng minh khung đã đặt — ở đây khung từng đặt `git merge`.
+        (self.target / ".xtemplates").mkdir()
+        (self.target / ".xtemplates" / "manifest.json").write_text(
+            json.dumps({"rules": {"ask": ["Bash(git merge *)"]}}), encoding="utf-8"
+        )
         self.run_install()
         d = json.loads(settings.read_text(encoding="utf-8"))
-        # ADR-0018: thêm `Bash` + deny của khung, gỡ ask mặc định cũ; quyền riêng của dự án giữ.
+        # ADR-0018: thêm `Bash` + deny của khung, gỡ ask do khung đặt; quyền riêng của dự án giữ.
         ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
         self.assertEqual(d["permissions"]["allow"], ["Bash(make *)", "Bash"])
         self.assertEqual(d["permissions"]["ask"], ["Bash(make deploy*)"])
@@ -555,6 +560,189 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.target / ".xtemplates" / "VERSION").read_text(encoding="utf-8"), "cli\n")
         self.assertIn("[install] Xong.", r.stderr)
+
+
+class InstallPlanTest(unittest.TestCase):
+    """`--plan` + manifest.json (REC-09): kế hoạch không ghi gì; chỉ gỡ `ask` mà manifest chứng minh do khung đặt."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.target = Path(tmp.name).resolve() / "dich"
+        self.target.mkdir()
+        self.settings = self.target / ".claude" / "settings.json"
+
+    def install(self, *extra) -> int:
+        with redirect_stderr(io.StringIO()):
+            return install.main([str(self.target), "--label", "t", *extra])
+
+    def plan(self, *extra) -> dict:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = install.main([str(self.target), "--plan", *extra])
+        self.assertEqual(code, 0, err.getvalue())
+        return json.loads(out.getvalue())
+
+    def snapshot(self) -> dict[str, bytes]:
+        return {p.relative_to(self.target).as_posix(): p.read_bytes() for p in self.target.rglob("*") if p.is_file()}
+
+    def write_settings(self, perms: dict, **extra) -> None:
+        self.settings.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.write_text(json.dumps({"permissions": perms, **extra}), encoding="utf-8")
+
+    def manifest(self) -> dict:
+        return json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
+
+    def test_install_plan_fresh_writes_nothing(self):
+        before = self.snapshot()
+        plan = self.plan("--with-github")
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.target / ".xtemplates").exists())
+        self.assertEqual(plan["schema"], 1)
+        self.assertEqual(plan["settings"], {"action": "copied"})
+        actions = {f["path"]: f["action"] for f in plan["files"]}
+        self.assertEqual(actions[".claude/hooks/stop-guard.sh"], "copied")
+        self.assertEqual(actions["AGENTS.md"], "copied")
+        self.assertEqual(actions[".github/rulesets/main.json"], "copied")
+        self.assertFalse(plan["legacy_migration"])
+        self.assertFalse(plan["manifest"]["present"])
+
+    def test_install_plan_matches_real_install_actions(self):
+        self.install()
+        (self.target / ".claude" / "hooks" / "stop-guard.sh").write_text("# của tôi\n", encoding="utf-8")
+        (self.target / "AGENTS.md").unlink()
+        plan = self.plan()
+        actions = {f["path"]: f["action"] for f in plan["files"]}
+        self.assertEqual(actions[".claude/hooks/stop-guard.sh"], "updated-new")
+        self.assertEqual(actions["AGENTS.md"], "copied")
+        self.assertEqual(actions["CLAUDE.md"], "kept")
+        self.assertEqual(plan["settings"]["action"], "kept")
+        self.assertTrue(plan["manifest"]["present"])
+        forced = self.plan("--force-harness")
+        self.assertEqual({f["path"]: f["action"] for f in forced["files"]}[".claude/hooks/stop-guard.sh"], "copied")
+        self.assertEqual(forced["settings"], {"action": "copied"})
+        self.install()
+        self.assertTrue((self.target / ".claude" / "hooks" / "stop-guard.sh.xtemplates-new").exists())
+
+    def test_install_plan_reports_permission_and_hook_diff(self):
+        self.write_settings({"allow": ["Bash(make *)"], "ask": ["Bash(git merge *)"], "deny": []})
+        (self.target / ".xtemplates").mkdir()
+        (self.target / ".xtemplates" / "manifest.json").write_text(
+            json.dumps({"rules": {"ask": ["Bash(git merge *)"]}}), encoding="utf-8"
+        )
+        before = self.snapshot()
+        plan = self.plan()
+        self.assertEqual(self.snapshot(), before)
+        st = plan["settings"]
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(st["action"], "merged-hooks")
+        self.assertEqual(st["permissions"]["allow_add"], ["Bash"])
+        self.assertEqual(st["permissions"]["deny_add"], ours["permissions"]["deny"])
+        self.assertEqual(st["permissions"]["ask_remove"], ["Bash(git merge *)"])
+        self.assertEqual(st["permissions"]["ask_unproven"], [])
+        self.assertIn("PreToolUse", {h["event"] for h in st["hooks_added"]})
+        self.assertEqual(st["hooks_matcher_updated"], [])
+
+    def test_install_plan_reports_matcher_update(self):
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        old = json.loads(json.dumps(ours))
+        for entries in old["hooks"].values():
+            for e in entries:
+                if "matcher" in e:
+                    e["matcher"] = "Cu"
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text(json.dumps(old), encoding="utf-8")
+        st = self.plan()["settings"]
+        self.assertTrue(st["hooks_matcher_updated"])
+        self.assertEqual(st["hooks_matcher_updated"][0]["matcher_from"], "Cu")
+
+    def test_install_plan_unproven_ask_is_kept_and_reported(self):
+        # Trùng chuỗi `ask` của khung cũ nhưng không có trong manifest → rule của dự án: giữ + báo (REC-09).
+        self.write_settings({"ask": ["Bash(git merge *)", "Bash(make deploy*)"]})
+        st = self.plan()["settings"]
+        self.assertEqual(st["permissions"]["ask_remove"], [])
+        self.assertEqual(st["permissions"]["ask_unproven"], ["Bash(git merge *)"])
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target), "--label", "t"]), 0)
+        self.assertEqual(
+            json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["ask"],
+            ["Bash(git merge *)", "Bash(make deploy*)"],
+        )
+        self.assertIn("manifest không chứng minh", err.getvalue())
+
+    def test_install_plan_manifest_records_framework_rules(self):
+        self.install()
+        m = self.manifest()
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
+        self.assertEqual(m["schema"], 1)
+        self.assertEqual(m["policy"], {"ask_removal": "manifest-only"})
+        self.assertEqual(m["rules"]["deny"], ours["deny"])
+        self.assertEqual(m["rules"]["allow"], ours["allow"])
+        self.assertIn(".claude/hooks/stop-guard.sh", m["files"])
+        self.assertEqual(m["files"], json.loads((self.target / ".xtemplates/harness.sha256.json").read_text()))
+        before = (self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8")
+        self.install()  # idempotent
+        self.assertEqual((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"), before)
+
+    def test_install_plan_manifest_keeps_user_preexisting_rule_out(self):
+        # Rule deny người dùng đã có sẵn trùng của khung: không do khung thêm → không vào manifest.
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
+        mine = ours["deny"][0]
+        self.write_settings({"deny": [mine]})
+        self.install()
+        self.assertNotIn(mine, self.manifest()["rules"]["deny"])
+        self.assertIn(ours["deny"][1], self.manifest()["rules"]["deny"])
+
+    def test_install_plan_removes_ask_only_when_framework_no_longer_sets_it(self):
+        self.install()
+        m = self.manifest()
+        m["rules"]["ask"] = ["Bash(old *)"]
+        (self.target / ".xtemplates" / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+        data = json.loads(self.settings.read_text(encoding="utf-8"))
+        data["permissions"]["ask"] = ["Bash(old *)", "Bash(mine *)"]
+        self.settings.write_text(json.dumps(data), encoding="utf-8")
+        self.install()
+        self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["ask"], ["Bash(mine *)"])
+        self.assertEqual(self.manifest()["rules"]["ask"], [])
+
+    def test_install_plan_load_rules_tolerates_bad_manifest(self):
+        empty = {"allow": [], "ask": [], "deny": []}
+        mf = self.target / ".xtemplates" / "manifest.json"
+        self.assertEqual(install.load_rules(self.target), empty)
+        mf.parent.mkdir()
+        for text in ("{không phải json", "[]", '{"rules": 5}', '{"rules": {"ask": 5}}'):
+            mf.write_text(text, encoding="utf-8")
+            self.assertEqual(install.load_rules(self.target), empty, text)
+        mf.write_text('{"rules": {"ask": ["a", 3, null]}}', encoding="utf-8")
+        self.assertEqual(install.load_rules(self.target)["ask"], ["a"])
+
+    def test_install_plan_settings_edge_cases(self):
+        self.settings.parent.mkdir(parents=True)
+        self.settings.write_text("{hỏng", encoding="utf-8")
+        self.assertEqual(self.plan()["settings"], {"action": "invalid-json"})
+        self.settings.unlink()
+        self.settings.symlink_to(self.target / "khong-co.json")  # symlink treo
+        self.assertEqual(self.plan()["settings"], {"action": "skipped-symlink"})
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(install.main([str(self.target), "--label", "t"]), 0)
+        self.assertTrue(self.settings.is_symlink())
+        self.assertFalse(self.settings.exists())
+        self.assertEqual(self.manifest()["rules"], {"allow": [], "ask": [], "deny": []})
+
+    def test_install_plan_no_harness_and_legacy(self):
+        (self.target / ".xstored").mkdir()
+        plan = self.plan("--no-harness")
+        self.assertEqual(plan["settings"], {"action": "skipped"})
+        self.assertTrue(plan["legacy_migration"])
+        self.assertTrue(all(not f["path"].startswith(".claude/") for f in plan["files"]))
+        self.assertTrue((self.target / ".xstored").is_dir())
+
+    def test_install_plan_invalid_target(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target / "khong-co"), "--plan"]), 2)
+        self.assertIn("không phải thư mục", err.getvalue())
 
 
 class CheckLinksTest(unittest.TestCase):
