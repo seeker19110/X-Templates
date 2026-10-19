@@ -5,6 +5,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `pr steward`/`pr next` ở repo thuộc org (D-058): tác giả PR và người đăng dấu review là `MEMBER` được tin khi REST
+  `collaborators/<login>/permission` trả `admin`/`write` (không hỏi được → không tin); workflow `pr-steward` chạy cả khi
+  MEMBER comment dấu review. Trước đây mọi PR ở repo org bị `defer-human`.
+- `pr_title_check: off` chỉ có hiệu lực khi cả xt.yaml ở nhánh đích lẫn cây làm việc đều `off` — PR không tự tắt luật
+  tiêu đề cho chính nó (D-058).
+- `pr steward --apply` không gắn được nhãn `xt-standard-lane` → dòng báo `⚠` (cả trong summary của run) và exit 1, thay vì
+  im lặng. `MERGE_FIELDS` (`--pr-json` từ `gh pr view`) có thêm `author` để miễn tiêu đề cho PR của bot.
+
 ## [3.5.0] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.4.1:** chạy lại `install.py --with-github` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của
