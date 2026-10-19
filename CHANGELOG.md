@@ -9,7 +9,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `pr steward --apply`: nhánh đích không có check bắt buộc (ruleset `rules/branches` hoặc branch protection cổ điển) thì
   không bật auto-merge — GitHub sẽ merge ngay lúc bật, trước khi CI chạy xong (sự cố hotel-manager#84/#85, chốt T-1107
   của dự án đưa vào khung); tắt auto-merge và merge ghim head khi `merge-check` đã thấy CI xanh vẫn chạy; báo cảnh báo
-  ra summary. Không đọc được rule → coi như không có (`LOOP-STOP-029`, D-062).
+  ra summary (⚠, run không đỏ). Không đọc được rule hoặc protection `enforcement_level: off` → coi như không có (`LOOP-STOP-029`, D-062).
 
 ## [3.7.0] - 2026-10-19
 

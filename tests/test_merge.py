@@ -1641,8 +1641,8 @@ class PrStewardTest(unittest.TestCase):
         gh = StewardGh(rules=[{"type": "pull_request"}])
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
-        self.assertEqual(rc, 1)
-        self.assertIn("không có check bắt buộc", out)
+        self.assertEqual(rc, 0)  # cấu hình bền: báo ⚠, run không đỏ
+        self.assertIn("⚠ nhánh đích không có check bắt buộc", out)
         # PR đã sẵn sàng (CI xanh, merge-check = merge): không bật auto-merge, chỉ merge ghim head
         self.assertEqual([w[:3] for w in gh.writes], [["gh", "api", "-X"]])
         self.assertTrue(gh.writes[0][4].endswith("/pulls/7/merge"))
@@ -1653,6 +1653,10 @@ class PrStewardTest(unittest.TestCase):
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual((rc, gh.writes[0][:3]), (0, ["gh", "pr", "merge"]))
+        off = {"protection": {"required_status_checks": {"enforcement_level": "off", "contexts": ["test"]}}}
+        xt._REQUIRED_CACHE.clear()
+        with StewardGh(rules=[{"type": "pull_request"}], branch=off).patch():
+            self.assertFalse(xt._base_has_required("repos/{owner}/{repo}", "main"))  # protection tắt: không tính
         # GitHub báo PR đã sẵn sàng (fallback): bỏ lệnh bật auto-merge, giữ merge ghim head
         cmds = [["gh", "pr", "merge", "7", "--auto"], ["gh", "api", "-X", "PUT", "x/merge"]]
         with (

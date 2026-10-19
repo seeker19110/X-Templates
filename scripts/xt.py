@@ -3796,7 +3796,8 @@ def _base_has_required(repo: str, branch: str) -> bool:
                 prot = _gh_one(f"{repo}/branches/{urllib.parse.quote(branch, safe='')}").get("protection") or {}
             except PrInputError:
                 prot = {}
-            found = bool(((prot.get("required_status_checks") or {}).get("contexts")) or [])
+            req = prot.get("required_status_checks") or {}
+            found = bool(req.get("contexts") or req.get("checks")) and req.get("enforcement_level") != "off"
         _REQUIRED_CACHE[key] = found
     return _REQUIRED_CACHE[key]
 
@@ -5833,7 +5834,8 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
         # auto-merge của GitHub chỉ chờ CI khi nhánh đích có check bắt buộc; không có thì merge NGAY lúc bật (T-1107 của
         # hotel-manager) — bỏ lệnh bật, giữ merge ghim head (chỉ có khi merge-check đã thấy CI xanh)
         cmds = [c for c in cmds if "--auto" not in c]
-        out["warn"] = "nhánh đích không có check bắt buộc — không bật auto-merge (import ruleset có required check)"
+        # trạng thái cấu hình bền, không phải lỗi của lượt: báo ⚠ nhưng không làm run đỏ mỗi 10 phút (review #155)
+        out["note"] = "nhánh đích không có check bắt buộc — không bật auto-merge (import ruleset có required check)"
     return _steward_apply(out, d, repo, cmds if apply else [])
 
 
@@ -5883,7 +5885,7 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
     lines = [
         f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' → ' + r['then'] if r.get('then') else ''}"
         f"{' ✗ ' + r['error'] if r.get('error') and not r.get('then') else ''}"
-        f" — {r['why']}{' ⚠ ' + r['warn'] if r.get('warn') else ''}"
+        f" — {r['why']}{' ⚠ ' + r['warn'] if r.get('warn') else ''}{' ⚠ ' + r['note'] if r.get('note') else ''}"
         for r in results
     ]
     if args.json:
