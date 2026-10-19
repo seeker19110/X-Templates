@@ -13,6 +13,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
+- `merge-check`/`pr next`/steward: check bắt buộc của ruleset bị SKIPPED/NEUTRAL/CANCELLED/STALE hoặc chỉ có bản của app khác
+  (`integration_id` ≠ app sinh check) nay là `human` ("không chạy thật") — GitHub tính required check skipped/neutral là đạt
+  nên PR từng "xanh" khi chưa test nào chạy; `_pr_rest` đưa `appId` của check-run và `requiredChecks` của ruleset vào PR,
+  `_ci_buckets` trả thêm nhóm `not_run` (REC-08, T-1504).
 - `loop init` ghi `scope` (blueprint, profile, scale, `rev`, khoá sàn Gate) vào state: blueprint đã khai mà mất, hỏng hoặc đổi quy mô/hồ sơ
   nay là verdict `verify` (trước đây xoá blueprint khiến vòng khai `done`); sàn Gate M/L đọc quy mô từ `scope` khi blueprint mất
   nên xoá/hạ quy mô không bỏ được sàn; state cũ không có `scope` được điền khi `loop resume` (REC-02, T-1503).

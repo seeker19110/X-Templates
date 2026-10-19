@@ -229,6 +229,89 @@ class MergeDecisionTest(unittest.TestCase):
             " (hoặc git merge origin/dev && git push)",
         )
 
+    def test_required_check_executed(self):
+        """T-1504 (REC-08): GitHub tính required check skipped/neutral là đạt; máy không — check bắt buộc SKIPPED/NEUTRAL/
+        CANCELLED/STALE hoặc chỉ có bản của app khác → `not_run` → `human`; check không bắt buộc không bị ảnh hưởng."""
+
+        def run(name: str, concl: str, app: int | None = None) -> dict:
+            return {
+                "__typename": "CheckRun",
+                "name": name,
+                "status": "COMPLETED",
+                "conclusion": concl,
+                **({"appId": app} if app is not None else {}),
+            }
+
+        req = [("test", None)]
+        for concl in ("SKIPPED", "NEUTRAL", "CANCELLED", "STALE"):
+            red, pend, green, not_run = xt._ci_buckets([run("test", concl), run("lint", "SUCCESS")], req)
+            self.assertEqual((red, pend, green, not_run), ([], [], ["lint"], ["test"]), concl)
+        # không bắt buộc: skipped chỉ là không có bằng chứng; cancelled vẫn đỏ như trước
+        self.assertEqual(xt._ci_buckets([run("test", "SKIPPED")], [])[3], [])
+        self.assertEqual(xt._ci_buckets([run("lint", "CANCELLED")], req)[0], ["lint"])
+        # bản hợp lệ thắng bản skipped cùng tên; vắng hẳn → không phải not_run (việc của missingRequired)
+        self.assertEqual(xt._ci_buckets([run("test", "SKIPPED"), run("test", "SUCCESS")], req)[2:], (["test"], []))
+        self.assertEqual(xt._ci_buckets([run("lint", "SUCCESS")], req)[3], [])
+        # app: ruleset đòi integration_id 15368; bản của app 99 không thay được, dù xanh
+        got = xt._ci_buckets([run("test", "SUCCESS", 99), run("lint", "SUCCESS")], [("test", 15368)])
+        self.assertEqual((got[2], got[3]), (["lint"], ["test"]))
+        got = xt._ci_buckets([run("test", "SUCCESS", 15368), run("lint", "SUCCESS")], [("test", 15368)])
+        self.assertEqual((got[2], got[3]), (["test", "lint"], []))
+        legacy = {"__typename": "StatusContext", "context": "test", "state": "SUCCESS"}  # commit status không có app
+        self.assertEqual(xt._ci_buckets([legacy], [("test", 15368)])[2:], (["test"], []))
+        # merge_decision: PR "xanh" nhưng check bắt buộc bị skip → human, không phải merge
+        p = pr(
+            statusCheckRollup=[run("test", "SKIPPED"), run("lint", "SUCCESS")],
+            requiredChecks=[{"context": "test"}, {"context": "lint", "appId": 15368}, "rác"],
+        )
+        d = xt.merge_decision(p, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("check bắt buộc không chạy thật (skipped/neutral/huỷ/sai app): test —", d["reasons"][0])
+        foreign = pr(
+            statusCheckRollup=[
+                run("test", "SUCCESS"),
+                run("lint", "SUCCESS", 99),
+            ],  # lint do app 99 sinh, ruleset đòi 15368
+            requiredChecks=[{"context": "test"}, {"context": "lint", "appId": 15368}],
+        )
+        d = xt.merge_decision(foreign, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("sai app): lint —", d["reasons"][0])
+        ok = pr(
+            statusCheckRollup=[run("test", "SUCCESS"), run("lint", "SUCCESS", 15368)],
+            requiredChecks=p["requiredChecks"][:2],
+        )
+        self.assertEqual(xt.merge_decision(ok, 3)["verdict"], "merge")
+        self.assertEqual(xt.merge_decision(pr(), 3)["verdict"], "merge")  # không khai requiredChecks: như cũ
+        # CI đỏ/đang chạy vẫn thắng not_run
+        mixed = {**p, "statusCheckRollup": [run("test", "SKIPPED"), run("lint", "FAILURE", 15368)]}
+        self.assertEqual(xt.merge_decision(mixed, 3)["verdict"], "fix")
+
+    def test_required_check_executed_rest_maps_app_and_ruleset(self):
+        """`_pr_rest` đưa `appId` của check-run và `requiredChecks` (context + integration_id) của ruleset vào PR."""
+        rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "test", "integration_id": 15368}, {"context": "lint"}]
+                },
+            }
+        ]
+        runs = [
+            {"id": 1, "name": "test", "status": "completed", "conclusion": "success", "app": {"id": 99}},
+            {"id": 2, "name": "lint", "status": "completed", "conclusion": "success"},
+        ]
+        with FakeGh(rules=rules, runs=runs, statuses=[]).patch():
+            p = xt._pr_rest("7")
+        self.assertEqual(p["requiredChecks"], [{"context": "test", "appId": 15368}, {"context": "lint"}])
+        self.assertEqual([c.get("appId") for c in p["statusCheckRollup"]], [99, None])
+        d = xt.merge_decision(p, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("không chạy thật", d["reasons"][0])
+        self.assertIn("test", d["reasons"][0])
+        with FakeGh(rules=[]).patch():  # không đọc được/không có ruleset → không khoá requiredChecks
+            self.assertNotIn("requiredChecks", xt._pr_rest("7"))
+
     def test_local_conflict_check_decides_before_github(self):
         """Xung đột tính cục bộ (`localConflicts` từ `git merge-tree`): GitHub chưa tính xong mà cục bộ thấy xung đột → `fix`
         kèm file + lệnh merge nhánh đích; cục bộ sạch → không `wait`; GitHub báo xung đột mà cục bộ sạch → vẫn tin GitHub."""
@@ -990,7 +1073,8 @@ class MergeCheckCliTest(unittest.TestCase):
         gh = FakeGh()
         with gh.patch():
             self.assertEqual(
-                xt._pr_rest("7"), pr(reviewDecision="", baseHasRequired=True, baseRefName="main")
+                xt._pr_rest("7"),
+                pr(reviewDecision="", baseHasRequired=True, baseRefName="main", requiredChecks=[{"context": "test"}]),
             )  # như fixture `gh pr view`
         cases = {
             "merged": ({"merged": True, "state": "closed"}, "state", "MERGED"),

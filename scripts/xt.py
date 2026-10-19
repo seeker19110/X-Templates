@@ -93,7 +93,7 @@ import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_FRAMEWORK = (SCRIPT_DIR.parent / "framework").resolve()
@@ -3425,25 +3425,41 @@ CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STAR
 CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 
 
-def _ci_buckets(rollup: List[Dict[str, Any]]) -> Tuple[List[str], List[str], List[str]]:
-    """(check đỏ, check đang chạy, check xanh) từ `statusCheckRollup` (CheckRun: status/conclusion; StatusContext:
-    state). Xanh = SUCCESS; SKIPPED/NEUTRAL không thuộc nhóm nào — không phải bằng chứng (AUD-HAR-023)."""
+NOT_RUN_STATES = {"SKIPPED", "NEUTRAL", "CANCELLED", "STALE"}  # GitHub coi required check skipped/neutral là "đạt"
+
+
+def _ci_buckets(
+    rollup: List[Dict[str, Any]], required: Sequence[Tuple[str, Optional[int]]] = ()
+) -> Tuple[List[str], List[str], List[str], List[str]]:
+    """(check đỏ, check đang chạy, check xanh, check bắt buộc KHÔNG chạy) từ `statusCheckRollup` (CheckRun: status/conclusion;
+    StatusContext: state). Xanh = SUCCESS; SKIPPED/NEUTRAL không thuộc nhóm nào — không phải bằng chứng (AUD-HAR-023).
+    `required` = [(tên, integration_id|None)] của ruleset (REC-08, T-1504): GitHub tính required check skipped/neutral là đạt
+    nên PR "xanh" mà chưa test nào chạy; check bắt buộc SKIPPED/NEUTRAL/CANCELLED/STALE, hoặc chỉ có bản của app khác
+    (`appId` ≠ integration_id) → `not_run` (không đỏ, không xanh). Check bắt buộc vắng hẳn là việc của `missingRequired`."""
+    want = {name: app for name, app in required}
     red: List[str] = []
     pending: List[str] = []
     green: List[str] = []
+    seen: Dict[str, bool] = {}  # tên bắt buộc → đã có bản hợp lệ ở nhóm đỏ/đang chạy/xanh
     for c in rollup:
         name = str(c.get("name") or c.get("context") or "?")
         if c.get("__typename") == "StatusContext":
             st = str(c.get("state", ""))
         else:
             st = str(c.get("conclusion") or "") if c.get("status") == "COMPLETED" else "PENDING"
+        if name in want:
+            seen.setdefault(name, False)
+            foreign = want[name] is not None and c.get("appId") is not None and c.get("appId") != want[name]
+            if foreign or st in NOT_RUN_STATES:
+                continue  # bản của app khác / bị bỏ qua / bị huỷ không thay được check bắt buộc
+            seen[name] = True
         if st in CI_RED:
             red.append(name)
         elif st in CI_PENDING:
             pending.append(name)
         elif st == "SUCCESS":
             green.append(name)
-    return red, pending, green
+    return red, pending, green, [n for n, ok in seen.items() if not ok]
 
 
 def _package_of(path: str) -> str:
@@ -3561,12 +3577,23 @@ NON_CI_CHECKS = {"merge-gate", "pr-steward"}
 
 
 def _ci_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
-    """CI đỏ → fix; đang chạy → wait; không check xanh nào kiểm mã → human (không có bằng chứng)."""
-    red, pending, green = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
+    """CI đỏ → fix; đang chạy → wait; check bắt buộc không chạy thật hoặc không check xanh nào kiểm mã → human."""
+    required = [
+        (str(r["context"]), r.get("appId") if isinstance(r.get("appId"), int) else None)
+        for r in pr.get("requiredChecks") or []
+        if isinstance(r, dict) and r.get("context")
+    ]
+    red, pending, green, not_run = _ci_buckets(
+        [c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)], required
+    )
     if red:
         return "fix", [f"CI đỏ: {', '.join(red)}"]
     if pending:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
+    if not_run:  # GitHub tính skipped/neutral/sai app là đạt — máy không: không có bằng chứng check đó đã chạy (REC-08)
+        return "human", [
+            f"check bắt buộc không chạy thật (skipped/neutral/huỷ/sai app): {', '.join(not_run)} — không có bằng chứng CI"
+        ]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
     if not [g for g in green if g.lower() not in NON_CI_CHECKS]:
@@ -3979,32 +4006,39 @@ def _review_decision(reviews: List[Dict[str, Any]], merge_state: str, missing_ch
     return "APPROVED" if "APPROVED" in states else ""
 
 
-def _required_checks(repo: str, branch: str) -> List[str]:
-    """Tên check bắt buộc của nhánh theo ruleset (REST `rules/branches`); không đọc được → [] (không suy ra gì)."""
+def _required_specs(repo: str, branch: str) -> List[Dict[str, Any]]:
+    """Check bắt buộc của nhánh theo ruleset (REST `rules/branches`): [{"context", "appId"?}] (`integration_id` của ruleset
+    là app phải sinh check); không đọc được → [] (không suy ra gì)."""
     try:
         rules = _gh_items(f"{repo}/rules/branches/{urllib.parse.quote(branch, safe='')}")
     except PrInputError:
         return []
-    out: List[str] = []
+    out: List[Dict[str, Any]] = []
     for r in rules:
         params = r.get("parameters") if r.get("type") == "required_status_checks" else None
         for c in (params or {}).get("required_status_checks") or []:
-            if isinstance(c, dict) and c.get("context") and c["context"] not in out:
-                out.append(str(c["context"]))
+            if isinstance(c, dict) and c.get("context") and all(o["context"] != c["context"] for o in out):
+                app = c.get("integration_id")
+                out.append({"context": str(c["context"]), **({"appId": app} if isinstance(app, int) else {})})
     return out
+
+
+def _required_checks(repo: str, branch: str) -> List[str]:
+    """Tên check bắt buộc của nhánh theo ruleset; không đọc được → [] (không suy ra gì)."""
+    return [o["context"] for o in _required_specs(repo, branch)]
 
 
 _REQUIRED_CACHE: Dict[Tuple[str, str], Tuple[float, bool]] = {}
 
 
-def _base_has_required(repo: str, branch: str) -> bool:
+def _base_has_required(repo: str, branch: str, specs: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Nhánh đích có check bắt buộc không — ruleset (REST `rules/branches`) hoặc branch protection cổ điển (REST
     `branches/<b>`, trường `protection.required_status_checks.contexts`). Không đọc được → False (chiều chặt). Nhớ theo
     (repo, nhánh) trong `WRITER_TTL` giây (`merge-watch` hỏi 30 giây/lần; import ruleset giữa chừng thì hết hạn là thấy)."""
     key, now = (repo, branch), time.monotonic()
     hit = _REQUIRED_CACHE.get(key)
     if hit is None or now - hit[0] >= WRITER_TTL:
-        found = bool(branch) and bool(_required_checks(repo, branch))
+        found = bool(branch) and bool(specs if specs is not None else _required_checks(repo, branch))
         if branch and not found:
             try:
                 prot = _gh_one(f"{repo}/branches/{urllib.parse.quote(branch, safe='')}").get("protection") or {}
@@ -4155,6 +4189,7 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
             "name": c.get("name"),
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
+            **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
         }
         for c in latest.values()
     ]
@@ -4169,11 +4204,8 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
     # BLOCKED có thể vì ruleset đòi check mà head không có (không workflow nào sinh) — không phải thiếu review.
     seen = {str(c.get("name") or c.get("context")) for c in rollup}
-    missing = (
-        [c for c in _required_checks(repo, str(base.get("ref") or "main")) if c not in seen]
-        if merge_state == "BLOCKED"
-        else []
-    )
+    required = _required_specs(repo, str(base.get("ref") or "main"))
+    missing = [r["context"] for r in required if r["context"] not in seen] if merge_state == "BLOCKED" else []
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
     prefix = project_prefix()
@@ -4214,10 +4246,12 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         **({"localConflicts": conflicts} if conflicts is not None else {}),
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
+        # Check bắt buộc của nhánh đích (+ app phải sinh ra): `_ci_blocker` không coi skipped/neutral/sai app là đạt (REC-08).
+        **({"requiredChecks": required} if required else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
         **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
         # Nhánh đích có check bắt buộc không: không có thì auto-merge của GitHub merge NGAY lúc bật (D-062, D-063).
-        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or "")),
+        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or ""), required),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
