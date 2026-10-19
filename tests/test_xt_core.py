@@ -991,8 +991,18 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         same += (('echo "\\$"', "echo '$'"), ('echo "~"', "echo '~'"), ("x  &&  y", "x && y"), ('a "b"c', "a 'b'c"))
         same += (("python3 -c \"print('a b')\"", "python3 -c 'print('\"'\"'a b'\"'\"')'"), ("", "   "))
         diff = (("echo '$X'", 'echo "$X"'), ("echo '*'", "echo *"), ('echo "!x"', "echo '!x'"), ("echo ~", "echo '~'"))
-        diff += (("echo '`id`'", 'echo "`id`"'), ("a | b", "a|b"), ("echo a", "echo a b"), ("echo '\\'", 'echo "\\x"'))
+        diff += (("echo '`id`'", 'echo "`id`"'), ("echo a", "echo a b"), ("echo '\\'", 'echo "\\x"'))
         same += (("echo '\\'", 'echo "\\\\"'),)  # nháy đơn giữ `\`; nháy kép `\\` → một `\` chữ: cùng nghĩa
+        # review #167: toán tử điều khiển/chuyển hướng ngoài nháy khác chữ trong nháy; khoảng trắng quanh toán tử thì không
+        same += (("a | b", "a|b"), ("true && false", "true&&false"), ("x > out", "x >out"), ("a ; b", "a;b"))
+        diff += (
+            ("true && false", "true '&&' false"),
+            ("a;b", "'a;b'"),
+            ("x >out", "x '>out'"),
+            ("echo a #b", "echo a '#b'"),
+        )
+        diff += (("true | cat", "true '|' cat"), ("echo (a)", "echo '(a)'"), ("echo a#b", "echo a '#b'"))
+        same += (("echo a#b", "echo 'a#b'"),)  # `#` giữa từ không mở comment
         for a, b in same:
             self.assertTrue(xt.same_command(a, b), (a, b))
             self.assertTrue(xt.same_command(b, a), (b, a))
