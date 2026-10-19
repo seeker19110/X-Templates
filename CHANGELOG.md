@@ -13,6 +13,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
+- `compose` ghép lại blueprint: mục `[x]`/`[~]` mà **chữ yêu cầu** (phần quy phạm, trước `→ Kiểm:`/`· Nguồn:`) đổi so với
+  bản cũ nay về `[ ]` kèm `— Cũ (rev <8 hex>, trước đó [x|~])` thay vì mang `[x]` và bằng chứng cũ sang yêu cầu mới;
+  `carry_states` trả danh sách `stale`, `compose` báo, `blueprint-status` (cả `--json` `stale`) liệt kê mục còn `[ ]` mang
+  `— Cũ`. Đổi mức/ngưỡng quy mô, Kiểm hoặc Nguồn không phải đổi yêu cầu (ADR-0012: chuyển file theo quy mô vẫn giữ trạng thái)
+  (REC-06, T-1505).
 - `merge-check`/`pr next`/steward: check bắt buộc của ruleset bị SKIPPED/NEUTRAL/CANCELLED/STALE hoặc chỉ có bản của app khác
   (`integration_id` ≠ app sinh check) nay là `human` ("không chạy thật") — GitHub tính required check skipped/neutral là đạt
   nên PR từng "xanh" khi chưa test nào chạy; `_pr_rest` đưa `appId` của check-run và `requiredChecks` của ruleset vào PR,
