@@ -34,7 +34,7 @@ import urllib.parse
 import sys
 import tempfile
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
@@ -523,6 +523,88 @@ def expand_ansi_c(cmd: str) -> str:
             out.append(c)
             i += 1
     return "".join(out)
+
+
+BRACE_MAX_VARIANTS = 64  # biến thể brace expansion tối đa được quét; hơn → chặn (AUD-SEC-064)
+BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.-?\d+)?")
+WORD_END = set(" \t\n;&|()<>")
+
+
+def _unquoted(s: str, i: int = 0) -> Iterator[Tuple[int, str]]:
+    """(vị trí, ký tự) ngoài nháy từ `s[i]`; ký tự thoát `\\x` và nội dung nháy bị bỏ qua."""
+    q, j = "", i
+    while j < len(s):
+        c = s[j]
+        if c == "\\" and q != "'":
+            j += 2
+            continue
+        if q:
+            q = "" if c == q else q
+        elif c in "'\"":
+            q = c
+        else:
+            yield j, c
+        j += 1
+
+
+def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
+    """Nhóm `{a,b}`/`{x..y}` bắt đầu ở `s[i]`: (vị trí `}`, các phương án) — dãy `x..y` lấy hai đầu mút. Khoảng trắng
+    ngoài nháy, không dấu phẩy cấp đầu, không đóng → không phải brace expansion (`{ cmd; }`, `{}` của `find`)."""
+    depth, start, parts = 0, i + 1, []
+    for j, c in _unquoted(s, i):
+        if c.isspace():
+            return None
+        depth += {"{": 1, "}": -1}.get(c, 0)
+        if depth == 0:
+            parts.append(s[start:j])
+            break
+        if c == "," and depth == 1:
+            parts.append(s[start:j])
+            start = j + 1
+    else:
+        return None
+    if len(parts) > 1:
+        return j, parts
+    m = BRACE_SEQ_RE.fullmatch(parts[0])
+    return (j, [m.group(1), m.group(2)]) if m else None
+
+
+def _first_brace(s: str) -> Optional[Tuple[int, int, List[str]]]:
+    """Nhóm brace expansion đầu tiên ngoài nháy (bỏ `${…}` và `\\{`)."""
+    for i, c in _unquoted(s):
+        if c == "{" and s[i - 1 : i] != "$" and (g := _brace_group(s, i)):
+            return i, g[0], g[1]
+    return None
+
+
+def _brace_word(t: str, i: int, end: int, alts: List[str]) -> str:
+    """Bản bung thật của từ chứa nhóm: `p{a,b}s` → `pas pbs` (phương án rỗng của từ rỗng bị bỏ như bash)."""
+    lo = i
+    while lo > 0 and t[lo - 1] not in WORD_END:
+        lo -= 1
+    hi = end + 1
+    while hi < len(t) and t[hi] not in WORD_END:
+        hi += 1
+    words = [w for a in alts if (w := t[lo:i] + a + t[end + 1 : hi])]
+    return t[:lo] + " ".join(words) + t[hi:]
+
+
+def brace_variants(cmd: str) -> Optional[List[str]]:
+    """Các lệnh bash sẽ chạy sau brace expansion (`git push origin {feat/x,main}`): mỗi nhóm lấy từng phương án và bản
+    bung thật. Không có nhóm → []; quá `BRACE_MAX_VARIANTS` → None (không quét hết). Heredoc/comment là dữ liệu."""
+    s = strip_comments(strip_heredocs(join_continuations(cmd)))
+    todo, done = [s], []
+    while todo:
+        t = todo.pop()
+        f = _first_brace(t)
+        if not f:
+            done += [t] if t != s else []
+            continue
+        i, end, alts = f
+        todo += [t[:i] + a + t[end + 1 :] for a in alts] + [_brace_word(t, i, end, alts)]
+        if len(todo) + len(done) > BRACE_MAX_VARIANTS:
+            return None
+    return done
 
 
 def tokenize(cmd: str) -> List[str]:
@@ -3050,7 +3132,8 @@ class ScanBudget:
         return self.calls < 0 or time.monotonic() > self.deadline
 
 
-MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi
+MAX_NEST = 3  # độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi (mặc định: chặn — AUD-SEC-063)
+NEST_ASK = "shell lồng quá sâu"
 
 
 SHELL_OPTS_WITH_VALUE = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
@@ -3609,7 +3692,7 @@ def _wrapped_scripts(tokens: List[str]) -> Tuple[List[str], List[Tuple[str, List
 def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Optional[ScanBudget] = None) -> List[str]:
     """Lệnh trong container quét bằng đủ luật với gốc giả `/`; chặn/hỏi của nó thành hỏi."""
     if ctr and depth >= MAX_NEST:
-        return ["shell lồng quá sâu — guard không quét hết lệnh trong container"]
+        return [f"{NEST_ASK} — guard không quét hết lệnh trong container"]
     out: List[str] = []
     for script, dests in ctr:
         sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
@@ -3634,7 +3717,7 @@ def _scan_scripts(
     trong quyết định này bị bỏ qua (cùng chuỗi → cùng kết quả)."""
     for script in scripts:
         if deeper and depth >= MAX_NEST:
-            asks.append("shell lồng quá sâu — guard không quét hết")
+            asks.append(f"{NEST_ASK} — guard không quét hết")
             break
         if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
             return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
@@ -3916,7 +3999,12 @@ def bash_decision(
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root)
-    nested_deny = _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
+    braces = brace_variants(cmd)
+    nested_deny = (
+        "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."
+        if braces is None
+        else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
+    ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
@@ -3959,6 +4047,7 @@ DANGER_MARKERS = (
     "ghi file bí mật qua Bash",
     "tay bằng chứng",  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     "lệnh đã mã hoá/nén",  # `… | base64 -d | sh` từ nguồn guard không giải được
+    NEST_ASK,  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
 )
 
 
