@@ -5,6 +5,25 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+> **Dự án đích:** chạy lại `install.py` để có `xt.py vendor-check` mới; dự án có skill chép vào `.claude/skills/` thêm
+> `xt.py vendor-check --dirs .claude/skills [--own …] --strict` vào CI (`UX-DS-022`).
+> CI đang chạy `vendor-check --strict` có thể đỏ vì cảnh báo mới: file `SOURCE`/`ORIGIN` tự viết thiếu dòng `License:`
+> (cho phép `**License:**`) hoặc URL repo gốc — thêm hai thông tin đó vào file ghi nguồn.
+
+### Added
+- Bàn giao UI/UX từ `stored` 06 §7i (`anti-slop`), đối chiếu ba cột ở `research/2026-10-19-stored-ui-7i.md`:
+  - bảng chọn skill (`design-system-and-tokens.md`) thêm `antislop-copywriting`/`antislop-code`; `UX-DS-022` đòi `SOURCE.md`
+    có `License:`, đặt sẵn câu hỏi chặn phiên của skill trước khi chạy tự động, ngưỡng tương phản trong skill khớp WCAG;
+    hai bẫy mới (nạp cả bộ luật ~58 KB; đọc huy hiệu "Skills 32K" là số người dùng);
+  - mẫu `AGENTS.md` §9 có dòng "UI" (DESIGN.md định hướng, giá trị từ token, token chữ `on-*`, `xt.py contrast` xanh mới
+    báo xong).
+- `xt.py vendor-check --own a,b`; `--dirs .claude/skills` bỏ qua skill do khung cài (manifest `install.py`) — D-059.
+
+### Changed
+- `UX-A11Y-002`: định nghĩa chữ lớn (≥ 24 px, hoặc ≥ 18,66 px và đậm) + bẫy "coi 18 px là chữ lớn".
+- `xt.py vendor-check`: nhận mã SPDX `CC-BY-NC-*`/`CC-BY-SA-NC` và "Tailwind Plus/UI License" là điều khoản hạn chế; file
+  `SOURCE`/`ORIGIN` tự viết thiếu dòng `License:` hoặc URL nguồn → cảnh báo (đỏ khi `--strict`) — `CMP-LIC-022`.
+
 ## [3.5.1] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.5.0:** chạy lại `install.py --with-github` (`xt.py`, workflow `pr-steward.yml`). Repo thuộc

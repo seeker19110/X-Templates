@@ -416,3 +416,11 @@
 - Chọn: MEMBER tin khi REST collaborators/<login>/permission trả admin/write; không hỏi được thì không tin. pr_title_check off cần cả nhánh đích lẫn cây làm việc
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: MEMBER có thể chỉ có quyền đọc nên không tin mặc định, nhưng hỏi quyền thật thì repo org vẫn dùng được steward; luật nới chỉ hiệu lực khi đã merge vào nhánh đích như merge_autonomy
 - Đường lùi: Bỏ nhánh MEMBER trong steward_untrusted/published_reviews và MEMBER khỏi trigger workflow
+
+### D-059 · 2026-10-19T05:04:02+00:00 · vendor-check có quét skill chép vào .claude/skills không, và phân biệt skill của khung/tự viết thế nào?
+
+- Phương án: (1) Không quét; chỉ ghi tài liệu · (2) Quét .claude/skills khi --dirs chỉ định; bỏ qua skill có trong manifest harness của install.py; skill tự viết khai --own · (3) Đòi mọi skill (kể cả của khung) có LICENSE
+- Chọn: Quét .claude/skills khi --dirs chỉ định; bỏ qua skill có trong manifest harness của install.py; skill tự viết khai --own
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: UX-DS-022 đòi skill chép có SOURCE/LICENSE nhưng trước đây máy không kiểm được; manifest là nguồn sự thật về file khung cài, nên không báo nhầm; skill tự viết khai tường minh
+- Đường lùi: Bỏ nhánh SKILLS_DIR/--own trong cmd_vendor_check
+- Giới hạn chấp nhận (review #148): manifest là file trong repo nên ai sửa được CI/manifest thì cũng bỏ qua được skill (như `--own`); skill vendor trùng tên skill của khung bị bỏ qua.
