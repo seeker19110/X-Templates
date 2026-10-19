@@ -1614,6 +1614,44 @@ class PrNextCliTest(unittest.TestCase):
         )
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
+    def test_review_identity_ignores_local_ledger(self):
+        """Review #168: có `review_identity` thì `pr next`/steward chỉ tính review đã đăng của reviewer — sổ cục bộ do chính
+        tác giả ghi (`pr reviewed --clean`) không mở được merge; cùng một sự thật với `merge_eligibility`."""
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
+        pinned = {**self.big, "reviewIdentity": "rev-bot"}
+        self.assertEqual(
+            json.loads(self.nxt(self.big, "--json")[1])["action"], "enable-auto-merge"
+        )  # không cấu hình: như cũ
+        self.assertEqual(json.loads(self.nxt(pinned, "--json")[1])["action"], "review")
+        published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
+        self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "enable-auto-merge")
+        rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
+        self.assertEqual(xt.with_published(rec, [], True)["reviews"], [])
+        self.assertEqual(xt.with_published(rec, [], False), rec)
+
+    def test_review_identity_edited_mark_is_ignored(self):
+        def by(updated: str) -> dict:
+            return {
+                **mark("a" * 40, "clean", "2026-10-19T01:00:00Z", "NONE"),
+                "user": {"login": "rev-bot"},
+                "updated_at": updated,
+            }
+
+        same, edited = by("2026-10-19T01:00:00Z"), by("2026-10-19T02:00:00Z")
+        self.assertEqual(len(xt.published_reviews([same], identity="rev-bot")), 1)
+        self.assertEqual(xt.published_reviews([edited], identity="rev-bot"), [])  # bị sửa sau khi đăng
+        self.assertEqual(
+            len(xt.published_reviews([{**edited, "author_association": "OWNER"}])), 1
+        )  # không cấu hình: như cũ
+
+    def test_review_identity_falls_back_to_working_tree_config(self):
+        """Review #168: không đọc được `origin/<base>` (PR chồng, fetch hỏng) thì lấy `review_identity` ở cây làm việc —
+        không bỏ trống làm dấu của tác giả được tin."""
+        self.assertEqual(xt.review_config(self.base, "origin/nope"), {})
+        (self.base / "xt.yaml").write_text("review_identity: rev-bot\n", encoding="utf-8")
+        self.assertEqual(xt.review_config(self.base, "origin/nope"), {"review_identity": "rev-bot"})
+        self.assertEqual(xt.review_config(self.base, "origin/main"), {})  # ref đọc được: cấu hình đã commit thắng
+
     def test_clean_review_needs_a_different_model(self):
         def run(*extra: str) -> tuple:
             return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, *extra)

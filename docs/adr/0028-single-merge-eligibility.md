@@ -28,12 +28,14 @@ không biết review; `pr next` biết review qua sổ cục bộ + dấu đã �
    `hard`). Không bật auto-merge → không chặn (merge tay ghim head đã có guard).
 4. **Guard** (`gh pr merge`, `gh api …/merge`, MCP) hỏi khi `eligible` là `false` (merge) hoặc `auto_merge_ok` là `false`
    (bật auto-merge). Trường vắng (khung cũ) = như trước.
-5. Nguồn review là **dấu đã đăng trên PR** (`xtReviews`, ADR-0027) — dùng chung giữa phiên, CI và steward; sổ cục bộ của một
+5. Có `review_identity` (xt.yaml đã commit ở nhánh đích; không đọc được ref thì lấy cây làm việc): chỉ dấu của đúng tài khoản đó
+   tính, dấu bị sửa sau khi đăng (`updated_at` ≠ `created_at`) bị bỏ, và `pr next`/steward cũng bỏ sổ cục bộ của tác giả.
+6. Nguồn review là **dấu đã đăng trên PR** (`xtReviews`, ADR-0027) — dùng chung giữa phiên, CI và steward; sổ cục bộ của một
    phiên (`pr reviewed --no-publish`) không đủ để guard/`merge-gate` cho qua.
 
 ## Lý do
 
-- Một hàm = một sự thật: `pr next` bảo tắt auto-merge ⇔ `merge-gate` đỏ ⇔ guard không cho bật. Test bảng
+- Một hàm = một sự thật: `pr next` bảo tắt auto-merge ⇔ `merge-gate` đỏ ⇔ guard hỏi khi bật (chỉ khi `XT_GUARD_POLICY=strict`: ở chính sách mặc định lý do không thuộc nhóm chặn nên guard cho qua — lớp chặn thật là `merge-gate`, và chỉ với PR đang bật auto-merge). Test bảng
   (`test_single_merge_condition`) chạy cùng một tập ca qua `merge_eligibility` và `pr_next`.
 - `merge-gate` không đòi review ở PR không bật auto-merge để người/agent còn merge được PR đã đủ điều kiện theo thiết kế
   ADR-0023; chỗ hở thật chỉ là auto-merge không ghim head.

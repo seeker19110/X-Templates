@@ -26,6 +26,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `install.py` (guard + `xt.py` đổi).
 
 ### Fixed
+- Review #168: ghi chú dự án (`— Bằng chứng:`, `(Miễn: …)`) của mục không có đuôi `→ Kiểm:`/`· Nguồn:` không còn bị tính là chữ
+  yêu cầu (trước đó mục `[x]` về `[ ]` oan); với `review_identity`, `pr next`/steward bỏ sổ review cục bộ của tác giả, dấu bị
+  sửa sau khi đăng không tính, `review_identity` lấy từ cây làm việc khi không đọc được `origin/<base>`; `pr-review.yml` cấm
+  tường minh Bash/ghi file/web, truyền model reviewer thật cho `pr reviewed`, ghi diff ra file trước khi cắt.
 - `audit plan`/`audit check --strict`: nhóm sổ ghi **N/A** được đối chiếu lại với tín hiệu repo hiện tại — repo từng không có UI/CSDL
   rồi có (nhóm A11Y/DATA) trước đây không bao giờ được quét lại; nay `audit_rescan` báo "N/A→áp dụng: …" và `--strict` đỏ tới
   khi quét nhóm đó hoặc ghi `Giải trình: <lý do>` ở Ghi chú (REC-07, T-1506).

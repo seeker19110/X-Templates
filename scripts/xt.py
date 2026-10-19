@@ -753,7 +753,9 @@ def _normative(m: "re.Match[str]") -> str:
     """Phần quy phạm của mục: chữ yêu cầu TRƯỚC `→ Kiểm:`/`· Nguồn:` — đổi chữ là đổi yêu cầu (REC-06). Mức MUST/SHOULD và
     ngưỡng quy mô KHÔNG tính (đổi quy mô chuyển mức mà yêu cầu giữ nguyên — ADR-0012: bằng chứng cũ vẫn đúng); đổi cách
     kiểm hoặc nguồn cũng không làm bằng chứng cũ hết giá trị."""
-    return NORM_TAIL_RE.split(m["text"], maxsplit=1)[0].strip()
+    head = STALE_NOTE_RE.split(NORM_TAIL_RE.split(m["text"], maxsplit=1)[0], maxsplit=1)[0]
+    note = LOOSE_NOTE_RE.search(head)  # mục không có đuôi `→ Kiểm:`/`· Nguồn:`: ghi chú dự án không phải chữ yêu cầu
+    return (head[: note.start()] if note else head).strip()
 
 
 def _norm_rev(norm: str) -> str:
@@ -4345,6 +4347,7 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         "statusCheckRollup": rollup,
         # Review đã đăng lên PR (`pr reviewed`, ADR-0027) — sổ dùng chung mọi phiên và workflow pr-steward.
         **({"xtReviews": marks} if marks else {}),
+        **({"reviewIdentity": cfg["review_identity"]} if cfg.get("review_identity") else {}),
         # Auto-merge đang bật (REST `auto_merge`: object hoặc null) — `merge-gate` đỏ khi bật trên PR ngoại lệ cứng.
         **({"autoMergeRequest": pr["auto_merge"]} if pr.get("auto_merge") else {}),
         # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
@@ -6004,7 +6007,7 @@ def published_reviews(
     """Review đã đăng trên PR, theo thứ tự thời gian: [{"head", "clean", "at"}] từ comment của người có quyền ghi —
     OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi. `identity` (xt.yaml
     `review_identity`, T-1508): khi cấu hình, CHỈ comment của đúng tài khoản reviewer đó là review — tác giả PR (cùng tài
-    khoản với phiên agent) đăng dấu không còn mở được merge."""
+    khoản với phiên agent) đăng dấu không còn mở được merge; comment đã bị sửa (`updated_at` ≠ `created_at`) bị bỏ qua."""
     out = []
     for c in comments:
         m = REVIEW_MARK_RE.search(str(c.get("body") or ""))
@@ -6014,7 +6017,8 @@ def published_reviews(
             if identity
             else assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))
         )
-        if m and trusted:
+        edited = bool(identity) and c.get("updated_at") not in (None, "", c.get("created_at"))
+        if m and trusted and not edited:  # dấu bị sửa sau khi đăng (người có quyền write sửa được comment) không tính
             out.append({"head": m[1], "clean": m[2] == "clean", "at": str(c.get("created_at", ""))})
     return sorted(out, key=lambda r: r["at"])
 
@@ -6067,9 +6071,13 @@ def _iso_key(at: object) -> str:
     return str(at).replace("Z", "+00:00")
 
 
-def with_published(rec: Dict[str, Any], marks: object) -> Dict[str, Any]:
-    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết."""
+def with_published(rec: Dict[str, Any], marks: object, published_only: bool = False) -> Dict[str, Any]:
+    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết. `published_only` (xt.yaml
+    có `review_identity`): chỉ review đã đăng của tài khoản reviewer — sổ cục bộ do chính tác giả ghi không tính, cùng
+    "một sự thật" với `merge_eligibility` (ADR-0028, review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
+    if published_only:
+        return {**rec, "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", "")))}
     if not pub:
         return rec
     local = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
@@ -6183,8 +6191,11 @@ REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family"
 
 def review_config(base: Path, ref: str) -> Dict[str, str]:
     """`review_identity`, `author_model_family`, `reviewer_model_family` từ xt.yaml **đã commit ở `ref`** (nhánh đích): danh
-    tính reviewer là gốc tin cậy nên PR không tự đổi được (T-1508, AUD-HAR-066). Thiếu khoá/không đọc được → vắng."""
-    keys = _committed_xt_keys(base, ref)
+    tính reviewer là gốc tin cậy nên PR không tự đổi được (T-1508, AUD-HAR-066). `ref` không đọc được (PR chồng nhắm nhánh
+    chưa fetch, fetch hỏng) → lấy từ xt.yaml ở cây làm việc thay vì bỏ trống: bỏ trống làm `published_reviews` quay về tin
+    cả dấu của tác giả (review #168). Thiếu khoá → vắng."""
+    text = _committed_xt_text(base, ref)
+    keys = _yaml_keys(text) if text is not None else _xt_keys(base)
     return {k: keys[k] for k in REVIEW_KEYS if keys.get(k)}
 
 
@@ -6351,7 +6362,9 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     except PrInputError as exc:
         return {"pr": pr_arg, "head": "", "action": "error", "why": str(exc), "applied": False}
     d, _ = _merge_eval(pr)
-    rec = with_published(_pr_record(read_reviews(base), str(d["pr"])), pr.get("xtReviews"))
+    rec = with_published(
+        _pr_record(read_reviews(base), str(d["pr"])), pr.get("xtReviews"), bool(pr.get("reviewIdentity"))
+    )
     if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
         rec = {**rec, "standard_seen": True}
     out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec), "applied": False}
@@ -6450,7 +6463,9 @@ def cmd_pr(args: argparse.Namespace) -> int:
         data[str(d["pr"])] = rec
         _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
-    out = pr_next(d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews")))
+    out = pr_next(
+        d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
+    )
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0

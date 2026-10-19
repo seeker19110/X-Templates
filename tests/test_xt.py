@@ -866,6 +866,29 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertIn("trước đó [x])", xt.carry_states(cap, "- [ ] `A-001` **MUST** b.\n", stale=st2)[0])
         self.assertEqual(st2, ["A-001"])
 
+    def test_requirement_revision_ignores_project_note_without_tail(self):
+        """Review #168: mục không có đuôi `→ Kiểm:`/`· Nguồn:` — ghi chú dự án (`— Bằng chứng:`, `(Miễn: …)`, `— Cũ (rev …)`)
+        không phải chữ yêu cầu; chữ y nguyên thì giữ `[x]`/`[~]` và ghi chú."""
+        old = (
+            "- [x] `L-001` **SHOULD** Sửa lint đi commit riêng. — Bằng chứng: commit abc\n"
+            "- [~] `L-002` **MAY** Làm gì đó. (Miễn: chưa cần)\n"
+            "- [x] `L-003` **MUST** Chữ mới. — Cũ (rev 0123abcd, trước đó [x])\n"
+            "- [x] `L-004` **SHOULD** Chữ cũ. — Bằng chứng: p\n"
+        )
+        new = (
+            "- [ ] `L-001` **SHOULD** Sửa lint đi commit riêng.\n"
+            "- [ ] `L-002` **MAY** Làm gì đó.\n"
+            "- [ ] `L-003` **MUST** Chữ mới.\n"
+            "- [ ] `L-004` **SHOULD** Chữ khác.\n"
+        )
+        stale: list[str] = []
+        out, _ = xt.carry_states(old, new, stale=stale)
+        lines = {ln.split("`")[1]: ln for ln in out.splitlines()}
+        self.assertEqual(stale, ["L-004"])  # chỉ mục đổi chữ thật
+        self.assertEqual(lines["L-001"], "- [x] `L-001` **SHOULD** Sửa lint đi commit riêng. — Bằng chứng: commit abc")
+        self.assertTrue(lines["L-002"].startswith("- [~] `L-002`") and "(Miễn: chưa cần)" in lines["L-002"])
+        self.assertTrue(lines["L-003"].startswith("- [x] `L-003`"))
+
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
 
