@@ -1,6 +1,7 @@
 # ADR-0027: PR steward chạy trên GitHub — PR đủ tiêu chuẩn vào nhánh chính không cần phiên agent
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận — sửa đổi bởi D-058 (3.5.1): MEMBER của org được tin như COLLABORATOR khi REST
+  `collaborators/<login>/permission` xác nhận quyền ghi (§2, §3 dưới đây ghi hành vi 3.5.0)
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` (`pr steward`, `pr reviewed` đăng kết quả lên PR,
   `published_reviews`, `with_published`), `.github/workflows/pr-steward.yml` (cài vào dự án đích bằng
   `install.py --with-github`), test `tests/test_merge.py` `PrStewardTest`, mục `LOOP-STOP-029`
