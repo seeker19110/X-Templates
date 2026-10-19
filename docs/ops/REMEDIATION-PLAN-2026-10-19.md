@@ -19,7 +19,7 @@ và **kế hoạch triển khai dạng máy đọc** cho đợt kế tiếp (3.9
 ở đây làm sổ hoàn thành thứ hai; chỉ cấp ID audit mới cho phần thật sự còn thiếu.
 
 PR tài liệu không sửa mã, quyền, workflow, ruleset, phiên bản hay trạng thái sổ audit. CLI/schema/hook mang nhãn
-**đề xuất** chưa tồn tại; mỗi thay đổi hành vi là một PR riêng theo [§7](#7-definition-of-done-cho-từng-pr-triển-khai).
+**đề xuất** chưa tồn tại; mỗi thay đổi hành vi là một PR riêng theo [§8](#8-definition-of-done-cho-từng-pr-triển-khai).
 
 ## 2. Tái hiện lại trên `19d3aa8` (2026-10-19)
 
@@ -31,7 +31,7 @@ phải mức nghiêm trọng: **đo** = lệnh chạy ra kết quả sai; **đ�
 | REC-01 | `same_command('test "$X" = yes', "test '$X' = yes")` | `True` — hai lệnh khác nghĩa shell bị coi là một | đo |
 | REC-02 | `_verdict_blueprint` khi file blueprint đã khai không còn tồn tại | trả `done` kèm lý do "không thấy blueprint" (mã dòng 1145–1152); `_still_open` bỏ qua MUST mở | đọc |
 | REC-03 | `merge_decision(pr làn chuẩn, L3, CI xanh, không review)` → `merge`; `pr_next` cùng dữ liệu → `review` | hai hàm hai điều kiện; steward dùng `pr_next` nên đường steward đúng, đường `merge-check`/guard không ép review | đo (hàm) |
-| REC-04 | `apply_policy` ánh xạ `ask` → deny theo chuỗi trong `DANGER_MARKERS` (guard.py 3945–3973) | #159 thêm dấu "shell lồng quá sâu" vào danh sách — sửa đúng lỗ, giữ cơ chế so chuỗi | đọc |
+| REC-04 | `apply_policy` ánh xạ `ask` → deny theo chuỗi trong `DANGER_MARKERS` (guard.py 3945–3973) | PR #159 (chưa merge) thêm dấu "shell lồng quá sâu" vào danh sách — sửa đúng lỗ, giữ cơ chế so chuỗi | đọc |
 | REC-06 | `carry_states(cũ: "Coverage ≥ 80 % … — Bằng chứng: coverage --fail-under=80", mới: "Coverage ≥ 90 %")` | mục mới thành `[x]` mang nguyên bằng chứng 80 %, `dropped=[]` — không cảnh báo | đo |
 | REC-07 | `audit_rescan`: nhóm `N/A` bị `continue` (mã dòng 2280–2300) | thêm UI sau khi audit không tạo yêu cầu quét A11Y | đọc |
 | REC-08 | `merge_decision(rollup: quality=SKIPPED, merge-gate=SUCCESS; missingRequired=[])`, L3 | `merge` — "làn nhanh, CI xanh"; SKIPPED không thuộc nhóm nào, `missingRequired` chỉ tính check **vắng** | đo |
@@ -39,7 +39,7 @@ phải mức nghiêm trọng: **đo** = lệnh chạy ra kết quả sai; **đ�
 
 Test cục bộ: `python3 -m unittest discover -s tests` trên `19d3aa8` → 788 test OK (báo cáo delta, CI run [quality][quality-run]).
 Một fixture (`ProjectDirTest.test_no_marker_falls_back_to_cwd_and_env_wins`) nhạy với marker Git ở thư mục cha của `/tmp`
-trong một môi trường; cô lập fixture ở PR test riêng (§8), không suy ra lỗi sản phẩm.
+trong một môi trường; cô lập fixture ở PR test riêng (§9), không suy ra lỗi sản phẩm.
 
 ## 3. Nghiên cứu bổ sung (nguồn sống, đọc 2026-10-19)
 
@@ -74,18 +74,18 @@ Giữ Python ≥ 3.11 stdlib, cổng `xt.yaml` (mypy --strict, coverage dòng + 
 
 | Mục | Ưu tiên | Kết quả mong muốn | Quan hệ với PLAN 3.8.0 | Task 3.9 |
 |---|---|---|---|---|
-| REC-01 | P1 | Không tái dùng kết quả giữa hai lệnh shell khác nghĩa; `-k` chạy 0 test là đỏ | mới | T-1501, T-1502 |
+| REC-01 | P1 | Không tái dùng kết quả giữa hai lệnh shell khác nghĩa; `-k` chạy 0 test (unittest 3.11) là đỏ | mới | T-1501, T-1502 |
 | REC-02 | P1 | Mất/hỏng blueprint đã khai không thành `done`, sàn Gate giữ | mới | T-1503 |
 | REC-08 | P1 | Check bắt buộc phải **thực thi** và SUCCESS đúng nguồn, đúng SHA | mở rộng T-1409 | T-1504 |
 | REC-06 | P1 | Bằng chứng gắn revision nội dung yêu cầu | mới | T-1505 |
 | REC-03 | P1 | Một điều kiện merge/review dùng chung; nguồn review xác thực | mở rộng T-1408/1409/1411 (AUD-SEC-069, HAR-058/059) | T-1507, T-1508 |
 | REC-04 | P1 | Guard trả quyết định có kiểu + mã lý do; headless qua `PermissionRequest` | mở rộng T-1402 (AUD-SEC-063/070) | T-1509 |
 | REC-07 | P2 | N/A được đánh giá lại khi khả năng dự án đổi | mới | T-1506 |
-| REC-09 | P2 | Installer có kế hoạch/manifest, giữ quyền riêng của dự án | mới | T-1515 |
-| REC-05 | P2 | Yêu cầu bảo mật thiết yếu không bị trần MUST hạ | mới, cần ADR | T-1518 |
-| REC-10 | P2 | Tài liệu một nhà cho chính sách tự chủ | gộp T-1415 | T-1519 |
-| REC-11 | P2 | Gói ngữ cảnh theo task, đo byte thật | mới | T-1511 |
-| REC-13 | P2 | Registry nguồn: phân loại lỗi tạm/đổi/hết hiệu lực | AUD-CI-011 | T-1519 |
+| REC-09 | P2 | Installer có kế hoạch/manifest, giữ quyền riêng của dự án | mới | T-1516 |
+| REC-05 | P2 | Yêu cầu bảo mật thiết yếu không bị trần MUST hạ | mới, cần ADR | T-1519 |
+| REC-10 | P2 | Tài liệu một nhà cho chính sách tự chủ | gộp T-1415 | T-1520 |
+| REC-11 | P2 | Gói ngữ cảnh theo task, đo byte thật | mới | T-1512 |
+| REC-13 | P2 | Registry nguồn: phân loại lỗi tạm/đổi/hết hiệu lực | AUD-CI-011 | T-1520 |
 | REC-12 | P3 | Tách dần `xt.py`/guard sau khi có kiểm bất biến | AUD-ARCH-001 | ngoài 3.9 |
 
 Việc đã có trong T-1403…1414 tiếp tục theo PLAN hiện hữu; vắng mặt ở đây không có nghĩa là giảm ưu tiên.
@@ -96,8 +96,10 @@ Việc đã có trong T-1403…1414 tiếp tục theo PLAN hiện hữu; vắng 
 
 **Sửa:** `same_command` so **chuỗi chuẩn hóa giữ ngữ nghĩa shell**: chỉ gộp khoảng trắng ngoài nháy; nháy đơn và nháy kép
 khác nhau khi phần trong nháy chứa `$`, `` ` ``, `\`, `!`; evidence ghi thêm `cmd_sha256` của chuỗi gốc. `loop record`/`loop
-verify` đọc "Ran N tests" của unittest (và `0 passed` của pytest) — **N = 0 ⇒ exit code coi là 1** (`zero_tests_red`), vì
-Gate dạng `-k <tên>` khi test chưa tồn tại là xanh giả (DoD §7 mục 2).
+verify` đọc dòng khớp `^Ran 0 tests` của unittest — **exit 0 kèm 0 test ⇒ coi là đỏ** (`zero_tests_red`). Phạm vi: unittest
+trên Python 3.11 exit 0 khi không chọn được test (tái hiện 2026-10-19; 3.12+ exit 5, pytest exit 5 — giữ nguyên là đỏ); các
+runner khác exit 0 khi 0 test (go/cargo/jest) xử lý theo mẫu đầu ra riêng khi gặp. Không bắt chuỗi `0 passed` (khớp nhầm
+`10 passed`). Gate dạng `-k <tên>` khi test chưa tồn tại là xanh giả (DoD §8 mục 2).
 
 **Nghiệm thu:** cặp lệnh ở §2 chạy riêng, tổng kiểm đỏ; ca glob, escape, env, thư mục khác; evidence cũ không có
 `cmd_sha256` giữ để truy vết nhưng `verify` chạy lại; bí mật vẫn che trong log.
@@ -118,7 +120,9 @@ dự án không khai blueprint từ đầu giữ hợp đồng riêng; migration
 `merge_decision`, `pr_next`, `merge-gate`, guard MCP/`gh` và steward đều gọi nó (hợp đồng một hàm, test đặc tính chéo).
 `merge-gate` đỏ khi auto-merge đang bật mà `needs` còn `review` ở head hiện tại (mở rộng ADR-0023 bằng ADR mới).
 Review hợp lệ = dấu `xt-review v1` **do danh tính reviewer đã cấu hình** (`xt.yaml review_identity:` — app/PAT riêng,
-D-069) đăng, đúng `head`, mới hơn mọi review chặn ở head đó; marker do tác giả/chủ repo đăng tay chỉ được tin khi
+D-069) đăng, đúng `head`, mới hơn mọi review chặn ở head đó; họ model của tác giả và reviewer khai cố định trong `xt.yaml`
+(`author_model_family:`, `reviewer_model_family:`) vì PR không mang dữ liệu model (`ai_attribution: forbid`) — `ci-check`
+từ chối hai họ trùng (D-045); marker do tác giả/chủ repo đăng tay chỉ được tin khi
 `review_identity` chưa cấu hình (chế độ hiện hành, ghi cảnh báo). Blocking ở head hiện tại thắng review sạch mang
 sang (T-1411). Kiểm head ngay trước merge, ghim SHA (đã có).
 
@@ -196,13 +200,13 @@ bằng hợp đồng máy đọc và bỏ điều phối tay. Bảng ghi **cơ c
 
 | Gói | Tự động hóa thêm | Cơ chế | Điều kiện chất lượng | Task |
 |---|---|---|---|---|
-| AUTO-01 — Task có phụ thuộc, gói ngữ cảnh | Chọn task sẵn sàng, giao song song khi không giao nhau file; không tick task khi dependency chưa xanh | PLAN thêm `(sau: T-a, T-b; files: a/*, b.py)` — parser hiện bỏ qua; `loop next --json` trả tập sẵn sàng + cặp giao nhau; `loop record` từ chối tick khi dependency mở; `xt.py context` (REC-11) | Feature fact chưa rõ ghi "chưa biết"; worktree riêng cho task giao nhau (LOOP-ORCH-010) | T-1510, T-1511 |
-| AUTO-02 — Thu và làm mới bằng chứng | Bằng chứng tự hết hiệu lực khi đầu vào đổi; verify chỉ chạy lại phần đổi | evidence v2: `cmd_sha256`, `scope`, `req_rev`, `files_digest` (sha256 cây của `files:`); `loop verify` chạy lại Gate có digest đổi, giữ Gate không đổi (vẫn chạy toàn bộ khi `--all`); hook `TaskCompleted` (exit 2 khi `TaskUpdate` đánh dấu xong mà không có evidence xanh cho `T-` trong subject) và `SubagentStop` (block khi báo cáo executor thiếu "lệnh + exit code") | REC-01/02/06/07; bí mật che; không tick tự khai | T-1512, T-1513 |
-| AUTO-03 — Review tự động độc lập | PR làn chuẩn được review mà không cần phiên tác giả; phát hiện có schema; sửa và review lại head mới tự động | Workflow `pr-review.yml`: `claude-code-action@v1` (SHA pin, OIDC/WIF hoặc token reviewer riêng), `prompt: /review`, `claude_args: --json-schema <findings> --model <khác tác giả> --max-turns --max-budget-usd`; job đọc `structured_output`, chạy `pr reviewed --clean|--blocking` bằng **danh tính reviewer** (`XT_REVIEWER_TOKEN`, D-069); `published_reviews` chỉ tin danh tính này khi `review_identity` cấu hình; blocking ⇒ `pr next` = `fix` ⇒ Routine/phiên agent sửa | REC-03/08; reviewer không có quyền ghi nhánh; không chạy trên fork; tác giả không tự tạo review sạch; model khác họ (D-045) | T-1508 |
-| AUTO-04 — Sửa CI trong ngân sách | Phân loại lỗi, sửa nhỏ, chạy lại kiểm liên quan, rồi cổng đầy đủ | `loop ci-triage --run <id> --json`: đọc log job qua `gh`, phân loại hạ tầng/test/lint/type/coverage/secret/migration theo bảng `self-healing-ci.md`; `state.json.episode` lưu `rerun_used`, `fix_attempts`, `cost_usd` (chưa đo ⇒ `null`); cùng chữ ký 3 lần ⇒ `defer`; secret/SAST ⇒ `block` | Không nới test/threshold/ruleset; re-run ≤ 1; ngân sách sống qua restart | T-1514 |
-| AUTO-05 — Steward theo sự kiện, phục hồi | Reconcile ngay khi check/review/head đổi; cron là bù; restart không lặp tác dụng phụ | `pr-steward.yml` thêm `check_suite: completed`, `workflow_run` (quality/merge-gate completed), `pull_request_review: submitted` (**cần xác minh** ngữ cảnh checkout của sự kiện này trước khi thêm; mặc định chỉ `check_suite`/`workflow_run`); mọi hành động idempotent theo (repo, PR, head, hành động) đọc trạng thái GitHub trước khi làm (auto-merge flag, nhãn); Routine GitHub trigger `pull_request.synchronize` kích phiên agent cho `review`/`fix`/`update` khi thiếu `XT_STEWARD_TOKEN` | REC-03/04/08; khóa thao tác; refresh head trước thực hiện | T-1516 |
-| AUTO-06 — Nâng cấp và drift có kiểm chứng | Dự án đích thấy lệch cấu hình/tài liệu/quyền và nhận PR nâng cấp trong phạm vi | `install.py --plan`/manifest (REC-09); `doctor --drift --json` so manifest với bản cài và tag mới nhất; Routine tuần ở dự án đích mở PR nâng cấp từ plan | Giữ tùy chỉnh; không đổi ruleset/production | T-1515, T-1517 |
-| AUTO-07 — Đánh giá tự chủ trước khi mở rộng | Bộ task chuẩn + corpus false-green chạy lại khi sửa policy/harness | `xt.py autonomy-bench --json`: corpus PR/rollup/review/guard fixture (gồm mọi tái hiện §2 và audit 🔴/🟠 đã sửa) ⇒ 0 false-green; `docs/ops/AUTONOMY-BASELINE.md` ghi cấu hình, revision, số đo; CI chạy ở job `quality` | Tập kiểm độc lập với tác giả bản sửa; kết luận giới hạn trong tập đã kiểm | T-1520 |
+| AUTO-01 — Task có phụ thuộc, gói ngữ cảnh | Chọn task sẵn sàng, giao song song khi không giao nhau file; không tick task khi dependency chưa xanh | PLAN thêm `(sau: T-a, T-b; files: a/*, b.py)` — parser hiện bỏ qua; `loop next --json` trả tập sẵn sàng + cặp giao nhau; `loop record` từ chối tick khi dependency mở; `xt.py context` (REC-11) | Feature fact chưa rõ ghi "chưa biết"; worktree riêng cho task giao nhau (LOOP-ORCH-010) | T-1511, T-1512 |
+| AUTO-02 — Thu và làm mới bằng chứng | Bằng chứng tự hết hiệu lực khi đầu vào đổi; verify chỉ chạy lại phần đổi | evidence v2: `cmd_sha256`, `scope`, `req_rev`, `files_digest` (sha256 cây của `files:`); `loop verify` chạy lại Gate có digest đổi, giữ Gate không đổi (vẫn chạy toàn bộ khi `--all`); hook `TaskCompleted` (exit 2 khi `TaskUpdate` đánh dấu xong mà không có evidence xanh cho `T-` trong subject) và `SubagentStop` (block khi báo cáo executor thiếu "lệnh + exit code") | REC-01/02/06/07; bí mật che; không tick tự khai | T-1513, T-1514 |
+| AUTO-03 — Review tự động độc lập | PR làn chuẩn được review mà không cần phiên tác giả; phát hiện có schema; sửa và review lại head mới tự động | Workflow `pr-review.yml`: `claude-code-action@v1` (SHA pin, OIDC/WIF hoặc token reviewer riêng), `prompt: /review`, `claude_args: --json-schema <findings> --model <họ reviewer_model_family trong xt.yaml> --max-turns --max-budget-usd`; job đọc `structured_output`, chạy `pr reviewed --clean|--blocking` bằng **danh tính reviewer** (`XT_REVIEWER_TOKEN`, D-069); `published_reviews` chỉ tin danh tính này khi `review_identity` cấu hình; blocking ⇒ `pr next` = `fix` ⇒ Routine/phiên agent sửa | REC-03/08; reviewer không có quyền ghi nhánh; không chạy trên fork; tác giả không tự tạo review sạch; họ model khai trong `xt.yaml`, khác tác giả (D-045) | T-1508 |
+| AUTO-04 — Sửa CI trong ngân sách | Phân loại lỗi, sửa nhỏ, chạy lại kiểm liên quan, rồi cổng đầy đủ | `loop ci-triage --run <id> --json`: đọc log job qua `gh`, phân loại hạ tầng/test/lint/type/coverage/secret/migration theo bảng `self-healing-ci.md`; `state.json.episode` lưu `rerun_used`, `fix_attempts`, `cost_usd` (chưa đo ⇒ `null`); cùng chữ ký 3 lần ⇒ `defer`; secret/SAST ⇒ `block` | Không nới test/threshold/ruleset; re-run ≤ 1; ngân sách sống qua restart | T-1515 |
+| AUTO-05 — Steward theo sự kiện, phục hồi | Reconcile ngay khi check/review/head đổi; cron là bù; restart không lặp tác dụng phụ | `pr-steward.yml` thêm `check_suite: completed`, `workflow_run` (quality/merge-gate completed), `pull_request_review: submitted` (**cần xác minh** ngữ cảnh checkout của sự kiện này trước khi thêm; mặc định chỉ `check_suite`/`workflow_run`); mọi hành động idempotent theo (repo, PR, head, hành động) đọc trạng thái GitHub trước khi làm (auto-merge flag, nhãn); Routine GitHub trigger `pull_request.synchronize` kích phiên agent cho `review`/`fix`/`update` khi thiếu `XT_STEWARD_TOKEN` | REC-03/04/08; khóa thao tác; refresh head trước thực hiện | T-1517 |
+| AUTO-06 — Nâng cấp và drift có kiểm chứng | Dự án đích thấy lệch cấu hình/tài liệu/quyền và nhận PR nâng cấp trong phạm vi | `install.py --plan`/manifest (REC-09); `doctor --drift --json` so manifest với bản cài và tag mới nhất; Routine tuần ở dự án đích mở PR nâng cấp từ plan | Giữ tùy chỉnh; không đổi ruleset/production | T-1516, T-1518 |
+| AUTO-07 — Đánh giá tự chủ trước khi mở rộng | Bộ task chuẩn + corpus false-green chạy lại khi sửa policy/harness | `xt.py autonomy-bench --json`: corpus PR/rollup/review/guard fixture (mọi tái hiện §2, audit 🔴/🟠 đã sửa, ca đối kháng do reviewer khác model thêm) — exit 1 khi false-green > 0; `docs/ops/AUTONOMY-BASELINE.md` ghi cấu hình, revision, số đo; CI chạy ở job `quality` | Ca đối kháng do reviewer khác model viết, không phải tác giả bản sửa; kết luận giới hạn trong tập đã kiểm | T-1521 |
 
 ### Thang tự chủ theo loại thay đổi (mục tiêu sau đợt 3.9/3.10)
 
@@ -248,21 +252,21 @@ flowchart TD
 | Chặn oan / phục hồi | Corpus `test_guard_corpus.py`; tỷ lệ restart đúng bước (fixture AUTO-05) |
 
 Baseline tại mốc (`9433792`, CI [quality][quality-run]): 788 test, coverage 100 %, cổng 150,5 s; PR #94–#157 merge theo làn
-với steward, số lần merge tay chưa đo — `T-1520` đo trước khi bật AUTO-03/04 thật. Mục tiêu số đặt sau pilot.
+với steward, số lần merge tay chưa đo — `T-1521` đo trước khi bật AUTO-03/04 thật. Mục tiêu số đặt sau pilot.
 
 ## 7. Thứ tự triển khai và điểm kiểm soát
 
-Kế hoạch máy đọc: [`PLAN-3.9-automation.md`](../autopilot/PLAN-3.9-automation.md) (T-1501…T-1521, Gate từng task, 4 con
-số, điểm dừng). Tóm tắt:
+Kế hoạch máy đọc: [`PLAN-3.9-automation.md`](../autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, Gate từng task, 4 con
+số, điểm dừng; `sau:` là dependency trong file, `cần:` là điều kiện ngoài file). Tóm tắt:
 
 | Đợt | Task | Phụ thuộc | Điều kiện sang đợt tiếp |
 |---|---|---|---|
-| 1 — Kết luận đạt đáng tin | T-1501…T-1506 (REC-01/02/06/07/08, `-k` rỗng) | 3.8.0 đã phát hành (`main` có #159…#1417) | test đỏ trước/xanh sau cho mọi tái hiện §2; `autonomy-bench` nền |
+| 1 — Kết luận đạt đáng tin | T-1501…T-1506 (REC-01/02/06/07/08, `-k` rỗng) | 3.8.0 đã phát hành (`main` có #159 và T-1417) | test đỏ trước/xanh sau cho mọi tái hiện §2 (các test này là hạt nhân corpus của T-1521) |
 | 2 — Review/merge nhất quán | T-1507…T-1509 (REC-03/04, AUTO-03) | đợt 1; T-1408/1409/1411 đã merge | `merge_eligibility` dùng chung 5 điểm; corpus guard xanh; workflow reviewer `ci-check` xanh (chạy thật cần `XT_REVIEWER_TOKEN` — `loop defer`) |
-| Phát hành 3.9.0 | T-1521 | đợt 1–2 | CHANGELOG, VERSION, tag qua `release-tag.yml` |
-| 3 — Bằng chứng và điều phối | T-1510…T-1514 (AUTO-01/02/04, hook mới, REC-11) | đợt 1 (evidence v2 cần REC-01/02/06) | fixture DAG/giao nhau; hook test payload giả; `ci-triage` fixture 4 loại lỗi |
-| 4 — Steward, nâng cấp, đánh giá, yêu cầu | T-1515…T-1520 (AUTO-05/06/07, REC-05/09/10/13) | đợt 2–3 | fixture phục hồi/event lặp; manifest; `AUTONOMY-BASELINE.md`; ADR selection |
-| Phát hành 3.10.0 | T-1521 (lần 2) | đợt 3–4 | như trên; dự án đích chạy lại `install.py` |
+| Phát hành 3.9.0 | T-1510 | đợt 1–2 | CHANGELOG, VERSION 3.9.0 (Gate kiểm), tag qua `release-tag.yml` |
+| 3 — Bằng chứng và điều phối | T-1511…T-1515 (AUTO-01/02/04, hook mới, REC-11) | 3.9.0 (evidence v2 cần REC-01/02/06) | fixture DAG/giao nhau; hook test payload giả; `ci-triage` fixture 4 loại lỗi |
+| 4 — Steward, nâng cấp, đánh giá, yêu cầu | T-1516…T-1521 (AUTO-05/06/07, REC-05/09/10/13) | đợt 2–3 | fixture phục hồi/event lặp; manifest; `AUTONOMY-BASELINE.md`; ADR selection |
+| Phát hành 3.10.0 | T-1522 | đợt 3–4 | như trên; dự án đích chạy lại `install.py` |
 
 Mỗi task một PR nhỏ (nhánh theo ràng buộc phiên, D-065). Pilot AUTO-03/04/05 ở chính repo khung trước, rồi
 `seeker19110/hotel-manager` ([TARGETS](TARGETS.md)) ở chế độ chỉ-lập-quyết-định (`--json`, không `--apply`) một tuần, so với
@@ -294,6 +298,8 @@ kết quả mong đợi, rồi mới bật ghi/merge.
   headless (LOOP-CI-014).
 - Routines chạy dưới danh tính chủ tài khoản: không dùng làm reviewer độc lập; chỉ kích `fix`/`update`.
 - Hook `prompt`/`agent`: không là bằng chứng; chỉ dùng cho nhắc nhở (ví dụ Stop nhắc còn task), có `timeout`.
+- `docs/autopilot/PLAN*.md` chứa lệnh Gate mà harness chạy nhưng `merge_lane_reasons` xếp làn nhanh (review bản 2 tái hiện:
+  PR chỉ sửa file này → `[]`); T-1511 đưa vào `merge_risk_paths`.
 
 ## 10. Nguồn và dấu vết
 
@@ -316,12 +322,12 @@ Liên kết mã ghim vào commit đánh giá để số dòng không trôi; ngu�
 
 Mã nguồn tại mốc `9433792`: [`same_command`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L1212-L1217) ·
 [`_verdict_blueprint`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L1145-L1152) ·
-[`merge_decision`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L3382-L3465) ·
+[`merge_decision`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L3422-L3486) ·
 [`pr_next`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L5626-L5666) ·
 [`apply_policy`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/.claude/hooks/guard.py#L3965-L3973) ·
-[`carry_states`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L737-L776) ·
+[`carry_states`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L748-L776) ·
 [`audit_rescan`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L2280-L2300) ·
 [`_ci_buckets`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L3252-L3270) ·
 [`merge_permissions`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/install.py#L163-L182) ·
-[`_check_must_cap`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L404-L526) ·
+[`_check_must_cap`](https://github.com/seeker19110/X-Templates/blob/943379215343a4eb537a880f1ed94231774ac1cd/scripts/xt.py#L411-L526) ·
 [Run Links đã kiểm](https://github.com/seeker19110/X-Templates/actions/runs/39233814093/job/117997920837).
