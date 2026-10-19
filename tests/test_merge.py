@@ -1315,7 +1315,9 @@ class MissingRequiredCheckTest(unittest.TestCase):
         d = xt.merge_decision(p, 3)
         self.assertEqual(d["verdict"], "human")
         self.assertIn("ruleset đòi check bắt buộc không có trên head: dast", d["reasons"][0])
-        self.assertIn("không phải vì thiếu review", d["reasons"][0])
+        self.assertIn("GitHub báo BLOCKED vì thiếu check", d["reasons"][0])
+        changes = {**p, "reviewDecision": "CHANGES_REQUESTED"}
+        self.assertEqual(xt.merge_decision(changes, 3)["verdict"], "fix")  # review đòi sửa vẫn được báo trước
 
     def test_blocked_without_missing_check_stays_review(self):
         rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}]
