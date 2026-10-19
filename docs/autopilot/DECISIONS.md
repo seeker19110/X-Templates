@@ -559,3 +559,10 @@
 - Chọn: Lệnh release-check gom blueprint + audit + kiểm lại cuối + cây git + đề xuất Khi chạy thật
 - Lý do (tiêu chí chất lượng cuối): blueprint-status một việc một nhà; GO-NO-GO cần nhiều nguồn và bảng N/A chờ người; JSON và Markdown cùng nguồn (PD-08)
 - Đường lùi: Xoá cmd_release_check; GO-NO-GO điền tay như trước
+
+### D-079 · 2026-10-19T18:08:50+00:00 · Cổng commit của repo khung mất ~190 s (test 97 %) — rút thời gian bằng cách nào
+
+- Phương án: (1) Hook commit chỉ chạy test liên quan file đổi, CI chạy trọn (BASE-GATE cho phép) · (2) Giữ trọn bộ test + coverage 100 % nhưng chạy mỗi lớp test một tiến trình song song theo số CPU (coverage parallel=True đã có) · (3) Chấp nhận 190 s
+- Chọn: Giữ trọn bộ test + coverage 100 % nhưng chạy mỗi lớp test một tiến trình song song theo số CPU (coverage parallel=True đã có)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: không bỏ kiểm nào ở hook, cùng ngưỡng; đo 180 s → 66 s trên 4 CPU; CI cũng nhanh theo; phương án test liên quan cần bản đồ file→test và có thể lọt lỗi chéo
+- Đường lùi: Trả dòng test: trong xt.yaml về discover tuần tự

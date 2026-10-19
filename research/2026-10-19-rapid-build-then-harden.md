@@ -242,6 +242,7 @@ planner.
 | build (`xt.py stats`) + typecheck (`mypy --strict`, 4 file) + lint (validate, link, progress/changelog/ci-check, ruff, shellcheck, json) | ≈ 6 s | tính từ tổng trừ test |
 | test (`coverage run -m unittest`, 841 test, coverage dòng + nhánh 100 %) | 188,75 s (`Ran 841 tests in 188.750s`) | ≈ 97 % thời gian cổng |
 | **gate tổng** (`scripts/dev-task.sh gate`, exit 0) | **195 s** | một mẫu, 2026-10-19 |
+| gate tổng **sau D-079** (mỗi lớp test một tiến trình, 4 luồng, vẫn coverage 100 %) | **68 s** (test 66 s) | cùng ngày, cùng máy |
 
 Đọc số: nút thắt là **suite test ~3 phút chạy trọn mỗi commit** (nhiều test gọi `xt.py`/hook qua subprocess để giữ coverage
 100 % cả subprocess — PROGRESS "Giữ cổng"), không phải lint/type. Dưới ngưỡng 10 phút của `BASE-GATE-011`, nên đây là

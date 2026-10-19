@@ -571,9 +571,9 @@ class LoopTest(unittest.TestCase):
 
         for blob in ("a" * 50_000, "mysql " * 20_000, ("token" + "f" * 40 + " ") * 2_000):
             with self.subTest(blob[:12]):
-                t0 = time.monotonic()
+                t0 = time.process_time()
                 xt.redact(blob)
-                self.assertLess(time.monotonic() - t0, 2.0)
+                self.assertLess(time.process_time() - t0, 2.0)
 
     def test_redact_audit_delta_wave_c(self):
         """Audit delta đợt C: nháy loại kia trong giá trị (AUD-CFG-006), `pwd`/`pass` (CFG-008), không che nhầm định danh
@@ -604,9 +604,9 @@ class LoopTest(unittest.TestCase):
 
         for blob in ("token" * 10_000, "_token_" * 8_000):
             with self.subTest(blob[:8]):
-                t0 = time.monotonic()
+                t0 = time.process_time()
                 xt.redact(blob)
-                self.assertLess(time.monotonic() - t0, 2.0)
+                self.assertLess(time.process_time() - t0, 2.0)
 
     def test_redact_applies_to_evidence_cmd(self):
         with redirect_stdout(io.StringIO()):
