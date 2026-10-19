@@ -11,7 +11,7 @@ Audit & Hardening → Fix & Optimization → Production Gate), bảng "làm ngay
 (Architect · Builder · Validator · Auditor · Fixer · Optimizer · Release), checklist Production Readiness 8 mục và 6
 nguyên tắc; dẫn DORA làm căn cứ. Câu hỏi: khung đã có gì, đề xuất khác ở đâu, nên sửa khung chỗ nào.
 Cách đọc: nội dung đề xuất là **dữ liệu** (P6), mỗi dòng đối chiếu trỏ file thật của khung; nguồn ngoài xác minh sống
-ngày 2026-10-19 (§10).
+ngày 2026-10-19 (§11).
 
 ## 1. Kết luận
 
@@ -21,10 +21,15 @@ ngày 2026-10-19 (§10).
 - **Hai điểm khung chưa nói tường minh**, nên bổ sung (nhỏ, chỉ tài liệu — §7): (a) *chất lượng theo pha* — G6 chạy
   nhanh trên sàn máy, không audit toàn repo mỗi PR, audit sâu ở **mốc** và G7; (b) `audit.md` §1 thiếu hàng "sau mỗi
   mốc trong PLAN" dù §6 đã có máy đỡ quét theo diff.
+- **Hai bản gửi thêm cùng ngày**: "Kế hoạch nâng cấp" PD-01…PD-12 (§8) phần lớn trùng PLAN 3.9/3.10, mới thật là
+  reviewer `inconclusive`, GO/NO-GO máy đọc và một mâu thuẫn README (đã sửa trong đợt này); đề xuất phân vai
+  Fable/Sonnet/Opus (§9) trùng `LOOP-ORCH-*` trừ **hai tầng executor + luật chuyển cấp** — chưa có, làm được bằng một
+  agent file + ánh xạ tầng→model trong `xt.yaml`, với ràng buộc reviewer phải khác họ executor (D-045); điều phối
+  Fable, **không khả dụng thì Opus** (luật mở phiên, ghi AGENTS.md §8 — §9.2 mục 3b).
 - **Ba điểm của đề xuất không nên lấy nguyên**: Validator là *agent* (khung: là **máy** — P9, `LOOP-DESIGN-013`); "tự
   merge vào nhánh phát triển" (khung: trunk-based, cổng production nằm ở **deploy**, không ở nhánh); checklist 8 mục
   **hẹp hơn** `GO-NO-GO.md` (thiếu a11y, pháp lý/DPIA, threat model, license phụ thuộc, quyết định "Khi chạy thật").
-- Căn cứ "chi phí sửa muộn lớn hơn nhiều": DORA xác nhận **định tính** (§10); con số nhân lên theo pha (Boehm 1981)
+- Căn cứ "chi phí sửa muộn lớn hơn nhiều": DORA xác nhận **định tính** (§11); con số nhân lên theo pha (Boehm 1981)
   **(chưa xác minh định lượng)** — không ghi số vào khung.
 
 ## 2. Năm giai đoạn ↔ vòng đời G0–G8 và autopilot
@@ -119,11 +124,11 @@ tự nhận ra phần lớn cơ chế khung đã có (mục 2 của bản). Đ�
 
 | PD | Nội dung | Khung / PLAN 3.9–3.10 đã có | Đánh giá |
 |---|---|---|---|
-| PD-01 baseline + corpus hồi quy | `loop stats` (`LOOP-DESIGN-024`), T-1521 `autonomy-bench` (corpus xanh giả), `LOOP-DESIGN-016` baseline DORA | **trùng** T-1521 phần corpus; phần "thời gian từng gate" chưa ai đo — số đo đầu tiên ở §9 |
+| PD-01 baseline + corpus hồi quy | `loop stats` (`LOOP-DESIGN-024`), T-1521 `autonomy-bench` (corpus xanh giả), `LOOP-DESIGN-016` baseline DORA | **trùng** T-1521 phần corpus; phần "thời gian từng gate" chưa ai đo — số đo đầu tiên ở §10 |
 | PD-02 ADR + hợp đồng chiều (`delivery_phase`, `gate_scope`, `target_environment`, `release_authorization`) | `scale` + `gate_floor` trong `scope` của state (T-1503); `- grant:` production (ADR-0022); môi trường `WF-ENV-*`; GO-NO-GO ký bởi người | `delivery_phase` là **mới**; dù bản nói "không phải vòng đời thứ hai", thêm biến pha vào state là chi phí schema/migration/tài liệu cho mọi dự án đích. Tối thiểu đủ dùng: "mốc" trong PLAN + hàng audit (§7a) + câu "chất lượng theo pha" (§7b); chỉ thêm biến pha khi PD-01 cho thấy cần |
 | PD-03 scope + yêu cầu theo thời hạn | T-1503/T-1505/T-1519; MUST sàn S vs `MUST@M` (ADR-0003/0004) | **trùng**; "phải đạt ngay / trước release" hiện phân theo quy mô, chưa theo thời gian — cùng kết luận §6 |
 | PD-04 trạng thái loop theo giai đoạn | `done` đã đòi blueprint 0 MUST + mọi `— Kiểm:` xanh (`LOOP-DESIGN-022/023`) → `done` ≈ "sẵn sàng phát hành về chất lượng", chưa phải "được phép deploy" (G7 + người ký) | thiếu đúng một bậc "mốc đã kiểm" — ra từ (§7a); không cần đổi nghĩa `done` |
-| PD-05 gate planner theo rủi ro, chạy quan sát trước | `BASE-GATE` quyết định "hook chạy test nhanh liên quan, CI toàn bộ; suite < 30 s thì chạy hết"; T-1504 `not_run`; T-1509 typed decision; `BASE-GATE-011` < 10 phút | hợp lý về nguyên tắc, **đúng là cần số trước** (bản cũng nói vậy). Repo khung: hook commit chạy **full gate** — số đo §9 cho biết có đáng tách không |
+| PD-05 gate planner theo rủi ro, chạy quan sát trước | `BASE-GATE` quyết định "hook chạy test nhanh liên quan, CI toàn bộ; suite < 30 s thì chạy hết"; T-1504 `not_run`; T-1509 typed decision; `BASE-GATE-011` < 10 phút | hợp lý về nguyên tắc, **đúng là cần số trước** (bản cũng nói vậy). Repo khung: hook commit chạy **full gate** — số đo §10 cho biết có đáng tách không |
 | PD-06 evidence có nguồn gốc, vô hiệu hoá | T-1513 evidence v2 (`cmd_sha256`, `scope`, `req_rev`, `files_digest`), `verified.json` dấu vân tay cây (`LOOP-DESIGN-022`) | **trùng**; mở rộng thêm lockfile/toolchain/policy vào `files_digest` là bổ sung nhỏ cho T-1513, không phải lát riêng |
 | PD-07 audit theo mốc, nợ có hạn, reviewer `inconclusive` | `audit check` đã chặn `chấp nhận` quá hạn/không chủ; T-1506 N/A xét lại; `pr reviewed` chỉ có `--clean`/`--blocking` | **mới thật, nhỏ**: verdict `inconclusive` (diff bị cắt, hết budget, thiếu file) — hiện reviewer hết ngân sách chỉ có thể im lặng hoặc `--blocking`; "mốc" như §7a |
 | PD-08 GO/NO-GO máy đọc | `blueprint-status --json`, `audit check`, `merge-check --json` rời nhau; GO-NO-GO chỉ Markdown | **mới, vừa phải**: một lệnh `release-check --json` gom blueprint + audit + CI head + review + SHA/digest artefact, in bảng FAIL; Markdown và JSON cùng nguồn |
@@ -144,7 +149,85 @@ thực thi"). Phần thật sự mới gom thành một PLAN sau T-1522, theo th
 --inconclusive` · (3) `release-check --json` · (4) baseline thời gian cổng + `loop stats` (PD-01 rút gọn) → mới quyết có
 làm gate planner (PD-05) hay không. `delivery_phase`, PD-04 và phần enforcement của PD-09 chờ số từ (4).
 
-## 9. Số đo đầu tiên: cổng commit của repo khung
+## 9. Đối chiếu đề xuất phân vai Fable (điều phối) · Sonnet (thực thi mặc định) · Opus (thực thi khó) — gửi thêm 2026-10-19
+
+Đề xuất thứ ba: orchestrator–workers + routing theo tầng model, phiếu giao việc 8 trường, bảng chọn Sonnet/Opus theo
+4 khía cạnh (phức tạp · bất định · rủi ro · phạm vi ảnh hưởng), quy tắc chuyển cấp (≤ 2 vòng sửa rồi lên Opus; rủi ro
+cao lên ngay; Opus trả về Fable khi cần quyết định phạm vi/kiến trúc), song song mặc định 1 executor, ba mức kiểm
+(task · mốc · phát hành), 5 chỉ số. Mục tiêu giữ nguyên: dự án đích code nhanh, sản phẩm vẫn chất lượng cao.
+
+### 9.1 Khung đã có gì
+
+| Đề xuất | Khung | Cột |
+|---|---|---|
+| Fable = điều phối duy nhất, quyết định lớn; bộ điều phối tất định làm phần đã rõ | Phiên chính là điều phối viên duy nhất (`LOOP-ORCH-001`), tự duyệt điểm quyết định (ADR-0008); harness sở hữu vòng lặp (`LOOP-DESIGN` nguyên tắc 1): `loop status` chọn task kế, Stop hook quyết dừng/tiếp; T-1511 `loop next --json` trả task **sẵn sàng theo DAG + cặp giao nhau file** — chính là "khi A xong, giao B" | **có**; T-1511 là mảnh còn thiếu, đã trong PLAN 3.10 |
+| Sonnet thực thi mặc định; reviewer khác model | `.claude/agents/executor.md` `model: sonnet`, `reviewer.md` `model: opus`, `researcher.md` sonnet; `LOOP-ORCH-005`, D-045 (`pr reviewed --clean` đòi reviewer khác họ model) | **có** |
+| Opus thực thi việc khó/rủi ro cao | **Chưa có**: chỉ một `executor`; bảng "chọn worker theo hai trục" (`LOOP-ORCH` nguyên tắc 3) chỉ quyết *giao hay không giao*, không quyết *model nào* | **chưa có** (§9.2) |
+| Phiếu giao việc 8 trường | Gói handoff `LOOP-ORCH-002`: `goal` · `acceptance_criteria` (= Gate) · `files_in_scope` · `budget` · `depth` · `granted_scopes` · `trust_level` · `report_format`; phụ thuộc = `(sau: …; files: …)` của T-1511; giao ước = `API-CONTRACT.md` chốt trước khi song song (`LOOP-ORCH-007`); ngữ cảnh đúng phạm vi = T-1512 `context --task` | **có 6/8**; thiếu `executor + lý do` và `điều kiện chuyển cấp` |
+| Chuyển cấp: ≤ 2 vòng sửa → Opus; rủi ro cao lên ngay; giữ ngân sách; chuyển cả diff/lỗi/giả thuyết đã loại | `LOOP-ORCH-014`/`LOOP-STOP-011`: thất bại 2 lần → **đổi cách hoặc chia nhỏ**, lần 3 → người; `max_same_failure: 3` theo chữ ký lỗi (`LOOP-DESIGN-005`) | **có khung, chưa có "đổi tầng model" là một dạng đổi cách** (§9.2) |
+| Opus đưa về Fable khi cần quyết định | Subagent không tự quyết, trả phương án về phiên chính (AGENTS.md §4, `LOOP-ORCH` nguyên tắc 2–3) | **có** |
+| Lỗi môi trường phân loại riêng, retry có hạn | T-1515 `loop ci-triage` (hạ tầng/test/lint/…; `rerun_used ≤ 1`) | **có** (PLAN 3.10) |
+| Song song: mặc định 1, tăng theo độ độc lập; worktree; chủ sở hữu schema/contract | `LOOP-ORCH-006/007/008/010` (≤ 5, hợp đồng trước, worktree B khi ≥ 2 executor, cùng file thì nối tiếp); nguồn Anthropic "coding ít phần song song hơn research" đã trích | **có** |
+| Ba mức kiểm: task · mốc · phát hành | task = Gate + `loop record`; phát hành = G7 + GO-NO-GO; **mốc chưa có** (§7a) | có 2/3 |
+| Phát hiện review có vị trí · tác động · tiêu chí · bằng chứng; đề xuất style phân mức | `reviewer.md`: `file:dòng` + mức 🔴/🟠/🟢 + **đường tái hiện**, không có đường tái hiện → "nghi ngờ" | **có** |
+| "Đổi model không tự chứng minh đúng" | `LOOP-ORCH-004`: phiên chính chạy lại Gate trước khi tick; D-045 chỉ là điều kiện cần | **có** |
+| Sổ công việc phân biệt đã viết · đã kiểm · đã tích hợp · đủ điều kiện phát hành | tick `[x]` chỉ sau evidence; PR merge; `done` + GO-NO-GO — thiếu bậc "mốc" như §8 PD-04 | có 3/4 |
+| 5 chỉ số (thời gian tới nghiệm thu, chi phí/task, tỉ lệ làm lại/chuyển cấp, lỗi sau tích hợp, thời gian bị chặn) | `loop stats` (`LOOP-DESIGN-024`): `first_pass_rate`, `needs_3_plus`, vòng đã dùng; `LOOP-ORCH-017` tỉ lệ bác; `LOOP-DESIGN-018` chi phí/task (headless) | **có 3/5**; thiếu tỉ lệ chuyển cấp và thời gian chặn vì phụ thuộc |
+| Ví dụ đợt đầu (P, T1–T5, M1) | T1 giao ước trạng thái = T-1513/T-1514; T3 điều phối phụ thuộc/retry/tiếp tục = T-1511/T-1515/T-1517; T4 hiển thị tiến độ = `loop status`/PROGRESS; T5 mẫu = T-1520; **T2 "chọn executor theo quy tắc" là phần mới duy nhất** | trùng 3.10 trừ T2 |
+
+### 9.2 Phần mới thật và cách ghép vào khung (đề xuất, chưa làm)
+
+1. **Hai tầng executor thay vì một.** Subagent của Claude Code ghim `model:` trong frontmatter, nên cần hai file:
+   `executor.md` (mặc định, sonnet) và một `executor-deep.md` (opus; cùng `tools`, `maxTurns` cao hơn). Phiên chính chọn
+   theo bảng 4 khía cạnh của đề xuất; bảng chính sách khởi đầu (UI/CRUD/bug cục bộ → mặc định; giao ước xuyên module,
+   auth/phân quyền/cô lập tenant, migration dữ liệu thật, đồng thời/retry, lỗi không ổn định, chưa đủ thông tin → sâu)
+   đưa vào `orchestration-and-subagents.md` "Khi nào tách subagent" — hàng mới, không ID mới.
+2. **Ràng buộc kéo theo cần giải trước khi làm (1):** `reviewer.md` đang ghim `model: opus`; task do tầng sâu (opus) làm
+   thì reviewer cùng họ → `pr reviewed --clean` bị từ chối (D-045) và `LOOP-ORCH-005` vi phạm. Cần reviewer chọn
+   **tương đối với executor** (hai agent reviewer, hoặc phiên chính review khi executor là opus, hoặc `XT_REVIEWER_MODEL`
+   như mẫu `xt.yaml` đã gợi ý). Đây là điểm bản đề xuất không nêu.
+3. **Tên tầng, không tên model, trong artefact commit.** AGENTS.md §3/LOOP-HARNESS-027 cấm ghi tên model vào artefact
+   đẩy lên repo (guard hiện chỉ quét commit/PR; `PLAN.md` là file commit). Ghi trong PLAN bằng tầng: `(exec: deep)`
+   (mặc định bỏ trống = tầng mặc định) trong ngoặc mà parser T-1511 đã đọc; ánh xạ tầng → model ở `xt.yaml`
+   (`executor_default_model`, `executor_deep_model`) cùng chỗ với `author_model_family`. Khớp chính bản đề xuất: "model ID
+   là cấu hình của bước triển khai". Model thật đã dùng ghi vào `.autopilot/runs.jsonl` (gitignore) cho `loop stats`.
+3b. **Tầng điều phối có đường lùi: Fable không khả dụng thì phiên chính chạy Opus** (yêu cầu chủ repo 2026-10-19).
+   Model của phiên chính không nằm trong `xt.yaml` mà chọn lúc mở phiên (bộ chọn model của phiên cloud, CLI/headless
+   `--model`), nên đây là luật vận hành ghi ở AGENTS.md §8 và mẫu `CLAUDE.md` dòng "Model/effort" (hiện để `[ĐIỀN]`):
+   `điều phối: fable → opus khi không khả dụng · thực thi mặc định: sonnet · thực thi sâu: opus`. Hệ quả phải ghi kèm:
+   khi phiên chính là Opus thì tầng sâu trùng họ với điều phối (chấp nhận được — điều phối không viết code) nhưng
+   **reviewer không được là Opus** cho task tầng sâu (D-045) → mục 2 càng bắt buộc; `author_model_family` trong `xt.yaml`
+   phản ánh họ thật của phiên đang chạy, không ghi cứng "fable". Không có cơ chế máy phát hiện "Fable không khả dụng" —
+   là quyết định của người/launcher khi mở phiên; ghi model thật vào `runs.jsonl` để `loop stats` so hai cấu hình.
+4. **Chuyển cấp = một dạng "đổi cách" của `LOOP-ORCH-014`**, không phải luật mới: lần thất bại thứ 2 cùng task → phiên
+   chính chọn giữa chia nhỏ task, đổi cách tiếp cận, hoặc **đổi tầng** (deep); rủi ro cao (`risk_tags` ≠ rỗng hoặc đường
+   dẫn nhạy cảm của `LOOP-STOP-009`) → tầng sâu ngay từ đầu; gói bàn giao khi chuyển = diff hiện tại + evidence lỗi +
+   giả thuyết đã loại (có sẵn trong `.autopilot/evidence/T-NNN.json` 40 dòng cuối); `max_same_failure: 3` giữ nguyên
+   (lần chuyển tầng tiêu một lần thử — lần 3 vẫn `blocked`, đúng nguyên tắc "sửa mã vòng 4 gần như luôn là đặc tả sai").
+   Ghi `escalated_to` vào `runs.jsonl` → `loop stats` thêm `escalation_rate`; `blocked_by_dependency_s` từ T-1511.
+5. **Hai trường thêm vào gói handoff** (`LOOP-ORCH-002`, sửa dòng, không thêm ID): `executor_tier + lý do` và
+   `escalation_condition` (mặc định: luật ở mục 4).
+6. **Không lấy / không đổi:** (a) "Fable chỉ tham gia đầu mốc, khi cần quyết định, lúc nghiệm thu" — đúng về vai, nhưng
+   trong autopilot một phiên (ADR-0009) phiên chính **là** vòng lặp (Stop hook gọi lại nó); bỏ nó ra khỏi vòng đòi
+   runner headless ngoài phiên (tầng "Trigger ngoài phiên"/durable runtime của `loop-design.md`) — ngoài phạm vi, và
+   chi phí context của phiên chính đã được giới hạn bằng T-1512 + `LOOP-ORCH-011/012` (báo cáo ≤ 25 dòng). (b) Validator
+   vẫn là máy (như §4). (c) Ngưỡng "≤ 2 vòng sửa" là tham số khởi đầu, bản tự nói cần đo — dùng `loop stats` trước khi
+   siết/nới (`LOOP-DESIGN-024`).
+
+Thứ tự làm, sau T-1522 cùng gói với §8: (1) tài liệu hàng chọn tầng + bảng chính sách + luật chuyển cấp (1 PR, docs) ·
+(2) `executor-deep.md` + reviewer tương đối + `install.py` chép (1 PR, harness — làn chuẩn) · (3) `exec:` trong
+parser T-1511, ánh xạ `xt.yaml`, `runs.jsonl`/`loop stats` (1 PR, `xt.py` + test) · (4) đợt đại diện 3 task (đơn giản ·
+nhiều phụ thuộc · rủi ro cao) đo 5 chỉ số rồi mới chỉnh ngưỡng. Mỗi bước có đường lùi: xoá agent file, bỏ khoá
+`xt.yaml` → về một tầng như hiện nay.
+
+Nguồn xác minh 2026-10-19: Anthropic *Building effective agents* — routing ("classifies an input and directs it to a
+specialized followup task", ví dụ "sending simpler questions to cheaper models"), orchestrator-workers ("a central LLM
+dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results", hợp cho thay đổi mã
+"span an unknown number of files"), và "finding the simplest solution possible, and only increasing complexity when
+needed": <https://www.anthropic.com/engineering/building-effective-agents>. Nguồn về agent chạy dài (tiến từng phần,
+lưu tiến độ, không khai xong sớm) và "coding ít phần song song" đã trích ở `loop-design.md`/`orchestration-and-subagents.md`.
+
+## 10. Số đo đầu tiên: cổng commit của repo khung
 
 Đo trong phiên này (container cloud, Python 3.13, cache pip nóng), `time scripts/dev-task.sh gate` trên cây làm việc của
 bản nghiên cứu này — ghi ở mục 10 sau khi chạy; đây là **một mẫu**, không phải baseline (`LOOP-DESIGN-016` đòi ≥ nhiều
@@ -163,7 +246,7 @@ chi phí lặp chứ chưa phải nút thắt; nếu PD-05 làm, phần đáng l
 quyết định sẵn có của `BASE-GATE`: "hook chạy test nhanh liên quan, CI toàn bộ"), CI vẫn chạy trọn — không cần gate
 planner tổng quát. Số để so sau này: `.autopilot/runs.jsonl` + `loop stats` (`LOOP-DESIGN-024`) khi autopilot chạy.
 
-## 10. Nguồn (xác minh 2026-10-19)
+## 11. Nguồn (xác minh 2026-10-19)
 
 - DORA — *DORA's software delivery performance metrics* (5 chỉ số: change lead time, deployment frequency, failed
   deployment recovery time, change fail rate, deployment rework rate; "reducing the batch size of changes" cải thiện cả

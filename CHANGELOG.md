@@ -31,7 +31,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   nâng cấp X-Templates" trong [`research/2026-10-19-rapid-build-then-harden.md`](research/2026-10-19-rapid-build-then-harden.md)
   (đề xuất "code nhanh → kiểm liên tục → audit sâu → fix → tối ưu → nghiệm thu → production" và PD-01…PD-12 đối chiếu với
   G0–G8/autopilot/audit/GO-NO-GO: khung đã có phần lớn; còn thiếu nhịp audit theo mốc, verdict `inconclusive` cho reviewer,
-  GO/NO-GO máy đọc — chưa làm, ghi §7/§8 của bản nghiên cứu).
+  GO/NO-GO máy đọc — chưa làm, ghi §7/§8/§9 của bản nghiên cứu; §9 đối chiếu đề xuất hai tầng executor Sonnet/Opus — chưa có, kèm ràng buộc reviewer khác họ).
 - Review #168: ghi chú dự án (`— Bằng chứng:`, `(Miễn: …)`) của mục không có đuôi `→ Kiểm:`/`· Nguồn:` không còn bị tính là chữ
   yêu cầu (trước đó mục `[x]` về `[ ]` oan); với `review_identity`, `pr next`/steward bỏ sổ review cục bộ của tác giả, dấu bị
   sửa sau khi đăng không tính, `review_identity` lấy từ cây làm việc khi không đọc được `origin/<base>`; `pr-review.yml` cấm
