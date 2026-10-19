@@ -431,3 +431,4 @@
 - Chọn: Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ
 - Lý do (tiêu chí chất lượng cuối): Đúng: X-Company#23 bị báo cần review trong khi ruleset đòi 0 review và chỉ thiếu job dast; REST chạy được ở phiên chặn GraphQL; chỉ gọi thêm khi BLOCKED; fail về hành vi cũ
 - Đường lùi: Bỏ _required_checks và nhánh missingRequired
+- Giới hạn chấp nhận (review #150): check cùng tên của app khác che được check thiếu (khi đó vẫn báo "cần review"); branch protection cổ điển không có trong `rules/branches` (giữ hành vi cũ); workflow riêng chưa kịp đăng ký check ngay sau push có thể bị báo thiếu một lượt — `pr-steward`/lần chạy sau tự sửa.
