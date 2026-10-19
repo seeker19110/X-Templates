@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | 🔴 | 1 | 2 (AUD-SEC-072 từ delta2, AUD-SEC-077) | 7 | 0 | 0 |
 | 🟠 | 8 | 11 | 93 | 0 | 0 |
-| 🟢 | 32 | 75 | 110 | 0 | 2 |
+| 🟢 | 32 | 73 | 112 | 0 | 2 |
 
 Mới: 🔴 AUD-SEC-077 (reviewer-alt nâng mức); 🟠 AUD-DOC-054 · AUD-HAR-077 · AUD-HAR-078 · AUD-HAR-079 · AUD-TEST-008 · AUD-TEST-009 · AUD-XFEAT-010 · AUD-XFEAT-011; 🟢 AUD-CFG-009, AUD-DOC-055…064, AUD-HAR-080…090, AUD-TEST-010/011, AUD-CODE-014…017, AUD-XFEAT-012/013/014, AUD-CI-013.
 
@@ -109,7 +109,7 @@ Kế hoạch đợt 1 của delta2 (sửa guard) **chưa được duyệt/làm**
 
 | Đợt | Phát hiện | PR dự kiến | Gate của đợt |
 |---|---|---|---|
-| 0 | sổ + báo cáo này; AUD-DOC-063 (đầu sổ) | `docs(audit): quét lại 11 nhóm tại a4f929c — 9 🟠, 31 🟢 chờ duyệt` (PR này, làn nhanh) | `xt.py audit check docs/ops/AUDIT-STATUS.md` exit 0 |
+| 0 | sổ + báo cáo này; AUD-DOC-063 (đầu sổ), AUD-DOC-053 (PROGRESS) | #172 `docs(audit): quét lại 11 nhóm tại a4f929c — 1 🔴, 8 🟠, 32 🟢 chờ duyệt` (làn nhanh) | `xt.py audit check docs/ops/AUDIT-STATUS.md` exit 0 |
 | 1 | 🔴 AUD-SEC-072 → 🔴 SEC-077 → 🟠 SEC-073 → SEC-074 → SEC-075 (+ SEC-076, CFG-009, HAR-083 cùng `guard.py`/`redact`) | `fix(guard): brace lệch nháy, surrogate fail-open, {x..y}, bytecode cache, exfil còn sót (3.8.1)` | `python3 -m unittest discover -s tests -k 'brace_quote_desync or surrogate or brace_sequence_middle or guard_cache_tamper or secret_exfil_other_channels or redact'` |
 | 2 | AUD-XFEAT-010, XFEAT-011, DOC-054 (chọn (b): guard chặn `eligible: false`; `merge-check`/`merge-watch` không in lệnh merge khi chưa review; `pr next`/steward đọc nguồn đã đăng, `_ci_blocker` không coi merge-gate đỏ là `fix`) + XFEAT-012, XFEAT-014, HAR-074 (test Gate còn thiếu) | `fix(merge): một nguồn review, merge-check không gợi merge khi chưa review, guard chặn eligible=false (ADR-0028)` — **cần chủ repo quyết (a)/(b)** | 3 one-liner trong sổ + `-k blocking_in_chain_wins` |
 | 3 | AUD-HAR-077, HAR-078, HAR-079 (+ HAR-088/089 bằng chứng blueprint, HAR-084, CODE-017) | `fix(audit): SHA phải trên nhánh chính, gốc repo cho N/A trôi, MUST bị sổ bác về [ ], release-check kiểm gate` | `-k 'audit_sha_on_base or NaReevaluatedTest'` + one-liner HAR-079 + `release-check` repo `test: false` → 1 |
@@ -128,7 +128,7 @@ Kế hoạch đợt 1 của delta2 (sửa guard) **chưa được duyệt/làm**
 | AUD-TEST-010, TEST-011 | agent | 4 | chỉ test |
 | AUD-HAR-080/081/082/085/086/087, CODE-014/015/016, XFEAT-013 | agent | 5 | loop/install, rủi ro thấp |
 | AUD-DOC-055…062, DOC-064, HAR-090, CI-013 | agent | 6 | tài liệu/vệ sinh |
-| AUD-DOC-063 | agent | 0 | đã ghi lại đầu sổ trong PR này — đóng khi merge |
+| AUD-DOC-063, AUD-DOC-053 | agent | 0 | đã sửa trong PR này (#172): đầu sổ và PROGRESS |
 | 43 🟢 mở từ trước (xem sổ) | theo ghi chú từng dòng | — | chờ chủ repo hoặc đợt tương ứng |
 
 ## 7. Chưa rà / chưa biết
