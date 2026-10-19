@@ -7,6 +7,8 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
+0. Sau 3.8.0: `loop init --plan docs/autopilot/PLAN-3.9-automation.md` (T-1501…T-1521 — REC/AUTO của
+   `docs/ops/REMEDIATION-PLAN-2026-10-19.md` bản 2, D-066…D-070; chờ chủ repo: token/app reviewer cho T-1508).
 1. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ); sàn quyền token; `xt.pyz` (ADR-0010).

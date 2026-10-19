@@ -6,10 +6,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
-- Kế hoạch khắc phục và nâng cấp tự động hóa sau đánh giá ngày 2026-10-19:
-  [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](docs/ops/REMEDIATION-PLAN-2026-10-19.md).
-  Gồm bằng chứng, ưu tiên, ánh xạ task audit hiện có, tiêu chí nghiệm thu, migration và chỉ số chất lượng;
-  đây là đề xuất tài liệu, chưa thay đổi hành vi công cụ.
+- Kế hoạch khắc phục và nâng cấp tự động hóa sau đánh giá ngày 2026-10-19 (bản 2, thay nháp #160):
+  [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](docs/ops/REMEDIATION-PLAN-2026-10-19.md) — tái hiện lại REC-01/03/06/08
+  bằng lệnh trên `19d3aa8`, nghiên cứu bổ sung nguồn sống (required check `skipped`/`neutral`, hook `PermissionRequest`/
+  `TaskCompleted`/`SubagentStop`, headless `--json-schema`, Code Review, Routines), thang tự chủ theo loại PR, cơ chế cụ
+  thể cho AUTO-01…07; kèm kế hoạch máy đọc cho đợt 3.9.0 → 3.10.0
+  [`docs/autopilot/PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) (T-1501…T-1521, chạy `loop init --plan`
+  sau khi 3.8.0 phát hành — D-066…D-070). Đề xuất tài liệu, chưa thay đổi hành vi công cụ.
 
 ### Changed
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
