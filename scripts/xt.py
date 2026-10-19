@@ -1040,13 +1040,28 @@ def write_state(state: Dict[str, Any], base: Optional[Path] = None) -> None:
     write_atomic(state_dir(base) / "state.json", json.dumps(state, ensure_ascii=False, indent=2) + "\n")
 
 
+EXEC_TIER_RE = re.compile(r"\bexec:\s*(default|deep)\b")  # `(exec: deep)` trong dòng task → tầng executor (ADR-0029)
+EXECUTOR_AGENTS = {
+    "default": "executor",
+    "deep": "executor-deep",
+}  # tên agent trong .claude/agents/, không phải tên model
+ESCALATE_AFTER = 2  # tầng mặc định đỏ từng này lần cùng task trong vòng này → tầng sâu (LOOP-ORCH-014: lần 2 đổi cách)
+PLAN_SECTION_RE = re.compile(r"^#{2,3} (.+?)\s*$")  # mục `## …`/`### …` của PLAN = mốc/lát chứa task
+
+
 def parse_plan(path: Path) -> List[Dict[str, Any]]:
     tasks = []
+    section: Optional[str] = None
     for line in path.read_text(encoding="utf-8").splitlines():
+        h = PLAN_SECTION_RE.match(line)
+        if h:
+            section = h[1]
+            continue
         m = TASK_RE.match(line)
         if not m:
             continue
         g = GATE_RE.search(m["rest"])
+        tier = EXEC_TIER_RE.search(m["rest"])
         tasks.append(
             {
                 "id": m["id"],
@@ -1054,9 +1069,39 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
                 "gate": g.group(1) if g else None,
                 "title": m["rest"].strip(" —-")[:120],
                 "rest": m["rest"],
+                "tier": tier[1] if tier else "default",
+                "section": section,
             }
         )
     return tasks
+
+
+def executor_choice(t: Dict[str, Any], base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
+    """Tầng executor cho task kế (ADR-0029): `(exec: deep)` trong PLAN → sâu ngay; tầng mặc định đỏ ≥ ESCALATE_AFTER lần
+    cùng task trong vòng này (runs.jsonl, lần chạy không phải của `executor-deep`) → chuyển cấp lên sâu. Tên trả về là
+    agent trong `.claude/agents/` — model thật nằm trong frontmatter của agent, không ở PLAN (LOOP-HARNESS-027)."""
+    fails = [
+        r
+        for r in read_runs(base)
+        if r["task"] == t["id"]
+        and r.get("loop") == st.get("started")
+        and r["exit_code"] != 0
+        and r.get("executor") != EXECUTOR_AGENTS["deep"]
+    ]
+    escalated = t.get("tier", "default") == "default" and len(fails) >= ESCALATE_AFTER
+    tier = "deep" if escalated else str(t.get("tier", "default"))
+    return {"tier": tier, "executor": EXECUTOR_AGENTS[tier], "escalated": escalated, "default_failures": len(fails)}
+
+
+def milestone_done(tasks: List[Dict[str, Any]], t: Dict[str, Any]) -> Optional[str]:
+    """Mốc vừa xong: `t` là task đầu của một mục (`## …`/`### …`) khác mục của task đứng trước, và mọi task trước đó đã
+    đóng (`[x]`/`[~]`) → trả tên mục trước (lát/mốc đã xong) để autopilot audit delta trước khi sang mốc kế (audit.md §1)."""
+    i = next((k for k, x in enumerate(tasks) if x["id"] == t["id"]), 0)
+    if i == 0 or tasks[i - 1]["section"] in (None, t["section"]):
+        return None
+    if any(x["state"] not in ("x", "~") for x in tasks[:i]):
+        return None
+    return str(tasks[i - 1]["section"])
 
 
 def read_evidence(task_id: str, base: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -1193,8 +1238,30 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     for t in tasks:
         v = _verdict_task(t, base, deferred, str(st.get("started") or ""))
         if v:
-            return v
+            return _with_dispatch(v, t, tasks, base, st) if v["verdict"] == "continue" else v
     return None
+
+
+def _with_dispatch(
+    v: Dict[str, Any], t: Dict[str, Any], tasks: List[Dict[str, Any]], base: Path, st: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Thêm tầng executor (chuyển cấp nếu có) và mốc vừa xong vào verdict `continue` (ADR-0029)."""
+    v.update(executor_choice(t, base, st))
+    if v["escalated"]:
+        v["reason"] += (
+            f" — chuyển cấp: tầng mặc định đỏ {v['default_failures']} lần → giao `{v['executor']}` kèm diff + evidence lỗi"
+            " + giả thuyết đã loại (LOOP-ORCH-014)"
+        )
+    elif v["tier"] == "deep":
+        v["reason"] += f" — tầng sâu theo PLAN (`exec: deep`): giao `{v['executor']}`"
+    done = milestone_done(tasks, t)
+    if done:
+        v["milestone_done"] = done
+        v["reason"] += (
+            f" · mốc «{done}» đã xong → audit delta trước khi sang mốc kế"
+            " (`xt.py audit plan --status docs/ops/AUDIT-STATUS.md`; 🔴/🟠 thành task mới — audit.md §1)"
+        )
+    return v
 
 
 def _scope_drift(base: Path, st: Dict[str, Any], bp: str) -> str:
@@ -1609,7 +1676,7 @@ def final_check(base: Path) -> Optional[str]:
     )
 
 
-def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
+def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor: Optional[str] = None) -> int:
     base = base or project_dir()
     st = read_state(base) or {}
     timeout = _record_timeout()
@@ -1631,6 +1698,8 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
     }
     if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
         ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
+    if executor:
+        ev["executor"] = executor  # agent đã làm task (tầng), cho `executor_choice`/`loop stats`; không phải tên model
     d = state_dir(base) / "evidence"
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")
@@ -1662,7 +1731,7 @@ def _append_run(base: Path, st: Dict[str, Any], ev: Dict[str, Any], signature: O
     Fail-open (AGENTS.md §7): ghi lỗi chỉ cảnh báo — bằng chứng và đếm lỗi lặp đã ghi trước đó. Không đi theo symlink
     đặt sẵn (O_NOFOLLOW, như `write_atomic` — AUD-HAR-009)."""
     row = {k: ev[k] for k in ("task", "exit_code", "started", "finished", "head")}
-    row.update({"signature": signature, "loop": st.get("started")})
+    row.update({"signature": signature, "loop": st.get("started"), "executor": ev.get("executor")})
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(state_dir(base) / RUNS_FILE, flags, 0o600)
@@ -1696,13 +1765,21 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     rows = [r for r in read_runs(base) if all_loops or r.get("loop") == st.get("started")]
     per: Dict[str, Dict[str, Any]] = {}
     for r in rows:
-        t = per.setdefault(r["task"], {"runs": 0, "failed": 0, "runs_to_green": None})
+        t = per.setdefault(r["task"], {"runs": 0, "failed": 0, "runs_to_green": None, "executors": []})
         t["runs"] += 1
         t["failed"] += r["exit_code"] != 0
         if r["exit_code"] == 0 and t["runs_to_green"] is None:
             t["runs_to_green"] = t["runs"]
+        ex = r.get("executor")
+        if isinstance(ex, str) and ex not in t["executors"]:
+            t["executors"].append(ex)  # thứ tự xuất hiện: [executor, executor-deep] = đã chuyển cấp (ADR-0029)
     first_pass = [k for k, t in per.items() if t["runs_to_green"] == 1]
     hard = [k for k, t in per.items() if (t["runs_to_green"] or t["runs"]) >= 3]
+    escalated = sorted(
+        k
+        for k, t in per.items()
+        if t["executors"][:1] != [EXECUTOR_AGENTS["deep"]] and EXECUTOR_AGENTS["deep"] in t["executors"]
+    )
     return {
         "tasks": per,
         "task_count": len(per),
@@ -1710,6 +1787,8 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         "failed_runs": sum(t["failed"] for t in per.values()),
         "first_pass_rate": round(len(first_pass) / len(per), 3) if per else None,
         "needs_3_plus": sorted(hard),
+        "escalated": escalated,
+        "escalation_rate": round(len(escalated) / len(per), 3) if per else None,
         "never_green": sorted(k for k, t in per.items() if t["runs_to_green"] is None),
         "iterations": st.get("iterations", 0),
         "max_iterations": st.get("max_iterations"),
@@ -1735,6 +1814,11 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
         print(f"  {k}: {t['runs']} lần · {green}")
     if s["needs_3_plus"]:
         print("⚠ Task cần ≥ 3 lần chạy (spec/Gate sai? — LOOP-DESIGN-011): " + ", ".join(s["needs_3_plus"]))
+    if s["escalated"]:
+        print(
+            f"Chuyển cấp lên tầng sâu: {len(s['escalated'])} task ({s['escalation_rate']:.0%}): "
+            + ", ".join(s["escalated"])
+        )
     return 0
 
 
@@ -4642,7 +4726,7 @@ def _loop_record(args: argparse.Namespace, base: Path) -> int:
     if not cmd:
         print("✗ Thiếu lệnh kiểm sau '--'", file=sys.stderr)
         return 2
-    return loop_record(args.task, cmd, base)
+    return loop_record(args.task, cmd, base, args.executor)
 
 
 def _loop_block(args: argparse.Namespace, base: Path) -> int:
@@ -5797,6 +5881,142 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
     return 0 if d["verdict"] == "merge" else 1
 
 
+# --------------------------------------------------------------------------- release-check (G7 máy đọc, ADR-0029)
+
+RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch")
+
+
+def _release_row(rid: str, result: str, evidence: str, level: str = "BLOCKER") -> Dict[str, str]:
+    return {"id": rid, "level": level, "result": result, "evidence": evidence}
+
+
+def _release_blueprint(base: Path, blueprint: str) -> Dict[str, str]:
+    bp = base / blueprint
+    if not bp.is_file():
+        return _release_row("blueprint", "FAIL", f"không thấy {blueprint} — `xt.py compose` rồi tick theo bằng chứng")
+    s = blueprint_status(bp)
+    run = _blueprint_run(bp)
+    if run is None:
+        return _release_row("blueprint", "FAIL", "không chạy được lệnh kiểm (XT_RECORD_TIMEOUT sai)")
+    bad = [f"MUST mở {len(s['open_must'])}"] if s["open_must"] else []
+    bad += [f"miễn trừ không hợp lệ {len(s['bad_waivers'])}"] if s["bad_waivers"] else []
+    bad += [f"dòng sai {len(s['bad_lines'])}"] if s["bad_lines"] else []
+    bad += (
+        [f"lệnh `— Kiểm:` đỏ {len(run['failed_checks'])}: {', '.join(run['failed_checks'][:5])}"]
+        if run["failed_checks"]
+        else []
+    )
+    note = (
+        f"; {len(run['unchecked_must'])} MUST tick không có lệnh kiểm (reviewer soát)" if run["unchecked_must"] else ""
+    )
+    if bad:
+        return _release_row("blueprint", "FAIL", "`blueprint-status --strict --run`: " + " · ".join(bad) + note)
+    return _release_row(
+        "blueprint", "PASS", f"`blueprint-status --strict --run` exit 0, {len(run['checks'])} lệnh kiểm xanh{note}"
+    )
+
+
+def _release_audit(base: Path, status: str) -> Dict[str, str]:
+    st = base / status
+    if not st.is_file():
+        return _release_row(
+            "audit", "FAIL", f"không có {status} — audit toàn bộ `--strict` trước phát hành (audit.md §1, §7)"
+        )
+    try:
+        errors, counts = audit_check(st, strict=True)
+    except OSError as exc:
+        return _release_row("audit", "FAIL", f"không đọc được {status}: {exc}")
+    if errors:
+        return _release_row("audit", "FAIL", f"`audit check --strict` {len(errors)} lỗi: {errors[0]}")
+    return _release_row(
+        "audit",
+        "PASS",
+        f"`audit check --strict` exit 0 ({', '.join(f'{k} {v}' for k, v in sorted(counts.items())) or 'sổ rỗng'})",
+    )
+
+
+def _release_verify(base: Path) -> Dict[str, str]:
+    if not read_state(base):
+        return _release_row(
+            "verify", "N/A", "không chạy autopilot (không có .autopilot/state.json) — Gate chạy ở CI", "SHOULD"
+        )
+    why = final_check(base)
+    if why:
+        return _release_row("verify", "FAIL", why)
+    return _release_row("verify", "PASS", "`loop verify` xanh và khớp dấu vân tay cây hiện tại (LOOP-DESIGN-022)")
+
+
+def _release_tree(base: Path) -> Dict[str, str]:
+    head = _git_head(base)
+    if head is None:
+        return _release_row("tree", "FAIL", "không phải repo git có commit — bản phát hành phải gắn SHA bất biến")
+    dirty = _git(base, "-c", "core.quotePath=false", "status", "--porcelain", "--", ".", ":(exclude).autopilot").stdout
+    files = [ln[3:] for ln in dirty.splitlines() if ln.strip()]
+    if files:
+        return _release_row(
+            "tree",
+            "FAIL",
+            f"cây làm việc có {len(files)} file chưa commit ({', '.join(files[:5])}) — chứng nhận chỉ gắn với commit",
+        )
+    return _release_row("tree", "PASS", f"cây sạch, HEAD {head[:12]}")
+
+
+def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -> Dict[str, str]:
+    """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm."""
+    try:
+        text = (base / log).read_text(encoding="utf-8")
+    except OSError:
+        return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
+    n = text.count(PROD_SWITCH_LABEL)
+    if n:
+        return _release_row(
+            "prod_switch",
+            "N/A",
+            f'{n} đề xuất "Khi chạy thật" trong {log} — chủ dự án quyết từng mục (người, GO-NO-GO #18)',
+            "BLOCKER",
+        )
+    return _release_row("prod_switch", "PASS", f'không có đề xuất "Khi chạy thật" chờ quyết trong {log}')
+
+
+def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
+    """Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối của autopilot
+    và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
+    hàng BLOCKER nào FAIL; hàng N/A BLOCKER là việc của người (không tính GO, không tính NO-GO — ghi rõ)."""
+    rows = [
+        _release_blueprint(base, blueprint),
+        _release_audit(base, status),
+        _release_verify(base),
+        _release_tree(base),
+        _release_prod_switch(base),
+    ]
+    fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
+    human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
+    return {
+        "head": _git_head(base),
+        "at": now_iso(),
+        "rows": rows,
+        "fails": fails,
+        "human": human,
+        "go": not fails,
+        "verdict": "NO-GO" if fails else "GO (chờ người)" if human else "GO",
+    }
+
+
+def cmd_release_check(args: argparse.Namespace) -> int:
+    base = project_dir()
+    out = release_check(base, args.blueprint, args.status)
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        print(f"release-check @ {(out['head'] or 'không có git')[:12]} — {out['verdict']}")
+        for r in out["rows"]:
+            mark = {"PASS": "✓", "FAIL": "✗", "N/A": "–"}[r["result"]]
+            print(f"{mark} {r['level']:<7} {r['id']:<12} {r['result']:<4} {r['evidence']}")
+        if out["human"]:
+            print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
+    return 0 if out["go"] else 1
+
+
 def cmd_merge_gate(args: argparse.Namespace) -> int:
     """Required check `merge-gate` (ADR-0023): auto-merge của GitHub không ghim head, nên commit đẩy SAU khi bật auto-merge
     phải được máy chặn trên head hiện tại. exit 1 khi `merge-check` báo `hard` VÀ PR đang bật auto-merge; `hard` mà không
@@ -5981,7 +6201,7 @@ def _pr_next_review(
 # Sổ review dùng chung (ADR-0027): `pr reviewed` đăng kết quả lên PR dưới dạng comment có dấu máy đọc; `pr next` và
 # `pr steward` (workflow pr-steward) gộp các dấu này với sổ cục bộ. Chỉ tin comment của người có quyền ghi repo (OWNER,
 # COLLABORATOR) — người ngoài comment dấu giả không mở được merge. Dấu không mang tên model (ai_attribution).
-REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review v1 head=([0-9a-f]{40}) verdict=(clean|blocking)\s*-->")
+REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review v1 head=([0-9a-f]{40}) verdict=(clean|blocking|inconclusive)\s*-->")
 # MEMBER không đủ: thành viên org có thể chỉ có quyền đọc repo (review #141).
 TRUSTED_ASSOCIATIONS = {"OWNER", "COLLABORATOR"}
 STANDARD_LABEL = (
@@ -5990,10 +6210,16 @@ STANDARD_LABEL = (
 TRUSTED_BOTS = {"dependabot[bot]"}  # bot cùng repo được steward xử lý như người có quyền ghi
 
 
-def review_comment_body(head: str, clean: bool) -> str:
-    """Nội dung comment `pr reviewed` đăng lên PR: một dòng cho người đọc + dấu cho máy (`pr next`, `pr steward`)."""
-    verdict = "clean" if clean else "blocking"
-    text = "sạch — không còn lỗi chặn" if clean else "còn lỗi chặn — sửa, push rồi rà lại"
+def review_comment_body(head: str, clean: bool, inconclusive: bool = False) -> str:
+    """Nội dung comment `pr reviewed` đăng lên PR: một dòng cho người đọc + dấu cho máy (`pr next`, `pr steward`).
+    `inconclusive` (ADR-0029): reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file) — không phải lỗi chặn,
+    cũng không phải sạch; PR làn chuẩn cần một review khác ở head này."""
+    verdict = "inconclusive" if inconclusive else "clean" if clean else "blocking"
+    text = {
+        "clean": "sạch — không còn lỗi chặn",
+        "blocking": "còn lỗi chặn — sửa, push rồi rà lại",
+        "inconclusive": "chưa kết luận được (diff cắt/hết ngân sách/thiếu bằng chứng) — cần review khác ở head này",
+    }[verdict]
     return f"Review ở `{head[:7]}`: {text}.\n\n<!-- xt-review v1 head={head} verdict={verdict} -->"
 
 
@@ -6020,7 +6246,10 @@ def published_reviews(
         )
         edited = bool(identity) and c.get("updated_at") not in (None, "", c.get("created_at"))
         if m and trusted:  # dấu bị sửa sau khi đăng (người có quyền write sửa được comment) không thể là "sạch"
-            out.append({"head": m[1], "clean": m[2] == "clean" and not edited, "at": str(c.get("created_at", ""))})
+            row = {"head": m[1], "clean": m[2] == "clean" and not edited, "at": str(c.get("created_at", ""))}
+            if m[2] == "inconclusive":
+                row["inconclusive"] = True
+            out.append(row)
     return sorted(out, key=lambda r: r["at"])
 
 
@@ -6097,8 +6326,8 @@ def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen:
     carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
     if not strict:
         state = "na"
-    elif last is None or (last.get("head") != head and not carried):
-        state = "missing"
+    elif last is None or (last.get("head") != head and not carried) or last.get("inconclusive"):
+        state = "missing"  # review chưa kết luận (ADR-0029) = chưa rà head này: cần review khác, không phải lỗi chặn
     else:
         state = "ok" if last.get("clean") else "blocking"
     return {"strict": strict, "state": state, "last": last}
@@ -6249,6 +6478,8 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.inconclusive:
+        args.clean = False
     err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
     if err:
         print(f"✗ {err}", file=sys.stderr)
@@ -6262,20 +6493,24 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     rec = _pr_record(data, key)
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     entry = {"head": args.head, "clean": args.clean, "at": now_iso()}
+    if args.inconclusive:
+        entry["inconclusive"] = True
     entry.update({k: v for k, v in (("reviewer_model", args.reviewer_model), ("author_model", args.author_model)) if v})
     reviews.append(entry)
     data[key] = {**rec, "reviews": reviews}
     _write_reviews(base, data)
-    print(f"✓ PR #{key}: review {'sạch' if args.clean else 'còn lỗi chặn'} ở {args.head[:7]}")
+    word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}")
     if args.no_publish:
         return 0
-    return _publish_review(str(args.pr), key, args.head, args.clean)
+    return _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
 
 
-def _publish_review(pr_arg: str, key: str, head: str, clean: bool) -> int:
+def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive: bool = False) -> int:
     """Đăng kết quả review lên PR (ADR-0027) để phiên khác và workflow pr-steward thấy; lỗi → exit 3 (sổ cục bộ đã ghi)."""
     repo, _ = _pr_target(pr_arg if PR_URL_RE.search(pr_arg) else key)
-    cmd = ["gh", "api", "-X", "POST", f"{repo}/issues/{key}/comments", "-f", f"body={review_comment_body(head, clean)}"]
+    body = review_comment_body(head, clean, inconclusive)
+    cmd = ["gh", "api", "-X", "POST", f"{repo}/issues/{key}/comments", "-f", f"body={body}"]
     try:  # cwd = gốc dự án: `{owner}/{repo}` là repo của dự án, không phải thư mục shell đang đứng
         r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT, cwd=project_dir())
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -6283,7 +6518,7 @@ def _publish_review(pr_arg: str, key: str, head: str, clean: bool) -> int:
     if r.returncode != 0:
         print(
             f"⚠ chưa đăng được review lên PR #{key} ({_one_line(r.stderr)}) — pr-steward không thấy review này; "
-            f"chạy lại `xt.py pr reviewed …` khi có gh, hoặc comment tay: {review_comment_body(head, clean)!r}",
+            f"chạy lại `xt.py pr reviewed …` khi có gh, hoặc comment tay: {body!r}",
             file=sys.stderr,
         )
         return 3
@@ -7056,6 +7291,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--clean", dest="clean", action="store_true", help="không còn lỗi chặn; mục nên sửa đã sửa/trả lời"
     )
     pres.add_argument("--blocking", dest="clean", action="store_false", help="còn lỗi chặn")
+    pres.add_argument(
+        "--inconclusive",
+        action="store_true",
+        help="reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file): không sạch, không chặn — PR làn chuẩn"
+        " cần review khác ở head này (ADR-0029)",
+    )
     prv.add_argument("--reviewer-model", help="model đã review (vd sonnet) — bắt buộc với --clean")
     prv.add_argument("--author-model", help="model viết PR/phiên chính (vd opus) — bắt buộc với --clean")
     prv.add_argument(
@@ -7077,6 +7318,14 @@ def build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--head", help="SHA head của sự kiện CI; PR có head khác → exit 3 (chờ rồi chạy lại)")
     pq.add_argument("--json", action="store_true", help="in JSON (pr, head, gate, auto_merge, hard, notes)")
     pq.set_defaults(fn=cmd_merge_gate)
+    prc = sub.add_parser(
+        "release-check",
+        help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch → GO/NO-GO (ADR-0029)",
+    )
+    prc.add_argument("--blueprint", default="BLUEPRINT.md")
+    prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")
+    prc.add_argument("--json", action="store_true", help="in JSON {head, rows, fails, human, go, verdict}")
+    prc.set_defaults(fn=cmd_release_check)
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")
@@ -7133,6 +7382,11 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--json", action="store_true")
     lr = lsub.add_parser("record")
     lr.add_argument("--task", required=True, type=_task_id)
+    lr.add_argument(
+        "--executor",
+        choices=sorted(EXECUTOR_AGENTS.values()),
+        help="agent đã làm task (tầng mặc định/sâu) — ghi vào evidence và runs.jsonl cho chuyển cấp/loop stats (ADR-0029)",
+    )
     lr.add_argument("cmd", nargs=argparse.REMAINDER)
     lb = lsub.add_parser("block")
     lb.add_argument("--reason", required=True)
