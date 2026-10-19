@@ -409,3 +409,10 @@
 - Chọn: Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: một chỗ quyết MCP (mcp_decision), một hook; fail-open về luồng cho tool không nguy hiểm (ADR-0002), fail-closed giữ nguyên cho merge
 - Đường lùi: Matcher về mcp__.*(merge_pull_request|auto_merge).*
+
+### D-058 · 2026-10-19T03:51:24+00:00 · Steward ở repo thuộc org: tin MEMBER thế nào; pr_title_check: off đọc ở đâu?
+
+- Phương án: (1) Giữ chỉ OWNER/COLLABORATOR (repo org luôn defer-human) · (2) Tin mọi MEMBER · (3) MEMBER tin khi REST collaborators/<login>/permission trả admin/write; không hỏi được thì không tin. pr_title_check off cần cả nhánh đích lẫn cây làm việc
+- Chọn: MEMBER tin khi REST collaborators/<login>/permission trả admin/write; không hỏi được thì không tin. pr_title_check off cần cả nhánh đích lẫn cây làm việc
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: MEMBER có thể chỉ có quyền đọc nên không tin mặc định, nhưng hỏi quyền thật thì repo org vẫn dùng được steward; luật nới chỉ hiệu lực khi đã merge vào nhánh đích như merge_autonomy
+- Đường lùi: Bỏ nhánh MEMBER trong steward_untrusted/published_reviews và MEMBER khỏi trigger workflow

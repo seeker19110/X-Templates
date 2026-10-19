@@ -1519,6 +1519,66 @@ class PrStewardTrustTest(unittest.TestCase):
         self.assertIn("--repo phải dạng owner/repo", err)
 
 
+class StewardFollowupTest(unittest.TestCase):
+    """Mục 🟢 sau #140/#141: MEMBER của org có quyền ghi; lỗi gắn nhãn hiện ra summary."""
+
+    PERM = "repos/{owner}/{repo}/collaborators/chu/permission"
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def steward(self, permission: str, **kw: Any) -> tuple[int, str, StewardGh]:
+        raw = {self.PERM: json.dumps({"permission": permission}), **kw.pop("raw", {})}
+        gh = StewardGh(pull={"author_association": "MEMBER", "user": {"login": "chu"}}, raw=raw, **kw)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        return rc, out, gh
+
+    def test_org_member_with_write_access_is_trusted(self):
+        for perm in ("admin", "write"):
+            with self.subTest(perm):
+                rc, out, gh = self.steward(perm)
+                self.assertIn("#7 enable-auto-merge ✓", out)
+                self.assertIn(self.PERM, gh.paths())
+        rc, out, gh = self.steward("read")
+        self.assertEqual(gh.writes, [])
+        self.assertIn("#7 defer-human — tác giả chu (MEMBER)", out)
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
+            self.assertFalse(xt.repo_writer("repos/o/r", "chu"))  # không hỏi được quyền → không tin
+        self.assertIsNone(xt._member_can_write("repos/o/r", "CONTRIBUTOR", "chu"))  # không hỏi khi không phải MEMBER
+
+    def test_member_review_marks_count_only_with_write_access(self):
+        def member(login: str) -> dict:
+            return {**mark("a" * 40, "clean", "2026-10-19T01:00:00Z", "MEMBER"), "user": {"login": login}}
+
+        raw = {
+            "repos/{owner}/{repo}/collaborators/ghi/permission": json.dumps({"permission": "write"}),
+            "repos/{owner}/{repo}/collaborators/doc/permission": json.dumps({"permission": "read"}),
+        }
+        with FakeGh(raw=raw, comments=[member("ghi"), member("doc"), member("")]).patch():
+            got = xt._published_marks("repos/{owner}/{repo}", "7")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(xt.published_reviews([member("ghi")], {"ghi"})[0]["head"], "a" * 40)
+        self.assertEqual(xt.published_reviews([member("ghi")]), [])
+
+    def test_label_failure_is_reported(self):
+        big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]
+        summary = self.base / "summary.md"
+        raw = {"repos/{owner}/{repo}/pulls/7/files?per_page=100": json.dumps(big)}
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertIn("⚠ không gắn được nhãn xt-standard-lane: HTTP 403", out)
+        self.assertIn("không gắn được nhãn", summary.read_text(encoding="utf-8"))
+
+    def test_merge_fields_include_author(self):
+        self.assertIn("author", xt.MERGE_FIELDS.split(","))
+
+
 class PrTitleExemptTest(unittest.TestCase):
     """Review #140: tiêu đề do máy đặt (bot, nút Revert) được miễn; `pr_title_check: off` tắt luật ở dự án."""
 
@@ -1539,5 +1599,12 @@ class PrTitleExemptTest(unittest.TestCase):
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
         self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
         commit_base_xt(base, "merge_autonomy: L2\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")
+        # PR tự thêm `off` vào xt.yaml trên nhánh của nó (cây làm việc) không tắt được luật — nhánh đích quyết
+        commit_base_xt(base, "merge_autonomy: L2\n", "merge_autonomy: L2\npr_title_check: off\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")
+        commit_base_xt(base, "merge_autonomy: L2\npr_title_check: off\n", "merge_autonomy: L2\n")  # sửa tại chỗ: chặt
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
         self.assertEqual(json.loads(out)["verdict"], "fix")

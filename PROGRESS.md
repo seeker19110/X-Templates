@@ -7,7 +7,7 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-1. Nâng hotel-manager, X-Company lên 3.5.0 (`install.py --with-github` cho `pr-steward.yml`). 🟢 #140/#141: `MERGE_FIELDS` thiếu `author`; `pr_title_check` đọc cây làm việc; steward ở org (MEMBER). Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
+1. Sau 3.5.0: steward ở org (MEMBER có quyền ghi), `pr_title_check` đọc nhánh đích, lỗi nhãn báo ra summary (D-058, chưa phát hành). Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ) — cần thiết kế bằng chứng ảnh chụp; sàn quyền token; `xt.pyz` (ADR-0010).
 4. Giới hạn đã biết của guard: ghép tên hàm lúc chạy, giải mã qua `$(…)` (né cố ý, D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042).
