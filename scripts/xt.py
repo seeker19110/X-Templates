@@ -2460,9 +2460,30 @@ def audit_status_groups(status: Path) -> Dict[int, Dict[str, str]]:
     return out
 
 
+NA_EXPLAIN_RE = re.compile(r"Giải trình:\s*\S")
+
+
+def audit_na_drift(root: Path, groups: Dict[int, Dict[str, str]]) -> Dict[int, str]:
+    """Nhóm sổ ghi `N/A` mà tín hiệu repo HIỆN TẠI nói là áp dụng/rút gọn (REC-07, T-1506): repo từng không có UI/CSDL
+    rồi có — nhóm A11Y/DATA không bao giờ được quét lại vì `audit_rescan` bỏ qua mọi nhóm N/A. Nhóm có `Giải trình: <lý do>` ở Ghi chú
+    là quyết định có chủ đích, không nhắc lại. {số nhóm: "N/A→áp dụng: …"}."""
+    na = [
+        no
+        for no, r in groups.items()
+        if r.get("Trạng thái") == "N/A"
+        and no in AUDIT_CODES.values()
+        and not NA_EXPLAIN_RE.search(r.get("Ghi chú", ""))
+    ]
+    if not na:
+        return {}
+    appl = audit_applicability(audit_signals(root, _repo_files(root)))
+    return {no: f"N/A→{appl[no][0]}: {appl[no][1]}" for no in na if appl[no][0] != "N/A"}
+
+
 def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
-    """Nhóm cần quét lại: chưa quét · SHA không còn trong lịch sử · có file đổi kể từ SHA quét."""
+    """Nhóm cần quét lại: chưa quét · SHA không còn trong lịch sử · có file đổi kể từ SHA quét · N/A nay áp dụng."""
     groups = audit_status_groups(status)
+    drift = audit_na_drift(root, groups)
     out: Dict[int, str] = {}
     for no, _, _ in AUDIT_GROUPS:
         r = groups.get(no)
@@ -2470,6 +2491,8 @@ def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
             out[no] = "chưa quét"
             continue
         if r.get("Trạng thái") == "N/A":
+            if no in drift:
+                out[no] = drift[no]
             continue
         sha = r.get("SHA", "").strip("` ")
         if not sha or _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
@@ -2650,6 +2673,18 @@ def _audit_finding_errors(
     return errors + [f"{i}: ID trùng {n} lần" for i, n in ids.items() if i and n > 1]
 
 
+def _audit_na_errors(tables: Dict[str, List[Dict[str, str]]], strict: bool, root: Path) -> List[str]:
+    """`--strict`: nhóm sổ ghi N/A mà repo nay áp dụng → đỏ tới khi quét nhóm đó (đổi trạng thái) hoặc ghi `Giải trình: <lý do>`
+    ở Ghi chú (REC-07). Không `--strict` thì chỉ `audit plan` báo."""
+    if not strict:
+        return []
+    groups = {int(r["#"]): r for r in tables.get("Nhóm", []) if r.get("#", "").isdecimal()}
+    return [
+        f"nhóm {no}: sổ ghi N/A nhưng repo nay áp dụng ({why}) — quét nhóm này hoặc ghi `Giải trình: <lý do>` ở Ghi chú"
+        for no, why in audit_na_drift(root, groups).items()
+    ]
+
+
 def audit_check(
     status: Path, strict: bool = False, today: Optional[_dt.date] = None
 ) -> Tuple[List[str], Dict[str, int]]:
@@ -2661,6 +2696,7 @@ def audit_check(
     counts: Dict[str, int] = {}
     errors = [f"thiếu bảng `## {name}`" for name in ("Nhóm", "Phát hiện") if name not in tables]
     errors += _audit_group_errors(tables, strict, root, in_git, counts)
+    errors += _audit_na_errors(tables, strict, root)
     errors += _audit_finding_errors(tables, strict, today, counts)
     return errors, counts
 

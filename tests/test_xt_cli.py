@@ -298,6 +298,54 @@ class AuditRescanTest(TmpRepoCase):
         self.assertEqual(set(rescan), {3})  # còn lại N/A
 
 
+class NaReevaluatedTest(TmpRepoCase):
+    """T-1506 (REC-07): nhóm sổ ghi N/A mà repo nay áp dụng không bị bỏ qua mãi."""
+
+    def ledger(self, note: str = "không có UI") -> Path:
+        status = self.tmp / "S.md"
+        groups = {6: ("N/A", "", "", note), 10: ("N/A", "", "", "không có CSDL")}
+        status.write_text(audit_status_text(groups), encoding="utf-8")
+        return status
+
+    def test_na_reevaluated_rescan_and_strict_check(self):
+        self.init_repo()
+        self.commit_files({"main.py": "1"}, 1_700_000_000)
+        status = self.ledger()
+        # repo vẫn không UI/CSDL: nhóm 6 và 10 vẫn N/A thật → không báo (chỉ nhóm khác theo luật cũ)
+        self.assertNotIn(6, xt.audit_rescan(self.repo, status))
+        self.assertNotIn(10, xt.audit_rescan(self.repo, status))
+        # repo có UI và migration SQL: N/A→áp dụng
+        self.commit_files({"web/index.html": "<p>", "db/migrations/001.sql": "select 1;"}, 1_700_000_100)
+        rescan = xt.audit_rescan(self.repo, status)
+        self.assertTrue(rescan[6].startswith("N/A→áp dụng"), rescan)
+        self.assertTrue(rescan[10].startswith("N/A→áp dụng"), rescan)
+        plan = xt.audit_plan(self.repo, None, status)
+        self.assertIn("N/A→áp dụng", plan["rescan"]["6"])
+        # check thường: chỉ báo ở `audit plan`; --strict đỏ tới khi quét hoặc giải trình
+        self.assertFalse([e for e in xt.audit_check(status, strict=False)[0] if "sổ ghi N/A nhưng" in e])
+        strict = [e for e in xt.audit_check(status, strict=True)[0] if "sổ ghi N/A nhưng repo nay áp dụng" in e]
+        self.assertEqual(len(strict), 2)
+        self.assertIn("nhóm 6:", strict[0])
+        self.assertIn("Giải trình:", strict[0])
+        # giải trình có chủ đích ở Ghi chú nhóm 6 → hết đỏ cho nhóm đó; nhóm 10 vẫn đỏ
+        explained = self.ledger("tài liệu HTML tĩnh, không phải UI sản phẩm — Giải trình: chỉ docs")
+        left = [e for e in xt.audit_check(explained, strict=True)[0] if "sổ ghi N/A nhưng" in e]
+        self.assertEqual(len(left), 1)
+        self.assertIn("nhóm 10:", left[0])
+        self.assertNotIn(6, xt.audit_rescan(self.repo, explained))
+        # nhóm đã quét (không còn N/A) không bị kiểm drift; số nhóm lạ trong sổ không làm sập
+        scanned = self.tmp / "S2.md"
+        scanned.write_text(
+            audit_status_text({6: ("đã quét", self.git("rev-parse", "HEAD").strip(), "2026-10-14", "")}),
+            encoding="utf-8",
+        )
+        self.assertFalse(
+            [e for e in xt.audit_check(scanned, strict=True)[0] if "sổ ghi N/A nhưng" in e and "nhóm 6" in e]
+        )
+        self.assertEqual(xt.audit_na_drift(self.repo, {99: {"Trạng thái": "N/A", "Ghi chú": ""}}), {})
+        self.assertEqual(xt.audit_na_drift(self.repo, {6: {"Trạng thái": "đã quét"}}), {})
+
+
 class ShaOkTest(TmpRepoCase):
     def test_sha_validation(self):
         self.init_repo()

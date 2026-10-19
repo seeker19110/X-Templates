@@ -1271,7 +1271,7 @@ def audit_status_text(groups=None, findings=()):
     groups = groups or {}
     rows = []
     for no, code, name in xt.AUDIT_GROUPS:
-        state, sha, day, note = groups.get(no, ("N/A", "", "", "không áp dụng cho repo thử"))
+        state, sha, day, note = groups.get(no, ("N/A", "", "", "không áp dụng cho repo thử — Giải trình: fixture"))
         rows.append(f"| {no} | {code} | {name} | {state} | {sha} | {day} | {note} |")
     head = "| ID | Mức | Trạng thái | Tóm tắt | Bằng chứng | Gate | Ghi chú |\n|---|---|---|---|---|---|---|\n"
     return (

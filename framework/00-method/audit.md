@@ -1,7 +1,7 @@
 ---
 title: Phương pháp audit
 kind: method
-updated: 2026-10-14
+updated: 2026-10-19
 ---
 
 # Phương pháp audit
@@ -85,6 +85,8 @@ Mỗi phát hiện là **một dòng** trong bảng "Phát hiện" của `docs/o
 và ánh xạ file đổi sang nhóm (workflow → 8, lockfile/manifest → 7, test → 4, migration → 10, tài liệu → 9,
 `AGENTS.md`/`xt.yaml`/`.claude/` → 13, mã nguồn → 1·2·3·12). SHA không còn là tổ tiên HEAD (rebase/squash) → quét lại
 nhóm đó từ đầu. Nhóm không đổi giữ kết quả cũ, nhưng phát hiện `chấp nhận` vẫn bị kiểm hạn.
+Nhóm sổ ghi **N/A** được đối chiếu lại với tín hiệu repo hiện tại (REC-07): repo nay có UI/CSDL… thì `audit plan` liệt kê
+"N/A→áp dụng: …" và `audit check --strict` đỏ tới khi quét nhóm đó (đổi trạng thái) hoặc ghi `Giải trình: <lý do>` ở Ghi chú.
 
 ## 7. Definition of Complete
 
