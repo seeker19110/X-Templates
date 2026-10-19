@@ -1004,6 +1004,20 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         diff += (("true | cat", "true '|' cat"), ("echo (a)", "echo '(a)'"), ("echo a#b", "echo a '#b'"))
         same += (("echo a#b", "echo 'a#b'"),)  # `#` giữa từ không mở comment
         # review #167 (vòng 2): ranh giới giữa các ký tự toán tử và số fd phải còn; xuống dòng ngoài nháy là dấu ngăn lệnh
+        # review #167 (vòng 3): chỉ chữ số KHÔNG nháy là số fd; cặp cùng nghĩa vẫn True; cặp đối kháng mới khoá hành vi
+        diff += (
+            ("echo '2'>f", "echo 2>f"),
+            ('echo "2">f', "echo 2>f"),
+            ("echo \\2>f", "echo 2>f"),
+            ("a <<EOF", "a < <EOF"),
+        )
+        diff += (("a >|f", "a > |f"), ("a &>> f", "a & >> f"), ("echo 12>f", "echo 12 >f"))
+        same += (
+            ("echo a2>f", "echo a2 >f"),
+            ("echo x>&2", "echo x >&2"),
+            ("a 2>&1", "a 2>& 1"),
+            ("echo $(a;b)", "echo $(a; b)"),
+        )
         diff += (
             ("pytest &> log", "pytest & > log"),
             ("echo 2>f", "echo 2 >f"),
