@@ -1107,7 +1107,9 @@ def _verdict_task(
             "task": t["id"],
             "reason": f"task {t['id']} không có Gate máy kiểm — thêm `Gate:` + lệnh trong backtick vào PLAN rồi `loop record`",
         }
-    if not same_command(ev.get("cmd") or "", redact(t["gate"])):  # bằng chứng lưu lệnh đã che bí mật
+    if ev.get("cmd_sha256") != cmd_sha256(t["gate"]) and not same_command(
+        ev.get("cmd") or "", redact(t["gate"])
+    ):  # bằng chứng lưu lệnh đã che bí mật; dấu vân tay khớp nguyên văn thì không cần so ngữ nghĩa (T-1502)
         return {
             "verdict": "verify",
             "task": t["id"],
@@ -1209,12 +1211,95 @@ def failure_signature(task: str, code: int, output: str) -> str:
     return hashlib.sha256(f"{task}|{code}|{norm}".encode()).hexdigest()[:16]
 
 
+# Ký tự shell còn "sống" (bị bung) khi đứng ngoài nháy; trong nháy kép chỉ `$`, backtick, `\\`, `!` còn sống; trong nháy
+# đơn không gì sống. `echo '$X'` ≠ `echo "$X"` ≠ `echo $X` dù shlex.split cho cùng token (REC-01, T-1502).
+SHELL_LIVE_OUTSIDE = frozenset("$`\\!*?[~{}")
+SHELL_LIVE_DOUBLE = frozenset("$`\\!")
+SHELL_OPERATORS = frozenset(";&|<>()\n")  # ngoài nháy là toán tử điều khiển/chuyển hướng (ranh giới token, review #167)
+
+
+def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]) -> Tuple[str, int]:
+    """Một ký tự trong nháy: trả (nháy đang mở sau ký tự này, số ký tự ăn thêm). Nháy đơn: mọi thứ là chữ; nháy kép:
+    backslash trước nháy kép, `$`, backtick, backslash là escape; còn lại `$`/backtick/backslash/`!` còn sống."""
+    if c == quote:
+        return "", 0
+    if quote == "'":
+        cur.append((c, False))
+    elif c == "\\" and nxt and nxt in '"$`\\':
+        cur.append((nxt, False))
+        return quote, 1
+    else:
+        cur.append((c, c in SHELL_LIVE_DOUBLE))
+    return quote, 0
+
+
+def _shell_op_token(
+    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], has: bool, fd_ok: bool, in_op: bool
+) -> None:
+    """Toán tử điều khiển/chuyển hướng ngoài nháy `c` thành token "sống": ký tự toán tử liền nhau gộp một token (`&>` ≠ `& >`);
+    từ toàn chữ số KHÔNG nháy dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`; `'2'>f` thì không)."""
+    if in_op:
+        tokens[-1] += ((c, True),)
+    elif fd_ok and c in "<>":
+        tokens.append(tuple(cur) + ((c, True),))
+    else:
+        if has:  # kể cả token rỗng có nháy (`''`): là một đối số, `a ''|b` ≠ `a |b`
+            tokens.append(tuple(cur))
+        tokens.append(((c, True),))
+
+
+def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
+    """Danh sách token, mỗi token là chuỗi (ký tự, còn sống?) theo đúng ngữ nghĩa nháy của bash: hai lệnh cùng danh sách
+    thì bash chạy cùng một việc. Nháy lệch → ValueError (như shlex)."""
+    tokens: List[Tuple[Tuple[str, bool], ...]] = []
+    cur: List[Tuple[str, bool]] = []
+    quote = ""  # "", "'" hoặc '"'
+    has_token = in_op = quoted = False  # quoted: token hiện tại có phần trong nháy/escape → không phải số fd
+    i = 0
+    while i < len(cmd):
+        c, nxt = cmd[i], cmd[i + 1 : i + 2]
+        i += 1
+        was_op = False
+        if quote:
+            quote, extra = _shell_quoted_char(c, nxt, quote, cur)
+            i += extra
+        elif c in "'\"":
+            quote, has_token, quoted = c, True, True
+        elif c == "\\" and nxt:
+            cur.append((nxt, False))
+            has_token = quoted = True
+            i += 1
+        elif c in SHELL_OPERATORS:
+            fd_ok = bool(cur) and not quoted and all(ch.isdigit() for ch, _ in cur)
+            _shell_op_token(c, tokens, cur, has_token, fd_ok, in_op)
+            cur, has_token, quoted, was_op = [], False, False, True
+        elif c.isspace():
+            if has_token:
+                tokens.append(tuple(cur))
+            cur, has_token, quoted = [], False, False
+        else:
+            cur.append((c, c in SHELL_LIVE_OUTSIDE or (c == "#" and not has_token)))  # `#` đầu từ mở comment
+            has_token = True
+        in_op = was_op
+    if quote:
+        raise ValueError("No closing quotation")
+    if has_token:
+        tokens.append(tuple(cur))
+    return tokens
+
+
 def same_command(a: str, b: str) -> bool:
-    """So lệnh theo token shell (nháy/khoảng trắng khác nhau vẫn là cùng lệnh)."""
+    """So lệnh theo token shell GIỮ ngữ nghĩa nháy: khoảng trắng/nháy khác nhau mà bash chạy cùng việc → cùng lệnh;
+    `'$X'` (chữ) ≠ `"$X"` (bung) (T-1502). Nháy lệch → so chuỗi đã bỏ khoảng trắng hai đầu."""
     try:
-        return shlex.split(a) == shlex.split(b)
+        return shell_identity(a) == shell_identity(b)
     except ValueError:
         return a.strip() == b.strip()
+
+
+def cmd_sha256(cmd: str) -> str:
+    """Dấu vân tay lệnh Gate (nguyên văn, chưa che bí mật) — evidence so khớp chính xác với PLAN trước khi so ngữ nghĩa."""
+    return hashlib.sha256(cmd.encode("utf-8")).hexdigest()
 
 
 def _record_timeout() -> Optional[int]:
@@ -1303,11 +1388,26 @@ def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
         proc = subprocess.run(
             ["bash", "-o", "pipefail", "-c", cmd_str], cwd=base, capture_output=True, text=True, timeout=timeout
         )
-        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        return zero_tests_red(proc.returncode, (proc.stdout or "") + (proc.stderr or ""))
     except subprocess.TimeoutExpired as exc:
         return 124, f"timeout: {exc}"
     except FileNotFoundError:
         return 127, "bash: không có trong PATH — loop record cần bash (như hook và dev-task.sh)"
+
+
+# unittest trên Python 3.11 exit 0 khi KHÔNG test nào chạy (`-k` sai tên, module không import được): từ 3.12 exit 5
+# (`NO_TESTS_RAN`). Gate `-k <tên>` là mẫu phổ biến của PLAN → "Ran 0 tests" + exit 0 là xanh giả (REC-01, T-1501).
+# Không bắt `0 passed`/`no tests ran` của pytest: pytest tự exit 5. Chỉ dòng tổng kết ở đầu dòng, không bắt trong tên test.
+ZERO_TESTS_RE = re.compile(r"^Ran 0 tests\b", re.M)
+ZERO_TESTS_EXIT = 5  # cùng mã với unittest 3.12+ để một ca cùng một chữ ký lỗi trên mọi bản Python
+ZERO_TESTS_MARK = "[xt] zero_tests_red: Gate exit 0 nhưng `Ran 0 tests` — không test nào chạy, coi là đỏ (exit 5)"
+
+
+def zero_tests_red(code: int, out: str) -> Tuple[int, str]:
+    """Exit 0 mà output có `Ran 0 tests` → exit 5 kèm dòng lý do; exit ≠ 0 giữ nguyên (3.12+ đã trả 5)."""
+    if code == 0 and ZERO_TESTS_RE.search(out):
+        return ZERO_TESTS_EXIT, out.rstrip("\n") + "\n" + ZERO_TESTS_MARK + "\n"
+    return code, out
 
 
 VERIFIED_FILE = "verified.json"
@@ -1450,12 +1550,15 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
     ev: Dict[str, Any] = {
         "task": task,
         "cmd": redact(cmd_str),
+        "cmd_sha256": cmd_sha256(cmd_str),
         "exit_code": code,
         "started": started,
         "finished": now_iso(),
         "head": _git_head(base),
         "output_tail": redact("\n".join(out.strip().splitlines()[-40:])),
     }
+    if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
+        ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
     d = state_dir(base) / "evidence"
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")

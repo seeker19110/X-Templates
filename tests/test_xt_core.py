@@ -821,6 +821,19 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
             rc = xt.loop_verify(self.base)
         return rc, buf.getvalue()
 
+    def test_zero_tests_red_in_verify_and_blueprint_checks(self):
+        """`loop verify` và lệnh `— Kiểm:` của blueprint đi cùng `run_gate_shell`: `Ran 0 tests` + exit 0 là đỏ (T-1501)."""
+        write(self.plan, "- [x] `T-001` a — Gate: `echo 'Ran 0 tests'`\n")
+        self.git("commit", "-qam", "plan")
+        rc, out = self.verify()
+        self.assertEqual(rc, 1)
+        self.assertIn("verify T-001: exit 5", out)
+        rec = json.loads((self.base / ".autopilot" / "verified.json").read_text())
+        self.assertEqual(rec["results"][0]["exit_code"], 5)
+        self.assertIn(xt.ZERO_TESTS_MARK, rec["results"][0]["output_tail"])
+        checks = xt.run_blueprint_checks([{"id": "X-001", "cmd": "echo 'Ran 0 tests'"}], self.base, 30)
+        self.assertEqual(checks[0]["exit_code"], 5)
+
     def test_stop_requires_final_verify_then_passes(self):
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")  # bằng chứng từng task vẫn đủ
         out, _ = xt.hook_stop("{}", self.base)
@@ -965,6 +978,107 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertFalse(xt.same_command("echo 'a", "echo 'b"))
         self.assertTrue(xt.same_command("echo  a", "echo 'a'"))
 
+    def test_command_identity_keeps_quote_semantics(self):
+        """T-1502 (REC-01): shlex.split cho `echo '$X'` và `echo "$X"` cùng token nhưng bash chạy khác — `same_command`
+        giữ ngữ nghĩa nháy: ký tự còn sống ngoài nháy/trong nháy kép (`$`, backtick, `\\`, `!`; ngoài nháy thêm glob/`~`)
+        khác ký tự chữ trong nháy đơn hoặc sau `\\`."""
+        same = (
+            ("echo  a", "echo 'a'"),
+            ('echo "$X"', "echo $X"),
+            ("echo \\$X", "echo '$X'"),
+            ('echo "a b"', "echo 'a b'"),
+        )
+        same += (('echo "\\$"', "echo '$'"), ('echo "~"', "echo '~'"), ("x  &&  y", "x && y"), ('a "b"c', "a 'b'c"))
+        same += (("python3 -c \"print('a b')\"", "python3 -c 'print('\"'\"'a b'\"'\"')'"), ("", "   "))
+        diff = (("echo '$X'", 'echo "$X"'), ("echo '*'", "echo *"), ('echo "!x"', "echo '!x'"), ("echo ~", "echo '~'"))
+        diff += (("echo '`id`'", 'echo "`id`"'), ("echo a", "echo a b"), ("echo '\\'", 'echo "\\x"'))
+        same += (("echo '\\'", 'echo "\\\\"'),)  # nháy đơn giữ `\`; nháy kép `\\` → một `\` chữ: cùng nghĩa
+        # review #167: toán tử điều khiển/chuyển hướng ngoài nháy khác chữ trong nháy; khoảng trắng quanh toán tử thì không
+        same += (("a | b", "a|b"), ("true && false", "true&&false"), ("x > out", "x >out"), ("a ; b", "a;b"))
+        diff += (
+            ("true && false", "true '&&' false"),
+            ("a;b", "'a;b'"),
+            ("x >out", "x '>out'"),
+            ("echo a #b", "echo a '#b'"),
+        )
+        diff += (("true | cat", "true '|' cat"), ("echo (a)", "echo '(a)'"), ("echo a#b", "echo a '#b'"))
+        same += (("echo a#b", "echo 'a#b'"),)  # `#` giữa từ không mở comment
+        # review #167 (vòng 2): ranh giới giữa các ký tự toán tử và số fd phải còn; xuống dòng ngoài nháy là dấu ngăn lệnh
+        # review #167 (vòng 4): đối số rỗng có nháy trước toán tử vẫn là một đối số
+        diff += (("a ''|b", "a |b"), ('a "";b', "a ;b"), ("a ''&&b", "a &&b"), ("a ''(b)", "a (b)"), ("a ''>f", "a >f"))
+        diff += (("a 2''>f", "a 2>f"),)
+        same += (('a 2"">f', "a 2 >f"),)
+        # review #167 (vòng 3): chỉ chữ số KHÔNG nháy là số fd; cặp cùng nghĩa vẫn True; cặp đối kháng mới khoá hành vi
+        diff += (
+            ("echo '2'>f", "echo 2>f"),
+            ('echo "2">f', "echo 2>f"),
+            ("echo \\2>f", "echo 2>f"),
+            ("a <<EOF", "a < <EOF"),
+        )
+        diff += (("a >|f", "a > |f"), ("a &>> f", "a & >> f"), ("echo 12>f", "echo 12 >f"))
+        same += (
+            ("echo a2>f", "echo a2 >f"),
+            ("echo x>&2", "echo x >&2"),
+            ("a 2>&1", "a 2>& 1"),
+            ("echo $(a;b)", "echo $(a; b)"),
+        )
+        diff += (
+            ("pytest &> log", "pytest & > log"),
+            ("echo 2>f", "echo 2 >f"),
+            ("a && b", "a & & b"),
+            ("a || b", "a | | b"),
+        )
+        diff += (
+            ("pytest 2>&1 | tee l", "pytest 2 >&1 | tee l"),
+            ("cat <(a)", "cat < (a)"),
+            ("echo ok\nfalse", "echo ok false"),
+        )
+        same += (
+            ("pytest 2>&1 | tee l", "pytest  2>&1|tee l"),
+            ("echo ok\nfalse", "echo ok\n false"),
+        )
+        for a, b in same:
+            self.assertTrue(xt.same_command(a, b), (a, b))
+            self.assertTrue(xt.same_command(b, a), (b, a))
+        for a, b in diff:
+            self.assertFalse(xt.same_command(a, b), (a, b))
+        with self.assertRaises(ValueError):
+            xt.shell_identity("echo 'a")
+        self.assertEqual(
+            xt.shell_identity('echo "\\x"'),
+            [(("e", False), ("c", False), ("h", False), ("o", False)), (("\\", True), ("x", False))],
+        )
+
+    def test_command_identity_evidence_sha_and_verdict(self):
+        """Evidence ghi `cmd_sha256` của lệnh nguyên văn; verdict: dấu vân tay khớp PLAN → không so ngữ nghĩa; khác → so
+        `same_command` (khoảng trắng khác vẫn nhận; nháy đổi nghĩa → `verify`)."""
+        write(self.base / "docs" / "autopilot" / "PLAN.md", '- [x] `T-001` việc — Gate: `echo "$HOME"`\n')
+        self.assertEqual(self.record(['echo "$HOME"'])[0], 0)
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual(ev["cmd_sha256"], xt.cmd_sha256('echo "$HOME"'))
+        self.assertEqual(len(ev["cmd_sha256"]), 64)
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        self.assertEqual(self.record(["echo  $HOME"])[0], 0)  # khác dấu vân tay, cùng nghĩa
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        self.assertEqual(self.record(["echo '$HOME'"])[0], 0)  # chữ, không bung: KHÔNG phải Gate khai
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
+        self.assertIn("bằng chứng chạy lệnh khác", v["reason"])
+        # evidence cũ không có cmd_sha256 (bản < 3.9): chỉ so ngữ nghĩa
+        ev = xt.read_evidence("T-001", self.base)
+        ev.pop("cmd_sha256")
+        ev["cmd"] = 'echo "$HOME"'
+        write(self.base / ".autopilot" / "evidence" / "T-001.json", json.dumps(ev))
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_command_identity_blueprint_checks_not_merged(self):
+        """`run_blueprint_checks` chỉ dùng chung kết quả cho lệnh CÙNG nghĩa."""
+        checks = [{"id": "A", "cmd": "echo '$X'"}, {"id": "B", "cmd": 'echo "$X"'}, {"id": "C", "cmd": "echo  '$X'"}]
+        with unittest.mock.patch.object(xt, "run_gate_shell", return_value=(0, "ok")) as run:
+            out = xt.run_blueprint_checks(checks, self.base, 30)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual([c["exit_code"] for c in out], [0, 0, 0])
+
     def test_invalid_timeout_env_returns_2_and_writes_nothing(self):
         os.environ["XT_RECORD_TIMEOUT"] = "abc"
         code, out, err = self.record(["true"])
@@ -1003,6 +1117,26 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         st = xt.read_state(self.base)
         self.assertEqual(st["same_failure_count"], 0)
         self.assertIsNone(st["last_failure_signature"])
+
+    def test_zero_tests_red_exit0_with_ran_0_tests_is_red(self):
+        """REC-01/T-1501: unittest 3.11 exit 0 khi `-k` không khớp test nào (`Ran 0 tests`) — xanh giả; nay exit 5 (như
+        3.12+), evidence ghi `zero_tests_red` + lý do; `Ran N tests` (N > 0) và `0 passed` của pytest (tự exit 5) không bắt."""
+        code, out, _ = self.record(["echo 'Ran 0 tests in 0.001s'; echo OK"])
+        self.assertEqual(code, xt.ZERO_TESTS_EXIT)
+        self.assertIn("zero_tests_red", out)
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual((ev["exit_code"], ev["zero_tests_red"]), (5, True))
+        self.assertIn("Ran 0 tests", ev["output_tail"])
+        self.assertIn(xt.ZERO_TESTS_MARK, ev["output_tail"])
+        self.assertEqual(xt.read_state(self.base)["same_failure_count"], 1)
+        self.assertEqual(self.record(["echo 'Ran 10 tests in 0.1s'; echo OK"])[0], 0)
+        self.assertNotIn("zero_tests_red", xt.read_evidence("T-001", self.base))
+        self.assertEqual(self.record(["echo '0 passed in 0.01s'"])[0], 0)  # pytest: tự exit 5 khi không test
+        self.assertEqual(self.record(["echo '  Ran 0 tests'"])[0], 0)  # chỉ dòng tổng kết ở đầu dòng
+        self.assertEqual(self.record(["echo 'Ran 0 tests'; exit 5"])[0], 5)  # 3.12+: giữ nguyên, không có dấu
+        self.assertNotIn("zero_tests_red", xt.read_evidence("T-001", self.base))
+        self.assertEqual(xt.zero_tests_red(0, "x\nRan 0 tests\n"), (5, f"x\nRan 0 tests\n{xt.ZERO_TESTS_MARK}\n"))
+        self.assertEqual(xt.zero_tests_red(1, "Ran 0 tests"), (1, "Ran 0 tests"))
 
     def test_pipeline_failure_is_not_green(self):
         # pipefail: Gate `test | tee log` đỏ khi test đỏ — /bin/sh lấy exit của `tee` → từng ghi exit 0 (xanh giả).

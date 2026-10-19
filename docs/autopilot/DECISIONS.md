@@ -517,3 +517,17 @@
 - Chọn: Ghi pr reviewed --blocking cho #162; mở PR mới trên nhánh phiên = #162 + commit sửa, thay #162 (như D-066 với #160); đóng #162
 - Lý do (tiêu chí chất lượng cuối): Giữ ràng buộc nhánh của phiên và một lát một PR; PR mới mang nguyên commit của #162 nên review tăng trưởng chỉ cần rà commit sửa; không chờ người (ADR-0008)
 - Đường lùi: Đóng PR mới, mở lại #162 và chép commit sửa sang nhánh của #162 khi được phép
+
+### D-073 · 2026-10-19T15:03:20+00:00 · Duyệt PLAN-3.9-automation (T-1501…T-1522, 3.9.0 → 3.10.0) sau khi 3.8.0 phát hành: chạy loop init như thế nào?
+
+- Phương án: (1) Duyệt nguyên văn, chạy ngay · (2) Duyệt sau khi siết Gate theo review khác model (tách -k theo ý, sau: tuần tự cho task cùng sửa xt.py, trần headless cho T-1508), rồi loop init --single-session --max-iterations 176 --hours 24 · (3) Hoãn tới khi sửa xong 🔴 AUD-SEC-072 của audit
+- Chọn: Duyệt sau khi siết Gate theo review khác model (tách -k theo ý, sau: tuần tự cho task cùng sửa xt.py, trần headless cho T-1508), rồi loop init --single-session --max-iterations 176 --hours 24
+- Lý do (tiêu chí chất lượng cuối): Reviewer Sonnet (LOOP-ORCH-018) tìm 4 Gate chỉ chứng minh test tồn tại hoặc thiếu ý của task; siết rẻ và đúng (1) đúng và an toàn; PLAN-3.9 độc lập về file với sửa guard nên không phải chờ — sửa guard đợi người duyệt kế hoạch audit riêng
+- Đường lùi: loop stop; loop init lại với PLAN cũ (git revert commit siết Gate)
+
+### D-074 · 2026-10-19T15:03:20+00:00 · T-1501 và T-1502 (cùng sửa scripts/xt.py phần evidence, đã xong cục bộ) — một PR hay hai?
+
+- Phương án: (1) Hai PR tuần tự trên cùng tên nhánh (D-065) · (2) Một PR gộp, hai commit theo task
+- Chọn: Một PR gộp, hai commit theo task
+- Lý do (tiêu chí chất lượng cuối): Hai task cùng hàm run_gate_shell/loop_record, review một lần rẻ hơn; commit tách theo task giữ đường lùi; ràng buộc một tên nhánh buộc hai vòng CI + review nối tiếp (như D-071)
+- Đường lùi: Revert commit của task cần bỏ
