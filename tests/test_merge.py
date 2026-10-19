@@ -1614,6 +1614,12 @@ class StewardFollowupTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual([w[3] for w in gh.writes], ["POST"])  # chỉ lần gắn nhãn, không `gh pr merge`
         self.assertIn("#7 enable-auto-merge — sạch ⚠", out)
+        hold = {**ready, "action": "disable-auto-merge"}  # giữ PR lại vẫn chạy dù nhãn lỗi
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=hold):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertEqual(gh.writes[-1], ["gh", "pr", "merge", "7", "--disable-auto"])
 
     def test_merge_fields_include_author(self):
         self.assertIn("author", xt.MERGE_FIELDS.split(","))

@@ -5634,7 +5634,9 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             [["gh", "api", "-X", "POST", f"{repo}/issues/{n}/labels", "-f", f"labels[]={STANDARD_LABEL}"]]
         )
         if label_err:  # không nhãn: push sau có thể hạ PR về làn nhanh — không bật/merge lượt này, báo đỏ ra summary
-            return {**out, "warn": f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"}
+            out["warn"] = f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"
+            if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
+                return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
     cmds = cmds if apply else []
     if cmds:

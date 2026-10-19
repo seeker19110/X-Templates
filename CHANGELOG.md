@@ -17,7 +17,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `pr_title_check: off` chỉ có hiệu lực khi cả xt.yaml ở nhánh đích lẫn cây làm việc đều `off` — PR không tự tắt luật
   tiêu đề cho chính nó (D-058).
 - `pr steward --apply` không gắn được nhãn `xt-standard-lane` → dòng báo `⚠` (cả trong summary của run) và exit 1, thay vì
-  im lặng; lượt đó không bật auto-merge/merge (lượt sau gắn lại nhãn rồi mới bật). `MERGE_FIELDS` (`--pr-json` từ
+  im lặng; lượt đó không bật auto-merge/merge (lượt sau gắn lại nhãn rồi mới bật) — tắt auto-merge vẫn chạy. `MERGE_FIELDS` (`--pr-json` từ
   `gh pr view`) có thêm `author` để miễn tiêu đề cho PR của bot.
 - Quyền ghi của MEMBER đọc cả `role_name` (`maintain` tính là ghi) và được nhớ 5 phút trong một tiến trình (`merge-watch`
   hỏi 30 giây/lần không tốn thêm request mỗi lượt); lỗi khi hỏi không được nhớ. ADR-0027 ghi chú sửa đổi ở dòng trạng thái.
