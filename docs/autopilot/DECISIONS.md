@@ -454,3 +454,17 @@
 - Chọn: Đủ điều kiện là merge ghim head ngay (kể cả khi auto-merge đang bật); nhánh đích không có check bắt buộc thì pr next không bao giờ trả enable-auto-merge mà chờ CI xanh rồi merge ghim head — chốt ở pr_next cho cả phiên agent lẫn steward
 - Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu đủ điều kiện là luôn được merge (X-Templates#155 treo ở trạng thái clean, phải merge tay); merge ghim head chỉ khi merge-check thấy mọi check xanh và GitHub báo sạch nên không mở rủi ro mới; một chỗ chốt trong pr_next thay cho bộ lọc riêng của steward (D-062), phiên agent cũng được che
 - Đường lùi: Bỏ nhánh verdict merge khi auto_merge và nhánh base_has_required trong _pr_next_final; trả lại bộ lọc --auto ở _steward_one
+
+### D-064 · 2026-10-19T11:13:18+00:00 · Duyệt kế hoạch sửa audit 2026-10-19 (5 đợt, T-1401…T-1417, bản 3.8.0)
+
+- Phương án: (1) Sửa mọi 🔴/🟠 + 🟢 cùng file khi rẻ, mỗi lát một PR, phát hành 3.8.0 · (2) Chỉ sửa 2 🔴 (đợt 1), phần còn lại để sau · (3) Gộp mọi đợt vào một PR
+- Chọn: Sửa mọi 🔴/🟠 + 🟢 cùng file khi rẻ, mỗi lát một PR, phát hành 3.8.0
+- Lý do (tiêu chí chất lượng cuối): Chủ repo gọi /autopilot ngay sau /audit dừng chờ duyệt kế hoạch 5 đợt; đúng và an toàn: 🔴/🟠 là hàng rào hứa chặn mà lọt và cổng máy xanh giả — để lại là nợ an toàn; mỗi lát một PR giữ đường lùi (revert từng lát) và review khác model theo làn
+- Đường lùi: Dừng sau lát bất kỳ; revert PR của lát; phát hiện còn lại giữ 'mở' trong AUDIT-STATUS
+
+### D-065 · 2026-10-19T11:13:18+00:00 · Phiên bị ràng buộc một tên nhánh (seeker/beautiful-turing-hv6jb9) trong khi AGENTS.md đòi mỗi lát một PR, nhánh riêng
+
+- Phương án: (1) Tuần tự: mỗi lát một PR trên cùng tên nhánh; lát sau chuẩn bị ở nhánh cục bộ, PR trước merge thì đặt lại nhánh từ main · (2) Đẩy nhiều nhánh <type>/<mô-tả> song song · (3) Mọi lát một PR
+- Chọn: Tuần tự: mỗi lát một PR trên cùng tên nhánh; lát sau chuẩn bị ở nhánh cục bộ, PR trước merge thì đặt lại nhánh từ main
+- Lý do (tiêu chí chất lượng cuối): Giữ cả hai luật: ràng buộc nhánh của phiên (không push nhánh khác khi chưa được phép) và một lát một PR (review/đường lùi riêng); chi phí chỉ là chờ CI/review giữa các lát
+- Đường lùi: Chủ repo cho phép nhánh khác → tách lát còn lại sang nhánh <type>/<mô-tả> riêng

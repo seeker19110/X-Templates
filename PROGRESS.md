@@ -29,7 +29,7 @@
 - Nợ kỹ thuật chấp nhận: chọn 4 MUST/module là phán đoán; số điều cụ thể của NĐ 356/2025 chưa đối chiếu bản gốc — trả khi audit dự án thật.
 
 ## Bàn giao phiên
-- 2026-10-19 · Commit cuối trên `main`: `ac24da9` (#156); tag `v3.7.1` (sau PR này), `v3.7.0` → `4d6d439`, `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-19 · Commit cuối trên `main`: `ac24da9` (#156); tag `v3.7.1` (sau PR này), `v3.7.0` → `4d6d439`, `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `9433792` (delta #94–#157: 2 🔴 · 17 🟠 mở, chờ duyệt — `docs/ops/AUDIT-REPORT-2026-10-19-delta.md`).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: không chạy. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.

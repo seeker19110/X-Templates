@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
+  (audit 2026-10-19: 4/5 subagent `reviewer` dừng ở trần 40 lượt trước khi kịp trả báo cáo). Dự án đích: chạy lại
+  `install.py` để nhận `.claude/agents/*.md` mới.
+
 ## [3.7.1] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.7.0:** chạy lại `install.py` (chỉ `xt.py` đổi; không đổi workflow/hook). Sau khi nâng, PR đủ
