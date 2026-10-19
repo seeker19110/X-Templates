@@ -5,7 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-> **Dự án đích:** chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, matcher hook MCP trong `settings.json` đổi).
+## [3.8.0] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.7.x:** chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, matcher hook MCP trong
+> `settings.json`, `xt.py`, mẫu, `.claude/agents/*.md` đổi). Guard chặn thêm (lồng sâu, brace expansion, gửi bí mật qua
+> scp/nc/gist, xoá ngoài dự án, dấu review tay); `contrast` đỏ với cặp màu không đọc được (`--allow-skip` nếu cố ý);
+> `merge-check` không coi `merge-gate` là bằng chứng CI; khung ở dự án con canh `xt.yaml` của dự án con.
 
 ### Added
 - Kế hoạch khắc phục và nâng cấp tự động hóa sau đánh giá ngày 2026-10-19 (bản 2, thay nháp #160):
