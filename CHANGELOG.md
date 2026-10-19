@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Đồ thị task của PLAN (T-1511, AUTO-01): `xt.py` đọc `(sau: T-…; files: …)` trên dòng task; `loop next [--json]` trả task
+  sẵn sàng + cặp giao nhau `files:`; `loop record` từ chối (exit 2) khi dependency `sau:` còn mở; `loop status` báo chu trình
+  (`cycles` trong `--json`). `framework/templates/PLAN.md` mô tả cú pháp. Dự án đích: chạy lại `install.py`.
+
+### Changed
+- `xt.yaml` `merge_risk_paths` thêm `docs/autopilot/PLAN*.md` (file PLAN chứa lệnh Gate harness chạy → PR đi làn chuẩn).
+
 ## [3.9.0] - 2026-10-19
 
 ### Added

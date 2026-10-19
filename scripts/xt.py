@@ -1061,9 +1061,9 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
         if not m:
             continue
         g = GATE_RE.search(m["rest"])
-        tier = EXEC_TIER_RE.search(
-            m["rest"][: g.start()] if g else m["rest"]
-        )  # không đọc trong lệnh Gate (review #169)
+        head = m["rest"][: g.start()] if g else m["rest"]  # không đọc trong lệnh Gate (review #169)
+        tier = EXEC_TIER_RE.search(head)
+        links = plan_links(head)
         tasks.append(
             {
                 "id": m["id"],
@@ -1073,9 +1073,99 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
                 "rest": m["rest"],
                 "tier": tier[1] if tier else "default",
                 "section": section,
+                "after": links["sau"],
+                "files": links["files"],
             }
         )
     return tasks
+
+
+PLAN_LINK_GROUP_RE = re.compile(
+    r"\(([^()]*\b(?:sau|files):[^()]*)\)"
+)  # `(… sau: T-1; files: a, b)` — ghi chú dòng task
+PLAN_LINK_RE = re.compile(r"^(sau|files):\s*(.*)$")
+PLAN_OPEN_STATES = (" ",)  # `[ ]`; `[x]`/`[~]` là đã đóng
+
+
+def plan_links(head: str) -> Dict[str, List[str]]:
+    """`(sau: T-A, T-B; files: p1, p2)` trong phần mô tả task (T-1511, AUTO-01): `sau` = dependency TRONG PLAN (ID task),
+    `files` = phạm vi ghi. Phần khác của nhóm ngoặc (`REC-01`, `cần: …`) bị bỏ qua; không có → danh sách rỗng."""
+    out: Dict[str, List[str]] = {"sau": [], "files": []}
+    for group in PLAN_LINK_GROUP_RE.findall(head):
+        for seg in group.split(";"):
+            kv = PLAN_LINK_RE.match(seg.strip())
+            if not kv:
+                continue
+            if kv[1] == "sau":
+                out["sau"] += re.findall(r"T-\d{3,}", kv[2])
+            else:
+                out["files"] += [p.strip(" `") for p in kv[2].split(",") if p.strip(" `")]
+    return {k: list(dict.fromkeys(v)) for k, v in out.items()}
+
+
+def _waiting(t: Dict[str, Any], state: Dict[str, str]) -> List[str]:
+    """Dependency của `t` còn mở (chưa `[x]`/`[~]`); ID không có trong PLAN coi như ngoài file → không chặn."""
+    return [d for d in t["after"] if state.get(d, "x") in PLAN_OPEN_STATES]
+
+
+def plan_ready(tasks: List[Dict[str, Any]], deferred: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Task `[ ]` chưa defer mà mọi dependency `sau:` đã đóng — làm được ngay (song song nếu không giao file)."""
+    state = {t["id"]: t["state"] for t in tasks}
+    return [t for t in tasks if t["state"] == " " and t["id"] not in deferred and not _waiting(t, state)]
+
+
+def _path_overlap(a: str, b: str) -> bool:
+    a, b = a.rstrip("/"), b.rstrip("/")
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def plan_overlaps(ready: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cặp task sẵn sàng có phạm vi `files:` giao nhau (trùng đường dẫn hoặc thư mục chứa nhau) → không giao song song."""
+    out: List[Dict[str, Any]] = []
+    for i, a in enumerate(ready):
+        for b in ready[i + 1 :]:
+            shared = sorted(
+                {
+                    max((x.rstrip("/"), y.rstrip("/")), key=len)
+                    for x in a["files"]
+                    for y in b["files"]
+                    if _path_overlap(x, y)
+                }
+            )
+            if shared:
+                out.append({"tasks": [a["id"], b["id"]], "files": shared})
+    return out
+
+
+def _prune_leaves(left: set[str], deps: Dict[str, set[str]]) -> set[str]:
+    while True:
+        drop = {n for n in left if not deps[n] & left}
+        if not drop:
+            return left
+        left = left - drop
+
+
+def plan_cycle_nodes(tasks: List[Dict[str, Any]]) -> List[str]:
+    """ID task nằm trên chu trình `sau:` (kể cả tự phụ thuộc): bóc dần node không còn dependency mở, rồi node không ai
+    phụ thuộc; phần còn lại là các chu trình. Dependency trỏ ra ngoài PLAN bị bỏ qua."""
+    ids = {t["id"] for t in tasks}
+    deps = {t["id"]: {d for d in t["after"] if d in ids} for t in tasks}
+    left = _prune_leaves(ids, deps)
+    rdeps = {n: {m for m in left if n in deps[m]} for n in left}
+    return sorted(_prune_leaves(left, rdeps))
+
+
+def _plan_tasks(base: Path, st: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Task của PLAN khai trong state; không có state/PLAN → [] (fail-open cho chỗ gọi)."""
+    plan = base / str(st.get("plan") or "")
+    return parse_plan(plan) if plan.is_file() else []
+
+
+def open_dependencies(task: str, base: Path, st: Dict[str, Any]) -> List[str]:
+    """Dependency `sau:` của `task` còn mở trong PLAN của vòng; task/PLAN không có → [] (không chặn)."""
+    tasks = _plan_tasks(base, st)
+    state = {t["id"]: t["state"] for t in tasks}
+    return next((_waiting(t, state) for t in tasks if t["id"] == task), [])
 
 
 def executor_choice(t: Dict[str, Any], base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
@@ -1682,6 +1772,13 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor
     st = read_state(base) or {}
     timeout = _record_timeout()
     if timeout is None:
+        return 2
+    waiting = open_dependencies(task, base, st)
+    if waiting:  # tick theo thứ tự `sau:` (T-1511): dependency chưa đóng thì chưa có bằng chứng cho task này
+        print(
+            f"✗ {task} phụ thuộc (sau:) {', '.join(waiting)} chưa xong trong PLAN — làm/tick chúng trước",
+            file=sys.stderr,
+        )
         return 2
     started = now_iso()
     # Một đối số = chuỗi shell nguyên văn (cho phép `a && b`, ống); nhiều đối số = argv, ghép bằng shlex để giữ nháy (AUD-HAR-002).
@@ -4695,6 +4792,8 @@ def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
     ]
     warn = _mode_warning(st.get("permission_mode")) if st.get("active") else ""
     notes += [warn.strip()] if warn else []
+    cycles = plan_cycle_nodes(_plan_tasks(base, st))
+    notes += [f"✗ PLAN có chu trình dependency (sau:) — không bao giờ làm được: {', '.join(cycles)}"] if cycles else []
     cp = st.get("checkpoint")
     newer = (_evidence_latest(base) or {}).get("finished") or ""
     if isinstance(cp, dict) and str(newer) <= str(cp.get("at")):
@@ -4714,11 +4813,37 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
     v["iterations"] = st.get("iterations", 0)
     if args.json:
         extra = {k: st.get(k) for k in ("single_session", "permission_mode", "checkpoint")}
-        print(json.dumps({**v, **extra, "deferred": _deferred(st)}, ensure_ascii=False))
+        cycles = plan_cycle_nodes(_plan_tasks(base, st))
+        print(json.dumps({**v, **extra, "deferred": _deferred(st), "cycles": cycles}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
         for n in _status_notes(st, base):
             print(f"  · {n}")
+    return 0
+
+
+def _loop_next(args: argparse.Namespace, base: Path) -> int:
+    """Task sẵn sàng theo `sau:` + cặp giao nhau `files:` (T-1511): phiên chính chỉ giao song song cặp không giao nhau."""
+    st = read_state(base) or {}
+    tasks = _plan_tasks(base, st)
+    if not tasks:
+        print("✗ Không đọc được PLAN của vòng — chạy `loop init --plan …` trước", file=sys.stderr)
+        return 2
+    ready = plan_ready(tasks, _deferred(st))
+    out = {
+        "ready": [{k: t[k] for k in ("id", "title", "tier", "after", "files")} for t in ready],
+        "overlaps": plan_overlaps(ready),
+        "unscoped": [t["id"] for t in ready if not t["files"]],
+        "cycles": plan_cycle_nodes(tasks),
+    }
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+    print("Sẵn sàng: " + (", ".join(r["id"] for r in out["ready"]) or "—"))
+    for o in out["overlaps"]:
+        print(f"  ⚠ {' ∩ '.join(o['tasks'])} cùng ghi {', '.join(o['files'])} — làm tuần tự")
+    for u in out["unscoped"]:
+        print(f"  · {u} chưa khai files: — coi như giao với mọi task")
     return 0
 
 
@@ -4932,6 +5057,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "init": _loop_init,
     "status": _loop_status,
     "record": _loop_record,
+    "next": _loop_next,
     "block": _loop_block,
     "decide": _loop_decide,
     "defer": _loop_defer,
@@ -7381,6 +7507,8 @@ def build_parser() -> argparse.ArgumentParser:
     li.add_argument("--force", action="store_true", help="ghi đè vòng đang chạy (đổi PLAN/ngân sách, vòng cũ đã chết)")
     ls = lsub.add_parser("status")
     ls.add_argument("--json", action="store_true")
+    lne = lsub.add_parser("next", help="task sẵn sàng theo `sau:` và cặp giao nhau `files:` (T-1511)")
+    lne.add_argument("--json", action="store_true")
     lr = lsub.add_parser("record")
     lr.add_argument("--task", required=True, type=_task_id)
     lr.add_argument(

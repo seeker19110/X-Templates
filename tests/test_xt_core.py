@@ -1551,5 +1551,128 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertIn("LOOP-STOP-027", err.getvalue())
 
 
+class TaskDagTest(TmpMixin, unittest.TestCase):
+    """T-1511 (AUTO-01): `(sau: …; files: …)` của dòng task → `loop next`, từ chối record khi dependency mở, chu trình."""
+
+    PLAN = """
+        ### Đợt 1
+        - [x] `T-001` nền (REC-01; files: scripts/xt.py) — Gate: `true`
+        - [ ] `T-002` hai (A; sau: T-001; cần: PR #9; files: scripts/xt.py, tests/a.py) — Gate: `echo "(sau: T-999)"`
+        - [ ] `T-003` ba (sau: T-001, T-001; files: `scripts/`) — Gate: `true`
+        - [ ] `T-004` bốn (sau: T-002) — Gate: `true`
+        - [ ] `T-005` năm (sau: T-777; files: docs/x.md) (exec: deep) — Gate: `true`
+        - [ ] `T-006` sáu (files: docs/x.md, ) — Gate: `true`
+        - [ ] `T-007` bảy (files: docs/y.md) — Gate: `true`
+        - [ ] `T-008` tám (sau: T-001; files: docs/z.md) — Gate: `true`
+        """
+
+    def setUp(self):
+        self.base = self.tmpdir()
+        ceiling = unittest.mock.patch.dict(
+            os.environ, {"GIT_CEILING_DIRECTORIES": str(self.base.parent), "CLAUDE_PROJECT_DIR": str(self.base)}
+        )
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
+        os.environ.pop("XT_RECORD_TIMEOUT", None)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN)
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.base)
+
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = xt.main(list(args))
+        return rc, out.getvalue(), err.getvalue()
+
+    def tasks(self):
+        return {t["id"]: t for t in xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")}
+
+    def test_task_dag_parser_reads_links_outside_gate(self):
+        t = self.tasks()
+        self.assertEqual((t["T-001"]["after"], t["T-001"]["files"]), ([], ["scripts/xt.py"]))
+        self.assertEqual((t["T-002"]["after"], t["T-002"]["files"]), (["T-001"], ["scripts/xt.py", "tests/a.py"]))
+        self.assertEqual((t["T-003"]["after"], t["T-003"]["files"]), (["T-001"], ["scripts/"]))  # dedupe, bỏ backtick
+        self.assertEqual((t["T-004"]["after"], t["T-004"]["files"]), (["T-002"], []))
+        self.assertEqual((t["T-006"]["after"], t["T-006"]["files"]), ([], ["docs/x.md"]))  # phần tử rỗng bị bỏ
+        self.assertEqual(t["T-005"]["tier"], "deep")
+        self.assertEqual(xt.plan_links("không có ghi chú (REC-01; cần: x)"), {"sau": [], "files": []})
+        self.assertEqual(
+            xt.plan_links("(sau: T-101; files: a) (sau: T-102)"), {"sau": ["T-101", "T-102"], "files": ["a"]}
+        )
+
+    def test_task_dag_ready_and_overlaps(self):
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        ready = [t["id"] for t in xt.plan_ready(tasks, {})]
+        self.assertEqual(
+            ready, ["T-002", "T-003", "T-005", "T-006", "T-007", "T-008"]
+        )  # T-004 chờ T-002; T-777 ngoài file
+        self.assertEqual([t["id"] for t in xt.plan_ready(tasks, {"T-002": {}})][:2], ["T-003", "T-005"])
+        pairs = {tuple(o["tasks"]): o["files"] for o in xt.plan_overlaps(xt.plan_ready(tasks, {}))}
+        self.assertEqual(pairs, {("T-002", "T-003"): ["scripts/xt.py"], ("T-005", "T-006"): ["docs/x.md"]})
+        self.assertEqual(xt.plan_overlaps([]), [])
+
+    def test_task_dag_next_json_and_text(self):
+        rc, out, _ = self.run_main("loop", "next", "--json")
+        data = json.loads(out)
+        self.assertEqual(rc, 0)
+        self.assertEqual([r["id"] for r in data["ready"]][:2], ["T-002", "T-003"])
+        self.assertEqual(data["ready"][0]["files"], ["scripts/xt.py", "tests/a.py"])
+        self.assertEqual(data["unscoped"], [])
+        self.assertEqual(data["cycles"], [])
+        self.assertEqual([o["tasks"] for o in data["overlaps"]], [["T-002", "T-003"], ["T-005", "T-006"]])
+        st = xt.read_state(self.base)
+        st["deferred"] = {"T-007": {"reason": "x"}}
+        xt.write_state(st, self.base)
+        self.assertNotIn("T-007", [r["id"] for r in json.loads(self.run_main("loop", "next", "--json")[1])["ready"]])
+        rc, text, _ = self.run_main("loop", "next")
+        self.assertEqual(rc, 0)
+        self.assertIn("Sẵn sàng: T-002, T-003", text)
+        self.assertIn("T-002 ∩ T-003 cùng ghi scripts/xt.py", text)
+        self.assertNotIn("chưa khai files", text)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-010` không phạm vi — Gate: `true`\n")
+        self.assertIn("T-010 chưa khai files:", self.run_main("loop", "next")[1])
+
+    def test_task_dag_next_without_plan_is_error(self):
+        xt.write_state({"active": True, "plan": "nope.md"}, self.base)
+        rc, out, err = self.run_main("loop", "next")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("loop init", err)
+
+    def test_task_dag_record_refuses_open_dependency(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(xt.loop_record("T-004", ["true"], self.base), 2)  # T-002 còn `[ ]`
+        self.assertIn("T-002 chưa xong", err.getvalue())
+        self.assertIsNone(xt.read_evidence("T-004", self.base))
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(xt.loop_record("T-002", ["true"], self.base), 0)  # T-001 `[x]`
+            self.assertEqual(xt.loop_record("T-005", ["true"], self.base), 0)  # dependency ngoài file không chặn
+            self.assertEqual(xt.loop_record("T-099", ["true"], self.base), 0)  # task không có trong PLAN
+        self.assertIsNotNone(xt.read_evidence("T-002", self.base))
+        self.assertEqual(xt.open_dependencies("T-004", self.base, {}), [])  # không có vòng/PLAN: không chặn
+        text = (self.base / "docs" / "autopilot" / "PLAN.md").read_text(encoding="utf-8")
+        write(self.base / "docs" / "autopilot" / "PLAN.md", text.replace("- [ ] `T-002`", "- [~] `T-002`"))
+        self.assertEqual(xt.open_dependencies("T-004", self.base, xt.read_state(self.base) or {}), [])
+
+    def test_task_dag_status_reports_cycles(self):
+        self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["cycles"], [])
+        self.assertNotIn("chu trình", self.run_main("loop", "status")[1])
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            - [ ] `T-001` a (sau: T-002) — Gate: `true`
+            - [ ] `T-002` b (sau: T-003) — Gate: `true`
+            - [ ] `T-003` c (sau: T-001) — Gate: `true`
+            - [ ] `T-004` d (sau: T-003) — Gate: `true`
+            - [ ] `T-005` e (sau: T-005) — Gate: `true`
+            - [ ] `T-006` f (sau: T-009) — Gate: `true`
+            """,
+        )
+        self.assertEqual(
+            json.loads(self.run_main("loop", "status", "--json")[1])["cycles"], ["T-001", "T-002", "T-003", "T-005"]
+        )
+        self.assertIn("chu trình dependency (sau:)", self.run_main("loop", "status")[1])
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["ready"][0]["id"], "T-006")
+
+
 if __name__ == "__main__":
     unittest.main()

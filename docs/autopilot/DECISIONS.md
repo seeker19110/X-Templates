@@ -587,3 +587,10 @@
 - Chọn: A: im lặng (headless tự deny, tương tác hiện hộp thoại)
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: chiều chặt, đúng REC-04 'không quyết định ⇒ deny'; B mở rộng tự duyệt ngoài permissions.allow và cần ADR
 - Đường lùi: đổi nhánh in allow trong guard.py permission + ADR
+
+### D-083 · 2026-10-19T23:08:39+00:00 · Audit delta ở mốc 3.9.0: làm ngay hay gộp vào mốc 3.10.0?
+
+- Phương án: (1) Audit delta đủ 13 nhóm ngay · (2) Gộp vào mốc 3.10.0; bây giờ chỉ review khác họ model diff T-1509 (phần guard)
+- Chọn: Gộp vào mốc 3.10.0; bây giờ chỉ review khác họ model diff T-1509 (phần guard)
+- Lý do (tiêu chí chất lượng cuối): sổ rescan tại a4f929c còn chờ duyệt và đã phủ phần lớn; diff mốc nhỏ (T-1501…1509 đã qua Gate + coverage 100%); rủi ro cao nhất là guard nên review riêng
+- Đường lùi: chạy audit plan/check đủ nhóm trước T-1511
