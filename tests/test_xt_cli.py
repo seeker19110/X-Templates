@@ -1786,3 +1786,128 @@ class VersionAndMainTest(TmpDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------- release-check (ADR-0029)
+
+
+class ReleaseCheckTest(TmpRepoCase):
+    """Cổng G7 máy đọc: mỗi hàng PASS/FAIL/N-A có bằng chứng; GO chỉ khi không BLOCKER nào FAIL; hàng N/A BLOCKER là
+    việc của người ("GO (chờ người)")."""
+
+    BP = (
+        "---\ntitle: B\nkind: blueprint\nupdated: 2026-10-19\nscale: S\nprofile: cli-tool\n---\n\n## Checklist\n\n"
+        "- [x] `BASE-X-001` **MUST** a — Kiểm: `true`\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
+        os.environ.pop("XT_RECORD_TIMEOUT", None)
+        (self.repo / "docs" / "ops").mkdir(parents=True)
+        (self.repo / "docs" / "ops" / "AUDIT-STATUS.md").write_text(audit_status_text(), encoding="utf-8")
+        (self.repo / "BLUEPRINT.md").write_text(self.BP, encoding="utf-8")
+
+    def rows(self, *extra: str) -> tuple[int, dict]:
+        rc, out, _ = run_main("release-check", "--json", *extra)
+        return rc, json.loads(out)
+
+    def by_id(self, d: dict) -> dict:
+        return {r["id"]: r for r in d["rows"]}
+
+    def fresh_verify(self) -> None:
+        """Giả `loop verify` xanh trên cây hiện tại (dấu vân tay khớp)."""
+        rec = {"ok": True, "fingerprint": xt.tree_fingerprint(self.repo)}
+        xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
+
+    def test_no_go_until_blueprint_audit_and_tree_pass(self):
+        rc, out, _ = run_main("release-check")  # chưa commit: cây không có HEAD
+        self.assertEqual(rc, 1)
+        self.assertIn("NO-GO", out)
+        self.assertIn("✗ BLOCKER tree         FAIL không phải repo git có commit", out)
+        self.assertIn("– SHOULD  verify       N/A  không chạy autopilot", out)
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        rc, d = self.rows()
+        self.assertEqual((rc, d["go"], d["verdict"], d["fails"], d["human"]), (0, True, "GO", [], []))
+        r = self.by_id(d)
+        self.assertEqual([r[k]["result"] for k in xt.RELEASE_ROWS], ["PASS", "PASS", "N/A", "PASS", "N/A"])
+        self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
+        self.assertTrue(r["tree"]["evidence"].startswith("cây sạch, HEAD "))
+        self.assertEqual(len(d["head"]), 40)
+        (self.repo / "x.txt").write_text("dở\n", encoding="utf-8")  # file chưa commit → tree FAIL; .autopilot bỏ qua
+        (self.repo / ".autopilot").mkdir()
+        (self.repo / ".autopilot" / "runs.jsonl").write_text("", encoding="utf-8")
+        rc, d = self.rows()
+        self.assertEqual((rc, d["fails"]), (1, ["tree"]))
+        self.assertIn("1 file chưa commit (x.txt)", self.by_id(d)["tree"]["evidence"])
+
+    def test_blueprint_failures_and_missing_inputs(self):
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        bp = self.repo / "BLUEPRINT.md"
+        bp.write_text(
+            self.BP + "- [ ] `BASE-X-002` **MUST** b → Kiểm: c\n- [x] `BASE-X-003` **MUST** d — Kiểm: `false`\n"
+            "- [~] `BASE-X-004` **MUST** e\n- [x] `BASE-X-005` **MUST** f → Kiểm: tay\n",
+            encoding="utf-8",
+        )
+        self.git("commit", "-q", "-am", "bp")
+        rc, d = self.rows()
+        ev = self.by_id(d)["blueprint"]["evidence"]
+        self.assertEqual((rc, d["fails"]), (1, ["blueprint"]))
+        for part in (
+            "MUST mở 1",
+            "miễn trừ không hợp lệ 1",
+            "lệnh `— Kiểm:` đỏ 1: BASE-X-003",
+            "1 MUST tick không có lệnh kiểm",
+        ):
+            self.assertIn(part, ev)
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}):
+            _, d = self.rows()
+            self.assertIn("XT_RECORD_TIMEOUT sai", self.by_id(d)["blueprint"]["evidence"])
+        rc, d = self.rows("--blueprint", "khong-co.md", "--status", "khong-co.md")
+        r = self.by_id(d)
+        self.assertEqual((rc, d["fails"]), (1, ["blueprint", "audit"]))
+        self.assertIn("không thấy khong-co.md", r["blueprint"]["evidence"])
+        self.assertIn("không có khong-co.md — audit toàn bộ", r["audit"]["evidence"])
+        (self.repo / "docs" / "ops" / "AUDIT-STATUS.md").write_text("# rỗng\n", encoding="utf-8")
+        _, d = self.rows()
+        self.assertIn("`audit check --strict` 2 lỗi: thiếu bảng", self.by_id(d)["audit"]["evidence"])
+        with unittest.mock.patch.object(xt, "audit_check", side_effect=OSError("EIO")):  # không đọc được sổ
+            _, d = self.rows()
+        self.assertIn("không đọc được docs/ops/AUDIT-STATUS.md: EIO", self.by_id(d)["audit"]["evidence"])
+
+    def test_autopilot_verify_and_prod_switch_rows(self):
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.repo)
+        _, d = self.rows()
+        r = self.by_id(d)["verify"]
+        self.assertEqual((r["level"], r["result"]), ("BLOCKER", "FAIL"))
+        self.assertIn("chưa kiểm lại cuối trên cây hiện tại", r["evidence"])
+        self.fresh_verify()
+        rc, d = self.rows()
+        self.assertEqual((rc, self.by_id(d)["verify"]["result"]), (0, "PASS"))
+        log = self.repo / "docs" / "autopilot" / "DECISIONS.md"
+        log.parent.mkdir(parents=True)
+        log.write_text("### D-001\n- Chọn: tự host\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "d")
+        _, d = self.rows()  # HEAD đổi → dấu vân tay cũ không khớp → verify FAIL (cây đổi sau khi kiểm lại cuối)
+        self.assertEqual((d["fails"], self.by_id(d)["prod_switch"]["result"]), (["verify"], "PASS"))
+        self.fresh_verify()
+        rc, d = self.rows()
+        self.assertEqual((rc, self.by_id(d)["prod_switch"]["result"]), (0, "PASS"))
+        log.write_text(
+            log.read_text(encoding="utf-8") + f"- {xt.PROD_SWITCH_LABEL} Postgres quản lý\n", encoding="utf-8"
+        )
+        self.git("commit", "-q", "-am", "prod")
+        self.fresh_verify()
+        rc, out, _ = run_main("release-check")
+        self.assertEqual(rc, 0)
+        self.assertIn("GO (chờ người)", out)
+        self.assertIn('1 đề xuất "Khi chạy thật"', out)
+        self.assertIn("Chờ người: prod_switch", out)
+        rc, d = self.rows()
+        self.assertEqual((d["human"], d["go"], d["verdict"]), (["prod_switch"], True, "GO (chờ người)"))

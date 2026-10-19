@@ -1652,6 +1652,34 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(xt.review_config(self.base, "origin/nope"), {"review_identity": "rev-bot"})
         self.assertEqual(xt.review_config(self.base, "origin/main"), {})  # ref đọc được: cấu hình đã commit thắng
 
+    def test_inconclusive_review_means_review_again(self):
+        """ADR-0029: `pr reviewed --inconclusive` (diff bị cắt, hết ngân sách) không sạch, không chặn: sổ ghi
+        `inconclusive`, dấu đăng `verdict=inconclusive`, `review_gate` coi là `missing` → `pr next` đòi review khác ở head;
+        review sạch sau đó mở lại; dấu đã đăng được đọc lại thành `inconclusive`."""
+        self.nxt(self.big)  # vào làn chuẩn
+        rc, out, _ = run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--inconclusive")
+        self.assertEqual((rc, out), (0, f"✓ PR #7: review chưa kết luận (cần review khác) ở {self.head[:7]}\n"))
+        self.published.assert_called_with("7", "7", self.head, False, True)
+        rec = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual((rec["clean"], rec["inconclusive"]), (False, True))
+        d = json.loads(self.nxt(self.big, "--json")[1])
+        self.assertEqual(d["action"], "review")
+        gate = xt.review_gate({"head": self.head, "lane": "chuẩn"}, [rec])
+        self.assertEqual((gate["strict"], gate["state"]), (True, "missing"))
+        self.assertFalse(xt.merge_eligibility({"head": self.head, "verdict": "merge"}, [rec])["auto_merge_ok"])
+        body = xt.review_comment_body(self.head, False, True)
+        self.assertIn("chưa kết luận được", body)
+        self.assertIn("verdict=inconclusive -->", body)
+        pub = xt.published_reviews(
+            [{"body": body, "author_association": "OWNER", "created_at": "2026-10-19T00:00:00Z"}]
+        )
+        self.assertEqual(pub, [{"head": self.head, "clean": False, "at": "2026-10-19T00:00:00Z", "inconclusive": True}])
+        self.assertEqual(xt.review_gate({"head": self.head}, pub)["state"], "missing")  # đã đăng cũng không chặn
+        with self.assertRaises(SystemExit):  # --clean/--blocking/--inconclusive loại trừ nhau
+            run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--inconclusive", "--clean", *MODELS)
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
+        self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "enable-auto-merge")
+
     def test_clean_review_needs_a_different_model(self):
         def run(*extra: str) -> tuple:
             return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, *extra)
