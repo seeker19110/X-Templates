@@ -469,7 +469,42 @@
 - Lý do (tiêu chí chất lượng cuối): Giữ cả hai luật: ràng buộc nhánh của phiên (không push nhánh khác khi chưa được phép) và một lát một PR (review/đường lùi riêng); chi phí chỉ là chờ CI/review giữa các lát
 - Đường lùi: Chủ repo cho phép nhánh khác → tách lát còn lại sang nhánh <type>/<mô-tả> riêng
 
-### D-066 · 2026-10-19T12:26:11+00:00 · Lát C (merge), D (cổng máy), E (tài liệu + sổ audit) đã commit và qua cổng ở nhánh cục bộ trong lúc chờ #159 — mở 3 PR tuần tự hay một PR
+### D-066 · 2026-10-19T12:05:59+00:00 · Bản nâng cấp kế hoạch #160 đi đâu khi phiên bị ràng buộc nhánh seeker/stoic-edison-i2llue?
+
+- Phương án: (1) Push lên nhánh docs/remediation-plan-2026-10-19 của #160 · (2) PR mới trên nhánh phiên (gộp commit #160), thay #160; #160 giữ làm lịch sử nháp · (3) Chỉ comment góp ý vào #160
+- Chọn: PR mới trên nhánh phiên (gộp commit #160), thay #160; #160 giữ làm lịch sử nháp
+- Lý do (tiêu chí chất lượng cuối): Ràng buộc nhánh của phiên (không push nhánh khác khi chưa được phép) và một lát một PR; #160 là nháp nên không mất gì
+- Đường lùi: Đóng PR mới, mở lại #160 và chép nội dung sang
+
+### D-067 · 2026-10-19T12:05:59+00:00 · Kế hoạch triển khai máy đọc được đặt ở đâu khi PLAN.md đang được vòng 3.8.0 (#159…) dùng?
+
+- Phương án: (1) Chèn T-14xx mới vào docs/autopilot/PLAN.md hiện hành · (2) File riêng docs/autopilot/PLAN-3.9-automation.md, chạy loop init --plan sau khi 3.8.0 xong · (3) Chỉ mô tả trong REMEDIATION-PLAN, không có task máy đọc
+- Chọn: File riêng docs/autopilot/PLAN-3.9-automation.md, chạy loop init --plan sau khi 3.8.0 xong
+- Lý do (tiêu chí chất lượng cuối): Không làm lệch verdict/ngân sách vòng đang chạy (loop status đọc PLAN.md); vẫn parse_plan được và duyệt một lần (ADR-0008); tách PR nhỏ, đảo ngược được
+- Đường lùi: Chép task sang PLAN.md khi 3.8.0 phát hành
+
+### D-068 · 2026-10-19T12:05:59+00:00 · Cổng bằng chứng ở tầng Claude Code cho task/subagent dùng cơ chế nào?
+
+- Phương án: (1) Giữ chỉ Stop + PreToolUse hiện có · (2) Thêm command hook TaskCompleted, SubagentStop, PermissionRequest đọc .autopilot/ (docs hooks xác minh 2026-10-19); hook prompt/agent LLM chỉ bổ trợ · (3) Dùng hook agent (LLM) làm cổng chính
+- Chọn: Thêm command hook TaskCompleted, SubagentStop, PermissionRequest đọc .autopilot/ (docs hooks xác minh 2026-10-19); hook prompt/agent LLM chỉ bổ trợ
+- Lý do (tiêu chí chất lượng cuối): Cổng máy tất định, test bằng payload giả như tests/test_hooks.py; LLM-judge là lời khai (P1, LOOP-DESIGN-004); PermissionRequest ở headless không có quyết định = deny nên là nhà đúng của typed decision (REC-04)
+- Đường lùi: Gỡ ba hook khỏi settings.json, giữ Stop hook
+
+### D-069 · 2026-10-19T12:05:59+00:00 · Review độc lập tự động (AUTO-03) dựa vào gì?
+
+- Phương án: (1) Sản phẩm Claude Code Review của Anthropic (Team/Enterprise; check run không bao giờ fail) · (2) Reviewer tự dựng: workflow riêng chạy claude -p --json-schema bằng danh tính GitHub riêng, đăng pr reviewed; model khác tác giả · (3) Giữ reviewer subagent trong phiên tác giả
+- Chọn: Reviewer tự dựng: workflow riêng chạy claude -p --json-schema bằng danh tính GitHub riêng, đăng pr reviewed; model khác tác giả
+- Lý do (tiêu chí chất lượng cuối): Cần danh tính tách quyền ghi và kết quả có schema để làm required gate; Code Review không fail nên không làm cổng được và chỉ có ở Team/Enterprise; subagent trong phiên tác giả chung vùng quyền ghi (REC-03)
+- Đường lùi: Tắt workflow reviewer, quay về reviewer subagent + pr reviewed tay
+
+### D-070 · 2026-10-19T12:06:00+00:00 · Bộ điều phối task (AUTO-01) viết bằng gì?
+
+- Phương án: (1) Agent SDK Python (thêm phụ thuộc) · (2) Python stdlib trong xt.py (loop next/dispatch) gọi claude -p --output-format json như subprocess · (3) Orchestrator riêng ngoài repo
+- Chọn: Python stdlib trong xt.py (loop next/dispatch) gọi claude -p --output-format json như subprocess
+- Lý do (tiêu chí chất lượng cuối): AGENTS §7: xt.py chỉ stdlib ≥ 3.11, CI 3.11/3.13; claude -p là đường tài liệu hỗ trợ cho ngôn ngữ khác; đơn giản, test được bằng subprocess giả
+- Đường lùi: Thêm Agent SDK khi cần callback canUseTool hoặc stream
+
+### D-071 · 2026-10-19T12:26:11+00:00 · Lát C (merge), D (cổng máy), E (tài liệu + sổ audit) đã commit và qua cổng ở nhánh cục bộ trong lúc chờ #159 — mở 3 PR tuần tự hay một PR
 
 - Phương án: (1) Ba PR tuần tự trên cùng tên nhánh (D-065) · (2) Một PR gộp C+D+E, commit tách theo lát
 - Chọn: Một PR gộp C+D+E, commit tách theo lát
