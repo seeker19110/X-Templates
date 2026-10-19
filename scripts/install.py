@@ -8,7 +8,7 @@ Kết quả trong dự án đích:
   .xtemplates/scripts/dev-task.sh
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
-  .github/rulesets/main.json, pull_request_template.md, dependabot.yml, workflows/merge-gate.yml   chỉ khi --with-github (copy-if-absent)
+  .github/rulesets/main.json, pull_request_template.md, dependabot.yml, workflows/{merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
 
 Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): chạy lại install là chuyển sang tên mới (ADR-0007) —
@@ -51,13 +51,15 @@ LEGACY_DIR = ".xstored"
 LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
 # --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Workflow KHÔNG copy vì job quality phụ thuộc
-# stack — trừ `merge-gate.yml`: không phụ thuộc stack (chỉ python3 + gh) và ruleset mẫu đòi check của nó (ADR-0023). Mẫu PR
+# stack — trừ `merge-gate.yml` (ruleset mẫu đòi check của nó, ADR-0023) và `pr-steward.yml` (tự merge PR đủ tiêu chuẩn khi
+# không có phiên agent, ADR-0027): không phụ thuộc stack (chỉ python3 + gh). Mẫu PR
 # và Dependabot lấy từ framework/templates: bản ở `.github/` của khung là của riêng repo khung (module/hồ sơ, pip).
 GITHUB_FILES = {
     ".github/rulesets/main.json": ".github/rulesets/main.json",
     ".github/pull_request_template.md": "framework/templates/PULL-REQUEST.md",
     ".github/dependabot.yml": "framework/templates/dependabot.yml",
     ".github/workflows/merge-gate.yml": ".github/workflows/merge-gate.yml",
+    ".github/workflows/pr-steward.yml": ".github/workflows/pr-steward.yml",
 }
 
 
@@ -458,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--with-github",
         action="store_true",
-        help="copy ruleset mẫu, PR template, Dependabot, workflow merge-gate vào .github/ (không đè)",
+        help="copy ruleset mẫu, PR template, Dependabot, workflow merge-gate + pr-steward vào .github/ (không đè)",
     )
     a = p.parse_args(argv)
     return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github)
