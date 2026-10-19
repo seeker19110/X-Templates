@@ -62,6 +62,20 @@ Ngân sách sống qua restart trong `.autopilot/state.json` khoá `episode` (th
 mỗi run. Chữ ký = loại + dòng lỗi đã thay số bằng `N` (không phụ thuộc thời điểm/số dòng). Triage lại run đã thấy trả
 kết quả cũ, không đếm lại, không cộng lại chi phí. Lỗi `gh` → exit 3.
 
+### Liên kết ngoài: phân loại lỗi (`check-links.py --external`, REC-13)
+
+Link ngoài đỏ vì **mạng** khác với đỏ vì **nội dung đã đổi**; gộp chung thì hoặc báo giả hoặc bỏ sót. `links.yml` (hằng tuần)
+chạy `python3 scripts/check-links.py --external` — chỉ stdlib, mỗi URL một lần, HEAD rồi GET khi HEAD bị từ chối:
+
+| Loại | Tín hiệu | Xử lý |
+|---|---|---|
+| tạm | 5xx · 408 · timeout · lỗi mạng | thử lại `--retries` lần (mặc định 2, lùi 1 s, 2 s); còn lỗi → cảnh báo, không đỏ |
+| đổi | 3xx (301/308…) — không đi theo chuyển hướng | cảnh báo: cập nhật URL; không đỏ |
+| chết | 404 · 410 · 4xx khác | **lỗi**, exit 1: sửa hoặc bỏ nguồn |
+| chưa xác minh | 403 · 429 (trang luật/chuẩn chặn bot) | cảnh báo, không kết luận nội dung; 429 được thử lại, 403 thì không |
+
+Nguồn trong `research/` ghi ngày rà lại; "chưa xác minh" không phải bằng chứng link còn đúng.
+
 ### Cấu hình CI khi agent chạy headless
 
 | Hạng mục | Quy định |
@@ -92,6 +106,7 @@ kết quả cũ, không đếm lại, không cộng lại chi phí. Lỗi `gh` �
 - [ ] `LOOP-CI-015` **SHOULD** Pin mọi action/CLI trong workflow theo SHA hoặc phiên bản khoá; agent không tự nâng. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
 - [ ] `LOOP-CI-016` **SHOULD** Sau khi PR merge, agent quay về `main`, xoá nhánh đã merge, cập nhật `PROGRESS.md` với SHA merge.
 - [ ] `LOOP-CI-017` **MAY** Dùng cơ chế theo dõi PR (webhook/`subscribe_pr_activity`) để phản hồi review và CI thay vì poll liên tục; mọi phản hồi vẫn qua trần ở mục 002–003.
+- [ ] `LOOP-CI-019` **SHOULD** Kiểm link ngoài theo lịch phân loại lỗi tạm/đổi/chết/chưa xác minh, thử lại hữu hạn; chỉ link chết làm đỏ. → Kiểm: `python3 scripts/check-links.py --external` trong `.github/workflows/links.yml`; test `link_classification`.
 - [ ] `LOOP-CI-018` **MAY** Đo tỉ lệ PR của agent merge không cần người sửa tay và thời gian đỏ→xanh theo tháng; làm baseline DORA trước khi nâng mức tự trị. · Nguồn: stored 23 §2.6
 
 ## Bẫy thường gặp

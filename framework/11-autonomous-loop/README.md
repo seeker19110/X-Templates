@@ -22,6 +22,13 @@ updated: 2026-10-19
 | [`context-and-token-budget.md`](context-and-token-budget.md) | Ngân sách context/token, compaction, bàn giao phiên | Khi phiên dài, gần hết ngân sách; khi viết bàn giao |
 | [`framework-feedback.md`](framework-feedback.md) | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`xt.py feedback`), khung kéo về và gộp | Khi sửa xong một lỗi do khung; trước bàn giao/phát hành; khi bảo trì repo khung |
 
+## Chính sách tự chủ: một nhà
+
+Nhà duy nhất của chính sách tự chủ — mức L0–L4 và điều kiện lên mức, vị từ "làn nhanh", điểm quyết định tự duyệt,
+điểm dừng bắt buộc, ngoại lệ cứng — là [`stop-points-and-escalation.md`](stop-points-and-escalation.md). README, skill,
+template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/ngưỡng; số đếm lấy từ `xt.py stats`. Test
+`autonomy_policy_single_home` giữ điều này.
+
 ## Giao thức autopilot (AGENTS.md trỏ tới đây)
 
 `<XT>` = `python3 .xtemplates/scripts/xt.py` trong dự án đích (hoặc `python3 scripts/xt.py` trong repo khung). Skill
