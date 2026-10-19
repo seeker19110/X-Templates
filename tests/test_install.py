@@ -235,6 +235,8 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("package-ecosystem: pip", dep)
         # ADR-0023: ruleset mẫu đòi `merge-gate` → workflow của nó đi kèm, không cảnh báo phải tự viết
         self.assertTrue((self.target / ".github" / "workflows" / "merge-gate.yml").exists())
+        # ADR-0027: PR đủ tiêu chuẩn tự vào nhánh chính khi không còn phiên agent
+        self.assertTrue((self.target / ".github" / "workflows" / "pr-steward.yml").exists())
         rs.write_text("{}\n", encoding="utf-8")
         self.run_install("--with-github")
         self.assertEqual(rs.read_text(encoding="utf-8"), "{}\n")
@@ -351,6 +353,7 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
         (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
         (src / ".github" / "workflows").mkdir()
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
+        (src / ".github" / "workflows" / "pr-steward.yml").write_text("name: pr-steward\n", encoding="utf-8")
     return src
 
 

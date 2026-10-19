@@ -1455,6 +1455,7 @@ class MergeGuardTest(unittest.TestCase):
                     for f in pr["files"]
                 ],
                 f"{repo}/pulls/{n}/reviews?per_page=100": [],
+                f"{repo}/issues/{n}/comments?per_page=100": [],
                 f"{repo}/commits/{sha}/check-runs?per_page=100": {"check_runs": runs},
                 f"{repo}/commits/{sha}/status?per_page=100": {"statuses": []},
                 f"{repo}/pulls?head={{owner}}:{{branch}}&state=open&per_page=100": [{"number": n}],

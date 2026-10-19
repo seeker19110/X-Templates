@@ -79,6 +79,7 @@ class FakeGh:
         runs: list | None = None,
         statuses: list | None = None,
         open_prs: list | None = None,
+        comments: list | None = None,
         raw: dict | None = None,
         real_git: bool = False,
     ):
@@ -104,6 +105,7 @@ class FakeGh:
         )
         self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
+        self.comments = comments or []
         self.raw = raw or {}
         self.real_git = real_git
         self.calls: list[list[str]] = []
@@ -125,6 +127,7 @@ class FakeGh:
             f"{self.REPO}/pulls/7": json.dumps(self.pull),
             f"{self.REPO}/pulls/7/files?per_page=100": json.dumps(files[:2]) + json.dumps(files[2:]),
             f"{self.REPO}/pulls/7/reviews?per_page=100": json.dumps(self.reviews),
+            f"{self.REPO}/issues/7/comments?per_page=100": json.dumps(self.comments),
             f"{self.REPO}/commits/{self.SHA}/check-runs?per_page=100": json.dumps({"check_runs": self.runs[:1]})
             + "\n"
             + json.dumps({"check_runs": self.runs[1:]}),
@@ -132,7 +135,7 @@ class FakeGh:
         }
         if path in self.raw:
             out = self.raw[path]
-        elif "/pulls?head=" in path:
+        elif "/pulls?head=" in path or "/pulls?state=open" in path:
             out = json.dumps(self.open_prs)
         else:
             out = routes[path]
@@ -1202,6 +1205,8 @@ class PrNextCliTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        # Không bao giờ gọi GitHub thật từ test: đăng review được thử riêng ở PrStewardTest với subprocess giả.
+        self.published = self.enterContext(unittest.mock.patch.object(xt, "_publish_review", return_value=0))
         commit_base_xt(self.base, "merge_autonomy: L3\n")
         self.head = "c" * 40
         self.big = pr(headRefOid=self.head, files=[{"path": "src/a.py", "additions": 400, "deletions": 0}])
@@ -1275,3 +1280,264 @@ class PrNextCliTest(unittest.TestCase):
         rc, _, err = run_main("pr", "next", "--pr-json", "-", stdin="[1]")
         self.assertEqual(rc, 2)
         self.assertIn("không phải object", err)
+
+
+class StewardGh(FakeGh):
+    """FakeGh + lệnh ghi (POST/PUT, `gh pr merge`): ghi lại, trả mã theo `fail` (tiền tố lệnh → stderr lỗi)."""
+
+    def __init__(self, fail: dict | None = None, **kw: Any):
+        kw["pull"] = {"author_association": "OWNER", "user": {"login": "chu"}, **(kw.get("pull") or {})}
+        super().__init__(**{"real_git": True, **kw})  # xt.yaml ở nhánh đích (L3) đọc từ repo tạm của test
+        self.fail = fail or {}
+        self.writes: list[list[str]] = []
+
+    def respond(self, cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
+        if cmd[:3] == ["gh", "pr", "merge"] or "-X" in cmd:
+            self.writes.append(cmd)
+            for prefix, err in self.fail.items():
+                if " ".join(cmd).startswith(prefix):
+                    if err == "oserror":
+                        raise OSError("gh vắng")
+                    return subprocess.CompletedProcess(cmd, 1, "", err)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return super().respond(cmd, **kw)
+
+
+TRUSTED = "OWNER"
+
+
+def mark(head: str, verdict: str, at: str, assoc: str = TRUSTED) -> dict:
+    return {
+        "body": f"Review\n\n<!-- xt-review v1 head={head} verdict={verdict} -->",
+        "author_association": assoc,
+        "created_at": at,
+    }
+
+
+class PrStewardTest(unittest.TestCase):
+    """ADR-0027 (D-054): sổ review đăng lên PR + `pr steward` quản PR không cần phiên agent."""
+
+    H = "d" * 40
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def test_comment_marks_only_from_trusted_authors(self):
+        body = xt.review_comment_body(self.H, True)
+        self.assertIn("sạch", body)
+        self.assertNotRegex(body, xt.MODEL_FAMILY_RE)  # không tên model trong artefact (ai_attribution)
+        self.assertIn("còn lỗi chặn", xt.review_comment_body(self.H, False))
+        comments = [
+            mark("e" * 40, "clean", "2026-10-19T02:00:00Z"),
+            mark(self.H, "blocking", "2026-10-19T01:00:00Z", "MEMBER"),
+            mark("d" * 40, "blocking", "2026-10-19T01:30:00Z", "COLLABORATOR"),
+            mark(self.H, "clean", "2026-10-19T03:00:00Z", "NONE"),  # người ngoài: bỏ
+            {"body": None, "author_association": TRUSTED},
+        ]
+        got = xt.published_reviews(comments)
+        # MEMBER của org có thể chỉ có quyền đọc: dấu lúc 01:00 bỏ, của COLLABORATOR lúc 01:30 giữ
+        self.assertEqual(
+            [(r["head"][0], r["clean"], r["at"][11:16]) for r in got], [("d", False, "01:30"), ("e", True, "02:00")]
+        )
+        rec = {"reviews": [{"head": "f" * 40, "clean": True, "at": "2026-10-19T02:30:00+00:00"}]}
+        merged = xt.with_published(rec, got)
+        self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e", "f"])
+        self.assertIs(xt.with_published(rec, None), rec)
+        self.assertIs(xt.with_published(rec, ["rác"]), rec)
+
+    def test_pr_rest_reads_marks_and_pr_next_uses_them(self):
+        big = [{"path": "src/a.py", "additions": 400, "deletions": 0}]
+        pull = {"head": {"sha": FakeGh.SHA}}
+        with FakeGh(pull=pull, comments=[mark("a" * 40, "clean", "2026-10-19T01:00:00Z")]).patch():
+            self.assertEqual(xt._pr_rest("7")["xtReviews"][0]["head"], "a" * 40)
+        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
+            self.assertEqual(xt._published_marks("repos/o/r", "7"), [])  # thiếu quyền đọc comment: chặt hơn, không lỗi
+        p = pr(headRefOid=self.H, files=big, xtReviews=[{"head": self.H, "clean": True, "at": "2026-10-19T01:00:00Z"}])
+        rc, out, _ = run_main("pr", "next", "--json", "--pr-json", "-", stdin=json.dumps(p))
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "enable-auto-merge"))
+
+    def test_publish_review(self):
+        args = ("pr", "reviewed", "--pr", "7", "--head", self.H, "--blocking")
+        gh = StewardGh()
+        with gh.patch():
+            rc, out, _ = run_main(*args)
+        self.assertEqual(rc, 0)
+        self.assertIn("đã đăng review lên PR #7", out)
+        post = gh.writes[0]
+        self.assertEqual(post[:5], ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/issues/7/comments"])
+        self.assertIn(f"head={self.H} verdict=blocking", post[-1])
+        gh = StewardGh()
+        with gh.patch():
+            run_main("pr", "reviewed", "--pr", "https://github.com/o/r/pull/7", "--head", self.H, "--blocking")
+        self.assertEqual(gh.writes[0][4], "repos/o/r/issues/7/comments")
+        for fail in ("gh api -X POST", "oserror"):
+            with (
+                self.subTest(fail),
+                StewardGh(fail={"gh api -X POST": "HTTP 403" if fail != "oserror" else fail}).patch(),
+            ):
+                rc, _, err = run_main(*args)
+            self.assertEqual(rc, 3)
+            self.assertIn("chưa đăng được review lên PR #7", err)
+        gh = StewardGh()
+        with gh.patch():
+            rc, out, _ = run_main(*args, "--no-publish")
+        self.assertEqual((rc, gh.writes), (0, []))
+        self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 5)  # sổ cục bộ luôn ghi, kể cả khi đăng lỗi
+
+    def test_steward_dry_run_and_apply(self):
+        gh = StewardGh()
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("#7 enable-auto-merge — làn nhanh"))
+        self.assertEqual(gh.writes, [])  # không --apply: chỉ báo
+        summary = self.base / "summary.md"
+        gh = StewardGh()
+        with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 0)
+        self.assertIn("#7 enable-auto-merge ✓", out)
+        self.assertEqual(
+            gh.writes[0], ["gh", "pr", "merge", "7", "--auto", "--squash", "--match-head-commit", FakeGh.SHA]
+        )
+        self.assertIn("## pr-steward", summary.read_text(encoding="utf-8"))
+        # GitHub báo PR đã sẵn sàng (không bật được auto-merge) → merge ghim head qua REST
+        gh = StewardGh(fail={"gh pr merge": "Pull request is in clean status"})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply", "--pr", "7", "--json")
+        self.assertEqual((rc, json.loads(out)[0]["applied"]), (0, True))
+        self.assertEqual(
+            gh.writes[1][4:],
+            ["repos/{owner}/{repo}/pulls/7/merge", "-f", "merge_method=squash", "-f", f"sha={FakeGh.SHA}"],
+        )
+
+    def test_steward_errors_and_other_actions(self):
+        gh = StewardGh(fail={"gh pr merge": "x", "gh api -X PUT": "y"})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertIn("#7 enable-auto-merge ✗ y", out)
+        with StewardGh(fail={"gh pr merge": "oserror", "gh api -X PUT": "oserror"}).patch():
+            self.assertEqual(run_main("pr", "steward", "--apply")[0], 1)
+        with StewardGh(open_prs=[]).patch():
+            self.assertEqual(run_main("pr", "steward")[1], "không có PR mở\n")
+        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("gh api lỗi")):
+            rc, _, err = run_main("pr", "steward")
+        self.assertEqual((rc, err), (2, "✗ gh api lỗi\n"))
+        with StewardGh(raw={"repos/{owner}/{repo}/pulls/7": "{}"}).patch():  # thiếu head → PrInputError
+            rc, out, _ = run_main("pr", "steward", "--pr", "7")
+        self.assertEqual(rc, 1)
+        self.assertIn("#7 error", out)
+        cases = {  # (auto_merge, verdict…) → lệnh steward
+            "disable": ({"action": "disable-auto-merge"}, [["gh", "pr", "merge", "7", "--disable-auto"]]),
+            "merge": ({"action": "merge"}, 1),
+            "auto": ({"action": "enable-auto-merge", "fallback": ""}, 1),
+            "review": ({"action": "review"}, []),
+        }
+        for name, (over, want) in cases.items():
+            with self.subTest(name):
+                cmds = xt._steward_command({"pr": 7, "head": self.H, **over}, "repos/o/r")
+                self.assertEqual(len(cmds) if isinstance(want, int) else cmds, want)
+        self.assertEqual(xt._steward_run([]), "không có lệnh")
+        listing = {"repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}])}
+        one = {"pr": 7, "head": self.H, "action": "wait", "why": "chờ", "applied": False}
+        with StewardGh(raw=listing).patch(), unittest.mock.patch.object(xt, "_steward_one", return_value=one) as m:
+            self.assertEqual(run_main("pr", "steward", "--repo", "o/r")[1], "#7 wait — chờ\n")
+        self.assertEqual(m.call_args[0][:2], ("https://github.com/o/r/pull/7", "repos/o/r"))
+
+
+class PrStewardTrustTest(unittest.TestCase):
+    """Review #141: steward không tự merge PR từ fork/người ngoài; nhãn làn chuẩn bền; `-R` khi --repo."""
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def steward(self, pull: dict, *extra: str) -> tuple[int, str, StewardGh]:
+        gh = StewardGh(pull=pull)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply", *extra)
+        return rc, out, gh
+
+    def test_untrusted_prs_are_left_to_humans(self):
+        fork = {
+            "head": {"sha": FakeGh.SHA, "repo": {"full_name": "la/r"}},
+            "base": {"repo": {"full_name": "o/r", "default_branch": "main"}, "ref": "main"},
+        }
+        cases = {
+            "fork": (fork, "PR từ fork la/r"),
+            "người ngoài": ({"author_association": "CONTRIBUTOR", "user": {"login": "x"}}, "tác giả x (CONTRIBUTOR)"),
+            "không rõ": ({"author_association": None, "user": None}, "tác giả ? (không rõ)"),
+        }
+        for name, (pull, why) in cases.items():
+            with self.subTest(name):
+                rc, out, gh = self.steward(pull)
+                self.assertEqual((rc, gh.writes), (0, []))
+                self.assertIn(f"#7 defer-human — {why}", out)
+        rc, out, gh = self.steward({"author_association": "NONE", "user": {"login": "dependabot[bot]"}})
+        self.assertIn("#7 enable-auto-merge ✓", out)
+        self.assertEqual(xt.steward_untrusted({"headRepo": "o/r", "repo": "o/r", "authorAssociation": "owner"}), "")
+
+    def test_standard_label_is_added_and_keeps_pr_strict(self):
+        big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]
+        raw = {"repos/{owner}/{repo}/pulls/7/files?per_page=100": json.dumps(big)}
+        gh = StewardGh(raw=raw)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 review", out)
+        self.assertEqual(gh.writes[0][4:], ["repos/{owner}/{repo}/issues/7/labels", "-f", "labels[]=xt-standard-lane"])
+        # nhãn có rồi: diff nhỏ lại (làn nhanh) vẫn cần review sạch ở head — không bật auto-merge
+        gh = StewardGh(pull={"labels": [{"name": "xt-standard-lane"}]})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 review", out)
+        self.assertEqual(gh.writes, [])
+        p = pr(labels=[{"name": "xt-standard-lane"}])
+        rc, out, _ = run_main("pr", "next", "--json", "--pr-json", "-", stdin=json.dumps(p))
+        self.assertEqual(json.loads(out)["action"], "review")
+
+    def test_repo_flag_pins_gh_pr_merge_and_is_validated(self):
+        listing = {"repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}])}
+        gh = StewardGh(raw=listing)
+        one = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "x", "fallback": ""}
+        self.assertEqual(xt._steward_command(one, "repos/o/r")[0][:3], ["gh", "pr", "merge"])
+        with (
+            unittest.mock.patch.object(
+                xt, "_pr_rest", return_value={**pr(), "author": "chu", "authorAssociation": "OWNER"}
+            ),
+            gh.patch(),
+        ):
+            rc, out, _ = run_main("pr", "steward", "--apply", "--repo", "o/r")
+        self.assertEqual(gh.writes[0][:5], ["gh", "pr", "merge", "-R", "o/r"])
+        rc, _, err = run_main("pr", "steward", "--repo", "https://github.com/o/r")
+        self.assertEqual(rc, 2)
+        self.assertIn("--repo phải dạng owner/repo", err)
+
+
+class PrTitleExemptTest(unittest.TestCase):
+    """Review #140: tiêu đề do máy đặt (bot, nút Revert) được miễn; `pr_title_check: off` tắt luật ở dự án."""
+
+    def test_bot_and_revert_titles_are_exempt(self):
+        for p in (
+            pr(title="Bump lodash from 4.17.20 to 4.17.21", author={"login": "dependabot[bot]"}),
+            pr(title="Update dependency x to v2", author="renovate[bot]"),
+            pr(title='Revert "feat: x"'),
+        ):
+            with self.subTest(p["title"]):
+                self.assertEqual(xt.merge_decision(p, 2)["verdict"], "merge")
+        self.assertEqual(xt.merge_decision(pr(title="Bump x", author={"login": "người"}), 2)["verdict"], "fix")
+
+    def test_title_check_off_in_xt_yaml(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}))
+        commit_base_xt(base, "merge_autonomy: L2\npr_title_check: off\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
+        commit_base_xt(base, "merge_autonomy: L2\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")

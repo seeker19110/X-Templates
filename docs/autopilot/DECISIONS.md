@@ -382,6 +382,13 @@
 - Lý do (tiêu chí chất lượng cuối): Đúng ngữ nghĩa CSS Nesting; bỏ qua làm mất token tối và vẫn rò khai báo
 - Đường lùi: revert PR contrast
 
+### D-054 · 2026-10-19T02:05:01+00:00 · PR đủ tiêu chuẩn vẫn không vào main khi không có phiên agent chạy pr next (phiên dừng, container khởi động lại, PR của phiên khác) — quản lý thế nào
+
+- Phương án: (1) PR steward chạy trên GitHub Actions (lịch 10 phút + comment review + chạy tay) gọi pr next cho mọi PR mở và tự bật auto-merge/merge ghim head; pr reviewed đăng kết quả review lên PR (marker, không tên model) để steward đọc · (2) Bật auto-merge cho mọi PR ngay khi mở, để ruleset/required check chặn · (3) Giữ như cũ, dặn phiên agent đặt send_later check-in
+- Chọn: PR steward chạy trên GitHub Actions (lịch 10 phút + comment review + chạy tay) gọi pr next cho mọi PR mở và tự bật auto-merge/merge ghim head; pr reviewed đăng kết quả review lên PR (marker, không tên model) để steward đọc
+- Lý do (tiêu chí chất lượng cuối): Không phụ thuộc phiên sống; giữ nguyên luật merge theo làn (review sạch ở đúng head) vì dùng chính pr next; sổ review lên GitHub nên không mất khi container khởi động lại; phương án 2 bỏ qua review làn chuẩn, phương án 3 vẫn mất khi phiên chết
+- Đường lùi: xoá workflow pr-steward.yml; pr reviewed --no-publish
+
 ### D-055 · 2026-10-19T01:20:43+00:00 · Việc kế tiếp sau 3.4.1 (PROGRESS Tiếp theo 1): làm gì trước?
 
 - Phương án: (1) Guard ghi công AI qua MCP/gh pr (PR title/body, commit qua MCP) + merge-check kiểm tiêu đề PR cục bộ, phát hành 3.5.0 · (2) Task [perf] trong loop (D-041 phương án 3) · (3) Chỉ nâng dự án đích
