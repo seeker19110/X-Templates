@@ -1360,6 +1360,8 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
+        os.environ.pop("GITHUB_ACTIONS", None)  # CI chạy test trong Actions: mặc định cập nhật nhánh khác đi
+        os.environ.pop("XT_STEWARD_UPDATE", None)
         xt._CHAIN_CACHE.clear()
         self.addCleanup(xt._CHAIN_CACHE.clear)
 
@@ -1459,6 +1461,20 @@ class BaseMergeCarryTest(unittest.TestCase):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 1)
         self.assertIn("→ update ✗ conflict", out)
+
+    def test_steward_can_update_flag(self):
+        cases = [
+            ({}, True),
+            ({"GITHUB_ACTIONS": "true"}, False),
+            ({"GITHUB_ACTIONS": "true", "XT_STEWARD_UPDATE": "on"}, True),
+            ({"XT_STEWARD_UPDATE": "off"}, False),
+            ({"XT_STEWARD_UPDATE": "lạ"}, False),
+            ({"XT_STEWARD_UPDATE": "true"}, True),
+            ({"XT_STEWARD_UPDATE": "0"}, False),
+        ]
+        for env, want in cases:
+            with unittest.mock.patch.dict(os.environ, env):
+                self.assertEqual(xt._steward_can_update(), want, env)
 
     def test_steward_no_update_with_github_token(self):
         # review #153: commit cập nhật nhánh do GITHUB_TOKEN tạo không kích CI → workflow đặt XT_STEWARD_UPDATE=off
