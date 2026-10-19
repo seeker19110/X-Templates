@@ -1061,7 +1061,9 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
         if not m:
             continue
         g = GATE_RE.search(m["rest"])
-        tier = EXEC_TIER_RE.search(m["rest"])
+        tier = EXEC_TIER_RE.search(
+            m["rest"][: g.start()] if g else m["rest"]
+        )  # không đọc trong lệnh Gate (review #169)
         tasks.append(
             {
                 "id": m["id"],
@@ -1080,26 +1082,25 @@ def executor_choice(t: Dict[str, Any], base: Path, st: Dict[str, Any]) -> Dict[s
     """Tầng executor cho task kế (ADR-0029): `(exec: deep)` trong PLAN → sâu ngay; tầng mặc định đỏ ≥ ESCALATE_AFTER lần
     cùng task trong vòng này (runs.jsonl, lần chạy không phải của `executor-deep`) → chuyển cấp lên sâu. Tên trả về là
     agent trong `.claude/agents/` — model thật nằm trong frontmatter của agent, không ở PLAN (LOOP-HARNESS-027)."""
-    fails = [
-        r
-        for r in read_runs(base)
-        if r["task"] == t["id"]
-        and r.get("loop") == st.get("started")
-        and r["exit_code"] != 0
-        and r.get("executor") != EXECUTOR_AGENTS["deep"]
-    ]
+    runs = [r for r in read_runs(base) if r["task"] == t["id"] and r.get("loop") == st.get("started")]
+    greens = [i for i, r in enumerate(runs) if r["exit_code"] == 0]
+    since_green = runs[greens[-1] + 1 :] if greens else runs  # chỉ chuỗi đỏ sau lần xanh cuối (review #169)
+    fails = [r for r in since_green if r.get("executor") != EXECUTOR_AGENTS["deep"]]
     escalated = t.get("tier", "default") == "default" and len(fails) >= ESCALATE_AFTER
     tier = "deep" if escalated else str(t.get("tier", "default"))
     return {"tier": tier, "executor": EXECUTOR_AGENTS[tier], "escalated": escalated, "default_failures": len(fails)}
 
 
-def milestone_done(tasks: List[Dict[str, Any]], t: Dict[str, Any]) -> Optional[str]:
+def milestone_done(
+    tasks: List[Dict[str, Any]], t: Dict[str, Any], deferred: Optional[Dict[str, Any]] = None
+) -> Optional[str]:
     """Mốc vừa xong: `t` là task đầu của một mục (`## …`/`### …`) khác mục của task đứng trước, và mọi task trước đó đã
-    đóng (`[x]`/`[~]`) → trả tên mục trước (lát/mốc đã xong) để autopilot audit delta trước khi sang mốc kế (audit.md §1)."""
+    đóng (`[x]`/`[~]`, hoặc đang `loop defer` — chờ người, không chặn mốc; review #169) → trả tên mục trước (lát/mốc đã
+    xong) để autopilot audit delta trước khi sang mốc kế (audit.md §1)."""
     i = next((k for k, x in enumerate(tasks) if x["id"] == t["id"]), 0)
     if i == 0 or tasks[i - 1]["section"] in (None, t["section"]):
         return None
-    if any(x["state"] not in ("x", "~") for x in tasks[:i]):
+    if any(x["state"] not in ("x", "~") and x["id"] not in (deferred or {}) for x in tasks[:i]):
         return None
     return str(tasks[i - 1]["section"])
 
@@ -1254,7 +1255,7 @@ def _with_dispatch(
         )
     elif v["tier"] == "deep":
         v["reason"] += f" — tầng sâu theo PLAN (`exec: deep`): giao `{v['executor']}`"
-    done = milestone_done(tasks, t)
+    done = milestone_done(tasks, t, _deferred(st))
     if done:
         v["milestone_done"] = done
         v["reason"] += (

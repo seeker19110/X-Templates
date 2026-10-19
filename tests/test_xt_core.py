@@ -1318,6 +1318,11 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         with redirect_stdout(out):
             self.assertEqual(xt._loop_stats(argparse.Namespace(json=False, all=False), self.base), 0)
         self.assertIn("Chuyển cấp lên tầng sâu: 1 task (50%): T-002", out.getvalue())
+        with redirect_stdout(out), redirect_stderr(err):  # xanh rồi lại đỏ một lần: chỉ đếm chuỗi đỏ sau lần xanh cuối
+            xt.loop_record("T-002", ["true"], self.base, "executor")
+            xt.loop_record("T-002", ["sh -c 'echo ed; exit 1'"], self.base, "executor")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["escalated"], v["default_failures"]), (False, 1))
         with redirect_stdout(out):  # CLI: --executor đi vào evidence; giá trị lạ bị argparse từ chối
             self.assertEqual(
                 xt.main(["loop", "record", "--task", "T-002", "--executor", "executor-deep", "--", "true"]), 0
@@ -1362,6 +1367,15 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         )
         tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
         self.assertIsNone(xt.milestone_done(tasks, tasks[1]))  # task trước còn mở
+        self.assertEqual(xt.milestone_done(tasks, tasks[1], {"T-001": {"reason": "người"}}), "A")  # defer = đóng (#169)
+        st = xt.read_state(self.base)
+        st["deferred"] = {"T-001": {"reason": "người"}}
+        xt.write_state(st, self.base)
+        self.assertEqual(xt.loop_verdict(self.base)["milestone_done"], "A")
+        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a — Gate: `docker compose exec: deep`\n")
+        self.assertEqual(
+            xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")[0]["tier"], "default"
+        )  # không đọc trong Gate
 
     def test_runs_log_is_fail_open_and_does_not_follow_symlink(self):
         # Review #109: runs.jsonl hỏng (là thư mục) không làm vỡ loop record, đếm lỗi lặp vẫn tăng; symlink không bị ghi theo.
