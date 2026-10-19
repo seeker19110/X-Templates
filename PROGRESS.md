@@ -1,8 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.8.0) · Cập nhật: 2026-10-19 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.9.0) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
+- 2026-10-19 3.9.0 (nhánh `seeker/upbeat-gates-4802fn`, chưa PR): T-1501…T-1509 xong — REC-01…04, 06…08, guard `Decision` có kiểu + hook `PermissionRequest` (D-081/D-082). Tiếp: T-1511…T-1522 (PLAN-3.9-automation, vòng đang chạy). `v3.9.0` chưa tạo — chủ repo chạy `release-tag.yml`.
 - 2026-10-19 audit quét lại 11 nhóm tại `a4f929c` (sổ delta2 ghi SHA nhánh `fd64dd6` đã mất — AUD-HAR-077): mới 🔴 AUD-SEC-077 (surrogate trong đích ghi làm guard fail-open), 🟠 DOC-054, HAR-077/078/079, TEST-008/009, XFEAT-010/011 + 32 🟢 — `docs/ops/AUDIT-REPORT-2026-10-19-rescan.md`, **chờ duyệt** kế hoạch 6 đợt (đợt 1 guard gồm cả 🔴 SEC-072 từ delta2 chưa làm; đợt 2 cần chủ repo chọn (a)/(b) cho merge làn chuẩn chưa review). D-079 (#170), D-080 (#171) đã merge.
 - 2026-10-19 ADR-0029 (#169 đã merge `758dda3`): hai tầng executor (`executor-deep`), chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive` + `reviewer-alt`, `xt.py release-check` (G7 máy đọc), `lifecycle.md` quy tắc 6; D-075…D-078; nghiên cứu `research/2026-10-19-rapid-build-then-harden.md`. Chưa làm (chờ số `loop stats`/pilot): `delivery_phase`, gate planner (PD-05), kiểm protection GitHub (PD-09).
 - 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064, D-065, D-071): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); sổ `docs/ops/AUDIT-STATUS.md` (trạng thái hiện tại ở dòng đầu mục này). Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).

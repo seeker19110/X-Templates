@@ -5,6 +5,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-10-19
+
 ### Added
 - Hai tầng executor, chuyển cấp, audit theo mốc, review chưa kết luận, cổng G7 máy đọc ([ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md),
   D-075…D-078; nghiên cứu [`research/2026-10-19-rapid-build-then-harden.md`](research/2026-10-19-rapid-build-then-harden.md)):
@@ -37,6 +39,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `review_identity` (chỉ dấu của tài khoản đó được tin), `author_model_family`/`reviewer_model_family` (`ci-check` từ chối
   trùng họ; `pr reviewed --clean` lấy họ từ cấu hình khi không truyền cờ). Mặc định TẮT tới khi chủ repo cấp
   `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
+
+- Guard có quyết định kiểu (REC-04, T-1509, D-081/D-082): `Decision(action, code, confidence, missing)` và bảng `apply_policy`
+  tra theo mã lý do; mã UNPARSED/BUDGET hoặc `confidence: unsure` trong nhóm chặn → deny ở bash/mcp/edit (`XT_GUARD_POLICY=strict`
+  giữ hành vi hỏi cũ). Hook mới `.claude/hooks/permission-request.sh` (sự kiện `PermissionRequest`, cho headless): guard không
+  phản đối thì im lặng, không tự allow. Corpus chặn oan không tăng (`test_guard_corpus_typed_decision_codes`).
+  **Dự án đích:** chạy lại `install.py` (hook + `settings.json`).
 
 ### Changed
 - `merge_risk_paths` của repo khung bỏ tài liệu thuần (`docs/adr/*`, `framework/11-autonomous-loop/*`, `code-review.md`) — PR chỉ sửa
