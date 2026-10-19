@@ -424,3 +424,10 @@
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: UX-DS-022 đòi skill chép có SOURCE/LICENSE nhưng trước đây máy không kiểm được; manifest là nguồn sự thật về file khung cài, nên không báo nhầm; skill tự viết khai tường minh
 - Đường lùi: Bỏ nhánh SKILLS_DIR/--own trong cmd_vendor_check
 - Giới hạn chấp nhận (review #148): manifest là file trong repo nên ai sửa được CI/manifest thì cũng bỏ qua được skill (như `--own`); skill vendor trùng tên skill của khung bị bỏ qua.
+
+### D-060 · 2026-10-19T06:07:33+00:00 · merge-check gặp mergeable_state BLOCKED: phân biệt thiếu check bắt buộc với cần review thế nào?
+
+- Phương án: (1) Giữ: BLOCKED luôn = cần review · (2) Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ · (3) Gọi GraphQL mergeStateStatus/required checks
+- Chọn: Khi BLOCKED, đọc REST rules/branches; check bắt buộc vắng trên head (sau khi mọi check xong) → human với lý do thiếu check; không đọc được → hành vi cũ
+- Lý do (tiêu chí chất lượng cuối): Đúng: X-Company#23 bị báo cần review trong khi ruleset đòi 0 review và chỉ thiếu job dast; REST chạy được ở phiên chặn GraphQL; chỉ gọi thêm khi BLOCKED; fail về hành vi cũ
+- Đường lùi: Bỏ _required_checks và nhánh missingRequired

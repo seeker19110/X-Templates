@@ -3393,6 +3393,12 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
+    missing = [str(m) for m in pr.get("missingRequired") or []]
+    if missing:  # mọi check đã xong mà check bắt buộc vẫn vắng: sẽ không bao giờ tự xuất hiện
+        return "human", [
+            f"ruleset đòi check bắt buộc không có trên head: {', '.join(missing)} — thêm job đúng tên đó vào workflow hoặc "
+            "bỏ khỏi ruleset (GitHub báo BLOCKED vì thiếu check, không phải vì thiếu review)"
+        ]
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "fix", ["reviewer yêu cầu sửa"]
     if pr.get("mergeStateStatus") == "BEHIND":
@@ -3742,9 +3748,10 @@ def _member_can_write(repo: str, assoc: object, login: object) -> Optional[str]:
     return None
 
 
-def _review_decision(reviews: List[Dict[str, Any]], merge_state: str) -> str:
+def _review_decision(reviews: List[Dict[str, Any]], merge_state: str, missing_checks: bool = False) -> str:
     """Như `reviewDecision` của GraphQL: review mới nhất của mỗi người (bỏ COMMENTED; DISMISSED xoá). REST không cho biết
-    ruleset/branch protection đòi review, nên `mergeable_state` BLOCKED (GitHub tính cả protection cổ điển) → cần người."""
+    ruleset/branch protection đòi review, nên `mergeable_state` BLOCKED (GitHub tính cả protection cổ điển) → cần người —
+    trừ khi đã biết BLOCKED vì thiếu check bắt buộc (`missing_checks`), không phải vì review."""
     latest: Dict[str, str] = {}
     for rv in reviews:
         user, st = (rv.get("user") or {}).get("login"), str(rv.get("state", "")).upper()
@@ -3753,9 +3760,24 @@ def _review_decision(reviews: List[Dict[str, Any]], merge_state: str) -> str:
     states = set(latest.values())
     if "CHANGES_REQUESTED" in states:
         return "CHANGES_REQUESTED"
-    if merge_state == "BLOCKED":
+    if merge_state == "BLOCKED" and not missing_checks:
         return "REVIEW_REQUIRED"
     return "APPROVED" if "APPROVED" in states else ""
+
+
+def _required_checks(repo: str, branch: str) -> List[str]:
+    """Tên check bắt buộc của nhánh theo ruleset (REST `rules/branches`); không đọc được → [] (không suy ra gì)."""
+    try:
+        rules = _gh_items(f"{repo}/rules/branches/{urllib.parse.quote(branch, safe='')}")
+    except PrInputError:
+        return []
+    out: List[str] = []
+    for r in rules:
+        params = r.get("parameters") if r.get("type") == "required_status_checks" else None
+        for c in (params or {}).get("required_status_checks") or []:
+            if isinstance(c, dict) and c.get("context") and c["context"] not in out:
+                out.append(str(c["context"]))
+    return out
 
 
 def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
@@ -3805,6 +3827,13 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
     raw_base = pr.get("base")
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
+    # BLOCKED có thể vì ruleset đòi check mà head không có (không workflow nào sinh) — không phải thiếu review.
+    seen = {str(c.get("name") or c.get("context")) for c in rollup}
+    missing = (
+        [c for c in _required_checks(repo, str(base.get("ref") or "main")) if c not in seen]
+        if merge_state == "BLOCKED"
+        else []
+    )
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
     gated = any(isinstance(f, dict) and _gated_file(f) for f in files)
@@ -3834,7 +3863,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "isDraft": bool(pr.get("draft")),
         "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
         "mergeStateStatus": merge_state,
-        "reviewDecision": _review_decision(reviews, merge_state),
+        "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
+        **({"missingRequired": missing} if missing else {}),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
