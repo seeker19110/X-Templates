@@ -5741,8 +5741,10 @@ def _steward_can_update() -> bool:
     workflow `pull_request` → head mới không có check, PR kẹt chờ check bắt buộc (review #153) — chỉ báo. Không đặt biến
     mà đang chạy trong GitHub Actions (workflow `pr-steward.yml` cũ của dự án đích, chưa chép bản mới) → coi như `off`."""
     flag = os.environ.get("XT_STEWARD_UPDATE", "").strip().lower()
-    if flag in ("on", "off"):
-        return flag == "on"
+    if flag in ("on", "true", "1", "yes"):
+        return True
+    if flag:  # off/false/0/no và mọi giá trị lạ: chiều chặt (review #154)
+        return False
     return os.environ.get("GITHUB_ACTIONS", "").strip().lower() != "true"
 
 

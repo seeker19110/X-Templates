@@ -1468,7 +1468,9 @@ class BaseMergeCarryTest(unittest.TestCase):
             ({"GITHUB_ACTIONS": "true"}, False),
             ({"GITHUB_ACTIONS": "true", "XT_STEWARD_UPDATE": "on"}, True),
             ({"XT_STEWARD_UPDATE": "off"}, False),
-            ({"XT_STEWARD_UPDATE": "lạ"}, True),
+            ({"XT_STEWARD_UPDATE": "lạ"}, False),
+            ({"XT_STEWARD_UPDATE": "true"}, True),
+            ({"XT_STEWARD_UPDATE": "0"}, False),
         ]
         for env, want in cases:
             with unittest.mock.patch.dict(os.environ, env):
