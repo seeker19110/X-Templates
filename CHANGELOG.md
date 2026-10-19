@@ -13,6 +13,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
+- `loop record`/`loop verify`/lệnh `— Kiểm:`/sàn Gate: Gate exit 0 mà đầu ra có `Ran 0 tests` (unittest Python 3.11 khi `-k`
+  không khớp test nào; 3.12+ tự exit 5) nay là exit 5 kèm dòng lý do, evidence ghi `zero_tests_red: true` — Gate `-k <tên>`
+  không còn xanh giả (REC-01, T-1501).
+- `same_command` giữ ngữ nghĩa nháy của bash: `echo '$X'` (chữ) ≠ `echo "$X"` (bung) ≠ glob/`~` ngoài nháy — trước đây
+  `shlex.split` coi là cùng lệnh nên `loop_verdict` và `run_blueprint_checks` gộp lệnh khác nghĩa; evidence ghi
+  `cmd_sha256` của lệnh nguyên văn và `loop_verdict` khớp dấu vân tay trước (REC-01, T-1502).
 - `perf guard`: tên file không phải UTF-8 (đã thay byte lạ bằng U+FFFD, không mở lại được) được báo đáng ngờ thay vì qua
   lặng lẽ (review #165).
 - `vendor-check`: đuôi file ghi nguồn theo danh sách cho phép (md/txt/rst/adoc/html, đoạn viết hoa/số) — `data_source.c`,
