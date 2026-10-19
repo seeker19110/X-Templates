@@ -7,6 +7,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 > **Dự án đích:** chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, matcher hook MCP trong `settings.json` đổi).
 
+### Added
+- Kế hoạch khắc phục và nâng cấp tự động hóa sau đánh giá ngày 2026-10-19 (bản 2, thay nháp #160):
+  [`docs/ops/REMEDIATION-PLAN-2026-10-19.md`](docs/ops/REMEDIATION-PLAN-2026-10-19.md) — tái hiện lại REC-01/03/06/08
+  bằng lệnh trên `19d3aa8`, nghiên cứu bổ sung nguồn sống (required check `skipped`/`neutral`, hook `PermissionRequest`/
+  `TaskCompleted`/`SubagentStop`, headless `--json-schema`, Code Review, Routines), thang tự chủ theo loại PR, cơ chế cụ
+  thể cho AUTO-01…07; kèm kế hoạch máy đọc cho đợt 3.9.0 → 3.10.0
+  [`docs/autopilot/PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) (T-1501…T-1522, chạy `loop init --plan`
+  sau khi 3.8.0 phát hành — D-066…D-070). Đề xuất tài liệu, chưa thay đổi hành vi công cụ.
+
 ### Security
 - Guard (audit 2026-10-19, chính sách mặc định ADR-0018):
   - shell lồng quá 4 lớp (`bash -c` ×5 quanh `rm -rf ~`) nay **chặn** thay vì cho qua im lặng; `find -exec` còn quét
