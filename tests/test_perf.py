@@ -337,6 +337,19 @@ class PerfGuardTest(unittest.TestCase):
         git(d, "commit", "-qm", "ignore2")
         self.assertEqual(xt._perf_self_hidden_ignores(d), [])
 
+    def test_perf_guard_non_utf8_name_is_suspect(self):
+        """Review #165: `_git` giải mã `errors=replace` nên tên file `bench\\xe9.py` thành `bench\\ufffd.py` — không mở lại
+        được để quét nội dung; không được qua lặng lẽ (trước đó sập, nay phải báo đáng ngờ)."""
+        d = self.make_repo()
+        (d / os.fsdecode(b"bench\xe9.py")).write_text("import functools\n@functools.lru_cache\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        _touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(len(suspect), 1)
+        self.assertIn("không phải UTF-8", suspect[0])
+        (d / "plain.py").write_text("@functools.lru_cache\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        self.assertEqual(len(xt.perf_guard(files, added, ["bench/*"])[1]), 2)
+
     def test_perf_self_hidden_root_and_git_error(self):
         d = self.make_repo()
         (d / ".gitignore").write_text("*\n")  # `.gitignore` gốc chưa theo dõi tự che: vẫn là luật ignore mới

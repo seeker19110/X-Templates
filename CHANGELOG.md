@@ -13,6 +13,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
+- `perf guard`: tên file không phải UTF-8 (đã thay byte lạ bằng U+FFFD, không mở lại được) được báo đáng ngờ thay vì qua
+  lặng lẽ (review #165).
 - `vendor-check`: đuôi file ghi nguồn theo danh sách cho phép (md/txt/rst/adoc/html, đoạn viết hoa/số) — `data_source.c`,
   `license_header.h`, `notice.less`, `license.svg` không còn được tính là ghi nguồn; `LICENSES.chromium.html` được nhận
   (review #162/#164, AUD-XFEAT-007).

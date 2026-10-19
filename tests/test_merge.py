@@ -337,12 +337,14 @@ class MergeDecisionTest(unittest.TestCase):
 
     def test_local_merge_conflicts_non_utf8_name_and_real_shallow_clone(self):
         """Review #165: tên file KHÔNG phải UTF-8 (`lat\\xe9`) ở xung đột — `-z` in byte thô, không được sập
-        UnicodeDecodeError (steward/merge-watch chết); clone nông thật: commit đã có nhưng merge-base ngoài ranh → None."""
+        UnicodeDecodeError (steward/merge-watch chết); clone nông thật: commit `main` thiếu → không fetch (kể cả khi fetch sẽ thành công) → None."""
         d = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
         def git(*a: str) -> str:
             r = subprocess.run(
-                ["git", "-C", str(d), "-c", "user.name=t", "-c", "user.email=t@x", *a], capture_output=True, text=True
+                ["git", "-C", str(d), "-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false", *a],
+                capture_output=True,
+                text=True,
             )
             self.assertEqual(r.returncode, 0, r.stderr)
             return r.stdout.strip()
@@ -370,7 +372,11 @@ class MergeDecisionTest(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        self.assertIsNone(xt.local_merge_conflicts("m", main, head, "1", clone))  # nông: không fetch, không kiểm được
+        with unittest.mock.patch.object(
+            xt, "_git", wraps=xt._git
+        ) as g:  # number="" → fetch `m` sẽ thành công nếu có chạy
+            self.assertIsNone(xt.local_merge_conflicts("m", main, head, "", clone))
+        self.assertNotIn("fetch", [c.args[1] for c in g.call_args_list])  # nông: không fetch, không kiểm được
 
     def test_merge_gate_skips_local_conflict_check(self):
         """Review #164: `merge-gate` chạy ở CI checkout nông — chỉ cần ngoại lệ cứng, không kiểm xung đột cục bộ."""

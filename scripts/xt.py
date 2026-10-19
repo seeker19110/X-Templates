@@ -6434,6 +6434,8 @@ def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]
         if f.rpartition("/")[2] == ".gitignore"
     ]
     suspect += [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
+    # Tên file không phải UTF-8: `_git` đã thay byte lạ bằng U+FFFD nên không mở lại được để quét nội dung — fail-closed
+    suspect += [f"{f}: tên file không phải UTF-8 — không quét được nội dung" for f in files if "\ufffd" in f]
     return touched, suspect
 
 
