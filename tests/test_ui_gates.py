@@ -250,6 +250,8 @@ class ContrastSkipTest(unittest.TestCase):
         self.assertEqual(run("contrast", "c.css", "--allow-skip", cwd=d)[0], 0)
         rc, out, _ = run("contrast", "c.css", "--json", cwd=d)
         self.assertEqual((rc, json.loads(out)["skipped"]), (1, 1))
+        rc, out, _ = run("contrast", "c.css", "--json", "--allow-skip", cwd=d)
+        self.assertEqual((rc, json.loads(out)["skipped"]), (0, 1))  # vẫn đếm cặp bỏ qua (review #162)
         (d / "n.css").write_text(":root{--x:rgb(0 0 0 / none);--x-foreground:#fff;--y:#000;--y-foreground:#fff}")
         rc, out, err = run("contrast", "n.css", cwd=d)
         self.assertNotIn("Traceback", err)
@@ -284,6 +286,12 @@ class VendorCheckTest(unittest.TestCase):
         self.put("vendor/ok4/LICENSE_MIT", "MIT License")
         self.put("vendor/bad2/c.js")
         self.put("vendor/bad2/LICENSE.d.ts")  # file mã, không phải ghi nguồn
+        self.put("vendor/libfoo/foo.c")  # review #162 (lần 2): mã C/C++ mang từ khoá không phải ghi nguồn
+        self.put("vendor/libfoo/license_header.h")
+        self.put("vendor/libbar/bar.c")
+        self.put("vendor/libbar/notice_window.cc")
+        self.put("vendor/ok5/a.js")
+        self.put("vendor/ok5/LICENSES.chromium.html", "BSD License")
         self.put("vendor/.gitkeep", "")
         rc, out, _ = run("vendor-check", "--strict", cwd=self.dir)
         self.assertEqual(rc, 1, out)
@@ -293,7 +301,28 @@ class VendorCheckTest(unittest.TestCase):
         self.assertNotIn("vendor/ok3", out)
         self.assertNotIn("vendor/ok4", out)
         self.assertIn("vendor/bad2: không có LICENSE", out)
+        self.assertIn("vendor/libfoo: không có LICENSE", out)
+        self.assertIn("vendor/libbar: không có LICENSE", out)
+        self.assertNotIn("vendor/ok5", out)
         self.assertNotIn(".gitkeep", out)
+
+    def test_vendor_notice_name_allowlist(self) -> None:
+        """Đuôi file là danh sách cho phép (tài liệu/đoạn viết hoa/số), không phải danh sách đuôi mã bị cấm (review #162)."""
+        yes = (
+            "LICENSE",
+            "license-apache.txt",
+            "LICENSE_MIT",
+            "COPYING.LESSER",
+            "THIRD-PARTY-NOTICES",
+            "LICENSE-2.0.txt",
+        )
+        yes += ("LICENSES.chromium.html", "notice.html", "README.vendor.md", "NOTICE.txt", "SOURCE.md", "Origins.rst")
+        no = ("data_source.c", "license_header.h", "notice.less", "license.svg", "source.map", "license.yaml")
+        no += ("SourceSelect.tsx", "LICENSE.d.ts", "Origin.ts", "sources.json", "notice_window.cc", "origin-check.sh")
+        for n in yes:
+            self.assertTrue(xt.vendor_notice_name(n), n)
+        for n in no:
+            self.assertFalse(xt.vendor_notice_name(n), n)
 
     def test_clean_project(self) -> None:
         rc, out, _ = run("vendor-check", cwd=self.dir)

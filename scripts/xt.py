@@ -1642,10 +1642,14 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
-def _git(cwd: Path, *args: str, env: Optional[Dict[str, str]] = None) -> "subprocess.CompletedProcess[str]":
+def _git(
+    cwd: Path, *args: str, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None
+) -> "subprocess.CompletedProcess[str]":
     cmd = ["git", "-C", str(cwd), *args]
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env)
+        return subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env, input=stdin
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 124, "", f"git quá {GIT_TIMEOUT} s")
 
@@ -4928,7 +4932,8 @@ def cmd_contrast(args: argparse.Namespace) -> int:
     bad = [r for r in rows if r["status"] == "fail"]
     skipped = [] if args.allow_skip else [r for r in rows if r["status"] == "skip"]
     if args.json:
-        print(json.dumps({"pairs": rows, "missing_on": missing, "skipped": len(skipped)}, ensure_ascii=False, indent=2))
+        n_skip = sum(r["status"] == "skip" for r in rows)  # cả khi `--allow-skip` (review #162)
+        print(json.dumps({"pairs": rows, "missing_on": missing, "skipped": n_skip}, ensure_ascii=False, indent=2))
     else:
         for r in rows:
             mark = {"ok": "✓", "fail": "✗", "skip": "–"}[str(r["status"])]
@@ -4957,18 +4962,23 @@ def cmd_contrast(args: argparse.Namespace) -> int:
 
 VENDOR_DIRS = ("vendor", "third_party", "third-party", "external")
 # Khớp NGUYÊN tên file: `LICENSE`, `LICENSE-MIT`, `license-apache.txt`, `COPYING.LESSER`, `THIRD-PARTY-NOTICES`,
-# `SOURCE.md`… (từ khoá đứng riêng giữa các dấu `-_.`); file mã (`SourceSelect.tsx`, `Notice.tsx`, `LICENSE.d.ts`) không
-# phải file ghi nguồn (AUD-XFEAT-007, review #162).
+# `LICENSES.chromium.html`, `SOURCE.md`… (từ khoá đứng riêng giữa các dấu `-_.`). Đuôi file là danh sách CHO PHÉP
+# (tài liệu, hoặc đoạn viết hoa/số như `.LESSER`, `-2.0`), không phải danh sách đuôi mã bị cấm: `data_source.c`,
+# `license_header.h`, `notice.less`, `license.svg`, `source.map`, `SourceSelect.tsx`, `LICENSE.d.ts` không phải file ghi
+# nguồn (AUD-XFEAT-007, review #162 ×2).
 VENDOR_NOTICE_RE = re.compile(
     r"(?:[a-z0-9]+[-_.])*(?:licen[cs]es?|copying|notices?|sources?|origins?)(?:[-_.][a-z0-9]+)*"
     r"|readme\.vendor(?:\.(?:md|txt))?",
     re.I,
 )
-CODE_EXT_RE = re.compile(r"\.(?:[cm]?[jt]sx?|json|css|scss|vue|svelte|py|go|rs|java|kt|swift|rb|php|html?)$", re.I)
+VENDOR_DOC_EXT_RE = re.compile(r"md|markdown|txt|rst|adoc|html?", re.I)
 
 
 def vendor_notice_name(name: str) -> bool:
-    return bool(VENDOR_NOTICE_RE.fullmatch(name)) and not CODE_EXT_RE.search(name)
+    if not VENDOR_NOTICE_RE.fullmatch(name):
+        return False
+    _stem, dot, ext = name.rpartition(".")
+    return not dot or bool(VENDOR_DOC_EXT_RE.fullmatch(ext)) or ext.isupper() or ext.isdigit()
 
 
 VENDOR_RISKY_RE = re.compile(
@@ -5730,9 +5740,11 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
     )
 
 
+# Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới từ: `graphic`/`commander` không phải tên model
+# (review #162).
 MODEL_FAMILY_RE = re.compile(
-    r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral|kimi|glm|phi|command|nova"
-    r"|\bo\d",
+    r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral"
+    r"|\b(?:kimi|glm|phi|command|nova|o\d)\b",
     re.I,
 )
 
@@ -6264,16 +6276,24 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
 def _perf_self_hidden_ignores(base: Path) -> List[str]:
     """`.gitignore` chưa theo dõi mà chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005): bị ignore nhưng thư
     mục chứa nó thì không. `.gitignore` trong thư mục đã ignore sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới
-    (review #162)."""
+    (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
+    tự khớp cả thư mục `bench/sub/`, và `info/exclude`/`excludesFile` không được tin (như `PERF_UNTRACKED`; review #162 ×2)."""
     hidden = _perf_git_names(
         base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".gitignore", "**/.gitignore"
     )
     parents = sorted({h.rpartition("/")[0] + "/" for h in hidden if "/" in h})
-    # `-z` của check-ignore chỉ đi với `--stdin`: đọc từng dòng, tên không quote (`core.quotePath=off`).
-    r = _git(base, "-c", "core.quotePath=off", "check-ignore", "--", *parents, env=_perf_env()) if parents else None
-    if r is not None and r.returncode not in (0, 1):  # 1 = không đường nào bị ignore
+    if not parents:
+        return hidden
+    tracked = set(_perf_git_names(base, "ls-files", "-z", "--", ".gitignore", "**/.gitignore"))
+    r = _git(base, "check-ignore", "-v", "-z", "--stdin", env=_perf_env(), stdin="\0".join(parents))
+    if r.returncode not in (0, 1):  # 1 = không đường nào bị ignore
         raise RuntimeError(f"git check-ignore lỗi: {r.stderr.strip() or r.returncode}")
-    ignored_dirs = set(r.stdout.splitlines()) if r else set()
+    fields = r.stdout.split("\0")  # -v -z: <nguồn> <dòng> <mẫu> <đường> cho mỗi khớp
+    ignored_dirs = {
+        fields[i + 3]
+        for i in range(0, len(fields) - 3, 4)
+        if fields[i] in tracked and not fields[i + 2].startswith("!")
+    }
     return [h for h in hidden if "/" not in h or h.rpartition("/")[0] + "/" not in ignored_dirs]
 
 

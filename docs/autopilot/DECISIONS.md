@@ -510,3 +510,10 @@
 - Chọn: Một PR gộp C+D+E, commit tách theo lát
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn như nhau (mỗi lát một commit có test đỏ trước, cổng xanh trên cây gộp, reviewer khác model rà cả diff); ràng buộc một tên nhánh buộc ba PR chờ nối tiếp nhau (mỗi vòng CI + review), gộp giữ đường lùi bằng revert từng commit
 - Đường lùi: Revert commit của lát cần bỏ; hoặc tách lại PR theo commit
+
+### D-072 · 2026-10-19T13:19:28+00:00 · Review #162 (reviewer khác model) báo 2 lỗi chặn (vendor-check lọt mã C/C++, perf guard bỏ sót .gitignore tự che trong thư mục mới) nhưng phiên này bị ràng buộc nhánh seeker/sleepy-dijkstra-wnl2b5, không push được nhánh của #162 — sửa ở đâu?
+
+- Phương án: (1) Push sửa lên nhánh của #162 (vi phạm ràng buộc nhánh phiên) · (2) Ghi pr reviewed --blocking cho #162; mở PR mới trên nhánh phiên = #162 + commit sửa, thay #162 (như D-066 với #160); đóng #162 · (3) Chờ chủ repo cho phép push nhánh #162
+- Chọn: Ghi pr reviewed --blocking cho #162; mở PR mới trên nhánh phiên = #162 + commit sửa, thay #162 (như D-066 với #160); đóng #162
+- Lý do (tiêu chí chất lượng cuối): Giữ ràng buộc nhánh của phiên và một lát một PR; PR mới mang nguyên commit của #162 nên review tăng trưởng chỉ cần rà commit sửa; không chờ người (ADR-0008)
+- Đường lùi: Đóng PR mới, mở lại #162 và chép commit sửa sang nhánh của #162 khi được phép

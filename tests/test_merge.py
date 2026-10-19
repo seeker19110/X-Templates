@@ -1315,7 +1315,8 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("không nhận diện được tên model", err)
         self.assertEqual(run("--clean", "--reviewer-model", "o3", "--author-model", "claude-opus-5-5")[0], 0)  # #162
-        for vague in ("claude", "reviewer", "Claude Code"):  # AUD-HAR-064: tên không lộ họ model → không so được
+        # AUD-HAR-064: tên không lộ họ model → không so được; `graphic`/`commander` không chứa họ `phi`/`command` (review #162)
+        for vague in ("claude", "reviewer", "Claude Code", "graphic", "commander", "novaX"):
             rc, _, err = run("--clean", "--reviewer-model", vague, "--author-model", "claude-opus-5-5")
             self.assertEqual(rc, 2, vague)
             self.assertIn("không nhận diện được họ model", err)
@@ -1325,6 +1326,9 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last["reviewer_model"], last["author_model"]), ("sonnet", "claude-opus-5-5"))
         self.assertEqual(xt.model_family("claude-sonnet-5-5"), "sonnet")
         self.assertEqual(xt.model_family("My-Model 2"), "mymodel")
+        self.assertEqual(
+            (xt.model_family("phi-4"), xt.model_family("o3-mini"), xt.model_family("GLM 4.5")), ("phi", "o3", "glm")
+        )
 
     def test_small_pr_after_standard_stays_strict_and_bad_input(self):
         self.nxt(self.big)  # ghi standard_seen

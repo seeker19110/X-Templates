@@ -313,6 +313,30 @@ class PerfGuardTest(unittest.TestCase):
         self.assertEqual(xt.perf_guard(files, added, ["bench/*"]), ([], []))
         self.assertEqual(xt._perf_self_hidden_ignores(d), [])
 
+    def test_perf_guard_self_ignored_in_new_subdir(self):
+        """Review #162 (lần 2): thư mục con MỚI `bench/sub/` chỉ có `.gitignore` = `*` + `conftest.py` — `git check-ignore`
+        báo `bench/sub/` bị ignore bởi chính `.gitignore` chưa theo dõi đó; `info/exclude` cũng không được tin. Chỉ
+        `.gitignore` ĐÃ THEO DÕI mới làm thư mục cha thành "đã ignore sẵn"; mẫu phủ định `!` không ignore."""
+        d = self.make_repo()
+        (d / "bench" / "sub").mkdir()
+        (d / "bench" / "sub" / ".gitignore").write_text("*\n")
+        (d / "bench" / "sub" / "conftest.py").write_text("import functools\n")
+        files, added = xt.perf_diff(d, "HEAD")
+        touched, suspect = xt.perf_guard(files, added, ["bench/*"])
+        self.assertEqual(touched, ["bench/sub/.gitignore", "bench/sub/conftest.py"])
+        self.assertTrue(suspect)
+        (d / ".git" / "info" / "exclude").write_text("bench/sub/\n")
+        self.assertEqual(xt._perf_self_hidden_ignores(d), ["bench/sub/.gitignore"])
+        (d / ".gitignore").write_text("bench/sub/\n!bench/sub/\n")  # phủ định ở .gitignore đã theo dõi: không ignore
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore")
+        (d / "bench" / "sub" / ".gitignore").write_text(".gitignore\n")  # chỉ che chính nó, không che thư mục
+        self.assertEqual(xt._perf_self_hidden_ignores(d), ["bench/sub/.gitignore"])
+        (d / ".gitignore").write_text("bench/sub/\n")  # .gitignore đã theo dõi ignore thư mục: không phải luật mới
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore2")
+        self.assertEqual(xt._perf_self_hidden_ignores(d), [])
+
     def test_perf_self_hidden_root_and_git_error(self):
         d = self.make_repo()
         (d / ".gitignore").write_text("*\n")  # `.gitignore` gốc chưa theo dõi tự che: vẫn là luật ignore mới
