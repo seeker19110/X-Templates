@@ -34,4 +34,4 @@
 - [x] `T-1303` `merge-check` đọc tiêu đề PR (REST + gh): sai `<type>(scope)!: mô tả` hoặc > 72 ký tự → verdict `fix` kèm lý do — Gate: `scripts/dev-task.sh gate`
 
 ### Lát C — phát hành
-- [ ] `T-1304` VERSION 3.5.0 + CHANGELOG `[3.5.0]` + PROGRESS; tag `v3.5.0` — Gate: `scripts/dev-task.sh gate`
+- [x] `T-1304` VERSION 3.5.0 + CHANGELOG `[3.5.0]` + PROGRESS; tag `v3.5.0` — Gate: `scripts/dev-task.sh gate`
