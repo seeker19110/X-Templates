@@ -468,3 +468,10 @@
 - Chọn: Tuần tự: mỗi lát một PR trên cùng tên nhánh; lát sau chuẩn bị ở nhánh cục bộ, PR trước merge thì đặt lại nhánh từ main
 - Lý do (tiêu chí chất lượng cuối): Giữ cả hai luật: ràng buộc nhánh của phiên (không push nhánh khác khi chưa được phép) và một lát một PR (review/đường lùi riêng); chi phí chỉ là chờ CI/review giữa các lát
 - Đường lùi: Chủ repo cho phép nhánh khác → tách lát còn lại sang nhánh <type>/<mô-tả> riêng
+
+### D-066 · 2026-10-19T12:26:11+00:00 · Lát C (merge), D (cổng máy), E (tài liệu + sổ audit) đã commit và qua cổng ở nhánh cục bộ trong lúc chờ #159 — mở 3 PR tuần tự hay một PR
+
+- Phương án: (1) Ba PR tuần tự trên cùng tên nhánh (D-065) · (2) Một PR gộp C+D+E, commit tách theo lát
+- Chọn: Một PR gộp C+D+E, commit tách theo lát
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn như nhau (mỗi lát một commit có test đỏ trước, cổng xanh trên cây gộp, reviewer khác model rà cả diff); ràng buộc một tên nhánh buộc ba PR chờ nối tiếp nhau (mỗi vòng CI + review), gộp giữ đường lùi bằng revert từng commit
+- Đường lùi: Revert commit của lát cần bỏ; hoặc tách lại PR theo commit
