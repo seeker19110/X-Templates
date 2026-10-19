@@ -721,21 +721,22 @@ class MergeConfigTest(unittest.TestCase):
         )
 
     def test_framework_repo_risk_paths(self):
-        """D-031 (review #103): ở repo khung, PR nhỏ sửa bộ máy merge (`scripts/xt.py` + test) hay chỉ đổi luật vòng tự
-        động vẫn vào làn chuẩn (review trước khi bật auto-merge) — `merge_risk_paths` của `xt.yaml` repo."""
+        """D-031 → D-080: ở repo khung, PR nhỏ sửa bộ máy merge (`scripts/xt.py` + test) hay mẫu dự án đích vẫn vào làn
+        chuẩn (review trước khi bật auto-merge); tài liệu thuần (luật vòng tự động, ADR) đi làn nhanh — `merge_risk_paths`
+        của `xt.yaml` repo."""
         _, globs, _ = xt.merge_config(ROOT)
         small = [
             {"path": "scripts/xt.py", "additions": 20, "deletions": 4},
             {"path": "tests/test_xt_core.py", "additions": 20, "deletions": 0},
         ]
         self.assertEqual(xt.merge_decision(pr(files=small), 3, [], hard_auto=True)["lane"], "nhanh")
-        for files in (
-            small,
-            [{"path": "framework/11-autonomous-loop/loop-design.md", "additions": 300, "deletions": 0}],
-        ):
+        for files in (small, [{"path": "framework/templates/PLAN.md", "additions": 5, "deletions": 0}]):
             d = xt.merge_decision(pr(files=files), 3, globs, hard_auto=True)
             self.assertEqual((d["lane"], d["hard"]), ("chuẩn", []))
             self.assertTrue(d["hard_waived"])
+        docs = [{"path": "framework/11-autonomous-loop/loop-design.md", "additions": 100, "deletions": 0}]
+        docs += [{"path": "docs/adr/0031-x.md", "additions": 40, "deletions": 0}]
+        self.assertEqual(xt.merge_decision(pr(files=docs), 3, globs, hard_auto=True)["lane"], "nhanh")
 
     def test_hard_mode(self):
         """ADR-0020: khoá đọc ở nhánh đích đã commit; không có ref/thiếu khoá → human; giá trị lạ → human kèm ghi chú;
