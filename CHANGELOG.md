@@ -19,7 +19,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `same_command` giữ ngữ nghĩa nháy của bash: `echo '$X'` (chữ) ≠ `echo "$X"` (bung) ≠ glob/`~` ngoài nháy — trước đây
   `shlex.split` coi là cùng lệnh nên `loop_verdict` và `run_blueprint_checks` gộp lệnh khác nghĩa; evidence ghi
   `cmd_sha256` của lệnh nguyên văn và `loop_verdict` khớp dấu vân tay trước; toán tử điều khiển ngoài nháy (`&&`, `;`, `|`,
-  `>`, `#` đầu từ) tách token riêng nên `echo ok && false` ≠ `echo ok '&&' false` (REC-01, T-1502).
+  `>`, `#` đầu từ, xuống dòng) tách token riêng, ký tự toán tử liền nhau và số fd dính `<`/`>` gộp một token nên
+  `echo ok && false` ≠ `echo ok '&&' false`, `x &> log` ≠ `x & > log`, `echo 2>f` ≠ `echo 2 >f` (REC-01, T-1502).
 - `perf guard`: tên file không phải UTF-8 (đã thay byte lạ bằng U+FFFD, không mở lại được) được báo đáng ngờ thay vì qua
   lặng lẽ (review #165).
 - `vendor-check`: đuôi file ghi nguồn theo danh sách cho phép (md/txt/rst/adoc/html, đoạn viết hoa/số) — `data_source.c`,

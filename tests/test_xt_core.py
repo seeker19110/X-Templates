@@ -1003,6 +1003,22 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         )
         diff += (("true | cat", "true '|' cat"), ("echo (a)", "echo '(a)'"), ("echo a#b", "echo a '#b'"))
         same += (("echo a#b", "echo 'a#b'"),)  # `#` giữa từ không mở comment
+        # review #167 (vòng 2): ranh giới giữa các ký tự toán tử và số fd phải còn; xuống dòng ngoài nháy là dấu ngăn lệnh
+        diff += (
+            ("pytest &> log", "pytest & > log"),
+            ("echo 2>f", "echo 2 >f"),
+            ("a && b", "a & & b"),
+            ("a || b", "a | | b"),
+        )
+        diff += (
+            ("pytest 2>&1 | tee l", "pytest 2 >&1 | tee l"),
+            ("cat <(a)", "cat < (a)"),
+            ("echo ok\nfalse", "echo ok false"),
+        )
+        same += (
+            ("pytest 2>&1 | tee l", "pytest  2>&1|tee l"),
+            ("echo ok\nfalse", "echo ok\n false"),
+        )
         for a, b in same:
             self.assertTrue(xt.same_command(a, b), (a, b))
             self.assertTrue(xt.same_command(b, a), (b, a))

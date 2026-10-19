@@ -1215,7 +1215,7 @@ def failure_signature(task: str, code: int, output: str) -> str:
 # đơn không gì sống. `echo '$X'` ≠ `echo "$X"` ≠ `echo $X` dù shlex.split cho cùng token (REC-01, T-1502).
 SHELL_LIVE_OUTSIDE = frozenset("$`\\!*?[~{}")
 SHELL_LIVE_DOUBLE = frozenset("$`\\!")
-SHELL_OPERATORS = frozenset(";&|<>()")  # ngoài nháy là toán tử điều khiển/chuyển hướng (ranh giới token, review #167)
+SHELL_OPERATORS = frozenset(";&|<>()\n")  # ngoài nháy là toán tử điều khiển/chuyển hướng (ranh giới token, review #167)
 
 
 def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]) -> Tuple[str, int]:
@@ -1233,17 +1233,33 @@ def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]
     return quote, 0
 
 
+def _shell_op_token(
+    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], has: bool, in_op: bool
+) -> None:
+    """Toán tử điều khiển/chuyển hướng ngoài nháy `c` thành token "sống": ký tự toán tử liền nhau gộp một token (`&>` ≠ `& >`);
+    từ toàn chữ số dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`)."""
+    if in_op:
+        tokens[-1] += ((c, True),)
+    elif has and c in "<>" and all(ch.isdigit() for ch, _ in cur):
+        tokens.append(tuple(cur) + ((c, True),))
+    else:
+        if has:
+            tokens.append(tuple(cur))
+        tokens.append(((c, True),))
+
+
 def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
     """Danh sách token, mỗi token là chuỗi (ký tự, còn sống?) theo đúng ngữ nghĩa nháy của bash: hai lệnh cùng danh sách
     thì bash chạy cùng một việc. Nháy lệch → ValueError (như shlex)."""
     tokens: List[Tuple[Tuple[str, bool], ...]] = []
     cur: List[Tuple[str, bool]] = []
     quote = ""  # "", "'" hoặc '"'
-    has_token = False
+    has_token = in_op = False
     i = 0
     while i < len(cmd):
         c, nxt = cmd[i], cmd[i + 1 : i + 2]
         i += 1
+        was_op = False
         if quote:
             quote, extra = _shell_quoted_char(c, nxt, quote, cur)
             i += extra
@@ -1253,17 +1269,17 @@ def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
             cur.append((nxt, False))
             has_token = True
             i += 1
-        elif c.isspace() or c in SHELL_OPERATORS:
+        elif c in SHELL_OPERATORS:
+            _shell_op_token(c, tokens, cur, has_token, in_op)
+            cur, has_token, was_op = [], False, True
+        elif c.isspace():
             if has_token:
                 tokens.append(tuple(cur))
             cur, has_token = [], False
-            if (
-                not c.isspace()
-            ):  # toán tử điều khiển (`&&`, `;`, `|`, `>`…) ngoài nháy: token "sống" riêng, `'&&'` thì không
-                tokens.append(((c, True),))
         else:
             cur.append((c, c in SHELL_LIVE_OUTSIDE or (c == "#" and not has_token)))  # `#` đầu từ mở comment
             has_token = True
+        in_op = was_op
     if quote:
         raise ValueError("No closing quotation")
     if has_token:
