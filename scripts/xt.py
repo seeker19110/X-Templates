@@ -1107,7 +1107,9 @@ def _verdict_task(
             "task": t["id"],
             "reason": f"task {t['id']} không có Gate máy kiểm — thêm `Gate:` + lệnh trong backtick vào PLAN rồi `loop record`",
         }
-    if not same_command(ev.get("cmd") or "", redact(t["gate"])):  # bằng chứng lưu lệnh đã che bí mật
+    if ev.get("cmd_sha256") != cmd_sha256(t["gate"]) and not same_command(
+        ev.get("cmd") or "", redact(t["gate"])
+    ):  # bằng chứng lưu lệnh đã che bí mật; dấu vân tay khớp nguyên văn thì không cần so ngữ nghĩa (T-1502)
         return {
             "verdict": "verify",
             "task": t["id"],
@@ -1209,12 +1211,73 @@ def failure_signature(task: str, code: int, output: str) -> str:
     return hashlib.sha256(f"{task}|{code}|{norm}".encode()).hexdigest()[:16]
 
 
+# Ký tự shell còn "sống" (bị bung) khi đứng ngoài nháy; trong nháy kép chỉ `$`, backtick, `\\`, `!` còn sống; trong nháy
+# đơn không gì sống. `echo '$X'` ≠ `echo "$X"` ≠ `echo $X` dù shlex.split cho cùng token (REC-01, T-1502).
+SHELL_LIVE_OUTSIDE = frozenset("$`\\!*?[~{}")
+SHELL_LIVE_DOUBLE = frozenset("$`\\!")
+
+
+def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]) -> Tuple[str, int]:
+    """Một ký tự trong nháy: trả (nháy đang mở sau ký tự này, số ký tự ăn thêm). Nháy đơn: mọi thứ là chữ; nháy kép:
+    backslash trước nháy kép, `$`, backtick, backslash là escape; còn lại `$`/backtick/backslash/`!` còn sống."""
+    if c == quote:
+        return "", 0
+    if quote == "'":
+        cur.append((c, False))
+    elif c == "\\" and nxt and nxt in '"$`\\':
+        cur.append((nxt, False))
+        return quote, 1
+    else:
+        cur.append((c, c in SHELL_LIVE_DOUBLE))
+    return quote, 0
+
+
+def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
+    """Danh sách token, mỗi token là chuỗi (ký tự, còn sống?) theo đúng ngữ nghĩa nháy của bash: hai lệnh cùng danh sách
+    thì bash chạy cùng một việc. Nháy lệch → ValueError (như shlex)."""
+    tokens: List[Tuple[Tuple[str, bool], ...]] = []
+    cur: List[Tuple[str, bool]] = []
+    quote = ""  # "", "'" hoặc '"'
+    has_token = False
+    i = 0
+    while i < len(cmd):
+        c, nxt = cmd[i], cmd[i + 1 : i + 2]
+        i += 1
+        if quote:
+            quote, extra = _shell_quoted_char(c, nxt, quote, cur)
+            i += extra
+        elif c in "'\"":
+            quote, has_token = c, True
+        elif c == "\\" and nxt:
+            cur.append((nxt, False))
+            has_token = True
+            i += 1
+        elif c.isspace():
+            if has_token:
+                tokens.append(tuple(cur))
+            cur, has_token = [], False
+        else:
+            cur.append((c, c in SHELL_LIVE_OUTSIDE))
+            has_token = True
+    if quote:
+        raise ValueError("No closing quotation")
+    if has_token:
+        tokens.append(tuple(cur))
+    return tokens
+
+
 def same_command(a: str, b: str) -> bool:
-    """So lệnh theo token shell (nháy/khoảng trắng khác nhau vẫn là cùng lệnh)."""
+    """So lệnh theo token shell GIỮ ngữ nghĩa nháy: khoảng trắng/nháy khác nhau mà bash chạy cùng việc → cùng lệnh;
+    `'$X'` (chữ) ≠ `"$X"` (bung) (T-1502). Nháy lệch → so chuỗi đã bỏ khoảng trắng hai đầu."""
     try:
-        return shlex.split(a) == shlex.split(b)
+        return shell_identity(a) == shell_identity(b)
     except ValueError:
         return a.strip() == b.strip()
+
+
+def cmd_sha256(cmd: str) -> str:
+    """Dấu vân tay lệnh Gate (nguyên văn, chưa che bí mật) — evidence so khớp chính xác với PLAN trước khi so ngữ nghĩa."""
+    return hashlib.sha256(cmd.encode("utf-8")).hexdigest()
 
 
 def _record_timeout() -> Optional[int]:
@@ -1465,6 +1528,7 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None) -> int:
     ev: Dict[str, Any] = {
         "task": task,
         "cmd": redact(cmd_str),
+        "cmd_sha256": cmd_sha256(cmd_str),
         "exit_code": code,
         "started": started,
         "finished": now_iso(),

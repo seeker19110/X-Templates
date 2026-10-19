@@ -978,6 +978,63 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         self.assertFalse(xt.same_command("echo 'a", "echo 'b"))
         self.assertTrue(xt.same_command("echo  a", "echo 'a'"))
 
+    def test_command_identity_keeps_quote_semantics(self):
+        """T-1502 (REC-01): shlex.split cho `echo '$X'` và `echo "$X"` cùng token nhưng bash chạy khác — `same_command`
+        giữ ngữ nghĩa nháy: ký tự còn sống ngoài nháy/trong nháy kép (`$`, backtick, `\\`, `!`; ngoài nháy thêm glob/`~`)
+        khác ký tự chữ trong nháy đơn hoặc sau `\\`."""
+        same = (
+            ("echo  a", "echo 'a'"),
+            ('echo "$X"', "echo $X"),
+            ("echo \\$X", "echo '$X'"),
+            ('echo "a b"', "echo 'a b'"),
+        )
+        same += (('echo "\\$"', "echo '$'"), ('echo "~"', "echo '~'"), ("x  &&  y", "x && y"), ('a "b"c', "a 'b'c"))
+        same += (("python3 -c \"print('a b')\"", "python3 -c 'print('\"'\"'a b'\"'\"')'"), ("", "   "))
+        diff = (("echo '$X'", 'echo "$X"'), ("echo '*'", "echo *"), ('echo "!x"', "echo '!x'"), ("echo ~", "echo '~'"))
+        diff += (("echo '`id`'", 'echo "`id`"'), ("a | b", "a|b"), ("echo a", "echo a b"), ("echo '\\'", 'echo "\\x"'))
+        same += (("echo '\\'", 'echo "\\\\"'),)  # nháy đơn giữ `\`; nháy kép `\\` → một `\` chữ: cùng nghĩa
+        for a, b in same:
+            self.assertTrue(xt.same_command(a, b), (a, b))
+            self.assertTrue(xt.same_command(b, a), (b, a))
+        for a, b in diff:
+            self.assertFalse(xt.same_command(a, b), (a, b))
+        with self.assertRaises(ValueError):
+            xt.shell_identity("echo 'a")
+        self.assertEqual(
+            xt.shell_identity('echo "\\x"'),
+            [(("e", False), ("c", False), ("h", False), ("o", False)), (("\\", True), ("x", False))],
+        )
+
+    def test_command_identity_evidence_sha_and_verdict(self):
+        """Evidence ghi `cmd_sha256` của lệnh nguyên văn; verdict: dấu vân tay khớp PLAN → không so ngữ nghĩa; khác → so
+        `same_command` (khoảng trắng khác vẫn nhận; nháy đổi nghĩa → `verify`)."""
+        write(self.base / "docs" / "autopilot" / "PLAN.md", '- [x] `T-001` việc — Gate: `echo "$HOME"`\n')
+        self.assertEqual(self.record(['echo "$HOME"'])[0], 0)
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual(ev["cmd_sha256"], xt.cmd_sha256('echo "$HOME"'))
+        self.assertEqual(len(ev["cmd_sha256"]), 64)
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        self.assertEqual(self.record(["echo  $HOME"])[0], 0)  # khác dấu vân tay, cùng nghĩa
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        self.assertEqual(self.record(["echo '$HOME'"])[0], 0)  # chữ, không bung: KHÔNG phải Gate khai
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["task"]), ("verify", "T-001"))
+        self.assertIn("bằng chứng chạy lệnh khác", v["reason"])
+        # evidence cũ không có cmd_sha256 (bản < 3.9): chỉ so ngữ nghĩa
+        ev = xt.read_evidence("T-001", self.base)
+        ev.pop("cmd_sha256")
+        ev["cmd"] = 'echo "$HOME"'
+        write(self.base / ".autopilot" / "evidence" / "T-001.json", json.dumps(ev))
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+
+    def test_command_identity_blueprint_checks_not_merged(self):
+        """`run_blueprint_checks` chỉ dùng chung kết quả cho lệnh CÙNG nghĩa."""
+        checks = [{"id": "A", "cmd": "echo '$X'"}, {"id": "B", "cmd": 'echo "$X"'}, {"id": "C", "cmd": "echo  '$X'"}]
+        with unittest.mock.patch.object(xt, "run_gate_shell", return_value=(0, "ok")) as run:
+            out = xt.run_blueprint_checks(checks, self.base, 30)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual([c["exit_code"] for c in out], [0, 0, 0])
+
     def test_invalid_timeout_env_returns_2_and_writes_nothing(self):
         os.environ["XT_RECORD_TIMEOUT"] = "abc"
         code, out, err = self.record(["true"])
