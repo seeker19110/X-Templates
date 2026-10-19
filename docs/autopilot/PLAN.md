@@ -50,5 +50,5 @@
 
 ### Lát E — tài liệu, bằng chứng blueprint, sổ audit, phát hành
 - [x] `T-1415` Tài liệu + bằng chứng blueprint (AUD-DOC-044/045, AUD-HAR-060/061/062, 🟢 DOC-046…050, HAR-068/069) — Gate: `scripts/dev-task.sh lint`
-- [ ] `T-1416` Sổ audit: phát hiện đã sửa kèm PR, quét lại nhóm bị chạm — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
+- [x] `T-1416` Sổ audit: phát hiện đã sửa kèm PR, quét lại nhóm bị chạm — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 - [ ] `T-1417` VERSION 3.8.0 + CHANGELOG `[3.8.0]` + PROGRESS; tag `v3.8.0` qua `release-tag.yml` — Gate: `scripts/dev-task.sh gate`
