@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.7.0:** chạy lại `install.py` (chỉ `xt.py` đổi; không đổi workflow/hook). Sau khi nâng, PR đủ
+> điều kiện được `pr next`/`pr-steward` merge ghim head ngay; repo chưa có check bắt buộc trên nhánh chính thì không còn
+> bật auto-merge (import ruleset có required check để dùng auto-merge của GitHub).
+
 ### Fixed
 - `pr next`/`pr steward`: PR đủ điều kiện (`merge-check` = `merge`: mọi check xanh, GitHub báo sạch) mà auto-merge đã bật
   nhưng GitHub chưa merge nay được merge ghim head ngay thay vì "chờ required check" mãi (X-Templates#155 phải merge tay).

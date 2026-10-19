@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.7.0) · Cập nhật: 2026-10-19 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.7.1) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 3.7.0: steward tự cập nhật nhánh tụt base, review sạch mang qua merge base không chạm file PR (#153, D-061); `merge-check` báo thiếu check bắt buộc (#150/#151, D-060); tên phiên `<repo> — <nhánh>` (#152, LOOP-HARNESS-028). 3.6.0: bàn giao UI/UX stored 06 §7i (#148, D-059: `vendor-check` kiểm skill chép vào `.claude/skills`, mã SPDX CC-BY-NC, `SOURCE` cần `License:`; chữ lớn 24 px/18,66 px đậm). 3.5.1 phát hành (#145/#146, D-058: steward ở repo org, `pr_title_check` đọc nhánh đích, nhãn lỗi không bật auto-merge); hotel-manager#84, X-Company#21 đã nâng. 3.5.0: guard ghi công AI qua `gh pr`/MCP, `merge-check` kiểm tiêu đề PR (#140, D-055…057); PR steward (#141, ADR-0027, D-054).
+- 2026-10-19 3.7.1: PR đủ điều kiện là merge ghim head ngay; không bật auto-merge khi nhánh đích thiếu check bắt buộc (#155/#156, D-062/D-063). 3.7.0: steward tự cập nhật nhánh tụt base, review sạch mang qua merge base không chạm file PR (#153, D-061); `merge-check` báo thiếu check bắt buộc (#150/#151, D-060); tên phiên `<repo> — <nhánh>` (#152, LOOP-HARNESS-028). 3.6.0: bàn giao UI/UX stored 06 §7i (#148, D-059: `vendor-check` kiểm skill chép vào `.claude/skills`, mã SPDX CC-BY-NC, `SOURCE` cần `License:`; chữ lớn 24 px/18,66 px đậm). 3.5.1 phát hành (#145/#146, D-058: steward ở repo org, `pr_title_check` đọc nhánh đích, nhãn lỗi không bật auto-merge); hotel-manager#84, X-Company#21 đã nâng. 3.5.0: guard ghi công AI qua `gh pr`/MCP, `merge-check` kiểm tiêu đề PR (#140, D-055…057); PR steward (#141, ADR-0027, D-054).
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
@@ -29,7 +29,7 @@
 - Nợ kỹ thuật chấp nhận: chọn 4 MUST/module là phán đoán; số điều cụ thể của NĐ 356/2025 chưa đối chiếu bản gốc — trả khi audit dự án thật.
 
 ## Bàn giao phiên
-- 2026-10-19 · Commit cuối trên `main`: `73fbf0c` (#153); tag `v3.7.0` (sau PR này), `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `536584f` (delta #68–#80).
+- 2026-10-19 · Commit cuối trên `main`: `ac24da9` (#156); tag `v3.7.1` (sau PR này), `v3.7.0` → `4d6d439`, `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `536584f` (delta #68–#80).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: không chạy. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
