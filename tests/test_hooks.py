@@ -1185,6 +1185,26 @@ class StopAndSessionTest(unittest.TestCase):
         self.assertIn("AGENTS.md", j["hookSpecificOutput"]["additionalContext"])
         self.assertLess(len(j["hookSpecificOutput"]["additionalContext"].encode()), 12_000)
 
+    def test_session_start_suggests_session_name(self):
+        # LOOP-HARNESS-028: "<Tên repo> — <tên nhánh>"; repo lấy từ remote origin, không có thì tên thư mục.
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        git = ["git", "-C", str(tmp), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        for args in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "x"]):
+            subprocess.run([*git, *args], check=True, capture_output=True)
+
+        def ctx() -> str:
+            code, out, _ = run_hook("session-start.sh", {"hook_event_name": "SessionStart"}, tmp)
+            self.assertEqual(code, 0)
+            return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn(f'Tên phiên: "{tmp.name} — <nhánh>" — tạo nhánh làm việc', ctx())
+        subprocess.run([*git, "checkout", "-q", "-b", "feat/dat-ten-phien"], check=True)
+        subprocess.run([*git, "remote", "add", "origin", "https://github.com/o/My-Repo.git/"], check=True)
+        self.assertIn('Tên phiên: "My-Repo — feat/dat-ten-phien" — đặt ngay', ctx())
+        subprocess.run([*git, "remote", "set-url", "origin", "git@github.com:o/other"], check=True)
+        self.assertIn('Tên phiên: "other — feat/dat-ten-phien"', ctx())
+
     def test_auto_format_noop(self):
         code, out, _ = run_hook("auto-format.sh", {"tool_input": {"file_path": str(ROOT / "README.md")}})
         self.assertEqual((code, out.strip()), (0, ""))
