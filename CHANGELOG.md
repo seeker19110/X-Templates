@@ -7,6 +7,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 > **Dự án đích:** chạy lại `install.py` để có `xt.py vendor-check` mới; dự án có skill chép vào `.claude/skills/` thêm
 > `xt.py vendor-check --dirs .claude/skills [--own …] --strict` vào CI (`UX-DS-022`).
+> CI đang chạy `vendor-check --strict` có thể đỏ vì cảnh báo mới: file `SOURCE`/`ORIGIN` tự viết thiếu dòng `License:`
+> (cho phép `**License:**`) hoặc URL repo gốc — thêm hai thông tin đó vào file ghi nguồn.
 
 ### Added
 - Bàn giao UI/UX từ `stored` 06 §7i (`anti-slop`), đối chiếu ba cột ở `research/2026-10-19-stored-ui-7i.md`:

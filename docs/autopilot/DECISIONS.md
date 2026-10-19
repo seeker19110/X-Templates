@@ -423,3 +423,4 @@
 - Chọn: Quét .claude/skills khi --dirs chỉ định; bỏ qua skill có trong manifest harness của install.py; skill tự viết khai --own
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: UX-DS-022 đòi skill chép có SOURCE/LICENSE nhưng trước đây máy không kiểm được; manifest là nguồn sự thật về file khung cài, nên không báo nhầm; skill tự viết khai tường minh
 - Đường lùi: Bỏ nhánh SKILLS_DIR/--own trong cmd_vendor_check
+- Giới hạn chấp nhận (review #148): manifest là file trong repo nên ai sửa được CI/manifest thì cũng bỏ qua được skill (như `--own`); skill vendor trùng tên skill của khung bị bỏ qua.

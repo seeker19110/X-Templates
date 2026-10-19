@@ -284,12 +284,17 @@ class VendorCheckTest(unittest.TestCase):
         self.put("vendor/nourl/SOURCE.md", "License: MIT")
         self.put("vendor/nolic/ORIGIN", "https://github.com/o/r")
         self.put("vendor/lic/LICENSE", "MIT License")  # LICENSE gốc: không cần dòng `License:`
+        self.put("vendor/bold/SOURCE.md", "- **License:** MIT\n- Repo: https://github.com/o/r")
+        self.put("vendor/bold2/SOURCES", "__License__: MIT https://github.com/o/r")
+        self.put("vendor/orig/ORIGINAL-LICENSE", "MIT License")  # tên bắt đầu ORIGIN nhưng là LICENSE gốc
         rc, out, _ = run("vendor-check", cwd=self.dir)
         self.assertEqual(rc, 0)  # chỉ cảnh báo
         self.assertIn("⚠ vendor/nourl/SOURCE.md: ghi nguồn thiếu dòng `License:` hoặc URL", out)
         self.assertIn("⚠ vendor/nolic/ORIGIN: ghi nguồn thiếu", out)
         self.assertNotIn("vendor/ok", out)
         self.assertNotIn("vendor/lic", out)
+        for ok in ("vendor/bold/", "vendor/bold2/", "vendor/orig/"):
+            self.assertNotIn(ok, out)
         self.assertEqual(run("vendor-check", "--strict", cwd=self.dir)[0], 1)
 
     def test_claude_skills_skip_framework_and_own(self) -> None:
@@ -304,7 +309,7 @@ class VendorCheckTest(unittest.TestCase):
             "Repo: https://github.com/s0xDk/refactoring-ui-skill\nLicense: MIT",
         )
         self.put(".claude/skills/copied/SKILL.md")
-        rc, out, _ = run("vendor-check", "--dirs", ".claude/skills", "--own", "mine", cwd=self.dir)
+        rc, out, _ = run("vendor-check", "--dirs", "./.claude/skills/", "--own", "mine", cwd=self.dir)
         self.assertEqual(rc, 1)
         self.assertEqual(
             out.strip(), "✗ .claude/skills/copied: không có LICENSE/NOTICE/SOURCE ghi nguồn và license của mã vendor"

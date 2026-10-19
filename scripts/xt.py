@@ -4796,7 +4796,9 @@ VENDOR_RISKY_RE = re.compile(
     r"|\bBUSL\b|\bSSPL\b|Elastic License",
     re.I,
 )
-VENDOR_SOURCE_RE = re.compile(r"(SOURCE|ORIGIN)", re.I)  # file ghi nguồn tự viết: phải có `License:` và URL nguồn
+VENDOR_SOURCE_RE = re.compile(
+    r"(SOURCE|ORIGIN)S?(\.\w+)?", re.I
+)  # file ghi nguồn tự viết: phải có `License:` và URL nguồn
 SKILLS_DIR = ".claude/skills"  # skill chép từ kho khác (UX-DS-022); skill của khung (manifest) và `--own` được bỏ qua
 HARNESS_MANIFEST = ".xtemplates/harness.sha256.json"
 NPM_ALIAS_RE = re.compile(r"npm:((?:@[^/@]+/)?[^@]+)")
@@ -4861,8 +4863,10 @@ def vendor_source_gaps(base: Path, name: str, own: Set[str]) -> List[str]:
     notes = [n for c in sorted(root.iterdir()) if c.is_dir() and c.name not in own for n in _vendor_notices(c)]
     out = []
     for note in [*_vendor_notices(root), *notes]:
-        text = _read_head(note) if VENDOR_SOURCE_RE.match(note.name) else ""
-        if text and not (re.search(r"^\s*[-*]?\s*License\s*:", text, re.I | re.M) and re.search(r"https?://", text)):
+        text = _read_head(note) if VENDOR_SOURCE_RE.fullmatch(note.name) else ""
+        if text and not (
+            re.search(r"^\s*[-*]?\s*[*_]*License[*_]*\s*:", text, re.I | re.M) and re.search(r"https?://", text)
+        ):
             out.append(
                 f"{note.relative_to(base)}: ghi nguồn thiếu dòng `License:` hoặc URL repo gốc (kèm commit, ngày)"
             )
@@ -4917,7 +4921,7 @@ def cmd_vendor_check(args: argparse.Namespace) -> int:
     base = project_dir()
     asked = tuple(d.strip() for d in args.dirs.split(",") if d.strip()) if args.dirs else VENDOR_DIRS
     outside = [d for d in asked if not (base / d).resolve().is_relative_to(base.resolve())]
-    dirs = tuple(d.rstrip("/") for d in asked if d not in outside)
+    dirs = tuple(posixpath.normpath(d) for d in asked if d not in outside)
     allowed = {a.strip().lower() for a in (args.allow or "").split(",") if a.strip()}
     own_names = {o.strip() for o in (args.own or "").split(",") if o.strip()}
     own = {d: own_names | (_harness_skills(base) if d == SKILLS_DIR else set()) for d in dirs}
