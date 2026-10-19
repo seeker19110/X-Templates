@@ -1253,16 +1253,16 @@ def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]
 
 
 def _shell_op_token(
-    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], has: bool, in_op: bool
+    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], fd_ok: bool, in_op: bool
 ) -> None:
     """Toán tử điều khiển/chuyển hướng ngoài nháy `c` thành token "sống": ký tự toán tử liền nhau gộp một token (`&>` ≠ `& >`);
-    từ toàn chữ số dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`)."""
+    từ toàn chữ số KHÔNG nháy dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`; `'2'>f` thì không)."""
     if in_op:
         tokens[-1] += ((c, True),)
-    elif has and c in "<>" and all(ch.isdigit() for ch, _ in cur):
+    elif fd_ok and c in "<>":
         tokens.append(tuple(cur) + ((c, True),))
     else:
-        if has:
+        if cur:
             tokens.append(tuple(cur))
         tokens.append(((c, True),))
 
@@ -1273,7 +1273,7 @@ def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
     tokens: List[Tuple[Tuple[str, bool], ...]] = []
     cur: List[Tuple[str, bool]] = []
     quote = ""  # "", "'" hoặc '"'
-    has_token = in_op = False
+    has_token = in_op = quoted = False  # quoted: token hiện tại có phần trong nháy/escape → không phải số fd
     i = 0
     while i < len(cmd):
         c, nxt = cmd[i], cmd[i + 1 : i + 2]
@@ -1283,18 +1283,19 @@ def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
             quote, extra = _shell_quoted_char(c, nxt, quote, cur)
             i += extra
         elif c in "'\"":
-            quote, has_token = c, True
+            quote, has_token, quoted = c, True, True
         elif c == "\\" and nxt:
             cur.append((nxt, False))
-            has_token = True
+            has_token = quoted = True
             i += 1
         elif c in SHELL_OPERATORS:
-            _shell_op_token(c, tokens, cur, has_token, in_op)
-            cur, has_token, was_op = [], False, True
+            fd_ok = bool(cur) and not quoted and all(ch.isdigit() for ch, _ in cur)
+            _shell_op_token(c, tokens, cur, fd_ok, in_op)
+            cur, has_token, quoted, was_op = [], False, False, True
         elif c.isspace():
             if has_token:
                 tokens.append(tuple(cur))
-            cur, has_token = [], False
+            cur, has_token, quoted = [], False, False
         else:
             cur.append((c, c in SHELL_LIVE_OUTSIDE or (c == "#" and not has_token)))  # `#` đầu từ mở comment
             has_token = True
