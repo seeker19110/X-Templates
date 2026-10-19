@@ -5,6 +5,23 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+> **Dự án đích:** chạy lại `install.py` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của hook MCP trong
+> `.claude/settings.json` — `install.py` nay cập nhật matcher của hook khung đã đăng ký, `xt.py`). PR có tiêu đề sai
+> `<type>(scope): mô tả` hoặc > 72 ký tự nay bị `merge-check` trả `fix`.
+
+### Added
+- Guard ghi công AI (`LOOP-HARNESS-027`, D-056) ngoài `git commit`: tiêu đề/thân PR và commit squash qua `gh pr
+  create|edit|merge` (`--title/-t`, `--subject`, `--body/-b`, `--body-file/-F`, heredoc) và tool MCP ghi PR/commit
+  (`create_pull_request`, `update_pull_request`, `create_or_update_file`, `push_files`, `delete_file`,
+  `merge_pull_request`) bị chặn ở dự án `ai_attribution: forbid`. Hook MCP mở rộng matcher; tool không phải merge cho qua
+  khi guard không chạy được (fail-open về luồng). Còn lọt: URL phiên do máy chủ MCP tự gắn sau khi hook cho qua.
+- `xt.py merge-check` (D-055): đọc tiêu đề PR (REST và `gh pr view`); sai Conventional Commits hoặc > 72 ký tự → `fix`
+  kèm lệnh `gh pr edit` — tiêu đề thành commit squash trên nhánh chính, bỏ qua cổng commit cục bộ.
+
+### Changed
+- `install.py`: hook của khung đã đăng ký mà matcher cũ → cập nhật matcher (chỉ mục gồm toàn lệnh của khung; mục dự án
+  gộp thêm lệnh riêng giữ nguyên).
+
 ## [3.4.1] - 2026-10-18
 
 > **Dự án đích khi nâng từ 3.4.0:** chạy lại `install.py` (hook `guard.py`, `xt.py`). Guard nay chặn thêm: lệnh mã hoá/nén

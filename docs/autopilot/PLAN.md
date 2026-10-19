@@ -1,18 +1,21 @@
-# PLAN.md — Khung X-Templates · bản 3.4.1: bịt phần "Còn lọt" của guard + contrast CSS lồng (2026-10-18)
+# PLAN.md — Khung X-Templates · bản 3.5.0: ghi công AI qua MCP/`gh pr` + kiểm tiêu đề PR cục bộ (2026-10-19)
 
-> Lập ngày 2026-10-18. Chủ repo gọi `/autopilot` (không đối số) ngay sau đề xuất "làm tiếp các lỗ này thành 3.4.1".
-> Kế hoạch trước (T-1101…T-1104) xong ở #109–#111.
+> Lập ngày 2026-10-19. Chủ repo gọi `/autopilot` (không đối số); việc lấy từ PROGRESS *Tiếp theo* 1 (D-054).
+> Kế hoạch trước (T-1201…T-1206, 3.4.1) xong ở #138–#139.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-051)
-- Phạm vi: mục "Còn lọt" của CHANGELOG 3.4.0 + ba điểm ghi nhận của review #134–#136.
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-054…056)
+- Phạm vi: (A) `LOOP-HARNESS-027` bịt lỗ "commit qua tool MCP" + tiêu đề/thân PR (MCP `create_pull_request`/
+  `update_pull_request`, `gh pr create|edit`, commit qua MCP `create_or_update_file`/`push_files`/`delete_file`/
+  `merge_pull_request`); (B) `merge-check` trả `fix` khi tiêu đề PR sai Conventional Commits hoặc > 72 ký tự (D-055).
 - Stack: Python ≥ 3.11 stdlib, không phụ thuộc mới; cổng `scripts/dev-task.sh gate` (mypy --strict, coverage 100%).
-- Không làm: ghép chuỗi tên hàm lúc chạy (`getattr(os, 'sys'+'tem')`) — né cố ý, ngoài phạm vi guard chống tai nạn
-  (guard.py dòng 16); giữ trong `KNOWN_GAPS`.
-- Nhánh: lát A+B một PR (`fix/guard-gaps-341`, cùng sửa CHANGELOG — tách thì xung đột), phát hành một PR.
-- Rủi ro: chặn nhầm lệnh hợp lệ (đỡ bằng bộ lệnh hợp lệ trong `tests/test_guard_corpus.py`); quét chậm (ngân sách D-050).
+- Không làm: URL phiên do máy chủ MCP tự gắn sau hook (ngoài tầm guard — ghi giới hạn); task `[perf]` (D-041).
+- Nhánh: lát A+B một PR (cùng sửa CHANGELOG/harness-files), phát hành một PR. Dự án đích chạy lại `install.py`
+  (matcher hook mới) → bản minor.
+- Rủi ro: chặn nhầm PR hợp lệ (đỡ: chỉ khi `ai_attribution: forbid`, cùng regex commit); hook MCP mới fail-closed
+  nhầm (đỡ: tool không phải merge fail-open, D-056).
 
 ## Ngân sách (4 con số)
-- Số vòng tối đa: 56 (`max(40, 8 × task chưa làm)`)
+- Số vòng tối đa: 40 (`max(40, 8 × task chưa làm)`)
 - Chi phí: 0 đồng ngoài phiên (không phụ thuộc mới)
 - Timeout mỗi lệnh Gate: 1800 giây (`XT_RECORD_TIMEOUT` mặc định)
 - Ngày hết hạn: 8 giờ sau `loop init` (`--hours 8`)
@@ -23,14 +26,12 @@
 
 ## Task
 
-### Lát A — guard (D-052)
-- [x] `T-1201` Biến từ `$(echo|printf …)`, `read … <<< '…'`, `${y:-…}` được thay giá trị và quét; `KNOWN_GAPS` bớt 3 dòng — Gate: `python3 -m unittest tests.test_guard_corpus`
-- [x] `T-1202` Shell đọc từ ống sau bộ giải mã (`base64 -d`, `xxd -r`, `openssl … -d`): giải mã chữ được thì quét, không thì chặn — Gate: `python3 -m unittest tests.test_guard_corpus`
-- [x] `T-1203` Ghi `.autopilot/` qua `sort -o`, `sed 'w …'`, `awk -i inplace`, `perl -e unlink`, `git restore|checkout .autopilot` bị chặn — Gate: `python3 -m unittest tests.test_guard_corpus tests.test_hooks`
-- [x] `T-1204` `bash -c "$(cat <<'E' … E)"` được quét; code span trong thân heredoc message của commit không bị chặn nhầm; `for` > 64 từ và `subprocess.run([..]+[..])` — Gate: `scripts/dev-task.sh gate`
+### Lát A — guard ghi công AI ngoài `git commit` (D-054, D-056)
+- [x] `T-1301` MCP ghi PR/commit (`create_pull_request`, `update_pull_request`, `create_or_update_file`, `push_files`, `delete_file`, `merge_pull_request`) có tên model/URL phiên ở repo `ai_attribution: forbid` → deny; matcher hook mở rộng, tool không phải merge fail-open — Gate: `python3 -m unittest tests.test_hooks`
+- [x] `T-1302` `gh pr create|edit` với `--title/-t`, `--body/-b`, `--body-file/-F` (file, heredoc) ghi công AI → deny — Gate: `python3 -m unittest tests.test_hooks tests.test_guard_corpus`
 
-### Lát B — contrast (D-053)
-- [x] `T-1205` `xt.py contrast`: khối lồng `:root{&.dark{…}}` (CSS nesting) thuộc theme tối, không rò sang theme sáng — Gate: `python3 -m unittest tests.test_ui_gates`
+### Lát B — tiêu đề PR (D-055)
+- [x] `T-1303` `merge-check` đọc tiêu đề PR (REST + gh): sai `<type>(scope)!: mô tả` hoặc > 72 ký tự → verdict `fix` kèm lý do — Gate: `scripts/dev-task.sh gate`
 
 ### Lát C — phát hành
-- [x] `T-1206` VERSION 3.4.1 + CHANGELOG `[3.4.1]` + PROGRESS; tag `v3.4.1` — Gate: `scripts/dev-task.sh gate`
+- [ ] `T-1304` VERSION 3.5.0 + CHANGELOG `[3.5.0]` + PROGRESS; tag `v3.5.0` — Gate: `scripts/dev-task.sh gate`

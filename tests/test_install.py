@@ -399,6 +399,27 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertIn("bỏ qua symlink", err.getvalue())
         self.assertEqual(outside.read_text(encoding="utf-8"), "{}")
 
+    def test_merge_hooks_updates_framework_matcher_only(self):
+        """D-056: hook của khung đã đăng ký với matcher cũ → cập nhật; mục có lệnh riêng của dự án → giữ nguyên."""
+        cmd, own = "bash pre-mcp-guard.sh", "bash rieng.sh"
+        src = self.tmp / "src.json"
+        new = {"matcher": "mcp__.*(merge|create_pull_request).*", "hooks": [{"command": cmd}]}
+        src.write_text(json.dumps({"hooks": {"PreToolUse": [new]}}), encoding="utf-8")
+        dst = self.tmp / "settings.json"
+        old = {"hooks": {"PreToolUse": [{"matcher": "mcp__.*merge.*", "hooks": [{"command": cmd}]}]}}
+        dst.write_text(json.dumps(old), encoding="utf-8")
+        self.assertEqual(install.merge_hooks(src, dst), "merged-hooks")
+        self.assertEqual(
+            json.loads(dst.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["matcher"], new["matcher"]
+        )
+        self.assertEqual(install.merge_hooks(src, dst), "kept")
+        mixed = {"matcher": "mcp__.*merge.*", "hooks": [{"command": cmd}, {"command": own}]}
+        dst.write_text(json.dumps({"hooks": {"PreToolUse": [mixed]}}), encoding="utf-8")
+        self.assertEqual(install.merge_hooks(src, dst), "kept")
+        self.assertEqual(
+            json.loads(dst.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["matcher"], "mcp__.*merge.*"
+        )
+
     def test_merge_hooks_invalid_or_missing_json_is_reported(self):
         src = self.tmp / "src.json"
         src.write_text('{"hooks": {}}', encoding="utf-8")

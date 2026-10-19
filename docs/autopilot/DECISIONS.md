@@ -381,3 +381,24 @@
 - Chọn: Ghép selector con với cha (& thay bằng cha, không & là con cháu), khai báo con tách khỏi cha
 - Lý do (tiêu chí chất lượng cuối): Đúng ngữ nghĩa CSS Nesting; bỏ qua làm mất token tối và vẫn rò khai báo
 - Đường lùi: revert PR contrast
+
+### D-054 · 2026-10-19T01:20:43+00:00 · Việc kế tiếp sau 3.4.1 (PROGRESS Tiếp theo 1): làm gì trước?
+
+- Phương án: (1) Guard ghi công AI qua MCP/gh pr (PR title/body, commit qua MCP) + merge-check kiểm tiêu đề PR cục bộ, phát hành 3.5.0 · (2) Task [perf] trong loop (D-041 phương án 3) · (3) Chỉ nâng dự án đích
+- Chọn: Guard ghi công AI qua MCP/gh pr (PR title/body, commit qua MCP) + merge-check kiểm tiêu đề PR cục bộ, phát hành 3.5.0
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: LOOP-HARNESS-027 ghi rõ lỗ commit qua MCP — phiên cloud được hệ thống dặn gắn URL phiên vào thân PR, đúng lỗ đó; tiêu đề PR sai là CI đỏ một vòng. Dự án đích đã ở nhánh 3.4.1; [perf] D-041 đã cân và hoãn
+- Đường lùi: Revert PR; matcher hook về như cũ
+
+### D-055 · 2026-10-19T01:20:43+00:00 · Tiêu đề PR sai Conventional Commits/> 72 ký tự: merge-check xử lý thế nào?
+
+- Phương án: (1) verdict fix (chặn merge) kèm lý do — tiêu đề thành subject squash trên nhánh chính · (2) Chỉ ghi chú, không chặn · (3) Chỉ kiểm ở CI repo khung
+- Chọn: verdict fix (chặn merge) kèm lý do — tiêu đề thành subject squash trên nhánh chính
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: squash-merge lấy tiêu đề PR làm commit trên main, bỏ qua cổng commit cục bộ; cổng khung đòi conventional commit; sửa tiêu đề rẻ, không cần push
+- Đường lùi: Bỏ nhánh title trong merge_decide
+
+### D-056 · 2026-10-19T01:20:44+00:00 · PR body/commit qua MCP có ghi công AI ở repo ai_attribution: forbid: hook chặn thế nào, khi thiếu python/guard lỗi?
+
+- Phương án: (1) Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy · (2) Hook riêng mới
+- Chọn: Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: một chỗ quyết MCP (mcp_decision), một hook; fail-open về luồng cho tool không nguy hiểm (ADR-0002), fail-closed giữ nguyên cho merge
+- Đường lùi: Matcher về mcp__.*(merge_pull_request|auto_merge).*

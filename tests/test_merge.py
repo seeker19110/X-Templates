@@ -179,6 +179,9 @@ class MergeDecisionTest(unittest.TestCase):
         cases = {
             "đóng": (pr(state="MERGED"), "closed", "PR đã MERGED"),
             "nháp": (pr(isDraft=True), "wait", "PR nháp"),
+            "tiêu đề không conventional": (pr(title="Sửa guard", mergeable="CONFLICTING"), "fix", "tiêu đề PR phải"),
+            "tiêu đề > 72": (pr(title="fix: " + "a" * 68), "fix", "≤ 72 ký tự"),
+            "tiêu đề nhiều dòng": (pr(title="fix: a\nb"), "fix", "gh pr edit 7 --title"),
             "xung đột": (pr(mergeable="CONFLICTING"), "fix", "xung đột với nhánh đích"),
             "dirty": (pr(mergeStateStatus="DIRTY"), "fix", "xung đột với nhánh đích"),
             "đổi yêu cầu": (pr(reviewDecision="CHANGES_REQUESTED"), "fix", "reviewer yêu cầu sửa"),
@@ -191,6 +194,9 @@ class MergeDecisionTest(unittest.TestCase):
                 d = xt.merge_decision(p, autonomy=2)
                 self.assertEqual(d["verdict"], verdict)
                 self.assertIn(reason, " · ".join(d["reasons"]))
+        for ok in ("fix(guard): a", "feat!: b", "chore(release/x.y): 3.5.0", "fix: " + "a" * 67):
+            with self.subTest(ok):
+                self.assertEqual(xt.merge_decision(pr(title=ok), autonomy=2)["verdict"], "merge")
         # `update` bằng git (gh pr update-branch cần GraphQL — phiên Claude Code chặn)
         self.assertEqual(
             xt.merge_decision(pr(mergeStateStatus="BEHIND", baseRefName="dev"), 2)["next"],
@@ -751,6 +757,7 @@ class MergeCheckCliTest(unittest.TestCase):
             "đang tính": ({"mergeable": None, "mergeable_state": "unknown"}, "mergeable", "UNKNOWN"),
             "xung đột": ({"mergeable": False, "mergeable_state": "dirty"}, "mergeStateStatus", "DIRTY"),
             "nháp": ({"draft": True}, "isDraft", True),
+            "tiêu đề": ({"title": "fix: a"}, "title", "fix: a"),
         }
         for name, (over, key, want) in cases.items():
             with self.subTest(name), FakeGh(pull=over).patch():
