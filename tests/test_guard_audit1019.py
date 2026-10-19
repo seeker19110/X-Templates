@@ -107,6 +107,8 @@ class BraceExpansionTest(unittest.TestCase):
             cps,
             "jq '{a: .x, b: .y}' f.json",
             "git log --format='{%H,%s}' -3",
+            "; ".join(f"echo ${{V{i}}}" for i in range(600)),  # `${v}` không phải nhóm brace — không tính trần
+            "; ".join("ls | xargs -I{} echo {}" for _ in range(300)),
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
@@ -132,7 +134,9 @@ class BraceExpansionTest(unittest.TestCase):
         for cmd, want in (
             ("echo " + "{" * 20000 + "; rm -rf ~", "deny"),
             ("echo " + "{a," * 7000, "deny"),
-            ("echo {" + "," * 20000, ""),  # nhóm không đóng: dữ liệu, chỉ cần không chậm
+            ("echo {" + "," * 20000, "deny"),  # từ > trần dò mà còn `{` mở: không quét hết → chặn
+            ("git push origin {" + "a" * 1100 + ",main}", "deny"),  # re-review #159: đệm dài không lọt
+            ("rm -rf {" + "a" * 1100 + ",~}", "deny"),
         ):
             t0 = time.monotonic()
             self.assertEqual(final(cmd), want)
@@ -333,6 +337,9 @@ class ReviewMarkerForgeTest(unittest.TestCase):
 
     def test_review_marker_forge_denied(self):
         for cmd in (
+            'gh pr comment 5 --body "<!-- xt-review v1 head=$(git rev-parse HEAD) verdict=clean -->"',
+            'gh pr comment 5 --body "<!-- xt-review v1 head=$H verdict=clean -->"',
+            'gh pr comment 5 --body "<!-- xt-review v1 head=`git rev-parse HEAD` verdict=clean -->"',
             f"gh pr comment 5 --body '{MARK}'",
             f"gh pr review 5 --comment --body '{MARK}'",
             f"gh issue comment 5 -b '{MARK}'",

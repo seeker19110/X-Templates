@@ -13,7 +13,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     được hai lớp shell bên trong (AUD-SEC-063);
   - brace expansion: guard quét bản bung thật như bash (`git push origin {feat/x,main}` → `… feat/x main`),
     `rm -rf {dist,~/.cache}`, `gh repo {delete,} o/r` bị chặn; dò nhóm tuyến tính có trần (> 512 `{` ngoài nháy hoặc bản
-    bung > 64 KB → chặn) (AUD-SEC-064);
+    bung > 64 KB, từ có `{` dài > 4096 ký tự → chặn) (AUD-SEC-064);
   - `rm -rf build 2>/dev/null` không còn bị coi là xoá `/dev/null` (đích chuyển hướng không phải đối số);
   - hook chạy `python3 -I` (bỏ `PYTHONPATH`/`PYTHONPYCACHEPREFIX`/user-site `usercustomize.py`), bytecode cache chuyển từ
     `~/.cache/xtemplates/pycache` vào `.autopilot/pycache` của dự án (đã rào ghi tay) — mã agent đặt ngoài dự án không

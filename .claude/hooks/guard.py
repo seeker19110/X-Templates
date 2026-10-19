@@ -526,7 +526,13 @@ def expand_ansi_c(cmd: str) -> str:
 
 
 BRACE_MAX_OPEN = 512  # `{` ngoài nháy tối đa được dò; hơn → không quét hết → chặn (review #159: chống bậc hai)
-BRACE_SCAN_MAX = 1024  # độ dài tối đa một nhóm `{…}` được dò
+BRACE_SCAN_MAX = 4096  # độ dài tối đa một từ có `{` được dò; dài hơn mà chưa đóng/hết từ → không quét hết → chặn
+
+
+class BraceTooComplex(Exception):
+    """Nhóm brace dài quá trần dò: guard không biết bash bung ra gì → chặn (không phải "không phải brace")."""
+
+
 BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.-?\d+)?")
 WORD_END = set(" \t\n;&|()<>")
 
@@ -554,8 +560,10 @@ def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
     `{}` của `find`)."""
     depth, start, parts = 0, i + 1, []
     for j, c in _unquoted(s, i):
-        if c.isspace() or j - i > BRACE_SCAN_MAX:
+        if c.isspace():
             return None
+        if j - i > BRACE_SCAN_MAX:  # bash vẫn bung nhóm dài — không bỏ qua (re-review #159: đệm 1100 ký tự từng lọt)
+            raise BraceTooComplex(s[i : i + 80])
         depth += {"{": 1, "}": -1}.get(c, 0)
         if depth == 0:
             parts.append(s[start:j])
@@ -598,13 +606,20 @@ def brace_variants(cmd: str) -> Optional[List[str]]:
     s = strip_comments(strip_heredocs(join_continuations(cmd)))
     if "{" not in s:
         return []
-    if sum(c == "{" for _, c in _unquoted(s)) > BRACE_MAX_OPEN:
+    # Chỉ `{` có thể mở nhóm: không phải `${`, không `{}`/`{ ` (xargs -I{}, find {}, `{ …; }`) — re-review #159.
+    opens = sum(
+        c == "{" and s[i - 1 : i] != "$" and s[i + 1 : i + 2] not in ("", "}", " ", "\t", "\n") for i, c in _unquoted(s)
+    )
+    if opens > BRACE_MAX_OPEN:
         return None
     t, pos = s, 0
-    while f := _first_brace(t, pos):
-        t, pos = _brace_word(t, *f)
-        if len(t) > REWRITE_MAX_CHARS:
-            return None
+    try:
+        while f := _first_brace(t, pos):
+            t, pos = _brace_word(t, *f)
+            if len(t) > REWRITE_MAX_CHARS:
+                return None
+    except BraceTooComplex:
+        return None
     return [t] if t != s else []
 
 
@@ -1595,8 +1610,11 @@ def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]
 
 # Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
 # python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer khác họ model" (D-045, AUD-SEC-069).
-# Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`): mã nguồn/tài liệu nhắc dạng dấu (`head={head}`) không khớp.
-REVIEW_MARK_RE = re.compile(r"<!--\s*xt-review\s+v1\s+head=[0-9a-f]{40}\s+verdict=(?:clean|blocking)")
+# Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`) hoặc head ghép lúc chạy (`head=$(git rev-parse HEAD)`,
+# `$H`, backtick — re-review #159); mã nguồn/tài liệu nhắc dạng dấu (`head={head}`, `head=<sha>`) không khớp.
+REVIEW_MARK_RE = re.compile(
+    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`][^>]{0,200}?)\s+verdict=(?:clean|blocking)"
+)
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
     r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)\b"
