@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.8.0) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064…066): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); `audit check --strict` xanh, 33 🟢 mở có chủ trong `docs/ops/AUDIT-STATUS.md`. Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).
+- 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064, D-065, D-071): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); `audit check --strict` xanh, 33 🟢 mở có chủ trong `docs/ops/AUDIT-STATUS.md`. Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).
 - 3.7.1: PR đủ điều kiện là merge ghim head ngay; không bật auto-merge khi nhánh đích thiếu check bắt buộc (#155/#156, D-062/D-063). 3.7.0: steward tự cập nhật nhánh tụt base, review sạch mang qua merge base không chạm file PR (#153, D-061); `merge-check` báo thiếu check bắt buộc (#150/#151, D-060); tên phiên `<repo> — <nhánh>` (#152, LOOP-HARNESS-028). 3.6.0: bàn giao UI/UX stored 06 §7i (#148, D-059: `vendor-check` kiểm skill chép vào `.claude/skills`, mã SPDX CC-BY-NC, `SOURCE` cần `License:`; chữ lớn 24 px/18,66 px đậm). 3.5.1 phát hành (#145/#146, D-058: steward ở repo org, `pr_title_check` đọc nhánh đích, nhãn lỗi không bật auto-merge); hotel-manager#84, X-Company#21 đã nâng. 3.5.0: guard ghi công AI qua `gh pr`/MCP, `merge-check` kiểm tiêu đề PR (#140, D-055…057); PR steward (#141, ADR-0027, D-054).
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
