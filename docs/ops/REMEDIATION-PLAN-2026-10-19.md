@@ -10,7 +10,7 @@
 
 Đánh giá kỹ thuật trên [v3.7.1, commit `9433792`][baseline]; bản 2 đối chiếu lại trên `main` `19d3aa8` (#158) ngày
 2026-10-19 và **tái hiện lại từng phát hiện bằng lệnh** (§2). PR #159 (lát B của [PLAN](../autopilot/PLAN.md),
-`T-1402…T-1408`) đang mở và sửa các lỗ guard cấp bách; bản này không lặp lại việc đó, chỉ nối tiếp.
+`T-1402…T-1408`) đã merge vào `main` (`f71d323`, 2026-10-19) và sửa các lỗ guard cấp bách; bản này chỉ nối tiếp.
 
 [PLAN đang thực thi](../autopilot/PLAN.md) (3.8.0, `T-1401…T-1417`), [sổ audit](AUDIT-STATUS.md) và
 [báo cáo delta](AUDIT-REPORT-2026-10-19-delta.md) vẫn là nơi theo dõi phát hiện đã có. Bản này bổ sung hướng sửa, nâng cấp
@@ -31,7 +31,7 @@ phải mức nghiêm trọng: **đo** = lệnh chạy ra kết quả sai; **đ�
 | REC-01 | `same_command('test "$X" = yes', "test '$X' = yes")` | `True` — hai lệnh khác nghĩa shell bị coi là một | đo |
 | REC-02 | `_verdict_blueprint` khi file blueprint đã khai không còn tồn tại | trả `done` kèm lý do "không thấy blueprint" (mã dòng 1145–1152); `_still_open` bỏ qua MUST mở | đọc |
 | REC-03 | `merge_decision(pr làn chuẩn, L3, CI xanh, không review)` → `merge`; `pr_next` cùng dữ liệu → `review` | hai hàm hai điều kiện; steward dùng `pr_next` nên đường steward đúng, đường `merge-check`/guard không ép review | đo (hàm) |
-| REC-04 | `apply_policy` ánh xạ `ask` → deny theo chuỗi trong `DANGER_MARKERS` (guard.py 3945–3973) | PR #159 (chưa merge) thêm dấu "shell lồng quá sâu" vào danh sách — sửa đúng lỗ, giữ cơ chế so chuỗi | đọc |
+| REC-04 | `apply_policy` ánh xạ `ask` → deny theo chuỗi trong `DANGER_MARKERS` (guard.py 3945–3973) | PR #159 (đã merge, `f71d323`) thêm dấu "shell lồng quá sâu" vào danh sách — sửa đúng lỗ, giữ cơ chế so chuỗi | đọc |
 | REC-06 | `carry_states(cũ: "Coverage ≥ 80 % … — Bằng chứng: coverage --fail-under=80", mới: "Coverage ≥ 90 %")` | mục mới thành `[x]` mang nguyên bằng chứng 80 %, `dropped=[]` — không cảnh báo | đo |
 | REC-07 | `audit_rescan`: nhóm `N/A` bị `continue` (mã dòng 2280–2300) | thêm UI sau khi audit không tạo yêu cầu quét A11Y | đọc |
 | REC-08 | `merge_decision(rollup: quality=SKIPPED, merge-gate=SUCCESS; missingRequired=[])`, L3 | `merge` — "làn nhanh, CI xanh"; SKIPPED không thuộc nhóm nào, `missingRequired` chỉ tính check **vắng** | đo |
