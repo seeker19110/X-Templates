@@ -3930,25 +3930,25 @@ def local_merge_conflicts(
     if missing:
         refs = [base_ref] if base_ref else []
         refs += [f"refs/pull/{number}/head"] if number else []
-        if not refs or _git(cwd, "fetch", "-q", "--no-tags", "origin", *refs).returncode != 0:
+        # Repo nông (CI checkout depth 1): fetch không `--depth` kéo cả lịch sử tổ tiên của head mà merge-tree vẫn lỗi
+        # "unrelated histories" — không fetch, không kiểm được (review #164). `GIT_TERMINAL_PROMPT=0`: không treo đợi mật khẩu.
+        shallow = _git(cwd, "rev-parse", "--is-shallow-repository").stdout.strip() == "true"
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        if shallow or not refs or _git(cwd, "fetch", "-q", "--no-tags", "origin", *refs, env=env).returncode != 0:
             return None
         if any(_git(cwd, "cat-file", "-e", f"{c}^{{commit}}").returncode != 0 for c in missing):
             return None
-    r = _git(cwd, "merge-tree", "--write-tree", "--name-only", "--no-messages", base_sha, head)
+    r = _git(cwd, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base_sha, head)
     if r.returncode == 0:
         return []
     if r.returncode != 1:  # 2+ = lỗi (git cũ không có --write-tree, commit hỏng…)
         return None
-    # --name-only --no-messages: dòng 1 = tree, rồi mỗi dòng một file xung đột (tới dòng trống nếu có)
-    files: List[str] = []
-    for ln in r.stdout.splitlines()[1:]:
-        if not ln.strip():
-            break
-        files.append(ln)
+    # `-z`: tên không bị quote (Unicode, khoảng trắng): tree\0file\0file\0 (tới trường rỗng nếu có thông điệp phía sau)
+    files = list(itertools.takewhile(bool, r.stdout.split("\0")[1:]))
     return files or None  # exit 1 mà không có file: định dạng lạ → không kiểm được
 
 
-def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
+def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
     pr = _gh_one(f"{repo}/pulls/{n}")
@@ -4008,9 +4008,9 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     gated = any(isinstance(f, dict) and _gated_file(f, prefix) for f in files)
     bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
     # GitHub chưa tính xong / báo xung đột → kiểm cục bộ để biết ngay sạch hay xung đột ở file nào (không đợi `wait`).
-    local = (
+    conflicts = (
         local_merge_conflicts(str(base.get("ref") or ""), str(base.get("sha") or ""), sha, str(n))
-        if mergeable is not True
+        if local and mergeable is not True
         else None
     )
     raw_user = pr.get("user")
@@ -4039,7 +4039,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
         "mergeStateStatus": merge_state,
         # Xung đột tính cục bộ (`git merge-tree`): [] sạch, [file…] xung đột; vắng = không kiểm được / GitHub đã khẳng định.
-        **({"localConflicts": local} if local is not None else {}),
+        **({"localConflicts": conflicts} if conflicts is not None else {}),
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
@@ -4070,11 +4070,12 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     }
 
 
-def load_pr(args: argparse.Namespace) -> Dict[str, Any]:
-    """JSON của PR: `--pr-json FILE|-` (định dạng `gh pr view --json MERGE_FIELDS`) hoặc lấy qua REST; lỗi → PrInputError."""
+def load_pr(args: argparse.Namespace, local: bool = True) -> Dict[str, Any]:
+    """JSON của PR: `--pr-json FILE|-` (định dạng `gh pr view --json MERGE_FIELDS`) hoặc lấy qua REST; lỗi → PrInputError.
+    `local=False`: không kiểm xung đột cục bộ (`merge-gate` chỉ cần ngoại lệ cứng, chạy ở CI checkout nông — review #164)."""
     try:
         if not args.pr_json:
-            return _pr_rest(args.pr)
+            return _pr_rest(args.pr, local)
         text = sys.stdin.read() if args.pr_json == "-" else Path(args.pr_json).read_text(encoding="utf-8")
         data = json.loads(text)
     except (OSError, json.JSONDecodeError) as exc:
@@ -5481,7 +5482,7 @@ def cmd_merge_gate(args: argparse.Namespace) -> int:
     head). exit 2 = không đọc được PR; exit 3 = head của PR khác `--head` (REST chưa thấy push mới, hoặc đã có push
     mới hơn) — workflow chờ rồi chạy lại."""
     try:
-        pr = load_pr(args)
+        pr = load_pr(args, local=False)
     except PrInputError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
