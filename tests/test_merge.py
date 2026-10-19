@@ -229,6 +229,89 @@ class MergeDecisionTest(unittest.TestCase):
             " (hoặc git merge origin/dev && git push)",
         )
 
+    def test_required_check_executed(self):
+        """T-1504 (REC-08): GitHub tính required check skipped/neutral là đạt; máy không — check bắt buộc SKIPPED/NEUTRAL/
+        CANCELLED/STALE hoặc chỉ có bản của app khác → `not_run` → `human`; check không bắt buộc không bị ảnh hưởng."""
+
+        def run(name: str, concl: str, app: int | None = None) -> dict:
+            return {
+                "__typename": "CheckRun",
+                "name": name,
+                "status": "COMPLETED",
+                "conclusion": concl,
+                **({"appId": app} if app is not None else {}),
+            }
+
+        req = [("test", None)]
+        for concl in ("SKIPPED", "NEUTRAL", "CANCELLED", "STALE"):
+            red, pend, green, not_run = xt._ci_buckets([run("test", concl), run("lint", "SUCCESS")], req)
+            self.assertEqual((red, pend, green, not_run), ([], [], ["lint"], ["test"]), concl)
+        # không bắt buộc: skipped chỉ là không có bằng chứng; cancelled vẫn đỏ như trước
+        self.assertEqual(xt._ci_buckets([run("test", "SKIPPED")], [])[3], [])
+        self.assertEqual(xt._ci_buckets([run("lint", "CANCELLED")], req)[0], ["lint"])
+        # bản hợp lệ thắng bản skipped cùng tên; vắng hẳn → không phải not_run (việc của missingRequired)
+        self.assertEqual(xt._ci_buckets([run("test", "SKIPPED"), run("test", "SUCCESS")], req)[2:], (["test"], []))
+        self.assertEqual(xt._ci_buckets([run("lint", "SUCCESS")], req)[3], [])
+        # app: ruleset đòi integration_id 15368; bản của app 99 không thay được, dù xanh
+        got = xt._ci_buckets([run("test", "SUCCESS", 99), run("lint", "SUCCESS")], [("test", 15368)])
+        self.assertEqual((got[2], got[3]), (["lint"], ["test"]))
+        got = xt._ci_buckets([run("test", "SUCCESS", 15368), run("lint", "SUCCESS")], [("test", 15368)])
+        self.assertEqual((got[2], got[3]), (["test", "lint"], []))
+        legacy = {"__typename": "StatusContext", "context": "test", "state": "SUCCESS"}  # commit status không có app
+        self.assertEqual(xt._ci_buckets([legacy], [("test", 15368)])[2:], (["test"], []))
+        # merge_decision: PR "xanh" nhưng check bắt buộc bị skip → human, không phải merge
+        p = pr(
+            statusCheckRollup=[run("test", "SKIPPED"), run("lint", "SUCCESS")],
+            requiredChecks=[{"context": "test"}, {"context": "lint", "appId": 15368}, "rác"],
+        )
+        d = xt.merge_decision(p, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("check bắt buộc không chạy thật (skipped/neutral/huỷ/sai app): test —", d["reasons"][0])
+        foreign = pr(
+            statusCheckRollup=[
+                run("test", "SUCCESS"),
+                run("lint", "SUCCESS", 99),
+            ],  # lint do app 99 sinh, ruleset đòi 15368
+            requiredChecks=[{"context": "test"}, {"context": "lint", "appId": 15368}],
+        )
+        d = xt.merge_decision(foreign, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("sai app): lint —", d["reasons"][0])
+        ok = pr(
+            statusCheckRollup=[run("test", "SUCCESS"), run("lint", "SUCCESS", 15368)],
+            requiredChecks=p["requiredChecks"][:2],
+        )
+        self.assertEqual(xt.merge_decision(ok, 3)["verdict"], "merge")
+        self.assertEqual(xt.merge_decision(pr(), 3)["verdict"], "merge")  # không khai requiredChecks: như cũ
+        # CI đỏ/đang chạy vẫn thắng not_run
+        mixed = {**p, "statusCheckRollup": [run("test", "SKIPPED"), run("lint", "FAILURE", 15368)]}
+        self.assertEqual(xt.merge_decision(mixed, 3)["verdict"], "fix")
+
+    def test_required_check_executed_rest_maps_app_and_ruleset(self):
+        """`_pr_rest` đưa `appId` của check-run và `requiredChecks` (context + integration_id) của ruleset vào PR."""
+        rules = [
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [{"context": "test", "integration_id": 15368}, {"context": "lint"}]
+                },
+            }
+        ]
+        runs = [
+            {"id": 1, "name": "test", "status": "completed", "conclusion": "success", "app": {"id": 99}},
+            {"id": 2, "name": "lint", "status": "completed", "conclusion": "success"},
+        ]
+        with FakeGh(rules=rules, runs=runs, statuses=[]).patch():
+            p = xt._pr_rest("7")
+        self.assertEqual(p["requiredChecks"], [{"context": "test", "appId": 15368}, {"context": "lint"}])
+        self.assertEqual([c.get("appId") for c in p["statusCheckRollup"]], [99, None])
+        d = xt.merge_decision(p, 3)
+        self.assertEqual(d["verdict"], "human")
+        self.assertIn("không chạy thật", d["reasons"][0])
+        self.assertIn("test", d["reasons"][0])
+        with FakeGh(rules=[]).patch():  # không đọc được/không có ruleset → không khoá requiredChecks
+            self.assertNotIn("requiredChecks", xt._pr_rest("7"))
+
     def test_local_conflict_check_decides_before_github(self):
         """Xung đột tính cục bộ (`localConflicts` từ `git merge-tree`): GitHub chưa tính xong mà cục bộ thấy xung đột → `fix`
         kèm file + lệnh merge nhánh đích; cục bộ sạch → không `wait`; GitHub báo xung đột mà cục bộ sạch → vẫn tin GitHub."""
@@ -990,7 +1073,8 @@ class MergeCheckCliTest(unittest.TestCase):
         gh = FakeGh()
         with gh.patch():
             self.assertEqual(
-                xt._pr_rest("7"), pr(reviewDecision="", baseHasRequired=True, baseRefName="main")
+                xt._pr_rest("7"),
+                pr(reviewDecision="", baseHasRequired=True, baseRefName="main", requiredChecks=[{"context": "test"}]),
             )  # như fixture `gh pr view`
         cases = {
             "merged": ({"merged": True, "state": "closed"}, "state", "MERGED"),
@@ -1302,10 +1386,68 @@ class MergeGateTest(unittest.TestCase):
         payment = pr(
             files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO
         )
-        rc, out, _ = self.gate(payment, "--json")  # `merge_hard_exceptions: auto` ở nhánh đích miễn đường dẫn tiền
-        self.assertEqual((rc, json.loads(out)["gate"]), (0, "pass"))
+        # `merge_hard_exceptions: auto` miễn đường dẫn tiền; làn chuẩn + auto-merge cần review sạch ở head (ADR-0028)
+        reviewed = {**payment, "xtReviews": [{"head": "abc1234def", "clean": True, "at": "2026-10-19T10:00:00Z"}]}
+        rc, out, _ = self.gate(reviewed, "--json")
+        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (0, "pass", "ok"))
         commit_base_xt(self.base, "merge_autonomy: L3\n")  # không khoá → human: đường dẫn tiền là hard
-        self.assertEqual(self.gate(payment)[0], 1)
+        self.assertEqual(self.gate(reviewed)[0], 1)
+
+    def test_merge_gate_missing_review(self):
+        """T-1507 (REC-03, ADR-0028): làn chuẩn + auto-merge bật mà chưa có review sạch ở ĐÚNG head → đỏ (như `pr next` bảo
+        tắt auto-merge); review chặn ở head → đỏ; review sạch → xanh; review sạch ở head cũ mang qua chỉ khi `baseMergeOf`."""
+        std = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO)
+
+        def mark(head: str, clean: bool, at: str) -> dict:
+            return {"head": head, "clean": clean, "at": at}
+
+        rc, out, _ = self.gate(std)
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ chưa có review sạch ở head (missing) trên head này mà PR đang bật auto-merge", out)
+        self.assertIn("xt.py pr reviewed", out)
+        rc, out, _ = self.gate({**std, "xtReviews": [mark("abc1234def", False, "2026-10-19T10:00:00Z")]}, "--json")
+        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (1, "block", "blocking"))
+        clean = {**std, "xtReviews": [mark("abc1234def", True, "2026-10-19T10:00:00Z")]}
+        self.assertEqual(self.gate(clean)[0], 0)
+        old = {**std, "xtReviews": [mark("old0000000", True, "2026-10-19T10:00:00Z")]}
+        self.assertEqual(self.gate(old)[0], 1)  # review sạch ở head cũ, head mới không phải "cập nhật nhánh" sạch
+        self.assertEqual(self.gate({**old, "baseMergeOf": ["old0000000"]})[0], 0)  # mang qua merge nhánh đích sạch
+        # không bật auto-merge: không chặn (người/agent merge ghim head, guard kiểm `eligible`)
+        self.assertEqual(self.gate({**std, "autoMergeRequest": None})[0], 0)
+        # làn nhanh không cần review
+        self.assertEqual(self.gate(pr(autoMergeRequest=self.AUTO))[0], 0)
+        d, _ = xt._merge_eval({**std, "xtReviews": clean["xtReviews"]})
+        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("ok", True, True))
+        d, _ = xt._merge_eval(std)
+        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("missing", False, False))
+
+    def test_single_merge_condition(self):
+        """`merge_eligibility` là MỘT hàm thuần cho merge-check/pr next/merge-gate/guard/steward: pr_next và merge-gate/guard
+        đọc cùng `review_gate` nên không thể lệch nhau về "đã đủ review ở head chưa"."""
+        d = {"head": "H3", "lane": "chuẩn", "verdict": "merge", "hard": [], "base_merge_of": ["H2"]}
+        r = lambda head, clean, at: {"head": head, "clean": clean, "at": at}  # noqa: E731
+        cases = {
+            "thiếu": ([], "missing", False, False),
+            "sạch ở head": ([r("H3", True, "1")], "ok", True, True),
+            "chặn ở head": ([r("H3", False, "1")], "blocking", False, False),
+            "sạch mang qua": ([r("H2", True, "1")], "ok", True, True),
+            "chặn ở head thắng sạch mang qua": ([r("H3", False, "1"), r("H2", True, "2")], "blocking", False, False),
+            "sạch ở head cũ khác": ([r("H1", True, "1")], "missing", False, False),
+        }
+        for name, (reviews, state, eligible, auto_ok) in cases.items():
+            with self.subTest(name):
+                e = xt.merge_eligibility(d, reviews)
+                self.assertEqual((e["review"], e["eligible"], e["auto_merge_ok"]), (state, eligible, auto_ok))
+                rec = {"reviews": reviews}  # `pr next` đi cùng cổng: thiếu → review, chặn → fix, ok → bật auto-merge
+                act = xt.pr_next({**d, "pr": 7, "autonomy": 3, "base_has_required": True}, False, rec)["action"]
+                self.assertEqual(act, {"missing": "review", "blocking": "fix", "ok": "enable-auto-merge"}[state])
+        fast = {**d, "lane": "nhanh"}  # làn nhanh không strict: bỏ qua review (trừ khi từng có review chặn)
+        self.assertEqual(xt.merge_eligibility(fast, [])["review"], "na")
+        self.assertEqual(xt.merge_eligibility(fast, [r("H0", False, "1")])["review"], "missing")
+        self.assertEqual(xt.merge_eligibility(fast, [], standard_seen=True)["review"], "missing")
+        hard = {**d, "hard": ["x"], "verdict": "human"}
+        e = xt.merge_eligibility(hard, [r("H3", True, "1")])
+        self.assertEqual((e["eligible"], e["auto_merge_ok"]), (False, False))
 
     def test_head_pin_and_read_errors(self):
         rc, out, err = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--head", "khac")
@@ -1471,6 +1613,44 @@ class PrNextCliTest(unittest.TestCase):
             f"  không được thì: gh pr merge 7 --squash --match-head-commit {self.head} · REST: gh api -X PUT", out
         )
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
+
+    def test_review_identity_ignores_local_ledger(self):
+        """Review #168: có `review_identity` thì `pr next`/steward chỉ tính review đã đăng của reviewer — sổ cục bộ do chính
+        tác giả ghi (`pr reviewed --clean`) không mở được merge; cùng một sự thật với `merge_eligibility`."""
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
+        pinned = {**self.big, "reviewIdentity": "rev-bot"}
+        self.assertEqual(
+            json.loads(self.nxt(self.big, "--json")[1])["action"], "enable-auto-merge"
+        )  # không cấu hình: như cũ
+        self.assertEqual(json.loads(self.nxt(pinned, "--json")[1])["action"], "review")
+        published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
+        self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "enable-auto-merge")
+        rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
+        self.assertEqual(xt.with_published(rec, [], True)["reviews"], [])
+        self.assertEqual(xt.with_published(rec, [], False), rec)
+
+    def test_review_identity_edited_mark_is_ignored(self):
+        def by(updated: str) -> dict:
+            return {
+                **mark("a" * 40, "clean", "2026-10-19T01:00:00Z", "NONE"),
+                "user": {"login": "rev-bot"},
+                "updated_at": updated,
+            }
+
+        same, edited = by("2026-10-19T01:00:00Z"), by("2026-10-19T02:00:00Z")
+        self.assertEqual(len(xt.published_reviews([same], identity="rev-bot")), 1)
+        self.assertFalse(xt.published_reviews([edited], identity="rev-bot")[0]["clean"])  # sửa sau khi đăng: không sạch
+        self.assertEqual(
+            len(xt.published_reviews([{**edited, "author_association": "OWNER"}])), 1
+        )  # không cấu hình: như cũ
+
+    def test_review_identity_falls_back_to_working_tree_config(self):
+        """Review #168: không đọc được `origin/<base>` (PR chồng, fetch hỏng) thì lấy `review_identity` ở cây làm việc —
+        không bỏ trống làm dấu của tác giả được tin."""
+        self.assertEqual(xt.review_config(self.base, "origin/nope"), {})
+        (self.base / "xt.yaml").write_text("review_identity: rev-bot\n", encoding="utf-8")
+        self.assertEqual(xt.review_config(self.base, "origin/nope"), {"review_identity": "rev-bot"})
+        self.assertEqual(xt.review_config(self.base, "origin/main"), {})  # ref đọc được: cấu hình đã commit thắng
 
     def test_clean_review_needs_a_different_model(self):
         def run(*extra: str) -> tuple:
@@ -2136,6 +2316,51 @@ class StewardFollowupTest(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertEqual(xt.published_reviews([member("ghi")], {"ghi"})[0]["head"], "a" * 40)
         self.assertEqual(xt.published_reviews([member("ghi")]), [])
+
+    def test_published_reviews_identity(self):
+        def by(login: str, assoc: str = TRUSTED) -> dict:
+            return {**mark("a" * 40, "clean", "2026-10-19T01:00:00Z", assoc), "user": {"login": login}}
+
+        # có `review_identity`: chỉ đúng tài khoản reviewer (không phân biệt hoa/thường); chủ repo/tác giả đăng dấu không tính
+        got = xt.published_reviews([by("Rev-Bot", "NONE"), by("chu")], identity="rev-bot")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(xt.published_reviews([by("chu")], identity="rev-bot"), [])
+        self.assertEqual(xt.published_reviews([{**by("x"), "user": None}], identity="rev-bot"), [])
+        # không cấu hình: giữ hành vi theo author_association
+        self.assertEqual(len(xt.published_reviews([by("chu")])), 1)
+        with FakeGh(comments=[by("chu"), by("rev-bot", "NONE")]).patch():
+            self.assertEqual(len(xt._published_marks("repos/{owner}/{repo}", "7", "rev-bot")), 1)
+
+    def test_review_identity_read_from_committed_xt_yaml(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        commit_base_xt(
+            base, "review_identity: rev-bot\nauthor_model_family: opus\nreviewer_model_family: gpt\n", "x: 1\n"
+        )
+        cfg = xt.review_config(base, "HEAD")
+        self.assertEqual(
+            cfg, {"review_identity": "rev-bot", "author_model_family": "opus", "reviewer_model_family": "gpt"}
+        )
+        self.assertEqual(xt.review_config(base, "origin/nope"), {})  # không đọc được ref → vắng
+
+    def test_same_family_rejected(self):
+        keys = {"author_model_family": "claude-opus-5-5", "reviewer_model_family": "Opus 5.5"}
+        self.assertIn("cùng họ", xt.review_family_config_error(keys) or "")
+        self.assertIn("không nhận diện", xt.review_family_config_error({**keys, "reviewer_model_family": "xyz"}) or "")
+        self.assertIsNone(xt.review_family_config_error({**keys, "reviewer_model_family": "gpt-5"}))
+        self.assertIsNone(xt.review_family_config_error({"author_model_family": "opus"}))  # khai thiếu → không kiểm
+        ns = unittest.mock.Mock(clean=True, reviewer_model=None, author_model=None)
+        self.assertIn("cùng họ", xt._review_models_error(ns, keys) or "")
+        ns = unittest.mock.Mock(clean=True, reviewer_model=None, author_model=None)
+        self.assertIsNone(xt._review_models_error(ns, {**keys, "reviewer_model_family": "gpt-5"}))
+        self.assertEqual((ns.reviewer_model, ns.author_model), ("gpt-5", "claude-opus-5-5"))  # lấy họ từ cấu hình
+
+    def test_same_family_rejected_by_ci_check(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (base / "xt.yaml").write_text("author_model_family: opus\nreviewer_model_family: opus\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
+            rc, out, _ = run_main("ci-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("cùng họ", out)
 
     def test_label_failure_is_reported(self):
         big = [{"filename": "src/a.py", "additions": 400, "deletions": 0}]

@@ -5,6 +5,7 @@ Bổ sung cho test_xt.py: phủ các nhánh lỗi/biên. Chạy: python3 -m unit
 
 from __future__ import annotations
 
+import argparse
 import io
 import datetime as _dt
 import json
@@ -747,17 +748,100 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual(
             (v["verdict"], v["reason"]), ("done", "mọi task có bằng chứng xanh và blueprint không còn MUST mở")
         )
-        # Không kiểm được blueprint thì vẫn done (PLAN là nguồn sự thật) nhưng KHÔNG được khai "blueprint sạch".
+        # T-1503: blueprint đã khai ở loop init mà mất → `verify` (trước đây `done` — xoá blueprint là qua cổng).
         self.activate(blueprint="khong-co.md")
         v = xt.loop_verdict(self.base)
-        self.assertEqual(v["verdict"], "done")
-        self.assertIn("không thấy blueprint khong-co.md", v["reason"])
-        self.assertNotIn("không còn MUST mở", v["reason"])
+        self.assertEqual(v["verdict"], "verify")
+        self.assertIn("blueprint khong-co.md đã khai ở loop init nhưng mất", v["reason"])
         self.activate()
         v = xt.loop_verdict(self.base)
         self.assertEqual(v["verdict"], "done")
         self.assertIn("loop init không có --blueprint", v["reason"])
         self.assertNotIn("không còn MUST mở", v["reason"])
+
+    def test_scope_contract_written_by_loop_init(self):
+        """T-1503 (REC-02): `loop init` ghi `scope` {blueprint, profile, scale, rev, gate_floor} vào state; không khai
+        blueprint hoặc blueprint không đọc được → không có scope."""
+        write(self.plan, "- [ ] `T-001` a — Gate: `true`\n")
+        bp = "---\nkind: blueprint\nprofile: web-app\nscale: M\n---\nnội dung\n"
+        write(self.base / "BLUEPRINT.md", bp)
+        write(self.base / "pyproject.toml", "[project]\n")
+        args = lambda **kw: argparse.Namespace(  # noqa: E731
+            plan="docs/autopilot/PLAN.md",
+            blueprint=None,
+            hours=None,
+            max_iterations=None,
+            single_session=True,
+            force=True,
+            framework=ROOT / "framework",
+            **kw,
+        )
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(xt._loop_init(args(), self.base), 0)
+            self.assertNotIn("scope", xt.read_state(self.base))
+            self.assertEqual(
+                xt._loop_init(argparse.Namespace(**{**vars(args()), "blueprint": "khong-co.md"}), self.base),
+                2,
+            )
+            self.assertEqual(
+                xt._loop_init(argparse.Namespace(**{**vars(args()), "blueprint": "BLUEPRINT.md"}), self.base),
+                0,
+            )
+        sc = xt.read_state(self.base)["scope"]
+        self.assertEqual((sc["blueprint"], sc["profile"], sc["scale"]), ("BLUEPRINT.md", "web-app", "M"))
+        self.assertEqual(sc["rev"], xt.hashlib.sha256(bp.encode()).hexdigest()[:16])
+        self.assertEqual(sc["gate_floor"], ["format_check", "coverage", "typecheck", "e2e"])
+        # blueprint không đọc được (nhị phân) → không có scope, không sập
+        (self.base / "BIN.md").write_bytes(b"\xff\xfe\x00")
+        self.assertEqual(xt.build_scope(self.base, "BIN.md"), {})
+        self.assertEqual(xt.build_scope(self.base, None), {})
+
+    def test_scope_blueprint_lost_keeps_gate_floor_and_verifies(self):
+        """Xoá/hỏng blueprint không hạ được sàn Gate (đọc từ scope) và verdict không còn `done`; đổi quy mô/hồ sơ → verify."""
+        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
+        self.evidence("T-001", 0, "true")
+        write(self.base / "BLUEPRINT.md", "---\nprofile: cli-tool\nscale: M\n---\n- [x] `AAA-001` **MUST** a\n")
+        write(self.base / "xt.yaml", "test: pytest\n")
+        sc = xt.build_scope(self.base, "BLUEPRINT.md")
+        self.activate(blueprint="BLUEPRINT.md", scope=sc)
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        issues_before = xt.gate_floor_issues(self.base)
+        self.assertTrue(issues_before)
+        # đổi quy mô M → S ngầm: sàn Gate sẽ biến mất → verify
+        write(self.base / "BLUEPRINT.md", "---\nprofile: cli-tool\nscale: S\n---\n- [x] `AAA-001` **MUST** a\n")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "verify")
+        self.assertIn("đổi quy mô/hồ sơ so với lúc loop init (M/cli-tool → S/cli-tool)", v["reason"])
+        # blueprint bị xoá: verify + sàn Gate vẫn đòi như cũ
+        (self.base / "BLUEPRINT.md").unlink()
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "verify")
+        self.assertIn("mất/không đọc được", v["reason"])
+        self.assertEqual(xt.blueprint_scale(self.base), ("M", "cli-tool"))
+        self.assertEqual(xt.gate_floor_issues(self.base), issues_before)
+        # frontmatter hỏng (mất khoá scale) → coi là đổi quy mô
+        write(self.base / "BLUEPRINT.md", "không có frontmatter\n")
+        self.assertIn("(M/cli-tool → —/—)", xt.loop_verdict(self.base)["reason"])
+
+    def test_scope_state_migration(self):
+        """State cũ (không có `scope`): verdict không kiểm drift quy mô (chỉ kiểm file còn); `loop resume` điền scope từ
+        blueprint hiện tại; không khai blueprint thì không thêm."""
+        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
+        self.evidence("T-001", 0, "true")
+        write(self.base / "BLUEPRINT.md", "---\nprofile: cli-tool\nscale: L\n---\n- [x] `AAA-001` **MUST** a\n")
+        self.activate(blueprint="BLUEPRINT.md")  # không scope
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        write(self.base / "BLUEPRINT.md", "---\nprofile: cli-tool\nscale: S\n---\n- [x] `AAA-001` **MUST** a\n")
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")  # state cũ không có gì để so
+        write(self.base / "BLUEPRINT.md", "---\nprofile: cli-tool\nscale: L\n---\n- [x] `AAA-001` **MUST** a\n")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt._loop_resume(argparse.Namespace(reason="x"), self.base), 0)
+        self.assertEqual(xt.read_state(self.base)["scope"]["scale"], "L")
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
+        self.activate()
+        with redirect_stdout(io.StringIO()):
+            xt._loop_resume(argparse.Namespace(reason="x"), self.base)
+        self.assertNotIn("scope", xt.read_state(self.base))
 
     def test_checks_run_in_priority_order(self):
         """Điều kiện dừng thắng nhau theo thứ tự: bị chặn > lỗi lặp > hết vòng > quá hạn > PLAN > blueprint."""

@@ -161,6 +161,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   sổ review) bị chặn, không chỉ hỏi.
 - [ADR-0027](docs/adr/0027-pr-steward-on-github.md): workflow `pr-steward` trên GitHub bật auto-merge/merge ghim head cho
   PR đủ tiêu chuẩn khi không còn phiên agent; `pr reviewed` đăng kết quả review lên PR.
+- [ADR-0028](docs/adr/0028-single-merge-eligibility.md): một điều kiện "được merge" (`merge_eligibility`) cho
+  `merge-check`, `pr next`, `merge-gate`, guard và steward — auto-merge cần review sạch ở head.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

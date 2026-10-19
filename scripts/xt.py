@@ -93,7 +93,7 @@ import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_FRAMEWORK = (SCRIPT_DIR.parent / "framework").resolve()
@@ -745,32 +745,72 @@ def _carried_note(old_line: str, new_line: str) -> str:
     return nm.group(0) if nm else ""
 
 
+NORM_TAIL_RE = re.compile(r"\s+(?:→\s*Kiểm:|·\s*Nguồn:)")
+STALE_NOTE_RE = re.compile(r"— Cũ \(rev ([0-9a-f]{8}), trước đó \[([x~])\]\)")
+
+
+def _normative(m: "re.Match[str]") -> str:
+    """Phần quy phạm của mục: chữ yêu cầu TRƯỚC `→ Kiểm:`/`· Nguồn:` — đổi chữ là đổi yêu cầu (REC-06). Mức MUST/SHOULD và
+    ngưỡng quy mô KHÔNG tính (đổi quy mô chuyển mức mà yêu cầu giữ nguyên — ADR-0012: bằng chứng cũ vẫn đúng); đổi cách
+    kiểm hoặc nguồn cũng không làm bằng chứng cũ hết giá trị."""
+    parts = NORM_TAIL_RE.split(m["text"], maxsplit=1)
+    head = STALE_NOTE_RE.split(parts[0], maxsplit=1)[0]
+    note = LOOSE_NOTE_RE.search(head) if len(parts) == 1 else None  # chỉ mục KHÔNG đuôi: thân có thể tự nhắc `— Miễn:`
+    return (head[: note.start()] if note else head).strip()
+
+
+def _norm_rev(norm: str) -> str:
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:8]
+
+
+def _carry_line(
+    line: str,
+    m: "re.Match[str]",
+    old: Tuple[str, str, str],
+    dropped: Optional[List[str]],
+    stale: Optional[List[str]],
+) -> Tuple[str, int]:
+    """Một mục có ở cả hai bản: (dòng mới đã mang trạng thái/ghi chú, 1 nếu có mang). `old` = (ô, dòng cũ, phần quy phạm cũ)."""
+    state, old_line, old_norm = old
+    if state != " " and old_norm != _normative(m):  # đổi yêu cầu: không mang `[x]`/`[~]` sang (REC-06)
+        if stale is not None:
+            stale.append(m["id"])
+        return f"{line} — Cũ (rev {_norm_rev(old_norm)}, trước đó [{state.lower()}])", 1
+    note = _carried_note(old_line, line)
+    if dropped is not None and state != " " and not note and old_line[5:] != line[5:]:
+        dropped.append(m["id"])
+    if (state, note) != (" ", ""):
+        return f"- [{state}]{line[5:]}{note}", 1
+    return line, 0
+
+
 def carry_states(
-    old: str, new: str, framework_ids: Optional[Set[str]] = None, dropped: Optional[List[str]] = None
+    old: str,
+    new: str,
+    framework_ids: Optional[Set[str]] = None,
+    dropped: Optional[List[str]] = None,
+    stale: Optional[List[str]] = None,
 ) -> Tuple[str, int]:
     """Chuyển ô trạng thái + ghi chú (— Bằng chứng/Miễn/Thiếu: …) từ blueprint cũ sang bản ghép mới theo ID.
     Có `framework_ids`: mục cũ có ID KHÔNG thuộc khung (mục riêng của dự án) được giữ nguyên ở cuối, không mất im lặng.
-    Có `dropped`: thêm ID mục `[x]`/`[~]` mà chữ đổi và không tìm được ghi chú để mang theo — người gọi cảnh báo."""
-    prev: Dict[str, Tuple[str, str]] = {}
+    Có `dropped`: thêm ID mục `[x]`/`[~]` mà chữ đổi và không tìm được ghi chú để mang theo — người gọi cảnh báo.
+    Chữ yêu cầu (phần quy phạm) đổi (REC-06, T-1505): mục `[x]`/`[~]` KHÔNG mang trạng thái sang — về `[ ]` kèm
+    `— Cũ (rev <8 hex của chữ yêu cầu cũ>, trước đó [x|~])`, ID vào `stale` (bằng chứng cũ không chứng minh yêu cầu mới)."""
+    prev: Dict[str, Tuple[str, str, str]] = {}
     for line in unicodedata.normalize("NFC", old).splitlines():
         m = ITEM_RE.match(line)
         if m:
-            prev[m["id"]] = (m["state"], line)
+            prev[m["id"]] = (m["state"], line, _normative(m))
     kept, lines, new_ids = 0, [], set()
     for line in new.splitlines():
         m = ITEM_RE.match(line)
         if m:
             new_ids.add(m["id"])
-        if m and m["id"] in prev:
-            state, old_line = prev[m["id"]]
-            note = _carried_note(old_line, line)
-            if dropped is not None and state != " " and not note and old_line[5:] != line[5:]:
-                dropped.append(m["id"])
-            if (state, note) != (" ", ""):
-                line = f"- [{state}]{line[5:]}{note}"
-                kept += 1
+            if m["id"] in prev:
+                line, hit = _carry_line(line, m, prev[m["id"]], dropped, stale)
+                kept += hit
         lines.append(line)
-    own = [ln for i, (_, ln) in prev.items() if framework_ids is not None and i not in new_ids | framework_ids]
+    own = [ln for i, (_, ln, _n) in prev.items() if framework_ids is not None and i not in new_ids | framework_ids]
     if own:
         lines += ["", "## Mục riêng của dự án (giữ từ bản trước khi ghép lại)", "", *own]
     return "\n".join(lines) + "\n", kept
@@ -827,7 +867,7 @@ def blueprint_status(path: Path) -> Dict[str, Any]:
     for lv in LEVELS:
         for k, v in b["levels"][lv].items():
             s["levels"][lv][k] += v
-    for key in ("open_must", "bad_waivers", "bad_lines"):
+    for key in ("open_must", "bad_waivers", "bad_lines", "stale"):
         s[key] += b[key]
     return s
 
@@ -883,6 +923,13 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
     return out
 
 
+def _stale_ids(text: str) -> List[str]:
+    """Mục còn `[ ]` mang `— Cũ (rev …)`: yêu cầu đổi so với bản đã tick (`carry_states`), chưa làm lại theo yêu cầu mới."""
+    return [
+        m["id"] for m in map(ITEM_RE.match, text.splitlines()) if m and m["state"] == " " and STALE_NOTE_RE.search(m[0])
+    ]
+
+
 def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
@@ -915,7 +962,13 @@ def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     counted = sum(total["MUST"].values())
     if expected is not None and counted < expected:  # mục MUST bị xoá khỏi file: bảng đầu trang vẫn nhớ tổng
         bad_lines.append(f"chỉ thấy {counted}/{expected} mục MUST so với bảng đầu trang (mục bị xoá?)")
-    return {"levels": total, "open_must": open_must, "bad_waivers": bad_waivers, "bad_lines": bad_lines}
+    return {
+        "levels": total,
+        "open_must": open_must,
+        "bad_waivers": bad_waivers,
+        "bad_lines": bad_lines,
+        "stale": _stale_ids(text),
+    }
 
 
 # --------------------------------------------------------------------------- loop (autopilot)
@@ -1144,14 +1197,33 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _scope_drift(base: Path, st: Dict[str, Any], bp: str) -> str:
+    """Lý do blueprint khai ở `loop init` không còn khớp phạm vi đã khoá; rỗng = ổn. Mất file → verify (trước đây khai
+    `done` vì "không thấy blueprint"); frontmatter hỏng/đổi quy mô-hồ sơ so với `scope` → verify (hạ M xuống S ngầm là hạ sàn)."""
+    got = _blueprint_front(base, bp)
+    if got is None:
+        return f"blueprint {bp} đã khai ở loop init nhưng mất/không đọc được — khôi phục file hoặc `loop init --force` để khai lại"
+    sc = _scope(st)
+    if sc and (got[0] != sc.get("scale") or got[1] != sc.get("profile")):
+        return (
+            f"blueprint {bp} đổi quy mô/hồ sơ so với lúc loop init ({sc.get('scale') or '—'}/{sc.get('profile') or '—'} → "
+            f"{got[0] or '—'}/{got[1] or '—'}) — sàn Gate đổi theo; chạy `loop init --force` nếu cố ý"
+        )
+    return ""
+
+
 def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
     """Mọi task đã ổn: còn MUST mở / miễn trừ thiếu lý do trong blueprint → continue, không thì done."""
     bp = st.get("blueprint")
     bpp = base / bp if bp else None
-    if bpp is None or not bpp.exists():
-        # Không khai "blueprint sạch" khi không hề kiểm blueprint (loop init thiếu --blueprint hoặc file mất).
-        why = "không kiểm blueprint: loop init không có --blueprint" if bpp is None else f"không thấy blueprint {bp}"
-        return {"verdict": "done", "reason": f"mọi task có bằng chứng xanh ({why})"}
+    if bpp is None:  # loop init không khai blueprint: không có gì để kiểm (đã nói rõ trong lý do)
+        return {
+            "verdict": "done",
+            "reason": "mọi task có bằng chứng xanh (không kiểm blueprint: loop init không có --blueprint)",
+        }
+    drift = _scope_drift(base, st, str(bp))
+    if drift:  # blueprint đã khai mà mất/hỏng/đổi quy mô: không được khai "done" (REC-02, T-1503)
+        return {"verdict": "verify", "reason": drift}
     s = blueprint_status(bpp)
     open_must = [i for i in s["open_must"] if i not in _deferred(st)]
     if open_must:
@@ -2391,9 +2463,30 @@ def audit_status_groups(status: Path) -> Dict[int, Dict[str, str]]:
     return out
 
 
+NA_EXPLAIN_RE = re.compile(r"Giải trình:\s*\S")
+
+
+def audit_na_drift(root: Path, groups: Dict[int, Dict[str, str]]) -> Dict[int, str]:
+    """Nhóm sổ ghi `N/A` mà tín hiệu repo HIỆN TẠI nói là áp dụng/rút gọn (REC-07, T-1506): repo từng không có UI/CSDL
+    rồi có — nhóm A11Y/DATA không bao giờ được quét lại vì `audit_rescan` bỏ qua mọi nhóm N/A. Nhóm có `Giải trình: <lý do>` ở Ghi chú
+    là quyết định có chủ đích, không nhắc lại. {số nhóm: "N/A→áp dụng: …"}."""
+    na = [
+        no
+        for no, r in groups.items()
+        if r.get("Trạng thái") == "N/A"
+        and no in AUDIT_CODES.values()
+        and not NA_EXPLAIN_RE.search(r.get("Ghi chú", ""))
+    ]
+    if not na:
+        return {}
+    appl = audit_applicability(audit_signals(root, _repo_files(root)))
+    return {no: f"N/A→{appl[no][0]}: {appl[no][1]}" for no in na if appl[no][0] != "N/A"}
+
+
 def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
-    """Nhóm cần quét lại: chưa quét · SHA không còn trong lịch sử · có file đổi kể từ SHA quét."""
+    """Nhóm cần quét lại: chưa quét · SHA không còn trong lịch sử · có file đổi kể từ SHA quét · N/A nay áp dụng."""
     groups = audit_status_groups(status)
+    drift = audit_na_drift(root, groups)
     out: Dict[int, str] = {}
     for no, _, _ in AUDIT_GROUPS:
         r = groups.get(no)
@@ -2401,6 +2494,8 @@ def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
             out[no] = "chưa quét"
             continue
         if r.get("Trạng thái") == "N/A":
+            if no in drift:
+                out[no] = drift[no]
             continue
         sha = r.get("SHA", "").strip("` ")
         if not sha or _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
@@ -2581,6 +2676,18 @@ def _audit_finding_errors(
     return errors + [f"{i}: ID trùng {n} lần" for i, n in ids.items() if i and n > 1]
 
 
+def _audit_na_errors(tables: Dict[str, List[Dict[str, str]]], strict: bool, root: Path) -> List[str]:
+    """`--strict`: nhóm sổ ghi N/A mà repo nay áp dụng → đỏ tới khi quét nhóm đó (đổi trạng thái) hoặc ghi `Giải trình: <lý do>`
+    ở Ghi chú (REC-07). Không `--strict` thì chỉ `audit plan` báo."""
+    if not strict:
+        return []
+    groups = {int(r["#"]): r for r in tables.get("Nhóm", []) if r.get("#", "").isdecimal()}
+    return [
+        f"nhóm {no}: sổ ghi N/A nhưng repo nay áp dụng ({why}) — quét nhóm này hoặc ghi `Giải trình: <lý do>` ở Ghi chú"
+        for no, why in audit_na_drift(root, groups).items()
+    ]
+
+
 def audit_check(
     status: Path, strict: bool = False, today: Optional[_dt.date] = None
 ) -> Tuple[List[str], Dict[str, int]]:
@@ -2592,6 +2699,7 @@ def audit_check(
     counts: Dict[str, int] = {}
     errors = [f"thiếu bảng `## {name}`" for name in ("Nhóm", "Phát hiện") if name not in tables]
     errors += _audit_group_errors(tables, strict, root, in_git, counts)
+    errors += _audit_na_errors(tables, strict, root)
     errors += _audit_finding_errors(tables, strict, today, counts)
     return errors, counts
 
@@ -2892,19 +3000,56 @@ FLOOR_SCALE_RE = re.compile(r"^scale:(.*)$", re.M)
 FLOOR_PROFILE_RE = re.compile(r"^profile:(.*)$", re.M)
 
 
-def blueprint_scale(base: Path) -> Tuple[str, str]:
-    """(quy mô S/M/L, hồ sơ) từ frontmatter BLUEPRINT.md (đường khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc);
-    giá trị đọc như xt.yaml (nháy, comment, chữ thường); không có/không đọc được → ("", "")."""
-    st = read_state(base) or {}
-    bp = base / str(st.get("blueprint") or "BLUEPRINT.md")
+def _blueprint_front(base: Path, rel: str) -> Optional[Tuple[str, str, str]]:
+    """(quy mô S/M/L, hồ sơ, rev) đọc từ `rel`: giá trị frontmatter đọc như xt.yaml (nháy, comment, chữ thường), `rev` =
+    sha256[:16] nội dung; file không đọc được → None; đọc được mà thiếu/lạ → ("", "" hoặc phần có, rev)."""
     try:
-        fm = FRONT_BLOCK_RE.match(bp.read_text(encoding="utf-8").replace("\r\n", "\n"))
-    except OSError:
-        return "", ""
+        raw = (base / rel).read_bytes()
+        fm = FRONT_BLOCK_RE.match(raw.decode("utf-8").replace("\r\n", "\n"))
+    except (OSError, UnicodeDecodeError):
+        return None
     text = fm[1] if fm else ""
     sm, pm = FLOOR_SCALE_RE.search(text), FLOOR_PROFILE_RE.search(text)
     scale = yaml_scalar(sm[1]).strip().upper() if sm else ""
-    return (scale if scale in SCALES else ""), (yaml_scalar(pm[1]).strip() if pm else "")
+    return (
+        (scale if scale in SCALES else ""),
+        (yaml_scalar(pm[1]).strip() if pm else ""),
+        hashlib.sha256(raw).hexdigest()[:16],
+    )
+
+
+def _scope(st: Dict[str, Any]) -> Dict[str, Any]:
+    """`scope` ghi lúc `loop init` (REC-02, T-1503): blueprint, profile, scale, rev, gate_floor."""
+    sc = st.get("scope")
+    return sc if isinstance(sc, dict) else {}
+
+
+def blueprint_scale(base: Path) -> Tuple[str, str]:
+    """(quy mô S/M/L, hồ sơ) từ frontmatter BLUEPRINT.md (đường khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc).
+    Blueprint mất/không đọc được → lấy `scope` đã ghi lúc `loop init` (xoá blueprint không hạ được sàn Gate); không có
+    scope (state cũ) → ("", "")."""
+    st = read_state(base) or {}
+    got = _blueprint_front(base, str(st.get("blueprint") or "BLUEPRINT.md"))
+    if got is not None:
+        return got[0], got[1]
+    sc = _scope(st)
+    return str(sc.get("scale") or ""), str(sc.get("profile") or "")
+
+
+def build_scope(base: Path, blueprint: Optional[str]) -> Dict[str, Any]:
+    """Phạm vi vòng khoá lúc `loop init`: blueprint đã khai, hồ sơ/quy mô/`rev` (sha256[:16] nội dung blueprint) và khoá sàn
+    Gate đòi ở quy mô đó. Không khai blueprint hoặc không đọc được → {} (không có gì để khoá)."""
+    got = _blueprint_front(base, blueprint) if blueprint else None
+    if got is None:
+        return {}
+    scale, profile, rev = got
+    return {
+        "blueprint": blueprint,
+        "profile": profile,
+        "scale": scale,
+        "rev": rev,
+        "gate_floor": [k for k, _ in _gate_floor_need(base, scale, profile)],
+    }
 
 
 def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
@@ -2916,13 +3061,20 @@ def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
     # Thiếu cả xt.yaml ở M/L = mọi khoá sàn đều thiếu (không phải "không áp" — review #107).
     rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else [])
     keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
+    return _gate_floor_need(base, scale, profile), keys
+
+
+def _gate_floor_need(base: Path, scale: str, profile: str) -> List[Tuple[str, str]]:
+    """[(khoá, mô tả)] sàn Gate đòi ở quy mô/hồ sơ đã cho; S/không rõ → []."""
+    if scale not in ("M", "L"):
+        return []
     need = list(FLOOR_ALWAYS)
     markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
     for key in sorted({FLOOR_TYPED_MARKERS[f] for f in markers}):
         need.append((key, f"kiểm kiểu/biên dịch vì repo có {', '.join(markers)}"))
     if profile in FLOOR_E2E_PROFILES:
         need.append(("e2e", f"suite e2e đầy đủ vì hồ sơ {profile} (QA-E2E-023)"))
-    return need, keys
+    return need
 
 
 def gate_floor_issues(base: Path) -> List[str]:
@@ -3363,25 +3515,41 @@ CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STAR
 CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 
 
-def _ci_buckets(rollup: List[Dict[str, Any]]) -> Tuple[List[str], List[str], List[str]]:
-    """(check đỏ, check đang chạy, check xanh) từ `statusCheckRollup` (CheckRun: status/conclusion; StatusContext:
-    state). Xanh = SUCCESS; SKIPPED/NEUTRAL không thuộc nhóm nào — không phải bằng chứng (AUD-HAR-023)."""
+NOT_RUN_STATES = {"SKIPPED", "NEUTRAL", "CANCELLED", "STALE"}  # GitHub coi required check skipped/neutral là "đạt"
+
+
+def _ci_buckets(
+    rollup: List[Dict[str, Any]], required: Sequence[Tuple[str, Optional[int]]] = ()
+) -> Tuple[List[str], List[str], List[str], List[str]]:
+    """(check đỏ, check đang chạy, check xanh, check bắt buộc KHÔNG chạy) từ `statusCheckRollup` (CheckRun: status/conclusion;
+    StatusContext: state). Xanh = SUCCESS; SKIPPED/NEUTRAL không thuộc nhóm nào — không phải bằng chứng (AUD-HAR-023).
+    `required` = [(tên, integration_id|None)] của ruleset (REC-08, T-1504): GitHub tính required check skipped/neutral là đạt
+    nên PR "xanh" mà chưa test nào chạy; check bắt buộc SKIPPED/NEUTRAL/CANCELLED/STALE, hoặc chỉ có bản của app khác
+    (`appId` ≠ integration_id) → `not_run` (không đỏ, không xanh). Check bắt buộc vắng hẳn là việc của `missingRequired`."""
+    want = {name: app for name, app in required}
     red: List[str] = []
     pending: List[str] = []
     green: List[str] = []
+    seen: Dict[str, bool] = {}  # tên bắt buộc → đã có bản hợp lệ ở nhóm đỏ/đang chạy/xanh
     for c in rollup:
         name = str(c.get("name") or c.get("context") or "?")
         if c.get("__typename") == "StatusContext":
             st = str(c.get("state", ""))
         else:
             st = str(c.get("conclusion") or "") if c.get("status") == "COMPLETED" else "PENDING"
+        if name in want:
+            seen.setdefault(name, False)
+            foreign = want[name] is not None and c.get("appId") is not None and c.get("appId") != want[name]
+            if foreign or st in NOT_RUN_STATES:
+                continue  # bản của app khác / bị bỏ qua / bị huỷ không thay được check bắt buộc
+            seen[name] = True
         if st in CI_RED:
             red.append(name)
         elif st in CI_PENDING:
             pending.append(name)
         elif st == "SUCCESS":
             green.append(name)
-    return red, pending, green
+    return red, pending, green, [n for n, ok in seen.items() if not ok]
 
 
 def _package_of(path: str) -> str:
@@ -3499,12 +3667,23 @@ NON_CI_CHECKS = {"merge-gate", "pr-steward"}
 
 
 def _ci_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
-    """CI đỏ → fix; đang chạy → wait; không check xanh nào kiểm mã → human (không có bằng chứng)."""
-    red, pending, green = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
+    """CI đỏ → fix; đang chạy → wait; check bắt buộc không chạy thật hoặc không check xanh nào kiểm mã → human."""
+    required = [
+        (str(r["context"]), r.get("appId") if isinstance(r.get("appId"), int) else None)
+        for r in pr.get("requiredChecks") or []
+        if isinstance(r, dict) and r.get("context")
+    ]
+    red, pending, green, not_run = _ci_buckets(
+        [c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)], required
+    )
     if red:
         return "fix", [f"CI đỏ: {', '.join(red)}"]
     if pending:
         return "wait", [f"CI đang chạy: {', '.join(pending)}"]
+    if not_run:  # GitHub tính skipped/neutral/sai app là đạt — máy không: không có bằng chứng check đó đã chạy (REC-08)
+        return "human", [
+            f"check bắt buộc không chạy thật (skipped/neutral/huỷ/sai app): {', '.join(not_run)} — không có bằng chứng CI"
+        ]
     if not green:
         return "human", ["không có check CI nào xanh — không có bằng chứng"]
     if not [g for g in green if g.lower() not in NON_CI_CHECKS]:
@@ -3917,32 +4096,39 @@ def _review_decision(reviews: List[Dict[str, Any]], merge_state: str, missing_ch
     return "APPROVED" if "APPROVED" in states else ""
 
 
-def _required_checks(repo: str, branch: str) -> List[str]:
-    """Tên check bắt buộc của nhánh theo ruleset (REST `rules/branches`); không đọc được → [] (không suy ra gì)."""
+def _required_specs(repo: str, branch: str) -> List[Dict[str, Any]]:
+    """Check bắt buộc của nhánh theo ruleset (REST `rules/branches`): [{"context", "appId"?}] (`integration_id` của ruleset
+    là app phải sinh check); không đọc được → [] (không suy ra gì)."""
     try:
         rules = _gh_items(f"{repo}/rules/branches/{urllib.parse.quote(branch, safe='')}")
     except PrInputError:
         return []
-    out: List[str] = []
+    out: List[Dict[str, Any]] = []
     for r in rules:
         params = r.get("parameters") if r.get("type") == "required_status_checks" else None
         for c in (params or {}).get("required_status_checks") or []:
-            if isinstance(c, dict) and c.get("context") and c["context"] not in out:
-                out.append(str(c["context"]))
+            if isinstance(c, dict) and c.get("context") and all(o["context"] != c["context"] for o in out):
+                app = c.get("integration_id")
+                out.append({"context": str(c["context"]), **({"appId": app} if isinstance(app, int) else {})})
     return out
+
+
+def _required_checks(repo: str, branch: str) -> List[str]:
+    """Tên check bắt buộc của nhánh theo ruleset; không đọc được → [] (không suy ra gì)."""
+    return [o["context"] for o in _required_specs(repo, branch)]
 
 
 _REQUIRED_CACHE: Dict[Tuple[str, str], Tuple[float, bool]] = {}
 
 
-def _base_has_required(repo: str, branch: str) -> bool:
+def _base_has_required(repo: str, branch: str, specs: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Nhánh đích có check bắt buộc không — ruleset (REST `rules/branches`) hoặc branch protection cổ điển (REST
     `branches/<b>`, trường `protection.required_status_checks.contexts`). Không đọc được → False (chiều chặt). Nhớ theo
     (repo, nhánh) trong `WRITER_TTL` giây (`merge-watch` hỏi 30 giây/lần; import ruleset giữa chừng thì hết hạn là thấy)."""
     key, now = (repo, branch), time.monotonic()
     hit = _REQUIRED_CACHE.get(key)
     if hit is None or now - hit[0] >= WRITER_TTL:
-        found = bool(branch) and bool(_required_checks(repo, branch))
+        found = bool(branch) and bool(specs if specs is not None else _required_checks(repo, branch))
         if branch and not found:
             try:
                 prot = _gh_one(f"{repo}/branches/{urllib.parse.quote(branch, safe='')}").get("protection") or {}
@@ -4093,6 +4279,7 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
             "name": c.get("name"),
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
+            **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
         }
         for c in latest.values()
     ]
@@ -4101,17 +4288,15 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         for s in statuses
     ]
     files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
-    marks = _published_marks(repo, n)
+    cfg = review_config(project_dir(), f"origin/{(pr.get('base') or {}).get('ref') or 'main'}")
+    marks = _published_marks(repo, n, cfg.get("review_identity", ""))
     mergeable = pr.get("mergeable")  # REST: true · false · null (GitHub đang tính)
     raw_base = pr.get("base")
     base: Dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
     # BLOCKED có thể vì ruleset đòi check mà head không có (không workflow nào sinh) — không phải thiếu review.
     seen = {str(c.get("name") or c.get("context")) for c in rollup}
-    missing = (
-        [c for c in _required_checks(repo, str(base.get("ref") or "main")) if c not in seen]
-        if merge_state == "BLOCKED"
-        else []
-    )
+    required = _required_specs(repo, str(base.get("ref") or "main"))
+    missing = [r["context"] for r in required if r["context"] not in seen] if merge_state == "BLOCKED" else []
     base_repo: Dict[str, Any] = base["repo"] if isinstance(base.get("repo"), dict) else {}
     # Đáy của phép so khoá/ủy quyền = merge-base (diff ba chấm như danh sách file), chỉ hỏi khi có file cần so.
     prefix = project_prefix()
@@ -4152,15 +4337,18 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         **({"localConflicts": conflicts} if conflicts is not None else {}),
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
+        # Check bắt buộc của nhánh đích (+ app phải sinh ra): `_ci_blocker` không coi skipped/neutral/sai app là đạt (REC-08).
+        **({"requiredChecks": required} if required else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
         **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
         # Nhánh đích có check bắt buộc không: không có thì auto-merge của GitHub merge NGAY lúc bật (D-062, D-063).
-        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or "")),
+        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or ""), required),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
         # Review đã đăng lên PR (`pr reviewed`, ADR-0027) — sổ dùng chung mọi phiên và workflow pr-steward.
         **({"xtReviews": marks} if marks else {}),
+        **({"reviewIdentity": cfg["review_identity"]} if cfg.get("review_identity") else {}),
         # Auto-merge đang bật (REST `auto_merge`: object hoặc null) — `merge-gate` đỏ khi bật trên PR ngoại lệ cứng.
         **({"autoMergeRequest": pr["auto_merge"]} if pr.get("auto_merge") else {}),
         # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
@@ -4233,11 +4421,18 @@ def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -
     fw_ids = {it.id for d in load_docs(fw)[0] for it in d.items}
     old = "\n".join(p.read_text(encoding="utf-8") for p in olds)
     dropped: List[str] = []
-    main, kept = carry_states(old, main, fw_ids, dropped)
+    stale: List[str] = []
+    main, kept = carry_states(old, main, fw_ids, dropped, stale)
     if backlog is not None:
-        backlog, kept_bl = carry_states(old, backlog, dropped=dropped)
+        backlog, kept_bl = carry_states(old, backlog, dropped=dropped, stale=stale)
         kept += kept_bl
-    print(f"↺ Giữ trạng thái {kept} mục theo ID từ bản cũ", file=sys.stderr)
+    print(f"↺ Giữ trạng thái {kept - len(stale)} mục theo ID từ bản cũ", file=sys.stderr)
+    if stale:
+        print(
+            f"⚠ {len(stale)} mục đổi chữ yêu cầu — đã đặt lại [ ] kèm `— Cũ (rev …)`, "
+            f"cần làm/kiểm lại theo yêu cầu mới: {', '.join(stale)}",
+            file=sys.stderr,
+        )
     if dropped:
         print(
             f"⚠ {len(dropped)} mục [x]/[~] đổi chữ mà không mang được ghi chú (Bằng chứng/Kiểm/Miễn) — so với bản cũ, "
@@ -4310,7 +4505,7 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
     if run is None:
         return 2
     ok = not s["open_must"] and not s["bad_waivers"] and not s["bad_lines"] and not run["failed_checks"]
-    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "checks", "failed_checks", "unchecked_must", "ok"}
+    if args.json:  # hợp đồng máy đọc: {"levels", "open_must", "bad_waivers", "bad_lines", "stale", "checks", "failed_checks", "unchecked_must", "ok"}
         print(json.dumps({**s, **run, "ok": ok}, ensure_ascii=False))
         return 0 if ok or not args.strict else 1
     for lv in LEVELS:
@@ -4322,6 +4517,8 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
         print(f"✗ Sai định dạng/thiếu mục: {b}")
     if s["open_must"]:
         print(f"Còn {len(s['open_must'])} mục MUST chưa đạt: " + ", ".join(s["open_must"][:15]))
+    if s["stale"]:
+        print(f"⚠ {len(s['stale'])} mục đổi yêu cầu (`— Cũ (rev …)`), chưa làm lại: " + ", ".join(s["stale"][:15]))
     if args.run:
         _print_blueprint_run(run)
     return 0 if ok or not args.strict else 1
@@ -4376,6 +4573,9 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "same_failure_count": 0,
         "blocked": False,
     }
+    scope = build_scope(base, args.blueprint)
+    if scope:
+        state["scope"] = scope
     write_state(state, base)
     issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
     if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
@@ -4603,6 +4803,8 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     )
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
+    if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
+        cur.update({"scope": sc} if (sc := build_scope(base, str(cur["blueprint"]))) else {})
     cur.pop("deferred", None)  # người đã xử lý: việc chờ quay lại hàng làm; còn cần người thì agent defer lại
     write_state(cur, base)
     print(f"▶ Autopilot tiếp tục (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {args.reason}")
@@ -4768,6 +4970,10 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
         for e in errors:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
+    cfg_err = review_family_config_error(_xt_keys(project_dir()))
+    if cfg_err:
+        print(f"✗ {cfg_err}")
+        bad += 1
     if not bad:
         print(
             f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error, không secret trên PR."
@@ -5563,7 +5769,13 @@ def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         pr = {k: v for k, v in pr.items() if k != "title"}
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
-    return merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
+    d = merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto)
+    # Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
+    # với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác).
+    marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
+    elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
+    d = {**d, "review": elig["review"], "eligible": elig["eligible"], "auto_merge_ok": elig["auto_merge_ok"]}
+    return d, notes + hard_notes
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -5602,29 +5814,46 @@ def cmd_merge_gate(args: argparse.Namespace) -> int:
         return 3
     d, notes = _merge_eval(pr)
     auto = bool(pr.get("autoMergeRequest"))
-    gate = "block" if d["hard"] and auto else "warn" if d["hard"] else "pass"
+    review_bad = d["review"] in ("missing", "blocking")
+    gate = "block" if auto and (d["hard"] or review_bad) else "warn" if d["hard"] else "pass"
     if args.json:
         print(
             json.dumps(
-                {"pr": d["pr"], "head": head, "gate": gate, "auto_merge": auto, "hard": d["hard"], "notes": notes},
+                {
+                    "pr": d["pr"],
+                    "head": head,
+                    "gate": gate,
+                    "auto_merge": auto,
+                    "hard": d["hard"],
+                    "review": d["review"],
+                    "notes": notes,
+                },
                 ensure_ascii=False,
             )
         )
         return 1 if gate == "block" else 0
-    msg = {
-        "block": "✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023)",
-        "warn": "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ",
-        "pass": "✓ không có ngoại lệ cứng",
-    }[gate]
-    print(f"{msg} · PR #{d['pr']} · head {head}")
+    n = d["pr"]
+    if gate == "block":
+        why = "ngoại lệ cứng" if d["hard"] else f"chưa có review sạch ở head ({d['review']})"
+        print(
+            f"✗ {why} trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023, ADR-0028) · PR #{n} · head {head}"
+        )
+    else:
+        print(
+            (
+                "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ"
+                if gate == "warn"
+                else "✓ không có ngoại lệ cứng"
+            )
+            + f" · PR #{n} · head {head}"
+        )
     for r in [*d["hard"], *notes]:
         print(f"  - {r}")
     if gate == "block":
-        n = d["pr"]
         print(
             f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;"
         )
-        print("  người merge tay")
+        print("  review: `xt.py pr reviewed` (reviewer khác họ model) rồi bật lại auto-merge; hoặc người merge tay")
     return 1 if gate == "block" else 0
 
 
@@ -5728,12 +5957,11 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
 
 
 def _pr_next_review(
-    d: Dict[str, Any], auto_merge: bool, last: Optional[Dict[str, Any]], act: PrAct, disable: str
+    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str
 ) -> Optional[Dict[str, Any]]:
-    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại."""
-    n, head = d.get("pr", ""), str(d.get("head", ""))
-    carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
-    if last is None or (last.get("head") != head and not carried):
+    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`)."""
+    n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
+    if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
         if auto_merge:
             return act("disable-auto-merge", f"head {head[:7]} chưa được rà mà auto-merge đang bật", disable)
@@ -5743,7 +5971,7 @@ def _pr_next_review(
             f"giao reviewer (model khác) rà {since}; xong: xt.py pr reviewed --pr {n} --head {head} --clean|--blocking"
             " --reviewer-model <M> --author-model <M>",
         )
-    if not last.get("clean"):
+    if gate["state"] == "blocking":
         if auto_merge:
             return act("disable-auto-merge", "review ở head báo lỗi chặn mà auto-merge đang bật", disable)
         return act("fix", "review ở head còn lỗi chặn — sửa, push, rà lại", "sửa lỗi chặn, push, chạy lại pr next")
@@ -5774,19 +6002,29 @@ def _comment_login(c: Dict[str, Any]) -> str:
     return str(user.get("login") or "") if isinstance(user, dict) else ""
 
 
-def published_reviews(comments: List[Dict[str, Any]], writers: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+def published_reviews(
+    comments: List[Dict[str, Any]], writers: Optional[Set[str]] = None, identity: str = ""
+) -> List[Dict[str, Any]]:
     """Review đã đăng trên PR, theo thứ tự thời gian: [{"head", "clean", "at"}] từ comment của người có quyền ghi —
-    OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi."""
+    OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi. `identity` (xt.yaml
+    `review_identity`, T-1508): khi cấu hình, CHỈ comment của đúng tài khoản reviewer đó là review — tác giả PR (cùng tài
+    khoản với phiên agent) đăng dấu không còn mở được merge; comment đã bị sửa (`updated_at` ≠ `created_at`) không bao giờ là review sạch."""
     out = []
     for c in comments:
         m = REVIEW_MARK_RE.search(str(c.get("body") or ""))
         assoc = str(c.get("author_association", "")).upper()
-        if m and (assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))):
-            out.append({"head": m[1], "clean": m[2] == "clean", "at": str(c.get("created_at", ""))})
+        trusted = (
+            _comment_login(c).lower() == identity.lower()
+            if identity
+            else assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))
+        )
+        edited = bool(identity) and c.get("updated_at") not in (None, "", c.get("created_at"))
+        if m and trusted:  # dấu bị sửa sau khi đăng (người có quyền write sửa được comment) không thể là "sạch"
+            out.append({"head": m[1], "clean": m[2] == "clean" and not edited, "at": str(c.get("created_at", ""))})
     return sorted(out, key=lambda r: r["at"])
 
 
-def _published_marks(repo: str, n: str) -> List[Dict[str, Any]]:
+def _published_marks(repo: str, n: str, identity: str = "") -> List[Dict[str, Any]]:
     """Review đã đăng trên PR; không đọc được comment (token thiếu quyền, mạng) → [] — thiếu dấu chỉ làm PR làn chuẩn
     chờ review (chặt hơn), không làm merge-check lỗi."""
     try:
@@ -5798,7 +6036,7 @@ def _published_marks(repo: str, n: str) -> List[Dict[str, Any]]:
         for c in comments
         if str(c.get("author_association", "")).upper() == "MEMBER" and REVIEW_MARK_RE.search(str(c.get("body") or ""))
     }
-    return published_reviews(comments, {u for u in members if u and repo_writer(repo, u)})
+    return published_reviews(comments, {u for u in members if u and repo_writer(repo, u)}, identity)
 
 
 WRITE_PERMISSIONS = {"admin", "write"}  # REST `permission` (cũ): maintain tính là write, triage là read
@@ -5834,13 +6072,50 @@ def _iso_key(at: object) -> str:
     return str(at).replace("Z", "+00:00")
 
 
-def with_published(rec: Dict[str, Any], marks: object) -> Dict[str, Any]:
-    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết."""
+def with_published(rec: Dict[str, Any], marks: object, published_only: bool = False) -> Dict[str, Any]:
+    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết. `published_only` (xt.yaml
+    có `review_identity`): chỉ review đã đăng của tài khoản reviewer — sổ cục bộ do chính tác giả ghi không tính, cùng
+    "một sự thật" với `merge_eligibility` (ADR-0028, review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
+    if published_only:
+        return {**rec, "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", "")))}
     if not pub:
         return rec
     local = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     return {**rec, "reviews": sorted([*local, *pub], key=lambda r: _iso_key(r.get("at", "")))}
+
+
+def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
+    """Điều kiện review MỘT NHÀ (REC-03, ADR-0028), hàm thuần: PR cần review sạch ở đúng head khi `strict` (làn chuẩn, từng vào
+    làn chuẩn — nhãn/sổ — hoặc từng có review báo lỗi chặn). `state`: `na` (không strict) · `ok` · `missing` (chưa rà head này,
+    review sạch ở head cũ chỉ mang qua khi head là "cập nhật nhánh" sạch — `base_merge_of`) · `blocking` (review ở head còn lỗi
+    chặn). Review ở đúng head hiện tại quyết trước (mới nhất ở head đó); chưa có mới xét review mang qua (AUD-HAR-059)."""
+    head = str(d.get("head", ""))
+    strict = d.get("lane") == "chuẩn" or standard_seen or any(not r.get("clean") for r in reviews)
+    at_head = [r for r in reviews if r.get("head") == head]
+    last = at_head[-1] if at_head else reviews[-1] if reviews else None
+    carried = last is not None and last.get("clean") and last.get("head") in (d.get("base_merge_of") or [])
+    if not strict:
+        state = "na"
+    elif last is None or (last.get("head") != head and not carried):
+        state = "missing"
+    else:
+        state = "ok" if last.get("clean") else "blocking"
+    return {"strict": strict, "state": state, "last": last}
+
+
+def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
+    """MỘT điều kiện "được merge/được bật auto-merge" cho `merge-check`, `pr next`, `merge-gate`, guard (`gh`/MCP) và steward
+    (REC-03, ADR-0028), hàm thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` =
+    không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật."""
+    g = review_gate(d, reviews, standard_seen)
+    review_ok = g["state"] in ("na", "ok")
+    return {
+        "strict": g["strict"],
+        "review": g["state"],
+        "eligible": d.get("verdict") == "merge" and review_ok,
+        "auto_merge_ok": not d.get("hard") and review_ok,
+    }
 
 
 def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[str, Any]:
@@ -5852,19 +6127,16 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
-    strict = d.get("lane") == "chuẩn" or bool(rec.get("standard_seen")) or any(not r.get("clean") for r in reviews)
+    gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
+    strict = gate["strict"]
     disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
 
     def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:
         return {"pr": n, "head": head, "action": action, "why": why, "do": do, "fallback": fallback, "strict": strict}
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
-    # Review ở đúng head hiện tại quyết (mới nhất ở head đó); chỉ khi chưa có mới xét review mang qua merge nhánh đích —
-    # review sạch đến muộn ở head cũ không che lỗi chặn ở head hiện tại (AUD-HAR-059).
-    at_head = [r for r in reviews if r.get("head") == head]
-    last = at_head[-1] if at_head else reviews[-1] if reviews else None
-    if early is None and strict:
-        early = _pr_next_review(d, auto_merge, last, act, disable)
+    if early is None and strict:  # review ở head hiện tại quyết trước review mang qua (AUD-HAR-059): xem `review_gate`
+        early = _pr_next_review(d, auto_merge, gate, act, disable)
     if early is not None:
         return early
     return _pr_next_final(d, auto_merge, strict, act, disable)
@@ -5915,10 +6187,44 @@ def model_family(name: str) -> str:
     return m.group(0).lower() if m else re.sub(r"[^a-z]+", "", name.lower())
 
 
-def _review_models_error(args: argparse.Namespace) -> Optional[str]:
-    """Review sạch phải do model KHÁC người viết (LOOP-STOP-022): khai cả hai, cùng họ thì từ chối."""
+REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family")
+
+
+def review_config(base: Path, ref: str) -> Dict[str, str]:
+    """`review_identity`, `author_model_family`, `reviewer_model_family` từ xt.yaml **đã commit ở `ref`** (nhánh đích): danh
+    tính reviewer là gốc tin cậy nên PR không tự đổi được (T-1508, AUD-HAR-066). `ref` không đọc được (PR chồng nhắm nhánh
+    chưa fetch, fetch hỏng) → lấy từ xt.yaml ở cây làm việc thay vì bỏ trống: bỏ trống làm `published_reviews` quay về tin
+    cả dấu của tác giả (review #168). Thiếu khoá → vắng."""
+    text = _committed_xt_text(base, ref)
+    keys = _yaml_keys(text) if text is not None else _xt_keys(base)
+    return {k: keys[k] for k in REVIEW_KEYS if keys.get(k)}
+
+
+def review_family_config_error(keys: Dict[str, str]) -> Optional[str]:
+    """Cấu hình `author_model_family`/`reviewer_model_family` (xt.yaml): khai cả hai thì phải nhận diện được và KHÁC họ
+    (D-045 kiểm theo cấu hình, vì PR không mang dữ liệu model của tác giả); `ci-check` từ chối cấu hình trùng họ."""
+    a, r = keys.get("author_model_family", ""), keys.get("reviewer_model_family", "")
+    if not (a and r):
+        return None
+    if not (MODEL_FAMILY_RE.search(a) and MODEL_FAMILY_RE.search(r)):
+        return f"xt.yaml: author_model_family '{a}' / reviewer_model_family '{r}' không nhận diện được họ model"
+    if model_family(a) == model_family(r):
+        return f"xt.yaml: reviewer_model_family '{r}' cùng họ với author_model_family '{a}' — D-045 (LOOP-STOP-022)"
+    return None
+
+
+def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Review sạch phải do model KHÁC người viết (LOOP-STOP-022): khai cả hai, cùng họ thì từ chối. Không truyền
+    `--reviewer-model`/`--author-model` thì lấy họ model từ cấu hình xt.yaml (workflow `pr-review`, T-1508) — cấu hình
+    trùng họ bị từ chối; nhận diện/so sánh như khi khai tay."""
     if not args.clean:
         return None
+    cfg = cfg or {}
+    bad_cfg = review_family_config_error(cfg)
+    if bad_cfg:
+        return bad_cfg
+    args.reviewer_model = args.reviewer_model or cfg.get("reviewer_model_family")
+    args.author_model = args.author_model or cfg.get("author_model_family")
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-STOP-022: reviewer phải khác model người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
@@ -5943,7 +6249,7 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
             file=sys.stderr,
         )
         return 2
-    err = _review_models_error(args)
+    err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2
@@ -6057,7 +6363,9 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     except PrInputError as exc:
         return {"pr": pr_arg, "head": "", "action": "error", "why": str(exc), "applied": False}
     d, _ = _merge_eval(pr)
-    rec = with_published(_pr_record(read_reviews(base), str(d["pr"])), pr.get("xtReviews"))
+    rec = with_published(
+        _pr_record(read_reviews(base), str(d["pr"])), pr.get("xtReviews"), bool(pr.get("reviewIdentity"))
+    )
     if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
         rec = {**rec, "standard_seen": True}
     out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec), "applied": False}
@@ -6156,7 +6464,9 @@ def cmd_pr(args: argparse.Namespace) -> int:
         data[str(d["pr"])] = rec
         _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
-    out = pr_next(d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews")))
+    out = pr_next(
+        d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
+    )
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0

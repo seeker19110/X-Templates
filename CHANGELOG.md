@@ -12,7 +12,39 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head` (không fetch ở repo nông; `merge-gate` ở CI không kiểm
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
+- Reviewer độc lập trên GitHub (AUTO-03, T-1508): workflow `pr-review.yml` (`claude-code-action` ghim SHA, công cụ chỉ-đọc,
+  `--json-schema`, trần turn/tiền, không checkout code PR) gọi `pr reviewed` bằng token của tài khoản reviewer; xt.yaml khai
+  `review_identity` (chỉ dấu của tài khoản đó được tin), `author_model_family`/`reviewer_model_family` (`ci-check` từ chối
+  trùng họ; `pr reviewed --clean` lấy họ từ cấu hình khi không truyền cờ). Mặc định TẮT tới khi chủ repo cấp
+  `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
+
+### Changed
+- Một điều kiện "được merge" ([ADR-0028](docs/adr/0028-single-merge-eligibility.md), REC-03, T-1507): hàm thuần `review_gate`/
+  `merge_eligibility` dùng chung cho `merge-check` (`--json` thêm `review`, `eligible`, `auto_merge_ok`), `pr next`, `merge-gate`,
+  guard `gh`/MCP và steward. `merge-gate` nay đỏ cả khi PR làn chuẩn đang bật auto-merge mà chưa có review sạch ở đúng head
+  (trước đây chỉ `hard`); guard hỏi khi bật auto-merge/merge PR làn chuẩn thiếu review đã đăng ở head. **Dự án đích:** chạy lại
+  `install.py` (guard + `xt.py` đổi).
+
 ### Fixed
+- Review #168: ghi chú dự án (`— Bằng chứng:`, `(Miễn: …)`) của mục không có đuôi `→ Kiểm:`/`· Nguồn:` không còn bị tính là chữ
+  yêu cầu (trước đó mục `[x]` về `[ ]` oan); với `review_identity`, `pr next`/steward bỏ sổ review cục bộ của tác giả, dấu bị
+  sửa sau khi đăng không tính, `review_identity` lấy từ cây làm việc khi không đọc được `origin/<base>`; `pr-review.yml` cấm
+  tường minh Bash/ghi file/web, truyền model reviewer thật cho `pr reviewed`, ghi diff ra file trước khi cắt.
+- `audit plan`/`audit check --strict`: nhóm sổ ghi **N/A** được đối chiếu lại với tín hiệu repo hiện tại — repo từng không có UI/CSDL
+  rồi có (nhóm A11Y/DATA) trước đây không bao giờ được quét lại; nay `audit_rescan` báo "N/A→áp dụng: …" và `--strict` đỏ tới
+  khi quét nhóm đó hoặc ghi `Giải trình: <lý do>` ở Ghi chú (REC-07, T-1506).
+- `compose` ghép lại blueprint: mục `[x]`/`[~]` mà **chữ yêu cầu** (phần quy phạm, trước `→ Kiểm:`/`· Nguồn:`) đổi so với
+  bản cũ nay về `[ ]` kèm `— Cũ (rev <8 hex>, trước đó [x|~])` thay vì mang `[x]` và bằng chứng cũ sang yêu cầu mới;
+  `carry_states` trả danh sách `stale`, `compose` báo, `blueprint-status` (cả `--json` `stale`) liệt kê mục còn `[ ]` mang
+  `— Cũ`. Đổi mức/ngưỡng quy mô, Kiểm hoặc Nguồn không phải đổi yêu cầu (ADR-0012: chuyển file theo quy mô vẫn giữ trạng thái)
+  (REC-06, T-1505).
+- `merge-check`/`pr next`/steward: check bắt buộc của ruleset bị SKIPPED/NEUTRAL/CANCELLED/STALE hoặc chỉ có bản của app khác
+  (`integration_id` ≠ app sinh check) nay là `human` ("không chạy thật") — GitHub tính required check skipped/neutral là đạt
+  nên PR từng "xanh" khi chưa test nào chạy; `_pr_rest` đưa `appId` của check-run và `requiredChecks` của ruleset vào PR,
+  `_ci_buckets` trả thêm nhóm `not_run` (REC-08, T-1504).
+- `loop init` ghi `scope` (blueprint, profile, scale, `rev`, khoá sàn Gate) vào state: blueprint đã khai mà mất, hỏng hoặc đổi quy mô/hồ sơ
+  nay là verdict `verify` (trước đây xoá blueprint khiến vòng khai `done`); sàn Gate M/L đọc quy mô từ `scope` khi blueprint mất
+  nên xoá/hạ quy mô không bỏ được sàn; state cũ không có `scope` được điền khi `loop resume` (REC-02, T-1503).
 - `loop record`/`loop verify`/lệnh `— Kiểm:`/sàn Gate: Gate exit 0 mà đầu ra có `Ran 0 tests` (unittest Python 3.11 khi `-k`
   không khớp test nào; 3.12+ tự exit 5) nay là exit 5 kèm dòng lý do, evidence ghi `zero_tests_red: true` — Gate `-k <tên>`
   không còn xanh giả (REC-01, T-1501).
