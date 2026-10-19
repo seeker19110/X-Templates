@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+> **Dự án đích:** chạy lại `install.py` (hook `session-start.sh` mới); thêm dòng "Tên phiên" vào §9 `AGENTS.md` của dự án
+> (file copy-if-absent — mẫu mới chỉ áp cho dự án mới).
+
+### Added
+- `LOOP-HARNESS-028` (SHOULD): tên phiên agent `<Tên repo> — <tên nhánh>` (nhánh agent tự đặt `<type>/<mô-tả-ngắn>`);
+  hook SessionStart in gợi ý tên đúng theo remote `origin` + nhánh hiện tại (đang ở `main` thì nhắc tạo nhánh trước);
+  AGENTS.md của khung và mẫu `AGENTS.md` §9 có dòng "Tên phiên".
+
 ### Fixed
 - `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không
   workflow nào sinh, vd `dast`) nay báo đúng "thiếu check bắt buộc: <tên> — thêm job đúng tên hoặc bỏ khỏi ruleset" thay vì
