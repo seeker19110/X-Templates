@@ -1342,6 +1342,7 @@ class HookFailOpenTest(unittest.TestCase):
         "stop-guard.sh",
         "pre-compact.sh",
         "pre-mcp-guard.sh",
+        "permission-request.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
@@ -3165,7 +3166,9 @@ class GuardPolicyTest(unittest.TestCase):
         import guard
 
         for out in ({"decision": "deny", "reason": "x"}, {"decision": "allow", "reason": "y"}, {"decision": ""}):
-            self.assertEqual(guard.apply_policy(out), out)
+            res = guard.apply_policy(out)
+            self.assertEqual({k: res[k] for k in out}, out)
+            self.assertEqual(res["confidence"], "sure")
 
 
 class GuardFenceTest(unittest.TestCase):
@@ -4019,6 +4022,141 @@ class GuardAiAttributionTest(unittest.TestCase):
     def test_repo_framework_forbids(self):
         # Repo khung tự áp luật của mình (AGENTS.md §3, AUD-HAR-017).
         self.assertRegex((ROOT / "xt.yaml").read_text(encoding="utf-8"), r"(?m)^ai_attribution: forbid")
+
+
+class TypedDecisionTest(unittest.TestCase):
+    """REC-04: quyết định có kiểu (action, code, confidence, missing); chính sách theo mã; cùng hành động qua
+    bash/mcp/edit/PermissionRequest cho cùng kết quả."""
+
+    def setUp(self) -> None:
+        self.g = _guard()
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        Path(self.root, "xt.yaml").write_text("", encoding="utf-8")
+
+    def _main(self, args: list, payload: object, policy: str = "") -> str:
+        out = io.StringIO()
+        raw = payload if isinstance(payload, str) else json.dumps(payload)
+        with (
+            mock.patch.object(sys, "argv", ["guard.py", *args]),
+            mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            mock.patch.object(sys, "stdout", out),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.root, "XT_GUARD_POLICY": policy}),
+        ):
+            self.assertEqual(self.g.main(), 0)
+        return out.getvalue()
+
+    def test_typed_decision_codes_from_reasons(self):
+        g = self.g
+        self.assertEqual(g.reason_code("ask", "x push thẳng nhánh chính y"), "PUSH_MAIN")
+        self.assertEqual(g.reason_code("ask", "ghi tay bằng chứng review (…)"), "REVIEW_FORGE")
+        self.assertEqual(g.reason_code("ask", "npm publish"), g.OTHER_ASK)
+        self.assertEqual(g.reason_code("deny", "sudo"), g.RULE_DENY)
+        self.assertEqual(g.reason_code("allow", "merge"), g.RULE_ALLOW)
+        self.assertEqual(g.reason_code("", ""), g.NO_OBJECTION)
+        d = g.decide({"decision": "ask", "reason": g.ASK_PREFIX + g.NEST_ASK})
+        self.assertEqual(
+            (d.action, d.code, d.confidence, d.missing), ("ask", g.NEST_TOO_DEEP, "unsure", ("NEST_TOO_DEEP",))
+        )
+        d = g.decide({"decision": "deny", "reason": "x", "code": "PUSH_MAIN"})
+        self.assertEqual((d.code, d.confidence, d.missing), ("PUSH_MAIN", "sure", ()))
+        self.assertEqual(d.as_dict(), {"code": "PUSH_MAIN", "confidence": "sure", "missing": []})
+        self.assertEqual(set(g.DANGER_MARKERS), {m for m, _ in g.REASON_CODES})
+
+    def test_typed_decision_policy_by_code(self):
+        g = self.g
+        # unsure trong nhóm chặn → deny kể cả mã không nguy hiểm; unsure ngoài nhóm chặn giữ nguyên.
+        out = g.apply_policy({"decision": "ask", "reason": "lạ", "confidence": "unsure"})
+        self.assertEqual((out["decision"], out["confidence"], out["missing"]), ("deny", "unsure", [g.OTHER_ASK]))
+        self.assertIn("nguy hiểm — OTHER_ASK", str(out["reason"]))
+        self.assertEqual(g.apply_policy({"decision": "", "confidence": "unsure"})["decision"], "")
+        # ask nguy hiểm theo mã → deny; ask khác → cho qua, lý do rỗng.
+        self.assertEqual(g.apply_policy({"decision": "ask", "reason": "x", "code": "PUSH_MAIN"})["decision"], "deny")
+        other = g.apply_policy({"decision": "ask", "reason": "npm publish"})
+        self.assertEqual((other["decision"], other["reason"], other["code"]), ("", "", g.OTHER_ASK))
+        # mã lạ (vắng bảng) của ask → cho qua; deny/allow giữ nguyên lý do.
+        self.assertEqual(g.apply_policy({"decision": "ask", "reason": "x", "code": "LẠ"})["decision"], "")
+        self.assertEqual(g.apply_policy({"decision": "deny", "reason": "r"})["reason"], "r")
+        # UNPARSED (guard lỗi khi kiểm merge) và BUDGET → deny.
+        fail = g._failure_decision("bash", {}, "gh pr merge 5")
+        self.assertEqual((g.apply_policy(fail)["decision"], fail["code"]), ("deny", g.UNPARSED))
+        long_cmd = "echo " + "a" * (g.CMD_MAX_CHARS + 1)
+        res = g.apply_policy(g.bash_decision(long_cmd, self.root))
+        self.assertEqual((res["decision"], res["code"], res["confidence"]), ("deny", g.BUDGET, "unsure"))
+
+    def test_typed_decision_same_across_adapters(self):
+        cmd = "git push origin main"
+        bash = json.loads(self._main(["bash"], {"tool_input": {"command": cmd}}))
+        self.assertEqual((bash["decision"], bash["code"]), ("deny", "PUSH_MAIN"))
+        perm = json.loads(self._main(["permission"], {"tool_name": "Bash", "tool_input": {"command": cmd}}))
+        dec = perm["hookSpecificOutput"]["decision"]
+        self.assertEqual(perm["hookSpecificOutput"]["hookEventName"], "PermissionRequest")
+        self.assertEqual(dec["behavior"], "deny")
+        self.assertEqual(dec["message"], bash["reason"])
+        edit = {"tool_name": "Write", "tool_input": {"file_path": ".env", "content": "x"}}
+        self.assertEqual(json.loads(self._main(["edit"], edit))["decision"], "deny")
+        self.assertEqual(
+            json.loads(self._main(["permission"], edit))["hookSpecificOutput"]["decision"]["behavior"], "deny"
+        )
+        # không phản đối / ask không nguy hiểm / tool lạ / strict ask → không in gì (headless: Claude Code deny).
+        for payload, policy in (
+            ({"tool_name": "Bash", "tool_input": {"command": "ls"}}, ""),
+            ({"tool_name": "Bash", "tool_input": {"command": "npm publish"}}, ""),
+            ({"tool_name": "Read", "tool_input": {"file_path": "x"}}, ""),
+            ({"tool_name": 5}, ""),
+            ({"tool_name": "Bash", "tool_input": {"command": "npm publish"}}, "strict"),
+        ):
+            self.assertEqual(self._main(["permission"], payload, policy), "", payload)
+
+    def test_typed_decision_permission_mcp_and_failure(self):
+        g = self.g
+        self.assertEqual(g.permission_mode("mcp__github__merge_pull_request"), "mcp")
+        self.assertEqual(g.permission_mode("MultiEdit"), "edit")
+        self.assertEqual(
+            g.permission_output({"decision": "allow", "reason": "ok"}),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+            ),
+        )
+        mcp = {"tool_name": "mcp__github__create_pull_request", "tool_input": {"title": "feat: x", "body": "b"}}
+        self.assertEqual(self._main(["permission"], mcp), "")
+        # guard lỗi giữa chừng: merge MCP → deny (UNPARSED); lệnh thường → fail-open (không in gì).
+        merge = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {}}
+        with mock.patch.object(g, "mcp_decision", side_effect=RuntimeError("x")):
+            out = json.loads(self._main(["permission"], merge))
+        self.assertEqual(out["hookSpecificOutput"]["decision"]["behavior"], "deny")
+        with mock.patch.object(g, "bash_decision", side_effect=RuntimeError("x")):
+            self.assertEqual(self._main(["permission"], {"tool_name": "Bash", "tool_input": {"command": "ls"}}), "")
+            out = json.loads(self._main(["bash"], {"tool_input": {"command": "gh pr merge 5"}}))
+        self.assertEqual((out["decision"], out["code"]), ("deny", g.UNPARSED))
+        self.assertEqual(self._main(["permission"], "not json"), "")
+        self.assertIsNone(g._payload_cmd({"tool_input": "x"}))
+        self.assertIsNone(g._payload_cmd(None))
+
+    def test_typed_decision_hook_script(self):
+        payload = {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}
+        code, out, _ = run_hook("permission-request.sh", payload, extra_env={"XT_GUARD_POLICY": ""})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["decision"]["behavior"], "deny")
+        code, out, _ = run_hook("permission-request.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual((code, out), (0, ""))
+        # thiếu guard.py → không in gì (fail-open về luồng; headless vẫn deny).
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(HOOKS / "permission-request.sh", tmp / "permission-request.sh")
+        shutil.copy(HOOKS / "_lib.sh", tmp / "_lib.sh")
+        r = subprocess.run(
+            ["bash", str(tmp / "permission-request.sh")], input=json.dumps(payload), capture_output=True, text=True
+        )
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    def test_typed_decision_registered_in_settings(self):
+        s = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        entry = s["hooks"]["PermissionRequest"][0]
+        self.assertEqual(entry["hooks"][0]["type"], "command")
+        self.assertIn("permission-request.sh", entry["hooks"][0]["command"])
+        for tool in ("Bash", "Edit", "Write", "MultiEdit", "mcp__github__merge_pull_request"):
+            self.assertRegex(tool, f"^(?:{entry['matcher']})$")
 
 
 if __name__ == "__main__":

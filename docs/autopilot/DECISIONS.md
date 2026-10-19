@@ -573,3 +573,17 @@
 - Chọn: Bỏ tài liệu thuần, giữ scripts/* và framework/templates/*
 - Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu 2026-10-19 (giảm vòng review cho PR docs); lớp đỡ còn validate, check-links, revert; templates giữ vì thành file thật ở dự án đích
 - Đường lùi: Đặt lại chuỗi D-031 trong xt.yaml
+
+### D-081 · 2026-10-19T22:57:52+00:00 · Duyệt PLAN-3.9-automation (T-1509…T-1522)
+
+- Phương án: (1) Chạy theo PLAN đã lập, review khác model đã rà Gate · (2) Hoãn, chờ chủ repo duyệt rescan audit trước
+- Chọn: Chạy theo PLAN đã lập, review khác model đã rà Gate
+- Lý do (tiêu chí chất lượng cuối): PLAN đã có D-066…D-070; không chặn bởi audit rescan (độc lập); tiêu chí 1: Gate đã siết
+- Đường lùi: loop block + revert PR từng lát
+
+### D-082 · 2026-10-19T23:05:41+00:00 · PermissionRequest hook: guard không phản đối thì trả allow hay im lặng?
+
+- Phương án: (1) A: im lặng (headless tự deny, tương tác hiện hộp thoại) · (2) B: trả allow cho mọi thứ guard không chặn
+- Chọn: A: im lặng (headless tự deny, tương tác hiện hộp thoại)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: chiều chặt, đúng REC-04 'không quyết định ⇒ deny'; B mở rộng tự duyệt ngoài permissions.allow và cần ADR
+- Đường lùi: đổi nhánh in allow trong guard.py permission + ADR

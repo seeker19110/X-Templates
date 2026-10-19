@@ -240,6 +240,19 @@ class GuardCorpusTest(unittest.TestCase):
         wrong = [c for c in ALLOW if self.dec(c) == "deny"]
         self.assertEqual(wrong, [])
 
+    def test_guard_corpus_typed_decision_codes(self) -> None:
+        """REC-04: lệnh hợp lệ không mang mã nguy hiểm/unsure; hạt giống bị chặn đều có mã của bảng."""
+        for c in ALLOW:
+            out = guard.apply_policy(guard.bash_decision(c, self.root))
+            with self.subTest(c):
+                self.assertEqual(out["confidence"], "sure")
+                self.assertNotEqual(guard.POLICY.get(str(out["code"])), "deny")
+        for s in SEEDS:
+            out = guard.apply_policy(guard.bash_decision(s, self.root))
+            with self.subTest(s):
+                self.assertEqual(out["decision"], "deny")
+                self.assertIn(out["code"], {*guard.POLICY, guard.RULE_DENY})
+
 
 # Lỗ ĐÃ BIẾT, guard chưa chặn (review #130, có sẵn trước bộ tấn công): ghi lại để không im lặng. Khi guard chặn được một
 # dòng, test dưới đỏ → chuyển nó sang SEEDS/ca chặn. Nhóm biến/eval biến/mã trong ngôn ngữ khác về nguyên tắc không

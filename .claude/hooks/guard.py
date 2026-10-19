@@ -4179,7 +4179,11 @@ def bash_decision(
     budget = budget or ScanBudget()
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
     if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:
-        res.update(decision="deny", reason=f"Lệnh quá phức tạp để guard quét hết (vượt ngân sách quét): {cmd[:200]}")
+        res.update(
+            decision="deny",
+            reason=f"Lệnh quá phức tạp để guard quét hết (vượt ngân sách quét): {cmd[:200]}",
+            code=BUDGET,
+        )
         return res
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)
@@ -4225,37 +4229,130 @@ def bash_decision(
 
 
 # Chính sách đầu ra (ADR-0018, chủ repo 2026-10-17): chỉ CẤM lệnh nguy hiểm/không đảo ngược, còn lại cho chạy. Bộ luật
-# ở trên vẫn tính `ask` đầy đủ; `XT_GUARD_POLICY=strict` giữ hành vi cũ (hỏi). Ask mang dấu dưới đây → deny, khác → cho qua.
-DANGER_MARKERS = (
-    "push thẳng nhánh chính",
-    "push --all/--tags",
-    "xoá đệ quy ngoài thư mục dự án",
-    "rm -rf không có đích",
-    "find xoá file ngoài thư mục dự án",
-    "xoá thay đổi đã cất",
-    DESTROY_ASK,
-    HARD_ASK,
-    UNVERIFIED_ASK,
-    "container có quyền máy chủ",
-    "xoá thư mục gắn từ máy",
-    "tắt hook của khung",
-    "bỏ qua hook của dự án",
-    "ghi file bí mật qua Bash",
-    "tay bằng chứng",  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
-    "lệnh đã mã hoá/nén",  # `… | base64 -d | sh` từ nguồn guard không giải được
-    NEST_ASK,  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
+# ở trên vẫn tính `ask` đầy đủ; `XT_GUARD_POLICY=strict` giữ hành vi cũ (hỏi). Quyết định có kiểu (REC-04): mỗi kết quả
+# mang MÃ lý do; `apply_policy` ánh xạ theo mã qua bảng `POLICY`, không theo chuỗi rải rác. Mã do nơi sinh quyết định
+# đặt (`code`), hoặc suy MỘT lần từ lý do qua `REASON_CODES` (luật cũ chưa đặt mã). Regex/hook cùng UID không phải ranh
+# giới cách ly (D-015) — đây là lớp chặn sai lầm, không chặn kẻ tấn công có quyền ghi.
+OTHER_ASK = "OTHER_ASK"  # ask không nguy hiểm → cho qua (mặc định)
+RULE_DENY = "RULE_DENY"  # deny của bộ luật chưa có mã riêng
+NO_OBJECTION = "NONE"  # guard không phản đối
+RULE_ALLOW = "RULE_ALLOW"  # allow rõ ràng (merge đã qua merge-check)
+UNPARSED = "UNPARSED"  # guard lỗi giữa chừng với hành động phải kiểm
+BUDGET = "BUDGET"
+BRACE_OVERFLOW = "BRACE_OVERFLOW"
+NEST_TOO_DEEP = "NEST_TOO_DEEP"
+# (dấu trong lý do, mã) — thứ tự: dấu cụ thể trước dấu chung ("bằng chứng review" trước "tay bằng chứng").
+REASON_CODES: Tuple[Tuple[str, str], ...] = (
+    ("push thẳng nhánh chính", "PUSH_MAIN"),
+    ("push --all/--tags", "PUSH_ALL"),
+    ("xoá đệ quy ngoài thư mục dự án", "WIPE_OUTSIDE"),
+    ("rm -rf không có đích", "WIPE_OUTSIDE"),
+    ("find xoá file ngoài thư mục dự án", "WIPE_OUTSIDE"),
+    ("xoá thư mục gắn từ máy", "WIPE_OUTSIDE"),
+    ("xoá thay đổi đã cất", "STASH_DROP"),
+    (DESTROY_ASK, "DESTROY"),
+    (HARD_ASK, "HARD_EXCEPTION"),
+    (UNVERIFIED_ASK, "UNVERIFIED"),
+    ("container có quyền máy chủ", "HOST_CONTAINER"),
+    ("tắt hook của khung", "HOOK_BYPASS"),
+    ("bỏ qua hook của dự án", "HOOK_BYPASS"),
+    ("ghi file bí mật qua Bash", "SECRET_WRITE"),
+    ("bằng chứng review", "REVIEW_FORGE"),
+    ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
+    ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
+    (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
+    ("vượt ngân sách quét", BUDGET),
+    ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
+# Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
+DANGER_MARKERS = tuple(m for m, _ in REASON_CODES)
+# Mã mà guard không đọc hết được hành động: luôn `unsure`.
+UNSURE_CODES = frozenset({UNPARSED, BUDGET, BRACE_OVERFLOW, NEST_TOO_DEEP, "OPAQUE_EXEC", "UNVERIFIED"})
+# Bảng chính sách mặc định: mã → hành động. Mã vắng bảng giữ hành động gốc. ask không nguy hiểm → "" (cho qua).
+POLICY: Dict[str, str] = {**{c: "deny" for _, c in REASON_CODES}, UNPARSED: "deny", OTHER_ASK: "", RULE_DENY: "deny"}
+# Nhóm chặn: hành động gốc ask/deny. `unsure` trong nhóm chặn → deny ở mọi adapter (bash/mcp/edit/permission).
+BLOCKING = frozenset({"ask", "deny"})
+
+
+class Decision:
+    """Quyết định có kiểu: `action` allow|deny|ask|"" (không phản đối), `code` mã lý do, `confidence` sure|unsure,
+    `missing` = phần guard không kiểm được (rỗng khi sure)."""
+
+    __slots__ = ("action", "code", "confidence", "missing", "reason")
+
+    def __init__(self, action: str, code: str, confidence: str, missing: Tuple[str, ...], reason: str = "") -> None:
+        self.action = action
+        self.code = code
+        self.confidence = confidence
+        self.missing = missing
+        self.reason = reason
+
+    def as_dict(self) -> Dict[str, object]:
+        return {"code": self.code, "confidence": self.confidence, "missing": list(self.missing)}
+
+
+def reason_code(action: str, reason: str) -> str:
+    """Mã lý do suy từ lý do (chỉ dùng khi nơi sinh chưa đặt `code`)."""
+    hit = next((c for m, c in REASON_CODES if m in reason), "")
+    if hit:
+        return hit
+    return {"ask": OTHER_ASK, "deny": RULE_DENY, "allow": RULE_ALLOW}.get(action, NO_OBJECTION)
+
+
+def decide(out: Dict[str, object]) -> Decision:
+    """Dựng `Decision` từ kết quả bộ luật (dict của bash/edit/mcp)."""
+    action = str(out.get("decision") or "")
+    reason = str(out.get("reason", "")).removeprefix(ASK_PREFIX)
+    code = str(out.get("code") or reason_code(action, reason))
+    unsure = code in UNSURE_CODES or out.get("confidence") == "unsure"
+    missing = (code,) if unsure else ()
+    return Decision(action, code, "unsure" if unsure else "sure", missing, reason)
+
+
+def policy_action(d: Decision) -> str:
+    """Hành động sau chính sách mặc định: unsure trong nhóm chặn → deny; còn lại tra bảng theo mã."""
+    if d.action in BLOCKING and d.confidence == "unsure":
+        return "deny"
+    if d.action == "ask":
+        return POLICY.get(d.code, "")
+    return d.action
 
 
 def apply_policy(out: Dict[str, object]) -> Dict[str, object]:
-    """ask nguy hiểm (DANGER_MARKERS) → deny; ask khác → cho qua (quyết định rỗng); deny/allow/rỗng giữ nguyên."""
-    if out.get("decision") != "ask":
-        return out
-    reason = str(out.get("reason", "")).removeprefix(ASK_PREFIX)
-    hit = next((m for m in DANGER_MARKERS if m in reason), "")
-    if hit:
-        return {**out, "decision": "deny", "reason": f"Lệnh bị khung chặn (nguy hiểm — {hit}): {reason[:400]}"}
-    return {**out, "decision": "", "reason": ""}
+    """Chính sách mặc định theo mã: ask nguy hiểm/unsure → deny; ask khác → cho qua (quyết định rỗng); deny/allow/rỗng
+    giữ nguyên. Kết quả mang `code`/`confidence`/`missing`."""
+    d = decide(out)
+    act = policy_action(d)
+    res = {**out, **d.as_dict(), "decision": act}
+    if act == "deny" and d.action == "ask":
+        res["reason"] = f"Lệnh bị khung chặn (nguy hiểm — {d.code}): {d.reason[:400]}"
+    elif act == "" and d.action == "ask":
+        res["reason"] = ""
+    return res
+
+
+PERMISSION_MODES = {"Bash": "bash", "Edit": "edit", "Write": "edit", "MultiEdit": "edit"}
+
+
+def permission_mode(tool: object) -> str:
+    """Chế độ guard cho tool của sự kiện PermissionRequest; tool khác → rỗng (không quyết)."""
+    if not isinstance(tool, str):
+        return ""
+    return PERMISSION_MODES.get(tool) or ("mcp" if tool.startswith("mcp__") else "")
+
+
+def permission_output(out: Dict[str, object]) -> str:
+    """JSON cho hook PermissionRequest (headless) từ CÙNG quyết định: deny/allow → `decision.behavior`; còn lại (ask,
+    rỗng) → không in gì: Claude Code hiện hộp thoại, headless thì deny (chiều chặt)."""
+    act = str(out.get("decision") or "")
+    if act not in ("allow", "deny"):
+        return ""
+    behavior: Dict[str, object] = {"behavior": act}
+    if act == "deny":
+        behavior["message"] = str(out.get("reason", ""))[:600]
+    return json.dumps(
+        {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": behavior}}, ensure_ascii=False
+    )
 
 
 # Lệnh merge/ghi GitHub: guard lỗi giữa chừng với lệnh này thì hỏi thay vì cho qua (fail-closed cho merge).
@@ -4269,7 +4366,12 @@ def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, obje
     if (mode == "mcp" and isinstance(tool, str) and MCP_MERGE_RE.fullmatch(tool)) or (
         mode == "bash" and isinstance(cmd, str) and MERGE_CMD_RE.search(cmd)
     ):
-        return {"decision": "ask", "reason": f"guard lỗi khi kiểm merge/ghi GitHub — {UNVERIFIED_ASK}"}
+        return {
+            "decision": "ask",
+            "reason": f"guard lỗi khi kiểm merge/ghi GitHub — {UNVERIFIED_ASK}",
+            "code": UNPARSED,
+            "confidence": "unsure",
+        }
     return {"decision": ""}
 
 
@@ -4283,35 +4385,49 @@ def _sh_field(v: object) -> str:
     return "" if v is None else str(v).replace("\0", "")
 
 
+def _rule_decision(mode: str, payload: Any, root: str) -> Dict[str, object]:
+    """Kết quả bộ luật cho một payload hook theo chế độ bash|edit|mcp; chế độ khác → không phản đối."""
+    tool_input = payload.get("tool_input") or {}
+    if mode == "bash":
+        cmd = tool_input.get("command")
+        cwd = payload.get("cwd")
+        cwd = cwd if isinstance(cwd, str) and posixpath.isabs(cwd) else None
+        return bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
+    if mode == "edit":
+        path = tool_input.get("file_path")
+        d, r = edit_decision(path, root, tool_input) if isinstance(path, str) and path else ("", "")
+        return {"decision": d, "reason": r}
+    if mode == "mcp":
+        name = payload.get("tool_name")
+        d, r = mcp_decision(name, tool_input, root) if isinstance(name, str) else ("", "")
+        return {"decision": d, "reason": r}
+    return {"decision": ""}
+
+
+def _payload_cmd(payload: Any) -> object:
+    """`tool_input.command` nếu payload đọc được (cho quyết định khi guard lỗi giữa chừng)."""
+    ti = payload.get("tool_input") if isinstance(payload, dict) else None
+    return ti.get("command") if isinstance(ti, dict) else None
+
+
 def main() -> int:
+    """`guard.py bash|edit|mcp [nul]` cho PreToolUse; `guard.py permission` cho PermissionRequest (chế độ suy từ
+    `tool_name`; in JSON của hook hoặc không in gì)."""
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     payload: Any = None
-    cmd: object = None
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-        tool_input = payload.get("tool_input") or {}
-        root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-        if mode == "bash":
-            cmd = tool_input.get("command")
-            cwd = payload.get("cwd")
-            cwd = cwd if isinstance(cwd, str) and posixpath.isabs(cwd) else None
-            out: Dict[str, object] = bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
-        elif mode == "edit":
-            path = tool_input.get("file_path")
-            d, r = edit_decision(path, root, tool_input) if isinstance(path, str) and path else ("", "")
-            out = {"decision": d, "reason": r}
-        elif mode == "mcp":
-            name = payload.get("tool_name")
-            d, r = mcp_decision(name, tool_input, root) if isinstance(name, str) else ("", "")
-            out = {"decision": d, "reason": r}
-        else:
-            out = {"decision": ""}
+        if mode == "permission":
+            mode = permission_mode(payload.get("tool_name"))
+        out = _rule_decision(mode, payload, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên — trừ merge (AUD-SEC-032)
-        out = _failure_decision(mode, payload, cmd)
+        out = _failure_decision(mode, payload, _payload_cmd(payload))
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
-    if sys.argv[2:3] == ["nul"]:
+    if sys.argv[1:2] == ["permission"]:
+        sys.stdout.write(permission_output(out))
+    elif sys.argv[2:3] == ["nul"]:
         sys.stdout.write("".join(f"{v}\0" for v in ["ok", *(_sh_field(out.get(k)) for k in NUL_FIELDS)]))
     else:
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
