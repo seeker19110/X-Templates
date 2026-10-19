@@ -275,6 +275,13 @@ class MergeDecisionTest(unittest.TestCase):
         base_bad = commit("base bad")
         self.assertEqual(xt.local_merge_conflicts("base", base_bad, head, "7", d), ["a.txt"])
         self.assertIsNone(xt.local_merge_conflicts("base", "", head, "7", d))
+        subprocess.run(["git", "-C", str(d), "checkout", "-q", "-b", "u1", root], check=True)
+        (d / "tên có dấu.txt").write_text("1\n")
+        u1 = commit("u1")
+        subprocess.run(["git", "-C", str(d), "checkout", "-q", "-b", "u2", root], check=True)
+        (d / "tên có dấu.txt").write_text("2\n")
+        u2 = commit("u2")
+        self.assertEqual(xt.local_merge_conflicts("u1", u1, u2, "7", d), ["tên có dấu.txt"])  # -z: không quote bát phân
         missing = "0" * 39 + "1"
         with unittest.mock.patch.object(xt, "_git", wraps=xt._git) as g:
             self.assertIsNone(
@@ -297,25 +304,87 @@ class MergeDecisionTest(unittest.TestCase):
 
         with unittest.mock.patch.object(xt, "_git", side_effect=fetch_then_ok):
             self.assertEqual(xt.local_merge_conflicts("base", base_bad, missing, "7", d), [])
-        self.assertEqual(seen, ["cat-file", "cat-file", "fetch", "cat-file", "cat-file", "merge-tree"])
+        self.assertEqual(seen, ["cat-file", "cat-file", "rev-parse", "fetch", "cat-file", "cat-file", "merge-tree"])
         old_git = subprocess.CompletedProcess([], 129, "", "unknown option")  # git cũ: không có --write-tree
         with unittest.mock.patch.object(xt, "_git") as g:
             g.side_effect = lambda *a, **k: (
                 old_git if a[1] == "merge-tree" else subprocess.CompletedProcess(a, 0, "", "")
             )
             self.assertIsNone(xt.local_merge_conflicts("base", base_bad, head, "7", d))
-        odd = subprocess.CompletedProcess([], 1, "tree-only\n", "")
+        odd = subprocess.CompletedProcess([], 1, "tree-only\0", "")
         with unittest.mock.patch.object(xt, "_git") as g:
             g.side_effect = lambda *a, **k: odd if a[1] == "merge-tree" else subprocess.CompletedProcess(a, 0, "", "")
             self.assertIsNone(xt.local_merge_conflicts("base", base_bad, head, "7", d))  # exit 1 mà không có file
-        tree_then_msgs = subprocess.CompletedProcess([], 1, "t\nx.py\n\nmsg\n", "")  # có dòng trống + thông điệp
+        tree_then_msgs = subprocess.CompletedProcess(
+            [], 1, "t\0x.py\0tên có dấu.txt\0\0msg\0", ""
+        )  # -z: trường rỗng rồi thông điệp
         with unittest.mock.patch.object(xt, "_git") as g:
             g.side_effect = lambda *a, **k: (
                 tree_then_msgs if a[1] == "merge-tree" else subprocess.CompletedProcess(a, 0, "", "")
             )
-            self.assertEqual(xt.local_merge_conflicts("base", base_bad, head, "7", d), ["x.py"])
+            self.assertEqual(xt.local_merge_conflicts("base", base_bad, head, "7", d), ["x.py", "tên có dấu.txt"])
+        shallow = subprocess.CompletedProcess([], 0, "true\n", "")  # repo nông (CI depth 1): không fetch lịch sử về
+        with unittest.mock.patch.object(xt, "_git") as g:
+            g.side_effect = lambda *a, **k: (
+                shallow
+                if a[1] == "rev-parse"
+                else subprocess.CompletedProcess(a, 1 if a[1] == "cat-file" else 0, "", "")
+            )
+            self.assertIsNone(xt.local_merge_conflicts("base", base_bad, missing, "7", d))
+        self.assertNotIn("fetch", [c.args[1] for c in g.call_args_list])
         empty = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.assertIsNone(xt.local_merge_conflicts("base", base_bad, head, "7", empty))  # không phải repo git
+
+    def test_local_merge_conflicts_non_utf8_name_and_real_shallow_clone(self):
+        """Review #165: tên file KHÔNG phải UTF-8 (`lat\\xe9`) ở xung đột — `-z` in byte thô, không được sập
+        UnicodeDecodeError (steward/merge-watch chết); clone nông thật: commit `main` thiếu → không fetch (kể cả khi fetch sẽ thành công) → None."""
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+        def git(*a: str) -> str:
+            r = subprocess.run(
+                ["git", "-C", str(d), "-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false", *a],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout.strip()
+
+        git("init", "-q")
+        name = os.fsdecode(b"lat\xe9")
+        (d / name).write_text("1")
+        git("add", "-A")
+        git("commit", "-qm", "r")
+        root = git("rev-parse", "HEAD")
+        git("checkout", "-q", "-b", "m")
+        (d / name).write_text("2")
+        git("commit", "-qam", "m")
+        main = git("rev-parse", "HEAD")
+        git("checkout", "-q", "-b", "b", root)
+        (d / name).write_text("3")
+        git("commit", "-qam", "b")
+        head = git("rev-parse", "HEAD")
+        got = xt.local_merge_conflicts("m", main, head, "1", d)
+        self.assertEqual(len(got or []), 1)
+        self.assertTrue(got and got[0].startswith("lat"))
+        clone = Path(self.enterContext(tempfile.TemporaryDirectory())) / "c"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", "--no-local", f"file://{d}", str(clone)],
+            check=True,
+            capture_output=True,
+        )
+        with unittest.mock.patch.object(
+            xt, "_git", wraps=xt._git
+        ) as g:  # number="" → fetch `m` sẽ thành công nếu có chạy
+            self.assertIsNone(xt.local_merge_conflicts("m", main, head, "", clone))
+        self.assertNotIn("fetch", [c.args[1] for c in g.call_args_list])  # nông: không fetch, không kiểm được
+
+    def test_merge_gate_skips_local_conflict_check(self):
+        """Review #164: `merge-gate` chạy ở CI checkout nông — chỉ cần ngoại lệ cứng, không kiểm xung đột cục bộ."""
+        with FakeGh(pull={"mergeable": None, "mergeable_state": "unknown"}).patch():
+            with unittest.mock.patch.object(xt, "local_merge_conflicts") as lmc:
+                rc, _, _ = run_main("merge-gate", "--pr", "7")
+        lmc.assert_not_called()
+        self.assertEqual(rc, 0)
 
     def test_rest_adds_local_conflicts_when_github_undecided(self):
         """`_pr_rest`: chỉ hỏi kiểm cục bộ khi GitHub chưa khẳng định MERGEABLE; không kiểm được → không có khoá."""
