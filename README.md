@@ -61,8 +61,9 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
 3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR mở kèm auto-merge ở L3 (ADR-0015), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã khi `merge_hard_exceptions: human` (ADR-0016, ADR-0020). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
 4. Dừng khi xong có bằng chứng, khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
-   thao tác không đảo ngược, tiền thật, dữ liệu người dùng thật, deploy/publish, đổi cấu hình cổng (mâu thuẫn spec không
-   còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`).
+   thao tác không đảo ngược (máy chặn), tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật
+   (`loop defer`, gom cho người). Deploy/publish và đổi cấu hình cổng kèm lý do **cho chạy** (ADR-0018, D-023 — lớp đỡ
+   là CI/ruleset nhánh/review); mâu thuẫn spec không còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`.
 
 Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/không đảo ngược (lệnh phá huỷ, `curl | sh`, push nhánh chính…) mà không hỏi người (ADR-0018),
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
@@ -79,6 +80,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py loop init/status/record/block/defer/decide/checkpoint/resume/stop` | Vòng lặp autopilot có bằng chứng, chạy một phiên đến khi xong (ADR-0009); `decide` ghi quyết định tự duyệt D-NNN (ADR-0008) |
 | `python3 scripts/xt.py grant-check GROUP [KHOÁ=GIÁ_TRỊ …]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không: exit 0 làm, 1 `loop defer` (ADR-0022) |
 | `python3 scripts/xt.py guard-check -- <lệnh>` | exit 126 nếu guard của dự án cấm lệnh — `dev-task.sh` gọi trước mỗi lệnh `xt.yaml`; Gate/`Kiểm:` do `loop record`/`verify`/`blueprint-status --run` chạy cũng qua cùng kiểm (LOOP-STOP-027) |
+| `python3 scripts/xt.py release-check [--blueprint F] [--status F] [--json]` | Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối khớp cây, cây git sạch + HEAD, đề xuất "Khi chạy thật" chờ người → PASS/FAIL/N-A có bằng chứng, `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO — phần máy của `GO-NO-GO.md` |
 | `python3 scripts/xt.py merge-gate --pr N --head SHA` | Required check `merge-gate` (job `.github/workflows/merge-gate.yml`): exit 1 khi `merge-check` báo `hard` mà PR đang bật auto-merge, 3 khi head khác `--head` (ADR-0023) |
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge (làn nhanh khi mở, làn chuẩn sau review sạch — ADR-0024) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
@@ -163,6 +165,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   PR đủ tiêu chuẩn khi không còn phiên agent; `pr reviewed` đăng kết quả review lên PR.
 - [ADR-0028](docs/adr/0028-single-merge-eligibility.md): một điều kiện "được merge" (`merge_eligibility`) cho
   `merge-check`, `pr next`, `merge-gate`, guard và steward — auto-merge cần review sạch ở head.
+- [ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md): hai tầng executor (`executor-deep`) có
+  chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive`, `release-check` (G7 máy đọc).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

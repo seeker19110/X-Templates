@@ -18,6 +18,7 @@ updated: 2026-10-19
 | Trước phát hành lớn / cổng G7 | Toàn bộ, `--strict` | Còn 🔴 mở → không phát hành |
 | Định kỳ (gợi ý: mỗi quý, hoặc sau ~50 PR) | Chỉ nhóm có thay đổi (§6) | `xt.py audit plan` liệt kê nhóm cần quét lại |
 | Sau sự cố / post-mortem | Nhóm liên quan | Phát hiện thành hàng rào máy (test, lint, Gate) |
+| **Sau mỗi mốc** của `PLAN.md` khi chạy autopilot (lát/nhóm lát xong — `loop status` báo `milestone_done`, ADR-0029) | Chỉ nhóm mà `xt.py audit plan --status …` suy ra từ diff kể từ SHA quét trước (§6), **không** toàn bộ | 🔴/🟠 thành task mới trong PLAN **trước** khi sang mốc kế; mốc kế chỉ bắt đầu khi không còn 🔴 mở |
 
 ## 2. Bước -1: đọc repo thật, không audit "khung trống"
 

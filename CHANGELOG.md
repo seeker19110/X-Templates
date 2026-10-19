@@ -6,6 +6,26 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- Hai tầng executor, chuyển cấp, audit theo mốc, review chưa kết luận, cổng G7 máy đọc ([ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md),
+  D-075…D-078; nghiên cứu [`research/2026-10-19-rapid-build-then-harden.md`](research/2026-10-19-rapid-build-then-harden.md)):
+  - `.claude/agents/executor-deep.md` (tầng sâu) và `reviewer-alt.md` (reviewer khác họ với `reviewer`, cho diff của
+    `executor-deep`/phiên chính cùng họ); `reviewer.md` biết kết luận INCONCLUSIVE.
+  - `PLAN.md`: `(exec: deep)` trong dòng task → tầng sâu; mục `##`/`###` chứa task là mốc. `loop status --json` (verdict
+    `continue`) thêm `executor`/`tier`/`escalated`/`default_failures` — tầng mặc định đỏ 2 lần cùng task trong vòng này →
+    chuyển cấp `executor-deep` (một dạng "đổi cách" của `LOOP-ORCH-014`, `max_same_failure` giữ 3) — và `milestone_done`
+    khi mọi task của mục trước đã đóng (audit delta trước mốc kế). `loop record --executor executor|executor-deep` ghi agent
+    vào evidence/`runs.jsonl`; `loop stats` thêm `executors` mỗi task, `escalated`, `escalation_rate`.
+  - `pr reviewed --inconclusive`: reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file) — sổ và dấu đăng
+    `verdict=inconclusive`; `review_gate` coi là `missing` (cần review khác ở head), không `blocking`; vẫn `strict`.
+  - `xt.py release-check [--blueprint B] [--status S] [--json]`: cổng G7 máy đọc gom blueprint `--strict --run`, `audit check
+    --strict`, kiểm lại cuối khớp cây, cây git sạch + HEAD, số đề xuất "Khi chạy thật" chờ người → PASS/FAIL/N-A có bằng chứng,
+    `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO. Mẫu `GO-NO-GO.md` trỏ tới nó.
+  - Mục mới `LOOP-ORCH-019` (hai tầng executor, tên tầng không tên model, điều phối chạy model cao nhất sẵn có — không khả dụng
+    thì Opus); sửa `LOOP-ORCH-002` (gói handoff thêm `executor_tier`, `escalation_condition`), `LOOP-ORCH-005` (khác họ với
+    agent đã viết; INCONCLUSIVE), `LOOP-ORCH-014` (chuyển cấp). `lifecycle.md` quy tắc 6 "chất lượng theo pha — nhanh ở G6,
+    tin cậy ở G7"; `audit.md` §1 hàng "Sau mỗi mốc"; giao thức autopilot bước 11b/14b; mẫu `PLAN.md`/`AGENTS.md`/`CLAUDE.md`.
+    **Dự án đích:** chạy lại `install.py` (agent mới, `xt.py`); `AGENTS.md`/`CLAUDE.md` copy-if-absent — tự chép dòng §8 và
+    "Model/effort".
 - `merge-check`/`pr next`/steward: xung đột với nhánh đích kiểm **cục bộ** bằng `git merge-tree --write-tree` khi GitHub
   chưa tính xong `mergeable` (null tới vài chục giây sau push) hoặc báo xung đột — `localConflicts` liệt kê file xung đột,
   verdict `fix` kèm lệnh `git fetch origin <base> && git merge origin/<base>`; cục bộ thấy merge sạch thì không còn `wait`
@@ -26,6 +46,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `install.py` (guard + `xt.py` đổi).
 
 ### Fixed
+- README mục "Dùng thế nào" bước 4 vẫn liệt kê deploy/publish và đổi cấu hình cổng là điểm dừng bắt buộc, trái với
+  AGENTS.md §5/ADR-0018/D-023 (cho chạy, lớp đỡ là CI/ruleset/review) — đồng bộ lại; phát hiện khi đối chiếu bản "Kế hoạch
+  nâng cấp X-Templates" trong [`research/2026-10-19-rapid-build-then-harden.md`](research/2026-10-19-rapid-build-then-harden.md)
+  (đề xuất "code nhanh → kiểm liên tục → audit sâu → fix → tối ưu → nghiệm thu → production" và PD-01…PD-12 đối chiếu với
+  G0–G8/autopilot/audit/GO-NO-GO: khung đã có phần lớn; còn thiếu nhịp audit theo mốc, verdict `inconclusive` cho reviewer,
+  GO/NO-GO máy đọc — chưa làm, ghi §7/§8/§9 của bản nghiên cứu; §9 đối chiếu đề xuất hai tầng executor Sonnet/Opus — chưa có, kèm ràng buộc reviewer khác họ).
 - Review #168: ghi chú dự án (`— Bằng chứng:`, `(Miễn: …)`) của mục không có đuôi `→ Kiểm:`/`· Nguồn:` không còn bị tính là chữ
   yêu cầu (trước đó mục `[x]` về `[ ]` oan); với `review_identity`, `pr next`/steward bỏ sổ review cục bộ của tác giả, dấu bị
   sửa sau khi đăng không tính, `review_identity` lấy từ cây làm việc khi không đọc được `origin/<base>`; `pr-review.yml` cấm

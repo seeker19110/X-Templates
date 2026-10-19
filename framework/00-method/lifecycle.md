@@ -1,7 +1,7 @@
 ---
 title: Vòng đời dự án và các cổng
 kind: method
-updated: 2026-10-15
+updated: 2026-10-19
 ---
 
 # Vòng đời dự án và các cổng
@@ -32,6 +32,13 @@ updated: 2026-10-15
 5. **Dự án có sẵn**: G0 = đọc repo (stack thật, cấu trúc, CI, test, nợ kỹ thuật) → G1 sinh blueprint → audit theo [`audit.md`](audit.md)
    blueprint với hiện trạng (mục nào đã đạt có bằng chứng thì tick) → các GĐ sau chỉ làm phần còn thiếu, tăng dần,
    **không áp đặt stack mới**.
+6. **Chất lượng theo pha — nhanh ở G6, tin cậy ở G7** (ADR-0029): G5 đặt **sàn máy** (năm cổng + MUST sàn về bảo mật,
+   cấu hình, dữ liệu, phân quyền — thứ sai từ đầu thì làm lại cả hệ); G6 chạy **nhanh trên sàn đó**: cổng commit + PR mỗi
+   lát + review theo làn, **không** audit toàn repo mỗi PR, **không** tối ưu khi chưa có số ([`../11-autonomous-loop/optimization-loop.md`](../11-autonomous-loop/optimization-loop.md)),
+   UI "đủ dùng" theo MUST của quy mô; audit **theo delta ở mỗi mốc** của PLAN ([`audit.md`](audit.md) §1) và **toàn diện ở G7**
+   (`xt.py release-check` gom blueprint `--strict --run`, sổ audit `--strict`, kiểm lại cuối, cây git → GO/NO-GO máy đọc;
+   người ký `GO-NO-GO.md`). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
+   cùng tiêu chí cuối, khác **thời điểm** kiểm.
 
 ## Quy mô S/M/L — làm nhẹ đi chứ không bỏ
 

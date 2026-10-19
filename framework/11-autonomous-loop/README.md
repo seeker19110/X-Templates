@@ -71,6 +71,10 @@ updated: 2026-10-19
     làm đúng `next` (`merge` = lệnh merge ghim head; `human` = `loop defer`); vòng sau chạy lại `merge-check` cho PR còn
     mở, theo FIFO; PR chồng chỉ merge sau khi đổi đích về nhánh mặc định và merge nhánh đó vào (`LOOP-DESIGN-020`). Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi PROGRESS); lần 3 → máy đặt
     `blocked`. Không skip test, không nới cổng (`AGENTS.md` §3 — hook không chặn việc này, ADR-0018).
+11b. **Mốc xong → audit delta trước khi sang mốc kế** (ADR-0029, [`../00-method/audit.md`](../00-method/audit.md) §1): `loop status`
+    trả `milestone_done: <mục PLAN>` khi task kế là task đầu của mục (`### Lát …`) mới và mọi task trước đã đóng → chạy
+    `<XT> audit plan --status docs/ops/AUDIT-STATUS.md`, quét **chỉ nhóm** máy suy ra từ diff, 🔴/🟠 thành task mới trong PLAN
+    (cùng mục), rồi mới làm task kế. Không audit toàn repo mỗi PR.
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`;
@@ -83,6 +87,12 @@ updated: 2026-10-19
 14. **Context đầy** → compaction tự nén, không bàn giao: hook PreCompact ghi checkpoint (`<XT> loop checkpoint`), SessionStart(compact) in lại
     `loop status` (task đang làm, lệnh kiểm cuối, file chưa commit, việc chờ người). **Gần hết trần máy** (≥ 80% vòng/giờ/tiền):
     ghi "Bàn giao phiên" vào PROGRESS (chỗ dở, bước kế tiếp, SHA), commit + push, để Stop hook kết thúc (`/handover`).
+14b. **Giao việc theo tầng** (ADR-0029, [`orchestration-and-subagents.md`](orchestration-and-subagents.md)): `loop status --json` trả `executor`
+    (`executor` mặc định · `executor-deep` khi PLAN ghi `(exec: deep)` hoặc `escalated: true` sau 2 lần đỏ của tầng mặc định);
+    giao đúng agent đó, chuyển cấp kèm diff + evidence lỗi + giả thuyết đã loại; Gate chạy lại ở phiên chính bằng
+    `<XT> loop record --task T-NNN --executor <agent> -- <Gate>`. Review: reviewer khác **họ** với agent đã viết
+    (`reviewer` cho `executor`, `reviewer-alt` cho `executor-deep`/phiên chính cùng họ với `reviewer`); reviewer không kết
+    luận được → `<XT> pr reviewed --inconclusive` rồi giao reviewer khác.
 15. **Kết thúc**: `done` = mọi task có bằng chứng xanh và `<XT> blueprint-status BLUEPRINT.md --strict --run` (cổng phát hành G7) không còn MUST mở, không lệnh `— Kiểm:` đỏ
     → `GO-NO-GO.md` (PR của lát cuối; PR đã merge, PR `merge-check` = `human` liệt kê chờ người), báo cáo ≤ 20 dòng (đã làm · bằng chứng · quyết định tự duyệt D-NNN · còn treo · đề xuất). `done-pending-human` → báo cáo như `done` + danh sách việc chờ người (ID, lý do, cách làm),
     người xử lý rồi `loop resume`. `blocked`/`budget` → báo lý do + bước kế tiếp, không khai "xong".
@@ -93,10 +103,10 @@ updated: 2026-10-19
 |---|---|
 | `doctor [--fix] [--json]` | Audit khung đã cài trước autopilot; `--fix` sửa phần an toàn (không đụng hook/settings); exit 1 khi còn lỗi ✗ |
 | `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session] [--force]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(40, 8 × task chưa làm)` (mặc định 100); vòng khác còn chạy → exit 2 trừ `--force` (`LOOP-HARNESS-024`) |
-| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint |
+| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint; `continue` thêm `executor`/`tier`/`escalated` (tầng giao việc, ADR-0029) và `milestone_done` khi mốc trước vừa xong |
 | `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |
 | `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |
-| `loop record --task T-NNN -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence, cập nhật chữ ký lỗi |
+| `loop record --task T-NNN [--executor executor\|executor-deep] -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence (kèm agent đã làm), cập nhật chữ ký lỗi |
 | `loop block --reason "..."` | Đặt `blocked=true` (điểm dừng bắt buộc về hành động) |
 | `loop decide --question Q --option A --option B --choice N --why W --revert R [--prod P] [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
@@ -115,6 +125,7 @@ updated: 2026-10-19
 | `audit plan [--blueprint B] [--status S] [--json]` | Lập kế hoạch audit 13 nhóm từ blueprint + `docs/ops/AUDIT-STATUS.md` (skill `/audit`) |
 | `feedback add/collect/list/aggregate` | Phản hồi về khung (`docs/xtemplates-feedback/FB-NNN.md`) — luật ở [`framework-feedback.md`](framework-feedback.md) |
 | `audit check [--strict] <AUDIT-STATUS.md>` | Kiểm sổ audit; `--strict` = 0 🔴/🟠 mở, mọi nhóm đã quét/N/A |
+| `release-check [--blueprint B] [--status S] [--json]` | Cổng G7 máy đọc (ADR-0029): blueprint `--strict --run` · sổ audit `--strict` · kiểm lại cuối khớp cây · cây git sạch + HEAD · đề xuất "Khi chạy thật" chờ người → bảng PASS/FAIL/N-A có bằng chứng, `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO. Phần máy của `GO-NO-GO.md`; chữ ký vẫn là người |
 
 Trần ngoài xt.py: Claude Code tự ngừng block Stop sau 8 lần liên tiếp không có tool call
 (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, không đặt `0`); headless thêm `--max-turns`, `--max-budget-usd`.
