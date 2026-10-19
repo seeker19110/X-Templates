@@ -1911,3 +1911,62 @@ class ReleaseCheckTest(TmpRepoCase):
         self.assertIn("Chờ người: prod_switch", out)
         rc, d = self.rows()
         self.assertEqual((d["human"], d["go"], d["verdict"]), (["prod_switch"], True, "GO (chờ người)"))
+
+
+class ContextPackTest(TmpDirCase):
+    PLAN = (
+        "## Đợt 1\n"
+        "- [ ] `T-001` Làm A (REC-11; AUTO-01; sau: T-000; files: src/a.py, src/d, nope.py) — Gate: `true`\n"
+        "- [ ] `T-002` Chỉ mô tả, không Gate REC-11 REC-11 ✓\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
+        plan = self.tmp / "docs" / "autopilot" / "PLAN.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text(self.PLAN, encoding="utf-8")
+        (self.tmp / "src" / "d").mkdir(parents=True)
+        (self.tmp / "src" / "a.py").write_text("abc", encoding="utf-8")
+        (self.tmp / "src" / "d" / "x.txt").write_text("12345", encoding="utf-8")
+
+    def test_context_pack_json(self):
+        rc, out, _ = run_main("context", "--task", "T-001", "--json")
+        d = json.loads(out)
+        self.assertEqual(rc, 0)
+        self.assertEqual(d["requirements"], ["REC-11", "AUTO-01"])  # T-000 không phải yêu cầu
+        self.assertEqual((d["gate"], d["after"], d["section"]), ("true", ["T-000"], "Đợt 1"))
+        self.assertEqual(d["files"], ["src/a.py", "src/d", "nope.py"])
+        self.assertEqual(d["missing_files"], ["nope.py"])
+        self.assertEqual(d["bytes"]["files"], 8)  # file + thư mục
+        self.assertEqual(d["bytes"]["total"], d["bytes"]["spec"] + 8)
+        self.assertTrue(d["spec"].startswith("Làm A"))
+        self.assertNotIn("Gate", d["spec"])
+
+    def test_context_pack_text_without_gate_and_unicode_bytes(self):
+        rc, out, _ = run_main("context", "--task", "T-002")
+        self.assertEqual(rc, 0)
+        self.assertIn("yêu cầu: REC-11\n", out)  # dedupe
+        self.assertIn("Gate: —", out)
+        self.assertIn("files: — (thiếu: không)", out)
+        spec = "Chỉ mô tả, không Gate REC-11 REC-11 ✓"
+        self.assertIn(f"byte: spec {len(spec.encode())} + files 0 = {len(spec.encode())}", out)
+        self.assertGreater(len(spec.encode()), len(spec))
+
+    def test_context_pack_plan_from_loop_state_or_flag(self):
+        other = self.tmp / "P2.md"
+        other.write_text("- [ ] `T-009` Khác — Gate: `true`\n", encoding="utf-8")
+        xt.write_state({"active": True, "plan": "P2.md"}, self.tmp)
+        self.assertEqual(run_main("context", "--task", "T-009", "--json")[0], 0)
+        rc, _, err = run_main("context", "--task", "T-001")
+        self.assertEqual(rc, 2)
+        self.assertIn("không có trong P2.md", err)
+        self.assertEqual(run_main("context", "--task", "T-001", "--plan", "docs/autopilot/PLAN.md")[0], 0)
+
+    def test_context_pack_errors(self):
+        rc, out, err = run_main("context", "--task", "T-404")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("T-404 không có trong PLAN.md", err)
+        rc, out, err = run_main("context", "--task", "T-001", "--plan", "none.md")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("Không thấy PLAN", err)

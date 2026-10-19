@@ -4847,6 +4847,61 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+REQ_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}\b")  # REC-11, AUTO-01, BE-AUTH-003
+
+
+def _tree_bytes(p: Path) -> Optional[int]:
+    """Số byte của file, hoặc tổng các file dưới thư mục; không có → None."""
+    if p.is_file():
+        return p.stat().st_size
+    if p.is_dir():
+        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+    return None
+
+
+def context_pack(t: Dict[str, Any], base: Path) -> Dict[str, Any]:
+    """Gói ngữ cảnh một task (REC-11): ID yêu cầu, đoạn spec, Gate, phạm vi file, số byte phải đọc/đưa cho executor."""
+    g = GATE_RE.search(t["rest"])
+    spec = (t["rest"][: g.start()] if g else t["rest"]).strip(" —-")
+    reqs = [r for r in dict.fromkeys(REQ_ID_RE.findall(spec)) if not re.fullmatch(r"T-\d+", r)]
+    sizes = {f: _tree_bytes(base / f) for f in t["files"]}
+    spec_bytes = len(spec.encode("utf-8"))
+    files_bytes = sum(n for n in sizes.values() if n is not None)
+    return {
+        "task": t["id"],
+        "requirements": reqs,
+        "spec": spec,
+        "gate": t["gate"],
+        "files": t["files"],
+        "after": t["after"],
+        "section": t["section"],
+        "missing_files": [f for f, n in sizes.items() if n is None],
+        "bytes": {"spec": spec_bytes, "files": files_bytes, "total": spec_bytes + files_bytes},
+    }
+
+
+def cmd_context(args: argparse.Namespace) -> int:
+    base = project_dir()
+    plan = base / (args.plan or str((read_state(base) or {}).get("plan") or "docs/autopilot/PLAN.md"))
+    if not plan.is_file():
+        print(f"✗ Không thấy PLAN: {plan}", file=sys.stderr)
+        return 2
+    task = next((t for t in parse_plan(plan) if t["id"] == args.task), None)
+    if task is None:
+        print(f"✗ {args.task} không có trong {plan.name}", file=sys.stderr)
+        return 2
+    pack = context_pack(task, base)
+    if args.json:
+        print(json.dumps(pack, ensure_ascii=False))
+        return 0
+    print(f"{pack['task']} — {pack['spec']}")
+    print(f"  yêu cầu: {', '.join(pack['requirements']) or '—'}")
+    print(f"  Gate: {pack['gate'] or '—'}")
+    print(f"  files: {', '.join(pack['files']) or '—'} (thiếu: {', '.join(pack['missing_files']) or 'không'})")
+    print(f"  byte: spec {pack['bytes']['spec']} + files {pack['bytes']['files']} = {pack['bytes']['total']}")
+    return 0
+
+
 def _loop_record(args: argparse.Namespace, base: Path) -> int:
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else list(args.cmd)  # chỉ bỏ `--` phân cách đầu tiên
     if not cmd:
@@ -7490,6 +7545,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="chạy lệnh `— Kiểm: `<lệnh>`` của mục [x] trong thư mục chứa blueprint; đỏ = mục chưa đạt (LOOP-DESIGN-023)",
     )
     pb.set_defaults(fn=cmd_blueprint_status)
+    pcx = sub.add_parser("context", help="gói ngữ cảnh một task: ID yêu cầu, spec, Gate, files, số byte (REC-11)")
+    pcx.add_argument("--task", required=True, type=_task_id)
+    pcx.add_argument("--plan", help="PLAN đọc (mặc định: PLAN của vòng, rồi docs/autopilot/PLAN.md)")
+    pcx.add_argument("--json", action="store_true")
+    pcx.set_defaults(fn=cmd_context)
     plp = sub.add_parser("loop")
     lsub = plp.add_subparsers(dest="loop_cmd", required=True)
     li = lsub.add_parser("init")
