@@ -5,6 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `pr next`/`pr steward`: PR đủ điều kiện (`merge-check` = `merge`: mọi check xanh, GitHub báo sạch) mà auto-merge đã bật
+  nhưng GitHub chưa merge nay được merge ghim head ngay thay vì "chờ required check" mãi (X-Templates#155 phải merge tay).
+  Nhánh đích không có check bắt buộc: `pr next` không còn bảo phiên agent bật auto-merge — chờ CI xanh rồi merge ghim
+  head; chốt chuyển từ steward vào `pr next` nên che cả phiên agent; kết quả đọc rule nhớ 5 phút (D-063).
+
 ### Changed
 - `pr steward --apply`: nhánh đích không có check bắt buộc (ruleset `rules/branches` hoặc branch protection cổ điển) thì
   không bật auto-merge — GitHub sẽ merge ngay lúc bật, trước khi CI chạy xong (sự cố hotel-manager#84/#85, chốt T-1107

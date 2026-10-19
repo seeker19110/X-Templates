@@ -447,3 +447,10 @@
 - Chọn: Chốt trong xt.py pr steward: nhánh đích không có check bắt buộc (ruleset hoặc branch protection cổ điển) thì bỏ lệnh bật auto-merge, vẫn tắt auto-merge/merge ghim head khi merge-check đã thấy CI xanh
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: chỉ chặn đúng lệnh nguy hiểm (auto-merge không chờ CI), giữ hành động an toàn (tắt auto-merge, merge ghim head sau khi CI xanh); test được bằng unittest thay vì bash trong YAML; mọi dự án đích nhận qua install.py không phải sửa workflow; đọc cả branch protection cổ điển; không đọc được → coi như không có (chiều chặt)
 - Đường lùi: Bỏ _base_has_required và nhánh lọc --auto trong _steward_one
+
+### D-063 · 2026-10-19T09:17:56+00:00 · PR đủ điều kiện (merge-check = merge) mà auto-merge đã bật nhưng GitHub chưa merge, hoặc nhánh đích không có check bắt buộc — pr next/steward làm gì?
+
+- Phương án: (1) Giữ: auto-merge bật thì chờ GitHub; phiên agent vẫn được bảo bật auto-merge · (2) Đủ điều kiện là merge ghim head ngay (kể cả khi auto-merge đang bật); nhánh đích không có check bắt buộc thì pr next không bao giờ trả enable-auto-merge mà chờ CI xanh rồi merge ghim head — chốt ở pr_next cho cả phiên agent lẫn steward
+- Chọn: Đủ điều kiện là merge ghim head ngay (kể cả khi auto-merge đang bật); nhánh đích không có check bắt buộc thì pr next không bao giờ trả enable-auto-merge mà chờ CI xanh rồi merge ghim head — chốt ở pr_next cho cả phiên agent lẫn steward
+- Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu đủ điều kiện là luôn được merge (X-Templates#155 treo ở trạng thái clean, phải merge tay); merge ghim head chỉ khi merge-check thấy mọi check xanh và GitHub báo sạch nên không mở rủi ro mới; một chỗ chốt trong pr_next thay cho bộ lọc riêng của steward (D-062), phiên agent cũng được che
+- Đường lùi: Bỏ nhánh verdict merge khi auto_merge và nhánh base_has_required trong _pr_next_final; trả lại bộ lọc --auto ở _steward_one
