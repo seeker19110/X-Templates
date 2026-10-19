@@ -13,6 +13,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   cục bộ); tên file không phải UTF-8 không làm sập; không kiểm được (git < 2.38, repo nông, không phải repo) → như cũ.
 
 ### Fixed
+- `loop init` ghi `scope` (blueprint, profile, scale, `rev`, khoá sàn Gate) vào state: blueprint đã khai mà mất, hỏng hoặc đổi quy mô/hồ sơ
+  nay là verdict `verify` (trước đây xoá blueprint khiến vòng khai `done`); sàn Gate M/L đọc quy mô từ `scope` khi blueprint mất
+  nên xoá/hạ quy mô không bỏ được sàn; state cũ không có `scope` được điền khi `loop resume` (REC-02, T-1503).
 - `loop record`/`loop verify`/lệnh `— Kiểm:`/sàn Gate: Gate exit 0 mà đầu ra có `Ran 0 tests` (unittest Python 3.11 khi `-k`
   không khớp test nào; 3.12+ tự exit 5) nay là exit 5 kèm dòng lý do, evidence ghi `zero_tests_red: true` — Gate `-k <tên>`
   không còn xanh giả (REC-01, T-1501).

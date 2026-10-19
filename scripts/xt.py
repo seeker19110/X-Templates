@@ -1144,14 +1144,33 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _scope_drift(base: Path, st: Dict[str, Any], bp: str) -> str:
+    """Lý do blueprint khai ở `loop init` không còn khớp phạm vi đã khoá; rỗng = ổn. Mất file → verify (trước đây khai
+    `done` vì "không thấy blueprint"); frontmatter hỏng/đổi quy mô-hồ sơ so với `scope` → verify (hạ M xuống S ngầm là hạ sàn)."""
+    got = _blueprint_front(base, bp)
+    if got is None:
+        return f"blueprint {bp} đã khai ở loop init nhưng mất/không đọc được — khôi phục file hoặc `loop init --force` để khai lại"
+    sc = _scope(st)
+    if sc and (got[0] != sc.get("scale") or got[1] != sc.get("profile")):
+        return (
+            f"blueprint {bp} đổi quy mô/hồ sơ so với lúc loop init ({sc.get('scale') or '—'}/{sc.get('profile') or '—'} → "
+            f"{got[0] or '—'}/{got[1] or '—'}) — sàn Gate đổi theo; chạy `loop init --force` nếu cố ý"
+        )
+    return ""
+
+
 def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
     """Mọi task đã ổn: còn MUST mở / miễn trừ thiếu lý do trong blueprint → continue, không thì done."""
     bp = st.get("blueprint")
     bpp = base / bp if bp else None
-    if bpp is None or not bpp.exists():
-        # Không khai "blueprint sạch" khi không hề kiểm blueprint (loop init thiếu --blueprint hoặc file mất).
-        why = "không kiểm blueprint: loop init không có --blueprint" if bpp is None else f"không thấy blueprint {bp}"
-        return {"verdict": "done", "reason": f"mọi task có bằng chứng xanh ({why})"}
+    if bpp is None:  # loop init không khai blueprint: không có gì để kiểm (đã nói rõ trong lý do)
+        return {
+            "verdict": "done",
+            "reason": "mọi task có bằng chứng xanh (không kiểm blueprint: loop init không có --blueprint)",
+        }
+    drift = _scope_drift(base, st, str(bp))
+    if drift:  # blueprint đã khai mà mất/hỏng/đổi quy mô: không được khai "done" (REC-02, T-1503)
+        return {"verdict": "verify", "reason": drift}
     s = blueprint_status(bpp)
     open_must = [i for i in s["open_must"] if i not in _deferred(st)]
     if open_must:
@@ -2870,19 +2889,56 @@ FLOOR_SCALE_RE = re.compile(r"^scale:(.*)$", re.M)
 FLOOR_PROFILE_RE = re.compile(r"^profile:(.*)$", re.M)
 
 
-def blueprint_scale(base: Path) -> Tuple[str, str]:
-    """(quy mô S/M/L, hồ sơ) từ frontmatter BLUEPRINT.md (đường khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc);
-    giá trị đọc như xt.yaml (nháy, comment, chữ thường); không có/không đọc được → ("", "")."""
-    st = read_state(base) or {}
-    bp = base / str(st.get("blueprint") or "BLUEPRINT.md")
+def _blueprint_front(base: Path, rel: str) -> Optional[Tuple[str, str, str]]:
+    """(quy mô S/M/L, hồ sơ, rev) đọc từ `rel`: giá trị frontmatter đọc như xt.yaml (nháy, comment, chữ thường), `rev` =
+    sha256[:16] nội dung; file không đọc được → None; đọc được mà thiếu/lạ → ("", "" hoặc phần có, rev)."""
     try:
-        fm = FRONT_BLOCK_RE.match(bp.read_text(encoding="utf-8").replace("\r\n", "\n"))
-    except OSError:
-        return "", ""
+        raw = (base / rel).read_bytes()
+        fm = FRONT_BLOCK_RE.match(raw.decode("utf-8").replace("\r\n", "\n"))
+    except (OSError, UnicodeDecodeError):
+        return None
     text = fm[1] if fm else ""
     sm, pm = FLOOR_SCALE_RE.search(text), FLOOR_PROFILE_RE.search(text)
     scale = yaml_scalar(sm[1]).strip().upper() if sm else ""
-    return (scale if scale in SCALES else ""), (yaml_scalar(pm[1]).strip() if pm else "")
+    return (
+        (scale if scale in SCALES else ""),
+        (yaml_scalar(pm[1]).strip() if pm else ""),
+        hashlib.sha256(raw).hexdigest()[:16],
+    )
+
+
+def _scope(st: Dict[str, Any]) -> Dict[str, Any]:
+    """`scope` ghi lúc `loop init` (REC-02, T-1503): blueprint, profile, scale, rev, gate_floor."""
+    sc = st.get("scope")
+    return sc if isinstance(sc, dict) else {}
+
+
+def blueprint_scale(base: Path) -> Tuple[str, str]:
+    """(quy mô S/M/L, hồ sơ) từ frontmatter BLUEPRINT.md (đường khai ở state autopilot, không thì `BLUEPRINT.md` ở gốc).
+    Blueprint mất/không đọc được → lấy `scope` đã ghi lúc `loop init` (xoá blueprint không hạ được sàn Gate); không có
+    scope (state cũ) → ("", "")."""
+    st = read_state(base) or {}
+    got = _blueprint_front(base, str(st.get("blueprint") or "BLUEPRINT.md"))
+    if got is not None:
+        return got[0], got[1]
+    sc = _scope(st)
+    return str(sc.get("scale") or ""), str(sc.get("profile") or "")
+
+
+def build_scope(base: Path, blueprint: Optional[str]) -> Dict[str, Any]:
+    """Phạm vi vòng khoá lúc `loop init`: blueprint đã khai, hồ sơ/quy mô/`rev` (sha256[:16] nội dung blueprint) và khoá sàn
+    Gate đòi ở quy mô đó. Không khai blueprint hoặc không đọc được → {} (không có gì để khoá)."""
+    got = _blueprint_front(base, blueprint) if blueprint else None
+    if got is None:
+        return {}
+    scale, profile, rev = got
+    return {
+        "blueprint": blueprint,
+        "profile": profile,
+        "scale": scale,
+        "rev": rev,
+        "gate_floor": [k for k, _ in _gate_floor_need(base, scale, profile)],
+    }
 
 
 def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
@@ -2894,13 +2950,20 @@ def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
     # Thiếu cả xt.yaml ở M/L = mọi khoá sàn đều thiếu (không phải "không áp" — review #107).
     rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else [])
     keys = {m[1]: yaml_scalar(m[2]).strip() for m in rows if m}
+    return _gate_floor_need(base, scale, profile), keys
+
+
+def _gate_floor_need(base: Path, scale: str, profile: str) -> List[Tuple[str, str]]:
+    """[(khoá, mô tả)] sàn Gate đòi ở quy mô/hồ sơ đã cho; S/không rõ → []."""
+    if scale not in ("M", "L"):
+        return []
     need = list(FLOOR_ALWAYS)
     markers = [f for f in FLOOR_TYPED_MARKERS if (base / f).is_file()]
     for key in sorted({FLOOR_TYPED_MARKERS[f] for f in markers}):
         need.append((key, f"kiểm kiểu/biên dịch vì repo có {', '.join(markers)}"))
     if profile in FLOOR_E2E_PROFILES:
         need.append(("e2e", f"suite e2e đầy đủ vì hồ sơ {profile} (QA-E2E-023)"))
-    return need, keys
+    return need
 
 
 def gate_floor_issues(base: Path) -> List[str]:
@@ -4354,6 +4417,9 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "same_failure_count": 0,
         "blocked": False,
     }
+    scope = build_scope(base, args.blueprint)
+    if scope:
+        state["scope"] = scope
     write_state(state, base)
     issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
     if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
@@ -4581,6 +4647,8 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     )
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
+    if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
+        cur.update({"scope": sc} if (sc := build_scope(base, str(cur["blueprint"]))) else {})
     cur.pop("deferred", None)  # người đã xử lý: việc chờ quay lại hàng làm; còn cần người thì agent defer lại
     write_state(cur, base)
     print(f"▶ Autopilot tiếp tục (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {args.reason}")
