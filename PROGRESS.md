@@ -3,14 +3,14 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.8.0) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 D-079: cổng test song song theo lớp, 195 s → 68 s, coverage 100 % giữ nguyên (PR sau #169). D-080: tài liệu thuần ra khỏi `merge_risk_paths` (chủ repo).
+- 2026-10-19 audit quét lại 11 nhóm tại `a4f929c` (sổ delta2 ghi SHA nhánh `fd64dd6` đã mất — AUD-HAR-077): mới 🔴 AUD-SEC-077 (surrogate trong đích ghi làm guard fail-open), 🟠 DOC-054, HAR-077/078/079, TEST-008/009, XFEAT-010/011 + 32 🟢 — `docs/ops/AUDIT-REPORT-2026-10-19-rescan.md`, **chờ duyệt** kế hoạch 6 đợt (đợt 1 guard gồm cả 🔴 SEC-072 từ delta2 chưa làm; đợt 2 cần chủ repo chọn (a)/(b) cho merge làn chuẩn chưa review). D-079 (#170), D-080 (#171) đã merge.
 - 2026-10-19 ADR-0029 (#169 đã merge `758dda3`): hai tầng executor (`executor-deep`), chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive` + `reviewer-alt`, `xt.py release-check` (G7 máy đọc), `lifecycle.md` quy tắc 6; D-075…D-078; nghiên cứu `research/2026-10-19-rapid-build-then-harden.md`. Chưa làm (chờ số `loop stats`/pilot): `delivery_phase`, gate planner (PD-05), kiểm protection GitHub (PD-09).
-- 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064, D-065, D-071): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); `audit check --strict` xanh, 33 🟢 mở có chủ trong `docs/ops/AUDIT-STATUS.md`. Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).
+- 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064, D-065, D-071): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); sổ `docs/ops/AUDIT-STATUS.md` (trạng thái hiện tại ở dòng đầu mục này). Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).
 - 3.7.1: PR đủ điều kiện là merge ghim head ngay; không bật auto-merge khi nhánh đích thiếu check bắt buộc (#155/#156, D-062/D-063). 3.7.0: steward tự cập nhật nhánh tụt base, review sạch mang qua merge base không chạm file PR (#153, D-061); `merge-check` báo thiếu check bắt buộc (#150/#151, D-060); tên phiên `<repo> — <nhánh>` (#152, LOOP-HARNESS-028). 3.6.0: bàn giao UI/UX stored 06 §7i (#148, D-059: `vendor-check` kiểm skill chép vào `.claude/skills`, mã SPDX CC-BY-NC, `SOURCE` cần `License:`; chữ lớn 24 px/18,66 px đậm). 3.5.1 phát hành (#145/#146, D-058: steward ở repo org, `pr_title_check` đọc nhánh đích, nhãn lỗi không bật auto-merge); hotel-manager#84, X-Company#21 đã nâng. 3.5.0: guard ghi công AI qua `gh pr`/MCP, `merge-check` kiểm tiêu đề PR (#140, D-055…057); PR steward (#141, ADR-0027, D-054).
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-0. Sau 3.8.0: `loop init --plan docs/autopilot/PLAN-3.9-automation.md` (T-1501…T-1522 — REC/AUTO của
+0. Sau 3.8.0: `loop init --plan docs/autopilot/PLAN-3.9-automation.md` (T-1509…T-1522; T-1501…T-1508 xong #167–#169 — REC/AUTO của
    `docs/ops/REMEDIATION-PLAN-2026-10-19.md` bản 2, D-066…D-070; chờ chủ repo: token/app reviewer cho T-1508).
 1. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
@@ -20,7 +20,7 @@
 6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100%, `changelog-check` — không `noqa`/pragma.
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0027) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0029) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage dòng + nhánh 100% (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge).
@@ -34,7 +34,7 @@
 - Nợ kỹ thuật chấp nhận: chọn 4 MUST/module là phán đoán; số điều cụ thể của NĐ 356/2025 chưa đối chiếu bản gốc — trả khi audit dự án thật.
 
 ## Bàn giao phiên
-- 2026-10-19 · Commit cuối trên `main`: `758dda3` (#169); tag `v3.8.0` (sau PR phát hành), `v3.7.1` → `9433792`, `v3.7.0` → `4d6d439`, `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `9433792` (delta #94–#157: 2 🔴 · 17 🟠 mở, chờ duyệt — `docs/ops/AUDIT-REPORT-2026-10-19-delta.md`).
+- 2026-10-19 · Commit cuối trên `main`: `a4f929c` (#171); tag mới nhất trên GitHub `v3.7.1` (**`v3.8.0` chưa tạo** — chủ repo chạy `release-tag.yml`, AUD-HAR-073), `v3.7.1` → `9433792`, `v3.7.0` → `4d6d439`, `v3.6.0` → `18b5113`, `v3.5.1` → `794570e`, `v3.5.0` → `cf35b70`, `v3.4.1` → `bbb96ec`, `v3.4.0` → `b20e6e6`, `v3.3.0` → `27e6bc3`; SHA quét audit `a4f929c` (quét lại 11 nhóm: 2 🔴 · 11 🟠 · 75 🟢 mở, chờ duyệt — `docs/ops/AUDIT-REPORT-2026-10-19-rescan.md`).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: không chạy. Đang chặn: không.
 - Câu hỏi cần người: Đang làm (chờ chủ repo), Tiếp theo 2.
