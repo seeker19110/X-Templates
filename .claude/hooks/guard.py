@@ -1182,19 +1182,16 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
 
 
 # Như `py_run` của _lib.sh: chạy xt.py bằng import để dùng bytecode cache (chạy như script thì biên dịch lại ~4.000 dòng
-# mỗi lần); sys.path[0] = thư mục của file, không lấy cwd.
+# mỗi lần), `-I` cách ly (bỏ PYTHON*, user-site, cwd) và cache ở `.autopilot/pycache` của dự án — AUD-SEC-065.
 IMPORT_RUNNER = (
-    "import sys; d, _, f = sys.argv[1].rpartition('/'); sys.path[0] = d or '.'; sys.argv = sys.argv[1:]; "
+    "import sys; d, _, f = sys.argv[1].rpartition('/'); sys.path.insert(0, d or '.'); sys.argv = sys.argv[1:]; "
     "sys.exit(__import__(f[:-3]).main())"
 )
 
 
-def pycache_prefix() -> str:
-    """Thư mục cache bytecode ngoài dự án (như `_lib.sh`): giữ `PYTHONPYCACHEPREFIX` có sẵn, nếu không thì XDG/~/.cache."""
-    if os.environ.get("PYTHONPYCACHEPREFIX"):
-        return os.environ["PYTHONPYCACHEPREFIX"]
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "xtemplates", "pycache")
+def isolated_python(root: str) -> List[str]:
+    """Đầu lệnh python cho tiến trình con của guard: cách ly, cache bytecode trong dự án (đã rào ghi tay)."""
+    return [sys.executable, "-I", "-X", f"pycache_prefix={os.path.join(root, '.autopilot', 'pycache')}"]
 
 
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
@@ -1209,7 +1206,7 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
         "",
     )
     cmd = [
-        sys.executable,
+        *isolated_python(root),
         "-c",
         IMPORT_RUNNER,
         xt,
@@ -1218,7 +1215,7 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
         *(["--pr", selector[0]] if selector else []),
     ]
     try:
-        env = dict(os.environ, CLAUDE_PROJECT_DIR=root, PYTHONPYCACHEPREFIX=pycache_prefix())
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=root)
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=MERGE_CHECK_TIMEOUT, env=env, check=False)
         data: Dict[str, object] = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -1427,9 +1424,35 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
+RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-\w+)?|remove-source-files)(?:=.*)?")
+
+
+def _wipe_outside(name: str, args: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Đích ngoài dự án mà lệnh khác `rm`/`find` xoá/huỷ (AUD-SEC-068): `rsync --delete … <đích local>`, `shred`, `mv`
+    chuyển thứ ngoài dự án đi chỗ khác ngoài dự án (`mv ~ /tmp/x`)."""
+    pos = _positionals(args)
+    if name == "rsync" and any(RSYNC_DELETE_RE.fullmatch(a) for a in args) and pos:
+        local = not REMOTE_SPEC_RE.match(pos[-1])
+        return [pos[-1]] if local and _outside_project(pos[-1], root, cwd) else []
+    if name == "shred":
+        return [t for t in pos if _outside_project(t, root, cwd)]
+    if name == "mv" and len(pos) > 1 and not _inside_root(pos[-1], root, cwd):
+        return [t for t in pos[:-1] if _outside_project(t, root, cwd) or _dangerous_rm_target(t)]
+    return []
+
+
+def _inside_root(target: str, root: str, cwd: Optional[str]) -> bool:
+    t = os.path.realpath(os.path.join(cwd or root, os.path.expanduser(target)))
+    r = os.path.realpath(root)
+    return t == r or t.startswith(r.rstrip("/") + "/")
+
+
 def _delete_rule(name: str, args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str]:
     if name == "rm":
         return _rm_rule(args, root, cwd)
+    wiped = _wipe_outside(name, args, root, cwd) if root else []
+    if wiped:
+        return "ask", f"xoá đệ quy ngoài thư mục dự án ({name} {wiped[0]}) — xoá dữ liệu cần người duyệt"
     return _find_rule(args, root, cwd) if name == "find" else ("", "")
 
 
@@ -1529,7 +1552,27 @@ def _mcp_auto_merge(tool_input: Dict[str, object], root: str) -> Tuple[str, str]
     return _auto_merge_verdict([str(n)], root, f"{owner}/{repo}")
 
 
+# Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
+# python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer khác họ model" (D-045, AUD-SEC-069).
+REVIEW_MARK_RE = re.compile(r"xt-review\s+v1")
+GH_POST_RE = re.compile(r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)|api)\b", re.S)
+REVIEW_FORGE_WHY = (
+    "ghi tay bằng chứng review (dấu `xt-review v1` trên PR) — chỉ `xt.py pr reviewed` đăng (ADR-0026/0027)"
+)
+
+
+def _forges_review(argv: List[str]) -> bool:
+    """Lệnh `gh` đăng/sửa comment, review, thân PR/issue (hoặc `gh api`) mang dấu review — chỉ argv của lệnh thật,
+    không phải chữ trong heredoc/chuỗi của lệnh khác (script sửa tài liệu nhắc tới dấu)."""
+    n = normalize(argv)
+    return (
+        bool(n) and n[0] == "gh" and bool(GH_POST_RE.search(" ".join(n))) and bool(REVIEW_MARK_RE.search(" ".join(n)))
+    )
+
+
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
+    if REVIEW_MARK_RE.search(json.dumps(tool_input, ensure_ascii=False)):
+        return "deny", f"Lệnh bị khung chặn ({REVIEW_FORGE_WHY}): {tool_name}"
     hit = mcp_attribution(tool_name, tool_input, root)
     if hit:
         return "deny", hit
@@ -3773,6 +3816,7 @@ WRITE_HINT_RE = re.compile(
     r"|\bopen\b[^;\n]{0,200}['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")` (trần độ dài: tuyến tính)
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
+RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
 STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")
 GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
 
@@ -3868,6 +3912,11 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
     (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn."""
     asks: List[str] = []
     for script in _interp_scripts(cmd, tokens):
+        asks += [
+            f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
+            for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])
+            if lit[:1] in ("/", "~", "$") and _outside_project(lit, root, None)
+        ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if not WRITE_HINT_RE.search(script):
             continue
         for raw in STR_LITERAL_RE.findall(script):
@@ -3942,15 +3991,50 @@ def _is_secret_file(path: str, root: str) -> bool:
     return path not in ("-", "") and classify_path(rel_path(path, root)) == "secret"
 
 
+REMOTE_SPEC_RE = re.compile(r"(?:[\w.-]+@)?[\w.-]+:(?!//)")  # `host:`, `u@h:path` của scp/rsync
+STREAM_SENDERS = {"nc", "ncat", "netcat", "socat", "telnet", "ssh"}
+GH_UPLOADS = (("gist", "create"), ("gist", "edit"), ("release", "upload"))
+NET_REDIRECT_RE = re.compile(r"/dev/(?:tcp|udp)/")
+
+
+def _redirect_targets(args: List[str], ops: Tuple[str, ...]) -> List[str]:
+    return [args[i + 1] for i, t in enumerate(args[:-1]) if t in ops]
+
+
+def _gh_upload_files(args: List[str]) -> List[str]:
+    """File `gh` đăng lên GitHub: `gh gist create|edit`, `gh release upload`, `--body-file`/`-F` của issue/pr."""
+    pos = _positionals(args)
+    files = pos[2:] if tuple(pos[:2]) in GH_UPLOADS else []
+    return files + [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--body-file", "-F")]
+
+
+def _net_files(c: List[str], n: List[str]) -> Optional[List[str]]:
+    """File một lệnh gửi ra mạng (`-` = stdin của nó), None nếu lệnh không gửi ra mạng (AUD-SEC-067): curl/wget,
+    scp/rsync tới `host:`, nc/socat/ssh (stdin, `<`, `FILE:`), `gh gist|release upload`, ghi vào `/dev/tcp/…`."""
+    args = c[1:]
+    if n[0] in FETCHERS:
+        return _fetch_files(args)
+    if n[0] in ("scp", "rsync", "sftp") and any(REMOTE_SPEC_RE.match(a) for a in _positionals(n[1:])):
+        return _positionals(n[1:])
+    if n[0] in STREAM_SENDERS:
+        return ["-", *_redirect_targets(args, ("<",)), *[a.split(":", 1)[1] for a in n[1:] if ":" in a]]
+    if n[0] == "gh":
+        return _gh_upload_files(n[1:]) or None
+    if any(NET_REDIRECT_RE.match(t) for t in _redirect_targets(args, (">", ">>", ">|", "&>"))):
+        return ["-", *_positionals(n[1:]), *_redirect_targets(args, ("<",))]
+    return None
+
+
 def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
     """Gửi file bí mật/biến môi trường ra mạng: `curl -d @.env …`, `curl -T .env …`, `cat .env | curl -d @- …`,
-    `env | curl --data-binary @- …` (rà stored 2026-10-16: Read(.env) bị chặn nhưng Bash thì không)."""
+    `env | curl --data-binary @- …` (rà stored 2026-10-16: Read(.env) bị chặn nhưng Bash thì không); kênh khác ở
+    `_net_files` (AUD-SEC-067)."""
     for group in pipelines(tokens):
         for i, c in enumerate(group):
             n = normalize(c)
-            if not n or n[0] not in FETCHERS:
+            files = _net_files(c, n) if n else None
+            if files is None:
                 continue
-            files = _fetch_files(c[1:])
             leaked = [f for f in files if _is_secret_file(f, root)]
             if not leaked and "-" in files:  # đọc stdin: xem lệnh phía trước trong ống
                 for up in group[:i]:
@@ -3999,6 +4083,7 @@ def bash_decision(
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root)
+    asks += [REVIEW_FORGE_WHY] if any(_forges_review(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."

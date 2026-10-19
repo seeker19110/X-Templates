@@ -14,13 +14,15 @@ xt_py() {
 
 # Chạy file Python của khung bằng `import` thay vì như script: script chính không được cache bytecode nên Python biên
 # dịch lại mỗi lần (guard.py ~25 ms, xt.py ~50 ms — trả ở MỌI lệnh Bash/Edit). sys.path[0] = thư mục của file như khi
-# chạy script (không lấy cwd). Cache đặt ngoài repo (PYTHONPYCACHEPREFIX) để không đẻ `__pycache__` trong dự án đích
-# chưa ignore nó; thư mục cache không ghi được thì Python bỏ qua (chỉ chậm như cũ).
+# chạy script (không lấy cwd). `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở
+# đó không chạy trước guard (AUD-SEC-065). Cache bytecode ở `.autopilot/pycache` của dự án (đã ignore, guard chặn ghi
+# tay cả Bash lẫn Edit — ADR-0026), không ở `~/.cache` agent ghi được; không đẻ `__pycache__` cạnh hook; thư mục cache
+# không ghi được thì Python bỏ qua (chỉ chậm như cũ).
 py_run() { # $1=đường dẫn .py (có main()) $2…=đối số
-  PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${XDG_CACHE_HOME:-${HOME:-}/.cache}/xtemplates/pycache}" python3 -c '
+  python3 -I -X "pycache_prefix=$XT_ROOT/.autopilot/pycache" -c '
 import sys
 d, _, f = sys.argv[1].rpartition("/")
-sys.path[0] = d or "."
+sys.path.insert(0, d or ".")
 sys.argv = sys.argv[1:]
 sys.exit(__import__(f[:-3]).main())
 ' "$@"
@@ -46,7 +48,7 @@ guard_fields() { # $1=bash|edit|mcp
 
 # Đọc một trường trong payload JSON (stdin của hook) bằng python3; rỗng nếu thiếu.
 json_field() { # $1=payload $2=đường dẫn dạng a.b.c
-  printf '%s' "$1" | python3 -c '
+  printf '%s' "$1" | python3 -I -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -62,7 +64,7 @@ sys.stdout.write(d if isinstance(d, str) else json.dumps(d, ensure_ascii=False))
 
 # In JSON quyết định PreToolUse (deny|ask|allow) kèm lý do, rồi exit 0.
 pretool_decision() { # $1=deny|ask $2=lý do
-  python3 -c '
+  python3 -I -c '
 import json, sys
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
       "permissionDecision": sys.argv[1], "permissionDecisionReason": sys.argv[2]}}, ensure_ascii=False))
@@ -84,12 +86,12 @@ fence_closed() { # $1=lý do
 
 # Cắt stdin tối đa $1 byte KHÔNG cắt giữa ký tự UTF-8 (head -c từng làm hỏng tiếng Việt — AUD-HAR-011).
 utf8_head() {
-  python3 -c 'import sys; sys.stdout.write(sys.stdin.buffer.read()[: int(sys.argv[1])].decode("utf-8", "ignore"))' "$1" 2>/dev/null
+  python3 -I -c 'import sys; sys.stdout.write(sys.stdin.buffer.read()[: int(sys.argv[1])].decode("utf-8", "ignore"))' "$1" 2>/dev/null
 }
 
 # In JSON additionalContext cho SessionStart/UserPromptSubmit.
 context_output() { # $1=hookEventName $2=nội dung
-  python3 -c '
+  python3 -I -c '
 import json, sys
 print(json.dumps({"hookSpecificOutput": {"hookEventName": sys.argv[1],
       "additionalContext": sys.argv[2]}}, ensure_ascii=False))

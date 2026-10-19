@@ -1545,14 +1545,14 @@ class MergeGuardTest(unittest.TestCase):
             return {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}
 
     def test_merge_check_real_subprocess(self):
-        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, cache ngoài dự án): các ca khác thay nó bằng
-        `merge_check_inproc`, hook đặt sẵn PYTHONPYCACHEPREFIX — ca này giữ nhánh XDG và nhánh lỗi."""
+        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly, cache trong `.autopilot/` của dự
+        án — AUD-SEC-065): các ca khác thay nó bằng `merge_check_inproc` — ca này giữ đường thật và nhánh lỗi."""
         cache = self.proj / "cache"
-        env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "XDG_CACHE_HOME": str(cache)}
+        env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "PYTHONPYCACHEPREFIX": str(cache)}
         with mock.patch.dict(os.environ, env):
-            os.environ.pop("PYTHONPYCACHEPREFIX", None)
-            self.assertEqual(self.guard.pycache_prefix(), str(cache / "xtemplates" / "pycache"))
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
+            self.assertTrue(list((self.proj / ".autopilot" / "pycache").rglob("xt*.pyc")))
+            self.assertFalse(cache.exists())  # PYTHONPYCACHEPREFIX của môi trường bị bỏ qua
             self.fake_gh(None)
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["reasons"], ["merge-check không chạy được"])
 
@@ -2406,7 +2406,8 @@ class HookRunnerTest(unittest.TestCase):
         )
         self.assertEqual(decision(r.stdout), "deny", r.stderr)
         self.assertFalse((self.hooks / "__pycache__").exists())
-        self.assertTrue(list((self.cache / "xtemplates" / "pycache").rglob("guard*.pyc")))
+        self.assertTrue(list((self.tmp / ".autopilot" / "pycache").rglob("guard*.pyc")))  # AUD-SEC-065
+        self.assertFalse((self.cache / "xtemplates").exists())  # không cache ở chỗ agent ghi được
 
     def test_guard_fields_reads_every_field(self):
         (self.hooks / "guard.py").write_text(

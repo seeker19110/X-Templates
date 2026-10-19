@@ -30,8 +30,8 @@
 - [x] `T-1401` Mở PR cho `docs(audit)` + `chore(agents)` maxTurns, đi tới merge — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 
 ### Lát B — guard 🔴/🟠 (AUD-SEC-063…069, + 🟢 SEC-070/071 nếu rẻ)
-- [ ] `T-1402` Shell lồng quá `MAX_NEST` → deny (AUD-SEC-063) — Gate: `python3 -m unittest discover -s tests -k nest_too_deep_denied`
-- [ ] `T-1403` Brace expansion: bung hữu hạn rồi xét từng biến thể; vượt trần → deny (AUD-SEC-064) — Gate: `python3 -m unittest discover -s tests -k brace_expansion`
+- [x] `T-1402` Shell lồng quá `MAX_NEST` → deny (AUD-SEC-063) — Gate: `python3 -m unittest discover -s tests -k nest_too_deep_denied`
+- [x] `T-1403` Brace expansion: bung hữu hạn rồi xét từng biến thể; vượt trần → deny (AUD-SEC-064) — Gate: `python3 -m unittest discover -s tests -k brace_expansion`
 - [ ] `T-1404` Hook chạy python cách ly (`-I`), pycache không nằm ở chỗ agent ghi được ngoài dự án (AUD-SEC-065) — Gate: `python3 -m unittest discover -s tests -k guard_cache_tamper`
 - [ ] `T-1405` `pre-mcp-guard.sh` so `tool_name` cấp đầu đã parse (AUD-SEC-066) — Gate: `python3 -m unittest discover -s tests -k mcp_disable_regex_scoped`
 - [ ] `T-1406` Gửi file bí mật qua `scp`/`rsync`/`nc`/`socat`/`gh gist` → deny (AUD-SEC-067) — Gate: `python3 -m unittest discover -s tests -k secret_exfil_other_channels`

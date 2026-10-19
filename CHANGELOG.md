@@ -5,6 +5,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+> **Dự án đích:** chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, matcher hook MCP trong `settings.json` đổi).
+
+### Security
+- Guard (audit 2026-10-19, chính sách mặc định ADR-0018):
+  - shell lồng quá 3 lớp (`bash -c` ×4 quanh `rm -rf ~`) nay **chặn** thay vì cho qua im lặng (AUD-SEC-063);
+  - brace expansion được bung (≤ 64 biến thể, quá → chặn) và quét từng biến thể: `git push origin {feat/x,main}`,
+    `rm -rf {dist,~/.cache}`, `gh repo {delete,} o/r` bị chặn (AUD-SEC-064);
+  - hook chạy `python3 -I` (bỏ `PYTHONPATH`/`PYTHONPYCACHEPREFIX`/user-site `usercustomize.py`), bytecode cache chuyển từ
+    `~/.cache/xtemplates/pycache` vào `.autopilot/pycache` của dự án (đã rào ghi tay) — mã agent đặt ngoài dự án không
+    chạy thay guard (AUD-SEC-065);
+  - `pre-mcp-guard.sh`: lối tắt "tắt auto-merge" chỉ khi payload có đúng một khoá `tool_name` (AUD-SEC-066);
+  - gửi file bí mật ra mạng qua `scp`/`rsync`/`sftp` tới máy khác, `nc`/`ncat`/`socat`/`telnet`/`ssh`, `gh gist
+    create|edit`, `gh release upload`, `--body-file`, ghi vào `/dev/tcp/…` → chặn (AUD-SEC-067);
+  - xoá/huỷ ngoài dự án qua `rsync --delete` (đích local), `shred`, `mv` chuyển thứ ngoài dự án đi nơi khác ngoài dự án,
+    `rmtree`/`remove_tree` trong script → chặn (AUD-SEC-068);
+  - dấu review `xt-review v1` đăng tay qua `gh pr|issue comment|review|edit`, `gh api` hoặc tool MCP comment → chặn —
+    chỉ `xt.py pr reviewed` đăng (ADR-0027, AUD-SEC-069); matcher hook MCP thêm tool comment/review.
+
 ### Changed
 - Subagent: nâng `maxTurns` gấp đôi theo yêu cầu chủ repo — `reviewer`/`researcher` 40 → 80, `executor` 60 → 120
   (audit 2026-10-19: 4/5 subagent `reviewer` dừng ở trần 40 lượt trước khi kịp trả báo cáo). Dự án đích: chạy lại
