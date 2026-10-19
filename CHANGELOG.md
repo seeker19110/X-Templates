@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-10-19
+
+> **Dự án đích khi nâng từ 3.5.0:** chạy lại `install.py --with-github` (`xt.py`, workflow `pr-steward.yml`). Repo thuộc
+> org nay dùng được `pr-steward` (trước đây mọi PR bị `defer-human`).
+
 ### Fixed
 - `pr steward`/`pr next` ở repo thuộc org (D-058): tác giả PR và người đăng dấu review là `MEMBER` được tin khi REST
   `collaborators/<login>/permission` trả `admin`/`write` (không hỏi được → không tin); workflow `pr-steward` chạy cả khi
@@ -12,7 +17,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `pr_title_check: off` chỉ có hiệu lực khi cả xt.yaml ở nhánh đích lẫn cây làm việc đều `off` — PR không tự tắt luật
   tiêu đề cho chính nó (D-058).
 - `pr steward --apply` không gắn được nhãn `xt-standard-lane` → dòng báo `⚠` (cả trong summary của run) và exit 1, thay vì
-  im lặng. `MERGE_FIELDS` (`--pr-json` từ `gh pr view`) có thêm `author` để miễn tiêu đề cho PR của bot.
+  im lặng; lượt đó không bật auto-merge/merge (lượt sau gắn lại nhãn rồi mới bật). `MERGE_FIELDS` (`--pr-json` từ
+  `gh pr view`) có thêm `author` để miễn tiêu đề cho PR của bot.
+- Quyền ghi của MEMBER đọc cả `role_name` (`maintain` tính là ghi) và được nhớ 5 phút trong một tiến trình (`merge-watch`
+  hỏi 30 giây/lần không tốn thêm request mỗi lượt); lỗi khi hỏi không được nhớ. ADR-0027 ghi chú sửa đổi ở dòng trạng thái.
 
 ## [3.5.0] - 2026-10-19
 

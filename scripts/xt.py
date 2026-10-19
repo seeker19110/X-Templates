@@ -5407,17 +5407,32 @@ def _published_marks(repo: str, n: str) -> List[Dict[str, Any]]:
     return published_reviews(comments, {u for u in members if u and repo_writer(repo, u)})
 
 
-WRITE_PERMISSIONS = {"admin", "write"}  # REST `permission`: maintain tính là write, triage là read
+WRITE_PERMISSIONS = {"admin", "write"}  # REST `permission` (cũ): maintain tính là write, triage là read
+WRITE_ROLES = {"admin", "maintain", "write"}  # REST `role_name`
+WRITER_TTL = (
+    300.0  # giây — merge-watch hỏi 30 giây/lần: không hỏi lại quyền mỗi lượt, thu hồi quyền có hiệu lực sau ≤ 5 phút
+)
+_WRITER_CACHE: Dict[Tuple[str, str], Tuple[float, bool]] = {}
 
 
 def repo_writer(repo: str, login: str) -> bool:
     """`login` có quyền ghi repo? Cho MEMBER của org — `author_association` không nói quyền repo (repo thuộc org: chủ
-    repo thường là MEMBER, không phải OWNER/COLLABORATOR). Không hỏi được (token thiếu quyền, mạng) → False (chặt)."""
+    repo thường là MEMBER, không phải OWNER/COLLABORATOR). Không hỏi được (token thiếu quyền, mạng) → False (chặt), không
+    nhớ kết quả lỗi. Token cần đọc được quyền cộng tác viên (GITHUB_TOKEN của Actions đọc được — quyền metadata)."""
+    now, key = time.monotonic(), (repo, login)
+    hit = _WRITER_CACHE.get(key)
+    if hit and now - hit[0] < WRITER_TTL:
+        return hit[1]
     try:
         got = _gh_one(f"{repo}/collaborators/{urllib.parse.quote(login, safe='')}/permission")
     except PrInputError:
         return False
-    return str(got.get("permission", "")).lower() in WRITE_PERMISSIONS
+    ok = (
+        str(got.get("permission", "")).lower() in WRITE_PERMISSIONS
+        or str(got.get("role_name", "")).lower() in WRITE_ROLES
+    )
+    _WRITER_CACHE[key] = (now, ok)
+    return ok
 
 
 def _iso_key(at: object) -> str:
@@ -5618,8 +5633,8 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
         label_err = _steward_run(
             [["gh", "api", "-X", "POST", f"{repo}/issues/{n}/labels", "-f", f"labels[]={STANDARD_LABEL}"]]
         )
-        if label_err:  # không nhãn: push sau có thể hạ PR về làn nhanh — báo ra summary, run đỏ để người thấy
-            out["warn"] = f"không gắn được nhãn {STANDARD_LABEL}: {label_err}"
+        if label_err:  # không nhãn: push sau có thể hạ PR về làn nhanh — không bật/merge lượt này, báo đỏ ra summary
+            return {**out, "warn": f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"}
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
     cmds = cmds if apply else []
     if cmds:

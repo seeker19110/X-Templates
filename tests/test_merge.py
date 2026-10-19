@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -1529,6 +1530,8 @@ class StewardFollowupTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
+        xt._WRITER_CACHE.clear()
+        self.addCleanup(xt._WRITER_CACHE.clear)
 
     def steward(self, permission: str, **kw: Any) -> tuple[int, str, StewardGh]:
         raw = {self.PERM: json.dumps({"permission": permission}), **kw.pop("raw", {})}
@@ -1540,15 +1543,44 @@ class StewardFollowupTest(unittest.TestCase):
     def test_org_member_with_write_access_is_trusted(self):
         for perm in ("admin", "write"):
             with self.subTest(perm):
+                xt._WRITER_CACHE.clear()
                 rc, out, gh = self.steward(perm)
                 self.assertIn("#7 enable-auto-merge ✓", out)
                 self.assertIn(self.PERM, gh.paths())
+        xt._WRITER_CACHE.clear()
         rc, out, gh = self.steward("read")
         self.assertEqual(gh.writes, [])
         self.assertIn("#7 defer-human — tác giả chu (MEMBER)", out)
         with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
             self.assertFalse(xt.repo_writer("repos/o/r", "chu"))  # không hỏi được quyền → không tin
         self.assertIsNone(xt._member_can_write("repos/o/r", "CONTRIBUTOR", "chu"))  # không hỏi khi không phải MEMBER
+
+    def test_permission_roles_and_cache(self):
+        cases = {  # (permission cũ, role_name) → quyền ghi
+            ("write", "maintain"): True,
+            ("read", "maintain"): True,  # role_name mới đủ
+            ("read", "triage"): False,
+            ("none", ""): False,
+        }
+        for (perm, role), want in cases.items():
+            with (
+                self.subTest(role=role),
+                unittest.mock.patch.object(xt, "_gh_one", return_value={"permission": perm, "role_name": role}),
+            ):
+                xt._WRITER_CACHE.clear()
+                self.assertIs(xt.repo_writer("repos/o/r", "chu"), want)
+        xt._WRITER_CACHE.clear()
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")) as one:
+            xt.repo_writer("repos/o/r", "chu")
+            xt.repo_writer("repos/o/r", "chu")
+        self.assertEqual(one.call_count, 2)  # lỗi không được nhớ
+        with unittest.mock.patch.object(xt, "_gh_one", return_value={"permission": "write"}) as one:
+            self.assertTrue(xt.repo_writer("repos/o/r", "chu"))
+            self.assertTrue(xt.repo_writer("repos/o/r", "chu"))
+            self.assertEqual(one.call_count, 1)  # nhớ trong WRITER_TTL
+            with unittest.mock.patch.object(xt.time, "monotonic", return_value=time.monotonic() + xt.WRITER_TTL + 1):
+                xt.repo_writer("repos/o/r", "chu")
+            self.assertEqual(one.call_count, 2)  # hết hạn → hỏi lại
 
     def test_member_review_marks_count_only_with_write_access(self):
         def member(login: str) -> dict:
@@ -1574,6 +1606,14 @@ class StewardFollowupTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("⚠ không gắn được nhãn xt-standard-lane: HTTP 403", out)
         self.assertIn("không gắn được nhãn", summary.read_text(encoding="utf-8"))
+        # review đã sạch nhưng nhãn lỗi: lượt này không bật auto-merge (lượt sau gắn lại nhãn rồi mới bật)
+        ready = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "sạch", "fallback": ""}
+        gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
+        with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=ready):
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 1)
+        self.assertEqual([w[3] for w in gh.writes], ["POST"])  # chỉ lần gắn nhãn, không `gh pr merge`
+        self.assertIn("#7 enable-auto-merge — sạch ⚠", out)
 
     def test_merge_fields_include_author(self):
         self.assertIn("author", xt.MERGE_FIELDS.split(","))
