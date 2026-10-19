@@ -38,7 +38,7 @@ merge_hard_exceptions: human
 # review_identity thì CHỈ dấu review của đúng tài khoản đó mở được merge (tác giả PR không tự đăng được); hai họ model khai
 # cùng nhau phải KHÁC họ (`xt.py ci-check` từ chối trùng). Dùng với workflow `pr-review` (cần secret của chủ repo).
 # review_identity: ten-tai-khoan-reviewer
-# author_model_family: opus
+# author_model_family: gpt  # tác giả họ khác Claude → reviewer Claude mặc định (opus) hợp lệ; tác giả opus thì đặt XT_REVIEWER_MODEL họ khác
 # reviewer_model_family: sonnet  # họ model THẬT của reviewer (workflow pr-review chạy model Claude — không ghi họ khác)
 # Tuỳ chọn, agent đọc và chạy trực tiếp (dev-task không chạy): e2e, audit (dependency), perf (k6/lighthouse), migrate (áp migration local), install, dev, init, smoke
 # e2e_affected: lệnh chạy CHỈ spec của lát/PR đang làm (vd `npx playwright test --grep @smoke e2e/<luồng>.spec.ts`); Gate mỗi task

@@ -889,6 +889,14 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertTrue(lines["L-002"].startswith("- [~] `L-002`") and "(Miễn: chưa cần)" in lines["L-002"])
         self.assertTrue(lines["L-003"].startswith("- [x] `L-003`"))
 
+    def test_requirement_revision_tail_item_keeps_body_with_waiver_mention(self):
+        """Review #168 vòng 2: mục CÓ đuôi `→ Kiểm:` mà thân nhắc "ghi `[~] — Miễn:`" — chữ yêu cầu không bị cắt ở đó."""
+        old = "- [x] `W-001` **MUST** Ghi `[~] — Miễn:` kèm lý do; auth vẫn người merge. → Kiểm: t. · Nguồn: x\n"
+        new = "- [ ] `W-001` **MUST** Ghi `[~] — Miễn:` kèm lý do; chỉ payment vẫn người merge. → Kiểm: t. · Nguồn: x\n"
+        stale: list[str] = []
+        xt.carry_states(old, new, stale=stale)
+        self.assertEqual(stale, ["W-001"])
+
     def test_waiver_reason_accepts_nfd(self):
         import unicodedata
 

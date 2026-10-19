@@ -753,8 +753,9 @@ def _normative(m: "re.Match[str]") -> str:
     """Phần quy phạm của mục: chữ yêu cầu TRƯỚC `→ Kiểm:`/`· Nguồn:` — đổi chữ là đổi yêu cầu (REC-06). Mức MUST/SHOULD và
     ngưỡng quy mô KHÔNG tính (đổi quy mô chuyển mức mà yêu cầu giữ nguyên — ADR-0012: bằng chứng cũ vẫn đúng); đổi cách
     kiểm hoặc nguồn cũng không làm bằng chứng cũ hết giá trị."""
-    head = STALE_NOTE_RE.split(NORM_TAIL_RE.split(m["text"], maxsplit=1)[0], maxsplit=1)[0]
-    note = LOOSE_NOTE_RE.search(head)  # mục không có đuôi `→ Kiểm:`/`· Nguồn:`: ghi chú dự án không phải chữ yêu cầu
+    parts = NORM_TAIL_RE.split(m["text"], maxsplit=1)
+    head = STALE_NOTE_RE.split(parts[0], maxsplit=1)[0]
+    note = LOOSE_NOTE_RE.search(head) if len(parts) == 1 else None  # chỉ mục KHÔNG đuôi: thân có thể tự nhắc `— Miễn:`
     return (head[: note.start()] if note else head).strip()
 
 
@@ -6007,7 +6008,7 @@ def published_reviews(
     """Review đã đăng trên PR, theo thứ tự thời gian: [{"head", "clean", "at"}] từ comment của người có quyền ghi —
     OWNER/COLLABORATOR, hoặc MEMBER của org mà `writers` (đã hỏi quyền repo) xác nhận có quyền ghi. `identity` (xt.yaml
     `review_identity`, T-1508): khi cấu hình, CHỈ comment của đúng tài khoản reviewer đó là review — tác giả PR (cùng tài
-    khoản với phiên agent) đăng dấu không còn mở được merge; comment đã bị sửa (`updated_at` ≠ `created_at`) bị bỏ qua."""
+    khoản với phiên agent) đăng dấu không còn mở được merge; comment đã bị sửa (`updated_at` ≠ `created_at`) không bao giờ là review sạch."""
     out = []
     for c in comments:
         m = REVIEW_MARK_RE.search(str(c.get("body") or ""))
@@ -6018,8 +6019,8 @@ def published_reviews(
             else assoc in TRUSTED_ASSOCIATIONS or (assoc == "MEMBER" and _comment_login(c) in (writers or set()))
         )
         edited = bool(identity) and c.get("updated_at") not in (None, "", c.get("created_at"))
-        if m and trusted and not edited:  # dấu bị sửa sau khi đăng (người có quyền write sửa được comment) không tính
-            out.append({"head": m[1], "clean": m[2] == "clean", "at": str(c.get("created_at", ""))})
+        if m and trusted:  # dấu bị sửa sau khi đăng (người có quyền write sửa được comment) không thể là "sạch"
+            out.append({"head": m[1], "clean": m[2] == "clean" and not edited, "at": str(c.get("created_at", ""))})
     return sorted(out, key=lambda r: r["at"])
 
 

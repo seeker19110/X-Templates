@@ -1639,7 +1639,7 @@ class PrNextCliTest(unittest.TestCase):
 
         same, edited = by("2026-10-19T01:00:00Z"), by("2026-10-19T02:00:00Z")
         self.assertEqual(len(xt.published_reviews([same], identity="rev-bot")), 1)
-        self.assertEqual(xt.published_reviews([edited], identity="rev-bot"), [])  # bị sửa sau khi đăng
+        self.assertFalse(xt.published_reviews([edited], identity="rev-bot")[0]["clean"])  # sửa sau khi đăng: không sạch
         self.assertEqual(
             len(xt.published_reviews([{**edited, "author_association": "OWNER"}])), 1
         )  # không cấu hình: như cũ
