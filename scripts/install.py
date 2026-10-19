@@ -227,10 +227,23 @@ def _sync_matcher(theirs: list[dict[str, Any]], entry: dict[str, Any], cmds: set
     return changed
 
 
+def _sync_on_failure(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """`onFailure` khung đặt cho handler (LOOP-DESIGN-010: guard PreToolUse lỗi/hết giờ thì chặn — T-1514) mà handler
+    cùng lệnh ở dự án chưa có → thêm; giá trị dự án đã tự đặt giữ nguyên. Trả danh sách handler đã đổi."""
+    want = {h.get("command"): h["onFailure"] for h in entry.get("hooks", []) if "onFailure" in h}
+    changed = []
+    for h in (h for e in theirs for h in e.get("hooks", [])):
+        if h.get("command") in want and "onFailure" not in h:
+            h["onFailure"] = want[h["command"]]
+            changed.append({"command": h["command"], "onFailure": h["onFailure"]})
+    return changed
+
+
 def _merge_hook_events(
     ours: dict[str, Any], theirs: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Gộp `hooks` của khung vào `theirs` (giữ hook riêng); trả (mục thêm, mục đổi matcher), mỗi mục kèm `event`."""
+    """Gộp `hooks` của khung vào `theirs` (giữ hook riêng); trả (mục thêm, mục đổi matcher/`onFailure`), mỗi mục kèm
+    `event`."""
     hooks = theirs.setdefault("hooks", {})
     added: list[dict[str, Any]] = []
     synced: list[dict[str, Any]] = []
@@ -245,6 +258,7 @@ def _merge_hook_events(
                 synced += [
                     {"event": event, "commands": cmds, **m}
                     for m in _sync_matcher(hooks.get(event, []), entry, set(cmds))
+                    + _sync_on_failure(hooks.get(event, []), entry)
                 ]
     return added, synced
 

@@ -1343,6 +1343,8 @@ class HookFailOpenTest(unittest.TestCase):
         "pre-compact.sh",
         "pre-mcp-guard.sh",
         "permission-request.sh",
+        "task-completed.sh",
+        "subagent-stop.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
@@ -4157,6 +4159,217 @@ class TypedDecisionTest(unittest.TestCase):
         self.assertIn("permission-request.sh", entry["hooks"][0]["command"])
         for tool in ("Bash", "Edit", "Write", "MultiEdit", "mcp__github__merge_pull_request"):
             self.assertRegex(tool, f"^(?:{entry['matcher']})$")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class EvidenceHooksTest(unittest.TestCase):
+    """AUTO-02 (T-1514, D-068): TaskCompleted đòi bằng chứng xanh cho `T-NNN` trong subject khi vòng đang bật;
+    SubagentStop chặn báo cáo executor thiếu lệnh + exit code; guard PreToolUse `onFailure: block` (LOOP-DESIGN-010)."""
+
+    PLAN = "- [ ] `T-001` việc một — Gate: `true`\n- [ ] `T-002` việc hai — Gate: `test -f ok.txt`\n"
+
+    def project(self, init: bool = True) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
+        (tmp / "docs" / "autopilot").mkdir(parents=True)
+        (tmp / "docs" / "autopilot" / "PLAN.md").write_text(self.PLAN, encoding="utf-8")
+        if init:
+            self.xt(tmp, "loop", "init", "--single-session")
+        return tmp
+
+    def xt(self, base: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(base))
+        cmd = [sys.executable, str(base / "scripts" / "xt.py"), *args]
+        return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=120)
+
+    def completed(self, base: Path, subject: object) -> tuple[int, str, str]:
+        payload = {"hook_event_name": "TaskCompleted", "task_id": "1", "task_subject": subject}
+        return run_hook("task-completed.sh", payload, base)
+
+    def test_task_completed_hook_blocks_until_green_evidence(self):
+        base = self.project()
+        code, out, err = self.completed(base, "Làm T-001 và T-002")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("TaskCompleted bị chặn (AUTO-02)", err)
+        self.assertIn("T-001 đã tick nhưng chưa có bằng chứng xanh", err)
+        self.assertIn("T-002", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-001", "--", "true").returncode, 0)
+        code, _, err = self.completed(base, "Làm T-001 và T-002")
+        self.assertEqual(code, 2)
+        self.assertNotIn("task T-001", err)
+        self.assertIn("T-002", err)
+        self.assertEqual(self.completed(base, "Xong T-001"), (0, "", ""))
+        # Bằng chứng đỏ, hoặc chạy lệnh khác Gate trong PLAN → vẫn chặn (cùng `_verdict_task` của Stop hook).
+        self.assertNotEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "test -f ok.txt").returncode, 0)
+        code, _, err = self.completed(base, "T-002")
+        self.assertEqual(code, 2)
+        self.assertIn("T-002", err)
+        (base / "ok.txt").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "true").returncode, 0)
+        code, _, err = self.completed(base, "T-002")
+        self.assertEqual(code, 2)
+        self.assertIn("bằng chứng chạy lệnh khác", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "test -f ok.txt").returncode, 0)
+        self.assertEqual(self.completed(base, "T-001, T-002 xong")[0], 0)
+
+    def test_task_completed_hook_id_outside_plan_needs_green_evidence(self):
+        base = self.project()
+        code, _, err = self.completed(base, "Phụ T-0999")
+        self.assertEqual(code, 2)
+        self.assertIn("T-0999 chưa có bằng chứng xanh", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-0999", "--", "true").returncode, 0)
+        self.assertEqual(self.completed(base, "Phụ T-0999")[0], 0)
+
+    def test_task_completed_hook_passes_when_inactive_or_no_task_id(self):
+        base = self.project(init=False)  # chưa `loop init`: không phải vòng autopilot → không chặn
+        self.assertEqual(self.completed(base, "Làm T-001"), (0, "", ""))
+        base = self.project()
+        for subject in ("Đọc tài liệu", "", None, 7, "AT-001x", "T-01"):
+            self.assertEqual(self.completed(base, subject), (0, "", ""), subject)
+        self.assertEqual(self.xt(base, "loop", "stop").returncode, 0)
+        self.assertEqual(self.completed(base, "Làm T-001"), (0, "", ""))
+
+    def test_task_completed_hook_fail_open(self):
+        base = self.project()
+        for payload in ("", "not json {", "[1, 2]", json.dumps({"subject": 5})):
+            self.assertEqual(run_hook("task-completed.sh", payload, base), (0, "", ""), payload)
+        # Khoá cũ `subject` (không có `task_subject`) vẫn được đọc.
+        self.assertEqual(run_hook("task-completed.sh", {"subject": "T-001"}, base)[0], 2)
+        (base / "scripts" / "xt.py").write_text("raise SystemExit(3)\n", encoding="utf-8")  # xt.py hỏng
+        self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
+        (base / "scripts" / "xt.py").unlink()  # thiếu xt.py
+        self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
+
+    def stop(self, payload: dict | str) -> tuple[int, str]:
+        code, out, _ = run_hook("subagent-stop.sh", payload)
+        return code, out
+
+    def test_subagent_stop_hook_blocks_executor_without_exit_code(self):
+        for agent in ("executor", "executor-deep", "xtemplates:executor"):
+            code, out = self.stop({"agent_type": agent, "last_assistant_message": "Đã sửa xong, test xanh."})
+            self.assertEqual(code, 0)
+            d = json.loads(out)
+            self.assertEqual(d["decision"], "block")
+            self.assertIn("lệnh + exit code", d["reason"])
+
+    def test_subagent_stop_hook_allows_report_with_exit_code(self):
+        for msg in (
+            "`python3 -m unittest` → exit 0",
+            "Lệnh: make test (exit code: 1)",
+            "ruff check — Exit Code 0",
+            "`bash -n x.sh` rc=0",
+            "pytest exit_code=2",
+            "gate: exit status 0",
+            "unittest: mã thoát 0",
+        ):
+            self.assertEqual(self.stop({"agent_type": "executor", "last_assistant_message": msg}), (0, ""), msg)
+
+    def test_subagent_stop_hook_ignores_other_agents_and_second_stop(self):
+        msg = "Đã sửa xong."
+        for payload in (
+            {"agent_type": "reviewer", "last_assistant_message": msg},
+            {"agent_type": "researcher", "last_assistant_message": msg},
+            {"last_assistant_message": msg},
+            {"agent_type": "executor", "last_assistant_message": msg, "stop_hook_active": True},  # chặn một lần
+            {"agent_type": "executor", "last_assistant_message": "   "},  # không có báo cáo, không transcript
+            {"agent_type": "executor", "agent_transcript_path": "/khong/co.jsonl"},
+            "",
+            "not json {",
+            "[1]",
+        ):
+            self.assertEqual(self.stop(payload), (0, ""), payload)
+
+    def test_subagent_stop_hook_reads_last_assistant_turn_from_transcript(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        tr = tmp / "agent.jsonl"
+
+        def turn(text: str) -> str:
+            return json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+
+        lines = [
+            turn("Chạy `true` → exit 0"),
+            "rác {",
+            json.dumps({"type": "user", "message": {"content": "exit 0"}}),
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}),
+            json.dumps({"type": "assistant", "message": "lạ"}),
+            json.dumps([1]),
+            turn("Báo cáo: đã sửa, mọi thứ xanh."),
+        ]
+        tr.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        payload = {"agent_type": "executor", "agent_transcript_path": str(tr)}
+        self.assertEqual(json.loads(self.stop(payload)[1])["decision"], "block")
+        tr.write_text("\n".join([*lines, turn("Lệnh `make` exit 0")]) + "\n", encoding="utf-8")
+        self.assertEqual(self.stop(payload), (0, ""))
+        tr.write_text("\n".join(lines[1:6]) + "\n", encoding="utf-8")  # không có lượt chữ nào → không chặn
+        self.assertEqual(self.stop(payload), (0, ""))
+
+    def test_subagent_stop_hook_and_task_completed_hook_registered(self):
+        s = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        for event, name in (("TaskCompleted", "task-completed.sh"), ("SubagentStop", "subagent-stop.sh")):
+            h = s["hooks"][event][0]["hooks"][0]
+            self.assertEqual(h["type"], "command")
+            self.assertIn(f"/.claude/hooks/{name}", h["command"])
+        # LOOP-DESIGN-010: guard chặn lệnh nguy hiểm fail-closed — hook lỗi/hết giờ thì Claude Code chặn tool.
+        for g in s["hooks"]["PreToolUse"]:
+            self.assertEqual([h.get("onFailure") for h in g["hooks"]], ["block"] * len(g["hooks"]), g.get("matcher"))
+        for event in ("Stop", "SessionStart", "PreCompact", "TaskCompleted", "SubagentStop"):  # fail-open về luồng
+            self.assertNotIn("onFailure", s["hooks"][event][0]["hooks"][0], event)
+
+    def test_install_copies_hooks_fresh(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import install
+
+        target = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, target, True)
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(install.main([str(target), "--label", "test"]), 0)
+        for name in ("task-completed.sh", "subagent-stop.sh"):
+            f = target / ".claude" / "hooks" / name
+            self.assertEqual(f.read_bytes(), (HOOKS / name).read_bytes(), name)
+            self.assertTrue(os.access(f, os.X_OK), name)
+        s = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertIn("task-completed.sh", s["hooks"]["TaskCompleted"][0]["hooks"][0]["command"])
+        self.assertIn("subagent-stop.sh", s["hooks"]["SubagentStop"][0]["hooks"][0]["command"])
+        # Hook đã cài chạy được ở dự án đích (xt.py ở `.xtemplates/scripts/`): vòng chưa bật → không chặn.
+        code, out, _ = run_hook("task-completed.sh", {"task_subject": "T-001"}, target)
+        self.assertEqual((code, out), (0, ""))
+
+    def test_install_copies_hooks_merges_events_and_on_failure(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import install
+
+        target = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, target, True)
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        old = json.loads(json.dumps(ours))  # bản khung cũ: chưa có hai sự kiện mới, chưa có onFailure
+        del old["hooks"]["TaskCompleted"], old["hooks"]["SubagentStop"]
+        for g in old["hooks"]["PreToolUse"]:
+            for h in g["hooks"]:
+                h.pop("onFailure", None)
+        old["hooks"]["PreToolUse"][1]["hooks"][0]["onFailure"] = "continue"  # dự án tự đặt → giữ
+        old["hooks"]["PreToolUse"].append({"matcher": "Read", "hooks": [{"type": "command", "command": "riêng.sh"}]})
+        (target / ".claude").mkdir()
+        (target / ".claude" / "settings.json").write_text(json.dumps(old), encoding="utf-8")
+        report: dict = {}
+        self.assertEqual(
+            install.merge_hooks(ROOT / ".claude" / "settings.json", target / ".claude" / "settings.json", {}, report),
+            "merged-hooks",
+        )
+        s = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(s["hooks"]["TaskCompleted"], ours["hooks"]["TaskCompleted"])
+        self.assertEqual(s["hooks"]["SubagentStop"], ours["hooks"]["SubagentStop"])
+        got = [h.get("onFailure") for g in s["hooks"]["PreToolUse"] for h in g["hooks"]]
+        self.assertEqual(got, ["block", "continue", "block", None])
+        self.assertEqual({h["event"] for h in report["hooks_added"]}, {"TaskCompleted", "SubagentStop"})
+        changed = [m for m in report["hooks_matcher_updated"] if "onFailure" in m]
+        self.assertEqual([m["onFailure"] for m in changed], ["block", "block"])
+        self.assertTrue(all(m["event"] == "PreToolUse" for m in changed))
+        report = {}  # chạy lại: không còn gì để gộp
+        install.merge_hooks(ROOT / ".claude" / "settings.json", target / ".claude" / "settings.json", {}, report)
+        self.assertEqual((report["hooks_added"], report["hooks_matcher_updated"]), ([], []))
 
 
 if __name__ == "__main__":

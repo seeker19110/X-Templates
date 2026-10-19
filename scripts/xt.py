@@ -1767,7 +1767,8 @@ def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all
 def loop_verify(base: Optional[Path] = None, run_all: bool = False) -> int:
     """Kiểm lại cuối (LOOP-DESIGN-022): chạy lại Gate của task đã tick trên cây hiện tại, một lần cho mỗi lệnh — Gate có
     evidence v2 còn khớp (lệnh, `files:`, spec, digest file) được giữ, `run_all` (`--all`) chạy hết (AUTO-02) — ghi
-    `.autopilot/verified.json` kèm dấu vân tay cây. Stop hook chỉ nhận `done` khi file này xanh và khớp cây: bắt cả
+    `.autopilot/verified.json` kèm dấu vân tay cây. Stop hook chỉ nhận `done` khi file này xanh, khớp cây và
+    `mode == "all"` (verify một phần chỉ dùng giữa vòng — D-084): bắt cả
     bằng chứng sửa tay lẫn task sau làm hỏng Gate của task trước."""
     base = base or project_dir()
     timeout = _record_timeout()
@@ -1850,7 +1851,12 @@ def final_check(base: Path) -> Optional[str]:
         return None
     rec = _read_json_obj(state_dir(base) / VERIFIED_FILE) or {}
     if rec.get("fingerprint") == fp and rec.get("ok") is True:
-        return None
+        if rec.get("mode") == "all":
+            return None
+        return (  # D-084: verify một phần (giữ Gate theo digest) chỉ dùng giữa vòng — `files:` khai thiếu làm lọt hồi quy
+            "kiểm lại cuối chỉ chạy Gate có đầu vào đổi — trước `done` chạy "
+            "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
+        )
     if rec.get("fingerprint") == fp:
         runs = rec.get("results", []) + rec.get("blueprint", []) + rec.get("gate_floor_runs", [])
         red = [
@@ -1862,7 +1868,7 @@ def final_check(base: Path) -> Optional[str]:
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
-        "`python3 .xtemplates/scripts/xt.py loop verify` (chạy lại Gate có đầu vào đổi, `--all` chạy hết; LOOP-DESIGN-022)"
+        "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
     )
 
 
@@ -5105,6 +5111,203 @@ def _loop_defer(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- loop ci-triage (AUTO-04, T-1515)
+# Loại lỗi CI theo bảng của `framework/11-autonomous-loop/self-healing-ci.md`; loại đầu tiên khớp thắng. Hạ tầng xét
+# CUỐI: log có cả lỗi thật lẫn dấu mạng thì là lỗi thật — không phí lượt re-run. Mẫu nhắm dòng LỖI, không nhắm tên
+# công cụ trong dòng lệnh được in lại (cổng một bước như `dev-task.sh gate` in mọi lệnh trong cùng log).
+CI_TRIAGE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+    (
+        "secret",
+        re.compile(
+            r"gitleaks|trufflehog|detect-secrets|secret scanning|\bsecrets? (?:detected|found)|\bleaks? found"
+            r"|potential secret|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|fail\w*|vulnerab\w*)"
+            r"|>> Issue: \[B\d+",
+            re.I,
+        ),
+    ),
+    (
+        "migration",
+        re.compile(r"\b(?:migrat\w*|alembic|flyway|liquibase)\b.*\b(?:fail\w*|error)\b|pending migrations?", re.I),
+    ),
+    (
+        "type",
+        re.compile(r"\berror TS\d+|: error: .*\[[a-z][\w-]*\]$|\bFound \d+ errors? in \d+ files?|is not assignable to"),
+    ),
+    ("coverage", re.compile(r"coverage failure|coverage threshold|\bcoverage\b.*\b(?:below|less than)\b", re.I)),
+    (
+        "lint",
+        re.compile(
+            r"^Found \d+ errors?\.|would reformat|files? would be reformatted|✖ \d+ problems?|\bSC\d{4}\b"
+            r"|^\S+:\d+:\d+: [EWFC]\d{3} |Code style issues found|Your code has been rated",
+            re.I,
+        ),
+    ),
+    ("test", re.compile(r"\bFAILED\b|^FAIL\b|AssertionError|\b\d+ (?:failed|failing)\b|--- FAIL:|\bpanicked at\b")),
+    (
+        "infra",
+        re.compile(
+            r"ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|connection (?:reset|refused|timed out)|could not resolve host"
+            r"|temporary failure in name resolution|read timed out|TLS handshake timeout|HTTP (?:error )?50[0234]"
+            r"|\b50[234] (?:Bad Gateway|Service Unavailable|Gateway Time-?out)|rate limit|received a shutdown signal"
+            r"|lost communication with the server|no space left on device|the operation was canceled",
+            re.I,
+        ),
+    ),
+)
+CI_FIX_HINTS = {
+    "migration": "migration đỏ — chỉ sửa migration CHƯA áp; đã áp ở môi trường chung → loop block (LOOP-CI-007)",
+    "type": "typecheck đỏ — sửa kiểu, không `any`/ignore, không nới strict",
+    "coverage": "coverage dưới ngưỡng — thêm test cho nhánh thiếu, không hạ ngưỡng",
+    "lint": "lint/format đỏ — chạy formatter/linter fix, commit riêng `style:`, không tắt rule",
+    "test": "test đỏ — tái hiện local, sửa code giữ test; không skip/xfail/xoá test",
+    "unknown": "không khớp loại nào — đọc log, trích dòng lỗi trước khi sửa (LOOP-CI-005)",
+    "infra": "hạ tầng vẫn đỏ sau re-run — coi là lỗi thật, đọc log (LOOP-CI-002)",
+}
+CI_LOG_PREFIX_RE = re.compile(r"^(?:[^\t\n]*\t){0,2}\d{4}-\d\d-\d\dT[\d:.]+Z ?")  # `job<TAB>bước<TAB>thời điểm `
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+CI_RUN_ID_RE = re.compile(r"[0-9]{1,20}")
+CI_TRIAGE_EVIDENCE = 10
+CI_SAME_SIGNATURE_MAX = 3  # cùng chữ ký lần 3 → dừng episode (defer), như `max_same_failure` của loop record
+CI_EPISODE_KEYS = ("task", "started", "rerun_used", "fix_attempts", "cost_usd", "signature", "same_signature")
+
+
+def _ci_log_lines(text: str) -> List[str]:
+    """Dòng log đã bỏ mã màu và tiền tố `job/bước/thời điểm` của `gh run view --log-failed`; bỏ dòng trống."""
+    lines = (CI_LOG_PREFIX_RE.sub("", ANSI_ESCAPE_RE.sub("", raw)).strip() for raw in text.splitlines())
+    return [line for line in lines if line]
+
+
+def ci_classify(text: str) -> Dict[str, Any]:
+    """Phân loại log job CI: loại thắng, mọi loại khớp, dòng lỗi làm bằng chứng và chữ ký (số → N, ổn định qua run).
+    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó."""
+    lines = _ci_log_lines(text)
+    hits = {cat: [line for line in lines if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
+    cats = [cat for cat, _ in CI_TRIAGE_RULES if hits[cat]]
+    category = cats[0] if cats else "unknown"
+    evidence = list(dict.fromkeys(hits.get(category) or lines[-CI_TRIAGE_EVIDENCE:]))[:CI_TRIAGE_EVIDENCE]
+    norm = "\n".join(re.sub(r"\d+", "N", line) for line in evidence)
+    signature = hashlib.sha256(f"{category}\n{norm}".encode()).hexdigest()[:16]
+    shown = [] if category == "secret" else evidence
+    return {"category": category, "categories": cats, "signature": signature, "evidence": shown}
+
+
+def _ci_log_text(run: str, log: Optional[str], base: Path) -> str:
+    """Log job: `--log FILE` (test/ngoại tuyến) hoặc `gh run view <id> --log-failed`; gh lỗi → PrInputError (exit 3)."""
+    if log:
+        p = Path(log)
+        return (p if p.is_absolute() else base / p).read_text(encoding="utf-8", errors="replace")
+    cmd = ["gh", "run", "view", run, "--log-failed"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PrInputError(f"không chạy được gh ({exc}) — cài/đăng nhập gh hoặc dùng --log FILE") from exc
+    if r.returncode != 0:
+        raise PrInputError(f"gh run view {run} lỗi: {_one_line(r.stderr)}")
+    return r.stdout
+
+
+def _ci_episode(st: Dict[str, Any], task: Optional[str]) -> Dict[str, Any]:
+    """Episode sửa CI của task (ngân sách sống trong state.json qua restart); task khác hoặc hỏng → episode mới."""
+    ep = st.get("episode")
+    if isinstance(ep, dict) and ep.get("task") == task and isinstance(ep.get("runs"), dict):
+        return ep
+    return {
+        "task": task,
+        "started": now_iso(),
+        "rerun_used": 0,
+        "fix_attempts": 0,
+        "cost_usd": None,  # chưa đo ≠ 0 (AUTO-04)
+        "signature": None,
+        "same_signature": 0,
+        "runs": {},
+    }
+
+
+def _ci_action(ep: Dict[str, Any], category: str) -> Tuple[str, str]:
+    """(hành động, lý do) theo bảng self-healing-ci.md; secret/SAST thắng mọi trần, rồi tới trần cùng chữ ký."""
+    if category == "secret":
+        return (
+            "block",
+            "secret scan/SAST đỏ — dừng, người xem; xoay bí mật nếu đã lộ, không thêm allowlist (LOOP-CI-006)",
+        )
+    if ep["same_signature"] >= CI_SAME_SIGNATURE_MAX:
+        return "defer", f"cùng chữ ký lỗi {ep['same_signature']} lần — dừng episode, chờ người (AUTO-04)"
+    if category == "infra" and ep["rerun_used"] < 1:
+        return "rerun", "nghi hạ tầng — re-run 1 lần (`gh run rerun <id> --failed`); vẫn đỏ → lỗi thật (LOOP-CI-002)"
+    return "fix", CI_FIX_HINTS[category]
+
+
+def _ci_triage_new(ep: Dict[str, Any], run: str, text: str, cost: Optional[float]) -> Dict[str, Any]:
+    """Triage một run CHƯA thấy: cập nhật đếm chữ ký, lượt re-run/sửa, chi phí; ghi kết quả vào episode."""
+    tri = ci_classify(text)
+    same = tri["signature"] == ep.get("signature")
+    ep["same_signature"] = ep.get("same_signature", 0) + 1 if same else 1
+    ep["signature"] = tri["signature"]
+    action, reason = _ci_action(ep, tri["category"])
+    if action == "rerun":
+        ep["rerun_used"] = ep.get("rerun_used", 0) + 1
+    if action == "fix":
+        ep["fix_attempts"] = ep.get("fix_attempts", 0) + 1
+    if cost is not None:  # chi phí cộng một lần mỗi run, không cộng lại khi triage lại cùng run
+        ep["cost_usd"] = round((ep.get("cost_usd") or 0.0) + cost, 6)
+    rec = {**tri, "action": action, "reason": reason, "at": now_iso()}
+    ep["runs"][run] = rec
+    return rec
+
+
+def _ci_apply(st: Dict[str, Any], run: str, rec: Dict[str, Any], task: Optional[str]) -> None:
+    """Máy áp quyết định: block → state blocked; defer → task vào `deferred` (khi có --task)."""
+    why = f"CI run {run}: {rec['reason']}"
+    if rec["action"] == "block":
+        st.update({"blocked": True, "blocked_reason": why, "blocked_at": now_iso()})
+    if rec["action"] == "defer" and task:
+        st["deferred"] = {**_deferred(st), task: {"reason": why, "at": now_iso()}}
+
+
+def _ci_triage_print(out: Dict[str, Any]) -> None:
+    ep = out["episode"]
+    print(
+        f"CI run {out['run']}: {out['category']} → {out['action']} "
+        f"(chữ ký {out['signature']}, lần {ep['same_signature']}/{CI_SAME_SIGNATURE_MAX})"
+    )
+    print(f"  lý do: {out['reason']}")
+    for line in out["evidence"]:
+        print(f"  | {line}")
+    cost = "—" if ep["cost_usd"] is None else f"{ep['cost_usd']} USD"
+    print(f"  episode {ep['task'] or '—'}: re-run {ep['rerun_used']}/1 · sửa {ep['fix_attempts']} · chi phí {cost}")
+
+
+def _loop_ci_triage(args: argparse.Namespace, base: Path) -> int:
+    if not CI_RUN_ID_RE.fullmatch(args.run):
+        print(f"✗ --run phải là ID số của run GitHub Actions: {args.run!r}", file=sys.stderr)
+        return 2
+    if args.cost_usd is not None and not (math.isfinite(args.cost_usd) and args.cost_usd >= 0):
+        print("✗ --cost-usd phải là số ≥ 0 (chưa đo thì bỏ trống — ghi null, không ghi 0)", file=sys.stderr)
+        return 2
+    st = read_state(base) or {"active": False}
+    ep = _ci_episode(st, args.task)
+    rec = ep["runs"].get(args.run)
+    if not isinstance(rec, dict):  # run đã triage → trả lại kết quả cũ, không đếm lại (restart không tiêu ngân sách)
+        try:
+            text = _ci_log_text(args.run, args.log, base)
+        except OSError as exc:
+            print(f"✗ Không đọc được --log {args.log}: {exc}", file=sys.stderr)
+            return 2
+        except PrInputError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            return 3
+        rec = _ci_triage_new(ep, args.run, text, args.cost_usd)
+    st["episode"] = ep
+    _ci_apply(st, args.run, rec, args.task)
+    write_state(st, base)
+    out = {"run": args.run, **rec, "episode": {k: ep.get(k) for k in CI_EPISODE_KEYS}}
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        _ci_triage_print(out)
+    return 1 if rec["action"] in ("block", "defer") else 0
+
+
 def _evidence_latest(base: Path) -> Optional[Dict[str, Any]]:
     files = sorted((state_dir(base) / "evidence").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     ev = next((e for e in map(_read_json_obj, files) if e), None)  # file mới nhất hỏng → lùi về file trước
@@ -5216,6 +5419,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "block": _loop_block,
     "decide": _loop_decide,
     "defer": _loop_defer,
+    "ci-triage": _loop_ci_triage,
     "checkpoint": _loop_checkpoint,
     "resume": _loop_resume,
     "stop": _loop_stop,
@@ -6225,7 +6429,9 @@ def _release_verify(base: Path) -> Dict[str, str]:
     why = final_check(base)
     if why:
         return _release_row("verify", "FAIL", why)
-    return _release_row("verify", "PASS", "`loop verify` xanh và khớp dấu vân tay cây hiện tại (LOOP-DESIGN-022)")
+    return _release_row(
+        "verify", "PASS", "`loop verify --all` xanh và khớp dấu vân tay cây hiện tại (LOOP-DESIGN-022, D-084)"
+    )
 
 
 def _release_tree(base: Path) -> Dict[str, str]:
@@ -7516,7 +7722,7 @@ def build_parser() -> argparse.ArgumentParser:
         "  xt.py blueprint-status BLUEPRINT.md --strict\n"
         "  xt.py loop record --task T-001 -- python3 -m unittest\n\n"
         "mã thoát: 0 ổn · 1 vi phạm/chưa đạt · 2 sai cách dùng hoặc không đọc được file/thư mục · 3 lỗi GitHub/"
-        "hết giờ (`merge-gate`, `merge-watch`, `pr reviewed`) · 126 guard cấm lệnh (`guard-check`, Gate — LOOP-STOP-027)",
+        "hết giờ (`merge-gate`, `merge-watch`, `pr reviewed`, `loop ci-triage`) · 126 guard cấm lệnh (`guard-check`, Gate — LOOP-STOP-027)",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {framework_version()}")
     p.add_argument(
@@ -7682,6 +7888,14 @@ def build_parser() -> argparse.ArgumentParser:
     lde = lsub.add_parser("defer", help="việc cần người: bỏ qua để làm việc khác, gom cuối phiên (done-pending-human)")
     lde.add_argument("--task", required=True, type=_defer_id, help="T-NNN trong PLAN hoặc ID mục blueprint")
     lde.add_argument("--reason", required=True)
+    lct = lsub.add_parser(
+        "ci-triage", help="phân loại lỗi một run CI, ngân sách sửa trong state.json.episode (AUTO-04); 1 = block/defer"
+    )
+    lct.add_argument("--run", required=True, help="ID run GitHub Actions (số)")
+    lct.add_argument("--log", help="đọc log từ file thay vì `gh run view <id> --log-failed`")
+    lct.add_argument("--task", type=_task_id, help="task đang sửa: khoá episode; defer áp vào task này")
+    lct.add_argument("--cost-usd", type=float, help="chi phí đã tiêu cho run này (chưa đo → bỏ trống, ghi null)")
+    lct.add_argument("--json", action="store_true")
     lsub.add_parser("checkpoint", help="dùng bởi PreCompact hook: ghi vị trí làm việc trước khi nén; luôn exit 0")
     lsta = lsub.add_parser(
         "stats", help="số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu (LOOP-DESIGN-024)"

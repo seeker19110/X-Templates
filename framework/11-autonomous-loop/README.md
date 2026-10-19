@@ -78,7 +78,8 @@ updated: 2026-10-19
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`;
-    đủ bằng chứng mà chưa kiểm lại cuối → chạy `<XT> loop verify` (mọi Gate trên cây hiện tại, `LOOP-DESIGN-022`).
+    đủ bằng chứng mà chưa kiểm lại cuối → chạy `<XT> loop verify --all` (mọi Gate trên cây hiện tại, `LOOP-DESIGN-022`;
+    `loop verify` không `--all` chỉ chạy Gate có đầu vào đổi — dùng giữa vòng, không đủ cho `done`, D-084).
 13. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <T-NNN|ID blueprint> --reason "..."` rồi làm việc
     độc lập khác; hết việc tự làm được → verdict `done-pending-human` (Stop hook cho dừng một lần, gom mọi việc cho người).
     **Điểm dừng bắt buộc về hành động** (merge PR ngoại lệ cứng khi `merge_hard_exceptions: human`, tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập

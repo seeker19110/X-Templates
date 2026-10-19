@@ -608,3 +608,17 @@
 - Chọn: giữ và báo ask_unproven, không suy diễn
 - Lý do (tiêu chí chất lượng cuối): REC-09 cấm suy diễn nguồn gốc; ghi CHANGELOG; thêm cờ khi có dự án đích cần
 - Đường lùi: thêm cờ adopt-legacy-ask sau
+
+### D-086 · 2026-10-19T23:41:06+00:00 · T-1514: ID ngoài PLAN trong subject; SubagentStop chặn mấy lần; có đòi lệnh kèm exit code?
+
+- Phương án: (1) ID ngoài PLAN vẫn đòi evidence; SubagentStop chặn một lần rồi cho dừng; chỉ đòi mẫu exit code · (2) bỏ qua ID ngoài PLAN; chặn mọi lần; đòi cả lệnh
+- Chọn: ID ngoài PLAN vẫn đòi evidence; SubagentStop chặn một lần rồi cho dừng; chỉ đòi mẫu exit code
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1 với evidence, tránh kẹt vòng subagent và chặn oan (phiên chính vẫn kiểm bằng loop record)
+- Đường lùi: đổi trong hook task-completed/subagent-stop
+
+### D-087 · 2026-10-19T23:47:36+00:00 · episode ci-triage: reset ở đâu?
+
+- Phương án: (1) giữ nguyên: resume không đụng, init --force xoá · (2) loop init mang episode vòng cũ sang · (3) resume xoá episode
+- Chọn: giữ nguyên: resume không đụng, init --force xoá
+- Lý do (tiêu chí chất lượng cuối): T-1515 đúng spec; lỗ init --force đổi ngân sách ghi vào PROGRESS để xử ở task sau, không mở rộng phạm vi
+- Đường lùi: thêm mang episode trong loop init

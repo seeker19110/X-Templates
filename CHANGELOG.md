@@ -19,8 +19,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Nâng khung có kế hoạch (T-1516, REC-09): `install.py <dự-án> --plan` in JSON diff (quyền thêm/bớt, `ask` trùng chuỗi
   nhưng không chứng minh được, hook thêm/đổi matcher, hành động từng file) và không ghi gì; `.xtemplates/manifest.json` ghi
   hash file harness + rule do khung đặt + chính sách. Dự án đích: chạy lại `install.py`.
+- Phân loại lỗi CI có ngân sách (T-1515, AUTO-04): `xt.py loop ci-triage --run <id> [--task T-NNN] [--cost-usd X]
+  [--json] [--log FILE]` đọc log bước đỏ qua `gh run view --log-failed`, phân loại secret/SAST · migration · type ·
+  coverage · lint · test · hạ tầng · unknown, trả `block`/`defer`/`rerun`/`fix`; `state.json` `episode` giữ `rerun_used`
+  (≤ 1), `fix_attempts`, `cost_usd` (chưa đo → `null`) qua restart; cùng chữ ký lần 3 → `defer` task, secret/SAST →
+  `blocked` (`self-healing-ci.md`, `LOOP-CI-002` Kiểm). Dự án đích: chạy lại `install.py`.
+- Cổng bằng chứng mức task/subagent (T-1514, AUTO-02, D-068): hook `.claude/hooks/task-completed.sh` (sự kiện
+  `TaskCompleted`) exit 2 — task không được đánh dấu xong — khi vòng autopilot đang bật mà `T-NNN` trong subject chưa có
+  evidence xanh đúng Gate (cùng `_verdict_task` với Stop hook; ID ngoài PLAN chỉ đòi evidence exit 0); hook
+  `.claude/hooks/subagent-stop.sh` (sự kiện `SubagentStop`) trả `block` một lần khi báo cáo `executor`/`executor-deep`
+  thiếu lệnh + exit code. Cả hai fail-open khi lỗi. Guard PreToolUse (Bash, Edit/Write, MCP) đặt `"onFailure": "block"`
+  — hook lỗi/hết giờ thì chặn tool (`LOOP-DESIGN-010`); `install.py` gộp hai sự kiện mới và thêm `onFailure` vào handler
+  cùng lệnh của dự án đã cài (giá trị dự án tự đặt giữ nguyên; báo trong `hooks_matcher_updated`). Dự án đích: chạy lại
+  `install.py`.
 
 ### Changed
+- Kiểm lại cuối (`LOOP-DESIGN-022`, D-084): Stop hook (`final_check`) và `release-check` chỉ nhận `verified.json` có
+  `mode: "all"` — lần `loop verify` cuối trước `done` phải là `--all`; verify không `--all` (chỉ Gate có đầu vào đổi) dùng
+  giữa vòng. `verified.json` không có `mode` (bản cũ) coi như một phần. Dự án đích: chạy lại `install.py`.
 - `install.py` chỉ gỡ `ask` khi `.xtemplates/manifest.json` chứng minh khung đã đặt (trước: gỡ mọi `ask` trùng chuỗi
   `OLD_FRAMEWORK_ASK`, có thể xoá rule của dự án); chuỗi trùng không có nguồn gốc → giữ và báo. Dự án cài trước bản này
   chưa có manifest → `ask` cũ của khung không tự gỡ nữa (xoá tay nếu muốn).

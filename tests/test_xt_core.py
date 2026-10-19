@@ -902,7 +902,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
     def verify(self) -> tuple[int, str]:
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = xt.loop_verify(self.base)
+            rc = xt.loop_verify(self.base, run_all=True)
         return rc, buf.getvalue()
 
     def test_zero_tests_red_in_verify_and_blueprint_checks(self):
@@ -927,6 +927,24 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertIn("XANH (1 Gate)", text)  # hai task cùng lệnh (khác khoảng trắng) → chạy một lần
         self.assertEqual(xt.hook_stop("{}", self.base), ("", 0))
         self.assertFalse(xt.read_state(self.base)["active"])
+
+    def test_partial_verify_not_enough_for_done(self):
+        # D-084: verify giữ Gate theo digest (mode=changed) chỉ dùng giữa vòng; `done` đòi lần cuối `--all`.
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.loop_verify(self.base), 0)
+        why = xt.final_check(self.base) or ""
+        self.assertIn("chỉ chạy Gate có đầu vào đổi", why)
+        self.assertIn("loop verify --all", why)
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertIn("loop verify --all", json.loads(out)["reason"])
+        self.assertTrue(xt.read_state(self.base)["active"])
+        rec_path = self.base / ".autopilot" / xt.VERIFIED_FILE
+        rec = json.loads(rec_path.read_text(encoding="utf-8"))
+        del rec["mode"]  # bản ghi cũ không có `mode` → coi là một phần (chiều chặt)
+        xt.write_atomic(rec_path, json.dumps(rec) + "\n")
+        self.assertIn("loop verify --all", xt.final_check(self.base) or "")
+        self.assertEqual(self.verify()[0], 0)
+        self.assertIsNone(xt.final_check(self.base))
 
     def test_tree_change_after_verify_invalidates(self):
         self.assertEqual(self.verify()[0], 0)

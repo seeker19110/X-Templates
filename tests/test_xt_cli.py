@@ -1818,7 +1818,7 @@ class ReleaseCheckTest(TmpRepoCase):
 
     def fresh_verify(self) -> None:
         """Giả `loop verify` xanh trên cây hiện tại (dấu vân tay khớp)."""
-        rec = {"ok": True, "fingerprint": xt.tree_fingerprint(self.repo)}
+        rec = {"ok": True, "mode": "all", "fingerprint": xt.tree_fingerprint(self.repo)}
         xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
 
     def test_no_go_until_blueprint_audit_and_tree_pass(self):
@@ -1886,6 +1886,11 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)["verify"]
         self.assertEqual((r["level"], r["result"]), ("BLOCKER", "FAIL"))
         self.assertIn("chưa kiểm lại cuối trên cây hiện tại", r["evidence"])
+        rec = {"ok": True, "mode": "changed", "fingerprint": xt.tree_fingerprint(self.repo)}  # verify một phần (D-084)
+        xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
+        rc, d = self.rows()
+        self.assertEqual((rc, self.by_id(d)["verify"]["result"]), (1, "FAIL"))
+        self.assertIn("loop verify --all", self.by_id(d)["verify"]["evidence"])
         self.fresh_verify()
         rc, d = self.rows()
         self.assertEqual((rc, self.by_id(d)["verify"]["result"]), (0, "PASS"))
@@ -1970,3 +1975,182 @@ class ContextPackTest(TmpDirCase):
         rc, out, err = run_main("context", "--task", "T-001", "--plan", "none.md")
         self.assertEqual((rc, out), (2, ""))
         self.assertIn("Không thấy PLAN", err)
+
+
+# --------------------------------------------------------------------------- loop ci-triage (AUTO-04, T-1515)
+
+
+GH_PREFIX = "quality\tGate\t2026-10-19T10:00:00.1234567Z "
+
+
+class CiTriageTest(TmpDirCase):
+    LOGS = {
+        "secret": "Finding: gitleaks detected 1 leak\nAKIA0000SECRETVALUE\n",
+        "migration": "alembic upgrade head\nERROR: migration 0042 failed: column exists\n",
+        "type": "scripts/a.py:3: error: Incompatible return value [return-value]\nFound 1 error in 1 file (checked 2)\n",
+        "coverage": "TOTAL 120 3 98%\nCoverage failure: total of 98 is less than fail-under=100\n",
+        "lint": "python3 -m ruff check scripts\nWould reformat: scripts/a.py\n",
+        "test": "python3 -m ruff check scripts\nAll checks passed!\nFAIL: test_x (t.T)\nAssertionError: 1 != 2\n",
+        "infra": "npm ERR! network read ECONNRESET\nError: Process completed with exit code 1.\n",
+        "unknown": "something odd\nError: Process completed with exit code 2.\n",
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
+
+    def log(self, text: str, name: str = "ci.log") -> str:
+        (self.tmp / name).write_text(text, encoding="utf-8")
+        return name
+
+    def triage(self, run: str, text: str, *extra: str) -> tuple[int, dict, str]:
+        rc, out, err = run_main("loop", "ci-triage", "--run", run, "--log", self.log(text), "--json", *extra)
+        return rc, (json.loads(out) if out else {}), err
+
+    def test_ci_triage_classifies_each_category(self):
+        for cat, text in self.LOGS.items():
+            with self.subTest(cat=cat):
+                self.assertEqual(xt.ci_classify(text)["category"], cat)
+        both = xt.ci_classify(self.LOGS["test"] + self.LOGS["infra"])  # lỗi thật thắng dấu mạng: không phí re-run
+        self.assertEqual((both["category"], both["categories"]), ("test", ["test", "infra"]))
+        sast = xt.ci_classify(">> Issue: [B105:hardcoded_password_string] Possible hardcoded password\n")
+        self.assertEqual(sast["category"], "secret")
+        self.assertEqual(xt.ci_classify("Run github/codeql-action/init@abc\nFAILED t\n")["category"], "test")
+
+    def test_ci_triage_strips_gh_prefix_ansi_and_hides_secret_lines(self):
+        text = "".join(GH_PREFIX + line + "\n" for line in ["\x1b[31mFAIL\x1b[0m: test_ü (t.T)", "", "ok"])
+        d = xt.ci_classify(text)
+        self.assertEqual((d["category"], d["evidence"]), ("test", ["FAIL: test_ü (t.T)"]))
+        s = xt.ci_classify(self.LOGS["secret"])
+        self.assertEqual(s["evidence"], [])  # dòng log có thể chứa chính bí mật
+        self.assertEqual(len(s["signature"]), 16)
+        empty = xt.ci_classify("")
+        self.assertEqual((empty["category"], empty["evidence"], empty["categories"]), ("unknown", [], []))
+        tail = xt.ci_classify("\n".join(f"dòng {i}" for i in range(30)))
+        self.assertEqual(tail["evidence"][0], "dòng 20")  # không khớp loại nào: 10 dòng cuối
+
+    def test_ci_triage_signature_ignores_numbers_and_timestamps(self):
+        a = xt.ci_classify(GH_PREFIX + "FAILED tests/a.py::t - assert 1 == 2 (0.12s)\n")
+        b = xt.ci_classify(GH_PREFIX.replace("10:00", "11:59") + "FAILED tests/a.py::t - assert 3 == 4 (9.87s)\n")
+        c = xt.ci_classify("FAILED tests/b.py::t\n")
+        self.assertEqual(a["signature"], b["signature"])
+        self.assertNotEqual(a["signature"], c["signature"])
+
+    def test_ci_triage_fix_episode_json_and_idempotent_rerun_of_command(self):
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
+        rc, d, _ = self.triage("101", self.LOGS["test"], "--task", "T-001", "--cost-usd", "0.25")
+        self.assertEqual((rc, d["run"], d["category"], d["action"]), (0, "101", "test", "fix"))
+        self.assertIn("AssertionError: 1 != 2", d["evidence"])
+        ep = d["episode"]
+        self.assertEqual((ep["task"], ep["rerun_used"], ep["fix_attempts"], ep["cost_usd"]), ("T-001", 0, 1, 0.25))
+        (self.tmp / "ci.log").unlink()  # cùng run lần nữa (restart): trả kết quả cũ, không đọc log, không đếm lại
+        rc, out, _ = run_main("loop", "ci-triage", "--run", "101", "--task", "T-001", "--cost-usd", "9", "--json")
+        again = json.loads(out)
+        self.assertEqual((rc, again["episode"]["fix_attempts"], again["episode"]["cost_usd"]), (0, 1, 0.25))
+        st = xt.read_state(self.tmp)
+        self.assertTrue(st["active"])
+        self.assertEqual(list(st["episode"]["runs"]), ["101"])
+
+    def test_ci_triage_cost_null_until_measured(self):
+        rc, d, _ = self.triage("1", self.LOGS["lint"])
+        self.assertEqual((rc, d["episode"]["cost_usd"], d["episode"]["task"]), (0, None, None))
+        self.assertIs(xt.read_state(self.tmp)["active"], False)  # không có vòng: tạo state không bật, chỉ giữ episode
+        _, d, _ = self.triage("2", self.LOGS["type"], "--cost-usd", "0")
+        self.assertEqual(d["episode"]["cost_usd"], 0.0)
+        _, d, _ = self.triage("3", self.LOGS["coverage"], "--cost-usd", "1.5")
+        self.assertEqual((d["episode"]["cost_usd"], d["episode"]["fix_attempts"]), (1.5, 3))
+
+    def test_ci_triage_infra_rerun_at_most_once(self):
+        rc, d, _ = self.triage("1", self.LOGS["infra"])
+        self.assertEqual((rc, d["action"], d["episode"]["rerun_used"]), (0, "rerun", 1))
+        rc, d, _ = self.triage("2", self.LOGS["infra"])
+        self.assertEqual((rc, d["action"], d["episode"]["rerun_used"], d["episode"]["fix_attempts"]), (0, "fix", 1, 1))
+        self.assertIn("LOOP-CI-002", d["reason"])
+        _, d, _ = self.triage("3", self.LOGS["infra"].replace("ECONNRESET", "ETIMEDOUT"))
+        self.assertEqual((d["action"], d["episode"]["rerun_used"], d["episode"]["same_signature"]), ("fix", 1, 1))
+
+    def test_ci_triage_same_signature_three_times_defers_task(self):
+        plan = self.tmp / "docs" / "autopilot" / "PLAN.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("- [ ] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `true`\n", encoding="utf-8")
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
+        actions = [
+            self.triage(str(n), self.LOGS["test"].replace("1 != 2", f"{n} != 0"), "--task", "T-001") for n in (7, 8, 9)
+        ]
+        self.assertEqual([(rc, d["action"]) for rc, d, _ in actions], [(0, "fix"), (0, "fix"), (1, "defer")])
+        self.assertEqual(actions[-1][1]["episode"]["same_signature"], 3)
+        st = xt.read_state(self.tmp)
+        self.assertIn("CI run 9: cùng chữ ký lỗi 3 lần", st["deferred"]["T-001"]["reason"])
+        self.assertEqual(xt.loop_verdict(self.tmp)["task"], "T-002")  # vòng làm tiếp việc khác
+        rc, d, _ = self.triage("10", self.LOGS["lint"], "--task", "T-001")  # chữ ký khác: đếm lại từ 1
+        self.assertEqual((rc, d["action"], d["episode"]["same_signature"]), (0, "fix", 1))
+
+    def test_ci_triage_defer_without_task_only_reports(self):
+        for n in (1, 2, 3):
+            rc, d, _ = self.triage(str(n), self.LOGS["test"])
+        self.assertEqual((rc, d["action"]), (1, "defer"))
+        self.assertNotIn("deferred", xt.read_state(self.tmp))
+
+    def test_ci_triage_secret_blocks_loop(self):
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
+        rc, d, _ = self.triage("55", self.LOGS["secret"], "--task", "T-001")
+        self.assertEqual((rc, d["category"], d["action"], d["evidence"]), (1, "secret", "block", []))
+        self.assertEqual(d["episode"]["fix_attempts"], 0)
+        v = xt.loop_verdict(self.tmp)
+        self.assertEqual(v["verdict"], "blocked")
+        self.assertIn("CI run 55: secret scan/SAST", v["reason"])
+        self.assertNotIn("AKIA", (self.tmp / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+
+    def test_ci_triage_new_episode_on_task_change_or_corrupt_episode(self):
+        self.triage("1", self.LOGS["infra"], "--task", "T-001")
+        _, d, _ = self.triage("1", self.LOGS["infra"], "--task", "T-002")  # task khác: episode mới, run 1 tính lại
+        self.assertEqual((d["action"], d["episode"]["task"], d["episode"]["rerun_used"]), ("rerun", "T-002", 1))
+        xt.write_state({"active": False, "episode": {"task": None, "runs": "hỏng"}}, self.tmp)
+        _, d, _ = self.triage("2", self.LOGS["test"])
+        self.assertEqual((d["episode"]["fix_attempts"], d["episode"]["same_signature"]), (1, 1))
+
+    def test_ci_triage_text_output(self):
+        rc, out, _ = run_main(
+            "loop", "ci-triage", "--run", "7", "--log", self.log(self.LOGS["type"]), "--task", "T-003"
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("CI run 7: type → fix (chữ ký ", out)
+        self.assertIn(", lần 1/3)", out)
+        self.assertIn("  | Found 1 error in 1 file (checked 2)", out)
+        self.assertIn("episode T-003: re-run 0/1 · sửa 1 · chi phí —", out)
+        rc, out, _ = run_main("loop", "ci-triage", "--run", "8", "--log", self.log("x"), "--cost-usd", "0.5")
+        self.assertIn("episode —: re-run 0/1 · sửa 1 · chi phí 0.5 USD", out)
+
+    def test_ci_triage_input_errors(self):
+        for args, msg in (
+            (["--run", "abc"], "--run phải là ID số"),
+            (["--run", "1", "--cost-usd", "-1"], "--cost-usd phải là số ≥ 0"),
+            (["--run", "1", "--cost-usd", "nan"], "--cost-usd phải là số ≥ 0"),
+            (["--run", "1", "--log", "none.log"], "Không đọc được --log none.log"),
+            (["--run", "1", "--log", "."], "Không đọc được --log ."),
+        ):
+            with self.subTest(args=args):
+                rc, out, err = run_main("loop", "ci-triage", *args)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(msg, err)
+        self.assertIsNone(xt.read_state(self.tmp))
+
+    def test_ci_triage_absolute_log_path(self):
+        p = self.tmp / "abs.log"
+        p.write_bytes(b"FAILED t \xff\n")  # byte hỏng không làm sập
+        rc, out, _ = run_main("loop", "ci-triage", "--run", "4", "--log", str(p), "--json")
+        self.assertEqual((rc, json.loads(out)["category"]), (0, "test"))
+
+    def test_ci_triage_reads_log_via_gh(self):
+        ok = subprocess.CompletedProcess([], 0, stdout=self.LOGS["lint"], stderr="")
+        with unittest.mock.patch.object(xt.subprocess, "run", return_value=ok) as run:
+            rc, out, _ = run_main("loop", "ci-triage", "--run", "123", "--json")
+        self.assertEqual((rc, json.loads(out)["category"]), (0, "lint"))
+        self.assertEqual(run.call_args.args[0], ["gh", "run", "view", "123", "--log-failed"])
+        bad = subprocess.CompletedProcess([], 1, stdout="", stderr="HTTP 404\n")
+        for effect in ({"return_value": bad}, {"side_effect": OSError("không có gh")}):
+            with self.subTest(effect=effect), unittest.mock.patch.object(xt.subprocess, "run", **effect):
+                rc, out, err = run_main("loop", "ci-triage", "--run", "124")
+            self.assertEqual((rc, out), (3, ""))
+            self.assertRegex(err, r"gh run view 124 lỗi: HTTP 404|không chạy được gh")
+        self.assertNotIn("124", xt.read_state(self.tmp)["episode"]["runs"])
