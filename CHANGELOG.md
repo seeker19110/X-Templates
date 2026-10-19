@@ -17,8 +17,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `pr steward --apply`: PR tụt sau base (ruleset đòi nhánh cập nhật) được cập nhật nhánh bằng REST
   `pulls/<N>/update-branch -f expected_head_sha=<head>` (đang bật auto-merge thì tắt trước rồi cập nhật trong cùng lượt);
   `pr next`/`merge-check` gợi ý cùng lệnh. Review sạch mang sang head mới khi head là merge commit có cha đầu là head đã
-  review và tập thay đổi của PR so với base (tên file, tên cũ, trạng thái, blob sha) không đổi — tối đa 5 merge liên tiếp;
-  merge có giải xung đột hay đổi file của PR thì review lại (`LOOP-STOP-029`, D-061).
+  review, tập thay đổi của PR so với base (tên file, tên cũ, trạng thái, blob sha) không đổi và nhánh đích không chạm file
+  nào của PR — tối đa 5 merge liên tiếp; khác đi thì review lại. Workflow `pr-steward` chỉ tự cập nhật nhánh khi có
+  `XT_STEWARD_TOKEN` (commit do GITHUB_TOKEN tạo không kích CI; `XT_STEWARD_UPDATE=off` thì chỉ báo) (`LOOP-STOP-029`,
+  D-061).
 
 ### Fixed
 - `merge-check`/`pr next`/`pr steward`: PR bị GitHub báo BLOCKED vì ruleset đòi check bắt buộc không có trên head (không

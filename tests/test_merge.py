@@ -1360,6 +1360,8 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
+        xt._CHAIN_CACHE.clear()
+        self.addCleanup(xt._CHAIN_CACHE.clear)
 
     def files(self, blob: str = "b1") -> str:
         return json.dumps({"files": [{"filename": "a.py", "status": "modified", "sha": blob}]})
@@ -1377,6 +1379,7 @@ class BaseMergeCarryTest(unittest.TestCase):
         return {**out, **over}
 
     def chain(self, **over: str) -> list:
+        xt._CHAIN_CACHE.clear()  # mỗi ca một bộ dữ liệu giả cho cùng (repo, base, head)
         with FakeGh(raw=self.raw(**over)).patch():
             return xt._base_merge_chain(self.R, "base", FakeGh.SHA)
 
@@ -1394,6 +1397,27 @@ class BaseMergeCarryTest(unittest.TestCase):
             xt, "_gh_one", side_effect=[{"parents": [{"sha": "a"}, {"sha": "b"}]}, xt.PrInputError("x")]
         ):
             self.assertEqual(xt._base_merge_chain(self.R, "base", FakeGh.SHA), [])
+
+    def test_base_touching_pr_files_blocks_carry(self):
+        # review #153: nhánh đích sửa a.py, merge giữ blob của PR ("ours") → tập thay đổi như cũ nhưng gỡ thay đổi của
+        # nhánh đích — không mang review
+        touch = json.dumps({"files": [{"filename": "a.py", "status": "modified", "sha": "m"}]})
+        self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...base": touch}), [])
+        self.assertEqual(self.chain(**{f"{self.R}/compare/{self.H}...base": touch}), [self.M1])
+        renamed = json.dumps({"files": [{"filename": "b.py", "previous_filename": "a.py", "status": "renamed"}]})
+        self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...base": renamed}), [])
+        other = json.dumps({"files": [{"filename": "z.py", "status": "modified", "sha": "z"}]})
+        self.assertEqual(self.chain(**{f"{self.R}/compare/{self.M1}...base": other}), [self.M1, self.H])
+        many = json.dumps({"files": [{"filename": f"f{i}", "sha": "s"} for i in range(xt.COMPARE_FILES_MAX)]})
+        with FakeGh(raw={f"{self.R}/compare/h...b": many}).patch():
+            self.assertTrue(xt._base_touches(self.R, "h", "b", {"a.py"}))  # bị cắt: coi như chạm
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
+            self.assertTrue(xt._base_touches(self.R, "h", "b", {"a.py"}))
+
+    def test_chain_cached_per_head(self):
+        self.assertEqual(self.chain(), [self.M1, self.H])  # chain() xoá cache trước khi gọi, rồi nhớ kết quả
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=AssertionError("không gọi lại")):
+            self.assertEqual(xt._base_merge_chain(self.R, "base", FakeGh.SHA), [self.M1, self.H])
 
     def test_pr_rest_and_pr_next_carry_review(self):
         pull = {"base": {"sha": "base", "ref": "main"}}
@@ -1433,6 +1457,21 @@ class BaseMergeCarryTest(unittest.TestCase):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 1)
         self.assertIn("→ update ✗ conflict", out)
+
+    def test_steward_no_update_with_github_token(self):
+        # review #153: commit cập nhật nhánh do GITHUB_TOKEN tạo không kích CI → workflow đặt XT_STEWARD_UPDATE=off
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"XT_STEWARD_UPDATE": "off"}))
+        behind = {"mergeable_state": "behind"}
+        gh = StewardGh(pull=behind)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual((rc, gh.writes), (0, []))
+        self.assertIn("XT_STEWARD_TOKEN", out)
+        gh = StewardGh(pull={**behind, "auto_merge": {"merge_method": "squash"}})
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("#7 disable-auto-merge ✓ —", out)
+        self.assertEqual([w[2] for w in gh.writes], ["merge"])
 
 
 class StewardGh(FakeGh):

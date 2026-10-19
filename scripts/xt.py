@@ -3783,6 +3783,7 @@ def _required_checks(repo: str, branch: str) -> List[str]:
 
 BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
 COMPARE_FILES_MAX = 300  # REST compare cắt danh sách file ở 300: nhiều hơn thì không mang review sang
+_CHAIN_CACHE: Dict[Tuple[str, str, str], List[str]] = {}
 
 
 def _pr_change_set(repo: str, base_sha: str, sha: str) -> Optional[Set[Tuple[str, str, str, str]]]:
@@ -3801,6 +3802,20 @@ def _pr_change_set(repo: str, base_sha: str, sha: str) -> Optional[Set[Tuple[str
     }
 
 
+def _base_touches(repo: str, old_head: str, base_sha: str, names: Set[str]) -> bool:
+    """Nhánh đích, kể từ merge-base với head cũ, có chạm file nào của PR không (compare `old_head...base_sha`). Có chạm
+    thì merge giữ nguyên blob phía PR vẫn có thể đã gỡ thay đổi của nhánh đích (giải xung đột "giữ bản của mình") — không
+    mang review (review #153). Lỗi đọc hoặc danh sách bị cắt → coi như có chạm."""
+    try:
+        cmp = _gh_one(f"{repo}/compare/{old_head}...{base_sha}")
+    except PrInputError:
+        return True
+    files = [f for f in cmp.get("files") or [] if isinstance(f, dict)]
+    if len(files) >= COMPARE_FILES_MAX:
+        return True
+    return any({str(f.get("filename")), str(f.get("previous_filename") or "")} & names for f in files)
+
+
 def _commit_parents(repo: str, sha: str) -> List[str]:
     try:
         got = _gh_one(f"{repo}/commits/{sha}").get("parents") or []
@@ -3812,8 +3827,12 @@ def _commit_parents(repo: str, sha: str) -> List[str]:
 def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
     """Các head trước đó mà head hiện tại chỉ là "cập nhật nhánh" sạch của chúng (ADR-0027, D-061): head là merge commit,
     cha đầu là head cũ, và thay đổi của PR so với nhánh đích (file + blob SHA) giữ nguyên — merge không sửa gì trong phần
-    của PR, không giải xung đột. Review sạch ở head cũ khi đó vẫn đúng cho head mới. Lỗi đọc → [] (phải rà lại). Chỉ hỏi
-    `compare` khi head là merge commit (`merge-watch` gọi 30 giây/lần)."""
+    của PR, không giải xung đột — và nhánh đích không chạm file nào của PR (`_base_touches`). Review sạch ở head cũ khi đó
+    vẫn đúng cho head mới. Lỗi đọc → [] (phải rà lại). Chỉ hỏi `compare` khi head là merge commit (`merge-watch` gọi 30
+    giây/lần); chuỗi tìm được nhớ theo (repo, base, head) trong tiến trình."""
+    key = (repo, base_sha, head)
+    if key in _CHAIN_CACHE:
+        return _CHAIN_CACHE[key]
     chain: List[str] = []
     cur, cur_set = head, None
     while base_sha and len(chain) < BASE_MERGE_HOPS:
@@ -3823,8 +3842,13 @@ def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
         cur_set = cur_set if cur_set is not None else _pr_change_set(repo, base_sha, cur)
         if cur_set is None or _pr_change_set(repo, base_sha, parents[0]) != cur_set:
             break
+        names = {x for f in cur_set for x in f[:2] if x}
+        if _base_touches(repo, parents[0], base_sha, names):
+            break
         chain.append(parents[0])
         cur = parents[0]
+    if chain:  # SHA bất biến: chuỗi đã tìm được không đổi; [] có thể do lỗi đọc nên không nhớ
+        _CHAIN_CACHE[key] = chain
     return chain
 
 
@@ -5706,9 +5730,15 @@ def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
         return [auto, merge] if out.get("fallback") else [auto]
     if action == "disable-auto-merge":
         return [["gh", "pr", "merge", n, "--disable-auto"]]
-    if action == "update":  # nhánh tụt sau nhánh đích: GitHub tạo merge commit (lỗi khi xung đột), ghim head đang thấy
+    if action == "update" and _steward_can_update():  # tụt sau nhánh đích: GitHub tạo merge commit, ghim head đang thấy
         return [_update_branch_cmd(repo, n, head)]
     return []
+
+
+def _steward_can_update() -> bool:
+    """`XT_STEWARD_UPDATE=off` (workflow chạy bằng GITHUB_TOKEN): commit cập nhật nhánh do GITHUB_TOKEN tạo không kích
+    workflow `pull_request` → head mới không có check, PR kẹt chờ check bắt buộc (review #153) — chỉ báo."""
+    return os.environ.get("XT_STEWARD_UPDATE", "").strip().lower() != "off"
 
 
 def _update_branch_cmd(repo: str, n: str, head: str) -> List[str]:
@@ -5768,12 +5798,21 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    cmds = cmds if apply else []
+    return _steward_apply(out, d, repo, cmds if apply else [])
+
+
+def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]]) -> Dict[str, Any]:
+    can_update = _steward_can_update()
+    if out["action"] == "update" and not can_update:
+        out["why"] = (
+            f"{out.get('why', '')} — steward chạy bằng GITHUB_TOKEN không cập nhật nhánh (CI không chạy trên head mới);"
+            " đặt XT_STEWARD_TOKEN"
+        )
     if cmds:
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
         # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
-        if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update":
+        if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update" and can_update:
             up_err = _steward_run([_update_branch_cmd(repo, str(d["pr"]), str(out["head"]))])
             out["then"] = "update" + (f" ✗ {up_err}" if up_err else " ✓")
             if up_err:
@@ -5786,7 +5825,8 @@ REPO_SLUG_RE = re.compile(r"[\w.-]+/[\w.-]+")
 
 def cmd_pr_steward(args: argparse.Namespace) -> int:
     """Quản PR không cần phiên agent (ADR-0027): mọi PR mở (hoặc `--pr`) → `pr next`; `--apply` thì tự bật/tắt
-    auto-merge, merge ghim head. Việc cần người/agent (review, sửa, cập nhật nhánh) chỉ báo."""
+    auto-merge, merge ghim head, cập nhật nhánh tụt sau nhánh đích (trừ khi `XT_STEWARD_UPDATE=off`). Việc cần
+    người/agent (review, sửa) chỉ báo."""
     if args.repo and not REPO_SLUG_RE.fullmatch(args.repo):
         print(f"✗ --repo phải dạng owner/repo, không phải {args.repo!r}", file=sys.stderr)
         return 2
