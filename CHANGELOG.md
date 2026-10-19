@@ -5,6 +5,21 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `merge-check`/`pr next`/steward: xung đột với nhánh đích kiểm **cục bộ** bằng `git merge-tree --write-tree` khi GitHub
+  chưa tính xong `mergeable` (null tới vài chục giây sau push) hoặc báo xung đột — `localConflicts` liệt kê file xung đột,
+  verdict `fix` kèm lệnh `git fetch origin <base> && git merge origin/<base>`; cục bộ thấy merge sạch thì không còn `wait`
+  chờ GitHub. Commit chưa có cục bộ → fetch `refs/pull/N/head`; không kiểm được (git < 2.38, không phải repo) → như cũ.
+
+### Fixed
+- `vendor-check`: đuôi file ghi nguồn theo danh sách cho phép (md/txt/rst/adoc/html, đoạn viết hoa/số) — `data_source.c`,
+  `license_header.h`, `notice.less`, `license.svg` không còn được tính là ghi nguồn; `LICENSES.chromium.html` được nhận
+  (review #162/#164, AUD-XFEAT-007).
+- `perf guard`: thư mục cha chỉ "đã ignore sẵn" khi luật nằm trong `.gitignore` đã theo dõi — `bench/sub/.gitignore` = `*`
+  trong thư mục mới và `info/exclude` không giấu được file đổi phép đo (review #162/#164, AUD-XFEAT-005).
+- `pr reviewed`: họ model ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `oN`) ranh giới theo chữ cái — `graphic`/
+  `commander` không lộ họ, `phi4`/`glm4.5`/`command_r` được nhận; `contrast --json` `skipped` đếm cả khi `--allow-skip`.
+
 ## [3.8.0] - 2026-10-19
 
 > **Dự án đích khi nâng từ 3.7.x:** chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, matcher hook MCP trong

@@ -101,7 +101,7 @@ updated: 2026-10-19
 | `loop decide --question Q --option A --option B --choice N --why W --revert R [--prod P] [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
-| `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` |
+| `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge`. Xung đột kiểm cục bộ bằng `git merge-tree` khi GitHub chưa tính xong/báo xung đột (`localConflicts`: file xung đột; `fix` kèm lệnh merge nhánh đích) |
 | `grant-check GROUP [KHOÁ=GIÁ_TRỊ …] [--plan F] [--json]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không (ADR-0022): exit 0 trong ủy quyền, 1 ngoài hoặc thiếu mục → `loop defer`, 2 tham số sai |
 | `merge-gate [--pr N] [--head SHA] [--json]` | Required check `merge-gate` (ADR-0023): exit 1 khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge (auto-merge không ghim head); `hard` không auto-merge → exit 0 kèm cảnh báo (người merge tay); 2 lỗi đọc PR; 3 head khác `--head` |
 | `merge-watch [--pr N] [--interval 30] [--max-minutes 240]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |

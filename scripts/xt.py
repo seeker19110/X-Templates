@@ -1642,10 +1642,14 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
-def _git(cwd: Path, *args: str, env: Optional[Dict[str, str]] = None) -> "subprocess.CompletedProcess[str]":
+def _git(
+    cwd: Path, *args: str, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None
+) -> "subprocess.CompletedProcess[str]":
     cmd = ["git", "-C", str(cwd), *args]
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env)
+        return subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT, env=env, input=stdin
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 124, "", f"git quá {GIT_TIMEOUT} s")
 
@@ -3403,8 +3407,13 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     early = _pr_shape_blocker(pr)
     if early:
         return early
-    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
-        return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
+    conflicts = pr.get("localConflicts")
+    local_files = [str(f) for f in conflicts] if isinstance(conflicts, list) else None
+    if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY" or local_files:
+        where = (
+            f" ở {', '.join(local_files[:8])}" if local_files else ""
+        )  # GitHub báo xung đột mà cục bộ sạch: vẫn tin GitHub
+        return "fix", [f"xung đột với nhánh đích{where} — merge nhánh đích vào rồi giải"]
     ci = _ci_blocker(pr)
     if ci:
         return ci
@@ -3418,7 +3427,7 @@ def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
             f"ruleset đòi check bắt buộc không có trên head: {', '.join(missing)} — thêm job đúng tên đó vào workflow hoặc "
             "bỏ khỏi ruleset (GitHub báo BLOCKED vì thiếu check; ruleset còn đòi review thì vẫn cần người duyệt)"
         ]
-    if pr.get("mergeable") != "MERGEABLE":
+    if pr.get("mergeable") != "MERGEABLE" and local_files is None:  # cục bộ đã thấy merge sạch thì không chờ GitHub
         return "wait", ["GitHub chưa tính xong mergeable"]
     return None
 
@@ -3474,7 +3483,11 @@ def merge_decision(
         "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
         "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
         "wait": "chờ rồi chạy lại merge-check",
-        "fix": "sửa, push, chạy lại merge-check",
+        "fix": (
+            f"git fetch origin {base} && git merge origin/{base} → giải xung đột, chạy cổng, push, chạy lại merge-check"
+            if reasons and reasons[0].startswith("xung đột với nhánh đích")
+            else "sửa, push, chạy lại merge-check"
+        ),
         "human": "để người merge; báo cáo lý do",
         "closed": "",
     }[verdict]
@@ -3903,6 +3916,38 @@ def _base_merge_chain(repo: str, base_sha: str, head: str) -> List[str]:
     return chain
 
 
+def local_merge_conflicts(
+    base_ref: str, base_sha: str, head: str, number: str = "", cwd: Optional[Path] = None
+) -> Optional[List[str]]:
+    """Xung đột tính CỤC BỘ bằng `git merge-tree --write-tree` (git ≥ 2.38), không chờ GitHub tính `mergeable`
+    (null tới vài chục giây sau push; `merge-watch` hỏi 30 giây/lần): [] = merge sạch · [file…] = xung đột ở các file đó ·
+    None = không kiểm được (không phải repo git, git cũ, không lấy được commit — fail-open về `mergeable` của GitHub).
+    Commit chưa có cục bộ → `git fetch origin <nhánh đích> refs/pull/N/head` (không đổi nhánh/cây làm việc)."""
+    cwd = cwd or project_dir()
+    if not (base_sha and head):
+        return None
+    missing = [c for c in (base_sha, head) if _git(cwd, "cat-file", "-e", f"{c}^{{commit}}").returncode != 0]
+    if missing:
+        refs = [base_ref] if base_ref else []
+        refs += [f"refs/pull/{number}/head"] if number else []
+        if not refs or _git(cwd, "fetch", "-q", "--no-tags", "origin", *refs).returncode != 0:
+            return None
+        if any(_git(cwd, "cat-file", "-e", f"{c}^{{commit}}").returncode != 0 for c in missing):
+            return None
+    r = _git(cwd, "merge-tree", "--write-tree", "--name-only", "--no-messages", base_sha, head)
+    if r.returncode == 0:
+        return []
+    if r.returncode != 1:  # 2+ = lỗi (git cũ không có --write-tree, commit hỏng…)
+        return None
+    # --name-only --no-messages: dòng 1 = tree, rồi mỗi dòng một file xung đột (tới dòng trống nếu có)
+    files: List[str] = []
+    for ln in r.stdout.splitlines()[1:]:
+        if not ln.strip():
+            break
+        files.append(ln)
+    return files or None  # exit 1 mà không có file: định dạng lạ → không kiểm được
+
+
 def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
@@ -3962,6 +4007,12 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     prefix = project_prefix()
     gated = any(isinstance(f, dict) and _gated_file(f, prefix) for f in files)
     bottom = _merge_base(repo, str(base.get("sha", "")), sha) if gated else ""
+    # GitHub chưa tính xong / báo xung đột → kiểm cục bộ để biết ngay sạch hay xung đột ở file nào (không đợi `wait`).
+    local = (
+        local_merge_conflicts(str(base.get("ref") or ""), str(base.get("sha") or ""), sha, str(n))
+        if mergeable is not True
+        else None
+    )
     raw_user = pr.get("user")
     user: Dict[str, Any] = raw_user if isinstance(raw_user, dict) else {}
     raw_head_repo = head.get("repo")
@@ -3987,6 +4038,8 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
         "isDraft": bool(pr.get("draft")),
         "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
         "mergeStateStatus": merge_state,
+        # Xung đột tính cục bộ (`git merge-tree`): [] sạch, [file…] xung đột; vắng = không kiểm được / GitHub đã khẳng định.
+        **({"localConflicts": local} if local is not None else {}),
         "reviewDecision": _review_decision(reviews, merge_state, bool(missing)),
         **({"missingRequired": missing} if missing else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
@@ -4928,7 +4981,8 @@ def cmd_contrast(args: argparse.Namespace) -> int:
     bad = [r for r in rows if r["status"] == "fail"]
     skipped = [] if args.allow_skip else [r for r in rows if r["status"] == "skip"]
     if args.json:
-        print(json.dumps({"pairs": rows, "missing_on": missing, "skipped": len(skipped)}, ensure_ascii=False, indent=2))
+        n_skip = sum(r["status"] == "skip" for r in rows)  # cả khi `--allow-skip` (review #162)
+        print(json.dumps({"pairs": rows, "missing_on": missing, "skipped": n_skip}, ensure_ascii=False, indent=2))
     else:
         for r in rows:
             mark = {"ok": "✓", "fail": "✗", "skip": "–"}[str(r["status"])]
@@ -4957,18 +5011,23 @@ def cmd_contrast(args: argparse.Namespace) -> int:
 
 VENDOR_DIRS = ("vendor", "third_party", "third-party", "external")
 # Khớp NGUYÊN tên file: `LICENSE`, `LICENSE-MIT`, `license-apache.txt`, `COPYING.LESSER`, `THIRD-PARTY-NOTICES`,
-# `SOURCE.md`… (từ khoá đứng riêng giữa các dấu `-_.`); file mã (`SourceSelect.tsx`, `Notice.tsx`, `LICENSE.d.ts`) không
-# phải file ghi nguồn (AUD-XFEAT-007, review #162).
+# `LICENSES.chromium.html`, `SOURCE.md`… (từ khoá đứng riêng giữa các dấu `-_.`). Đuôi file là danh sách CHO PHÉP
+# (tài liệu, hoặc đoạn viết hoa/số như `.LESSER`, `-2.0`), không phải danh sách đuôi mã bị cấm: `data_source.c`,
+# `license_header.h`, `notice.less`, `license.svg`, `source.map`, `SourceSelect.tsx`, `LICENSE.d.ts` không phải file ghi
+# nguồn (AUD-XFEAT-007, review #162 ×2).
 VENDOR_NOTICE_RE = re.compile(
     r"(?:[a-z0-9]+[-_.])*(?:licen[cs]es?|copying|notices?|sources?|origins?)(?:[-_.][a-z0-9]+)*"
     r"|readme\.vendor(?:\.(?:md|txt))?",
     re.I,
 )
-CODE_EXT_RE = re.compile(r"\.(?:[cm]?[jt]sx?|json|css|scss|vue|svelte|py|go|rs|java|kt|swift|rb|php|html?)$", re.I)
+VENDOR_DOC_EXT_RE = re.compile(r"md|markdown|txt|rst|adoc|html?", re.I)
 
 
 def vendor_notice_name(name: str) -> bool:
-    return bool(VENDOR_NOTICE_RE.fullmatch(name)) and not CODE_EXT_RE.search(name)
+    if not VENDOR_NOTICE_RE.fullmatch(name):
+        return False
+    _stem, dot, ext = name.rpartition(".")
+    return not dot or bool(VENDOR_DOC_EXT_RE.fullmatch(ext)) or ext.isupper() or ext.isdigit()
 
 
 VENDOR_RISKY_RE = re.compile(
@@ -5730,9 +5789,11 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
     )
 
 
+# Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI (không phải `\b`: `phi4`, `glm4.5`,
+# `command_r`, `o3mini` là tên thẻ thật) — `graphic`/`commander`/`novaX` không phải tên model (review #162, #164).
 MODEL_FAMILY_RE = re.compile(
-    r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral|kimi|glm|phi|command|nova"
-    r"|\bo\d",
+    r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral"
+    r"|(?<![a-z])(?:kimi|glm|phi|command|nova)(?![a-z])|(?<![a-z0-9])o\d",
     re.I,
 )
 
@@ -6264,16 +6325,24 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
 def _perf_self_hidden_ignores(base: Path) -> List[str]:
     """`.gitignore` chưa theo dõi mà chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005): bị ignore nhưng thư
     mục chứa nó thì không. `.gitignore` trong thư mục đã ignore sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới
-    (review #162)."""
+    (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
+    tự khớp cả thư mục `bench/sub/`, và `info/exclude`/`excludesFile` không được tin (như `PERF_UNTRACKED`; review #162 ×2)."""
     hidden = _perf_git_names(
         base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".gitignore", "**/.gitignore"
     )
     parents = sorted({h.rpartition("/")[0] + "/" for h in hidden if "/" in h})
-    # `-z` của check-ignore chỉ đi với `--stdin`: đọc từng dòng, tên không quote (`core.quotePath=off`).
-    r = _git(base, "-c", "core.quotePath=off", "check-ignore", "--", *parents, env=_perf_env()) if parents else None
-    if r is not None and r.returncode not in (0, 1):  # 1 = không đường nào bị ignore
+    if not parents:
+        return hidden
+    tracked = set(_perf_git_names(base, "ls-files", "-z", "--", ".gitignore", "**/.gitignore"))
+    r = _git(base, "check-ignore", "-v", "-z", "--stdin", env=_perf_env(), stdin="\0".join(parents))
+    if r.returncode not in (0, 1):  # 1 = không đường nào bị ignore
         raise RuntimeError(f"git check-ignore lỗi: {r.stderr.strip() or r.returncode}")
-    ignored_dirs = set(r.stdout.splitlines()) if r else set()
+    fields = r.stdout.split("\0")  # -v -z: <nguồn> <dòng> <mẫu> <đường> cho mỗi khớp
+    ignored_dirs = {
+        fields[i + 3]
+        for i in range(0, len(fields) - 3, 4)
+        if fields[i] in tracked and not fields[i + 2].startswith("!")
+    }
     return [h for h in hidden if "/" not in h or h.rpartition("/")[0] + "/" not in ignored_dirs]
 
 
