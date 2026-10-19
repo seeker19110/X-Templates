@@ -531,3 +531,31 @@
 - Chọn: Một PR gộp, hai commit theo task
 - Lý do (tiêu chí chất lượng cuối): Hai task cùng hàm run_gate_shell/loop_record, review một lần rẻ hơn; commit tách theo task giữ đường lùi; ràng buộc một tên nhánh buộc hai vòng CI + review nối tiếp (như D-071)
 - Đường lùi: Revert commit của task cần bỏ
+
+### D-075 · 2026-10-19T17:23:30+00:00 · Tầng executor ghi trong PLAN/artefact commit bằng gì
+
+- Phương án: (1) Tên model (sonnet/opus) trong dòng task · (2) Tên tầng (exec: deep), model thật chỉ trong frontmatter .claude/agents/*.md
+- Chọn: Tên tầng (exec: deep), model thật chỉ trong frontmatter .claude/agents/*.md
+- Lý do (tiêu chí chất lượng cuối): AGENTS.md §3/LOOP-HARNESS-027 cấm tên model trong artefact đẩy lên repo; một nguồn sự thật cho model (P5); đổi model chỉ sửa agent file
+- Đường lùi: Bỏ EXEC_TIER_RE, xoá executor-deep.md — về một tầng như trước
+
+### D-076 · 2026-10-19T17:23:31+00:00 · Reviewer cho diff của executor-deep (opus) khi reviewer.md ghim opus
+
+- Phương án: (1) Một reviewer, bỏ luật khác họ cho tầng sâu · (2) Thêm reviewer-alt (sonnet), phiên chính chọn reviewer khác họ với agent đã viết · (3) Phiên chính tự review
+- Chọn: Thêm reviewer-alt (sonnet), phiên chính chọn reviewer khác họ với agent đã viết
+- Lý do (tiêu chí chất lượng cuối): Giữ D-045/LOOP-ORCH-005 (người chấm khác họ người viết) — (1) đúng và an toàn; agent file rẻ, test được; phiên chính tự review mất tính độc lập
+- Đường lùi: Xoá reviewer-alt.md, dùng XT_REVIEWER_MODEL
+
+### D-077 · 2026-10-19T17:23:31+00:00 · Chuyển cấp Sonnet→Opus là luật mới hay dạng của LOOP-ORCH-014
+
+- Phương án: (1) Luật mới với ngưỡng riêng, đếm riêng · (2) Một dạng đổi cách của LOOP-ORCH-014: đỏ 2 lần → tầng sâu; max_same_failure 3 giữ nguyên
+- Chọn: Một dạng đổi cách của LOOP-ORCH-014: đỏ 2 lần → tầng sâu; max_same_failure 3 giữ nguyên
+- Lý do (tiêu chí chất lượng cuối): Không nhân đôi bộ đếm; nguyên tắc 'lần 2 đổi cách, lần 3 hỏi người' đã có máy kiểm; ngưỡng 2 là tham số khởi đầu đo bằng loop stats
+- Đường lùi: Đặt ESCALATE_AFTER rất lớn (tắt chuyển cấp tự động)
+
+### D-078 · 2026-10-19T17:23:31+00:00 · Cổng G7 máy đọc: lệnh mới hay mở rộng blueprint-status
+
+- Phương án: (1) Thêm cờ vào blueprint-status · (2) Lệnh release-check gom blueprint + audit + kiểm lại cuối + cây git + đề xuất Khi chạy thật
+- Chọn: Lệnh release-check gom blueprint + audit + kiểm lại cuối + cây git + đề xuất Khi chạy thật
+- Lý do (tiêu chí chất lượng cuối): blueprint-status một việc một nhà; GO-NO-GO cần nhiều nguồn và bảng N/A chờ người; JSON và Markdown cùng nguồn (PD-08)
+- Đường lùi: Xoá cmd_release_check; GO-NO-GO điền tay như trước

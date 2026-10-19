@@ -46,6 +46,7 @@ Trong autopilot: còn việc khác làm được → `xt.py loop defer --task <I
 | Ghép blueprint mẫu | `python3 scripts/xt.py compose --profile web-app --industry ecommerce --scale M` |
 | Quyết khi nào merge PR đã mở (ADR-0013) | `python3 scripts/xt.py merge-check --pr <N>` |
 | Theo dõi PR đã mở, 30 giây/lần tới khi xong hoặc cần hành động (ADR-0021) | `python3 scripts/xt.py merge-watch --pr <N>` (chạy nền) |
+| Cổng G7 máy đọc (ADR-0029) | `python3 scripts/xt.py release-check [--json]` |
 | Thống kê | `python3 scripts/xt.py stats` |
 
 Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint · test (lint nên gồm kiểm format; ở repo này `lint` trong `xt.yaml` gồm validate · link · progress-check · changelog-check · ci-check · ruff check + format --check · `bash -n` + shellcheck · json.tool cho settings/ruleset) + tự review diff + conventional commit. Cổng merge: thêm CI xanh, review (PR làn chuẩn — `LOOP-STOP-022`), cập nhật `CHANGELOG.md` khi đổi mục/ID/công cụ.
@@ -61,7 +62,7 @@ Cổng commit: `/gate` = `scripts/dev-task.sh gate` = build · typecheck · lint
 
 ## 8. Skill và subagent
 `/autopilot` (tự động đến khi xong) · `/blueprint` (ghép/audit checklist) · `/gate` (cổng + báo cáo) · `/research` (xác minh nguồn sống) · `/audit` (rà 13 nhóm có máy đỡ `xt.py audit plan/check`, dừng chờ duyệt) · `/review` (review theo checklist) · `/adr` · `/handover` (bàn giao phiên).
-Subagent: `researcher` (tra cứu, read-only) · `executor` (task rõ phạm vi) · `reviewer` (model khác, read-only). Phiên chính điều phối; **subagent không lồng subagent**; song song chỉ khi việc độc lập về file.
+Subagent: `researcher` (tra cứu, read-only) · `executor` (task rõ phạm vi, tầng mặc định) · `executor-deep` (tầng sâu: task `(exec: deep)` trong PLAN hoặc chuyển cấp sau 2 lần đỏ — ADR-0029) · `reviewer` (khác họ model với người viết, read-only; `reviewer-alt` khi người viết cùng họ với `reviewer`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối — chạy model cao nhất sẵn có, **không khả dụng thì Opus** (chọn lúc mở phiên, không ghi vào artefact commit); **subagent không lồng subagent**; song song chỉ khi việc độc lập về file. Mốc PLAN xong → audit delta trước mốc kế; G7 chạy `xt.py release-check`.
 
 ## 9. Giao tiếp
 Tên phiên: `<Tên repo> — <tên nhánh>` (nhánh do agent tự đặt `<type>/<mô-tả-ngắn>`; Claude Code `/rename`, phiên cloud `set_session_title`; hook SessionStart in gợi ý — `LOOP-HARNESS-028`). Tiếng Việt có dấu, ngắn, dẫn đầu bằng kết quả. Báo cáo cuối việc: đã làm · bằng chứng (lệnh + exit code) · quyết định tự duyệt (D-NNN) · còn treo · đề xuất. Không khai "xong" khi chưa có bằng chứng; sai thì đính chính, không xoá dấu vết.

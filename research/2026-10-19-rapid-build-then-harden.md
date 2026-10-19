@@ -101,6 +101,9 @@ Ghi chú của đề xuất "checklist tự đánh giá, mỗi mục cần bằn
 
 ## 7. Việc nên làm với khung (đề xuất, chưa làm trong đợt này)
 
+> Cập nhật cùng ngày: (a), (b) ở đây, §8 mục reviewer `inconclusive` + GO/NO-GO máy đọc, và §9.2 mục 1–5 đã triển khai
+> trong cùng nhánh — ADR-0029, D-075…D-078 (xem CHANGELOG Unreleased). Còn chờ số: `delivery_phase`, PD-05, PD-09.
+
 - **(a) `framework/00-method/audit.md` §1** thêm hàng: *Sau mỗi mốc trong `PLAN.md` (nhóm lát, bản phát hành con) khi
   chạy autopilot* — phạm vi: nhóm mà `audit plan --status` suy ra từ diff kể từ SHA mốc trước (§6), không toàn bộ;
   kết quả 🔴/🟠 thành task mới trong PLAN trước khi sang mốc kế. Máy đỡ đã có, chỉ thiếu nhịp trong tài liệu và trong
