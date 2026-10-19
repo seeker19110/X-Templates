@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.4.1 — tag sau PR phát hành) · Cập nhật: 2026-10-19 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 PLAN 3.5.0 (T-1301…T-1304, D-054…056; `loop init --force` vì đổi PLAN, vòng 3.4.1 đã xong): guard ghi công AI qua `gh pr`/MCP + `merge-check` kiểm tiêu đề PR.
+- 2026-10-19 PLAN 3.5.0 (T-1301…T-1304, D-055…056; `loop init --force` vì đổi PLAN, vòng 3.4.1 đã xong): guard ghi công AI qua `gh pr`/MCP + `merge-check` kiểm tiêu đề PR.
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard (Gate/`Kiểm:`/`xt.yaml` qua guard, CLI agent tự duyệt, `--no-verify`, git hook/khoá chạy lệnh), #118 mục checklist mới, PR harness (`loop init` khoá, doctor thử guard, `claude_min_version`). Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo

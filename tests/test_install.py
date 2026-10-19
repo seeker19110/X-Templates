@@ -400,7 +400,7 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertEqual(outside.read_text(encoding="utf-8"), "{}")
 
     def test_merge_hooks_updates_framework_matcher_only(self):
-        """D-056: hook của khung đã đăng ký với matcher cũ → cập nhật; mục có lệnh riêng của dự án → giữ nguyên."""
+        """D-057: hook của khung đã đăng ký với matcher cũ → cập nhật; mục có lệnh riêng của dự án → giữ nguyên."""
         cmd, own = "bash pre-mcp-guard.sh", "bash rieng.sh"
         src = self.tmp / "src.json"
         new = {"matcher": "mcp__.*(merge|create_pull_request).*", "hooks": [{"command": cmd}]}

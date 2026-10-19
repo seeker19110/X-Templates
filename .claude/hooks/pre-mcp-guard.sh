@@ -4,7 +4,7 @@
 # Quyết định ở guard.py (`mcp`); thiếu python3, thiếu guard.py hoặc guard.py lỗi → không kiểm được ngoại lệ cứng: chặn
 # (XT_GUARD_POLICY=strict: hỏi) — ADR-0019, AUD-SEC-045; riêng tool tắt auto-merge cho qua (LOOP-STOP-005 đòi).
 # Tool ghi PR/commit (tạo/sửa PR, commit file): guard chặn ghi công AI (LOOP-HARNESS-027); guard không chạy được thì
-# cho qua — không phải hành động nguy hiểm (fail-open về luồng, ADR-0002, D-056).
+# cho qua — không phải hành động nguy hiểm (fail-open về luồng, ADR-0002, D-057).
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 

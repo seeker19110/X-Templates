@@ -1631,7 +1631,7 @@ class MergeGuardTest(unittest.TestCase):
                 self.assertEqual(decision(out), "ask" if hit else None)
 
     def test_mcp_text_tools_reach_hook(self):
-        """D-056: matcher gồm tool ghi PR/commit; hook chặn ghi công AI khi `ai_attribution: forbid`, không thì cho qua."""
+        """D-057: matcher gồm tool ghi PR/commit; hook chặn ghi công AI khi `ai_attribution: forbid`, không thì cho qua."""
         settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
         matcher = next(e["matcher"] for e in settings["hooks"]["PreToolUse"] if "pre-mcp-guard" in json.dumps(e))
         tools = ("create_pull_request", "update_pull_request", "create_or_update_file", "push_files", "delete_file")
@@ -2339,7 +2339,7 @@ class MergeHookFailClosedTest(unittest.TestCase):
         off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
         pr = {"tool_name": "mcp__github__create_pull_request", "tool_input": {"title": "fix: a"}}
         cases = (
-            ("pre-mcp-guard.sh", pr, None),  # ghi PR không nguy hiểm: guard không chạy được thì cho qua (D-056)
+            ("pre-mcp-guard.sh", pr, None),  # ghi PR không nguy hiểm: guard không chạy được thì cho qua (D-057)
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}, "deny"),
             ("pre-mcp-guard.sh", mcp, "deny"),
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --disable-auto"}}, None),
@@ -3819,7 +3819,7 @@ class GuardAiAttributionTest(unittest.TestCase):
                 self.assertEqual(self.decide(cmd, d), "")
 
     def test_mcp_pr_and_commit_tools(self):
-        """D-056: tiêu đề/thân PR và message commit qua tool MCP ghi công AI → deny (repo `ai_attribution: forbid`)."""
+        """D-057: tiêu đề/thân PR và message commit qua tool MCP ghi công AI → deny (repo `ai_attribution: forbid`)."""
         d, loose = self.repo("ai_attribution: forbid\n"), self.repo("")
         url = "https://claude.ai/code/session_01"
         for tool, inp in (
@@ -3846,7 +3846,7 @@ class GuardAiAttributionTest(unittest.TestCase):
                 self.assertEqual(self.g.mcp_decision(tool, inp, d), ("", ""))
 
     def test_gh_pr_title_body_and_squash_message(self):
-        """D-056: `gh pr create|edit|merge` mang tên model/URL phiên trong tiêu đề/thân (chữ, file, heredoc) → deny."""
+        """D-057: `gh pr create|edit|merge` mang tên model/URL phiên trong tiêu đề/thân (chữ, file, heredoc) → deny."""
         self.enterContext(mock.patch.object(self.g, "merge_check", return_value={}))  # `gh pr merge`: không gọi mạng
         d = self.repo("ai_attribution: forbid\n")
         Path(d, "b.md").write_text("## Tóm tắt\n\nhttps://claude.ai/code/session_01\n", encoding="utf-8")

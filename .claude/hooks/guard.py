@@ -2898,7 +2898,7 @@ def _xt_yaml_for(d: str) -> str:
     return ""
 
 
-# `gh pr create|edit|merge` (D-056): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
+# `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
 GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|edit|merge)\b")
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
 
@@ -2957,7 +2957,7 @@ def ai_attribution(cmd: str, commands: List[Tuple[List[str], Optional[str]]], ro
     return ""
 
 
-# Tool MCP ghi chữ lên PR/lịch sử git (LOOP-HARNESS-027, D-056): tiêu đề/thân PR, message commit (kể cả commit squash
+# Tool MCP ghi chữ lên PR/lịch sử git (LOOP-HARNESS-027, D-057): tiêu đề/thân PR, message commit (kể cả commit squash
 # của merge). Khoá đọc từ `xt.yaml` của dự án (repo đích của tool là chuỗi owner/repo, không có thư mục để dò).
 MCP_TEXT_RE = re.compile(
     r"mcp__.+__(create_pull_request|update_pull_request|create_or_update_file|push_files|delete_file|merge_pull_request)"
@@ -3979,7 +3979,7 @@ MERGE_CMD_RE = re.compile(r"\bgh\s+(pr\b.*\bmerge|api)\b", re.S)
 
 def _failure_decision(mode: str, payload: object, cmd: object) -> Dict[str, object]:
     """Quyết định khi guard ném lỗi: fail-open về luồng (ADR-0002), trừ merge/`gh api` và tool MCP merge (payload đọc
-    được — stdin rác không phải lời gọi tool, LOOP-HARNESS-018) → hỏi; tool MCP ghi PR/commit khác cho qua (D-056)."""
+    được — stdin rác không phải lời gọi tool, LOOP-HARNESS-018) → hỏi; tool MCP ghi PR/commit khác cho qua (D-057)."""
     tool = payload.get("tool_name") if isinstance(payload, dict) else None
     if (mode == "mcp" and isinstance(tool, str) and MCP_MERGE_RE.fullmatch(tool)) or (
         mode == "bash" and isinstance(cmd, str) and MERGE_CMD_RE.search(cmd)

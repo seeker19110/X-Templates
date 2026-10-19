@@ -181,7 +181,7 @@ def merge_permissions(ours: dict[str, Any], theirs: dict[str, Any]) -> int:
 
 
 def _sync_matcher(theirs: list[dict[str, Any]], entry: dict[str, Any], cmds: set[object]) -> int:
-    """Hook của khung đã đăng ký mà matcher cũ (vd pre-mcp-guard thêm tool ghi PR — D-056): cập nhật matcher của mục
+    """Hook của khung đã đăng ký mà matcher cũ (vd pre-mcp-guard thêm tool ghi PR — D-057): cập nhật matcher của mục
     CHỈ gồm lệnh của khung; mục dự án gộp thêm lệnh riêng thì giữ nguyên (gộp tay). Trả số mục đã đổi."""
     changed = 0
     for e in theirs:
