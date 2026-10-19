@@ -566,3 +566,10 @@
 - Chọn: Giữ trọn bộ test + coverage 100 % nhưng chạy mỗi lớp test một tiến trình song song theo số CPU (coverage parallel=True đã có)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: không bỏ kiểm nào ở hook, cùng ngưỡng; đo 180 s → 66 s trên 4 CPU; CI cũng nhanh theo; phương án test liên quan cần bản đồ file→test và có thể lọt lỗi chéo
 - Đường lùi: Trả dòng test: trong xt.yaml về discover tuần tự
+
+### D-080 · 2026-10-19T18:24:22+00:00 · merge_risk_paths của repo khung có giữ tài liệu thuần không
+
+- Phương án: (1) Giữ như D-031 (ADR, 11-autonomous-loop, code-review.md vào làn chuẩn) · (2) Bỏ tài liệu thuần, giữ scripts/* và framework/templates/*
+- Chọn: Bỏ tài liệu thuần, giữ scripts/* và framework/templates/*
+- Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu 2026-10-19 (giảm vòng review cho PR docs); lớp đỡ còn validate, check-links, revert; templates giữ vì thành file thật ở dự án đích
+- Đường lùi: Đặt lại chuỗi D-031 trong xt.yaml

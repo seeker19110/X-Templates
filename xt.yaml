@@ -10,10 +10,11 @@ typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/
 # tập test, cùng ngưỡng, 180 s → ~70 s trên 4 CPU. Một lớp đỏ → xargs exit ≠ 0 → cổng đỏ.
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))' | xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 python3 -m coverage run -m unittest && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
-# PR quan trọng riêng của repo khung (D-031, review #103): bộ máy merge/ủy quyền/cổng (`scripts/`), luật vòng tự động,
-# ADR, mẫu dự án đích — vào làn chuẩn (review trước khi bật auto-merge) dù nhỏ hay chỉ đổi tài liệu. Ở dự án đích
-# `.xtemplates/` đã vào làn chuẩn qua nhóm cổng/CI. Khi ngoại lệ cứng giữ người (ADR-0020) các đường dẫn này thành ngoại lệ cứng.
-merge_risk_paths: "scripts/*, framework/11-autonomous-loop/*, framework/10-workflow/code-review.md, framework/templates/*, docs/adr/*"
+# PR quan trọng riêng của repo khung (D-031 → D-080, chủ repo 2026-10-19): chỉ bộ máy merge/ủy quyền/cổng (`scripts/`) và
+# mẫu dự án đích (`framework/templates/` — thành file thật ở dự án đích) vào làn chuẩn. Tài liệu thuần (ADR, luật vòng tự động,
+# code-review.md) đi làn nhanh: lớp đỡ là `validate` + `check-links` + revert. Khi ngoại lệ cứng giữ người (ADR-0020) các
+# đường dẫn này thành ngoại lệ cứng.
+merge_risk_paths: "scripts/*, framework/templates/*"
 # Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: auto-merge
 # của GitHub cho mọi làn — làn nhanh khi mở PR, làn chuẩn sau khi review sạch (ADR-0024) — merge khi required check xanh; L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3

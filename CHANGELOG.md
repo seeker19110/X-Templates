@@ -39,6 +39,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
 
 ### Changed
+- `merge_risk_paths` của repo khung bỏ tài liệu thuần (`docs/adr/*`, `framework/11-autonomous-loop/*`, `code-review.md`) — PR chỉ sửa
+  tài liệu đi làn nhanh, lớp đỡ `validate` + `check-links` + revert; giữ `scripts/*`, `framework/templates/*` (D-080, chủ repo).
 - Cổng `test` của repo khung chạy **mỗi lớp test một tiến trình, song song theo số CPU** (D-079): danh sách lớp từ
   `unittest` discover (không lớp rỗng → không "Ran 0 tests"), `coverage parallel=True` combine rồi vẫn đòi 100 % dòng + nhánh —
   cùng tập test, cùng ngưỡng; `scripts/dev-task.sh gate` 195 s → 68 s trên 4 CPU (test 180 s → 66 s), CI `quality` nhanh theo.
