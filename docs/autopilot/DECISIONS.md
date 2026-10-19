@@ -388,3 +388,24 @@
 - Chọn: PR steward chạy trên GitHub Actions (lịch 10 phút + comment review + chạy tay) gọi pr next cho mọi PR mở và tự bật auto-merge/merge ghim head; pr reviewed đăng kết quả review lên PR (marker, không tên model) để steward đọc
 - Lý do (tiêu chí chất lượng cuối): Không phụ thuộc phiên sống; giữ nguyên luật merge theo làn (review sạch ở đúng head) vì dùng chính pr next; sổ review lên GitHub nên không mất khi container khởi động lại; phương án 2 bỏ qua review làn chuẩn, phương án 3 vẫn mất khi phiên chết
 - Đường lùi: xoá workflow pr-steward.yml; pr reviewed --no-publish
+
+### D-055 · 2026-10-19T01:20:43+00:00 · Việc kế tiếp sau 3.4.1 (PROGRESS Tiếp theo 1): làm gì trước?
+
+- Phương án: (1) Guard ghi công AI qua MCP/gh pr (PR title/body, commit qua MCP) + merge-check kiểm tiêu đề PR cục bộ, phát hành 3.5.0 · (2) Task [perf] trong loop (D-041 phương án 3) · (3) Chỉ nâng dự án đích
+- Chọn: Guard ghi công AI qua MCP/gh pr (PR title/body, commit qua MCP) + merge-check kiểm tiêu đề PR cục bộ, phát hành 3.5.0
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: LOOP-HARNESS-027 ghi rõ lỗ commit qua MCP — phiên cloud được hệ thống dặn gắn URL phiên vào thân PR, đúng lỗ đó; tiêu đề PR sai là CI đỏ một vòng. Dự án đích đã ở nhánh 3.4.1; [perf] D-041 đã cân và hoãn
+- Đường lùi: Revert PR; matcher hook về như cũ
+
+### D-056 · 2026-10-19T01:20:43+00:00 · Tiêu đề PR sai Conventional Commits/> 72 ký tự: merge-check xử lý thế nào?
+
+- Phương án: (1) verdict fix (chặn merge) kèm lý do — tiêu đề thành subject squash trên nhánh chính · (2) Chỉ ghi chú, không chặn · (3) Chỉ kiểm ở CI repo khung
+- Chọn: verdict fix (chặn merge) kèm lý do — tiêu đề thành subject squash trên nhánh chính
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: squash-merge lấy tiêu đề PR làm commit trên main, bỏ qua cổng commit cục bộ; cổng khung đòi conventional commit; sửa tiêu đề rẻ, không cần push
+- Đường lùi: Bỏ nhánh title trong merge_decide
+
+### D-057 · 2026-10-19T01:20:44+00:00 · PR body/commit qua MCP có ghi công AI ở repo ai_attribution: forbid: hook chặn thế nào, khi thiếu python/guard lỗi?
+
+- Phương án: (1) Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy · (2) Hook riêng mới
+- Chọn: Mở rộng matcher pre-mcp-guard sang tool ghi PR/commit; deny khi khớp; tool không phải merge thì fail-open khi guard không chạy
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: một chỗ quyết MCP (mcp_decision), một hook; fail-open về luồng cho tool không nguy hiểm (ADR-0002), fail-closed giữ nguyên cho merge
+- Đường lùi: Matcher về mcp__.*(merge_pull_request|auto_merge).*

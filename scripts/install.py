@@ -182,6 +182,18 @@ def merge_permissions(ours: dict[str, Any], theirs: dict[str, Any]) -> int:
     return changed
 
 
+def _sync_matcher(theirs: list[dict[str, Any]], entry: dict[str, Any], cmds: set[object]) -> int:
+    """Hook của khung đã đăng ký mà matcher cũ (vd pre-mcp-guard thêm tool ghi PR — D-057): cập nhật matcher của mục
+    CHỈ gồm lệnh của khung; mục dự án gộp thêm lệnh riêng thì giữ nguyên (gộp tay). Trả số mục đã đổi."""
+    changed = 0
+    for e in theirs:
+        mine = {h.get("command") for h in e.get("hooks", [])}
+        if mine and mine <= cmds and "matcher" in entry and e.get("matcher") != entry["matcher"]:
+            e["matcher"] = entry["matcher"]
+            changed += 1
+    return changed
+
+
 def merge_hooks(src: Path, dst: Path) -> str:
     """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ hook riêng) và gộp quyền theo
     ADR-0018 (`merge_permissions`; quyền riêng của dự án giữ nguyên).
@@ -208,6 +220,8 @@ def merge_hooks(src: Path, dst: Path) -> str:
             if not any(c in have for c in cmds):
                 hooks.setdefault(event, []).append(entry)
                 added += 1
+            else:
+                added += _sync_matcher(hooks.get(event, []), entry, set(cmds))
     added += merge_permissions(ours, theirs)
     if not added:
         return "kept"

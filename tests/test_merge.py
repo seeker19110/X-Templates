@@ -182,6 +182,9 @@ class MergeDecisionTest(unittest.TestCase):
         cases = {
             "đóng": (pr(state="MERGED"), "closed", "PR đã MERGED"),
             "nháp": (pr(isDraft=True), "wait", "PR nháp"),
+            "tiêu đề không conventional": (pr(title="Sửa guard", mergeable="CONFLICTING"), "fix", "tiêu đề PR phải"),
+            "tiêu đề > 72": (pr(title="fix: " + "a" * 68), "fix", "≤ 72 ký tự"),
+            "tiêu đề nhiều dòng": (pr(title="fix: a\nb"), "fix", "gh pr edit 7 --title"),
             "xung đột": (pr(mergeable="CONFLICTING"), "fix", "xung đột với nhánh đích"),
             "dirty": (pr(mergeStateStatus="DIRTY"), "fix", "xung đột với nhánh đích"),
             "đổi yêu cầu": (pr(reviewDecision="CHANGES_REQUESTED"), "fix", "reviewer yêu cầu sửa"),
@@ -194,6 +197,9 @@ class MergeDecisionTest(unittest.TestCase):
                 d = xt.merge_decision(p, autonomy=2)
                 self.assertEqual(d["verdict"], verdict)
                 self.assertIn(reason, " · ".join(d["reasons"]))
+        for ok in ("fix(guard): a", "feat!: b", "chore(release/x.y): 3.5.0", "fix: " + "a" * 67):
+            with self.subTest(ok):
+                self.assertEqual(xt.merge_decision(pr(title=ok), autonomy=2)["verdict"], "merge")
         # `update` bằng git (gh pr update-branch cần GraphQL — phiên Claude Code chặn)
         self.assertEqual(
             xt.merge_decision(pr(mergeStateStatus="BEHIND", baseRefName="dev"), 2)["next"],
@@ -754,6 +760,7 @@ class MergeCheckCliTest(unittest.TestCase):
             "đang tính": ({"mergeable": None, "mergeable_state": "unknown"}, "mergeable", "UNKNOWN"),
             "xung đột": ({"mergeable": False, "mergeable_state": "dirty"}, "mergeStateStatus", "DIRTY"),
             "nháp": ({"draft": True}, "isDraft", True),
+            "tiêu đề": ({"title": "fix: a"}, "title", "fix: a"),
         }
         for name, (over, key, want) in cases.items():
             with self.subTest(name), FakeGh(pull=over).patch():
@@ -1510,3 +1517,27 @@ class PrStewardTrustTest(unittest.TestCase):
         rc, _, err = run_main("pr", "steward", "--repo", "https://github.com/o/r")
         self.assertEqual(rc, 2)
         self.assertIn("--repo phải dạng owner/repo", err)
+
+
+class PrTitleExemptTest(unittest.TestCase):
+    """Review #140: tiêu đề do máy đặt (bot, nút Revert) được miễn; `pr_title_check: off` tắt luật ở dự án."""
+
+    def test_bot_and_revert_titles_are_exempt(self):
+        for p in (
+            pr(title="Bump lodash from 4.17.20 to 4.17.21", author={"login": "dependabot[bot]"}),
+            pr(title="Update dependency x to v2", author="renovate[bot]"),
+            pr(title='Revert "feat: x"'),
+        ):
+            with self.subTest(p["title"]):
+                self.assertEqual(xt.merge_decision(p, 2)["verdict"], "merge")
+        self.assertEqual(xt.merge_decision(pr(title="Bump x", author={"login": "người"}), 2)["verdict"], "fix")
+
+    def test_title_check_off_in_xt_yaml(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}))
+        commit_base_xt(base, "merge_autonomy: L2\npr_title_check: off\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
+        commit_base_xt(base, "merge_autonomy: L2\n")
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
+        self.assertEqual(json.loads(out)["verdict"], "fix")

@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+> **Dự án đích:** chạy lại `install.py` (hook `guard.py`, `pre-mcp-guard.sh`, matcher của hook MCP trong
+> `.claude/settings.json` — `install.py` nay cập nhật matcher của hook khung đã đăng ký, `xt.py`). PR có tiêu đề sai
+> `<type>(scope): mô tả` hoặc > 72 ký tự nay bị `merge-check` trả `fix`.
+
 ### Added
 - **PR steward** (ADR-0027, D-054, `LOOP-STOP-029`): PR đủ tiêu chuẩn tự vào nhánh chính kể cả khi không còn phiên agent
   (phiên dừng, container khởi động lại, PR do phiên khác mở).
@@ -15,6 +19,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
     Dependabot) — PR từ fork/người ngoài để người merge; PR từng vào làn chuẩn gắn nhãn `xt-standard-lane` để giữ chặt.
   - Workflow `.github/workflows/pr-steward.yml` (mỗi 10 phút, khi có comment review, chạy tay); `install.py --with-github`
     copy vào dự án đích. Token `XT_STEWARD_TOKEN` (tuỳ chọn) để merge kích workflow `push`; repo cần bật "Allow auto-merge".
+- Guard ghi công AI (`LOOP-HARNESS-027`, D-057) ngoài `git commit`: tiêu đề/thân PR và commit squash qua `gh pr
+  create|edit|merge` (`--title/-t`, `--subject`, `--body/-b`, `--body-file/-F`, heredoc) và tool MCP ghi PR/commit
+  (`create_pull_request`, `update_pull_request`, `create_or_update_file`, `push_files`, `delete_file`,
+  `merge_pull_request`) bị chặn ở dự án `ai_attribution: forbid`. Hook MCP mở rộng matcher; tool không phải merge cho qua
+  khi guard không chạy được (fail-open về luồng). Tên model ở **bất kỳ đâu** trong tiêu đề/thân bị chặn, kể cả khi nhắc
+  như tên sản phẩm ("hỗ trợ Claude Sonnet") — diễn đạt khác (review #140). Còn lọt: URL phiên do máy chủ MCP tự gắn sau
+  khi hook cho qua; `gh api …/pulls -f body=…` (chỉ theo luật `gh api`); thân lấy từ biến/ống/file do lệnh trước tạo.
+- `xt.py merge-check` (D-056): đọc tiêu đề PR (REST và `gh pr view`); sai Conventional Commits hoặc > 72 ký tự → `fix`
+  kèm lệnh `gh pr edit` — tiêu đề thành commit squash trên nhánh chính, bỏ qua cổng commit cục bộ. Miễn PR của bot
+  (`…[bot]`) và `Revert "…"` của GitHub; dự án không theo Conventional Commits đặt `pr_title_check: off` trong `xt.yaml`.
+
+### Changed
+- `install.py`: hook của khung đã đăng ký mà matcher cũ → cập nhật matcher (chỉ mục gồm toàn lệnh của khung; mục dự án
+  gộp thêm lệnh riêng giữ nguyên). Mục chỉ gồm lệnh khung mà dự án tự thu hẹp matcher sẽ về lại matcher mặc định.
 
 ## [3.4.1] - 2026-10-18
 

@@ -3190,7 +3190,7 @@ def doctor_fix(findings: List[Finding]) -> Tuple[List[str], List[Finding]]:
 # --------------------------------------------------------------------------- merge-check (ADR-0013)
 
 MERGE_FIELDS = (
-    "number,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,labels,statusCheckRollup,files,"
+    "number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,labels,statusCheckRollup,files,"
     "autoMergeRequest"
 )
 FAST_LANE_MAX_LINES = 150  # vị từ làn nhanh, 11-autonomous-loop/stop-points-and-escalation.md
@@ -3349,12 +3349,41 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     return out
 
 
-def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
-    """Trạng thái chặn merge bất kể làn, theo thứ tự: đóng → nháp → xung đột → CI → review đòi sửa → tụt sau → chưa tính."""
+# Tiêu đề PR thành subject commit squash trên nhánh chính, bỏ qua cổng commit cục bộ (D-056) — cùng luật bước CI.
+PR_TITLE_RE = re.compile(r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+")
+PR_TITLE_MAX = 72
+
+
+def _title_exempt(pr: Dict[str, Any], title: str) -> bool:
+    """Tiêu đề do máy đặt, không sửa được ở nguồn (review #140): PR của bot (Dependabot, Renovate — `…[bot]`) và
+    `Revert "…"` mặc định của nút Revert của GitHub."""
+    author = pr.get("author")
+    login = str(author.get("login", "")) if isinstance(author, dict) else str(author or "")
+    return login.endswith("[bot]") or title.startswith('Revert "')
+
+
+def _pr_shape_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
+    """Chặn theo chính PR, trước CI: đã đóng → nháp → tiêu đề (có trong dữ liệu) sai Conventional Commits/dài quá."""
     if pr.get("state") != "OPEN":
         return "closed", [f"PR đã {pr.get('state')}"]
     if pr.get("isDraft"):
         return "wait", ["PR nháp"]
+    title = pr.get("title")
+    if not isinstance(title, str) or (len(title) <= PR_TITLE_MAX and PR_TITLE_RE.fullmatch(title)):
+        return None
+    if _title_exempt(pr, title):
+        return None
+    return "fix", [
+        f"tiêu đề PR phải dạng `<type>(scope): mô tả`, ≤ {PR_TITLE_MAX} ký tự (thành commit squash — D-056): "
+        f"{title[:100]!r} — sửa tiêu đề (`gh pr edit {pr.get('number', '<N>')} --title …`), không cần push"
+    ]
+
+
+def _merge_blockers(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
+    """Trạng thái chặn merge bất kể làn, theo thứ tự: đóng → nháp → tiêu đề → xung đột → CI → review đòi sửa → tụt sau → chưa tính."""
+    early = _pr_shape_blocker(pr)
+    if early:
+        return early
     if pr.get("mergeable") == "CONFLICTING" or pr.get("mergeStateStatus") == "DIRTY":
         return "fix", ["xung đột với nhánh đích — merge nhánh đích vào rồi giải"]
     red, pending, green = _ci_buckets([c for c in pr.get("statusCheckRollup") or [] if isinstance(c, dict)])
@@ -3792,6 +3821,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     return {
         **extra,
         "number": pr.get("number", n),
+        **({"title": pr["title"]} if isinstance(pr.get("title"), str) else {}),
         "state": "MERGED" if pr.get("merged") else str(pr.get("state", "")).upper(),
         "isDraft": bool(pr.get("draft")),
         "mergeable": "MERGEABLE" if mergeable is True else "CONFLICTING" if mergeable is False else "UNKNOWN",
@@ -5120,6 +5150,8 @@ def _print_doctor(base: Path, findings: List[Finding], fixed: List[str], fixing:
 def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`."""
     ref = f"origin/{pr.get('baseRefName') or 'main'}"
+    if _xt_keys(project_dir()).get("pr_title_check") == "off":  # dự án không theo Conventional Commits (review #140)
+        pr = {k: v for k, v in pr.items() if k != "title"}
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
     return merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes

@@ -63,7 +63,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*(merge_pull_request|auto_merge).*",
+        "matcher": "mcp__.*(merge_pull_request|auto_merge|create_pull_request|update_pull_request|create_or_update_file|push_files|delete_file).*",
         "hooks": [
           { "type": "command", "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-mcp-guard.sh\"", "timeout": 120 }
         ]

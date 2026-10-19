@@ -1631,6 +1631,21 @@ class MergeGuardTest(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(decision(out), "ask" if hit else None)
 
+    def test_mcp_text_tools_reach_hook(self):
+        """D-057: matcher gồm tool ghi PR/commit; hook chặn ghi công AI khi `ai_attribution: forbid`, không thì cho qua."""
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        matcher = next(e["matcher"] for e in settings["hooks"]["PreToolUse"] if "pre-mcp-guard" in json.dumps(e))
+        tools = ("create_pull_request", "update_pull_request", "create_or_update_file", "push_files", "delete_file")
+        for t in tools:
+            self.assertTrue(re.fullmatch(matcher, f"mcp__github__{t}"), t)
+        payload = {"tool_name": "mcp__github__create_pull_request", "tool_input": {"body": "Claude-Session: x"}}
+        code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj)
+        self.assertEqual((code, decision(out)), (0, None))
+        (self.proj / "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, {"XT_GUARD_POLICY": ""})
+        self.assertEqual((code, decision(out)), (0, "deny"))
+        self.assertIn("LOOP-HARNESS-027", out)
+
     def test_rest_merge_pinned_allows(self):
         """ADR-0014: phiên chặn GraphQL merge qua REST — allow chỉ khi đúng repo hiện tại, ghim sha = head đã kiểm."""
         ok = "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f merge_method=squash"
@@ -2293,9 +2308,12 @@ class MergeHookFailClosedTest(unittest.TestCase):
 
     def test_mcp_hook_missing_or_broken_guard_asks(self):
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
+        pr = {"tool_name": "mcp__github__update_pull_request", "tool_input": {"body": "x"}}
         self.assertEqual(self.hook("pre-mcp-guard.sh", mcp), "ask")
+        self.assertIsNone(self.hook("pre-mcp-guard.sh", pr))
         (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
         self.assertEqual(self.hook("pre-mcp-guard.sh", mcp), "ask")
+        self.assertIsNone(self.hook("pre-mcp-guard.sh", pr))
         self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --auto"}}), "ask")
         self.assertIsNone(self.hook("pre-bash-guard.sh", {"tool_input": {"command": "ls"}}))
 
@@ -2320,7 +2338,9 @@ class MergeHookFailClosedTest(unittest.TestCase):
         env["XT_GUARD_POLICY"] = ""
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
         off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
+        pr = {"tool_name": "mcp__github__create_pull_request", "tool_input": {"title": "fix: a"}}
         cases = (
+            ("pre-mcp-guard.sh", pr, None),  # ghi PR không nguy hiểm: guard không chạy được thì cho qua (D-057)
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7"}}, "deny"),
             ("pre-mcp-guard.sh", mcp, "deny"),
             ("pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --disable-auto"}}, None),
@@ -3798,6 +3818,65 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "")
+
+    def test_mcp_pr_and_commit_tools(self):
+        """D-057: tiêu đề/thân PR và message commit qua tool MCP ghi công AI → deny (repo `ai_attribution: forbid`)."""
+        d, loose = self.repo("ai_attribution: forbid\n"), self.repo("")
+        url = "https://claude.ai/code/session_01"
+        for tool, inp in (
+            ("mcp__github__create_pull_request", {"title": "fix: a", "body": f"x\n\n{url}"}),
+            ("mcp__github__update_pull_request", {"pullNumber": 7, "title": "feat: Claude Opus 5"}),
+            ("mcp__github__create_or_update_file", {"path": "a", "message": "fix: a\n\nClaude-Session: x"}),
+            ("mcp__github__push_files", {"message": "Co-Authored-By: Claude Sonnet 5 <n@a.com>"}),
+            ("mcp__github__delete_file", {"message": "chore: claude-haiku-4"}),
+            ("mcp__github__merge_pull_request", {"pullNumber": 7, "commit_message": url}),
+            ("mcp__other__create_pull_request", {"body": url}),
+        ):
+            with self.subTest(tool):
+                dec, why = self.g.mcp_decision(tool, inp, d)
+                self.assertEqual(dec, "deny")
+                self.assertIn("LOOP-HARNESS-027", why)
+                self.assertEqual(self.g.mcp_attribution(tool, inp, loose), "")
+        for tool, inp in (
+            ("mcp__github__create_pull_request", {"title": "fix: Claude Code hook", "body": "Co-authored-by: Claude"}),
+            ("mcp__github__create_pull_request", {"title": 7, "body": None}),
+            ("mcp__github__add_issue_comment", {"body": url}),  # không phải PR/lịch sử git
+            ("mcp__github__update_pull_request_branch", {"body": url}),
+        ):
+            with self.subTest(ok=tool):
+                self.assertEqual(self.g.mcp_decision(tool, inp, d), ("", ""))
+
+    def test_gh_pr_title_body_and_squash_message(self):
+        """D-057: `gh pr create|edit|merge` mang tên model/URL phiên trong tiêu đề/thân (chữ, file, heredoc) → deny."""
+        self.enterContext(mock.patch.object(self.g, "merge_check", return_value={}))  # `gh pr merge`: không gọi mạng
+        d = self.repo("ai_attribution: forbid\n")
+        Path(d, "b.md").write_text("## Tóm tắt\n\nhttps://claude.ai/code/session_01\n", encoding="utf-8")
+        for cmd in (
+            'gh pr create --title "fix: a" --body "x\n\nClaude-Session: y"',
+            "gh pr create -t 'feat: Claude Opus 5' -b x",
+            "gh pr create --body-file b.md",
+            "gh pr create -F b.md --base main",
+            "gh pr edit 7 --body=https://claude.ai/code/session_01",
+            "gh pr -R o/r edit 7 -bclaude-sonnet-5",
+            "gh pr --repo=o/r merge 7 --squash --subject 'fix: Claude Haiku 4'",
+            "gh pr create --title 'fix: a' --body-file - <<'EOF'\n## Tóm tắt\n\nClaude-Session: x\nEOF",
+            'gh pr create --title "fix: a" --body "$(cat <<\'EOF\'\nx\n\nClaude Opus 5\nEOF\n)"',
+        ):
+            with self.subTest(cmd[:60]):
+                self.assertEqual(self.decide(cmd, d), "deny")
+                self.assertIn("PR ghi công AI", self.g.bash_decision(cmd, d, d)["reason"])
+        for cmd in (
+            'gh pr create --title "fix: Claude Code hook" --body "Co-authored-by: Claude"',
+            "gh pr view 7 --json body",
+            "gh pr comment 7 --body 'Claude-Session: x'",
+            "gh pr create --body-file khong-co.md",
+            "gh pr --repo o/r",
+            "gh pr view 7 --json body; gh pr create -t 'fix: a' -b x",  # `view` cùng chuỗi: không phải lệnh ghi
+            "python3 - <<'EOF'\nprint('Claude Opus 5')\nEOF\ngh pr create --title 'fix: a' --body x",
+        ):
+            with self.subTest(ok=cmd[:60]):
+                self.assertEqual(self.decide(cmd, d), "")
+        self.assertEqual(self.decide("gh pr create -t 'Claude Opus 5'", self.repo("")), "")
 
     def test_only_repos_that_forbid(self):
         for xt in ("", "ai_attribution: allow\n", "# ai_attribution: forbid\n"):
