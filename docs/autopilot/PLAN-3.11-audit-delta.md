@@ -37,7 +37,7 @@
 > Gate T-1601 không `--strict`: `--strict` đòi 0 🔴/🟠 mở — đỏ đúng thiết kế khi audit vừa tìm ra lỗi; `--strict` ở T-1690.
 
 ### Lát B — sửa 🔴/🟠 (theo phát hiện của T-1601; 21 phát hiện: 🔴 1 · 🟠 3 · 🟢 17)
-- [ ] `T-1602` Guard: dấu che giả `\x01N\x02` fail-open (AUD-SEC-091 🔴, hồi quy) + quét bậc hai theo số chuỗi canh (AUD-SEC-092, hồi quy) — Gate: `python3 -m unittest tests.test_guard_audit1020b`
+- [x] `T-1602` Guard: dấu che giả `\x01N\x02` fail-open (AUD-SEC-091 🔴, hồi quy) + quét bậc hai theo số chuỗi canh (AUD-SEC-092, hồi quy) — Gate: `python3 -m unittest tests.test_guard_audit1020b`
 - [ ] `T-1603` Guard: cờ trình thông dịch ghép/dính, `nodejs`, lệnh chạy hộ `uv/poetry/pipx/pipenv run`, `npx`, `npm exec --` (AUD-SEC-093) — Gate: `python3 -m unittest discover -s tests -k guard_interp_flag_forms`
 - [ ] `T-1604` Guard: sau `cd` quét `$(…)`/backtick/`<(…)`/lệnh bọc với thư mục đã đổi (AUD-SEC-094) — Gate: `python3 -m unittest discover -s tests -k guard_nested_cwd_runners`
 - [ ] `T-1605` Guard: `~+`/`~-` (AUD-SEC-097) và `source /dev/stdin` (AUD-SEC-098) — Gate: `python3 -m unittest discover -s tests -k guard_tilde_plus_minus`

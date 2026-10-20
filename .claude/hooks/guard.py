@@ -4504,6 +4504,12 @@ WRITE_HINT_RE = re.compile(
     r"|\b(?:createWriteStream|openSync|os\.open)\b|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?\("
     r"|\.open\(\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
 )
+# Mọi dạng ghi mà `_direct_write`/`_alias_write` bắt được đều khớp regex này (test giữ): script không khớp thì không chuỗi
+# nào là đích ghi trực tiếp — bỏ hẳn regex theo từng chuỗi (AUD-SEC-092).
+WRITE_ANY_RE = re.compile(
+    WRITE_HINT_RE.pattern + r"|\bcompile\w*\(|\btruncate\w*|\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b"
+)
+DIRECT_PROBES = 64  # số chuỗi canh được dò API ghi mỗi script (mỗi chuỗi một regex quét cả script); hơn → coi như ghi
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
 HOME_EXPR_RE = re.compile(
@@ -4692,11 +4698,11 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families)
+        hint, ro, probe = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families), _WriteProbe(script)
         asks += [
             a
             for raw in _script_literals(script, families) + (_ipython_magic_words(script) if ipython else [])
-            if (a := _interp_literal_ask(script, raw, root, here, hint, ro))
+            if (a := _interp_literal_ask(script, raw, root, here, hint, ro, probe))
         ]
     return asks
 
@@ -4761,8 +4767,31 @@ def _interp_families(tokens: List[str], cwd: Optional[str]) -> FrozenSet[str]:
     return frozenset(INTERP_FAMILY.get(m[1], m[1]) for m in found if m)
 
 
+class _WriteProbe:
+    """`_direct_write`/`_alias_write` cho các chuỗi canh của MỘT script (AUD-SEC-092: mỗi chuỗi dựng một regex quét cả
+    script — bậc hai theo số chuỗi): script không khớp `WRITE_ANY_RE` → không chuỗi nào là đích ghi, bỏ regex; quá
+    `DIRECT_PROBES` chuỗi → coi như ghi (fail-closed: chặn, không quét quá hạn hook)."""
+
+    def __init__(self, script: str) -> None:
+        self.script = script
+        self.writes = bool(WRITE_ANY_RE.search(script))
+        self.left = DIRECT_PROBES
+
+    def __call__(self, raw: str) -> bool:
+        if not self.writes:
+            return False
+        self.left -= 1
+        return self.left < 0 or _direct_write(self.script, raw) or _alias_write(self.script, raw)
+
+
 def _interp_literal_ask(
-    script: str, raw: str, root: str, here: Optional[str], hint: bool = True, ro: object = False
+    script: str,
+    raw: str,
+    root: str,
+    here: Optional[str],
+    hint: bool = True,
+    ro: object = False,
+    probe: Optional[_WriteProbe] = None,
 ) -> str:
     """Câu hỏi cho chuỗi `raw` trong script. Là hàng rào/cấu hình git/bí mật/bằng chứng (thử ở mọi thư mục canh khi
     `here` không biết — D-106) → câu mang dấu chặn, TRỪ khi toàn script chỉ gồm thao tác đọc (`ro`, D-105: mặc định
@@ -4775,8 +4804,8 @@ def _interp_literal_ask(
         if not (fence or git_hook or kind in ("secret", "evidence")):
             continue
         # Mã lý do chính xác khi khớp API ghi đã biết; còn lại theo D-105: script không chỉ đọc → chặn như ghi
-        direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
-        direct = direct or _alias_write(script, raw)  # AUD-SEC-084: qua biến/bí danh
+        # AUD-SEC-084: qua biến/bí danh (`_alias_write`, trong `probe`)
+        direct = (lit != raw and ">" in raw[: len(raw) - len(lit)]) or (probe or _WriteProbe(script))(raw)
         how = "script trình thông dịch" if direct else "script trình thông dịch không chỉ đọc — D-105"
         if not (direct or not ro):
             continue
@@ -4873,6 +4902,7 @@ READ_MODES = frozenset({"r", "rb", "rt", "br", "tr", "rs", "sr"})
 FS_RECEIVERS = frozenset({"fs", "File", "io", "codecs", "fsp", "promises"})  # `.open(path, mode)`: đường dẫn trước
 OPEN_KWARGS = frozenset({"encoding", "errors", "newline"})
 RO_MASK_RE = re.compile(r"\x01(\d+)\x02")
+RO_MARK_CHARS_RE = re.compile(r"[\x01\x02]")  # script có sẵn byte dấu che → không chỉ đọc (AUD-SEC-091)
 RO_NEXT_LIT_RE = re.compile(r"[ \t]*\x01(\d+)\x02")
 RO_CALL_RE = re.compile(r"(\.\s*)?(?<![\w$])([A-Za-z_]\w*[?!]?)\s*\(")
 RO_BARE_CALL_RE = re.compile(r"(\.\s*)?(?<![\w$@%&])([A-Za-z_]\w*[?!]?)[ \t]+(?=([\x01$@\[\d]|[A-Za-z_]\w*))")
@@ -4924,6 +4954,8 @@ def _ro_mask(script: str, families: Optional[FrozenSet[str]] = None) -> Masked:
         lits.append((m[0][0], m[m.lastindex or 1]))
         return f"\x01{len(lits) - 1}\x02"
 
+    if RO_MARK_CHARS_RE.search(script):  # AUD-SEC-091: byte dấu che có sẵn trong script giả làm chuỗi đã che
+        return None
     masked = RO_SIMPLE_STR_RE.sub(sub, script)
     perl = not families or "perl" in families
     lua = not families or "lua" in families
@@ -4987,7 +5019,7 @@ def _ro_mask_py(script: str, depth: int = 0) -> Masked:
     """Python: chuỗi (cả f-string) thay bằng `\\x01N\\x02`, comment bỏ đi — theo `tokenize`. Biểu thức trong f-string
     kiểm đệ quy bằng `_read_only_script` (tối đa RO_FSTRING_DEPTH tầng). Không tách chắc được → None (không chỉ đọc)."""
     try:
-        spans = _ro_py_spans(script, depth)
+        spans = None if RO_MARK_CHARS_RE.search(script) else _ro_py_spans(script, depth)  # AUD-SEC-091
         if spans is None:
             return None
         out: List[str] = []
@@ -5038,7 +5070,7 @@ def _paren_args(masked: str, start: int, end: int) -> List[str]:
 
 def _ro_lit(a: str, lits: List[Tuple[str, str]]) -> Optional[str]:
     m = RO_MASK_RE.fullmatch(a)
-    return lits[int(m[1])][1] if m else None
+    return lits[int(m[1])][1] if m and int(m[1]) < len(lits) else None
 
 
 def _ro_kwargs(args: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
