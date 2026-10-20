@@ -189,4 +189,5 @@ Xem [`CONTRIBUTING.md`](CONTRIBUTING.md) và [`framework/00-method/conventions.m
 Bản đề xuất [khắc phục và nâng cấp tự động hóa ngày 2026-10-19](docs/ops/REMEDIATION-PLAN-2026-10-19.md)
 gồm tái hiện, nghiên cứu nguồn sống, thang tự chủ theo loại PR, tiêu chí nghiệm thu và kế hoạch máy đọc
 [`PLAN-3.9-automation.md`](docs/autopilot/PLAN-3.9-automation.md) cho đợt sau 3.8.0.
+Vận hành: [runbook `pr-steward`](docs/ops/RUNBOOK-PR-STEWARD.md) · [phụ thuộc và license](docs/ops/DEPENDENCIES.md).
 Báo lỗ hổng: [`SECURITY.md`](SECURITY.md). Giấy phép: [MIT](LICENSE).
