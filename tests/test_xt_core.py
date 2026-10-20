@@ -934,7 +934,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
             self.assertEqual(xt.loop_verify(self.base), 0)
         why = xt.final_check(self.base) or ""
         self.assertIn("chỉ chạy Gate có đầu vào đổi", why)
-        self.assertIn("loop verify --all", why)
+        self.assertIn("`python3 scripts/xt.py loop verify --all`", why)  # lệnh đúng repo — review #190
         out, _ = xt.hook_stop("{}", self.base)
         self.assertIn("loop verify --all", json.loads(out)["reason"])
         self.assertTrue(xt.read_state(self.base)["active"])
@@ -950,6 +950,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertEqual(self.verify()[0], 0)
         write(self.base / "new.txt", "x\n")  # file chưa track đổi cây
         self.assertIn("chưa kiểm lại cuối", xt.final_check(self.base) or "")
+        self.assertIn("`python3 scripts/xt.py loop verify --all`", xt.final_check(self.base) or "")
         self.assertEqual(self.verify()[0], 0)
         self.assertIsNone(xt.final_check(self.base))
         write(self.base / "ok.txt", "2\n")  # sửa file đã track

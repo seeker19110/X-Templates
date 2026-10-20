@@ -2350,7 +2350,7 @@ def final_check(base: Path) -> Optional[str]:
             return None
         return (  # D-084: verify một phần (giữ Gate theo digest) chỉ dùng giữa vòng — `files:` khai thiếu làm lọt hồi quy
             "kiểm lại cuối chỉ chạy Gate có đầu vào đổi — trước `done` chạy "
-            "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
+            f"`{xt_cmd(base)} loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
         )
     if rec.get("fingerprint") == fp:
         runs = rec.get("results", []) + rec.get("blueprint", []) + rec.get("gate_floor_runs", [])
@@ -2363,7 +2363,7 @@ def final_check(base: Path) -> Optional[str]:
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
-        "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
+        f"`{xt_cmd(base)} loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
     )
 
 
