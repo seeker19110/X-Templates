@@ -2514,7 +2514,18 @@ def _mode_warning(mode: Optional[str]) -> str:
     )
 
 
-def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str]) -> str:
+def xt_cmd(base: Path) -> str:
+    """Lệnh gọi xt.py đúng repo: dự án đích có `.xtemplates/scripts/xt.py`, repo khung dùng `scripts/xt.py` (review #189, C15)."""
+    return (
+        "python3 .xtemplates/scripts/xt.py"
+        if (base / ".xtemplates" / "scripts" / "xt.py").is_file()
+        else "python3 scripts/xt.py"
+    )
+
+
+def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt: str = "python3 scripts/xt.py") -> str:
+    """Lý do Stop hook trả mỗi vòng — ngắn (ADR-0033): `v['reason']` đã mang task, Gate, tầng executor và mốc; nhắc lệnh
+    ghi bằng chứng, nhịp đẩy theo lát (không phải mỗi task), và hai lối cho quyết định/việc cần người."""
     one = (
         " Chế độ một phiên: context đầy thì để compaction tự nén (PreCompact ghi checkpoint), không bàn giao; "
         "chỉ bàn giao khi gần trần vòng/giờ."
@@ -2523,10 +2534,8 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str]) -> 
     )
     return (
         f"[autopilot vòng {st['iterations']}/{st.get('max_iterations', 50)}] Chưa xong: {v['reason']}. "
-        "Làm tiếp theo PLAN; chạy `python3 .xtemplates/scripts/xt.py loop record --task <ID> -- <lệnh kiểm>` "
-        "để ghi bằng chứng; commit+push sau mỗi task. Quyết định chuyên môn: tự duyệt bằng `xt.py loop decide`. "
-        "Việc cần người (điểm dừng về hành động): `xt.py loop defer --task <ID> --reason ...` rồi làm việc khác; "
-        "chỉ `xt.py loop block --reason ...` khi mọi việc còn lại đều phụ thuộc nó." + one + _mode_warning(mode)
+        f"Gate qua `{xt} loop record --task <ID> -- '<lệnh Gate>'`; commit nhỏ, đẩy theo lát; quyết định → `loop decide`; "
+        "việc cần người → `loop defer` (mọi việc phụ thuộc → `loop block`)." + one + _mode_warning(mode)
     )
 
 
@@ -2546,7 +2555,9 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
         st["iterations"] = st.get("iterations", 0) + 1
         st["last_verdict"] = v
         write_state(st, base)
-        return json.dumps({"decision": "block", "reason": _stop_reason(st, v, mode)}, ensure_ascii=False), 0
+        return json.dumps(
+            {"decision": "block", "reason": _stop_reason(st, v, mode, xt_cmd(base))}, ensure_ascii=False
+        ), 0
     if st and st.get("active") and v["verdict"] in ("done", "blocked", "budget", PENDING_HUMAN):
         st["active"] = False
         st["ended"] = now_iso()

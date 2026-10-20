@@ -1500,7 +1500,17 @@ class LoopCommandsTest(TmpDirCase):
         reason = json.loads(out)["reason"]
         self.assertIn("⚠ Phiên ở chế độ hỏi quyền `default`", reason)
         self.assertIn("Chế độ một phiên: context đầy thì để compaction tự nén", reason)
-        self.assertIn("loop defer --task <ID>", reason)
+        self.assertIn("loop defer", reason)
+        # Lý do ngắn, nhịp đẩy theo lát (ADR-0033) và lệnh xt.py đúng repo: không có `.xtemplates/` → `scripts/xt.py`.
+        self.assertIn("`python3 scripts/xt.py loop record --task <ID> -- '<lệnh Gate>'`", reason)
+        self.assertNotIn("commit+push sau mỗi task", reason)
+        target = self.tmp / ".xtemplates" / "scripts"
+        target.mkdir(parents=True)
+        (target / "xt.py").write_text("# bản cài\n", encoding="utf-8")
+        self.assertEqual(xt.xt_cmd(self.tmp), "python3 .xtemplates/scripts/xt.py")
+        reason2 = json.loads(run_main("loop", "hook-stop", stdin='{"permission_mode": "default"}')[1])["reason"]
+        self.assertIn("`python3 .xtemplates/scripts/xt.py loop record", reason2)
+        shutil.rmtree(self.tmp / ".xtemplates")
         self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "default")
         self.assertIn("⚠ Phiên ở chế độ hỏi quyền", run_main("loop", "status")[1])
         for payload in ('{"permission_mode": "auto"}', "rác {", "[1]", '{"permission_mode": 3}'):

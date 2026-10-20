@@ -6,7 +6,7 @@
   `framework/00-method/audit.md` §1; test `tests/test_xt_core.py::LoopRecordBranchesTest.test_milestone_done_marks_section_transition`.
 - **Ngày:** 2026-10-20
 - **Làm rõ:** ADR-0029 (audit theo mốc — thay ở pha build), ADR-0031 (pha build/harden — mục Hệ quả "audit delta mỗi
-  mốc" thay ở pha build); quyết định D-110.
+  mốc" thay ở pha build), ADR-0009 (PROGRESS "sau mỗi task" → theo lát); quyết định D-110.
 
 ## Bối cảnh
 
@@ -30,7 +30,7 @@ trình vẫn giữ ba khâu không thêm chốt an toàn nào ở pha này:
    đọc từ `xt.yaml` ở cây làm việc — đây chỉ là gợi ý thứ tự việc; chốt thật là `release-check` (đọc pha và sổ audit).
 2. **Reviewer chỉ khi `pr next` trả `review`** (mọi pha): máy đã biết PR nào cần review (làn chuẩn pha harden, ngoại lệ
    cứng, nhãn `risk:`, PR từng bị review báo lỗi chặn — ADR-0024/0031). PR làn nhanh, và PR làn chuẩn ở pha build, không
-   giao reviewer — đúng `AGENTS.md` §3 ("PR khác bật khi mở"); phiên chính vẫn được chủ động giao khi thấy rủi ro.
+   giao reviewer — đúng `AGENTS.md` §3 ("PR khác bật khi mở"); thấy rủi ro cụ thể thì gắn nhãn `risk:` để máy đòi review (một đường duy nhất).
 3. **`PROGRESS.md` cập nhật theo lát** — trong commit cuối của lát, trước cổng đầy đủ, không ghi số PR (chưa có) — và
    trước khi dừng, không sau mỗi task.
 
