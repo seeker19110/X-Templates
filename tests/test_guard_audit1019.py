@@ -464,7 +464,7 @@ class ForNumericSampleTest(unittest.TestCase):
         got = guard._for_values(["for", "i", "in", *words])
         self.assertEqual(len(got), guard.FOR_NUM_SAMPLE)
         self.assertEqual((got[0], got[-1]), ("1", "100"))
-        self.assertTrue(set(got) <= set(words))
+        self.assertEqual(set(got) - set(words), set())
         self.assertEqual(guard._for_values(["for", "i", "in", "3", "1", "3"]), ["3", "1"])  # ít → đủ, bỏ trùng
         self.assertEqual(guard._for_values(["echo", "i"]), [])
         self.assertEqual(guard._for_words(["do", "for", "i", "in", *words]), guard.FOR_NUM_SAMPLE)
