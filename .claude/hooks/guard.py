@@ -4429,6 +4429,8 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
             direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
             if direct and _is_fence(lit, root):
                 asks.append(FENCE_WHY.format(f"{lit} — script trình thông dịch"))
+            elif direct and _match_any(rel_path(lit, root), GIT_HOOK_PATTERNS):  # AUD-SEC-083: như `>> .git/config`
+                asks.append(GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch"))
             elif direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
                 asks.append(f"ghi file bí mật qua Bash (script trình thông dịch): {lit}")
             elif direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng

@@ -3041,6 +3041,61 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec083-python-git-config",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-083"
+   ],
+   "input": {
+    "command": "python3 -c \"open('.git/config','a').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec083-python-git-hook",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-083"
+   ],
+   "input": {
+    "command": "python3 -c \"open('.git/hooks/pre-commit','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec083-node-git-config",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-083"
+   ],
+   "input": {
+    "command": "node -e \"require('fs').appendFileSync('.git/config','x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-control-sec083-read-git-config",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-083"
+   ],
+   "input": {
+    "command": "python3 -c \"open('out.txt','w').write(open('.git/config').read())\""
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
