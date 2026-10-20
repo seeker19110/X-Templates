@@ -21,8 +21,11 @@ jobs:
   # `quality` = cổng chuẩn (validate khung + test + link + shell + cài thử). Ruleset `.github/rulesets/main.json` đòi 5 required check:
   # `quality`, `protection-guard` (job bên dưới), `gitleaks` (secret-scan.yml), `dep-audit` (dep-audit.yml) và `merge-gate`
   # (merge-gate.yml, `pull_request_target` — ADR-0023). Nguyên tắc: required check phải là job có thật (protection-guard đối chiếu).
-  quality:
-    name: quality
+  # CI chạy SONG SONG trên ba runner (wall time ≈ job chậm nhất thay vì cộng dồn ~165 s): `gate` (cổng chuẩn + bench),
+  # `py311` (sàn hỗ trợ, test theo lớp song song), `checks` (ghép thử blueprint, README, tiêu đề PR, placeholder). `quality`
+  # bên dưới là job TỔNG HỢP giữ nguyên tên required check của ruleset: đỏ khi bất kỳ job nào ở trên không `success`.
+  gate:
+    name: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -32,7 +35,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          # 3.11 = sàn hỗ trợ (3.10 hết hạn 2026-10-01); 3.13 = mặc định. Cài cả hai trong MỘT job để giữ tên check `quality`.
+          # 3.11 = sàn hỗ trợ (3.10 hết hạn 2026-10-01); 3.13 = mặc định. Cài cả hai trong MỖI job như cũ để môi trường giống nhau.
           python-version: |
             3.11
             3.13
@@ -48,14 +51,47 @@ jobs:
       - name: autonomy-bench — đỏ khi false-green > 0 (AUTO-07)
         run: python3 scripts/xt.py autonomy-bench
 
-      # Cổng ở trên chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
+  py311:
+    name: py311
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # 3.11 = sàn hỗ trợ (3.10 hết hạn 2026-10-01); 3.13 = mặc định. Cài cả hai trong MỖI job như cũ để môi trường giống nhau.
+          python-version: |
+            3.11
+            3.13
+
+      - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
+        run: pip install --quiet --require-hashes -r requirements-dev.txt
+
+      # Job `gate` chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
       # thuộc nhánh (guard: `git push` không refspec trên `main`) từng xanh ở PR mà đỏ trên `main` (AUD-TEST-005, #124).
       - name: Test trên Python 3.11 (sàn hỗ trợ), checkout mang tên nhánh `main`
         run: |
           set -euo pipefail
           git checkout -q -B main
           test "$(git symbolic-ref --short HEAD)" = main
-          python3.11 -m unittest discover -s tests
+          # Mỗi LỚP test một tiến trình, song song theo số CPU như `gate` (xt.yaml `test`) — tuần tự đo ở CI ~70 s; song song theo lớp ngắn hơn đáng kể.
+          # Không đo coverage lần hai (đã đo ở bước cổng chuẩn). Module lỗi import → in lỗi, exit 1; không có lớp nào →
+          # `xargs -r` không chạy gì nên kiểm số lớp để không xanh giả.
+          python3.11 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))' > "$RUNNER_TEMP/classes.txt"
+          test "$(wc -l < "$RUNNER_TEMP/classes.txt")" -ge 100
+          xargs -r -P "$(nproc)" -n 1 python3.11 -m unittest < "$RUNNER_TEMP/classes.txt"
+
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
 
       - name: Ghép thử blueprint cho MỌI hồ sơ × gói ngành (smoke)
         run: |
@@ -99,6 +135,24 @@ jobs:
           set -euo pipefail
           if grep -rn "(đang viết)" framework/ ; then echo "::error::Còn chỗ đang viết trong framework/"; exit 1; fi
           echo "OK"
+
+  # Required check `quality` (ruleset `.github/rulesets/main.json`): job tổng hợp. `!cancelled()`: chạy cả khi job con đỏ để báo
+  # đỏ rõ ràng (không bị `skipped` — skipped có thể bị hiểu là qua); run bị huỷ do push mới thì bỏ qua.
+  quality:
+    name: quality
+    needs: [gate, py311, checks]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GATE: ${{ needs.gate.result }}
+      PY311: ${{ needs.py311.result }}
+      CHECKS: ${{ needs.checks.result }}
+    steps:
+      - name: Mọi job con phải `success`
+        run: |
+          echo "gate=$GATE py311=$PY311 checks=$CHECKS"
+          [ "$GATE" = success ] && [ "$PY311" = success ] && [ "$CHECKS" = success ]
 
   # Hàng rào cho hàng rào: (1) mọi required check trong ruleset mẫu phải là job có thật (chặn khoá-nhánh-do-đổi-tên-job);
   # (2) ruleset trên nhánh mặc định có đang hiệu lực không — chỉ CẢNH BÁO (không đỏ) để repo mới chưa import vẫn merge được;
