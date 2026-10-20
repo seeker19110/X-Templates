@@ -1985,7 +1985,6 @@ GH_PREFIX = "quality\tGate\t2026-10-19T10:00:00.1234567Z "
 
 class CiTriageTest(TmpDirCase):
     LOGS = {
-        "secret": "Finding: gitleaks detected 1 leak\n<giá-trị-đã-che>\n",
         "migration": "alembic upgrade head\nERROR: migration 0042 failed: column exists\n",
         "type": "scripts/a.py:3: error: Incompatible return value [return-value]\nFound 1 error in 1 file (checked 2)\n",
         "coverage": "TOTAL 120 3 98%\nCoverage failure: total of 98 is less than fail-under=100\n",
@@ -1994,6 +1993,8 @@ class CiTriageTest(TmpDirCase):
         "infra": "npm ERR! network read ECONNRESET\nError: Process completed with exit code 1.\n",
         "unknown": "something odd\nError: Process completed with exit code 2.\n",
     }
+
+    LEAK_LOG = "Finding: gitleaks detected 1 leak\n<giá-trị-đã-che>\n"
 
     def setUp(self):
         super().setUp()
@@ -2008,7 +2009,7 @@ class CiTriageTest(TmpDirCase):
         return rc, (json.loads(out) if out else {}), err
 
     def test_ci_triage_classifies_each_category(self):
-        for cat, text in self.LOGS.items():
+        for cat, text in [*self.LOGS.items(), ("secret", self.LEAK_LOG)]:
             with self.subTest(cat=cat):
                 self.assertEqual(xt.ci_classify(text)["category"], cat)
         both = xt.ci_classify(self.LOGS["test"] + self.LOGS["infra"])  # lỗi thật thắng dấu mạng: không phí re-run
@@ -2021,7 +2022,7 @@ class CiTriageTest(TmpDirCase):
         text = "".join(GH_PREFIX + line + "\n" for line in ["\x1b[31mFAIL\x1b[0m: test_ü (t.T)", "", "ok"])
         d = xt.ci_classify(text)
         self.assertEqual((d["category"], d["evidence"]), ("test", ["FAIL: test_ü (t.T)"]))
-        s = xt.ci_classify(self.LOGS["secret"])
+        s = xt.ci_classify(self.LEAK_LOG)
         self.assertEqual(s["evidence"], [])  # dòng log có thể chứa chính bí mật
         self.assertEqual(len(s["signature"]), 16)
         empty = xt.ci_classify("")
@@ -2093,7 +2094,7 @@ class CiTriageTest(TmpDirCase):
 
     def test_ci_triage_secret_blocks_loop(self):
         xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
-        rc, d, _ = self.triage("55", self.LOGS["secret"], "--task", "T-001")
+        rc, d, _ = self.triage("55", self.LEAK_LOG, "--task", "T-001")
         self.assertEqual((rc, d["category"], d["action"], d["evidence"]), (1, "secret", "block", []))
         self.assertEqual(d["episode"]["fix_attempts"], 0)
         v = xt.loop_verdict(self.tmp)
@@ -2112,16 +2113,16 @@ class CiTriageTest(TmpDirCase):
     def test_audit_delta_ci_triage_tool_name_alone_is_not_secret(self):
         """T-1524: tên công cụ in lại (`gitleaks protect (skipped…)`) hay báo sạch không phải phát hiện bí mật — test
         đỏ cạnh đó là `test`/fix, không block; phát hiện thật (từ khoá cùng dòng) vẫn block."""
-        not_secret = (
+        benign_logs = (
             "+ scripts/dev-task.sh gate: gitleaks protect (skipped: not installed)\nFAILED test_y\n",
             "quality\tgitleaks\t2026-10-19T10:00:00.0Z INF no leaks found\nFAILED test_y\n",
             "Run gitleaks/gitleaks-action@v2\ntrufflehog git file://. --fail\nFAILED test_y\n",
             "semgrep: 0 findings\ndetect-secrets scan > .secrets.baseline\nFAILED test_y\n",
         )
-        for text in not_secret:
+        for text in benign_logs:
             with self.subTest(text=text):
                 self.assertEqual(xt.ci_classify(text)["category"], "test")
-        secret = (
+        flagged_logs = (
             "quality\tgitleaks\t2026-10-19T10:00:00.0Z WRN leaks found: 1\n",
             "gitleaks detect: 2 leaks detected\n",
             "Finding: gitleaks detected 1 leak\n",
@@ -2131,11 +2132,11 @@ class CiTriageTest(TmpDirCase):
             "semgrep: 3 blocking findings\n",
             "GitHub secret scanning: push protection violation\n",
         )
-        for text in secret:
+        for text in flagged_logs:
             with self.subTest(text=text):
                 self.assertEqual(xt.ci_classify(text + "FAILED test_y\n")["category"], "secret")
         xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
-        rc, d, _ = self.triage("7", not_secret[0], "--task", "T-001")
+        rc, d, _ = self.triage("7", benign_logs[0], "--task", "T-001")
         self.assertEqual((rc, d["category"], d["action"]), (0, "test", "fix"))
         self.assertIn("FAILED test_y", d["evidence"])
         self.assertFalse(xt.read_state(self.tmp).get("blocked"))
