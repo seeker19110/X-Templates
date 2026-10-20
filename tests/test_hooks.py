@@ -2268,12 +2268,12 @@ class GuardDeltaAuditTest(unittest.TestCase):
             "bash -s -- a b <<'E'\ngit reset --hard\nE",
             "printf '%s\\n' 'rm -rf ~' | sh",
             "printf 'git reset --hard\\n' | bash",
+            "echo 'git reset --hard' | tee /dev/null | bash",  # T-1523: chữ echo đi qua tee vẫn được quét
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
         for cmd in (
             "bash -c -e 'gh pr merge 7 --admin'",
-            "echo 'git reset --hard' | tee /dev/null | bash",
             "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
@@ -2787,12 +2787,19 @@ class GuardEgressAuditTest(EgressCase):
         self.assert_all("", ("ssh -L 8080:localhost:80 localhost", "rsync -avL dist/ /backup/"))
 
     def test_guard_ssh_loopback_inner(self):  # AUD-SEC-035
+        # T-1523: lệnh chạy trên máy này (loopback, ProxyCommand) được quét như lệnh lồng → lệnh cấm bên trong bị chặn.
         self.assert_all(
-            "ask",
+            "deny",
             (
                 "ssh localhost 'rm -rf ~'",
                 "ssh localhost git push --force origin main",
                 "ssh -o ProxyCommand='rm -rf ~' localhost",
+            ),
+        )
+        self.assert_all(
+            "ask",
+            (
+                "ssh localhost ls",
                 "ssh -oProxyCommand=sh localhost",
                 "ssh -J evil.example.com localhost",
                 "ssh -oProxyJump=evil.example.com localhost",
@@ -4370,6 +4377,200 @@ class EvidenceHooksTest(unittest.TestCase):
         report = {}  # chạy lại: không còn gì để gộp
         install.merge_hooks(ROOT / ".claude" / "settings.json", target / ".claude" / "settings.json", {}, report)
         self.assertEqual((report["hooks_added"], report["hooks_matcher_updated"]), ([], []))
+
+
+class GuardFalseGreenBenchTest(unittest.TestCase):
+    """T-1523: false-green `autonomy-bench` tìm ra (`echo main | xargs git push origin`, `git push origin $(echo main)`,
+    `echo … | tee /dev/null | bash`, `ssh localhost '…'`, surrogate làm guard sập — AUD-SEC-077) và brace lệch nháy
+    (AUD-SEC-072). Đo như hook ở chính sách mặc định (ADR-0018): cấu trúc guard không giải được quanh hành động không
+    đảo ngược → deny có mã unsure; lệnh hợp lệ cùng dạng vẫn cho chạy."""
+
+    def setUp(self) -> None:
+        self.g = _guard()
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        Path(self.root, "xt.yaml").write_text("", encoding="utf-8")
+
+    def out(self, cmd: str, root: str | None = None) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, root or self.root))
+
+    def assert_policy(self, expected: str, cmds: tuple[str, ...], root: str | None = None) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd, root)["decision"], expected)
+
+    def test_guard_false_green_xargs_push_unknown_ref(self):
+        self.assert_policy(
+            "deny",
+            (
+                "echo main | xargs git push origin",
+                "echo main | xargs -I{} git push origin {}",
+                "printf 'main\\n' | xargs -n1 git -C . push origin",
+                "bash -c 'echo main | xargs git push origin'",
+                "echo feat | xargs git push origin feat",  # xargs nối thêm đối số: đích vẫn có thể là main
+            ),
+        )
+        out = self.out("echo main | xargs git push origin")
+        self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assert_policy("", ("echo a | xargs echo", "ls | xargs cat", "git push -u origin feat/x"))
+
+    def test_guard_false_green_push_command_substitution(self):
+        self.assert_policy(
+            "deny",
+            (
+                "git push origin $(echo main)",
+                'git push origin "$(echo main)"',
+                "git push origin `echo main`",
+                "git push origin $(printf '%s' main)",
+                "git push $(echo --force) origin feat",
+                "git push origin $(cat branch.txt)",  # guard không đọc được giá trị → không biết đích
+                "git push origin HEAD:$(cat b)",
+                "git push origin $(echo $(echo main))",
+                "sh -c 'git push origin $(echo main)'",
+            ),
+        )
+        out = self.out("git push origin $(cat branch.txt)")
+        self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assertEqual(self.out("git push origin $(echo main)")["code"], "PUSH_MAIN")
+        self.assert_policy(
+            "",
+            (
+                "git push origin $(echo feat/x)",
+                "git push -u origin $(git branch --show-current)",  # thư mục tạm không phải repo: không phải main
+                'git push -u origin "$(git rev-parse --abbrev-ref HEAD)"',
+                "git push $(git remote | head -1) feat/x",  # chỉ remote là thay lệnh; đích ghi rõ
+                "git push origin feat/x && echo $(date)",
+                "x=$(cat f); git push origin feat/x",
+                "git commit -q -m \"$(cat <<'EOF'\nrevert: git push origin $(echo main)\nEOF\n)\"",
+                "echo $(git push --dry-run 2>&1 | head -1)",
+            ),
+        )
+
+    @unittest.skipIf(shutil.which("git") is None, "cần git")
+    def test_guard_false_green_push_current_branch_query_on_main(self):
+        repo = Path(self.root, "r")
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        self.assert_policy(
+            "deny",
+            (
+                "git push origin $(git branch --show-current)",
+                "git push origin $(git symbolic-ref --short -q HEAD)",
+            ),
+            str(repo),
+        )
+
+    def test_guard_false_green_pipe_through_filters_into_shell(self):
+        self.assert_policy(
+            "deny",
+            (
+                "echo 'rm -rf ~' | tee /dev/null | bash",
+                "echo 'rm -rf ~' | cat | sh",
+                "echo 'rm -rf ~' | cat - | tee -a log | bash",
+                "printf '%s\\n' 'git reset --hard' | tee log | head -5 | bash",
+                "echo 'git push --force origin x' | tail -n 1 | sh",
+                "echo 'rm -rf ~' | xargs -0 bash -c",
+                "echo 'rm -rf ~' | tee /dev/null | xargs -d '\\n' sh -c",
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "echo ls | tee /dev/null | bash",
+                "echo hi | tee out.txt",
+                "cat run.sh | bash",  # file script: như `bash run.sh` (guard không đọc file) — giữ hành vi cũ
+                "echo 'rm -rf ~' | cat notes.txt | bash",  # cat có file: ống ra là nội dung file, không phải chữ echo
+                "echo 'rm -rf ~' | tee /dev/null | wc -l",
+            ),
+        )
+
+    def test_guard_false_green_ssh_loopback_runs_here(self):
+        self.assert_policy(
+            "deny",
+            (
+                "ssh localhost 'rm -rf ~'",
+                "ssh 127.0.0.1 git push --force origin main",
+                "ssh -p 2222 user@localhost 'rm -rf ~'",
+                "ssh localhost -t 'gh repo delete o/r --yes'",
+                "ssh -o ProxyCommand='rm -rf ~' example.com",  # ProxyCommand chạy trên máy này, máy đích nào cũng vậy
+                "ssh -oProxyCommand='git push --force origin main' localhost",
+                "ssh -o 'LocalCommand rm -rf ~' -o PermitLocalCommand=yes localhost",
+                "ssh localhost 'rm -rf projects'",  # lệnh chạy ở ~ (không phải thư mục dự án)
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "ssh localhost",
+                "ssh localhost ls",
+                "ssh -p 2222 127.0.0.1 uptime",
+                "ssh -o StrictHostKeyChecking=no localhost",
+                "ssh prod.example.com 'rm -rf /tmp/x'",  # máy khác: ra khỏi máy dev — cho chạy (ADR-0018)
+                "ssh -o ProxyCommand='nc %h %p' localhost",
+            ),
+        )
+
+    def test_guard_false_green_surrogate_nul_no_crash(self):
+        for cmd in (
+            "echo x > a\ud800b; rm -rf ~",
+            "touch x\ud800; gh repo delete o/r --yes",
+            "touch a\x00b; git push --force origin main",
+            "cp f y\udcff; docker run --privileged alpine",
+        ):
+            with self.subTest(repr(cmd)):
+                self.assertEqual(self.out(cmd)["decision"], "deny")
+        self.assertEqual(self.out("echo a\ud800b > out.txt")["decision"], "")
+        self.assertEqual(self.g.clean_payload({"k\ud800": ["x\x00y", 1, None]}), {"k�": ["x y", 1, None]})
+        # rel_path không ném lỗi với đường dẫn chứa surrogate/NUL; hàng rào vẫn nhận ra file hook
+        self.assertEqual(self.g.rel_path("a\ud800/../b", self.root), "b")
+        self.assertEqual(self.g.rel_path("x\x00y", self.root), "x\x00y")
+        d, _ = self.g.edit_decision(os.path.join(self.root, ".claude/hooks/x\ud800.sh"), self.root)
+        self.assertEqual(d, "ask")
+
+    def test_guard_false_green_surrogate_via_main(self):
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "touch x\ud800; gh repo delete o/r --yes"}}
+        )
+        self.assertIn("\\ud800", payload)
+        raw = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["guard.py", "bash"]),
+            mock.patch.object(sys, "stdin", io.StringIO(payload)),
+            mock.patch.object(sys, "stdout", raw),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.root, "XT_GUARD_POLICY": ""}),
+        ):
+            self.assertEqual(self.g.main(), 0)
+        self.assertEqual(json.loads(raw.getvalue())["decision"], "deny")
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_guard_false_green_surrogate_via_hook(self):
+        payload = {"tool_input": {"command": "touch x\ud800; gh repo delete o/r --yes"}}
+        code, out, _ = run_hook("pre-bash-guard.sh", payload, Path(self.root), {"XT_GUARD_POLICY": ""})
+        self.assertEqual((code, decision(out)), (0, "deny"))
+
+    def test_brace_quote_desync(self):
+        """AUD-SEC-072: `\\'` trong `$'…'` và nháy mở lại trong `"$(…)"` từng làm `_unquoted` coi phần sau là trong nháy
+        → `{…}` không bung, lệnh cấm lọt."""
+        self.assert_policy(
+            "deny",
+            (
+                "echo $'\\''; rm -rf {dist,~}",
+                "echo $'\\''; gh repo {delete,} o/r --yes",
+                'echo "$(echo "\'")"; git push origin {main,}',
+                'echo "$(echo "$(echo "\'")")"; git push origin {main,}',
+                "echo $'a\\'b'; git push origin {main,}",
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "echo $'it\\'s'; ls {a,b}",
+                'echo "$(echo "\'")"; ls {a,b}',
+                "echo '{main,}'; git push origin feat",
+                'echo "{main,x}"; git status',
+            ),
+        )
+        chars = "".join(c for _, c in self.g._unquoted("a$'\\''b\"c$(d\"e\"f)g\"h'i'j"))
+        self.assertEqual(chars, "abdf)hj")
 
 
 if __name__ == "__main__":

@@ -67,6 +67,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   chưa có manifest → `ask` cũ của khung không tự gỡ nữa (xoá tay nếu muốn).
 - `xt.yaml` `merge_risk_paths` thêm `docs/autopilot/PLAN*.md` (file PLAN chứa lệnh Gate harness chạy → PR đi làn chuẩn).
 
+### Fixed
+- Guard (T-1523): sửa 5 false-green `autonomy-bench` tìm ra và brace lệch nháy, ở chính sách mặc định (ADR-0018).
+  **AUD-SEC-077** 🔴: surrogate lẻ/NUL trong lệnh, đường dẫn hoặc payload làm guard sập rồi fail-open → làm sạch trước khi
+  quét (U+FFFD, khoảng trắng), `rel_path` không sập. **AUD-SEC-072** 🔴: `_unquoted` hiểu `$'…'` (kể cả `\'`) và thân
+  `$(…)` trong nháy kép → `{…}` sau đó bung và được quét. **AUD-SEC-078/079**: `… | xargs git push …` và `git push … $(…)`
+  — đích push từ stdin hoặc thay lệnh không tính được → mã mới `UNRESOLVED_TARGET` (unsure → chặn); `$(echo main)` →
+  `main`, `$(git branch --show-current)` → nhánh thật. **AUD-SEC-080**: chữ echo/printf đi qua `tee`/`cat`/`head`/`tail`
+  (không file) rồi vào shell, hoặc vào `xargs … sh -c`, được quét. **AUD-SEC-081**: `ssh` tới loopback quét lệnh từ xa
+  (chạy ở `~`), `-o ProxyCommand/LocalCommand/KnownHostsCommand` quét với mọi máy đích. Ca chuyển từ
+  `tests/fixtures/autonomy/pending/` sang `guard.json` (257 ca, 0 false-green); corpus ALLOW của
+  `tests/test_guard_corpus.py` không đổi và vẫn không bị chặn. Dự án đích: chạy lại `install.py`.
+
 ## [3.9.0] - 2026-10-19
 
 ### Added

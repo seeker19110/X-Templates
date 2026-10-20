@@ -1252,7 +1252,7 @@
    },
    "expect": {
     "allowed": false,
-    "code": "UNPARSED"
+    "code": "UNVERIFIED"
    }
   },
   {
@@ -2392,6 +2392,136 @@
    },
    "expect": {
     "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-xargs-push-main",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-078"
+   ],
+   "input": {
+    "command": "echo main | xargs git push origin"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-cmdsub-push-main",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-059",
+    "AUD-SEC-079"
+   ],
+   "input": {
+    "command": "git push origin $(echo main)"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-tee-pipe-default",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-028",
+    "REC-04",
+    "AUD-SEC-080"
+   ],
+   "input": {
+    "command": "echo 'rm -rf ~' | tee /dev/null | bash"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-sec077-surrogate-crash",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-077"
+   ],
+   "input": {
+    "command": "echo x > a\ud800b; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-ssh-loopback-default",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-035",
+    "AUD-SEC-081"
+   ],
+   "input": {
+    "command": "ssh localhost 'rm -rf ~'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-sec072-brace-ansi-quote",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-072"
+   ],
+   "input": {
+    "command": "echo $'\\''; rm -rf {dist,~}"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-sec072-brace-subst-quote",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-072"
+   ],
+   "input": {
+    "command": "echo \"$(echo \"'\")\"; git push origin {main,}"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-control-tee-pipe-ls",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo ls | tee /dev/null | bash"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-push-current-branch",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git push -u origin $(git branch --show-current)"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-ssh-loopback-ls",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "ssh localhost ls"
+   },
+   "expect": {
+    "allowed": true
    }
   }
  ]

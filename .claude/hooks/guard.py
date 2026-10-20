@@ -170,12 +170,36 @@ TEST_ASSERT_RE = re.compile(
 def rel_path(path: str, root: str) -> str:
     """Đường dẫn tương đối chuẩn hoá (realpath cả hai phía, bỏ ./ // ..); ngoài gốc → giữ đường dẫn chuẩn hoá."""
     p = path if os.path.isabs(path) else os.path.join(root, path)
-    rp, rr = os.path.realpath(p), os.path.realpath(root)
+    try:
+        rp, rr = os.path.realpath(p), os.path.realpath(root)
+    except ValueError:  # NUL, surrogate lẻ (UnicodeEncodeError): chuẩn hoá theo chữ — không làm guard sập (AUD-SEC-077)
+        rp, rr = os.path.normpath(p), os.path.normpath(root)
     try:
         rel = os.path.relpath(rp, rr)
     except ValueError:
         return rp
     return rp if rel.startswith("..") else rel.replace(os.sep, "/")
+
+
+# Surrogate lẻ (`\ud800` từ JSON `"\ud800"`) không mã hoá được ra hệ điều hành/stdout: từng làm guard sập giữa chừng →
+# fail-open, cả danh sách "máy chặn" lọt (AUD-SEC-077). Thay bằng U+FFFD; NUL (C cắt chuỗi ở đó) thay bằng khoảng trắng —
+# phần sau NUL vẫn được quét (chiều chặt).
+SURROGATE_RE = re.compile("[\ud800-\udfff]")
+
+
+def clean_text(s: str) -> str:
+    return SURROGATE_RE.sub("�", s).replace("\0", " ")
+
+
+def clean_payload(v: Any) -> Any:
+    """`clean_text` cho mọi chuỗi (cả khoá) trong payload JSON."""
+    if isinstance(v, str):
+        return clean_text(v)
+    if isinstance(v, dict):
+        return {clean_payload(k): clean_payload(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [clean_payload(x) for x in v]
+    return v
 
 
 def _match_any(rel: str, patterns: Tuple[str, ...]) -> bool:
@@ -537,21 +561,48 @@ BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.-?\d+)?")
 WORD_END = set(" \t\n;&|()<>")
 
 
+def _skip_single(s: str, j: int) -> int:
+    """Vị trí sau chuỗi nháy đơn `'…'` hoặc ANSI-C `$'…'` (`\\'` trong `$'…'` là ký tự, không đóng nháy) mở ở `s[j]`."""
+    ansi = s.startswith("$'", j)
+    k = j + (2 if ansi else 1)
+    while k < len(s) and s[k] != "'":
+        k += 2 if ansi and s[k] == "\\" else 1
+    return k + 1
+
+
+def _in_double(s: str, j: int, stack: List[str]) -> int:
+    """Một bước trong nháy kép: `$(` mở thay lệnh — bên trong là ngữ cảnh mới, nháy tính lại từ đầu (bash) —, `"` đóng."""
+    if s.startswith("$(", j):
+        stack.append("(")
+        return j + 2
+    if s[j] == '"':
+        stack.pop()
+    return j + 1
+
+
 def _unquoted(s: str, i: int = 0) -> Iterator[Tuple[int, str]]:
-    """(vị trí, ký tự) ngoài nháy từ `s[i]`; ký tự thoát `\\x` và nội dung nháy bị bỏ qua."""
-    q, j = "", i
+    """(vị trí, ký tự) ngoài nháy từ `s[i]`; ký tự thoát `\\x`, nội dung nháy (cả `$'…'`) bị bỏ qua; thân `$(…)` trong
+    nháy kép là ngoài nháy (AUD-SEC-072: `$'\\''`, `"$(echo "'")"` từng làm lệch trạng thái nháy tới cuối lệnh)."""
+    stack: List[str] = []  # '"' = trong nháy kép; "(" = trong ngoặc/thay lệnh (ngữ cảnh ngoài nháy)
+    j = i
     while j < len(s):
         c = s[j]
-        if c == "\\" and q != "'":
+        if c == "\\":
             j += 2
-            continue
-        if q:
-            q = "" if c == q else q
-        elif c in "'\"":
-            q = c
+        elif stack[-1:] == ['"']:
+            j = _in_double(s, j, stack)
+        elif c == "'" or s.startswith("$'", j):
+            j = _skip_single(s, j)
+        elif c == '"':
+            stack.append(c)
+            j += 1
         else:
+            if c == "(":
+                stack.append(c)
+            elif c == ")" and stack:
+                stack.pop()
             yield j, c
-        j += 1
+            j += 1
 
 
 def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
@@ -980,12 +1031,15 @@ def _push_ref_rule(ref: str, deleting: bool, cwd: Optional[str] = None) -> Tuple
     return "ask", "push thẳng nhánh chính — khung yêu cầu đi qua PR"
 
 
+PUSH_VALUE_OPTS = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+
+
 def _git_push(args: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
     """push: deny --force/--mirror/+refspec và xoá nhánh chính; ask khi đẩy thẳng nhánh chính — kể cả khi không có
     refspec hoặc đích là `HEAD` mà nhánh hiện tại (ở `cwd`) là nhánh chính — và khi `--all`/`--tags` (mọi nhánh/tag)."""
     flags = _short_flags(args)
     force = any(x.startswith("--force") and x != "--force-if-includes" or x == "--mirror" for x in args) or "f" in flags
-    refs = _positionals(args, ("-o", "--push-option", "--repo", "--receive-pack", "--exec"))
+    refs = _positionals(args, PUSH_VALUE_OPTS)
     if force or any(r.startswith("+") for r in refs):
         return "deny", "push --force/--mirror/+refspec ghi đè lịch sử"
     spread = any("*" in r or r == ":" for r in refs[1:])  # refspec glob, `:` = matching (AUD-SEC-047)
@@ -2131,6 +2185,41 @@ def _remote_rule(name: str, args: List[str]) -> str:
         if host and not _is_loopback(host):
             return f"{EGRESS_ASK} — {name} chép với máy {host}"
     return ""
+
+
+# Tuỳ chọn `-o` của ssh chạy lệnh shell trên CHÍNH máy này, máy đích nào cũng vậy (ProxyCommand, LocalCommand…).
+SSH_LOCAL_CMD_OPTS = ("proxycommand", "localcommand", "knownhostscommand")
+
+
+def _ssh_target(args: List[str]) -> Tuple[str, List[str]]:
+    """(máy đích, lệnh từ xa) của `ssh [opts] host [opts] [lệnh…]` — ssh đọc tuỳ chọn cả sau tên máy, tới từ đầu tiên của
+    lệnh."""
+    host, i = "", 0
+    while i < len(args) and (not host or args[i].startswith("-")):
+        a = args[i]
+        if a.startswith("-"):
+            i += 2 if a in SSH_VALUE_FLAGS else 1
+            continue
+        host, i = a, i + 1
+    return host, args[i:]
+
+
+def _ssh_local_scripts(tokens: List[str]) -> List[str]:
+    """Lệnh ssh chạy trên máy này (AUD-SEC-035, T-1523): `-o ProxyCommand=…`/`LocalCommand`, và lệnh từ xa khi đích là
+    loopback — một shell thật ở `~` (`ssh localhost 'rm -rf ~'` = `rm -rf ~` tại đây). Máy khác: lệnh chạy ở đó, không
+    quét (ra khỏi máy dev là việc của `egress_rule`)."""
+    out: List[str] = []
+    for c in split_commands(tokens):
+        n = normalize(c)
+        if n[:1] != ["ssh"]:
+            continue
+        for opt in _flag_values(n[1:], ("-o",)):
+            key, val = [*re.split(r"[=\s]", opt.strip(), maxsplit=1), ""][:2]  # `Key=giá trị` hoặc `Key giá trị`
+            out += [val] if key.lower() in SSH_LOCAL_CMD_OPTS and val.strip() else []
+        host, remote = _ssh_target(n[1:])
+        if remote and _is_loopback(host.rsplit("@", 1)[-1]):
+            out.append("cd ~ && " + " ".join(remote))
+    return out
 
 
 def _curl_methods(args: List[str]) -> List[str]:
@@ -3355,9 +3444,16 @@ def _here_strings(tokens: List[str]) -> List[str]:
     return [c[i + 1] for c in split_commands(tokens) if _stdin_shell(c) for i, t in enumerate(c[:-1]) if t == "<<<"]
 
 
+Span = Tuple[int, int, str]  # (đầu, sau cuối, thân) của một thay lệnh trong chuỗi
+
+
 def _backtick_scripts(cmd: str) -> List[str]:
     """Thân `` `…` `` (thay lệnh kiểu cũ) ngoài nháy đơn — shlex không tách backtick nên lệnh bên trong từng lọt."""
-    out: List[str] = []
+    return [body for _, _, body in _backtick_spans(cmd)]
+
+
+def _backtick_spans(cmd: str) -> List[Span]:
+    out: List[Span] = []
     quote, start, i = "", -1, 0
     while i < len(cmd):
         c = cmd[i]
@@ -3372,7 +3468,7 @@ def _backtick_scripts(cmd: str) -> List[str]:
             if start < 0:
                 start = i + 1
             else:
-                out.append(cmd[start:i])
+                out.append((start - 1, i + 1, cmd[start:i]))
                 start = -1
         i += 1
     return out
@@ -3381,7 +3477,11 @@ def _backtick_scripts(cmd: str) -> List[str]:
 def _dollar_scripts(cmd: str) -> List[str]:
     """Thân `$(…)` ngoài nháy đơn — kể cả trong nháy kép (`git commit -m "$(rm -rf ~)"`), nơi shlex coi là chữ; bỏ
     `$((…))` (số học)."""
-    out: List[str] = []
+    return [body for _, _, body in _dollar_spans(cmd)]
+
+
+def _dollar_spans(cmd: str) -> List[Span]:
+    out: List[Span] = []
     quote, i = "", 0
     while i < len(cmd):
         c = cmd[i]
@@ -3395,7 +3495,7 @@ def _dollar_scripts(cmd: str) -> List[str]:
             while j < len(cmd) and depth:
                 depth += {"(": 1, ")": -1}.get(cmd[j], 0)
                 j += 1
-            out.append(cmd[i + 2 : j - 1])
+            out.append((i, j, cmd[i + 2 : j - 1]))
             i = j
             continue
         i += 1
@@ -3445,11 +3545,52 @@ def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
     out += _procsub_scripts(tokens)
     out += [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
     for pipe in pipelines(tokens):
-        for up, down in zip(pipe, pipe[1:]):
-            src = normalize(up)
-            if src[:1] in (["echo"], ["printf"]) and _stdin_shell(down):
-                out += _echoed_scripts(src)
+        for feed, down in zip(_pipe_feeds(pipe), pipe[1:]):
+            if feed and (_stdin_shell(down) or _argless_shell_c(down)):
+                out += feed
     return out + _here_strings(tokens) + _heredoc_scripts(cmd)
+
+
+# Lệnh chuyển nguyên stdin ra stdout (khi không có file đầu vào): chữ echo đi qua vẫn là chữ đó (`echo … | tee x | sh`).
+# Giá trị: cờ ăn thêm một token. `head`/`tail` cắt bớt dòng — quét cả chữ là chiều chặt.
+PIPE_FILTERS: Dict[str, Tuple[str, ...]] = {
+    "cat": (),
+    "head": ("-n", "-c", "--lines", "--bytes"),
+    "tail": ("-n", "-c", "--lines", "--bytes"),
+}
+
+
+def _pipe_feed(stage: List[str], prev: Optional[List[str]]) -> Optional[List[str]]:
+    """Chữ (script) ra khỏi một khâu của ống: echo/printf → chữ của nó; heredoc → [] (thân đã quét ở `_heredoc_scripts`);
+    here-string vào bộ lọc → chữ đó; `tee`/bộ lọc không file → chữ vào; khâu khác → None (guard không biết)."""
+    n = normalize(stage)
+    if n[:1] in (["echo"], ["printf"]):
+        return _echoed_scripts(n)
+    if "<<" in stage:
+        return []
+    if n[:1] == ["tee"]:
+        return prev
+    if not n or n[0] not in PIPE_FILTERS:
+        return None
+    if "<<<" in n[:-1]:
+        return [n[n.index("<<<") + 1]]
+    return prev if all(p == "-" for p in _positionals(n[1:], PIPE_FILTERS[n[0]])) else None
+
+
+def _pipe_feeds(pipe: List[List[str]]) -> List[Optional[List[str]]]:
+    """Chữ ra khỏi từng khâu của một ống (T-1523: `echo 'rm -rf ~' | tee /dev/null | bash` từng lọt)."""
+    feeds: List[Optional[List[str]]] = []
+    prev: Optional[List[str]] = None
+    for stage in pipe:
+        prev = _pipe_feed(stage, prev)
+        feeds.append(prev)
+    return feeds
+
+
+def _argless_shell_c(argv: List[str]) -> bool:
+    """`sh -c` không kèm chuỗi lệnh — lệnh đến từ đối số xargs nối thêm (`… | xargs -0 bash -c`)."""
+    n = normalize(argv)
+    return bool(n) and n[0] in SHELLS and _shell_script_arg(n) == (True, None)
 
 
 # Lệnh có thể ghi/xoá file khi đích đến từ stdin qua `xargs` (`find .autopilot -print0 | xargs -0 rm`).
@@ -3474,6 +3615,83 @@ def _xargs_evidence(tokens: List[str]) -> List[str]:
             ):
                 asks.append(EVIDENCE_WHY.format(f"đích từ ống `{' '.join(up)[:60]}` vào xargs {inner[0]}"))
     return asks
+
+
+# `git push` mà guard không biết đích (T-1523): push là hành động không đảo ngược ở nhánh chính, nên đích không giải được
+# → chặn có mã unsure (REC-04), không đoán "không phải main".
+UNRESOLVED_PUSH_WHY = "guard không biết đích của push"
+SUBST_MARK = "xt-unresolved-subst"  # thay cho `$(…)`/backtick guard không tính được giá trị
+SUBST_PLAIN_RE = re.compile(r"[\w./@:+^~-]+(?:[ \t\n]+[\w./@:+^~-]+)*")
+# Thay lệnh trả nhánh hiện tại = `HEAD` của push (luật refspec tra nhánh thật ở thư mục repo).
+CURRENT_BRANCH_QUERIES = {
+    ("git", "branch", "--show-current"),
+    ("git", "rev-parse", "--abbrev-ref", "HEAD"),
+    ("git", "symbolic-ref", "--short", "HEAD"),
+    ("git", "symbolic-ref", "--short", "-q", "HEAD"),
+    ("git", "symbolic-ref", "-q", "--short", "HEAD"),
+}
+
+
+def _xargs_wrapped(argv: List[str]) -> bool:
+    """Lệnh chạy qua `xargs` (đối số nối thêm từ stdin, guard không thấy)."""
+    head = argv[: len(argv) - len(_strip_prefixes(argv))]
+    return any(posixpath.basename(t) == "xargs" for t in head)
+
+
+def _subst_words(body: str) -> List[str]:
+    """Giá trị thay cho một `$(…)`: echo/printf chữ thường → chữ đó; truy vấn nhánh hiện tại → `HEAD`; còn lại → dấu
+    không biết."""
+    words = tokenize(body)
+    n = normalize(words)
+    if any(_is_punct(w) for w in words) or "$" in body or "`" in body:
+        return [SUBST_MARK]
+    if tuple(n) in CURRENT_BRANCH_QUERIES:
+        return ["HEAD"]
+    vals = _echoed_scripts(n)[:LIFT_PICKS] if n[:1] in (["echo"], ["printf"]) and n[1:] else []
+    return vals if vals and all(SUBST_PLAIN_RE.fullmatch(v) for v in vals) else [SUBST_MARK]
+
+
+def _subst_variants(base: str) -> List[str]:
+    """Dòng lệnh với mỗi thay lệnh ngoài cùng đổi thành giá trị của nó (`_subst_words`) — tối đa LIFT_PICKS² bản."""
+    spans = sorted(_dollar_spans(base) + _backtick_spans(base))
+    outer = [sp for k, sp in enumerate(spans) if not any(o[0] <= sp[0] and sp[1] <= o[1] for o in spans[:k])]
+    variants = [base]
+    for start, end, body in reversed(outer):
+        vals = _subst_words(body)
+        variants = [v[:start] + val + v[end:] for v in variants for val in vals][: LIFT_PICKS * LIFT_PICKS]
+    return variants if outer else []
+
+
+def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
+    """`git push origin $(echo main)`: luật push trên bản đã thay giá trị; đích là thay lệnh không tính được → hỏi
+    (unsure → chặn). Trả (lý do deny, câu hỏi)."""
+    base = strip_heredocs(cmd)
+    variants = _subst_variants(base) if "push" in base else []
+    seen = {tuple(a) for a, _ in _commands_with_cwd(tokenize(base), cwd)} if variants else set()
+    asks: List[str] = []
+    for argv, here in (c for v in variants for c in _commands_with_cwd(tokenize(v), cwd)):
+        n = normalize(argv)
+        if n[:2] != ["git", "push"] or tuple(argv) in seen:
+            continue
+        if any(SUBST_MARK in r for r in _positionals(n[2:], PUSH_VALUE_OPTS)[1:]):
+            asks.append(f"{UNRESOLVED_PUSH_WHY} (đích là thay lệnh): {' '.join(argv)[:200]}")
+            continue
+        d, why = git_rules(n, _git_dir(argv, here) or root)
+        if d == "deny":
+            return f"Lệnh bị khung chặn ({why}, giá trị của thay lệnh): {' '.join(argv)[:300]}", asks
+        asks += [f"{why} (giá trị của thay lệnh): {' '.join(argv)[:200]}"] if d else []
+    return "", asks
+
+
+def _unresolved_push(cmd: str, tokens: List[str], root: str, cwd: str) -> Tuple[str, List[str]]:
+    """`… | xargs git push …` (đích nối thêm từ stdin) và `git push … $(…)`: (lý do deny, câu hỏi)."""
+    asks = [
+        f"{UNRESOLVED_PUSH_WHY} (đối số nối thêm từ xargs): {' '.join(c)[:200]}"
+        for c in split_commands(tokens)
+        if normalize(c)[:2] == ["git", "push"] and _xargs_wrapped(c)
+    ]
+    deny, more = _push_subst_rule(cmd, root, cwd)
+    return deny, asks + more
 
 
 def _join_tokens(words: List[str]) -> str:
@@ -3714,14 +3932,11 @@ def _opaque_shells(tokens: List[str]) -> List[str]:
     (`… | tee /dev/null | bash`, `cat run.sh | bash`), `bash -c` không kèm chuỗi lệnh (`xargs bash -c`)."""
     asks: List[str] = []
     for pipe in pipelines(tokens):
-        for up, down in zip(pipe, pipe[1:]):
-            src = normalize(up)
-            known = src[:1] in (["echo"], ["printf"]) or "<<" in up
-            if _stdin_shell(down) and not known:
+        for feed, up, down in zip(_pipe_feeds(pipe), pipe, pipe[1:]):
+            if _stdin_shell(down) and feed is None:
                 asks.append(f"shell đọc lệnh từ ống `{' '.join(up)[:80]}` — guard không thấy lệnh sẽ chạy")
     for c in split_commands(tokens):
-        n = normalize(c)
-        if n and n[0] in SHELLS and _shell_script_arg(n) == (True, None):
+        if _argless_shell_c(c):
             asks.append("`sh -c` không kèm chuỗi lệnh (lệnh đến từ stdin/xargs) — guard không thấy lệnh sẽ chạy")
     return asks
 
@@ -3870,12 +4085,17 @@ def _scan_nested(
     if max([0, *(_for_words(c) for c in split_commands(tokens))]) > VAR_FOR_PICKS:
         return f"Lệnh quá phức tạp để guard quét hết (vòng `for` hơn {VAR_FOR_PICKS} giá trị khác nhau): chia nhỏ lệnh."
     asks += _opaque_shells(tokens) + _xargs_evidence(tokens)
+    push_deny, push_asks = _unresolved_push(cmd, tokens, root, cwd or root)
+    if push_deny:
+        return push_deny
+    asks += push_asks
     host, ctr = _wrapped_scripts(tokens)
     asks += _container_asks(ctr, depth, budget)  # mọi lệnh, không cắt theo số lượng (review #82)
     decoded, opaque = _decoded_pipes(tokens)
     asks += opaque
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
+    nested += _ssh_local_scripts(tokens)
     return _scan_scripts(rewritten, root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
         nested, root, cwd, depth, asks, 1, budget
     )
@@ -4177,6 +4397,7 @@ def bash_decision(
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
     budget = budget or ScanBudget()
+    cmd = clean_text(cmd)
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
     if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:
         res.update(
@@ -4241,6 +4462,7 @@ UNPARSED = "UNPARSED"  # guard lỗi giữa chừng với hành động phải k
 BUDGET = "BUDGET"
 BRACE_OVERFLOW = "BRACE_OVERFLOW"
 NEST_TOO_DEEP = "NEST_TOO_DEEP"
+UNRESOLVED_TARGET = "UNRESOLVED_TARGET"  # đích của hành động không đảo ngược guard không giải được (T-1523)
 # (dấu trong lý do, mã) — thứ tự: dấu cụ thể trước dấu chung ("bằng chứng review" trước "tay bằng chứng").
 REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("push thẳng nhánh chính", "PUSH_MAIN"),
@@ -4261,13 +4483,16 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
+    (UNRESOLVED_PUSH_WHY, UNRESOLVED_TARGET),  # `xargs git push`, `git push origin $(…)` (T-1523)
     ("vượt ngân sách quét", BUDGET),
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
 # Giữ tên cũ cho mã/ test đọc danh sách dấu nguy hiểm.
 DANGER_MARKERS = tuple(m for m, _ in REASON_CODES)
 # Mã mà guard không đọc hết được hành động: luôn `unsure`.
-UNSURE_CODES = frozenset({UNPARSED, BUDGET, BRACE_OVERFLOW, NEST_TOO_DEEP, "OPAQUE_EXEC", "UNVERIFIED"})
+UNSURE_CODES = frozenset(
+    {UNPARSED, BUDGET, BRACE_OVERFLOW, NEST_TOO_DEEP, UNRESOLVED_TARGET, "OPAQUE_EXEC", "UNVERIFIED"}
+)
 # Bảng chính sách mặc định: mã → hành động. Mã vắng bảng giữ hành động gốc. ask không nguy hiểm → "" (cho qua).
 POLICY: Dict[str, str] = {**{c: "deny" for _, c in REASON_CODES}, UNPARSED: "deny", OTHER_ASK: "", RULE_DENY: "deny"}
 # Nhóm chặn: hành động gốc ask/deny. `unsure` trong nhóm chặn → deny ở mọi adapter (bash/mcp/edit/permission).
@@ -4386,7 +4611,9 @@ def _sh_field(v: object) -> str:
 
 
 def _rule_decision(mode: str, payload: Any, root: str) -> Dict[str, object]:
-    """Kết quả bộ luật cho một payload hook theo chế độ bash|edit|mcp; chế độ khác → không phản đối."""
+    """Kết quả bộ luật cho một payload hook theo chế độ bash|edit|mcp; chế độ khác → không phản đối. Payload được làm
+    sạch trước (surrogate lẻ, NUL — AUD-SEC-077) để lý do in ra cũng ghi được."""
+    payload = clean_payload(payload)
     tool_input = payload.get("tool_input") or {}
     if mode == "bash":
         cmd = tool_input.get("command")
