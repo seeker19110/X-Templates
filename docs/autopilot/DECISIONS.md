@@ -678,3 +678,10 @@
 - Chọn: tham lam theo trọng số (file trọng số trong repo, lớp lạ lấy mặc định)
 - Lý do (tiêu chí chất lượng cuối): mục tiêu là giảm wall time; mod N gần như không nhanh hơn; 2 gần tối ưu (~54 s/shard) và bền khi thêm lớp (lớp lạ có mặc định), chi phí là một file trọng số
 - Đường lùi: quay về mod N trong test-shard
+
+### D-096 · 2026-10-20T05:31:33+00:00 · CI mẫu dự án đích khi xt.yaml chưa khai lint/test
+
+- Phương án: (1) đỏ khi lint hoặc test chưa khai (cả pha build), ::error:: chỉ chỗ điền · (2) chỉ ::warning::, giữ xanh · (3) đỏ trừ khi delivery_phase: build
+- Chọn: đỏ khi lint hoặc test chưa khai (cả pha build), ::error:: chỉ chỗ điền
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: CI xanh rỗng cho merge mã chưa kiểm (bẫy ci-cd-pipeline.md); code nhanh ≠ không cổng; ADR-0011 cổng rỗng là đỏ; dự án mới điền xt.yaml ở task đầu
+- Đường lùi: đổi bước kiểm thành ::warning::
