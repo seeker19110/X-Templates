@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- Tên phiên `<Tên repo> — <tên nhánh>` (`LOOP-HARNESS-028`, mức SHOULD giữ nguyên vì `harness-files.md` đã đủ 4 MUST ở quy mô M) trở thành bước bắt buộc của quy trình: skill `/autopilot` Bước 0 đặt tên phiên trước `doctor`; `AGENTS.md` và mẫu `AGENTS.md` ghi "bắt buộc, đặt ngay đầu phiên". **Dự án đích:** chạy lại `install.py` (skill `/autopilot`; `AGENTS.md` copy-if-absent — tự chép dòng Tên phiên).
+
 ### Fixed
 - Review delta PR #173: `ci_classify` lớp `secret` chỉ loại dòng giống dòng test đỏ (`FAILED a::t`, `FAIL pkg 0.1s`, `FAIL: test`, `--- FAIL: Test`, AssertionError) — dòng phát hiện thật có chữ FAILED/failed (`FAILED: gitleaks detected 2 leaks`, `semgrep scan failed: 5 findings`) và `0 findings, 2 blocking findings` vẫn block; `Finding:` của gitleaks tính là phát hiện. Task có ghi chú `sau:`/`files:` không đọc được (cả `SAU:`, `Files:`, `sau T-1`) không `ready` ở `loop next`, `loop record` từ chối (fail-closed). `_safe_rel_path` (doctor drift, `context`) chặn symlink ở thành phần giữa đường dẫn trỏ ra ngoài dự án. Corpus `ci_log` 25 ca (tổng 279).
 
