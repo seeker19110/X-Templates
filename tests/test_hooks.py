@@ -4019,9 +4019,16 @@ class GuardAiAttributionTest(unittest.TestCase):
         # heredoc của lệnh khác trên cùng dòng vẫn là dữ liệu của lệnh đó
         self.assertEqual(self.decide("python3 - <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
         self.assertEqual(self.g._unquoted_seps("a \"b;c\" 'd&&e' f\\;g; h"), [(19, 20)])
-        t0 = time.process_time()
-        self.g._heredoc_bodies("a;" * 200000 + " git commit -F - <<E\nb\nE")
-        self.assertLess(time.process_time() - t0, 2.0)
+
+        # Không bậc hai: nhân 4 cỡ đầu vào thì thời gian CPU tăng ~4 lần (tuyến tính), bậc hai sẽ ~16 lần. So tỉ lệ thay cho
+        # ngưỡng tuyệt đối vì runner CI chậm/nhanh khác nhau (coverage làm chậm thêm): 2,0 s từng vượt 0,04–0,07 s.
+        def cost(n: int) -> float:
+            t0 = time.process_time()
+            self.g._heredoc_bodies("a;" * n + " git commit -F - <<E\nb\nE")
+            return time.process_time() - t0
+
+        small = max(cost(50000), 0.02)
+        self.assertLess(cost(200000), small * 10 + 0.5)
 
     def test_review_125_cases(self):
         # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
