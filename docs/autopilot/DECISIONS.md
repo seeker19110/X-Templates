@@ -727,3 +727,10 @@
 - Chọn: cho thiếu tới ngưỡng (lớp lạ lấy trung vị), đỏ khi thiếu quá ngưỡng
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 3: lớp lạ đã có trung vị nên shard đúng, chỉ lệch nhẹ; tiêu chí 5 phá hoà: không buộc đo 7 phút mỗi PR thêm test (code nhanh); ngưỡng chặn trôi dài hạn
 - Đường lùi: trả kiểm chặt
+
+### D-103 · 2026-10-20T07:50:48+00:00 · Chấp nhận ngoại lệ license MPL-2.0 (pathspec, certifi) cho công cụ dev/CI
+
+- Phương án: (1) chấp nhận có hạn 12 tháng: dùng nguyên bản, không sửa, không phân phối · (2) thay gói (bỏ pathspec/certifi)
+- Chọn: chấp nhận có hạn 12 tháng: dùng nguyên bản, không sửa, không phân phối
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: MPL-2.0 copyleft theo file chỉ ràng buộc khi sửa/phân phối file của gói; công cụ chỉ chạy trên CI/máy dev, không vào sản phẩm phát hành; tiêu chí 3: certifi/pathspec là phụ thuộc bắc cầu khó thay
+- Đường lùi: gỡ ngoại lệ khỏi license-allow.json, thay gói

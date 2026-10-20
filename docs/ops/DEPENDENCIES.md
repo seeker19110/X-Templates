@@ -12,7 +12,7 @@
 - Allowlist: MIT · BSD-2-Clause · BSD-3-Clause · Apache-2.0 · PSF-2.0 · PSFL (`defusedxml`) — đều OSI/FSF chấp nhận.
 - **Chấp nhận có điều kiện:** `pathspec` và `certifi` — MPL-2.0 (copyleft yếu, theo từng file). Dùng nguyên bản từ PyPI,
   không sửa, không phân phối lại, chỉ chạy trên runner CI/máy dev nên nghĩa vụ chia sẻ mã nguồn sửa đổi không phát sinh.
-  Đổi cách dùng (nhúng/phân phối) thì phải xét lại.
+  Đổi cách dùng (nhúng/phân phối) thì phải xét lại. Quyết định D-103 (phiên chính tự duyệt theo ADR-0008, hạn 12 tháng; chủ repo đổi được).
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
 - Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
   `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
