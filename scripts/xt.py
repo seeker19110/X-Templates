@@ -905,7 +905,7 @@ def carry_states(
         if m:
             prev[m["id"]] = (m["state"], line, _normative(m))
     kept, lines, new_ids = 0, [], set()
-    for line in new.splitlines():
+    for line in unicodedata.normalize("NFC", new).splitlines():  # cả hai phía NFC (AUD-HAR-070)
         m = ITEM_RE.match(line)
         if m:
             new_ids.add(m["id"])
@@ -3264,31 +3264,45 @@ def audit_plan(root: Path, blueprint: Optional[Path] = None, status: Optional[Pa
     return plan
 
 
-def _sha_ok(root: Path, sha: str) -> Optional[str]:
+def _sha_ok(root: Path, sha: str, base: Optional[str] = None) -> Optional[str]:
+    """SHA quét hợp lệ, là tổ tiên HEAD và — khi biết nhánh chính `base` — nằm trên nhánh chính (AUD-HAR-077:
+    squash-merge xoá SHA của nhánh PR, sổ trên nhánh chính hỏng; cùng luật `progress-check`)."""
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha):
         return "SHA không hợp lệ"
     if _git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").returncode != 0:
         return f"SHA `{sha}` không có trong lịch sử (clone nông? quét lại?)"
     if _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
         return f"SHA `{sha}` không phải tổ tiên HEAD — quét lại nhóm này"
+    if base and _git(root, "merge-base", "--is-ancestor", sha, base).returncode != 0:
+        return (
+            f"SHA `{sha}` chưa nằm trên `{base}` — squash-merge sẽ làm sổ trên nhánh chính hỏng; ghi SHA trên nhánh "
+            f"chính mà lần quét dựa vào (`git merge-base HEAD {base}`; `git fetch` nếu `{base}` cũ; "
+            "`XT_PROGRESS_BASE` đổi/tắt nhánh chính)"
+        )
     return None
 
 
-def _audit_scan_errors(no: int, r: Dict[str, str], root: Path, in_git: bool) -> List[str]:
-    """Nhóm đã quét/rút gọn: có Ngày quét YYYY-MM-DD và SHA (khi ở trong git, SHA phải là tổ tiên HEAD)."""
+def _audit_scan_errors(no: int, r: Dict[str, str], root: Path, in_git: bool, base: Optional[str] = None) -> List[str]:
+    """Nhóm đã quét/rút gọn: có Ngày quét YYYY-MM-DD và SHA (khi ở trong git, SHA là tổ tiên HEAD và của `base`)."""
     errors: List[str] = []
     sha = r.get("SHA", "").strip("` ")
     if not DATE_RE.match(r.get("Ngày", "")):
         errors.append(f"nhóm {no}: thiếu Ngày quét YYYY-MM-DD")
     if not sha:
         errors.append(f"nhóm {no}: thiếu SHA lúc quét")
-    elif in_git and (msg := _sha_ok(root, sha)):
+    elif in_git and (msg := _sha_ok(root, sha, base)):
         errors.append(f"nhóm {no}: {msg}")
     return errors
 
 
 def _audit_group_row(
-    r: Dict[str, str], strict: bool, root: Path, in_git: bool, seen_no: Dict[int, int], counts: Dict[str, int]
+    r: Dict[str, str],
+    strict: bool,
+    root: Path,
+    in_git: bool,
+    seen_no: Dict[int, int],
+    counts: Dict[str, int],
+    base: Optional[str] = None,
 ) -> List[str]:
     """Một dòng bảng `## Nhóm`: số nhóm, mã, trạng thái, ghi chú, dữ liệu quét. Ghi nhận vào `seen_no`/`counts`."""
     no_s, code, state, note = r.get("#", ""), r.get("Mã", ""), r.get("Trạng thái", ""), r.get("Ghi chú", "")
@@ -3306,20 +3320,25 @@ def _audit_group_row(
     if state in ("N/A", "rút gọn") and not note:
         errors.append(f"nhóm {no}: `{state}` phải ghi lý do/phạm vi ở Ghi chú")
     if state in ("đã quét", "rút gọn"):
-        errors += _audit_scan_errors(no, r, root, in_git)
+        errors += _audit_scan_errors(no, r, root, in_git, base)
     if strict and state == "chưa quét":
         errors.append(f"nhóm {no}: chưa quét (--strict)")
     return errors
 
 
 def _audit_group_errors(
-    tables: Dict[str, List[Dict[str, str]]], strict: bool, root: Path, in_git: bool, counts: Dict[str, int]
+    tables: Dict[str, List[Dict[str, str]]],
+    strict: bool,
+    root: Path,
+    in_git: bool,
+    counts: Dict[str, int],
+    base: Optional[str] = None,
 ) -> List[str]:
     """Bảng `## Nhóm`: từng dòng hợp lệ, rồi mỗi nhóm 1–N phải có đúng một dòng."""
     errors: List[str] = []
     seen_no: Dict[int, int] = {}
     for r in tables.get("Nhóm", []):
-        errors += _audit_group_row(r, strict, root, in_git, seen_no, counts)
+        errors += _audit_group_row(r, strict, root, in_git, seen_no, counts, base)
     if "Nhóm" in tables:
         for no, _, _ in AUDIT_GROUPS:
             if seen_no.get(no, 0) != 1:
@@ -3426,11 +3445,15 @@ def audit_check(
     """Kiểm sổ AUDIT-STATUS.md theo templates/AUDIT-STATUS.md. Trả (lỗi, đếm). Ném OSError khi không đọc được."""
     today = today or _dt.date.today()
     tables = md_tables(status.read_text(encoding="utf-8"))
+    # Gốc = gốc repo chứa sổ (AUD-HAR-078: sổ ở docs/ops/ thì `git ls-files` trong docs/ops không thấy UI/CSDL).
     root = status.resolve().parent
-    in_git = _git(root, "rev-parse", "--git-dir").returncode == 0
+    top = _git(root, "rev-parse", "--show-toplevel")
+    in_git = top.returncode == 0
+    if in_git:
+        root = Path(top.stdout.strip())
     counts: Dict[str, int] = {}
     errors = [f"thiếu bảng `## {name}`" for name in ("Nhóm", "Phát hiện") if name not in tables]
-    errors += _audit_group_errors(tables, strict, root, in_git, counts)
+    errors += _audit_group_errors(tables, strict, root, in_git, counts, progress_base_ref(root) if in_git else None)
     errors += _audit_na_errors(tables, strict, root)
     errors += _audit_finding_errors(tables, strict, today, counts)
     return errors, counts
@@ -5641,8 +5664,9 @@ DECISIONS_HEADER = (
 
 
 def _one_line(text: str) -> str:
-    """Gộp khoảng trắng/xuống dòng: một trường = một dòng, không chèn được tiêu đề Markdown giả."""
-    return " ".join(text.split())
+    """Gộp khoảng trắng/xuống dòng: một trường = một dòng, không chèn được tiêu đề Markdown giả. Chuẩn hoá NFC ở biên
+    (BASE-DATA-002, AUD-HAR-070): `--option` NFD và `--choice` NFC là cùng chữ; nhật ký/state lưu NFC."""
+    return unicodedata.normalize("NFC", " ".join(text.split()))
 
 
 def _decision_choice(options: List[str], choice: str) -> Optional[str]:
@@ -7701,18 +7725,31 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
     rec = _pr_record(data, key)
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
-    entry = {"head": args.head, "clean": args.clean, "at": now_iso()}
+    entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
-    entry.update({k: v for k, v in (("reviewer_model", args.reviewer_model), ("author_model", args.author_model)) if v})
-    reviews.append(entry)
-    data[key] = {**rec, "reviews": reviews}
-    _write_reviews(base, data)
+    models = (("reviewer_model", args.reviewer_model), ("author_model", args.author_model))
+    entry.update({k: unicodedata.normalize("NFC", v) for k, v in models if v})  # NFC ở biên (AUD-HAR-070)
+    # Idempotent (AUD-HAR-071, BASE-DATA-008): chạy lại cùng kết quả ở cùng head không thêm bản ghi, đã đăng thì không
+    # đăng trùng; chỉ so bản ghi CUỐI — đổi kết quả rồi đổi lại vẫn là bản ghi mới.
+    same = ("head", "clean", "inconclusive", "reviewer_model", "author_model")
+    again = bool(reviews) and all(reviews[-1].get(k) == entry.get(k) for k in same)
+    if again:
+        entry = reviews[-1]
+    else:
+        reviews.append(entry)
+        data[key] = {**rec, "reviews": reviews}
+        _write_reviews(base, data)
     word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
-    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}")
-    if args.no_publish:
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if again else ""))
+    if args.no_publish or entry.get("published"):
         return 0
-    return _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
+    rc = _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
+    if rc == 0:
+        entry["published"] = True
+        data[key] = {**rec, "reviews": reviews}
+        _write_reviews(base, data)
+    return rc
 
 
 def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive: bool = False) -> int:

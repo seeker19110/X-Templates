@@ -9,13 +9,15 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import time
 import sys
 import unittest
 import unittest.mock as mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 
 
 def _load_guard():
@@ -138,9 +140,14 @@ class BraceExpansionTest(unittest.TestCase):
             ("git push origin {" + "a" * 1100 + ",main}", "deny"),  # re-review #159: đệm dài không lọt
             ("rm -rf {" + "a" * 1100 + ",~}", "deny"),
         ):
-            t0 = time.process_time()
             self.assertEqual(final(cmd), want)
-            self.assertLess(time.process_time() - t0, 3.0)
+
+        # AUD-TEST-008: không bậc hai theo số `{` — so tỉ lệ cỡ n/4n trong cùng tiến trình, không ngưỡng giây cứng.
+        def braces(n: int) -> None:
+            for cmd in ("echo " + "{" * n + "; rm -rf ~", "echo " + "{a," * (n * 7 // 20), "echo {" + "," * n):
+                final(cmd)
+
+        cpu_budget.assert_not_quadratic(self, braces, 5000)
 
 
 class GuardCacheTamperTest(unittest.TestCase):
