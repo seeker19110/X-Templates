@@ -1,0 +1,241 @@
+{
+ "cases": [
+  {
+   "id": "harness-rec01-quote-semantics",
+   "origin": "repro",
+   "refs": [
+    "REC-01"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "test \"$X\" = yes",
+    "b": "test '$X' = yes"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-rec01-glob",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-01"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "echo '*'",
+    "b": "echo *"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-rec01-control",
+   "origin": "control",
+   "refs": [
+    "REC-01"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "echo  a",
+    "b": "echo 'a'"
+   },
+   "expect": {
+    "green": true
+   }
+  },
+  {
+   "id": "harness-rec06-threshold-raised",
+   "origin": "repro",
+   "refs": [
+    "REC-06"
+   ],
+   "input": {
+    "kind": "carry_states",
+    "id": "A-001",
+    "old": "- [x] `A-001` **MUST** Coverage ≥ 80 %. — Bằng chứng: coverage --fail-under=80\n",
+    "new": "- [ ] `A-001` **MUST** Coverage ≥ 90 %.\n"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-rec06-control-level-only",
+   "origin": "control",
+   "refs": [
+    "REC-06"
+   ],
+   "input": {
+    "kind": "carry_states",
+    "id": "A-004",
+    "old": "- [x] `A-004` **SHOULD** d. — Bằng chứng: PR #7\n",
+    "new": "- [ ] `A-004` **MUST@L** d.\n"
+   },
+   "expect": {
+    "green": true
+   }
+  },
+  {
+   "id": "harness-rec02-blueprint-missing",
+   "origin": "repro",
+   "refs": [
+    "REC-02"
+   ],
+   "input": {
+    "kind": "blueprint_done",
+    "state": {
+     "blueprint": "BLUEPRINT.md",
+     "scope": {
+      "blueprint": "BLUEPRINT.md",
+      "profile": "web-app",
+      "scale": "M"
+     }
+    }
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-rec02-scale-lowered",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-02"
+   ],
+   "input": {
+    "kind": "blueprint_done",
+    "files": {
+     "BLUEPRINT.md": "---\nkind: blueprint\nprofile: web-app\nscale: S\n---\n- [x] `A-001` **MUST** a. — Bằng chứng: t\n"
+    },
+    "state": {
+     "blueprint": "BLUEPRINT.md",
+     "scope": {
+      "blueprint": "BLUEPRINT.md",
+      "profile": "web-app",
+      "scale": "M"
+     }
+    }
+   },
+   "expect": {
+    "green": false
+   },
+   "note": "hạ quy mô M→S ngầm là hạ sàn — không khai done"
+  },
+  {
+   "id": "harness-rec07-na-now-ui",
+   "origin": "repro",
+   "refs": [
+    "REC-07"
+   ],
+   "input": {
+    "kind": "na_skipped",
+    "group": 6,
+    "groups": {
+     "6": {
+      "#": "6",
+      "Mã": "A11Y",
+      "Trạng thái": "N/A",
+      "Ghi chú": "không có UI"
+     }
+    },
+    "files": {
+     "web/index.html": "<p>x</p>"
+    }
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-rec07-control-still-na",
+   "origin": "control",
+   "refs": [
+    "REC-07"
+   ],
+   "input": {
+    "kind": "na_skipped",
+    "group": 6,
+    "groups": {
+     "6": {
+      "#": "6",
+      "Mã": "A11Y",
+      "Trạng thái": "N/A",
+      "Ghi chú": "không có UI"
+     }
+    },
+    "files": {
+     "main.py": "print(1)\n"
+    }
+   },
+   "expect": {
+    "green": true
+   }
+  },
+  {
+   "id": "harness-rec09-project-ask-kept",
+   "origin": "repro",
+   "refs": [
+    "REC-09"
+   ],
+   "input": {
+    "kind": "ask_removed",
+    "rule": "Bash(git merge:*)",
+    "ours": {
+     "permissions": {
+      "allow": [
+       "Bash"
+      ],
+      "deny": []
+     }
+    },
+    "theirs": {
+     "permissions": {
+      "ask": [
+       "Bash(git merge:*)"
+      ]
+     }
+    }
+   },
+   "expect": {
+    "green": false
+   },
+   "note": "rule `ask` trùng chuỗi khung cũ mà manifest không chứng minh do khung đặt → của dự án, giữ"
+  },
+  {
+   "id": "harness-rec09-control-manifest-proves",
+   "origin": "control",
+   "refs": [
+    "REC-09"
+   ],
+   "input": {
+    "kind": "ask_removed",
+    "rule": "Bash(git merge:*)",
+    "ours": {
+     "permissions": {
+      "allow": [
+       "Bash"
+      ],
+      "deny": []
+     }
+    },
+    "theirs": {
+     "permissions": {
+      "ask": [
+       "Bash(git merge:*)"
+      ]
+     }
+    },
+    "manifest": {
+     "ask": [
+      "Bash(git merge:*)"
+     ]
+    }
+   },
+   "expect": {
+    "green": true
+   }
+  }
+ ]
+}

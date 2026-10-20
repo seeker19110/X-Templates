@@ -573,3 +573,94 @@
 - Chọn: Bỏ tài liệu thuần, giữ scripts/* và framework/templates/*
 - Lý do (tiêu chí chất lượng cuối): Chủ repo yêu cầu 2026-10-19 (giảm vòng review cho PR docs); lớp đỡ còn validate, check-links, revert; templates giữ vì thành file thật ở dự án đích
 - Đường lùi: Đặt lại chuỗi D-031 trong xt.yaml
+
+### D-081 · 2026-10-19T22:57:52+00:00 · Duyệt PLAN-3.9-automation (T-1509…T-1522)
+
+- Phương án: (1) Chạy theo PLAN đã lập, review khác model đã rà Gate · (2) Hoãn, chờ chủ repo duyệt rescan audit trước
+- Chọn: Chạy theo PLAN đã lập, review khác model đã rà Gate
+- Lý do (tiêu chí chất lượng cuối): PLAN đã có D-066…D-070; không chặn bởi audit rescan (độc lập); tiêu chí 1: Gate đã siết
+- Đường lùi: loop block + revert PR từng lát
+
+### D-082 · 2026-10-19T23:05:41+00:00 · PermissionRequest hook: guard không phản đối thì trả allow hay im lặng?
+
+- Phương án: (1) A: im lặng (headless tự deny, tương tác hiện hộp thoại) · (2) B: trả allow cho mọi thứ guard không chặn
+- Chọn: A: im lặng (headless tự deny, tương tác hiện hộp thoại)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: chiều chặt, đúng REC-04 'không quyết định ⇒ deny'; B mở rộng tự duyệt ngoài permissions.allow và cần ADR
+- Đường lùi: đổi nhánh in allow trong guard.py permission + ADR
+
+### D-083 · 2026-10-19T23:08:39+00:00 · Audit delta ở mốc 3.9.0: làm ngay hay gộp vào mốc 3.10.0?
+
+- Phương án: (1) Audit delta đủ 13 nhóm ngay · (2) Gộp vào mốc 3.10.0; bây giờ chỉ review khác họ model diff T-1509 (phần guard)
+- Chọn: Gộp vào mốc 3.10.0; bây giờ chỉ review khác họ model diff T-1509 (phần guard)
+- Lý do (tiêu chí chất lượng cuối): sổ rescan tại a4f929c còn chờ duyệt và đã phủ phần lớn; diff mốc nhỏ (T-1501…1509 đã qua Gate + coverage 100%); rủi ro cao nhất là guard nên review riêng
+- Đường lùi: chạy audit plan/check đủ nhóm trước T-1511
+
+### D-084 · 2026-10-19T23:30:13+00:00 · final_check/release-check có đòi lần verify cuối là mode=all?
+
+- Phương án: (1) a: nhận cả verify một phần · (2) b: đòi mode=all trước done (giữ LOOP-DESIGN-022), một phần chỉ giữa vòng
+- Chọn: b: đòi mode=all trước done (giữ LOOP-DESIGN-022), một phần chỉ giữa vòng
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: files: khai thiếu làm lọt hồi quy; làm trong T-1514 (đụng Stop hook) + sửa tài liệu loop-design/README/SKILL
+- Đường lùi: bỏ đòi mode trong final_check
+
+### D-085 · 2026-10-19T23:31:24+00:00 · install.py: đường nâng cấp một lần cho ask cũ chưa có manifest?
+
+- Phương án: (1) giữ và báo ask_unproven, không suy diễn · (2) thêm cờ adopt-legacy-ask
+- Chọn: giữ và báo ask_unproven, không suy diễn
+- Lý do (tiêu chí chất lượng cuối): REC-09 cấm suy diễn nguồn gốc; ghi CHANGELOG; thêm cờ khi có dự án đích cần
+- Đường lùi: thêm cờ adopt-legacy-ask sau
+
+### D-086 · 2026-10-19T23:41:06+00:00 · T-1514: ID ngoài PLAN trong subject; SubagentStop chặn mấy lần; có đòi lệnh kèm exit code?
+
+- Phương án: (1) ID ngoài PLAN vẫn đòi evidence; SubagentStop chặn một lần rồi cho dừng; chỉ đòi mẫu exit code · (2) bỏ qua ID ngoài PLAN; chặn mọi lần; đòi cả lệnh
+- Chọn: ID ngoài PLAN vẫn đòi evidence; SubagentStop chặn một lần rồi cho dừng; chỉ đòi mẫu exit code
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1 với evidence, tránh kẹt vòng subagent và chặn oan (phiên chính vẫn kiểm bằng loop record)
+- Đường lùi: đổi trong hook task-completed/subagent-stop
+
+### D-087 · 2026-10-19T23:47:36+00:00 · episode ci-triage: reset ở đâu?
+
+- Phương án: (1) giữ nguyên: resume không đụng, init --force xoá · (2) loop init mang episode vòng cũ sang · (3) resume xoá episode
+- Chọn: giữ nguyên: resume không đụng, init --force xoá
+- Lý do (tiêu chí chất lượng cuối): T-1515 đúng spec; lỗ init --force đổi ngân sách ghi vào PROGRESS để xử ở task sau, không mở rộng phạm vi
+- Đường lùi: thêm mang episode trong loop init
+
+### D-088 · 2026-10-20T00:08:58+00:00 · T-1517: concurrency steward và sự kiện không gắn PR
+
+- Phương án: (1) concurrency theo PR; sự kiện không gắn PR quét mọi PR mở · (2) một nhóm chung; bỏ qua sự kiện không gắn PR
+- Chọn: concurrency theo PR; sự kiện không gắn PR quét mọi PR mở
+- Lý do (tiêu chí chất lượng cuối): bước đọc lại trước khi làm đỡ race; push main cần update PR tụt base (tiêu chí 1)
+- Đường lùi: đổi group về pr-steward
+
+### D-089 · 2026-10-20T00:15:07+00:00 · doctor --drift: lệch modified có làm exit đỏ? so ask?
+
+- Phương án: (1) modified không đỏ; chỉ so allow/deny; hook mới ở mức warn · (2) mọi lệch đều đỏ, so cả ask
+- Chọn: modified không đỏ; chỉ so allow/deny; hook mới ở mức warn
+- Lý do (tiêu chí chất lượng cuối): modified là tuỳ chỉnh hợp lệ; ADR-0018 gỡ ask có chủ đích; tránh đỏ oan ở dự án cài bản cũ
+- Đường lùi: đổi một dòng trong drift_report
+
+### D-090 · 2026-10-20T00:46:01+00:00 · 5 false-green guard do autonomy-bench tìm ra: xử lý thế nào?
+
+- Phương án: (1) mở task riêng T-1523 sửa guard, ca chuyển từ pending/ sang corpus chính khi xong; giữ exit 1 · (2) sửa ngay trong T-1521 · (3) chỉ ghi danh sách lỗ đã biết
+- Chọn: mở task riêng T-1523 sửa guard, ca chuyển từ pending/ sang corpus chính khi xong; giữ exit 1
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: guard nhạy cảm bảo mật, không nới bench; gộp được với SEC-072/077 đang mở; T-1521 đúng phạm vi
+- Đường lùi: bỏ T-1523 khỏi PLAN
+
+### D-091 · 2026-10-20T01:14:11+00:00 · Audit delta mốc: 3 phát hiện 🟠 (guard $VAR push, ci-triage secret khớp tên công cụ, episode bị reset khi đổi --task) + 🟡 sau: ID lạ
+
+- Phương án: (1) task mới T-1524 sửa cả ba 🟠 + cảnh báo sau: lạ, trước khi cắt 3.10.0 · (2) ghi sổ, sửa ở bản sau
+- Chọn: task mới T-1524 sửa cả ba 🟠 + cảnh báo sau: lạ, trước khi cắt 3.10.0
+- Lý do (tiêu chí chất lượng cuối): audit.md §1: 🔴/🟠 thành task mới; lỗi nằm ở code vừa viết; ci-triage block oan dừng cả vòng
+- Đường lùi: bỏ T-1524 khỏi PLAN
+
+### D-092 · 2026-10-20T01:24:04+00:00 · ci-triage: mang episode khi đổi task (AUD-HAR-092)
+
+- Phương án: (1) giữ signature/same_signature/rerun_used/cost_usd/runs, chỉ reset task/started/fix_attempts · (2) reset rerun_used khi chữ ký đổi
+- Chọn: giữ signature/same_signature/rerun_used/cost_usd/runs, chỉ reset task/started/fix_attempts
+- Lý do (tiêu chí chất lượng cuối): chặt hơn, không lách trần; hệ quả task mới không được re-run nếu lượt đã dùng — chấp nhận
+- Đường lùi: reset rerun_used theo chữ ký
+
+### D-093 · 2026-10-20T01:31:24+00:00 · Gate T-1510 ghim VERSION=3.9.0 đỏ sau khi lên 3.10.0 — xử lý?
+
+- Phương án: (1) đổi phép kiểm sang grep mục [3.9.0] trong CHANGELOG (đúng ở mọi bản sau) · (2) bỏ T-1510 khỏi verify
+- Chọn: đổi phép kiểm sang grep mục [3.9.0] trong CHANGELOG (đúng ở mọi bản sau)
+- Lý do (tiêu chí chất lượng cuối): kiểm tại thời điểm đã đạt; không bỏ task, không hạ ngưỡng — chỉ gỡ ràng buộc sai thời điểm; ghi lý do ở commit
+- Đường lùi: khôi phục test VERSION = 3.9.0

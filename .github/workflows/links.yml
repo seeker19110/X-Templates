@@ -1,7 +1,8 @@
 name: Links
 
 # Kiểm liên kết NGOÀI theo lịch (khung trích hàng trăm nguồn: chuẩn, luật, tài liệu — link chết là nợ ngầm).
-# Liên kết nội bộ đã kiểm ở mỗi PR (scripts/check-links.py). 202/403/429 chấp nhận: nhiều trang luật/chuẩn (eur-lex, legislation.gov.uk, pdpc.gov.sg) chặn bot.
+# Liên kết nội bộ đã kiểm ở mỗi PR (scripts/check-links.py). Phân loại lỗi tạm/đổi/chết/chưa xác minh (403/429: trang luật
+# chặn bot) do check-links.py --external làm, luật ở framework/11-autonomous-loop/self-healing-ci.md; chỉ link chết làm đỏ.
 on:
   schedule:
     - cron: "17 4 * * 1"
@@ -14,10 +15,11 @@ jobs:
   external-links:
     name: external-links
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # ~810 URL (autolink + link + URL trần), 8 luồng: thường vài phút; 30 phút chừa chỗ cho một nhóm host chậm/timeout.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          args: --no-progress --max-concurrency 8 --accept 200,202,206,403,429 --exclude-path .git './**/*.md'
-          fail: true
+          python-version: "3.13"
+      - run: python3 scripts/check-links.py --external --retries 2 --timeout 20

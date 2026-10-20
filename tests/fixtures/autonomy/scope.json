@@ -1,0 +1,87 @@
+{
+ "note": "ID bắt buộc (REC §2 + 🔴/🟠 đã sửa) mà corpus autonomy-bench không phủ, kèm lý do; thêm ca thì gỡ ID khỏi đây.",
+ "out_of_scope": [
+  {
+   "reason": "Tài liệu / bằng chứng blueprint — đỡ bằng `validate`, `check-links`, `audit plan`; không phải quyết định cho/chặn của PR, rollup, review hay guard",
+   "ids": [
+    "AUD-DOC-001",
+    "AUD-DOC-002",
+    "AUD-DOC-003",
+    "AUD-DOC-004",
+    "AUD-DOC-005",
+    "AUD-DOC-006",
+    "AUD-DOC-007",
+    "AUD-DOC-008",
+    "AUD-DOC-009",
+    "AUD-DOC-010",
+    "AUD-DOC-011",
+    "AUD-DOC-012",
+    "AUD-DOC-023",
+    "AUD-DOC-044",
+    "AUD-DOC-045",
+    "AUD-HAR-006",
+    "AUD-HAR-014",
+    "AUD-HAR-015",
+    "AUD-HAR-060",
+    "AUD-HAR-062"
+   ]
+  },
+  {
+   "reason": "CI, ruleset, phụ thuộc — đỡ bằng `ci-check`, job `protection-guard`, `pip-audit` (dep-audit.yml)",
+   "ids": [
+    "AUD-CI-001",
+    "AUD-CI-002",
+    "AUD-CI-003",
+    "AUD-DEP-001",
+    "AUD-DEP-003"
+   ]
+  },
+  {
+   "reason": "Che bí mật (`redact`) — đầu ra là chuỗi đã che, không phải quyết định cho/chặn; test `-k redact`",
+   "ids": [
+    "AUD-CFG-001",
+    "AUD-CFG-002",
+    "AUD-CFG-005",
+    "AUD-CFG-006"
+   ]
+  },
+  {
+   "reason": "Hook shell, cổng commit, cài đặt — đường chạy tiến trình (`dev-task.sh`, `pre-*-guard.sh`, `install.py`, `loop record`); test_hooks.py, test_install.py chạy hook thật",
+   "ids": [
+    "AUD-HAR-001",
+    "AUD-HAR-002",
+    "AUD-HAR-003",
+    "AUD-HAR-012",
+    "AUD-HAR-013",
+    "AUD-HAR-025",
+    "AUD-HAR-037",
+    "AUD-SEC-005",
+    "AUD-SEC-015",
+    "AUD-SEC-057",
+    "AUD-SEC-065",
+    "AUD-SEC-066"
+   ]
+  },
+  {
+   "reason": "Phụ thuộc git/REST thật — nhánh hiện tại của repo (AUD-TEST-005), nội dung xt.yaml đọc qua REST contents (AUD-XFEAT-003); fixture tự chứa không tái hiện được",
+   "ids": [
+    "AUD-TEST-005",
+    "AUD-XFEAT-003"
+   ]
+  },
+  {
+   "reason": "Công cụ khác (perf guard, contrast, vendor-check) — không thuộc đường merge/guard",
+   "ids": [
+    "AUD-XFEAT-005",
+    "AUD-XFEAT-006",
+    "AUD-XFEAT-007"
+   ]
+  },
+  {
+   "reason": "Ngân sách episode `loop ci-triage` qua nhiều run (đếm cùng chữ ký giữ khi đổi/bỏ `--task`) — nhóm ci_log chỉ đo hành động lần đầu của episode, ca một log không tái hiện được; test `-k audit_delta_ci_triage_episode`",
+   "ids": [
+    "AUD-HAR-092"
+   ]
+  }
+ ]
+}

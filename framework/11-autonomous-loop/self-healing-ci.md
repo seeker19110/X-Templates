@@ -3,7 +3,7 @@ title: Agent tự sửa CI/review: giới hạn, cấm, bằng chứng
 kind: module
 prefix: LOOP-CI
 applies_to: [all]
-updated: 2026-10-17
+updated: 2026-10-20
 ---
 
 # Agent tự sửa CI/review: giới hạn, cấm, bằng chứng
@@ -43,6 +43,41 @@ updated: 2026-10-17
 | Dependency có CVE | Nâng lên phiên bản vá nếu semver tương thích; breaking → hỏi | Ghi đè audit level |
 | Migration đỏ | Chỉ sửa migration **chưa áp**; migration đã áp → điểm dừng | Sửa file migration đã chạy ở môi trường chung |
 
+### Máy phân loại và giữ ngân sách: `loop ci-triage`
+
+`python3 scripts/xt.py loop ci-triage --run <id> [--task T-NNN] [--cost-usd X] [--json]` đọc log bước đỏ
+(`gh run view <id> --log-failed`; `--log FILE` khi ngoại tuyến), phân loại theo bảng trên — thứ tự
+secret/SAST → migration → type → coverage → lint → test → hạ tầng (hạ tầng xét cuối: log có cả lỗi thật lẫn dấu mạng là
+lỗi thật), không khớp → `unknown`. Secret/SAST chỉ tính khi dòng báo **phát hiện** (`leaks detected`, `3 blocking
+findings`, `>> Issue: [B105…]`); công cụ tự lỗi (`codeql-action upload failed`), báo sạch (`no issues`) hay dòng test đỏ
+nhắc chữ "secret" không block — rồi trả **một** hành động:
+
+| Hành động | Khi nào | Máy làm |
+|---|---|---|
+| `block` (exit 1) | secret scan/SAST đỏ | state `blocked` (`LOOP-CI-006`); dòng log không in/ghi — có thể chứa chính bí mật |
+| `defer` (exit 1) | cùng chữ ký lỗi lần thứ 3 trong episode | có `--task` → task vào `deferred` (vòng làm việc khác, gom cho người) |
+| `rerun` (exit 0) | nghi hạ tầng, episode chưa re-run | `rerun_used` = 1; lần đỏ sau là lỗi thật (`LOOP-CI-002`) |
+| `fix` (exit 0) | còn lại | `fix_attempts` + 1; kèm dòng lỗi trích từ log (`LOOP-CI-005`) |
+
+Ngân sách sống qua restart trong `.autopilot/state.json` khoá `episode` (theo `--task`; task khác → episode mới):
+`rerun_used` (≤ 1), `fix_attempts`, `cost_usd` (chưa đo → `null`, không ghi 0), `signature`/`same_signature` và kết quả
+mỗi run. Chữ ký = loại + dòng lỗi đã thay số bằng `N` (không phụ thuộc thời điểm/số dòng). Triage lại run đã thấy trả
+kết quả cũ, không đếm lại, không cộng lại chi phí. Lỗi `gh` → exit 3.
+
+### Liên kết ngoài: phân loại lỗi (`check-links.py --external`, REC-13)
+
+Link ngoài đỏ vì **mạng** khác với đỏ vì **nội dung đã đổi**; gộp chung thì hoặc báo giả hoặc bỏ sót. `links.yml` (hằng tuần)
+chạy `python3 scripts/check-links.py --external` — chỉ stdlib, mỗi URL một lần, HEAD rồi GET khi HEAD trả 4xx khác 404/410 (hoặc 501) — nhiều máy chủ từ chối HEAD dù trang còn:
+
+| Loại | Tín hiệu | Xử lý |
+|---|---|---|
+| tạm | 5xx · 408 · timeout · lỗi mạng | thử lại `--retries` lần (mặc định 2, lùi 1 s, 2 s); còn lỗi → cảnh báo, không đỏ |
+| đổi | 3xx (301/308…) — không đi theo chuyển hướng | cảnh báo: cập nhật URL; không đỏ |
+| chết | 404 · 410 (HEAD) · 4xx khác sau khi GET xác nhận | **lỗi**, exit 1: sửa hoặc bỏ nguồn |
+| chưa xác minh | 401 · 403 · 429 (trang đòi đăng nhập/chặn bot) | cảnh báo, không kết luận nội dung; 429 được thử lại, 401/403 thì không |
+
+Nguồn trong `research/` ghi ngày rà lại; "chưa xác minh" không phải bằng chứng link còn đúng.
+
 ### Cấu hình CI khi agent chạy headless
 
 | Hạng mục | Quy định |
@@ -57,7 +92,7 @@ updated: 2026-10-17
 ## Checklist
 
 - [ ] `LOOP-CI-001` **MUST** Không skip/disable/xoá test, không hạ ngưỡng coverage, không tắt rule lint/type để cổng xanh. → Kiểm: diff không chứa `skip(`, `xfail`, `.only(`, `eslint-disable` mới, thay đổi `coverageThreshold`/`strict`; hook `pre-edit-guard.sh` đánh dấu khi chạm file cấu hình cổng và khi sửa file test đã có mà thêm skip/only/xfail/`@flaky` hoặc bớt assertion (mặc định cho chạy — ADR-0018; `XT_GUARD_POLICY=strict` thì hỏi). · Nguồn: `AGENTS.md` §3
-- [ ] `LOOP-CI-002` **MUST@L** Re-run CI tối đa 1 lần cho mỗi lần đỏ nghi do hạ tầng; đỏ lần hai được xử lý như lỗi thật. → Kiểm: log autopilot/PROGRESS ghi số lần re-run mỗi run ID ≤ 1.
+- [ ] `LOOP-CI-002` **MUST@L** Re-run CI tối đa 1 lần cho mỗi lần đỏ nghi do hạ tầng; đỏ lần hai được xử lý như lỗi thật. → Kiểm: `loop ci-triage` trả `rerun` tối đa 1 lần mỗi episode (`state.json` `episode.rerun_used` ≤ 1); log autopilot/PROGRESS ghi số lần re-run mỗi run ID ≤ 1.
 - [ ] `LOOP-CI-003` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`LOOP-DESIGN-005`](loop-design.md) (cùng chữ ký lỗi lặp 3 lần → `blocked`).
 - [ ] `LOOP-CI-004` **MUST** Không force-push, không rebase/rewrite history nhánh người khác, không empty commit để kích CI. → Kiểm: `.claude/settings.json` deny `git push --force*`; `pre-bash-guard.sh` chặn; `git log` không có commit rỗng (`git log --format=%H --diff-filter=A`… hoặc `git show --stat` rỗng). · Nguồn: [`../10-workflow/git-and-branching.md`](../10-workflow/git-and-branching.md)
 - [ ] `LOOP-CI-005` **MUST@L** Trước mỗi lần sửa, agent trích đúng dòng lỗi từ log CI (assertion/stack trace) vào PROGRESS hoặc commit message; không sửa theo tên job. → Kiểm: commit `fix:` dẫn dòng lỗi hoặc link job log.
@@ -73,6 +108,7 @@ updated: 2026-10-17
 - [ ] `LOOP-CI-015` **SHOULD** Pin mọi action/CLI trong workflow theo SHA hoặc phiên bản khoá; agent không tự nâng. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
 - [ ] `LOOP-CI-016` **SHOULD** Sau khi PR merge, agent quay về `main`, xoá nhánh đã merge, cập nhật `PROGRESS.md` với SHA merge.
 - [ ] `LOOP-CI-017` **MAY** Dùng cơ chế theo dõi PR (webhook/`subscribe_pr_activity`) để phản hồi review và CI thay vì poll liên tục; mọi phản hồi vẫn qua trần ở mục 002–003.
+- [ ] `LOOP-CI-019` **SHOULD** Kiểm link ngoài theo lịch phân loại lỗi tạm/đổi/chết/chưa xác minh, thử lại hữu hạn; chỉ link chết làm đỏ. → Kiểm: `python3 scripts/check-links.py --external` trong `.github/workflows/links.yml`; test `link_classification`.
 - [ ] `LOOP-CI-018` **MAY** Đo tỉ lệ PR của agent merge không cần người sửa tay và thời gian đỏ→xanh theo tháng; làm baseline DORA trước khi nâng mức tự trị. · Nguồn: stored 23 §2.6
 
 ## Bẫy thường gặp
@@ -96,6 +132,7 @@ updated: 2026-10-17
 | Chặn nới cổng | `pre-edit-guard.sh` (đánh dấu khi sửa eslint/tsconfig/coverage/workflows/migration, và khi test đã có bị thêm skip/only/xfail/`@flaky` hoặc bớt assertion — mặc định cho chạy, `strict` thì ask); grep diff `skip(|xfail|\.only\(|eslint-disable` | PreToolUse Edit/Write/MultiEdit; job CI | 0 vi phạm không giải thích |
 | Chặn lệnh phá huỷ | `pre-bash-guard.sh` deny `push --force`, `reset --hard`, `clean`; `settings.json` deny | PreToolUse Bash | Deny |
 | Trần sửa cùng lỗi | `xt.py loop status --json` → `blocked` | Stop hook `stop-guard.sh` | `same_failure_count` ≥ 3 |
+| Phân loại lỗi CI + ngân sách episode | `xt.py loop ci-triage --run <id> --json` | Trước mỗi lần sửa CI | re-run ≤ 1; cùng chữ ký 3 lần → `defer`; secret/SAST → `block` |
 | Trần chi phí headless | `claude -p … --max-turns N --max-budget-usd X --output-format json` | Workflow | `total_cost_usd` ≤ X |
 | Cổng commit | `scripts/dev-task.sh gate` (đọc `xt.yaml`) | Hook trước `git commit` | Exit 0 |
 | Pin action | Linter workflow (vd `zizmor`/`actionlint`) | CI | 0 action chưa pin |

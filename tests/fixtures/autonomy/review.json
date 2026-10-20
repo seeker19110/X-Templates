@@ -1,0 +1,477 @@
+{
+ "defaults": {
+  "decision": {
+   "pr": 7,
+   "head": "2222222222222222222222222222222222222222",
+   "verdict": "merge",
+   "lane": "chuẩn",
+   "autonomy": 3,
+   "hard": [],
+   "stacked": false,
+   "base_merge_of": [],
+   "base_has_required": true,
+   "reasons": [
+    "L3"
+   ],
+   "next": "gh pr merge 7 --squash --match-head-commit 2222222222222222222222222222222222222222",
+   "next_rest": ""
+  },
+  "auto_merge": false
+ },
+ "cases": [
+  {
+   "id": "review-control-clean-at-head",
+   "origin": "control",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "proceed": true,
+    "action": "enable-auto-merge"
+   }
+  },
+  {
+   "id": "review-rec03-none",
+   "origin": "repro",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {},
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "action": "review"
+   }
+  },
+  {
+   "id": "review-rec03-auto-merge-on-no-review",
+   "origin": "repro",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "auto_merge": true
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "action": "disable-auto-merge"
+   },
+   "note": "làn chuẩn đang bật auto-merge mà chưa review ở head → tắt (cùng điều kiện merge-gate, T-1507)"
+  },
+  {
+   "id": "review-har059-blocking-at-head-wins",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-059"
+   ],
+   "input": {
+    "decision": {
+     "base_merge_of": [
+      "1111111111111111111111111111111111111111"
+     ]
+    },
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-19T10:00:00+00:00"
+     },
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": true,
+      "at": "2026-10-19T10:05:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "blocking",
+    "action": "fix"
+   }
+  },
+  {
+   "id": "review-control-carried-over-update-branch",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-059"
+   ],
+   "input": {
+    "decision": {
+     "base_merge_of": [
+      "1111111111111111111111111111111111111111"
+     ]
+    },
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": true,
+      "at": "2026-10-19T10:05:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": true,
+    "proceed": true
+   }
+  },
+  {
+   "id": "review-old-head-not-update",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-059"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": true,
+      "at": "2026-10-19T10:05:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "review": "missing"
+   }
+  },
+  {
+   "id": "review-inconclusive-at-head",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-19T10:00:00+00:00",
+      "inconclusive": true
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "review": "missing"
+   }
+  },
+  {
+   "id": "review-sec069-forged-by-outsider",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-069"
+   ],
+   "input": {
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "NONE",
+      "user": {
+       "login": "mallory"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T10:00:00Z"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "review": "missing"
+   }
+  },
+  {
+   "id": "review-member-without-write",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-069"
+   ],
+   "input": {
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "MEMBER",
+      "user": {
+       "login": "reader"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T10:00:00Z"
+     }
+    ],
+    "writers": [
+     "someone-else"
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false
+   }
+  },
+  {
+   "id": "review-control-member-with-write",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-069"
+   ],
+   "input": {
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "MEMBER",
+      "user": {
+       "login": "dev"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T10:00:00Z"
+     }
+    ],
+    "writers": [
+     "dev"
+    ]
+   },
+   "expect": {
+    "eligible": true,
+    "proceed": true
+   }
+  },
+  {
+   "id": "review-identity-other-owner",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-069"
+   ],
+   "input": {
+    "identity": "xt-reviewer",
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "OWNER",
+      "user": {
+       "login": "owner"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T10:00:00Z"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false
+   },
+   "note": "review_identity đặt: chỉ tài khoản reviewer — chủ repo (cùng tài khoản phiên tác giả) đăng dấu không mở được merge (T-1508)"
+  },
+  {
+   "id": "review-identity-edited-comment",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-069"
+   ],
+   "input": {
+    "identity": "xt-reviewer",
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "OWNER",
+      "user": {
+       "login": "xt-reviewer"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T11:00:00Z"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "review": "blocking"
+   }
+  },
+  {
+   "id": "review-identity-ignores-local-ledger",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "identity": "xt-reviewer",
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false
+   },
+   "note": "sổ cục bộ do tác giả ghi không tính khi có review_identity (ADR-0028)"
+  },
+  {
+   "id": "review-control-identity-published",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "identity": "xt-reviewer",
+    "comments": [
+     {
+      "body": "Review.\n\n<!-- xt-review v1 head=2222222222222222222222222222222222222222 verdict=clean -->",
+      "author_association": "OWNER",
+      "user": {
+       "login": "xt-reviewer"
+      },
+      "created_at": "2026-10-19T10:00:00Z",
+      "updated_at": "2026-10-19T10:00:00Z"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": true,
+    "proceed": true
+   }
+  },
+  {
+   "id": "review-fast-lane-after-blocking",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "lane": "nhanh"
+    },
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "review": "missing"
+   },
+   "note": "từng có review chặn → strict dù diff nay là làn nhanh"
+  },
+  {
+   "id": "review-standard-seen-fast-lane",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "lane": "nhanh"
+    },
+    "standard_seen": true
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false
+   }
+  },
+  {
+   "id": "review-hard-auto-merge-on",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-042"
+   ],
+   "input": {
+    "decision": {
+     "hard": [
+      "đường dẫn nhạy cảm (auth): src/auth.py"
+     ],
+     "verdict": "human"
+    },
+    "auto_merge": true,
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "action": "disable-auto-merge"
+   }
+  },
+  {
+   "id": "review-stacked",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-039"
+   ],
+   "input": {
+    "decision": {
+     "stacked": true,
+     "verdict": "wait"
+    },
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "action": "retarget"
+   }
+  },
+  {
+   "id": "review-l2-auto-merge-on",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "lane": "nhanh",
+     "autonomy": 2
+    },
+    "auto_merge": true
+   },
+   "expect": {
+    "eligible": true,
+    "proceed": false,
+    "action": "disable-auto-merge"
+   },
+   "note": "dưới L3 auto-merge (không ghim head) không được bật"
+  },
+  {
+   "id": "review-no-required-checks-wait",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "lane": "nhanh",
+     "verdict": "wait",
+     "base_has_required": false
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "action": "wait"
+   },
+   "note": "nhánh đích không có check bắt buộc: bật auto-merge = GitHub merge ngay (D-062)"
+  }
+ ]
+}

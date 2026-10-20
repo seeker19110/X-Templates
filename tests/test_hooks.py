@@ -1342,6 +1342,9 @@ class HookFailOpenTest(unittest.TestCase):
         "stop-guard.sh",
         "pre-compact.sh",
         "pre-mcp-guard.sh",
+        "permission-request.sh",
+        "task-completed.sh",
+        "subagent-stop.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
@@ -2265,12 +2268,12 @@ class GuardDeltaAuditTest(unittest.TestCase):
             "bash -s -- a b <<'E'\ngit reset --hard\nE",
             "printf '%s\\n' 'rm -rf ~' | sh",
             "printf 'git reset --hard\\n' | bash",
+            "echo 'git reset --hard' | tee /dev/null | bash",  # T-1523: chữ echo đi qua tee vẫn được quét
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
         for cmd in (
             "bash -c -e 'gh pr merge 7 --admin'",
-            "echo 'git reset --hard' | tee /dev/null | bash",
             "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
@@ -2784,12 +2787,19 @@ class GuardEgressAuditTest(EgressCase):
         self.assert_all("", ("ssh -L 8080:localhost:80 localhost", "rsync -avL dist/ /backup/"))
 
     def test_guard_ssh_loopback_inner(self):  # AUD-SEC-035
+        # T-1523: lệnh chạy trên máy này (loopback, ProxyCommand) được quét như lệnh lồng → lệnh cấm bên trong bị chặn.
         self.assert_all(
-            "ask",
+            "deny",
             (
                 "ssh localhost 'rm -rf ~'",
                 "ssh localhost git push --force origin main",
                 "ssh -o ProxyCommand='rm -rf ~' localhost",
+            ),
+        )
+        self.assert_all(
+            "ask",
+            (
+                "ssh localhost ls",
                 "ssh -oProxyCommand=sh localhost",
                 "ssh -J evil.example.com localhost",
                 "ssh -oProxyJump=evil.example.com localhost",
@@ -3165,7 +3175,9 @@ class GuardPolicyTest(unittest.TestCase):
         import guard
 
         for out in ({"decision": "deny", "reason": "x"}, {"decision": "allow", "reason": "y"}, {"decision": ""}):
-            self.assertEqual(guard.apply_policy(out), out)
+            res = guard.apply_policy(out)
+            self.assertEqual({k: res[k] for k in out}, out)
+            self.assertEqual(res["confidence"], "sure")
 
 
 class GuardFenceTest(unittest.TestCase):
@@ -4019,6 +4031,605 @@ class GuardAiAttributionTest(unittest.TestCase):
     def test_repo_framework_forbids(self):
         # Repo khung tự áp luật của mình (AGENTS.md §3, AUD-HAR-017).
         self.assertRegex((ROOT / "xt.yaml").read_text(encoding="utf-8"), r"(?m)^ai_attribution: forbid")
+
+
+class TypedDecisionTest(unittest.TestCase):
+    """REC-04: quyết định có kiểu (action, code, confidence, missing); chính sách theo mã; cùng hành động qua
+    bash/mcp/edit/PermissionRequest cho cùng kết quả."""
+
+    def setUp(self) -> None:
+        self.g = _guard()
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        Path(self.root, "xt.yaml").write_text("", encoding="utf-8")
+
+    def _main(self, args: list, payload: object, policy: str = "") -> str:
+        out = io.StringIO()
+        raw = payload if isinstance(payload, str) else json.dumps(payload)
+        with (
+            mock.patch.object(sys, "argv", ["guard.py", *args]),
+            mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            mock.patch.object(sys, "stdout", out),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.root, "XT_GUARD_POLICY": policy}),
+        ):
+            self.assertEqual(self.g.main(), 0)
+        return out.getvalue()
+
+    def test_typed_decision_codes_from_reasons(self):
+        g = self.g
+        self.assertEqual(g.reason_code("ask", "x push thẳng nhánh chính y"), "PUSH_MAIN")
+        self.assertEqual(g.reason_code("ask", "ghi tay bằng chứng review (…)"), "REVIEW_FORGE")
+        self.assertEqual(g.reason_code("ask", "npm publish"), g.OTHER_ASK)
+        self.assertEqual(g.reason_code("deny", "sudo"), g.RULE_DENY)
+        self.assertEqual(g.reason_code("allow", "merge"), g.RULE_ALLOW)
+        self.assertEqual(g.reason_code("", ""), g.NO_OBJECTION)
+        d = g.decide({"decision": "ask", "reason": g.ASK_PREFIX + g.NEST_ASK})
+        self.assertEqual(
+            (d.action, d.code, d.confidence, d.missing), ("ask", g.NEST_TOO_DEEP, "unsure", ("NEST_TOO_DEEP",))
+        )
+        d = g.decide({"decision": "deny", "reason": "x", "code": "PUSH_MAIN"})
+        self.assertEqual((d.code, d.confidence, d.missing), ("PUSH_MAIN", "sure", ()))
+        self.assertEqual(d.as_dict(), {"code": "PUSH_MAIN", "confidence": "sure", "missing": []})
+        self.assertEqual(set(g.DANGER_MARKERS), {m for m, _ in g.REASON_CODES})
+
+    def test_typed_decision_policy_by_code(self):
+        g = self.g
+        # unsure trong nhóm chặn → deny kể cả mã không nguy hiểm; unsure ngoài nhóm chặn giữ nguyên.
+        out = g.apply_policy({"decision": "ask", "reason": "lạ", "confidence": "unsure"})
+        self.assertEqual((out["decision"], out["confidence"], out["missing"]), ("deny", "unsure", [g.OTHER_ASK]))
+        self.assertIn("nguy hiểm — OTHER_ASK", str(out["reason"]))
+        self.assertEqual(g.apply_policy({"decision": "", "confidence": "unsure"})["decision"], "")
+        # ask nguy hiểm theo mã → deny; ask khác → cho qua, lý do rỗng.
+        self.assertEqual(g.apply_policy({"decision": "ask", "reason": "x", "code": "PUSH_MAIN"})["decision"], "deny")
+        other = g.apply_policy({"decision": "ask", "reason": "npm publish"})
+        self.assertEqual((other["decision"], other["reason"], other["code"]), ("", "", g.OTHER_ASK))
+        # mã lạ (vắng bảng) của ask → cho qua; deny/allow giữ nguyên lý do.
+        self.assertEqual(g.apply_policy({"decision": "ask", "reason": "x", "code": "LẠ"})["decision"], "")
+        self.assertEqual(g.apply_policy({"decision": "deny", "reason": "r"})["reason"], "r")
+        # UNPARSED (guard lỗi khi kiểm merge) và BUDGET → deny.
+        fail = g._failure_decision("bash", {}, "gh pr merge 5")
+        self.assertEqual((g.apply_policy(fail)["decision"], fail["code"]), ("deny", g.UNPARSED))
+        long_cmd = "echo " + "a" * (g.CMD_MAX_CHARS + 1)
+        res = g.apply_policy(g.bash_decision(long_cmd, self.root))
+        self.assertEqual((res["decision"], res["code"], res["confidence"]), ("deny", g.BUDGET, "unsure"))
+
+    def test_typed_decision_same_across_adapters(self):
+        cmd = "git push origin main"
+        bash = json.loads(self._main(["bash"], {"tool_input": {"command": cmd}}))
+        self.assertEqual((bash["decision"], bash["code"]), ("deny", "PUSH_MAIN"))
+        perm = json.loads(self._main(["permission"], {"tool_name": "Bash", "tool_input": {"command": cmd}}))
+        dec = perm["hookSpecificOutput"]["decision"]
+        self.assertEqual(perm["hookSpecificOutput"]["hookEventName"], "PermissionRequest")
+        self.assertEqual(dec["behavior"], "deny")
+        self.assertEqual(dec["message"], bash["reason"])
+        edit = {"tool_name": "Write", "tool_input": {"file_path": ".env", "content": "x"}}
+        self.assertEqual(json.loads(self._main(["edit"], edit))["decision"], "deny")
+        self.assertEqual(
+            json.loads(self._main(["permission"], edit))["hookSpecificOutput"]["decision"]["behavior"], "deny"
+        )
+        # không phản đối / ask không nguy hiểm / tool lạ / strict ask → không in gì (headless: Claude Code deny).
+        for payload, policy in (
+            ({"tool_name": "Bash", "tool_input": {"command": "ls"}}, ""),
+            ({"tool_name": "Bash", "tool_input": {"command": "npm publish"}}, ""),
+            ({"tool_name": "Read", "tool_input": {"file_path": "x"}}, ""),
+            ({"tool_name": 5}, ""),
+            ({"tool_name": "Bash", "tool_input": {"command": "npm publish"}}, "strict"),
+        ):
+            self.assertEqual(self._main(["permission"], payload, policy), "", payload)
+
+    def test_typed_decision_permission_mcp_and_failure(self):
+        g = self.g
+        self.assertEqual(g.permission_mode("mcp__github__merge_pull_request"), "mcp")
+        self.assertEqual(g.permission_mode("MultiEdit"), "edit")
+        self.assertEqual(
+            g.permission_output({"decision": "allow", "reason": "ok"}),
+            json.dumps(
+                {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
+            ),
+        )
+        mcp = {"tool_name": "mcp__github__create_pull_request", "tool_input": {"title": "feat: x", "body": "b"}}
+        self.assertEqual(self._main(["permission"], mcp), "")
+        # guard lỗi giữa chừng: merge MCP → deny (UNPARSED); lệnh thường → fail-open (không in gì).
+        merge = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {}}
+        with mock.patch.object(g, "mcp_decision", side_effect=RuntimeError("x")):
+            out = json.loads(self._main(["permission"], merge))
+        self.assertEqual(out["hookSpecificOutput"]["decision"]["behavior"], "deny")
+        with mock.patch.object(g, "bash_decision", side_effect=RuntimeError("x")):
+            self.assertEqual(self._main(["permission"], {"tool_name": "Bash", "tool_input": {"command": "ls"}}), "")
+            out = json.loads(self._main(["bash"], {"tool_input": {"command": "gh pr merge 5"}}))
+        self.assertEqual((out["decision"], out["code"]), ("deny", g.UNPARSED))
+        self.assertEqual(self._main(["permission"], "not json"), "")
+        self.assertIsNone(g._payload_cmd({"tool_input": "x"}))
+        self.assertIsNone(g._payload_cmd(None))
+
+    def test_typed_decision_hook_script(self):
+        payload = {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}
+        code, out, _ = run_hook("permission-request.sh", payload, extra_env={"XT_GUARD_POLICY": ""})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["decision"]["behavior"], "deny")
+        code, out, _ = run_hook("permission-request.sh", {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual((code, out), (0, ""))
+        # thiếu guard.py → không in gì (fail-open về luồng; headless vẫn deny).
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(HOOKS / "permission-request.sh", tmp / "permission-request.sh")
+        shutil.copy(HOOKS / "_lib.sh", tmp / "_lib.sh")
+        r = subprocess.run(
+            ["bash", str(tmp / "permission-request.sh")], input=json.dumps(payload), capture_output=True, text=True
+        )
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    def test_typed_decision_registered_in_settings(self):
+        s = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        entry = s["hooks"]["PermissionRequest"][0]
+        self.assertEqual(entry["hooks"][0]["type"], "command")
+        self.assertIn("permission-request.sh", entry["hooks"][0]["command"])
+        for tool in ("Bash", "Edit", "Write", "MultiEdit", "mcp__github__merge_pull_request"):
+            self.assertRegex(tool, f"^(?:{entry['matcher']})$")
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class EvidenceHooksTest(unittest.TestCase):
+    """AUTO-02 (T-1514, D-068): TaskCompleted đòi bằng chứng xanh cho `T-NNN` trong subject khi vòng đang bật;
+    SubagentStop chặn báo cáo executor thiếu lệnh + exit code; guard PreToolUse `onFailure: block` (LOOP-DESIGN-010)."""
+
+    PLAN = "- [ ] `T-001` việc một — Gate: `true`\n- [ ] `T-002` việc hai — Gate: `test -f ok.txt`\n"
+
+    def project(self, init: bool = True) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
+        (tmp / "docs" / "autopilot").mkdir(parents=True)
+        (tmp / "docs" / "autopilot" / "PLAN.md").write_text(self.PLAN, encoding="utf-8")
+        if init:
+            self.xt(tmp, "loop", "init", "--single-session")
+        return tmp
+
+    def xt(self, base: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(base))
+        cmd = [sys.executable, str(base / "scripts" / "xt.py"), *args]
+        return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=120)
+
+    def completed(self, base: Path, subject: object) -> tuple[int, str, str]:
+        payload = {"hook_event_name": "TaskCompleted", "task_id": "1", "task_subject": subject}
+        return run_hook("task-completed.sh", payload, base)
+
+    def test_task_completed_hook_blocks_until_green_evidence(self):
+        base = self.project()
+        code, out, err = self.completed(base, "Làm T-001 và T-002")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("TaskCompleted bị chặn (AUTO-02)", err)
+        self.assertIn("T-001 đã tick nhưng chưa có bằng chứng xanh", err)
+        self.assertIn("T-002", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-001", "--", "true").returncode, 0)
+        code, _, err = self.completed(base, "Làm T-001 và T-002")
+        self.assertEqual(code, 2)
+        self.assertNotIn("task T-001", err)
+        self.assertIn("T-002", err)
+        self.assertEqual(self.completed(base, "Xong T-001"), (0, "", ""))
+        # Bằng chứng đỏ, hoặc chạy lệnh khác Gate trong PLAN → vẫn chặn (cùng `_verdict_task` của Stop hook).
+        self.assertNotEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "test -f ok.txt").returncode, 0)
+        code, _, err = self.completed(base, "T-002")
+        self.assertEqual(code, 2)
+        self.assertIn("T-002", err)
+        (base / "ok.txt").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "true").returncode, 0)
+        code, _, err = self.completed(base, "T-002")
+        self.assertEqual(code, 2)
+        self.assertIn("bằng chứng chạy lệnh khác", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-002", "--", "test -f ok.txt").returncode, 0)
+        self.assertEqual(self.completed(base, "T-001, T-002 xong")[0], 0)
+
+    def test_task_completed_hook_id_outside_plan_needs_green_evidence(self):
+        base = self.project()
+        code, _, err = self.completed(base, "Phụ T-0999")
+        self.assertEqual(code, 2)
+        self.assertIn("T-0999 chưa có bằng chứng xanh", err)
+        self.assertEqual(self.xt(base, "loop", "record", "--task", "T-0999", "--", "true").returncode, 0)
+        self.assertEqual(self.completed(base, "Phụ T-0999")[0], 0)
+
+    def test_task_completed_hook_passes_when_inactive_or_no_task_id(self):
+        base = self.project(init=False)  # chưa `loop init`: không phải vòng autopilot → không chặn
+        self.assertEqual(self.completed(base, "Làm T-001"), (0, "", ""))
+        base = self.project()
+        for subject in ("Đọc tài liệu", "", None, 7, "AT-001x", "T-01"):
+            self.assertEqual(self.completed(base, subject), (0, "", ""), subject)
+        self.assertEqual(self.xt(base, "loop", "stop").returncode, 0)
+        self.assertEqual(self.completed(base, "Làm T-001"), (0, "", ""))
+
+    def test_task_completed_hook_fail_open(self):
+        base = self.project()
+        for payload in ("", "not json {", "[1, 2]", json.dumps({"subject": 5})):
+            self.assertEqual(run_hook("task-completed.sh", payload, base), (0, "", ""), payload)
+        # Khoá cũ `subject` (không có `task_subject`) vẫn được đọc.
+        self.assertEqual(run_hook("task-completed.sh", {"subject": "T-001"}, base)[0], 2)
+        (base / "scripts" / "xt.py").write_text("raise SystemExit(3)\n", encoding="utf-8")  # xt.py hỏng
+        self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
+        (base / "scripts" / "xt.py").unlink()  # thiếu xt.py
+        self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
+
+    def stop(self, payload: dict | str) -> tuple[int, str]:
+        code, out, _ = run_hook("subagent-stop.sh", payload)
+        return code, out
+
+    def test_subagent_stop_hook_blocks_executor_without_exit_code(self):
+        for agent in ("executor", "executor-deep", "xtemplates:executor"):
+            code, out = self.stop({"agent_type": agent, "last_assistant_message": "Đã sửa xong, test xanh."})
+            self.assertEqual(code, 0)
+            d = json.loads(out)
+            self.assertEqual(d["decision"], "block")
+            self.assertIn("lệnh + exit code", d["reason"])
+
+    def test_subagent_stop_hook_allows_report_with_exit_code(self):
+        for msg in (
+            "`python3 -m unittest` → exit 0",
+            "Lệnh: make test (exit code: 1)",
+            "ruff check — Exit Code 0",
+            "`bash -n x.sh` rc=0",
+            "pytest exit_code=2",
+            "gate: exit status 0",
+            "unittest: mã thoát 0",
+        ):
+            self.assertEqual(self.stop({"agent_type": "executor", "last_assistant_message": msg}), (0, ""), msg)
+
+    def test_subagent_stop_hook_ignores_other_agents_and_second_stop(self):
+        msg = "Đã sửa xong."
+        for payload in (
+            {"agent_type": "reviewer", "last_assistant_message": msg},
+            {"agent_type": "researcher", "last_assistant_message": msg},
+            {"last_assistant_message": msg},
+            {"agent_type": "executor", "last_assistant_message": msg, "stop_hook_active": True},  # chặn một lần
+            {"agent_type": "executor", "last_assistant_message": "   "},  # không có báo cáo, không transcript
+            {"agent_type": "executor", "agent_transcript_path": "/khong/co.jsonl"},
+            "",
+            "not json {",
+            "[1]",
+        ):
+            self.assertEqual(self.stop(payload), (0, ""), payload)
+
+    def test_subagent_stop_hook_reads_last_assistant_turn_from_transcript(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        tr = tmp / "agent.jsonl"
+
+        def turn(text: str) -> str:
+            return json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+
+        lines = [
+            turn("Chạy `true` → exit 0"),
+            "rác {",
+            json.dumps({"type": "user", "message": {"content": "exit 0"}}),
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}),
+            json.dumps({"type": "assistant", "message": "lạ"}),
+            json.dumps([1]),
+            turn("Báo cáo: đã sửa, mọi thứ xanh."),
+        ]
+        tr.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        payload = {"agent_type": "executor", "agent_transcript_path": str(tr)}
+        self.assertEqual(json.loads(self.stop(payload)[1])["decision"], "block")
+        tr.write_text("\n".join([*lines, turn("Lệnh `make` exit 0")]) + "\n", encoding="utf-8")
+        self.assertEqual(self.stop(payload), (0, ""))
+        tr.write_text("\n".join(lines[1:6]) + "\n", encoding="utf-8")  # không có lượt chữ nào → không chặn
+        self.assertEqual(self.stop(payload), (0, ""))
+
+    def test_subagent_stop_hook_and_task_completed_hook_registered(self):
+        s = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        for event, name in (("TaskCompleted", "task-completed.sh"), ("SubagentStop", "subagent-stop.sh")):
+            h = s["hooks"][event][0]["hooks"][0]
+            self.assertEqual(h["type"], "command")
+            self.assertIn(f"/.claude/hooks/{name}", h["command"])
+        # LOOP-DESIGN-010: guard chặn lệnh nguy hiểm fail-closed — hook lỗi/hết giờ thì Claude Code chặn tool.
+        for g in s["hooks"]["PreToolUse"]:
+            self.assertEqual([h.get("onFailure") for h in g["hooks"]], ["block"] * len(g["hooks"]), g.get("matcher"))
+        for event in ("Stop", "SessionStart", "PreCompact", "TaskCompleted", "SubagentStop"):  # fail-open về luồng
+            self.assertNotIn("onFailure", s["hooks"][event][0]["hooks"][0], event)
+
+    def test_install_copies_hooks_fresh(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import install
+
+        target = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, target, True)
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(install.main([str(target), "--label", "test"]), 0)
+        for name in ("task-completed.sh", "subagent-stop.sh"):
+            f = target / ".claude" / "hooks" / name
+            self.assertEqual(f.read_bytes(), (HOOKS / name).read_bytes(), name)
+            self.assertTrue(os.access(f, os.X_OK), name)
+        s = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertIn("task-completed.sh", s["hooks"]["TaskCompleted"][0]["hooks"][0]["command"])
+        self.assertIn("subagent-stop.sh", s["hooks"]["SubagentStop"][0]["hooks"][0]["command"])
+        # Hook đã cài chạy được ở dự án đích (xt.py ở `.xtemplates/scripts/`): vòng chưa bật → không chặn.
+        code, out, _ = run_hook("task-completed.sh", {"task_subject": "T-001"}, target)
+        self.assertEqual((code, out), (0, ""))
+
+    def test_install_copies_hooks_merges_events_and_on_failure(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import install
+
+        target = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, target, True)
+        ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        old = json.loads(json.dumps(ours))  # bản khung cũ: chưa có hai sự kiện mới, chưa có onFailure
+        del old["hooks"]["TaskCompleted"], old["hooks"]["SubagentStop"]
+        for g in old["hooks"]["PreToolUse"]:
+            for h in g["hooks"]:
+                h.pop("onFailure", None)
+        old["hooks"]["PreToolUse"][1]["hooks"][0]["onFailure"] = "continue"  # dự án tự đặt → giữ
+        old["hooks"]["PreToolUse"].append({"matcher": "Read", "hooks": [{"type": "command", "command": "riêng.sh"}]})
+        (target / ".claude").mkdir()
+        (target / ".claude" / "settings.json").write_text(json.dumps(old), encoding="utf-8")
+        report: dict = {}
+        self.assertEqual(
+            install.merge_hooks(ROOT / ".claude" / "settings.json", target / ".claude" / "settings.json", {}, report),
+            "merged-hooks",
+        )
+        s = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(s["hooks"]["TaskCompleted"], ours["hooks"]["TaskCompleted"])
+        self.assertEqual(s["hooks"]["SubagentStop"], ours["hooks"]["SubagentStop"])
+        got = [h.get("onFailure") for g in s["hooks"]["PreToolUse"] for h in g["hooks"]]
+        self.assertEqual(got, ["block", "continue", "block", None])
+        self.assertEqual({h["event"] for h in report["hooks_added"]}, {"TaskCompleted", "SubagentStop"})
+        changed = [m for m in report["hooks_matcher_updated"] if "onFailure" in m]
+        self.assertEqual([m["onFailure"] for m in changed], ["block", "block"])
+        self.assertTrue(all(m["event"] == "PreToolUse" for m in changed))
+        report = {}  # chạy lại: không còn gì để gộp
+        install.merge_hooks(ROOT / ".claude" / "settings.json", target / ".claude" / "settings.json", {}, report)
+        self.assertEqual((report["hooks_added"], report["hooks_matcher_updated"]), ([], []))
+
+
+class GuardFalseGreenBenchTest(unittest.TestCase):
+    """T-1523: false-green `autonomy-bench` tìm ra (`echo main | xargs git push origin`, `git push origin $(echo main)`,
+    `echo … | tee /dev/null | bash`, `ssh localhost '…'`, surrogate làm guard sập — AUD-SEC-077) và brace lệch nháy
+    (AUD-SEC-072). Đo như hook ở chính sách mặc định (ADR-0018): cấu trúc guard không giải được quanh hành động không
+    đảo ngược → deny có mã unsure; lệnh hợp lệ cùng dạng vẫn cho chạy."""
+
+    def setUp(self) -> None:
+        self.g = _guard()
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        Path(self.root, "xt.yaml").write_text("", encoding="utf-8")
+
+    def out(self, cmd: str, root: str | None = None) -> dict:
+        return self.g.apply_policy(self.g.bash_decision(cmd, root or self.root))
+
+    def assert_policy(self, expected: str, cmds: tuple[str, ...], root: str | None = None) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd):
+                self.assertEqual(self.out(cmd, root)["decision"], expected)
+
+    def test_guard_false_green_xargs_push_unknown_ref(self):
+        self.assert_policy(
+            "deny",
+            (
+                "echo main | xargs git push origin",
+                "echo main | xargs -I{} git push origin {}",
+                "printf 'main\\n' | xargs -n1 git -C . push origin",
+                "bash -c 'echo main | xargs git push origin'",
+                "echo feat | xargs git push origin feat",  # xargs nối thêm đối số: đích vẫn có thể là main
+            ),
+        )
+        out = self.out("echo main | xargs git push origin")
+        self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assert_policy("", ("echo a | xargs echo", "ls | xargs cat", "git push -u origin feat/x"))
+
+    def test_guard_false_green_push_command_substitution(self):
+        self.assert_policy(
+            "deny",
+            (
+                "git push origin $(echo main)",
+                'git push origin "$(echo main)"',
+                "git push origin `echo main`",
+                "git push origin $(printf '%s' main)",
+                "git push $(echo --force) origin feat",
+                "git push origin $(cat branch.txt)",  # guard không đọc được giá trị → không biết đích
+                "git push origin HEAD:$(cat b)",
+                "git push origin $(echo $(echo main))",
+                "sh -c 'git push origin $(echo main)'",
+            ),
+        )
+        out = self.out("git push origin $(cat branch.txt)")
+        self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assertEqual(self.out("git push origin $(echo main)")["code"], "PUSH_MAIN")
+        self.assert_policy(
+            "",
+            (
+                "git push origin $(echo feat/x)",
+                "git push -u origin $(git branch --show-current)",  # thư mục tạm không phải repo: không phải main
+                'git push -u origin "$(git rev-parse --abbrev-ref HEAD)"',
+                "git push $(git remote | head -1) feat/x",  # chỉ remote là thay lệnh; đích ghi rõ
+                "git push origin feat/x && echo $(date)",
+                "x=$(cat f); git push origin feat/x",
+                "git commit -q -m \"$(cat <<'EOF'\nrevert: git push origin $(echo main)\nEOF\n)\"",
+                "echo $(git push --dry-run 2>&1 | head -1)",
+            ),
+        )
+
+    def test_audit_delta_push_var_unresolved_target(self):
+        """T-1524: refspec là biến guard không giải được từ gán chữ/lệnh đã biết → deny UNRESOLVED_TARGET; gán chữ trong
+        cùng lệnh thì giải ra và xét theo giá trị; không chặn oan HEAD/nhánh ghi rõ/push trần."""
+        unresolved = (
+            "B=$(cat .branch); git push origin $B",
+            "git push origin $B",
+            'read B; git push origin "$B"',
+            "export B=$(cat f); git push origin $B",
+            "git push origin ${B}",
+            'git push origin "${B:-feat}"',  # B có thể đã đặt ở môi trường
+            "git push -u origin feat:$B",
+            'git push origin "$@"',
+            "git push origin $1",
+            "B=; git push origin $B",
+            'B=feat; git push origin "$B" && git push origin $C',
+            "for b in $(cat list); do git push origin $b; done",
+            "bash -c 'read B; git push origin $B'",
+        )
+        self.assert_policy("deny", unresolved)
+        for cmd in unresolved[:4]:
+            with self.subTest(cmd):
+                out = self.out(cmd)
+                self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assert_policy(
+            "deny",
+            (
+                "B=main; git push origin $B",
+                'export B=master; git push -u origin "$B"',
+                'B="feat main"; git push origin $B',  # không nháy: tách từ, có main
+                "B=$(echo main); git push origin $B",
+                "B=master; git push origin --delete $B",
+                "for b in feat main; do git push origin $b; done",
+            ),
+        )
+        self.assertEqual(self.out("B=main; git push origin $B")["code"], "PUSH_MAIN")
+        self.assert_policy(
+            "",
+            (
+                "git push origin HEAD",
+                "git push -u origin feat/x",
+                "git push",
+                "git push $REMOTE feat/x",  # chỉ remote là biến
+                "git push $R",
+                "B=feat/x; git push origin $B",
+                'B=feat/x; git push -u origin "${B}"',
+                'B=$(git branch --show-current); git push -u origin "$B"',  # thư mục tạm không phải repo
+                'git push origin "$"',  # `$` đứng riêng là chữ
+                "B=x; git push -o ci.skip=$B origin feat",
+                'git commit -m "git push origin $B"',
+                "echo git push origin $B",
+            ),
+        )
+
+    @unittest.skipIf(shutil.which("git") is None, "cần git")
+    def test_audit_delta_push_var_current_branch_query_on_main(self):
+        repo = Path(self.root, "r")
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        self.assert_policy("deny", ('B=$(git branch --show-current); git push -u origin "$B"',), str(repo))
+
+    @unittest.skipIf(shutil.which("git") is None, "cần git")
+    def test_guard_false_green_push_current_branch_query_on_main(self):
+        repo = Path(self.root, "r")
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        self.assert_policy(
+            "deny",
+            (
+                "git push origin $(git branch --show-current)",
+                "git push origin $(git symbolic-ref --short -q HEAD)",
+            ),
+            str(repo),
+        )
+
+    def test_guard_false_green_pipe_through_filters_into_shell(self):
+        self.assert_policy(
+            "deny",
+            (
+                "echo 'rm -rf ~' | tee /dev/null | bash",
+                "echo 'rm -rf ~' | cat | sh",
+                "echo 'rm -rf ~' | cat - | tee -a log | bash",
+                "printf '%s\\n' 'git reset --hard' | tee log | head -5 | bash",
+                "echo 'git push --force origin x' | tail -n 1 | sh",
+                "echo 'rm -rf ~' | xargs -0 bash -c",
+                "echo 'rm -rf ~' | tee /dev/null | xargs -d '\\n' sh -c",
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "echo ls | tee /dev/null | bash",
+                "echo hi | tee out.txt",
+                "cat run.sh | bash",  # file script: như `bash run.sh` (guard không đọc file) — giữ hành vi cũ
+                "echo 'rm -rf ~' | cat notes.txt | bash",  # cat có file: ống ra là nội dung file, không phải chữ echo
+                "echo 'rm -rf ~' | tee /dev/null | wc -l",
+            ),
+        )
+
+    def test_guard_false_green_ssh_loopback_runs_here(self):
+        self.assert_policy(
+            "deny",
+            (
+                "ssh localhost 'rm -rf ~'",
+                "ssh 127.0.0.1 git push --force origin main",
+                "ssh -p 2222 user@localhost 'rm -rf ~'",
+                "ssh localhost -t 'gh repo delete o/r --yes'",
+                "ssh -o ProxyCommand='rm -rf ~' example.com",  # ProxyCommand chạy trên máy này, máy đích nào cũng vậy
+                "ssh -oProxyCommand='git push --force origin main' localhost",
+                "ssh -o 'LocalCommand rm -rf ~' -o PermitLocalCommand=yes localhost",
+                "ssh localhost 'rm -rf projects'",  # lệnh chạy ở ~ (không phải thư mục dự án)
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "ssh localhost",
+                "ssh localhost ls",
+                "ssh -p 2222 127.0.0.1 uptime",
+                "ssh -o StrictHostKeyChecking=no localhost",
+                "ssh prod.example.com 'rm -rf /tmp/x'",  # máy khác: ra khỏi máy dev — cho chạy (ADR-0018)
+                "ssh -o ProxyCommand='nc %h %p' localhost",
+            ),
+        )
+
+    def test_guard_false_green_surrogate_nul_no_crash(self):
+        for cmd in (
+            "echo x > a\ud800b; rm -rf ~",
+            "touch x\ud800; gh repo delete o/r --yes",
+            "touch a\x00b; git push --force origin main",
+            "cp f y\udcff; docker run --privileged alpine",
+        ):
+            with self.subTest(repr(cmd)):
+                self.assertEqual(self.out(cmd)["decision"], "deny")
+        self.assertEqual(self.out("echo a\ud800b > out.txt")["decision"], "")
+        self.assertEqual(self.g.clean_payload({"k\ud800": ["x\x00y", 1, None]}), {"k�": ["x y", 1, None]})
+        # rel_path không ném lỗi với đường dẫn chứa surrogate/NUL; hàng rào vẫn nhận ra file hook
+        self.assertEqual(self.g.rel_path("a\ud800/../b", self.root), "b")
+        self.assertEqual(self.g.rel_path("x\x00y", self.root), "x\x00y")
+        d, _ = self.g.edit_decision(os.path.join(self.root, ".claude/hooks/x\ud800.sh"), self.root)
+        self.assertEqual(d, "ask")
+
+    def test_guard_false_green_surrogate_via_main(self):
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "touch x\ud800; gh repo delete o/r --yes"}}
+        )
+        self.assertIn("\\ud800", payload)
+        raw = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["guard.py", "bash"]),
+            mock.patch.object(sys, "stdin", io.StringIO(payload)),
+            mock.patch.object(sys, "stdout", raw),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.root, "XT_GUARD_POLICY": ""}),
+        ):
+            self.assertEqual(self.g.main(), 0)
+        self.assertEqual(json.loads(raw.getvalue())["decision"], "deny")
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_guard_false_green_surrogate_via_hook(self):
+        payload = {"tool_input": {"command": "touch x\ud800; gh repo delete o/r --yes"}}
+        code, out, _ = run_hook("pre-bash-guard.sh", payload, Path(self.root), {"XT_GUARD_POLICY": ""})
+        self.assertEqual((code, decision(out)), (0, "deny"))
+
+    def test_brace_quote_desync(self):
+        """AUD-SEC-072: `\\'` trong `$'…'` và nháy mở lại trong `"$(…)"` từng làm `_unquoted` coi phần sau là trong nháy
+        → `{…}` không bung, lệnh cấm lọt."""
+        self.assert_policy(
+            "deny",
+            (
+                "echo $'\\''; rm -rf {dist,~}",
+                "echo $'\\''; gh repo {delete,} o/r --yes",
+                'echo "$(echo "\'")"; git push origin {main,}',
+                'echo "$(echo "$(echo "\'")")"; git push origin {main,}',
+                "echo $'a\\'b'; git push origin {main,}",
+            ),
+        )
+        self.assert_policy(
+            "",
+            (
+                "echo $'it\\'s'; ls {a,b}",
+                'echo "$(echo "\'")"; ls {a,b}',
+                "echo '{main,}'; git push origin feat",
+                'echo "{main,x}"; git status',
+            ),
+        )
+        chars = "".join(c for _, c in self.g._unquoted("a$'\\''b\"c$(d\"e\"f)g\"h'i'j"))
+        self.assertEqual(chars, "abdf)hj")
 
 
 if __name__ == "__main__":

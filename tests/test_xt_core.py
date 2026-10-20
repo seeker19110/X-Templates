@@ -902,7 +902,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
     def verify(self) -> tuple[int, str]:
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = xt.loop_verify(self.base)
+            rc = xt.loop_verify(self.base, run_all=True)
         return rc, buf.getvalue()
 
     def test_zero_tests_red_in_verify_and_blueprint_checks(self):
@@ -927,6 +927,24 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertIn("XANH (1 Gate)", text)  # hai task cùng lệnh (khác khoảng trắng) → chạy một lần
         self.assertEqual(xt.hook_stop("{}", self.base), ("", 0))
         self.assertFalse(xt.read_state(self.base)["active"])
+
+    def test_partial_verify_not_enough_for_done(self):
+        # D-084: verify giữ Gate theo digest (mode=changed) chỉ dùng giữa vòng; `done` đòi lần cuối `--all`.
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.loop_verify(self.base), 0)
+        why = xt.final_check(self.base) or ""
+        self.assertIn("chỉ chạy Gate có đầu vào đổi", why)
+        self.assertIn("loop verify --all", why)
+        out, _ = xt.hook_stop("{}", self.base)
+        self.assertIn("loop verify --all", json.loads(out)["reason"])
+        self.assertTrue(xt.read_state(self.base)["active"])
+        rec_path = self.base / ".autopilot" / xt.VERIFIED_FILE
+        rec = json.loads(rec_path.read_text(encoding="utf-8"))
+        del rec["mode"]  # bản ghi cũ không có `mode` → coi là một phần (chiều chặt)
+        xt.write_atomic(rec_path, json.dumps(rec) + "\n")
+        self.assertIn("loop verify --all", xt.final_check(self.base) or "")
+        self.assertEqual(self.verify()[0], 0)
+        self.assertIsNone(xt.final_check(self.base))
 
     def test_tree_change_after_verify_invalidates(self):
         self.assertEqual(self.verify()[0], 0)
@@ -1549,6 +1567,209 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
             self.assertEqual(xt.main(["guard-check", "--", "git", "push", "origin", "main"]), 126)
             self.assertEqual(xt.main(["guard-check", "pytest -q"]), 0)
         self.assertIn("LOOP-STOP-027", err.getvalue())
+
+
+class TaskDagTest(TmpMixin, unittest.TestCase):
+    """T-1511 (AUTO-01): `(sau: …; files: …)` của dòng task → `loop next`, từ chối record khi dependency mở, chu trình."""
+
+    PLAN = """
+        ### Đợt 1
+        - [x] `T-001` nền (REC-01; files: scripts/xt.py) — Gate: `true`
+        - [ ] `T-002` hai (A; sau: T-001; cần: PR #9; files: scripts/xt.py, tests/a.py) — Gate: `echo "(sau: T-999)"`
+        - [ ] `T-003` ba (sau: T-001, T-001; files: `scripts/`) — Gate: `true`
+        - [ ] `T-004` bốn (sau: T-002) — Gate: `true`
+        - [ ] `T-005` năm (sau: T-777; files: docs/x.md) (exec: deep) — Gate: `true`
+        - [ ] `T-006` sáu (files: docs/x.md, ) — Gate: `true`
+        - [ ] `T-007` bảy (files: docs/y.md) — Gate: `true`
+        - [ ] `T-008` tám (sau: T-001; files: docs/z.md) — Gate: `true`
+        """
+
+    def setUp(self):
+        self.base = self.tmpdir()
+        ceiling = unittest.mock.patch.dict(
+            os.environ, {"GIT_CEILING_DIRECTORIES": str(self.base.parent), "CLAUDE_PROJECT_DIR": str(self.base)}
+        )
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
+        os.environ.pop("XT_RECORD_TIMEOUT", None)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN)
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.base)
+
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = xt.main(list(args))
+        return rc, out.getvalue(), err.getvalue()
+
+    def tasks(self):
+        return {t["id"]: t for t in xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")}
+
+    def test_task_dag_parser_reads_links_outside_gate(self):
+        t = self.tasks()
+        self.assertEqual((t["T-001"]["after"], t["T-001"]["files"]), ([], ["scripts/xt.py"]))
+        self.assertEqual((t["T-002"]["after"], t["T-002"]["files"]), (["T-001"], ["scripts/xt.py", "tests/a.py"]))
+        self.assertEqual((t["T-003"]["after"], t["T-003"]["files"]), (["T-001"], ["scripts/"]))  # dedupe, bỏ backtick
+        self.assertEqual((t["T-004"]["after"], t["T-004"]["files"]), (["T-002"], []))
+        self.assertEqual((t["T-006"]["after"], t["T-006"]["files"]), ([], ["docs/x.md"]))  # phần tử rỗng bị bỏ
+        self.assertEqual(t["T-005"]["tier"], "deep")
+        self.assertEqual(xt.plan_links("không có ghi chú (REC-01; cần: x)"), {"sau": [], "files": []})
+        self.assertEqual(
+            xt.plan_links("(sau: T-101; files: a) (sau: T-102)"), {"sau": ["T-101", "T-102"], "files": ["a"]}
+        )
+
+    def test_review173_plan_links_anywhere_in_group(self):
+        """PR #173: `sau:`/`files:` không đứng đầu đoạn vẫn được đọc; `files:` có ngoặc lồng giữ nguyên tên."""
+        self.assertEqual(xt.plan_links("(S-001, sau: T-001)"), {"sau": ["T-001"], "files": []})
+        self.assertEqual(xt.plan_links("(sau: T-001, files: a.py)"), {"sau": ["T-001"], "files": ["a.py"]})
+        self.assertEqual(xt.plan_links("(files: b (c).py)"), {"sau": [], "files": ["b (c).py"]})
+        self.assertEqual(
+            xt.plan_links("x (REC-01, files: a.py, b.py; cần: y) (ghi chú (phụ), sau: T-002, T-003)"),
+            {"sau": ["T-002", "T-003"], "files": ["a.py", "b.py"]},
+        )
+        self.assertEqual(xt.plan_links("sau: T-001 files: a.py ngoài ngoặc"), {"sau": [], "files": []})
+        self.assertEqual(xt.plan_links("(tiêu đề có chữ hậu: sau:x)"), {"sau": [], "files": []})
+
+    def test_review173_plan_bad_links_warn(self):
+        """Nhóm ngoặc có `sau:`/`files:` mà không đọc được (thiếu ID, rỗng, ngoặc không đóng) → cảnh báo, không chặn."""
+        self.assertEqual(xt.plan_link_problems("(sau: T-001; files: a)"), [])
+        self.assertEqual(xt.plan_link_problems("(sau: xong T-1)"), ["sau: xong T-1"])
+        self.assertEqual(xt.plan_link_problems("(files: , ; sau: T-001)"), ["files:"])
+        self.assertEqual(xt.plan_link_problems("(sau: T-001; files: a"), ["(sau: T-001; files: a"])
+        self.assertEqual(xt.plan_link_problems("không ngoặc sau: gì"), [])
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [ ] `T-001` a (sau: T-1) — Gate: `true`\n- [ ] `T-002` b (files: a.py) — Gate: `true`\n",
+        )
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        self.assertEqual(xt.plan_bad_links(tasks), {"T-001": ["sau: T-1"]})
+        self.assertEqual(xt.plan_bad_links([{"id": "T-9"}]), {})
+        nxt = json.loads(self.run_main("loop", "next", "--json")[1])
+        self.assertEqual(nxt["bad_links"], {"T-001": ["sau: T-1"]})
+        self.assertEqual([r["id"] for r in nxt["ready"]], ["T-001", "T-002"])  # chỉ cảnh báo
+        self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["bad_links"], {"T-001": ["sau: T-1"]})
+        for cmd in ("next", "status"):
+            with self.subTest(cmd=cmd):
+                self.assertIn("ghi chú `sau:`/`files:` không đọc được: T-001 → sau: T-1", self.run_main("loop", cmd)[1])
+        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a (sau: T-002)\n- [x] `T-002` b\n")
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["bad_links"], {})
+        self.assertNotIn("không đọc được", self.run_main("loop", "status")[1])
+
+    def test_review173_path_overlap_normalised_and_glob(self):
+        self.assertTrue(xt._path_overlap("./src/a.py", "src/"))
+        self.assertTrue(xt._path_overlap("src//a.py", "./src/a.py"))
+        self.assertTrue(xt._path_overlap("src/*.py", "src/a.py"))
+        self.assertTrue(xt._path_overlap("src/a.py", "src/*.py"))
+        self.assertTrue(xt._path_overlap("src/**", "src/d/x.txt"))
+        self.assertTrue(xt._path_overlap("src/d/*.txt", "src/"))  # glob nằm trong thư mục
+        self.assertTrue(xt._path_overlap("src/*", "src/d/"))
+        self.assertFalse(xt._path_overlap("src/*.py", "src/a.txt"))
+        self.assertFalse(xt._path_overlap("src/*.py", "lib/a.py"))
+        self.assertFalse(xt._path_overlap("./src/a.py", "src/ab.py"))
+        self.assertFalse(xt._path_overlap("docs/*.md", "docs/sub/x.md"))
+        ready = [
+            {"id": "T-1", "files": ["./src/a.py"]},
+            {"id": "T-2", "files": ["src/*.py"]},
+            {"id": "T-3", "files": ["docs/"]},
+        ]
+        self.assertEqual(xt.plan_overlaps(ready), [{"tasks": ["T-1", "T-2"], "files": ["src/a.py"]}])
+        self.assertTrue(xt._path_overlap(".", "docs/x.md"))  # cả repo
+        self.assertTrue(xt._path_overlap("src/*.py", "src/[ab].py"))  # hai glob: coi như giao (an toàn)
+
+    def test_task_dag_ready_and_overlaps(self):
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        ready = [t["id"] for t in xt.plan_ready(tasks, {})]
+        self.assertEqual(
+            ready, ["T-002", "T-003", "T-005", "T-006", "T-007", "T-008"]
+        )  # T-004 chờ T-002; T-777 ngoài file
+        self.assertEqual([t["id"] for t in xt.plan_ready(tasks, {"T-002": {}})][:2], ["T-003", "T-005"])
+        pairs = {tuple(o["tasks"]): o["files"] for o in xt.plan_overlaps(xt.plan_ready(tasks, {}))}
+        self.assertEqual(pairs, {("T-002", "T-003"): ["scripts/xt.py"], ("T-005", "T-006"): ["docs/x.md"]})
+        self.assertEqual(xt.plan_overlaps([]), [])
+
+    def test_task_dag_next_json_and_text(self):
+        rc, out, _ = self.run_main("loop", "next", "--json")
+        data = json.loads(out)
+        self.assertEqual(rc, 0)
+        self.assertEqual([r["id"] for r in data["ready"]][:2], ["T-002", "T-003"])
+        self.assertEqual(data["ready"][0]["files"], ["scripts/xt.py", "tests/a.py"])
+        self.assertEqual(data["unscoped"], [])
+        self.assertEqual(data["cycles"], [])
+        self.assertEqual([o["tasks"] for o in data["overlaps"]], [["T-002", "T-003"], ["T-005", "T-006"]])
+        st = xt.read_state(self.base)
+        st["deferred"] = {"T-007": {"reason": "x"}}
+        xt.write_state(st, self.base)
+        self.assertNotIn("T-007", [r["id"] for r in json.loads(self.run_main("loop", "next", "--json")[1])["ready"]])
+        rc, text, _ = self.run_main("loop", "next")
+        self.assertEqual(rc, 0)
+        self.assertIn("Sẵn sàng: T-002, T-003", text)
+        self.assertIn("T-002 ∩ T-003 cùng ghi scripts/xt.py", text)
+        self.assertNotIn("chưa khai files", text)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-010` không phạm vi — Gate: `true`\n")
+        self.assertIn("T-010 chưa khai files:", self.run_main("loop", "next")[1])
+
+    def test_task_dag_next_without_plan_is_error(self):
+        xt.write_state({"active": True, "plan": "nope.md"}, self.base)
+        rc, out, err = self.run_main("loop", "next")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("loop init", err)
+
+    def test_task_dag_record_refuses_open_dependency(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(xt.loop_record("T-004", ["true"], self.base), 2)  # T-002 còn `[ ]`
+        self.assertIn("T-002 chưa xong", err.getvalue())
+        self.assertIsNone(xt.read_evidence("T-004", self.base))
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(xt.loop_record("T-002", ["true"], self.base), 0)  # T-001 `[x]`
+            self.assertEqual(xt.loop_record("T-005", ["true"], self.base), 0)  # dependency ngoài file không chặn
+            self.assertEqual(xt.loop_record("T-099", ["true"], self.base), 0)  # task không có trong PLAN
+        self.assertIsNotNone(xt.read_evidence("T-002", self.base))
+        self.assertEqual(xt.open_dependencies("T-004", self.base, {}), [])  # không có vòng/PLAN: không chặn
+        text = (self.base / "docs" / "autopilot" / "PLAN.md").read_text(encoding="utf-8")
+        write(self.base / "docs" / "autopilot" / "PLAN.md", text.replace("- [ ] `T-002`", "- [~] `T-002`"))
+        self.assertEqual(xt.open_dependencies("T-004", self.base, xt.read_state(self.base) or {}), [])
+
+    def test_task_dag_status_reports_cycles(self):
+        self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["cycles"], [])
+        self.assertNotIn("chu trình", self.run_main("loop", "status")[1])
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            """
+            - [ ] `T-001` a (sau: T-002) — Gate: `true`
+            - [ ] `T-002` b (sau: T-003) — Gate: `true`
+            - [ ] `T-003` c (sau: T-001) — Gate: `true`
+            - [ ] `T-004` d (sau: T-003) — Gate: `true`
+            - [ ] `T-005` e (sau: T-005) — Gate: `true`
+            - [ ] `T-006` f (sau: T-009) — Gate: `true`
+            """,
+        )
+        self.assertEqual(
+            json.loads(self.run_main("loop", "status", "--json")[1])["cycles"], ["T-001", "T-002", "T-003", "T-005"]
+        )
+        self.assertIn("chu trình dependency (sau:)", self.run_main("loop", "status")[1])
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["ready"][0]["id"], "T-006")
+
+    def test_audit_delta_unknown_after_warns_without_blocking(self):
+        """T-1524: `sau:` trỏ ID không có trong PLAN (gõ nhầm) → cảnh báo ở `loop status`/`loop next`; vẫn không chặn."""
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        self.assertEqual(xt.plan_unknown_after(tasks), {"T-005": ["T-777"]})  # `(sau: T-999)` trong Gate không tính
+        self.assertEqual(xt.plan_unknown_after([]), {})
+        nxt = json.loads(self.run_main("loop", "next", "--json")[1])
+        self.assertEqual(nxt["unknown_after"], {"T-005": ["T-777"]})
+        self.assertIn("T-005", [r["id"] for r in nxt["ready"]])  # hành vi chặn không đổi
+        status = json.loads(self.run_main("loop", "status", "--json")[1])
+        self.assertEqual(status["unknown_after"], {"T-005": ["T-777"]})
+        for cmd in ("next", "status"):
+            with self.subTest(cmd=cmd):
+                rc, text, _ = self.run_main("loop", cmd)
+                self.assertEqual(rc, 0)
+                self.assertIn("`sau:` trỏ ID không có trong PLAN (không chặn — kiểm gõ nhầm): T-005 → T-777", text)
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [ ] `T-001` a (sau: T-002) — Gate: `true`\n- [x] `T-002` b\n",
+        )
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["unknown_after"], {})
+        self.assertNotIn("không có trong PLAN", self.run_main("loop", "status")[1])
 
 
 if __name__ == "__main__":

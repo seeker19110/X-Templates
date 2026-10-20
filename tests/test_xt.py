@@ -710,6 +710,174 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "")
 
 
+class EvidenceV2Test(unittest.TestCase):
+    """AUTO-02 (T-1513): evidence ghi `cmd_sha256`, `scope`, `req_rev`, `files_digest`; `loop verify` chỉ chạy lại Gate có
+    đầu vào đổi, `--all` chạy hết; evidence cũ thiếu trường → chạy lại."""
+
+    PLAN = (
+        "- [x] `T-001` sửa a (files: src/a.txt) — Gate: `test -f src/a.txt`\n"
+        "- [x] `T-002` sửa b (files: lib/) — Gate: `test -d lib`\n"
+    )
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN)
+        write(self.base / "src" / "a.txt", "a\n")
+        write(self.base / "lib" / "b.txt", "b\n")
+        patcher = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(self.cli("loop", "init")[0], 0)
+
+    def cli(self, *args: str) -> tuple[int, str]:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            rc = xt.main(list(args))
+        return rc, out.getvalue()
+
+    def record_all(self) -> None:
+        self.assertEqual(self.cli("loop", "record", "--task", "T-001", "--", "test -f src/a.txt")[0], 0)
+        self.assertEqual(self.cli("loop", "record", "--task", "T-002", "--", "test -d lib")[0], 0)
+
+    def task(self, tid: str) -> dict:
+        return next(t for t in xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md") if t["id"] == tid)
+
+    def test_evidence_v2_record_writes_fields(self):
+        self.record_all()
+        ev = xt.read_evidence("T-001", self.base)
+        self.assertEqual(ev["cmd_sha256"], xt.cmd_sha256("test -f src/a.txt"))
+        self.assertEqual(ev["scope"], ["src/a.txt"])
+        self.assertEqual(ev["req_rev"], xt.task_req_rev(self.task("T-001")))
+        self.assertEqual(len(ev["req_rev"]), 16)
+        self.assertEqual(ev["files_digest"], xt.files_digest(self.base, ["src/a.txt"]))
+        self.assertRegex(ev["files_digest"], r"^[0-9a-f]{64}$")
+        # Task ngoài PLAN: không có phạm vi/yêu cầu để gắn → trường có mặt nhưng rỗng (verify luôn chạy lại).
+        self.assertEqual(self.cli("loop", "record", "--task", "T-099", "--", "true")[0], 0)
+        ev = xt.read_evidence("T-099", self.base)
+        self.assertEqual((ev["scope"], ev["req_rev"], ev["files_digest"]), ([], None, None))
+
+    def test_evidence_v2_verify_reruns_only_changed_gate(self):
+        self.record_all()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: giữ", out)
+        self.assertIn("verify T-002: giữ", out)
+        self.assertIn("XANH (0 Gate, giữ 2 Gate có evidence v2 khớp)", out)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(rec["mode"], "changed")
+        self.assertEqual([r.get("kept") for r in rec["results"]], [True, True])
+        write(self.base / "lib" / "sub" / "c.txt", "mới\n")  # file mới trong thư mục phạm vi T-002
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: giữ", out)
+        self.assertIn("verify T-002: exit 0 (file trong phạm vi đổi (files_digest))", out)
+        rc, out = self.cli("loop", "verify", "--all")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (--all)", out)
+        self.assertIn("verify T-002: exit 0 (--all)", out)
+        rec = json.loads((self.base / ".autopilot" / xt.VERIFIED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(rec["mode"], "all")
+        # Digest đổi mà Gate giờ đỏ → kiểm lại cuối ĐỎ (không giữ kết quả xanh cũ).
+        (self.base / "src" / "a.txt").unlink()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 1)
+        self.assertIn("verify T-001: exit 1", out)
+
+    def test_evidence_v2_old_evidence_without_fields_reruns(self):
+        for t, cmd in (("T-001", "test -f src/a.txt"), ("T-002", "test -d lib")):
+            write(
+                self.base / ".autopilot" / "evidence" / f"{t}.json",
+                json.dumps({"task": t, "exit_code": 0, "cmd": cmd, "cmd_sha256": xt.cmd_sha256(cmd)}),
+            )
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (evidence cũ thiếu scope, req_rev, files_digest)", out)
+        self.assertIn("XANH (2 Gate)", out)
+
+    def test_evidence_v2_shared_gate_runs_once_when_any_task_stale(self):
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [x] `T-001` a (files: src/a.txt) — Gate: `test -f src/a.txt`\n"
+            "- [x] `T-002` b (files: lib/) — Gate: `test  -f src/a.txt`\n",
+        )
+        self.assertEqual(self.cli("loop", "record", "--task", "T-001", "--", "test -f src/a.txt")[0], 0)
+        self.assertEqual(self.cli("loop", "record", "--task", "T-002", "--", "test  -f src/a.txt")[0], 0)
+        self.assertIn("verify T-001: giữ", self.cli("loop", "verify")[1])
+        write(self.base / "lib" / "b.txt", "đổi\n")  # chỉ phạm vi T-002 đổi; lệnh chung → chạy một lần
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify T-001: exit 0 (file trong phạm vi đổi (files_digest))", out)
+        self.assertNotIn("verify T-002", out)
+
+    def test_evidence_v2_floor_not_skipped_by_kept_gate(self):
+        # Lệnh sàn là kiểm toàn repo: trùng một Gate được giữ thì vẫn phải chạy (chỉ bỏ khi trùng Gate vừa chạy).
+        write(self.base / "BLUEPRINT.md", "---\nkind: blueprint\nprofile: cli-tool\nscale: M\n---\n")
+        write(self.base / "xt.yaml", "format_check: test -f src/a.txt\ncoverage: test -d lib\n")
+        self.record_all()
+        rc, out = self.cli("loop", "verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("verify sàn Gate `format_check`: exit 0", out)
+        self.assertIn("verify sàn Gate `coverage`: exit 0", out)
+        rc, out = self.cli("loop", "verify", "--all")
+        self.assertNotIn("verify sàn Gate", out)  # Gate vừa chạy lại trùng lệnh sàn → không chạy hai lần
+
+    def test_evidence_v2_stale_reasons(self):
+        self.record_all()
+        t1 = self.task("T-001")
+        self.assertEqual(xt.evidence_stale(t1, self.base), "")
+        ev_path = self.base / ".autopilot" / "evidence" / "T-001.json"
+        good = json.loads(ev_path.read_text(encoding="utf-8"))
+
+        def stale_with(**changes: object) -> str:
+            write(ev_path, json.dumps({**good, **changes}))
+            return xt.evidence_stale(t1, self.base)
+
+        self.assertEqual(stale_with(exit_code=1), "chưa có evidence xanh")
+        self.assertEqual(stale_with(finished="2999-01-01T00:00:00+00:00"), "evidence có thời điểm bất thường")
+        self.assertEqual(stale_with(cmd_sha256="0" * 64), "lệnh Gate đổi")
+        self.assertEqual(stale_with(scope=["src/"]), "phạm vi `files:` đổi")
+        self.assertEqual(stale_with(req_rev="0" * 16), "đoạn spec của task đổi (req_rev)")
+        self.assertEqual(stale_with(files_digest="0" * 64), "file trong phạm vi đổi (files_digest)")
+        write(ev_path, json.dumps(good))
+        with unittest.mock.patch.object(xt.hashlib, "file_digest", side_effect=OSError("đọc lỗi")):
+            self.assertEqual(xt.evidence_stale(t1, self.base), "file trong phạm vi đổi (files_digest)")
+        ev_path.unlink()
+        self.assertEqual(xt.evidence_stale(t1, self.base), "chưa có evidence xanh")
+        # Spec đổi chữ trong PLAN (Gate giữ nguyên) → req_rev khác.
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            self.PLAN.replace("sửa b", "sửa b theo yêu cầu mới").replace("(files: lib/) ", ""),
+        )
+        t2 = self.task("T-002")
+        self.assertEqual(xt.evidence_stale(t2, self.base), "phạm vi `files:` đổi")
+        write(self.base / "docs" / "autopilot" / "PLAN.md", self.PLAN.replace("sửa b", "sửa b mới"))
+        self.assertEqual(xt.evidence_stale(self.task("T-002"), self.base), "đoạn spec của task đổi (req_rev)")
+        # Task không khai `files:` → không có gì để giữ, luôn chạy lại.
+        bare = {**t2, "files": []}
+        ev2 = self.base / ".autopilot" / "evidence" / "T-002.json"
+        write(
+            ev2,
+            json.dumps({**json.loads(ev2.read_text(encoding="utf-8")), "scope": [], "req_rev": xt.task_req_rev(bare)}),
+        )
+        self.assertEqual(xt.evidence_stale(bare, self.base), "task không khai `files:` — không có digest để giữ")
+
+    def test_evidence_v2_files_digest_tree(self):
+        d = xt.files_digest(self.base, ["lib/"])
+        self.assertIsNone(xt.files_digest(self.base, []))
+        self.assertEqual(d, xt.files_digest(self.base, ["lib", "lib/"]))  # dấu `/` cuối và trùng lặp không đổi digest
+        write(self.base / "lib" / "__pycache__" / "x.pyc", "rác\n")  # sinh khi chạy → không tính
+        self.assertEqual(d, xt.files_digest(self.base, ["lib/"]))
+        write(self.base / "lib" / "b.txt", "khác\n")
+        self.assertNotEqual(d, xt.files_digest(self.base, ["lib/"]))
+        missing = xt.files_digest(self.base, ["khong-co"])
+        write(self.base / "khong-co", "")
+        self.assertNotEqual(missing, xt.files_digest(self.base, ["khong-co"]))  # mất file ≠ file rỗng
+        self.assertEqual(xt.task_spec({"rest": " — viết hàm (files: a) — Gate: `true`"}), "viết hàm (files: a)")
+        self.assertEqual(xt.task_spec({"rest": "chỉ mô tả"}), "chỉ mô tả")
+
+
 class AuditRegressionTest(unittest.TestCase):
     """Lỗi tái hiện khi dogfood khung trên chính repo (2026-10-14)."""
 
@@ -1554,6 +1722,215 @@ class RealFrameworkTest(unittest.TestCase):
     def test_repo_framework_valid(self):
         errs = xt.validate(xt.DEFAULT_FRAMEWORK)
         self.assertEqual(errs, [], "\n".join(errs[:30]))
+
+
+AUTHX_MODULE = """
+---
+title: Xác thực thí điểm
+kind: module
+prefix: BE-AUTHX
+applies_to: [web-app]
+essential: [BE-AUTHX-002@auth, BE-AUTHX-003@jwt, BE-AUTHX-004@oauth, BE-AUTHX-005@reset, BE-AUTHX-003@auth]
+updated: 2026-10-20
+---
+
+# Xác thực thí điểm
+
+## Checklist
+
+- [ ] `BE-AUTHX-001` **MUST** Băm mật khẩu. → Kiểm: test hash.
+- [ ] `BE-AUTHX-002` **MUST@L** Khoá theo tài khoản. → Kiểm: test 20 lần sai.
+- [ ] `BE-AUTHX-003` **MUST@L** JWT cố định alg. → Kiểm: test alg none.
+- [ ] `BE-AUTHX-004` **MUST@L** OAuth PKCE. → Kiểm: test redirect.
+- [ ] `BE-AUTHX-005` **MUST@L** Reset một lần. → Kiểm: test token lần hai.
+- [ ] `BE-AUTHX-006` **MUST@L** Không thiết yếu. → Kiểm: test x.
+
+## Nguồn
+
+- z
+"""
+
+
+class EssentialNotCappedTest(unittest.TestCase):
+    """ADR-0030 (REC-05): mục `essential` không bị trần MUST ở M khi fact bật; S/L và ghép không fact không đổi."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.fw = make_framework(self.tmp)
+        write(self.fw / "08-backend" / "authx.md", AUTHX_MODULE)
+
+    def levels(self, scale: str, features: list[str]) -> dict[str, str]:
+        out = xt.compose(self.fw, "web-app", [], scale, include_may=False, today="2026-10-20", features=features)
+        found = {m["id"]: m["level"] for m in map(xt.ITEM_RE.match, out.splitlines()) if m}
+        return {k: v for k, v in found.items() if k.startswith("BE-AUTHX")}
+
+    def test_essential_not_capped_scale_feature_matrix(self):
+        ids = [f"BE-AUTHX-00{n}" for n in range(1, 7)]
+        cases = {
+            # (quy mô, fact) -> ID ở mức MUST; còn lại SHOULD
+            ("S", ()): set(),
+            ("S", ("auth", "jwt", "oauth", "reset")): set(),  # S: chỉ sàn (ADR-0003), fact không mở
+            ("M", ()): {"BE-AUTHX-001"},  # không fact: như trước ADR-0030
+            ("M", ("auth",)): {"BE-AUTHX-001", "BE-AUTHX-002", "BE-AUTHX-003"},  # 003 khai cả @auth
+            ("M", ("jwt",)): {"BE-AUTHX-001", "BE-AUTHX-003"},
+            ("M", ("oauth",)): {"BE-AUTHX-001", "BE-AUTHX-004"},
+            ("M", ("reset",)): {"BE-AUTHX-001", "BE-AUTHX-005"},
+            ("M", ("payment", "pii")): {"BE-AUTHX-001"},  # fact không khai ở module
+            ("M", ("auth", "jwt", "oauth", "reset")): set(ids) - {"BE-AUTHX-006"},
+            ("L", ()): set(ids),
+            ("L", ("auth",)): set(ids),
+        }
+        for (scale, feats), must in cases.items():
+            with self.subTest(scale=scale, feats=feats):
+                got = self.levels(scale, list(feats))
+                self.assertEqual({k for k, v in got.items() if v == "MUST"}, must)
+                self.assertEqual({k for k, v in got.items() if v == "SHOULD"}, set(ids) - must)
+
+    def test_essential_not_capped_report_and_header(self):
+        promoted: list[str] = []
+        main, backlog = xt.compose_split(
+            self.fw,
+            "web-app",
+            [],
+            "M",
+            False,
+            today="2026-10-20",
+            features=["reset", "auth", "auth"],
+            promoted=promoted,
+        )
+        self.assertEqual(promoted, ["BE-AUTHX-002", "BE-AUTHX-003", "BE-AUTHX-005"])
+        self.assertIn("features: [auth, reset]\n---", main)  # thứ tự cố định, bỏ trùng
+        self.assertIn("> Feature: auth, reset", main)
+        self.assertIn("`BE-AUTHX-005` **MUST**", main)
+        self.assertIn("`BE-AUTHX-004` **SHOULD**", backlog)
+        plain = xt.compose(self.fw, "web-app", [], "M", False, today="2026-10-20")
+        self.assertNotIn("features:", plain)
+        self.assertNotIn("> Feature:", plain)
+        none: list[str] = []
+        xt.compose(self.fw, "web-app", [], "L", False, today="2026-10-20", features=["auth"], promoted=none)
+        self.assertEqual(none, [])  # L đã MUST: không có gì "lên"
+        with self.assertRaises(SystemExit) as cm:
+            xt.compose(self.fw, "web-app", [], "M", False, features=["auth", "sso"])
+        self.assertIn("sso", str(cm.exception))
+
+    def test_essential_not_capped_cli_recompose_stable(self):
+        out = self.tmp / "proj" / "BLUEPRINT.md"
+        out.parent.mkdir()
+        args = ("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--out", str(out))
+        r1 = xt_cli(*args, "--feature", "auth", "--feature", "jwt")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertIn(
+            "↑ 2 mục thiết yếu lên MUST ở quy mô M (feature auth, jwt; ADR-0030): BE-AUTHX-002, BE-AUTHX-003", r1.stderr
+        )
+        first = out.read_text(encoding="utf-8"), (out.parent / "BLUEPRINT-BACKLOG.md").read_text(encoding="utf-8")
+        r2 = xt_cli(*args, "--feature", "jwt", "--feature", "auth")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        second = out.read_text(encoding="utf-8"), (out.parent / "BLUEPRINT-BACKLOG.md").read_text(encoding="utf-8")
+        self.assertEqual(first, second)  # ghép lại hai lần: cùng byte
+        r3 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "S", "--feature", "auth")
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        self.assertIn("không đổi mức mục nào ở quy mô S (fact chỉ đổi mức ở quy mô M", r3.stderr)
+        r3m = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--feature", "pii")
+        self.assertIn("không đổi mức mục nào ở quy mô M (không module nào trong hồ sơ/gói", r3m.stderr)
+        self.assertNotIn("chỉ đổi mức ở quy mô M", r3m.stderr)  # ở M, lý do thật là không có module khai fact
+        r4 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--full", "--feature", "oauth")
+        self.assertIn("`BE-AUTHX-004` **MUST**", r4.stdout)
+        self.assertIn("BE-AUTHX-004", r4.stderr)
+        r5 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--feature", "sso")
+        self.assertEqual(r5.returncode, 2)  # argparse: fact ngoài tập đóng
+
+    def test_essential_not_capped_recompose_warns_dropped_feature(self):
+        out = self.tmp / "proj" / "BLUEPRINT.md"
+        out.parent.mkdir()
+        args = ("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--out", str(out))
+        r1 = xt_cli(*args, "--feature", "auth", "--feature", "oauth")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertNotIn("⚠ bỏ feature", r1.stderr)  # chưa có file cũ: không cảnh báo
+        r2 = xt_cli(*args, "--feature", "auth", "--feature", "oauth")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertNotIn("⚠ bỏ feature", r2.stderr)  # cùng tập fact
+        r3 = xt_cli(*args, "--feature", "jwt")  # bỏ auth+oauth; 003 vẫn MUST nhờ jwt → chỉ 002, 004 rơi
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        self.assertIn("⚠ bỏ feature auth, oauth: 2 mục về SHOULD (BE-AUTHX-002, BE-AUTHX-004)", r3.stderr)
+        r4 = xt_cli(*args)
+        self.assertEqual(r4.returncode, 0, r4.stderr)
+        self.assertIn("⚠ bỏ feature jwt: 1 mục về SHOULD (BE-AUTHX-003)", r4.stderr)
+        self.assertNotIn("features:", out.read_text(encoding="utf-8"))
+        # fact không mở mục nào ở module (payment) → vẫn báo bỏ, 0 mục; frontmatter hỏng/fact lạ → im lặng
+        xt_cli(*args, "--feature", "payment")
+        r5 = xt_cli(*args)
+        self.assertIn("⚠ bỏ feature payment: 0 mục về SHOULD\n", r5.stderr)
+        out.write_text("không frontmatter\n", encoding="utf-8")
+        self.assertEqual(xt._old_features(out), [])
+        out.write_text("---\nfeatures: [auth, sso]\n---\n", encoding="utf-8")
+        self.assertEqual(xt._old_features(out), ["auth"])
+        self.assertEqual(xt._old_features(self.tmp / "khong-co.md"), [])
+
+    def test_essential_not_capped_must_cap_unchanged(self):
+        # trần ADR-0004 đếm mức KHÔNG fact: 4 MUST trơn + 4 MUST@L thiết yếu vẫn hợp lệ
+        extra = "".join(f"- [ ] `BE-AUTHX-0{n}` **MUST** x. → Kiểm: y.\n" for n in range(10, 13))
+        path = self.fw / "08-backend" / "authx.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("## Nguồn", extra + "\n## Nguồn"), encoding="utf-8")
+        self.assertEqual(xt.validate(self.fw), [])
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "## Nguồn", "- [ ] `BE-AUTHX-013` **MUST** x. → Kiểm: y.\n\n## Nguồn"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(len([e for e in xt.validate(self.fw) if "trần 4" in e]), 1)
+
+    def test_essential_not_capped_validate_rejects_bad_entries(self):
+        path = self.fw / "08-backend" / "authx.md"
+        base = path.read_text(encoding="utf-8")
+        bad = {
+            "[BE-AUTHX-002]": "phải dạng <ID>@<fact>",
+            "[BE-AUTHX-002@sso]": "fact 'sso' không thuộc",
+            "[BE-AUTHX-099@auth]": "BE-AUTHX-099 không có trong file",
+            "[BE-AUTHX-001@auth]": "BE-AUTHX-001 không phải MUST@L",
+            "[BE-AUTHX-002@auth, BE-AUTHX-003@auth, BE-AUTHX-004@auth, BE-AUTHX-005@auth, BE-AUTHX-006@auth]": (
+                "5 mục essential, tối đa 4"
+            ),
+        }
+        line = "essential: [BE-AUTHX-002@auth, BE-AUTHX-003@jwt, BE-AUTHX-004@oauth, BE-AUTHX-005@reset, BE-AUTHX-003@auth]"
+        for value, msg in bad.items():
+            with self.subTest(value=value):
+                path.write_text(base.replace(line, f"essential: {value}"), encoding="utf-8")
+                errs = xt.validate(self.fw)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn(msg, errs[0])
+        path.write_text(base, encoding="utf-8")
+        sec = self.fw / "01-baseline" / "security.md"
+        sec.write_text(
+            sec.read_text(encoding="utf-8").replace("updated:", "essential: [BASE-SEC-002@auth]\nupdated:"),
+            encoding="utf-8",
+        )
+        errs = xt.validate(self.fw)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("'essential' chỉ dùng cho module/standard", errs[0])
+        # phần tử sai dạng bị bỏ khi ghép (validate đã báo), không làm hỏng compose_sections
+        doc = xt.Doc(path=sec, rel="x", meta={"essential": ["rác", "BE-X-001@auth"]}, body="", body_offset=0)
+        self.assertEqual(xt.essential_ids(doc, ["auth"]), {"BE-X-001"})
+
+    def test_essential_not_capped_real_authn_pilot(self):
+        # thí điểm thật: chỉ 4 mục BE-AUTH, chỉ ở M, đúng fact; hồ sơ khác không đổi khi không fact
+        fw = xt.DEFAULT_FRAMEWORK
+        self.assertEqual(xt.validate(fw), [])
+        pilot = {"auth": "BE-AUTH-003", "jwt": "BE-AUTH-006", "oauth": "BE-AUTH-008", "reset": "BE-AUTH-015"}
+        for fact, iid in pilot.items():
+            promoted: list[str] = []
+            xt.compose(fw, "api-service", [], "M", False, features=[fact], promoted=promoted)
+            self.assertEqual(promoted, [iid])
+        for fact in ("payment", "pii"):
+            promoted = []
+            xt.compose(fw, "api-service", [], "M", False, features=[fact], promoted=promoted)
+            self.assertEqual(promoted, [])
+        for scale in ("S", "L"):
+            promoted = []
+            xt.compose(fw, "web-app", [], scale, False, features=list(pilot), promoted=promoted)
+            self.assertEqual(promoted, [])
+        essentials = {d.rel: d.meta["essential"] for d in xt.load_docs(fw)[0] if "essential" in d.meta}
+        self.assertEqual(list(essentials), ["08-backend/authn-authz"])  # không bỏ trần đại trà
 
 
 if __name__ == "__main__":

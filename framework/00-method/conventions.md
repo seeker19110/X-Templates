@@ -1,7 +1,7 @@
 ---
 title: Quy ước viết module của khung
 kind: method
-updated: 2026-10-14
+updated: 2026-10-20
 ---
 
 # Quy ước viết module của khung
@@ -38,6 +38,7 @@ updated: 2026-10-13
 | `applies_to` | `module`, `baseline` | `[all]` hoặc danh sách slug hồ sơ (`[web-app, mobile-app]`) |
 | `modules` | `profile`, `industry` | Danh sách module được ghép vào blueprint, đường dẫn tương đối từ `framework/`, bỏ `.md`; cho phép `*` cuối (vd `08-backend/*`) |
 | `slug` | `profile`, `industry` | Tên ngắn dùng trong lệnh `compose` (vd `web-app`, `fintech`) |
+| `essential` | tuỳ chọn, `module`/`standard` | Danh sách `ID@fact` (≤ 4, mục `MUST@L`): ở quy mô M mục được nâng lên MUST khi chạy `compose --feature <fact>` (ADR-0030) |
 
 ## 3. Mục checklist 🔒
 

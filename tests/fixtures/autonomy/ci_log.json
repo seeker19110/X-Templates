@@ -1,0 +1,209 @@
+{
+ "cases": [
+  {
+   "id": "ci-control-test",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "log": "FAILED tests/test_a.py::test_x - AssertionError: 1 != 2"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   }
+  },
+  {
+   "id": "ci-control-infra",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "log": "Error: The runner has received a shutdown signal."
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": true,
+    "category": "infra"
+   }
+  },
+  {
+   "id": "ci-gitleaks",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "quality\tgitleaks\t2026-10-19T10:00:00.0Z WRN leaks found: 1"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   }
+  },
+  {
+   "id": "ci-bandit",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": ">> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'x'"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   }
+  },
+  {
+   "id": "ci-semgrep",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "semgrep: 3 blocking findings"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret"
+   }
+  },
+  {
+   "id": "ci-secret-beats-lint",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "src/a.py:1:1: F401 'os' imported but unused\nFound 1 error.\n\u001b[31mtrufflehog\u001b[0m: potential secret in src/a.py"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret"
+   },
+   "note": "secret/SAST thắng mọi loại khác — không tự sửa lint rồi bỏ qua bí mật"
+  },
+  {
+   "id": "ci-test-with-network-words",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "FAILED tests/test_net.py::test_retry - ConnectionError: connection refused\n1 failed, 20 passed"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "test đỏ nhắc lỗi mạng không phải hạ tầng — không re-run cho tới khi may xanh"
+  },
+  {
+   "id": "ci-migration",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "alembic upgrade head failed: duplicate column"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "migration"
+   }
+  },
+  {
+   "id": "ci-coverage",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "log": "Coverage failure: total of 98 is less than fail-under=100"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "coverage"
+   }
+  },
+  {
+   "id": "ci-adv-gitleaks-skipped",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "+ scripts/dev-task.sh gate: gitleaks protect (skipped: not installed)\nFAILED test_y"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "tên công cụ in lại không phải phát hiện — test đỏ cạnh đó không bị block oan"
+  },
+  {
+   "id": "ci-adv-gitleaks-clean",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "quality\tgitleaks\t2026-10-19T10:00:00.0Z INF no leaks found\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   }
+  },
+  {
+   "id": "ci-gitleaks-detected",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "gitleaks detect: 2 leaks detected\nFAILED test_y"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   }
+  },
+  {
+   "id": "ci-sast-tool-failed-is-infra",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "codeql-action upload failed: network\nError: connect ETIMEDOUT 140.82.112.3:443"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": true,
+    "category": "infra"
+   },
+   "note": "công cụ SAST tự lỗi không phải phát hiện (PR #173)"
+  },
+  {
+   "id": "ci-sast-no-issues-is-test",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "bandit: no issues identified\nFAILED test_x"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "báo sạch của SAST không phải phát hiện (PR #173)"
+  },
+  {
+   "id": "ci-assertion-mentions-secret",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "AssertionError: expected secret detected in output"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "test đỏ nhắc chữ secret là test (PR #173)"
+  }
+ ]
+}

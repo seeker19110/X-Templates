@@ -1,0 +1,481 @@
+{
+ "cases": [
+  {
+   "id": "rollup-control-green",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": true
+   }
+  },
+  {
+   "id": "rollup-rec08-required-skipped",
+   "origin": "repro",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "merge-gate",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ],
+    "required": [
+     {
+      "context": "quality"
+     },
+     {
+      "context": "merge-gate"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-rec08-required-neutral",
+   "origin": "repro",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "NEUTRAL"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ],
+    "required": [
+     {
+      "context": "quality"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-rec08-foreign-app",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "appId": 999
+     }
+    ],
+    "required": [
+     {
+      "context": "quality",
+      "appId": 15368
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   },
+   "note": "check bắt buộc cùng tên do app khác sinh (workflow giả) không thay được check thật"
+  },
+  {
+   "id": "rollup-control-required-real-plus-foreign-skipped",
+   "origin": "control",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "appId": 15368
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "appId": 999
+     }
+    ],
+    "required": [
+     {
+      "context": "quality",
+      "appId": 15368
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": true
+   }
+  },
+  {
+   "id": "rollup-required-cancelled",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "CANCELLED"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ],
+    "required": [
+     {
+      "context": "quality"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false
+   }
+  },
+  {
+   "id": "rollup-required-stale",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "STALE"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ],
+    "required": [
+     {
+      "context": "quality"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false
+   }
+  },
+  {
+   "id": "rollup-har023-only-skipped",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-023"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "lint",
+      "status": "COMPLETED",
+      "conclusion": "NEUTRAL"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-har023-empty",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-023"
+   ],
+   "input": {
+    "rollup": []
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-har058-only-merge-gate",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-058"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "merge-gate",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-har058-merge-gate-and-steward",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-058"
+   ],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "Merge-Gate",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "pr-steward",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "human"
+   }
+  },
+  {
+   "id": "rollup-har038-rerun-green-wins",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-038"
+   ],
+   "input": {
+    "check_runs": [
+     {
+      "id": 1,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "failure",
+      "app": {
+       "id": 15368
+      }
+     },
+     {
+      "id": 2,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 15368
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": true
+   },
+   "note": "chạy lại check trên cùng head: lần mới nhất (id lớn nhất) có hiệu lực — lần đỏ cũ không che (AUD-HAR-038)"
+  },
+  {
+   "id": "rollup-har038-rerun-red-wins",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-038"
+   ],
+   "input": {
+    "check_runs": [
+     {
+      "id": 5,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 15368
+      }
+     },
+     {
+      "id": 9,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "failure",
+      "app": {
+       "id": 15368
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "fix"
+   }
+  },
+  {
+   "id": "rollup-same-name-other-app-red",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-038"
+   ],
+   "input": {
+    "check_runs": [
+     {
+      "id": 9,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 1
+      }
+     },
+     {
+      "id": 3,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "failure",
+      "app": {
+       "id": 2
+      }
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "fix"
+   },
+   "note": "check cùng tên của app khác là check khác — lần xanh của app này không che lần đỏ của app kia (AUD-CODE-007)"
+  },
+  {
+   "id": "rollup-status-context-red",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "check_runs": [
+     {
+      "id": 1,
+      "name": "quality",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {
+       "id": 15368
+      }
+     }
+    ],
+    "statuses": [
+     {
+      "context": "ci/legacy",
+      "state": "failure"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "fix"
+   }
+  },
+  {
+   "id": "rollup-pending",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "wait"
+   }
+  },
+  {
+   "id": "rollup-startup-failure",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "rollup": [
+     {
+      "__typename": "CheckRun",
+      "name": "quality",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+     },
+     {
+      "__typename": "CheckRun",
+      "name": "tests",
+      "status": "COMPLETED",
+      "conclusion": "STARTUP_FAILURE"
+     }
+    ]
+   },
+   "expect": {
+    "ci_green": false,
+    "ci": "fix"
+   }
+  }
+ ]
+}

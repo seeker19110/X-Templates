@@ -5,6 +5,117 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-10-20
+
+**Dự án đích: chạy lại `install.py`** (hook `task-completed`/`subagent-stop`, `PermissionRequest`, guard, `xt.py`, workflow steward, manifest). Dự án cài trước bản này chưa có `.xtemplates/manifest.json`: `ask` cũ do khung từng đặt được giữ và báo `ask_unproven` (D-085). Ghép lại blueprint quy mô M với `compose --feature auth` để nhận `BE-AUTH-003/006/008/015` (ADR-0030). Vòng autopilot đang chạy: `loop verify --all` trước `done` (D-084).
+
+
+### Added
+- Đo tự chủ trước khi mở rộng (T-1521, AUTO-07): `xt.py autonomy-bench [--corpus DIR] [--json]` chạy corpus `tests/fixtures/autonomy/` (PR, rollup, review, guard, log CI, harness — 269 ca) qua hàm thật của khung (`merge_check_result` = `merge_decision` + `merge_eligibility`, `_ci_blocker`, `pr_next`, guard `_rule_decision` + `apply_policy`, `ci_classify`); exit 1 khi false-green > 0, 2 khi corpus hỏng; báo chặn oan, độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa của sổ audit, ID ngoài phạm vi khai lý do ở `scope.json`). Job CI `quality` chạy lệnh này; số đo và giới hạn ở [`docs/ops/AUTONOMY-BASELINE.md`](docs/ops/AUTONOMY-BASELINE.md). Tách hàm thuần `rest_rollup`, `prefixed_globs`, `merge_check_result` (hành vi không đổi). `tests/fixtures/autonomy/pending/` giữ 5 false-green mới phát hiện ở guard, chưa sửa (ngoài cổng).
+- Mục thiết yếu không bị trần MUST ở M (T-1519, REC-05, [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md)):
+  `xt.py compose --feature <auth|jwt|oauth|reset|payment|pii>` (lặp được) đưa mục `MUST@L` mà module khai ở frontmatter
+  `essential: [<ID>@<fact>]` lên MUST ở quy mô M; S/L và ghép không `--feature` không đổi một byte. Blueprint ghi
+  `features:` + dòng `> Feature:`; stderr báo ID được đưa lên. `validate` chặn `essential` sai dạng/fact lạ/ID không
+  phải `MUST@L`/quá 4 ID mỗi file/dùng ở sàn. Thí điểm `08-backend/authn-authz.md`: **`BE-AUTH-003`** (`auth`),
+  **`BE-AUTH-006`** (`jwt`), **`BE-AUTH-008`** (`oauth`), **`BE-AUTH-015`** (`reset`) — mức gốc giữ `MUST@L`, chữ mục
+  không đổi; nguồn RFC 8725, OWASP Authentication và Forgot Password xác minh lại 2026-10-20. Dự án đích: chạy lại
+  `install.py`, rồi ghép lại blueprint M kèm `--feature` đúng tính năng đang có (trạng thái giữ theo ID).
+- Drift có kiểm chứng (T-1518, AUTO-06): `xt.py doctor --drift [--latest TAG] [--json]` so `.xtemplates/manifest.json` với
+  bản cài — file thiếu/`modified`, rule `allow`/`deny` của khung không còn trong `settings.json`, thiếu AGENTS/CLAUDE/khung,
+  nhãn khung cũ hơn tag mới nhất (`--latest` hoặc `gh api`, fail-open); exit 1 khi lệch (trừ `modified`). `doctor` thêm
+  hook `TaskCompleted`/`SubagentStop` (cảnh báo khi thiếu). Mẫu Routine tuần cho dự án đích ở `stop-points-and-escalation.md`.
+  Dự án đích: chạy lại `install.py`.
+- Đồ thị task của PLAN (T-1511, AUTO-01): `xt.py` đọc `(sau: T-…; files: …)` trên dòng task; `loop next [--json]` trả task
+  sẵn sàng + cặp giao nhau `files:`; `loop record` từ chối (exit 2) khi dependency `sau:` còn mở; `loop status` báo chu trình
+  (`cycles` trong `--json`). `framework/templates/PLAN.md` mô tả cú pháp. Dự án đích: chạy lại `install.py`.
+- Gói ngữ cảnh task (T-1512, REC-11): `xt.py context --task T-NNNN [--json] [--plan FILE]` trả ID yêu cầu, đoạn spec, Gate,
+  `files:`, file thiếu và số byte (spec + file/thư mục trong phạm vi). Dự án đích: chạy lại `install.py`.
+- Evidence v2 (T-1513, AUTO-02): `loop record` ghi thêm `scope` (`files:` của task), `req_rev` (sha256[:16] đoạn spec
+  của task) và `files_digest` (sha256 cây các đường dẫn trong `files:`, lấy trước khi chạy Gate); `loop verify` chỉ chạy
+  lại Gate có lệnh/phạm vi/spec/digest đổi, giữ Gate còn khớp (`kept` trong `verified.json`, `mode: changed`), `--all`
+  chạy hết. Evidence cũ thiếu trường, task không khai `files:` hoặc digest đọc lỗi → chạy lại; lệnh sàn Gate vẫn chạy
+  khi chỉ trùng Gate được giữ. Dự án đích: chạy lại `install.py`.
+- Nâng khung có kế hoạch (T-1516, REC-09): `install.py <dự-án> --plan` in JSON diff (quyền thêm/bớt, `ask` trùng chuỗi
+  nhưng không chứng minh được, hook thêm/đổi matcher, hành động từng file) và không ghi gì; `.xtemplates/manifest.json` ghi
+  hash file harness + rule do khung đặt + chính sách. Dự án đích: chạy lại `install.py`.
+- Phân loại lỗi CI có ngân sách (T-1515, AUTO-04): `xt.py loop ci-triage --run <id> [--task T-NNN] [--cost-usd X]
+  [--json] [--log FILE]` đọc log bước đỏ qua `gh run view --log-failed`, phân loại secret/SAST · migration · type ·
+  coverage · lint · test · hạ tầng · unknown, trả `block`/`defer`/`rerun`/`fix`; `state.json` `episode` giữ `rerun_used`
+  (≤ 1), `fix_attempts`, `cost_usd` (chưa đo → `null`) qua restart; cùng chữ ký lần 3 → `defer` task, secret/SAST →
+  `blocked` (`self-healing-ci.md`, `LOOP-CI-002` Kiểm). Dự án đích: chạy lại `install.py`.
+- Cổng bằng chứng mức task/subagent (T-1514, AUTO-02, D-068): hook `.claude/hooks/task-completed.sh` (sự kiện
+  `TaskCompleted`) exit 2 — task không được đánh dấu xong — khi vòng autopilot đang bật mà `T-NNN` trong subject chưa có
+  evidence xanh đúng Gate (cùng `_verdict_task` với Stop hook; ID ngoài PLAN chỉ đòi evidence exit 0); hook
+  `.claude/hooks/subagent-stop.sh` (sự kiện `SubagentStop`) trả `block` một lần khi báo cáo `executor`/`executor-deep`
+  thiếu lệnh + exit code. Cả hai fail-open khi lỗi. Guard PreToolUse (Bash, Edit/Write, MCP) đặt `"onFailure": "block"`
+  — hook lỗi/hết giờ thì chặn tool (`LOOP-DESIGN-010`); `install.py` gộp hai sự kiện mới và thêm `onFailure` vào handler
+  cùng lệnh của dự án đã cài (giá trị dự án tự đặt giữ nguyên; báo trong `hooks_matcher_updated`). Dự án đích: chạy lại
+  `install.py`.
+- Link ngoài phân loại (T-1520, REC-13): `scripts/check-links.py --external [--retries N] [--timeout S]` chia lỗi tạm
+  (5xx/408/timeout/lỗi mạng — thử lại hữu hạn, còn lỗi thì cảnh báo) · đã đổi (3xx như 301 — cảnh báo cập nhật URL) ·
+  chết (404… — exit 1) · chưa xác minh (403/429 — cảnh báo, không kết luận); `links.yml` dùng nó. Chính sách tự chủ một nhà (REC-10):
+  `framework/11-autonomous-loop/stop-points-and-escalation.md`, README của mảng chỉ liên kết (test
+  `autonomy_policy_single_home`).
+- Steward theo sự kiện (T-1517, AUTO-05): `pr-steward.yml` chạy thêm khi `workflow_run` của `CI`/`merge-gate` xong và
+  `check_suite: completed` (check của app ngoài); `xt.py pr steward --event <payload>` chỉ xét PR gắn với sự kiện (không
+  gắn PR → mọi PR mở). Mỗi hành động idempotent theo (repo, PR, head, hành động): đọc lại PR ngay trước khi làm — đã
+  đóng/merge, head đổi, bật khi đã bật, tắt khi đã tắt → bỏ qua (`note`, run xanh); sự kiện cho head cũ → xét head hiện
+  tại. Nhóm `concurrency` theo PR. Mẫu Routine `pull_request.synchronize` cho `fix`/`update` ở
+  `stop-points-and-escalation.md` (`LOOP-STOP-029` Kiểm). Dự án đích: chạy lại `install.py`.
+
+### Changed
+- Kiểm lại cuối (`LOOP-DESIGN-022`, D-084): Stop hook (`final_check`) và `release-check` chỉ nhận `verified.json` có
+  `mode: "all"` — lần `loop verify` cuối trước `done` phải là `--all`; verify không `--all` (chỉ Gate có đầu vào đổi) dùng
+  giữa vòng. `verified.json` không có `mode` (bản cũ) coi như một phần. Dự án đích: chạy lại `install.py`.
+- `install.py` chỉ gỡ `ask` khi `.xtemplates/manifest.json` chứng minh khung đã đặt (trước: gỡ mọi `ask` trùng chuỗi
+  `OLD_FRAMEWORK_ASK`, có thể xoá rule của dự án); chuỗi trùng không có nguồn gốc → giữ và báo. Dự án cài trước bản này
+  chưa có manifest → `ask` cũ của khung không tự gỡ nữa (xoá tay nếu muốn).
+- `xt.yaml` `merge_risk_paths` thêm `docs/autopilot/PLAN*.md` (file PLAN chứa lệnh Gate harness chạy → PR đi làn chuẩn).
+
+### Fixed
+- Review PR #173: `loop ci-triage` lớp `secret` không còn bắt oan SAST tự lỗi (`codeql-action upload failed`, `semgrep …
+  failed to download rules`), báo sạch (`bandit: no issues identified`) hay dòng test đỏ nhắc chữ secret
+  (`AssertionError: expected secret detected…`) — thành `test`/`infra`; phát hiện thật vẫn block (+3 ca `ci_log`).
+  `(sau:/files:)` đọc khoá ở bất kỳ đâu trong ngoặc (`(S-001, sau: T-001)`, `(sau: T-001, files: a.py)`,
+  `files: b (c).py`); ghi chú không đọc được → cảnh báo `bad_links` ở `loop next`/`loop status`. `files:` giao nhau
+  chuẩn hoá `./`/`//` và hiểu glob (`src/*.py` ∩ `src/a.py`). `doctor --drift`: gỡ rule `allow` của khung (trừ `Bash`) là
+  `modified` (siết quyền), không đỏ; manifest trỏ đường tuyệt đối/`..`/không phải file thường → `invalid`, không đọc;
+  băm theo luồng. `context`: `files:` tuyệt đối/`..`/symlink/FIFO → `missing_files`, thư mục chỉ cộng file thường.
+  `install.py`: `rules` trong `manifest.json` khử trùng (không phình khi cài lại). `check-links.py --external`: HEAD 4xx
+  (trừ 404/410) thử GET trước khi kết luận chết; 401 là "chưa xác minh". Dự án đích: chạy lại `install.py`.
+- Guard (T-1523): sửa 5 false-green `autonomy-bench` tìm ra và brace lệch nháy, ở chính sách mặc định (ADR-0018).
+  **AUD-SEC-077** 🔴: surrogate lẻ/NUL trong lệnh, đường dẫn hoặc payload làm guard sập rồi fail-open → làm sạch trước khi
+  quét (U+FFFD, khoảng trắng), `rel_path` không sập. **AUD-SEC-072** 🔴: `_unquoted` hiểu `$'…'` (kể cả `\'`) và thân
+  `$(…)` trong nháy kép → `{…}` sau đó bung và được quét. **AUD-SEC-078/079**: `… | xargs git push …` và `git push … $(…)`
+  — đích push từ stdin hoặc thay lệnh không tính được → mã mới `UNRESOLVED_TARGET` (unsure → chặn); `$(echo main)` →
+  `main`, `$(git branch --show-current)` → nhánh thật. **AUD-SEC-080**: chữ echo/printf đi qua `tee`/`cat`/`head`/`tail`
+  (không file) rồi vào shell, hoặc vào `xargs … sh -c`, được quét. **AUD-SEC-081**: `ssh` tới loopback quét lệnh từ xa
+  (chạy ở `~`), `-o ProxyCommand/LocalCommand/KnownHostsCommand` quét với mọi máy đích. Ca chuyển từ
+  `tests/fixtures/autonomy/pending/` sang `guard.json` (257 ca, 0 false-green); corpus ALLOW của
+  `tests/test_guard_corpus.py` không đổi và vẫn không bị chặn. Dự án đích: chạy lại `install.py`.
+- Audit delta mốc Đợt 4 (T-1524, D-091). **AUD-SEC-082** 🟠 guard: refspec của `git push` là biến không giải được
+  (`B=$(cat .branch); git push origin $B`, `read B; git push origin "$B"`, `${B:-x}`, `$1`/`$@`) → `UNRESOLVED_TARGET`
+  (unsure → chặn); biến gán chữ trong cùng lệnh được giải và xét theo giá trị (`B=main` → `PUSH_MAIN`,
+  `B=$(git branch --show-current)` → nhánh thật); `git push origin HEAD`/`feat/x`, push trần, biến chỉ ở remote không
+  đổi. **AUD-HAR-091** 🟠 `loop ci-triage`: lớp `secret` đòi từ khoá phát hiện cùng dòng — tên công cụ in lại
+  (`gitleaks protect (skipped: not installed)`) hay báo sạch (`no leaks found`, `0 findings`) cạnh test đỏ không còn
+  `block` oan; phát hiện thật vẫn block. **AUD-HAR-092** 🟠: đổi/bỏ `--task` không còn đặt lại đếm cùng chữ ký, lượt
+  re-run, chi phí và run đã triage của episode (trước: luân phiên `--task` lách trần 3 lần); `loop init --force` vẫn xoá
+  (D-087). 🟡 `loop status`/`loop next` cảnh báo `sau:` trỏ ID không có trong PLAN (JSON `unknown_after`), không đổi
+  hành vi chặn. `autonomy-bench`: 266 ca, 0 false-green. Dự án đích: chạy lại `install.py`.
+- Review độc lập PR #173. 🔴 `check-links.py --external` chỉ đọc đích của link Markdown (ngoặc vuông + ngoặc tròn) nên chỉ kiểm 9 URL — khung ghi nguồn
+  bằng autolink `<https://…>` (≈ 800 URL, lychee trước đây có quét) → `links.yml` xanh giả. Giờ đọc cả autolink và URL
+  trần (bỏ dấu câu/`)` đóng câu), bỏ qua URL trong code span và code fence (ví dụ `https://evil/…`); dedup, phân loại,
+  retry giữ nguyên; repo hiện 812 URL. Job `links.yml` nâng `timeout-minutes` 20 → 30 (812 URL / 8 luồng thường vài
+  phút; chừa chỗ cho nhóm host timeout × 3 lần thử). 🟠 `compose --out` có file cũ mà `features:` cũ có fact lần ghép
+  này bỏ → stderr `⚠ bỏ feature <fact>: N mục về SHOULD (<ID>…)`; exit code và nội dung ghi không đổi (khoá `features`
+  vào `scope` của `loop init` để sau — ADR-0030). 🟢 `autonomy-bench` exit 1 cả khi có ca lệch (kể cả `code` khác
+  mong đợi) hoặc ID bắt buộc chưa có ca; `doctor --drift --latest <sai dạng>` → exit 2 kèm lỗi thay vì lặng lẽ bỏ qua;
+  `compose --feature` ở M không đổi mục nào thì nói lý do thật (không module nào khai fact) thay vì "chỉ M". 🟡 PLAN
+  T-1510 ghi đúng: 3.9.0 không tag riêng vì VERSION lên 3.10.0 trong cùng PR (D-093). Dự án đích: chạy lại `install.py`.
+
+## [3.9.0] - 2026-10-19
+
 ### Added
 - Hai tầng executor, chuyển cấp, audit theo mốc, review chưa kết luận, cổng G7 máy đọc ([ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md),
   D-075…D-078; nghiên cứu [`research/2026-10-19-rapid-build-then-harden.md`](research/2026-10-19-rapid-build-then-harden.md)):
@@ -37,6 +148,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   `review_identity` (chỉ dấu của tài khoản đó được tin), `author_model_family`/`reviewer_model_family` (`ci-check` từ chối
   trùng họ; `pr reviewed --clean` lấy họ từ cấu hình khi không truyền cờ). Mặc định TẮT tới khi chủ repo cấp
   `XT_REVIEWER_TOKEN`, `ANTHROPIC_API_KEY` (environment `pr-review`) và đặt biến `XT_REVIEWER_ENABLED=true`.
+
+- Guard có quyết định kiểu (REC-04, T-1509, D-081/D-082): `Decision(action, code, confidence, missing)` và bảng `apply_policy`
+  tra theo mã lý do; mã UNPARSED/BUDGET hoặc `confidence: unsure` trong nhóm chặn → deny ở bash/mcp/edit (`XT_GUARD_POLICY=strict`
+  giữ hành vi hỏi cũ). Hook mới `.claude/hooks/permission-request.sh` (sự kiện `PermissionRequest`, cho headless): guard không
+  phản đối thì im lặng, không tự allow. Corpus chặn oan không tăng (`test_guard_corpus_typed_decision_codes`).
+  **Dự án đích:** chạy lại `install.py` (hook + `settings.json`).
 
 ### Changed
 - `merge_risk_paths` của repo khung bỏ tài liệu thuần (`docs/adr/*`, `framework/11-autonomous-loop/*`, `code-review.md`) — PR chỉ sửa

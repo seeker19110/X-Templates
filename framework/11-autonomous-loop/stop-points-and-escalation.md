@@ -3,7 +3,7 @@ title: Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
 kind: module
 prefix: LOOP-STOP
 applies_to: [all]
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
@@ -133,6 +133,55 @@ Ngoại lệ cứng: **xác thực/phân quyền · thanh toán · mật mã lu�
 liệt kê lý do ở `hard_waived` nhưng `hard` rỗng — PR vẫn làn chuẩn, ở L3 merge như PR làn chuẩn khác (review sạch ở H — `LOOP-STOP-022`); thiếu khoá, giá
 trị lạ, không đọc được = `human`. PR đổi chính khoá luôn người merge (không tự miễn).
 
+### Steward theo sự kiện và Routine kích phiên (AUTO-05)
+
+`pr-steward.yml` xét lại PR **ngay khi trạng thái đổi**, lịch 10 phút chỉ là lưới bù:
+
+| Trigger | Khi nào | PR được xét |
+|---|---|---|
+| `workflow_run` (`workflows: [CI, merge-gate]`, `completed`) | Check của GitHub Actions xong (job `quality`, `merge-gate`) | `pull_requests` trong payload; trống (push lên nhánh đích, PR từ fork) → mọi PR mở |
+| `check_suite: completed` | Check của app ngoài xong (GitHub **không** kích sự kiện này cho check suite do Actions tạo — chống đệ quy) | Như trên |
+| `issue_comment` có dấu `xt-review v1` | Review đăng lên PR (ADR-0027) | PR của comment |
+| `schedule` / `workflow_dispatch` | Lưới bù / chạy tay | Mọi PR mở hoặc `inputs.pr` |
+
+Idempotent theo khoá **(repo, PR, head, hành động)**: payload chỉ chọn PR cần xét — head, auto-merge, check, review luôn
+đọc lại từ GitHub (`pr next` như phiên agent), và `xt.py pr steward` **đọc lại PR ngay trước mỗi hành động**: PR đã
+đóng/merge, head đã đổi, bật khi đã bật, tắt khi đã tắt → bỏ qua (ghi `bỏ qua <khoá> — <lý do>`, run xanh); không đọc lại
+được → không làm, run đỏ để lượt sau thử lại. Vì vậy sự kiện lặp, sự kiện đến sai thứ tự (head của payload cũ hơn head
+hiện tại → xét và ghim head hiện tại, ghi chú) và re-run sau restart không lặp tác dụng phụ. Nhóm `concurrency` theo PR
+của sự kiện (`pr-steward-<N>`, lịch: `pr-steward-all`): GitHub chỉ giữ một lượt chờ mỗi nhóm, nhóm chung sẽ để sự kiện
+của PR khác thay mất lượt đang chờ; lượt `all` chạy song song lượt của một PR an toàn nhờ bước đọc lại. Dự án đích đặt
+tên workflow CI khác thì sửa `workflows:` (tên không khớp = không bao giờ kích).
+
+**Routine kích phiên cho việc steward không làm được.** Steward chỉ bật/tắt auto-merge, merge ghim head và (có
+`XT_STEWARD_TOKEN`) cập nhật nhánh; hành động `fix` (CI đỏ do mã) và `update` khi thiếu token chỉ được báo. Mẫu Routine
+(research preview — hành vi và giới hạn có thể đổi):
+
+- Trigger GitHub `pull_request.synchronize` (thêm `pull_request.opened` nếu muốn), lọc *Base branch* = nhánh mặc định,
+  *Is draft* = `false`; repo của PR là repo đầu tiên của Routine để phiên bắt đầu từ head của PR.
+- Prompt: chạy `python3 .xtemplates/scripts/xt.py pr next --pr <N> --json`; chỉ làm khi `action` là `fix` (đọc
+  `loop ci-triage`, sửa trong phạm vi PR, qua `/gate`, push lên **nhánh head của PR** — tắt auto-merge trước, `LOOP-STOP-022`)
+  hoặc `update` (cập nhật nhánh ghim head: `gh api -X PUT repos/<o>/<r>/pulls/<N>/update-branch -f expected_head_sha=<head>`);
+  hành động khác → kết thúc không làm gì. Ngân sách sửa theo `self-healing-ci.md` (cùng chữ ký lỗi 3 lần → `loop defer`).
+- Danh tính: Routine chạy bằng tài khoản GitHub của chủ Routine — commit/push hiện là người đó. Review từ Routine **không**
+  tính là review độc lập với tác giả (`review_identity`, ADR-0027); `review` vẫn do reviewer khác danh tính/khác họ model.
+- Routine mặc định push nhánh `claude/…`; prompt phải chỉ rõ nhánh head của PR, và ruleset nhánh vẫn là lớp chặn (push
+  thẳng nhánh chính bị từ chối). Sự kiện vượt trần theo giờ bị bỏ — steward theo lịch vẫn báo `fix`/`update` còn treo.
+
+**Routine tuần ở dự án đích: phát hiện lệch và mở PR nâng cấp (AUTO-06).** Mẫu (research preview), lịch tuần một lần:
+
+- Trigger *Schedule* hằng tuần (≥ 1 giờ/lần là giới hạn của Routine); repo là dự án đích, nhánh mặc định.
+- Prompt: (1) `python3 .xtemplates/scripts/xt.py doctor --drift --json` — `ok: true` và không có `outdated` → kết thúc
+  không làm gì; (2) có `outdated`/`missing`: trong bản clone X-Templates mới nhất chạy
+  `python3 <clone>/scripts/install.py <gốc dự án> --plan` đọc JSON, rồi `install.py` (copy-if-absent, giữ file
+  `modified`, chỉ gỡ `ask` có trong `.xtemplates/manifest.json`), làm các bước "Dự án đích" của `CHANGELOG.md`, qua
+  `/gate`, mở **PR nháp** từ nhánh `claude/upgrade-<tag>` (`LOOP-STOP-014`: chỉ đề xuất, không merge).
+- Phạm vi: không đổi ruleset, secret hay production; `modified` là tuỳ chỉnh hợp lệ — liệt kê trong mô tả PR, không ghi đè.
+  Danh tính, trần sự kiện và việc review như Routine ở trên (review không độc lập với tác giả).
+- `doctor --drift --json` trả `{ok, installed, latest, manifest, drift: [{kind: file|permission|doc|version|manifest,
+  state: missing|modified|outdated, subject, msg}]}`; exit 1 khi có lệch khác `modified`. `--latest vX.Y.Z` cấp tag
+  không cần mạng; không cấp thì hỏi `gh api` và fail-open (không biết tag → không kết luận về phiên bản).
+
 ## Checklist
 
 - [ ] `LOOP-STOP-001` **MUST** Lệnh phá huỷ/không đảo ngược bị **deny** ở PreToolUse (không chỉ `ask`), sau khi tách lệnh nối `; && | ||`. Lệnh lồng cũng được quét: `sh -c`/`bash -c`, `eval '…'`, backtick, `{ …; }`, `if …; then …`, heredoc/ống vào shell, `find … -delete`/`-exec rm` (gốc `/`, `~` → deny); xoá đệ quy ra ngoài gốc dự án (trừ thư mục tạm) → deny (`XT_GUARD_POLICY=strict`: ask). → Kiểm: hook trả `permissionDecision: deny` cho `ls; rm -rf /`, `git push --force`, `eval 'rm -rf ~'`, `` echo `rm -rf ~` ``, `{ rm -rf ~; }`, `find / -exec rm -rf {} +`; deny cho `rm -rf ~/x` (strict: ask); test hook xanh (`tests/test_hooks.py` `GuardStoredScanTest`). · Nguồn: stored 12 §4 quy tắc 6
@@ -164,7 +213,7 @@ trị lạ, không đọc được = `human`. PR đổi chính khoá luôn ngư�
   required check `merge-gate` chạy `merge-check` bằng mã của nhánh mặc định trên head hiện tại, đỏ khi `hard` mà auto-merge đang bật (ADR-0023). → Kiểm: `xt.py grant-check payments mode=live` exit 1 khi PLAN chỉ có `mode=sandbox`; `merge-check` báo `hard` cho PR đổi hiệu lực grant kể cả đổi code fence/viết hoa (`test_plan_grant_effect_changes_are_hard`) hoặc đổi tên/sao chép vào PLAN.md (`test_rename_or_copy_into_plan_is_hard`); `merge-gate` đỏ khi head đó có auto-merge (`MergeGateTest`); `grant-check` chỉ đọc REST nhánh mặc định nên sửa tại chỗ/ref cục bộ không có tác dụng (`test_within_grant_reads_default_branch_via_rest`); test `tests/test_grants.py`. · Nguồn: ADR-0022
 - [ ] `LOOP-STOP-027` **MUST@L** Lệnh do model viết mà harness chạy — Gate trong `PLAN.md`, `— Kiểm:` trong blueprint (`loop record`/`loop verify`/`blueprint-status --run`), lệnh trong `xt.yaml` (sàn Gate; `dev-task.sh` ở cổng commit, `/gate`, `format_file` sau mỗi lần sửa — qua `xt.py guard-check`) — qua **cùng luật guard** như lệnh Bash của agent trước khi chạy; bị cấm thì không chạy, exit 126 kèm lý do, task đỏ. Guard lấy ở dự án rồi ở bản cài của chính `xt.py` (đổi `CLAUDE_PROJECT_DIR` không thoát được); harness đã cài (`.claude/settings.json`) mà thiếu guard → chặn như hook. Stop hook buộc chạy `loop verify` (`LOOP-DESIGN-022`), nên một Gate độc hay gõ nhầm (`git push --force …`, `rm -rf ~/…`) sẽ chạy ngoài hàng rào ở mọi phiên nếu bỏ bước này. Chưa cài harness → chạy (fail-open về luồng); guard lỗi giữa chừng → như hook (`_failure_decision`: merge/`gh api` bị chặn, lệnh khác chạy). → Kiểm: `GuardChokePointTest` (`tests/test_xt_core.py`): lệnh bị cấm ra exit 126 và file canary không được tạo. · Nguồn: seeker19110/stored mục 01 §3g (lệnh test do LLM đề xuất chạy thẳng `sh -c` — rà 2026-10-18); OWASP Top 10 for Agentic Applications 2026 — ASI05 Unexpected Code Execution (https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/, đọc 2026-10-18)
 - [ ] `LOOP-STOP-028` **MUST@L** Agent không mở CLI agent khác Claude Code (codex, gemini, copilot, opencode, aider, cursor-agent, amp…) với cờ hoặc biến môi trường **tự duyệt mọi công cụ** (codex `--yolo`/`--dangerously-bypass-approvals-and-sandbox`, `-s danger-full-access`, `-a never`, `--approve-for-me`; gemini `--approval-mode=yolo`/`--yolo`; copilot `--allow-all-tools`/`--allow-all`/`--yolo`/`COPILOT_ALLOW_ALL`; opencode `--auto`; aider `--yes-always`/`AIDER_YES_ALWAYS`; cursor-agent `--force`/`--yolo`/`--approve-mcps`; amp `--dangerously-allow-all`): agent lồng không chạy hook của khung — một lệnh là ra khỏi mọi hàng rào (đường vòng của `LOOP-STOP-025`). Guard **chặn**; Claude Code lồng vẫn nạp hook của dự án nên chỉ chặn cờ tắt hook (`LOOP-HARNESS-018`). Nhận cả dạng qua `npx`/`npm exec … --`/`uvx`/`pipx run`, gói kèm `@phiên-bản`, cụm cờ ngắn (`-yp`), viết tắt cờ argparse (`aider --yes`), `export VAR=…` trước đó trong cùng lệnh, Codex `-c approval_policy=never`/`sandbox_mode=danger-full-access`. Cùng nhóm: `--no-verify`/`-c core.hooksPath=…`/`GIT_CONFIG_KEY_n=core.hooksPath` chỉ tắt git hook — cổng của khung vẫn chạy trước commit (strict: hỏi người); ghi `.git/hooks`, `.git/config` (kể cả sau `cd`, `chmod`), đặt/bỏ `core.hooksPath`, hay đặt khoá git chạy lệnh tuỳ ý — nhận theo **mẫu**: `core.{fsmonitor,sshCommand,gitProxy,pager,editor,askpass,alternateRefsCommand}`, `pager.*`, `alias.*`, `protocol.*.allow`, `gpg.*.program`, `submodule.*.update`, `sendemail.*cmd`, `init.templateDir`, mọi khoá đuôi `.path`/`.cmd`/`.command`/`.program`/`.helper`/`.textconv`/`.smudge`/`.clean`/`.driver`/`.uploadpack`/`.receivepack`, và URL `ext::` ở mọi lệnh git — bằng `git config`, `git config -f .git/config`, hay một lần `git -c k=v` → chặn, trừ giá trị khớp **nguyên văn** tập an toàn (alias không `!`, `credential.helper` store/cache/osxkeychain/manager/`/usr/…/git-credential-*`, `core.pager` cat/less [-FRSX], `core.editor` vim/nano/`code --wait`, `core.sshCommand` `ssh -i <khoá>` [-o StrictHostKeyChecking/IdentitiesOnly…], `core.fsmonitor` true/false, `merge.*.driver true`, `gpg.program gpg2`, `protocol.{http,https,ssh,git,file}.allow`; `protocol.ext.allow` chỉ `never`); giá trị khác người đặt tay: không vào commit, không có dấu vết PR, lệnh chạy về sau ngoài guard. Giới hạn đã biết (phân tích tĩnh, cùng loại lệnh trong trình thông dịch): cấu hình qua biến môi trường (`GIT_ALLOW_PROTOCOL`, `export GIT_CONFIG_*` trước lệnh), `find … -exec chmod`, tuỳ chọn pager riêng của công cụ (`delta.*.pager`) — cổng của khung vẫn chạy trước commit. Thiết lập husky/lefthook bằng tay (`git config core.hooksPath .husky`) vì thế cũng bị chặn — dùng `npx husky`/`lefthook install`/`pre-commit install`, hoặc người tự đặt. → Kiểm: `GuardStored1018Test` (`tests/test_hooks.py`). · Nguồn: seeker19110/stored mục 01 §3g.4 (runner `codex exec --full-auto`, `copilot --allow-all-tools`; model ghi được `.git/hooks`), 03 §8c; OWASP Top 10 for Agentic Applications 2026 — ASI02 Tool Misuse, ASI05 Unexpected Code Execution; cờ đọc 2026-10-18 từ docs/mã nguồn Codex CLI, Gemini CLI, Copilot CLI, opencode, aider, Cursor CLI (Amp: docs E2B/SDK, chưa thấy ở docs chính thức)
-- [ ] `LOOP-STOP-029` **SHOULD** PR đủ tiêu chuẩn vào nhánh chính **không phụ thuộc phiên agent còn sống**: kết quả review ghi lên chính PR (`xt.py pr reviewed` đăng comment có dấu `xt-review v1 head=<SHA> verdict=…`, không tên model), và một job chạy trên nền tảng CI (`pr-steward.yml`: lịch ≤ 15 phút + khi có comment review) gọi cùng luật `pr next` cho mọi PR mở để bật auto-merge hoặc merge ghim head; chỉ tin dấu của người có quyền ghi repo; chỉ tự merge PR cùng repo của tác giả có quyền ghi (PR từ fork/người ngoài → người merge); PR từng vào làn chuẩn mang nhãn bền để giữ chặt; job không chạy code của PR (ADR-0027); PR tụt sau base thì job cập nhật nhánh (ghim head cũ) và review sạch mang sang head mới chỉ khi head là merge base không đổi tập thay đổi của PR (tên file, trạng thái, blob) và nhánh đích không chạm file nào của PR — khác đi thì review lại; job chạy bằng GITHUB_TOKEN không tự cập nhật nhánh vì commit đó không kích CI (D-061); nhánh đích không có check bắt buộc thì job không bật auto-merge (GitHub merge ngay lúc bật, trước khi CI xong — D-062); PR đủ điều kiện (`merge-check` = `merge`) thì `pr next` trả merge ghim head kể cả khi auto-merge đang bật mà GitHub chưa merge, và không bao giờ bảo bật auto-merge khi nhánh đích không có check bắt buộc (D-063). → Kiểm: `.github/workflows/pr-steward.yml` có trong repo; `python3 .xtemplates/scripts/xt.py pr steward` (không `--apply`) liệt kê mọi PR mở kèm hành động; PR làn chuẩn đã review sạch có comment dấu review ở đúng head. · Nguồn: ADR-0027 của repo khung
+- [ ] `LOOP-STOP-029` **SHOULD** PR đủ tiêu chuẩn vào nhánh chính **không phụ thuộc phiên agent còn sống**: kết quả review ghi lên chính PR (`xt.py pr reviewed` đăng comment có dấu `xt-review v1 head=<SHA> verdict=…`, không tên model), và một job chạy trên nền tảng CI (`pr-steward.yml`: lịch ≤ 15 phút + khi có comment review) gọi cùng luật `pr next` cho mọi PR mở để bật auto-merge hoặc merge ghim head; chỉ tin dấu của người có quyền ghi repo; chỉ tự merge PR cùng repo của tác giả có quyền ghi (PR từ fork/người ngoài → người merge); PR từng vào làn chuẩn mang nhãn bền để giữ chặt; job không chạy code của PR (ADR-0027); PR tụt sau base thì job cập nhật nhánh (ghim head cũ) và review sạch mang sang head mới chỉ khi head là merge base không đổi tập thay đổi của PR (tên file, trạng thái, blob) và nhánh đích không chạm file nào của PR — khác đi thì review lại; job chạy bằng GITHUB_TOKEN không tự cập nhật nhánh vì commit đó không kích CI (D-061); nhánh đích không có check bắt buộc thì job không bật auto-merge (GitHub merge ngay lúc bật, trước khi CI xong — D-062); PR đủ điều kiện (`merge-check` = `merge`) thì `pr next` trả merge ghim head kể cả khi auto-merge đang bật mà GitHub chưa merge, và không bao giờ bảo bật auto-merge khi nhánh đích không có check bắt buộc (D-063); job chạy cả theo sự kiện (`workflow_run` của CI/`merge-gate`, `check_suite: completed`) và mỗi hành động idempotent theo (repo, PR, head, hành động) — đọc lại PR ngay trước khi làm (AUTO-05, mục *Steward theo sự kiện* ở trên). → Kiểm: `.github/workflows/pr-steward.yml` có trong repo; `python3 .xtemplates/scripts/xt.py pr steward` (không `--apply`) liệt kê mọi PR mở kèm hành động; PR làn chuẩn đã review sạch có comment dấu review ở đúng head; ở repo khung `python3 -m unittest discover -s tests -k steward_events` xanh. · Nguồn: ADR-0027 của repo khung
 
 ## Bẫy thường gặp
 
@@ -200,6 +249,8 @@ trị lạ, không đọc được = `human`. PR đổi chính khoá luôn ngư�
 
 ## Nguồn
 
+- GitHub Docs — Events that trigger workflows (`check_suite` không kích cho check suite do GitHub Actions tạo; `workflow_run` chạy ở nhánh mặc định, có secret và token ghi): <https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows> — đọc 2026-10-20.
+- Claude Code docs — Routines (trigger `pull_request.*`, run bắt đầu từ head của PR, push nhánh `claude/` trừ khi prompt chỉ nhánh khác, danh tính GitHub của chủ Routine, trần sự kiện theo giờ): <https://code.claude.com/docs/en/routines> — đọc 2026-10-20.
 - ADR-0008 (`docs/adr/0008-main-session-self-approves-decisions.md` của repo khung): phiên chính tự duyệt điểm quyết định theo tiêu chí chất lượng cuối — chủ repo yêu cầu 2026-10-15.
 - `.claude/hooks/pre-bash-guard.sh`, `pre-edit-guard.sh`, `.claude/settings.json` của khung — đọc 2026-10-13.
 - Claude Code docs — permission modes (`defaultMode` `auto`/`bypassPermissions` bị bỏ qua ở project settings; deny có hiệu lực mọi chế độ): <https://code.claude.com/docs/en/permission-modes> · hooks `PreToolUse` `permissionDecision`: <https://code.claude.com/docs/en/hooks> — theo `research/2026-10-13-claude-code-hooks-skills.md`, xác minh 2026-10-13.
