@@ -487,5 +487,59 @@ class ReadOnlyAllowlistTest(unittest.TestCase):
         self.assertTrue(ro("import hashlib\nh = hashlib.sha256()\nh.update(b'.env')\nprint(h.hexdigest())", PY))
 
 
+class Review3Test(unittest.TestCase):
+    """Review #186 lần 3: f-string cùng nháy (3.12+) và escape `'\\x2eenv'` giấu chuỗi đường dẫn khỏi regex; định danh
+    toàn-rộng (`os.ｒemove`); redirect `<>`; trình thông dịch còn thiếu; `env --ch=` viết tắt."""
+
+    def assertDenied(self, cases: dict) -> None:
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def assertAllowed(self, cmds) -> None:
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_r3_fstring_same_quote_denied(self):
+        deep_env = 'print(f"{f"{f"{open(".env","w")}"}"}")'
+        deep_cfg = 'print(f"{f"{f"{open(".claude/settings.json","w")}"}"}")'
+        self.assertDenied(
+            {
+                'python3 -c \'print(f"{open(".env","w")}")\'': "SECRET_WRITE",
+                'python3 -c \'print(f"{open(".claude/settings.json","w")}")\'': "HOOK_BYPASS",
+                f"python3 -c '{deep_env}'": "SECRET_WRITE",
+                f"python3 -c '{deep_cfg}'": "HOOK_BYPASS",
+            }
+        )
+
+    def test_guard_r3_escape_literal_denied(self):
+        self.assertDenied(
+            {
+                "python3 -c \"p = '\\x2eenv'; open(p, 'w').write('x')\"": "SECRET_WRITE",
+                "python3 -c \"import os; os.remove('\\x2eenv')\"": "SECRET_WRITE",
+                "python3 -c \"import shutil; shutil.copy('/tmp/a', '\\x2eclaude/settings.json')\"": "HOOK_BYPASS",
+            }
+        )
+
+    def test_guard_r3_fstring_read_only_passes(self):
+        self.assertAllowed(
+            (
+                'python3 -c \'print(f"{open(".env").read()}")\'',
+                'python3 -c "print(f\'{open(\\"\\x2eenv\\").read()}\')"',
+                "python3 -c \"print('\\x2eenv.example')\"",
+            )
+        )
+
+    def test_script_literals_ast(self):
+        lits = guard._script_literals
+        self.assertIn(".env", lits("open('\\x2eenv','w')"))
+        self.assertIn(".env", lits("x = b'\\x2eenv'"))
+        self.assertIn(".env", lits('print(f"{open(".env","w")}")'))
+        self.assertIn("a.py", lits("x = 'a.py'"))  # regex vẫn chạy (hợp, không thay thế)
+        self.assertIn("a.py", lits("x = 'a.py' +"))  # không phải Python hợp lệ: chỉ regex
+
+
 if __name__ == "__main__":
     unittest.main()

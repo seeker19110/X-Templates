@@ -4599,20 +4599,51 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
         hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families)
-        asks += [a for raw in _script_literals(script) if (a := _interp_literal_ask(script, raw, root, here, hint, ro))]
+        asks += [
+            a
+            for raw in _script_literals(script, families)
+            if (a := _interp_literal_ask(script, raw, root, here, hint, ro))
+        ]
     return asks
 
 
-def _script_literals(script: str) -> List[str]:
+def _script_literals(script: str, families: Optional[FrozenSet[str]] = None) -> List[str]:
     """Chuỗi nguyên văn không khoảng trắng trong script (ứng viên đường dẫn): cả chuỗi lồng trong chuỗi (f-string
-    `f'{open(".env","w")}'`, nội suy Ruby `"#{File.delete('.env')}"`) — một tầng."""
+    `f'{open(".env","w")}'`, nội suy Ruby `"#{File.delete('.env')}"`) — một tầng; chuỗi giữa hai nháy bất kỳ (chồng
+    lấn: f-string cùng nháy `f"{open(".env","w")}"` của 3.12+ cả khi guard chạy 3.11). Script là Python (cách xác định
+    như `_read_only_script`) và `ast.parse` qua → thêm mọi hằng str/bytes của AST, gồm phần hằng của f-string, escape
+    đã giải (`'\\x2eenv'` → `.env`) — review #186 lần 3. Lấy hợp, không thay thế."""
     out = dict.fromkeys(STR_LITERAL_RE.findall(script))
+    out.update(dict.fromkeys(STR_OVERLAP_RE.findall(script)))
     for m in LITERAL_RE.finditer(script):
         v = m.group(m.lastindex or 0)
         for x in [v, *(n.group(n.lastindex or 0) for n in LITERAL_RE.finditer(v))]:
             if len(x) >= 2 and not any(ch.isspace() for ch in x):
                 out[x] = None
+    if not families or families == frozenset({"python"}):
+        out.update(dict.fromkeys(_ast_literals(script)))
     return list(out)
+
+
+STR_OVERLAP_RE = re.compile(r"""(?<=['"])([^'"\s]{2,})(?=['"])""")  # mỗi vị trí thử một lần: tuyến tính theo nhánh
+
+
+def _ast_literals(script: str) -> List[str]:
+    """Hằng str/bytes (giải escape) trong AST của script Python; không phải Python hợp lệ → []."""
+    import ast
+
+    try:
+        tree = ast.parse(script)
+    except Exception:  # SyntaxError, ValueError (NUL), RecursionError…: không phải Python — regex vẫn chạy
+        return []
+    out: List[str] = []
+    for node in ast.walk(tree):
+        v = getattr(node, "value", None) if isinstance(node, ast.Constant) else None
+        if isinstance(v, bytes):
+            v = os.fsdecode(v)
+        if isinstance(v, str) and v:
+            out.append(v)
+    return out
 
 
 class _ReadOnly:
