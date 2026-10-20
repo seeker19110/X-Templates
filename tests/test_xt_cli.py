@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import unittest
 import warnings
 import unittest.mock
@@ -344,6 +345,62 @@ class NaReevaluatedTest(TmpRepoCase):
         )
         self.assertEqual(xt.audit_na_drift(self.repo, {99: {"Trạng thái": "N/A", "Ghi chú": ""}}), {})
         self.assertEqual(xt.audit_na_drift(self.repo, {6: {"Trạng thái": "đã quét"}}), {})
+
+    def test_na_drift_with_ledger_in_docs_ops(self):
+        # AUD-HAR-078: sổ ở đường mặc định docs/ops/ — gốc kiểm phải là gốc repo, không phải thư mục chứa sổ
+        # (`git ls-files` trong docs/ops không thấy index.html → --strict từng luôn xanh giả).
+        self.init_repo()
+        groups = {6: ("N/A", "", "", "không có UI"), 10: ("N/A", "", "", "không có CSDL")}
+        self.commit_files({"index.html": "<p>", "docs/ops/AUDIT-STATUS.md": audit_status_text(groups)}, 1_700_000_000)
+        status = self.repo / "docs" / "ops" / "AUDIT-STATUS.md"
+        strict = [e for e in xt.audit_check(status, strict=True)[0] if "sổ ghi N/A nhưng repo nay áp dụng" in e]
+        self.assertEqual(len(strict), 1, strict)
+        self.assertIn("nhóm 6:", strict[0])
+        rc, out, _ = run_main("audit", "check", status, "--strict")
+        self.assertEqual(rc, 1)
+        self.assertIn("nhóm 6: sổ ghi N/A nhưng repo nay áp dụng", out)
+
+
+class AuditShaOnBaseTest(TmpRepoCase):
+    """AUD-HAR-077: SHA quét phải nằm trên nhánh chính (như `progress-check`) — squash-merge xoá SHA nhánh PR."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.base = self.commit_files({"main.py": "1"}, 1_700_000_000)
+        self.git("checkout", "-q", "-b", "feat")
+        self.feat = self.commit_files({"main.py": "2"}, 1_700_000_100)
+        self.status = self.repo / "docs" / "ops" / "AUDIT-STATUS.md"
+        self.status.parent.mkdir(parents=True)
+
+    def errors(self, sha: str) -> list[str]:
+        self.status.write_text(audit_status_text({1: ("đã quét", sha, "2026-10-19", "")}), encoding="utf-8")
+        return xt.audit_check(self.status)[0]
+
+    def test_audit_sha_on_base(self):
+        with unittest.mock.patch.dict(os.environ, {"XT_PROGRESS_BASE": "main"}):
+            errs = self.errors(self.feat)
+            self.assertEqual(len(errs), 1, errs)
+            self.assertIn("nhóm 1: SHA `", errs[0])
+            self.assertIn("chưa nằm trên `main`", errs[0])
+            self.assertIn("git merge-base HEAD main", errs[0])  # hướng dẫn sửa
+            self.assertEqual(self.errors(self.base), [])
+            self.assertEqual(self.errors(self.base[:7]), [])
+        with unittest.mock.patch.dict(os.environ, {"XT_PROGRESS_BASE": ""}):  # rỗng = tắt, như progress-check
+            self.assertEqual(self.errors(self.feat), [])
+
+    def test_audit_sha_on_base_from_origin(self):
+        # Không đặt biến: dò origin/HEAD → origin/main; repo không có remote thì bỏ qua kiểm này.
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("XT_PROGRESS_BASE", None)
+            self.assertEqual(self.errors(self.feat), [])
+            self.git("update-ref", "refs/remotes/origin/main", self.base)
+            errs = self.errors(self.feat)
+            self.assertEqual(len(errs), 1, errs)
+            self.assertIn("chưa nằm trên `origin/main`", errs[0])
+            rc, out, _ = run_main("audit", "check", self.status)
+            self.assertEqual(rc, 1)
+            self.assertIn("chưa nằm trên `origin/main`", out)
 
 
 class ShaOkTest(TmpRepoCase):
@@ -1316,6 +1373,29 @@ class LoopCommandsTest(TmpDirCase):
         self.assertIn("### D-001 · ", text)
         self.assertIn(" · q ### D-900 giả\n", text)
         self.assertIn("- Chọn: a b\n", text)
+
+    def test_decide_normalizes_nfc_at_boundary(self):
+        # AUD-HAR-070 (BASE-DATA-002): `--option` gõ NFD, `--choice` NFC (hoặc ngược lại) là cùng chữ → khớp; lưu NFC.
+        nfc, nfd = "Việt Nam", unicodedata.normalize("NFD", "Việt Nam")
+        self.assertNotEqual(nfc, nfd)
+        for opt, choice in ((nfd, nfc), (nfc, nfd)):
+            with self.subTest(option_nfd=opt == nfd):
+                rc, out, err = run_main(
+                    "loop", "decide", "--question", f"Thị trường {nfd}?", "--option", opt, "--option", "Lào",
+                    "--choice", choice, "--why", nfd, "--revert", "r",
+                )  # fmt: skip
+                self.assertEqual((rc, err), (0, ""))
+                self.assertIn(f"tự duyệt: {nfc} →", out)
+        text = (self.tmp / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertEqual(text, unicodedata.normalize("NFC", text))
+        self.assertIn(f"- Chọn: {nfc}\n", text)
+        # cùng chữ khác dạng chuẩn hoá không thành hai phương án khác nhau
+        rc, _, err = run_main(
+            "loop", "decide", "--question", "q", "--option", nfc, "--option", nfd, "--choice", "1",
+            "--why", "w", "--revert", "r",
+        )  # fmt: skip
+        self.assertEqual(rc, 2)
+        self.assertIn("cần ≥ 2 phương án", err)
 
     def test_decide_rejects_bad_input_without_writing(self):
         cases = {

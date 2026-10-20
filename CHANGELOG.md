@@ -45,6 +45,33 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - HOME giả của `test_wipe_outside_and_home_claude_unchanged` có tiền tố `xt-tmp-home-`, `.gitignore` thêm `tests/xt-tmp-home-*/` — tiến trình test bị kill không để rác vào `git status`.
 - `tests/shard-weights.json` đo lại (181 lớp, thêm `DevTaskRequireEmptyGateTest`, `GuardOutsideDirTest`); test `test_committed_weights_cover_every_class` đỏ khi lớp test thiếu/thừa trọng số.
 
+- `audit check` đỏ khi SHA quét chưa nằm trên nhánh chính (AUD-HAR-077): squash-merge xoá SHA của nhánh PR làm sổ trên
+  nhánh chính hỏng; nay cùng luật và biến `XT_PROGRESS_BASE` với `progress-check` (mặc định `origin/HEAD` →
+  `origin/main` → `origin/master`, repo không có remote thì bỏ qua), thông báo chỉ cách sửa (`git merge-base HEAD <base>`).
+  `framework/00-method/audit.md` §7/§8 ghi hàng rào máy này.
+- `audit check --strict` lấy gốc là gốc repo git chứa sổ, không phải thư mục chứa sổ (AUD-HAR-078): sổ ở đường mặc định
+  `docs/ops/AUDIT-STATUS.md` từng không bao giờ phát hiện "N/A trôi" (`git ls-files` trong `docs/ops` không thấy UI/CSDL)
+  nên `release-check` hàng audit PASS giả.
+- NFC ở biên (AUD-HAR-070, `BASE-DATA-002`): `loop decide`/`loop defer` chuẩn hoá NFC mọi trường trước khi so và lưu
+  (`--option` NFD khớp `--choice` NFC; cùng chữ khác dạng không thành hai phương án); `compose` ghép lại chuẩn hoá NFC cả
+  bản mới nên mục `[x]` không bị đặt lại `[ ]` "— Cũ" chỉ vì khác dạng chuẩn hoá; tên model trong sổ review lưu NFC.
+- `pr reviewed` idempotent (AUD-HAR-071, `BASE-DATA-008`): chạy lại cùng kết quả ở cùng head (như thông báo lỗi đăng
+  khuyên) không thêm bản ghi sổ review và không đăng comment trùng; lần đăng trước lỗi thì chỉ đăng bù (bản ghi mang
+  `published`). Kết quả khác hoặc reviewer khác vẫn là bản ghi mới.
+- Bảng Công cụ của README thiếu `pr next/reviewed/steward`, `loop next/ci-triage/stats/verify/hook-stop`,
+  `test-shard-plan`, `test-weights` (AUD-HAR-075, `BASE-DOC-007`): test `test_readme_lists_every_subcommand` chỉ đọc ô
+  đầu bảng `## Công cụ` và đòi cả lệnh con.
+- Test độ phức tạp không còn ngưỡng giây CPU cứng (AUD-TEST-008; CI `main` #170 đỏ 2,013 s ≥ 2,0 s dưới coverage): 10
+  chỗ ở `test_hooks`, `test_doctor`, `test_guard_audit1019`, `test_guard_corpus`, `test_perf`, `test_xt` dùng
+  `tests/cpu_budget.py` `assert_not_quadratic` — so CPU cỡ `4n` với cỡ `n` đo trong cùng tiến trình (< 10× + sàn
+  0,02 s/nhiễu 0,5 s; cỡ lớn giữ cỡ cũ nên vẫn bắt bậc hai, `test_perf.CpuBudgetTest` chứng minh bằng đồng hồ giả và
+  quét `tests/` không còn `assertLess(time.process_time() - t0, N)`).
+- Test ghi vào `.autopilot/` của repo thật (AUD-TEST-009): `LoopRecordBranchesTest` đặt `CLAUDE_PROJECT_DIR` = thư mục
+  tạm; lớp này chụp `.autopilot/` thật (theo `CLAUDE_PROJECT_DIR` và theo cwd) trước mỗi test và đỏ khi có file đổi.
+- `BLUEPRINT.md` (AUD-HAR-079): `BASE-DATA-002`, `BASE-DATA-008`, `BASE-DOC-007`, `BASE-GATE-005` giữ `[x]` kèm
+  `— Kiểm:` chạy lại được sau khi sửa; `BASE-REPO-006` (tag mới nhất v3.7.1, `VERSION` 3.10.0), `BASE-DOC-004`
+  (runbook `pr-steward`, AUD-HAR-072), `BASE-DEP-005` (license gói bắc cầu, AUD-DEP-004) về `[ ]` kèm `— Thiếu:`.
+
 ## [3.10.0] - 2026-10-20
 
 **Dự án đích: chạy lại `install.py`** (hook `task-completed`/`subagent-stop`, `PermissionRequest`, guard, `xt.py`, workflow steward, manifest). Dự án cài trước bản này chưa có `.xtemplates/manifest.json`: `ask` cũ do khung từng đặt được giữ và báo `ask_unproven` (D-085). Ghép lại blueprint quy mô M với `compose --feature auth` để nhận `BE-AUTH-003/006/008/015` (ADR-0030). Vòng autopilot đang chạy: `loop verify --all` trước `done` (D-084).

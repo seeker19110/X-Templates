@@ -15,7 +15,6 @@ import re
 import shlex
 import sys
 import tempfile
-import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -23,6 +22,8 @@ from typing import Callable, Dict, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 import guard
 
 # Lệnh nguy hiểm/không đảo ngược mà guard phải chặn ở mọi dạng viết.
@@ -510,10 +511,12 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
 
     def test_exec_api_literals_are_linear_time(self) -> None:
         """CodeQL #134: regex chuỗi nguồn không được backtracking lũy thừa trên `\\a` lặp lại sau một dấu nháy."""
-        start = time.process_time()
-        for quote in ('"', "'"):
-            guard._exec_api_scripts([f"os.system({quote}" + "\\a" * 20000])
-        self.assertLess(time.process_time() - start, 2.0)
+
+        def scan(n: int) -> None:
+            for quote in ('"', "'"):
+                guard._exec_api_scripts([f"os.system({quote}" + "\\a" * n])
+
+        cpu_budget.assert_not_quadratic(self, scan, 5000)  # AUD-TEST-008: tỉ lệ cỡ n/4n, không ngưỡng giây cứng
         # chuỗi đầu của lời gọi chuỗi-lệnh; list → ghép thành một lệnh; chuỗi ngoài lời gọi/đối số sau là dữ liệu
         self.assertEqual(guard._exec_api_scripts(["os.system('a b', \"c d\")"]), ["a b"])
         self.assertEqual(guard._exec_api_scripts(["subprocess.run(['ls', 'a b']); print('x y')"]), ["ls 'a b'"])
@@ -563,17 +566,24 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
 
     def test_scan_budget_blocks_instead_of_hanging(self) -> None:
         """Reviewer #134 🔴: nhân đôi biến / lệnh bọc lồng làm guard quá hạn rồi lệnh chạy không qua guard."""
-        doubling = "a=x; " + "; ".join(['a="$a$a"'] * 40) + "; ls"
-        flocks = "flock /tmp/l " * 40 + "ls"
-        chain = "v0=a; " + "; ".join(f'v{i + 1}="$v{i}$v{i}"' for i in range(40)) + '; eval "$v40"'
-        loops = "x='flock l flock l '; " + "; ".join(["$x"] * 60)
-        selfref = "x='x='\"'\"'echo hi'\"'\"'; bash -c \"$x\"'; eval \"$x\""
-        start = time.process_time()
-        for cmd in (doubling, flocks, chain, loops, selfref, doubling + "; rm -rf ~"):
+
+        def cmds(k: int) -> tuple:
+            doubling = "a=x; " + "; ".join(['a="$a$a"'] * k) + "; ls"
+            flocks = "flock /tmp/l " * k + "ls"
+            chain = "v0=a; " + "; ".join(f'v{i + 1}="$v{i}$v{i}"' for i in range(k)) + f'; eval "$v{k}"'
+            loops = "x='flock l flock l '; " + "; ".join(["$x"] * (k * 3 // 2))
+            selfref = "x='x='\"'\"'echo hi'\"'\"'; bash -c \"$x\"'; eval \"$x\""
+            return doubling, flocks, chain, loops, selfref, doubling + "; rm -rf ~"
+
+        for cmd in cmds(40):
             with self.subTest(cmd[:40]):
                 self.assertIn(self.dec(cmd), ("", "deny"))
-        self.assertEqual(self.dec(doubling + "; rm -rf ~"), "deny")
-        self.assertLess(time.process_time() - start, 15.0)  # CI dưới coverage chậm ~3 lần; trước bản vá: hàng trăm giây
+        self.assertEqual(self.dec(cmds(40)[-1]), "deny")
+        # Trước bản vá: hàm mũ theo số lần nhân đôi (hàng trăm giây). AUD-TEST-008: so tỉ lệ k=10/k=40 trong cùng tiến
+        # trình — ngân sách quét giữ chi phí ≤ tuyến tính; ngưỡng giây cứng (15 s) từng phụ thuộc máy CI.
+        cpu_budget.assert_not_quadratic(
+            self, lambda k: [self.dec(c) for c in cmds(k)], 10, ratio=40
+        )  # `chain` bậc hai theo k
 
     def test_scan_budget_exhaustion_is_deny(self) -> None:
         nested = "sh -c 'sh -c \"sh -c ls\"'"

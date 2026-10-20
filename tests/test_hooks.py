@@ -12,12 +12,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 import unittest.mock as mock
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
+
 # Test bộ luật ở chế độ strict (hỏi); chính sách mặc định — ask nguy hiểm → deny, còn lại cho qua (ADR-0018) — test riêng ở
 # GuardPolicyTest.
 os.environ["XT_GUARD_POLICY"] = "strict"
@@ -3240,12 +3242,15 @@ class GuardEgressAuditTest(EgressCase):
         )
 
     def test_url_re_linear(self):  # AUD-CODE-011
-        start = (
-            time.process_time()
-        )  # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
+        # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
         self.assertEqual(self.guard._url_hosts("a" * 200_000), [])
         self.assertEqual(self.guard._url_hosts("x" * 100_000 + "postgres://u@h.example.com/d"), ["h.example.com"])
-        self.assertLess(time.process_time() - start, 1.0)
+
+        def hosts(n: int) -> None:
+            self.guard._url_hosts("a" * n)
+            self.guard._url_hosts("x" * (n // 2) + "postgres://u@h.example.com/d")
+
+        cpu_budget.assert_not_quadratic(self, hosts, 50_000)  # AUD-TEST-008: tỉ lệ cỡ n/4n, không ngưỡng giây cứng
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -4097,13 +4102,9 @@ class GuardAiAttributionTest(unittest.TestCase):
 
         # Không bậc hai: nhân 4 cỡ đầu vào thì thời gian CPU tăng ~4 lần (tuyến tính), bậc hai sẽ ~16 lần. So tỉ lệ thay cho
         # ngưỡng tuyệt đối vì runner CI chậm/nhanh khác nhau (coverage làm chậm thêm): 2,0 s từng vượt 0,04–0,07 s.
-        def cost(n: int) -> float:
-            t0 = time.process_time()
-            self.g._heredoc_bodies("a;" * n + " git commit -F - <<E\nb\nE")
-            return time.process_time() - t0
-
-        small = max(cost(50000), 0.02)
-        self.assertLess(cost(200000), small * 10 + 0.5)
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: self.g._heredoc_bodies("a;" * n + " git commit -F - <<E\nb\nE"), 50000
+        )
 
     def test_review_125_cases(self):
         # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
@@ -4128,11 +4129,15 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "deny")
-        t0 = time.process_time()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
+        # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ; `--git` dài bậc hai nếu không cắt dòng
         self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
-        long_line = "git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"  # bậc hai nếu không cắt dòng
-        self.assertEqual(self.g._heredoc_bodies(long_line), [])
-        self.assertLess(time.process_time() - t0, 1.0)
+        self.assertEqual(self.g._heredoc_bodies("git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"), [])
+
+        def scan(n: int) -> None:
+            self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * n + " x")
+            self.g._heredoc_bodies("git" + " --git" * (n * 8 // 5) + " x <<E\nClaude Opus 5\nE")
+
+        cpu_budget.assert_not_quadratic(self, scan, 1250)  # AUD-TEST-008: tỉ lệ cỡ n/4n, không ngưỡng giây cứng
         os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
         self.assertEqual(self.decide("git commit -F p", d), "")
         with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp

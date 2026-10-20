@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import os
 import subprocess
 import sys
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import xt
+import cpu_budget
 from test_xt_cli import run_main
 
 SLOW = [1.00, 1.02, 0.99, 1.01, 1.00, 0.98, 1.03, 1.00, 1.01, 0.99, 1.02, 1.00]
@@ -413,10 +415,10 @@ class PerfGuardTest(unittest.TestCase):
             self.assertFalse(xt.PERF_SUSPECT_RE.search(line), line)
 
     def test_guard_regex_is_linear(self):
-        line = "perf_counter" + " " * 50000 + "x"
-        start = time.process_time()
-        self.assertIsNone(xt.PERF_SUSPECT_RE.search(line))
-        self.assertLess(time.process_time() - start, 1.0)
+        self.assertIsNone(xt.PERF_SUSPECT_RE.search("perf_counter" + " " * 50000 + "x"))
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: xt.PERF_SUSPECT_RE.search("perf_counter" + " " * n + "x"), 12500
+        )
 
 
 class PerfCliTest(unittest.TestCase):
@@ -649,3 +651,50 @@ class PerfCliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CpuBudgetTest(unittest.TestCase):
+    """AUD-TEST-008: test độ phức tạp so tỉ lệ đo cùng tiến trình (`tests/cpu_budget.py`), không ngưỡng giây cứng."""
+
+    def fake_clock(self, seconds_for: object) -> tuple:
+        now = [0.0]
+
+        def clock() -> float:
+            return now[0]
+
+        def work(n: int) -> None:
+            now[0] += seconds_for(n)  # type: ignore[operator]
+
+        return clock, work
+
+    def test_linear_passes_quadratic_fails(self):
+        for name, per_n, ok in (
+            ("tuyến tính", lambda n: n * 1e-5, True),  # 0,1 s → 0,4 s
+            ("tuyến tính rất nhanh", lambda n: n * 1e-9, True),  # dưới sàn: không đỏ vì nhiễu
+            ("bậc hai", lambda n: n * n * 1e-8, False),  # 1 s → 16 s
+            ("bậc hai vừa đủ nhạy", lambda n: n * n * 9e-10, False),  # 0,09 s → 1,44 s
+        ):
+            with self.subTest(name):
+                clock, work = self.fake_clock(per_n)
+                if ok:
+                    cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+                else:
+                    with self.assertRaises(AssertionError) as cm:
+                        cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock)
+                    self.assertIn("bậc hai?", str(cm.exception))
+        clock, work = self.fake_clock(lambda n: n * n * 1e-8)  # canh hàm mũ: cho phép bậc hai (16 lần)…
+        cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock, ratio=40)
+        clock, work = self.fake_clock(lambda n: 2.0 ** (n / 1000) * 1e-3)  # …nhưng hàm mũ vẫn đỏ
+        with self.assertRaises(AssertionError):
+            cpu_budget.assert_not_quadratic(self, work, 10_000, clock=clock, ratio=40)
+        self.assertGreaterEqual(cpu_budget.cost(lambda n: sum(range(n)), 10), 0.0)  # đồng hồ thật
+
+    def test_no_hard_cpu_thresholds_left(self):
+        hard = re.compile(r"assertLess\(\s*time\.process_time\(\)\s*-\s*\w+\s*,\s*[0-9.]+\s*\)")
+        found = [
+            f"{p.name}:{i}"
+            for p in sorted((ROOT / "tests").glob("test*.py"))
+            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+            if hard.search(line)
+        ]
+        self.assertEqual(found, [], "ngưỡng CPU cứng — dùng cpu_budget.assert_not_quadratic")
