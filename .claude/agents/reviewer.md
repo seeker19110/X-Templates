@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Review độc lập diff/PR theo checklist của khung (đúng spec, lỗi logic & ca biên, bảo mật, thống nhất, test) — model KHÁC với executor để tránh cùng điểm mù; mọi phát hiện phải có đường tái hiện. Giao trước khi merge hoặc khi /review với diff lớn.
+description: Review độc lập diff/PR theo checklist của khung (đúng spec, lỗi logic & ca biên, bảo mật, thống nhất, test) — khác HỌ model với người viết (LOOP-ORCH-005) để tránh cùng điểm mù; mọi phát hiện phải có đường tái hiện. Giao khi `xt.py pr next` trả `review` hoặc khi /review.
 tools: Read, Glob, Grep, Bash
 model: opus
 maxTurns: 80
