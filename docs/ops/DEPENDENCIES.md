@@ -14,6 +14,9 @@
   không sửa, không phân phối lại, chỉ chạy trên runner CI/máy dev nên nghĩa vụ chia sẻ mã nguồn sửa đổi không phát sinh.
   Đổi cách dùng (nhúng/phân phối) thì phải xét lại.
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
+- Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
+  `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
+  vi phạm hoặc ngoại lệ quá hạn → exit 1. `requirements-audit.txt` kiểm khi đã cài: `--requirements requirements-audit.txt`.
 
 ## `requirements-dev.txt`
 

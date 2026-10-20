@@ -33,6 +33,9 @@ Lệnh:
   vendor-check [--dirs a,b] [--allow X] [--own a,b] [--strict] [--json]
                                 Thư mục vendor có LICENSE/NOTICE/SOURCE, không điều khoản hạn chế; dò Preline/Commons
                                 Clause/CC BY-NC… trong package.json + ghi nguồn (CMP-LIC-022).
+  license-check [--requirements F]... [--allow F]
+                                License gói đã cài của file requirements ghim (mặc định requirements-dev.txt) đối chiếu
+                                allowlist license-allow.json; vi phạm/ngoại lệ quá hạn → exit 1 (BASE-DEP-005).
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
   ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
   audit plan [--blueprint F] [--status F] [--json]
@@ -6184,6 +6187,163 @@ def cmd_changelog_check(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+# --------------------------------------------------------------------------- license-check (BASE-DEP-005)
+
+# Dòng ghim `tên==bản [; marker]` của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
+LICENSE_REQ_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)[ \t]*(;[^\\#]*)?")
+# Classifier `License :: OSI Approved :: …` → SPDX, khi gói không khai License-Expression/License ngắn.
+LICENSE_CLASSIFIERS = {
+    "MIT License": "MIT",
+    "Apache Software License": "Apache-2.0",
+    "Mozilla Public License 2.0 (MPL 2.0)": "MPL-2.0",
+    "Python Software Foundation License": "PSF-2.0",
+}
+LICENSE_FIELD_MAX = 64  # trường `License` dài hơn (toàn văn license) không phải định danh → đọc classifier
+LICENSE_EXC_KEYS = ("package", "license", "approved_by", "expires")
+
+
+class LicenseConfigError(ValueError):
+    """Allowlist/requirements đọc không được hoặc sai dạng (exit 2)."""
+
+
+def _pkg_key(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()  # PEP 503
+
+
+def license_requirements(text: str) -> List[Tuple[str, str, bool]]:
+    """[(tên, bản ghim, có marker)] của file requirements ghim `==`."""
+    out = []
+    for line in text.splitlines():
+        m = LICENSE_REQ_RE.match(line)
+        if m:
+            out.append((m.group(1), m.group(2), bool(m.group(3))))
+    return out
+
+
+def license_policy(text: str) -> Tuple[Set[str], Dict[str, Dict[str, str]]]:
+    """(SPDX cho phép, {gói: ngoại lệ}) từ JSON allowlist; sai dạng → LicenseConfigError."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LicenseConfigError(f"JSON hỏng: {exc}") from exc
+    allow = data.get("allow") if isinstance(data, dict) else None
+    exc_list = data.get("exceptions", []) if isinstance(data, dict) else None
+    if (
+        not isinstance(allow, list)
+        or not all(isinstance(x, str) and x for x in allow)
+        or not isinstance(exc_list, list)
+    ):
+        raise LicenseConfigError("cần `allow` (danh sách SPDX) và `exceptions` (danh sách)")
+    exceptions: Dict[str, Dict[str, str]] = {}
+    for e in exc_list:
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e[k].strip() for k in LICENSE_EXC_KEYS):
+            raise LicenseConfigError(f"ngoại lệ thiếu {'/'.join(LICENSE_EXC_KEYS)}: {e}")
+        try:
+            _dt.date.fromisoformat(e["expires"])
+        except ValueError as exc:
+            raise LicenseConfigError(f"ngoại lệ {e['package']}: `expires` không phải ngày ISO") from exc
+        exceptions[_pkg_key(e["package"])] = e
+    return set(allow), exceptions
+
+
+def license_of(meta: Any) -> str:
+    """Biểu thức license của gói đã cài: `License-Expression` > `License` ngắn một dòng > classifier đổi sang SPDX
+    (classifier lạ → `?`, không bao giờ được phép). Rỗng = không khai."""
+
+    def first(key: str) -> str:
+        return str((meta.get_all(key) or [""])[0] or "").strip()
+
+    if first("License-Expression"):
+        return first("License-Expression")
+    lic = first("License")
+    if lic and "\n" not in lic and len(lic) <= LICENSE_FIELD_MAX:
+        return lic
+    found = {
+        LICENSE_CLASSIFIERS.get(c.split(" :: ")[-1].strip(), "?")
+        for c in meta.get_all("Classifier") or []
+        if c.startswith("License :: ")
+    }
+    return " OR ".join(sorted(found))
+
+
+def license_allowed(expr: str, allowed: Set[str]) -> bool:
+    """`A OR B` được khi một nhánh được; `A AND B` khi mọi vế được. Có ngoặc → bảo thủ: mọi định danh phải được."""
+    if not expr:
+        return False
+    if "(" in expr or ")" in expr:
+        ids = [t for t in re.split(r"[()\s]+|\bAND\b|\bOR\b", expr) if t]
+        return bool(ids) and all(t in allowed for t in ids)
+    return any(all(t.strip() in allowed for t in re.split(r"\s+AND\s+", alt)) for alt in re.split(r"\s+OR\s+", expr))
+
+
+def _installed_dist(name: str) -> Optional[Tuple[str, Any]]:
+    import importlib.metadata as md
+
+    try:
+        d = md.distribution(name)
+    except md.PackageNotFoundError:
+        return None
+    return d.version, d.metadata
+
+
+def license_check(
+    reqs: List[Tuple[str, str, bool]],
+    allowed: Set[str],
+    exceptions: Dict[str, Dict[str, str]],
+    today: _dt.date,
+    lookup: Callable[[str], Optional[Tuple[str, Any]]] = _installed_dist,
+) -> Tuple[List[str], List[str]]:
+    """(vi phạm, dòng thông tin) — vi phạm: license ngoài allowlist không có ngoại lệ đúng license, gói ghim không
+    marker mà chưa cài, ngoại lệ quá hạn (mọi ngoại lệ trong file, kể cả gói không có ở requirements này)."""
+    bad: List[str] = []
+    info: List[str] = []
+    expired = {k for k, e in exceptions.items() if _dt.date.fromisoformat(e["expires"]) < today}
+    for e in (exceptions[k] for k in sorted(expired)):
+        bad.append(f"ngoại lệ {e['package']} ({e['license']}) hết hạn {e['expires']} — xét lại rồi gia hạn/bỏ gói")
+    for name, pinned, marker in reqs:
+        got = lookup(name)
+        if got is None:
+            if marker:
+                info.append(f"– {name}=={pinned}: chưa cài (có marker nền tảng) — bỏ qua")
+            else:
+                bad.append(f"{name}=={pinned}: chưa cài — `pip install --require-hashes -r` file requirements")
+            continue
+        version, meta = got
+        expr = license_of(meta)
+        drift = f" (đã cài {version}, ghim {pinned})" if version != pinned else ""
+        exc = None if _pkg_key(name) in expired else exceptions.get(_pkg_key(name))
+        if license_allowed(expr, allowed):
+            info.append(f"✓ {name} {version}: {expr}{drift}")
+        elif exc and exc["license"] == expr:
+            info.append(f"✓ {name} {version}: {expr} — ngoại lệ ({exc['approved_by']}; tới {exc['expires']}){drift}")
+        else:
+            bad.append(f"{name} {version}: license `{expr or 'không khai'}` ngoài allowlist, không có ngoại lệ{drift}")
+    return bad, info
+
+
+def cmd_license_check(args: argparse.Namespace) -> int:
+    """Đối chiếu license gói đã cài (importlib.metadata) của file requirements với allowlist (BASE-DEP-005)."""
+    try:
+        allowed, exceptions = license_policy(Path(args.allow).read_text(encoding="utf-8"))
+        reqs = [r for f in args.requirements or ["requirements-dev.txt"] for r in license_requirements(_read(f))]
+        today = _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
+    except (OSError, ValueError) as exc:
+        print(f"✗ license-check: {exc}", file=sys.stderr)
+        return 2
+    bad, info = license_check(reqs, allowed, exceptions, today)
+    for line in info:
+        print(line)
+    for line in bad:
+        print(f"✗ {line}")
+    if not bad:
+        print(f"✓ license-check: {len(reqs)} gói ghim khớp allowlist {args.allow}.")
+    return 1 if bad else 0
+
+
+def _read(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def cmd_progress_check(args: argparse.Namespace) -> int:
     errors = progress_check(Path(args.file))
     for e in errors:
@@ -9417,6 +9577,13 @@ def build_parser() -> argparse.ArgumentParser:
     pcl = sub.add_parser("changelog-check")
     pcl.add_argument("file", nargs="?", default="CHANGELOG.md")
     pcl.set_defaults(fn=cmd_changelog_check)
+    plc = sub.add_parser("license-check")
+    plc.add_argument(
+        "--requirements", action="append", help="file requirements ghim `==` (mặc định requirements-dev.txt)"
+    )
+    plc.add_argument("--allow", default="license-allow.json")
+    plc.add_argument("--today", default="", help="ngày ISO thay hôm nay (test hạn ngoại lệ)")
+    plc.set_defaults(fn=cmd_license_check)
     pp = sub.add_parser("progress-check")
     pp.add_argument("file", nargs="?", default="PROGRESS.md")
     pp.set_defaults(fn=cmd_progress_check)

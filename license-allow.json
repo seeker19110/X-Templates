@@ -1,0 +1,20 @@
+{
+  "_doc": "Allowlist license cho `python3 scripts/xt.py license-check` (BASE-DEP-005). Bảng đầy đủ và lý do: docs/ops/DEPENDENCIES.md. Ngoại lệ hết hạn (`expires` < hôm nay) → exit 1, phải xét lại.",
+  "allow": ["MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "PSF-2.0", "PSFL"],
+  "exceptions": [
+    {
+      "package": "pathspec",
+      "license": "MPL-2.0",
+      "approved_by": "chủ repo — docs/ops/DEPENDENCIES.md, mục Quyết định (2026-10-20)",
+      "expires": "2027-10-20",
+      "reason": "copyleft yếu theo file; dùng nguyên bản, không sửa, không phân phối lại, chỉ chạy trên runner CI/máy dev"
+    },
+    {
+      "package": "certifi",
+      "license": "MPL-2.0",
+      "approved_by": "chủ repo — docs/ops/DEPENDENCIES.md, mục Quyết định (2026-10-20)",
+      "expires": "2027-10-20",
+      "reason": "copyleft yếu theo file; gói của requirements-audit.txt, chỉ chạy trên runner CI"
+    }
+  ]
+}
