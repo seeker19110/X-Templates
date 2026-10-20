@@ -10,6 +10,13 @@ typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/
 # tập test, cùng ngưỡng, 180 s → ~70 s trên 4 CPU. Một lớp đỏ → xargs exit ≠ 0 → cổng đỏ.
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))' | xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 python3 -m coverage run -m unittest && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
+# Cổng trước commit (hook pre-bash-guard): fast = `dev-task.sh gate-fast` — lint (gồm format --check) · typecheck ·
+# test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) chạy trước
+# khi mở PR và ở CI `quality`. Vắng = full.
+commit_gate: fast
+# test_fast: `xt.py test-select` đọc XT_CHANGED_FILES (dev-task.sh đặt) → id lớp test liên quan (file không ánh xạ được →
+# cả suite), mỗi lớp một tiến trình như `test`. Module test lỗi import → test-select exit 1 → cổng đỏ.
+test_fast: python3 scripts/xt.py test-select --unittest | xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 python3 -m unittest
 # PR quan trọng riêng của repo khung (D-031 → D-080, chủ repo 2026-10-19): chỉ bộ máy merge/ủy quyền/cổng (`scripts/`) và
 # mẫu dự án đích (`framework/templates/` — thành file thật ở dự án đích) và các file PLAN (chứa lệnh Gate mà harness chạy;
 # T-1511) vào làn chuẩn. Tài liệu thuần (ADR, luật vòng tự động,

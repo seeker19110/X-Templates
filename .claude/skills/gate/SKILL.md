@@ -11,7 +11,7 @@ argument-hint: "[commit|merge]"
 `<DT>` = `.xtemplates/scripts/dev-task.sh` ở dự án đích (ưu tiên, như hook), `scripts/dev-task.sh` ở repo khung. Lệnh thật của dự án nằm ở `xt.yaml` (ưu tiên) → `.claude/project-commands.sh` → tự dò (package.json/pyproject/go.mod/Cargo.toml/Makefile). **Không suy diễn lệnh từ văn xuôi**; nếu `xt.yaml` thiếu khoá, đề xuất thêm.
 
 ## Cổng commit
-1. `<DT> gate` (build → typecheck → lint → test; `lint` nên gồm kiểm format, format không phải bước riêng; đỏ một cái là dừng). Đọc output thật.
+1. `<DT> gate` (build → typecheck → lint → test; `lint` nên gồm kiểm format, format không phải bước riêng; đỏ một cái là dừng). Đọc output thật. Hook commit chạy `<DT> gate-fast` khi `xt.yaml` `commit_gate: fast` (lint · typecheck · test liên quan file đổi) — `/gate` trước khi đẩy/mở PR vẫn là cổng đầy đủ.
 2. Tự review diff: đúng mục tiêu, không sửa nhầm, không console.log/code chết, không bí mật (`git diff --cached | grep -iE "api[_-]?key|secret|password|token"`), input đã validate, nhánh lỗi đã xử lý.
 3. Commit message conventional (`feat|fix|refactor|docs|test|chore|perf|ci|build(scope): ...`), ≤ 72 ký tự dòng đầu.
 

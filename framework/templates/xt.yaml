@@ -4,7 +4,8 @@
 # Quy mô M/L còn có SÀN (LOOP-HARNESS-023, `xt.py doctor` báo `gate-floor`; `loop verify` CHẠY các lệnh sàn và đỏ khi thiếu/đỏ):
 # format_check + coverage luôn có; typecheck khi stack có kiểm kiểu (build với Go/Rust); e2e khi hồ sơ có UI. Lệnh thật, không no-op.
 # Nhà của bộ khoá: LOOP-HARNESS-008 (framework/11-autonomous-loop/harness-files.md). `.xtemplates/scripts/dev-task.sh` CHỈ chạy các khoá format · lint · typecheck · test · build · format_file
-# (`gate` = build → typecheck → lint → test; lint nên gồm kiểm format). Khoá khác (install, dev, e2e, migrate, init, smoke, audit…) là lệnh KHAI BÁO để agent ĐỌC và chạy trực tiếp; dev-task không chạy.
+# (`gate` = build → typecheck → lint → test; lint nên gồm kiểm format) và format_check · test_fast (`gate-fast` = format_check → lint → typecheck → test_fast — cổng commit nhanh, xem `commit_gate`).
+# Khoá khác (install, dev, e2e, migrate, init, smoke, audit…) là lệnh KHAI BÁO để agent ĐỌC và chạy trực tiếp; dev-task không chạy.
 # Mẫu theo stack (giữ MỘT bộ, xoá phần còn lại):
 #   Node:   lint: npm run lint · typecheck: npm run typecheck · test: npm test -- --run · build: npm run build · format: npm run format · format_file: npx --no-install prettier --write "{}"
 #           format_check: npx --no-install prettier --check . · coverage: npx --no-install vitest run --coverage (ngưỡng ở `test.coverage.thresholds`)
@@ -22,6 +23,16 @@ format: ""
 format_check: ""
 coverage: ""
 format_file: ""
+# commit_gate: cổng hook chạy trước MỖI `git commit` — fast (mặc định dự án mới) = `dev-task.sh gate-fast`: format_check · lint ·
+# typecheck · test_fast (không build, không ngưỡng coverage); full = `dev-task.sh gate` như CI. Vắng = full. Cổng đầy đủ
+# (`dev-task.sh gate`) chạy MỘT lần trước khi mở PR/đẩy, và CI chạy lại — lớp đỡ không đổi. Giá trị khác fast|full: doctor/ci-check từ chối.
+commit_gate: fast
+# test_fast: test liên quan file đổi; dev-task đặt XT_CHANGED_FILES (mỗi dòng một file, đổi so với HEAD + file mới).
+# Trống/no-op hoặc không biết file đổi (chưa có commit) → chạy `test`. Ví dụ:
+#   Node:   npx --no-install vitest related --run $XT_CHANGED_FILES · npx --no-install jest --findRelatedTests --passWithNoTests $XT_CHANGED_FILES
+#   Python: python3 .xtemplates/scripts/xt.py test-select --unittest | xargs -r -n 1 python3 -m unittest  ·  pytest -q $(python3 .xtemplates/scripts/xt.py test-select)
+#   Go:     để trống (= test) hoặc lệnh chỉ chạy gói chứa file trong XT_CHANGED_FILES
+test_fast: ""
 # Merge PR (ADR-0013/0014/0015, LOOP-STOP-022): L3 (mặc định) = bật auto-merge của GitHub (làn nhanh khi mở, làn chuẩn sau review sạch — ADR-0024), merge khi required check
 # xanh (cần bật "Allow auto-merge" + ruleset có required check; ghi miễn trừ WF-REVIEW-007); L2 = máy chỉ tự merge làn nhanh
 # (`xt.py merge-check`); L1 = người merge mọi PR.
