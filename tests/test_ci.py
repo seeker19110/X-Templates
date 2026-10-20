@@ -295,6 +295,87 @@ class TestShardTest(unittest.TestCase):
         (self.tmp / "cov").mkdir()
         self.assertEqual(self.run_dt("test-combine", "cov", XT_GUARD_POLICY="").returncode, 126)
 
+    # xt.py giả: ghi mỗi lần được gọi (argv + stdin) vào $OUT/guard/<n>; `DENY` trong lệnh → 126; biết `--stdin` thì in
+    # dòng xác nhận như xt.py thật. Bản "cũ" không biết `--stdin`: không in gì, không đọc stdin.
+    XT_STUB = (
+        "import os, sys\n"
+        "d = os.path.join(os.environ['OUT'], 'guard'); os.makedirs(d, exist_ok=True)\n"
+        "data = sys.stdin.read() if '--stdin' in sys.argv and NEW else ''\n"
+        "open(os.path.join(d, str(len(os.listdir(d)))), 'w').write(' '.join(sys.argv[1:]) + '\\n' + data)\n"
+        "sys.exit(126) if 'DENY' in data + ' '.join(sys.argv) else None\n"
+        "print('guard-check: ok') if '--stdin' in sys.argv and NEW else None\n"
+    )
+
+    def guard_calls(self) -> List[str]:
+        d = self.tmp / "out" / "guard"
+        got = (
+            [p.read_text(encoding="utf-8") for p in sorted(d.glob("*"), key=lambda p: int(p.name))]
+            if d.is_dir()
+            else []
+        )
+        shutil.rmtree(d, True)
+        return got
+
+    def rec(self, name: str) -> str:
+        return f'f="$(mktemp "$OUT/ran.XXXXXX")" && echo {name} > "$f"'
+
+    def test_guard_blocks_gate_once_for_every_command(self):
+        """T-1715: `gate`/`gate-fast` hỏi guard MỘT lần (stdin, mỗi dòng một lệnh) cho mọi lệnh của lượt; một lệnh bị
+        cấm → 126 và không lệnh nào chạy; xt.py cũ (không biết `--stdin`) → hỏi từng lệnh như trước."""
+        (self.tmp / "scripts" / "xt.py").write_text("NEW = True\n" + self.XT_STUB, encoding="utf-8")
+        self.yaml(
+            build=self.rec("build"), typecheck=self.rec("typecheck"), lint=self.rec("lint"), test=self.rec("test")
+        )
+        r = self.run_dt("gate", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.guard_calls()
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(  # here-string thêm một dòng trống cuối stdin: không phải lệnh
+            [ln for ln in calls[0].splitlines() if ln],
+            ["guard-check --stdin", *(self.rec(n) for n in ("build", "typecheck", "lint", "test"))],
+        )
+        self.assertEqual(sorted(self.ran()), ["build", "lint", "test", "typecheck"])
+        self.yaml(
+            build=self.rec("build"),
+            typecheck=self.rec("typecheck"),
+            lint=self.rec("lint"),
+            test=self.rec("test") + " && DENY",
+        )
+        r = self.run_dt("gate", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 126, r.stderr)
+        self.assertIn("LOOP-STOP-027", r.stderr)
+        self.assertEqual((len(self.guard_calls()), self.ran()), (1, []))
+        # gate-fast với mọi lớp test (XT_GATE_ALL_TESTS=1): test_list + test_unit cũng nằm trong một lần hỏi
+        self.yaml(
+            format_check=self.rec("fmt"),
+            lint=self.rec("lint"),
+            typecheck=self.rec("tc"),
+            test_list=self.ids("a\n"),
+            test_unit=self.RECORD,
+        )
+        r = self.run_dt("gate-fast", XT_GUARD_POLICY="", XT_GATE_ALL_TESTS="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.guard_calls()
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(
+            [ln for ln in calls[0].splitlines() if ln][1:],
+            [self.rec("fmt"), self.rec("lint"), self.rec("tc"), "cat ids.txt", self.RECORD],
+        )
+        self.assertEqual(sorted(self.ran()), ["a", "fmt", "lint", "tc"])
+        # xt.py cũ: lần hỏi --stdin không in gì → hỏi lại từng lệnh (4 lệnh → 5 lần gọi), vẫn chạy đủ
+        (self.tmp / "scripts" / "xt.py").write_text("NEW = False\n" + self.XT_STUB, encoding="utf-8")
+        self.yaml(
+            build=self.rec("build"), typecheck=self.rec("typecheck"), lint=self.rec("lint"), test=self.rec("test")
+        )
+        r = self.run_dt("gate", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.guard_calls()
+        self.assertEqual(
+            [c.splitlines()[0] for c in calls],
+            ["guard-check --stdin"] + [f"guard-check -- {self.rec(n)}" for n in ("build", "typecheck", "lint", "test")],
+        )
+        self.assertEqual(sorted(self.ran()), ["build", "lint", "test", "typecheck"])
+
     def test_unknown_task_lists_shard_tasks(self):
         r = self.run_dt("nope")
         self.assertEqual(r.returncode, 2)

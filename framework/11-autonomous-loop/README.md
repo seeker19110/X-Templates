@@ -69,13 +69,13 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
     ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số
     bọc nháy đơn — mỗi `'` trong Gate viết `'\''`; ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
-11. Exit 0 → tick `[x]`, commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
+11. Exit 0 → máy tự tick `[x]` (lệnh khớp Gate; `--no-tick` để tự tay — T-1719), commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
     Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi D-NNN); lần 3 → máy đặt `blocked`
     ([`LOOP-DESIGN-005`](loop-design.md)). Không skip test, không nới cổng ([`LOOP-CI-001`](self-healing-ci.md)).
 12. **Lát xong → một PR** ([`LOOP-DESIGN-020`](loop-design.md), ADR-0014; nhánh riêng từ nhánh đích mới nhất, chồng lên PR
     chưa merge nếu phụ thuộc): `PROGRESS.md` (≤ 8 KB) vào commit cuối của lát → cổng đầy đủ `dev-task.sh gate` **một lần**
     (CI chạy đúng lệnh đó) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
-    chạy nền; mỗi khi PR đổi (push, CI, review, `merge-watch` thoát) lại `pr next`. Reviewer **chỉ khi** `pr next` trả
+    chạy nền và khi thoát in sẵn kết quả `pr next`; mỗi khi PR đổi (push, CI, review) lại `pr next`. Reviewer **chỉ khi** `pr next` trả
     `review` — khác **họ** model với người viết ([`LOOP-ORCH-005`](orchestration-and-subagents.md); không kết luận được →
     `<XT> pr reviewed --inconclusive` rồi giao reviewer khác); ghi `<XT> pr reviewed` theo lệnh máy in (đăng lên PR để
     `pr-steward` làm thay khi không còn phiên — ADR-0027). Cần push thêm → tự tắt auto-merge trước, gói sửa vào một commit.

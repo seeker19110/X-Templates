@@ -185,6 +185,28 @@ guard_ok() { # $1=lệnh -> 0 nếu được chạy
   CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check -- "$1"
   [ "$?" -ne 126 ]
 }
+# gate/gate-fast: hỏi guard MỘT lần cho mọi lệnh của lượt (stdin, mỗi dòng một lệnh — T-1715) thay vì một tiến trình
+# python mỗi lệnh; một lệnh bị cấm → 126, không chạy lệnh nào. xt.py in `guard-check: N lệnh` khi đã kiểm → GUARDED=1
+# và run_task/test_shard bỏ hỏi từng lệnh; xt.py cũ (không biết --stdin, không in gì) hay sập → hỏi từng lệnh như cũ.
+GUARDED=""
+guard_ok_all() { # stdin=lệnh (mỗi dòng một) -> 126 nếu guard cấm lệnh nào, 0 nếu được chạy
+  local xt n; xt="$(dirname "$0")/xt.py"
+  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || { cat >/dev/null; return 0; }
+  n="$(CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check --stdin)"
+  case "$?" in
+    126) return 126 ;;
+    0) [ -n "$n" ] && GUARDED=1 ;;
+  esac
+  return 0
+}
+guard_turn() { # $@=task -> 0 nếu mọi lệnh phân giải được của lượt được chạy; 126 (kèm log) nếu guard cấm lệnh nào
+  local t c cmds=""
+  for t in "$@"; do c="$(resolve "$t")"; [ -n "$c" ] && cmds="$cmds$c"$'\n'; done
+  [ -n "$cmds" ] || return 0
+  guard_ok_all <<< "$cmds" && return 0 # here-string, không ống: GUARDED=1 phải đặt ở shell này, không phải subshell
+  log "$TASK: guard cấm một lệnh của xt.yaml → không chạy lệnh nào (LOOP-STOP-027)"
+  return 126
+}
 
 RAN=0
 run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh fail hoặc no-op trong autopilot
@@ -193,7 +215,7 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
   if [ -z "$cmd" ]; then log "skip: chưa cấu hình/dò được '$1'"; return 0; fi
   RAN=$((RAN + 1))
   log "run [$1]: $cmd"
-  guard_ok "$cmd" || return 126
+  [ -n "$GUARDED" ] || guard_ok "$cmd" || return 126
   # pipefail cho chính lệnh khai báo: `set -o pipefail` ở trên không truyền vào `bash -c` mới, nên
   # `test | tee log` từng xanh giả khi test đỏ.
   ( cd "$ROOT" && bash -o pipefail -c "$cmd" )
@@ -207,6 +229,12 @@ changed_files() { # file đổi so với HEAD (theo gốc dự án) + file mới
     git -C "$ROOT" -c core.quotePath=false ls-files --others --exclude-standard; } | sort -u
 }
 fast_test_task() { # in task test cho gate-fast: test_fast nếu có lệnh thật và biết file đổi, ngược lại test
+  # XT_GATE_ALL_TESTS=1 (hook commit: diff đụng cấu hình cổng — T-1713): mọi lớp test qua test_list/test_unit, không
+  # coverage (`test-all`); dự án chưa khai hai khoá đó → `test` đầy đủ như trước.
+  if [ "${XT_GATE_ALL_TESTS:-}" = 1 ]; then
+    if yaml_has test_list && yaml_has test_unit; then echo test-all; else echo test; fi
+    return 0
+  fi
   is_noop "$(resolve test_fast)" && { echo test; return 0; }
   [ -n "${XT_CHANGED_FILES+x}" ] && { echo test_fast; return 0; }
   log "gate-fast: không biết file nào đổi (không phải repo git/chưa có commit) → chạy 'test' đầy đủ"
@@ -253,7 +281,7 @@ test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   list="$(shard_decl test_list)" && unit="$(shard_decl test_unit)" || return 2
   unset XT_COV_DIR
   if [ -n "${3:-}" ]; then cov_dir "$3" || return 2; fi
-  guard_ok "$list" && guard_ok "$unit" || return 126
+  [ -n "$GUARDED" ] || { guard_ok "$list" && guard_ok "$unit"; } || return 126
   ids="$(cd "$ROOT" && bash -o pipefail -c "$list" | sed -E 's/[[:space:]]+$//' | grep -v '^$' | LC_ALL=C sort -u)" ||
     { log "test-shard: 'test_list' đỏ hoặc không in id nào"; return 1; }
   total="$(printf '%s\n' "$ids" | grep -c .)"
@@ -348,7 +376,14 @@ case "$TASK" in
     case "$F" in
       *.json | *.JSON) json_ok "$F" && keep="$(mktemp)" && { cp -p -- "$F" "$keep" || { rm -f -- "$keep"; keep=""; }; } ;;
     esac
-    guard_ok "$C" || exit 0 # format_file bị guard cấm: không format, không chặn lượt sửa (PostToolUse)
+    # Lệnh `format_file` khai báo (xt.yaml/project-commands — người hay agent viết được) qua guard như mọi lệnh khai
+    # báo (LOOP-STOP-027); mẫu dựng sẵn của khung (prettier/ruff/black/gofmt/rustfmt với "$1") là hằng trong file này
+    # nên không khởi động guard (−260–370 ms mỗi lần Edit/Write; PLAN-3.12 T-1712).
+    if [ -n "$(declared_format_file)" ]; then
+      guard_ok "$C" || exit 0 # format_file bị guard cấm: không format, không chặn lượt sửa (PostToolUse)
+    else
+      log "format-file: mẫu dựng sẵn của khung — không qua guard"
+    fi
     ( cd "$ROOT" && bash -c "$C" _ "$P" ) || true
     if [ -n "$keep" ]; then
       json_ok "$F" || { cp -p -- "$keep" "$F"; log "format-file: formatter làm hỏng JSON '$P' → khôi phục bản trước"; }
@@ -357,6 +392,7 @@ case "$TASK" in
     exit 0 ;;
   gate)
     rc=0
+    guard_turn build typecheck lint test || exit 126
     for t in build typecheck lint test; do
       run_task "$t" || { rc=1; log "GATE ĐỎ ở '$t' → dừng"; break; }
     done
@@ -364,8 +400,16 @@ case "$TASK" in
   gate-fast)
     rc=0
     if CHANGED="$(changed_files)"; then export XT_CHANGED_FILES="$CHANGED"; else unset XT_CHANGED_FILES; fi
-    for t in format_check lint typecheck "$(fast_test_task)"; do
-      run_task "$t" || { rc=1; log "GATE-FAST ĐỎ ở '$t' → dừng"; break; }
+    FT="$(fast_test_task)"
+    if [ "$FT" = test-all ]; then guard_turn format_check lint typecheck test_list test_unit
+    else guard_turn format_check lint typecheck "$FT"; fi || exit 126
+    for t in format_check lint typecheck "$FT"; do
+      if [ "$t" = test-all ]; then
+        RAN=$((RAN + 1)); log "run [test-all]: mọi lớp test qua test_list/test_unit, không coverage (XT_GATE_ALL_TESTS=1)"
+        test_shard 1 1
+      else
+        run_task "$t"
+      fi || { rc=1; log "GATE-FAST ĐỎ ở '$t' → dừng"; break; }
     done
     gate_report "$rc" GATE-FAST ;;
   test-shard)
