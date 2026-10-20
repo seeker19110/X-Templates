@@ -657,3 +657,10 @@
 - Chọn: giữ signature/same_signature/rerun_used/cost_usd/runs, chỉ reset task/started/fix_attempts
 - Lý do (tiêu chí chất lượng cuối): chặt hơn, không lách trần; hệ quả task mới không được re-run nếu lượt đã dùng — chấp nhận
 - Đường lùi: reset rerun_used theo chữ ký
+
+### D-093 · 2026-10-20T01:31:24+00:00 · Gate T-1510 ghim VERSION=3.9.0 đỏ sau khi lên 3.10.0 — xử lý?
+
+- Phương án: (1) đổi phép kiểm sang grep mục [3.9.0] trong CHANGELOG (đúng ở mọi bản sau) · (2) bỏ T-1510 khỏi verify
+- Chọn: đổi phép kiểm sang grep mục [3.9.0] trong CHANGELOG (đúng ở mọi bản sau)
+- Lý do (tiêu chí chất lượng cuối): kiểm tại thời điểm đã đạt; không bỏ task, không hạ ngưỡng — chỉ gỡ ràng buộc sai thời điểm; ghi lý do ở commit
+- Đường lùi: khôi phục test VERSION = 3.9.0
