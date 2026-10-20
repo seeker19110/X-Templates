@@ -129,6 +129,49 @@ class GuardReviewMissingTest(unittest.TestCase):
                     self.assertEqual(res["code"], "REVIEW_MISSING")
             self.assertEqual(self.mcp(d)["decision"], "deny")
 
+    def test_default_policy_review_missing_denies_when_not_ready(self):
+        """Review PR #182: PR chưa review mà `merge-check` trả `wait` (CI đang chạy, PR nháp) hay `fix` (conflict) —
+        merge ghim head (gh/REST/MCP) vẫn bị chặn vì review, không lọt thành ask thường như `verdict != merge`."""
+        running = [{**GREEN[0], "status": "IN_PROGRESS", "conclusion": ""}]
+        cases = {
+            "wait CI": std(statusCheckRollup=running),
+            "wait nháp": std(isDraft=True),
+            "fix conflict": std(mergeable="CONFLICTING"),
+        }
+        for name, p in cases.items():
+            d = xt.merge_check_result(p, 3, [], False)
+            self.assertEqual((d["eligible"], d["review"]), (False, "missing"), name)
+            self.assertIn(d["verdict"], ("wait", "fix"), name)
+            for cmd in self.MERGES:
+                with self.subTest(name, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+            with self.subTest(name, cmd="mcp"):
+                res = self.mcp(d)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+
+    def test_default_policy_not_ready_without_review_need_not_blocked(self):
+        """Đối chứng: làn nhanh, pha build (review hoãn) và dưới L3 ở cùng verdict `wait`/`fix` không bị chặn vì review
+        (hành vi cũ: ask thường, chính sách mặc định cho qua)."""
+        running = [{**GREEN[0], "status": "IN_PROGRESS", "conclusion": ""}]
+        fast = pr(headRefOid=HEAD, files=[{"path": "README.md", "additions": 1, "deletions": 0}], repo="o/r")
+        cases = {
+            "làn nhanh wait": xt.merge_check_result({**fast, "statusCheckRollup": running}, 3, [], False),
+            "làn nhanh fix": xt.merge_check_result({**fast, "mergeable": "CONFLICTING"}, 3, [], False),
+            "pha build wait": xt.merge_check_result(std(statusCheckRollup=running), 3, [], False, "build"),
+            "pha build fix": xt.merge_check_result(std(mergeable="CONFLICTING"), 3, [], False, "build"),
+            "L2 wait": xt.merge_check_result(std(statusCheckRollup=running), 2, [], False),
+        }
+        for name, d in cases.items():
+            self.assertIn(d["verdict"], ("wait", "fix"), name)
+            for cmd in (self.MERGES[0], self.MERGES[1]):
+                with self.subTest(name, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertNotEqual(res.get("code"), "REVIEW_MISSING", res)
+                    self.assertEqual(res["decision"], "", res)
+            with self.subTest(name, cmd="mcp"):
+                self.assertNotEqual(self.mcp(d).get("code"), "REVIEW_MISSING")
+
     def test_default_policy_review_missing_strict_still_asks(self):
         d = xt.merge_check_result(std(), 3, [], False)
         with unittest.mock.patch.object(guard, "merge_check", return_value=d):

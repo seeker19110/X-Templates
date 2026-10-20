@@ -36,7 +36,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   head/kết luận/model; auto-merge đang bật thì tắt trước), không còn vòng bật/tắt auto-merge. Review sạch chưa đăng không
   chặn PR đã qua (làn nhanh, pha build); lỗi chặn chưa đăng thì luôn phải đăng. **AUD-DOC-054:** guard chặn ở chính sách
   mặc định (mã mới `REVIEW_MISSING`, `strict` → `ask`) merge ghim head (`gh pr merge`, `gh api …/merge`, MCP
-  `merge_pull_request`) khi `eligible` false và bật auto-merge khi `auto_merge_ok` false; tài liệu (`LOOP-STOP-002`,
+  `merge_pull_request`) khi `eligible` false và bật auto-merge khi `auto_merge_ok` false — ở L3 cả khi `merge-check` trả
+  `wait` (CI đang chạy, PR nháp) hay `fix` (conflict) mà review ở head `missing`/`blocking` (review PR #182: trước đây chỉ
+  verdict `merge`/`review` nên merge ghim head lọt thành ask thường; làn nhanh, pha build và dưới L3 giữ hành vi cũ); tài liệu (`LOOP-STOP-002`,
   `LOOP-STOP-022` cả câu Kiểm, skill `/autopilot` bước 10/13, mẫu `CLAUDE.md`/`AGENTS.md` của dự án đích, đính chính hai mục cũ của CHANGELOG) ghi đúng mã: merge khác
   ở chính sách mặc định guard chỉ hỏi khi `strict`. autonomy-bench: corpus `review` có đầu vào `local` (sổ cục bộ),
   `reviews` = review đã đăng; thêm ca `review-xfeat011-*`, `guard-doc054-*`. **Dự án đích:** chạy lại `install.py` (guard

@@ -1810,7 +1810,11 @@ def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> 
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
     # Điều kiện merge một nhà (ADR-0028): CI/làn cho merge mà thiếu review hợp lệ ở head (merge-check `review`; khung cũ
     # trả `merge` kèm `eligible: false`) → mã chặn, không phải ask thường bị chính sách mặc định cho qua (AUD-DOC-054).
-    if d.get("eligible") is False and d.get("verdict") in ("merge", "review"):
+    # Kiểm trước nhánh `verdict != merge`: ở L3, PR chưa review mà CI đang chạy/PR nháp (`wait`) hay conflict (`fix`)
+    # cũng chặn vì review (review PR #182) — làn nhanh/pha build (`na`/`deferred`) và dưới L3 giữ hành vi cũ.
+    level = d.get("autonomy")
+    not_reviewed = isinstance(level, int) and level >= 3 and d.get("review") in ("missing", "blocking")
+    if d.get("eligible") is False and (d.get("verdict") in ("merge", "review") or not_reviewed):
         return "ask", f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
