@@ -4656,7 +4656,18 @@ RO_METHODS = frozenset(
 )
 RO_JSON = frozenset({"json.load", "json.loads", "json.dumps", "JSON.parse", "JSON.stringify"})
 RO_CHAINS = frozenset({"console.log", "pathlib.Path", "pathlib.PurePath"})
-RO_CHAIN_PREFIXES = ("os.path.",)
+# `os.path.<hàm>(`: chỉ đúng bên nhận `os.path` và hàm trong danh sách — `os.path.os.rmdir(` không phải (review #186 lần 2)
+RO_OS_PATH = frozenset(
+    "exists lexists isfile isdir islink ismount isabs join basename dirname split splitext splitdrive abspath realpath "
+    "normpath normcase relpath commonpath commonprefix expanduser expandvars getsize getmtime getatime getctime "
+    "samefile".split()
+)
+# Hàm trong danh sách đọc nhận hàm gọi lại → giới hạn số đối số (đủ để không còn chỗ cho hàm): Node `fs.stat(p, cb)`,
+# `fs.exists(p, cb)`, `fs.read(fd, cb)`, `fs.close(fd, cb)` (chỉ khi script có thể chạy bởi Node/Deno/Bun);
+# `ConfigParser(dict_type=…, converters=…, interpolation=…)` — không đối số.
+RO_JS_CALLBACK = frozenset({"stat", "lstat", "exists", "read", "close"})
+RO_ARGS_MAX = {**{n: 2 for n in RO_JS_CALLBACK}, "ConfigParser": 1}
+RO_ARG_NAMES = frozenset({"open", "openSync", "require", *RO_ARGS_MAX})  # lời gọi cần tách đối số để xét
 JSON_DUMPS_KWARGS = frozenset({"indent", "sort_keys", "ensure_ascii", "separators"})
 # Tên module/đối tượng mà danh sách cho phép dựa vào (`os.path.*`, `json.load`, `console.log`, `fs.readFileSync`):
 # chỉ được dùng làm bên nhận (`os.`) — gán lại (`console = {log: …}`) là mượn tên.
@@ -4672,7 +4683,7 @@ RO_KEYWORDS = frozenset(
 )
 READ_MODES = frozenset({"r", "rb", "rt", "br", "tr", "rs", "sr"})
 FS_RECEIVERS = frozenset({"fs", "File", "io", "codecs", "fsp", "promises"})  # `.open(path, mode)`: đường dẫn trước
-OPEN_KWARGS = frozenset({"encoding", "errors", "newline", "buffering"})
+OPEN_KWARGS = frozenset({"encoding", "errors", "newline"})
 RO_MASK_RE = re.compile(r"\x01(\d+)\x02")
 RO_NEXT_LIT_RE = re.compile(r"[ \t]*\x01(\d+)\x02")
 RO_CALL_RE = re.compile(r"(\.\s*)?(?<![\w$])([A-Za-z_]\w*[?!]?)\s*\(")
@@ -4686,7 +4697,7 @@ RO_BINDERS_RE = re.compile(
 RO_DENY_RE = re.compile(
     r"[`'\"]"  # nháy lẻ/backtick (Ruby/Perl chạy lệnh, JS template)
     r"|(?:\$\{?\w+\}?|&\w+)\s*\(|->"  # gọi qua biến/tham chiếu (`$f(…)`, `&f(…)`, `$f->(…)`, `$o->m(…)`)
-    r"|\bflags?\s*:"  # `{flag: 'w'}` của fs
+    r"|\b(?:flags?|mode)\s*:"  # `{flag: 'w'}` của fs, Ruby `File.read(p, mode: 'w')`
     r"|[.\]]\s*[A-Za-z_]?\w*\s*(?:[-+*/%|&^]|<<|>>|\*\*|//)?=(?![=~>])"  # gán thuộc tính/phần tử
     r"|[)\]}]\s*\("  # gọi trên biểu thức
     r"|(?!__(?:name|main|file)__)__\w+__"  # dunder (`__builtins__`, `__import__`, `__dict__`)
@@ -4858,8 +4869,8 @@ def _ro_read_mode(a: str, lits: List[Tuple[str, str]]) -> bool:
 def _ro_open(kind: str, args: List[str], lits: List[Tuple[str, str]]) -> bool:
     """`open` chỉ đọc: `kind` = path (đường dẫn trước, mode sau) | mode (`Path.open(mode)`) | os (`os.open(p, cờ)`)."""
     pos, kws = _ro_kwargs(args)
-    for name, val in kws:
-        if name in ("mode", "flag", "flags"):
+    for name, val in kws:  # từ khoá: chỉ encoding/errors/newline và mode đọc (`os.open`: cả flags) — không opener=…
+        if name in (("mode", "flag", "flags") if kind == "os" else ("mode",)):
             if not _ro_read_mode(val, lits):
                 return False
         elif name not in OPEN_KWARGS:
@@ -4870,11 +4881,12 @@ def _ro_open(kind: str, args: List[str], lits: List[Tuple[str, str]]) -> bool:
         return False  # Ruby/Perl `open('|lệnh')`, `open(F, 'lệnh|')`: chạy lệnh
     if kind == "mode":
         return all(_ro_lit(a, lits) in READ_MODES for a in pos[:1]) and all(re.fullmatch(r"-?\d+", a) for a in pos[1:])
-    # path: `open(p[, mode[, buffering]])`, `fs.openSync(p, 'r')`, perl `open(F, '<', p)`/`open(F, '<p')`
+    # path: `open(p[, mode])`, `fs.openSync(p, 'r')`, perl `open(F, '<', p)`/`open(F, '<p')` — đối số vị trí thứ 3 trở
+    # đi của Python `open` (buffering … closefd, opener) không nhận: opener là hàm gọi lại (review #186 lần 2)
     mode = _ro_lit(pos[1], lits) if len(pos) > 1 else "r"
     if mode is None or not (mode in READ_MODES or re.fullmatch(r"<(?![&=+]).*", mode, re.S)):
         return False
-    return all(re.fullmatch(r"-?\d+", a) or mode == "<" or _ro_lit(a, lits) is None for a in pos[2:])
+    return len(pos) <= 2 or (mode == "<" and len(pos) == 3)
 
 
 def _ro_json(chain: str, args: List[str]) -> bool:
@@ -4913,36 +4925,40 @@ def _ro_names_ok(masked: str, lits: List[Tuple[str, str]]) -> bool:
     return True
 
 
-def _ro_call_ok(name: str, recv: Optional[str], args: List[str], lits: List[Tuple[str, str]]) -> bool:
-    """Một lời gọi thuộc danh sách đọc: `recv` None = gọi trần `f(…)`, "" = phương thức trên biểu thức (`).m(`)."""
+def _ro_call_ok(name: str, recv: Optional[str], args: List[str], lits: List[Tuple[str, str]], js: bool = True) -> bool:
+    """Một lời gọi thuộc danh sách đọc: `recv` None = gọi trần `f(…)`, "" = phương thức trên biểu thức (`).m(`).
+    `js`: script có thể chạy bởi Node/Deno/Bun — `fs.stat(p, cb)`… nhận hàm gọi lại."""
     chain = f"{recv}.{name}" if recv else name
     if name in ("open", "openSync"):
         path_first = recv is None or name == "openSync" or recv in FS_RECEIVERS
         return _ro_open("os" if recv == "os" else "path" if path_first else "mode", args, lits)
     if chain in RO_JSON:
         return _ro_json(chain, args)
+    if name == "ConfigParser" or (js and name in RO_JS_CALLBACK):
+        bare_ok = recv is not None or name == "ConfigParser"
+        return bare_ok and len(args) < RO_ARGS_MAX[name]  # `ConfigParser(dict_type=…)`, `fs.stat(p, cb)`: hàm gọi lại
     if recv is not None:
-        return name in RO_METHODS or chain in RO_CHAINS or chain.startswith(RO_CHAIN_PREFIXES)
+        return name in RO_METHODS or chain in RO_CHAINS or (recv == "os.path" and name in RO_OS_PATH)
     if name not in RO_FUNCS and name not in RO_KEYWORDS:
         return False
     module = (_ro_lit(args[0], lits) or "") if name == "require" and args else "fs"
     return bool(module) and not module.startswith((".", "/"))  # `require('./x')`, `require(x)`: mã từ file khác
 
 
-def _ro_calls_ok(masked: str, lits: List[Tuple[str, str]], close: Dict[int, int]) -> bool:
-    """Mọi lời gọi `f(…)`/`x.m(…)` thuộc danh sách đọc; `open` chỉ với mode đọc; JSON không hàm gọi lại."""
+def _ro_calls_ok(masked: str, lits: List[Tuple[str, str]], close: Dict[int, int], js: bool = True) -> bool:
+    """Mọi lời gọi `f(…)`/`x.m(…)` thuộc danh sách đọc; `open` chỉ với mode đọc; JSON/hàm khác không hàm gọi lại."""
     scans = 0
     for m in RO_CALL_RE.finditer(masked):
         name, recv = m[2], None
         if m[1]:
             recv_m = RO_RECEIVER_RE.search(masked[max(0, m.start() - 200) : m.start() + 1])
             recv = re.sub(r"\s+", "", recv_m[1]) if recv_m else ""
-        special = name in ("open", "openSync", "require") or f"{recv}.{name}" in RO_JSON
+        special = name in RO_ARG_NAMES or f"{recv}.{name}" in RO_JSON
         scans += special
         if scans > RO_ARG_SCANS:
             return False
         args = _paren_args(masked, m.end(), close[m.end() - 1]) if special else []
-        if not _ro_call_ok(name, recv, args, lits):
+        if not _ro_call_ok(name, recv, args, lits, js):
             return False
     return True
 
@@ -4964,7 +4980,8 @@ def _read_only_script(script: str, families: Optional[FrozenSet[str]] = None, de
         name, nxt = m[2], m[3]
         if name not in RO_KEYWORDS and nxt not in RO_KEYWORDS and name not in (*RO_PRINTERS, "require"):
             return False
-    return _ro_names_ok(masked, lits) and _ro_calls_ok(masked, lits, close)
+    js = not families or bool(families & {"node", "deno", "bun"})
+    return _ro_names_ok(masked, lits) and _ro_calls_ok(masked, lits, close, js)
 
 
 # Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,

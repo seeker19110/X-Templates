@@ -196,7 +196,7 @@ class InterpDefaultDenyTest(unittest.TestCase):
         self.assertTrue(ro('open(F, "<.autopilot/state.json")'))
         self.assertTrue(ro("open(my $fh, '<', '.env'); print <$fh>"))
         self.assertTrue(ro("puts File.open('.env').read"))
-        self.assertTrue(ro("print(open('.env', 'r', -1).read())"))
+        self.assertFalse(ro("print(open('.env', 'r', -1).read())"))  # review #186 lần 2: tối đa 2 đối số vị trí
         self.assertTrue(
             ro("const fs = require('fs'); console.log(JSON.stringify(JSON.parse(fs.readFileSync('.env')), null, 2))")
         )
@@ -334,6 +334,62 @@ class MaskFailClosedTest(unittest.TestCase):
         self.assertFalse(ro("x = 1 / 2 # ; os.remove('.env')", NODE))
         # luật Perl chỉ áp cho perl (hoặc không biết trình thông dịch)
         self.assertTrue(ro("s = File.read('.env'); puts s", RUBY))
+
+
+class OpenArgsTest(unittest.TestCase):
+    """Review #186 lần 2: `open` với đối số thứ 8 là hàm (`opener`), chuỗi `os.path.os.*`, hàm trong danh sách đọc
+    nhận hàm gọi lại."""
+
+    def test_guard_open_opener_and_chain_denied(self):
+        cases = {
+            "python3 -c \"import os; open('.env','r',-1,None,None,None,True,os.truncate)\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.path.os.rmdir('.claude/hooks')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.path.genericpath.os.rmdir('.claude/hooks')\"": "HOOK_BYPASS",
+            "node -e \"const fs = require('fs'); fs.stat('.env', fs.unlinkSync)\"": "SECRET_WRITE",
+            "ruby -e \"File.read('.env', mode: 'w')\"": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_open_args_helper(self):
+        ro = guard._read_only_script
+        for good, fam in (
+            ("print(open('.env').read())", PY),
+            ("print(open('.env', 'rb').read())", PY),
+            ("print(open('.env', 'r', encoding='utf-8', errors='replace', newline='').read())", PY),
+            ("print(open('.env', mode='r').read())", PY),
+            ("open(my $fh, '<', '.env'); print <$fh>", PERL),
+            ("import os; print(os.path.join('a', '.env'), os.path.exists('.env'), os.path.getsize('.env'))", PY),
+            ("import os; fd = os.open('.env', os.O_RDONLY); print(os.read(fd, 10)); os.close(fd)", PY),
+            ("from pathlib import Path; print(Path('.env').open('r', -1).read())", PY),
+            ("import configparser\nc = configparser.ConfigParser(); c.read('.env')", PY),
+            ("const fs = require('fs'); console.log(fs.statSync('.env').size, fs.readFileSync('.env', 'utf8'))", NODE),
+        ):
+            with self.subTest(good=good):
+                self.assertTrue(ro(good, fam))
+        for bad, fam in (
+            ("open('.env', 'r', -1)", PY),
+            ("open('.env', 'r', -1, None, None, None, True, x)", PY),
+            ("open('.env', buffering=0)", PY),
+            ("open('.env', 'r', closefd=False)", PY),
+            ("open(F, '<', '.env', 'x')", PERL),
+            ("import os; os.path.os.rmdir('.env')", PY),
+            ("import os; os.path.genericpath.os.rmdir('.env')", PY),
+            ("import os; os.path.walk('.env')", PY),
+            (
+                "from configparser import ConfigParser; import os; c = ConfigParser(dict_type=os.getcwd); c.read('.env')",
+                PY,
+            ),
+            ("const fs = require('fs'); fs.stat('.env', fs.unlinkSync)", NODE),
+            ("require('fs').exists('.env', console.log)", NODE),
+            ("require('fs').lstat('.env', {}, x)", NODE),
+            ("require('fs').open('.env', 'r', x)", NODE),
+            ("File.read('.env', mode: 'w')", RUBY),
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(ro(bad, fam))
 
 
 if __name__ == "__main__":
