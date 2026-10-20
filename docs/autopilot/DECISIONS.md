@@ -762,3 +762,10 @@
 - Chọn: fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: che sai từng làm lọt ghi thật (review #186 lần 2); chặn oan chỉ khi script nhắc đường dẫn canh, agent còn Edit/Write
 - Đường lùi: cho comment # đầu dòng
+
+### D-108 · 2026-10-20T15:08:28+00:00 · Bỏ bước reviewer cho PR của repo khung: chỉ cần CI xanh là auto-merge (yêu cầu chủ repo 2026-10-20)
+
+- Phương án: (1) Đặt delivery_phase: build trong xt.yaml (cơ chế ADR-0031 có sẵn: review thành nợ, release-check đòi harden ở G7) · (2) Hạ merge_autonomy hoặc sửa merge-check để bỏ hẳn review_gate
+- Chọn: Đặt delivery_phase: build trong xt.yaml (cơ chế ADR-0031 có sẵn: review thành nợ, release-check đòi harden ở G7)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1+3: dùng đúng cơ chế đã có test, không nới guard/merge-check; nợ review được ghi và đòi trả ở G7 — đúng ý 'để dành reviewer cho giai đoạn hoàn thiện'; ngoại lệ cứng và review blocking vẫn chặn
+- Đường lùi: đổi lại delivery_phase: harden trong xt.yaml, hoàn test + AGENTS.md
