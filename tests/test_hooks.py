@@ -1709,6 +1709,8 @@ class MergeGuardBase(unittest.TestCase):
                 arms.append(f"  {shlex.quote(path)}) exec cat {shlex.quote(str(out / f'{i}.json'))} ;;\n")
             script = (
                 '#!/bin/sh\nfor a; do last=$a; done\n[ "$1" = api ] || { echo "gh giả: chỉ có api" >&2; exit 1; }\n'
+                'case "$last" in *"&page=1") last="${last%&page=1}" ;; *"?page=1") last="${last%?page=1}" ;; '
+                '*page=[2-9]*) echo "[]"; exit 0 ;; esac\n'  # phân trang tự làm (FB-001)
                 'case "$last" in\n'
                 + "".join(arms)
                 + '  *) echo "gh giả: không có đường dẫn $last" >&2; exit 1 ;;\nesac\n'
@@ -4901,7 +4903,7 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
             with self.subTest(repr(cmd)):
                 self.assertEqual(self.out(cmd)["decision"], "deny")
         self.assertEqual(self.out("echo a\ud800b > out.txt")["decision"], "")
-        self.assertEqual(self.g.clean_payload({"k\ud800": ["x\x00y", 1, None]}), {"k�": ["x y", 1, None]})
+        self.assertEqual(self.g.clean_payload({"k\ud800": ["x\x00y", 1, None]}), {"k\ufffd": ["x y", 1, None]})
         # rel_path không ném lỗi với đường dẫn chứa surrogate/NUL; hàng rào vẫn nhận ra file hook
         self.assertEqual(self.g.rel_path("a\ud800/../b", self.root), "b")
         self.assertEqual(self.g.rel_path("x\x00y", self.root), "x\x00y")

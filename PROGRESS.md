@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.11.0, pha `build`) · Cập nhật: 2026-10-20 · Nhánh: main
 
 ## Đang làm
-- 2026-10-20 **PLAN-3.12-lean** (D-111 "tối ưu toàn bộ, cả dự án đích"): Lát 1 #190 (tài liệu một nhà) và Lát 2 #191 (harness ít lượt, `install.py` băm file gốc, cắt bản 3.11.0, tag `v3.11.0`) đã merge. Lát 3: PR nâng khung 3.7.1 → 3.11.0 ở hotel-manager (#105) và X-Company (#45) — chủ dự án quyết khoá `xt.yaml` mới và merge; PROGRESS gọn (T-1736), `tick_plan_task` ghi xuyên symlink (T-1737). Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
+- 2026-10-20 **PLAN-3.12-lean** (D-111 "tối ưu toàn bộ, cả dự án đích"): Lát 1 #190 (tài liệu một nhà) và Lát 2 #191 (harness ít lượt, `install.py` băm file gốc, cắt bản 3.11.0, tag `v3.11.0`) đã merge. Lát 3: PR nâng khung 3.7.1 → 3.11.x ở hotel-manager và X-Company (CI dự án đích lộ 3 hồi quy → bản vá 3.11.1, Lát 4; PR thay thế — số ở báo cáo cuối phiên) — chủ dự án quyết khoá `xt.yaml` mới và merge; PROGRESS gọn (T-1736), `tick_plan_task` ghi xuyên symlink (T-1737). Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/007/009, SEC-043 #97).
 
