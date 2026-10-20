@@ -472,6 +472,123 @@
     "action": "wait"
    },
    "note": "nhánh đích không có check bắt buộc: bật auto-merge = GitHub merge ngay (D-062)"
+  },
+  {
+   "id": "review-phase-build-no-review-proceeds",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "decision": {
+     "delivery_phase": "build"
+    }
+   },
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "proceed": true,
+    "review": "deferred",
+    "action": "enable-auto-merge"
+   }
+  },
+  {
+   "id": "review-phase-build-blocking-stops",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "delivery_phase": "build"
+    },
+    "auto_merge": true,
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-20T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "blocking",
+    "action": "disable-auto-merge"
+   }
+  },
+  {
+   "id": "review-phase-build-hard-waived-asks-review",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "delivery_phase": "build",
+     "hard_waived": [
+      "đường dẫn nhạy cảm (auth): src/auth/x.py"
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
+   }
+  },
+  {
+   "id": "review-phase-blocking-oldhead",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "decision": {
+     "delivery_phase": "build"
+    },
+    "auto_merge": true,
+    "reviews": [
+     {
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "clean": false,
+      "at": "2026-10-20T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "disable-auto-merge"
+   },
+   "note": "lỗi chặn ở head cũ: tắt auto-merge, review lại head hiện tại (ADR-0031)"
+  },
+  {
+   "id": "review-phase-build-clean-after-blocking",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "decision": {
+     "delivery_phase": "build"
+    },
+    "reviews": [
+     {
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "clean": false,
+      "at": "2026-10-20T10:00:00+00:00"
+     },
+     {
+      "head": "cccccccccccccccccccccccccccccccccccccccc",
+      "clean": true,
+      "at": "2026-10-20T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "proceed": true,
+    "review": "deferred",
+    "action": "enable-auto-merge"
+   }
   }
  ]
 }

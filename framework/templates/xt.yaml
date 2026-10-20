@@ -34,6 +34,12 @@ format_file: ""
 merge_autonomy: L3
 merge_risk_paths: ""
 merge_hard_exceptions: human
+# delivery_phase (ADR-0031): build (mặc định dự án mới) = code nhanh, merge nhanh — PR làn chuẩn KHÔNG thuộc ngoại lệ cứng chỉ
+# cần CI xanh + không xung đột + không có review `blocking` ở head; review hoãn thành nợ (`merge-check --json`
+# `review_deferred: true`). harden = PR làn chuẩn cần review sạch ở head (ADR-0024). Vắng/rỗng = harden. Có hiệu lực khi
+# cả nhánh đích đã commit lẫn cây làm việc đều `build`. Trước G7: đặt harden, chạy audit delta rồi `xt.py release-check`
+# (hàng `phase`, `review_debt`). Ngoại lệ cứng (tiền, dữ liệu thật, auth, mật mã, bí mật) luôn cần review ở mọi pha.
+delivery_phase: build
 # review_identity / author_model_family / reviewer_model_family (tuỳ chọn, T-1508): đọc ở nhánh đích đã commit. Có
 # review_identity thì CHỈ dấu review của đúng tài khoản đó mở được merge (tác giả PR không tự đăng được); hai họ model khai
 # cùng nhau phải KHÁC họ (`xt.py ci-check` từ chối trùng). Dùng với workflow `pr-review` (cần secret của chủ repo).

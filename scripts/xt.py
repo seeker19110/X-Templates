@@ -3617,6 +3617,9 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         return [Finding("xt-yaml", "error", msg, fix)]
     keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
     out = _doctor_gate_tools(keys)
+    phase_err = delivery_phase_error({k: yaml_scalar(v) for k, v in keys.items()})
+    if phase_err:
+        out.append(Finding("xt-yaml", "error", phase_err + " — sửa thành build hoặc harden"))
     missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
     if missing:
         out.append(
@@ -4242,6 +4245,14 @@ def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
+def _risk_labels(pr: Dict[str, Any]) -> List[str]:
+    return [
+        n
+        for n in (str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict))
+        if n.startswith("risk:")
+    ]
+
+
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
@@ -4303,6 +4314,9 @@ def merge_decision(
         "base_has_required": pr.get("baseHasRequired") if isinstance(pr.get("baseHasRequired"), bool) else None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
+        "risk_labels": _risk_labels(
+            pr
+        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build không hoãn review (ADR-0031)
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -4344,6 +4358,46 @@ def merge_hard_mode(base: Path, ref: str) -> Tuple[bool, List[str]]:
     if mode in ("human", "auto"):
         return mode == "auto", []
     return False, [f"{HARD_KEY} '{mode}' không hợp lệ (human|auto) — dùng human"]
+
+
+# Pha giao hàng (ADR-0031): `build` = code nhanh, merge nhanh — PR làn chuẩn không thuộc ngoại lệ cứng chỉ cần CI xanh,
+# review hoãn thành nợ (`review_deferred`); `harden` = hành vi trước đó (review sạch ở head). Khoá vắng/rỗng = harden.
+PHASE_KEY = "delivery_phase"
+DELIVERY_PHASES = ("build", "harden")
+PHASE_DEFER_NOTE = "pha build: bỏ qua review, ghi nợ (ADR-0031)"
+
+
+def delivery_phase_error(keys: Dict[str, str]) -> Optional[str]:
+    """Giá trị `delivery_phase` lạ (không phải build|harden; vắng/rỗng hợp lệ) — `doctor`/`ci-check` từ chối."""
+    value = keys.get(PHASE_KEY, "")
+    if value in ("", *DELIVERY_PHASES):
+        return None
+    return f"xt.yaml: {PHASE_KEY} '{value}' không hợp lệ (build|harden — ADR-0031)"
+
+
+def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
+    """(pha, ghi chú) cho `merge-check`: `build` chỉ khi CẢ xt.yaml đã commit ở `ref` (nhánh đích) LẪN cây làm việc đều
+    `build` — PR không tự chuyển sang build cho chính nó (như `pr_title_check`); còn lại `harden`. Giá trị lạ → harden kèm
+    ghi chú."""
+    work, committed = _xt_keys(base), _committed_xt_keys(base, ref)
+    notes = [f"{e} — dùng harden" for e in (delivery_phase_error(work), delivery_phase_error(committed)) if e]
+    both = work.get(PHASE_KEY) == "build" and committed.get(PHASE_KEY) == "build"
+    return ("build" if both else "harden"), notes
+
+
+def review_deferrable(d: Dict[str, Any]) -> bool:
+    """Review của PR được hoãn thành nợ (ADR-0031): pha build VÀ PR không thuộc ngoại lệ cứng — kể cả ngoại lệ cứng chủ
+    dự án đã cho máy merge (`hard_waived`, ADR-0020): tiền/dữ liệu thật/auth/mật mã/bí mật vẫn cần review sạch."""
+    return d.get(PHASE_KEY) == "build" and not d.get("hard") and not d.get("hard_waived")
+
+
+def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:
+    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable`, PR không mang nhãn `risk:` (phanh thủ
+    công, ADR-0025) VÀ review KẾT LUẬN mới nhất của PR (bất kể head) không phải `blocking`: lỗi chặn ở head cũ không bị
+    "rửa" bằng một lần push — cần review lại head hiện tại; review `inconclusive` không gỡ lỗi chặn trước nó."""
+    concluded = [r for r in reviews if not r.get("inconclusive")]
+    washed = bool(concluded) and not concluded[-1].get("clean")
+    return state == "missing" and review_deferrable(d) and not d.get("risk_labels") and not washed
 
 
 def _risk_globs(keys: Dict[str, str]) -> List[str]:
@@ -5871,10 +5925,11 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
         for e in errors:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
-    cfg_err = review_family_config_error(_xt_keys(project_dir()))
-    if cfg_err:
-        print(f"✗ {cfg_err}")
-        bad += 1
+    keys = _xt_keys(project_dir())
+    for cfg_err in (review_family_config_error(keys), delivery_phase_error(keys)):
+        if cfg_err:
+            print(f"✗ {cfg_err}")
+            bad += 1
     if not bad:
         print(
             f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error, không secret trên PR."
@@ -6670,17 +6725,28 @@ def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         pr = {k: v for k, v in pr.items() if k != "title"}
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
-    return merge_check_result(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
+    phase, phase_notes = delivery_phase(project_dir(), ref)
+    risk = merge_risk_globs(project_dir(), ref)
+    return merge_check_result(pr, autonomy, risk, hard_auto, phase), notes + hard_notes + phase_notes
 
 
-def merge_check_result(pr: Dict[str, Any], autonomy: int, risk_paths: List[str], hard_auto: bool) -> Dict[str, Any]:
+def merge_check_result(
+    pr: Dict[str, Any], autonomy: int, risk_paths: List[str], hard_auto: bool, phase: str = "harden"
+) -> Dict[str, Any]:
     """Kết quả `merge-check` cho PR đã đọc và cấu hình đã đọc, hàm thuần (dùng chung với `autonomy-bench`).
     Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
-    với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác)."""
-    d = merge_decision(pr, autonomy, risk_paths, hard_auto)
+    với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác). `phase` (ADR-0031): pha
+    build hoãn review của PR không thuộc ngoại lệ cứng (`review_deferred`)."""
+    d = {**merge_decision(pr, autonomy, risk_paths, hard_auto), PHASE_KEY: phase}
     marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
     elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
-    return {**d, "review": elig["review"], "eligible": elig["eligible"], "auto_merge_ok": elig["auto_merge_ok"]}
+    return {
+        **d,
+        "review": elig["review"],
+        "review_deferred": elig["review_deferred"],
+        "eligible": elig["eligible"],
+        "auto_merge_ok": elig["auto_merge_ok"],
+    }
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -6695,7 +6761,8 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
         print(json.dumps({**d, "notes": notes}, ensure_ascii=False))
     else:
         print(f"{d['verdict'].upper()} · PR #{d['pr']} · làn {d['lane']}")
-        for r in [*d["reasons"], *notes]:
+        deferred = [f"{PHASE_DEFER_NOTE} — chưa có review sạch ở head"] if d["review_deferred"] else []
+        for r in [*d["reasons"], *deferred, *notes]:
             print(f"  - {r}")
         if d["next"]:
             print(f"→ {d['next']}")
@@ -6704,7 +6771,7 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- release-check (G7 máy đọc, ADR-0029)
 
-RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch")
+RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch", "phase", "review_debt")
 
 
 def _release_row(rid: str, result: str, evidence: str, level: str = "BLOCKER") -> Dict[str, str]:
@@ -6801,16 +6868,74 @@ def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -
     return _release_row("prod_switch", "PASS", f'không có đề xuất "Khi chạy thật" chờ quyết trong {log}')
 
 
+def _release_phase(base: Path) -> Dict[str, str]:
+    """Phát hành chỉ ở pha harden (ADR-0031): pha build là "merge trước, review sau" — chưa phải chất lượng phát hành."""
+    keys = _xt_keys(base)
+    err = delivery_phase_error(keys)
+    if err:
+        return _release_row("phase", "FAIL", f"{err} — đặt `{PHASE_KEY}: harden`")
+    if keys.get(PHASE_KEY) == "build":
+        return _release_row(
+            "phase", "FAIL", f"xt.yaml `{PHASE_KEY}: build` — đặt `{PHASE_KEY}: harden` rồi chạy audit delta (ADR-0031)"
+        )
+    return _release_row("phase", "PASS", f"`{PHASE_KEY}: {keys.get(PHASE_KEY) or 'harden'}` (vắng = harden)")
+
+
+def review_debt(root: Path, status: Path) -> Tuple[List[str], List[str]]:
+    """Nợ review (ADR-0031): (file ngoài tài liệu đổi sau SHA quét mà audit chưa phủ, SHA quét đã dùng). Nhóm đã quét/rút
+    gọn của sổ phủ file thuộc nhóm đó (`_path_groups`) tới SHA của nhóm; file không thuộc nhóm nào (cấu hình cổng như
+    `ruff.toml`) tính từ SHA quét MỚI NHẤT. SHA không phải tổ tiên HEAD bỏ qua — hàng `audit` đã báo."""
+    scanned = {
+        no: sha
+        for no, r in audit_status_groups(status).items()
+        if r.get("Trạng thái") in ("đã quét", "rút gọn")
+        and (sha := r.get("SHA", "").strip("` "))
+        and _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode == 0
+    }
+    changed: Dict[str, List[str]] = {}
+    for sha in set(scanned.values()):
+        names = _git(root, "-c", "core.quotePath=false", "diff", "--name-only", f"{sha}..HEAD").stdout.splitlines()
+        changed[sha] = [f for f in names if f and not DOC_PATH_RE.search(f)]
+    debt = {f for no, sha in scanned.items() for f in changed[sha] if no in _path_groups(f)}
+    ahead = {s: _git(root, "rev-list", "--count", f"{s}..HEAD").stdout.strip() for s in changed}
+    newest = min(ahead, key=lambda s: int(ahead[s] or 0), default="")
+    debt |= {f for f in changed.get(newest, []) if not _path_groups(f)}
+    return sorted(debt), sorted(set(scanned.values()))
+
+
+def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
+    """Nợ review (ADR-0031). Sổ vắng/không đọc được hay không có SHA quét dùng được → N/A: hàng `audit` đã FAIL hoặc mọi
+    nhóm N/A (`audit check --strict` soát N/A trôi) — một vấn đề một hàng chặn."""
+    try:
+        debt, shas = review_debt(base, base / status)
+    except (OSError, ValueError) as exc:  # ValueError: sổ không phải UTF-8
+        return _release_row("review_debt", "N/A", f"không đọc được {status} ({exc}) — xem hàng audit", "SHOULD")
+    if not shas:
+        why = f"{status} không có nhóm đã quét với SHA là tổ tiên HEAD — không có SHA quét để so"
+        return _release_row("review_debt", "N/A", why, "SHOULD")
+    if debt:
+        return _release_row(
+            "review_debt",
+            "FAIL",
+            f"{len(debt)} file ngoài tài liệu đổi sau SHA quét ({', '.join(debt[:5])}) — chạy audit delta "
+            f"(`xt.py audit plan --status {status}`), cập nhật sổ (ADR-0031)",
+        )
+    return _release_row("review_debt", "PASS", f"không có file ngoài tài liệu đổi sau SHA quét ({len(shas)} SHA)")
+
+
 def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
     """Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối của autopilot
     và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
-    hàng BLOCKER nào FAIL; hàng N/A BLOCKER là việc của người (không tính GO, không tính NO-GO — ghi rõ)."""
+    hàng BLOCKER nào FAIL; hàng N/A BLOCKER là việc của người (không tính GO, không tính NO-GO — ghi rõ). ADR-0031: pha
+    phải là harden (`phase`) và không còn nợ review — file ngoài tài liệu đổi sau SHA quét của sổ audit (`review_debt`)."""
     rows = [
         _release_blueprint(base, blueprint),
         _release_audit(base, status),
         _release_verify(base),
         _release_tree(base),
         _release_prod_switch(base),
+        _release_phase(base),
+        _release_review_debt(base, status),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
@@ -7159,12 +7284,16 @@ def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen:
 def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
     """MỘT điều kiện "được merge/được bật auto-merge" cho `merge-check`, `pr next`, `merge-gate`, guard (`gh`/MCP) và steward
     (REC-03, ADR-0028), hàm thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` =
-    không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật."""
+    không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật. Pha build
+    (ADR-0031, `review_deferred`): thiếu review ở head thành `deferred` (hợp lệ, ghi nợ); review `blocking` vẫn chặn — kể
+    cả ở head cũ khi chưa có review sạch sau nó — và nhãn `risk:` giữ `missing`."""
     g = review_gate(d, reviews, standard_seen)
-    review_ok = g["state"] in ("na", "ok")
+    state = "deferred" if review_deferred(d, reviews, g["state"]) else g["state"]
+    review_ok = state in ("na", "ok", "deferred")
     return {
         "strict": g["strict"],
-        "review": g["state"],
+        "review": state,
+        "review_deferred": state == "deferred",
         "eligible": d.get("verdict") == "merge" and review_ok,
         "auto_merge_ok": not d.get("hard") and review_ok,
     }
@@ -7181,20 +7310,34 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
     gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
     strict = gate["strict"]
+    # Pha build (ADR-0031): chưa rà head này không chặn PR ngoài ngoại lệ cứng — ghi nợ; review `blocking` (cả ở head cũ
+    # chưa có review sạch sau nó) và nhãn `risk:` vẫn chặn.
+    deferred = review_deferred(d, reviews, gate["state"])
     disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
 
     def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:
-        return {"pr": n, "head": head, "action": action, "why": why, "do": do, "fallback": fallback, "strict": strict}
+        return {
+            "pr": n,
+            "head": head,
+            "action": action,
+            "why": why,
+            "do": do,
+            "fallback": fallback,
+            "strict": strict,
+            "review_deferred": deferred,
+        }
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
-    if early is None and strict:  # review ở head hiện tại quyết trước review mang qua (AUD-HAR-059): xem `review_gate`
+    if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
         early = _pr_next_review(d, auto_merge, gate, act, disable)
     if early is not None:
         return early
-    return _pr_next_final(d, auto_merge, strict, act, disable)
+    label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
+    out = _pr_next_final(d, auto_merge, label, act, disable)
+    return {**out, "why": f"{PHASE_DEFER_NOTE} — {out['why']}"} if deferred else out
 
 
-def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct, disable: str) -> Dict[str, Any]:
+def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, disable: str) -> Dict[str, Any]:
     """Đã qua mọi chốt: L3 bật auto-merge (chờ nếu đã bật); dưới L3 không bao giờ bật — auto-merge không ghim head —
     mà merge bằng lệnh ghim head khi `merge-check` = `merge` (ADR-0013/0015, review #110)."""
     n, head, verdict = d.get("pr", ""), str(d.get("head", "")), d.get("verdict")
@@ -7218,7 +7361,7 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, strict: bool, act: PrAct
         return act("wait", f"{why}; chờ CI xanh rồi merge ghim head", f"chạy nền xt.py merge-watch --pr {n}")
     return act(
         "enable-auto-merge",
-        f"{'review sạch ở head' if strict else 'làn nhanh'} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
+        f"{label} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
         f"gh pr merge {n} --auto --squash (MCP enable_pr_auto_merge)",
         pinned if verdict == "merge" else "",
     )
@@ -7957,13 +8100,15 @@ class BenchEnv:
 def _bench_pr(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     """PR → `merge-check` (merge_decision + merge_eligibility, ADR-0028) với cấu hình của ca, không đọc xt.yaml/GitHub."""
     risk = prefixed_globs([str(g) for g in inp.get("risk_paths") or []], str(inp.get("project_prefix") or ""))
-    d = merge_check_result(inp["pr"], int(inp.get("autonomy") or 1), risk, bool(inp.get("hard_auto")))
+    phase = str(inp.get(PHASE_KEY) or "harden")
+    d = merge_check_result(inp["pr"], int(inp.get("autonomy") or 1), risk, bool(inp.get("hard_auto")), phase)
     return {
         "eligible": d["eligible"],
         "auto_merge_ok": d["auto_merge_ok"],
         "verdict": d["verdict"],
         "lane": d["lane"],
         "review": d["review"],
+        "review_deferred": d["review_deferred"],
         "hard": bool(d["hard"]),
     }
 
@@ -7992,6 +8137,7 @@ def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
         "proceed": nxt["action"] in PROCEED_ACTIONS,
         "review": elig["review"],
         "action": nxt["action"],
+        "review_deferred": elig["review_deferred"],
     }
 
 

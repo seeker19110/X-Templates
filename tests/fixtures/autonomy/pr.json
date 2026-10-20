@@ -855,6 +855,232 @@
     "eligible": false,
     "verdict": "fix"
    }
+  },
+  {
+   "id": "pr-phase-build-standard-no-review",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "verdict": "merge",
+    "lane": "chuẩn",
+    "review": "deferred",
+    "review_deferred": true
+   },
+   "note": "ADR-0031: pha build, làn chuẩn ngoài ngoại lệ cứng — CI xanh là đủ, review ghi nợ"
+  },
+  {
+   "id": "pr-phase-harden-standard-no-review",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "harden",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing",
+    "review_deferred": false
+   }
+  },
+  {
+   "id": "pr-phase-build-hard-auth",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/auth/login.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_auth.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true,
+    "review_deferred": false
+   },
+   "note": "ADR-0031: ngoại lệ cứng không đổi theo pha"
+  },
+  {
+   "id": "pr-phase-build-hard-waived-needs-review",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "hard_auto": true,
+    "pr": {
+     "files": [
+      {
+       "path": "src/auth/login.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_auth.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": false,
+    "review": "missing",
+    "review_deferred": false
+   },
+   "note": "merge_hard_exceptions: auto miễn người merge, không miễn review ở pha build"
+  },
+  {
+   "id": "pr-phase-build-blocking-review",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ],
+     "xtReviews": [
+      {
+       "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "clean": false,
+       "at": "2026-10-20T10:00:00Z"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "blocking",
+    "review_deferred": false
+   },
+   "note": "review blocking chặn ở mọi pha"
+  },
+  {
+   "id": "pr-phase-blocking-oldhead",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ],
+     "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "xtReviews": [
+      {
+       "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "clean": false,
+       "at": "2026-10-20T10:00:00Z"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing",
+    "review_deferred": false
+   },
+   "note": "ADR-0031: review blocking ở head cũ không bị một lần push 'rửa' thành deferred — cần review lại head hiện tại"
+  },
+  {
+   "id": "pr-phase-build-risk-label",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ],
+     "labels": [
+      {
+       "name": "risk:perf"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing",
+    "review_deferred": false
+   },
+   "note": "ADR-0031 + ADR-0025: nhãn risk: là phanh thủ công — pha build không hoãn review"
   }
  ]
 }

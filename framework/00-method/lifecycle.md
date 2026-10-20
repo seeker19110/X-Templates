@@ -1,7 +1,7 @@
 ---
 title: Vòng đời dự án và các cổng
 kind: method
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Vòng đời dự án và các cổng
@@ -38,7 +38,8 @@ updated: 2026-10-19
    UI "đủ dùng" theo MUST của quy mô; audit **theo delta ở mỗi mốc** của PLAN ([`audit.md`](audit.md) §1) và **toàn diện ở G7**
    (`xt.py release-check` gom blueprint `--strict --run`, sổ audit `--strict`, kiểm lại cuối, cây git → GO/NO-GO máy đọc;
    người ký `GO-NO-GO.md`). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
-   cùng tiêu chí cuối, khác **thời điểm** kiểm.
+   cùng tiêu chí cuối, khác **thời điểm** kiểm. Máy merge theo pha bằng khoá `delivery_phase: build|harden` của `xt.yaml`
+   — build hoãn review thành nợ, G7 đòi harden và hết nợ (ADR-0031 của repo khung).
 
 ## Quy mô S/M/L — làm nhẹ đi chứ không bỏ
 

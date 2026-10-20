@@ -664,3 +664,10 @@
 - Chọn: đổi phép kiểm sang grep mục [3.9.0] trong CHANGELOG (đúng ở mọi bản sau)
 - Lý do (tiêu chí chất lượng cuối): kiểm tại thời điểm đã đạt; không bỏ task, không hạ ngưỡng — chỉ gỡ ràng buộc sai thời điểm; ghi lý do ở commit
 - Đường lùi: khôi phục test VERSION = 3.9.0
+
+### D-094 · 2026-10-20T02:59:26+00:00 · delivery_phase build: ngoại lệ cứng đã miễn (hard_waived), điều kiện build hiệu lực, cách tính review_debt
+
+- Phương án: (1) hard_waived vẫn cần review sạch; build chỉ hiệu lực khi xt.yaml ở nhánh đích VÀ cây cùng là build; review_debt theo SHA của nhóm audit chứa file · (2) hard_waived như PR thường; build đọc từ cây; review_debt theo SHA cũ nhất
+- Chọn: hard_waived vẫn cần review sạch; build chỉ hiệu lực khi xt.yaml ở nhánh đích VÀ cây cùng là build; review_debt theo SHA của nhóm audit chứa file
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: chặt hơn; PR không tự bật build cho chính nó; tránh báo nợ mãi sau audit delta
+- Đường lùi: đặt delivery_phase: harden

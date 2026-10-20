@@ -1832,7 +1832,9 @@ class ReleaseCheckTest(TmpRepoCase):
         rc, d = self.rows()
         self.assertEqual((rc, d["go"], d["verdict"], d["fails"], d["human"]), (0, True, "GO", [], []))
         r = self.by_id(d)
-        self.assertEqual([r[k]["result"] for k in xt.RELEASE_ROWS], ["PASS", "PASS", "N/A", "PASS", "N/A"])
+        self.assertEqual(
+            [r[k]["result"] for k in xt.RELEASE_ROWS], ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A"]
+        )
         self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
         self.assertTrue(r["tree"]["evidence"].startswith("cây sạch, HEAD "))
         self.assertEqual(len(d["head"]), 40)
