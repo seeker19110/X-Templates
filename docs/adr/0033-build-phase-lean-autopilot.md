@@ -2,7 +2,7 @@
 
 - **Trạng thái:** Đã chấp nhận
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `_with_dispatch` (`milestone_audit`: `now`|`g7`);
-  skill `.claude/skills/autopilot/SKILL.md` bước 10/13; `framework/11-autonomous-loop/README.md` bước 11/11b;
+  (`_phase_in_tree`: `xt.yaml` không đọc được → `now`, fail-open); skill `.claude/skills/autopilot/SKILL.md` bước 10/13; `framework/11-autonomous-loop/README.md` bước 11/11b;
   `framework/00-method/audit.md` §1; test `tests/test_xt_core.py::LoopRecordBranchesTest.test_milestone_done_marks_section_transition`.
 - **Ngày:** 2026-10-20
 - **Làm rõ:** ADR-0029 (audit theo mốc — thay ở pha build), ADR-0031 (pha build/harden — mục Hệ quả "audit delta mỗi
@@ -13,13 +13,15 @@
 Chủ repo hỏi autopilot đã tối giản cho giai đoạn dev chưa. ADR-0031 cho máy merge bỏ review ở pha build, nhưng quy
 trình vẫn giữ ba khâu không thêm chốt an toàn nào ở pha này:
 
-1. **Giao reviewer mỗi PR** (skill bước 10 (c), "song song với CI") — ở pha build `pr next` không bao giờ trả `review`
-   cho PR ngoài ngoại lệ cứng/nhãn `risk:`, nên lượt review không đổi được merge, chỉ tốn một subagent mỗi PR.
+1. **Giao reviewer mỗi PR** (skill bước 10 (c), "song song với CI") — ở pha build `pr next` chỉ trả `review` cho
+   ngoại lệ cứng, PR mang nhãn `risk:`, hoặc PR từng có review báo lỗi chặn chưa được rà sạch sau đó (`review_deferred`,
+   ADR-0031); với PR còn lại lượt review không đổi được merge, chỉ tốn một subagent mỗi PR.
 2. **Audit delta mỗi mốc** (ADR-0029) — trùng với audit delta bắt buộc trước G7: `release-check` FAIL hàng `phase`
    (còn `build`) và `review_debt` (file đổi sau SHA quét) tới khi audit phủ toàn bộ diff. Code của mốc trước thường còn
    đổi ở mốc sau, nên quét giữa chừng quét lại cùng file.
-3. **Cập nhật `PROGRESS.md` sau mỗi task** — một phiên chạy tới khi xong (ADR-0009) và compaction dùng checkpoint của
-   `loop` (PreCompact/SessionStart), không đọc PROGRESS; mỗi task thêm một lần sửa file trạng thái.
+3. **Cập nhật `PROGRESS.md` sau mỗi task** — một phiên chạy tới khi xong (ADR-0009); sau compaction SessionStart nạp lại PROGRESS
+   nhưng vị trí việc đang làm (task, lệnh kiểm cuối, file chưa commit) lấy từ checkpoint của `loop` và `loop status`/PLAN,
+   không từ PROGRESS; mỗi task thêm một lần sửa file trạng thái.
 
 ## Quyết định
 
@@ -29,7 +31,8 @@ trình vẫn giữ ba khâu không thêm chốt an toàn nào ở pha này:
 2. **Reviewer chỉ khi `pr next` trả `review`** (mọi pha): máy đã biết PR nào cần review (làn chuẩn pha harden, ngoại lệ
    cứng, nhãn `risk:`, PR từng bị review báo lỗi chặn — ADR-0024/0031). PR làn nhanh, và PR làn chuẩn ở pha build, không
    giao reviewer — đúng `AGENTS.md` §3 ("PR khác bật khi mở"); phiên chính vẫn được chủ động giao khi thấy rủi ro.
-3. **`PROGRESS.md` cập nhật theo lát** (lúc mở PR của lát) và trước khi dừng, không sau mỗi task.
+3. **`PROGRESS.md` cập nhật theo lát** — trong commit cuối của lát, trước cổng đầy đủ, không ghi số PR (chưa có) — và
+   trước khi dừng, không sau mỗi task.
 
 Giữ nguyên (tiêu chí 1 thắng tiêu chí 5, AGENTS.md §4): cổng đầy đủ `dev-task.sh gate` một lần trước khi đẩy (tránh vòng
 CI đỏ); tắt auto-merge trước mỗi push (push thêm file ngoại lệ cứng không được tự merge khi auto-merge không ghim head —

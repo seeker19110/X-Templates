@@ -1445,6 +1445,13 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertEqual((v["milestone_done"], v["milestone_audit"]), ("Lát 1 — skeleton", "g7"))
         self.assertIn("pha build: audit delta gom về trước G7 (ADR-0033)", v["reason"])
         self.assertNotIn("audit delta trước khi sang mốc kế", v["reason"])
+        for phase in ("Build", "prod", "harden", ""):  # giá trị lạ/vắng = harden → audit theo mốc như cũ (ADR-0031)
+            write(self.base / "xt.yaml", f"delivery_phase: {phase}\n")
+            self.assertEqual(xt.loop_verdict(self.base)["milestone_audit"], "now", phase)
+        (self.base / "xt.yaml").write_bytes(
+            b"delivery_phase: build\n\xfa"
+        )  # không đọc được → now, không vỡ (review #189)
+        self.assertEqual(xt.loop_verdict(self.base)["milestone_audit"], "now")
         (self.base / "xt.yaml").unlink()
         write(
             self.base / "docs" / "autopilot" / "PLAN.md",

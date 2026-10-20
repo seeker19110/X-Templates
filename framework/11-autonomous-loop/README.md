@@ -71,10 +71,11 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh
     gate-fast`: lint · typecheck · test liên quan file đổi, không ngưỡng coverage); `PROGRESS.md` (≤ 8 KB) cập nhật theo lát
-    (lúc mở PR) và trước khi dừng, không sau mỗi task — compaction dùng checkpoint của `loop` (ADR-0033).
+    (trong commit cuối của lát, trước cổng đầy đủ) và trước khi dừng, không sau mỗi task — vị trí việc nằm ở `loop status`/PLAN
+    và checkpoint của `loop` (ADR-0033).
     Lưu ý `git commit --amend` chỉ chạy lại phần đổi so với HEAD; cổng đầy đủ ở bước mở PR bù phần còn lại.
     Trước khi đẩy/mở PR chạy cổng đầy đủ `dev-task.sh gate` **một lần** (CI chạy lại đúng lệnh đó). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
-    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do` (giao reviewer **chỉ khi** `do` là `review` — ADR-0033), review xong ghi
+    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do` (giao reviewer **chỉ khi** `pr next` trả `review` — ADR-0033), review xong ghi
     `<XT> pr reviewed` (đăng kết quả lên PR; workflow `pr-steward` tự bật auto-merge khi không còn phiên — `LOOP-STOP-029`,
     ADR-0027) (`LOOP-STOP-022`, ADR-0024/0025) trừ PR `merge-check` báo `hard` (ngoại lệ
     cứng, ADR-0016 → `loop defer`); dưới L3 `<XT> merge-check --pr <N>` →
