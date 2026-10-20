@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- Review delta PR #173: `ci_classify` lớp `secret` chỉ loại dòng giống dòng test đỏ (`FAILED a::t`, `FAIL pkg 0.1s`, `FAIL: test`, `--- FAIL: Test`, AssertionError) — dòng phát hiện thật có chữ FAILED/failed (`FAILED: gitleaks detected 2 leaks`, `semgrep scan failed: 5 findings`) và `0 findings, 2 blocking findings` vẫn block; `Finding:` của gitleaks tính là phát hiện. Task có ghi chú `sau:`/`files:` không đọc được (cả `SAU:`, `Files:`, `sau T-1`) không `ready` ở `loop next`, `loop record` từ chối (fail-closed). `_safe_rel_path` (doctor drift, `context`) chặn symlink ở thành phần giữa đường dẫn trỏ ra ngoài dự án. Corpus `ci_log` 25 ca (tổng 279).
+
 ## [3.10.0] - 2026-10-20
 
 **Dự án đích: chạy lại `install.py`** (hook `task-completed`/`subagent-stop`, `PermissionRequest`, guard, `xt.py`, workflow steward, manifest). Dự án cài trước bản này chưa có `.xtemplates/manifest.json`: `ask` cũ do khung từng đặt được giữ và báo `ask_unproven` (D-085). Ghép lại blueprint quy mô M với `compose --feature auth` để nhận `BE-AUTH-003/006/008/015` (ADR-0030). Vòng autopilot đang chạy: `loop verify --all` trước `done` (D-084).

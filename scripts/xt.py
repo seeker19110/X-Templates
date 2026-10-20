@@ -1218,6 +1218,15 @@ def _link_value(group: str, pos: int) -> str:
     return (value[: nxt.start()] if nxt else value).strip(" ,`")
 
 
+PLAN_LINK_LOOSE_RE = re.compile(r"\b(?:sau|files)(?::|\s+T-\d)", re.I)  # `SAU:`, `Files:`, `sau T-1` — gần đúng khoá
+
+
+def _loose_link_keys(group: str) -> List[str]:
+    """[nhóm ngoặc] khi có khoá viết sai (`SAU:`, `Files:`, thiếu `:` trước ID) — không đọc được, không lặng lẽ bỏ qua."""
+    loose = any(m[0] not in ("sau:", "files:") for m in PLAN_LINK_LOOSE_RE.finditer(group))
+    return [group.strip()] if loose else []
+
+
 def _plan_link_parse(head: str) -> Tuple[Dict[str, List[str]], List[str]]:
     out: Dict[str, List[str]] = {"sau": [], "files": []}
     bad: List[str] = []
@@ -1232,6 +1241,7 @@ def _plan_link_parse(head: str) -> Tuple[Dict[str, List[str]], List[str]]:
             )
             out[kv[1]] += got
             bad += [] if got else [f"{kv[1]}: {value}".strip()]
+        bad += _loose_link_keys(group)
     bad += [unclosed.strip()] if unclosed and PLAN_LINK_KEY_RE.search(unclosed) else []
     return {k: list(dict.fromkeys(v)) for k, v in out.items()}, bad
 
@@ -1249,14 +1259,19 @@ def plan_link_problems(head: str) -> List[str]:
 
 
 def plan_bad_links(tasks: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-    """{task: [ghi chú không đọc được]} — chỉ cảnh báo, như `unknown_after` (PR #173)."""
+    """{task: [ghi chú không đọc được]} — task đó không `ready`, `loop record` từ chối tới khi PLAN sửa (fail-closed)."""
     return {t["id"]: list(t.get("bad_links") or []) for t in tasks if t.get("bad_links")}
 
 
 def _bad_links_note(bad: Dict[str, List[str]]) -> List[str]:
     pairs = "; ".join(f"{k} → {', '.join(v)}" for k, v in bad.items())
     return (
-        [f"⚠ ghi chú `sau:`/`files:` không đọc được: {pairs} — sửa cú pháp `(sau: T-NNN; files: a, b)`"] if bad else []
+        [
+            f"⚠ ghi chú `sau:`/`files:` không đọc được: {pairs} — không ready, `loop record` từ chối; "
+            "sửa cú pháp `(sau: T-NNN; files: a, b)`"
+        ]
+        if bad
+        else []
     )
 
 
@@ -1268,7 +1283,11 @@ def _waiting(t: Dict[str, Any], state: Dict[str, str]) -> List[str]:
 def plan_ready(tasks: List[Dict[str, Any]], deferred: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Task `[ ]` chưa defer mà mọi dependency `sau:` đã đóng — làm được ngay (song song nếu không giao file)."""
     state = {t["id"]: t["state"] for t in tasks}
-    return [t for t in tasks if t["state"] == " " and t["id"] not in deferred and not _waiting(t, state)]
+    return [
+        t
+        for t in tasks
+        if t["state"] == " " and t["id"] not in deferred and not t.get("bad_links") and not _waiting(t, state)
+    ]
 
 
 GLOB_CHARS_RE = re.compile(r"[*?\[]")
@@ -2080,6 +2099,10 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor
             f"✗ {task} phụ thuộc (sau:) {', '.join(waiting)} chưa xong trong PLAN — làm/tick chúng trước",
             file=sys.stderr,
         )
+        return 2
+    bad = plan_bad_links(_plan_tasks(base, st)).get(task)
+    if bad:  # fail-closed: không biết dependency/phạm vi thật thì không nhận bằng chứng (review delta PR #173)
+        print(f"✗ {task} có ghi chú `sau:`/`files:` không đọc được: {', '.join(bad)} — sửa PLAN trước", file=sys.stderr)
         return 2
     meta = evidence_meta(base, st, task)  # digest file TRƯỚC khi chạy: đầu vào mà Gate đã kiểm (AUTO-02)
     started = now_iso()
@@ -5406,14 +5429,19 @@ CI_TRIAGE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         # Tên công cụ trần (`gitleaks protect (skipped: not installed)`) hay báo sạch (`no leaks found`) không phải phát
         # hiện: đòi từ khoá phát hiện cùng dòng (T-1524) — không thì test đỏ cạnh đó bị block oan. SAST chỉ tính khi báo
         # phát hiện (finding/alert/issue/vulnerability), không tính công cụ tự lỗi (`codeql-action upload failed`, `semgrep
-        # … failed to download rules`) hay `no issues`; dòng test đỏ (AssertionError/FAILED) nhắc chữ secret là test (PR #173).
+        # … failed to download rules`) hay `no issues`; dòng test đỏ nhắc chữ secret là test (PR #173). Chỉ loại dòng
+        # GIỐNG dòng test đỏ (`FAILED a::t`, `FAIL pkg 0.1s`, `FAIL: test`, `--- FAIL: Test`, AssertionError) — chữ
+        # FAILED/failed khác vẫn là secret; `no/0 X` chỉ loại vế (giữa `,;…`) của nó (`0 findings, 2 findings` vẫn block).
         "secret",
         re.compile(
-            r"^(?!.*\b(?:no|0|zero) (?:leaks?|secrets?|findings?|issues?|alerts?|vulnerabilit(?:y|ies))\b)"
-            r"(?!FAIL\b|.*(?:AssertionError|\bFAILED\b|--- FAIL:))"
-            r".*(?:\b(?:leaks?|secrets?) (?:found|detected)|potential secret|\b(?:un)?verified results?\b"
-            r"|\b(?:gitleaks|trufflehog|detect-secrets|ggshield|secret scanning)\b.*\b(?:detected|findings?|violations?)\b"
-            r"|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|vulnerab\w*)|>> Issue: \[B\d+)",
+            r"^(?!FAILED \S+::|FAIL\s+\S+\s+\d|FAIL: test|.*(?:AssertionError|--- FAIL: Test))(?:"
+            r"(?>.*?\b(?:gitleaks|trufflehog|detect-secrets|ggshield|secret scanning)\b)"
+            r"(?:.*[,;…])?(?:(?!\b(?:no|zero|0)\s)[^,;…])*?\b(?:detected|findings?|violations?)\b"
+            r"|(?>.*?\b(?:codeql|semgrep|bandit|sast)\b)"
+            r"(?:.*[,;…])?(?:(?!\b(?:no|zero|0)\s)[^,;…])*?\b(?:finding|alert|issue|vulnerab\w*)"
+            r"|(?:.*[,;…])?(?:(?!\b(?:no|zero|0)\s)[^,;…])*?"
+            r"(?:\b(?:leaks?|secrets?) (?:found|detected)|potential secret|\b(?:un)?verified results?\b|>> Issue: \[B\d+)"
+            r"|\s*Finding:\s)",
             re.I,
         ),
     ),
@@ -7691,11 +7719,14 @@ DRIFT_REQUIRED_ALLOW = ("Bash",)  # thiếu thì phiên đứng chờ bấm duy�
 
 
 def _safe_rel_path(base: Path, rel: str) -> Optional[Path]:
-    """`base/rel` khi `rel` là đường tương đối không rỗng, không `..`; tuyệt đối/thoát ra ngoài → None (không đọc)."""
+    """`base/rel` khi `rel` là đường tương đối không rỗng, không `..` và realpath còn dưới realpath(base) — symlink ở
+    thành phần giữa (`d/out -> /etc`, `d/out/h`) cũng bị chặn; tuyệt đối/thoát ra ngoài → None (không đọc)."""
     parts = Path(rel).parts
     if not parts or Path(rel).is_absolute() or ".." in parts:
         return None
-    return base / rel
+    root = os.path.realpath(base)
+    real = os.path.realpath(base / rel)
+    return base / rel if os.path.commonpath([root, real]) == root else None
 
 
 def _file_sha256(path: Path) -> Optional[str]:
