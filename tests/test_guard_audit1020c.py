@@ -109,6 +109,7 @@ class InterpFlagFormsTest(unittest.TestCase):
             f'uv run --python 3.12 --with a --with b --env-file e python3 -c "{PY_EXEC}"',
             f'npx -y -y -y -y -y -y -y node -e "{JS_EXEC}"',
             f'npm exec --yes --package=a --package=b --package=c -- node -e "{JS_EXEC}"',
+            "uv run " + "--with p " * 80 + f'python3 -c "{PY_FENCE}"',  # review #187 lần 2: trần 64 cũng né được
         ):
             with self.subTest(cmd=cmd):
                 self.assertDeny(cmd)

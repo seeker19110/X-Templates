@@ -4607,7 +4607,6 @@ INTERP_RUNNERS = {
     *(("conda", "run"), ("mamba", "run"), ("micromamba", "run"), ("pixi", "run")),
     *(("pipx", "run"), ("uvx",), ("uv", "tool", "run")),
 }
-INTERP_RUNNER_SCAN = 64  # số token đầu sau lệnh chạy hộ được dò tìm lệnh thật (review #187: 6 sót `--with a` ×3)
 INTERP_RUNNER_DEPTH = (
     8  # số lớp chạy hộ lồng được bóc (`uv run npx node -e …`); sâu hơn → không coi là trình thông dịch
 )
@@ -4649,7 +4648,7 @@ def _runner_cmd_index(rest: List[str]) -> Optional[int]:
     """Vị trí lệnh thật trong đối số của lệnh chạy hộ: tên trình thông dịch đầu tiên, hoặc từ đầu tiên không phải cờ
     và không phải giá trị ngay sau cờ (`conda run -n x python`, `uv run -n python`, `npm exec -- node`); không có → None."""
     after_flag = False
-    for i, t in enumerate(rest[:INTERP_RUNNER_SCAN]):
+    for i, t in enumerate(rest):  # dò hết: trần 6 rồi 64 token đều né được bằng `--with x` lặp (review #187)
         if INTERP_RE.fullmatch(posixpath.basename(t)) or not (t.startswith("-") or after_flag):
             return i
         after_flag = t.startswith("-")
