@@ -1045,6 +1045,8 @@ def _positionals(args: List[str], with_value: Tuple[str, ...] = ()) -> List[str]
 
 
 def _rm_target(t: str) -> str:
+    # `$PWD`/`~+` là thư mục đang đứng; `..` chuẩn hoá (`$PWD/..`, `x/../..` — AUD-SEC-099)
+    t = posixpath.normpath(PWD_REF_RE.sub(".", t))  # rỗng → `.` (trước đây `/`): vẫn là đích nguy hiểm
     t = t.rstrip("/") or "/"
     return t[:-2] if t.endswith("/*") and len(t) > 2 else t
 
@@ -1486,8 +1488,11 @@ TEMP_DIRS = ("/tmp", "/var/tmp", "/private/tmp", "/private/var/folders")
 
 
 def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
-    """Đích (đã mở `~`/`$HOME`) nằm ngoài gốc dự án và ngoài thư mục tạm; biến khác/không rõ → False (fail-open)."""
-    t = re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", "~", target)
+    """Đích (đã mở `~`/`$HOME`, `$PWD`/`~+` = thư mục đang đứng) nằm ngoài gốc dự án và ngoài thư mục tạm; `~-`/
+    `$OLDPWD` (thư mục trước, không biết) → True (fail-closed, AUD-SEC-099); biến khác/không rõ → False (fail-open)."""
+    if OLDPWD_REF_RE.match(target):
+        return True
+    t = PWD_REF_RE.sub(".", re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", "~", target))
     if "$" in t or "`" in t:
         return False
     p = os.path.realpath(os.path.join(cwd or root, os.path.expanduser(t)))

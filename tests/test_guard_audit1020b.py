@@ -107,5 +107,30 @@ class InterpLiteralPerfTest(unittest.TestCase):
                 self.assertTrue(guard.WRITE_ANY_RE.search(script))
 
 
+class RmPwdParentTest(unittest.TestCase):
+    """AUD-SEC-099 (executor-deep tìm khi sửa AUD-SEC-097): `$PWD`/`~+` trong đích `rm -rf` không được giải —
+    `_outside_project` coi mọi `$…` là không rõ (cho qua), `_dangerous_rm_target` không chuẩn hoá `..`. `rm -rf $PWD/..`
+    xoá thư mục CHA của dự án mà guard cho chạy."""
+
+    def test_guard_rm_pwd_parent_denied(self):
+        for cmd in (
+            "rm -rf $PWD/..",
+            "rm -rf ${PWD}/..",
+            "rm -rf ~+/..",
+            "rm -rf $PWD",
+            "rm -rf ~+",
+            "rm -rf build/../..",
+            "rm -rf $PWD/../other-project",
+            "rm -rf ~-/x",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny", cmd)
+
+    def test_guard_rm_pwd_inside_passes(self):
+        for cmd in ("rm -rf $PWD/build", "rm -rf ~+/dist", "rm -rf build/../dist", "rm -rf $TMPDIR/x"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

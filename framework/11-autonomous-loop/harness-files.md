@@ -64,7 +64,8 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   (`python3 -c "open(sys.argv[1],'a')" .git/config`) cũng không được xét (AUD-SEC-096).
 - **Thư mục tính theo thứ tự chữ, không theo luồng chạy** (AUD-SEC-095): hàm định nghĩa trước `cd` rồi gọi sau
   (`f(){ echo x > settings.json; }; cd .claude; f`), thân vòng lặp chạy lần 2 sau `cd` ở cuối thân, `trap … EXIT` — guard
-  không mô phỏng luồng điều khiển của shell.
+  không mô phỏng luồng điều khiển của shell. `git -C ~+/x commit`: thư mục repo nhận commit hiểu `~+` là thư mục con
+  (AUD-SEC-100) — cổng commit chạy ở gốc phiên thay vì repo `x`.
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
   bị coi là cũ hơn. Lớp đỡ: `pr reviewed` đăng ngay kết luận (dấu đã đăng là nguồn của `merge-gate`/steward/guard).
