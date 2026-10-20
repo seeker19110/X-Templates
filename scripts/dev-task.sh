@@ -13,7 +13,7 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights | setup
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights | require | setup
 #   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
 #          mở PR, `xt.py loop record` dùng đúng lệnh này.
 #   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
@@ -31,6 +31,9 @@
 #          (JSON khoá sắp xếp). Chạy tay khi bộ test đổi đáng kể rồi commit file; CI KHÔNG chạy (số đo phụ thuộc máy).
 #   test-combine DIR = gộp dữ liệu coverage các shard (fan-in): export XT_COV_DIR=DIR rồi chạy `test_combine` (ngưỡng
 #          nằm trong lệnh đó). Không khai `test_list`/`test_unit`/`test_combine` → đỏ (không có no-op cho chia test).
+#   require T… = đỏ (exit 1) khi task T phân giải ra rỗng hoặc lệnh không kiểm gì (như `is_noop`), ở mọi pha — bước đầu
+#          job `checks` của CI mẫu gọi `require lint test` để `skip` không thành "CI xanh rỗng" (D-096). Trong GitHub
+#          Actions in `::error::` nêu khoá cần điền và ví dụ theo stack. typecheck/build rỗng vẫn được (không bắt buộc).
 #   setup = cài toolchain/phụ thuộc cho job CI (mẫu `framework/templates/ci.yml`): chạy khoá `setup` (vd `npm ci`). Chỉ
 #          lệnh khai báo, không tự dò; vắng/rỗng → log "không khai setup", exit 0; guard cấm lệnh → exit 126.
 #
@@ -49,7 +52,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|setup"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|require|setup"
   exit 2
 fi
 
@@ -274,6 +277,22 @@ test_combine() { # $1=thư mục chứa dữ liệu coverage của mọi shard
   (cd "$ROOT" && bash -o pipefail -c "$c")
 }
 
+# --- require: CI mẫu đỏ khi cổng bắt buộc rỗng (D-096) — `skip` của run_task không được thành "CI xanh rỗng" ----------
+require_tasks() { # $@=task → 0 nếu mọi task phân giải ra lệnh thật (khai báo hoặc tự dò), 1 nếu có task rỗng/no-op
+  local t c bad=0 msg
+  [ "$#" -gt 0 ] || { log "require: cần ít nhất một task (vd: require lint test)"; return 2; }
+  for t in "$@"; do
+    c="$(resolve "$t")"
+    is_noop "$c" || { log "require: '$t' = $c"; continue; }
+    bad=1
+    msg="xt.yaml chưa khai lệnh thật cho '$t' (đang rỗng hoặc không kiểm gì: '${c}') — CI đỏ tới khi điền khoá '$t:'"
+    msg+=" trong xt.yaml (D-096). Ví dụ — Node: lint: npm run lint · test: npm test; Python: lint: ruff check . · test:"
+    msg+=" pytest -q; Go: lint: go vet ./... · test: go test ./..."
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then printf '::error::%s\n' "$msg"; else log "ĐỎ: $msg"; fi
+  done
+  return "$bad"
+}
+
 # --- format-file: format ĐÚNG file vừa sửa (dùng cho auto-format hook) --------
 json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
   command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
@@ -344,6 +363,8 @@ case "$TASK" in
     test_combine "${2:-}"; exit $? ;;
   test-weights)
     test_weights; exit $? ;;
+  require)
+    shift; require_tasks "$@"; exit $? ;;
   setup)
     C="$(declared_cmd setup)"
     [ -n "$C" ] || { log "setup: không khai setup trong xt.yaml — bỏ qua (dùng toolchain sẵn có của máy)"; exit 0; }
@@ -351,5 +372,5 @@ case "$TASK" in
     guard_ok "$C" || exit 126
     ( cd "$ROOT" && bash -o pipefail -c "$C" ); exit $? ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|setup)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|require|setup)"; exit 2 ;;
 esac

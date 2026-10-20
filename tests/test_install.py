@@ -305,6 +305,31 @@ class InstallTest(unittest.TestCase):
         m = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(m["rules"], {"allow": [], "ask": [], "deny": []})
 
+    def test_with_github_hash_only_when_target_is_framework_copy(self):
+        """Hash khung vào manifest chỉ khi file đích đúng bằng bản khung: file có sẵn trùng bản khung (`kept`) → ghi;
+        `kept` mà nội dung đích khác bản khung (file người dùng) → không ghi."""
+        scan = self.target / ".github" / "workflows" / "secret-scan.yml"
+        scan.parent.mkdir(parents=True)
+        tmpl = (ROOT / "framework" / "templates" / "secret-scan.yml").read_bytes()
+        scan.write_bytes(tmpl)  # dự án đã có đúng bản khung
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.run_install("--no-harness", "--with-github"), 0)
+        _, files = self.manifests()
+        self.assertEqual(files[".github/workflows/secret-scan.yml"], install.sha256(tmpl))
+        shutil.rmtree(self.target / ".xtemplates")
+        scan.write_text("# CI quét bí mật của dự án\n", encoding="utf-8")
+        real = install.copy_if_absent
+
+        def kept_for_scan(src, dst, *a, **k):  # copy_if_absent trả `kept` cho file người dùng (khác bản khung)
+            return "kept" if dst == scan else real(src, dst, *a, **k)
+
+        with redirect_stderr(io.StringIO()), mock.patch.object(install, "copy_if_absent", side_effect=kept_for_scan):
+            self.assertEqual(self.run_install("--no-harness", "--with-github"), 0)
+        _, files = self.manifests()
+        self.assertNotIn(".github/workflows/secret-scan.yml", files)
+        self.assertIn(".github/workflows/ci.yml", files)
+        self.assertEqual(scan.read_text(encoding="utf-8"), "# CI quét bí mật của dự án\n")
+
     def test_workflow_job_names(self):
         text = (
             "name: x\njobs:\n  a:\n    name: quality\n    runs-on: u\n\n  b-c:\n    runs-on: u\n  d:\n    name: 'g'\n"

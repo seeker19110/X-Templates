@@ -1,6 +1,7 @@
 # xt.yaml — lệnh chuẩn của dự án cho agent và hook (YAML PHẲNG `task: lệnh`, do .xtemplates/scripts/dev-task.sh đọc).
 # Agent KHÔNG suy diễn lệnh từ văn xuôi; đọc file này. Để trống "" = không có; thiếu khoá = tự dò (package.json/pyproject/go.mod/Cargo.toml/Makefile).
 # Khi autopilot đang chạy, lint/test để "" hoặc lệnh không kiểm gì (true, :, exit 0, echo …) = cổng ĐỎ (ADR-0011): điền ở task đầu PLAN.
+# CI mẫu (`install.py --with-github`) ĐỎ ở mọi pha tới khi lint và test có lệnh thật (`dev-task.sh require lint test`, D-096).
 # Quy mô M/L còn có SÀN (LOOP-HARNESS-023, `xt.py doctor` báo `gate-floor`; `loop verify` CHẠY các lệnh sàn và đỏ khi thiếu/đỏ):
 # format_check + coverage luôn có; typecheck khi stack có kiểm kiểu (build với Go/Rust); e2e khi hồ sơ có UI. Lệnh thật, không no-op.
 # Nhà của bộ khoá: LOOP-HARNESS-008 (framework/11-autonomous-loop/harness-files.md). `.xtemplates/scripts/dev-task.sh` CHỈ chạy các khoá format · lint · typecheck · test · build · format_file · setup · test_list/test_unit/test_combine (CI)

