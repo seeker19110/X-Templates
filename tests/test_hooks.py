@@ -368,6 +368,38 @@ class CommitGateFastHookTest(unittest.TestCase):
                 self.assertIn("Cổng trước commit ĐỎ (gate-fast", err)
 
 
+@unittest.skipIf(shutil.which("bash") is None or shutil.which("git") is None, "cần bash + git")
+class CommitGateXtPyHookTest(unittest.TestCase):
+    """AUD-TEST-016: hook đọc `commit_gate` bằng xt.py cài CÙNG hook (`<hooks>/../../scripts/xt.py`); xt.py lỗi cú pháp,
+    exit ≠ 0 hay vắng → cổng đầy đủ, không bao giờ hạ cổng. Hook chạy từ bản sao trong dự án tạm để thay được xt.py."""
+
+    setUp = CommitGateFastHookTest.setUp
+    commit = CommitGateFastHookTest.commit
+
+    def hook_run(self, xt_py: str | None) -> tuple[int, str, str]:
+        hooks = self.tmp / ".claude" / "hooks"
+        if not hooks.exists():
+            shutil.copytree(HOOKS, hooks, ignore=shutil.ignore_patterns("__pycache__"))
+        target = self.tmp / "scripts" / "xt.py"
+        target.unlink(missing_ok=True)
+        if xt_py is not None:
+            target.write_text(xt_py, encoding="utf-8")
+        with mock.patch(f"{__name__}.HOOKS", hooks):
+            return self.commit("commit_gate: fast\n", fast="echo FAST-RAN")
+
+    def test_commit_gate_xt_py_broken(self):
+        real = (ROOT / "scripts" / "xt.py").read_text(encoding="utf-8")
+        code, out, err = self.hook_run(real)  # đối chứng: bản sao chạy được → gate-fast
+        self.assertEqual(code, 0, err)
+        self.assertIn("FAST-RAN", err)
+        for name, src in (("cú pháp", "def (\n"), ("exit 1", "import sys\nsys.exit(1)\n"), ("vắng", None)):
+            with self.subTest(xt_py=name):
+                code, out, err = self.hook_run(src)
+                self.assertEqual(code, 0, err)
+                self.assertIn("FULL-RAN", err)
+                self.assertNotIn("FAST-RAN", err)
+
+
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class SessionStartUtf8Test(unittest.TestCase):
     def test_session_start_utf8_cut_is_valid(self):

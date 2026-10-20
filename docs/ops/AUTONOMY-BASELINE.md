@@ -45,16 +45,17 @@ ghi thì như merge-check lỗi mạng.
 | pr | 47 | 47 | 0 | 0 | 0 | 0 |
 | rollup | 17 | 17 | 0 | 0 | 0 | 0 |
 | review | 30 | 30 | 0 | 0 | 0 | 0 |
-| guard | 211 | 211 | 0 | 0 | 0 | 0 |
+| guard | 308 | 308 | 0 | 0 | 0 | 0 |
 | ci_log | 25 | 25 | 0 | 0 | 0 | 0 |
 | harness | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Tổng** | **341** | **341** | **0** | **0** | **0** | **0** |
+| **Tổng** | **438** | **438** | **0** | **0** | **0** | **0** |
 
-Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 44 · phát hiện audit 161 · đối kháng do tác giả bản sửa viết 93 · đối kháng do reviewer khác họ
-model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 43. Độ phủ: 137 ID bắt buộc (8 REC §2 + 129 🔴/🟠 đã sửa) —
-81 có ca, 56 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
+Đo lại 2026-10-20 sau audit delta lần 2 (AUD-DOC-072: bảng cũ ghi guard 211, tổng 341 trong khi #186 đã thêm 70 ca).
+Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031, audit delta lần 2) 84 · phát hiện audit 187 · đối kháng do tác giả bản sửa viết 94 · đối kháng do reviewer khác họ
+model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 73. Độ phủ: 144 ID bắt buộc (8 REC §2 + 136 🔴/🟠 đã sửa) —
+88 có ca, 56 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
 thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run, sổ audit/blueprint, bộ test của khung,
-bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Audit delta 2026-10-20: ca `guard-sec083-*`, `guard-sec084-*`, `guard-sec085-*`, `guard-sec087-*`, `guard-har093-*`, `pr-xfeat015-*`/`pr-xfeat016-*`, `review-test014-*`; AUD-CI-014, AUD-HAR-094/095 (workflow, PROGRESS, bằng chứng blueprint) vào `scope.json`. Thời gian chạy ~0,35 s.
+bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Audit delta 2026-10-20: ca `guard-sec083-*`, `guard-sec084-*`, `guard-sec085-*`, `guard-sec087-*`, `guard-har093-*`, `pr-xfeat015-*`/`pr-xfeat016-*`, `review-test014-*`; AUD-CI-014, AUD-HAR-094/095 (workflow, PROGRESS, bằng chứng blueprint) vào `scope.json`. Audit delta 2026-10-20 lần 2: ca `guard-sec091-*`, `guard-audit1020c-*` (AUD-SEC-093/094/097/098), `guard-sec099-*`. Thời gian chạy ~0,35 s.
 
 Kiểm độ nhạy (test `test_autonomy_bench_detects_regression_as_false_green`): gỡ bản sửa AUD-HAR-058 (`NON_CI_CHECKS`)
 và REC-08 (`NOT_RUN_STATES`) khỏi hàm thật → corpus báo false-green ở `rollup-har058-only-merge-gate`,

@@ -763,7 +763,14 @@
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: che sai từng làm lọt ghi thật (review #186 lần 2); chặn oan chỉ khi script nhắc đường dẫn canh, agent còn Edit/Write
 - Đường lùi: cho comment # đầu dòng
 
-### D-108 · 2026-10-20T15:08:28+00:00 · Bỏ bước reviewer cho PR của repo khung: chỉ cần CI xanh là auto-merge (yêu cầu chủ repo 2026-10-20)
+### D-108 · 2026-10-20T13:04:06+00:00 · Duyệt PLAN-3.11 (audit delta f36ea90..0afa30d → sửa 🔴/🟠 → quét lại → release-check)
+
+- Phương án: (1) Audit delta theo nhóm bị chạm tại 0afa30d, sửa, quét lại theo diff bản sửa · (2) Chỉ cập nhật SHA quét của sổ sang 0afa30d dựa vào review PR #185/#186
+- Chọn: Audit delta theo nhóm bị chạm tại 0afa30d, sửa, quét lại theo diff bản sửa
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: release-check đòi audit phủ mã đổi; #185/#186 sửa guard ~1000 dòng — review PR không thay audit theo nhóm (SEC-088/089 chỉ lộ ra ở review lần 2); phương án 2 là lời khai
+- Đường lùi: dừng sau T-1601, giữ báo cáo; cập nhật SHA sổ theo PR review
+
+### D-109 · 2026-10-20T15:08:28+00:00 · Bỏ bước reviewer cho PR của repo khung: chỉ cần CI xanh là auto-merge (yêu cầu chủ repo 2026-10-20)
 
 - Phương án: (1) Đặt delivery_phase: build trong xt.yaml (cơ chế ADR-0031 có sẵn: review thành nợ, release-check đòi harden ở G7) · (2) Hạ merge_autonomy hoặc sửa merge-check để bỏ hẳn review_gate
 - Chọn: Đặt delivery_phase: build trong xt.yaml (cơ chế ADR-0031 có sẵn: review thành nợ, release-check đòi harden ở G7)
