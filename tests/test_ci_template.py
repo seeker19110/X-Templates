@@ -275,6 +275,21 @@ class DevTaskRequireEmptyGateTest(unittest.TestCase):
                 )  # ngoài Actions: log, không ::error::
                 self.assertNotIn("::error::", r.stdout)
 
+    def test_empty_gate_chained_noop_commands_are_red(self):
+        """Chuỗi toàn no-op nối bằng `&&`/`;`/`||` vẫn không kiểm gì."""
+        for noop in ("true && true", ": && :", "true; true", "true || :", " true ;", "echo a; exit 0", "true&&:"):
+            with self.subTest(noop=noop):
+                r = self.require(f"lint: ruff check .\ntest: '{noop}'\n", "lint", "test")
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("ĐỎ: xt.yaml chưa khai lệnh thật cho 'test'", r.stderr)
+
+    def test_empty_gate_chain_with_real_command_is_green(self):
+        for cmd in ("true && pytest -q", "pytest -q; true", ": || make test", "true | pytest", "exit 1 && :"):
+            with self.subTest(cmd=cmd):
+                r = self.require(f"lint: ruff check .\ntest: '{cmd}'\n", "lint", "test")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"require: 'test' = {cmd}", r.stderr)
+
     def test_empty_gate_detected_command_counts(self):
         """Không có xt.yaml mà tự dò được (Makefile có target) → lệnh thật, xanh; không dò được → đỏ."""
         self.assertEqual(self.require(None, "lint", "test").returncode, 1)

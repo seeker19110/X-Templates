@@ -2966,7 +2966,7 @@ FENCE_WHY = "ghi/xoá hàng rào qua Bash ({}) — tắt hook của khung; sửa
 def _is_fence(target: str, root: str) -> bool:
     if not target or target.startswith("/dev/"):
         return False
-    rel = rel_path(target, root).rstrip("/")
+    rel = _rel_dir(target, root)
     return rel in FENCE_DIRS or _match_any(rel, FENCE_PATTERNS)
 
 
@@ -3029,20 +3029,54 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
 
 
+def _rel_dir(target: str, root: str) -> str:
+    """`rel_path` bỏ `/` cuối; đích `/` (hay `//`) giữ là `/` — rỗng từng bị coi là gốc dự án (`cp x /` thành cổng)."""
+    rel = rel_path(target, root)
+    return rel.rstrip("/") or rel[:1]
+
+
 def _target_kind(target: str, root: str) -> str:
     """classify_path của đích ghi; đích là THƯ MỤC cổng (`cp x .claude/hooks/`) cũng là cổng."""
     if not target or target.startswith("/dev/"):
         return ""
-    rel = rel_path(target, root).rstrip("/")
+    rel = _rel_dir(target, root)
     return path_kind(rel, root) or ("gate" if _dir_holds_gate(rel, root) else "")
+
+
+# Thư mục NGOÀI dự án (`mv x /tmp`) đọc tối đa chừng này mục (D-097): /tmp ≈ 20k mục làm mỗi lệnh chậm ~2,5 s; thư mục
+# nhỏ hơn thì xét đủ như trong dự án, kể cả mẫu wildcard (`tsconfig*.json`) — strict vẫn hỏi `cp x OUT/ts/`.
+OUTSIDE_SCAN_MAX = 256
+
+
+def _outside_names(d: str) -> Optional[List[str]]:
+    """Tên mục của thư mục ngoài dự án `d`; None khi quá OUTSIDE_SCAN_MAX mục hoặc không đọc được (chỉ kiểm tên đích
+    danh); không phải thư mục → rỗng."""
+    if not os.path.isdir(d) or os.path.islink(d):
+        return []
+    names: List[str] = []
+    try:
+        with os.scandir(d) as it:
+            for entry in it:
+                if len(names) >= OUTSIDE_SCAN_MAX:
+                    return None
+                names.append(entry.name)
+    except OSError:
+        return None
+    return names
 
 
 def _dir_holds_gate(rel: str, root: str) -> bool:
     """Đích là THƯ MỤC chứa file cổng (`cp x .claude/hooks/`, `rm -rf .claude`, `mv scripts …`) — reviewer #60."""
-    if classify_path(rel + "/_") == "gate" or any(p.startswith(rel + "/") for p in GATE_PATTERNS):
+    base = rel.rstrip("/")  # `/` → nối thành `/Makefile`, không `//Makefile`
+    if classify_path(base + "/_") == "gate" or any(p.startswith(base + "/") for p in GATE_PATTERNS):
         return True
-    if os.path.isabs(rel):  # ngoài gốc dự án (`mv x /tmp`): không liệt kê cả thư mục (/tmp ≈ 20k mục, D-097)
-        return any(classify_path(f"{rel}/{n}") == "gate" and os.path.lexists(f"{rel}/{n}") for n in _gate_names(rel))
+    if os.path.isabs(rel):  # ngoài gốc dự án: đọc có giới hạn, quá ngưỡng thì chỉ tên đích danh (D-097)
+        names = _outside_names(rel)
+        if names is None:
+            return any(
+                classify_path(f"{base}/{n}") == "gate" and os.path.lexists(f"{base}/{n}") for n in _gate_names(rel)
+            )
+        return any(classify_path(f"{base}/{name}") == "gate" for name in names)
     d, names = os.path.join(root, rel), []
     with contextlib.suppress(OSError):  # không đọc được thư mục → coi như không chứa file cổng
         names = os.listdir(d) if os.path.isdir(d) and not os.path.islink(d) else []

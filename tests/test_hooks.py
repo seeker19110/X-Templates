@@ -4798,12 +4798,84 @@ class GuardOutsideDirTest(unittest.TestCase):
     def no_listdir(self):
         return mock.patch.object(self.g.os, "listdir", side_effect=AssertionError("không được liệt kê thư mục ngoài"))
 
+    def counted_scandir(self, seen: list[int]):
+        """`os.scandir` đếm số mục guard thật sự đọc ra (mỗi lần gọi một phần tử trong `seen`)."""
+        real = os.scandir
+
+        class Counted:
+            def __init__(self, path):
+                self.it, self.n = real(path), len(seen)
+                seen.append(0)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.it.close()
+
+            def __iter__(self):
+                for entry in self.it:
+                    seen[self.n] += 1
+                    yield entry
+
+        return mock.patch.object(self.g.os, "scandir", side_effect=Counted)
+
     def test_outside_dir_is_not_listed(self):
-        with self.no_listdir():
+        seen: list[int] = []
+        with self.no_listdir(), self.counted_scandir(seen):
             for cmd in (f"mv x {self.out}", f"cp a {self.out}/", f"mv x {self.out}/tmp1"):
                 self.assertEqual(self.raw(cmd), "", cmd)
                 self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "", cmd)
             self.assertEqual(self.g._target_kind(str(self.out), self.root), "")
+        self.assertTrue(seen, "thư mục ngoài nhỏ/lớn đều đọc qua scandir có giới hạn")
+        self.assertLessEqual(max(seen), self.g.OUTSIDE_SCAN_MAX + 1, seen)  # 300 mục: dừng sớm, không đọc hết
+
+    def test_outside_large_dir_wildcard_gate_not_seen(self):
+        """> OUTSIDE_SCAN_MAX mục: chỉ kiểm tên đích danh — mẫu wildcard (`tsconfig*.json`) không thấy (đánh đổi D-097)."""
+        (self.out / "tsconfig.base.json").touch()
+        self.assertEqual(self.g._target_kind(str(self.out), self.root), "")
+        (self.out / "Makefile").touch()
+        self.assertEqual(self.g._target_kind(str(self.out), self.root), "gate")
+
+    def test_outside_small_dir_wildcard_gate_strict_asks(self):
+        """Thư mục ngoài nhỏ (≤ OUTSIDE_SCAN_MAX mục) xét đủ như trước D-097, kể cả mẫu wildcard."""
+        ts = self.out / "ts"
+        ts.mkdir()
+        for i in range(self.g.OUTSIDE_SCAN_MAX - 1):
+            (ts / f"f{i}").touch()
+        self.assertEqual(self.raw(f"cp x {ts}/"), "")
+        (ts / "tsconfig.base.json").touch()  # đúng OUTSIDE_SCAN_MAX mục: vẫn đọc hết
+        for name in ("eslint.config.mjs", ".eslintrc.cjs", "vitest.config.ts", "jest.config.js"):
+            other = self.out / name.replace(".", "_")
+            other.mkdir()
+            (other / name).touch()
+            self.assertEqual(self.g._target_kind(str(other), self.root), "gate", name)
+        with self.no_listdir():
+            self.assertEqual(self.g._target_kind(str(ts), self.root), "gate")
+            self.assertEqual(self.raw(f"cp x {ts}/"), "ask")
+            self.assertEqual(guard_decision("bash", f"cp x {ts}/", Path(self.root), "strict"), "ask")
+            self.assertIsNone(guard_decision("bash", f"cp x {ts}/", Path(self.root), "default"))
+        (ts / "one-more").touch()  # vượt ngưỡng → chỉ tên đích danh
+        self.assertEqual(self.g._target_kind(str(ts), self.root), "")
+
+    def test_outside_unreadable_dir_falls_back_to_named(self):
+        (self.out / "Makefile").touch()
+        with mock.patch.object(self.g.os, "scandir", side_effect=PermissionError("denied")):
+            self.assertEqual(self.g._target_kind(str(self.out), self.root), "gate")
+            self.assertEqual(self.g._target_kind(str(self.out / "nope"), self.root), "")
+
+    def test_slash_target_is_absolute_root_not_project(self):
+        """`cp x /`: rel_path("/").rstrip("/") == "" từng bị coi là gốc dự án (có Makefile → cổng)."""
+        Path(self.root, "Makefile").touch()
+        for t in ("/", "//", "///"):
+            self.assertEqual(self.g._target_kind(t, self.root), "", t)
+            self.assertFalse(self.g._is_fence(t, self.root), t)
+            self.assertEqual(self.raw(f"cp x {t}"), "", t)
+            self.assertEqual(self.raw(f"mv x {t}"), "", t)
+        self.assertEqual(self.g._target_kind(".", self.root), "gate")  # gốc dự án thật vẫn là cổng
+        self.assertEqual(self.raw("cp x ."), "ask")
+        for cmd in ("rm -rf /", "rm -rf //", "rm -fr / --no-preserve-root"):
+            self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
 
     def test_outside_dir_with_named_gate_file_is_still_gate(self):
         claude = self.out / ".claude"
@@ -4834,12 +4906,28 @@ class GuardOutsideDirTest(unittest.TestCase):
     def test_wipe_outside_and_home_claude_unchanged(self):
         # HOME giả có `.claude/settings.json`: máy dev có sẵn, runner CI thì không — test không phụ thuộc máy chạy.
         # Đặt ngoài thư mục tạm hệ thống: xoá/dời trong /tmp được guard miễn.
-        home = Path(self.enterContext(tempfile.TemporaryDirectory(dir=Path(__file__).parent))).resolve() / "home"
+        home = (
+            Path(
+                self.enterContext(tempfile.TemporaryDirectory(prefix="xt-tmp-home-", dir=Path(__file__).parent))
+            ).resolve()
+            / "home"
+        )
         (home / ".claude").mkdir(parents=True)
         (home / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.assert_tmp_home_ignored(home)
         self.enterContext(mock.patch.dict(os.environ, {"HOME": str(home)}))
         for cmd in ("rm -rf ~/.claude", "rm -rf /home/user/other", "mv ~/.claude /home/user/other"):
             self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
+
+    def assert_tmp_home_ignored(self, home: Path):
+        """Tiến trình bị kill giữa chừng thì thư mục tạm nằm lại trong `tests/` — tiền tố cố định + `.gitignore` giữ nó
+        khỏi `git status`/commit."""
+        self.assertTrue(home.parent.name.startswith("xt-tmp-home-"), home)
+        if shutil.which("git") is None:  # pragma: no cover - runner nào cũng có git
+            return
+        rel = home.parent.relative_to(ROOT).as_posix() + "/"
+        r = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", rel], capture_output=True)
+        self.assertEqual(r.returncode, 0, f"{rel} chưa có trong .gitignore")
 
     def test_gate_names_by_dir_tail(self):
         names = self.g._gate_names("/x/.claude")

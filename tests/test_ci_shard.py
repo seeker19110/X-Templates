@@ -77,6 +77,13 @@ class ShardPlanTest(unittest.TestCase):
             heaviest = max(w.get(t, default) for t in ids)
             self.assertLessEqual(spread(shards, w, default), heaviest + 1e-9)
 
+    def test_committed_weights_cover_every_class(self):
+        """Lớp mới chưa đo rơi về trung vị → shard lệch dần; thêm/bỏ lớp thì chạy lại `dev-task.sh test-weights`."""
+        w = xt.load_shard_weights(WEIGHTS)
+        ids = set(xt.unittest_class_ids(ROOT, "tests", None))
+        self.assertEqual(sorted(ids - w.keys()), [], "lớp thiếu trọng số")
+        self.assertEqual(sorted(w.keys() - ids), [], "trọng số của lớp không còn")
+
     def test_committed_weights_balance_real_suite(self):
         w = xt.load_shard_weights(WEIGHTS)
         self.assertTrue(w)

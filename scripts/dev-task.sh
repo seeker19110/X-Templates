@@ -154,9 +154,17 @@ resolve() { # $1=task -> in lệnh (khai báo ưu tiên), rỗng nếu không c�
 # --- ADR-0011: trong vòng autopilot, lint/test không được là no-op ------------
 LOOP_REQUIRED=" lint test "
 autopilot_active() { [ -f "$ROOT/.autopilot/state.json" ] && grep -Eq '"active"[[:space:]]*:[[:space:]]*true' "$ROOT/.autopilot/state.json"; }
-is_noop() { # $1=lệnh -> true nếu rỗng hoặc không kiểm gì
+NOOP_RE='true|:|exit( 0)?|(echo|printf)([[:space:]].*)?'
+is_noop() { # $1=lệnh -> true nếu rỗng hoặc không kiểm gì (kể cả chuỗi toàn no-op nối bằng && ; ||: `true && :`)
   local c; c="$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-  [ -z "$c" ] || printf '%s' "$c" | grep -Eqx "true|:|exit( 0)?|(echo|printf)([[:space:]].*)?"
+  [ -z "$c" ] || printf '%s' "$c" | grep -Eqx "$NOOP_RE" && return 0
+  printf '%s\n' "$c" | awk '{ # [ \t] thay [[:space:]]: mawk cũ không có lớp ký tự POSIX
+    n = split($0, seg, /&&|\|\||;/)
+    for (i = 1; i <= n; i++) {
+      s = seg[i]; gsub(/^[ \t]+|[ \t]+$/, "", s)
+      if (s != "" && s !~ /^(true|:|exit( 0)?|(echo|printf)([ \t].*)?)$/) exit 1
+    }
+  }'
 }
 loop_noop() { # $1=task $2=lệnh -> true (kèm log) nếu autopilot đang chạy mà task bắt buộc là no-op
   case "$LOOP_REQUIRED" in *" $1 "*) ;; *) return 1 ;; esac
