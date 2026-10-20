@@ -2915,7 +2915,9 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
     return ""
 
 
-REDIRECTS = (">", ">>", ">|", "&>", "&>>")
+# `<>`: mở đọc-ghi (tạo file nếu chưa có) — `exec 3<> .env`, `1<> .env` là ghi (review #186 lần 3); số fd đứng trước
+# (`3<>`) là token riêng sau khi tách
+REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<>")
 
 
 def _copy_targets(name: str, args: List[str]) -> List[str]:

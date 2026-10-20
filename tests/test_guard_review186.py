@@ -543,6 +543,17 @@ class Review3Test(unittest.TestCase):
         )
         self.assertAllowed(("python3 -c \"print('ｒｅａｄｍｅ')\"",))
 
+    def test_guard_r3_readwrite_redirect_denied(self):
+        self.assertDenied(
+            {
+                "exec 3<> .env": "SECRET_WRITE",
+                "1<> .env": "SECRET_WRITE",
+                "exec 3<>.claude/settings.json": "HOOK_BYPASS",
+                "cat <> .autopilot/verified.json": "EVIDENCE_HANDWRITE",
+            }
+        )
+        self.assertAllowed(("exec 3>&1", "exec >/tmp/log 2>&1", "exec 3<> /tmp/fifo", "cat < .env"))
+
     def test_script_literals_ast(self):
         lits = guard._script_literals
         self.assertIn(".env", lits("open('\\x2eenv','w')"))
