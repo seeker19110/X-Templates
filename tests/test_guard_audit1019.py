@@ -416,10 +416,58 @@ class BraceSequenceMiddleTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
-        # Dãy bung đủ nên `for` theo đúng trần `VAR_FOR_PICKS` như khi viết tay từng giá trị; dãy quá `BRACE_SEQ_MAX`
-        # → chặn như các chỗ bung khác.
-        self.assertEqual(final("for i in {1..65}; do echo $i; done"), "deny")
+        # Dãy bung đủ nên `for` giá trị không phải số theo đúng trần `VAR_FOR_PICKS` như khi viết tay từng giá trị (giá
+        # trị số thuần: `ForNumericSampleTest`); dãy quá `BRACE_SEQ_MAX` → chặn như các chỗ bung khác.
+        self.assertEqual(final("for i in x{1..65}; do echo $i; done"), "deny")
         self.assertEqual(final("echo {1..100000}"), "deny")
+
+
+class ForNumericSampleTest(unittest.TestCase):
+    """D-098: vòng `for` toàn số nguyên thuần không theo trần `VAR_FOR_PICKS` — quét mẫu đại diện (đầu, cuối, giữa);
+    giá trị không phải số vẫn theo trần; trần tổng `BRACE_SEQ_MAX` vẫn giữ."""
+
+    def test_numeric_loop_allowed(self):
+        for cmd in (
+            "for i in {1..100}; do sleep 1; done",
+            "for i in {1..4096}; do echo $i; done",
+            "for i in {100..1}; do echo $i; done",
+            "for i in {01..99}; do touch f$i; done",
+            "for i in {-50..50}; do echo $i; done",
+            "for i in " + " ".join(str(k) for k in range(200)) + "; do echo $i; done",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+    def test_numeric_loop_body_still_scanned(self):
+        for cmd in (
+            "for i in {1..100}; do rm -rf /; done",
+            "for i in {1..100}; do rm -rf ~; done",
+            "for i in {1..100}; do git push origin HEAD:main; done",
+            "for x in {1..100}; do cmd=rm; $cmd -rf ~; done",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_non_numeric_or_too_many_still_capped(self):
+        many = " ".join(f"a{k}" for k in range(guard.VAR_FOR_PICKS + 1))
+        for cmd in (
+            f"for x in {many}; do echo $x; done",
+            "for x in " + " ".join(str(k) for k in range(70)) + " rm; do $x -rf ~; done",  # một từ chữ → trần 64
+            "for i in 1.5 " + " ".join(str(k) for k in range(70)) + "; do echo $i; done",  # số thực không thuần
+            "for i in " + " ".join(str(k) for k in range(guard.BRACE_SEQ_MAX + 1)) + "; do echo $i; done",
+        ):
+            with self.subTest(cmd[:40]):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_sample_values(self):
+        words = [str(k) for k in range(1, 101)]
+        got = guard._for_values(["for", "i", "in", *words])
+        self.assertEqual(len(got), guard.FOR_NUM_SAMPLE)
+        self.assertEqual((got[0], got[-1]), ("1", "100"))
+        self.assertTrue(set(got) <= set(words))
+        self.assertEqual(guard._for_values(["for", "i", "in", "3", "1", "3"]), ["3", "1"])  # ít → đủ, bỏ trùng
+        self.assertEqual(guard._for_values(["echo", "i"]), [])
+        self.assertEqual(guard._for_words(["do", "for", "i", "in", *words]), guard.FOR_NUM_SAMPLE)
 
 
 def _pyc(code_src: str, flags: int, mid: bytes) -> bytes:

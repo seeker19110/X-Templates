@@ -3896,14 +3896,19 @@ def _sub_vars(text: str, env: Dict[str, str]) -> str:
 
 VAR_VALUE_MAX = 4096  # giá trị biến dài hơn không được ghi nhận (chặn nhân đôi `a="$a$a"`)
 VAR_FOR_PICKS = 64  # số từ KHÁC NHAU tối đa của `for x in …` được thử làm giá trị của x (nhiều hơn → chặn)
+# D-098: vòng `for` mà MỌI giá trị là số nguyên thuần (`for i in {1..100}`, `for i in 1 2 3`) không theo trần trên — số
+# không tạo tên lệnh/đường dẫn/nhánh nguy hiểm khác nhau giữa các lần lặp, nên thử một mẫu đại diện (đầu, cuối, giữa
+# cách đều) là đủ. Trần tổng an toàn: hơn `BRACE_SEQ_MAX` giá trị → không lấy mẫu, theo trần `VAR_FOR_PICKS` (chặn).
+FOR_NUM_SAMPLE = 8
+FOR_NUM_RE = re.compile(r"-?[0-9]+")
 
 
 def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
     """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau; `for x in a b`: x lấy từ thứ
     `pick` của danh sách."""
     c = [t for t in c if t not in SHELL_KEYWORDS] if c[0] in SHELL_KEYWORDS else c  # `then x=…`, `do x=…`, `{ x=…`
-    if c[:1] == ["for"] and len(c) > 3 and c[2] == "in":
-        words = list(dict.fromkeys(c[3:]))  # từ trùng chỉ thử một lần (`for x in a a … a rm`)
+    words = _for_values(c)
+    if words:
         env[c[1]] = _sub_vars(words[min(pick, len(words) - 1)], env)[:VAR_VALUE_MAX]
         return
     words = c[1:] if c[:1] and c[0] in DECLARE_CMDS else c
@@ -3915,10 +3920,23 @@ def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
                 env[k] = val
 
 
+def _for_values(c: List[str]) -> List[str]:
+    """Giá trị cần thử cho biến của `for x in a b c` (đã bỏ từ khoá đầu dòng; rỗng nếu không phải vòng for): từ khác
+    nhau theo thứ tự (từ trùng chỉ thử một lần — `for x in a a … a rm`); toàn số nguyên thuần và không quá
+    `BRACE_SEQ_MAX` giá trị → mẫu đại diện `FOR_NUM_SAMPLE` giá trị gồm đầu, cuối và giữa cách đều (D-098)."""
+    if not (c[:1] == ["for"] and len(c) > 3 and c[2] == "in"):
+        return []
+    words = list(dict.fromkeys(c[3:]))
+    n = len(words)
+    if n <= FOR_NUM_SAMPLE or n > BRACE_SEQ_MAX or not all(FOR_NUM_RE.fullmatch(w) for w in words):
+        return words
+    return list(dict.fromkeys(words[(n - 1) * k // (FOR_NUM_SAMPLE - 1)] for k in range(FOR_NUM_SAMPLE)))
+
+
 def _for_words(c: List[str]) -> int:
-    """Số từ trong danh sách của `for x in a b c` (0 nếu không phải vòng for)."""
+    """Số giá trị guard phải thử cho `for x in a b c` (0 nếu không phải vòng for) — xem `_for_values`."""
     c = [t for t in c if t not in SHELL_KEYWORDS] if c[:1] and c[0] in SHELL_KEYWORDS else c
-    return len(set(c[3:])) if c[:1] == ["for"] and len(c) > 3 and c[2] == "in" else 0
+    return len(_for_values(c))
 
 
 def _expand_tokens(tokens: List[str], pick: int, split: bool) -> List[str]:
