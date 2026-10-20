@@ -41,7 +41,8 @@ AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
 BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
 SKIP_SUFFIXES = (".invalid", ".example", ".test", ".localhost")
-RETRY_GET_CODES = {403, 405, 501}  # HEAD bị từ chối → thử lại bằng GET trước khi kết luận
+RETRY_GET_CODES = {501}  # HEAD bị từ chối → thử lại bằng GET trước khi kết luận; cùng mọi 4xx trừ GONE_CODES
+GONE_CODES = {404, 410}  # HEAD 404/410 đủ kết luận "không còn" — không gọi GET
 USER_AGENT = "xtemplates-check-links/1 (+https://github.com/)"
 Fetcher = Callable[[str, float], int]
 
@@ -123,12 +124,12 @@ def external_urls(root: Path) -> dict[str, str]:
 
 
 def classify_status(status: int) -> str:
-    """Mã HTTP → `ok` · `moved` (3xx) · `unverified` (403/429) · `transient` (5xx/408) · `dead` (còn lại)."""
+    """Mã HTTP → `ok` · `moved` (3xx) · `unverified` (401/403/429) · `transient` (5xx/408) · `dead` (còn lại)."""
     if 200 <= status < 300:
         return "ok"
     if 300 <= status < 400:
         return "moved"
-    if status in (403, 429):
+    if status in (401, 403, 429):
         return "unverified"
     if status == 408 or 500 <= status < 600:
         return "transient"
@@ -143,7 +144,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def http_status(url: str, timeout: float, opener: urllib.request.OpenerDirector | None = None) -> int:
-    """Mã HTTP của URL (HEAD, rồi GET nếu HEAD bị từ chối). Timeout/lỗi mạng → `OSError` cho người gọi phân loại."""
+    """Mã HTTP của URL (HEAD, rồi GET nếu HEAD trả 4xx khác 404/410 hoặc 501 — nhiều máy chủ từ chối HEAD bằng 400/403/
+    405 dù trang còn, PR #173). Timeout/lỗi mạng → `OSError` cho người gọi phân loại."""
     op = opener or urllib.request.build_opener(_NoRedirect)
     code = 0
     for method in ("HEAD", "GET"):
@@ -153,7 +155,7 @@ def http_status(url: str, timeout: float, opener: urllib.request.OpenerDirector 
                 return int(resp.status)
         except urllib.error.HTTPError as e:
             code = e.code
-        if code not in RETRY_GET_CODES:
+        if code not in RETRY_GET_CODES and not (400 <= code < 500 and code not in GONE_CODES):
             break
     return code
 
@@ -209,7 +211,7 @@ EXTERNAL_LABELS = (
     ("dead", "✗ chết (sửa/bỏ link)"),
     ("moved", "! đã đổi (cập nhật URL)"),
     ("transient", "! lỗi tạm sau khi thử lại (kiểm lại lần sau)"),
-    ("unverified", "? chưa xác minh (trang chặn bot, 403/429)"),
+    ("unverified", "? chưa xác minh (trang chặn bot/đòi đăng nhập, 401/403/429)"),
 )
 
 

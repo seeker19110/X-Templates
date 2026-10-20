@@ -162,6 +162,48 @@
     "category": "secret",
     "shown": 0
    }
+  },
+  {
+   "id": "ci-sast-tool-failed-is-infra",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "codeql-action upload failed: network\nError: connect ETIMEDOUT 140.82.112.3:443"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": true,
+    "category": "infra"
+   },
+   "note": "công cụ SAST tự lỗi không phải phát hiện (PR #173)"
+  },
+  {
+   "id": "ci-sast-no-issues-is-test",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "bandit: no issues identified\nFAILED test_x"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "báo sạch của SAST không phải phát hiện (PR #173)"
+  },
+  {
+   "id": "ci-assertion-mentions-secret",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "AssertionError: expected secret detected in output"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "test đỏ nhắc chữ secret là test (PR #173)"
   }
  ]
 }

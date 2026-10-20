@@ -1166,7 +1166,7 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
         g = GATE_RE.search(m["rest"])
         head = m["rest"][: g.start()] if g else m["rest"]  # không đọc trong lệnh Gate (review #169)
         tier = EXEC_TIER_RE.search(head)
-        links = plan_links(head)
+        links, bad_links = _plan_link_parse(head)
         tasks.append(
             {
                 "id": m["id"],
@@ -1178,32 +1178,86 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
                 "section": section,
                 "after": links["sau"],
                 "files": links["files"],
+                "bad_links": bad_links,
             }
         )
     return tasks
 
 
-PLAN_LINK_GROUP_RE = re.compile(
-    r"\(([^()]*\b(?:sau|files):[^()]*)\)"
-)  # `(… sau: T-1; files: a, b)` — ghi chú dòng task
-PLAN_LINK_RE = re.compile(r"^(sau|files):\s*(.*)$")
+PLAN_LINK_KEY_RE = re.compile(r"\b(sau|files):")  # `(… sau: T-1; files: a, b)` — ghi chú dòng task, ở đâu trong ngoặc
+PLAN_LINK_ID_RE = re.compile(r"T-\d{3,}")
 PLAN_OPEN_STATES = (" ",)  # `[ ]`; `[x]`/`[~]` là đã đóng
+
+
+def _paren_groups(head: str) -> Tuple[List[str], Optional[str]]:
+    """(nội dung các nhóm ngoặc ngoài cùng đã đóng, phần từ `(` chưa đóng tới hết dòng hoặc None); ngoặc lồng giữ nguyên."""
+    groups: List[str] = []
+    depth = start = 0
+    for i, c in enumerate(head):
+        if c == "(":
+            start = i if depth == 0 else start
+            depth += 1
+        elif c == ")" and depth:
+            depth -= 1
+            if depth == 0:
+                groups.append(head[start + 1 : i])
+    return groups, (head[start:] if depth else None)
+
+
+def _link_value(group: str, pos: int) -> str:
+    """Giá trị sau `sau:`/`files:` ở `pos`: tới `;`/`)` cùng cấp ngoặc hoặc khoá `sau:`/`files:` kế tiếp."""
+    depth, end = 0, len(group)
+    for i in range(pos, len(group)):
+        c = group[i]
+        if c in ";)" and depth == 0:
+            end = i
+            break
+        depth += {"(": 1, ")": -1}.get(c, 0)
+    value = group[pos:end]
+    nxt = PLAN_LINK_KEY_RE.search(value)
+    return (value[: nxt.start()] if nxt else value).strip(" ,`")
+
+
+def _plan_link_parse(head: str) -> Tuple[Dict[str, List[str]], List[str]]:
+    out: Dict[str, List[str]] = {"sau": [], "files": []}
+    bad: List[str] = []
+    groups, unclosed = _paren_groups(head)
+    for group in groups:
+        for kv in PLAN_LINK_KEY_RE.finditer(group):
+            value = _link_value(group, kv.end())
+            got = (
+                PLAN_LINK_ID_RE.findall(value)
+                if kv[1] == "sau"
+                else [p.strip(" `") for p in value.split(",") if p.strip(" `")]
+            )
+            out[kv[1]] += got
+            bad += [] if got else [f"{kv[1]}: {value}".strip()]
+    bad += [unclosed.strip()] if unclosed and PLAN_LINK_KEY_RE.search(unclosed) else []
+    return {k: list(dict.fromkeys(v)) for k, v in out.items()}, bad
 
 
 def plan_links(head: str) -> Dict[str, List[str]]:
     """`(sau: T-A, T-B; files: p1, p2)` trong phần mô tả task (T-1511, AUTO-01): `sau` = dependency TRONG PLAN (ID task),
-    `files` = phạm vi ghi. Phần khác của nhóm ngoặc (`REC-01`, `cần: …`) bị bỏ qua; không có → danh sách rỗng."""
-    out: Dict[str, List[str]] = {"sau": [], "files": []}
-    for group in PLAN_LINK_GROUP_RE.findall(head):
-        for seg in group.split(";"):
-            kv = PLAN_LINK_RE.match(seg.strip())
-            if not kv:
-                continue
-            if kv[1] == "sau":
-                out["sau"] += re.findall(r"T-\d{3,}", kv[2])
-            else:
-                out["files"] += [p.strip(" `") for p in kv[2].split(",") if p.strip(" `")]
-    return {k: list(dict.fromkeys(v)) for k, v in out.items()}
+    `files` = phạm vi ghi. Khoá ở bất kỳ đâu trong nhóm ngoặc (`(S-001, sau: T-001)`, `(sau: T-1, files: a.py)`), giá
+    trị tới `;`/`)` cùng cấp hoặc khoá kế (`files: b (c).py` giữ nguyên); phần khác (`REC-01`, `cần: …`) bị bỏ qua."""
+    return _plan_link_parse(head)[0]
+
+
+def plan_link_problems(head: str) -> List[str]:
+    """Ghi chú `sau:`/`files:` trong ngoặc mà không đọc ra gì (không có ID T-NNN, danh sách rỗng, ngoặc không đóng)."""
+    return _plan_link_parse(head)[1]
+
+
+def plan_bad_links(tasks: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """{task: [ghi chú không đọc được]} — chỉ cảnh báo, như `unknown_after` (PR #173)."""
+    return {t["id"]: list(t.get("bad_links") or []) for t in tasks if t.get("bad_links")}
+
+
+def _bad_links_note(bad: Dict[str, List[str]]) -> List[str]:
+    pairs = "; ".join(f"{k} → {', '.join(v)}" for k, v in bad.items())
+    return (
+        [f"⚠ ghi chú `sau:`/`files:` không đọc được: {pairs} — sửa cú pháp `(sau: T-NNN; files: a, b)`"] if bad else []
+    )
 
 
 def _waiting(t: Dict[str, Any], state: Dict[str, str]) -> List[str]:
@@ -1217,9 +1271,42 @@ def plan_ready(tasks: List[Dict[str, Any]], deferred: Dict[str, Any]) -> List[Di
     return [t for t in tasks if t["state"] == " " and t["id"] not in deferred and not _waiting(t, state)]
 
 
+GLOB_CHARS_RE = re.compile(r"[*?\[]")
+
+
+def _norm_scope(p: str) -> str:
+    """`./src//a.py` → `src/a.py`, `src/` → `src`; rỗng/`.` → `.` (cả repo)."""
+    return posixpath.normpath(p.strip() or ".")
+
+
+def _seg_overlap(s: str, t: str) -> bool:
+    """Hai đoạn đường dẫn có thể trỏ cùng tên: chữ = chữ, glob khớp chữ; hai glob → coi như giao (an toàn)."""
+    gs, gt = bool(GLOB_CHARS_RE.search(s)), bool(GLOB_CHARS_RE.search(t))
+    if gs and gt:
+        return True
+    if gs or gt:
+        pat, name = (s, t) if gs else (t, s)
+        return fnmatch.fnmatchcase(name, pat)
+    return s == t
+
+
 def _path_overlap(a: str, b: str) -> bool:
-    a, b = a.rstrip("/"), b.rstrip("/")
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+    """Hai phạm vi `files:` giao nhau: trùng, thư mục chứa nhau, hoặc glob (`src/*.py`, `src/**`) khớp — sau chuẩn hoá."""
+    pa, pb = _norm_scope(a).split("/"), _norm_scope(b).split("/")
+    if "." in (pa[0], pb[0]):
+        return True
+    for s, t in zip(pa, pb):
+        if "**" in (s, t):
+            return True
+        if not _seg_overlap(s, t):
+            return False
+    return True
+
+
+def _overlap_label(x: str, y: str) -> str:
+    """Tên hiển thị của phần giao: đường sâu hơn, ưu tiên đường không glob."""
+    nx, ny = _norm_scope(x), _norm_scope(y)
+    return max((nx, ny), key=lambda p: (p.count("/"), not GLOB_CHARS_RE.search(p), len(p)))
 
 
 def plan_overlaps(ready: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1227,14 +1314,7 @@ def plan_overlaps(ready: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for i, a in enumerate(ready):
         for b in ready[i + 1 :]:
-            shared = sorted(
-                {
-                    max((x.rstrip("/"), y.rstrip("/")), key=len)
-                    for x in a["files"]
-                    for y in b["files"]
-                    if _path_overlap(x, y)
-                }
-            )
+            shared = sorted({_overlap_label(x, y) for x in a["files"] for y in b["files"] if _path_overlap(x, y)})
             if shared:
                 out.append({"tasks": [a["id"], b["id"]], "files": shared})
     return out
@@ -5080,7 +5160,7 @@ def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
     tasks = _plan_tasks(base, st)
     cycles = plan_cycle_nodes(tasks)
     notes += [f"✗ PLAN có chu trình dependency (sau:) — không bao giờ làm được: {', '.join(cycles)}"] if cycles else []
-    notes += _unknown_after_note(plan_unknown_after(tasks))
+    notes += _unknown_after_note(plan_unknown_after(tasks)) + _bad_links_note(plan_bad_links(tasks))
     cp = st.get("checkpoint")
     newer = (_evidence_latest(base) or {}).get("finished") or ""
     if isinstance(cp, dict) and str(newer) <= str(cp.get("at")):
@@ -5101,7 +5181,11 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
     if args.json:
         extra = {k: st.get(k) for k in ("single_session", "permission_mode", "checkpoint")}
         tasks = _plan_tasks(base, st)
-        plan = {"cycles": plan_cycle_nodes(tasks), "unknown_after": plan_unknown_after(tasks)}
+        plan = {
+            "cycles": plan_cycle_nodes(tasks),
+            "unknown_after": plan_unknown_after(tasks),
+            "bad_links": plan_bad_links(tasks),
+        }
         print(json.dumps({**v, **extra, "deferred": _deferred(st), **plan}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
@@ -5119,18 +5203,20 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
         return 2
     ready = plan_ready(tasks, _deferred(st))
     unknown = plan_unknown_after(tasks)
+    bad = plan_bad_links(tasks)
     out = {
         "ready": [{k: t[k] for k in ("id", "title", "tier", "after", "files")} for t in ready],
         "overlaps": plan_overlaps(ready),
         "unscoped": [t["id"] for t in ready if not t["files"]],
         "cycles": plan_cycle_nodes(tasks),
         "unknown_after": unknown,
+        "bad_links": bad,
     }
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
     print("Sẵn sàng: " + (", ".join(r["id"] for r in out["ready"]) or "—"))
-    for note in _unknown_after_note(unknown):
+    for note in _unknown_after_note(unknown) + _bad_links_note(bad):
         print(f"  {note}")
     for o in out["overlaps"]:
         print(f"  ⚠ {' ∩ '.join(o['tasks'])} cùng ghi {', '.join(o['files'])} — làm tuần tự")
@@ -5142,12 +5228,27 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
 REQ_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}\b")  # REC-11, AUTO-01, BE-AUTH-003
 
 
-def _tree_bytes(p: Path) -> Optional[int]:
-    """Số byte của file, hoặc tổng các file dưới thư mục; không có → None."""
-    if p.is_file():
-        return p.stat().st_size
-    if p.is_dir():
-        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+def _regular_size(path: str) -> int:
+    """Byte của file thường (lstat, không theo symlink); symlink/FIFO/mất giữa chừng → 0."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return 0
+    return st.st_size if stat.S_ISREG(st.st_mode) else 0
+
+
+def _tree_bytes(base: Path, rel: str) -> Optional[int]:
+    """Số byte của file thường, hoặc tổng file thường dưới thư mục (không theo symlink); không có, đường tuyệt đối/`..`,
+    hay không phải file/thư mục thường → None (vào `missing_files`, không đọc — PR #173)."""
+    p = _safe_rel_path(base, rel)
+    try:
+        mode = p.lstat().st_mode if p else 0
+    except OSError:
+        return None
+    if stat.S_ISREG(mode):
+        return _regular_size(str(p))
+    if stat.S_ISDIR(mode):
+        return sum(_regular_size(os.path.join(d, n)) for d, _, names in os.walk(str(p)) for n in names)
     return None
 
 
@@ -5155,7 +5256,7 @@ def context_pack(t: Dict[str, Any], base: Path) -> Dict[str, Any]:
     """Gói ngữ cảnh một task (REC-11): ID yêu cầu, đoạn spec, Gate, phạm vi file, số byte phải đọc/đưa cho executor."""
     spec = task_spec(t)
     reqs = [r for r in dict.fromkeys(REQ_ID_RE.findall(spec)) if not re.fullmatch(r"T-\d+", r)]
-    sizes = {f: _tree_bytes(base / f) for f in t["files"]}
+    sizes = {f: _tree_bytes(base, f) for f in t["files"]}
     spec_bytes = len(spec.encode("utf-8"))
     files_bytes = sum(n for n in sizes.values() if n is not None)
     return {
@@ -5303,13 +5404,16 @@ def _loop_defer(args: argparse.Namespace, base: Path) -> int:
 CI_TRIAGE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (
         # Tên công cụ trần (`gitleaks protect (skipped: not installed)`) hay báo sạch (`no leaks found`) không phải phát
-        # hiện: đòi từ khoá phát hiện cùng dòng (T-1524) — không thì test đỏ cạnh đó bị block oan.
+        # hiện: đòi từ khoá phát hiện cùng dòng (T-1524) — không thì test đỏ cạnh đó bị block oan. SAST chỉ tính khi báo
+        # phát hiện (finding/alert/issue/vulnerability), không tính công cụ tự lỗi (`codeql-action upload failed`, `semgrep
+        # … failed to download rules`) hay `no issues`; dòng test đỏ (AssertionError/FAILED) nhắc chữ secret là test (PR #173).
         "secret",
         re.compile(
-            r"^(?!.*\b(?:no|0|zero) (?:leaks?|secrets?|findings?)\b)"
+            r"^(?!.*\b(?:no|0|zero) (?:leaks?|secrets?|findings?|issues?|alerts?|vulnerabilit(?:y|ies))\b)"
+            r"(?!FAIL\b|.*(?:AssertionError|\bFAILED\b|--- FAIL:))"
             r".*(?:\b(?:leaks?|secrets?) (?:found|detected)|potential secret|\b(?:un)?verified results?\b"
             r"|\b(?:gitleaks|trufflehog|detect-secrets|ggshield|secret scanning)\b.*\b(?:detected|findings?|violations?)\b"
-            r"|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|fail\w*|vulnerab\w*)|>> Issue: \[B\d+)",
+            r"|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|vulnerab\w*)|>> Issue: \[B\d+)",
             re.I,
         ),
     ),
@@ -7583,25 +7687,57 @@ def _drift(kind: str, state: str, subject: str, msg: str) -> Dict[str, str]:
     return {"kind": kind, "state": state, "subject": subject, "msg": msg}
 
 
+DRIFT_REQUIRED_ALLOW = ("Bash",)  # thiếu thì phiên đứng chờ bấm duyệt (ADR-0017); allow khác bị gỡ = siết quyền
+
+
+def _safe_rel_path(base: Path, rel: str) -> Optional[Path]:
+    """`base/rel` khi `rel` là đường tương đối không rỗng, không `..`; tuyệt đối/thoát ra ngoài → None (không đọc)."""
+    parts = Path(rel).parts
+    if not parts or Path(rel).is_absolute() or ".." in parts:
+        return None
+    return base / rel
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    """sha256 băm theo luồng của file THƯỜNG (lstat, không theo symlink); thư mục/symlink/FIFO… → None."""
+    if not stat.S_ISREG(path.lstat().st_mode):
+        return None
+    with path.open("rb") as fh:
+        return hashlib.file_digest(fh, "sha256").hexdigest()
+
+
 def _drift_files(base: Path, files: Dict[str, Any]) -> List[Dict[str, str]]:
-    """File harness trong manifest: thiếu → `missing`; hash khác hash khung đã cài → `modified` (tuỳ chỉnh của dự án)."""
+    """File harness trong manifest: thiếu → `missing`; hash khác hash khung đã cài → `modified` (tuỳ chỉnh của dự án);
+    đường tuyệt đối/`..`/không phải file thường → `invalid`, không đọc (PR #173)."""
     out = []
     for rel, digest in sorted(files.items()):
-        path = base / rel
+        path = _safe_rel_path(base, rel)
         try:
-            have = hashlib.sha256(path.read_bytes()).hexdigest()
+            have = _file_sha256(path) if path else None
         except OSError:
             out.append(_drift("file", "missing", rel, f"{rel} có trong manifest nhưng không còn ở dự án"))
             continue
-        if have != digest:
+        if have is None:
+            out.append(_drift("file", "invalid", rel, f"{rel!r} không phải file thường trong dự án — không đọc"))
+        elif have != digest:
             out.append(
                 _drift("file", "modified", rel, f"{rel} khác bản khung đã cài (tuỳ chỉnh của dự án — giữ khi nâng)")
             )
     return out
 
 
+def _drift_rule(key: str, rule: Any) -> Dict[str, str]:
+    """Rule khung không còn: thiếu `deny` hay `allow: Bash` là lệch thật (`missing`); gỡ `allow` khác là siết quyền có
+    chủ đích (`modified`, không làm `ok` đỏ — PR #173)."""
+    if key == "allow" and rule not in DRIFT_REQUIRED_ALLOW:
+        return _drift("permission", "modified", f"{key}:{rule}", f"rule allow `{rule}` của khung đã gỡ (siết quyền)")
+    return _drift(
+        "permission", "missing", f"{key}:{rule}", f"rule {key} `{rule}` của khung không còn trong settings.json"
+    )
+
+
 def _drift_permissions(base: Path, rules: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Rule `allow`/`deny` do khung đặt (manifest) mà `.claude/settings.json` không còn → `missing`."""
+    """Rule `allow`/`deny` do khung đặt (manifest) mà `.claude/settings.json` không còn."""
     perms = (_read_json_obj(base / ".claude" / "settings.json") or {}).get("permissions")
     perms = perms if isinstance(perms, dict) else {}
     out = []
@@ -7609,13 +7745,7 @@ def _drift_permissions(base: Path, rules: Dict[str, Any]) -> List[Dict[str, str]
         have = perms.get(key)
         have = have if isinstance(have, list) else []
         expected = rules.get(key)
-        out += [
-            _drift(
-                "permission", "missing", f"{key}:{rule}", f"rule {key} `{rule}` của khung không còn trong settings.json"
-            )
-            for rule in (expected if isinstance(expected, list) else [])
-            if rule not in have
-        ]
+        out += [_drift_rule(key, rule) for rule in (expected if isinstance(expected, list) else []) if rule not in have]
     return out
 
 

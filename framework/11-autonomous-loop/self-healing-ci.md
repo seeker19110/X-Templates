@@ -3,7 +3,7 @@ title: Agent tự sửa CI/review: giới hạn, cấm, bằng chứng
 kind: module
 prefix: LOOP-CI
 applies_to: [all]
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Agent tự sửa CI/review: giới hạn, cấm, bằng chứng
@@ -48,7 +48,9 @@ updated: 2026-10-19
 `python3 scripts/xt.py loop ci-triage --run <id> [--task T-NNN] [--cost-usd X] [--json]` đọc log bước đỏ
 (`gh run view <id> --log-failed`; `--log FILE` khi ngoại tuyến), phân loại theo bảng trên — thứ tự
 secret/SAST → migration → type → coverage → lint → test → hạ tầng (hạ tầng xét cuối: log có cả lỗi thật lẫn dấu mạng là
-lỗi thật), không khớp → `unknown` — rồi trả **một** hành động:
+lỗi thật), không khớp → `unknown`. Secret/SAST chỉ tính khi dòng báo **phát hiện** (`leaks detected`, `3 blocking
+findings`, `>> Issue: [B105…]`); công cụ tự lỗi (`codeql-action upload failed`), báo sạch (`no issues`) hay dòng test đỏ
+nhắc chữ "secret" không block — rồi trả **một** hành động:
 
 | Hành động | Khi nào | Máy làm |
 |---|---|---|
@@ -65,14 +67,14 @@ kết quả cũ, không đếm lại, không cộng lại chi phí. Lỗi `gh` �
 ### Liên kết ngoài: phân loại lỗi (`check-links.py --external`, REC-13)
 
 Link ngoài đỏ vì **mạng** khác với đỏ vì **nội dung đã đổi**; gộp chung thì hoặc báo giả hoặc bỏ sót. `links.yml` (hằng tuần)
-chạy `python3 scripts/check-links.py --external` — chỉ stdlib, mỗi URL một lần, HEAD rồi GET khi HEAD bị từ chối:
+chạy `python3 scripts/check-links.py --external` — chỉ stdlib, mỗi URL một lần, HEAD rồi GET khi HEAD trả 4xx khác 404/410 (hoặc 501) — nhiều máy chủ từ chối HEAD dù trang còn:
 
 | Loại | Tín hiệu | Xử lý |
 |---|---|---|
 | tạm | 5xx · 408 · timeout · lỗi mạng | thử lại `--retries` lần (mặc định 2, lùi 1 s, 2 s); còn lỗi → cảnh báo, không đỏ |
 | đổi | 3xx (301/308…) — không đi theo chuyển hướng | cảnh báo: cập nhật URL; không đỏ |
-| chết | 404 · 410 · 4xx khác | **lỗi**, exit 1: sửa hoặc bỏ nguồn |
-| chưa xác minh | 403 · 429 (trang luật/chuẩn chặn bot) | cảnh báo, không kết luận nội dung; 429 được thử lại, 403 thì không |
+| chết | 404 · 410 (HEAD) · 4xx khác sau khi GET xác nhận | **lỗi**, exit 1: sửa hoặc bỏ nguồn |
+| chưa xác minh | 401 · 403 · 429 (trang đòi đăng nhập/chặn bot) | cảnh báo, không kết luận nội dung; 429 được thử lại, 401/403 thì không |
 
 Nguồn trong `research/` ghi ngày rà lại; "chưa xác minh" không phải bằng chứng link còn đúng.
 

@@ -685,6 +685,23 @@ class InstallPlanTest(unittest.TestCase):
         self.install()  # idempotent
         self.assertEqual((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"), before)
 
+    def test_review173_manifest_rules_do_not_grow(self):
+        """PR #173: rule khung bị gỡ rồi cài lại (khung thêm lại) không làm `rules.deny` phình; trùng sẵn có được khử."""
+        self.install()
+        first = self.manifest()["rules"]
+        for _ in range(2):
+            data = json.loads(self.settings.read_text(encoding="utf-8"))
+            data["permissions"]["deny"] = data["permissions"]["deny"][1:]
+            data["permissions"]["allow"] = []
+            self.settings.write_text(json.dumps(data), encoding="utf-8")
+            self.install()
+        self.assertEqual(self.manifest()["rules"], first)
+        out = install.update_provenance(
+            {"allow": ["a", "a"], "ask": ["q", "q", "r"], "deny": ["d"]},
+            {"permissions": {"allow_add": ["b", "a"], "deny_add": ["d", "e"], "ask_remove": ["r"]}},
+        )
+        self.assertEqual(out, {"allow": ["a", "b"], "ask": ["q"], "deny": ["d", "e"]})
+
     def test_install_plan_manifest_keeps_user_preexisting_rule_out(self):
         # Rule deny người dùng đã có sẵn trùng của khung: không do khung thêm → không vào manifest.
         ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]

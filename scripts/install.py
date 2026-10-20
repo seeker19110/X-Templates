@@ -361,9 +361,10 @@ def our_rules() -> dict[str, list[str]]:
 
 def update_provenance(prov: dict[str, list[str]], report: dict[str, Any]) -> dict[str, list[str]]:
     """Rule do khung đặt sau lần gộp: cũ + vừa thêm (`allow_add`/`deny_add`), bớt `ask` vừa gỡ. Rule người dùng đã có
-    sẵn (không do khung thêm) không bao giờ vào danh sách này."""
+    sẵn (không do khung thêm) không bao giờ vào danh sách này. Khử trùng giữ thứ tự: rule bị gỡ rồi khung thêm lại ở lần
+    cài sau không làm danh sách phình (PR #173)."""
     perms = report.get("permissions", {})
-    out = {k: [*prov.get(k, []), *perms.get(f"{k}_add", [])] for k in RULE_KEYS}
+    out = {k: list(dict.fromkeys([*prov.get(k, []), *perms.get(f"{k}_add", [])])) for k in RULE_KEYS}
     out["ask"] = [r for r in out["ask"] if r not in perms.get("ask_remove", [])]
     return out
 

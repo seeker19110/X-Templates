@@ -1617,6 +1617,64 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
             xt.plan_links("(sau: T-101; files: a) (sau: T-102)"), {"sau": ["T-101", "T-102"], "files": ["a"]}
         )
 
+    def test_review173_plan_links_anywhere_in_group(self):
+        """PR #173: `sau:`/`files:` không đứng đầu đoạn vẫn được đọc; `files:` có ngoặc lồng giữ nguyên tên."""
+        self.assertEqual(xt.plan_links("(S-001, sau: T-001)"), {"sau": ["T-001"], "files": []})
+        self.assertEqual(xt.plan_links("(sau: T-001, files: a.py)"), {"sau": ["T-001"], "files": ["a.py"]})
+        self.assertEqual(xt.plan_links("(files: b (c).py)"), {"sau": [], "files": ["b (c).py"]})
+        self.assertEqual(
+            xt.plan_links("x (REC-01, files: a.py, b.py; cần: y) (ghi chú (phụ), sau: T-002, T-003)"),
+            {"sau": ["T-002", "T-003"], "files": ["a.py", "b.py"]},
+        )
+        self.assertEqual(xt.plan_links("sau: T-001 files: a.py ngoài ngoặc"), {"sau": [], "files": []})
+        self.assertEqual(xt.plan_links("(tiêu đề có chữ hậu: sau:x)"), {"sau": [], "files": []})
+
+    def test_review173_plan_bad_links_warn(self):
+        """Nhóm ngoặc có `sau:`/`files:` mà không đọc được (thiếu ID, rỗng, ngoặc không đóng) → cảnh báo, không chặn."""
+        self.assertEqual(xt.plan_link_problems("(sau: T-001; files: a)"), [])
+        self.assertEqual(xt.plan_link_problems("(sau: xong T-1)"), ["sau: xong T-1"])
+        self.assertEqual(xt.plan_link_problems("(files: , ; sau: T-001)"), ["files:"])
+        self.assertEqual(xt.plan_link_problems("(sau: T-001; files: a"), ["(sau: T-001; files: a"])
+        self.assertEqual(xt.plan_link_problems("không ngoặc sau: gì"), [])
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [ ] `T-001` a (sau: T-1) — Gate: `true`\n- [ ] `T-002` b (files: a.py) — Gate: `true`\n",
+        )
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        self.assertEqual(xt.plan_bad_links(tasks), {"T-001": ["sau: T-1"]})
+        self.assertEqual(xt.plan_bad_links([{"id": "T-9"}]), {})
+        nxt = json.loads(self.run_main("loop", "next", "--json")[1])
+        self.assertEqual(nxt["bad_links"], {"T-001": ["sau: T-1"]})
+        self.assertEqual([r["id"] for r in nxt["ready"]], ["T-001", "T-002"])  # chỉ cảnh báo
+        self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["bad_links"], {"T-001": ["sau: T-1"]})
+        for cmd in ("next", "status"):
+            with self.subTest(cmd=cmd):
+                self.assertIn("ghi chú `sau:`/`files:` không đọc được: T-001 → sau: T-1", self.run_main("loop", cmd)[1])
+        write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a (sau: T-002)\n- [x] `T-002` b\n")
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["bad_links"], {})
+        self.assertNotIn("không đọc được", self.run_main("loop", "status")[1])
+
+    def test_review173_path_overlap_normalised_and_glob(self):
+        self.assertTrue(xt._path_overlap("./src/a.py", "src/"))
+        self.assertTrue(xt._path_overlap("src//a.py", "./src/a.py"))
+        self.assertTrue(xt._path_overlap("src/*.py", "src/a.py"))
+        self.assertTrue(xt._path_overlap("src/a.py", "src/*.py"))
+        self.assertTrue(xt._path_overlap("src/**", "src/d/x.txt"))
+        self.assertTrue(xt._path_overlap("src/d/*.txt", "src/"))  # glob nằm trong thư mục
+        self.assertTrue(xt._path_overlap("src/*", "src/d/"))
+        self.assertFalse(xt._path_overlap("src/*.py", "src/a.txt"))
+        self.assertFalse(xt._path_overlap("src/*.py", "lib/a.py"))
+        self.assertFalse(xt._path_overlap("./src/a.py", "src/ab.py"))
+        self.assertFalse(xt._path_overlap("docs/*.md", "docs/sub/x.md"))
+        ready = [
+            {"id": "T-1", "files": ["./src/a.py"]},
+            {"id": "T-2", "files": ["src/*.py"]},
+            {"id": "T-3", "files": ["docs/"]},
+        ]
+        self.assertEqual(xt.plan_overlaps(ready), [{"tasks": ["T-1", "T-2"], "files": ["src/a.py"]}])
+        self.assertTrue(xt._path_overlap(".", "docs/x.md"))  # cả repo
+        self.assertTrue(xt._path_overlap("src/*.py", "src/[ab].py"))  # hai glob: coi như giao (an toàn)
+
     def test_task_dag_ready_and_overlaps(self):
         tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
         ready = [t["id"] for t in xt.plan_ready(tasks, {})]

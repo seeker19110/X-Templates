@@ -11,7 +11,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 
 ### Added
-- Đo tự chủ trước khi mở rộng (T-1521, AUTO-07): `xt.py autonomy-bench [--corpus DIR] [--json]` chạy corpus `tests/fixtures/autonomy/` (PR, rollup, review, guard, log CI, harness — 247 ca) qua hàm thật của khung (`merge_check_result` = `merge_decision` + `merge_eligibility`, `_ci_blocker`, `pr_next`, guard `_rule_decision` + `apply_policy`, `ci_classify`); exit 1 khi false-green > 0, 2 khi corpus hỏng; báo chặn oan, độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa của sổ audit, ID ngoài phạm vi khai lý do ở `scope.json`). Job CI `quality` chạy lệnh này; số đo và giới hạn ở [`docs/ops/AUTONOMY-BASELINE.md`](docs/ops/AUTONOMY-BASELINE.md). Tách hàm thuần `rest_rollup`, `prefixed_globs`, `merge_check_result` (hành vi không đổi). `tests/fixtures/autonomy/pending/` giữ 5 false-green mới phát hiện ở guard, chưa sửa (ngoài cổng).
+- Đo tự chủ trước khi mở rộng (T-1521, AUTO-07): `xt.py autonomy-bench [--corpus DIR] [--json]` chạy corpus `tests/fixtures/autonomy/` (PR, rollup, review, guard, log CI, harness — 269 ca) qua hàm thật của khung (`merge_check_result` = `merge_decision` + `merge_eligibility`, `_ci_blocker`, `pr_next`, guard `_rule_decision` + `apply_policy`, `ci_classify`); exit 1 khi false-green > 0, 2 khi corpus hỏng; báo chặn oan, độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa của sổ audit, ID ngoài phạm vi khai lý do ở `scope.json`). Job CI `quality` chạy lệnh này; số đo và giới hạn ở [`docs/ops/AUTONOMY-BASELINE.md`](docs/ops/AUTONOMY-BASELINE.md). Tách hàm thuần `rest_rollup`, `prefixed_globs`, `merge_check_result` (hành vi không đổi). `tests/fixtures/autonomy/pending/` giữ 5 false-green mới phát hiện ở guard, chưa sửa (ngoài cổng).
 - Mục thiết yếu không bị trần MUST ở M (T-1519, REC-05, [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md)):
   `xt.py compose --feature <auth|jwt|oauth|reset|payment|pii>` (lặp được) đưa mục `MUST@L` mà module khai ở frontmatter
   `essential: [<ID>@<fact>]` lên MUST ở quy mô M; S/L và ghép không `--feature` không đổi một byte. Blueprint ghi
@@ -73,6 +73,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `xt.yaml` `merge_risk_paths` thêm `docs/autopilot/PLAN*.md` (file PLAN chứa lệnh Gate harness chạy → PR đi làn chuẩn).
 
 ### Fixed
+- Review PR #173: `loop ci-triage` lớp `secret` không còn bắt oan SAST tự lỗi (`codeql-action upload failed`, `semgrep …
+  failed to download rules`), báo sạch (`bandit: no issues identified`) hay dòng test đỏ nhắc chữ secret
+  (`AssertionError: expected secret detected…`) — thành `test`/`infra`; phát hiện thật vẫn block (+3 ca `ci_log`).
+  `(sau:/files:)` đọc khoá ở bất kỳ đâu trong ngoặc (`(S-001, sau: T-001)`, `(sau: T-001, files: a.py)`,
+  `files: b (c).py`); ghi chú không đọc được → cảnh báo `bad_links` ở `loop next`/`loop status`. `files:` giao nhau
+  chuẩn hoá `./`/`//` và hiểu glob (`src/*.py` ∩ `src/a.py`). `doctor --drift`: gỡ rule `allow` của khung (trừ `Bash`) là
+  `modified` (siết quyền), không đỏ; manifest trỏ đường tuyệt đối/`..`/không phải file thường → `invalid`, không đọc;
+  băm theo luồng. `context`: `files:` tuyệt đối/`..`/symlink/FIFO → `missing_files`, thư mục chỉ cộng file thường.
+  `install.py`: `rules` trong `manifest.json` khử trùng (không phình khi cài lại). `check-links.py --external`: HEAD 4xx
+  (trừ 404/410) thử GET trước khi kết luận chết; 401 là "chưa xác minh". Dự án đích: chạy lại `install.py`.
 - Guard (T-1523): sửa 5 false-green `autonomy-bench` tìm ra và brace lệch nháy, ở chính sách mặc định (ADR-0018).
   **AUD-SEC-077** 🔴: surrogate lẻ/NUL trong lệnh, đường dẫn hoặc payload làm guard sập rồi fail-open → làm sạch trước khi
   quét (U+FFFD, khoảng trắng), `rel_path` không sập. **AUD-SEC-072** 🔴: `_unquoted` hiểu `$'…'` (kể cả `\'`) và thân

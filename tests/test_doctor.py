@@ -732,6 +732,38 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(rc, 1)
         self.assertEqual(self.subjects(doc, "missing"), [f"deny:{dropped}"])
 
+    def test_review173_drift_allow_removed_is_modified(self):
+        """PR #173: gỡ rule `allow` của khung là siết quyền — `modified`, không làm `ok` đỏ; thiếu `allow: Bash` thì đỏ."""
+        sp = self.base / ".claude" / "settings.json"
+        settings = json.loads(sp.read_text(encoding="utf-8"))
+        settings["permissions"]["allow"] = [r for r in settings["permissions"]["allow"] if r in ("Bash", "Read")]
+        sp.write_text(json.dumps(settings), encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, doc["ok"], self.subjects(doc, "missing")), (0, True, []))
+        self.assertIn("allow:Edit", self.subjects(doc, "modified"))
+        settings["permissions"]["allow"] = ["Read"]
+        sp.write_text(json.dumps(settings), encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, self.subjects(doc, "missing")), (1, ["allow:Bash"]))
+
+    def test_review173_drift_files_bad_paths_not_read(self):
+        """PR #173: manifest trỏ đường tuyệt đối / `..` / không phải file thường → báo lệch, không đọc; băm theo luồng."""
+        mp = self.base / ".xtemplates" / "manifest.json"
+        manifest = json.loads(mp.read_text(encoding="utf-8"))
+        outside = self.tmp / "outside.txt"
+        outside.write_text("x", encoding="utf-8")
+        (self.base / "adir").mkdir()
+        os.symlink(outside, self.base / "alink")
+        os.mkfifo(self.base / "afifo")
+        bad = {str(outside): "0", "../outside.txt": "0", "adir": "0", "alink": "0", "afifo": "0", "": "0"}
+        manifest["files"] = {**manifest["files"], **bad}
+        mp.write_text(json.dumps(manifest), encoding="utf-8")
+        with unittest.mock.patch.object(Path, "read_bytes", side_effect=AssertionError("không đọc cả file")):
+            rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(sorted(self.subjects(doc, "invalid")), sorted(bad))
+        self.assertEqual(self.subjects(doc, "modified"), [])
+
     def test_doctor_drift_settings_unreadable_lists_all_rules(self):
         (self.base / ".claude" / "settings.json").write_text("{", encoding="utf-8")
         rc, doc = self.drift("--latest", "v0.0.1")

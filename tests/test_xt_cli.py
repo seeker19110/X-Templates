@@ -1968,6 +1968,22 @@ class ContextPackTest(TmpDirCase):
         self.assertIn("không có trong P2.md", err)
         self.assertEqual(run_main("context", "--task", "T-001", "--plan", "docs/autopilot/PLAN.md")[0], 0)
 
+    def test_review173_context_pack_bad_paths_are_missing(self):
+        """PR #173: `files:` tuyệt đối / `..` / symlink / FIFO → `missing_files`, không stat/đọc ngoài dự án; thư mục chỉ
+        cộng file thường (symlink bên trong không tính)."""
+        outside = self.tmp.parent / f"{self.tmp.name}-ngoai.txt"
+        outside.write_text("x" * 50, encoding="utf-8")
+        self.addCleanup(outside.unlink)
+        os.symlink(outside, self.tmp / "link.txt")
+        os.symlink(outside, self.tmp / "src" / "d" / "in-link.txt")
+        os.mkfifo(self.tmp / "fifo")
+        files = [str(outside), f"../{outside.name}", "link.txt", "fifo", "src/a.py", "src/d"]
+        task = {"id": "T-1", "rest": "x", "gate": None, "files": files, "after": [], "section": None}
+        pack = xt.context_pack(task, self.tmp)
+        self.assertEqual(pack["missing_files"], files[:4])
+        self.assertEqual(pack["bytes"]["files"], 8)  # 3 + 5; symlink 50 byte ngoài dự án không tính
+        self.assertEqual(xt._regular_size(str(self.tmp / "biến-mất")), 0)  # file mất giữa lúc duyệt
+
     def test_context_pack_errors(self):
         rc, out, err = run_main("context", "--task", "T-404")
         self.assertEqual((rc, out), (2, ""))
@@ -2140,6 +2156,35 @@ class CiTriageTest(TmpDirCase):
         self.assertEqual((rc, d["category"], d["action"]), (0, "test", "fix"))
         self.assertIn("FAILED test_y", d["evidence"])
         self.assertFalse(xt.read_state(self.tmp).get("blocked"))
+
+    def test_review173_sast_secret_needs_real_finding(self):
+        """PR #173: tên SAST/scanner + `failed`/`no issues`/AssertionError không phải phát hiện bí mật — log đó là
+        `test`/`infra` (fix/re-run), không block; phát hiện thật (số lượng > 0) vẫn là `secret`."""
+        benign = {
+            "bandit: no issues identified\nFAILED test_x\n": "test",
+            "bandit: 0 issues\nFAILED test_x\n": "test",
+            "codeql-action upload failed: network\nError: connect ETIMEDOUT 140.82.112.3:443\n": "infra",
+            "semgrep ci: failed to download rules\nread timed out\n": "infra",
+            "semgrep scan failed: could not resolve host semgrep.dev\n": "infra",
+            "AssertionError: expected secret detected in output\n": "test",
+            "FAILED tests/test_scan.py::test_secret_found - AssertionError\n": "test",
+            "--- FAIL: TestLeaksDetected (0.00s)\n": "test",
+        }
+        for text, cat in benign.items():
+            with self.subTest(text=text):
+                self.assertEqual(xt.ci_classify(text)["category"], cat)
+        real = (
+            "semgrep: 3 blocking findings\n",
+            ">> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'x'\n",
+            "gitleaks detect: 2 leaks detected\n",
+            "ERROR: Potential secrets about to be committed to git repo!\n",
+            "CodeQL: 4 alerts found\n",
+            "bandit: 2 issues identified (severity HIGH)\n",
+            "semgrep: 1 vulnerability\n",
+        )
+        for text in real:
+            with self.subTest(text=text):
+                self.assertEqual(xt.ci_classify(text + "FAILED test_y\n")["category"], "secret")
 
     def test_audit_delta_ci_triage_episode_counts_survive_task_change(self):
         """T-1524: đổi/bỏ `--task` không đặt lại đếm cùng chữ ký, lượt re-run, chi phí (không lách trần 3 lần);

@@ -299,6 +299,20 @@ class LinkClassificationTest(unittest.TestCase):
         self.assertEqual(self.cl.http_status("http://h", 1.0, op), 301)
         self.assertEqual(op.calls, ["HEAD"])
 
+    def test_review173_head_4xx_retried_with_get(self):
+        """PR #173: HEAD 4xx (trừ 404/410) không đủ kết luận chết — thử GET; 401 là `unverified`."""
+        for head, get, want in [(400, 200, 200), (401, 401, 401), (418, 404, 404), (429, 200, 200)]:
+            with self.subTest(head=head):
+                op = FakeOpener([("HEAD", http_err(head)), ("GET", get if get < 400 else http_err(get))])
+                self.assertEqual(self.cl.http_status("http://h", 1.0, op), want)
+                self.assertEqual(op.calls, ["HEAD", "GET"])
+        for gone in (404, 410):
+            op = FakeOpener([("HEAD", http_err(gone))])
+            self.assertEqual(self.cl.http_status("http://h", 1.0, op), gone)
+            self.assertEqual(op.calls, ["HEAD"])
+        self.assertEqual(self.cl.classify_status(401), "unverified")
+        self.assertEqual(self.cl.classify_status(410), "dead")
+
     def test_link_classification_http_status_error_codes(self):
         op = FakeOpener([("HEAD", http_err(404))])
         self.assertEqual(self.cl.http_status("http://h", 1.0, op), 404)
