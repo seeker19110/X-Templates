@@ -526,11 +526,18 @@ class Review3Test(unittest.TestCase):
     def test_guard_r3_fstring_read_only_passes(self):
         self.assertAllowed(
             (
-                'python3 -c \'print(f"{open(".env").read()}")\'',
+                'python3 -c "print(f\\"{open(\'.env\').read()}\\")"',  # nháy khác loại: 3.11 và 3.12+ đều parse
                 'python3 -c "print(f\'{open(\\"\\x2eenv\\").read()}\')"',
                 "python3 -c \"print('\\x2eenv.example')\"",
             )
         )
+
+    def test_guard_r3_fstring_same_quote_read_by_version(self):
+        """f-string cùng nháy chỉ đọc: 3.12+ parse được → cho qua; 3.11 (guard chạy 3.11) không parse được → fail-closed
+        chặn — vô hại vì chính Python 3.11 cũng báo lỗi cú pháp với script đó."""
+        res = policy('python3 -c \'print(f"{open(".env").read()}")\'')
+        want = ("", None) if sys.version_info >= (3, 12) else ("deny", "SECRET_WRITE")
+        self.assertEqual((res["decision"], res.get("code") if res["decision"] else None), want, res)
 
     def test_guard_r3_nfkc_identifiers_denied(self):
         self.assertDenied(
@@ -620,6 +627,60 @@ class Review3Test(unittest.TestCase):
         self.assertIn(".env", lits('print(f"{open(".env","w")}")'))
         self.assertIn("a.py", lits("x = 'a.py'"))  # regex vẫn chạy (hợp, không thay thế)
         self.assertIn("a.py", lits("x = 'a.py' +"))  # không phải Python hợp lệ: chỉ regex
+
+
+class IpythonMagicTest(unittest.TestCase):
+    """Review #186 lần 3 (phần E): dòng magic chạy shell của ipython (`!cmd`, `!!cmd`, `%sx`, `%system`, `x = !cmd`,
+    ô `%%bash`/`%%sh`/`%%script bash`) quét như lệnh shell; magic lạ nhắc đường dẫn canh → không chỉ đọc (chặn)."""
+
+    def test_guard_ipython_shell_magic_denied(self):
+        cases = {
+            "ipython -c '!rm -rf ~'": "RULE_DENY",
+            "ipython -c '!!rm -rf ~'": "RULE_DENY",
+            "ipython -c 'if True:\n    !rm -rf ~'": "RULE_DENY",
+            "ipython -c 'x = !rm -rf ~'": "RULE_DENY",
+            "ipython -c '%sx rm -rf ~'": "RULE_DENY",
+            "ipython -c '%system rm -rf ~'": "RULE_DENY",
+            "ipython -c '%%bash\nrm -rf ~'": "RULE_DENY",
+            "ipython -c '%%sh\necho x\nrm -rf ~'": "RULE_DENY",
+            "ipython -c '%%script bash\nrm -rf ~'": "RULE_DENY",
+            "ipython -c '%%bash\necho x > .claude/settings.json'": "HOOK_BYPASS",
+            "ipython -c '!touch .env'": "SECRET_WRITE",
+            "ipython <<'PY'\nprint(1)\n!rm -rf ~\nPY": "RULE_DENY",
+            "echo '!rm -rf ~' | ipython": "RULE_DENY",
+            "cd .claude && ipython -c '!echo x > settings.json'": "HOOK_BYPASS",
+            # magic lạ: không chắc → từ trên dòng magic là ứng viên đường dẫn, script không chỉ đọc
+            "ipython -c '%%writefile .env\nK=1'": "SECRET_WRITE",
+            "ipython -c '%store x > .claude/settings.json'": "HOOK_BYPASS",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_ipython_magic_controls_pass(self):
+        for cmd in (
+            "ipython -c '!ls'",
+            "ipython -c '%%bash\nls -la'",
+            "ipython -c '%%writefile notes.md\nhello'",
+            "ipython -c 'print(1 != 2)'",
+            "python3 -c 'print(1)'",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_ipython_magic_helpers(self):
+        sh = guard._ipython_shell_scripts
+        self.assertEqual(sh("!ls -la"), ["ls -la"])
+        self.assertEqual(sh("  !!echo a"), ["echo a"])
+        self.assertEqual(sh("y = %sx ls"), ["ls"])
+        self.assertEqual(sh("%%bash -e\nls\nrm x"), ["ls\nrm x"])
+        self.assertEqual(sh("%%script /bin/sh\nls"), ["ls"])
+        self.assertEqual(sh("%%script perl\nprint 1"), [])
+        self.assertEqual(sh("a != b"), [])
+        self.assertEqual(guard._ipython_magic_words("%%writefile -a .env\nx"), ["%%writefile", "-a", ".env"])
+        self.assertTrue(guard._has_ipython(guard.tokenize("ipython3 -c x")))
+        self.assertFalse(guard._has_ipython(guard.tokenize("python3 -c x")))
 
 
 if __name__ == "__main__":

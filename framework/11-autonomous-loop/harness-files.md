@@ -68,7 +68,10 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   (giới hạn ở mục trên). Chuỗi lấy bằng regex (cả chuỗi giữa hai nháy bất kỳ, bắt f-string cùng nháy của 3.12+) hợp với
   hằng str/bytes của AST khi script là Python (escape đã giải, phần hằng của f-string); script chuẩn hoá NFKC trước khi
   quét (`os.ｒemove` là `os.remove`). Trình thông dịch nhận: python, pypy, ipython (họ python), node, deno (`-e`,
-  `deno eval`), bun, perl, ruby, php, lua (`--`/`[[…]]` là không chỉ đọc), tclsh. Bộ che chuỗi/comment (D-107): Python che
+  `deno eval`), bun, perl, ruby, php, lua (`--`/`[[…]]` là không chỉ đọc), tclsh. Magic chạy shell của ipython (`!cmd`,
+  `!!cmd`, `x = !cmd`, `%sx`, `%system`, ô `%%bash`/`%%sh`/`%%script <shell>`) quét như `sh -c`; magic lạ: từ trên dòng
+  magic là ứng viên đường dẫn (`%%writefile .env` bị chặn). Tcl không cần nháy nên `file delete .env` không bị xét;
+  escape trong chuỗi node/ruby/perl chưa được giải. Bộ che chuỗi/comment (D-107): Python che
   bằng `tokenize` (cú pháp sai → không chỉ đọc; biểu thức f-string kiểm đệ quy); node/ruby/perl/php chỉ che chuỗi một
   dòng, phần mã còn `#`, `/`, `%`, `<<`, quote-like Perl (`q{}`, `qq{}`, `m{}`, `s{}{}`…), nháy dính biến (`$'`, `?'`) hay
   chuỗi nháy kép có `$`/`@` là không chỉ đọc. Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi

@@ -4057,7 +4057,7 @@
     "AUD-SEC-089"
    ],
    "input": {
-    "command": "python3 -c 'print(f\"{open(\".env\").read()}\")'"
+    "command": "python3 -c \"print(f\\\"{open('.env').read()}\\\")\""
    },
    "expect": {
     "allowed": true
@@ -4210,6 +4210,47 @@
    ],
    "input": {
     "command": "env --ch=docs tee notes.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython-bang",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '!rm -rf ~'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython-cell-bash",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '%%bash\necho x > .claude/settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-ipython-ls",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '!ls'"
    },
    "expect": {
     "allowed": true

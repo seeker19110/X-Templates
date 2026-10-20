@@ -4442,7 +4442,7 @@ def _scan_nested(
     asks += opaque
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
-    nested += _ssh_local_scripts(tokens)
+    nested += _ssh_local_scripts(tokens) + [s for s, _ in _ipython_nested(cmd, tokens, None)]
     for here, scripts in _moved_nested_scripts(cmd, tokens, cwd).items():
         moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
         if moved:
@@ -4478,6 +4478,8 @@ def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> 
         add(here, _heredoc_scripts(cmd))
     for script, here in _interp_scripts_at(cmd, tokens, start):
         add(here, _exec_api_scripts([script]))
+    for script, here in _ipython_nested(cmd, tokens, start):
+        add(here, [script])
     return out
 
 
@@ -4637,12 +4639,50 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     return out
 
 
+# ipython (review #186 lần 3, phần E): magic chạy shell — `!cmd`, `!!cmd`, `%sx cmd`, `%system cmd` (đầu dòng, sau thụt
+# lề, hoặc vế phải phép gán `x = !cmd`) và ô `%%bash`/`%%sh`/`%%script <shell>` (thân ô là phần còn lại của script).
+IPY_LINE_SHELL_RE = re.compile(r"(?:^|=)[ \t]*(?:!!?|%(?:sx|system)(?![\w.]))[ \t]*([^\n]*)", re.M)
+IPY_CELL_SHELL_RE = re.compile(
+    r"^[ \t]*%%(?:bash|sh|script[ \t]+(?:\S*/)?(?:ba|da|k|z)?sh)(?![\w.])[^\n]*\n(.*)", re.M | re.S
+)
+IPY_MAGIC_LINE_RE = re.compile(r"(?:^|=)[ \t]*(%[^\n]*)", re.M)  # mọi dòng magic `%…`/`%%…` (cả lạ)
+
+
+def _has_ipython(tokens: List[str]) -> bool:
+    """Lệnh có chạy ipython (script trong lệnh có thể chứa magic)."""
+    found = (INTERP_RE.fullmatch(n[0]) for n in map(normalize, split_commands(tokens)) if n)
+    return any(m and m[1] == "ipython" for m in found)
+
+
+def _ipython_shell_scripts(script: str) -> List[str]:
+    """Lệnh shell mà magic của ipython chạy, để quét bằng chính bộ quét lệnh như `sh -c`."""
+    script = _nfkc(script)
+    out = [m[1] for m in IPY_LINE_SHELL_RE.finditer(script) if m[1].strip()]
+    return out + [m[1] for m in IPY_CELL_SHELL_RE.finditer(script) if m[1].strip()]
+
+
+def _ipython_magic_words(script: str) -> List[str]:
+    """Từ trên các dòng magic `%…` (magic lạ như `%%writefile .env`, `%store x > f` không phân tích chắc được): là ứng
+    viên đường dẫn; script có magic không qua `ast.parse` nên không bao giờ chỉ đọc → nhắc đường dẫn canh là chặn."""
+    return [w for m in IPY_MAGIC_LINE_RE.finditer(_nfkc(script)) for w in _split_words(m[1])]
+
+
+def _ipython_nested(cmd: str, tokens: List[str], start: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """(lệnh shell từ magic, thư mục chạy) của mọi script trình thông dịch trong lệnh có ipython."""
+    if not _has_ipython(tokens):
+        return []
+    return [
+        (s, here) for script, here in _interp_scripts_at(cmd, tokens, start) for s in _ipython_shell_scripts(script)
+    ]
+
+
 def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
     (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
     tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
     families = _interp_families(tokens, cwd or root)
+    ipython = _has_ipython(tokens)
     for raw_script, here in _interp_scripts_at(cmd, tokens, cwd or root):
         script = _nfkc(raw_script)  # `os.ｒemove` là `os.remove` với Python (định danh chuẩn hoá NFKC, PEP 3131)
         asks += [
@@ -4655,7 +4695,7 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families)
         asks += [
             a
-            for raw in _script_literals(script, families)
+            for raw in _script_literals(script, families) + (_ipython_magic_words(script) if ipython else [])
             if (a := _interp_literal_ask(script, raw, root, here, hint, ro))
         ]
     return asks
