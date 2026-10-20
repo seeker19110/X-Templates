@@ -58,6 +58,9 @@ Lệnh:
                                 1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
   doctor [--fix] [--json]       Audit khung đã cài trước /autopilot (Python/git, hook + file hook, skill, AGENTS/CLAUDE,
                                 xt.yaml, .gitignore, state, khung hợp lệ); --fix sửa phần an toàn, exit 1 khi còn lỗi.
+  doctor --drift [--latest TAG] [--json]
+                                So `.xtemplates/manifest.json` với bản cài (file/quyền/tài liệu) và tag mới nhất
+                                (--latest hoặc gh api); exit 1 khi có lệch; mẫu Routine tuần: stop-points-and-escalation.md.
   stats                         Thống kê số module/mục.
 
 Thoát: 0 = ổn, 1 = vi phạm/chưa đạt, 2 = lỗi dùng lệnh.
@@ -3002,6 +3005,8 @@ DOCTOR_HOOK_EVENTS = {
     "PreToolUse": "error",
     "Stop": "error",
     "PostToolUse": "warn",
+    "TaskCompleted": "warn",  # T-1514: chặn tick task chưa có evidence xanh
+    "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
 DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
 DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
@@ -7370,7 +7375,125 @@ def cmd_grant_check(args: argparse.Namespace) -> int:
     return 1 if why else 0
 
 
+# --------------------------------------------------------------------------- doctor --drift (AUTO-06, T-1518)
+
+DRIFT_DOCS = ("AGENTS.md", "CLAUDE.md")
+DRIFT_RULE_KEYS = ("allow", "deny")  # `ask` do khung đặt đã bị gỡ có chủ đích (ADR-0018) nên vắng mặt không phải lệch
+
+
+def _drift(kind: str, state: str, subject: str, msg: str) -> Dict[str, str]:
+    return {"kind": kind, "state": state, "subject": subject, "msg": msg}
+
+
+def _drift_files(base: Path, files: Dict[str, Any]) -> List[Dict[str, str]]:
+    """File harness trong manifest: thiếu → `missing`; hash khác hash khung đã cài → `modified` (tuỳ chỉnh của dự án)."""
+    out = []
+    for rel, digest in sorted(files.items()):
+        path = base / rel
+        try:
+            have = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            out.append(_drift("file", "missing", rel, f"{rel} có trong manifest nhưng không còn ở dự án"))
+            continue
+        if have != digest:
+            out.append(
+                _drift("file", "modified", rel, f"{rel} khác bản khung đã cài (tuỳ chỉnh của dự án — giữ khi nâng)")
+            )
+    return out
+
+
+def _drift_permissions(base: Path, rules: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Rule `allow`/`deny` do khung đặt (manifest) mà `.claude/settings.json` không còn → `missing`."""
+    perms = (_read_json_obj(base / ".claude" / "settings.json") or {}).get("permissions")
+    perms = perms if isinstance(perms, dict) else {}
+    out = []
+    for key in DRIFT_RULE_KEYS:
+        have = perms.get(key)
+        have = have if isinstance(have, list) else []
+        expected = rules.get(key)
+        out += [
+            _drift(
+                "permission", "missing", f"{key}:{rule}", f"rule {key} `{rule}` của khung không còn trong settings.json"
+            )
+            for rule in (expected if isinstance(expected, list) else [])
+            if rule not in have
+        ]
+    return out
+
+
+def _drift_docs(base: Path) -> List[Dict[str, str]]:
+    out = [
+        _drift("doc", "missing", name, f"thiếu {name} — luật dự án không được nạp")
+        for name in DRIFT_DOCS
+        if not (base / name).is_file()
+    ]
+    if not (base / ".xtemplates" / "framework").is_dir():
+        out.append(_drift("doc", "missing", ".xtemplates/framework", "thiếu .xtemplates/framework — tài liệu khung"))
+    return out
+
+
+def _drift_version(base: Path, latest_arg: Optional[str]) -> Tuple[Optional[str], Optional[str], List[Dict[str, str]]]:
+    """(nhãn đã cài, tag mới nhất, lệch). Không có nhãn hoặc không biết tag → không kết luận (fail-open)."""
+    try:
+        label = (base / ".xtemplates" / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        label = ""
+    m = SEMVER_PREFIX_RE.fullmatch(label)
+    given = SEMVER_PREFIX_RE.fullmatch(latest_arg) if latest_arg else None
+    latest = (int(given[1]), int(given[2]), int(given[3])) if given else None
+    if latest_arg is None:
+        latest = latest_framework_tag()
+    want = ".".join(map(str, latest)) if latest else None
+    if not m or latest is None:
+        return label or None, want, []
+    have = (int(m[1]), int(m[2]), int(m[3]))
+    if have > latest or (have == latest and not m[4]):
+        return label, want, []
+    msg = f"khung đã cài {label} cũ hơn bản phát hành mới nhất v{want} — chạy `install.py --plan` rồi `install.py`"
+    return label, want, [_drift("version", "outdated", label, msg)]
+
+
+def drift_report(base: Path, latest_arg: Optional[str] = None) -> Dict[str, Any]:
+    """Hợp đồng máy đọc của `doctor --drift --json`: {ok, base, installed, latest, manifest, drift: [{kind, state, subject,
+    msg}]}. `modified` là tuỳ chỉnh hợp lệ — hiện trong `drift` nhưng không làm `ok` đỏ."""
+    manifest = _read_json_obj(base / ".xtemplates" / "manifest.json")
+    installed, latest, found = _drift_version(base, latest_arg)
+    if manifest is None:
+        found.append(
+            _drift("manifest", "missing", ".xtemplates/manifest.json", "thiếu hoặc hỏng — chạy lại `install.py`")
+        )
+    else:
+        files, rules = manifest.get("files"), manifest.get("rules")
+        found += _drift_files(base, files if isinstance(files, dict) else {})
+        found += _drift_permissions(base, rules if isinstance(rules, dict) else {})
+    found += _drift_docs(base)
+    ok = all(d["state"] == "modified" for d in found)
+    return {
+        "ok": ok,
+        "base": str(base),
+        "installed": installed,
+        "latest": latest,
+        "manifest": manifest is not None,
+        "drift": found,
+    }
+
+
+def cmd_doctor_drift(args: argparse.Namespace) -> int:
+    base = project_dir()
+    report = drift_report(base, args.latest)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
+    else:
+        print(f"Drift — {base} (cài {report['installed'] or '?'}, mới nhất {report['latest'] or '?'})")
+        for d in report["drift"]:
+            print(f"{'·' if d['state'] == 'modified' else '⚠'} [{d['kind']}/{d['state']}] {d['msg']}")
+        print("✓ không lệch đáng kể" if report["ok"] else "✗ có lệch — xem `install.py --plan` rồi nâng khung")
+    return 0 if report["ok"] else 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
+    if args.drift:
+        return cmd_doctor_drift(args)
     base = project_dir()
     findings = doctor_findings(base, args.framework)
     fixed: List[str] = []
@@ -8064,6 +8187,8 @@ def build_parser() -> argparse.ArgumentParser:
     pdr = sub.add_parser("doctor", help="audit khung đã cài (harness, xt.yaml, khung, state) trước /autopilot")
     pdr.add_argument("--fix", action="store_true", help="sửa an toàn, đảo ngược được (không đụng hook/settings)")
     pdr.add_argument("--json", action="store_true")
+    pdr.add_argument("--drift", action="store_true", help="so manifest.json với bản cài và tag mới nhất (AUTO-06)")
+    pdr.add_argument("--latest", help="tag mới nhất (vX.Y.Z) cho --drift; bỏ qua = hỏi gh api (fail-open)")
     pdr.set_defaults(fn=cmd_doctor)
     pp = sub.add_parser("perf", help="đo và so hiệu năng có thống kê, chặn gian lận số đo (LOOP-OPT-*)")
     ppsub = pp.add_subparsers(dest="perf_cmd", required=True)

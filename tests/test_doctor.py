@@ -686,5 +686,134 @@ class DoctorGuardAndClaudeVersionTest(DoctorCase):
                 self.assertEqual(xt._doctor_claude_version(self.base), [])
 
 
+class DoctorDriftTest(DoctorCase):
+    """`doctor --drift --json` (T-1518, AUTO-06): manifest.json so với bản cài và tag mới nhất, không gọi mạng thật."""
+
+    def drift(self, *args: str) -> tuple[int, dict]:
+        with unittest.mock.patch.object(xt, "latest_framework_tag", side_effect=AssertionError("không được gọi mạng")):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = xt.main(["--framework", str(self.fw), "doctor", "--drift", "--json", *args])
+        return rc, json.loads(out.getvalue())
+
+    def subjects(self, doc: dict, state: str) -> list[str]:
+        return [d["subject"] for d in doc["drift"] if d["state"] == state]
+
+    def test_doctor_drift_clean_install(self):
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, doc["ok"], doc["drift"]), (0, True, []))
+        self.assertTrue(doc["manifest"])
+        self.assertEqual((doc["installed"], doc["latest"]), ("test", "0.0.1"))
+
+    def test_doctor_drift_file_missing_and_modified(self):
+        files = json.loads((self.base / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))["files"]
+        gone, edited = sorted(files)[:2]
+        (self.base / gone).unlink()
+        (self.base / edited).write_text("# tuỳ chỉnh\n", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.subjects(doc, "missing"), [gone])
+        self.assertEqual(self.subjects(doc, "modified"), [edited])
+
+    def test_doctor_drift_modified_only_is_ok(self):
+        files = json.loads((self.base / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))["files"]
+        edited = sorted(files)[0]
+        (self.base / edited).write_text("# tuỳ chỉnh\n", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, doc["ok"]), (0, True))
+        self.assertEqual(self.subjects(doc, "modified"), [edited])
+
+    def test_doctor_drift_permission_missing(self):
+        sp = self.base / ".claude" / "settings.json"
+        settings = json.loads(sp.read_text(encoding="utf-8"))
+        dropped = settings["permissions"]["deny"].pop(0)
+        sp.write_text(json.dumps(settings), encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.subjects(doc, "missing"), [f"deny:{dropped}"])
+
+    def test_doctor_drift_settings_unreadable_lists_all_rules(self):
+        (self.base / ".claude" / "settings.json").write_text("{", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertTrue(all(d["kind"] == "permission" for d in doc["drift"]))
+        sp = self.base / ".claude" / "settings.json"
+        sp.write_text(json.dumps({"permissions": {"allow": "x", "deny": None}}), encoding="utf-8")
+        self.assertEqual(self.drift("--latest", "v0.0.1")[0], 1)
+
+    def test_doctor_drift_docs_missing(self):
+        (self.base / "CLAUDE.md").unlink()
+        shutil.rmtree(self.base / ".xtemplates" / "framework")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.subjects(doc, "missing"), ["CLAUDE.md", ".xtemplates/framework"])
+
+    def test_doctor_drift_manifest_missing_or_malformed(self):
+        mp = self.base / ".xtemplates" / "manifest.json"
+        mp.write_text("[]", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(
+            (rc, doc["manifest"], self.subjects(doc, "missing")), (1, False, [".xtemplates/manifest.json"])
+        )
+        mp.write_text(json.dumps({"files": [], "rules": "x"}), encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, doc["manifest"], doc["drift"]), (0, True, []))
+
+    def test_doctor_drift_version_outdated_and_failopen(self):
+        (self.base / ".xtemplates" / "VERSION").write_text("3.9.0\n", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v3.10.0")
+        self.assertEqual((rc, doc["installed"], doc["latest"]), (1, "3.9.0", "3.10.0"))
+        self.assertEqual(self.subjects(doc, "outdated"), ["3.9.0"])
+        for latest in ("v3.9.0", "v3.8.0"):  # bằng hoặc mới hơn tag → không lệch
+            self.assertEqual(self.drift("--latest", latest)[0], 0)
+        (self.base / ".xtemplates" / "VERSION").write_text("3.9.0-rc1\n", encoding="utf-8")
+        self.assertEqual(self.drift("--latest", "v3.9.0")[0], 1)  # rc < bản chính
+        self.assertEqual(self.drift("--latest", "không-phải-tag")[0], 0)  # tag lạ → không kết luận
+        (self.base / ".xtemplates" / "VERSION").write_text("nhãn-lạ", encoding="utf-8")
+        self.assertEqual(self.drift("--latest", "v9.9.9")[0], 0)
+        (self.base / ".xtemplates" / "VERSION").unlink()
+        rc, doc = self.drift("--latest", "v9.9.9")
+        self.assertEqual((rc, doc["installed"]), (0, None))
+
+    def test_doctor_drift_latest_from_gh_when_not_given(self):
+        (self.base / ".xtemplates" / "VERSION").write_text("3.9.0", encoding="utf-8")
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(xt, "latest_framework_tag", return_value=(4, 0, 0)),
+            redirect_stdout(out),
+        ):
+            rc = xt.main(["--framework", str(self.fw), "doctor", "--drift", "--json"])
+        self.assertEqual((rc, json.loads(out.getvalue())["latest"]), (1, "4.0.0"))
+        with unittest.mock.patch.object(xt, "latest_framework_tag", return_value=None):
+            rc, _, _ = self.run_doctor("--drift")
+        self.assertEqual(rc, 0)  # không biết tag → fail-open
+
+    def test_doctor_drift_text_output(self):
+        files = json.loads((self.base / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))["files"]
+        (self.base / sorted(files)[0]).write_text("x", encoding="utf-8")
+        with unittest.mock.patch.object(xt, "latest_framework_tag", return_value=None):
+            rc, out, _ = self.run_doctor("--drift")
+        self.assertEqual(rc, 0)
+        self.assertIn("[file/modified]", out)
+        self.assertIn("✓ không lệch đáng kể", out)
+        (self.base / "AGENTS.md").unlink()
+        with unittest.mock.patch.object(xt, "latest_framework_tag", return_value=None):
+            rc, out, _ = self.run_doctor("--drift")
+        self.assertEqual(rc, 1)
+        self.assertIn("[doc/missing]", out)
+        self.assertIn("✗ có lệch", out)
+
+    def test_doctor_drift_hook_events_task_completed_subagent_stop(self):
+        self.assertEqual(xt.DOCTOR_HOOK_EVENTS["TaskCompleted"], "warn")
+        self.assertEqual(xt.DOCTOR_HOOK_EVENTS["SubagentStop"], "warn")
+        sp = self.base / ".claude" / "settings.json"
+        settings = json.loads(sp.read_text(encoding="utf-8"))
+        del settings["hooks"]["TaskCompleted"], settings["hooks"]["SubagentStop"]
+        sp.write_text(json.dumps(settings), encoding="utf-8")
+        msgs = [f.msg for f in self.findings(deep=False) if f.code == "hooks" and f.level == "warn"]
+        self.assertEqual(len(msgs), 2)
+        self.assertTrue(any("TaskCompleted" in m for m in msgs) and any("SubagentStop" in m for m in msgs))
+
+
 if __name__ == "__main__":
     unittest.main()

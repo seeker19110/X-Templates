@@ -629,3 +629,10 @@
 - Chọn: concurrency theo PR; sự kiện không gắn PR quét mọi PR mở
 - Lý do (tiêu chí chất lượng cuối): bước đọc lại trước khi làm đỡ race; push main cần update PR tụt base (tiêu chí 1)
 - Đường lùi: đổi group về pr-steward
+
+### D-089 · 2026-10-20T00:15:07+00:00 · doctor --drift: lệch modified có làm exit đỏ? so ask?
+
+- Phương án: (1) modified không đỏ; chỉ so allow/deny; hook mới ở mức warn · (2) mọi lệch đều đỏ, so cả ask
+- Chọn: modified không đỏ; chỉ so allow/deny; hook mới ở mức warn
+- Lý do (tiêu chí chất lượng cuối): modified là tuỳ chỉnh hợp lệ; ADR-0018 gỡ ask có chủ đích; tránh đỏ oan ở dự án cài bản cũ
+- Đường lùi: đổi một dòng trong drift_report

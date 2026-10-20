@@ -168,6 +168,20 @@ tên workflow CI khác thì sửa `workflows:` (tên không khớp = không bao 
 - Routine mặc định push nhánh `claude/…`; prompt phải chỉ rõ nhánh head của PR, và ruleset nhánh vẫn là lớp chặn (push
   thẳng nhánh chính bị từ chối). Sự kiện vượt trần theo giờ bị bỏ — steward theo lịch vẫn báo `fix`/`update` còn treo.
 
+**Routine tuần ở dự án đích: phát hiện lệch và mở PR nâng cấp (AUTO-06).** Mẫu (research preview), lịch tuần một lần:
+
+- Trigger *Schedule* hằng tuần (≥ 1 giờ/lần là giới hạn của Routine); repo là dự án đích, nhánh mặc định.
+- Prompt: (1) `python3 .xtemplates/scripts/xt.py doctor --drift --json` — `ok: true` và không có `outdated` → kết thúc
+  không làm gì; (2) có `outdated`/`missing`: trong bản clone X-Templates mới nhất chạy
+  `python3 <clone>/scripts/install.py <gốc dự án> --plan` đọc JSON, rồi `install.py` (copy-if-absent, giữ file
+  `modified`, chỉ gỡ `ask` có trong `.xtemplates/manifest.json`), làm các bước "Dự án đích" của `CHANGELOG.md`, qua
+  `/gate`, mở **PR nháp** từ nhánh `claude/upgrade-<tag>` (`LOOP-STOP-014`: chỉ đề xuất, không merge).
+- Phạm vi: không đổi ruleset, secret hay production; `modified` là tuỳ chỉnh hợp lệ — liệt kê trong mô tả PR, không ghi đè.
+  Danh tính, trần sự kiện và việc review như Routine ở trên (review không độc lập với tác giả).
+- `doctor --drift --json` trả `{ok, installed, latest, manifest, drift: [{kind: file|permission|doc|version|manifest,
+  state: missing|modified|outdated, subject, msg}]}`; exit 1 khi có lệch khác `modified`. `--latest vX.Y.Z` cấp tag
+  không cần mạng; không cấp thì hỏi `gh api` và fail-open (không biết tag → không kết luận về phiên bản).
+
 ## Checklist
 
 - [ ] `LOOP-STOP-001` **MUST** Lệnh phá huỷ/không đảo ngược bị **deny** ở PreToolUse (không chỉ `ask`), sau khi tách lệnh nối `; && | ||`. Lệnh lồng cũng được quét: `sh -c`/`bash -c`, `eval '…'`, backtick, `{ …; }`, `if …; then …`, heredoc/ống vào shell, `find … -delete`/`-exec rm` (gốc `/`, `~` → deny); xoá đệ quy ra ngoài gốc dự án (trừ thư mục tạm) → deny (`XT_GUARD_POLICY=strict`: ask). → Kiểm: hook trả `permissionDecision: deny` cho `ls; rm -rf /`, `git push --force`, `eval 'rm -rf ~'`, `` echo `rm -rf ~` ``, `{ rm -rf ~; }`, `find / -exec rm -rf {} +`; deny cho `rm -rf ~/x` (strict: ask); test hook xanh (`tests/test_hooks.py` `GuardStoredScanTest`). · Nguồn: stored 12 §4 quy tắc 6

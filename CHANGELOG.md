@@ -6,6 +6,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- Drift có kiểm chứng (T-1518, AUTO-06): `xt.py doctor --drift [--latest TAG] [--json]` so `.xtemplates/manifest.json` với
+  bản cài — file thiếu/`modified`, rule `allow`/`deny` của khung không còn trong `settings.json`, thiếu AGENTS/CLAUDE/khung,
+  nhãn khung cũ hơn tag mới nhất (`--latest` hoặc `gh api`, fail-open); exit 1 khi lệch (trừ `modified`). `doctor` thêm
+  hook `TaskCompleted`/`SubagentStop` (cảnh báo khi thiếu). Mẫu Routine tuần cho dự án đích ở `stop-points-and-escalation.md`.
+  Dự án đích: chạy lại `install.py`.
 - Đồ thị task của PLAN (T-1511, AUTO-01): `xt.py` đọc `(sau: T-…; files: …)` trên dòng task; `loop next [--json]` trả task
   sẵn sàng + cặp giao nhau `files:`; `loop record` từ chối (exit 2) khi dependency `sau:` còn mở; `loop status` báo chu trình
   (`cycles` trong `--json`). `framework/templates/PLAN.md` mô tả cú pháp. Dự án đích: chạy lại `install.py`.
