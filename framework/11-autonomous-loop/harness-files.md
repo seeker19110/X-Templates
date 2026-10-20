@@ -53,6 +53,10 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `mã thoát` theo sau là số. Lọt: báo cáo nhắc `exit 0` mà không chạy lệnh nào (hay trích log có `rc=1`) vẫn được cho
   dừng. Bắt sai: báo cáo ghi kết quả theo dạng khác (`→ 0`, "trả 0", "xanh") bị chặn một lần dù đã chạy. Hook chỉ là
   lời nhắc ghi bằng chứng; kết luận "xanh" vẫn từ evidence do `loop record` ghi.
+- **Guard chỉ hiểu đường dẫn viết nguyên văn** (AUD-SEC-090): script trình thông dịch ghép đường dẫn (`'.git/' + 'config'`,
+  f-string, `os.path.join('.git', 'config')`, phần tử list/dict) không bị nhận là ghi file được canh; `cd "$PWD/…"` (đích
+  có biến) làm guard không biết thư mục và quét lệnh sau như ở gốc dự án; trên hệ file không phân biệt hoa thường
+  (macOS, Windows) `.GIT/config` là `.git/config` nhưng không bị chặn; `.git/info/exclude` không nằm trong danh sách canh.
 
 ### Định dạng PLAN (parser thật trong `xt.py`)
 

@@ -3180,6 +3180,157 @@
    }
   },
   {
+   "id": "guard-sec088-cd-redirect-bash-c",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd .claude >/dev/null && bash -c 'echo x > settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-pushd-redirect-python",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "pushd .claude >/dev/null && python3 -c \"open('settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-P",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd -P .claude && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-stderr-null",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd .claude 2>/dev/null; echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-control-sec088-cd-docs-redirect",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd docs 2>/dev/null && echo x > a.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec089-node-createwritestream",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "node -e \"require('fs').createWriteStream('.git/config')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-os-open-wronly",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.open('.git/config', os.O_WRONLY|os.O_APPEND)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-os-symlink-hook",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.symlink('/x','.git/hooks/pre-commit')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-path-open-env",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path; Path('.env').open('w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec089-os-open-rdonly",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.open('.git/config', os.O_RDONLY)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec089-path-open-read",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path; print(Path('.git/config').open().read())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
    "id": "guard-sec084-var-settings",
    "origin": "repro",
    "refs": [
