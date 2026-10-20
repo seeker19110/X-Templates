@@ -226,5 +226,57 @@ class CdRedirectFlagsTest(unittest.TestCase):
         self.assertIsNone(guard._cd_target(["pushd", "+1"], here))
 
 
+class InterpMoreWriteApisTest(unittest.TestCase):
+    """AUD-SEC-089: API ghi ngoài danh sách cũ (`fs.createWriteStream`, `os.open` cờ ghi, `os.symlink`/`os.link`/
+    `os.chmod`, `fs.symlinkSync`/`openSync`/`chmodSync`, `Path(…).open('a')`) vào đường dẫn được canh → chặn như đường
+    shell `ln -s`/`chmod`/`cp`."""
+
+    def test_guard_interp_more_write_apis(self):
+        cases = {
+            "node -e \"require('fs').createWriteStream('.git/config')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.open('.git/config', os.O_WRONLY|os.O_APPEND)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.open('.env', os.O_CREAT | os.O_RDWR)\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.open('.git/config', flags=os.O_TRUNC)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.symlink('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.link('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.chmod('.git/hooks/pre-commit',0)\"": "HOOK_BYPASS",
+            "node -e \"require('fs').symlinkSync('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').openSync('.git/config','a')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').chmodSync('.git/hooks/pre-commit',0)\"": "HOOK_BYPASS",
+            "python3 -c \"from pathlib import Path; Path('.git/config').open('a')\"": "HOOK_BYPASS",
+            "python3 -c \"from pathlib import Path; Path('.env').open('w')\"": "SECRET_WRITE",
+            "python3 -c \"from pathlib import Path; Path('.env').open(mode='a')\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.symlink('/x','.claude/settings.local.json')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').createWriteStream('.autopilot/verified.json')\"": "EVIDENCE_HANDWRITE",
+            # qua biến (AUD-SEC-084)
+            "python3 -c \"import os; p='.git/config'; os.open(p, os.O_WRONLY)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; f='.git/hooks/pre-commit'; os.symlink('/x', f)\"": "HOOK_BYPASS",
+            "node -e \"const f='.env'; require('fs').createWriteStream(f)\"": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_interp_more_write_apis_controls(self):
+        """Đọc không chặn: `os.open` cờ chỉ đọc, `Path.open()` không mode hoặc `'r'`, `fs.openSync(…,'r')`,
+        `createReadStream`, liên kết/chmod file thường."""
+        for cmd in (
+            "python3 -c \"import os; os.open('.git/config', os.O_RDONLY)\"",
+            "python3 -c \"import os; os.read(os.open('.git/config', os.O_RDONLY), 10)\"",
+            "python3 -c \"from pathlib import Path; print(Path('.git/config').open().read())\"",
+            "python3 -c \"from pathlib import Path; print(Path('.env').open('r').read())\"",
+            "node -e \"require('fs').openSync('.git/config','r')\"",
+            "node -e \"require('fs').createReadStream('.git/config')\"",
+            "python3 -c \"import os; os.symlink('/x','build/link')\"",
+            "python3 -c \"import os; os.chmod('scripts/run.sh',0o755)\"",
+            "python3 -c \"import os; os.open('out.txt', os.O_WRONLY|os.O_CREAT)\"",
+            "python3 -c \"import os; p='.git/config'; os.open(p, os.O_RDONLY)\"",
+            "node -e \"console.log(require('fs').readlinkSync('.git/hooks/pre-commit'))\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

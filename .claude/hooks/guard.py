@@ -4372,6 +4372,9 @@ WRITE_HINT_RE = re.compile(
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|unlink|rename|truncate)\b"
     r"|\bopen\b[^;\n]{0,200}['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")` (trần độ dài: tuyến tính)
     r"|\b(?:py_compile|compileall|pycache_prefix)\b"  # trình biên dịch ghi bytecode (AUD-SEC-074)
+    # AUD-SEC-089: luồng ghi, `os.open`, liên kết, đổi quyền, `Path(…).open('a')` (mode là đối số đầu)
+    r"|\b(?:createWriteStream|openSync|os\.open)\b|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?\("
+    r"|\.open\(\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
@@ -4530,10 +4533,18 @@ DIRECT_WRITE_FMT = (
     r"open\(\s*{q}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
     r"|(?:\bos\.(?:remove|unlink|rename|replace|truncate)|\bshutil\.\w+|writeFile\w*|appendFile\w*|unlinkSync|rmSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|\bunlink)\(\s*(?:[^)]*,\s*)?{q}"
-    r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
-    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(`/`.open(` của
-    # hàm khác (str) không phải ghi, chỉ nhận với `Path`
+    r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch)\("
+    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(` của hàm khác
+    # (str) không phải ghi, chỉ nhận với `Path`
     r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\("
+    # AUD-SEC-089: `Path('…').open('a')` chỉ là ghi khi có mode ghi — `.open()`/`.open('r')` là đọc
+    r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.open\(\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
+    # AUD-SEC-089: luồng ghi; `os.open` với cờ ghi; `fs.openSync(…, 'a'|'r+'|số)`; liên kết/đổi quyền/chủ (như đường
+    # shell `ln -s`/`chmod` bị chặn) — mọi vị trí đối số, gồm cả đích của `symlink(src, dst)`
+    r"|\bcreateWriteStream\(\s*{q}"
+    r"|\bos\.open\(\s*{q}\s*,[^)]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b"
+    r"|\bopen(?:Sync)?\(\s*{q}\s*,\s*(?:['\"][^'\"]*[wa+]|[^)'\"]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b)"
+    r"|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?\(\s*(?:[^)]*,\s*)?{q}"
     r"|\b(?:unlink|rename|truncate)[ \t]+(?:[^;\n)]*,[ \t]*)?{q}"  # perl/ruby/php gọi không ngoặc: `unlink ".autopilot/x"`
     r"|\bopen[ \t]*\(?[^,;\n]*,[ \t]*['\"]\+?(?:>|>>|w|a)['\"][ \t]*,[ \t]*{q}"  # perl `open(F, '>', '…')`
     # AUD-SEC-074: `py_compile.compile(f, cfile='…')`, `p.compile(f, '…')`, `compile_dir(d, …)`, `sys.pycache_prefix = '…'`
@@ -4559,7 +4570,9 @@ ALIAS_WRITE_FMT = (
     r"open\(\s*{n}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"  # python/ruby `open(f, 'w')`, `File.open(f, 'a')`
     r"|(?:writeFile\w*|appendFile\w*|unlinkSync|rmSync|truncate\w*|File\.write|IO\.write|file_put_contents|\bunlink"
     r"|\bos\.(?:remove|unlink|truncate))\(\s*{n}\s*[,)]"  # đối số đầu là đường dẫn
-    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"
+    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename"
+    r"|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?|\bcreateWriteStream)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"  # AUD-SEC-089
+    r"|\bos\.open\(\s*{n}\s*,[^)]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b"
     r"|{n}\s*\.\s*(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\(|{n}\s*\.\s*open\(\s*['\"][rbt]?[wax+]"
     r"|\bopen\s*\(?[^;\n]*?['\"]\+?>{{1,2}}['\"]\s*,\s*{n}"  # perl `open(my $h, '>', $f)`
     r"|\bopen\s*\(?[^,;\n]*,\s*['\"]\+?>{{1,2}}\s*{n}"  # perl 2 đối số `open(F, ">$f")`
