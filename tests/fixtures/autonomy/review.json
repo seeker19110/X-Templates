@@ -665,6 +665,55 @@
     "action": "republish-review"
    },
    "note": "lỗi chặn mới hơn chỉ có ở sổ cục bộ: không bật auto-merge theo dấu sạch cũ"
+  },
+  {
+   "id": "review-test014-verdict-review-missing",
+   "origin": "audit",
+   "refs": [
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "decision": {
+     "verdict": "review",
+     "next": "giao reviewer (model khác) rà head; bước kế: xt.py pr next --pr 7"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
+   },
+   "note": "merge-check trả verdict review (chưa có review ở head, AUD-XFEAT-010): pr next giao rà, không bật auto-merge"
+  },
+  {
+   "id": "review-test014-verdict-review-blocking",
+   "origin": "audit",
+   "refs": [
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "decision": {
+     "verdict": "review",
+     "next": "giao reviewer (model khác) rà head; bước kế: xt.py pr next --pr 7"
+    },
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "blocking",
+    "action": "fix"
+   },
+   "note": "verdict review với lỗi chặn ở head: pr next đòi sửa, không bật auto-merge"
   }
  ]
 }

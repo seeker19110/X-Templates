@@ -50,7 +50,7 @@ gate_config_changed() { # $1=gốc repo → 0 nếu file đổi so với HEAD (�
   while IFS= read -r f; do
     case "$f" in
     xt.yaml | .claude/settings.json | .claude/hooks/pre-bash-guard.sh | scripts/dev-task.sh | \
-      .xtemplates/scripts/dev-task.sh | ruff.toml | */ruff.toml | .ruff.toml | */.ruff.toml | pyproject.toml | \
+      .xtemplates/scripts/dev-task.sh | scripts/xt.py | .xtemplates/scripts/xt.py | ruff.toml | */ruff.toml | .ruff.toml | */.ruff.toml | pyproject.toml | \
       */pyproject.toml | .coveragerc | */.coveragerc | requirements*.txt | */requirements*.txt) return 0 ;;
     esac
   done < <(git -C "$1" -c core.quotePath=false diff --no-renames --relative --name-only HEAD -- 2>/dev/null
@@ -98,12 +98,18 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
   if [ -n "$gate" ]; then
     # `commit_gate: fast` (xt.yaml của repo nhận commit) → cổng nhanh: format/lint/typecheck + test liên quan file đổi;
     # cổng đầy đủ (`dev-task.sh gate`, ngưỡng coverage) chạy ở bước mở PR và CI. Vắng/giá trị khác → đầy đủ như trước.
+    # Đọc `commit_gate` bằng chính xt.py của khung cài cùng hook này (`commit-gate`: cùng cách đọc khoá với `doctor`/
+    # `ci-check` — bỏ comment, dòng trùng lấy dòng cuối; AUD-XFEAT-017), không grep riêng. Không chạy được/giá trị lạ → full.
     task="gate"
-    fast_re='^commit_gate:[[:space:]]*("fast"|'\''fast'\''|fast)[[:space:]]*(#.*)?$'
-    [ -f "$groot/xt.yaml" ] && grep -Eq "$fast_re" "$groot/xt.yaml" && task="gate-fast"
-    # `commit_gate` đọc từ cây làm việc: commit đổi chính cấu hình cổng (xt.yaml → fast, ruff/coverage, dev-task.sh, hook
-    # này) không được tự hạ cổng cho nó → file đổi so với HEAD (như XT_CHANGED_FILES; --no-renames giữ cả tên cũ) đụng
-    # cấu hình cổng thì chạy cổng đầy đủ.
+    hooks="$(cd "$(dirname "$0")" && pwd)"
+    for x in "$hooks/../../.xtemplates/scripts/xt.py" "$hooks/../../scripts/xt.py"; do
+      [ -f "$x" ] || continue
+      [ -f "$groot/xt.yaml" ] && [ "$(CLAUDE_PROJECT_DIR="$groot" py_run "$x" commit-gate 2>/dev/null)" = fast ] && task="gate-fast"
+      break
+    done
+    # `commit_gate` đọc từ cây làm việc: commit đổi chính cấu hình cổng (xt.yaml → fast, ruff/coverage, dev-task.sh, xt.py
+    # chọn test của gate-fast — AUD-TEST-013, hook này) không được tự hạ cổng cho nó → file đổi so với HEAD (như
+    # XT_CHANGED_FILES; --no-renames giữ cả tên cũ) đụng cấu hình cổng thì chạy cổng đầy đủ.
     if [ "$task" = "gate-fast" ] && gate_config_changed "$groot"; then
       task="gate"
       echo "🔒 Commit đụng cấu hình cổng nên chạy cổng đầy đủ (scripts/dev-task.sh gate) thay cho commit_gate: fast." >&2
