@@ -1438,8 +1438,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertIsNone(xt.milestone_done(tasks, tasks[3]))  # cùng mục với task trước
         self.assertIsNone(xt.milestone_done(tasks, tasks[0]))  # task đầu PLAN
         v = xt.loop_verdict(self.base)
-        self.assertEqual((v["task"], v["milestone_done"]), ("T-003", "Lát 1 — skeleton"))
+        self.assertEqual((v["task"], v["milestone_done"], v["milestone_audit"]), ("T-003", "Lát 1 — skeleton", "now"))
         self.assertIn("mốc «Lát 1 — skeleton» đã xong → audit delta", v["reason"])
+        write(self.base / "xt.yaml", "delivery_phase: build\n")  # ADR-0033: pha build gom audit theo mốc về trước G7
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["milestone_done"], v["milestone_audit"]), ("Lát 1 — skeleton", "g7"))
+        self.assertIn("pha build: audit delta gom về trước G7 (ADR-0033)", v["reason"])
+        self.assertNotIn("audit delta trước khi sang mốc kế", v["reason"])
+        (self.base / "xt.yaml").unlink()
         write(
             self.base / "docs" / "autopilot" / "PLAN.md",
             "- [ ] `T-001` a — Gate: `true`\n### X\n- [ ] `T-002` b — Gate: `true`\n",

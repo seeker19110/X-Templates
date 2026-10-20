@@ -1,6 +1,6 @@
 # ADR-0031: Pha giao hàng `delivery_phase: build|harden` — merge nhanh trước, review và audit sâu trước phát hành
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; Hệ quả "audit delta mỗi mốc" ở pha build thay bởi ADR-0033
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `delivery_phase`/`delivery_phase_error`/
   `review_deferrable`/`review_deferred`, `merge_eligibility` (`review: deferred`, `review_deferred`), `merge_check_result`, `pr_next`,
   `release_check` (hàng `phase`, `review_debt`), `doctor`/`ci-check`; mẫu `framework/templates/xt.yaml`

@@ -1566,8 +1566,12 @@ def _with_dispatch(
     done = milestone_done(tasks, t, _deferred(st))
     if done:
         v["milestone_done"] = done
+        # Pha build (ADR-0033): audit delta theo mốc gom về trước G7 — `release-check` FAIL `phase`/`review_debt` tới khi trả.
+        v["milestone_audit"] = "g7" if _xt_keys(base).get(PHASE_KEY) == "build" else "now"
         v["reason"] += (
-            f" · mốc «{done}» đã xong → audit delta trước khi sang mốc kế"
+            f" · mốc «{done}» đã xong · pha build: audit delta gom về trước G7 (ADR-0033), làm tiếp task kế"
+            if v["milestone_audit"] == "g7"
+            else f" · mốc «{done}» đã xong → audit delta trước khi sang mốc kế"
             " (`xt.py audit plan --status docs/ops/AUDIT-STATUS.md`; 🔴/🟠 thành task mới — audit.md §1)"
         )
     return v

@@ -1,6 +1,6 @@
 # ADR-0029: Hai tầng executor có chuyển cấp, audit theo mốc, review chưa kết luận, cổng G7 máy đọc
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; audit theo mốc ở pha build thay bởi ADR-0033
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `EXEC_TIER_RE`/`executor_choice`/`milestone_done`/
   `_with_dispatch`, `loop record --executor`, `loop stats` (`escalated`, `escalation_rate`), `pr reviewed --inconclusive`
   (`review_gate` → `missing`), `release_check`/`cmd_release_check`; `.claude/agents/executor-deep.md`, `reviewer-alt.md`;
