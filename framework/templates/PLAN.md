@@ -1,7 +1,7 @@
 ---
 title: Mẫu PLAN
 kind: template
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Mẫu PLAN.md
@@ -12,7 +12,7 @@ updated: 2026-10-19
 > **Dependency và phạm vi ghi (máy đọc):** ghi chú trong ngoặc của dòng task `(sau: T-001, T-002; files: src/a.ts, tests/)` — `sau:` = task TRONG file này phải `[x]`/`[~]` trước (ID không có trong file thì bỏ qua; `loop record` từ chối chạy task khi dependency còn mở, exit 2; chu trình `sau:` hiện ở `loop status`); `files:` = đường dẫn/thư mục task ghi, cách nhau dấu phẩy (thư mục chứa nhau tính là giao nhau). `loop next [--json]` liệt kê task sẵn sàng + cặp giao nhau `files:` (không giao song song) + task chưa khai `files:`. Các mục khác trong ngoặc (`S-001`, `cần: …`) máy bỏ qua; nhóm ngoặc chứa dấu `;` mà không có `sau:`/`files:` vẫn hợp lệ.
 > **Trạng thái:** `[ ]` chưa · `[x]` xong (chỉ khi `.autopilot/evidence/T-NNN.json` có `exit_code: 0` và `cmd` đúng Gate) · `[~]` bỏ (ghi `— Bỏ: <lý do>`, thiếu thì `loop status` ra `verify`).
 > **Tầng executor (ADR-0029):** mặc định `executor`; task khó/bất định/rủi ro cao/phạm vi rộng (giao ước xuyên module, auth/phân quyền/tenant, migration dữ liệu thật, đồng thời/retry, lỗi không ổn định) ghi `(exec: deep)` trong ngoặc của dòng task → `executor-deep`; tầng mặc định đỏ 2 lần → máy tự chuyển cấp. Tên tầng, không tên model.
-> **Mốc:** mỗi mục `### Lát N — …` là một mốc; `loop status` báo `milestone_done` khi mọi task của mục trước đã đóng → audit delta (`xt.py audit plan --status …`) trước khi làm task đầu của mục kế.
+> **Mốc:** mỗi mục `### Lát N — …` là một mốc; `loop status` báo `milestone_done` khi mọi task của mục trước đã đóng → audit delta (`xt.py audit plan --status …`) trước khi làm task đầu của mục kế; pha build (`milestone_audit: g7`) gom audit về trước G7 (ADR-0033 của khung).
 > Bốn mục "Ủy quyền production", "Điểm dừng bắt buộc", "Ngân sách (4 con số)", "Hạn" là bắt buộc. 4 con số theo [`LOOP-DESIGN-001`](../11-autonomous-loop/loop-design.md): trần vòng · ngân sách tiền/token · timeout mỗi lệnh kiểm · hạn chót.
 
 ```markdown

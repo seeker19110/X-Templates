@@ -776,3 +776,10 @@
 - Chọn: Đặt delivery_phase: build trong xt.yaml (cơ chế ADR-0031 có sẵn: review thành nợ, release-check đòi harden ở G7)
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1+3: dùng đúng cơ chế đã có test, không nới guard/merge-check; nợ review được ghi và đòi trả ở G7 — đúng ý 'để dành reviewer cho giai đoạn hoàn thiện'; ngoại lệ cứng và review blocking vẫn chặn
 - Đường lùi: đổi lại delivery_phase: harden trong xt.yaml, hoàn test + AGENTS.md
+
+### D-110 · 2026-10-20T15:52:09+00:00 · Tối giản autopilot ở pha build: bỏ khâu nào?
+
+- Phương án: (1) Giữ nguyên: reviewer mỗi PR, audit delta mỗi mốc, PROGRESS mỗi task · (2) Pha build: audit delta theo mốc gom về G7 (release-check review_debt đã chặn); reviewer chỉ khi pr next trả review (mọi pha); PROGRESS cập nhật theo lát/PR thay vì mỗi task · (3) Bỏ thêm cổng đầy đủ cục bộ trước push và tắt auto-merge trước push
+- Chọn: Pha build: audit delta theo mốc gom về G7 (release-check review_debt đã chặn); reviewer chỉ khi pr next trả review (mọi pha); PROGRESS cập nhật theo lát/PR thay vì mỗi task
+- Lý do (tiêu chí chất lượng cuối): Ba khâu này không thêm chốt an toàn ở pha build: review đã hoãn bằng máy (ADR-0031) nên giao reviewer chỉ tốn lượt; audit theo mốc trùng với audit delta bắt buộc trước G7 (release-check FAIL phase/review_debt); compaction dùng checkpoint của loop nên PROGRESS mỗi task chỉ thêm commit. Giữ cổng đầy đủ trước push (tránh vòng CI đỏ) và tắt auto-merge trước push (chốt ngoại lệ cứng khi push thêm file nhạy cảm) vì tiêu chí 1 thắng tiêu chí 5.
+- Đường lùi: Đặt delivery_phase: harden (audit theo mốc trở lại ngay) hoặc revert commit; không có state mới cần dọn.

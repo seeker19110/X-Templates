@@ -70,10 +70,12 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh
-    gate-fast`: lint · typecheck · test liên quan file đổi, không ngưỡng coverage), cập nhật `PROGRESS.md` (≤ 8 KB).
+    gate-fast`: lint · typecheck · test liên quan file đổi, không ngưỡng coverage); `PROGRESS.md` (≤ 8 KB) cập nhật theo lát
+    (trong commit cuối của lát, trước cổng đầy đủ) và trước khi dừng, không sau mỗi task — vị trí việc nằm ở `loop status`/PLAN
+    và checkpoint của `loop` (ADR-0033).
     Lưu ý `git commit --amend` chỉ chạy lại phần đổi so với HEAD; cổng đầy đủ ở bước mở PR bù phần còn lại.
     Trước khi đẩy/mở PR chạy cổng đầy đủ `dev-task.sh gate` **một lần** (CI chạy lại đúng lệnh đó). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
-    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do`, review xong ghi
+    nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do` (giao reviewer **chỉ khi** `pr next` trả `review` — ADR-0033), review xong ghi
     `<XT> pr reviewed` (đăng kết quả lên PR; workflow `pr-steward` tự bật auto-merge khi không còn phiên — `LOOP-STOP-029`,
     ADR-0027) (`LOOP-STOP-022`, ADR-0024/0025) trừ PR `merge-check` báo `hard` (ngoại lệ
     cứng, ADR-0016 → `loop defer`); dưới L3 `<XT> merge-check --pr <N>` →
@@ -83,7 +85,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 11b. **Mốc xong → audit delta trước khi sang mốc kế** (ADR-0029, [`../00-method/audit.md`](../00-method/audit.md) §1): `loop status`
     trả `milestone_done: <mục PLAN>` khi task kế là task đầu của mục (`### Lát …`) mới và mọi task trước đã đóng → chạy
     `<XT> audit plan --status docs/ops/AUDIT-STATUS.md`, quét **chỉ nhóm** máy suy ra từ diff, 🔴/🟠 thành task mới trong PLAN
-    (cùng mục), rồi mới làm task kế. Không audit toàn repo mỗi PR.
+    (cùng mục), rồi mới làm task kế. Không audit toàn repo mỗi PR. **Pha build** (`delivery_phase: build`): `loop status` kèm
+    `milestone_audit: g7` — không quét theo mốc, làm tiếp; audit delta gom về trước G7 (`release-check` hàng `phase`/`review_debt`, ADR-0033).
 12. **Stop hook quyết**: `stop-guard.sh` gọi `<XT> loop hook-stop`; verdict `continue`/`verify` → trả
     `{"decision":"block","reason":"[autopilot vòng i/N] …"}` và tăng `iterations` (agent làm tiếp); `done`/`blocked`/
     `budget` → `active=false`, cho dừng. `verify` nghĩa là có task tick mà thiếu/khác bằng chứng — chạy lại `loop record`;
@@ -113,7 +116,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 |---|---|
 | `doctor [--fix] [--json]` | Audit khung đã cài trước autopilot; `--fix` sửa phần an toàn (không đụng hook/settings); exit 1 khi còn lỗi ✗ |
 | `loop init --plan P [--blueprint B] [--max-iterations N] [--hours H] [--single-session] [--force]` | Tạo `.autopilot/state.json`, bật vòng; `--single-session`: trần vòng `max(40, 8 × task chưa làm)` (mặc định 100); vòng khác còn chạy → exit 2 trừ `--force` (`LOOP-HARNESS-024`) |
-| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint; `continue` thêm `executor`/`tier`/`escalated` (tầng giao việc, ADR-0029) và `milestone_done` khi mốc trước vừa xong |
+| `loop status [--json]` | Verdict: `inactive` · `continue` · `verify` · `blocked` · `budget` · `done` · `done-pending-human`; kèm chế độ, việc chờ người, cảnh báo quyền, checkpoint; `continue` thêm `executor`/`tier`/`escalated` (tầng giao việc, ADR-0029) và `milestone_done` khi mốc trước vừa xong (kèm `milestone_audit`: `now` · `g7` ở pha build — ADR-0033) |
 | `loop defer --task ID --reason "..."` | Việc cần người (T-NNN hoặc ID blueprint): bỏ qua, làm việc khác; `loop resume` đưa lại hàng làm |
 | `loop checkpoint` | Dùng bởi PreCompact hook: ghi vị trí làm việc vào state; luôn exit 0 (exit 2 sẽ chặn nén) |
 | `loop record --task T-NNN [--executor executor\|executor-deep] -- <lệnh>` | Chạy lệnh (timeout `XT_RECORD_TIMEOUT`, mặc định 1800 s), ghi evidence (kèm agent đã làm), cập nhật chữ ký lỗi |

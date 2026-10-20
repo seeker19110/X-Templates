@@ -183,6 +183,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   ngoài ngoại lệ cứng khi CI xanh, review ghi nợ; `release-check` đòi `harden` và hết nợ review trước G7.
 - [ADR-0032](docs/adr/0032-merge-check-review-verdict.md): `merge-check` trả verdict `review` (exit 1, không gợi lệnh
   merge) khi CI/làn cho merge mà review ở head chưa hợp lệ — thay ADR-0028 §2.
+- [ADR-0033](docs/adr/0033-build-phase-lean-autopilot.md): pha build tối giản autopilot — audit delta theo mốc gom về
+  trước G7, reviewer chỉ khi `pr next` trả `review`, `PROGRESS.md` cập nhật theo lát.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
