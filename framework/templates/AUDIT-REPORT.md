@@ -1,7 +1,7 @@
 ---
 title: Mẫu AUDIT-REPORT
 kind: template
-updated: 2026-10-14
+updated: 2026-10-20
 ---
 
 # Mẫu AUDIT-REPORT.md — báo cáo một lần audit

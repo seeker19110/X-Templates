@@ -6,7 +6,7 @@
   `framework/00-method/audit.md` §1; test `tests/test_xt_core.py::LoopRecordBranchesTest.test_milestone_done_marks_section_transition`.
 - **Ngày:** 2026-10-20
 - **Làm rõ:** ADR-0029 (audit theo mốc — thay ở pha build), ADR-0031 (pha build/harden — mục Hệ quả "audit delta mỗi
-  mốc" thay ở pha build), ADR-0009 (PROGRESS "sau mỗi task" → theo lát); quyết định D-110.
+  mốc" thay ở pha build); quyết định D-110.
 
 ## Bối cảnh
 

@@ -67,8 +67,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 10. **Mỗi vòng**: `<XT> loop status --json` → `continue` kèm `task`, `executor` (tầng giao việc, ADR-0029; `escalated` =
     chuyển cấp kèm diff + evidence lỗi + giả thuyết đã loại), `milestone_done` + `milestone_audit` (`now` → audit delta theo
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
-    ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số —
-    chứa nháy đơn thì bọc nháy kép; ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
+    ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số
+    bọc nháy đơn — mỗi `'` trong Gate viết `'\''`; ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]`, commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
     Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi D-NNN); lần 3 → máy đặt `blocked`
     ([`LOOP-DESIGN-005`](loop-design.md)). Không skip test, không nới cổng ([`LOOP-CI-001`](self-healing-ci.md)).
