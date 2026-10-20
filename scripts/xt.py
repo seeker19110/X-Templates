@@ -4238,7 +4238,11 @@ def merge_risk_globs(base: Path, ref: str) -> List[str]:
     """`merge_risk_paths` của cây làm việc HỢP với bản đã commit ở `ref` (nhánh đích): checkout cũ hay sửa tại chỗ không
     làm rơi glob của nhánh đích (bỏ glob phải qua PR sửa xt.yaml — làn chuẩn, D-031); glob thêm tại chỗ chỉ chặt hơn."""
     globs = [*_risk_globs(_xt_keys(base)), *_risk_globs(_committed_xt_keys(base, ref))]
-    prefix = project_prefix()  # dự án con: glob viết theo gốc dự án, đường file của PR theo gốc repo (AUD-XFEAT-004)
+    return prefixed_globs(globs, project_prefix())
+
+
+def prefixed_globs(globs: List[str], prefix: str) -> List[str]:
+    """Glob của dự án con (viết theo gốc dự án) cộng bản có `prefix` (đường file của PR tính theo gốc repo — AUD-XFEAT-004)."""
     return list(dict.fromkeys([*globs, *(prefix + g for g in globs if prefix and not g.startswith(prefix))]))
 
 
@@ -4638,6 +4642,33 @@ def local_merge_conflicts(
     return files or None  # exit 1 mà không có file: định dạng lạ → không kiểm được
 
 
+def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """`statusCheckRollup` dạng GraphQL từ check-run + status REST của head, hàm thuần.
+    Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên, cùng app: chỉ lần mới nhất
+    (id lớn nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58, AUD-HAR-038). Khoá gồm app: check
+    cùng tên của app khác là check khác, không được che nhau (AUD-CODE-007)."""
+    latest: Dict[str, Dict[str, Any]] = {}
+    for c in runs:
+        app = c.get("app")
+        key = f"{app.get('id') if isinstance(app, dict) else ''}/{c.get('name')}"
+        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
+            latest[key] = c
+    rollup: List[Dict[str, Any]] = [
+        {
+            "__typename": "CheckRun",
+            "name": c.get("name"),
+            "status": str(c.get("status", "")).upper(),
+            "conclusion": str(c.get("conclusion") or "").upper(),
+            **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
+        }
+        for c in latest.values()
+    ]
+    return rollup + [
+        {"__typename": "StatusContext", "context": s.get("context"), "state": str(s.get("state", "")).upper()}
+        for s in statuses
+    ]
+
+
 def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
@@ -4658,29 +4689,7 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     statuses = [
         s for s in _gh_one(f"{repo}/commits/{sha}/status?per_page=100").get("statuses") or [] if isinstance(s, dict)
     ]
-    # Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên, cùng app: chỉ lần mới nhất
-    # (id lớn nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58). Khoá gồm app: check cùng tên
-    # của app khác là check khác, không được che nhau (AUD-CODE-007).
-    latest: Dict[str, Dict[str, Any]] = {}
-    for c in runs:
-        app = c.get("app")
-        key = f"{app.get('id') if isinstance(app, dict) else ''}/{c.get('name')}"
-        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
-            latest[key] = c
-    rollup = [
-        {
-            "__typename": "CheckRun",
-            "name": c.get("name"),
-            "status": str(c.get("status", "")).upper(),
-            "conclusion": str(c.get("conclusion") or "").upper(),
-            **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
-        }
-        for c in latest.values()
-    ]
-    rollup += [
-        {"__typename": "StatusContext", "context": s.get("context"), "state": str(s.get("state", "")).upper()}
-        for s in statuses
-    ]
+    rollup = rest_rollup(runs, statuses)
     files = _gh_items(f"{repo}/pulls/{n}/files?per_page=100")
     cfg = review_config(project_dir(), f"origin/{(pr.get('base') or {}).get('ref') or 'main'}")
     marks = _published_marks(repo, n, cfg.get("review_identity", ""))
@@ -6466,13 +6475,17 @@ def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         pr = {k: v for k, v in pr.items() if k != "title"}
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
-    d = merge_decision(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto)
-    # Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
-    # với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác).
+    return merge_check_result(pr, autonomy, merge_risk_globs(project_dir(), ref), hard_auto), notes + hard_notes
+
+
+def merge_check_result(pr: Dict[str, Any], autonomy: int, risk_paths: List[str], hard_auto: bool) -> Dict[str, Any]:
+    """Kết quả `merge-check` cho PR đã đọc và cấu hình đã đọc, hàm thuần (dùng chung với `autonomy-bench`).
+    Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
+    với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác)."""
+    d = merge_decision(pr, autonomy, risk_paths, hard_auto)
     marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
     elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
-    d = {**d, "review": elig["review"], "eligible": elig["eligible"], "auto_merge_ok": elig["auto_merge_ok"]}
-    return d, notes + hard_notes
+    return {**d, "review": elig["review"], "eligible": elig["eligible"], "auto_merge_ok": elig["auto_merge_ok"]}
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -7648,6 +7661,378 @@ PERF_SUSPECT_RE = re.compile(
 )
 
 
+# --------------------------------------------------------------------------- autonomy-bench (AUTO-07, T-1521)
+
+AUTONOMY_CORPUS = "tests/fixtures/autonomy"
+AUTONOMY_REMEDIATION = "docs/ops/REMEDIATION-PLAN-2026-10-19.md"
+AUTONOMY_SCOPE = "scope.json"
+# Khoá "cổng" của mỗi nhóm: True = máy cho đi tiếp (được merge, được bật auto-merge, bước kế là merge/bật, lệnh chạy,
+# CI tính xanh, tự sửa thay vì dừng). Ca mong False mà máy trả True = false-green (exit 1); mong True mà trả False = chặn
+# oan (false-red: báo, không làm đỏ). Khoá khác trong `expect` (verdict, code, category…) so bằng nhau → `mismatch`.
+AUTONOMY_GATES: Dict[str, Tuple[str, ...]] = {
+    "pr": ("eligible", "auto_merge_ok"),
+    "rollup": ("ci_green",),
+    "review": ("eligible", "auto_merge_ok", "proceed"),
+    "guard": ("allowed",),
+    "ci_log": ("proceed", "rerun"),
+    "harness": ("green",),
+}
+# Nguồn ca: tái hiện REMEDIATION §2 · phát hiện audit 🔴/🟠 đã sửa · ca đối kháng do tác giả bản sửa viết (chưa độc lập)
+# · ca đối kháng do reviewer khác họ model viết (AUTO-07 đòi) · ca đối chứng (việc hợp lệ phải đi tiếp — đo chặn oan).
+AUTONOMY_ORIGINS = ("repro", "audit", "adversarial-author", "adversarial-reviewer", "control")
+PROCEED_ACTIONS = {"enable-auto-merge", "merge"}
+BENCH_MERGE_CHECK_DOWN = {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}  # như guard.merge_check khi lỗi
+REC_ROW_RE = re.compile(r"^\| (REC-\d+) \|", re.M)
+
+
+class BenchInputError(Exception):
+    """Corpus `autonomy-bench` không đọc được hoặc sai dạng (exit 2)."""
+
+
+class BenchEnv:
+    """Môi trường chạy corpus: thư mục tạm làm gốc dự án giả của guard, module guard/install nạp từ cùng bản khung."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._mods: Dict[str, Any] = {}
+        self._n = 0
+
+    def module(self, name: str) -> Any:
+        """`guard` (.claude/hooks/guard.py) hoặc `install` (scripts/install.py) của bản khung chứa xt.py này."""
+        if name not in self._mods:
+            path = SCRIPT_DIR.parent / GUARD_FILE if name == "guard" else SCRIPT_DIR / "install.py"
+            spec = importlib.util.spec_from_file_location(f"xt_bench_{name}", path)
+            assert spec is not None and spec.loader is not None  # đường `.py` có thật: luôn có loader
+            mod = importlib.util.module_from_spec(spec)
+            keep = sys.dont_write_bytecode
+            sys.dont_write_bytecode = True  # không để `__pycache__` trong `.claude/hooks`
+            try:
+                spec.loader.exec_module(mod)
+            finally:
+                sys.dont_write_bytecode = keep
+            self._mods[name] = mod
+        return self._mods[name]
+
+    def scratch(self, files: object) -> Path:
+        """Thư mục con mới dưới gốc tạm, ghi `files` {đường tương đối: nội dung}; đường tuyệt đối/`..` → lỗi corpus."""
+        self._n += 1
+        d = self.root / f"case-{self._n}"
+        d.mkdir()
+        for rel, text in (files if isinstance(files, dict) else {}).items():
+            parts = Path(str(rel)).parts
+            if not parts or Path(str(rel)).is_absolute() or ".." in parts:
+                raise BenchInputError(f"đường file của ca phải tương đối, trong thư mục ca: {rel!r}")
+            (d / str(rel)).parent.mkdir(parents=True, exist_ok=True)
+            (d / str(rel)).write_text(str(text), encoding="utf-8")
+        return d
+
+
+def _bench_pr(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """PR → `merge-check` (merge_decision + merge_eligibility, ADR-0028) với cấu hình của ca, không đọc xt.yaml/GitHub."""
+    risk = prefixed_globs([str(g) for g in inp.get("risk_paths") or []], str(inp.get("project_prefix") or ""))
+    d = merge_check_result(inp["pr"], int(inp.get("autonomy") or 1), risk, bool(inp.get("hard_auto")))
+    return {
+        "eligible": d["eligible"],
+        "auto_merge_ok": d["auto_merge_ok"],
+        "verdict": d["verdict"],
+        "lane": d["lane"],
+        "review": d["review"],
+        "hard": bool(d["hard"]),
+    }
+
+
+def _bench_rollup(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """Rollup (GraphQL, hoặc check-run/status REST qua `rest_rollup`) + check bắt buộc → `_ci_blocker`: CI có là bằng chứng?"""
+    rollup = inp["rollup"] if "rollup" in inp else rest_rollup(inp.get("check_runs") or [], inp.get("statuses") or [])
+    blocked = _ci_blocker({"statusCheckRollup": rollup, "requiredChecks": inp.get("required") or []})
+    return {"ci_green": blocked is None, "ci": blocked[0] if blocked else "green"}
+
+
+def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """Quyết định merge-check + review (sổ cục bộ và/hoặc comment đã đăng) → merge_eligibility và `pr next`."""
+    published = published_reviews(
+        inp.get("comments") or [], set(inp.get("writers") or []), str(inp.get("identity") or "")
+    )
+    rec = {"reviews": inp.get("reviews") or [], "standard_seen": bool(inp.get("standard_seen"))}
+    rec = with_published(rec, published, bool(inp.get("identity")))
+    reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
+    d = inp["decision"]
+    elig = merge_eligibility(d, reviews, rec["standard_seen"])
+    nxt = pr_next(d, bool(inp.get("auto_merge")), rec)
+    return {
+        "eligible": elig["eligible"],
+        "auto_merge_ok": elig["auto_merge_ok"],
+        "proceed": nxt["action"] in PROCEED_ACTIONS,
+        "review": elig["review"],
+        "action": nxt["action"],
+    }
+
+
+def _bench_guard_payload(mode: str, inp: Dict[str, Any], root: Path) -> Dict[str, Any]:
+    if mode == "edit":
+        path = root / str(inp["path"])
+        return {"tool_name": "Write", "tool_input": {**(inp.get("tool_input") or {}), "file_path": str(path)}}
+    if mode == "mcp":
+        return {"tool_name": str(inp["tool_name"]), "tool_input": inp.get("tool_input") or {}}
+    return {"tool_name": "Bash", "tool_input": {"command": str(inp["command"])}, "cwd": str(root)}
+
+
+def _bench_guard(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """Lệnh/tool → guard như hook PreToolUse: bộ luật, lỗi giữa chừng → `_failure_decision`, rồi chính sách mặc định
+    (`apply_policy`, ADR-0018) hoặc `strict` (ask = chặn). `merge-check` là kết quả ghi trong ca (không gọi GitHub);
+    ca không ghi → như merge-check lỗi mạng."""
+    guard = env.module("guard")
+    verdict = inp.get("merge_check")
+    guard.merge_check = lambda selector, root: dict(verdict if isinstance(verdict, dict) else BENCH_MERGE_CHECK_DOWN)
+    mode = str(inp.get("tool") or "bash")
+    root = env.scratch(inp["files"]) if "files" in inp else env.root  # luật đọc file có thật (test đã có — AUD-HAR-026)
+    payload = _bench_guard_payload(mode, inp, root)
+    try:
+        out = dict(guard._rule_decision(mode, payload, str(root)))
+    except Exception:  # như hook: guard ném lỗi → quyết định khi lỗi (merge/gh api hỏi → chặn; khác cho qua)
+        out = dict(guard._failure_decision(mode, payload, guard._payload_cmd(payload)))
+    strict = inp.get("policy") == "strict"
+    final = out if strict else dict(guard.apply_policy(out))
+    act = str(final.get("decision") or "")
+    return {
+        "allowed": not (act == "deny" or (strict and act == "ask")),
+        "decision": act,
+        "code": str(guard.decide(out).code),
+    }
+
+
+def _bench_ci_log(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    """Log job CI → `ci_classify` + hành động lần đầu của episode (`_ci_action`): `proceed` = tự re-run/sửa, không dừng;
+    `rerun` = chạy lại không sửa."""
+    c = ci_classify(str(inp["log"]))
+    action, _ = _ci_action({"same_signature": 1, "rerun_used": 0}, c["category"])
+    return {
+        "proceed": action != "block",
+        "rerun": action == "rerun",  # re-run lỗi thật có thể "xanh" nhờ may (flaky) mà không sửa gì
+        "category": c["category"],
+        "action": action,
+        "shown": len(c["evidence"]),
+    }
+
+
+def _bench_carry(inp: Dict[str, Any], env: BenchEnv) -> bool:
+    text, _ = carry_states(str(inp["old"]), str(inp["new"]))
+    return any(ln.startswith("- [x]") and f"`{inp['id']}`" in ln for ln in text.splitlines())
+
+
+def _bench_blueprint_done(inp: Dict[str, Any], env: BenchEnv) -> bool:
+    return bool(_verdict_blueprint(env.scratch(inp.get("files")), inp["state"])["verdict"] == "done")
+
+
+def _bench_na_skipped(inp: Dict[str, Any], env: BenchEnv) -> bool:
+    groups = {int(k): v for k, v in inp["groups"].items()}
+    return int(inp["group"]) not in audit_na_drift(env.scratch(inp.get("files")), groups)
+
+
+def _bench_ask_removed(inp: Dict[str, Any], env: BenchEnv) -> bool:
+    report = env.module("install").merge_permissions(inp["ours"], inp["theirs"], inp.get("manifest"))
+    return str(inp["rule"]) in report["ask_remove"]
+
+
+# Nhóm harness: tái hiện REMEDIATION §2 ngoài PR/rollup/review/guard. `green` = máy coi là đạt/cho qua.
+BENCH_HARNESS: Dict[str, Callable[[Dict[str, Any], BenchEnv], bool]] = {
+    "same_command": lambda inp, env: same_command(str(inp["a"]), str(inp["b"])),  # bằng chứng tính cho Gate khác nghĩa
+    "carry_states": _bench_carry,  # mục [x] mang bằng chứng cũ sang chữ yêu cầu mới
+    "blueprint_done": _bench_blueprint_done,  # vòng lặp khai done
+    "na_skipped": _bench_na_skipped,  # nhóm audit N/A không bị quét lại
+    "ask_removed": _bench_ask_removed,  # install gỡ rule `ask` của dự án
+}
+
+
+def _bench_harness(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    fn = BENCH_HARNESS.get(str(inp.get("kind")))
+    if fn is None:
+        raise BenchInputError(f"kind lạ: {inp.get('kind')!r} (có: {', '.join(BENCH_HARNESS)})")
+    return {"green": fn(inp, env)}
+
+
+BENCH_EVAL: Dict[str, Callable[[Dict[str, Any], BenchEnv], Dict[str, Any]]] = {
+    "pr": _bench_pr,
+    "rollup": _bench_rollup,
+    "review": _bench_review,
+    "guard": _bench_guard,
+    "ci_log": _bench_ci_log,
+    "harness": _bench_harness,
+}
+
+
+def _bench_json(path: Path) -> Dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BenchInputError(f"{path.name}: không đọc được JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise BenchInputError(f"{path.name}: cần object JSON")
+    return data
+
+
+def _bench_case_error(c: object, seen: Set[str]) -> str:
+    """Lý do ca sai dạng (rỗng = hợp lệ): id duy nhất, input/expect là object, expect có ít nhất một khoá cổng của nhóm,
+    origin trong `AUTONOMY_ORIGINS`, refs là danh sách chuỗi."""
+    if not isinstance(c, dict) or not isinstance(c.get("id"), str) or c["id"] in seen:
+        return f"ca thiếu id hoặc id trùng: {str(c)[:80]}"
+    gates = AUTONOMY_GATES[str(c.get("group"))]
+    if not isinstance(c.get("input"), dict) or not isinstance(c.get("expect"), dict):
+        return f"{c['id']}: thiếu input/expect (object)"
+    if not any(isinstance(c["expect"].get(k), bool) for k in gates):
+        return f"{c['id']}: expect phải có ít nhất một khoá cổng bool ({', '.join(gates)})"
+    if c.get("origin") not in AUTONOMY_ORIGINS:
+        return f"{c['id']}: origin phải là một trong {', '.join(AUTONOMY_ORIGINS)}"
+    refs = c.get("refs")
+    if not isinstance(refs, list) or not all(isinstance(r, str) for r in refs):
+        return f"{c['id']}: refs phải là danh sách ID"
+    return ""
+
+
+def _bench_input(defaults: object, inp: Dict[str, Any]) -> Dict[str, Any]:
+    """`input` của ca phủ lên `defaults` của file, gộp sâu một mức (`pr` của ca chỉ ghi phần khác PR mẫu)."""
+    base = defaults if isinstance(defaults, dict) else {}
+    merged = {**base, **inp}
+    return {
+        k: {**base[k], **v} if isinstance(v, dict) and isinstance(base.get(k), dict) else v for k, v in merged.items()
+    }
+
+
+def autonomy_corpus(corpus: Path) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """(ca, {ID ngoài phạm vi: lý do}) từ `<nhóm>.json` ({"defaults": {...}, "cases": [...]}) và `scope.json`
+    ({"out_of_scope": [{"reason", "ids"}]}); thiếu thư mục, không có ca nào, ca sai dạng → BenchInputError."""
+    if not corpus.is_dir():
+        raise BenchInputError(f"không thấy corpus {corpus}")
+    cases: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for group in AUTONOMY_GATES:
+        path = corpus / f"{group}.json"
+        data = _bench_json(path) if path.is_file() else {"cases": []}
+        raw = data.get("cases")
+        rows: List[Any] = raw if isinstance(raw, list) else [None]
+        for c in rows:
+            why = _bench_case_error({**c, "group": group} if isinstance(c, dict) else c, seen)
+            if why:
+                raise BenchInputError(f"{group}.json: {why}")
+            seen.add(c["id"])
+            cases.append({**c, "group": group, "input": _bench_input(data.get("defaults"), c["input"])})
+    if not cases:
+        raise BenchInputError(f"corpus {corpus} không có ca nào")
+    scope_path = corpus / AUTONOMY_SCOPE
+    groups = _bench_json(scope_path).get("out_of_scope") if scope_path.is_file() else []
+    scope = {
+        str(i): str(g.get("reason", ""))
+        for g in (groups if isinstance(groups, list) else [])
+        if isinstance(g, dict)
+        for i in g.get("ids") or []
+    }
+    return cases, scope
+
+
+def _bench_score(group: str, expect: Dict[str, Any], got: Dict[str, Any]) -> str:
+    gates = AUTONOMY_GATES[group]
+    if any(expect.get(k) is False and got.get(k) is True for k in gates):
+        return "false_green"
+    if any(expect.get(k) is True and got.get(k) is False for k in gates):
+        return "false_red"
+    if any(got.get(k) != v for k, v in expect.items() if k not in gates):
+        return "mismatch"
+    return "pass"
+
+
+def _bench_run(case: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
+    row = {"id": case["id"], "group": case["group"], "refs": case["refs"], "origin": case["origin"]}
+    try:
+        got = BENCH_EVAL[case["group"]](case["input"], env)
+    except Exception as exc:  # ca không chạy được: không có bằng chứng — tính `error` (exit 2), không tính đạt
+        return {**row, "status": "error", "expect": case["expect"], "got": {"error": f"{type(exc).__name__}: {exc}"}}
+    return {**row, "status": _bench_score(case["group"], case["expect"], got), "expect": case["expect"], "got": got}
+
+
+def autonomy_required(base: Path, remediation: str, status: str) -> Dict[str, List[str]]:
+    """ID corpus phải phủ: REC có tái hiện ở §2 của kế hoạch khắc phục · phát hiện 🔴/🟠 `đã sửa` trong sổ audit. File vắng
+    → danh sách rỗng (ghi `sources` để người đọc biết)."""
+    try:
+        text = (base / remediation).read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    sec2 = text.split("\n## 2.", 1)[-1].split("\n## 3.", 1)[0] if "\n## 2." in text else ""
+    try:
+        rows = md_tables((base / status).read_text(encoding="utf-8")).get("Phát hiện", [])
+    except OSError:
+        rows = []
+    fixed = [r["ID"] for r in rows if r.get("Mức") in ("🔴", "🟠") and r.get("Trạng thái") == "đã sửa" and r.get("ID")]
+    return {"remediation": sorted(set(REC_ROW_RE.findall(sec2))), "audit": fixed}
+
+
+def _bench_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    c = Counter(r["status"] for r in rows)
+    return {"cases": len(rows), **{k: c[k] for k in ("pass", "false_green", "false_red", "mismatch", "error")}}
+
+
+def autonomy_bench(base: Path, corpus: Path, remediation: str, status: str) -> Dict[str, Any]:
+    """Chạy corpus PR/rollup/review/guard/log CI/harness qua hàm thật của khung (AUTO-07): đếm false-green theo nhóm,
+    độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa) trừ ID khai ngoài phạm vi trong `scope.json`."""
+    cases, scope = autonomy_corpus(corpus)
+    with tempfile.TemporaryDirectory(prefix="xt-bench-") as tmp:
+        env = BenchEnv(Path(tmp).resolve())
+        rows = [_bench_run(c, env) for c in cases]
+    need = autonomy_required(base, remediation, status)
+    covered = {r for c in cases for r in c["refs"]}
+    required = sorted({*need["remediation"], *need["audit"]})
+    origins = Counter(c["origin"] for c in cases)
+    return {
+        "revision": _git_head(base),
+        "corpus": os.path.relpath(corpus, base),
+        **_bench_counts(rows),
+        "groups": {g: _bench_counts([r for r in rows if r["group"] == g]) for g in AUTONOMY_GATES},
+        "origins": {o: origins[o] for o in AUTONOMY_ORIGINS},
+        "coverage": {
+            "required": len(required),
+            "covered": len([i for i in required if i in covered]),
+            "out_of_scope": len([i for i in required if i in scope and i not in covered]),
+            "uncovered": [i for i in required if i not in covered and i not in scope],
+            "sources": {"remediation": len(need["remediation"]), "audit": len(need["audit"])},
+        },
+        "failures": [r for r in rows if r["status"] != "pass"],
+    }
+
+
+def _bench_print(out: Dict[str, Any]) -> None:
+    print(
+        f"autonomy-bench @ {(out['revision'] or 'không có git')[:12]} — {out['cases']} ca, false-green {out['false_green']}"
+    )
+    for g, n in out["groups"].items():
+        print(
+            f"  {g:<8} {n['cases']:>3} ca · đạt {n['pass']} · false-green {n['false_green']} · chặn oan {n['false_red']}"
+            f" · lệch {n['mismatch']} · lỗi {n['error']}"
+        )
+    cov = out["coverage"]
+    print(f"  phủ: {cov['covered']}/{cov['required']} ID bắt buộc, ngoài phạm vi {cov['out_of_scope']}")
+    if cov["uncovered"]:
+        print(f"  ✗ chưa có ca: {', '.join(cov['uncovered'])}")
+    if not out["origins"]["adversarial-reviewer"]:
+        print("  ! chưa có ca đối kháng do reviewer khác họ model viết (AUTO-07)")
+    for r in out["failures"]:
+        print(f"  ✗ {r['status']}: {r['id']} ({', '.join(r['refs'])}) mong {r['expect']} — được {r['got']}")
+
+
+def cmd_autonomy_bench(args: argparse.Namespace) -> int:
+    """`autonomy-bench`: exit 1 khi có false-green, 2 khi corpus hỏng hoặc ca không chạy được, 0 còn lại."""
+    base = project_dir()
+    corpus = Path(args.corpus)
+    try:
+        out = autonomy_bench(base, corpus if corpus.is_absolute() else base / corpus, args.remediation, args.status)
+    except BenchInputError as exc:
+        print(f"✗ autonomy-bench: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        _bench_print(out)
+    return 1 if out["false_green"] else 2 if out["error"] else 0
+
+
 def perf_load(path: str) -> List[float]:
     """Mẫu đo từ file: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy."""
     text = Path(path).read_text(encoding="utf-8")
@@ -8151,6 +8536,17 @@ def build_parser() -> argparse.ArgumentParser:
     prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")
     prc.add_argument("--json", action="store_true", help="in JSON {head, rows, fails, human, go, verdict}")
     prc.set_defaults(fn=cmd_release_check)
+    pab = sub.add_parser(
+        "autonomy-bench",
+        help="corpus PR/rollup/review/guard/log CI/harness qua hàm thật — exit 1 khi có false-green (AUTO-07)",
+    )
+    pab.add_argument("--corpus", default=AUTONOMY_CORPUS, help=f"thư mục fixture (mặc định {AUTONOMY_CORPUS})")
+    pab.add_argument("--remediation", default=AUTONOMY_REMEDIATION, help="kế hoạch khắc phục có §2 tái hiện (REC-NN)")
+    pab.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit: 🔴/🟠 đã sửa phải có ca")
+    pab.add_argument(
+        "--json", action="store_true", help="in JSON {revision, cases, false_green, groups, coverage, failures}"
+    )
+    pab.set_defaults(fn=cmd_autonomy_bench)
     pw = sub.add_parser("merge-watch", help="gọi merge-check định kỳ tới khi PR xong hoặc cần hành động (ADR-0021)")
     pw.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pw.add_argument("--interval", type=int, default=30, help="giây giữa hai lần kiểm (mặc định 30)")

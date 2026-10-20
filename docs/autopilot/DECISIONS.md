@@ -636,3 +636,10 @@
 - Chọn: modified không đỏ; chỉ so allow/deny; hook mới ở mức warn
 - Lý do (tiêu chí chất lượng cuối): modified là tuỳ chỉnh hợp lệ; ADR-0018 gỡ ask có chủ đích; tránh đỏ oan ở dự án cài bản cũ
 - Đường lùi: đổi một dòng trong drift_report
+
+### D-090 · 2026-10-20T00:46:01+00:00 · 5 false-green guard do autonomy-bench tìm ra: xử lý thế nào?
+
+- Phương án: (1) mở task riêng T-1523 sửa guard, ca chuyển từ pending/ sang corpus chính khi xong; giữ exit 1 · (2) sửa ngay trong T-1521 · (3) chỉ ghi danh sách lỗ đã biết
+- Chọn: mở task riêng T-1523 sửa guard, ca chuyển từ pending/ sang corpus chính khi xong; giữ exit 1
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: guard nhạy cảm bảo mật, không nới bench; gộp được với SEC-072/077 đang mở; T-1521 đúng phạm vi
+- Đường lùi: bỏ T-1523 khỏi PLAN

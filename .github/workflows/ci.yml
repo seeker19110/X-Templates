@@ -43,6 +43,11 @@ jobs:
       - name: Cổng chuẩn — đúng lệnh trong xt.yaml (build · typecheck · lint · test)
         run: scripts/dev-task.sh gate
 
+      # Corpus PR/rollup/review/guard/log CI qua hàm thật của khung (AUTO-07, docs/ops/AUTONOMY-BASELINE.md): exit 1 khi
+      # có false-green (máy cho merge/chạy/tính xanh ở ca phải chặn), exit 2 khi corpus hỏng.
+      - name: autonomy-bench — đỏ khi false-green > 0 (AUTO-07)
+        run: python3 scripts/xt.py autonomy-bench
+
       # Cổng ở trên chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
       # thuộc nhánh (guard: `git push` không refspec trên `main`) từng xanh ở PR mà đỏ trên `main` (AUD-TEST-005, #124).
       - name: Test trên Python 3.11 (sàn hỗ trợ), checkout mang tên nhánh `main`

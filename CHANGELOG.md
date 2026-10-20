@@ -6,6 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- Đo tự chủ trước khi mở rộng (T-1521, AUTO-07): `xt.py autonomy-bench [--corpus DIR] [--json]` chạy corpus `tests/fixtures/autonomy/` (PR, rollup, review, guard, log CI, harness — 247 ca) qua hàm thật của khung (`merge_check_result` = `merge_decision` + `merge_eligibility`, `_ci_blocker`, `pr_next`, guard `_rule_decision` + `apply_policy`, `ci_classify`); exit 1 khi false-green > 0, 2 khi corpus hỏng; báo chặn oan, độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa của sổ audit, ID ngoài phạm vi khai lý do ở `scope.json`). Job CI `quality` chạy lệnh này; số đo và giới hạn ở [`docs/ops/AUTONOMY-BASELINE.md`](docs/ops/AUTONOMY-BASELINE.md). Tách hàm thuần `rest_rollup`, `prefixed_globs`, `merge_check_result` (hành vi không đổi). `tests/fixtures/autonomy/pending/` giữ 5 false-green mới phát hiện ở guard, chưa sửa (ngoài cổng).
 - Mục thiết yếu không bị trần MUST ở M (T-1519, REC-05, [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md)):
   `xt.py compose --feature <auth|jwt|oauth|reset|payment|pii>` (lặp được) đưa mục `MUST@L` mà module khai ở frontmatter
   `essential: [<ID>@<fact>]` lên MUST ở quy mô M; S/L và ghép không `--feature` không đổi một byte. Blueprint ghi

@@ -1,0 +1,75 @@
+{
+ "defaults": {
+  "tool": "bash",
+  "policy": "default"
+ },
+ "cases": [
+  {
+   "id": "pending-xargs-push-main",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-008"
+   ],
+   "input": {
+    "command": "echo main | xargs git push origin"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "pending-cmdsub-push-main",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-059"
+   ],
+   "input": {
+    "command": "git push origin $(echo main)"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "pending-tee-pipe-default",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-028",
+    "REC-04"
+   ],
+   "input": {
+    "command": "echo 'rm -rf ~' | tee /dev/null | bash"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "pending-sec077-surrogate-crash",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-077"
+   ],
+   "input": {
+    "command": "echo x > a\ud800b; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "pending-ssh-loopback-default",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-035"
+   ],
+   "input": {
+    "command": "ssh localhost 'rm -rf ~'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  }
+ ]
+}

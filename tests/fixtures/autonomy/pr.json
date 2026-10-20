@@ -1,0 +1,860 @@
+{
+ "defaults": {
+  "autonomy": 3,
+  "hard_auto": false,
+  "risk_paths": [],
+  "pr": {
+   "number": 7,
+   "repo": "o/r",
+   "state": "OPEN",
+   "isDraft": false,
+   "title": "fix(core): sửa lỗi nhỏ",
+   "mergeable": "MERGEABLE",
+   "mergeStateStatus": "CLEAN",
+   "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "baseRefName": "main",
+   "defaultBranch": "main",
+   "statusCheckRollup": [
+    {
+     "__typename": "CheckRun",
+     "name": "quality",
+     "status": "COMPLETED",
+     "conclusion": "SUCCESS"
+    }
+   ],
+   "labels": [],
+   "files": [
+    {
+     "path": "src/a.py",
+     "additions": 3,
+     "deletions": 1
+    },
+    {
+     "path": "tests/test_a.py",
+     "additions": 4,
+     "deletions": 0
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "id": "pr-control-fast",
+   "origin": "control",
+   "refs": [],
+   "input": {},
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "verdict": "merge",
+    "lane": "nhanh"
+   }
+  },
+  {
+   "id": "pr-control-standard-reviewed",
+   "origin": "control",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "risk_paths": [
+     "src/*"
+    ],
+    "hard_auto": true,
+    "pr": {
+     "xtReviews": [
+      {
+       "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "clean": true,
+       "at": "2026-10-19T10:00:00Z"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": true,
+    "auto_merge_ok": true,
+    "lane": "chuẩn",
+    "review": "ok"
+   }
+  },
+  {
+   "id": "pr-rec03-standard-no-review",
+   "origin": "repro",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "risk_paths": [
+     "src/*"
+    ],
+    "hard_auto": true
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "verdict": "merge",
+    "lane": "chuẩn",
+    "review": "missing"
+   },
+   "note": "REMEDIATION §2: merge_decision(làn chuẩn, L3, CI xanh, không review) → merge; điều kiện một nhà phải chặn"
+  },
+  {
+   "id": "pr-rec03-review-old-head",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "risk_paths": [
+     "src/*"
+    ],
+    "hard_auto": true,
+    "pr": {
+     "xtReviews": [
+      {
+       "head": "1111111111111111111111111111111111111111",
+       "clean": true,
+       "at": "2026-10-19T10:00:00Z"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing"
+   }
+  },
+  {
+   "id": "pr-rec03-standard-label-fast-diff",
+   "origin": "adversarial-author",
+   "refs": [
+    "REC-03"
+   ],
+   "input": {
+    "pr": {
+     "labels": [
+      {
+       "name": "xt-standard-lane"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "nhanh",
+    "review": "missing"
+   },
+   "note": "PR từng vào làn chuẩn (nhãn bền) rồi thu nhỏ diff về làn nhanh vẫn cần review ở head"
+  },
+  {
+   "id": "pr-rec08-required-skipped",
+   "origin": "repro",
+   "refs": [
+    "REC-08"
+   ],
+   "input": {
+    "pr": {
+     "statusCheckRollup": [
+      {
+       "__typename": "CheckRun",
+       "name": "quality",
+       "status": "COMPLETED",
+       "conclusion": "SKIPPED"
+      },
+      {
+       "__typename": "CheckRun",
+       "name": "merge-gate",
+       "status": "COMPLETED",
+       "conclusion": "SUCCESS"
+      }
+     ],
+     "requiredChecks": [
+      {
+       "context": "quality"
+      },
+      {
+       "context": "merge-gate"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human"
+   }
+  },
+  {
+   "id": "pr-har021-1",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "AGENTS.md",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-2",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "CLAUDE.md",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-3",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "scripts/dev-task.sh",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-4",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "vitest.config.ts",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-5",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": ".pre-commit-config.yaml",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-6",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": ".gitleaks.toml",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har021-7",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-021"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "ruff.toml",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har022-rename-workflow-out",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-022"
+   ],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "docs/old-ci.yml",
+       "previous": ".github/workflows/ci.yml",
+       "additions": 0,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-har023-only-skipped",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-023"
+   ],
+   "input": {
+    "pr": {
+     "statusCheckRollup": [
+      {
+       "__typename": "CheckRun",
+       "name": "quality",
+       "status": "COMPLETED",
+       "conclusion": "SKIPPED"
+      },
+      {
+       "__typename": "CheckRun",
+       "name": "lint",
+       "status": "COMPLETED",
+       "conclusion": "NEUTRAL"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human"
+   }
+  },
+  {
+   "id": "pr-har039-stacked",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-039"
+   ],
+   "input": {
+    "pr": {
+     "baseRefName": "feat/base"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "wait"
+   }
+  },
+  {
+   "id": "pr-har042-auth",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-042",
+    "AUD-SEC-044"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/auth/login.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-har042-payment",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-042",
+    "AUD-SEC-044"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/payments/charge.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-har042-crypto",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-042",
+    "AUD-SEC-044"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/crypto/keys.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-har042-label-secret",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-042"
+   ],
+   "input": {
+    "pr": {
+     "labels": [
+      {
+       "name": "risk:secret"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-hard-key-unwaivable",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-042"
+   ],
+   "input": {
+    "hard_auto": true,
+    "pr": {
+     "files": [
+      {
+       "path": "xt.yaml",
+       "additions": 1,
+       "deletions": 1,
+       "hard_key": true
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   },
+   "note": "merge_hard_exceptions: auto không miễn được PR đổi chính khoá đó"
+  },
+  {
+   "id": "pr-files-truncated",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-HAR-042"
+   ],
+   "input": {
+    "hard_auto": true,
+    "pr": {
+     "filesTruncated": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-hard-auto-waived",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-042"
+   ],
+   "input": {
+    "hard_auto": true,
+    "pr": {
+     "files": [
+      {
+       "path": "src/auth/login.py",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_auth.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": false,
+    "lane": "chuẩn",
+    "review": "missing"
+   },
+   "note": "ADR-0020: ngoại lệ cứng được miễn nhưng vẫn là làn chuẩn — cần review sạch ở head"
+  },
+  {
+   "id": "pr-xfeat004-subproject-risk-glob",
+   "origin": "audit",
+   "refs": [
+    "AUD-XFEAT-004"
+   ],
+   "input": {
+    "autonomy": 2,
+    "project_prefix": "apps/web/",
+    "risk_paths": [
+     "src/exports/*"
+    ],
+    "pr": {
+     "files": [
+      {
+       "path": "apps/web/src/exports/x.ts",
+       "additions": 1,
+       "deletions": 0
+      },
+      {
+       "path": "apps/web/tests/x.test.ts",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "hard": true
+   }
+  },
+  {
+   "id": "pr-draft",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "isDraft": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "wait"
+   }
+  },
+  {
+   "id": "pr-closed",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "state": "MERGED"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "closed"
+   }
+  },
+  {
+   "id": "pr-bad-title",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "title": "update stuff"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "fix"
+   }
+  },
+  {
+   "id": "pr-conflict",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "mergeable": "CONFLICTING"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "fix"
+   }
+  },
+  {
+   "id": "pr-changes-requested",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "reviewDecision": "CHANGES_REQUESTED"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "fix"
+   }
+  },
+  {
+   "id": "pr-behind",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "mergeStateStatus": "BEHIND"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "update"
+   }
+  },
+  {
+   "id": "pr-missing-required",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "missingRequired": [
+      "gitleaks"
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human"
+   }
+  },
+  {
+   "id": "pr-mergeable-unknown",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "mergeable": "UNKNOWN"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "wait"
+   }
+  },
+  {
+   "id": "pr-review-required",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "reviewDecision": "REVIEW_REQUIRED"
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human"
+   }
+  },
+  {
+   "id": "pr-l1",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "autonomy": 1
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human"
+   }
+  },
+  {
+   "id": "pr-big-diff-l2",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-code-without-test-l2",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "autonomy": 2,
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "human",
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-ci-red",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "pr": {
+     "statusCheckRollup": [
+      {
+       "__typename": "CheckRun",
+       "name": "quality",
+       "status": "COMPLETED",
+       "conclusion": "SUCCESS"
+      },
+      {
+       "__typename": "StatusContext",
+       "context": "ci/ext",
+       "state": "FAILURE"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "verdict": "fix"
+   }
+  }
+ ]
+}
