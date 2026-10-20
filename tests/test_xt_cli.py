@@ -1985,7 +1985,7 @@ GH_PREFIX = "quality\tGate\t2026-10-19T10:00:00.1234567Z "
 
 class CiTriageTest(TmpDirCase):
     LOGS = {
-        "secret": "Finding: gitleaks detected 1 leak\nAKIA0000SECRETVALUE\n",
+        "secret": "Finding: gitleaks detected 1 leak\n<giá-trị-đã-che>\n",
         "migration": "alembic upgrade head\nERROR: migration 0042 failed: column exists\n",
         "type": "scripts/a.py:3: error: Incompatible return value [return-value]\nFound 1 error in 1 file (checked 2)\n",
         "coverage": "TOTAL 120 3 98%\nCoverage failure: total of 98 is less than fail-under=100\n",

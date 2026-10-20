@@ -5296,8 +5296,8 @@ CI_TRIAGE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (
         "lint",
         re.compile(
-            r"^Found \d+ errors?\.|would reformat|files? would be reformatted|✖ \d+ problems?|\bSC\d{4}\b"
-            r"|^\S+:\d+:\d+: [EWFC]\d{3} |Code style issues found|Your code has been rated",
+            r"(?:^Found \d+ errors?\.)|would reformat|files? would be reformatted|✖ \d+ problems?|\bSC\d{4}\b"
+            r"|(?:^\S+:\d+:\d+: [EWFC]\d{3} )|Code style issues found|Your code has been rated",
             re.I,
         ),
     ),
