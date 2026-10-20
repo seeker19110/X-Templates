@@ -776,12 +776,36 @@ def _skip_env_args(a: List[str], dirs: Optional[List[str]] = None) -> None:
 
 
 ENV_LONG_OPTS = {"--split-string": "S", "--chdir": "C", "--unset": "u", "--argv0": "a"}
+# Mọi tuỳ chọn dài của GNU env (coreutils 9.x) — để nhận viết tắt duy nhất như getopt_long (`--ch=` → `--chdir`)
+ENV_LONG_ALL = (
+    *ENV_LONG_OPTS,
+    "--ignore-environment",
+    "--null",
+    "--block-signal",
+    "--default-signal",
+    "--ignore-signal",
+    "--list-signal-handling",
+    "--debug",
+    "--help",
+    "--version",
+)
+
+
+def _env_long_name(name: str) -> str:
+    """Tên đầy đủ của tuỳ chọn dài `name` (viết đủ, hoặc viết tắt khớp đúng một tuỳ chọn — review #186 lần 3);
+    mơ hồ/lạ → giữ nguyên."""
+    if not name.startswith("--") or len(name) < 3 or name in ENV_LONG_ALL:
+        return name
+    hits = [o for o in ENV_LONG_ALL if o.startswith(name)]
+    return hits[0] if len(hits) == 1 else name
 
 
 def _env_opt(opt: str) -> Tuple[str, Optional[str]]:
     """Tuỳ chọn có giá trị của `env`: (khoá S/C/u/a, giá trị dính liền hoặc None = ở token kế). Cờ ngắn ghép
-    (`-iC dir`, `-iCdir`, `-iS'…'`) tách như getopt; tuỳ chọn khác/gán biến → ('', None)."""
+    (`-iC dir`, `-iCdir`, `-iS'…'`) tách như getopt; tuỳ chọn dài nhận viết tắt duy nhất (`--ch=`, `--spl`); tuỳ
+    chọn khác/gán biến → ('', None)."""
     name, eq, rest = opt.partition("=")
+    name = _env_long_name(name)
     if name in ENV_LONG_OPTS:
         return ENV_LONG_OPTS[name], (rest if eq else None)
     m = re.fullmatch(r"-[^-CSua]*([CSua])(.*)", opt, re.S)
@@ -4459,8 +4483,13 @@ def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
 
-INTERP_RE = re.compile(r"(python|node|perl|ruby|php|deno|bun)[0-9.]*")
+INTERP_RE = re.compile(r"(python|pypy|ipython|node|perl|ruby|php|deno|bun|lua|tclsh)[0-9.]*")
 INTERP_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "-p", "--print", "-r"}
+# Họ của trình thông dịch cùng ngôn ngữ (review #186 lần 3): pypy/ipython chạy Python — ipython còn có magic `!cmd`,
+# `%…` mà `ast.parse` không nhận nên script có magic không bao giờ là chỉ đọc
+INTERP_FAMILY = {"pypy": "python", "ipython": "python"}
+# Lệnh con nhận script làm đối số: `deno eval '…'` (review #186 lần 3)
+INTERP_EVAL_SUBCMDS = {"deno": "eval"}
 PERL_E_FLAG_RE = re.compile(r"-[a-zA-DF-Z]+[eE]")  # cờ gộp `-ne`, `-pe`, `-lne`: đối số kế tiếp là script
 # Dấu hiệu script GHI/XOÁ file (đọc thì không hỏi): open(..., "w"), .write_text(, os.remove, shutil.*, fs.writeFileSync…
 WRITE_HINT_RE = re.compile(
@@ -4484,7 +4513,19 @@ GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
 
 def _stdin_interp(argv: List[str]) -> bool:
     n = normalize(argv)
-    return bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS
+    return (
+        bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS and _eval_subcmd(n) is None
+    )
+
+
+def _eval_subcmd(n: List[str]) -> Optional[int]:
+    """Vị trí lệnh con nhận script (`deno [cờ…] eval '…'`) trong argv đã chuẩn hoá; không có → None."""
+    m = INTERP_RE.fullmatch(n[0]) if n else None
+    sub = INTERP_EVAL_SUBCMDS.get(m[1]) if m else None
+    k = 1
+    while sub and k < len(n) and n[k].startswith("-"):
+        k += 1
+    return k if sub and n[k : k + 1] == [sub] else None
 
 
 def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
@@ -4503,7 +4544,10 @@ def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[
         n = normalize(c)
         if n and INTERP_RE.fullmatch(n[0]):
             flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
-            out += [(n[i + 1], here) for i in flags]
+            scripts = [n[i + 1] for i in flags]
+            k = _eval_subcmd(n)  # `deno eval [cờ…] '…'`: mọi đối số không phải cờ sau lệnh con (chặt: cả giá trị cờ)
+            scripts += [a for a in (n[k + 1 :] if k is not None else []) if a[:1] != "-" and a not in scripts]
+            out += [(s, here) for s in scripts]
         if _stdin_interp(c):
             stdin_dirs.append(here)
             out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<"]
@@ -4674,7 +4718,7 @@ def _interp_families(tokens: List[str], cwd: Optional[str]) -> FrozenSet[str]:
     """Họ trình thông dịch có trong lệnh (`python`, `node`, `perl`…): script trong lệnh có thể chạy bởi bất kỳ ai trong
     số đó, nên chỉ coi là Python khi mọi trình thông dịch đều là Python (D-107)."""
     found = (INTERP_RE.fullmatch(n[0]) for n in (normalize(c) for c, _ in _commands_with_cwd(tokens, cwd)) if n)
-    return frozenset(m[1] for m in found if m)
+    return frozenset(INTERP_FAMILY.get(m[1], m[1]) for m in found if m)
 
 
 def _interp_literal_ask(
@@ -4827,6 +4871,7 @@ RO_GENERIC_DENY_RE = re.compile(
     r"|[\w$?@&\\]\x01"  # nháy dính tên/ký hiệu: Perl `$'`, `pkg'name`, Ruby `?'`, tiền tố `rb'…'`
 )
 RO_PERL_QUOTE_RE = re.compile(r"(?<![\w$@%&])(?:qq|qw|qr|qx|q|m|s|tr|y)(?!\w)(?:\s*[^\w\s]|\s+\w)")
+RO_LUA_DENY_RE = re.compile(r"--|\[=*\[")  # Lua: comment `--`, chuỗi dài `[[…]]`/`[==[…]==]` (review #186 lần 3)
 RO_INTERP_RE = re.compile(r"[$@]|#\{")  # nội suy trong nháy kép: Perl `$h{…}`/`@a[…]`, PHP `{$o->m()}`, Ruby `#{…}`
 
 
@@ -4841,9 +4886,11 @@ def _ro_mask(script: str, families: Optional[FrozenSet[str]] = None) -> Masked:
 
     masked = RO_SIMPLE_STR_RE.sub(sub, script)
     perl = not families or "perl" in families
+    lua = not families or "lua" in families
     if (
         RO_GENERIC_DENY_RE.search(masked)
         or (perl and RO_PERL_QUOTE_RE.search(masked))
+        or (lua and RO_LUA_DENY_RE.search(masked))
         or any(q == '"' and RO_INTERP_RE.search(v) for q, v in lits)
         or any(len(v.strip()) > 1 and "|" in (v.strip()[0], v.strip()[-1]) for _, v in lits)
     ):

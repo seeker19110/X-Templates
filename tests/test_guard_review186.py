@@ -554,6 +554,65 @@ class Review3Test(unittest.TestCase):
         )
         self.assertAllowed(("exec 3>&1", "exec >/tmp/log 2>&1", "exec 3<> /tmp/fifo", "cat < .env"))
 
+    def test_guard_r3_more_interpreters_denied(self):
+        self.assertDenied(
+            {
+                "deno eval \"Deno.writeTextFileSync('.env', 'x')\"": "SECRET_WRITE",
+                "deno --quiet eval \"Deno.writeTextFileSync('.env', 'x')\"": "SECRET_WRITE",
+                "deno eval -p \"Deno.removeSync('.claude/settings.json')\"": "HOOK_BYPASS",
+                "lua -e \"io.open('.env', 'w'):write('x')\"": "SECRET_WRITE",
+                "lua5.4 -e \"os.remove('.claude/settings.json')\"": "HOOK_BYPASS",
+                "echo 'set f [open \".env\" w]' | tclsh": "SECRET_WRITE",
+                "tclsh -c 'file delete \".autopilot/verified.json\"'": "EVIDENCE_HANDWRITE",
+                "pypy3 -c \"open('.env', 'w')\"": "SECRET_WRITE",
+                "pypy -c \"import os; os.utime('.git/config')\"": "HOOK_BYPASS",
+                "ipython -c \"open('.env', 'w')\"": "SECRET_WRITE",
+                "ipython -c \"!touch .env; print(open('.env').read())\"": "SECRET_WRITE",
+            }
+        )
+        self.assertAllowed(
+            (
+                "pypy3 -c \"print(open('.env').read())\"",
+                "ipython -c \"print(open('.env').read())\"",
+                "lua -e \"print('hello')\"",
+                'deno eval "console.log(1)"',
+                "deno run main.ts",
+            )
+        )
+
+    def test_interp_helpers(self):
+        self.assertEqual(guard._eval_subcmd(["deno", "-q", "eval", "x"]), 2)
+        self.assertIsNone(guard._eval_subcmd(["deno", "run", "eval"]))
+        self.assertIsNone(guard._eval_subcmd(["node", "eval"]))
+        self.assertFalse(guard._stdin_interp(["deno", "eval", "x"]))
+        self.assertTrue(guard._stdin_interp(["tclsh"]))
+        lua = frozenset({"lua"})
+        self.assertTrue(guard._read_only_script("print('.env')", lua))
+        self.assertFalse(guard._read_only_script("x = [[']] print('.env') --[[']]", lua))
+        self.assertFalse(guard._read_only_script("print('.env') -- c", lua))
+
+    def test_guard_r3_env_long_abbrev_denied(self):
+        self.assertDenied(
+            {
+                "env --ch=.claude tee settings.json": "HOOK_BYPASS",
+                "env --chd=.claude tee settings.json": "HOOK_BYPASS",
+                "env --chdi .claude tee settings.json": "HOOK_BYPASS",
+                "env --c=.claude/hooks tee guard.py": "HOOK_BYPASS",
+                "env --spl='tee .claude/settings.json'": "HOOK_BYPASS",
+            }
+        )
+        self.assertAllowed(("env --ch=docs tee notes.md", "env --ig ls"))
+
+    def test_env_long_abbrev_helper(self):
+        self.assertEqual(guard._env_opt("--ch=a"), ("C", "a"))
+        self.assertEqual(guard._env_opt("--chd"), ("C", None))
+        self.assertEqual(guard._env_opt("--un=X"), ("u", "X"))
+        self.assertEqual(guard._env_opt("--chdir=a"), ("C", "a"))
+        self.assertEqual(guard._env_opt("--i"), ("", None))  # mơ hồ: --ignore-environment / --ignore-signal
+        self.assertEqual(guard._env_opt("--d"), ("", None))  # mơ hồ: --debug / --default-signal
+        self.assertEqual(guard._env_opt("--null"), ("", None))  # không nhận giá trị
+        self.assertEqual(guard._env_opt("--"), ("", None))
+
     def test_script_literals_ast(self):
         lits = guard._script_literals
         self.assertIn(".env", lits("open('\\x2eenv','w')"))
