@@ -32,6 +32,17 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   — hook lỗi/hết giờ thì chặn tool (`LOOP-DESIGN-010`); `install.py` gộp hai sự kiện mới và thêm `onFailure` vào handler
   cùng lệnh của dự án đã cài (giá trị dự án tự đặt giữ nguyên; báo trong `hooks_matcher_updated`). Dự án đích: chạy lại
   `install.py`.
+- Link ngoài phân loại (T-1520, REC-13): `scripts/check-links.py --external [--retries N] [--timeout S]` chia lỗi tạm
+  (5xx/408/timeout/lỗi mạng — thử lại hữu hạn, còn lỗi thì cảnh báo) · đã đổi (3xx như 301 — cảnh báo cập nhật URL) ·
+  chết (404… — exit 1) · chưa xác minh (403/429 — cảnh báo, không kết luận); `links.yml` dùng nó. Chính sách tự chủ một nhà (REC-10):
+  `framework/11-autonomous-loop/stop-points-and-escalation.md`, README của mảng chỉ liên kết (test
+  `autonomy_policy_single_home`).
+- Steward theo sự kiện (T-1517, AUTO-05): `pr-steward.yml` chạy thêm khi `workflow_run` của `CI`/`merge-gate` xong và
+  `check_suite: completed` (check của app ngoài); `xt.py pr steward --event <payload>` chỉ xét PR gắn với sự kiện (không
+  gắn PR → mọi PR mở). Mỗi hành động idempotent theo (repo, PR, head, hành động): đọc lại PR ngay trước khi làm — đã
+  đóng/merge, head đổi, bật khi đã bật, tắt khi đã tắt → bỏ qua (`note`, run xanh); sự kiện cho head cũ → xét head hiện
+  tại. Nhóm `concurrency` theo PR. Mẫu Routine `pull_request.synchronize` cho `fix`/`update` ở
+  `stop-points-and-escalation.md` (`LOOP-STOP-029` Kiểm). Dự án đích: chạy lại `install.py`.
 
 ### Changed
 - Kiểm lại cuối (`LOOP-DESIGN-022`, D-084): Stop hook (`final_check`) và `release-check` chỉ nhận `verified.json` có

@@ -7108,14 +7108,49 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     return _steward_apply(out, d, repo, cmds if apply else [])
 
 
+def _steward_key(out: Dict[str, Any], repo: str) -> str:
+    """Khoá idempotent của một hành động steward: (repo, PR, head, hành động) — AUTO-05."""
+    return f"{repo.removeprefix('repos/')}#{out['pr']}@{str(out['head'])[:12]}:{out['action']}"
+
+
+def _add_note(out: Dict[str, Any], text: str) -> Dict[str, Any]:
+    out["note"] = "; ".join(x for x in (out.get("note"), text) if x)
+    return out
+
+
+def _steward_stale(out: Dict[str, Any], repo: str) -> str:
+    """Đọc lại PR NGAY trước khi làm (AUTO-05): "" = trạng thái GitHub vẫn cần đúng hành động này ở đúng head; khác =
+    lý do bỏ qua. Sự kiện lặp, chạy lại sau restart, hay lượt lịch/sự kiện song song đã làm xong → không lặp tác dụng
+    phụ; head đổi giữa lúc xét và lúc làm → không làm trên head chưa xét."""
+    pull = _gh_one(f"{repo}/pulls/{out['pr']}")
+    raw = pull.get("head")
+    sha = str(raw.get("sha") or "") if isinstance(raw, dict) else ""
+    if pull.get("merged") or pull.get("state") != "open":
+        return "PR đã đóng/merge"
+    if sha != out["head"]:
+        return f"head đổi {str(out['head'])[:7]} → {sha[:7] or '?'} — lượt sau xét head mới"
+    want = {"enable-auto-merge": True, "disable-auto-merge": False}.get(str(out["action"]))
+    on = bool(pull.get("auto_merge"))
+    if want is not None and want == on:  # bật khi đã bật / tắt khi đã tắt
+        return f"auto-merge đã {'bật' if on else 'tắt'}"
+    return ""
+
+
 def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]]) -> Dict[str, Any]:
     can_update = _steward_can_update()
+    out["key"] = _steward_key(out, repo)
     if out["action"] == "update" and not can_update:
         out["why"] = (
             f"{out.get('why', '')} — steward chạy bằng GITHUB_TOKEN không cập nhật nhánh (CI không chạy trên head mới);"
             " đặt XT_STEWARD_TOKEN"
         )
     if cmds:
+        try:
+            stale = _steward_stale(out, repo)
+        except PrInputError as exc:  # không đọc lại được: không làm mù (chiều chặt), lượt sau thử lại
+            return {**out, "error": f"không đọc lại được PR trước khi làm: {exc}"}
+        if stale:
+            return _add_note(out, f"bỏ qua {out['key']} — {stale}")
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
         # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
@@ -7124,6 +7159,54 @@ def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List
             out["then"] = "update" + (f" ✗ {up_err}" if up_err else " ✓")
             if up_err:
                 out["error"] = up_err
+    return out
+
+
+STEWARD_EVENT_KEYS = ("check_suite", "workflow_run")
+
+
+def _event_pulls(body: Any) -> List[Dict[str, Any]]:
+    pulls = body.get("pull_requests") if isinstance(body, dict) else None
+    return [p for p in pulls if isinstance(p, dict)] if isinstance(pulls, list) else []
+
+
+def steward_event_prs(event: Dict[str, Any]) -> Dict[str, str]:
+    """PR (số → head SHA của sự kiện) mà payload `check_suite`/`workflow_run` gắn với; {} = sự kiện không gắn PR nào
+    (push lên nhánh đích; PR từ fork — GitHub để trống `pull_requests`) → xét mọi PR mở như lượt lịch. Payload CHỈ chọn
+    PR cần xét: head, auto-merge, check, review luôn đọc lại từ GitHub — sự kiện lặp, sai thứ tự hay chạy lại sau
+    restart không đổi kết quả (AUTO-05)."""
+    prs: Dict[str, str] = {}
+    for key in STEWARD_EVENT_KEYS:
+        body = event.get(key)
+        head = str(body.get("head_sha") or "") if isinstance(body, dict) else ""
+        for p in _event_pulls(body):
+            n, raw = p.get("number"), p.get("head")
+            if type(n) is int and n > 0:
+                prs[str(n)] = str(raw.get("sha") or head) if isinstance(raw, dict) else head
+    return prs
+
+
+def _steward_targets(args: argparse.Namespace, repo: str) -> Tuple[List[str], Dict[str, str]]:
+    """(số PR cần xét, head theo sự kiện): `--pr` > PR của `--event` > mọi PR mở."""
+    if args.pr:
+        return [str(args.pr)], {}
+    heads: Dict[str, str] = {}
+    if args.event:
+        try:
+            event = json.loads(Path(args.event).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PrInputError(f"không đọc được payload sự kiện {args.event}: {exc}") from exc
+        heads = steward_event_prs(event) if isinstance(event, dict) else {}
+    if heads:
+        return list(heads), heads
+    return [str(p.get("number")) for p in _gh_items(f"{repo}/pulls?state=open&per_page=100")], {}
+
+
+def _event_note(out: Dict[str, Any], event_head: str) -> Dict[str, Any]:
+    """Sự kiện đến muộn/sai thứ tự (head của sự kiện ≠ head hiện tại): đã xét head hiện tại, ghi lại cho người đọc."""
+    head = str(out.get("head") or "")
+    if event_head and head and event_head != head:
+        return _add_note(out, f"sự kiện cho head cũ {event_head[:7]} — đã xét head hiện tại {head[:7]}")
     return out
 
 
@@ -7140,17 +7223,15 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
     repo = f"repos/{args.repo}" if args.repo else "repos/{owner}/{repo}"
     gh_repo = ["-R", args.repo] if args.repo else []  # `gh pr merge` trên đúng repo đã đánh giá (review #141)
     try:
-        nums = (
-            [str(args.pr)]
-            if args.pr
-            else [str(p.get("number")) for p in _gh_items(f"{repo}/pulls?state=open&per_page=100")]
-        )
+        nums, heads = _steward_targets(args, repo)
     except PrInputError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     target = (lambda n: f"https://github.com/{args.repo}/pull/{n}") if args.repo else (lambda n: n)
     _REQUIRED_CACHE.clear()
-    results = [_steward_one(target(n), repo, project_dir(), args.apply, gh_repo) for n in nums]
+    results = [
+        _event_note(_steward_one(target(n), repo, project_dir(), args.apply, gh_repo), heads.get(n, "")) for n in nums
+    ]
     lines = [
         f"#{r['pr']} {r['action']}{' ✓' if r.get('applied') else ''}{' → ' + r['then'] if r.get('then') else ''}"
         f"{' ✗ ' + r['error'] if r.get('error') and not r.get('then') else ''}"
@@ -7799,6 +7880,11 @@ def build_parser() -> argparse.ArgumentParser:
     pst.add_argument("--repo", help="owner/repo (mặc định repo hiện tại của gh)")
     pst.add_argument("--apply", action="store_true", help="làm thật: bật/tắt auto-merge, merge ghim head")
     pst.add_argument("--json", action="store_true", help="in JSON danh sách kết quả")
+    pst.add_argument(
+        "--event",
+        help="payload sự kiện `check_suite`/`workflow_run` (GITHUB_EVENT_PATH): chỉ xét PR gắn với sự kiện; không gắn PR"
+        " nào → mọi PR mở (AUTO-05)",
+    )
     ppr.set_defaults(fn=cmd_pr)
     pq = sub.add_parser("merge-gate", help="required check: đỏ khi PR ngoại lệ cứng đang bật auto-merge (ADR-0023)")
     pq.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")

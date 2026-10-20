@@ -622,3 +622,10 @@
 - Chọn: giữ nguyên: resume không đụng, init --force xoá
 - Lý do (tiêu chí chất lượng cuối): T-1515 đúng spec; lỗ init --force đổi ngân sách ghi vào PROGRESS để xử ở task sau, không mở rộng phạm vi
 - Đường lùi: thêm mang episode trong loop init
+
+### D-088 · 2026-10-20T00:08:58+00:00 · T-1517: concurrency steward và sự kiện không gắn PR
+
+- Phương án: (1) concurrency theo PR; sự kiện không gắn PR quét mọi PR mở · (2) một nhóm chung; bỏ qua sự kiện không gắn PR
+- Chọn: concurrency theo PR; sự kiện không gắn PR quét mọi PR mở
+- Lý do (tiêu chí chất lượng cuối): bước đọc lại trước khi làm đỡ race; push main cần update PR tụt base (tiêu chí 1)
+- Đường lùi: đổi group về pr-steward
