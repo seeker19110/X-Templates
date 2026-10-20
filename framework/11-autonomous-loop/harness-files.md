@@ -60,13 +60,23 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 - **Script nhắc đường dẫn được canh: mặc định chặn** (D-105): script `-c`/`-e`/`-r`, heredoc, here-string hay ống vào
   trình thông dịch có chuỗi là hàng rào (`.claude/hooks/*`, `.claude/settings*.json`), `.git/hooks`/`.git/config`, bí mật
   hay `.autopilot/` bị chặn với mã của đích, trừ khi TOÀN script chỉ gồm thao tác đọc trong danh sách nhỏ (`open` mode
-  đọc, `.read*()`, `Path(…).read_text/exists/stat`, `os.path.*`, `json.load(s)`, `print`; `readFileSync`/`existsSync`/
-  `statSync`). Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi `requests.get`, ghi file khác, `sorted`,
-  `dict.get`, hàm tự viết), script sửa tài liệu có chuỗi `'.env'` đứng riêng, Perl/PHP đọc file bằng hàm ngoài danh sách,
-  JS template string. Sửa file canh thì dùng Edit/Write; đọc thì dùng `cat`/Read hoặc script chỉ đọc.
-- **Thư mục không biết** (D-106): sau `cd "$X"`, `cd -`, `pushd +N`, `popd`, `cd` khi có `CDPATH`, đích ghi tương đối
-  được thử ở gốc và mọi thư mục canh (`.claude`, `.claude/hooks`, `.autopilot`, `.git`, `.git/hooks`) — chặn khi file đã
-  có ở đó hoặc tên là tên được canh (chặn oan: `cd "$X" && echo x > config` dù `$X` không phải `.git`).
+  đọc tối đa 2 đối số vị trí, `.read*()`, `Path(…).read_text/exists/stat/glob/rglob/iterdir`, `os.path.<hàm đọc>`,
+  `os.listdir/scandir/walk`, `json.load(s)`, `json.dump(x, sys.stdout)`, `.get/.keys/.values/.items`, `sorted/min/max`
+  không `key=`, `ast.parse`, `hashlib`, `print`; `readFileSync`/`existsSync`/`statSync`). D-105 **kích hoạt theo chuỗi
+  nguyên văn**: chỉ khi script có chuỗi viết đúng đường dẫn được canh — đường dẫn ghép hay escape đứng riêng
+  (`'.e' + 'nv'`, `'\x2eenv'`) không làm script bị xét (giới hạn ở mục trên). Bộ che chuỗi/comment (D-107): Python che
+  bằng `tokenize` (cú pháp sai → không chỉ đọc; biểu thức f-string kiểm đệ quy); node/ruby/perl/php chỉ che chuỗi một
+  dòng, phần mã còn `#`, `/`, `%`, `<<`, quote-like Perl (`q{}`, `qq{}`, `m{}`, `s{}{}`…), nháy dính biến (`$'`, `?'`) hay
+  chuỗi nháy kép có `$`/`@` là không chỉ đọc. Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi
+  `requests.get`, ghi file khác, hàm tự viết), script sửa tài liệu có chuỗi `'.env'` đứng riêng, Perl/PHP đọc file bằng
+  hàm ngoài danh sách, JS template string; theo D-107 thêm: script node/ruby/perl/php nhắc đường dẫn được canh mà có
+  comment, phép chia, `%`, heredoc, chuỗi nhiều dòng; `open(p, 'r', -1)` (đối số thứ 3). Sửa file canh thì dùng
+  Edit/Write; đọc thì dùng `cat`/Read hoặc script chỉ đọc.
+- **Thư mục không biết** (D-106): sau `cd "$X"`, `cd -`, `pushd +N`, `popd`, `cd` khi có `CDPATH`, `cd`/`pushd` tới
+  toán hạng có glob (`cd .cl*`), đích ghi tương đối được thử ở gốc và mọi thư mục canh (`.claude`, `.claude/hooks`,
+  `.autopilot`, `.git`, `.git/hooks`) — chặn khi file đã có ở đó hoặc tên là tên được canh (chặn oan: `cd "$X" && echo
+  x > config` dù `$X` không phải `.git`). `env -C DIR`/`--chdir=DIR` dời thư mục của lệnh sau `env` như `cd` (kèm chuyển
+  hướng thì thư mục là không biết); `dd of=<đích>` và lệnh chỉ gồm chuyển hướng (`exec 3> .env`) là ghi.
 
 ### Định dạng PLAN (parser thật trong `xt.py`)
 

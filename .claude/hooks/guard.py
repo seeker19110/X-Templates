@@ -4679,16 +4679,42 @@ def _interp_literal_ask(
 # giới hạn đối số.
 RO_FUNCS = frozenset(
     "open print len str int float bool repr list dict tuple set range enumerate zip isinstance sum any all exit Path "
-    "PurePath PurePosixPath PosixPath require puts file_get_contents file_exists is_file is_dir".split()
+    "PurePath PurePosixPath PosixPath require puts file_get_contents file_exists is_file is_dir sorted min max".split()
 )
 RO_METHODS = frozenset(
     "read readline readlines read_text read_bytes exists is_file is_dir stat lstat close open openSync readFileSync "
     "existsSync statSync lstatSync createReadStream readlinkSync exist? exists? file? directory? strip lstrip rstrip "
     "split splitlines startswith endswith decode encode lower upper keys values items join toString trim exit "
-    "ConfigParser".split()
+    "ConfigParser get glob rglob iterdir update hexdigest".split()
 )
-RO_JSON = frozenset({"json.load", "json.loads", "json.dumps", "JSON.parse", "JSON.stringify"})
-RO_CHAINS = frozenset({"console.log", "pathlib.Path", "pathlib.PurePath"})
+RO_JSON = frozenset({"json.load", "json.loads", "json.dump", "json.dumps", "JSON.parse", "JSON.stringify"})
+RO_CHAINS = frozenset(
+    {"console.log", "pathlib.Path", "pathlib.PurePath", "os.listdir", "os.scandir", "os.walk", "ast.parse"}
+    | {"hashlib.sha256", "hashlib.md5"}
+)
+# Giới hạn đối số (review #186 lần 2, bớt chặn oan theo D-107): (tối đa đối số vị trí, từ khoá được phép) — chỗ nhận
+# hàm gọi lại (`key=`, `onerror=`, `default=` của json) không có. Khoá: tên gọi trần, chuỗi `a.b`, hay `.m` (phương thức).
+RO_ARG_RULES: Dict[str, Tuple[int, FrozenSet[str]]] = {
+    "sorted": (1, frozenset({"reverse"})),
+    "min": (10**6, frozenset({"default"})),
+    "max": (10**6, frozenset({"default"})),
+    "os.listdir": (1, frozenset()),
+    "os.scandir": (1, frozenset()),
+    "os.walk": (1, frozenset({"topdown", "followlinks"})),
+    ".glob": (1, frozenset({"recursive", "case_sensitive", "recurse_symlinks", "include_hidden", "root_dir"})),
+    ".rglob": (1, frozenset({"case_sensitive", "recurse_symlinks"})),
+    ".iterdir": (0, frozenset()),
+    "ast.parse": (3, frozenset({"filename", "mode", "type_comments", "feature_version"})),
+    "hashlib.sha256": (1, frozenset({"usedforsecurity"})),
+    "hashlib.md5": (1, frozenset({"usedforsecurity"})),
+    ".update": (1, frozenset()),
+    ".hexdigest": (0, frozenset()),
+    ".get": (2, frozenset()),
+}
+# `.get(` của thư viện mạng (`requests.get(url)`) không phải đọc dict: script nhắc mạng thì `.get` không chỉ đọc.
+RO_NET_RE = re.compile(
+    r"\b(?:requests|httpx|urllib\d?|urlopen|https?|aiohttp|socket|net|axios|fetch|ftplib|smtplib|LWP|HTTP|curl)\b"
+)
 # `os.path.<hàm>(`: chỉ đúng bên nhận `os.path` và hàm trong danh sách — `os.path.os.rmdir(` không phải (review #186 lần 2)
 RO_OS_PATH = frozenset(
     "exists lexists isfile isdir islink ismount isabs join basename dirname split splitext splitdrive abspath realpath "
@@ -4700,11 +4726,15 @@ RO_OS_PATH = frozenset(
 # `ConfigParser(dict_type=…, converters=…, interpolation=…)` — không đối số.
 RO_JS_CALLBACK = frozenset({"stat", "lstat", "exists", "read", "close"})
 RO_ARGS_MAX = {**{n: 2 for n in RO_JS_CALLBACK}, "ConfigParser": 1}
-RO_ARG_NAMES = frozenset({"open", "openSync", "require", *RO_ARGS_MAX})  # lời gọi cần tách đối số để xét
+RO_ARG_NAMES = frozenset(  # lời gọi cần tách đối số để xét
+    {"open", "openSync", "require", *RO_ARGS_MAX, *(k.rsplit(".", 1)[-1] for k in RO_ARG_RULES)}
+)
 JSON_DUMPS_KWARGS = frozenset({"indent", "sort_keys", "ensure_ascii", "separators"})
 # Tên module/đối tượng mà danh sách cho phép dựa vào (`os.path.*`, `json.load`, `console.log`, `fs.readFileSync`):
 # chỉ được dùng làm bên nhận (`os.`) — gán lại (`console = {log: …}`) là mượn tên.
-RO_RECEIVERS = frozenset({"os", "json", "JSON", "console", "fs", "File", "io", "codecs", "sys", "process", "pathlib"})
+RO_RECEIVERS = frozenset(
+    {"os", "json", "JSON", "console", "fs", "File", "io", "codecs", "sys", "process", "pathlib", "ast", "hashlib"}
+)
 RO_FS_MODULES = frozenset({"fs", "node:fs", "path", "node:path"})
 RO_PRINTERS = frozenset({"print", "puts"})  # in không ngoặc (`print "x"`, `puts File.read(…)`)
 # Từ khoá/toán tử chữ (Python, JS, Ruby, Perl, PHP) — đứng trước `(` hay trước từ khác không phải lời gọi hàm.
@@ -4928,8 +4958,9 @@ def _ro_json(chain: str, args: List[str]) -> bool:
     pos, kws = _ro_kwargs(args)
     if chain == "JSON.stringify":
         return pos[1:2] in ([], ["null"], ["undefined"])
-    if chain == "json.dumps":
-        return len(pos) == 1 and all(k in JSON_DUMPS_KWARGS for k, _ in kws)
+    if chain in ("json.dumps", "json.dump"):  # `json.dump(v, sys.stdout)`: chỉ ra stdout
+        want = [pos[0], "sys.stdout"] if chain == "json.dump" and pos else pos[:1]
+        return pos == want and len(pos) >= 1 and all(k in JSON_DUMPS_KWARGS for k, _ in kws)
     return len(pos) == 1 and not kws
 
 
@@ -4958,18 +4989,32 @@ def _ro_names_ok(masked: str, lits: List[Tuple[str, str]]) -> bool:
     return True
 
 
-def _ro_call_ok(name: str, recv: Optional[str], args: List[str], lits: List[Tuple[str, str]], js: bool = True) -> bool:
+def _ro_args_ok(key: Optional[str], args: List[str]) -> bool:
+    """Đối số trong giới hạn của RO_ARG_RULES[key] (không có luật → đúng)."""
+    rule = RO_ARG_RULES.get(key or "")
+    pos, kws = _ro_kwargs(args)
+    return not rule or (len(pos) <= rule[0] and all(k in rule[1] for k, _ in kws))
+
+
+def _ro_call_ok(
+    name: str, recv: Optional[str], args: List[str], lits: List[Tuple[str, str]], flags: FrozenSet[str] = frozenset()
+) -> bool:
     """Một lời gọi thuộc danh sách đọc: `recv` None = gọi trần `f(…)`, "" = phương thức trên biểu thức (`).m(`).
-    `js`: script có thể chạy bởi Node/Deno/Bun — `fs.stat(p, cb)`… nhận hàm gọi lại."""
+    `flags`: `js` — script có thể chạy bởi Node/Deno/Bun (`fs.stat(p, cb)`… nhận hàm gọi lại); `py` — chỉ Python
+    (`.update` của hashlib/dict); `net` — script nhắc thư viện mạng (`.get` không phải đọc dict)."""
     chain = f"{recv}.{name}" if recv else name
     if name in ("open", "openSync"):
         path_first = recv is None or name == "openSync" or recv in FS_RECEIVERS
         return _ro_open("os" if recv == "os" else "path" if path_first else "mode", args, lits)
     if chain in RO_JSON:
         return _ro_json(chain, args)
-    if name == "ConfigParser" or (js and name in RO_JS_CALLBACK):
+    if name == "ConfigParser" or ("js" in flags and name in RO_JS_CALLBACK):
         bare_ok = recv is not None or name == "ConfigParser"
         return bare_ok and len(args) < RO_ARGS_MAX[name]  # `ConfigParser(dict_type=…)`, `fs.stat(p, cb)`: hàm gọi lại
+    if (name == "update" and "py" not in flags) or (name == "get" and "net" in flags):
+        return False
+    if not _ro_args_ok(chain if chain in RO_ARG_RULES or recv is None else f".{name}", args):
+        return False  # `sorted(key=…)`, `os.walk(onerror=…)`: hàm gọi lại
     if recv is not None:
         return name in RO_METHODS or chain in RO_CHAINS or (recv == "os.path" and name in RO_OS_PATH)
     if name not in RO_FUNCS and name not in RO_KEYWORDS:
@@ -4978,7 +5023,9 @@ def _ro_call_ok(name: str, recv: Optional[str], args: List[str], lits: List[Tupl
     return bool(module) and not module.startswith((".", "/"))  # `require('./x')`, `require(x)`: mã từ file khác
 
 
-def _ro_calls_ok(masked: str, lits: List[Tuple[str, str]], close: Dict[int, int], js: bool = True) -> bool:
+def _ro_calls_ok(
+    masked: str, lits: List[Tuple[str, str]], close: Dict[int, int], flags: FrozenSet[str] = frozenset()
+) -> bool:
     """Mọi lời gọi `f(…)`/`x.m(…)` thuộc danh sách đọc; `open` chỉ với mode đọc; JSON/hàm khác không hàm gọi lại."""
     scans = 0
     for m in RO_CALL_RE.finditer(masked):
@@ -4991,7 +5038,7 @@ def _ro_calls_ok(masked: str, lits: List[Tuple[str, str]], close: Dict[int, int]
         if scans > RO_ARG_SCANS:
             return False
         args = _paren_args(masked, m.end(), close[m.end() - 1]) if special else []
-        if not _ro_call_ok(name, recv, args, lits, js):
+        if not _ro_call_ok(name, recv, args, lits, flags):
             return False
     return True
 
@@ -5002,6 +5049,7 @@ def _read_only_script(script: str, families: Optional[FrozenSet[str]] = None, de
     khác/rỗng → bộ che chung chặt (D-107); None (không truyền) → script Python hợp lệ thì như Python."""
     python = families == frozenset({"python"})
     found = _ro_mask_py(script, depth) if python or families is None else None
+    py = found is not None
     found = found if python else (found or _ro_mask(script, families))
     if found is None:
         return False
@@ -5014,7 +5062,8 @@ def _read_only_script(script: str, families: Optional[FrozenSet[str]] = None, de
         if name not in RO_KEYWORDS and nxt not in RO_KEYWORDS and name not in (*RO_PRINTERS, "require"):
             return False
     js = not families or bool(families & {"node", "deno", "bun"})
-    return _ro_names_ok(masked, lits) and _ro_calls_ok(masked, lits, close, js)
+    flags = frozenset(f for f, on in (("js", js), ("py", py), ("net", bool(RO_NET_RE.search(script)))) if on)
+    return _ro_names_ok(masked, lits) and _ro_calls_ok(masked, lits, close, flags)
 
 
 # Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,

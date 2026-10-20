@@ -446,5 +446,46 @@ class CdGlobEnvDdExecTest(unittest.TestCase):
         self.assertEqual(guard._env_dirs(["FOO=1", "env", "-u", "X", "make"]), [])
 
 
+class ReadOnlyAllowlistTest(unittest.TestCase):
+    """Review #186 lần 2: bớt chặn oan (D-107) — thao tác đọc thường gặp vào danh sách, giữ chặn hàm gọi lại."""
+
+    def test_guard_read_only_allowlist_passes(self):
+        for cmd in (
+            "python3 -c \"import json; d = json.load(open('.claude/settings.json')); print(d.get('hooks', {}).keys())\"",
+            "python3 -c \"import json; d = json.load(open('.claude/settings.json')); print(sorted(d), min(d), max(d))\"",
+            "python3 -c \"import os; print(os.listdir('.claude/hooks'), list(os.walk('.autopilot')))\"",
+            "python3 -c \"import os; print([e.name for e in os.scandir('.git/hooks')])\"",
+            "python3 -c \"from pathlib import Path; print(list(Path('.claude').glob('*.json')), "
+            "list(Path('.claude').rglob('*')), list(Path('.claude/hooks').iterdir()))\"",
+            "python3 -c \"import ast; ast.parse(open('.claude/hooks/guard.py').read())\"",
+            "python3 -c \"import hashlib; h = hashlib.sha256(); h.update(open('.env','rb').read()); "
+            "print(h.hexdigest(), hashlib.md5(b'x').hexdigest())\"",
+            "python3 -c \"import json, sys; json.dump(json.load(open('.claude/settings.json')), sys.stdout, indent=2)\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_allowlist_callbacks_still_denied(self):
+        ro = guard._read_only_script
+        for bad, fam in (
+            ("import shutil\nprint(sorted(['.claude'], key=shutil.rmtree))", PY),
+            ("import shutil\nprint(max(['.claude'], key=shutil.rmtree))", PY),
+            ("import os, shutil\nprint(list(os.walk('.claude', onerror=shutil.rmtree)))", PY),
+            ("import os\nprint(os.listdir('.claude', 1))", PY),
+            ("from pathlib import Path\nprint(list(Path('.claude').glob('*', x)))", PY),
+            ("import json\njson.dump({}, open('.env', 'w'))", PY),
+            ("import json\njson.dump({}, f)\nprint('.env')", PY),
+            ("import json, sys\njson.dump({}, sys.stdout, default=print)\nprint('.env')", PY),
+            ("import requests\nprint(open('.env').read()); requests.get('https://x')", PY),
+            ("import requests\nr = {}.get('.env'); requests.get('https://x')", PY),
+            ("require('https').get('https://x'); console.log(require('fs').readFileSync('.env'))", NODE),
+            ("x.update('.env')", NODE),
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(ro(bad, fam))
+        self.assertTrue(ro("d = {}\nprint(d.get('.env'), d.items(), d.values())", PY))
+        self.assertTrue(ro("import hashlib\nh = hashlib.sha256()\nh.update(b'.env')\nprint(h.hexdigest())", PY))
+
+
 if __name__ == "__main__":
     unittest.main()
