@@ -29,6 +29,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Guard: quét chuỗi đường dẫn canh trong script không còn bậc hai (AUD-SEC-092, hồi quy #185/#186): script không có dấu
   hiệu API ghi (`WRITE_ANY_RE`) bỏ hẳn regex theo từng chuỗi; có dấu hiệu mà nhắc hơn `DIRECT_PROBES` = 64 chuỗi canh thì
   coi như ghi (fail-closed). 3.200 chuỗi: 62 s → < 1 s.
+- Guard: script trình thông dịch được trích ở cờ gộp/dính (`python3 -Ic`, `-c"…"`, `-Sc`, `node --eval=…`, `node -p"…"`,
+  `php -nr`, `perl -e'…'`, `ruby -e'…'`), tên `nodejs`/`python3.13t`, và sau lệnh chạy hộ (`uv/poetry/pdm/pipenv/hatch/
+  rye/conda/pixi run`, `pipx run`, `uvx`, `npx`, `npm exec`, `bunx`; tối đa 8 lớp) — trước đây cả quét `os.system`/
+  `execSync` lẫn D-105 bị bỏ qua (AUD-SEC-093). Nguồn lồng sau `cd` (`$(…)`, backtick, `<(…)`, `script -c`, `flock`,
+  `watch`, `busybox sh`, `su -c`, heredoc vào shell, ống giải mã) dùng chung MỘT danh sách với lượt quét gốc nên được quét
+  ở thư mục đã đổi (AUD-SEC-094, phần sót của AUD-SEC-087). `~+`/`~-` (bash mở thành `$PWD`/`$OLDPWD`) không còn bị coi là
+  thư mục con: ghi tay `.autopilot/` qua `~+/…` bị chặn, `~-` là thư mục không biết (D-106) (AUD-SEC-097). `source`/`.`
+  với `/dev/stdin`/`/dev/fd/0` quét như `bash <<<`; `curl … | source /dev/stdin` chặn như `curl | sh` (AUD-SEC-098).
+- Guard: `rm -rf $PWD/..`, `rm -rf ~+`, `rm -rf ~-/x` bị chặn như `rm -rf ..` (AUD-SEC-099 🔴): `_outside_project` coi
+  mọi `$…` là không rõ nên cho qua — nay `$PWD`/`~+` là thư mục đang đứng, `~-`/`$OLDPWD` là ngoài dự án; đích `rm`
+  chuẩn hoá `..`. **Dự án đích:** chạy lại `install.py` (guard đổi).
+- `docs/ops/AUTONOMY-BASELINE.md` §3 đo lại: 438 ca, guard 308, phủ 88/144 (AUD-DOC-072); `tests/shard-weights.json`
+  đo lại 216 lớp (AUD-TEST-017).
 - `merge-check`/`pr next`/`pr reviewed`: sổ review cục bộ hỏng (`reviews` không phải list) bị bỏ qua thay vì văng
   traceback (AUD-CODE-019); hai bản ghi cùng giây ở cùng head lấy bản ghi sau trong sổ, khớp `pr next` (AUD-XFEAT-018).
   Test hook cho xt.py lỗi cú pháp/exit ≠ 0/vắng → cổng commit đầy đủ (AUD-TEST-016).

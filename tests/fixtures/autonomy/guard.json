@@ -4556,6 +4556,72 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec091-mask-marker-then-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-091"
+   ],
+   "input": {
+    "command": "node -e \"require(\u00019\u0002);'.env'\"; echo x > .claude/settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec091-mask-marker-then-destroy",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-091"
+   ],
+   "input": {
+    "command": "perl -e \"open(\u00019\u0002);'.env'\"; gh repo delete o/r --yes"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-rm-pwd-parent",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf $PWD/.."
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-rm-tilde-plus",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf ~+"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-control-rm-pwd-build",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf $PWD/build"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
