@@ -24,7 +24,7 @@ updated: 2026-10-20
    quyền, tool, ngân sách, mức tin cậy của subagent ⊆ của người giao; subagent không tự nâng tier T0–T4.
 3. **Chọn worker theo hai trục**: độ phức tạp × độ khép kín của spec (stored 23 §4.3). Spec hở → không giao;
    phiên chính quyết tường minh (D-NNN, [`LOOP-STOP-018`](stop-points-and-escalation.md)) rồi mới giao.
-4. **Người review không phải người viết**: `reviewer` dùng model khác `executor`, chỉ đọc + chạy lệnh kiểm, chỉ nhận
+4. **Người review không phải người viết**: `reviewer` khác **họ** model với người viết, chỉ đọc + chạy lệnh kiểm, chỉ nhận
    diff + SPEC, không nhận lý luận của người viết (`.claude/agents/reviewer.md`).
 5. **Song song chỉ khi độc lập về file**: hai task chạm cùng file/schema/port → nối tiếp. Hợp đồng giao diện
    (OpenAPI, type, schema) chốt trước khi tách việc.
@@ -41,7 +41,7 @@ updated: 2026-10-20
 | Task có SPEC + Gate rõ, ≤ 1 ngày, không chạm điểm dừng — UI/bố cục/trạng thái, biểu mẫu/màn hình theo API đã chốt, CRUD theo kiến trúc và phân quyền sẵn có, bug tái hiện được nguyên nhân cục bộ | `executor` (**tầng mặc định**) | Spec khép kín, máy kiểm được; rẻ |
 | Task khó/bất định/rủi ro cao: đổi giao ước xuyên nhiều module; xác thực/phân quyền/cô lập tenant; migration hoặc schema có dữ liệu thật; hàng đợi/đồng thời/retry/phục hồi; lỗi không ổn định hoặc hiệu năng chưa rõ nguyên nhân; khảo sát khi chưa đủ thông tin chọn thiết kế | `executor-deep` (**tầng sâu**, ADR-0029) — ghi `(exec: deep)` trong dòng task của PLAN; `loop status` trả `executor` | Hậu quả sai lớn dù diff nhỏ; cần giữ nhiều trạng thái/giả thuyết. Xét **4 khía cạnh**: phức tạp · bất định · rủi ro · phạm vi ảnh hưởng — một khía cạnh cao là đủ |
 | Tầng mặc định đỏ 2 lần cùng task trong vòng này | **Chuyển cấp** lên `executor-deep` (`loop status` trả `escalated: true`), kèm diff hiện tại + evidence lỗi + giả thuyết đã loại; ngân sách task giữ nguyên | `LOOP-ORCH-014`: lần 2 đổi cách — đổi tầng là một dạng đổi cách; lần 3 vẫn `blocked` |
-| Review diff trước merge, diff > 200 dòng hoặc chạm auth/tiền/dữ liệu | `reviewer` (model khác người viết); diff do `executor-deep` hoặc phiên chính **cùng họ** với `reviewer` viết → `reviewer-alt` (họ khác) | Tránh cùng điểm mù; phát hiện phải có đường tái hiện; `pr reviewed --clean` cùng họ bị từ chối (D-045) |
+| Review khi `pr next` trả `review` (làn chuẩn; pha build chỉ khi nhãn `risk:`/ngoại lệ cứng — ADR-0031/0033) hoặc phiên chính thấy rủi ro cụ thể | `reviewer` (khác **họ** model với người viết); diff do `executor-deep` hoặc phiên chính **cùng họ** với `reviewer` viết → `reviewer-alt` (họ khác) | Tránh cùng điểm mù; phát hiện phải có đường tái hiện; `pr reviewed --clean` cùng họ bị từ chối (D-045) |
 | Quyết định kiến trúc, chọn công nghệ, spec mâu thuẫn | **Không tách** — phiên chính tự duyệt, ghi D-NNN (ADR-0008) | Cần toàn cảnh; subagent chỉ trả phương án |
 | Điểm dừng bắt buộc về hành động | **Không tách** — phiên chính + người | Hành động không đảo ngược/đối ngoại |
 | Việc nhỏ < 10 phút trong một file | Làm trực tiếp | Chi phí giao việc (handoff + đọc lại repo) lớn hơn việc |
