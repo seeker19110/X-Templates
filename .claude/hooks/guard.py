@@ -916,6 +916,8 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
 
 # Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
 CD_FLAG_RE = re.compile(r"-[LPe@]+")
+# `~+`/`~-` đứng đầu: bash mở thành `$PWD`/`$OLDPWD` (biến gán lại được) — `cd` tới đó như `cd $PWD`: không biết
+TILDE_DIR_RE = re.compile(r"~[+-](?=/|$)")
 
 
 def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
@@ -945,8 +947,8 @@ def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Option
     tương đối sau đó thử ở mọi thư mục canh). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088).
     Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được."""
     args, dashdash = _cd_operands(n[1:])
-    if len(args) != 1 or "$" in args[0] or re.search(r"[*?\[]", args[0]):
-        return None  # biến, glob (`cd .cl*` — shell bung ra tên thật, D-106): không biết
+    if len(args) != 1 or "$" in args[0] or re.search(r"[*?\[]", args[0]) or TILDE_DIR_RE.match(args[0]):
+        return None  # biến, glob (`cd .cl*`), `~+`/`~-` (= `$PWD`/`$OLDPWD` — AUD-SEC-097): không biết (D-106)
     if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
     target = posixpath.expanduser(args[0])
@@ -1075,7 +1077,7 @@ def _runs_stdin(argv: List[str]) -> bool:
         if args[:1] and SCRIPT_FILE_RE.fullmatch(args[0]):
             return False
         return not (args[:1] == ["-m"] and args[1:2] and args[1] in DATA_MODULES)
-    return n[0] in INTERPRETERS or n[0] == "sudo"
+    return n[0] in INTERPRETERS or n[0] == "sudo" or _stdin_shell(argv)  # `| source /dev/stdin` (AUD-SEC-098)
 
 
 def remote_exec(cmd: str, tokens: List[str]) -> Optional[str]:
@@ -3177,7 +3179,9 @@ def _at(target: str, cwd: Optional[str]) -> str:
 EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
 
 
-PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)(?=/|$)")
+# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106)
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+)(?=/|$)")
+OLDPWD_REF_RE = re.compile(r"^(~-|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
 PROJECT_REF_RE = re.compile(r"^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})(?=/|$)")
 
 
@@ -3208,7 +3212,10 @@ UNKNOWN_CWD_DIRS: Tuple[Tuple[str, FrozenSet[str]], ...] = (
 
 def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
     """Các đích có thể của `t`: thư mục biết → một đích (`_resolve_target`); không biết (None) → gốc dự án cộng thư mục
-    canh nào có file đó hoặc tên được canh (D-106)."""
+    canh nào có file đó hoặc tên được canh (D-106). `~-/x`, `$OLDPWD/x` = `x` ở thư mục không biết (AUD-SEC-097)."""
+    old = OLDPWD_REF_RE.match(t)
+    if old:
+        return _where(t[old.end() :].lstrip("/") or ".", root, None)
     if cwd is not None:
         return [_resolve_target(t, root, cwd)]
     t = PROJECT_REF_RE.sub(lambda _: root, t, count=1)
@@ -3679,12 +3686,21 @@ def _stdin_shell(argv: List[str]) -> bool:
     n = normalize(argv)
     if n and n[0] == "find":
         return any(_stdin_shell(sub) for sub in _find_exec_argvs(n))
+    if n[:1] in (["source"], ["."]):
+        return _stdin_source(n)
     if not n or n[0] not in SHELLS:
         return False
     rest = [a for i, a in enumerate(n) if not _is_redirect(a) and not (i > 0 and _is_redirect(n[i - 1]))]
     has_c, script = _shell_script_arg(rest)
     stdin = script is None or script in STDIN_SCRIPTS
     return not has_c and stdin and "-n" not in rest  # `bash -n`: chỉ kiểm cú pháp
+
+
+def _stdin_source(n: List[str]) -> bool:
+    """`source /dev/stdin`, `. /dev/fd/0` (cả sau `--`): shell hiện tại chạy chữ từ stdin như `bash <<<`/`bash <<E`
+    (AUD-SEC-098)."""
+    args = n[2:] if n[1:2] == ["--"] else n[1:]
+    return bool(args) and args[0] in STDIN_SCRIPTS
 
 
 def _shell_c_script(argv: List[str]) -> Optional[str]:

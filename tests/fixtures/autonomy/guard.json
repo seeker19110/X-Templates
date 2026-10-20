@@ -4447,6 +4447,115 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-audit1020c-tilde-plus-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "echo {} > ~+/.autopilot/verified.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-tilde-plus-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~+/.autopilot && echo {} > verified.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-tilde-minus-settings",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~- && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-source-stdin-herestring",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": "source /dev/stdin <<< 'echo x > .claude/settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-dot-stdin-heredoc",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": ". /dev/stdin <<'E'\necho x > .claude/settings.json\nE"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-ls-tilde-plus",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "ls ~+/docs"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-tilde-plus-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~+/docs && echo x > out.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-source-venv",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": "source .venv/bin/activate"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
