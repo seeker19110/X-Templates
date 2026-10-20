@@ -5,7 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-10-20
+
+**Dự án đích: chạy lại `install.py`** — ba hồi quy lộ ra khi nâng hotel-manager/X-Company lên 3.11.0: manifest ghi hash dạng `sha256:<hex>` (gitleaks `generic-api-key` hết bắt nhầm dòng `secret-scan.yml`), `guard.py` không còn ký tự U+FFFD thật, `xt.py` tự phân trang `gh api` (FB-001).
+
 ### Fixed
+- `install.py` ghi mọi hash trong `.xtemplates/manifest.json` (và `harness.sha256.json`) dạng `sha256:<hex>`; mọi chỗ đọc (`install.py` phân loại/`--plan`, `xt.py doctor --drift`) nhận cả hex trần của manifest cũ — gitleaks rule `generic-api-key` từng bắt dòng `".github/workflows/secret-scan.yml": "<64 hex>"` ở hai dự án đích (test `test_manifest_labels_every_hash_sha256`, `test_manifest_legacy_bare_hex_still_pristine`, `test_doctor_drift_manifest_sha256_and_legacy_hex`).
+- `xt.py _gh_api(path, paginate=True)` (merge-check, pr next, merge-watch, release-check, `latest_framework_tag`) tự phân trang bằng `page=N` trên đường `repos/<chủ>/<repo>/…`, không dùng `gh api --paginate` — `--paginate` đi theo header Link tới `repositories/{id}/…` mà proxy của phiên Claude Code chặn (403) nên PR > 30 check/commit/tệp làm `merge-check` hỏng (FB-001 của X-Company; test `GhApiPaginationTest`).
+- `.claude/hooks/guard.py` `clean_text` ghi `"�"` dạng escape thay ký tự U+FFFD thật — test "mọi file văn bản UTF-8, không BOM, không U+FFFD" của dự án đích (hotel-manager) từng đỏ sau khi cài 3.11.0; repo khung thêm test cùng luật cho mọi file tracked (`tests/test_docs_budget.py`).
 - `loop record` tự tick PLAN (D-113) ghi xuyên symlink `PLAN.md` (`resolve()` trước khi đọc/ghi) — trước đó thay symlink bằng file thường (review #191, T-1737).
 
 ## [3.11.0] - 2026-10-20

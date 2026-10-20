@@ -8,6 +8,7 @@ Kết quả trong dự án đích:
   .xtemplates/scripts/dev-task.sh
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
   .xtemplates/manifest.json     hash file harness/gốc/GitHub + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
+                                — hash dạng `sha256:<hex>` (cả `harness.sha256.json`); đọc nhận cả hex trần của bản cũ
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
   .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest)
@@ -134,12 +135,34 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# Hash trong manifest ghi dạng `sha256:<hex>`: hex trần sau khoá như `".github/workflows/secret-scan.yml"` khớp rule
+# `generic-api-key` của gitleaks (token `[\w.=-]{10,150}` ngay sau dấu phân cách) — `:` không thuộc lớp đó nên tiền tố
+# chặn khớp. Trong install.py hash là hex trần; đổi dạng ở ranh giới file: `load_manifest` (nhận cả hex trần của
+# manifest cũ) và `write_manifests`; `classify_copy` cũng nhận cả hai dạng.
+HASH_PREFIX = "sha256:"
+
+
+def manifest_hash(value: str) -> str:
+    """Hex của một hash trong manifest: bỏ tiền tố `sha256:` nếu có; hex trần (manifest cũ) giữ nguyên. Dùng ở mọi chỗ
+    so hash với manifest."""
+    return value.removeprefix(HASH_PREFIX)
+
+
+def hash_label(digest: str) -> str:
+    """Dạng ghi vào manifest: `sha256:<hex>` — giá trị đã có tiền tố không bị nhân đôi."""
+    return HASH_PREFIX + manifest_hash(digest)
+
+
 def load_manifest(target: Path) -> dict[str, str]:
+    """Đường dẫn → hash hex theo `harness.sha256.json`: `sha256:<hex>` hay hex trần đều về hex (`manifest_hash`); giá
+    trị không phải chuỗi bỏ qua như chưa biết hash; file thiếu/hỏng/không phải object → rỗng."""
     try:
         data = json.loads((target / MANIFEST).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    return {rel: manifest_hash(value) for rel, value in data.items() if isinstance(value, str)}
 
 
 def load_rules(target: Path) -> dict[str, list[str]]:
@@ -174,7 +197,8 @@ def classify_copy(
     'skipped-symlink', nội dung bản khung). `installed_hash` = hash bản khung ghi ở lần cài trước: file còn đúng hash đó
     → `updated`; file dự án đã sửa mà mẫu vẫn đúng hash đó (mẫu không đổi) → `kept-own`, không có gì mới để đưa; mẫu đổi
     hoặc chưa biết hash → `updated-new`. `template_hash` = hash nhận diện mẫu (mặc định hash nội dung sẽ ghi; PROGRESS.md:
-    mẫu trước khi thay SHA HEAD). Dùng chung cho `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
+    mẫu trước khi thay SHA HEAD); cả hai nhận `sha256:<hex>` lẫn hex trần (`manifest_hash`). Dùng chung cho
+    `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
     data = source_bytes(src, transform)
     if dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
         return "skipped-symlink", data
@@ -185,9 +209,10 @@ def classify_copy(
         return "kept", data
     if installed_hash is None:
         return "updated-new", data
-    if sha256(current) == installed_hash:
+    installed = manifest_hash(installed_hash)
+    if sha256(current) == installed:
         return "updated", data
-    return ("kept-own" if (template_hash or sha256(data)) == installed_hash else "updated-new"), data
+    return ("kept-own" if manifest_hash(template_hash or sha256(data)) == installed else "updated-new"), data
 
 
 def write_copy(src: Path, dst: Path, status: str, data: bytes) -> None:
@@ -461,9 +486,11 @@ def copy_harness_files(
 
 
 def write_manifests(target: Path, files: dict[str, str], rules: dict[str, list[str]]) -> None:
-    """Ghi `harness.sha256.json` (hash file) và `manifest.json` (hash file + rule khung đặt + chính sách, REC-09)."""
-    write_atomic(target / MANIFEST, json.dumps(files, indent=2, sort_keys=True) + "\n")
-    doc = {"schema": 1, "files": files, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
+    """Ghi `harness.sha256.json` (hash file) và `manifest.json` (hash file + rule khung đặt + chính sách, REC-09); mọi
+    hash ghi dạng `sha256:<hex>` (`hash_label`), kể cả hash hex trần giữ lại từ manifest cũ."""
+    labelled = {rel: hash_label(digest) for rel, digest in files.items()}
+    write_atomic(target / MANIFEST, json.dumps(labelled, indent=2, sort_keys=True) + "\n")
+    doc = {"schema": 1, "files": labelled, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
     write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 

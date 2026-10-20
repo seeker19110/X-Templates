@@ -2717,3 +2717,67 @@ class PrTitleExemptTest(unittest.TestCase):
         commit_base_xt(base, "merge_autonomy: L2\npr_title_check: off\n", "merge_autonomy: L2\n")  # sửa tại chỗ: chặt
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(pr(title="Sửa guard")))
         self.assertEqual(json.loads(out)["verdict"], "fix")
+
+
+class GhApiPaginationTest(unittest.TestCase):
+    """FB-001 (X-Company): `_gh_api(path, True)` tự phân trang bằng `page=N` trên đường `repos/…` — không `gh --paginate`
+    (đi theo header Link tới `repositories/{id}/…` bị proxy của phiên chặn 403)."""
+
+    def fake(self, total: int, per: int = 5, key: str | None = None):
+        calls: list[list[str]] = []
+
+        def run(cmd, **kw):
+            calls.append(list(cmd))
+            self.assertNotIn("--paginate", cmd)
+            m = re.search(r"[?&]page=(\d+)", cmd[-1])
+            page = int(m.group(1)) if m else 1
+            lo, hi = (page - 1) * per, min(page * per, total)
+            items = [{"id": i} for i in range(lo, hi)]
+            body = {key: items, "total_count": total} if key else items
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(body), "")
+
+        return calls, unittest.mock.patch("xt.subprocess.run", side_effect=run)
+
+    def test_gh_api_pages_until_short_page(self):
+        calls, patch = self.fake(12)
+        with patch:
+            pages = xt._gh_api("repos/o/r/pulls/7/files?per_page=5", True)
+            self.assertEqual(len(xt._gh_items("repos/o/r/pulls/7/files?per_page=5")), 12)
+        self.assertEqual([len(p) for p in pages], [5, 5, 2])
+        self.assertEqual(
+            [c[-1] for c in calls][:3], [f"repos/o/r/pulls/7/files?per_page=5&page={n}" for n in (1, 2, 3)]
+        )
+
+    def test_gh_api_exact_multiple_reads_one_empty_page_then_stops(self):
+        calls, patch = self.fake(10)
+        with patch:
+            pages = xt._gh_api("repos/o/r/pulls/7/commits?per_page=5", True)
+        self.assertEqual([len(p) for p in pages], [5, 5, 0])
+        self.assertEqual(len(calls), 3)
+
+    def test_gh_api_empty_and_default_per_page(self):
+        calls, patch = self.fake(0)
+        with patch:
+            self.assertEqual(xt._gh_api("repos/o/r/pulls/7/files", True), [[]])
+        self.assertEqual(calls[0][-1], "repos/o/r/pulls/7/files?page=1")  # không có `?` → thêm `?page=`
+        calls, patch = self.fake(31, per=30)
+        with patch:
+            pages = xt._gh_api("repos/o/r/pulls/7/files", True)  # per_page vắng = 30 (mặc định GitHub)
+        self.assertEqual([len(p) for p in pages], [30, 1])
+
+    def test_gh_api_object_with_array_paginates_and_cap(self):
+        calls, patch = self.fake(7, key="check_runs")
+        with patch:
+            pages = xt._gh_api("repos/o/r/commits/abc/check-runs?per_page=5", True)
+        self.assertEqual([len(p["check_runs"]) for p in pages], [5, 2])
+        calls, patch = self.fake(10**6, per=5)  # API lặp trang mãi → dừng ở trần GH_MAX_PAGES
+        with patch:
+            pages = xt._gh_api("repos/o/r/x?per_page=5", True)
+        self.assertEqual(len(pages), xt.GH_MAX_PAGES)
+        self.assertEqual(xt._gh_page_len("lạ"), 0)
+
+    def test_gh_api_single_call_without_paginate(self):
+        calls, patch = self.fake(3)
+        with patch:
+            self.assertEqual(xt._gh_api("repos/o/r/pulls/7"), [[{"id": 0}, {"id": 1}, {"id": 2}]])
+        self.assertEqual(calls[0][-1], "repos/o/r/pulls/7")

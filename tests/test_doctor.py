@@ -437,9 +437,15 @@ class DoctorVersionTest(DoctorCase):
         return unittest.mock.patch("xt.subprocess.run", side_effect=run)
 
     def test_latest_tag_parsing_and_fail_open(self):
-        page1 = json.dumps([{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "nope"}, "x", {"name": 3}])
-        tags = page1 + "\n" + json.dumps([{"name": "v10.1.0"}])  # --paginate: trang sau vẫn được đọc
-        with self.gh(out=tags):
+        page1 = [{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "nope"}, "x", {"name": 3}]
+        page1 += [{"name": f"t{i}"} for i in range(100 - len(page1))]  # trang đầy 100 → đọc tiếp trang 2
+        pages = {"page=1": json.dumps(page1), "page=2": json.dumps([{"name": "v10.1.0"}])}
+
+        def run(cmd, **kw):  # phân trang tự làm `page=N` (FB-001), không `--paginate`
+            self.assertNotIn("--paginate", cmd)
+            return subprocess.CompletedProcess(cmd, 0, pages.get(cmd[-1].rsplit("&", 1)[-1], "[]"), "")
+
+        with unittest.mock.patch("xt.subprocess.run", side_effect=run):
             self.assertEqual(xt.latest_framework_tag(), (10, 1, 0))  # so số, không so chuỗi; pre-release bỏ
         cases = (
             {"rc": 1},
@@ -456,7 +462,7 @@ class DoctorVersionTest(DoctorCase):
                 self.assertIsNone(xt.latest_framework_tag())
         with unittest.mock.patch.dict(os.environ, {"XT_FRAMEWORK_REPO": "fork/khung"}), self.gh() as run:
             xt.latest_framework_tag()
-        want = ["gh", "api", "--hostname", "github.com", "--paginate", "repos/fork/khung/tags?per_page=100"]
+        want = ["gh", "api", "--hostname", "github.com", "repos/fork/khung/tags?per_page=100&page=1"]
         self.assertEqual(run.call_args[0][0], want)
 
     def test_doctor_warns_only_when_installed_is_older(self):
@@ -732,6 +738,35 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(self.subjects(d, "modified"), [])
         (self.base / "xt.yaml").unlink()
         self.assertEqual(self.subjects(self.drift("--latest", "v0.0.1")[1], "missing"), ["xt.yaml"])
+
+    def test_doctor_drift_manifest_sha256_and_legacy_hex(self):
+        """T-1743: manifest dạng mới (`sha256:<hex>`, install.py) không làm `--drift` báo `modified` oan; manifest cũ hex
+        trần vẫn đọc được; lệch thật vẫn báo ở cả hai dạng; giá trị không phải chuỗi → `modified`, không lỗi. Cùng luật
+        với `install.manifest_hash`."""
+        mf = self.base / ".xtemplates" / "manifest.json"
+        doc = json.loads(mf.read_text(encoding="utf-8"))
+        self.assertEqual([v for v in doc["files"].values() if not v.startswith("sha256:")], [])
+        rc, d = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, d["drift"]), (0, []))
+        legacy = {**doc, "files": {rel: install.manifest_hash(v) for rel, v in doc["files"].items()}}
+        mf.write_text(json.dumps(legacy), encoding="utf-8")
+        rc, d = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, d["drift"]), (0, []))
+        rel = ".claude/hooks/stop-guard.sh"
+        (self.base / rel).write_text("# tuỳ chỉnh\n", encoding="utf-8")
+        for form in (doc, legacy):
+            mf.write_text(json.dumps(form), encoding="utf-8")
+            rc, d = self.drift("--latest", "v0.0.1")
+            self.assertEqual((rc, d["ok"], self.subjects(d, "modified")), (0, True, [rel]))
+        (self.base / rel).write_bytes((ROOT / rel).read_bytes())
+        for value in (5, None, ["x"]):
+            with self.subTest(value=value):
+                mf.write_text(json.dumps({**legacy, "files": {**legacy["files"], rel: value}}), encoding="utf-8")
+                self.assertEqual(self.subjects(self.drift("--latest", "v0.0.1")[1], "modified"), [rel])
+        h = install.sha256(b"x")
+        for value in (h, install.hash_label(h), ""):
+            self.assertEqual(xt._manifest_hex(value), install.manifest_hash(value))
+        self.assertIsNone(xt._manifest_hex(None))
 
     def test_doctor_drift_modified_only_is_ok(self):
         files = json.loads((self.base / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))["files"]

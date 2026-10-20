@@ -22,6 +22,11 @@ import install
 import xt
 
 
+def stored(data: bytes) -> str:
+    """Hash của `data` đúng dạng install.py ghi vào manifest: `sha256:<hex>` (T-1743)."""
+    return install.hash_label(install.sha256(data))
+
+
 class InstallTest(unittest.TestCase):
     def setUp(self):
         self.target = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -291,10 +296,10 @@ class InstallTest(unittest.TestCase):
         for files in self.manifests():
             # D-114: file của dự án ra `.xtemplates-new` → ghi hash MẪU (không phải hash file dự án, nên không bao giờ
             # bị coi là "chưa sửa" mà đè)
-            self.assertEqual(files[".github/workflows/ci.yml"], install.sha256(tmpl.read_bytes()))
+            self.assertEqual(files[".github/workflows/ci.yml"], stored(tmpl.read_bytes()))
             for gh in (".github/workflows/secret-scan.yml", ".github/pull_request_template.md"):
                 # hash = nội dung ĐÃ ghi (mẫu .md đã bỏ frontmatter) → `doctor --drift` so được với file thật
-                self.assertEqual(files[gh], install.sha256((self.target / gh).read_bytes()), gh)
+                self.assertEqual(files[gh], stored((self.target / gh).read_bytes()), gh)
         # Cài lại khi mẫu không đổi sau `updated-new` → `kept-own`: không ghi lại `.xtemplates-new`, không đè file dự án
         own.with_name("ci.yml.xtemplates-new").unlink()
         err = io.StringIO()
@@ -307,7 +312,7 @@ class InstallTest(unittest.TestCase):
         scan = self.target / ".github" / "workflows" / "secret-scan.yml"
         scan.write_text("# bản khung cũ\n", encoding="utf-8")
         legacy, _ = self.manifests()
-        legacy[".github/workflows/secret-scan.yml"] = install.sha256(scan.read_bytes())
+        legacy[".github/workflows/secret-scan.yml"] = install.sha256(scan.read_bytes())  # hex trần như manifest cũ
         (self.target / ".xtemplates" / "harness.sha256.json").write_text(json.dumps(legacy), encoding="utf-8")
         with redirect_stderr(io.StringIO()):
             self.run_install("--with-github")
@@ -341,7 +346,7 @@ class InstallTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()):
             self.assertEqual(self.run_install("--no-harness", "--with-github"), 0)
         _, files = self.manifests()
-        self.assertEqual(files[".github/workflows/secret-scan.yml"], install.sha256(tmpl))
+        self.assertEqual(files[".github/workflows/secret-scan.yml"], stored(tmpl))
         shutil.rmtree(self.target / ".xtemplates")
         scan.write_text("# CI quét bí mật của dự án\n", encoding="utf-8")
         real = install.copy_if_absent
@@ -625,7 +630,7 @@ class InstallEdgeTest(unittest.TestCase):
         manifest = json.loads((self.target / ".xtemplates" / "harness.sha256.json").read_text(encoding="utf-8"))
         # D-114: `updated-new` ghi hash MẪU mới (không phải hash file của dự án) → lần sau mẫu không đổi thì im lặng
         self.assertEqual(
-            manifest[".claude/hooks/stop-guard.sh"], install.sha256((ROOT / ".claude/hooks/stop-guard.sh").read_bytes())
+            manifest[".claude/hooks/stop-guard.sh"], stored((ROOT / ".claude/hooks/stop-guard.sh").read_bytes())
         )
         self.assertIn(".claude/hooks/session-start.sh", manifest)
         new.unlink()  # dự án đã xem/gộp bản mới
@@ -638,7 +643,8 @@ class InstallEdgeTest(unittest.TestCase):
 
     def test_harness_symlink_is_skipped_and_hash_kept(self):
         """AUD-HAR-010 cho file harness: đích là symlink → `skipped-symlink`, không ghi qua liên kết; chưa có hash thì
-        không ghi, đã có hash thì giữ nguyên (symlink không thuộc `HASHED`)."""
+        không ghi, đã có hash thì giữ nguyên (symlink không thuộc `HASHED`) — hex trần của manifest cũ ghi lại dạng
+        `sha256:<hex>`."""
         outside = self.tmp / "ngoai.sh"
         hook = self.target / ".claude" / "hooks" / "stop-guard.sh"
         hook.parent.mkdir(parents=True)
@@ -653,9 +659,7 @@ class InstallEdgeTest(unittest.TestCase):
         manifest[".claude/hooks/stop-guard.sh"] = install.sha256(b"ban cu\n")
         mf.write_text(json.dumps(manifest), encoding="utf-8")
         self.install_quiet()
-        self.assertEqual(
-            json.loads(mf.read_text(encoding="utf-8"))[".claude/hooks/stop-guard.sh"], install.sha256(b"ban cu\n")
-        )
+        self.assertEqual(json.loads(mf.read_text(encoding="utf-8"))[".claude/hooks/stop-guard.sh"], stored(b"ban cu\n"))
         self.assertFalse(outside.exists())
 
     def test_missing_root_template_is_skipped(self):
@@ -974,10 +978,10 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertEqual(code, 0, err.getvalue())
         return code, err.getvalue()
 
-    def plan(self) -> dict[str, dict]:
+    def plan(self, *extra: str) -> dict[str, dict]:
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(io.StringIO()):
-            self.assertEqual(install.main([str(self.target), "--plan"]), 0)
+            self.assertEqual(install.main([str(self.target), "--plan", *extra]), 0)
         return {f["path"]: f for f in json.loads(out.getvalue())["files"]}
 
     def files(self) -> dict[str, str]:
@@ -988,7 +992,8 @@ class InstallUpgradeTest(unittest.TestCase):
         return legacy
 
     def set_installed_hash(self, rel: str, content: bytes) -> None:
-        """Giả lập: lần cài trước là bản khung `content` (mẫu đã đổi kể từ đó)."""
+        """Giả lập: lần cài trước là bản khung `content` (mẫu đã đổi kể từ đó) — ghi hex trần như manifest cũ; dạng
+        `sha256:<hex>`: `test_manifest_*`."""
         mf = self.target / ".xtemplates" / "harness.sha256.json"
         m = json.loads(mf.read_text(encoding="utf-8"))
         m[rel] = install.sha256(content)
@@ -1030,7 +1035,7 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertEqual(new.read_bytes(), self.template("AGENTS.md"))
         self.assertEqual(agents.read_text(encoding="utf-8"), "# luật riêng\n")
         self.assertIn("AGENTS.md: giữ file của dự án; mẫu khung ở AGENTS.md.xtemplates-new", err)
-        self.assertEqual(self.files()["AGENTS.md"], install.sha256(self.template("AGENTS.md")))
+        self.assertEqual(self.files()["AGENTS.md"], stored(self.template("AGENTS.md")))
         new.unlink()  # dự án đã gộp phần của khung
         _, err = self.install_quiet()
         self.assertFalse(new.exists())
@@ -1047,7 +1052,7 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertEqual(claude.read_bytes(), self.template("CLAUDE.md"))
         self.assertFalse(claude.with_name("CLAUDE.md.xtemplates-new").exists())
         self.assertIn("CLAUDE.md: updated", err)
-        self.assertEqual(self.files()["CLAUDE.md"], install.sha256(self.template("CLAUDE.md")))
+        self.assertEqual(self.files()["CLAUDE.md"], stored(self.template("CLAUDE.md")))
 
     def test_manifest_records_root_file_hashes(self):
         """Hash file gốc = nội dung mẫu đã ghi (sau biến đổi) trong CÙNG map `files` với harness; cài lại không đổi gì
@@ -1055,7 +1060,7 @@ class InstallUpgradeTest(unittest.TestCase):
         self.install_quiet()
         files = self.files()
         for name in install.ROOT_TEMPLATES:
-            self.assertEqual(files[name], install.sha256((self.target / name).read_bytes()), name)
+            self.assertEqual(files[name], stored((self.target / name).read_bytes()), name)
         self.assertIn(".claude/hooks/stop-guard.sh", files)
         manifest = (self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8")
         self.install_quiet()
@@ -1067,7 +1072,144 @@ class InstallUpgradeTest(unittest.TestCase):
         _, err = self.install_quiet()
         self.assertIn("CLAUDE.md: skipped-symlink", err)
         self.assertFalse(outside.exists())
-        self.assertEqual(self.files()["CLAUDE.md"], install.sha256(b"# mau CLAUDE cu\n"))
+        self.assertEqual(self.files()["CLAUDE.md"], stored(b"# mau CLAUDE cu\n"))
+
+    BARE_HEX = re.compile(r'"[0-9a-f]{64}"')  # giá trị hex trần trong JSON — dạng gitleaks `generic-api-key` bắt
+
+    def to_bare_hex(self, extra: dict[str, str] | None = None) -> None:
+        """Giả lập manifest ≤ 3.11.0: mọi hash ở cả hai file về hex trần (+ `extra` đè lên)."""
+        xt_dir = self.target / ".xtemplates"
+        for mf in (xt_dir / "harness.sha256.json", xt_dir / "manifest.json"):
+            doc = json.loads(mf.read_text(encoding="utf-8"))
+            files = doc.get("files", doc)
+            files.update({rel: install.manifest_hash(v) for rel, v in files.items()})
+            files.update(extra or {})
+            mf.write_text(json.dumps(doc), encoding="utf-8")
+            self.assertIsNotNone(self.BARE_HEX.search(mf.read_text(encoding="utf-8")), mf.name)
+
+    def test_manifest_labels_every_hash_sha256(self):
+        """T-1743: gitleaks (`generic-api-key`) bắt hex trần sau khoá `…/secret-scan.yml` → mọi hash ghi `sha256:<hex>`
+        ở cả hai file manifest — harness, file gốc lẫn `.github/`; giá trị là hash nội dung đã ghi."""
+        self.install_quiet("--with-github")
+        files = self.files()
+        for rel in (".claude/hooks/stop-guard.sh", "AGENTS.md", ".github/workflows/secret-scan.yml"):
+            self.assertEqual(files[rel], stored((self.target / rel).read_bytes()), rel)
+        self.assertLessEqual({*install.GITHUB_FILES, *install.ROOT_TEMPLATES}, set(files))
+        self.assertEqual([v for v in files.values() if not re.fullmatch(r"sha256:[0-9a-f]{64}", v)], [])
+
+    def test_manifest_hash_forms_and_load_manifest(self):
+        """`manifest_hash` bỏ tiền tố `sha256:` (hex trần giữ nguyên), `hash_label` không nhân đôi tiền tố;
+        `classify_copy` nhận cả hai dạng (kể cả trộn) cho `installed_hash`/`template_hash`; `load_manifest` trả hex, bỏ
+        giá trị không phải chuỗi, JSON không phải object → rỗng."""
+        h = install.sha256(b"x")
+        self.assertEqual([install.manifest_hash(v) for v in (h, "sha256:" + h, "")], [h, h, ""])
+        self.assertEqual({install.hash_label(h), install.hash_label("sha256:" + h)}, {"sha256:" + h})
+        src, dst = self.tmp / "khung.sh", self.tmp / "dich.sh"
+        src.write_bytes(b"ban moi\n")
+        dst.write_bytes(b"ban cu\n")
+        for form in (install.sha256, stored):
+            with self.subTest(form=form.__name__):
+                for installed, want in (
+                    (b"ban cu\n", "updated"),
+                    (b"ban moi\n", "kept-own"),
+                    (b"khac\n", "updated-new"),
+                ):
+                    self.assertEqual(install.classify_copy(src, dst, installed_hash=form(installed))[0], want)
+                got = install.classify_copy(src, dst, installed_hash=stored(b"mau\n"), template_hash=form(b"mau\n"))
+                self.assertEqual(got[0], "kept-own")
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        mf.parent.mkdir()
+        mf.write_text(json.dumps({"a": "sha256:" + h, "b": h, "c": 5, "d": None, "e": [h]}), encoding="utf-8")
+        self.assertEqual(install.load_manifest(self.target), {"a": h, "b": h})
+        mf.write_text(json.dumps([h]), encoding="utf-8")
+        self.assertEqual(install.load_manifest(self.target), {})
+
+    def test_manifest_legacy_bare_hex_still_pristine(self):
+        """Manifest cũ (hex trần): file còn đúng hash lần cài trước vẫn là "chưa sửa" → cập nhật tại chỗ (harness, file
+        gốc, `.github/`); đã sửa mà mẫu không đổi → `kept-own`; `--plan` khớp; cài xong ghi `sha256:<hex>`, cài lại
+        không đổi manifest; hash dạng mới của bản cũ cũng là "chưa sửa"."""
+        self.install_quiet("--with-github")
+        old = b"# ban khung cu\n"
+        expect = {
+            ".claude/hooks/stop-guard.sh": (ROOT / ".claude/hooks/stop-guard.sh").read_bytes(),
+            "CLAUDE.md": self.template("CLAUDE.md"),
+            ".github/workflows/secret-scan.yml": (ROOT / "framework/templates/secret-scan.yml").read_bytes(),
+        }
+        for rel in expect:
+            (self.target / rel).write_bytes(old)
+        agents = self.target / "AGENTS.md"
+        agents.write_text("# luật riêng\n", encoding="utf-8")
+        self.to_bare_hex(dict.fromkeys(expect, install.sha256(old)))
+        plan = self.plan("--with-github")
+        want = {**dict.fromkeys(expect, "updated"), "AGENTS.md": "kept-own"}
+        self.assertEqual({rel: plan[rel]["action"] for rel in want}, want)
+        _, err = self.install_quiet("--with-github")
+        self.assertEqual({rel: (self.target / rel).read_bytes() for rel in expect}, expect)
+        self.assertEqual(sorted(p.name for p in self.target.rglob("*.xtemplates-new")), [])
+        self.assertEqual(agents.read_text(encoding="utf-8"), "# luật riêng\n")
+        self.assertIn("AGENTS.md: kept-own", err)
+        files = self.files()
+        self.assertEqual({rel: files[rel] for rel in expect}, {rel: stored(data) for rel, data in expect.items()})
+        self.assertEqual(files["AGENTS.md"], stored(self.template("AGENTS.md")))
+        self.assertEqual([v for v in files.values() if not v.startswith("sha256:")], [])
+        manifest = (self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8")
+        self.install_quiet("--with-github")
+        self.assertEqual((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"), manifest)
+        hook = self.target / ".claude/hooks/stop-guard.sh"
+        hook.write_bytes(old)
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        mf.write_text(json.dumps({**self.files(), ".claude/hooks/stop-guard.sh": stored(old)}), encoding="utf-8")
+        self.assertEqual(self.plan()[".claude/hooks/stop-guard.sh"]["action"], "updated")
+        self.install_quiet()
+        self.assertEqual(hook.read_bytes(), expect[".claude/hooks/stop-guard.sh"])
+
+    def test_manifest_no_bare_hex_after_carry_over(self):
+        """Regex trên file: manifest vừa ghi không còn giá trị `"<64 hex>"` trần — kể cả hash chỉ GIỮ LẠI từ manifest cũ
+        mà không băm lại: `.github/` khi cài lại không `--with-github`, file `kept-own`, đích symlink."""
+        self.install_quiet("--with-github")
+        xt_dir = self.target / ".xtemplates"
+        manifests = (xt_dir / "harness.sha256.json", xt_dir / "manifest.json")
+        self.assertEqual([mf.name for mf in manifests if self.BARE_HEX.search(mf.read_text(encoding="utf-8"))], [])
+        self.to_bare_hex()
+        (self.target / ".claude/hooks/stop-guard.sh").write_text("# đã sửa\n", encoding="utf-8")  # kept-own
+        link = self.target / ".claude/hooks/session-start.sh"
+        link.unlink()
+        link.symlink_to(self.tmp / "ngoai.sh")  # skipped-symlink: giữ hash cũ
+        _, err = self.install_quiet()
+        self.assertRegex(err, r"✓ \.claude/: .*kept-own 1 .*skipped-symlink 1")
+        self.assertEqual([mf.name for mf in manifests if self.BARE_HEX.search(mf.read_text(encoding="utf-8"))], [])
+        files = self.files()
+        scan = ".github/workflows/secret-scan.yml"
+        self.assertEqual(files[scan], stored((self.target / scan).read_bytes()))
+        for rel in (".claude/hooks/stop-guard.sh", ".claude/hooks/session-start.sh"):
+            self.assertEqual(files[rel], stored((ROOT / rel).read_bytes()), rel)
+
+    def test_manifest_mixed_forms_after_interrupted_write(self):
+        """Nâng từ manifest hex trần bị ngắt giữa hai lần ghi (`harness.sha256.json` đã `sha256:`, `manifest.json` còn hex
+        trần) — trạng thái người đọc đồng thời có thể thấy: `--plan` và `doctor --drift` vẫn đúng (không `modified` oan),
+        lần cài sau ghi cả hai file dạng `sha256:`."""
+        self.install_quiet("--with-github")
+        self.to_bare_hex()
+        real = install.write_atomic
+
+        def fail_v2(path: Path, text: str) -> None:
+            if path.name == "manifest.json":
+                raise OSError("ngắt giữa chừng")
+            real(path, text)
+
+        with mock.patch.object(install, "write_atomic", side_effect=fail_v2), redirect_stderr(io.StringIO()):
+            self.assertRaises(OSError, install.main, [str(self.target), "--label", "t"])
+        xt_dir = self.target / ".xtemplates"
+        legacy = json.loads((xt_dir / "harness.sha256.json").read_text(encoding="utf-8"))
+        v2 = json.loads((xt_dir / "manifest.json").read_text(encoding="utf-8"))["files"]
+        self.assertEqual({rel: install.manifest_hash(v) for rel, v in legacy.items()}, v2)
+        self.assertTrue(all(v.startswith("sha256:") for v in legacy.values()))
+        self.assertFalse(any(v.startswith("sha256:") for v in v2.values()))
+        self.assertEqual({f["action"] for f in self.plan("--with-github").values()}, {"kept"})
+        report = xt.drift_report(self.target, "v0.0.1")
+        self.assertEqual((report["ok"], report["drift"]), (True, []))
+        self.install_quiet("--with-github")
+        self.assertEqual([v for v in self.files().values() if not v.startswith("sha256:")], [])
 
     def test_progress_hash_is_template_before_head_sha(self):
         """PROGRESS.md (D-114): hash vào manifest là mẫu TRƯỚC khi thay SHA HEAD, nên HEAD đổi không làm mẫu "đổi" — cài
@@ -1088,7 +1230,7 @@ class InstallUpgradeTest(unittest.TestCase):
         progress = self.target / "PROGRESS.md"
         self.assertIn(f"`{first}`", progress.read_text(encoding="utf-8"))  # AUD-HAR-053 giữ nguyên
         basis = install.sha256(self.template("PROGRESS.md"))
-        self.assertEqual(self.files()["PROGRESS.md"], basis)
+        self.assertEqual(self.files()["PROGRESS.md"], install.hash_label(basis))
         self.assertNotEqual(install.sha256(progress.read_bytes()), basis)
         commit("2")
         _, err = self.install_quiet()
@@ -1100,7 +1242,7 @@ class InstallUpgradeTest(unittest.TestCase):
         _, err = self.install_quiet()
         self.assertIn("PROGRESS.md: kept-own", err)
         self.assertFalse(progress.with_name("PROGRESS.md.xtemplates-new").exists())
-        self.assertEqual(self.files()["PROGRESS.md"], basis)
+        self.assertEqual(self.files()["PROGRESS.md"], install.hash_label(basis))
 
     def test_upgrade_from_install_without_root_hashes_infers_old_template(self):
         """Dự án cài từ bản chưa có hash file gốc (giả 3.7.1): hash lần cài trước suy từ `.xtemplates/framework/templates/`
@@ -1147,7 +1289,7 @@ class InstallUpgradeTest(unittest.TestCase):
         )
         files = self.files()
         for name in install.ROOT_TEMPLATES:
-            self.assertEqual(files[name], install.sha256(self.template(name)), name)
+            self.assertEqual(files[name], stored(self.template(name)), name)
         self.assertIn("[install] Bước làm tay từ CHANGELOG (3.7.1 (9433792) → t):\n", err)
 
     def test_infer_root_hashes_skips_missing_symlink_and_unreadable(self):
@@ -1357,7 +1499,7 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertTrue(data.startswith(b"lint: x\r\ntest: y\r\n\r\n" + self.MARKER.encode() + b"\r\n# "), data[:80])
         self.assertTrue(data.endswith(b"\r\n"))
         self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
-        self.assertEqual(self.files()["xt.yaml"], install.sha256(self.template("xt.yaml")))  # hash mẫu MỚI
+        self.assertEqual(self.files()["xt.yaml"], stored(self.template("xt.yaml")))  # hash mẫu MỚI
         _, err = self.install_quiet()
         self.assertEqual(y.read_bytes(), data)
         self.assertIn("xt.yaml: kept-own", err)
