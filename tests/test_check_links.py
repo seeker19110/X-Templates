@@ -339,7 +339,9 @@ class AutonomyPolicySingleHomeTest(unittest.TestCase):
     def md_files(self):
         skip = {".git", "node_modules", ".venv", ".autopilot", "__pycache__", ".xtemplates"}
         for p in sorted(ROOT.rglob("*.md")):
-            if not any(part in skip for part in p.relative_to(ROOT).parts):
+            parts = p.relative_to(ROOT).parts
+            # .claude/worktrees: bản sao repo của subagent, không phải nội dung của repo
+            if not any(part in skip for part in parts) and parts[:2] != (".claude", "worktrees"):
                 yield p
 
     def test_autonomy_policy_single_home_markers_only_in_home(self):
