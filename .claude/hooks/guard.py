@@ -701,8 +701,14 @@ def brace_variants(cmd: str) -> Optional[List[str]]:
     return [t] if t != s else []
 
 
+PWD_SUBST_RE = re.compile(
+    r"\$\(\s*pwd\s*\)|`\s*pwd\s*`"
+)  # `$(pwd)`/`` `pwd` `` = `$PWD` (review #187: không nháy bị tách token)
+
+
 def tokenize(cmd: str) -> List[str]:
     cmd = IFS_RE.sub(" ", expand_ansi_c(strip_heredocs(join_continuations(cmd))))
+    cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -4601,7 +4607,7 @@ INTERP_RUNNERS = {
     *(("conda", "run"), ("mamba", "run"), ("micromamba", "run"), ("pixi", "run")),
     *(("pipx", "run"), ("uvx",), ("uv", "tool", "run")),
 }
-INTERP_RUNNER_SCAN = 6  # số token đầu sau lệnh chạy hộ được dò tìm lệnh thật
+INTERP_RUNNER_SCAN = 64  # số token đầu sau lệnh chạy hộ được dò tìm lệnh thật (review #187: 6 sót `--with a` ×3)
 INTERP_RUNNER_DEPTH = (
     8  # số lớp chạy hộ lồng được bóc (`uv run npx node -e …`); sâu hơn → không coi là trình thông dịch
 )

@@ -39,7 +39,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   với `/dev/stdin`/`/dev/fd/0` quét như `bash <<<`; `curl … | source /dev/stdin` chặn như `curl | sh` (AUD-SEC-098).
 - Guard: `rm -rf $PWD/..`, `rm -rf ~+`, `rm -rf ~-/x` bị chặn như `rm -rf ..` (AUD-SEC-099 🔴): `_outside_project` coi
   mọi `$…` là không rõ nên cho qua — nay `$PWD`/`~+` là thư mục đang đứng, `~-`/`$OLDPWD` là ngoài dự án; đích `rm`
-  chuẩn hoá `..`. **Dự án đích:** chạy lại `install.py` (guard đổi).
+  chuẩn hoá `..`. Review #187: `$(pwd)`/`` `pwd` `` không nháy (tokenizer từng tách thành 5 token) được thay bằng `$PWD`
+  trước khi tách; lệnh chạy hộ dò tới 64 token cờ (6 từng bỏ sót `uv run --with a --with b --with c python …`); giới hạn
+  còn lại ghi ở AUD-SEC-101. **Dự án đích:** chạy lại `install.py` (guard đổi).
 - `docs/ops/AUTONOMY-BASELINE.md` §3 đo lại: 438 ca, guard 308, phủ 88/144 (AUD-DOC-072); `tests/shard-weights.json`
   đo lại 216 lớp (AUD-TEST-017).
 - `merge-check`/`pr next`/`pr reviewed`: sổ review cục bộ hỏng (`reviews` không phải list) bị bỏ qua thay vì văng

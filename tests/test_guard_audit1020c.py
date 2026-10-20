@@ -104,6 +104,11 @@ class InterpFlagFormsTest(unittest.TestCase):
             f'bunx node -e "{JS_EXEC}"',
             f'uv run npx node --eval="{JS_EXEC}"',
             f'uv run python -c "{PY_FENCE}"',
+            # review #187: hơn 6 token cờ trước tên trình thông dịch từng làm lệnh chạy hộ không được bóc
+            f'uv run --with a --with b --with c python3 -c "{PY_FENCE}"',
+            f'uv run --python 3.12 --with a --with b --env-file e python3 -c "{PY_EXEC}"',
+            f'npx -y -y -y -y -y -y -y node -e "{JS_EXEC}"',
+            f'npm exec --yes --package=a --package=b --package=c -- node -e "{JS_EXEC}"',
         ):
             with self.subTest(cmd=cmd):
                 self.assertDeny(cmd)

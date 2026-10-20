@@ -122,12 +122,25 @@ class RmPwdParentTest(unittest.TestCase):
             "rm -rf build/../..",
             "rm -rf $PWD/../other-project",
             "rm -rf ~-/x",
+            # review #187: `$(pwd)` không nháy bị tokenizer tách thành `$`, `(`, `pwd`, `)`, `/..`
+            "rm -rf $(pwd)/..",
+            "rm -rf $(pwd)",
+            "rm -rf $(pwd)/*",
+            "rm -rf `pwd`/..",
+            "cd docs && rm -rf $(pwd)/..",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny", cmd)
 
     def test_guard_rm_pwd_inside_passes(self):
-        for cmd in ("rm -rf $PWD/build", "rm -rf ~+/dist", "rm -rf build/../dist", "rm -rf $TMPDIR/x"):
+        for cmd in (
+            "rm -rf $PWD/build",
+            "rm -rf ~+/dist",
+            "rm -rf build/../dist",
+            "rm -rf $TMPDIR/x",
+            "rm -rf $(pwd)/build",
+            'echo "$(pwd)"',
+        ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
