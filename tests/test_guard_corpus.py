@@ -223,7 +223,7 @@ class GuardCorpusBase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.root = tempfile.mkdtemp()
+        cls.root = cls.enterClassContext(tempfile.TemporaryDirectory())
         os.makedirs(os.path.join(cls.root, ".claude", "hooks"))
         Path(cls.root, "xt.yaml").write_text("", encoding="utf-8")
 
@@ -308,7 +308,7 @@ KNOWN_GAPS = (
 
 class GuardKnownGapsTest(unittest.TestCase):
     def test_known_gaps_are_still_gaps(self) -> None:
-        root = tempfile.mkdtemp()
+        root = self.enterContext(tempfile.TemporaryDirectory())
         closed = [c for c in KNOWN_GAPS if guard.apply_policy(guard.bash_decision(c, root))["decision"] == "deny"]
         self.assertEqual(closed, [], "guard đã chặn — chuyển các dòng này khỏi KNOWN_GAPS sang ca phải chặn")
 
@@ -317,7 +317,7 @@ class GuardCorpusFixesTest(unittest.TestCase):
     """Lỗ bộ tấn công tìm ra lần đầu (2026-10-18) và chặn nhầm `curl … | python3 -m json.tool`."""
 
     def setUp(self) -> None:
-        self.root = tempfile.mkdtemp()
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
 
     def dec(self, cmd: str) -> str:
         return str(guard.apply_policy(guard.bash_decision(cmd, self.root))["decision"])
@@ -410,7 +410,7 @@ class GuardRemainingGapsBase(unittest.TestCase):
     `GuardRemainingGapsTest` và `GuardFindAutopilotPart*Test`."""
 
     def setUp(self) -> None:
-        self.root = tempfile.mkdtemp()
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
 
     def dec(self, cmd: str) -> str:
         return str(guard.apply_policy(guard.bash_decision(cmd, self.root))["decision"])
@@ -712,7 +712,7 @@ class GuardGaps341Test(unittest.TestCase):
     qua sort/sed/awk/perl/git/tar, `bash -c "$(cat <<'E' …)"`, `for` nhiều giá trị."""
 
     def setUp(self) -> None:
-        self.root = tempfile.mkdtemp()
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
         os.makedirs(os.path.join(self.root, ".autopilot"))
 
     def dec(self, cmd: str) -> str:

@@ -685,3 +685,10 @@
 - Chọn: đỏ khi lint hoặc test chưa khai (cả pha build), ::error:: chỉ chỗ điền
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: CI xanh rỗng cho merge mã chưa kiểm (bẫy ci-cd-pipeline.md); code nhanh ≠ không cổng; ADR-0011 cổng rỗng là đỏ; dự án mới điền xt.yaml ở task đầu
 - Đường lùi: đổi bước kiểm thành ::warning::
+
+### D-097 · 2026-10-20T06:12:31+00:00 · Guard _dir_holds_gate đọc toàn bộ /tmp (≈20k mục, 2,5 s/lệnh)
+
+- Phương án: (1) giữ nguyên, chấp nhận trễ và trọng số phụ thuộc máy · (2) bỏ liệt kê thư mục ngoài gốc dự án mà không có dấu hiệu chứa cổng (giữ bảo vệ ~/.claude, .git), kèm test chặn/cho qua
+- Chọn: bỏ liệt kê thư mục ngoài gốc dự án mà không có dấu hiệu chứa cổng (giữ bảo vệ ~/.claude, .git), kèm test chặn/cho qua
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1 giữ nguyên bảo vệ (test chặn hiện có không đổi), tiêu chí 4 trễ mỗi lệnh Bash của agent; thư mục tạm hệ thống không chứa file cổng của dự án
+- Đường lùi: trả lại os.listdir cho mọi đích

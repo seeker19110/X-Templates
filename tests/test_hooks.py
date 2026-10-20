@@ -106,7 +106,7 @@ class PreBashGuardTest(unittest.TestCase):
         self.assertEqual((code, out.strip()), (0, ""))
 
     def test_commit_runs_gate_and_blocks_when_red(self):
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
         (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
@@ -121,7 +121,7 @@ class PreBashGuardTest(unittest.TestCase):
 
     def test_commit_gate_with_ask(self):
         # AUD-HAR-013: lệnh commit kèm một câu hỏi (push main) vẫn phải qua cổng trước khi hỏi người.
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
         (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
@@ -141,7 +141,7 @@ class PreBashGuardTest(unittest.TestCase):
 
     def test_commit_gate_message_flags_are_data(self):
         # AUD-SEC-005: ` -n ` / `--no-verify` nằm trong message không được làm bỏ cổng.
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", tmp / "scripts" / "dev-task.sh")
         (tmp / "xt.yaml").write_text("test: sh -c 'echo FAIL; exit 1'\n", encoding="utf-8")
@@ -364,7 +364,7 @@ class CommitGateFastHookTest(unittest.TestCase):
 class SessionStartUtf8Test(unittest.TestCase):
     def test_session_start_utf8_cut_is_valid(self):
         # AUD-HAR-011: head -c 8192 từng cắt giữa ký tự UTF-8 tiếng Việt.
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         body = "\n".join(f"- dòng {i}: Đang làm việc dở với tiếng Việt có dấu ạ ễ ữ" for i in range(400))
         pad = ""
         while (("# PROGRESS" + pad + "\n## Đang làm\n" + body).encode()[8192] & 0xC0) != 0x80:
@@ -383,7 +383,7 @@ class SessionStartUtf8Test(unittest.TestCase):
         # PROGRESS.md dạng NFD (macOS): awk so byte nên từng chỉ còn dòng tiêu đề, mất cả 4 mục.
         import unicodedata
 
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         text = "# PROGRESS\n## Đang làm\n- việc A\n## Bàn giao phiên\n- SHA abc\n## Ghi chú\n- bỏ qua\n"
         (tmp / "PROGRESS.md").write_text(unicodedata.normalize("NFD", text), encoding="utf-8")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
@@ -405,7 +405,7 @@ class GuardMatrixTest(unittest.TestCase):
         import guard
 
         self.g = guard
-        self.root = tempfile.mkdtemp()
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
 
     def dec(self, cmd: str) -> str:
         return str(self.g.bash_decision(cmd, self.root)["decision"])
@@ -1035,7 +1035,7 @@ class GuardStoredScanTest(unittest.TestCase):
         import guard
 
         self.g = guard
-        self.root = tempfile.mkdtemp()
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
 
     def dec(self, cmd: str) -> str:
         return str(self.g.bash_decision(cmd, self.root)["decision"])
@@ -1220,7 +1220,7 @@ class PreEditGuardTest(unittest.TestCase):
         self.assertEqual(self.d("pyproject.toml"), "ask")
 
     def test_migration_existing_vs_new(self):
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "db" / "migrations").mkdir(parents=True)
         (tmp / "db" / "migrations" / "0001_init.sql").write_text("select 1;", encoding="utf-8")
         self.assertEqual(self.d("db/migrations/0001_init.sql", tmp), "ask")
@@ -1235,14 +1235,14 @@ class PreEditGuardTest(unittest.TestCase):
 class StopAndSessionTest(unittest.TestCase):
     def test_stop_guard_inactive_allows_stop(self):
         # Dự án tạm chưa `loop init` — không dùng ROOT, vì autopilot có thể đang bật trên chính repo này.
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
         code, out, _ = run_hook("stop-guard.sh", {"stop_hook_active": False}, tmp)
         self.assertEqual((code, out.strip()), (0, ""))
 
     def test_stop_guard_blocks_when_loop_active(self):
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
         (tmp / "docs" / "autopilot").mkdir(parents=True)
@@ -1320,7 +1320,7 @@ class StopAndSessionTest(unittest.TestCase):
 
 class DevTaskTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
 
@@ -4776,6 +4776,72 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
         )
         chars = "".join(c for _, c in self.g._unquoted("a$'\\''b\"c$(d\"e\"f)g\"h'i'j"))
         self.assertEqual(chars, "abdf)hj")
+
+
+class GuardOutsideDirTest(unittest.TestCase):
+    """D-097: đích ghi/dời là thư mục NGOÀI dự án (`mv x /tmp`) — không liệt kê cả thư mục (/tmp ≈ 20k mục làm mỗi lệnh
+    chậm ~2,5 s); thư mục chứa file cổng đích danh (`~/.claude/settings.json`, `Makefile`) vẫn là cổng."""
+
+    def setUp(self):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        self.g = guard
+        self.root = self.enterContext(tempfile.TemporaryDirectory())
+        self.out = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for i in range(300):
+            (self.out / f"tmp{i}").touch()
+
+    def raw(self, cmd: str) -> str:
+        return str(self.g.bash_decision(cmd, self.root)["decision"] or "")
+
+    def no_listdir(self):
+        return mock.patch.object(self.g.os, "listdir", side_effect=AssertionError("không được liệt kê thư mục ngoài"))
+
+    def test_outside_dir_is_not_listed(self):
+        with self.no_listdir():
+            for cmd in (f"mv x {self.out}", f"cp a {self.out}/", f"mv x {self.out}/tmp1"):
+                self.assertEqual(self.raw(cmd), "", cmd)
+                self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "", cmd)
+            self.assertEqual(self.g._target_kind(str(self.out), self.root), "")
+
+    def test_outside_dir_with_named_gate_file_is_still_gate(self):
+        claude = self.out / ".claude"
+        claude.mkdir()
+        with self.no_listdir():
+            self.assertEqual(self.g._target_kind(str(claude), self.root), "")  # chưa có settings.json
+            (claude / "settings.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(self.g._target_kind(str(claude), self.root), "gate")
+            self.assertEqual(self.raw(f"mv x {claude}/"), "ask")  # strict: hỏi như trước
+            self.assertEqual(self.g._target_kind(str(self.out), self.root), "")  # settings.json không nằm thẳng ở đây
+            (self.out / "Makefile").touch()
+            self.assertEqual(self.g._target_kind(str(self.out), self.root), "gate")
+        github = self.out / ".github"
+        github.mkdir()
+        (github / "dependabot.yml").touch()
+        with self.no_listdir():
+            self.assertEqual(self.g._target_kind(str(github), self.root), "gate")
+
+    def test_project_dir_holding_gate_is_still_listed(self):
+        sub = Path(self.root, "sub")
+        sub.mkdir()
+        self.assertEqual(self.g._target_kind(str(sub), self.root), "")
+        (sub / "tsconfig.base.json").touch()  # mẫu có `*`: chỉ thấy được nhờ liệt kê — trong dự án vẫn liệt kê
+        self.assertEqual(self.g._target_kind("sub", self.root), "gate")
+        self.assertEqual(self.raw("cp x sub/"), "ask")
+        self.assertEqual(self.raw("rm -rf sub"), "ask")
+
+    def test_wipe_outside_and_home_claude_unchanged(self):
+        for cmd in ("rm -rf ~/.claude", "rm -rf /home/user/other", "mv ~/.claude /home/user/other"):
+            self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
+
+    def test_gate_names_by_dir_tail(self):
+        names = self.g._gate_names("/x/.claude")
+        self.assertIn("settings.json", names)
+        self.assertIn("Makefile", names)
+        self.assertNotIn("dependabot.yml", names)
+        self.assertFalse(any(c in n for n in names for c in "*?["))
+        self.assertIn("dependabot.yml", self.g._gate_names("/x/.github"))
 
 
 if __name__ == "__main__":
