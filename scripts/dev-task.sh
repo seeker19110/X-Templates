@@ -406,7 +406,7 @@ case "$TASK" in
     for t in format_check lint typecheck "$FT"; do
       if [ "$t" = test-all ]; then
         RAN=$((RAN + 1)); log "run [test-all]: mọi lớp test qua test_list/test_unit, không coverage (XT_GATE_ALL_TESTS=1)"
-        test_shard 1 1
+        ( unset XT_GATE_ALL_TESTS; test_shard 1 1 ) # không rò cờ vào test con: test của chính gate-fast đọc cờ này
       else
         run_task "$t"
       fi || { rc=1; log "GATE-FAST ĐỎ ở '$t' → dừng"; break; }
