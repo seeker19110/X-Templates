@@ -4936,7 +4936,9 @@ class GuardOutsideDirTest(unittest.TestCase):
             r = Path(os.path.realpath(c))
             if r.is_dir() and os.access(r, os.W_OK) and not any(r == a or a in r.parents for a in avoid):
                 return r
-        self.skipTest(f"mọi chỗ đặt HOME giả đều dưới thư mục tạm hoặc cây nguồn ({avoid}) — guard miễn thư mục tạm")
+        raise unittest.SkipTest(
+            f"mọi chỗ đặt HOME giả đều dưới thư mục tạm hoặc cây nguồn ({avoid}) — guard miễn thư mục tạm"
+        )
 
     def test_home_parent_outside_temp_or_skips(self):
         parent = self.home_parent()
