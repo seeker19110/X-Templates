@@ -42,19 +42,19 @@ ghi thì như merge-check lỗi mạng.
 
 | Nhóm | Ca | Đạt | False-green | Chặn oan | Lệch | Lỗi |
 |---|---:|---:|---:|---:|---:|---:|
-| pr | 44 | 44 | 0 | 0 | 0 | 0 |
+| pr | 47 | 47 | 0 | 0 | 0 | 0 |
 | rollup | 17 | 17 | 0 | 0 | 0 | 0 |
-| review | 28 | 28 | 0 | 0 | 0 | 0 |
-| guard | 183 | 183 | 0 | 0 | 0 | 0 |
+| review | 30 | 30 | 0 | 0 | 0 | 0 |
+| guard | 211 | 211 | 0 | 0 | 0 | 0 |
 | ci_log | 25 | 25 | 0 | 0 | 0 | 0 |
 | harness | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Tổng** | **308** | **308** | **0** | **0** | **0** | **0** |
+| **Tổng** | **341** | **341** | **0** | **0** | **0** | **0** |
 
-Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 33 · phát hiện audit 155 · đối kháng do tác giả bản sửa viết 84 · đối kháng do reviewer khác họ
-model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 36. Độ phủ: 128 ID bắt buộc (8 REC §2 + 120 🔴/🟠 đã sửa) —
-75 có ca, 53 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
+Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 44 · phát hiện audit 161 · đối kháng do tác giả bản sửa viết 93 · đối kháng do reviewer khác họ
+model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 43. Độ phủ: 137 ID bắt buộc (8 REC §2 + 129 🔴/🟠 đã sửa) —
+81 có ca, 56 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
 thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run, sổ audit/blueprint, bộ test của khung,
-bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Thời gian chạy ~0,35 s.
+bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Audit delta 2026-10-20: ca `guard-sec083-*`, `guard-sec084-*`, `guard-sec085-*`, `guard-sec087-*`, `guard-har093-*`, `pr-xfeat015-*`/`pr-xfeat016-*`, `review-test014-*`; AUD-CI-014, AUD-HAR-094/095 (workflow, PROGRESS, bằng chứng blueprint) vào `scope.json`. Thời gian chạy ~0,35 s.
 
 Kiểm độ nhạy (test `test_autonomy_bench_detects_regression_as_false_green`): gỡ bản sửa AUD-HAR-058 (`NON_CI_CHECKS`)
 và REC-08 (`NOT_RUN_STATES`) khỏi hàm thật → corpus báo false-green ở `rollup-har058-only-merge-gate`,

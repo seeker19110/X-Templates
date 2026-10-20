@@ -4658,6 +4658,18 @@ def commit_gate_error(keys: Dict[str, str]) -> Optional[str]:
     return f"xt.yaml: {COMMIT_GATE_KEY} '{value}' không hợp lệ (fast|full — vắng = full)"
 
 
+def commit_gate_mode(keys: Dict[str, str]) -> str:
+    """Cổng trước commit hook chạy: `fast` chỉ khi giá trị (đọc như mọi khoá xt.yaml — `yaml_scalar`, dòng trùng thì dòng
+    cuối) đúng `fast`; vắng/`full`/giá trị lạ → `full` (AUD-XFEAT-017: hook từng đọc bằng grep, khác `doctor`/`ci-check`)."""
+    return "fast" if keys.get(COMMIT_GATE_KEY, "") == "fast" else "full"
+
+
+def cmd_commit_gate(args: argparse.Namespace) -> int:
+    """In `fast`|`full` cho xt.yaml của dự án — hook `pre-bash-guard.sh` gọi để đọc `commit_gate` cùng cách với xt.py."""
+    print(commit_gate_mode(_xt_keys(project_dir())))
+    return 0
+
+
 def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
     """(pha, ghi chú) cho `merge-check`: `build` chỉ khi CẢ xt.yaml đã commit ở `ref` (nhánh đích) LẪN cây làm việc đều
     `build` — PR không tự chuyển sang build cho chính nó (như `pr_title_check`); còn lại `harden`. Giá trị lạ → harden kèm
@@ -6189,8 +6201,10 @@ def cmd_changelog_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- license-check (BASE-DEP-005)
 
-# Dòng ghim `tên==bản [; marker]` của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
-LICENSE_REQ_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)[ \t]*(;[^\\#]*)?")
+# Dòng ghim `tên[extras] == bản [; marker]` (dấu cách quanh `==` và `[extras]` tuỳ chọn) của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
+LICENSE_REQ_RE = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)[ \t]*(?:\[[^\]\n]*\][ \t]*)?==[ \t]*([^\s;\\]+)[ \t]*(;[^\\#]*)?"
+)
 # Classifier `License :: OSI Approved :: …` → SPDX, khi gói không khai License-Expression/License ngắn.
 LICENSE_CLASSIFIERS = {
     "MIT License": "MIT",
@@ -7159,8 +7173,9 @@ def pr_title_check_off(base: Path, ref: str) -> bool:
     )
 
 
-def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
-    """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`."""
+def _merge_eval(pr: Dict[str, Any], local: bool = False) -> Tuple[Dict[str, Any], List[str]]:
+    """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`. `local`: đọc thêm sổ
+    review cục bộ của PR, chỉ để chặt hơn (D-104) — `merge-check` của phiên; `merge-gate`/steward chạy ở CI, không có sổ."""
     ref = f"origin/{pr.get('baseRefName') or 'main'}"
     if pr_title_check_off(project_dir(), ref):  # dự án không theo Conventional Commits (review #140)
         pr = {k: v for k, v in pr.items() if k != "title"}
@@ -7168,19 +7183,33 @@ def _merge_eval(pr: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
     phase, phase_notes = delivery_phase(project_dir(), ref)
     risk = merge_risk_globs(project_dir(), ref)
-    return merge_check_result(pr, autonomy, risk, hard_auto, phase), notes + hard_notes + phase_notes
+    rec = _pr_record(read_reviews(project_dir()), str(pr.get("number", ""))) if local else None
+    return merge_check_result(pr, autonomy, risk, hard_auto, phase, rec), notes + hard_notes + phase_notes
 
 
 def merge_check_result(
-    pr: Dict[str, Any], autonomy: int, risk_paths: List[str], hard_auto: bool, phase: str = "harden"
+    pr: Dict[str, Any],
+    autonomy: int,
+    risk_paths: List[str],
+    hard_auto: bool,
+    phase: str = "harden",
+    local: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Kết quả `merge-check` cho PR đã đọc và cấu hình đã đọc, hàm thuần (dùng chung với `autonomy-bench`).
     Điều kiện merge một nhà (ADR-0028): review hợp lệ ở head tính từ review ĐÃ ĐĂNG trên PR (`xtReviews`) — nguồn dùng chung
     với CI, guard và steward (sổ cục bộ của một phiên không phải bằng chứng cho phiên/CI khác). `phase` (ADR-0031): pha
-    build hoãn review của PR không thuộc ngoại lệ cứng (`review_deferred`)."""
+    build hoãn review của PR không thuộc ngoại lệ cứng (`review_deferred`). `local` = sổ review cục bộ của PR (D-104), CHỈ
+    để chặt hơn: review `clean:false` chưa đăng ở đúng head → `blocking` (AUD-XFEAT-015); `standard_seen` cục bộ → strict
+    như nhãn (AUD-XFEAT-016). Review sạch cục bộ không bao giờ làm PR thành hợp lệ."""
     d = {**merge_decision(pr, autonomy, risk_paths, hard_auto), PHASE_KEY: phase}
-    marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
-    elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
+    marks = sorted(
+        [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)], key=lambda r: _iso_key(r.get("at", ""))
+    )
+    rec = local if isinstance(local, dict) else {}
+    seen = _standard_seen(pr) or bool(rec.get("standard_seen"))
+    elig = merge_eligibility(d, marks, seen)
+    if not bool(pr.get("reviewIdentity")) and _local_blocking(str(d.get("head", "")), marks, rec):
+        elig = {**elig, "review": "blocking", "review_deferred": False, "eligible": False, "auto_merge_ok": False}
     # AUD-XFEAT-010: CI/làn cho merge mà chưa có review hợp lệ ở head → không gợi lệnh merge, verdict `review`
     if d["verdict"] == "merge" and not elig["eligible"]:
         d = {k: v for k, v in d.items() if k != "next_rest"}
@@ -7196,6 +7225,18 @@ def merge_check_result(
         "eligible": elig["eligible"],
         "auto_merge_ok": elig["auto_merge_ok"],
     }
+
+
+def _local_blocking(head: str, marks: List[Dict[str, Any]], rec: Dict[str, Any]) -> bool:
+    """Review cuối của sổ cục bộ ở đúng `head` là `clean:false` (lỗi chặn hoặc chưa kết luận) và mới hơn mọi dấu đã đăng ở
+    head đó — `pr reviewed` đã ghi sổ mà chưa đăng (D-104). Dấu đã đăng có `at` = lúc đăng, sau lúc ghi sổ, nên review đã
+    đăng không bị tính hai lần; `review_identity` (sổ do tác giả ghi không tính) do bên gọi loại."""
+    local = [r for r in rec.get("reviews") or [] if isinstance(r, dict) and r.get("head") == head]
+    if not head or not local:
+        return False
+    last = max(local, key=lambda r: _iso_key(r.get("at", "")))
+    newest = max((_iso_key(r.get("at", "")) for r in marks if r.get("head") == head), default="")
+    return not (last.get("clean") and not last.get("inconclusive")) and _iso_key(last.get("at", "")) > newest
 
 
 def _review_step(d: Dict[str, Any], state: str) -> str:
@@ -7216,7 +7257,7 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
     except PrInputError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
-    d, notes = _merge_eval(pr)
+    d, notes = _merge_eval(pr, local=True)
     if args.json:
         print(json.dumps({**d, "notes": notes}, ensure_ascii=False))
     else:
@@ -8625,10 +8666,12 @@ class BenchEnv:
 
 
 def _bench_pr(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
-    """PR → `merge-check` (merge_decision + merge_eligibility, ADR-0028) với cấu hình của ca, không đọc xt.yaml/GitHub."""
+    """PR → `merge-check` (merge_decision + merge_eligibility, ADR-0028) với cấu hình của ca, không đọc xt.yaml/GitHub.
+    `local` = sổ review cục bộ của PR (`{"reviews", "standard_seen"}`, D-104 — chỉ làm chặt hơn)."""
     risk = prefixed_globs([str(g) for g in inp.get("risk_paths") or []], str(inp.get("project_prefix") or ""))
     phase = str(inp.get(PHASE_KEY) or "harden")
-    d = merge_check_result(inp["pr"], int(inp.get("autonomy") or 1), risk, bool(inp.get("hard_auto")), phase)
+    local = inp.get("local") if isinstance(inp.get("local"), dict) else None
+    d = merge_check_result(inp["pr"], int(inp.get("autonomy") or 1), risk, bool(inp.get("hard_auto")), phase, local)
     return {
         "eligible": d["eligible"],
         "auto_merge_ok": d["auto_merge_ok"],
@@ -9391,6 +9434,8 @@ def build_parser() -> argparse.ArgumentParser:
     ptw.add_argument("--unit", required=True, help='lệnh bash chạy MỘT id ("$1"), như `test_unit` của xt.yaml')
     ptw.add_argument("--out", required=True, help="file JSON ghi ra (khoá sắp xếp)")
     ptw.set_defaults(fn=cmd_test_weights)
+    pcg = sub.add_parser("commit-gate", help="in fast|full: cổng trước commit theo `commit_gate` của xt.yaml (hook)")
+    pcg.set_defaults(fn=cmd_commit_gate)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
     pg.set_defaults(fn=cmd_guard_check)

@@ -1082,6 +1082,108 @@
     "review_deferred": false
    },
    "note": "ADR-0031 + ADR-0025: nhãn risk: là phanh thủ công — pha build không hoãn review"
+  },
+  {
+   "id": "pr-xfeat015-build-local-blocking-unpublished",
+   "origin": "audit",
+   "refs": [
+    "AUD-XFEAT-015"
+   ],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ]
+    },
+    "local": {
+     "reviews": [
+      {
+       "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "clean": false,
+       "at": "2026-10-20T10:00:00+00:00"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "verdict": "review",
+    "lane": "chuẩn",
+    "review": "blocking",
+    "review_deferred": false
+   },
+   "note": "D-104: lỗi chặn chỉ có ở sổ cục bộ (chưa đăng) ở head hiện tại — pha build không hoãn, merge-check không cho merge"
+  },
+  {
+   "id": "pr-xfeat015-local-clean-not-eligible",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-XFEAT-015"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ]
+    },
+    "local": {
+     "reviews": [
+      {
+       "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "clean": true,
+       "at": "2026-10-20T10:00:00+00:00"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "verdict": "review",
+    "review": "missing"
+   },
+   "note": "sổ cục bộ chỉ làm chặt hơn: review sạch chưa đăng không thay dấu đã đăng (ADR-0028)"
+  },
+  {
+   "id": "pr-xfeat016-local-standard-seen-fast-lane",
+   "origin": "audit",
+   "refs": [
+    "AUD-XFEAT-016"
+   ],
+   "input": {
+    "local": {
+     "reviews": [],
+     "standard_seen": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "verdict": "review",
+    "lane": "nhanh",
+    "review": "missing"
+   },
+   "note": "PR từng vào làn chuẩn (sổ cục bộ, chưa có nhãn) rồi thu về làn nhanh: vẫn đòi review ở head như pr next"
   }
  ]
 }

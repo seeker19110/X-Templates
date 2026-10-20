@@ -734,3 +734,10 @@
 - Chọn: chấp nhận có hạn 12 tháng: dùng nguyên bản, không sửa, không phân phối
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: MPL-2.0 copyleft theo file chỉ ràng buộc khi sửa/phân phối file của gói; công cụ chỉ chạy trên CI/máy dev, không vào sản phẩm phát hành; tiêu chí 3: certifi/pathspec là phụ thuộc bắc cầu khó thay
 - Đường lùi: gỡ ngoại lệ khỏi license-allow.json, thay gói
+
+### D-104 · 2026-10-20T08:46:31+00:00 · merge-check ở pha build không thấy review blocking chỉ có trong sổ cục bộ (chưa đăng) — AUD-XFEAT-015
+
+- Phương án: (1) merge-check đọc thêm sổ cục bộ, chỉ để chặt hơn: review clean:false ở head hiện tại → review=blocking (không deferred) · (2) pr reviewed đăng trước rồi mới ghi sổ
+- Chọn: merge-check đọc thêm sổ cục bộ, chỉ để chặt hơn: review clean:false ở head hiện tại → review=blocking (không deferred)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: đóng cửa sổ merge PR có lỗi chặn đã biết; đăng-trước không đóng được ca đăng thất bại; sổ cục bộ chỉ làm chặt hơn nên không mở đường lách
+- Đường lùi: merge-check chỉ đọc xtReviews như cũ

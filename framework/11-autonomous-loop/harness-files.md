@@ -40,6 +40,20 @@ updated: 2026-10-20
 | `docs/adr/`, `docs/SPEC-*.md`, `THREAT-MODEL.md` | Quyết định, đặc tả, mối đe doạ | Agent soạn, người duyệt | Có | Link từ PR `feat:` |
 | `TRAPS.md` (tuỳ chọn) | Bẫy đã mắc thật: triệu chứng → cách rà → chốt chặn → ngày/PR | Agent sau mỗi lỗi lặp | Có | Mỗi `fix:` lặp lại phải trỏ TRAPS |
 
+### Giới hạn đã biết của guard và hook
+
+Hook là lớp chặn sai lầm bằng phân tích tĩnh, không phải ranh giới cách ly (D-015). Lớp đỡ cho các chỗ dưới đây là sandbox
+OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chính chạy lại Gate (`loop record`):
+
+- **Guard không xét gửi bí mật ra mạng bằng thư viện của trình thông dịch** (AUD-SEC-086): luật "gửi file bí mật/biến môi
+  trường ra mạng" chỉ nhận CLI (`curl`/`wget`, `scp`/`rsync`, `nc`/`socat`/`ssh`, `gh gist|release upload`) và `/dev/tcp`.
+  `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` đọc `.env` rồi gửi đi thì không bị
+  chặn. Không để bí mật thật trong máy/biến môi trường của phiên agent không người trực.
+- **`subagent-stop.sh` chỉ khớp mẫu chữ "exit/rc + số"** (AUD-HAR-098): regex `exit`, `exit code`, `exit status`, `rc`,
+  `mã thoát` theo sau là số. Lọt: báo cáo nhắc `exit 0` mà không chạy lệnh nào (hay trích log có `rc=1`) vẫn được cho
+  dừng. Bắt sai: báo cáo ghi kết quả theo dạng khác (`→ 0`, "trả 0", "xanh") bị chặn một lần dù đã chạy. Hook chỉ là
+  lời nhắc ghi bằng chứng; kết luận "xanh" vẫn từ evidence do `loop record` ghi.
+
 ### Định dạng PLAN (parser thật trong `xt.py`)
 
 ```markdown

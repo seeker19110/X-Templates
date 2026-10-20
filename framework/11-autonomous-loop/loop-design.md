@@ -3,7 +3,7 @@ title: Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằ
 kind: module
 prefix: LOOP-DESIGN
 applies_to: [all]
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng
@@ -109,7 +109,7 @@ và `--max-budget-usd`. Tăng trần chỉ bằng `loop init` lại có chủ đ
 | `xt.py loop stats` | `xt.py loop stats --json` | Báo cáo cuối phiên, bàn giao | `first_pass_rate`, `needs_3_plus` ghi vào báo cáo (`LOOP-DESIGN-024`) |
 | `xt.py loop verify` | `xt.py loop verify --all` (không `--all`: chỉ Gate có đầu vào đổi — giữa vòng) | Khi mọi task đã xanh, trước khi dừng (`LOOP-DESIGN-022`) | mọi Gate và lệnh `— Kiểm:` của blueprint exit 0 trên cây hiện tại; `verified.json` khớp dấu vân tay cây và `mode: "all"` (D-084) |
 | Cổng bằng chứng mức task | qua `.claude/hooks/task-completed.sh` | TaskCompleted hook, chỉ khi vòng đang bật | exit 2 (task không được đánh dấu xong) khi `T-NNN` trong subject chưa có evidence xanh đúng Gate (AUTO-02, D-068); lỗi hook → cho qua |
-| Cổng báo cáo subagent | qua `.claude/hooks/subagent-stop.sh` | SubagentStop hook | `decision: block` một lần khi báo cáo `executor`/`executor-deep` thiếu lệnh + exit code (AUTO-02) |
+| Cổng báo cáo subagent | qua `.claude/hooks/subagent-stop.sh` | SubagentStop hook | `decision: block` một lần khi báo cáo `executor`/`executor-deep` thiếu lệnh + exit code (AUTO-02); chỉ khớp mẫu chữ — giới hạn ở [`harness-files.md`](harness-files.md#giới-hạn-đã-biết-của-guard-và-hook) |
 | `xt.py blueprint-status` | `xt.py blueprint-status BLUEPRINT.md --strict --run` | Cổng phát hành G7 (dự án tự thêm vào CI khi phát hành) | 0 MUST mở, 0 lệnh `— Kiểm:` đỏ (`LOOP-DESIGN-023`), 0 miễn trừ không hợp lệ (MUST `Miễn` cần `Duyệt:` — `LOOP-STOP-024`) |
 | Headless | `claude -p ... --max-turns N --max-budget-usd X --output-format json` | CI/Routine | dừng cứng theo trần |
 | Test hook | `python3 -m unittest discover -s tests` | pre-commit, CI | Mọi test loop/hook xanh |

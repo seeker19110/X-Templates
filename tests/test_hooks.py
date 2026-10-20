@@ -300,6 +300,8 @@ class CommitGateFastHookTest(unittest.TestCase):
             "requirements.txt",
             "scripts/dev-task.sh",
             ".xtemplates/scripts/dev-task.sh",
+            "scripts/xt.py",  # AUD-TEST-013: xt.py chọn test cho gate-fast — sửa nó không được tự chọn 0 test
+            ".xtemplates/scripts/xt.py",
             ".claude/hooks/pre-bash-guard.sh",
             ".claude/settings.json",
         ]
@@ -335,7 +337,8 @@ class CommitGateFastHookTest(unittest.TestCase):
                 subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
 
     def test_commit_gate_fast_runs_gate_fast(self):
-        for line in ("commit_gate: fast\n", 'commit_gate: "fast"  # cổng nhanh\n', "commit_gate: 'fast'\n"):
+        fast = ("commit_gate: full\ncommit_gate: fast\n", "commit_gate:\tfast\t# nhanh\n")  # dòng cuối thắng; tab
+        for line in ("commit_gate: fast\n", 'commit_gate: "fast"  # cổng nhanh\n', "commit_gate: 'fast'\n", *fast):
             with self.subTest(line=line):
                 code, out, err = self.commit(line, fast="echo FAST-RAN")
                 self.assertEqual((code, decision(out)), (0, None), err)
@@ -345,7 +348,10 @@ class CommitGateFastHookTest(unittest.TestCase):
                 self.assertIn("cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI", err)
 
     def test_commit_gate_fast_full_absent_or_unknown_runs_full_gate(self):
-        for line in ("commit_gate: full\n", "", "commit_gate: fastest\n", "# commit_gate: fast\n"):
+        # AUD-XFEAT-017: hook đọc như xt.py (`commit-gate`): dòng trùng lấy dòng cuối; `#` dính liền là một phần giá trị
+        # (giá trị lạ → full, như `doctor`/`ci-check` từ chối) — grep cũ coi hai dòng cuối là fast.
+        lines = ("commit_gate: fast\ncommit_gate: full\n", "commit_gate: fast#nhanh\n")
+        for line in ("commit_gate: full\n", "", "commit_gate: fastest\n", "# commit_gate: fast\n", *lines):
             with self.subTest(line=line):
                 code, out, err = self.commit(line, fast="echo FAST-RAN")
                 self.assertEqual(code, 0, err)
@@ -4910,29 +4916,37 @@ class GuardOutsideDirTest(unittest.TestCase):
 
     def test_wipe_outside_and_home_claude_unchanged(self):
         # HOME giả có `.claude/settings.json`: máy dev có sẵn, runner CI thì không — test không phụ thuộc máy chạy.
-        # Đặt ngoài thư mục tạm hệ thống: xoá/dời trong /tmp được guard miễn.
+        # Đặt ngoài thư mục tạm (xoá/dời trong đó được guard miễn) và ngoài cây nguồn (AUD-TEST-012).
+        parent = self.home_parent()
         home = (
-            Path(
-                self.enterContext(tempfile.TemporaryDirectory(prefix="xt-tmp-home-", dir=Path(__file__).parent))
-            ).resolve()
-            / "home"
+            Path(self.enterContext(tempfile.TemporaryDirectory(prefix="xt-tmp-home-", dir=parent))).resolve() / "home"
         )
         (home / ".claude").mkdir(parents=True)
         (home / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
-        self.assert_tmp_home_ignored(home)
         self.enterContext(mock.patch.dict(os.environ, {"HOME": str(home)}))
         for cmd in ("rm -rf ~/.claude", "rm -rf /home/user/other", "mv ~/.claude /home/user/other"):
             self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
 
-    def assert_tmp_home_ignored(self, home: Path):
-        """Tiến trình bị kill giữa chừng thì thư mục tạm nằm lại trong `tests/` — tiền tố cố định + `.gitignore` giữ nó
-        khỏi `git status`/commit."""
-        self.assertTrue(home.parent.name.startswith("xt-tmp-home-"), home)
-        if shutil.which("git") is None:  # pragma: no cover - runner nào cũng có git
-            return
-        rel = home.parent.relative_to(ROOT).as_posix() + "/"
-        r = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", rel], capture_output=True)
-        self.assertEqual(r.returncode, 0, f"{rel} chưa có trong .gitignore")
+    def home_parent(self) -> Path:
+        """Thư mục ghi được, ngoài thư mục tạm của guard và ngoài cây nguồn: `~/.cache`, `~`, rồi thư mục cha của repo. Không
+        có → bỏ qua kèm lý do (ngoại lệ môi trường: CI và máy dev bình thường luôn có `~/.cache`/`~` ngoài thư mục tạm)."""
+        tops = (*self.g.TEMP_DIRS, tempfile.gettempdir(), os.environ.get("TMPDIR", "/tmp"))
+        avoid = [Path(os.path.realpath(d)) for d in (*tops, ROOT, self.root)]
+        for c in (Path.home() / ".cache", Path.home(), ROOT.parent):
+            r = Path(os.path.realpath(c))
+            if r.is_dir() and os.access(r, os.W_OK) and not any(r == a or a in r.parents for a in avoid):
+                return r
+        raise unittest.SkipTest(
+            f"mọi chỗ đặt HOME giả đều dưới thư mục tạm hoặc cây nguồn ({avoid}) — guard miễn thư mục tạm"
+        )
+
+    def test_home_parent_outside_temp_or_skips(self):
+        parent = self.home_parent()
+        temps = [Path(os.path.realpath(d)) for d in (*self.g.TEMP_DIRS, tempfile.gettempdir())]
+        self.assertFalse(any(parent == t or t in parent.parents for t in temps), parent)
+        self.assertNotIn(ROOT, [parent, *parent.parents])
+        with mock.patch.object(self.g, "TEMP_DIRS", ("/",)), self.assertRaises(unittest.SkipTest):
+            self.home_parent()  # mọi lựa chọn dưới "thư mục tạm" → skip có lý do, không đỏ giả
 
     def test_gate_names_by_dir_tail(self):
         names = self.g._gate_names("/x/.claude")

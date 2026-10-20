@@ -1793,11 +1793,27 @@ def _hard_gate(selector: List[str], root: str, repo: str = "") -> Tuple[Dict[str
     return d, ("", "")
 
 
+def _review_block(d: Dict[str, object]) -> str:
+    """Lý do chặn vì review (ADR-0028) theo kết quả merge-check; '' khi không chặn. CI/làn cho merge (`merge`/`review`)
+    mà review ở head chưa hợp lệ (`eligible` false; khung cũ trả `merge` kèm `eligible: false`), hoặc ở L3 PR chưa
+    review/review chặn dù CI đang chạy/PR nháp (`wait`) hay conflict (`fix`) — review PR #182. Làn nhanh/pha build
+    (`na`/`deferred`) và dưới L3 → ''."""
+    level = d.get("autonomy")
+    not_reviewed = isinstance(level, int) and level >= 3 and d.get("review") in ("missing", "blocking")
+    if d.get("eligible") is False and (d.get("verdict") in ("merge", "review") or not_reviewed):
+        return f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
+    return ""
+
+
 def _merge_ask(why: str, selector: List[str], root: str, repo: str = "") -> Tuple[str, str]:
     """Merge mà guard không tự cho phép (thiếu ghim, cờ lạ, repo khác…): ask `why` — trừ khi chạm/không xác minh được
-    ngoại lệ cứng thì ask mang dấu chặn (AUD-SEC-044)."""
-    gate = _hard_gate(selector, root, repo)[1]
-    return gate if gate[0] else ("ask", why)
+    ngoại lệ cứng (AUD-SEC-044) hoặc PR chưa có review hợp lệ ở head (AUD-HAR-093: cùng luật với merge ghim head) thì
+    ask mang dấu chặn."""
+    d, gate = _hard_gate(selector, root, repo)
+    if gate[0]:
+        return gate
+    block = _review_block(d)
+    return ("ask", block) if block else ("ask", why)
 
 
 def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> Tuple[str, str]:
@@ -1808,14 +1824,11 @@ def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> 
         return gate
     raw = d.get("reasons")
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
-    # Điều kiện merge một nhà (ADR-0028): CI/làn cho merge mà thiếu review hợp lệ ở head (merge-check `review`; khung cũ
-    # trả `merge` kèm `eligible: false`) → mã chặn, không phải ask thường bị chính sách mặc định cho qua (AUD-DOC-054).
-    # Kiểm trước nhánh `verdict != merge`: ở L3, PR chưa review mà CI đang chạy/PR nháp (`wait`) hay conflict (`fix`)
-    # cũng chặn vì review (review PR #182) — làn nhanh/pha build (`na`/`deferred`) và dưới L3 giữ hành vi cũ.
-    level = d.get("autonomy")
-    not_reviewed = isinstance(level, int) and level >= 3 and d.get("review") in ("missing", "blocking")
-    if d.get("eligible") is False and (d.get("verdict") in ("merge", "review") or not_reviewed):
-        return "ask", f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
+    # Điều kiện merge một nhà (ADR-0028): thiếu review hợp lệ ở head → mã chặn, không phải ask thường bị chính sách mặc
+    # định cho qua (AUD-DOC-054). Kiểm trước nhánh `verdict != merge` (`_review_block`).
+    block = _review_block(d)
+    if block:
+        return "ask", block
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
     if d.get("head") != sha:
@@ -3457,7 +3470,7 @@ class ScanBudget:
     def __init__(self) -> None:
         self.calls = SCAN_CALLS
         self.deadline = time.monotonic() + SCAN_SECONDS
-        self.seen: Set[str] = set()
+        self.seen: Set[Tuple[str, Optional[str]]] = set()  # (script, thư mục chạy): cùng chuỗi ở thư mục khác vẫn quét
 
     def exhausted(self) -> bool:
         self.calls -= 1
@@ -4244,11 +4257,11 @@ def _scan_scripts(
             break
         if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
             return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
-        if script in budget.seen:
+        if (script, cwd) in budget.seen:
             continue
         if not deeper and len(script) > REWRITE_MAX_CHARS:
             return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
-        budget.seen.add(script)
+        budget.seen.add((script, cwd))
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
             return str(sub["reason"])
@@ -4283,9 +4296,41 @@ def _scan_nested(
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
     nested += _ssh_local_scripts(tokens)
+    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd or root).items():
+        moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
+        if moved:
+            return moved
     return _scan_scripts(rewritten, root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
         nested, root, cwd, depth, asks, 1, budget
     )
+
+
+def _moved_nested_scripts(cmd: str, tokens: List[str], start: str) -> Dict[Optional[str], List[str]]:
+    """Lệnh lồng đứng sau `cd`/`pushd` (AUD-SEC-087), nhóm theo thư mục nó chạy: `cd .claude && bash -c '…'` chạy
+    trong `.claude`. Gồm `sh -c`, `eval`, here-string/ống/heredoc vào shell, lệnh bọc trên máy, `os.system` trong script
+    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét như gốc dự án."""
+    out: Dict[Optional[str], List[str]] = {}
+    placed = _commands_with_cwd(tokens, start)
+    dirs = [here for _, here in placed]
+
+    def add(here: Optional[str], scripts: List[str]) -> None:
+        if here != start and scripts:
+            out.setdefault(here, []).extend(scripts)
+
+    for c, here in placed:
+        add(here, [s for s in [_shell_c_script(c)] if s] + _eval_scripts(c) + _here_strings(c) + _wrapped_scripts(c)[0])
+    i = 0
+    for pipe in pipelines(tokens):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
+            if feed and (_stdin_shell(down) or _argless_shell_c(down)):
+                add(here, feed)
+        i += len(pipe)
+    shells = list(dict.fromkeys(here for c, here in placed if _stdin_shell(c)))
+    for here in shells:
+        add(here, _heredoc_scripts(cmd))
+    for script, here in _interp_scripts_at(cmd, tokens, start):
+        add(here, _exec_api_scripts([script]))
+    return out
 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
@@ -4317,12 +4362,23 @@ def _stdin_interp(argv: List[str]) -> bool:
 
 def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Script trình thông dịch viết ngay trong lệnh: `python3 -c '…'`, `node -e '…'`, `python3 - <<'PY'` … `PY`."""
-    out: List[str] = []
-    for c in split_commands(tokens):
+    return list(dict.fromkeys(s for s, _ in _interp_scripts_at(cmd, tokens, None)))
+
+
+def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """(script, thư mục nó chạy) — `cd .claude && python3 -c '…'` chạy trong `.claude` (AUD-SEC-085). Thân heredoc gắn
+    với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    stdin_dirs: List[Optional[str]] = []
+    for c, here in _commands_with_cwd(tokens, cwd) if cwd else [(c, None) for c in split_commands(tokens)]:
         n = normalize(c)
         if n and INTERP_RE.fullmatch(n[0]):
-            out += [n[i + 1] for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
-    return out + _heredoc_scripts(cmd, _stdin_interp)
+            flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
+            out += [(n[i + 1], here) for i in flags]
+        if _stdin_interp(c):
+            stdin_dirs.append(here)
+    dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp) for d in dirs]
 
 
 # Lời gọi chạy lệnh shell từ trình thông dịch (`os.system('…')`, `subprocess.run(['rm','-rf','~'])`, `execSync('…')`):
@@ -4396,11 +4452,12 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     return out
 
 
-def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
+def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
-    (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn."""
+    (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
+    tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
-    for script in _interp_scripts(cmd, tokens):
+    for script, here in _interp_scripts_at(cmd, tokens, cwd or root):
         asks += [
             f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
             for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])
@@ -4408,21 +4465,35 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        if not WRITE_HINT_RE.search(script):
-            continue
-        for raw in STR_LITERAL_RE.findall(script):
-            lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
-            kind = path_kind(rel_path(lit, root), root) if ("/" in lit or "." in lit) and lit not in ("..",) else ""
-            direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
-            if direct and _is_fence(lit, root):
-                asks.append(FENCE_WHY.format(f"{lit} — script trình thông dịch"))
-            elif direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
-                asks.append(f"ghi file bí mật qua Bash (script trình thông dịch): {lit}")
-            elif direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng
-                asks.append(f"ghi/xoá tay bằng chứng autopilot qua script trình thông dịch: {lit}")
-            elif kind in GUARDED_KINDS:
-                asks.append(f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt")
+        if WRITE_HINT_RE.search(script):
+            asks += [a for raw in STR_LITERAL_RE.findall(script) if (a := _interp_literal_ask(script, raw, root, here))]
     return asks
+
+
+def _interp_literal_ask(script: str, raw: str, root: str, here: Optional[str]) -> str:
+    """Câu hỏi cho chuỗi `raw` trong script có dấu hiệu ghi: là đối số đường dẫn của lời gọi ghi/xoá (trực tiếp hay qua
+    biến — AUD-SEC-084) vào hàng rào/cấu hình git/bí mật/bằng chứng → câu mang dấu chặn; chỉ nhắc tên file được canh →
+    hỏi thường; khác → ''."""
+    lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
+    target = _at(lit, here)
+    rel = rel_path(target, root)
+    kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
+    fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
+    if not (fence or git_hook or kind in GUARDED_KINDS):
+        return ""
+    direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
+    direct = direct or _alias_write(script, raw)  # AUD-SEC-084: qua biến/bí danh
+    if direct and fence:
+        return FENCE_WHY.format(f"{lit} — script trình thông dịch")
+    if direct and git_hook:  # AUD-SEC-083: như `>> .git/config`
+        return GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch")
+    if direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
+        return f"ghi file bí mật qua Bash (script trình thông dịch): {lit}"
+    if direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng
+        return f"ghi/xoá tay bằng chứng autopilot qua script trình thông dịch: {lit}"
+    if kind in GUARDED_KINDS:
+        return f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt"
+    return ""
 
 
 # Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,
@@ -4433,6 +4504,9 @@ DIRECT_WRITE_FMT = (
     r"|(?:\bos\.(?:remove|unlink|rename|replace|truncate)|\bshutil\.\w+|writeFile\w*|appendFile\w*|unlinkSync|rmSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|\bunlink)\(\s*(?:[^)]*,\s*)?{q}"
     r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
+    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(`/`.open(` của
+    # hàm khác (str) không phải ghi, chỉ nhận với `Path`
+    r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\("
     r"|\b(?:unlink|rename|truncate)[ \t]+(?:[^;\n)]*,[ \t]*)?{q}"  # perl/ruby/php gọi không ngoặc: `unlink ".autopilot/x"`
     r"|\bopen[ \t]*\(?[^,;\n]*,[ \t]*['\"]\+?(?:>|>>|w|a)['\"][ \t]*,[ \t]*{q}"  # perl `open(F, '>', '…')`
     # AUD-SEC-074: `py_compile.compile(f, cfile='…')`, `p.compile(f, '…')`, `compile_dir(d, …)`, `sys.pycache_prefix = '…'`
@@ -4443,6 +4517,49 @@ DIRECT_WRITE_FMT = (
 def _direct_write(script: str, lit: str) -> bool:
     q = "['\"]" + re.escape(lit) + "['\"]"
     return bool(re.search(DIRECT_WRITE_FMT.format(q=q), script))
+
+
+# AUD-SEC-084: đường dẫn gán cho biến (`f='.env'`, `p = Path('…')`, `my $f = '…'`, `const f = '…'`, `for f in ['…']`) rồi
+# biến đó (hoặc biến gán lại từ nó, `b = a`) là đối số ĐƯỜNG DẪN của lời gọi ghi/xoá → chặn như ghi trực tiếp. Biến chỉ
+# được in ra, đọc, hay làm NỘI DUNG ghi vào file khác (`writeFileSync('out', 'x' + f)`) không tính — tránh chặn oan
+# script sửa tài liệu/test nhắc `.env`. Còn hở: đường dẫn ghép chuỗi/format, nằm trong dict/đối số hàm tự viết.
+ALIAS_NAME = r"\$?[A-Za-z_]\w*"
+ALIAS_BIND_FMT = (
+    r"(?<![\w.$])(" + ALIAS_NAME + r")\s*(?::\s*[\w.\[\]]+\s*)?=(?![=~>])[^;\n=]{{0,200}}?{q}"
+    r"|\bfor(?:each)?\s*\(?\s*(?:(?:const|let|var|my|our)\s+)?(" + ALIAS_NAME + r")\b[^;\n:{{]{{0,200}}?{q}"
+)
+ALIAS_WRITE_FMT = (
+    r"open\(\s*{n}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"  # python/ruby `open(f, 'w')`, `File.open(f, 'a')`
+    r"|(?:writeFile\w*|appendFile\w*|unlinkSync|rmSync|truncate\w*|File\.write|IO\.write|file_put_contents|\bunlink"
+    r"|\bos\.(?:remove|unlink|truncate))\(\s*{n}\s*[,)]"  # đối số đầu là đường dẫn
+    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"
+    r"|{n}\s*\.\s*(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\(|{n}\s*\.\s*open\(\s*['\"][rbt]?[wax+]"
+    r"|\bopen\s*\(?[^;\n]*?['\"]\+?>{{1,2}}['\"]\s*,\s*{n}"  # perl `open(my $h, '>', $f)`
+    r"|\bopen\s*\(?[^,;\n]*,\s*['\"]\+?>{{1,2}}\s*{n}"  # perl 2 đối số `open(F, ">$f")`
+    r"|\b(?:unlink|rename|truncate)[ \t(]+(?:[^;\n)]*,[ \t]*)?{n}"  # perl/ruby/php không ngoặc
+)
+ALIAS_MAX = 16
+
+
+def _alias_ref(name: str) -> str:
+    return r"(?<![\w.$])" + re.escape(name) + r"(?![\w(])"
+
+
+def _alias_write(script: str, lit: str) -> bool:
+    """Chuỗi `lit` được gán cho một biến (trực tiếp hoặc qua chuỗi gán lại) mà biến đó là đường dẫn của lời gọi
+    ghi/xoá trong `script`."""
+    q = "['\"]" + re.escape(lit) + "['\"]"
+    script = script.replace("\\$", "$")  # `"\$f"` trong nháy kép của shell: bash bỏ `\`, bộ tách token giữ lại
+    names = {g for m in re.finditer(ALIAS_BIND_FMT.format(q=q), script) for g in m.groups() if g}
+    todo = list(names)
+    while todo and len(names) < ALIAS_MAX:  # `b = a`, `p = Path(a)`: biến gán từ biến đã là bí danh
+        ref = _alias_ref(todo.pop())
+        bind = r"(?<![\w.$])(" + ALIAS_NAME + r")\s*(?::\s*[\w.\[\]]+\s*)?=(?![=~>])[^;\n=]{0,200}?" + ref
+        for m in re.finditer(bind, script):
+            if m[1] not in names:
+                names.add(m[1])
+                todo.append(m[1])
+    return any(re.search(ALIAS_WRITE_FMT.format(n=_alias_ref(n)), script) for n in names)
 
 
 CURL_FILE_FLAGS = {"-T", "--upload-file", "--post-file", "--body-file"}  # giá trị là đường dẫn file
@@ -4714,7 +4831,7 @@ def bash_decision(
     if leak:
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
-    asks: List[str] = interp_write_asks(cmd, tokens, root)
+    asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
     asks += [REVIEW_FORGE_WHY] if any(_forges_review(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (

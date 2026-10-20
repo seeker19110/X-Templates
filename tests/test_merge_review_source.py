@@ -87,6 +87,81 @@ class MergeCheckReviewStepTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertNotIn("match-head-commit", out)
 
+    def seed(self, reviews: list, standard_seen: bool = False) -> None:
+        xt._write_reviews(self.base, {"7": {"reviews": reviews, "standard_seen": standard_seen}})
+
+    def check_json(self, p: dict) -> tuple[int, dict]:
+        rc, out = self.check(p, "--json")
+        return rc, dict(json.loads(out))
+
+    def test_merge_check_local_unpublished_blocking_blocks(self):
+        """AUD-XFEAT-015 (D-104): review `clean:false` (lỗi chặn/chưa kết luận) chỉ có ở sổ cục bộ, đúng head hiện tại →
+        `merge-check` trả `review`/`blocking` exit 1 ở cả pha build lẫn harden — trước đây pha build trả `merge` (deferred)."""
+        local = {**mark(False), "at": "2026-10-20T10:00:00+00:00"}
+        for phase in ("build", "harden"):
+            commit_base_xt(self.base, f"merge_autonomy: L3\ndelivery_phase: {phase}\n")
+            for name, row in (("blocking", local), ("inconclusive", {**local, "inconclusive": True})):
+                with self.subTest(phase=phase, review=name):
+                    self.seed([row])
+                    rc, d = self.check_json(std())
+                    self.assertEqual(
+                        (rc, d["verdict"], d["review"], d["review_deferred"], d["eligible"], d["auto_merge_ok"]),
+                        (1, "review", "blocking", False, False, False),
+                    )
+                    self.assertNotIn("match-head-commit", d["next"])
+                    self.assertIn("lỗi chặn", d["next"])
+                    res = GuardReviewMissingTest().final(d, f"gh pr merge 7 --squash --match-head-commit {HEAD}")
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"))
+
+    def test_merge_check_local_book_only_stricter(self):
+        """Sổ cục bộ chỉ làm chặt hơn: review sạch cục bộ không làm PR hợp lệ; lỗi chặn ở head cũ, cũ hơn dấu đã đăng ở head,
+        hoặc khi `review_identity` (sổ của tác giả không tính) không đổi kết quả."""
+        commit_base_xt(self.base, "merge_autonomy: L3\ndelivery_phase: build\n")
+        self.seed([mark(True)])
+        self.assertEqual(self.check_json(std())[1]["review"], "deferred")
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+        rc, d = self.check_json(std())  # harden: review sạch cục bộ chưa đăng không thay dấu đã đăng
+        self.assertEqual((rc, d["review"], d["eligible"]), (1, "missing", False))
+        self.seed([mark(False, head="a" * 40)])  # head cũ: không phải lỗi chặn của head hiện tại
+        self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[0], 0)
+        self.seed([{**mark(False), "at": "2026-10-20T09:00:00+00:00"}])  # đã có dấu sạch đăng sau nó ở head này
+        self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[0], 0)
+        self.seed([{**mark(False), "at": "2026-10-20T11:00:00+00:00"}])  # mới hơn dấu sạch: chặn
+        self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[1]["review"], "blocking")
+        self.assertEqual(self.check_json(std(xtReviews=[mark(True)], reviewIdentity="bot"))[0], 0)
+        self.seed(
+            [{**mark(False), "at": "2026-10-20T11:00:00+00:00"}, {**mark(True), "at": "2026-10-20T12:00:00+00:00"}]
+        )
+        self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[0], 0)  # review cuối ở head là sạch
+
+    def test_merge_gate_and_steward_keep_published_source(self):
+        """`merge-gate`/steward chạy ở CI (không có sổ cục bộ) — giữ nguồn dấu đã đăng, không đổi hành vi (D-104)."""
+        commit_base_xt(self.base, "merge_autonomy: L3\ndelivery_phase: build\n")
+        self.seed([mark(False)])
+        on = {**std(), "autoMergeRequest": AUTO}
+        rc, out, _ = run_main("merge-gate", "--json", "--pr-json", "-", stdin=json.dumps(on))
+        self.assertEqual((rc, json.loads(out)["review"]), (0, "deferred"))
+        rest = {**std(), "author": "a", "authorAssociation": "OWNER"}
+        with unittest.mock.patch.object(xt, "_pr_rest", return_value=rest):
+            out = xt._steward_one("7", "repos/o/r", self.base, False, [])
+        self.assertEqual(out["action"], "republish-review")
+        self.assertEqual(xt._steward_command(out, "repos/o/r"), [])
+
+    def test_merge_check_local_standard_seen_keeps_strict(self):
+        """AUD-XFEAT-016: PR từng vào làn chuẩn (sổ cục bộ `standard_seen`, chưa có nhãn) rồi thu về làn nhanh — `merge-check`
+        vẫn đòi review ở head như `pr next`, không trả `merge`."""
+        fast = pr(headRefOid=HEAD, files=[{"path": "README.md", "additions": 1, "deletions": 0}], repo="o/r")
+        self.assertEqual(self.check_json(fast)[0], 0)
+        self.seed([], standard_seen=True)
+        rc, d = self.check_json(fast)
+        self.assertEqual(
+            (rc, d["verdict"], d["lane"], d["review"], d["eligible"]), (1, "review", "nhanh", "missing", False)
+        )
+        self.assertEqual(self.check_json({**fast, "xtReviews": [mark(True)]})[0], 0)
+        pure = xt.merge_check_result(fast, 3, [], False, "harden", {"standard_seen": True})
+        self.assertEqual(pure["review"], "missing")
+        self.assertEqual(xt.merge_check_result(fast, 3, [], False, "harden", None)["review"], "na")
+
     def test_merge_watch_no_merge_command_without_review(self):
         with unittest.mock.patch.object(xt, "load_pr", return_value=std()):
             rc, out, _ = run_main("merge-watch", "--pr", "7")
@@ -171,6 +246,60 @@ class GuardReviewMissingTest(unittest.TestCase):
                     self.assertEqual(res["decision"], "", res)
             with self.subTest(name, cmd="mcp"):
                 self.assertNotEqual(self.mcp(d).get("code"), "REVIEW_MISSING")
+
+    UNPINNED = (
+        "gh pr merge 7 --squash",
+        "gh pr merge 7",
+        "gh pr merge 7 --squash --delete-branch",
+        f"gh pr merge 7 --squash --admin --match-head-commit {HEAD}",
+        "gh pr -R o/r merge 7 --squash",
+        "gh api -X PUT repos/o/r/pulls/7/merge -f merge_method=squash",
+    )
+
+    def mcp_unpinned(self, d: dict, tool: dict | None = None) -> dict:
+        tool = tool or {"owner": "o", "repo": "r", "pullNumber": 7, "merge_method": "squash"}
+        with unittest.mock.patch.object(guard, "merge_check", return_value=d):
+            dec, why = guard.mcp_decision("mcp__github__merge_pull_request", tool, str(ROOT))
+        return dict(guard.apply_policy({"decision": dec, "reason": why}))
+
+    def test_default_policy_review_missing_unpinned(self):
+        """AUD-HAR-093: merge KHÔNG ghim head (`gh pr merge 7 --squash`, `gh api` thiếu `sha`, MCP thiếu
+        `expectedHeadSha`) của PR làn chuẩn chưa review/review chặn ở L3 → chặn `REVIEW_MISSING` như merge ghim head,
+        không lọt thành ask thường mà chính sách mặc định cho qua."""
+        for reviews, state in (([], "missing"), ([mark(False)], "blocking")):
+            d = xt.merge_check_result(std(xtReviews=reviews), 3, [], False)
+            self.assertEqual((d["eligible"], d["review"]), (False, state))
+            for cmd in self.UNPINNED:
+                with self.subTest(state=state, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+            for tool in (None, {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": HEAD, "x": 1}):
+                with self.subTest(state=state, tool=tool):
+                    res = self.mcp_unpinned(d, tool)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+
+    def test_default_policy_review_missing_unpinned_controls(self):
+        """Đối chứng AUD-HAR-093: review sạch, pha build (review hoãn), làn nhanh, dưới L3 → merge không ghim vẫn là ask
+        thường (chính sách mặc định cho qua); strict vẫn hỏi."""
+        fast = pr(headRefOid=HEAD, files=[{"path": "README.md", "additions": 1, "deletions": 0}], repo="o/r")
+        cases = {
+            "sạch": xt.merge_check_result(std(xtReviews=[mark(True)]), 3, [], False),
+            "pha build": xt.merge_check_result(std(), 3, [], False, "build"),
+            "làn nhanh": xt.merge_check_result(fast, 3, [], False),
+            "L2": xt.merge_check_result(std(), 2, [], False),
+        }
+        for name, d in cases.items():
+            for cmd in self.UNPINNED:
+                with self.subTest(name, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("", "OTHER_ASK"), res)
+            with self.subTest(name, cmd="mcp"):
+                self.assertEqual(self.mcp_unpinned(d)["decision"], "")
+        d = xt.merge_check_result(std(), 3, [], False)
+        with unittest.mock.patch.object(guard, "merge_check", return_value=d):
+            res = guard.bash_decision(self.UNPINNED[0], str(ROOT))
+        self.assertEqual(res["decision"], "ask")
+        self.assertIn(guard.REVIEW_MISSING_ASK, str(res["reason"]))
 
     def test_default_policy_review_missing_strict_still_asks(self):
         d = xt.merge_check_result(std(), 3, [], False)

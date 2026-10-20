@@ -108,8 +108,8 @@ Nguồn trong `research/` ghi ngày rà lại; "chưa xác minh" không phải b
 - [ ] `LOOP-CI-015` **SHOULD** Pin mọi action/CLI trong workflow theo SHA hoặc phiên bản khoá; agent không tự nâng. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
 - [ ] `LOOP-CI-016` **SHOULD** Sau khi PR merge, agent quay về `main`, xoá nhánh đã merge, cập nhật `PROGRESS.md` với SHA merge.
 - [ ] `LOOP-CI-017` **MAY** Dùng cơ chế theo dõi PR (webhook/`subscribe_pr_activity`) để phản hồi review và CI thay vì poll liên tục; mọi phản hồi vẫn qua trần ở mục 002–003.
-- [ ] `LOOP-CI-019` **SHOULD** Kiểm link ngoài theo lịch phân loại lỗi tạm/đổi/chết/chưa xác minh, thử lại hữu hạn; chỉ link chết làm đỏ. → Kiểm: `python3 scripts/check-links.py --external` trong `.github/workflows/links.yml`; test `link_classification`.
 - [ ] `LOOP-CI-018` **MAY** Đo tỉ lệ PR của agent merge không cần người sửa tay và thời gian đỏ→xanh theo tháng; làm baseline DORA trước khi nâng mức tự trị. · Nguồn: stored 23 §2.6
+- [ ] `LOOP-CI-019` **SHOULD** Kiểm link ngoài theo lịch phân loại lỗi tạm/đổi/chết/chưa xác minh, thử lại hữu hạn; chỉ link chết làm đỏ. → Kiểm: `python3 scripts/check-links.py --external` trong `.github/workflows/links.yml`; test `link_classification`.
 
 ## Bẫy thường gặp
 
