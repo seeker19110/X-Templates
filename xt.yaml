@@ -22,6 +22,8 @@ merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
+# Pha giao hàng (ADR-0031): repo khung giữ `harden` (khai tường minh) — PR làn chuẩn vẫn cần review sạch ở head (ADR-0024).
+delivery_phase: harden
 # Ghi công AI trong commit (AGENTS.md §3, AUD-HAR-017): forbid = guard chặn commit có tên model/URL phiên AI
 # (LOOP-HARNESS-027).
 ai_attribution: forbid
