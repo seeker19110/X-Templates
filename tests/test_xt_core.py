@@ -1183,6 +1183,20 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertTrue(raw.startswith(b"- [x] `T-001`"), raw)
         self.assertEqual(plan.stat().st_mode & 0o777, 0o644)
 
+    def test_tick_writes_through_plan_symlink(self):
+        """Review #191: PLAN là symlink → tick ghi vào file thật, liên kết còn nguyên (trước: thay bằng file thường)."""
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        real = self.base / "real" / "PLAN.md"
+        real.parent.mkdir(parents=True, exist_ok=True)
+        real.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.unlink(missing_ok=True)
+        plan.symlink_to(real)
+        code, out, _ = self.record(["true"], "T-001")
+        self.assertEqual((code, "đã tick [x]" in out), (0, True))
+        self.assertTrue(plan.is_symlink())
+        self.assertEqual(real.read_text(encoding="utf-8"), "- [x] `T-001` a — Gate: `true`\n")
+
     def test_same_command_unbalanced_quote_falls_back_to_strip(self):
         self.assertTrue(xt.same_command("echo 'a", "  echo 'a  "))
         self.assertFalse(xt.same_command("echo 'a", "echo 'b"))
