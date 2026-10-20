@@ -27,11 +27,11 @@ name: pr-steward
 on:
   schedule:
     - cron: "*/10 * * * *"
-  issue_comment:
+  issue_comment: # zizmor: ignore[dangerous-triggers] — chỉ checkout nhánh mặc định, không chạy code PR; comment phải mang dấu review của người có quyền ghi
     types: [created]
   check_suite:
     types: [completed]
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] — chỉ checkout nhánh mặc định, không chạy code PR, không tải artifact của run kích nó
     workflows: [CI, merge-gate]
     types: [completed]
   workflow_dispatch:

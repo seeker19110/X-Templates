@@ -6189,8 +6189,10 @@ def cmd_changelog_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- license-check (BASE-DEP-005)
 
-# Dòng ghim `tên==bản [; marker]` của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
-LICENSE_REQ_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)[ \t]*(;[^\\#]*)?")
+# Dòng ghim `tên[extras] == bản [; marker]` (dấu cách quanh `==` và `[extras]` tuỳ chọn) của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
+LICENSE_REQ_RE = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)[ \t]*(?:\[[^\]\n]*\][ \t]*)?==[ \t]*([^\s;\\]+)[ \t]*(;[^\\#]*)?"
+)
 # Classifier `License :: OSI Approved :: …` → SPDX, khi gói không khai License-Expression/License ngắn.
 LICENSE_CLASSIFIERS = {
     "MIT License": "MIT",
