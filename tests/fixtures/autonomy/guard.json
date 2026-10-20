@@ -3137,6 +3137,102 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec084-var-settings",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"p='.claude/settings.local.json'; open(p,'w').write('{}')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec084-var-env",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"f='.env'; open(f,'w').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-sec084-var-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"f='.autopilot/verified.json'; open(f,'w').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-sec084-path-alias",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path as P; P('.claude/hooks/guard.py').write_text('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-adv-sec084-node-var",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "node -e \"const f='.env'; require('fs').writeFileSync(f,'x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec084-read-env",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"f='.env'; print(open(f).read())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec084-mention-env",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-084"
+   ],
+   "input": {
+    "command": "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\""
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

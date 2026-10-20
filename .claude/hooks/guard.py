@@ -4433,25 +4433,35 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        if not WRITE_HINT_RE.search(script):
-            continue
-        for raw in STR_LITERAL_RE.findall(script):
-            lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
-            target = _at(lit, here)
-            rel = rel_path(target, root)
-            kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
-            direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
-            if direct and _is_fence(target, root):
-                asks.append(FENCE_WHY.format(f"{lit} — script trình thông dịch"))
-            elif direct and _match_any(rel, GIT_HOOK_PATTERNS):  # AUD-SEC-083: như `>> .git/config`
-                asks.append(GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch"))
-            elif direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
-                asks.append(f"ghi file bí mật qua Bash (script trình thông dịch): {lit}")
-            elif direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng
-                asks.append(f"ghi/xoá tay bằng chứng autopilot qua script trình thông dịch: {lit}")
-            elif kind in GUARDED_KINDS:
-                asks.append(f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt")
+        if WRITE_HINT_RE.search(script):
+            asks += [a for raw in STR_LITERAL_RE.findall(script) if (a := _interp_literal_ask(script, raw, root, here))]
     return asks
+
+
+def _interp_literal_ask(script: str, raw: str, root: str, here: Optional[str]) -> str:
+    """Câu hỏi cho chuỗi `raw` trong script có dấu hiệu ghi: là đối số đường dẫn của lời gọi ghi/xoá (trực tiếp hay qua
+    biến — AUD-SEC-084) vào hàng rào/cấu hình git/bí mật/bằng chứng → câu mang dấu chặn; chỉ nhắc tên file được canh →
+    hỏi thường; khác → ''."""
+    lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
+    target = _at(lit, here)
+    rel = rel_path(target, root)
+    kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
+    fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
+    if not (fence or git_hook or kind in GUARDED_KINDS):
+        return ""
+    direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
+    direct = direct or _alias_write(script, raw)  # AUD-SEC-084: qua biến/bí danh
+    if direct and fence:
+        return FENCE_WHY.format(f"{lit} — script trình thông dịch")
+    if direct and git_hook:  # AUD-SEC-083: như `>> .git/config`
+        return GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch")
+    if direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
+        return f"ghi file bí mật qua Bash (script trình thông dịch): {lit}"
+    if direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng
+        return f"ghi/xoá tay bằng chứng autopilot qua script trình thông dịch: {lit}"
+    if kind in GUARDED_KINDS:
+        return f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt"
+    return ""
 
 
 # Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,
@@ -4462,6 +4472,9 @@ DIRECT_WRITE_FMT = (
     r"|(?:\bos\.(?:remove|unlink|rename|replace|truncate)|\bshutil\.\w+|writeFile\w*|appendFile\w*|unlinkSync|rmSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|\bunlink)\(\s*(?:[^)]*,\s*)?{q}"
     r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
+    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(`/`.open(` của
+    # hàm khác (str) không phải ghi, chỉ nhận với `Path`
+    r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\("
     r"|\b(?:unlink|rename|truncate)[ \t]+(?:[^;\n)]*,[ \t]*)?{q}"  # perl/ruby/php gọi không ngoặc: `unlink ".autopilot/x"`
     r"|\bopen[ \t]*\(?[^,;\n]*,[ \t]*['\"]\+?(?:>|>>|w|a)['\"][ \t]*,[ \t]*{q}"  # perl `open(F, '>', '…')`
     # AUD-SEC-074: `py_compile.compile(f, cfile='…')`, `p.compile(f, '…')`, `compile_dir(d, …)`, `sys.pycache_prefix = '…'`
@@ -4472,6 +4485,49 @@ DIRECT_WRITE_FMT = (
 def _direct_write(script: str, lit: str) -> bool:
     q = "['\"]" + re.escape(lit) + "['\"]"
     return bool(re.search(DIRECT_WRITE_FMT.format(q=q), script))
+
+
+# AUD-SEC-084: đường dẫn gán cho biến (`f='.env'`, `p = Path('…')`, `my $f = '…'`, `const f = '…'`, `for f in ['…']`) rồi
+# biến đó (hoặc biến gán lại từ nó, `b = a`) là đối số ĐƯỜNG DẪN của lời gọi ghi/xoá → chặn như ghi trực tiếp. Biến chỉ
+# được in ra, đọc, hay làm NỘI DUNG ghi vào file khác (`writeFileSync('out', 'x' + f)`) không tính — tránh chặn oan
+# script sửa tài liệu/test nhắc `.env`. Còn hở: đường dẫn ghép chuỗi/format, nằm trong dict/đối số hàm tự viết.
+ALIAS_NAME = r"\$?[A-Za-z_]\w*"
+ALIAS_BIND_FMT = (
+    r"(?<![\w.$])(" + ALIAS_NAME + r")\s*(?::\s*[\w.\[\]]+\s*)?=(?![=~>])[^;\n=]{{0,200}}?{q}"
+    r"|\bfor(?:each)?\s*\(?\s*(?:(?:const|let|var|my|our)\s+)?(" + ALIAS_NAME + r")\b[^;\n:{{]{{0,200}}?{q}"
+)
+ALIAS_WRITE_FMT = (
+    r"open\(\s*{n}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"  # python/ruby `open(f, 'w')`, `File.open(f, 'a')`
+    r"|(?:writeFile\w*|appendFile\w*|unlinkSync|rmSync|truncate\w*|File\.write|IO\.write|file_put_contents|\bunlink"
+    r"|\bos\.(?:remove|unlink|truncate))\(\s*{n}\s*[,)]"  # đối số đầu là đường dẫn
+    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"
+    r"|{n}\s*\.\s*(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\(|{n}\s*\.\s*open\(\s*['\"][rbt]?[wax+]"
+    r"|\bopen\s*\(?[^;\n]*?['\"]\+?>{{1,2}}['\"]\s*,\s*{n}"  # perl `open(my $h, '>', $f)`
+    r"|\bopen\s*\(?[^,;\n]*,\s*['\"]\+?>{{1,2}}\s*{n}"  # perl 2 đối số `open(F, ">$f")`
+    r"|\b(?:unlink|rename|truncate)[ \t(]+(?:[^;\n)]*,[ \t]*)?{n}"  # perl/ruby/php không ngoặc
+)
+ALIAS_MAX = 16
+
+
+def _alias_ref(name: str) -> str:
+    return r"(?<![\w.$])" + re.escape(name) + r"(?![\w(])"
+
+
+def _alias_write(script: str, lit: str) -> bool:
+    """Chuỗi `lit` được gán cho một biến (trực tiếp hoặc qua chuỗi gán lại) mà biến đó là đường dẫn của lời gọi
+    ghi/xoá trong `script`."""
+    q = "['\"]" + re.escape(lit) + "['\"]"
+    script = script.replace("\\$", "$")  # `"\$f"` trong nháy kép của shell: bash bỏ `\`, bộ tách token giữ lại
+    names = {g for m in re.finditer(ALIAS_BIND_FMT.format(q=q), script) for g in m.groups() if g}
+    todo = list(names)
+    while todo and len(names) < ALIAS_MAX:  # `b = a`, `p = Path(a)`: biến gán từ biến đã là bí danh
+        ref = _alias_ref(todo.pop())
+        bind = r"(?<![\w.$])(" + ALIAS_NAME + r")\s*(?::\s*[\w.\[\]]+\s*)?=(?![=~>])[^;\n=]{0,200}?" + ref
+        for m in re.finditer(bind, script):
+            if m[1] not in names:
+                names.add(m[1])
+                todo.append(m[1])
+    return any(re.search(ALIAS_WRITE_FMT.format(n=_alias_ref(n)), script) for n in names)
 
 
 CURL_FILE_FLAGS = {"-T", "--upload-file", "--post-file", "--body-file"}  # giá trị là đường dẫn file

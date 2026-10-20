@@ -91,5 +91,56 @@ class InterpCwdTest(unittest.TestCase):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
 
+class InterpAliasWriteTest(unittest.TestCase):
+    """AUD-SEC-084: script ghi file hàng rào/bí mật/bằng chứng qua biến hoặc bí danh (`p='.env'; open(p,'w')`,
+    `Path as P`) → mã chặn như ghi trực tiếp, không phải ask thường mà chính sách mặc định cho qua."""
+
+    def test_guard_interp_alias_write(self):
+        cases = {
+            "python3 -c \"p='.claude/settings.local.json'; open(p,'w').write('{}')\"": "HOOK_BYPASS",
+            "python3 -c \"f='.env'; open(f,'w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"f = '.env'\nwith open(f, mode='a') as h: h.write('x')\"": "SECRET_WRITE",
+            "python3 -c \"f='.autopilot/verified.json'; open(f,'w').write('x')\"": "EVIDENCE_HANDWRITE",
+            "python3 -c \"from pathlib import Path as P; P('.claude/hooks/guard.py').write_text('x')\"": "HOOK_BYPASS",
+            "python3 -c \"from pathlib import Path; p = Path('.claude/hooks/guard.py'); p.write_text('x')\"": "HOOK_BYPASS",
+            "python3 -c \"import pathlib; p = pathlib.Path('.env'); p.unlink()\"": "SECRET_WRITE",
+            "python3 -c \"import os; t='.autopilot/state.json'; os.remove(t)\"": "EVIDENCE_HANDWRITE",
+            "python3 -c \"import shutil; d='.claude/settings.json'; shutil.copy('x.json', d)\"": "HOOK_BYPASS",
+            "python3 -c \"a='.env'; b=a; open(b,'w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"f='.env'; f = f.strip(); open(f,'w').write('x')\"": "SECRET_WRITE",  # gán lại chính nó
+            "python3 -c \"for f in ['.autopilot/verified.json']: open(f,'w').write('{}')\"": "EVIDENCE_HANDWRITE",
+            "node -e \"const fs=require('fs'); const f='.env'; fs.writeFileSync(f,'x')\"": "SECRET_WRITE",
+            "node -e \"let f='.claude/settings.json'; require('fs').appendFileSync(f, '{}')\"": "HOOK_BYPASS",
+            "perl -e \"my \\$f = '.env'; open(my \\$h, '>', \\$f); print \\$h 'x'\"": "SECRET_WRITE",
+            'perl -e "my \\$f = \'.autopilot/x.json\'; open(F, \\">\\$f\\")"': "EVIDENCE_HANDWRITE",
+            "ruby -e \"f = '.env'; File.write(f, 'x')\"": "SECRET_WRITE",
+            "php -r \"\\$f = '.env'; file_put_contents(\\$f, 'x');\"": "SECRET_WRITE",
+            "python3 -c \"g='.git/config'; open(g,'a').write('x')\"": "HOOK_BYPASS",
+            "cd .claude && python3 -c \"p='settings.local.json'; open(p,'w').write('{}')\"": "HOOK_BYPASS",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_interp_alias_write_controls(self):
+        """Đối chứng (không chặn oan): chỉ đọc file bí mật, ghi file khác mà nhắc tên `.env`/hook trong chuỗi in ra hay
+        nội dung, đổi chữ trong tài liệu, biến không tới lời gọi ghi."""
+        for cmd in (
+            "python3 -c \"f='.env'; print(open(f).read())\"",
+            "python3 -c \"import os; f='.env'; print(os.path.exists(f))\"",
+            "python3 -c \"print('.env'); open('out.txt','w').write('x')\"",
+            "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\"",
+            "python3 -c \"n='.env'; open('README.md','w').write('Đặt khoá vào ' + n)\"",
+            "python3 -c \"from pathlib import Path; p=Path('README.md'); old='.claude/hooks/guard.py'; "
+            "p.write_text(p.read_text().replace(old, 'hooks/guard.py'))\"",
+            "node -e \"const f='.env'; const fs=require('fs'); fs.writeFileSync('out.txt', 'see ' + f)\"",
+            "python3 -c \"src='.env.example'; open('notes.txt','w').write(src)\"",
+            "python3 -c \"f='.env'; data=open(f).read(); open('copy.txt','w').write(str(len(data)))\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()
