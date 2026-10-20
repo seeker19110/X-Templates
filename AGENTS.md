@@ -42,7 +42,8 @@ Trong autopilot: còn việc khác làm được → `xt.py loop defer --task <I
 | Audit khung đã cài + sửa an toàn (việc đầu tiên của `/autopilot`) | `python3 scripts/xt.py doctor --fix` |
 | Test | `python3 -m unittest discover -s tests` |
 | Link toàn repo | `python3 scripts/check-links.py` |
-| Cổng commit (hook tự chạy) | `scripts/dev-task.sh gate` (đọc `xt.yaml`) |
+| Cổng commit (hook tự chạy; `xt.yaml` `commit_gate: fast`) | `scripts/dev-task.sh gate-fast` (lint · typecheck · test liên quan file đổi) |
+| Cổng đầy đủ (một lần trước khi đẩy/mở PR; CI chạy đúng lệnh này) | `scripts/dev-task.sh gate` (đọc `xt.yaml`) |
 | Ghép blueprint mẫu | `python3 scripts/xt.py compose --profile web-app --industry ecommerce --scale M` |
 | Quyết khi nào merge PR đã mở (ADR-0013) | `python3 scripts/xt.py merge-check --pr <N>` |
 | Theo dõi PR đã mở, 30 giây/lần tới khi xong hoặc cần hành động (ADR-0021) | `python3 scripts/xt.py merge-watch --pr <N>` (chạy nền) |

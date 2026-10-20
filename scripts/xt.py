@@ -1901,6 +1901,103 @@ def cmd_guard_check(args: argparse.Namespace) -> int:
     return 0
 
 
+# Chọn test liên quan cho `dev-task.sh gate-fast` (cổng commit nhanh): file test bị đổi chạy chính nó; file khác →
+# test `test_<tên>.py` cùng tên, test nhắc tên file (`"guard.py"`, `"dev-task.sh"`) và test quét theo đuôi (`*.md`).
+# Không ánh xạ được → cả suite (None). Cổng đầy đủ (CI, `dev-task.sh gate`) vẫn chạy mọi test + ngưỡng coverage.
+CHANGED_FILES_ENV = "XT_CHANGED_FILES"
+
+
+def _test_mentions(name: str, text: str) -> bool:
+    return re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text) is not None
+
+
+def _tests_for_file(rel: str, tests_rel: str, texts: Dict[str, str]) -> Optional[Set[str]]:
+    """Test liên quan tới `rel` (đường dẫn POSIX theo gốc); None = không ánh xạ được."""
+    p = posixpath.normpath(rel)
+    name = posixpath.basename(p)
+    if posixpath.dirname(p) == tests_rel and name.startswith("test_") and name.endswith(".py"):
+        return {p} & texts.keys()  # file test bị xoá: không còn gì để chạy
+    stem = posixpath.splitext(name)[0].replace("-", "_").lstrip("_")
+    hit = {t for t, s in texts.items() if _test_mentions(name, s)}
+    hit |= {posixpath.join(tests_rel, f"test_{stem}.py")} & texts.keys()
+    suffix = posixpath.splitext(name)[1]
+    if suffix:
+        hit |= {t for t, s in texts.items() if f"*{suffix}" in s}
+    return hit or None
+
+
+def test_select(root: Path, tests_dir: str, files: Sequence[str]) -> Optional[List[str]]:
+    """File test (POSIX, theo gốc) liên quan tới `files`; None = chạy cả suite."""
+    tests_rel = posixpath.normpath(tests_dir)
+    texts = {
+        posixpath.join(tests_rel, p.name): p.read_text(encoding="utf-8", errors="replace")
+        for p in sorted((root / tests_rel).glob("test_*.py"))
+    }
+    chosen: Set[str] = set()
+    for f in files:
+        hit = _tests_for_file(f, tests_rel, texts)
+        if hit is None:
+            return None
+        chosen |= hit
+    return sorted(chosen)
+
+
+def unittest_class_ids(root: Path, tests_dir: str, test_files: Optional[List[str]]) -> List[str]:
+    """Id `<gói>.<module>.<Lớp>` cho từng lớp test trong `test_files` (None = cả `tests_dir`) — như lệnh `test` của
+    repo khung: mỗi lớp một tiến trình. Module lỗi import → ValueError (cổng đỏ, không bỏ lặng)."""
+    import unittest
+
+    start = str(root / tests_dir)
+    loader = unittest.TestLoader()
+    patterns = ["test_*.py"] if test_files is None else [posixpath.basename(f) for f in test_files]
+    stack: List[Any] = [loader.discover(start, pattern=pat, top_level_dir=start) for pat in patterns]
+    if loader.errors:
+        raise ValueError(f"không nạp được test: {str(loader.errors[0]).strip()}")
+    pkg = "".join(f"{part}." for part in Path(posixpath.normpath(tests_dir)).parts)
+    ids: Set[str] = set()
+    while stack:
+        item = stack.pop()
+        if isinstance(item, unittest.TestSuite):
+            stack.extend(item)
+        else:
+            ids.add(f"{pkg}{type(item).__module__}.{type(item).__name__}")
+    return sorted(ids)
+
+
+def _changed_files(args: argparse.Namespace) -> Optional[List[str]]:
+    """File đã đổi: đối số, hoặc `XT_CHANGED_FILES` (mỗi dòng một đường dẫn); không có cả hai → None (không biết)."""
+    if args.files:
+        return list(args.files)
+    env = os.environ.get(CHANGED_FILES_ENV)
+    return None if env is None else [ln.strip() for ln in env.splitlines() if ln.strip()]
+
+
+def cmd_test_select(args: argparse.Namespace) -> int:
+    """`xt.py test-select [FILE…] [--tests DIR] [--unittest]`: in file test liên quan tới file đã đổi (đối số, hoặc
+    `XT_CHANGED_FILES` do `dev-task.sh gate-fast` đặt); không biết file nào đổi hoặc có file không ánh xạ được → in
+    `DIR` (cả suite). `--unittest`: in id lớp test (`tests.test_x.Lop`) để chạy mỗi lớp một tiến trình."""
+    root = project_dir()
+    files = _changed_files(args)
+    picked = None if files is None else test_select(root, args.tests, files)
+    if picked is None:
+        print(
+            f"[test-select] cả suite ({args.tests}): không biết file đổi hoặc có file không ánh xạ được",
+            file=sys.stderr,
+        )
+    elif not picked:
+        print("[test-select] không có test liên quan", file=sys.stderr)
+    out = [args.tests] if picked is None else picked
+    if args.unittest:
+        try:
+            out = unittest_class_ids(root, args.tests, picked)
+        except ValueError as e:
+            print(f"✗ {e}", file=sys.stderr)
+            return 1
+    if out:
+        print("\n".join(out))
+    return 0
+
+
 def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
     """Chạy lệnh Gate: bash -o pipefail, không phải /bin/sh của shell=True — `test | tee log` phải đỏ khi test đỏ
     (sh lấy exit của lệnh cuối ống nên từng ghi bằng chứng exit 0 cho Gate đỏ — xanh giả, FB từ dự án đích).
@@ -3617,9 +3714,13 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         return [Finding("xt-yaml", "error", msg, fix)]
     keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
     out = _doctor_gate_tools(keys)
-    phase_err = delivery_phase_error({k: yaml_scalar(v) for k, v in keys.items()})
+    scalars = {k: yaml_scalar(v) for k, v in keys.items()}
+    phase_err = delivery_phase_error(scalars)
     if phase_err:
         out.append(Finding("xt-yaml", "error", phase_err + " — sửa thành build hoặc harden"))
+    gate_err = commit_gate_error(scalars)
+    if gate_err:
+        out.append(Finding("xt-yaml", "error", gate_err + " — sửa thành fast hoặc full"))
     missing = [k for k in DOCTOR_YAML_KEYS if k not in keys]
     if missing:
         out.append(
@@ -4373,6 +4474,21 @@ def delivery_phase_error(keys: Dict[str, str]) -> Optional[str]:
     if value in ("", *DELIVERY_PHASES):
         return None
     return f"xt.yaml: {PHASE_KEY} '{value}' không hợp lệ (build|harden — ADR-0031)"
+
+
+# Cổng trước commit (D-NNN do phiên chính ghi): `fast` = hook commit chạy `dev-task.sh gate-fast` (format/lint/typecheck +
+# test liên quan, không ngưỡng coverage); `full` = `dev-task.sh gate` như CI. Vắng/rỗng = full. Hook coi giá trị lạ là full;
+# `doctor`/`ci-check` từ chối giá trị lạ.
+COMMIT_GATE_KEY = "commit_gate"
+COMMIT_GATES = ("fast", "full")
+
+
+def commit_gate_error(keys: Dict[str, str]) -> Optional[str]:
+    """Giá trị `commit_gate` lạ (không phải fast|full; vắng/rỗng hợp lệ = full) — `doctor`/`ci-check` từ chối."""
+    value = keys.get(COMMIT_GATE_KEY, "")
+    if value in ("", *COMMIT_GATES):
+        return None
+    return f"xt.yaml: {COMMIT_GATE_KEY} '{value}' không hợp lệ (fast|full — vắng = full)"
 
 
 def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
@@ -5926,7 +6042,7 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
             print(f"✗ {d / name}: {e}")
         bad += len(errors)
     keys = _xt_keys(project_dir())
-    for cfg_err in (review_family_config_error(keys), delivery_phase_error(keys)):
+    for cfg_err in (review_family_config_error(keys), delivery_phase_error(keys), commit_gate_error(keys)):
         if cfg_err:
             print(f"✗ {cfg_err}")
             bad += 1
@@ -8847,6 +8963,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="fact của dự án (lặp được): mục thiết yếu của fact lên MUST ở quy mô M (ADR-0030)",
     )
     pc.set_defaults(fn=cmd_compose)
+    pts = sub.add_parser("test-select", help="test liên quan tới file đã đổi — cho `dev-task.sh gate-fast`")
+    pts.add_argument("files", nargs="*", help=f"file đã đổi (mặc định: biến {CHANGED_FILES_ENV}, mỗi dòng một file)")
+    pts.add_argument("--tests", default="tests", help="thư mục test theo gốc dự án (mặc định tests)")
+    pts.add_argument("--unittest", action="store_true", help="in id lớp unittest thay vì đường dẫn file test")
+    pts.set_defaults(fn=cmd_test_select)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
     pg.set_defaults(fn=cmd_guard_check)

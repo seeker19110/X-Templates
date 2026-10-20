@@ -134,7 +134,8 @@ Nguồn trong `research/` ghi ngày rà lại; "chưa xác minh" không phải b
 | Trần sửa cùng lỗi | `xt.py loop status --json` → `blocked` | Stop hook `stop-guard.sh` | `same_failure_count` ≥ 3 |
 | Phân loại lỗi CI + ngân sách episode | `xt.py loop ci-triage --run <id> --json` | Trước mỗi lần sửa CI | re-run ≤ 1; cùng chữ ký 3 lần → `defer`; secret/SAST → `block` |
 | Trần chi phí headless | `claude -p … --max-turns N --max-budget-usd X --output-format json` | Workflow | `total_cost_usd` ≤ X |
-| Cổng commit | `scripts/dev-task.sh gate` (đọc `xt.yaml`) | Hook trước `git commit` | Exit 0 |
+| Cổng commit | `scripts/dev-task.sh gate-fast` khi `xt.yaml` `commit_gate: fast` (lint · typecheck · test liên quan), ngược lại `gate` | Hook trước `git commit` | Exit 0 |
+| Cổng đầy đủ | `scripts/dev-task.sh gate` (build · typecheck · lint · test + ngưỡng của dự án) | Một lần trước khi đẩy/mở PR; job CI `quality` | Exit 0 |
 | Pin action | Linter workflow (vd `zizmor`/`actionlint`) | CI | 0 action chưa pin |
 
 ## Nguồn

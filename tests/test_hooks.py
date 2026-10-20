@@ -252,6 +252,56 @@ class CommitGateRepoTest(unittest.TestCase):
         self.assertNotIn("GATE-PROJ", err)
 
 
+@unittest.skipIf(shutil.which("bash") is None or shutil.which("git") is None, "cần bash + git")
+class CommitGateFastHookTest(unittest.TestCase):
+    """`commit_gate: fast` trong xt.yaml → hook commit chạy `dev-task.sh gate-fast`; `full`, vắng, giá trị lạ → `gate`
+    (cổng đầy đủ). `--no-verify` không bỏ được cổng nào."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
+        git = ["git", "-C", str(self.tmp), "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run([*git, "add", "scripts"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)  # có HEAD → gate-fast biết file đổi
+
+    def commit(self, gate_line: str, fast: str = "echo-fast", cmd: str = "git commit -m x") -> tuple[int, str, str]:
+        (self.tmp / "xt.yaml").write_text(
+            f"{gate_line}test_fast: sh -c '{fast}'\ntest: sh -c 'echo FULL-RAN'\n", encoding="utf-8"
+        )
+        payload = {"tool_input": {"command": cmd}, "cwd": str(self.tmp)}
+        return run_hook("pre-bash-guard.sh", payload, self.tmp, extra_env={"XT_GUARD_POLICY": ""})
+
+    def test_commit_gate_fast_runs_gate_fast(self):
+        for line in ("commit_gate: fast\n", 'commit_gate: "fast"  # cổng nhanh\n', "commit_gate: 'fast'\n"):
+            with self.subTest(line=line):
+                code, out, err = self.commit(line, fast="echo FAST-RAN")
+                self.assertEqual((code, decision(out)), (0, None), err)
+                self.assertIn("FAST-RAN", err)
+                self.assertNotIn("FULL-RAN", err)
+                self.assertIn("Commit nhanh (commit_gate: fast)", err)
+                self.assertIn("cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI", err)
+
+    def test_commit_gate_fast_full_absent_or_unknown_runs_full_gate(self):
+        for line in ("commit_gate: full\n", "", "commit_gate: fastest\n", "# commit_gate: fast\n"):
+            with self.subTest(line=line):
+                code, out, err = self.commit(line, fast="echo FAST-RAN")
+                self.assertEqual(code, 0, err)
+                self.assertIn("FULL-RAN", err)
+                self.assertNotIn("FAST-RAN", err)
+                self.assertNotIn("Commit nhanh", err)
+
+    def test_commit_gate_fast_red_blocks_even_with_no_verify(self):
+        for cmd in ("git commit -m x", "git commit --no-verify -m x", "git -c core.hooksPath=/dev/null commit -m x"):
+            with self.subTest(cmd=cmd):
+                code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RED; exit 1", cmd=cmd)
+                self.assertEqual(code, 2, out + err)
+                self.assertIn("FAST-RED", err)
+                self.assertIn("Cổng trước commit ĐỎ (gate-fast", err)
+
+
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class SessionStartUtf8Test(unittest.TestCase):
     def test_session_start_utf8_cut_is_valid(self):

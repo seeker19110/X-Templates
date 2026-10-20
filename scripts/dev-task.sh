@@ -13,8 +13,14 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate
-#   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail.
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast
+#   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
+#          mở PR, `xt.py loop record` dùng đúng lệnh này.
+#   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
+#          nhận danh sách file đã đổi so với HEAD (staged + chưa staged + file mới chưa ignore) qua biến
+#          XT_CHANGED_FILES (mỗi dòng một file); test_fast trống/no-op hoặc không biết file đổi (không phải repo git,
+#          chưa có commit) → chạy `test` (không bao giờ yếu hơn test thường). Không chạy build, không ngưỡng coverage
+#          riêng — cổng đầy đủ ở CI giữ chúng.
 #
 # Dùng: scripts/dev-task.sh <task>
 set -uo pipefail
@@ -31,7 +37,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast"
   exit 2
 fi
 
@@ -167,6 +173,28 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
   ( cd "$ROOT" && bash -o pipefail -c "$cmd" )
 }
 
+# --- gate-fast: test liên quan file đã đổi ----------------------------------------
+changed_files() { # file đổi so với HEAD (theo gốc dự án) + file mới chưa ignore; không phải repo git/chưa có HEAD → 1
+  git -C "$ROOT" rev-parse -q --verify HEAD >/dev/null 2>&1 || return 1
+  # core.quotePath=false: tên file Unicode (tiếng Việt) ra nguyên văn, không thành "\303\241…" có nháy.
+  { git -C "$ROOT" -c core.quotePath=false diff --relative --name-only HEAD -- &&
+    git -C "$ROOT" -c core.quotePath=false ls-files --others --exclude-standard; } | sort -u
+}
+fast_test_task() { # in task test cho gate-fast: test_fast nếu có lệnh thật và biết file đổi, ngược lại test
+  is_noop "$(resolve test_fast)" && { echo test; return 0; }
+  [ -n "${XT_CHANGED_FILES+x}" ] && { echo test_fast; return 0; }
+  log "gate-fast: không biết file nào đổi (không phải repo git/chưa có commit) → chạy 'test' đầy đủ"
+  echo test
+}
+gate_report() { # $1=rc $2=tên cổng → log kết quả, exit rc
+  if [ "$1" -eq 0 ] && [ "$RAN" -eq 0 ]; then
+    log "$2 KHÔNG CHẠY LỆNH NÀO (no-op) — không thấy xt.yaml/lệnh ở $ROOT; đây KHÔNG phải bằng chứng xanh"
+  elif [ "$1" -eq 0 ]; then
+    log "$2 XANH ($RAN lệnh)"
+  fi
+  exit "$1"
+}
+
 # --- format-file: format ĐÚNG file vừa sửa (dùng cho auto-format hook) --------
 json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
   command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
@@ -223,12 +251,14 @@ case "$TASK" in
     for t in build typecheck lint test; do
       run_task "$t" || { rc=1; log "GATE ĐỎ ở '$t' → dừng"; break; }
     done
-    if [ "$rc" -eq 0 ] && [ "$RAN" -eq 0 ]; then
-      log "GATE KHÔNG CHẠY LỆNH NÀO (no-op) — không thấy xt.yaml/lệnh ở $ROOT; đây KHÔNG phải bằng chứng xanh"
-    elif [ "$rc" -eq 0 ]; then
-      log "GATE XANH ($RAN lệnh)"
-    fi
-    exit "$rc" ;;
+    gate_report "$rc" GATE ;;
+  gate-fast)
+    rc=0
+    if CHANGED="$(changed_files)"; then export XT_CHANGED_FILES="$CHANGED"; else unset XT_CHANGED_FILES; fi
+    for t in format_check lint typecheck "$(fast_test_task)"; do
+      run_task "$t" || { rc=1; log "GATE-FAST ĐỎ ở '$t' → dừng"; break; }
+    done
+    gate_report "$rc" GATE-FAST ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast)"; exit 2 ;;
 esac

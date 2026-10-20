@@ -2,7 +2,7 @@
 # pre-bash-guard.sh — PreToolUse hook (matcher: Bash). Ba việc, theo thứ tự:
 #  1) DENY lệnh phá huỷ / không đảo ngược (deny chặn cả ở bypassPermissions).
 #  2) ASK (chỉ khi XT_GUARD_POLICY=strict; mặc định guard.py đổi ask nguy hiểm → deny, còn lại cho qua — ADR-0018) lệnh "hành động đối ngoại" (riêng `gh pr merge` qua `xt.py merge-check` → có thể ALLOW, ADR-0013), nới hàng rào, ghi file cổng/bí mật qua Bash (điểm dừng bắt buộc — 11-autonomous-loop).
-#  3) Khi là `git commit`: chạy cổng chất lượng qua dev-task.sh gate; đỏ → chặn (exit 2).
+#  3) Khi là `git commit`: chạy cổng chất lượng qua dev-task.sh gate (gate-fast khi xt.yaml `commit_gate: fast`); đỏ → chặn (exit 2).
 # Phân tích lệnh nằm ở guard.py (tách theo token shell, chuẩn hoá wrapper/tuỳ chọn git — audit AUD-SEC-001…010).
 # Payload đi qua stdin, không qua argv. guard.py lỗi/thiếu python3 → cho qua (fail-open về luồng), trừ merge: không kiểm
 # được ngoại lệ cứng → chặn (strict: hỏi) — ADR-0019, AUD-SEC-045.
@@ -83,9 +83,15 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
     [ -x "$g" ] && { gate="$g"; break; }
   done
   if [ -n "$gate" ]; then
+    # `commit_gate: fast` (xt.yaml của repo nhận commit) → cổng nhanh: format/lint/typecheck + test liên quan file đổi;
+    # cổng đầy đủ (`dev-task.sh gate`, ngưỡng coverage) chạy ở bước mở PR và CI. Vắng/giá trị khác → đầy đủ như trước.
+    task="gate"
+    fast_re='^commit_gate:[[:space:]]*("fast"|'\''fast'\''|fast)[[:space:]]*(#.*)?$'
+    [ -f "$groot/xt.yaml" ] && grep -Eq "$fast_re" "$groot/xt.yaml" && task="gate-fast"
+    [ "$task" = "gate-fast" ] && echo "⚡ Commit nhanh (commit_gate: fast): format/lint/typecheck + test liên quan file đổi; cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI." >&2
     # stdout của cổng sang stderr: stdout của hook chỉ được chứa JSON quyết định.
-    if ! CLAUDE_PROJECT_DIR="$groot" "$gate" gate >&2; then
-      echo "❌ Cổng trước commit ĐỎ (build/typecheck/lint/test) ở $groot. Sửa rồi commit lại." >&2
+    if ! CLAUDE_PROJECT_DIR="$groot" "$gate" "$task" >&2; then
+      echo "❌ Cổng trước commit ĐỎ ($task: build/typecheck/lint/test) ở $groot. Sửa rồi commit lại." >&2
       exit 2
     fi
   fi

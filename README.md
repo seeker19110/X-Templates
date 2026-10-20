@@ -101,7 +101,9 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py stats` | Đếm file theo loại và mục theo mức |
 | `python3 scripts/xt.py --version` · `--help` | Phiên bản khung (file `VERSION`) · ví dụ và mã thoát (0 ổn · 1 chưa đạt · 2 sai cách dùng) |
 | `python3 scripts/check-links.py` | Kiểm liên kết Markdown toàn repo |
-| `scripts/dev-task.sh gate` | Cổng commit: chạy lệnh trong `xt.yaml` (build · typecheck · lint · test), CI chạy đúng lệnh này |
+| `scripts/dev-task.sh gate` | Cổng đầy đủ: chạy lệnh trong `xt.yaml` (build · typecheck · lint · test), CI chạy đúng lệnh này; chạy một lần trước khi đẩy/mở PR |
+| `scripts/dev-task.sh gate-fast` | Cổng commit nhanh (hook chạy khi `xt.yaml` `commit_gate: fast`; vắng = `full` = `gate`): `format_check` · lint · typecheck · `test_fast` với `XT_CHANGED_FILES` (file đổi so với HEAD + file mới); `test_fast` trống hoặc không biết file đổi → `test`; không build, không ngưỡng coverage |
+| `python3 scripts/xt.py test-select [FILE…] [--tests DIR] [--unittest]` | Test liên quan file đổi (đối số hoặc `XT_CHANGED_FILES`): chính file test, `test_<tên>.py`, test nhắc tên file, test quét theo đuôi (`*.md`); file không ánh xạ được → cả suite; `--unittest` in id lớp (`tests.test_x.Lop`), module lỗi import → exit 1 |
 
 Biến môi trường (đều tuỳ chọn): `XT_FRAMEWORK` (thư mục khung, mặc định cạnh `scripts/`) · `XT_FRAMEWORK_LINK` (gốc liên kết
 trong blueprint, mặc định `.xtemplates/framework`) · `XT_RECORD_TIMEOUT` (giây, mặc định 1800) · `XT_PROGRESS_BASE` (nhánh chính cho `progress-check`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; rỗng = tắt) · `CLAUDE_PROJECT_DIR` (gốc dự án cho
