@@ -131,10 +131,11 @@ class DeliveryPhaseMergeTest(unittest.TestCase):
         waived = self.result(
             AUTH, "build", hard_auto=True
         )  # auto (ADR-0020): máy merge được, nhưng vẫn cần review sạch
-        self.assertEqual((waived["hard"], bool(waived["hard_waived"]), waived["verdict"]), ([], True, "merge"))
+        # chưa review: merge-check không gợi merge (verdict `review`, AUD-XFEAT-010)
+        self.assertEqual((waived["hard"], bool(waived["hard_waived"]), waived["verdict"]), ([], True, "review"))
         self.assertEqual((waived["review"], waived["review_deferred"], waived["eligible"]), ("missing", False, False))
         ok = self.result(AUTH, "build", hard_auto=True, xtReviews=[mark(True)])
-        self.assertEqual((ok["review"], ok["eligible"]), ("ok", True))
+        self.assertEqual((ok["review"], ok["eligible"], ok["verdict"]), ("ok", True, "merge"))
 
     def test_delivery_phase_build_blocking_review_blocks(self):
         d = self.result(STANDARD, "build", xtReviews=[mark(False)])

@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -20,6 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 import install
 import xt
 
@@ -146,9 +147,11 @@ class DoctorHealthyTest(DoctorCase):
             "test: git -C . log -1 && python3 -m json.tool -h 'do something'\nbuild: ''\n",
         )
         self.assertEqual([f.msg for f in self.findings() if f.code == "gate-tools"], [])
-        start = time.process_time()  # không bậc hai với token dài có `=` cuối
+        # không bậc hai với token dài có `=` cuối (AUD-TEST-008: so tỉ lệ cỡ n/4n, không ngưỡng giây cứng)
         self.assertEqual(xt._doctor_gate_tools({"lint": "git && " + "b" * 50000 + "="}), [])
-        self.assertLess(time.process_time() - start, 1.0)
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: xt._doctor_gate_tools({"lint": "git && " + "b" * n + "="}), 12500
+        )
         self.write("xt.yaml", "lint: git status && python3 -m json.tool x\ntypecheck: ''\ntest: ''\nbuild: ''\n")
         self.assertEqual([f for f in self.findings() if f.code == "gate-tools"], [])
 

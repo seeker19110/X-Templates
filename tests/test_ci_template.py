@@ -219,6 +219,42 @@ class DevTaskSetupTest(unittest.TestCase):
         self.assertIn("|require|setup)", r.stderr)
 
 
+# (lệnh, là no-op?) — bảng chung cho `is_noop` của dev-task.sh và `xt.gate_noop` (không chứa `'` hay ` #`: nằm trong
+# nháy đơn của xt.yaml).
+NOOP_TABLE = (
+    ("true", True),
+    (":", True),
+    ("exit", True),
+    ("exit 0", True),
+    ("echo", True),
+    ("echo ok", True),
+    ("printf x", True),
+    ("echo $HOME", True),
+    ("true && true", True),
+    (": && :", True),
+    ("true; true", True),
+    ("true || :", True),
+    (" true ;", True),
+    ("echo a; exit 0", True),
+    ("true&&:", True),
+    ("echo go && echo done", True),
+    ("echo go && pytest", False),
+    ("echo go; pytest -q", False),
+    ("printf x || make test", False),
+    ("echo x | sh", False),
+    ("echo $(pytest)", False),
+    ("echo `pytest`", False),
+    ("echo a & pytest", False),
+    ("true && pytest -q", False),
+    ("pytest -q; true", False),
+    ("true | pytest", False),
+    ("exit 1 && :", False),
+    ("truex", False),
+    ("echox", False),
+    ("pytest -q", False),
+)
+
+
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class DevTaskRequireEmptyGateTest(unittest.TestCase):
     """`dev-task.sh require lint test` (bước đầu job `checks` của CI mẫu, D-096): đỏ khi `lint`/`test` rỗng hoặc no-op,
@@ -274,6 +310,31 @@ class DevTaskRequireEmptyGateTest(unittest.TestCase):
                     "ĐỎ: xt.yaml chưa khai lệnh thật cho 'test'", r.stderr
                 )  # ngoài Actions: log, không ::error::
                 self.assertNotIn("::error::", r.stdout)
+
+    def test_empty_gate_chained_noop_commands_are_red(self):
+        """Chuỗi toàn no-op nối bằng `&&`/`;`/`||` vẫn không kiểm gì."""
+        for noop in ("true && true", ": && :", "true; true", "true || :", " true ;", "echo a; exit 0", "true&&:"):
+            with self.subTest(noop=noop):
+                r = self.require(f"lint: ruff check .\ntest: '{noop}'\n", "lint", "test")
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("ĐỎ: xt.yaml chưa khai lệnh thật cho 'test'", r.stderr)
+
+    def test_empty_gate_chain_with_real_command_is_green(self):
+        for cmd in ("true && pytest -q", "pytest -q; true", ": || make test", "true | pytest", "exit 1 && :"):
+            with self.subTest(cmd=cmd):
+                r = self.require(f"lint: ruff check .\ntest: '{cmd}'\n", "lint", "test")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"require: 'test' = {cmd}", r.stderr)
+
+    def test_noop_parity_with_xt(self):
+        """`is_noop` (dev-task.sh) và `xt.gate_noop` cùng kết luận trên một bảng ca; hai chuỗi regex trùng nhau."""
+        dev = (ROOT / "scripts" / "dev-task.sh").read_text(encoding="utf-8")
+        self.assertIn(f"NOOP_RE='{xt.GATE_NOOP_SEG}'\n", dev)
+        for cmd, noop in NOOP_TABLE:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(xt.gate_noop(cmd), noop)
+                r = self.require(f"lint: ruff check .\ntest: '{cmd}'\n", "lint", "test")
+                self.assertEqual(r.returncode, 1 if noop else 0, r.stderr)
 
     def test_empty_gate_detected_command_counts(self):
         """Không có xt.yaml mà tự dò được (Makefile có target) → lệnh thật, xanh; không dò được → đỏ."""

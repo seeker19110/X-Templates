@@ -6,10 +6,12 @@ import argparse
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import textwrap
+import unicodedata
 import unittest
 import unittest.mock
 from contextlib import chdir, redirect_stderr, redirect_stdout
@@ -17,6 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
 import xt
 
 
@@ -567,13 +571,10 @@ class LoopTest(unittest.TestCase):
             with self.subTest(raw):
                 out = xt.redact(raw)
                 self.assertNotIn("cret", out)
-        import time
-
-        for blob in ("a" * 50_000, "mysql " * 20_000, ("token" + "f" * 40 + " ") * 2_000):
-            with self.subTest(blob[:12]):
-                t0 = time.process_time()
-                xt.redact(blob)
-                self.assertLess(time.process_time() - t0, 2.0)
+        # AUD-TEST-008: không bậc hai — tỉ lệ cỡ n/4n trong cùng tiến trình (cỡ lớn = cỡ cũ), không ngưỡng giây cứng
+        for unit, count in (("a", 50_000), ("mysql ", 20_000), ("token" + "f" * 40 + " ", 2_000)):
+            with self.subTest(unit[:12]):
+                cpu_budget.assert_not_quadratic(self, lambda n, u=unit: xt.redact(u * n), count // 4)
 
     def test_redact_audit_delta_wave_c(self):
         """Audit delta đợt C: nháy loại kia trong giá trị (AUD-CFG-006), `pwd`/`pass` (CFG-008), không che nhầm định danh
@@ -600,13 +601,9 @@ class LoopTest(unittest.TestCase):
             with self.subTest(raw):
                 self.assertEqual(xt.redact(raw), raw)
         self.assertIn("***", xt.redact("npm_" + "a1B2" * 9))
-        import time
-
-        for blob in ("token" * 10_000, "_token_" * 8_000):
-            with self.subTest(blob[:8]):
-                t0 = time.process_time()
-                xt.redact(blob)
-                self.assertLess(time.process_time() - t0, 2.0)
+        for unit, count in (("token", 10_000), ("_token_", 8_000)):  # AUD-TEST-008: tỉ lệ n/4n, không ngưỡng cứng
+            with self.subTest(unit):
+                cpu_budget.assert_not_quadratic(self, lambda n, u=unit: xt.redact(u * n), count // 4)
 
     def test_redact_applies_to_evidence_cmd(self):
         with redirect_stdout(io.StringIO()):
@@ -983,6 +980,15 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertIn("- [x] `A-001` **MUST** a. · Nguồn: w · Bằng chứng: `ci.yml`\n", out)
         self.assertEqual(dropped, ["A-002"])  # đã tick, đuôi đổi, không có ghi chú để mang → người gọi cảnh báo
 
+    def test_carry_states_normalizes_new_text_nfc(self):
+        # AUD-HAR-070 (BASE-DATA-002): bản ghép mới mang chữ NFD (module khung sửa bằng trình soạn khác) không được bị
+        # coi là "chữ yêu cầu đổi" — mục `[x]` giữ trạng thái, không về `[ ]` kèm "— Cũ"; đầu ra lưu NFC.
+        old = "- [x] `A-001` **MUST** Chuỗi tiếng Việt được lưu. — Bằng chứng: test\n"
+        new = unicodedata.normalize("NFD", "- [ ] `A-001` **MUST** Chuỗi tiếng Việt được lưu.\n")
+        stale: list[str] = []
+        out, kept = xt.carry_states(old, new, stale=stale)
+        self.assertEqual((out, kept, stale), (old, 1, []))
+
     def test_requirement_revision_resets_changed_text_and_reports_stale(self):
         """T-1505 (REC-06): chữ yêu cầu (phần quy phạm) đổi → mục `[x]`/`[~]` về `[ ]` kèm `— Cũ (rev …, trước đó [x|~])`,
         ID vào `stale`; đổi mức/quy mô, Kiểm, Nguồn không phải đổi yêu cầu; `[ ]` đổi chữ không gắn nhãn; `blueprint-status`
@@ -1135,10 +1141,20 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual((d["ok"], d["open_must"], d["bad_waivers"]), (False, ["A-002"], ["A-003 (dòng 3)"]))
 
     def test_readme_lists_every_subcommand(self):
+        # AUD-HAR-075 (BASE-DOC-007): chỉ đọc ô đầu các dòng bảng `## Công cụ` (không cả README) và đòi cả lệnh con
+        # (`loop next`, `pr reviewed`…): dạng `xt.py <lệnh> <con>` hoặc `xt.py <lệnh> a/b/<con>`.
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        section = readme.split("\n## Công cụ\n", 1)[1].split("\n## ", 1)[0]
+        cells = "\n".join(ln.split("|")[1] for ln in section.splitlines() if ln.startswith("| "))
         sub = next(a for a in xt.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
-        missing = [c for c in sub.choices if f"xt.py {c}" not in readme]
-        self.assertEqual(missing, [], "README thiếu lệnh — cập nhật bảng Công cụ")
+        missing = []
+        for c, p in sub.choices.items():
+            if not re.search(rf"xt\.py {re.escape(c)}(?![\w-])", cells):
+                missing.append(c)
+            for nested in (a for a in p._actions if isinstance(a, argparse._SubParsersAction)):
+                pat = rf"xt\.py {re.escape(c)} (?:[\w-]+/)*{{}}(?![\w-])"
+                missing += [f"{c} {s}" for s in nested.choices if not re.search(pat.format(re.escape(s)), cells)]
+        self.assertEqual(missing, [], "bảng Công cụ của README thiếu lệnh — thêm vào ô đầu bảng")
 
 
 GOOD_PROGRESS = """# PROGRESS.md — Thử

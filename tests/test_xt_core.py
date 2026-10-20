@@ -1055,8 +1055,75 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
 # --------------------------------------------------------------------------- loop record / helpers
 
 
-class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
+def real_autopilot_dirs() -> list[Path]:
+    """`.autopilot/` mà `loop record` sẽ ghi khi test quên đặt gốc tạm: theo `CLAUDE_PROJECT_DIR` (nếu có) và theo cwd."""
+    dirs = {ROOT / ".autopilot"}
+    with unittest.mock.patch.dict(os.environ):
+        env = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        dirs.add(xt.project_dir() / ".autopilot")
+    if env:
+        dirs.add(Path(env).resolve() / ".autopilot")
+    return sorted(dirs)
+
+
+def autopilot_snapshot(dirs: list[Path]) -> dict:
+    """{đường dẫn: (mtime_ns, cỡ)} của mọi file trong `dirs` — so trước/sau để bắt test ghi vào sổ thật (hook không còn
+    cache bytecode ở `.autopilot/pycache` — review PR #182 — nên không bỏ qua thư mục nào)."""
+    snap: dict = {}
+    for d in dirs:
+        for p in d.rglob("*") if d.exists() else ():
+            if p.is_file():
+                st = p.stat()
+                snap[str(p)] = (st.st_mtime_ns, st.st_size)
+    return snap
+
+
+def autopilot_changes(before: dict, dirs: list[Path]) -> list[str]:
+    after = autopilot_snapshot(dirs)
+    return sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+
+
+class RealAutopilotUntouchedMixin(unittest.TestCase):
+    """AUD-TEST-009: test không được ghi `.autopilot/` của repo thật (bằng chứng giả vào sổ thật, trái ADR-0026).
+    Gọi `guard_real_autopilot()` đầu `setUp`: chụp trước, kiểm lại sau mỗi test (cleanup)."""
+
+    def guard_real_autopilot(self) -> None:
+        dirs = real_autopilot_dirs()
+        before = autopilot_snapshot(dirs)
+        self.addCleanup(
+            lambda: self.assertEqual(
+                autopilot_changes(before, dirs),
+                [],
+                "test đã ghi vào .autopilot/ thật — đặt CLAUDE_PROJECT_DIR/base tạm",
+            )
+        )
+
+
+class RealAutopilotGuardTest(TmpMixin, unittest.TestCase):
+    def test_snapshot_sees_new_and_changed_files(self):
+        d = self.tmpdir() / ".autopilot"
+        self.assertEqual(autopilot_snapshot([d]), {})
+        before = autopilot_snapshot([d])
+        (d / "evidence").mkdir(parents=True)
+        write(d / "evidence" / "T-002.json", "{}")
+        write(d / "pycache" / "x.pyc", "b")  # hook không còn cache bytecode: file ở đây cũng tính
+        self.assertEqual(
+            autopilot_changes(before, [d]), [str(d / "evidence" / "T-002.json"), str(d / "pycache" / "x.pyc")]
+        )
+        before = autopilot_snapshot([d])
+        self.assertEqual(autopilot_changes(before, [d]), [])
+        write(d / "runs.jsonl", "{}\n")
+        self.assertEqual(autopilot_changes(before, [d]), [str(d / "runs.jsonl")])
+        write(d / "evidence" / "T-002.json", "{} ")  # ghi đè bằng chứng có sẵn
+        self.assertIn(str(d / "evidence" / "T-002.json"), autopilot_changes(before, [d]))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(d.parent)}):
+            self.assertIn(d.resolve(), real_autopilot_dirs())
+        self.assertIn(ROOT / ".autopilot", real_autopilot_dirs())
+
+
+class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.TestCase):
     def setUp(self):
+        self.guard_real_autopilot()
         self.base = self.tmpdir()
         # git không được dò ngược lên thư mục cha (TMPDIR nằm trong một repo → _git_head nhặt nhầm SHA)
         ceiling = unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.base.parent)})
@@ -1068,6 +1135,7 @@ class LoopRecordBranchesTest(TmpMixin, unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("XT_RECORD_TIMEOUT", None)
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.base)  # AUD-TEST-009: CLI `xt.main([...])` ghi vào gốc tạm
 
     def record(self, cmd, task="T-001"):
         out, err = io.StringIO(), io.StringIO()

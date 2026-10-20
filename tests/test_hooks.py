@@ -12,12 +12,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 import unittest.mock as mock
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
+import cpu_budget
+
 # Test bộ luật ở chế độ strict (hỏi); chính sách mặc định — ask nguy hiểm → deny, còn lại cho qua (ADR-0018) — test riêng ở
 # GuardPolicyTest.
 os.environ["XT_GUARD_POLICY"] = "strict"
@@ -1682,8 +1684,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
     """Merge ghim head qua Bash/REST/MCP được allow; thiếu ghim, cờ lạ, repo khác → hỏi; `merge_check` thật."""
 
     def test_merge_check_real_subprocess(self):
-        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly, cache trong `.autopilot/` của dự
-        án — AUD-SEC-065): các ca khác thay nó bằng `merge_check_inproc` — ca này giữ đường thật và nhánh lỗi."""
+        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly — AUD-SEC-065, không cache
+        bytecode — review PR #182): các ca khác thay nó bằng `merge_check_inproc` — ca này giữ đường thật và nhánh lỗi."""
         cache = self.proj / "cache"
         env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "PYTHONPYCACHEPREFIX": str(cache)}
         with mock.patch.dict(os.environ, env):
@@ -1691,7 +1693,7 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             self.assertFalse((self.proj / ".autopilot").exists())  # chưa có .autopilot/: không ghi bytecode (-B)
             (self.proj / ".autopilot").mkdir()
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
-            self.assertTrue(list((self.proj / ".autopilot" / "pycache").rglob("xt*.pyc")))
+            self.assertFalse((self.proj / ".autopilot" / "pycache").exists())  # không cache bytecode (review PR #182)
             self.assertFalse(cache.exists())  # PYTHONPYCACHEPREFIX của môi trường bị bỏ qua
             self.fake_gh(None)
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["reasons"], ["merge-check không chạy được"])
@@ -2540,8 +2542,8 @@ class MergeHookFailClosedTest(unittest.TestCase):
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class HookRunnerTest(unittest.TestCase):
-    """Hook gọi guard.py/xt.py bằng import (bytecode cache) và đọc kết quả `nul` một lần — không đẻ `__pycache__` trong
-    dự án đích, kết quả giữ nguyên ký tự xuống dòng/tiếng Việt."""
+    """Hook gọi guard.py/xt.py bằng import (biên dịch từ nguồn, không cache bytecode) và đọc kết quả `nul` một lần —
+    không đẻ `__pycache__` trong dự án đích, kết quả giữ nguyên ký tự xuống dòng/tiếng Việt."""
 
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -2552,7 +2554,7 @@ class HookRunnerTest(unittest.TestCase):
         self.env.update(CLAUDE_PROJECT_DIR=str(self.tmp), XDG_CACHE_HOME=str(self.cache), XT_GUARD_POLICY="")
 
     def test_nul_fields_and_no_pycache_in_project(self):
-        (self.tmp / ".autopilot").mkdir()  # cache bytecode chỉ khi .autopilot/ đã có (đã ignore)
+        (self.tmp / ".autopilot").mkdir()  # có .autopilot/ cũng không ghi bytecode vào đó (review PR #182)
         r = subprocess.run(
             ["bash", str(self.hooks / "pre-bash-guard.sh")],
             input=json.dumps({"tool_input": {"command": "sudo ls"}}),
@@ -2563,7 +2565,7 @@ class HookRunnerTest(unittest.TestCase):
         )
         self.assertEqual(decision(r.stdout), "deny", r.stderr)
         self.assertFalse((self.hooks / "__pycache__").exists())
-        self.assertTrue(list((self.tmp / ".autopilot" / "pycache").rglob("guard*.pyc")))  # AUD-SEC-065
+        self.assertEqual(list((self.tmp / ".autopilot").iterdir()), [])  # AUD-SEC-065/074
         self.assertFalse((self.cache / "xtemplates").exists())  # không cache ở chỗ agent ghi được
 
     def test_guard_fields_reads_every_field(self):
@@ -3240,12 +3242,15 @@ class GuardEgressAuditTest(EgressCase):
         )
 
     def test_url_re_linear(self):  # AUD-CODE-011
-        start = (
-            time.process_time()
-        )  # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
+        # trước sửa: 40k ký tự 1,9 s (bậc hai); shlex của thư viện chuẩn đo riêng, không ở đây
         self.assertEqual(self.guard._url_hosts("a" * 200_000), [])
         self.assertEqual(self.guard._url_hosts("x" * 100_000 + "postgres://u@h.example.com/d"), ["h.example.com"])
-        self.assertLess(time.process_time() - start, 1.0)
+
+        def hosts(n: int) -> None:
+            self.guard._url_hosts("a" * n)
+            self.guard._url_hosts("x" * (n // 2) + "postgres://u@h.example.com/d")
+
+        cpu_budget.assert_not_quadratic(self, hosts, 50_000)  # AUD-TEST-008: tỉ lệ cỡ n/4n, không ngưỡng giây cứng
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -4097,13 +4102,9 @@ class GuardAiAttributionTest(unittest.TestCase):
 
         # Không bậc hai: nhân 4 cỡ đầu vào thì thời gian CPU tăng ~4 lần (tuyến tính), bậc hai sẽ ~16 lần. So tỉ lệ thay cho
         # ngưỡng tuyệt đối vì runner CI chậm/nhanh khác nhau (coverage làm chậm thêm): 2,0 s từng vượt 0,04–0,07 s.
-        def cost(n: int) -> float:
-            t0 = time.process_time()
-            self.g._heredoc_bodies("a;" * n + " git commit -F - <<E\nb\nE")
-            return time.process_time() - t0
-
-        small = max(cost(50000), 0.02)
-        self.assertLess(cost(200000), small * 10 + 0.5)
+        cpu_budget.assert_not_quadratic(
+            self, lambda n: self.g._heredoc_bodies("a;" * n + " git commit -F - <<E\nb\nE"), 50000
+        )
 
     def test_review_125_cases(self):
         # Review #125: commit từ thư mục con, `--trailer`/`--author`, `-F` tương đối sau `-C`, FIFO không treo, cờ toàn
@@ -4128,11 +4129,15 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "deny")
-        t0 = time.process_time()  # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ
+        # CodeQL #125: `-C ""` lặp lại từng làm regex backtrack hàm mũ; `--git` dài bậc hai nếu không cắt dòng
         self.assertIsNone(self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * 5000 + " x"))
-        long_line = "git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"  # bậc hai nếu không cắt dòng
-        self.assertEqual(self.g._heredoc_bodies(long_line), [])
-        self.assertLess(time.process_time() - t0, 1.0)
+        self.assertEqual(self.g._heredoc_bodies("git" + " --git" * 8000 + " x <<E\nClaude Opus 5\nE"), [])
+
+        def scan(n: int) -> None:
+            self.g.GIT_COMMIT_TEXT_RE.search("git" + ' -C ""' * n + " x")
+            self.g._heredoc_bodies("git" + " --git" * (n * 8 // 5) + " x <<E\nClaude Opus 5\nE")
+
+        cpu_budget.assert_not_quadratic(self, scan, 1250)  # AUD-TEST-008: tỉ lệ cỡ n/4n, không ngưỡng giây cứng
         os.mkfifo(os.path.join(d, "p"))  # đọc FIFO sẽ treo hook tới timeout → bỏ qua file không thường
         self.assertEqual(self.decide("git commit -F p", d), "")
         with mock.patch.object(self.g, "GIT_TOP_MAX", 1):  # sâu hơn trần → không tìm tiếp
@@ -4798,12 +4803,84 @@ class GuardOutsideDirTest(unittest.TestCase):
     def no_listdir(self):
         return mock.patch.object(self.g.os, "listdir", side_effect=AssertionError("không được liệt kê thư mục ngoài"))
 
+    def counted_scandir(self, seen: list[int]):
+        """`os.scandir` đếm số mục guard thật sự đọc ra (mỗi lần gọi một phần tử trong `seen`)."""
+        real = os.scandir
+
+        class Counted:
+            def __init__(self, path):
+                self.it, self.n = real(path), len(seen)
+                seen.append(0)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.it.close()
+
+            def __iter__(self):
+                for entry in self.it:
+                    seen[self.n] += 1
+                    yield entry
+
+        return mock.patch.object(self.g.os, "scandir", side_effect=Counted)
+
     def test_outside_dir_is_not_listed(self):
-        with self.no_listdir():
+        seen: list[int] = []
+        with self.no_listdir(), self.counted_scandir(seen):
             for cmd in (f"mv x {self.out}", f"cp a {self.out}/", f"mv x {self.out}/tmp1"):
                 self.assertEqual(self.raw(cmd), "", cmd)
                 self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "", cmd)
             self.assertEqual(self.g._target_kind(str(self.out), self.root), "")
+        self.assertTrue(seen, "thư mục ngoài nhỏ/lớn đều đọc qua scandir có giới hạn")
+        self.assertLessEqual(max(seen), self.g.OUTSIDE_SCAN_MAX + 1, seen)  # 300 mục: dừng sớm, không đọc hết
+
+    def test_outside_large_dir_wildcard_gate_not_seen(self):
+        """> OUTSIDE_SCAN_MAX mục: chỉ kiểm tên đích danh — mẫu wildcard (`tsconfig*.json`) không thấy (đánh đổi D-097)."""
+        (self.out / "tsconfig.base.json").touch()
+        self.assertEqual(self.g._target_kind(str(self.out), self.root), "")
+        (self.out / "Makefile").touch()
+        self.assertEqual(self.g._target_kind(str(self.out), self.root), "gate")
+
+    def test_outside_small_dir_wildcard_gate_strict_asks(self):
+        """Thư mục ngoài nhỏ (≤ OUTSIDE_SCAN_MAX mục) xét đủ như trước D-097, kể cả mẫu wildcard."""
+        ts = self.out / "ts"
+        ts.mkdir()
+        for i in range(self.g.OUTSIDE_SCAN_MAX - 1):
+            (ts / f"f{i}").touch()
+        self.assertEqual(self.raw(f"cp x {ts}/"), "")
+        (ts / "tsconfig.base.json").touch()  # đúng OUTSIDE_SCAN_MAX mục: vẫn đọc hết
+        for name in ("eslint.config.mjs", ".eslintrc.cjs", "vitest.config.ts", "jest.config.js"):
+            other = self.out / name.replace(".", "_")
+            other.mkdir()
+            (other / name).touch()
+            self.assertEqual(self.g._target_kind(str(other), self.root), "gate", name)
+        with self.no_listdir():
+            self.assertEqual(self.g._target_kind(str(ts), self.root), "gate")
+            self.assertEqual(self.raw(f"cp x {ts}/"), "ask")
+            self.assertEqual(guard_decision("bash", f"cp x {ts}/", Path(self.root), "strict"), "ask")
+            self.assertIsNone(guard_decision("bash", f"cp x {ts}/", Path(self.root), "default"))
+        (ts / "one-more").touch()  # vượt ngưỡng → chỉ tên đích danh
+        self.assertEqual(self.g._target_kind(str(ts), self.root), "")
+
+    def test_outside_unreadable_dir_falls_back_to_named(self):
+        (self.out / "Makefile").touch()
+        with mock.patch.object(self.g.os, "scandir", side_effect=PermissionError("denied")):
+            self.assertEqual(self.g._target_kind(str(self.out), self.root), "gate")
+            self.assertEqual(self.g._target_kind(str(self.out / "nope"), self.root), "")
+
+    def test_slash_target_is_absolute_root_not_project(self):
+        """`cp x /`: rel_path("/").rstrip("/") == "" từng bị coi là gốc dự án (có Makefile → cổng)."""
+        Path(self.root, "Makefile").touch()
+        for t in ("/", "//", "///"):
+            self.assertEqual(self.g._target_kind(t, self.root), "", t)
+            self.assertFalse(self.g._is_fence(t, self.root), t)
+            self.assertEqual(self.raw(f"cp x {t}"), "", t)
+            self.assertEqual(self.raw(f"mv x {t}"), "", t)
+        self.assertEqual(self.g._target_kind(".", self.root), "gate")  # gốc dự án thật vẫn là cổng
+        self.assertEqual(self.raw("cp x ."), "ask")
+        for cmd in ("rm -rf /", "rm -rf //", "rm -fr / --no-preserve-root"):
+            self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
 
     def test_outside_dir_with_named_gate_file_is_still_gate(self):
         claude = self.out / ".claude"
@@ -4834,12 +4911,28 @@ class GuardOutsideDirTest(unittest.TestCase):
     def test_wipe_outside_and_home_claude_unchanged(self):
         # HOME giả có `.claude/settings.json`: máy dev có sẵn, runner CI thì không — test không phụ thuộc máy chạy.
         # Đặt ngoài thư mục tạm hệ thống: xoá/dời trong /tmp được guard miễn.
-        home = Path(self.enterContext(tempfile.TemporaryDirectory(dir=Path(__file__).parent))).resolve() / "home"
+        home = (
+            Path(
+                self.enterContext(tempfile.TemporaryDirectory(prefix="xt-tmp-home-", dir=Path(__file__).parent))
+            ).resolve()
+            / "home"
+        )
         (home / ".claude").mkdir(parents=True)
         (home / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.assert_tmp_home_ignored(home)
         self.enterContext(mock.patch.dict(os.environ, {"HOME": str(home)}))
         for cmd in ("rm -rf ~/.claude", "rm -rf /home/user/other", "mv ~/.claude /home/user/other"):
             self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
+
+    def assert_tmp_home_ignored(self, home: Path):
+        """Tiến trình bị kill giữa chừng thì thư mục tạm nằm lại trong `tests/` — tiền tố cố định + `.gitignore` giữ nó
+        khỏi `git status`/commit."""
+        self.assertTrue(home.parent.name.startswith("xt-tmp-home-"), home)
+        if shutil.which("git") is None:  # pragma: no cover - runner nào cũng có git
+            return
+        rel = home.parent.relative_to(ROOT).as_posix() + "/"
+        r = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", rel], capture_output=True)
+        self.assertEqual(r.returncode, 0, f"{rel} chưa có trong .gitignore")
 
     def test_gate_names_by_dir_tail(self):
         names = self.g._gate_names("/x/.claude")

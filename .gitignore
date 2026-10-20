@@ -17,6 +17,8 @@ Thumbs.db
 .claude/settings.local.json
 # Bản sao repo của subagent (worktree tạm)
 .claude/worktrees/
+# HOME giả của test guard (tiến trình bị kill giữa chừng thì nằm lại)
+tests/xt-tmp-home-*/
 
 # Khoá/chứng chỉ
 *.pem

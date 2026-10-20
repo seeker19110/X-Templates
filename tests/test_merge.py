@@ -1032,8 +1032,12 @@ class MergeCheckCliTest(unittest.TestCase):
         commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot))
         d = json.loads(out)
-        self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (0, "merge", [], []))
+        # miễn người (ADR-0020) nhưng vẫn cần review sạch ở head: merge-check không gợi merge (AUD-XFEAT-010)
+        self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (1, "review", [], []))
         self.assertTrue(d["hard_waived"])
+        hot_ok = {**hot, "xtReviews": [{"head": "abc1234def", "clean": True, "at": "2026-10-19T10:00:00Z"}]}
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot_ok))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
         commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: x\n")
         rc, out, _ = run_main("merge-check", "--pr-json", "-", stdin=json.dumps(hot))
         self.assertEqual(rc, 1)
@@ -1592,6 +1596,12 @@ class PrNextCliTest(unittest.TestCase):
         self.big = pr(headRefOid=self.head, files=[{"path": "src/a.py", "additions": 400, "deletions": 0}])
 
     def nxt(self, p: dict, *extra: str) -> tuple[int, str, str]:
+        """`_publish_review` giả = đăng thành công: PR mang dấu của các review đã ghi (`xtReviews`, như REST đọc lại) —
+        trừ khi có `review_identity` (dấu của tác giả không phải review). Nguồn review của `pr next` là dấu đã đăng."""
+        if "xtReviews" not in p and not p.get("reviewIdentity"):
+            rec = xt.read_reviews(self.base).get(str(p.get("number", 7))) or {}
+            keys = ("head", "clean", "at", "inconclusive")
+            p = {**p, "xtReviews": [{k: r[k] for k in keys if k in r} for r in rec.get("reviews", [])]}
         return run_main("pr", "next", *extra, "--pr-json", "-", stdin=json.dumps(p))
 
     def test_flow_review_then_enable_and_ledger(self):
@@ -1615,6 +1625,37 @@ class PrNextCliTest(unittest.TestCase):
         )
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
+    def test_reviewed_rerun_is_idempotent(self):
+        """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
+        ghi thứ hai và không đăng comment trùng; lần đăng trước lỗi thì lần chạy lại chỉ đăng bù. Kết quả khác → bản mới."""
+        args = ("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
+
+        def reviews() -> list:
+            return xt.read_reviews(self.base)["7"]["reviews"]
+
+        self.published.return_value = 3  # đăng lỗi: sổ cục bộ vẫn ghi, chưa đánh dấu đã đăng
+        self.assertEqual(run_main(*args)[0], 3)
+        self.assertEqual((len(reviews()), reviews()[0].get("published")), (1, None))
+        self.published.return_value = 0
+        rc, out, _ = run_main(*args)  # chạy lại theo lời khuyên: đăng bù, không thêm bản ghi
+        self.assertEqual(rc, 0)
+        self.assertIn("đã ghi trước đó", out)
+        self.assertEqual((len(reviews()), reviews()[0]["published"], self.published.call_count), (1, True, 2))
+        at = reviews()[0]["at"]
+        self.assertEqual(run_main(*args)[0], 0)  # lần ba: không ghi, không đăng
+        self.assertEqual((len(reviews()), reviews()[0]["at"], self.published.call_count), (1, at, 2))
+        self.assertEqual(run_main(*args, "--no-publish")[0], 0)
+        self.assertEqual(len(reviews()), 1)
+        # kết quả khác (lỗi chặn), rồi sạch lại ở cùng head: mỗi lần đổi là một bản ghi mới, đăng lại
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
+        run_main(*args)
+        self.assertEqual([r["clean"] for r in reviews()], [True, False, True])
+        self.assertEqual(self.published.call_count, 4)
+        # cùng kết quả, khai model khác → bản ghi mới (người rà khác)
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", "--reviewer-model", "gpt-5",
+                 "--author-model", "claude-opus-5-5")  # fmt: skip
+        self.assertEqual(len(reviews()), 4)
+
     def test_review_identity_ignores_local_ledger(self):
         """Review #168: có `review_identity` thì `pr next`/steward chỉ tính review đã đăng của reviewer — sổ cục bộ do chính
         tác giả ghi (`pr reviewed --clean`) không mở được merge; cùng một sự thật với `merge_eligibility`."""
@@ -1627,8 +1668,8 @@ class PrNextCliTest(unittest.TestCase):
         published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
         self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "enable-auto-merge")
         rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
-        self.assertEqual(xt.with_published(rec, [], True)["reviews"], [])
-        self.assertEqual(xt.with_published(rec, [], False), rec)
+        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": []})
+        self.assertEqual(xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"]})
 
     def test_review_identity_edited_mark_is_ignored(self):
         def by(updated: str) -> dict:
@@ -1725,7 +1766,8 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("8", xt.read_reviews(self.base))
         for ref in ("#8", "https://github.com/o/r/pull/8#issuecomment-1", "https://github.com/o/r/pull/8/files"):
             rc, out, _ = run_main("pr", "reviewed", "--pr", ref, "--head", self.head, "--clean", *MODELS)
-            self.assertEqual((rc, out), (0, f"✓ PR #8: review sạch ở {self.head[:7]}\n"), ref)
+            self.assertEqual(rc, 0, ref)  # cùng khoá "8", cùng kết quả: chạy lại idempotent (AUD-HAR-071)
+            self.assertTrue(out.startswith(f"✓ PR #8: review sạch ở {self.head[:7]} (đã ghi trước đó"), (ref, out))
         for bad in ("https://github.com/o/r/issues/9", "abc", "8a"):  # không ghi khoá rác vào sổ (nợ review #110)
             rc, _, err = run_main("pr", "reviewed", "--pr", bad, "--head", self.head, "--clean", *MODELS)
             self.assertEqual(rc, 2, bad)
@@ -2021,10 +2063,11 @@ class PrStewardTest(unittest.TestCase):
             [(r["head"][0], r["clean"], r["at"][11:16]) for r in got], [("d", False, "01:30"), ("e", True, "02:00")]
         )
         rec = {"reviews": [{"head": "f" * 40, "clean": True, "at": "2026-10-19T02:30:00+00:00"}]}
-        merged = xt.with_published(rec, got)
-        self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e", "f"])
-        self.assertIs(xt.with_published(rec, None), rec)
-        self.assertIs(xt.with_published(rec, ["rác"]), rec)
+        merged = xt.with_published(rec, got)  # một nguồn (AUD-XFEAT-011): review = dấu đã đăng; sổ cục bộ để đăng lại
+        self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e"])
+        self.assertEqual(merged["local_reviews"], rec["reviews"])
+        self.assertEqual(xt.with_published(rec, None)["reviews"], [])
+        self.assertEqual(xt.with_published(rec, ["rác"])["reviews"], [])
 
     def test_pr_rest_reads_marks_and_pr_next_uses_them(self):
         big = [{"path": "src/a.py", "additions": 400, "deletions": 0}]
@@ -2048,22 +2091,29 @@ class PrStewardTest(unittest.TestCase):
         self.assertEqual(post[:5], ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/issues/7/comments"])
         self.assertIn(f"head={self.H} verdict=blocking", post[-1])
         gh = StewardGh()
+        with gh.patch():  # chạy lại cùng kết quả đã đăng: không đăng trùng (AUD-HAR-071)
+            self.assertEqual(run_main(*args)[0], 0)
+        self.assertEqual(gh.writes, [])
+        h2 = "e" * 40
+        gh = StewardGh()
         with gh.patch():
-            run_main("pr", "reviewed", "--pr", "https://github.com/o/r/pull/7", "--head", self.H, "--blocking")
+            run_main("pr", "reviewed", "--pr", "https://github.com/o/r/pull/7", "--head", h2, "--blocking")
         self.assertEqual(gh.writes[0][4], "repos/o/r/issues/7/comments")
-        for fail in ("gh api -X POST", "oserror"):
+        for i, fail in enumerate(("gh api -X POST", "oserror")):
             with (
                 self.subTest(fail),
                 StewardGh(fail={"gh api -X POST": "HTTP 403" if fail != "oserror" else fail}).patch(),
             ):
-                rc, _, err = run_main(*args)
+                rc, _, err = run_main("pr", "reviewed", "--pr", "7", "--head", "f0"[i] * 40, "--blocking")
             self.assertEqual(rc, 3)
             self.assertIn("chưa đăng được review lên PR #7", err)
         gh = StewardGh()
         with gh.patch():
             rc, out, _ = run_main(*args, "--no-publish")
         self.assertEqual((rc, gh.writes), (0, []))
-        self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 5)  # sổ cục bộ luôn ghi, kể cả khi đăng lỗi
+        reviews = xt.read_reviews(self.base)["7"]["reviews"]
+        self.assertEqual(len(reviews), 5)  # sổ cục bộ luôn ghi, kể cả khi đăng lỗi
+        self.assertEqual([r.get("published") for r in reviews], [True, True, None, None, None])
 
     def test_steward_dry_run_and_apply(self):
         gh = StewardGh()

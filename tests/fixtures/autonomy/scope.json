@@ -82,6 +82,27 @@
    "ids": [
     "AUD-HAR-092"
    ]
+  },
+  {
+   "reason": "Sổ audit/blueprint — `audit check` đọc SHA và gốc repo git thật (SHA quét trên nhánh chính, `--strict` lấy gốc repo chứa sổ), `blueprint-status` đối chiếu MUST `[x]` với lệnh `— Kiểm:`; không phải quyết định cho/chặn của PR, rollup, review hay guard; test `-k audit_sha_on_base`, `NaReevaluatedTest`, `blueprint-status --run`",
+   "ids": [
+    "AUD-HAR-077",
+    "AUD-HAR-078",
+    "AUD-HAR-079"
+   ]
+  },
+  {
+   "reason": "Bộ test của chính khung — ngưỡng CPU cứng đỏ ngẫu nhiên, test ghi vùng bằng chứng thật; không phải quyết định của máy; đỡ bằng `tests.test_perf.CpuBudgetTest`, `LoopRecordBranchesTest` (`RealAutopilotUntouchedMixin`)",
+   "ids": [
+    "AUD-TEST-008",
+    "AUD-TEST-009"
+   ]
+  },
+  {
+   "reason": "Bytecode hook — bộ nạp `python3 -I -B` chỉ tin pyc checked-hash là đường tiến trình hook (`_lib.sh`, `PY_LOADER`), không phải quyết định của `_rule_decision`; ca guard cho đường ghi bytecode chứa đường dẫn vùng bằng chứng nên script viết corpus bị chính guard chặn; test `-k guard_cache_tamper`",
+   "ids": [
+    "AUD-SEC-074"
+   ]
   }
  ]
 }

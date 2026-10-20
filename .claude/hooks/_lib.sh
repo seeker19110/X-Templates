@@ -12,22 +12,24 @@ xt_py() {
   return 1
 }
 
-# Chạy file Python của khung bằng `import` thay vì như script: script chính không được cache bytecode nên Python biên
-# dịch lại mỗi lần (guard.py ~25 ms, xt.py ~50 ms — trả ở MỌI lệnh Bash/Edit). sys.path[0] = thư mục của file như khi
-# chạy script (không lấy cwd). `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở
-# đó không chạy trước guard (AUD-SEC-065). Cache bytecode ở `.autopilot/pycache` của dự án (đã ignore, guard chặn ghi
-# tay cả Bash lẫn Edit — ADR-0026), không ở `~/.cache` agent ghi được; chỉ khi `.autopilot/` đã có (install/doctor đã
-# ignore nó) — chưa có thì `-B` không ghi bytecode (dự án chưa ignore không bị đẻ file — review #159); không đẻ
-# `__pycache__` cạnh hook; thư mục cache không ghi được thì Python bỏ qua (chỉ chậm như cũ).
+# Chạy file Python của khung như module (`main()`), sys.path[0] = thư mục của file như khi chạy script (không lấy cwd).
+# `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở đó không chạy trước guard
+# (AUD-SEC-065). `-B`: Python không ghi bytecode (không đẻ `__pycache__` cạnh hook). KHÔNG cache bytecode: biên dịch từ
+# nguồn mỗi lần — thư mục agent ghi được không thể tin (header pyc checked-hash tính được từ nguồn công khai, phần
+# marshal không ai kiểm — AUD-SEC-074, review PR #182); đổi lại thêm ~80–100 ms mỗi lệnh Bash. Bộ nạp giống hệt
+# `PY_LOADER` của guard.py (test so).
 py_run() { # $1=đường dẫn .py (có main()) $2…=đối số
-  local cache=(-B)
-  [ -d "$XT_ROOT/.autopilot" ] && cache=(-X "pycache_prefix=$XT_ROOT/.autopilot/pycache")
-  python3 -I "${cache[@]}" -c '
-import sys
-d, _, f = sys.argv[1].rpartition("/")
+  python3 -I -B -c 'import sys
+p = sys.argv[1]
+d, _, f = p.rpartition("/")
 sys.path.insert(0, d or ".")
+code = compile(open(p, "rb").read(), p, "exec", dont_inherit=True)
+m = type(sys)(f[:-3])
+m.__file__ = p
+sys.modules[m.__name__] = m
 sys.argv = sys.argv[1:]
-sys.exit(__import__(f[:-3]).main())
+exec(code, m.__dict__)
+sys.exit(m.main())
 ' "$@"
 }
 

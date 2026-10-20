@@ -308,7 +308,7 @@
    "refs": [],
    "input": {
     "identity": "xt-reviewer",
-    "reviews": [
+    "local": [
      {
       "head": "2222222222222222222222222222222222222222",
       "clean": true,
@@ -589,6 +589,82 @@
     "review": "deferred",
     "action": "enable-auto-merge"
    }
+  },
+  {
+   "id": "review-xfeat011-local-unpublished",
+   "origin": "repro",
+   "refs": [
+    "AUD-XFEAT-011"
+   ],
+   "input": {
+    "local": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00",
+      "reviewer_model": "sonnet",
+      "author_model": "claude-opus-5-5"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "action": "republish-review"
+   },
+   "note": "đăng dấu thất bại: sổ cục bộ sạch, PR chưa có dấu → đăng lại, không bật auto-merge (merge-gate đọc dấu đã đăng)"
+  },
+  {
+   "id": "review-xfeat011-local-unpublished-auto-on",
+   "origin": "repro",
+   "refs": [
+    "AUD-XFEAT-011"
+   ],
+   "input": {
+    "auto_merge": true,
+    "local": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "action": "disable-auto-merge"
+   }
+  },
+  {
+   "id": "review-xfeat011-local-blocking-unpublished",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-XFEAT-011"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": true,
+      "at": "2026-10-19T10:00:00+00:00"
+     }
+    ],
+    "local": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-19T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "proceed": false,
+    "action": "republish-review"
+   },
+   "note": "lỗi chặn mới hơn chỉ có ở sổ cục bộ: không bật auto-merge theo dấu sạch cũ"
   }
  ]
 }

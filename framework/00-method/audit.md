@@ -1,7 +1,7 @@
 ---
 title: Phương pháp audit
 kind: method
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Phương pháp audit
@@ -92,7 +92,7 @@ Nhóm sổ ghi **N/A** được đối chiếu lại với tín hiệu repo hi�
 ## 7. Definition of Complete
 
 Audit **xong** khi và chỉ khi `xt.py audit check docs/ops/AUDIT-STATUS.md --strict` exit 0:
-mọi nhóm `đã quét` (SHA tổ tiên HEAD) hoặc `N/A` có lý do · không còn 🔴/🟠 `mở` · mọi `chấp nhận` có chủ và còn hạn.
+mọi nhóm `đã quét` (SHA tổ tiên HEAD và có trên nhánh chính) hoặc `N/A` có lý do · không còn 🔴/🟠 `mở` · mọi `chấp nhận` có chủ và còn hạn.
 Báo cáo cuối: đã quét gì · số phát hiện theo mức/trạng thái · bằng chứng (lệnh + exit code) · nợ 🟢 còn lại có chủ.
 
 ## 8. Bẫy
@@ -100,7 +100,9 @@ Báo cáo cuối: đã quét gì · số phát hiện theo mức/trạng thái �
 - Liệt kê "best practice" chung chung thay vì lỗi có thật trong repo này → mỗi phát hiện phải trỏ file:dòng hoặc lệnh.
 - Tin miễn trừ cũ: miễn trừ viết khi CI chưa cài gì có thể sai khi CI đã cài công cụ — `audit plan` đánh dấu, người xác minh.
 - Ghi SHA của nhánh PR vào cột SHA: squash-merge xoá commit đó, sổ trên nhánh chính hỏng (`audit check` đỏ). Ghi SHA
-  **trên nhánh chính** mà lần quét dựa vào (thường là base của nhánh audit); thay đổi sau đó tự hiện ở "Quét lại".
+  **trên nhánh chính** mà lần quét dựa vào (thường là base của nhánh audit, `git merge-base HEAD origin/main`); thay
+  đổi sau đó tự hiện ở "Quét lại". Máy đỡ: `audit check` đỏ khi SHA quét chưa nằm trên nhánh chính (cùng luật và biến
+  `XT_PROGRESS_BASE` với `progress-check`; repo không có remote thì bỏ qua).
 - Coverage từ test chạy qua subprocess bị đếm thiếu → ghi rõ cách đo, đừng kết luận "0% không test".
 - Công cụ không cài được → `chưa biết`, không phải "đạt".
 - Sửa trong lúc audit làm lẫn bằng chứng → audit xong, duyệt, rồi mới sửa theo đợt.

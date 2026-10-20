@@ -33,6 +33,9 @@ Lệnh:
   vendor-check [--dirs a,b] [--allow X] [--own a,b] [--strict] [--json]
                                 Thư mục vendor có LICENSE/NOTICE/SOURCE, không điều khoản hạn chế; dò Preline/Commons
                                 Clause/CC BY-NC… trong package.json + ghi nguồn (CMP-LIC-022).
+  license-check [--requirements F]... [--allow F]
+                                License gói đã cài của file requirements ghim (mặc định requirements-dev.txt) đối chiếu
+                                allowlist license-allow.json; vi phạm/ngoại lệ quá hạn → exit 1 (BASE-DEP-005).
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
   ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
   audit plan [--blueprint F] [--status F] [--json]
@@ -46,7 +49,7 @@ Lệnh:
   feedback aggregate --from DỰ_ÁN=GỐC_REPO|THƯ_MỤC ... [--json]
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   merge-check [--pr PR] [--pr-json F] [--json]
-                                Máy quyết khi nào merge PR: merge · wait · update · fix · human · closed (exit 0 = merge).
+                                Máy quyết khi nào merge PR: merge · review · wait · update · fix · human · closed (exit 0 = merge).
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
                                 Việc production có nằm trong mục Ủy quyền production của PLAN.md không (exit 0 =
                                 trong ủy quyền; 1 = ngoài → loop defer; thiếu mục = ngoài).
@@ -905,7 +908,7 @@ def carry_states(
         if m:
             prev[m["id"]] = (m["state"], line, _normative(m))
     kept, lines, new_ids = 0, [], set()
-    for line in new.splitlines():
+    for line in unicodedata.normalize("NFC", new).splitlines():  # cả hai phía NFC (AUD-HAR-070)
         m = ITEM_RE.match(line)
         if m:
             new_ids.add(m["id"])
@@ -3264,31 +3267,45 @@ def audit_plan(root: Path, blueprint: Optional[Path] = None, status: Optional[Pa
     return plan
 
 
-def _sha_ok(root: Path, sha: str) -> Optional[str]:
+def _sha_ok(root: Path, sha: str, base: Optional[str] = None) -> Optional[str]:
+    """SHA quét hợp lệ, là tổ tiên HEAD và — khi biết nhánh chính `base` — nằm trên nhánh chính (AUD-HAR-077:
+    squash-merge xoá SHA của nhánh PR, sổ trên nhánh chính hỏng; cùng luật `progress-check`)."""
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha):
         return "SHA không hợp lệ"
     if _git(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").returncode != 0:
         return f"SHA `{sha}` không có trong lịch sử (clone nông? quét lại?)"
     if _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
         return f"SHA `{sha}` không phải tổ tiên HEAD — quét lại nhóm này"
+    if base and _git(root, "merge-base", "--is-ancestor", sha, base).returncode != 0:
+        return (
+            f"SHA `{sha}` chưa nằm trên `{base}` — squash-merge sẽ làm sổ trên nhánh chính hỏng; ghi SHA trên nhánh "
+            f"chính mà lần quét dựa vào (`git merge-base HEAD {base}`; `git fetch` nếu `{base}` cũ; "
+            "`XT_PROGRESS_BASE` đổi/tắt nhánh chính)"
+        )
     return None
 
 
-def _audit_scan_errors(no: int, r: Dict[str, str], root: Path, in_git: bool) -> List[str]:
-    """Nhóm đã quét/rút gọn: có Ngày quét YYYY-MM-DD và SHA (khi ở trong git, SHA phải là tổ tiên HEAD)."""
+def _audit_scan_errors(no: int, r: Dict[str, str], root: Path, in_git: bool, base: Optional[str] = None) -> List[str]:
+    """Nhóm đã quét/rút gọn: có Ngày quét YYYY-MM-DD và SHA (khi ở trong git, SHA là tổ tiên HEAD và của `base`)."""
     errors: List[str] = []
     sha = r.get("SHA", "").strip("` ")
     if not DATE_RE.match(r.get("Ngày", "")):
         errors.append(f"nhóm {no}: thiếu Ngày quét YYYY-MM-DD")
     if not sha:
         errors.append(f"nhóm {no}: thiếu SHA lúc quét")
-    elif in_git and (msg := _sha_ok(root, sha)):
+    elif in_git and (msg := _sha_ok(root, sha, base)):
         errors.append(f"nhóm {no}: {msg}")
     return errors
 
 
 def _audit_group_row(
-    r: Dict[str, str], strict: bool, root: Path, in_git: bool, seen_no: Dict[int, int], counts: Dict[str, int]
+    r: Dict[str, str],
+    strict: bool,
+    root: Path,
+    in_git: bool,
+    seen_no: Dict[int, int],
+    counts: Dict[str, int],
+    base: Optional[str] = None,
 ) -> List[str]:
     """Một dòng bảng `## Nhóm`: số nhóm, mã, trạng thái, ghi chú, dữ liệu quét. Ghi nhận vào `seen_no`/`counts`."""
     no_s, code, state, note = r.get("#", ""), r.get("Mã", ""), r.get("Trạng thái", ""), r.get("Ghi chú", "")
@@ -3306,20 +3323,25 @@ def _audit_group_row(
     if state in ("N/A", "rút gọn") and not note:
         errors.append(f"nhóm {no}: `{state}` phải ghi lý do/phạm vi ở Ghi chú")
     if state in ("đã quét", "rút gọn"):
-        errors += _audit_scan_errors(no, r, root, in_git)
+        errors += _audit_scan_errors(no, r, root, in_git, base)
     if strict and state == "chưa quét":
         errors.append(f"nhóm {no}: chưa quét (--strict)")
     return errors
 
 
 def _audit_group_errors(
-    tables: Dict[str, List[Dict[str, str]]], strict: bool, root: Path, in_git: bool, counts: Dict[str, int]
+    tables: Dict[str, List[Dict[str, str]]],
+    strict: bool,
+    root: Path,
+    in_git: bool,
+    counts: Dict[str, int],
+    base: Optional[str] = None,
 ) -> List[str]:
     """Bảng `## Nhóm`: từng dòng hợp lệ, rồi mỗi nhóm 1–N phải có đúng một dòng."""
     errors: List[str] = []
     seen_no: Dict[int, int] = {}
     for r in tables.get("Nhóm", []):
-        errors += _audit_group_row(r, strict, root, in_git, seen_no, counts)
+        errors += _audit_group_row(r, strict, root, in_git, seen_no, counts, base)
     if "Nhóm" in tables:
         for no, _, _ in AUDIT_GROUPS:
             if seen_no.get(no, 0) != 1:
@@ -3426,11 +3448,15 @@ def audit_check(
     """Kiểm sổ AUDIT-STATUS.md theo templates/AUDIT-STATUS.md. Trả (lỗi, đếm). Ném OSError khi không đọc được."""
     today = today or _dt.date.today()
     tables = md_tables(status.read_text(encoding="utf-8"))
+    # Gốc = gốc repo chứa sổ (AUD-HAR-078: sổ ở docs/ops/ thì `git ls-files` trong docs/ops không thấy UI/CSDL).
     root = status.resolve().parent
-    in_git = _git(root, "rev-parse", "--git-dir").returncode == 0
+    top = _git(root, "rev-parse", "--show-toplevel")
+    in_git = top.returncode == 0
+    if in_git:
+        root = Path(top.stdout.strip())
     counts: Dict[str, int] = {}
     errors = [f"thiếu bảng `## {name}`" for name in ("Nhóm", "Phát hiện") if name not in tables]
-    errors += _audit_group_errors(tables, strict, root, in_git, counts)
+    errors += _audit_group_errors(tables, strict, root, in_git, counts, progress_base_ref(root) if in_git else None)
     errors += _audit_na_errors(tables, strict, root)
     errors += _audit_finding_errors(tables, strict, today, counts)
     return errors, counts
@@ -3455,7 +3481,20 @@ HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/([\w.-]+)')  # file hook nạp/gọi cạnh nó (_lib.sh, guard.py)
 YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
 LOOP_GATE_KEYS = ("lint", "test")  # ADR-0011: trong vòng autopilot, hai khoá này rỗng/no-op thì dev-task.sh ĐỎ
-GATE_NOOP_RE = re.compile(r"true|:|exit( 0)?|(echo|printf)(\s.*)?")  # khớp is_noop() trong dev-task.sh
+# Một đoạn no-op của lệnh cổng — ĐÚNG chuỗi `NOOP_RE` của dev-task.sh (test so hai bên): `true` · `:` · `exit [0]` ·
+# `echo|printf` mà đối số không chứa `|`, `&`, `;`, backtick, `$(` (`echo go && pytest` là lệnh thật).
+GATE_NOOP_SEG = r"true|:|exit( 0)?|(echo|printf)([ \t]([^|&;`$]|[$][^(|&;`$])*)?"
+GATE_NOOP_SEG_RE = re.compile(GATE_NOOP_SEG)
+GATE_NOOP_SPLIT_RE = re.compile(r"&&|\|\||;|\n")
+
+
+def gate_noop(cmd: str) -> bool:
+    """Lệnh cổng rỗng hoặc không kiểm gì — như `is_noop()` của dev-task.sh: mọi đoạn nối bằng `&&` `||` `;` (bỏ khoảng
+    trắng hai đầu, đoạn rỗng bỏ qua) đều khớp `GATE_NOOP_SEG`."""
+    segs = (x.strip(" \t") for x in GATE_NOOP_SPLIT_RE.split(cmd.strip()))
+    return all(GATE_NOOP_SEG_RE.fullmatch(x) for x in segs if x)
+
+
 AUTOPILOT_IGNORES = (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot")
 # Công cụ memory ngoài cho coding agent (LOOP-HARNESS-021); khớp theo token trong tên plugin/MCP server.
 MEMORY_TOOLS = ("engram", "claude-mem", "agentmemory", "mem0", "openmemory", "basic-memory")
@@ -3692,7 +3731,7 @@ def gate_noop_keys(base: Path) -> List[str]:
         return []
     keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
     vals = {k: keys[k].strip() for k in LOOP_GATE_KEYS if k in keys}
-    return [k for k, v in vals.items() if not v or GATE_NOOP_RE.fullmatch(v)]
+    return [k for k, v in vals.items() if gate_noop(v)]
 
 
 def yaml_scalar(raw: str) -> str:
@@ -3815,14 +3854,14 @@ def gate_floor_issues(base: Path) -> List[str]:
     """Khoá sàn Gate ở quy mô M/L còn thiếu, rỗng hoặc no-op (mỗi dòng một khoá kèm cách sửa)."""
     scale, _ = blueprint_scale(base)
     need, keys = gate_floor_keys(base)
-    bad = [(k, why) for k, why in need if not keys.get(k) or GATE_NOOP_RE.fullmatch(keys[k])]
+    bad = [(k, why) for k, why in need if gate_noop(keys.get(k) or "")]
     return [f"quy mô {scale}: xt.yaml thiếu hoặc no-op `{k}` — {why}" for k, why in bad]
 
 
 def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:
     """[(khoá, lệnh)] sàn đã khai hợp lệ — `loop verify` chạy lại; khoá thiếu đã nằm ở `gate_floor_issues`."""
     need, keys = gate_floor_keys(base)
-    return [(k, keys[k]) for k, _ in need if keys.get(k) and not GATE_NOOP_RE.fullmatch(keys[k])]
+    return [(k, keys[k]) for k, _ in need if not gate_noop(keys.get(k) or "")]
 
 
 def _doctor_gate_floor(base: Path) -> List[Finding]:
@@ -4484,7 +4523,8 @@ def _risk_labels(pr: Dict[str, Any]) -> List[str]:
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
-    """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
+    """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed (`merge_check_result`
+    thêm `review` khi CI/làn cho merge mà review ở head chưa hợp lệ — AUD-XFEAT-010).
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
     PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0024: làn chuẩn bật sau review sạch, làn nhanh khi mở). `hard_auto` (`merge_hard_exceptions: auto`,
@@ -5641,8 +5681,9 @@ DECISIONS_HEADER = (
 
 
 def _one_line(text: str) -> str:
-    """Gộp khoảng trắng/xuống dòng: một trường = một dòng, không chèn được tiêu đề Markdown giả."""
-    return " ".join(text.split())
+    """Gộp khoảng trắng/xuống dòng: một trường = một dòng, không chèn được tiêu đề Markdown giả. Chuẩn hoá NFC ở biên
+    (BASE-DATA-002, AUD-HAR-070): `--option` NFD và `--choice` NFC là cùng chữ; nhật ký/state lưu NFC."""
+    return unicodedata.normalize("NFC", " ".join(text.split()))
 
 
 def _decision_choice(options: List[str], choice: str) -> Optional[str]:
@@ -6144,6 +6185,163 @@ def cmd_changelog_check(args: argparse.Namespace) -> int:
             f"✓ {args.file}: Keep a Changelog — Unreleased đầu, bản có ngày, giảm dần, khớp VERSION {version or '—'}."
         )
     return 1 if errors else 0
+
+
+# --------------------------------------------------------------------------- license-check (BASE-DEP-005)
+
+# Dòng ghim `tên==bản [; marker]` của file requirements (dòng thụt đầu — `--hash`, `# via` — bỏ qua).
+LICENSE_REQ_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\]+)[ \t]*(;[^\\#]*)?")
+# Classifier `License :: OSI Approved :: …` → SPDX, khi gói không khai License-Expression/License ngắn.
+LICENSE_CLASSIFIERS = {
+    "MIT License": "MIT",
+    "Apache Software License": "Apache-2.0",
+    "Mozilla Public License 2.0 (MPL 2.0)": "MPL-2.0",
+    "Python Software Foundation License": "PSF-2.0",
+}
+LICENSE_FIELD_MAX = 64  # trường `License` dài hơn (toàn văn license) không phải định danh → đọc classifier
+LICENSE_EXC_KEYS = ("package", "license", "approved_by", "expires")
+
+
+class LicenseConfigError(ValueError):
+    """Allowlist/requirements đọc không được hoặc sai dạng (exit 2)."""
+
+
+def _pkg_key(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()  # PEP 503
+
+
+def license_requirements(text: str) -> List[Tuple[str, str, bool]]:
+    """[(tên, bản ghim, có marker)] của file requirements ghim `==`."""
+    out = []
+    for line in text.splitlines():
+        m = LICENSE_REQ_RE.match(line)
+        if m:
+            out.append((m.group(1), m.group(2), bool(m.group(3))))
+    return out
+
+
+def license_policy(text: str) -> Tuple[Set[str], Dict[str, Dict[str, str]]]:
+    """(SPDX cho phép, {gói: ngoại lệ}) từ JSON allowlist; sai dạng → LicenseConfigError."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LicenseConfigError(f"JSON hỏng: {exc}") from exc
+    allow = data.get("allow") if isinstance(data, dict) else None
+    exc_list = data.get("exceptions", []) if isinstance(data, dict) else None
+    if (
+        not isinstance(allow, list)
+        or not all(isinstance(x, str) and x for x in allow)
+        or not isinstance(exc_list, list)
+    ):
+        raise LicenseConfigError("cần `allow` (danh sách SPDX) và `exceptions` (danh sách)")
+    exceptions: Dict[str, Dict[str, str]] = {}
+    for e in exc_list:
+        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) and e[k].strip() for k in LICENSE_EXC_KEYS):
+            raise LicenseConfigError(f"ngoại lệ thiếu {'/'.join(LICENSE_EXC_KEYS)}: {e}")
+        try:
+            _dt.date.fromisoformat(e["expires"])
+        except ValueError as exc:
+            raise LicenseConfigError(f"ngoại lệ {e['package']}: `expires` không phải ngày ISO") from exc
+        exceptions[_pkg_key(e["package"])] = e
+    return set(allow), exceptions
+
+
+def license_of(meta: Any) -> str:
+    """Biểu thức license của gói đã cài: `License-Expression` > `License` ngắn một dòng > classifier đổi sang SPDX
+    (classifier lạ → `?`, không bao giờ được phép). Rỗng = không khai."""
+
+    def first(key: str) -> str:
+        return str((meta.get_all(key) or [""])[0] or "").strip()
+
+    if first("License-Expression"):
+        return first("License-Expression")
+    lic = first("License")
+    if lic and "\n" not in lic and len(lic) <= LICENSE_FIELD_MAX:
+        return lic
+    found = {
+        LICENSE_CLASSIFIERS.get(c.split(" :: ")[-1].strip(), "?")
+        for c in meta.get_all("Classifier") or []
+        if c.startswith("License :: ")
+    }
+    return " OR ".join(sorted(found))
+
+
+def license_allowed(expr: str, allowed: Set[str]) -> bool:
+    """`A OR B` được khi một nhánh được; `A AND B` khi mọi vế được. Có ngoặc → bảo thủ: mọi định danh phải được."""
+    if not expr:
+        return False
+    if "(" in expr or ")" in expr:
+        ids = [t for t in re.split(r"[()\s]+|\bAND\b|\bOR\b", expr) if t]
+        return bool(ids) and all(t in allowed for t in ids)
+    return any(all(t.strip() in allowed for t in re.split(r"\s+AND\s+", alt)) for alt in re.split(r"\s+OR\s+", expr))
+
+
+def _installed_dist(name: str) -> Optional[Tuple[str, Any]]:
+    import importlib.metadata as md
+
+    try:
+        d = md.distribution(name)
+    except md.PackageNotFoundError:
+        return None
+    return d.version, d.metadata
+
+
+def license_check(
+    reqs: List[Tuple[str, str, bool]],
+    allowed: Set[str],
+    exceptions: Dict[str, Dict[str, str]],
+    today: _dt.date,
+    lookup: Callable[[str], Optional[Tuple[str, Any]]] = _installed_dist,
+) -> Tuple[List[str], List[str]]:
+    """(vi phạm, dòng thông tin) — vi phạm: license ngoài allowlist không có ngoại lệ đúng license, gói ghim không
+    marker mà chưa cài, ngoại lệ quá hạn (mọi ngoại lệ trong file, kể cả gói không có ở requirements này)."""
+    bad: List[str] = []
+    info: List[str] = []
+    expired = {k for k, e in exceptions.items() if _dt.date.fromisoformat(e["expires"]) < today}
+    for e in (exceptions[k] for k in sorted(expired)):
+        bad.append(f"ngoại lệ {e['package']} ({e['license']}) hết hạn {e['expires']} — xét lại rồi gia hạn/bỏ gói")
+    for name, pinned, marker in reqs:
+        got = lookup(name)
+        if got is None:
+            if marker:
+                info.append(f"– {name}=={pinned}: chưa cài (có marker nền tảng) — bỏ qua")
+            else:
+                bad.append(f"{name}=={pinned}: chưa cài — `pip install --require-hashes -r` file requirements")
+            continue
+        version, meta = got
+        expr = license_of(meta)
+        drift = f" (đã cài {version}, ghim {pinned})" if version != pinned else ""
+        exc = None if _pkg_key(name) in expired else exceptions.get(_pkg_key(name))
+        if license_allowed(expr, allowed):
+            info.append(f"✓ {name} {version}: {expr}{drift}")
+        elif exc and exc["license"] == expr:
+            info.append(f"✓ {name} {version}: {expr} — ngoại lệ ({exc['approved_by']}; tới {exc['expires']}){drift}")
+        else:
+            bad.append(f"{name} {version}: license `{expr or 'không khai'}` ngoài allowlist, không có ngoại lệ{drift}")
+    return bad, info
+
+
+def cmd_license_check(args: argparse.Namespace) -> int:
+    """Đối chiếu license gói đã cài (importlib.metadata) của file requirements với allowlist (BASE-DEP-005)."""
+    try:
+        allowed, exceptions = license_policy(Path(args.allow).read_text(encoding="utf-8"))
+        reqs = [r for f in args.requirements or ["requirements-dev.txt"] for r in license_requirements(_read(f))]
+        today = _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
+    except (OSError, ValueError) as exc:
+        print(f"✗ license-check: {exc}", file=sys.stderr)
+        return 2
+    bad, info = license_check(reqs, allowed, exceptions, today)
+    for line in info:
+        print(line)
+    for line in bad:
+        print(f"✗ {line}")
+    if not bad:
+        print(f"✓ license-check: {len(reqs)} gói ghim khớp allowlist {args.allow}.")
+    return 1 if bad else 0
+
+
+def _read(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
 
 
 def cmd_progress_check(args: argparse.Namespace) -> int:
@@ -6983,6 +7181,14 @@ def merge_check_result(
     d = {**merge_decision(pr, autonomy, risk_paths, hard_auto), PHASE_KEY: phase}
     marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
     elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
+    # AUD-XFEAT-010: CI/làn cho merge mà chưa có review hợp lệ ở head → không gợi lệnh merge, verdict `review`
+    if d["verdict"] == "merge" and not elig["eligible"]:
+        d = {k: v for k, v in d.items() if k != "next_rest"}
+        d.update(
+            verdict="review",
+            reasons=[*d["reasons"], f"chưa có review hợp lệ ở head ({elig['review']}) — ADR-0028"],
+            next=_review_step(d, elig["review"]),
+        )
     return {
         **d,
         "review": elig["review"],
@@ -6990,6 +7196,17 @@ def merge_check_result(
         "eligible": elig["eligible"],
         "auto_merge_ok": elig["auto_merge_ok"],
     }
+
+
+def _review_step(d: Dict[str, Any], state: str) -> str:
+    """Bước kế của `merge-check` khi CI/làn đã cho merge mà review ở head chưa hợp lệ (verdict `review`)."""
+    n, head = d.get("pr", ""), d.get("head", "")
+    if state == "blocking":
+        return f"review ở head còn lỗi chặn — sửa, push, rà lại; bước kế: xt.py pr next --pr {n}"
+    return (
+        f"giao reviewer (model khác) rà head; xong: xt.py pr reviewed --pr {n} --head {head} --clean|--blocking"
+        f" --reviewer-model <M> --author-model <M>; bước kế: xt.py pr next --pr {n}"
+    )
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -7290,7 +7507,7 @@ def _watch_final(d: Dict[str, Any]) -> int:
 
 def cmd_merge_watch(args: argparse.Namespace) -> int:
     """Gọi `merge-check` mỗi `--interval` giây (mặc định 30) tới khi verdict ≠ wait (ADR-0021). Chạy nền (`run_in_background`): thoát
-    thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (update/fix/human/
+    thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (review/update/fix/human/
     đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ, 141 bên đọc đóng ống."""
     deadline = time.monotonic() + args.max_minutes * 60
     errors = 0
@@ -7493,16 +7710,46 @@ def _iso_key(at: object) -> str:
 
 
 def with_published(rec: Dict[str, Any], marks: object, published_only: bool = False) -> Dict[str, Any]:
-    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết. `published_only` (xt.yaml
-    có `review_identity`): chỉ review đã đăng của tài khoản reviewer — sổ cục bộ do chính tác giả ghi không tính, cùng
-    "một sự thật" với `merge_eligibility` (ADR-0028, review #168)."""
+    """Sổ review của PR cho `pr next`/steward: `reviews` = CHỈ review đã đăng trên PR (ADR-0027), theo thời gian — cùng
+    nguồn với `merge-check`/`merge-gate`/guard (ADR-0028, AUD-XFEAT-011: hai nguồn làm `pr next` bật auto-merge mà
+    `merge-gate` đỏ, thành vòng bật/tắt). `local_reviews` = sổ cục bộ, chỉ để nhận ra review chưa đăng được
+    (`unpublished_review` → bước đăng lại). `published_only` (xt.yaml có `review_identity`): sổ cục bộ do chính tác giả
+    ghi không tính, kể cả để đăng lại — dấu của tác giả không phải review (review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
-    if published_only:
-        return {**rec, "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", "")))}
-    if not pub:
-        return rec
-    local = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
-    return {**rec, "reviews": sorted([*local, *pub], key=lambda r: _iso_key(r.get("at", "")))}
+    local = [] if published_only else [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+    return {
+        **rec,
+        "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", ""))),
+        "local_reviews": sorted(local, key=lambda r: _iso_key(r.get("at", ""))),
+    }
+
+
+def _review_kind(r: Dict[str, Any]) -> Tuple[str, bool, bool]:
+    return str(r.get("head", "")), bool(r.get("clean")), bool(r.get("inconclusive"))
+
+
+def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Review cuối của sổ cục bộ mà PR chưa có dấu tương ứng (cùng head, cùng kết luận) và không cũ hơn dấu đã đăng mới
+    nhất — `pr reviewed` đã ghi sổ nhưng đăng thất bại (gh lỗi, exit 3). None = không có gì phải đăng lại."""
+    local = [r for r in rec.get("local_reviews") or [] if isinstance(r, dict)]
+    pub = [r for r in rec.get("reviews") or [] if isinstance(r, dict)]
+    if not local:
+        return None
+    last = local[-1]
+    newest = max((_iso_key(r.get("at", "")) for r in pub), default="")
+    if _review_kind(last) in {_review_kind(r) for r in pub} or _iso_key(last.get("at", "")) < newest:
+        return None
+    return last
+
+
+def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
+    flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
+    models = (
+        f" --reviewer-model {r.get('reviewer_model') or '<M>'} --author-model {r.get('author_model') or '<M>'}"
+        if flag == "--clean"
+        else ""
+    )
+    return f"xt.py pr reviewed --pr {n} --head {r.get('head', '')} {flag}{models}"
 
 
 def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
@@ -7546,8 +7793,8 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     """MỘT hành động kế tiếp cho PR theo "merge theo làn" (ADR-0024 → ADR-0025), hàm thuần.
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
-    GitHub: agent làm đúng `do`, guard vẫn là lớp chặn. Hành động: done · closed · disable-auto-merge · defer-human ·
-    retarget · update · fix · review · enable-auto-merge · merge (dưới L3) · wait."""
+    GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
+    republish-review · review · enable-auto-merge · merge (dưới L3) · wait."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -7571,6 +7818,10 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
         }
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
+    if early is None:  # review chỉ có ở sổ cục bộ: đăng lại trước, không bật auto-merge theo nó (AUD-XFEAT-011)
+        early = _pr_next_republish(
+            d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
+        )
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
         early = _pr_next_review(d, auto_merge, gate, act, disable)
     if early is not None:
@@ -7578,6 +7829,26 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
     out = _pr_next_final(d, auto_merge, label, act, disable)
     return {**out, "why": f"{PHASE_DEFER_NOTE} — {out['why']}"} if deferred else out
+
+
+def _pr_next_republish(
+    d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any], review_bad: bool, act: PrAct, disable: str
+) -> Optional[Dict[str, Any]]:
+    """Sổ cục bộ có review chưa đăng lên PR: đăng lại khi nó đổi được kết luận — review không sạch (lỗi chặn/chưa kết
+    luận phải thấy được ở mọi phiên, CI, steward) hoặc review sạch khi dấu đã đăng chưa cho qua (`review_bad`). Review
+    sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn. Review của head cũ không đăng lại: head đã đổi
+    thì cần review mới ở head hiện tại, đăng kết luận cũ chỉ thêm một bước thừa."""
+    r = unpublished_review(rec)
+    if r is None or r.get("head") != d.get("head") or (r.get("clean") and not r.get("inconclusive") and not review_bad):
+        return None
+    n = d.get("pr", "")
+    why = (
+        f"review ở {str(r.get('head', ''))[:7]} chỉ có trong sổ cục bộ, chưa đăng lên PR — merge-check/merge-gate/guard/"
+        "steward chỉ đọc dấu đã đăng (ADR-0028)"
+    )
+    if auto_merge:
+        return act("disable-auto-merge", f"{why}: tắt auto-merge trước khi đăng lại", disable)
+    return act("republish-review", f"{why}: đăng lại (cần gh hoạt động)", _republish_cmd(n, r))
 
 
 def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, disable: str) -> Dict[str, Any]:
@@ -7701,18 +7972,31 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
     rec = _pr_record(data, key)
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
-    entry = {"head": args.head, "clean": args.clean, "at": now_iso()}
+    entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
-    entry.update({k: v for k, v in (("reviewer_model", args.reviewer_model), ("author_model", args.author_model)) if v})
-    reviews.append(entry)
-    data[key] = {**rec, "reviews": reviews}
-    _write_reviews(base, data)
+    models = (("reviewer_model", args.reviewer_model), ("author_model", args.author_model))
+    entry.update({k: unicodedata.normalize("NFC", v) for k, v in models if v})  # NFC ở biên (AUD-HAR-070)
+    # Idempotent (AUD-HAR-071, BASE-DATA-008): chạy lại cùng kết quả ở cùng head không thêm bản ghi, đã đăng thì không
+    # đăng trùng; chỉ so bản ghi CUỐI — đổi kết quả rồi đổi lại vẫn là bản ghi mới.
+    same = ("head", "clean", "inconclusive", "reviewer_model", "author_model")
+    again = bool(reviews) and all(reviews[-1].get(k) == entry.get(k) for k in same)
+    if again:
+        entry = reviews[-1]
+    else:
+        reviews.append(entry)
+        data[key] = {**rec, "reviews": reviews}
+        _write_reviews(base, data)
     word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
-    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}")
-    if args.no_publish:
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if again else ""))
+    if args.no_publish or entry.get("published"):
         return 0
-    return _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
+    rc = _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
+    if rc == 0:
+        entry["published"] = True
+        data[key] = {**rec, "reviews": reviews}
+        _write_reviews(base, data)
+    return rc
 
 
 def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive: bool = False) -> int:
@@ -8364,11 +8648,14 @@ def _bench_rollup(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
 
 
 def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
-    """Quyết định merge-check + review (sổ cục bộ và/hoặc comment đã đăng) → merge_eligibility và `pr next`."""
+    """Quyết định merge-check + review → merge_eligibility và `pr next`. `reviews` = review đã đăng (đã lọc, như
+    `xtReviews`), `comments` = comment thô qua `published_reviews`, `local` = sổ cục bộ (chỉ để nhận ra review chưa
+    đăng — AUD-XFEAT-011)."""
     published = published_reviews(
         inp.get("comments") or [], set(inp.get("writers") or []), str(inp.get("identity") or "")
     )
-    rec = {"reviews": inp.get("reviews") or [], "standard_seen": bool(inp.get("standard_seen"))}
+    published += [r for r in inp.get("reviews") or [] if isinstance(r, dict)]
+    rec = {"reviews": inp.get("local") or [], "standard_seen": bool(inp.get("standard_seen"))}
     rec = with_published(rec, published, bool(inp.get("identity")))
     reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
     d = inp["decision"]
@@ -9291,6 +9578,13 @@ def build_parser() -> argparse.ArgumentParser:
     pcl = sub.add_parser("changelog-check")
     pcl.add_argument("file", nargs="?", default="CHANGELOG.md")
     pcl.set_defaults(fn=cmd_changelog_check)
+    plc = sub.add_parser("license-check")
+    plc.add_argument(
+        "--requirements", action="append", help="file requirements ghim `==` (mặc định requirements-dev.txt)"
+    )
+    plc.add_argument("--allow", default="license-allow.json")
+    plc.add_argument("--today", default="", help="ngày ISO thay hôm nay (test hạn ngoại lệ)")
+    plc.set_defaults(fn=cmd_license_check)
     pp = sub.add_parser("progress-check")
     pp.add_argument("file", nargs="?", default="PROGRESS.md")
     pp.set_defaults(fn=cmd_progress_check)
