@@ -611,8 +611,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(cdir("git -C ../b commit -m x"), "/w/b")
         self.assertEqual(cdir("cd /w/c && git -C d -C e commit -m x"), "/w/c/d/e")
         self.assertEqual(cdir("cd ~ && git commit -m x"), posixpath_expand("~"))
-        for unknown in ("cd && git commit -m x", "cd - && git commit -m x", "cd -P /x && git commit -m x"):
+        for unknown in ("cd && git commit -m x", "cd - && git commit -m x", "cd -Z /x && git commit -m x"):
             self.assertEqual(cdir(unknown), "", unknown)  # không biết → hook dùng gốc dự án như cũ
+        # AUD-SEC-088: cờ -P/-L/--, chuyển hướng không đổi đích của `cd`
+        self.assertEqual(cdir("cd -P /x 2>/dev/null && git commit -m x"), "/x")
         self.assertEqual(cdir('cd "$D" && git commit -m x'), "")
         self.assertEqual(cdir('git -C "$D" commit -m x'), "")
         self.assertEqual(cdir("cd $D && git -C b commit -m x"), "")

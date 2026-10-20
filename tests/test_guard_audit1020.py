@@ -181,5 +181,50 @@ class InterpAliasWriteTest(unittest.TestCase):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
 
+class CdRedirectFlagsTest(unittest.TestCase):
+    """AUD-SEC-088: `cd`/`pushd` kèm chuyển hướng (`2>/dev/null`, `>/dev/null`) hay cờ (`-P`, `-L`, `-e`, `--`) vẫn dời
+    thư mục — lệnh sau phải được quét ở thư mục mới, không như đang ở gốc dự án."""
+
+    def test_guard_cd_redirect_flags(self):
+        cases = {
+            "cd .claude >/dev/null && bash -c 'echo x > settings.json'": "HOOK_BYPASS",
+            "pushd .claude >/dev/null && python3 -c \"open('settings.json','w')\"": "HOOK_BYPASS",
+            "cd -P .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd .claude 2>/dev/null; echo x > settings.json": "HOOK_BYPASS",
+            "cd -L .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -- .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -e .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -P -e .claude 2> /dev/null && echo x > settings.json": "HOOK_BYPASS",
+            "cd .claude &>/dev/null && echo x > settings.json": "HOOK_BYPASS",
+            "pushd -- .autopilot > /dev/null && echo {} > verified.json": "EVIDENCE_HANDWRITE",
+            "cd docs 2>/dev/null && echo K=1 > ../.env": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_cd_redirect_flags_controls(self):
+        for cmd in (
+            "cd docs 2>/dev/null && echo x > a.md",
+            "cd -P docs && echo x > settings.json",
+            "pushd docs >/dev/null && bash -c 'echo x > settings.json'",
+            "cd .claude 2>/dev/null && cat settings.json",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_cd_target_parsing(self):
+        here = "/p"
+        self.assertEqual(guard._cd_target(guard.tokenize("cd .claude 2>/dev/null"), here), "/p/.claude")
+        self.assertEqual(guard._cd_target(["cd", "-P", "-L", "--", "a"], here), "/p/a")
+        self.assertEqual(guard._cd_target(["cd", "--", "-x"], here), "/p/-x")
+        self.assertIsNone(guard._cd_target(["cd", "-"], here))
+        self.assertIsNone(guard._cd_target(["cd", "-P"], here))
+        self.assertIsNone(guard._cd_target(["cd", "-x", "a"], here))  # cờ lạ: không đoán
+        self.assertIsNone(guard._cd_target(["cd", "a", "b"], here))
+        self.assertIsNone(guard._cd_target(["pushd", "+1"], here))
+
+
 if __name__ == "__main__":
     unittest.main()

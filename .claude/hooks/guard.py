@@ -869,10 +869,37 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
     return gdir
 
 
+CD_FLAGS = ("-P", "-L", "-e", "-@")  # cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088)
+
+
+def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
+    """(đối số, có `--`) của `cd`/`pushd` sau khi bỏ chuyển hướng (`2>/dev/null` tách thành `2`, `>`, `/dev/null`;
+    `>&1`) và cờ `-P`/`-L`/`-e`/`-@` đứng trước `--` (AUD-SEC-088). Cờ lạ giữ lại để bên gọi coi là không biết."""
+    plain: List[str] = []
+    i = 0
+    while i < len(args):
+        if _is_redirect(args[i]):
+            i += 2  # toán tử + đích
+        elif args[i].isdigit() and i + 1 < len(args) and _is_redirect(args[i + 1]):
+            i += 1  # số fd đứng trước toán tử (`2>`)
+        else:
+            plain.append(args[i])
+            i += 1
+    j = 0
+    while j < len(plain) and plain[j] in CD_FLAGS:
+        j += 1
+    if plain[j : j + 1] == ["--"]:
+        return plain[j + 1 :], True
+    return plain[j:], False
+
+
 def _cd_target(n: List[str], cwd: Optional[str]) -> Optional[str]:
-    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `cd` kèm tuỳ chọn hay biến → None (không biết, hook dùng gốc dự án)."""
-    args = n[1:]
-    if cwd is None or len(args) != 1 or args[0].startswith("-") or "$" in args[0]:
+    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `pushd +N`, `cd` kèm cờ lạ hay biến → None (không biết, hook dùng gốc dự
+    án). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088)."""
+    args, dashdash = _cd_operands(n[1:])
+    if cwd is None or len(args) != 1 or "$" in args[0]:
+        return None
+    if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
     return posixpath.normpath(posixpath.join(cwd, posixpath.expanduser(args[0])))
 
