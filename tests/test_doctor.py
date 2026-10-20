@@ -436,6 +436,13 @@ class DoctorVersionTest(DoctorCase):
 
         return unittest.mock.patch("xt.subprocess.run", side_effect=run)
 
+    def test_latest_tag_pagination_stops_at_cap(self):
+        """API trả trang đầy mãi (lặp trang) → dừng ở trần GH_MAX_PAGES, không vòng vô hạn."""
+        full = json.dumps([{"name": "v1.0.0"}] * 100)
+        with self.gh(out=full) as run:
+            self.assertEqual(xt.latest_framework_tag(), (1, 0, 0))
+        self.assertEqual(run.call_count, xt.GH_MAX_PAGES)
+
     def test_latest_tag_parsing_and_fail_open(self):
         page1 = [{"name": "v2.0.0"}, {"name": "v3.0.0-rc1"}, {"name": "nope"}, "x", {"name": 3}]
         page1 += [{"name": f"t{i}"} for i in range(100 - len(page1))]  # trang đầy 100 → đọc tiếp trang 2

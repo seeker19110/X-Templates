@@ -123,7 +123,7 @@ class FakeGh:
         xt._CHAIN_CACHE.clear()
 
     def paths(self) -> list[str]:
-        return [c[-1] for c in self.calls]
+        return [_unpage(c[-1])[0] for c in self.calls]
 
     def respond(self, cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
         if cmd[0] == "git":  # xt.yaml ở nhánh đích: mặc định không có repo → human/L1; `real_git` = repo tạm của test
@@ -131,7 +131,9 @@ class FakeGh:
                 return REAL_RUN(cmd, **kw)
             return subprocess.CompletedProcess(cmd, 128, "", "not a git repository")
         self.calls.append(cmd)
-        path = cmd[-1]
+        path, later = _unpage(cmd[-1])
+        if later:  # phân trang tự làm (FB-001): trang ≥ 2 rỗng
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
         files = [
             {"filename": f["path"], "additions": f["additions"], "deletions": f["deletions"]} for f in pr()["files"]
         ]
@@ -165,6 +167,12 @@ class FakeGh:
 
     def patch(self) -> Any:
         return unittest.mock.patch.object(xt.subprocess, "run", side_effect=self.respond)
+
+
+def _unpage(path: str) -> tuple[str, bool]:
+    """Route không mang `page=N` của phân trang tự làm; True khi là trang ≥ 2."""
+    m = re.search(r"[?&]page=(\d+)$", path)
+    return (path[: m.start()], int(m.group(1)) > 1) if m else (path, False)
 
 
 def run_main(*args: str, stdin: str | None = None) -> tuple[int, str, str]:

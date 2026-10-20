@@ -1709,6 +1709,8 @@ class MergeGuardBase(unittest.TestCase):
                 arms.append(f"  {shlex.quote(path)}) exec cat {shlex.quote(str(out / f'{i}.json'))} ;;\n")
             script = (
                 '#!/bin/sh\nfor a; do last=$a; done\n[ "$1" = api ] || { echo "gh giả: chỉ có api" >&2; exit 1; }\n'
+                'case "$last" in *"&page=1") last="${last%&page=1}" ;; *"?page=1") last="${last%?page=1}" ;; '
+                '*page=[2-9]*) echo "[]"; exit 0 ;; esac\n'  # phân trang tự làm (FB-001)
                 'case "$last" in\n'
                 + "".join(arms)
                 + '  *) echo "gh giả: không có đường dẫn $last" >&2; exit 1 ;;\nesac\n'
