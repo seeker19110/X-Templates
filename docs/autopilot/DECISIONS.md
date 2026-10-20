@@ -755,3 +755,10 @@
 - Chọn: cwd không biết: đích ghi tương đối được thử ở mọi thư mục canh (gốc, .claude, .claude/hooks, .autopilot, .git, .git/hooks) — trúng chỗ nào là chặn
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: mất dấu cwd không được làm mở đường; chặn oan chỉ khi tên file trùng tên file canh trong thư mục canh, hiếm
 - Đường lùi: trả về coi cwd không biết là gốc dự án
+
+### D-107 · 2026-10-20T11:27:35+00:00 · Bộ che chuỗi/comment cho script không phải Python (node/ruby/perl/php): ký tự # / % quote-like làm lệch che
+
+- Phương án: (1) fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc · (2) cho riêng comment # ở đầu dòng
+- Chọn: fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: che sai từng làm lọt ghi thật (review #186 lần 2); chặn oan chỉ khi script nhắc đường dẫn canh, agent còn Edit/Write
+- Đường lùi: cho comment # đầu dòng

@@ -239,12 +239,101 @@ class InterpDefaultDenyTest(unittest.TestCase):
             "$f('.env')",
             "$o->unlink('.env')",
             "File.delete '.env'",
-            "x = 1 / 2 # ; os.remove('.env')",
         ):
             with self.subTest(bad=bad):
                 self.assertFalse(ro(bad))
         # chống bậc hai: quá nhiều lời gọi cần tách đối số → coi là không chỉ đọc
         self.assertFalse(ro("print(" + "open('.env'), " * (guard.RO_ARG_SCANS + 1) + "1)"))
+
+
+PY = frozenset({"python"})
+PERL = frozenset({"perl"})
+NODE = frozenset({"node"})
+RUBY = frozenset({"ruby"})
+
+
+class MaskFailClosedTest(unittest.TestCase):
+    """Review #186 lần 2 (D-105, D-107): bộ che chuỗi/comment lệch → mã ghi thật nằm trong "chuỗi" nên script bị coi là
+    chỉ đọc. Python che bằng `tokenize` (lỗi tách → không chỉ đọc); ngôn ngữ khác thấy ký tự che không chắc → không chỉ
+    đọc."""
+
+    def test_guard_fake_comment_triple_quote_denied(self):
+        cases = (
+            "python3 -c \"x = 4 / 2 # '''\nimport os; os.close(os.open('.env', 513))\ny = 4 / 2 # '''\"",
+            'python3 -c \'x = 4 / 2 # """\nimport os; os.close(os.open(".env", 513))\ny = 4 / 2 # """\'',
+            "python3 - <<'PY'\nx = 1 # '''\nimport os; os.utime('.env')\ny = 2 # '''\nPY",
+            'perl -e \'open(F,"<.env"); $x=qq{ # }; sysopen(G,".env",01001);\'',
+            'perl -e \'open(F,"<.env"); $x=m{ #}; sysopen(G,".env",01001);\'',
+            "node -e \"x = /'/; require('fs').cpSync('/tmp/a','.env'); y = /'/\"",
+            "ruby -e \"x = ?'; File.rename('/tmp/a','.env'); y = ?'\"",
+        )
+        for cmd in cases:
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", "SECRET_WRITE"), res)
+
+    def test_guard_python_comment_controls_pass(self):
+        for cmd in (
+            "python3 - <<'PY'\nimport json  # đọc '''cấu hình'''\nprint(json.load(open('.claude/settings.json')))  # it's\nPY",
+            "python3 -c \"x = 4 / 2  # it's ok\nprint(open('.env').read(), x)\"",
+            'python3 -c "print(f\'{open(\\".env\\").read()!r:>10}\')"',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_python_mask_tokenize(self):
+        ro = guard._read_only_script
+        self.assertTrue(ro("x = 1  # '''\nprint(open('.env').read())  # '''", PY))
+        self.assertFalse(ro("x = 1  # '''\nimport os; os.utime('.env')\ny = 2  # '''", PY))
+        self.assertFalse(ro("x = $y; print(open('.env').read())", PY))  # ERRORTOKEN (3.11) / SyntaxError (3.12+)
+        self.assertFalse(ro("print(open('.env').read())\nx = '''", PY))  # TokenError
+        self.assertFalse(ro("print(open('.env').read())\r\nx = 1", PY))  # \r: vị trí token không chắc
+        self.assertFalse(ro("print(open('.env').read())\n  x = 1", PY))  # IndentationError
+        # f-string: biểu thức kiểm đệ quy; lồng nhau trong giới hạn độ sâu
+        self.assertTrue(ro("print(f'{open(\".env\").read()}')", PY))
+        self.assertTrue(ro("w = 3\nprint(f\"{open('.env').read():>{w}}\")", PY))
+        self.assertFalse(ro('print(f\'{open(".env", "w")}\')', PY))
+        self.assertFalse(ro("import os\nprint(f'{os.utime(\".env\")}')", PY))
+        self.assertTrue(ro("x = 1\nprint(f'{f\"{x}\"}', open('.env').read())", PY))
+        deep = "x"
+        for _ in range(guard.RO_FSTRING_DEPTH + 1):
+            deep = "f'{" + deep + "}'" if deep.count("'") % 2 == 0 else 'f"{' + deep + '}"'
+        self.assertFalse(ro(f"x = 1\nprint({deep}, open('.env').read())", PY))
+        # tự nhận: script Python hợp lệ → che bằng tokenize; không → bộ che chung (chặt)
+        self.assertTrue(ro("x = 4 / 2  # it's\nprint(open('.env').read())"))
+
+    def test_generic_mask_fail_closed(self):
+        ro = guard._read_only_script
+        self.assertTrue(ro("open(my $fh, '<', '.env'); print <$fh>", PERL))
+        self.assertTrue(ro("console.log(require('fs').readFileSync('.env', 'utf8'))", NODE))
+        self.assertTrue(ro("puts File.read('.env')", RUBY))
+        for script, fam in (
+            ("open(F,'<.env'); $x=qq{ # }; sysopen(G,'.env',01001);", PERL),
+            ("$x = q xax; print('.env')", PERL),
+            ("$x = s{a}{b}; print('.env')", PERL),
+            ("$x = $'; rename('/tmp/a', '.env'); $y = $'", PERL),
+            ("print('.env'); # comment", PERL),
+            ("print \"$h{1}\", '.env'", PERL),
+            ("print \"@a\", '.env'", PERL),
+            ("x = /'/; console.log('.env'); y = /'/", NODE),
+            ("console.log(1 / 2, '.env')", NODE),
+            ("x = %q{'}; puts '.env'", RUBY),
+            ("x = ?'; puts '.env'; y = ?'", RUBY),
+            ("x = <<~E\nputs '.env'\nE", RUBY),
+            ("puts File.read('|touch x')", RUBY),
+            ("echo '.env'; ?> ' <?php", frozenset({"php"})),
+            ("puts 'a\nb', '.env'", RUBY),  # chuỗi nhiều dòng: không che → nháy lẻ
+            ("x = rb'.env'", NODE),  # tiền tố dính chuỗi
+            ("puts \"#{File.read('.env')}\"", RUBY),
+            ("x = s => 1; print('.env')", frozenset()),  # không biết trình thông dịch: áp cả luật Perl
+        ):
+            with self.subTest(script=script):
+                self.assertFalse(ro(script, fam))
+        # `/ … #`: với Python là comment thật (chỉ đọc), với trình thông dịch khác thì không chắc → không chỉ đọc
+        self.assertTrue(ro("x = 1 / 2 # ; os.remove('.env')", PY))
+        self.assertFalse(ro("x = 1 / 2 # ; os.remove('.env')", NODE))
+        # luật Perl chỉ áp cho perl (hoặc không biết trình thông dịch)
+        self.assertTrue(ro("s = File.read('.env'); puts s", RUBY))
 
 
 if __name__ == "__main__":

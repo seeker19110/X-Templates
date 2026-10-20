@@ -4556,6 +4556,7 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
     (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
     tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
+    families = _interp_families(tokens, cwd or root)
     for script, here in _interp_scripts_at(cmd, tokens, cwd or root):
         asks += [
             f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
@@ -4564,7 +4565,7 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script)
+        hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families)
         asks += [a for raw in _script_literals(script) if (a := _interp_literal_ask(script, raw, root, here, hint, ro))]
     return asks
 
@@ -4584,14 +4585,22 @@ def _script_literals(script: str) -> List[str]:
 class _ReadOnly:
     """Kết quả `_read_only_script` tính một lần cho mỗi script, chỉ khi có chuỗi là đường dẫn được canh."""
 
-    def __init__(self, script: str) -> None:
+    def __init__(self, script: str, families: FrozenSet[str]) -> None:
         self.script = script
+        self.families = families
         self.value: Optional[bool] = None
 
     def __bool__(self) -> bool:
         if self.value is None:
-            self.value = _read_only_script(self.script)
+            self.value = _read_only_script(self.script, self.families)
         return self.value
+
+
+def _interp_families(tokens: List[str], cwd: Optional[str]) -> FrozenSet[str]:
+    """Họ trình thông dịch có trong lệnh (`python`, `node`, `perl`…): script trong lệnh có thể chạy bởi bất kỳ ai trong
+    số đó, nên chỉ coi là Python khi mọi trình thông dịch đều là Python (D-107)."""
+    found = (INTERP_RE.fullmatch(n[0]) for n in (normalize(c) for c, _ in _commands_with_cwd(tokens, cwd)) if n)
+    return frozenset(m[1] for m in found if m)
 
 
 def _interp_literal_ask(
@@ -4691,29 +4700,112 @@ RO_FS_REQUIRE_RE = re.compile(r"\b(?:const|let|var)\s+(?:fs|path)\s*=\s*require\
 RO_ARG_SCANS = 256  # số lời gọi được tách đối số tối đa mỗi script (chống bậc hai) — hơn → coi là không chỉ đọc
 
 
-def _ro_mask(script: str) -> Tuple[str, List[Tuple[str, str]]]:
-    """Script với chuỗi thay bằng `\\x01N\\x02` và comment `#` bỏ đi (trừ dòng có `/` trước `#` — có thể là regex
-    `/ #/` của JS/Ruby/Perl); danh sách (tiền tố, nội dung) của chuỗi."""
-    out: List[str] = []
+Masked = Optional[Tuple[str, List[Tuple[str, str]]]]
+# Bộ che chuỗi/comment (review #186 lần 2): che lệch là mã ghi thật nằm trong "chuỗi" → script bị coi là chỉ đọc. Python:
+# `tokenize` của thư viện chuẩn (đúng lexer của Python); lỗi tách → không chỉ đọc. Ngôn ngữ khác (D-107): chỉ che chuỗi
+# một dòng `'…'`/`"…"`; phần mã còn lại có ký tự mà bộ che không hiểu chắc (comment, regex, quote-like, heredoc, nháy dính
+# biến/tên) → không chỉ đọc.
+RO_FSTRING_DEPTH = 3  # độ sâu f-string lồng được kiểm đệ quy; sâu hơn → không chỉ đọc
+RO_SIMPLE_STR_RE = re.compile(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)\"""")
+RO_GENERIC_DENY_RE = re.compile(
+    r"[#/%]|<<|<\?|\?>"  # comment `#`, `//`, regex `/…/`, Ruby `%q{}`, heredoc `<<`, thẻ PHP
+    r"|[\w$?@&\\]\x01"  # nháy dính tên/ký hiệu: Perl `$'`, `pkg'name`, Ruby `?'`, tiền tố `rb'…'`
+)
+RO_PERL_QUOTE_RE = re.compile(r"(?<![\w$@%&])(?:qq|qw|qr|qx|q|m|s|tr|y)(?!\w)(?:\s*[^\w\s]|\s+\w)")
+RO_INTERP_RE = re.compile(r"[$@]|#\{")  # nội suy trong nháy kép: Perl `$h{…}`/`@a[…]`, PHP `{$o->m()}`, Ruby `#{…}`
+
+
+def _ro_mask(script: str, families: Optional[FrozenSet[str]] = None) -> Masked:
+    """Ngôn ngữ khác Python (D-107): chuỗi một dòng thay bằng `\\x01N\\x02`, danh sách (nháy, nội dung). Phần còn lại
+    có ký tự che không chắc, chuỗi nháy kép có nội suy, chuỗi là ống lệnh (`'|cmd'`) → None (không chỉ đọc)."""
     lits: List[Tuple[str, str]] = []
-    i = 0
-    while i < len(script):
-        c = script[i]
-        prev = script[i - 1] if i else " "
-        m = LITERAL_RE.match(script, i) if c in "'\"rRbBfFuU" and not (prev.isalnum() or prev == "_") else None
-        if m:
-            body = m.group(m.lastindex or 0)
-            whole = m.group(0)
-            lits.append((whole[: len(whole) - len(whole.lstrip("rRbBfFuU"))], body))  # (tiền tố r/b/f/u, nội dung)
+
+    def sub(m: "re.Match[str]") -> str:
+        lits.append((m[0][0], m[m.lastindex or 1]))
+        return f"\x01{len(lits) - 1}\x02"
+
+    masked = RO_SIMPLE_STR_RE.sub(sub, script)
+    perl = not families or "perl" in families
+    if (
+        RO_GENERIC_DENY_RE.search(masked)
+        or (perl and RO_PERL_QUOTE_RE.search(masked))
+        or any(q == '"' and RO_INTERP_RE.search(v) for q, v in lits)
+        or any(len(v.strip()) > 1 and "|" in (v.strip()[0], v.strip()[-1]) for _, v in lits)
+    ):
+        return None
+    return masked, lits
+
+
+def _ro_py_spans(script: str, depth: int) -> Optional[List[Tuple[int, int]]]:
+    """Vị trí (đầu, cuối) của chuỗi, f-string (trọn cả lồng) và comment theo `tokenize`; None khi không chắc: quá độ
+    sâu, `\\r` (vị trí token không chắc), ERRORTOKEN, token không khớp vị trí. Cú pháp sai/TokenError → ngoại lệ."""
+    import ast
+    import io
+    import tokenize as pytok
+
+    opens = {getattr(pytok, n) for n in ("FSTRING_START", "TSTRING_START") if hasattr(pytok, n)}
+    closes = {getattr(pytok, n) for n in ("FSTRING_END", "TSTRING_END") if hasattr(pytok, n)}
+    ast.parse(script)
+    toks = list(pytok.generate_tokens(io.StringIO(script).readline))
+    starts = list(itertools.accumulate((len(x) + 1 for x in script.split("\n")), initial=0))
+    spans: List[Tuple[int, int]] = []
+    seen: List[Tuple[int, str]] = []
+    level, begin = 0, 0
+    for t in toks:
+        a, b = starts[t.start[0] - 1] + t.start[1], starts[t.end[0] - 1] + t.end[1]
+        if t.type in opens:
+            begin, level = (begin if level else a), level + 1
+            seen.append((a, t.string))
+        elif t.type in closes:
+            level -= 1
+            seen.append((a, t.string))
+            spans += [(begin, b)] if not level else []
+        elif not level and t.type in (pytok.STRING, pytok.COMMENT):
+            spans.append((a, b))
+            seen.append((a, t.string))
+    bad = (
+        depth > RO_FSTRING_DEPTH
+        or "\r" in script
+        or any(t.type == pytok.ERRORTOKEN for t in toks)
+        or any(script[a : a + len(s)] != s for a, s in seen)
+    )
+    return None if bad else spans
+
+
+def _ro_fstring_ok(text: str, depth: int) -> bool:
+    """Mọi biểu thức trong f-string/t-string `text` chỉ đọc (kiểm đệ quy, tầng `depth + 1`)."""
+    import ast
+
+    tree = ast.parse(text, mode="eval")
+    exprs = [n for n in ast.walk(tree) if type(n).__name__ in ("FormattedValue", "Interpolation")]
+    return all(_read_only_script(ast.unparse(getattr(e, "value")), frozenset({"python"}), depth + 1) for e in exprs)
+
+
+def _ro_mask_py(script: str, depth: int = 0) -> Masked:
+    """Python: chuỗi (cả f-string) thay bằng `\\x01N\\x02`, comment bỏ đi — theo `tokenize`. Biểu thức trong f-string
+    kiểm đệ quy bằng `_read_only_script` (tối đa RO_FSTRING_DEPTH tầng). Không tách chắc được → None (không chỉ đọc)."""
+    try:
+        spans = _ro_py_spans(script, depth)
+        if spans is None:
+            return None
+        out: List[str] = []
+        lits: List[Tuple[str, str]] = []
+        i = 0
+        for a, b in spans:
+            out.append(script[i:a])
+            i, text = b, script[a:b]
+            if text[0] == "#":
+                continue
+            prefix = text[: len(text) - len(text.lstrip("rRbBfFuUtT"))]
+            q = 3 if text[len(prefix) : len(prefix) + 3] in ("'''", '"""') else 1
+            if set(prefix.lower()) & {"f", "t"} and not _ro_fstring_ok(text, depth):
+                return None
+            lits.append((prefix.lower().replace("f", "").replace("t", ""), text[len(prefix) + q : len(text) - q]))
             out.append(f"\x01{len(lits) - 1}\x02")
-            i = m.end()
-        elif c == "#" and prev in " \t\n;" and "/" not in script[script.rfind("\n", 0, i) + 1 : i]:
-            j = script.find("\n", i)
-            i = len(script) if j < 0 else j
-        else:
-            out.append(c)
-            i += 1
-    return "".join(out), lits
+        out.append(script[i:])
+        return "".join(out), lits
+    except Exception:  # SyntaxError, TokenError, ValueError (NUL), RecursionError…: không phân tích được → chặt
+        return None
 
 
 def _ro_parens(masked: str) -> Optional[Dict[int, int]]:
@@ -4855,14 +4947,19 @@ def _ro_calls_ok(masked: str, lits: List[Tuple[str, str]], close: Dict[int, int]
     return True
 
 
-def _read_only_script(script: str) -> bool:
-    """Toàn script chỉ gồm thao tác đọc trong danh sách cho phép (D-105). Không phân tích được → False (chặt)."""
-    masked, lits = _ro_mask(script)
+def _read_only_script(script: str, families: Optional[FrozenSet[str]] = None, depth: int = 0) -> bool:
+    """Toàn script chỉ gồm thao tác đọc trong danh sách cho phép (D-105). Không phân tích được → False (chặt).
+    `families` = họ trình thông dịch chạy script (`python`, `node`, `perl`…): chỉ `{python}` → che bằng `tokenize`;
+    khác/rỗng → bộ che chung chặt (D-107); None (không truyền) → script Python hợp lệ thì như Python."""
+    python = families == frozenset({"python"})
+    found = _ro_mask_py(script, depth) if python or families is None else None
+    found = found if python else (found or _ro_mask(script, families))
+    if found is None:
+        return False
+    masked, lits = found
     close = _ro_parens(masked)
     if close is None or RO_DENY_RE.search(masked):
         return False  # ngoặc lẻ, nháy lẻ, backtick, gọi qua biến, tuỳ chọn flag, gán, gọi trên biểu thức
-    if any("#{" in v or "${" in v or "@{" in v or ("f" in p.lower() and "{" in v) for p, v in lits):
-        return False  # chuỗi nội suy/f-string có biểu thức
     for m in RO_BARE_CALL_RE.finditer(masked):  # gọi không ngoặc: `unlink '.env'`, `File.delete '.env'`
         name, nxt = m[2], m[3]
         if name not in RO_KEYWORDS and nxt not in RO_KEYWORDS and name not in (*RO_PRINTERS, "require"):
