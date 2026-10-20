@@ -204,6 +204,146 @@
     "category": "test"
    },
    "note": "test đỏ nhắc chữ secret là test (PR #173)"
+  },
+  {
+   "id": "ci-failed-word-gitleaks",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "FAILED: gitleaks detected 2 leaks\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-fail-prefix-gitleaks",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "FAIL gitleaks: leaks found\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-failed-suffix-detect-secrets",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "detect-secrets: potential secret in a.py: FAILED\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-semgrep-scan-failed-findings",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "semgrep scan failed: 5 findings\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-semgrep-ci-failed-blocking",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "semgrep ci failed with 3 blocking findings\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-codeql-alert-failed",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "codeql: found 1 alert, failed\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-bandit-failed-issue",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "bandit failed: issue B105 hardcoded password\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-semgrep-zero-then-blocking",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "semgrep: 0 findings, 2 blocking findings\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-bandit-no-issues-then-found",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "bandit: no issues identified … 2 issues found\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-gitleaks-finding-line",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "log": "Finding: Generic API Key\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
   }
  ]
 }

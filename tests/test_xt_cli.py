@@ -1984,6 +1984,22 @@ class ContextPackTest(TmpDirCase):
         self.assertEqual(pack["bytes"]["files"], 8)  # 3 + 5; symlink 50 byte ngoài dự án không tính
         self.assertEqual(xt._regular_size(str(self.tmp / "biến-mất")), 0)  # file mất giữa lúc duyệt
 
+    def test_review173b_context_pack_mid_symlink_escape_is_missing(self):
+        """Review delta PR #173: symlink ở thành phần GIỮA (`out -> thư mục ngoài`, `out/x.txt`) → `missing_files`,
+        không stat/đọc ngoài dự án; symlink giữa trỏ vào trong dự án vẫn đọc."""
+        outside = self.tmp.parent / f"{self.tmp.name}-ngoai"
+        outside.mkdir()
+        (outside / "x.txt").write_text("x" * 50, encoding="utf-8")
+        self.addCleanup(shutil.rmtree, outside)
+        os.symlink(outside, self.tmp / "out")
+        os.symlink(self.tmp / "src", self.tmp / "inside")
+        files = ["out/x.txt", "out", "inside/a.py"]
+        task = {"id": "T-1", "rest": "x", "gate": None, "files": files, "after": [], "section": None}
+        pack = xt.context_pack(task, self.tmp)
+        self.assertEqual(pack["missing_files"], ["out/x.txt", "out"])
+        self.assertEqual(pack["bytes"]["files"], 3)
+        self.assertIsNone(xt._safe_rel_path(self.tmp, "out/x.txt"))
+
     def test_context_pack_errors(self):
         rc, out, err = run_main("context", "--task", "T-404")
         self.assertEqual((rc, out), (2, ""))
@@ -2185,6 +2201,42 @@ class CiTriageTest(TmpDirCase):
         for text in real:
             with self.subTest(text=text):
                 self.assertEqual(xt.ci_classify(text + "FAILED test_y\n")["category"], "secret")
+
+    def test_review173b_secret_line_with_failed_word_still_secret(self):
+        """Review delta PR #173: dòng phát hiện thật có chữ FAILED/FAIL/failed vẫn là `secret` — chỉ loại dòng GIỐNG dòng
+        test đỏ; mệnh đề `no/0 X` chỉ loại phần của nó, không cả dòng (nghiêng về block khi mơ hồ)."""
+        rule = dict(xt.CI_TRIAGE_RULES)["secret"]
+        real = (
+            "FAILED: gitleaks detected 2 leaks",
+            "FAIL gitleaks: leaks found",
+            "detect-secrets: potential secret in a.py: FAILED",
+            "semgrep scan failed: 5 findings",
+            "semgrep ci failed with 3 blocking findings",
+            "codeql: found 1 alert, failed",
+            "bandit failed: issue B105 hardcoded password",
+            "semgrep: 0 findings, 2 blocking findings",
+            "bandit: no issues identified … 2 issues found",
+            "Finding: Generic API Key",
+        )
+        for line in real:
+            with self.subTest(line=line):
+                self.assertTrue(rule.search(line))
+                self.assertEqual(xt.ci_classify(line + "\nFAILED tests/a.py::t\n")["category"], "secret")
+        test_like = (
+            "FAILED tests/test_scan.py::test_leaks - gitleaks detected 2 leaks",
+            "FAIL\tgithub.com/x/scan\t0.12s semgrep: 3 findings",
+            "FAIL: test_secret (tests.test_scan.ScanTest) secret detected",
+            "--- FAIL: TestScan (0.00s) leaks found",
+            "E       AssertionError: potential secret not reported",
+            "AssertionError: expected secret detected in output",
+            "semgrep: 0 blocking findings",
+            "ggshield: no incidents detected",
+            "gitleaks: no leaks detected",
+            "trufflehog: 0 verified results",
+        )
+        for line in test_like:
+            with self.subTest(line=line):
+                self.assertFalse(rule.search(line))
 
     def test_audit_delta_ci_triage_episode_counts_survive_task_change(self):
         """T-1524: đổi/bỏ `--task` không đặt lại đếm cùng chữ ký, lượt re-run, chi phí (không lách trần 3 lần);

@@ -764,6 +764,23 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(sorted(self.subjects(doc, "invalid")), sorted(bad))
         self.assertEqual(self.subjects(doc, "modified"), [])
 
+    def test_review173b_drift_mid_symlink_escape_not_read(self):
+        """Review delta PR #173: manifest trỏ qua symlink ở thành phần GIỮA (`d/out -> ngoài`, `d/out/h`) → `invalid`,
+        không băm file ngoài dự án."""
+        mp = self.base / ".xtemplates" / "manifest.json"
+        manifest = json.loads(mp.read_text(encoding="utf-8"))
+        outside = self.tmp / "ngoai"
+        outside.mkdir()
+        (outside / "h").write_text("x", encoding="utf-8")
+        (self.base / "d").mkdir()
+        os.symlink(outside, self.base / "d" / "out")
+        manifest["files"] = {**manifest["files"], "d/out/h": "0"}
+        mp.write_text(json.dumps(manifest), encoding="utf-8")
+        rc, doc = self.drift("--latest", "v0.0.1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.subjects(doc, "invalid"), ["d/out/h"])  # trước khi sửa: băm file ngoài → `modified`
+        self.assertNotIn("d/out/h", self.subjects(doc, "modified"))
+
     def test_doctor_drift_settings_unreadable_lists_all_rules(self):
         (self.base / ".claude" / "settings.json").write_text("{", encoding="utf-8")
         rc, doc = self.drift("--latest", "v0.0.1")

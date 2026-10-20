@@ -1645,7 +1645,7 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
         self.assertEqual(xt.plan_bad_links([{"id": "T-9"}]), {})
         nxt = json.loads(self.run_main("loop", "next", "--json")[1])
         self.assertEqual(nxt["bad_links"], {"T-001": ["sau: T-1"]})
-        self.assertEqual([r["id"] for r in nxt["ready"]], ["T-001", "T-002"])  # chỉ cảnh báo
+        self.assertEqual([r["id"] for r in nxt["ready"]], ["T-002"])  # fail-closed: T-001 không ready (review173b)
         self.assertEqual(json.loads(self.run_main("loop", "status", "--json")[1])["bad_links"], {"T-001": ["sau: T-1"]})
         for cmd in ("next", "status"):
             with self.subTest(cmd=cmd):
@@ -1653,6 +1653,33 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
         write(self.base / "docs" / "autopilot" / "PLAN.md", "- [ ] `T-001` a (sau: T-002)\n- [x] `T-002` b\n")
         self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["bad_links"], {})
         self.assertNotIn("không đọc được", self.run_main("loop", "status")[1])
+
+    def test_review173b_bad_links_fail_closed(self):
+        """Review delta PR #173: task có ghi chú `sau:`/`files:` không đọc được (ngoặc chưa đóng, thiếu `:`, viết hoa) →
+        không `ready` ở `loop next`, `loop record` từ chối kèm lý do, cho tới khi PLAN sửa."""
+        self.assertEqual(xt.plan_link_problems("(SAU: T-001)"), ["SAU: T-001"])
+        self.assertEqual(xt.plan_link_problems("(sau T-001)"), ["sau T-001"])
+        self.assertEqual(xt.plan_link_problems("(Files: a.py; sau: T-001)"), ["Files: a.py; sau: T-001"])
+        self.assertEqual(xt.plan_link_problems("(làm sau; files: a.py)"), [])  # chữ `sau` thường không phải khoá
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        write(
+            plan,
+            "- [ ] `T-001` a — Gate: `true`\n- [ ] `T-002` b (sau T-001) — Gate: `true`\n"
+            "- [ ] `T-003` c (sau: T-001; files: a — Gate: `true`\n- [ ] `T-004` d (files: d.py) — Gate: `true`\n",
+        )
+        nxt = json.loads(self.run_main("loop", "next", "--json")[1])
+        self.assertEqual([r["id"] for r in nxt["ready"]], ["T-001", "T-004"])
+        self.assertEqual(sorted(nxt["bad_links"]), ["T-002", "T-003"])
+        self.assertIn("không ready, `loop record` từ chối", self.run_main("loop", "next")[1])
+        for task in ("T-002", "T-003"):
+            with self.subTest(task=task):
+                rc, _, err = self.run_main("loop", "record", "--task", task, "--", "true")
+                self.assertEqual(rc, 2)
+                self.assertIn(f"{task} có ghi chú `sau:`/`files:` không đọc được", err)
+                self.assertFalse((self.base / ".autopilot" / "evidence" / f"{task}.json").exists())
+        self.assertEqual(self.run_main("loop", "record", "--task", "T-004", "--", "true")[0], 0)
+        write(plan, "- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b (sau: T-001) — Gate: `true`\n")
+        self.assertEqual(self.run_main("loop", "record", "--task", "T-002", "--", "true")[0], 0)  # PLAN sửa → nhận
 
     def test_review173_path_overlap_normalised_and_glob(self):
         self.assertTrue(xt._path_overlap("./src/a.py", "src/"))
