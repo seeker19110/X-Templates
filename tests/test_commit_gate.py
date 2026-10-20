@@ -44,6 +44,25 @@ class CommitGateKeyTest(unittest.TestCase):
             self.assertFalse([f for f in xt._doctor_xt_yaml(self.base, self.base) if f.level == "error"], value)
             self.assertEqual(run_main("ci-check")[0], 0, value)
 
+    def test_commit_gate_cli_reads_like_doctor(self):
+        """AUD-XFEAT-017: `xt.py commit-gate` (hook gọi) đọc khoá như `doctor`: dòng cuối thắng, `#` dính liền thuộc giá
+        trị; chỉ đúng `fast` mới là fast, còn lại (vắng, full, lạ) → full."""
+        cases = {
+            "": "full",
+            "commit_gate: fast\n": "fast",
+            "commit_gate: 'fast'  # x\n": "fast",
+            "commit_gate: full\ncommit_gate: fast\n": "fast",
+            "commit_gate: fast\ncommit_gate: full\n": "full",
+            "commit_gate: fast#x\n": "full",
+            "commit_gate: Fast\n": "full",
+        }
+        for text, want in cases.items():
+            with self.subTest(text=text):
+                (self.base / "xt.yaml").write_text(text, encoding="utf-8")
+                self.assertEqual(run_main("commit-gate"), (0, want + "\n", ""))
+        (self.base / "xt.yaml").unlink()
+        self.assertEqual(run_main("commit-gate")[1], "full\n")
+
 
 class TestSelectTest(unittest.TestCase):
     """Ánh xạ file đổi → file test: chính file test, `test_<tên>.py`, test nhắc tên file, test quét theo đuôi; còn lại
