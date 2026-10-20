@@ -227,7 +227,7 @@ class FrontmatterTest(unittest.TestCase):
 
 class ValidateTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.fw = make_framework(self.tmp)
 
     def test_valid_fixture(self):
@@ -308,7 +308,7 @@ class ValidateTest(unittest.TestCase):
 
 class ComposeTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.fw = make_framework(self.tmp)
 
     def test_compose_web_fintech_scale_m(self):
@@ -446,7 +446,7 @@ class ComposeTest(unittest.TestCase):
 
 class LoopTest(unittest.TestCase):
     def setUp(self):
-        self.base = Path(tempfile.mkdtemp())
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         write(
             self.base / "docs" / "autopilot" / "PLAN.md",
             """
@@ -882,7 +882,7 @@ class AuditRegressionTest(unittest.TestCase):
     """Lỗi tái hiện khi dogfood khung trên chính repo (2026-10-14)."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.fw = make_framework(self.tmp)
 
     def cli(self, *args, env=None) -> subprocess.CompletedProcess:
@@ -1755,7 +1755,7 @@ class EssentialNotCappedTest(unittest.TestCase):
     """ADR-0030 (REC-05): mục `essential` không bị trần MUST ở M khi fact bật; S/L và ghép không fact không đổi."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.fw = make_framework(self.tmp)
         write(self.fw / "08-backend" / "authx.md", AUTHX_MODULE)
 

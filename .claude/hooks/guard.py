@@ -3041,10 +3041,25 @@ def _dir_holds_gate(rel: str, root: str) -> bool:
     """Đích là THƯ MỤC chứa file cổng (`cp x .claude/hooks/`, `rm -rf .claude`, `mv scripts …`) — reviewer #60."""
     if classify_path(rel + "/_") == "gate" or any(p.startswith(rel + "/") for p in GATE_PATTERNS):
         return True
+    if os.path.isabs(rel):  # ngoài gốc dự án (`mv x /tmp`): không liệt kê cả thư mục (/tmp ≈ 20k mục, D-097)
+        return any(classify_path(f"{rel}/{n}") == "gate" and os.path.lexists(f"{rel}/{n}") for n in _gate_names(rel))
     d, names = os.path.join(root, rel), []
     with contextlib.suppress(OSError):  # không đọc được thư mục → coi như không chứa file cổng
         names = os.listdir(d) if os.path.isdir(d) and not os.path.islink(d) else []
     return any(classify_path(f"{rel}/{name}") == "gate" for name in names)
+
+
+def _gate_names(rel: str) -> List[str]:
+    """Tên file cổng đích danh có thể nằm ngay trong thư mục `rel`: mẫu chữ (không `*?[`) có phần thư mục khớp đuôi
+    `rel` — `Makefile`, `pyproject.toml` ở mọi nơi; `settings.json` trong `~/.claude`; `dependabot.yml` trong `.github`."""
+    names = []
+    for pat in GATE_PATTERNS:
+        if any(c in pat for c in "*?["):
+            continue
+        head, _, name = pat.rpartition("/")
+        if not head or (rel + "/").endswith("/" + head + "/"):
+            names.append(name)
+    return names
 
 
 def _existing_test(target: str, root: str) -> bool:

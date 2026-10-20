@@ -22,7 +22,7 @@ import xt
 
 class InstallTest(unittest.TestCase):
     def setUp(self):
-        self.target = Path(tempfile.mkdtemp())
+        self.target = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
     def run_install(self, *extra) -> int:
         return install.main([str(self.target), "--label", "test", *extra])
@@ -104,9 +104,10 @@ class InstallTest(unittest.TestCase):
 
     def test_check_links_fence_angle_and_outside_root(self):
         # AUD-DOC-019: ~~~ fence, link <có dấu cách>, link ra ngoài gốc repo.
-        repo = Path(tempfile.mkdtemp())
+        repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
         outside = repo.parent / (repo.name + "-ngoai.md")
         outside.write_text("x", encoding="utf-8")
+        self.addCleanup(outside.unlink)
         (repo / "có dấu cách.md").write_text("x", encoding="utf-8")
         (repo / "a.md").write_text(
             "~~~\n[x](khong-co.md)\n~~~\n[ok](<có dấu cách.md>)\n[hỏng](<không có.md>)\n[ngoài](../"
@@ -209,7 +210,7 @@ class InstallTest(unittest.TestCase):
 
     def test_install_symlink_not_followed(self):
         # AUD-HAR-010: symlink treo ở đích không được đi theo ra ngoài dự án.
-        outside = Path(tempfile.mkdtemp())
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.target / "CLAUDE.md").symlink_to(outside / "pwn.md")
         self.run_install()
         self.assertFalse((outside / "pwn.md").exists())
@@ -875,7 +876,7 @@ class CheckLinksTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
 
     def test_detects_broken(self):
-        tmp = Path(tempfile.mkdtemp())
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tmp / "a.md").write_text(
             "[x](b.md) [ok](#h) [url](https://x) `[no](c.md)`\n```\n[in-fence](d.md)\n```\n", encoding="utf-8"
         )
