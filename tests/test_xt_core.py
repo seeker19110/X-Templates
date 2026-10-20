@@ -1067,12 +1067,12 @@ def real_autopilot_dirs() -> list[Path]:
 
 
 def autopilot_snapshot(dirs: list[Path]) -> dict:
-    """{đường dẫn: (mtime_ns, cỡ)} của mọi file trong `dirs` — so trước/sau để bắt test ghi vào sổ thật. Bỏ
-    `pycache/` (cache bytecode của hook, `_lib.sh` — hook chạy trong lúc test được phép ghi, không phải sổ)."""
+    """{đường dẫn: (mtime_ns, cỡ)} của mọi file trong `dirs` — so trước/sau để bắt test ghi vào sổ thật (hook không còn
+    cache bytecode ở `.autopilot/pycache` — review PR #182 — nên không bỏ qua thư mục nào)."""
     snap: dict = {}
     for d in dirs:
         for p in d.rglob("*") if d.exists() else ():
-            if p.is_file() and "pycache" not in p.relative_to(d).parts:
+            if p.is_file():
                 st = p.stat()
                 snap[str(p)] = (st.st_mtime_ns, st.st_size)
     return snap
@@ -1106,8 +1106,10 @@ class RealAutopilotGuardTest(TmpMixin, unittest.TestCase):
         before = autopilot_snapshot([d])
         (d / "evidence").mkdir(parents=True)
         write(d / "evidence" / "T-002.json", "{}")
-        write(d / "pycache" / "x.pyc", "b")  # cache bytecode của hook: không tính
-        self.assertEqual(autopilot_changes(before, [d]), [str(d / "evidence" / "T-002.json")])
+        write(d / "pycache" / "x.pyc", "b")  # hook không còn cache bytecode: file ở đây cũng tính
+        self.assertEqual(
+            autopilot_changes(before, [d]), [str(d / "evidence" / "T-002.json"), str(d / "pycache" / "x.pyc")]
+        )
         before = autopilot_snapshot([d])
         self.assertEqual(autopilot_changes(before, [d]), [])
         write(d / "runs.jsonl", "{}\n")

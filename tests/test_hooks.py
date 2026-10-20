@@ -1684,8 +1684,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
     """Merge ghim head qua Bash/REST/MCP được allow; thiếu ghim, cờ lạ, repo khác → hỏi; `merge_check` thật."""
 
     def test_merge_check_real_subprocess(self):
-        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly, cache trong `.autopilot/` của dự
-        án — AUD-SEC-065): các ca khác thay nó bằng `merge_check_inproc` — ca này giữ đường thật và nhánh lỗi."""
+        """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly — AUD-SEC-065, không cache
+        bytecode — review PR #182): các ca khác thay nó bằng `merge_check_inproc` — ca này giữ đường thật và nhánh lỗi."""
         cache = self.proj / "cache"
         env = {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj), "PYTHONPYCACHEPREFIX": str(cache)}
         with mock.patch.dict(os.environ, env):
@@ -1693,7 +1693,7 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             self.assertFalse((self.proj / ".autopilot").exists())  # chưa có .autopilot/: không ghi bytecode (-B)
             (self.proj / ".autopilot").mkdir()
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["verdict"], "merge")
-            self.assertTrue(list((self.proj / ".autopilot" / "pycache").rglob("xt*.pyc")))
+            self.assertFalse((self.proj / ".autopilot" / "pycache").exists())  # không cache bytecode (review PR #182)
             self.assertFalse(cache.exists())  # PYTHONPYCACHEPREFIX của môi trường bị bỏ qua
             self.fake_gh(None)
             self.assertEqual(self.guard.merge_check(["7"], str(self.proj))["reasons"], ["merge-check không chạy được"])
@@ -2542,8 +2542,8 @@ class MergeHookFailClosedTest(unittest.TestCase):
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class HookRunnerTest(unittest.TestCase):
-    """Hook gọi guard.py/xt.py bằng import (bytecode cache) và đọc kết quả `nul` một lần — không đẻ `__pycache__` trong
-    dự án đích, kết quả giữ nguyên ký tự xuống dòng/tiếng Việt."""
+    """Hook gọi guard.py/xt.py bằng import (biên dịch từ nguồn, không cache bytecode) và đọc kết quả `nul` một lần —
+    không đẻ `__pycache__` trong dự án đích, kết quả giữ nguyên ký tự xuống dòng/tiếng Việt."""
 
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -2554,7 +2554,7 @@ class HookRunnerTest(unittest.TestCase):
         self.env.update(CLAUDE_PROJECT_DIR=str(self.tmp), XDG_CACHE_HOME=str(self.cache), XT_GUARD_POLICY="")
 
     def test_nul_fields_and_no_pycache_in_project(self):
-        (self.tmp / ".autopilot").mkdir()  # cache bytecode chỉ khi .autopilot/ đã có (đã ignore)
+        (self.tmp / ".autopilot").mkdir()  # có .autopilot/ cũng không ghi bytecode vào đó (review PR #182)
         r = subprocess.run(
             ["bash", str(self.hooks / "pre-bash-guard.sh")],
             input=json.dumps({"tool_input": {"command": "sudo ls"}}),
@@ -2565,7 +2565,7 @@ class HookRunnerTest(unittest.TestCase):
         )
         self.assertEqual(decision(r.stdout), "deny", r.stderr)
         self.assertFalse((self.hooks / "__pycache__").exists())
-        self.assertTrue(list((self.tmp / ".autopilot" / "pycache").rglob("guard*.pyc")))  # AUD-SEC-065
+        self.assertEqual(list((self.tmp / ".autopilot").iterdir()), [])  # AUD-SEC-065/074
         self.assertFalse((self.cache / "xtemplates").exists())  # không cache ở chỗ agent ghi được
 
     def test_guard_fields_reads_every_field(self):

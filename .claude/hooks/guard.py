@@ -1280,51 +1280,30 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
-# Bộ nạp của `py_run` (_lib.sh — giữ GIỐNG HỆT, test so): chạy `main()` của file .py với bytecode cache tự quản (chạy
-# như script thì biên dịch lại ~4.000 dòng mỗi lần). Đối số: <thư mục cache hoặc ""> <file.py> <đối số…>. Chạy với
-# `-I -B`: cách ly (bỏ PYTHON*, user-site, cwd — AUD-SEC-065) và Python KHÔNG đọc/ghi cache của nó ở chỗ agent ghi được
-# (`-X pycache_prefix` cũ làm cả pyc thư viện chuẩn nằm trong `.autopilot/`). Cache riêng chỉ tin pyc checked-hash khớp
-# mã nguồn hiện tại (AUD-SEC-074: pyc giả khớp mtime/size, pyc unchecked-hash, pyc biên dịch từ mã khác → bỏ, biên dịch
-# lại); ghi qua file tạm + `os.replace`. Không có cache/không ghi được → chỉ chậm như cũ.
-PY_LOADER = """import sys, os, marshal, importlib.util as u
-c, p = sys.argv[1], sys.argv[2]
+# Bộ nạp của `py_run` (_lib.sh — giữ GIỐNG HỆT, test so): chạy `main()` của file .py như một module (sys.path[0] = thư
+# mục của file, không lấy cwd). Đối số: <file.py> <đối số…>. Chạy với `-I -B`: cách ly (bỏ PYTHON*, user-site, cwd —
+# AUD-SEC-065) và Python không đọc/ghi bytecode ở chỗ agent ghi được. Bộ nạp KHÔNG cache bytecode: biên dịch từ nguồn
+# mỗi lần. Thư mục agent ghi được không thể tin — header pyc (checked-hash) tính được từ mã nguồn công khai còn phần
+# marshal thì không ai kiểm, nên pyc giả khớp header vẫn chạy thay guard (AUD-SEC-074, review PR #182). Đo: thêm
+# ~80–100 ms mỗi lần gọi `pre-bash-guard.sh` (guard.py ~4.900 dòng).
+PY_LOADER = """import sys
+p = sys.argv[1]
 d, _, f = p.rpartition("/")
 sys.path.insert(0, d or ".")
-src = open(p, "rb").read()
-h = u.MAGIC_NUMBER + b"\\3\\0\\0\\0" + u.source_hash(src)
-pyc = c and os.path.join(c, os.path.abspath(p).lstrip("/") + "." + sys.implementation.cache_tag + ".pyc")
-code = None
-try:
-    b = open(pyc, "rb").read() if pyc else b""
-    code = marshal.loads(b[16:]) if len(b) > 16 and b[:16] == h else None
-except Exception:
-    pass
-if code is None:
-    code = compile(src, p, "exec", dont_inherit=True)
-    try:
-        if pyc:
-            os.makedirs(os.path.dirname(pyc), exist_ok=True)
-            t = "%s.%d.tmp" % (pyc, os.getpid())
-            with open(t, "wb") as w:
-                w.write(h + marshal.dumps(code))
-            os.replace(t, pyc)
-    except Exception:
-        pass
+code = compile(open(p, "rb").read(), p, "exec", dont_inherit=True)
 m = type(sys)(f[:-3])
 m.__file__ = p
 sys.modules[m.__name__] = m
-sys.argv = sys.argv[2:]
+sys.argv = sys.argv[1:]
 exec(code, m.__dict__)
 sys.exit(m.main())
 """
 
 
-def isolated_python(root: str) -> List[str]:
+def isolated_python() -> List[str]:
     """Đầu lệnh python chạy `main()` của một file cho tiến trình con của guard — như `py_run` của _lib.sh: cách ly,
-    cache bytecode checked-hash trong `.autopilot/pycache` khi thư mục `.autopilot/` đã có (chưa có: không cache)."""
-    autopilot = os.path.join(root, ".autopilot")
-    cache = os.path.join(autopilot, "pycache") if os.path.isdir(autopilot) else ""
-    return [sys.executable, "-I", "-B", "-c", PY_LOADER, cache]
+    biên dịch từ nguồn (không cache bytecode)."""
+    return [sys.executable, "-I", "-B", "-c", PY_LOADER]
 
 
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
@@ -1339,7 +1318,7 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
         "",
     )
     cmd = [
-        *isolated_python(root),
+        *isolated_python(),
         xt,
         "merge-check",
         "--json",
@@ -2970,7 +2949,7 @@ PYCACHE_ENV_RE = re.compile(r"PYTHONPYCACHEPREFIX=(.+)")
 def _checkout_index_targets(args: List[str]) -> List[str]:
     """`git checkout-index [--prefix=P] [path…]` ghi `P` + đường dẫn trong chỉ mục (nối CHUỖI, không nối thư mục):
     đích là P, từng P+path, và `.autopilot` khi P là tiền tố chữ của nó (`--prefix=.auto` + path `pilot/…`) — AUD-SEC-074
-    (`--prefix=.autopilot/pycache/` từng ghi pyc giả mà guard không thấy)."""
+    (`--prefix=.autopilot/…` từng ghi file vào vùng rào mà guard không thấy)."""
     vals = _flag_values(args, ("--prefix",))
     prefix = vals[-1] if vals else ""
     pos = _positionals(args, ("--prefix",))
@@ -2988,7 +2967,8 @@ GIT_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
 
 def _pycache_targets(n: List[str], argv: List[str]) -> List[str]:
     """Thư mục bytecode mà Python sẽ ghi: `-X pycache_prefix=P`/`-Xpycache_prefix=P`, `PYTHONPYCACHEPREFIX=P` (gán đầu
-    lệnh, `env`, `export`) — AUD-SEC-074: cache bytecode của hook nằm trong `.autopilot/`."""
+    lệnh, `env`, `export`) — AUD-SEC-074. Hook không còn nạp bytecode từ cache (review PR #182) nên đây chỉ là một
+    đường ghi file như mọi đường khác: prefix trỏ vào vùng rào (`.autopilot/`, hook, cổng) vẫn là ghi tay vào đó."""
     out = [m.group(1) for t in argv if (m := PYCACHE_ENV_RE.fullmatch(t))]
     if n and INTERP_RE.fullmatch(n[0]):
         xs = [n[i + 1] for i, a in enumerate(n[:-1]) if a == "-X"] + [a[2:] for a in n if a.startswith("-X")]
@@ -4503,7 +4483,6 @@ def _is_secret_file(path: str, root: str) -> bool:
 # `host:`, `u@h:path` của scp/rsync, URL `scp://`/`sftp://`/`rsync://` (review #159).
 REMOTE_SPEC_RE = re.compile(r"(?:[\w.-]+@)?[\w.-]+:(?!//)|(?:scp|sftp|rsync)://")
 STREAM_SENDERS = {"nc", "ncat", "netcat", "socat", "telnet", "ssh"}
-GH_UPLOADS = (("gist", "create"), ("gist", "edit"), ("release", "upload"))
 NET_REDIRECT_RE = re.compile(r"/dev/(?:tcp|udp)/")
 
 
@@ -4512,8 +4491,21 @@ def _redirect_targets(args: List[str], ops: Tuple[str, ...]) -> List[str]:
 
 
 # Tuỳ chọn `gh` ăn một giá trị không phải file gửi đi (`gh -R o/r release upload …` — AUD-SEC-075: `o/r` từng bị coi là
-# lệnh con nên `release upload` không được nhận ra).
-GH_UPLOAD_VALUE_OPTS = ("-R", "--repo", "--hostname", "-d", "--desc", "-f", "--filename")
+# lệnh con nên `release upload` không được nhận ra). Theo lệnh con: `-d` của gist là mô tả, của release là `--draft`.
+GH_GLOBAL_VALUE_OPTS = ("-R", "--repo", "--hostname")
+# Lệnh con tải file (đối số vị trí sau `<nhóm> <lệnh>`) → tuỳ chọn ăn giá trị của nó (review PR #182: `release create`).
+GH_UPLOADS: Dict[Tuple[str, ...], Tuple[str, ...]] = {
+    ("gist", "create"): ("-d", "--desc", "-f", "--filename"),
+    ("gist", "edit"): ("-d", "--desc", "-f", "--filename"),
+    ("release", "upload"): (),
+    ("release", "create"): (
+        *("-t", "--title", "-n", "--notes", "-F", "--notes-file", "--target", "--discussion-category"),
+        "--notes-start-tag",
+    ),
+}
+GH_UPLOAD_VALUE_OPTS = (*GH_GLOBAL_VALUE_OPTS, *{o for v in GH_UPLOADS.values() for o in v})
+# Cờ `gh` đọc file để đăng (`--body-file`/`--notes-file`/`-F` của issue/pr/release; `-F k=@f` của `workflow run`).
+GH_FILE_FLAGS = ("--body-file", "--notes-file", "-F")
 
 
 def _gh_api_files(args: List[str]) -> List[str]:
@@ -4532,16 +4524,34 @@ def _gh_api_files(args: List[str]) -> List[str]:
     return out
 
 
+def _gh_flag_files(args: List[str]) -> List[str]:
+    """Giá trị của cờ đọc file (`GH_FILE_FLAGS`) ở mọi dạng: `--body-file f`, `--body-file=f`, `-F f`, `-Ff`, `-F=f`
+    (review PR #182); giá trị `k=@f` thêm cả `f`."""
+    out: List[str] = []
+    for i, a in enumerate(args):
+        if a in GH_FILE_FLAGS:
+            val = args[i + 1] if i + 1 < len(args) else ""
+        elif a.startswith("--") and a.split("=", 1)[0] in GH_FILE_FLAGS and "=" in a:
+            val = a.split("=", 1)[1]
+        elif a[:2] == "-F" and len(a) > 2:
+            val = a[3:] if a[2] == "=" else a[2:]
+        else:
+            continue
+        out += [val, val.split("@", 1)[1]] if "=@" in val else [val]
+    return out
+
+
 def _gh_upload_files(args: List[str]) -> List[str]:
-    """File `gh` đăng lên GitHub: `gh gist create|edit` (không file hoặc `-` = stdin), `gh release upload`, `gh api -F
-    k=@f`/`--input f`, `--body-file`/`-F` của issue/pr."""
-    pos = _positionals(args, GH_UPLOAD_VALUE_OPTS)
-    if pos[:1] == ["api"]:
+    """File `gh` đăng lên GitHub: `gh gist create|edit` (không file hoặc `-` = stdin), `gh release upload|create`
+    (bỏ hậu tố `#nhãn` của tài sản — review PR #182), `gh api -F k=@f`/`--input f`, cờ đọc file (`_gh_flag_files`)."""
+    head = tuple(_positionals(args, GH_UPLOAD_VALUE_OPTS)[:2])
+    if head[:1] == ("api",):
         return _gh_api_files(args)
-    files = pos[2:] if tuple(pos[:2]) in GH_UPLOADS else []
-    if tuple(pos[:2]) == ("gist", "create") and (not files or "-" in args):  # `cat .env | gh gist create` (AUD-SEC-075)
+    opts = GH_UPLOADS.get(head)
+    files = [] if opts is None else [f.split("#", 1)[0] for f in _positionals(args, (*GH_GLOBAL_VALUE_OPTS, *opts))[2:]]
+    if head == ("gist", "create") and (not files or "-" in args):  # `cat .env | gh gist create` (AUD-SEC-075)
         files.append("-")
-    return files + [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--body-file", "-F")]
+    return files + _gh_flag_files(args)
 
 
 # Tuỳ chọn ăn một giá trị (giá trị không phải file gửi đi: `scp -i key.pem`, `rsync -e "ssh -i k"`, `--exclude .env`).
@@ -4574,14 +4584,39 @@ def _copy_files(n: List[str]) -> Optional[List[str]]:
 NET_WRITE_OPS = (">", ">>", ">|", "&>", "<>")  # `<>` mở socket hai chiều (`exec 3<>/dev/tcp/h/80` — AUD-SEC-075)
 
 
+FD_VAR_RE = re.compile(r"\{([A-Za-z_]\w*)\}")  # `exec {fd}<>/dev/tcp/…`: bash cấp số fd, lưu vào biến `fd`
+DEV_FD_RE = re.compile(r"/dev/fd/(\d+)")
+
+
+def _net_fd_names(prev: str, op: str) -> Set[str]:
+    m = FD_VAR_RE.fullmatch(prev)
+    if m:
+        return {f"${m.group(1)}", f"${{{m.group(1)}}}"}
+    return {prev if prev.isdigit() else ("0" if op == "<>" else "1")}
+
+
 def _net_fds(tokens: List[str]) -> Set[str]:
-    """Số fd mở tới `/dev/tcp|udp/…` ở bất kỳ lệnh nào trong chuỗi (`exec 3<>/dev/tcp/h/80`, `3>/dev/tcp/…`): lệnh sau
-    ghi `>&3` là gửi ra mạng (AUD-SEC-075)."""
+    """Tên fd mở tới `/dev/tcp|udp/…` ở bất kỳ lệnh nào trong chuỗi (`exec 3<>/dev/tcp/h/80`, `3>/dev/tcp/…`, `exec
+    {fd}<>/dev/tcp/…` → `$fd`/`${fd}`): lệnh sau ghi `>&3`, `>&$fd`, `>/dev/fd/3` là gửi ra mạng (AUD-SEC-075)."""
     return {
-        tokens[i - 1] if i and tokens[i - 1].isdigit() else ("0" if t == "<>" else "1")
+        name
         for i, t in enumerate(tokens[:-1])
         if t in NET_WRITE_OPS and NET_REDIRECT_RE.match(tokens[i + 1])
+        for name in _net_fd_names(tokens[i - 1] if i else "", t)
     }
+
+
+def _fd_ref(target: str) -> str:
+    """Đích chuyển hướng quy về tên fd: `/dev/fd/3` → `3` (cùng fd với `>&3`)."""
+    m = DEV_FD_RE.fullmatch(target)
+    return m.group(1) if m else target
+
+
+def _subst_secrets(args: List[str], root: str) -> List[str]:
+    """File bí mật đọc trong thay lệnh của đối số (`printf %s "$(cat .env)" >/dev/tcp/…`, `curl -d "\\`cat .env\\`"`)."""
+    line = " ".join(args)  # thay lệnh không nháy bị tách thành nhiều token (`` echo `cat .env` ``)
+    bodies = [sp[2] for sp in (*_dollar_spans(line), *_backtick_spans(line))] if "$(" in line or "`" in line else []
+    return [w for body in bodies for w in tokenize(body) if _is_secret_file(w, root)]
 
 
 def _socat_files(n: List[str]) -> List[str]:
@@ -4605,7 +4640,7 @@ def _net_files(c: List[str], n: List[str], net_fds: Optional[Set[str]] = None) -
         return ["-", *_redirect_targets(args, ("<",)), *[a.split(":", 1)[1] for a in n[1:] if ":" in a]]
     if n[0] == "gh":
         return _gh_upload_files(n[1:]) or None
-    to_fd = [t for t in _redirect_targets(args, (">&", "&>", ">")) if t in (net_fds or set())]
+    to_fd = [t for t in _redirect_targets(args, (">&", "&>", ">", ">>")) if _fd_ref(t) in (net_fds or set())]
     if to_fd or any(NET_REDIRECT_RE.match(t) for t in _redirect_targets(args, NET_WRITE_OPS)):
         return ["-", *_positionals(n[1:]), *_redirect_targets(args, ("<",))]
     return None
@@ -4623,6 +4658,7 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
             if files is None:
                 continue
             leaked = [f for f in files if _is_secret_file(f, root) and not f.endswith(".pub")]  # khoá công khai
+            leaked += _subst_secrets(c[1:], root)
             if not leaked and "-" in files:  # đọc stdin: xem lệnh phía trước trong ống
                 for up in group[:i]:
                     head = posixpath.basename(up[0]) if up else ""

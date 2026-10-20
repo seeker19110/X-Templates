@@ -12,48 +12,25 @@ xt_py() {
   return 1
 }
 
-# Chạy file Python của khung bằng `import` thay vì như script: script chính không được cache bytecode nên Python biên
-# dịch lại mỗi lần (guard.py ~25 ms, xt.py ~50 ms — trả ở MỌI lệnh Bash/Edit). sys.path[0] = thư mục của file như khi
-# chạy script (không lấy cwd). `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở
-# đó không chạy trước guard (AUD-SEC-065). `-B`: Python không ghi bytecode (không đẻ `__pycache__` cạnh hook); cache do
-# bộ nạp tự quản ở `.autopilot/pycache` của dự án, chỉ khi `.autopilot/` đã có (install/doctor đã ignore nó — review
-# #159), và CHỈ tin pyc checked-hash khớp mã nguồn hiện tại: pyc giả khớp mtime/size hay biên dịch từ mã khác bị bỏ
-# (AUD-SEC-074); thư viện chuẩn không còn nạp bytecode từ thư mục agent ghi được. Bộ nạp giống hệt `PY_LOADER` của
-# guard.py (test so). Thư mục cache không ghi được thì bỏ qua (chỉ chậm như cũ).
+# Chạy file Python của khung như module (`main()`), sys.path[0] = thư mục của file như khi chạy script (không lấy cwd).
+# `-I` (cách ly): bỏ biến PYTHON*, user-site (`usercustomize.py`) và cwd — mã agent đặt ở đó không chạy trước guard
+# (AUD-SEC-065). `-B`: Python không ghi bytecode (không đẻ `__pycache__` cạnh hook). KHÔNG cache bytecode: biên dịch từ
+# nguồn mỗi lần — thư mục agent ghi được không thể tin (header pyc checked-hash tính được từ nguồn công khai, phần
+# marshal không ai kiểm — AUD-SEC-074, review PR #182); đổi lại thêm ~80–100 ms mỗi lệnh Bash. Bộ nạp giống hệt
+# `PY_LOADER` của guard.py (test so).
 py_run() { # $1=đường dẫn .py (có main()) $2…=đối số
-  local cache=""
-  [ -d "$XT_ROOT/.autopilot" ] && cache="$XT_ROOT/.autopilot/pycache"
-  python3 -I -B -c 'import sys, os, marshal, importlib.util as u
-c, p = sys.argv[1], sys.argv[2]
+  python3 -I -B -c 'import sys
+p = sys.argv[1]
 d, _, f = p.rpartition("/")
 sys.path.insert(0, d or ".")
-src = open(p, "rb").read()
-h = u.MAGIC_NUMBER + b"\3\0\0\0" + u.source_hash(src)
-pyc = c and os.path.join(c, os.path.abspath(p).lstrip("/") + "." + sys.implementation.cache_tag + ".pyc")
-code = None
-try:
-    b = open(pyc, "rb").read() if pyc else b""
-    code = marshal.loads(b[16:]) if len(b) > 16 and b[:16] == h else None
-except Exception:
-    pass
-if code is None:
-    code = compile(src, p, "exec", dont_inherit=True)
-    try:
-        if pyc:
-            os.makedirs(os.path.dirname(pyc), exist_ok=True)
-            t = "%s.%d.tmp" % (pyc, os.getpid())
-            with open(t, "wb") as w:
-                w.write(h + marshal.dumps(code))
-            os.replace(t, pyc)
-    except Exception:
-        pass
+code = compile(open(p, "rb").read(), p, "exec", dont_inherit=True)
 m = type(sys)(f[:-3])
 m.__file__ = p
 sys.modules[m.__name__] = m
-sys.argv = sys.argv[2:]
+sys.argv = sys.argv[1:]
 exec(code, m.__dict__)
 sys.exit(m.main())
-' "$cache" "$@"
+' "$@"
 }
 
 # Chạy guard.py một lần, đặt XG_DECISION XG_REASON XG_COMMIT XG_NO_VERIFY XG_COMMIT_DIR (định dạng `nul` của guard.py) — không
