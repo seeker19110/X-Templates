@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-10-20
+
+**Dự án đích: chạy lại `install.py`** (PLAN-3.12-lean: tài liệu vận hành một nhà, harness ít lượt hơn, `install.py` cập nhật file gốc tại chỗ khi chưa sửa và in các bước "Dự án đích" từ bản đã cài; mẫu `xt.yaml` 3 KB — khoá mới nối vào `xt.yaml` của dự án dạng chú thích).
+
 ### Added
 - `xt.py license-check` (`BASE-DEP-005`, AUD-DEP-004/AUD-HAR-079): chỉ thư viện chuẩn — đọc license gói đã cài (`importlib.metadata`: `License-Expression` > `License` ngắn > classifier đổi sang SPDX) của mọi gói ghim `==` trong `requirements-dev.txt` (`--requirements` lặp được), đối chiếu allowlist `license-allow.json` (SPDX cho phép + ngoại lệ có `approved_by`/`expires`, chỉ khớp đúng license đã duyệt: pathspec, certifi — MPL-2.0); `OR` cần một nhánh được, `AND`/có ngoặc cần mọi định danh được; vi phạm, gói ghim không marker mà chưa cài, ngoại lệ quá hạn → exit 1; allowlist/requirements hỏng → exit 2. Thêm vào `lint` của `xt.yaml` (~0,4 s; job CI `lint` đã cài `requirements-dev.txt`). `BLUEPRINT.md`: `BASE-DEP-005`, `BASE-DOC-004` tick kèm `— Kiểm:`. Test `tests/test_license_check.py`. Dự án đích: không bắt buộc (lệnh có trong `xt.py` mới; cần `license-allow.json` riêng).
 - Runbook `pr-steward` [`docs/ops/RUNBOOK-PR-STEWARD.md`](docs/ops/RUNBOOK-PR-STEWARD.md) (`BASE-DOC-004`, AUD-HAR-072): steward làm gì/khi nào chạy, triệu chứng (PR treo, auto-merge không bật, thiếu `XT_STEWARD_TOKEN`) chẩn đoán bằng `pr next`/`pr steward`, tắt khẩn và khôi phục. Bảng license mọi gói kể cả bắc cầu của `requirements-dev.txt` và `requirements-audit.txt` ở [`docs/ops/DEPENDENCIES.md`](docs/ops/DEPENDENCIES.md) (`BASE-DEP-005`, AUD-DEP-004), xác minh 2026-10-20.
