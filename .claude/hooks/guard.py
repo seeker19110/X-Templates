@@ -34,7 +34,7 @@ import urllib.parse
 import sys
 import tempfile
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
@@ -798,11 +798,17 @@ SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "while", "until",
 
 
 def _strip_prefixes(argv: List[str]) -> List[str]:
-    """Bỏ từ khoá shell, gán biến đầu lệnh và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật."""
+    """Bỏ từ khoá shell, gán biến đầu lệnh, chuyển hướng đặt đầu lệnh (`2>/dev/null cd x`, `>/dev/null rm …` — review
+    #186) và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật. Đích của chuyển hướng vẫn được
+    `write_targets` đọc từ argv gốc."""
     a = list(argv)
     while a:
         head = a[0]
-        if head in SHELL_KEYWORDS:
+        if _is_redirect(head):
+            del a[:2]  # toán tử + đích
+        elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
+            a.pop(0)  # số fd (`2>`)
+        elif head in SHELL_KEYWORDS:
             a.pop(0)
         elif ENV_ASSIGN_RE.fullmatch(head):
             a.pop(0)
@@ -869,12 +875,14 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
     return gdir
 
 
-CD_FLAGS = ("-P", "-L", "-e", "-@")  # cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088)
+# Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
+CD_FLAG_RE = re.compile(r"-[LPe@]+")
 
 
 def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
     """(đối số, có `--`) của `cd`/`pushd` sau khi bỏ chuyển hướng (`2>/dev/null` tách thành `2`, `>`, `/dev/null`;
-    `>&1`) và cờ `-P`/`-L`/`-e`/`-@` đứng trước `--` (AUD-SEC-088). Cờ lạ giữ lại để bên gọi coi là không biết."""
+    `>&1`) và cờ `-P`/`-L`/`-e`/`-@` (cả ghép `-LP`) đứng trước `--` (AUD-SEC-088). Cờ lạ giữ lại để bên gọi coi là
+    không biết."""
     plain: List[str] = []
     i = 0
     while i < len(args):
@@ -886,38 +894,53 @@ def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
             plain.append(args[i])
             i += 1
     j = 0
-    while j < len(plain) and plain[j] in CD_FLAGS:
+    while j < len(plain) and CD_FLAG_RE.fullmatch(plain[j]):
         j += 1
     if plain[j : j + 1] == ["--"]:
         return plain[j + 1 :], True
     return plain[j:], False
 
 
-def _cd_target(n: List[str], cwd: Optional[str]) -> Optional[str]:
-    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `pushd +N`, `cd` kèm cờ lạ hay biến → None (không biết, hook dùng gốc dự
-    án). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088)."""
+def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Optional[str]:
+    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `pushd +N`, `cd` kèm cờ lạ hay biến → None (không biết — D-106: đích ghi
+    tương đối sau đó thử ở mọi thư mục canh). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088).
+    Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được."""
     args, dashdash = _cd_operands(n[1:])
-    if cwd is None or len(args) != 1 or "$" in args[0]:
+    if len(args) != 1 or "$" in args[0]:
         return None
     if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
-    return posixpath.normpath(posixpath.join(cwd, posixpath.expanduser(args[0])))
+    target = posixpath.expanduser(args[0])
+    if target.startswith("/"):
+        return posixpath.normpath(target)
+    if cwd is None or cdpath:
+        return None
+    return posixpath.normpath(posixpath.join(cwd, target))
 
 
-def _commands_with_cwd(tokens: List[str], start: str) -> List[Tuple[List[str], Optional[str]]]:
+def _sets_cdpath(argv: List[str]) -> bool:
+    """Lệnh đặt/xuất `CDPATH` (`CDPATH=… cd x`, `CDPATH=…;`, `export CDPATH[=…]`): `cd` tương đối sau đó tìm trong
+    CDPATH, guard không đoán (D-106)."""
+    return any(t == "CDPATH" or t.startswith("CDPATH=") for t in argv)
+
+
+def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
     """Mỗi lệnh đơn kèm thư mục nó chạy: `cd`/`pushd` dời thư mục; `(`…`)` và `$(`…`)` là subshell — ra khỏi đó
-    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None."""
+    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None.
+    `CDPATH` có trong môi trường hay được đặt trong lệnh → `cd` tương đối là không rõ (D-106)."""
     out: List[Tuple[List[str], Optional[str]]] = []
     stack: List[Optional[str]] = []
     here: Optional[str] = start
     cur: List[str] = []
+    cdpath = bool(os.environ.get("CDPATH"))
 
     def flush() -> None:
-        nonlocal here
+        nonlocal here, cdpath
         if cur:
             n = normalize(cur)
+            cdpath = cdpath or _sets_cdpath(cur)
             if n[:1] in (["cd"], ["pushd"]):
-                here = _cd_target(n, here)
+                here = _cd_target(n, here, cdpath)
             elif n[:1] == ["popd"]:
                 here = None
             out.append((list(cur), here))
@@ -3106,24 +3129,61 @@ def _resolve_target(t: str, root: str, cwd: Optional[str]) -> str:
     return _at(t, cwd)
 
 
+# D-106: thư mục đang đứng không biết (`cd "$X"`, `cd -`, `pushd +1`, `popd`, CDPATH) → đích tương đối thử ở gốc và
+# mọi thư mục canh. Ở thư mục canh chỉ tính khi file đã có hoặc tên là tên được canh ở đó — `cd "$X" && echo > a.txt`
+# không bị chặn chỉ vì `.claude/hooks/a.txt` khớp mẫu `.claude/hooks/*`.
+GIT_HOOK_NAMES = frozenset(
+    "applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit "
+    "pre-rebase post-checkout post-merge pre-push pre-receive update proc-receive post-receive post-update "
+    "reference-transaction push-to-checkout pre-auto-gc post-rewrite sendemail-validate fsmonitor-watchman "
+    "p4-changelist p4-prepare-changelist p4-post-changelist p4-pre-submit post-index-change".split()
+)
+UNKNOWN_CWD_DIRS: Tuple[Tuple[str, FrozenSet[str]], ...] = (
+    (".claude", frozenset({"settings.json", "settings.local.json", "hooks"})),
+    (".claude/hooks", frozenset()),
+    (".autopilot", frozenset(EVIDENCE_NAMES)),
+    (".git", frozenset({"config", "hooks"})),
+    (".git/hooks", GIT_HOOK_NAMES),
+)
+
+
+def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
+    """Các đích có thể của `t`: thư mục biết → một đích (`_resolve_target`); không biết (None) → gốc dự án cộng thư mục
+    canh nào có file đó hoặc tên được canh (D-106)."""
+    if cwd is not None:
+        return [_resolve_target(t, root, cwd)]
+    t = PROJECT_REF_RE.sub(lambda _: root, t, count=1)
+    pwd = PWD_REF_RE.match(t)  # `$PWD/x` khi thư mục không biết = `x` tương đối
+    t = (t[pwd.end() :].lstrip("/") or ".") if pwd else t
+    if not t or t.startswith(("/", "~", "$")):
+        return [t]
+    out = [posixpath.normpath(posixpath.join(root, t))]
+    for d, names in UNKNOWN_CWD_DIRS:
+        p = posixpath.normpath(posixpath.join(root, d, t))
+        if os.path.lexists(p) or t.split("/", 1)[0] in names:
+            out.append(p)
+    return out
+
+
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
-    """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
+    """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
+    mục đang đứng không biết (D-106, `_where`)."""
     asks: List[str] = []
     if n and n[0] in ("chmod", "chown", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
         asks += [
             GIT_HOOK_WHY.format(t)
             for t in _positionals(n[1:])
-            if _match_any(rel_path(_at(t, cwd), root), GIT_HOOK_PATTERNS)
+            if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
         ]
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
     asks += [
         EVIDENCE_WHY.format(t)
-        for t in (_resolve_target(t, root, cwd) for t in find_evidence)
+        for t in (x for t in find_evidence for x in _where(t, root, cwd))
         if t not in targets and _target_kind(t, root) == "evidence"
     ]
-    for target in (_resolve_target(t, root, cwd) for t in targets):
+    for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
@@ -3139,7 +3199,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
             asks.append(CAPABILITY_WHY.format(f"ghi {target} qua Bash"))
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
-    restored = [(t, _target_kind(_resolve_target(t, root, cwd), root)) for t in _git_file_targets(n)]
+    restored = [(t, _target_kind(x, root)) for t in _git_file_targets(n) for x in _where(t, root, cwd)]
     asks += [f"ghi file bí mật qua Bash (git lấy từ commit khác): {t}" for t, k in restored if k == "secret"]
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
 
@@ -4323,7 +4383,7 @@ def _scan_nested(
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
     nested += _ssh_local_scripts(tokens)
-    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd or root).items():
+    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd).items():
         moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
         if moved:
             return moved
@@ -4332,10 +4392,11 @@ def _scan_nested(
     )
 
 
-def _moved_nested_scripts(cmd: str, tokens: List[str], start: str) -> Dict[Optional[str], List[str]]:
+def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> Dict[Optional[str], List[str]]:
     """Lệnh lồng đứng sau `cd`/`pushd` (AUD-SEC-087), nhóm theo thư mục nó chạy: `cd .claude && bash -c '…'` chạy
     trong `.claude`. Gồm `sh -c`, `eval`, here-string/ống/heredoc vào shell, lệnh bọc trên máy, `os.system` trong script
-    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét như gốc dự án."""
+    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét với cwd không biết —
+    đích tương đối thử ở mọi thư mục canh (D-106)."""
     out: Dict[Optional[str], List[str]] = {}
     placed = _commands_with_cwd(tokens, start)
     dirs = [here for _, here in placed]
@@ -4849,6 +4910,8 @@ def bash_decision(
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
+    if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
+        cwd = cwd or root
     budget = budget or ScanBudget()
     cmd = clean_text(cmd)
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
@@ -4882,7 +4945,7 @@ def bash_decision(
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
-    commands = _commands_with_cwd(tokens, cwd or root)
+    commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
