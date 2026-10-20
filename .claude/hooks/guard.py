@@ -557,7 +557,31 @@ class BraceTooComplex(Exception):
     """Nhóm brace dài quá trần dò: guard không biết bash bung ra gì → chặn (không phải "không phải brace")."""
 
 
-BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.-?\d+)?")
+BRACE_SEQ_RE = re.compile(r"(-?\w+)\.\.(-?\w+)(?:\.\.([-+]?\d+))?")
+BRACE_NUM_RE = re.compile(r"[-+]?\d+")
+BRACE_SEQ_MAX = 4096  # phần tử tối đa một dãy `{x..y}` được bung; hơn → không quét hết → chặn (AUD-SEC-073)
+
+
+def _brace_sequence(lo: str, hi: str, step: Optional[str]) -> List[str]:
+    """Dãy `{x..y[..s]}` bung ĐỦ như bash (AUD-SEC-073: `mai{m..o}` → `maim main maio`, không chỉ hai đầu mút): số
+    nguyên (đệm 0 khi một đầu mút có số 0 đứng đầu) hoặc một chữ cái mỗi đầu (ký tự không phải chữ/số trong khoảng
+    `Z..a` được thoát để guard đọc lại như chữ); bước lấy trị tuyệt đối, 0 = 1. Dạng bash để nguyên chữ (`{ab..cd}`) →
+    giữ hai đầu mút như trước (bảo thủ). Quá `BRACE_SEQ_MAX` phần tử → `BraceTooComplex`."""
+    inc = abs(int(step)) if step else 1
+    inc = inc or 1
+    if BRACE_NUM_RE.fullmatch(lo) and BRACE_NUM_RE.fullmatch(hi):
+        a, b = int(lo), int(hi)
+        if abs(b - a) // inc >= BRACE_SEQ_MAX:
+            raise BraceTooComplex(f"{{{lo}..{hi}}}")
+        pad = max(len(lo), len(hi)) if any(re.match(r"[-+]?0\d", x) for x in (lo, hi)) else 0
+        return [f"{n:0{pad}d}" for n in range(a, b + (1 if b >= a else -1), inc if b >= a else -inc)]
+    if len(lo) == len(hi) == 1 and lo.isascii() and hi.isascii() and lo.isalpha() and hi.isalpha():
+        a, b = ord(lo), ord(hi)
+        chars = [chr(n) for n in range(a, b + (1 if b >= a else -1), inc if b >= a else -inc)]
+        return [ch if ch.isalnum() or ch == "_" else "\\" + ch for ch in chars]
+    return [lo, hi]
+
+
 WORD_END = set(" \t\n;&|()<>")
 
 
@@ -606,7 +630,7 @@ def _unquoted(s: str, i: int = 0) -> Iterator[Tuple[int, str]]:
 
 
 def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
-    """Nhóm `{a,b}`/`{x..y}` bắt đầu ở `s[i]`: (vị trí `}`, các phương án) — dãy `x..y` lấy hai đầu mút. Khoảng trắng
+    """Nhóm `{a,b}`/`{x..y}` bắt đầu ở `s[i]`: (vị trí `}`, các phương án) — dãy `x..y` bung đủ. Khoảng trắng
     ngoài nháy, không dấu phẩy cấp đầu, không đóng trong `BRACE_SCAN_MAX` ký tự → không phải brace expansion (`{ cmd; }`,
     `{}` của `find`)."""
     depth, start, parts = 0, i + 1, []
@@ -627,7 +651,7 @@ def _brace_group(s: str, i: int) -> Optional[Tuple[int, List[str]]]:
     if len(parts) > 1:
         return j, parts
     m = BRACE_SEQ_RE.fullmatch(parts[0])
-    return (j, [m.group(1), m.group(2)]) if m else None
+    return (j, _brace_sequence(*m.groups())) if m else None
 
 
 def _first_brace(s: str, start: int = 0) -> Optional[Tuple[int, int, List[str]]]:
@@ -646,6 +670,8 @@ def _brace_word(t: str, i: int, end: int, alts: List[str]) -> Tuple[str, int]:
     hi = end + 1
     while hi < len(t) and t[hi] not in WORD_END:
         hi += 1
+    if len(alts) * (i - lo + hi - end) + sum(map(len, alts)) > REWRITE_MAX_CHARS:  # ước trước khi dựng (AUD-SEC-073)
+        raise BraceTooComplex(t[lo : lo + 80])
     words = [w for a in alts if (w := t[lo:i] + a + t[end + 1 : hi])]
     return t[:lo] + " ".join(words) + t[hi:], lo
 
@@ -1251,20 +1277,51 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
-# Như `py_run` của _lib.sh: chạy xt.py bằng import để dùng bytecode cache (chạy như script thì biên dịch lại ~4.000 dòng
-# mỗi lần), `-I` cách ly (bỏ PYTHON*, user-site, cwd) và cache ở `.autopilot/pycache` của dự án — AUD-SEC-065.
-IMPORT_RUNNER = (
-    "import sys; d, _, f = sys.argv[1].rpartition('/'); sys.path.insert(0, d or '.'); sys.argv = sys.argv[1:]; "
-    "sys.exit(__import__(f[:-3]).main())"
-)
+# Bộ nạp của `py_run` (_lib.sh — giữ GIỐNG HỆT, test so): chạy `main()` của file .py với bytecode cache tự quản (chạy
+# như script thì biên dịch lại ~4.000 dòng mỗi lần). Đối số: <thư mục cache hoặc ""> <file.py> <đối số…>. Chạy với
+# `-I -B`: cách ly (bỏ PYTHON*, user-site, cwd — AUD-SEC-065) và Python KHÔNG đọc/ghi cache của nó ở chỗ agent ghi được
+# (`-X pycache_prefix` cũ làm cả pyc thư viện chuẩn nằm trong `.autopilot/`). Cache riêng chỉ tin pyc checked-hash khớp
+# mã nguồn hiện tại (AUD-SEC-074: pyc giả khớp mtime/size, pyc unchecked-hash, pyc biên dịch từ mã khác → bỏ, biên dịch
+# lại); ghi qua file tạm + `os.replace`. Không có cache/không ghi được → chỉ chậm như cũ.
+PY_LOADER = """import sys, os, marshal, importlib.util as u
+c, p = sys.argv[1], sys.argv[2]
+d, _, f = p.rpartition("/")
+sys.path.insert(0, d or ".")
+src = open(p, "rb").read()
+h = u.MAGIC_NUMBER + b"\\3\\0\\0\\0" + u.source_hash(src)
+pyc = c and os.path.join(c, os.path.abspath(p).lstrip("/") + "." + sys.implementation.cache_tag + ".pyc")
+code = None
+try:
+    b = open(pyc, "rb").read() if pyc else b""
+    code = marshal.loads(b[16:]) if len(b) > 16 and b[:16] == h else None
+except Exception:
+    pass
+if code is None:
+    code = compile(src, p, "exec", dont_inherit=True)
+    try:
+        if pyc:
+            os.makedirs(os.path.dirname(pyc), exist_ok=True)
+            t = "%s.%d.tmp" % (pyc, os.getpid())
+            with open(t, "wb") as w:
+                w.write(h + marshal.dumps(code))
+            os.replace(t, pyc)
+    except Exception:
+        pass
+m = type(sys)(f[:-3])
+m.__file__ = p
+sys.modules[m.__name__] = m
+sys.argv = sys.argv[2:]
+exec(code, m.__dict__)
+sys.exit(m.main())
+"""
 
 
 def isolated_python(root: str) -> List[str]:
-    """Đầu lệnh python cho tiến trình con của guard: cách ly, cache bytecode trong `.autopilot/` của dự án (đã rào ghi
-    tay) khi thư mục đó đã có; chưa có thì không ghi bytecode (`-B`) — như `py_run` của _lib.sh."""
+    """Đầu lệnh python chạy `main()` của một file cho tiến trình con của guard — như `py_run` của _lib.sh: cách ly,
+    cache bytecode checked-hash trong `.autopilot/pycache` khi thư mục `.autopilot/` đã có (chưa có: không cache)."""
     autopilot = os.path.join(root, ".autopilot")
-    cache = ["-X", f"pycache_prefix={os.path.join(autopilot, 'pycache')}"] if os.path.isdir(autopilot) else ["-B"]
-    return [sys.executable, "-I", *cache]
+    cache = os.path.join(autopilot, "pycache") if os.path.isdir(autopilot) else ""
+    return [sys.executable, "-I", "-B", "-c", PY_LOADER, cache]
 
 
 def merge_check(selector: List[str], root: str) -> Dict[str, object]:
@@ -1280,8 +1337,6 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
     )
     cmd = [
         *isolated_python(root),
-        "-c",
-        IMPORT_RUNNER,
         xt,
         "merge-check",
         "--json",
@@ -2906,12 +2961,45 @@ def _git_file_targets(n: List[str]) -> List[str]:
     return []
 
 
+PYCACHE_ENV_RE = re.compile(r"PYTHONPYCACHEPREFIX=(.+)")
+
+
+def _checkout_index_targets(args: List[str]) -> List[str]:
+    """`git checkout-index [--prefix=P] [path…]` ghi `P` + đường dẫn trong chỉ mục (nối CHUỖI, không nối thư mục):
+    đích là P, từng P+path, và `.autopilot` khi P là tiền tố chữ của nó (`--prefix=.auto` + path `pilot/…`) — AUD-SEC-074
+    (`--prefix=.autopilot/pycache/` từng ghi pyc giả mà guard không thấy)."""
+    vals = _flag_values(args, ("--prefix",))
+    prefix = vals[-1] if vals else ""
+    pos = _positionals(args, ("--prefix",))
+    head, _, tail = prefix.rpartition("/")
+    partial = [f"{head}/.autopilot" if head else ".autopilot"] if tail and ".autopilot".startswith(tail) else []
+    return ([prefix] if prefix else []) + [prefix + p for p in pos] + partial
+
+
+GIT_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
+    "rm": _positionals,
+    "mv": _positionals,
+    "checkout-index": _checkout_index_targets,
+}
+
+
+def _pycache_targets(n: List[str], argv: List[str]) -> List[str]:
+    """Thư mục bytecode mà Python sẽ ghi: `-X pycache_prefix=P`/`-Xpycache_prefix=P`, `PYTHONPYCACHEPREFIX=P` (gán đầu
+    lệnh, `env`, `export`) — AUD-SEC-074: cache bytecode của hook nằm trong `.autopilot/`."""
+    out = [m.group(1) for t in argv if (m := PYCACHE_ENV_RE.fullmatch(t))]
+    if n and INTERP_RE.fullmatch(n[0]):
+        xs = [n[i + 1] for i, a in enumerate(n[:-1]) if a == "-X"] + [a[2:] for a in n if a.startswith("-X")]
+        out += [x.split("=", 1)[1] for x in xs if x.startswith("pycache_prefix=")]
+    return out
+
+
 def write_targets(n: List[str], argv: List[str]) -> List[str]:
-    """File mà lệnh có thể ghi/xoá: chuyển hướng, `sed -i`/`perl -i`, `tee`, cp/mv/install/ln, truncate/rm, `git rm/mv`."""
-    out = [argv[i + 1] for i, t in enumerate(argv[:-1]) if t in REDIRECTS]
+    """File mà lệnh có thể ghi/xoá: chuyển hướng, `sed -i`/`perl -i`, `tee`, cp/mv/install/ln, truncate/rm, `git rm/mv`,
+    `git checkout-index --prefix`, thư mục bytecode của Python."""
+    out = [argv[i + 1] for i, t in enumerate(argv[:-1]) if t in REDIRECTS] + _pycache_targets(n, argv)
     name, args = (n[0], n[1:]) if n else ("", [])
-    if name == "git" and args[:1] in (["rm"], ["mv"]):
-        return out + _positionals(args[1:])
+    if name == "git" and args[:1] and args[0] in GIT_WRITERS:
+        return out + GIT_WRITERS[args[0]](args[1:])
     if name == "tee":
         return out + _positionals(args)
     if name in ("cp", "mv", "install", "ln"):
@@ -4206,6 +4294,7 @@ WRITE_HINT_RE = re.compile(
     r"|\b(?:os\.(?:remove|unlink|rename|replace|truncate)|shutil\.\w+|writeFile\w*|appendFile\w*|rmSync|unlinkSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|unlink|rename|truncate)\b"
     r"|\bopen\b[^;\n]{0,200}['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")` (trần độ dài: tuyến tính)
+    r"|\b(?:py_compile|compileall|pycache_prefix)\b"  # trình biên dịch ghi bytecode (AUD-SEC-074)
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
@@ -4341,6 +4430,8 @@ DIRECT_WRITE_FMT = (
     r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
     r"|\b(?:unlink|rename|truncate)[ \t]+(?:[^;\n)]*,[ \t]*)?{q}"  # perl/ruby/php gọi không ngoặc: `unlink ".autopilot/x"`
     r"|\bopen[ \t]*\(?[^,;\n]*,[ \t]*['\"]\+?(?:>|>>|w|a)['\"][ \t]*,[ \t]*{q}"  # perl `open(F, '>', '…')`
+    # AUD-SEC-074: `py_compile.compile(f, cfile='…')`, `p.compile(f, '…')`, `compile_dir(d, …)`, `sys.pycache_prefix = '…'`
+    r"|\bcompile\w*\(\s*(?:[^)]*,\s*)?(?:\w+\s*=\s*)?{q}|\bpycache_prefix\s*=\s*{q}"
 )
 
 
@@ -4399,10 +4490,36 @@ def _redirect_targets(args: List[str], ops: Tuple[str, ...]) -> List[str]:
     return [args[i + 1] for i, t in enumerate(args[:-1]) if t in ops]
 
 
+# Tuỳ chọn `gh` ăn một giá trị không phải file gửi đi (`gh -R o/r release upload …` — AUD-SEC-075: `o/r` từng bị coi là
+# lệnh con nên `release upload` không được nhận ra).
+GH_UPLOAD_VALUE_OPTS = ("-R", "--repo", "--hostname", "-d", "--desc", "-f", "--filename")
+
+
+def _gh_api_files(args: List[str]) -> List[str]:
+    """File `gh api` đọc để gửi đi: `-F k=@f`/`--field k=@f`/`-Fk=@f`/`--field=k=@f`, `--input f` (AUD-SEC-075)."""
+    out: List[str] = []
+    for i, a in enumerate(args):
+        flag, val = (a, args[i + 1] if i + 1 < len(args) else "") if a in GH_API_FIELD_FLAGS else ("", "")
+        if not flag and a.startswith("--") and a.split("=", 1)[0] in GH_API_FIELD_FLAGS and "=" in a:
+            flag, val = a.split("=", 1)
+        elif not flag and a[:2] == "-F" and len(a) > 2:
+            flag, val = "-F", a[2:]
+        if flag == "--input":
+            out.append(val)
+        elif flag in ("-F", "--field") and val.split("=", 1)[-1].startswith("@"):
+            out.append(val.split("=", 1)[-1][1:])
+    return out
+
+
 def _gh_upload_files(args: List[str]) -> List[str]:
-    """File `gh` đăng lên GitHub: `gh gist create|edit`, `gh release upload`, `--body-file`/`-F` của issue/pr."""
-    pos = _positionals(args)
+    """File `gh` đăng lên GitHub: `gh gist create|edit` (không file hoặc `-` = stdin), `gh release upload`, `gh api -F
+    k=@f`/`--input f`, `--body-file`/`-F` của issue/pr."""
+    pos = _positionals(args, GH_UPLOAD_VALUE_OPTS)
+    if pos[:1] == ["api"]:
+        return _gh_api_files(args)
     files = pos[2:] if tuple(pos[:2]) in GH_UPLOADS else []
+    if tuple(pos[:2]) == ("gist", "create") and (not files or "-" in args):  # `cat .env | gh gist create` (AUD-SEC-075)
+        files.append("-")
     return files + [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("--body-file", "-F")]
 
 
@@ -4433,19 +4550,42 @@ def _copy_files(n: List[str]) -> Optional[List[str]]:
     return None
 
 
-def _net_files(c: List[str], n: List[str]) -> Optional[List[str]]:
+NET_WRITE_OPS = (">", ">>", ">|", "&>", "<>")  # `<>` mở socket hai chiều (`exec 3<>/dev/tcp/h/80` — AUD-SEC-075)
+
+
+def _net_fds(tokens: List[str]) -> Set[str]:
+    """Số fd mở tới `/dev/tcp|udp/…` ở bất kỳ lệnh nào trong chuỗi (`exec 3<>/dev/tcp/h/80`, `3>/dev/tcp/…`): lệnh sau
+    ghi `>&3` là gửi ra mạng (AUD-SEC-075)."""
+    return {
+        tokens[i - 1] if i and tokens[i - 1].isdigit() else ("0" if t == "<>" else "1")
+        for i, t in enumerate(tokens[:-1])
+        if t in NET_WRITE_OPS and NET_REDIRECT_RE.match(tokens[i + 1])
+    }
+
+
+def _socat_files(n: List[str]) -> List[str]:
+    """Địa chỉ socat là file: `FILE:f`, `OPEN:f,rdonly`, hoặc đường dẫn trơn (`socat -u ./.env TCP:…` — kiểu
+    GOPEN ngầm, AUD-SEC-075)."""
+    return [a.split(":", 1)[-1].split(",", 1)[0] for a in _positionals(n[1:])]
+
+
+def _net_files(c: List[str], n: List[str], net_fds: Optional[Set[str]] = None) -> Optional[List[str]]:
     """File một lệnh gửi ra mạng (`-` = stdin của nó), None nếu lệnh không gửi ra mạng (AUD-SEC-067): curl/wget,
-    scp/rsync tới máy khác, lệnh cloud, nc/socat/ssh (stdin, `<`, `FILE:`), `gh gist|release upload`, `/dev/tcp/…`."""
+    scp/rsync tới máy khác, lệnh cloud, nc/socat/ssh (stdin, `<`, `FILE:`, đường dẫn trơn của socat), `gh gist|release
+    upload`/`gh api -F k=@f`, `/dev/tcp/…` (cả `>&N` tới fd đã mở vào socket — `net_fds`)."""
     args = c[1:]
     if n[0] in FETCHERS:
         return _fetch_files(args)
     if n[0] in COPY_VALUE_OPTS or n[0] in CLOUD_COPIERS:
         return _copy_files(n)
+    if n[0] == "socat":
+        return ["-", *_redirect_targets(args, ("<",)), *_socat_files(n)]
     if n[0] in STREAM_SENDERS:
         return ["-", *_redirect_targets(args, ("<",)), *[a.split(":", 1)[1] for a in n[1:] if ":" in a]]
     if n[0] == "gh":
         return _gh_upload_files(n[1:]) or None
-    if any(NET_REDIRECT_RE.match(t) for t in _redirect_targets(args, (">", ">>", ">|", "&>"))):
+    to_fd = [t for t in _redirect_targets(args, (">&", "&>", ">")) if t in (net_fds or set())]
+    if to_fd or any(NET_REDIRECT_RE.match(t) for t in _redirect_targets(args, NET_WRITE_OPS)):
         return ["-", *_positionals(n[1:]), *_redirect_targets(args, ("<",))]
     return None
 
@@ -4454,10 +4594,11 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
     """Gửi file bí mật/biến môi trường ra mạng: `curl -d @.env …`, `curl -T .env …`, `cat .env | curl -d @- …`,
     `env | curl --data-binary @- …` (rà stored 2026-10-16: Read(.env) bị chặn nhưng Bash thì không); kênh khác ở
     `_net_files` (AUD-SEC-067)."""
+    net_fds = _net_fds(tokens)
     for group in pipelines(tokens):
         for i, c in enumerate(group):
             n = normalize(c)
-            files = _net_files(c, n) if n else None
+            files = _net_files(c, n, net_fds) if n else None
             if files is None:
                 continue
             leaked = [f for f in files if _is_secret_file(f, root) and not f.endswith(".pub")]  # khoá công khai
