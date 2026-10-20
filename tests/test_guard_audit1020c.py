@@ -160,6 +160,74 @@ class InterpFlagFormsTest(unittest.TestCase):
         self.assertEqual(argv(["uv", "run", "--frozen"]), ["uv", "run", "--frozen"])
         self.assertEqual(argv(["uv", "sync"]), ["uv", "sync"])
         self.assertEqual(argv([]), [])
+        deep = ["npx"] * guard.INTERP_RUNNER_DEPTH + ["node", "-e", "x"]
+        self.assertEqual(argv(deep), ["node", "-e", "x"])
+        too_deep = ["npx"] * (guard.INTERP_RUNNER_DEPTH + 1) + ["node", "-e", "x"]
+        self.assertEqual(argv(too_deep), ["npx", "node", "-e", "x"])  # giới hạn đã biết: dừng bóc sau trần
+
+
+class NestedCwdRunnersTest(unittest.TestCase):
+    """AUD-SEC-094: sau `cd`, nguồn lồng ngoài `sh -c`/`eval`/ống/heredoc (lệnh bọc `flock`/`script`/`su`/`watch`/
+    `busybox`, `<( )`, `$(…)`/backtick trong nháy kép, `$(cat <<E …)`, ống giải mã) từng chỉ được quét ở thư mục ban
+    đầu. Hai đường (gốc và sau `cd`) nay dùng chung một danh sách nguồn, mỗi script mang thư mục nó chạy."""
+
+    def test_guard_nested_cwd_runners_deny(self):
+        for cmd in (
+            'cd .claude && echo "$(echo x > settings.json)"',
+            "cd .claude && echo `echo x > settings.json`",
+            "cd .claude && bash <(echo 'echo x > settings.json')",
+            "cd .claude && script -qc 'echo x > settings.json' /dev/null",
+            "cd .claude && flock /tmp/l sh -c 'echo x > settings.json'",
+            "cd .claude && busybox sh -c 'echo x > settings.json'",
+            "cd .claude && watch -n1 'echo x > settings.json'",
+            "cd .claude && su -c 'echo x > settings.json'",
+            "cd .git && flock /tmp/l sh -c 'echo \"[core]\" >> config'",
+            "cd .autopilot && script -qc 'echo {} > verified.json' /dev/null",
+            "cd .claude && echo \"$(python3 -c \"open('settings.json','w')\")\"",
+            "cd .claude && bash -c \"$(cat <<'E'\necho x > settings.json\nE\n)\"",
+            "cd .claude && echo 'echo x > settings.json' | rev | rev | sh",
+            'pushd .claude >/dev/null; echo "$(echo x > settings.json)"',
+            '(cd .claude && echo "$(echo x > settings.json)")',
+            'cd .claude\necho "$(echo x > settings.json)"',
+            "cd .claude && cat <<E\n$(echo x > settings.json)\nE",
+        ):
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual(res["decision"], "deny", res)
+
+    def test_guard_nested_cwd_runners_same_as_full_path(self):
+        """Cùng lệnh với đường dẫn đầy đủ, không `cd`: đã deny — dạng sau `cd` phải cùng kết quả."""
+        for cmd in (
+            'echo "$(echo x > .claude/settings.json)"',
+            "script -qc 'echo x > .claude/settings.json' /dev/null",
+            "bash <(echo 'echo x > .claude/settings.json')",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+
+    def test_guard_nested_cwd_runners_controls_allowed(self):
+        for cmd in (
+            'cd docs && echo "$(date)" > out.txt',
+            "cd tests && flock /tmp/l python3 -m unittest -q",
+            "cd docs && echo `date` > out.txt",
+            "cd docs && script -qc 'echo x > out.txt' /dev/null",
+            "cd docs && bash <(echo 'echo x > settings.json')",
+            'echo "$(cd .claude && pwd)"; echo "$(echo x > settings.json)"',
+            '(cd .claude && ls); echo "$(echo x > settings.json)"',
+            "cd .claude && ls # $(echo x > ../docs/a.md)",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(policy(cmd)["decision"], "deny", cmd)
+
+    def test_guard_nested_cwd_runners_span_dirs(self):
+        root = str(ROOT)
+        claude = str(ROOT / ".claude")
+        text = 'echo "$(a)"; cd .claude && echo "$(b)" `c`'
+        spans = guard._dollar_spans(text)
+        self.assertEqual(guard._span_dirs(text, spans, root), [root, claude])
+        self.assertEqual(guard._span_dirs("echo $(a)", guard._dollar_spans("echo $(a)"), root), [root])
+        commented = "cd .claude; # $(a)"
+        self.assertEqual(guard._span_dirs(commented, guard._dollar_spans(commented), root), [root])
 
 
 if __name__ == "__main__":

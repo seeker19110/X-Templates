@@ -3819,20 +3819,80 @@ def _cat_heredoc_bodies(script: str) -> List[str]:
     return out
 
 
-def _nested_scripts(cmd: str, tokens: List[str]) -> List[str]:
-    """Lệnh chạy lồng (AUD-SEC-017): `sh -c '…'`, heredoc/here-string vào shell, `echo/printf '…' | sh`, `eval '…'`,
-    backtick."""
-    out = [s for c in split_commands(tokens) for s in [_shell_c_script(c)] if s]
-    out += _eval_scripts(tokens) + _backtick_scripts(strip_heredocs(literal_bodies_masked(cmd)))
-    out += _dollar_scripts(strip_heredocs(cmd))
-    out += [b for sc in list(out) for b in _cat_heredoc_bodies(sc)]
-    out += _procsub_scripts(tokens)
-    out += [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
+Placed = List[Tuple[str, Optional[str]]]  # (script, thư mục nó chạy; None = không biết — D-106)
+PlacedCmds = List[Tuple[List[str], Optional[str]]]  # kết quả `_commands_with_cwd`
+SPAN_MARK = "$__xt_span_{}_"  # có `$`: `cd "$(…)"` thành đích không biết
+SPAN_MARK_RE = re.compile(r"\$__xt_span_(\d+)_")
+
+
+def _nested_pairs(cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str]) -> Placed:
+    """Lệnh chạy lồng (AUD-SEC-017) kèm thư mục nó chạy (AUD-SEC-094): `sh -c '…'`, `eval '…'`, backtick, `$(…)`,
+    `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell."""
+    moved = any(here != start for _, here in placed)
+    out: Placed = [(s, here) for c, here in placed for s in [_shell_c_script(c)] if s]
+    out += [(s, here) for c, here in placed for s in _eval_scripts(c)]
+    out += _span_pairs(strip_heredocs(literal_bodies_masked(cmd)), _backtick_spans, start, moved)
+    out += _span_pairs(strip_heredocs(cmd), _dollar_spans, start, moved)
+    out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
+    out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
+    visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
+    bodies = [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
+    out += [(s, d) for s in bodies for d in visited]  # thân heredoc mở rộng: thư mục mọi lệnh (chiều chặt)
+    out += _shell_feeds(tokens, placed)
+    out += [(s, here) for c, here in placed for s in _here_strings(c)]
+    shells = dict.fromkeys([start, *(here for c, here in placed if _stdin_shell(c))])
+    return out + [(body, d) for body in _heredoc_scripts(cmd) for d in shells]
+
+
+def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
+    """Thân thay lệnh (`finder` = `_dollar_spans`/`_backtick_spans`) kèm thư mục lệnh chứa nó; không lệnh nào dời thư
+    mục → mọi thân ở `start`."""
+    spans = finder(text)
+    dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
+    return [(body, d) for (_, _, body), d in zip(spans, dirs)]
+
+
+def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optional[str]]:
+    """Thư mục của lệnh chứa mỗi thay lệnh trong `text`: thay span thứ K bằng dấu `$__xt_span_K_`, tách lệnh, đọc dấu
+    trong argv của `_commands_with_cwd` (`cd .claude && echo "$(…)"` chạy trong `.claude`). Không thấy dấu (span trong
+    comment) → `start`."""
+    parts: List[str] = []
+    pos = 0
+    for k, (a, b, _) in enumerate(spans):
+        parts += [text[pos:a], SPAN_MARK.format(k)]
+        pos = b
+    found: Dict[int, Optional[str]] = {}
+    for c, here in _commands_with_cwd(tokenize("".join(parts) + text[pos:]), start):
+        for m in SPAN_MARK_RE.finditer(" ".join(c)):
+            found.setdefault(int(m[1]), here)
+    return [found.get(k, start) for k in range(len(spans))]
+
+
+def _token_dirs(tokens: List[str], placed: PlacedCmds) -> List[Optional[str]]:
+    """Thư mục của lệnh chứa từng token (`placed` = `_commands_with_cwd(tokens, …)`); token tách lệnh mang thư mục
+    của lệnh trước nó (None khi chưa có lệnh)."""
+    out: List[Optional[str]] = []
+    k, fresh = -1, True
+    for t in tokens:
+        sep = _is_punct(t) and not _is_redirect(t)
+        if not sep and fresh:
+            k += 1
+        fresh = sep
+        out.append(placed[k][1] if k >= 0 else None)
+    return out
+
+
+def _shell_feeds(tokens: List[str], placed: PlacedCmds) -> Placed:
+    """Chữ đi qua ống vào shell (`echo '…' | tee /dev/null | sh`, `… | xargs sh -c`) kèm thư mục của shell nhận."""
+    out: Placed = []
+    dirs = [here for _, here in placed]
+    i = 0
     for pipe in pipelines(tokens):
-        for feed, down in zip(_pipe_feeds(pipe), pipe[1:]):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
             if feed and (_stdin_shell(down) or _argless_shell_c(down)):
-                out += feed
-    return out + _here_strings(tokens) + _heredoc_scripts(cmd)
+                out += [(s, here) for s in feed]
+        i += len(pipe)
+    return out
 
 
 # Lệnh chuyển nguyên stdin ra stdout (khi không có file đầu vào): chữ echo đi qua vẫn là chữ đó (`echo … | tee x | sh`).
@@ -4196,29 +4256,37 @@ def _decode(name: str, data: str) -> Optional[str]:
     return None
 
 
-def _decoded_pipes(tokens: List[str]) -> Tuple[List[str], List[str]]:
-    """(lệnh giải được, câu hỏi chặn) cho mỗi ống `… | <giải mã>… | sh`: nguồn là echo/printf chữ → giải và quét."""
-    scripts: List[str] = []
+def _decoded_feed(pipe: List[List[str]], i: int) -> Tuple[List[str], Optional[str]]:
+    """(chuỗi bộ giải mã, lệnh giải được) của ống vào shell ở khâu `i` (`echo cm0g… | base64 -d | sh`); khâu không phải
+    shell sau bộ giải mã → ([], None); nguồn không phải echo/printf chữ → (chuỗi, None)."""
+    if i == 0 or not _stdin_shell(pipe[i]):
+        return [], None
+    j = i - 1
+    chain: List[str] = []
+    while j >= 0 and _decoder(pipe[j]):
+        chain.insert(0, _decoder(pipe[j]))
+        j -= 1
+    src = normalize(pipe[j]) if j >= 0 else []
+    text: Optional[str] = _echoed_scripts(src)[0] if chain and src[:1] in (["echo"], ["printf"]) else None
+    for name in chain:
+        text = _decode(name, text) if text is not None else None
+    return chain, text
+
+
+def _decoded_pipes(tokens: List[str], dirs: List[Optional[str]]) -> Tuple[Placed, List[str]]:
+    """(lệnh giải được kèm thư mục shell nhận — `dirs` theo từng lệnh, câu hỏi chặn) cho mỗi ống `… | <giải mã>… |
+    sh`: nguồn là echo/printf chữ → giải và quét."""
+    scripts: Placed = []
     asks: List[str] = []
+    i = 0
     for pipe in pipelines(tokens):
-        for i, down in enumerate(pipe):
-            if i == 0 or not _stdin_shell(down):
-                continue
-            j = i - 1
-            chain: List[str] = []
-            while j >= 0 and _decoder(pipe[j]):
-                chain.insert(0, _decoder(pipe[j]))
-                j -= 1
-            if not chain:
-                continue
-            src = normalize(pipe[j]) if j >= 0 else []
-            text: Optional[str] = _echoed_scripts(src)[0] if src[:1] in (["echo"], ["printf"]) else None
-            for name in chain:
-                text = _decode(name, text) if text is not None else None
+        for k in range(len(pipe)):
+            chain, text = _decoded_feed(pipe, k)
             if text is not None:
-                scripts.append(text)
-            else:
+                scripts.append((text, dirs[i + k]))
+            elif chain:
                 asks.append(OPAQUE_EXEC_WHY.format(" | ".join(chain)))
+        i += len(pipe)
     return scripts, asks
 
 
@@ -4253,9 +4321,10 @@ def _runner_scripts(tokens: List[str]) -> List[str]:
     return out
 
 
-def _procsub_scripts(tokens: List[str]) -> List[str]:
-    """`sh <(echo '…')`, `source <(printf '…')`, `bash < <(echo '…')`: shell đọc script do lệnh trong `<( )` sinh ra."""
-    out: List[str] = []
+def _procsub_scripts(tokens: List[str], dirs: List[Optional[str]]) -> Placed:
+    """`sh <(echo '…')`, `source <(printf '…')`, `bash < <(echo '…')`: shell đọc script do lệnh trong `<( )` sinh ra —
+    kèm thư mục của shell (`dirs` theo từng token, `_token_dirs`)."""
+    out: Placed = []
     for i, t in enumerate(tokens):
         if t != "<(":
             continue
@@ -4270,7 +4339,7 @@ def _procsub_scripts(tokens: List[str]) -> List[str]:
             k += 1
         inner = normalize(tokens[i + 1 : k - 1])
         if inner[:1] in (["echo"], ["printf"]):
-            out += _echoed_scripts(inner)
+            out += [(s, dirs[j]) for s in _echoed_scripts(inner)]
     return out
 
 
@@ -4436,50 +4505,48 @@ def _scan_nested(
     if push_deny:
         return push_deny
     asks += push_asks
-    host, ctr = _wrapped_scripts(tokens)
-    asks += _container_asks(ctr, depth, budget)  # mọi lệnh, không cắt theo số lượng (review #82)
-    decoded, opaque = _decoded_pipes(tokens)
+    asks += _container_asks(_wrapped_scripts(tokens)[1], depth, budget)  # mọi lệnh, không cắt (review #82)
+    rewritten, nested, opaque = _nested_sources(cmd, tokens, cwd)
     asks += opaque
-    rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
-    nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
-    nested += _ssh_local_scripts(tokens) + [s for s, _ in _ipython_nested(cmd, tokens, None)]
-    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd).items():
-        moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
+    for here, (rw, ns) in _moved_groups(rewritten, nested, cwd).items():
+        moved = _scan_scripts(rw, root, here, depth, asks, 0, budget, rewrites)
+        moved = moved or _scan_scripts(ns, root, here, depth, asks, 1, budget)
         if moved:
             return moved
-    return _scan_scripts(rewritten, root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
-        nested, root, cwd, depth, asks, 1, budget
+    return _scan_scripts([s for s, _ in rewritten], root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
+        [s for s, _ in nested], root, cwd, depth, asks, 1, budget
     )
 
 
-def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> Dict[Optional[str], List[str]]:
-    """Lệnh lồng đứng sau `cd`/`pushd` (AUD-SEC-087), nhóm theo thư mục nó chạy: `cd .claude && bash -c '…'` chạy
-    trong `.claude`. Gồm `sh -c`, `eval`, here-string/ống/heredoc vào shell, lệnh bọc trên máy, `os.system` trong script
-    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét với cwd không biết —
-    đích tương đối thử ở mọi thư mục canh (D-106)."""
-    out: Dict[Optional[str], List[str]] = {}
+def _nested_sources(cmd: str, tokens: List[str], start: Optional[str]) -> Tuple[Placed, Placed, List[str]]:
+    """MỘT danh sách nguồn lệnh lồng cho cả lượt quét ở thư mục ban đầu lẫn sau `cd`/`pushd`/`env -C` (AUD-SEC-087,
+    AUD-SEC-094 — hai danh sách riêng từng lệch nhau): (bản viết lại cùng lệnh, lệnh lồng, câu hỏi chặn), mỗi script
+    kèm thư mục nó chạy. Bản viết lại: thay biến/gán thay lệnh (cả dòng, gồm `cd`) và hậu tố lệnh bọc (`flock`,
+    `script -qc`, `su -c`, `watch`…). Lệnh lồng: `_nested_pairs`, lệnh bọc trên máy (`uv run bash -c`), `os.system`
+    trong script trình thông dịch, ống giải mã vào shell, ssh chạy tại máy này, magic ipython."""
     placed = _commands_with_cwd(tokens, start)
-    dirs = [here for _, here in placed]
+    rewritten: Placed = [(s, start) for s in _var_scripts(tokens)]
+    rewritten += [(s, here) for c, here in placed for s in _runner_scripts(c)]
+    rewritten += [(s, start) for s in _lifted_scripts(cmd)]
+    decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
+    nested = _nested_pairs(cmd, tokens, placed, start)
+    nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
+    nested += [(s, here) for raw, here in _interp_scripts_at(cmd, tokens, start) for s in _exec_api_scripts([raw])]
+    nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
+    return rewritten, nested + _ipython_nested(cmd, tokens, start), opaque
 
-    def add(here: Optional[str], scripts: List[str]) -> None:
-        if here != start and scripts:
-            out.setdefault(here, []).extend(scripts)
 
-    for c, here in placed:
-        add(here, [s for s in [_shell_c_script(c)] if s] + _eval_scripts(c) + _here_strings(c) + _wrapped_scripts(c)[0])
-    i = 0
-    for pipe in pipelines(tokens):
-        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
-            if feed and (_stdin_shell(down) or _argless_shell_c(down)):
-                add(here, feed)
-        i += len(pipe)
-    shells = list(dict.fromkeys(here for c, here in placed if _stdin_shell(c)))
-    for here in shells:
-        add(here, _heredoc_scripts(cmd))
-    for script, here in _interp_scripts_at(cmd, tokens, start):
-        add(here, _exec_api_scripts([script]))
-    for script, here in _ipython_nested(cmd, tokens, start):
-        add(here, [script])
+def _moved_groups(
+    rewritten: Placed, nested: Placed, start: Optional[str]
+) -> Dict[Optional[str], Tuple[List[str], List[str]]]:
+    """Script chạy ở thư mục khác `start`, nhóm theo thư mục: (bản viết lại, lệnh lồng). Thư mục không rõ (None) quét
+    với cwd không biết — đích tương đối thử ở mọi thư mục canh (D-106). Mọi script còn được quét ở `start` (chiều chặt,
+    như trước)."""
+    out: Dict[Optional[str], Tuple[List[str], List[str]]] = {}
+    for idx, pairs in enumerate((rewritten, nested)):
+        for script, here in pairs:
+            if here != start:
+                out.setdefault(here, ([], []))[idx].append(script)
     return out
 
 
@@ -4514,7 +4581,9 @@ INTERP_RUNNERS = {
     *(("pipx", "run"), ("uvx",), ("uv", "tool", "run")),
 }
 INTERP_RUNNER_SCAN = 6  # số token đầu sau lệnh chạy hộ được dò tìm lệnh thật
-INTERP_RUNNER_DEPTH = 3  # số lớp chạy hộ lồng (`uv run npx node -e …`)
+INTERP_RUNNER_DEPTH = (
+    8  # số lớp chạy hộ lồng được bóc (`uv run npx node -e …`); sâu hơn → không coi là trình thông dịch
+)
 # Lệnh con nhận script làm đối số: `deno eval '…'` (review #186 lần 3)
 INTERP_EVAL_SUBCMDS = {"deno": "eval"}
 PERL_E_FLAG_RE = re.compile(r"-[a-zA-DF-Z]+[eE]")  # cờ gộp `-ne`, `-pe`, `-lne`: đối số kế tiếp là script
@@ -4631,11 +4700,6 @@ def _eval_subcmd(n: List[str]) -> Optional[int]:
     while sub and k < len(n) and n[k].startswith("-"):
         k += 1
     return k if sub and n[k : k + 1] == [sub] else None
-
-
-def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
-    """Script trình thông dịch viết ngay trong lệnh: `python3 -c '…'`, `node -e '…'`, `python3 - <<'PY'` … `PY`."""
-    return list(dict.fromkeys(s for s, _ in _interp_scripts_at(cmd, tokens, None)))
 
 
 def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:

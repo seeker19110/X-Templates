@@ -4351,6 +4351,102 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-audit1020c-cd-dollar-in-quotes",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && echo \"$(echo x > settings.json)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-script-qc",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && script -qc 'echo x > settings.json' /dev/null"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-git-flock-config",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .git && flock /tmp/l sh -c 'echo \"[core]\" >> config'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-autopilot-script",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .autopilot && script -qc 'echo {} > verified.json' /dev/null"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-procsub",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && bash <(echo 'echo x > settings.json')"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-docs-dollar",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd docs && echo \"$(date)\" > out.txt"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-tests-flock",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd tests && flock /tmp/l python3 -m unittest -q"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
