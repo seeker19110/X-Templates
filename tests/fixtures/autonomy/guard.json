@@ -4004,6 +4004,216 @@
     "allowed": false,
     "code": "HOOK_BYPASS"
    }
+  },
+  {
+   "id": "guard-review186r3-fstring-same-quote",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c 'print(f\"{open(\".env\",\"w\")}\")'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-fstring-same-quote-depth3",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c 'print(f\"{f\"{f\"{open(\".claude/settings.json\",\"w\")}\"}\"}\")'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-escape-literal",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"p = '\\x2eenv'; open(p, 'w').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-fstring-read",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c 'print(f\"{open(\".env\").read()}\")'"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-nfkc-identifier",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.ｒemove('.env')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-readwrite-redirect",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec 3<> .env"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-readwrite-redirect-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec 3<>.claude/settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-exec-dup",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec >/tmp/log 2>&1"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-deno-eval",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "deno eval \"Deno.writeTextFileSync('.env', 'x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-lua",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "lua -e \"os.remove('.claude/settings.json')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-tclsh-stdin",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "echo 'set f [open \".env\" w]' | tclsh"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-pypy",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "pypy3 -c \"open('.env', 'w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "ipython -c \"import os; os.utime('.git/config')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-env-chdir-abbrev",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "env --ch=.claude tee settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-env-abbrev",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "env --ch=docs tee notes.md"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
