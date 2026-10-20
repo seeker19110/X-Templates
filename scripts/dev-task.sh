@@ -154,15 +154,18 @@ resolve() { # $1=task -> in lệnh (khai báo ưu tiên), rỗng nếu không c�
 # --- ADR-0011: trong vòng autopilot, lint/test không được là no-op ------------
 LOOP_REQUIRED=" lint test "
 autopilot_active() { [ -f "$ROOT/.autopilot/state.json" ] && grep -Eq '"active"[[:space:]]*:[[:space:]]*true' "$ROOT/.autopilot/state.json"; }
-NOOP_RE='true|:|exit( 0)?|(echo|printf)([[:space:]].*)?'
-is_noop() { # $1=lệnh -> true nếu rỗng hoặc không kiểm gì (kể cả chuỗi toàn no-op nối bằng && ; ||: `true && :`)
+# Một đoạn no-op (sau khi tách theo `&&` `||` `;`): `true` · `:` · `exit [0]` · `echo|printf` mà đối số không chứa `|`,
+# `&`, `;`, backtick, `$(` — `echo go && pytest`, `echo x | sh` là lệnh thật. ĐÚNG chuỗi này ở `xt.py` `GATE_NOOP_SEG`
+# (test so hai bên trên cùng bảng ca). Đưa vào awk qua -v (awk tự đổi `\t` thành tab; mawk cũ không có [[:space:]]).
+NOOP_RE='true|:|exit( 0)?|(echo|printf)([ \t]([^|&;`$]|[$][^(|&;`$])*)?'
+is_noop() { # $1=lệnh -> true nếu rỗng hoặc mọi đoạn nối bằng && ; || đều no-op (`true && :`, `echo a; exit 0`)
   local c; c="$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-  [ -z "$c" ] || printf '%s' "$c" | grep -Eqx "$NOOP_RE" && return 0
-  printf '%s\n' "$c" | awk '{ # [ \t] thay [[:space:]]: mawk cũ không có lớp ký tự POSIX
+  [ -z "$c" ] && return 0
+  printf '%s\n' "$c" | awk -v re="^($NOOP_RE)\$" '{
     n = split($0, seg, /&&|\|\||;/)
     for (i = 1; i <= n; i++) {
       s = seg[i]; gsub(/^[ \t]+|[ \t]+$/, "", s)
-      if (s != "" && s !~ /^(true|:|exit( 0)?|(echo|printf)([ \t].*)?)$/) exit 1
+      if (s != "" && s !~ re) exit 1
     }
   }'
 }

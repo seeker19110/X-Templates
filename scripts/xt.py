@@ -3478,7 +3478,20 @@ HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/([\w.-]+)')  # file hook nạp/gọi cạnh nó (_lib.sh, guard.py)
 YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
 LOOP_GATE_KEYS = ("lint", "test")  # ADR-0011: trong vòng autopilot, hai khoá này rỗng/no-op thì dev-task.sh ĐỎ
-GATE_NOOP_RE = re.compile(r"true|:|exit( 0)?|(echo|printf)(\s.*)?")  # khớp is_noop() trong dev-task.sh
+# Một đoạn no-op của lệnh cổng — ĐÚNG chuỗi `NOOP_RE` của dev-task.sh (test so hai bên): `true` · `:` · `exit [0]` ·
+# `echo|printf` mà đối số không chứa `|`, `&`, `;`, backtick, `$(` (`echo go && pytest` là lệnh thật).
+GATE_NOOP_SEG = r"true|:|exit( 0)?|(echo|printf)([ \t]([^|&;`$]|[$][^(|&;`$])*)?"
+GATE_NOOP_SEG_RE = re.compile(GATE_NOOP_SEG)
+GATE_NOOP_SPLIT_RE = re.compile(r"&&|\|\||;|\n")
+
+
+def gate_noop(cmd: str) -> bool:
+    """Lệnh cổng rỗng hoặc không kiểm gì — như `is_noop()` của dev-task.sh: mọi đoạn nối bằng `&&` `||` `;` (bỏ khoảng
+    trắng hai đầu, đoạn rỗng bỏ qua) đều khớp `GATE_NOOP_SEG`."""
+    segs = (x.strip(" \t") for x in GATE_NOOP_SPLIT_RE.split(cmd.strip()))
+    return all(GATE_NOOP_SEG_RE.fullmatch(x) for x in segs if x)
+
+
 AUTOPILOT_IGNORES = (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot")
 # Công cụ memory ngoài cho coding agent (LOOP-HARNESS-021); khớp theo token trong tên plugin/MCP server.
 MEMORY_TOOLS = ("engram", "claude-mem", "agentmemory", "mem0", "openmemory", "basic-memory")
@@ -3715,7 +3728,7 @@ def gate_noop_keys(base: Path) -> List[str]:
         return []
     keys = {m[1]: yaml_scalar(m[2]) for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
     vals = {k: keys[k].strip() for k in LOOP_GATE_KEYS if k in keys}
-    return [k for k, v in vals.items() if not v or GATE_NOOP_RE.fullmatch(v)]
+    return [k for k, v in vals.items() if gate_noop(v)]
 
 
 def yaml_scalar(raw: str) -> str:
@@ -3838,14 +3851,14 @@ def gate_floor_issues(base: Path) -> List[str]:
     """Khoá sàn Gate ở quy mô M/L còn thiếu, rỗng hoặc no-op (mỗi dòng một khoá kèm cách sửa)."""
     scale, _ = blueprint_scale(base)
     need, keys = gate_floor_keys(base)
-    bad = [(k, why) for k, why in need if not keys.get(k) or GATE_NOOP_RE.fullmatch(keys[k])]
+    bad = [(k, why) for k, why in need if gate_noop(keys.get(k) or "")]
     return [f"quy mô {scale}: xt.yaml thiếu hoặc no-op `{k}` — {why}" for k, why in bad]
 
 
 def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:
     """[(khoá, lệnh)] sàn đã khai hợp lệ — `loop verify` chạy lại; khoá thiếu đã nằm ở `gate_floor_issues`."""
     need, keys = gate_floor_keys(base)
-    return [(k, keys[k]) for k, _ in need if keys.get(k) and not GATE_NOOP_RE.fullmatch(keys[k])]
+    return [(k, keys[k]) for k, _ in need if not gate_noop(keys.get(k) or "")]
 
 
 def _doctor_gate_floor(base: Path) -> List[Finding]:
