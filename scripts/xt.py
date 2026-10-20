@@ -2018,6 +2018,113 @@ def cmd_test_select(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- Chia shard test theo trọng số (D-095): `dev-task.sh test-shard` khi `xt.yaml` khai `test_weights` --------------
+SHARD_DEFAULT_WEIGHT = 1.0  # file vắng/rỗng: mọi id cùng trọng số → phân hoạch trùng hệt chỉ số k mod N
+
+
+def load_shard_weights(path: Path) -> Dict[str, float]:
+    """`{"tests.test_x.Lop": giây}` từ `path`; file vắng → {} (mọi id lấy mặc định). JSON hỏng, không phải object,
+    khoá không phải chuỗi hoặc giá trị không phải số hữu hạn ≥ 0 → ValueError (fail-closed: shard đỏ rõ)."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise ValueError(f"không đọc được {path}: {e}") from e
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        raise ValueError(f"{path} không phải JSON hợp lệ: {e}") from e
+    if not isinstance(data, dict):
+        raise ValueError(f'{path} phải là object {{"id": giây}}')
+    out: Dict[str, float] = {}
+    for key, val in data.items():
+        ok = isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(val) and val >= 0
+        if not ok:
+            raise ValueError(f"{path}: trọng số của {key!r} phải là số giây hữu hạn ≥ 0 (nhận {val!r})")
+        out[key] = float(val)
+    return out
+
+
+def shard_plan(ids: Iterable[str], weights: Dict[str, float], n: int) -> List[List[str]]:
+    """Phân hoạch xác định `ids` thành `n` shard bằng tham lam LPT: sắp giảm dần theo trọng số (hoà → theo id), mỗi id
+    vào shard có tổng nhẹ nhất (hoà → chỉ số nhỏ nhất). Id không có trong `weights` lấy trung vị của file (file rỗng →
+    `SHARD_DEFAULT_WEIGHT`). Mọi shard tính cùng phân hoạch từ cùng đầu vào; chênh lệch tổng giữa hai shard bất kỳ
+    ≤ trọng số lớn nhất (tính chất của lập lịch tham lam)."""
+    default = statistics.median(weights.values()) if weights else SHARD_DEFAULT_WEIGHT
+    order = sorted(set(ids), key=lambda t: (-weights.get(t, default), t))
+    loads = [0.0] * n
+    shards: List[List[str]] = [[] for _ in range(n)]
+    for t in order:
+        k = min(range(n), key=lambda j: (loads[j], j))
+        loads[k] += weights.get(t, default)
+        shards[k].append(t)
+    return [sorted(s) for s in shards]
+
+
+def _stdin_ids() -> List[str]:
+    return sorted({ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip()})
+
+
+def cmd_test_shard_plan(args: argparse.Namespace) -> int:
+    """`xt.py test-shard-plan I N --weights FILE`: đọc id test từ stdin (mỗi dòng một id), in id của shard I/N theo
+    `shard_plan`. I/N sai hoặc file trọng số hỏng → exit 2 (không đoán)."""
+    if not 1 <= args.index <= args.count:
+        print(f"✗ test-shard-plan: cần 1 ≤ I ≤ N (nhận I={args.index} N={args.count})", file=sys.stderr)
+        return 2
+    try:
+        weights = load_shard_weights(Path(args.weights))
+    except ValueError as e:
+        print(f"✗ test-shard-plan: {e}", file=sys.stderr)
+        return 2
+    ids = _stdin_ids()
+    shards = shard_plan(ids, weights, args.count)
+    default = statistics.median(weights.values()) if weights else SHARD_DEFAULT_WEIGHT
+    loads = [sum(weights.get(t, default) for t in s) for s in shards]
+    unknown = sum(1 for t in ids if t not in weights)
+    print(
+        f"[test-shard] {args.index}/{args.count}: ≈{loads[args.index - 1]:.1f} s theo trọng số "
+        f"(các shard: {' / '.join(f'{x:.1f}' for x in loads)}; {unknown} id không có trong {args.weights} "
+        f"→ {default:.1f} s)",
+        file=sys.stderr,
+    )
+    if shards[args.index - 1]:
+        print("\n".join(shards[args.index - 1]))
+    return 0
+
+
+def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path) -> Tuple[Dict[str, float], List[str]]:
+    """Chạy `unit` (bash, id ở "$1") lần lượt cho từng id, đo giây đồng hồ treo tường (làm tròn 0.1). Trả (trọng số,
+    id đỏ). Nối tiếp có chủ ý: đo song song thì các lớp tranh CPU, số đo lệch theo thứ tự chạy."""
+    weights: Dict[str, float] = {}
+    red: List[str] = []
+    for t in ids:
+        start = time.monotonic()
+        rc = subprocess.run(["bash", "-o", "pipefail", "-c", unit, "_", t], cwd=cwd, check=False).returncode
+        weights[t] = round(time.monotonic() - start, 1)
+        if rc != 0:
+            red.append(t)
+    return weights, red
+
+
+def cmd_test_weights(args: argparse.Namespace) -> int:
+    """`xt.py test-weights --unit CMD --out FILE`: id test từ stdin → đo từng id bằng `CMD`, ghi `FILE` (JSON, khoá sắp
+    xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → exit 1, không ghi (trọng số của lần chạy đỏ không đáng tin).
+    Chạy tay (`dev-task.sh test-weights`) khi bộ test đổi đáng kể; CI không chạy."""
+    ids = _stdin_ids()
+    if not ids:
+        print("✗ test-weights: stdin không có id test nào", file=sys.stderr)
+        return 1
+    weights, red = measure_test_weights(ids, args.unit, project_dir())
+    if red:
+        print(f"✗ test-weights: {len(red)} id đỏ, không ghi {args.out}: {', '.join(red)}", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"[test-weights] {len(weights)} id, tổng {sum(weights.values()):.1f} s → {out}", file=sys.stderr)
+    return 0
+
+
 def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
     """Chạy lệnh Gate: bash -o pipefail, không phải /bin/sh của shell=True — `test | tee log` phải đỏ khi test đỏ
     (sh lấy exit của lệnh cuối ống nên từng ghi bằng chứng exit 0 cho Gate đỏ — xanh giả, FB từ dự án đích).
@@ -8988,6 +9095,15 @@ def build_parser() -> argparse.ArgumentParser:
     pts.add_argument("--tests", default="tests", help="thư mục test theo gốc dự án (mặc định tests)")
     pts.add_argument("--unittest", action="store_true", help="in id lớp unittest thay vì đường dẫn file test")
     pts.set_defaults(fn=cmd_test_select)
+    psp = sub.add_parser("test-shard-plan", help="id test (stdin) của shard I/N chia theo trọng số — `dev-task.sh`")
+    psp.add_argument("index", type=int, help="shard I (1..N)")
+    psp.add_argument("count", type=int, help="số shard N")
+    psp.add_argument("--weights", required=True, help='file JSON {"id": giây}; vắng → mọi id cùng trọng số (k mod N)')
+    psp.set_defaults(fn=cmd_test_shard_plan)
+    ptw = sub.add_parser("test-weights", help="đo giây từng id test (stdin) bằng lệnh --unit, ghi file trọng số")
+    ptw.add_argument("--unit", required=True, help='lệnh bash chạy MỘT id ("$1"), như `test_unit` của xt.yaml')
+    ptw.add_argument("--out", required=True, help="file JSON ghi ra (khoá sắp xếp)")
+    ptw.set_defaults(fn=cmd_test_weights)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
     pg.set_defaults(fn=cmd_guard_check)

@@ -9,7 +9,8 @@ Kết quả trong dự án đích:
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
   .xtemplates/manifest.json     hash file harness + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
-  .github/rulesets/main.json, pull_request_template.md, dependabot.yml, workflows/{merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent)
+  .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
+  .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
 
 Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): chạy lại install là chuyển sang tên mới (ADR-0007) —
@@ -52,17 +53,24 @@ ROOT_TEMPLATES = {
 LEGACY_DIR = ".xstored"
 LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
-# --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Workflow KHÔNG copy vì job quality phụ thuộc
-# stack — trừ `merge-gate.yml` (ruleset mẫu đòi check của nó, ADR-0023) và `pr-steward.yml` (tự merge PR đủ tiêu chuẩn khi
-# không có phiên agent, ADR-0027): không phụ thuộc stack (chỉ python3 + gh). Mẫu PR
-# và Dependabot lấy từ framework/templates: bản ở `.github/` của khung là của riêng repo khung (module/hồ sơ, pip).
+# --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Mọi workflow ở đây KHÔNG phụ thuộc stack
+# (AUD-CI-003): `ci.yml` mẫu chạy lệnh của xt.yaml qua `.xtemplates/scripts/dev-task.sh` (job song song + `quality` tổng
+# hợp + `protection-guard`, WF-CI-024), `secret-scan.yml` (`gitleaks`), `merge-gate.yml` (ADR-0023) và `pr-steward.yml`
+# (ADR-0027) chỉ cần python3 + gh. `dep-audit` phụ thuộc ngôn ngữ — dự án tự viết (cảnh báo khi cài). Mẫu PR, Dependabot,
+# CI, quét bí mật lấy từ framework/templates: bản ở `.github/` của khung là của riêng repo khung (module/hồ sơ, pip).
 GITHUB_FILES = {
     ".github/rulesets/main.json": ".github/rulesets/main.json",
     ".github/pull_request_template.md": "framework/templates/PULL-REQUEST.md",
     ".github/dependabot.yml": "framework/templates/dependabot.yml",
+    ".github/workflows/ci.yml": "framework/templates/ci.yml",
+    ".github/workflows/secret-scan.yml": "framework/templates/secret-scan.yml",
     ".github/workflows/merge-gate.yml": ".github/workflows/merge-gate.yml",
     ".github/workflows/pr-steward.yml": ".github/workflows/pr-steward.yml",
 }
+# Job cấp 1 của workflow (thụt 2) và `name:` của nó (thụt 4) — cùng cách đọc với job `protection-guard`.
+WORKFLOW_JOBS_RE = re.compile(r"^jobs:\n(.*)", re.S | re.M)
+WORKFLOW_JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\n((?:    .*\n|\n)*)", re.M)
+WORKFLOW_NAME_RE = re.compile(r"^    name:\s*(.+?)\s*$", re.M)
 
 
 def log(msg: str) -> None:
@@ -136,6 +144,12 @@ def load_rules(target: Path) -> dict[str, list[str]]:
         return {k: [] for k in RULE_KEYS}
 
 
+def source_bytes(src: Path, transform: Callable[[str], str] | None = None) -> bytes:
+    """Nội dung file khung sẽ ghi vào dự án (sau biến đổi) — cũng là nội dung được băm vào manifest."""
+    data = src.read_bytes()
+    return transform(data.decode("utf-8")).encode("utf-8") if transform else data
+
+
 def classify_copy(
     src: Path,
     dst: Path,
@@ -145,9 +159,7 @@ def classify_copy(
 ) -> tuple[str, bytes]:
     """Quyết định (không ghi gì) cho một file khung: ('copied' | 'kept' | 'updated' | 'updated-new' | 'skipped-symlink',
     nội dung bản khung). Dùng chung cho `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
-    data = src.read_bytes()
-    if transform:
-        data = transform(data.decode("utf-8")).encode("utf-8")
+    data = source_bytes(src, transform)
     if dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
         return "skipped-symlink", data
     if dst.exists() and not force:
@@ -416,15 +428,22 @@ def copy_harness_files(
     return new_manifest
 
 
+def write_manifests(target: Path, files: dict[str, str], rules: dict[str, list[str]]) -> None:
+    """Ghi `harness.sha256.json` (hash file) và `manifest.json` (hash file + rule khung đặt + chính sách, REC-09)."""
+    write_atomic(target / MANIFEST, json.dumps(files, indent=2, sort_keys=True) + "\n")
+    doc = {"schema": 1, "files": files, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
+    write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+
+
 def install_harness(target: Path, force_harness: bool) -> None:
     """Bước 2: harness .claude/ — copy-if-absent, ghi manifest hash (+ manifest.json có rule khung), báo thống kê."""
     stats: Counter[str] = Counter()
     manifest = load_manifest(target)
     rules = install_settings(target, force_harness, stats, load_rules(target))
     new_manifest = copy_harness_files(target, force_harness, manifest, stats)
-    write_atomic(target / MANIFEST, json.dumps(new_manifest, indent=2, sort_keys=True) + "\n")
-    doc = {"schema": 1, "files": new_manifest, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
-    write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    # Hash file `.github/` (--with-github) giữ qua lần cài này: lần sau file chưa sửa vẫn được cập nhật tại chỗ.
+    new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES})
+    write_manifests(target, new_manifest, rules)
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
     if stats.get("updated-new"):
         log(
@@ -483,18 +502,49 @@ def ruleset_required_checks() -> list[str]:
         return []
 
 
-def install_github(target: Path) -> None:
-    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow `merge-gate` (copy-if-absent), cảnh
-    báo required check mà dự án phải tự có job."""
+def workflow_job_names(text: str) -> set[str]:
+    """Tên check của các job trong một workflow: `name:` của job, không có thì khoá job (như `protection-guard`)."""
+    m = WORKFLOW_JOBS_RE.search(text)
+    names: set[str] = set()
+    for jm in WORKFLOW_JOB_RE.finditer(m.group(1) if m else ""):
+        nm = WORKFLOW_NAME_RE.search(jm.group(2))
+        names.add(nm.group(1).strip("\"'") if nm else jm.group(1))
+    return names
+
+
+def provided_checks() -> set[str]:
+    """Tên job mà các workflow `--with-github` cung cấp (đọc từ nguồn trong khung)."""
+    names: set[str] = set()
     for gh, src in GITHUB_FILES.items():
-        r = copy_if_absent(SRC / src, target / gh, False, transform=template_body if src.endswith(".md") else None)
+        if gh.startswith(".github/workflows/"):
+            names |= workflow_job_names((SRC / src).read_text(encoding="utf-8"))
+    return names
+
+
+def github_template(src: str) -> Callable[[str], str] | None:
+    """Biến đổi mẫu GitHub: mẫu `.md` bỏ frontmatter/lấy khối ```markdown; file khác giữ nguyên."""
+    return template_body if src.endswith(".md") else None
+
+
+def install_github(target: Path) -> None:
+    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow CI/quét bí mật/`merge-gate`/
+    `pr-steward` (copy-if-absent; file chưa sửa so với lần cài trước thì cập nhật tại chỗ), ghi hash vào manifest, cảnh
+    báo required check chưa có job."""
+    manifest = load_manifest(target)
+    for gh, src in GITHUB_FILES.items():
+        tf = github_template(src)
+        r = copy_if_absent(SRC / src, target / gh, False, transform=tf, installed_hash=manifest.get(gh))
         log(f"  {gh}: {r}")
-    checks = [c for c in ruleset_required_checks() if c != "merge-gate"]  # job đã copy cùng ruleset
-    # AUD-CI-003: workflow không được copy (phụ thuộc stack) → import ruleset trước khi có job sẽ khoá merge
+        if r in ("copied", "updated", "kept"):
+            manifest[gh] = sha256(source_bytes(SRC / src, tf))
+    write_manifests(target, manifest, load_rules(target))
+    # AUD-CI-003: import ruleset khi còn required check chưa có job → mọi PR treo chờ check (và `protection-guard` đỏ)
+    checks = [c for c in ruleset_required_checks() if c not in provided_checks()]
     if checks:
         log(
-            f"  ⚠ ruleset mẫu đòi required check: {', '.join(checks)} — tạo workflow có job ĐÚNG tên trước khi import, "
-            "hoặc sửa danh sách check trong .github/rulesets/main.json; nếu không, mọi PR sẽ treo chờ check"
+            f"  ⚠ ruleset mẫu đòi required check chưa có job: {', '.join(checks)} — viết job ĐÚNG tên (vd `dep-audit`: "
+            "quét lỗ hổng phụ thuộc theo ngôn ngữ của dự án) trước khi import ruleset, hoặc bỏ khỏi "
+            ".github/rulesets/main.json; tới lúc đó `protection-guard` đỏ và PR treo chờ check"
         )
 
 
@@ -571,7 +621,7 @@ def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github:
     jobs += [(tsrc, name, False, body) for name, tsrc, body in root_template_jobs(target)]
     if with_github:
         for gh, gsrc in GITHUB_FILES.items():
-            jobs.append((SRC / gsrc, gh, False, template_body if gsrc.endswith(".md") else None))
+            jobs.append((SRC / gsrc, gh, False, github_template(gsrc)))
     return [
         {"path": rel, "action": classify_copy(src, target / rel, force, tf, manifest.get(rel))[0]}
         for src, rel, force, tf in jobs
@@ -642,7 +692,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--with-github",
         action="store_true",
-        help="copy ruleset mẫu, PR template, Dependabot, workflow merge-gate + pr-steward vào .github/ (không đè)",
+        help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + merge-gate + pr-steward vào .github/ "
+        "(không đè)",
     )
     p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")
     a = p.parse_args(argv)

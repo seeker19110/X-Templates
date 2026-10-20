@@ -17,6 +17,10 @@ build: python3 scripts/xt.py stats
 # đo; test_combine gộp mọi shard rồi đòi đúng ngưỡng của `test` (100 %, cấu hình .coveragerc). `gate`/`test` không đổi.
 test_list: "${XT_PY:-python3}" -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))'
 test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverage" python3 -m coverage run -m unittest "$1"; else "${XT_PY:-python3}" -m unittest "$1"; fi
+# test_weights: file trọng số (giây/lớp, đo có coverage) để `test-shard` chia tham lam LPT thay cho k mod N (D-095:
+# mod N dồn lớp nặng vào một shard). Sinh lại bằng tay: `scripts/dev-task.sh test-weights` rồi commit; lớp mới chưa có
+# trong file lấy trung vị; JSON hỏng → shard đỏ.
+test_weights: tests/shard-weights.json
 test_combine: export COVERAGE_FILE="$XT_COV_DIR/.coverage" && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100
 # Cổng trước commit (hook pre-bash-guard): fast = `dev-task.sh gate-fast` — lint (gồm format --check) · typecheck ·
 # test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) chạy trước

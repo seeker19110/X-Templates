@@ -13,7 +13,7 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights | setup
 #   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
 #          mở PR, `xt.py loop record` dùng đúng lệnh này.
 #   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
@@ -22,11 +22,17 @@
 #          chưa có commit) → chạy `test` (không bao giờ yếu hơn test thường). Không chạy build, không ngưỡng coverage
 #          riêng — cổng đầy đủ ở CI giữ chúng.
 #   test-shard I N [DIR] = chạy phần thứ I (1..N) của bộ test cho CI song song (fan-out): lệnh khai báo `test_list` in
-#          mỗi dòng một id test (sắp xếp, bỏ trùng); id thứ k (đếm từ 0) thuộc shard (k mod N) + 1; mỗi id chạy
-#          `test_unit` (id ở "$1") song song theo số CPU. DIR → export XT_COV_DIR=DIR để `test_unit` ghi dữ liệu
-#          coverage vào đó. Đỏ khi `test_list` đỏ, ít hơn XT_MIN_TESTS id (mặc định 1) hoặc shard rỗng.
+#          mỗi dòng một id test (sắp xếp, bỏ trùng). Có khoá `test_weights` (file JSON {"id": giây}) → chia tham lam
+#          LPT theo trọng số (`xt.py test-shard-plan`: nặng trước, vào shard nhẹ nhất; id lạ lấy trung vị; file hỏng →
+#          đỏ exit 2, file vắng → mọi id cùng trọng số); không khai → id thứ k (đếm từ 0) thuộc shard (k mod N) + 1.
+#          Mỗi id chạy `test_unit` (id ở "$1") song song theo số CPU. DIR → export XT_COV_DIR=DIR để `test_unit` ghi
+#          dữ liệu coverage vào đó. Đỏ khi `test_list` đỏ, ít hơn XT_MIN_TESTS id (mặc định 1) hoặc shard rỗng.
+#   test-weights = đo lại file `test_weights`: chạy `test_unit` lần lượt từng id (coverage vào thư mục tạm), ghi giây
+#          (JSON khoá sắp xếp). Chạy tay khi bộ test đổi đáng kể rồi commit file; CI KHÔNG chạy (số đo phụ thuộc máy).
 #   test-combine DIR = gộp dữ liệu coverage các shard (fan-in): export XT_COV_DIR=DIR rồi chạy `test_combine` (ngưỡng
 #          nằm trong lệnh đó). Không khai `test_list`/`test_unit`/`test_combine` → đỏ (không có no-op cho chia test).
+#   setup = cài toolchain/phụ thuộc cho job CI (mẫu `framework/templates/ci.yml`): chạy khoá `setup` (vd `npm ci`). Chỉ
+#          lệnh khai báo, không tự dò; vắng/rỗng → log "không khai setup", exit 0; guard cấm lệnh → exit 126.
 #
 # Dùng: scripts/dev-task.sh <task>
 set -uo pipefail
@@ -43,7 +49,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|setup"
   exit 2
 fi
 
@@ -211,6 +217,20 @@ shard_decl() { # $1=khoá → lệnh khai báo (in ra); thiếu → log, 1
 cov_dir() { # $1=thư mục → export XT_COV_DIR (đường dẫn tuyệt đối, tạo nếu chưa có)
   mkdir -p -- "$1" && XT_COV_DIR="$(cd -- "$1" && pwd)" && export XT_COV_DIR
 }
+xt_py() { # chạy xt.py cạnh script này (cần cho chia theo trọng số); thiếu python3/xt.py → log, 2
+  local xt; xt="$(dirname "$0")/xt.py"
+  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || { log "$TASK: cần python3 và $xt (khoá 'test_weights')"; return 2; }
+  CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" "$@"
+}
+weights_file() { # đường dẫn tuyệt đối của `test_weights` trong xt.yaml; rỗng nếu không khai
+  local w; w="$(declared_cmd test_weights)"
+  case "$w" in "" | /*) printf '%s' "$w" ;; *) printf '%s' "$ROOT/$w" ;; esac
+}
+shard_pick() { # stdin=id (sắp xếp, bỏ trùng) $1=I $2=N → id của shard I: theo trọng số nếu khai `test_weights`, không thì k mod N
+  local w; w="$(weights_file)"
+  if [ -z "$w" ]; then awk -v i="$1" -v n="$2" '(NR - 1) % n == i - 1'; return 0; fi
+  xt_py test-shard-plan "$1" "$2" --weights "$w"
+}
 test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   local i="$1" n="$2" min="${XT_MIN_TESTS:-1}" list unit ids total pick
   if ! [[ "$i" =~ ^[1-9][0-9]{0,5}$ && "$n" =~ ^[1-9][0-9]{0,5}$ && "$min" =~ ^[0-9]{1,9}$ ]] || [ "$i" -gt "$n" ]; then
@@ -226,10 +246,23 @@ test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   if [ "$total" -lt "$min" ]; then
     log "test-shard: chỉ có $total id test < XT_MIN_TESTS=$min — liệt kê hỏng thì không được xanh"; return 1
   fi
-  pick="$(printf '%s\n' "$ids" | awk -v i="$i" -v n="$n" '(NR - 1) % n == i - 1')"
+  pick="$(printf '%s\n' "$ids" | shard_pick "$i" "$n")" || return $?
   [ -n "$pick" ] || { log "test-shard: shard $i/$n rỗng (chỉ $total id) — giảm N"; return 1; }
   log "test-shard $i/$n: $(printf '%s\n' "$pick" | grep -c .)/$total id"
   printf '%s\n' "$pick" | (cd "$ROOT" && xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 bash -o pipefail -c "$unit" _)
+}
+test_weights() { # đo lại `test_weights` bằng `test_list` + `test_unit` (coverage vào thư mục tạm, như job `test` của CI)
+  local list unit w ids d rc
+  w="$(weights_file)"
+  [ -n "$w" ] || { log "test-weights: chưa khai 'test_weights' (đường dẫn file trọng số) trong xt.yaml"; return 2; }
+  list="$(shard_decl test_list)" && unit="$(shard_decl test_unit)" || return 2
+  guard_ok "$list" && guard_ok "$unit" || return 126
+  ids="$(cd "$ROOT" && bash -o pipefail -c "$list")" || { log "test-weights: 'test_list' đỏ"; return 1; }
+  d="$(mktemp -d)" || return 2
+  printf '%s\n' "$ids" | XT_COV_DIR="$d" xt_py test-weights --unit "$unit" --out "$w"
+  rc=$?
+  rm -rf -- "$d"
+  return "$rc"
 }
 test_combine() { # $1=thư mục chứa dữ liệu coverage của mọi shard
   local c
@@ -309,6 +342,14 @@ case "$TASK" in
     test_shard "${2:-}" "${3:-}" "${4:-}"; exit $? ;;
   test-combine)
     test_combine "${2:-}"; exit $? ;;
+  test-weights)
+    test_weights; exit $? ;;
+  setup)
+    C="$(declared_cmd setup)"
+    [ -n "$C" ] || { log "setup: không khai setup trong xt.yaml — bỏ qua (dùng toolchain sẵn có của máy)"; exit 0; }
+    log "run [setup]: $C"
+    guard_ok "$C" || exit 126
+    ( cd "$ROOT" && bash -o pipefail -c "$C" ); exit $? ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|setup)"; exit 2 ;;
 esac

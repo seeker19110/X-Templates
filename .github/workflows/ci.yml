@@ -86,7 +86,7 @@ jobs:
       - name: lint — đúng lệnh trong xt.yaml (validate · link · progress · changelog · ci-check · ruff · shellcheck · JSON)
         run: scripts/dev-task.sh lint
 
-  # Test 3.13 có coverage, 4 shard theo lớp (lớp thứ k của danh sách sắp xếp → shard k mod 4 + 1). Mỗi shard tải dữ liệu
+  # Test 3.13 có coverage, 4 shard theo lớp, chia tham lam theo trọng số đo thật (`xt.yaml` `test_weights`, LPT; lớp lạ lấy trung vị — D-095). Mỗi shard tải dữ liệu
   # `.coverage.*` lên artefact; job `coverage` gộp và đòi 100 % — cùng tập test, cùng ngưỡng với `xt.yaml` `test`.
   test:
     name: test ${{ matrix.shard }}/4

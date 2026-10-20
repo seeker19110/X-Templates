@@ -215,13 +215,19 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((outside / "pwn.md").exists())
         self.assertTrue((self.target / "CLAUDE.md").is_symlink())
 
-    def test_with_github_warns_required_checks(self):
-        # AUD-CI-003: ruleset mẫu đòi check mà workflow không được copy.
+    def test_with_github_warns_only_checks_without_job(self):
+        # AUD-CI-003: ruleset mẫu đòi 5 check; workflow mẫu cung cấp quality · protection-guard · gitleaks · merge-gate →
+        # chỉ còn `dep-audit` (phụ thuộc ngôn ngữ) là dự án phải tự viết.
         err = io.StringIO()
         with redirect_stderr(err):
             self.assertEqual(self.run_install("--with-github"), 0)
-        self.assertIn("required check: quality", err.getvalue())
-        self.assertNotIn("merge-gate", err.getvalue().split("required check:")[1].split("\n")[0])
+        line = err.getvalue().split("required check chưa có job:")[1].split("\n")[0]
+        self.assertTrue(line.startswith(" dep-audit —"), line)
+        for provided in ("quality", "protection-guard", "gitleaks", "merge-gate"):
+            self.assertNotIn(provided, line.split("—")[0])
+        self.assertEqual(
+            set(install.ruleset_required_checks()) - install.provided_checks(), {"dep-audit"}
+        )  # mọi check khác của ruleset là job có thật trong workflow mẫu
 
     def test_with_github_copies_guardrails_without_overwrite(self):
         self.assertEqual(self.run_install(), 0)
@@ -242,10 +248,69 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((self.target / ".github" / "workflows" / "merge-gate.yml").exists())
         # ADR-0027: PR đủ tiêu chuẩn tự vào nhánh chính khi không còn phiên agent
         self.assertTrue((self.target / ".github" / "workflows" / "pr-steward.yml").exists())
+        # CI song song + `quality` tổng hợp và quét bí mật là mẫu không phụ thuộc stack (bản cho dự án đích)
+        for wf in ("ci.yml", "secret-scan.yml"):
+            self.assertEqual(
+                (self.target / ".github" / "workflows" / wf).read_bytes(),
+                (ROOT / "framework" / "templates" / wf).read_bytes(),
+            )
         rs.write_text("{}\n", encoding="utf-8")
         self.run_install("--with-github")
         self.assertEqual(rs.read_text(encoding="utf-8"), "{}\n")
         self.assertTrue(rs.with_name("main.json.xtemplates-new").exists())
+
+    def manifests(self) -> tuple[dict, dict]:
+        xt_dir = self.target / ".xtemplates"
+        legacy = json.loads((xt_dir / "harness.sha256.json").read_text(encoding="utf-8"))
+        return legacy, json.loads((xt_dir / "manifest.json").read_text(encoding="utf-8"))["files"]
+
+    def test_with_github_keeps_project_ci_and_records_hashes(self):
+        own = self.target / ".github" / "workflows" / "ci.yml"
+        own.parent.mkdir(parents=True)
+        own.write_text("name: CI riêng của dự án\n", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.run_install("--with-github"), 0)
+        self.assertEqual(own.read_text(encoding="utf-8"), "name: CI riêng của dự án\n")  # không đè
+        tmpl = ROOT / "framework" / "templates" / "ci.yml"
+        self.assertEqual(own.with_name("ci.yml.xtemplates-new").read_bytes(), tmpl.read_bytes())
+        for files in self.manifests():
+            self.assertNotIn(".github/workflows/ci.yml", files)  # file của dự án, không phải bản khung
+            for gh in (".github/workflows/secret-scan.yml", ".github/pull_request_template.md"):
+                # hash = nội dung ĐÃ ghi (mẫu .md đã bỏ frontmatter) → `doctor --drift` so được với file thật
+                self.assertEqual(files[gh], install.sha256((self.target / gh).read_bytes()), gh)
+        # File khung chưa sửa (đúng hash lần cài trước) → cập nhật tại chỗ khi khung có bản mới
+        scan = self.target / ".github" / "workflows" / "secret-scan.yml"
+        scan.write_text("# bản khung cũ\n", encoding="utf-8")
+        legacy, _ = self.manifests()
+        legacy[".github/workflows/secret-scan.yml"] = install.sha256(scan.read_bytes())
+        (self.target / ".xtemplates" / "harness.sha256.json").write_text(json.dumps(legacy), encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            self.run_install("--with-github")
+        self.assertEqual(scan.read_bytes(), (ROOT / "framework" / "templates" / "secret-scan.yml").read_bytes())
+        self.assertFalse(scan.with_name("secret-scan.yml.xtemplates-new").exists())
+        # Cài lại không --with-github: hash `.github/` vẫn giữ trong manifest
+        with redirect_stderr(io.StringIO()):
+            self.run_install()
+        for files in self.manifests():
+            self.assertIn(".github/workflows/secret-scan.yml", files)
+
+    def test_with_github_no_harness_creates_manifest(self):
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.run_install("--no-harness", "--with-github"), 0)
+        self.assertFalse((self.target / ".claude").exists())
+        legacy, files = self.manifests()
+        self.assertEqual(legacy, files)
+        self.assertEqual({k for k in files if not k.startswith(".github/")}, set())
+        self.assertIn(".github/workflows/ci.yml", files)
+        m = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(m["rules"], {"allow": [], "ask": [], "deny": []})
+
+    def test_workflow_job_names(self):
+        text = (
+            "name: x\njobs:\n  a:\n    name: quality\n    runs-on: u\n\n  b-c:\n    runs-on: u\n  d:\n    name: 'g'\n"
+        )
+        self.assertEqual(install.workflow_job_names(text), {"quality", "b-c", "g"})
+        self.assertEqual(install.workflow_job_names("name: merge-gate\n"), set())
 
     def test_refuses_self_and_missing(self):
         self.assertEqual(install.main([str(ROOT), "--label", "x"]), 2)
@@ -356,6 +421,8 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
         (src / "framework" / "templates").mkdir(parents=True, exist_ok=True)
         (src / "framework" / "templates" / "PULL-REQUEST.md").write_text("pr\n", encoding="utf-8")
         (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
+        for wf in ("ci.yml", "secret-scan.yml"):
+            (src / "framework" / "templates" / wf).write_text("name: x\n", encoding="utf-8")
         (src / ".github" / "workflows").mkdir()
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
         (src / ".github" / "workflows" / "pr-steward.yml").write_text("name: pr-steward\n", encoding="utf-8")
@@ -604,6 +671,8 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(actions[".claude/hooks/stop-guard.sh"], "copied")
         self.assertEqual(actions["AGENTS.md"], "copied")
         self.assertEqual(actions[".github/rulesets/main.json"], "copied")
+        self.assertEqual(actions[".github/workflows/ci.yml"], "copied")
+        self.assertEqual(actions[".github/workflows/secret-scan.yml"], "copied")
         self.assertFalse(plan["legacy_migration"])
         self.assertFalse(plan["manifest"]["present"])
 
@@ -623,6 +692,19 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(forced["settings"], {"action": "copied"})
         self.install()
         self.assertTrue((self.target / ".claude" / "hooks" / "stop-guard.sh.xtemplates-new").exists())
+
+    def test_install_plan_github_matches_real_install(self):
+        own = self.target / ".github" / "workflows" / "ci.yml"
+        own.parent.mkdir(parents=True)
+        own.write_text("name: CI riêng\n", encoding="utf-8")
+        actions = {f["path"]: f["action"] for f in self.plan("--with-github")["files"]}
+        self.assertEqual(actions[".github/workflows/ci.yml"], "updated-new")  # file dự án: giữ, mẫu ra .xtemplates-new
+        self.assertEqual(actions[".github/workflows/secret-scan.yml"], "copied")
+        self.install("--with-github")
+        actions = {f["path"]: f["action"] for f in self.plan("--with-github")["files"]}
+        self.assertEqual(actions[".github/workflows/secret-scan.yml"], "kept")
+        self.assertTrue(own.with_name("ci.yml.xtemplates-new").exists())
+        self.assertFalse([f for f in self.plan()["files"] if f["path"].startswith(".github/")])  # chỉ khi --with-github
 
     def test_install_plan_reports_permission_and_hook_diff(self):
         self.write_settings({"allow": ["Bash(make *)"], "ask": ["Bash(git merge *)"], "deny": []})

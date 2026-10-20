@@ -47,8 +47,11 @@ song (**fan-out**) rồi gom về một job tổng hợp (**fan-in**) giữ nguy
 1. **Một job mỗi task của cổng**, mỗi job gọi đúng lệnh của nguồn lệnh chung (`dev-task.sh lint`, `npm run lint`…) —
    không viết lệnh khác trong YAML (`WF-CI-002`). Mọi job cùng bước chuẩn bị (checkout, runtime, cài theo lockfile).
 2. **Test chia shard** bằng `strategy.matrix` (vd 4 shard): liệt kê đơn vị test (lớp/file) theo **một** cách duy nhất,
-   sắp xếp ổn định, phần tử thứ k vào shard `k mod N`; shard rỗng hoặc tổng số đơn vị dưới sàn → đỏ (không xanh với 0
-   test). Test của repo kiểm các shard hợp lại đúng bằng bộ test (không sót, không trùng).
+   sắp xếp ổn định, chia **xác định** (mọi shard tính cùng phân hoạch): phần tử thứ k vào shard `k mod N`, hoặc — khi
+   đơn vị nặng nhẹ chênh nhiều — tham lam LPT theo trọng số giây đo được, commit trong repo (nặng trước, vào shard nhẹ
+   nhất; đơn vị mới chưa có trọng số lấy trung vị; file trọng số hỏng → đỏ; đo lại bằng tay, không ở CI); shard rỗng
+   hoặc tổng số đơn vị dưới sàn → đỏ (không xanh với 0 test). Test của repo kiểm các shard hợp lại đúng bằng bộ test
+   (không sót, không trùng).
 3. **Coverage gộp ở fan-in**: mỗi shard đo coverage và tải dữ liệu lên artefact (retention ngắn, `WF-CI-019`); job
    `coverage` (`needs` mọi shard) tải về, gộp và đòi **đúng ngưỡng** như cổng local — ngưỡng không đổi vì tách job.
 4. **Job tổng hợp** `quality`: `needs` mọi job con, `if: always()`, đỏ khi bất kỳ `needs.<job>.result` ≠ `success` (job
@@ -58,7 +61,12 @@ song (**fan-out**) rồi gom về một job tổng hợp (**fan-in**) giữ nguy
 5. Cổng local (`dev-task.sh gate`, hook commit) giữ nguyên là một lệnh nối tiếp — fan-out chỉ là cách CI chạy cùng các
    lệnh đó. Bước một lệnh ngắn (secret scan, audit phụ thuộc) để nguyên một job: tách thêm chỉ tốn thời gian khởi động
    runner (~10–15 s mỗi job). Shard theo chỉ số không cân thời gian — lớp test nặng nhất là sàn của shard; cân bằng theo
-   thời gian đo được chỉ khi shard chậm nhất chênh rõ.
+   thời gian đo được chỉ khi shard chậm nhất chênh rõ (repo khung: `k mod N` cho 4 shard 63/58/80/164 s tổng trọng số,
+   LPT 91/91/91/92 s — D-095).
+
+Dự án đích không phải tự viết (`WF-CI-024`, `WF-CI-001`): `install.py --with-github` cài mẫu không phụ thuộc stack
+[`../templates/ci.yml`](../templates/ci.yml) (lệnh lấy từ `xt.yaml`) và
+[`../templates/secret-scan.yml`](../templates/secret-scan.yml); `dep-audit` vẫn do dự án viết theo ngôn ngữ.
 
 ## Checklist
 
@@ -85,7 +93,7 @@ song (**fan-out**) rồi gom về một job tổng hợp (**fan-in**) giữ nguy
 - [ ] `WF-CI-021` **MAY** Preview deploy cho mỗi PR (URL trong PR) dùng environment riêng, dữ liệu giả, tự xoá khi đóng PR ([`environments-and-config.md`](environments-and-config.md)). → Kiểm: job preview + job cleanup on `closed`.
 - [ ] `WF-CI-022` **MAY** Agent tự sửa CI đỏ: trần số lần re-run/sửa (vd 3), cấm skip/disable test, cấm rewrite history; xem [`../11-autonomous-loop/self-healing-ci.md`](../11-autonomous-loop/self-healing-ci.md). → Kiểm: cấu hình trần; log số lần.
 - [ ] `WF-CI-023` **MUST@L** Workflow có trigger `pull_request` (cả PR cùng repo, không riêng fork) không tham chiếu `secrets.*` ngoài `GITHUB_TOKEN`, trừ job có `environment:` kèm required reviewers; job cần secret chỉ chạy khi push nhánh chính hoặc `workflow_dispatch`, và chạy công cụ từ thư mục sạch (không phải thư mục chứa code PR). Lý do: với autopilot, PR là code agent viết, có thể đã dính injection. → Kiểm: `xt.py ci-check` báo lỗi khi workflow có `pull_request` (hoặc `pull_request_target`) mà job không có `environment:` lại chứa `secrets.X`/`secrets[...]`/`secrets: inherit` (X ≠ `GITHUB_TOKEN`); ngoại lệ có chủ đích `# ci-check-allow: <lý do>` trên dòng đó; reviewer của environment kiểm trên GitHub, không kiểm được bằng máy. · Nguồn: stored 12 §3f (garak chỉ chạy khi push `main`/chạy tay, không trên `pull_request`, chạy trong thư mục trống)
-- [ ] `WF-CI-024` **SHOULD** Cổng CI chạy song song theo mô hình fan-out/fan-in khi có ≥ 2 bước độc lập dài: mỗi task của cổng một job gọi đúng lệnh chung, test chia shard (liệt kê đơn vị test một cách, phần tử k vào shard `k mod N`, shard rỗng/tổng dưới sàn → đỏ), coverage gộp ở job riêng với đúng ngưỡng cổng local, job tổng hợp `quality` `if: always()` `needs` mọi job con. → Kiểm: test của repo đọc workflow — mọi task của cổng có job, `quality.needs` = mọi job con, `quality.if` có `always()` không có `cancelled()`; hợp các shard == tập đơn vị test của discover; job gộp coverage đòi ngưỡng như cổng local. · Nguồn: GitHub Troubleshooting required status checks (job bị bỏ qua do điều kiện báo "Success"), Workflow syntax (`jobs.<id>.needs`, `always()`, `strategy.matrix`)
+- [ ] `WF-CI-024` **SHOULD** Cổng CI chạy song song theo mô hình fan-out/fan-in khi có ≥ 2 bước độc lập dài: mỗi task của cổng một job gọi đúng lệnh chung, test chia shard (liệt kê đơn vị test một cách, chia xác định — phần tử k vào shard `k mod N` hoặc tham lam theo trọng số đo được commit trong repo, file trọng số hỏng → đỏ — shard rỗng/tổng dưới sàn → đỏ), coverage gộp ở job riêng với đúng ngưỡng cổng local, job tổng hợp `quality` `if: always()` `needs` mọi job con. → Kiểm: test của repo đọc workflow — mọi task của cổng có job, `quality.needs` = mọi job con, `quality.if` có `always()` không có `cancelled()`; hợp các shard == tập đơn vị test của discover; job gộp coverage đòi ngưỡng như cổng local. · Nguồn: GitHub Troubleshooting required status checks (job bị bỏ qua do điều kiện báo "Success"), Workflow syntax (`jobs.<id>.needs`, `always()`, `strategy.matrix`)
 
 ## Bẫy thường gặp
 
