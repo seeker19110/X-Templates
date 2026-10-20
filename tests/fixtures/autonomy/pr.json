@@ -1010,6 +1010,77 @@
     "review_deferred": false
    },
    "note": "review blocking chặn ở mọi pha"
+  },
+  {
+   "id": "pr-phase-blocking-oldhead",
+   "origin": "repro",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ],
+     "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "xtReviews": [
+      {
+       "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "clean": false,
+       "at": "2026-10-20T10:00:00Z"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing",
+    "review_deferred": false
+   },
+   "note": "ADR-0031: review blocking ở head cũ không bị một lần push 'rửa' thành deferred — cần review lại head hiện tại"
+  },
+  {
+   "id": "pr-phase-build-risk-label",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "src/a.py",
+       "additions": 200,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ],
+     "labels": [
+      {
+       "name": "risk:perf"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "review": "missing",
+    "review_deferred": false
+   },
+   "note": "ADR-0031 + ADR-0025: nhãn risk: là phanh thủ công — pha build không hoãn review"
   }
  ]
 }

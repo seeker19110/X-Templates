@@ -42,16 +42,16 @@ ghi thì như merge-check lỗi mạng.
 
 | Nhóm | Ca | Đạt | False-green | Chặn oan | Lệch | Lỗi |
 |---|---:|---:|---:|---:|---:|---:|
-| pr | 42 | 42 | 0 | 0 | 0 | 0 |
+| pr | 44 | 44 | 0 | 0 | 0 | 0 |
 | rollup | 17 | 17 | 0 | 0 | 0 | 0 |
-| review | 23 | 23 | 0 | 0 | 0 | 0 |
+| review | 25 | 25 | 0 | 0 | 0 | 0 |
 | guard | 169 | 169 | 0 | 0 | 0 | 0 |
 | ci_log | 25 | 25 | 0 | 0 | 0 | 0 |
 | harness | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Tổng** | **287** | **287** | **0** | **0** | **0** | **0** |
+| **Tổng** | **291** | **291** | **0** | **0** | **0** | **0** |
 
-Nguồn ca: tái hiện §2 + review PR #173 27 · phát hiện audit 153 · đối kháng do tác giả bản sửa viết 76 · đối kháng do reviewer khác họ
-model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 31. Độ phủ: 117 ID bắt buộc (8 REC §2 + 109 🔴/🟠 đã sửa) —
+Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 29 · phát hiện audit 153 · đối kháng do tác giả bản sửa viết 77 · đối kháng do reviewer khác họ
+model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 32. Độ phủ: 117 ID bắt buộc (8 REC §2 + 109 🔴/🟠 đã sửa) —
 70 có ca, 47 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
 thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run), 0 chưa phủ. Thời gian chạy ~0,35 s.
 
@@ -88,7 +88,7 @@ mở); ở mặc định lớp đỡ là required check `merge-gate` (nhóm `rev
   kháng do reviewer **khác họ model** với tác giả viết. Số ca `adversarial-reviewer` hiện là 0 và lệnh in cảnh báo
   "chưa có ca đối kháng do reviewer khác họ model viết". Việc kế: reviewer khác họ (`reviewer`/`reviewer-alt`) thêm ca
   vào các file nhóm với `"origin": "adversarial-reviewer"`; ca nào đỏ thì vào `pending/` kèm phát hiện audit.
-- **Kết luận giới hạn trong tập đã kiểm.** 0 false-green nghĩa là 287 ca này không lọt, không phải guard/merge không còn
+- **Kết luận giới hạn trong tập đã kiểm.** 0 false-green nghĩa là 291 ca này không lọt, không phải guard/merge không còn
   lỗ — §4 (5 lỗ baseline tìm ra sau khi đã có 247 ca xanh) là bằng chứng ngược lại.
 - **Không đo đường tiến trình.** Hook shell (`pre-*-guard.sh`, cổng commit), `install.py` chép file, `gh` thật và
   `git` thật nằm ngoài corpus (`scope.json`); test_hooks.py/test_install.py/test_merge.py giữ phần đó.

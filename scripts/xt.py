@@ -4245,6 +4245,14 @@ def _stacked_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
+def _risk_labels(pr: Dict[str, Any]) -> List[str]:
+    return [
+        n
+        for n in (str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict))
+        if n.startswith("risk:")
+    ]
+
+
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
@@ -4306,6 +4314,9 @@ def merge_decision(
         "base_has_required": pr.get("baseHasRequired") if isinstance(pr.get("baseHasRequired"), bool) else None,
         "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
+        "risk_labels": _risk_labels(
+            pr
+        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build không hoãn review (ADR-0031)
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -4378,6 +4389,15 @@ def review_deferrable(d: Dict[str, Any]) -> bool:
     """Review của PR được hoãn thành nợ (ADR-0031): pha build VÀ PR không thuộc ngoại lệ cứng — kể cả ngoại lệ cứng chủ
     dự án đã cho máy merge (`hard_waived`, ADR-0020): tiền/dữ liệu thật/auth/mật mã/bí mật vẫn cần review sạch."""
     return d.get(PHASE_KEY) == "build" and not d.get("hard") and not d.get("hard_waived")
+
+
+def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:
+    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable`, PR không mang nhãn `risk:` (phanh thủ
+    công, ADR-0025) VÀ review KẾT LUẬN mới nhất của PR (bất kể head) không phải `blocking`: lỗi chặn ở head cũ không bị
+    "rửa" bằng một lần push — cần review lại head hiện tại; review `inconclusive` không gỡ lỗi chặn trước nó."""
+    concluded = [r for r in reviews if not r.get("inconclusive")]
+    washed = bool(concluded) and not concluded[-1].get("clean")
+    return state == "missing" and review_deferrable(d) and not d.get("risk_labels") and not washed
 
 
 def _risk_globs(keys: Dict[str, str]) -> List[str]:
@@ -7265,9 +7285,10 @@ def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard
     """MỘT điều kiện "được merge/được bật auto-merge" cho `merge-check`, `pr next`, `merge-gate`, guard (`gh`/MCP) và steward
     (REC-03, ADR-0028), hàm thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` =
     không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật. Pha build
-    (ADR-0031, `review_deferrable`): thiếu review ở head thành `deferred` (hợp lệ, ghi nợ); review `blocking` vẫn chặn."""
+    (ADR-0031, `review_deferred`): thiếu review ở head thành `deferred` (hợp lệ, ghi nợ); review `blocking` vẫn chặn — kể
+    cả ở head cũ khi chưa có review sạch sau nó — và nhãn `risk:` giữ `missing`."""
     g = review_gate(d, reviews, standard_seen)
-    state = "deferred" if g["state"] == "missing" and review_deferrable(d) else g["state"]
+    state = "deferred" if review_deferred(d, reviews, g["state"]) else g["state"]
     review_ok = state in ("na", "ok", "deferred")
     return {
         "strict": g["strict"],
@@ -7289,8 +7310,9 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
     gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
     strict = gate["strict"]
-    # Pha build (ADR-0031): chưa rà head này không chặn PR ngoài ngoại lệ cứng — ghi nợ; review `blocking` vẫn chặn.
-    deferred = gate["state"] == "missing" and review_deferrable(d)
+    # Pha build (ADR-0031): chưa rà head này không chặn PR ngoài ngoại lệ cứng — ghi nợ; review `blocking` (cả ở head cũ
+    # chưa có review sạch sau nó) và nhãn `risk:` vẫn chặn.
+    deferred = review_deferred(d, reviews, gate["state"])
     disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
 
     def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:

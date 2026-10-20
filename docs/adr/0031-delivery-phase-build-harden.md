@@ -2,7 +2,7 @@
 
 - **Trạng thái:** Đã chấp nhận
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `delivery_phase`/`delivery_phase_error`/
-  `review_deferrable`, `merge_eligibility` (`review: deferred`, `review_deferred`), `merge_check_result`, `pr_next`,
+  `review_deferrable`/`review_deferred`, `merge_eligibility` (`review: deferred`, `review_deferred`), `merge_check_result`, `pr_next`,
   `release_check` (hàng `phase`, `review_debt`), `doctor`/`ci-check`; mẫu `framework/templates/xt.yaml`
   (`delivery_phase: build`); test `tests/test_delivery_phase.py`, ca `pr-phase-*`/`review-phase-*` của
   `tests/fixtures/autonomy/`.
@@ -33,7 +33,13 @@ vào state.
    `merge-check --json` có `review_deferred: true`, `merge-gate` xanh, guard cho bật auto-merge/merge ghim head, steward
    xử lý như PR đã rà. Điều kiện còn lại không đổi: CI xanh, không xung đột, không tụt sau, verdict `merge` của
    `merge_decision`. `pr next` đi thẳng tới bật auto-merge/merge và ghi "pha build: bỏ qua review, ghi nợ (ADR-0031)".
-4. **Review `blocking` chặn ở mọi pha.** Review đã đăng báo lỗi chặn ở head thì PR phải sửa như cũ.
+4. **Review `blocking` chặn ở mọi pha — kể cả ở head cũ; nhãn `risk:` cũng giữ review.** Review đã đăng báo lỗi chặn ở
+   head thì PR phải sửa như cũ. Ở pha build, `missing` chỉ thành `deferred` (`review_deferred`) khi review KẾT LUẬN mới
+   nhất của PR, bất kể head, không phải `blocking`: nếu không, một lần push đổi head sẽ "rửa" lỗi chặn thành nợ — nên
+   review `blocking` ở head cũ mà chưa có review sạch sau nó giữ `missing` (cần review lại head hiện tại); review
+   `inconclusive` không gỡ lỗi chặn trước nó; chưa từng có review, chỉ có review `inconclusive`, hay review gần nhất sạch
+   ở head cũ thì vẫn hoãn. PR mang nhãn `risk:` bất kỳ (`risk_labels` của `merge_decision`) cũng giữ `missing`: ADR-0025
+   dùng gắn nhãn `risk:` làm phanh thủ công, nên pha build không được bỏ qua nó (cách hiểu chặt, AGENTS.md §4 tiêu chí 1).
 5. **Nợ review có hạn — trả trước G7.** PR merge ở pha build không có review sạch là nợ review; không thêm sổ mới:
    `xt.py release-check` thêm hai hàng BLOCKER — `phase` FAIL khi `delivery_phase: build` (hay giá trị lạ): "đặt
    `delivery_phase: harden` rồi chạy audit delta"; `review_debt` FAIL khi có file ngoài tài liệu (`DOC_PATH_RE`) đổi sau

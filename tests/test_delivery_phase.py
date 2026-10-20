@@ -144,6 +144,35 @@ class DeliveryPhaseMergeTest(unittest.TestCase):
         fast = self.result(pr()["files"], "build", xtReviews=[mark(False)])  # lỗi chặn trên làn nhanh cũng chặn
         self.assertEqual((fast["review"], fast["eligible"]), ("blocking", False))
 
+    def test_delivery_phase_blocking_washed_by_push_not_deferred(self):
+        old = "b" * 40  # review blocking ở head CŨ; head hiện tại khác (một lần push không "rửa" được lỗi chặn)
+        d = self.result(STANDARD, "build", xtReviews=[mark(False, old)])
+        self.assertEqual(
+            (d["review"], d["review_deferred"], d["eligible"], d["auto_merge_ok"]), ("missing", False, False, False)
+        )
+        inc = {**mark(False, HEAD), "at": "2026-10-20T11:00:00Z", "inconclusive": True}
+        d = self.result(STANDARD, "build", xtReviews=[mark(False, old), inc])  # chưa kết luận không gỡ lỗi chặn
+        self.assertEqual((d["review"], d["eligible"]), ("missing", False))
+        fixed = {**mark(True, "c" * 40), "at": "2026-10-20T11:00:00Z"}  # sạch (head cũ khác) sau blocking: lại hoãn
+        d = self.result(STANDARD, "build", xtReviews=[mark(False, old), fixed])
+        self.assertEqual((d["review"], d["review_deferred"], d["eligible"]), ("deferred", True, True))
+        d = self.result(STANDARD, "build", xtReviews=[mark(False, old), fixed, inc])  # sạch rồi chưa kết luận: hoãn
+        self.assertEqual((d["review"], d["eligible"]), ("deferred", True))
+        d = self.result(STANDARD, "build", xtReviews=[{**inc, "head": old}])  # chỉ có review chưa kết luận: hoãn
+        self.assertEqual((d["review"], d["eligible"]), ("deferred", True))
+        self.assertEqual(self.result(STANDARD, "build")["review"], "deferred")  # chưa review lần nào: hoãn
+        d = self.result(STANDARD, "harden", xtReviews=[mark(False, old)])  # harden không đổi
+        self.assertEqual((d["review"], d["eligible"]), ("missing", False))
+        d = self.result(STANDARD, "harden", xtReviews=[mark(False, old), fixed])
+        self.assertEqual((d["review"], d["eligible"]), ("missing", False))
+
+    def test_delivery_phase_blocking_washed_risk_label_needs_review(self):
+        d = self.result(STANDARD, "build", labels=[{"name": "risk:perf"}])  # nhãn risk: = phanh thủ công (ADR-0025)
+        self.assertEqual((d["risk_labels"], d["review"], d["eligible"]), (["risk:perf"], "missing", False))
+        d = self.result(STANDARD, "build", labels=[{"name": "risk:perf"}], xtReviews=[mark(True)])
+        self.assertEqual((d["review"], d["eligible"]), ("ok", True))
+        self.assertEqual(self.result(STANDARD, "build", labels=[{"name": "ui"}])["risk_labels"], [])
+
 
 class DeliveryPhasePrNextTest(unittest.TestCase):
     """`pr next` ở pha build: PR làn chuẩn chưa rà đi thẳng tới bật auto-merge/merge, nói rõ "bỏ qua review, ghi nợ"."""
@@ -182,6 +211,18 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         self.assertEqual((r["action"], r["review_deferred"]), ("disable-auto-merge", False))
         r = xt.pr_next(self.d(), False, {"reviews": [mark(False, self.H)]})
         self.assertEqual(r["action"], "fix")
+
+    def test_delivery_phase_blocking_washed_pr_next_asks_review(self):
+        old = [mark(False, "b" * 40)]  # lỗi chặn ở head cũ: sau push cần review lại head hiện tại, không bật auto-merge
+        r = xt.pr_next(self.d(), False, {"reviews": old})
+        self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
+        r = xt.pr_next(self.d(), True, {"reviews": old})
+        self.assertEqual(r["action"], "disable-auto-merge")
+        r = xt.pr_next(self.d(risk_labels=["risk:perf"]), False, {})
+        self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
+        ok = [*old, {**mark(True, "c" * 40), "at": "2026-10-20T11:00:00Z"}]
+        r = xt.pr_next(self.d(), False, {"reviews": ok})
+        self.assertEqual((r["action"], r["review_deferred"]), ("enable-auto-merge", True))
 
 
 class DeliveryPhaseCliTest(unittest.TestCase):
