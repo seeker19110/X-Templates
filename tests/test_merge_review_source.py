@@ -222,6 +222,11 @@ class ReviewSourceTest(unittest.TestCase):
         self.assertEqual(r["action"], "republish-review")
         r = xt.pr_next({**d, "lane": "nhanh"}, False, xt.with_published({"reviews": [clean]}, []))
         self.assertEqual(r["action"], "enable-auto-merge")  # sạch, làn nhanh: không cần review
+        # review chưa đăng của head CŨ: không đăng lại (head đã đổi → cần review mới ở head hiện tại)
+        stale = {**newer, "head": "a" * 40}
+        for lane in ("nhanh", "chuẩn"):
+            r = xt.pr_next({**d, "lane": lane}, False, xt.with_published({"reviews": [stale]}, []))
+            self.assertNotEqual(r["action"], "republish-review", lane)
 
 
 class ReviewSourceChainTest(unittest.TestCase):

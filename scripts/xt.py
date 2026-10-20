@@ -7836,9 +7836,10 @@ def _pr_next_republish(
 ) -> Optional[Dict[str, Any]]:
     """Sổ cục bộ có review chưa đăng lên PR: đăng lại khi nó đổi được kết luận — review không sạch (lỗi chặn/chưa kết
     luận phải thấy được ở mọi phiên, CI, steward) hoặc review sạch khi dấu đã đăng chưa cho qua (`review_bad`). Review
-    sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn."""
+    sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn. Review của head cũ không đăng lại: head đã đổi
+    thì cần review mới ở head hiện tại, đăng kết luận cũ chỉ thêm một bước thừa."""
     r = unpublished_review(rec)
-    if r is None or (r.get("clean") and not r.get("inconclusive") and not review_bad):
+    if r is None or r.get("head") != d.get("head") or (r.get("clean") and not r.get("inconclusive") and not review_bad):
         return None
     n = d.get("pr", "")
     why = (
