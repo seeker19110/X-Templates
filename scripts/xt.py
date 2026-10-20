@@ -46,7 +46,7 @@ Lệnh:
   feedback aggregate --from DỰ_ÁN=GỐC_REPO|THƯ_MỤC ... [--json]
                                 Repo khung: gộp phản hồi nhiều dự án theo (loại, ID), đánh dấu đủ ngưỡng sửa.
   merge-check [--pr PR] [--pr-json F] [--json]
-                                Máy quyết khi nào merge PR: merge · wait · update · fix · human · closed (exit 0 = merge).
+                                Máy quyết khi nào merge PR: merge · review · wait · update · fix · human · closed (exit 0 = merge).
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
                                 Việc production có nằm trong mục Ủy quyền production của PLAN.md không (exit 0 =
                                 trong ủy quyền; 1 = ngoài → loop defer; thiếu mục = ngoài).
@@ -4484,7 +4484,8 @@ def _risk_labels(pr: Dict[str, Any]) -> List[str]:
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
-    """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed.
+    """Máy quyết khi nào merge PR (ADR-0013). verdict: merge · wait · update · fix · human · closed (`merge_check_result`
+    thêm `review` khi CI/làn cho merge mà review ở head chưa hợp lệ — AUD-XFEAT-010).
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
     PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0024: làn chuẩn bật sau review sạch, làn nhanh khi mở). `hard_auto` (`merge_hard_exceptions: auto`,
@@ -6983,6 +6984,14 @@ def merge_check_result(
     d = {**merge_decision(pr, autonomy, risk_paths, hard_auto), PHASE_KEY: phase}
     marks = [r for r in pr.get("xtReviews") or [] if isinstance(r, dict)]
     elig = merge_eligibility(d, sorted(marks, key=lambda r: _iso_key(r.get("at", ""))), _standard_seen(pr))
+    # AUD-XFEAT-010: CI/làn cho merge mà chưa có review hợp lệ ở head → không gợi lệnh merge, verdict `review`
+    if d["verdict"] == "merge" and not elig["eligible"]:
+        d = {k: v for k, v in d.items() if k != "next_rest"}
+        d.update(
+            verdict="review",
+            reasons=[*d["reasons"], f"chưa có review hợp lệ ở head ({elig['review']}) — ADR-0028"],
+            next=_review_step(d, elig["review"]),
+        )
     return {
         **d,
         "review": elig["review"],
@@ -6990,6 +6999,17 @@ def merge_check_result(
         "eligible": elig["eligible"],
         "auto_merge_ok": elig["auto_merge_ok"],
     }
+
+
+def _review_step(d: Dict[str, Any], state: str) -> str:
+    """Bước kế của `merge-check` khi CI/làn đã cho merge mà review ở head chưa hợp lệ (verdict `review`)."""
+    n, head = d.get("pr", ""), d.get("head", "")
+    if state == "blocking":
+        return f"review ở head còn lỗi chặn — sửa, push, rà lại; bước kế: xt.py pr next --pr {n}"
+    return (
+        f"giao reviewer (model khác) rà head; xong: xt.py pr reviewed --pr {n} --head {head} --clean|--blocking"
+        f" --reviewer-model <M> --author-model <M>; bước kế: xt.py pr next --pr {n}"
+    )
 
 
 def cmd_merge_check(args: argparse.Namespace) -> int:
@@ -7290,7 +7310,7 @@ def _watch_final(d: Dict[str, Any]) -> int:
 
 def cmd_merge_watch(args: argparse.Namespace) -> int:
     """Gọi `merge-check` mỗi `--interval` giây (mặc định 30) tới khi verdict ≠ wait (ADR-0021). Chạy nền (`run_in_background`): thoát
-    thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (update/fix/human/
+    thì agent được đánh thức, không tốn token mỗi lượt hỏi. Exit: 0 đã merge/`merge`, 1 cần hành động (review/update/fix/human/
     đóng không merge), 2 lỗi đọc PR `WATCH_ERROR_LIMIT` lần liền, 3 hết `--max-minutes` mà PR vẫn chờ, 141 bên đọc đóng ống."""
     deadline = time.monotonic() + args.max_minutes * 60
     errors = 0
@@ -7493,16 +7513,46 @@ def _iso_key(at: object) -> str:
 
 
 def with_published(rec: Dict[str, Any], marks: object, published_only: bool = False) -> Dict[str, Any]:
-    """Sổ review của PR gộp review đã đăng (ADR-0027), theo thời gian — review cuối cùng quyết. `published_only` (xt.yaml
-    có `review_identity`): chỉ review đã đăng của tài khoản reviewer — sổ cục bộ do chính tác giả ghi không tính, cùng
-    "một sự thật" với `merge_eligibility` (ADR-0028, review #168)."""
+    """Sổ review của PR cho `pr next`/steward: `reviews` = CHỈ review đã đăng trên PR (ADR-0027), theo thời gian — cùng
+    nguồn với `merge-check`/`merge-gate`/guard (ADR-0028, AUD-XFEAT-011: hai nguồn làm `pr next` bật auto-merge mà
+    `merge-gate` đỏ, thành vòng bật/tắt). `local_reviews` = sổ cục bộ, chỉ để nhận ra review chưa đăng được
+    (`unpublished_review` → bước đăng lại). `published_only` (xt.yaml có `review_identity`): sổ cục bộ do chính tác giả
+    ghi không tính, kể cả để đăng lại — dấu của tác giả không phải review (review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
-    if published_only:
-        return {**rec, "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", "")))}
-    if not pub:
-        return rec
-    local = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
-    return {**rec, "reviews": sorted([*local, *pub], key=lambda r: _iso_key(r.get("at", "")))}
+    local = [] if published_only else [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+    return {
+        **rec,
+        "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", ""))),
+        "local_reviews": sorted(local, key=lambda r: _iso_key(r.get("at", ""))),
+    }
+
+
+def _review_kind(r: Dict[str, Any]) -> Tuple[str, bool, bool]:
+    return str(r.get("head", "")), bool(r.get("clean")), bool(r.get("inconclusive"))
+
+
+def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Review cuối của sổ cục bộ mà PR chưa có dấu tương ứng (cùng head, cùng kết luận) và không cũ hơn dấu đã đăng mới
+    nhất — `pr reviewed` đã ghi sổ nhưng đăng thất bại (gh lỗi, exit 3). None = không có gì phải đăng lại."""
+    local = [r for r in rec.get("local_reviews") or [] if isinstance(r, dict)]
+    pub = [r for r in rec.get("reviews") or [] if isinstance(r, dict)]
+    if not local:
+        return None
+    last = local[-1]
+    newest = max((_iso_key(r.get("at", "")) for r in pub), default="")
+    if _review_kind(last) in {_review_kind(r) for r in pub} or _iso_key(last.get("at", "")) < newest:
+        return None
+    return last
+
+
+def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
+    flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
+    models = (
+        f" --reviewer-model {r.get('reviewer_model') or '<M>'} --author-model {r.get('author_model') or '<M>'}"
+        if flag == "--clean"
+        else ""
+    )
+    return f"xt.py pr reviewed --pr {n} --head {r.get('head', '')} {flag}{models}"
 
 
 def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
@@ -7546,8 +7596,8 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     """MỘT hành động kế tiếp cho PR theo "merge theo làn" (ADR-0024 → ADR-0025), hàm thuần.
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
-    GitHub: agent làm đúng `do`, guard vẫn là lớp chặn. Hành động: done · closed · disable-auto-merge · defer-human ·
-    retarget · update · fix · review · enable-auto-merge · merge (dưới L3) · wait."""
+    GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
+    republish-review · review · enable-auto-merge · merge (dưới L3) · wait."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -7571,6 +7621,10 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
         }
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
+    if early is None:  # review chỉ có ở sổ cục bộ: đăng lại trước, không bật auto-merge theo nó (AUD-XFEAT-011)
+        early = _pr_next_republish(
+            d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
+        )
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
         early = _pr_next_review(d, auto_merge, gate, act, disable)
     if early is not None:
@@ -7578,6 +7632,25 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
     out = _pr_next_final(d, auto_merge, label, act, disable)
     return {**out, "why": f"{PHASE_DEFER_NOTE} — {out['why']}"} if deferred else out
+
+
+def _pr_next_republish(
+    d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any], review_bad: bool, act: PrAct, disable: str
+) -> Optional[Dict[str, Any]]:
+    """Sổ cục bộ có review chưa đăng lên PR: đăng lại khi nó đổi được kết luận — review không sạch (lỗi chặn/chưa kết
+    luận phải thấy được ở mọi phiên, CI, steward) hoặc review sạch khi dấu đã đăng chưa cho qua (`review_bad`). Review
+    sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn."""
+    r = unpublished_review(rec)
+    if r is None or (r.get("clean") and not r.get("inconclusive") and not review_bad):
+        return None
+    n = d.get("pr", "")
+    why = (
+        f"review ở {str(r.get('head', ''))[:7]} chỉ có trong sổ cục bộ, chưa đăng lên PR — merge-check/merge-gate/guard/"
+        "steward chỉ đọc dấu đã đăng (ADR-0028)"
+    )
+    if auto_merge:
+        return act("disable-auto-merge", f"{why}: tắt auto-merge trước khi đăng lại", disable)
+    return act("republish-review", f"{why}: đăng lại (cần gh hoạt động)", _republish_cmd(n, r))
 
 
 def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, disable: str) -> Dict[str, Any]:
@@ -8364,11 +8437,14 @@ def _bench_rollup(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
 
 
 def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
-    """Quyết định merge-check + review (sổ cục bộ và/hoặc comment đã đăng) → merge_eligibility và `pr next`."""
+    """Quyết định merge-check + review → merge_eligibility và `pr next`. `reviews` = review đã đăng (đã lọc, như
+    `xtReviews`), `comments` = comment thô qua `published_reviews`, `local` = sổ cục bộ (chỉ để nhận ra review chưa
+    đăng — AUD-XFEAT-011)."""
     published = published_reviews(
         inp.get("comments") or [], set(inp.get("writers") or []), str(inp.get("identity") or "")
     )
-    rec = {"reviews": inp.get("reviews") or [], "standard_seen": bool(inp.get("standard_seen"))}
+    published += [r for r in inp.get("reviews") or [] if isinstance(r, dict)]
+    rec = {"reviews": inp.get("local") or [], "standard_seen": bool(inp.get("standard_seen"))}
     rec = with_published(rec, published, bool(inp.get("identity")))
     reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
     d = inp["decision"]

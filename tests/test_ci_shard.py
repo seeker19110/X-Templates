@@ -78,11 +78,13 @@ class ShardPlanTest(unittest.TestCase):
             self.assertLessEqual(spread(shards, w, default), heaviest + 1e-9)
 
     def test_committed_weights_cover_every_class(self):
-        """Lớp mới chưa đo rơi về trung vị → shard lệch dần; thêm/bỏ lớp thì chạy lại `dev-task.sh test-weights`."""
+        """Lớp mới chưa đo rơi về trung vị → shard lệch dần (D-102): cho thiếu/thừa tới 15 % số lớp để PR thêm test không
+        phải đo lại (~7 phút); quá ngưỡng thì chạy lại `dev-task.sh test-weights`."""
         w = xt.load_shard_weights(WEIGHTS)
         ids = set(xt.unittest_class_ids(ROOT, "tests", None))
-        self.assertEqual(sorted(ids - w.keys()), [], "lớp thiếu trọng số")
-        self.assertEqual(sorted(w.keys() - ids), [], "trọng số của lớp không còn")
+        cap = len(ids) * 15 // 100
+        self.assertLessEqual(len(ids - w.keys()), cap, f"lớp thiếu trọng số: {sorted(ids - w.keys())}")
+        self.assertLessEqual(len(w.keys() - ids), cap, f"trọng số của lớp không còn: {sorted(w.keys() - ids)}")
 
     def test_committed_weights_balance_real_suite(self):
         w = xt.load_shard_weights(WEIGHTS)
