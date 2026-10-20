@@ -1793,11 +1793,27 @@ def _hard_gate(selector: List[str], root: str, repo: str = "") -> Tuple[Dict[str
     return d, ("", "")
 
 
+def _review_block(d: Dict[str, object]) -> str:
+    """Lý do chặn vì review (ADR-0028) theo kết quả merge-check; '' khi không chặn. CI/làn cho merge (`merge`/`review`)
+    mà review ở head chưa hợp lệ (`eligible` false; khung cũ trả `merge` kèm `eligible: false`), hoặc ở L3 PR chưa
+    review/review chặn dù CI đang chạy/PR nháp (`wait`) hay conflict (`fix`) — review PR #182. Làn nhanh/pha build
+    (`na`/`deferred`) và dưới L3 → ''."""
+    level = d.get("autonomy")
+    not_reviewed = isinstance(level, int) and level >= 3 and d.get("review") in ("missing", "blocking")
+    if d.get("eligible") is False and (d.get("verdict") in ("merge", "review") or not_reviewed):
+        return f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
+    return ""
+
+
 def _merge_ask(why: str, selector: List[str], root: str, repo: str = "") -> Tuple[str, str]:
     """Merge mà guard không tự cho phép (thiếu ghim, cờ lạ, repo khác…): ask `why` — trừ khi chạm/không xác minh được
-    ngoại lệ cứng thì ask mang dấu chặn (AUD-SEC-044)."""
-    gate = _hard_gate(selector, root, repo)[1]
-    return gate if gate[0] else ("ask", why)
+    ngoại lệ cứng (AUD-SEC-044) hoặc PR chưa có review hợp lệ ở head (AUD-HAR-093: cùng luật với merge ghim head) thì
+    ask mang dấu chặn."""
+    d, gate = _hard_gate(selector, root, repo)
+    if gate[0]:
+        return gate
+    block = _review_block(d)
+    return ("ask", block) if block else ("ask", why)
 
 
 def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> Tuple[str, str]:
@@ -1808,14 +1824,11 @@ def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> 
         return gate
     raw = d.get("reasons")
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
-    # Điều kiện merge một nhà (ADR-0028): CI/làn cho merge mà thiếu review hợp lệ ở head (merge-check `review`; khung cũ
-    # trả `merge` kèm `eligible: false`) → mã chặn, không phải ask thường bị chính sách mặc định cho qua (AUD-DOC-054).
-    # Kiểm trước nhánh `verdict != merge`: ở L3, PR chưa review mà CI đang chạy/PR nháp (`wait`) hay conflict (`fix`)
-    # cũng chặn vì review (review PR #182) — làn nhanh/pha build (`na`/`deferred`) và dưới L3 giữ hành vi cũ.
-    level = d.get("autonomy")
-    not_reviewed = isinstance(level, int) and level >= 3 and d.get("review") in ("missing", "blocking")
-    if d.get("eligible") is False and (d.get("verdict") in ("merge", "review") or not_reviewed):
-        return "ask", f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
+    # Điều kiện merge một nhà (ADR-0028): thiếu review hợp lệ ở head → mã chặn, không phải ask thường bị chính sách mặc
+    # định cho qua (AUD-DOC-054). Kiểm trước nhánh `verdict != merge` (`_review_block`).
+    block = _review_block(d)
+    if block:
+        return "ask", block
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
     if d.get("head") != sha:

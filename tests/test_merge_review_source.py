@@ -172,6 +172,60 @@ class GuardReviewMissingTest(unittest.TestCase):
             with self.subTest(name, cmd="mcp"):
                 self.assertNotEqual(self.mcp(d).get("code"), "REVIEW_MISSING")
 
+    UNPINNED = (
+        "gh pr merge 7 --squash",
+        "gh pr merge 7",
+        "gh pr merge 7 --squash --delete-branch",
+        f"gh pr merge 7 --squash --admin --match-head-commit {HEAD}",
+        "gh pr -R o/r merge 7 --squash",
+        "gh api -X PUT repos/o/r/pulls/7/merge -f merge_method=squash",
+    )
+
+    def mcp_unpinned(self, d: dict, tool: dict | None = None) -> dict:
+        tool = tool or {"owner": "o", "repo": "r", "pullNumber": 7, "merge_method": "squash"}
+        with unittest.mock.patch.object(guard, "merge_check", return_value=d):
+            dec, why = guard.mcp_decision("mcp__github__merge_pull_request", tool, str(ROOT))
+        return dict(guard.apply_policy({"decision": dec, "reason": why}))
+
+    def test_default_policy_review_missing_unpinned(self):
+        """AUD-HAR-093: merge KHÔNG ghim head (`gh pr merge 7 --squash`, `gh api` thiếu `sha`, MCP thiếu
+        `expectedHeadSha`) của PR làn chuẩn chưa review/review chặn ở L3 → chặn `REVIEW_MISSING` như merge ghim head,
+        không lọt thành ask thường mà chính sách mặc định cho qua."""
+        for reviews, state in (([], "missing"), ([mark(False)], "blocking")):
+            d = xt.merge_check_result(std(xtReviews=reviews), 3, [], False)
+            self.assertEqual((d["eligible"], d["review"]), (False, state))
+            for cmd in self.UNPINNED:
+                with self.subTest(state=state, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+            for tool in (None, {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": HEAD, "x": 1}):
+                with self.subTest(state=state, tool=tool):
+                    res = self.mcp_unpinned(d, tool)
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"), res)
+
+    def test_default_policy_review_missing_unpinned_controls(self):
+        """Đối chứng AUD-HAR-093: review sạch, pha build (review hoãn), làn nhanh, dưới L3 → merge không ghim vẫn là ask
+        thường (chính sách mặc định cho qua); strict vẫn hỏi."""
+        fast = pr(headRefOid=HEAD, files=[{"path": "README.md", "additions": 1, "deletions": 0}], repo="o/r")
+        cases = {
+            "sạch": xt.merge_check_result(std(xtReviews=[mark(True)]), 3, [], False),
+            "pha build": xt.merge_check_result(std(), 3, [], False, "build"),
+            "làn nhanh": xt.merge_check_result(fast, 3, [], False),
+            "L2": xt.merge_check_result(std(), 2, [], False),
+        }
+        for name, d in cases.items():
+            for cmd in self.UNPINNED:
+                with self.subTest(name, cmd=cmd):
+                    res = self.final(d, cmd)
+                    self.assertEqual((res["decision"], res.get("code")), ("", "OTHER_ASK"), res)
+            with self.subTest(name, cmd="mcp"):
+                self.assertEqual(self.mcp_unpinned(d)["decision"], "")
+        d = xt.merge_check_result(std(), 3, [], False)
+        with unittest.mock.patch.object(guard, "merge_check", return_value=d):
+            res = guard.bash_decision(self.UNPINNED[0], str(ROOT))
+        self.assertEqual(res["decision"], "ask")
+        self.assertIn(guard.REVIEW_MISSING_ASK, str(res["reason"]))
+
     def test_default_policy_review_missing_strict_still_asks(self):
         d = xt.merge_check_result(std(), 3, [], False)
         with unittest.mock.patch.object(guard, "merge_check", return_value=d):

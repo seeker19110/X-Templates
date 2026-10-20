@@ -2952,6 +2952,95 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-har093-unpinned-merge-no-review",
+   "origin": "repro",
+   "refs": [
+    "AUD-HAR-093"
+   ],
+   "input": {
+    "command": "gh pr merge 5 --squash",
+    "merge_check": {
+     "verdict": "review",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": false,
+     "auto_merge_ok": false,
+     "review": "missing",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REVIEW_MISSING"
+   }
+  },
+  {
+   "id": "guard-har093-mcp-unpinned-merge-no-review",
+   "origin": "repro",
+   "refs": [
+    "AUD-HAR-093"
+   ],
+   "input": {
+    "tool": "mcp",
+    "tool_name": "mcp__github__merge_pull_request",
+    "tool_input": {
+     "owner": "o",
+     "repo": "r",
+     "pullNumber": 5
+    },
+    "merge_check": {
+     "verdict": "review",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": false,
+     "auto_merge_ok": false,
+     "review": "blocking",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REVIEW_MISSING"
+   }
+  },
+  {
+   "id": "guard-control-har093-unpinned-merge-reviewed",
+   "origin": "control",
+   "refs": [
+    "AUD-HAR-093"
+   ],
+   "input": {
+    "command": "gh pr merge 5 --squash",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
