@@ -11,7 +11,7 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-0. Đang sửa audit delta 2026-10-20 (`docs/ops/AUDIT-STATUS.md`: AUD-CI-014/015, HAR-094/096/097, DOC-065…070, `license_requirements`); sau đó `release-check`; giao `reviewer`/`reviewer-alt` viết ca đối kháng cho `autonomy-bench`; chờ chủ repo: secret `XT_RELEASE_TOKEN` (đẩy tag khi commit đổi workflow), token/app reviewer (T-1508), xoá `/scratch.log` ở gốc hệ thống file của container (executor lỡ tạo).
+0. Audit delta 2026-10-20 đã sửa hết 🔴/🟠 (`docs/ops/AUDIT-REPORT-2026-10-20-delta.md`; còn 🟢 SEC-086/HAR-098 ghi giới hạn); sau khi PR merge: `loop verify --all` rồi `release-check`; giao `reviewer`/`reviewer-alt` viết ca đối kháng cho `autonomy-bench`; chờ chủ repo: secret `XT_RELEASE_TOKEN` (đẩy tag khi commit đổi workflow), token/app reviewer (T-1508), xoá `/scratch.log` ở gốc hệ thống file của container (executor lỡ tạo).
 1. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ); sàn quyền token; `xt.pyz` (ADR-0010).
