@@ -43,7 +43,7 @@
 - [x] `T-1605` Guard: `~+`/`~-` (AUD-SEC-097) và `source /dev/stdin` (AUD-SEC-098) — Gate: `python3 -m unittest discover -s tests -k guard_tilde_plus_minus`
 - [x] `T-1606` merge-check: sổ review hỏng không văng (AUD-CODE-019), bản ghi cùng giây lấy bản cuối (AUD-XFEAT-018); test hook nhánh xt.py lỗi (AUD-TEST-016) — Gate: `python3 -m unittest discover -s tests -k local_blocking -k commit_gate_xt_py_broken`
 - [x] `T-1608` Guard: `rm -rf $PWD/..`, `~+/..`, `$PWD`, `~-/x` (AUD-SEC-099, executor-deep tìm khi sửa T-1605) — Gate: `python3 -m unittest discover -s tests -k guard_rm_pwd`
-- [ ] `T-1607` Tài liệu + giới hạn 🟢 (AUD-SEC-095/096, XFEAT-019, HAR-100, DOC-072…075), trọng số shard (AUD-TEST-017), CHANGELOG — Gate: `scripts/dev-task.sh lint`
+- [x] `T-1607` Tài liệu + giới hạn 🟢 (AUD-SEC-095/096, XFEAT-019, HAR-100, DOC-072…075), trọng số shard (AUD-TEST-017), CHANGELOG — Gate: `scripts/dev-task.sh lint`
 
 ### Lát C — quét lại theo diff bản sửa, phát hành
 - [ ] `T-1690` Quét lại theo diff bản sửa của lát B; sổ ghi SHA quét = HEAD lát B — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
