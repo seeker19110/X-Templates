@@ -1,7 +1,7 @@
 # ADR-0032: `merge-check` trả verdict `review` (exit 1) khi PR chưa đủ điều kiện merge vì review
 
 - **Trạng thái:** Đã chấp nhận
-- **Trạng thái triển khai:** Đã triển khai trong repo (commit a535dc4) — `scripts/xt.py` `merge_check_result` (verdict
+- **Trạng thái triển khai:** Đã triển khai trong repo (commit 061137b, #182) — `scripts/xt.py` `merge_check_result` (verdict
   `review`, bỏ `next_rest`, `_review_step`), `cmd_merge_check` (exit 0 chỉ khi `merge`), `merge-watch` thoát 1 cùng bước;
   test `tests/test_merge_review_source.py::MergeCheckReviewStepTest`
   (`test_merge_check_no_merge_command_without_review`, `test_merge_check_blocking_review_points_to_fix`,

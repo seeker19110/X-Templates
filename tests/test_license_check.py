@@ -45,6 +45,24 @@ class LicenseParseTest(unittest.TestCase):
         )
         self.assertEqual(xt.license_requirements(text), [("ruff", "0.17.1", False), ("librt", "0.16.0", True)])
 
+    def test_requirements_extras_spaces_and_markers(self):
+        text = (
+            "requests[security,socks]==2.32.0 \\\n    --hash=sha256:aa\n"
+            "pkg == 1.2.3\n"
+            "other  [extra]  ==  4.5 ; python_version >= '3.11' \\\n"
+            "tool[x]==0.1; sys_platform == 'win32'\n"
+            "loose[x]>=1\nbroken[==1\n"
+        )
+        self.assertEqual(
+            xt.license_requirements(text),
+            [
+                ("requests", "2.32.0", False),
+                ("pkg", "1.2.3", False),
+                ("other", "4.5", True),
+                ("tool", "0.1", True),
+            ],
+        )
+
     def test_policy_valid_and_errors(self):
         allowed, exc = xt.license_policy(
             json.dumps({"allow": ["MIT"], "exceptions": [{**EXC, "package": "Path_Spec"}]})

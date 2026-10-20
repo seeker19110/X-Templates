@@ -2501,7 +2501,12 @@ class StewardEventsTest(unittest.TestCase):
         self.assertEqual(xt.ci_check_text(text), [])
         on = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertIn("check_suite:\n    types: [completed]", on)
-        self.assertRegex(on, r"workflow_run:\n    workflows: \[CI, merge-gate\]\n    types: \[completed\]")
+        self.assertRegex(on, r"workflow_run:[^\n]*\n    workflows: \[CI, merge-gate\]\n    types: \[completed\]")
+        for trigger in (
+            "issue_comment",
+            "workflow_run",
+        ):  # AUD-CI-015: ghi lý do bỏ qua dangerous-triggers như merge-gate
+            self.assertRegex(on, rf"\n  {trigger}: # zizmor: ignore\[dangerous-triggers\] — \S")
         self.assertNotRegex(on, r"pull_request(_target)?:")  # không chạy trong ngữ cảnh PR
         self.assertIn('--event "$GITHUB_EVENT_PATH"', text)
         self.assertIn("pr-steward-${{", text)  # nhóm concurrency theo PR: sự kiện PR khác không thay lượt đang chờ

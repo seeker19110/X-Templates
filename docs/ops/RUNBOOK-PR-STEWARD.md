@@ -70,3 +70,11 @@ Khôi phục: `gh workflow enable pr-steward.yml` → `gh workflow run pr-stewar
 `python3 scripts/xt.py pr steward --json` đối chiếu kết quả → đặt lại secret/bật "Allow auto-merge" nếu đã gỡ. Sau tắt
 dài ngày PR cũ có thể tụt nhánh: cập nhật (steward có token hoặc `gh pr update-branch`) rồi review lại ở head mới.
 Workflow bị sửa hỏng: revert commit qua PR; dự án đích chạy lại `install.py` để chép bản chuẩn.
+
+## 4. Đẩy tag phát hành (`release-tag.yml`)
+
+Workflow `release-tag.yml` đẩy tag bằng `GITHUB_TOKEN`; GitHub từ chối khi commit đích đổi file workflow so với tag trước
+("refusing to allow a GitHub App to create or update workflow … without workflows permission", AUD-CI-014). Sửa: đặt secret
+tuỳ chọn `XT_RELEASE_TOKEN` (fine-grained PAT, chỉ repo này: `contents: write` + `workflows: write`); workflow dùng nó ở bước
+checkout, thiếu thì rơi về `GITHUB_TOKEN`. Thiếu secret mà commit có đổi workflow: người đẩy tag tay
+(`git tag -a vX.Y.Z -m vX.Y.Z <sha> && git push origin vX.Y.Z`). Xoay/thu hồi như `XT_STEWARD_TOKEN` (§2).

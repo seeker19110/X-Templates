@@ -69,8 +69,9 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task do máy chọn (task `[ ]` đầu tiên chưa `defer`) → làm task → chạy Gate
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
-11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh Lưu ý `git commit --amend` chỉ chạy lại phần đổi so với HEAD; cổng đầy đủ ở bước mở PR bù phần còn lại.
+11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh
     gate-fast`: lint · typecheck · test liên quan file đổi, không ngưỡng coverage), cập nhật `PROGRESS.md` (≤ 8 KB).
+    Lưu ý `git commit --amend` chỉ chạy lại phần đổi so với HEAD; cổng đầy đủ ở bước mở PR bù phần còn lại.
     Trước khi đẩy/mở PR chạy cổng đầy đủ `dev-task.sh gate` **một lần** (CI chạy lại đúng lệnh đó). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
     nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do`, review xong ghi
     `<XT> pr reviewed` (đăng kết quả lên PR; workflow `pr-steward` tự bật auto-merge khi không còn phiên — `LOOP-STOP-029`,
@@ -120,7 +121,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 | `loop decide --question Q --option A --option B --choice N --why W --revert R [--prod P] [--log F]` | Phiên chính tự duyệt điểm quyết định: ghi `D-NNN` vào `docs/autopilot/DECISIONS.md` (≥ 2 phương án, lý do, đường lùi); không đổi state |
 | `loop resume [--reason "..."]` | Sau khi người xử lý `blocked`/`done-pending-human`: bỏ chặn, đưa việc `defer` lại hàng làm, giữ số vòng và bằng chứng, đặt lại đếm lỗi lặp (`loop init` lại chỉ khi đổi PLAN/ngân sách) |
 | `loop stop` | Tắt vòng (`active=false`) |
-| `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge`. Xung đột kiểm cục bộ bằng `git merge-tree` khi GitHub chưa tính xong/báo xung đột (`localConflicts`: file xung đột; `fix` kèm lệnh merge nhánh đích) |
+| `merge-check [--pr N] [--json]` | Quyết thời điểm merge PR đã mở (ADR-0013/0014): `merge` · `review` (chưa đủ review sạch ở head, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed` kèm `next`; exit 0 chỉ khi `merge` (`review` exit 1). Xung đột kiểm cục bộ bằng `git merge-tree` khi GitHub chưa tính xong/báo xung đột (`localConflicts`: file xung đột; `fix` kèm lệnh merge nhánh đích) |
 | `grant-check GROUP [KHOÁ=GIÁ_TRỊ …] [--plan F] [--json]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không (ADR-0022): exit 0 trong ủy quyền, 1 ngoài hoặc thiếu mục → `loop defer`, 2 tham số sai |
 | `merge-gate [--pr N] [--head SHA] [--json]` | Required check `merge-gate` (ADR-0023): exit 1 khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge (auto-merge không ghim head); `hard` không auto-merge → exit 0 kèm cảnh báo (người merge tay); 2 lỗi đọc PR; 3 head khác `--head` |
 | `merge-watch [--pr N] [--interval 30] [--max-minutes 240]` | Gọi `merge-check` định kỳ (ADR-0021), chạy nền tới khi verdict ≠ `wait`: exit 0 đã merge/`merge`, 1 cần hành động, 2 lỗi đọc PR 3 lần liền, 3 hết giờ |
