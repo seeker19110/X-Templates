@@ -2379,7 +2379,7 @@ def tick_plan_task(base: Path, st: Dict[str, Any], task: str, cmd_str: str) -> b
     gate = next((t.get("gate") for t in _plan_tasks(base, st) if t["id"] == task), None)
     if not gate or not same_command(cmd_str, gate):
         return False
-    plan = base / str(st.get("plan") or "")
+    plan = (base / str(st.get("plan") or "")).resolve()  # PLAN là symlink → ghi file thật, giữ liên kết (review #191)
     with plan.open(encoding="utf-8", newline="") as fh:  # giữ nguyên CRLF của file (review #191)
         text = fh.read()
     new, n = re.subn(rf"^- \[ \] `{re.escape(task)}`", f"- [x] `{task}`", text, count=1, flags=re.M)

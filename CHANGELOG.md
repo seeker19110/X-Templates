@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `loop record` tự tick PLAN (D-113) ghi xuyên symlink `PLAN.md` (`resolve()` trước khi đọc/ghi) — trước đó thay symlink bằng file thường (review #191, T-1737).
+
 ## [3.11.0] - 2026-10-20
 
 **Dự án đích: chạy lại `install.py`** (PLAN-3.12-lean: tài liệu vận hành một nhà, harness ít lượt hơn, `install.py` cập nhật file gốc tại chỗ khi chưa sửa và in các bước "Dự án đích" từ bản đã cài; mẫu `xt.yaml` 3 KB — khoá mới nối vào `xt.yaml` của dự án dạng chú thích).
