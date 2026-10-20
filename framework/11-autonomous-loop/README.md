@@ -69,7 +69,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 10. **Mỗi vòng**: `<XT> loop status --json` → verdict `continue` kèm task do máy chọn (task `[ ]` đầu tiên chưa `defer`) → làm task → chạy Gate
     **y nguyên** qua `<XT> loop record --task T-NNN -- <lệnh Gate>` (ghi `.autopilot/evidence/T-NNN.json`:
     `exit_code`, `cmd`, `head`, 40 dòng cuối).
-11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh
+11. Exit 0 → tick `[x]` trong PLAN, commit nhỏ (conventional) qua cổng commit (`commit_gate: fast` → `dev-task.sh Lưu ý `git commit --amend` chỉ chạy lại phần đổi so với HEAD; cổng đầy đủ ở bước mở PR bù phần còn lại.
     gate-fast`: lint · typecheck · test liên quan file đổi, không ngưỡng coverage), cập nhật `PROGRESS.md` (≤ 8 KB).
     Trước khi đẩy/mở PR chạy cổng đầy đủ `dev-task.sh gate` **một lần** (CI chạy lại đúng lệnh đó). **Lát xong** (task hoặc nhóm task chạy được) → mở PR của lát (nhánh riêng từ nhánh đích mới
     nhất; phụ thuộc PR chưa merge thì chồng lên nhánh đó — `LOOP-DESIGN-020`, ADR-0014) → ở `merge_autonomy: L3` merge theo làn: chạy `<XT> pr next --pr <N>`, làm đúng `do`, review xong ghi

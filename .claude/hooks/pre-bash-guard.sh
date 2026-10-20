@@ -45,6 +45,19 @@ fi
 decision="$XG_DECISION"
 [ "$decision" = "deny" ] && pretool_decision deny "$XG_REASON"
 
+gate_config_changed() { # $1=gốc repo → 0 nếu file đổi so với HEAD (đã/chưa stage, file mới) là cấu hình cổng
+  local f
+  while IFS= read -r f; do
+    case "$f" in
+    xt.yaml | .claude/settings.json | .claude/hooks/pre-bash-guard.sh | scripts/dev-task.sh | \
+      .xtemplates/scripts/dev-task.sh | ruff.toml | */ruff.toml | .ruff.toml | */.ruff.toml | pyproject.toml | \
+      */pyproject.toml | .coveragerc | */.coveragerc | requirements*.txt | */requirements*.txt) return 0 ;;
+    esac
+  done < <(git -C "$1" -c core.quotePath=false diff --no-renames --relative --name-only HEAD -- 2>/dev/null
+    git -C "$1" -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null)
+  return 1
+}
+
 # ---- 3) Cổng trước commit (chạy TRƯỚC khi hỏi người — ask không được bỏ cổng, AUD-HAR-013) ----
 # `--no-verify` (hoặc `-c core.hooksPath=…`) chỉ tắt git hook, KHÔNG tắt cổng của khung: mặc định (không hỏi người, ADR-0018)
 # vẫn chạy cổng — trước đây bỏ cổng lặng lẽ (rà stored 2026-10-18). Chỉ `XT_GUARD_POLICY=strict` để người quyết (hỏi).
@@ -88,6 +101,13 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
     task="gate"
     fast_re='^commit_gate:[[:space:]]*("fast"|'\''fast'\''|fast)[[:space:]]*(#.*)?$'
     [ -f "$groot/xt.yaml" ] && grep -Eq "$fast_re" "$groot/xt.yaml" && task="gate-fast"
+    # `commit_gate` đọc từ cây làm việc: commit đổi chính cấu hình cổng (xt.yaml → fast, ruff/coverage, dev-task.sh, hook
+    # này) không được tự hạ cổng cho nó → file đổi so với HEAD (như XT_CHANGED_FILES; --no-renames giữ cả tên cũ) đụng
+    # cấu hình cổng thì chạy cổng đầy đủ.
+    if [ "$task" = "gate-fast" ] && gate_config_changed "$groot"; then
+      task="gate"
+      echo "🔒 Commit đụng cấu hình cổng nên chạy cổng đầy đủ (scripts/dev-task.sh gate) thay cho commit_gate: fast." >&2
+    fi
     [ "$task" = "gate-fast" ] && echo "⚡ Commit nhanh (commit_gate: fast): format/lint/typecheck + test liên quan file đổi; cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI." >&2
     # stdout của cổng sang stderr: stdout của hook chỉ được chứa JSON quyết định.
     if ! CLAUDE_PROJECT_DIR="$groot" "$gate" "$task" >&2; then

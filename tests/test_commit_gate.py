@@ -84,6 +84,51 @@ class TestSelectTest(unittest.TestCase):
         self.assertIsNone(self.sel("scripts/ta.sh"))  # `ta.sh` nằm trong `alpha.sh` nhưng không phải tên đó
         self.assertIsNone(self.sel("tests/fixtures/khung.json"))  # file phụ trong thư mục test, không ai nhắc
 
+    def test_commit_gate_fast_select_by_import(self):
+        t = self.base / "tests"
+        imports = {
+            "test_i1.py": "import sys\nimport delta\n",
+            "test_i2.py": "def f():\n    import os, delta as d  # lồng trong hàm\n",
+            "test_i3.py": "from delta import x\n",
+            "test_i4.py": "from delta.sub import y\nimport delta.sub\n",
+            "test_i5.py": "from scripts import delta\n",
+            "test_i6.py": "from test_gamma import helper\n",
+        }
+        for name, text in imports.items():
+            (t / name).write_text(text, encoding="utf-8")
+        for name, text in {"test_n1.py": "import deltax\n# import delta\n", "test_n2.py": "x = 'delta'\n"}.items():
+            (t / name).write_text(text, encoding="utf-8")  # không phải import `delta`
+        want = [f"tests/test_i{i}.py" for i in range(1, 6)]
+        self.assertEqual(self.sel("scripts/delta.py"), want)
+        self.assertEqual(self.sel(".claude/hooks/delta.py"), want)
+        self.assertEqual(self.sel("tests/test_gamma.py"), ["tests/test_gamma.py", "tests/test_i6.py"])
+        self.assertEqual(self.sel("tests/test_xoa.py"), [])  # test bị xoá, không ai import
+        self.assertIsNone(self.sel("scripts/delta-x.py"))  # tên không phải định danh Python: không ánh xạ import
+        self.assertIsNone(self.sel("scripts/delta.pyi"))
+
+    def test_commit_gate_fast_select_covers_every_importer_in_repo(self):
+        # Đối chiếu độc lập bằng ast (không dùng regex của test-select): mọi test import module của scripts/ hoặc
+        # .claude/hooks/ phải được chọn khi module đó đổi — review #177 (test_delivery_phase `import xt` từng bị sót).
+        import ast
+
+        importers: dict[str, set[str]] = {}
+        for test in sorted((ROOT / "tests").glob("test_*.py")):
+            for node in ast.walk(ast.parse(test.read_text(encoding="utf-8"))):
+                names = [a.name for a in node.names] if isinstance(node, ast.Import) else []
+                names += [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+                for n in names:
+                    importers.setdefault(n.split(".")[0], set()).add(f"tests/{test.name}")
+        modules = sorted([*(ROOT / "scripts").glob("*.py"), *(ROOT / ".claude" / "hooks").glob("*.py")])
+        checked = 0
+        for mod in modules:
+            want = importers.get(mod.stem, set())
+            if want:
+                checked += 1
+                picked = xt.test_select(ROOT, "tests", [mod.relative_to(ROOT).as_posix()])
+                got = want if picked is None else set(picked)  # None = cả suite: đủ
+                self.assertEqual(want - got, set(), f"{mod.name}: test-select bỏ sót test import nó")
+        self.assertGreaterEqual(checked, 3)  # xt, install, guard
+
     def test_commit_gate_fast_cli_paths(self):
         rc, out, err = run_main("test-select", "scripts/alpha.sh")
         self.assertEqual((rc, out), (0, "tests/test_alpha.py\n"))

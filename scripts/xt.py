@@ -1902,7 +1902,8 @@ def cmd_guard_check(args: argparse.Namespace) -> int:
 
 
 # Chọn test liên quan cho `dev-task.sh gate-fast` (cổng commit nhanh): file test bị đổi chạy chính nó; file khác →
-# test `test_<tên>.py` cùng tên, test nhắc tên file (`"guard.py"`, `"dev-task.sh"`) và test quét theo đuôi (`*.md`).
+# test `test_<tên>.py` cùng tên, test nhắc tên file (`"guard.py"`, `"dev-task.sh"`), test import module (`import xt`)
+# và test quét theo đuôi (`*.md`).
 # Không ánh xạ được → cả suite (None). Cổng đầy đủ (CI, `dev-task.sh gate`) vẫn chạy mọi test + ngưỡng coverage.
 CHANGED_FILES_ENV = "XT_CHANGED_FILES"
 
@@ -1911,14 +1912,33 @@ def _test_mentions(name: str, text: str) -> bool:
     return re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text) is not None
 
 
+def _test_imports(module: str, text: str) -> bool:
+    """`text` có `import <module>` (cả `import a, <module>`, `import <module> as x`, `import <module>.con`),
+    `from <module>[.con] import …` hoặc `from <gói> import <module>` — kể cả import lồng trong hàm. Chọn dư còn hơn sót
+    (review #177: `import xt` mà không nhắc `xt.py` từng bị bỏ)."""
+    m = re.escape(module)
+    pat = rf"^[ \t]*(?:from[ \t]+{m}(?:\.[\w.]+)?[ \t]+import\b|(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+(?:[^\n#;]*,[ \t]*)?{m}(?!\w))"
+    return re.search(pat, text, re.M) is not None
+
+
+def _importers(name: str, texts: Dict[str, str]) -> Set[str]:
+    """Test import module Python `name` (`xt.py` → `xt`; `check-links.py` không import được bằng tên, đã có cách nhắc
+    tên file)."""
+    stem, suffix = posixpath.splitext(name)
+    if suffix != ".py" or not stem.isidentifier():
+        return set()
+    return {t for t, s in texts.items() if _test_imports(stem, s)}
+
+
 def _tests_for_file(rel: str, tests_rel: str, texts: Dict[str, str]) -> Optional[Set[str]]:
     """Test liên quan tới `rel` (đường dẫn POSIX theo gốc); None = không ánh xạ được."""
     p = posixpath.normpath(rel)
     name = posixpath.basename(p)
     if posixpath.dirname(p) == tests_rel and name.startswith("test_") and name.endswith(".py"):
-        return {p} & texts.keys()  # file test bị xoá: không còn gì để chạy
+        # file test bị xoá: không còn gì để chạy — trừ test khác import helper từ nó (`from test_merge import …`)
+        return ({p} & texts.keys()) | _importers(name, texts)
     stem = posixpath.splitext(name)[0].replace("-", "_").lstrip("_")
-    hit = {t for t, s in texts.items() if _test_mentions(name, s)}
+    hit = {t for t, s in texts.items() if _test_mentions(name, s)} | _importers(name, texts)
     hit |= {posixpath.join(tests_rel, f"test_{stem}.py")} & texts.keys()
     suffix = posixpath.splitext(name)[1]
     if suffix:

@@ -263,16 +263,74 @@ class CommitGateFastHookTest(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
         (self.tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
-        git = ["git", "-C", str(self.tmp), "-c", "user.email=t@t", "-c", "user.name=t"]
-        subprocess.run([*git, "add", "scripts"], check=True)
-        subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)  # có HEAD → gate-fast biết file đổi
+        self.git = ["git", "-C", str(self.tmp), "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run([*self.git, "add", "scripts"], check=True)
+        subprocess.run([*self.git, "commit", "-q", "-m", "init"], check=True)  # có HEAD → gate-fast biết file đổi
 
-    def commit(self, gate_line: str, fast: str = "echo-fast", cmd: str = "git commit -m x") -> tuple[int, str, str]:
+    def commit(
+        self, gate_line: str, fast: str = "echo-fast", cmd: str = "git commit -m x", change: str = ""
+    ) -> tuple[int, str, str]:
+        # xt.yaml nằm trong HEAD (cấu hình cổng đã có); `change` = file commit này đổi (cấu hình cổng → cổng đầy đủ).
         (self.tmp / "xt.yaml").write_text(
-            f"{gate_line}test_fast: sh -c '{fast}'\ntest: sh -c 'echo FULL-RAN'\n", encoding="utf-8"
+            f"{gate_line}test_fast: sh -c '{fast}'\ntest: sh -c 'echo FULL-RAN'\n"
+            'build: ""\ntypecheck: ""\nlint: ""\nformat_check: ""\n',  # không tự dò ruff/mypy khi có pyproject.toml
+            encoding="utf-8",
         )
+        subprocess.run([*self.git, "add", "-A"], check=True)
+        subprocess.run([*self.git, "commit", "-q", "--allow-empty", "-m", "cfg"], check=True)
+        if change:
+            (self.tmp / change).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.tmp / change, "a", encoding="utf-8") as f:
+                f.write("# đổi\n")
         payload = {"tool_input": {"command": cmd}, "cwd": str(self.tmp)}
         return run_hook("pre-bash-guard.sh", payload, self.tmp, extra_env={"XT_GUARD_POLICY": ""})
+
+    def test_commit_gate_fast_config_change_forces_full_gate(self):
+        # Review #177: commit đổi xt.yaml thành `fast` (hay ruff/coverage/dev-task.sh/hook) từng tự hạ cổng cho nó.
+        cfg = [
+            "xt.yaml",
+            "ruff.toml",
+            "sub/.ruff.toml",
+            "pyproject.toml",
+            "pkg/pyproject.toml",
+            ".coveragerc",
+            "requirements-dev.txt",
+            "requirements.txt",
+            "scripts/dev-task.sh",
+            ".xtemplates/scripts/dev-task.sh",
+            ".claude/hooks/pre-bash-guard.sh",
+            ".claude/settings.json",
+        ]
+        for change in cfg:
+            with self.subTest(change=change):
+                code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change=change)
+                self.assertEqual((code, decision(out)), (0, None), err)
+                self.assertIn("FULL-RAN", err)
+                self.assertNotIn("FAST-RAN", err)
+                self.assertIn("đụng cấu hình cổng nên chạy cổng đầy đủ", err)
+                subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
+                subprocess.run([*self.git, "clean", "-qfd"], check=True)
+        # Đổi file thường (cả file mới, tên gần giống) → vẫn cổng nhanh.
+        for change in ("src/app.py", "docs/xt.yaml.md", "notes/requirements.md"):
+            with self.subTest(change=change):
+                code, out, err = self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change=change)
+                self.assertIn("FAST-RAN", err)
+                self.assertNotIn("FULL-RAN", err)
+                self.assertNotIn("đụng cấu hình cổng", err)
+        # Đã stage (git add) cũng tính; xoá/đổi tên cấu hình cổng (tên cũ) cũng tính.
+        self.commit("commit_gate: fast\n", fast="echo FAST-RAN", change="ruff.toml")
+        subprocess.run([*self.git, "add", "-A"], check=True)
+        subprocess.run([*self.git, "commit", "-q", "-m", "ruff"], check=True)
+        for op in (["add", "ruff.toml"], ["mv", "ruff.toml", "khac.toml"], ["rm", "-q", "ruff.toml"]):
+            with self.subTest(op=op):
+                if op[0] == "add":
+                    (self.tmp / "ruff.toml").write_text("# staged\n", encoding="utf-8")
+                subprocess.run([*self.git, *op], check=True)
+                payload = {"tool_input": {"command": "git commit -m x"}, "cwd": str(self.tmp)}
+                code, out, err = run_hook("pre-bash-guard.sh", payload, self.tmp, extra_env={"XT_GUARD_POLICY": ""})
+                self.assertIn("FULL-RAN", err)
+                self.assertIn("đụng cấu hình cổng", err)
+                subprocess.run([*self.git, "reset", "-q", "--hard"], check=True)
 
     def test_commit_gate_fast_runs_gate_fast(self):
         for line in ("commit_gate: fast\n", 'commit_gate: "fast"  # cổng nhanh\n', "commit_gate: 'fast'\n"):
