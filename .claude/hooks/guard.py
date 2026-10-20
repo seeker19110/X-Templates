@@ -34,6 +34,7 @@ import urllib.parse
 import sys
 import tempfile
 import time
+import unicodedata
 from typing import Any, Callable, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
@@ -4545,6 +4546,12 @@ def _balanced(text: str, start: int, opener: str, closer: str) -> str:
     return text[start:end]
 
 
+def _nfkc(script: str) -> str:
+    """Script chuẩn hoá NFKC trước khi che, quét lời gọi và trích literal (review #186 lần 3): Python chuẩn hoá định
+    danh theo NFKC (PEP 3131) nên `os.ｒemove`, `Path(…).ｗrite_text` toàn-rộng là lời gọi ghi thật."""
+    return unicodedata.normalize("NFKC", script)
+
+
 def _literal(m: "re.Match[str]") -> str:
     return ANSI_ESCAPE_RE.sub(_ansi_c_char, m.group(m.lastindex or 0))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
 
@@ -4569,7 +4576,7 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     `'rm' + ' -rf ~'`) → lệnh shell; `subprocess.run([…])` → các phần tử ghép thành một lệnh. Chuỗi khác trong script
     (`print('…')`, đối số sau) là dữ liệu, không quét."""
     out: List[str] = []
-    for script in scripts:
+    for script in map(_nfkc, scripts):
         spans = [x.span() for x in STR_ANY_RE.finditer(script)]
         for m in EXEC_CALL_RE.finditer(script):
             if any(
@@ -4590,7 +4597,8 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
     tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
     families = _interp_families(tokens, cwd or root)
-    for script, here in _interp_scripts_at(cmd, tokens, cwd or root):
+    for raw_script, here in _interp_scripts_at(cmd, tokens, cwd or root):
+        script = _nfkc(raw_script)  # `os.ｒemove` là `os.remove` với Python (định danh chuẩn hoá NFKC, PEP 3131)
         asks += [
             f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
             for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])

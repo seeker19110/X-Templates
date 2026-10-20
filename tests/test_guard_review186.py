@@ -532,6 +532,17 @@ class Review3Test(unittest.TestCase):
             )
         )
 
+    def test_guard_r3_nfkc_identifiers_denied(self):
+        self.assertDenied(
+            {
+                "python3 -c \"import os; os.ｒemove('.env')\"": "SECRET_WRITE",
+                "python3 -c \"from pathlib import Path; Path('.env').ｗrite_text('x')\"": "SECRET_WRITE",
+                "python3 -c \"import os; oｓ.unlink('.claude/settings.json')\"": "HOOK_BYPASS",
+                "python3 -c \"import os; os.ｓystem('rm -rf ~')\"": "RULE_DENY",
+            }
+        )
+        self.assertAllowed(("python3 -c \"print('ｒｅａｄｍｅ')\"",))
+
     def test_script_literals_ast(self):
         lits = guard._script_literals
         self.assertIn(".env", lits("open('\\x2eenv','w')"))
