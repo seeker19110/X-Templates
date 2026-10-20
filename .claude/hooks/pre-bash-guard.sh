@@ -110,7 +110,7 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
     # `commit_gate` đọc từ cây làm việc: commit đổi chính cấu hình cổng (xt.yaml → fast, ruff/coverage, dev-task.sh, xt.py
     # chọn test của gate-fast — AUD-TEST-013, hook này) không được tự hạ cổng cho nó → file đổi so với HEAD (như
     # XT_CHANGED_FILES; --no-renames giữ cả tên cũ) đụng cấu hình cổng thì chạy cổng đầy đủ.
-    # Không hạ cổng nhưng cũng không chạy lại ngưỡng coverage (131 s so với 4,5 s; 49 % commit đụng danh sách này — PLAN-3.12
+    # Không hạ cổng nhưng cũng không chạy lại ngưỡng coverage lẫn `build` (131 s so với 4,5 s; 49 % commit đụng danh sách này — PLAN-3.12
     # T-1713): cổng nhanh chạy MỌI lớp test qua `test_list`/`test_unit` song song, không coverage; chưa khai hai khoá đó → `test`.
     if [ "$task" = "gate-fast" ] && gate_config_changed "$groot"; then
       export XT_GATE_ALL_TESTS=1

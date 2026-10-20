@@ -2753,7 +2753,7 @@ class GuardCheckSourceLoadTest(unittest.TestCase):
         r = self.guard_check("--", "git", "push", "origin", "main")
         self.assertEqual(r.returncode, 126, r.stdout + r.stderr)  # guard thật (từ nguồn) chặn; pyc độc từng cho qua
         self.assertIn("LOOP-STOP-027", r.stderr)
-        r = self.guard_check("--stdin", stdin="pytest -q\nruff check .\n")  # đường `dev-task.sh` hỏi một lần
+        r = self.guard_check("--stdin", stdin="pytest -q\0ruff check .\0")  # đường `dev-task.sh` hỏi một lần (NUL)
         self.assertEqual((r.returncode, r.stdout), (0, "guard-check: 2 lệnh\n"), r.stderr)  # lệnh thường vẫn chạy
         self.assertEqual(
             self.hook_files(), before

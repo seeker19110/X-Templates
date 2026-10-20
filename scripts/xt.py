@@ -1132,14 +1132,18 @@ def read_state(base: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     return _read_json_obj(state_dir(base) / "state.json")
 
 
-def write_atomic(path: Path, text: str) -> None:
-    """Ghi file qua tệp tạm rồi đổi tên: lỗi giữa chừng không để lại file dở."""
+def write_atomic(path: Path, text: str, keep_mode: bool = False) -> None:
+    """Ghi file qua tệp tạm rồi đổi tên: lỗi giữa chừng không để lại file dở. Không dịch xuống dòng (`newline=""`: CRLF
+    trong `text` giữ nguyên); `keep_mode` giữ quyền của file cũ (tệp tạm của mkstemp là 0600 — file tài liệu đã track
+    như PLAN không được đổi quyền, review #191)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     # Tên tạm ngẫu nhiên, tạo độc quyền (O_EXCL): không đi theo symlink đặt sẵn, hai tiến trình không đè nhau (AUD-HAR-009).
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
+        if keep_mode and path.exists():
+            os.chmod(tmp, path.stat().st_mode & 0o7777)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -1939,11 +1943,12 @@ def guard_block(cmd_str: str, base: Path, only: Optional[List[Path]] = None) -> 
 
 
 def cmd_guard_check(args: argparse.Namespace) -> int:
-    """`xt.py guard-check -- <lệnh>` hoặc `guard-check --stdin` (mỗi dòng một lệnh — `dev-task.sh` hỏi MỘT lần cho cả
-    lượt cổng, T-1715): exit 126 + lý do nếu guard cấm lệnh nào, không chạy gì. `--stdin` mọi lệnh được chạy → in
+    """`xt.py guard-check -- <lệnh>` hoặc `guard-check --stdin` (các lệnh cách nhau bằng NUL, mỗi lệnh có thể nhiều dòng
+    — `dev-task.sh` hỏi MỘT lần cho cả lượt cổng, T-1715; tách theo dòng từng để lệnh `git push --fo\\<NL>rce` lọt,
+    review #191): exit 126 + lý do nếu guard cấm lệnh nào, không chạy gì. `--stdin` mọi lệnh được chạy → in
     `guard-check: N lệnh` (dev-task.sh chỉ bỏ hỏi từng lệnh khi thấy dòng này — xt.py cũ không in)."""
     if args.stdin:
-        cmds = [ln for ln in sys.stdin.read().splitlines() if ln.strip()]
+        cmds = [c for c in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if c.strip()]
     else:
         cmds = [" ".join(args.command[1:] if args.command[:1] == ["--"] else args.command)]
     bad = [(c, w) for c, w in zip(cmds, guard_blocks(cmds, project_dir())) if w]
@@ -2375,10 +2380,11 @@ def tick_plan_task(base: Path, st: Dict[str, Any], task: str, cmd_str: str) -> b
     if not gate or not same_command(cmd_str, gate):
         return False
     plan = base / str(st.get("plan") or "")
-    text = plan.read_text(encoding="utf-8")
+    with plan.open(encoding="utf-8", newline="") as fh:  # giữ nguyên CRLF của file (review #191)
+        text = fh.read()
     new, n = re.subn(rf"^- \[ \] `{re.escape(task)}`", f"- [x] `{task}`", text, count=1, flags=re.M)
     if n:
-        write_atomic(plan, new)
+        write_atomic(plan, new, keep_mode=True)
     return bool(n)
 
 
@@ -9611,7 +9617,7 @@ def build_parser() -> argparse.ArgumentParser:
     pcg = sub.add_parser("commit-gate", help="in fast|full: cổng trước commit theo `commit_gate` của xt.yaml (hook)")
     pcg.set_defaults(fn=cmd_commit_gate)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
-    pg.add_argument("--stdin", action="store_true", help="đọc lệnh từ stdin, mỗi dòng một lệnh (một lần cho cả cổng)")
+    pg.add_argument("--stdin", action="store_true", help="đọc lệnh từ stdin, cách nhau bằng NUL (một lần cho cả cổng)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
     pg.set_defaults(fn=cmd_guard_check)
     pm = sub.add_parser("merge-check", help="máy quyết khi nào merge PR đã mở (ADR-0013)")

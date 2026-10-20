@@ -849,6 +849,8 @@ def report_upgrade_steps(previous: str | None, label: str) -> None:
         log(f"{title} không đọc được CHANGELOG.md của khung ({exc}) — xem mục 'Dự án đích' ở CHANGELOG bản mới")
         return
     steps = upgrade_steps(text, since)
+    if not steps and now == since:  # cài lại cùng bản: im lặng (review #191)
+        return
     log(title if steps else f"{title} không có")
     for name, clauses in steps:
         log(f"  [{name}]")

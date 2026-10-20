@@ -1279,17 +1279,19 @@ class InstallUpgradeTest(unittest.TestCase):
         return err.getvalue()
 
     def test_upgrade_steps_skip_none_downgrade_and_unreadable(self):
-        """Cài mới/nhãn lạ/VERSION hỏng → im lặng; không có bước → "không có"; hạ bản → một dòng; CHANGELOG thiếu hoặc
-        không phải UTF-8 → một dòng, không lỗi (fail-open)."""
+        """Cài mới/nhãn lạ/VERSION hỏng → im lặng; nâng bản mà không có bước → "không có"; cài lại cùng bản không có
+        bước → im lặng (review #191); hạ bản → một dòng; CHANGELOG thiếu hoặc không phải UTF-8 → một dòng, không lỗi
+        (fail-open)."""
         log = "## [Unreleased]\n- a không có bước\n## [3.6.0]\n- b Dự án đích: chạy lại\n"
         for previous in (None, "", "nhãn-lạ", "v3"):
             self.assertEqual(self.report(previous, "3.6.0", log.encode()), "", previous)
         (self.target / ".xtemplates").mkdir()
         (self.target / ".xtemplates" / "VERSION").write_bytes(b"\xff\xfe3.5.0")
         self.assertIsNone(install.installed_label(self.target / ".xtemplates"))
+        self.assertEqual(self.report("3.6.0 (abc)", "3.6.0", log.encode()), "")  # cài lại cùng bản: im lặng
         self.assertEqual(
-            self.report("3.6.0 (abc)", "3.6.0", log.encode()),
-            "[install] Bước làm tay từ CHANGELOG (3.6.0 (abc) → mới): không có\n",
+            self.report("3.5.0 (abc)", "3.6.0", b"## [Unreleased]\n- a\n## [3.6.0]\n- b\n"),
+            "[install] Bước làm tay từ CHANGELOG (3.5.0 (abc) → mới): không có\n",
         )
         out = self.report("3.5.0", None, log.encode())  # khung không có VERSION → không biết hạ bản, vẫn in
         self.assertEqual(out.splitlines()[1:], ["[install]   [3.6.0]", "[install]   - Dự án đích: chạy lại"])

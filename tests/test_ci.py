@@ -300,7 +300,7 @@ class TestShardTest(unittest.TestCase):
     XT_STUB = (
         "import os, sys\n"
         "d = os.path.join(os.environ['OUT'], 'guard'); os.makedirs(d, exist_ok=True)\n"
-        "data = sys.stdin.read() if '--stdin' in sys.argv and NEW else ''\n"
+        "data = sys.stdin.buffer.read().decode().replace('\\0', '\\n') if '--stdin' in sys.argv and NEW else ''\n"
         "open(os.path.join(d, str(len(os.listdir(d)))), 'w').write(' '.join(sys.argv[1:]) + '\\n' + data)\n"
         "sys.exit(126) if 'DENY' in data + ' '.join(sys.argv) else None\n"
         "print('guard-check: ok') if '--stdin' in sys.argv and NEW else None\n"
@@ -375,6 +375,25 @@ class TestShardTest(unittest.TestCase):
             ["guard-check --stdin"] + [f"guard-check -- {self.rec(n)}" for n in ("build", "typecheck", "lint", "test")],
         )
         self.assertEqual(sorted(self.ran()), ["build", "lint", "test", "typecheck"])
+
+    def test_guard_blocks_multiline_command_in_gate(self):
+        """Review #191: lệnh nhiều dòng (`.claude/project-commands.sh`) tới guard NGUYÊN VẸN qua `guard-check --stdin`
+        (cách nhau bằng NUL) — tiếp dòng `\\<NL>` không né được; heredoc chứa chữ cấm làm dữ liệu vẫn chạy như trước."""
+        shutil.copy(ROOT / "scripts" / "xt.py", self.tmp / "scripts" / "xt.py")
+        (self.tmp / ".claude" / "hooks").mkdir(parents=True)
+        shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", self.tmp / ".claude" / "hooks" / "guard.py")
+        decl = self.tmp / ".claude" / "project-commands.sh"
+        decl.write_text("build=$'" + self.rec("build") + "\\ngit push --fo\\\\\\nrce origin main'\n", encoding="utf-8")
+        r = self.run_dt("gate", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 126, r.stderr)
+        self.assertIn("LOOP-STOP-027", r.stderr)
+        self.assertEqual(self.ran(), [])
+        decl.write_text(
+            "build=$'cat <<E\\ngit push --force origin main\\nE\\n" + self.rec("build") + "'\n", encoding="utf-8"
+        )
+        r = self.run_dt("gate", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.ran(), ["build"])
 
     def test_unknown_task_lists_shard_tasks(self):
         r = self.run_dt("nope")

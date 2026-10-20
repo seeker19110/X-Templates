@@ -185,25 +185,32 @@ guard_ok() { # $1=lệnh -> 0 nếu được chạy
   CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check -- "$1"
   [ "$?" -ne 126 ]
 }
-# gate/gate-fast: hỏi guard MỘT lần cho mọi lệnh của lượt (stdin, mỗi dòng một lệnh — T-1715) thay vì một tiến trình
-# python mỗi lệnh; một lệnh bị cấm → 126, không chạy lệnh nào. xt.py in `guard-check: N lệnh` khi đã kiểm → GUARDED=1
-# và run_task/test_shard bỏ hỏi từng lệnh; xt.py cũ (không biết --stdin, không in gì) hay sập → hỏi từng lệnh như cũ.
-GUARDED=""
-guard_ok_all() { # stdin=lệnh (mỗi dòng một) -> 126 nếu guard cấm lệnh nào, 0 nếu được chạy
-  local xt n; xt="$(dirname "$0")/xt.py"
-  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || { cat >/dev/null; return 0; }
-  n="$(CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check --stdin)"
+# gate/gate-fast: hỏi guard MỘT lần cho mọi lệnh của lượt (stdin, các lệnh cách nhau bằng NUL — lệnh nhiều dòng của
+# project-commands.sh vẫn nguyên vẹn, review #191; T-1715) thay vì một tiến trình python mỗi lệnh; một lệnh bị cấm → 126,
+# không chạy lệnh nào. xt.py in `guard-check: N lệnh` khi đã kiểm → GUARDED_CMDS ghi đúng các lệnh đã hỏi; run_task/
+# test_shard chỉ bỏ hỏi lại khi lệnh còn y nguyên (lệnh đổi giữa lượt vẫn qua guard); xt.py cũ (không biết --stdin,
+# không in gì) hay sập → hỏi từng lệnh như cũ.
+GUARDED_CMDS=""
+GSEP=$'\x1f'
+guard_cached() { # $1=lệnh -> 0 nếu đúng lệnh này đã qua guard trong lượt
+  case "$GUARDED_CMDS" in *"$GSEP$1$GSEP"*) return 0 ;; esac
+  return 1
+}
+guard_ok_all() { # $@=lệnh -> 126 nếu guard cấm lệnh nào, 0 nếu được chạy (ghi GUARDED_CMDS khi xt.py xác nhận)
+  local xt n c joined=""; xt="$(dirname "$0")/xt.py"
+  [ -f "$xt" ] && command -v python3 >/dev/null 2>&1 || return 0
+  n="$(printf '%s\0' "$@" | CLAUDE_PROJECT_DIR="$ROOT" python3 "$xt" guard-check --stdin)"
   case "$?" in
     126) return 126 ;;
-    0) [ -n "$n" ] && GUARDED=1 ;;
+    0) [ -n "$n" ] && { for c in "$@"; do joined="$joined$GSEP$c$GSEP"; done; GUARDED_CMDS="$joined"; } ;;
   esac
   return 0
 }
 guard_turn() { # $@=task -> 0 nếu mọi lệnh phân giải được của lượt được chạy; 126 (kèm log) nếu guard cấm lệnh nào
-  local t c cmds=""
-  for t in "$@"; do c="$(resolve "$t")"; [ -n "$c" ] && cmds="$cmds$c"$'\n'; done
-  [ -n "$cmds" ] || return 0
-  guard_ok_all <<< "$cmds" && return 0 # here-string, không ống: GUARDED=1 phải đặt ở shell này, không phải subshell
+  local t c; local -a cmds=()
+  for t in "$@"; do c="$(resolve "$t")"; [ -n "$c" ] && cmds+=("$c"); done
+  [ "${#cmds[@]}" -gt 0 ] || return 0
+  guard_ok_all "${cmds[@]}" && return 0 # gọi thẳng, không ống: GUARDED_CMDS phải đặt ở shell này, không phải subshell
   log "$TASK: guard cấm một lệnh của xt.yaml → không chạy lệnh nào (LOOP-STOP-027)"
   return 126
 }
@@ -215,7 +222,7 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
   if [ -z "$cmd" ]; then log "skip: chưa cấu hình/dò được '$1'"; return 0; fi
   RAN=$((RAN + 1))
   log "run [$1]: $cmd"
-  [ -n "$GUARDED" ] || guard_ok "$cmd" || return 126
+  guard_cached "$cmd" || guard_ok "$cmd" || return 126
   # pipefail cho chính lệnh khai báo: `set -o pipefail` ở trên không truyền vào `bash -c` mới, nên
   # `test | tee log` từng xanh giả khi test đỏ.
   ( cd "$ROOT" && bash -o pipefail -c "$cmd" )
@@ -281,7 +288,7 @@ test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   list="$(shard_decl test_list)" && unit="$(shard_decl test_unit)" || return 2
   unset XT_COV_DIR
   if [ -n "${3:-}" ]; then cov_dir "$3" || return 2; fi
-  [ -n "$GUARDED" ] || { guard_ok "$list" && guard_ok "$unit"; } || return 126
+  { guard_cached "$list" && guard_cached "$unit"; } || { guard_ok "$list" && guard_ok "$unit"; } || return 126
   ids="$(cd "$ROOT" && bash -o pipefail -c "$list" | sed -E 's/[[:space:]]+$//' | grep -v '^$' | LC_ALL=C sort -u)" ||
     { log "test-shard: 'test_list' đỏ hoặc không in id nào"; return 1; }
   total="$(printf '%s\n' "$ids" | grep -c .)"
