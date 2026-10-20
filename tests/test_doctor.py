@@ -718,6 +718,21 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(self.subjects(doc, "missing"), [gone])
         self.assertEqual(self.subjects(doc, "modified"), [edited])
 
+    def test_doctor_drift_root_files_modified_is_silent(self):
+        """T-1732: file gốc (AGENTS/CLAUDE/PROGRESS/xt.yaml) có hash trong manifest nhưng dự án sửa là chuyện thường —
+        không `modified`; vẫn báo `missing` khi mất file."""
+        mf = self.base / ".xtemplates" / "manifest.json"
+        doc = json.loads(mf.read_text(encoding="utf-8"))
+        doc["files"]["AGENTS.md"] = "0" * 64
+        doc["files"]["xt.yaml"] = "0" * 64
+        mf.write_text(json.dumps(doc), encoding="utf-8")
+        (self.base / "xt.yaml").write_text("lint: x\n", encoding="utf-8")
+        rc, d = self.drift("--latest", "v0.0.1")
+        self.assertEqual((rc, d["ok"]), (0, True))
+        self.assertEqual(self.subjects(d, "modified"), [])
+        (self.base / "xt.yaml").unlink()
+        self.assertEqual(self.subjects(self.drift("--latest", "v0.0.1")[1], "missing"), ["xt.yaml"])
+
     def test_doctor_drift_modified_only_is_ok(self):
         files = json.loads((self.base / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))["files"]
         edited = sorted(files)[0]
@@ -818,6 +833,13 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(self.subjects(doc, "outdated"), ["3.9.0"])
         for latest in ("v3.9.0", "v3.8.0"):  # bằng hoặc mới hơn tag → không lệch
             self.assertEqual(self.drift("--latest", latest)[0], 0)
+        # T-1718: nhãn cài mặc định của install.py có SHA — `fullmatch` từng làm drift không bao giờ báo bản cũ.
+        (self.base / ".xtemplates" / "VERSION").write_text("3.10.0 (da64110)\n", encoding="utf-8")
+        rc, doc = self.drift("--latest", "v3.11.0")
+        self.assertEqual(
+            (rc, doc["installed"], self.subjects(doc, "outdated")), (1, "3.10.0 (da64110)", ["3.10.0 (da64110)"])
+        )
+        self.assertEqual(self.drift("--latest", "v3.10.0")[0], 0)
         (self.base / ".xtemplates" / "VERSION").write_text("3.9.0-rc1\n", encoding="utf-8")
         self.assertEqual(self.drift("--latest", "v3.9.0")[0], 1)  # rc < bản chính
         for bad in ("không-phải-tag", "", "v3.9", "3.9.0x"):  # tag sai dạng → lỗi dùng lệnh, không lặng lẽ bỏ qua

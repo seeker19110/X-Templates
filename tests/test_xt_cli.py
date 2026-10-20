@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,14 +18,14 @@ import unicodedata
 import unittest
 import warnings
 import unittest.mock
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import xt
-from test_xt import audit_status_text, make_framework
+from test_xt import GOOD_PROGRESS, GOOD_WORKFLOW, audit_status_text, make_framework
 
 
 def run_main(*args, stdin: str | None = None) -> tuple[int, str, str]:
@@ -1020,6 +1021,163 @@ class ChangelogCheckTest(TmpDirCase):
         self.assertEqual(rc, 0, out)
 
 
+# --------------------------------------------------------------------------- checks (T-1714)
+
+
+class ChecksTest(TmpRepoCase):
+    """`xt.py checks`: validate · progress-check · changelog-check · ci-check · license-check trong MỘT tiến trình — mục xanh
+    một dòng, mục đỏ kèm chi tiết của chính lệnh đó và không chặn mục sau, exit 1 khi bất kỳ mục nào ≠ 0."""
+
+    ITEMS = ("validate", "progress-check", "changelog-check", "ci-check", "license-check")
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.sha = self.commit_files({"a.txt": "a"}, at=1_700_000_000)
+        self.fw = self.repo / "framework"
+        self.write_good()
+        # Kín: gốc dự án là repo tạm (ci-check đọc xt.yaml ở đó); `XT_PROGRESS_BASE` rỗng = tắt kiểm nhánh chính.
+        env = {"CLAUDE_PROJECT_DIR": str(self.repo), "XT_PROGRESS_BASE": ""}
+        self.enterContext(unittest.mock.patch.dict(os.environ, env))
+        self.enterContext(chdir(self.repo))
+
+    def write_good(self):
+        """Dự án tối thiểu mà cả năm lệnh con (đối số mặc định, cwd = repo) đều xanh."""
+        make_framework(self.repo)
+        files = {
+            "PROGRESS.md": GOOD_PROGRESS.format(sha=self.sha[:7]),
+            "CHANGELOG.md": ChangelogCheckTest.GOOD,
+            "VERSION": "2.0.0\n",
+            "license-allow.json": json.dumps({"allow": ["MIT"], "exceptions": []}),
+            "requirements-dev.txt": "",
+            ".github/workflows/ci.yml": GOOD_WORKFLOW,
+        }
+        for name, text in files.items():
+            f = self.repo / name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text, encoding="utf-8")
+
+    def run_checks(self) -> tuple[int, str, str]:
+        return run_main("--framework", self.fw, "checks")
+
+    def want(self, red: dict[str, int]) -> list[str]:
+        """Dòng kết quả mong đợi của năm mục theo thứ tự; `red` = {mục đỏ: exit}."""
+        return [f"✗ {n}: exit {red[n]}" if n in red else f"✓ {n}: exit 0" for n in self.ITEMS]
+
+    @staticmethod
+    def verdicts(out: str) -> list[str]:
+        """Dòng kết quả từng mục (`✓|✗ tên: exit N` ở đầu dòng) — chi tiết của mục đỏ thụt 2 ô, dòng lỗi stderr không có
+        `: exit N`, nên không lẫn vào."""
+        return [ln for ln in out.splitlines() if re.fullmatch(r"[✓✗] [a-z-]+: exit \d+", ln)]
+
+    def test_checks_all_green_prints_one_line_per_item_and_exits_0(self):
+        rc, out, err = self.run_checks()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out.splitlines(), [*self.want({}), "checks: 5/5 mục xanh."])
+        self.assertEqual((out.count("✓"), out.count("✗")), (5, 0))
+        for name in self.ITEMS:  # đứng một mình cũng xanh trên cùng cây: `checks` không làm xanh hộ lệnh nào
+            with self.subTest(item=name):
+                self.assertEqual(run_main("--framework", self.fw, name)[0], 0)
+
+    def test_checks_red_item_shows_its_details_and_the_other_four_still_run(self):
+        breaks = {  # mục → (file làm hỏng, nội dung hỏng, mảnh chi tiết lệnh con đó phải in)
+            "validate": ("framework/01-baseline/security.md", "không có frontmatter\n", "security.md"),
+            "progress-check": ("PROGRESS.md", "## Đang làm\n", "mục `## ` phải đúng thứ tự"),
+            "changelog-check": (
+                "CHANGELOG.md",
+                ChangelogCheckTest.GOOD.replace("## [Unreleased]", "## [Chưa phát hành]"),
+                "Unreleased",
+            ),
+            "ci-check": (
+                ".github/workflows/ci.yml",
+                GOOD_WORKFLOW.replace("permissions:\n  contents: read\n", ""),
+                "thiếu `permissions:`",
+            ),
+            "license-check": (
+                "requirements-dev.txt",
+                "xt-khong-co-goi-nay==1.0\n",
+                "xt-khong-co-goi-nay==1.0: chưa cài",
+            ),
+        }
+        self.assertEqual(list(breaks), list(self.ITEMS))
+        for name, (path, text, fragment) in breaks.items():
+            with self.subTest(item=name):
+                self.write_good()
+                (self.repo / path).write_text(text, encoding="utf-8")
+                alone_rc, alone_out, _ = run_main("--framework", self.fw, name)
+                rc, out, err = self.run_checks()
+                self.assertEqual((alone_rc, rc, err), (1, 1, ""))
+                self.assertIn(fragment, alone_out)
+                lines = out.splitlines()
+                self.assertEqual(self.verdicts(out), self.want({name: 1}))
+                self.assertEqual(lines[-1], f"checks: 4/5 mục xanh; đỏ: {name} (exit 1).")
+                # chi tiết = đúng stdout của lệnh đứng một mình, thụt 2 ô, ngay trước dòng kết quả của mục
+                at = lines.index(f"✗ {name}: exit 1")
+                alone_lines = alone_out.splitlines()
+                self.assertEqual(lines[at - len(alone_lines) : at], [f"  {ln}" if ln else "" for ln in alone_lines])
+
+    def test_checks_several_red_items_are_all_reported_in_order(self):
+        (self.repo / "PROGRESS.md").write_text("## Đang làm\n", encoding="utf-8")
+        (self.repo / "requirements-dev.txt").write_text("xt-khong-co-goi-nay==1.0\n", encoding="utf-8")
+        rc, out, err = self.run_checks()
+        self.assertEqual((rc, err), (1, ""))
+        self.assertEqual(self.verdicts(out), self.want({"progress-check": 1, "license-check": 1}))
+        self.assertEqual(
+            out.splitlines()[-1], "checks: 3/5 mục xanh; đỏ: progress-check (exit 1), license-check (exit 1)."
+        )
+
+    def test_checks_unreadable_file_is_exit_2_for_that_item_and_the_rest_still_run(self):
+        (self.repo / "CHANGELOG.md").unlink()
+        rc, out, err = self.run_checks()
+        self.assertEqual(rc, 1)  # tổng hợp: có mục ≠ 0 → 1; mã riêng (2) nằm ở dòng của mục
+        self.assertTrue(err.startswith("✗ ") and "CHANGELOG.md" in err, err)  # lỗi OSError một dòng, như gọi một mình
+        self.assertEqual(
+            out.splitlines(),
+            [*self.want({"changelog-check": 2}), "checks: 4/5 mục xanh; đỏ: changelog-check (exit 2)."],
+        )
+
+    def test_checks_missing_framework_dir_is_a_usage_error_before_any_item(self):
+        rc, out, err = run_main("--framework", self.tmp / "khong-co", "checks")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("Không thấy thư mục khung", err)
+
+    def test_checks_xt_debug_reraises_oserror_like_a_single_command(self):
+        (self.repo / "CHANGELOG.md").unlink()
+        with unittest.mock.patch.dict(os.environ, {"XT_DEBUG": "1"}), self.assertRaises(FileNotFoundError):
+            self.run_checks()
+
+    def test_checks_process_streams_each_item_in_order_with_its_stderr(self):
+        # Ống thật (stdout đệm khối — bỏ PYTHONUNBUFFERED như CI): mỗi mục xả ngay sau khi chạy nên lỗi stderr của mục sau
+        # không chen lên trước kết quả các mục đã chạy; mã thoát của tiến trình = mã tổng hợp.
+        (self.repo / "CHANGELOG.md").unlink()
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "xt.py"), "--framework", str(self.fw), "checks"],
+            cwd=self.repo,
+            env={k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(self.verdicts(r.stdout), self.want({"changelog-check": 2}))
+        stderr_at = next(i for i, ln in enumerate(lines) if "CHANGELOG.md" in ln and " exit " not in ln)
+        self.assertLess(lines.index("✓ progress-check: exit 0"), stderr_at)
+        self.assertLess(stderr_at, lines.index("✗ changelog-check: exit 2"))
+        self.assertEqual(lines[-1], "checks: 4/5 mục xanh; đỏ: changelog-check (exit 2).")
+
+    def test_checks_replaces_the_five_lint_commands_in_xt_yaml(self):
+        self.assertEqual(xt.CHECKS_ITEMS, self.ITEMS)
+        lint = next(ln for ln in (ROOT / "xt.yaml").read_text(encoding="utf-8").splitlines() if ln.startswith("lint:"))
+        self.assertTrue(
+            lint.startswith("lint: python3 scripts/xt.py checks && python3 scripts/check-links.py && "), lint
+        )
+        for name in self.ITEMS:  # không còn gọi riêng (5 lần khởi động xt.py → 1)
+            self.assertNotIn(f"xt.py {name} ", f"{lint} ")
+
+
 class FeedbackTest(TmpDirCase):
     """ADR-0010: dự án đích ghi lỗi do khung + cách khắc phục; repo khung gộp theo (loại, ID)."""
 
@@ -1910,6 +2068,39 @@ class ReleaseCheckTest(TmpRepoCase):
         """Giả `loop verify` xanh trên cây hiện tại (dấu vân tay khớp)."""
         rec = {"ok": True, "mode": "all", "fingerprint": xt.tree_fingerprint(self.repo)}
         xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
+
+    def test_release_reuses_loop_verify_all_blueprint_checks(self):
+        """T-1720: `loop verify --all` xanh trên đúng cây và đúng blueprint → hàng `blueprint` dùng lại kết quả `— Kiểm:`
+        đã ghi, không chạy lại; kết quả đỏ đã ghi → FAIL; cây đổi hoặc verify một phần → chạy lại như cũ."""
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md", "blueprint": "BLUEPRINT.md"}, self.repo)
+        check = {"id": "BASE-X-001", "level": "MUST", "cmd": "true", "file": "BLUEPRINT.md", "exit_code": 0}
+
+        def verified(mode: str = "all", code: int = 0) -> None:
+            rec = {"ok": code == 0, "mode": mode, "fingerprint": xt.tree_fingerprint(self.repo)}
+            rec["blueprint"] = [{**check, "exit_code": code}]
+            xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
+
+        verified()
+        with unittest.mock.patch.object(xt, "_blueprint_run", side_effect=AssertionError("không được chạy lại")):
+            r = self.by_id(self.rows()[1])
+        self.assertEqual(r["blueprint"]["result"], "PASS")
+        self.assertIn("dùng lại `loop verify --all` trên cây này, 1 lệnh kiểm xanh", r["blueprint"]["evidence"])
+        verified(code=1)
+        with unittest.mock.patch.object(xt, "_blueprint_run", side_effect=AssertionError("không được chạy lại")):
+            r = self.by_id(self.rows()[1])
+        self.assertEqual(r["blueprint"]["result"], "FAIL")
+        self.assertIn("lệnh `— Kiểm:` đỏ 1: BASE-X-001", r["blueprint"]["evidence"])
+        verified(mode="changed")  # verify một phần (D-084) không đủ để dùng lại
+        self.assertIn("`blueprint-status --strict --run` exit 0", self.by_id(self.rows()[1])["blueprint"]["evidence"])
+        verified()
+        (self.repo / "moi.txt").write_text("đổi cây\n", encoding="utf-8")  # cây đổi → chạy lại
+        self.assertIn("`blueprint-status --strict --run` exit 0", self.by_id(self.rows()[1])["blueprint"]["evidence"])
+        (self.repo / "moi.txt").unlink()
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md", "blueprint": "KHAC.md"}, self.repo)
+        verified()  # blueprint khai ở loop init khác file đang kiểm → không dùng lại
+        self.assertIn("`blueprint-status --strict --run` exit 0", self.by_id(self.rows()[1])["blueprint"]["evidence"])
 
     def test_no_go_until_blueprint_audit_and_tree_pass(self):
         rc, out, _ = run_main("release-check")  # chưa commit: cây không có HEAD

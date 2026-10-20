@@ -105,6 +105,24 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   hướng thì thư mục là không biết; tuỳ chọn dài viết tắt duy nhất như `--ch=DIR` cũng tính); `dd of=<đích>`, lệnh chỉ
   gồm chuyển hướng (`exec 3> .env`) và chuyển hướng đọc-ghi `<>` (`exec 3<> .env`) là ghi.
 
+### Khoá của `xt.yaml` (nhà — mẫu: [`../templates/xt.yaml`](../templates/xt.yaml) chỉ còn một dòng chú thích mỗi khoá)
+
+YAML phẳng `khoá: lệnh`; `""` = không có, thiếu khoá = tự dò từ manifest; chú thích sau `#` ngoài nháy bị bỏ. Hai nhóm:
+
+| Khoá | Ai chạy | Ý nghĩa |
+|---|---|---|
+| `lint` · `typecheck` · `test` · `build` | `dev-task.sh gate` (= CI) | Cổng đầy đủ theo thứ tự build → typecheck → lint → test; `lint` nên gồm kiểm format. Autopilot đang chạy mà `lint`/`test` rỗng hay no-op (`true`, `:`, `exit 0`, `echo …`) = cổng **đỏ** (ADR-0011); CI mẫu đỏ tới khi có lệnh thật (D-096). Ở M/L còn sàn `LOOP-HARNESS-023` |
+| `format` · `format_file` | `dev-task.sh format` · hook PostToolUse | Format cả repo · format MỘT file (`{}` = đường dẫn); `format_file` trống → mẫu dựng sẵn (prettier/ruff/black/gofmt/rustfmt), không qua guard; lệnh khai báo qua guard (LOOP-STOP-027) |
+| `format_check` · `coverage` | `loop verify` (sàn M/L) | Kiểm format không ghi file; test có ngưỡng coverage — artefact ra `mktemp`, không `\|\| true` |
+| `commit_gate` · `test_fast` | hook trước `git commit` | `fast` (mặc định dự án mới) = `gate-fast` (format_check → lint → typecheck → `test_fast` với `XT_CHANGED_FILES`, trống → `test`); `full`/vắng = `gate`. Diff đụng cấu hình cổng (xt.yaml, xt.py, dev-task.sh, hook, ruff/coverage/requirements) → mọi lớp test qua `test_list`/`test_unit` không coverage, chưa khai hai khoá đó → `test` (D-112). Giá trị khác `fast`/`full` → `doctor` (lỗi `xt-yaml`) và `ci-check` từ chối |
+| `setup` · `test_list` · `test_unit` · `test_combine` · `test_weights` | CI mẫu (`install.py --with-github`) | Cài phụ thuộc mỗi job; chia shard khi khai đủ `test_list` (mỗi dòng một id), `test_unit` (chạy `"$1"`, coverage vào `"$XT_COV_DIR"` nếu có), `test_combine` (gộp, đòi ngưỡng); `test_weights` = file trọng số LPT (`dev-task.sh test-weights`) |
+| `merge_autonomy` · `merge_risk_paths` · `merge_hard_exceptions` · `delivery_phase` · `pr_title_check` | `merge-check`/`pr next`/guard — đọc ở **nhánh đích đã commit** (PR không tự đổi luật cho mình) | L3 (mặc định) bật auto-merge/merge theo làn, L2 chỉ làn nhanh, L1 người merge (ADR-0015) · glob thêm vào đường dẫn nhạy cảm (hợp của cây làm việc và nhánh đích) · `human` người merge ngoại lệ cứng (ADR-0016), `auto` máy merge khi CI xanh (ADR-0020; PR đổi khoá này luôn người merge) · `build` PR làn chuẩn chỉ cần CI xanh, review ghi nợ, `harden`/vắng cần review sạch ở head (ADR-0031; có hiệu lực khi cả nhánh đích lẫn cây làm việc đều `build`; trước G7 đặt `harden`) · `off` tắt kiểm tiêu đề PR Conventional Commits |
+| `review_identity` · `author_model_family` · `reviewer_model_family` | `merge-check`, `ci-check` (T-1508) | Chỉ dấu review của đúng tài khoản mở được merge; hai họ model khai cùng nhau phải khác nhau; `reviewer_model_family` là họ THẬT của model reviewer (workflow `pr-review` chạy model trong `XT_REVIEWER_MODEL`), không phải nhãn tuỳ ý |
+| `e2e` · `e2e_affected` · `audit` · `migrate` · `init` · `smoke` · `install` · `dev`… | Agent đọc và chạy trực tiếp | Khai báo; `dev-task.sh` không chạy. `e2e_affected` = chỉ spec của lát đang làm (Gate mỗi task), suite đầy đủ `e2e` khi push `main`/trước phát hành (`QA-E2E-023`) |
+| `claude_min_version` · `ai_attribution` | `doctor` · guard | Cảnh báo Claude Code thấp hơn (`LOOP-HARNESS-026`) · `forbid` chặn commit/PR ghi tên model hay URL phiên AI (`LOOP-HARNESS-027`) |
+
+Mẫu theo stack (giữ MỘT bộ): **Node** `lint: npm run lint` · `typecheck: npm run typecheck` · `test: npm test -- --run` · `build: npm run build` · `format: npm run format` · `format_file: npx --no-install prettier --write "{}"` · `format_check: npx --no-install prettier --check .` · `coverage: npx --no-install vitest run --coverage` · `test_fast: npx --no-install vitest related --run $XT_CHANGED_FILES`. **Python** `lint: ruff check .` · `typecheck: pyright` · `test: pytest -q` · `format: ruff format .` · `format_file: case "{}" in *.py) ruff format "{}" ;; esac` · `format_check: ruff format --check .` · `coverage: COVERAGE_FILE="$(mktemp)" PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider --cov --cov-fail-under=80` · `test_fast: pytest -q $(python3 .xtemplates/scripts/xt.py test-select)`. **Go** `lint: go vet ./...` · `test: go test ./...` · `build: go build ./...` · `format: gofmt -l -w .` · `format_file: gofmt -w "{}"` · `format_check: test -z "$(gofmt -l .)"` · `coverage: f="$(mktemp)" && go test -coverprofile="$f" ./... && go tool cover -func="$f" | awk '/^total:/{exit ($3+0 < 80)}'`.
+
 ### Định dạng PLAN (parser thật trong `xt.py`)
 
 ```markdown

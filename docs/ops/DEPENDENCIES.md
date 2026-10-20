@@ -37,7 +37,7 @@
 |---|---|---|
 | boolean-py | 5.0 | BSD-2-Clause |
 | cachecontrol | 0.14.4 | Apache-2.0 |
-| certifi | 2026.7.22 | MPL-2.0 (chấp nhận — xem trên) |
+| certifi | 2026.10.19 | MPL-2.0 (chấp nhận — xem trên) |
 | charset-normalizer | 3.5.2 | MIT |
 | cyclonedx-python-lib | 11.12.0 | Apache-2.0 |
 | defusedxml | 0.7.1 | PSFL |

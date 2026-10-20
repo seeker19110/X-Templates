@@ -1301,9 +1301,35 @@ class MergeWatchTest(unittest.TestCase):
     def watch(self, results: list, *extra: str) -> tuple[int, str]:
         """Chạy merge-watch với chuỗi kết quả merge-check giả: (rc, data, err) hoặc verdict ngắn gọn."""
         seq = iter(results)
-        with unittest.mock.patch.object(xt, "_merge_check_json", side_effect=lambda pr: next(seq)):
+        self.pr_next_calls: list[str] = []
+        with (
+            unittest.mock.patch.object(xt, "_merge_check_json", side_effect=lambda pr: next(seq)),
+            unittest.mock.patch.object(xt, "_watch_pr_next", side_effect=self.pr_next_calls.append),
+        ):
             rc, out, _ = run_main("merge-watch", "--pr", "7", *extra)
         return rc, out
+
+    def test_watch_prints_pr_next_when_pr_still_open(self):
+        """T-1719: merge-watch thoát → in luôn kết quả `pr next` (agent không gọi thêm); PR đã đóng thì không; `pr next`
+        không hỏi được PR (exit ≠ 0, lỗi) → im lặng."""
+        self.watch([self.d("fix", "CI đỏ", "sửa")])
+        self.assertEqual(self.pr_next_calls, ["7"])
+        self.watch([self.d("closed", "PR đã MERGED")])
+        self.assertEqual(self.pr_next_calls, [])
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(
+                xt, "cmd_pr", side_effect=lambda a: print("ENABLE-AUTO-MERGE · PR #7\n→ gh x") or 0
+            ),
+            redirect_stdout(out),
+        ):
+            xt._watch_pr_next("7")
+        self.assertEqual(out.getvalue(), "pr next → ENABLE-AUTO-MERGE · PR #7\n  → gh x\n")
+        for bad in (lambda a: 2, unittest.mock.Mock(side_effect=OSError("mạng"))):
+            out = io.StringIO()
+            with unittest.mock.patch.object(xt, "cmd_pr", side_effect=bad), redirect_stdout(out):
+                xt._watch_pr_next("7")
+            self.assertEqual(out.getvalue(), "")
 
     @staticmethod
     def d(verdict: str, reason: str = "x", nxt: str = "") -> tuple[int, dict, str]:

@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -165,9 +167,13 @@ class InstallTest(unittest.TestCase):
         self.run_install()
         self.assertEqual(agents.read_text(encoding="utf-8"), "của tôi\n")
         self.assertEqual(hook.read_text(encoding="utf-8"), "# hook tôi đã sửa\n")
-        self.assertTrue(hook.with_name("stop-guard.sh.xtemplates-new").exists())
+        # T-1732: mẫu không đổi từ lần cài trước → `kept-own`, không có gì mới để gộp nên không ghi `.xtemplates-new`
+        # (trường hợp mẫu đổi: InstallUpgradeTest)
+        self.assertFalse(hook.with_name("stop-guard.sh.xtemplates-new").exists())
+        self.assertFalse(agents.with_name("AGENTS.md.xtemplates-new").exists())
         self.run_install("--force-harness")
         self.assertNotEqual(hook.read_text(encoding="utf-8"), "# hook tôi đã sửa\n")
+        self.assertEqual(agents.read_text(encoding="utf-8"), "của tôi\n")  # --force-harness không đụng file gốc
 
     def test_install_merges_hooks_into_existing_settings(self):
         # AUD-HAR-003: settings.json có sẵn từng chỉ sinh .xtemplates-new → hook copy mà không chạy.
@@ -258,6 +264,14 @@ class InstallTest(unittest.TestCase):
         rs.write_text("{}\n", encoding="utf-8")
         self.run_install("--with-github")
         self.assertEqual(rs.read_text(encoding="utf-8"), "{}\n")
+        # T-1732: mẫu không đổi từ lần cài trước → `kept-own`, không `.xtemplates-new`; mẫu đổi (hash lần trước khác) → có
+        self.assertFalse(rs.with_name("main.json.xtemplates-new").exists())
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        legacy = json.loads(mf.read_text(encoding="utf-8"))
+        legacy[".github/rulesets/main.json"] = install.sha256(b"ruleset khung cu\n")
+        mf.write_text(json.dumps(legacy), encoding="utf-8")
+        self.run_install("--with-github")
+        self.assertEqual(rs.read_text(encoding="utf-8"), "{}\n")
         self.assertTrue(rs.with_name("main.json.xtemplates-new").exists())
 
     def manifests(self) -> tuple[dict, dict]:
@@ -275,10 +289,20 @@ class InstallTest(unittest.TestCase):
         tmpl = ROOT / "framework" / "templates" / "ci.yml"
         self.assertEqual(own.with_name("ci.yml.xtemplates-new").read_bytes(), tmpl.read_bytes())
         for files in self.manifests():
-            self.assertNotIn(".github/workflows/ci.yml", files)  # file của dự án, không phải bản khung
+            # D-114: file của dự án ra `.xtemplates-new` → ghi hash MẪU (không phải hash file dự án, nên không bao giờ
+            # bị coi là "chưa sửa" mà đè)
+            self.assertEqual(files[".github/workflows/ci.yml"], install.sha256(tmpl.read_bytes()))
             for gh in (".github/workflows/secret-scan.yml", ".github/pull_request_template.md"):
                 # hash = nội dung ĐÃ ghi (mẫu .md đã bỏ frontmatter) → `doctor --drift` so được với file thật
                 self.assertEqual(files[gh], install.sha256((self.target / gh).read_bytes()), gh)
+        # Cài lại khi mẫu không đổi sau `updated-new` → `kept-own`: không ghi lại `.xtemplates-new`, không đè file dự án
+        own.with_name("ci.yml.xtemplates-new").unlink()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.run_install("--with-github")
+        self.assertIn(".github/workflows/ci.yml: kept-own", err.getvalue())
+        self.assertFalse(own.with_name("ci.yml.xtemplates-new").exists())
+        self.assertEqual(own.read_text(encoding="utf-8"), "name: CI riêng của dự án\n")
         # File khung chưa sửa (đúng hash lần cài trước) → cập nhật tại chỗ khi khung có bản mới
         scan = self.target / ".github" / "workflows" / "secret-scan.yml"
         scan.write_text("# bản khung cũ\n", encoding="utf-8")
@@ -301,7 +325,8 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((self.target / ".claude").exists())
         legacy, files = self.manifests()
         self.assertEqual(legacy, files)
-        self.assertEqual({k for k in files if not k.startswith(".github/")}, set())
+        # ngoài `.github/` chỉ có hash file gốc (T-1732), không file harness nào
+        self.assertEqual({k for k in files if not k.startswith(".github/")}, set(install.ROOT_TEMPLATES))
         self.assertIn(".github/workflows/ci.yml", files)
         m = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(m["rules"], {"allow": [], "ask": [], "deny": []})
@@ -380,7 +405,10 @@ class LegacyMigrationTest(unittest.TestCase):
         self.assertFalse((self.target / ".xstored").exists())
         self.assertTrue((self.target / ".xtemplates" / "scripts" / "xt.py").is_file())
         self.assertFalse((self.target / "xs.yaml").exists())
-        self.assertEqual((self.target / "xt.yaml").read_text(encoding="utf-8"), 'test: "true"\n')
+        # dòng của dự án giữ nguyên; khoá mới của mẫu nối dạng chú thích (T-1732) nên khoá có hiệu lực không đổi
+        yaml = (self.target / "xt.yaml").read_text(encoding="utf-8")
+        self.assertTrue(yaml.startswith('test: "true"\n\n# Khoá mới của khung (bản t)'), yaml[:80])
+        self.assertEqual(xt._yaml_keys(yaml), {"test": "true"})
         self.assertEqual(hook.read_text(encoding="utf-8"), (ROOT / ".claude/hooks/stop-guard.sh").read_text("utf-8"))
         self.assertIn(".xstored/ → .xtemplates/", err)
         self.assertIn("xs.yaml → xt.yaml", err)
@@ -563,11 +591,13 @@ class InstallEdgeTest(unittest.TestCase):
                 with mock.patch.object(install.subprocess, "run", side_effect=exc):
                     self.assertEqual(install.framework_label(None), "1.2.3")
 
-    def test_no_harness_skips_claude_dir_and_manifest(self):
+    def test_no_harness_skips_claude_dir_and_harness_hashes(self):
         code, _ = self.install_quiet("--no-harness")
         self.assertEqual(code, 0)
         self.assertFalse((self.target / ".claude").exists())
-        self.assertFalse((self.target / ".xtemplates" / "harness.sha256.json").exists())
+        # manifest vẫn ghi để file gốc nâng được không gộp tay (T-1732) — chỉ hash file gốc, không có file harness
+        legacy = json.loads((self.target / ".xtemplates" / "harness.sha256.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(legacy), set(install.ROOT_TEMPLATES))
         self.assertTrue((self.target / ".xtemplates" / "framework").is_dir())
         self.assertTrue((self.target / "AGENTS.md").exists())
 
@@ -582,18 +612,51 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertIn("AGENTS.md: giữ file của dự án", err)
         self.assertIn("hàng rào", err)
 
-    def test_preexisting_modified_hook_gets_new_file_and_no_manifest_entry(self):
+    def test_preexisting_modified_hook_gets_new_file_once_and_template_hash(self):
         hook = self.target / ".claude" / "hooks" / "stop-guard.sh"
         hook.parent.mkdir(parents=True)
         hook.write_text("# của tôi\n", encoding="utf-8")
         code, err = self.install_quiet()
         self.assertEqual(code, 0)
         self.assertEqual(hook.read_text(encoding="utf-8"), "# của tôi\n")
-        self.assertTrue(hook.with_name("stop-guard.sh.xtemplates-new").exists())
+        new = hook.with_name("stop-guard.sh.xtemplates-new")
+        self.assertTrue(new.exists())
         self.assertIn(".xtemplates-new", err)
         manifest = json.loads((self.target / ".xtemplates" / "harness.sha256.json").read_text(encoding="utf-8"))
-        self.assertNotIn(".claude/hooks/stop-guard.sh", manifest)  # không biết hash bản cài → không ghi
+        # D-114: `updated-new` ghi hash MẪU mới (không phải hash file của dự án) → lần sau mẫu không đổi thì im lặng
+        self.assertEqual(
+            manifest[".claude/hooks/stop-guard.sh"], install.sha256((ROOT / ".claude/hooks/stop-guard.sh").read_bytes())
+        )
         self.assertIn(".claude/hooks/session-start.sh", manifest)
+        new.unlink()  # dự án đã xem/gộp bản mới
+        code, err = self.install_quiet()
+        self.assertEqual(code, 0)
+        self.assertFalse(new.exists())  # `kept-own`: không ghi lại `.xtemplates-new`
+        self.assertRegex(err, r"✓ \.claude/: .*kept-own 1")
+        self.assertNotIn("có file .xtemplates-new", err)
+        self.assertEqual(hook.read_text(encoding="utf-8"), "# của tôi\n")
+
+    def test_harness_symlink_is_skipped_and_hash_kept(self):
+        """AUD-HAR-010 cho file harness: đích là symlink → `skipped-symlink`, không ghi qua liên kết; chưa có hash thì
+        không ghi, đã có hash thì giữ nguyên (symlink không thuộc `HASHED`)."""
+        outside = self.tmp / "ngoai.sh"
+        hook = self.target / ".claude" / "hooks" / "stop-guard.sh"
+        hook.parent.mkdir(parents=True)
+        hook.symlink_to(outside)
+        code, err = self.install_quiet()
+        self.assertEqual(code, 0)
+        self.assertFalse(outside.exists())
+        self.assertRegex(err, r"✓ \.claude/: .*skipped-symlink 1")
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        manifest = json.loads(mf.read_text(encoding="utf-8"))
+        self.assertNotIn(".claude/hooks/stop-guard.sh", manifest)
+        manifest[".claude/hooks/stop-guard.sh"] = install.sha256(b"ban cu\n")
+        mf.write_text(json.dumps(manifest), encoding="utf-8")
+        self.install_quiet()
+        self.assertEqual(
+            json.loads(mf.read_text(encoding="utf-8"))[".claude/hooks/stop-guard.sh"], install.sha256(b"ban cu\n")
+        )
+        self.assertFalse(outside.exists())
 
     def test_missing_root_template_is_skipped(self):
         with mock.patch.dict(install.ROOT_TEMPLATES, {"KHONG-CO.md": "KHONG-CO.md"}):
@@ -704,20 +767,37 @@ class InstallPlanTest(unittest.TestCase):
 
     def test_install_plan_matches_real_install_actions(self):
         self.install()
-        (self.target / ".claude" / "hooks" / "stop-guard.sh").write_text("# của tôi\n", encoding="utf-8")
+        hook = self.target / ".claude" / "hooks" / "stop-guard.sh"
+        hook.write_text("# của tôi\n", encoding="utf-8")
         (self.target / "AGENTS.md").unlink()
+        (self.target / "CLAUDE.md").write_text("# luật riêng\n", encoding="utf-8")
+        before = self.snapshot()
         plan = self.plan()
+        self.assertEqual(self.snapshot(), before)
         actions = {f["path"]: f["action"] for f in plan["files"]}
-        self.assertEqual(actions[".claude/hooks/stop-guard.sh"], "updated-new")
+        # T-1732: mẫu không đổi từ lần cài trước → file dự án đã sửa (hook lẫn file gốc) là `kept-own`
+        self.assertEqual(actions[".claude/hooks/stop-guard.sh"], "kept-own")
+        self.assertEqual(actions["CLAUDE.md"], "kept-own")
         self.assertEqual(actions["AGENTS.md"], "copied")
-        self.assertEqual(actions["CLAUDE.md"], "kept")
+        self.assertEqual(actions["PROGRESS.md"], "kept")
         self.assertEqual(plan["settings"]["action"], "kept")
         self.assertTrue(plan["manifest"]["present"])
         forced = self.plan("--force-harness")
         self.assertEqual({f["path"]: f["action"] for f in forced["files"]}[".claude/hooks/stop-guard.sh"], "copied")
         self.assertEqual(forced["settings"], {"action": "copied"})
         self.install()
-        self.assertTrue((self.target / ".claude" / "hooks" / "stop-guard.sh.xtemplates-new").exists())
+        self.assertEqual(sorted(p.name for p in self.target.rglob("*.xtemplates-new")), [])
+        self.assertEqual((self.target / "CLAUDE.md").read_text(encoding="utf-8"), "# luật riêng\n")
+        # mẫu đổi so với lần cài trước (hash lần trước khác) → kế hoạch `updated-new`, bản thật ghi `.xtemplates-new`
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        m = json.loads(mf.read_text(encoding="utf-8"))
+        m[".claude/hooks/stop-guard.sh"] = m["CLAUDE.md"] = install.sha256(b"ban khung cu\n")
+        mf.write_text(json.dumps(m), encoding="utf-8")
+        actions = {f["path"]: f["action"] for f in self.plan()["files"]}
+        self.assertEqual((actions[".claude/hooks/stop-guard.sh"], actions["CLAUDE.md"]), ("updated-new",) * 2)
+        self.install()
+        self.assertTrue(hook.with_name("stop-guard.sh.xtemplates-new").exists())
+        self.assertTrue((self.target / "CLAUDE.md.xtemplates-new").exists())
 
     def test_install_plan_github_matches_real_install(self):
         own = self.target / ".github" / "workflows" / "ci.yml"
@@ -868,6 +948,445 @@ class InstallPlanTest(unittest.TestCase):
         with redirect_stderr(err):
             self.assertEqual(install.main([str(self.target / "khong-co"), "--plan"]), 2)
         self.assertIn("không phải thư mục", err.getvalue())
+
+
+class InstallUpgradeTest(unittest.TestCase):
+    """T-1732: nâng bản không gộp tay — file gốc có hash trong manifest (`kept-own` khi dự án đã sửa mà mẫu không đổi,
+    `.xtemplates-new` một lần khi mẫu đổi), in bước "Dự án đích" của CHANGELOG, khoá mới của `xt.yaml` dạng chú thích."""
+
+    MARKER = '# Khoá mới của khung (bản t) — bật bằng cách bỏ "# "; vắng khoá = hành vi cũ'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name).resolve()
+        # đích không phải repo git (kể cả khi TMPDIR nằm trong repo) → PROGRESS không nhận SHA HEAD, hash ổn định
+        ceiling = mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp.parent)})
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
+        self.target = self.tmp / "dich"
+        self.target.mkdir()
+
+    def install_quiet(self, *extra) -> tuple[int, str]:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = install.main([str(self.target), "--label", "t", *extra])
+        self.assertEqual(code, 0, err.getvalue())
+        return code, err.getvalue()
+
+    def plan(self) -> dict[str, dict]:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            self.assertEqual(install.main([str(self.target), "--plan"]), 0)
+        return {f["path"]: f for f in json.loads(out.getvalue())["files"]}
+
+    def files(self) -> dict[str, str]:
+        """Map `files` — `harness.sha256.json` và `manifest.json` phải giống nhau."""
+        xt_dir = self.target / ".xtemplates"
+        legacy = json.loads((xt_dir / "harness.sha256.json").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads((xt_dir / "manifest.json").read_text(encoding="utf-8"))["files"], legacy)
+        return legacy
+
+    def set_installed_hash(self, rel: str, content: bytes) -> None:
+        """Giả lập: lần cài trước là bản khung `content` (mẫu đã đổi kể từ đó)."""
+        mf = self.target / ".xtemplates" / "harness.sha256.json"
+        m = json.loads(mf.read_text(encoding="utf-8"))
+        m[rel] = install.sha256(content)
+        mf.write_text(json.dumps(m), encoding="utf-8")
+
+    @staticmethod
+    def template(name: str) -> bytes:
+        return install.source_bytes(ROOT / "framework" / "templates" / name, install.template_body)
+
+    def test_kept_own_when_template_unchanged(self):
+        """Dự án sửa AGENTS.md + một hook, cài lại với mẫu không đổi → `kept-own`: không `.xtemplates-new`, không cảnh
+        báo gộp tay, file và hash giữ nguyên."""
+        _, err = self.install_quiet()
+        self.assertNotIn("Bước làm tay", err)  # cài mới (chưa có VERSION) → không in bước CHANGELOG
+        agents = self.target / "AGENTS.md"
+        hook = self.target / ".claude" / "hooks" / "stop-guard.sh"
+        agents.write_text("# luật riêng của dự án — Đ\n", encoding="utf-8")
+        hook.write_text("# hook đã sửa\n", encoding="utf-8")
+        before = self.files()
+        _, err = self.install_quiet()
+        self.assertEqual(agents.read_text(encoding="utf-8"), "# luật riêng của dự án — Đ\n")
+        self.assertEqual(hook.read_text(encoding="utf-8"), "# hook đã sửa\n")
+        self.assertEqual(sorted(p.name for p in self.target.rglob("*.xtemplates-new")), [])
+        self.assertIn("AGENTS.md: kept-own", err)
+        self.assertRegex(err, r"✓ \.claude/: .*kept-own 1")
+        self.assertNotIn("có file .xtemplates-new", err)
+        self.assertEqual(self.files(), before)
+        self.assertNotIn("Bước làm tay", err)  # nhãn "t" không đọc được X.Y.Z → bỏ qua
+
+    def test_template_changed_and_edited_writes_new_once(self):
+        """Mẫu đổi + dự án đã sửa → `.xtemplates-new` MỘT lần, hash mẫu mới vào manifest; lần cài sau mẫu không đổi →
+        im lặng (`kept-own`)."""
+        self.install_quiet()
+        agents = self.target / "AGENTS.md"
+        agents.write_text("# luật riêng\n", encoding="utf-8")
+        self.set_installed_hash("AGENTS.md", b"# mau AGENTS cu\n")
+        _, err = self.install_quiet()
+        new = agents.with_name("AGENTS.md.xtemplates-new")
+        self.assertEqual(new.read_bytes(), self.template("AGENTS.md"))
+        self.assertEqual(agents.read_text(encoding="utf-8"), "# luật riêng\n")
+        self.assertIn("AGENTS.md: giữ file của dự án; mẫu khung ở AGENTS.md.xtemplates-new", err)
+        self.assertEqual(self.files()["AGENTS.md"], install.sha256(self.template("AGENTS.md")))
+        new.unlink()  # dự án đã gộp phần của khung
+        _, err = self.install_quiet()
+        self.assertFalse(new.exists())
+        self.assertIn("AGENTS.md: kept-own", err)
+        self.assertEqual(agents.read_text(encoding="utf-8"), "# luật riêng\n")
+
+    def test_pristine_root_file_updated_in_place(self):
+        """File gốc còn đúng hash lần cài trước (chưa sửa) + mẫu đổi → cập nhật tại chỗ, không `.xtemplates-new`."""
+        self.install_quiet()
+        claude = self.target / "CLAUDE.md"
+        claude.write_bytes(b"# mau CLAUDE cu\n")
+        self.set_installed_hash("CLAUDE.md", b"# mau CLAUDE cu\n")
+        _, err = self.install_quiet()
+        self.assertEqual(claude.read_bytes(), self.template("CLAUDE.md"))
+        self.assertFalse(claude.with_name("CLAUDE.md.xtemplates-new").exists())
+        self.assertIn("CLAUDE.md: updated", err)
+        self.assertEqual(self.files()["CLAUDE.md"], install.sha256(self.template("CLAUDE.md")))
+
+    def test_manifest_records_root_file_hashes(self):
+        """Hash file gốc = nội dung mẫu đã ghi (sau biến đổi) trong CÙNG map `files` với harness; cài lại không đổi gì
+        thì manifest không đổi; file gốc là symlink → bỏ qua, giữ hash cũ."""
+        self.install_quiet()
+        files = self.files()
+        for name in install.ROOT_TEMPLATES:
+            self.assertEqual(files[name], install.sha256((self.target / name).read_bytes()), name)
+        self.assertIn(".claude/hooks/stop-guard.sh", files)
+        manifest = (self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8")
+        self.install_quiet()
+        self.assertEqual((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"), manifest)
+        outside = self.tmp / "ngoai.md"
+        (self.target / "CLAUDE.md").unlink()
+        (self.target / "CLAUDE.md").symlink_to(outside)
+        self.set_installed_hash("CLAUDE.md", b"# mau CLAUDE cu\n")
+        _, err = self.install_quiet()
+        self.assertIn("CLAUDE.md: skipped-symlink", err)
+        self.assertFalse(outside.exists())
+        self.assertEqual(self.files()["CLAUDE.md"], install.sha256(b"# mau CLAUDE cu\n"))
+
+    def test_progress_hash_is_template_before_head_sha(self):
+        """PROGRESS.md (D-114): hash vào manifest là mẫu TRƯỚC khi thay SHA HEAD, nên HEAD đổi không làm mẫu "đổi" — cài
+        lại sau commit mới: PROGRESS còn SHA cũ hay dự án đã sửa đều `kept-own`, không `.xtemplates-new`."""
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.target)], check=True)
+        git = ["git", "-C", str(self.target), "-c", "user.name=t", "-c", "user.email=t@t"]
+
+        def commit(msg: str) -> str:
+            (self.target / "a.txt").write_text(msg, encoding="utf-8")
+            subprocess.run([*git, "add", "a.txt"], check=True)
+            subprocess.run([*git, "commit", "-qm", msg], check=True)
+            return subprocess.run(
+                [*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+
+        first = commit("1")
+        self.install_quiet()
+        progress = self.target / "PROGRESS.md"
+        self.assertIn(f"`{first}`", progress.read_text(encoding="utf-8"))  # AUD-HAR-053 giữ nguyên
+        basis = install.sha256(self.template("PROGRESS.md"))
+        self.assertEqual(self.files()["PROGRESS.md"], basis)
+        self.assertNotEqual(install.sha256(progress.read_bytes()), basis)
+        commit("2")
+        _, err = self.install_quiet()
+        self.assertIn("PROGRESS.md: kept-own", err)
+        self.assertIn(f"`{first}`", progress.read_text(encoding="utf-8"))
+        progress.write_text(progress.read_text(encoding="utf-8") + "- ghi chú của dự án\n", encoding="utf-8")
+        commit("3")
+        self.assertEqual(self.plan()["PROGRESS.md"]["action"], "kept-own")
+        _, err = self.install_quiet()
+        self.assertIn("PROGRESS.md: kept-own", err)
+        self.assertFalse(progress.with_name("PROGRESS.md.xtemplates-new").exists())
+        self.assertEqual(self.files()["PROGRESS.md"], basis)
+
+    def test_upgrade_from_install_without_root_hashes_infers_old_template(self):
+        """Dự án cài từ bản chưa có hash file gốc (giả 3.7.1): hash lần cài trước suy từ `.xtemplates/framework/templates/`
+        CŨ, trước khi khung mới thay nó (D-114) — AGENTS.md chưa sửa → `updated` tại chỗ; xt.yaml đã sửa + mẫu đổi →
+        `updated-new` + nối khoá; PROGRESS đã sửa + mẫu không đổi → `kept-own`; manifest có hash thì thắng hash suy;
+        `--plan` khớp; sau đó manifest ghi hash mẫu mới."""
+        self.install_quiet()
+        xt_dir = self.target / ".xtemplates"
+        for mf in (xt_dir / "harness.sha256.json", xt_dir / "manifest.json"):
+            doc = json.loads(mf.read_text(encoding="utf-8"))
+            for name in ("AGENTS.md", "PROGRESS.md", "xt.yaml"):  # CLAUDE.md giữ hash: kiểm manifest thắng hash suy
+                doc.get("files", doc).pop(name)
+            mf.write_text(json.dumps(doc), encoding="utf-8")
+        (xt_dir / "VERSION").write_text("3.7.1 (9433792)\n", encoding="utf-8")
+        old = xt_dir / "framework" / "templates"
+        (old / "AGENTS.md").write_text("---\ntitle: Mẫu AGENTS cũ\n---\n\n# AGENTS cũ\n", encoding="utf-8")
+        agents = self.target / "AGENTS.md"
+        agents.write_text("# AGENTS cũ\n", encoding="utf-8")  # đúng bản mẫu cũ đã cài (bỏ frontmatter) — chưa sửa
+        (old / "xt.yaml").write_text('lint: ""\ntest: ""\n', encoding="utf-8")
+        y = self.target / "xt.yaml"
+        y.write_text("lint: ruff check .\ntest: pytest -q\n", encoding="utf-8")
+        progress = self.target / "PROGRESS.md"  # mẫu PROGRESS cũ = mẫu hiện tại
+        progress.write_text(progress.read_text(encoding="utf-8") + "- việc của dự án\n", encoding="utf-8")
+        claude = self.target / "CLAUDE.md"
+        claude.write_text("# luật riêng\n", encoding="utf-8")
+        (old / "CLAUDE.md").write_text("# CLAUDE cũ khác\n", encoding="utf-8")  # suy từ đây sẽ ra `updated-new`
+        expected = {
+            "AGENTS.md": "updated",
+            "CLAUDE.md": "kept-own",
+            "PROGRESS.md": "kept-own",
+            "xt.yaml": "updated-new",
+        }
+        plan = self.plan()
+        self.assertEqual({name: plan[name]["action"] for name in install.ROOT_TEMPLATES}, expected)
+        _, err = self.install_quiet()
+        self.assertEqual(agents.read_bytes(), self.template("AGENTS.md"))
+        self.assertIn("AGENTS.md: updated", err)
+        self.assertIn("PROGRESS.md: kept-own", err)
+        self.assertIn("CLAUDE.md: kept-own", err)
+        self.assertEqual(claude.read_text(encoding="utf-8"), "# luật riêng\n")
+        self.assertEqual(sorted(p.name for p in self.target.glob("*.xtemplates-new")), ["xt.yaml.xtemplates-new"])
+        self.assertTrue(
+            y.read_text(encoding="utf-8").startswith(f"lint: ruff check .\ntest: pytest -q\n\n{self.MARKER}")
+        )
+        files = self.files()
+        for name in install.ROOT_TEMPLATES:
+            self.assertEqual(files[name], install.sha256(self.template(name)), name)
+        self.assertIn("[install] Bước làm tay từ CHANGELOG (3.7.1 (9433792) → t):\n", err)
+
+    def test_infer_root_hashes_skips_missing_symlink_and_unreadable(self):
+        old = self.target / ".xtemplates" / "framework" / "templates"
+        self.assertEqual(install.infer_root_hashes(self.target), {})  # chưa cài
+        old.mkdir(parents=True)
+        (old / "AGENTS.md").write_text("---\na: 1\n---\n# a\n", encoding="utf-8")
+        (old / "CLAUDE.md").write_bytes(b"\xff\xfe")  # không phải UTF-8
+        (self.tmp / "ngoai.yaml").write_text("lint: x\n", encoding="utf-8")
+        (old / "xt.yaml").symlink_to(self.tmp / "ngoai.yaml")  # symlink (kể cả trỏ file có thật) → không đọc
+        self.assertEqual(install.infer_root_hashes(self.target), {"AGENTS.md": install.sha256(b"# a\n")})
+
+    def test_upgrade_steps_from_real_changelog(self):
+        """Nâng từ 3.5.0 (nhãn kèm SHA): CHANGELOG thật của khung → mỗi mục bản > 3.5.0 có bước in `[bản]` MỘT lần, rồi
+        mỗi bước là MỘT dòng `- Dự án đích …` (mệnh đề tới hết câu, D-114), trước dòng "Xong."; mục ≤ 3.5.0 không in."""
+        (self.target / ".xtemplates").mkdir()
+        (self.target / ".xtemplates" / "VERSION").write_text("3.5.0 (abc)\n", encoding="utf-8")
+        _, err = self.install_quiet()
+        head = "[install] Bước làm tay từ CHANGELOG (3.5.0 (abc) → t):\n"
+        self.assertIn(head, err)
+        self.assertNotIn("Xong.", err.split(head, 1)[0])
+        lines = err.split(head, 1)[1].split("[install] Xong.", 1)[0].splitlines()
+        sections = [ln[len("[install]   [") : -1] for ln in lines if ln.startswith("[install]   [")]
+        self.assertTrue(all(re.fullmatch(r"\[install\]   (\[[^]]+\]|- Dự án đích.*)", ln) for ln in lines), lines)
+        self.assertEqual(len(sections), len(set(sections)))  # mỗi mục in [bản] một lần
+        released = [s for s in sections if s != "Unreleased"]
+        self.assertEqual(released[-7:], ["3.10.0", "3.9.0", "3.8.0", "3.7.1", "3.7.0", "3.6.0", "3.5.1"])
+        self.assertTrue(all(tuple(map(int, s.split("."))) > (3, 5, 0) for s in released))
+        # trích dẫn nhiều dòng của 3.8.0 → một dòng: bỏ `>` và `**` (ngoài mã), tới dấu chấm hết câu
+        self.assertIn(
+            "[install]   - Dự án đích khi nâng từ 3.7.x: chạy lại `install.py` (guard, `_lib.sh`, `pre-mcp-guard.sh`, "
+            "matcher hook MCP trong `settings.json`, `xt.py`, mẫu, `.claude/agents/*.md` đổi).",
+            lines,
+        )
+        self.assertFalse([ln for ln in lines if "khi nâng từ 3.4.1" in ln])  # bước của 3.5.0 (≤ bản đã cài)
+        per_section: dict[str, list[str]] = {}
+        for ln in lines:
+            if ln.startswith("[install]   ["):
+                current = per_section.setdefault(ln, [])
+            else:
+                current.append(ln)
+        self.assertTrue(all(len(v) == len(set(v)) for v in per_section.values()))  # trùng hệt trong mục in một lần
+
+    def test_upgrade_steps_clauses_versions_and_unicode(self):
+        """Mệnh đề = từ "Dự án đích" tới hết câu (dấu chấm + khoảng trắng/hết khối; `1.` của danh sách không phải hết câu),
+        khối nhiều dòng gộp một dòng (bỏ thụt lề, `>`, `**` ngoài mã); nhắc tên trong ngoặc bỏ qua; trùng hệt trong mục
+        in một lần; mục ≤ đã cài, tiêu đề `## ` khác, dòng ngoài mục bỏ; NFD vẫn khớp (ra NFC); giữ thứ tự CHANGELOG."""
+        text = "\n".join(
+            [
+                "# Changelog",
+                "Dự án đích: dòng ngoài mục — không lấy.",
+                "## [Unreleased]",
+                "### Added",
+                "- u1 **Dự án đích:** chạy lại `install.py`",
+                "  (guard đổi). Câu sau không lấy.",
+                "- u2 không có bước",
+                "  nối tiếp u2",
+                "- u3 **Dự án đích:** chạy lại `install.py` (guard đổi).",
+                '- u5 in các bước "Dự án đích" của CHANGELOG. Dự án đích: chạy lại.',
+                "- u6 Dự án đích: chép `.github/**/*.yml` vào **dự án**.",
+                unicodedata.normalize("NFD", "u7 Dự án đích dạng tổ hợp"),
+                "",
+                "## [3.6.0] - 2026-01-02",
+                "> **Dự án đích khi nâng từ 3.5.x:** chạy lại `install.py`",
+                "> (guard). Guard chặn thêm.",
+                "",
+                "> **Dự án đích khi nâng từ 3.0.x:**",
+                "> 1. Chạy lại `install.py`.",
+                "> 2. Ghép lại.",
+                "",
+                "Đoạn p1 có Dự án đích: làm X",
+                "p1 tiếp. Hết.",
+                "",
+                "    khối thụt lề, Dự án đích: Y",
+                "    dòng hai",
+                "## Ghi chú",
+                "- n1 Dự án đích dưới tiêu đề lạ — không lấy.",
+                "## [v3.5.1] - 2026-01-01",
+                "Dự án đích: bản có tiền tố v.",
+                "## [3.5.0] - 2026-01-01",
+                "- c1 Dự án đích: bằng bản đã cài — không lấy.",
+                "## [2.0.0]",
+                "- d1 Dự án đích: cũ hơn — không lấy.",
+            ]
+        )
+        unreleased = (
+            "Unreleased",
+            [
+                "Dự án đích: chạy lại `install.py` (guard đổi).",
+                "Dự án đích: chạy lại.",
+                "Dự án đích: chép `.github/**/*.yml` vào dự án.",
+                unicodedata.normalize("NFC", "Dự án đích dạng tổ hợp"),
+            ],
+        )
+        self.assertEqual(
+            install.upgrade_steps(text, (3, 5, 0)),
+            [
+                unreleased,
+                (
+                    "3.6.0",
+                    [
+                        "Dự án đích khi nâng từ 3.5.x: chạy lại `install.py` (guard).",
+                        "Dự án đích khi nâng từ 3.0.x: 1. Chạy lại `install.py`.",
+                        "Dự án đích: làm X p1 tiếp.",
+                        "Dự án đích: Y dòng hai",
+                    ],
+                ),
+                ("v3.5.1", ["Dự án đích: bản có tiền tố v."]),
+            ],
+        )
+        self.assertEqual(install.upgrade_steps(text, (9, 0, 0)), [unreleased])
+        self.assertEqual(
+            install.text_blocks(["- a", "- b", "> q", "  q nối", "", "  c"]),
+            [["- a"], ["- b"], ["> q", "  q nối"], ["  c"]],
+        )
+
+    def report(self, previous: str | None, version: str | None, changelog: bytes | None) -> str:
+        """`report_upgrade_steps` với khung giả chỉ có VERSION/CHANGELOG (None = không có file)."""
+        src = self.tmp / "khung-gia"
+        shutil.rmtree(src, ignore_errors=True)
+        src.mkdir()
+        if version is not None:
+            (src / "VERSION").write_text(version, encoding="utf-8")
+        if changelog is not None:
+            (src / "CHANGELOG.md").write_bytes(changelog)
+        err = io.StringIO()
+        with mock.patch.object(install, "SRC", src), redirect_stderr(err):
+            install.report_upgrade_steps(previous, "mới")
+        return err.getvalue()
+
+    def test_upgrade_steps_skip_none_downgrade_and_unreadable(self):
+        """Cài mới/nhãn lạ/VERSION hỏng → im lặng; nâng bản mà không có bước → "không có"; cài lại cùng bản không có
+        bước → im lặng (review #191); hạ bản → một dòng; CHANGELOG thiếu hoặc không phải UTF-8 → một dòng, không lỗi
+        (fail-open)."""
+        log = "## [Unreleased]\n- a không có bước\n## [3.6.0]\n- b Dự án đích: chạy lại\n"
+        for previous in (None, "", "nhãn-lạ", "v3"):
+            self.assertEqual(self.report(previous, "3.6.0", log.encode()), "", previous)
+        (self.target / ".xtemplates").mkdir()
+        (self.target / ".xtemplates" / "VERSION").write_bytes(b"\xff\xfe3.5.0")
+        self.assertIsNone(install.installed_label(self.target / ".xtemplates"))
+        self.assertEqual(self.report("3.6.0 (abc)", "3.6.0", log.encode()), "")  # cài lại cùng bản: im lặng
+        self.assertEqual(
+            self.report("3.5.0 (abc)", "3.6.0", b"## [Unreleased]\n- a\n## [3.6.0]\n- b\n"),
+            "[install] Bước làm tay từ CHANGELOG (3.5.0 (abc) → mới): không có\n",
+        )
+        out = self.report("3.5.0", None, log.encode())  # khung không có VERSION → không biết hạ bản, vẫn in
+        self.assertEqual(out.splitlines()[1:], ["[install]   [3.6.0]", "[install]   - Dự án đích: chạy lại"])
+        changelog = (
+            "## [Unreleased]\n- a **Dự án đích:** chạy lại `install.py`.\n- b **Dự án đích:** chạy lại `install.py`.\n"
+            "## [3.6.0] - 2026-01-02\n> **Dự án đích khi nâng từ 3.5.x:** chạy lại\n> `install.py` (guard). Thêm.\n"
+        )
+        self.assertEqual(  # dạng ra đầy đủ: tiêu đề, `[bản]` một lần mỗi mục, mỗi bước một dòng
+            self.report("3.5.0 (abc)", "3.6.0", changelog.encode()),
+            "[install] Bước làm tay từ CHANGELOG (3.5.0 (abc) → mới):\n"
+            "[install]   [Unreleased]\n"
+            "[install]   - Dự án đích: chạy lại `install.py`.\n"
+            "[install]   [3.6.0]\n"
+            "[install]   - Dự án đích khi nâng từ 3.5.x: chạy lại `install.py` (guard).\n",
+        )
+        out = self.report("v9.0.0", "3.6.0\n", log.encode())
+        self.assertEqual(
+            out,
+            "[install] Bước làm tay từ CHANGELOG (v9.0.0 → mới): bỏ qua — bản khung 3.6.0 cũ hơn bản đã cài (hạ bản)\n",
+        )
+        for changelog in (None, b"## [3.6.0]\n- \xff Du an dich\n"):
+            out = self.report("3.5.0", "3.6.0", changelog)
+            self.assertEqual(len(out.splitlines()), 1, out)
+            self.assertIn("(3.5.0 → mới): không đọc được CHANGELOG.md của khung", out)
+
+    def test_xt_yaml_new_keys_appended_as_comments_idempotent(self):
+        """xt.yaml của dự án (`kept-own`): khoá của mẫu mà dự án chưa có (`khoá:` lẫn `# khoá:`) nối cuối file dạng chú
+        thích sau MỘT dòng đánh dấu; dòng cũ giữ nguyên byte; khoá có hiệu lực không đổi; `--plan` chỉ báo; cài lần hai
+        không nối thêm."""
+        self.install_quiet()
+        y = self.target / "xt.yaml"
+        own = 'lint: ruff check .\ntest: "pytest -q"\n#delivery_phase: harden\n'
+        y.write_text(own, encoding="utf-8")
+        template = self.template("xt.yaml").decode("utf-8")
+        tmpl = {m[1]: ln for ln in template.splitlines() if (m := re.match(r"([a-z0-9_]+):", ln))}
+        expected = [k for k in tmpl if k not in ("lint", "test", "delivery_phase")]
+        self.assertIn("e2e_affected", expected)  # khoá có chữ số cũng là khoá của mẫu
+        entry = self.plan()["xt.yaml"]
+        self.assertEqual((entry["action"], entry["keys_add"]), ("kept-own", expected))
+        self.assertEqual(y.read_text(encoding="utf-8"), own)  # --plan không ghi
+        _, err = self.install_quiet()
+        text = y.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(own), text[:120])
+        self.assertEqual(text[len(own) :].splitlines(), ["", self.MARKER, *(f"# {tmpl[k]}" for k in expected)])
+        self.assertIn(f"xt.yaml: nối {len(expected)} khoá mới của khung dạng chú thích ({', '.join(expected)})", err)
+        self.assertEqual(set(xt._yaml_keys(text)), {"lint", "test"})  # vắng khoá = hành vi cũ
+        self.assertFalse(y.with_name("xt.yaml.xtemplates-new").exists())
+        _, err = self.install_quiet()
+        self.assertEqual(y.read_text(encoding="utf-8"), text)
+        self.assertNotIn("khoá mới của khung dạng chú thích", err)
+        self.assertEqual(self.plan()["xt.yaml"]["keys_add"], [])
+
+    def test_xt_yaml_keys_crlf_updated_new_and_unreadable(self):
+        """Mẫu đổi + xt.yaml của dự án (`updated-new`): vừa `.xtemplates-new` vừa nối khoá; giữ CRLF và dòng cuối thiếu
+        xuống dòng; lần sau `kept-own` không nối thêm. Không phải UTF-8 → log, không ghi; lỗi ghi → log (fail-open)."""
+        self.install_quiet()
+        y = self.target / "xt.yaml"
+        y.write_bytes(b"lint: x\r\ntest: y")
+        self.set_installed_hash("xt.yaml", b'lint: ""\n')
+        _, err = self.install_quiet()
+        self.assertTrue(y.with_name("xt.yaml.xtemplates-new").exists())
+        data = y.read_bytes()
+        self.assertTrue(data.startswith(b"lint: x\r\ntest: y\r\n\r\n" + self.MARKER.encode() + b"\r\n# "), data[:80])
+        self.assertTrue(data.endswith(b"\r\n"))
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+        self.assertEqual(self.files()["xt.yaml"], install.sha256(self.template("xt.yaml")))  # hash mẫu MỚI
+        _, err = self.install_quiet()
+        self.assertEqual(y.read_bytes(), data)
+        self.assertIn("xt.yaml: kept-own", err)
+        y.write_bytes(b"lint: \xff\n")
+        self.assertEqual(self.plan()["xt.yaml"], {"path": "xt.yaml", "action": "kept-own", "keys_add": []})
+        _, err = self.install_quiet()
+        self.assertEqual(y.read_bytes(), b"lint: \xff\n")
+        self.assertIn("⚠ xt.yaml: không đọc được", err)
+        y.write_bytes(b"")
+        real_open = Path.open
+
+        def no_append(path, mode="r", *a, **k):
+            if mode == "ab":
+                raise OSError("đĩa đầy")
+            return real_open(path, mode, *a, **k)
+
+        err_io = io.StringIO()
+        with mock.patch.object(Path, "open", no_append), redirect_stderr(err_io):
+            install.append_yaml_keys(y, 'lint: ""\n', "t")
+        self.assertEqual(y.read_bytes(), b"")
+        self.assertIn("⚠ xt.yaml: không nối được khoá mới của khung (đĩa đầy)", err_io.getvalue())
+
+    def test_yaml_block_layout(self):
+        marker = self.MARKER
+        self.assertEqual(install.yaml_block("", ["a: 1"], "t"), f"{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("x: 1\n", ["a: 1"], "t"), f"\n{marker}\n# a: 1\n")
+        self.assertEqual(install.yaml_block("x: 1", ["a: 1", "b: 2"], "t"), f"\n\n{marker}\n# a: 1\n# b: 2\n")
+        self.assertEqual(install.yaml_block("x: 1\r\n", ["a: 1"], "t"), f"\r\n{marker}\r\n# a: 1\r\n")
+        self.assertEqual(install.missing_yaml_keys("a: 1\n# b: 2\nc: 3\nc: 4\n", "# a: x\n  c: y\n"), [("c", "c: 3")])
 
 
 class CheckLinksTest(unittest.TestCase):

@@ -38,6 +38,9 @@ Lệnh:
                                 allowlist license-allow.json; vi phạm/ngoại lệ quá hạn → exit 1 (BASE-DEP-005).
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
   ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
+  checks                        validate · progress-check · changelog-check · ci-check · license-check (đối số mặc định) trong MỘT
+                                tiến trình, gom lỗi: mục xanh một dòng, mục đỏ kèm chi tiết, không chặn mục sau; exit 1 khi bất kỳ
+                                mục nào ≠ 0 — `lint` của xt.yaml dùng (T-1714).
   audit plan [--blueprint F] [--status F] [--json]
                                 Dò stack → nhóm audit áp dụng/rút gọn/N/A, công cụ có/thiếu, bằng chứng blueprint cũ, nhóm cần quét lại.
   audit check STATUS [--strict] Kiểm sổ docs/ops/AUDIT-STATUS.md; --strict = Definition of Complete (0 🔴/🟠 mở, mọi nhóm đã quét).
@@ -94,6 +97,7 @@ import tempfile
 import sys
 import time
 import traceback
+import types
 import unicodedata
 import urllib.parse
 from collections import Counter
@@ -1128,14 +1132,18 @@ def read_state(base: Optional[Path] = None) -> Optional[Dict[str, Any]]:
     return _read_json_obj(state_dir(base) / "state.json")
 
 
-def write_atomic(path: Path, text: str) -> None:
-    """Ghi file qua tệp tạm rồi đổi tên: lỗi giữa chừng không để lại file dở."""
+def write_atomic(path: Path, text: str, keep_mode: bool = False) -> None:
+    """Ghi file qua tệp tạm rồi đổi tên: lỗi giữa chừng không để lại file dở. Không dịch xuống dòng (`newline=""`: CRLF
+    trong `text` giữ nguyên); `keep_mode` giữ quyền của file cũ (tệp tạm của mkstemp là 0600 — file tài liệu đã track
+    như PLAN không được đổi quyền, review #191)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     # Tên tạm ngẫu nhiên, tạo độc quyền (O_EXCL): không đi theo symlink đặt sẵn, hai tiến trình không đè nhau (AUD-HAR-009).
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
+        if keep_mode and path.exists():
+            os.chmod(tmp, path.stat().st_mode & 0o7777)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -1860,61 +1868,97 @@ def guard_paths(base: Path) -> List[Path]:
     return [base / GUARD_FILE, SCRIPT_DIR.parent / GUARD_FILE, SCRIPT_DIR.parent.parent / GUARD_FILE]
 
 
-def _guard_verdict(path: Path, cmd_str: str, base: Path, strict: bool) -> Dict[str, Any]:
-    """Quyết định của guard `path` cho lệnh (như hook: chính sách mặc định trừ strict). Guard ném lỗi → `_failure_decision`
-    của nó (merge/`gh api` hỏi → bị chặn; lệnh khác cho qua — fail-open về luồng, ADR-0002)."""
+def _exec_source(path: Path, mod: Any) -> None:
+    """Chạy MÃ NGUỒN `path` vào module `mod` như `py_run` của hook (_lib.sh, `guard.PY_LOADER`): đọc byte nguồn,
+    `compile`, `exec` — không đọc lẫn ghi bytecode. `spec_from_file_location` + `exec_module` với `dont_write_bytecode`
+    chỉ không GHI: `SourceFileLoader.get_code` vẫn ĐỌC `__pycache__/<tên>.cpython-3XX.pyc` khi header khớp mtime/size
+    của nguồn, nên pyc độc đặt sẵn cạnh hook chạy thay guard (AUD-SEC-074, T-1716). Lỗi đọc/biên dịch/chạy ném ra
+    ngoài; định nghĩa trước điểm lỗi đã nằm trong `mod` (module dở). Import lồng trong lúc chạy không đẻ `__pycache__`."""
+    mod.__file__ = str(path)
+    code = compile(path.read_bytes(), str(path), "exec", dont_inherit=True)
     keep = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True  # không để `__pycache__` trong `.claude/hooks` (loop verify so dấu vân tay cây)
+    sys.dont_write_bytecode = True
+    try:
+        exec(code, mod.__dict__)
+    finally:
+        sys.dont_write_bytecode = keep
+
+
+def _load_guard(path: Path) -> Any:
+    """Module guard `path` nạp từ nguồn (`_exec_source`: không đọc pyc độc, không ghi `__pycache__` vào `.claude/hooks` —
+    loop verify so dấu vân tay cây). Guard ném lỗi lúc nạp → trả module dở (còn `_failure_decision` của nó); không tạo
+    được module → None."""
     mod: Any = None
     try:
-        spec = importlib.util.spec_from_file_location("xt_project_guard", path)
-        assert spec is not None and spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = types.ModuleType("xt_project_guard")
+        _exec_source(path, mod)
+    except Exception:
+        pass  # `_guard_decide` dùng `_failure_decision` của module dở
+    return mod
+
+
+def _guard_decide(mod: Any, cmd_str: str, base: Path, strict: bool) -> Dict[str, Any]:
+    """Quyết định của guard đã nạp cho lệnh (như hook: chính sách mặc định trừ strict). Guard ném lỗi →
+    `_failure_decision` của nó (merge/`gh api` hỏi → bị chặn; lệnh khác cho qua — fail-open về luồng, ADR-0002)."""
+    try:
         out: Dict[str, Any] = mod.bash_decision(cmd_str, str(base), str(base))
     except Exception:
         try:
             out = mod._failure_decision("bash", {}, cmd_str) if mod is not None else {"decision": ""}
         except Exception:  # guard hỏng tới mức không có cả `_failure_decision`
             out = {"decision": ""}
-    finally:
-        sys.dont_write_bytecode = keep
     try:
         return out if strict or mod is None else dict(mod.apply_policy(out))
     except Exception:
         return out
 
 
-def guard_block(cmd_str: str, base: Path, only: Optional[List[Path]] = None) -> str:
-    """Lý do guard CẤM lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng nếu cho chạy.
+def guard_blocks(cmds: List[str], base: Path, only: Optional[List[Path]] = None) -> List[str]:
+    """Lý do guard CẤM từng lệnh (cùng luật như lệnh Bash của agent, LOOP-STOP-027); rỗng = cho chạy. Mỗi guard nạp
+    MỘT lần cho cả danh sách (`dev-task.sh gate`/`gate-fast` hỏi một lần cho mọi lệnh của lượt — T-1715).
     Lệnh Gate (PLAN), `— Kiểm:` (blueprint), lệnh `xt.yaml` (sàn Gate, `dev-task.sh`) do model viết mà harness chạy —
     trước đây chạy ngoài guard (rà stored 01 §3g). Không có guard ở dự án lẫn bản cài: dự án có `.claude/settings.json`
     (harness đã cài mà guard bị gỡ) → chặn như hook (AUD-SEC-019); không có harness → cho chạy.
     `XT_GUARD_POLICY=strict`: lệnh guard hỏi người cũng không chạy (harness không hỏi được người)."""
     paths = list(dict.fromkeys(p.resolve() for p in (only or guard_paths(base)) if p.is_file()))
     if not paths:
-        return (
-            "thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục bằng install.py"
-            if (base / ".claude" / "settings.json").is_file()
-            else ""
-        )
+        gone = (base / ".claude" / "settings.json").is_file()
+        return ["thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục bằng install.py" if gone else ""] * len(cmds)
     strict = os.environ.get("XT_GUARD_POLICY") == "strict"
+    whys = [""] * len(cmds)
     for (
         path
     ) in paths:  # guard của dự án VÀ của bản cài: một cái chặn là chặn (guard giả ở dự án không thắng — review #117)
-        out = _guard_verdict(path, cmd_str, base, strict)
-        if out.get("decision") == "deny" or (strict and out.get("decision") == "ask"):
-            return str(out.get("reason") or "guard chặn")
-    return ""
+        mod = _load_guard(path)
+        for i, cmd_str in enumerate(cmds):
+            out = _guard_decide(mod, cmd_str, base, strict) if not whys[i] else {}
+            if out.get("decision") == "deny" or (strict and out.get("decision") == "ask"):
+                whys[i] = str(out.get("reason") or "guard chặn")
+    return whys
+
+
+def guard_block(cmd_str: str, base: Path, only: Optional[List[Path]] = None) -> str:
+    """Lý do guard CẤM một lệnh (xem `guard_blocks`); rỗng nếu cho chạy."""
+    return guard_blocks([cmd_str], base, only)[0]
 
 
 def cmd_guard_check(args: argparse.Namespace) -> int:
-    """`xt.py guard-check -- <lệnh>`: exit 126 + lý do nếu guard cấm (dùng cho `dev-task.sh` trước lệnh xt.yaml)."""
-    cmd = " ".join(args.command[1:] if args.command[:1] == ["--"] else args.command)
-    why = guard_block(cmd, project_dir())
-    if why:
-        print(f"✗ guard chặn, không chạy (LOOP-STOP-027): {why}", file=sys.stderr)
+    """`xt.py guard-check -- <lệnh>` hoặc `guard-check --stdin` (các lệnh cách nhau bằng NUL, mỗi lệnh có thể nhiều dòng
+    — `dev-task.sh` hỏi MỘT lần cho cả lượt cổng, T-1715; tách theo dòng từng để lệnh `git push --fo\\<NL>rce` lọt,
+    review #191): exit 126 + lý do nếu guard cấm lệnh nào, không chạy gì. `--stdin` mọi lệnh được chạy → in
+    `guard-check: N lệnh` (dev-task.sh chỉ bỏ hỏi từng lệnh khi thấy dòng này — xt.py cũ không in)."""
+    if args.stdin:
+        cmds = [c for c in sys.stdin.buffer.read().decode("utf-8", "replace").split("\0") if c.strip()]
+    else:
+        cmds = [" ".join(args.command[1:] if args.command[:1] == ["--"] else args.command)]
+    bad = [(c, w) for c, w in zip(cmds, guard_blocks(cmds, project_dir())) if w]
+    for cmd, why in bad:
+        tail = f" — lệnh: {cmd}" if args.stdin else ""
+        print(f"✗ guard chặn, không chạy (LOOP-STOP-027): {why}{tail}", file=sys.stderr)
+    if bad:
         return 126
+    if args.stdin:
+        print(f"guard-check: {len(cmds)} lệnh")
     return 0
 
 
@@ -2311,7 +2355,7 @@ def final_check(base: Path) -> Optional[str]:
             return None
         return (  # D-084: verify một phần (giữ Gate theo digest) chỉ dùng giữa vòng — `files:` khai thiếu làm lọt hồi quy
             "kiểm lại cuối chỉ chạy Gate có đầu vào đổi — trước `done` chạy "
-            "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
+            f"`{xt_cmd(base)} loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
         )
     if rec.get("fingerprint") == fp:
         runs = rec.get("results", []) + rec.get("blueprint", []) + rec.get("gate_floor_runs", [])
@@ -2324,11 +2368,29 @@ def final_check(base: Path) -> Optional[str]:
         return "kiểm lại cuối ĐỎ (" + (", ".join(red) or "cây đổi khi chạy Gate") + ") — sửa rồi chạy lại `loop verify`"
     return (
         "mọi task có bằng chứng nhưng chưa kiểm lại cuối trên cây hiện tại — chạy "
-        "`python3 .xtemplates/scripts/xt.py loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
+        f"`{xt_cmd(base)} loop verify --all` (chạy lại MỌI Gate; LOOP-DESIGN-022, D-084)"
     )
 
 
-def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor: Optional[str] = None) -> int:
+def tick_plan_task(base: Path, st: Dict[str, Any], task: str, cmd_str: str) -> bool:
+    """`loop record` exit 0 với lệnh KHỚP Gate → máy tự tick `[ ]` → `[x]` dòng task trong PLAN (T-1719, D-113): tick sau
+    bằng chứng của chính máy chặt hơn agent tick tay và bớt một Edit + hai hook mỗi task. Lệnh khác Gate, task không có
+    trong PLAN hay đã đóng → không đổi gì; trả True khi đã ghi."""
+    gate = next((t.get("gate") for t in _plan_tasks(base, st) if t["id"] == task), None)
+    if not gate or not same_command(cmd_str, gate):
+        return False
+    plan = base / str(st.get("plan") or "")
+    with plan.open(encoding="utf-8", newline="") as fh:  # giữ nguyên CRLF của file (review #191)
+        text = fh.read()
+    new, n = re.subn(rf"^- \[ \] `{re.escape(task)}`", f"- [x] `{task}`", text, count=1, flags=re.M)
+    if n:
+        write_atomic(plan, new, keep_mode=True)
+    return bool(n)
+
+
+def loop_record(
+    task: str, cmd: List[str], base: Optional[Path] = None, executor: Optional[str] = None, tick: bool = True
+) -> int:
     base = base or project_dir()
     st = read_state(base) or {}
     timeout = _record_timeout()
@@ -2385,7 +2447,15 @@ def loop_record(task: str, cmd: List[str], base: Optional[Path] = None, executor
     print(f"[xt] {task}: exit {code} — bằng chứng: .autopilot/evidence/{task}.json")
     if code != 0:
         print(ev["output_tail"][-2000:])
+    else:
+        _tick_after_green(base, st, task, cmd_str, tick and not ev.get("zero_tests_red", False))
     return code
+
+
+def _tick_after_green(base: Path, st: Dict[str, Any], task: str, cmd_str: str, tick: bool) -> None:
+    """Sau exit 0 thật (không phải 0 test): tự tick dòng task trong PLAN khi được phép và lệnh khớp Gate (T-1719)."""
+    if tick and st and tick_plan_task(base, st, task, cmd_str):
+        print(f"[xt] {task}: đã tick [x] trong PLAN (lệnh khớp Gate; `--no-tick` để tự tay)")
 
 
 RUNS_FILE = "runs.jsonl"  # nhật ký chỉ ghi nối mọi lần `loop record` — nguồn của `loop stats` (LOOP-DESIGN-024, D-037)
@@ -2534,7 +2604,8 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt:
     )
     return (
         f"[autopilot vòng {st['iterations']}/{st.get('max_iterations', 50)}] Chưa xong: {v['reason']}. "
-        f"Gate qua `{xt} loop record --task <ID> -- '<lệnh Gate>'`; commit nhỏ, đẩy theo lát; quyết định → `loop decide`; "
+        f"Gate qua `{xt} loop record --task <ID> -- '<lệnh Gate>'` (một đối số bọc nháy đơn; `'` bên trong viết `'\\''`); "
+        "commit nhỏ, đẩy theo lát; quyết định → `loop decide`; "
         "việc cần người → `loop defer` (mọi việc phụ thuộc → `loop block`)." + one + _mode_warning(mode)
     )
 
@@ -4152,8 +4223,8 @@ def _doctor_version(base: Path) -> List[Finding]:
         return []
     have, want = ".".join(map(str, installed)) + (m[4] or ""), ".".join(map(str, latest))
     msg = (
-        f"khung đã cài {have} cũ hơn bản phát hành mới nhất v{want} — chạy lại `install.py` từ bản mới rồi làm các bước"
-        f" 'Dự án đích' trong CHANGELOG từ {have} tới {want}"
+        f"khung đã cài {have} cũ hơn bản phát hành mới nhất v{want} — chạy lại `install.py` từ bản mới (nó in các bước"
+        f" 'Dự án đích' của CHANGELOG khung từ {have} tới {want})"
     )
     return [Finding("version", "warn", msg)]
 
@@ -5696,7 +5767,7 @@ def _loop_record(args: argparse.Namespace, base: Path) -> int:
     if not cmd:
         print("✗ Thiếu lệnh kiểm sau '--'", file=sys.stderr)
         return 2
-    return loop_record(args.task, cmd, base, args.executor)
+    return loop_record(args.task, cmd, base, args.executor, tick=not args.no_tick)
 
 
 def _loop_block(args: argparse.Namespace, base: Path) -> int:
@@ -6415,6 +6486,38 @@ def cmd_ci_check(args: argparse.Namespace) -> int:
             f"✓ {len(results)} workflow: permissions, ghim SHA, timeout, không continue-on-error, không secret trên PR."
         )
     return 1 if bad else 0
+
+
+# --------------------------------------------------------------------------- checks (T-1714)
+
+# Năm cổng nhanh của `lint` (xt.yaml), chạy trong MỘT tiến trình thay vì năm lần khởi động xt.py (~250 ms mỗi lần: nạp +
+# biên dịch tệp này). Mỗi tên là một lệnh con có sẵn, thứ tự như `lint` cũ.
+CHECKS_ITEMS = ("validate", "progress-check", "changelog-check", "ci-check", "license-check")
+
+
+def _checks_run(name: str, framework: Path) -> Tuple[int, str]:
+    """(mã thoát, stdout) của lệnh con `name` không đối số riêng. Đi qua `main` nên cùng parser, cùng mặc định, cùng xử
+    lý lỗi (file thiếu → `✗ …` ở stderr, mã 2) như gọi một mình — không sao chép mặc định đối số của năm lệnh."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["--framework", str(framework), name])
+    return rc, buf.getvalue()
+
+
+def cmd_checks(args: argparse.Namespace) -> int:
+    """Chạy lần lượt `CHECKS_ITEMS`, gom lỗi (mục đỏ không chặn mục sau). Mục xanh: một dòng `✓ tên: exit 0`; mục đỏ: stdout
+    của chính lệnh đó (thụt 2 ô) rồi `✗ tên: exit N`. Dòng cuối tổng kết; exit 1 khi bất kỳ mục nào ≠ 0."""
+    red: List[str] = []
+    for name in CHECKS_ITEMS:
+        rc, text = _checks_run(name, args.framework)
+        if rc:
+            red.append(f"{name} (exit {rc})")
+            print("".join(f"  {line}\n" if line else "\n" for line in text.splitlines()), end="")
+        # xả từng mục: stderr của mục sau (nếu có) không chen lên trước dòng kết quả của các mục đã chạy
+        print(f"{'✗' if rc else '✓'} {name}: exit {rc}", flush=True)
+    summary = f"checks: {len(CHECKS_ITEMS) - len(red)}/{len(CHECKS_ITEMS)} mục xanh"
+    print(f"{summary}; đỏ: {', '.join(red)}." if red else f"{summary}.")
+    return 1 if red else 0
 
 
 # --------------------------------------------------------------------------- contrast (UX-DS-003, UX-DS-020)
@@ -7311,12 +7414,33 @@ def _release_row(rid: str, result: str, evidence: str, level: str = "BLOCKER") -
     return {"id": rid, "level": level, "result": result, "evidence": evidence}
 
 
+def _verified_blueprint_run(base: Path, bp: Path) -> Optional[Dict[str, Any]]:
+    """Kết quả `— Kiểm:` đã có trong `.autopilot/verified.json` của `loop verify --all` trên ĐÚNG cây này và đúng blueprint
+    (PLAN-3.12 T-1720): `release-check` chạy ngay sau kiểm lại cuối nên dùng lại thay vì chạy mọi lệnh kiểm lần thứ ba
+    (verify → blueprint-status → release-check). Cây đổi, verify một phần, blueprint khác → None → chạy lại như cũ."""
+    st = read_state(base) or {}
+    rec = _read_json_obj(state_dir(base) / VERIFIED_FILE) or {}
+    bp_state = st.get("blueprint")
+    if not bp_state or (base / str(bp_state)).resolve() != bp.resolve() or rec.get("mode") != "all":
+        return None
+    if rec.get("fingerprint") != tree_fingerprint(base):
+        return None
+    checks = [r for r in rec.get("blueprint", []) if isinstance(r, dict)]
+    failed = [str(r.get("id")) for r in checks if r.get("exit_code") != 0]
+    return {
+        "checks": checks,
+        "failed_checks": failed,
+        "unchecked_must": blueprint_checks(bp)["unchecked_must"],
+        "reused": True,
+    }
+
+
 def _release_blueprint(base: Path, blueprint: str) -> Dict[str, str]:
     bp = base / blueprint
     if not bp.is_file():
         return _release_row("blueprint", "FAIL", f"không thấy {blueprint} — `xt.py compose` rồi tick theo bằng chứng")
     s = blueprint_status(bp)
-    run = _blueprint_run(bp)
+    run = _verified_blueprint_run(base, bp) or _blueprint_run(bp)
     if run is None:
         return _release_row("blueprint", "FAIL", "không chạy được lệnh kiểm (XT_RECORD_TIMEOUT sai)")
     bad = [f"MUST mở {len(s['open_must'])}"] if s["open_must"] else []
@@ -7332,9 +7456,10 @@ def _release_blueprint(base: Path, blueprint: str) -> Dict[str, str]:
     )
     if bad:
         return _release_row("blueprint", "FAIL", "`blueprint-status --strict --run`: " + " · ".join(bad) + note)
-    return _release_row(
-        "blueprint", "PASS", f"`blueprint-status --strict --run` exit 0, {len(run['checks'])} lệnh kiểm xanh{note}"
+    src = (
+        "dùng lại `loop verify --all` trên cây này" if run.get("reused") else "`blueprint-status --strict --run` exit 0"
     )
+    return _release_row("blueprint", "PASS", f"{src}, {len(run['checks'])} lệnh kiểm xanh{note}")
 
 
 def _release_audit(base: Path, status: str) -> Dict[str, str]:
@@ -7570,11 +7695,27 @@ def _merge_check_json(pr: Optional[str]) -> Tuple[int, Dict[str, Any], str]:
     return rc, (json.loads(out.getvalue()) if rc != 2 else {}), err.getvalue()
 
 
+def _watch_pr_next(pr: Optional[str]) -> None:
+    """`merge-watch` thoát → in luôn hành động kế của `pr next` (action · do · fallback) để agent không phải gọi thêm một
+    lệnh (PLAN-3.12 T-1719). Không hỏi được PR (gh/mạng/lỗi đọc) → im lặng: `next` của merge-check đã in ở trên."""
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = cmd_pr(argparse.Namespace(pr_cmd="next", pr=pr, pr_json=None, json=False))
+    except (OSError, ValueError):
+        return
+    if rc == 0 and out.getvalue().strip():
+        print("pr next → " + out.getvalue().strip().replace("\n", "\n  "), flush=True)
+
+
 def _watch_final(d: Dict[str, Any]) -> int:
-    """In bước kế và trả exit khi verdict ≠ wait: 0 = PR đã merge hoặc đủ điều kiện merge, 1 = cần hành động/người."""
+    """In bước kế (+ kết quả `pr next` khi PR còn mở) và trả exit khi verdict ≠ wait: 0 = PR đã merge hoặc đủ điều kiện
+    merge, 1 = cần hành động/người."""
     if d["next"]:
         print(f"→ {d['next']}", flush=True)
     merged = d["verdict"] == "closed" and "PR đã MERGED" in d["reasons"][0]
+    if d["verdict"] != "closed":
+        _watch_pr_next(str(d.get("pr", "")))
     return 0 if merged or d["verdict"] == "merge" else 1
 
 
@@ -8458,6 +8599,9 @@ def cmd_grant_check(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- doctor --drift (AUTO-06, T-1518)
 
 DRIFT_DOCS = ("AGENTS.md", "CLAUDE.md")
+# File gốc do dự án sở hữu (điền `[ĐIỀN]`, trạng thái): install.py ghi hash mẫu vào manifest để nâng cấp không gộp tay
+# (PLAN-3.12 T-1732); khác mẫu là chuyện thường — `--drift` không báo `modified` cho chúng.
+DRIFT_OWN_FILES = ("AGENTS.md", "CLAUDE.md", "PROGRESS.md", "xt.yaml")
 DRIFT_RULE_KEYS = ("allow", "deny")  # `ask` do khung đặt đã bị gỡ có chủ đích (ADR-0018) nên vắng mặt không phải lệch
 
 
@@ -8488,7 +8632,8 @@ def _file_sha256(path: Path) -> Optional[str]:
 
 
 def _drift_files(base: Path, files: Dict[str, Any]) -> List[Dict[str, str]]:
-    """File harness trong manifest: thiếu → `missing`; hash khác hash khung đã cài → `modified` (tuỳ chỉnh của dự án);
+    """File trong manifest: thiếu → `missing`; hash khác hash khung đã cài → `modified` (tuỳ chỉnh của dự án; file gốc
+    `DRIFT_OWN_FILES` do dự án sở hữu thì không báo — T-1732);
     đường tuyệt đối/`..`/không phải file thường → `invalid`, không đọc (PR #173)."""
     out = []
     for rel, digest in sorted(files.items()):
@@ -8496,11 +8641,12 @@ def _drift_files(base: Path, files: Dict[str, Any]) -> List[Dict[str, str]]:
         try:
             have = _file_sha256(path) if path else None
         except OSError:
-            out.append(_drift("file", "missing", rel, f"{rel} có trong manifest nhưng không còn ở dự án"))
+            if rel not in DRIFT_DOCS:  # AGENTS/CLAUDE thiếu đã có `_drift_docs` báo — không báo hai lần
+                out.append(_drift("file", "missing", rel, f"{rel} có trong manifest nhưng không còn ở dự án"))
             continue
         if have is None:
             out.append(_drift("file", "invalid", rel, f"{rel!r} không phải file thường trong dự án — không đọc"))
-        elif have != digest:
+        elif have != digest and rel not in DRIFT_OWN_FILES:
             out.append(
                 _drift("file", "modified", rel, f"{rel} khác bản khung đã cài (tuỳ chỉnh của dự án — giữ khi nâng)")
             )
@@ -8547,7 +8693,9 @@ def _drift_version(base: Path, latest_arg: Optional[str]) -> Tuple[Optional[str]
         label = (base / ".xtemplates" / "VERSION").read_text(encoding="utf-8").strip()
     except OSError:
         label = ""
-    m = SEMVER_PREFIX_RE.fullmatch(label)
+    # Nhãn cài mặc định là `3.10.0 (da64110)` — `match` lấy bộ ba số ở đầu như `_doctor_version`; `fullmatch` từng làm
+    # `--drift` không bao giờ báo bản cũ (khảo sát 2026-10-20, T-1718). Tag `--latest` do người truyền vẫn `fullmatch`.
+    m = SEMVER_PREFIX_RE.match(label)
     given = SEMVER_PREFIX_RE.fullmatch(latest_arg) if latest_arg else None
     latest = (int(given[1]), int(given[2]), int(given[3])) if given else None
     if latest_arg is None:
@@ -8678,15 +8826,8 @@ class BenchEnv:
         """`guard` (.claude/hooks/guard.py) hoặc `install` (scripts/install.py) của bản khung chứa xt.py này."""
         if name not in self._mods:
             path = SCRIPT_DIR.parent / GUARD_FILE if name == "guard" else SCRIPT_DIR / "install.py"
-            spec = importlib.util.spec_from_file_location(f"xt_bench_{name}", path)
-            assert spec is not None and spec.loader is not None  # đường `.py` có thật: luôn có loader
-            mod = importlib.util.module_from_spec(spec)
-            keep = sys.dont_write_bytecode
-            sys.dont_write_bytecode = True  # không để `__pycache__` trong `.claude/hooks`
-            try:
-                spec.loader.exec_module(mod)
-            finally:
-                sys.dont_write_bytecode = keep
+            mod = types.ModuleType(f"xt_bench_{name}")
+            _exec_source(path, mod)  # từ nguồn như hook: không đọc pyc độc, không để `__pycache__` cạnh hook (T-1716)
             self._mods[name] = mod
         return self._mods[name]
 
@@ -9476,6 +9617,7 @@ def build_parser() -> argparse.ArgumentParser:
     pcg = sub.add_parser("commit-gate", help="in fast|full: cổng trước commit theo `commit_gate` của xt.yaml (hook)")
     pcg.set_defaults(fn=cmd_commit_gate)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
+    pg.add_argument("--stdin", action="store_true", help="đọc lệnh từ stdin, cách nhau bằng NUL (một lần cho cả cổng)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")
     pg.set_defaults(fn=cmd_guard_check)
     pm = sub.add_parser("merge-check", help="máy quyết khi nào merge PR đã mở (ADR-0013)")
@@ -9621,6 +9763,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(EXECUTOR_AGENTS.values()),
         help="agent đã làm task (tầng mặc định/sâu) — ghi vào evidence và runs.jsonl cho chuyển cấp/loop stats (ADR-0029)",
     )
+    lr.add_argument(
+        "--no-tick", action="store_true", help="exit 0 khớp Gate vẫn không tự tick [x] dòng task trong PLAN (T-1719)"
+    )
     lr.add_argument("cmd", nargs=argparse.REMAINDER)
     lb = lsub.add_parser("block")
     lb.add_argument("--reason", required=True)
@@ -9675,6 +9820,9 @@ def build_parser() -> argparse.ArgumentParser:
     pci = sub.add_parser("ci-check")
     pci.add_argument("dir", nargs="?", help="thư mục workflow (mặc định .github/workflows, không có thì bỏ qua)")
     pci.set_defaults(fn=cmd_ci_check)
+    sub.add_parser(
+        "checks", help="validate · progress-check · changelog-check · ci-check · license-check trong một tiến trình"
+    ).set_defaults(fn=cmd_checks)
     pct = sub.add_parser("contrast", help="tương phản WCAG của cặp token màu trong CSS, mọi theme (UX-DS-003/020)")
     pct.add_argument("files", nargs="+", help="file CSS có custom properties (`:root`, `.dark`, `[data-theme=dark]`)")
     pct.add_argument("--pairs", help="file cặp tường minh: mỗi dòng `FG on BG [min N]`")
@@ -9759,7 +9907,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     args.framework = Path(args.framework).resolve()
-    if args.cmd in ("validate", "list", "compose", "stats") and not args.framework.is_dir():
+    if args.cmd in ("validate", "checks", "list", "compose", "stats") and not args.framework.is_dir():
         print(f"✗ Không thấy thư mục khung: {args.framework}", file=sys.stderr)
         return 2
     try:

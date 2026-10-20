@@ -55,7 +55,7 @@ updated: 2026-10-20
 
 Giới hạn: ≤ 5 subagent đồng thời (stored 23 §4.5; RAM/IO máy và ngân sách context phiên chính), độ sâu lồng = 1
 (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` hoặc không cấp tool `Agent` cho subagent — cách thứ hai là cách repo
-này đang dùng: `tools:` của ba agent trong `.claude/agents/` không có `Agent`).
+này đang dùng: `tools:` của năm agent trong `.claude/agents/` không có `Agent`).
 
 ### Gói giao việc (handoff) tối thiểu
 
@@ -75,7 +75,7 @@ Thiếu `acceptance_criteria` → không giao.
 - [ ] `LOOP-ORCH-006` **MUST@L** Hai task chạm cùng file, migration, port hoặc biến môi trường không chạy song song. → Kiểm: `PLAN.md` ghi `files:`/`depends_on:` cho task song song; script kiểm giao nhau tập file trước khi tách. · Nguồn: stored 21 §6
 - [ ] `LOOP-ORCH-007` **MUST@L** Trước khi chạy song song, hợp đồng giao diện (OpenAPI/schema/type) đã commit và có test contract. → Kiểm: `API-CONTRACT.md` hoặc file schema trong `git log` trước commit đầu của nhánh song song. · Nguồn: [`../08-backend/api-design.md`](../08-backend/api-design.md)
 - [ ] `LOOP-ORCH-008` **MUST@L** Số subagent đồng thời ≤ 5 và mỗi subagent có `maxTurns`. → Kiểm: `.claude/agents/*.md` đều có `maxTurns:`; PLAN ghi số song song tối đa. · Nguồn: stored 23 §4.5
-- [ ] `LOOP-ORCH-009` **MUST** Hành động đối ngoại (push, publish, gửi thông báo) không giao cho subagent; chỉ phiên chính làm và qua hook `ask`. → Kiểm: prompt subagent không chứa lệnh push/publish; `pre-bash-guard.sh` xử lý `ask` ở phiên chính. · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
+- [ ] `LOOP-ORCH-009` **MUST** Hành động đối ngoại (push, publish, gửi thông báo) không giao cho subagent; chỉ phiên chính làm; guard chặn hành động không đảo ngược, không hỏi (ADR-0018). → Kiểm: prompt subagent không chứa lệnh push/publish; `pre-bash-guard.sh` chặn (không `ask`) ở phiên chính. · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
 - [ ] `LOOP-ORCH-010` **SHOULD** Dùng mô hình nhánh A (một nhánh, task = commit) mặc định; chỉ chuyển sang worktree (`isolation: worktree`) khi task độc lập file và cần ≥ 2 executor đồng thời. · Nguồn: stored 23 §4.5
 - [ ] `LOOP-ORCH-011` **SHOULD** Subagent trả báo cáo ≤ 25 dòng theo khuôn: đã làm · lệnh + exit code · còn treo · đề xuất; không trả transcript dài về phiên chính.
 - [ ] `LOOP-ORCH-012` **SHOULD** Việc đọc dài (tài liệu, log, repo lạ) giao `researcher` để giữ context phiên chính; phiên chính chỉ nhận tóm tắt có URL/đường dẫn. · Nguồn: [`context-and-token-budget.md`](context-and-token-budget.md)
@@ -108,7 +108,7 @@ Thiếu `acceptance_criteria` → không giao.
 | Bằng chứng task do subagent làm | `xt.py loop record --task T-xxx -- <Gate>` ở phiên chính | Trước khi tick `[x]` | `exit_code: 0` |
 | Giao nhau tập file giữa task song song | Script đọc `files:` trong PLAN, báo cặp giao nhau | Trước khi tách subagent | 0 cặp giao nhau |
 | Reviewer khác model, read-only | Kiểm frontmatter `model:`/`tools:` | Test harness | Khác `executor`; không `Edit/Write` |
-| Trần turn mỗi subagent | `maxTurns:` trong frontmatter agent | `.claude/agents/*.md` | Có giá trị (repo này: 80–120) |
+| Trần turn mỗi subagent | `maxTurns:` trong frontmatter agent | `.claude/agents/*.md` | Có giá trị (repo này: 80–160) |
 
 ## Nguồn
 

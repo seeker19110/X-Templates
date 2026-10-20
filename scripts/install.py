@@ -7,11 +7,17 @@ Kết quả trong dự án đích:
   .xtemplates/scripts/xt.py     công cụ compose / blueprint-status / loop
   .xtemplates/scripts/dev-task.sh
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
-  .xtemplates/manifest.json     hash file harness + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
+  .xtemplates/manifest.json     hash file harness/gốc/GitHub + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
   .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
+
+File đã có mà khác bản khung (mọi nhóm): còn đúng hash lần cài trước → cập nhật tại chỗ; dự án đã sửa mà mẫu không đổi từ lần
+cài trước → `kept-own` (im lặng); dự án đã sửa và mẫu đổi (hoặc chưa biết hash) → `.xtemplates-new`, ghi hash mẫu MỚI nên chỉ
+gộp tay một lần mỗi lần mẫu đổi (D-114). File gốc: hash là mẫu đã bỏ frontmatter, TRƯỚC khi thay SHA HEAD (PROGRESS.md); cài
+từ bản chưa có hash file gốc → suy từ `.xtemplates/framework/templates/` cũ; `xt.yaml` của dự án nhận khoá mới của mẫu dạng
+chú thích. Nâng bản (`.xtemplates/VERSION` cũ đọc được X.Y.Z) → in mệnh đề "Dự án đích …" của CHANGELOG khung từ bản đó.
 
 Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): chạy lại install là chuyển sang tên mới (ADR-0007) —
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
@@ -35,6 +41,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
@@ -150,26 +157,50 @@ def source_bytes(src: Path, transform: Callable[[str], str] | None = None) -> by
     return transform(data.decode("utf-8")).encode("utf-8") if transform else data
 
 
+# Trạng thái ghi hash mẫu vừa đưa vào manifest (harness, file gốc, GitHub): `updated-new` cũng ghi hash mẫu MỚI để lần cài
+# sau với mẫu không đổi im lặng (`kept-own`) thay vì gộp tay lại (D-114); `kept-own` giữ hash cũ (= hash mẫu), symlink giữ cũ.
+HASHED = ("copied", "updated", "kept", "updated-new")
+
+
 def classify_copy(
     src: Path,
     dst: Path,
     force: bool = False,
     transform: Callable[[str], str] | None = None,
     installed_hash: str | None = None,
+    template_hash: str | None = None,
 ) -> tuple[str, bytes]:
-    """Quyết định (không ghi gì) cho một file khung: ('copied' | 'kept' | 'updated' | 'updated-new' | 'skipped-symlink',
-    nội dung bản khung). Dùng chung cho `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
+    """Quyết định (không ghi gì) cho một file khung: ('copied' | 'kept' | 'updated' | 'kept-own' | 'updated-new' |
+    'skipped-symlink', nội dung bản khung). `installed_hash` = hash bản khung ghi ở lần cài trước: file còn đúng hash đó
+    → `updated`; file dự án đã sửa mà mẫu vẫn đúng hash đó (mẫu không đổi) → `kept-own`, không có gì mới để đưa; mẫu đổi
+    hoặc chưa biết hash → `updated-new`. `template_hash` = hash nhận diện mẫu (mặc định hash nội dung sẽ ghi; PROGRESS.md:
+    mẫu trước khi thay SHA HEAD). Dùng chung cho `copy_if_absent` và `--plan` để kế hoạch không lệch hành vi thật."""
     data = source_bytes(src, transform)
     if dst.is_symlink() or dst.with_name(dst.name + ".xtemplates-new").is_symlink():
         return "skipped-symlink", data
-    if dst.exists() and not force:
-        current = dst.read_bytes()
-        if current == data:
-            return "kept", data
-        if installed_hash is None or sha256(current) != installed_hash:
-            return "updated-new", data
+    if not dst.exists() or force:
+        return "copied", data
+    current = dst.read_bytes()
+    if current == data:
+        return "kept", data
+    if installed_hash is None:
+        return "updated-new", data
+    if sha256(current) == installed_hash:
         return "updated", data
-    return "copied", data
+    return ("kept-own" if (template_hash or sha256(data)) == installed_hash else "updated-new"), data
+
+
+def write_copy(src: Path, dst: Path, status: str, data: bytes) -> None:
+    """Thực hiện quyết định của `classify_copy`: `copied`/`updated` ghi bản khung (giữ bit chạy cho `.sh`), `updated-new`
+    ghi `<file>.xtemplates-new`, `kept`/`kept-own` không ghi gì; symlink → bỏ qua, không đi theo (AUD-HAR-010)."""
+    if status == "skipped-symlink":
+        log(f"  ⚠ bỏ qua symlink {dst} (không ghi qua liên kết)")
+    elif status == "updated-new":
+        dst.with_name(dst.name + ".xtemplates-new").write_bytes(data)
+    elif status in ("copied", "updated"):
+        dst.write_bytes(data)
+        if src.suffix == ".sh":
+            dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
 
 
 def copy_if_absent(
@@ -179,7 +210,7 @@ def copy_if_absent(
     transform: Callable[[str], str] | None = None,
     installed_hash: str | None = None,
 ) -> str:
-    """Trả 'copied' | 'kept' | 'updated' | 'updated-new' | 'skipped-symlink'.
+    """Trả 'copied' | 'kept' | 'updated' | 'kept-own' | 'updated-new' | 'skipped-symlink'.
 
     Không bao giờ đè file người dùng đã sửa (trừ force). File còn đúng hash bản khung đã cài lần trước
     (`installed_hash`, người dùng chưa sửa) thì cập nhật tại chỗ — bản sửa hook tới được dự án đã cài (AUD-HAR-004).
@@ -187,14 +218,7 @@ def copy_if_absent(
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     status, data = classify_copy(src, dst, force, transform, installed_hash)
-    if status == "skipped-symlink":
-        log(f"  ⚠ bỏ qua symlink {dst} (không ghi qua liên kết)")
-    elif status == "updated-new":
-        dst.with_name(dst.name + ".xtemplates-new").write_bytes(data)
-    elif status != "kept":
-        dst.write_bytes(data)
-        if src.suffix == ".sh":
-            dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
+    write_copy(src, dst, status, data)
     return status
 
 
@@ -320,11 +344,16 @@ def merge_hooks(
     return "merged-hooks"
 
 
+def source_version() -> str:
+    """Nội dung `VERSION` của bản khung đang cài ('unknown' nếu thiếu)."""
+    return (SRC / "VERSION").read_text(encoding="utf-8").strip() if (SRC / "VERSION").exists() else "unknown"
+
+
 def framework_label(explicit: str | None) -> str:
     """Nhãn ghi vào .xtemplates/VERSION: --label, hoặc '<VERSION> (<git sha>)' của bản khung đang cài."""
     if explicit:
         return explicit
-    version = (SRC / "VERSION").read_text(encoding="utf-8").strip() if (SRC / "VERSION").exists() else "unknown"
+    version = source_version()
     try:
         r = subprocess.run(
             ["git", "-C", str(SRC), "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=10
@@ -345,8 +374,9 @@ def target_error(target: Path) -> str | None:
     return None
 
 
-def install_framework(xt_dir: Path, label: str | None) -> None:
-    """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc)."""
+def install_framework(xt_dir: Path, label: str | None) -> str:
+    """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc).
+    Trả nhãn đã ghi vào VERSION."""
     copy_tree_replace(SRC / "framework", xt_dir / "framework")
     # research/ đi kèm vì module trong framework/ trỏ tới nguồn nghiên cứu bằng đường dẫn tương đối.
     if (SRC / "research").is_dir():
@@ -363,6 +393,7 @@ def install_framework(xt_dir: Path, label: str | None) -> None:
         encoding="utf-8",
     )
     log(f"✓ .xtemplates/framework + scripts (phiên bản {version})")
+    return version
 
 
 def our_rules() -> dict[str, list[str]]:
@@ -415,13 +446,14 @@ def harness_sources() -> list[Path]:
 def copy_harness_files(
     target: Path, force_harness: bool, manifest: dict[str, str], stats: Counter[str]
 ) -> dict[str, str]:
-    """Copy-if-absent từng file harness; trả manifest mới (hash bản khung đã cài, giữ hash cũ nếu file người dùng đã sửa)."""
+    """Copy-if-absent từng file harness; trả manifest mới: hash bản khung vừa đưa (`HASHED`, kể cả `.xtemplates-new`),
+    giữ hash cũ khi `kept-own`/symlink."""
     new_manifest: dict[str, str] = {}
     for src in harness_sources():
         rel = src.relative_to(SRC).as_posix()
         r = copy_if_absent(src, target / rel, force_harness, installed_hash=manifest.get(rel))
         stats[r] += 1
-        if r in ("copied", "updated", "kept"):
+        if r in HASHED:
             new_manifest[rel] = sha256(src.read_bytes())
         elif rel in manifest:
             new_manifest[rel] = manifest[rel]
@@ -441,8 +473,9 @@ def install_harness(target: Path, force_harness: bool) -> None:
     manifest = load_manifest(target)
     rules = install_settings(target, force_harness, stats, load_rules(target))
     new_manifest = copy_harness_files(target, force_harness, manifest, stats)
-    # Hash file `.github/` (--with-github) giữ qua lần cài này: lần sau file chưa sửa vẫn được cập nhật tại chỗ.
-    new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES})
+    # Hash file `.github/` (--with-github) và file gốc (bước sau ghi lại) giữ qua bước này: lần sau file chưa sửa vẫn
+    # được cập nhật tại chỗ.
+    new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES or k in ROOT_TEMPLATES})
     write_manifests(target, new_manifest, rules)
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
     if stats.get("updated-new"):
@@ -463,14 +496,104 @@ def root_template_jobs(target: Path) -> list[tuple[str, Path, Callable[[str], st
     return jobs
 
 
-def install_root_templates(target: Path) -> None:
-    """Bước 3: file gốc từ framework/templates — copy-if-absent, bỏ frontmatter."""
+def root_template_hash(tmpl: Path) -> str:
+    """Hash nhận diện mẫu file gốc (ghi vào manifest): mẫu đã bỏ frontmatter, TRƯỚC khi thay SHA HEAD — PROGRESS.md mang
+    SHA đổi theo HEAD của dự án, không được làm mẫu "đổi" (D-114)."""
+    return sha256(source_bytes(tmpl, template_body))
+
+
+def infer_root_hashes(target: Path) -> dict[str, str]:
+    """Hash mẫu file gốc của bản khung ĐÃ cài, suy từ `.xtemplates/framework/templates/` cũ — gọi trước `install_framework`.
+    Chỉ dùng để phân loại file gốc mà manifest chưa có hash (cài từ trước khi có hash file gốc), không ghi vào manifest.
+    Mẫu cũ thiếu/symlink/không đọc được → bỏ qua (coi như chưa biết hash)."""
+    old = target / ".xtemplates" / "framework" / "templates"
+    out: dict[str, str] = {}
+    for name, tmpl in ROOT_TEMPLATES.items():
+        p = old / tmpl
+        if p.is_file() and not p.is_symlink():
+            try:
+                out[name] = root_template_hash(p)
+            except (OSError, UnicodeDecodeError):
+                pass  # không suy được → phân loại như chưa biết hash (`.xtemplates-new` khi khác mẫu)
+    return out
+
+
+YAML_MERGE = ("kept-own", "updated-new")  # xt.yaml của dự án: nối khoá mới của mẫu dạng chú thích
+ROOT_MESSAGES = {
+    # AUD-HAR-052: file của dự án (không phải bản khung cũ) — chỉ nói điều đúng
+    "updated-new": "giữ file của dự án; mẫu khung ở {name}.xtemplates-new — gộp phần của khung vào",
+    "kept-own": "kept-own — file của dự án, mẫu khung không đổi từ lần cài trước (không có gì mới để gộp)",
+}
+YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):")  # dòng khoá cấp 1 của mẫu xt.yaml (cùng dạng `YAML_KEY_RE` của xt.py)
+YAML_HAS_KEY_RE = re.compile(r"^(?:#[ \t]*)?([A-Za-z_][\w-]*):", re.M)  # dự án đã có: `khoá:` hoặc `# khoá:`
+YAML_MARKER = '# Khoá mới của khung (bản {label}) — bật bằng cách bỏ "# "; vắng khoá = hành vi cũ'
+
+
+def install_root_templates(target: Path, label: str, inferred: dict[str, str] | None = None) -> None:
+    """Bước 3: file gốc từ framework/templates — copy-if-absent, bỏ frontmatter; hash mẫu (`root_template_hash`) vào
+    CÙNG map `files` của manifest với harness: chưa sửa → cập nhật tại chỗ; đã sửa mà mẫu không đổi → `kept-own` (im
+    lặng); đã sửa và mẫu đổi → `.xtemplates-new` một lần. Manifest chưa có hash file gốc → dùng hash suy từ mẫu cũ
+    (`inferred`, chỉ để phân loại). `xt.yaml` của dự án nhận khoá mới của mẫu dạng chú thích (`label`)."""
+    manifest = load_manifest(target)
+    hints = inferred or {}
     for name, tsrc, body in root_template_jobs(target):
-        r = copy_if_absent(tsrc, target / name, False, transform=body)
-        if r == "updated-new":  # AUD-HAR-052: file của dự án (không phải bản khung cũ) — chỉ nói điều đúng
-            log(f"  {name}: giữ file của dự án; mẫu khung ở {name}.xtemplates-new — gộp phần của khung vào")
-        else:
-            log(f"  {name}: {r}")
+        th = root_template_hash(tsrc)
+        r, data = classify_copy(tsrc, target / name, False, body, manifest.get(name, hints.get(name)), th)
+        write_copy(tsrc, target / name, r, data)
+        log(f"  {name}: " + ROOT_MESSAGES.get(r, r).format(name=name))
+        if r != "skipped-symlink":  # `HASHED` ghi hash mẫu mới; `kept-own`: hash mẫu = hash đã cài, ghi lại như giữ
+            manifest[name] = th
+        if name == "xt.yaml" and r in YAML_MERGE:
+            append_yaml_keys(target / name, data.decode("utf-8"), label)
+    write_manifests(target, manifest, load_rules(target))
+
+
+def missing_yaml_keys(template: str, own: str) -> list[tuple[str, str]]:
+    """(khoá, dòng mẫu) của khoá cấp 1 trong mẫu xt.yaml mà file của dự án chưa có — không có `khoá:` lẫn `# khoá:`
+    (khoá đã nối dạng chú thích ở lần cài trước hay dự án cố ý tắt không nối lại)."""
+    have = set(YAML_HAS_KEY_RE.findall(own))
+    lines: dict[str, str] = {}
+    for line in template.splitlines():
+        m = YAML_KEY_RE.match(line)
+        if m and m[1] not in have:
+            lines.setdefault(m[1], line)
+    return list(lines.items())
+
+
+def read_own_yaml(path: Path) -> str | None:
+    """xt.yaml của dự án (UTF-8, bỏ BOM, giữ nguyên xuống dòng); không đọc được → None, đã log (fail-open)."""
+    try:
+        return path.read_bytes().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f"  ⚠ xt.yaml: không đọc được ({exc}) — bỏ qua nối khoá mới của khung")
+        return None
+
+
+def yaml_block(own: str, lines: list[str], label: str) -> str:
+    """Khối nối cuối xt.yaml: dòng trống ngăn cách, MỘT dòng đánh dấu, rồi `# <dòng mẫu>`; cùng kiểu xuống dòng với file."""
+    nl = "\r\n" if "\r\n" in own else "\n"
+    lead = "" if not own else nl if own.endswith("\n") else nl + nl
+    return lead + nl.join([YAML_MARKER.format(label=label), *(f"# {ln}" for ln in lines)]) + nl
+
+
+def append_yaml_keys(path: Path, template: str, label: str) -> None:
+    """xt.yaml của dự án (`kept-own`/`updated-new`): nối vào cuối khoá có trong mẫu mà dự án chưa có, dạng chú thích —
+    vắng khoá = hành vi cũ nên không đổi hành vi; không sửa dòng đã có (ghi nối byte); idempotent (khoá đã nối dạng
+    `# khoá:` không nối lại)."""
+    own = read_own_yaml(path)
+    if own is None:
+        return
+    missing = missing_yaml_keys(template, own)
+    if not missing:
+        return
+    try:
+        with path.open("ab") as fh:
+            fh.write(yaml_block(own, [ln for _, ln in missing], label).encode("utf-8"))
+    except OSError as exc:
+        log(f"  ⚠ xt.yaml: không nối được khoá mới của khung ({exc})")
+        return
+    keys = ", ".join(k for k, _ in missing)
+    log(f'  xt.yaml: nối {len(missing)} khoá mới của khung dạng chú thích ({keys}) — bỏ "# " để bật; vắng = hành vi cũ')
 
 
 def progress_with_head(text: str, target: Path) -> str:
@@ -536,9 +659,10 @@ def install_github(target: Path) -> None:
         dst, data = target / gh, source_bytes(SRC / src, tf)
         r = copy_if_absent(SRC / src, dst, False, transform=tf, installed_hash=manifest.get(gh))
         log(f"  {gh}: {r}")
-        # Hash khung chỉ ghi khi file đích THỰC SỰ là bản khung — file của người dùng (khác bản khung) không được coi là
-        # "chưa sửa", nếu không lần cài sau sẽ đè nó (cập nhật tại chỗ) và `doctor --drift` báo sai.
-        if r in ("copied", "updated", "kept") and dst.read_bytes() == data:
+        # Hash ghi luôn là hash MẪU (không bao giờ hash file của người dùng — nếu không lần cài sau coi file đó là "chưa
+        # sửa" và đè nó): bản khung thật sự nằm ở đích (`copied`/`updated`/`kept`), hoặc mẫu vừa ra `.xtemplates-new` —
+        # lần sau mẫu không đổi thì `kept-own`, không gộp tay lại (D-114).
+        if r == "updated-new" or (r in HASHED and dst.read_bytes() == data):
             manifest[gh] = sha256(data)
     write_manifests(target, manifest, load_rules(target))
     # AUD-CI-003: import ruleset khi còn required check chưa có job → mọi PR treo chờ check (và `protection-guard` đỏ)
@@ -600,6 +724,140 @@ def legacy_refs(target: Path) -> list[str]:
     return sorted(hits)
 
 
+VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")  # nhãn VERSION dạng "3.7.1 (9433792)" → (3, 7, 1)
+CHANGELOG_HEAD_RE = re.compile(r"^## \[(Unreleased|v?\d+\.\d+\.\d+)\]")
+TARGET_STEP = unicodedata.normalize("NFC", "Dự án đích")  # so trên NFC: CHANGELOG gõ dạng tổ hợp (NFD) vẫn khớp
+
+
+def installed_label(xt_dir: Path) -> str | None:
+    """Nhãn `.xtemplates/VERSION` có TRƯỚC lần cài này (None: cài mới hoặc không đọc được)."""
+    try:
+        return (xt_dir / "VERSION").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def parse_version(label: str | None) -> tuple[int, int, int] | None:
+    m = VERSION_RE.match((label or "").strip())
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def changelog_sections(text: str) -> list[tuple[str, list[str]]]:
+    """(tên mục — `Unreleased` hoặc `X.Y.Z`, rỗng với tiêu đề `## ` khác — và các dòng của mục) theo thứ tự CHANGELOG."""
+    out: list[tuple[str, list[str]]] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            m = CHANGELOG_HEAD_RE.match(line)
+            out.append((m[1] if m else "", []))
+        elif out:
+            out[-1][1].append(line)
+    return out
+
+
+def _block_kind(line: str) -> str:
+    """Loại dòng Markdown: `bullet` (`- `), `quote` (`>`), `cont` (thụt lề), `para`; rỗng = dòng trống/tiêu đề (hết khối)."""
+    if not line.strip() or line.startswith("#"):
+        return ""
+    if line.startswith("- "):
+        return "bullet"
+    if line.startswith(">"):
+        return "quote"
+    return "cont" if line[:1] in (" ", "\t") else "para"
+
+
+def text_blocks(lines: list[str]) -> list[list[str]]:
+    """Khối của một mục: gạch đầu dòng cùng dòng nối tiếp thụt lề của nó, khối trích dẫn `>` liền nhau, đoạn văn."""
+    blocks: list[list[str]] = []
+    cur = ""  # loại dòng mở khối đang đọc ("" = không có khối mở)
+    for line in lines:
+        kind = _block_kind(line)
+        if not kind:
+            cur = ""
+        elif cur and (kind == "cont" or (kind == cur and kind != "bullet")):
+            blocks[-1].append(line)
+        else:
+            blocks.append([line])
+            cur = kind
+    return blocks
+
+
+LINE_PREFIX_RE = re.compile(r"^\s*(?:>\s*)*")  # thụt lề + dấu trích dẫn `>` đầu dòng — bỏ khi gộp khối thành một dòng
+SENTENCE_END_RE = re.compile(r"\.(?=\s|$)")
+QUOTES = "\"'“”‘’«»"  # "Dự án đích" đứng sau dấu nháy là nhắc tên (vd mô tả tính năng này), không phải bước làm tay
+
+
+def _unbold(text: str) -> str:
+    """Bỏ `**` (đậm Markdown) ngoài mã `…`: mệnh đề cắt giữa cặp `**` nên dấu còn lại lẻ; trong mã (glob `**/`) giữ."""
+    parts = text.split("`")
+    return "`".join(p if i % 2 else p.replace("**", "") for i, p in enumerate(parts))
+
+
+def _sentence_end(text: str, start: int) -> int:
+    """Chỉ số ngay sau dấu chấm hết câu đầu tiên từ `start`: dấu chấm rồi khoảng trắng hoặc hết khối; số thứ tự danh sách
+    (`1.`) không phải hết câu; không có → hết khối."""
+    for m in SENTENCE_END_RE.finditer(text, start):
+        before = text[start : m.start()].split()
+        if not (before and before[-1].isdigit()):
+            return m.end()
+    return len(text)
+
+
+def step_clauses(block: list[str]) -> list[str]:
+    """Mệnh đề bước làm tay của một khối: gộp các dòng thành một (bỏ thụt lề và `>`), rồi lấy từ mỗi "Dự án đích" tới hết
+    câu (so trên NFC); lần nhắc tên trong ngoặc (`"Dự án đích"`) bỏ qua."""
+    text = unicodedata.normalize("NFC", " ".join(LINE_PREFIX_RE.sub("", ln).strip() for ln in block))
+    out: list[str] = []
+    i = text.find(TARGET_STEP)
+    while i >= 0:
+        if i and text[i - 1] in QUOTES:
+            i = text.find(TARGET_STEP, i + len(TARGET_STEP))
+            continue
+        j = _sentence_end(text, i)
+        out.append(_unbold(text[i:j]).strip())
+        i = text.find(TARGET_STEP, j)
+    return out
+
+
+def upgrade_steps(text: str, since: tuple[int, int, int]) -> list[tuple[str, list[str]]]:
+    """(tên mục, mệnh đề "Dự án đích …") của mục `[Unreleased]` và mọi mục `[X.Y.Z]` có bản > `since`, thứ tự CHANGELOG;
+    mệnh đề trùng hệt trong cùng mục in một lần."""
+    out: list[tuple[str, list[str]]] = []
+    for name, lines in changelog_sections(text):
+        version = parse_version(name)
+        if name != "Unreleased" and (version is None or version <= since):
+            continue
+        clauses = list(dict.fromkeys(c for block in text_blocks(lines) for c in step_clauses(block)))
+        if clauses:
+            out.append((name, clauses))
+    return out
+
+
+def report_upgrade_steps(previous: str | None, label: str) -> None:
+    """Nâng bản (`previous` = nhãn VERSION trước khi cài, đọc được X.Y.Z): in các bước "Dự án đích" của CHANGELOG khung
+    từ bản đó. Cài mới/nhãn lạ → bỏ qua; hạ bản → một dòng; CHANGELOG không đọc được → một dòng, không lỗi (fail-open)."""
+    since = parse_version(previous)
+    if since is None:
+        return
+    title = f"Bước làm tay từ CHANGELOG ({previous} → {label}):"
+    now = parse_version(source_version())
+    if now is not None and now < since:
+        log(f"{title} bỏ qua — bản khung {'.'.join(map(str, now))} cũ hơn bản đã cài (hạ bản)")
+        return
+    try:
+        text = (SRC / "CHANGELOG.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f"{title} không đọc được CHANGELOG.md của khung ({exc}) — xem mục 'Dự án đích' ở CHANGELOG bản mới")
+        return
+    steps = upgrade_steps(text, since)
+    if not steps and now == since:  # cài lại cùng bản: im lặng (review #191)
+        return
+    log(title if steps else f"{title} không có")
+    for name, clauses in steps:
+        log(f"  [{name}]")
+        for clause in clauses:
+            log(f"  - {clause}")
+
+
 def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]]) -> dict[str, Any]:
     """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi matcher (không ghi gì)."""
     src, dst = SRC / ".claude" / "settings.json", target / ".claude" / "settings.json"
@@ -613,22 +871,32 @@ def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]])
     return {"action": classify_copy(src, dst, force_harness)[0]}
 
 
-def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github: bool) -> list[dict[str, str]]:
-    """Hành động dự kiến cho từng file harness/gốc/GitHub: copied | kept | updated | updated-new | skipped-symlink."""
-    manifest = load_manifest(target)
-    jobs: list[tuple[Path, str, bool, Callable[[str], str] | None]] = []
+PlanJob = tuple[Path, str, bool, Callable[[str], str] | None, str | None]  # nguồn, đích, force, biến đổi, hash mẫu
+
+
+def plan_entry(target: Path, job: PlanJob, installed_hash: str | None) -> dict[str, Any]:
+    """Một file của kế hoạch: {path, action}; `xt.yaml` của dự án (`kept-own`/`updated-new`) kèm `keys_add` — khoá mới
+    của mẫu sẽ được nối dạng chú thích (chỉ báo, không ghi)."""
+    src, rel, force, tf, template_hash = job
+    action, data = classify_copy(src, target / rel, force, tf, installed_hash, template_hash)
+    entry: dict[str, Any] = {"path": rel, "action": action}
+    if rel == "xt.yaml" and action in YAML_MERGE:
+        own = read_own_yaml(target / rel)
+        entry["keys_add"] = [k for k, _ in missing_yaml_keys(data.decode("utf-8"), own)] if own is not None else []
+    return entry
+
+
+def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github: bool) -> list[dict[str, Any]]:
+    """Hành động dự kiến cho từng file harness/gốc/GitHub: copied | kept | updated | kept-own | updated-new |
+    skipped-symlink. Cùng hash như cài thật: manifest, file gốc chưa có hash thì suy từ mẫu cũ (`infer_root_hashes`)."""
+    hashes = {**infer_root_hashes(target), **load_manifest(target)}  # manifest thắng hash suy
+    jobs: list[PlanJob] = []
     if not no_harness:
-        for src in harness_sources():
-            rel = src.relative_to(SRC).as_posix()
-            jobs.append((src, rel, force_harness, None))
-    jobs += [(tsrc, name, False, body) for name, tsrc, body in root_template_jobs(target)]
+        jobs += [(src, src.relative_to(SRC).as_posix(), force_harness, None, None) for src in harness_sources()]
+    jobs += [(tsrc, name, False, body, root_template_hash(tsrc)) for name, tsrc, body in root_template_jobs(target)]
     if with_github:
-        for gh, gsrc in GITHUB_FILES.items():
-            jobs.append((SRC / gsrc, gh, False, github_template(gsrc)))
-    return [
-        {"path": rel, "action": classify_copy(src, target / rel, force, tf, manifest.get(rel))[0]}
-        for src, rel, force, tf in jobs
-    ]
+        jobs += [(SRC / gsrc, gh, False, github_template(gsrc), None) for gh, gsrc in GITHUB_FILES.items()]
+    return [plan_entry(target, job, hashes.get(job[1])) for job in jobs]
 
 
 def install_plan(target: Path, force_harness: bool, no_harness: bool, with_github: bool = False) -> int:
@@ -662,13 +930,15 @@ def install(target: Path, force_harness: bool, no_harness: bool, label: str | No
         log(error)
         return 2
     xt_dir = target / ".xtemplates"
+    previous = installed_label(xt_dir)  # đọc trước khi install_framework ghi nhãn mới
     xt_dir.mkdir(exist_ok=True)
 
     migrate_legacy(target)
-    install_framework(xt_dir, label)
+    inferred = infer_root_hashes(target)  # mẫu cũ trong .xtemplates/framework/ — trước khi install_framework thay
+    version = install_framework(xt_dir, label)
     if not no_harness:
         install_harness(target, force_harness)
-    install_root_templates(target)
+    install_root_templates(target, version, inferred)
     if with_github:
         install_github(target)
     ensure_gitignore(target)
@@ -678,6 +948,7 @@ def install(target: Path, force_harness: bool, no_harness: bool, label: str | No
             "  ⚠ còn nhắc tên cũ (.xstored/xs.py/xs.yaml/XS_*) — đổi tay sang .xtemplates/xt.py/xt.yaml/XT_*: "
             + ", ".join(stale)
         )
+    report_upgrade_steps(previous, version)
 
     log(
         "Xong. Bước tiếp: `python3 .xtemplates/scripts/xt.py doctor` (audit khung vừa cài), đọc AGENTS.md, điền xt.yaml, "

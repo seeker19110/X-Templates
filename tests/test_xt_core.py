@@ -934,7 +934,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
             self.assertEqual(xt.loop_verify(self.base), 0)
         why = xt.final_check(self.base) or ""
         self.assertIn("chỉ chạy Gate có đầu vào đổi", why)
-        self.assertIn("loop verify --all", why)
+        self.assertIn("`python3 scripts/xt.py loop verify --all`", why)  # lệnh đúng repo — review #190
         out, _ = xt.hook_stop("{}", self.base)
         self.assertIn("loop verify --all", json.loads(out)["reason"])
         self.assertTrue(xt.read_state(self.base)["active"])
@@ -950,6 +950,7 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         self.assertEqual(self.verify()[0], 0)
         write(self.base / "new.txt", "x\n")  # file chưa track đổi cây
         self.assertIn("chưa kiểm lại cuối", xt.final_check(self.base) or "")
+        self.assertIn("`python3 scripts/xt.py loop verify --all`", xt.final_check(self.base) or "")
         self.assertEqual(self.verify()[0], 0)
         self.assertIsNone(xt.final_check(self.base))
         write(self.base / "ok.txt", "2\n")  # sửa file đã track
@@ -1142,6 +1143,45 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         with redirect_stdout(out), redirect_stderr(err):
             code = xt.loop_record(task, cmd, self.base)
         return code, out.getvalue(), err.getvalue()
+
+    def test_record_ticks_plan_task_on_green(self):
+        """T-1719 (D-113): exit 0 với lệnh khớp Gate → máy tự tick `[x]`; lệnh khác Gate, đỏ, task đã đóng hay `--no-tick`
+        → giữ nguyên PLAN."""
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        write(plan, "- [ ] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `true`\n- [ ] `T-003` c — Gate: `false`\n")
+        self.record(["echo", "khac"], "T-001")  # lệnh khác Gate: bằng chứng không khớp → không tick
+        self.assertIn("- [ ] `T-001`", plan.read_text(encoding="utf-8"))
+        code, out, _ = self.record(["true"], "T-001")
+        self.assertEqual(code, 0)
+        self.assertIn("đã tick [x]", out)
+        self.assertEqual(
+            plan.read_text(encoding="utf-8"),
+            "- [x] `T-001` a — Gate: `true`\n- [ ] `T-002` b — Gate: `true`\n- [ ] `T-003` c — Gate: `false`\n",
+        )
+        self.assertNotIn("đã tick", self.record(["true"], "T-001")[1])  # đã đóng → không ghi lại
+        self.record(["false"], "T-003")
+        self.assertIn("- [ ] `T-003`", plan.read_text(encoding="utf-8"))
+        with redirect_stdout(io.StringIO()):
+            xt.loop_record("T-002", ["true"], self.base, tick=False)
+        self.assertIn("- [ ] `T-002`", plan.read_text(encoding="utf-8"))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.main(["loop", "record", "--task", "T-002", "--no-tick", "--", "true"]), 0)
+        self.assertIn("- [ ] `T-002`", plan.read_text(encoding="utf-8"))
+        self.assertFalse(xt.tick_plan_task(self.base, {}, "T-002", "true"))  # không state/PLAN → không đụng file
+
+    def test_tick_keeps_crlf_and_file_mode(self):
+        """Review #191: tự tick ghi lại cả file → giữ CRLF và quyền file (tệp tạm của mkstemp là 0600)."""
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_bytes("- [ ] `T-001` a — Gate: `true`\r\n- [ ] `T-002` b — Gate: `true`\r\n".encode("utf-8"))
+        plan.chmod(0o644)
+        code, out, _ = self.record(["true"], "T-001")
+        self.assertEqual(code, 0)
+        self.assertIn("đã tick [x]", out)
+        raw = plan.read_bytes()
+        self.assertEqual((raw.count(b"\r\n"), raw.count(b"\n")), (2, 2))
+        self.assertTrue(raw.startswith(b"- [x] `T-001`"), raw)
+        self.assertEqual(plan.stat().st_mode & 0o777, 0o644)
 
     def test_same_command_unbalanced_quote_falls_back_to_strip(self):
         self.assertTrue(xt.same_command("echo 'a", "  echo 'a  "))
@@ -1405,7 +1445,7 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             self.assertEqual(xt._loop_stats(argparse.Namespace(json=False, all=False), self.base), 0)
         self.assertIn("Chuyển cấp lên tầng sâu: 1 task (50%): T-002", out.getvalue())
         with redirect_stdout(out), redirect_stderr(err):  # xanh rồi lại đỏ một lần: chỉ đếm chuỗi đỏ sau lần xanh cuối
-            xt.loop_record("T-002", ["true"], self.base, "executor")
+            xt.loop_record("T-002", ["true"], self.base, "executor", tick=False)  # không tick: còn đỏ tiếp bên dưới
             xt.loop_record("T-002", ["sh -c 'echo ed; exit 1'"], self.base, "executor")
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["escalated"], v["default_failures"]), (False, 1))
@@ -1648,6 +1688,39 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
             self.assertEqual(xt.main(["guard-check", "--", "git", "push", "origin", "main"]), 126)
             self.assertEqual(xt.main(["guard-check", "pytest -q"]), 0)
         self.assertIn("LOOP-STOP-027", err.getvalue())
+
+    def test_guard_check_stdin_loads_guard_once_for_every_line(self):
+        """T-1715: `guard-check --stdin` — các lệnh cách nhau bằng NUL, một lệnh bị cấm → 126 kèm lệnh đó; mọi lệnh được
+        chạy → in `guard-check: N lệnh`; mỗi guard nạp một lần cho cả danh sách (không phải một lần mỗi lệnh). Lệnh
+        nhiều dòng là MỘT lệnh: tiếp dòng không né được guard, `\\r` không tách lệnh (review #191)."""
+        self.use_real_guard()
+        env = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)})
+        env.start()
+        self.addCleanup(env.stop)
+
+        def run(text: str) -> tuple[int, str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            stdin = io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="utf-8")
+            with redirect_stdout(out), redirect_stderr(err), unittest.mock.patch("sys.stdin", stdin):
+                rc = xt.main(["guard-check", "--stdin"])
+            return rc, out.getvalue(), err.getvalue()
+
+        rc, out, err = run("pytest -q\0git push origin main\0ruff check .\0")
+        self.assertEqual(rc, 126)
+        self.assertIn("LOOP-STOP-027", err)
+        self.assertIn("lệnh: git push origin main", err)
+        self.assertNotIn("ruff check", err)  # chỉ lệnh bị cấm được nêu
+        self.assertEqual(out, "")
+        self.assertEqual(run("pytest -q\0\0  \0ruff check .\0")[:2], (0, "guard-check: 2 lệnh\n"))
+        self.assertEqual(run("")[:2], (0, "guard-check: 0 lệnh\n"))
+        self.assertEqual(run("git push --fo\\\nrce origin main\0")[0], 126)  # tiếp dòng: vẫn là `git push --force`
+        self.assertEqual(run("echo a\rgit push --force origin main\0")[0], 0)  # `\r` là chữ của echo, không tách lệnh
+        with unittest.mock.patch.object(xt, "_load_guard", wraps=xt._load_guard) as load:
+            self.assertEqual(xt.guard_blocks(["pytest -q"], self.base), [""])
+            once = load.call_count
+            self.assertGreaterEqual(once, 1)
+            self.assertEqual(xt.guard_blocks(["pytest -q", "git push origin main", "ruff check ."], self.base)[0], "")
+            self.assertEqual(load.call_count, 2 * once)  # 3 lệnh: vẫn một lần nạp mỗi guard
 
 
 class TaskDagTest(TmpMixin, unittest.TestCase):

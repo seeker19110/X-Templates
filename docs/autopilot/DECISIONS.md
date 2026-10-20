@@ -790,3 +790,24 @@
 - Chọn: Duyệt PLAN 3 lát / 23 task như đã lập: tài liệu một nhà → harness ít lượt/nhanh hơn → dự án đích nhẹ + nâng cấp thật
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng, an toàn): mọi luật bỏ khỏi tài liệu đều còn nhà + link và test một nhà; hook/cổng sửa đều giữ LOOP-STOP-027, test hook 217 ca + bench 308 ca; sửa bất nhất pyc theo hướng chặt hơn. Tiêu chí 3 (bền, đơn giản): số liệu khảo sát cho thấy 35–60 % nội dung quy trình là trùng, 3/7 lệnh mỗi PR máy làm được, commit xt.py mất 131 s vì coverage trùng cổng PR. Phương án 2 bỏ dở yêu cầu 'toàn bộ'. Phương án 3 chạm hàng rào bảo mật (guard) với lợi 100 ms/lệnh và lệch WF-CI-024 — loại theo tiêu chí 1.
 - Đường lùi: Mỗi lát một PR, revert PR; tài liệu: git revert không mất gì; cổng commit: đặt lại hành vi cũ trong dev-task; install.py: hash file gốc chỉ thêm metadata, bỏ là về copy-if-absent.
+
+### D-112 · 2026-10-20T17:35:20+00:00 · Cổng commit khi diff đụng cấu hình cổng (xt.yaml, xt.py, dev-task.sh, hook, ruff/coverage/requirements): giữ cổng đầy đủ có coverage hay đổi?
+
+- Phương án: (1) Giữ: cổng đầy đủ có ngưỡng coverage (131 s) như review #177 · (2) gate-fast nhưng bước test = MỌI lớp qua test_list/test_unit song song, không coverage (~75 s); chưa khai hai khoá → test đầy đủ; coverage 100 % giữ ở cổng trước PR và CI · (3) Bỏ hẳn cổng commit cho diff đụng cấu hình, chỉ dựa cổng PR/CI
+- Chọn: gate-fast nhưng bước test = MỌI lớp qua test_list/test_unit song song, không coverage (~75 s); chưa khai hai khoá → test đầy đủ; coverage 100 % giữ ở cổng trước PR và CI
+- Lý do (tiêu chí chất lượng cuối): Review #177 chặn việc commit tự hạ cổng của chính nó (xt.py chọn test); chạy MỌI lớp test không phụ thuộc test-select nên vẫn đóng lỗ đó (tiêu chí 1), còn ngưỡng coverage là việc của cổng trước PR và CI vốn chạy lại y hệt — lặp ở mỗi commit chỉ tốn 55 s × 49 % commit (tiêu chí 3/5). Phương án 3 bỏ chốt sớm — loại theo tiêu chí 1.
+- Đường lùi: Đặt lại task=gate trong pre-bash-guard.sh (một dòng) hoặc bỏ nhánh XT_GATE_ALL_TESTS trong dev-task.sh; không có state mới.
+
+### D-113 · 2026-10-20T18:01:14+00:00 · loop record exit 0 khớp Gate: máy tự tick [x] trong PLAN hay để agent tick tay?
+
+- Phương án: (1) Để agent tick tay như cũ (1 Edit + 2 hook mỗi task, agent có thể quên hoặc tick sai task) · (2) Máy tự tick khi lệnh khớp Gate và exit 0 (cờ --no-tick để tắt); đỏ/khác Gate/zero-tests không tick
+- Chọn: Máy tự tick khi lệnh khớp Gate và exit 0 (cờ --no-tick để tắt); đỏ/khác Gate/zero-tests không tick
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: tick sau bằng chứng của chính máy chặt hơn lời khai của agent (P1) — Stop hook verify vẫn đối chiếu; tiêu chí 3/5: bớt một lượt Edit + hai hook (~0,5 s) mỗi task và hết lỗi tick nhầm.
+- Đường lùi: --no-tick hoặc bỏ nhánh tick trong loop_record; PLAN là file text, revert bằng git.
+
+### D-114 · 2026-10-20T18:17:02+00:00 · T-1732 install.py nâng bản: 4 điểm mở của executor-deep (hash PROGRESS theo HEAD; in 53 KB khối CHANGELOG; harness updated-new giữ hash cũ; dự án 3.7.1 chưa có hash file gốc)
+
+- Phương án: (1) A: giữ đúng đặc tả T-1732 — PROGRESS băm sau khi thay SHA (mỗi HEAD mới lại ra .xtemplates-new trên nhánh chính), in đủ khối CHANGELOG, harness updated-new giữ hash cũ (báo lại mỗi lần cài), lần nâng đầu gộp tay mọi file gốc đã sửa · (2) B: PROGRESS băm mẫu TRƯỚC khi thay SHA (kept-own ở mọi nhánh); chỉ in mệnh đề "Dự án đích…" tới hết câu kèm [bản]; harness/GitHub updated-new ghi hash mẫu mới như file gốc (báo một lần mỗi lần mẫu đổi); lần nâng đầu suy hash cũ từ .xtemplates/framework/templates/* cũ trước khi thay (file gốc chưa sửa cập nhật tại chỗ)
+- Chọn: B: PROGRESS băm mẫu TRƯỚC khi thay SHA (kept-own ở mọi nhánh); chỉ in mệnh đề "Dự án đích…" tới hết câu kèm [bản]; harness/GitHub updated-new ghi hash mẫu mới như file gốc (báo một lần mỗi lần mẫu đổi); lần nâng đầu suy hash cũ từ .xtemplates/framework/templates/* cũ trước khi thay (file gốc chưa sửa cập nhật tại chỗ)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí (1) đúng: cùng một luật cho mọi nhóm file — chỉ báo khi mẫu đổi, không báo theo HEAD; (3) ít nhiễu: 4,9 KB thay vì 53 KB, .xtemplates-new một lần; (4) hotel-manager/X-Company nâng từ 3.7.1 không phải gộp tay AGENTS/CLAUDE chưa sửa
+- Đường lùi: đảo từng điểm: băm sau thay SHA / in đủ khối / giữ hash cũ ở harness / bỏ bước suy hash (mỗi điểm một hàm riêng trong install.py)
