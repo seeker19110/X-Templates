@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng
@@ -24,7 +24,7 @@ updated: 2026-10-19
    quyền, tool, ngân sách, mức tin cậy của subagent ⊆ của người giao; subagent không tự nâng tier T0–T4.
 3. **Chọn worker theo hai trục**: độ phức tạp × độ khép kín của spec (stored 23 §4.3). Spec hở → không giao;
    phiên chính quyết tường minh (D-NNN, [`LOOP-STOP-018`](stop-points-and-escalation.md)) rồi mới giao.
-4. **Người review không phải người viết**: `reviewer` dùng model khác `executor`, chỉ đọc + chạy lệnh kiểm, chỉ nhận
+4. **Người review không phải người viết**: `reviewer` khác **họ** model với người viết, chỉ đọc + chạy lệnh kiểm, chỉ nhận
    diff + SPEC, không nhận lý luận của người viết (`.claude/agents/reviewer.md`).
 5. **Song song chỉ khi độc lập về file**: hai task chạm cùng file/schema/port → nối tiếp. Hợp đồng giao diện
    (OpenAPI, type, schema) chốt trước khi tách việc.
@@ -41,7 +41,7 @@ updated: 2026-10-19
 | Task có SPEC + Gate rõ, ≤ 1 ngày, không chạm điểm dừng — UI/bố cục/trạng thái, biểu mẫu/màn hình theo API đã chốt, CRUD theo kiến trúc và phân quyền sẵn có, bug tái hiện được nguyên nhân cục bộ | `executor` (**tầng mặc định**) | Spec khép kín, máy kiểm được; rẻ |
 | Task khó/bất định/rủi ro cao: đổi giao ước xuyên nhiều module; xác thực/phân quyền/cô lập tenant; migration hoặc schema có dữ liệu thật; hàng đợi/đồng thời/retry/phục hồi; lỗi không ổn định hoặc hiệu năng chưa rõ nguyên nhân; khảo sát khi chưa đủ thông tin chọn thiết kế | `executor-deep` (**tầng sâu**, ADR-0029) — ghi `(exec: deep)` trong dòng task của PLAN; `loop status` trả `executor` | Hậu quả sai lớn dù diff nhỏ; cần giữ nhiều trạng thái/giả thuyết. Xét **4 khía cạnh**: phức tạp · bất định · rủi ro · phạm vi ảnh hưởng — một khía cạnh cao là đủ |
 | Tầng mặc định đỏ 2 lần cùng task trong vòng này | **Chuyển cấp** lên `executor-deep` (`loop status` trả `escalated: true`), kèm diff hiện tại + evidence lỗi + giả thuyết đã loại; ngân sách task giữ nguyên | `LOOP-ORCH-014`: lần 2 đổi cách — đổi tầng là một dạng đổi cách; lần 3 vẫn `blocked` |
-| Review diff trước merge, diff > 200 dòng hoặc chạm auth/tiền/dữ liệu | `reviewer` (model khác người viết); diff do `executor-deep` hoặc phiên chính **cùng họ** với `reviewer` viết → `reviewer-alt` (họ khác) | Tránh cùng điểm mù; phát hiện phải có đường tái hiện; `pr reviewed --clean` cùng họ bị từ chối (D-045) |
+| Review khi `pr next` trả `review` (làn chuẩn; pha build chỉ khi nhãn `risk:`/ngoại lệ cứng — ADR-0031/0033) hoặc phiên chính thấy rủi ro cụ thể | `reviewer` (khác **họ** model với người viết); diff do `executor-deep` hoặc phiên chính **cùng họ** với `reviewer` viết → `reviewer-alt` (họ khác) | Tránh cùng điểm mù; phát hiện phải có đường tái hiện; `pr reviewed --clean` cùng họ bị từ chối (D-045) |
 | Quyết định kiến trúc, chọn công nghệ, spec mâu thuẫn | **Không tách** — phiên chính tự duyệt, ghi D-NNN (ADR-0008) | Cần toàn cảnh; subagent chỉ trả phương án |
 | Điểm dừng bắt buộc về hành động | **Không tách** — phiên chính + người | Hành động không đảo ngược/đối ngoại |
 | Việc nhỏ < 10 phút trong một file | Làm trực tiếp | Chi phí giao việc (handoff + đọc lại repo) lớn hơn việc |
@@ -112,7 +112,7 @@ Thiếu `acceptance_criteria` → không giao.
 
 ## Nguồn
 
-- Harness thật của repo: `.claude/agents/{researcher,executor,reviewer}.md` (`tools`, `model`, `maxTurns`; không có `Agent` trong `tools`) và `AGENTS.md` §8 (§7 trước ADR-0008) — đọc 2026-10-13.
+- Harness thật của repo: `.claude/agents/{researcher,executor,reviewer}.md` (`tools`, `model`, `maxTurns`; không có `Agent` trong `tools`) và `AGENTS.md` mục Skill và subagent (§7 trước ADR-0008) — đọc 2026-10-13.
 - Claude Code docs — subagents (`tools`, `disallowedTools`, `maxTurns`, `isolation: worktree`): <https://code.claude.com/docs/en/sub-agents> · env `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` (mặc định 3, `1` = tắt lồng): <https://code.claude.com/docs/en/env-vars> — xác minh 2026-10-13 (`research/2026-10-13-claude-code-hooks-skills.md`).
 - Anthropic, *How we built our multi-agent research system* (ngữ cảnh tách biệt, chi phí ~15× token, chỉ cho việc rộng): <https://www.anthropic.com/engineering/multi-agent-research-system> — theo `research/2026-10-13-ai-agent-research.md` §2.3 [F].
 - `seeker19110/stored` mục 21 §6 (giới hạn song song, hợp đồng giao diện trước), mục 23 §4.3 (chọn worker 2 trục), §4.4 (subagent không lồng, điều phối = phiên chính), §4.5 (trần 5 đồng thời, mô hình nhánh A/B, thất bại 2× đổi cách, 3× hỏi người) — đọc 2026-10-13.

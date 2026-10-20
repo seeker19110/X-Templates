@@ -783,3 +783,10 @@
 - Chọn: Pha build: audit delta theo mốc gom về G7 (release-check review_debt đã chặn); reviewer chỉ khi pr next trả review (mọi pha); PROGRESS cập nhật theo lát/PR thay vì mỗi task
 - Lý do (tiêu chí chất lượng cuối): Ba khâu này không thêm chốt an toàn ở pha build: review đã hoãn bằng máy (ADR-0031) nên giao reviewer chỉ tốn lượt; audit theo mốc trùng với audit delta bắt buộc trước G7 (release-check FAIL phase/review_debt); compaction dùng checkpoint của loop nên PROGRESS mỗi task chỉ thêm commit. Giữ cổng đầy đủ trước push (tránh vòng CI đỏ) và tắt auto-merge trước push (chốt ngoại lệ cứng khi push thêm file nhạy cảm) vì tiêu chí 1 thắng tiêu chí 5.
 - Đường lùi: Đặt delivery_phase: harden (audit theo mốc trở lại ngay) hoặc revert commit; không có state mới cần dọn.
+
+### D-111 · 2026-10-20T16:58:24+00:00 · Duyệt PLAN-3.12-lean (tối ưu toàn bộ khung + dự án đích)?
+
+- Phương án: (1) Duyệt PLAN 3 lát / 23 task như đã lập: tài liệu một nhà → harness ít lượt/nhanh hơn → dự án đích nhẹ + nâng cấp thật · (2) Chỉ làm Lát 1 (tài liệu) rồi dừng chờ chủ repo xem · (3) Làm cả việc đã loại (tách guard.py nạp lười, cài chọn lọc framework, gộp job CI)
+- Chọn: Duyệt PLAN 3 lát / 23 task như đã lập: tài liệu một nhà → harness ít lượt/nhanh hơn → dự án đích nhẹ + nâng cấp thật
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng, an toàn): mọi luật bỏ khỏi tài liệu đều còn nhà + link và test một nhà; hook/cổng sửa đều giữ LOOP-STOP-027, test hook 217 ca + bench 308 ca; sửa bất nhất pyc theo hướng chặt hơn. Tiêu chí 3 (bền, đơn giản): số liệu khảo sát cho thấy 35–60 % nội dung quy trình là trùng, 3/7 lệnh mỗi PR máy làm được, commit xt.py mất 131 s vì coverage trùng cổng PR. Phương án 2 bỏ dở yêu cầu 'toàn bộ'. Phương án 3 chạm hàng rào bảo mật (guard) với lợi 100 ms/lệnh và lệch WF-CI-024 — loại theo tiêu chí 1.
+- Đường lùi: Mỗi lát một PR, revert PR; tài liệu: git revert không mất gì; cổng commit: đặt lại hành vi cũ trong dev-task; install.py: hash file gốc chỉ thêm metadata, bỏ là về copy-if-absent.

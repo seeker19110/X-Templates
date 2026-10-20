@@ -137,4 +137,4 @@ Gói ngành thêm: **Khung pháp lý** (Việt Nam + quốc tế, số hiệu v�
 
 - Thêm/sửa mục: giữ ID cũ ổn định; cập nhật `updated`; ghi `CHANGELOG.md`.
 - Đổi quyết định lớn về cấu trúc khung: ghi ADR ở `docs/adr/`.
-- Chạy `python3 scripts/xt.py validate` và `python3 -m unittest discover -s tests` trước khi commit.
+- Cổng commit do hook chạy (`scripts/dev-task.sh gate-fast` theo `commit_gate` trong `xt.yaml`); trước khi đẩy/mở PR chạy `scripts/dev-task.sh gate` một lần — lệnh thật ở `xt.yaml`.

@@ -13,7 +13,7 @@ updated: 2026-10-20
 > **Trạng thái:** `[ ]` chưa · `[x]` xong (chỉ khi `.autopilot/evidence/T-NNN.json` có `exit_code: 0` và `cmd` đúng Gate) · `[~]` bỏ (ghi `— Bỏ: <lý do>`, thiếu thì `loop status` ra `verify`).
 > **Tầng executor (ADR-0029):** mặc định `executor`; task khó/bất định/rủi ro cao/phạm vi rộng (giao ước xuyên module, auth/phân quyền/tenant, migration dữ liệu thật, đồng thời/retry, lỗi không ổn định) ghi `(exec: deep)` trong ngoặc của dòng task → `executor-deep`; tầng mặc định đỏ 2 lần → máy tự chuyển cấp. Tên tầng, không tên model.
 > **Mốc:** mỗi mục `### Lát N — …` là một mốc; `loop status` báo `milestone_done` khi mọi task của mục trước đã đóng → audit delta (`xt.py audit plan --status …`) trước khi làm task đầu của mục kế; pha build (`milestone_audit: g7`) gom audit về trước G7 (ADR-0033 của khung).
-> Bốn mục "Ủy quyền production", "Điểm dừng bắt buộc", "Ngân sách (4 con số)", "Hạn" là bắt buộc. 4 con số theo [`LOOP-DESIGN-001`](../11-autonomous-loop/loop-design.md): trần vòng · ngân sách tiền/token · timeout mỗi lệnh kiểm · hạn chót.
+> Máy đọc: dòng task và mục "Ủy quyền production" (`xt.py grant-check`). "Ngân sách (4 con số)" theo [`LOOP-DESIGN-001`](../11-autonomous-loop/loop-design.md) là số truyền cho cờ `loop init` (`--max-iterations`, `--hours`) và `XT_RECORD_TIMEOUT`; "Điểm dừng bắt buộc" và "Hạn" để người đọc — điểm dừng thật đi qua `loop defer`/`loop block` lúc chạy.
 
 ```markdown
 # docs/autopilot/PLAN.md — <Tên dự án> · <mốc/lát>

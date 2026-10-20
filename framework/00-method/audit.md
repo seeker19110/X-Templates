@@ -76,8 +76,9 @@ Mỗi phát hiện là **một dòng** trong bảng "Phát hiện" của `docs/o
    thành `suy luận` hoặc `bác bỏ`. Đây là chốt chặn ảo giác quan trọng nhất của audit.
 5. **Ghi** — cập nhật `AUDIT-STATUS.md` (nhóm đã quét + SHA, bảng phát hiện) và `AUDIT-REPORT-<ngày>.md`;
    `xt.py audit check docs/ops/AUDIT-STATUS.md` phải exit 0 (schema đúng).
-6. **DỪNG CHỜ DUYỆT** — trình kế hoạch sửa theo đợt (mỗi đợt ≤ 1 PR, bug có test tái hiện trước khi sửa). Không sửa
-   trước khi người duyệt, trừ khi đang trong autopilot đã duyệt trước và phát hiện thuộc phạm vi PLAN.
+6. **Duyệt kế hoạch sửa** — trình kế hoạch theo đợt (mỗi đợt ≤ 1 PR, bug có test tái hiện trước khi sửa); phiên chính tự
+   duyệt theo tiêu chí chất lượng cuối (ADR-0008, `xt.py loop decide` → D-NNN — có hay không chạy autopilot), báo người
+   tóm tắt rồi làm tiếp, người đổi ý lúc nào cũng được; không sửa lặng lẽ trước khi có kế hoạch đã ghi.
 7. **Hội tụ** — sửa → `/gate` → quét lại nhóm liên quan → lặp tới khi `xt.py audit check --strict` exit 0.
 
 ## 6. Quét lại theo thay đổi
