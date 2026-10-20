@@ -3085,16 +3085,18 @@
    }
   },
   {
-   "id": "guard-control-sec083-read-git-config",
-   "origin": "control",
+   "id": "guard-sec083-read-git-config-write-other",
+   "origin": "audit",
    "refs": [
-    "AUD-SEC-083"
+    "AUD-SEC-083",
+    "AUD-SEC-090"
    ],
    "input": {
     "command": "python3 -c \"open('out.txt','w').write(open('.git/config').read())\""
    },
    "expect": {
-    "allowed": true
+    "allowed": false,
+    "code": "HOOK_BYPASS"
    }
   },
   {
@@ -3174,6 +3176,157 @@
    ],
    "input": {
     "command": "cd docs && bash -c \"echo x > a.md\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec088-cd-redirect-bash-c",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd .claude >/dev/null && bash -c 'echo x > settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-pushd-redirect-python",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "pushd .claude >/dev/null && python3 -c \"open('settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-P",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd -P .claude && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-stderr-null",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd .claude 2>/dev/null; echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-control-sec088-cd-docs-redirect",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd docs 2>/dev/null && echo x > a.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec089-node-createwritestream",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "node -e \"require('fs').createWriteStream('.git/config')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-os-open-wronly",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.open('.git/config', os.O_WRONLY|os.O_APPEND)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-os-symlink-hook",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.symlink('/x','.git/hooks/pre-commit')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-path-open-env",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path; Path('.env').open('w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec089-os-open-rdonly",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.open('.git/config', os.O_RDONLY)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec089-path-open-read",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path; print(Path('.git/config').open().read())\""
    },
    "expect": {
     "allowed": true
@@ -3263,13 +3416,841 @@
    }
   },
   {
-   "id": "guard-control-sec084-mention-env",
-   "origin": "control",
+   "id": "guard-sec084-mention-env-write-other",
+   "origin": "audit",
    "refs": [
-    "AUD-SEC-084"
+    "AUD-SEC-084",
+    "AUD-SEC-090"
    ],
    "input": {
     "command": "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-combined-flags",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd -LP .claude && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-combined-flags-pe",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd -Pe .claude && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-redirect-before-cd",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "2>/dev/null cd .claude && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-cdpath-prefix",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "CDPATH=/p cd x && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec088-export-cdpath",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "export CDPATH=/p; cd x && echo {} > verified.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-sec088-cd-unknown-git-config",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd \"$X\" && echo x > config"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-os-open-numeric-flags",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.open('.git/hooks/pre-commit',577)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-node-opensync-numeric",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "node -e \"require('fs').openSync('.git/hooks/pre-commit',1)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-node-rename-callback",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "node -e \"require('fs').rename('/tmp/a','.git/hooks/pre-commit',()=>{})\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-ruby-fileutils-cp",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "ruby -e \"require 'fileutils'; FileUtils.cp('/tmp/a','.claude/settings.json')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-perl-file-copy",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "perl -e \"use File::Copy; copy('/tmp/a','.env')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-sec089-php-copy",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "php -r \"copy('/tmp/a','.env');\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-sec089-sqlite-evidence",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import sqlite3; sqlite3.connect('.autopilot/x.db')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-sec089-makedirs-hooks",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.makedirs('.claude/hooks/x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec089-logging-filehandler-env",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import logging; logging.FileHandler('.env')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-sec089-read-env-then-network",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"print(open('.env').read()); import requests; requests.get('https://x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec089-read-env-only",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"print(open('.env').read())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec089-read-settings-json",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import json; print(json.load(open('.claude/settings.json'))['hooks'])\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec089-node-read-settings",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "node -e \"console.log(require('fs').readFileSync('.claude/settings.json','utf8'))\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec089-write-plain-file",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"open('out.txt','w').write('x')\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec088-cd-flags-tmp",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd -LP /tmp && echo x > a.txt"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec088-cd-unknown-plain-file",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "cd \"$X\" && echo x > notes.txt"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-sec088-redirect-cd-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "2>/dev/null cd docs && echo x > a.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-dict-get-keys",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import json; d = json.load(open('.claude/settings.json')); print(d.get('hooks', {}).keys())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-sorted-min-max",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import json; d = json.load(open('.claude/settings.json')); print(sorted(d), min(d), max(d))\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-os-listdir-walk",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; print(os.listdir('.claude/hooks'), list(os.walk('.autopilot')))\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-os-scandir",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; print([e.name for e in os.scandir('.git/hooks')])\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-path-glob-iterdir",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"from pathlib import Path; print(list(Path('.claude').glob('*.json')), list(Path('.claude').rglob('*')), list(Path('.claude/hooks').iterdir()))\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-ast-parse",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import ast; ast.parse(open('.claude/hooks/guard.py').read())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-hashlib",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import hashlib; h = hashlib.sha256(); h.update(open('.env','rb').read()); print(h.hexdigest(), hashlib.md5(b'x').hexdigest())\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-json-dump-stdout",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"import json, sys; json.dump(json.load(open('.claude/settings.json')), sys.stdout, indent=2)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-python-real-comment",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"x = 4 / 2  # it's ok\nprint(open('.env').read(), x)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-review186-env-chdir-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "env -C docs make"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186-fake-comment-triple-quote",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"x = 4 / 2 # '''\nimport os; os.close(os.open('.env', 513))\ny = 4 / 2 # '''\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186-perl-qq-hash",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "perl -e 'open(F,\"<.env\"); $x=qq{ # }; sysopen(G,\".env\",01001);'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186-open-opener-arg",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; open('.env','r',-1,None,None,None,True,os.truncate)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186-os-path-os-chain",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.path.os.rmdir('.claude/hooks')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186-cd-glob",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "cd .cl* && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186-env-chdir",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "env -C .claude sh -c 'echo x > settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186-dd-of",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "dd of=.env"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186-exec-fd-redirect",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088",
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "exec 3>> .claude/settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-fstring-same-quote",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c 'print(f\"{open(\".env\",\"w\")}\")'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-fstring-same-quote-depth3",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c 'print(f\"{f\"{f\"{open(\".claude/settings.json\",\"w\")}\"}\"}\")'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-escape-literal",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089",
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "python3 -c \"p = '\\x2eenv'; open(p, 'w').write('x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-fstring-read",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"print(f\\\"{open('.env').read()}\\\")\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-nfkc-identifier",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "python3 -c \"import os; os.ｒemove('.env')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-readwrite-redirect",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec 3<> .env"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-readwrite-redirect-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec 3<>.claude/settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-exec-dup",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "exec >/tmp/log 2>&1"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-deno-eval",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "deno eval \"Deno.writeTextFileSync('.env', 'x')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-lua",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "lua -e \"os.remove('.claude/settings.json')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-tclsh-stdin",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "echo 'set f [open \".env\" w]' | tclsh"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-pypy",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "pypy3 -c \"open('.env', 'w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "SECRET_WRITE"
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-089"
+   ],
+   "input": {
+    "command": "ipython -c \"import os; os.utime('.git/config')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-env-chdir-abbrev",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "env --ch=.claude tee settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-env-abbrev",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-088"
+   ],
+   "input": {
+    "command": "env --ch=docs tee notes.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython-bang",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '!rm -rf ~'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-review186r3-ipython-cell-bash",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '%%bash\necho x > .claude/settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-review186r3-control-ipython-ls",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-090"
+   ],
+   "input": {
+    "command": "ipython -c '!ls'"
    },
    "expect": {
     "allowed": true

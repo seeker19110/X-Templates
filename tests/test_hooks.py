@@ -611,8 +611,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(cdir("git -C ../b commit -m x"), "/w/b")
         self.assertEqual(cdir("cd /w/c && git -C d -C e commit -m x"), "/w/c/d/e")
         self.assertEqual(cdir("cd ~ && git commit -m x"), posixpath_expand("~"))
-        for unknown in ("cd && git commit -m x", "cd - && git commit -m x", "cd -P /x && git commit -m x"):
+        for unknown in ("cd && git commit -m x", "cd - && git commit -m x", "cd -Z /x && git commit -m x"):
             self.assertEqual(cdir(unknown), "", unknown)  # không biết → hook dùng gốc dự án như cũ
+        # AUD-SEC-088: cờ -P/-L/--, chuyển hướng không đổi đích của `cd`
+        self.assertEqual(cdir("cd -P /x 2>/dev/null && git commit -m x"), "/x")
         self.assertEqual(cdir('cd "$D" && git commit -m x'), "")
         self.assertEqual(cdir('git -C "$D" commit -m x'), "")
         self.assertEqual(cdir("cd $D && git -C b commit -m x"), "")
@@ -3349,6 +3351,8 @@ class GuardFenceTest(unittest.TestCase):
             "sed -i 's/deny/x/' .claude/hooks/guard.py",
             "python3 -c \"import os; os.remove('.claude/hooks/guard.py')\"",
             "python3 -c \"from pathlib import Path; Path('.claude/settings.json').write_text('{}')\"",
+            # D-105 (review #186): script nhắc hàng rào mà không chỉ đọc → chặn (trước là đối chứng cho qua)
+            "python3 -c \"import pathlib; s=open('.claude/hooks/guard.py').read(); pathlib.Path('o.txt').write_text(s)\"",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.bash(cmd), "deny")
@@ -3358,7 +3362,7 @@ class GuardFenceTest(unittest.TestCase):
             "python3 -m ruff format .claude/hooks/guard.py",
             "cp .claude/hooks/guard.py /tmp/g.py",
             "rm -rf .claude/worktrees/x",
-            "python3 -c \"import pathlib; s=open('.claude/hooks/guard.py').read(); pathlib.Path('o.txt').write_text(s)\"",
+            "python3 -c \"import pathlib; print(open('.claude/hooks/guard.py').read())\"",
         ):
             with self.subTest(ok=cmd):
                 self.assertEqual(self.bash(cmd), "")
@@ -3543,7 +3547,6 @@ class GuardWave1017Test(unittest.TestCase):
                 "git restore .claude/hooks/guard.py",
                 "rsync -a src/ dst/",
                 "python3 -c \"print(open('.env.example').read())\"",
-                "python3 -c \"names = ['.env']; open('out.txt', 'w').write(str(names))\"",
                 # heredoc thuộc lệnh sở hữu `<<`, không thuộc trình thông dịch khác trên cùng dòng (gặp khi commit)
                 "python3 a.py 2>&1 | tail -1; git commit -F - <<'EOF'\nopen('.env','w')\nEOF",
             ),
@@ -3553,6 +3556,8 @@ class GuardWave1017Test(unittest.TestCase):
             (
                 "cat <<'E' | python3\nopen('.env','w').write('x')\nE",
                 "ls && python3 - <<'E'\nopen('.env','w').write('x')\nE",
+                # D-105 (review #186): nhắc `.env` mà không chỉ đọc → chặn (trước là đối chứng cho qua)
+                "python3 -c \"names = ['.env']; open('out.txt', 'w').write(str(names))\"",
             ),
         )
 

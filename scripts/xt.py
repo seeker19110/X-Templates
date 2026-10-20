@@ -7208,8 +7208,9 @@ def merge_check_result(
     rec = local if isinstance(local, dict) else {}
     seen = _standard_seen(pr) or bool(rec.get("standard_seen"))
     elig = merge_eligibility(d, marks, seen)
-    if not bool(pr.get("reviewIdentity")) and _local_blocking(str(d.get("head", "")), marks, rec):
-        elig = {**elig, "review": "blocking", "review_deferred": False, "eligible": False, "auto_merge_ok": False}
+    state = "" if bool(pr.get("reviewIdentity")) else _local_blocking(str(d.get("head", "")), marks, rec)
+    if state:
+        elig = {**elig, "review": state, "review_deferred": False, "eligible": False, "auto_merge_ok": False}
     # AUD-XFEAT-010: CI/làn cho merge mà chưa có review hợp lệ ở head → không gợi lệnh merge, verdict `review`
     if d["verdict"] == "merge" and not elig["eligible"]:
         d = {k: v for k, v in d.items() if k != "next_rest"}
@@ -7227,16 +7228,21 @@ def merge_check_result(
     }
 
 
-def _local_blocking(head: str, marks: List[Dict[str, Any]], rec: Dict[str, Any]) -> bool:
-    """Review cuối của sổ cục bộ ở đúng `head` là `clean:false` (lỗi chặn hoặc chưa kết luận) và mới hơn mọi dấu đã đăng ở
-    head đó — `pr reviewed` đã ghi sổ mà chưa đăng (D-104). Dấu đã đăng có `at` = lúc đăng, sau lúc ghi sổ, nên review đã
-    đăng không bị tính hai lần; `review_identity` (sổ do tác giả ghi không tính) do bên gọi loại."""
+def _local_blocking(head: str, marks: List[Dict[str, Any]], rec: Dict[str, Any]) -> str:
+    """Trạng thái review khi review cuối của sổ cục bộ ở đúng `head` không sạch và mới hơn mọi dấu đã đăng ở head đó —
+    `pr reviewed` đã ghi sổ mà chưa đăng (D-104): lỗi chặn → `blocking`; chưa kết luận → `missing` (cần rà lại, không phải
+    "còn lỗi chặn"); khác → ''. Dấu đã đăng có `at` = lúc đăng, sau lúc ghi sổ, nên review đã đăng không bị tính hai lần;
+    `review_identity` (sổ do tác giả ghi không tính) do bên gọi loại."""
     local = [r for r in rec.get("reviews") or [] if isinstance(r, dict) and r.get("head") == head]
     if not head or not local:
-        return False
+        return ""
     last = max(local, key=lambda r: _iso_key(r.get("at", "")))
     newest = max((_iso_key(r.get("at", "")) for r in marks if r.get("head") == head), default="")
-    return not (last.get("clean") and not last.get("inconclusive")) and _iso_key(last.get("at", "")) > newest
+    if _iso_key(last.get("at", "")) <= newest:
+        return ""
+    if last.get("inconclusive"):
+        return "missing"
+    return "" if last.get("clean") else "blocking"
 
 
 def _review_step(d: Dict[str, Any], state: str) -> str:

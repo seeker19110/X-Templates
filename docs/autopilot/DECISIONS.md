@@ -741,3 +741,24 @@
 - Chọn: merge-check đọc thêm sổ cục bộ, chỉ để chặt hơn: review clean:false ở head hiện tại → review=blocking (không deferred)
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: đóng cửa sổ merge PR có lỗi chặn đã biết; đăng-trước không đóng được ca đăng thất bại; sổ cục bộ chỉ làm chặt hơn nên không mở đường lách
 - Đường lùi: merge-check chỉ đọc xtReviews như cũ
+
+### D-105 · 2026-10-20T10:31:12+00:00 · Script trình thông dịch chạm đường dẫn được canh: liệt kê từng API ghi luôn thiếu (review #186 còn 6 nhóm API lọt)
+
+- Phương án: (1) tiếp tục liệt kê API ghi theo từng ngôn ngữ · (2) mặc định chặn: script nhắc tới đường dẫn được canh (fence/secret/evidence/.git/hooks|config) thì deny, trừ khi toàn script chỉ gồm thao tác đọc trong danh sách cho phép · (3) chặn mọi script nhắc tới đường dẫn được canh, không ngoại lệ
+- Chọn: mặc định chặn: script nhắc tới đường dẫn được canh (fence/secret/evidence/.git/hooks|config) thì deny, trừ khi toàn script chỉ gồm thao tác đọc trong danh sách cho phép
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: danh sách API ghi là vô hạn (rename/copy/delete/số cờ/thư viện), phân tích tĩnh không thể đầy đủ → đảo sang allowlist thao tác đọc; tiêu chí 4: đọc .env/.claude bằng script vẫn chạy, agent sửa file canh vẫn có Edit/Write (đường duy nhất được thiết kế)
+- Đường lùi: trả về liệt kê API ghi (DIRECT_WRITE_FMT)
+
+### D-106 · 2026-10-20T10:31:13+00:00 · cd tới thư mục guard không giải được (cờ ghép, chuyển hướng đầu lệnh, CDPATH, biến)
+
+- Phương án: (1) coi cwd 'không biết' như gốc dự án (hiện tại) · (2) cwd không biết: đích ghi tương đối được thử ở mọi thư mục canh (gốc, .claude, .claude/hooks, .autopilot, .git, .git/hooks) — trúng chỗ nào là chặn
+- Chọn: cwd không biết: đích ghi tương đối được thử ở mọi thư mục canh (gốc, .claude, .claude/hooks, .autopilot, .git, .git/hooks) — trúng chỗ nào là chặn
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: mất dấu cwd không được làm mở đường; chặn oan chỉ khi tên file trùng tên file canh trong thư mục canh, hiếm
+- Đường lùi: trả về coi cwd không biết là gốc dự án
+
+### D-107 · 2026-10-20T11:27:35+00:00 · Bộ che chuỗi/comment cho script không phải Python (node/ruby/perl/php): ký tự # / % quote-like làm lệch che
+
+- Phương án: (1) fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc · (2) cho riêng comment # ở đầu dòng
+- Chọn: fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: che sai từng làm lọt ghi thật (review #186 lần 2); chặn oan chỉ khi script nhắc đường dẫn canh, agent còn Edit/Write
+- Đường lùi: cho comment # đầu dòng

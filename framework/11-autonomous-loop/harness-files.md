@@ -53,6 +53,39 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `mã thoát` theo sau là số. Lọt: báo cáo nhắc `exit 0` mà không chạy lệnh nào (hay trích log có `rc=1`) vẫn được cho
   dừng. Bắt sai: báo cáo ghi kết quả theo dạng khác (`→ 0`, "trả 0", "xanh") bị chặn một lần dù đã chạy. Hook chỉ là
   lời nhắc ghi bằng chứng; kết luận "xanh" vẫn từ evidence do `loop record` ghi.
+- **Guard chỉ hiểu đường dẫn viết nguyên văn** (AUD-SEC-090): script trình thông dịch ghép đường dẫn (`'.git/' + 'config'`,
+  f-string có biểu thức, `os.path.join('.git', 'config')`) không có chuỗi nào là đường dẫn được canh nên không bị xét
+  (escape trong chuỗi Python như `'\x2eenv'` thì được giải qua AST; escape của ngôn ngữ khác chưa); script ở file
+  (`python3 x.py`, `python3 < x.py`) và module cục bộ được `import` không được đọc; trên hệ file không phân biệt hoa thường
+  (macOS, Windows) `.GIT/config` là `.git/config` nhưng không bị chặn; `.git/info/exclude` không nằm trong danh sách canh.
+- **Script nhắc đường dẫn được canh: mặc định chặn** (D-105): script `-c`/`-e`/`-r`, heredoc, here-string hay ống vào
+  trình thông dịch có chuỗi là hàng rào (`.claude/hooks/*`, `.claude/settings*.json`), `.git/hooks`/`.git/config`, bí mật
+  hay `.autopilot/` bị chặn với mã của đích, trừ khi TOÀN script chỉ gồm thao tác đọc trong danh sách nhỏ (`open` mode
+  đọc tối đa 2 đối số vị trí, `.read*()`, `Path(…).read_text/exists/stat/glob/rglob/iterdir`, `os.path.<hàm đọc>`,
+  `os.listdir/scandir/walk`, `json.load(s)`, `json.dump(x, sys.stdout)`, `.get/.keys/.values/.items`, `sorted/min/max`
+  không `key=`, `ast.parse`, `hashlib`, `print`; `readFileSync`/`existsSync`/`statSync`). D-105 **kích hoạt theo chuỗi
+  nguyên văn**: chỉ khi script có chuỗi là đường dẫn được canh — đường dẫn ghép (`'.e' + 'nv'`) không làm script bị xét
+  (giới hạn ở mục trên). Chuỗi lấy bằng regex (cả chuỗi giữa hai nháy bất kỳ, bắt f-string cùng nháy của 3.12+) hợp với
+  hằng str/bytes của AST khi script là Python (escape đã giải, phần hằng của f-string); script chuẩn hoá NFKC trước khi
+  quét (`os.ｒemove` là `os.remove`). Trình thông dịch nhận: python, pypy, ipython (họ python), node, deno (`-e`,
+  `deno eval`), bun, perl, ruby, php, lua (`--`/`[[…]]` là không chỉ đọc), tclsh. Magic chạy shell của ipython (`!cmd`,
+  `!!cmd`, `x = !cmd`, `%sx`, `%system`, ô `%%bash`/`%%sh`/`%%script <shell>`) quét như `sh -c`; magic lạ: từ trên dòng
+  magic là ứng viên đường dẫn (`%%writefile .env` bị chặn). Tcl không cần nháy nên `file delete .env` không bị xét;
+  escape trong chuỗi node/ruby/perl chưa được giải. Bộ che chuỗi/comment (D-107): Python che
+  bằng `tokenize` (cú pháp sai → không chỉ đọc; biểu thức f-string kiểm đệ quy); node/ruby/perl/php chỉ che chuỗi một
+  dòng, phần mã còn `#`, `/`, `%`, `<<`, quote-like Perl (`q{}`, `qq{}`, `m{}`, `s{}{}`…), nháy dính biến (`$'`, `?'`) hay
+  chuỗi nháy kép có `$`/`@` là không chỉ đọc. Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi
+  `requests.get`, ghi file khác, hàm tự viết), script sửa tài liệu có chuỗi `'.env'` đứng riêng, Perl/PHP đọc file bằng
+  hàm ngoài danh sách, JS template string; theo D-107 thêm: script node/ruby/perl/php nhắc đường dẫn được canh mà có
+  comment, phép chia, `%`, heredoc, chuỗi nhiều dòng; `open(p, 'r', -1)` (đối số thứ 3); deno/lua/tclsh đọc file canh
+  bằng API riêng (`Deno.readTextFileSync`, Lua `f:read`, Tcl `read`). Sửa file canh thì dùng
+  Edit/Write; đọc thì dùng `cat`/Read hoặc script chỉ đọc.
+- **Thư mục không biết** (D-106): sau `cd "$X"`, `cd -`, `pushd +N`, `popd`, `cd` khi có `CDPATH`, `cd`/`pushd` tới
+  toán hạng có glob (`cd .cl*`), đích ghi tương đối được thử ở gốc và mọi thư mục canh (`.claude`, `.claude/hooks`,
+  `.autopilot`, `.git`, `.git/hooks`) — chặn khi file đã có ở đó hoặc tên là tên được canh (chặn oan: `cd "$X" && echo
+  x > config` dù `$X` không phải `.git`). `env -C DIR`/`--chdir=DIR` dời thư mục của lệnh sau `env` như `cd` (kèm chuyển
+  hướng thì thư mục là không biết; tuỳ chọn dài viết tắt duy nhất như `--ch=DIR` cũng tính); `dd of=<đích>`, lệnh chỉ
+  gồm chuyển hướng (`exec 3> .env`) và chuyển hướng đọc-ghi `<>` (`exec 3<> .env`) là ghi.
 
 ### Định dạng PLAN (parser thật trong `xt.py`)
 

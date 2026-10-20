@@ -100,16 +100,21 @@ class MergeCheckReviewStepTest(unittest.TestCase):
         local = {**mark(False), "at": "2026-10-20T10:00:00+00:00"}
         for phase in ("build", "harden"):
             commit_base_xt(self.base, f"merge_autonomy: L3\ndelivery_phase: {phase}\n")
-            for name, row in (("blocking", local), ("inconclusive", {**local, "inconclusive": True})):
+            # review chưa kết luận không phải "còn lỗi chặn": trạng thái `missing` (cần reviewer rà lại), vẫn không hợp lệ
+            for name, row in (("blocking", local), ("missing", {**local, "inconclusive": True})):
                 with self.subTest(phase=phase, review=name):
                     self.seed([row])
                     rc, d = self.check_json(std())
                     self.assertEqual(
                         (rc, d["verdict"], d["review"], d["review_deferred"], d["eligible"], d["auto_merge_ok"]),
-                        (1, "review", "blocking", False, False, False),
+                        (1, "review", name, False, False, False),
                     )
                     self.assertNotIn("match-head-commit", d["next"])
-                    self.assertIn("lỗi chặn", d["next"])
+                    if name == "blocking":
+                        self.assertIn("lỗi chặn", d["next"])
+                    else:
+                        self.assertNotIn("lỗi chặn", d["next"])
+                        self.assertIn("giao reviewer", d["next"])
                     res = GuardReviewMissingTest().final(d, f"gh pr merge 7 --squash --match-head-commit {HEAD}")
                     self.assertEqual((res["decision"], res.get("code")), ("deny", "REVIEW_MISSING"))
 

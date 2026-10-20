@@ -52,7 +52,8 @@ class InterpGitConfigTest(unittest.TestCase):
         for cmd in (
             "python3 -c \"print(open('.git/config').read())\"",
             "python3 -c \"import configparser; c=configparser.ConfigParser(); c.read('.git/config')\"",
-            "python3 -c \"open('out.txt','w').write(open('.git/config').read())\"",
+            # D-105 (review #186): đọc `.git/config` rồi ghi file khác không còn là "chỉ đọc" → chặn, xem
+            # test_guard_review186.InterpDefaultDenyTest
             "node -e \"console.log(require('fs').readFileSync('.git/config','utf8'))\"",
         ):
             with self.subTest(cmd=cmd):
@@ -163,19 +164,126 @@ class InterpAliasWriteTest(unittest.TestCase):
                 self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
 
     def test_guard_interp_alias_write_controls(self):
-        """Đối chứng (không chặn oan): chỉ đọc file bí mật, ghi file khác mà nhắc tên `.env`/hook trong chuỗi in ra hay
-        nội dung, đổi chữ trong tài liệu, biến không tới lời gọi ghi."""
+        """Đối chứng (không chặn oan): chỉ đọc file bí mật, tên không phải file canh (`.env.example`)."""
         for cmd in (
             "python3 -c \"f='.env'; print(open(f).read())\"",
             "python3 -c \"import os; f='.env'; print(os.path.exists(f))\"",
-            "python3 -c \"print('.env'); open('out.txt','w').write('x')\"",
-            "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\"",
-            "python3 -c \"n='.env'; open('README.md','w').write('Đặt khoá vào ' + n)\"",
-            "python3 -c \"from pathlib import Path; p=Path('README.md'); old='.claude/hooks/guard.py'; "
-            "p.write_text(p.read_text().replace(old, 'hooks/guard.py'))\"",
-            "node -e \"const f='.env'; const fs=require('fs'); fs.writeFileSync('out.txt', 'see ' + f)\"",
             "python3 -c \"src='.env.example'; open('notes.txt','w').write(src)\"",
-            "python3 -c \"f='.env'; data=open(f).read(); open('copy.txt','w').write(str(len(data)))\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_interp_mention_and_write_other_denied(self):
+        """D-105 (review #186): script nhắc đường dẫn được canh mà có thao tác ngoài danh sách đọc (ở đây: ghi file
+        khác) → chặn theo mã của đường dẫn. Trước D-105 các ca này là đối chứng cho qua; đổi theo quyết định, ghi ở
+        CHANGELOG (chặn oan đã biết)."""
+        cases = {
+            "python3 -c \"print('.env'); open('out.txt','w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"n='.env'; open('README.md','w').write('Đặt khoá vào ' + n)\"": "SECRET_WRITE",
+            "python3 -c \"from pathlib import Path; p=Path('README.md'); old='.claude/hooks/guard.py'; "
+            "p.write_text(p.read_text().replace(old, 'hooks/guard.py'))\"": "HOOK_BYPASS",
+            "node -e \"const f='.env'; const fs=require('fs'); fs.writeFileSync('out.txt', 'see ' + f)\"": "SECRET_WRITE",
+            "python3 -c \"f='.env'; data=open(f).read(); open('copy.txt','w').write(str(len(data)))\"": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+
+class CdRedirectFlagsTest(unittest.TestCase):
+    """AUD-SEC-088: `cd`/`pushd` kèm chuyển hướng (`2>/dev/null`, `>/dev/null`) hay cờ (`-P`, `-L`, `-e`, `--`) vẫn dời
+    thư mục — lệnh sau phải được quét ở thư mục mới, không như đang ở gốc dự án."""
+
+    def test_guard_cd_redirect_flags(self):
+        cases = {
+            "cd .claude >/dev/null && bash -c 'echo x > settings.json'": "HOOK_BYPASS",
+            "pushd .claude >/dev/null && python3 -c \"open('settings.json','w')\"": "HOOK_BYPASS",
+            "cd -P .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd .claude 2>/dev/null; echo x > settings.json": "HOOK_BYPASS",
+            "cd -L .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -- .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -e .claude && echo x > settings.json": "HOOK_BYPASS",
+            "cd -P -e .claude 2> /dev/null && echo x > settings.json": "HOOK_BYPASS",
+            "cd .claude &>/dev/null && echo x > settings.json": "HOOK_BYPASS",
+            "pushd -- .autopilot > /dev/null && echo {} > verified.json": "EVIDENCE_HANDWRITE",
+            "cd docs 2>/dev/null && echo K=1 > ../.env": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_cd_redirect_flags_controls(self):
+        for cmd in (
+            "cd docs 2>/dev/null && echo x > a.md",
+            "cd -P docs && echo x > settings.json",
+            "pushd docs >/dev/null && bash -c 'echo x > settings.json'",
+            "cd .claude 2>/dev/null && cat settings.json",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_cd_target_parsing(self):
+        here = "/p"
+        self.assertEqual(guard._cd_target(guard.tokenize("cd .claude 2>/dev/null"), here), "/p/.claude")
+        self.assertEqual(guard._cd_target(["cd", "-P", "-L", "--", "a"], here), "/p/a")
+        self.assertEqual(guard._cd_target(["cd", "--", "-x"], here), "/p/-x")
+        self.assertIsNone(guard._cd_target(["cd", "-"], here))
+        self.assertIsNone(guard._cd_target(["cd", "-P"], here))
+        self.assertIsNone(guard._cd_target(["cd", "-x", "a"], here))  # cờ lạ: không đoán
+        self.assertIsNone(guard._cd_target(["cd", "a", "b"], here))
+        self.assertIsNone(guard._cd_target(["pushd", "+1"], here))
+
+
+class InterpMoreWriteApisTest(unittest.TestCase):
+    """AUD-SEC-089: API ghi ngoài danh sách cũ (`fs.createWriteStream`, `os.open` cờ ghi, `os.symlink`/`os.link`/
+    `os.chmod`, `fs.symlinkSync`/`openSync`/`chmodSync`, `Path(…).open('a')`) vào đường dẫn được canh → chặn như đường
+    shell `ln -s`/`chmod`/`cp`."""
+
+    def test_guard_interp_more_write_apis(self):
+        cases = {
+            "node -e \"require('fs').createWriteStream('.git/config')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.open('.git/config', os.O_WRONLY|os.O_APPEND)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.open('.env', os.O_CREAT | os.O_RDWR)\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.open('.git/config', flags=os.O_TRUNC)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.symlink('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.link('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.chmod('.git/hooks/pre-commit',0)\"": "HOOK_BYPASS",
+            "node -e \"require('fs').symlinkSync('/x','.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').openSync('.git/config','a')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').chmodSync('.git/hooks/pre-commit',0)\"": "HOOK_BYPASS",
+            "python3 -c \"from pathlib import Path; Path('.git/config').open('a')\"": "HOOK_BYPASS",
+            "python3 -c \"from pathlib import Path; Path('.env').open('w')\"": "SECRET_WRITE",
+            "python3 -c \"from pathlib import Path; Path('.env').open(mode='a')\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.symlink('/x','.claude/settings.local.json')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').createWriteStream('.autopilot/verified.json')\"": "EVIDENCE_HANDWRITE",
+            # qua biến (AUD-SEC-084)
+            "python3 -c \"import os; p='.git/config'; os.open(p, os.O_WRONLY)\"": "HOOK_BYPASS",
+            "python3 -c \"import os; f='.git/hooks/pre-commit'; os.symlink('/x', f)\"": "HOOK_BYPASS",
+            "node -e \"const f='.env'; require('fs').createWriteStream(f)\"": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_interp_more_write_apis_controls(self):
+        """Đọc không chặn: `os.open` cờ chỉ đọc, `Path.open()` không mode hoặc `'r'`, `fs.openSync(…,'r')`,
+        `createReadStream`, liên kết/chmod file thường."""
+        for cmd in (
+            "python3 -c \"import os; os.open('.git/config', os.O_RDONLY)\"",
+            "python3 -c \"import os; os.read(os.open('.git/config', os.O_RDONLY), 10)\"",
+            "python3 -c \"from pathlib import Path; print(Path('.git/config').open().read())\"",
+            "python3 -c \"from pathlib import Path; print(Path('.env').open('r').read())\"",
+            "node -e \"require('fs').openSync('.git/config','r')\"",
+            "node -e \"require('fs').createReadStream('.git/config')\"",
+            "python3 -c \"import os; os.symlink('/x','build/link')\"",
+            "python3 -c \"import os; os.chmod('scripts/run.sh',0o755)\"",
+            "python3 -c \"import os; os.open('out.txt', os.O_WRONLY|os.O_CREAT)\"",
+            "python3 -c \"import os; p='.git/config'; os.open(p, os.O_RDONLY)\"",
+            "node -e \"console.log(require('fs').readlinkSync('.git/hooks/pre-commit'))\"",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)

@@ -34,7 +34,8 @@ import urllib.parse
 import sys
 import tempfile
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+import unicodedata
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
@@ -759,18 +760,56 @@ def _split_words(text: str) -> List[str]:
         return text.split()
 
 
-def _skip_env_args(a: List[str]) -> None:
-    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C` kèm một giá trị); `-S '<lệnh>'` tách chuỗi thành lệnh
-    thật (`env -S "git push --force"`, AUD-SEC-024)."""
+def _skip_env_args(a: List[str], dirs: Optional[List[str]] = None) -> None:
+    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C`/`--unset`/`--chdir` kèm một giá trị); `-S '<lệnh>'` tách
+    chuỗi thành lệnh thật (`env -S "git push --force"`, AUD-SEC-024). Thư mục của `-C DIR`/`-CDIR`/`--chdir[=]DIR` ghi
+    vào `dirs` (lệnh sau `env` chạy ở đó — review #186 lần 2)."""
     while a and (a[0].startswith("-") or "=" in a[0]):
         opt = a.pop(0)
-        split = opt.split("=", 1)[1] if opt.startswith("--split-string=") else opt[2:] if opt[:2] == "-S" else None
-        if opt in ("-S", "--split-string") and a:
-            split = a.pop(0)
-        if split:
-            a[:0] = _split_words(split)
-        elif opt in ("-u", "-C") and a:
-            a.pop(0)
+        key, val = _env_opt(opt)
+        if key and val is None:
+            val = a.pop(0) if a else ""
+        if key == "S" and val:
+            a[:0] = _split_words(val)
+        if key == "C" and val and dirs is not None:
+            dirs.append(val)
+
+
+ENV_LONG_OPTS = {"--split-string": "S", "--chdir": "C", "--unset": "u", "--argv0": "a"}
+# Mọi tuỳ chọn dài của GNU env (coreutils 9.x) — để nhận viết tắt duy nhất như getopt_long (`--ch=` → `--chdir`)
+ENV_LONG_ALL = (
+    *ENV_LONG_OPTS,
+    "--ignore-environment",
+    "--null",
+    "--block-signal",
+    "--default-signal",
+    "--ignore-signal",
+    "--list-signal-handling",
+    "--debug",
+    "--help",
+    "--version",
+)
+
+
+def _env_long_name(name: str) -> str:
+    """Tên đầy đủ của tuỳ chọn dài `name` (viết đủ, hoặc viết tắt khớp đúng một tuỳ chọn — review #186 lần 3);
+    mơ hồ/lạ → giữ nguyên."""
+    if not name.startswith("--") or len(name) < 3 or name in ENV_LONG_ALL:
+        return name
+    hits = [o for o in ENV_LONG_ALL if o.startswith(name)]
+    return hits[0] if len(hits) == 1 else name
+
+
+def _env_opt(opt: str) -> Tuple[str, Optional[str]]:
+    """Tuỳ chọn có giá trị của `env`: (khoá S/C/u/a, giá trị dính liền hoặc None = ở token kế). Cờ ngắn ghép
+    (`-iC dir`, `-iCdir`, `-iS'…'`) tách như getopt; tuỳ chọn dài nhận viết tắt duy nhất (`--ch=`, `--spl`); tuỳ
+    chọn khác/gán biến → ('', None)."""
+    name, eq, rest = opt.partition("=")
+    name = _env_long_name(name)
+    if name in ENV_LONG_OPTS:
+        return ENV_LONG_OPTS[name], (rest if eq else None)
+    m = re.fullmatch(r"-[^-CSua]*([CSua])(.*)", opt, re.S)
+    return (m[1], m[2] or None) if m else ("", None)
 
 
 def _skip_wrapper_args(name: str, a: List[str]) -> None:
@@ -797,18 +836,24 @@ def _skip_env_args_keep_assigns(a: List[str]) -> None:
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "while", "until", "do"}
 
 
-def _strip_prefixes(argv: List[str]) -> List[str]:
-    """Bỏ từ khoá shell, gán biến đầu lệnh và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật."""
+def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[str]:
+    """Bỏ từ khoá shell, gán biến đầu lệnh, chuyển hướng đặt đầu lệnh (`2>/dev/null cd x`, `>/dev/null rm …` — review
+    #186) và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật. Đích của chuyển hướng vẫn được
+    `write_targets` đọc từ argv gốc. `dirs`: nhận thư mục của `env -C` (theo thứ tự)."""
     a = list(argv)
     while a:
         head = a[0]
-        if head in SHELL_KEYWORDS:
+        if _is_redirect(head):
+            del a[:2]  # toán tử + đích
+        elif head.isdigit() and len(a) > 1 and _is_redirect(a[1]):
+            a.pop(0)  # số fd (`2>`)
+        elif head in SHELL_KEYWORDS:
             a.pop(0)
         elif ENV_ASSIGN_RE.fullmatch(head):
             a.pop(0)
         elif posixpath.basename(head) == "env":
             a.pop(0)
-            _skip_env_args(a)
+            _skip_env_args(a, dirs)
         elif posixpath.basename(head) in WRAPPERS:
             a.pop(0)
             _skip_wrapper_args(posixpath.basename(head), a)
@@ -869,31 +914,92 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
     return gdir
 
 
-def _cd_target(n: List[str], cwd: Optional[str]) -> Optional[str]:
-    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `cd` kèm tuỳ chọn hay biến → None (không biết, hook dùng gốc dự án)."""
-    args = n[1:]
-    if cwd is None or len(args) != 1 or args[0].startswith("-") or "$" in args[0]:
+# Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
+CD_FLAG_RE = re.compile(r"-[LPe@]+")
+
+
+def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
+    """(đối số, có `--`) của `cd`/`pushd` sau khi bỏ chuyển hướng (`2>/dev/null` tách thành `2`, `>`, `/dev/null`;
+    `>&1`) và cờ `-P`/`-L`/`-e`/`-@` (cả ghép `-LP`) đứng trước `--` (AUD-SEC-088). Cờ lạ giữ lại để bên gọi coi là
+    không biết."""
+    plain: List[str] = []
+    i = 0
+    while i < len(args):
+        if _is_redirect(args[i]):
+            i += 2  # toán tử + đích
+        elif args[i].isdigit() and i + 1 < len(args) and _is_redirect(args[i + 1]):
+            i += 1  # số fd đứng trước toán tử (`2>`)
+        else:
+            plain.append(args[i])
+            i += 1
+    j = 0
+    while j < len(plain) and CD_FLAG_RE.fullmatch(plain[j]):
+        j += 1
+    if plain[j : j + 1] == ["--"]:
+        return plain[j + 1 :], True
+    return plain[j:], False
+
+
+def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Optional[str]:
+    """Thư mục sau `cd <dir>`; `cd`, `cd -`, `pushd +N`, `cd` kèm cờ lạ hay biến → None (không biết — D-106: đích ghi
+    tương đối sau đó thử ở mọi thư mục canh). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088).
+    Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được."""
+    args, dashdash = _cd_operands(n[1:])
+    if len(args) != 1 or "$" in args[0] or re.search(r"[*?\[]", args[0]):
+        return None  # biến, glob (`cd .cl*` — shell bung ra tên thật, D-106): không biết
+    if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
-    return posixpath.normpath(posixpath.join(cwd, posixpath.expanduser(args[0])))
+    target = posixpath.expanduser(args[0])
+    if target.startswith("/"):
+        return posixpath.normpath(target)
+    if cwd is None or cdpath:
+        return None
+    return posixpath.normpath(posixpath.join(cwd, target))
 
 
-def _commands_with_cwd(tokens: List[str], start: str) -> List[Tuple[List[str], Optional[str]]]:
+def _env_dirs(argv: List[str]) -> List[str]:
+    """Thư mục của `env -C DIR`/`--chdir=DIR` (theo thứ tự, kể cả `env` lồng) trước lệnh thật."""
+    dirs: List[str] = []
+    _strip_prefixes(argv, dirs)
+    return dirs
+
+
+def _run_dir(argv: List[str], here: Optional[str]) -> Optional[str]:
+    """Thư mục lệnh `argv` chạy: `here`, dời theo `env -C` như `cd` (review #186 lần 2). Lệnh có chuyển hướng mà thư mục
+    đã dời: shell mở đích chuyển hướng ở `here`, lệnh ghi file ở thư mục mới → không biết (D-106 thử mọi thư mục canh)."""
+    run = here
+    for d in _env_dirs(argv):
+        run = _cd_target(["cd", "--", d], run)
+    moved = run != here
+    return None if moved and any(_is_redirect(t) for t in argv) else run
+
+
+def _sets_cdpath(argv: List[str]) -> bool:
+    """Lệnh đặt/xuất `CDPATH` (`CDPATH=… cd x`, `CDPATH=…;`, `export CDPATH[=…]`): `cd` tương đối sau đó tìm trong
+    CDPATH, guard không đoán (D-106)."""
+    return any(t == "CDPATH" or t.startswith("CDPATH=") for t in argv)
+
+
+def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[List[str], Optional[str]]]:
     """Mỗi lệnh đơn kèm thư mục nó chạy: `cd`/`pushd` dời thư mục; `(`…`)` và `$(`…`)` là subshell — ra khỏi đó
-    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None."""
+    thì về thư mục cũ (`(cd ../b && git pull); git commit` vẫn commit ở chỗ cũ). `popd`/đích không rõ → None.
+    `CDPATH` có trong môi trường hay được đặt trong lệnh → `cd` tương đối là không rõ (D-106)."""
     out: List[Tuple[List[str], Optional[str]]] = []
     stack: List[Optional[str]] = []
     here: Optional[str] = start
     cur: List[str] = []
+    cdpath = bool(os.environ.get("CDPATH"))
 
     def flush() -> None:
-        nonlocal here
+        nonlocal here, cdpath
         if cur:
             n = normalize(cur)
+            cdpath = cdpath or _sets_cdpath(cur)
             if n[:1] in (["cd"], ["pushd"]):
-                here = _cd_target(n, here)
+                here = _cd_target(n, here, cdpath)
             elif n[:1] == ["popd"]:
                 here = None
-            out.append((list(cur), here))
+            out.append((list(cur), _run_dir(cur, here)))
             cur.clear()
 
     for t in tokens:
@@ -2833,7 +2939,9 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
     return ""
 
 
-REDIRECTS = (">", ">>", ">|", "&>", "&>>")
+# `<>`: mở đọc-ghi (tạo file nếu chưa có) — `exec 3<> .env`, `1<> .env` là ghi (review #186 lần 3); số fd đứng trước
+# (`3<>`) là token riêng sau khi tách
+REDIRECTS = (">", ">>", ">|", "&>", "&>>", "<>")
 
 
 def _copy_targets(name: str, args: List[str]) -> List[str]:
@@ -2947,6 +3055,7 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "unzip": lambda a: _flag_values(a, ("-d",)),
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
+    "dd": lambda a: [x[3:] for x in a if x.startswith("of=")],  # review #186 lần 2: `dd of=.env` là ghi
 }
 
 
@@ -3079,24 +3188,61 @@ def _resolve_target(t: str, root: str, cwd: Optional[str]) -> str:
     return _at(t, cwd)
 
 
+# D-106: thư mục đang đứng không biết (`cd "$X"`, `cd -`, `pushd +1`, `popd`, CDPATH) → đích tương đối thử ở gốc và
+# mọi thư mục canh. Ở thư mục canh chỉ tính khi file đã có hoặc tên là tên được canh ở đó — `cd "$X" && echo > a.txt`
+# không bị chặn chỉ vì `.claude/hooks/a.txt` khớp mẫu `.claude/hooks/*`.
+GIT_HOOK_NAMES = frozenset(
+    "applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit prepare-commit-msg commit-msg post-commit "
+    "pre-rebase post-checkout post-merge pre-push pre-receive update proc-receive post-receive post-update "
+    "reference-transaction push-to-checkout pre-auto-gc post-rewrite sendemail-validate fsmonitor-watchman "
+    "p4-changelist p4-prepare-changelist p4-post-changelist p4-pre-submit post-index-change".split()
+)
+UNKNOWN_CWD_DIRS: Tuple[Tuple[str, FrozenSet[str]], ...] = (
+    (".claude", frozenset({"settings.json", "settings.local.json", "hooks"})),
+    (".claude/hooks", frozenset()),
+    (".autopilot", frozenset(EVIDENCE_NAMES)),
+    (".git", frozenset({"config", "hooks"})),
+    (".git/hooks", GIT_HOOK_NAMES),
+)
+
+
+def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
+    """Các đích có thể của `t`: thư mục biết → một đích (`_resolve_target`); không biết (None) → gốc dự án cộng thư mục
+    canh nào có file đó hoặc tên được canh (D-106)."""
+    if cwd is not None:
+        return [_resolve_target(t, root, cwd)]
+    t = PROJECT_REF_RE.sub(lambda _: root, t, count=1)
+    pwd = PWD_REF_RE.match(t)  # `$PWD/x` khi thư mục không biết = `x` tương đối
+    t = (t[pwd.end() :].lstrip("/") or ".") if pwd else t
+    if not t or t.startswith(("/", "~", "$")):
+        return [t]
+    out = [posixpath.normpath(posixpath.join(root, t))]
+    for d, names in UNKNOWN_CWD_DIRS:
+        p = posixpath.normpath(posixpath.join(root, d, t))
+        if os.path.lexists(p) or t.split("/", 1)[0] in names:
+            out.append(p)
+    return out
+
+
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
-    """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*)."""
+    """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
+    mục đang đứng không biết (D-106, `_where`)."""
     asks: List[str] = []
     if n and n[0] in ("chmod", "chown", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
         asks += [
             GIT_HOOK_WHY.format(t)
             for t in _positionals(n[1:])
-            if _match_any(rel_path(_at(t, cwd), root), GIT_HOOK_PATTERNS)
+            if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
         ]
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
     asks += [
         EVIDENCE_WHY.format(t)
-        for t in (_resolve_target(t, root, cwd) for t in find_evidence)
+        for t in (x for t in find_evidence for x in _where(t, root, cwd))
         if t not in targets and _target_kind(t, root) == "evidence"
     ]
-    for target in (_resolve_target(t, root, cwd) for t in targets):
+    for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
             asks.append(FENCE_WHY.format(target))
@@ -3112,7 +3258,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
             asks.append(CAPABILITY_WHY.format(f"ghi {target} qua Bash"))
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
-    restored = [(t, _target_kind(_resolve_target(t, root, cwd), root)) for t in _git_file_targets(n)]
+    restored = [(t, _target_kind(x, root)) for t in _git_file_targets(n) for x in _where(t, root, cwd)]
     asks += [f"ghi file bí mật qua Bash (git lấy từ commit khác): {t}" for t, k in restored if k == "secret"]
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
 
@@ -3422,7 +3568,8 @@ def _scan_command(
 ) -> Optional[str]:
     """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
     n = normalize(argv)
-    if not n:
+    if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
+        asks.extend(_write_asks(n, argv, root, cwd))
         return None
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
@@ -4295,8 +4442,8 @@ def _scan_nested(
     asks += opaque
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
-    nested += _ssh_local_scripts(tokens)
-    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd or root).items():
+    nested += _ssh_local_scripts(tokens) + [s for s, _ in _ipython_nested(cmd, tokens, None)]
+    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd).items():
         moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
         if moved:
             return moved
@@ -4305,10 +4452,11 @@ def _scan_nested(
     )
 
 
-def _moved_nested_scripts(cmd: str, tokens: List[str], start: str) -> Dict[Optional[str], List[str]]:
+def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> Dict[Optional[str], List[str]]:
     """Lệnh lồng đứng sau `cd`/`pushd` (AUD-SEC-087), nhóm theo thư mục nó chạy: `cd .claude && bash -c '…'` chạy
     trong `.claude`. Gồm `sh -c`, `eval`, here-string/ống/heredoc vào shell, lệnh bọc trên máy, `os.system` trong script
-    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét như gốc dự án."""
+    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét với cwd không biết —
+    đích tương đối thử ở mọi thư mục canh (D-106)."""
     out: Dict[Optional[str], List[str]] = {}
     placed = _commands_with_cwd(tokens, start)
     dirs = [here for _, here in placed]
@@ -4330,13 +4478,20 @@ def _moved_nested_scripts(cmd: str, tokens: List[str], start: str) -> Dict[Optio
         add(here, _heredoc_scripts(cmd))
     for script, here in _interp_scripts_at(cmd, tokens, start):
         add(here, _exec_api_scripts([script]))
+    for script, here in _ipython_nested(cmd, tokens, start):
+        add(here, [script])
     return out
 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
 
-INTERP_RE = re.compile(r"(python|node|perl|ruby|php|deno|bun)[0-9.]*")
+INTERP_RE = re.compile(r"(python|pypy|ipython|node|perl|ruby|php|deno|bun|lua|tclsh)[0-9.]*")
 INTERP_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "-p", "--print", "-r"}
+# Họ của trình thông dịch cùng ngôn ngữ (review #186 lần 3): pypy/ipython chạy Python — ipython còn có magic `!cmd`,
+# `%…` mà `ast.parse` không nhận nên script có magic không bao giờ là chỉ đọc
+INTERP_FAMILY = {"pypy": "python", "ipython": "python"}
+# Lệnh con nhận script làm đối số: `deno eval '…'` (review #186 lần 3)
+INTERP_EVAL_SUBCMDS = {"deno": "eval"}
 PERL_E_FLAG_RE = re.compile(r"-[a-zA-DF-Z]+[eE]")  # cờ gộp `-ne`, `-pe`, `-lne`: đối số kế tiếp là script
 # Dấu hiệu script GHI/XOÁ file (đọc thì không hỏi): open(..., "w"), .write_text(, os.remove, shutil.*, fs.writeFileSync…
 WRITE_HINT_RE = re.compile(
@@ -4345,6 +4500,9 @@ WRITE_HINT_RE = re.compile(
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|unlink|rename|truncate)\b"
     r"|\bopen\b[^;\n]{0,200}['\"]\+?>"  # perl `open(F, '>', …)`, `open(F, ">f")` (trần độ dài: tuyến tính)
     r"|\b(?:py_compile|compileall|pycache_prefix)\b"  # trình biên dịch ghi bytecode (AUD-SEC-074)
+    # AUD-SEC-089: luồng ghi, `os.open`, liên kết, đổi quyền, `Path(…).open('a')` (mode là đối số đầu)
+    r"|\b(?:createWriteStream|openSync|os\.open)\b|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?\("
+    r"|\.open\(\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
 )
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
@@ -4357,7 +4515,19 @@ GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
 
 def _stdin_interp(argv: List[str]) -> bool:
     n = normalize(argv)
-    return bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS
+    return (
+        bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS and _eval_subcmd(n) is None
+    )
+
+
+def _eval_subcmd(n: List[str]) -> Optional[int]:
+    """Vị trí lệnh con nhận script (`deno [cờ…] eval '…'`) trong argv đã chuẩn hoá; không có → None."""
+    m = INTERP_RE.fullmatch(n[0]) if n else None
+    sub = INTERP_EVAL_SUBCMDS.get(m[1]) if m else None
+    k = 1
+    while sub and k < len(n) and n[k].startswith("-"):
+        k += 1
+    return k if sub and n[k : k + 1] == [sub] else None
 
 
 def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
@@ -4367,16 +4537,27 @@ def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
 
 def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:
     """(script, thư mục nó chạy) — `cd .claude && python3 -c '…'` chạy trong `.claude` (AUD-SEC-085). Thân heredoc gắn
-    với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`)."""
+    với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`). Script qua stdin bằng
+    here-string (`python3 <<< '…'`) hay ống (`echo '…' | node`) cũng tính (D-105)."""
     out: List[Tuple[str, Optional[str]]] = []
     stdin_dirs: List[Optional[str]] = []
-    for c, here in _commands_with_cwd(tokens, cwd) if cwd else [(c, None) for c in split_commands(tokens)]:
+    placed = _commands_with_cwd(tokens, cwd)
+    for c, here in placed:
         n = normalize(c)
         if n and INTERP_RE.fullmatch(n[0]):
             flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
-            out += [(n[i + 1], here) for i in flags]
+            scripts = [n[i + 1] for i in flags]
+            k = _eval_subcmd(n)  # `deno eval [cờ…] '…'`: mọi đối số không phải cờ sau lệnh con (chặt: cả giá trị cờ)
+            scripts += [a for a in (n[k + 1 :] if k is not None else []) if a[:1] != "-" and a not in scripts]
+            out += [(s, here) for s in scripts]
         if _stdin_interp(c):
             stdin_dirs.append(here)
+            out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<"]
+    i = 0
+    for pipe in pipelines(tokens):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], [d for _, d in placed][i + 1 :]):
+            out += [(s, here) for s in feed or [] if _stdin_interp(down)]
+        i += len(pipe)
     dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
     return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp) for d in dirs]
 
@@ -4413,6 +4594,12 @@ def _balanced(text: str, start: int, opener: str, closer: str) -> str:
     return text[start:end]
 
 
+def _nfkc(script: str) -> str:
+    """Script chuẩn hoá NFKC trước khi che, quét lời gọi và trích literal (review #186 lần 3): Python chuẩn hoá định
+    danh theo NFKC (PEP 3131) nên `os.ｒemove`, `Path(…).ｗrite_text` toàn-rộng là lời gọi ghi thật."""
+    return unicodedata.normalize("NFKC", script)
+
+
 def _literal(m: "re.Match[str]") -> str:
     return ANSI_ESCAPE_RE.sub(_ansi_c_char, m.group(m.lastindex or 0))  # `\"`, `\\n` trong chuỗi nguồn → ký tự thật
 
@@ -4437,7 +4624,7 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     `'rm' + ' -rf ~'`) → lệnh shell; `subprocess.run([…])` → các phần tử ghép thành một lệnh. Chuỗi khác trong script
     (`print('…')`, đối số sau) là dữ liệu, không quét."""
     out: List[str] = []
-    for script in scripts:
+    for script in map(_nfkc, scripts):
         spans = [x.span() for x in STR_ANY_RE.finditer(script)]
         for m in EXEC_CALL_RE.finditer(script):
             if any(
@@ -4452,12 +4639,52 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     return out
 
 
+# ipython (review #186 lần 3, phần E): magic chạy shell — `!cmd`, `!!cmd`, `%sx cmd`, `%system cmd` (đầu dòng, sau thụt
+# lề, hoặc vế phải phép gán `x = !cmd`) và ô `%%bash`/`%%sh`/`%%script <shell>` (thân ô là phần còn lại của script).
+IPY_LINE_SHELL_RE = re.compile(r"(?:^|=)[ \t]*(?:!!?|%(?:sx|system)(?![\w.]))[ \t]*([^\n]*)", re.M)
+IPY_CELL_SHELL_RE = re.compile(
+    r"^[ \t]*%%(?:bash|sh|script[ \t]+(?:\S*/)?(?:ba|da|k|z)?sh)(?![\w.])[^\n]*\n(.*)", re.M | re.S
+)
+IPY_MAGIC_LINE_RE = re.compile(r"(?:^|=)[ \t]*(%[^\n]*)", re.M)  # mọi dòng magic `%…`/`%%…` (cả lạ)
+
+
+def _has_ipython(tokens: List[str]) -> bool:
+    """Lệnh có chạy ipython (script trong lệnh có thể chứa magic)."""
+    found = (INTERP_RE.fullmatch(n[0]) for n in map(normalize, split_commands(tokens)) if n)
+    return any(m and m[1] == "ipython" for m in found)
+
+
+def _ipython_shell_scripts(script: str) -> List[str]:
+    """Lệnh shell mà magic của ipython chạy, để quét bằng chính bộ quét lệnh như `sh -c`."""
+    script = _nfkc(script)
+    out = [m[1] for m in IPY_LINE_SHELL_RE.finditer(script) if m[1].strip()]
+    return out + [m[1] for m in IPY_CELL_SHELL_RE.finditer(script) if m[1].strip()]
+
+
+def _ipython_magic_words(script: str) -> List[str]:
+    """Từ trên các dòng magic `%…` (magic lạ như `%%writefile .env`, `%store x > f` không phân tích chắc được): là ứng
+    viên đường dẫn; script có magic không qua `ast.parse` nên không bao giờ chỉ đọc → nhắc đường dẫn canh là chặn."""
+    return [w for m in IPY_MAGIC_LINE_RE.finditer(_nfkc(script)) for w in _split_words(m[1])]
+
+
+def _ipython_nested(cmd: str, tokens: List[str], start: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """(lệnh shell từ magic, thư mục chạy) của mọi script trình thông dịch trong lệnh có ipython."""
+    if not _has_ipython(tokens):
+        return []
+    return [
+        (s, here) for script, here in _interp_scripts_at(cmd, tokens, start) for s in _ipython_shell_scripts(script)
+    ]
+
+
 def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
     (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
     tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
-    for script, here in _interp_scripts_at(cmd, tokens, cwd or root):
+    families = _interp_families(tokens, cwd or root)
+    ipython = _has_ipython(tokens)
+    for raw_script, here in _interp_scripts_at(cmd, tokens, cwd or root):
+        script = _nfkc(raw_script)  # `os.ｒemove` là `os.remove` với Python (định danh chuẩn hoá NFKC, PEP 3131)
         asks += [
             f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
             for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])
@@ -4465,35 +4692,506 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str]
         ]  # AUD-SEC-068: `shutil.rmtree("/home/x")`, perl `rmtree(...)`
         if RMTREE_RE.search(script) and HOME_EXPR_RE.search(script):  # `rmtree(Path.home())`, `expanduser("~")`
             asks.append("xoá đệ quy ngoài thư mục dự án (thư mục home — script trình thông dịch)")
-        if WRITE_HINT_RE.search(script):
-            asks += [a for raw in STR_LITERAL_RE.findall(script) if (a := _interp_literal_ask(script, raw, root, here))]
+        hint, ro = bool(WRITE_HINT_RE.search(script)), _ReadOnly(script, families)
+        asks += [
+            a
+            for raw in _script_literals(script, families) + (_ipython_magic_words(script) if ipython else [])
+            if (a := _interp_literal_ask(script, raw, root, here, hint, ro))
+        ]
     return asks
 
 
-def _interp_literal_ask(script: str, raw: str, root: str, here: Optional[str]) -> str:
-    """Câu hỏi cho chuỗi `raw` trong script có dấu hiệu ghi: là đối số đường dẫn của lời gọi ghi/xoá (trực tiếp hay qua
-    biến — AUD-SEC-084) vào hàng rào/cấu hình git/bí mật/bằng chứng → câu mang dấu chặn; chỉ nhắc tên file được canh →
-    hỏi thường; khác → ''."""
+def _script_literals(script: str, families: Optional[FrozenSet[str]] = None) -> List[str]:
+    """Chuỗi nguyên văn không khoảng trắng trong script (ứng viên đường dẫn): cả chuỗi lồng trong chuỗi (f-string
+    `f'{open(".env","w")}'`, nội suy Ruby `"#{File.delete('.env')}"`) — một tầng; chuỗi giữa hai nháy bất kỳ (chồng
+    lấn: f-string cùng nháy `f"{open(".env","w")}"` của 3.12+ cả khi guard chạy 3.11). Script là Python (cách xác định
+    như `_read_only_script`) và `ast.parse` qua → thêm mọi hằng str/bytes của AST, gồm phần hằng của f-string, escape
+    đã giải (`'\\x2eenv'` → `.env`) — review #186 lần 3. Lấy hợp, không thay thế."""
+    out = dict.fromkeys(STR_LITERAL_RE.findall(script))
+    out.update(dict.fromkeys(STR_OVERLAP_RE.findall(script)))
+    for m in LITERAL_RE.finditer(script):
+        v = m.group(m.lastindex or 0)
+        for x in [v, *(n.group(n.lastindex or 0) for n in LITERAL_RE.finditer(v))]:
+            if len(x) >= 2 and not any(ch.isspace() for ch in x):
+                out[x] = None
+    if not families or families == frozenset({"python"}):
+        out.update(dict.fromkeys(_ast_literals(script)))
+    return list(out)
+
+
+STR_OVERLAP_RE = re.compile(r"""(?<=['"])([^'"\s]{2,})(?=['"])""")  # mỗi vị trí thử một lần: tuyến tính theo nhánh
+
+
+def _ast_literals(script: str) -> List[str]:
+    """Hằng str/bytes (giải escape) trong AST của script Python; không phải Python hợp lệ → []."""
+    import ast
+
+    try:
+        tree = ast.parse(script)
+    except Exception:  # SyntaxError, ValueError (NUL), RecursionError…: không phải Python — regex vẫn chạy
+        return []
+    out: List[str] = []
+    for node in ast.walk(tree):
+        v = getattr(node, "value", None) if isinstance(node, ast.Constant) else None
+        if isinstance(v, bytes):
+            v = os.fsdecode(v)
+        if isinstance(v, str) and v:
+            out.append(v)
+    return out
+
+
+class _ReadOnly:
+    """Kết quả `_read_only_script` tính một lần cho mỗi script, chỉ khi có chuỗi là đường dẫn được canh."""
+
+    def __init__(self, script: str, families: FrozenSet[str]) -> None:
+        self.script = script
+        self.families = families
+        self.value: Optional[bool] = None
+
+    def __bool__(self) -> bool:
+        if self.value is None:
+            self.value = _read_only_script(self.script, self.families)
+        return self.value
+
+
+def _interp_families(tokens: List[str], cwd: Optional[str]) -> FrozenSet[str]:
+    """Họ trình thông dịch có trong lệnh (`python`, `node`, `perl`…): script trong lệnh có thể chạy bởi bất kỳ ai trong
+    số đó, nên chỉ coi là Python khi mọi trình thông dịch đều là Python (D-107)."""
+    found = (INTERP_RE.fullmatch(n[0]) for n in (normalize(c) for c, _ in _commands_with_cwd(tokens, cwd)) if n)
+    return frozenset(INTERP_FAMILY.get(m[1], m[1]) for m in found if m)
+
+
+def _interp_literal_ask(
+    script: str, raw: str, root: str, here: Optional[str], hint: bool = True, ro: object = False
+) -> str:
+    """Câu hỏi cho chuỗi `raw` trong script. Là hàng rào/cấu hình git/bí mật/bằng chứng (thử ở mọi thư mục canh khi
+    `here` không biết — D-106) → câu mang dấu chặn, TRỪ khi toàn script chỉ gồm thao tác đọc (`ro`, D-105: mặc định
+    chặn, không liệt kê API ghi). Cổng/năng lực mà script có dấu hiệu ghi (`hint`) → hỏi thường; khác → ''."""
     lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
-    target = _at(lit, here)
-    rel = rel_path(target, root)
-    kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
-    fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
-    if not (fence or git_hook or kind in GUARDED_KINDS):
-        return ""
-    direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
-    direct = direct or _alias_write(script, raw)  # AUD-SEC-084: qua biến/bí danh
-    if direct and fence:
-        return FENCE_WHY.format(f"{lit} — script trình thông dịch")
-    if direct and git_hook:  # AUD-SEC-083: như `>> .git/config`
-        return GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch")
-    if direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
-        return f"ghi file bí mật qua Bash (script trình thông dịch): {lit}"
-    if direct and kind == "evidence":  # ADR-0026: như ghi tay qua chuyển hướng
-        return f"ghi/xoá tay bằng chứng autopilot qua script trình thông dịch: {lit}"
-    if kind in GUARDED_KINDS:
+    for target in _where(lit, root, here):
+        rel = rel_path(target, root)
+        kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
+        fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
+        if not (fence or git_hook or kind in ("secret", "evidence")):
+            continue
+        # Mã lý do chính xác khi khớp API ghi đã biết; còn lại theo D-105: script không chỉ đọc → chặn như ghi
+        direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
+        direct = direct or _alias_write(script, raw)  # AUD-SEC-084: qua biến/bí danh
+        how = "script trình thông dịch" if direct else "script trình thông dịch không chỉ đọc — D-105"
+        if not (direct or not ro):
+            continue
+        if fence:
+            return FENCE_WHY.format(f"{lit} — {how}")
+        if git_hook:  # AUD-SEC-083: như `>> .git/config`
+            return GIT_HOOK_WHY.format(f"{lit} — {how}")
+        if kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
+            return f"ghi file bí mật qua Bash ({how}): {lit}"
+        return f"ghi/xoá tay bằng chứng autopilot qua {how}: {lit}"  # ADR-0026: như ghi tay qua chuyển hướng
+    kind = (
+        path_kind(rel_path(_at(lit, here), root), root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
+    )
+    if hint and kind in GUARDED_KINDS:
         return f"script trình thông dịch ghi/xoá {lit} ({kind}) — dùng đúng công cụ hoặc người duyệt"
     return ""
+
+
+# D-105: thao tác ĐỌC được phép trong script nhắc đường dẫn được canh. Mọi lời gọi khác (kể cả hàm tự viết, gọi qua
+# biến, `getattr`, `eval`), gọi không ngoặc ngoài từ khoá, gán thuộc tính, chuỗi nội suy/f-string có biểu thức, backtick,
+# tuỳ chọn `flag(s)`, mode ghi → script không chỉ đọc → chặn. Phân tích theo từ (không phải AST): đa ngôn ngữ, chặt.
+# Chống mượn tên: tên trong danh sách chỉ được GỌI (`print = os.remove`, `as open`, `{unlinkSync: open}` → chặn); gọi
+# trên biểu thức (`(os.remove)(…)`, `{…}.read(…)`), dunder, gán phần tử, đối tượng có giá trị là hàm → chặn. Hàm nhận
+# hàm gọi lại (`sorted(key=…)`, `JSON.parse(t, reviver)`, `json.dumps(default=…)`) không có trong danh sách hoặc bị
+# giới hạn đối số.
+RO_FUNCS = frozenset(
+    "open print len str int float bool repr list dict tuple set range enumerate zip isinstance sum any all exit Path "
+    "PurePath PurePosixPath PosixPath require puts file_get_contents file_exists is_file is_dir sorted min max".split()
+)
+RO_METHODS = frozenset(
+    "read readline readlines read_text read_bytes exists is_file is_dir stat lstat close open openSync readFileSync "
+    "existsSync statSync lstatSync createReadStream readlinkSync exist? exists? file? directory? strip lstrip rstrip "
+    "split splitlines startswith endswith decode encode lower upper keys values items join toString trim exit "
+    "ConfigParser get glob rglob iterdir update hexdigest".split()
+)
+RO_JSON = frozenset({"json.load", "json.loads", "json.dump", "json.dumps", "JSON.parse", "JSON.stringify"})
+RO_CHAINS = frozenset(
+    {"console.log", "pathlib.Path", "pathlib.PurePath", "os.listdir", "os.scandir", "os.walk", "ast.parse"}
+    | {"hashlib.sha256", "hashlib.md5"}
+)
+# Giới hạn đối số (review #186 lần 2, bớt chặn oan theo D-107): (tối đa đối số vị trí, từ khoá được phép) — chỗ nhận
+# hàm gọi lại (`key=`, `onerror=`, `default=` của json) không có. Khoá: tên gọi trần, chuỗi `a.b`, hay `.m` (phương thức).
+RO_ARG_RULES: Dict[str, Tuple[int, FrozenSet[str]]] = {
+    "sorted": (1, frozenset({"reverse"})),
+    "min": (10**6, frozenset({"default"})),
+    "max": (10**6, frozenset({"default"})),
+    "os.listdir": (1, frozenset()),
+    "os.scandir": (1, frozenset()),
+    "os.walk": (1, frozenset({"topdown", "followlinks"})),
+    ".glob": (1, frozenset({"recursive", "case_sensitive", "recurse_symlinks", "include_hidden", "root_dir"})),
+    ".rglob": (1, frozenset({"case_sensitive", "recurse_symlinks"})),
+    ".iterdir": (0, frozenset()),
+    "ast.parse": (3, frozenset({"filename", "mode", "type_comments", "feature_version"})),
+    "hashlib.sha256": (1, frozenset({"usedforsecurity"})),
+    "hashlib.md5": (1, frozenset({"usedforsecurity"})),
+    ".update": (1, frozenset()),
+    ".hexdigest": (0, frozenset()),
+    ".get": (2, frozenset()),
+}
+# `.get(` của thư viện mạng (`requests.get(url)`) không phải đọc dict: script nhắc mạng thì `.get` không chỉ đọc.
+RO_NET_RE = re.compile(
+    r"\b(?:requests|httpx|urllib\d?|urlopen|https?|aiohttp|socket|net|axios|fetch|ftplib|smtplib|LWP|HTTP|curl)\b"
+)
+# `os.path.<hàm>(`: chỉ đúng bên nhận `os.path` và hàm trong danh sách — `os.path.os.rmdir(` không phải (review #186 lần 2)
+RO_OS_PATH = frozenset(
+    "exists lexists isfile isdir islink ismount isabs join basename dirname split splitext splitdrive abspath realpath "
+    "normpath normcase relpath commonpath commonprefix expanduser expandvars getsize getmtime getatime getctime "
+    "samefile".split()
+)
+# Hàm trong danh sách đọc nhận hàm gọi lại → giới hạn số đối số (đủ để không còn chỗ cho hàm): Node `fs.stat(p, cb)`,
+# `fs.exists(p, cb)`, `fs.read(fd, cb)`, `fs.close(fd, cb)` (chỉ khi script có thể chạy bởi Node/Deno/Bun);
+# `ConfigParser(dict_type=…, converters=…, interpolation=…)` — không đối số.
+RO_JS_CALLBACK = frozenset({"stat", "lstat", "exists", "read", "close"})
+RO_ARGS_MAX = {**{n: 2 for n in RO_JS_CALLBACK}, "ConfigParser": 1}
+RO_ARG_NAMES = frozenset(  # lời gọi cần tách đối số để xét
+    {"open", "openSync", "require", *RO_ARGS_MAX, *(k.rsplit(".", 1)[-1] for k in RO_ARG_RULES)}
+)
+JSON_DUMPS_KWARGS = frozenset({"indent", "sort_keys", "ensure_ascii", "separators"})
+# Tên module/đối tượng mà danh sách cho phép dựa vào (`os.path.*`, `json.load`, `console.log`, `fs.readFileSync`):
+# chỉ được dùng làm bên nhận (`os.`) — gán lại (`console = {log: …}`) là mượn tên.
+RO_RECEIVERS = frozenset(
+    {"os", "json", "JSON", "console", "fs", "File", "io", "codecs", "sys", "process", "pathlib", "ast", "hashlib"}
+)
+RO_FS_MODULES = frozenset({"fs", "node:fs", "path", "node:path"})
+RO_PRINTERS = frozenset({"print", "puts"})  # in không ngoặc (`print "x"`, `puts File.read(…)`)
+# Từ khoá/toán tử chữ (Python, JS, Ruby, Perl, PHP) — đứng trước `(` hay trước từ khác không phải lời gọi hàm.
+RO_KEYWORDS = frozenset(
+    "if elif else while for in not and or is return import from as with lambda assert try except finally raise pass "
+    "None True False del global nonlocal yield async await class def const let var new typeof instanceof of function "
+    "throw catch case default break continue switch do then end unless until elsif begin rescue ensure nil true false "
+    "null undefined self this my our local use sub foreach eq ne lt gt le ge cmp echo".split()
+)
+READ_MODES = frozenset({"r", "rb", "rt", "br", "tr", "rs", "sr"})
+FS_RECEIVERS = frozenset({"fs", "File", "io", "codecs", "fsp", "promises"})  # `.open(path, mode)`: đường dẫn trước
+OPEN_KWARGS = frozenset({"encoding", "errors", "newline"})
+RO_MASK_RE = re.compile(r"\x01(\d+)\x02")
+RO_NEXT_LIT_RE = re.compile(r"[ \t]*\x01(\d+)\x02")
+RO_CALL_RE = re.compile(r"(\.\s*)?(?<![\w$])([A-Za-z_]\w*[?!]?)\s*\(")
+RO_BARE_CALL_RE = re.compile(r"(\.\s*)?(?<![\w$@%&])([A-Za-z_]\w*[?!]?)[ \t]+(?=([\x01$@\[\d]|[A-Za-z_]\w*))")
+RO_NAME_RE = re.compile(r"(?<![\w$@%&.])([A-Za-z_]\w*)(?=[ \t]*(.?))")
+# Từ khoá gắn tên (`as print`, `for open in`, `lambda print:`, `def open(`, `let open`) — tên trong danh sách đứng sau
+# là bị gán lại.
+RO_BINDERS_RE = re.compile(
+    r"\b(?:as|for|lambda|def|function|class|let|const|var|global|nonlocal|local|my|our|sub)[ \t]+(?:[\w$]+[ \t]*,[ \t]*)*$"
+)
+RO_DENY_RE = re.compile(
+    r"[`'\"]"  # nháy lẻ/backtick (Ruby/Perl chạy lệnh, JS template)
+    r"|(?:\$\{?\w+\}?|&\w+)\s*\(|->"  # gọi qua biến/tham chiếu (`$f(…)`, `&f(…)`, `$f->(…)`, `$o->m(…)`)
+    r"|\b(?:flags?|mode)\s*:"  # `{flag: 'w'}` của fs, Ruby `File.read(p, mode: 'w')`
+    r"|[.\]]\s*[A-Za-z_]?\w*\s*(?:[-+*/%|&^]|<<|>>|\*\*|//)?=(?![=~>])"  # gán thuộc tính/phần tử
+    r"|[)\]}]\s*\("  # gọi trên biểu thức
+    r"|(?!__(?:name|main|file)__)__\w+__"  # dunder (`__builtins__`, `__import__`, `__dict__`)
+    r"|[{,]\s*(?:[\w$]+|\x01\d+\x02)\s*:\s*[A-Za-z_$]"  # đối tượng/dict có giá trị là tên (hàm mượn tên)
+)
+RO_RECEIVER_RE = re.compile(r"([A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\.\s*$")
+RO_IMPORT_RE = re.compile(
+    r"(?m)(?:^|(?<=;))[ \t]*(?:from[ \t]+[\w.]+[ \t]+)?import[ \t]+[\w.]+(?:[ \t]*,[ \t]*[\w.]+)*"
+)
+RO_FS_REQUIRE_RE = re.compile(r"\b(?:const|let|var)\s+(?:fs|path)\s*=\s*require\(\x01(\d+)\x02\)")
+RO_ARG_SCANS = 256  # số lời gọi được tách đối số tối đa mỗi script (chống bậc hai) — hơn → coi là không chỉ đọc
+
+
+Masked = Optional[Tuple[str, List[Tuple[str, str]]]]
+# Bộ che chuỗi/comment (review #186 lần 2): che lệch là mã ghi thật nằm trong "chuỗi" → script bị coi là chỉ đọc. Python:
+# `tokenize` của thư viện chuẩn (đúng lexer của Python); lỗi tách → không chỉ đọc. Ngôn ngữ khác (D-107): chỉ che chuỗi
+# một dòng `'…'`/`"…"`; phần mã còn lại có ký tự mà bộ che không hiểu chắc (comment, regex, quote-like, heredoc, nháy dính
+# biến/tên) → không chỉ đọc.
+RO_FSTRING_DEPTH = 3  # độ sâu f-string lồng được kiểm đệ quy; sâu hơn → không chỉ đọc
+RO_SIMPLE_STR_RE = re.compile(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)\"""")
+RO_GENERIC_DENY_RE = re.compile(
+    r"[#/%]|<<|<\?|\?>"  # comment `#`, `//`, regex `/…/`, Ruby `%q{}`, heredoc `<<`, thẻ PHP
+    r"|[\w$?@&\\]\x01"  # nháy dính tên/ký hiệu: Perl `$'`, `pkg'name`, Ruby `?'`, tiền tố `rb'…'`
+)
+RO_PERL_QUOTE_RE = re.compile(r"(?<![\w$@%&])(?:qq|qw|qr|qx|q|m|s|tr|y)(?!\w)(?:\s*[^\w\s]|\s+\w)")
+RO_LUA_DENY_RE = re.compile(r"--|\[=*\[")  # Lua: comment `--`, chuỗi dài `[[…]]`/`[==[…]==]` (review #186 lần 3)
+RO_INTERP_RE = re.compile(r"[$@]|#\{")  # nội suy trong nháy kép: Perl `$h{…}`/`@a[…]`, PHP `{$o->m()}`, Ruby `#{…}`
+
+
+def _ro_mask(script: str, families: Optional[FrozenSet[str]] = None) -> Masked:
+    """Ngôn ngữ khác Python (D-107): chuỗi một dòng thay bằng `\\x01N\\x02`, danh sách (nháy, nội dung). Phần còn lại
+    có ký tự che không chắc, chuỗi nháy kép có nội suy, chuỗi là ống lệnh (`'|cmd'`) → None (không chỉ đọc)."""
+    lits: List[Tuple[str, str]] = []
+
+    def sub(m: "re.Match[str]") -> str:
+        lits.append((m[0][0], m[m.lastindex or 1]))
+        return f"\x01{len(lits) - 1}\x02"
+
+    masked = RO_SIMPLE_STR_RE.sub(sub, script)
+    perl = not families or "perl" in families
+    lua = not families or "lua" in families
+    if (
+        RO_GENERIC_DENY_RE.search(masked)
+        or (perl and RO_PERL_QUOTE_RE.search(masked))
+        or (lua and RO_LUA_DENY_RE.search(masked))
+        or any(q == '"' and RO_INTERP_RE.search(v) for q, v in lits)
+        or any(len(v.strip()) > 1 and "|" in (v.strip()[0], v.strip()[-1]) for _, v in lits)
+    ):
+        return None
+    return masked, lits
+
+
+def _ro_py_spans(script: str, depth: int) -> Optional[List[Tuple[int, int]]]:
+    """Vị trí (đầu, cuối) của chuỗi, f-string (trọn cả lồng) và comment theo `tokenize`; None khi không chắc: quá độ
+    sâu, `\\r` (vị trí token không chắc), ERRORTOKEN, token không khớp vị trí. Cú pháp sai/TokenError → ngoại lệ."""
+    import ast
+    import io
+    import tokenize as pytok
+
+    opens = {getattr(pytok, n) for n in ("FSTRING_START", "TSTRING_START") if hasattr(pytok, n)}
+    closes = {getattr(pytok, n) for n in ("FSTRING_END", "TSTRING_END") if hasattr(pytok, n)}
+    ast.parse(script)
+    toks = list(pytok.generate_tokens(io.StringIO(script).readline))
+    starts = list(itertools.accumulate((len(x) + 1 for x in script.split("\n")), initial=0))
+    spans: List[Tuple[int, int]] = []
+    seen: List[Tuple[int, str]] = []
+    level, begin = 0, 0
+    for t in toks:
+        a, b = starts[t.start[0] - 1] + t.start[1], starts[t.end[0] - 1] + t.end[1]
+        if t.type in opens:
+            begin, level = (begin if level else a), level + 1
+            seen.append((a, t.string))
+        elif t.type in closes:
+            level -= 1
+            seen.append((a, t.string))
+            spans += [(begin, b)] if not level else []
+        elif not level and t.type in (pytok.STRING, pytok.COMMENT):
+            spans.append((a, b))
+            seen.append((a, t.string))
+    bad = (
+        depth > RO_FSTRING_DEPTH
+        or "\r" in script
+        or any(t.type == pytok.ERRORTOKEN for t in toks)
+        or any(script[a : a + len(s)] != s for a, s in seen)
+    )
+    return None if bad else spans
+
+
+def _ro_fstring_ok(text: str, depth: int) -> bool:
+    """Mọi biểu thức trong f-string/t-string `text` chỉ đọc (kiểm đệ quy, tầng `depth + 1`)."""
+    import ast
+
+    tree = ast.parse(text, mode="eval")
+    exprs = [n for n in ast.walk(tree) if type(n).__name__ in ("FormattedValue", "Interpolation")]
+    return all(_read_only_script(ast.unparse(getattr(e, "value")), frozenset({"python"}), depth + 1) for e in exprs)
+
+
+def _ro_mask_py(script: str, depth: int = 0) -> Masked:
+    """Python: chuỗi (cả f-string) thay bằng `\\x01N\\x02`, comment bỏ đi — theo `tokenize`. Biểu thức trong f-string
+    kiểm đệ quy bằng `_read_only_script` (tối đa RO_FSTRING_DEPTH tầng). Không tách chắc được → None (không chỉ đọc)."""
+    try:
+        spans = _ro_py_spans(script, depth)
+        if spans is None:
+            return None
+        out: List[str] = []
+        lits: List[Tuple[str, str]] = []
+        i = 0
+        for a, b in spans:
+            out.append(script[i:a])
+            i, text = b, script[a:b]
+            if text[0] == "#":
+                continue
+            prefix = text[: len(text) - len(text.lstrip("rRbBfFuUtT"))]
+            q = 3 if text[len(prefix) : len(prefix) + 3] in ("'''", '"""') else 1
+            if set(prefix.lower()) & {"f", "t"} and not _ro_fstring_ok(text, depth):
+                return None
+            lits.append((prefix.lower().replace("f", "").replace("t", ""), text[len(prefix) + q : len(text) - q]))
+            out.append(f"\x01{len(lits) - 1}\x02")
+        out.append(script[i:])
+        return "".join(out), lits
+    except Exception:  # SyntaxError, TokenError, ValueError (NUL), RecursionError…: không phân tích được → chặt
+        return None
+
+
+def _ro_parens(masked: str) -> Optional[Dict[int, int]]:
+    """Vị trí `(` → `)` khớp với nó (chuỗi đã che nên chỉ đếm ngoặc); ngoặc lẻ/sai thứ tự → None."""
+    stack: List[int] = []
+    close: Dict[int, int] = {}
+    for i, ch in enumerate(masked):
+        if ch == "(":
+            stack.append(i)
+        elif ch == ")":
+            if not stack:
+                return None
+            close[stack.pop()] = i
+    return None if stack else close
+
+
+def _paren_args(masked: str, start: int, end: int) -> List[str]:
+    """Đối số cấp ngoài cùng trong `masked[start:end]` (phần giữa hai ngoặc của lời gọi), tách theo `,` ngoài ngoặc."""
+    args: List[str] = []
+    depth, cur = 0, start
+    for i in range(start, end):
+        depth += (masked[i] in "([{") - (masked[i] in ")]}")
+        if masked[i] == "," and not depth:
+            args.append(masked[cur:i].strip())
+            cur = i + 1
+    return [a for a in [*args, masked[cur:end].strip()] if a]
+
+
+def _ro_lit(a: str, lits: List[Tuple[str, str]]) -> Optional[str]:
+    m = RO_MASK_RE.fullmatch(a)
+    return lits[int(m[1])][1] if m else None
+
+
+def _ro_kwargs(args: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """(đối số vị trí, [(tên, giá trị)] của đối số từ khoá)."""
+    pos, kws = [], []
+    for a in args:
+        m = re.match(r"([A-Za-z_]\w*)\s*=(?!=)\s*", a)
+        if m:
+            kws.append((m[1], a[m.end() :]))
+        else:
+            pos.append(a)
+    return pos, kws
+
+
+def _ro_read_mode(a: str, lits: List[Tuple[str, str]]) -> bool:
+    return _ro_lit(a, lits) in READ_MODES or a in ("os.O_RDONLY", "O_RDONLY", "0")
+
+
+def _ro_open(kind: str, args: List[str], lits: List[Tuple[str, str]]) -> bool:
+    """`open` chỉ đọc: `kind` = path (đường dẫn trước, mode sau) | mode (`Path.open(mode)`) | os (`os.open(p, cờ)`)."""
+    pos, kws = _ro_kwargs(args)
+    for name, val in kws:  # từ khoá: chỉ encoding/errors/newline và mode đọc (`os.open`: cả flags) — không opener=…
+        if name in (("mode", "flag", "flags") if kind == "os" else ("mode",)):
+            if not _ro_read_mode(val, lits):
+                return False
+        elif name not in OPEN_KWARGS:
+            return False
+    if kind == "os":
+        return all(_ro_read_mode(a, lits) for a in pos[1:2]) and all(re.fullmatch(r"0o?[0-7]*", a) for a in pos[2:])
+    if any(lit[:1] == "|" or lit.rstrip()[-1:] == "|" for lit in (_ro_lit(a, lits) or "" for a in pos)):
+        return False  # Ruby/Perl `open('|lệnh')`, `open(F, 'lệnh|')`: chạy lệnh
+    if kind == "mode":
+        return all(_ro_lit(a, lits) in READ_MODES for a in pos[:1]) and all(re.fullmatch(r"-?\d+", a) for a in pos[1:])
+    # path: `open(p[, mode])`, `fs.openSync(p, 'r')`, perl `open(F, '<', p)`/`open(F, '<p')` — đối số vị trí thứ 3 trở
+    # đi của Python `open` (buffering … closefd, opener) không nhận: opener là hàm gọi lại (review #186 lần 2)
+    mode = _ro_lit(pos[1], lits) if len(pos) > 1 else "r"
+    if mode is None or not (mode in READ_MODES or re.fullmatch(r"<(?![&=+]).*", mode, re.S)):
+        return False
+    return len(pos) <= 2 or (mode == "<" and len(pos) == 3)
+
+
+def _ro_json(chain: str, args: List[str]) -> bool:
+    """JSON không kèm hàm gọi lại: `JSON.parse(t)`, `JSON.stringify(v[, null[, 2]])`, `json.load(s)(x)` không từ khoá,
+    `json.dumps(v, indent=…)` (không `default=`/`cls=`)."""
+    pos, kws = _ro_kwargs(args)
+    if chain == "JSON.stringify":
+        return pos[1:2] in ([], ["null"], ["undefined"])
+    if chain in ("json.dumps", "json.dump"):  # `json.dump(v, sys.stdout)`: chỉ ra stdout
+        want = [pos[0], "sys.stdout"] if chain == "json.dump" and pos else pos[:1]
+        return pos == want and len(pos) >= 1 and all(k in JSON_DUMPS_KWARGS for k, _ in kws)
+    return len(pos) == 1 and not kws
+
+
+def _ro_names_ok(masked: str, lits: List[Tuple[str, str]]) -> bool:
+    """Tên trong danh sách chỉ được gọi (hàm) hay làm bên nhận (module) — không gán lại/truyền làm giá trị. Câu
+    `import a, b` (không `as`) và `const fs = require('fs')` không tính là gán."""
+    body = RO_FS_REQUIRE_RE.sub(lambda m: " " if lits[int(m[1])][1] in RO_FS_MODULES else m[0], masked)
+    body = RO_IMPORT_RE.sub(" ", body)
+    for m in RO_NAME_RE.finditer(body):
+        name, nxt = m[1], m[2]
+        if name not in RO_FUNCS and name not in RO_RECEIVERS:
+            continue
+        if RO_BINDERS_RE.search(body[max(0, m.start() - 80) : m.start()]):
+            return False
+        if name in RO_RECEIVERS:
+            allowed = "."
+        elif name in RO_PRINTERS:
+            allowed = "($@<\x01" if not nxt or not (nxt.isalpha() or nxt == "_") else nxt  # perl `print <$fh>`
+        else:
+            allowed = "(\x01" if name == "require" else "("
+        if not nxt or nxt not in allowed:
+            return False
+        lm = RO_NEXT_LIT_RE.match(body, m.end()) if name == "require" else None
+        if lm and lits[int(lm[1])][1].startswith((".", "/")):
+            return False  # Ruby `require './x'`: chạy mã từ file khác
+    return True
+
+
+def _ro_args_ok(key: Optional[str], args: List[str]) -> bool:
+    """Đối số trong giới hạn của RO_ARG_RULES[key] (không có luật → đúng)."""
+    rule = RO_ARG_RULES.get(key or "")
+    pos, kws = _ro_kwargs(args)
+    return not rule or (len(pos) <= rule[0] and all(k in rule[1] for k, _ in kws))
+
+
+def _ro_call_ok(
+    name: str, recv: Optional[str], args: List[str], lits: List[Tuple[str, str]], flags: FrozenSet[str] = frozenset()
+) -> bool:
+    """Một lời gọi thuộc danh sách đọc: `recv` None = gọi trần `f(…)`, "" = phương thức trên biểu thức (`).m(`).
+    `flags`: `js` — script có thể chạy bởi Node/Deno/Bun (`fs.stat(p, cb)`… nhận hàm gọi lại); `py` — chỉ Python
+    (`.update` của hashlib/dict); `net` — script nhắc thư viện mạng (`.get` không phải đọc dict)."""
+    chain = f"{recv}.{name}" if recv else name
+    if name in ("open", "openSync"):
+        path_first = recv is None or name == "openSync" or recv in FS_RECEIVERS
+        return _ro_open("os" if recv == "os" else "path" if path_first else "mode", args, lits)
+    if chain in RO_JSON:
+        return _ro_json(chain, args)
+    if name == "ConfigParser" or ("js" in flags and name in RO_JS_CALLBACK):
+        bare_ok = recv is not None or name == "ConfigParser"
+        return bare_ok and len(args) < RO_ARGS_MAX[name]  # `ConfigParser(dict_type=…)`, `fs.stat(p, cb)`: hàm gọi lại
+    if (name == "update" and "py" not in flags) or (name == "get" and "net" in flags):
+        return False
+    if not _ro_args_ok(chain if chain in RO_ARG_RULES or recv is None else f".{name}", args):
+        return False  # `sorted(key=…)`, `os.walk(onerror=…)`: hàm gọi lại
+    if recv is not None:
+        return name in RO_METHODS or chain in RO_CHAINS or (recv == "os.path" and name in RO_OS_PATH)
+    if name not in RO_FUNCS and name not in RO_KEYWORDS:
+        return False
+    module = (_ro_lit(args[0], lits) or "") if name == "require" and args else "fs"
+    return bool(module) and not module.startswith((".", "/"))  # `require('./x')`, `require(x)`: mã từ file khác
+
+
+def _ro_calls_ok(
+    masked: str, lits: List[Tuple[str, str]], close: Dict[int, int], flags: FrozenSet[str] = frozenset()
+) -> bool:
+    """Mọi lời gọi `f(…)`/`x.m(…)` thuộc danh sách đọc; `open` chỉ với mode đọc; JSON/hàm khác không hàm gọi lại."""
+    scans = 0
+    for m in RO_CALL_RE.finditer(masked):
+        name, recv = m[2], None
+        if m[1]:
+            recv_m = RO_RECEIVER_RE.search(masked[max(0, m.start() - 200) : m.start() + 1])
+            recv = re.sub(r"\s+", "", recv_m[1]) if recv_m else ""
+        special = name in RO_ARG_NAMES or f"{recv}.{name}" in RO_JSON
+        scans += special
+        if scans > RO_ARG_SCANS:
+            return False
+        args = _paren_args(masked, m.end(), close[m.end() - 1]) if special else []
+        if not _ro_call_ok(name, recv, args, lits, flags):
+            return False
+    return True
+
+
+def _read_only_script(script: str, families: Optional[FrozenSet[str]] = None, depth: int = 0) -> bool:
+    """Toàn script chỉ gồm thao tác đọc trong danh sách cho phép (D-105). Không phân tích được → False (chặt).
+    `families` = họ trình thông dịch chạy script (`python`, `node`, `perl`…): chỉ `{python}` → che bằng `tokenize`;
+    khác/rỗng → bộ che chung chặt (D-107); None (không truyền) → script Python hợp lệ thì như Python."""
+    python = families == frozenset({"python"})
+    found = _ro_mask_py(script, depth) if python or families is None else None
+    py = found is not None
+    found = found if python else (found or _ro_mask(script, families))
+    if found is None:
+        return False
+    masked, lits = found
+    close = _ro_parens(masked)
+    if close is None or RO_DENY_RE.search(masked):
+        return False  # ngoặc lẻ, nháy lẻ, backtick, gọi qua biến, tuỳ chọn flag, gán, gọi trên biểu thức
+    for m in RO_BARE_CALL_RE.finditer(masked):  # gọi không ngoặc: `unlink '.env'`, `File.delete '.env'`
+        name, nxt = m[2], m[3]
+        if name not in RO_KEYWORDS and nxt not in RO_KEYWORDS and name not in (*RO_PRINTERS, "require"):
+            return False
+    js = not families or bool(families & {"node", "deno", "bun"})
+    flags = frozenset(f for f, on in (("js", js), ("py", py), ("net", bool(RO_NET_RE.search(script)))) if on)
+    return _ro_names_ok(masked, lits) and _ro_calls_ok(masked, lits, close, flags)
 
 
 # Đường dẫn là đối số của chính lời gọi ghi/xoá (`open('.env','w')`, `os.remove('…')`, `Path('…').write_text(`,
@@ -4503,10 +5201,18 @@ DIRECT_WRITE_FMT = (
     r"open\(\s*{q}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
     r"|(?:\bos\.(?:remove|unlink|rename|replace|truncate)|\bshutil\.\w+|writeFile\w*|appendFile\w*|unlinkSync|rmSync"
     r"|renameSync|copyFile\w*|File\.write|IO\.write|file_put_contents|\bunlink)\(\s*(?:[^)]*,\s*)?{q}"
-    r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch|open)\("
-    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(`/`.open(` của
-    # hàm khác (str) không phải ghi, chỉ nhận với `Path`
+    r"|Path\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rename|replace|touch)\("
+    # AUD-SEC-084: bí danh của Path (`from pathlib import Path as P; P('…').write_text(`) — `.replace(` của hàm khác
+    # (str) không phải ghi, chỉ nhận với `Path`
     r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\("
+    # AUD-SEC-089: `Path('…').open('a')` chỉ là ghi khi có mode ghi — `.open()`/`.open('r')` là đọc
+    r"|\b[A-Za-z_][\w.]*\(\s*{q}\s*\)\s*\.open\(\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"
+    # AUD-SEC-089: luồng ghi; `os.open` với cờ ghi; `fs.openSync(…, 'a'|'r+'|số)`; liên kết/đổi quyền/chủ (như đường
+    # shell `ln -s`/`chmod` bị chặn) — mọi vị trí đối số, gồm cả đích của `symlink(src, dst)`
+    r"|\bcreateWriteStream\(\s*{q}"
+    r"|\bos\.open\(\s*{q}\s*,[^)]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b"
+    r"|\bopen(?:Sync)?\(\s*{q}\s*,\s*(?:['\"][^'\"]*[wa+]|[^)'\"]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b)"
+    r"|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?\(\s*(?:[^)]*,\s*)?{q}"
     r"|\b(?:unlink|rename|truncate)[ \t]+(?:[^;\n)]*,[ \t]*)?{q}"  # perl/ruby/php gọi không ngoặc: `unlink ".autopilot/x"`
     r"|\bopen[ \t]*\(?[^,;\n]*,[ \t]*['\"]\+?(?:>|>>|w|a)['\"][ \t]*,[ \t]*{q}"  # perl `open(F, '>', '…')`
     # AUD-SEC-074: `py_compile.compile(f, cfile='…')`, `p.compile(f, '…')`, `compile_dir(d, …)`, `sys.pycache_prefix = '…'`
@@ -4532,7 +5238,9 @@ ALIAS_WRITE_FMT = (
     r"open\(\s*{n}\s*,\s*(?:mode\s*=\s*)?['\"][rbt]?[wax+]"  # python/ruby `open(f, 'w')`, `File.open(f, 'a')`
     r"|(?:writeFile\w*|appendFile\w*|unlinkSync|rmSync|truncate\w*|File\.write|IO\.write|file_put_contents|\bunlink"
     r"|\bos\.(?:remove|unlink|truncate))\(\s*{n}\s*[,)]"  # đối số đầu là đường dẫn
-    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"
+    r"|(?:\bos\.(?:rename|replace)|\bshutil\.\w+|renameSync|copyFile\w*|\brename"
+    r"|\b(?:symlink|link|l?chmod|l?chown)(?:Sync)?|\bcreateWriteStream)\(\s*(?:[^,()]*,\s*)?{n}\s*[,)]"  # AUD-SEC-089
+    r"|\bos\.open\(\s*{n}\s*,[^)]*\bO_(?:WRONLY|RDWR|APPEND|CREAT|TRUNC)\b"
     r"|{n}\s*\.\s*(?:write_text|write_bytes|unlink|rmdir|rename|touch|chmod)\(|{n}\s*\.\s*open\(\s*['\"][rbt]?[wax+]"
     r"|\bopen\s*\(?[^;\n]*?['\"]\+?>{{1,2}}['\"]\s*,\s*{n}"  # perl `open(my $h, '>', $f)`
     r"|\bopen\s*\(?[^,;\n]*,\s*['\"]\+?>{{1,2}}\s*{n}"  # perl 2 đối số `open(F, ">$f")`
@@ -4809,6 +5517,8 @@ def bash_decision(
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
+    if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
+        cwd = cwd or root
     budget = budget or ScanBudget()
     cmd = clean_text(cmd)
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
@@ -4842,7 +5552,7 @@ def bash_decision(
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
-    commands = _commands_with_cwd(tokens, cwd or root)
+    commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
