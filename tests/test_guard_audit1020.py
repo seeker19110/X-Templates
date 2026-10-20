@@ -52,7 +52,8 @@ class InterpGitConfigTest(unittest.TestCase):
         for cmd in (
             "python3 -c \"print(open('.git/config').read())\"",
             "python3 -c \"import configparser; c=configparser.ConfigParser(); c.read('.git/config')\"",
-            "python3 -c \"open('out.txt','w').write(open('.git/config').read())\"",
+            # D-105 (review #186): đọc `.git/config` rồi ghi file khác không còn là "chỉ đọc" → chặn, xem
+            # test_guard_review186.InterpDefaultDenyTest
             "node -e \"console.log(require('fs').readFileSync('.git/config','utf8'))\"",
         ):
             with self.subTest(cmd=cmd):
@@ -163,22 +164,32 @@ class InterpAliasWriteTest(unittest.TestCase):
                 self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
 
     def test_guard_interp_alias_write_controls(self):
-        """Đối chứng (không chặn oan): chỉ đọc file bí mật, ghi file khác mà nhắc tên `.env`/hook trong chuỗi in ra hay
-        nội dung, đổi chữ trong tài liệu, biến không tới lời gọi ghi."""
+        """Đối chứng (không chặn oan): chỉ đọc file bí mật, tên không phải file canh (`.env.example`)."""
         for cmd in (
             "python3 -c \"f='.env'; print(open(f).read())\"",
             "python3 -c \"import os; f='.env'; print(os.path.exists(f))\"",
-            "python3 -c \"print('.env'); open('out.txt','w').write('x')\"",
-            "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\"",
-            "python3 -c \"n='.env'; open('README.md','w').write('Đặt khoá vào ' + n)\"",
-            "python3 -c \"from pathlib import Path; p=Path('README.md'); old='.claude/hooks/guard.py'; "
-            "p.write_text(p.read_text().replace(old, 'hooks/guard.py'))\"",
-            "node -e \"const f='.env'; const fs=require('fs'); fs.writeFileSync('out.txt', 'see ' + f)\"",
             "python3 -c \"src='.env.example'; open('notes.txt','w').write(src)\"",
-            "python3 -c \"f='.env'; data=open(f).read(); open('copy.txt','w').write(str(len(data)))\"",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_interp_mention_and_write_other_denied(self):
+        """D-105 (review #186): script nhắc đường dẫn được canh mà có thao tác ngoài danh sách đọc (ở đây: ghi file
+        khác) → chặn theo mã của đường dẫn. Trước D-105 các ca này là đối chứng cho qua; đổi theo quyết định, ghi ở
+        CHANGELOG (chặn oan đã biết)."""
+        cases = {
+            "python3 -c \"print('.env'); open('out.txt','w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"f='.env'; print('bỏ qua', f); open('out.txt','w').write('x')\"": "SECRET_WRITE",
+            "python3 -c \"n='.env'; open('README.md','w').write('Đặt khoá vào ' + n)\"": "SECRET_WRITE",
+            "python3 -c \"from pathlib import Path; p=Path('README.md'); old='.claude/hooks/guard.py'; "
+            "p.write_text(p.read_text().replace(old, 'hooks/guard.py'))\"": "HOOK_BYPASS",
+            "node -e \"const f='.env'; const fs=require('fs'); fs.writeFileSync('out.txt', 'see ' + f)\"": "SECRET_WRITE",
+            "python3 -c \"f='.env'; data=open(f).read(); open('copy.txt','w').write(str(len(data)))\"": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
 
 
 class CdRedirectFlagsTest(unittest.TestCase):

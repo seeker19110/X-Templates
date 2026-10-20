@@ -52,6 +52,7 @@ class CdUnresolvedTest(unittest.TestCase):
             "cd $X && echo x > $PWD/settings.json": "HOOK_BYPASS",
             "cd - && echo x > ${CLAUDE_PROJECT_DIR}/.claude/settings.json": "HOOK_BYPASS",
             # đường script và shell lồng cũng theo cwd không biết
+            "cd $X && python3 -c \"open('settings.json','w')\"": "HOOK_BYPASS",
             "cd $X && bash -c 'echo x > guard.py'": "HOOK_BYPASS",
             "popd; echo x > settings.local.json": "HOOK_BYPASS",
         }
@@ -64,6 +65,8 @@ class CdUnresolvedTest(unittest.TestCase):
         """AUD-SEC-090: `cd "$PWD/…"` (thư mục không biết) và đường dẫn trong phần tử list nay bị chặn."""
         cases = {
             'cd "$PWD/.claude" && echo x > settings.json': "HOOK_BYPASS",
+            "python3 -c \"open(['.env'][0],'w')\"": "SECRET_WRITE",
+            "python3 -c \"d={'p': '.git/config'}; open(d['p'],'a')\"": "HOOK_BYPASS",
         }
         for cmd, code in cases.items():
             with self.subTest(cmd=cmd):
@@ -102,6 +105,146 @@ class CdUnresolvedTest(unittest.TestCase):
         """Chuyển hướng đặt đầu lệnh không che lệnh thật (`>/dev/null rm -rf ~`)."""
         res = policy(">/dev/null rm -rf ~")
         self.assertEqual(res["decision"], "deny", res)
+
+
+class InterpDefaultDenyTest(unittest.TestCase):
+    """D-105: script trình thông dịch nhắc đường dẫn được canh mà không chỉ gồm thao tác đọc → chặn theo mã của đích."""
+
+    def test_guard_interp_default_deny(self):
+        cases = {
+            "python3 -c \"import os; os.open('.git/hooks/pre-commit',577)\"": "HOOK_BYPASS",
+            "node -e \"require('fs').openSync('.git/hooks/pre-commit',1)\"": "HOOK_BYPASS",
+            "node -e \"require('fs').rename('/tmp/a','.git/hooks/pre-commit',()=>{})\"": "HOOK_BYPASS",
+            "node -e \"require('fs').cpSync('/tmp/a','.claude/settings.json')\"": "HOOK_BYPASS",
+            "node -e \"require('fs').truncateSync('.env')\"": "SECRET_WRITE",
+            "ruby -e \"File.rename('/tmp/a','.git/config')\"": "HOOK_BYPASS",
+            "ruby -e \"File.delete('.autopilot/verified.json')\"": "EVIDENCE_HANDWRITE",
+            "ruby -e \"File.binwrite('.git/config','x')\"": "HOOK_BYPASS",
+            "ruby -e \"require 'fileutils'; FileUtils.cp('/tmp/a','.claude/settings.json')\"": "HOOK_BYPASS",
+            "ruby -e \"require 'fileutils'; FileUtils.mv('/tmp/a','.env')\"": "SECRET_WRITE",
+            "ruby -e \"File.delete '.env'\"": "SECRET_WRITE",
+            "perl -e \"rename('/tmp/a','.git/config')\"": "HOOK_BYPASS",
+            "perl -e \"use File::Copy; copy('/tmp/a','.env')\"": "SECRET_WRITE",
+            "perl -e \"use File::Copy; move('/tmp/a','.claude/hooks/guard.py')\"": "HOOK_BYPASS",
+            "php -r \"copy('/tmp/a','.env');\"": "SECRET_WRITE",
+            "php -r \"rename('/tmp/a','.git/hooks/pre-commit');\"": "HOOK_BYPASS",
+            "python3 -c \"import tarfile; tarfile.open('/tmp/a.tar').extractall('.git/hooks')\"": "HOOK_BYPASS",
+            "python3 -c \"import sqlite3; sqlite3.connect('.autopilot/x.db')\"": "EVIDENCE_HANDWRITE",
+            "python3 -c \"import os; os.utime('.git/hooks/pre-commit')\"": "HOOK_BYPASS",
+            "python3 -c \"import os; os.makedirs('.claude/hooks/x')\"": "HOOK_BYPASS",
+            "python3 -c \"import logging; logging.FileHandler('.env')\"": "SECRET_WRITE",
+            # dạng lách allowlist: mode biến, gọi gián tiếp, f-string, nội suy, bí danh hàm, gán thuộc tính
+            "python3 -c \"m='w'; open('.env', m)\"": "SECRET_WRITE",
+            "python3 -c \"from pathlib import Path; m='w'; p=Path('.env'); p.open(m)\"": "SECRET_WRITE",
+            "python3 -c \"import os; getattr(os,'remove')('.env')\"": "SECRET_WRITE",
+            "python3 -c \"o=open; o('.env','w')\"": "SECRET_WRITE",
+            'python3 -c "print(f\'{open(\\".env\\",\\"w\\")}\')"': "SECRET_WRITE",
+            "python3 -c \"import sys; sys.pycache_prefix='.autopilot'\"": "EVIDENCE_HANDWRITE",
+            "node -e \"require('fs').readFileSync('.env',{flag:'w+'})\"": "SECRET_WRITE",
+            "node -e \"console.log(`${require('fs').unlinkSync('.env')}`)\"": "SECRET_WRITE",
+            'ruby -e "puts \\"#{File.delete(\'.env\')}\\""': "SECRET_WRITE",
+            "python3 -c \"print(open('.env').read()); import requests; requests.get('https://x')\"": "SECRET_WRITE",
+            "python3 -c \"open('out.txt','w').write(open('.git/config').read())\"": "HOOK_BYPASS",
+            "python3 - <<'PY'\nimport shutil\nshutil.copy('/tmp/a', '.claude/settings.json')\nPY": "HOOK_BYPASS",
+            "python3 -c \"open('.env', 'r', 0, opener=x)\"": "SECRET_WRITE",
+            "python3 -c \"import os; os.utime('.git/config'); os.utime('.env')\"": "HOOK_BYPASS",
+            # script qua stdin: here-string, ống vào trình thông dịch
+            "python3 <<< \"import os; os.utime('.env')\"": "SECRET_WRITE",
+            "echo \"require('fs').cpSync('/tmp/a','.claude/settings.json')\" | node": "HOOK_BYPASS",
+            "cd .autopilot && printf '%s' \"import os; os.utime('verified.json')\" | python3": "EVIDENCE_HANDWRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_interp_read_only_passes(self):
+        for cmd in (
+            "python3 -c \"print(open('.env').read())\"",
+            "python3 -c \"print(open('.env', 'rb').read())\"",
+            "python3 -c \"print(open('.env', mode='r', encoding='utf-8').read())\"",
+            "python3 -c \"import json; print(json.load(open('.claude/settings.json'))['hooks'])\"",
+            "python3 -c \"import json; d = json.loads(open('.claude/settings.json').read()); print(len(d))\"",
+            "python3 -c \"from pathlib import Path; print(Path('.env').read_text().splitlines())\"",
+            "python3 -c \"from pathlib import Path; p = Path('.autopilot/verified.json'); print(p.exists(), p.is_file())\"",
+            "python3 -c \"import os; print(os.path.exists('.git/hooks/pre-commit'), os.stat('.env').st_size)\"",
+            "python3 -c \"from pathlib import Path; print(Path('.env').open('rb').read())\"",
+            "python3 -c \"import os\nif os.path.isfile('.env'):\n    print('ok')  # đọc .env\n\"",
+            "node -e \"console.log(require('fs').readFileSync('.claude/settings.json','utf8'))\"",
+            "node -e \"const fs = require('fs'); console.log(fs.existsSync('.env'), fs.statSync('.env').size)\"",
+            "node -e \"require('fs').lstatSync('.git/hooks/pre-commit')\"",
+            "ruby -e \"puts File.read('.env')\"",
+            "ruby -e \"puts File.exist?('.env')\"",
+            "python3 -c \"open('out.txt','w').write('x')\"",
+            "python3 -c \"print('.env.example')\"",
+            "python3 -c \"import requests; requests.get('https://example.com')\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_read_only_script_helper(self):
+        ro = guard._read_only_script
+        self.assertTrue(ro("print(open('.env').read())"))
+        self.assertFalse(ro("print(open('.env').read()"))  # ngoặc lẻ: không phân tích được
+        self.assertFalse(ro("x = 'a"))  # nháy lẻ
+        self.assertFalse(ro("unlink '.env'"))  # gọi không ngoặc
+        self.assertFalse(ro("os.remove('.env')"))
+        self.assertTrue(ro("import os  # remove later\nprint(os.path.exists('.env'))"))
+        self.assertTrue(ro("print(open('.env').read())  # đọc"))
+        self.assertFalse(ro("x) + open('.env'"))  # ngoặc sai thứ tự
+        # perl/ruby: đọc theo mode `<`, mở không mode; ghi/ống lệnh thì không
+        self.assertTrue(ro('open(F, "<.autopilot/state.json")'))
+        self.assertTrue(ro("open(my $fh, '<', '.env'); print <$fh>"))
+        self.assertTrue(ro("puts File.open('.env').read"))
+        self.assertTrue(ro("print(open('.env', 'r', -1).read())"))
+        self.assertTrue(
+            ro("const fs = require('fs'); console.log(JSON.stringify(JSON.parse(fs.readFileSync('.env')), null, 2))")
+        )
+        self.assertTrue(
+            ro("import json\nif __name__ == '__main__':\n    print(json.dumps(json.load(open('.env')), indent=2))")
+        )
+        for bad in (
+            "open(F, '>', '.env')",
+            "open(F, '<&STDIN')",
+            "open('|touch .env')",
+            "open(F, 'cat .env|')",
+            "File.open('.env', 'w')",
+            "open('.env', 'r', 'x')",
+            "open('.env', m)",
+            "open('.env', opener=o)",
+            "Path('.env').open('r', 'x')",
+            "import os; os.open('.env', os.O_RDONLY, 'x')",
+            "import os; os.open('.env', flags=os.O_WRONLY)",
+            # mượn tên/hàm gọi lại
+            "from os import remove as print; print('.env')",
+            "import shutil as os; print(os.path.exists('.env'))",
+            "print = __import__('os').remove",
+            "x, print = 1, 2; print('.env')",
+            "for open in [1]: open('.env')",
+            "const {unlinkSync: open} = require('fs'); open('.env')",
+            "const fs = require('child_process'); fs.existsSync('.env')",
+            "console = 1; console.log('.env')",
+            "({readFileSync: require('fs').unlinkSync}).readFileSync('.env')",
+            "[1].forEach(f => f('.env'))",
+            "(os.remove)('.env')",
+            "d = {}; d['.env'] = 1",
+            "JSON.parse('{\".env\":0}', require('fs').unlinkSync)",
+            "JSON.stringify({'.env': 1}, require('fs').unlinkSync)",
+            "import json; json.loads('[]', object_hook=print); print('.env')",
+            "import json; json.dumps(1, default=print); print('.env')",
+            "require('./evil'); print('.env')",
+            "require x; print('.env')",
+            "require './evil'\nputs '.env'",
+            "puts\n'.env'",
+            "$f('.env')",
+            "$o->unlink('.env')",
+            "File.delete '.env'",
+            "x = 1 / 2 # ; os.remove('.env')",
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(ro(bad))
+        # chống bậc hai: quá nhiều lời gọi cần tách đối số → coi là không chỉ đọc
+        self.assertFalse(ro("print(" + "open('.env'), " * (guard.RO_ARG_SCANS + 1) + "1)"))
 
 
 if __name__ == "__main__":
