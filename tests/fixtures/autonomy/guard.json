@@ -4255,6 +4255,373 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-audit1020c-python-Ic-exec",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -Ic \"import os; os.system('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-python-c-attached-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -c\"open('.claude/settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-node-eval-eq",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "node --eval=\"require('child_process').execSync('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-uv-run-python-c",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "uv run python -c \"import os; os.system('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-conda-run-python-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "conda run -n x python -c \"open('.claude/settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-uv-run-pytest",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "uv run python -m pytest"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-python-Ic-print",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -Ic \"print(1)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-dollar-in-quotes",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && echo \"$(echo x > settings.json)\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-script-qc",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && script -qc 'echo x > settings.json' /dev/null"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-git-flock-config",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .git && flock /tmp/l sh -c 'echo \"[core]\" >> config'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-autopilot-script",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .autopilot && script -qc 'echo {} > verified.json' /dev/null"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-procsub",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd .claude && bash <(echo 'echo x > settings.json')"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-docs-dollar",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd docs && echo \"$(date)\" > out.txt"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-tests-flock",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-094"
+   ],
+   "input": {
+    "command": "cd tests && flock /tmp/l python3 -m unittest -q"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-tilde-plus-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "echo {} > ~+/.autopilot/verified.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-tilde-plus-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~+/.autopilot && echo {} > verified.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-audit1020c-cd-tilde-minus-settings",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~- && echo x > settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-source-stdin-herestring",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": "source /dev/stdin <<< 'echo x > .claude/settings.json'"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-dot-stdin-heredoc",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": ". /dev/stdin <<'E'\necho x > .claude/settings.json\nE"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-ls-tilde-plus",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "ls ~+/docs"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-cd-tilde-plus-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-097"
+   ],
+   "input": {
+    "command": "cd ~+/docs && echo x > out.md"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-source-venv",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-098"
+   ],
+   "input": {
+    "command": "source .venv/bin/activate"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec091-mask-marker-then-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-091"
+   ],
+   "input": {
+    "command": "node -e \"require(\u00019\u0002);'.env'\"; echo x > .claude/settings.json"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec091-mask-marker-then-destroy",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-091"
+   ],
+   "input": {
+    "command": "perl -e \"open(\u00019\u0002);'.env'\"; gh repo delete o/r --yes"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-rm-pwd-parent",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf $PWD/.."
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-rm-tilde-plus",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf ~+"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec099-control-rm-pwd-build",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-099"
+   ],
+   "input": {
+    "command": "rm -rf $PWD/build"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

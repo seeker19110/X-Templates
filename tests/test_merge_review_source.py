@@ -139,6 +139,30 @@ class MergeCheckReviewStepTest(unittest.TestCase):
         )
         self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[0], 0)  # review cuối ở head là sạch
 
+    def test_local_blocking_same_second(self):
+        """AUD-XFEAT-018: hai bản ghi cùng giây ở cùng head — bản ghi SAU trong sổ là kết luận (như `pr next` lấy
+        `local[-1]`); `max(at)` từng lấy bản đầu nên sạch-rồi-chặn bỏ qua review chặn."""
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+        old = [mark(True, at="2026-10-20T09:00:00Z")]
+        at = "2026-10-20T10:00:00+00:00"
+        self.seed([{**mark(True), "at": at}, {**mark(False), "at": at}])
+        self.assertEqual(self.check_json(std(xtReviews=old))[1]["review"], "blocking")
+        self.seed([{**mark(False), "at": at}, {**mark(True), "at": at}])
+        self.assertEqual(self.check_json(std(xtReviews=old))[0], 0)
+
+    def test_local_blocking_corrupt(self):
+        """AUD-CODE-019: sổ hỏng (`reviews` không phải list, phần tử lạ) → bỏ qua sổ như `read_reviews` hứa, không văng."""
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+        for bad in (5, "abc", {"head": HEAD}, None, [None, 1, "x"]):
+            with self.subTest(reviews=bad):
+                xt._write_reviews(self.base, {"7": {"reviews": bad}})
+                self.assertEqual(self.check_json(std(xtReviews=[mark(True)]))[0], 0)
+                self.assertEqual(xt.with_published({"reviews": bad}, [mark(True)])["local_reviews"], [])
+        xt._write_reviews(self.base, {"7": {"reviews": 5}})  # `pr reviewed` ghi đè sổ hỏng, không văng
+        rc, _, _ = run_main("pr", "reviewed", "--pr", "7", "--head", HEAD, "--blocking", "--no-publish", *MODELS)
+        self.assertEqual(rc, 0)
+        self.assertEqual([r["clean"] for r in xt.read_reviews(self.base)["7"]["reviews"]], [False])
+
     def test_merge_gate_and_steward_keep_published_source(self):
         """`merge-gate`/steward chạy ở CI (không có sổ cục bộ) — giữ nguồn dấu đã đăng, không đổi hành vi (D-104)."""
         commit_base_xt(self.base, "merge_autonomy: L3\ndelivery_phase: build\n")
