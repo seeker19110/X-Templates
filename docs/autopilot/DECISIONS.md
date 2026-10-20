@@ -762,3 +762,10 @@
 - Chọn: fail-closed: phần mã còn lại có # / % << quote-like Perl… thì coi là không chỉ đọc
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: che sai từng làm lọt ghi thật (review #186 lần 2); chặn oan chỉ khi script nhắc đường dẫn canh, agent còn Edit/Write
 - Đường lùi: cho comment # đầu dòng
+
+### D-108 · 2026-10-20T13:04:06+00:00 · Duyệt PLAN-3.11 (audit delta f36ea90..0afa30d → sửa 🔴/🟠 → quét lại → release-check)
+
+- Phương án: (1) Audit delta theo nhóm bị chạm tại 0afa30d, sửa, quét lại theo diff bản sửa · (2) Chỉ cập nhật SHA quét của sổ sang 0afa30d dựa vào review PR #185/#186
+- Chọn: Audit delta theo nhóm bị chạm tại 0afa30d, sửa, quét lại theo diff bản sửa
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: release-check đòi audit phủ mã đổi; #185/#186 sửa guard ~1000 dòng — review PR không thay audit theo nhóm (SEC-088/089 chỉ lộ ra ở review lần 2); phương án 2 là lời khai
+- Đường lùi: dừng sau T-1601, giữ báo cáo; cập nhật SHA sổ theo PR review
