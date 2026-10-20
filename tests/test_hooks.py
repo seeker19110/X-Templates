@@ -1527,11 +1527,12 @@ FAST_PR = {
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
-class MergeGuardTest(unittest.TestCase):
+class MergeGuardBase(unittest.TestCase):
     """ADR-0013: `gh pr merge` hỏi người, trừ khi `xt.py merge-check` = merge và lệnh ghim đúng head.
 
     Bảng ca gọi `guard` trong tiến trình test (`d`, `mcp_d`): mỗi ca qua hook thật tốn bash + một tiến trình python (có
-    coverage) mà chỉ kiểm lại cùng một đường ống. Đường ống hook (bash/MCP × allow/ask/deny) giữ ca `via_hook=True`."""
+    coverage) mà chỉ kiểm lại cùng một đường ống. Đường ống hook (bash/MCP × allow/ask/deny) giữ ca `via_hook=True`.
+    Lớp gốc dùng chung, không có test: các lớp `MergeGuard*Test` chia ca để lớp nặng nhất không chặn shard CI."""
 
     @classmethod
     def setUpClass(cls):
@@ -1664,6 +1665,21 @@ class MergeGuardTest(unittest.TestCase):
             return dict(json.loads(out.getvalue()))
         except ValueError:
             return {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}
+
+    def policy(self, cmd: str) -> str | None:
+        """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            res = self.guard.apply_policy(self.guard.bash_decision(cmd, str(self.proj)))
+        return str(res["decision"]) or None
+
+    def mcp_policy(self, tool: str, inp: dict) -> str | None:
+        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
+            d, r = self.guard.mcp_decision(tool, inp, str(self.proj))
+        return str(self.guard.apply_policy({"decision": d, "reason": r})["decision"]) or None
+
+
+class MergeGuardPinnedMergeTest(MergeGuardBase):
+    """Merge ghim head qua Bash/REST/MCP được allow; thiếu ghim, cờ lạ, repo khác → hỏi; `merge_check` thật."""
 
     def test_merge_check_real_subprocess(self):
         """`guard.merge_check` thật (tiến trình con `xt.py` bằng import, python cách ly, cache trong `.autopilot/` của dự
@@ -1832,6 +1848,10 @@ class MergeGuardTest(unittest.TestCase):
         self.set_xt("merge_autonomy: L1\n")
         self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")
 
+
+class MergeGuardTest(MergeGuardBase):
+    """L3 bật auto-merge khi mở PR (ADR-0015); PR ngoại lệ cứng bị chặn (ADR-0019) hoặc cho qua khi `auto` (ADR-0020)."""
+
     def test_l3_enables_auto_merge_on_open(self):
         """ADR-0015 (chủ repo 2026-10-16): ở L3 mở PR là bật auto-merge — `gh pr merge --auto`/MCP được allow cho PR nhắm
         nhánh mặc định; L2, PR chồng, `--admin`, repo khác → hỏi."""
@@ -1933,16 +1953,9 @@ class MergeGuardTest(unittest.TestCase):
         )
         self.assertEqual((code, decision(out)), (0, "deny"), out)  # PR đổi khoá, qua Bash
 
-    def policy(self, cmd: str) -> str | None:
-        """Quyết định sau chính sách mặc định (ADR-0018) — cái agent thực sự gặp."""
-        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
-            res = self.guard.apply_policy(self.guard.bash_decision(cmd, str(self.proj)))
-        return str(res["decision"]) or None
 
-    def mcp_policy(self, tool: str, inp: dict) -> str | None:
-        with mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}):
-            d, r = self.guard.mcp_decision(tool, inp, str(self.proj))
-        return str(self.guard.apply_policy({"decision": d, "reason": r})["decision"]) or None
+class MergeGuardHardUnpinnedTest(MergeGuardBase):
+    """AUD-SEC-044 ở mọi mức tự chủ (mỗi ca một `merge-check` thật — lớp riêng vì nặng nhất)."""
 
     def test_guard_hard_merge_unpinned(self):
         """AUD-SEC-044: PR ngoại lệ cứng — merge không ghim head, cờ lạ, `-R` cùng repo, REST, MCP thiếu ghim/khoá lạ
@@ -1980,6 +1993,10 @@ class MergeGuardTest(unittest.TestCase):
             with self.subTest(normal=cmd):
                 self.assertIsNone(self.policy(cmd))
         self.assertIsNone(self.mcp_policy("mcp__github__merge_pull_request", mcp))
+
+
+class MergeGuardFailClosedTest(MergeGuardBase):
+    """Không xác minh được (merge-check lỗi, thiếu python, head đổi) → deny/hỏi có lý do."""
 
     def test_guard_merge_check_error_denies(self):
         """AUD-SEC-045: không xác minh được ngoại lệ cứng (merge-check lỗi, repo khác, PR không đọc được số, graphql
@@ -4284,9 +4301,11 @@ class TypedDecisionTest(unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
-class EvidenceHooksTest(unittest.TestCase):
+class EvidenceHooksBase(unittest.TestCase):
     """AUTO-02 (T-1514, D-068): TaskCompleted đòi bằng chứng xanh cho `T-NNN` trong subject khi vòng đang bật;
-    SubagentStop chặn báo cáo executor thiếu lệnh + exit code; guard PreToolUse `onFailure: block` (LOOP-DESIGN-010)."""
+    SubagentStop chặn báo cáo executor thiếu lệnh + exit code; guard PreToolUse `onFailure: block` (LOOP-DESIGN-010).
+    Lớp gốc dùng chung, không có test: ca chia ở `EvidenceHooksTest`, `TaskCompletedHookPassTest`,
+    `EvidenceHooksStopInstallTest` để lớp nặng nhất không chặn shard CI."""
 
     PLAN = "- [ ] `T-001` việc một — Gate: `true`\n- [ ] `T-002` việc hai — Gate: `test -f ok.txt`\n"
 
@@ -4309,6 +4328,10 @@ class EvidenceHooksTest(unittest.TestCase):
     def completed(self, base: Path, subject: object) -> tuple[int, str, str]:
         payload = {"hook_event_name": "TaskCompleted", "task_id": "1", "task_subject": subject}
         return run_hook("task-completed.sh", payload, base)
+
+
+class EvidenceHooksTest(EvidenceHooksBase):
+    """TaskCompleted chặn tới khi có bằng chứng xanh đúng Gate (cả id ngoài PLAN)."""
 
     def test_task_completed_hook_blocks_until_green_evidence(self):
         base = self.project()
@@ -4344,6 +4367,10 @@ class EvidenceHooksTest(unittest.TestCase):
         self.assertEqual(self.xt(base, "loop", "record", "--task", "T-0999", "--", "true").returncode, 0)
         self.assertEqual(self.completed(base, "Phụ T-0999")[0], 0)
 
+
+class TaskCompletedHookPassTest(EvidenceHooksBase):
+    """TaskCompleted cho qua khi vòng tắt, không có id task, hoặc hook hỏng (fail-open)."""
+
     def test_task_completed_hook_passes_when_inactive_or_no_task_id(self):
         base = self.project(init=False)  # chưa `loop init`: không phải vòng autopilot → không chặn
         self.assertEqual(self.completed(base, "Làm T-001"), (0, "", ""))
@@ -4363,6 +4390,10 @@ class EvidenceHooksTest(unittest.TestCase):
         self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
         (base / "scripts" / "xt.py").unlink()  # thiếu xt.py
         self.assertEqual(self.completed(base, "T-001"), (0, "", ""))
+
+
+class EvidenceHooksStopInstallTest(EvidenceHooksBase):
+    """SubagentStop đòi lệnh + exit code trong báo cáo executor; hook đăng ký và được `install.py` chép."""
 
     def stop(self, payload: dict | str) -> tuple[int, str]:
         code, out, _ = run_hook("subagent-stop.sh", payload)

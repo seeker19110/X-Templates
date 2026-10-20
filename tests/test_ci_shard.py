@@ -240,17 +240,31 @@ class DevTaskProject(unittest.TestCase):
         return res
 
 
-class DevTaskWeightedShardTest(DevTaskProject):
-    """`dev-task.sh test-shard`/`test-weights` với khoá `test_weights` (lệnh giả, id a..e)."""
+# Bảng ca của `test_weighted_partition_cases`: mỗi ca chạy `dev-task.sh` hai lần (vài giây dưới coverage) nên chia theo
+# chỉ số cho `WEIGHT_CASE_PARTS` lớp — hợp các phần đúng bằng bảng (`test_partition_case_parts_cover_table`).
+WEIGHT_CASES: Dict[str, Dict[str, int] | None] = {
+    "vắng": None,
+    "đủ": {"a": 9, "b": 1, "c": 1, "d": 1, "e": 1},
+    "thiếu một lớp": {"a": 9, "b": 1, "c": 1, "d": 1},
+    "thừa lớp cũ": {"a": 9, "b": 1, "c": 1, "d": 1, "e": 1, "cu": 50},
+}
+WEIGHT_CASE_PARTS = 2
+
+
+def weight_case_part(part: int) -> Dict[str, Dict[str, int] | None]:
+    names = list(WEIGHT_CASES)[part::WEIGHT_CASE_PARTS]
+    return {name: WEIGHT_CASES[name] for name in names}
+
+
+class WeightedPartitionPart:
+    """Mixin (không phải TestCase, không tự chạy): phần `PART` của `WEIGHT_CASES`; lớp con ghép với `DevTaskProject`."""
+
+    PART = -1
 
     def test_weighted_partition_cases(self):
         self.yaml()
-        cases = {
-            "vắng": None,
-            "đủ": {"a": 9, "b": 1, "c": 1, "d": 1, "e": 1},
-            "thiếu một lớp": {"a": 9, "b": 1, "c": 1, "d": 1},
-            "thừa lớp cũ": {"a": 9, "b": 1, "c": 1, "d": 1, "e": 1, "cu": 50},
-        }
+        cases = weight_case_part(self.PART)
+        self.assertTrue(cases)
         for name, w in cases.items():
             if w is None:
                 self.w.unlink(missing_ok=True)
@@ -262,6 +276,25 @@ class DevTaskWeightedShardTest(DevTaskProject):
                 self.assertEqual(sorted(t for s in got for t in s), ["a", "b", "c", "d", "e"])
                 want = [["a"], ["b", "c", "d", "e"]] if w is not None else [["a", "c", "e"], ["b", "d"]]
                 self.assertEqual(got, want)  # có trọng số: lớp nặng nhất đứng một mình
+
+
+class DevTaskWeightedPartitionPart1Test(WeightedPartitionPart, DevTaskProject):
+    PART = 0
+
+
+class DevTaskWeightedPartitionPart2Test(WeightedPartitionPart, DevTaskProject):
+    PART = 1
+
+
+class DevTaskWeightedShardTest(DevTaskProject):
+    """`dev-task.sh test-shard`/`test-weights` với khoá `test_weights` (lệnh giả, id a..e)."""
+
+    def test_partition_case_parts_cover_table(self):
+        parts = sorted(c.PART for c in WeightedPartitionPart.__subclasses__())
+        self.assertEqual(parts, list(range(WEIGHT_CASE_PARTS)))  # mỗi phần đúng một lớp
+        merged = [name for p in parts for name in weight_case_part(p)]
+        self.assertEqual(sorted(merged), sorted(WEIGHT_CASES))  # hợp == bảng đầy đủ
+        self.assertEqual(len(merged), len(set(merged)))  # các phần rời nhau
 
     def test_broken_weights_red_exit_2(self):
         self.yaml()

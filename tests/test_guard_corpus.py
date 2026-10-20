@@ -7,6 +7,7 @@ nhân lên hàng trăm ca. Quyết định đo như hook trả ra (`apply_policy
 
 from __future__ import annotations
 
+import functools
 import itertools
 import os
 import random
@@ -129,6 +130,20 @@ TRANSFORMS: Dict[str, Callable[[str], Optional[str]]] = {
 }
 
 PAIR_SAMPLE = 4000  # cặp biến đổi × hạt giống, chọn tất định; toàn bộ ~22k cặp chạy được bằng tay khi sửa guard
+# Mẫu cặp chia theo chỉ số cho PAIR_PARTS lớp (mỗi lớp một tiến trình khi chạy song song): hợp các phần == mẫu đầy đủ,
+# kiểm ở `GuardCorpusPartsTest`.
+PAIR_PARTS = 4
+
+
+@functools.lru_cache(maxsize=1)
+def sampled_pairs() -> tuple[tuple[str, tuple[str, str]], ...]:
+    pairs = list(itertools.product(SEEDS, itertools.permutations(TRANSFORMS, 2)))
+    return tuple(random.Random(2026).sample(pairs, PAIR_SAMPLE))
+
+
+def pair_part(part: int) -> tuple[tuple[str, tuple[str, str]], ...]:
+    return sampled_pairs()[part::PAIR_PARTS]
+
 
 # Lệnh hợp lệ agent chạy hằng ngày — có cả chữ "nguy hiểm" nằm trong dữ liệu (message commit, heredoc của python).
 ALLOW = (
@@ -201,7 +216,11 @@ ALLOW = (
 )
 
 
-class GuardCorpusTest(unittest.TestCase):
+class GuardCorpusBase(unittest.TestCase):
+    """Dựng chung cho bộ tấn công, không có test: ca chia ở `GuardCorpusTest` và `GuardCorpusPairsPart*Test`."""
+
+    root: str
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.root = tempfile.mkdtemp()
@@ -211,6 +230,8 @@ class GuardCorpusTest(unittest.TestCase):
     def dec(self, cmd: str) -> str:
         return str(guard.apply_policy(guard.bash_decision(cmd, self.root))["decision"])
 
+
+class GuardCorpusTest(GuardCorpusBase):
     def test_seeds_are_denied(self) -> None:
         for s in SEEDS:
             with self.subTest(s):
@@ -222,18 +243,6 @@ class GuardCorpusTest(unittest.TestCase):
             c = t(s)
             if c is not None and self.dec(c) != "deny":
                 missed.append(f"{name}: {c!r}")
-        self.assertEqual(missed, [])
-
-    def test_sampled_transform_pairs_are_denied(self) -> None:
-        pairs = list(itertools.product(SEEDS, itertools.permutations(TRANSFORMS, 2)))
-        missed = []
-        for s, (a, b) in random.Random(2026).sample(pairs, PAIR_SAMPLE):
-            inner = TRANSFORMS[a](s)
-            if a in VAR_WRAPS and b in PREFIX_WRAPS:
-                continue
-            c = TRANSFORMS[b](inner) if inner is not None else None
-            if c is not None and self.dec(c) != "deny":
-                missed.append(f"{a}+{b}: {c!r}")
         self.assertEqual(missed, [])
 
     def test_allow_corpus_is_not_denied(self) -> None:
@@ -252,6 +261,41 @@ class GuardCorpusTest(unittest.TestCase):
             with self.subTest(s):
                 self.assertEqual(out["decision"], "deny")
                 self.assertIn(out["code"], {*guard.POLICY, guard.RULE_DENY})
+
+
+class GuardCorpusPairs:
+    """Mixin (không phải TestCase, không tự chạy): phần `PART` của mẫu cặp; lớp con ghép với `GuardCorpusBase`."""
+
+    PART = -1
+
+    def test_sampled_transform_pairs_are_denied(self) -> None:
+        part = pair_part(self.PART)
+        self.assertTrue(part)
+        missed = []
+        for s, (a, b) in part:
+            inner = TRANSFORMS[a](s)
+            if a in VAR_WRAPS and b in PREFIX_WRAPS:
+                continue
+            c = TRANSFORMS[b](inner) if inner is not None else None
+            if c is not None and self.dec(c) != "deny":
+                missed.append(f"{a}+{b}: {c!r}")
+        self.assertEqual(missed, [])
+
+
+class GuardCorpusPairsPart1Test(GuardCorpusPairs, GuardCorpusBase):
+    PART = 0
+
+
+class GuardCorpusPairsPart2Test(GuardCorpusPairs, GuardCorpusBase):
+    PART = 1
+
+
+class GuardCorpusPairsPart3Test(GuardCorpusPairs, GuardCorpusBase):
+    PART = 2
+
+
+class GuardCorpusPairsPart4Test(GuardCorpusPairs, GuardCorpusBase):
+    PART = 3
 
 
 # Lỗ ĐÃ BIẾT, guard chưa chặn (review #130, có sẵn trước bộ tấn công): ghi lại để không im lặng. Khi guard chặn được một
@@ -361,8 +405,9 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class GuardRemainingGapsTest(unittest.TestCase):
-    """Các lỗ còn lại sau #132 (reviewer #132 + `KNOWN_GAPS` cũ), D-047."""
+class GuardRemainingGapsBase(unittest.TestCase):
+    """Các lỗ còn lại sau #132 (reviewer #132 + `KNOWN_GAPS` cũ), D-047. Dựng chung, không có test: ca chia ở
+    `GuardRemainingGapsTest` và `GuardFindAutopilotPart*Test`."""
 
     def setUp(self) -> None:
         self.root = tempfile.mkdtemp()
@@ -375,6 +420,8 @@ class GuardRemainingGapsTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), want)
 
+
+class GuardRemainingGapsTest(GuardRemainingGapsBase):
     def test_dquote_and_backtick_heredoc_opener_does_not_swallow(self) -> None:
         body = "\nbash <<F\ngit reset --hard HEAD~3\nF"
         self.assert_all(
@@ -394,45 +441,6 @@ class GuardRemainingGapsTest(unittest.TestCase):
                 'echo "$(cat <<E\nx git reset --hard\nE\n)"',
                 'echo "$(\ncat <<E\nx git reset --hard\nE\n)"',  # `$(` ở dòng trước
                 "echo `cat <<E\nx git reset --hard\nE\n`",  # backtick còn mở: thân thật
-            ),
-        )
-
-    def test_find_hits_autopilot_in_every_form(self) -> None:
-        self.assert_all(
-            "deny",
-            (
-                "find -L .autopilot -delete",
-                "find -H -L .autopilot -type f -exec rm {} \\;",
-                "find -D tree .autopilot -delete",
-                "find -O2 .autopilot -delete",
-                "find . -path './.autopilot/*' -delete",
-                "find . -name verified.json -delete",
-                "find . -iname 'reviews.json' -exec mv {} /tmp \\;",
-                "find .autopilot -exec mv {} /tmp \\;",
-                "find .autopilot -exec sed -i s/a/b/ {} \\;",
-                "find .autopilot -exec sh -c 'rm {}' \\;",
-                "find . -name x -fprint .autopilot/verified.json",
-                "find .autopilot -print0 | xargs -0 rm",
-                "ls .autopilot/evidence | xargs -I{} mv {} /tmp",
-                "touch .autopilot/verified.json",
-                "touch -d 2020-01-01 .autopilot/state.json",
-            ),
-        )
-        self.assert_all(
-            "",
-            (
-                "find .autopilot -name '*.json'",
-                "find .autopilot -type f -exec cat {} \\;",
-                "find .autopilot -type f -exec grep -l ok {} +",
-                "find . -name '*.py' -exec python3 -m black {} +",
-                "find docs -name evidence -delete",
-                "find build -delete",
-                "find . -name '*.pyc' -delete",
-                "find . -name x -fprint /tmp/out.txt",
-                "find .autopilot -print0 | xargs -0 cat",
-                "find src -name '*.tmp' -print0 | xargs -0 rm",
-                "touch /tmp/x",
-                "touch -d 2020-01-01 build/x",
             ),
         )
 
@@ -608,6 +616,95 @@ class GuardRemainingGapsTest(unittest.TestCase):
         self.assertEqual(guard._first_arg("'a', 'b'"), "'a'")
         self.assertEqual(guard._first_arg("x)"), "x")  # ngoặc đóng của lời gọi
         self.assertEqual(guard._first_arg("('a', 'b')"), "('a', 'b')")
+
+
+# Bảng ca của `test_find_hits_autopilot_in_every_form` (lệnh `find`/`xargs`/`touch` đụng `.autopilot/` phải chặn, lệnh
+# tương tự không đụng thì không): chia theo chỉ số cho FIND_PARTS lớp — hợp các phần == bảng (`GuardCorpusPartsTest`).
+FIND_DENY = (
+    "find -L .autopilot -delete",
+    "find -H -L .autopilot -type f -exec rm {} \\;",
+    "find -D tree .autopilot -delete",
+    "find -O2 .autopilot -delete",
+    "find . -path './.autopilot/*' -delete",
+    "find . -name verified.json -delete",
+    "find . -iname 'reviews.json' -exec mv {} /tmp \\;",
+    "find .autopilot -exec mv {} /tmp \\;",
+    "find .autopilot -exec sed -i s/a/b/ {} \\;",
+    "find .autopilot -exec sh -c 'rm {}' \\;",
+    "find . -name x -fprint .autopilot/verified.json",
+    "find .autopilot -print0 | xargs -0 rm",
+    "ls .autopilot/evidence | xargs -I{} mv {} /tmp",
+    "touch .autopilot/verified.json",
+    "touch -d 2020-01-01 .autopilot/state.json",
+)
+FIND_ALLOW = (
+    "find .autopilot -name '*.json'",
+    "find .autopilot -type f -exec cat {} \\;",
+    "find .autopilot -type f -exec grep -l ok {} +",
+    "find . -name '*.py' -exec python3 -m black {} +",
+    "find docs -name evidence -delete",
+    "find build -delete",
+    "find . -name '*.pyc' -delete",
+    "find . -name x -fprint /tmp/out.txt",
+    "find .autopilot -print0 | xargs -0 cat",
+    "find src -name '*.tmp' -print0 | xargs -0 rm",
+    "touch /tmp/x",
+    "touch -d 2020-01-01 build/x",
+)
+FIND_CASES = tuple(("deny", c) for c in FIND_DENY) + tuple(("", c) for c in FIND_ALLOW)
+FIND_PARTS = 4
+
+
+def find_part(part: int) -> tuple[tuple[str, str], ...]:
+    return FIND_CASES[part::FIND_PARTS]
+
+
+class GuardFindAutopilot:
+    """Mixin (không phải TestCase, không tự chạy): phần `PART` của `FIND_CASES`; lớp con ghép với
+    `GuardRemainingGapsBase`."""
+
+    PART = -1
+
+    def test_find_hits_autopilot_in_every_form(self) -> None:
+        part = find_part(self.PART)
+        self.assertTrue(part)
+        self.assert_all("deny", tuple(c for w, c in part if w == "deny"))
+        self.assert_all("", tuple(c for w, c in part if w == ""))
+
+
+class GuardFindAutopilotPart1Test(GuardFindAutopilot, GuardRemainingGapsBase):
+    PART = 0
+
+
+class GuardFindAutopilotPart2Test(GuardFindAutopilot, GuardRemainingGapsBase):
+    PART = 1
+
+
+class GuardFindAutopilotPart3Test(GuardFindAutopilot, GuardRemainingGapsBase):
+    PART = 2
+
+
+class GuardFindAutopilotPart4Test(GuardFindAutopilot, GuardRemainingGapsBase):
+    PART = 3
+
+
+class GuardCorpusPartsTest(unittest.TestCase):
+    """Bảng ca chia cho nhiều lớp: mỗi phần đúng một lớp, các phần rời nhau, hợp lại == bảng đầy đủ."""
+
+    def assert_parts(self, mixin: type, n: int, full: tuple, part: Callable[[int], tuple]) -> None:
+        parts = sorted(getattr(c, "PART") for c in mixin.__subclasses__())
+        self.assertEqual(parts, list(range(n)))
+        merged = [case for p in parts for case in part(p)]
+        self.assertEqual(len(merged), len(full))
+        self.assertEqual(sorted(merged), sorted(full))
+
+    def test_pair_parts_cover_sample(self) -> None:
+        self.assertEqual(len(sampled_pairs()), PAIR_SAMPLE)
+        self.assert_parts(GuardCorpusPairs, PAIR_PARTS, sampled_pairs(), pair_part)
+
+    def test_find_parts_cover_table(self) -> None:
+        self.assertEqual(len(set(FIND_CASES)), len(FIND_DENY) + len(FIND_ALLOW))  # không ca trùng
+        self.assert_parts(GuardFindAutopilot, FIND_PARTS, FIND_CASES, find_part)
 
 
 class GuardGaps341Test(unittest.TestCase):
