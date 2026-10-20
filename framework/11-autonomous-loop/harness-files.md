@@ -47,8 +47,10 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 
 - **Guard không xét gửi bí mật ra mạng bằng thư viện của trình thông dịch** (AUD-SEC-086): luật "gửi file bí mật/biến môi
   trường ra mạng" chỉ nhận CLI (`curl`/`wget`, `scp`/`rsync`, `nc`/`socat`/`ssh`, `gh gist|release upload`) và `/dev/tcp`.
-  `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` đọc `.env` rồi gửi đi thì không bị
-  chặn. Không để bí mật thật trong máy/biến môi trường của phiên agent không người trực.
+  `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` gửi bí mật đi thì không bị xét
+  như gửi ra mạng; script có chuỗi bí mật nguyên văn (`open('.env')`) bị chặn theo D-105 (không chỉ đọc) — còn hở khi bí
+  mật lấy từ biến môi trường (`os.environ`, `process.env`) hay đường dẫn ghép (AUD-DOC-073). Không để bí mật thật trong
+  máy/biến môi trường của phiên agent không người trực.
 - **`subagent-stop.sh` chỉ khớp mẫu chữ "exit/rc + số"** (AUD-HAR-098): regex `exit`, `exit code`, `exit status`, `rc`,
   `mã thoát` theo sau là số. Lọt: báo cáo nhắc `exit 0` mà không chạy lệnh nào (hay trích log có `rc=1`) vẫn được cho
   dừng. Bắt sai: báo cáo ghi kết quả theo dạng khác (`→ 0`, "trả 0", "xanh") bị chặn một lần dù đã chạy. Hook chỉ là
@@ -58,6 +60,14 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   (escape trong chuỗi Python như `'\x2eenv'` thì được giải qua AST; escape của ngôn ngữ khác chưa); script ở file
   (`python3 x.py`, `python3 < x.py`) và module cục bộ được `import` không được đọc; trên hệ file không phân biệt hoa thường
   (macOS, Windows) `.GIT/config` là `.git/config` nhưng không bị chặn; `.git/info/exclude` không nằm trong danh sách canh.
+  Đích ghi dời bởi đổi thư mục bên trong script (`os.chdir('.git')`, `process.chdir`, `ruby -C .git`) hay đến từ argv
+  (`python3 -c "open(sys.argv[1],'a')" .git/config`) cũng không được xét (AUD-SEC-096).
+- **Thư mục tính theo thứ tự chữ, không theo luồng chạy** (AUD-SEC-095): hàm định nghĩa trước `cd` rồi gọi sau
+  (`f(){ echo x > settings.json; }; cd .claude; f`), thân vòng lặp chạy lần 2 sau `cd` ở cuối thân, `trap … EXIT` — guard
+  không mô phỏng luồng điều khiển của shell.
+- **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
+  tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
+  bị coi là cũ hơn. Lớp đỡ: `pr reviewed` đăng ngay kết luận (dấu đã đăng là nguồn của `merge-gate`/steward/guard).
 - **Script nhắc đường dẫn được canh: mặc định chặn** (D-105): script `-c`/`-e`/`-r`, heredoc, here-string hay ống vào
   trình thông dịch có chuỗi là hàng rào (`.claude/hooks/*`, `.claude/settings*.json`), `.git/hooks`/`.git/config`, bí mật
   hay `.autopilot/` bị chặn với mã của đích, trừ khi TOÀN script chỉ gồm thao tác đọc trong danh sách nhỏ (`open` mode
@@ -74,11 +84,14 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   escape trong chuỗi node/ruby/perl chưa được giải. Bộ che chuỗi/comment (D-107): Python che
   bằng `tokenize` (cú pháp sai → không chỉ đọc; biểu thức f-string kiểm đệ quy); node/ruby/perl/php chỉ che chuỗi một
   dòng, phần mã còn `#`, `/`, `%`, `<<`, quote-like Perl (`q{}`, `qq{}`, `m{}`, `s{}{}`…), nháy dính biến (`$'`, `?'`) hay
-  chuỗi nháy kép có `$`/`@` là không chỉ đọc. Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi
+  chuỗi nháy kép có `$`/`@` là không chỉ đọc; script có sẵn byte `\x01`/`\x02` (trùng dấu che) cũng vậy (AUD-SEC-091).
+  Script có dấu hiệu API ghi mà nhắc hơn 64 đường dẫn canh khác nhau bị coi như ghi (trần dò, AUD-SEC-092). Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi
   `requests.get`, ghi file khác, hàm tự viết), script sửa tài liệu có chuỗi `'.env'` đứng riêng, Perl/PHP đọc file bằng
   hàm ngoài danh sách, JS template string; theo D-107 thêm: script node/ruby/perl/php nhắc đường dẫn được canh mà có
   comment, phép chia, `%`, heredoc, chuỗi nhiều dòng; `open(p, 'r', -1)` (đối số thứ 3); deno/lua/tclsh đọc file canh
-  bằng API riêng (`Deno.readTextFileSync`, Lua `f:read`, Tcl `read`). Sửa file canh thì dùng
+  bằng API riêng (`Deno.readTextFileSync`, Lua `f:read`, Tcl `read`); script chỉ nạp module hàng rào
+  (`sys.path.insert(0, '.claude/hooks'); import guard`) hay heredoc python ghi tài liệu có nhắc `.env`/`.claude/hooks`
+  (AUD-HAR-100 — dùng `python3 -m unittest`, Edit/Write). Sửa file canh thì dùng
   Edit/Write; đọc thì dùng `cat`/Read hoặc script chỉ đọc.
 - **Thư mục không biết** (D-106): sau `cd "$X"`, `cd -`, `pushd +N`, `popd`, `cd` khi có `CDPATH`, `cd`/`pushd` tới
   toán hạng có glob (`cd .cl*`), đích ghi tương đối được thử ở gốc và mọi thư mục canh (`.claude`, `.claude/hooks`,

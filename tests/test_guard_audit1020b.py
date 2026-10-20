@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests"))
+import cpu_budget
 
 
 def _load_guard():
@@ -61,20 +62,18 @@ class InterpLiteralPerfTest(unittest.TestCase):
         return f'python3 -c "print({lits}){extra}"'
 
     def test_guard_interp_literals_perf(self):
-        t0 = time.monotonic()
-        res = policy(self._many(3200) + "; echo x > .claude/settings.json")
-        self.assertLess(time.monotonic() - t0, 2.0)
-        self.assertEqual(res["decision"], "deny", res)
+        tail = "; echo x > .claude/settings.json"
+        self.assertEqual(policy(self._many(3200) + tail)["decision"], "deny")
+        # tỉ lệ CPU cỡ 4n/n, không ngưỡng giây cứng (AUD-TEST-008); cỡ lớn 3200 = cỡ đo của phát hiện (62 s trước khi sửa)
+        cpu_budget.assert_not_quadratic(self, lambda n: policy(self._many(n) + tail), 800)
+        cpu_budget.assert_not_quadratic(self, lambda n: policy(self._many(n, extra=";print('os.remove')")), 800)
 
     def test_guard_interp_literals_read_only_passes(self):
         self.assertEqual(policy(self._many(50))["decision"], "", "script chỉ in tên file, không ghi → cho chạy")
 
     def test_guard_interp_literals_probe_cap_fail_closed(self):
         # có chữ giống API ghi (trong chuỗi — script vẫn chỉ đọc) và quá trần chuỗi canh → coi như ghi, chặn
-        cmd = self._many(guard.DIRECT_PROBES + 5, extra=";print('os.remove')")
-        t0 = time.monotonic()
-        res = policy(cmd)
-        self.assertLess(time.monotonic() - t0, 2.0)
+        res = policy(self._many(guard.DIRECT_PROBES + 5, extra=";print('os.remove')"))
         self.assertEqual((res["decision"], res.get("code")), ("deny", "SECRET_WRITE"), res)
         under = self._many(3, extra=";print('os.remove')")
         self.assertEqual(policy(under)["decision"], "", "dưới trần: chữ trong chuỗi không phải ghi thật")
