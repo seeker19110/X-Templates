@@ -19,6 +19,21 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Test dọn thư mục tạm: các `tempfile.mkdtemp()` không được dọn trong `tests/test_hooks.py`, `tests/test_guard_corpus.py`, `tests/test_install.py`, `tests/test_xt.py` chuyển sang `enterContext(tempfile.TemporaryDirectory())` (`enterClassContext` cho `setUpClass`) — mỗi lần chạy suite không còn để lại hàng trăm thư mục trong `/tmp` (chính thứ làm guard chậm, D-097). `.gitignore` thêm `.claude/worktrees/` (bản sao repo của subagent).
 
 ### Fixed
+- Một điều kiện merge (ADR-0028) thành cơ chế, audit 2026-10-19 rescan. **AUD-XFEAT-010:** `merge-check` không còn in
+  `MERGE` + lệnh `gh pr merge … --match-head-commit` (exit 0) cho PR mà CI/làn cho merge nhưng review ở head chưa hợp lệ
+  (`eligible: false`): verdict mới `review` (exit 1, không có `next_rest`), `next` là bước review/`pr next`, lý do ghi
+  `review` (`missing`/`blocking`); `merge-watch` thoát 1 với cùng bước. Pha `delivery_phase: build` (ADR-0031) giữ nguyên:
+  review hoãn (`review_deferred`) → vẫn `merge`. **AUD-XFEAT-011:** `pr next` và `pr steward` tính review từ CÙNG nguồn với
+  `merge-check`/`merge-gate`/guard — dấu đã đăng trên PR; sổ `.autopilot/reviews.json` chỉ để nhận ra review chưa đăng được
+  (đăng dấu thất bại, `pr reviewed` exit 3) → hành động mới `republish-review` (`do` = `xt.py pr reviewed …` với đúng
+  head/kết luận/model; auto-merge đang bật thì tắt trước), không còn vòng bật/tắt auto-merge. Review sạch chưa đăng không
+  chặn PR đã qua (làn nhanh, pha build); lỗi chặn chưa đăng thì luôn phải đăng. **AUD-DOC-054:** guard chặn ở chính sách
+  mặc định (mã mới `REVIEW_MISSING`, `strict` → `ask`) merge ghim head (`gh pr merge`, `gh api …/merge`, MCP
+  `merge_pull_request`) khi `eligible` false và bật auto-merge khi `auto_merge_ok` false; tài liệu (`LOOP-STOP-002`,
+  `LOOP-STOP-022` cả câu Kiểm, skill `/autopilot` bước 10/13, mẫu `CLAUDE.md`/`AGENTS.md` của dự án đích, đính chính hai mục cũ của CHANGELOG) ghi đúng mã: merge khác
+  ở chính sách mặc định guard chỉ hỏi khi `strict`. autonomy-bench: corpus `review` có đầu vào `local` (sổ cục bộ),
+  `reviews` = review đã đăng; thêm ca `review-xfeat011-*`, `guard-doc054-*`. **Dự án đích:** chạy lại `install.py` (guard
+  + `xt.py` đổi).
 - Guard chậm khi đích ghi/dời là thư mục ngoài dự án (D-097): `_dir_holds_gate` từng `os.listdir` cả thư mục rồi phân loại từng mục — `mv x /tmp`, `cp a /tmp/` mất ~2,2 s/lệnh trên máy có ~22k mục trong `/tmp`, nay ~0,16 s. Đích ngoài gốc dự án chỉ kiểm đích danh tên file cổng chữ (`Makefile`, `pyproject.toml`, `xt.yaml`… ở mọi nơi; `settings.json` khi thư mục là `…/.claude`; `dependabot.yml` khi là `…/.github`) bằng `os.path.lexists`, không liệt kê; trong dự án giữ liệt kê như cũ. `~/.claude` có `settings.json` vẫn là cổng; `rm -rf` ngoài dự án vẫn bị chặn (luật riêng, không đổi). Thu hẹp có chủ đích: thư mục NGOÀI dự án chỉ chứa file cổng theo mẫu có `*` (`tsconfig.base.json`, `eslint.config.js`) không còn tính là cổng. Test `GuardOutsideDirTest` (mock `os.listdir` — đỏ trên bản cũ). Dự án đích: chạy lại `install.py` để nhận `guard.py` mới.
 - Review delta PR #173: `ci_classify` lớp `secret` chỉ loại dòng giống dòng test đỏ (`FAILED a::t`, `FAIL pkg 0.1s`, `FAIL: test`, `--- FAIL: Test`, AssertionError) — dòng phát hiện thật có chữ FAILED/failed (`FAILED: gitleaks detected 2 leaks`, `semgrep scan failed: 5 findings`) và `0 findings, 2 blocking findings` vẫn block; `Finding:` của gitleaks tính là phát hiện. Task có ghi chú `sau:`/`files:` không đọc được (cả `SAU:`, `Files:`, `sau T-1`) không `ready` ở `loop next`, `loop record` từ chối (fail-closed). `_safe_rel_path` (doctor drift, `context`) chặn symlink ở thành phần giữa đường dẫn trỏ ra ngoài dự án. Corpus `ci_log` 25 ca (tổng 279).
 
@@ -182,7 +197,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - Một điều kiện "được merge" ([ADR-0028](docs/adr/0028-single-merge-eligibility.md), REC-03, T-1507): hàm thuần `review_gate`/
   `merge_eligibility` dùng chung cho `merge-check` (`--json` thêm `review`, `eligible`, `auto_merge_ok`), `pr next`, `merge-gate`,
   guard `gh`/MCP và steward. `merge-gate` nay đỏ cả khi PR làn chuẩn đang bật auto-merge mà chưa có review sạch ở đúng head
-  (trước đây chỉ `hard`); guard hỏi khi bật auto-merge/merge PR làn chuẩn thiếu review đã đăng ở head. **Dự án đích:** chạy lại
+  (trước đây chỉ `hard`); guard hỏi khi bật auto-merge/merge PR làn chuẩn thiếu review đã đăng ở head (đính chính AUD-DOC-054: chỉ khi `XT_GUARD_POLICY=strict`, chính sách mặc định cho qua — xem Unreleased). **Dự án đích:** chạy lại
   `install.py` (guard + `xt.py` đổi).
 
 ### Fixed
@@ -706,7 +721,7 @@ Mục checklist từ đợt rà `seeker19110/stored` 2026-10-18 (stored `10ecf8b
   trạng thái auto-merge của PR và sổ `.autopilot/reviews.json`, trả MỘT hành động (`enable-auto-merge`,
   `disable-auto-merge`, `review`, `fix`, `update`, `retarget`, `defer-human`, `merge`, `wait`, `done`, `closed`) kèm `do` và
   `fallback` (merge ghim head, cả `next_rest`); dưới L3 không bao giờ bật auto-merge (trả `merge` ghim head khi `merge-check` =
-  `merge`); verdict `human` khi auto-merge đang bật → tắt trước; không gọi GitHub, guard vẫn là lớp chặn. `pr reviewed --pr N --head <SHA 40 ký tự>
+  `merge`); verdict `human` khi auto-merge đang bật → tắt trước; không gọi GitHub, guard vẫn là lớp chặn (đính chính AUD-DOC-054: chỉ khi `XT_GUARD_POLICY=strict`). `pr reviewed --pr N --head <SHA 40 ký tự>
   --clean|--blocking` ghi review gắn với commit đã rà; PR từng vào làn chuẩn được nhớ (`standard_seen`). Văn xuôi bảy
   bước ở `AGENTS.md` §3, mẫu `AGENTS.md` §7, skill `/autopilot` bước 10/13, README mảng 11, `LOOP-STOP-022` (SHOULD),
   `LOOP-DESIGN-020` (SHOULD) rút về "chạy `pr next`, làm đúng `do`" (không đổi mức). Dự án đích: chạy lại `install.py`.

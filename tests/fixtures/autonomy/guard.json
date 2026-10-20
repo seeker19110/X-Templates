@@ -2601,6 +2601,123 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-doc054-pinned-merge-no-review-default",
+   "origin": "repro",
+   "refs": [
+    "AUD-DOC-054",
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --squash --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "merge_check": {
+     "verdict": "review",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": false,
+     "auto_merge_ok": false,
+     "review": "missing",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REVIEW_MISSING"
+   }
+  },
+  {
+   "id": "guard-doc054-auto-merge-no-review-default",
+   "origin": "repro",
+   "refs": [
+    "AUD-DOC-054",
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --auto --squash",
+    "merge_check": {
+     "verdict": "review",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": false,
+     "auto_merge_ok": false,
+     "review": "missing",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REVIEW_MISSING"
+   }
+  },
+  {
+   "id": "guard-doc054-pinned-merge-blocking-old-shape",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-DOC-054",
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "command": "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -f merge_method=squash",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": false,
+     "auto_merge_ok": false,
+     "review": "blocking",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REVIEW_MISSING"
+   }
+  },
+  {
+   "id": "guard-control-build-phase-deferred-merge",
+   "origin": "control",
+   "refs": [
+    "AUD-DOC-054",
+    "AUD-XFEAT-010"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --squash --match-head-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "deferred",
+     "reasons": [
+      "L3: làn chuẩn"
+     ],
+     "stacked": false,
+     "review_deferred": true
+    }
+   },
+   "expect": {
+    "allowed": true,
+    "decision": "allow"
+   }
   }
  ]
 }

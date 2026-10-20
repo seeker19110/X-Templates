@@ -82,7 +82,8 @@
    "id": "pr-rec03-standard-no-review",
    "origin": "repro",
    "refs": [
-    "REC-03"
+    "REC-03",
+    "AUD-XFEAT-010"
    ],
    "input": {
     "risk_paths": [
@@ -93,7 +94,7 @@
    "expect": {
     "eligible": false,
     "auto_merge_ok": false,
-    "verdict": "merge",
+    "verdict": "review",
     "lane": "chuẩn",
     "review": "missing"
    },

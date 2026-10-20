@@ -355,7 +355,7 @@ class AutonomyBenchHelpersTest(unittest.TestCase):
             "labels": [{"name": "xt-standard-lane"}],
         }
         d = xt.merge_check_result(pr, 3, [], False)
-        self.assertEqual((d["verdict"], d["eligible"], d["review"]), ("merge", False, "missing"))
+        self.assertEqual((d["verdict"], d["eligible"], d["review"]), ("review", False, "missing"))  # AUD-XFEAT-010
         pr["xtReviews"] = [{"head": H, "clean": True, "at": "2026-10-19T10:00:00Z"}, "rác"]
         self.assertTrue(xt.merge_check_result(pr, 3, [], False)["eligible"])
 

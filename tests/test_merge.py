@@ -1032,8 +1032,12 @@ class MergeCheckCliTest(unittest.TestCase):
         commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot))
         d = json.loads(out)
-        self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (0, "merge", [], []))
+        # miễn người (ADR-0020) nhưng vẫn cần review sạch ở head: merge-check không gợi merge (AUD-XFEAT-010)
+        self.assertEqual((rc, d["verdict"], d["hard"], d["notes"]), (1, "review", [], []))
         self.assertTrue(d["hard_waived"])
+        hot_ok = {**hot, "xtReviews": [{"head": "abc1234def", "clean": True, "at": "2026-10-19T10:00:00Z"}]}
+        rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(hot_ok))
+        self.assertEqual((rc, json.loads(out)["verdict"]), (0, "merge"))
         commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: x\n")
         rc, out, _ = run_main("merge-check", "--pr-json", "-", stdin=json.dumps(hot))
         self.assertEqual(rc, 1)
@@ -1592,6 +1596,12 @@ class PrNextCliTest(unittest.TestCase):
         self.big = pr(headRefOid=self.head, files=[{"path": "src/a.py", "additions": 400, "deletions": 0}])
 
     def nxt(self, p: dict, *extra: str) -> tuple[int, str, str]:
+        """`_publish_review` giả = đăng thành công: PR mang dấu của các review đã ghi (`xtReviews`, như REST đọc lại) —
+        trừ khi có `review_identity` (dấu của tác giả không phải review). Nguồn review của `pr next` là dấu đã đăng."""
+        if "xtReviews" not in p and not p.get("reviewIdentity"):
+            rec = xt.read_reviews(self.base).get(str(p.get("number", 7))) or {}
+            keys = ("head", "clean", "at", "inconclusive")
+            p = {**p, "xtReviews": [{k: r[k] for k in keys if k in r} for r in rec.get("reviews", [])]}
         return run_main("pr", "next", *extra, "--pr-json", "-", stdin=json.dumps(p))
 
     def test_flow_review_then_enable_and_ledger(self):
@@ -1627,8 +1637,8 @@ class PrNextCliTest(unittest.TestCase):
         published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
         self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "enable-auto-merge")
         rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
-        self.assertEqual(xt.with_published(rec, [], True)["reviews"], [])
-        self.assertEqual(xt.with_published(rec, [], False), rec)
+        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": []})
+        self.assertEqual(xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"]})
 
     def test_review_identity_edited_mark_is_ignored(self):
         def by(updated: str) -> dict:
@@ -2021,10 +2031,11 @@ class PrStewardTest(unittest.TestCase):
             [(r["head"][0], r["clean"], r["at"][11:16]) for r in got], [("d", False, "01:30"), ("e", True, "02:00")]
         )
         rec = {"reviews": [{"head": "f" * 40, "clean": True, "at": "2026-10-19T02:30:00+00:00"}]}
-        merged = xt.with_published(rec, got)
-        self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e", "f"])
-        self.assertIs(xt.with_published(rec, None), rec)
-        self.assertIs(xt.with_published(rec, ["rác"]), rec)
+        merged = xt.with_published(rec, got)  # một nguồn (AUD-XFEAT-011): review = dấu đã đăng; sổ cục bộ để đăng lại
+        self.assertEqual([r["head"][0] for r in merged["reviews"]], ["d", "e"])
+        self.assertEqual(merged["local_reviews"], rec["reviews"])
+        self.assertEqual(xt.with_published(rec, None)["reviews"], [])
+        self.assertEqual(xt.with_published(rec, ["rác"])["reviews"], [])
 
     def test_pr_rest_reads_marks_and_pr_next_uses_them(self):
         big = [{"path": "src/a.py", "additions": 400, "deletions": 0}]

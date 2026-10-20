@@ -1209,6 +1209,9 @@ HARD_ASK = "ngoại lệ cứng (LOOP-STOP-005): người merge"
 # Merge/bật auto-merge mà guard không đọc được `hard` (merge-check lỗi, repo khác, PR không rõ số, graphql) → chặn như
 # ngoại lệ cứng: không xác minh được thì không cho qua (AUD-SEC-044/045).
 UNVERIFIED_ASK = "không xác minh được ngoại lệ cứng (ADR-0019): người merge"
+# Merge ghim head/bật auto-merge khi `merge-check` báo chưa có review hợp lệ ở head (`eligible`/`auto_merge_ok` false —
+# ADR-0028; pha build hoãn review nên không rơi vào đây, ADR-0031) → chặn ở chính sách mặc định (AUD-DOC-054).
+REVIEW_MISSING_ASK = "chưa có review hợp lệ ở head (ADR-0028)"
 # Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
 GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
     *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
@@ -1649,7 +1652,7 @@ def _auto_merge_verdict(selector: List[str], root: str, repo: str = "") -> Tuple
     if d.get("verdict") == "closed" or d.get("stacked"):
         return "ask", f"{EXTERNAL_ASK} — không bật auto-merge: PR {d.get('verdict')}/PR chồng (nhắm nhánh sắp bị xoá)"
     if d.get("auto_merge_ok") is False:  # làn chuẩn: chỉ bật sau review sạch ở head (ADR-0024/0028)
-        return "ask", f"{EXTERNAL_ASK} — bật auto-merge sau review sạch ở head ({d.get('review')}): `xt.py pr reviewed`"
+        return "ask", f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi bật auto-merge"
     return "allow", f"merge_autonomy L{level}: bật auto-merge (GitHub merge khi required check xanh)"
 
 
@@ -1771,12 +1774,12 @@ def _merge_verdict(selector: List[str], sha: str, root: str, repo: str = "") -> 
         return gate
     raw = d.get("reasons")
     reasons = "; ".join(str(x) for x in raw) if isinstance(raw, list) else ""
+    # Điều kiện merge một nhà (ADR-0028): CI/làn cho merge mà thiếu review hợp lệ ở head (merge-check `review`; khung cũ
+    # trả `merge` kèm `eligible: false`) → mã chặn, không phải ask thường bị chính sách mặc định cho qua (AUD-DOC-054).
+    if d.get("eligible") is False and d.get("verdict") in ("merge", "review"):
+        return "ask", f"{EXTERNAL_ASK} — {REVIEW_MISSING_ASK}: {d.get('review')} — `xt.py pr next` rồi merge"
     if d.get("verdict") != "merge":
         return "ask", f"{EXTERNAL_ASK} — merge-check: {d.get('verdict')}: {reasons}"
-    if (
-        d.get("eligible") is False
-    ):  # điều kiện merge một nhà (ADR-0028): thiếu review sạch ở head → như merge-check chưa cho
-        return "ask", f"{EXTERNAL_ASK} — chưa có review sạch ở head ({d.get('review')}): `xt.py pr reviewed` rồi merge"
     if d.get("head") != sha:
         return "ask", f"{EXTERNAL_ASK} — head đã kiểm {d.get('head')} khác {sha}"
     return "allow", f"merge-check: {reasons}"
@@ -4535,6 +4538,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (DESTROY_ASK, "DESTROY"),
     (HARD_ASK, "HARD_EXCEPTION"),
     (UNVERIFIED_ASK, "UNVERIFIED"),
+    (REVIEW_MISSING_ASK, "REVIEW_MISSING"),
     ("container có quyền máy chủ", "HOST_CONTAINER"),
     ("tắt hook của khung", "HOOK_BYPASS"),
     ("bỏ qua hook của dự án", "HOOK_BYPASS"),
