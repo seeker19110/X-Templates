@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.9.0) · Cập nhật: 2026-10-19 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.10.0) · Cập nhật: 2026-10-20 · Nhánh: main
 
 ## Đang làm
-- 2026-10-19 3.9.0 (nhánh `seeker/upbeat-gates-4802fn`, chưa PR): T-1501…T-1509 xong — REC-01…04, 06…08, guard `Decision` có kiểu + hook `PermissionRequest` (D-081/D-082). Tiếp: T-1511…T-1522 (PLAN-3.9-automation, vòng đang chạy). `v3.9.0` chưa tạo — chủ repo chạy `release-tag.yml`.
+- 2026-10-20 3.10.0 (nhánh `seeker/upbeat-gates-4802fn`, chưa PR): PLAN-3.9 xong T-1501…T-1524 (REC-01…09, 13, AUTO-01…07; D-081…D-091): evidence v2, `loop next/context/ci-triage`, hook task-completed/subagent-stop, steward theo sự kiện, `doctor --drift`, `install --plan` + manifest, `compose --feature` (ADR-0030), `autonomy-bench` (266 ca, 0 false-green), guard sửa SEC-072/077/078…081. `v3.9.0`/`v3.10.0` chưa tạo tag (chủ repo chạy `release-tag.yml`). Còn: ca đối kháng do reviewer khác họ model viết = 0 (AUTONOMY-BASELINE §5); lỗ guard đã biết (`$BR` đặt ngoài, `xargs git checkout --`, backtick trong nháy kép).
 - 2026-10-19 audit quét lại 11 nhóm tại `a4f929c` (sổ delta2 ghi SHA nhánh `fd64dd6` đã mất — AUD-HAR-077): mới 🔴 AUD-SEC-077 (surrogate trong đích ghi làm guard fail-open), 🟠 DOC-054, HAR-077/078/079, TEST-008/009, XFEAT-010/011 + 32 🟢 — `docs/ops/AUDIT-REPORT-2026-10-19-rescan.md`, **chờ duyệt** kế hoạch 6 đợt (đợt 1 guard gồm cả 🔴 SEC-072 từ delta2 chưa làm; đợt 2 cần chủ repo chọn (a)/(b) cho merge làn chuẩn chưa review). D-079 (#170), D-080 (#171) đã merge.
 - 2026-10-19 ADR-0029 (#169 đã merge `758dda3`): hai tầng executor (`executor-deep`), chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive` + `reviewer-alt`, `xt.py release-check` (G7 máy đọc), `lifecycle.md` quy tắc 6; D-075…D-078; nghiên cứu `research/2026-10-19-rapid-build-then-harden.md`. Chưa làm (chờ số `loop stats`/pilot): `delivery_phase`, gate planner (PD-05), kiểm protection GitHub (PD-09).
 - 2026-10-19 3.8.0: sửa audit delta #94–#157 (D-064, D-065, D-071): guard 2 🔴 + 5 🟠 (#159), merge/cổng UI-perf/tài liệu (#162); sổ `docs/ops/AUDIT-STATUS.md` (trạng thái hiện tại ở dòng đầu mục này). Chờ chủ repo: `BASE-GATE-009` (miễn trừ có Duyệt hoặc CODEOWNERS cho đường dẫn cổng).
@@ -11,8 +11,7 @@
 - Rà `seeker19110/stored` 2026-10-18 (`10ecf8b..a1a1f51`): #117 guard, #118 mục checklist mới, PR harness. Chờ chủ repo: HAR-036/041, SEC-026, CI-006/007/009, SEC-043 (#97).
 
 ## Tiếp theo
-0. Sau 3.8.0: `loop init --plan docs/autopilot/PLAN-3.9-automation.md` (T-1509…T-1522; T-1501…T-1508 xong #167–#169 — REC/AUTO của
-   `docs/ops/REMEDIATION-PLAN-2026-10-19.md` bản 2, D-066…D-070; chờ chủ repo: token/app reviewer cho T-1508).
+0. Sau 3.10.0: mở PR cho nhánh `seeker/upbeat-gates-4802fn` (chưa có PR) rồi `pr next`; giao `reviewer`/`reviewer-alt` viết ca đối kháng cho `autonomy-bench`; chờ chủ repo: token/app reviewer (T-1508).
 1. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP tự gắn vào thân PR (ngoài tầm guard).
 2. hotel-manager: chủ repo thêm `merge-gate` vào required check ruleset `main`. `x-hotel-manager`: chờ chủ repo quyết dọn/tạo mới.
 3. Hoãn từ rà stored: ép báo "đã đo/chưa đo" cho task UI trong `loop` (`LOOP-DESIGN-021` chưa có máy đỡ); sàn quyền token; `xt.pyz` (ADR-0010).

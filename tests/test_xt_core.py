@@ -1691,6 +1691,28 @@ class TaskDagTest(TmpMixin, unittest.TestCase):
         self.assertIn("chu trình dependency (sau:)", self.run_main("loop", "status")[1])
         self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["ready"][0]["id"], "T-006")
 
+    def test_audit_delta_unknown_after_warns_without_blocking(self):
+        """T-1524: `sau:` trỏ ID không có trong PLAN (gõ nhầm) → cảnh báo ở `loop status`/`loop next`; vẫn không chặn."""
+        tasks = xt.parse_plan(self.base / "docs" / "autopilot" / "PLAN.md")
+        self.assertEqual(xt.plan_unknown_after(tasks), {"T-005": ["T-777"]})  # `(sau: T-999)` trong Gate không tính
+        self.assertEqual(xt.plan_unknown_after([]), {})
+        nxt = json.loads(self.run_main("loop", "next", "--json")[1])
+        self.assertEqual(nxt["unknown_after"], {"T-005": ["T-777"]})
+        self.assertIn("T-005", [r["id"] for r in nxt["ready"]])  # hành vi chặn không đổi
+        status = json.loads(self.run_main("loop", "status", "--json")[1])
+        self.assertEqual(status["unknown_after"], {"T-005": ["T-777"]})
+        for cmd in ("next", "status"):
+            with self.subTest(cmd=cmd):
+                rc, text, _ = self.run_main("loop", cmd)
+                self.assertEqual(rc, 0)
+                self.assertIn("`sau:` trỏ ID không có trong PLAN (không chặn — kiểm gõ nhầm): T-005 → T-777", text)
+        write(
+            self.base / "docs" / "autopilot" / "PLAN.md",
+            "- [ ] `T-001` a (sau: T-002) — Gate: `true`\n- [x] `T-002` b\n",
+        )
+        self.assertEqual(json.loads(self.run_main("loop", "next", "--json")[1])["unknown_after"], {})
+        self.assertNotIn("không có trong PLAN", self.run_main("loop", "status")[1])
+
 
 if __name__ == "__main__":
     unittest.main()

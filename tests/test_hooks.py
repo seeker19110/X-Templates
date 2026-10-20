@@ -4446,6 +4446,65 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
             ),
         )
 
+    def test_audit_delta_push_var_unresolved_target(self):
+        """T-1524: refspec là biến guard không giải được từ gán chữ/lệnh đã biết → deny UNRESOLVED_TARGET; gán chữ trong
+        cùng lệnh thì giải ra và xét theo giá trị; không chặn oan HEAD/nhánh ghi rõ/push trần."""
+        unresolved = (
+            "B=$(cat .branch); git push origin $B",
+            "git push origin $B",
+            'read B; git push origin "$B"',
+            "export B=$(cat f); git push origin $B",
+            "git push origin ${B}",
+            'git push origin "${B:-feat}"',  # B có thể đã đặt ở môi trường
+            "git push -u origin feat:$B",
+            'git push origin "$@"',
+            "git push origin $1",
+            "B=; git push origin $B",
+            'B=feat; git push origin "$B" && git push origin $C',
+            "for b in $(cat list); do git push origin $b; done",
+            "bash -c 'read B; git push origin $B'",
+        )
+        self.assert_policy("deny", unresolved)
+        for cmd in unresolved[:4]:
+            with self.subTest(cmd):
+                out = self.out(cmd)
+                self.assertEqual((out["code"], out["confidence"]), (self.g.UNRESOLVED_TARGET, "unsure"))
+        self.assert_policy(
+            "deny",
+            (
+                "B=main; git push origin $B",
+                'export B=master; git push -u origin "$B"',
+                'B="feat main"; git push origin $B',  # không nháy: tách từ, có main
+                "B=$(echo main); git push origin $B",
+                "B=master; git push origin --delete $B",
+                "for b in feat main; do git push origin $b; done",
+            ),
+        )
+        self.assertEqual(self.out("B=main; git push origin $B")["code"], "PUSH_MAIN")
+        self.assert_policy(
+            "",
+            (
+                "git push origin HEAD",
+                "git push -u origin feat/x",
+                "git push",
+                "git push $REMOTE feat/x",  # chỉ remote là biến
+                "git push $R",
+                "B=feat/x; git push origin $B",
+                'B=feat/x; git push -u origin "${B}"',
+                'B=$(git branch --show-current); git push -u origin "$B"',  # thư mục tạm không phải repo
+                'git push origin "$"',  # `$` đứng riêng là chữ
+                "B=x; git push -o ci.skip=$B origin feat",
+                'git commit -m "git push origin $B"',
+                "echo git push origin $B",
+            ),
+        )
+
+    @unittest.skipIf(shutil.which("git") is None, "cần git")
+    def test_audit_delta_push_var_current_branch_query_on_main(self):
+        repo = Path(self.root, "r")
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        self.assert_policy("deny", ('B=$(git branch --show-current); git push -u origin "$B"',), str(repo))
+
     @unittest.skipIf(shutil.which("git") is None, "cần git")
     def test_guard_false_green_push_current_branch_query_on_main(self):
         repo = Path(self.root, "r")

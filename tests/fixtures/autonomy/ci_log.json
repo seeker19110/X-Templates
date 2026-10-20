@@ -116,6 +116,52 @@
     "rerun": false,
     "category": "coverage"
    }
+  },
+  {
+   "id": "ci-adv-gitleaks-skipped",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "+ scripts/dev-task.sh gate: gitleaks protect (skipped: not installed)\nFAILED test_y"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   },
+   "note": "tên công cụ in lại không phải phát hiện — test đỏ cạnh đó không bị block oan"
+  },
+  {
+   "id": "ci-adv-gitleaks-clean",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "quality\tgitleaks\t2026-10-19T10:00:00.0Z INF no leaks found\nFAILED tests/test_a.py::test_x"
+   },
+   "expect": {
+    "proceed": true,
+    "rerun": false,
+    "category": "test"
+   }
+  },
+  {
+   "id": "ci-gitleaks-detected",
+   "origin": "audit",
+   "refs": [
+    "AUD-HAR-091"
+   ],
+   "input": {
+    "log": "gitleaks detect: 2 leaks detected\nFAILED test_y"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   }
   }
  ]
 }

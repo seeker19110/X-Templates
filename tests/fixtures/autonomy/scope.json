@@ -76,6 +76,12 @@
     "AUD-XFEAT-006",
     "AUD-XFEAT-007"
    ]
+  },
+  {
+   "reason": "Ngân sách episode `loop ci-triage` qua nhiều run (đếm cùng chữ ký giữ khi đổi/bỏ `--task`) — nhóm ci_log chỉ đo hành động lần đầu của episode, ca một log không tái hiện được; test `-k audit_delta_ci_triage_episode`",
+   "ids": [
+    "AUD-HAR-092"
+   ]
   }
  ]
 }

@@ -643,3 +643,17 @@
 - Chọn: mở task riêng T-1523 sửa guard, ca chuyển từ pending/ sang corpus chính khi xong; giữ exit 1
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: guard nhạy cảm bảo mật, không nới bench; gộp được với SEC-072/077 đang mở; T-1521 đúng phạm vi
 - Đường lùi: bỏ T-1523 khỏi PLAN
+
+### D-091 · 2026-10-20T01:14:11+00:00 · Audit delta mốc: 3 phát hiện 🟠 (guard $VAR push, ci-triage secret khớp tên công cụ, episode bị reset khi đổi --task) + 🟡 sau: ID lạ
+
+- Phương án: (1) task mới T-1524 sửa cả ba 🟠 + cảnh báo sau: lạ, trước khi cắt 3.10.0 · (2) ghi sổ, sửa ở bản sau
+- Chọn: task mới T-1524 sửa cả ba 🟠 + cảnh báo sau: lạ, trước khi cắt 3.10.0
+- Lý do (tiêu chí chất lượng cuối): audit.md §1: 🔴/🟠 thành task mới; lỗi nằm ở code vừa viết; ci-triage block oan dừng cả vòng
+- Đường lùi: bỏ T-1524 khỏi PLAN
+
+### D-092 · 2026-10-20T01:24:04+00:00 · ci-triage: mang episode khi đổi task (AUD-HAR-092)
+
+- Phương án: (1) giữ signature/same_signature/rerun_used/cost_usd/runs, chỉ reset task/started/fix_attempts · (2) reset rerun_used khi chữ ký đổi
+- Chọn: giữ signature/same_signature/rerun_used/cost_usd/runs, chỉ reset task/started/fix_attempts
+- Lý do (tiêu chí chất lượng cuối): chặt hơn, không lách trần; hệ quả task mới không được re-run nếu lượt đã dùng — chấp nhận
+- Đường lùi: reset rerun_used theo chữ ký

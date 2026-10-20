@@ -1258,6 +1258,19 @@ def plan_cycle_nodes(tasks: List[Dict[str, Any]]) -> List[str]:
     return sorted(_prune_leaves(left, rdeps))
 
 
+def plan_unknown_after(tasks: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """`sau:` trỏ ID không có trong PLAN (gõ nhầm, task đã xoá): {task: [ID lạ]}. Chỉ cảnh báo — `_waiting` vẫn coi ID
+    ngoài file là không chặn (T-1524)."""
+    ids = {t["id"] for t in tasks}
+    out = {t["id"]: [d for d in t["after"] if d not in ids] for t in tasks}
+    return {k: v for k, v in out.items() if v}
+
+
+def _unknown_after_note(unknown: Dict[str, List[str]]) -> List[str]:
+    pairs = "; ".join(f"{k} → {', '.join(v)}" for k, v in unknown.items())
+    return [f"⚠ `sau:` trỏ ID không có trong PLAN (không chặn — kiểm gõ nhầm): {pairs}"] if unknown else []
+
+
 def _plan_tasks(base: Path, st: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Task của PLAN khai trong state; không có state/PLAN → [] (fail-open cho chỗ gọi)."""
     plan = base / str(st.get("plan") or "")
@@ -5035,8 +5048,10 @@ def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
     ]
     warn = _mode_warning(st.get("permission_mode")) if st.get("active") else ""
     notes += [warn.strip()] if warn else []
-    cycles = plan_cycle_nodes(_plan_tasks(base, st))
+    tasks = _plan_tasks(base, st)
+    cycles = plan_cycle_nodes(tasks)
     notes += [f"✗ PLAN có chu trình dependency (sau:) — không bao giờ làm được: {', '.join(cycles)}"] if cycles else []
+    notes += _unknown_after_note(plan_unknown_after(tasks))
     cp = st.get("checkpoint")
     newer = (_evidence_latest(base) or {}).get("finished") or ""
     if isinstance(cp, dict) and str(newer) <= str(cp.get("at")):
@@ -5056,8 +5071,9 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
     v["iterations"] = st.get("iterations", 0)
     if args.json:
         extra = {k: st.get(k) for k in ("single_session", "permission_mode", "checkpoint")}
-        cycles = plan_cycle_nodes(_plan_tasks(base, st))
-        print(json.dumps({**v, **extra, "deferred": _deferred(st), "cycles": cycles}, ensure_ascii=False))
+        tasks = _plan_tasks(base, st)
+        plan = {"cycles": plan_cycle_nodes(tasks), "unknown_after": plan_unknown_after(tasks)}
+        print(json.dumps({**v, **extra, "deferred": _deferred(st), **plan}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
         for n in _status_notes(st, base):
@@ -5073,16 +5089,20 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
         print("✗ Không đọc được PLAN của vòng — chạy `loop init --plan …` trước", file=sys.stderr)
         return 2
     ready = plan_ready(tasks, _deferred(st))
+    unknown = plan_unknown_after(tasks)
     out = {
         "ready": [{k: t[k] for k in ("id", "title", "tier", "after", "files")} for t in ready],
         "overlaps": plan_overlaps(ready),
         "unscoped": [t["id"] for t in ready if not t["files"]],
         "cycles": plan_cycle_nodes(tasks),
+        "unknown_after": unknown,
     }
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
     print("Sẵn sàng: " + (", ".join(r["id"] for r in out["ready"]) or "—"))
+    for note in _unknown_after_note(unknown):
+        print(f"  {note}")
     for o in out["overlaps"]:
         print(f"  ⚠ {' ∩ '.join(o['tasks'])} cùng ghi {', '.join(o['files'])} — làm tuần tự")
     for u in out["unscoped"]:
@@ -5253,11 +5273,14 @@ def _loop_defer(args: argparse.Namespace, base: Path) -> int:
 # công cụ trong dòng lệnh được in lại (cổng một bước như `dev-task.sh gate` in mọi lệnh trong cùng log).
 CI_TRIAGE_RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (
+        # Tên công cụ trần (`gitleaks protect (skipped: not installed)`) hay báo sạch (`no leaks found`) không phải phát
+        # hiện: đòi từ khoá phát hiện cùng dòng (T-1524) — không thì test đỏ cạnh đó bị block oan.
         "secret",
         re.compile(
-            r"gitleaks|trufflehog|detect-secrets|secret scanning|\bsecrets? (?:detected|found)|\bleaks? found"
-            r"|potential secret|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|fail\w*|vulnerab\w*)"
-            r"|>> Issue: \[B\d+",
+            r"^(?!.*\b(?:no|0|zero) (?:leaks?|secrets?|findings?)\b)"
+            r".*(?:\b(?:leaks?|secrets?) (?:found|detected)|potential secret|\b(?:un)?verified results?\b"
+            r"|\b(?:gitleaks|trufflehog|detect-secrets|ggshield|secret scanning)\b.*\b(?:detected|findings?|violations?)\b"
+            r"|\b(?:codeql|semgrep|bandit|sast)\b.*\b(?:finding|alert|issue|fail\w*|vulnerab\w*)|>> Issue: \[B\d+)",
             re.I,
         ),
     ),
@@ -5342,11 +5365,22 @@ def _ci_log_text(run: str, log: Optional[str], base: Path) -> str:
     return r.stdout
 
 
+CI_EPISODE_CARRY = ("signature", "same_signature", "rerun_used", "cost_usd", "runs")
+
+
 def _ci_episode(st: Dict[str, Any], task: Optional[str]) -> Dict[str, Any]:
-    """Episode sửa CI của task (ngân sách sống trong state.json qua restart); task khác hoặc hỏng → episode mới."""
+    """Episode sửa CI của task (ngân sách sống trong state.json qua restart); hỏng → episode mới. Task khác (hay bỏ
+    `--task`) chỉ mở lượt sửa mới — đếm cùng chữ ký, re-run, chi phí và run đã triage mang sang, không thì đổi `--task`
+    là lách trần 3 lần (T-1524); `loop init --force` vẫn xoá cả episode (D-087)."""
     ep = st.get("episode")
-    if isinstance(ep, dict) and ep.get("task") == task and isinstance(ep.get("runs"), dict):
+    if not (isinstance(ep, dict) and isinstance(ep.get("runs"), dict)):
+        return _ci_episode_new(task)
+    if ep.get("task") == task:
         return ep
+    return {**_ci_episode_new(task), **{k: ep[k] for k in CI_EPISODE_CARRY if k in ep}}
+
+
+def _ci_episode_new(task: Optional[str]) -> Dict[str, Any]:
     return {
         "task": task,
         "started": now_iso(),

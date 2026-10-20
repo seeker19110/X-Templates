@@ -2101,13 +2101,67 @@ class CiTriageTest(TmpDirCase):
         self.assertIn("CI run 55: secret scan/SAST", v["reason"])
         self.assertNotIn("AKIA", (self.tmp / ".autopilot" / "state.json").read_text(encoding="utf-8"))
 
-    def test_ci_triage_new_episode_on_task_change_or_corrupt_episode(self):
+    def test_ci_triage_task_change_keeps_runs_and_corrupt_episode_resets(self):
         self.triage("1", self.LOGS["infra"], "--task", "T-001")
-        _, d, _ = self.triage("1", self.LOGS["infra"], "--task", "T-002")  # task khác: episode mới, run 1 tính lại
+        _, d, _ = self.triage("1", self.LOGS["infra"], "--task", "T-002")  # task khác: run 1 đã triage, không đếm lại
         self.assertEqual((d["action"], d["episode"]["task"], d["episode"]["rerun_used"]), ("rerun", "T-002", 1))
         xt.write_state({"active": False, "episode": {"task": None, "runs": "hỏng"}}, self.tmp)
         _, d, _ = self.triage("2", self.LOGS["test"])
         self.assertEqual((d["episode"]["fix_attempts"], d["episode"]["same_signature"]), (1, 1))
+
+    def test_audit_delta_ci_triage_tool_name_alone_is_not_secret(self):
+        """T-1524: tên công cụ in lại (`gitleaks protect (skipped…)`) hay báo sạch không phải phát hiện bí mật — test
+        đỏ cạnh đó là `test`/fix, không block; phát hiện thật (từ khoá cùng dòng) vẫn block."""
+        not_secret = (
+            "+ scripts/dev-task.sh gate: gitleaks protect (skipped: not installed)\nFAILED test_y\n",
+            "quality\tgitleaks\t2026-10-19T10:00:00.0Z INF no leaks found\nFAILED test_y\n",
+            "Run gitleaks/gitleaks-action@v2\ntrufflehog git file://. --fail\nFAILED test_y\n",
+            "semgrep: 0 findings\ndetect-secrets scan > .secrets.baseline\nFAILED test_y\n",
+        )
+        for text in not_secret:
+            with self.subTest(text=text):
+                self.assertEqual(xt.ci_classify(text)["category"], "test")
+        secret = (
+            "quality\tgitleaks\t2026-10-19T10:00:00.0Z WRN leaks found: 1\n",
+            "gitleaks detect: 2 leaks detected\n",
+            "Finding: gitleaks detected 1 leak\n",
+            "trufflehog: Found verified result 🐷🔑\n",
+            "ERROR: Potential secrets about to be committed to git repo!\n",
+            "ggshield: 1 incident detected\n",
+            "semgrep: 3 blocking findings\n",
+            "GitHub secret scanning: push protection violation\n",
+        )
+        for text in secret:
+            with self.subTest(text=text):
+                self.assertEqual(xt.ci_classify(text + "FAILED test_y\n")["category"], "secret")
+        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md"}, self.tmp)
+        rc, d, _ = self.triage("7", not_secret[0], "--task", "T-001")
+        self.assertEqual((rc, d["category"], d["action"]), (0, "test", "fix"))
+        self.assertIn("FAILED test_y", d["evidence"])
+        self.assertFalse(xt.read_state(self.tmp).get("blocked"))
+
+    def test_audit_delta_ci_triage_episode_counts_survive_task_change(self):
+        """T-1524: đổi/bỏ `--task` không đặt lại đếm cùng chữ ký, lượt re-run, chi phí (không lách trần 3 lần);
+        `loop init --force` vẫn xoá episode (D-087)."""
+        runs = [("7", "T-001"), ("8", "T-002"), ("9", None)]
+        out = [  # cùng chữ ký (số trong dòng lỗi khác nhau)
+            self.triage(
+                r, self.LOGS["test"].replace("1 != 2", f"{r} != 0"), *(["--task", t] if t else []), "--cost-usd", "0.5"
+            )
+            for r, t in runs
+        ]
+        self.assertEqual([(rc, d["action"]) for rc, d, _ in out], [(0, "fix"), (0, "fix"), (1, "defer")])
+        ep = out[-1][1]["episode"]
+        self.assertEqual((ep["task"], ep["same_signature"], ep["cost_usd"], ep["fix_attempts"]), (None, 3, 1.5, 0))
+        self.assertEqual(sorted(xt.read_state(self.tmp)["episode"]["runs"]), ["7", "8", "9"])
+        self.triage("10", self.LOGS["infra"], "--task", "T-003")
+        _, d, _ = self.triage("11", self.LOGS["infra"], "--task", "T-004")  # re-run đã dùng: không re-run lần 2
+        self.assertEqual((d["action"], d["episode"]["rerun_used"]), ("fix", 1))
+        plan = self.tmp / "docs" / "autopilot" / "PLAN.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "init", "--force")[0], 0)
+        self.assertNotIn("episode", xt.read_state(self.tmp))
 
     def test_ci_triage_text_output(self):
         rc, out, _ = run_main(

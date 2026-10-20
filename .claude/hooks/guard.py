@@ -3683,15 +3683,60 @@ def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
     return "", asks
 
 
+VAR_USE_RE = re.compile(r"\$[\w{@*#?!$-]")  # dùng biến/tham số (`$B`, `${B}`, `$1`, `$@`); `$` đứng riêng là chữ
+
+
+def _known_vars(text: str, env: Dict[str, str]) -> str:
+    """Thay CHỈ biến đã gán chữ trong cùng lệnh; biến lạ (`$B` từ `read`/môi trường, `${B:-x}` khi B chưa gán) giữ nguyên."""
+    text = VAR_DEFAULT_RE.sub(lambda m: env.get(m.group(1), m.group(0)), text)
+    return VAR_REF_RE.sub(lambda m: env.get(m.group(1) or m.group(2), m.group(0)), text)
+
+
+def _push_var_refspec(n: List[str], env: Dict[str, str], gdir: str) -> Tuple[str, List[str]]:
+    """Một `git push` có refspec chứa biến: giải bằng gán chữ đã thấy rồi áp luật push; không giải được → hỏi (unsure).
+    Giá trị không nháy có thể tách nhiều từ (`B='feat main'`) → mỗi từ là một refspec."""
+    for r in (r for r in _positionals(n[2:], PUSH_VALUE_OPTS)[1:] if VAR_USE_RE.search(r)):
+        val = _known_vars(r, env)
+        if VAR_USE_RE.search(val) or SUBST_MARK in val or not val.split():
+            return "", [f"{UNRESOLVED_PUSH_WHY} (đích là biến không giải được): {' '.join(n)[:200]}"]
+        d, why = git_rules([w for t in n for w in (val.split() if t == r else [t])], gdir)
+        if d == "deny":
+            return f"Lệnh bị khung chặn ({why}, giá trị của biến): {' '.join(n)[:300]}", []
+        if d:
+            return "", [f"{why} (giá trị của biến): {' '.join(n)[:200]}"]
+    return "", []
+
+
+def _push_var_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
+    """`B=$(cat f); git push origin $B`, `read B; git push origin "$B"`: đích là biến (T-1524). Thay lệnh được thay giá trị
+    trước (`$(git branch --show-current)` → HEAD, không tính được → dấu không biết), rồi theo dõi gán chữ từng lệnh."""
+    base = strip_heredocs(cmd)
+    if "push" not in base or "$" not in base:
+        return "", []
+    asks: List[str] = []
+    for variant in _subst_variants(base) or [base]:
+        env: Dict[str, str] = {}
+        for argv, here in _commands_with_cwd(tokenize(variant), cwd):
+            n = normalize(argv)
+            if n[:2] == ["git", "push"]:
+                deny, more = _push_var_refspec(n, env, _git_dir(argv, here) or root)
+                if deny:
+                    return deny, asks
+                asks += more
+            _record_assigns(argv, env)
+    return "", asks
+
+
 def _unresolved_push(cmd: str, tokens: List[str], root: str, cwd: str) -> Tuple[str, List[str]]:
-    """`… | xargs git push …` (đích nối thêm từ stdin) và `git push … $(…)`: (lý do deny, câu hỏi)."""
+    """`… | xargs git push …` (đích nối thêm từ stdin), `git push … $(…)` và `git push origin $B`: (lý do deny, câu hỏi)."""
     asks = [
         f"{UNRESOLVED_PUSH_WHY} (đối số nối thêm từ xargs): {' '.join(c)[:200]}"
         for c in split_commands(tokens)
         if normalize(c)[:2] == ["git", "push"] and _xargs_wrapped(c)
     ]
     deny, more = _push_subst_rule(cmd, root, cwd)
-    return deny, asks + more
+    var_deny, var_asks = ("", []) if deny else _push_var_rule(cmd, root, cwd)
+    return deny or var_deny, asks + more + var_asks
 
 
 def _join_tokens(words: List[str]) -> str:

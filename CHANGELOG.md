@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-10-20
+
+**Dự án đích: chạy lại `install.py`** (hook `task-completed`/`subagent-stop`, `PermissionRequest`, guard, `xt.py`, workflow steward, manifest). Dự án cài trước bản này chưa có `.xtemplates/manifest.json`: `ask` cũ do khung từng đặt được giữ và báo `ask_unproven` (D-085). Ghép lại blueprint quy mô M với `compose --feature auth` để nhận `BE-AUTH-003/006/008/015` (ADR-0030). Vòng autopilot đang chạy: `loop verify --all` trước `done` (D-084).
+
+
 ### Added
 - Đo tự chủ trước khi mở rộng (T-1521, AUTO-07): `xt.py autonomy-bench [--corpus DIR] [--json]` chạy corpus `tests/fixtures/autonomy/` (PR, rollup, review, guard, log CI, harness — 247 ca) qua hàm thật của khung (`merge_check_result` = `merge_decision` + `merge_eligibility`, `_ci_blocker`, `pr_next`, guard `_rule_decision` + `apply_policy`, `ci_classify`); exit 1 khi false-green > 0, 2 khi corpus hỏng; báo chặn oan, độ phủ ID bắt buộc (REC §2 + 🔴/🟠 đã sửa của sổ audit, ID ngoài phạm vi khai lý do ở `scope.json`). Job CI `quality` chạy lệnh này; số đo và giới hạn ở [`docs/ops/AUTONOMY-BASELINE.md`](docs/ops/AUTONOMY-BASELINE.md). Tách hàm thuần `rest_rollup`, `prefixed_globs`, `merge_check_result` (hành vi không đổi). `tests/fixtures/autonomy/pending/` giữ 5 false-green mới phát hiện ở guard, chưa sửa (ngoài cổng).
 - Mục thiết yếu không bị trần MUST ở M (T-1519, REC-05, [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md)):
@@ -78,6 +83,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   (chạy ở `~`), `-o ProxyCommand/LocalCommand/KnownHostsCommand` quét với mọi máy đích. Ca chuyển từ
   `tests/fixtures/autonomy/pending/` sang `guard.json` (257 ca, 0 false-green); corpus ALLOW của
   `tests/test_guard_corpus.py` không đổi và vẫn không bị chặn. Dự án đích: chạy lại `install.py`.
+- Audit delta mốc Đợt 4 (T-1524, D-091). **AUD-SEC-082** 🟠 guard: refspec của `git push` là biến không giải được
+  (`B=$(cat .branch); git push origin $B`, `read B; git push origin "$B"`, `${B:-x}`, `$1`/`$@`) → `UNRESOLVED_TARGET`
+  (unsure → chặn); biến gán chữ trong cùng lệnh được giải và xét theo giá trị (`B=main` → `PUSH_MAIN`,
+  `B=$(git branch --show-current)` → nhánh thật); `git push origin HEAD`/`feat/x`, push trần, biến chỉ ở remote không
+  đổi. **AUD-HAR-091** 🟠 `loop ci-triage`: lớp `secret` đòi từ khoá phát hiện cùng dòng — tên công cụ in lại
+  (`gitleaks protect (skipped: not installed)`) hay báo sạch (`no leaks found`, `0 findings`) cạnh test đỏ không còn
+  `block` oan; phát hiện thật vẫn block. **AUD-HAR-092** 🟠: đổi/bỏ `--task` không còn đặt lại đếm cùng chữ ký, lượt
+  re-run, chi phí và run đã triage của episode (trước: luân phiên `--task` lách trần 3 lần); `loop init --force` vẫn xoá
+  (D-087). 🟡 `loop status`/`loop next` cảnh báo `sau:` trỏ ID không có trong PLAN (JSON `unknown_after`), không đổi
+  hành vi chặn. `autonomy-bench`: 266 ca, 0 false-green. Dự án đích: chạy lại `install.py`.
 
 ## [3.9.0] - 2026-10-19
 

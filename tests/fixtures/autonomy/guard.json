@@ -2523,6 +2523,84 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-adv-push-var-subst-file",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-082"
+   ],
+   "input": {
+    "command": "B=$(cat .branch); git push origin $B"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-push-var-read",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-082"
+   ],
+   "input": {
+    "command": "read B; git push origin \"$B\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-push-var-export-subst",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-082"
+   ],
+   "input": {
+    "command": "export B=$(cat f); git push origin $B"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-adv-push-var-literal-main",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-008",
+    "AUD-SEC-082"
+   ],
+   "input": {
+    "command": "B=main; git push origin $B"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-control-push-var-feature",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "B=feat/x; git push -u origin \"$B\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-push-bare",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git push"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
