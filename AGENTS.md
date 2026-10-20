@@ -29,7 +29,7 @@ Khi cần quyết định chuyên môn — cách hiểu yêu cầu/spec hở/mâ
 
 ## 5. Điểm dừng bắt buộc về hành động (máy chặn, không hỏi — ADR-0018, ADR-0019, D-023)
 Tự duyệt không mở các điểm này; guard không hỏi người mà chia ba nhóm:
-- **Máy chặn** (`deny` ở mọi chế độ, danh sách ở `CLAUDE.md`): thao tác không đảo ngược (lệnh phá huỷ, push thẳng nhánh chính, xoá ngoài dự án, huỷ repo/bí mật/hạ tầng, ghi ruleset qua `gh api`) · tắt/bỏ qua hook · merge/bật auto-merge PR ngoại lệ cứng khi `merge_hard_exceptions: human` (ADR-0020). Bị chặn là kết luận (§3).
+- **Máy chặn** (`deny` ở mọi chế độ, danh sách ở `CLAUDE.md`): thao tác không đảo ngược (lệnh phá huỷ, push thẳng nhánh chính, xoá ngoài dự án, huỷ repo/bí mật/hạ tầng, ghi ruleset qua `gh api`) · tắt/bỏ qua hook · merge/bật auto-merge PR ngoại lệ cứng khi `merge_hard_exceptions: human` (ADR-0020) · merge (ghim head hay không)/bật auto-merge PR làn chuẩn chưa có review sạch ở head (`REVIEW_MISSING`, `LOOP-STOP-022`; pha `build` hoãn review nên không chặn — ADR-0031). Bị chặn là kết luận (§3).
 - **Cho chạy** (đường lùi: revert, CI, ruleset nhánh, review): deploy/publish, merge PR khác, sửa cấu hình cổng/CI/hook (nêu lý do trong commit/PR, §3), thêm phụ thuộc/MCP/plugin, ra khỏi máy dev.
 - **Vẫn cần người** (máy không chặn hết — agent tự dừng việc đó): PR ngoại lệ cứng khi `merge_hard_exceptions: human` (ADR-0020) (repo này: `auto`) · thao tác trên tiền thật/dữ liệu người dùng thật (thanh toán thật, xoá/xuất/migration phá vỡ trên dữ liệu production, gửi tin tới người dùng thật) — trừ việc nằm trong mục Ủy quyền production của PLAN.md và còn trong hạn mức (`xt.py grant-check` exit 0, ADR-0022) · đăng ký dịch vụ trả phí/nhập khoá thật · bế tắc máy (cùng lỗi lần 3, hết ngân sách).
 
