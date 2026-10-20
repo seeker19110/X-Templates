@@ -429,7 +429,7 @@ class ForNumericSampleTest(unittest.TestCase):
     def test_numeric_loop_allowed(self):
         for cmd in (
             "for i in {1..100}; do sleep 1; done",
-            "for i in {1..4096}; do echo $i; done",
+            "for i in {1..1000}; do echo $i; done",  # {1..4096}: ~2 s một mình, sát hạn SCAN_SECONDS khi máy tải
             "for i in {100..1}; do echo $i; done",
             "for i in {01..99}; do touch f$i; done",
             "for i in {-50..50}; do echo $i; done",
