@@ -179,6 +179,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   (`compose --feature`), thí điểm `08-backend/authn-authz.md`.
 - [ADR-0031](docs/adr/0031-delivery-phase-build-harden.md): `delivery_phase: build|harden` — pha build merge PR làn chuẩn
   ngoài ngoại lệ cứng khi CI xanh, review ghi nợ; `release-check` đòi `harden` và hết nợ review trước G7.
+- [ADR-0032](docs/adr/0032-merge-check-review-verdict.md): `merge-check` trả verdict `review` (exit 1, không gợi lệnh
+  merge) khi CI/làn cho merge mà review ở head chưa hợp lệ — thay ADR-0028 §2.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

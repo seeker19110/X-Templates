@@ -1,6 +1,6 @@
 # ADR-0028: Một điều kiện "được merge" cho merge-check, pr next, merge-gate, guard và steward
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; §2 thay bởi ADR-0032
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `review_gate`, `merge_eligibility`, `_merge_eval`
   (trường `review`/`eligible`/`auto_merge_ok`), `cmd_merge_gate`, `pr_next`; `.claude/hooks/guard.py`
   `_merge_verdict`/`_auto_merge_verdict`; test `tests/test_merge.py::MergeGateTest.test_merge_gate_missing_review`,
