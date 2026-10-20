@@ -32,9 +32,17 @@
 ## Task
 
 ### Lát A — audit delta
-- [ ] `T-1601` Audit delta `f36ea90..0afa30d` nhóm 1/2/3/4/8/9/12/13 + bằng chứng blueprint cũ; sổ ghi SHA quét `0afa30d`, báo cáo `docs/ops/AUDIT-REPORT-2026-10-20-delta2.md` — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
+- [x] `T-1601` Audit delta `f36ea90..0afa30d` nhóm 1/2/3/4/8/9/12/13 + bằng chứng blueprint cũ; sổ ghi SHA quét `0afa30d`, báo cáo `docs/ops/AUDIT-REPORT-2026-10-20-delta2.md` — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 
-### Lát B — sửa 🔴/🟠 (thêm task theo phát hiện của T-1601)
+> Gate T-1601 không `--strict`: `--strict` đòi 0 🔴/🟠 mở — đỏ đúng thiết kế khi audit vừa tìm ra lỗi; `--strict` ở T-1690.
+
+### Lát B — sửa 🔴/🟠 (theo phát hiện của T-1601; 21 phát hiện: 🔴 1 · 🟠 3 · 🟢 17)
+- [ ] `T-1602` Guard: dấu che giả `\x01N\x02` fail-open (AUD-SEC-091 🔴, hồi quy) + quét bậc hai theo số chuỗi canh (AUD-SEC-092, hồi quy) — Gate: `python3 -m unittest tests.test_guard_audit1020b`
+- [ ] `T-1603` Guard: cờ trình thông dịch ghép/dính, `nodejs`, lệnh chạy hộ `uv/poetry/pipx/pipenv run`, `npx`, `npm exec --` (AUD-SEC-093) — Gate: `python3 -m unittest discover -s tests -k guard_interp_flag_forms`
+- [ ] `T-1604` Guard: sau `cd` quét `$(…)`/backtick/`<(…)`/lệnh bọc với thư mục đã đổi (AUD-SEC-094) — Gate: `python3 -m unittest discover -s tests -k guard_nested_cwd_runners`
+- [ ] `T-1605` Guard: `~+`/`~-` (AUD-SEC-097) và `source /dev/stdin` (AUD-SEC-098) — Gate: `python3 -m unittest discover -s tests -k guard_tilde_plus_minus`
+- [ ] `T-1606` merge-check: sổ review hỏng không văng (AUD-CODE-019), bản ghi cùng giây lấy bản cuối (AUD-XFEAT-018); test hook nhánh xt.py lỗi (AUD-TEST-016) — Gate: `python3 -m unittest discover -s tests -k local_blocking -k commit_gate_xt_py_broken`
+- [ ] `T-1607` Tài liệu + giới hạn 🟢 (AUD-SEC-095/096, XFEAT-019, HAR-100, DOC-072…075), trọng số shard (AUD-TEST-017), CHANGELOG — Gate: `scripts/dev-task.sh lint`
 
 ### Lát C — quét lại theo diff bản sửa, phát hành
 - [ ] `T-1690` Quét lại theo diff bản sửa của lát B; sổ ghi SHA quét = HEAD lát B — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
