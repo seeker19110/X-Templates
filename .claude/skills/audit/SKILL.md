@@ -42,7 +42,7 @@ Không tái hiện được → hạ thành `suy luận:` (và hạ mức nếu 
 - `<XT> audit check docs/ops/AUDIT-STATUS.md` phải exit 0. Commit `docs(audit): …` (không sửa mã trong commit này).
 
 ## 6. Duyệt kế hoạch sửa — phiên chính tự duyệt
-Trình ≤ 20 dòng: số phát hiện theo mức, 🔴 từng dòng, kế hoạch đợt (mỗi đợt ≤ 1 PR, 🔴 trước, bug có test tái hiện đỏ trước khi sửa). Phiên chính tự duyệt theo tiêu chí chất lượng cuối (ADR-0008, `<XT> loop decide` → D-NNN; `.xtemplates/framework/11-autonomous-loop/stop-points-and-escalation.md` — có hay không chạy autopilot), báo người tóm tắt rồi làm tiếp; người đổi ý lúc nào cũng được. Phần cần người (điểm dừng về hành động) → `<XT> loop defer`, chỉ `loop block` khi mọi việc còn lại phụ thuộc nó. Không sửa lặng lẽ trước khi có kế hoạch đã ghi.
+Trình ≤ 20 dòng: số phát hiện theo mức, 🔴 từng dòng, kế hoạch đợt (mỗi đợt ≤ 1 PR, 🔴 trước, bug có test tái hiện đỏ trước khi sửa). Phiên chính tự duyệt theo tiêu chí chất lượng cuối (ADR-0008, `<XT> loop decide` → D-NNN; `<FW>/11-autonomous-loop/stop-points-and-escalation.md` — có hay không chạy autopilot), báo người tóm tắt rồi làm tiếp; người đổi ý lúc nào cũng được. Phần cần người (điểm dừng về hành động) → `<XT> loop defer`, chỉ `loop block` khi mọi việc còn lại phụ thuộc nó. Không sửa lặng lẽ trước khi có kế hoạch đã ghi.
 
 ## 7. Hội tụ (sau duyệt)
 Mỗi đợt: test/Gate đỏ → sửa → `/gate` → PR → cập nhật phát hiện `đã sửa` (#PR) → `<XT> audit plan` → quét lại nhóm bị chạm.

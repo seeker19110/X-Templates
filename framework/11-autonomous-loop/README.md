@@ -40,7 +40,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 0. Tên phiên `<Tên repo> — <tên nhánh>` (hook SessionStart in gợi ý). `<XT> doctor --fix` là việc **đầu tiên**: kiểm khung
    đã cài (runtime, hook + file hook + cú pháp, skill/subagent, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state,
    khung hợp lệ, `PROGRESS.md`), sửa phần an toàn, đảo ngược được. Còn ✗ (hook/settings/khung cài lệch) → báo người lệnh
-   `install.py` một lần, vẫn làm tiếp; `loop init` cảnh báo lại trên stderr (không chặn, ADR-0002 fail-open về luồng).
+   `install.py` một lần, vẫn làm tiếp — vòng thiếu máy kiểm: báo cáo cuối ghi rõ, gom vào việc chờ người; `loop init` cảnh
+   báo lại trên stderr (không chặn, ADR-0002 fail-open về luồng).
    Phiên ở chế độ quyền Auto (`claude --permission-mode auto`; phiên cloud chọn Auto ở bộ chọn chế độ quyền).
 
 **Pha 1 — lập kế hoạch, không code** (đầu ra từng giai đoạn: [`../00-method/lifecycle.md`](../00-method/lifecycle.md))
@@ -66,8 +67,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 10. **Mỗi vòng**: `<XT> loop status --json` → `continue` kèm `task`, `executor` (tầng giao việc, ADR-0029; `escalated` =
     chuyển cấp kèm diff + evidence lỗi + giả thuyết đã loại), `milestone_done` + `milestone_audit` (`now` → audit delta theo
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
-    ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'`
-    (ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
+    ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số —
+    chứa nháy đơn thì bọc nháy kép; ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
 11. Exit 0 → tick `[x]`, commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
     Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi D-NNN); lần 3 → máy đặt `blocked`
     ([`LOOP-DESIGN-005`](loop-design.md)). Không skip test, không nới cổng ([`LOOP-CI-001`](self-healing-ci.md)).
@@ -94,6 +95,6 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 
 ## Lệnh thật
 
-Bảng mọi lệnh con của `scripts/xt.py` ở [README gốc của repo khung](../../README.md) (§Công cụ) và `xt.py --help`.
+Bảng mọi lệnh con của `scripts/xt.py`: README gốc của repo khung §Công cụ ([`../../README.md`](../../README.md) trong repo khung; dự án đích xem trên GitHub `seeker19110/X-Templates`) và `<XT> --help`.
 Trần ngoài xt.py: Claude Code tự ngừng block Stop sau 8 lần liên tiếp không có tool call
 (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, không đặt `0`); headless thêm `--max-turns`, `--max-budget-usd`.
