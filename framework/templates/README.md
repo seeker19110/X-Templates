@@ -1,7 +1,7 @@
 ---
 title: Mẫu tài liệu
 kind: index
-updated: 2026-10-18
+updated: 2026-10-20
 ---
 
 # Mẫu tài liệu
@@ -9,7 +9,8 @@ updated: 2026-10-18
 > Mỗi mẫu gồm hướng dẫn ngắn (ai viết, giai đoạn G0–G8 nào theo [`../00-method/lifecycle.md`](../00-method/lifecycle.md),
 > cổng nào dùng) rồi phần mẫu trong một khối ```` ```markdown ```` để chép nguyên vào dự án và điền chỗ `<...>`.
 > Không có gì để điền thì ghi "không áp dụng — lý do", không xoá mục. Bốn file `AGENTS.md`, `CLAUDE.md`, `PROGRESS.md`, `xt.yaml` là
-> mẫu harness do `scripts/install.py` copy vào dự án đích (copy-if-absent), có chỗ `[ĐIỀN]` thay vì `<...>`.
+> mẫu harness do `scripts/install.py` copy vào dự án đích (copy-if-absent), có chỗ `[ĐIỀN]` thay vì `<...>`; `PULL-REQUEST.md`,
+> `dependabot.yml`, `ci.yml`, `secret-scan.yml` là mẫu `.github/` do `install.py --with-github` copy.
 
 | File | Dùng cho | Giai đoạn · cổng |
 |---|---|---|
@@ -32,4 +33,6 @@ updated: 2026-10-18
 | [`CLAUDE.md`](CLAUDE.md) | `CLAUDE.md` của dự án đích — chỉ import `AGENTS.md` + phần riêng cho Claude Code (hook, skill) | G5 · dựng nền harness |
 | [`PULL-REQUEST.md`](PULL-REQUEST.md) | `.github/pull_request_template.md` của dự án đích — mục tiêu + link, bằng chứng exit code, rủi ro/đường lùi, nhãn `risk:`, migration, phụ thuộc mới, hỗ trợ AI; `install.py --with-github` copy-if-absent | Mọi PR · `WF-GIT-014`, `WF-REVIEW-002` |
 | [`dependabot.yml`](dependabot.yml) | `.github/dependabot.yml` của dự án đích — chỉ hệ `github-actions` (thêm hệ theo manifest thật), gom nhóm, cooldown 14 ngày; `install.py --with-github` copy-if-absent | G5 · `BASE-DEP-007` |
+| [`ci.yml`](ci.yml) | `.github/workflows/ci.yml` của dự án đích — không phụ thuộc stack: job song song `build` · `typecheck` · `lint` · `test` (chia shard khi `xt.yaml` khai `test_list`/`test_unit`/`test_combine`, không thì một job `test`) · `coverage` · `checks` (`xt.py doctor`/`ci-check`, tiêu đề PR) + `quality` tổng hợp `if: always()` + `protection-guard`; lệnh lấy từ `xt.yaml` qua `.xtemplates/scripts/dev-task.sh`, cài phụ thuộc bằng khoá `setup`; `install.py --with-github` copy-if-absent | G5 · `WF-CI-001`, `WF-CI-024` |
+| [`secret-scan.yml`](secret-scan.yml) | `.github/workflows/secret-scan.yml` của dự án đích — job `gitleaks` (required check của ruleset mẫu), quét toàn lịch sử; `install.py --with-github` copy-if-absent | G5 · `WF-CI-001`, `BASE-SEC-002` |
 | [`xt.yaml`](xt.yaml) | `xt.yaml` — lệnh chuẩn của dự án cho hook và agent; YAML phẳng, không suy diễn từ văn xuôi. `dev-task.sh` chỉ chạy `format · lint · typecheck · test · build · format_file` (`gate` = build→typecheck→lint→test) và `format_check · test_fast` (`gate-fast`, cổng commit khi `commit_gate: fast`); khoá khác (`install`, `dev`, `e2e`, `migrate`, `init`, `smoke`, `audit`…) agent đọc và chạy trực tiếp | G5 · `dev-task.sh gate`; `LOOP-HARNESS-008` |

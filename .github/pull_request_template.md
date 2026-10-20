@@ -11,7 +11,7 @@
 - [ ] `refactor` / `docs` / `test` / `chore` / `ci`
 - [ ] ⚠️ Đổi ID/mức của mục đã có hoặc đổi hành vi `xt.py` (ghi CHANGELOG + lý do)
 
-## Cổng (bằng chứng ở CI job `quality`)
+## Cổng (bằng chứng ở CI: job tổng hợp `quality` gom build · typecheck · lint · test · coverage · py311 · checks)
 
 - [ ] `python3 scripts/xt.py validate` xanh (frontmatter, ID duy nhất, MUST có `→ Kiểm:`, link)
 - [ ] `python3 -m unittest discover -s tests` xanh

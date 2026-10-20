@@ -3,7 +3,7 @@
 > Ngày đo: 2026-10-20 · Revision: `6dded28` (`main` sau T-1519) + thay đổi của T-1521 chưa commit · Python 3.13.
 > Nguồn: [kế hoạch khắc phục §6](REMEDIATION-PLAN-2026-10-19.md#6-nâng-cấp-tự-động-hóa-auto--cơ-chế-thật) (AUTO-07),
 > [`PLAN-3.9-automation.md`](../autopilot/PLAN-3.9-automation.md) `T-1521`. Đo lại sau mỗi thay đổi policy/harness
-> và cập nhật bảng dưới; CI chạy lệnh ở job `quality` (`.github/workflows/ci.yml`).
+> và cập nhật bảng dưới; CI chạy lệnh ở job `checks` (`.github/workflows/ci.yml`; job tổng hợp `quality` đỏ khi `checks` đỏ).
 
 ## 1. Chạy
 
