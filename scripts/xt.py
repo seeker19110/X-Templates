@@ -106,6 +106,11 @@ LEVELS = ("MUST", "SHOULD", "MAY")
 SCALES = ("S", "M", "L")
 # Trần MUST hiệu lực ở quy mô M cho mỗi module/chuẩn; phần vượt là MUST@L — ADR-0004.
 MAX_MUST_AT_M = 4
+# Mục thiết yếu (ADR-0030): module khai `essential: [<ID>@<fact>, …]`; `compose --feature <fact>` đưa mục MUST@L đó lên
+# MUST ở quy mô M (không bị trần trên). Tập fact đóng, mỗi module tối đa MAX_ESSENTIAL ID — không bỏ trần đại trà.
+FEATURE_FACTS = ("auth", "jwt", "oauth", "reset", "payment", "pii")
+MAX_ESSENTIAL = 4
+ESSENTIAL_RE = re.compile(r"^(?P<id>[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3})@(?P<fact>[a-z]+)$")
 REQUIRED_KEYS = ("title", "kind", "updated")
 
 ITEM_RE = re.compile(
@@ -419,6 +424,43 @@ def _check_must_cap(d: Doc, where: str) -> List[str]:
     return []
 
 
+def _essential_entry_error(entry: str, by_id: Dict[str, Item]) -> str:
+    """Lỗi của một phần tử `essential` (rỗng nếu hợp lệ): dạng `<ID>@<fact>`, fact thuộc tập đóng, ID là mục MUST@L của file."""
+    m = ESSENTIAL_RE.match(entry)
+    if not m:
+        return f"'{entry}' phải dạng <ID>@<fact>"
+    if m["fact"] not in FEATURE_FACTS:
+        return f"fact '{m['fact']}' không thuộc {', '.join(FEATURE_FACTS)}"
+    it = by_id.get(m["id"])
+    if it is None:
+        return f"{m['id']} không có trong file"
+    if (it.level, it.scale) != ("MUST", "L"):
+        return f"{m['id']} không phải MUST@L (MUST/MUST@M đã là MUST ở M)"
+    return ""
+
+
+def _check_essential(d: Doc, where: str) -> List[str]:
+    """`essential` (ADR-0030): chỉ module/chuẩn, từng phần tử hợp lệ, tối đa MAX_ESSENTIAL ID mỗi file."""
+    entries = _as_list(d.meta.get("essential"))
+    if not entries:
+        return []
+    if d.kind not in ("module", "standard"):
+        return [f"{where}: 'essential' chỉ dùng cho module/standard (sàn không bị trần — ADR-0004)"]
+    by_id = {it.id: it for it in d.items}
+    errors = [f"{where}: essential {e}" for e in (_essential_entry_error(x, by_id) for x in entries) if e]
+    n_ids = len({x.partition("@")[0] for x in entries})
+    if n_ids > MAX_ESSENTIAL:
+        errors.append(f"{where}: {n_ids} mục essential, tối đa {MAX_ESSENTIAL} (ADR-0030 — không bỏ trần đại trà)")
+    return errors
+
+
+def essential_ids(d: Doc, features: Iterable[str]) -> Set[str]:
+    """ID mục thiết yếu của `d` mà ít nhất một fact đang bật (phần tử sai dạng bị bỏ — `validate` báo)."""
+    on = set(features)
+    hits = (ESSENTIAL_RE.match(x) for x in _as_list(d.meta.get("essential")))
+    return {m["id"] for m in hits if m and m["fact"] in on}
+
+
 def _check_sections(d: Doc, where: str) -> List[str]:
     """module/baseline/profile/industry: có `## Checklist` (khi có mục) và `## Nguồn`."""
     if d.kind not in ("module", "baseline", "profile", "industry"):
@@ -505,6 +547,7 @@ def validate(root: Path) -> List[str]:
         errors += _check_prefix(d, where, prefixes)
         errors += _check_items(d, where, ids)
         errors += _check_must_cap(d, where)
+        errors += _check_essential(d, where)
         errors += _check_sections(d, where)
         errors += _check_applies_to(d, where, profile_slugs)
         errors += _check_slug_modules(d, where, slugs, by_rel)
@@ -519,9 +562,13 @@ def validate(root: Path) -> List[str]:
 FLOOR_KINDS = ("baseline", "profile", "industry")
 
 
-def effective_level(item: Item, scale: str, doc_kind: str = "baseline") -> str:
+def effective_level(item: Item, scale: str, doc_kind: str = "baseline", essential: bool = False) -> str:
+    """Mức hiệu lực theo quy mô. `essential`: mục thiết yếu có fact đang bật — ở M là MUST dù ghi MUST@L (ADR-0030);
+    S vẫn theo sàn (ADR-0003), L đã là MUST."""
     if item.level != "MUST":
         return item.level
+    if essential and scale == "M":
+        return "MUST"
     if item.scale and SCALES.index(scale) < SCALES.index(item.scale):
         return "SHOULD"
     if scale == "S" and doc_kind not in FLOOR_KINDS:
@@ -585,16 +632,22 @@ def _compose_order(docs: List[Doc], profile: str, prof: Doc, inds: List[Doc], ex
 
 
 def _compose_sections(
-    root: Path, ordered: List[Doc], scale: str, include_may: bool, levels: Tuple[str, ...] = LEVELS
+    root: Path,
+    ordered: List[Doc],
+    scale: str,
+    include_may: bool,
+    levels: Tuple[str, ...] = LEVELS,
+    features: Sequence[str] = (),
 ) -> Tuple[List[str], Dict[str, int]]:
     """Mỗi tài liệu có mục thành một phần `### tiêu đề` + danh sách mục ở mức hiệu lực theo quy mô; đếm theo mức.
-    `levels`: chỉ in mục ở các mức này (đếm vẫn đủ); phần không còn mục nào thì bỏ."""
+    `levels`: chỉ in mục ở các mức này (đếm vẫn đủ); phần không còn mục nào thì bỏ. `features`: fact bật (ADR-0030)."""
     counts = {lv: 0 for lv in LEVELS}
     sections: List[str] = []
     for d in ordered:
         rows = []
+        ess = essential_ids(d, features)
         for it in d.items:
-            lv = effective_level(it, scale, d.kind)
+            lv = effective_level(it, scale, d.kind, it.id in ess)
             if lv == "MAY" and not include_may:
                 continue
             counts[lv] += 1
@@ -617,8 +670,10 @@ def _compose_header(
     include_may: bool,
     link_root: str,
     backlog: Optional[str] = None,
+    features: Sequence[str] = (),
 ) -> List[str]:
-    """Frontmatter + đầu trang + bảng đếm mục của BLUEPRINT.md (các dòng, chưa nối). `backlog`: tên file SHOULD/MAY."""
+    """Frontmatter + đầu trang + bảng đếm mục của BLUEPRINT.md (các dòng, chưa nối). `backlog`: tên file SHOULD/MAY.
+    `features`: fact đã bật (ADR-0030) — chỉ in khi có, để blueprint ghép không `--feature` giữ nguyên từng byte."""
     ind_names = ", ".join(ind_slugs) or "(không)"
     # xt.py nằm cạnh framework/ theo cùng gốc liên kết: dự án đích `.xtemplates/scripts/xt.py`, repo khung `scripts/xt.py`.
     xt_cmd = posixpath.join(posixpath.dirname(link_root), "scripts", "xt.py")
@@ -632,6 +687,7 @@ def _compose_header(
         f"scale: {scale}",
         f"generated: {today}",
         *([f"backlog: {backlog}"] if backlog else []),
+        *([f"features: [{', '.join(features)}]"] if features else []),
         "---",
         "",
         "# Blueprint dự án",
@@ -648,6 +704,14 @@ def _compose_header(
                 " `blueprint-status` đọc cả hai, ghép lại thì mục chuyển file theo ID (ADR-0012)."
             ]
             if backlog
+            else []
+        ),
+        *(
+            [
+                f"> Feature: {', '.join(features)} — mục thiết yếu của các fact này là MUST ở quy mô M dù ghi `MUST@L`;"
+                " ghép lại phải truyền lại đúng `--feature` (ADR-0030)."
+            ]
+            if features
             else []
         ),
         "",
@@ -670,13 +734,41 @@ def compose(
     include_may: bool,
     today: Optional[str] = None,
     extra: Optional[List[str]] = None,
+    features: Optional[List[str]] = None,
+    promoted: Optional[List[str]] = None,
 ) -> str:
+    """Blueprint một file mọi mức. `features`/`promoted`: như `compose_split`."""
     extra = extra or []
+    feats = norm_features(features)
     ordered, ind_slugs = _compose_sources(root, profile, industries, extra)
     today = today or _dt.date.today().isoformat()
-    sections, counts = _compose_sections(root, ordered, scale, include_may)
-    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, _rel_link(root))
+    sections, counts = _compose_sections(root, ordered, scale, include_may, features=feats)
+    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, _rel_link(root), None, feats)
+    if promoted is not None:
+        promoted.extend(essential_promoted(ordered, scale, feats))
     return "\n".join(header) + "\n" + "\n\n".join(sections) + "\n"
+
+
+def norm_features(features: Optional[Iterable[str]]) -> List[str]:
+    """Fact theo thứ tự `FEATURE_FACTS`, bỏ trùng — ghép hai lần cùng tập fact ra cùng byte; fact lạ → SystemExit."""
+    given = set(features or [])
+    unknown = sorted(given - set(FEATURE_FACTS))
+    if unknown:
+        raise SystemExit(f"Feature không hỗ trợ: {', '.join(unknown)} (chọn trong: {', '.join(FEATURE_FACTS)})")
+    return [f for f in FEATURE_FACTS if f in given]
+
+
+def essential_promoted(ordered: List[Doc], scale: str, features: Sequence[str]) -> List[str]:
+    """ID mục lên MUST nhờ fact (so với ghép không `--feature`) — báo cáo diff MUST/SHOULD của ADR-0030."""
+    out: List[str] = []
+    for d in ordered:
+        ess = essential_ids(d, features)
+        out.extend(
+            it.id
+            for it in d.items
+            if effective_level(it, scale, d.kind, it.id in ess) != effective_level(it, scale, d.kind)
+        )
+    return out
 
 
 def _compose_sources(root: Path, profile: str, industries: List[str], extra: List[str]) -> Tuple[List[Doc], List[str]]:
@@ -697,16 +789,24 @@ def compose_split(
     today: Optional[str] = None,
     extra: Optional[List[str]] = None,
     backlog_name: str = "BLUEPRINT-BACKLOG.md",
+    features: Optional[List[str]] = None,
+    promoted: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     """ADR-0012: (BLUEPRINT.md chỉ MUST hiệu lực ở quy mô, backlog SHOULD/MAY). Agent đọc file chính mỗi vòng; quy mô
-    chỉ đổi nhãn nên bản một file nặng như nhau ở S/M/L (web-app + ecommerce ~690 KB), MUST ở S chỉ ~40 KB."""
+    chỉ đổi nhãn nên bản một file nặng như nhau ở S/M/L (web-app + ecommerce ~690 KB), MUST ở S chỉ ~40 KB.
+    `features`: fact của dự án (ADR-0030); có `promoted` thì thêm ID mục thiết yếu được đưa lên MUST."""
     extra = extra or []
+    feats = norm_features(features)
     ordered, ind_slugs = _compose_sources(root, profile, industries, extra)
     today = today or _dt.date.today().isoformat()
     link_root = _rel_link(root)
-    must, counts = _compose_sections(root, ordered, scale, include_may, ("MUST",))
-    rest, _ = _compose_sections(root, ordered, scale, include_may, ("SHOULD", "MAY"))
-    header = _compose_header(profile, ind_slugs, extra, scale, today, counts, include_may, link_root, backlog_name)
+    must, counts = _compose_sections(root, ordered, scale, include_may, ("MUST",), feats)
+    rest, _ = _compose_sections(root, ordered, scale, include_may, ("SHOULD", "MAY"), feats)
+    header = _compose_header(
+        profile, ind_slugs, extra, scale, today, counts, include_may, link_root, backlog_name, feats
+    )
+    if promoted is not None:
+        promoted.extend(essential_promoted(ordered, scale, feats))
     bl_header = [
         "---",
         "title: Blueprint dự án — backlog SHOULD/MAY",
@@ -4739,15 +4839,37 @@ def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -
     return main, backlog
 
 
+def _report_essential(features: List[str], scale: str, promoted: List[str]) -> None:
+    """stderr: diff MUST/SHOULD do `--feature` (ADR-0030); fact bật ở S/L không đổi mức nào thì nói rõ."""
+    if not features:
+        return
+    if promoted:
+        print(
+            f"↑ {len(promoted)} mục thiết yếu lên MUST ở quy mô {scale} (feature {', '.join(features)}; ADR-0030): "
+            + ", ".join(promoted),
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"ℹ --feature {', '.join(features)} không đổi mức mục nào ở quy mô {scale} (chỉ M — ADR-0030)",
+            file=sys.stderr,
+        )
+
+
 def cmd_compose(args: argparse.Namespace) -> int:
     out_path = Path(args.out) if args.out else None
     bl_path = _backlog_path(out_path or Path("BLUEPRINT.md"))
     src = (args.framework, args.profile, args.industry or [], args.scale, args.include_may)
     backlog: Optional[str] = None
+    feats = args.feature or []
+    promoted: List[str] = []
     if args.full:
-        main = compose(*src, extra=args.add or [])
+        main = compose(*src, extra=args.add or [], features=feats, promoted=promoted)
     else:
-        main, backlog = compose_split(*src, extra=args.add or [], backlog_name=bl_path.name)
+        main, backlog = compose_split(
+            *src, extra=args.add or [], backlog_name=bl_path.name, features=feats, promoted=promoted
+        )
+    _report_essential(norm_features(feats), args.scale, promoted)
     if out_path is None:
         sys.stdout.write(main)
         if backlog is not None:
@@ -7955,6 +8077,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", help="ghi FILE (MUST theo quy mô) + <tên>-BACKLOG.md (SHOULD/MAY) cạnh nó; ghép lại giữ trạng thái"
     )
     pc.add_argument("--full", action="store_true", help="một file chứa mọi mức như trước ADR-0012 (không tách backlog)")
+    pc.add_argument(
+        "--feature",
+        action="append",
+        choices=FEATURE_FACTS,
+        help="fact của dự án (lặp được): mục thiết yếu của fact lên MUST ở quy mô M (ADR-0030)",
+    )
     pc.set_defaults(fn=cmd_compose)
     pg = sub.add_parser("guard-check", help="exit 126 nếu guard của dự án cấm lệnh (LOOP-STOP-027)")
     pg.add_argument("command", nargs=argparse.REMAINDER, help="-- <lệnh shell nguyên văn>")

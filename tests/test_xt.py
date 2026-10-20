@@ -1724,5 +1724,184 @@ class RealFrameworkTest(unittest.TestCase):
         self.assertEqual(errs, [], "\n".join(errs[:30]))
 
 
+AUTHX_MODULE = """
+---
+title: Xác thực thí điểm
+kind: module
+prefix: BE-AUTHX
+applies_to: [web-app]
+essential: [BE-AUTHX-002@auth, BE-AUTHX-003@jwt, BE-AUTHX-004@oauth, BE-AUTHX-005@reset, BE-AUTHX-003@auth]
+updated: 2026-10-20
+---
+
+# Xác thực thí điểm
+
+## Checklist
+
+- [ ] `BE-AUTHX-001` **MUST** Băm mật khẩu. → Kiểm: test hash.
+- [ ] `BE-AUTHX-002` **MUST@L** Khoá theo tài khoản. → Kiểm: test 20 lần sai.
+- [ ] `BE-AUTHX-003` **MUST@L** JWT cố định alg. → Kiểm: test alg none.
+- [ ] `BE-AUTHX-004` **MUST@L** OAuth PKCE. → Kiểm: test redirect.
+- [ ] `BE-AUTHX-005` **MUST@L** Reset một lần. → Kiểm: test token lần hai.
+- [ ] `BE-AUTHX-006` **MUST@L** Không thiết yếu. → Kiểm: test x.
+
+## Nguồn
+
+- z
+"""
+
+
+class EssentialNotCappedTest(unittest.TestCase):
+    """ADR-0030 (REC-05): mục `essential` không bị trần MUST ở M khi fact bật; S/L và ghép không fact không đổi."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.fw = make_framework(self.tmp)
+        write(self.fw / "08-backend" / "authx.md", AUTHX_MODULE)
+
+    def levels(self, scale: str, features: list[str]) -> dict[str, str]:
+        out = xt.compose(self.fw, "web-app", [], scale, include_may=False, today="2026-10-20", features=features)
+        found = {m["id"]: m["level"] for m in map(xt.ITEM_RE.match, out.splitlines()) if m}
+        return {k: v for k, v in found.items() if k.startswith("BE-AUTHX")}
+
+    def test_essential_not_capped_scale_feature_matrix(self):
+        ids = [f"BE-AUTHX-00{n}" for n in range(1, 7)]
+        cases = {
+            # (quy mô, fact) -> ID ở mức MUST; còn lại SHOULD
+            ("S", ()): set(),
+            ("S", ("auth", "jwt", "oauth", "reset")): set(),  # S: chỉ sàn (ADR-0003), fact không mở
+            ("M", ()): {"BE-AUTHX-001"},  # không fact: như trước ADR-0030
+            ("M", ("auth",)): {"BE-AUTHX-001", "BE-AUTHX-002", "BE-AUTHX-003"},  # 003 khai cả @auth
+            ("M", ("jwt",)): {"BE-AUTHX-001", "BE-AUTHX-003"},
+            ("M", ("oauth",)): {"BE-AUTHX-001", "BE-AUTHX-004"},
+            ("M", ("reset",)): {"BE-AUTHX-001", "BE-AUTHX-005"},
+            ("M", ("payment", "pii")): {"BE-AUTHX-001"},  # fact không khai ở module
+            ("M", ("auth", "jwt", "oauth", "reset")): set(ids) - {"BE-AUTHX-006"},
+            ("L", ()): set(ids),
+            ("L", ("auth",)): set(ids),
+        }
+        for (scale, feats), must in cases.items():
+            with self.subTest(scale=scale, feats=feats):
+                got = self.levels(scale, list(feats))
+                self.assertEqual({k for k, v in got.items() if v == "MUST"}, must)
+                self.assertEqual({k for k, v in got.items() if v == "SHOULD"}, set(ids) - must)
+
+    def test_essential_not_capped_report_and_header(self):
+        promoted: list[str] = []
+        main, backlog = xt.compose_split(
+            self.fw,
+            "web-app",
+            [],
+            "M",
+            False,
+            today="2026-10-20",
+            features=["reset", "auth", "auth"],
+            promoted=promoted,
+        )
+        self.assertEqual(promoted, ["BE-AUTHX-002", "BE-AUTHX-003", "BE-AUTHX-005"])
+        self.assertIn("features: [auth, reset]\n---", main)  # thứ tự cố định, bỏ trùng
+        self.assertIn("> Feature: auth, reset", main)
+        self.assertIn("`BE-AUTHX-005` **MUST**", main)
+        self.assertIn("`BE-AUTHX-004` **SHOULD**", backlog)
+        plain = xt.compose(self.fw, "web-app", [], "M", False, today="2026-10-20")
+        self.assertNotIn("features:", plain)
+        self.assertNotIn("> Feature:", plain)
+        none: list[str] = []
+        xt.compose(self.fw, "web-app", [], "L", False, today="2026-10-20", features=["auth"], promoted=none)
+        self.assertEqual(none, [])  # L đã MUST: không có gì "lên"
+        with self.assertRaises(SystemExit) as cm:
+            xt.compose(self.fw, "web-app", [], "M", False, features=["auth", "sso"])
+        self.assertIn("sso", str(cm.exception))
+
+    def test_essential_not_capped_cli_recompose_stable(self):
+        out = self.tmp / "proj" / "BLUEPRINT.md"
+        out.parent.mkdir()
+        args = ("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--out", str(out))
+        r1 = xt_cli(*args, "--feature", "auth", "--feature", "jwt")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertIn(
+            "↑ 2 mục thiết yếu lên MUST ở quy mô M (feature auth, jwt; ADR-0030): BE-AUTHX-002, BE-AUTHX-003", r1.stderr
+        )
+        first = out.read_text(encoding="utf-8"), (out.parent / "BLUEPRINT-BACKLOG.md").read_text(encoding="utf-8")
+        r2 = xt_cli(*args, "--feature", "jwt", "--feature", "auth")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        second = out.read_text(encoding="utf-8"), (out.parent / "BLUEPRINT-BACKLOG.md").read_text(encoding="utf-8")
+        self.assertEqual(first, second)  # ghép lại hai lần: cùng byte
+        r3 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "S", "--feature", "auth")
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        self.assertIn("không đổi mức mục nào ở quy mô S", r3.stderr)
+        r4 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--full", "--feature", "oauth")
+        self.assertIn("`BE-AUTHX-004` **MUST**", r4.stdout)
+        self.assertIn("BE-AUTHX-004", r4.stderr)
+        r5 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--feature", "sso")
+        self.assertEqual(r5.returncode, 2)  # argparse: fact ngoài tập đóng
+
+    def test_essential_not_capped_must_cap_unchanged(self):
+        # trần ADR-0004 đếm mức KHÔNG fact: 4 MUST trơn + 4 MUST@L thiết yếu vẫn hợp lệ
+        extra = "".join(f"- [ ] `BE-AUTHX-0{n}` **MUST** x. → Kiểm: y.\n" for n in range(10, 13))
+        path = self.fw / "08-backend" / "authx.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("## Nguồn", extra + "\n## Nguồn"), encoding="utf-8")
+        self.assertEqual(xt.validate(self.fw), [])
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "## Nguồn", "- [ ] `BE-AUTHX-013` **MUST** x. → Kiểm: y.\n\n## Nguồn"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(len([e for e in xt.validate(self.fw) if "trần 4" in e]), 1)
+
+    def test_essential_not_capped_validate_rejects_bad_entries(self):
+        path = self.fw / "08-backend" / "authx.md"
+        base = path.read_text(encoding="utf-8")
+        bad = {
+            "[BE-AUTHX-002]": "phải dạng <ID>@<fact>",
+            "[BE-AUTHX-002@sso]": "fact 'sso' không thuộc",
+            "[BE-AUTHX-099@auth]": "BE-AUTHX-099 không có trong file",
+            "[BE-AUTHX-001@auth]": "BE-AUTHX-001 không phải MUST@L",
+            "[BE-AUTHX-002@auth, BE-AUTHX-003@auth, BE-AUTHX-004@auth, BE-AUTHX-005@auth, BE-AUTHX-006@auth]": (
+                "5 mục essential, tối đa 4"
+            ),
+        }
+        line = "essential: [BE-AUTHX-002@auth, BE-AUTHX-003@jwt, BE-AUTHX-004@oauth, BE-AUTHX-005@reset, BE-AUTHX-003@auth]"
+        for value, msg in bad.items():
+            with self.subTest(value=value):
+                path.write_text(base.replace(line, f"essential: {value}"), encoding="utf-8")
+                errs = xt.validate(self.fw)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn(msg, errs[0])
+        path.write_text(base, encoding="utf-8")
+        sec = self.fw / "01-baseline" / "security.md"
+        sec.write_text(
+            sec.read_text(encoding="utf-8").replace("updated:", "essential: [BASE-SEC-002@auth]\nupdated:"),
+            encoding="utf-8",
+        )
+        errs = xt.validate(self.fw)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("'essential' chỉ dùng cho module/standard", errs[0])
+        # phần tử sai dạng bị bỏ khi ghép (validate đã báo), không làm hỏng compose_sections
+        doc = xt.Doc(path=sec, rel="x", meta={"essential": ["rác", "BE-X-001@auth"]}, body="", body_offset=0)
+        self.assertEqual(xt.essential_ids(doc, ["auth"]), {"BE-X-001"})
+
+    def test_essential_not_capped_real_authn_pilot(self):
+        # thí điểm thật: chỉ 4 mục BE-AUTH, chỉ ở M, đúng fact; hồ sơ khác không đổi khi không fact
+        fw = xt.DEFAULT_FRAMEWORK
+        self.assertEqual(xt.validate(fw), [])
+        pilot = {"auth": "BE-AUTH-003", "jwt": "BE-AUTH-006", "oauth": "BE-AUTH-008", "reset": "BE-AUTH-015"}
+        for fact, iid in pilot.items():
+            promoted: list[str] = []
+            xt.compose(fw, "api-service", [], "M", False, features=[fact], promoted=promoted)
+            self.assertEqual(promoted, [iid])
+        for fact in ("payment", "pii"):
+            promoted = []
+            xt.compose(fw, "api-service", [], "M", False, features=[fact], promoted=promoted)
+            self.assertEqual(promoted, [])
+        for scale in ("S", "L"):
+            promoted = []
+            xt.compose(fw, "web-app", [], scale, False, features=list(pilot), promoted=promoted)
+            self.assertEqual(promoted, [])
+        essentials = {d.rel: d.meta["essential"] for d in xt.load_docs(fw)[0] if "essential" in d.meta}
+        self.assertEqual(list(essentials), ["08-backend/authn-authz"])  # không bỏ trần đại trà
+
+
 if __name__ == "__main__":
     unittest.main()

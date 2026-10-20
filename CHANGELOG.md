@@ -6,6 +6,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- Mục thiết yếu không bị trần MUST ở M (T-1519, REC-05, [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md)):
+  `xt.py compose --feature <auth|jwt|oauth|reset|payment|pii>` (lặp được) đưa mục `MUST@L` mà module khai ở frontmatter
+  `essential: [<ID>@<fact>]` lên MUST ở quy mô M; S/L và ghép không `--feature` không đổi một byte. Blueprint ghi
+  `features:` + dòng `> Feature:`; stderr báo ID được đưa lên. `validate` chặn `essential` sai dạng/fact lạ/ID không
+  phải `MUST@L`/quá 4 ID mỗi file/dùng ở sàn. Thí điểm `08-backend/authn-authz.md`: **`BE-AUTH-003`** (`auth`),
+  **`BE-AUTH-006`** (`jwt`), **`BE-AUTH-008`** (`oauth`), **`BE-AUTH-015`** (`reset`) — mức gốc giữ `MUST@L`, chữ mục
+  không đổi; nguồn RFC 8725, OWASP Authentication và Forgot Password xác minh lại 2026-10-20. Dự án đích: chạy lại
+  `install.py`, rồi ghép lại blueprint M kèm `--feature` đúng tính năng đang có (trạng thái giữ theo ID).
 - Drift có kiểm chứng (T-1518, AUTO-06): `xt.py doctor --drift [--latest TAG] [--json]` so `.xtemplates/manifest.json` với
   bản cài — file thiếu/`modified`, rule `allow`/`deny` của khung không còn trong `settings.json`, thiếu AGENTS/CLAUDE/khung,
   nhãn khung cũ hơn tag mới nhất (`--latest` hoặc `gh api`, fail-open); exit 1 khi lệch (trừ `modified`). `doctor` thêm

@@ -168,6 +168,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check`, `pr next`, `merge-gate`, guard và steward — auto-merge cần review sạch ở head.
 - [ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md): hai tầng executor (`executor-deep`) có
   chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive`, `release-check` (G7 máy đọc).
+- [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md): mục `essential` không bị trần MUST ở M khi fact bật
+  (`compose --feature`), thí điểm `08-backend/authn-authz.md`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
