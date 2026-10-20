@@ -44,16 +44,17 @@ ghi thì như merge-check lỗi mạng.
 |---|---:|---:|---:|---:|---:|---:|
 | pr | 44 | 44 | 0 | 0 | 0 | 0 |
 | rollup | 17 | 17 | 0 | 0 | 0 | 0 |
-| review | 25 | 25 | 0 | 0 | 0 | 0 |
-| guard | 169 | 169 | 0 | 0 | 0 | 0 |
+| review | 28 | 28 | 0 | 0 | 0 | 0 |
+| guard | 183 | 183 | 0 | 0 | 0 | 0 |
 | ci_log | 25 | 25 | 0 | 0 | 0 | 0 |
 | harness | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Tổng** | **291** | **291** | **0** | **0** | **0** | **0** |
+| **Tổng** | **308** | **308** | **0** | **0** | **0** | **0** |
 
-Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 29 · phát hiện audit 153 · đối kháng do tác giả bản sửa viết 77 · đối kháng do reviewer khác họ
-model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 32. Độ phủ: 117 ID bắt buộc (8 REC §2 + 109 🔴/🟠 đã sửa) —
-70 có ca, 47 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
-thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run), 0 chưa phủ. Thời gian chạy ~0,35 s.
+Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031) 33 · phát hiện audit 155 · đối kháng do tác giả bản sửa viết 84 · đối kháng do reviewer khác họ
+model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 36. Độ phủ: 128 ID bắt buộc (8 REC §2 + 120 🔴/🟠 đã sửa) —
+75 có ca, 53 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
+thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run, sổ audit/blueprint, bộ test của khung,
+bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Thời gian chạy ~0,35 s.
 
 Kiểm độ nhạy (test `test_autonomy_bench_detects_regression_as_false_green`): gỡ bản sửa AUD-HAR-058 (`NON_CI_CHECKS`)
 và REC-08 (`NOT_RUN_STATES`) khỏi hàm thật → corpus báo false-green ở `rollup-har058-only-merge-gate`,
