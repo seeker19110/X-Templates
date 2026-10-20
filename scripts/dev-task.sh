@@ -13,7 +13,7 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine
 #   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
 #          mở PR, `xt.py loop record` dùng đúng lệnh này.
 #   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
@@ -21,6 +21,12 @@
 #          XT_CHANGED_FILES (mỗi dòng một file); test_fast trống/no-op hoặc không biết file đổi (không phải repo git,
 #          chưa có commit) → chạy `test` (không bao giờ yếu hơn test thường). Không chạy build, không ngưỡng coverage
 #          riêng — cổng đầy đủ ở CI giữ chúng.
+#   test-shard I N [DIR] = chạy phần thứ I (1..N) của bộ test cho CI song song (fan-out): lệnh khai báo `test_list` in
+#          mỗi dòng một id test (sắp xếp, bỏ trùng); id thứ k (đếm từ 0) thuộc shard (k mod N) + 1; mỗi id chạy
+#          `test_unit` (id ở "$1") song song theo số CPU. DIR → export XT_COV_DIR=DIR để `test_unit` ghi dữ liệu
+#          coverage vào đó. Đỏ khi `test_list` đỏ, ít hơn XT_MIN_TESTS id (mặc định 1) hoặc shard rỗng.
+#   test-combine DIR = gộp dữ liệu coverage các shard (fan-in): export XT_COV_DIR=DIR rồi chạy `test_combine` (ngưỡng
+#          nằm trong lệnh đó). Không khai `test_list`/`test_unit`/`test_combine` → đỏ (không có no-op cho chia test).
 #
 # Dùng: scripts/dev-task.sh <task>
 set -uo pipefail
@@ -37,7 +43,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine"
   exit 2
 fi
 
@@ -195,6 +201,46 @@ gate_report() { # $1=rc $2=tên cổng → log kết quả, exit rc
   exit "$1"
 }
 
+# --- test-shard / test-combine: chia bộ test cho job CI song song, gộp coverage ----------
+shard_decl() { # $1=khoá → lệnh khai báo (in ra); thiếu → log, 1
+  local c; c="$(declared_cmd "$1")"
+  [ -n "$c" ] && ! is_noop "$c" && { printf '%s' "$c"; return 0; }
+  log "$TASK: chưa khai lệnh '$1' trong xt.yaml (hoặc là lệnh không kiểm gì) — chia test cần lệnh thật"
+  return 1
+}
+cov_dir() { # $1=thư mục → export XT_COV_DIR (đường dẫn tuyệt đối, tạo nếu chưa có)
+  mkdir -p -- "$1" && XT_COV_DIR="$(cd -- "$1" && pwd)" && export XT_COV_DIR
+}
+test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
+  local i="$1" n="$2" min="${XT_MIN_TESTS:-1}" list unit ids total pick
+  if ! [[ "$i" =~ ^[1-9][0-9]{0,5}$ && "$n" =~ ^[1-9][0-9]{0,5}$ && "$min" =~ ^[0-9]{1,9}$ ]] || [ "$i" -gt "$n" ]; then
+    log "test-shard: cần 1 ≤ I ≤ N và XT_MIN_TESTS là số (nhận I='$i' N='$n' XT_MIN_TESTS='$min')"; return 2
+  fi
+  list="$(shard_decl test_list)" && unit="$(shard_decl test_unit)" || return 2
+  unset XT_COV_DIR
+  if [ -n "${3:-}" ]; then cov_dir "$3" || return 2; fi
+  guard_ok "$list" && guard_ok "$unit" || return 126
+  ids="$(cd "$ROOT" && bash -o pipefail -c "$list" | sed -E 's/[[:space:]]+$//' | grep -v '^$' | LC_ALL=C sort -u)" ||
+    { log "test-shard: 'test_list' đỏ hoặc không in id nào"; return 1; }
+  total="$(printf '%s\n' "$ids" | grep -c .)"
+  if [ "$total" -lt "$min" ]; then
+    log "test-shard: chỉ có $total id test < XT_MIN_TESTS=$min — liệt kê hỏng thì không được xanh"; return 1
+  fi
+  pick="$(printf '%s\n' "$ids" | awk -v i="$i" -v n="$n" '(NR - 1) % n == i - 1')"
+  [ -n "$pick" ] || { log "test-shard: shard $i/$n rỗng (chỉ $total id) — giảm N"; return 1; }
+  log "test-shard $i/$n: $(printf '%s\n' "$pick" | grep -c .)/$total id"
+  printf '%s\n' "$pick" | (cd "$ROOT" && xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 bash -o pipefail -c "$unit" _)
+}
+test_combine() { # $1=thư mục chứa dữ liệu coverage của mọi shard
+  local c
+  [ -n "${1:-}" ] && [ -d "$1" ] || { log "test-combine: cần thư mục dữ liệu có sẵn (nhận '${1:-}')"; return 2; }
+  c="$(shard_decl test_combine)" || return 2
+  cov_dir "$1" || return 2
+  guard_ok "$c" || return 126
+  log "test-combine: $c (XT_COV_DIR=$XT_COV_DIR)"
+  (cd "$ROOT" && bash -o pipefail -c "$c")
+}
+
 # --- format-file: format ĐÚNG file vừa sửa (dùng cho auto-format hook) --------
 json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
   command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
@@ -259,6 +305,10 @@ case "$TASK" in
       run_task "$t" || { rc=1; log "GATE-FAST ĐỎ ở '$t' → dừng"; break; }
     done
     gate_report "$rc" GATE-FAST ;;
+  test-shard)
+    test_shard "${2:-}" "${3:-}" "${4:-}"; exit $? ;;
+  test-combine)
+    test_combine "${2:-}"; exit $? ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine)"; exit 2 ;;
 esac

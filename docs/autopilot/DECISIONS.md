@@ -671,3 +671,10 @@
 - Chọn: hard_waived vẫn cần review sạch; build chỉ hiệu lực khi xt.yaml ở nhánh đích VÀ cây cùng là build; review_debt theo SHA của nhóm audit chứa file
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1: chặt hơn; PR không tự bật build cho chính nó; tránh báo nợ mãi sau audit delta
 - Đường lùi: đặt delivery_phase: harden
+
+### D-095 · 2026-10-20T04:35:11+00:00 · CI shard test: chia mod N bị lệch tải (26/34/53/100 s)
+
+- Phương án: (1) mod N như spec · (2) tham lam theo trọng số (file trọng số trong repo, lớp lạ lấy mặc định) · (3) shard theo phương thức · (4) băm crc32 rồi mod N
+- Chọn: tham lam theo trọng số (file trọng số trong repo, lớp lạ lấy mặc định)
+- Lý do (tiêu chí chất lượng cuối): mục tiêu là giảm wall time; mod N gần như không nhanh hơn; 2 gần tối ưu (~54 s/shard) và bền khi thêm lớp (lớp lạ có mặc định), chi phí là một file trọng số
+- Đường lùi: quay về mod N trong test-shard
