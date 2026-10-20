@@ -91,6 +91,45 @@ class InterpCwdTest(unittest.TestCase):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
 
+class NestedCwdTest(unittest.TestCase):
+    """AUD-SEC-087: shell lồng sau `cd` chạy trong thư mục của lệnh đó — `cd .claude && bash -c "echo x > settings.json"`
+    là ghi `.claude/settings.json` như `echo x > .claude/settings.json`, không được quét với thư mục ban đầu."""
+
+    def test_guard_nested_cwd(self):
+        cases = {
+            'cd .claude && bash -c "echo x > settings.json"': "HOOK_BYPASS",
+            "cd .claude; sh -c 'echo x > settings.local.json'": "HOOK_BYPASS",
+            "cd .claude/hooks && bash -lc 'echo > guard.py'": "HOOK_BYPASS",
+            'cd .claude && eval "echo x > settings.json"': "HOOK_BYPASS",
+            "cd .claude && bash <<< 'echo x > settings.json'": "HOOK_BYPASS",
+            "cd .claude && echo 'echo x > settings.json' | bash": "HOOK_BYPASS",
+            "cd .claude && bash <<'E'\necho x > settings.json\nE": "HOOK_BYPASS",
+            "cd .claude && uv run bash -c 'echo x > settings.json'": "HOOK_BYPASS",
+            "cd .claude && python3 -c \"import os; os.system('echo x > settings.json')\"": "HOOK_BYPASS",
+            'cd .autopilot && bash -c "echo {} > verified.json"': "EVIDENCE_HANDWRITE",
+            'cd docs && bash -c "echo K=1 > ../.env"': "SECRET_WRITE",
+            "bash -c 'cd .claude && bash -c \"echo x > settings.json\"'": "HOOK_BYPASS",
+            # cùng chuỗi lệnh lồng ở hai thư mục: lần ở gốc vẫn được quét
+            "cd .claude && bash -c 'echo x > .claude/settings.json'; cd .. && bash -c 'echo x > .claude/settings.json'": (
+                "HOOK_BYPASS"
+            ),
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_nested_cwd_other_dir_passes(self):
+        for cmd in (
+            'cd docs && bash -c "echo x > a.md"',
+            'cd docs && bash -c "echo x > settings.json"',
+            "(cd .claude && ls); bash -c 'echo x > settings.json'",
+            'cd .claude && bash -c "cat settings.json"',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+
 class InterpAliasWriteTest(unittest.TestCase):
     """AUD-SEC-084: script ghi file hàng rào/bí mật/bằng chứng qua biến hoặc bí danh (`p='.env'; open(p,'w')`,
     `Path as P`) → mã chặn như ghi trực tiếp, không phải ask thường mà chính sách mặc định cho qua."""

@@ -3139,6 +3139,47 @@
    }
   },
   {
+   "id": "guard-sec087-cd-claude-bash-c",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-087"
+   ],
+   "input": {
+    "command": "cd .claude && bash -c \"echo x > settings.json\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec087-cd-autopilot-pipe-sh",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-087"
+   ],
+   "input": {
+    "command": "cd .autopilot && echo 'echo {} > verified.json' | sh"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec087-cd-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-087"
+   ],
+   "input": {
+    "command": "cd docs && bash -c \"echo x > a.md\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
    "id": "guard-sec084-var-settings",
    "origin": "repro",
    "refs": [

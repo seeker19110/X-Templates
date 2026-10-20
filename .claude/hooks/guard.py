@@ -3470,7 +3470,7 @@ class ScanBudget:
     def __init__(self) -> None:
         self.calls = SCAN_CALLS
         self.deadline = time.monotonic() + SCAN_SECONDS
-        self.seen: Set[str] = set()
+        self.seen: Set[Tuple[str, Optional[str]]] = set()  # (script, thư mục chạy): cùng chuỗi ở thư mục khác vẫn quét
 
     def exhausted(self) -> bool:
         self.calls -= 1
@@ -4257,11 +4257,11 @@ def _scan_scripts(
             break
         if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
             return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
-        if script in budget.seen:
+        if (script, cwd) in budget.seen:
             continue
         if not deeper and len(script) > REWRITE_MAX_CHARS:
             return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
-        budget.seen.add(script)
+        budget.seen.add((script, cwd))
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
             return str(sub["reason"])
@@ -4296,9 +4296,41 @@ def _scan_nested(
     rewritten = _var_scripts(tokens) + _runner_scripts(tokens) + _lifted_scripts(cmd)
     nested = _nested_scripts(cmd, tokens) + host + _exec_api_scripts(_interp_scripts(cmd, tokens)) + decoded
     nested += _ssh_local_scripts(tokens)
+    for here, scripts in _moved_nested_scripts(cmd, tokens, cwd or root).items():
+        moved = _scan_scripts(scripts, root, here, depth, asks, 1, budget)
+        if moved:
+            return moved
     return _scan_scripts(rewritten, root, cwd, depth, asks, 0, budget, rewrites) or _scan_scripts(
         nested, root, cwd, depth, asks, 1, budget
     )
+
+
+def _moved_nested_scripts(cmd: str, tokens: List[str], start: str) -> Dict[Optional[str], List[str]]:
+    """Lệnh lồng đứng sau `cd`/`pushd` (AUD-SEC-087), nhóm theo thư mục nó chạy: `cd .claude && bash -c '…'` chạy
+    trong `.claude`. Gồm `sh -c`, `eval`, here-string/ống/heredoc vào shell, lệnh bọc trên máy, `os.system` trong script
+    trình thông dịch. Lệnh ở thư mục ban đầu đã có lượt quét chung; thư mục không rõ (None) quét như gốc dự án."""
+    out: Dict[Optional[str], List[str]] = {}
+    placed = _commands_with_cwd(tokens, start)
+    dirs = [here for _, here in placed]
+
+    def add(here: Optional[str], scripts: List[str]) -> None:
+        if here != start and scripts:
+            out.setdefault(here, []).extend(scripts)
+
+    for c, here in placed:
+        add(here, [s for s in [_shell_c_script(c)] if s] + _eval_scripts(c) + _here_strings(c) + _wrapped_scripts(c)[0])
+    i = 0
+    for pipe in pipelines(tokens):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 :]):
+            if feed and (_stdin_shell(down) or _argless_shell_c(down)):
+                add(here, feed)
+        i += len(pipe)
+    shells = list(dict.fromkeys(here for c, here in placed if _stdin_shell(c)))
+    for here in shells:
+        add(here, _heredoc_scripts(cmd))
+    for script, here in _interp_scripts_at(cmd, tokens, start):
+        add(here, _exec_api_scripts([script]))
+    return out
 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
