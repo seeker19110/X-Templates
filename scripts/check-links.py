@@ -7,7 +7,8 @@
 - Bỏ qua thư mục: .git, node_modules, .venv, .autopilot, __pycache__.
 Thoát 1 nếu có link hỏng. Chỉ dùng thư viện chuẩn.
 
-`--external` (REC-13) kiểm URL http(s) thay vì link nội bộ và phân loại kết quả (chính sách ở
+`--external` (REC-13) kiểm URL http(s) thay vì link nội bộ — đích `[text](url)`, autolink `<url>` (cách khung ghi
+nguồn) và URL trần; bỏ qua URL trong code span/fence (ví dụ minh hoạ) — và phân loại kết quả (chính sách ở
 framework/11-autonomous-loop/self-healing-ci.md, mục "Kiểm liên kết ngoài"):
 - tạm (5xx, 408, timeout, lỗi mạng): thử lại hữu hạn, còn lỗi thì CẢNH BÁO, không làm đỏ;
 - đổi (3xx): CẢNH BÁO, nên cập nhật URL; chết (404/410/4xx khác): LỖI, exit 1;
@@ -35,6 +36,9 @@ SKIP_DIRS = {".git", "node_modules", ".venv", ".autopilot", "__pycache__", ".xte
 LINK_RE = re.compile(r"\[[^\]]*\]\((<[^>]+>|[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 URL_RE = re.compile(r"^https?://[^\s]+$")
+CODE_SPAN_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")  # `x` và ``x ` y``: URL trong đó là ví dụ, không phải nguồn
+AUTOLINK_RE = re.compile(r"<(https?://[^\s<>]+)>")
+BARE_URL_RE = re.compile(r"https?://[^\s<>\[\]\"`|]+")
 SKIP_HOSTS = {"localhost", "127.0.0.1", "example.com", "example.org", "example.net"}
 SKIP_SUFFIXES = (".invalid", ".example", ".test", ".localhost")
 RETRY_GET_CODES = {403, 405, 501}  # HEAD bị từ chối → thử lại bằng GET trước khi kết luận
@@ -49,8 +53,8 @@ def iter_md(root: Path) -> Iterator[Path]:
         yield p
 
 
-def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
-    """(file, số dòng, đích) của mọi link Markdown ngoài code fence; đích đã bỏ `<>`."""
+def iter_lines(root: Path) -> Iterator[tuple[Path, int, str]]:
+    """(file, số dòng, dòng) của mọi dòng Markdown nằm ngoài code fence."""
     for p in iter_md(root):
         fence: str | None = None
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
@@ -58,10 +62,34 @@ def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
             if m and (fence is None or m.group(1) == fence):
                 fence = None if fence else m.group(1)
                 continue
-            if fence:
-                continue
-            for target in LINK_RE.findall(line):
-                yield p, n, (target[1:-1] if target.startswith("<") else target)
+            if not fence:
+                yield p, n, line
+
+
+def _unangle(target: str) -> str:
+    return target[1:-1] if target.startswith("<") else target
+
+
+def iter_links(root: Path) -> Iterator[tuple[Path, int, str]]:
+    """(file, số dòng, đích) của mọi link Markdown ngoài code fence; đích đã bỏ `<>`."""
+    for p, n, line in iter_lines(root):
+        for target in LINK_RE.findall(line):
+            yield p, n, _unangle(target)
+
+
+def line_urls(line: str) -> list[str]:
+    """URL http(s) trong một dòng: đích `[text](url)`, autolink `<url>`, URL trần; bỏ qua mọi thứ trong code span."""
+    rest = CODE_SPAN_RE.sub(" ", line)
+    urls = [_unangle(t) for t in LINK_RE.findall(rest)]
+    rest = LINK_RE.sub(" ", rest)
+    urls += AUTOLINK_RE.findall(rest)
+    rest = AUTOLINK_RE.sub(" ", rest)
+    for raw in BARE_URL_RE.findall(rest):
+        url = raw.rstrip(".,;:!?*_'")
+        while url.endswith(")") and url.count(")") > url.count("("):  # `(xem https://a/b)` → bỏ `)` đóng câu
+            url = url[:-1]
+        urls.append(url)
+    return urls
 
 
 def check(root: Path) -> list[str]:
@@ -82,14 +110,15 @@ def check(root: Path) -> list[str]:
 def external_urls(root: Path) -> dict[str, str]:
     """URL http(s) duy nhất (bỏ #anchor, bỏ host giả/nội bộ) → vị trí `file:dòng` đầu tiên."""
     found: dict[str, str] = {}
-    for p, n, target in iter_links(root):
-        if not URL_RE.match(target):
-            continue
-        url = target.split("#", 1)[0]
-        host = (urlsplit(url).hostname or "").lower()
-        if host in SKIP_HOSTS or host.endswith(SKIP_SUFFIXES):
-            continue
-        found.setdefault(url, f"{p.relative_to(root)}:{n}")
+    for p, n, line in iter_lines(root):
+        for target in line_urls(line):
+            if not URL_RE.match(target):
+                continue
+            url = target.split("#", 1)[0]
+            host = (urlsplit(url).hostname or "").lower()
+            if host in SKIP_HOSTS or host.endswith(SKIP_SUFFIXES):
+                continue
+            found.setdefault(url, f"{p.relative_to(root)}:{n}")
     return found
 
 

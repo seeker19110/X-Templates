@@ -8,7 +8,7 @@
 ## 1. Chạy
 
 ```bash
-python3 scripts/xt.py autonomy-bench            # bảng theo nhóm; exit 1 khi false-green > 0, 2 khi corpus hỏng
+python3 scripts/xt.py autonomy-bench            # bảng theo nhóm; exit 1 khi false-green/lệch/ID chưa phủ, 2 khi corpus hỏng
 python3 scripts/xt.py autonomy-bench --json     # {revision, cases, false_green, groups, origins, coverage, failures}
 python3 scripts/xt.py autonomy-bench --corpus tests/fixtures/autonomy/pending   # lỗ đã biết, chưa sửa (exit 1; hiện trống)
 python3 -m unittest discover -s tests -k autonomy_bench

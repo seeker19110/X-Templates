@@ -212,6 +212,24 @@ class AutonomyBenchCorpusTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(json.loads(out)["coverage"]["sources"], {"remediation": 0, "audit": 0})
 
+    def test_autonomy_bench_mismatch_or_uncovered_exit_1(self):
+        """Cổng đúng nhưng `code` lệch → mismatch → exit 1; ID bắt buộc chưa có ca (không lệch) → exit 1; đủ → 0."""
+        self.write(
+            "guard.json",
+            {"cases": [case("code-lech", {"command": "git status"}, {"allowed": True, "code": "KHONG_PHAI"})]},
+        )
+        rc, out, _ = self.run_bench("--json")
+        d = json.loads(out)
+        self.assertEqual((rc, d["false_green"], d["error"], d["mismatch"]), (1, 0, 0, 1))
+        self.write("guard.json", {"cases": [case("ok", {"command": "git status"}, {"allowed": True}, refs=["REC-01"])]})
+        (self.base / "R.md").write_text("# K\n\n## 2. Tái hiện\n\n| REC-01 | a |\n| REC-02 | b |\n", encoding="utf-8")
+        rc, out, _ = self.run_bench("--json", "--remediation", "R.md")
+        d = json.loads(out)
+        self.assertEqual((rc, d["mismatch"], d["coverage"]["uncovered"]), (1, 0, ["REC-02"]))
+        self.write("scope.json", {"out_of_scope": [{"reason": "tài liệu", "ids": ["REC-02"]}]})
+        rc, _, _ = self.run_bench("--json", "--remediation", "R.md")
+        self.assertEqual(rc, 0)
+
     def test_autonomy_bench_guard_scratch_files_must_stay_inside(self):
         """`files` của ca: đường tuyệt đối/`..`/rỗng → ca lỗi (không ghi ra ngoài thư mục tạm); đường hợp lệ được tạo."""
         bad = [{"/etc/x": "1"}, {"../x": "1"}, {"": "1"}]

@@ -768,7 +768,14 @@ class DoctorDriftTest(DoctorCase):
             self.assertEqual(self.drift("--latest", latest)[0], 0)
         (self.base / ".xtemplates" / "VERSION").write_text("3.9.0-rc1\n", encoding="utf-8")
         self.assertEqual(self.drift("--latest", "v3.9.0")[0], 1)  # rc < bản chính
-        self.assertEqual(self.drift("--latest", "không-phải-tag")[0], 0)  # tag lạ → không kết luận
+        for bad in ("không-phải-tag", "", "v3.9", "3.9.0x"):  # tag sai dạng → lỗi dùng lệnh, không lặng lẽ bỏ qua
+            with self.subTest(bad=bad):
+                out, err = io.StringIO(), io.StringIO()
+                with redirect_stdout(out), redirect_stderr(err):
+                    rc = xt.main(["--framework", str(self.fw), "doctor", "--drift", "--json", "--latest", bad])
+                self.assertEqual((rc, out.getvalue()), (2, ""))
+                self.assertIn("không phải tag vX.Y.Z", err.getvalue())
+        self.assertEqual(xt._drift_version(self.base, "không-phải-tag")[1:], (None, []))  # hàm: tag lạ → không kết luận
         (self.base / ".xtemplates" / "VERSION").write_text("nhãn-lạ", encoding="utf-8")
         self.assertEqual(self.drift("--latest", "v9.9.9")[0], 0)
         (self.base / ".xtemplates" / "VERSION").unlink()

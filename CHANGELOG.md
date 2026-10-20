@@ -93,6 +93,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   re-run, chi phí và run đã triage của episode (trước: luân phiên `--task` lách trần 3 lần); `loop init --force` vẫn xoá
   (D-087). 🟡 `loop status`/`loop next` cảnh báo `sau:` trỏ ID không có trong PLAN (JSON `unknown_after`), không đổi
   hành vi chặn. `autonomy-bench`: 266 ca, 0 false-green. Dự án đích: chạy lại `install.py`.
+- Review độc lập PR #173. 🔴 `check-links.py --external` chỉ đọc đích của link Markdown (ngoặc vuông + ngoặc tròn) nên chỉ kiểm 9 URL — khung ghi nguồn
+  bằng autolink `<https://…>` (≈ 800 URL, lychee trước đây có quét) → `links.yml` xanh giả. Giờ đọc cả autolink và URL
+  trần (bỏ dấu câu/`)` đóng câu), bỏ qua URL trong code span và code fence (ví dụ `https://evil/…`); dedup, phân loại,
+  retry giữ nguyên; repo hiện 812 URL. Job `links.yml` nâng `timeout-minutes` 20 → 30 (812 URL / 8 luồng thường vài
+  phút; chừa chỗ cho nhóm host timeout × 3 lần thử). 🟠 `compose --out` có file cũ mà `features:` cũ có fact lần ghép
+  này bỏ → stderr `⚠ bỏ feature <fact>: N mục về SHOULD (<ID>…)`; exit code và nội dung ghi không đổi (khoá `features`
+  vào `scope` của `loop init` để sau — ADR-0030). 🟢 `autonomy-bench` exit 1 cả khi có ca lệch (kể cả `code` khác
+  mong đợi) hoặc ID bắt buộc chưa có ca; `doctor --drift --latest <sai dạng>` → exit 2 kèm lỗi thay vì lặng lẽ bỏ qua;
+  `compose --feature` ở M không đổi mục nào thì nói lý do thật (không module nào khai fact) thay vì "chỉ M". 🟡 PLAN
+  T-1510 ghi đúng: 3.9.0 không tag riêng vì VERSION lên 3.10.0 trong cùng PR (D-093). Dự án đích: chạy lại `install.py`.
 
 ## [3.9.0] - 2026-10-19
 

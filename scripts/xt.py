@@ -4872,10 +4872,38 @@ def _report_essential(features: List[str], scale: str, promoted: List[str]) -> N
             file=sys.stderr,
         )
     else:
+        why = (
+            "không module nào trong hồ sơ/gói đã ghép khai mục thiết yếu cho fact này"
+            if scale == "M"
+            else "fact chỉ đổi mức ở quy mô M"
+        )
         print(
-            f"ℹ --feature {', '.join(features)} không đổi mức mục nào ở quy mô {scale} (chỉ M — ADR-0030)",
+            f"ℹ --feature {', '.join(features)} không đổi mức mục nào ở quy mô {scale} ({why} — ADR-0030)",
             file=sys.stderr,
         )
+
+
+def _old_features(path: Path) -> List[str]:
+    """`features:` của blueprint đã ghép trước (chỉ fact hợp lệ); file không có/không đọc được → []."""
+    try:
+        meta = parse_frontmatter(path.read_text(encoding="utf-8"))[0]
+    except (OSError, UnicodeDecodeError, FrontmatterError):
+        return []
+    return [f for f in _as_list(meta.get("features")) if f in FEATURE_FACTS]
+
+
+def _warn_dropped_features(args: argparse.Namespace, out_path: Path, feats: List[str], promoted: List[str]) -> None:
+    """stderr: ghép lại bỏ fact mà bản cũ đã bật → mục thiết yếu của fact đó rơi về SHOULD (ADR-0030); im lặng nếu không bỏ."""
+    old = _old_features(out_path)
+    dropped = [f for f in old if f not in feats]
+    if not dropped:
+        return
+    ordered, _ = _compose_sources(args.framework, args.profile, args.industry or [], args.add or [])
+    lost = [i for i in essential_promoted(ordered, args.scale, old) if i not in promoted]
+    print(
+        f"⚠ bỏ feature {', '.join(dropped)}: {len(lost)} mục về SHOULD" + (f" ({', '.join(lost)})" if lost else ""),
+        file=sys.stderr,
+    )
 
 
 def cmd_compose(args: argparse.Namespace) -> int:
@@ -4898,6 +4926,7 @@ def cmd_compose(args: argparse.Namespace) -> int:
             n = sum(1 for ln in backlog.splitlines() if ITEM_RE.match(ln))
             print(f"ℹ {n} mục SHOULD/MAY không in — dùng --out (ghi kèm {bl_path.name}) hoặc --full", file=sys.stderr)
         return 0
+    _warn_dropped_features(args, out_path, norm_features(feats), promoted)
     olds = [p for p in (out_path, bl_path) if p.exists()]
     if olds:
         main, backlog = _carry_into(args.framework, olds, main, backlog)
@@ -7648,6 +7677,9 @@ def drift_report(base: Path, latest_arg: Optional[str] = None) -> Dict[str, Any]
 
 
 def cmd_doctor_drift(args: argparse.Namespace) -> int:
+    if args.latest is not None and not SEMVER_PREFIX_RE.fullmatch(args.latest):
+        print(f"✗ --latest {args.latest!r} không phải tag vX.Y.Z — sửa đối số (bỏ qua thì hỏi gh api)", file=sys.stderr)
+        return 2
     base = project_dir()
     report = drift_report(base, args.latest)
     if args.json:
@@ -8052,7 +8084,8 @@ def _bench_print(out: Dict[str, Any]) -> None:
 
 
 def cmd_autonomy_bench(args: argparse.Namespace) -> int:
-    """`autonomy-bench`: exit 1 khi có false-green, 2 khi corpus hỏng hoặc ca không chạy được, 0 còn lại."""
+    """`autonomy-bench`: exit 1 khi có false-green; 2 khi corpus hỏng hoặc ca không chạy được; 1 khi có ca lệch
+    (`mismatch` — kể cả `code`/`decision` khác mong đợi dù cổng đúng) hoặc ID bắt buộc chưa có ca; 0 còn lại."""
     base = project_dir()
     corpus = Path(args.corpus)
     try:
@@ -8064,7 +8097,11 @@ def cmd_autonomy_bench(args: argparse.Namespace) -> int:
         print(json.dumps(out, ensure_ascii=False))
     else:
         _bench_print(out)
-    return 1 if out["false_green"] else 2 if out["error"] else 0
+    if out["false_green"]:
+        return 1
+    if out["error"]:
+        return 2
+    return 1 if out["mismatch"] or out["coverage"]["uncovered"] else 0
 
 
 def perf_load(path: str) -> List[float]:

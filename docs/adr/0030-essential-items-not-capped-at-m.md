@@ -43,7 +43,10 @@ Số đo trước thay đổi (`compose --profile web-app`, 2026-10-20): MUST S 
 4. **Trần ADR-0004 đếm mức không fact**: `essential` không làm file vượt trần trong `validate`, nhưng ở blueprint M
    một module có thể có tới `4 + MAX_ESSENTIAL` MUST — chỉ khi dự án tự khai tính năng tương ứng.
 5. **Báo cáo diff**: `compose` in stderr các ID được đưa lên MUST (`↑ N mục thiết yếu…`); fact bật ở S/L mà không đổi
-   mục nào thì in `ℹ`. Ghép lại phải truyền lại đúng `--feature` — trạng thái mục giữ theo ID như ADR-0012.
+   mục nào thì in `ℹ` kèm lý do thật (ở S/L: fact chỉ đổi mức ở M; ở M: không module nào trong hồ sơ/gói đã ghép khai
+   mục thiết yếu cho fact). Ghép lại phải truyền lại đúng `--feature` — trạng thái mục giữ theo ID như ADR-0012; khi
+   `--out` đã có và `features:` cũ có fact mà lần ghép này bỏ, `compose` cảnh báo stderr
+   `⚠ bỏ feature <fact>: N mục về SHOULD (<ID>…)` (exit code và nội dung ghi không đổi).
 6. **Thí điểm** chỉ `08-backend/authn-authz.md`: `BE-AUTH-003@auth`, `BE-AUTH-006@jwt`, `BE-AUTH-008@oauth`,
    `BE-AUTH-015@reset`. `payment`/`pii` có trong tập fact nhưng chưa module nào khai — mở rộng là thay đổi riêng, mỗi
    mục ghi CHANGELOG theo ID.
@@ -75,7 +78,12 @@ Số đo trước thay đổi (`compose --profile web-app`, 2026-10-20): MUST S 
 - Tốt: dự án M có đăng nhập/JWT/OAuth/quên mật khẩu nhận đúng MUST chống chiếm tài khoản; blueprint không fact, mọi
   hồ sơ, mọi quy mô không đổi một byte (đo lại 2026-10-20: `web-app` M 473 → 474 với `auth`, 477 với cả bốn fact;
   S 70 và L 1.146 không đổi).
-- Xấu: thêm một khái niệm (fact) mà người ghép phải nhớ truyền lại; quên thì bốn mục về SHOULD — `compose` không cảnh
-  báo việc thiếu cờ so với lần trước (giữ lệnh tự mô tả — phương án cuối ở trên).
+- Xấu: thêm một khái niệm (fact) mà người ghép phải nhớ truyền lại; quên thì mục thiết yếu về SHOULD. `compose` không
+  đọc `features:` cũ làm đầu vào (giữ lệnh tự mô tả — phương án cuối ở trên) nhưng cảnh báo khi lần ghép bỏ fact so
+  với file `--out` đang có (quyết định 5). `loop init` chưa khoá `features` vào `scope`: ghép lại bỏ fact giữa chừng
+  autopilot không làm `_scope_drift` trả `verify` như khi đổi quy mô/hồ sơ.
 - Theo dõi: ứng viên khai `payment`/`pii` (thanh toán, dữ liệu cá nhân) khi audit dự án thật cho thấy mục `MUST@L`
-  tương ứng hay bị bỏ; `conventions.md` cần ghi khoá frontmatter `essential` (ngoài phạm vi thay đổi này).
+  tương ứng hay bị bỏ. Khoá frontmatter `essential` đã ghi ở `framework/00-method/conventions.md`.
+- Việc sau: đưa `features` vào `scope` của `loop init` và `_scope_drift` (bỏ fact so với lúc khoá → `verify`). Để
+  riêng vì đổi dạng `scope` trong trạng thái vòng và bộ ba trả về của `_blueprint_front` mà nhiều chỗ dùng; trạng thái
+  cũ không có khoá `features` phải được coi là "chưa khoá" để không làm đỏ vòng đang chạy.

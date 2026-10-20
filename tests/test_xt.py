@@ -1829,12 +1829,42 @@ class EssentialNotCappedTest(unittest.TestCase):
         self.assertEqual(first, second)  # ghép lại hai lần: cùng byte
         r3 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "S", "--feature", "auth")
         self.assertEqual(r3.returncode, 0, r3.stderr)
-        self.assertIn("không đổi mức mục nào ở quy mô S", r3.stderr)
+        self.assertIn("không đổi mức mục nào ở quy mô S (fact chỉ đổi mức ở quy mô M", r3.stderr)
+        r3m = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--feature", "pii")
+        self.assertIn("không đổi mức mục nào ở quy mô M (không module nào trong hồ sơ/gói", r3m.stderr)
+        self.assertNotIn("chỉ đổi mức ở quy mô M", r3m.stderr)  # ở M, lý do thật là không có module khai fact
         r4 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--full", "--feature", "oauth")
         self.assertIn("`BE-AUTHX-004` **MUST**", r4.stdout)
         self.assertIn("BE-AUTHX-004", r4.stderr)
         r5 = xt_cli("--framework", str(self.fw), "compose", "--profile", "web-app", "--feature", "sso")
         self.assertEqual(r5.returncode, 2)  # argparse: fact ngoài tập đóng
+
+    def test_essential_not_capped_recompose_warns_dropped_feature(self):
+        out = self.tmp / "proj" / "BLUEPRINT.md"
+        out.parent.mkdir()
+        args = ("--framework", str(self.fw), "compose", "--profile", "web-app", "--scale", "M", "--out", str(out))
+        r1 = xt_cli(*args, "--feature", "auth", "--feature", "oauth")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertNotIn("⚠ bỏ feature", r1.stderr)  # chưa có file cũ: không cảnh báo
+        r2 = xt_cli(*args, "--feature", "auth", "--feature", "oauth")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertNotIn("⚠ bỏ feature", r2.stderr)  # cùng tập fact
+        r3 = xt_cli(*args, "--feature", "jwt")  # bỏ auth+oauth; 003 vẫn MUST nhờ jwt → chỉ 002, 004 rơi
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        self.assertIn("⚠ bỏ feature auth, oauth: 2 mục về SHOULD (BE-AUTHX-002, BE-AUTHX-004)", r3.stderr)
+        r4 = xt_cli(*args)
+        self.assertEqual(r4.returncode, 0, r4.stderr)
+        self.assertIn("⚠ bỏ feature jwt: 1 mục về SHOULD (BE-AUTHX-003)", r4.stderr)
+        self.assertNotIn("features:", out.read_text(encoding="utf-8"))
+        # fact không mở mục nào ở module (payment) → vẫn báo bỏ, 0 mục; frontmatter hỏng/fact lạ → im lặng
+        xt_cli(*args, "--feature", "payment")
+        r5 = xt_cli(*args)
+        self.assertIn("⚠ bỏ feature payment: 0 mục về SHOULD\n", r5.stderr)
+        out.write_text("không frontmatter\n", encoding="utf-8")
+        self.assertEqual(xt._old_features(out), [])
+        out.write_text("---\nfeatures: [auth, sso]\n---\n", encoding="utf-8")
+        self.assertEqual(xt._old_features(out), ["auth"])
+        self.assertEqual(xt._old_features(self.tmp / "khong-co.md"), [])
 
     def test_essential_not_capped_must_cap_unchanged(self):
         # trần ADR-0004 đếm mức KHÔNG fact: 4 MUST trơn + 4 MUST@L thiết yếu vẫn hợp lệ
