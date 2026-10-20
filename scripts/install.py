@@ -533,10 +533,13 @@ def install_github(target: Path) -> None:
     manifest = load_manifest(target)
     for gh, src in GITHUB_FILES.items():
         tf = github_template(src)
-        r = copy_if_absent(SRC / src, target / gh, False, transform=tf, installed_hash=manifest.get(gh))
+        dst, data = target / gh, source_bytes(SRC / src, tf)
+        r = copy_if_absent(SRC / src, dst, False, transform=tf, installed_hash=manifest.get(gh))
         log(f"  {gh}: {r}")
-        if r in ("copied", "updated", "kept"):
-            manifest[gh] = sha256(source_bytes(SRC / src, tf))
+        # Hash khung chỉ ghi khi file đích THỰC SỰ là bản khung — file của người dùng (khác bản khung) không được coi là
+        # "chưa sửa", nếu không lần cài sau sẽ đè nó (cập nhật tại chỗ) và `doctor --drift` báo sai.
+        if r in ("copied", "updated", "kept") and dst.read_bytes() == data:
+            manifest[gh] = sha256(data)
     write_manifests(target, manifest, load_rules(target))
     # AUD-CI-003: import ruleset khi còn required check chưa có job → mọi PR treo chờ check (và `protection-guard` đỏ)
     checks = [c for c in ruleset_required_checks() if c not in provided_checks()]

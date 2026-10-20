@@ -15,9 +15,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Dict, List
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -134,13 +134,13 @@ class ShardCliTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.f = self.tmp / "w.json"
-        patcher = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)})
+        patcher = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)})
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def run_xt(self, stdin: str, *args: str):
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(sys, "stdin", io.StringIO(stdin)):
+        with unittest.mock.patch.object(sys, "stdin", io.StringIO(stdin)):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 rc = xt.main(list(args))
         return rc, out.getvalue(), err.getvalue()

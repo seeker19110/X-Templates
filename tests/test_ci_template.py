@@ -127,6 +127,17 @@ class CiTemplateTest(unittest.TestCase):
         self.assertNotIn('${{ github.event.pull_request.title }}"', body)
         self.assertIn("pr_title_check", body)
 
+    def test_empty_gate_step_first_in_job_quality_needs(self):
+        """D-096: bước `require lint test` nằm đầu job `checks` (sau checkout), job đó thuộc `quality.needs`."""
+        step = f"run: {DEV_TASK} require lint test\n"
+        body = self.jobs["checks"]
+        self.assertIn(step, body)
+        self.assertIn("checks", flow_list(job_key(self.jobs["quality"], "needs")))
+        self.assertLess(body.index("actions/checkout@"), body.index(step))
+        self.assertLess(body.index(step), body.index("xt.py doctor"))
+        self.assertEqual(job_key(body, "if"), "")
+        self.assertNotIn("continue-on-error", body)
+
     def test_protection_guard_reads_ruleset(self):
         body = self.jobs["protection-guard"]
         self.assertIn(".github/rulesets/main.json", body)
@@ -205,7 +216,77 @@ class DevTaskSetupTest(unittest.TestCase):
     def test_unknown_task_lists_setup(self):
         r = subprocess.run(["bash", str(self.tmp / "scripts" / "dev-task.sh"), "nope"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("|setup)", r.stderr)
+        self.assertIn("|require|setup)", r.stderr)
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class DevTaskRequireEmptyGateTest(unittest.TestCase):
+    """`dev-task.sh require lint test` (bước đầu job `checks` của CI mẫu, D-096): đỏ khi `lint`/`test` rỗng hoặc no-op,
+    ở mọi `delivery_phase`; typecheck/build rỗng không chặn."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
+
+    def require(self, yaml: str | None, *tasks: str, **env: str) -> subprocess.CompletedProcess:
+        if yaml is not None:
+            (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+        full = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+        full.update(CLAUDE_PROJECT_DIR=str(self.tmp), **env)
+        cmd = ["bash", str(self.tmp / "scripts" / "dev-task.sh"), "require", *tasks]
+        return subprocess.run(cmd, capture_output=True, text=True, env=full, cwd="/")
+
+    def test_empty_gate_template_yaml_is_red(self):
+        """xt.yaml mẫu (mọi khoá cổng "") → đỏ cả `lint` lẫn `test`, kể cả `delivery_phase: build`."""
+        yaml = (TEMPLATES / "xt.yaml").read_text(encoding="utf-8")
+        self.assertIn("delivery_phase: build\n", yaml)
+        r = self.require(yaml, "lint", "test", GITHUB_ACTIONS="true")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        errors = [ln for ln in r.stdout.splitlines() if ln.startswith("::error::")]
+        self.assertEqual(len(errors), 2, r.stdout)
+        self.assertIn("'lint:'", errors[0])
+        self.assertIn("'test:'", errors[1])
+        for stack in ("Node:", "Python:", "Go:"):
+            self.assertIn(stack, errors[0])
+
+    def test_empty_gate_lint_and_test_declared_is_green(self):
+        r = self.require('lint: ruff check .\ntest: "pytest -q"  # đủ\ntypecheck: ""\nbuild: ""\n', "lint", "test")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("::error::", r.stdout + r.stderr)
+
+    def test_empty_gate_only_lint_is_red(self):
+        for yaml in ('lint: ruff check .\ntest: ""\n', "lint: ruff check .\n"):
+            with self.subTest(yaml=yaml):
+                r = self.require(yaml, "lint", "test", GITHUB_ACTIONS="true")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("::error::xt.yaml chưa khai lệnh thật cho 'test'", r.stdout)
+                self.assertNotIn("cho 'lint'", r.stdout)
+
+    def test_empty_gate_noop_commands_are_red(self):
+        for noop in ("true", ":", "exit 0", "echo ok", "printf x", "  "):
+            with self.subTest(noop=noop):
+                r = self.require(f"lint: ruff check .\ntest: {noop}\n", "lint", "test")
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(
+                    "ĐỎ: xt.yaml chưa khai lệnh thật cho 'test'", r.stderr
+                )  # ngoài Actions: log, không ::error::
+                self.assertNotIn("::error::", r.stdout)
+
+    def test_empty_gate_detected_command_counts(self):
+        """Không có xt.yaml mà tự dò được (Makefile có target) → lệnh thật, xanh; không dò được → đỏ."""
+        self.assertEqual(self.require(None, "lint", "test").returncode, 1)
+        (self.tmp / "Makefile").write_text("lint:\n\ttrue\ntest:\n\ttrue\n", encoding="utf-8")
+        r = self.require(None, "lint", "test")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("require: 'test' = make test", r.stderr)
+
+    def test_empty_gate_needs_task(self):
+        r = self.require("lint: x\n")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("cần ít nhất một task", r.stderr)
 
 
 if __name__ == "__main__":
