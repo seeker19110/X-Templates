@@ -41,7 +41,7 @@
 - [ ] `T-1603` Guard: cờ trình thông dịch ghép/dính, `nodejs`, lệnh chạy hộ `uv/poetry/pipx/pipenv run`, `npx`, `npm exec --` (AUD-SEC-093) — Gate: `python3 -m unittest discover -s tests -k guard_interp_flag_forms`
 - [ ] `T-1604` Guard: sau `cd` quét `$(…)`/backtick/`<(…)`/lệnh bọc với thư mục đã đổi (AUD-SEC-094) — Gate: `python3 -m unittest discover -s tests -k guard_nested_cwd_runners`
 - [ ] `T-1605` Guard: `~+`/`~-` (AUD-SEC-097) và `source /dev/stdin` (AUD-SEC-098) — Gate: `python3 -m unittest discover -s tests -k guard_tilde_plus_minus`
-- [ ] `T-1606` merge-check: sổ review hỏng không văng (AUD-CODE-019), bản ghi cùng giây lấy bản cuối (AUD-XFEAT-018); test hook nhánh xt.py lỗi (AUD-TEST-016) — Gate: `python3 -m unittest discover -s tests -k local_blocking -k commit_gate_xt_py_broken`
+- [x] `T-1606` merge-check: sổ review hỏng không văng (AUD-CODE-019), bản ghi cùng giây lấy bản cuối (AUD-XFEAT-018); test hook nhánh xt.py lỗi (AUD-TEST-016) — Gate: `python3 -m unittest discover -s tests -k local_blocking -k commit_gate_xt_py_broken`
 - [ ] `T-1607` Tài liệu + giới hạn 🟢 (AUD-SEC-095/096, XFEAT-019, HAR-100, DOC-072…075), trọng số shard (AUD-TEST-017), CHANGELOG — Gate: `scripts/dev-task.sh lint`
 
 ### Lát C — quét lại theo diff bản sửa, phát hành

@@ -7233,10 +7233,11 @@ def _local_blocking(head: str, marks: List[Dict[str, Any]], rec: Dict[str, Any])
     `pr reviewed` đã ghi sổ mà chưa đăng (D-104): lỗi chặn → `blocking`; chưa kết luận → `missing` (cần rà lại, không phải
     "còn lỗi chặn"); khác → ''. Dấu đã đăng có `at` = lúc đăng, sau lúc ghi sổ, nên review đã đăng không bị tính hai lần;
     `review_identity` (sổ do tác giả ghi không tính) do bên gọi loại."""
-    local = [r for r in rec.get("reviews") or [] if isinstance(r, dict) and r.get("head") == head]
+    local = [r for r in _ledger_reviews(rec) if r.get("head") == head]
     if not head or not local:
         return ""
-    last = max(local, key=lambda r: _iso_key(r.get("at", "")))
+    # sắp ổn định: cùng `at` (cùng giây) thì bản ghi sau trong sổ là kết luận, như `unpublished_review` (AUD-XFEAT-018)
+    last = sorted(local, key=lambda r: _iso_key(r.get("at", "")))[-1]
     newest = max((_iso_key(r.get("at", "")) for r in marks if r.get("head") == head), default="")
     if _iso_key(last.get("at", "")) <= newest:
         return ""
@@ -7600,6 +7601,13 @@ def _pr_record(data: Dict[str, Any], pr: str) -> Dict[str, Any]:
     return rec if isinstance(rec, dict) else {}
 
 
+def _ledger_reviews(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Bản ghi review của sổ cục bộ, đúng thứ tự ghi; sổ hỏng (`reviews` không phải list, phần tử lạ) → bỏ qua như
+    `read_reviews` (AUD-CODE-019)."""
+    reviews = rec.get("reviews")
+    return [r for r in reviews if isinstance(r, dict)] if isinstance(reviews, list) else []
+
+
 PrAct = Callable[..., Dict[str, Any]]
 
 
@@ -7763,7 +7771,7 @@ def with_published(rec: Dict[str, Any], marks: object, published_only: bool = Fa
     (`unpublished_review` → bước đăng lại). `published_only` (xt.yaml có `review_identity`): sổ cục bộ do chính tác giả
     ghi không tính, kể cả để đăng lại — dấu của tác giả không phải review (review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
-    local = [] if published_only else [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+    local = [] if published_only else _ledger_reviews(rec)
     return {
         **rec,
         "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", ""))),
@@ -8018,7 +8026,7 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
         return 2
     key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
     rec = _pr_record(data, key)
-    reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
+    reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
