@@ -392,5 +392,59 @@ class OpenArgsTest(unittest.TestCase):
                 self.assertFalse(ro(bad, fam))
 
 
+class CdGlobEnvDdExecTest(unittest.TestCase):
+    """Review #186 lần 2: `cd` tới thư mục glob (D-106), `env -C DIR`, `dd of=`, `exec N>` ghi đường dẫn được canh."""
+
+    def test_guard_cd_glob_env_dd_exec_denied(self):
+        cases = {
+            "cd .cl* && echo x > settings.json": "HOOK_BYPASS",
+            "cd .clau?e && echo x > settings.json": "HOOK_BYPASS",
+            "cd .claud[e] && echo x > settings.json": "HOOK_BYPASS",
+            "pushd .autopil* && echo {} > verified.json": "EVIDENCE_HANDWRITE",
+            "env -C .claude sh -c 'echo x > settings.json'": "HOOK_BYPASS",
+            "env --chdir=.claude sh -c 'echo x > settings.json'": "HOOK_BYPASS",
+            "env --chdir .claude tee settings.json": "HOOK_BYPASS",
+            "env -C .claude tee settings.json": "HOOK_BYPASS",
+            "env -C.claude/hooks tee guard.py": "HOOK_BYPASS",
+            "env -C docs echo x > .claude/settings.json": "HOOK_BYPASS",
+            "env -i -C .claude python3 -c \"open('settings.json','a')\"": "HOOK_BYPASS",
+            "dd of=.env": "SECRET_WRITE",
+            "dd of=.claude/hooks/guard.py": "HOOK_BYPASS",
+            "exec 3> .env": "SECRET_WRITE",
+            "exec 3>> .claude/settings.json": "HOOK_BYPASS",
+            "exec 3>.env": "SECRET_WRITE",
+            "exec >> .autopilot/verified.json": "EVIDENCE_HANDWRITE",
+            "> .env": "SECRET_WRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+
+    def test_guard_cd_env_dd_controls(self):
+        for cmd in (
+            "env -C docs make",
+            "env -C docs tee notes.md",
+            "env --chdir=docs ls",
+            "dd of=b.img",
+            "cd doc* && ls",
+            "exec 3> /tmp/log.txt",
+            "exec 2>&1",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+        # `dd if=…` vẫn theo luật cũ "dd ghi thô" (RULE_DENY), không đổi thành mã ghi đường dẫn canh
+        self.assertEqual(policy("dd if=a of=b.img").get("code"), "RULE_DENY")
+
+    def test_cd_glob_and_env_dirs(self):
+        self.assertIsNone(guard._cd_target(["cd", ".cl*"], "/p"))
+        self.assertIsNone(guard._cd_target(["pushd", "a?"], "/p"))
+        self.assertIsNone(guard._cd_target(["cd", "[ab]"], "/p"))
+        self.assertEqual(guard._cd_target(["cd", "docs"], "/p"), "/p/docs")
+        self.assertEqual(guard._env_dirs(["env", "-C", "a", "env", "--chdir=b", "x"]), ["a", "b"])
+        self.assertEqual(guard._env_dirs(["env", "--chdir", "a", "-Cb", "x"]), ["a", "b"])
+        self.assertEqual(guard._env_dirs(["FOO=1", "env", "-u", "X", "make"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

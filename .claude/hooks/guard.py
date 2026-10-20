@@ -759,18 +759,32 @@ def _split_words(text: str) -> List[str]:
         return text.split()
 
 
-def _skip_env_args(a: List[str]) -> None:
-    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C` kèm một giá trị); `-S '<lệnh>'` tách chuỗi thành lệnh
-    thật (`env -S "git push --force"`, AUD-SEC-024)."""
+def _skip_env_args(a: List[str], dirs: Optional[List[str]] = None) -> None:
+    """Sau `env`: bỏ tuỳ chọn và gán biến tại chỗ (`-u`/`-C`/`--unset`/`--chdir` kèm một giá trị); `-S '<lệnh>'` tách
+    chuỗi thành lệnh thật (`env -S "git push --force"`, AUD-SEC-024). Thư mục của `-C DIR`/`-CDIR`/`--chdir[=]DIR` ghi
+    vào `dirs` (lệnh sau `env` chạy ở đó — review #186 lần 2)."""
     while a and (a[0].startswith("-") or "=" in a[0]):
         opt = a.pop(0)
-        split = opt.split("=", 1)[1] if opt.startswith("--split-string=") else opt[2:] if opt[:2] == "-S" else None
-        if opt in ("-S", "--split-string") and a:
-            split = a.pop(0)
-        if split:
-            a[:0] = _split_words(split)
-        elif opt in ("-u", "-C") and a:
-            a.pop(0)
+        key, val = _env_opt(opt)
+        if key and val is None:
+            val = a.pop(0) if a else ""
+        if key == "S" and val:
+            a[:0] = _split_words(val)
+        if key == "C" and val and dirs is not None:
+            dirs.append(val)
+
+
+ENV_LONG_OPTS = {"--split-string": "S", "--chdir": "C", "--unset": "u", "--argv0": "a"}
+
+
+def _env_opt(opt: str) -> Tuple[str, Optional[str]]:
+    """Tuỳ chọn có giá trị của `env`: (khoá S/C/u/a, giá trị dính liền hoặc None = ở token kế). Cờ ngắn ghép
+    (`-iC dir`, `-iCdir`, `-iS'…'`) tách như getopt; tuỳ chọn khác/gán biến → ('', None)."""
+    name, eq, rest = opt.partition("=")
+    if name in ENV_LONG_OPTS:
+        return ENV_LONG_OPTS[name], (rest if eq else None)
+    m = re.fullmatch(r"-[^-CSua]*([CSua])(.*)", opt, re.S)
+    return (m[1], m[2] or None) if m else ("", None)
 
 
 def _skip_wrapper_args(name: str, a: List[str]) -> None:
@@ -797,10 +811,10 @@ def _skip_env_args_keep_assigns(a: List[str]) -> None:
 SHELL_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "while", "until", "do"}
 
 
-def _strip_prefixes(argv: List[str]) -> List[str]:
+def _strip_prefixes(argv: List[str], dirs: Optional[List[str]] = None) -> List[str]:
     """Bỏ từ khoá shell, gán biến đầu lệnh, chuyển hướng đặt đầu lệnh (`2>/dev/null cd x`, `>/dev/null rm …` — review
     #186) và wrapper (`command`, `env -i`, `nohup`…) cho tới khi gặp lệnh thật. Đích của chuyển hướng vẫn được
-    `write_targets` đọc từ argv gốc."""
+    `write_targets` đọc từ argv gốc. `dirs`: nhận thư mục của `env -C` (theo thứ tự)."""
     a = list(argv)
     while a:
         head = a[0]
@@ -814,7 +828,7 @@ def _strip_prefixes(argv: List[str]) -> List[str]:
             a.pop(0)
         elif posixpath.basename(head) == "env":
             a.pop(0)
-            _skip_env_args(a)
+            _skip_env_args(a, dirs)
         elif posixpath.basename(head) in WRAPPERS:
             a.pop(0)
             _skip_wrapper_args(posixpath.basename(head), a)
@@ -906,8 +920,8 @@ def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Option
     tương đối sau đó thử ở mọi thư mục canh). Chuyển hướng và cờ `-P`/`-L`/`-e`/`--` không đổi đích (AUD-SEC-088).
     Có `CDPATH` (`cdpath`) hay thư mục trước đó không biết: chỉ đích tuyệt đối/`~` giải được."""
     args, dashdash = _cd_operands(n[1:])
-    if len(args) != 1 or "$" in args[0]:
-        return None
+    if len(args) != 1 or "$" in args[0] or re.search(r"[*?\[]", args[0]):
+        return None  # biến, glob (`cd .cl*` — shell bung ra tên thật, D-106): không biết
     if (args[0].startswith("-") and not dashdash) or (n[0] == "pushd" and re.fullmatch(r"[+-]\d+", args[0])):
         return None
     target = posixpath.expanduser(args[0])
@@ -916,6 +930,23 @@ def _cd_target(n: List[str], cwd: Optional[str], cdpath: bool = False) -> Option
     if cwd is None or cdpath:
         return None
     return posixpath.normpath(posixpath.join(cwd, target))
+
+
+def _env_dirs(argv: List[str]) -> List[str]:
+    """Thư mục của `env -C DIR`/`--chdir=DIR` (theo thứ tự, kể cả `env` lồng) trước lệnh thật."""
+    dirs: List[str] = []
+    _strip_prefixes(argv, dirs)
+    return dirs
+
+
+def _run_dir(argv: List[str], here: Optional[str]) -> Optional[str]:
+    """Thư mục lệnh `argv` chạy: `here`, dời theo `env -C` như `cd` (review #186 lần 2). Lệnh có chuyển hướng mà thư mục
+    đã dời: shell mở đích chuyển hướng ở `here`, lệnh ghi file ở thư mục mới → không biết (D-106 thử mọi thư mục canh)."""
+    run = here
+    for d in _env_dirs(argv):
+        run = _cd_target(["cd", "--", d], run)
+    moved = run != here
+    return None if moved and any(_is_redirect(t) for t in argv) else run
 
 
 def _sets_cdpath(argv: List[str]) -> bool:
@@ -943,7 +974,7 @@ def _commands_with_cwd(tokens: List[str], start: Optional[str]) -> List[Tuple[Li
                 here = _cd_target(n, here, cdpath)
             elif n[:1] == ["popd"]:
                 here = None
-            out.append((list(cur), here))
+            out.append((list(cur), _run_dir(cur, here)))
             cur.clear()
 
     for t in tokens:
@@ -2997,6 +3028,7 @@ FILE_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "unzip": lambda a: _flag_values(a, ("-d",)),
     "split": lambda a: _positionals(a, ("-l", "-b", "-C", "-n", "-a", "-t", "--additional-suffix"))[1:2],
     "csplit": lambda a: _flag_values(a, ("-f", "--prefix")),
+    "dd": lambda a: [x[3:] for x in a if x.startswith("of=")],  # review #186 lần 2: `dd of=.env` là ghi
 }
 
 
@@ -3509,7 +3541,8 @@ def _scan_command(
 ) -> Optional[str]:
     """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
     n = normalize(argv)
-    if not n:
+    if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
+        asks.extend(_write_asks(n, argv, root, cwd))
         return None
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
