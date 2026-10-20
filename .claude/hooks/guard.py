@@ -4485,11 +4485,36 @@ def _moved_nested_scripts(cmd: str, tokens: List[str], start: Optional[str]) -> 
 
 # --------------------------------------------------------------------------- rà stored 2026-10-16
 
-INTERP_RE = re.compile(r"(python|pypy|ipython|node|perl|ruby|php|deno|bun|lua|tclsh)[0-9.]*")
+# Tên biến thể (AUD-SEC-093): `python3.13t` (free-threaded), `python3.6m`, `nodejs` (Debian)
+INTERP_RE = re.compile(r"(python|pypy|ipython|nodejs|node|perl|ruby|php|deno|bun|lua|tclsh)(?:[0-9.]+[dmt]?)?")
 INTERP_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "-p", "--print", "-r"}
 # Họ của trình thông dịch cùng ngôn ngữ (review #186 lần 3): pypy/ipython chạy Python — ipython còn có magic `!cmd`,
 # `%…` mà `ast.parse` không nhận nên script có magic không bao giờ là chỉ đọc
-INTERP_FAMILY = {"pypy": "python", "ipython": "python"}
+INTERP_FAMILY = {"pypy": "python", "ipython": "python", "nodejs": "node"}
+# Cờ ngắn theo họ (AUD-SEC-093) — (chữ nhận script, chữ ăn phần còn lại của token làm giá trị, chữ trong số đó ăn token
+# kế khi không dính, chữ kết thúc phần cờ): `-Ic '…'`, `-c'…'` dính, `-nr`, `perl -lne'…'`, `node -p'…'`; `-m` của
+# Python là module — phần sau không phải script.
+INTERP_SHORT_OPTS: Dict[str, Tuple[str, str, str, str]] = {
+    "python": ("c", "WXQ", "WXQ", "m"),
+    "node": ("ep", "rC", "rC", ""),
+    "bun": ("ep", "r", "r", ""),
+    "perl": ("eE", "IMmiFxdDC", "", ""),
+    "ruby": ("e", "IrCEFKWxT", "IrCE", ""),
+    "php": ("rBRE", "cdfzF", "cdfzF", ""),
+    "lua": ("e", "l", "l", ""),
+}
+INTERP_LONG_SCRIPT = {"--eval", "--print"}  # `node --eval='…'`, `--eval '…'`
+INTERP_LONG_VALUE = {"--require", "--import", "--loader", "--experimental-loader", "--input-type", "--conditions"}
+INTERP_LONG_VALUE |= {"--check-hash-based-pycs", "--title"}
+# Lệnh chạy hộ trình thông dịch (AUD-SEC-093): `uv run [cờ] python -c …`, `conda run -n x python -c …`, `npx node -e …`
+INTERP_RUNNERS = {
+    *PKG_RUNNERS,
+    *(("uv", "run"), ("poetry", "run"), ("pdm", "run"), ("pipenv", "run"), ("hatch", "run"), ("rye", "run")),
+    *(("conda", "run"), ("mamba", "run"), ("micromamba", "run"), ("pixi", "run")),
+    *(("pipx", "run"), ("uvx",), ("uv", "tool", "run")),
+}
+INTERP_RUNNER_SCAN = 6  # số token đầu sau lệnh chạy hộ được dò tìm lệnh thật
+INTERP_RUNNER_DEPTH = 3  # số lớp chạy hộ lồng (`uv run npx node -e …`)
 # Lệnh con nhận script làm đối số: `deno eval '…'` (review #186 lần 3)
 INTERP_EVAL_SUBCMDS = {"deno": "eval"}
 PERL_E_FLAG_RE = re.compile(r"-[a-zA-DF-Z]+[eE]")  # cờ gộp `-ne`, `-pe`, `-lne`: đối số kế tiếp là script
@@ -4520,10 +4545,82 @@ GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
 
 
 def _stdin_interp(argv: List[str]) -> bool:
+    n = _interp_argv(argv)
+    return bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not _inline_scripts(n)
+
+
+def _runner_cmd_index(rest: List[str]) -> Optional[int]:
+    """Vị trí lệnh thật trong đối số của lệnh chạy hộ: tên trình thông dịch đầu tiên, hoặc từ đầu tiên không phải cờ
+    và không phải giá trị ngay sau cờ (`conda run -n x python`, `uv run -n python`, `npm exec -- node`); không có → None."""
+    after_flag = False
+    for i, t in enumerate(rest[:INTERP_RUNNER_SCAN]):
+        if INTERP_RE.fullmatch(posixpath.basename(t)) or not (t.startswith("-") or after_flag):
+            return i
+        after_flag = t.startswith("-")
+    return None
+
+
+def _interp_argv(argv: List[str]) -> List[str]:
+    """argv đã chuẩn hoá, bóc lệnh chạy hộ phía trước (`uv run --with x python -c …` → `python -c …`) — AUD-SEC-093."""
     n = normalize(argv)
-    return (
-        bool(n) and bool(INTERP_RE.fullmatch(n[0])) and not set(n[1:]) & INTERP_SCRIPT_FLAGS and _eval_subcmd(n) is None
-    )
+    for _ in range(INTERP_RUNNER_DEPTH):
+        k = next((len(p) for p in INTERP_RUNNERS if tuple(n[: len(p)]) == p), 0)
+        j = _runner_cmd_index(n[k:]) if k else None
+        if j is None:
+            break
+        n = normalize(n[k + j :])
+    return n
+
+
+def _short_opt(a: str, nxt: Optional[str], spec: Tuple[str, str, str, str]) -> Tuple[Optional[str], int, bool]:
+    """(script, số token đã dùng, kết thúc phần cờ) của một cụm cờ ngắn (`-Ic`, `-c'…'` dính, `-W x`, `-mpip`)."""
+    script, value, takes_next, stop = spec
+    for k, ch in enumerate(a[1:], 2):
+        rest = a[k:]
+        if ch in stop:
+            return None, 1, True
+        if ch in script:
+            return (rest, 1, False) if rest else (nxt, 2, False)
+        if ch in value:
+            return None, 1 if rest or ch not in takes_next else 2, False
+    return None, 1, False
+
+
+def _long_opt(a: str, nxt: Optional[str]) -> Tuple[Optional[str], int]:
+    """(script, số token đã dùng) của một cờ dài: `--eval='…'`, `--eval '…'`, `--require mod`."""
+    key, eq, val = a.partition("=")
+    if key in INTERP_LONG_SCRIPT:
+        return (val, 1) if eq else (nxt, 2)
+    return None, 2 if not eq and key in INTERP_LONG_VALUE else 1
+
+
+def _interp_opt_scripts(n: List[str]) -> List[str]:
+    """Script trong phần cờ của trình thông dịch theo cú pháp từng họ (AUD-SEC-093): cờ gộp/dính `-Ic`, `-c"…"`,
+    `-nr`, `-e'…'`, `--eval=…`. Dừng ở đối số đầu không phải cờ (file script), `-`, `--`, `-m`."""
+    m = INTERP_RE.fullmatch(n[0]) if n else None
+    spec = INTERP_SHORT_OPTS.get(INTERP_FAMILY.get(m[1], m[1])) if m else None
+    out: List[str] = []
+    i = 1
+    while spec and i < len(n) and n[i][:1] == "-" and n[i] not in ("-", "--"):
+        nxt = n[i + 1] if i + 1 < len(n) else None
+        stop = False
+        if n[i].startswith("--"):
+            script, width = _long_opt(n[i], nxt)
+        else:
+            script, width, stop = _short_opt(n[i], nxt, spec)
+        out += [script] if script is not None else []
+        i = len(n) if stop else i + width
+    return out
+
+
+def _inline_scripts(n: List[str]) -> List[str]:
+    """Script viết ngay trong argv trình thông dịch (đã chuẩn hoá): đối số sau cờ script ở bất kỳ đâu (chiều chặt), cờ
+    gộp/dính theo họ, `deno eval '…'` (mọi đối số không phải cờ sau lệnh con — chặt: cả giá trị cờ)."""
+    flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
+    scripts = [n[i + 1] for i in flags]
+    k = _eval_subcmd(n)
+    scripts += [a for a in (n[k + 1 :] if k is not None else []) if a[:1] != "-"]
+    return list(dict.fromkeys(scripts + _interp_opt_scripts(n)))
 
 
 def _eval_subcmd(n: List[str]) -> Optional[int]:
@@ -4549,13 +4646,9 @@ def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[
     stdin_dirs: List[Optional[str]] = []
     placed = _commands_with_cwd(tokens, cwd)
     for c, here in placed:
-        n = normalize(c)
+        n = _interp_argv(c)  # cả sau lệnh chạy hộ (`uv run python -c …` — AUD-SEC-093)
         if n and INTERP_RE.fullmatch(n[0]):
-            flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
-            scripts = [n[i + 1] for i in flags]
-            k = _eval_subcmd(n)  # `deno eval [cờ…] '…'`: mọi đối số không phải cờ sau lệnh con (chặt: cả giá trị cờ)
-            scripts += [a for a in (n[k + 1 :] if k is not None else []) if a[:1] != "-" and a not in scripts]
-            out += [(s, here) for s in scripts]
+            out += [(s, here) for s in _inline_scripts(n)]
         if _stdin_interp(c):
             stdin_dirs.append(here)
             out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<"]
@@ -4656,7 +4749,7 @@ IPY_MAGIC_LINE_RE = re.compile(r"(?:^|=)[ \t]*(%[^\n]*)", re.M)  # mọi dòng m
 
 def _has_ipython(tokens: List[str]) -> bool:
     """Lệnh có chạy ipython (script trong lệnh có thể chứa magic)."""
-    found = (INTERP_RE.fullmatch(n[0]) for n in map(normalize, split_commands(tokens)) if n)
+    found = (INTERP_RE.fullmatch(n[0]) for n in map(_interp_argv, split_commands(tokens)) if n)
     return any(m and m[1] == "ipython" for m in found)
 
 
@@ -4763,7 +4856,7 @@ class _ReadOnly:
 def _interp_families(tokens: List[str], cwd: Optional[str]) -> FrozenSet[str]:
     """Họ trình thông dịch có trong lệnh (`python`, `node`, `perl`…): script trong lệnh có thể chạy bởi bất kỳ ai trong
     số đó, nên chỉ coi là Python khi mọi trình thông dịch đều là Python (D-107)."""
-    found = (INTERP_RE.fullmatch(n[0]) for n in (normalize(c) for c, _ in _commands_with_cwd(tokens, cwd)) if n)
+    found = (INTERP_RE.fullmatch(n[0]) for n in (_interp_argv(c) for c, _ in _commands_with_cwd(tokens, cwd)) if n)
     return frozenset(INTERP_FAMILY.get(m[1], m[1]) for m in found if m)
 
 

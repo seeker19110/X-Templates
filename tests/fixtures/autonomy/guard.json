@@ -4255,6 +4255,102 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-audit1020c-python-Ic-exec",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -Ic \"import os; os.system('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-python-c-attached-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -c\"open('.claude/settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-node-eval-eq",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "node --eval=\"require('child_process').execSync('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-uv-run-python-c",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "uv run python -c \"import os; os.system('rm -rf ~')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "RULE_DENY"
+   }
+  },
+  {
+   "id": "guard-audit1020c-conda-run-python-fence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "conda run -n x python -c \"open('.claude/settings.json','w')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-uv-run-pytest",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "uv run python -m pytest"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-audit1020c-control-python-Ic-print",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-093"
+   ],
+   "input": {
+    "command": "python3 -Ic \"print(1)\""
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
