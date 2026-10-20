@@ -4330,12 +4330,23 @@ def _stdin_interp(argv: List[str]) -> bool:
 
 def _interp_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Script trình thông dịch viết ngay trong lệnh: `python3 -c '…'`, `node -e '…'`, `python3 - <<'PY'` … `PY`."""
-    out: List[str] = []
-    for c in split_commands(tokens):
+    return list(dict.fromkeys(s for s, _ in _interp_scripts_at(cmd, tokens, None)))
+
+
+def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """(script, thư mục nó chạy) — `cd .claude && python3 -c '…'` chạy trong `.claude` (AUD-SEC-085). Thân heredoc gắn
+    với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`)."""
+    out: List[Tuple[str, Optional[str]]] = []
+    stdin_dirs: List[Optional[str]] = []
+    for c, here in _commands_with_cwd(tokens, cwd) if cwd else [(c, None) for c in split_commands(tokens)]:
         n = normalize(c)
         if n and INTERP_RE.fullmatch(n[0]):
-            out += [n[i + 1] for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
-    return out + _heredoc_scripts(cmd, _stdin_interp)
+            flags = [i for i, a in enumerate(n[:-1]) if a in INTERP_SCRIPT_FLAGS or PERL_E_FLAG_RE.fullmatch(a)]
+            out += [(n[i + 1], here) for i in flags]
+        if _stdin_interp(c):
+            stdin_dirs.append(here)
+    dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp) for d in dirs]
 
 
 # Lời gọi chạy lệnh shell từ trình thông dịch (`os.system('…')`, `subprocess.run(['rm','-rf','~'])`, `execSync('…')`):
@@ -4409,11 +4420,12 @@ def _exec_api_scripts(scripts: List[str]) -> List[str]:
     return out
 
 
-def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
+def interp_write_asks(cmd: str, tokens: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Script trình thông dịch ghi/xoá file bí mật/cổng/bằng chứng/năng lực agent → hỏi, như Edit/chuyển hướng
-    (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn."""
+    (LOOP-STOP-025: bị chặn ở Edit thì không đổi sang `python -c` để lách). Phân tích tĩnh, chỉ chữ nguyên văn; đích
+    tương đối tính từ thư mục lệnh đang đứng (`cwd`, `cd` trước đó — AUD-SEC-085), như đường shell."""
     asks: List[str] = []
-    for script in _interp_scripts(cmd, tokens):
+    for script, here in _interp_scripts_at(cmd, tokens, cwd or root):
         asks += [
             f"xoá đệ quy ngoài thư mục dự án ({lit} — script trình thông dịch)"
             for lit in (STR_LITERAL_RE.findall(script) if RMTREE_RE.search(script) else [])
@@ -4425,11 +4437,13 @@ def interp_write_asks(cmd: str, tokens: List[str], root: str) -> List[str]:
             continue
         for raw in STR_LITERAL_RE.findall(script):
             lit = PERL_OPEN_MODE_RE.sub("", raw)  # perl 2 đối số `open(F, ">f")`: chế độ dính vào tên file
-            kind = path_kind(rel_path(lit, root), root) if ("/" in lit or "." in lit) and lit not in ("..",) else ""
+            target = _at(lit, here)
+            rel = rel_path(target, root)
+            kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
             direct = _direct_write(script, raw) or (lit != raw and ">" in raw[: len(raw) - len(lit)])
-            if direct and _is_fence(lit, root):
+            if direct and _is_fence(target, root):
                 asks.append(FENCE_WHY.format(f"{lit} — script trình thông dịch"))
-            elif direct and _match_any(rel_path(lit, root), GIT_HOOK_PATTERNS):  # AUD-SEC-083: như `>> .git/config`
+            elif direct and _match_any(rel, GIT_HOOK_PATTERNS):  # AUD-SEC-083: như `>> .git/config`
                 asks.append(GIT_HOOK_WHY.format(f"{lit} — script trình thông dịch"))
             elif direct and kind == "secret":  # AUD-SEC-049: dấu chặn như chuyển hướng, không chỉ hỏi
                 asks.append(f"ghi file bí mật qua Bash (script trình thông dịch): {lit}")
@@ -4729,7 +4743,7 @@ def bash_decision(
     if leak:
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
-    asks: List[str] = interp_write_asks(cmd, tokens, root)
+    asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
     asks += [REVIEW_FORGE_WHY] if any(_forges_review(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (

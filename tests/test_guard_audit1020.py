@@ -59,5 +59,37 @@ class InterpGitConfigTest(unittest.TestCase):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
 
+class InterpCwdTest(unittest.TestCase):
+    """AUD-SEC-085: đích ghi của script trình thông dịch tính từ thư mục lệnh đang đứng (`cd` trước đó), như đường shell."""
+
+    def test_guard_interp_cwd(self):
+        cases = {
+            "cd .claude && python3 -c \"open('settings.local.json','w').write('{}')\"": "HOOK_BYPASS",
+            "cd .claude/hooks; python3 -c \"open('guard.py','w').write('')\"": "HOOK_BYPASS",
+            "cd .autopilot && python3 -c \"open('verified.json','w').write('{}')\"": "EVIDENCE_HANDWRITE",
+            "cd .git && python3 -c \"open('config','a').write('x')\"": "HOOK_BYPASS",
+            "cd .git/hooks && node -e \"require('fs').writeFileSync('pre-commit','')\"": "HOOK_BYPASS",
+            "cd docs && python3 -c \"open('../.env','w').write('K=1')\"": "SECRET_WRITE",
+            "pushd .autopilot && python3 - <<'PY'\nopen('verified.json','w').write('{}')\nPY": "EVIDENCE_HANDWRITE",
+        }
+        for cmd, code in cases.items():
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual((res["decision"], res.get("code")), ("deny", code), res)
+        # thư mục của phiên (payload `cwd`) cũng là gốc tính đích tương đối
+        res = policy("python3 -c \"open('verified.json','w').write('{}')\"", str(ROOT / ".autopilot"))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", "EVIDENCE_HANDWRITE"), res)
+
+    def test_guard_interp_cwd_other_dir_passes(self):
+        for cmd in (
+            "cd docs && python3 -c \"open('settings.local.json','w').write('{}')\"",
+            "cd scripts && python3 -c \"open('verified.json','w').write('{}')\"",
+            "(cd .claude && ls); python3 -c \"open('settings.local.json','w').write('{}')\"",
+            "cd .claude && python3 -c \"print(open('settings.json').read())\"",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

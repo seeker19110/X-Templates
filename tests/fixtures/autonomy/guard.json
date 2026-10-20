@@ -3096,6 +3096,47 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec085-cd-claude-settings",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-085"
+   ],
+   "input": {
+    "command": "cd .claude && python3 -c \"open('settings.local.json','w').write('{}')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-sec085-cd-autopilot-evidence",
+   "origin": "repro",
+   "refs": [
+    "AUD-SEC-085"
+   ],
+   "input": {
+    "command": "cd .autopilot && python3 -c \"open('verified.json','w').write('{}')\""
+   },
+   "expect": {
+    "allowed": false,
+    "code": "EVIDENCE_HANDWRITE"
+   }
+  },
+  {
+   "id": "guard-control-sec085-cd-docs",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-085"
+   ],
+   "input": {
+    "command": "cd docs && python3 -c \"open('settings.local.json','w').write('{}')\""
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
