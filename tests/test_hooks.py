@@ -4832,6 +4832,12 @@ class GuardOutsideDirTest(unittest.TestCase):
         self.assertEqual(self.raw("rm -rf sub"), "ask")
 
     def test_wipe_outside_and_home_claude_unchanged(self):
+        # HOME giả có `.claude/settings.json`: máy dev có sẵn, runner CI thì không — test không phụ thuộc máy chạy.
+        # Đặt ngoài thư mục tạm hệ thống: xoá/dời trong /tmp được guard miễn.
+        home = Path(self.enterContext(tempfile.TemporaryDirectory(dir=Path(__file__).parent))).resolve() / "home"
+        (home / ".claude").mkdir(parents=True)
+        (home / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.enterContext(mock.patch.dict(os.environ, {"HOME": str(home)}))
         for cmd in ("rm -rf ~/.claude", "rm -rf /home/user/other", "mv ~/.claude /home/user/other"):
             self.assertEqual(self.g.apply_policy(self.g.bash_decision(cmd, self.root))["decision"], "deny", cmd)
 
