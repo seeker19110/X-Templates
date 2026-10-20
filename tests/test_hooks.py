@@ -291,7 +291,9 @@ class CommitGateFastHookBase(unittest.TestCase):
             with open(self.tmp / change, "a", encoding="utf-8") as f:
                 f.write("# đổi\n")
         payload = {"tool_input": {"command": cmd}, "cwd": str(self.tmp)}
-        return run_hook("pre-bash-guard.sh", payload, self.tmp, extra_env={"XT_GUARD_POLICY": ""})
+        # CI đặt XT_MIN_TESTS=100 cho shard thật; dự án giả chỉ liệt kê 2 id nên sàn đó làm `test-all` đỏ oan (CI #191 py311).
+        env = {"XT_GUARD_POLICY": "", "XT_MIN_TESTS": "0"}
+        return run_hook("pre-bash-guard.sh", payload, self.tmp, extra_env=env)
 
 
 class CommitGateFastConfigChangeTest(CommitGateFastHookBase):
