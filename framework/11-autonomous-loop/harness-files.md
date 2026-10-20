@@ -54,9 +54,19 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   dừng. Bắt sai: báo cáo ghi kết quả theo dạng khác (`→ 0`, "trả 0", "xanh") bị chặn một lần dù đã chạy. Hook chỉ là
   lời nhắc ghi bằng chứng; kết luận "xanh" vẫn từ evidence do `loop record` ghi.
 - **Guard chỉ hiểu đường dẫn viết nguyên văn** (AUD-SEC-090): script trình thông dịch ghép đường dẫn (`'.git/' + 'config'`,
-  f-string, `os.path.join('.git', 'config')`, phần tử list/dict) không bị nhận là ghi file được canh; `cd "$PWD/…"` (đích
-  có biến) làm guard không biết thư mục và quét lệnh sau như ở gốc dự án; trên hệ file không phân biệt hoa thường
+  f-string, `os.path.join('.git', 'config')`) không có chuỗi nào là đường dẫn được canh nên không bị xét; script ở file
+  (`python3 x.py`, `python3 < x.py`) và module cục bộ được `import` không được đọc; trên hệ file không phân biệt hoa thường
   (macOS, Windows) `.GIT/config` là `.git/config` nhưng không bị chặn; `.git/info/exclude` không nằm trong danh sách canh.
+- **Script nhắc đường dẫn được canh: mặc định chặn** (D-105): script `-c`/`-e`/`-r`, heredoc, here-string hay ống vào
+  trình thông dịch có chuỗi là hàng rào (`.claude/hooks/*`, `.claude/settings*.json`), `.git/hooks`/`.git/config`, bí mật
+  hay `.autopilot/` bị chặn với mã của đích, trừ khi TOÀN script chỉ gồm thao tác đọc trong danh sách nhỏ (`open` mode
+  đọc, `.read*()`, `Path(…).read_text/exists/stat`, `os.path.*`, `json.load(s)`, `print`; `readFileSync`/`existsSync`/
+  `statSync`). Chặn oan đã biết: script vừa đọc `.env` vừa làm việc khác (gọi `requests.get`, ghi file khác, `sorted`,
+  `dict.get`, hàm tự viết), script sửa tài liệu có chuỗi `'.env'` đứng riêng, Perl/PHP đọc file bằng hàm ngoài danh sách,
+  JS template string. Sửa file canh thì dùng Edit/Write; đọc thì dùng `cat`/Read hoặc script chỉ đọc.
+- **Thư mục không biết** (D-106): sau `cd "$X"`, `cd -`, `pushd +N`, `popd`, `cd` khi có `CDPATH`, đích ghi tương đối
+  được thử ở gốc và mọi thư mục canh (`.claude`, `.claude/hooks`, `.autopilot`, `.git`, `.git/hooks`) — chặn khi file đã
+  có ở đó hoặc tên là tên được canh (chặn oan: `cd "$X" && echo x > config` dù `$X` không phải `.git`).
 
 ### Định dạng PLAN (parser thật trong `xt.py`)
 
