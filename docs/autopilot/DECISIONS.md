@@ -692,3 +692,38 @@
 - Chọn: bỏ liệt kê thư mục ngoài gốc dự án mà không có dấu hiệu chứa cổng (giữ bảo vệ ~/.claude, .git), kèm test chặn/cho qua
 - Lý do (tiêu chí chất lượng cuối): tiêu chí 1 giữ nguyên bảo vệ (test chặn hiện có không đổi), tiêu chí 4 trễ mỗi lệnh Bash của agent; thư mục tạm hệ thống không chứa file cổng của dự án
 - Đường lùi: trả lại os.listdir cho mọi đích
+
+### D-098 · 2026-10-20T06:47:17+00:00 · Guard bung đủ dãy {1..N}: vòng for số > 64 giá trị bị chặn theo trần VAR_FOR_PICKS
+
+- Phương án: (1) giữ trần 64 cho mọi giá trị (nhất quán với for viết tay) · (2) nới trần khi mọi giá trị là số thuần, kèm test
+- Chọn: nới trần khi mọi giá trị là số thuần, kèm test
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: giá trị số thuần không tạo tên lệnh/đường dẫn nguy hiểm khác nhau giữa các lần lặp nên quét mẫu đại diện là đủ; tiêu chí 4: vòng chờ/thử lại {1..100} là việc thường ngày của agent
+- Đường lùi: trả trần 64 cho mọi giá trị
+
+### D-099 · 2026-10-20T07:02:11+00:00 · merge-check gặp PR làn chuẩn eligible=false: thêm verdict review + exit 1 trái ADR-0028 §2
+
+- Phương án: (1) ADR mới thay ADR-0028 §2: verdict review, exit 1, không in lệnh merge · (2) giữ verdict merge, chỉ bỏ dòng lệnh merge
+- Chọn: ADR mới thay ADR-0028 §2: verdict review, exit 1, không in lệnh merge
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: lệnh 'quyết khi nào merge' không được trả merge cho PR chưa đủ điều kiện (AUD-XFEAT-010); script dựa exit 0 sẽ merge sai nếu giữ merge
+- Đường lùi: trả verdict merge, exit 0
+
+### D-100 · 2026-10-20T07:02:11+00:00 · Guard chặn cả bật auto-merge khi auto_merge_ok=false, không chỉ merge ghim head
+
+- Phương án: (1) chặn cả hai (nhất quán với pr next) · (2) chỉ chặn merge ghim head, để merge-gate đỡ auto-merge
+- Chọn: chặn cả hai (nhất quán với pr next)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 1: auto-merge không ghim head, merge-gate chỉ là lớp đỡ sau; pr next không bao giờ bảo bật trong ca này nên không chặn việc hợp lệ
+- Đường lùi: bỏ chặn bật auto-merge trong REVIEW_MISSING
+
+### D-101 · 2026-10-20T07:02:11+00:00 · Review sạch ghi sổ cục bộ mà chưa đăng ở pha build/làn nhanh: có bắt đăng lại
+
+- Phương án: (1) không bắt (review không phải điều kiện merge ở đó) · (2) luôn bắt đăng lại
+- Chọn: không bắt (review không phải điều kiện merge ở đó)
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 5 phá hoà: review không là điều kiện merge ở pha build/làn nhanh nên không đổi độ đúng; bắt đăng lại chỉ làm chậm — mục tiêu code nhanh merge nhanh; nợ review vẫn do release-check chặn
+- Đường lùi: unpublished_review trả bước đăng lại mọi làn
+
+### D-102 · 2026-10-20T07:04:07+00:00 · Test phủ trọng số shard bắt mọi PR thêm/bỏ lớp test phải đo lại test-weights (~7 phút)
+
+- Phương án: (1) giữ chặt: thiếu một lớp là đỏ · (2) cho thiếu tới ngưỡng (lớp lạ lấy trung vị), đỏ khi thiếu quá ngưỡng · (3) chỉ kiểm lớp có tên cụ thể
+- Chọn: cho thiếu tới ngưỡng (lớp lạ lấy trung vị), đỏ khi thiếu quá ngưỡng
+- Lý do (tiêu chí chất lượng cuối): tiêu chí 3: lớp lạ đã có trung vị nên shard đúng, chỉ lệch nhẹ; tiêu chí 5 phá hoà: không buộc đo 7 phút mỗi PR thêm test (code nhanh); ngưỡng chặn trôi dài hạn
+- Đường lùi: trả kiểm chặt
