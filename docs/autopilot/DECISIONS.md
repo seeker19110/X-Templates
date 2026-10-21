@@ -874,3 +874,10 @@
 - Chọn: A: off → bỏ qua exit 0; không khoá cứng bản shellcheck (CI cài từ requirements-dev.txt ghim hash); giữ gitleaks-action + ghi chú EULA, đổi CLI là lát riêng cần chủ repo
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: A theo đúng cấu hình dự án (không chặn oan dự án đã tắt luật), không làm đỏ máy dev chưa cài requirements-dev, không đổi nội dung required check gitleaks của dự án đích khi chưa có người duyệt; B chặt hơn nhưng chặn oan và đổi hợp đồng dự án đích
 - Đường lùi: Bật kiểm tiêu đề vô điều kiện trong cmd_pr_title_check; thêm kiểm bản shellcheck vào lint của xt.yaml; lát mới đổi secret-scan mẫu sang CLI
+
+### D-124 · 2026-10-21T09:50:12+00:00 · Chủ repo yêu cầu 2026-10-21: reviewer/reviewer-alt chỉ chạy ở pha harden; chỉ chuyển sang harden khi lên production — pha build xử lý PR ngoại lệ cứng đã miễn (hard_waived) và nhãn risk: thế nào
+
+- Phương án: (1) A: pha build hoãn review (ghi nợ) cho MỌI PR mà máy được merge — kể cả hard_waived và nhãn risk:; ngoại lệ cứng giữ người (merge_hard_exceptions: human) vẫn do người merge; review blocking đã có vẫn chặn; nợ trả ở harden (release-check review_debt); /autopilot không giao reviewer ở pha build · (2) B: giữ ADR-0031 — build vẫn đòi review cho hard_waived và risk:
+- Chọn: A: pha build hoãn review (ghi nợ) cho MỌI PR mà máy được merge — kể cả hard_waived và nhãn risk:; ngoại lệ cứng giữ người (merge_hard_exceptions: human) vẫn do người merge; review blocking đã có vẫn chặn; nợ trả ở harden (release-check review_debt); /autopilot không giao reviewer ở pha build
+- Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo (quyền cuối). An toàn còn lại: người vẫn merge ngoại lệ cứng giữ người; review chặn đã có không bị rửa; release-check FAIL phase/review_debt tới khi harden + audit delta trước phát hành; harden chỉ bật khi lên production
+- Đường lùi: review_deferrable thêm lại điều kiện not hard_waived, review_deferred thêm not risk_labels; ADR-0037 đổi trạng thái

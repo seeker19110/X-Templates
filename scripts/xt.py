@@ -4742,7 +4742,7 @@ def merge_decision(
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "risk_labels": _risk_labels(
             pr
-        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build không hoãn review (ADR-0031)
+        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build hoãn review thành nợ (ADR-0037)
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -4839,18 +4839,19 @@ def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
 
 
 def review_deferrable(d: Dict[str, Any]) -> bool:
-    """Review của PR được hoãn thành nợ (ADR-0031): pha build VÀ PR không thuộc ngoại lệ cứng — kể cả ngoại lệ cứng chủ
-    dự án đã cho máy merge (`hard_waived`, ADR-0020): tiền/dữ liệu thật/auth/mật mã/bí mật vẫn cần review sạch."""
-    return d.get(PHASE_KEY) == "build" and not d.get("hard") and not d.get("hard_waived")
+    """Review của PR được hoãn thành nợ (ADR-0031, ADR-0037): pha build VÀ PR không thuộc ngoại lệ cứng giữ người (`hard`
+    — người merge). Reviewer chỉ chạy ở pha harden (chủ repo 2026-10-21, D-124): ngoại lệ cứng đã miễn (`hard_waived`,
+    ADR-0020) cũng thành nợ, trả ở harden trước phát hành (`release-check` hàng `review_debt`)."""
+    return d.get(PHASE_KEY) == "build" and not d.get("hard")
 
 
 def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:
-    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable`, PR không mang nhãn `risk:` (phanh thủ
-    công, ADR-0025) VÀ review KẾT LUẬN mới nhất của PR (bất kể head) không phải `blocking`: lỗi chặn ở head cũ không bị
-    "rửa" bằng một lần push — cần review lại head hiện tại; review `inconclusive` không gỡ lỗi chặn trước nó."""
+    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable` VÀ review KẾT LUẬN mới nhất của PR (bất kể
+    head) không phải `blocking`: lỗi chặn ở head cũ không bị "rửa" bằng một lần push — cần review lại head hiện tại; review
+    `inconclusive` không gỡ lỗi chặn trước nó. Nhãn `risk:` (ADR-0025) ở pha build cũng thành nợ (ADR-0037, D-124)."""
     concluded = [r for r in reviews if not r.get("inconclusive")]
     washed = bool(concluded) and not concluded[-1].get("clean")
-    return state == "missing" and review_deferrable(d) and not d.get("risk_labels") and not washed
+    return state == "missing" and review_deferrable(d) and not washed
 
 
 def _risk_globs(keys: Dict[str, str]) -> List[str]:

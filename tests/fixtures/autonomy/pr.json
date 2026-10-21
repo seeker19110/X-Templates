@@ -968,13 +968,13 @@
     }
    },
    "expect": {
-    "eligible": false,
-    "auto_merge_ok": false,
+    "eligible": true,
+    "auto_merge_ok": true,
     "hard": false,
-    "review": "missing",
-    "review_deferred": false
+    "review": "deferred",
+    "review_deferred": true
    },
-   "note": "merge_hard_exceptions: auto miễn người merge, không miễn review ở pha build"
+   "note": "ADR-0037 (D-124, chủ repo 2026-10-21): reviewer chỉ ở pha harden — ngoại lệ cứng đã miễn ở pha build thành nợ review; harden lại đòi review sạch"
   },
   {
    "id": "pr-phase-build-blocking-review",
@@ -1076,12 +1076,12 @@
     }
    },
    "expect": {
-    "eligible": false,
-    "auto_merge_ok": false,
-    "review": "missing",
-    "review_deferred": false
+    "eligible": true,
+    "auto_merge_ok": true,
+    "review": "deferred",
+    "review_deferred": true
    },
-   "note": "ADR-0031 + ADR-0025: nhãn risk: là phanh thủ công — pha build không hoãn review"
+   "note": "ADR-0037 (D-124, chủ repo 2026-10-21): reviewer chỉ ở pha harden — nhãn risk: ở pha build thành nợ review, trả trước phát hành"
   },
   {
    "id": "pr-xfeat015-build-local-blocking-unpublished",
