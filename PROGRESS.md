@@ -30,6 +30,7 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc.
 
 ## Bàn giao phiên
-- 2026-10-21 · Commit cuối trên `main`: `cd17588` (#196); tag `v3.12.0` → `5b8b8a6` (#194). Dự án đích: hotel-manager (#111) và X-Company (#51) đã chạy 3.12.0, ruleset GitHub khớp file. Nhánh `claude/adoring-noether-3jkse5`: PR Lát 0 (ADR-0036; ngoại lệ cứng `scripts/`/`.github/`/`.claude/` — reviewer-alt đã rà trước khi mở).
-- Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
-- Autopilot: `loop status` (PLAN-3.13, T-1810 → Lát A). Đang chặn: không. Câu hỏi cần người: Tiếp theo 0 và 2.
+- 2026-10-21 · `main` `83fc7b0` (#202), tag `v3.13.0`. PLAN-3.13 xong phần tự làm (#198–#202); dự án đích: PR nâng 3.13.0 hotel-manager #112, X-Company #58 (chủ dự án merge trước 2026-11-02).
+- Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
+- `pr stats --days 7`: 183 PR merge · lead time trung vị 0,16 giờ (P95 1,59) · 4 run CI/PR · 8 % run đỏ/huỷ · 0 revert.
+- Kiểm nhanh: `scripts/dev-task.sh gate`. SessionStart gần trần 12 KB khi nhiều task hoãn — lý do hoãn viết ngắn.
