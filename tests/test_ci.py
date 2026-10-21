@@ -75,12 +75,18 @@ def required_checks(path: Path) -> List[str]:
     return [c["context"] for c in status_rule(path)["required_status_checks"]]
 
 
-def gate_tasks() -> List[str]:
-    """Task mà `dev-task.sh gate` chạy (vòng `for t in … ; do` của nhánh `gate)`)."""
+def gate_loop() -> List[str]:
+    """Từ của vòng `for t in … ; do` ở nhánh `gate)` của dev-task.sh (kể cả biến như `$FLOOR`)."""
     src = (ROOT / "scripts" / "dev-task.sh").read_text(encoding="utf-8")
     m = re.search(r"^  gate\)\n(?:.*\n)*?\s*for t in ([^;]+); do", src, re.M)
     assert m, "không thấy vòng task của `gate` trong dev-task.sh"
     return m.group(1).split()
+
+
+def gate_tasks() -> List[str]:
+    """Task cố định mà `dev-task.sh gate` chạy — bỏ task tuỳ chọn theo biến (`$FLOOR` = `test_floor` khi khai, T-1812;
+    CI giữ sàn đó bằng job `py311`)."""
+    return [t for t in gate_loop() if not t.startswith("$")]
 
 
 class QualityAggregateTest(unittest.TestCase):
@@ -122,6 +128,24 @@ class GateFanOutTest(unittest.TestCase):
 
     def test_gate_tasks_known(self):
         self.assertEqual(gate_tasks(), ["build", "typecheck", "lint", "test"])
+
+    def test_gate_optional_test_floor_last(self):
+        """T-1812: task tuỳ chọn duy nhất của `gate` là `$FLOOR` (= `test_floor` khi xt.yaml khai), đứng sau `test`."""
+        self.assertEqual(gate_loop(), ["build", "typecheck", "lint", "test", "$FLOOR"])
+        src = (ROOT / "scripts" / "dev-task.sh").read_text(encoding="utf-8")
+        self.assertIn('[ -n "$(declared_cmd test_floor)" ] && FLOOR=test_floor', src)
+        self.assertIn("guard_turn build typecheck lint test $FLOOR", src)
+
+    def test_lint_uses_pinned_shellcheck_from_pip(self):
+        """T-1812: shellcheck của `lint` là bản ghim kèm hash (`shellcheck-py`) — job `lint` cài requirements-dev.txt
+        TRƯỚC khi chạy `dev-task.sh lint`, nên `shellcheck` trên PATH là bản pip, không phải bản của runner."""
+        req = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+        self.assertRegex(req, r"(?m)^shellcheck-py==0\.11\.0\.1 \\\n(?:    --hash=sha256:[0-9a-f]{64}(?: \\)?\n){2,}")
+        body = self.jobs["lint"]
+        install = body.index("pip install --quiet --require-hashes -r requirements-dev.txt")
+        self.assertLess(install, body.index("run: scripts/dev-task.sh lint"))
+        lint = re.search(r"^lint: (.*)$", (ROOT / "xt.yaml").read_text(encoding="utf-8"), re.M).group(1)
+        self.assertIn("shellcheck --severity=warning", lint)
 
     def test_each_gate_task_has_job(self):
         for task in gate_tasks():

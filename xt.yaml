@@ -1,7 +1,8 @@
 # xt.yaml — lệnh chuẩn của repo này cho agent, hook và CI (YAML phẳng `task: lệnh`, đọc bởi scripts/dev-task.sh).
 # CI chạy build · typecheck · lint · test bằng ĐÚNG các lệnh dưới đây, mỗi task một job song song (test chia shard qua
 # `dev-task.sh test-shard`), job `quality` tổng hợp; local `scripts/dev-task.sh gate` chạy nối tiếp.
-# Công cụ ghim kèm hash: requirements-dev.txt (ruff 0.17.1, mypy 2.4.0, coverage 7.16.2 — xem file khoá); shellcheck (CI: ubuntu-latest). Agent KHÔNG suy diễn lệnh từ văn xuôi.
+# Công cụ ghim kèm hash: requirements-dev.txt (ruff 0.17.1, mypy 2.4.0, coverage 7.16.2, shellcheck-py 0.11.0.1 — xem file khoá;
+# `pip install` đặt `shellcheck` vào bin của Python, cùng bản ở máy dev và CI — T-1812). Agent KHÔNG suy diễn lệnh từ văn xuôi.
 format: python3 -m ruff format scripts tests .claude/hooks
 format_file: case {} in *.py) python3 -m ruff format {} ;; esac
 # lint: `xt.py checks` = validate · progress-check · changelog-check · ci-check · license-check trong MỘT tiến trình (mỗi lần
@@ -24,6 +25,10 @@ test_unit: if [ -n "${XT_COV_DIR:-}" ]; then COVERAGE_FILE="$XT_COV_DIR/.coverag
 # trong file lấy trung vị; JSON hỏng → shard đỏ.
 test_weights: tests/shard-weights.json
 test_combine: export COVERAGE_FILE="$XT_COV_DIR/.coverage" && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100
+# test_floor: sàn hỗ trợ Python 3.11 như job CI `py311` (T-1812, research NH-2): `dev-task.sh gate` chạy SAU `test` khi
+# khoá có lệnh — mọi lớp qua test_list/test_unit với XT_PY=python3.11 (không coverage, XT_MIN_TESTS như CI); máy không có
+# python3.11 → bỏ qua có log, exit 0 (CI py311 vẫn giữ sàn).
+test_floor: if command -v python3.11 >/dev/null 2>&1; then XT_PY=python3.11 XT_MIN_TESTS="${XT_MIN_TESTS:-100}" scripts/dev-task.sh test-shard 1 1; else echo "[dev-task] test_floor: không có python3.11 — bỏ qua sàn 3.11 (job CI py311 vẫn chạy)" >&2; fi
 # Cổng trước commit (hook pre-bash-guard): fast = `dev-task.sh gate-fast` — lint (gồm format --check) · typecheck ·
 # test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) chạy trước
 # khi mở PR và ở CI `quality`. Vắng = full.
