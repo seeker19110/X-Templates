@@ -1683,88 +1683,50 @@ def failure_signature(task: str, code: int, output: str) -> str:
     return hashlib.sha256(f"{task}|{code}|{norm}".encode()).hexdigest()[:16]
 
 
-# Ký tự shell còn "sống" (bị bung) khi đứng ngoài nháy; trong nháy kép chỉ `$`, backtick, `\\`, `!` còn sống; trong nháy
-# đơn không gì sống. `echo '$X'` ≠ `echo "$X"` ≠ `echo $X` dù shlex.split cho cùng token (REC-01, T-1502).
-SHELL_LIVE_OUTSIDE = frozenset("$`\\!*?[~{}")
-SHELL_LIVE_DOUBLE = frozenset("$`\\!")
-SHELL_OPERATORS = frozenset(";&|<>()\n")  # ngoài nháy là toán tử điều khiển/chuyển hướng (ranh giới token, review #167)
-
-
-def _shell_quoted_char(c: str, nxt: str, quote: str, cur: List[Tuple[str, bool]]) -> Tuple[str, int]:
-    """Một ký tự trong nháy: trả (nháy đang mở sau ký tự này, số ký tự ăn thêm). Nháy đơn: mọi thứ là chữ; nháy kép:
-    backslash trước nháy kép, `$`, backtick, backslash là escape; còn lại `$`/backtick/backslash/`!` còn sống."""
-    if c == quote:
-        return "", 0
+def _canon_piece(cmd: str, i: int, quote: str) -> Tuple[str, str]:
+    """(đoạn chép nguyên văn từ `i`, nháy đang mở sau đoạn) — ký tự không phải khoảng trắng ngoài nháy. Nháy đơn: không
+    escape; nháy kép và ngoài nháy: `\\` chép kèm ký tự sau (`\\"` không đóng nháy, `\\ ` không phải khoảng trắng)."""
+    c = cmd[i]
     if quote == "'":
-        cur.append((c, False))
-    elif c == "\\" and nxt and nxt in '"$`\\':
-        cur.append((nxt, False))
-        return quote, 1
-    else:
-        cur.append((c, c in SHELL_LIVE_DOUBLE))
-    return quote, 0
+        return c, "" if c == "'" else quote
+    if c == "\\":
+        return cmd[i : i + 2], quote
+    if quote == '"':
+        return c, "" if c == '"' else quote
+    return c, c if c in "'\"" else ""
 
 
-def _shell_op_token(
-    c: str, tokens: List[Tuple[Tuple[str, bool], ...]], cur: List[Tuple[str, bool]], has: bool, fd_ok: bool, in_op: bool
-) -> None:
-    """Toán tử điều khiển/chuyển hướng ngoài nháy `c` thành token "sống": ký tự toán tử liền nhau gộp một token (`&>` ≠ `& >`);
-    từ toàn chữ số KHÔNG nháy dính ngay trước `<`/`>` là số fd của chuyển hướng (`2>f` ≠ `2 >f`; `'2'>f` thì không)."""
-    if in_op:
-        tokens[-1] += ((c, True),)
-    elif fd_ok and c in "<>":
-        tokens.append(tuple(cur) + ((c, True),))
-    else:
-        if has:  # kể cả token rỗng có nháy (`''`): là một đối số, `a ''|b` ≠ `a |b`
-            tokens.append(tuple(cur))
-        tokens.append(((c, True),))
-
-
-def shell_identity(cmd: str) -> List[Tuple[Tuple[str, bool], ...]]:
-    """Danh sách token, mỗi token là chuỗi (ký tự, còn sống?) theo đúng ngữ nghĩa nháy của bash: hai lệnh cùng danh sách
-    thì bash chạy cùng một việc. Nháy lệch → ValueError (như shlex)."""
-    tokens: List[Tuple[Tuple[str, bool], ...]] = []
-    cur: List[Tuple[str, bool]] = []
-    quote = ""  # "", "'" hoặc '"'
-    has_token = in_op = quoted = False  # quoted: token hiện tại có phần trong nháy/escape → không phải số fd
-    i = 0
+def canonical_command(cmd: str) -> str:
+    """Dạng chuẩn để so hai lệnh Gate (REC-01, AUD-CODE-014): **nháy có nghĩa** (`$X` ≠ `"$X"` ≠ `'$X'`, `X=1 cmd` ≠
+    `'X=1' cmd`), mỗi dãy space/tab NGOÀI nháy thành một dấu cách (bỏ ở hai đầu), mọi ký tự khác giữ nguyên — kể cả vị
+    trí khoảng trắng cạnh toán tử (`2>f` ≠ `2 >f`, `{fd}>f` ≠ `{fd} >f`), xuống dòng và NBSP (bash chỉ tách từ theo IFS
+    space/tab/newline). Từ `<<` ngoài nháy (heredoc, here-string) phần còn lại so nguyên văn: khoảng trắng trong thân
+    heredoc là dữ liệu. Nháy lệch → ValueError (như shlex)."""
+    out: List[str] = []
+    quote, blank, i = "", False, 0
     while i < len(cmd):
-        c, nxt = cmd[i], cmd[i + 1 : i + 2]
-        i += 1
-        was_op = False
-        if quote:
-            quote, extra = _shell_quoted_char(c, nxt, quote, cur)
-            i += extra
-        elif c in "'\"":
-            quote, has_token, quoted = c, True, True
-        elif c == "\\" and nxt:
-            cur.append((nxt, False))
-            has_token = quoted = True
-            i += 1
-        elif c in SHELL_OPERATORS:
-            fd_ok = bool(cur) and not quoted and all(ch.isdigit() for ch, _ in cur)
-            _shell_op_token(c, tokens, cur, has_token, fd_ok, in_op)
-            cur, has_token, quoted, was_op = [], False, False, True
-        elif c.isspace():
-            if has_token:
-                tokens.append(tuple(cur))
-            cur, has_token, quoted = [], False, False
-        else:
-            cur.append((c, c in SHELL_LIVE_OUTSIDE or (c == "#" and not has_token)))  # `#` đầu từ mở comment
-            has_token = True
-        in_op = was_op
+        if not quote and cmd[i] in " \t":
+            blank, i = True, i + 1
+            continue
+        if blank and out:
+            out.append(" ")
+        blank = False
+        if not quote and cmd.startswith("<<", i):
+            return "".join(out) + cmd[i:].rstrip(" \t")
+        piece, quote = _canon_piece(cmd, i, quote)
+        out.append(piece)
+        i += len(piece)
     if quote:
         raise ValueError("No closing quotation")
-    if has_token:
-        tokens.append(tuple(cur))
-    return tokens
+    return "".join(out)
 
 
 def same_command(a: str, b: str) -> bool:
-    """So lệnh theo token shell GIỮ ngữ nghĩa nháy: khoảng trắng/nháy khác nhau mà bash chạy cùng việc → cùng lệnh;
-    `'$X'` (chữ) ≠ `"$X"` (bung) (T-1502). Nháy lệch → so chuỗi đã bỏ khoảng trắng hai đầu."""
+    """Hai lệnh là một khi `canonical_command` bằng nhau: chỉ khoảng trắng ASCII ngoài nháy là tự do; nháy, toán tử,
+    heredoc, NBSP đều có nghĩa (T-1502 → AUD-CODE-014: token identity cũ coi `test -n $X` ≡ `test -n "$X"` nên evidence
+    lệnh xanh giả được tick và `loop verify` khử trùng lặp bỏ Gate đỏ). Nháy lệch → so chuỗi đã bỏ khoảng trắng hai đầu."""
     try:
-        return shell_identity(a) == shell_identity(b)
+        return canonical_command(a) == canonical_command(b)
     except ValueError:
         return a.strip() == b.strip()
 
@@ -3960,6 +3922,68 @@ def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:
     """[(khoá, lệnh)] sàn đã khai hợp lệ — `loop verify` chạy lại; khoá thiếu đã nằm ở `gate_floor_issues`."""
     need, keys = gate_floor_keys(base)
     return [(k, keys[k]) for k, _ in need if not gate_noop(keys.get(k) or "")]
+
+
+GATE_PAR_KEYS = ("build", "typecheck", "lint", "test", "test_floor")  # lệnh `dev-task.sh gate`/`gate-par` đã chạy
+
+
+def floor_plan(base: Path, skip: Sequence[str] = ()) -> List[Tuple[str, str, str]]:
+    """[(khoá, lệnh, lý do bỏ qua hoặc "")] sàn M/L đã khai: bỏ khoá trong `skip` (CI mẫu: `e2e` có job riêng) và lệnh
+    trùng một lệnh của `gate`/`gate-par` (vd `coverage` = `test`) — không chạy hai lần."""
+    keys = gate_floor_keys(base)[1]
+    out: List[Tuple[str, str, str]] = []
+    for key, cmd in gate_floor_commands(base):
+        dup = next((g for g in GATE_PAR_KEYS if g != key and same_command(cmd, keys.get(g) or "")), "")
+        why = "--skip" if key in skip else (f"trùng `{dup}` của gate" if dup else "")
+        out.append((key, cmd, why))
+    return out
+
+
+def _floor_run(base: Path, plan: List[Tuple[str, str, str]], timeout: int) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for key, cmd, why in plan:
+        if why:
+            rows.append({"key": key, "cmd": redact(cmd), "skipped": why})
+            continue
+        print(f"[xt] floor `{key}`: {redact(cmd)}", file=sys.stderr, flush=True)
+        code, out = run_gate_shell(cmd, base, timeout)
+        print(out, end="" if out.endswith("\n") else "\n", file=sys.stderr)
+        rows.append({"key": key, "cmd": redact(cmd), "exit_code": code})
+    return rows
+
+
+def cmd_floor(args: argparse.Namespace) -> int:
+    """`xt.py floor [--run] [--skip KEY]… [--strict] [--json]` (AUD-XFEAT-020): sàn Gate M/L (LOOP-HARNESS-023) mà trước
+    đây chỉ `loop verify` chạy — CI mẫu (job `gate`) chạy `floor --run --skip e2e` sau `gate-par` để khoá sàn khai riêng
+    (`format_check`, `coverage`) đỏ thì CI đỏ. Lệnh sàn qua guard và bắt `Ran 0 tests` (`run_gate_shell`). Exit 1 khi
+    lệnh sàn đỏ, hoặc khi thiếu khoá sàn và có `--strict` (thiếu mà không `--strict` chỉ cảnh báo như `doctor`); quy mô
+    S/không blueprint → không áp, exit 0."""
+    base = project_dir()
+    scale = blueprint_scale(base)[0]
+    missing = gate_floor_issues(base)
+    plan = floor_plan(base, args.skip or [])
+    timeout = _record_timeout()
+    if timeout is None:
+        return 2
+    rows = _floor_run(base, plan, timeout) if args.run else []
+    red = [r for r in rows if r.get("exit_code", 0) != 0]
+    rc = 1 if red or (missing and args.strict) else 0
+    if args.json:
+        print(
+            json.dumps({"scale": scale, "missing": missing, "plan": [list(x) for x in plan], "runs": rows, "exit": rc})
+        )
+        return rc
+    if scale not in ("M", "L"):
+        print(f"floor: không áp (quy mô {scale or 'không rõ'} — sàn chỉ ở M/L, LOOP-HARNESS-023)")
+        return 0
+    for m in missing:
+        print(f"{'✗' if args.strict else '⚠'} {m}")
+    for key, cmd, why in plan:
+        r = next((x for x in rows if x["key"] == key), None)
+        state = f"bỏ qua ({why})" if why else ("chưa chạy" if r is None else f"exit {r['exit_code']}")
+        print(f"{'✗' if r and r.get('exit_code', 0) else '·'} {key}: {state} — {redact(cmd)}")
+    print(f"floor: {'ĐỎ' if rc else 'xanh'}")
+    return rc
 
 
 def _doctor_gate_floor(base: Path) -> List[Finding]:
@@ -10026,6 +10050,15 @@ def build_parser() -> argparse.ArgumentParser:
     pp = sub.add_parser("progress-check")
     pp.add_argument("file", nargs="?", default="PROGRESS.md")
     pp.set_defaults(fn=cmd_progress_check)
+    pfl = sub.add_parser(
+        "floor",
+        help="sàn Gate M/L (format_check, coverage…): liệt kê, `--run` chạy — CI mẫu sau gate-par (AUD-XFEAT-020)",
+    )
+    pfl.add_argument("--run", action="store_true", help="chạy lệnh sàn đã khai (qua guard, như loop verify)")
+    pfl.add_argument("--skip", action="append", metavar="KEY", help="bỏ khoá sàn này (CI mẫu: e2e có job riêng)")
+    pfl.add_argument("--strict", action="store_true", help="thiếu khoá sàn cũng exit 1 (mặc định chỉ cảnh báo)")
+    pfl.add_argument("--json", action="store_true")
+    pfl.set_defaults(fn=cmd_floor)
     pci = sub.add_parser("ci-check")
     pci.add_argument("dir", nargs="?", help="thư mục workflow (mặc định .github/workflows, không có thì bỏ qua)")
     pci.set_defaults(fn=cmd_ci_check)

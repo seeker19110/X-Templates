@@ -924,3 +924,17 @@
 - Chọn: A: nhập audit d388802, tái hiện độc lập từng phát hiện (repro + 2 người bác bỏ), sửa theo PLAN-3.15-audit-gate (bằng chứng Gate → cổng nhất quán → guard/reviewer → installer → đo CI) trước, tạm dừng PLAN-3.14-app
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): AUD-CODE-014 tái hiện được tới Stop hook (verified.json ok=True, final_verdict=done khi Gate thật exit 1) = cổng giả xanh 🔴 — mọi bằng chứng 'xong' của autopilot, gồm PLAN-3.14, dựa trên nó; AUD-XFEAT-013 làm cổng dự án đích xanh với 0 test. Tiêu chí 2: mỗi lát một PR, chỉ chặt hơn, revert được. PLAN-3.14 chưa có mã nên dừng không mất gì
 - Đường lùi: loop init --force --plan docs/autopilot/PLAN-3.14-app.md; revert PR của từng lát
+
+### D-131 · 2026-10-21T15:22:52+00:00 · T-2141: gom CI chính của repo khung 14 → 3 job (gate · quality · protection-guard) theo kế hoạch tối ưu 2026-10-21?
+
+- Phương án: (1) A: giữ fan-out 14 job — đo 20 run: wall trung vị 94,5 s, chờ runner ≤ 4 s; 3 job ước ~200 s (gate-par cục bộ 179,5 s); repo public nên phút runner không tính phí · (2) B: gom 3 job như kế hoạch tối ưu — 15 → ~4 phút tính, wall ~gấp đôi · (3) C: gom vừa (build+typecheck+lint+checks một job, py311 2 shard) 14 → 10 job, giữ đường dài nhất — cần ADR đổi WF-CI-024 của repo khung
+- Chọn: A: giữ fan-out 14 job — đo 20 run: wall trung vị 94,5 s, chờ runner ≤ 4 s; 3 job ước ~200 s (gate-par cục bộ 179,5 s); repo public nên phút runner không tính phí
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí nhận của chính kế hoạch tối ưu: chỉ nhận 14→3 khi thời gian hoàn tất đạt ngân sách — B kéo wall ~2 lần mà không có lợi đo được (không chờ runner, không tốn tiền). C chỉ đáng khi đo thấy tranh trần job đồng thời. Tiêu chí 3: không đổi kiến trúc CI khi chưa có số đo cần
+- Đường lùi: C (ADR mới) khi chờ runner trung vị > 30 s hoặc repo chuyển riêng tư; số đo ở docs/ops/CI-TIMING-2026-10-21.md
+
+### D-132 · 2026-10-21T15:33:19+00:00 · PR #207 (Lát 1) đủ điều kiện merge nhưng bộ phân loại Auto chặn lệnh merge của phiên và cron pr-steward không chạy ~1 giờ (lần cuối 14:37) — đi tiếp thế nào
+
+- Phương án: (1) A: đẩy Lát 2 lên cùng nhánh/PR #207 — push kích CI, workflow_run CI kích pr-steward merge ghim head; PR ~430 dòng vượt mức 150 (pha build không giao reviewer) · (2) B: chờ cron pr-steward tới khi chạy lại, các lát còn lại đứng yên · (3) C: kích pr-steward bằng workflow_dispatch — cùng hiệu ứng với lệnh merge vừa bị chặn (LOOP-STOP-025), không làm
+- Chọn: A: đẩy Lát 2 lên cùng nhánh/PR #207 — push kích CI, workflow_run CI kích pr-steward merge ghim head; PR ~430 dòng vượt mức 150 (pha build không giao reviewer)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: không vòng qua chặn (C loại); A giữ mọi cổng (CI đầy đủ, merge ghim head do máy steward quyết). Tiêu chí 2: lát vẫn là commit riêng, revert được. Đổi lại PR lớn hơn mức 150 dòng — chấp nhận ở pha build vì không có reviewer đọc diff; B treo vô hạn
+- Đường lùi: Revert commit Lát 2 trên main

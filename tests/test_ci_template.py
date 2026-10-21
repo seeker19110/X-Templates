@@ -105,14 +105,15 @@ class CiTemplateTest(unittest.TestCase):
                 self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
 
     def test_gate_job_runs_gate_and_framework_checks_in_order(self):
-        """`gate`: require (đỏ sớm, D-096) → setup → `dev-task.sh gate-par` (song song trong job, D-128) → doctor → ci-check →
-        tiêu đề PR."""
+        """`gate`: require (đỏ sớm, D-096) → setup → `dev-task.sh gate-par` (song song trong job, D-128) → sàn M/L `floor --run`
+        → doctor → ci-check → tiêu đề PR."""
         body = self.jobs["gate"]
         order = [
             body.index("actions/checkout@"),
             step_index(body, f"{DEV_TASK} require lint test"),
             body.index(SETUP),
             step_index(body, f"{DEV_TASK} gate-par"),
+            step_index(body, "python3 .xtemplates/scripts/xt.py floor --run --skip e2e"),  # AUD-XFEAT-020
             step_index(body, "python3 .xtemplates/scripts/xt.py doctor"),
             step_index(body, "python3 .xtemplates/scripts/xt.py ci-check"),
             body.index("TITLE: ${{ github.event.pull_request.title }}"),
