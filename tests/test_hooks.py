@@ -5301,5 +5301,140 @@ class GuardOutsideDirTest(unittest.TestCase):
         self.assertIn("dependabot.yml", self.g._gate_names("/x/.github"))
 
 
+class TriageLocalTest(unittest.TestCase):
+    """TD-5 (T-1822): `xt.py loop triage-local` cho hook PostToolUseFailure — lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã
+    che bí mật làm `additionalContext`; lệnh khác, payload rác, lỗi → im lặng, luôn exit 0 (fail-open)."""
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        self.xt = xt
+
+    def run_cli(self, stdin: str, tty: bool = False) -> tuple[int, str]:
+        out = io.StringIO()
+        fake = io.StringIO(stdin)
+        fake.isatty = lambda: tty  # type: ignore[method-assign]
+        with (
+            contextlib.redirect_stdout(out),
+            mock.patch.object(sys, "stdin", fake),
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}),
+        ):
+            code = self.xt.main(["loop", "triage-local"])
+        return code, out.getvalue()
+
+    def ctx(self, payload: dict | str) -> str | None:
+        code, out = self.run_cli(payload if isinstance(payload, str) else json.dumps(payload))
+        self.assertEqual(code, 0)
+        if not out.strip():
+            return None
+        d = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(d["hookEventName"], "PostToolUseFailure")
+        return str(d["additionalContext"])
+
+    @staticmethod
+    def payload(cmd: str, response: object, **extra: object) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": cmd}, "tool_response": response, **extra}
+
+    def test_triage_local_classifies_gate_failure(self):
+        log = "Ran 3 tests\nFAIL: test_x (tests.test_a.T)\nAssertionError: 1 != 2\nFAILED (failures=1)\n"
+        ctx = self.ctx(self.payload("python3 -m unittest tests.test_a", log))
+        assert ctx is not None
+        self.assertIn("loại test", ctx)
+        self.assertIn("AssertionError: 1 != 2", ctx)
+        self.assertIn("không skip", ctx)
+        for cmd in (
+            "scripts/dev-task.sh gate-fast",
+            "python3 scripts/xt.py loop record --task T-001 -- make",
+            "python3 scripts/xt.py loop verify",
+            "pytest -q",
+            "npm test",
+            "pnpm run test",
+            "cargo test",
+            "ruff check .",
+        ):
+            self.assertIsNotNone(self.ctx(self.payload(cmd, log)), cmd)
+
+    def test_triage_local_reads_dict_response_and_error_field(self):
+        resp = {"stdout": "scripts/x.py:3:1: E501 line too long\n", "stderr": "Found 1 error.\n", "exit_code": 1}
+        ctx = self.ctx(self.payload("ruff check scripts", resp))
+        assert ctx is not None
+        self.assertIn("loại lint", ctx)
+        self.assertIn("E501", ctx)
+        ctx = self.ctx(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "mypy --strict x.py"},
+                "error": "x.py:1: error: Incompatible types [assignment]",
+            }
+        )
+        assert ctx is not None
+        self.assertIn("loại type", ctx)
+
+    def test_triage_local_redacts_and_caps_lines(self):
+        token = "ghp_" + "A" * 36
+        log = "\n".join(f"FAILED tests/t.py::test_{i} - token={token} " + "x" * 400 for i in range(40))
+        ctx = self.ctx(self.payload("pytest", log + "\nruff: would reformat a.py"))
+        assert ctx is not None
+        self.assertNotIn(token, ctx)
+        self.assertIn("cũng khớp", ctx)  # lint thắng test, test vẫn được nhắc
+        lines = ctx.splitlines()
+        self.assertLessEqual(len(lines), 20)
+        self.assertLessEqual(len(ctx), 10_000)
+        self.assertTrue(all(len(line) <= 305 for line in lines))
+
+    def test_triage_local_secret_category_prints_no_log_line(self):
+        ctx = self.ctx(self.payload("scripts/dev-task.sh gate", "gitleaks: 2 leaks found\nAKIA_FAKE_SECRET_LINE"))
+        assert ctx is not None
+        self.assertIn("loại secret", ctx)
+        self.assertNotIn("AKIA_FAKE_SECRET_LINE", ctx)
+        self.assertNotIn("| ", ctx)
+
+    def test_triage_local_unknown_and_infra_hints(self):
+        ctx = self.ctx(self.payload("make test", "lỗi lạ không khớp mẫu\nexit 2"))
+        assert ctx is not None
+        self.assertIn("loại unknown", ctx)
+        self.assertIn("lỗi lạ không khớp mẫu", ctx)
+        ctx = self.ctx(self.payload("npm test", "npm ERR! ECONNRESET"))
+        assert ctx is not None
+        self.assertIn("chạy lại một lần", ctx)
+
+    def test_triage_local_silent_when_not_gate_or_garbage(self):
+        log = "AssertionError"
+        for payload in (
+            self.payload("ls -la", log),  # không phải cổng
+            self.payload("git status", log),
+            {**self.payload("pytest", log), "tool_name": "Edit"},
+            self.payload("pytest", log, is_interrupt=True),  # người ngắt, không phải đỏ
+            {"tool_name": "Bash", "tool_input": "pytest", "tool_response": log},
+            {"tool_name": "Bash", "tool_input": {"command": 1}, "tool_response": log},
+            self.payload("pytest", ""),
+            self.payload("pytest", "   \n"),
+            self.payload("pytest", 42),
+            self.payload("pytest", {"stdout": None}),
+            "",
+            "not json {",
+            "[1]",
+            "null",
+        ):
+            self.assertIsNone(self.ctx(payload), payload)
+
+    def test_triage_local_tty_stdin_is_silent(self):
+        self.assertEqual(self.run_cli("rác", tty=True), (0, ""))
+
+    def test_triage_local_cli_subprocess(self):
+        data = json.dumps(self.payload("pytest", "FAILED a.py::t - AssertionError"))
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "xt.py"), "loop", "triage-local"],
+            input=data,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=str(ROOT)),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("loại test", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+
+
 if __name__ == "__main__":
     unittest.main()

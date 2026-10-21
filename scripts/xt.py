@@ -24,9 +24,14 @@ Lệnh:
   loop stop [--reason TEXT]     Tắt vòng lặp.
   loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
   pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (tắt auto-merge người bật, rà, merge ghim head…).
+  pr stats [--days 30] [--repo R] [--json]
+                                Số đo PR đã merge trong N ngày (REST): lead time trung vị/P95, run CI `pull_request` mỗi PR,
+                                tỉ lệ run failure/cancelled, PR làn chuẩn, PR revert — bảng Markdown cho /handover.
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
+  loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
+                                (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
   contrast FILE.css... [--pairs F] [--require-on a,b] [--json]
                                 Tương phản WCAG của cặp token (`--X`/`--X-foreground`, `--on-X`, cặp tường minh) ở mọi
                                 theme; thiếu token chữ cho `--primary` cũng đỏ (UX-DS-003/020).
@@ -6150,6 +6155,70 @@ def _loop_ci_triage(args: argparse.Namespace, base: Path) -> int:
     return 1 if rec["action"] in ("block", "defer") else 0
 
 
+# --------------------------------------------------------------------------- loop triage-local (TD-5, T-1822)
+# Hook PostToolUseFailure: lệnh Bash là cổng/Gate vừa đỏ → phân loại output bằng bộ của `ci-triage` (`ci_classify`), trả
+# ≤ 20 dòng đã `redact` làm `additionalContext` (trần 10 000 ký tự của Claude Code). Chỉ gợi ý, không đổi state.
+TRIAGE_LOCAL_GATE_RE = re.compile(
+    r"dev-task\.sh\b|xt\.py\s+loop\s+(?:record|verify)\b|\bunittest\b|\bpytest\b"
+    r"|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\b(?:go|cargo|make)\s+test\b|\b(?:ruff|mypy|shellcheck|tsc|eslint)\b"
+)
+TRIAGE_LOCAL_MAX_LINES = 20
+TRIAGE_LOCAL_LINE_CHARS = 300
+TRIAGE_LOCAL_MAX_CHARS = 10_000
+TRIAGE_LOCAL_HINTS = {
+    **CI_FIX_HINTS,
+    "secret": "secret scan/SAST đỏ — không in dòng (có thể chứa bí mật); xoay bí mật nếu đã lộ, không thêm allowlist "
+    "(LOOP-CI-006)",
+    "infra": "nghi mạng/hạ tầng — chạy lại một lần; vẫn đỏ thì coi là lỗi thật, đọc log (LOOP-CI-002)",
+}
+
+
+def _hook_strings(value: Any) -> List[str]:
+    """Chuỗi output trong `tool_response`/`error` của payload hook: chuỗi trần hoặc dict có stdout/stderr/output/error."""
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, dict):
+        return []
+    return [v for k in ("stdout", "stderr", "output", "error") if isinstance(v := value.get(k), str)]
+
+
+def triage_local(stdin_text: str) -> Optional[str]:
+    """JSON `additionalContext` cho hook PostToolUseFailure, hoặc None khi không phải lệnh Bash cổng/Gate đỏ có output.
+    JSON hỏng ném lỗi — `_loop_triage_local` nuốt (fail-open)."""
+    d = json.loads(stdin_text or "{}")
+    if not isinstance(d, dict) or d.get("tool_name") != "Bash" or d.get("is_interrupt"):
+        return None
+    tool_input = d.get("tool_input")
+    cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if not isinstance(cmd, str) or not TRIAGE_LOCAL_GATE_RE.search(cmd):
+        return None
+    text = "\n".join(s for v in (d.get("tool_response"), d.get("error")) for s in _hook_strings(v))
+    if not text.strip():
+        return None
+    tri = ci_classify(text)
+    also = [c for c in tri["categories"] if c != tri["category"]]
+    head = [
+        f"Gate đỏ — triage-local (TD-5, chỉ gợi ý): loại {tri['category']}"
+        + (f" (cũng khớp: {', '.join(also)})" if also else ""),
+        f"  gợi ý: {TRIAGE_LOCAL_HINTS[tri['category']]}",
+    ]
+    lines = [f"  | {redact(line)[:TRIAGE_LOCAL_LINE_CHARS]}" for line in tri["evidence"]]
+    ctx = "\n".join([*head, *lines][:TRIAGE_LOCAL_MAX_LINES])[:TRIAGE_LOCAL_MAX_CHARS]
+    out = {"hookSpecificOutput": {"hookEventName": "PostToolUseFailure", "additionalContext": ctx}}
+    return json.dumps(out, ensure_ascii=False)
+
+
+def _loop_triage_local(args: argparse.Namespace, base: Path) -> int:
+    """Luôn exit 0, lỗi bất kỳ → im lặng: hook trích lỗi không được làm phiên kẹt hay ồn (fail-open)."""
+    try:
+        out = triage_local(sys.stdin.read() if not sys.stdin.isatty() else "")
+    except Exception:  # fail-open: payload rác/đổi định dạng → không gợi ý gì
+        return 0
+    if out:
+        print(out)
+    return 0
+
+
 def _evidence_latest(base: Path) -> Optional[Dict[str, Any]]:
     files = sorted((state_dir(base) / "evidence").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     ev = next((e for e in map(_read_json_obj, files) if e), None)  # file mới nhất hỏng → lùi về file trước
@@ -6262,6 +6331,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "decide": _loop_decide,
     "defer": _loop_defer,
     "ci-triage": _loop_ci_triage,
+    "triage-local": _loop_triage_local,
     "checkpoint": _loop_checkpoint,
     "resume": _loop_resume,
     "stop": _loop_stop,
@@ -8459,14 +8529,149 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
     return 1 if any(r.get("error") or r.get("warn") or r["action"] == "error" for r in results) else 0
 
 
+# --------------------------------------------------------------------------- pr stats (TD-4)
+
+PR_STATS_DAYS = 30
+PR_RUN_BAD = ("failure", "cancelled")
+PR_REVERT_RE = re.compile(r'Revert "|revert(\([^)]*\))?!?: ')
+
+
+def _quantiles(vals: List[float]) -> Dict[str, Optional[float]]:
+    """Trung vị (nội suy) và P95 theo hạng gần nhất — không cần nhiều mẫu; rỗng → None."""
+    if not vals:
+        return {"median": None, "p95": None}
+    xs = sorted(vals)
+    return {"median": round(statistics.median(xs), 2), "p95": round(xs[math.ceil(0.95 * len(xs)) - 1], 2)}
+
+
+def _pr_runs(pr: Dict[str, Any], runs: List[Dict[str, Any]], opened: _dt.datetime, merged: _dt.datetime) -> List[Any]:
+    """Run CI `pull_request` của một PR: cùng `head_branch` và (`head_sha` = head cuối, hoặc tạo trong lúc PR mở —
+    các lần push trước có SHA khác; tên nhánh dùng lại sau khi PR đóng không bị tính nhầm)."""
+    head = pr.get("head")
+    ref, sha = (head.get("ref"), head.get("sha")) if isinstance(head, dict) else (None, None)
+
+    def mine(r: Dict[str, Any]) -> bool:
+        if not ref or r.get("head_branch") != ref:
+            return False
+        at = _parse_iso(str(r.get("created_at") or ""))
+        return bool(sha and r.get("head_sha") == sha) or (at is not None and opened <= at <= merged)
+
+    return [r for r in runs if mine(r)]
+
+
+def _pr_stats_row(pr: Dict[str, Any], runs: List[Dict[str, Any]], since: _dt.datetime) -> Optional[Dict[str, Any]]:
+    """Một PR đã merge từ `since`: lead time mở → merge (giờ), số run, run đỏ/huỷ, làn chuẩn, revert; khác → None."""
+    opened, merged = _parse_iso(str(pr.get("created_at") or "")), _parse_iso(str(pr.get("merged_at") or ""))
+    if opened is None or merged is None or merged < since:
+        return None
+    mine = _pr_runs(pr, runs, opened, merged)
+    concl = [str(r.get("conclusion") or "") for r in mine]
+    labels = [lb.get("name") for lb in pr.get("labels") or [] if isinstance(lb, dict)]
+    return {
+        "number": pr.get("number"),
+        "lead_hours": round((merged - opened).total_seconds() / 3600, 2),
+        "runs": len(mine),
+        "failure": concl.count("failure"),
+        "cancelled": concl.count("cancelled"),
+        "standard_lane": STANDARD_LABEL in labels,
+        "revert": bool(PR_REVERT_RE.match(str(pr.get("title") or ""))),
+    }
+
+
+def pr_stats(prs: List[Dict[str, Any]], runs: List[Dict[str, Any]], now: _dt.datetime, days: int) -> Dict[str, Any]:
+    """Số đo PR đã merge trong `days` ngày tới `now` (TD-4, hàm thuần): lead time trung vị/P95, run CI mỗi PR, tỉ lệ run
+    `failure`/`cancelled`, PR làn chuẩn (nhãn `xt-standard-lane`), PR revert."""
+    since = now - _dt.timedelta(days=days)
+    rows = sorted(
+        (r for r in (_pr_stats_row(p, runs, since) for p in prs) if r), key=lambda r: str(r["number"]).zfill(9)
+    )
+    total = sum(r["runs"] for r in rows)
+    bad = sum(r["failure"] + r["cancelled"] for r in rows)
+    return {
+        "days": days,
+        "since": since.replace(microsecond=0).isoformat(),
+        "merged": len(rows),
+        "lead_time_hours": _quantiles([r["lead_hours"] for r in rows]),
+        "runs_per_pr": {**_quantiles([float(r["runs"]) for r in rows]), "total": total},
+        "runs_failure": sum(r["failure"] for r in rows),
+        "runs_cancelled": sum(r["cancelled"] for r in rows),
+        "bad_run_rate": round(bad / total, 3) if total else None,
+        "standard_lane": sum(r["standard_lane"] for r in rows),
+        "reverts": sum(r["revert"] for r in rows),
+        "runs_seen": len(runs),
+        "prs": rows,
+    }
+
+
+def _num(x: Optional[float], unit: str = "") -> str:
+    return "—" if x is None else f"{x:g}{unit}"
+
+
+def pr_stats_table(s: Dict[str, Any]) -> str:
+    """Bảng Markdown cho người đọc và cho `/handover` dán vào `PROGRESS.md` mục Bàn giao phiên."""
+    lt, rp = s["lead_time_hours"], s["runs_per_pr"]
+    rate = "—" if s["bad_run_rate"] is None else f"{s['bad_run_rate']:.0%}"
+    rows = [
+        ("PR đã merge", str(s["merged"])),
+        ("Lead time mở → merge (trung vị · P95)", f"{_num(lt['median'], ' giờ')} · {_num(lt['p95'], ' giờ')}"),
+        (
+            "Run CI `pull_request` mỗi PR (trung vị · P95 · tổng)",
+            f"{_num(rp['median'])} · {_num(rp['p95'])} · {rp['total']}",
+        ),
+        ("Run `failure` · `cancelled` (tỉ lệ)", f"{s['runs_failure']} · {s['runs_cancelled']} ({rate})"),
+        (f"PR làn chuẩn (`{STANDARD_LABEL}`)", str(s["standard_lane"])),
+        ("PR revert", str(s["reverts"])),
+    ]
+    head = f"| PR merge trong {s['days']} ngày (từ {s['since'][:10]}) | Giá trị |\n|---|---|\n"
+    return head + "".join(f"| {k} | {v} |\n" for k, v in rows)
+
+
+def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """I/O REST: PR đã đóng (mới cập nhật trước) và run `pull_request` từ ngày mở sớm nhất của PR merge trong kỳ."""
+    prs = _gh_items(f"{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100")
+    opened = [
+        o
+        for p in prs
+        if (m := _parse_iso(str(p.get("merged_at") or ""))) and m >= since
+        if (o := _parse_iso(str(p.get("created_at") or "")))
+    ]
+    if not opened:
+        return prs, []
+    day = min(opened).date().isoformat()
+    runs = [
+        r
+        for page in _gh_api(f"{repo}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100", True)
+        if isinstance(page, dict)
+        for r in page.get("workflow_runs") or []
+        if isinstance(r, dict)
+    ]
+    return prs, runs
+
+
+def cmd_pr_stats(args: argparse.Namespace) -> int:
+    if args.days < 1 or (args.repo and not REPO_SLUG_RE.fullmatch(args.repo)):
+        print("✗ --days phải ≥ 1 và --repo dạng owner/repo", file=sys.stderr)
+        return 2
+    now = _dt.datetime.now(_dt.timezone.utc)
+    try:
+        prs, runs = _pr_stats_fetch(
+            f"repos/{args.repo}" if args.repo else "repos/{owner}/{repo}", now - _dt.timedelta(days=args.days)
+        )
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    s = pr_stats(prs, runs, now, args.days)
+    print(json.dumps(s, ensure_ascii=False) if args.json else pr_stats_table(s), end="\n" if args.json else "")
+    return 0
+
+
 def cmd_pr(args: argparse.Namespace) -> int:
     base = project_dir()
     if args.pr_cmd == "reviewed":
         return _pr_reviewed(args, base)
-    if args.pr_cmd == "steward":
-        return cmd_pr_steward(args)
-    if args.pr_cmd == "title-check":
-        return cmd_pr_title_check(args)
+    other = {"steward": cmd_pr_steward, "title-check": cmd_pr_title_check, "stats": cmd_pr_stats}.get(args.pr_cmd)
+    if other:
+        return other(args)
     try:
         pr = load_pr(args)
     except PrInputError as exc:
@@ -9668,6 +9873,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="tiêu đề PR đúng luật CI `checks`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
     )
     ptc.add_argument("title", nargs="?", help="tiêu đề định đặt (mặc định tiêu đề PR mở của nhánh hiện tại)")
+    pss = prsub.add_parser(
+        "stats",
+        help="số đo PR đã merge trong N ngày qua REST: lead time trung vị/P95, run CI mỗi PR, run đỏ/huỷ, làn chuẩn,"
+        " revert (TD-4)",
+    )
+    pss.add_argument("--days", type=int, default=PR_STATS_DAYS, help=f"số ngày nhìn lại (mặc định {PR_STATS_DAYS})")
+    pss.add_argument("--repo", help="owner/repo (mặc định repo hiện tại của gh)")
+    pss.add_argument("--json", action="store_true", help="in JSON (merged, lead_time_hours, runs_per_pr, prs…)")
     ppr.set_defaults(fn=cmd_pr)
     prc = sub.add_parser(
         "release-check",
@@ -9773,6 +9986,9 @@ def build_parser() -> argparse.ArgumentParser:
     lct.add_argument("--task", type=_task_id, help="task đang sửa: khoá episode; defer áp vào task này")
     lct.add_argument("--cost-usd", type=float, help="chi phí đã tiêu cho run này (chưa đo → bỏ trống, ghi null)")
     lct.add_argument("--json", action="store_true")
+    lsub.add_parser(
+        "triage-local", help="dùng bởi hook PostToolUseFailure: trích ≤ 20 dòng lỗi Gate đã che bí mật; luôn exit 0"
+    )
     lsub.add_parser("checkpoint", help="dùng bởi PreCompact hook: ghi vị trí làm việc trước khi nén; luôn exit 0")
     lsta = lsub.add_parser(
         "stats", help="số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu (LOOP-DESIGN-024)"

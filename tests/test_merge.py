@@ -2753,3 +2753,153 @@ class GhApiPaginationTest(unittest.TestCase):
         with patch:
             self.assertEqual(xt._gh_api("repos/o/r/pulls/7"), [[{"id": 0}, {"id": 1}, {"id": 2}]])
         self.assertEqual(calls[0][-1], "repos/o/r/pulls/7")
+
+
+class PrStatsTest(unittest.TestCase):
+    """`xt.py pr stats` (TD-4): số đo PR đã merge từ REST — hàm thuần `pr_stats` + I/O qua REST giả có phân trang
+    `page=N` như `GhApiPaginationTest` (không `--paginate`, không GraphQL)."""
+
+    NOW = xt._dt.datetime(2026, 10, 21, 12, tzinfo=xt._dt.timezone.utc)
+
+    @staticmethod
+    def at(hours_ago: float, now: Any = None) -> str:
+        t = (now or PrStatsTest.NOW) - xt._dt.timedelta(hours=hours_ago)
+        return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def mk_pr(self, n: int, opened: float, merged: float | None, now: Any = None, **over: Any) -> dict:
+        p = {
+            "number": n,
+            "title": f"feat: việc {n}",
+            "created_at": self.at(opened, now),
+            "merged_at": None if merged is None else self.at(merged, now),
+            "head": {"ref": f"nhanh-{n}", "sha": f"sha{n}"},
+            "labels": [],
+        }
+        p.update(over)
+        return p
+
+    def mk_run(self, branch: str, sha: str, hours_ago: float, concl: str | None = "success", now: Any = None) -> dict:
+        return {"head_branch": branch, "head_sha": sha, "created_at": self.at(hours_ago, now), "conclusion": concl}
+
+    def corpus(self, now: Any = None) -> tuple[list[dict], list[dict]]:
+        prs = [
+            self.mk_pr(1, 30, 20, now, labels=[{"name": "xt-standard-lane"}, "lạ"]),  # lead 10 giờ
+            self.mk_pr(2, 5, 3, now, title='Revert "feat: việc 1"'),  # lead 2 giờ
+            self.mk_pr(3, 50, 2, now, title="revert(cli)!: bỏ cờ"),  # lead 48 giờ
+            self.mk_pr(4, 2000, 1000, now),  # merge trước kỳ 30 ngày → bỏ
+            self.mk_pr(5, 10, None, now),  # đóng không merge → bỏ
+            {**self.mk_pr(6, 4, 1, now), "created_at": "hỏng"},  # giờ mở hỏng → bỏ
+        ]
+        runs = [
+            self.mk_run("nhanh-1", "cu", 29, "failure", now),  # push trước, SHA khác, trong lúc PR mở
+            self.mk_run("nhanh-1", "sha1", 21, "success", now),
+            self.mk_run("nhanh-1", "khac", 5, "success", now),  # tên nhánh dùng lại sau merge → không tính
+            self.mk_run("nhanh-2", "sha2", 4, "cancelled", now),
+            self.mk_run("nhanh-2", "sha2", 4.5, None, now),  # đang chạy (conclusion null)
+            self.mk_run("nhanh-2", "x", 0, "failure", now) | {"created_at": "hỏng"},  # giờ hỏng, SHA khác → bỏ
+            self.mk_run("nhanh-9", "sha1", 25, "failure", now),  # nhánh khác dù trùng SHA → bỏ
+        ]
+        return prs, runs
+
+    def test_pr_stats_pure_numbers(self):
+        prs, runs = self.corpus()
+        s = xt.pr_stats(prs, runs, self.NOW, 30)
+        self.assertEqual([r["number"] for r in s["prs"]], [1, 2, 3])
+        self.assertEqual(s["merged"], 3)
+        self.assertEqual(s["lead_time_hours"], {"median": 10.0, "p95": 48.0})
+        self.assertEqual([r["runs"] for r in s["prs"]], [2, 2, 0])
+        self.assertEqual(s["runs_per_pr"], {"median": 2.0, "p95": 2.0, "total": 4})
+        self.assertEqual((s["runs_failure"], s["runs_cancelled"], s["bad_run_rate"]), (1, 1, 0.5))
+        self.assertEqual((s["standard_lane"], s["reverts"], s["runs_seen"]), (1, 2, len(runs)))
+        self.assertEqual(s["since"], "2026-09-21T12:00:00+00:00")
+
+    def test_pr_stats_empty_and_missing_head(self):
+        s = xt.pr_stats([], [], self.NOW, 7)
+        self.assertEqual((s["merged"], s["bad_run_rate"]), (0, None))
+        self.assertEqual(s["lead_time_hours"], {"median": None, "p95": None})
+        table = xt.pr_stats_table(s)
+        self.assertIn("| PR merge trong 7 ngày (từ 2026-10-14) | Giá trị |", table)
+        self.assertIn("| — · — |", table)
+        no_head = {**self.mk_pr(8, 3, 1), "head": None, "title": None, "labels": None}
+        s = xt.pr_stats([no_head], [self.mk_run("nhanh-8", "sha8", 2)], self.NOW, 7)
+        self.assertEqual((s["prs"][0]["runs"], s["prs"][0]["revert"], s["runs_per_pr"]["total"]), (0, False, 0))
+
+    def test_pr_stats_table_values(self):
+        table = xt.pr_stats_table(xt.pr_stats(*self.corpus(), self.NOW, 30))
+        self.assertIn("| PR đã merge | 3 |", table)
+        self.assertIn("| 10 giờ · 48 giờ |", table)
+        self.assertIn("| 2 · 2 · 4 |", table)
+        self.assertIn("| 1 · 1 (50%) |", table)
+        self.assertIn("(`xt-standard-lane`) | 1 |", table)
+        self.assertIn("| PR revert | 2 |", table)
+
+    def fake_rest(self, prs: list[dict], runs: list[dict], fail: str = ""):
+        """REST giả: `pulls` là mảng, `actions/runs` là object `workflow_runs`; cắt trang theo `per_page`/`page`."""
+        calls: list[str] = []
+
+        def run(cmd, **kw):
+            path = cmd[-1]
+            calls.append(path)
+            self.assertNotIn("--paginate", cmd)
+            self.assertNotIn("graphql", cmd)
+            if fail and fail in path:
+                return subprocess.CompletedProcess(cmd, 1, "", "HTTP 403: Resource not accessible")
+            page = int(re.search(r"[?&]page=(\d+)", path)[1])
+            per = int(re.search(r"[?&]per_page=(\d+)", path)[1])
+            src = runs if "/actions/runs" in path else prs
+            chunk = src[(page - 1) * per : page * per]
+            body = {"total_count": len(src), "workflow_runs": chunk} if src is runs else chunk
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(body), "")
+
+        return calls, unittest.mock.patch("xt.subprocess.run", side_effect=run)
+
+    def test_pr_stats_cli_rest_paginated_json_and_table(self):
+        now = xt._dt.datetime.now(xt._dt.timezone.utc)
+        prs, runs = self.corpus(now)
+        filler = [self.mk_pr(100 + i, 9000, 8000, now) for i in range(100)]  # trang 1 đủ 100 → đọc trang 2
+        runs_full = runs + [self.mk_run("khac", "z", 1, "success", now)] * 100
+        calls, patch = self.fake_rest(filler + prs, runs_full)
+        with patch:
+            rc, out, err = run_main("pr", "stats", "--json")
+        self.assertEqual((rc, err), (0, ""))
+        s = json.loads(out)
+        self.assertEqual((s["merged"], s["runs_per_pr"]["total"], s["runs_seen"]), (3, 4, len(runs_full)))
+        day = (now - xt._dt.timedelta(hours=50)).date().isoformat()  # ngày mở sớm nhất của PR merge trong kỳ
+        self.assertEqual(
+            calls,
+            [
+                "repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1",
+                "repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=2",
+                f"repos/{{owner}}/{{repo}}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100&page=1",
+                f"repos/{{owner}}/{{repo}}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100&page=2",
+            ],
+        )
+        calls, patch = self.fake_rest(prs, runs)
+        with patch:
+            rc, out, _ = run_main("pr", "stats", "--days", "30", "--repo", "o/r")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("| PR merge trong 30 ngày"), out)
+        self.assertIn("| PR revert | 2 |", out)
+        self.assertTrue(all(c.startswith("repos/o/r/") for c in calls), calls)
+
+    def test_pr_stats_cli_no_merged_pr_skips_runs(self):
+        now = xt._dt.datetime.now(xt._dt.timezone.utc)
+        calls, patch = self.fake_rest([self.mk_pr(5, 10, None, now)], [])
+        with patch:
+            rc, out, _ = run_main("pr", "stats", "--days", "1", "--json")
+        self.assertEqual((rc, json.loads(out)["merged"]), (0, 0))
+        self.assertFalse(any("actions/runs" in c for c in calls), calls)
+
+    def test_pr_stats_cli_errors(self):
+        for args in (("--days", "0"), ("--repo", "khong hop le")):
+            rc, _, err = run_main("pr", "stats", *args)
+            self.assertEqual(rc, 2, args)
+            self.assertIn("--days phải ≥ 1", err)
+        now = xt._dt.datetime.now(xt._dt.timezone.utc)
+        prs, runs = self.corpus(now)
+        for fail in ("/pulls", "/actions/runs"):  # token thiếu quyền (403) ở từng endpoint → lỗi rõ, exit 2
+            _, patch = self.fake_rest(prs, runs, fail=fail)
+            with patch:
+                rc, out, err = run_main("pr", "stats")
+            self.assertEqual((rc, out), (2, ""), fail)
+            self.assertIn("HTTP 403", err)
