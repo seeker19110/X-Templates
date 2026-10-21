@@ -110,11 +110,21 @@ def template_body(text: str) -> str:
     return "\n".join(lines[start + 1 : end]).strip("\n") + "\n"
 
 
+def drop_symlink(path: Path) -> None:
+    """`.xtemplates/` là bản chỉ đọc của khung: đích là symlink → gỡ liên kết (không đụng file nó trỏ tới) rồi ghi file
+    thật — không bao giờ ghi xuyên symlink ra ngoài dự án (AUD-CFG-003, như AUD-HAR-010 cho harness)."""
+    if path.is_symlink():
+        log(f"  ⚠ {path} là symlink — gỡ liên kết, ghi bản khung tại chỗ (không ghi qua liên kết)")
+        path.unlink()
+
+
 def copy_tree_replace(src: Path, dst: Path) -> None:
     """Copy vào thư mục tạm rồi mới thay: lỗi giữa chừng không để dst mất/dở."""
     tmp = dst.with_name(dst.name + ".tmp")
+    drop_symlink(tmp)
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    drop_symlink(dst)
     if dst.exists():
         shutil.rmtree(dst)
     tmp.rename(dst)
@@ -395,13 +405,34 @@ def framework_label(explicit: str | None) -> str:
     return version
 
 
-def target_error(target: Path) -> str | None:
+def target_error(target: Path, with_github: bool = False) -> str | None:
     """Lý do không cài được vào `target` (None nếu hợp lệ)."""
     if not target.is_dir():
         return f"✗ không phải thư mục: {target}"
     if target == SRC:
         return "✗ không cài khung vào chính repo khung"
-    return None
+    if (target / ".xtemplates").is_symlink():
+        return f"✗ {target / '.xtemplates'} là symlink — khung không ghi xuyên liên kết (AUD-CFG-003); gỡ liên kết rồi cài lại"
+    return github_root_error(target) if with_github else None
+
+
+def github_root_error(target: Path) -> str | None:
+    """`--with-github` vào thư mục con của repo git (monorepo `apps/web`): GitHub chỉ chạy workflow ở `.github/workflows`
+    của GỐC repo — ghi vào thư mục con là CI không bao giờ chạy mà không ai biết (AUD-CI-012). Không phải repo git / git
+    lỗi → không chặn (chưa có gốc để so)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    top = Path(r.stdout.strip()).resolve() if r.returncode == 0 and r.stdout.strip() else None
+    if top is None or top == target:
+        return None
+    return (
+        f"✗ --with-github: {target} không phải gốc repo git ({top}) — GitHub chỉ chạy workflow ở {top / '.github'}; "
+        "cài không kèm --with-github ở thư mục con, rồi chép/gộp workflow vào gốc repo và đặt `working-directory`"
+    )
 
 
 def install_framework(xt_dir: Path, label: str | None) -> str:
@@ -411,11 +442,15 @@ def install_framework(xt_dir: Path, label: str | None) -> str:
     # research/ đi kèm vì module trong framework/ trỏ tới nguồn nghiên cứu bằng đường dẫn tương đối.
     if (SRC / "research").is_dir():
         copy_tree_replace(SRC / "research", xt_dir / "research")
+    drop_symlink(xt_dir / "scripts")
     (xt_dir / "scripts").mkdir(exist_ok=True)
     for f in ("xt.py", "dev-task.sh", "check-links.py"):
+        drop_symlink(xt_dir / "scripts" / f)
         shutil.copy2(SRC / "scripts" / f, xt_dir / "scripts" / f)
     (xt_dir / "scripts" / "dev-task.sh").chmod(0o755)
     version = framework_label(label)
+    for f in ("VERSION", "README.md"):
+        drop_symlink(xt_dir / f)
     (xt_dir / "VERSION").write_text(version + "\n", encoding="utf-8")
     (xt_dir / "README.md").write_text(
         "# .xtemplates/\n\nBản sao khung X-Templates (chỉ đọc). Cập nhật: chạy lại `install.py` từ bản khung mới.\n"
@@ -711,6 +746,9 @@ def ensure_gitignore(target: Path) -> None:
     """Bước 4: .gitignore thêm `.autopilot/` nếu thiếu (tạo mới nếu chưa có file)."""
     gi = target / ".gitignore"
     line = ".autopilot/"
+    if gi.is_symlink():  # file của dự án (không phải bản khung): không ghi qua liên kết, không gỡ (AUD-CFG-003)
+        log(f"  ⚠ bỏ qua symlink {gi} — tự thêm dòng `{line}` vào file thật")
+        return
     if gi.exists():
         if line not in gi.read_text(encoding="utf-8").splitlines():
             with gi.open("a", encoding="utf-8") as fh:
@@ -934,7 +972,7 @@ def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github:
 def install_plan(target: Path, force_harness: bool, no_harness: bool, with_github: bool = False) -> int:
     """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
-    error = target_error(target)
+    error = target_error(target, with_github)
     if error:
         log(error)
         return 2
@@ -957,7 +995,7 @@ def install_plan(target: Path, force_harness: bool, no_harness: bool, with_githu
 
 def install(target: Path, force_harness: bool, no_harness: bool, label: str | None, with_github: bool = False) -> int:
     target = target.resolve()
-    error = target_error(target)
+    error = target_error(target, with_github)
     if error:
         log(error)
         return 2

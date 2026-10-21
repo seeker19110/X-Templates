@@ -38,6 +38,39 @@
    }
   },
   {
+   "id": "guard-sec102-push-main-redirect",
+   "origin": "audit",
+   "refs": ["AUD-SEC-102"],
+   "input": {
+    "command": "git push origin main 2>&1"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec102-push-quoted-gt-main",
+   "origin": "adversarial-author",
+   "refs": ["AUD-SEC-102"],
+   "input": {
+    "command": "git push origin '>' main >/dev/null"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec102-push-feature-redirect",
+   "origin": "control",
+   "refs": ["AUD-SEC-102"],
+   "input": {
+    "command": "git push origin feat/x 2>&1"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
    "id": "guard-control-rm-dist",
    "origin": "control",
    "refs": [],

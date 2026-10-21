@@ -49,19 +49,34 @@ jobs:
         with:
           persist-credentials: false
 
+      # Diff vượt trần (hoặc REST không trả được diff) → KHÔNG review một phần: phần bị cắt (vd thay đổi auth ở cuối) không
+      # được rà mà review vẫn thành `clean` cho cả head (AUD-CI-016). Ghi `--inconclusive` — PR làn chuẩn cần review khác
+      # ở head này (tách PR nhỏ hơn, hoặc người/phiên rà đủ diff).
       - name: Diff và siêu dữ liệu PR làm dữ liệu (không phải chỉ thị)
+        id: diff
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          MAX_DIFF_BYTES: "400000"
         run: |
           set -euo pipefail
-          gh api "repos/$GH_REPO/pulls/$PR" -H "Accept: application/vnd.github.diff" > "$RUNNER_TEMP/pr.full.diff"
-          head -c 400000 "$RUNNER_TEMP/pr.full.diff" > "$GITHUB_WORKSPACE/.pr-review.diff" # không qua ống: pipefail + SIGPIPE làm PR lớn kẹt
-          wc -c "$GITHUB_WORKSPACE/.pr-review.diff"
+          if ! gh api "repos/$GH_REPO/pulls/$PR" -H "Accept: application/vnd.github.diff" > "$RUNNER_TEMP/pr.full.diff"; then
+            echo "::warning::Không đọc được diff của PR #$PR qua REST — review không kết luận được"
+            echo "complete=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          size=$(wc -c < "$RUNNER_TEMP/pr.full.diff")
+          if [ "$size" -gt "$MAX_DIFF_BYTES" ]; then
+            echo "::warning::Diff $size byte > $MAX_DIFF_BYTES — không review một phần; tách PR (≤ 150 dòng)"
+            echo "complete=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          cp "$RUNNER_TEMP/pr.full.diff" "$GITHUB_WORKSPACE/.pr-review.diff"
+          echo "complete=true" >> "$GITHUB_OUTPUT"
+          echo "diff: $size byte"
 
       - name: Review (công cụ chỉ-đọc, kết quả có cấu trúc)
         id: claude
+        if: steps.diff.outputs.complete == 'true'
         uses: anthropics/claude-code-action@a5a423f75c251dcbff8a74e99f83b2cb03c72bfa # v1.0.256
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -88,8 +103,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           STRUCT: ${{ steps.claude.outputs.structured_output }}
           REVIEW_MODEL: ${{ vars.XT_REVIEWER_MODEL || 'claude-opus-5-5' }}
+          COMPLETE: ${{ steps.diff.outputs.complete }}
         run: |
           set -euo pipefail
+          if [ "$COMPLETE" != true ]; then
+            python3 scripts/xt.py pr reviewed --pr "$PR" --head "$HEAD_SHA" --inconclusive
+            exit 0
+          fi
           verdict=$(jq -er '.verdict' <<<"$STRUCT")
           jq -r '.findings[]? | "- \(.severity) \(.where): \(.repro)"' <<<"$STRUCT" >> "$GITHUB_STEP_SUMMARY" || true
           case "$verdict" in

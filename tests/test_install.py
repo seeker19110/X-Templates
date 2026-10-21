@@ -402,6 +402,99 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(install.main([str(self.target / "khong-co"), "--label", "x"]), 2)
 
 
+class InstallAuditFixTest(unittest.TestCase):
+    """Audit 2026-10-21: AUD-CI-012 (`--with-github` vào thư mục con của repo git ghi workflow GitHub không chạy) và
+    AUD-CFG-003 (installer ghi xuyên symlink trong `.xtemplates/` và `.gitignore` ra file ngoài dự án)."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+
+    def quiet(self, *argv: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            rc = install.main(list(argv))
+        return rc, err.getvalue()
+
+    def test_with_github_subdir_of_git_repo_refused(self):
+        mono = self.tmp / "mono"
+        web = mono / "apps" / "web"
+        web.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(mono)], check=True)
+        for extra in ((), ("--plan",)):
+            with self.subTest(extra=extra):
+                rc, err = self.quiet(str(web), "--label", "t", "--with-github", *extra)
+                self.assertEqual(rc, 2)
+                self.assertIn("không phải gốc repo git", err)
+                self.assertIn(str(mono / ".github"), err)
+        self.assertFalse((web / ".github").exists())
+        self.assertFalse((web / ".xtemplates").exists())  # từ chối trước khi ghi gì
+        self.assertEqual(self.quiet(str(web), "--label", "t")[0], 0)  # không kèm --with-github: cài được
+        self.assertEqual(self.quiet(str(mono), "--label", "t", "--with-github")[0], 0)  # ở gốc repo: như cũ
+        self.assertTrue((mono / ".github" / "workflows" / "ci.yml").is_file())
+
+    def test_with_github_outside_git_or_git_error_not_blocked(self):
+        plain = self.tmp / "plain"
+        plain.mkdir()
+        env = mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)})
+        with env:
+            self.assertIsNone(install.github_root_error(plain))
+        with mock.patch.object(install.subprocess, "run", side_effect=OSError("git")):
+            self.assertIsNone(install.github_root_error(plain))
+
+    def test_symlink_in_xtemplates_not_followed(self):
+        target = self.tmp / "proj"
+        target.mkdir()
+        self.assertEqual(self.quiet(str(target), "--label", "t")[0], 0)
+        xt_dir = target / ".xtemplates"
+        victims = {}
+        for rel in ("VERSION", "README.md", "scripts/xt.py", "scripts/dev-task.sh"):
+            victim = self.outside / rel.replace("/", "_")
+            victim.write_text("ORIG", encoding="utf-8")
+            (xt_dir / rel).unlink()
+            (xt_dir / rel).symlink_to(victim)
+            victims[rel] = victim
+        rc, err = self.quiet(str(target), "--label", "t2")
+        self.assertEqual(rc, 0)
+        self.assertIn("là symlink — gỡ liên kết", err)
+        for rel, victim in victims.items():
+            with self.subTest(rel=rel):
+                self.assertEqual(victim.read_text(encoding="utf-8"), "ORIG")  # file ngoài dự án không bị ghi
+                self.assertFalse((xt_dir / rel).is_symlink())
+        self.assertEqual((xt_dir / "VERSION").read_text(encoding="utf-8"), "t2\n")
+
+    def test_symlink_dirs_and_gitignore_not_followed(self):
+        target = self.tmp / "proj"
+        target.mkdir()
+        self.assertEqual(self.quiet(str(target), "--label", "t")[0], 0)
+        xt_dir = target / ".xtemplates"
+        shutil.rmtree(xt_dir / "scripts")
+        (self.outside / "scripts").mkdir()
+        (xt_dir / "scripts").symlink_to(self.outside / "scripts")
+        shutil.rmtree(xt_dir / "framework")
+        (self.outside / "fw").mkdir()
+        (self.outside / "fw" / "keep.md").write_text("ORIG", encoding="utf-8")
+        (xt_dir / "framework").symlink_to(self.outside / "fw")
+        (target / ".gitignore").unlink()
+        (self.outside / "gi").write_text("ORIG\n", encoding="utf-8")
+        (target / ".gitignore").symlink_to(self.outside / "gi")
+        rc, err = self.quiet(str(target), "--label", "t2")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(list((self.outside / "scripts").iterdir()), [])
+        self.assertEqual((self.outside / "fw" / "keep.md").read_text(encoding="utf-8"), "ORIG")
+        self.assertTrue((xt_dir / "framework" / "00-method").is_dir() and not (xt_dir / "framework").is_symlink())
+        self.assertEqual((self.outside / "gi").read_text(encoding="utf-8"), "ORIG\n")
+        self.assertIn("bỏ qua symlink", err)
+        shutil.rmtree(xt_dir)
+        (self.outside / "xt").mkdir()
+        xt_dir.symlink_to(self.outside / "xt")
+        rc, err = self.quiet(str(target), "--label", "t3")
+        self.assertEqual(rc, 2)
+        self.assertIn(".xtemplates là symlink", err)
+        self.assertEqual(list((self.outside / "xt").iterdir()), [])
+
+
 class LegacyMigrationTest(unittest.TestCase):
     """ADR-0007: dự án cài bản ≤ 2.x (`.xstored/`, `xs.yaml`) chạy lại install là sang tên mới."""
 
