@@ -917,3 +917,10 @@
 - Chọn: A: bỏ vế đó; test_ci_template đã chạy ci_check_text trên ci.yml và secret-scan.yml
 - Lý do (tiêu chí chất lượng cuối): Gate viết sai từ đầu; A giữ đúng kiểm (cả hai workflow mẫu vẫn qua ci-check trong test), không đổi công cụ
 - Đường lùi: Thêm lại vế ci-check khi công cụ bỏ qua file không phải workflow
+
+### D-130 · 2026-10-21T14:17:29+00:00 · Chủ repo: đọc commit chưa merge d388802 (audit tại ec4c7d2 + kế hoạch tối ưu), kiểm tra lại, nghiên cứu thêm rồi thi hành — làm gì trước PLAN-3.14-app
+
+- Phương án: (1) A: nhập audit d388802, tái hiện độc lập từng phát hiện (repro + 2 người bác bỏ), sửa theo PLAN-3.15-audit-gate (bằng chứng Gate → cổng nhất quán → guard/reviewer → installer → đo CI) trước, tạm dừng PLAN-3.14-app · (2) B: tiếp PLAN-3.14-app như PROGRESS Tiếp theo 0, ghi các phát hiện vào sổ làm nợ · (3) C: chỉ merge báo cáo audit, không sửa
+- Chọn: A: nhập audit d388802, tái hiện độc lập từng phát hiện (repro + 2 người bác bỏ), sửa theo PLAN-3.15-audit-gate (bằng chứng Gate → cổng nhất quán → guard/reviewer → installer → đo CI) trước, tạm dừng PLAN-3.14-app
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): AUD-CODE-014 tái hiện được tới Stop hook (verified.json ok=True, final_verdict=done khi Gate thật exit 1) = cổng giả xanh 🔴 — mọi bằng chứng 'xong' của autopilot, gồm PLAN-3.14, dựa trên nó; AUD-XFEAT-013 làm cổng dự án đích xanh với 0 test. Tiêu chí 2: mỗi lát một PR, chỉ chặt hơn, revert được. PLAN-3.14 chưa có mã nên dừng không mất gì
+- Đường lùi: loop init --force --plan docs/autopilot/PLAN-3.14-app.md; revert PR của từng lát
