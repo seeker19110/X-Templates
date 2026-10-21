@@ -3,7 +3,7 @@ title: Triển khai: canary, blue/green, feature flag, rollback, migration onlin
 kind: module
 prefix: OPS-DEPLOY
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain, static-site, mobile-app, desktop-app, embedded-iot]
-updated: 2026-10-14
+updated: 2026-10-21
 ---
 
 # Triển khai: canary, blue/green, feature flag, rollback, migration online
@@ -12,6 +12,9 @@ updated: 2026-10-14
 > khỏi release, rollback < 15 phút đã diễn tập, migration online expand/contract, smoke test sau deploy, freeze có chủ. Pipeline CI/CD
 > và cổng merge là nhà của [`../10-workflow/ci-cd-pipeline.md`](../10-workflow/ci-cd-pipeline.md); cách viết migration ở
 > [`../09-database/migrations.md`](../09-database/migrations.md); phát hành phiên bản/changelog ở [`../10-workflow/release-and-versioning.md`](../10-workflow/release-and-versioning.md).
+> Khởi đầu: mẫu CD tối thiểu của khung (`WF-CI-026` — đóng gói một lần, staging tự động sau CI xanh + smoke, production
+> chạy tay nâng đúng artefact, `run_id` cũ = rollback) phủ phần lõi của `OPS-DEPLOY-001`, `-002`, `-004`; chiến lược
+> rollout bên dưới thêm khi quy mô đòi.
 
 ## Nguyên tắc
 

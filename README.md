@@ -110,6 +110,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py test-select [FILE…] [--tests DIR] [--unittest]` | Test liên quan file đổi (đối số hoặc `XT_CHANGED_FILES`): chính file test, `test_<tên>.py`, test nhắc tên file, test quét theo đuôi (`*.md`); file không ánh xạ được → cả suite; `--unittest` in id lớp (`tests.test_x.Lop`), module lỗi import → exit 1 |
 | `python3 scripts/xt.py commit-gate` | In `fast`\|`full`: cổng trước commit theo `commit_gate` của `xt.yaml` (đọc như `doctor`; vắng/lạ → `full`) — hook `pre-bash-guard.sh` gọi |
 | `scripts/dev-task.sh test-shard I N [DIR]` · `test-combine DIR` · `python3 scripts/xt.py test-shard-plan I N --weights FILE` | Chia test cho job CI song song (`test_list`/`test_unit`/`test_combine` của `xt.yaml`); có `test_weights` → chia theo trọng số qua `test-shard-plan` (id từ stdin; tham lam LPT: nặng trước, vào shard nhẹ nhất; id lạ lấy trung vị; JSON hỏng → exit 2), không khai → id thứ k vào shard k mod N |
+| `scripts/dev-task.sh test-mode` · `e2e-mode` · `e2e [I N]` · `package DIR` · `deploy ENV DIR` · `declared T…` | Task của CI/CD mẫu dự án đích (D-115): `shard`/`whole` cho job `test`; `off`/`shard`/`whole` cho job `e2e`; `e2e_setup` rồi `e2e` với `XT_SHARD=I/N`; đóng gói `package` vào DIR + `SHA256SUMS`; kiểm `SHA256SUMS` rồi `deploy` + `smoke` với `XT_DEPLOY_ENV`; exit 0 khi task có lệnh thật |
 | `scripts/dev-task.sh test-weights` · `python3 scripts/xt.py test-weights --unit CMD --out FILE` | Đo lại file `test_weights` (id từ stdin, chạy lần lượt, giây làm tròn 0.1, JSON khoá sắp xếp; id đỏ → exit 1, không ghi). Chạy tay rồi commit; CI không chạy |
 
 Biến môi trường (đều tuỳ chọn): `XT_FRAMEWORK` (thư mục khung, mặc định cạnh `scripts/`) · `XT_FRAMEWORK_LINK` (gốc liên kết
@@ -186,6 +187,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   merge) khi CI/làn cho merge mà review ở head chưa hợp lệ — thay ADR-0028 §2.
 - [ADR-0033](docs/adr/0033-build-phase-lean-autopilot.md): pha build tối giản autopilot — audit delta theo mốc gom về
   trước G7, reviewer chỉ khi `pr next` trả `review`, `PROGRESS.md` cập nhật theo lát.
+- [ADR-0034](docs/adr/0034-target-ci-cd-minimal-max-parallel.md): CI/CD và ruleset dự án đích tối thiểu khi triển khai
+  ban đầu, song song tối đa — matrix tĩnh không job lập kế hoạch, job `e2e`, CD staging/production, ruleset không strict.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

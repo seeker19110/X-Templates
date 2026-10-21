@@ -13,7 +13,8 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights | require | setup
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights |
+#   test-mode | e2e-mode | e2e | package | deploy | declared | require | setup
 #   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
 #          mở PR, `xt.py loop record` dùng đúng lệnh này.
 #   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
@@ -36,6 +37,17 @@
 #          Actions in `::error::` nêu khoá cần điền và ví dụ theo stack. typecheck/build rỗng vẫn được (không bắt buộc).
 #   setup = cài toolchain/phụ thuộc cho job CI (mẫu `framework/templates/ci.yml`): chạy khoá `setup` (vd `npm ci`). Chỉ
 #          lệnh khai báo, không tự dò; vắng/rỗng → log "không khai setup", exit 0; guard cấm lệnh → exit 126.
+#   CI/CD mẫu (D-115 — job song song, không job lập kế hoạch tuần tự; mọi lệnh vẫn là khoá của xt.yaml, qua guard):
+#   test-mode = in `shard` khi khai đủ lệnh thật `test_list` · `test_unit` · `test_combine`, không thì `whole` (job `test`
+#          shard 1 chạy cả `test`, shard khác bỏ qua; job `coverage` gộp chỉ khi `shard`).
+#   e2e-mode = in `off` (`e2e` rỗng/no-op), `shard` (lệnh `e2e` dùng $XT_SHARD) hoặc `whole` (chỉ shard 1 chạy cả suite).
+#   e2e [I N] = suite E2E: `e2e_setup` (cài trình duyệt…) rồi `e2e` với XT_SHARD="I/N" (mặc định 1/1 — agent chạy tay
+#          được); `off` → bỏ qua exit 0; `whole` mà I > 1 → bỏ qua (không chạy trùng cả suite N lần).
+#   package DIR = đóng gói MỘT lần (WF-CI-013, OPS-DEPLOY-001): DIR rỗng, chạy `package` với XT_ARTIFACT_DIR=DIR (vắng →
+#          artefact chỉ có xt-artifact.txt), rồi ghi `SHA256SUMS` của mọi file.
+#   deploy ENV DIR = kiểm `SHA256SUMS` của DIR (lệch/thiếu → đỏ), chạy `deploy` với XT_DEPLOY_ENV=ENV và
+#          XT_ARTIFACT_DIR=DIR, rồi `smoke` cùng biến (OPS-DEPLOY-004; vắng → cảnh báo); `deploy` rỗng → đỏ.
+#   declared T… = exit 0 khi mọi task phân giải ra lệnh thật (khai báo hoặc tự dò), 1 khi có task rỗng/no-op — im lặng.
 #
 # Dùng: scripts/dev-task.sh <task>
 set -uo pipefail
@@ -52,7 +64,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|require|setup"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|package|deploy|declared|require|setup"
   exit 2
 fi
 
@@ -339,6 +351,81 @@ require_tasks() { # $@=task → 0 nếu mọi task phân giải ra lệnh thật
   return "$bad"
 }
 
+# --- CI/CD mẫu (D-115): chế độ test/e2e cho matrix tĩnh, đóng gói một lần, deploy + smoke ---------------------------
+real_cmd() { # $1=task → 0 nếu phân giải ra lệnh thật (khai báo hoặc tự dò), không phải rỗng/no-op
+  ! is_noop "$(resolve "$1")"
+}
+test_mode() { # in shard|whole — cùng điều kiện với test-shard/test-combine (chỉ lệnh khai báo, không no-op)
+  local k c
+  for k in test_list test_unit test_combine; do
+    c="$(declared_cmd "$k")"
+    if [ -z "$c" ] || is_noop "$c"; then echo whole; return 0; fi
+  done
+  echo shard
+}
+e2e_mode() { # in off|shard|whole
+  local c; c="$(resolve e2e)"
+  if is_noop "$c"; then echo off; return 0; fi
+  case "$c" in *XT_SHARD*) echo shard ;; *) echo whole ;; esac
+}
+shard_args_ok() { # $1=I $2=N → 0 nếu 1 ≤ I ≤ N (số)
+  [[ "$1" =~ ^[1-9][0-9]{0,5}$ && "$2" =~ ^[1-9][0-9]{0,5}$ ]] && [ "$1" -le "$2" ]
+}
+e2e_run() { # $1=I $2=N (mặc định 1 1)
+  local i="${1:-1}" n="${2:-1}" mode
+  shard_args_ok "$i" "$n" || { log "e2e: cần 1 ≤ I ≤ N (nhận I='$i' N='$n')"; return 2; }
+  mode="$(e2e_mode)"
+  case "$mode" in
+    off) log "e2e: chưa khai 'e2e' trong xt.yaml (hoặc là lệnh không kiểm gì) — bỏ qua"; return 0 ;;
+    whole)
+      if [ "$i" -gt 1 ]; then log "e2e $i/$n: lệnh 'e2e' không dùng \$XT_SHARD — shard 1 chạy cả suite, shard này bỏ qua"; return 0; fi
+      n=1 ;;
+  esac
+  export XT_SHARD="$i/$n"
+  guard_turn e2e_setup e2e || return 126
+  run_task e2e_setup || return $?
+  run_task e2e
+}
+sha_tool() { # lệnh sha256 sẵn có (coreutils hoặc perl shasum); không có → 1
+  if command -v sha256sum >/dev/null 2>&1; then echo sha256sum
+  elif command -v shasum >/dev/null 2>&1; then echo "shasum -a 256"
+  else return 1; fi
+}
+package_run() { # $1=thư mục đích (rỗng hoặc chưa có)
+  local d sha tool sums
+  [ -n "${1:-}" ] || { log "package: cần thư mục đích (vd package \"\$RUNNER_TEMP/artifact\")"; return 2; }
+  mkdir -p -- "$1" && d="$(cd -- "$1" && pwd)" || return 2
+  [ -z "$(ls -A -- "$d")" ] || { log "package: '$d' phải rỗng — artefact chỉ chứa thứ lệnh 'package' ghi"; return 2; }
+  tool="$(sha_tool)" || { log "package: cần sha256sum hoặc shasum"; return 2; }
+  if real_cmd package; then
+    export XT_ARTIFACT_DIR="$d"
+    run_task package || return $?
+  else
+    log "package: chưa khai 'package' — artefact chỉ có xt-artifact.txt (lệnh 'deploy' tự lấy mã từ commit)"
+  fi
+  sha="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+  printf 'commit=%s\n' "$sha" >"$d/xt-artifact.txt"
+  sums="$(mktemp)" || return 2
+  (cd "$d" && find . -type f ! -path ./SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 $tool) >"$sums" &&
+    mv -- "$sums" "$d/SHA256SUMS" || { rm -f -- "$sums"; log "package: không ghi được SHA256SUMS"; return 1; }
+  log "package: $(grep -c . "$d/SHA256SUMS") file → $d (SHA256SUMS)"
+}
+deploy_run() { # $1=môi trường $2=thư mục artefact (từ package)
+  local env="${1:-}" d tool msg
+  [[ "$env" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || { log "deploy: tên môi trường không hợp lệ: '$env' (vd staging, production)"; return 2; }
+  [ -n "${2:-}" ] && [ -f "$2/SHA256SUMS" ] || { log "deploy: '${2:-}' không có SHA256SUMS — chỉ deploy artefact do 'package' tạo"; return 2; }
+  d="$(cd -- "$2" && pwd)" || return 2
+  tool="$(sha_tool)" || { log "deploy: cần sha256sum hoặc shasum"; return 2; }
+  (cd "$d" && $tool -c --quiet SHA256SUMS) || { log "deploy: ĐỎ — artefact lệch SHA256SUMS, không deploy"; return 1; }
+  real_cmd deploy || { log "deploy: ĐỎ — chưa khai lệnh 'deploy' trong xt.yaml"; return 1; }
+  export XT_DEPLOY_ENV="$env" XT_ARTIFACT_DIR="$d"
+  guard_turn deploy smoke || return 126
+  run_task deploy || return $?
+  if real_cmd smoke; then run_task smoke; return $?; fi
+  msg="chưa khai 'smoke' trong xt.yaml — deploy '$env' không được kiểm sau khi lên (OPS-DEPLOY-004)"
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then printf '::warning::%s\n' "$msg"; else log "CẢNH BÁO: $msg"; fi
+}
+
 # --- format-file: format ĐÚNG file vừa sửa (dùng cho auto-format hook) --------
 json_ok() { # $1=file → 0 nếu là JSON hợp lệ; không có python3 thì không kiểm được (coi như không hợp lệ: không giữ bản sao)
   command -v python3 >/dev/null 2>&1 && python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1
@@ -425,6 +512,21 @@ case "$TASK" in
     test_combine "${2:-}"; exit $? ;;
   test-weights)
     test_weights; exit $? ;;
+  test-mode)
+    test_mode; exit $? ;;
+  e2e-mode)
+    e2e_mode; exit $? ;;
+  e2e)
+    e2e_run "${2:-1}" "${3:-1}"; exit $? ;;
+  package)
+    package_run "${2:-}"; exit $? ;;
+  deploy)
+    deploy_run "${2:-}" "${3:-}"; exit $? ;;
+  declared)
+    shift
+    [ "$#" -gt 0 ] || { log "declared: cần ít nhất một task"; exit 2; }
+    for t in "$@"; do real_cmd "$t" || exit 1; done
+    exit 0 ;;
   require)
     shift; require_tasks "$@"; exit $? ;;
   setup)
@@ -434,5 +536,5 @@ case "$TASK" in
     guard_ok "$C" || exit 126
     ( cd "$ROOT" && bash -o pipefail -c "$C" ); exit $? ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|require|setup)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|package|deploy|declared|require|setup)"; exit 2 ;;
 esac

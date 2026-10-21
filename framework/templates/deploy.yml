@@ -1,0 +1,111 @@
+# Deploy production mẫu cho dự án đích — `install.py --with-github` chép vào `.github/workflows/deploy.yml`
+# (copy-if-absent). CD tối thiểu (WF-CI-026, D-115): staging tự động trong `ci.yml` (job `deploy-staging`); production chạy
+# TAY (Actions → Deploy production → Run workflow, hoặc REST `workflow_dispatch`) với `run_id` của một run CI đã xanh trên
+# push nhánh mặc định — nâng ĐÚNG artefact đã qua CI và staging, không build lại (OPS-DEPLOY-001). Rollback = chạy lại
+# với `run_id` của bản trước (OPS-DEPLOY-002). Lệnh lấy từ xt.yaml: `deploy` rồi `smoke` (OPS-DEPLOY-004).
+# Chủ dự án cấu hình environment `production` trên GitHub: required reviewers (≥ M — OPS-DEPLOY-007), deployment
+# branches chỉ nhánh mặc định, secret `XT_DEPLOY_TOKEN` (hoặc OIDC). Không cấu hình → GitHub tự tạo environment không cổng.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID run CI (push nhánh mặc định, xanh, có artefact deploy-artifact); run cũ hơn = rollback"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Một lần deploy production tại một thời điểm; lần sau xếp hàng, không huỷ lần đang chạy.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  # Kiểm run TRƯỚC khi environment hỏi duyệt: người duyệt chỉ thấy artefact đã qua CI. Input đi qua env (WF-CI-004).
+  verify-run:
+    name: verify-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.run.outputs.sha }}
+    steps:
+      - id: run
+        name: Run CI hợp lệ — workflow ci.yml, push, nhánh mặc định, success, cùng repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.run_id }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          REF: ${{ github.ref }}
+          API: ${{ github.api_url }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.request
+          env = os.environ
+          def fail(msg):
+              print(f"::error::{msg}")
+              sys.exit(1)
+          if env["REF"] != f"refs/heads/{env['BRANCH']}":
+              fail(f"chỉ chạy từ nhánh mặc định {env['BRANCH']} (đang ở {env['REF']})")
+          if not re.fullmatch(r"[1-9][0-9]{0,19}", env["RUN_ID"]):
+              fail(f"run_id phải là số (nhận {env['RUN_ID']!r})")
+          req = urllib.request.Request(
+              f"{env['API']}/repos/{env['REPO']}/actions/runs/{env['RUN_ID']}",
+              headers={"Authorization": f"Bearer {env['GH_TOKEN']}", "Accept": "application/vnd.github+json"},
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  run = json.load(resp)
+          except Exception as exc:
+              fail(f"không đọc được run {env['RUN_ID']}: {exc}")
+          head_repo = (run.get("head_repository") or {}).get("full_name")
+          checks = {
+              "workflow .github/workflows/ci.yml": str(run.get("path") or "").split("@")[0] == ".github/workflows/ci.yml",
+              "event push": run.get("event") == "push",
+              f"nhánh {env['BRANCH']}": run.get("head_branch") == env["BRANCH"],
+              "kết luận success": run.get("conclusion") == "success",
+              f"repo {env['REPO']}": head_repo == env["REPO"],
+          }
+          bad = [k for k, ok in checks.items() if not ok]
+          if bad:
+              fail(f"run {env['RUN_ID']} không đạt: {', '.join(bad)}")
+          sha = run["head_sha"]
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              fail(f"head_sha lạ: {sha!r}")
+          with open(env["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"sha={sha}\n")
+          print(f"OK — run {env['RUN_ID']} ({sha}) đủ điều kiện lên production.")
+          PY
+
+  production:
+    name: production
+    needs: [verify-run]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify-run.outputs.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: deploy-artifact
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/artifact
+      - name: setup — khoá `setup:` của xt.yaml (vắng = bỏ qua)
+        run: bash .xtemplates/scripts/dev-task.sh setup
+      - name: deploy production — kiểm SHA256SUMS, `deploy` rồi `smoke` của xt.yaml
+        env:
+          XT_DEPLOY_TOKEN: ${{ secrets.XT_DEPLOY_TOKEN }}
+        run: bash .xtemplates/scripts/dev-task.sh deploy production "$RUNNER_TEMP/artifact"
