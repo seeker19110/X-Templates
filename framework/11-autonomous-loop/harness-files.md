@@ -104,6 +104,12 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   x > config` dù `$X` không phải `.git`). `env -C DIR`/`--chdir=DIR` dời thư mục của lệnh sau `env` như `cd` (kèm chuyển
   hướng thì thư mục là không biết; tuỳ chọn dài viết tắt duy nhất như `--ch=DIR` cũng tính); `dd of=<đích>`, lệnh chỉ
   gồm chuyển hướng (`exec 3> .env`) và chuyển hướng đọc-ghi `<>` (`exec 3<> .env`) là ghi.
+- **Hook `TaskCompleted` chỉ chạy khi phiên có tool Task** (AUTO-02, D-068): `TaskCreate`/`TaskUpdate` không bật mặc định
+  trên Opus 5.5/Sonnet 5.5/Haiku 5.5/Fable ở CLI — cần `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` hoặc nêu tool trong
+  `--allowedTools`; phiên nền và phiên cloud luôn có. Thiếu tool thì không có sự kiện `TaskCompleted`, hook không bao giờ
+  kích hoạt và cổng bằng chứng mức task im lặng; lớp đỡ vẫn là `loop record` + Stop hook. Nguồn: Claude Code docs
+  tools-reference <https://code.claude.com/docs/en/tools-reference.md>, đọc 2026-10-21
+  (`research/2026-10-21-next-level-speed-automation-quality.md` §4.1).
 
 ### Khoá của `xt.yaml` (nhà — mẫu: [`../templates/xt.yaml`](../templates/xt.yaml) chỉ còn một dòng chú thích mỗi khoá)
 
