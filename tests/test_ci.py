@@ -322,6 +322,56 @@ class PullRequestTargetTest(unittest.TestCase):
                 self.assertFalse(uses_pull_request_target(path.read_text(encoding="utf-8")))
 
 
+def step_run(body: str, step_id: str) -> str:
+    """Script `run: |` của bước có `id: <step_id>` (bỏ thụt lề 10 của khối)."""
+    m = re.search(
+        rf"^        id: {re.escape(step_id)}\n(?:        .*\n)*?        run: \|\n((?:          .*\n|\n)+)", body, re.M
+    )
+    return re.sub(r"^          ", "", m.group(1), flags=re.M) if m else ""
+
+
+class PrReviewDiffTest(unittest.TestCase):
+    """AUD-CI-016 (audit 2026-10-21): `pr-review.yml` từng cắt diff ở 400.000 byte (`head -c`) rồi vẫn cho reviewer trả
+    `clean` cho cả head — phần cắt (vd auth ở cuối) không được rà. Nay diff vượt trần hoặc không đọc được → không gọi
+    reviewer, ghi `pr reviewed --inconclusive` (PR làn chuẩn cần review khác ở head đó)."""
+
+    def setUp(self):
+        self.body = ci_jobs((WORKFLOWS / "pr-review.yml").read_text(encoding="utf-8"))["review"]
+
+    def run_diff(self, size: int, gh_rc: int = 0) -> tuple[str, str]:
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (tmp / "bin").mkdir()
+        gh = tmp / "bin" / "gh"
+        gh.write_text(f"#!/bin/sh\nhead -c {size} /dev/zero | tr '\\000' x\nexit {gh_rc}\n", encoding="utf-8")
+        gh.chmod(0o755)
+        (tmp / "ws").mkdir()
+        out = tmp / "out"
+        env = dict(
+            os.environ,
+            PATH=f"{tmp / 'bin'}:{os.environ['PATH']}",
+            RUNNER_TEMP=str(tmp),
+            GITHUB_WORKSPACE=str(tmp / "ws"),
+        )
+        env.update(GITHUB_OUTPUT=str(out), GH_REPO="o/r", PR="7", MAX_DIFF_BYTES="400000")
+        r = subprocess.run(["bash", "-c", step_run(self.body, "diff")], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        review = tmp / "ws" / ".pr-review.diff"
+        return out.read_text(encoding="utf-8").strip(), (review.read_text(encoding="utf-8") if review.exists() else "")
+
+    def test_pr_review_full_diff_only(self):
+        self.assertNotIn("head -c", self.body)
+        self.assertEqual(self.run_diff(400_000), ("complete=true", "x" * 400_000))
+        self.assertEqual(self.run_diff(400_001), ("complete=false", ""))  # không bao giờ review một phần
+        self.assertEqual(self.run_diff(10, gh_rc=1), ("complete=false", ""))
+
+    def test_pr_review_incomplete_records_inconclusive(self):
+        claude = self.body[self.body.index("id: claude") :]
+        self.assertIn("if: steps.diff.outputs.complete == 'true'", claude.split("\n      - ", 1)[0])
+        record = self.body[self.body.index("name: Ghi kết quả bằng danh tính reviewer") :]
+        self.assertIn("COMPLETE: ${{ steps.diff.outputs.complete }}", record)
+        self.assertLess(record.index("--inconclusive"), record.index("jq -er '.verdict'"))
+
+
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class TestShardTest(unittest.TestCase):
     """`dev-task.sh test-shard I N [DIR]` / `test-combine DIR` trên dự án giả."""

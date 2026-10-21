@@ -913,6 +913,35 @@ class GuardMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as bare, contextlib.chdir(bare):
             self.assertEqual(self.g.git_rules(["git", "push"]), ("", ""))  # không biết nhánh
 
+    def test_guard_push_redirect_keeps_branch_check(self):
+        """AUD-SEC-102 (audit 2026-10-21): token chuyển hướng không phải refspec — `git push origin 2>&1` trên `main` từng
+        thành "có refspec `2 >& 1`" nên bỏ kiểm nhánh hiện tại (mã NONE). shlex trả `>` cho cả `'>'` trong nháy (tên ref
+        hợp lệ) nên guard xét cả hai cách đọc, lấy quyết định chặt hơn: `git push origin '>' main` vẫn thấy `main`."""
+        main_repo, feat_repo = self.make_repo("main"), self.make_repo("feat/x")
+
+        def dec_in(cmd: str, cwd: str) -> object:
+            return self.g.bash_decision(cmd, self.root, cwd)["decision"]
+
+        for cmd in (
+            "git push origin 2>&1",
+            "git push origin >/dev/null",
+            "git push origin >/dev/null 2>&1",
+            "git push origin &>log",
+            "git push -u origin 2>/dev/null",
+            "git push origin HEAD 2>&1 | tail -3",
+        ):
+            self.assertEqual(dec_in(cmd, main_repo), "ask", cmd)
+            self.assertEqual(dec_in(cmd, feat_repo), "", cmd)  # nhánh khác: không chặn oan
+            policy = self.g.apply_policy(self.g.bash_decision(cmd, self.root, main_repo))
+            self.assertEqual((policy["decision"], policy.get("code")), ("deny", "PUSH_MAIN"), cmd)
+        self.assertEqual(dec_in("git push origin feat/x 2>&1", main_repo), "")
+        self.assertEqual(dec_in("git push origin main 2>&1", feat_repo), "ask")
+        self.assertEqual(dec_in("git push origin '>' main", feat_repo), "ask")
+        self.assertEqual(dec_in("git push --force origin feat 2>&1", feat_repo), "deny")
+        self.assertEqual(self.g._stricter(("ask", "a"), ("deny", "d")), ("deny", "d"))
+        self.assertEqual(self.g._stricter(("ask", "a"), ("ask", "b")), ("ask", "a"))
+        self.assertEqual(self.g._stricter(("", ""), ("ask", "b")), ("ask", "b"))
+
     def test_guard_current_branch_errors_are_unknown(self):
         repo = self.make_repo("main")
         self.assertEqual(self.g._current_branch(repo), "main")
