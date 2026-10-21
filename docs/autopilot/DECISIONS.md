@@ -952,3 +952,10 @@
 - Chọn: B: lấy đúng dòng PRF-WEB-* từ compose --profile web-app --scale S (chữ + rev chuẩn của khung), thêm thành mục riêng 'Ứng dụng cục bộ xt.py app (ADR-0038)' trong BLUEPRINT.md; tick kèm Kiểm chạy lại được hoặc [~] Không áp dụng có lý do; không đụng mục cũ
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: B đưa đúng chữ yêu cầu của khung, mỗi tick có lệnh kiểm; không giả xanh 21 mục cũ. Tiêu chí 2: mục riêng, revert một commit. A làm lẫn nợ cũ vào lát app (phạm vi); C để MUST PRF-WEB-006/007 của app không có nhà. Nợ 21 mục đổi chữ ghi vào PROGRESS cho audit delta trước G7
 - Đường lùi: Xoá mục 'Ứng dụng cục bộ' khỏi BLUEPRINT.md; hoặc ghép lại toàn bộ ở pha harden (A)
+
+### D-135 · 2026-10-21T20:15:49+00:00 · test_tracked_text_files_are_clean_utf8 đỏ: tests_e2e/vendor/axe/axe.min.js (vendored nguyên văn, MPL-2.0, sha256 ghim) chứa U+FFFD hợp lệ trong bảng ký tự
+
+- Phương án: (1) A: loại thư mục vendored tests_e2e/vendor/ khỏi kiểm này — test nhằm file khung cài sang dự án đích; vendor không cài, đã có vendor-check --strict + sha256 trong SOURCE · (2) B: thoát ký tự trong axe.min.js — sửa tệp bên thứ ba, lệch sha256 nguồn, phải ghi Modifications theo MPL · (3) C: nạp axe từ npm lúc chạy CI thay vì vendored — thêm mạng/npm vào job, ngược D-133
+- Chọn: A: loại thư mục vendored tests_e2e/vendor/ khỏi kiểm này — test nhằm file khung cài sang dự án đích; vendor không cài, đã có vendor-check --strict + sha256 trong SOURCE
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: giữ tệp đúng nguồn (hash khớp npm), kiểm vẫn phủ mọi file khung cài sang; vendor được kiểm bằng vendor-check. Tiêu chí 3: một đường dẫn loại trừ có lý do trong test, không nới cho mã của khung
+- Đường lùi: Bỏ loại trừ và chọn C (tải axe lúc chạy CI)

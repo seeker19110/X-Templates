@@ -33,6 +33,8 @@ class DocsBudgetTest(unittest.TestCase):
         for rel in tracked:
             if not rel or rel.endswith((b".png", b".jpg", b".ico", b".pyc", b".zip", b".gz")):
                 continue
+            if rel.startswith(b"tests_e2e/vendor/"):
+                continue  # D-135: tệp bên thứ ba nguyên văn (hash ghim, vendor-check), không cài sang dự án đích
             data = (ROOT / rel.decode()).read_bytes()
             if b"\0" in data:
                 continue  # nhị phân
