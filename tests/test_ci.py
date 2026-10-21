@@ -195,7 +195,7 @@ class GateFanOutTest(unittest.TestCase):
                 for block, single in versions:
                     listed = block.split() if block else [single]
                     self.assertEqual(listed[-1], "3.14")
-                    self.assertTrue(set(listed) <= {"3.11", "3.14"})
+                    self.assertLessEqual(set(listed), {"3.11", "3.14"})
 
     def test_sysmon_only_on_coverage_measuring_jobs(self):
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["test"])
