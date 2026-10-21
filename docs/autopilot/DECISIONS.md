@@ -888,3 +888,11 @@
 - Chọn: A: đổi Gate thành zizmor --offline --min-severity high .github/workflows — khớp đúng bước CI
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: Gate tự chứa, chạy lại được y nguyên, khớp CI (không nới so với CI vì CI cũng offline); B phụ thuộc biến môi trường ẩn
 - Đường lùi: Đổi Gate về zizmor trần và chạy với token GitHub
+
+### D-126 · 2026-10-21T11:05:12+00:00 · Chủ repo hỏi 2026-10-21: biến dự án này thành app và phân chia công việc được không — app dạng nào, chia việc thế nào
+
+- Phương án: (1) Ứng dụng web cục bộ xt.py app: http.server stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi đúng hàm xt.py của CLI, app không chạy lệnh; thêm xt.py plan waves xếp task thành đợt song song; PLAN-3.14-app 11 lát 29 task (ADR-0038) · (2) Site tĩnh xuất ra GitHub Pages: chia sẻ bằng URL nhưng không thấy trạng thái sống, phải chép logic compose sang JS hoặc sinh trước mọi tổ hợp · (3) Web app lưu trữ đa người dùng (framework web + DB + đăng nhập): cần hosting/tài khoản/khoá chỉ chủ repo có, phá luật stdlib, mặt tấn công lớn · (4) App desktop Tauri/Electron: thêm toolchain Rust/Node và ký số trả phí, không hơn phương án 1 · (5) Giữ CLI như hiện trạng
+- Chọn: Ứng dụng web cục bộ xt.py app: http.server stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi đúng hàm xt.py của CLI, app không chạy lệnh; thêm xt.py plan waves xếp task thành đợt song song; PLAN-3.14-app 11 lát 29 task (ADR-0038)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: một nguồn sự thật (cùng hàm với CLI), app không chạy lệnh nên không vòng qua guard, loopback + token + kiểm Host/Origin chặn trang khác đọc dữ liệu. Tiêu chí 2: gói tách rời, import lười, xoá là về hiện trạng; API JSON dùng lại được cho phương án 3. Tiêu chí 3: 0 phụ thuộc runtime mới, giữ stdlib và coverage 100 %. Tiêu chí 4: một lệnh, offline, chạy cả ở dự án đích. Mặc định tự host (AGENTS.md §4)
+- Đường lùi: Revert PR Lát 0 (ADR-0038 + PLAN-3.14-app); nếu chủ repo muốn web app lưu trữ hay mobile: ADR mới thay ADR-0038, giữ Lát 1 (plan waves) vì độc lập với giao diện
+- Khi chạy thật (đề xuất, chủ dự án quyết ở G7): Khi cần nhiều người hoặc dùng trên điện thoại: web app lưu trữ (phương án 3) dùng lại API JSON của SPEC-app, cần chủ repo chọn hosting và đăng nhập

@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- [ADR-0038](docs/adr/0038-local-app-on-xt.md) (D-126; chủ repo hỏi 2026-10-21 "biến dự án này thành app và phân chia công
+  việc"): ứng dụng web cục bộ `xt.py app` — `http.server` stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi
+  đúng hàm của CLI, app không chạy lệnh; chia việc bằng máy `xt.py plan waves`. Kế hoạch
+  [`PLAN-3.14-app.md`](docs/autopilot/PLAN-3.14-app.md): 11 lát, 29 task, 12 đợt song song theo `sau:`/`files:`. Chưa có
+  mã — dự án đích chưa phải làm gì.
+
 ## [3.13.0] - 2026-10-21
 
 **Dự án đích: chạy lại `install.py --with-github`** — máy chỉ merge ghim head, không dùng auto-merge của GitHub; required check `merge-gate` bỏ ([ADR-0036](docs/adr/0036-pinned-merge-no-auto-merge-drop-merge-gate.md), D-122). Nhận `xt.py` mới và **stub** `merge-gate.yml` (`pull_request`, luôn xanh — chỉ giữ context cho ruleset còn đòi); rồi gỡ `merge-gate` khỏi ruleset sống (hoặc import lại `ruleset-main.json` 2 check `quality` · `gitleaks`), tắt Settings → "Allow auto-merge", đặt `XT_STEWARD_TOKEN` để merge của steward kích CI trên nhánh chính. Không cần event policy cho `pull_request_target` (K-1 đóng). Stub bị xoá ở bản sau — đừng xoá tay trước khi gỡ ruleset (PR treo "Expected"). Mẫu `xt.yaml`/`ci.yml` chỉ đổi chú thích nhưng hash đổi: dự án đã sửa hai file này nhận `.xtemplates-new` một lần, không cần gộp gì.
