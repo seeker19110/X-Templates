@@ -237,6 +237,16 @@ class McpDisableRegexScopedTest(unittest.TestCase):
         self.assertIn('"deny"', first)  # khoá lồng đứng trước khoá thật
         ok = self.run_mcp({"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": merge})
         self.assertEqual(ok, "")  # tắt auto-merge thật vẫn cho qua
+        # Lối tắt "tắt auto-merge" không mở đường cho tool BẬT (ADR-0036): input hợp lệ hay có khoá lồng `x_disable`
+        # đều bị chặn thẳng, không qua merge-check.
+        for inp in (merge, nested):
+            with self.subTest(enable=inp):
+                out = self.run_mcp({"tool_name": "mcp__github__enable_pr_auto_merge", "tool_input": inp})
+                self.assertIn('"deny"', out)
+                self.assertIn("ADR-0036", out)
+        # Tên vừa `enable` vừa `disable` (T-1806 câu hỏi mở 1): lối tắt `disable` không được nuốt — guard vẫn deny.
+        both = self.run_mcp({"tool_name": "mcp__github__enable_pr_auto_merge_disable", "tool_input": merge})
+        self.assertIn('"deny"', both)
 
 
 class SecretExfilOtherChannelsTest(unittest.TestCase):

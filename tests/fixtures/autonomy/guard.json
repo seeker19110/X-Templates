@@ -77,9 +77,11 @@
    }
   },
   {
-   "id": "guard-control-auto-merge-l3",
-   "origin": "control",
-   "refs": [],
+   "id": "guard-adr0036-auto-merge-l3-eligible",
+   "origin": "repro",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
    "input": {
     "command": "gh pr merge 7 --auto --squash",
     "merge_check": {
@@ -98,9 +100,11 @@
     }
    },
    "expect": {
-    "allowed": true,
-    "decision": "allow"
-   }
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "ADR-0036 §3: từng là ca đối chứng ADR-0015 (L3 bật auto-merge → allow); nay PR sạch, mọi điều kiện xanh vẫn deny phẳng — máy chỉ merge ghim head"
   },
   {
    "id": "guard-har061-edit-gate-default",
@@ -2657,8 +2661,9 @@
    },
    "expect": {
     "allowed": false,
-    "code": "REVIEW_MISSING"
-   }
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "ADR-0036 §3: bật auto-merge bị chặn phẳng trước khi xét review; REVIEW_MISSING của merge ghim head do các ca guard-doc054-pinned-* cùng ref giữ"
   },
   {
    "id": "guard-doc054-pinned-merge-blocking-old-shape",
@@ -4618,6 +4623,394 @@
    ],
    "input": {
     "command": "rm -rf $PWD/build"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-adr0036-mcp-enable-valid",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "tool": "mcp",
+    "tool_name": "mcp__github__enable_pr_auto_merge",
+    "tool_input": {
+     "owner": "o",
+     "repo": "r",
+     "pullNumber": 7,
+     "mergeMethod": "SQUASH"
+    },
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "input hợp lệ, L3, PR sạch — ADR-0015 từng allow"
+  },
+  {
+   "id": "guard-adr0036-mcp-enable-other-server",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "tool": "mcp",
+    "tool_name": "mcp__evil__enable_pr_auto_merge",
+    "tool_input": {
+     "owner": "o",
+     "repo": "r",
+     "pullNumber": 7,
+     "mergeMethod": "SQUASH"
+    },
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   }
+  },
+  {
+   "id": "guard-adr0036-graphql-enable",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_x\", mergeMethod: SQUASH}) { clientMutationId } }'",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "trước ADR-0036 mang mã UNVERIFIED (strict hỏi)"
+  },
+  {
+   "id": "guard-adr0036-graphql-enable-slash-endpoint",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh api /graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_x\", mergeMethod: SQUASH}) { clientMutationId } }'",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "`/graphql` qua đường REST của gh vẫn tới GraphQL; trước ADR-0036 là ask thường → cho chạy"
+  },
+  {
+   "id": "guard-adr0036-auto-admin",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --auto --admin",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "`--admin` từng rơi xuống nhánh ghim head → ask thường → cho chạy ở chính sách mặc định"
+  },
+  {
+   "id": "guard-adr0036-repo-before-pr-auto",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh --repo o/r pr merge 7 --auto",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   }
+  },
+  {
+   "id": "guard-adr0036-pr-flag-merge-auto",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr -R o/r merge 7 --auto",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "`gh pr <cờ> merge` từng là ask thường → cho chạy ở chính sách mặc định"
+  },
+  {
+   "id": "guard-adr0036-auto-assign-true",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --auto=true --squash",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "dạng gán `--auto=true` từng lọt qua kiểm `--auto` → ask thường → cho chạy"
+  },
+  {
+   "id": "guard-adr0036-auto-strict",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --auto --squash",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    },
+    "policy": "strict"
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "deny từ luật, không phải ask — strict cũng chặn"
+  },
+  {
+   "id": "guard-adr0036-auto-merge-check-down",
+   "origin": "adversarial-author",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --auto"
+   },
+   "expect": {
+    "allowed": false,
+    "decision": "deny",
+    "code": "AUTO_MERGE_ENABLE"
+   },
+   "note": "không gọi merge-check: merge-check lỗi vẫn ra AUTO_MERGE_ENABLE, không phải UNVERIFIED"
+  },
+  {
+   "id": "guard-adr0036-control-disable-auto",
+   "origin": "control",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh pr merge 7 --disable-auto",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": true
+   },
+   "note": "tắt auto-merge do người bật: máy phải tắt được"
+  },
+  {
+   "id": "guard-adr0036-control-mcp-disable",
+   "origin": "control",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "tool": "mcp",
+    "tool_name": "mcp__github__disable_pr_auto_merge",
+    "tool_input": {
+     "owner": "o",
+     "repo": "r",
+     "pullNumber": 7,
+     "mergeMethod": "SQUASH"
+    },
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-adr0036-control-graphql-disable",
+   "origin": "control",
+   "refs": [
+    "LOOP-STOP-022"
+   ],
+   "input": {
+    "command": "gh api graphql -f query='mutation { disablePullRequestAutoMerge(input: {pullRequestId: \"PR_x\"}) { clientMutationId } }'",
+    "merge_check": {
+     "verdict": "merge",
+     "hard": [],
+     "repo": "o/r",
+     "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "autonomy": 3,
+     "eligible": true,
+     "auto_merge_ok": true,
+     "review": "ok",
+     "reasons": [
+      "làn nhanh, CI xanh"
+     ],
+     "stacked": false
+    }
    },
    "expect": {
     "allowed": true
