@@ -3,6 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.13.0, pha `build`) · Cập nhật: 2026-10-21 · Nhánh: main
 
 ## Đang làm
+- 2026-10-21: [Audit khung/bộ mẫu](docs/ops/AUDIT-REPORT-2026-10-21.md) tại `ec4c7d2`: đề nghị nâng ưu tiên lỗi Gate/0 test; có [kế hoạch tối ưu](docs/ops/OPTIMIZATION-PLAN-2026-10-21.md). `gate-par` qua, 179,53 s một mẫu; gom CI 14 → 3 job chưa triển khai.
 - 2026-10-21 **PLAN-3.13 Lát 0 (ADR-0036, D-122 — chủ repo chọn "ruleset tối thiểu")**: máy chỉ merge ghim head, không auto-merge của GitHub; bỏ required check `merge-gate` + lệnh `xt.py merge-gate`; guard deny phẳng bật auto-merge (`AUTO_MERGE_ENABLE`); `merge-gate.yml` thành stub `pull_request` giữ context tới khi chủ repo gỡ khỏi ruleset sống (T-1834 xoá); ruleset mẫu 2 check. K-1 đóng (không còn `pull_request_target` ngoài `pr-review.yml`). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
 - 2026-10-20 **PLAN-3.12-lean** (D-111) đã xong: Lát 1 #190, Lát 2 #191 (3.11.0), Lát 3 #192, Lát 4 #193 (3.11.1). Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
