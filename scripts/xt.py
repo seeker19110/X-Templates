@@ -5552,9 +5552,13 @@ def _backlog_path(out: Path) -> Path:
     return out.with_name(f"{out.stem}-BACKLOG{out.suffix}")
 
 
-def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -> Tuple[str, Optional[str]]:
+def _carry_merge(
+    fw: Path, olds: List[Path], main: str, backlog: Optional[str]
+) -> Tuple[str, Optional[str], Dict[str, Any]]:
     """Ghép lại: giữ tick/miễn trừ/bằng chứng theo ID từ mọi file cũ (bản một file hoặc chính + backlog), mục chuyển
-    file khi đổi quy mô vẫn giữ trạng thái; mục riêng của dự án về cuối file chính."""
+    file khi đổi quy mô vẫn giữ trạng thái; mục riêng của dự án về cuối file chính. Không in gì; trả thêm
+    `{"kept": int, "stale": [id], "dropped": [id], "own": [id]}` — `kept` = số mục `carry_states` mang trạng thái/ghi chú
+    sang trừ mục đổi chữ yêu cầu (`stale`), đúng số in ở dòng `↺ Giữ trạng thái`."""
     fw_ids = {it.id for d in load_docs(fw)[0] for it in d.items}
     old = "\n".join(p.read_text(encoding="utf-8") for p in olds)
     dropped: List[str] = []
@@ -5563,7 +5567,16 @@ def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -
     if backlog is not None:
         backlog, kept_bl = carry_states(old, backlog, dropped=dropped, stale=stale)
         kept += kept_bl
-    print(f"↺ Giữ trạng thái {kept - len(stale)} mục theo ID từ bản cũ", file=sys.stderr)
+    own = [m["id"] for m in map(ITEM_RE.match, main.splitlines()) if m and m["id"] not in fw_ids]
+    return main, backlog, {"kept": kept - len(stale), "stale": stale, "dropped": dropped, "own": own}
+
+
+def _report_carry(info: Dict[str, Any]) -> None:
+    """stderr: kết quả `_carry_merge` (giữ trạng thái, mục đổi chữ, mục mất ghi chú, mục riêng của dự án)."""
+    stale: List[str] = info["stale"]
+    dropped: List[str] = info["dropped"]
+    own: List[str] = info["own"]
+    print(f"↺ Giữ trạng thái {info['kept']} mục theo ID từ bản cũ", file=sys.stderr)
     if stale:
         print(
             f"⚠ {len(stale)} mục đổi chữ yêu cầu — đã đặt lại [ ] kèm `— Cũ (rev …)`, "
@@ -5576,10 +5589,8 @@ def _carry_into(fw: Path, olds: List[Path], main: str, backlog: Optional[str]) -
             f"ghi lại: {', '.join(dropped)}",
             file=sys.stderr,
         )
-    own = [m["id"] for m in map(ITEM_RE.match, main.splitlines()) if m and m["id"] not in fw_ids]
     if own:
         print(f"↺ Giữ {len(own)} mục riêng của dự án ở cuối: {', '.join(own[:10])}", file=sys.stderr)
-    return main, backlog
 
 
 def _report_essential(features: List[str], scale: str, promoted: List[str]) -> None:
@@ -5613,26 +5624,84 @@ def _old_features(path: Path) -> List[str]:
     return [f for f in _as_list(meta.get("features")) if f in FEATURE_FACTS]
 
 
-def _warn_dropped_features(args: argparse.Namespace, out_path: Path, feats: List[str], promoted: List[str]) -> None:
-    """stderr: ghép lại bỏ fact mà bản cũ đã bật → mục thiết yếu của fact đó rơi về SHOULD (ADR-0030); im lặng nếu không bỏ."""
+def _warn_dropped_features(
+    src: Tuple[Path, str, List[str], str, bool], extra: List[str], out_path: Path, feats: List[str], promoted: List[str]
+) -> None:
+    """stderr: ghép lại bỏ fact mà bản cũ đã bật → mục thiết yếu của fact đó rơi về SHOULD (ADR-0030); im lặng nếu không bỏ.
+    `src` = (framework, profile, industries, scale, include_may) như `compose`."""
     old = _old_features(out_path)
     dropped = [f for f in old if f not in feats]
     if not dropped:
         return
-    ordered, _ = _compose_sources(args.framework, args.profile, args.industry or [], args.add or [])
-    lost = [i for i in essential_promoted(ordered, args.scale, old) if i not in promoted]
+    framework, profile, industries, scale, _include_may = src
+    ordered, _ = _compose_sources(framework, profile, industries, extra)
+    lost = [i for i in essential_promoted(ordered, scale, old) if i not in promoted]
     print(
         f"⚠ bỏ feature {', '.join(dropped)}: {len(lost)} mục về SHOULD" + (f" ({', '.join(lost)})" if lost else ""),
         file=sys.stderr,
     )
 
 
-def cmd_compose(args: argparse.Namespace) -> int:
-    out_path = Path(args.out) if args.out else None
-    bl_path = _backlog_path(out_path or Path("BLUEPRINT.md"))
-    src = (args.framework, args.profile, args.industry or [], args.scale, args.include_may)
+def compose_write(
+    framework: Path,
+    profile: str,
+    industries: List[str],
+    scale: str,
+    include_may: bool,
+    out_path: Path,
+    extra: Optional[List[str]] = None,
+    features: Optional[List[str]] = None,
+    full: bool = False,
+    quiet: bool = False,
+) -> Dict[str, Any]:
+    """Đường ghi của `compose --out` (CLI và `POST /api/blueprint` dùng chung): ghép, giữ tick/miễn trừ theo ID từ
+    `out_path` + `<tên>-BACKLOG.md` cũ, ghi nguyên tử. Lỗi như `compose`/`compose_split` (SystemExit). Trả
+    `{"written": [Path], "kept", "dropped", "stale" (int), "promoted": [id]}`: `kept` = số mục mang được trạng thái/ghi
+    chú từ bản cũ trừ mục đổi chữ (số của dòng `↺ Giữ trạng thái`), `dropped` = số mục `[x]`/`[~]` đổi chữ mà không mang
+    được ghi chú, `stale` = số mục đổi chữ yêu cầu bị đặt lại `[ ]`; không có bản cũ → 0. `quiet`: không in stderr."""
+    extra = extra or []
+    feats = features or []
+    bl_path = _backlog_path(out_path)
+    src = (framework, profile, industries, scale, include_may)
     backlog: Optional[str] = None
+    promoted: List[str] = []
+    if full:
+        main = compose(*src, extra=extra, features=feats, promoted=promoted)
+    else:
+        main, backlog = compose_split(*src, extra=extra, backlog_name=bl_path.name, features=feats, promoted=promoted)
+    if not quiet:
+        _report_essential(norm_features(feats), scale, promoted)
+        _warn_dropped_features(src, extra, out_path, norm_features(feats), promoted)
+    olds = [p for p in (out_path, bl_path) if p.exists()]
+    info: Dict[str, Any] = {"kept": 0, "stale": [], "dropped": []}
+    if olds:
+        main, backlog, info = _carry_merge(framework, olds, main, backlog)
+        if not quiet:
+            _report_carry(info)
+    write_atomic(out_path, main)
+    written = [out_path]
+    if backlog is not None:
+        write_atomic(bl_path, backlog)
+        written.append(bl_path)
+    return {
+        "written": written,
+        "kept": int(info["kept"]),
+        "dropped": len(info["dropped"]),
+        "stale": len(info["stale"]),
+        "promoted": promoted,
+    }
+
+
+def cmd_compose(args: argparse.Namespace) -> int:
+    src = (args.framework, args.profile, args.industry or [], args.scale, args.include_may)
     feats = args.feature or []
+    if args.out:
+        res = compose_write(*src, Path(args.out), extra=args.add or [], features=feats, full=args.full)
+        bl_name = _backlog_path(Path(args.out)).name
+        print(f"✓ Đã ghi {args.out}" + (f" + {bl_name}" if len(res["written"]) > 1 else ""))
+        return 0
+    bl_path = _backlog_path(Path("BLUEPRINT.md"))
+    backlog: Optional[str] = None
     promoted: List[str] = []
     if args.full:
         main = compose(*src, extra=args.add or [], features=feats, promoted=promoted)
@@ -5641,20 +5710,10 @@ def cmd_compose(args: argparse.Namespace) -> int:
             *src, extra=args.add or [], backlog_name=bl_path.name, features=feats, promoted=promoted
         )
     _report_essential(norm_features(feats), args.scale, promoted)
-    if out_path is None:
-        sys.stdout.write(main)
-        if backlog is not None:
-            n = sum(1 for ln in backlog.splitlines() if ITEM_RE.match(ln))
-            print(f"ℹ {n} mục SHOULD/MAY không in — dùng --out (ghi kèm {bl_path.name}) hoặc --full", file=sys.stderr)
-        return 0
-    _warn_dropped_features(args, out_path, norm_features(feats), promoted)
-    olds = [p for p in (out_path, bl_path) if p.exists()]
-    if olds:
-        main, backlog = _carry_into(args.framework, olds, main, backlog)
-    write_atomic(out_path, main)
+    sys.stdout.write(main)
     if backlog is not None:
-        write_atomic(bl_path, backlog)
-    print(f"✓ Đã ghi {args.out}" + (f" + {bl_path.name}" if backlog is not None else ""))
+        n = sum(1 for ln in backlog.splitlines() if ITEM_RE.match(ln))
+        print(f"ℹ {n} mục SHOULD/MAY không in — dùng --out (ghi kèm {bl_path.name}) hoặc --full", file=sys.stderr)
     return 0
 
 

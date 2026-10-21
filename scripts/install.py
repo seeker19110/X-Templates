@@ -6,6 +6,7 @@ Kết quả trong dự án đích:
   .xtemplates/research/         bản nghiên cứu nền mà module trích dẫn
   .xtemplates/scripts/xt.py     công cụ compose / blueprint-status / loop
   .xtemplates/scripts/dev-task.sh
+  .xtemplates/scripts/{xt_app,app}/  app cục bộ `xt.py app` (ADR-0038)
   .xtemplates/VERSION           SHA/nhãn phiên bản khung đã cài
   .xtemplates/manifest.json     hash file harness/gốc/GitHub + rule do khung đặt (chỉ gỡ `ask` có trong đây) + chính sách (REC-09)
                                 — hash dạng `sha256:<hex>` (cả `harness.sha256.json`); đọc nhận cả hex trần của bản cũ
@@ -448,6 +449,10 @@ def install_framework(xt_dir: Path, label: str | None) -> str:
         drop_symlink(xt_dir / "scripts" / f)
         shutil.copy2(SRC / "scripts" / f, xt_dir / "scripts" / f)
     (xt_dir / "scripts" / "dev-task.sh").chmod(0o755)
+    # App cục bộ `xt.py app` (ADR-0038): gói máy chủ + giao diện tĩnh cạnh xt.py, luôn thay như xt.py.
+    for d in ("xt_app", "app"):
+        if (SRC / "scripts" / d).is_dir():  # khung tối giản (test, bản cũ) không có app: bỏ qua, `doctor` báo ⚠
+            copy_tree_replace(SRC / "scripts" / d, xt_dir / "scripts" / d)
     version = framework_label(label)
     for f in ("VERSION", "README.md"):
         drop_symlink(xt_dir / f)

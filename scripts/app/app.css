@@ -151,3 +151,15 @@ code { background: var(--muted); padding: 0.1rem 0.3rem; border-radius: 0.25rem;
 }
 
 progress { width: 100%; max-width: 24rem; height: 0.75rem; accent-color: var(--ok); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; margin-bottom: 1rem; }
+.split { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .split { grid-template-columns: 20rem minmax(0, 1fr); } }
+.items { list-style: none; padding: 0; }
+.items > li { border-bottom: 1px solid var(--border); padding: 0.5rem 0; overflow-wrap: anywhere; }
+button.link { background: none; border: 0; padding: 0.15rem 0; color: var(--primary); text-align: left; cursor: pointer; font: inherit; }
+.meter { margin: 0.5rem 0; }
+.meter > span { display: block; }
+code { overflow-wrap: anywhere; }
+form.compose { display: grid; gap: 0.35rem 1rem; grid-template-columns: minmax(0, 1fr); max-width: 40rem; margin-bottom: 1rem; }
+form.compose select, form.compose button { max-width: 100%; }
+pre.md { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; border: 1px solid var(--border); padding: 0.75rem; }
