@@ -867,3 +867,10 @@
 - Chọn: B: bỏ required check merge-gate — không bật auto-merge của GitHub nữa; phiên/steward merge ghim head sau merge-check xanh ở đúng head; merge-gate.yml thành stub pull_request luôn xanh (giữ context tới khi chủ repo gỡ khỏi ruleset ba repo, rồi xoá); bỏ ADR-0035 + mã check-run (T-1802); guard chặn bật auto-merge; ruleset mẫu dự án đích còn quality + gitleaks
 - Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo (quyền cuối, AGENTS.md §1) — ghi đè D-121. Tiêu chí 3: ít máy móc nhất (xoá thay vì thêm), một luật duy nhất kiểm được: merge luôn ghim head đã đánh giá; K-1 hết vì không còn pull_request_target. Tiêu chí 1 giữ: stub luôn xanh không nới an toàn vì mọi đường merge của máy đều ghim head và đọc lại merge-check; auto-merge do người bật bị steward tắt. Tiêu chí 2: ruleset chỉ bớt check, lùi lại = thêm lại check + revert PR
 - Đường lùi: Revert PR Lát 0 rev B; thêm lại merge-gate vào ruleset; quay về ADR-0023 (pull_request_target cần event policy của chủ repo sau 2026-11-02)
+
+### D-123 · 2026-10-21T09:46:04+00:00 · Lát A: ba câu hỏi mở của executor — pr title-check khi pr_title_check: off; khoá cứng bản shellcheck trong lint; mẫu secret-scan giữ gitleaks-action hay đổi CLI (CL-9)
+
+- Phương án: (1) A: off → bỏ qua exit 0; không khoá cứng bản shellcheck (CI cài từ requirements-dev.txt ghim hash); giữ gitleaks-action + ghi chú EULA, đổi CLI là lát riêng cần chủ repo · (2) B: luôn kiểm tiêu đề; lint đỏ khi shellcheck ≠ 0.11.0; đổi mẫu sang gitleaks CLI ngay
+- Chọn: A: off → bỏ qua exit 0; không khoá cứng bản shellcheck (CI cài từ requirements-dev.txt ghim hash); giữ gitleaks-action + ghi chú EULA, đổi CLI là lát riêng cần chủ repo
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1/3: A theo đúng cấu hình dự án (không chặn oan dự án đã tắt luật), không làm đỏ máy dev chưa cài requirements-dev, không đổi nội dung required check gitleaks của dự án đích khi chưa có người duyệt; B chặt hơn nhưng chặn oan và đổi hợp đồng dự án đích
+- Đường lùi: Bật kiểm tiêu đề vô điều kiện trong cmd_pr_title_check; thêm kiểm bản shellcheck vào lint của xt.yaml; lát mới đổi secret-scan mẫu sang CLI
