@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 import unittest.mock as mock
@@ -1632,6 +1633,118 @@ class GateTestFloorTest(unittest.TestCase):
         self.assertIn('XT_MIN_TESTS="${XT_MIN_TESTS:-' + n + '}"', floor)
         self.assertIn("XT_PY=python3.11", floor)
         self.assertIn("scripts/dev-task.sh test-shard 1 1", floor)
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class DevTaskGateParTest(unittest.TestCase):
+    """D-128: `dev-task.sh gate-par` chạy typecheck ∥ lint ∥ build → test (→ test_floor) cùng lúc — log tách nhóm, đỏ khi
+    nhóm nào đỏ (exit code nhóm đỏ đầu tiên theo thứ tự nhóm), guard hỏi một lần trước khi chạy (LOOP-STOP-027)."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
+
+    def gate_par(self, yaml: str, **env: str) -> subprocess.CompletedProcess[str]:
+        (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+        full = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), **env)
+        cmd = ["bash", str(self.tmp / "scripts" / "dev-task.sh"), "gate-par"]
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=self.tmp, env=full, timeout=60)
+
+    def test_groups_run_concurrently(self):
+        """Mỗi nhóm ghi mốc khi bắt đầu rồi chờ tới khi cả 3 nhóm đã bắt đầu — chạy tuần tự thì nhóm đầu hết hạn (exit 9)."""
+        wait = "n=0; until [ $(ls started | wc -l) -ge 3 ]; do n=$((n+1)); [ $n -gt 150 ] && exit 9; sleep 0.1; done"
+        yaml = (
+            f"typecheck: touch started/tc && {wait}\n"
+            f"lint: touch started/lint && {wait}\n"
+            f"build: touch started/build && {wait} && touch built\n"
+            "test: test -f built && echo TEST-OK\n"
+        )
+        (self.tmp / "started").mkdir()
+        r = self.gate_par(yaml)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("TEST-OK", r.stderr)  # test chạy SAU build trong cùng nhóm
+        self.assertIn("GATE-PAR XANH (4 lệnh)", r.stderr)
+        self.assertEqual(sorted(p.name for p in (self.tmp / "started").iterdir()), ["build", "lint", "tc"])
+
+    def test_wall_time_is_longest_group(self):
+        t0 = time.monotonic()
+        r = self.gate_par("typecheck: sleep 2\nlint: sleep 2\nbuild: sleep 1\ntest: sleep 1\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertLess(time.monotonic() - t0, 4.5)  # tuần tự ≥ 6 s
+
+    def test_red_when_any_group_red_first_group_code(self):
+        r = self.gate_par("typecheck: echo TC\nlint: exit 5\nbuild: echo B\ntest: echo T\n")
+        self.assertEqual(r.returncode, 5, r.stderr)
+        self.assertIn("nhóm ĐỎ ở 'lint' (exit 5)", r.stderr)
+        self.assertIn("GATE-PAR ĐỎ (exit 5", r.stderr)
+        for out in ("TC", "B", "T"):  # nhóm khác vẫn chạy hết
+            self.assertRegex(r.stderr, rf"(?m)^{out}$")
+        r = self.gate_par("typecheck: exit 3\nlint: echo L\nbuild: echo B\ntest: exit 4\n")
+        self.assertEqual(r.returncode, 3, r.stderr)  # nhóm đỏ đầu tiên theo thứ tự typecheck · lint · build→test
+        self.assertIn("nhóm ĐỎ ở 'test' (exit 4)", r.stderr)
+
+    def test_build_red_skips_test_and_floor(self):
+        r = self.gate_par("lint: echo L\nbuild: exit 2\ntest: touch tested\ntest_floor: touch floored\n")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertFalse((self.tmp / "tested").exists())
+        self.assertFalse((self.tmp / "floored").exists())
+        r = self.gate_par("lint: echo L\ntest: echo T > order\ntest_floor: echo F >> order\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.tmp / "order").read_text(encoding="utf-8").split(), ["T", "F"])
+        self.assertIn("── nhóm [build → test → test_floor] exit 0 ──", r.stderr)
+
+    def test_logs_separated_per_group(self):
+        yaml = (
+            "typecheck: echo TC-1; sleep 0.4; echo TC-2\n"
+            "lint: sleep 0.2; echo L-1; sleep 0.4; echo L-2\n"
+            "build: echo B-1\ntest: sleep 0.1; echo T-1\n"
+        )
+        r = self.gate_par(yaml)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        blocks: dict[str, list[str]] = {}
+        cur = ""
+        for ln in r.stderr.splitlines():
+            m = re.match(r"\[dev-task\] ── nhóm \[(.+)\] exit (\d+) ──$", ln)
+            if m:
+                cur = m.group(1)
+                blocks[cur] = []
+            elif cur and not ln.startswith(("[dev-task] run [", "[dev-task] GATE")):
+                blocks[cur].append(ln)
+        self.assertEqual(
+            blocks, {"typecheck": ["TC-1", "TC-2"], "lint": ["L-1", "L-2"], "build → test": ["B-1", "T-1"]}
+        )
+
+    def test_empty_and_noop_groups_skipped_like_gate(self):
+        r = self.gate_par('lint: sh -c "echo L"\ntest: sh -c "echo T"\ntypecheck: ""\nbuild: ""\n')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("skip: chưa cấu hình/dò được 'typecheck'", r.stderr)
+        self.assertIn("skip: chưa cấu hình/dò được 'build'", r.stderr)
+        self.assertIn("GATE-PAR XANH (2 lệnh)", r.stderr)
+        r = self.gate_par('lint: ""\ntest: ""\ntypecheck: ""\nbuild: ""\n')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("GATE-PAR KHÔNG CHẠY LỆNH NÀO", r.stderr)
+        (self.tmp / ".autopilot").mkdir()
+        (self.tmp / ".autopilot" / "state.json").write_text('{"active": true}', encoding="utf-8")
+        r = self.gate_par("lint: true\ntest: echo T\n")
+        self.assertEqual(r.returncode, 3, r.stderr)  # autopilot: lint no-op → nhóm lint đỏ (ADR-0011)
+        self.assertIn("ĐỎ: autopilot đang chạy mà 'lint'", r.stderr)
+
+    def test_guard_blocks_before_any_group(self):
+        """LOOP-STOP-027: một lệnh bị guard cấm → 126, không nhóm nào chạy; bỏ phần cấm thì mọi nhóm chạy."""
+        shutil.copy(ROOT / "scripts" / "xt.py", self.tmp / "scripts" / "xt.py")
+        (self.tmp / ".claude" / "hooks").mkdir(parents=True)
+        shutil.copy(HOOKS / "guard.py", self.tmp / ".claude" / "hooks" / "guard.py")
+        yaml = "typecheck: touch tc\nlint: touch l && git push origin main\nbuild: touch b\ntest: touch t\n"
+        r = self.gate_par(yaml, XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 126, r.stderr)
+        self.assertIn("guard cấm", r.stderr)
+        for f in ("tc", "l", "b", "t"):
+            self.assertFalse((self.tmp / f).exists(), f)
+        r = self.gate_par(yaml.replace(" && git push origin main", ""), XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for f in ("tc", "l", "b", "t"):
+            self.assertTrue((self.tmp / f).exists(), f)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")

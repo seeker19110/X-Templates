@@ -896,3 +896,24 @@
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: một nguồn sự thật (cùng hàm với CLI), app không chạy lệnh nên không vòng qua guard, loopback + token + kiểm Host/Origin chặn trang khác đọc dữ liệu. Tiêu chí 2: gói tách rời, import lười, xoá là về hiện trạng; API JSON dùng lại được cho phương án 3. Tiêu chí 3: 0 phụ thuộc runtime mới, giữ stdlib và coverage 100 %. Tiêu chí 4: một lệnh, offline, chạy cả ở dự án đích. Mặc định tự host (AGENTS.md §4)
 - Đường lùi: Revert PR Lát 0 (ADR-0038 + PLAN-3.14-app); nếu chủ repo muốn web app lưu trữ hay mobile: ADR mới thay ADR-0038, giữ Lát 1 (plan waves) vì độc lập với giao diện
 - Khi chạy thật (đề xuất, chủ dự án quyết ở G7): Khi cần nhiều người hoặc dùng trên điện thoại: web app lưu trữ (phương án 3) dùng lại API JSON của SPEC-app, cần chủ repo chọn hosting và đăng nhập
+
+### D-127 · 2026-10-21T11:30:11+00:00 · Chủ repo 2026-10-21: giữ tối thiểu job CI trên dự án đích, ruleset chỉ quality + gitleaks (sau khi đo e2e X-Company chờ runner 6 phút vì ~40 job hai repo cùng tài khoản tranh trần job đồng thời)
+
+- Phương án: (1) A: mẫu CI = gate (dev-task.sh gate: build→typecheck→lint→test+coverage→checks, một job) + e2e (matrix [1], tăng shard khi đo chậm) + quality (gom, chạy luôn protection-guard như bước) — 3 job; dự án đích gộp job ngắn vào gate, giữ job dài độc lập (e2e shard, dast…) dưới quality; ruleset quality + gitleaks · (2) B: giữ fan-out ADR-0034 (mỗi task một job, test 4 shard, e2e 2 shard)
+- Chọn: A: mẫu CI = gate (dev-task.sh gate: build→typecheck→lint→test+coverage→checks, một job) + e2e (matrix [1], tăng shard khi đo chậm) + quality (gom, chạy luôn protection-guard như bước) — 3 job; dự án đích gộp job ngắn vào gate, giữ job dài độc lập (e2e shard, dast…) dưới quality; ruleset quality + gitleaks
+- Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo; khớp số đo: job ngắn (10–60 s) mỗi cái tốn một runner + thời gian khởi động/cài phụ thuộc, làm job dài (e2e) xếp hàng; ít job thì job dài được runner ngay. Không bỏ kiểm nào — chỉ gộp job
+- Đường lùi: Khôi phục framework/templates/ci.yml bản 3.13.0 (ADR-0034)
+
+### D-128 · 2026-10-21T11:41:09+00:00 · Chủ repo thêm 'chạy song song job tối đa có thể' sau yêu cầu 'tối thiểu job' (D-127) — dung hoà thế nào; X-Company: OSV-Scanner/CodeQL/pr-policy không còn required
+
+- Phương án: (1) A: song song tối đa TRONG số job tối thiểu: mọi job bắt đầu cùng lúc (không needs ngoài quality); trong gate các nhóm độc lập chạy nền song song (typecheck ∥ lint ∥ build→test ∥ kiểm khác), log riêng, đỏ nếu nhóm nào đỏ; OSV-Scanner vào gate (vẫn chặn qua quality); CodeQL, pr-policy chạy nhưng không chặn · (2) B: tách lại thành nhiều job song song (ngược D-127)
+- Chọn: A: song song tối đa TRONG số job tối thiểu: mọi job bắt đầu cùng lúc (không needs ngoài quality); trong gate các nhóm độc lập chạy nền song song (typecheck ∥ lint ∥ build→test ∥ kiểm khác), log riêng, đỏ nếu nhóm nào đỏ; OSV-Scanner vào gate (vẫn chặn qua quality); CodeQL, pr-policy chạy nhưng không chặn
+- Lý do (tiêu chí chất lượng cuối): Thoả cả hai yêu cầu của chủ repo: không thêm job tranh runner (nguyên nhân e2e chờ 6 phút) mà vẫn rút ngắn gate bằng song song trong job; OSV vào gate giữ được sức chặn đã có (ruleset cũ đòi osv-scanner) mà không thêm required check
+- Đường lùi: Bỏ chạy nền trong gate, về tuần tự (D-127)
+
+### D-129 · 2026-10-21T11:41:26+00:00 · Gate T-1851 có vế ci-check framework/templates đỏ sẵn ở HEAD (quét cả xt.yaml/dependabot.yml không phải workflow)
+
+- Phương án: (1) A: bỏ vế đó; test_ci_template đã chạy ci_check_text trên ci.yml và secret-scan.yml · (2) B: đổi xt.py ci-check bỏ qua file không có jobs:
+- Chọn: A: bỏ vế đó; test_ci_template đã chạy ci_check_text trên ci.yml và secret-scan.yml
+- Lý do (tiêu chí chất lượng cuối): Gate viết sai từ đầu; A giữ đúng kiểm (cả hai workflow mẫu vẫn qua ci-check trong test), không đổi công cụ
+- Đường lùi: Thêm lại vế ci-check khi công cụ bỏ qua file không phải workflow
