@@ -228,18 +228,20 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((self.target / "CLAUDE.md").is_symlink())
 
     def test_with_github_ruleset_template_minimal_and_parallel(self):
-        """D-116: ruleset mẫu chỉ đòi check mà workflow mẫu cung cấp (không treo PR ngày đầu), không đòi "up to date"
-        (PR merge song song); repo khung giữ ruleset riêng."""
+        """D-116/D-117: ruleset mẫu chỉ đòi 3 check mà workflow mẫu cung cấp (không treo PR ngày đầu; `protection-guard`
+        là job con của `quality`), không đòi "up to date" (PR merge song song); repo khung giữ ruleset riêng. Vẫn giữ
+        cấm xoá, cấm force-push, PR bắt buộc."""
         err = io.StringIO()
         with redirect_stderr(err):
             self.assertEqual(self.run_install("--with-github"), 0)
         self.assertNotIn("required check chưa có job", err.getvalue())
-        self.assertEqual(install.ruleset_required_checks(), ["quality", "protection-guard", "gitleaks", "merge-gate"])
+        self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks", "merge-gate"])
         self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
         rs = json.loads((self.target / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
         status = next(r for r in rs["rules"] if r["type"] == "required_status_checks")["parameters"]
         self.assertIs(status["strict_required_status_checks_policy"], False)
         self.assertEqual(rs["bypass_actors"], [])
+        self.assertEqual([r["type"] for r in rs["rules"]][:3], ["deletion", "non_fast_forward", "pull_request"])
         own = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
         self.assertNotEqual(own, rs)
 
@@ -284,7 +286,7 @@ class InstallTest(unittest.TestCase):
         # ADR-0027: PR đủ tiêu chuẩn tự vào nhánh chính khi không còn phiên agent
         self.assertTrue((self.target / ".github" / "workflows" / "pr-steward.yml").exists())
         # CI song song + `quality` tổng hợp và quét bí mật là mẫu không phụ thuộc stack (bản cho dự án đích)
-        for wf in ("ci.yml", "deploy.yml", "secret-scan.yml"):
+        for wf in ("ci.yml", "secret-scan.yml"):
             self.assertEqual(
                 (self.target / ".github" / "workflows" / wf).read_bytes(),
                 (ROOT / "framework" / "templates" / wf).read_bytes(),
@@ -502,7 +504,7 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
         (src / "framework" / "templates" / "ruleset-main.json").write_text(ruleset, encoding="utf-8")
         (src / "framework" / "templates" / "PULL-REQUEST.md").write_text("pr\n", encoding="utf-8")
         (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
-        for wf in ("ci.yml", "deploy.yml", "secret-scan.yml"):
+        for wf in ("ci.yml", "secret-scan.yml"):
             (src / "framework" / "templates" / wf).write_text("name: x\n", encoding="utf-8")
         (src / ".github" / "workflows").mkdir(parents=True)
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")

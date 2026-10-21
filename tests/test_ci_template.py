@@ -1,6 +1,6 @@
-"""Workflow mẫu cho dự án đích (`framework/templates/ci.yml`, `deploy.yml`, `secret-scan.yml` — `install.py --with-github`
-chép vào `.github/workflows/`) và các task CI/CD của `dev-task.sh`: không phụ thuộc stack, fan-out/fan-in với `quality`
-tổng hợp (WF-CI-001, WF-CI-024), mọi job cổng cùng lúc, CD tối thiểu (WF-CI-025/026, D-115), qua được `xt.py ci-check`."""
+"""Workflow mẫu cho dự án đích (`framework/templates/ci.yml`, `secret-scan.yml` — `install.py --with-github` chép vào
+`.github/workflows/`) và các task CI của `dev-task.sh`: không phụ thuộc stack, fan-out/fan-in với `quality` tổng hợp
+(WF-CI-001, WF-CI-024), mọi job cổng cùng lúc (WF-CI-025, D-115, D-117), qua được `xt.py ci-check`."""
 
 from __future__ import annotations
 
@@ -12,9 +12,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Dict
 
@@ -28,7 +26,6 @@ from test_ci import ci_jobs, flow_list, job_key, matrix_shards
 TEMPLATES = ROOT / "framework" / "templates"
 CI = TEMPLATES / "ci.yml"
 SCAN = TEMPLATES / "secret-scan.yml"
-DEPLOY = TEMPLATES / "deploy.yml"
 DEV_TASK = "bash .xtemplates/scripts/dev-task.sh"  # đường dẫn ở dự án đích (install.py chép scripts vào .xtemplates/)
 SETUP = f"run: {DEV_TASK} setup\n"
 # Dòng YAML khối đơn giản mà mẫu dùng: comment, `khoá:`/`khoá: giá trị`, `- khoá: giá trị`, `- giá trị`.
@@ -50,7 +47,8 @@ class CiTemplateTest(unittest.TestCase):
 
     def test_jobs_and_check_names(self):
         want = ["build", "typecheck", "lint", "test", "coverage", "e2e", "checks", "quality", "protection-guard"]
-        self.assertEqual(list(self.jobs), want + ["deploy-staging"])
+        self.assertEqual(list(self.jobs), want)
+        self.assertNotIn("deploy", self.text)  # CD không thuộc mẫu (D-117)
         for name, body in self.jobs.items():
             if name in ("test", "e2e"):
                 self.assertEqual(job_key(body, "name"), f"{name} ${{{{ matrix.shard }}}}/${{{{ strategy.job-total }}}}")
@@ -59,8 +57,8 @@ class CiTemplateTest(unittest.TestCase):
 
     def test_quality_aggregates_every_job_always(self):
         q = self.jobs["quality"]
-        outside = {"quality", "protection-guard", "deploy-staging"}
-        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - outside)
+        # D-117: `protection-guard` là job con (ruleset mẫu không đòi nó riêng)
+        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - {"quality"})
         cond = job_key(q, "if")
         self.assertIn("always()", cond)
         self.assertNotIn("cancelled()", cond)
@@ -101,10 +99,10 @@ class CiTemplateTest(unittest.TestCase):
         self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|python|go))\b")  # không theo stack
 
     def test_gate_jobs_fan_out_without_planning_job(self):
-        """WF-CI-025: không job lập kế hoạch tuần tự — chỉ `coverage` (gộp) và `quality`/`deploy-staging` có `needs`;
+        """WF-CI-025: không job lập kế hoạch tuần tự — chỉ `coverage` (gộp) và `quality` (tổng hợp) có `needs`;
         matrix tĩnh, mỗi shard tự đọc xt.yaml; `e2e` không chờ `build`."""
         with_needs = {k for k, body in self.jobs.items() if job_key(body, "needs")}
-        self.assertEqual(with_needs, {"coverage", "quality", "deploy-staging"})
+        self.assertEqual(with_needs, {"coverage", "quality"})
         self.assertEqual(matrix_shards(self.jobs["test"]), ["1", "2", "3", "4"])
         self.assertEqual(matrix_shards(self.jobs["e2e"]), ["1", "2"])
         self.assertNotIn("TEST_SHARDS", self.text)
@@ -117,25 +115,6 @@ class CiTemplateTest(unittest.TestCase):
         e2e = self.jobs["e2e"]
         self.assertIn(f'run: {DEV_TASK} e2e "$SHARD" "$TOTAL"\n', e2e)
         self.assertIn("fail-fast: false", e2e)
-
-    def test_build_packages_once_on_push_when_deploy_declared(self):
-        build = self.jobs["build"]
-        self.assertIn("deploy: ${{ steps.package.outputs.deploy }}", build)
-        self.assertIn("if: github.event_name == 'push'\n", build)
-        self.assertLess(build.index(f"run: {DEV_TASK} build\n"), build.index(f"if {DEV_TASK} declared deploy; then"))
-        self.assertIn(f'{DEV_TASK} package "$RUNNER_TEMP/artifact"', build)
-        self.assertIn("name: deploy-artifact", build)
-        self.assertIn("if-no-files-found: error", build)
-
-    def test_deploy_staging_after_quality_on_push_only(self):
-        body = self.jobs["deploy-staging"]
-        self.assertEqual(flow_list(job_key(body, "needs")), ["build", "quality"])
-        self.assertEqual(job_key(body, "if"), "github.event_name == 'push' && needs.build.outputs.deploy == 'true'")
-        self.assertEqual(job_key(body, "environment"), "staging")  # secret chỉ ở environment (WF-CI-023)
-        self.assertIn("      group: deploy-staging\n      cancel-in-progress: false\n", body)
-        self.assertIn("      id-token: write\n", body)
-        self.assertIn(f'run: {DEV_TASK} deploy staging "$RUNNER_TEMP/artifact"\n', body)
-        self.assertNotIn("deploy-staging", job_key(self.jobs["quality"], "needs"))
 
     def test_checks_job_runs_framework_checks_and_pr_title(self):
         body = self.jobs["checks"]
@@ -164,13 +143,13 @@ class CiTemplateTest(unittest.TestCase):
         self.assertIn('glob.glob(".github/workflows/*.yml")', body)
 
     def test_ruleset_checks_are_all_provided(self):
-        """D-116: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu."""
+        """D-116/D-117: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu."""
         self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
         self.assertEqual(xt.ci_check_text(SCAN.read_text(encoding="utf-8")), [])
         self.assertEqual(job_key(ci_jobs(SCAN.read_text(encoding="utf-8"))["gitleaks"], "name"), "gitleaks")
 
     def test_templates_pass_ci_check_and_are_block_yaml(self):
-        for path in (CI, SCAN, DEPLOY):
+        for path in (CI, SCAN):
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=path.name):
                 self.assertEqual(xt.ci_check_text(text), [])
@@ -186,8 +165,7 @@ class CiTemplateTest(unittest.TestCase):
                     if BLOCK_RE.search(line):
                         block = indent
                 self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n")
-                if path != DEPLOY:
-                    self.assertRegex(text, r"(?m)^on:\n  push:\n    branches: \[main\]\n  pull_request:\n")
+                self.assertRegex(text, r"(?m)^on:\n  push:\n    branches: \[main\]\n  pull_request:\n")
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -370,111 +348,9 @@ class DevTaskRequireEmptyGateTest(unittest.TestCase):
         self.assertIn("cần ít nhất một task", r.stderr)
 
 
-class DeployTemplateTest(unittest.TestCase):
-    """`deploy.yml` (WF-CI-026): production chạy tay, `verify-run` kiểm run CI trước khi environment hỏi duyệt."""
-
-    RUN = {
-        "path": ".github/workflows/ci.yml",
-        "event": "push",
-        "head_branch": "main",
-        "conclusion": "success",
-        "head_repository": {"full_name": "o/r"},
-        "head_sha": "a" * 40,
-    }
-
-    def setUp(self):
-        self.text = DEPLOY.read_text(encoding="utf-8")
-        self.jobs = ci_jobs(self.text)
-
-    def test_dispatch_only_and_jobs(self):
-        self.assertRegex(self.text, r"(?m)^on:\n  workflow_dispatch:\n    inputs:\n      run_id:\n")
-        self.assertNotRegex(self.text, r"(?m)^  (push|pull_request|pull_request_target|workflow_run):")
-        self.assertEqual(list(self.jobs), ["verify-run", "production"])
-        prod = self.jobs["production"]
-        self.assertEqual(flow_list(job_key(prod, "needs")), ["verify-run"])
-        self.assertEqual(job_key(prod, "environment"), "production")
-        self.assertIn("ref: ${{ needs.verify-run.outputs.sha }}", prod)
-        self.assertIn("run-id: ${{ inputs.run_id }}", prod)
-        self.assertIn(f'run: {DEV_TASK} deploy production "$RUNNER_TEMP/artifact"\n', prod)
-        verify = self.jobs["verify-run"]
-        self.assertEqual(job_key(verify, "environment"), "")  # kiểm trước, không chờ duyệt
-        self.assertIn("RUN_ID: ${{ inputs.run_id }}", verify)  # input qua env (WF-CI-004)
-        self.assertEqual(heredoc_python(verify).count("${{"), 0)
-
-    def verify(self, run: dict | None, run_id: str = "42", ref: str = "refs/heads/main") -> tuple[int, str, str]:
-        body = json.dumps(run or {}).encode()
-        status = 200 if run is not None else 404
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802 — tên do http.server đặt
-                self.send_response(status if self.path == "/repos/o/r/actions/runs/42" else 404)
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *args):
-                pass
-
-        srv = HTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        self.addCleanup(srv.server_close)
-        self.addCleanup(srv.shutdown)
-        with tempfile.TemporaryDirectory() as d:
-            out = Path(d, "out")
-            out.write_text("", encoding="utf-8")
-            env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy")}
-            env.update(
-                GH_TOKEN="t",
-                RUN_ID=run_id,
-                REPO="o/r",
-                BRANCH="main",
-                REF=ref,
-                API=f"http://127.0.0.1:{srv.server_port}",
-                GITHUB_OUTPUT=str(out),
-                NO_PROXY="127.0.0.1",
-                no_proxy="127.0.0.1",
-            )
-            code = heredoc_python(self.jobs["verify-run"])
-            r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
-            return r.returncode, r.stdout, out.read_text(encoding="utf-8")
-
-    def test_verify_run_accepts_green_push_run_on_default_branch(self):
-        rc, stdout, out = self.verify(self.RUN)
-        self.assertEqual(rc, 0, stdout)
-        self.assertEqual(out, f"sha={'a' * 40}\n")
-
-    def test_verify_run_rejects(self):
-        cases = (
-            ({"event": "pull_request"}, "event push"),
-            ({"head_branch": "feature"}, "nhánh main"),
-            ({"conclusion": "failure"}, "kết luận success"),
-            ({"head_repository": {"full_name": "fork/r"}}, "repo o/r"),  # PR từ fork có nhánh tên main
-            ({"head_repository": None}, "repo o/r"),
-            ({"path": ".github/workflows/other.yml"}, "workflow .github/workflows/ci.yml"),
-            ({"path": None}, "workflow .github/workflows/ci.yml"),
-            ({"head_sha": "$(x)"}, "head_sha lạ"),
-        )
-        for patch, msg in cases:
-            with self.subTest(patch=patch):
-                rc, stdout, out = self.verify({**self.RUN, **patch})
-                self.assertEqual(rc, 1, stdout)
-                self.assertIn(msg, stdout)
-                self.assertEqual(out, "")
-        for run_id, ref, msg in (
-            ("4 2", "refs/heads/main", "run_id phải là số"),
-            ("42", "refs/heads/x", "nhánh mặc định"),
-        ):
-            with self.subTest(run_id=run_id, ref=ref):
-                rc, stdout, _ = self.verify(self.RUN, run_id=run_id, ref=ref)
-                self.assertEqual(rc, 1)
-                self.assertIn(msg, stdout)
-        rc, stdout, _ = self.verify(None)
-        self.assertEqual(rc, 1)
-        self.assertIn("không đọc được run 42", stdout)
-
-
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
-class DevTaskCdTest(unittest.TestCase):
-    """Task CI/CD của dev-task.sh (D-115): test-mode · e2e-mode · e2e · package · deploy · declared."""
+class DevTaskCiModeTest(unittest.TestCase):
+    """Task CI của dev-task.sh (D-115): test-mode · e2e-mode · e2e."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -536,88 +412,15 @@ class DevTaskCdTest(unittest.TestCase):
         self.assertEqual(self.dt('e2e_setup: "false"\ne2e: touch x\n', "e2e").returncode, 1)
         self.assertFalse((self.tmp / "x").exists())
 
-    def test_package_writes_checksums(self):
-        out = self.tmp / "art"
-        yaml = 'package: mkdir -p "$XT_ARTIFACT_DIR/d" && printf x > "$XT_ARTIFACT_DIR/d/a.txt"\n'
-        r = self.dt(yaml, "package", str(out), GITHUB_SHA="abc")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual((out / "xt-artifact.txt").read_text(encoding="utf-8"), "commit=abc\n")
-        sums = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
-        self.assertEqual([ln.split()[1] for ln in sums], ["./d/a.txt", "./xt-artifact.txt"])
-        r = self.dt(None, "package", str(out))
-        self.assertEqual(r.returncode, 2)  # thư mục phải rỗng
-        self.assertIn("phải rỗng", r.stderr)
-        self.assertEqual(self.dt(None, "package").returncode, 2)
-
-    def test_package_without_command_and_failure(self):
-        out = self.tmp / "art"
-        r = self.dt('package: ""\n', "package", str(out))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("chưa khai 'package'", r.stderr)
-        self.assertEqual(sorted(p.name for p in out.iterdir()), ["SHA256SUMS", "xt-artifact.txt"])
-        r = self.dt("package: exit 5\n", "package", str(self.tmp / "art2"))
-        self.assertEqual(r.returncode, 5)
-        self.assertFalse((self.tmp / "art2" / "SHA256SUMS").exists())
-
-    def packaged(self) -> Path:
-        out = self.tmp / "art"
-        self.assertEqual(self.dt('package: printf x | tee "$XT_ARTIFACT_DIR/a"\n', "package", str(out)).returncode, 0)
-        return out
-
-    def test_deploy_runs_deploy_then_smoke_with_env(self):
-        out = self.packaged()
-        yaml = (
-            'deploy: printf "%s %s;" "$XT_DEPLOY_ENV" "$(cat "$XT_ARTIFACT_DIR/a")" >> log\n'
-            'smoke: printf "smoke %s" "$XT_DEPLOY_ENV" | tee -a log\n'
-        )
-        r = self.dt(yaml, "deploy", "staging", str(out))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual((self.tmp / "log").read_text(encoding="utf-8"), "staging x;smoke staging")
-        self.assertEqual(self.dt("deploy: touch d\nsmoke: exit 7\n", "deploy", "staging", str(out)).returncode, 7)
-        self.assertEqual(self.dt("deploy: exit 6\nsmoke: touch s\n", "deploy", "staging", str(out)).returncode, 6)
-        self.assertFalse((self.tmp / "s").exists())  # deploy đỏ → không smoke
-
-    def test_deploy_without_smoke_warns(self):
-        out = self.packaged()
-        r = self.dt("deploy: touch d\n", "deploy", "production", str(out), GITHUB_ACTIONS="true")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("::warning::chưa khai 'smoke'", r.stdout)
-        r = self.dt("deploy: touch d\n", "deploy", "production", str(out))
-        self.assertIn("CẢNH BÁO: chưa khai 'smoke'", r.stderr)
-
-    def test_deploy_refuses_bad_input(self):
-        out = self.packaged()
-        r = self.dt('deploy: ""\n', "deploy", "staging", str(out))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("chưa khai lệnh 'deploy'", r.stderr)
-        for env in ("", "Prod", "a b", "../x"):
-            with self.subTest(env=env):
-                self.assertEqual(self.dt("deploy: touch d\n", "deploy", env, str(out)).returncode, 2)
-        self.assertEqual(self.dt("deploy: touch d\n", "deploy", "staging", str(self.tmp)).returncode, 2)  # thiếu SUMS
-        (out / "a").write_text("độc", encoding="utf-8")
-        r = self.dt("deploy: touch d\n", "deploy", "staging", str(out))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("lệch SHA256SUMS", r.stderr)
-        self.assertFalse((self.tmp / "d").exists())
-
-    def test_declared(self):
-        self.assertEqual(self.dt("deploy: make deploy\n", "declared", "deploy").returncode, 0)
-        self.assertEqual(self.dt('deploy: ""\n', "declared", "deploy").returncode, 1)
-        self.assertEqual(self.dt("deploy: true\n", "declared", "deploy").returncode, 1)
-        r = self.dt("deploy: x\n", "declared")
-        self.assertEqual(r.returncode, 2)
-        self.assertEqual(r.stdout, "")
-        (self.tmp / "xt.yaml").unlink()
-        (self.tmp / "Makefile").write_text("deploy:\n\ttrue\n", encoding="utf-8")
-        self.assertEqual(self.dt(None, "declared", "deploy").returncode, 0)  # tự dò như require
-
-    def test_guard_blocks_deploy(self):
-        out = self.packaged()
+    def test_guard_blocks_e2e(self):
+        """LOOP-STOP-027: lệnh `e2e` bị guard cấm → 126, không chạy cả `e2e_setup`."""
         shutil.copy(ROOT / "scripts" / "xt.py", self.tmp / "scripts" / "xt.py")
         (self.tmp / ".claude" / "hooks").mkdir(parents=True)
         shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", self.tmp / ".claude" / "hooks" / "guard.py")
-        r = self.dt("deploy: touch d && git push origin main\n", "deploy", "staging", str(out), XT_GUARD_POLICY="")
+        yaml = "e2e_setup: touch cai\ne2e: touch d && git push origin main\n"
+        r = self.dt(yaml, "e2e", XT_GUARD_POLICY="")
         self.assertEqual(r.returncode, 126, r.stderr)
+        self.assertFalse((self.tmp / "cai").exists())
         self.assertFalse((self.tmp / "d").exists())
 
 
