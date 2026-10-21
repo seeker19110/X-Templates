@@ -39,10 +39,86 @@
    "input": {
     "kind": "same_command",
     "a": "echo  a",
-    "b": "echo 'a'"
+    "b": "echo a"
    },
    "expect": {
     "green": true
+   }
+  },
+  {
+   "id": "harness-aud-code-014-empty-expansion",
+   "origin": "audit",
+   "refs": [
+    "AUD-CODE-014",
+    "REC-01"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "test -n $X",
+    "b": "test -n \"$X\""
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-aud-code-014-nbsp",
+   "origin": "audit",
+   "refs": [
+    "AUD-CODE-014"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "make test",
+    "b": "make test"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-aud-code-014-heredoc-quoted",
+   "origin": "audit",
+   "refs": [
+    "AUD-CODE-014"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "cat <<EOF",
+    "b": "cat <<'EOF'"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-aud-code-014-quoted-assignment",
+   "origin": "audit",
+   "refs": [
+    "AUD-CODE-014"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "X=1 cmd",
+    "b": "'X=1' cmd"
+   },
+   "expect": {
+    "green": false
+   }
+  },
+  {
+   "id": "harness-aud-code-014-fd-space",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-CODE-014"
+   ],
+   "input": {
+    "kind": "same_command",
+    "a": "exec {fd}>f",
+    "b": "exec {fd} >f"
+   },
+   "expect": {
+    "green": false
    }
   },
   {

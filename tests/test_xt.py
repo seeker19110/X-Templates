@@ -493,7 +493,9 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(
             self.run_cli("loop", "record", "--task", "T-002", "--", "python3", "-c", "print('hi there')"), 0
         )
-        self.assertTrue(xt.same_command("python3 -c \"print('a b')\"", "python3 -c 'print('\"'\"'a b'\"'\"')'"))
+        # AUD-CODE-014: nháy khác → không coi là một lệnh (Gate truyền MỘT đối số nguyên văn; argv ghép bằng shlex chỉ khớp
+        # Gate khi không có ký tự đặc biệt).
+        self.assertFalse(xt.same_command("python3 -c \"print('a b')\"", "python3 -c 'print('\"'\"'a b'\"'\"')'"))
 
     def test_task_id_rejects_trailing_newline(self):
         with self.assertRaises(argparse.ArgumentTypeError):

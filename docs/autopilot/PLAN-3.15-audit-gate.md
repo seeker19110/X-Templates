@@ -35,7 +35,7 @@
 ## Task
 
 ### Lát 1 — Bằng chứng Gate
-- [ ] `T-2101` `same_command` so dạng chuẩn `canonical_command` (nháy, toán tử, heredoc, NBSP có nghĩa; chỉ space/tab ngoài nháy tự do) thay token identity; test đỏ trước/xanh sau cho 8 cặp của AUD-CODE-014, `loop record` không tick Gate khác nháy, `loop verify --all` chạy cả hai Gate chỉ khác nháy; 5 ca `autonomy-bench` (files: scripts/xt.py, tests/test_xt_core.py, tests/test_xt.py, tests/fixtures/autonomy/harness.json, CHANGELOG.md, framework/11-autonomous-loop/harness-files.md) — Gate: `python3 -m unittest tests.test_xt_core -k command_identity -k audit_code_014 -k same_command && python3 scripts/xt.py autonomy-bench`
+- [x] `T-2101` `same_command` so dạng chuẩn `canonical_command` (nháy, toán tử, heredoc, NBSP có nghĩa; chỉ space/tab ngoài nháy tự do) thay token identity; test đỏ trước/xanh sau cho 8 cặp của AUD-CODE-014, `loop record` không tick Gate khác nháy, `loop verify --all` chạy cả hai Gate chỉ khác nháy; 5 ca `autonomy-bench` (files: scripts/xt.py, tests/test_xt_core.py, tests/test_xt.py, tests/fixtures/autonomy/harness.json, CHANGELOG.md, framework/11-autonomous-loop/harness-files.md) — Gate: `python3 -m unittest tests.test_xt_core -k command_identity -k audit_code_014 -k same_command && python3 scripts/xt.py autonomy-bench`
 
 ### Lát 2 — Cổng nhất quán
 - [ ] `T-2111` `dev-task.sh`: lệnh test (`test`, `test_fast`, `test_floor`, `test_unit` của `test-shard`) exit 0 mà output có dòng `Ran 0 tests` → exit 5, cùng chữ ký với `zero_tests_red` của `xt.py` (cổng commit, `gate`, `gate-par`, shard, CI mẫu); test `DevTaskZeroTestsTest` (AUD-XFEAT-013) (sau: T-2101; files: scripts/dev-task.sh, tests/test_hooks.py, CHANGELOG.md) — Gate: `python3 -m unittest tests.test_hooks -k zero_tests`

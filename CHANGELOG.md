@@ -16,6 +16,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   [`PLAN-3.14-app.md`](docs/autopilot/PLAN-3.14-app.md): 11 lát, 29 task, 12 đợt song song theo `sau:`/`files:`. Chưa có
   mã — dự án đích chưa phải làm gì.
 
+### Fixed
+- `same_command` (bằng chứng Gate: `loop record` tick, `loop status`/`verify` so evidence với Gate, khử trùng lặp ở `loop verify`/`blueprint-status --run`) so **dạng chuẩn** `canonical_command`: chỉ dãy space/tab ngoài nháy là tự do; nháy, khoảng trắng cạnh toán tử, heredoc, NBSP, gán biến có nháy đều có nghĩa. Token identity cũ (T-1502, bốn vòng vá ở review #167) vẫn coi `test -n $X` ≡ `test -n "$X"` (X rỗng: exit 0 ≠ 1) nên evidence của lệnh xanh giả được tick cho Gate khác và `loop verify --all` bỏ Gate đỏ đứng sau Gate "cùng lệnh" xanh (AUD-CODE-014 🔴 — audit 2026-10-21 tại `ec4c7d2`, `docs/ops/AUDIT-REPORT-2026-10-21.md`). Chỉ chặt hơn: evidence lệch nháy/khoảng trắng cạnh toán tử nay là `verify` (chạy lại đúng Gate). `autonomy-bench` thêm 5 ca; `shell_identity` bỏ.
+
 ## [3.13.0] - 2026-10-21
 
 **Dự án đích: chạy lại `install.py --with-github`** — máy chỉ merge ghim head, không dùng auto-merge của GitHub; required check `merge-gate` bỏ ([ADR-0036](docs/adr/0036-pinned-merge-no-auto-merge-drop-merge-gate.md), D-122). Nhận `xt.py` mới và **stub** `merge-gate.yml` (`pull_request`, luôn xanh — chỉ giữ context cho ruleset còn đòi); rồi gỡ `merge-gate` khỏi ruleset sống (hoặc import lại `ruleset-main.json` 2 check `quality` · `gitleaks`), tắt Settings → "Allow auto-merge", đặt `XT_STEWARD_TOKEN` để merge của steward kích CI trên nhánh chính. Không cần event policy cho `pull_request_target` (K-1 đóng). Stub bị xoá ở bản sau — đừng xoá tay trước khi gỡ ruleset (PR treo "Expected"). Mẫu `xt.yaml`/`ci.yml` chỉ đổi chú thích nhưng hash đổi: dự án đã sửa hai file này nhận `.xtemplates-new` một lần, không cần gộp gì.
