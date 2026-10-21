@@ -69,6 +69,23 @@ Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/khô
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
 [`framework/11-autonomous-loop/README.md`](framework/11-autonomous-loop/README.md).
 
+## Ứng dụng cục bộ
+
+```bash
+python3 scripts/xt.py app                 # repo khung
+python3 .xtemplates/scripts/xt.py app     # dự án đích (sau install.py)
+```
+
+Lệnh in một URL `http://127.0.0.1:<cổng>/#t=<token>` và mở trình duyệt. Có 7 màn: Tổng quan · Thư viện yêu cầu ·
+Ghép blueprint · Tiến độ blueprint · Kế hoạch và phân chia việc (cùng kết quả `xt.py plan waves`) · Vòng tự động, việc
+chờ người, quyết định và ADR · PR (cần `gh` đã đăng nhập; thiếu thì màn báo lý do, các màn khác vẫn chạy).
+
+App **không chạy lệnh**: không Gate, merge, push hay defer — mỗi màn chỉ hiện lệnh để chép sang terminal, nơi guard
+kiểm. Ngoại lệ duy nhất là nút "Ghi BLUEPRINT.md", đi đúng đường của `compose --out` (giữ tick theo ID). Máy chủ chỉ
+nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặt CSP chặt — mô hình đầy đủ ở
+[ADR-0038](docs/adr/0038-local-app-on-xt.md), hợp đồng API ở [`SPEC-app.md`](docs/specs/SPEC-app.md).
+`xt.py app --smoke` gọi mọi API rồi thoát (exit 1 khi có route lỗi) — dùng để kiểm bản cài.
+
 ## Công cụ
 
 | Lệnh | Việc |
@@ -85,6 +102,7 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py guard-check -- <lệnh>` | exit 126 nếu guard của dự án cấm lệnh — `dev-task.sh` gọi trước mỗi lệnh `xt.yaml`; Gate/`Kiểm:` do `loop record`/`verify`/`blueprint-status --run` chạy cũng qua cùng kiểm (LOOP-STOP-027) |
 | `python3 scripts/xt.py release-check [--blueprint F] [--status F] [--json]` | Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối khớp cây, cây git sạch + HEAD, đề xuất "Khi chạy thật" chờ người, pha `harden` và nợ review sau SHA quét (ADR-0031) → PASS/FAIL/N-A có bằng chứng, `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO — phần máy của `GO-NO-GO.md` |
 | `python3 scripts/xt.py autonomy-bench [--corpus DIR] [--json]` | Corpus PR/rollup/review/guard/log CI ở `tests/fixtures/autonomy/` chạy qua hàm thật (merge-check, `_ci_blocker`, `pr next`, guard + chính sách): exit 1 khi false-green > 0 (máy cho merge/chạy/tính xanh ở ca phải chặn), khi có ca lệch (kể cả `code` khác mong đợi) hoặc ID bắt buộc chưa có ca; 2 khi corpus hỏng/ca không chạy được; báo chặn oan và độ phủ REC §2 + 🔴/🟠 đã sửa; job CI `checks` chạy (tổng hợp vào `quality`) (AUTO-07, [baseline](docs/ops/AUTONOMY-BASELINE.md)) |
+| `python3 scripts/xt.py app [--port N] [--no-open] [--smoke]` | App web cục bộ (ADR-0038): máy chủ 127.0.0.1 cổng ngẫu nhiên, in URL kèm token rồi mở trình duyệt; chỉ đọc (trừ ghi `BLUEPRINT.md` như `compose --out`), không chạy lệnh; `--smoke` gọi mọi `GET /api/*` rồi thoát, exit 1 khi có route khác 200 |
 | `python3 scripts/xt.py plan waves [--plan F] [--max N] [--json]` | Xếp task mở của PLAN thành đợt chạy song song (ADR-0038): mỗi đợt `sau:` đã thoả, `files:` không giao, ≤ N task (mặc định 5, `LOOP-ORCH-008`); chu trình, ghi chú hỏng, task defer → bị chặn kèm lý do; không cần vòng đang chạy |
 | `python3 scripts/xt.py context --task T-NNNN [--json] [--plan F]` | Gói ngữ cảnh một task của PLAN (REC-11): ID yêu cầu, đoạn spec, Gate, `files:`, file thiếu, số byte — đưa cho executor thay vì cả PLAN |
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |

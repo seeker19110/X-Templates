@@ -161,6 +161,22 @@ class DoctorHealthyTest(DoctorCase):
         self.assertEqual(errors, [])
 
 
+class DoctorAppTest(DoctorCase):
+    """T-1981 (ADR-0038): install.py chép `scripts/xt_app`, `scripts/app` cạnh xt.py; thiếu → doctor ⚠ `app`, không ✗."""
+
+    def test_install_copies_app_and_doctor_warns_when_missing(self):
+        scripts = self.base / ".xtemplates" / "scripts"
+        self.assertTrue((scripts / "xt_app" / "server.py").is_file())
+        self.assertTrue((scripts / "app" / "index.html").is_file())
+        self.assertFalse(list(scripts.rglob("__pycache__")))
+        self.assertNotIn("app", self.codes("warn", deep=False))
+        shutil.rmtree(scripts / "app")
+        warn = [f for f in self.findings(deep=False) if f.code == "app"]
+        self.assertEqual([f.level for f in warn], ["warn"])
+        self.assertIn("thiếu app cạnh xt.py", warn[0].msg)
+        self.assertNotIn("app", self.codes("error", deep=False))
+
+
 class DoctorFixTest(DoctorCase):
     def test_fix_repairs_safe_parts_and_keeps_hook_errors(self):
         (self.base / ".gitignore").unlink()

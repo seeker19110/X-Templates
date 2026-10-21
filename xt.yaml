@@ -8,7 +8,7 @@ format_file: case {} in *.py) python3 -m ruff format {} ;; esac
 # lint: `xt.py checks` = validate · progress-check · changelog-check · ci-check · license-check trong MỘT tiến trình (mỗi lần
 # khởi động xt.py ~250 ms), rồi link, ruff, shell, JSON.
 lint: python3 scripts/xt.py checks && python3 scripts/check-links.py && python3 -m ruff check scripts tests .claude/hooks && python3 -m ruff format --check scripts tests .claude/hooks && for f in scripts/*.sh .claude/hooks/*.sh; do bash -n "$f" || exit 1; done && shellcheck --severity=warning scripts/*.sh .claude/hooks/*.sh && python3 -m json.tool .claude/settings.json >/dev/null && python3 -m json.tool .github/rulesets/main.json >/dev/null
-typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/install.py scripts/check-links.py .claude/hooks/guard.py
+typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/install.py scripts/check-links.py .claude/hooks/guard.py scripts/xt_app
 # test: mỗi LỚP test một tiến trình, chạy song song theo số CPU (D-079): danh sách lớp lấy từ unittest discover (không có
 # lớp rỗng → không sinh "Ran 0 tests"; module lỗi import → in lỗi, exit 1; `xargs -r`: danh sách rỗng không chạy gì); coverage parallel=True ghi mỗi tiến trình một file, combine rồi đòi 100 % — cùng
 # tập test, cùng ngưỡng, 180 s → ~70 s trên 4 CPU. Một lớp đỏ → xargs exit ≠ 0 → cổng đỏ.

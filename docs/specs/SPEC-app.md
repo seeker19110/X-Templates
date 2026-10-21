@@ -49,7 +49,8 @@ lệnh** (Gate, merge, push, defer): chỉ hiển thị lệnh để chép. Ngo�
 Mỗi `scripts/xt_app/api_<màn>.py` khai `ROUTES: Dict[Tuple[str, str], Callable[[Ctx], Tuple[int, Dict[str, Any]]]]`,
 khoá `(method, path)`; `Ctx` có `base` (gốc dự án), `framework` (thư mục khung), `query` (`Dict[str, List[str]]`), `body`
 (object JSON hoặc `None`). Máy chủ nạp mọi module `api_*`; trùng khoá → lỗi khi khởi động. `--smoke` gọi mọi route
-`GET` không có tham số bắt buộc.
+`GET`; route có tham số bắt buộc khai query mẫu trong `SMOKE: Dict[path, query]` của module (vd
+`{"/api/catalog/module": "rel=00-method/conventions"}`), máy chủ gom bằng `load_smoke()`.
 
 ## 3. API
 
@@ -62,9 +63,9 @@ khoá `(method, path)`; `Ctx` có `base` (gốc dự án), `framework` (thư m�
 | `GET /api/compose/options` | — | `profiles: [{slug, title}]`, `industries: [{slug, title}]`, `modules: [rel]`, `features: [str]`, `scales: ["S","M","L"]` | — | T-1931 |
 | `GET /api/compose` | `profile` (bắt buộc), `scale` (bắt buộc), `industry`, `add`, `feature` (lặp được) | `counts: {MUST, SHOULD, MAY}`, `markdown` (≤ 512 KB), `truncated`, `promoted: [id]` | 400 hồ sơ/ngành/module/quy mô lạ | T-1931 |
 | `POST /api/blueprint` | thân `{profile, scale, industry: [], add: [], feature: [], out: "BLUEPRINT.md"}` | `written: [path]`, `kept`, `dropped`, `stale` (int) | 400 `out` ngoài dự án/không `.md`/tham số lạ | T-1931 |
-| `GET /api/blueprint` | `path` (mặc định `BLUEPRINT.md`) | `path`, `levels: {MUST: {done, open, waived}, …}`, `modules: [{module, must_done, must_total, should_done, should_total}]`, `open_must: [{id, module, text}]` (≤ 200), `truncated`, `bad_lines`, `check_cmd` | 400 path sai; 404 không có file | T-1941 |
+| `GET /api/blueprint` | `path` (mặc định `BLUEPRINT.md`) | `path`, `levels: {MUST: {done, open, waived}, …}`, `modules: [{module, must_done, must_total, should_done, should_total}]`, `open_must: [{id, module, text}]` (≤ 200), `truncated`, `bad_lines`, `check_cmd` | 400 path sai; 404 không có file khi `path` được truyền (vắng `path` mà chưa có `BLUEPRINT.md` → 200, `path: null`) | T-1941 |
 | `GET /api/plans` | — | `plans: [{path, open, done, dropped, active}]` (mọi `docs/autopilot/PLAN*.md`; `active` = PLAN của vòng) | — | T-1951 |
-| `GET /api/plan` | `path` (bắt buộc), `max` (1–10, mặc định 5) | `path`, `sections: [{title, tasks: [{id, state, title, gate, after, files, tier}]}]`, `waves`, `blocked` (= `plan waves --json`), `overlaps`, `cycles`, `unknown_after`, `bad_links`, `deferred: {id: reason}` | 400 path sai/`max` sai; 404 | T-1951 |
+| `GET /api/plan` | `path` (vắng → PLAN của vòng rồi `docs/autopilot/PLAN.md`, không có → 200 rỗng, như `plan waves`; có mà rỗng → 400), `max` (1–10, mặc định 5) | `path`, `sections: [{title, tasks: [{id, state, title, gate, after, files, tier}]}]`, `waves`, `blocked` (= `plan waves --json`), `overlaps`, `cycles`, `unknown_after`, `bad_links`, `deferred: {id: reason}` | 400 path sai/`max` sai; 404 | T-1951 |
 | `GET /api/loop` | — | `verdict`, `reason`, `iterations`, `max_iterations`, `deadline`, `deferred: [{id, reason, at}]`, `checkpoint`, `stats` (như `loop stats --json` hoặc `null`) | — (không có vòng → `verdict: "inactive"`) | T-1961 |
 | `GET /api/decisions` | `q` (tuỳ chọn) | `decisions: [{id, at, question, options, choice, why, revert}]` mới nhất trước (≤ 200, `truncated`) | — | T-1961 |
 | `GET /api/adrs` | — | `adrs: [{number, title, status, path}]` | — | T-1961 |

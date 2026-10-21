@@ -245,6 +245,27 @@ jobs:
           if grep -rn "(đang viết)" framework/ ; then echo "::error::Còn chỗ đang viết trong framework/"; exit 1; fi
           echo "OK"
 
+  # E2E trình duyệt cho app cục bộ `xt.py app` (T-1992, D-133, PRF-WEB-006): 7 màn × 2 viewport (1280×800, 390×844),
+  # console sạch, không cuộn ngang, bàn phím, axe-core 4.14.0 (vendored ở tests_e2e/vendor/axe) 0 vi phạm critical/serious.
+  # Phụ thuộc CHỈ ở job này (requirements-e2e.txt ghim hash) — bộ test chính, `xt.yaml` gate và runtime vẫn chỉ stdlib.
+  # Trình duyệt: Chrome Headless Shell bản Playwright ghim (`--only-shell` bỏ Chromium đầy đủ ~200 MB); không cache theo
+  # khuyến nghị docs CI Playwright (thư viện hệ thống không cache được). Gỡ job + requirements-e2e.txt + tests_e2e/ = về như cũ.
+  app-e2e:
+    name: app-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Playwright ghim kèm hash (requirements-e2e.txt)
+        run: pip install --quiet --require-hashes -r requirements-e2e.txt
+      - name: Chrome Headless Shell + thư viện hệ thống
+        run: python -m playwright install --with-deps --only-shell chromium
+      - name: E2E app — 7 màn × 2 viewport, bàn phím, axe, luồng ghi BLUEPRINT.md
+        run: python -m unittest discover -s tests_e2e -t .
+
   # Required check `quality` (ruleset `.github/rulesets/main.json`): job TỔNG HỢP của mọi job con ở trên (WF-CI-001).
   # `always()` — không phải `!cancelled()`: run bị huỷ (push mới, hết giờ) thì `quality` vẫn chạy và ĐỎ (job con
   # `cancelled`/`skipped` ≠ `success`). Với `!cancelled()`, run bị huỷ làm `quality` thành `skipped`, mà required check
@@ -252,7 +273,7 @@ jobs:
   # quả gộp (một shard đỏ → `failure`). Thêm job con mà quên `needs` → `tests/test_ci.py` đỏ.
   quality:
     name: quality
-    needs: [build, typecheck, lint, test, coverage, py311, checks]
+    needs: [build, typecheck, lint, test, coverage, py311, checks, app-e2e]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2

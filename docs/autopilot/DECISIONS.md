@@ -938,3 +938,24 @@
 - Chọn: A: đẩy Lát 2 lên cùng nhánh/PR #207 — push kích CI, workflow_run CI kích pr-steward merge ghim head; PR ~430 dòng vượt mức 150 (pha build không giao reviewer)
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: không vòng qua chặn (C loại); A giữ mọi cổng (CI đầy đủ, merge ghim head do máy steward quyết). Tiêu chí 2: lát vẫn là commit riêng, revert được. Đổi lại PR lớn hơn mức 150 dòng — chấp nhận ở pha build vì không có reviewer đọc diff; B treo vô hạn
 - Đường lùi: Revert commit Lát 2 trên main
+
+### D-133 · 2026-10-21T19:00:52+00:00 · T-1991: E2E trình duyệt + axe cho xt.py app đi đường nào (research/2026-10-21-app-e2e.md §8)
+
+- Phương án: (1) A: Playwright for Python 1.64.0 (Apache-2.0) chỉ là phụ thuộc dev ở requirements-e2e.txt ghim hash riêng (pyee tách theo marker python_version), CI cài trình duyệt bằng playwright install --with-deps --only-shell chromium, không cache; axe-core 4.14.0 axe.min.js vendored ở tests_e2e/vendor/axe/ (không nằm trong scripts/app, không chép sang dự án đích) kèm LICENSE + SOURCE (URL, sha256, MPL-2.0) theo CMP-LIC-022, tiêm bằng add_script_tag; tag wcag2a…wcag22aa, ngưỡng critical/serious · (2) B: client CDP tự viết chỉ stdlib qua --remote-debugging-pipe + Chromium sẵn trên runner; axe như A · (3) C: không E2E trình duyệt, chỉ test tĩnh + --smoke; PRF-WEB-006 ghi không áp dụng
+- Chọn: A: Playwright for Python 1.64.0 (Apache-2.0) chỉ là phụ thuộc dev ở requirements-e2e.txt ghim hash riêng (pyee tách theo marker python_version), CI cài trình duyệt bằng playwright install --with-deps --only-shell chromium, không cache; axe-core 4.14.0 axe.min.js vendored ở tests_e2e/vendor/axe/ (không nằm trong scripts/app, không chép sang dự án đích) kèm LICENSE + SOURCE (URL, sha256, MPL-2.0) theo CMP-LIC-022, tiêm bằng add_script_tag; tag wcag2a…wcag22aa, ngưỡng critical/serious
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: Playwright là công cụ chuẩn, đã dùng ở bộ mẫu dự án đích (QA-E2E-*), chờ phần tử/console đáng tin; B là mã giao thức tự viết chưa có mẫu tham chiếu Python, rủi ro sai lặng; C bỏ MUST PRF-WEB-006. Tiêu chí 2: phụ thuộc chỉ ở job e2e và file requirements riêng, bộ test chính và runtime vẫn stdlib — xoá job là về như cũ. axe đặt dưới tests_e2e nên không phát tán sang dự án đích, nghĩa vụ MPL-2.0 chỉ là giữ nguyên tệp + thông báo. Tiêu chí 3: --only-shell giảm tải ~200 MB; không cache theo khuyến nghị docs CI
+- Đường lùi: Gỡ job app-e2e và requirements-e2e.txt, tests_e2e/; hoặc đổi sang B nếu Playwright đổi giấy phép/telemetry
+
+### D-134 · 2026-10-21T19:51:12+00:00 · T-1993: thêm mục PRF-WEB cho app vào BLUEPRINT.md repo khung thế nào — compose --add không nhận hồ sơ web-app; ghép lại toàn bộ đặt lại 21 MUST đổi chữ (nợ có sẵn từ 2026-10-15)
+
+- Phương án: (1) A: ghép lại toàn bộ (cli-tool S) + kiểm lại 21 MUST đổi chữ trong T-1993 · (2) B: lấy đúng dòng PRF-WEB-* từ compose --profile web-app --scale S (chữ + rev chuẩn của khung), thêm thành mục riêng 'Ứng dụng cục bộ xt.py app (ADR-0038)' trong BLUEPRINT.md; tick kèm Kiểm chạy lại được hoặc [~] Không áp dụng có lý do; không đụng mục cũ · (3) C: hoãn T-1993 tới pha harden
+- Chọn: B: lấy đúng dòng PRF-WEB-* từ compose --profile web-app --scale S (chữ + rev chuẩn của khung), thêm thành mục riêng 'Ứng dụng cục bộ xt.py app (ADR-0038)' trong BLUEPRINT.md; tick kèm Kiểm chạy lại được hoặc [~] Không áp dụng có lý do; không đụng mục cũ
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: B đưa đúng chữ yêu cầu của khung, mỗi tick có lệnh kiểm; không giả xanh 21 mục cũ. Tiêu chí 2: mục riêng, revert một commit. A làm lẫn nợ cũ vào lát app (phạm vi); C để MUST PRF-WEB-006/007 của app không có nhà. Nợ 21 mục đổi chữ ghi vào PROGRESS cho audit delta trước G7
+- Đường lùi: Xoá mục 'Ứng dụng cục bộ' khỏi BLUEPRINT.md; hoặc ghép lại toàn bộ ở pha harden (A)
+
+### D-135 · 2026-10-21T20:15:49+00:00 · test_tracked_text_files_are_clean_utf8 đỏ: tests_e2e/vendor/axe/axe.min.js (vendored nguyên văn, MPL-2.0, sha256 ghim) chứa U+FFFD hợp lệ trong bảng ký tự
+
+- Phương án: (1) A: loại thư mục vendored tests_e2e/vendor/ khỏi kiểm này — test nhằm file khung cài sang dự án đích; vendor không cài, đã có vendor-check --strict + sha256 trong SOURCE · (2) B: thoát ký tự trong axe.min.js — sửa tệp bên thứ ba, lệch sha256 nguồn, phải ghi Modifications theo MPL · (3) C: nạp axe từ npm lúc chạy CI thay vì vendored — thêm mạng/npm vào job, ngược D-133
+- Chọn: A: loại thư mục vendored tests_e2e/vendor/ khỏi kiểm này — test nhằm file khung cài sang dự án đích; vendor không cài, đã có vendor-check --strict + sha256 trong SOURCE
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: giữ tệp đúng nguồn (hash khớp npm), kiểm vẫn phủ mọi file khung cài sang; vendor được kiểm bằng vendor-check. Tiêu chí 3: một đường dẫn loại trừ có lý do trong test, không nới cho mã của khung
+- Đường lùi: Bỏ loại trừ và chọn C (tải axe lúc chạy CI)

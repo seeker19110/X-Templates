@@ -1,7 +1,7 @@
 name: Dependency audit
 
 # Quét lỗ hổng phụ thuộc Python (BASE-DEP-004): mỗi PR, push main, hằng tuần và chạy tay.
-# Khung chỉ dùng thư viện chuẩn lúc chạy; các gói ở đây là công cụ cổng (requirements-dev.txt) và chính pip-audit.
+# Khung chỉ dùng thư viện chuẩn lúc chạy; các gói ở đây là công cụ cổng (requirements-dev.txt) và chính pip-audit. Gói E2E (requirements-e2e.txt, D-133) chỉ chạy ở job `app-e2e`.
 on:
   pull_request:
   push:
@@ -26,7 +26,7 @@ jobs:
       - name: Cài pip-audit và zizmor kèm hash
         run: pip install --quiet --require-hashes -r requirements-audit.txt
       - name: Quét lỗ hổng (đỏ khi có lỗ hổng đã biết)
-        run: pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt
+        run: pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt -r requirements-e2e.txt
       # Lint workflow (CL-5, T-1833): zizmor 1.31.1 chạy offline (không gọi GitHub API, không cần token), persona regular,
       # chỉ đỏ khi có finding mức high; ngoại lệ đã có lý do ngay tại workflow (`# zizmor: ignore[...]`).
       - name: Lint workflow bằng zizmor (đỏ khi có finding high)

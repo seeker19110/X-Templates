@@ -1,7 +1,8 @@
 # Phụ thuộc và license (`BASE-DEP-005`)
 
-> Xác minh ngày **2026-10-20** (`shellcheck-py`: **2026-10-21**). Phạm vi: mọi gói, kể cả bắc cầu, trong hai file ghim kèm hash: `requirements-dev.txt`
-> (cổng chất lượng: ruff, mypy, coverage, shellcheck-py) và `requirements-audit.txt` (pip-audit, job quét phụ thuộc). Khung chạy
+> Xác minh ngày **2026-10-20** (`shellcheck-py`: **2026-10-21**). Phạm vi: mọi gói, kể cả bắc cầu, trong ba file ghim kèm hash: `requirements-dev.txt`
+> (cổng chất lượng: ruff, mypy, coverage, shellcheck-py), `requirements-audit.txt` (pip-audit, job quét phụ thuộc) và
+> `requirements-e2e.txt` (Playwright, job `app-e2e` — xác minh 2026-10-21), cùng mã chép vào repo của E2E (axe-core). Khung chạy
 > `scripts/xt.py` chỉ bằng thư viện chuẩn Python; các gói dưới đây chỉ chạy trên runner CI/máy dev, không phân phối
 > kèm khung hay dự án đích, không sửa mã gói.
 > Nguồn license: `requirements-dev.txt` — metadata gói đã cài (`importlib.metadata`: `License-Expression`, `License`,
@@ -34,6 +35,23 @@
   .github/workflows` (không gọi API, không cần token; đỏ khi có finding high). Máy dev chạy bằng `zizmor` trần phải đặt
   `ZIZMOR_OFFLINE=true` hoặc có token GitHub, nếu không audit `artipacked` báo 401 khi liệt kê tag. Cục bộ 2026-10-21:
   cài `--require-hashes` vào venv tạm exit 0; quét 9 workflow: 0 finding (16 ignored, 13 suppressed). Chỉ chạy trên runner CI/dev, không phân phối kèm.
+- **E2E app cục bộ (T-1992, D-133):** `requirements-e2e.txt` (Playwright for Python và bắc cầu) chỉ cài ở job CI
+  `app-e2e` và máy dev chạy `tests_e2e/`; không nằm trong `xt.yaml` (`test`/`gate`), không phải phụ thuộc runtime của
+  `xt.py app` (vẫn chỉ stdlib), không phân phối kèm khung hay dự án đích. Hash = sha256 từ PyPI JSON từng phiên bản (xác
+  minh 2026-10-21), mọi wheel Linux x86_64 cho CPython 3.11–3.14; `pyee` tách theo marker (`13.0.1` cho Python < 3.12,
+  `14.0.0` cho ≥ 3.12 — `pyee` 14 đòi ≥ 3.12, Playwright 1.64.0 đòi `pyee>=13,<15`). Kiểm cục bộ 2026-10-21:
+  `pip install --require-hashes -r requirements-e2e.txt` vào venv 3.13 và 3.11 exit 0; `license-check --requirements
+  requirements-e2e.txt` exit 0 ở cả hai; `pip-audit --require-hashes --strict --disable-pip -r requirements-e2e.txt` 0 lỗ
+  hổng. Trình duyệt (Chrome Headless Shell bản Playwright ghim, `playwright install --with-deps --only-shell chromium`)
+  chỉ tải trên runner, không vào repo. Telemetry Playwright: chưa có tuyên bố chính thức (research
+  `research/2026-10-21-app-e2e.md` §1.14).
+- **axe-core 4.14.0 (MPL-2.0) — mã chép vào repo, không phải gói pip:** `tests_e2e/vendor/axe/axe.min.js` nguyên văn từ
+  tarball npm (sha256 `20c09fe157a8a34a30e241aaa1fcdade657734f08ab379ecfbeb7d45cc46e878`), kèm `LICENSE`,
+  `LICENSE-3RD-PARTY.txt` (từ tarball) và `SOURCE` (URL, phiên bản, sha256, `License:`) theo `CMP-LIC-022`; kiểm
+  `python3 scripts/xt.py vendor-check --dirs tests_e2e/vendor --strict` exit 0. Chỉ test nạp nó (qua `page.route`, cùng
+  origin, CSP của app không đổi); không nằm trong `scripts/app`, không chép sang dự án đích; không sửa tệp nên nghĩa vụ
+  MPL-2.0 là giữ nguyên tệp + thông báo bản quyền và chỉ nguồn. `license-check` chỉ đọc gói pip nên không cần ngoại lệ
+  trong `license-allow.json`. Quyết định D-133.
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
 - Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
   `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
@@ -87,6 +105,16 @@
 | typing-extensions | 4.16.0 | PSF-2.0 |
 | urllib3 | 2.8.0 | MIT |
 | zizmor | 1.31.1 | MIT |
+
+## `requirements-e2e.txt` và mã vendored của E2E
+
+| Gói | Bản | License | Dùng ở |
+|---|---|---|---|
+| playwright | 1.64.0 | Apache-2.0 | job CI `app-e2e`, máy dev (`tests_e2e/`) |
+| greenlet | 3.5.6 | MIT AND PSF-2.0 | như trên (bắc cầu của playwright) |
+| pyee | 13.0.1 (Python < 3.12) · 14.0.0 (≥ 3.12) | MIT | như trên (bắc cầu) |
+| typing-extensions | 4.16.0 | PSF-2.0 | như trên (bắc cầu của pyee) |
+| axe-core (vendored, `tests_e2e/vendor/axe/`) | 4.14.0 | MPL-2.0 (chấp nhận — xem trên) | chỉ test E2E, không phân phối kèm |
 
 ## Cách tạo lại
 

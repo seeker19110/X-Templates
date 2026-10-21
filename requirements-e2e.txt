@@ -1,0 +1,26 @@
+# E2E trình duyệt cho app cục bộ `xt.py app` (T-1992, D-133) — CHỈ job CI `app-e2e` và máy dev; bộ test chính và runtime
+# của khung vẫn chỉ stdlib. Cài: pip install --require-hashes -r requirements-e2e.txt ; trình duyệt cài riêng:
+# python -m playwright install --with-deps --only-shell chromium
+# Hash: sha256 từ PyPI JSON (https://pypi.org/pypi/<gói>/<bản>/json, xác minh 2026-10-21), mọi wheel Linux x86_64 cho
+# CPython 3.11–3.14 (manylinux + musllinux; greenlet có thêm cp314t). Không sửa tay hash; nâng bản: lấy lại từ PyPI JSON.
+# `pyee` tách theo Python: 14.x đòi Python >= 3.12; playwright 1.64.0 đòi pyee >=13,<15.
+# License (PyPI 2026-10-21): playwright Apache-2.0 · greenlet MIT AND PSF-2.0 · pyee MIT · typing-extensions PSF-2.0.
+greenlet==3.5.6 \
+    --hash=sha256:1c20ea32a73d17b9b60e3371240e17b0068120c98a5ec01a224a7dd8c89733ba \
+    --hash=sha256:188bf333769b7145e2b0b4a7f09615ec550ed44d3a2a8395fb7b36f0e9901e13 \
+    --hash=sha256:975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1 \
+    --hash=sha256:3dbb4596a6a4e5d47121a33ff20533a81e60f302d9e67b69909a8bc21a43f0a7 \
+    --hash=sha256:f98e8215e172f567ce80eeaed9107fb4d32b6c44f26983d9b8334658136a205a \
+    --hash=sha256:06c0e933290fba8ffe53ead4ae1b8044b0e9754b75cebf381aa2bc3e50d82fac \
+    --hash=sha256:9a09d59bef1db94f384b5bcc2d523694d338f3df6b757aeeaf7baca5d0c0be88 \
+    --hash=sha256:8b27df301f56e3b3d2298095c8f7d6b68f2521f6b1693e901fa039bdbae34424 \
+    --hash=sha256:460e70b033aba8ed47e2ac9b5d0d2157b05a34fbfa30a241400aef4118902cdc \
+    --hash=sha256:916f92f2a8db10508f739d0b5e00b83defe5d1115a997c54532a6d7cf8c95404
+playwright==1.64.0 \
+    --hash=sha256:5a59af1b230b234008524a5d42b613b233d4256f73bc1dd25bf3f11db0c81b75
+pyee==13.0.1 ; python_version < "3.12" \
+    --hash=sha256:af2f8fede4171ef667dfded53f96e2ed0d6e6bd7ee3bb46437f77e3b57689228
+pyee==14.0.0 ; python_version >= "3.12" \
+    --hash=sha256:3ac2d3229a9677f7de2c33d7f52fe25b638a46b19c413fea2edc8c6d0a644e4d
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

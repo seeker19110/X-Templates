@@ -1,0 +1,11 @@
+Tên: axe-core
+Phiên bản: 4.14.0
+License: MPL-2.0 (tệp LICENSE bên cạnh, nguyên văn từ tarball; thành phần bên thứ ba: LICENSE-3RD-PARTY.txt)
+Nguồn: https://registry.npmjs.org/axe-core/-/axe-core-4.14.0.tgz (tệp package/axe.min.js, package/LICENSE, package/LICENSE-3RD-PARTY.txt)
+Tarball sha1: a9819d3932a8198fbe935d8cbd8afcdfecbcf31d (= dist.shasum của registry npm)
+axe.min.js sha256: 20c09fe157a8a34a30e241aaa1fcdade657734f08ab379ecfbeb7d45cc46e878 (cùng giá trị với https://cdn.jsdelivr.net/npm/axe-core@4.14.0/axe.min.js)
+Repo gốc: https://github.com/dequelabs/axe-core (tag v4.14.0, commit e797173108eadfa4355fe06af331791734e1757f)
+Ngày lấy: 2026-10-21
+Sửa đổi: không — tệp chép nguyên văn, không sửa (MPL-2.0 §3.1: mã nguồn có tại URL trên).
+Dùng ở đâu: chỉ test E2E của repo khung (tests_e2e/, job CI app-e2e) — không nằm trong scripts/app, không chép sang dự án đích.
+Quyết định: D-133 (docs/autopilot/DECISIONS.md), CMP-LIC-022.

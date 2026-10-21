@@ -86,7 +86,9 @@ function routeName() {
   return m ? m[1] : "";
 }
 
-async function route() {
+// `moveFocus`: chuyển màn do người dùng (hashchange, nút Thử lại) → focus vào main; lần tải đầu thì không, để điểm Tab
+// đầu tiên vẫn là link "Bỏ qua tới nội dung" (WCAG 2.4.1/2.4.3, E2E tests_e2e).
+async function route(moveFocus = true) {
   const main = document.getElementById("main");
   const status = document.getElementById("status");
   const name = routeName();
@@ -115,12 +117,12 @@ async function route() {
   } catch (e) {
     error(main, e, route);
   }
-  main.focus();
+  if (moveFocus) main.focus();
 }
 
 captureToken();
 window.addEventListener("hashchange", () => {
-  if (location.hash.startsWith("#/")) route(); // `#main` (bỏ qua tới nội dung) không phải màn
+  if (location.hash.startsWith("#/")) route(true); // `#main` (bỏ qua tới nội dung) không phải màn
 });
 if (!location.hash) history.replaceState(null, "", location.pathname + "#/");
-route();
+route(false);
