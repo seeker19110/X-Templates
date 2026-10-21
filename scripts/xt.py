@@ -59,6 +59,9 @@ Lệnh:
   merge-gate [--pr PR] [--pr-json F] [--head SHA] [--json]
                                 Required check (ADR-0023): exit 1 khi merge-check báo `hard` mà PR đang bật auto-merge
                                 (2 = lỗi đọc PR, 3 = head khác --head → chạy lại).
+  merge-gate --event F [--check-run] [--json]
+                                Payload `workflow_run` (ADR-0035): PR gắn với head_sha, cùng luật; --check-run tạo
+                                check-run `merge-gate` trên head mỗi PR (1 = có PR chặn, 2 = payload/PR/tạo check lỗi).
   merge-watch [--pr PR] [--interval 30] [--max-minutes 240]
                                 Gọi merge-check mỗi `interval` giây tới khi verdict ≠ wait (exit 0 = đã merge/merge,
                                 1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
@@ -7659,12 +7662,60 @@ def cmd_release_check(args: argparse.Namespace) -> int:
     return 0 if out["go"] else 1
 
 
+def _merge_gate_verdict(pr: Dict[str, Any]) -> Tuple[str, Dict[str, Any], List[str]]:
+    """(gate pass|warn|block, quyết định của `merge-check`, ghi chú cấu hình) — luật duy nhất của `merge-gate` (ADR-0023)."""
+    d, notes = _merge_eval(pr)
+    auto = bool(pr.get("autoMergeRequest"))
+    review_bad = d["review"] in ("missing", "blocking")
+    gate = "block" if auto and (d["hard"] or review_bad) else "warn" if d["hard"] else "pass"
+    return gate, d, notes
+
+
+def _merge_gate_lines(gate: str, d: Dict[str, Any], notes: List[str], head: str) -> List[str]:
+    """Dòng kết luận + lý do + việc cần làm của `merge-gate` (in ra, và làm title/summary của check-run)."""
+    n = d["pr"]
+    if gate == "block":
+        why = "ngoại lệ cứng" if d["hard"] else f"chưa có review sạch ở head ({d['review']})"
+        lines = [
+            f"✗ {why} trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023, ADR-0028) · PR #{n} · head {head}"
+        ]
+    else:
+        lines = [
+            (
+                "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ"
+                if gate == "warn"
+                else "✓ không có ngoại lệ cứng"
+            )
+            + f" · PR #{n} · head {head}"
+        ]
+    lines += [f"  - {r}" for r in [*d["hard"], *notes]]
+    if gate == "block":
+        lines += [
+            f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;",
+            "  review: `xt.py pr reviewed` (reviewer khác họ model) rồi bật lại auto-merge; hoặc người merge tay",
+        ]
+    return lines
+
+
+def merge_gate_eval(pr: Dict[str, Any]) -> Tuple[str, str, List[str]]:
+    """Đánh giá `merge-gate` trên PR đã đọc: (gate pass|warn|block, head hiện tại, dòng lý do) — không in, không exit;
+    dùng chung cho đường `--pr`/`--head` và `--event` (một luật, hai nguồn sự kiện)."""
+    gate, d, notes = _merge_gate_verdict(pr)
+    head = str(pr.get("headRefOid", ""))
+    return gate, head, _merge_gate_lines(gate, d, notes, head)
+
+
 def cmd_merge_gate(args: argparse.Namespace) -> int:
     """Required check `merge-gate` (ADR-0023): auto-merge của GitHub không ghim head, nên commit đẩy SAU khi bật auto-merge
     phải được máy chặn trên head hiện tại. exit 1 khi `merge-check` báo `hard` VÀ PR đang bật auto-merge; `hard` mà không
     auto-merge thì exit 0 kèm cảnh báo (người merge tay — chốt người của ADR-0016/0022, merge tay của agent đã có guard ghim
     head). exit 2 = không đọc được PR; exit 3 = head của PR khác `--head` (REST chưa thấy push mới, hoặc đã có push
-    mới hơn) — workflow chờ rồi chạy lại."""
+    mới hơn) — workflow chờ rồi chạy lại. `--event`: xem `_merge_gate_event`."""
+    if args.event:
+        return _merge_gate_event(args)
+    if args.check_run:
+        print("✗ --check-run cần --event (check-run gắn head của sự kiện workflow_run)", file=sys.stderr)
+        return 2
     try:
         pr = load_pr(args, local=False)
     except PrInputError as exc:
@@ -7674,49 +7725,154 @@ def cmd_merge_gate(args: argparse.Namespace) -> int:
     if args.head and head != args.head:
         print(f"✗ head của PR là `{head}`, không phải `{args.head}` (sự kiện) — chờ rồi chạy lại", file=sys.stderr)
         return 3
-    d, notes = _merge_eval(pr)
-    auto = bool(pr.get("autoMergeRequest"))
-    review_bad = d["review"] in ("missing", "blocking")
-    gate = "block" if auto and (d["hard"] or review_bad) else "warn" if d["hard"] else "pass"
     if args.json:
-        print(
-            json.dumps(
-                {
-                    "pr": d["pr"],
-                    "head": head,
-                    "gate": gate,
-                    "auto_merge": auto,
-                    "hard": d["hard"],
-                    "review": d["review"],
-                    "notes": notes,
-                },
-                ensure_ascii=False,
-            )
-        )
-        return 1 if gate == "block" else 0
-    n = d["pr"]
-    if gate == "block":
-        why = "ngoại lệ cứng" if d["hard"] else f"chưa có review sạch ở head ({d['review']})"
-        print(
-            f"✗ {why} trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023, ADR-0028) · PR #{n} · head {head}"
-        )
+        gate, d, notes = _merge_gate_verdict(pr)
+        auto = bool(pr.get("autoMergeRequest"))
+        out = {"pr": d["pr"], "head": head, "gate": gate, "auto_merge": auto, "hard": d["hard"], "review": d["review"]}
+        print(json.dumps({**out, "notes": notes}, ensure_ascii=False))
     else:
-        print(
-            (
-                "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ"
-                if gate == "warn"
-                else "✓ không có ngoại lệ cứng"
-            )
-            + f" · PR #{n} · head {head}"
-        )
-    for r in [*d["hard"], *notes]:
-        print(f"  - {r}")
-    if gate == "block":
-        print(
-            f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;"
-        )
-        print("  review: `xt.py pr reviewed` (reviewer khác họ model) rồi bật lại auto-merge; hoặc người merge tay")
+        gate, _, lines = merge_gate_eval(pr)
+        print("\n".join(lines))
     return 1 if gate == "block" else 0
+
+
+CHECK_RUN_NAME = "merge-gate"  # context của required check trong ruleset — đổi tên là mọi PR treo "Expected"
+CHECK_SUMMARY_MAX = 65000  # REST check-run: `output.summary` tối đa 65535 ký tự
+
+
+def _read_run_event(path: str) -> Dict[str, Any]:
+    """`workflow_run` của payload sự kiện (GITHUB_EVENT_PATH); không đọc được hoặc thiếu `head_sha` → PrInputError."""
+    try:
+        event = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:  # ValueError: JSON hỏng hoặc không phải UTF-8
+        raise PrInputError(f"không đọc được payload sự kiện {path}: {exc}") from exc
+    run = event.get("workflow_run") if isinstance(event, dict) else None
+    sha = run.get("head_sha") if isinstance(run, dict) else None
+    if not isinstance(run, dict) or not isinstance(sha, str) or not sha:
+        raise PrInputError(f"payload {path} không có `workflow_run.head_sha` — không biết check gắn vào head nào")
+    return run
+
+
+def _pr_numbers(items: List[Dict[str, Any]]) -> List[str]:
+    """Số PR hợp lệ (int > 0), bỏ trùng, giữ thứ tự."""
+    return list(dict.fromkeys(str(p["number"]) for p in items if type(p.get("number")) is int and p["number"] > 0))
+
+
+def _run_head_owner(run: Dict[str, Any]) -> str:
+    """Chủ repo head của `workflow_run` (PR từ fork: chủ fork) cho bộ lọc `head=<chủ>:<nhánh>`; vắng → `{owner}` (gh thay
+    bằng chủ repo hiện tại/GH_REPO)."""
+    repo = run.get("head_repository")
+    owner = repo.get("owner") if isinstance(repo, dict) else None
+    login = owner.get("login") if isinstance(owner, dict) else None
+    return urllib.parse.quote(login, safe="") if isinstance(login, str) and login else "{owner}"
+
+
+def _run_event_prs(run: Dict[str, Any]) -> List[str]:
+    """PR của sự kiện `workflow_run`: `pull_requests[]`; rỗng (PR từ fork — GitHub để trống) → REST PR mở có head
+    `<chủ repo head>:<head_branch>` (phân trang). Không có `head_branch` → không tra. gh lỗi → PrInputError."""
+    nums = _pr_numbers(_event_pulls(run))
+    branch = run.get("head_branch")
+    if nums or not isinstance(branch, str) or not branch:
+        return nums
+    head = f"{_run_head_owner(run)}:{urllib.parse.quote(branch, safe='/')}"
+    return _pr_numbers(_gh_items(f"repos/{{owner}}/{{repo}}/pulls?state=open&head={head}&per_page=100"))
+
+
+def _gate_event_pr(n: str, head_sha: str) -> Dict[str, Any]:
+    """Một PR của sự kiện → {pr, gate, check_run, lines}. Head hiện tại khác head của sự kiện → `skip` (push mới có run CI
+    mới quyết; không tính chặn); không đọc được PR → `error`. Hai trường hợp này log ra stderr, không tạo check-run."""
+    out: Dict[str, Any] = {"pr": int(n), "check_run": None}
+    try:
+        pr = load_pr(argparse.Namespace(pr=n, pr_json=None), local=False)
+    except PrInputError as exc:
+        print(f"✗ PR #{n}: {exc}", file=sys.stderr)
+        return {**out, "gate": "error", "lines": []}
+    head = str(pr.get("headRefOid", ""))
+    if head != head_sha:
+        print(
+            f"– PR #{n}: head hiện tại `{head or '?'}` khác head của sự kiện `{head_sha}` — bỏ qua, run CI của push mới"
+            " sẽ quyết",
+            file=sys.stderr,
+        )
+        return {**out, "gate": "skip", "lines": []}
+    gate, _, lines = merge_gate_eval(pr)
+    return {**out, "gate": gate, "lines": lines}
+
+
+def _create_check_run(head_sha: str, gate: str, lines: List[str]) -> Optional[int]:
+    """POST check-run `merge-gate` (completed) trên head — REST, token cần `checks: write`; repo như mọi lệnh gh khác
+    (`{owner}/{repo}` = GH_REPO hoặc repo hiện tại). → id (None khi phản hồi không có id); gh lỗi → PrInputError."""
+    summary = "\n".join(lines)[:CHECK_SUMMARY_MAX]
+    cmd = ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/check-runs", "-f", f"name={CHECK_RUN_NAME}"]
+    cmd += ["-f", f"head_sha={head_sha}", "-f", "status=completed"]
+    cmd += ["-f", f"conclusion={'failure' if gate == 'block' else 'success'}"]
+    cmd += ["-f", f"output[title]={lines[0]}", "-f", f"output[summary]={summary}"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PrInputError(f"không chạy được gh ({exc})") from exc
+    if r.returncode != 0:
+        raise PrInputError(f"gh api POST check-runs lỗi: {_one_line(r.stderr)}")
+    try:
+        body = json.loads(r.stdout)
+    except ValueError:
+        body = None
+    cid = body.get("id") if isinstance(body, dict) else None
+    return cid if type(cid) is int else None
+
+
+def _post_check_runs(results: List[Dict[str, Any]], head_sha: str) -> bool:
+    """Mỗi PR đã đánh giá một check-run (`skip`/`error` không có); True khi có lần tạo lỗi (đã in ✗) — vẫn thử PR còn lại."""
+    failed = False
+    for r in results:
+        if r["gate"] not in ("pass", "warn", "block"):
+            continue
+        try:
+            r["check_run"] = _create_check_run(head_sha, r["gate"], r["lines"])
+        except PrInputError as exc:
+            print(f"✗ PR #{r['pr']}: không tạo được check-run {CHECK_RUN_NAME} — {exc}", file=sys.stderr)
+            failed = True
+    return failed
+
+
+def _print_gate_event(results: List[Dict[str, Any]], head_sha: str, as_json: bool) -> None:
+    if as_json:
+        prs = [{k: r[k] for k in ("pr", "gate", "check_run")} for r in results]
+        print(json.dumps({"head": head_sha, "prs": prs}, ensure_ascii=False))
+        return
+    if not results:
+        print(
+            f"không có PR mở nào gắn với head {head_sha} — không tạo check-run (push không thuộc PR, hoặc PR đã đóng)"
+        )
+    for r in results:
+        for line in r["lines"]:  # skip/error: không có dòng (đã log ra stderr)
+            print(line)
+        if r["check_run"] is not None:
+            print(f"  ✓ check-run {CHECK_RUN_NAME} #{r['check_run']} trên head {head_sha}")
+
+
+def _merge_gate_event(args: argparse.Namespace) -> int:
+    """`merge-gate --event FILE [--check-run]` (ADR-0035): payload `workflow_run` của CI chạy ở nhánh mặc định (PR không
+    sửa được cổng) → PR gắn với `head_sha`, đánh giá đúng luật `merge_gate_eval`, `--check-run` tạo check-run tên
+    `merge-gate` trên head cho từng PR. Nhiều PR cùng head: check-run của PR chặn tạo SAU CÙNG — cùng head cùng tên thì
+    run mới nhất là kết quả required check, PR xanh không che được PR đỏ. exit 0 = không PR nào chặn (kể cả không có PR);
+    1 = có PR chặn (sau khi đã tạo check-run cho mọi PR); 2 = payload hỏng/thiếu `head_sha`, không đọc được PR, hoặc tạo
+    check-run lỗi (check không báo = required check treo — fail-closed)."""
+    try:
+        run = _read_run_event(args.event)
+        nums = _run_event_prs(run)
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    head_sha = str(run["head_sha"])
+    results = [_gate_event_pr(n, head_sha) for n in nums]
+    results.sort(key=lambda r: r["gate"] == "block")  # ổn định: PR chặn về cuối, thứ tự còn lại giữ nguyên
+    failed = _post_check_runs(results, head_sha) if args.check_run else False
+    _print_gate_event(results, head_sha, args.json)
+    gates = {r["gate"] for r in results}
+    if failed or "error" in gates:
+        return 2
+    return 1 if "block" in gates else 0
 
 
 WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)
@@ -9717,7 +9873,21 @@ def build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pq.add_argument("--pr-json", help="đọc JSON `gh pr view --json …` từ FILE hoặc - thay vì gọi REST")
     pq.add_argument("--head", help="SHA head của sự kiện CI; PR có head khác → exit 3 (chờ rồi chạy lại)")
-    pq.add_argument("--json", action="store_true", help="in JSON (pr, head, gate, auto_merge, hard, notes)")
+    pq.add_argument(
+        "--event",
+        help="payload `workflow_run` (GITHUB_EVENT_PATH): PR từ `pull_requests[]`, rỗng → PR mở của head_branch; head ="
+        " workflow_run.head_sha; PR có head khác bị bỏ qua (bỏ qua --pr/--pr-json/--head)",
+    )
+    pq.add_argument(
+        "--check-run",
+        action="store_true",
+        help="với --event: tạo check-run `merge-gate` trên head cho mỗi PR (REST, cần `checks: write`); lỗi → exit 2",
+    )
+    pq.add_argument(
+        "--json",
+        action="store_true",
+        help="in JSON (pr, head, gate, auto_merge, hard, notes); với --event: {head, prs: [{pr, gate, check_run}]}",
+    )
     pq.set_defaults(fn=cmd_merge_gate)
     prc = sub.add_parser(
         "release-check",

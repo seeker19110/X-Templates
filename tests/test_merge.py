@@ -1528,6 +1528,259 @@ class MergeGateTest(unittest.TestCase):
         self.assertIn("merge-gate", checks)
 
 
+class CheckRunGh(FakeGh):
+    """FakeGh + `gh api -X POST …/check-runs`: ghi field đã gửi; `post_rc` ≠ 0 = gh lỗi (vd 403: token thiếu
+    `checks: write`)."""
+
+    def __init__(self, post_rc: int = 0, post_out: str = '{"id": 99}', **kw: Any):
+        super().__init__(**kw)
+        self.post_rc, self.post_out = post_rc, post_out
+        self.posts: list[dict[str, str]] = []
+
+    def respond(self, cmd: list[str], **kw: Any) -> subprocess.CompletedProcess:
+        if cmd[:4] != ["gh", "api", "-X", "POST"]:
+            return super().respond(cmd, **kw)
+        self.calls.append(cmd)
+        self.posts.append({"path": cmd[4], **dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "-f")})
+        err = "" if self.post_rc == 0 else "HTTP 403: Resource not accessible by integration"
+        return subprocess.CompletedProcess(cmd, self.post_rc, "" if err else self.post_out, err)
+
+
+class MergeGateEventTest(unittest.TestCase):
+    """T-1802 (ADR-0035): `merge-gate --event` đọc payload `workflow_run` của CI (chạy ở nhánh mặc định — thay
+    `pull_request_target` sắp bị chặn mặc định), chạy ĐÚNG luật merge-gate trên PR gắn với `head_sha`; `--check-run` tạo
+    check-run `merge-gate` qua REST. Check không báo = required check treo (fail-closed)."""
+
+    SHA = FakeGh.SHA
+    AUTO = MergeGateTest.AUTO
+    RISK = {"auto_merge": MergeGateTest.AUTO, "labels": [{"name": "risk:payment"}]}
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
+        self.n = 0
+
+    def payload(self, body: Any = None, **over: Any) -> str:
+        """File payload: `body` thay cả payload (chuỗi = ghi nguyên văn); `over` đổi trường của `workflow_run` mặc định
+        (PR #7 trong `pull_requests[]`, head = FakeGh.SHA)."""
+        run = {
+            "head_sha": self.SHA,
+            "head_branch": "feat/x",
+            "pull_requests": [{"number": 7, "head": {"sha": self.SHA}}],
+            **over,
+        }
+        self.n += 1
+        path = self.base / f"event-{self.n}.json"
+        body = {"workflow_run": run} if body is None else body
+        path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+        return str(path)
+
+    def gate(self, gh: FakeGh, event: str, *extra: str) -> tuple[int, str, str]:
+        with gh.patch():
+            return run_main("merge-gate", "--event", event, *extra)
+
+    def test_merge_gate_event_pass_creates_success_check_run(self):
+        gh = CheckRunGh()
+        rc, out, err = self.gate(gh, self.payload(), "--check-run")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(len(gh.posts), 1)
+        post = gh.posts[0]
+        want = {
+            "path": "repos/{owner}/{repo}/check-runs",
+            "name": "merge-gate",
+            "head_sha": self.SHA,
+            "status": "completed",
+            "conclusion": "success",
+        }
+        self.assertEqual({k: post[k] for k in want}, want)
+        self.assertEqual(post["output[title]"], f"✓ không có ngoại lệ cứng · PR #7 · head {self.SHA}")
+        self.assertTrue(post["output[summary]"].startswith(post["output[title]"]))
+        self.assertIn(f"✓ check-run merge-gate #99 trên head {self.SHA}", out)
+        self.assertFalse([p for p in gh.paths() if "/pulls?" in p])  # pull_requests[] có số: không tra REST
+        rc, out, _ = self.gate(CheckRunGh(), self.payload(), "--check-run", "--json")
+        self.assertEqual(
+            (rc, json.loads(out)), (0, {"head": self.SHA, "prs": [{"pr": 7, "gate": "pass", "check_run": 99}]})
+        )
+        gh = CheckRunGh()  # không --check-run → chỉ in, không POST
+        rc, out, _ = self.gate(gh, self.payload())
+        self.assertEqual((rc, gh.posts), (0, []))
+        self.assertIn("✓ không có ngoại lệ cứng · PR #7", out)
+        self.assertNotIn("check-run", out)
+
+    def test_merge_gate_event_block_posts_failure_exit_1(self):
+        gh = CheckRunGh(pull=self.RISK)
+        rc, out, _ = self.gate(gh, self.payload(), "--check-run")
+        self.assertEqual((rc, len(gh.posts)), (1, 1))
+        post = gh.posts[0]
+        self.assertEqual(post["conclusion"], "failure")
+        self.assertTrue(post["output[title]"].startswith("✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge"))
+        self.assertNotIn("\n", post["output[title]"])
+        for reason in ("nhãn rủi ro: risk:payment", "→ tắt auto-merge (`gh pr merge 7 --disable-auto`"):
+            self.assertIn(reason, post["output[summary]"])
+            self.assertIn(reason, out)
+        # cùng luật với đường --pr: `hard` mà không auto-merge → warn → check xanh, exit 0
+        gh = CheckRunGh(pull={"labels": [{"name": "risk:payment"}]})
+        rc, out, _ = self.gate(gh, self.payload(), "--check-run", "--json")
+        self.assertEqual((rc, gh.posts[0]["conclusion"], json.loads(out)["prs"][0]["gate"]), (0, "success", "warn"))
+        self.assertTrue(gh.posts[0]["output[title]"].startswith("⚠ ngoại lệ cứng — người merge tay"))
+
+    def test_merge_gate_event_rest_lookup_by_head_branch(self):
+        """`pull_requests` rỗng (PR từ fork) → REST PR mở có head `<chủ repo head>:<head_branch>`, phân trang."""
+        run = {
+            "head_sha": self.SHA,
+            "head_branch": "feat/x",
+            "pull_requests": [],
+            "head_repository": {"owner": {"login": "octo"}},
+        }
+        gh = CheckRunGh()
+        rc, out, _ = self.gate(gh, self.payload({"workflow_run": run}), "--check-run", "--json")
+        self.assertEqual((rc, json.loads(out)["prs"]), (0, [{"pr": 7, "gate": "pass", "check_run": 99}]))
+        lookup = [c[-1] for c in gh.calls if "/pulls?" in c[-1]]
+        self.assertEqual(lookup, ["repos/{owner}/{repo}/pulls?state=open&head=octo:feat/x&per_page=100&page=1"])
+        self.assertEqual(gh.posts[0]["head_sha"], self.SHA)
+        # head_repository vắng → `{owner}` (gh thay theo GH_REPO/repo hiện tại); số hỏng/trùng bị lọc
+        gh = CheckRunGh(open_prs=[{"number": 7}, {"number": 7}, {"number": "8"}, {"number": 0}, {}])
+        rc, out, _ = self.gate(gh, self.payload({"workflow_run": {**run, "head_repository": None}}), "--json")
+        self.assertEqual((rc, [p["pr"] for p in json.loads(out)["prs"]]), (0, [7]))
+        self.assertIn("repos/{owner}/{repo}/pulls?state=open&head={owner}:feat/x&per_page=100", gh.paths())
+        # pull_requests[] có phần tử hỏng lẫn số trùng: chỉ số int > 0, một lần
+        gh = CheckRunGh()
+        pulls = [{"number": 0}, {"number": "7"}, "x", {"number": 7}, {"number": 7}]
+        rc, out, _ = self.gate(gh, self.payload(pull_requests=pulls), "--check-run")
+        self.assertEqual((rc, len(gh.posts)), (0, 1))
+
+    def test_merge_gate_event_no_pr_exit_0_without_check_run(self):
+        gh = CheckRunGh(open_prs=[])
+        rc, out, err = self.gate(gh, self.payload(pull_requests=[]), "--check-run")
+        self.assertEqual((rc, gh.posts, err), (0, [], ""))
+        self.assertIn(f"không có PR mở nào gắn với head {self.SHA} — không tạo check-run", out)
+        rc, out, _ = self.gate(CheckRunGh(open_prs=[]), self.payload(pull_requests=[]), "--check-run", "--json")
+        self.assertEqual((rc, json.loads(out)), (0, {"head": self.SHA, "prs": []}))
+        for branch in (None, "", 5):  # không có head_branch: không tra REST, không gọi gh
+            with self.subTest(branch=branch):
+                gh = CheckRunGh()
+                rc, _, _ = self.gate(gh, self.payload(pull_requests=None, head_branch=branch), "--check-run")
+                self.assertEqual((rc, gh.calls), (0, []))
+
+    def test_merge_gate_event_head_moved_skips_pr(self):
+        """Head hiện tại của PR khác head của sự kiện (đã có push mới) → bỏ qua có log, không check-run, không tính chặn."""
+        gh = CheckRunGh(pull=self.RISK)
+        rc, out, err = self.gate(gh, self.payload(head_sha="old0000000"), "--check-run", "--json")
+        self.assertEqual((rc, gh.posts), (0, []))
+        self.assertEqual(json.loads(out), {"head": "old0000000", "prs": [{"pr": 7, "gate": "skip", "check_run": None}]})
+        self.assertIn(f"– PR #7: head hiện tại `{self.SHA}` khác head của sự kiện `old0000000` — bỏ qua", err)
+        rc, out, _ = self.gate(CheckRunGh(), self.payload(head_sha="old0000000"))
+        self.assertEqual((rc, out), (0, ""))
+
+    def test_merge_gate_event_many_prs_same_head_block_posted_last(self):
+        """Đồng thời: nhiều PR cùng head → mỗi PR một check-run; check-run của PR chặn tạo SAU CÙNG (cùng head cùng tên:
+        run mới nhất là kết quả required check — PR xanh không che PR đỏ); PR có push mới giữa chừng bị bỏ qua."""
+        prs = {
+            "8": pr(number=8, files=MergeGateTest.KEY, autoMergeRequest=self.AUTO),  # chặn
+            "7": pr(number=7),
+            "9": pr(number=9, headRefOid="moi0000000"),
+            "10": pr(number=10, headRefOid=""),
+        }
+        gh = CheckRunGh()
+        event = self.payload(pull_requests=[{"number": int(n)} for n in prs])
+        with gh.patch(), unittest.mock.patch.object(xt, "load_pr", side_effect=lambda a, local: prs[a.pr]) as lp:
+            rc, out, err = run_main("merge-gate", "--event", event, "--check-run", "--json")
+        self.assertEqual(rc, 1)
+        self.assertEqual([(c.args[0].pr, c.kwargs) for c in lp.call_args_list], [(n, {"local": False}) for n in prs])
+        self.assertEqual(
+            json.loads(out)["prs"],
+            [
+                {"pr": 7, "gate": "pass", "check_run": 99},
+                {"pr": 9, "gate": "skip", "check_run": None},
+                {"pr": 10, "gate": "skip", "check_run": None},
+                {"pr": 8, "gate": "block", "check_run": 99},
+            ],
+        )
+        got = [(p["conclusion"], p["output[title]"].split(" · ")[1], p["head_sha"]) for p in gh.posts]
+        self.assertEqual(got, [("success", "PR #7", self.SHA), ("failure", "PR #8", self.SHA)])
+        self.assertIn("PR #10: head hiện tại `?`", err)
+
+    def test_merge_gate_event_read_errors_exit_2(self):
+        def load(a: Any, local: bool) -> dict:
+            if a.pr == "8":
+                raise xt.PrInputError("gh api repos/{owner}/{repo}/pulls/8 lỗi: HTTP 502")
+            return pr()
+
+        gh = CheckRunGh()
+        event = self.payload(pull_requests=[{"number": 8}, {"number": 7}])
+        with gh.patch(), unittest.mock.patch.object(xt, "load_pr", side_effect=load):
+            rc, out, err = run_main("merge-gate", "--event", event, "--check-run", "--json")
+        self.assertEqual(rc, 2)  # PR không đọc được: không check-run cho nó (treo = fail-closed), PR khác vẫn có
+        self.assertEqual(
+            json.loads(out)["prs"],
+            [{"pr": 8, "gate": "error", "check_run": None}, {"pr": 7, "gate": "pass", "check_run": 99}],
+        )
+        self.assertIn("✗ PR #8: gh api repos/{owner}/{repo}/pulls/8 lỗi: HTTP 502", err)
+        self.assertEqual(len(gh.posts), 1)
+        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("gh api lỗi: HTTP 403")):
+            rc, out, err = run_main("merge-gate", "--event", self.payload(pull_requests=[]), "--check-run")
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("✗ gh api lỗi: HTTP 403", err)
+
+    def test_merge_gate_event_bad_payload_exit_2(self):
+        bad_utf8 = self.base / "event-latin1.json"
+        bad_utf8.write_bytes(b'{"workflow_run": "\xff"}')
+        cases = {
+            "file vắng": str(self.base / "khong-co.json"),
+            "không phải UTF-8": str(bad_utf8),
+            "JSON hỏng": self.payload("{không phải json"),
+            "không phải object": self.payload([1]),
+            "thiếu workflow_run": self.payload({"check_suite": {"head_sha": self.SHA}}),
+            "workflow_run không phải object": self.payload({"workflow_run": "x"}),
+            "thiếu head_sha": self.payload(head_sha=None),
+            "head_sha rỗng": self.payload(head_sha=""),
+            "head_sha không phải chuỗi": self.payload(head_sha=123),
+        }
+        for name, path in cases.items():
+            with self.subTest(name):
+                gh = CheckRunGh()
+                rc, out, err = self.gate(gh, path, "--check-run", "--json")
+                self.assertEqual((rc, out, gh.calls), (2, "", []))
+                self.assertTrue(err.startswith("✗ "), err)
+        self.assertIn("workflow_run.head_sha", self.gate(CheckRunGh(), cases["thiếu head_sha"])[2])
+        self.assertIn("không đọc được payload sự kiện", self.gate(CheckRunGh(), cases["JSON hỏng"])[2])
+
+    def test_check_run_post_denied_exit_2(self):
+        """Phân quyền: token thiếu `checks: write` (403) → ✗ + exit 2 — kể cả khi PR chặn (lỗi tạo check thắng exit 1)."""
+        gh = CheckRunGh(post_rc=1)
+        rc, out, err = self.gate(gh, self.payload(), "--check-run", "--json")
+        self.assertEqual(rc, 2)
+        self.assertEqual(json.loads(out)["prs"], [{"pr": 7, "gate": "pass", "check_run": None}])
+        self.assertIn("✗ PR #7: không tạo được check-run merge-gate — gh api POST check-runs lỗi: HTTP 403", err)
+        gh = CheckRunGh(post_rc=1, pull=self.RISK)
+        rc, out, _ = self.gate(gh, self.payload(), "--check-run")
+        self.assertEqual((rc, len(gh.posts)), (2, 1))
+        self.assertNotIn("✓ check-run", out)
+
+    def test_check_run_requires_event(self):
+        rc, out, err = run_main("merge-gate", "--check-run", "--pr-json", "-", stdin=json.dumps(pr()))
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("--check-run cần --event", err)
+
+    def test_check_run_create_edges(self):
+        long = ["✓ tiêu đề", *("x" * 1000 for _ in range(80))]
+        gh = CheckRunGh(post_out="không phải json")
+        with gh.patch():
+            self.assertIsNone(xt._create_check_run(self.SHA, "pass", long))  # đã tạo, phản hồi không có id
+        self.assertEqual(len(gh.posts[0]["output[summary]"]), xt.CHECK_SUMMARY_MAX)
+        self.assertEqual((gh.posts[0]["output[title]"], gh.posts[0]["conclusion"]), ("✓ tiêu đề", "success"))
+        for body in ('{"id": "99"}', "[]", '{"name": "merge-gate"}'):
+            with self.subTest(body), CheckRunGh(post_out=body).patch():
+                self.assertIsNone(xt._create_check_run(self.SHA, "block", ["✗ chặn"]))
+        for exc in (OSError("không có gh"), subprocess.TimeoutExpired("gh", 60)):
+            with self.subTest(exc), unittest.mock.patch.object(xt.subprocess, "run", side_effect=exc):
+                with self.assertRaises(xt.PrInputError) as cm:
+                    xt._create_check_run(self.SHA, "pass", ["✓"])
+                self.assertIn("không chạy được gh", str(cm.exception))
+        self.assertEqual(xt.merge_gate_eval(pr())[:2], ("pass", "abc1234def"))  # hàm thuần dùng chung
+
+
 class PrNextTest(unittest.TestCase):
     """ADR-0025 (D-038): `pr next` chọn MỘT hành động theo merge theo làn (ADR-0024) — hàm thuần + sổ review."""
 
