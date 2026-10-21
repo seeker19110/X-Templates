@@ -20,7 +20,7 @@ test_fast: ""         # test liên quan file đổi (XT_CHANGED_FILES, mỗi dò
 # test_list: ""
 # test_unit: ""
 # test_combine: ""
-# merge_autonomy: L3 = máy bật auto-merge/merge theo làn · L2 = chỉ làn nhanh · L1 = người merge (ADR-0015)
+# merge_autonomy: L3 = máy merge ghim head theo làn · L2 = chỉ làn nhanh · L1 = người merge (ADR-0015, D-122)
 merge_autonomy: L3
 merge_risk_paths: ""          # glob thêm vào đường dẫn nhạy cảm (ngoại lệ cứng), cách nhau dấu phẩy
 # merge_hard_exceptions: human = người merge ngoại lệ cứng (ADR-0016) · auto = máy merge khi CI xanh (ADR-0020)

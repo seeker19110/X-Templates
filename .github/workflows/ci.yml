@@ -24,8 +24,8 @@ env:
 
 jobs:
   # Required check `quality` (job TỔNG HỢP cuối file) + `protection-guard` ở đây; `gitleaks` (secret-scan.yml), `dep-audit`
-  # (dep-audit.yml), `merge-gate` (merge-gate.yml, `pull_request_target` — ADR-0023) ở workflow khác. Nguyên tắc: required
-  # check phải là job có thật (protection-guard đối chiếu).
+  # (dep-audit.yml) ở workflow khác. Nguyên tắc: required check phải là job có thật (protection-guard đối chiếu).
+  # `merge-gate.yml` chỉ là stub tạm (D-122, ADR-0036) giữ context `merge-gate` tới khi chủ repo gỡ khỏi ruleset sống.
   # Fan-out/fan-in (WF-CI-024): mỗi task của `scripts/dev-task.sh gate` (build · typecheck · lint · test) là MỘT job song
   # song gọi đúng `dev-task.sh <task>` (lệnh trong xt.yaml — WF-CI-002); `test` chia 4 shard theo lớp, `coverage` gộp dữ
   # liệu các shard và đòi đúng ngưỡng của `test`; `py311` (sàn hỗ trợ) 3 shard; `checks` (bench + kiểm của repo khung).

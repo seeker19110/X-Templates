@@ -4,6 +4,7 @@ thành `skipped` mà GitHub tính là ĐẠT); mọi task của `dev-task.sh gat
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -12,15 +13,21 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import xt
 
-CI = ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOWS = ROOT / ".github" / "workflows"
+CI = WORKFLOWS / "ci.yml"
+STUB = WORKFLOWS / "merge-gate.yml"
+RULESET = ROOT / ".github" / "rulesets" / "main.json"
 AGGREGATE = "quality"
 OUTSIDE_QUALITY = {"protection-guard"}  # required check riêng, không phải cổng chất lượng
+# ADR-0036: `pull_request_target` chỉ còn ở reviewer trên GitHub (đang tắt) — GitHub chặn mặc định ở repo public từ 2026-11-02.
+PR_TARGET_ALLOWED = {"pr-review.yml"}
+PR_TARGET_RE = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
 
 
 def ci_jobs(text: str) -> Dict[str, str]:
@@ -44,6 +51,28 @@ def flow_list(value: str) -> List[str]:
 def matrix_shards(body: str) -> List[str]:
     m = re.search(r"^        shard:\s*(\[.*\])\s*$", body, re.M)
     return flow_list(m.group(1)) if m else []
+
+
+def strip_comment(line: str) -> str:
+    """Bỏ comment YAML (`#` đầu dòng hoặc sau khoảng trắng tới hết dòng)."""
+    return re.sub(r"(?:^|\s)#.*$", "", line)
+
+
+def uses_pull_request_target(text: str) -> bool:
+    """Workflow khai `pull_request_target` ở mã — khoá map, phần tử mảng, chuỗi `on:` (comment không tính)."""
+    return any(PR_TARGET_RE.search(strip_comment(ln)) for ln in text.splitlines())
+
+
+def status_rule(path: Path) -> Dict[str, Any]:
+    """`parameters` của rule `required_status_checks` trong một ruleset JSON."""
+    rules = json.loads(path.read_text(encoding="utf-8"))["rules"]
+    params: Dict[str, Any] = next(r for r in rules if r["type"] == "required_status_checks")["parameters"]
+    return params
+
+
+def required_checks(path: Path) -> List[str]:
+    """Context required check của một ruleset JSON (theo thứ tự khai)."""
+    return [c["context"] for c in status_rule(path)["required_status_checks"]]
 
 
 def gate_tasks() -> List[str]:
@@ -157,6 +186,97 @@ class GateFanOutTest(unittest.TestCase):
         self.assertIn(f"python3 {listing} |", test)
         self.assertRegex(yaml, r"(?m)^test_combine: .*coverage report --fail-under=100$")
         self.assertIn("--fail-under=100", test)
+
+
+class MergeGateStubTest(unittest.TestCase):
+    """D-122/ADR-0036: `merge-gate.yml` chỉ là stub giữ context required check cũ tới khi chủ repo gỡ khỏi ruleset sống —
+    trigger `pull_request` trần (không lọc → mọi PR có check-run trên head), luôn xanh, không quyền ghi/action/secret."""
+
+    def setUp(self):
+        self.text = STUB.read_text(encoding="utf-8")
+        self.jobs = ci_jobs(self.text)
+
+    def test_trigger_is_bare_pull_request(self):
+        on = self.text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(
+            on.strip(), "pull_request:"
+        )  # không `branches:`/`paths:`/`types:` — PR lệch lọc sẽ treo "Expected"
+        self.assertNotIn("pull_request_target", self.text)  # kể cả comment (cổng T-1807 grep cả file)
+        self.assertFalse(uses_pull_request_target(self.text))
+
+    def test_read_only_no_action_no_secret(self):
+        perms = self.text.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(perms, "  contents: read")
+        for banned in ("uses:", "actions/checkout", "write", "secrets.", "${{", "continue-on-error", "concurrency:"):
+            with self.subTest(banned=banned):
+                self.assertNotIn(banned, self.text)
+        self.assertEqual(xt.ci_check_text(self.text), [])
+
+    def test_single_always_green_job_named_merge_gate(self):
+        self.assertEqual(list(self.jobs), ["merge-gate"])
+        body = self.jobs["merge-gate"]
+        self.assertEqual(job_key(body, "name"), "merge-gate")  # đúng tên context trong ruleset sống
+        self.assertEqual(job_key(body, "runs-on"), "ubuntu-latest")
+        self.assertEqual(job_key(body, "timeout-minutes"), "1")
+        for key in ("if", "needs", "environment", "permissions"):
+            with self.subTest(key=key):
+                self.assertEqual(job_key(body, key), "")
+        steps = re.findall(r"^      - ", body, re.M)
+        self.assertEqual(len(steps), 1)
+        run = body.split("run: |\n", 1)[1].strip().splitlines()
+        self.assertEqual(len(run), 1)
+        self.assertTrue(run[0].startswith('echo "'), run[0])
+        self.assertIn("D-122", run[0])
+
+    def test_header_names_removal_order(self):
+        header = [ln for ln in self.text.split("\non:\n", 1)[0].splitlines() if ln.startswith("#")]
+        self.assertTrue(6 <= len(header) <= 10, len(header))
+        joined = "\n".join(header)
+        for marker in ("D-122", "ADR-0036", "T-1834", "gh api repos/<o>/<r>/rules/branches/main", "`branches:`"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, joined)
+
+    def test_rulesets_drop_merge_gate(self):
+        self.assertEqual(required_checks(RULESET), ["quality", "protection-guard", "gitleaks", "dep-audit"])
+        self.assertIs(status_rule(RULESET)["strict_required_status_checks_policy"], True)  # repo khung giữ "up to date"
+        template = ROOT / "framework" / "templates" / "ruleset-main.json"
+        self.assertEqual(required_checks(template), ["quality", "gitleaks"])
+
+
+class PullRequestTargetTest(unittest.TestCase):
+    """ADR-0036 §Lý do: ngoài `pr-review.yml` không workflow nào trong `.github/workflows` dùng `pull_request_target`."""
+
+    def test_detector_cases(self):
+        for text in (
+            "on:\n  pull_request_target:\n",
+            "on: [push, pull_request_target]\n",
+            "on: pull_request_target\n",
+            "on:\n  'pull_request_target':\n",
+            "on:\n  pull_request_target: # zizmor: ignore[dangerous-triggers]\n",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(uses_pull_request_target(text))
+        for text in (
+            "# `pull_request_target` có chủ đích\non:\n  pull_request:\n",
+            "on:\n  pull_request: # không dùng pull_request_target\n",
+            "on:\n  pull_request_targets:\n",
+            "on: [push, pull_request]\n",
+            "",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(uses_pull_request_target(text))
+
+    def test_only_pr_review_uses_pull_request_target(self):
+        files = sorted(p for p in WORKFLOWS.iterdir() if p.suffix in (".yml", ".yaml") and p.is_file())
+        self.assertIn(STUB, files)
+        for name in PR_TARGET_ALLOWED:  # danh sách cho phép không cũ: file còn và còn dùng thật
+            with self.subTest(allowed=name):
+                self.assertTrue(uses_pull_request_target((WORKFLOWS / name).read_text(encoding="utf-8")))
+        for path in files:
+            if path.name in PR_TARGET_ALLOWED:
+                continue
+            with self.subTest(workflow=path.name):
+                self.assertFalse(uses_pull_request_target(path.read_text(encoding="utf-8")))
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
