@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-10-21
+
+**Dự án đích: chạy lại `install.py`** để có `xt.py app` (app web cục bộ, ADR-0038) và `xt.py plan waves` — `.xtemplates/scripts/xt_app/` và `.xtemplates/scripts/app/` được chép cạnh `xt.py`; thử bằng `python3 .xtemplates/scripts/xt.py app --smoke`.
+
 **Dự án đích: chạy lại `install.py --with-github`** — CI tối thiểu số job, song song tối đa trong job ([ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md), D-127, D-128; chủ repo 2026-10-21). Mẫu `ci.yml` đã sửa → gộp tay từ `ci.yml.xtemplates-new`; ruleset chỉ `quality` + `gitleaks` (không đổi). Ngưỡng coverage trên CI phải nằm trong lệnh `test` của `xt.yaml`.
 
 ### Added

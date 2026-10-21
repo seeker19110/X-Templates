@@ -105,7 +105,7 @@ chạy lại Gate bằng `loop record` trước khi tick (`LOOP-ORCH-004`), mở
 - [x] `T-1993` Blueprint repo khung: ghép thêm mục web áp cho app (`PRF-WEB-*`) giữ tick cũ; tick `[x]` kèm `— Kiểm:` chạy lại được, `[~] — Không áp dụng:` có lý do (HSTS trên HTTP loopback, Core Web Vitals/Lighthouse cho trang cục bộ) (sau: T-1992; files: BLUEPRINT.md, BLUEPRINT-BACKLOG.md) — Gate: `python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict && grep -q "PRF-WEB-007" BLUEPRINT.md`
 
 ### Lát 11 — Cắt bản 3.14.0, dự án đích
-- [ ] `T-1996` Cắt bản 3.14.0: `VERSION`, CHANGELOG `## [3.14.0]` (Dự án đích: chạy lại `install.py` để có `xt.py app` và `plan waves`), README, PROGRESS (sau: T-1993; files: VERSION, CHANGELOG.md, README.md, PROGRESS.md) — Gate: `python3 scripts/xt.py checks && grep -qx "3.14.0" VERSION`
+- [x] `T-1996` Cắt bản 3.14.0: `VERSION`, CHANGELOG `## [3.14.0]` (Dự án đích: chạy lại `install.py` để có `xt.py app` và `plan waves`), README, PROGRESS (sau: T-1993; files: VERSION, CHANGELOG.md, README.md, PROGRESS.md) — Gate: `python3 scripts/xt.py checks && grep -qx "3.14.0" VERSION`
 - [ ] `T-1997` Tag `v3.14.0` qua `release-tag.yml` (`workflow_dispatch` REST) sau khi PR Lát 11 merge; thiếu `XT_RELEASE_TOKEN` hoặc tag không đẩy được → `loop defer` (sau: T-1996) — Gate: `git fetch -q --tags origin && git tag -l "v$(cat VERSION)" | grep -q .`
 - [ ] `T-1998` Nâng `seeker19110/hotel-manager` và `seeker19110/X-Company` lên 3.14.0 (chạy lại `install.py`, mở PR, không merge thay chủ dự án) (sau: T-1997) — Gate: `for d in /home/user/hotel-manager /home/user/x-company; do (cd "$d" && grep -q "3.14.0" .xtemplates/VERSION && python3 .xtemplates/scripts/xt.py app --smoke) || exit 1; done`
 
