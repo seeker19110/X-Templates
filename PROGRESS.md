@@ -30,7 +30,7 @@
 
 ## Bàn giao phiên
 - 2026-10-21 · `main` `83fc7b0` (#202), tag `v3.13.0`. PLAN-3.13 xong phần tự làm (#198–#202); dự án đích: PR nâng 3.13.0 hotel-manager #112, X-Company #58 (chủ dự án merge trước 2026-11-02).
-- Lát E (ADR-0039): mẫu CI 3 job + `gate-par`; hotel-manager #112 13 → 9 job, X-Company #58 17 → 8 job, song song trong `gate`, ruleset `quality` + `gitleaks`.
+- Lát E (ADR-0039, #204): mẫu CI 3 job + `gate-par`. Dự án đích (PR mở, CI xanh): hotel-manager #114 13 → 10 job, CI 4m03s; X-Company #60 17 → 8 job, mọi job bắt đầu cùng lúc, CI 8m14s → 4m52s, `gate` song song 49 s (tuần tự cũ ~220 s).
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - `pr stats --days 7`: 183 PR merge · lead time trung vị 0,16 giờ (P95 1,59) · 4 run CI/PR · 8 % run đỏ/huỷ · 0 revert.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. SessionStart gần trần 12 KB khi nhiều task hoãn — lý do hoãn viết ngắn.
