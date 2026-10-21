@@ -1636,6 +1636,60 @@ class GateTestFloorTest(unittest.TestCase):
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class DevTaskZeroTestsTest(unittest.TestCase):
+    """AUD-XFEAT-013 (audit 2026-10-21): unittest Python ≤ 3.11 in `Ran 0 tests` và exit 0 khi không test nào chạy (`-k`
+    sai) — `loop record` (xt.py `zero_tests_red`) đỏ nhưng cổng commit, `gate`, `gate-par`, shard và CI mẫu xanh. Nay mọi
+    lệnh test của dev-task.sh dùng cùng chữ ký: exit 0 + dòng `Ran 0 tests` (stdout hoặc stderr) → exit 5."""
+
+    ZERO = "printf 'Ran 0 tests in 0.000s\\n\\nOK\\n' >&2"
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
+        subprocess.run(["git", "init", "-q"], cwd=self.tmp, check=True)
+
+    def dt(self, yaml: str, *args: str) -> subprocess.CompletedProcess[str]:
+        (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp))
+        for k in ("XT_GATE_ALL_TESTS", "XT_MIN_TESTS"):  # biến của cổng/CI đang chạy không rò vào dự án giả
+            env.pop(k, None)
+        cmd = ["bash", str(self.tmp / "scripts" / "dev-task.sh"), *args]
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=self.tmp, env=env, timeout=60)
+
+    def test_zero_tests_red_in_every_gate(self):
+        for test in (self.ZERO, self.ZERO.replace(" >&2", ""), f"{self.ZERO} 2>&1 | cat"):
+            yaml = f"lint: echo L\ntest: {test}\ntest_fast: {test}\n"
+            for args, rc in ((("test",), 5), (("gate",), 1), (("gate-par",), 5), (("gate-fast",), 1)):
+                with self.subTest(test=test, task=args[0]):
+                    r = self.dt(yaml, *args)
+                    self.assertEqual(r.returncode, rc, r.stderr)
+                    self.assertIn("zero_tests_red", r.stderr)
+                    self.assertIn("Ran 0 tests", r.stdout + r.stderr)  # output vẫn in ra, không bị nuốt
+
+    def test_zero_tests_red_in_floor_and_shard(self):
+        yaml = "lint: echo L\ntest: echo 'Ran 3 tests'\ntest_floor: " + self.ZERO + "\n"
+        r = self.dt(yaml, "gate")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("GATE ĐỎ ở 'test_floor'", r.stderr)
+        (self.tmp / "ids").write_text("a\nb\n", encoding="utf-8")  # printf/echo là no-op với is_noop
+        shard = 'test_list: cat ids\ntest_unit: if [ "$1" = b ]; then ' + self.ZERO + "; fi\n"
+        r = self.dt(shard, "test-shard", "1", "1")
+        self.assertEqual(r.returncode, 5, r.stderr)
+        self.assertIn("zero_tests_red", r.stderr)
+
+    def test_zero_tests_keeps_real_results(self):
+        """Không đổi kết quả khác: test thật xanh vẫn xanh (stdout giữ nguyên); `Ran 0` không ở đầu dòng hay lệnh đã đỏ
+        giữ exit gốc; lệnh không phải test (`lint`) in `Ran 0 tests` không bị đổi."""
+        r = self.dt("lint: echo L\ntest: printf 'kq\\nRan 2 tests\\n'\n", "test")
+        self.assertEqual((r.returncode, r.stdout), (0, "kq\nRan 2 tests\n"))
+        self.assertEqual(self.dt("test: echo '  Ran 0 tests'\n", "test").returncode, 0)
+        self.assertEqual(self.dt("test: echo 'Ran 0 tests'; exit 3\n", "test").returncode, 3)
+        r = self.dt("lint: echo 'Ran 0 tests'\ntest: echo 'Ran 1 test'\n", "gate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("zero_tests_red", r.stderr)
+
+
 class DevTaskGateParTest(unittest.TestCase):
     """D-128: `dev-task.sh gate-par` chạy typecheck ∥ lint ∥ build → test (→ test_floor) cùng lúc — log tách nhóm, đỏ khi
     nhóm nào đỏ (exit code nhóm đỏ đầu tiên theo thứ tự nhóm), guard hỏi một lần trước khi chạy (LOOP-STOP-027)."""

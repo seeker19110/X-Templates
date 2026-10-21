@@ -1749,6 +1749,76 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
             self.assertEqual(load.call_count, 2 * once)  # 3 lệnh: vẫn một lần nạp mỗi guard
 
 
+class GateFloorCliTest(TmpMixin, unittest.TestCase):
+    """AUD-XFEAT-020 (audit 2026-10-21): khoá sàn M/L khai riêng (`format_check`, `coverage`) đỏ mà `require`, `gate-par`,
+    `doctor`, `ci-check` đều xanh — chỉ `loop verify` chạy sàn. `xt.py floor --run` (CI mẫu sau `gate-par`) chạy đúng các
+    lệnh đó, bỏ lệnh trùng gate và khoá `--skip`; thiếu khoá chỉ cảnh báo trừ `--strict`."""
+
+    BP = "---\ntitle: B\nkind: blueprint\nprofile: {p}\nscale: {s}\n---\n"
+
+    def setUp(self):
+        self.base = self.tmpdir()
+        env = unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("XT_RECORD_TIMEOUT", None)
+
+    def floor(self, yaml: str, *args: str, scale: str = "M", profile: str = "cli-tool"):
+        write(self.base / "BLUEPRINT.md", self.BP.format(p=profile, s=scale))
+        write(self.base / "xt.yaml", yaml)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = xt.main(["floor", *args])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_gate_floor_cli_runs_declared_floor_and_fails_red(self):
+        yaml = "lint: ruff check .\ntest: sh -c 'exit 0'\nformat_check: sh -c 'exit 3'\ncoverage: sh -c 'exit 0'\n"
+        rc, out, _ = self.floor(yaml)
+        self.assertEqual(rc, 0)  # không `--run`: chỉ liệt kê
+        self.assertIn("format_check: chưa chạy", out)
+        self.assertIn("coverage: bỏ qua (trùng `test` của gate)", out)
+        rc, out, err = self.floor(yaml, "--run")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ format_check: exit 3", out)
+        self.assertIn("floor: ĐỎ", out)
+        self.assertIn("[xt] floor `format_check`", err)
+        rc, out, _ = self.floor(
+            yaml.replace("exit 3", "exit 0").replace("coverage: sh -c 'exit 0'", "coverage: sh -c 'true'"), "--run"
+        )
+        self.assertEqual((rc, "floor: xanh" in out), (0, True))
+
+    def test_gate_floor_cli_zero_tests_and_json(self):
+        yaml = "lint: ruff check .\ntest: pytest -q\nformat_check: sh -c 'exit 0'\ncoverage: python3 -c \"print('Ran 0 tests')\"\n"
+        rc, out, _ = self.floor(yaml, "--run", "--json")
+        d = json.loads(out)
+        self.assertEqual((rc, d["exit"], d["scale"], d["missing"]), (1, 1, "M", []))
+        self.assertEqual({r["key"]: r["exit_code"] for r in d["runs"]}, {"format_check": 0, "coverage": 5})
+
+    def test_gate_floor_cli_missing_strict_skip_and_scale(self):
+        rc, out, _ = self.floor("lint: ruff check .\ntest: pytest -q\n")
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ quy mô M: xt.yaml thiếu hoặc no-op `format_check`", out)
+        rc, out, _ = self.floor("lint: ruff check .\ntest: pytest -q\n", "--strict")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ quy mô M", out)
+        web = "lint: a\ntest: b\nformat_check: sh -c 'exit 0'\ncoverage: sh -c 'exit 0'\ne2e: sh -c 'exit 9'\n"
+        rc, out, _ = self.floor(web, "--run", "--skip", "e2e", profile="web-app")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("e2e: bỏ qua (--skip)", out)
+        rc, out, _ = self.floor("lint: a\n", "--run", "--strict", scale="S")
+        self.assertEqual(rc, 0)
+        self.assertIn("không áp (quy mô S", out)
+        (self.base / "BLUEPRINT.md").unlink()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(xt.main(["floor"]), 0)
+        self.assertIn("quy mô không rõ", out.getvalue())
+
+    def test_gate_floor_cli_bad_timeout(self):
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}):
+            self.assertEqual(self.floor("lint: a\n", "--run")[0], 2)
+
+
 class TaskDagTest(TmpMixin, unittest.TestCase):
     """T-1511 (AUTO-01): `(sau: …; files: …)` của dòng task → `loop next`, từ chối record khi dependency mở, chu trình."""
 

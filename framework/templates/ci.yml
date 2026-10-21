@@ -52,6 +52,11 @@ jobs:
         run: bash .xtemplates/scripts/dev-task.sh setup
       - name: gate-par — typecheck ∥ lint ∥ build → test (kèm ngưỡng coverage của `test`) đúng lệnh trong xt.yaml
         run: bash .xtemplates/scripts/dev-task.sh gate-par
+      # Sàn M/L (LOOP-HARNESS-023): khoá sàn khai riêng trong xt.yaml (`format_check`, `coverage`, kiểm kiểu theo stack) —
+      # trước chỉ `loop verify` chạy nên CI xanh khi sàn đỏ (AUD-XFEAT-020). Lệnh trùng lệnh của gate-par bỏ qua; `e2e` có
+      # job riêng; quy mô S/không blueprint → không áp; khoá thiếu chỉ cảnh báo (như doctor).
+      - name: Sàn Gate M/L — `xt.py floor --run` (khoá sàn đã khai đỏ → bước đỏ)
+        run: python3 .xtemplates/scripts/xt.py floor --run --skip e2e
       - name: Khung đã cài còn nguyên — `xt.py doctor` (đỏ khi có lỗi; cảnh báo không chặn)
         run: python3 .xtemplates/scripts/xt.py doctor
       - name: Workflow (ghim SHA, quyền, timeout, secret trên PR) + cấu hình xt.yaml — `xt.py ci-check`

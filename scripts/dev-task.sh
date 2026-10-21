@@ -227,6 +227,25 @@ guard_turn() { # $@=task -> 0 nếu mọi lệnh phân giải được của lư
   return 126
 }
 
+# unittest trên Python ≤ 3.11 exit 0 khi KHÔNG test nào chạy (`-k` sai tên, discover sai thư mục) — 3.12+ exit 5. Lệnh
+# test exit 0 mà output (stdout hoặc stderr) có dòng tổng kết `Ran 0 tests` → exit 5, cùng chữ ký và cùng mã với
+# `zero_tests_red` của xt.py (`loop record`/`verify`), để cổng commit, `gate`, `gate-par`, shard và CI không xanh giả
+# khi loop đỏ (AUD-XFEAT-013). pytest tự exit 5, jest exit 1; `go test` "[no tests to run]" exit 0 không bắt (dòng đó
+# hợp lệ ở gói không khớp `-run` khi gói khác chạy test).
+ZERO_TESTS_RE='^Ran 0 tests\b'
+run_counted() { # $@=lệnh như sau `bash -o pipefail -c` → exit của lệnh; 0 mà có `Ran 0 tests` → 5
+  local d rc
+  d="$(mktemp -d)" || return 2
+  { { "$@" | tee -- "$d/out"; } 2>&1 1>&3 3>&- | tee -- "$d/err" >&2; } 3>&1
+  rc=$?
+  if [ "$rc" -eq 0 ] && grep -Eq "$ZERO_TESTS_RE" -- "$d/out" "$d/err"; then
+    log "zero_tests_red: lệnh test exit 0 nhưng in \`Ran 0 tests\` — không test nào chạy, coi là đỏ (exit 5)"
+    rc=5
+  fi
+  rm -rf -- "$d"
+  return "$rc"
+}
+
 RAN=0
 run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh fail hoặc no-op trong autopilot
   local cmd; cmd="$(resolve "$1")"
@@ -237,7 +256,10 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
   guard_cached "$cmd" || guard_ok "$cmd" || return 126
   # pipefail cho chính lệnh khai báo: `set -o pipefail` ở trên không truyền vào `bash -c` mới, nên
   # `test | tee log` từng xanh giả khi test đỏ.
-  ( cd "$ROOT" && bash -o pipefail -c "$cmd" )
+  case "$1" in
+    test | test_fast | test_floor) ( cd "$ROOT" && run_counted bash -o pipefail -c "$cmd" ) ;;
+    *) ( cd "$ROOT" && bash -o pipefail -c "$cmd" ) ;;
+  esac
 }
 
 # --- gate-fast: test liên quan file đã đổi ----------------------------------------
@@ -342,7 +364,7 @@ test_shard() { # $1=I (1..N) $2=N [$3=thư mục dữ liệu coverage]
   pick="$(printf '%s\n' "$ids" | shard_pick "$i" "$n")" || return $?
   [ -n "$pick" ] || { log "test-shard: shard $i/$n rỗng (chỉ $total id) — giảm N"; return 1; }
   log "test-shard $i/$n: $(printf '%s\n' "$pick" | grep -c .)/$total id"
-  printf '%s\n' "$pick" | (cd "$ROOT" && xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 bash -o pipefail -c "$unit" _)
+  printf '%s\n' "$pick" | (cd "$ROOT" && run_counted xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 bash -o pipefail -c "$unit" _)
 }
 test_weights() { # đo lại `test_weights` bằng `test_list` + `test_unit` (coverage vào thư mục tạm, như job `test` của CI)
   local list unit w ids d rc

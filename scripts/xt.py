@@ -3924,6 +3924,68 @@ def gate_floor_commands(base: Path) -> List[Tuple[str, str]]:
     return [(k, keys[k]) for k, _ in need if not gate_noop(keys.get(k) or "")]
 
 
+GATE_PAR_KEYS = ("build", "typecheck", "lint", "test", "test_floor")  # lệnh `dev-task.sh gate`/`gate-par` đã chạy
+
+
+def floor_plan(base: Path, skip: Sequence[str] = ()) -> List[Tuple[str, str, str]]:
+    """[(khoá, lệnh, lý do bỏ qua hoặc "")] sàn M/L đã khai: bỏ khoá trong `skip` (CI mẫu: `e2e` có job riêng) và lệnh
+    trùng một lệnh của `gate`/`gate-par` (vd `coverage` = `test`) — không chạy hai lần."""
+    keys = gate_floor_keys(base)[1]
+    out: List[Tuple[str, str, str]] = []
+    for key, cmd in gate_floor_commands(base):
+        dup = next((g for g in GATE_PAR_KEYS if g != key and same_command(cmd, keys.get(g) or "")), "")
+        why = "--skip" if key in skip else (f"trùng `{dup}` của gate" if dup else "")
+        out.append((key, cmd, why))
+    return out
+
+
+def _floor_run(base: Path, plan: List[Tuple[str, str, str]], timeout: int) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for key, cmd, why in plan:
+        if why:
+            rows.append({"key": key, "cmd": redact(cmd), "skipped": why})
+            continue
+        print(f"[xt] floor `{key}`: {redact(cmd)}", file=sys.stderr, flush=True)
+        code, out = run_gate_shell(cmd, base, timeout)
+        print(out, end="" if out.endswith("\n") else "\n", file=sys.stderr)
+        rows.append({"key": key, "cmd": redact(cmd), "exit_code": code})
+    return rows
+
+
+def cmd_floor(args: argparse.Namespace) -> int:
+    """`xt.py floor [--run] [--skip KEY]… [--strict] [--json]` (AUD-XFEAT-020): sàn Gate M/L (LOOP-HARNESS-023) mà trước
+    đây chỉ `loop verify` chạy — CI mẫu (job `gate`) chạy `floor --run --skip e2e` sau `gate-par` để khoá sàn khai riêng
+    (`format_check`, `coverage`) đỏ thì CI đỏ. Lệnh sàn qua guard và bắt `Ran 0 tests` (`run_gate_shell`). Exit 1 khi
+    lệnh sàn đỏ, hoặc khi thiếu khoá sàn và có `--strict` (thiếu mà không `--strict` chỉ cảnh báo như `doctor`); quy mô
+    S/không blueprint → không áp, exit 0."""
+    base = project_dir()
+    scale = blueprint_scale(base)[0]
+    missing = gate_floor_issues(base)
+    plan = floor_plan(base, args.skip or [])
+    timeout = _record_timeout()
+    if timeout is None:
+        return 2
+    rows = _floor_run(base, plan, timeout) if args.run else []
+    red = [r for r in rows if r.get("exit_code", 0) != 0]
+    rc = 1 if red or (missing and args.strict) else 0
+    if args.json:
+        print(
+            json.dumps({"scale": scale, "missing": missing, "plan": [list(x) for x in plan], "runs": rows, "exit": rc})
+        )
+        return rc
+    if scale not in ("M", "L"):
+        print(f"floor: không áp (quy mô {scale or 'không rõ'} — sàn chỉ ở M/L, LOOP-HARNESS-023)")
+        return 0
+    for m in missing:
+        print(f"{'✗' if args.strict else '⚠'} {m}")
+    for key, cmd, why in plan:
+        r = next((x for x in rows if x["key"] == key), None)
+        state = f"bỏ qua ({why})" if why else ("chưa chạy" if r is None else f"exit {r['exit_code']}")
+        print(f"{'✗' if r and r.get('exit_code', 0) else '·'} {key}: {state} — {redact(cmd)}")
+    print(f"floor: {'ĐỎ' if rc else 'xanh'}")
+    return rc
+
+
 def _doctor_gate_floor(base: Path) -> List[Finding]:
     return [Finding("gate-floor", "warn", f"{i} — sàn Gate M/L (LOOP-HARNESS-023)") for i in gate_floor_issues(base)]
 
@@ -9988,6 +10050,15 @@ def build_parser() -> argparse.ArgumentParser:
     pp = sub.add_parser("progress-check")
     pp.add_argument("file", nargs="?", default="PROGRESS.md")
     pp.set_defaults(fn=cmd_progress_check)
+    pfl = sub.add_parser(
+        "floor",
+        help="sàn Gate M/L (format_check, coverage…): liệt kê, `--run` chạy — CI mẫu sau gate-par (AUD-XFEAT-020)",
+    )
+    pfl.add_argument("--run", action="store_true", help="chạy lệnh sàn đã khai (qua guard, như loop verify)")
+    pfl.add_argument("--skip", action="append", metavar="KEY", help="bỏ khoá sàn này (CI mẫu: e2e có job riêng)")
+    pfl.add_argument("--strict", action="store_true", help="thiếu khoá sàn cũng exit 1 (mặc định chỉ cảnh báo)")
+    pfl.add_argument("--json", action="store_true")
+    pfl.set_defaults(fn=cmd_floor)
     pci = sub.add_parser("ci-check")
     pci.add_argument("dir", nargs="?", help="thư mục workflow (mặc định .github/workflows, không có thì bỏ qua)")
     pci.set_defaults(fn=cmd_ci_check)
