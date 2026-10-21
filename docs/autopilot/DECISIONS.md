@@ -881,3 +881,10 @@
 - Chọn: A: pha build hoãn review (ghi nợ) cho MỌI PR mà máy được merge — kể cả hard_waived và nhãn risk:; ngoại lệ cứng giữ người (merge_hard_exceptions: human) vẫn do người merge; review blocking đã có vẫn chặn; nợ trả ở harden (release-check review_debt); /autopilot không giao reviewer ở pha build
 - Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo (quyền cuối). An toàn còn lại: người vẫn merge ngoại lệ cứng giữ người; review chặn đã có không bị rửa; release-check FAIL phase/review_debt tới khi harden + audit delta trước phát hành; harden chỉ bật khi lên production
 - Đường lùi: review_deferrable thêm lại điều kiện not hard_waived, review_deferred thêm not risk_labels; ADR-0037 đổi trạng thái
+
+### D-125 · 2026-10-21T10:43:13+00:00 · Gate T-1833 gọi zizmor trần (mặc định online, 401 qua proxy phiên) trong khi bước CI dep-audit chạy --offline
+
+- Phương án: (1) A: đổi Gate thành zizmor --offline --min-severity high .github/workflows — khớp đúng bước CI · (2) B: giữ Gate, đặt ZIZMOR_OFFLINE=true ngoài lệnh khi chạy loop record
+- Chọn: A: đổi Gate thành zizmor --offline --min-severity high .github/workflows — khớp đúng bước CI
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3: Gate tự chứa, chạy lại được y nguyên, khớp CI (không nới so với CI vì CI cũng offline); B phụ thuộc biến môi trường ẩn
+- Đường lùi: Đổi Gate về zizmor trần và chạy với token GitHub
