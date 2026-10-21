@@ -36,7 +36,8 @@
     "AUD-CI-003",
     "AUD-DEP-001",
     "AUD-DEP-003",
-    "AUD-CI-014"
+    "AUD-CI-014",
+    "AUD-CI-016"
    ]
   },
   {
@@ -62,7 +63,10 @@
     "AUD-SEC-015",
     "AUD-SEC-057",
     "AUD-SEC-065",
-    "AUD-SEC-066"
+    "AUD-SEC-066",
+    "AUD-XFEAT-013",
+    "AUD-XFEAT-020",
+    "AUD-CFG-003"
    ]
   },
   {
