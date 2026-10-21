@@ -1,6 +1,6 @@
 """Workflow mẫu cho dự án đích (`framework/templates/ci.yml`, `secret-scan.yml` — `install.py --with-github` chép vào
-`.github/workflows/`) và các task CI của `dev-task.sh`: không phụ thuộc stack, fan-out/fan-in với `quality` tổng hợp
-(WF-CI-001, WF-CI-024), mọi job cổng cùng lúc (WF-CI-025, D-115, D-117), qua được `xt.py ci-check`."""
+`.github/workflows/`) và các task CI của `dev-task.sh`: không phụ thuộc stack, 3 job `gate` · `e2e` · `quality` tổng hợp
+(ADR-0039, WF-CI-001, WF-CI-024, WF-CI-025), qua được `xt.py ci-check`."""
 
 from __future__ import annotations
 
@@ -34,45 +34,69 @@ BLOCK_RE = re.compile(r":\s*\|\s*$")
 
 
 def heredoc_python(body: str) -> str:
-    """Mã Python trong `python3 - <<'PY' … PY` đầu tiên của thân job (bỏ thụt lề YAML)."""
-    m = re.search(r"python3 - <<'PY'\n(.*?)\n\s*PY\n", body, re.S)
-    assert m, "không thấy heredoc python"
+    """Mã Python trong `python3 - <<'PY' … PY` cuối cùng của thân job (bỏ thụt lề YAML)."""
+    found = re.findall(r"python3 - <<'PY'\n(.*?)\n\s*PY\n", body, re.S)
+    assert found, "không thấy heredoc python"
+    return textwrap.dedent(found[-1])
+
+
+def step_run(body: str, name_prefix: str) -> str:
+    """Script `run: |` của bước có `name:` bắt đầu bằng `name_prefix` (bỏ thụt lề YAML)."""
+    m = re.search(
+        rf"^      - name: {re.escape(name_prefix)}.*?^        run: \|\n(.*?)(?=^      - |\Z)", body, re.S | re.M
+    )
+    assert m, f"không thấy bước {name_prefix!r}"
     return textwrap.dedent(m.group(1))
 
 
+def step_index(body: str, run: str) -> int:
+    return body.index(f"run: {run}\n")
+
+
 class CiTemplateTest(unittest.TestCase):
+    """ADR-0039: mẫu CI dự án đích còn đúng 3 job — `gate` · `e2e` · `quality` (gom, kèm bước protection-guard)."""
+
     def setUp(self):
         self.text = CI.read_text(encoding="utf-8")
         self.jobs: Dict[str, str] = ci_jobs(self.text)
 
-    def test_jobs_and_check_names(self):
-        want = ["build", "typecheck", "lint", "test", "coverage", "e2e", "checks", "quality", "protection-guard"]
-        self.assertEqual(list(self.jobs), want)
+    def test_three_jobs_and_check_names(self):
+        self.assertEqual(list(self.jobs), ["gate", "e2e", "quality"])
+        # Gate của T-1851 đếm dòng `  khoá:` thụt 2 — `on:` viết dạng flow để chỉ job khớp.
+        self.assertEqual(len(re.findall(r"(?m)^  [a-z0-9-]*:$", self.text)), 3)
         self.assertNotIn("deploy", self.text)  # CD không thuộc mẫu (D-117)
-        for name, body in self.jobs.items():
-            if name in ("test", "e2e"):
-                self.assertEqual(job_key(body, "name"), f"{name} ${{{{ matrix.shard }}}}/${{{{ strategy.job-total }}}}")
-            else:
-                self.assertEqual(job_key(body, "name"), name)  # tên check = khoá job (required check khớp ruleset)
+        for gone in ("build", "typecheck", "lint", "test", "coverage", "checks", "protection-guard", "test-plan"):
+            with self.subTest(job=gone):
+                self.assertNotIn(gone, self.jobs)
+                self.assertNotRegex(self.text, rf"(?m)^  {re.escape(gone)}:")
+        self.assertEqual(job_key(self.jobs["gate"], "name"), "gate")
+        self.assertEqual(job_key(self.jobs["quality"], "name"), "quality")  # tên check = khoá job (khớp ruleset)
+        self.assertEqual(job_key(self.jobs["e2e"], "name"), "e2e ${{ matrix.shard }}/${{ strategy.job-total }}")
 
     def test_quality_aggregates_every_job_always(self):
         q = self.jobs["quality"]
-        # D-117: `protection-guard` là job con (ruleset mẫu không đòi nó riêng)
-        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - {"quality"})
+        self.assertEqual(flow_list(job_key(q, "needs")), ["gate", "e2e"])
+        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - {"quality"})  # mọi job khác là job con
         cond = job_key(q, "if")
         self.assertIn("always()", cond)
         self.assertNotIn("cancelled()", cond)
         self.assertIn("RESULTS: ${{ toJSON(needs) }}", q)
-        self.assertEqual(job_key(self.jobs["protection-guard"], "if"), "")
-        self.assertEqual(job_key(self.jobs["protection-guard"], "needs"), "")
+        # Bước tổng hợp chạy cả khi bước protection-guard đỏ (log luôn nêu job con nào đỏ) và đứng cuối job.
+        agg = q.index("- name: Mọi job con phải `success`")
+        self.assertGreater(agg, q.index("protection-guard — ruleset trên nhánh"))
+        self.assertIn("if: ${{ always() }}", q[agg:])
+        for name in ("gate", "e2e"):
+            self.assertEqual(job_key(self.jobs[name], "needs"), "")  # job con chạy cùng lúc, không chờ nhau
+            self.assertEqual(job_key(self.jobs[name], "if"), "")  # job bị điều kiện bỏ qua = `skipped` → `quality` đỏ
 
     def test_quality_script_red_on_any_non_success(self):
         code = heredoc_python(self.jobs["quality"])
         for results, rc in (
-            ({"a": {"result": "success"}, "b": {"result": "success"}}, 0),
-            ({"a": {"result": "success"}, "b": {"result": "skipped"}}, 1),
-            ({"a": {"result": "cancelled"}}, 1),
-            ({"a": {"result": "failure"}}, 1),
+            ({"gate": {"result": "success"}, "e2e": {"result": "success"}}, 0),
+            ({"gate": {"result": "success"}, "e2e": {"result": "skipped"}}, 1),
+            ({"gate": {"result": "cancelled"}}, 1),
+            ({"gate": {"result": "failure"}, "e2e": {"result": "success"}}, 1),
+            ({"gate": {}}, 1),
             ({}, 1),
         ):
             with self.subTest(results=results):
@@ -80,73 +104,121 @@ class CiTemplateTest(unittest.TestCase):
                 r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
                 self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
 
-    def test_gate_tasks_run_declared_commands_after_setup(self):
-        for task in ("build", "typecheck", "lint"):
-            with self.subTest(task=task):
-                body = self.jobs[task]
-                self.assertIn(f"run: {DEV_TASK} {task}\n", body)
-                self.assertLess(body.index(SETUP), body.index(f"run: {DEV_TASK} {task}\n"))
-        test = self.jobs["test"]
-        self.assertLess(test.index(SETUP), test.index(f'{DEV_TASK} test-shard "$SHARD" "$TOTAL" "$RUNNER_TEMP/cov"'))
-        self.assertIn(f"{DEV_TASK} test\n", test)  # không chia shard → cả lệnh `test`
-        self.assertIn("if: steps.mode.outputs.mode == 'whole' && matrix.shard == 1\n", test)
-        cov = self.jobs["coverage"]
-        self.assertEqual(flow_list(job_key(cov, "needs")), ["test"])
-        self.assertIn(f'{DEV_TASK} test-combine "$RUNNER_TEMP/cov"', cov)
-        self.assertEqual(job_key(cov, "if"), "")  # job bị bỏ qua = `skipped` → `quality` đỏ; chỉ bỏ BƯỚC
-        self.assertIn("include-hidden-files: true", test)
+    def test_gate_job_runs_gate_and_framework_checks_in_order(self):
+        """`gate`: require (đỏ sớm, D-096) → setup → `dev-task.sh gate-par` (song song trong job, D-128) → doctor → ci-check →
+        tiêu đề PR."""
+        body = self.jobs["gate"]
+        order = [
+            body.index("actions/checkout@"),
+            step_index(body, f"{DEV_TASK} require lint test"),
+            body.index(SETUP),
+            step_index(body, f"{DEV_TASK} gate-par"),
+            step_index(body, "python3 .xtemplates/scripts/xt.py doctor"),
+            step_index(body, "python3 .xtemplates/scripts/xt.py ci-check"),
+            body.index("TITLE: ${{ github.event.pull_request.title }}"),
+        ]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("fetch-depth: 0", body)  # doctor: SHA bàn giao là tổ tiên HEAD
+        self.assertEqual(body.count(f"{DEV_TASK} gate"), 1)  # đúng một lần, là `gate-par`
+        self.assertNotIn(f"run: {DEV_TASK} gate\n", self.text)
+        # Coverage: ngưỡng nằm trong `test` mà `gate` chạy — không còn đường shard/combine/artefact trong mẫu.
+        for gone in ("test-shard", "test-combine", "test-mode", "upload-artifact", "download-artifact", "XT_MIN_TESTS"):
+            self.assertNotIn(gone, self.text)
         code = "\n".join(ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#"))
         self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|python|go))\b")  # không theo stack
 
-    def test_gate_jobs_fan_out_without_planning_job(self):
-        """WF-CI-025: không job lập kế hoạch tuần tự — chỉ `coverage` (gộp) và `quality` (tổng hợp) có `needs`;
-        matrix tĩnh, mỗi shard tự đọc xt.yaml; `e2e` không chờ `build`."""
-        with_needs = {k for k, body in self.jobs.items() if job_key(body, "needs")}
-        self.assertEqual(with_needs, {"coverage", "quality"})
-        self.assertEqual(matrix_shards(self.jobs["test"]), ["1", "2", "3", "4"])
-        self.assertEqual(matrix_shards(self.jobs["e2e"]), ["1", "2"])
-        self.assertNotIn("TEST_SHARDS", self.text)
-        for job, mode in (("test", "test-mode"), ("coverage", "test-mode"), ("e2e", "e2e-mode")):
-            with self.subTest(job=job):
-                body = self.jobs[job]
-                self.assertIn(f'mode="$({DEV_TASK} {mode})"\n', body)  # gán riêng: lỗi dev-task → bước đỏ (set -e)
-                self.assertIn("set -euo pipefail", body)
-                self.assertLess(body.index(mode), body.index(SETUP))
-        e2e = self.jobs["e2e"]
-        self.assertIn(f'run: {DEV_TASK} e2e "$SHARD" "$TOTAL"\n', e2e)
-        self.assertIn("fail-fast: false", e2e)
-
-    def test_checks_job_runs_framework_checks_and_pr_title(self):
-        body = self.jobs["checks"]
-        self.assertIn("run: python3 .xtemplates/scripts/xt.py doctor\n", body)
-        self.assertIn("run: python3 .xtemplates/scripts/xt.py ci-check\n", body)
+    def test_pr_title_step(self):
+        body = self.jobs["gate"]
         self.assertIn("if: github.event_name == 'pull_request'", body)
         self.assertIn("TITLE: ${{ github.event.pull_request.title }}", body)  # qua env, không chèn thẳng vào shell
         self.assertNotIn('${{ github.event.pull_request.title }}"', body)
         self.assertIn("pr_title_check", body)
+        script = step_run(body, "Tiêu đề PR")
+        for title, author, rc in (
+            ("feat(ci): gộp job ngắn vào gate", "dev", 0),
+            ("fix!: đổi giao ước", "dev", 0),
+            ("gộp job", "dev", 1),
+            ("feat: " + "x" * 70, "dev", 1),
+            ("bất kỳ", "dependabot[bot]", 0),
+            ('Revert "feat: x"', "dev", 0),
+        ):
+            with self.subTest(title=title):
+                env = dict(os.environ, TITLE=title, AUTHOR=author)
+                r = subprocess.run(
+                    ["bash", "-c", script], capture_output=True, text=True, env=env, cwd=tempfile.gettempdir()
+                )
+                self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
 
-    def test_empty_gate_step_first_in_job_quality_needs(self):
-        """D-096: bước `require lint test` nằm đầu job `checks` (sau checkout), job đó thuộc `quality.needs`."""
-        step = f"run: {DEV_TASK} require lint test\n"
-        body = self.jobs["checks"]
-        self.assertIn(step, body)
-        self.assertIn("checks", flow_list(job_key(self.jobs["quality"], "needs")))
-        self.assertLess(body.index("actions/checkout@"), body.index(step))
-        self.assertLess(body.index(step), body.index("xt.py doctor"))
-        self.assertEqual(job_key(body, "if"), "")
-        self.assertNotIn("continue-on-error", body)
+    def test_e2e_single_shard_mode_driven(self):
+        e2e = self.jobs["e2e"]
+        self.assertEqual(matrix_shards(e2e), ["1"])
+        self.assertIn("thêm shard", e2e.lower())
+        self.assertIn(f'mode="$({DEV_TASK} e2e-mode)"\n', e2e)  # gán riêng: lỗi dev-task → bước đỏ (set -e)
+        self.assertIn("set -euo pipefail", e2e)
+        self.assertLess(e2e.index("e2e-mode"), e2e.index(SETUP))
+        self.assertIn(f'run: {DEV_TASK} e2e "$SHARD" "$TOTAL"\n', e2e)
+        self.assertIn("fail-fast: false", e2e)
+        self.assertIn("steps.mode.outputs.mode == 'whole' && matrix.shard == 1", e2e)
 
-    def test_protection_guard_reads_ruleset(self):
-        body = self.jobs["protection-guard"]
+    def test_hardening_kept(self):
+        """Ghim SHA, quyền tối thiểu, timeout mỗi job, concurrency theo PR, persist-credentials: false, không
+        continue-on-error."""
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
+        self.assertNotRegex(self.text, r"(?m)^    permissions:")  # không job nào nới quyền
+        self.assertIn("group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}", self.text)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", self.text)
+        self.assertNotIn("continue-on-error", self.text)
+        for name, body in self.jobs.items():
+            with self.subTest(job=name):
+                self.assertRegex(job_key(body, "timeout-minutes"), r"^\d+$")
+                n = body.count("actions/checkout@")
+                self.assertEqual(n, 1)
+                self.assertEqual(body.count("persist-credentials: false"), n)
+        for ref in re.findall(r"uses: (\S+)", self.text):
+            self.assertRegex(ref, r"@[0-9a-f]{40}$")
+
+    def test_protection_guard_step_reads_ruleset(self):
+        body = self.jobs["quality"]
         self.assertIn(".github/rulesets/main.json", body)
         self.assertIn("required_status_checks", body)
         self.assertIn('glob.glob(".github/workflows/*.yml")', body)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", body)  # chỉ GITHUB_TOKEN (WF-CI-023)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_protection_guard_step_allows_and_denies(self):
+        """Chạy thật bước đối chiếu: ruleset mẫu ↔ workflow mẫu → xanh; context không có job → đỏ nêu tên; không có
+        ruleset → cảnh báo, xanh."""
+        script = step_run(self.jobs["quality"], "protection-guard — required check")
+        repo = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (repo / ".github" / "workflows").mkdir(parents=True)
+        (repo / ".github" / "rulesets").mkdir()
+        for src in (CI, SCAN):
+            shutil.copy(src, repo / ".github" / "workflows" / src.name)
+
+        def run() -> subprocess.CompletedProcess:
+            return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=repo)
+
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Không có .github/rulesets/main.json", r.stdout)
+        ruleset = repo / ".github" / "rulesets" / "main.json"
+        shutil.copy(TEMPLATES / "ruleset-main.json", ruleset)
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("OK — mọi required check đều là job có thật.", r.stdout)
+        rs = json.loads(ruleset.read_text(encoding="utf-8"))
+        status = next(x for x in rs["rules"] if x["type"] == "required_status_checks")["parameters"]
+        status["required_status_checks"].append({"context": "checks"})  # job cũ đã gộp vào `gate` (ADR-0039)
+        ruleset.write_text(json.dumps(rs), encoding="utf-8")
+        r = run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("::error::Required check 'checks' không khớp job nào", r.stdout)
 
     def test_ruleset_checks_are_all_provided(self):
-        """D-116/D-117: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu;
-        D-122: đúng 2 check, `merge-gate` đã bỏ."""
+        """D-116/D-117/D-122, ADR-0039: ruleset mẫu đòi đúng `quality` + `gitleaks`, cả hai là job có thật."""
         self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks"])
         self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
+        self.assertLessEqual({"gate", "quality"}, install.provided_checks())
         self.assertEqual(xt.ci_check_text(SCAN.read_text(encoding="utf-8")), [])
         self.assertEqual(job_key(ci_jobs(SCAN.read_text(encoding="utf-8"))["gitleaks"], "name"), "gitleaks")
 
@@ -167,7 +239,8 @@ class CiTemplateTest(unittest.TestCase):
                     if BLOCK_RE.search(line):
                         block = indent
                 self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n")
-                self.assertRegex(text, r"(?m)^on:\n  push:\n    branches: \[main\]\n  pull_request:\n")
+        self.assertIn("\non:\n  push: { branches: [main] }\n", self.text)
+        self.assertRegex(self.text, r"(?m)^  pull_request: \{ branches: \[main\], types: \[.*\bedited\b.*\] \}$")
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -257,7 +330,7 @@ NOOP_TABLE = (
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class DevTaskRequireEmptyGateTest(unittest.TestCase):
-    """`dev-task.sh require lint test` (bước đầu job `checks` của CI mẫu, D-096): đỏ khi `lint`/`test` rỗng hoặc no-op,
+    """`dev-task.sh require lint test` (bước đầu job `gate` của CI mẫu, D-096): đỏ khi `lint`/`test` rỗng hoặc no-op,
     ở mọi `delivery_phase`; typecheck/build rỗng không chặn."""
 
     def setUp(self):

@@ -13,10 +13,15 @@
 #      Ngoại lệ (ADR-0011): autopilot đang chạy (.autopilot/state.json "active": true) mà `lint`/`test`
 #      rỗng hoặc là lệnh không kiểm gì (true, :, exit 0, echo …) → ĐỎ. Cổng rỗng không phải bằng chứng.
 #
-# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-fast | test-shard | test-combine | test-weights |
-#   test-mode | e2e-mode | e2e | require | setup
+# Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-par | gate-fast | test-shard | test-combine |
+#   test-weights | test-mode | e2e-mode | e2e | require | setup
 #   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
 #          mở PR, `xt.py loop record` dùng đúng lệnh này. Khai `test_floor` (lệnh, chỉ khai báo) → chạy thêm sau `test`.
+#   gate-par = cùng các lệnh của `gate` nhưng chia nhóm độc lập chạy nền CÙNG LÚC (D-128, job `gate` của CI mẫu):
+#          typecheck ∥ lint ∥ build → test (→ test_floor). Guard hỏi một lần cho mọi lệnh trước khi chạy nhóm nào; mỗi
+#          nhóm log riêng, in lại nguyên khối kèm nhãn nhóm khi xong (theo thứ tự nhóm); đỏ khi nhóm nào đỏ — exit code
+#          của nhóm đỏ đầu tiên theo thứ tự đó. Các nhóm không được ghi chung file (vd typecheck sinh mã build đọc) —
+#          khi đó dùng `gate`.
 #   gate-fast = cổng commit nhanh (`commit_gate: fast` trong xt.yaml): format_check→lint→typecheck→test_fast. test_fast
 #          nhận danh sách file đã đổi so với HEAD (staged + chưa staged + file mới chưa ignore) qua biến
 #          XT_CHANGED_FILES (mỗi dòng một file); test_fast trống/no-op hoặc không biết file đổi (không phải repo git,
@@ -33,13 +38,13 @@
 #   test-combine DIR = gộp dữ liệu coverage các shard (fan-in): export XT_COV_DIR=DIR rồi chạy `test_combine` (ngưỡng
 #          nằm trong lệnh đó). Không khai `test_list`/`test_unit`/`test_combine` → đỏ (không có no-op cho chia test).
 #   require T… = đỏ (exit 1) khi task T phân giải ra rỗng hoặc lệnh không kiểm gì (như `is_noop`), ở mọi pha — bước đầu
-#          job `checks` của CI mẫu gọi `require lint test` để `skip` không thành "CI xanh rỗng" (D-096). Trong GitHub
+#          job `gate` của CI mẫu gọi `require lint test` để `skip` không thành "CI xanh rỗng" (D-096). Trong GitHub
 #          Actions in `::error::` nêu khoá cần điền và ví dụ theo stack. typecheck/build rỗng vẫn được (không bắt buộc).
 #   setup = cài toolchain/phụ thuộc cho job CI (mẫu `framework/templates/ci.yml`): chạy khoá `setup` (vd `npm ci`). Chỉ
 #          lệnh khai báo, không tự dò; vắng/rỗng → log "không khai setup", exit 0; guard cấm lệnh → exit 126.
-#   CI mẫu (D-115 — job song song, không job lập kế hoạch tuần tự; mọi lệnh vẫn là khoá của xt.yaml, qua guard):
-#   test-mode = in `shard` khi khai đủ lệnh thật `test_list` · `test_unit` · `test_combine`, không thì `whole` (job `test`
-#          shard 1 chạy cả `test`, shard khác bỏ qua; job `coverage` gộp chỉ khi `shard`).
+#   CI mẫu (ADR-0039 — 3 job `gate` · `e2e` · `quality`; mọi lệnh vẫn là khoá của xt.yaml, qua guard):
+#   test-mode = in `shard` khi khai đủ lệnh thật `test_list` · `test_unit` · `test_combine`, không thì `whole` (cho CI tự
+#          tách test thành job shard + job gộp coverage; mẫu không dùng — ngưỡng coverage nằm trong `test` của `gate`).
 #   e2e-mode = in `off` (`e2e` rỗng/no-op), `shard` (lệnh `e2e` dùng $XT_SHARD) hoặc `whole` (chỉ shard 1 chạy cả suite).
 #   e2e [I N] = suite E2E: `e2e_setup` (cài trình duyệt…) rồi `e2e` với XT_SHARD="I/N" (mặc định 1/1 — agent chạy tay
 #          được); `off` → bỏ qua exit 0; `whole` mà I > 1 → bỏ qua (không chạy trùng cả suite N lần).
@@ -59,7 +64,7 @@ YAML="$ROOT/xt.yaml"
 log() { printf '[dev-task] %s\n' "$*" >&2; }
 
 if [ -z "$TASK" ]; then
-  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|require|setup"
+  log "thiếu tên task. Dùng: dev-task.sh format|lint|typecheck|test|build|gate|gate-fast|gate-par|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|require|setup"
   exit 2
 fi
 
@@ -263,6 +268,38 @@ gate_report() { # $1=rc $2=tên cổng → log kết quả, exit rc
   exit "$1"
 }
 
+# --- gate-par: nhóm độc lập của `gate` chạy nền cùng lúc (D-128) ------------------------------------------------------
+gate_par() { # → exit qua gate_report (rc = exit code nhóm đỏ đầu tiên theo thứ tự nhóm); 126 nếu guard cấm lệnh nào
+  local floor="" d i grc rc=0 ran=0 n; local -a groups=() pids=()
+  [ -n "$(declared_cmd test_floor)" ] && floor=" test_floor"
+  # shellcheck disable=SC2086 # $floor rỗng hoặc một tên task
+  guard_turn build typecheck lint test $floor || exit 126
+  groups=("typecheck" "lint" "build test$floor")
+  d="$(mktemp -d)" || exit 2
+  trap 'kill "${pids[@]}" 2>/dev/null; rm -rf -- "$d"' INT TERM
+  for i in "${!groups[@]}"; do
+    (
+      RAN=0; grc=0
+      for t in ${groups[$i]}; do run_task "$t" || { grc=$?; log "nhóm ĐỎ ở '$t' (exit $grc) → dừng nhóm"; break; }; done
+      echo "$RAN" > "$d/$i.ran"
+      exit "$grc"
+    ) > "$d/$i.log" 2>&1 &
+    pids+=("$!")
+  done
+  for i in "${!groups[@]}"; do
+    wait "${pids[$i]}"; grc=$?
+    log "── nhóm [${groups[$i]// / → }] exit $grc ──"
+    cat -- "$d/$i.log" >&2
+    n="$(cat -- "$d/$i.ran" 2>/dev/null)"; ran=$((ran + ${n:-0}))
+    [ "$grc" -ne 0 ] && [ "$rc" -eq 0 ] && rc=$grc
+  done
+  trap - INT TERM
+  rm -rf -- "$d"
+  RAN=$ran
+  [ "$rc" -eq 0 ] || log "GATE-PAR ĐỎ (exit $rc của nhóm đỏ đầu tiên)"
+  gate_report "$rc" GATE-PAR
+}
+
 # --- test-shard / test-combine: chia bộ test cho job CI song song, gộp coverage ----------
 shard_decl() { # $1=khoá → lệnh khai báo (in ra); thiếu → log, 1
   local c; c="$(declared_cmd "$1")"
@@ -446,6 +483,8 @@ case "$TASK" in
       run_task "$t" || { rc=1; log "GATE ĐỎ ở '$t' → dừng"; break; }
     done
     gate_report "$rc" GATE ;;
+  gate-par)
+    gate_par ;;
   gate-fast)
     rc=0
     if CHANGED="$(changed_files)"; then export XT_CHANGED_FILES="$CHANGED"; else unset XT_CHANGED_FILES; fi
@@ -482,5 +521,5 @@ case "$TASK" in
     guard_ok "$C" || exit 126
     ( cd "$ROOT" && bash -o pipefail -c "$C" ); exit $? ;;
   *)
-    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|require|setup)"; exit 2 ;;
+    log "task không hợp lệ: '$TASK' (format|lint|typecheck|test|build|gate|gate-fast|gate-par|test-shard|test-combine|test-weights|test-mode|e2e-mode|e2e|require|setup)"; exit 2 ;;
 esac

@@ -4,8 +4,6 @@
 
 ## Đang làm
 - 2026-10-21 **PLAN-3.13 Lát 0 (ADR-0036, D-122 — chủ repo chọn "ruleset tối thiểu")**: máy chỉ merge ghim head, không auto-merge của GitHub; bỏ required check `merge-gate` + lệnh `xt.py merge-gate`; guard deny phẳng bật auto-merge (`AUTO_MERGE_ENABLE`); `merge-gate.yml` thành stub `pull_request` giữ context tới khi chủ repo gỡ khỏi ruleset sống (T-1834 xoá); ruleset mẫu 2 check. K-1 đóng (không còn `pull_request_target` ngoài `pr-review.yml`). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
-- 2026-10-21 **3.12.0 — CI/E2E/ruleset dự án đích tối thiểu, song song tối đa** (chủ repo; ADR-0034, D-115…D-117; CD bỏ theo chủ repo): #194 đã merge, tag `v3.12.0` → `5b8b8a6`. Mẫu `ci.yml` bỏ `test-plan` (matrix tĩnh), thêm job `e2e`, `protection-guard` vào `quality.needs`; mẫu `ruleset-main.json` (3 check, không strict); `dev-task.sh` thêm `test-mode`/`e2e-mode`/`e2e`.
-- 2026-10-21 **Đã cài 3.12.0 cho hai dự án đích** (gộp tay `ci.yml`/ruleset của dự án): hotel-manager #111 **đã merge** — `typecheck`/`lint` song song với `gate` (build → test giữ chung: test quét bundle cần `.next`), e2e 4 → 6 shard, CI 4m30s → 3m34s, ruleset giữ (đã 3 check); X-Company #51 **đã merge** — `quality` nối tiếp 8m02s tách thành typecheck · lint · build · checks · test · coverage song song, `quality` gom mọi job, ruleset 13 → 4 check (`quality`, `gitleaks`, `merge-gate`, `pr-policy`), không strict — chủ repo đã import, `gh api …/rules/branches/main` khớp file.
 - 2026-10-20 **PLAN-3.12-lean** (D-111) đã xong: Lát 1 #190, Lát 2 #191 (3.11.0), Lát 3 #192, Lát 4 #193 (3.11.1). Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/007/009, SEC-043 #97).
@@ -32,6 +30,7 @@
 
 ## Bàn giao phiên
 - 2026-10-21 · `main` `83fc7b0` (#202), tag `v3.13.0`. PLAN-3.13 xong phần tự làm (#198–#202); dự án đích: PR nâng 3.13.0 hotel-manager #112, X-Company #58 (chủ dự án merge trước 2026-11-02).
+- Lát E (ADR-0039): mẫu CI 3 job + `gate-par`; hotel-manager #112 13 → 9 job, X-Company #58 17 → 8 job, song song trong `gate`, ruleset `quality` + `gitleaks`.
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - `pr stats --days 7`: 183 PR merge · lead time trung vị 0,16 giờ (P95 1,59) · 4 run CI/PR · 8 % run đỏ/huỷ · 0 revert.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. SessionStart gần trần 12 KB khi nhiều task hoãn — lý do hoãn viết ngắn.

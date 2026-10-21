@@ -5,7 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+**Dự án đích: chạy lại `install.py --with-github`** — CI tối thiểu số job, song song tối đa trong job ([ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md), D-127, D-128; chủ repo 2026-10-21). Mẫu `ci.yml` đã sửa → gộp tay từ `ci.yml.xtemplates-new`; ruleset chỉ `quality` + `gitleaks` (không đổi). Ngưỡng coverage trên CI phải nằm trong lệnh `test` của `xt.yaml`.
+
 ### Added
+- `dev-task.sh gate-par`: cùng lệnh với `gate` nhưng nhóm độc lập chạy song song (typecheck ∥ lint ∥ build → test → test_floor), log tách nhóm, đỏ khi nhóm nào đỏ (exit code nhóm đỏ đầu tiên), guard hỏi một lần cho mọi lệnh (D-128, test `DevTaskGateParTest`).
 - [ADR-0038](docs/adr/0038-local-app-on-xt.md) (D-126; chủ repo hỏi 2026-10-21 "biến dự án này thành app và phân chia công
   việc"): ứng dụng web cục bộ `xt.py app` — `http.server` stdlib trên 127.0.0.1, HTML/CSS/JS thuần không build, API JSON gọi
   đúng hàm của CLI, app không chạy lệnh; chia việc bằng máy `xt.py plan waves`. Kế hoạch
@@ -34,6 +37,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `research/2026-10-21-next-level-speed-automation-quality.md`: nghiên cứu nâng khung lên tầng mới (code nhanh hơn, tự động tối đa, chất lượng tối đa) — số đo thật (cổng cục bộ, CI, lead time PR, push/PR), dữ kiện sống Claude Code 2.1.306 · GitHub · công cụ Python · thực hành agent (2026-10-21), đề xuất theo ba trục kèm bằng chứng/đường lùi, dự thảo thứ tự PLAN-3.13. Việc khẩn K-1: GitHub chặn mặc định `pull_request_target` ở repo public từ 2026-11-02 — `merge-gate.yml` (required check) của repo khung và dự án đích cần event policy hoặc chuyển sang `workflow_run` + check-run.
 
 ### Changed
+- Mẫu `framework/templates/ci.yml` còn 3 job (ADR-0039): `gate` (chạy `gate-par`, rồi `require lint test`, `doctor`, `ci-check`, tiêu đề PR) · `e2e` (matrix 1 shard, thêm shard khi đo e2e là đường dài nhất) · `quality` (gom, bước protection-guard); bỏ job riêng build/typecheck/lint/test shard/coverage/checks/protection-guard; `gate` và `e2e` chạy cùng lúc; mọi checkout `persist-credentials: false`. Đổi chữ (giữ ID/mức): `WF-CI-024`, `WF-CI-025`. Lý do đo được: X-Company ~17 job làm `e2e` chờ runner 6 phút dù không `needs`.
 - CI repo khung: Python mặc định 3.14 (3.13 chỉ còn vá bảo mật) cho build/typecheck/lint/test/coverage/checks, `py311` giữ làm sàn; `COVERAGE_CORE=sysmon` ở shard `test` và `coverage` (cục bộ 3.14.6 vẫn 100 % dòng + nhánh; chưa đo tốc độ trên CI — đỏ thì bỏ biến, ghi D-NNN). `requirements-dev.txt` đủ wheel cp314.
 - Đổi chữ (giữ ID/mức): `LOOP-CI-011` (link run CI sống ≤ 90 ngày, số chụp vào `docs/ops/`); `harness-files.md` mẫu `test_fast` Go/Java/.NET; `supply-chain.md`/`licensing-and-ip.md` + mẫu `secret-scan.yml`: `gitleaks-action` theo EULA độc quyền, tài khoản tổ chức cần `GITLEAKS_LICENSE` (giữ action, D-123); `/review` chỉ diff + SPEC, phát hiện phải tái hiện được.
 - Đổi chữ (giữ ID/mức) theo ADR-0036: `LOOP-STOP-002`, `LOOP-STOP-005`, `LOOP-STOP-009`, `LOOP-STOP-022` (viết lại cả mục theo một cơ chế), `LOOP-STOP-026`, `LOOP-STOP-029`, `WF-CI-001`, `WF-REVIEW-007`, `QA-STATIC-014`, `WF-GIT-002`, `FE-BUILD-010`, `PRF-MONO-006`, bảng BASE-GATE (`quality-gates.md`) — L3 = máy merge ghim head mọi làn (nhanh khi CI xanh, chuẩn khi CI xanh + review sạch ở head), ruleset dự án đích 2 check. Dòng trạng thái ADR-0014/0015/0016/0020/0021/0022/0023/0024/0025/0027/0028/0034/0035. `/autopilot` bước 6 bỏ "tắt auto-merge trước khi push". Runbook steward theo merge ghim head.
