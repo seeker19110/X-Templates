@@ -5,6 +5,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-10-21
+
+**Dự án đích: chạy lại `install.py --with-github`** — CI, E2E và ruleset tối thiểu khi triển khai ban đầu, chạy song song tối đa ([ADR-0034](docs/adr/0034-target-ci-ruleset-minimal-max-parallel.md), D-115, D-116, D-117). File `.github/` đã sửa nhận bản mới ở `*.xtemplates-new` để gộp tay; import lại `.github/rulesets/main.json` (3 required check, không "up to date"). **`e2e` đổi nghĩa:** CI nay chạy khoá `e2e` của `xt.yaml` (trước: chỉ agent chạy tay) — runner thiếu trình duyệt/server thì khai `e2e_setup`, chưa sẵn thì để `e2e: ""`.
+
+### Added
+- Mục checklist mới: `WF-CI-025` (SHOULD — CI mẫu tối thiểu, song song tối đa: không job lập kế hoạch tuần tự, matrix tĩnh, `e2e` không chờ `build`), `QA-E2E-029` (SHOULD — E2E khởi đầu tối thiểu: `@smoke` + axe, chia shard bằng `$XT_SHARD`, phần tối ưu thêm khi vượt ngân sách). Bảng "Khởi đầu tối thiểu, song song tối đa" ở `framework/10-workflow/ci-cd-pipeline.md`. Mẫu `framework/templates/ruleset-main.json` cho dự án đích (repo khung giữ ruleset riêng).
+- `dev-task.sh` task mới: `test-mode` (`shard`/`whole`), `e2e-mode` (`off`/`shard`/`whole`), `e2e [I N]` (`e2e_setup` rồi `e2e` với `XT_SHARD=I/N`, mặc định `1/1`; lệnh không dùng `$XT_SHARD` → chỉ shard 1 chạy cả suite; qua guard — LOOP-STOP-027). Khoá mới của mẫu `xt.yaml`: `e2e_setup`. Test `DevTaskCiModeTest`.
+
+### Changed
+- Mẫu `framework/templates/ci.yml`: bỏ job `test-plan` (và `env.TEST_SHARDS`) — `test` là matrix tĩnh `[1, 2, 3, 4]`, mỗi shard đọc `dev-task.sh test-mode` (`whole` → shard 1 chạy cả `test`, shard khác thoát sau checkout); `coverage` `needs: [test]`; job mới `e2e` (matrix `[1, 2]`, không `needs`); `protection-guard` vào `quality.needs`. Không có mẫu CD (D-117).
+- Ruleset mẫu dự án đích (D-116, D-117): required check còn 3 (`quality`, `gitleaks`, `merge-gate`) — `protection-guard` và `dep-audit` thành job con trong `quality.needs`; `strict_required_status_checks_policy: false` (PR merge song song). `install.py` lấy ruleset từ `framework/templates/ruleset-main.json`. Đổi chữ mục: `BASE-GATE-007` (MUST, mức giữ nguyên — đạt bằng strict, hoặc không strict kèm CI chạy lại trên push nhánh mặc định), `WF-CI-001` và `WF-GIT-002` (3 required check), `QA-STATIC-014`, `FE-BUILD-010`, `PRF-MONO-006` (danh sách check), `LOOP-HARNESS-008`, `BASE-GATE-001` (dev-task chạy thêm `e2e`).
+
 ## [3.11.1] - 2026-10-20
 
 **Dự án đích: chạy lại `install.py`** — ba hồi quy lộ ra khi nâng hotel-manager/X-Company lên 3.11.0: manifest ghi hash dạng `sha256:<hex>` (gitleaks `generic-api-key` hết bắt nhầm dòng `secret-scan.yml`), `guard.py` không còn ký tự U+FFFD thật, `xt.py` tự phân trang `gh api` (FB-001).

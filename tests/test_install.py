@@ -227,19 +227,44 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((outside / "pwn.md").exists())
         self.assertTrue((self.target / "CLAUDE.md").is_symlink())
 
-    def test_with_github_warns_only_checks_without_job(self):
-        # AUD-CI-003: ruleset mẫu đòi 5 check; workflow mẫu cung cấp quality · protection-guard · gitleaks · merge-gate →
-        # chỉ còn `dep-audit` (phụ thuộc ngôn ngữ) là dự án phải tự viết.
+    def test_with_github_ruleset_template_minimal_and_parallel(self):
+        """D-116/D-117: ruleset mẫu chỉ đòi 3 check mà workflow mẫu cung cấp (không treo PR ngày đầu; `protection-guard`
+        là job con của `quality`), không đòi "up to date" (PR merge song song); repo khung giữ ruleset riêng. Vẫn giữ
+        cấm xoá, cấm force-push, PR bắt buộc."""
         err = io.StringIO()
         with redirect_stderr(err):
             self.assertEqual(self.run_install("--with-github"), 0)
+        self.assertNotIn("required check chưa có job", err.getvalue())
+        self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks", "merge-gate"])
+        self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
+        rs = json.loads((self.target / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
+        status = next(r for r in rs["rules"] if r["type"] == "required_status_checks")["parameters"]
+        self.assertIs(status["strict_required_status_checks_policy"], False)
+        self.assertEqual(rs["bypass_actors"], [])
+        self.assertEqual([r["type"] for r in rs["rules"]][:3], ["deletion", "non_fast_forward", "pull_request"])
+        own = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
+        self.assertNotEqual(own, rs)
+
+    def test_with_github_warns_checks_without_job(self):
+        """AUD-CI-003: ruleset mẫu đòi check không có job → cảnh báo nêu đúng tên đó."""
+        ruleset = json.dumps(
+            {
+                "rules": [
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {"required_status_checks": [{"context": "merge-gate"}, {"context": "dep-audit"}]},
+                    }
+                ]
+            }
+        )
+        src = make_fake_src(Path(self.enterContext(tempfile.TemporaryDirectory())), ruleset=ruleset)
+        target = self.target / "dich"
+        target.mkdir()
+        err = io.StringIO()
+        with mock.patch.object(install, "SRC", src), redirect_stderr(err):
+            self.assertEqual(install.main([str(target), "--label", "t", "--with-github"]), 0)
         line = err.getvalue().split("required check chưa có job:")[1].split("\n")[0]
-        self.assertTrue(line.startswith(" dep-audit —"), line)
-        for provided in ("quality", "protection-guard", "gitleaks", "merge-gate"):
-            self.assertNotIn(provided, line.split("—")[0])
-        self.assertEqual(
-            set(install.ruleset_required_checks()) - install.provided_checks(), {"dep-audit"}
-        )  # mọi check khác của ruleset là job có thật trong workflow mẫu
+        self.assertEqual(line.split("—")[0].strip(), "merge-gate, dep-audit")  # khung giả: workflow không có job
 
     def test_with_github_copies_guardrails_without_overwrite(self):
         self.assertEqual(self.run_install(), 0)
@@ -475,14 +500,13 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
     for d in install.HARNESS_DIRS:
         (src / ".claude" / d).mkdir()
     if ruleset is not None:
-        (src / ".github" / "rulesets").mkdir(parents=True)
-        (src / ".github" / "rulesets" / "main.json").write_text(ruleset, encoding="utf-8")
         (src / "framework" / "templates").mkdir(parents=True, exist_ok=True)
+        (src / "framework" / "templates" / "ruleset-main.json").write_text(ruleset, encoding="utf-8")
         (src / "framework" / "templates" / "PULL-REQUEST.md").write_text("pr\n", encoding="utf-8")
         (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
         for wf in ("ci.yml", "secret-scan.yml"):
             (src / "framework" / "templates" / wf).write_text("name: x\n", encoding="utf-8")
-        (src / ".github" / "workflows").mkdir()
+        (src / ".github" / "workflows").mkdir(parents=True)
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
         (src / ".github" / "workflows" / "pr-steward.yml").write_text("name: pr-steward\n", encoding="utf-8")
     return src

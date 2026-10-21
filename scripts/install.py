@@ -63,11 +63,13 @@ LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
 # --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Mọi workflow ở đây KHÔNG phụ thuộc stack
 # (AUD-CI-003): `ci.yml` mẫu chạy lệnh của xt.yaml qua `.xtemplates/scripts/dev-task.sh` (job song song + `quality` tổng
-# hợp + `protection-guard`, WF-CI-024), `secret-scan.yml` (`gitleaks`), `merge-gate.yml` (ADR-0023) và `pr-steward.yml`
-# (ADR-0027) chỉ cần python3 + gh. `dep-audit` phụ thuộc ngôn ngữ — dự án tự viết (cảnh báo khi cài). Mẫu PR, Dependabot,
-# CI, quét bí mật lấy từ framework/templates: bản ở `.github/` của khung là của riêng repo khung (module/hồ sơ, pip).
+# hợp, WF-CI-024/025), `secret-scan.yml` (`gitleaks`), `merge-gate.yml` (ADR-0023) và `pr-steward.yml`
+# (ADR-0027) chỉ cần python3 + gh. Ruleset mẫu (D-116, D-117) chỉ đòi `quality` · `gitleaks` · `merge-gate` và không đòi
+# "up to date" (PR merge song song); `protection-guard` và `dep-audit` (theo ngôn ngữ, dự án viết) là job con trong
+# `quality.needs`. Mẫu PR, ruleset, Dependabot, CI, quét bí mật lấy từ framework/templates: bản ở `.github/` của khung là
+# của riêng repo khung.
 GITHUB_FILES = {
-    ".github/rulesets/main.json": ".github/rulesets/main.json",
+    ".github/rulesets/main.json": "framework/templates/ruleset-main.json",
     ".github/pull_request_template.md": "framework/templates/PULL-REQUEST.md",
     ".github/dependabot.yml": "framework/templates/dependabot.yml",
     ".github/workflows/ci.yml": "framework/templates/ci.yml",
@@ -641,7 +643,7 @@ def progress_with_head(text: str, target: Path) -> str:
 def ruleset_required_checks() -> list[str]:
     """Tên các required status check trong ruleset mẫu (rỗng nếu không đọc/không có)."""
     try:
-        rules = json.loads((SRC / ".github/rulesets/main.json").read_text(encoding="utf-8"))["rules"]
+        rules = json.loads((SRC / GITHUB_FILES[".github/rulesets/main.json"]).read_text(encoding="utf-8"))["rules"]
         return [
             c["context"]
             for r in rules
@@ -696,8 +698,8 @@ def install_github(target: Path) -> None:
     checks = [c for c in ruleset_required_checks() if c not in provided_checks()]
     if checks:
         log(
-            f"  ⚠ ruleset mẫu đòi required check chưa có job: {', '.join(checks)} — viết job ĐÚNG tên (vd `dep-audit`: "
-            "quét lỗ hổng phụ thuộc theo ngôn ngữ của dự án) trước khi import ruleset, hoặc bỏ khỏi "
+            f"  ⚠ ruleset mẫu đòi required check chưa có job: {', '.join(checks)} — viết job ĐÚNG tên trước khi import "
+            "ruleset, hoặc bỏ khỏi "
             ".github/rulesets/main.json; tới lúc đó `protection-guard` đỏ và PR treo chờ check"
         )
 

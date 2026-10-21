@@ -1,6 +1,6 @@
 """Workflow mẫu cho dự án đích (`framework/templates/ci.yml`, `secret-scan.yml` — `install.py --with-github` chép vào
-`.github/workflows/`) và `dev-task.sh setup`: không phụ thuộc stack, fan-out/fan-in với `quality` tổng hợp (WF-CI-001,
-WF-CI-024), qua được `xt.py ci-check`."""
+`.github/workflows/`) và các task CI của `dev-task.sh`: không phụ thuộc stack, fan-out/fan-in với `quality` tổng hợp
+(WF-CI-001, WF-CI-024), mọi job cổng cùng lúc (WF-CI-025, D-115, D-117), qua được `xt.py ci-check`."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import install
 import xt
-from test_ci import ci_jobs, flow_list, job_key
+from test_ci import ci_jobs, flow_list, job_key, matrix_shards
 
 TEMPLATES = ROOT / "framework" / "templates"
 CI = TEMPLATES / "ci.yml"
@@ -46,15 +46,19 @@ class CiTemplateTest(unittest.TestCase):
         self.jobs: Dict[str, str] = ci_jobs(self.text)
 
     def test_jobs_and_check_names(self):
-        want = ["build", "typecheck", "lint", "test-plan", "test", "coverage", "checks", "quality", "protection-guard"]
+        want = ["build", "typecheck", "lint", "test", "coverage", "e2e", "checks", "quality", "protection-guard"]
         self.assertEqual(list(self.jobs), want)
+        self.assertNotIn("deploy", self.text)  # CD không thuộc mẫu (D-117)
         for name, body in self.jobs.items():
-            if name != "test":
+            if name in ("test", "e2e"):
+                self.assertEqual(job_key(body, "name"), f"{name} ${{{{ matrix.shard }}}}/${{{{ strategy.job-total }}}}")
+            else:
                 self.assertEqual(job_key(body, "name"), name)  # tên check = khoá job (required check khớp ruleset)
 
     def test_quality_aggregates_every_job_always(self):
         q = self.jobs["quality"]
-        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - {"quality", "protection-guard"})
+        # D-117: `protection-guard` là job con (ruleset mẫu không đòi nó riêng)
+        self.assertEqual(set(flow_list(job_key(q, "needs"))), set(self.jobs) - {"quality"})
         cond = job_key(q, "if")
         self.assertIn("always()", cond)
         self.assertNotIn("cancelled()", cond)
@@ -85,38 +89,32 @@ class CiTemplateTest(unittest.TestCase):
         test = self.jobs["test"]
         self.assertLess(test.index(SETUP), test.index(f'{DEV_TASK} test-shard "$SHARD" "$TOTAL" "$RUNNER_TEMP/cov"'))
         self.assertIn(f"{DEV_TASK} test\n", test)  # không chia shard → cả lệnh `test`
-        self.assertIn("fromJSON(needs.test-plan.outputs.shards)", test)
-        self.assertEqual(flow_list(job_key(test, "needs")), ["test-plan"])
+        self.assertIn("if: steps.mode.outputs.mode == 'whole' && matrix.shard == 1\n", test)
         cov = self.jobs["coverage"]
-        self.assertEqual(flow_list(job_key(cov, "needs")), ["test-plan", "test"])
+        self.assertEqual(flow_list(job_key(cov, "needs")), ["test"])
         self.assertIn(f'{DEV_TASK} test-combine "$RUNNER_TEMP/cov"', cov)
         self.assertEqual(job_key(cov, "if"), "")  # job bị bỏ qua = `skipped` → `quality` đỏ; chỉ bỏ BƯỚC
         self.assertIn("include-hidden-files: true", test)
         code = "\n".join(ln for ln in self.text.splitlines() if not ln.lstrip().startswith("#"))
         self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|python|go))\b")  # không theo stack
 
-    def test_test_plan_shards_only_when_declared(self):
-        code = heredoc_python(self.jobs["test-plan"])
-        three = 'test_list: ls\ntest_unit: run "$1"\ntest_combine: comb  # gộp\n'
-        cases = (
-            (None, "4", 0, {"sharded": "false", "shards": "[1]", "total": "1"}),
-            (three, "4", 0, {"sharded": "true", "shards": "[1, 2, 3, 4]", "total": "4"}),
-            (three.replace("ls", '""'), "4", 0, {"sharded": "false", "shards": "[1]", "total": "1"}),
-            ("test_list: ls\ntest_unit: x\n", "4", 0, {"sharded": "false", "shards": "[1]", "total": "1"}),
-            (three, "0", 1, {}),
-            (three, "x", 1, {}),
-        )
-        for yaml, shards, rc, out in cases:
-            with self.subTest(yaml=yaml, shards=shards), tempfile.TemporaryDirectory() as d:
-                if yaml is not None:
-                    Path(d, "xt.yaml").write_text(yaml, encoding="utf-8")
-                gh_out = Path(d, "out")
-                gh_out.write_text("", encoding="utf-8")
-                env = dict(os.environ, GITHUB_OUTPUT=str(gh_out), TEST_SHARDS=shards)
-                r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=d)
-                self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
-                got = dict(ln.split("=", 1) for ln in gh_out.read_text(encoding="utf-8").splitlines())
-                self.assertEqual(got, out)
+    def test_gate_jobs_fan_out_without_planning_job(self):
+        """WF-CI-025: không job lập kế hoạch tuần tự — chỉ `coverage` (gộp) và `quality` (tổng hợp) có `needs`;
+        matrix tĩnh, mỗi shard tự đọc xt.yaml; `e2e` không chờ `build`."""
+        with_needs = {k for k, body in self.jobs.items() if job_key(body, "needs")}
+        self.assertEqual(with_needs, {"coverage", "quality"})
+        self.assertEqual(matrix_shards(self.jobs["test"]), ["1", "2", "3", "4"])
+        self.assertEqual(matrix_shards(self.jobs["e2e"]), ["1", "2"])
+        self.assertNotIn("TEST_SHARDS", self.text)
+        for job, mode in (("test", "test-mode"), ("coverage", "test-mode"), ("e2e", "e2e-mode")):
+            with self.subTest(job=job):
+                body = self.jobs[job]
+                self.assertIn(f'mode="$({DEV_TASK} {mode})"\n', body)  # gán riêng: lỗi dev-task → bước đỏ (set -e)
+                self.assertIn("set -euo pipefail", body)
+                self.assertLess(body.index(mode), body.index(SETUP))
+        e2e = self.jobs["e2e"]
+        self.assertIn(f'run: {DEV_TASK} e2e "$SHARD" "$TOTAL"\n', e2e)
+        self.assertIn("fail-fast: false", e2e)
 
     def test_checks_job_runs_framework_checks_and_pr_title(self):
         body = self.jobs["checks"]
@@ -144,9 +142,9 @@ class CiTemplateTest(unittest.TestCase):
         self.assertIn("required_status_checks", body)
         self.assertIn('glob.glob(".github/workflows/*.yml")', body)
 
-    def test_ruleset_checks_are_provided_except_dep_audit(self):
-        provided = install.provided_checks()
-        self.assertEqual(set(install.ruleset_required_checks()) - provided, {"dep-audit"})
+    def test_ruleset_checks_are_all_provided(self):
+        """D-116/D-117: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu."""
+        self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
         self.assertEqual(xt.ci_check_text(SCAN.read_text(encoding="utf-8")), [])
         self.assertEqual(job_key(ci_jobs(SCAN.read_text(encoding="utf-8"))["gitleaks"], "name"), "gitleaks")
 
@@ -348,6 +346,82 @@ class DevTaskRequireEmptyGateTest(unittest.TestCase):
         r = self.require("lint: x\n")
         self.assertEqual(r.returncode, 2)
         self.assertIn("cần ít nhất một task", r.stderr)
+
+
+@unittest.skipIf(shutil.which("bash") is None, "cần bash")
+class DevTaskCiModeTest(unittest.TestCase):
+    """Task CI của dev-task.sh (D-115): test-mode · e2e-mode · e2e."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", self.tmp / "scripts" / "dev-task.sh")
+
+    def dt(self, yaml: str | None, *args: str, **env: str) -> subprocess.CompletedProcess:
+        if yaml is not None:
+            (self.tmp / "xt.yaml").write_text(yaml, encoding="utf-8")
+        full = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", "XT_SHARD", "GITHUB_SHA")}
+        full.update(CLAUDE_PROJECT_DIR=str(self.tmp), **env)
+        cmd = ["bash", str(self.tmp / "scripts" / "dev-task.sh"), *args]
+        return subprocess.run(cmd, capture_output=True, text=True, env=full, cwd="/")
+
+    def test_test_mode(self):
+        three = 'test_list: ls\ntest_unit: run "$1"\ntest_combine: comb  # gộp\n'
+        for yaml, want in (
+            (None, "whole"),
+            (three, "shard"),
+            (three.replace("ls", '""'), "whole"),
+            (three.replace("comb", "true"), "whole"),
+            ("test_list: ls\ntest_unit: x\n", "whole"),
+        ):
+            with self.subTest(yaml=yaml):
+                (self.tmp / "xt.yaml").unlink(missing_ok=True)
+                r = self.dt(yaml, "test-mode")
+                self.assertEqual((r.returncode, r.stdout), (0, f"{want}\n"), r.stderr)
+
+    def test_e2e_off(self):
+        self.assertEqual(self.dt('e2e: ""\n', "e2e-mode").stdout, "off\n")
+        self.assertEqual(self.dt("e2e: echo hi\n", "e2e-mode").stdout, "off\n")  # no-op không phải suite
+        r = self.dt('e2e: ""\n', "e2e", "1", "2")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("e2e: chưa khai 'e2e'", r.stderr)
+
+    def test_e2e_sharded(self):
+        sharded = 'e2e_setup: touch cai-dat\ne2e: printf "%s;" "$XT_SHARD" >> chay\n'
+        self.assertEqual(self.dt(sharded, "e2e-mode").stdout, "shard\n")
+        for i in ("1", "2"):
+            self.assertEqual(self.dt(sharded, "e2e", i, "2").returncode, 0)
+        self.assertEqual(self.dt(sharded, "e2e").returncode, 0)  # agent chạy tay: cả suite
+        self.assertEqual((self.tmp / "chay").read_text(encoding="utf-8"), "1/2;2/2;1/1;")
+        self.assertTrue((self.tmp / "cai-dat").exists())
+        for bad in (("3", "2"), ("0", "1"), ("a", "1")):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.dt(sharded, "e2e", *bad).returncode, 2)
+
+    def test_e2e_whole_runs_once(self):
+        whole = "e2e: printf x | tee -a ca-suite\n"
+        self.assertEqual(self.dt(whole, "e2e-mode").stdout, "whole\n")
+        r = self.dt(whole, "e2e", "2", "2")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("shard này bỏ qua", r.stderr)
+        self.assertEqual(self.dt(whole, "e2e", "1", "2").returncode, 0)
+        self.assertEqual((self.tmp / "ca-suite").read_text(encoding="utf-8"), "x")  # không chạy trùng cả suite
+        self.assertEqual(self.dt("e2e: exit 4\n", "e2e").returncode, 4)
+        self.assertEqual(self.dt('e2e_setup: "false"\ne2e: touch x\n', "e2e").returncode, 1)
+        self.assertFalse((self.tmp / "x").exists())
+
+    def test_guard_blocks_e2e(self):
+        """LOOP-STOP-027: lệnh `e2e` bị guard cấm → 126, không chạy cả `e2e_setup`."""
+        shutil.copy(ROOT / "scripts" / "xt.py", self.tmp / "scripts" / "xt.py")
+        (self.tmp / ".claude" / "hooks").mkdir(parents=True)
+        shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", self.tmp / ".claude" / "hooks" / "guard.py")
+        yaml = "e2e_setup: touch cai\ne2e: touch d && git push origin main\n"
+        r = self.dt(yaml, "e2e", XT_GUARD_POLICY="")
+        self.assertEqual(r.returncode, 126, r.stderr)
+        self.assertFalse((self.tmp / "cai").exists())
+        self.assertFalse((self.tmp / "d").exists())
 
 
 if __name__ == "__main__":
