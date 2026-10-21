@@ -152,7 +152,9 @@ class BlueprintApiTest(unittest.TestCase):
         self.assertIn("backlog", body["error"])
 
     def test_not_found(self) -> None:
-        self.assertEqual(self.call()[0], 404)
+        code, body = self.call()  # vắng path, chưa có BLUEPRINT.md: 200 rỗng (smoke ở dự án mới cài)
+        self.assertEqual((code, body["path"], body["modules"], body["check_cmd"]), (200, None, [], None))
+        self.assertEqual(self.call("BLUEPRINT.md")[0], 404)
         (self.base / "dir.md").mkdir()
         self.assertEqual(self.call("dir.md")[0], 404)
         self.assertEqual(self.call("sub/none.md")[0], 404)

@@ -25,6 +25,11 @@ export async function render(main, { api, h, loading, empty, error }) {
     loading(body);
     try {
       const d = await api("/api/blueprint");
+      if (!d.path) {
+        empty(body, "Chưa có BLUEPRINT.md — ghép ở màn Ghép blueprint.");
+        body.append(h("p", null, h("a", { href: "#/compose" }, "Sang màn Ghép blueprint")));
+        return;
+      }
       const m = d.levels.MUST;
       const s = d.levels.SHOULD;
       body.replaceChildren(

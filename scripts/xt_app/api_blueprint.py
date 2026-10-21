@@ -84,6 +84,16 @@ def _blueprint(ctx: Ctx) -> Reply:
     if not _inside(ctx.base, target):
         return _bad("path nằm ngoài dự án")
     if not target.is_file():
+        if "path" not in ctx.query:  # mặc định chưa có (dự án mới cài): 200 rỗng như /api/plan, smoke không đỏ
+            return 200, {
+                "path": None,
+                "levels": None,
+                "modules": [],
+                "open_must": [],
+                "truncated": False,
+                "bad_lines": [],
+                "check_cmd": None,
+            }
         return 404, {"error": f"không có file {rel}"}
     try:
         files = cast("List[Path]", ctx.xt.blueprint_files(target))

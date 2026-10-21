@@ -96,7 +96,7 @@ chạy lại Gate bằng `loop record` trước khi tick (`LOOP-ORCH-004`), mở
 - [x] `T-1972` `views/pr.js`: bảng PR (làn, hành động kế, lý do), số đo lead time/CI, thông báo khi không có `gh`; lệnh `pr next --pr N` để chép, không nút merge (sau: T-1913, T-1914, T-1971; files: scripts/app/views/pr.js) — Gate: `python3 -m unittest tests.test_app_static && python3 scripts/xt.py app --smoke`
 
 ### Lát 9 — Cài vào dự án đích
-- [ ] `T-1981` `install.py` chép `scripts/xt_app/` và `scripts/app/` vào `.xtemplates/scripts/` (luôn cập nhật như `xt.py`, có trong `manifest.json`); `doctor` báo ⚠ khi thiếu file app (app tuỳ chọn, không ✗) (sau: T-1913, T-1914; files: scripts/install.py, tests/test_install.py, scripts/xt.py, tests/test_doctor.py) — Gate: `python3 -m unittest tests.test_install tests.test_doctor`
+- [x] `T-1981` `install.py` chép `scripts/xt_app/` và `scripts/app/` vào `.xtemplates/scripts/` (luôn cập nhật như `xt.py`, có trong `manifest.json`); `doctor` báo ⚠ khi thiếu file app (app tuỳ chọn, không ✗) (sau: T-1913, T-1914; files: scripts/install.py, tests/test_install.py, scripts/xt.py, tests/test_doctor.py) — Gate: `python3 -m unittest tests.test_install tests.test_doctor`
 - [ ] `T-1982` README §Ứng dụng (một lệnh chạy, 7 màn, mô hình bảo mật trỏ ADR-0038, không chạy lệnh) + thử thật trên dự án giả (sau: T-1981, T-1923, T-1924, T-1932, T-1942, T-1952, T-1962, T-1972; files: README.md) — Gate: `d="$(mktemp -d)" && python3 scripts/install.py "$d" >/dev/null && (cd "$d" && python3 .xtemplates/scripts/xt.py app --smoke); rc=$?; rm -rf "$d"; exit $rc`
 
 ### Lát 10 — E2E trình duyệt, tiếp cận, blueprint web

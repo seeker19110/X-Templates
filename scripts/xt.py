@@ -3709,6 +3709,9 @@ def _doctor_runtime() -> List[Finding]:
     return out
 
 
+APP_DIRS = ("xt_app", "app")  # gói máy chủ + giao diện tĩnh của `xt.py app`, cài cạnh xt.py (ADR-0038)
+
+
 def _doctor_scripts() -> List[Finding]:
     out = []
     if not (SCRIPT_DIR / "dev-task.sh").is_file():
@@ -3718,6 +3721,11 @@ def _doctor_scripts() -> List[Finding]:
     if framework_version() == "unknown":
         out.append(
             Finding("scripts", "warn", f"thiếu file VERSION của khung — không biết bản đang cài; {INSTALL_HINT}")
+        )
+    missing = [d for d in APP_DIRS if not (SCRIPT_DIR / d).is_dir()]
+    if missing:  # app tuỳ chọn (ADR-0038): thiếu chỉ tắt `xt.py app`, vòng tự động không cần
+        out.append(
+            Finding("app", "warn", f"thiếu {', '.join(missing)} cạnh xt.py — `xt.py app` không chạy; {INSTALL_HINT}")
         )
     return out
 
@@ -5405,8 +5413,9 @@ def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> L
     ]
 
 
-def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
-    """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
+def _pr_rest(pr_arg: Optional[str], local_check: bool = True) -> Dict[str, Any]:
+    """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước.
+    `local_check=False` (app chỉ đọc, ADR-0038): không kiểm xung đột cục bộ (`git fetch` + `merge-tree` ghi ref/object)."""
     repo, n = _pr_target(pr_arg)
     pr = _gh_one(f"{repo}/pulls/{n}")
     head = pr.get("head")
@@ -5444,7 +5453,7 @@ def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     # GitHub chưa tính xong / báo xung đột → kiểm cục bộ để biết ngay sạch hay xung đột ở file nào (không đợi `wait`).
     conflicts = (
         local_merge_conflicts(str(base.get("ref") or ""), str(base.get("sha") or ""), sha, str(n))
-        if mergeable is not True
+        if mergeable is not True and local_check
         else None
     )
     raw_user = pr.get("user")
@@ -10022,10 +10031,12 @@ def cmd_app(args: argparse.Namespace) -> int:
         sys.path.insert(0, str(SCRIPT_DIR))
     from xt_app import server
 
+    base = project_dir()
+    os.chdir(base)  # `gh`/`git` của API PR đọc repo theo cwd — đặt về gốc dự án như các API khác (`ctx.base`)
     try:
         srv, token = server.make_server(
             xt=sys.modules[__name__],
-            base=project_dir(),
+            base=base,
             framework=args.framework,
             static_root=SCRIPT_DIR / "app",
             port=0 if args.smoke else args.port,

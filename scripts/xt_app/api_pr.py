@@ -45,7 +45,7 @@ def _pr_row(ctx: Ctx, item: Dict[str, Any]) -> Dict[str, Any]:
         "head_sha": str(head.get("sha") or "") if isinstance(head, dict) else "",
     }
     try:
-        pr = xt._pr_rest(n)
+        pr = xt._pr_rest(n, local_check=False)
         d, _notes = xt._merge_eval(pr)
         rec = dict(xt._pr_record(xt.read_reviews(ctx.base), str(d["pr"])))
         if d.get("lane") == "chuẩn" or xt._standard_seen(pr):

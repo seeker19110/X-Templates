@@ -31,6 +31,7 @@ class AppCliTest(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        self.addCleanup(os.chdir, os.getcwd())  # `xt.py app` chdir về gốc dự án — trả cwd trước khi xoá thư mục tạm
         patcher = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -122,3 +123,17 @@ class AppCliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AppCwdTest(unittest.TestCase):
+    def test_app_chdirs_to_project_root(self) -> None:
+        """API PR gọi `gh`/`git` theo cwd: `xt.py app` đặt cwd = gốc dự án dù chạy từ thư mục khác."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(os.chdir, os.getcwd())
+        base = Path(tmp.name).resolve()
+        (base / "sub").mkdir()
+        os.chdir(base / "sub")
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(xt.main(["app", "--smoke"]), 0)
+        self.assertEqual(Path(os.getcwd()).resolve(), base)

@@ -451,3 +451,22 @@ class PrHttpTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalCheckTest(unittest.TestCase):
+    """App gọi `_pr_rest(local_check=False)`: PR GitHub chưa tính `mergeable` không kéo `git fetch`/`merge-tree` cục bộ;
+    CLI (`local_check` mặc định) vẫn kiểm như cũ."""
+
+    def test_unknown_mergeable_skips_local_conflict_check_only_in_app(self) -> None:
+        def gh(path: str, *a: Any, **k: Any) -> List[Any]:
+            if re.search(r"/pulls/7$", path):
+                return [{**pr_json(7, SHA7, "docs: sửa"), "mergeable": None, "mergeable_state": "unknown"}]
+            return GhSpy()(path, *a, **k)
+
+        local = mock.Mock(return_value=None)
+        with Sandbox(gh=gh) as sb, mock.patch.object(xt, "local_merge_conflicts", local):
+            _, body = sb.call("/api/prs")
+            self.assertFalse(local.called)
+            self.assertEqual(next(p for p in body["prs"] if p["number"] == 7)["head_sha"], SHA7)
+            xt._pr_rest("7")
+            self.assertTrue(local.called)
