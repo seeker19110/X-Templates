@@ -16,7 +16,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
-from unittest import mock
+import unittest.mock as mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))

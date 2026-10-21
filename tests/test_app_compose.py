@@ -12,7 +12,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest import mock
+import unittest.mock as mock
 from urllib.parse import parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent

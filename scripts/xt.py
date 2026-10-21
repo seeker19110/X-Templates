@@ -10018,8 +10018,8 @@ def _app_serve(srv: Any, token: str, open_browser: bool) -> int:
             print(f"⚠ không mở được trình duyệt ({exc}); mở URL trên thủ công", flush=True)
     try:
         srv.serve_forever()
-    except KeyboardInterrupt:
-        pass
+    except KeyboardInterrupt:  # Ctrl-C là cách dừng app bình thường: thoát sạch, exit 0
+        print("Đã dừng app.", flush=True)
     finally:
         srv.server_close()
     return 0

@@ -18,7 +18,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest import mock
+import unittest.mock as mock
 from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
