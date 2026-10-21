@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.12.0, pha `build`) · Cập nhật: 2026-10-21 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.13.0, pha `build`) · Cập nhật: 2026-10-21 · Nhánh: main
 
 ## Đang làm
 - 2026-10-21 **PLAN-3.13 Lát 0 (ADR-0036, D-122 — chủ repo chọn "ruleset tối thiểu")**: máy chỉ merge ghim head, không auto-merge của GitHub; bỏ required check `merge-gate` + lệnh `xt.py merge-gate`; guard deny phẳng bật auto-merge (`AUTO_MERGE_ENABLE`); `merge-gate.yml` thành stub `pull_request` giữ context tới khi chủ repo gỡ khỏi ruleset sống (T-1834 xoá); ruleset mẫu 2 check. K-1 đóng (không còn `pull_request_target` ngoài `pr-review.yml`). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
