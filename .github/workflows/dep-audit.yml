@@ -23,7 +23,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - name: Cài pip-audit kèm hash
+      - name: Cài pip-audit và zizmor kèm hash
         run: pip install --quiet --require-hashes -r requirements-audit.txt
       - name: Quét lỗ hổng (đỏ khi có lỗ hổng đã biết)
         run: pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt
+      # Lint workflow (CL-5, T-1833): zizmor 1.31.1 chạy offline (không gọi GitHub API, không cần token), persona regular,
+      # chỉ đỏ khi có finding mức high; ngoại lệ đã có lý do ngay tại workflow (`# zizmor: ignore[...]`).
+      - name: Lint workflow bằng zizmor (đỏ khi có finding high)
+        run: zizmor --offline --persona regular --min-severity high .github/workflows

@@ -23,6 +23,17 @@
   `https://pypi.org/pypi/shellcheck-py/0.11.0.1/json` (4 wheel macOS x86_64/arm64, manylinux x86_64, win_amd64 + sdist)
   và cài thử `pip install --require-hashes -r requirements-dev.txt` trong venv tạm. Linux aarch64 không có wheel → pip
   dựng từ sdist (tải binary lúc build — chưa thử trên aarch64).
+- **Python CI mặc định 3.14, sàn 3.11 (T-1831):** `setup-python` cài `3.11` + `3.14` trong mỗi job (3.13 chỉ còn vá bảo mật
+  từ 2026-10-01 — xác minh 2026-10-21, research §4.3). `requirements-dev.txt` (khoá `--universal`, tạo bằng 3.11) đã có hash
+  wheel cp314 cho đủ 9 gói: `uv pip install --python <venv 3.14.6> --require-hashes --only-binary=:all: -r requirements-dev.txt`
+  exit 0, không gói nào phải dựng từ sdist (kiểm cục bộ 2026-10-21). `COVERAGE_CORE=sysmon` bật ở shard `test` và job
+  `coverage`: cục bộ trên 3.14.6 `dev-task.sh test` vẫn 100 % dòng + nhánh (exit 0), chưa đo trên CI; CI `coverage` đỏ dưới
+  100 % thì bỏ biến và ghi D-NNN.
+- **zizmor 1.31.1 trong `requirements-audit.txt` (T-1833, CL-5):** lint workflow GitHub Actions (MIT, wheel manylinux trên PyPI;
+  xác minh 2026-10-21, research §4.3). Job `dep-audit` chạy `zizmor --offline --persona regular --min-severity high
+  .github/workflows` (không gọi API, không cần token; đỏ khi có finding high). Máy dev chạy bằng `zizmor` trần phải đặt
+  `ZIZMOR_OFFLINE=true` hoặc có token GitHub, nếu không audit `artipacked` báo 401 khi liệt kê tag. Cục bộ 2026-10-21:
+  cài `--require-hashes` vào venv tạm exit 0; quét 9 workflow: 0 finding (16 ignored, 13 suppressed). Chỉ chạy trên runner CI/dev, không phân phối kèm.
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
 - Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
   `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
@@ -75,6 +86,7 @@
 | tomli-w | 1.2.0 | MIT |
 | typing-extensions | 4.16.0 | PSF-2.0 |
 | urllib3 | 2.8.0 | MIT |
+| zizmor | 1.31.1 | MIT |
 
 ## Cách tạo lại
 
