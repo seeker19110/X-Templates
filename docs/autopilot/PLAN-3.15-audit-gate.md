@@ -50,8 +50,8 @@
 - [x] `T-2132` `install.py`: không ghi xuyên symlink trong `.xtemplates/` (`VERSION`, `README.md`, `scripts/*`) và `.gitignore` — symlink → thay bằng file thật trong `.xtemplates/` (bản chỉ đọc của khung), `.gitignore` symlink → bỏ qua có log (AUD-CFG-003) (sau: T-2131; files: scripts/install.py, tests/test_install.py, CHANGELOG.md) — Gate: `python3 -m unittest tests.test_install -k symlink`
 
 ### Lát 5 — Đo CI repo khung
-- [ ] `T-2141` Số đo CI repo khung từ API (wall time, runner-phút, job sau matrix, đường dài nhất) cho 10 run `main` gần nhất; so với phương án 3 job của kế hoạch tối ưu theo đúng tiêu chí nhận ở đó; ghi `docs/ops/CI-TIMING-2026-10-21.md` + D-NNN giữ/đổi (đổi kiến trúc → ADR riêng, PLAN sau) (files: docs/ops/CI-TIMING-2026-10-21.md, docs/autopilot/DECISIONS.md) — Gate: `test -f docs/ops/CI-TIMING-2026-10-21.md && grep -q "runner" docs/ops/CI-TIMING-2026-10-21.md`
-- [ ] `T-2142` Sổ audit: phát hiện đã sửa ghi `đã sửa` kèm PR; `audit check` xanh; PROGRESS bàn giao (sau: T-2101, T-2111, T-2112, T-2121, T-2122, T-2131, T-2132, T-2141; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
+- [x] `T-2141` Số đo CI repo khung từ API (wall time, runner-phút, job sau matrix, đường dài nhất) cho 10 run `main` gần nhất; so với phương án 3 job của kế hoạch tối ưu theo đúng tiêu chí nhận ở đó; ghi `docs/ops/CI-TIMING-2026-10-21.md` + D-NNN giữ/đổi (đổi kiến trúc → ADR riêng, PLAN sau) (files: docs/ops/CI-TIMING-2026-10-21.md, docs/autopilot/DECISIONS.md) — Gate: `test -f docs/ops/CI-TIMING-2026-10-21.md && grep -q "runner" docs/ops/CI-TIMING-2026-10-21.md`
+- [x] `T-2142` Sổ audit: phát hiện đã sửa ghi `đã sửa` kèm PR; `audit check` xanh; PROGRESS bàn giao (sau: T-2101, T-2111, T-2112, T-2121, T-2122, T-2131, T-2132, T-2141; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 
 ## Ước lượng (giờ phiên agent)
 | Lát | P50 | P90 |
