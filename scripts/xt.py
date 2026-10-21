@@ -4510,7 +4510,8 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
 
 
 # Tiêu đề PR thành subject commit squash trên nhánh chính, bỏ qua cổng commit cục bộ (D-056) — cùng luật bước CI.
-PR_TITLE_RE = re.compile(r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+")
+PR_TITLE_TYPES = ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert")
+PR_TITLE_RE = re.compile(rf"({'|'.join(PR_TITLE_TYPES)})(\([a-z0-9._/-]+\))?!?: .+")
 PR_TITLE_MAX = 72
 
 
@@ -4537,6 +4538,65 @@ def _pr_shape_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
         f"tiêu đề PR phải dạng `<type>(scope): mô tả`, ≤ {PR_TITLE_MAX} ký tự (thành commit squash — D-056): "
         f"{title[:100]!r} — sửa tiêu đề (`gh pr edit {pr.get('number', '<N>')} --title …`), không cần push"
     ]
+
+
+PR_TITLE_SHAPE_RE = re.compile(r"\s*([A-Za-z]+)\s*(?:\(([^)]*)\))?\s*(!?)\s*:?\s*(.*)", re.S)
+
+
+def _pr_title_suggest(title: str) -> str:
+    """Gợi ý sửa dạng `<type>(scope): mô tả` cho tiêu đề sai dạng: type viết hoa/thiếu `:`/scope lạ → chuẩn hoá; không
+    nhận ra type → mẫu `fix(scope): <tiêu đề cũ>`."""
+    m = PR_TITLE_SHAPE_RE.fullmatch(title)
+    if not m or m[1].lower() not in PR_TITLE_TYPES:
+        return f"bắt đầu bằng type ({'|'.join(PR_TITLE_TYPES)}) — vd 'fix(scope): {' '.join(title.split()) or 'mô tả'}'"
+    scope = re.sub(r"[^a-z0-9._/-]+", "-", (m[2] or "").strip().lower()).strip("-")
+    desc = " ".join(m[4].split()) or "<mô tả>"
+    return f"thử: '{m[1].lower()}{f'({scope})' if scope else ''}{m[3]}: {desc}'"
+
+
+def pr_title_problems(title: str) -> List[str]:
+    """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật bước CI `checks` và `merge-check` (D-056): Conventional Commits
+    (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự. Rỗng = hợp lệ."""
+    out: List[str] = []
+    if len(title) > PR_TITLE_MAX:
+        out.append(f"dài {len(title)} ký tự > {PR_TITLE_MAX} — rút gọn mô tả (tiêu đề thành subject commit squash)")
+    if not PR_TITLE_RE.fullmatch(title):
+        out.append(f"sai dạng `<type>(scope): mô tả` — {_pr_title_suggest(title)}")
+    return out
+
+
+def _branch_pr_title() -> str:
+    """Tiêu đề PR mở của nhánh hiện tại qua REST (`gh api …/pulls?head=…`); không có PR/gh lỗi → PrInputError."""
+    found = _gh_items("repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open&per_page=100")
+    title = found[0].get("title") if found else None
+    if not isinstance(title, str):
+        raise PrInputError("nhánh hiện tại chưa có PR mở")
+    return title
+
+
+def cmd_pr_title_check(args: argparse.Namespace) -> int:
+    """`pr title-check [TITLE]`: kiểm tiêu đề TRƯỚC `gh pr create` (merge-check chỉ thấy sau khi PR mở — research NH-2).
+    0 hợp lệ hoặc `pr_title_check: off` · 1 sai (kèm gợi ý) · 2 không có TITLE và không đọc được PR của nhánh."""
+    if _xt_keys(project_dir()).get("pr_title_check") == "off":
+        print("pr title-check: bỏ qua — xt.yaml đặt `pr_title_check: off`")
+        return 0
+    title = args.title
+    if title is None:
+        try:
+            title = _branch_pr_title()
+        except PrInputError as exc:
+            print(
+                f"✗ pr title-check: không có TITLE và {exc} — chạy `xt.py pr title-check '<tiêu đề>'`", file=sys.stderr
+            )
+            return 2
+    problems = pr_title_problems(title)
+    if not problems:
+        print(f"✓ tiêu đề PR hợp lệ ({len(title)}/{PR_TITLE_MAX} ký tự): {title}")
+        return 0
+    print(f"✗ tiêu đề PR sai luật CI `checks`/merge-check (D-056): {title[:100]!r}", file=sys.stderr)
+    for p in problems:
+        print(f"  → {p}", file=sys.stderr)
+    return 1
 
 
 # Check của chính bộ máy merge, không chạy test — một mình chúng xanh không phải bằng chứng CI (AUD-HAR-058: dự án đích
@@ -4682,7 +4742,7 @@ def merge_decision(
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "risk_labels": _risk_labels(
             pr
-        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build không hoãn review (ADR-0031)
+        ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build hoãn review thành nợ (ADR-0037)
         "reasons": reasons,
         "next": nxt,
         # Phiên chặn GraphQL (`gh pr merge` không chạy): cùng merge ghim head qua REST (ADR-0014).
@@ -4779,18 +4839,19 @@ def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
 
 
 def review_deferrable(d: Dict[str, Any]) -> bool:
-    """Review của PR được hoãn thành nợ (ADR-0031): pha build VÀ PR không thuộc ngoại lệ cứng — kể cả ngoại lệ cứng chủ
-    dự án đã cho máy merge (`hard_waived`, ADR-0020): tiền/dữ liệu thật/auth/mật mã/bí mật vẫn cần review sạch."""
-    return d.get(PHASE_KEY) == "build" and not d.get("hard") and not d.get("hard_waived")
+    """Review của PR được hoãn thành nợ (ADR-0031, ADR-0037): pha build VÀ PR không thuộc ngoại lệ cứng giữ người (`hard`
+    — người merge). Reviewer chỉ chạy ở pha harden (chủ repo 2026-10-21, D-124): ngoại lệ cứng đã miễn (`hard_waived`,
+    ADR-0020) cũng thành nợ, trả ở harden trước phát hành (`release-check` hàng `review_debt`)."""
+    return d.get(PHASE_KEY) == "build" and not d.get("hard")
 
 
 def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:
-    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable`, PR không mang nhãn `risk:` (phanh thủ
-    công, ADR-0025) VÀ review KẾT LUẬN mới nhất của PR (bất kể head) không phải `blocking`: lỗi chặn ở head cũ không bị
-    "rửa" bằng một lần push — cần review lại head hiện tại; review `inconclusive` không gỡ lỗi chặn trước nó."""
+    """`missing` của `review_gate` thành nợ (ADR-0031)? Cần `review_deferrable` VÀ review KẾT LUẬN mới nhất của PR (bất kể
+    head) không phải `blocking`: lỗi chặn ở head cũ không bị "rửa" bằng một lần push — cần review lại head hiện tại; review
+    `inconclusive` không gỡ lỗi chặn trước nó. Nhãn `risk:` (ADR-0025) ở pha build cũng thành nợ (ADR-0037, D-124)."""
     concluded = [r for r in reviews if not r.get("inconclusive")]
     washed = bool(concluded) and not concluded[-1].get("clean")
-    return state == "missing" and review_deferrable(d) and not d.get("risk_labels") and not washed
+    return state == "missing" and review_deferrable(d) and not washed
 
 
 def _risk_globs(keys: Dict[str, str]) -> List[str]:
@@ -8404,6 +8465,8 @@ def cmd_pr(args: argparse.Namespace) -> int:
         return _pr_reviewed(args, base)
     if args.pr_cmd == "steward":
         return cmd_pr_steward(args)
+    if args.pr_cmd == "title-check":
+        return cmd_pr_title_check(args)
     try:
         pr = load_pr(args)
     except PrInputError as exc:
@@ -9600,6 +9663,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="payload sự kiện `check_suite`/`workflow_run` (GITHUB_EVENT_PATH): chỉ xét PR gắn với sự kiện; không gắn PR"
         " nào → mọi PR mở (AUTO-05)",
     )
+    ptc = prsub.add_parser(
+        "title-check",
+        help="tiêu đề PR đúng luật CI `checks`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
+    )
+    ptc.add_argument("title", nargs="?", help="tiêu đề định đặt (mặc định tiêu đề PR mở của nhánh hiện tại)")
     ppr.set_defaults(fn=cmd_pr)
     prc = sub.add_parser(
         "release-check",

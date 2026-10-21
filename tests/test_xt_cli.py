@@ -2589,3 +2589,84 @@ class CiTriageTest(TmpDirCase):
             self.assertEqual((rc, out), (3, ""))
             self.assertRegex(err, r"gh run view 124 lỗi: HTTP 404|không chạy được gh")
         self.assertNotIn("124", xt.read_state(self.tmp)["episode"]["runs"])
+
+
+class PrTitleCheckTest(TmpDirCase):
+    """`xt.py pr title-check [TITLE]` (T-1812, research NH-2): kiểm tiêu đề TRƯỚC `gh pr create` bằng ĐÚNG luật bước CI
+    `checks` và `merge-check` (D-056) — exit 0 hợp lệ · 1 sai kèm gợi ý · 2 không có TITLE mà không đọc được PR nhánh."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
+
+    def test_title_check_regex_same_as_ci_step(self):
+        """Một hằng cho cả hai đầu: regex của bước CI = `^` + `PR_TITLE_RE` + `$`, trần độ dài = `PR_TITLE_MAX`."""
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        step = ci.split("Tiêu đề PR theo Conventional Commits", 1)[1].split("\n      - name:", 1)[0]
+        self.assertEqual(re.search(r"grep -Eq '([^']+)'", step).group(1), f"^{xt.PR_TITLE_RE.pattern}$")
+        self.assertIn(f'[ "${{#TITLE}}" -le {xt.PR_TITLE_MAX} ]', step)
+
+    def test_title_check_valid_titles(self):
+        for title in ("feat(xt): pr title-check", "fix: a", "ci(ci.yml/x-1)!: đổi", "docs: " + "é" * 66):
+            with self.subTest(title=title):
+                rc, out, err = run_main("pr", "title-check", title)
+                self.assertEqual((rc, err), (0, ""))
+                self.assertIn(f"({len(title)}/72 ký tự)", out)
+
+    def test_title_check_invalid_titles_with_hints(self):
+        cases = {
+            "Feat(API Docs)!:x": "thử: 'feat(api-docs)!: x'",
+            "fix bug": "thử: 'fix: bug'",
+            "chore():  ": "thử: 'chore: <mô tả>'",
+            "thêm  cái\tmới": "vd 'fix(scope): thêm cái mới'",
+            "": "vd 'fix(scope): mô tả'",
+            "fixed(x): y": "bắt đầu bằng type (feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)",
+            "feat: dòng một\ndòng hai": "thử: 'feat: dòng một dòng hai'",
+        }
+        for title, hint in cases.items():
+            with self.subTest(title=title):
+                rc, out, err = run_main("pr", "title-check", title)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertIn("D-056", err)
+                self.assertIn(hint, err)
+                self.assertNotIn("ký tự >", err)
+
+    def test_title_check_too_long(self):
+        for title, shape in (("feat(x): " + "a" * 64, False), ("Feat " + "b" * 70, True)):
+            with self.subTest(title=title):
+                rc, _, err = run_main("pr", "title-check", title)
+                self.assertEqual(rc, 1)
+                self.assertIn(f"dài {len(title)} ký tự > 72", err)
+                self.assertEqual("sai dạng" in err, shape)
+        self.assertEqual(run_main("pr", "title-check", "feat(x): " + "a" * 63)[0], 0)  # đúng 72 → đạt
+
+    def test_title_check_reads_branch_pr_title(self):
+        prs = [[{"number": 7, "title": "feat: từ PR"}], [{"number": 8, "title": "Sai tiêu đề"}]]
+        for found, want in zip(prs, (0, 1)):
+            with self.subTest(found=found), unittest.mock.patch.object(xt, "_gh_items", return_value=found) as items:
+                rc, _, _ = run_main("pr", "title-check")
+            self.assertEqual(rc, want)
+            path = items.call_args.args[0]
+            self.assertTrue(path.startswith("repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open"), path)
+
+    def test_title_check_without_title_or_pr_exits_2(self):
+        effects = (
+            {"return_value": []},
+            {"return_value": [{"number": 9}]},  # PR không có trường title
+            {"side_effect": xt.PrInputError("không chạy được gh (không có gh)")},
+        )
+        for eff in effects:
+            with self.subTest(eff=eff), unittest.mock.patch.object(xt, "_gh_items", **eff):
+                rc, out, err = run_main("pr", "title-check")
+            self.assertEqual((rc, out), (2, ""))
+            self.assertIn("xt.py pr title-check '<tiêu đề>'", err)
+
+    def test_title_check_respects_pr_title_check_off(self):
+        (self.tmp / "xt.yaml").write_text("pr_title_check: off\n", encoding="utf-8")
+        with unittest.mock.patch.object(xt, "_gh_items") as items:
+            rc, out, _ = run_main("pr", "title-check")
+        self.assertEqual(rc, 0)
+        self.assertIn("pr_title_check: off", out)
+        items.assert_not_called()
+        (self.tmp / "xt.yaml").write_text("pr_title_check: on\n", encoding="utf-8")
+        self.assertEqual(run_main("pr", "title-check", "sai")[0], 1)

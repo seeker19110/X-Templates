@@ -190,7 +190,10 @@ class LicenseCheckCliTest(unittest.TestCase):
             "--allow", str(ROOT / "license-allow.json"), "--requirements", str(ROOT / "requirements-dev.txt")
         )
         errors = [line for line in out.splitlines() if line.startswith("✗")]
-        passed = rc == 0 and "✓ license-check: 8 gói ghim" in out
+        # Đếm gói ghim từ requirements-dev.txt thay vì ghi cứng (thêm shellcheck-py ở T-1812 từng làm test đỏ).
+        lines = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
+        pinned = sum(1 for line in lines if line[:1].isalnum() and "==" in line.split(" ", 1)[0])
+        passed = rc == 0 and f"✓ license-check: {pinned} gói ghim" in out
         only_missing = rc == 1 and bool(errors) and all(": chưa cài" in line for line in errors)
         self.assertTrue(passed or only_missing, out)
 

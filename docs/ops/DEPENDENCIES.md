@@ -1,7 +1,7 @@
 # Phụ thuộc và license (`BASE-DEP-005`)
 
-> Xác minh ngày **2026-10-20**. Phạm vi: mọi gói, kể cả bắc cầu, trong hai file ghim kèm hash: `requirements-dev.txt`
-> (cổng chất lượng: ruff, mypy, coverage) và `requirements-audit.txt` (pip-audit, job quét phụ thuộc). Khung chạy
+> Xác minh ngày **2026-10-20** (`shellcheck-py`: **2026-10-21**). Phạm vi: mọi gói, kể cả bắc cầu, trong hai file ghim kèm hash: `requirements-dev.txt`
+> (cổng chất lượng: ruff, mypy, coverage, shellcheck-py) và `requirements-audit.txt` (pip-audit, job quét phụ thuộc). Khung chạy
 > `scripts/xt.py` chỉ bằng thư viện chuẩn Python; các gói dưới đây chỉ chạy trên runner CI/máy dev, không phân phối
 > kèm khung hay dự án đích, không sửa mã gói.
 > Nguồn license: `requirements-dev.txt` — metadata gói đã cài (`importlib.metadata`: `License-Expression`, `License`,
@@ -13,6 +13,16 @@
 - **Chấp nhận có điều kiện:** `pathspec` và `certifi` — MPL-2.0 (copyleft yếu, theo từng file). Dùng nguyên bản từ PyPI,
   không sửa, không phân phối lại, chỉ chạy trên runner CI/máy dev nên nghĩa vụ chia sẻ mã nguồn sửa đổi không phát sinh.
   Đổi cách dùng (nhúng/phân phối) thì phải xét lại. Quyết định D-103 (phiên chính tự duyệt theo ADR-0008, hạn 12 tháng; chủ repo đổi được).
+- **`shellcheck-py` (MIT) gói kèm binary `shellcheck` (GPL-3.0):** chỉ *chạy* binary trong `lint` trên máy dev/runner CI
+  (kiểm `scripts/*.sh`), không liên kết, không sửa, không phân phối kèm khung hay dự án đích — GPL không áp nghĩa vụ lên
+  mã của repo. `license-check` thấy metadata wrapper (MIT). Lý do ghim: CI từng dùng shellcheck 0.9.0 của runner, máy
+  dev 0.11.0 — hai bản khác luật (research 2026-10-21 NH-2); `pip install` đặt `shellcheck` 0.11.0 vào `bin` của Python
+  (đứng trước `/usr/bin` trên PATH sau `actions/setup-python`), nên `lint` cục bộ và CI cùng bản.
+  Hash: `uv pip compile --python-version 3.11 --generate-hashes --universal` trên `req.in` có thêm
+  `shellcheck-py==0.11.0.1`, rồi chỉ chép khối `shellcheck-py` vào file khoá (giữ nguyên ghim cũ); đối chiếu sha256 với
+  `https://pypi.org/pypi/shellcheck-py/0.11.0.1/json` (4 wheel macOS x86_64/arm64, manylinux x86_64, win_amd64 + sdist)
+  và cài thử `pip install --require-hashes -r requirements-dev.txt` trong venv tạm. Linux aarch64 không có wheel → pip
+  dựng từ sdist (tải binary lúc build — chưa thử trên aarch64).
 - Gói mới hoặc đổi license khi Dependabot nâng phiên bản: cập nhật bảng này trong cùng PR (`BASE-DEP-006`).
 - Máy kiểm: allowlist và ngoại lệ (`approved_by`, `expires`) ở [`license-allow.json`](../../license-allow.json);
   `python3 scripts/xt.py license-check` (trong `lint` của `xt.yaml`) đối chiếu gói đã cài của `requirements-dev.txt`,
@@ -29,6 +39,7 @@
 | mypy-extensions | 1.1.0 | MIT |
 | pathspec | 1.1.1 | MPL-2.0 (classifier PyPI; chấp nhận — xem trên) |
 | ruff | 0.17.1 | MIT |
+| shellcheck-py | 0.11.0.1 | MIT (binary `shellcheck` kèm theo: GPL-3.0, chỉ chạy dev/CI — xem trên) |
 | typing-extensions | 4.16.0 | PSF-2.0 |
 
 ## `requirements-audit.txt`

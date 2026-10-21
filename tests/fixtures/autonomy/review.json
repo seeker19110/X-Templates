@@ -547,12 +547,13 @@
     }
    },
    "expect": {
-    "eligible": false,
-    "auto_merge_ok": false,
-    "proceed": false,
-    "review": "missing",
-    "action": "review"
-   }
+    "eligible": true,
+    "auto_merge_ok": true,
+    "proceed": true,
+    "review": "deferred",
+    "action": "merge"
+   },
+   "note": "ADR-0037 (D-124, chủ repo 2026-10-21): reviewer chỉ ở pha harden — ngoại lệ cứng đã miễn ở pha build thành nợ review; harden lại đòi review sạch"
   },
   {
    "id": "review-phase-blocking-oldhead",
