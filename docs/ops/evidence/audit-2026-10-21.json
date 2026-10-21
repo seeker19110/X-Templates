@@ -1,0 +1,185 @@
+{
+  "audit_head": "ec4c7d2da946730a945d719a3385ae381463987e",
+  "date": "2026-10-21",
+  "scope": "Local framework and generated fixtures; no deployed-target audit.",
+  "tools": {
+    "ruff": "0.17.1",
+    "mypy": "2.4.0",
+    "coverage": "7.16.2",
+    "shellcheck-py": "0.11.0.1",
+    "pip-audit": "2.10.1",
+    "zizmor": "1.31.1",
+    "gitleaks": "8.30.1"
+  },
+  "full_checks": [
+    {
+      "command": "scripts/dev-task.sh gate",
+      "python": "3.13.16",
+      "exit": 0,
+      "classes": 234,
+      "tests": 1363,
+      "floor_tests": 1363
+    },
+    {
+      "command": "scripts/dev-task.sh gate",
+      "python": "3.14.8",
+      "exit": 0,
+      "classes": 234,
+      "tests": 1363,
+      "floor_tests": 1363
+    },
+    {
+      "command": "bash scripts/dev-task.sh gate-par",
+      "python": "3.14.8",
+      "exit": 0,
+      "classes": 234,
+      "tests": 1363,
+      "floor_tests": 1363,
+      "wall_seconds": 179.53,
+      "timing_samples": 1
+    }
+  ],
+  "coverage": {
+    "applies_to": "Primary runtimes of both full gates and gate-par.",
+    "statements": 10248,
+    "missed_statements": 0,
+    "branches": 3918,
+    "partial_branches": 0,
+    "percent": 100
+  },
+  "additional_checks": [
+    {
+      "command": "python3 scripts/xt.py doctor --json",
+      "exit": 0,
+      "ok": true,
+      "findings": 0
+    },
+    {
+      "command": "python3 scripts/xt.py autonomy-bench",
+      "exit": 0,
+      "cases": 452,
+      "false_green": 0
+    },
+    {
+      "command": "pip-audit --require-hashes --strict --disable-pip -r requirements-dev.txt -r requirements-audit.txt",
+      "exit": 0,
+      "known_vulnerabilities": 0
+    },
+    {
+      "command": "zizmor --offline --persona regular --min-severity high .github/workflows",
+      "exit": 0,
+      "reported_findings": 0,
+      "ignored": 16,
+      "suppressed": 13
+    },
+    {
+      "command": "gitleaks git . --redact=100",
+      "exit": 0,
+      "commits_scanned": 244,
+      "reported_leaks": 0,
+      "official_release_sha256_verified": true
+    },
+    {
+      "command": "python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict",
+      "exit": 1,
+      "reason": "Malformed AUD-SEC-102 evidence prefix and open orange finding."
+    }
+  ],
+  "ci_jobs": {
+    "counting": "Expanded matrix instances per file; other workflows excluded.",
+    ".github/workflows/ci.yml": 14,
+    "framework/templates/ci.yml": 3,
+    "primary_three_job_proposal_implemented": false
+  },
+  "reproductions": {
+    "AUD-CODE-014": {
+      "fixture_X": "",
+      "unquoted_command": "test -n $X",
+      "unquoted_exit": 0,
+      "quoted_command": "test -n \"$X\"",
+      "quoted_exit": 1,
+      "same_command": true,
+      "failing_planned_gate_ticked": true,
+      "planned_verify_gates": 2,
+      "executed_verify_gates_passing_first": 1,
+      "executed_gate_exit": 0,
+      "level": "Function-level only; no CLI/Stop-hook/merge end-to-end run."
+    },
+    "AUD-SEC-102": {
+      "fixture_branch": "main",
+      "actual_push_executed": false,
+      "decisions": [
+        {
+          "command": "git push origin",
+          "decision": "deny",
+          "code": "PUSH_MAIN"
+        },
+        {
+          "command": "git push origin 2>&1",
+          "decision": "",
+          "code": "NONE"
+        },
+        {
+          "command": "git push origin >/dev/null",
+          "decision": "",
+          "code": "NONE"
+        }
+      ]
+    },
+    "review_diff_clipping": {
+      "command": "head -c 400000",
+      "exit": 0,
+      "input_bytes": 435194,
+      "output_bytes": 400000,
+      "auth_change_present_in_input": true,
+      "auth_change_present_in_output": false,
+      "review_bot_executed": false
+    },
+    "AUD-XFEAT-013": {
+      "python": "3.11.17",
+      "fixture_contains_real_test": true,
+      "test_command": "python3.11 -m unittest discover -s tests -k nonexistent_case",
+      "gate_command": "bash .xtemplates/scripts/dev-task.sh gate-par",
+      "gate_exit": 0,
+      "tests_run": 0,
+      "green_gate_reported": true
+    },
+    "separate_coverage_format_floor": {
+      "fixture_scale": "M",
+      "delivery_phase": "harden",
+      "real_tests_run": 1,
+      "checks": [
+        {
+          "command": "bash .xtemplates/scripts/dev-task.sh require lint test",
+          "exit": 0
+        },
+        {
+          "command": "bash .xtemplates/scripts/dev-task.sh gate-par",
+          "exit": 0
+        },
+        {
+          "command": "python3 .xtemplates/scripts/xt.py doctor --json",
+          "exit": 0
+        },
+        {
+          "command": "python3 .xtemplates/scripts/xt.py ci-check",
+          "exit": 0
+        },
+        {
+          "command": "bash -c 'test -f formatter-would-pass'",
+          "exit": 1
+        },
+        {
+          "command": "bash -c 'test -f coverage-would-pass'",
+          "exit": 1
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "One local timing sample; no controlled speedup or GitHub Actions measurement.",
+    "No live ruleset, bot, credential or production verification.",
+    "Passing existing tests/corpus does not resolve defects or complete audit strict."
+  ],
+  "floor_python": "3.11.17"
+}
