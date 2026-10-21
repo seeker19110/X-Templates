@@ -3904,6 +3904,8 @@ class GuardReview97Test(unittest.TestCase):
                 "gh api user/keys -X POST -f key=x",
                 "gh api repos/o/r/actions/variables/X -X PATCH -f value=y",
                 "gh api graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+                "gh api /graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+                "gh api https://api.github.com/graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { x } }'",
             ),
             hard=False,
         )

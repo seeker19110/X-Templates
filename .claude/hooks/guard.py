@@ -2051,7 +2051,7 @@ def _gh_api_destroy(args: List[str]) -> bool:
     if (
         method != "GET"
         and GH_API_GUARDED_RE.fullmatch(path)
-        or path == "graphql"
+        or path.rstrip("/").rsplit("/", 1)[-1] == "graphql"  # cả `/graphql`, URL đầy đủ (review #198)
         and GRAPHQL_DESTROY_RE.search(" ".join(args))
     ):
         return True
