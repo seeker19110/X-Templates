@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `research/2026-10-21-next-level-speed-automation-quality.md`: nghiên cứu nâng khung lên tầng mới (code nhanh hơn, tự động tối đa, chất lượng tối đa) — số đo thật (cổng cục bộ, CI, lead time PR, push/PR), dữ kiện sống Claude Code 2.1.306 · GitHub · công cụ Python · thực hành agent (2026-10-21), đề xuất theo ba trục kèm bằng chứng/đường lùi, dự thảo thứ tự PLAN-3.13. Việc khẩn K-1: GitHub chặn mặc định `pull_request_target` ở repo public từ 2026-11-02 — `merge-gate.yml` (required check) của repo khung và dự án đích cần event policy hoặc chuyển sang `workflow_run` + check-run.
+
 ## [3.12.0] - 2026-10-21
 
 **Dự án đích: chạy lại `install.py --with-github`** — CI, E2E và ruleset tối thiểu khi triển khai ban đầu, chạy song song tối đa ([ADR-0034](docs/adr/0034-target-ci-ruleset-minimal-max-parallel.md), D-115, D-116, D-117). File `.github/` đã sửa nhận bản mới ở `*.xtemplates-new` để gộp tay; import lại `.github/rulesets/main.json` (3 required check, không "up to date"). **`e2e` đổi nghĩa:** CI nay chạy khoá `e2e` của `xt.yaml` (trước: chỉ agent chạy tay) — runner thiếu trình duyệt/server thì khai `e2e_setup`, chưa sẵn thì để `e2e: ""`.
