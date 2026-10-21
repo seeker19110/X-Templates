@@ -589,3 +589,39 @@ class LoadRoutesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SmokeAndErrorTest(unittest.TestCase):
+    """`SMOKE` của module api gom vào `srv.smoke` (SPEC-app §2.4); client đóng kết nối không in traceback."""
+
+    def test_load_smoke_and_make_server(self) -> None:
+        self.assertEqual(server.load_smoke().get("/api/catalog/module"), "rel=00-method/conventions")
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            real, _ = server.make_server(None, base, base, base)
+            injected, _ = server.make_server(None, base, base, base, routes=dict(server.ROUTES))
+            try:
+                self.assertIn("/api/catalog/module", real.smoke)
+                self.assertEqual(injected.smoke, {})
+            finally:
+                real.server_close()
+                injected.server_close()
+
+    def test_handle_error_silences_disconnect_only(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            srv, _ = server.make_server(None, Path(td), Path(td), Path(td), routes={})
+            try:
+                for exc, printed in (
+                    (ConnectionResetError(), False),
+                    (BrokenPipeError(), False),
+                    (ValueError("x"), True),
+                ):
+                    err = io.StringIO()
+                    with self.subTest(exc=type(exc).__name__), redirect_stderr(err):
+                        try:
+                            raise exc
+                        except Exception:
+                            srv.handle_error(None, ("127.0.0.1", 0))
+                    self.assertEqual("ValueError" in err.getvalue(), printed)
+            finally:
+                srv.server_close()

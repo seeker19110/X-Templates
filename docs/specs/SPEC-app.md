@@ -49,7 +49,8 @@ lệnh** (Gate, merge, push, defer): chỉ hiển thị lệnh để chép. Ngo�
 Mỗi `scripts/xt_app/api_<màn>.py` khai `ROUTES: Dict[Tuple[str, str], Callable[[Ctx], Tuple[int, Dict[str, Any]]]]`,
 khoá `(method, path)`; `Ctx` có `base` (gốc dự án), `framework` (thư mục khung), `query` (`Dict[str, List[str]]`), `body`
 (object JSON hoặc `None`). Máy chủ nạp mọi module `api_*`; trùng khoá → lỗi khi khởi động. `--smoke` gọi mọi route
-`GET` không có tham số bắt buộc.
+`GET`; route có tham số bắt buộc khai query mẫu trong `SMOKE: Dict[path, query]` của module (vd
+`{"/api/catalog/module": "rel=00-method/conventions"}`), máy chủ gom bằng `load_smoke()`.
 
 ## 3. API
 

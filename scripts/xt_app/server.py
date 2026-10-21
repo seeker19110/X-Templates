@@ -108,6 +108,17 @@ def load_routes(package: str = "xt_app") -> Routes:
     return merged
 
 
+def load_smoke(package: str = "xt_app") -> Dict[str, str]:
+    """Query mẫu cho `xt.py app --smoke`: gộp `SMOKE` (path → query) của mọi module `<package>.api_*` — route có tham số
+    bắt buộc khai ở đây để smoke gọi đúng đường chính thay vì nhận 400 (SPEC-app §2.4)."""
+    pkg = importlib.import_module(package)
+    out: Dict[str, str] = {}
+    for m in pkgutil.iter_modules(getattr(pkg, "__path__", [])):
+        if m.name.startswith("api_"):
+            out.update(getattr(importlib.import_module(f"{package}.{m.name}"), "SMOKE", None) or {})
+    return out
+
+
 def _read_regular(path: str) -> Optional[bytes]:
     """Đọc file thường, không theo symlink (O_NOFOLLOW nơi có); không phải file thường → None."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -173,6 +184,7 @@ class AppServer(ThreadingHTTPServer):
     daemon_threads = True
     quiet = False
     request_timeout = 30.0
+    smoke: Dict[str, str] = {}
 
     def __init__(
         self,
@@ -197,6 +209,12 @@ class AppServer(ThreadingHTTPServer):
         real_port = int(self.socket.getsockname()[1])
         self.allowed_hosts: FrozenSet[str] = frozenset({f"127.0.0.1:{real_port}", f"localhost:{real_port}"})
         self.allowed_origins: FrozenSet[str] = frozenset("http://" + host for host in self.allowed_hosts)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # Client đóng kết nối giữa chừng (tab đóng, smoke `Connection: close`) không phải lỗi máy chủ — không in traceback.
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
     def server_bind(self) -> None:
         # HTTPServer.server_bind gọi getfqdn (tra DNS ngược, có thể chậm) — không cần cho loopback.
@@ -385,4 +403,5 @@ def make_server(
     table = static_table(static_root)
     table_routes = load_routes() if routes is None else dict(routes)
     server = AppServer(port, xt=xt, base=base, framework=framework, static=table, routes=table_routes, token=token)
+    server.smoke = load_smoke() if routes is None else {}
     return server, token

@@ -9890,6 +9890,95 @@ def framework_version() -> str:
         return "unknown"
 
 
+def _port_arg(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"cổng phải là số nguyên 0–65535: {text!r}") from None
+    if not 0 <= value <= 65535:
+        raise argparse.ArgumentTypeError(f"cổng phải trong 0–65535: {value}")
+    return value
+
+
+def _app_smoke(srv: Any, token: str) -> int:
+    """Gọi mọi route GET của server bằng `http.client` (có token + Host); 200 hết → 0, ngược lại 1.
+
+    Smoke gọi mọi GET, không bỏ route nào: route có tham số bắt buộc lấy query mẫu từ `SMOKE` của module api
+    (`srv.smoke`, SPEC-app §2.4)."""
+    import http.client
+    import threading
+
+    srv.quiet = True
+    port = int(srv.server_address[1])
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    bad = 0
+    try:
+        for method, path in sorted(srv.routes):
+            if method != "GET":
+                continue
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+            try:
+                query = srv.smoke.get(path, "")
+                conn.request(
+                    "GET",
+                    f"{path}?{query}" if query else path,
+                    headers={"X-XT-Token": token, "Host": f"127.0.0.1:{port}", "Connection": "close"},
+                )
+                status = conn.getresponse().status
+            finally:
+                conn.close()
+            bad += status != 200
+            print(f"{'✓' if status == 200 else '✗'} {path} {status}")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        thread.join(5)
+    return 1 if bad else 0
+
+
+def _app_serve(srv: Any, token: str, open_browser: bool) -> int:
+    url = f"http://127.0.0.1:{srv.server_address[1]}/#t={token}"
+    print(url, flush=True)
+    print("Ctrl-C để dừng.", flush=True)
+    if open_browser:
+        import webbrowser
+
+        try:
+            webbrowser.open(url)
+        except Exception as exc:  # trình duyệt không mở được không làm hỏng app
+            print(f"⚠ không mở được trình duyệt ({exc}); mở URL trên thủ công", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.server_close()
+    return 0
+
+
+def cmd_app(args: argparse.Namespace) -> int:
+    """`xt.py app [--port N] [--no-open] [--smoke]`: app cục bộ (ADR-0038); `xt_app` import lười."""
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    from xt_app import server
+
+    try:
+        srv, token = server.make_server(
+            xt=sys.modules[__name__],
+            base=project_dir(),
+            framework=args.framework,
+            static_root=SCRIPT_DIR / "app",
+            port=0 if args.smoke else args.port,
+        )
+    except OSError as exc:
+        print(f"✗ không khởi động được app: {exc}", file=sys.stderr)
+        return 2
+    if args.smoke:
+        return _app_smoke(srv, token)
+    return _app_serve(srv, token, not args.no_open)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="xt.py",
@@ -10266,6 +10355,11 @@ def build_parser() -> argparse.ArgumentParser:
     pgu.add_argument("--strict", action="store_true", help="dòng đáng ngờ cũng làm exit 1")
     pp.set_defaults(fn=cmd_perf)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
+    pap = sub.add_parser("app", help="app cục bộ xem/soạn trên trình duyệt (127.0.0.1, token mỗi lần chạy)")
+    pap.add_argument("--port", type=_port_arg, default=0, help="cổng 0–65535 (mặc định 0 = hệ điều hành chọn)")
+    pap.add_argument("--no-open", action="store_true", help="không tự mở trình duyệt")
+    pap.add_argument("--smoke", action="store_true", help="tự gọi mọi route GET rồi thoát (0 = tất cả 200)")
+    pap.set_defaults(fn=cmd_app)
     return p
 
 
