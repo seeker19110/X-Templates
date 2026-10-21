@@ -25,7 +25,7 @@ ghi thì như merge-check lỗi mạng.
 |---|---|---|---|
 | `pr` | PR dạng `gh pr view --json`, `autonomy`, `hard_auto`, `risk_paths`, `project_prefix` | `merge_check_result` (= `merge_decision` + `merge_eligibility`, ADR-0028), `prefixed_globs` | `eligible`, `auto_merge_ok` |
 | `rollup` | `statusCheckRollup` GraphQL hoặc check-run/status REST, check bắt buộc | `rest_rollup`, `_ci_blocker` (`_ci_buckets`) | `ci_green` |
-| `review` | quyết định merge-check, sổ review cục bộ, comment đã đăng, `review_identity`, auto-merge | `published_reviews`, `with_published`, `merge_eligibility`, `pr_next` | `eligible`, `auto_merge_ok`, `proceed` (bước kế là merge/bật auto-merge) |
+| `review` | quyết định merge-check, sổ review cục bộ, comment đã đăng, `review_identity`, auto-merge | `published_reviews`, `with_published`, `merge_eligibility`, `pr_next` | `eligible`, `auto_merge_ok`, `proceed` (bước kế là merge ghim head) |
 | `guard` | lệnh Bash, Write/Edit, tool MCP; chính sách `default`/`strict` | guard `_rule_decision` → lỗi thì `_failure_decision` → `apply_policy` (T-1509) | `allowed` |
 | `ci_log` | log job CI | `ci_classify` + `_ci_action` lần đầu của episode (T-1515) | `proceed` (không dừng), `rerun` (chạy lại không sửa) |
 | `harness` | tái hiện REMEDIATION §2 ngoài bốn nhóm trên | `same_command`, `carry_states`, `_verdict_blueprint`, `audit_na_drift`, `install.merge_permissions` | `green` |
@@ -44,15 +44,16 @@ ghi thì như merge-check lỗi mạng.
 |---|---:|---:|---:|---:|---:|---:|
 | pr | 47 | 47 | 0 | 0 | 0 | 0 |
 | rollup | 17 | 17 | 0 | 0 | 0 | 0 |
-| review | 30 | 30 | 0 | 0 | 0 | 0 |
-| guard | 308 | 308 | 0 | 0 | 0 | 0 |
+| review | 31 | 31 | 0 | 0 | 0 | 0 |
+| guard | 321 | 321 | 0 | 0 | 0 | 0 |
 | ci_log | 25 | 25 | 0 | 0 | 0 | 0 |
 | harness | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Tổng** | **438** | **438** | **0** | **0** | **0** | **0** |
+| **Tổng** | **452** | **452** | **0** | **0** | **0** | **0** |
 
-Đo lại 2026-10-20 sau audit delta lần 2 (AUD-DOC-072: bảng cũ ghi guard 211, tổng 341 trong khi #186 đã thêm 70 ca).
-Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031, audit delta lần 2) 84 · phát hiện audit 187 · đối kháng do tác giả bản sửa viết 94 · đối kháng do reviewer khác họ
-model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 73. Độ phủ: 144 ID bắt buộc (8 REC §2 + 136 🔴/🟠 đã sửa) —
+Đo lại 2026-10-21 sau ADR-0036 (Lát 0 PLAN-3.13: guard chặn phẳng bật auto-merge — ca `guard` thêm; `review` thêm
+`review-adr0036-auto-on-ci-running`, ba ca `enable-auto-merge` → `merge`, `review-l2-auto-merge-on` → merge ghim head theo
+D-063). Nguồn ca: tái hiện (§2, review PR #173, review ADR-0031, audit delta lần 2) 85 · phát hiện audit 187 · đối kháng do tác giả bản sửa viết 105 · đối kháng do reviewer khác họ
+model viết **0** · đối chứng (việc hợp lệ phải đi tiếp) 75. Độ phủ: 144 ID bắt buộc (8 REC §2 + 136 🔴/🟠 đã sửa) —
 88 có ca, 56 ngoài phạm vi có lý do (`scope.json`: tài liệu, CI/ruleset/phụ thuộc, `redact`, hook shell/cài đặt, phụ
 thuộc git/REST thật, công cụ perf/contrast/vendor, ngân sách episode ci-triage nhiều run, sổ audit/blueprint, bộ test của khung,
 bytecode hook), 0 chưa phủ. Rescan 2026-10-19 sửa xong (2026-10-20): ca `guard-*sec073*`/`guard-*sec075*`, `guard-*d098*` (vòng `for` số, D-098). Audit delta 2026-10-20: ca `guard-sec083-*`, `guard-sec084-*`, `guard-sec085-*`, `guard-sec087-*`, `guard-har093-*`, `pr-xfeat015-*`/`pr-xfeat016-*`, `review-test014-*`; AUD-CI-014, AUD-HAR-094/095 (workflow, PROGRESS, bằng chứng blueprint) vào `scope.json`. Audit delta 2026-10-20 lần 2: ca `guard-sec091-*`, `guard-audit1020c-*` (AUD-SEC-093/094/097/098), `guard-sec099-*`. Thời gian chạy ~0,35 s.
@@ -81,8 +82,9 @@ AUD-HAR-091): trên `a6e2f0d` 3 false-green + 2 chặn oan, sau bản sửa đ�
 
 Ca `guard-sec045-guard-crash-on-merge` từng dùng `\ud800` để làm guard sập trên lệnh merge; nay guard không sập nên ca đo
 đường merge không trơn (mã `UNVERIFIED`, vẫn chặn) — đường guard lỗi giữa chừng với merge (`UNPARSED`) do test
-`MergeHookFailClosedTest` và `TypedDecisionTest` giữ. Bật auto-merge PR làn chuẩn chưa review ở head chỉ bị guard chặn ở `strict` (AUD-DOC-054,
-mở); ở mặc định lớp đỡ là required check `merge-gate` (nhóm `review`: `review-rec03-auto-merge-on-no-review`).
+`MergeHookFailClosedTest` và `TypedDecisionTest` giữ. Bật auto-merge bị guard chặn phẳng ở mọi chính sách (mã
+`AUTO_MERGE_ENABLE`, ADR-0036 §3); auto-merge người bật mà PR chưa đủ điều kiện thì `pr next`/steward tắt (nhóm `review`:
+`review-rec03-auto-merge-on-no-review`, `review-adr0036-auto-on-ci-running`).
 
 ## 5. Giới hạn — cần reviewer khác họ model bổ sung
 

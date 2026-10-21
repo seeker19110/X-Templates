@@ -59,7 +59,7 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 
 1. Agent lập kế hoạch G0–G4: `PROJECT.md`, `BLUEPRINT.md`, nghiên cứu phiên bản, spec, thiết kế, `PLAN.md` có task và lệnh kiểm.
 2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
-3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR mở kèm auto-merge ở L3 (ADR-0015), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã khi `merge_hard_exceptions: human` (ADR-0016, ADR-0020). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
+3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR, máy merge ghim head khi `merge-check` = `merge` ở đúng head (ADR-0036; làn chuẩn sau review sạch — ADR-0024), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã khi `merge_hard_exceptions: human` (ADR-0016, ADR-0020). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
 4. Dừng khi xong có bằng chứng, khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
    thao tác không đảo ngược (máy chặn), tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật
    (`loop defer`, gom cho người). Deploy/publish và đổi cấu hình cổng kèm lý do **cho chạy** (ADR-0018, D-023 — lớp đỡ
@@ -84,12 +84,11 @@ chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness �
 | `python3 scripts/xt.py guard-check -- <lệnh>` | exit 126 nếu guard của dự án cấm lệnh — `dev-task.sh` gọi trước mỗi lệnh `xt.yaml`; Gate/`Kiểm:` do `loop record`/`verify`/`blueprint-status --run` chạy cũng qua cùng kiểm (LOOP-STOP-027) |
 | `python3 scripts/xt.py release-check [--blueprint F] [--status F] [--json]` | Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối khớp cây, cây git sạch + HEAD, đề xuất "Khi chạy thật" chờ người, pha `harden` và nợ review sau SHA quét (ADR-0031) → PASS/FAIL/N-A có bằng chứng, `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO — phần máy của `GO-NO-GO.md` |
 | `python3 scripts/xt.py autonomy-bench [--corpus DIR] [--json]` | Corpus PR/rollup/review/guard/log CI ở `tests/fixtures/autonomy/` chạy qua hàm thật (merge-check, `_ci_blocker`, `pr next`, guard + chính sách): exit 1 khi false-green > 0 (máy cho merge/chạy/tính xanh ở ca phải chặn), khi có ca lệch (kể cả `code` khác mong đợi) hoặc ID bắt buộc chưa có ca; 2 khi corpus hỏng/ca không chạy được; báo chặn oan và độ phủ REC §2 + 🔴/🟠 đã sửa; job CI `checks` chạy (tổng hợp vào `quality`) (AUTO-07, [baseline](docs/ops/AUTONOMY-BASELINE.md)) |
-| `python3 scripts/xt.py merge-gate --pr N --head SHA` | Required check `merge-gate` (job `.github/workflows/merge-gate.yml`): exit 1 khi `merge-check` báo `hard` mà PR đang bật auto-merge, 3 khi head khác `--head` (ADR-0023) |
 | `python3 scripts/xt.py context --task T-NNNN [--json] [--plan F]` | Gói ngữ cảnh một task của PLAN (REC-11): ID yêu cầu, đoạn spec, Gate, `files:`, file thiếu, số byte — đưa cho executor thay vì cả PLAN |
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
-| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `review` (chưa đủ review sạch ở head, exit 1, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) bật auto-merge (làn nhanh khi mở, làn chuẩn sau review sạch — ADR-0024) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
+| `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `review` (chưa đủ review sạch ở head, exit 1, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) máy merge ghim head mọi làn (làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở đúng head — ADR-0024, ADR-0036; không bật auto-merge của GitHub) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
-| `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích; `--with-github` thêm ruleset, CI song song + `quality` tổng hợp, quét bí mật, `merge-gate`, `pr-steward` ([`framework/templates/`](framework/templates/README.md)) |
+| `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích; `--with-github` thêm ruleset, CI song song + `quality` tổng hợp, quét bí mật, `pr-steward`, stub `merge-gate` tới khi gỡ khỏi ruleset ([`framework/templates/`](framework/templates/README.md)) |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
 | `python3 scripts/xt.py changelog-check [FILE]` | `CHANGELOG.md` theo Keep a Changelog 1.1.0: `## [Unreleased]` đầu tiên, bản `## [X.Y.Z] - YYYY-MM-DD` giảm dần, nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` cùng thư mục (nếu có) |
 | `python3 scripts/xt.py license-check [--requirements F]… [--allow F] [--today D]` | License (`importlib.metadata`) của mọi gói ghim `==` trong `requirements-dev.txt` (hoặc file chỉ định) đối chiếu allowlist SPDX của `license-allow.json`; ngoại lệ cần `approved_by` + `expires`, chỉ khớp đúng license đã duyệt; vi phạm, gói ghim chưa cài hoặc ngoại lệ quá hạn → exit 1 (BASE-DEP-005); chạy trong `lint` |
@@ -146,18 +145,18 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   SHOULD/MAY ở `BLUEPRINT-BACKLOG.md`; trần vòng một phiên chỉ đếm task.
 - [ADR-0013](docs/adr/0013-machine-decides-when-to-merge.md): `xt.py merge-check` quyết khi nào merge PR; tự merge chỉ
   bằng lệnh ghim head (mức tự chủ: ADR-0015/0024).
-- [ADR-0015](docs/adr/0015-auto-merge-on-open-l3.md): mức `merge_autonomy: L3` (mặc định, chủ repo yêu cầu) — auto-merge
-  của GitHub cho mọi làn; GitHub merge khi required check xanh (làn chuẩn bật sau review sạch — ADR-0024).
+- [ADR-0015](docs/adr/0015-auto-merge-on-open-l3.md): mức `merge_autonomy: L3` (mặc định, chủ repo yêu cầu) — máy merge
+  mọi làn trừ ngoại lệ cứng (làn chuẩn sau review sạch — ADR-0024); cơ chế auto-merge thay bởi ADR-0036 (merge ghim head).
 - [ADR-0014](docs/adr/0014-pr-per-slice-and-machine-merge.md): mỗi lát code một PR; máy tự merge khi `merge-check` cho
   phép bằng lệnh ghim head (`gh pr merge`, REST `PUT …/merge` có `sha`, MCP `merge_pull_request` có `expectedHeadSha`).
 - [ADR-0016](docs/adr/0016-l3-keeps-hard-exceptions.md): ở L3 PR chạm tiền/dữ liệu người dùng thật/auth/mật mã/bí mật
-  vẫn người merge (`merge-check` trả `hard`, guard không bật auto-merge) — tắt được bằng ADR-0020.
+  vẫn người merge (`merge-check` trả `hard`, guard chặn merge) — tắt được bằng ADR-0020.
 - [ADR-0017](docs/adr/0017-allow-all-bash-behind-fences.md): `permissions.allow` gồm `Bash` — mọi lệnh Bash không hỏi;
   hàng rào là `deny`/`ask` của settings và hook guard.
 - [ADR-0018](docs/adr/0018-deny-dangerous-allow-rest.md): guard không hỏi người — lệnh nguy hiểm/không đảo ngược bị
   chặn, còn lại cho chạy; `XT_GUARD_POLICY=strict` giữ hành vi hỏi cũ.
-- [ADR-0019](docs/adr/0019-hard-exceptions-denied-under-no-ask.md): dưới chính sách không hỏi, merge/bật auto-merge PR
-  ngoại lệ cứng (`hard`) bị chặn — người merge.
+- [ADR-0019](docs/adr/0019-hard-exceptions-denied-under-no-ask.md): dưới chính sách không hỏi, merge PR ngoại lệ cứng
+  (`hard`) bị chặn — người merge (bật auto-merge bị chặn phẳng ở mọi PR — ADR-0036).
 - [ADR-0020](docs/adr/0020-hard-exceptions-owner-opt-out.md): chủ dự án tắt được chốt người của ngoại lệ cứng
   (`xt.yaml` `merge_hard_exceptions: auto` đã commit ở nhánh đích; thiếu khoá = `human`; PR đổi khoá luôn người merge);
   repo khung `auto`, mẫu dự án đích `human`.
@@ -165,18 +164,18 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check`) tới khi PR đã merge hoặc cần hành động.
 - [ADR-0022](docs/adr/0022-production-grants-in-plan.md): duyệt kế hoạch = một lần người duyệt mục Ủy quyền production
   (`- grant:` trong PLAN.md, máy kiểm `xt.py grant-check`); PR đổi grant/khoá luôn người merge; hạn mức autopilot mặc định x2.
-- [ADR-0023](docs/adr/0023-merge-gate-required-check.md): required check `merge-gate` (`pull_request_target`, mã của
-  nhánh mặc định) đỏ khi `merge-check` báo `hard` trên head hiện tại mà PR đang bật auto-merge — auto-merge không ghim head.
+- [ADR-0023](docs/adr/0023-merge-gate-required-check.md): required check `merge-gate` (`pull_request_target`) đỏ khi
+  `merge-check` báo `hard` mà PR đang bật auto-merge — bỏ bởi ADR-0036 (stub xanh tới khi chủ repo gỡ khỏi ruleset).
 - [ADR-0024](docs/adr/0024-auto-merge-after-clean-review.md): merge theo làn — PR quan trọng (làn chuẩn) `reviewer` rà sạch
-  mới bật auto-merge, PR làn nhanh bật khi mở; không bật được thì merge bằng lệnh ghim head của `merge-check`.
+  mới merge, PR làn nhanh merge khi CI xanh — luôn bằng lệnh ghim head (cơ chế: ADR-0036).
 - [ADR-0025](docs/adr/0025-merge-by-lane-state-machine-in-code.md): luật merge theo làn nằm trong code — `xt.py pr next`
   trả một hành động kế tiếp, `pr reviewed` ghi kết quả review ở đúng head.
 - [ADR-0026](docs/adr/0026-autopilot-evidence-write-denied.md): ghi/xoá tay `.autopilot/` (bằng chứng, trạng thái vòng,
   sổ review) bị chặn, không chỉ hỏi.
-- [ADR-0027](docs/adr/0027-pr-steward-on-github.md): workflow `pr-steward` trên GitHub bật auto-merge/merge ghim head cho
-  PR đủ tiêu chuẩn khi không còn phiên agent; `pr reviewed` đăng kết quả review lên PR.
+- [ADR-0027](docs/adr/0027-pr-steward-on-github.md): workflow `pr-steward` trên GitHub merge ghim head PR đủ
+  tiêu chuẩn khi CI xanh và không còn phiên agent (tắt auto-merge do người bật — ADR-0036); `pr reviewed` đăng kết quả review lên PR.
 - [ADR-0028](docs/adr/0028-single-merge-eligibility.md): một điều kiện "được merge" (`merge_eligibility`) cho
-  `merge-check`, `pr next`, `merge-gate`, guard và steward — auto-merge cần review sạch ở head.
+  `merge-check`, `pr next`, guard và steward — merge cần review sạch ở head.
 - [ADR-0029](docs/adr/0029-two-executor-tiers-milestone-audit-release-check.md): hai tầng executor (`executor-deep`) có
   chuyển cấp sau 2 lần đỏ, mốc PLAN → audit delta, `pr reviewed --inconclusive`, `release-check` (G7 máy đọc).
 - [ADR-0030](docs/adr/0030-essential-items-not-capped-at-m.md): mục `essential` không bị trần MUST ở M khi fact bật
@@ -188,7 +187,12 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0033](docs/adr/0033-build-phase-lean-autopilot.md): pha build tối giản autopilot — audit delta theo mốc gom về
   trước G7, reviewer chỉ khi `pr next` trả `review`, `PROGRESS.md` cập nhật theo lát.
 - [ADR-0034](docs/adr/0034-target-ci-ruleset-minimal-max-parallel.md): CI, E2E và ruleset dự án đích tối thiểu khi triển
-  khai ban đầu, song song tối đa — matrix tĩnh không job lập kế hoạch, job `e2e`, ruleset 3 check không strict; không CD.
+  khai ban đầu, song song tối đa — matrix tĩnh không job lập kế hoạch, job `e2e`, ruleset không strict (nay 2 check `quality`, `gitleaks` — ADR-0036); không CD.
+- [ADR-0035](docs/adr/0035-merge-gate-workflow-run-check-run.md): `merge-gate` qua `workflow_run` + check-run REST — bỏ
+  bởi ADR-0036, không triển khai.
+- [ADR-0036](docs/adr/0036-pinned-merge-no-auto-merge-drop-merge-gate.md): máy không bao giờ bật auto-merge của GitHub
+  (guard `deny`, mã `AUTO_MERGE_ENABLE`); mọi đường merge của máy (phiên qua `pr next`, steward `--apply`) ghim head sau
+  `merge-check` = `merge` ở đúng head, CI chưa xong → `wait`; bỏ required check `merge-gate` (thay ADR-0023, ADR-0035).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
