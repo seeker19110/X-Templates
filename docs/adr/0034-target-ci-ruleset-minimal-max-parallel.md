@@ -1,6 +1,6 @@
 # ADR-0034: CI, E2E và ruleset dự án đích — tối thiểu khi triển khai ban đầu, song song tối đa
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; ruleset mẫu dự án đích 3 check → 2 check (`quality`, `gitleaks`) theo ADR-0036 (2026-10-21)
 - **Trạng thái triển khai:** Đã triển khai trong repo — mẫu `framework/templates/ci.yml` (bỏ job `test-plan`, matrix tĩnh,
   job `e2e`, `protection-guard` vào `quality.needs`), `framework/templates/ruleset-main.json`; `scripts/dev-task.sh` task
   `test-mode` · `e2e-mode` · `e2e`; `scripts/install.py` `GITHUB_FILES`; test `tests/test_ci_template.py`

@@ -9,7 +9,6 @@
    "hard": [],
    "stacked": false,
    "base_merge_of": [],
-   "base_has_required": true,
    "reasons": [
     "L3"
    ],
@@ -38,7 +37,7 @@
     "eligible": true,
     "auto_merge_ok": true,
     "proceed": true,
-    "action": "enable-auto-merge"
+    "action": "merge"
    }
   },
   {
@@ -70,7 +69,7 @@
     "proceed": false,
     "action": "disable-auto-merge"
    },
-   "note": "làn chuẩn đang bật auto-merge mà chưa review ở head → tắt (cùng điều kiện merge-gate, T-1507)"
+   "note": "làn chuẩn đang bật auto-merge (người bật) mà chưa review ở head → tắt: auto-merge không ghim head (ADR-0036, T-1507)"
   },
   {
    "id": "review-har059-blocking-at-head-wins",
@@ -450,10 +449,10 @@
    },
    "expect": {
     "eligible": true,
-    "proceed": false,
-    "action": "disable-auto-merge"
+    "proceed": true,
+    "action": "merge"
    },
-   "note": "dưới L3 auto-merge (không ghim head) không được bật"
+   "note": "ADR-0036 §2 (một luật mọi mức): người bật auto-merge mà merge-check = merge → merge ghim head ngay (D-063); chưa đủ điều kiện → tắt (review-adr0036-auto-on-ci-running)"
   },
   {
    "id": "review-no-required-checks-wait",
@@ -462,8 +461,7 @@
    "input": {
     "decision": {
      "lane": "nhanh",
-     "verdict": "wait",
-     "base_has_required": false
+     "verdict": "wait"
     }
    },
    "expect": {
@@ -471,7 +469,28 @@
     "proceed": false,
     "action": "wait"
    },
-   "note": "nhánh đích không có check bắt buộc: bật auto-merge = GitHub merge ngay (D-062)"
+   "note": "CI chưa xanh → wait (merge-watch), không bao giờ bật auto-merge; nhánh base_has_required bỏ (ADR-0036 §2, D-062 hết đối tượng)"
+  },
+  {
+   "id": "review-adr0036-auto-on-ci-running",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "decision": {
+     "lane": "nhanh",
+     "verdict": "wait",
+     "reasons": [
+      "CI đang chạy: test"
+     ]
+    },
+    "auto_merge": true
+   },
+   "expect": {
+    "eligible": false,
+    "proceed": false,
+    "action": "disable-auto-merge"
+   },
+   "note": "người bật auto-merge khi CI còn chạy: tắt ngay — GitHub sẽ merge head chưa đánh giá khi check xanh (ADR-0036 §2)"
   },
   {
    "id": "review-phase-build-no-review-proceeds",
@@ -487,7 +506,7 @@
     "auto_merge_ok": true,
     "proceed": true,
     "review": "deferred",
-    "action": "enable-auto-merge"
+    "action": "merge"
    }
   },
   {
@@ -587,7 +606,7 @@
     "auto_merge_ok": true,
     "proceed": true,
     "review": "deferred",
-    "action": "enable-auto-merge"
+    "action": "merge"
    }
   },
   {
@@ -613,7 +632,7 @@
     "proceed": false,
     "action": "republish-review"
    },
-   "note": "đăng dấu thất bại: sổ cục bộ sạch, PR chưa có dấu → đăng lại, không bật auto-merge (merge-gate đọc dấu đã đăng)"
+   "note": "đăng dấu thất bại: sổ cục bộ sạch, PR chưa có dấu → đăng lại, không merge (merge-check/guard/steward đọc dấu đã đăng)"
   },
   {
    "id": "review-xfeat011-local-unpublished-auto-on",
@@ -664,7 +683,7 @@
     "proceed": false,
     "action": "republish-review"
    },
-   "note": "lỗi chặn mới hơn chỉ có ở sổ cục bộ: không bật auto-merge theo dấu sạch cũ"
+   "note": "lỗi chặn mới hơn chỉ có ở sổ cục bộ: không merge theo dấu sạch cũ"
   },
   {
    "id": "review-test014-verdict-review-missing",
@@ -685,7 +704,7 @@
     "review": "missing",
     "action": "review"
    },
-   "note": "merge-check trả verdict review (chưa có review ở head, AUD-XFEAT-010): pr next giao rà, không bật auto-merge"
+   "note": "merge-check trả verdict review (chưa có review ở head, AUD-XFEAT-010): pr next giao rà, không merge"
   },
   {
    "id": "review-test014-verdict-review-blocking",
@@ -713,7 +732,7 @@
     "review": "blocking",
     "action": "fix"
    },
-   "note": "verdict review với lỗi chặn ở head: pr next đòi sửa, không bật auto-merge"
+   "note": "verdict review với lỗi chặn ở head: pr next đòi sửa, không merge"
   }
  ]
 }

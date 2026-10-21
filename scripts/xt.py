@@ -23,7 +23,7 @@ Lệnh:
   loop resume [--reason TEXT]   Người đã xử lý → bỏ BLOCKED, đặt lại đếm lỗi lặp, giữ số vòng/bằng chứng.
   loop stop [--reason TEXT]     Tắt vòng lặp.
   loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
-  pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (bật/tắt auto-merge, rà, merge ghim head…).
+  pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (tắt auto-merge người bật, rà, merge ghim head…).
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
@@ -56,9 +56,6 @@ Lệnh:
   grant-check GROUP [KHOÁ=GIÁ_TRỊ ...] [--plan F] [--json]
                                 Việc production có nằm trong mục Ủy quyền production của PLAN.md không (exit 0 =
                                 trong ủy quyền; 1 = ngoài → loop defer; thiếu mục = ngoài).
-  merge-gate [--pr PR] [--pr-json F] [--head SHA] [--json]
-                                Required check (ADR-0023): exit 1 khi merge-check báo `hard` mà PR đang bật auto-merge
-                                (2 = lỗi đọc PR, 3 = head khác --head → chạy lại).
   merge-watch [--pr PR] [--interval 30] [--max-minutes 240]
                                 Gọi merge-check mỗi `interval` giây tới khi verdict ≠ wait (exit 0 = đã merge/merge,
                                 1 = cần hành động, 2 = lỗi đọc PR 3 lần liền, 3 = hết giờ); chạy nền, không tốn token.
@@ -3761,7 +3758,7 @@ def _doctor_harness_parts(base: Path) -> List[Finding]:
     claude = base / ".claude"
     missing = [f"skills/{s}/SKILL.md" for s in DOCTOR_SKILLS if not (claude / "skills" / s / "SKILL.md").is_file()]
     missing += [f"agents/{a}.md" for a in DOCTOR_AGENTS if not (claude / "agents" / f"{a}.md").is_file()]
-    # `.github/`: bản mới của mẫu `install.py --with-github` (ruleset, mẫu PR, Dependabot, merge-gate) — review #115
+    # `.github/`: bản mới của mẫu `install.py --with-github` (ruleset, mẫu PR, Dependabot, stub merge-gate) — review #115
     roots = (
         *base.glob("*.xtemplates-new"),
         *claude.rglob("*.xtemplates-new"),
@@ -4542,8 +4539,9 @@ def _pr_shape_blocker(pr: Dict[str, Any]) -> Optional[Tuple[str, List[str]]]:
     ]
 
 
-# Check của chính bộ máy merge (ADR-0023/0027): chỉ xét auto-merge/review, không chạy test — một mình chúng xanh không
-# phải bằng chứng CI (AUD-HAR-058: dự án đích cài `--with-github` mà chưa có CI riêng).
+# Check của chính bộ máy merge, không chạy test — một mình chúng xanh không phải bằng chứng CI (AUD-HAR-058: dự án đích
+# cài `--with-github` mà chưa có CI riêng): `pr-steward` (ADR-0027) và stub `merge-gate` luôn xanh, chỉ giữ context
+# required check còn trong ruleset sống tới khi gỡ (ADR-0036 §5) — xoá tên cùng stub.
 NON_CI_CHECKS = {"merge-gate", "pr-steward"}
 
 
@@ -4628,7 +4626,7 @@ def merge_decision(
     thêm `review` khi CI/làn cho merge mà review ở head chưa hợp lệ — AUD-XFEAT-010).
     `merge` chỉ khi làn nhanh + CI xanh + mức tự chủ ≥ L2 (L3: mọi làn trừ ngoại lệ cứng `LOOP-STOP-005` — ADR-0015,
     ADR-0016); lệnh merge ghim `--match-head-commit` (có commit mới → lệch). `hard` = lý do ngoại lệ cứng, tính cả khi
-    PR còn chờ CI để guard không bật auto-merge cho nó (ADR-0024: làn chuẩn bật sau review sạch, làn nhanh khi mở). `hard_auto` (`merge_hard_exceptions: auto`,
+    PR còn chờ CI để máy không merge và tắt auto-merge người bật (ADR-0036). `hard_auto` (`merge_hard_exceptions: auto`,
     ADR-0020): ngoại lệ cứng không giữ người — lý do chuyển sang `hard_waived`, `hard` rỗng."""
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
@@ -4676,12 +4674,11 @@ def merge_decision(
         "head": pr.get("headRefOid", ""),
         "verdict": verdict,
         "lane": lane,
-        # L3 (ADR-0015, ADR-0024): guard cho bật auto-merge của GitHub (làn chuẩn sau review sạch, làn nhanh khi mở) — trừ PR chồng (nhắm nhánh sắp bị xoá).
+        # L3 (ADR-0015): máy merge ghim head mọi làn trừ ngoại lệ cứng (ADR-0036); PR chồng nhắm nhánh sắp bị xoá.
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "base_merge_of": [str(x) for x in pr.get("baseMergeOf") or [] if isinstance(x, str)],
-        "base_has_required": pr.get("baseHasRequired") if isinstance(pr.get("baseHasRequired"), bool) else None,
-        "hard": hard,  # ngoại lệ cứng: guard không bật auto-merge (ADR-0016)
+        "hard": hard,  # ngoại lệ cứng: máy không merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "risk_labels": _risk_labels(
             pr
@@ -5108,33 +5105,6 @@ def _required_specs(repo: str, branch: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _required_checks(repo: str, branch: str) -> List[str]:
-    """Tên check bắt buộc của nhánh theo ruleset; không đọc được → [] (không suy ra gì)."""
-    return [o["context"] for o in _required_specs(repo, branch)]
-
-
-_REQUIRED_CACHE: Dict[Tuple[str, str], Tuple[float, bool]] = {}
-
-
-def _base_has_required(repo: str, branch: str, specs: Optional[List[Dict[str, Any]]] = None) -> bool:
-    """Nhánh đích có check bắt buộc không — ruleset (REST `rules/branches`) hoặc branch protection cổ điển (REST
-    `branches/<b>`, trường `protection.required_status_checks.contexts`). Không đọc được → False (chiều chặt). Nhớ theo
-    (repo, nhánh) trong `WRITER_TTL` giây (`merge-watch` hỏi 30 giây/lần; import ruleset giữa chừng thì hết hạn là thấy)."""
-    key, now = (repo, branch), time.monotonic()
-    hit = _REQUIRED_CACHE.get(key)
-    if hit is None or now - hit[0] >= WRITER_TTL:
-        found = bool(branch) and bool(specs if specs is not None else _required_checks(repo, branch))
-        if branch and not found:
-            try:
-                prot = _gh_one(f"{repo}/branches/{urllib.parse.quote(branch, safe='')}").get("protection") or {}
-            except PrInputError:
-                prot = {}
-            req = prot.get("required_status_checks") or {}
-            found = bool(req.get("contexts") or req.get("checks")) and req.get("enforcement_level") != "off"
-        _REQUIRED_CACHE[key] = (now, found)
-    return _REQUIRED_CACHE[key][1]
-
-
 BASE_MERGE_HOPS = 5  # số lần "cập nhật nhánh" liên tiếp tối đa được lần ngược khi mang review sang head mới
 COMPARE_FILES_MAX = 300  # REST compare cắt danh sách file ở 300: nhiều hơn thì không mang review sang
 _CHAIN_CACHE: Dict[Tuple[str, str, str], List[str]] = {}
@@ -5266,7 +5236,7 @@ def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> L
     ]
 
 
-def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
+def _pr_rest(pr_arg: Optional[str]) -> Dict[str, Any]:
     """Dựng JSON dạng `gh pr view --json MERGE_FIELDS` chỉ bằng REST — `merge_decision` dùng nguyên như trước."""
     repo, n = _pr_target(pr_arg)
     pr = _gh_one(f"{repo}/pulls/{n}")
@@ -5305,7 +5275,7 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     # GitHub chưa tính xong / báo xung đột → kiểm cục bộ để biết ngay sạch hay xung đột ở file nào (không đợi `wait`).
     conflicts = (
         local_merge_conflicts(str(base.get("ref") or ""), str(base.get("sha") or ""), sha, str(n))
-        if local and mergeable is not True
+        if mergeable is not True
         else None
     )
     raw_user = pr.get("user")
@@ -5341,15 +5311,14 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
         **({"requiredChecks": required} if required else {}),
         # Head là "cập nhật nhánh" sạch của các head này (mới → cũ): review sạch ở chúng mang sang head hiện tại.
         **({"baseMergeOf": chain} if (chain := _base_merge_chain(repo, str(base.get("sha", "")), sha)) else {}),
-        # Nhánh đích có check bắt buộc không: không có thì auto-merge của GitHub merge NGAY lúc bật (D-062, D-063).
-        "baseHasRequired": _base_has_required(repo, str(base.get("ref") or ""), required),
         "headRefOid": sha,
         "labels": [{"name": lb.get("name", "")} for lb in pr.get("labels") or [] if isinstance(lb, dict)],
         "statusCheckRollup": rollup,
         # Review đã đăng lên PR (`pr reviewed`, ADR-0027) — sổ dùng chung mọi phiên và workflow pr-steward.
         **({"xtReviews": marks} if marks else {}),
         **({"reviewIdentity": cfg["review_identity"]} if cfg.get("review_identity") else {}),
-        # Auto-merge đang bật (REST `auto_merge`: object hoặc null) — `merge-gate` đỏ khi bật trên PR ngoại lệ cứng.
+        # Auto-merge đang bật (REST `auto_merge`: object hoặc null) — chỉ người bật được; máy tắt khi PR chưa đủ điều
+        # kiện vì auto-merge không ghim head (ADR-0036).
         **({"autoMergeRequest": pr["auto_merge"]} if pr.get("auto_merge") else {}),
         # REST cắt danh sách file ở 3000: PLAN.md/xt.yaml có thể nằm ngoài phần đã thấy → luôn người merge
         **({"filesTruncated": True} if int(pr.get("changed_files") or 0) > len(files) else {}),
@@ -5368,12 +5337,11 @@ def _pr_rest(pr_arg: Optional[str], local: bool = True) -> Dict[str, Any]:
     }
 
 
-def load_pr(args: argparse.Namespace, local: bool = True) -> Dict[str, Any]:
-    """JSON của PR: `--pr-json FILE|-` (định dạng `gh pr view --json MERGE_FIELDS`) hoặc lấy qua REST; lỗi → PrInputError.
-    `local=False`: không kiểm xung đột cục bộ (`merge-gate` chỉ cần ngoại lệ cứng, chạy ở CI checkout nông — review #164)."""
+def load_pr(args: argparse.Namespace) -> Dict[str, Any]:
+    """JSON của PR: `--pr-json FILE|-` (định dạng `gh pr view --json MERGE_FIELDS`) hoặc lấy qua REST; lỗi → PrInputError."""
     try:
         if not args.pr_json:
-            return _pr_rest(args.pr, local)
+            return _pr_rest(args.pr)
         text = sys.stdin.read() if args.pr_json == "-" else Path(args.pr_json).read_text(encoding="utf-8")
         data = json.loads(text)
     except (OSError, json.JSONDecodeError) as exc:
@@ -7338,8 +7306,8 @@ def pr_title_check_off(base: Path, ref: str) -> bool:
 
 
 def _merge_eval(pr: Dict[str, Any], local: bool = False) -> Tuple[Dict[str, Any], List[str]]:
-    """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `merge-gate`. `local`: đọc thêm sổ
-    review cục bộ của PR, chỉ để chặt hơn (D-104) — `merge-check` của phiên; `merge-gate`/steward chạy ở CI, không có sổ."""
+    """(quyết định, ghi chú cấu hình) của `merge-check` cho PR đã đọc — dùng chung với `pr next`/steward. `local`: đọc thêm
+    sổ review cục bộ của PR, chỉ để chặt hơn (D-104) — `merge-check` của phiên; steward chạy ở CI, không có sổ."""
     ref = f"origin/{pr.get('baseRefName') or 'main'}"
     if pr_title_check_off(project_dir(), ref):  # dự án không theo Conventional Commits (review #140)
         pr = {k: v for k, v in pr.items() if k != "title"}
@@ -7659,66 +7627,6 @@ def cmd_release_check(args: argparse.Namespace) -> int:
     return 0 if out["go"] else 1
 
 
-def cmd_merge_gate(args: argparse.Namespace) -> int:
-    """Required check `merge-gate` (ADR-0023): auto-merge của GitHub không ghim head, nên commit đẩy SAU khi bật auto-merge
-    phải được máy chặn trên head hiện tại. exit 1 khi `merge-check` báo `hard` VÀ PR đang bật auto-merge; `hard` mà không
-    auto-merge thì exit 0 kèm cảnh báo (người merge tay — chốt người của ADR-0016/0022, merge tay của agent đã có guard ghim
-    head). exit 2 = không đọc được PR; exit 3 = head của PR khác `--head` (REST chưa thấy push mới, hoặc đã có push
-    mới hơn) — workflow chờ rồi chạy lại."""
-    try:
-        pr = load_pr(args, local=False)
-    except PrInputError as exc:
-        print(f"✗ {exc}", file=sys.stderr)
-        return 2
-    head = str(pr.get("headRefOid", ""))
-    if args.head and head != args.head:
-        print(f"✗ head của PR là `{head}`, không phải `{args.head}` (sự kiện) — chờ rồi chạy lại", file=sys.stderr)
-        return 3
-    d, notes = _merge_eval(pr)
-    auto = bool(pr.get("autoMergeRequest"))
-    review_bad = d["review"] in ("missing", "blocking")
-    gate = "block" if auto and (d["hard"] or review_bad) else "warn" if d["hard"] else "pass"
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "pr": d["pr"],
-                    "head": head,
-                    "gate": gate,
-                    "auto_merge": auto,
-                    "hard": d["hard"],
-                    "review": d["review"],
-                    "notes": notes,
-                },
-                ensure_ascii=False,
-            )
-        )
-        return 1 if gate == "block" else 0
-    n = d["pr"]
-    if gate == "block":
-        why = "ngoại lệ cứng" if d["hard"] else f"chưa có review sạch ở head ({d['review']})"
-        print(
-            f"✗ {why} trên head này mà PR đang bật auto-merge — auto-merge không ghim head (ADR-0023, ADR-0028) · PR #{n} · head {head}"
-        )
-    else:
-        print(
-            (
-                "⚠ ngoại lệ cứng — người merge tay; bật auto-merge sẽ làm check này đỏ"
-                if gate == "warn"
-                else "✓ không có ngoại lệ cứng"
-            )
-            + f" · PR #{n} · head {head}"
-        )
-    for r in [*d["hard"], *notes]:
-        print(f"  - {r}")
-    if gate == "block":
-        print(
-            f"→ tắt auto-merge (`gh pr merge {n} --disable-auto` hoặc MCP `disable_pr_auto_merge`) — check chạy lại khi tắt;"
-        )
-        print("  review: `xt.py pr reviewed` (reviewer khác họ model) rồi bật lại auto-merge; hoặc người merge tay")
-    return 1 if gate == "block" else 0
-
-
 WATCH_ERROR_LIMIT = 3  # lần lỗi đọc PR liên tiếp tối đa trước khi merge-watch bỏ cuộc (mạng chập chờn không đáng dừng)
 
 
@@ -7732,7 +7640,7 @@ def _merge_check_json(pr: Optional[str]) -> Tuple[int, Dict[str, Any], str]:
 
 
 def _watch_pr_next(pr: Optional[str]) -> None:
-    """`merge-watch` thoát → in luôn hành động kế của `pr next` (action · do · fallback) để agent không phải gọi thêm một
+    """`merge-watch` thoát → in luôn hành động kế của `pr next` (action · do) để agent không phải gọi thêm một
     lệnh (PLAN-3.12 T-1719). Không hỏi được PR (gh/mạng/lỗi đọc) → im lặng: `next` của merge-check đã in ở trên."""
     out = io.StringIO()
     try:
@@ -7818,15 +7726,17 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
     n, verdict, why = d.get("pr", ""), d.get("verdict"), "; ".join(d.get("reasons", []))
     if verdict == "closed":
         return act("done" if "MERGED" in why else "closed", why)
-    if d.get("hard"):  # ngoại lệ cứng: không auto-merge; đang bật thì tắt trước (merge-gate đỏ — ADR-0023)
+    if d.get("hard"):  # ngoại lệ cứng: máy không merge; auto-merge người bật thì tắt trước (không ghim head — ADR-0036)
         if auto_merge:
-            return act("disable-auto-merge", "ngoại lệ cứng mà auto-merge đang bật (ADR-0023)", disable)
+            return act(
+                "disable-auto-merge", "ngoại lệ cứng mà auto-merge đang bật — không ghim head (ADR-0036)", disable
+            )
         return act(
             "defer-human", "ngoại lệ cứng — người merge (ADR-0016)", f"xt.py loop defer --task <ID> --reason 'PR #{n}'"
         )
     if d.get("stacked"):
         if auto_merge:
-            return act("disable-auto-merge", "PR chồng không được bật auto-merge", disable)
+            return act("disable-auto-merge", "PR chồng mà auto-merge đang bật — tắt (ADR-0036)", disable)
         return act(
             "retarget", why, "chờ PR đáy merge → đổi đích về nhánh mặc định, merge nhánh đó vào đây, push, pr next"
         )
@@ -7968,8 +7878,8 @@ def _iso_key(at: object) -> str:
 
 def with_published(rec: Dict[str, Any], marks: object, published_only: bool = False) -> Dict[str, Any]:
     """Sổ review của PR cho `pr next`/steward: `reviews` = CHỈ review đã đăng trên PR (ADR-0027), theo thời gian — cùng
-    nguồn với `merge-check`/`merge-gate`/guard (ADR-0028, AUD-XFEAT-011: hai nguồn làm `pr next` bật auto-merge mà
-    `merge-gate` đỏ, thành vòng bật/tắt). `local_reviews` = sổ cục bộ, chỉ để nhận ra review chưa đăng được
+    nguồn với `merge-check`/guard/steward (ADR-0028, AUD-XFEAT-011: hai nguồn làm `pr next` và cổng merge kết luận
+    khác nhau, thành vòng lặp). `local_reviews` = sổ cục bộ, chỉ để nhận ra review chưa đăng được
     (`unpublished_review` → bước đăng lại). `published_only` (xt.yaml có `review_identity`): sổ cục bộ do chính tác giả
     ghi không tính, kể cả để đăng lại — dấu của tác giả không phải review (review #168)."""
     pub = [r for r in marks if isinstance(r, dict)] if isinstance(marks, list) else []
@@ -8029,9 +7939,9 @@ def review_gate(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen:
 
 
 def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard_seen: bool = False) -> Dict[str, Any]:
-    """MỘT điều kiện "được merge/được bật auto-merge" cho `merge-check`, `pr next`, `merge-gate`, guard (`gh`/MCP) và steward
-    (REC-03, ADR-0028), hàm thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` =
-    không `hard` VÀ review hợp lệ — điều kiện để auto-merge của GitHub (không ghim head) được phép đang bật. Pha build
+    """MỘT điều kiện "được merge" cho `merge-check`, `pr next`, guard (`gh`/MCP) và steward (REC-03, ADR-0028), hàm
+    thuần: `eligible` = `merge-check` = merge VÀ review hợp lệ ở head (nếu strict); `auto_merge_ok` (giữ tên — ADR-0036
+    §Hệ quả) = không `hard` VÀ review hợp lệ — tín hiệu cho guard/bench, máy không bật auto-merge. Pha build
     (ADR-0031, `review_deferred`): thiếu review ở head thành `deferred` (hợp lệ, ghi nợ); review `blocking` vẫn chặn — kể
     cả ở head cũ khi chưa có review sạch sau nó — và nhãn `risk:` giữ `missing`."""
     g = review_gate(d, reviews, standard_seen)
@@ -8051,10 +7961,10 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
-    republish-review · review · enable-auto-merge · merge (dưới L3) · wait."""
+    republish-review · review · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
-    # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ bật khi review sạch ở head, bất kể làn hiện tại (bước 3).
+    # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
     gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
     strict = gate["strict"]
     # Pha build (ADR-0031): chưa rà head này không chặn PR ngoài ngoại lệ cứng — ghi nợ; review `blocking` (cả ở head cũ
@@ -8062,20 +7972,19 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     deferred = review_deferred(d, reviews, gate["state"])
     disable = f"gh pr merge {n} --disable-auto (MCP disable_pr_auto_merge)"
 
-    def act(action: str, why: str, do: str = "", fallback: str = "") -> Dict[str, Any]:
+    def act(action: str, why: str, do: str = "") -> Dict[str, Any]:
         return {
             "pr": n,
             "head": head,
             "action": action,
             "why": why,
             "do": do,
-            "fallback": fallback,
             "strict": strict,
             "review_deferred": deferred,
         }
 
     early = _pr_next_blocked(d, auto_merge, act, disable)
-    if early is None:  # review chỉ có ở sổ cục bộ: đăng lại trước, không bật auto-merge theo nó (AUD-XFEAT-011)
+    if early is None:  # review chỉ có ở sổ cục bộ: đăng lại trước, không merge theo nó (AUD-XFEAT-011)
         early = _pr_next_republish(
             d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
         )
@@ -8100,8 +8009,8 @@ def _pr_next_republish(
         return None
     n = d.get("pr", "")
     why = (
-        f"review ở {str(r.get('head', ''))[:7]} chỉ có trong sổ cục bộ, chưa đăng lên PR — merge-check/merge-gate/guard/"
-        "steward chỉ đọc dấu đã đăng (ADR-0028)"
+        f"review ở {str(r.get('head', ''))[:7]} chỉ có trong sổ cục bộ, chưa đăng lên PR — merge-check/guard/steward "
+        "chỉ đọc dấu đã đăng (ADR-0028)"
     )
     if auto_merge:
         return act("disable-auto-merge", f"{why}: tắt auto-merge trước khi đăng lại", disable)
@@ -8109,33 +8018,18 @@ def _pr_next_republish(
 
 
 def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, disable: str) -> Dict[str, Any]:
-    """Đã qua mọi chốt: L3 bật auto-merge (chờ nếu đã bật); dưới L3 không bao giờ bật — auto-merge không ghim head —
-    mà merge bằng lệnh ghim head khi `merge-check` = `merge` (ADR-0013/0015, review #110)."""
+    """Đã qua mọi chốt — một luật mọi mức (ADR-0036 §2; L1 không tới đây: verdict `human`): `merge-check` = merge →
+    merge ghim head (auto-merge người bật cũng vậy — ghim head an toàn hơn chờ GitHub, D-063); auto-merge đang bật mà
+    chưa đủ điều kiện → tắt (không ghim head); còn lại → chờ (`merge-watch`)."""
     n, head, verdict = d.get("pr", ""), str(d.get("head", "")), d.get("verdict")
-    pinned = f"{d.get('next', '')} · REST: {d.get('next_rest', '')} · MCP merge_pull_request expectedHeadSha={head}"
-    if int(d.get("autonomy") or 1) < 3:
-        if auto_merge:
-            return act("disable-auto-merge", "dưới L3 không bật auto-merge của GitHub (không ghim head)", disable)
-        if verdict == "merge":
-            return act("merge", "dưới L3: merge-check = merge — merge ghim head", pinned)
-        return act("wait", "; ".join(d.get("reasons", [])), f"chạy nền xt.py merge-watch --pr {n}")
-    if auto_merge:  # đã bật: GitHub merge khi required check xanh
-        if verdict == "merge":  # đã đủ điều kiện mà GitHub chưa merge (PR treo): merge ghim head, không chờ mãi (D-063)
-            return act("merge", "auto-merge đang bật mà merge-check đã = merge — merge ghim head", pinned)
-        return act("wait", "auto-merge đang bật — chờ required check", f"chạy nền xt.py merge-watch --pr {n}")
-    if d.get("base_has_required") is False:
-        # không có check bắt buộc: auto-merge của GitHub merge NGAY lúc bật, trước khi CI xong (D-062) — merge ghim head
-        # khi merge-check thấy CI xanh, không bật auto-merge
-        why = "nhánh đích không có check bắt buộc — không bật auto-merge (GitHub merge ngay lúc bật)"
-        if verdict == "merge":
-            return act("merge", f"{why}; merge-check = merge — merge ghim head", pinned)
-        return act("wait", f"{why}; chờ CI xanh rồi merge ghim head", f"chạy nền xt.py merge-watch --pr {n}")
-    return act(
-        "enable-auto-merge",
-        f"{label} — bật auto-merge (GitHub báo PR đã sẵn sàng thì merge ghim head)",
-        f"gh pr merge {n} --auto --squash (MCP enable_pr_auto_merge)",
-        pinned if verdict == "merge" else "",
-    )
+    if verdict == "merge":
+        pinned = f"{d.get('next', '')} · REST: {d.get('next_rest', '')} · MCP merge_pull_request expectedHeadSha={head}"
+        return act("merge", f"{label} — merge-check = merge — merge ghim head", pinned)
+    if auto_merge:
+        return act(
+            "disable-auto-merge", f"{label} — auto-merge đang bật mà chưa đủ điều kiện — tắt (ADR-0036)", disable
+        )
+    return act("wait", f"{label} — chờ: {'; '.join(d.get('reasons', []))}", f"chạy nền xt.py merge-watch --pr {n}")
 
 
 # Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI (không phải `\b`: `phi4`, `glm4.5`,
@@ -8281,14 +8175,10 @@ def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive:
 
 def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
     """Lệnh gh cho hành động `pr next` mà steward tự làm; [] = chỉ báo (review, fix, defer-human, chờ…). Merge luôn ghim
-    head (REST `sha`); bật auto-merge rồi GitHub báo PR đã sẵn sàng → merge ghim head (fallback)."""
+    head (REST `sha`); không bao giờ bật auto-merge (ADR-0036)."""
     n, head, action = str(out["pr"]), str(out["head"]), out["action"]
-    merge = ["gh", "api", "-X", "PUT", f"{repo}/pulls/{n}/merge", "-f", "merge_method=squash", "-f", f"sha={head}"]
     if action == "merge":
-        return [merge]
-    if action == "enable-auto-merge":
-        auto = ["gh", "pr", "merge", n, "--auto", "--squash", "--match-head-commit", head]
-        return [auto, merge] if out.get("fallback") else [auto]
+        return [["gh", "api", "-X", "PUT", f"{repo}/pulls/{n}/merge", "-f", "merge_method=squash", "-f", f"sha={head}"]]
     if action == "disable-auto-merge":
         return [["gh", "pr", "merge", n, "--disable-auto"]]
     if action == "update" and _steward_can_update():  # tụt sau nhánh đích: GitHub tạo merge commit, ghim head đang thấy
@@ -8362,7 +8252,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
         label_err = _steward_run(
             [["gh", "api", "-X", "POST", f"{repo}/issues/{n}/labels", "-f", f"labels[]={STANDARD_LABEL}"]]
         )
-        if label_err:  # không nhãn: push sau có thể hạ PR về làn nhanh — không bật/merge lượt này, báo đỏ ra summary
+        if label_err:  # không nhãn: push sau có thể hạ PR về làn nhanh — không merge lượt này, báo đỏ ra summary
             out["warn"] = f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
@@ -8391,10 +8281,8 @@ def _steward_stale(out: Dict[str, Any], repo: str) -> str:
         return "PR đã đóng/merge"
     if sha != out["head"]:
         return f"head đổi {str(out['head'])[:7]} → {sha[:7] or '?'} — lượt sau xét head mới"
-    want = {"enable-auto-merge": True, "disable-auto-merge": False}.get(str(out["action"]))
-    on = bool(pull.get("auto_merge"))
-    if want is not None and want == on:  # bật khi đã bật / tắt khi đã tắt
-        return f"auto-merge đã {'bật' if on else 'tắt'}"
+    if out["action"] == "disable-auto-merge" and not pull.get("auto_merge"):  # tắt khi đã tắt
+        return "auto-merge đã tắt"
     return ""
 
 
@@ -8476,9 +8364,9 @@ REPO_SLUG_RE = re.compile(r"[\w.-]+/[\w.-]+")
 
 
 def cmd_pr_steward(args: argparse.Namespace) -> int:
-    """Quản PR không cần phiên agent (ADR-0027): mọi PR mở (hoặc `--pr`) → `pr next`; `--apply` thì tự bật/tắt
-    auto-merge, merge ghim head, cập nhật nhánh tụt sau nhánh đích (trừ khi `XT_STEWARD_UPDATE=off`). Việc cần
-    người/agent (review, sửa) chỉ báo."""
+    """Quản PR không cần phiên agent (ADR-0027): mọi PR mở (hoặc `--pr`) → `pr next`; `--apply` thì tắt auto-merge người
+    bật (không ghim head — ADR-0036), merge ghim head khi merge-check = merge ở head, cập nhật nhánh tụt sau nhánh đích
+    (trừ khi `XT_STEWARD_UPDATE=off`). Việc cần người/agent (review, sửa) chỉ báo."""
     if args.repo and not REPO_SLUG_RE.fullmatch(args.repo):
         print(f"✗ --repo phải dạng owner/repo, không phải {args.repo!r}", file=sys.stderr)
         return 2
@@ -8490,7 +8378,6 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     target = (lambda n: f"https://github.com/{args.repo}/pull/{n}") if args.repo else (lambda n: n)
-    _REQUIRED_CACHE.clear()
     results = [
         _event_note(_steward_one(target(n), repo, project_dir(), args.apply, gh_repo), heads.get(n, "")) for n in nums
     ]
@@ -8537,9 +8424,8 @@ def cmd_pr(args: argparse.Namespace) -> int:
         print(json.dumps(out, ensure_ascii=False))
         return 0
     print(f"{out['action'].upper()} · PR #{out['pr']} · head {out['head'][:7]} — {out['why']}")
-    for k in ("do", "fallback"):
-        if out[k]:
-            print(f"→ {out[k]}" if k == "do" else f"  không được thì: {out[k]}")
+    if out["do"]:
+        print(f"→ {out['do']}")
     return 0
 
 
@@ -8834,7 +8720,7 @@ PERF_SUSPECT_RE = re.compile(
 AUTONOMY_CORPUS = "tests/fixtures/autonomy"
 AUTONOMY_REMEDIATION = "docs/ops/REMEDIATION-PLAN-2026-10-19.md"
 AUTONOMY_SCOPE = "scope.json"
-# Khoá "cổng" của mỗi nhóm: True = máy cho đi tiếp (được merge, được bật auto-merge, bước kế là merge/bật, lệnh chạy,
+# Khoá "cổng" của mỗi nhóm: True = máy cho đi tiếp (được merge, `auto_merge_ok`, bước kế là merge, lệnh chạy,
 # CI tính xanh, tự sửa thay vì dừng). Ca mong False mà máy trả True = false-green (exit 1); mong True mà trả False = chặn
 # oan (false-red: báo, không làm đỏ). Khoá khác trong `expect` (verdict, code, category…) so bằng nhau → `mismatch`.
 AUTONOMY_GATES: Dict[str, Tuple[str, ...]] = {
@@ -8848,7 +8734,7 @@ AUTONOMY_GATES: Dict[str, Tuple[str, ...]] = {
 # Nguồn ca: tái hiện REMEDIATION §2 · phát hiện audit 🔴/🟠 đã sửa · ca đối kháng do tác giả bản sửa viết (chưa độc lập)
 # · ca đối kháng do reviewer khác họ model viết (AUTO-07 đòi) · ca đối chứng (việc hợp lệ phải đi tiếp — đo chặn oan).
 AUTONOMY_ORIGINS = ("repro", "audit", "adversarial-author", "adversarial-reviewer", "control")
-PROCEED_ACTIONS = {"enable-auto-merge", "merge"}
+PROCEED_ACTIONS = {"merge"}
 BENCH_MERGE_CHECK_DOWN = {"verdict": "lỗi", "reasons": ["merge-check không chạy được"]}  # như guard.merge_check khi lỗi
 REC_ROW_RE = re.compile(r"^\| (REC-\d+) \|", re.M)
 
@@ -9607,7 +9493,7 @@ def build_parser() -> argparse.ArgumentParser:
         "  xt.py blueprint-status BLUEPRINT.md --strict\n"
         "  xt.py loop record --task T-001 -- python3 -m unittest\n\n"
         "mã thoát: 0 ổn · 1 vi phạm/chưa đạt · 2 sai cách dùng hoặc không đọc được file/thư mục · 3 lỗi GitHub/"
-        "hết giờ (`merge-gate`, `merge-watch`, `pr reviewed`, `loop ci-triage`) · 126 guard cấm lệnh (`guard-check`, Gate — LOOP-STOP-027)",
+        "hết giờ (`merge-watch`, `pr reviewed`, `loop ci-triage`) · 126 guard cấm lệnh (`guard-check`, Gate — LOOP-STOP-027)",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {framework_version()}")
     p.add_argument(
@@ -9673,7 +9559,9 @@ def build_parser() -> argparse.ArgumentParser:
     pm.set_defaults(fn=cmd_merge_check)
     ppr = sub.add_parser("pr", help="merge theo làn: bước kế tiếp cho PR đã mở + sổ review (ADR-0025)")
     prsub = ppr.add_subparsers(dest="pr_cmd", required=True)
-    pnx = prsub.add_parser("next", help="MỘT hành động kế tiếp: bật/tắt auto-merge, rà, merge ghim head, chờ, defer")
+    pnx = prsub.add_parser(
+        "next", help="MỘT hành động kế tiếp: tắt auto-merge người bật, rà, merge ghim head, chờ, defer"
+    )
     pnx.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pnx.add_argument("--pr-json", help="đọc JSON PR từ FILE hoặc - như merge-check")
     pnx.add_argument("--json", action="store_true")
@@ -9701,11 +9589,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="chỉ ghi sổ cục bộ, không đăng kết quả lên PR (pr-steward và phiên khác sẽ không thấy — ADR-0027)",
     )
     pst = prsub.add_parser(
-        "steward", help="mọi PR mở → pr next; --apply tự bật auto-merge/merge ghim head (workflow pr-steward, ADR-0027)"
+        "steward", help="mọi PR mở → pr next; --apply tự merge ghim head/tắt auto-merge (workflow pr-steward, ADR-0027)"
     )
     pst.add_argument("--pr", help="chỉ PR này (số/URL); mặc định mọi PR mở")
     pst.add_argument("--repo", help="owner/repo (mặc định repo hiện tại của gh)")
-    pst.add_argument("--apply", action="store_true", help="làm thật: bật/tắt auto-merge, merge ghim head")
+    pst.add_argument("--apply", action="store_true", help="làm thật: merge ghim head, tắt auto-merge, cập nhật nhánh")
     pst.add_argument("--json", action="store_true", help="in JSON danh sách kết quả")
     pst.add_argument(
         "--event",
@@ -9713,12 +9601,6 @@ def build_parser() -> argparse.ArgumentParser:
         " nào → mọi PR mở (AUTO-05)",
     )
     ppr.set_defaults(fn=cmd_pr)
-    pq = sub.add_parser("merge-gate", help="required check: đỏ khi PR ngoại lệ cứng đang bật auto-merge (ADR-0023)")
-    pq.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
-    pq.add_argument("--pr-json", help="đọc JSON `gh pr view --json …` từ FILE hoặc - thay vì gọi REST")
-    pq.add_argument("--head", help="SHA head của sự kiện CI; PR có head khác → exit 3 (chờ rồi chạy lại)")
-    pq.add_argument("--json", action="store_true", help="in JSON (pr, head, gate, auto_merge, hard, notes)")
-    pq.set_defaults(fn=cmd_merge_gate)
     prc = sub.add_parser(
         "release-check",
         help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch → GO/NO-GO (ADR-0029)",

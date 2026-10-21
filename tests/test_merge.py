@@ -114,13 +114,12 @@ class FakeGh:
         self.statuses = statuses if statuses is not None else [{"context": "ci/legacy", "state": "success"}]
         self.open_prs = open_prs if open_prs is not None else [{"number": 7}]
         self.comments = comments or []
-        self.rules = rules if rules is not None else REQUIRED_TEST  # nhánh đích có check bắt buộc (D-062)
+        self.rules = rules if rules is not None else REQUIRED_TEST  # check bắt buộc của nhánh đích (REC-08)
         self.branch = branch or {}
         self.raw = raw or {}
         self.real_git = real_git
         self.calls: list[list[str]] = []
-        xt._REQUIRED_CACHE.clear()  # cache theo thời gian của xt: mỗi FakeGh một bộ dữ liệu giả
-        xt._CHAIN_CACHE.clear()
+        xt._CHAIN_CACHE.clear()  # cache của xt: mỗi FakeGh một bộ dữ liệu giả
 
     def paths(self) -> list[str]:
         return [_unpage(c[-1])[0] for c in self.calls]
@@ -469,14 +468,6 @@ class MergeDecisionTest(unittest.TestCase):
             self.assertIsNone(xt.local_merge_conflicts("m", main, head, "", clone))
         self.assertNotIn("fetch", [c.args[1] for c in g.call_args_list])  # nông: không fetch, không kiểm được
 
-    def test_merge_gate_skips_local_conflict_check(self):
-        """Review #164: `merge-gate` chạy ở CI checkout nông — chỉ cần ngoại lệ cứng, không kiểm xung đột cục bộ."""
-        with FakeGh(pull={"mergeable": None, "mergeable_state": "unknown"}).patch():
-            with unittest.mock.patch.object(xt, "local_merge_conflicts") as lmc:
-                rc, _, _ = run_main("merge-gate", "--pr", "7")
-        lmc.assert_not_called()
-        self.assertEqual(rc, 0)
-
     def test_rest_adds_local_conflicts_when_github_undecided(self):
         """`_pr_rest`: chỉ hỏi kiểm cục bộ khi GitHub chưa khẳng định MERGEABLE; không kiểm được → không có khoá."""
         with FakeGh(
@@ -527,8 +518,8 @@ class MergeDecisionTest(unittest.TestCase):
         )
 
     def test_merge_gate_not_ci_evidence(self):
-        """AUD-HAR-058: `merge-gate`/`pr-steward` chỉ xét auto-merge, không kiểm mã — một mình chúng xanh không phải
-        bằng chứng CI (dự án đích chưa có CI riêng từng được merge khi chưa test nào chạy)."""
+        """AUD-HAR-058: `pr-steward` và stub `merge-gate` (luôn xanh, ADR-0036 §5) không kiểm mã — một mình chúng xanh
+        không phải bằng chứng CI (dự án đích chưa có CI riêng từng được merge khi chưa test nào chạy)."""
         gate = {"__typename": "CheckRun", "name": "merge-gate", "status": "COMPLETED", "conclusion": "SUCCESS"}
         steward = {**gate, "name": "pr-steward"}
         for rollup in ([gate], [gate, steward], [{**gate, "name": "Merge-Gate"}]):
@@ -1087,7 +1078,7 @@ class MergeCheckCliTest(unittest.TestCase):
         with gh.patch():
             self.assertEqual(
                 xt._pr_rest("7"),
-                pr(reviewDecision="", baseHasRequired=True, baseRefName="main", requiredChecks=[{"context": "test"}]),
+                pr(reviewDecision="", baseRefName="main", requiredChecks=[{"context": "test"}]),
             )  # như fixture `gh pr view`
         cases = {
             "merged": ({"merged": True, "state": "closed"}, "state", "MERGED"),
@@ -1269,20 +1260,29 @@ class HardExceptionL3Test(unittest.TestCase):
 
 
 class GuardHardExceptionTest(unittest.TestCase):
-    """ADR-0016: guard không bật auto-merge (L3) cho PR thuộc ngoại lệ cứng — kể cả lúc mới mở, CI còn chạy."""
+    """ADR-0036 §3: guard chặn phẳng việc bật auto-merge — mọi mức tự chủ, mọi PR (cả ngoại lệ cứng lúc mới mở, CI còn
+    chạy), không gọi merge-check; tắt auto-merge vẫn qua. Ngoại lệ cứng với merge ghim head: người merge (ADR-0016)."""
 
     def test_guard_auto_merge_refuses_hard_exception(self):
         sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
         import guard
 
-        base = {"verdict": "wait", "autonomy": 3, "stacked": False, "repo": "o/r", "hard": []}
-        with unittest.mock.patch.object(guard, "merge_check", return_value=base):
-            self.assertEqual(guard._auto_merge_verdict(["7"], ".", "o/r")[0], "allow")
-        hard = {**base, "hard": ["đường dẫn nhạy cảm (auth): src/auth/x.py"]}
+        base = {"verdict": "merge", "autonomy": 3, "stacked": False, "repo": "o/r", "hard": [], "eligible": True}
+        hard = {**base, "verdict": "human", "hard": ["đường dẫn nhạy cảm (auth): src/auth/x.py"], "eligible": False}
+        for d in (base, hard):
+            for cmd in ("gh pr merge 7 --auto --squash", "gh pr merge --auto 7 --admin -R o/r"):
+                with self.subTest(hard=bool(d["hard"]), cmd=cmd):
+                    with unittest.mock.patch.object(guard, "merge_check", return_value=d) as mc:
+                        res = dict(guard.apply_policy(guard.bash_decision(cmd, ".")))
+                    self.assertEqual((res["decision"], res["code"]), ("deny", "AUTO_MERGE_ENABLE"))
+                    mc.assert_not_called()
         with unittest.mock.patch.object(guard, "merge_check", return_value=hard):
-            dec, why = guard._auto_merge_verdict(["7"], ".", "o/r")
-        self.assertEqual(dec, "ask")
-        self.assertIn("LOOP-STOP-005", why)
+            res = dict(
+                guard.apply_policy(guard.bash_decision(f"gh pr merge 7 --squash --match-head-commit {'a' * 40}", "."))
+            )
+        self.assertNotEqual(res["decision"], "allow")  # ngoại lệ cứng: merge ghim head vẫn không tự qua
+        dis = dict(guard.apply_policy(guard.bash_decision("gh pr merge 7 --disable-auto", ".")))
+        self.assertNotEqual(dis["decision"], "deny")
 
 
 if __name__ == "__main__":
@@ -1387,84 +1387,19 @@ class MergeWatchTest(unittest.TestCase):
         self.assertIn("hỏng", err)
 
 
-class MergeGateTest(unittest.TestCase):
-    """ADR-0023 (D-029): required check `merge-gate` đỏ khi `merge-check` báo `hard` trên head hiện tại VÀ PR đang bật
-    auto-merge — commit đẩy sau khi bật auto-merge không lọt nhờ auto-merge không ghim head."""
+class MergeConditionTest(unittest.TestCase):
+    """ADR-0028/0036: MỘT điều kiện merge cho merge-check/pr next/guard/steward; stub `merge-gate` chỉ giữ context."""
 
     AUTO = {"enabledBy": {"login": "a"}, "mergeMethod": "SQUASH"}
-    KEY = [{"path": "docs/autopilot/PLAN.md", "additions": 1, "deletions": 0, "hard_key": True}]
-
-    def setUp(self):
-        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
-        commit_base_xt(self.base, "merge_autonomy: L3\nmerge_hard_exceptions: auto\n")
-
-    def gate(self, p: dict, *extra: str) -> tuple[int, str, str]:
-        return run_main("merge-gate", *extra, "--pr-json", "-", stdin=json.dumps(p))
-
-    def test_hard_head_with_auto_merge_is_red(self):
-        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO))
-        self.assertEqual(rc, 1)
-        self.assertIn("✗ ngoại lệ cứng trên head này mà PR đang bật auto-merge", out)
-        self.assertIn(xt.HARD_KEY_REASON, out)  # grant/khoá: `auto` không miễn được
-        self.assertIn("→ tắt auto-merge (`gh pr merge 7 --disable-auto`", out)
-        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--json")
-        d = json.loads(out)
-        self.assertEqual((rc, d["gate"], d["auto_merge"], d["hard"]), (1, "block", True, [xt.HARD_KEY_REASON]))
-
-    def test_hard_without_auto_merge_stays_green_for_human_merge(self):
-        rc, out, _ = self.gate(pr(files=self.KEY))
-        self.assertEqual(rc, 0)
-        self.assertIn("⚠ ngoại lệ cứng — người merge tay", out)
-        rc, out, _ = self.gate(pr(files=self.KEY, autoMergeRequest=None), "--json")
-        self.assertEqual((rc, json.loads(out)["gate"]), (0, "warn"))
-
-    def test_harmless_or_waived_pr_is_green_even_with_auto_merge(self):
-        rc, out, _ = self.gate(pr(autoMergeRequest=self.AUTO))
-        self.assertEqual((rc, out), (0, "✓ không có ngoại lệ cứng · PR #7 · head abc1234def\n"))
-        payment = pr(
-            files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO
-        )
-        # `merge_hard_exceptions: auto` miễn đường dẫn tiền; làn chuẩn + auto-merge cần review sạch ở head (ADR-0028)
-        reviewed = {**payment, "xtReviews": [{"head": "abc1234def", "clean": True, "at": "2026-10-19T10:00:00Z"}]}
-        rc, out, _ = self.gate(reviewed, "--json")
-        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (0, "pass", "ok"))
-        commit_base_xt(self.base, "merge_autonomy: L3\n")  # không khoá → human: đường dẫn tiền là hard
-        self.assertEqual(self.gate(reviewed)[0], 1)
-
-    def test_merge_gate_missing_review(self):
-        """T-1507 (REC-03, ADR-0028): làn chuẩn + auto-merge bật mà chưa có review sạch ở ĐÚNG head → đỏ (như `pr next` bảo
-        tắt auto-merge); review chặn ở head → đỏ; review sạch → xanh; review sạch ở head cũ mang qua chỉ khi `baseMergeOf`."""
-        std = pr(files=[{"path": "src/payment/charge.py", "additions": 1, "deletions": 0}], autoMergeRequest=self.AUTO)
-
-        def mark(head: str, clean: bool, at: str) -> dict:
-            return {"head": head, "clean": clean, "at": at}
-
-        rc, out, _ = self.gate(std)
-        self.assertEqual(rc, 1)
-        self.assertIn("✗ chưa có review sạch ở head (missing) trên head này mà PR đang bật auto-merge", out)
-        self.assertIn("xt.py pr reviewed", out)
-        rc, out, _ = self.gate({**std, "xtReviews": [mark("abc1234def", False, "2026-10-19T10:00:00Z")]}, "--json")
-        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (1, "block", "blocking"))
-        clean = {**std, "xtReviews": [mark("abc1234def", True, "2026-10-19T10:00:00Z")]}
-        self.assertEqual(self.gate(clean)[0], 0)
-        old = {**std, "xtReviews": [mark("old0000000", True, "2026-10-19T10:00:00Z")]}
-        self.assertEqual(self.gate(old)[0], 1)  # review sạch ở head cũ, head mới không phải "cập nhật nhánh" sạch
-        self.assertEqual(self.gate({**old, "baseMergeOf": ["old0000000"]})[0], 0)  # mang qua merge nhánh đích sạch
-        # không bật auto-merge: không chặn (người/agent merge ghim head, guard kiểm `eligible`)
-        self.assertEqual(self.gate({**std, "autoMergeRequest": None})[0], 0)
-        # làn nhanh không cần review
-        self.assertEqual(self.gate(pr(autoMergeRequest=self.AUTO))[0], 0)
-        d, _ = xt._merge_eval({**std, "xtReviews": clean["xtReviews"]})
-        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("ok", True, True))
-        d, _ = xt._merge_eval(std)
-        self.assertEqual((d["review"], d["eligible"], d["auto_merge_ok"]), ("missing", False, False))
 
     def test_single_merge_condition(self):
-        """`merge_eligibility` là MỘT hàm thuần cho merge-check/pr next/merge-gate/guard/steward: pr_next và merge-gate/guard
-        đọc cùng `review_gate` nên không thể lệch nhau về "đã đủ review ở head chưa"."""
+        """`merge_eligibility` là MỘT hàm thuần cho merge-check/pr next/guard/steward: pr_next và guard đọc cùng
+        `review_gate` nên không thể lệch nhau về "đã đủ review ở head chưa"."""
         d = {"head": "H3", "lane": "chuẩn", "verdict": "merge", "hard": [], "base_merge_of": ["H2"]}
-        r = lambda head, clean, at: {"head": head, "clean": clean, "at": at}  # noqa: E731
+
+        def r(head: str, clean: bool, at: str) -> dict:
+            return {"head": head, "clean": clean, "at": at}
+
         cases = {
             "thiếu": ([], "missing", False, False),
             "sạch ở head": ([r("H3", True, "1")], "ok", True, True),
@@ -1477,9 +1412,11 @@ class MergeGateTest(unittest.TestCase):
             with self.subTest(name):
                 e = xt.merge_eligibility(d, reviews)
                 self.assertEqual((e["review"], e["eligible"], e["auto_merge_ok"]), (state, eligible, auto_ok))
-                rec = {"reviews": reviews}  # `pr next` đi cùng cổng: thiếu → review, chặn → fix, ok → bật auto-merge
-                act = xt.pr_next({**d, "pr": 7, "autonomy": 3, "base_has_required": True}, False, rec)["action"]
-                self.assertEqual(act, {"missing": "review", "blocking": "fix", "ok": "enable-auto-merge"}[state])
+                rec = {"reviews": reviews}  # `pr next` đi cùng cổng: thiếu → review, chặn → fix, ok → merge ghim head
+                act = xt.pr_next({**d, "pr": 7, "autonomy": 3}, False, rec)["action"]
+                self.assertEqual(act, {"missing": "review", "blocking": "fix", "ok": "merge"}[state])
+                waiting = xt.pr_next({**d, "pr": 7, "autonomy": 3, "verdict": "wait"}, False, rec)["action"]
+                self.assertEqual(waiting, {"missing": "review", "blocking": "fix", "ok": "wait"}[state])
         fast = {**d, "lane": "nhanh"}  # làn nhanh không strict: bỏ qua review (trừ khi từng có review chặn)
         self.assertEqual(xt.merge_eligibility(fast, [])["review"], "na")
         self.assertEqual(xt.merge_eligibility(fast, [r("H0", False, "1")])["review"], "missing")
@@ -1488,35 +1425,25 @@ class MergeGateTest(unittest.TestCase):
         e = xt.merge_eligibility(hard, [r("H3", True, "1")])
         self.assertEqual((e["eligible"], e["auto_merge_ok"]), (False, False))
 
-    def test_head_pin_and_read_errors(self):
-        rc, out, err = self.gate(pr(files=self.KEY, autoMergeRequest=self.AUTO), "--head", "khac")
-        self.assertEqual((rc, out), (3, ""))
-        self.assertIn("head của PR là `abc1234def`, không phải `khac`", err)
-        self.assertEqual(self.gate(pr(), "--head", "abc1234def")[0], 0)
-        rc, _, err = run_main("merge-gate", "--pr-json", "-", stdin="không phải json")
-        self.assertEqual(rc, 2)
-        self.assertIn("JSON của PR không đọc được", err)
-
     def test_rest_reads_auto_merge(self):
+        """`autoMergeRequest` (REST `auto_merge`) — auto-merge do người bật; `pr next`/steward cần để tắt (ADR-0036)."""
         with FakeGh(pull={"auto_merge": self.AUTO}).patch():
             self.assertEqual(xt._pr_rest("7")["autoMergeRequest"], self.AUTO)
         with FakeGh(pull={"auto_merge": None}).patch():
             self.assertNotIn("autoMergeRequest", xt._pr_rest("7"))
-        # Qua REST, không có xt.yaml đã commit (FakeGh: git lỗi → human) + nhãn rủi ro + auto-merge → đỏ
-        with FakeGh(pull={"auto_merge": self.AUTO, "labels": [{"name": "risk:payment"}]}).patch():
-            rc, out, _ = run_main("merge-gate", "--pr", "7", "--head", FakeGh.SHA)
-        self.assertEqual(rc, 1)
-        self.assertIn("nhãn rủi ro: risk:payment", out)
 
     def test_workflow_runs_base_code_only(self):
-        """Workflow lấy từ nhánh mặc định (`pull_request_target`), không checkout/chạy code PR, token chỉ đọc."""
+        """ADR-0036 §4–§5: `merge-gate.yml` là stub `pull_request` trần, một job `merge-gate`, không chạy mã, không action
+        ngoài, token chỉ đọc; ruleset repo khung không còn đòi `merge-gate`."""
         wf = (ROOT / ".github" / "workflows" / "merge-gate.yml").read_text(encoding="utf-8")
-        self.assertIn("pull_request_target:", wf)
-        for event in ("synchronize", "auto_merge_enabled", "auto_merge_disabled", "labeled", "unlabeled"):
-            self.assertIn(event, wf)
-        self.assertNotIn("ref:", wf.split("actions/checkout", 1)[1].split("- name:", 1)[0])
-        self.assertNotIn("write", wf.split("permissions:", 2)[2].split("steps:", 1)[0])
-        self.assertIn('merge-gate --pr "$PR" --head "$HEAD_SHA"', wf)
+        on = wf.split("\non:", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(on.strip(), "pull_request:")  # trần: không branches/paths/types — PR nào cũng có check-run
+        self.assertNotIn("pull_request_target", wf)
+        self.assertNotIn("uses:", wf)
+        self.assertNotIn("secrets.", wf)
+        self.assertNotIn("xt.py", wf)
+        self.assertNotIn("write", wf.split("\npermissions:", 1)[1].split("\njobs:", 1)[0])
+        self.assertRegex(wf, r"\njobs:\n  merge-gate:\n")
         self.assertEqual(xt.ci_check_text(wf), [])
         rules = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))["rules"]
         checks = [
@@ -1525,7 +1452,9 @@ class MergeGateTest(unittest.TestCase):
             if r["type"] == "required_status_checks"
             for c in r["parameters"]["required_status_checks"]
         ]
-        self.assertIn("merge-gate", checks)
+        self.assertNotIn("merge-gate", checks)
+        self.assertIn("quality", checks)
+        self.assertIn("merge-gate", xt.NON_CI_CHECKS)  # stub còn đó: xanh không phải bằng chứng CI (AUD-HAR-058)
 
 
 class PrNextTest(unittest.TestCase):
@@ -1554,7 +1483,7 @@ class PrNextTest(unittest.TestCase):
     def test_closed_hard_stacked_push_and_human(self):
         self.assertEqual(self.act(verdict="closed", reasons=["PR đã MERGED"])["action"], "done")
         self.assertEqual(self.act(verdict="closed", reasons=["PR đã CLOSED"])["action"], "closed")
-        self.assertEqual(self.act(True, hard=["tiền"])["action"], "disable-auto-merge")  # (7) ADR-0023
+        self.assertEqual(self.act(True, hard=["tiền"])["action"], "disable-auto-merge")  # (7) ADR-0036
         self.assertEqual(self.act(hard=["tiền"])["action"], "defer-human")
         self.assertEqual(self.act(True, stacked=True)["action"], "disable-auto-merge")
         self.assertEqual(self.act(stacked=True)["action"], "retarget")
@@ -1566,18 +1495,23 @@ class PrNextTest(unittest.TestCase):
         # Review #110: PR dành cho người mà auto-merge đang bật → GitHub sẽ tự merge; tắt trước.
         self.assertEqual(self.act(True, verdict="human")["action"], "disable-auto-merge")
 
-    def test_fast_lane_enables_on_open(self):
+    def test_fast_lane_merges_pinned_or_waits(self):
         r = self.act(lane="nhanh")
-        self.assertEqual((r["action"], r["strict"], r["fallback"]), ("enable-auto-merge", False, ""))
+        self.assertEqual((r["action"], r["strict"], r["do"]), ("wait", False, "chạy nền xt.py merge-watch --pr 7"))
+        self.assertNotIn("fallback", r)  # ADR-0036: khoá `fallback` bỏ — lệnh ghim head nằm trong `do`
         r = self.act(
             lane="nhanh",
             verdict="merge",
             next=f"gh pr merge 7 --squash --match-head-commit {self.H}",
             next_rest="gh api X",
         )
-        self.assertIn(f"expectedHeadSha={self.H}", r["fallback"])  # (5) PR đã clean: merge ghim head
-        self.assertIn("REST: gh api X", r["fallback"])  # phiên chặn GraphQL
-        self.assertEqual(self.act(True, lane="nhanh")["action"], "wait")
+        self.assertEqual(r["action"], "merge")
+        self.assertIn(f"--match-head-commit {self.H}", r["do"])
+        self.assertIn(f"expectedHeadSha={self.H}", r["do"])  # MCP
+        self.assertIn("REST: gh api X", r["do"])  # phiên chặn GraphQL
+        self.assertEqual(self.act(True, lane="nhanh")["action"], "disable-auto-merge")  # người bật, chưa đủ: tắt
+        # người bật mà đã đủ điều kiện: merge ghim head ngay, an toàn hơn chờ GitHub (D-063)
+        self.assertEqual(self.act(True, lane="nhanh", verdict="merge")["action"], "merge")
 
     def test_standard_lane_needs_clean_review_at_head(self):
         r = self.act()
@@ -1592,12 +1526,20 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec=dirty)["action"], "fix")
         self.assertEqual(self.act(True, rec=dirty)["action"], "disable-auto-merge")
         clean = {"reviews": [{"head": self.H2, "clean": False}, {"head": self.H, "clean": True}]}
-        self.assertEqual(self.act(rec=clean)["action"], "enable-auto-merge")  # (4)
-        self.assertEqual(self.act(True, rec=clean)["action"], "wait")
+        r = self.act(rec=clean)
+        self.assertEqual(r["action"], "wait")  # (4) review sạch, CI chưa xanh: chờ
+        self.assertTrue(r["why"].startswith("review sạch ở head — chờ: CI"))
+        r = self.act(rec=clean, verdict="merge")
+        self.assertEqual(
+            (r["action"], r["why"]), ("merge", "review sạch ở head — merge-check = merge — merge ghim head")
+        )
+        self.assertEqual(self.act(True, rec=clean)["action"], "disable-auto-merge")
+        self.assertEqual(self.act(True, rec=clean, verdict="merge")["action"], "merge")
 
-    def test_below_l3_never_enables_auto_merge(self):
-        # Review #110: dưới L3 không bật auto-merge (không ghim head) — merge ghim head khi merge-check = merge, còn lại chờ.
-        for level in (1, 2):
+    def test_never_enables_auto_merge(self):
+        # ADR-0036 §2: một luật mọi mức — merge ghim head khi merge-check = merge, auto-merge người bật mà chưa đủ thì
+        # tắt, còn lại chờ; không mức nào bật auto-merge.
+        for level in (1, 2, 3):
             with self.subTest(level=level):
                 self.assertEqual(self.act(lane="nhanh", autonomy=level)["action"], "wait")
                 r = self.act(lane="nhanh", autonomy=level, verdict="merge", next="gh pr merge 7 --match-head-commit x")
@@ -1605,6 +1547,9 @@ class PrNextTest(unittest.TestCase):
                     (r["action"], r["do"].split(" · ")[0]), ("merge", "gh pr merge 7 --match-head-commit x")
                 )
                 self.assertEqual(self.act(True, lane="nhanh", autonomy=level)["action"], "disable-auto-merge")
+                for v in ("wait", "merge", "update", "fix", "human", "closed"):
+                    for auto in (False, True):
+                        self.assertNotIn("enable", self.act(auto, lane="nhanh", autonomy=level, verdict=v)["action"])
         clean = {"reviews": [{"head": self.H, "clean": True}]}
         self.assertEqual(self.act(rec=clean, autonomy=2)["action"], "wait")  # L2 làn chuẩn: merge-check vốn trả human
 
@@ -1638,7 +1583,7 @@ class PrNextCliTest(unittest.TestCase):
             p = {**p, "xtReviews": [{k: r[k] for k in keys if k in r} for r in rec.get("reviews", [])]}
         return run_main("pr", "next", *extra, "--pr-json", "-", stdin=json.dumps(p))
 
-    def test_flow_review_then_enable_and_ledger(self):
+    def test_flow_review_then_merge_and_ledger(self):
         rc, out, _ = self.nxt(self.big)
         self.assertEqual(rc, 0)
         self.assertTrue(out.startswith(f"REVIEW · PR #7 · head {self.head[:7]} — làn chuẩn: rà cả PR"))
@@ -1652,11 +1597,10 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
         rc, out, _ = self.nxt(self.big)
-        self.assertIn("ENABLE-AUTO-MERGE · PR #7", out)
-        self.assertIn("→ gh pr merge 7 --auto --squash", out)
-        self.assertIn(
-            f"  không được thì: gh pr merge 7 --squash --match-head-commit {self.head} · REST: gh api -X PUT", out
-        )
+        self.assertIn("MERGE · PR #7", out)
+        self.assertIn(f"→ gh pr merge 7 --squash --match-head-commit {self.head} · REST: gh api -X PUT", out)
+        self.assertNotIn("--auto", out)
+        self.assertNotIn("không được thì", out)
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
     def test_reviewed_rerun_is_idempotent(self):
@@ -1695,12 +1639,12 @@ class PrNextCliTest(unittest.TestCase):
         tác giả ghi (`pr reviewed --clean`) không mở được merge; cùng một sự thật với `merge_eligibility`."""
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
         pinned = {**self.big, "reviewIdentity": "rev-bot"}
-        self.assertEqual(
-            json.loads(self.nxt(self.big, "--json")[1])["action"], "enable-auto-merge"
-        )  # không cấu hình: như cũ
+        got = json.loads(self.nxt(self.big, "--json")[1])
+        self.assertEqual(got["action"], "merge")  # không cấu hình: như cũ
+        self.assertNotIn("fallback", got)
         self.assertEqual(json.loads(self.nxt(pinned, "--json")[1])["action"], "review")
         published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
-        self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "enable-auto-merge")
+        self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "merge")
         rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
         self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": []})
         self.assertEqual(xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"]})
@@ -1754,7 +1698,7 @@ class PrNextCliTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # --clean/--blocking/--inconclusive loại trừ nhau
             run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--inconclusive", "--clean", *MODELS)
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
-        self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "enable-auto-merge")
+        self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "merge")
 
     def test_clean_review_needs_a_different_model(self):
         def run(*extra: str) -> tuple:
@@ -1787,13 +1731,18 @@ class PrNextCliTest(unittest.TestCase):
         for name in ("command_r", "nova_pro", "o3mini", "GLM_4"):  # review #164: thẻ thật không có dấu ngăn
             self.assertTrue(xt.MODEL_FAMILY_RE.search(name), name)
 
+    def test_done_prints_no_command(self):
+        """Hành động không có lệnh (`done`/`closed`): chỉ in dòng kết luận, không dòng `→` rỗng; không còn `fallback`."""
+        rc, out, _ = self.nxt(pr(state="MERGED"))
+        self.assertEqual((rc, out), (0, f"DONE · PR #7 · head {pr()['headRefOid'][:7]} — PR đã MERGED\n"))
+
     def test_small_pr_after_standard_stays_strict_and_bad_input(self):
         self.nxt(self.big)  # ghi standard_seen
         small = pr(headRefOid=self.head)
         self.assertEqual(json.loads(self.nxt(small, "--json")[1])["action"], "review")
         rc, out, _ = self.nxt(pr(number=8))  # PR khác, làn nhanh, chưa từng chuẩn
-        self.assertIn("ENABLE-AUTO-MERGE · PR #8", out)
-        self.assertIn("  không được thì: gh pr merge 8 --squash --match-head-commit abc1234def", out)  # CI đã xanh
+        self.assertIn("MERGE · PR #8", out)
+        self.assertIn("→ gh pr merge 8 --squash --match-head-commit abc1234def", out)  # CI đã xanh
         url = "https://github.com/o/r/pull/8/"  # URL → cùng khoá số PR với `pr next`
         rc, out, _ = run_main("pr", "reviewed", "--pr", url, "--head", self.head, "--clean", *MODELS)
         self.assertEqual(out, f"✓ PR #8: review sạch ở {self.head[:7]}\n")
@@ -1859,7 +1808,7 @@ class MissingRequiredCheckTest(unittest.TestCase):
         with gh.patch():
             p = xt._pr_rest("7")
         self.assertNotIn("missingRequired", p)
-        # rules chỉ đọc một lần (baseHasRequired, D-062) — không đọc thêm để tìm check thiếu khi không BLOCKED
+        # rules chỉ đọc một lần (requiredChecks, REC-08) — không đọc thêm để tìm check thiếu khi không BLOCKED
         self.assertEqual(sum("rules/branches" in c for c in gh.paths()), 1)
         pending = {**pr(), "missingRequired": ["dast"]}
         pending["statusCheckRollup"] = [{"__typename": "CheckRun", "name": "x", "status": "IN_PROGRESS"}]
@@ -1867,9 +1816,9 @@ class MissingRequiredCheckTest(unittest.TestCase):
 
     def test_rules_unreadable_falls_back(self):
         with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
-            self.assertEqual(xt._required_checks("repos/o/r", "main"), [])
+            self.assertEqual(xt._required_specs("repos/o/r", "main"), [])
         with FakeGh(raw={"repos/{owner}/{repo}/rules/branches/rel%2F1": json.dumps([{"type": "x"}])}).patch():
-            self.assertEqual(xt._required_checks("repos/{owner}/{repo}", "rel/1"), [])
+            self.assertEqual(xt._required_specs("repos/{owner}/{repo}", "rel/1"), [])
 
 
 class BaseMergeCarryTest(unittest.TestCase):
@@ -1954,7 +1903,7 @@ class BaseMergeCarryTest(unittest.TestCase):
         d = xt.merge_decision({**p, "files": [{"path": "src/a.py", "additions": 400, "deletions": 0}]}, 3)
         self.assertEqual(d["lane"], "chuẩn")
         clean = {"reviews": [{"head": self.H, "clean": True}]}
-        self.assertEqual(xt.pr_next(d, False, clean)["action"], "enable-auto-merge")  # review ở H mang sang head
+        self.assertEqual(xt.pr_next(d, False, clean)["action"], "merge")  # review ở H mang sang head
         dirty = {"reviews": [{"head": self.H, "clean": False}]}
         self.assertEqual(xt.pr_next(d, False, dirty)["action"], "review")  # review báo lỗi không mang sang
         self.assertEqual(xt.pr_next({**d, "base_merge_of": []}, False, clean)["action"], "review")
@@ -1964,7 +1913,6 @@ class BaseMergeCarryTest(unittest.TestCase):
         nhánh đích) che; review mới hơn ở cùng head vẫn thắng review cũ ở head đó."""
         head, old = "b" * 40, "a" * 40
         d = {"pr": 7, "head": head, "lane": "chuẩn", "verdict": "merge", "autonomy": 3, "base_merge_of": [old]}
-        d["base_has_required"] = True
         late_clean = {
             "reviews": [
                 {"head": head, "clean": False, "at": "2026-10-19T10:00:00Z"},
@@ -1973,8 +1921,8 @@ class BaseMergeCarryTest(unittest.TestCase):
         }
         self.assertEqual(xt.pr_next(d, False, late_clean)["action"], "fix")
         fixed = {"reviews": [*late_clean["reviews"], {"head": head, "clean": True, "at": "2026-10-19T10:09:00Z"}]}
-        self.assertEqual(xt.pr_next(d, False, fixed)["action"], "enable-auto-merge")
-        self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "enable-auto-merge")
+        self.assertEqual(xt.pr_next(d, False, fixed)["action"], "merge")
+        self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "merge")
 
     def test_steward_updates_branch(self):
         cmds = xt._steward_command({"pr": 7, "head": "h", "action": "update"}, "repos/o/r")
@@ -2112,7 +2060,7 @@ class PrStewardTest(unittest.TestCase):
             self.assertEqual(xt._published_marks("repos/o/r", "7"), [])  # thiếu quyền đọc comment: chặt hơn, không lỗi
         p = pr(headRefOid=self.H, files=big, xtReviews=[{"head": self.H, "clean": True, "at": "2026-10-19T01:00:00Z"}])
         rc, out, _ = run_main("pr", "next", "--json", "--pr-json", "-", stdin=json.dumps(p))
-        self.assertEqual((rc, json.loads(out)["action"]), (0, "enable-auto-merge"))
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "merge"))
 
     def test_publish_review(self):
         args = ("pr", "reviewed", "--pr", "7", "--head", self.H, "--blocking")
@@ -2154,99 +2102,92 @@ class PrStewardTest(unittest.TestCase):
         with gh.patch():
             rc, out, _ = run_main("pr", "steward")
         self.assertEqual(rc, 0)
-        self.assertTrue(out.startswith("#7 enable-auto-merge — làn nhanh"))
+        self.assertTrue(out.startswith("#7 merge — làn nhanh"))
         self.assertEqual(gh.writes, [])  # không --apply: chỉ báo
         summary = self.base / "summary.md"
         gh = StewardGh()
         with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 0)
-        self.assertIn("#7 enable-auto-merge ✓", out)
+        self.assertIn("#7 merge ✓", out)
         self.assertEqual(
-            gh.writes[0], ["gh", "pr", "merge", "7", "--auto", "--squash", "--match-head-commit", FakeGh.SHA]
-        )
+            gh.writes,
+            [
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "PUT",
+                    "repos/{owner}/{repo}/pulls/7/merge",
+                    "-f",
+                    "merge_method=squash",
+                    "-f",
+                    f"sha={FakeGh.SHA}",
+                ]
+            ],
+        )  # merge ghim head, không bật auto-merge (ADR-0036)
         self.assertIn("## pr-steward", summary.read_text(encoding="utf-8"))
-        # GitHub báo PR đã sẵn sàng (không bật được auto-merge) → merge ghim head qua REST
-        gh = StewardGh(fail={"gh pr merge": "Pull request is in clean status"})
-        with gh.patch():
-            rc, out, _ = run_main("pr", "steward", "--apply", "--pr", "7", "--json")
-        self.assertEqual((rc, json.loads(out)[0]["applied"]), (0, True))
-        self.assertEqual(
-            gh.writes[1][4:],
-            ["repos/{owner}/{repo}/pulls/7/merge", "-f", "merge_method=squash", "-f", f"sha={FakeGh.SHA}"],
-        )
 
-    def test_steward_needs_required_checks_to_enable_auto_merge(self):
-        # T-1107 (hotel-manager): nhánh đích không có check bắt buộc → auto-merge của GitHub merge NGAY lúc bật
-        gh = StewardGh(rules=[{"type": "pull_request"}])
-        with gh.patch():
-            rc, out, _ = run_main("pr", "steward", "--apply")
-        self.assertEqual(rc, 0)  # cấu hình bền: không làm run đỏ
-        self.assertIn("#7 merge ✓ — nhánh đích không có check bắt buộc", out)
-        # PR đã sẵn sàng (CI xanh, merge-check = merge): không bật auto-merge, chỉ merge ghim head
-        self.assertEqual([w[:3] for w in gh.writes], [["gh", "api", "-X"]])
-        self.assertTrue(gh.writes[0][4].endswith("/pulls/7/merge"))
-        # CI còn chạy: chờ, không bật auto-merge
+    def test_steward_waits_without_required_checks(self):
+        """ADR-0036 §2: nhánh đích có hay không có check bắt buộc, luật như nhau — CI chưa xong thì chờ, không ghi gì;
+        xanh thì merge ghim head (D-062 hết đối tượng: không còn auto-merge để kìm)."""
         running = [{"name": "test", "status": "in_progress", "conclusion": None}]
-        gh = StewardGh(rules=[{"type": "pull_request"}], runs=running)
-        with gh.patch():
-            rc, out, _ = run_main("pr", "steward", "--apply")
-        self.assertEqual((rc, gh.writes), (0, []))
-        self.assertIn("#7 wait — nhánh đích không có check bắt buộc", out)
-        # branch protection cổ điển có check bắt buộc → được bật
-        gh = StewardGh(
-            rules=[{"type": "pull_request"}], branch={"protection": {"required_status_checks": {"contexts": ["test"]}}}
-        )
-        with gh.patch():
-            rc, out, _ = run_main("pr", "steward", "--apply")
-        self.assertEqual((rc, gh.writes[0][:3]), (0, ["gh", "pr", "merge"]))
-        off = {"protection": {"required_status_checks": {"enforcement_level": "off", "contexts": ["test"]}}}
-        xt._REQUIRED_CACHE.clear()
-        with StewardGh(rules=[{"type": "pull_request"}], branch=off).patch():
-            self.assertFalse(xt._base_has_required("repos/{owner}/{repo}", "main"))  # protection tắt: không tính
-        # không đọc được rule/nhánh, hoặc PR không có nhánh đích → coi như không có (chiều chặt)
-        xt._REQUIRED_CACHE.clear()
-        with unittest.mock.patch.object(xt, "_gh_items", side_effect=xt.PrInputError("403")):
-            with unittest.mock.patch.object(xt, "_gh_one", side_effect=xt.PrInputError("403")):
-                self.assertFalse(xt._base_has_required("repos/o/r", "main"))
-        self.assertFalse(xt._base_has_required("repos/o/r", ""))
-        with unittest.mock.patch.object(xt, "_required_checks", side_effect=AssertionError("cache")):
-            self.assertFalse(xt._base_has_required("repos/o/r", "main"))
-        # hết hạn cache (import ruleset giữa lúc merge-watch chạy) thì đọc lại
-        with (
-            unittest.mock.patch.object(xt.time, "monotonic", return_value=time.monotonic() + xt.WRITER_TTL + 1),
-            unittest.mock.patch.object(xt, "_required_checks", return_value=["test"]),
-        ):
-            self.assertTrue(xt._base_has_required("repos/o/r", "main"))
+        for rules in ([{"type": "pull_request"}], REQUIRED_TEST):
+            gh = StewardGh(rules=rules, runs=running)
+            with self.subTest(rules=rules), gh.patch():
+                rc, out, _ = run_main("pr", "steward", "--apply")
+            self.assertEqual((rc, gh.writes), (0, []))
+            self.assertIn("#7 wait — làn nhanh — chờ: CI đang chạy: test", out)
+            gh = StewardGh(rules=rules)
+            with gh.patch():
+                rc, out, _ = run_main("pr", "steward", "--apply")
+            self.assertEqual(
+                (rc, gh.writes),
+                (
+                    0,
+                    [
+                        [
+                            "gh",
+                            "api",
+                            "-X",
+                            "PUT",
+                            "repos/{owner}/{repo}/pulls/7/merge",
+                            "-f",
+                            "merge_method=squash",
+                            "-f",
+                            f"sha={FakeGh.SHA}",
+                        ]
+                    ],
+                ),
+            )
 
     def test_pr_next_merges_when_eligible(self):
-        # D-063: đủ điều kiện (merge-check = merge) là merge ghim head, không chờ GitHub mãi
+        # D-063: đủ điều kiện (merge-check = merge) là merge ghim head — cả khi người đã bật auto-merge
         d = xt.merge_decision(pr(), 3)
         self.assertEqual(d["verdict"], "merge")
-        got = xt.pr_next(d, True, {})
-        self.assertEqual(
-            (got["action"], got["why"]), ("merge", "auto-merge đang bật mà merge-check đã = merge — merge ghim head")
-        )
-        self.assertIn(f"expectedHeadSha={d['head']}", got["do"])
+        self.assertNotIn("base_has_required", d)
+        for auto in (False, True):
+            got = xt.pr_next(d, auto, {})
+            self.assertEqual(
+                (got["action"], got["why"]), ("merge", "làn nhanh — merge-check = merge — merge ghim head")
+            )
+            self.assertIn(f"expectedHeadSha={d['head']}", got["do"])
         pending = xt.merge_decision(
             pr(statusCheckRollup=[{"__typename": "CheckRun", "name": "x", "status": "IN_PROGRESS"}]), 3
         )
-        self.assertEqual(xt.pr_next(pending, True, {})["action"], "wait")
-        # nhánh đích không có check bắt buộc: không bao giờ bảo bật auto-merge
-        no_req = xt.merge_decision(pr(baseHasRequired=False), 3)
-        self.assertEqual(no_req["base_has_required"], False)
-        self.assertEqual(xt.pr_next(no_req, False, {})["action"], "merge")
-        pend_no_req = {**pending, "base_has_required": False}
-        self.assertEqual(xt.pr_next(pend_no_req, False, {})["action"], "wait")
-        self.assertIsNone(xt.merge_decision(pr(baseHasRequired="có"), 3)["base_has_required"])  # không rõ: như cũ
-        self.assertEqual(xt.pr_next(xt.merge_decision(pr(), 3), False, {})["action"], "enable-auto-merge")
+        got = xt.pr_next(pending, True, {})  # người bật, CI còn chạy: tắt — auto-merge không ghim head
+        self.assertEqual(
+            (got["action"], got["do"]),
+            ("disable-auto-merge", "gh pr merge 7 --disable-auto (MCP disable_pr_auto_merge)"),
+        )
+        self.assertEqual(xt.pr_next(pending, False, {})["action"], "wait")
 
     def test_steward_errors_and_other_actions(self):
         gh = StewardGh(fail={"gh pr merge": "x", "gh api -X PUT": "y"})
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 1)
-        self.assertIn("#7 enable-auto-merge ✗ y", out)
+        self.assertIn("#7 merge ✗ y", out)
         with StewardGh(fail={"gh pr merge": "oserror", "gh api -X PUT": "oserror"}).patch():
             self.assertEqual(run_main("pr", "steward", "--apply")[0], 1)
         with StewardGh(open_prs=[]).patch():
@@ -2261,7 +2202,7 @@ class PrStewardTest(unittest.TestCase):
         cases = {  # (auto_merge, verdict…) → lệnh steward
             "disable": ({"action": "disable-auto-merge"}, [["gh", "pr", "merge", "7", "--disable-auto"]]),
             "merge": ({"action": "merge"}, 1),
-            "auto": ({"action": "enable-auto-merge", "fallback": ""}, 1),
+            "enable (không còn hành động này)": ({"action": "enable-auto-merge"}, []),
             "review": ({"action": "review"}, []),
         }
         for name, (over, want) in cases.items():
@@ -2310,7 +2251,7 @@ class PrStewardTrustTest(unittest.TestCase):
                 self.assertEqual((rc, gh.writes), (0, []))
                 self.assertIn(f"#7 defer-human — {why}", out)
         rc, out, gh = self.steward({"author_association": "NONE", "user": {"login": "dependabot[bot]"}})
-        self.assertIn("#7 enable-auto-merge ✓", out)
+        self.assertIn("#7 merge ✓", out)
         self.assertEqual(xt.steward_untrusted({"headRepo": "o/r", "repo": "o/r", "authorAssociation": "owner"}), "")
 
     def test_standard_label_is_added_and_keeps_pr_strict(self):
@@ -2321,7 +2262,7 @@ class PrStewardTrustTest(unittest.TestCase):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertIn("#7 review", out)
         self.assertEqual(gh.writes[0][4:], ["repos/{owner}/{repo}/issues/7/labels", "-f", "labels[]=xt-standard-lane"])
-        # nhãn có rồi: diff nhỏ lại (làn nhanh) vẫn cần review sạch ở head — không bật auto-merge
+        # nhãn có rồi: diff nhỏ lại (làn nhanh) vẫn cần review sạch ở head — không merge
         gh = StewardGh(pull={"labels": [{"name": "xt-standard-lane"}]})
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
@@ -2336,20 +2277,17 @@ class PrStewardTrustTest(unittest.TestCase):
             "repos/o/r/pulls?state=open&per_page=100": json.dumps([{"number": 7}]),
             "repos/o/r/rules/branches/main": json.dumps(REQUIRED_TEST),
         }
-        gh = StewardGh(raw=listing)
+        auto = {"merge_method": "squash"}
+        gh = StewardGh(raw=listing, pull={"auto_merge": auto})
         listing["repos/o/r/pulls/7"] = json.dumps(gh.pull)  # đọc lại PR trước khi làm (AUTO-05)
-        one = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "x", "fallback": ""}
+        one = {"pr": 7, "head": FakeGh.SHA, "action": "disable-auto-merge", "why": "x"}
         self.assertEqual(xt._steward_command(one, "repos/o/r")[0][:3], ["gh", "pr", "merge"])
-        with (
-            unittest.mock.patch.object(
-                xt,
-                "_pr_rest",
-                return_value={**pr(), "author": "chu", "authorAssociation": "OWNER", "baseRefName": "main"},
-            ),
-            gh.patch(),
-        ):
+        running = [{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]
+        rest = {**pr(statusCheckRollup=running), "author": "chu", "authorAssociation": "OWNER", "baseRefName": "main"}
+        with unittest.mock.patch.object(xt, "_pr_rest", return_value={**rest, "autoMergeRequest": auto}), gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply", "--repo", "o/r")
-        self.assertEqual(gh.writes[0][:5], ["gh", "pr", "merge", "-R", "o/r"])
+        # `gh pr merge` duy nhất còn lại (tắt auto-merge người bật) ghim đúng repo đã đánh giá (review #141)
+        self.assertEqual(gh.writes[0], ["gh", "pr", "merge", "-R", "o/r", "7", "--disable-auto"])
         rc, _, err = run_main("pr", "steward", "--repo", "https://github.com/o/r")
         self.assertEqual(rc, 2)
         self.assertIn("--repo phải dạng owner/repo", err)
@@ -2429,10 +2367,23 @@ class StewardEventsTest(unittest.TestCase):
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply", "--event", self.event(self.check_suite(FakeGh.SHA)))
         self.assertEqual(rc, 0)
-        self.assertEqual(out, f"#7 enable-auto-merge ✓ — {out.split(' — ', 1)[1]}")
+        self.assertEqual(out, f"#7 merge ✓ — {out.split(' — ', 1)[1]}")
         self.assertFalse(any("pulls?state=open" in p for p in gh.paths()))  # không quét mọi PR
         self.assertEqual(
-            gh.writes, [["gh", "pr", "merge", "7", "--auto", "--squash", "--match-head-commit", FakeGh.SHA]]
+            gh.writes,
+            [
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "PUT",
+                    "repos/{owner}/{repo}/pulls/7/merge",
+                    "-f",
+                    "merge_method=squash",
+                    "-f",
+                    f"sha={FakeGh.SHA}",
+                ]
+            ],
         )
         # sự kiện không gắn PR (push lên nhánh đích, PR từ fork) hoặc payload không phải object → quét mọi PR mở như lịch
         for payload in ({"check_suite": {"head_sha": FakeGh.SHA, "pull_requests": []}}, ["không phải object"]):
@@ -2464,31 +2415,44 @@ class StewardEventsTest(unittest.TestCase):
                 "pr", "steward", "--apply", "--json", "--event", self.event(self.check_suite(self.OLD))
             )
         got = json.loads(out)[0]
-        self.assertEqual((rc, got["action"], got["applied"]), (0, "enable-auto-merge", True))
+        self.assertEqual((rc, got["action"], got["applied"]), (0, "merge", True))
         self.assertIn("sự kiện cho head cũ 0000000 — đã xét head hiện tại abc1234", got["note"])
-        self.assertEqual(got["key"], f"{{owner}}/{{repo}}#7@{FakeGh.SHA}:enable-auto-merge")
-        self.assertEqual(gh.writes[0][-1], FakeGh.SHA)
+        self.assertEqual(got["key"], f"{{owner}}/{{repo}}#7@{FakeGh.SHA}:merge")
+        self.assertEqual(gh.writes[0][-1], f"sha={FakeGh.SHA}")
         self.assertNotIn(self.OLD, json.dumps(gh.writes))
 
     def test_steward_events_duplicate_or_restart_does_not_repeat(self):
         ev = self.event(self.check_suite(FakeGh.SHA))
-        # lần 1 bật; GitHub ghi nhận → lần 2 (sự kiện lặp / re-run sau restart) thấy auto-merge đang bật: chỉ chờ
         on = {"auto_merge": {"merge_method": "squash"}}
         running = [{"name": "test", "status": "in_progress", "conclusion": None}]
-        first, second = StewardGh(runs=running), StewardGh(runs=running, pull=on)
+        # CI chưa xong: chờ ở mọi lượt (sự kiện lặp / re-run sau restart), không ghi gì
+        for _ in range(2):
+            gh = StewardGh(runs=running)
+            with gh.patch():
+                rc, out, _ = run_main("pr", "steward", "--apply", "--event", ev)
+            self.assertEqual((rc, gh.writes), (0, []))
+            self.assertIn("#7 wait", out)
+        # người bật auto-merge khi CI còn chạy: lần 1 tắt; GitHub ghi nhận → lần 2 (sự kiện lặp) chỉ chờ
+        first, second = StewardGh(runs=running, pull=on), StewardGh(runs=running)
         for gh in (first, second):
             with gh.patch():
                 rc, out, _ = run_main("pr", "steward", "--apply", "--event", ev)
             self.assertEqual(rc, 0)
-        self.assertEqual(len(first.writes), 1)
+        self.assertEqual(first.writes, [["gh", "pr", "merge", "7", "--disable-auto"]])
         self.assertEqual(second.writes, [])
         self.assertIn("#7 wait", out)
-        # lượt song song bật auto-merge giữa lúc xét và lúc làm: đọc lại thấy đã bật → bỏ qua, không lỗi
-        gh = SeqGh([{}, on])
+        # lượt song song đã tắt giữa lúc xét và lúc làm: đọc lại thấy đã tắt → bỏ qua, không lỗi
+        gh = SeqGh([on, {}], runs=running)
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply", "--event", ev)
         self.assertEqual((rc, gh.writes), (0, []))
-        self.assertIn(f"bỏ qua {{owner}}/{{repo}}#7@{FakeGh.SHA}:enable-auto-merge — auto-merge đã bật", out)
+        self.assertIn(f"bỏ qua {{owner}}/{{repo}}#7@{FakeGh.SHA}:disable-auto-merge — auto-merge đã tắt", out)
+        # lượt song song đã merge giữa lúc xét và lúc làm: không merge lần hai
+        gh = SeqGh([{}, {"merged": True, "state": "closed"}])
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply", "--event", ev)
+        self.assertEqual((rc, gh.writes), (0, []))
+        self.assertIn(f"bỏ qua {{owner}}/{{repo}}#7@{FakeGh.SHA}:merge — PR đã đóng/merge", out)
         # restart sau khi PR đã merge: steward thấy done, không ghi gì
         gh = StewardGh(pull={"merged": True, "state": "closed"})
         with gh.patch():
@@ -2510,7 +2474,7 @@ class StewardEventsTest(unittest.TestCase):
             self.assertEqual((rc, gh.writes), (0, []))
             self.assertIn(why, out)
         # tắt auto-merge mà lượt khác đã tắt → bỏ qua; còn bật → tắt
-        hold = {"pr": 7, "head": FakeGh.SHA, "action": "disable-auto-merge", "why": "giữ", "fallback": ""}
+        hold = {"pr": 7, "head": FakeGh.SHA, "action": "disable-auto-merge", "why": "giữ"}
         for states, writes in (([{}], 0), ([on], 1)):
             gh = SeqGh(states)
             with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=dict(hold)):
@@ -2535,11 +2499,11 @@ class StewardEventsTest(unittest.TestCase):
         self.assertEqual(xt.ci_check_text(text), [])
         on = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertIn("check_suite:\n    types: [completed]", on)
-        self.assertRegex(on, r"workflow_run:[^\n]*\n    workflows: \[CI, merge-gate\]\n    types: \[completed\]")
+        self.assertRegex(on, r"workflow_run:[^\n]*\n    workflows: \[CI\]\n    types: \[completed\]")
         for trigger in (
             "issue_comment",
             "workflow_run",
-        ):  # AUD-CI-015: ghi lý do bỏ qua dangerous-triggers như merge-gate
+        ):  # AUD-CI-015: ghi lý do bỏ qua dangerous-triggers
             self.assertRegex(on, rf"\n  {trigger}: # zizmor: ignore\[dangerous-triggers\] — \S")
         self.assertNotRegex(on, r"pull_request(_target)?:")  # không chạy trong ngữ cảnh PR
         self.assertIn('--event "$GITHUB_EVENT_PATH"', text)
@@ -2571,7 +2535,7 @@ class StewardFollowupTest(unittest.TestCase):
             with self.subTest(perm):
                 xt._WRITER_CACHE.clear()
                 rc, out, gh = self.steward(perm)
-                self.assertIn("#7 enable-auto-merge ✓", out)
+                self.assertIn("#7 merge ✓", out)
                 self.assertIn(self.PERM, gh.paths())
         xt._WRITER_CACHE.clear()
         rc, out, gh = self.steward("read")
@@ -2677,14 +2641,14 @@ class StewardFollowupTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("⚠ không gắn được nhãn xt-standard-lane: HTTP 403", out)
         self.assertIn("không gắn được nhãn", summary.read_text(encoding="utf-8"))
-        # review đã sạch nhưng nhãn lỗi: lượt này không bật auto-merge (lượt sau gắn lại nhãn rồi mới bật)
-        ready = {"pr": 7, "head": FakeGh.SHA, "action": "enable-auto-merge", "why": "sạch", "fallback": ""}
+        # review đã sạch nhưng nhãn lỗi: lượt này không merge (lượt sau gắn lại nhãn rồi mới merge)
+        ready = {"pr": 7, "head": FakeGh.SHA, "action": "merge", "why": "sạch"}
         gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"})
         with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=ready):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 1)
-        self.assertEqual([w[3] for w in gh.writes], ["POST"])  # chỉ lần gắn nhãn, không `gh pr merge`
-        self.assertIn("#7 enable-auto-merge — sạch ⚠", out)
+        self.assertEqual([w[3] for w in gh.writes], ["POST"])  # chỉ lần gắn nhãn, không PUT merge
+        self.assertIn("#7 merge — sạch ⚠", out)
         hold = {**ready, "action": "disable-auto-merge"}  # giữ PR lại vẫn chạy dù nhãn lỗi
         gh = StewardGh(raw=raw, fail={"gh api -X POST": "HTTP 403"}, pull={"auto_merge": {"merge_method": "squash"}})
         with gh.patch(), unittest.mock.patch.object(xt, "pr_next", return_value=hold):

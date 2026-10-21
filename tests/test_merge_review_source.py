@@ -1,7 +1,7 @@
 """Audit 2026-10-19 rescan: một điều kiện merge (ADR-0028) thành cơ chế — AUD-XFEAT-010 (`merge-check` không gợi lệnh merge
-khi chưa có review hợp lệ ở head), AUD-XFEAT-011 (`pr next`/steward đọc cùng nguồn review với `merge-gate`/`merge-check`/
-guard; review cục bộ chưa đăng → bước "đăng lại review", không bật/tắt auto-merge thành vòng), AUD-DOC-054 (guard chặn
-merge/bật auto-merge khi `eligible`/`auto_merge_ok` là false ở chính sách mặc định)."""
+khi chưa có review hợp lệ ở head), AUD-XFEAT-011 (`pr next`/steward đọc cùng nguồn review với `merge-check`/guard; review
+cục bộ chưa đăng → bước "đăng lại review", không thành vòng), AUD-DOC-054 (guard chặn merge khi `eligible` là false ở
+chính sách mặc định; bật auto-merge bị chặn phẳng — ADR-0036)."""
 
 from __future__ import annotations
 
@@ -163,13 +163,13 @@ class MergeCheckReviewStepTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual([r["clean"] for r in xt.read_reviews(self.base)["7"]["reviews"]], [False])
 
-    def test_merge_gate_and_steward_keep_published_source(self):
-        """`merge-gate`/steward chạy ở CI (không có sổ cục bộ) — giữ nguồn dấu đã đăng, không đổi hành vi (D-104)."""
+    def test_steward_keeps_published_source(self):
+        """Steward chạy ở CI (không có sổ cục bộ) — giữ nguồn dấu đã đăng, không đổi hành vi (D-104)."""
         commit_base_xt(self.base, "merge_autonomy: L3\ndelivery_phase: build\n")
         self.seed([mark(False)])
         on = {**std(), "autoMergeRequest": AUTO}
-        rc, out, _ = run_main("merge-gate", "--json", "--pr-json", "-", stdin=json.dumps(on))
-        self.assertEqual((rc, json.loads(out)["review"]), (0, "deferred"))
+        d, _ = xt._merge_eval(on)  # không đọc sổ cục bộ: lỗi chặn chỉ có trong sổ không làm đỏ
+        self.assertEqual(d["review"], "deferred")
         rest = {**std(), "author": "a", "authorAssociation": "OWNER"}
         with unittest.mock.patch.object(xt, "_pr_rest", return_value=rest):
             out = xt._steward_one("7", "repos/o/r", self.base, False, [])
@@ -200,14 +200,35 @@ class MergeCheckReviewStepTest(unittest.TestCase):
 
 
 class GuardReviewMissingTest(unittest.TestCase):
-    """AUD-DOC-054: chính sách mặc định (ADR-0018) CHẶN merge ghim head/bật auto-merge khi `merge-check` (thật) báo chưa có
-    review hợp lệ ở head; có review sạch hoặc pha build hoãn review → cho phép như trước."""
+    """AUD-DOC-054: chính sách mặc định (ADR-0018) CHẶN merge ghim head khi `merge-check` (thật) báo chưa có review hợp lệ
+    ở head; có review sạch hoặc pha build hoãn review → cho phép như trước. Bật auto-merge: deny phẳng bất kể review
+    (ADR-0036 §3)."""
 
     MERGES = (
         f"gh pr merge 7 --squash --match-head-commit {HEAD}",
         f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/7/merge -f sha={HEAD} -f merge_method=squash",
-        "gh pr merge 7 --auto --squash",
     )
+    AUTO_MERGES = ("gh pr merge 7 --auto --squash", f"gh pr merge 7 --auto --squash --match-head-commit {HEAD}")
+
+    def test_auto_merge_denied_whatever_the_review(self):
+        """ADR-0036 §3: `--auto` → deny mã `AUTO_MERGE_ENABLE` cả khi review thiếu/chặn lẫn khi review sạch, pha build;
+        không gọi merge-check. Merge ghim head cùng PR sạch vẫn được (đối chứng)."""
+        clean = xt.merge_check_result(std(xtReviews=[mark(True)]), 3, [], False)
+        cases = {
+            "thiếu": xt.merge_check_result(std(), 3, [], False),
+            "chặn": xt.merge_check_result(std(xtReviews=[mark(False)]), 3, [], False),
+            "sạch": clean,
+            "pha build": xt.merge_check_result(std(), 3, [], False, "build"),
+        }
+        for name, d in cases.items():
+            for cmd in self.AUTO_MERGES:
+                with self.subTest(name, cmd=cmd), unittest.mock.patch.object(guard, "merge_check") as mc:
+                    mc.return_value = d
+                    with unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+                        res = dict(guard.apply_policy(guard.bash_decision(cmd, str(ROOT))))
+                    self.assertEqual((res["decision"], res.get("code")), ("deny", "AUTO_MERGE_ENABLE"), res)
+                    mc.assert_not_called()
+        self.assertEqual(self.final(clean, self.MERGES[0])["decision"], "allow")
 
     def final(self, d: dict, cmd: str) -> dict:
         with (
@@ -341,18 +362,18 @@ class GuardReviewMissingTest(unittest.TestCase):
         clean = xt.merge_check_result(std(xtReviews=[mark(True)]), 3, [], False)
         build = xt.merge_check_result(std(), 3, [], False, "build")
         for name, d in (("sạch", clean), ("pha build", build)):
-            for cmd in (self.MERGES[0], self.MERGES[2]):
+            for cmd in self.MERGES:
                 with self.subTest(name, cmd=cmd):
                     self.assertEqual(self.final(d, cmd)["decision"], "allow")
             self.assertEqual(self.mcp(d)["decision"], "allow")
 
 
 class ReviewSourceTest(unittest.TestCase):
-    """AUD-XFEAT-011: `pr next`/steward tính review từ CÙNG nguồn với `merge-check`/`merge-gate`/guard (dấu đã đăng);
+    """AUD-XFEAT-011: `pr next`/steward tính review từ CÙNG nguồn với `merge-check`/guard (dấu đã đăng);
     sổ cục bộ chỉ để nhận ra review chưa đăng được → bước "đăng lại review"."""
 
     def test_xfeat011_one_liner(self):
-        """Gate trong sổ AUDIT-STATUS: `pr next` không bật auto-merge khi `merge_eligibility` (nguồn đã đăng) không cho."""
+        """Gate trong sổ AUDIT-STATUS: `pr next` không merge khi `merge_eligibility` (nguồn đã đăng) không cho."""
         d = {
             "head": "H",
             "lane": "chuẩn",
@@ -360,11 +381,10 @@ class ReviewSourceTest(unittest.TestCase):
             "hard": [],
             "pr": 7,
             "autonomy": 3,
-            "base_has_required": True,
         }
         rec = xt.with_published({"reviews": [{"head": "H", "clean": True, "at": "1"}]}, [])
         act = xt.pr_next(d, False, rec)["action"]
-        self.assertFalse(act == "enable-auto-merge" and not xt.merge_eligibility(d, [])["auto_merge_ok"])
+        self.assertFalse(act == "merge" and not xt.merge_eligibility(d, [])["eligible"])
         self.assertEqual(act, "republish-review")
 
     def test_review_record_uses_published_only(self):
@@ -382,7 +402,7 @@ class ReviewSourceTest(unittest.TestCase):
 
     def test_unpublished_review_steps(self):
         d = {"pr": 7, "head": HEAD, "verdict": "merge", "lane": "chuẩn", "hard": [], "autonomy": 3}
-        d.update({"reasons": ["L3"], "next": "x", "base_has_required": True})
+        d.update({"reasons": ["L3"], "next": "x"})
         clean = {"reviewer_model": "sonnet", "author_model": "claude-opus-5-5", **mark(True)}
         r = xt.pr_next(d, False, xt.with_published({"reviews": [clean]}, []))
         self.assertEqual(r["action"], "republish-review")
@@ -394,10 +414,8 @@ class ReviewSourceTest(unittest.TestCase):
         self.assertEqual(r["action"], "disable-auto-merge")
         self.assertIn("chưa đăng", r["why"])
         # đã đăng đúng dấu đó: không còn bước đăng lại
-        self.assertEqual(
-            xt.pr_next(d, False, xt.with_published({"reviews": [clean]}, [mark(True)]))["action"], "enable-auto-merge"
-        )
-        # lỗi chặn cục bộ chưa đăng, dấu đã đăng còn sạch → đăng lại (không bật auto-merge trên review cũ)
+        self.assertEqual(xt.pr_next(d, False, xt.with_published({"reviews": [clean]}, [mark(True)]))["action"], "merge")
+        # lỗi chặn cục bộ chưa đăng, dấu đã đăng còn sạch → đăng lại (không merge trên review cũ)
         newer = {**mark(False), "at": "2026-10-20T11:00:00+00:00"}
         r = xt.pr_next(d, False, xt.with_published({"reviews": [clean, newer]}, [mark(True)]))
         self.assertEqual((r["action"], r["do"].split(" --head")[0]), ("republish-review", "xt.py pr reviewed --pr 7"))
@@ -417,12 +435,12 @@ class ReviewSourceTest(unittest.TestCase):
         # pha build: review sạch chưa đăng không chặn việc merge (review đang hoãn) — không bắt đăng lại
         b = {**d, "delivery_phase": "build"}
         r = xt.pr_next(b, False, xt.with_published({"reviews": [clean]}, []))
-        self.assertEqual((r["action"], r["review_deferred"]), ("enable-auto-merge", True))
+        self.assertEqual((r["action"], r["review_deferred"]), ("merge", True))
         # làn nhanh: lỗi chặn cục bộ chưa đăng vẫn phải đăng (trước đây sổ cục bộ làm PR strict)
         r = xt.pr_next({**d, "lane": "nhanh"}, False, xt.with_published({"reviews": [newer]}, []))
         self.assertEqual(r["action"], "republish-review")
         r = xt.pr_next({**d, "lane": "nhanh"}, False, xt.with_published({"reviews": [clean]}, []))
-        self.assertEqual(r["action"], "enable-auto-merge")  # sạch, làn nhanh: không cần review
+        self.assertEqual(r["action"], "merge")  # sạch, làn nhanh: không cần review
         # review chưa đăng của head CŨ: không đăng lại (head đã đổi → cần review mới ở head hiện tại)
         stale = {**newer, "head": "a" * 40}
         for lane in ("nhanh", "chuẩn"):
@@ -431,8 +449,8 @@ class ReviewSourceTest(unittest.TestCase):
 
 
 class ReviewSourceChainTest(unittest.TestCase):
-    """AUD-XFEAT-011, chuỗi bước như báo cáo audit: đăng dấu thất bại → `pr next` không bật auto-merge (bước đăng lại, ổn
-    định qua nhiều lượt), `merge-gate` không đỏ; đăng xong → bật; bật rồi → chờ. Không có cặp bật/tắt nào lặp lại."""
+    """AUD-XFEAT-011, chuỗi bước như báo cáo audit: đăng dấu thất bại → `pr next` không merge (bước đăng lại, ổn định qua
+    nhiều lượt); đăng xong → merge ghim head; người bật auto-merge khi CI chạy → tắt. Không vòng lặp nào."""
 
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -445,9 +463,6 @@ class ReviewSourceChainTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         return dict(json.loads(out))
 
-    def gate(self, p: dict) -> int:
-        return run_main("merge-gate", "--pr-json", "-", stdin=json.dumps(p))[0]
-
     def test_publish_failure_no_auto_merge_loop(self):
         p = std()
         self.assertEqual(self.nxt(p)["action"], "review")
@@ -457,23 +472,20 @@ class ReviewSourceChainTest(unittest.TestCase):
         for _ in range(3):  # nhiều lượt: bước ổn định, không phải enable/disable xen kẽ
             out = self.nxt(p)
             actions.append(out["action"])
-            self.assertEqual(self.gate(p), 0)  # không bật auto-merge → merge-gate không đỏ
         self.assertEqual(actions, ["republish-review"] * 3)
         self.assertIn(f"xt.py pr reviewed --pr 7 --head {HEAD} --clean", out["do"])
-        self.assertNotIn("enable-auto-merge", actions)
+        self.assertNotIn("merge", actions)
         # merge-check cùng nguồn: chưa có dấu đã đăng → chưa merge
         rc, out, _ = run_main("merge-check", "--json", "--pr-json", "-", stdin=json.dumps(p))
         self.assertEqual((rc, json.loads(out)["verdict"]), (1, "review"))
         # đăng lại thành công → dấu có trên PR
         published = std(xtReviews=[mark(True, at="2026-10-20T12:00:00Z")])
-        self.assertEqual(self.nxt(published)["action"], "enable-auto-merge")
+        self.assertEqual(self.nxt(published)["action"], "merge")
         on = {**published, "autoMergeRequest": AUTO}
-        self.assertEqual(self.gate(on), 0)  # cùng nguồn: merge-gate xanh khi pr next đã bảo bật
-        self.assertEqual(
-            self.nxt(on)["action"], "merge"
-        )  # đã bật mà merge-check = merge: merge ghim head (D-063), không tắt
+        self.assertEqual(self.nxt(on)["action"], "merge")  # người bật mà merge-check = merge: merge ghim head (D-063)
         pending = {**on, "statusCheckRollup": [{**GREEN[0], "status": "IN_PROGRESS", "conclusion": ""}]}
-        self.assertEqual(self.nxt(pending)["action"], "wait")
+        self.assertEqual(self.nxt(pending)["action"], "disable-auto-merge")  # chưa đủ: tắt (không ghim head)
+        self.assertEqual(self.nxt({**pending, "autoMergeRequest": None})["action"], "wait")
 
     def test_steward_uses_published_source(self):
         run_main("pr", "reviewed", "--pr", "7", "--head", HEAD, "--clean", *MODELS)

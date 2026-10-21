@@ -34,8 +34,7 @@
           { "context": "quality" },
           { "context": "protection-guard" },
           { "context": "gitleaks" },
-          { "context": "dep-audit" },
-          { "context": "merge-gate" }
+          { "context": "dep-audit" }
         ]
       }
     }

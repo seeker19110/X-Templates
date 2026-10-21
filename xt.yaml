@@ -37,8 +37,10 @@ test_fast: python3 scripts/xt.py test-select --unittest | xargs -r -P "$(nproc 2
 # code-review.md) đi làn nhanh: lớp đỡ là `validate` + `check-links` + revert. Khi ngoại lệ cứng giữ người (ADR-0020) các
 # đường dẫn này thành ngoại lệ cứng.
 merge_risk_paths: "scripts/*, framework/templates/*, docs/autopilot/PLAN*.md"
-# Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: auto-merge
-# của GitHub cho mọi làn — làn nhanh khi mở PR, làn chuẩn sau khi review sạch (ADR-0024) — merge khi required check xanh; L2 = máy chỉ tự merge làn nhanh; L1 = người merge mọi PR.
+# Merge PR (ADR-0013/0014/0015): chủ repo yêu cầu 2026-10-16 "mở PR luôn kèm auto merge" → L3: máy merge GHIM head mọi
+# làn khi `merge-check` = `merge` ở đúng head đó — làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở head
+# (ADR-0024; pha build: review ghi nợ); không dùng auto-merge của GitHub (D-122, ADR-0036). L2 = máy chỉ tự merge làn
+# nhanh; L1 = người merge mọi PR.
 merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).

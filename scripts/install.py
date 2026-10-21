@@ -11,7 +11,8 @@ Kết quả trong dự án đích:
                                 — hash dạng `sha256:<hex>` (cả `harness.sha256.json`); đọc nhận cả hex trần của bản cũ
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
-  .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest)
+  .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest;
+                                merge-gate.yml là stub tạm D-122)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
 
 File đã có mà khác bản khung (mọi nhóm): còn đúng hash lần cài trước → cập nhật tại chỗ; dự án đã sửa mà mẫu không đổi từ lần
@@ -63,10 +64,12 @@ LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
 # --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Mọi workflow ở đây KHÔNG phụ thuộc stack
 # (AUD-CI-003): `ci.yml` mẫu chạy lệnh của xt.yaml qua `.xtemplates/scripts/dev-task.sh` (job song song + `quality` tổng
-# hợp, WF-CI-024/025), `secret-scan.yml` (`gitleaks`), `merge-gate.yml` (ADR-0023) và `pr-steward.yml`
-# (ADR-0027) chỉ cần python3 + gh. Ruleset mẫu (D-116, D-117) chỉ đòi `quality` · `gitleaks` · `merge-gate` và không đòi
-# "up to date" (PR merge song song); `protection-guard` và `dep-audit` (theo ngôn ngữ, dự án viết) là job con trong
-# `quality.needs`. Mẫu PR, ruleset, Dependabot, CI, quét bí mật lấy từ framework/templates: bản ở `.github/` của khung là
+# hợp, WF-CI-024/025), `secret-scan.yml` (`gitleaks`) và `pr-steward.yml` (ADR-0027) chỉ cần python3 + gh. Ruleset mẫu
+# (D-116, D-117, D-122) chỉ đòi `quality` · `gitleaks` và không đòi "up to date" (PR merge song song); `protection-guard` và
+# `dep-audit` (theo ngôn ngữ, dự án viết) là job con trong `quality.needs`. `merge-gate.yml` là STUB TẠM (D-122, ADR-0036):
+# job `merge-gate` luôn xanh, chỉ giữ context cũ còn trong ruleset sống của dự án — vẫn phát để bản cũ (gọi lệnh
+# `xt.py merge-gate` đã gỡ) được cập nhật tại chỗ thay vì làm đỏ mọi PR; bỏ khỏi danh sách này khi ruleset sống đã gỡ
+# context (T-1834). Mẫu PR, ruleset, Dependabot, CI, quét bí mật lấy từ framework/templates: bản ở `.github/` của khung là
 # của riêng repo khung.
 GITHUB_FILES = {
     ".github/rulesets/main.json": "framework/templates/ruleset-main.json",
@@ -679,9 +682,9 @@ def github_template(src: str) -> Callable[[str], str] | None:
 
 
 def install_github(target: Path) -> None:
-    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow CI/quét bí mật/`merge-gate`/
-    `pr-steward` (copy-if-absent; file chưa sửa so với lần cài trước thì cập nhật tại chỗ), ghi hash vào manifest, cảnh
-    báo required check chưa có job."""
+    """Bước 3b (--with-github): ruleset mẫu + PR template + Dependabot + workflow CI/quét bí mật/`pr-steward` + stub
+    `merge-gate` tạm (D-122) (copy-if-absent; file chưa sửa so với lần cài trước thì cập nhật tại chỗ), ghi hash vào
+    manifest, cảnh báo required check chưa có job."""
     manifest = load_manifest(target)
     for gh, src in GITHUB_FILES.items():
         tf = github_template(src)
@@ -995,8 +998,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--with-github",
         action="store_true",
-        help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + merge-gate + pr-steward vào .github/ "
-        "(không đè)",
+        help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + pr-steward (+ stub merge-gate tạm, "
+        "D-122) vào .github/ (không đè)",
     )
     p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")
     a = p.parse_args(argv)

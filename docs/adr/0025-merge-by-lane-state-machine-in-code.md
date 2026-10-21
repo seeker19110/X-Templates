@@ -1,6 +1,7 @@
 # ADR-0025: Máy trạng thái "merge theo làn" trong code — `xt.py pr next`
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; theo ADR-0036 (2026-10-21) hành động `enable-auto-merge` và khoá `fallback` bỏ, `merge` luôn là
+  lệnh ghim head ở mọi mức, `disable-auto-merge` chỉ còn cho auto-merge do người bật
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` (`pr_next`, `cmd_pr`: `pr next`, `pr reviewed`, sổ
   `.autopilot/reviews.json`), test `tests/test_merge.py` `PrNextTest`, `PrNextCliTest`; văn xuôi rút gọn ở `AGENTS.md` §3,
   `framework/templates/AGENTS.md` §7, skill `/autopilot` bước 10/13, `framework/11-autonomous-loop/README.md`,

@@ -1,6 +1,7 @@
 # ADR-0024: Merge theo làn — PR quan trọng review sạch rồi bật auto-merge, PR khác bật khi mở
 
-- **Trạng thái:** Đã chấp nhận — cách thực thi bị thay một phần bởi ADR-0025 (`xt.py pr next`; luật giữ nguyên)
+- **Trạng thái:** Đã chấp nhận — cách thực thi bị thay một phần bởi ADR-0025 (`xt.py pr next`; luật giữ nguyên); bước bật
+  auto-merge thay bởi ADR-0036 (2026-10-21): làn nhanh merge ghim head khi CI xanh, làn chuẩn khi CI xanh + review sạch ở H
 - **Trạng thái triển khai:** Đã triển khai — quy định ở `AGENTS.md` §3, `framework/templates/AGENTS.md`, skill `/autopilot`
   bước 10, `framework/11-autonomous-loop/README.md`, `LOOP-STOP-022`, `LOOP-DESIGN-020`, `WF-REVIEW-007`; không đổi code
   guard (`merge-check` vẫn quyết `merge`/`hard`; merge trực tiếp chỉ qua lệnh ghim head mà guard đã cho phép)

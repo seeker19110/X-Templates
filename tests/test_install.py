@@ -228,14 +228,14 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((self.target / "CLAUDE.md").is_symlink())
 
     def test_with_github_ruleset_template_minimal_and_parallel(self):
-        """D-116/D-117: ruleset mẫu chỉ đòi 3 check mà workflow mẫu cung cấp (không treo PR ngày đầu; `protection-guard`
-        là job con của `quality`), không đòi "up to date" (PR merge song song); repo khung giữ ruleset riêng. Vẫn giữ
-        cấm xoá, cấm force-push, PR bắt buộc."""
+        """D-116/D-117/D-122: ruleset mẫu chỉ đòi 2 check mà workflow mẫu cung cấp (không treo PR ngày đầu;
+        `protection-guard` là job con của `quality`; `merge-gate` đã bỏ), không đòi "up to date" (PR merge song song); repo
+        khung giữ ruleset riêng. Vẫn giữ cấm xoá, cấm force-push, PR bắt buộc."""
         err = io.StringIO()
         with redirect_stderr(err):
             self.assertEqual(self.run_install("--with-github"), 0)
         self.assertNotIn("required check chưa có job", err.getvalue())
-        self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks", "merge-gate"])
+        self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks"])
         self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
         rs = json.loads((self.target / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
         status = next(r for r in rs["rules"] if r["type"] == "required_status_checks")["parameters"]
@@ -281,8 +281,12 @@ class InstallTest(unittest.TestCase):
         dep = (self.target / ".github" / "dependabot.yml").read_text(encoding="utf-8")
         self.assertIn("package-ecosystem: github-actions", dep)
         self.assertNotIn("package-ecosystem: pip", dep)
-        # ADR-0023: ruleset mẫu đòi `merge-gate` → workflow của nó đi kèm, không cảnh báo phải tự viết
-        self.assertTrue((self.target / ".github" / "workflows" / "merge-gate.yml").exists())
+        # D-122/ADR-0036: stub `merge-gate.yml` vẫn phát (đúng bản của khung) để giữ context cũ tới khi ruleset sống của
+        # dự án đích gỡ — bản cũ gọi `xt.py merge-gate` đã gỡ thì làm đỏ mọi PR
+        self.assertEqual(
+            (self.target / ".github" / "workflows" / "merge-gate.yml").read_bytes(),
+            (ROOT / ".github" / "workflows" / "merge-gate.yml").read_bytes(),
+        )
         # ADR-0027: PR đủ tiêu chuẩn tự vào nhánh chính khi không còn phiên agent
         self.assertTrue((self.target / ".github" / "workflows" / "pr-steward.yml").exists())
         # CI song song + `quality` tổng hợp và quét bí mật là mẫu không phụ thuộc stack (bản cho dự án đích)

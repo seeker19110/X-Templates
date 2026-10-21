@@ -3,7 +3,7 @@ name: pr-review
 # Reviewer độc lập chạy trên GitHub (AUTO-03, D-069, T-1508): mỗi PR làn chuẩn cần review sạch ở đúng head do MODEL KHÁC người
 # viết và TÀI KHOẢN KHÁC tác giả (ADR-0024/0028). Job đọc diff qua REST, chạy `claude-code-action` với công cụ chỉ-đọc và
 # `--json-schema` (kết quả có cấu trúc, không phải văn xuôi), rồi gọi `xt.py pr reviewed` bằng token của danh tính reviewer
-# (`XT_REVIEWER_TOKEN`) — dấu review đăng lên PR là thứ `merge-check`/`merge-gate`/guard/steward đọc (ADR-0027/0028).
+# (`XT_REVIEWER_TOKEN`) — dấu review đăng lên PR là thứ `merge-check`/guard/steward đọc (ADR-0027/0028).
 #
 # CHƯA BẬT cho tới khi chủ repo làm các việc chỉ người làm được (điểm dừng — không tạo secret/tài khoản thay chủ):
 #   1. Tạo tài khoản/GitHub App reviewer (khác tác giả PR) với quyền pull-requests: write, issues: write; token → secret
@@ -62,7 +62,7 @@ jobs:
 
       - name: Review (công cụ chỉ-đọc, kết quả có cấu trúc)
         id: claude
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        uses: anthropics/claude-code-action@a5a423f75c251dcbff8a74e99f83b2cb03c72bfa # v1.0.256
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}

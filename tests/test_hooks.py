@@ -1838,6 +1838,21 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
                 self.assertEqual(self.d(cmd)[0], "ask")
         self.assertEqual(self.d(f"gh pr merge 7 --squash --delete-branch {pin}")[0], "allow")
 
+    def test_guard_gh_api_graphql_endpoint_forms(self):
+        """Endpoint graphql ở dạng `/graphql` hay URL đầy đủ cũng là graphql: mutation merge → không xác minh được (chặn
+        mặc định) như dạng `graphql`, không rơi xuống `ask` thường của nhánh REST (T-1806 câu hỏi mở 2, 2026-10-21)."""
+        q = "-f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+        ref = self.d(f"gh api graphql {q}")
+        self.assertEqual(ref[0], "ask")
+        self.assertIn("không đọc được số PR", ref[1])
+        for ep in ("/graphql", "graphql/", "https://api.github.com/graphql"):
+            with self.subTest(ep):
+                got = self.d(f"gh api {ep} {q}")
+                self.assertEqual(got[0], "ask")
+                self.assertEqual(
+                    got[1].split(": gh api")[0], ref[1].split(": gh api")[0]
+                )  # cùng lý do, khác lệnh in kèm
+
     def test_guard_gh_api_merge(self):
         """AUD-SEC-020: `gh api` ghi (khác GET, hoặc mutation GraphQL) là hành động đối ngoại — merge vòng qua merge-check."""
         for cmd in (
@@ -1872,23 +1887,24 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
                 self.assertIsNone(self.d(cmd)[0])
 
     def test_mcp_merge_tool_asks(self):
-        """AUD-SEC-020: tool MCP merge PR có hook PreToolUse riêng và luôn hỏi (không qua merge-check)."""
+        """AUD-SEC-020: tool MCP merge PR có hook PreToolUse riêng và luôn hỏi (không qua merge-check); tool bật
+        auto-merge vẫn khớp matcher và bị chặn thẳng, kể cả strict (ADR-0036)."""
         settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
         matchers = [e["matcher"] for e in settings["hooks"]["PreToolUse"] if "pre-mcp-guard" in json.dumps(e)]
         self.assertEqual(len(matchers), 1)
-        for tool, hit in (
-            ("mcp__github__merge_pull_request", True),
-            ("mcp__github__enable_pr_auto_merge", True),
-            ("mcp__github__get_me", False),
-            ("Bash", False),
+        for tool, want in (
+            ("mcp__github__merge_pull_request", "ask"),
+            ("mcp__github__enable_pr_auto_merge", "deny"),
+            ("mcp__github__get_me", None),
+            ("Bash", None),
         ):
             with self.subTest(tool):
-                self.assertEqual(bool(re.fullmatch(matchers[0], tool)), hit)
+                self.assertEqual(bool(re.fullmatch(matchers[0], tool)), want is not None)
                 code, out, _ = run_hook(
                     "pre-mcp-guard.sh", {"tool_name": tool, "tool_input": {"pullNumber": 7}}, self.proj
                 )
                 self.assertEqual(code, 0)
-                self.assertEqual(decision(out), "ask" if hit else None)
+                self.assertEqual(decision(out), want)
 
     def test_mcp_text_tools_reach_hook(self):
         """D-057: matcher gồm tool ghi PR/commit; hook chặn ghi công AI khi `ai_attribution: forbid`, không thì cho qua."""
@@ -1925,7 +1941,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
                 self.assertEqual(self.d(cmd)[0], "ask")
 
     def test_mcp_merge_pinned_allows(self):
-        """ADR-0014: tool MCP `merge_pull_request` ghim `expectedHeadSha`, đúng repo đã kiểm → allow; bật auto-merge → hỏi."""
+        """ADR-0014: tool MCP `merge_pull_request` ghim `expectedHeadSha`, đúng repo đã kiểm → allow; bật auto-merge → chặn
+        (ADR-0036)."""
         good = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def", "merge_method": "squash"}
         dec = self.mcp_d
         self.assertEqual(dec("mcp__github__merge_pull_request", good, via_hook=True), "allow")
@@ -1943,61 +1960,106 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             with self.subTest(name):
                 self.assertEqual(dec("mcp__github__merge_pull_request", inp), "ask")
         self.assertEqual(dec("mcp__gitlab__merge_pull_request", good), "ask")  # server khác: host khác
-        self.assertEqual(dec("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 7}), "ask")
+        self.assertEqual(dec("mcp__github__enable_pr_auto_merge", {"owner": "o", "repo": "r", "pullNumber": 7}), "deny")
         self.set_xt("merge_autonomy: L1\n")
         self.assertEqual(dec("mcp__github__merge_pull_request", good), "ask")
 
 
 class MergeGuardTest(MergeGuardBase):
-    """L3 bật auto-merge khi mở PR (ADR-0015); PR ngoại lệ cứng bị chặn (ADR-0019) hoặc cho qua khi `auto` (ADR-0020)."""
+    """Bật auto-merge luôn bị chặn (ADR-0036); PR ngoại lệ cứng bị chặn (ADR-0019) hoặc cho qua khi `auto` (ADR-0020)."""
 
-    def test_l3_enables_auto_merge_on_open(self):
-        """ADR-0015 (chủ repo 2026-10-16): ở L3 mở PR là bật auto-merge — `gh pr merge --auto`/MCP được allow cho PR nhắm
-        nhánh mặc định; L2, PR chồng, `--admin`, repo khác → hỏi."""
+    ENABLE_CMDS = (
+        "gh pr merge 7 --auto --squash",
+        "gh pr merge 7 --auto",
+        "gh pr merge 7 --squash --auto",
+        "gh pr merge 7 --auto --squash --admin",
+        "gh pr merge 7 --admin --auto",
+        "gh pr merge 7 --auto -b x",
+        "gh pr merge 7 --auto=true --squash",
+        "gh pr merge 7 --auto && ls",
+        "gh pr merge 7 --auto -R o/r",
+        "gh pr merge --auto",
+        "gh -R o/r pr merge 7 --auto",
+        "gh --repo o/r pr merge 7 --auto --squash",
+        "gh pr -R o/r merge 7 --auto",
+        "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { x } }'",
+        "gh api /graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { x } }'",
+    )
 
-        def mcp(inp: dict, via_hook: bool = False) -> str | None:
-            return self.mcp_d("mcp__github__enable_pr_auto_merge", inp, via_hook)
-
+    def test_enable_auto_merge_always_denied(self):
+        """ADR-0036 §3: bật auto-merge của GitHub — `gh pr merge --auto` ở mọi vị trí cờ (kể cả `--admin`/`-R`, dạng
+        gán), graphql `enablePullRequestAutoMerge`, tool MCP `enable…auto_merge` (input hợp lệ lẫn lạ, mọi server) → deny
+        mã `AUTO_MERGE_ENABLE` ở L2 và L3, cả strict lẫn mặc định, KHÔNG gọi merge-check. Đối chứng: tắt auto-merge vẫn
+        cho qua; merge ghim head vẫn theo merge-check (thiếu review ở head → hỏi, review sạch ở head → allow)."""
         good = {"owner": "o", "repo": "r", "pullNumber": 7, "mergeMethod": "SQUASH"}
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # setUp: L2
-        self.assertEqual(mcp(good), "ask")
-        self.set_xt("merge_autonomy: L3\n")
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash", via_hook=True)[0], "allow")
-        self.assertEqual(mcp(good, via_hook=True), "allow")
-        for cmd in ("gh pr merge 7 --auto --squash --admin", "gh pr merge 7 --auto -b x", "gh pr merge 7 --auto && ls"):
-            with self.subTest(cmd):
-                self.assertEqual(self.d(cmd)[0], "ask")
-        for inp in (
-            {**good, "owner": "evil"},
-            {**good, "pullNumber": "7"},
-            {**good, "mergeMethod": "FAST"},
-            {**good, "x": 1},
-        ):
-            with self.subTest(inp):
-                self.assertEqual(mcp(inp), "ask")
-        std = {**FAST_PR, "files": [{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}]}
+        tools = (
+            ("mcp__github__enable_pr_auto_merge", good),
+            ("mcp__github__enable_pr_auto_merge", {**good, "owner": "evil"}),
+            ("mcp__github__enable_pr_auto_merge", {**good, "pullNumber": "7", "x": 1}),
+            ("mcp__evil__enable_pr_auto_merge", good),
+        )
+        no_check = mock.Mock(side_effect=AssertionError("bật auto-merge không được gọi merge-check"))
+        for level in ("L2", "L3"):
+            self.set_xt(f"merge_autonomy: {level}\n")
+            with (
+                mock.patch.dict(os.environ, {**self.env(), "CLAUDE_PROJECT_DIR": str(self.proj)}),
+                mock.patch.object(self.guard, "merge_check", no_check),
+            ):
+                for cmd in self.ENABLE_CMDS:
+                    with self.subTest(level=level, cmd=cmd):
+                        res = self.guard.bash_decision(cmd, str(self.proj))
+                        self.assertEqual(res["decision"], "deny", res)
+                        self.assertEqual(self.guard.decide(res).code, "AUTO_MERGE_ENABLE")
+                        self.assertIn("ADR-0036", str(res["reason"]))
+                        self.assertEqual(self.guard.apply_policy(res)["decision"], "deny")
+                for tool, inp in tools:
+                    with self.subTest(level=level, tool=tool, inp=inp):
+                        out = dict(zip(("decision", "reason"), self.guard.mcp_decision(tool, inp, str(self.proj))))
+                        self.assertEqual(out["decision"], "deny", out)
+                        self.assertEqual(self.guard.decide(out).code, "AUTO_MERGE_ENABLE")
+                        self.assertEqual(self.guard.apply_policy(out)["decision"], "deny")
+        no_check.assert_not_called()
+        # Đường ống hook thật: deny từ luật không bị strict làm mềm thành ask.
+        for policy in ("strict", ""):
+            env = {**self.env(), "XT_GUARD_POLICY": policy}
+            with self.subTest(policy=policy, hook="bash"):
+                payload = {"tool_input": {"command": "gh pr merge 7 --auto --squash"}}
+                code, out, _ = run_hook("pre-bash-guard.sh", payload, self.proj, env)
+                self.assertEqual((code, decision(out)), (0, "deny"), out)
+                self.assertIn("ADR-0036", out)
+            with self.subTest(policy=policy, hook="mcp"):
+                payload = {"tool_name": "mcp__github__enable_pr_auto_merge", "tool_input": good}
+                code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, env)
+                self.assertEqual((code, decision(out)), (0, "deny"), out)
+                self.assertIn("ADR-0036", out)
+        # Đối chứng: tắt auto-merge (người bật) vẫn cho qua — máy phải tắt được.
+        self.assertIsNone(self.policy("gh pr merge 7 --disable-auto"))
+        self.assertIsNone(self.mcp_policy("mcp__github__disable_pr_auto_merge", good))
+        self.assertIsNone(
+            self.policy("gh api graphql -f query='mutation { disablePullRequestAutoMerge(input: {}) { x } }'")
+        )
+        # Merge ghim head giữ nguyên luật merge-check (ADR-0014/0028).
         sha40 = "a" * 40
-        std = {**std, "headRefOid": sha40}
-        self.fake_gh(std)  # làn chuẩn, chưa có review đã đăng ở head: bật auto-merge/merge đều hỏi (ADR-0024/0028)
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")
+        std = {
+            **FAST_PR,
+            "headRefOid": sha40,
+            "files": [{"path": ".claude/hooks/guard.py", "additions": 900, "deletions": 0}],
+        }
+        self.fake_gh(std)  # làn chuẩn, chưa có review đã đăng ở head → hỏi
         self.assertEqual(self.d(f"gh pr merge 7 --squash --match-head-commit {sha40}")[0], "ask")
-        self.fake_gh(std, reviewed="b" * 40)  # review sạch nhưng ở head khác (cũ) → vẫn hỏi
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")
         self.fake_gh(std, reviewed=sha40)  # review sạch ở đúng head → L3 cho cả làn chuẩn
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "allow")
         self.assertEqual(self.d(f"gh pr merge 7 --squash --match-head-commit {sha40}")[0], "allow")
-        self.fake_gh({**FAST_PR, "state": "CLOSED"})
-        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "ask")  # PR đã đóng
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "deny")  # review sạch vẫn không được bật
 
     def test_hard_exception_merge_denied_by_default(self):
         """ADR-0019: PR thuộc ngoại lệ cứng (ADR-0016) — strict hỏi, mặc định (ADR-0018) chặn cả merge ghim head,
-        bật auto-merge, merge REST và MCP, kể cả ở L3."""
+        merge REST và MCP, kể cả ở L3. Bật auto-merge bị chặn phẳng ở mọi PR (ADR-0036), không cần đường `hard`."""
         self.set_xt("merge_autonomy: L3\n")
         self.fake_gh({**FAST_PR, "labels": [{"name": "risk:auth"}]})
+        self.assertEqual(self.d("gh pr merge 7 --auto --squash")[0], "deny")
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
         cmds = (
             "gh pr merge 7 --squash --match-head-commit abc1234def",
-            "gh pr merge 7 --auto --squash",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def",
         )
         mcp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc1234def"}
@@ -2018,8 +2080,8 @@ class MergeGuardTest(MergeGuardBase):
                 self.assertEqual((code, decision(out)), (0, want), out)
 
     def test_hard_exception_auto_lets_merge_through(self):
-        """ADR-0020: nhánh đích đã commit `merge_hard_exceptions: auto` → PR ngoại lệ cứng merge/bật auto-merge như PR
-        khác. Đối chứng: chỉ sửa cây làm việc (agent tự đặt khoá) hoặc PR đổi chính khoá → vẫn chặn."""
+        """ADR-0020: nhánh đích đã commit `merge_hard_exceptions: auto` → PR ngoại lệ cứng merge ghim head như PR khác.
+        Đối chứng: chỉ sửa cây làm việc (agent tự đặt khoá) hoặc PR đổi chính khoá → vẫn chặn."""
         sys.path.insert(0, str(ROOT / "tests"))
         from test_merge import commit_base_xt
 
@@ -2047,10 +2109,10 @@ class MergeGuardTest(MergeGuardBase):
                 self.fake_gh(pr, reviewed=sha40)
                 code, out, _ = run_hook("pre-mcp-guard.sh", payload, self.proj, env)
                 self.assertEqual((code, decision(out)), (0, want), out)
-        code, out, _ = run_hook(
-            "pre-bash-guard.sh", {"tool_input": {"command": "gh pr merge 7 --auto --squash"}}, self.proj, env
-        )
+        pinned = f"gh pr merge 7 --squash --match-head-commit {sha40}"
+        code, out, _ = run_hook("pre-bash-guard.sh", {"tool_input": {"command": pinned}}, self.proj, env)
         self.assertEqual((code, decision(out)), (0, "deny"), out)  # PR đổi khoá, qua Bash
+        self.assertIn("HARD_EXCEPTION", out)
 
 
 class MergeGuardHardUnpinnedTest(MergeGuardBase):
@@ -2092,6 +2154,9 @@ class MergeGuardHardUnpinnedTest(MergeGuardBase):
             with self.subTest(normal=cmd):
                 self.assertIsNone(self.policy(cmd))
         self.assertIsNone(self.mcp_policy("mcp__github__merge_pull_request", mcp))
+        # PR thường vẫn không được bật auto-merge (ADR-0036): chặn phẳng không phụ thuộc `hard`.
+        self.assertEqual(self.policy("gh pr merge 7 --auto --squash"), "deny")
+        self.assertEqual(self.mcp_policy("mcp__github__enable_pr_auto_merge", mcp), "deny")
 
 
 class MergeGuardFailClosedTest(MergeGuardBase):
@@ -3760,6 +3825,8 @@ class GuardReview97Test(unittest.TestCase):
             ),
         )
         self.check("", ("gh -R o/r pr merge 7 --squash", "gh -R o/r pr view 7"), hard=False)
+        # Bật auto-merge sau cờ repo toàn cục: chặn cả khi PR không thuộc ngoại lệ cứng (ADR-0036).
+        self.check("deny", ("gh -Ro/r pr merge 7 --auto", "gh --repo o/r pr merge 7 --auto --squash"), hard=False)
 
     def test_push_config_flag_only_for_push(self):
         self.check("deny", ("git -c push.default=current stash drop", "git -c push.default=matching stash clear"))
@@ -3837,6 +3904,8 @@ class GuardReview97Test(unittest.TestCase):
                 "gh api user/keys -X POST -f key=x",
                 "gh api repos/o/r/actions/variables/X -X PATCH -f value=y",
                 "gh api graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+                "gh api /graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { clientMutationId } }'",
+                "gh api https://api.github.com/graphql -f query='mutation { deleteRepository(input: {repositoryId: \"x\"}) { x } }'",
             ),
             hard=False,
         )

@@ -176,7 +176,7 @@ class DeliveryPhaseMergeTest(unittest.TestCase):
 
 
 class DeliveryPhasePrNextTest(unittest.TestCase):
-    """`pr next` ở pha build: PR làn chuẩn chưa rà đi thẳng tới bật auto-merge/merge, nói rõ "bỏ qua review, ghi nợ"."""
+    """`pr next` ở pha build: PR làn chuẩn chưa rà đi thẳng tới merge ghim head, nói rõ "bỏ qua review, ghi nợ"."""
 
     H = "a" * 40
 
@@ -188,11 +188,17 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
 
     def test_delivery_phase_build_pr_next_skips_review(self):
         r = xt.pr_next(self.d(), False, {})
-        self.assertEqual((r["action"], r["review_deferred"]), ("enable-auto-merge", True))
-        self.assertTrue(r["why"].startswith("pha build: bỏ qua review, ghi nợ (ADR-0031) — làn chuẩn — bật auto-merge"))
-        r = xt.pr_next(self.d(), True, {})  # đã bật mà merge-check = merge: merge ghim head
+        self.assertEqual((r["action"], r["review_deferred"]), ("merge", True))
+        self.assertTrue(
+            r["why"].startswith("pha build: bỏ qua review, ghi nợ (ADR-0031) — làn chuẩn — merge-check = merge")
+        )
+        r = xt.pr_next(self.d(), True, {})  # người bật mà merge-check = merge: merge ghim head (D-063)
         self.assertEqual(r["action"], "merge")
         self.assertIn("pha build: bỏ qua review, ghi nợ", r["why"])
+        r = xt.pr_next(self.d(verdict="wait", reasons=["CI đang chạy: test"]), True, {})  # chưa đủ: tắt
+        self.assertEqual((r["action"], r["review_deferred"]), ("disable-auto-merge", True))
+        r = xt.pr_next(self.d(verdict="wait", reasons=["CI đang chạy: test"]), False, {})
+        self.assertEqual(r["action"], "wait")
         r = xt.pr_next(self.d(verdict="fix", reasons=["CI đỏ"], next="sửa"), False, {})  # chốt CI vẫn trước
         self.assertEqual((r["action"], r["why"]), ("fix", "CI đỏ"))
 
@@ -200,8 +206,8 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         r = xt.pr_next(self.d(delivery_phase="harden"), False, {})
         self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
         r = xt.pr_next(self.d(delivery_phase="harden"), False, {"reviews": [mark(True, self.H)]})
-        self.assertEqual(r["action"], "enable-auto-merge")
-        self.assertTrue(r["why"].startswith("review sạch ở head — bật auto-merge"))
+        self.assertEqual(r["action"], "merge")
+        self.assertTrue(r["why"].startswith("review sạch ở head — merge-check = merge — merge ghim head"))
 
     def test_delivery_phase_build_pr_next_hard_and_blocking(self):
         r = xt.pr_next(self.d(hard_waived=["auth"]), False, {})  # ngoại lệ cứng đã miễn người: vẫn đòi review
@@ -214,7 +220,7 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         self.assertEqual(r["action"], "fix")
 
     def test_delivery_phase_blocking_washed_pr_next_asks_review(self):
-        old = [mark(False, "b" * 40)]  # lỗi chặn ở head cũ: sau push cần review lại head hiện tại, không bật auto-merge
+        old = [mark(False, "b" * 40)]  # lỗi chặn ở head cũ: sau push cần review lại head hiện tại, không merge
         r = xt.pr_next(self.d(), False, {"reviews": old})
         self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
         r = xt.pr_next(self.d(), True, {"reviews": old})
@@ -223,11 +229,11 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
         ok = [*old, {**mark(True, "c" * 40), "at": "2026-10-20T11:00:00Z"}]
         r = xt.pr_next(self.d(), False, {"reviews": ok})
-        self.assertEqual((r["action"], r["review_deferred"]), ("enable-auto-merge", True))
+        self.assertEqual((r["action"], r["review_deferred"]), ("merge", True))
 
 
 class DeliveryPhaseCliTest(unittest.TestCase):
-    """`merge-check`, `merge-gate`, `pr next` đọc pha từ xt.yaml (nhánh đích + cây làm việc)."""
+    """`merge-check`, `pr next` đọc pha từ xt.yaml (nhánh đích + cây làm việc)."""
 
     def setUp(self):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -257,16 +263,16 @@ class DeliveryPhaseCliTest(unittest.TestCase):
         self.assertEqual((d["delivery_phase"], d["eligible"]), ("harden", False))
         self.assertIn("delivery_phase 'nhanh' không hợp lệ (build|harden — ADR-0031) — dùng harden", d["notes"][0])
 
-    def test_delivery_phase_merge_gate_and_pr_next(self):
-        std = pr(files=STANDARD, autoMergeRequest=AUTO)
-        rc, out, _ = run_main("merge-gate", "--json", "--pr-json", "-", stdin=json.dumps(std))
-        self.assertEqual((rc, json.loads(out)["gate"], json.loads(out)["review"]), (0, "pass", "deferred"))
-        blocking = {**std, "xtReviews": [mark(False)]}
-        rc, out, _ = run_main("merge-gate", "--json", "--pr-json", "-", stdin=json.dumps(blocking))
-        self.assertEqual((rc, json.loads(out)["gate"]), (1, "block"))
+    def test_delivery_phase_pr_next(self):
+        blocking = pr(files=STANDARD, autoMergeRequest=AUTO, xtReviews=[mark(False)])
+        rc, out, _ = run_main("pr", "next", "--json", "--pr-json", "-", stdin=json.dumps(blocking))
+        self.assertEqual(
+            (rc, json.loads(out)["action"]), (0, "disable-auto-merge")
+        )  # lỗi chặn: tắt auto-merge người bật
         rc, out, _ = run_main("pr", "next", "--pr-json", "-", stdin=json.dumps(pr(files=STANDARD)))
         self.assertEqual(rc, 0)
-        self.assertIn("ENABLE-AUTO-MERGE · PR #7", out)
+        self.assertIn("MERGE · PR #7", out)
+        self.assertNotIn("AUTO-MERGE", out)
         self.assertIn("pha build: bỏ qua review, ghi nợ (ADR-0031)", out)
 
 

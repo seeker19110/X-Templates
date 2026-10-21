@@ -143,7 +143,9 @@ class CiTemplateTest(unittest.TestCase):
         self.assertIn('glob.glob(".github/workflows/*.yml")', body)
 
     def test_ruleset_checks_are_all_provided(self):
-        """D-116/D-117: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu."""
+        """D-116/D-117: ruleset mẫu chỉ đòi check có job thật trong workflow mẫu — không check nào treo PR ngày đầu;
+        D-122: đúng 2 check, `merge-gate` đã bỏ."""
+        self.assertEqual(install.ruleset_required_checks(), ["quality", "gitleaks"])
         self.assertLessEqual(set(install.ruleset_required_checks()), install.provided_checks())
         self.assertEqual(xt.ci_check_text(SCAN.read_text(encoding="utf-8")), [])
         self.assertEqual(job_key(ci_jobs(SCAN.read_text(encoding="utf-8"))["gitleaks"], "name"), "gitleaks")
