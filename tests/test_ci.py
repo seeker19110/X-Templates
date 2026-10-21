@@ -183,6 +183,25 @@ class GateFanOutTest(unittest.TestCase):
         self.assertIn("XT_PY: python3.11", body)
         self.assertIn("git checkout -q -B main", body)
 
+    def test_default_python_314_with_311_floor(self):
+        """T-1831: mọi job cài 3.11 (sàn) + 3.14 (mặc định, đứng sau cùng → đầu PATH); không còn 3.13 trong job."""
+        for name, body in self.jobs.items():
+            if "actions/setup-python@" not in body:
+                continue
+            with self.subTest(job=name):
+                self.assertNotRegex(body, r"(?m)^\s+(?:python-version: \"?)?3\.13\"?$")
+                versions = re.findall(r"python-version: (?:\|\n((?:\s+\d+\.\d+\n)+)|\"?(\d+\.\d+)\"?)", body)
+                self.assertTrue(versions)
+                for block, single in versions:
+                    listed = block.split() if block else [single]
+                    self.assertEqual(listed[-1], "3.14")
+                    self.assertTrue(set(listed) <= {"3.11", "3.14"})
+
+    def test_sysmon_only_on_coverage_measuring_jobs(self):
+        self.assertIn("COVERAGE_CORE: sysmon", self.jobs["test"])
+        self.assertIn("COVERAGE_CORE: sysmon", self.jobs["coverage"])
+        self.assertNotIn("COVERAGE_CORE", self.jobs["py311"])  # 3.11 không có sys.monitoring, và không đo coverage
+
     def test_min_tests_declared_once(self):
         text = CI.read_text(encoding="utf-8")
         self.assertEqual(len(re.findall(r"XT_MIN_TESTS:", text)), 1)
