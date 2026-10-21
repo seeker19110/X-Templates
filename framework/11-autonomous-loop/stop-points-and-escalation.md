@@ -141,8 +141,13 @@ trị lạ, không đọc được = `human`. PR đổi chính khoá luôn ngư�
 |---|---|---|
 | `workflow_run` (`workflows: [CI, merge-gate]`, `completed`) | Check của GitHub Actions xong (job `quality`, `merge-gate`) | `pull_requests` trong payload; trống (push lên nhánh đích, PR từ fork) → mọi PR mở |
 | `check_suite: completed` | Check của app ngoài xong (GitHub **không** kích sự kiện này cho check suite do Actions tạo — chống đệ quy) | Như trên |
+| `workflow_run` của `CI` → workflow `merge-gate.yml` (ADR-0035; không phải steward) | CI xong trên một head | PR từ `pull_requests[]` (trống → REST theo `head_branch`): chạy luật `merge-gate`, tạo check-run `merge-gate` trên head; job xong kích steward qua dòng đầu |
 | `issue_comment` có dấu `xt-review v1` | Review đăng lên PR (ADR-0027) | PR của comment |
 | `schedule` / `workflow_dispatch` | Lưới bù / chạy tay | Mọi PR mở hoặc `inputs.pr` |
+
+`merge-gate` không còn nghe `labeled`/`edited`/`auto_merge_enabled`/`auto_merge_disabled` (ADR-0035): PR đã có check xanh
+mà sau đó bị gắn nhãn `risk:`, đổi nhánh đích hay bật auto-merge chỉ được xét lại khi steward chạy — `pr next` trả
+`disable-auto-merge` cho PR `hard`/thiếu review sạch; lịch 10 phút là lớp đỡ, cửa sổ và các lớp đỡ khác ở ADR-0035 §Hệ quả.
 
 Idempotent theo khoá **(repo, PR, head, hành động)**: payload chỉ chọn PR cần xét — head, auto-merge, check, review luôn
 đọc lại từ GitHub (`pr next` như phiên agent), và `xt.py pr steward` **đọc lại PR ngay trước mỗi hành động**: PR đã
