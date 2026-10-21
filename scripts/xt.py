@@ -1383,6 +1383,85 @@ def _unknown_after_note(unknown: Dict[str, List[str]]) -> List[str]:
     return [f"⚠ `sau:` trỏ ID không có trong PLAN (không chặn — kiểm gõ nhầm): {pairs}"] if unknown else []
 
 
+def _direct_block(t: Dict[str, Any], cyc: set[str], deferred: Dict[str, Any]) -> Optional[str]:
+    """Lý do `t` tự bị chặn (chu trình `sau:`, ghi chú hỏng, đã defer); None nếu không."""
+    if t["id"] in cyc:
+        return "trên chu trình `sau:`"
+    if t.get("bad_links"):
+        return f"ghi chú `sau:`/`files:` không đọc được: {', '.join(t['bad_links'])}"
+    if t["id"] in deferred:
+        info = deferred[t["id"]]
+        return f"đã defer: {info.get('reason', '') if isinstance(info, dict) else info}"
+    return None
+
+
+def _plan_blocked(opens: List[Dict[str, Any]], deferred: Dict[str, Any], cyc: set[str]) -> Dict[str, str]:
+    """{ID: lý do} của task mở bị chặn, theo thứ tự PLAN; chặn lan sang task chờ dependency mở bị chặn."""
+    ids = {t["id"] for t in opens}
+    blocked: Dict[str, str] = {}
+    for t in opens:
+        reason = _direct_block(t, cyc, deferred)
+        if reason:
+            blocked[t["id"]] = reason
+    changed = True
+    while changed:
+        changed = False
+        for t in opens:
+            deps = [d for d in t["after"] if d in ids and d in blocked]
+            if t["id"] not in blocked and deps:
+                blocked[t["id"]] = f"chờ {', '.join(deps)} bị chặn"
+                changed = True
+    return {t["id"]: blocked[t["id"]] for t in opens if t["id"] in blocked}
+
+
+def _plan_level(tid: str, deps: Dict[str, List[str]], memo: Dict[str, int]) -> int:
+    """Tầng phụ thuộc: 0 nếu không có dependency mở trong file, else 1 + max tầng các dependency."""
+    if tid not in memo:
+        memo[tid] = 1 + max((_plan_level(d, deps, memo) for d in deps[tid]), default=-1)
+    return memo[tid]
+
+
+def _fits_group(t: Dict[str, Any], group: List[Dict[str, Any]], max_parallel: int) -> bool:
+    """`t` vào được nhóm: còn chỗ, không ai thiếu `files:`, `files:` đôi một không giao."""
+    if len(group) >= max_parallel or not t["files"] or not all(g["files"] for g in group):
+        return False
+    return not any(_path_overlap(f, h) for g in group for f in t["files"] for h in g["files"])
+
+
+def _pack_level(level_tasks: List[Dict[str, Any]], max_parallel: int) -> List[List[Dict[str, Any]]]:
+    """Xếp tham lam (first-fit, theo thứ tự PLAN) task cùng tầng thành nhóm chạy song song."""
+    groups: List[List[Dict[str, Any]]] = []
+    for t in level_tasks:
+        target = next((g for g in groups if _fits_group(t, g, max_parallel)), None)
+        if target is None:
+            groups.append([t])
+        else:
+            target.append(t)
+    return groups
+
+
+def plan_waves(tasks: List[Dict[str, Any]], deferred: Dict[str, Any], max_parallel: int = 5) -> Dict[str, Any]:
+    """Chia task `[ ]` thành đợt song song: mỗi `sau:` trong file đã đóng hoặc thuộc đợt trước; trong đợt, nhóm có
+    `files:` không giao (task thiếu `files:` đứng riêng), ≤ max_parallel. Task chu trình/bad_links/defer → `blocked`."""
+    opens = [t for t in tasks if t["state"] in PLAN_OPEN_STATES]
+    blocked = _plan_blocked(opens, deferred, set(plan_cycle_nodes(tasks)))
+    live = [t for t in opens if t["id"] not in blocked]
+    ids = {t["id"] for t in live}
+    deps = {t["id"]: [d for d in t["after"] if d in ids] for t in live}
+    memo: Dict[str, int] = {}
+    levels = {t["id"]: _plan_level(t["id"], deps, memo) for t in live}
+    waves: List[Dict[str, Any]] = []
+    for lv in sorted(set(levels.values())):
+        for group in _pack_level([t for t in live if levels[t["id"]] == lv], max_parallel):
+            waves.append(
+                {
+                    "wave": len(waves) + 1,
+                    "tasks": [{k: t[k] for k in ("id", "title", "tier", "files")} for t in group],
+                }
+            )
+    return {"waves": waves, "blocked": [{"id": k, "reason": v} for k, v in blocked.items()]}
+
+
 def _plan_tasks(base: Path, st: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Task của PLAN khai trong state; không có state/PLAN → [] (fail-open cho chỗ gọi)."""
     plan = base / str(st.get("plan") or "")
@@ -6371,6 +6450,43 @@ def cmd_loop(args: argparse.Namespace) -> int:
     return handler(args, base) if handler else 2
 
 
+def _plan_waves_print(out: Dict[str, Any]) -> None:
+    """In văn bản: mỗi đợt một dòng, mỗi task bị chặn một dòng, một dòng tổng."""
+    n = 0
+    for w in out["waves"]:
+        names = [t["id"] + (" (deep)" if t["tier"] == "deep" else "") for t in w["tasks"]]
+        n += len(names)
+        print(f"Đợt {w['wave']} ({len(names)} task): {' · '.join(names)}")
+    for b in out["blocked"]:
+        print(f"⛔ {b['id']} — {b['reason']}")
+    print(f"{n + len(out['blocked'])} task mở → {len(out['waves'])} đợt ({len(out['blocked'])} bị chặn)")
+
+
+def _plan_waves(args: argparse.Namespace, base: Path) -> int:
+    if args.max < 1:
+        print("✗ --max phải ≥ 1", file=sys.stderr)
+        return 2
+    st = read_state(base) or {}
+    plan = base / (args.plan or str(st.get("plan") or "docs/autopilot/PLAN.md"))
+    if not plan.is_file():
+        print(f"✗ Không thấy PLAN: {plan}", file=sys.stderr)
+        return 2
+    out = plan_waves(parse_plan(plan), _deferred(st), args.max)
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        _plan_waves_print(out)
+    return 0
+
+
+PLAN_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {"waves": _plan_waves}
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    handler = PLAN_HANDLERS.get(args.plan_cmd)
+    return handler(args, project_dir()) if handler else 2
+
+
 CHANGELOG_GROUPS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
 CHANGELOG_VERSION_RE = re.compile(r"## \[(\d+)\.(\d+)\.(\d+)\] - (\d{4}-\d{2}-\d{2})(?: \[YANKED\])?")
 
@@ -9967,6 +10083,13 @@ def build_parser() -> argparse.ArgumentParser:
     pcx.add_argument("--plan", help="PLAN đọc (mặc định: PLAN của vòng, rồi docs/autopilot/PLAN.md)")
     pcx.add_argument("--json", action="store_true")
     pcx.set_defaults(fn=cmd_context)
+    ppl = sub.add_parser("plan", help="đọc PLAN: chia task mở thành đợt song song (T-1901)")
+    ppsub = ppl.add_subparsers(dest="plan_cmd", required=True)
+    pw = ppsub.add_parser("waves", help="xếp task `[ ]` thành đợt song song (không cần vòng đang bật)")
+    pw.add_argument("--plan", help="PLAN đọc (mặc định: PLAN của vòng, rồi docs/autopilot/PLAN.md)")
+    pw.add_argument("--max", type=int, default=5, help="số task tối đa mỗi đợt (mặc định 5)")
+    pw.add_argument("--json", action="store_true")
+    pw.set_defaults(fn=cmd_plan)
     plp = sub.add_parser("loop")
     lsub = plp.add_subparsers(dest="loop_cmd", required=True)
     li = lsub.add_parser("init")
