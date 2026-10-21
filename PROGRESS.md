@@ -3,6 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.12.0, pha `build`) · Cập nhật: 2026-10-21 · Nhánh: main
 
 ## Đang làm
+- 2026-10-21 **Nghiên cứu nâng tầng** ([`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md)): số đo thật (cổng 127 s, CI 92 s, lead time PR trung vị 15 phút, 3,3 run CI/PR), 4 bảng dữ kiện sống (Claude Code 2.1.306, GitHub, công cụ Python, thực hành agent), đề xuất theo ba trục + dự thảo thứ tự PLAN-3.13 — chờ chủ repo duyệt hướng. **Khẩn K-1**: GitHub chặn mặc định `pull_request_target` ở repo public từ 2026-11-02 — `merge-gate.yml` (required check) ở khung + 2 dự án đích.
 - 2026-10-21 **3.12.0 — CI/E2E/ruleset dự án đích tối thiểu, song song tối đa** (chủ repo; ADR-0034, D-115…D-117; CD bỏ theo chủ repo): #194 đã merge, tag `v3.12.0` → `5b8b8a6`. Mẫu `ci.yml` bỏ `test-plan` (matrix tĩnh), thêm job `e2e`, `protection-guard` vào `quality.needs`; mẫu `ruleset-main.json` (3 check, không strict); `dev-task.sh` thêm `test-mode`/`e2e-mode`/`e2e`.
 - 2026-10-21 **Đã cài 3.12.0 cho hai dự án đích** (gộp tay `ci.yml`/ruleset của dự án): hotel-manager #111 **đã merge** — `typecheck`/`lint` song song với `gate` (build → test giữ chung: test quét bundle cần `.next`), e2e 4 → 6 shard, CI 4m30s → 3m34s, ruleset giữ (đã 3 check); X-Company #51 **đã merge** — `quality` nối tiếp 8m02s tách thành typecheck · lint · build · checks · test · coverage song song, `quality` gom mọi job, ruleset 13 → 4 check (`quality`, `gitleaks`, `merge-gate`, `pr-policy`), không strict — chủ repo đã import, `gh api …/rules/branches/main` khớp file.
 - 2026-10-20 **PLAN-3.12-lean** (D-111) đã xong: Lát 1 #190, Lát 2 #191 (3.11.0), Lát 3 #192, Lát 4 #193 (3.11.1). Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
@@ -10,6 +11,7 @@
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/007/009, SEC-043 #97).
 
 ## Tiếp theo
+0. PLAN-3.13 theo research §6 khi chủ repo duyệt: Lát 0 K-1 (`merge-gate` → `workflow_run` + check-run REST, ADR mới thay ADR-0023) + TD-8 khớp Claude Code 2.1.306 → Lát A CL-2 fuzz guard · NH-2 cổng cục bộ = CI · CL-4 → Lát B TD-4 `pr stats` · TD-5 → Lát C NH-7a Python 3.14 · CL-1 mutation nightly → Lát D song song worktree. **Chờ chủ repo trước 2026-11-02**: event policy cho `pull_request_target` ở X-Templates, hotel-manager, X-Company (Settings → Actions → Policies); ruleset khung `strict: false` (NH-1); `XT_STEWARD_TOKEN`; App reviewer.
 1. Sau PLAN-3.12: `delivery_phase: harden` khi vào hoàn thiện → audit delta → `release-check`; 🟢 mở: AUD-TEST-019, AUD-SEC-100; ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task (`guard_turn` + `run_task`).
 2. Chờ chủ repo: token/app reviewer (T-1508); xoá `/scratch.log` ở gốc hệ thống file container; hotel-manager thêm `merge-gate` vào required check; `x-hotel-manager` dọn/tạo mới; ô "extra approval for unattributed changes" của ruleset `main`; Dependabot security updates (proxy chặn API).
 3. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR (PATCH lại thân PR sau khi mở — đã làm cho #190/#191); ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010).
@@ -28,6 +30,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc.
 
 ## Bàn giao phiên
-- 2026-10-21 · Commit cuối trên `main`: `9307e8b` (#195); tag `v3.12.0` → `5b8b8a6` (#194). Dự án đích: hotel-manager (#111) và X-Company (#51) đã chạy 3.12.0, ruleset GitHub khớp file. Nhánh `claude/peaceful-babbage-ap3k9u`: chỉ còn PR bàn giao này.
+- 2026-10-21 · Commit cuối trên `main`: `cd17588` (#196); tag `v3.12.0` → `5b8b8a6` (#194). Dự án đích: hotel-manager (#111) và X-Company (#51) đã chạy 3.12.0, ruleset GitHub khớp file. Nhánh `claude/adoring-noether-3jkse5`: bản nghiên cứu nâng tầng (tài liệu thuần, làn nhanh).
 - Lệnh kiểm nhanh: `scripts/dev-task.sh gate` (`pip install --require-hashes -r requirements-dev.txt`, cần shellcheck; hook cổng commit dùng python hệ thống).
 - Autopilot: `loop status`. Đang chặn: không. Câu hỏi cần người: Tiếp theo 2.
