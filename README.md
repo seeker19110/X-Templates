@@ -69,6 +69,23 @@ Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/khô
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
 [`framework/11-autonomous-loop/README.md`](framework/11-autonomous-loop/README.md).
 
+## Ứng dụng cục bộ
+
+```bash
+python3 scripts/xt.py app                 # repo khung
+python3 .xtemplates/scripts/xt.py app     # dự án đích (sau install.py)
+```
+
+Lệnh in một URL `http://127.0.0.1:<cổng>/#t=<token>` và mở trình duyệt. Có 7 màn: Tổng quan · Thư viện yêu cầu ·
+Ghép blueprint · Tiến độ blueprint · Kế hoạch và phân chia việc (cùng kết quả `xt.py plan waves`) · Vòng tự động, việc
+chờ người, quyết định và ADR · PR (cần `gh` đã đăng nhập; thiếu thì màn báo lý do, các màn khác vẫn chạy).
+
+App **không chạy lệnh**: không Gate, merge, push hay defer — mỗi màn chỉ hiện lệnh để chép sang terminal, nơi guard
+kiểm. Ngoại lệ duy nhất là nút "Ghi BLUEPRINT.md", đi đúng đường của `compose --out` (giữ tick theo ID). Máy chủ chỉ
+nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặt CSP chặt — mô hình đầy đủ ở
+[ADR-0038](docs/adr/0038-local-app-on-xt.md), hợp đồng API ở [`SPEC-app.md`](docs/specs/SPEC-app.md).
+`xt.py app --smoke` gọi mọi API rồi thoát (exit 1 khi có route lỗi) — dùng để kiểm bản cài.
+
 ## Công cụ
 
 | Lệnh | Việc |
