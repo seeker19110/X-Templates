@@ -65,7 +65,8 @@ export async function render(main, { api, h, loading, empty, error }) {
         h("p", null, h("a", { href: blob, download: "BLUEPRINT.md" }, "Tải .md"), " · ", save),
         out,
         h("p", null, "Lệnh tương đương: ", h("code", null, "python3 scripts/xt.py compose " + query(p).replace(/&/g, " ").replace(/=/g, " ").replace(/(^|\s)(\w+) /g, "$1--$2 ") + " --out BLUEPRINT.md")),
-        h("pre", { class: "md" }, d.markdown),
+        // Vùng cuộn được phải nhận focus bàn phím (axe scrollable-region-focusable, WCAG 2.1.1) — có tên vùng.
+        h("pre", { class: "md", tabindex: "0", role: "region", "aria-label": "Xem trước BLUEPRINT.md" }, d.markdown),
       );
     } catch (e) {
       error(preview, e, show);
