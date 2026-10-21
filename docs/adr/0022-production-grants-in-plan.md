@@ -7,7 +7,8 @@
   `AGENTS.md` §5, mẫu `AGENTS.md` §6, skill `/autopilot` bước 8/9/13/14, `LOOP-STOP-026`; test `tests/test_grants.py`,
   `tests/test_merge.py::MergeConfigTest::test_plan_grant_effect_changes_are_hard`, `test_plan_status_rename_and_unreadable`, `test_plan_grants_reader_rejects_bad_content`
 - **Ngày:** 2026-10-18
-- **Làm rõ bởi:** ADR-0023 (required check `merge-gate` đóng giới hạn "auto-merge không ghim head")
+- **Làm rõ bởi:** ADR-0023 (required check `merge-gate` đóng giới hạn "auto-merge không ghim head") — bỏ; ADR-0036 (2026-10-21)
+  đóng giới hạn đó tận gốc: máy không bật auto-merge, vế "bật auto-merge" ở §Giới hạn hết hiệu lực
 - **Làm rõ:** ADR-0020 (khoá `merge_hard_exceptions`), ADR-0021 (`--max-minutes` 120 → 240); **thay một phần** ADR-0012
   §5 (hệ số trần vòng) — quyết định D-027, D-028
 

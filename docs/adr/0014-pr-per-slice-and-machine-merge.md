@@ -1,7 +1,7 @@
 # ADR-0014: Mỗi lát code một PR; máy tự merge khi `merge-check` cho phép, lệnh merge ghim head
 
 - **Trạng thái:** Đã chấp nhận; §2 (không dùng auto-merge của GitHub) bị thay ở mức L3 bởi ADR-0015; §1 "không xoá
-  nhánh khi merge" là luật cho agent — chủ repo bật `delete_branch_on_merge` thì GitHub tự đổi đích PR chồng (ADR-0016 §4)
+  nhánh khi merge" là luật cho agent — chủ repo bật `delete_branch_on_merge` thì GitHub tự đổi đích PR chồng (ADR-0016 §4); ADR-0036 (2026-10-21) khôi phục §2 ở mọi mức: máy không dùng auto-merge của GitHub, merge luôn ghim head
 - **Trạng thái triển khai:** Đã triển khai (`.claude/hooks/guard.py` `_gh_api_merge_rule`, `mcp_decision`,
   `_merge_verdict`; `.claude/hooks/pre-mcp-guard.sh`; `scripts/xt.py` `merge_decision` trả `repo`; mục `LOOP-DESIGN-020`;
   `xt.yaml` của repo khung `merge_autonomy: L2`; test `tests/test_hooks.py::MergeGuardTest`)

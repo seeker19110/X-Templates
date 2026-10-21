@@ -1,7 +1,7 @@
 # ADR-0035: `merge-gate` chạy theo `workflow_run` của CI và báo bằng check-run REST trên head PR
 
-- **Trạng thái:** Đã chấp nhận; thay ADR-0023 về trigger và cách báo (luật `merge-gate`, exit code 1/2/3 và ruleset giữ nguyên)
-- **Trạng thái triển khai:** Chưa triển khai — Lát 0 của `docs/autopilot/PLAN-3.13-next-level.md`: T-1802 (`xt.py merge-gate
+- **Trạng thái:** Bị thay bởi ADR-0036 (2026-10-21, D-122) — không triển khai tiếp; trước đó: thay ADR-0023 về trigger và cách báo
+- **Trạng thái triển khai:** Không triển khai — mã T-1802 gỡ ở T-1808, T-1803 bỏ (ADR-0036). Kế hoạch cũ: Lát 0 của `docs/autopilot/PLAN-3.13-next-level.md`: T-1802 (`xt.py merge-gate
   --event FILE [--check-run]`, test `tests/test_merge.py`), T-1803 (`.github/workflows/merge-gate.yml`, test
   `tests/test_ci.py`). Cập nhật dòng này khi hai PR merge và check đã báo trên một PR thật.
 - **Ngày:** 2026-10-21

@@ -1,6 +1,7 @@
 # ADR-0016: Ở `merge_autonomy: L3` vẫn để người merge ngoại lệ cứng (tiền, dữ liệu thật, auth, mật mã, bí mật)
 
-- **Trạng thái:** Đã chấp nhận — thay một phần bởi ADR-0020 (`merge_hard_exceptions: auto`)
+- **Trạng thái:** Đã chấp nhận — thay một phần bởi ADR-0020 (`merge_hard_exceptions: auto`); vế "bật auto-merge" trong cơ chế
+  chặn hết hiệu lực theo ADR-0036 (2026-10-21): guard chặn merge ghim head PR `hard`, máy không bật auto-merge ở PR nào
 - **Trạng thái triển khai:** Đã triển khai (`scripts/xt.py` `merge_hard_reasons`, `merge_decision` trả `hard`;
   `.claude/hooks/guard.py` `_auto_merge_verdict`; test `tests/test_merge.py::HardExceptionL3Test`,
   `GuardHardExceptionTest`)

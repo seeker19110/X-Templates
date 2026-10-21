@@ -1,11 +1,13 @@
 # ADR-0023: Required check `merge-gate` — máy chặn auto-merge của PR ngoại lệ cứng trên head hiện tại
 
-- **Trạng thái:** Thay bởi ADR-0035 (2026-10-21) về trigger; luật và exit code giữ
+- **Trạng thái:** Bị thay toàn bộ bởi ADR-0036 (2026-10-21, D-122): required check `merge-gate` bỏ — máy không bật auto-merge nên
+  không còn gì để chặn; lệnh `xt.py merge-gate` gỡ; `merge-gate.yml` thành stub xanh tới khi chủ repo gỡ context khỏi ruleset
+  rồi xoá (T-1834). Trước đó: thay bởi ADR-0035 về trigger (ADR-0035 không triển khai)
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `cmd_merge_gate`, `_merge_eval`, `autoMergeRequest`
   trong `_pr_rest`; workflow `.github/workflows/merge-gate.yml`; ruleset mẫu `.github/rulesets/main.json` thêm context
   `merge-gate`; `scripts/install.py` copy workflow cùng ruleset (`--with-github`); test `tests/test_merge.py::MergeGateTest`.
-  **Chờ người:** chủ repo thêm `merge-gate` vào ruleset `main` đang chạy trên GitHub (Settings → Rules) sau khi thấy job
-  chạy trên một PR — đến lúc đó check chưa bắt buộc.
+  **Chờ người (đảo theo ADR-0036):** chủ repo gỡ `merge-gate` khỏi ruleset `main` đang chạy ở ba repo (Settings → Rules),
+  sau đó PR xoá stub.
 - **Ngày:** 2026-10-18
 - **Ghi chú ngày hiệu lực (2026-10-21):** "từ 2025-11-07" ở §Quyết định 2 là ngày GitHub công bố; thay đổi có hiệu lực
   từ 2025-12-08 (`pull_request_target` luôn lấy workflow và checkout từ nhánh mặc định). Nội dung quyết định bên dưới giữ nguyên.

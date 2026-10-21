@@ -2,7 +2,9 @@
 
 - **Trạng thái:** Đã chấp nhận — sửa đổi bởi D-058 (3.5.1): MEMBER của org được tin như COLLABORATOR khi REST
   `collaborators/<login>/permission` xác nhận quyền ghi (§2, §3 dưới đây ghi hành vi 3.5.0); sửa đổi bởi D-061 (3.7.0): PR tụt sau base được steward
-  cập nhật nhánh (REST `update-branch` ghim `expected_head_sha`), review sạch mang sang head merge base không đổi tập thay đổi; D-062: không bật auto-merge khi nhánh đích không có check bắt buộc
+  cập nhật nhánh (REST `update-branch` ghim `expected_head_sha`), review sạch mang sang head merge base không đổi tập thay đổi; D-062: không bật auto-merge khi nhánh đích không có check bắt buộc; thay một phần bởi ADR-0036 (2026-10-21): steward không bật
+  auto-merge (D-062/D-063 hết đối tượng), chỉ merge ghim head khi `merge-check` = `merge` và tắt auto-merge do người bật;
+  `workflow_run` chỉ còn `CI`
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` (`pr steward`, `pr reviewed` đăng kết quả lên PR,
   `published_reviews`, `with_published`), `.github/workflows/pr-steward.yml` (cài vào dự án đích bằng
   `install.py --with-github`), test `tests/test_merge.py` `PrStewardTest`, mục `LOOP-STOP-029`

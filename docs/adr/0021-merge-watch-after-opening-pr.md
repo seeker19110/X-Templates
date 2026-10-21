@@ -1,6 +1,7 @@
 # ADR-0021: Mở PR xong chạy nền `merge-watch` (30 giây/lần)
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; theo ADR-0036 (2026-10-21) `merge-watch` là đường chờ CI duy nhất của phiên (`wait` → merge ghim
+  head khi verdict `merge`) — không còn auto-merge chờ hộ
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `cmd_merge_watch`, `_merge_check_json`, `_watch_final`; quy
   định ở `AGENTS.md`, `framework/templates/AGENTS.md`, skill `/autopilot` bước 13, `LOOP-STOP-022`; test
   `tests/test_merge.py::MergeWatchTest`
