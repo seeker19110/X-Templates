@@ -1798,7 +1798,8 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
-RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-\w+)?)(?:=.*)?")
+# `--del`, `--delete`, `--delete-after`, cả tên nhiều đoạn `--delete-missing-args` (AUD-SEC-076)
+RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-[\w-]+)?)(?:=.*)?")
 HOME_ROOT_TARGETS = {"/", "~", "$HOME", "${HOME}"}  # dời đi đâu cũng là mất (`mv ~ ./x`)
 MV_VALUE_OPTS = ("-t", "--target-directory", "-S", "--suffix")
 
@@ -4793,7 +4794,7 @@ DIRECT_PROBES = 64  # số chuỗi canh được dò API ghi mỗi script (mỗi
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
 HOME_EXPR_RE = re.compile(
-    r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ\[\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
+    r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ(?:\[|\.get\()\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
 )
 STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")
 GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}
