@@ -2,7 +2,7 @@
 
 - **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo ADR-0008, D-126; chủ repo hỏi 2026-10-21 "biến dự án này thành
   app và phân chia công việc được không?").
-- **Trạng thái triển khai:** chưa bắt đầu — [`PLAN-3.14-app.md`](../autopilot/PLAN-3.14-app.md) (T-1901…T-1998).
+- **Trạng thái triển khai:** xong ở 3.14.0 (#209, #210; tag `v3.14.0`) — [`PLAN-3.14-app.md`](../autopilot/PLAN-3.14-app.md) (T-1901…T-1998); chặn ghi đè `.md` không phải blueprint ở 3.15.6 (AUD-SEC-103).
 - **Ngày:** 2026-10-21
 - **Làm rõ:** ADR-0001 (khung = thư viện ID + máy ghép/kiểm), ADR-0018 (guard), ADR-0010 (`xt.pyz` chưa làm), AGENTS.md §7
   (`xt.py` chỉ stdlib Python ≥ 3.11); `LOOP-ORCH-006`/`007`/`008` (song song theo file, hợp đồng trước, ≤ 5 đồng thời).

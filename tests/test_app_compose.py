@@ -237,6 +237,26 @@ class BlueprintPostTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in outside.iterdir()), ["t.md"])
         self.assertEqual(api_compose._blueprint(ctx(self.base, body=None))[0], 400)
 
+    def test_overwrite_only_blueprint_files(self) -> None:
+        """AUD-SEC-103 (ADR-0038 §2): app chỉ ghi blueprint — `.md` có sẵn mà không phải blueprint (README, AGENTS, ADR…)
+        hay backlog đích không phải backlog blueprint → 400, không file nào đổi."""
+        (self.base / "README.md").write_text("# Tài liệu người dùng\n", encoding="utf-8")
+        (self.base / "docs").mkdir()
+        (self.base / "docs" / "notes.md").write_text("---\nkind: note\n---\nghi chú\n", encoding="utf-8")
+        (self.base / "BP.md").write_text("", encoding="utf-8")
+        (self.base / "X-BACKLOG.md").write_text("việc riêng\n", encoding="utf-8")
+        (self.base / "bin.md").write_bytes(b"\xff\xfe")
+        before = {p: p.read_bytes() for p in self.base.rglob("*.md")}
+        for out in ("README.md", "docs/notes.md", "BP.md", "X.md", "bin.md"):
+            with self.subTest(out=out):
+                status, res = self.post(profile="cli-tool", scale="S", out=out)
+                self.assertEqual(status, 400, res)
+                self.assertIn("blueprint", res["error"])
+        self.assertEqual({p: p.read_bytes() for p in self.base.rglob("*.md")}, before)
+        # Blueprint đã có (và backlog của nó) ghi lại được như cũ.
+        self.assertEqual(self.post(profile="cli-tool", scale="S", out="BLUEPRINT.md")[0], 200)
+        self.assertEqual(self.post(profile="cli-tool", scale="S", out="BLUEPRINT.md")[0], 200)
+
     def test_concurrent_posts_keep_tick(self) -> None:
         self.assertEqual(self.post(profile="cli-tool", scale="S")[0], 200)
         bp = self.base / "BLUEPRINT.md"
