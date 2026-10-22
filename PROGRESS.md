@@ -3,10 +3,9 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.13.0, pha `harden` — D-136) · Cập nhật: 2026-10-22 · Nhánh: main
 
 ## Đang làm
-- 2026-10-22 **ADR-0040** (#212, #213, sửa review): pha build nới việc chỉ trong dự án/tmp. Repo khung luôn harden (D-136). Auto chặn sửa `.claude/hooks/` → chế độ hỏi. Tiếp: lát build gọn (CI bỏ `floor`, trần 150 dòng, PLAN nhẹ), lát harden (`release-check`: tấn công thử, `perf`).
+- 2026-10-22 **ADR-0040** (#212–#214; steward: PR sửa xt.yaml tính harden, D-137): pha build nới việc chỉ trong dự án/tmp. Repo khung luôn harden (D-136). Auto chặn sửa `.claude/hooks/` → chế độ hỏi. Tiếp: lát build gọn (CI bỏ `floor`, trần 150 dòng, PLAN nhẹ), lát harden (`release-check`: tấn công thử, `perf`).
 - 2026-10-21 **PLAN-3.15-audit-gate** (D-130) xong phần mã: [audit tại `ec4c7d2`](docs/ops/AUDIT-REPORT-2026-10-21.md) (commit `d388802`) xác minh lại 7/7 tái hiện được; sửa AUD-CODE-014 🔴, XFEAT-013/020 🟠 ở #207, SEC-102, CI-016, CI-012, CFG-003 ở PR Lát 3–4; `audit check --strict` xanh. CI khung giữ fan-out ([số đo](docs/ops/CI-TIMING-2026-10-21.md), D-131). Mới AUD-XFEAT-021 🟢 (`go test` 0 test).
 - 2026-10-21 **PLAN-3.13 Lát 0** (ADR-0036, D-122): máy chỉ merge ghim head, không auto-merge; bỏ required check `merge-gate` (stub giữ context tới khi chủ repo gỡ khỏi ruleset sống — T-1834). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
-- Lỗi `pr-steward`: `merge-check` ở workflow đọc pha từ checkout của `main`, nên PR tự đổi sang `harden` (#213) được merge như build — cần đọc thêm `xt.yaml` ở head PR (pha chặt hơn thắng).
 - Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/007/009, SEC-043 #97).

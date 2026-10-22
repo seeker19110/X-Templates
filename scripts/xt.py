@@ -7653,6 +7653,12 @@ def _merge_eval(pr: Dict[str, Any], local: bool = False) -> Tuple[Dict[str, Any]
     autonomy, notes = merge_autonomy_level(project_dir(), ref)
     hard_auto, hard_notes = merge_hard_mode(project_dir(), ref)
     phase, phase_notes = delivery_phase(project_dir(), ref)
+    if phase == "build" and {"xt.yaml", project_prefix() + "xt.yaml"} & set(
+        _risky_paths(pr)
+    ):  # kể cả tên cũ, dự án con
+        # steward chạy trên checkout nhánh đích: "cây làm việc" = nhánh đích, không thấy xt.yaml của PR — PR tự đổi pha
+        # (#213: build → harden) từng merge như build. PR đụng xt.yaml luôn tính harden (review #213, D-137).
+        phase, phase_notes = "harden", [*phase_notes, "PR sửa xt.yaml — tính pha harden (D-137)"]
     risk = merge_risk_globs(project_dir(), ref)
     rec = _pr_record(read_reviews(project_dir()), str(pr.get("number", ""))) if local else None
     return merge_check_result(pr, autonomy, risk, hard_auto, phase, rec), notes + hard_notes + phase_notes
