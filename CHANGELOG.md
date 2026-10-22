@@ -7,6 +7,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 **Dự án đích: chạy lại `install.py`** để nhận guard theo pha và gỡ 4 deny tĩnh cũ (ADR-0040).
 
+### Added
+- `release-check` thêm hàng `attack` (tấn công thử: DAST/fuzz/kịch bản khai thác) và `perf` (kiểm tải có ngưỡng) chạy lệnh cùng tên của `xt.yaml` — đỏ = NO-GO; chưa khai ở quy mô M/L = việc người ký ([ADR-0042](docs/adr/0042-release-check-attack-and-perf.md); chủ repo 2026-10-22). Mẫu `xt.yaml` có hai khoá mới; dự án đích: chạy lại `install.py`, gộp hai khoá từ `xt.yaml.xtemplates-new` nếu có.
+
 ### Fixed
 - `merge-check`/`pr-steward`: PR sửa `xt.yaml` luôn tính pha `harden` (D-137) — steward chạy trên checkout nhánh đích nên không thấy `xt.yaml` của PR; #213 (đổi build → harden) từng merge như build, không review.
 - Guard pha build (review #213): không nới khi đích không cố định trên dòng lệnh — `xargs`, `find -exec … {}`, glob, gốc thư mục tạm, `chmod` không đích, git `--work-tree`/`--git-dir`/`--exec-path`/`core.worktree`/`core.hooksPath`/mọi `GIT_*=` (`GIT_INDEX_FILE=/etc/x` — review #214); tên dự án có ký tự glob không còn làm git cục bộ bị chặn oan; `xt.yaml` đọc cả file (dòng trùng cuối thắng như `xt.py`). `dd of=/dev/<thiết bị>` không `if=` (`dd of=/dev/sda`; trừ `/dev/null|stdout|stderr`) nay bị chặn ở mọi pha — trước chỉ deny tĩnh `Bash(dd *)` che lỗ này.

@@ -2114,8 +2114,10 @@ class ReleaseCheckTest(TmpRepoCase):
         self.assertEqual((rc, d["go"], d["verdict"], d["fails"], d["human"]), (0, True, "GO", [], []))
         r = self.by_id(d)
         self.assertEqual(
-            [r[k]["result"] for k in xt.RELEASE_ROWS], ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A"]
+            [r[k]["result"] for k in xt.RELEASE_ROWS],
+            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A"],
         )
+        self.assertEqual((r["attack"]["level"], r["perf"]["level"]), ("SHOULD", "SHOULD"))  # quy mô S
         self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
         self.assertTrue(r["tree"]["evidence"].startswith("cây sạch, HEAD "))
         self.assertEqual(len(d["head"]), 40)
@@ -2125,6 +2127,29 @@ class ReleaseCheckTest(TmpRepoCase):
         rc, d = self.rows()
         self.assertEqual((rc, d["fails"]), (1, ["tree"]))
         self.assertIn("1 file chưa commit (x.txt)", self.by_id(d)["tree"]["evidence"])
+
+    def test_release_attack_and_perf_rows(self):
+        """ADR-0042: `attack`/`perf` của xt.yaml chạy ở release-check — đỏ = NO-GO; chưa khai ở M/L = việc của người."""
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        (self.repo / "BLUEPRINT.md").write_text(self.BP.replace("scale: S", "scale: M"), encoding="utf-8")
+        (self.repo / "xt.yaml").write_text("delivery_phase: harden\n", encoding="utf-8")
+        self.git("commit", "-q", "-am", "m")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "xt")
+        rc, d = self.rows()
+        r = self.by_id(d)
+        self.assertEqual((r["attack"]["result"], r["attack"]["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("attack", d["human"])
+        (self.repo / "xt.yaml").write_text(
+            "delivery_phase: harden\nattack: sh -c 'echo lo-hong; exit 4'\nperf: sh -c 'exit 0'\n", encoding="utf-8"
+        )
+        self.git("commit", "-q", "-am", "k")
+        rc, d = self.rows()
+        r = self.by_id(d)
+        self.assertEqual((rc, r["attack"]["result"], r["perf"]["result"]), (1, "FAIL", "PASS"))
+        self.assertIn("exit 4: lo-hong", r["attack"]["evidence"])
+        self.assertIn("attack", d["fails"])
 
     def test_blueprint_failures_and_missing_inputs(self):
         self.git("add", ".")

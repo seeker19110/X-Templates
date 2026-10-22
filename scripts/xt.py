@@ -7760,7 +7760,12 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- release-check (G7 máy đọc, ADR-0029)
 
-RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch", "phase", "review_debt")
+RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch", "phase", "review_debt", "attack", "perf")
+# ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
+RELEASE_RUN_KEYS = (
+    ("attack", "tấn công thử: DAST/fuzz/kịch bản khai thác trên bản chạy cục bộ hay staging"),
+    ("perf", "kiểm tải/ngân sách hiệu năng có ngưỡng, đỏ khi vượt"),
+)
 
 
 def _release_row(rid: str, result: str, evidence: str, level: str = "BLOCKER") -> Dict[str, str]:
@@ -7934,6 +7939,25 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     return _release_row("review_debt", "PASS", f"không có file ngoài tài liệu đổi sau SHA quét ({len(shas)} SHA)")
 
 
+def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
+    """Hàng chạy lệnh `key` của xt.yaml (ADR-0042). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
+    lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
+    cmd = _xt_keys(base).get(key, "")
+    if gate_noop(cmd):
+        scale = (_blueprint_front(base, blueprint) or ("", ""))[0]
+        if scale in ("M", "L"):
+            return _release_row(
+                key, "N/A", f"xt.yaml chưa khai `{key}` ({what}) — khai lệnh, hoặc người ký lý do không áp"
+            )
+        return _release_row(key, "N/A", f"quy mô {scale or 'không rõ'}: `{key}` không bắt buộc ({what})", "SHOULD")
+    timeout = _record_timeout() or 1800
+    code, out = run_gate_shell(cmd, base, timeout)
+    tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
+    if code:
+        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {tail}")
+    return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
+
+
 def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
     """Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối của autopilot
     và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
@@ -7947,6 +7971,7 @@ def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
         _release_prod_switch(base),
         _release_phase(base),
         _release_review_debt(base, status),
+        *(_release_run(base, blueprint, key, what) for key, what in RELEASE_RUN_KEYS),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
