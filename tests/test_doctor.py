@@ -285,6 +285,19 @@ class DoctorHooksTest(DoctorCase):
         with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
             self.assertIsNone(xt._syntax_error(self.base / ".claude" / "hooks" / "stop-guard.sh"))
 
+    def test_hook_climbing_to_repo_root_is_not_a_missing_sibling(self):
+        """`$(dirname "$0")/../..` (hook riêng của dự án lên gốc repo — dhcb) không phải file nạp cạnh hook tên `..`."""
+        self.write(
+            ".claude/hooks/rieng.sh", 'ROOT="$(cd "$(dirname "$0")/../.." && pwd)"\nsource "$(dirname "$0")/_lib.sh"\n'
+        )
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        data["hooks"]["Stop"].append({"hooks": [{"type": "command", "command": "bash .claude/hooks/rieng.sh"}]})
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.codes(), [])
+        (self.base / ".claude" / "hooks" / "_lib.sh").unlink()
+        self.assertIn("_lib.sh nhưng file không có", " ".join(f.msg for f in self.findings() if f.code == "hooks"))
+
     def test_python_hook_with_null_byte(self):
         p = self.base / ".claude" / "hooks" / "guard.py"
         p.write_bytes(b"x = 1\x00\n")

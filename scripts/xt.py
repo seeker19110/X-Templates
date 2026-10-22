@@ -3648,7 +3648,8 @@ DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review"
 DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
-HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/([\w.-]+)')  # file hook nạp/gọi cạnh nó (_lib.sh, guard.py)
+# file hook nạp/gọi cạnh nó (_lib.sh, guard.py); tên không bắt đầu bằng "." — `$(dirname "$0")/../..` là lên gốc repo
+HOOK_SIBLING_RE = re.compile(r'\$\(dirname "\$0"\)/(\w[\w.-]*)')
 YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):[ \t]*(.*?)[ \t]*$")
 LOOP_GATE_KEYS = ("lint", "test")  # ADR-0011: trong vòng autopilot, hai khoá này rỗng/no-op thì dev-task.sh ĐỎ
 # Một đoạn no-op của lệnh cổng — ĐÚNG chuỗi `NOOP_RE` của dev-task.sh (test so hai bên): `true` · `:` · `exit [0]` ·

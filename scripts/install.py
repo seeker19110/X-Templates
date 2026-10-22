@@ -318,6 +318,40 @@ def _sync_on_failure(theirs: list[dict[str, Any]], entry: dict[str, Any]) -> lis
     return changed
 
 
+PROJECT_DIR_PREFIX = re.compile(r'"?\$\{?CLAUDE_PROJECT_DIR\}?/')
+
+
+def _hook_key(cmd: object) -> object:
+    """Khoá so lệnh hook: bỏ `${CLAUDE_PROJECT_DIR}/` và dấu nháy — khung 2.x đăng ký dạng tương đối
+    (`bash .claude/hooks/x.sh`), cùng hook với dạng hiện tại (`bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/x.sh"`)."""
+    return PROJECT_DIR_PREFIX.sub("", cmd).replace('"', "") if isinstance(cmd, str) else cmd
+
+
+def _upgrade_legacy_commands(theirs: list[dict[str, Any]], entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Handler dự án cùng khoá với lệnh khung nhưng khác chữ (dạng tương đối của khung 2.x — sai đường khi cwd không phải
+    gốc dự án) → đổi sang lệnh khung; lệnh khung lặp lại sau khi đổi thì gỡ bản sau (mục chỉ còn rỗng vì vậy bỏ luôn) —
+    không đăng ký hook hai lần. Trả danh sách thay đổi."""
+    want = {_hook_key(h.get("command")): h.get("command") for e in entries for h in e.get("hooks", [])}
+    framework, seen = set(want.values()), set[object]()
+    changed: list[dict[str, Any]] = []
+    for e in theirs:
+        kept = []
+        for h in e.get("hooks", []):
+            cmd = want.get(_hook_key(h.get("command")), h.get("command"))
+            if cmd != h.get("command"):
+                changed.append({"command_from": h.get("command"), "command_to": cmd})
+                h["command"] = cmd
+            if cmd in framework and cmd in seen:
+                changed.append({"duplicate_removed": cmd})
+                continue
+            seen.add(cmd)
+            kept.append(h)
+        if len(kept) < len(e.get("hooks", [])):
+            e["hooks"] = kept
+    theirs[:] = [e for e in theirs if e.get("hooks") != []]
+    return changed
+
+
 def _merge_hook_events(
     ours: dict[str, Any], theirs: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -327,6 +361,7 @@ def _merge_hook_events(
     added: list[dict[str, Any]] = []
     synced: list[dict[str, Any]] = []
     for event, entries in ours.get("hooks", {}).items():
+        synced += [{"event": event, **c} for c in _upgrade_legacy_commands(hooks.get(event, []), entries)]
         have = {h.get("command") for e in hooks.get(event, []) for h in e.get("hooks", [])}
         for entry in entries:
             cmds = [h.get("command") for h in entry.get("hooks", [])]
