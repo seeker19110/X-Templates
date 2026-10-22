@@ -10,7 +10,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`.** Dự án có luật quyền/dạng hook riêng (dhcb): thêm `harness_permissions: own` vào `xt.yaml` trước khi chạy.
 
 ### Added
-- Khoá `xt.yaml` `harness_permissions` (mẫu `xt.yaml`, `harness-files.md`): `own` = `install.py` không thêm `allow: Bash`/`deny` của khung và ghi lệnh hook của khung dạng tương đối `bash .claude/hooks/x.sh` như dự án (lệnh `${CLAUDE_PROJECT_DIR}` đã cài trước được đổi lại); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 như cũ (dhcb cấm quyền Bash trùm và bắt hook dạng tương đối — chủ repo 2026-10-22).
+- Khoá `xt.yaml` `harness_permissions` (mẫu `xt.yaml`, `harness-files.md`): `own` = `install.py` không thêm `allow: Bash`/`deny` của khung và ghi lệnh hook của khung dạng tương đối `bash .claude/hooks/x.sh` như dự án (lệnh `${CLAUDE_PROJECT_DIR}` đã cài trước được đổi lại); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 như cũ (dhcb cấm quyền Bash trùm và bắt hook dạng tương đối — chủ repo 2026-10-22). Cài mới/`--force-harness` với `own`: `settings.json` chép từ khung không mang `permissions`. `own` không gỡ `allow`/`deny` mà khung đã thêm ở lần cài trước — dọn tay.
 
 ### Fixed
 - `doctor`: file nạp cạnh hook nhận cả đường dẫn (`$(dirname "$0")/nested/x.py`, `../x.py`, `/x.py`, file ẩn `.guard.py`); đường dẫn chỉ gồm `.`/`..` (lên gốc repo) không tính là file; ghép chuỗi thay `Path` nên `guard.py/` không bị coi là có file. Bản 3.15.2 bỏ sót `.guard.py`, `../guard.py`, `nested/guard.py` — port bản sửa và bộ ca test từ xboss #664.

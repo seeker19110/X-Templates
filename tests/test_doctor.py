@@ -973,10 +973,6 @@ class DoctorDriftTest(DoctorCase):
         self.assertTrue(any("TaskCompleted" in m for m in msgs) and any("SubagentStop" in m for m in msgs))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DoctorHookSiblingTest(unittest.TestCase):
     """File nạp cạnh hook (`$(dirname "$0")/<đường dẫn>`) — ca port từ `tests/xt-doctor.test.ts` của xboss (#664)."""
 
@@ -1060,3 +1056,7 @@ class DoctorHookSiblingTest(unittest.TestCase):
     def test_direct_settings_hook_missing_or_broken(self):
         self.assert_error(self.run_doctor({}), "entry.sh", "file không có")
         self.assert_error(self.run_doctor({"entry.sh": self.BROKEN_SH}), "entry.sh", "lỗi cú pháp")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -574,9 +574,20 @@ def install_settings(
         if unproven:
             log(f"  ⚠ giữ `ask` trùng chuỗi rule cũ của khung nhưng manifest không chứng minh khung đặt: {unproven}")
         return update_provenance(prov, report)
-    r = copy_if_absent(SRC / ".claude" / "settings.json", settings, force_harness)
+    own = own_permissions(target)
+    r = copy_if_absent(SRC / ".claude" / "settings.json", settings, force_harness, own_settings if own else None)
     stats[r] += 1
-    return our_rules() if r == "copied" else prov
+    if r != "copied":
+        return prov
+    return dict.fromkeys(RULE_KEYS, []) if own else our_rules()
+
+
+def own_settings(text: str) -> str:
+    """settings.json khung cho dự án `harness_permissions: own` khi chép mới/`--force-harness`: bỏ `permissions` (dự án tự
+    khai), lệnh hook dạng tương đối (`_relative_hooks`)."""
+    data = _relative_hooks(json.loads(text))
+    data.pop("permissions", None)
+    return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
 def shadowed_skills(target: Path) -> list[str]:
@@ -1048,7 +1059,7 @@ def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]])
         rep = settings_changes(pair[0], pair[1], prov, own_permissions(target))
         action = "merged-hooks" if rep.pop("changes") else "kept"
         return {"action": action, **rep}
-    return {"action": classify_copy(src, dst, force_harness)[0]}
+    return {"action": classify_copy(src, dst, force_harness, own_settings if own_permissions(target) else None)[0]}
 
 
 PlanJob = tuple[Path, str, bool, Callable[[str], str] | None, str | None]  # nguồn, đích, force, biến đổi, hash mẫu

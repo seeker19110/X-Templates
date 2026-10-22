@@ -1037,6 +1037,22 @@ class InstallPlanTest(unittest.TestCase):
         (self.target / "xt.yaml").write_bytes(b"\xff")
         self.assertFalse(install.own_permissions(self.target))
 
+    def test_own_permissions_fresh_or_forced_copy_has_no_framework_permissions(self):
+        """Cài mới / `--force-harness` với `harness_permissions: own` (review #224): settings.json chép từ khung không mang
+        `permissions` của khung, lệnh hook dạng tương đối; manifest không ghi rule khung."""
+        (self.target / "xt.yaml").write_text("harness_permissions: own\n", encoding="utf-8")
+        self.assertEqual(self.plan()["settings"]["action"], "copied")
+        for extra in ((), ("--force-harness",)):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.install(*extra), 0)
+                data = json.loads(self.settings.read_text(encoding="utf-8"))
+                self.assertNotIn("permissions", data)
+                commands = [h["command"] for es in data["hooks"].values() for e in es for h in e["hooks"]]
+                self.assertTrue(commands)
+                self.assertFalse([c for c in commands if "CLAUDE_PROJECT_DIR" in c])
+                manifest = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(manifest["rules"], {"allow": [], "ask": [], "deny": []})
+
     def test_install_plan_reports_matcher_update(self):
         ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
         old = json.loads(json.dumps(ours))
