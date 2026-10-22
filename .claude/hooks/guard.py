@@ -914,10 +914,12 @@ def _git_C_dirs(argv: List[str]) -> List[str]:
 
 
 def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
-    """Thư mục repo mà lệnh git (`git -C a -C b …`) tác động: `cwd` đi qua các `-C`; không biết (biến, `cd -`) → None."""
+    """Thư mục repo mà lệnh git (`git -C a -C b …`) tác động: `cwd` đi qua các `-C`; không biết (biến, `cd -`,
+    `~+`/`~-` — AUD-SEC-100) → None."""
     gdir = cwd
     for d in _git_C_dirs(argv):
-        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and "$" not in d else None
+        known = "$" not in d and not TILDE_DIR_RE.match(d)
+        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and known else None
     return gdir
 
 
@@ -1798,7 +1800,8 @@ def _snapshot_update_rule(n: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
-RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-\w+)?)(?:=.*)?")
+# `--del`, `--delete`, `--delete-after`, cả tên nhiều đoạn `--delete-missing-args` (AUD-SEC-076)
+RSYNC_DELETE_RE = re.compile(r"--(?:del|delete(?:-[\w-]+)?)(?:=.*)?")
 HOME_ROOT_TARGETS = {"/", "~", "$HOME", "${HOME}"}  # dời đi đâu cũng là mất (`mv ~ ./x`)
 MV_VALUE_OPTS = ("-t", "--target-directory", "-S", "--suffix")
 
@@ -4793,7 +4796,7 @@ DIRECT_PROBES = 64  # số chuỗi canh được dò API ghi mỗi script (mỗi
 PERL_OPEN_MODE_RE = re.compile(r"^\+?(?:>>?|<)[ \t]*")
 RMTREE_RE = re.compile(r"\b(?:rmtree|remove_tree|rm_rf|rmSync|rimraf)\b")  # xoá đệ quy trong script (AUD-SEC-068)
 HOME_EXPR_RE = re.compile(
-    r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ\[\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
+    r"expanduser\(\s*['\"]~/?['\"]\s*\)|Path\.home\(\)|environ(?:\[|\.get\()\s*['\"]HOME['\"]|getenv\(\s*['\"]HOME['\"]|homedir\(\)"
 )
 STR_LITERAL_RE = re.compile(r"""['"]([^'"\s]{2,})['"]""")
 GUARDED_KINDS = {"secret", "gate", "evidence", "capability"}

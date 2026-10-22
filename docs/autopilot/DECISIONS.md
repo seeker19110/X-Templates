@@ -973,3 +973,10 @@
 - Chọn: PR sửa xt.yaml luôn tính harden (không thêm lời gọi API, chặt ở cả hai chiều đổi pha)
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: PR đổi pha theo chiều nào cũng cần review; đơn giản, không thêm I/O hay chế độ lỗi mạng; chi phí chỉ là PR sửa xt.yaml ở pha build phải chờ review — hiếm
 - Đường lùi: Bỏ nhánh 'PR sửa xt.yaml' trong _merge_eval
+
+### D-138 · 2026-10-22T08:47:19+00:00 · Duyệt PLAN-3.15.5-green-debt: /autopilot không kèm yêu cầu — làm gì?
+
+- Phương án: (1) Dọn 5 🟢 mở của sổ audit có đường tái hiện máy và bản vá nhỏ, không cần quyết chính sách (SEC-076, SEC-100, CFG-004, XFEAT-002, TEST-019) → 3.15.5 · (2) Tách xt.py thành gói (AUD-ARCH-001) · (3) Dừng: báo không có việc máy làm được
+- Chọn: Dọn 5 🟢 mở của sổ audit có đường tái hiện máy và bản vá nhỏ, không cần quyết chính sách (SEC-076, SEC-100, CFG-004, XFEAT-002, TEST-019) → 3.15.5
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: đóng lỗ guard và lệch cổng có tái hiện; (2) đường lùi: mỗi lát một PR nhỏ revert được; (3) tách xt.py cần ADR + đổi danh sách copy của install.py — rủi ro lớn, không làm khi chưa có yêu cầu; dừng bỏ phí lỗi đã biết
+- Đường lùi: revert PR lát tương ứng; phát hiện về lại 'mở' trong sổ

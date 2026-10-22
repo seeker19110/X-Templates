@@ -327,6 +327,10 @@ class DeleteOutsideProjectTest(unittest.TestCase):
             "rsync --remove-source-files -a ~/docs ./x",
             "python3 -c 'import shutil,os; shutil.rmtree(os.path.expanduser(\"~\"))'",
             "python3 -c 'import shutil; from pathlib import Path; shutil.rmtree(Path.home())'",
+            "python3 -c 'import shutil,os; shutil.rmtree(os.environ.get(\"HOME\"))'",  # AUD-SEC-076
+            "python3 -c \"import shutil,os; shutil.rmtree(os.environ.get('HOME', '/tmp/h'))\"",
+            "rsync -a --delete-missing-args x/ /home/user/other/",
+            "rsync -a --delete-excluded --exclude=a x/ ~/",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -339,6 +343,8 @@ class DeleteOutsideProjectTest(unittest.TestCase):
             "mv ~/Downloads/a.txt docs/",
             "python3 -c 'import shutil; shutil.rmtree(\"build\")'",
             "rsync -a --delete dist/ h:/srv/www/",
+            "rsync -a --delete-missing-args dist/ build/",
+            "python3 -c 'import os; print(os.environ.get(\"HOME\"))'",
             "mv ~/Downloads/x.zip /tmp/",  # đổi chỗ một file, không phải xoá đệ quy (review #159)
             "mv ../sibling/f ../sibling/f2",
             "rm -rf build 2>/dev/null",  # đích chuyển hướng không phải đích xoá

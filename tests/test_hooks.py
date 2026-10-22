@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import importlib.util
 import io
 import json
@@ -693,6 +694,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(cdir("cd $D && git -C b commit -m x"), "")
         self.assertEqual(cdir("git -C commit"), "")  # `-C` thiếu giá trị: không phải commit
         self.assertEqual(cdir("git -c user.name=x commit -m x"), "/w/a")
+        # AUD-SEC-100: `~+`/`~-` là `$PWD`/`$OLDPWD` (như `cd ~+`), không phải thư mục con tên `~+`
+        for tilde in ("git -C ~+/x commit -m x", "git -C ~- commit -m x", "git -C b -C ~+ commit -m x"):
+            self.assertEqual(cdir(tilde), "", tilde)
+        self.assertEqual(cdir("git -C x~+ commit -m x"), "/w/a/x~+")  # `~+` không đứng đầu: chữ thường
         # Subshell: `cd` trong `( … )`/`$( … )` không dời thư mục của lệnh sau.
         self.assertEqual(cdir("(cd ../b && git pull); git commit -m x"), "/w/a")
         self.assertEqual(cdir("x=$(cd ../b; pwd) && git commit -m x"), "/w/a")
@@ -1913,6 +1918,17 @@ class SettingsJsonTest(unittest.TestCase):
         # ADR-0018: không hỏi — nguy hiểm thì deny (settings + guard), còn lại cho chạy.
         self.assertEqual(perms["ask"], [])
         self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))
+
+    def test_read_deny_covers_secret_patterns(self):
+        """AUD-CFG-004: tool Read không qua hook guard — mỗi mẫu bí mật mà guard chặn ghi (`SECRET_PATTERNS`) phải có
+        một `Read(...)` deny khớp, để hai danh sách không lệch lại khi thêm mẫu."""
+        perms = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
+        globs = [r[5:-1].removeprefix("./").removeprefix("**/") for r in perms["deny"] if r.startswith("Read(")]
+        for pat in _guard().SECRET_PATTERNS:
+            for fill in ("", "x_"):  # `*id_rsa*` → `id_rsa` và `x_id_rsax_` (`id_rsa_work` — review Lát 1)
+                name = pat.replace("/*", "/x").replace("*", fill)
+                with self.subTest(name):
+                    self.assertTrue(any(fnmatch.fnmatchcase(name, g) for g in globs), f"{name}: thiếu Read deny")
 
 
 FAST_PR = {
