@@ -4,9 +4,10 @@
 > dòng: app cục bộ `xt.py app` + `scripts/xt_app`, pha build/harden ADR-0040…0042, CI mẫu ADR-0039, merge ghim head
 > ADR-0036, installer 3.15.x) cho nhóm 1–5, 7–9, 11–13; nhóm 6 A11Y quét lần đầu (N/A → áp dụng: `scripts/app`); 64 bằng
 > chứng blueprint `stale_evidence` · Lý do: `release-check` @ `e7a717b` NO-GO, hàng `review_debt` (88 file đổi sau SHA
-> quét, ADR-0031) và `audit` (nhóm 6) — PLAN-3.16-audit-delta (D-139) · Người quét: 3 subagent `reviewer` (Sonnet) song
-> song theo cụm {SEC, CFG, DEP, CI} · {ARCH, CODE, TEST, PERF, XFEAT} · {DOC, HAR, A11Y}, read-only; phiên chính chạy
-> pip-audit, zizmor, gitleaks · Xác minh đối kháng: phiên chính (Opus, khác họ người quét) tái hiện cả 4 🟠 (D-140) ·
+> quét, ADR-0031) và `audit` (nhóm 6) — PLAN-3.16-audit-delta (D-139) · Người quét: 3 subagent `reviewer` song song
+> theo cụm {SEC, CFG, DEP, CI} · {ARCH, CODE, TEST, PERF, XFEAT} · {DOC, HAR, A11Y}, read-only; phiên chính chạy
+> pip-audit, zizmor, gitleaks · Xác minh đối kháng: phiên chính (khác họ model người quét) tái hiện cả 3 🟠
+> khác nhau mà người quét báo — AUD-SEC-103 do hai cụm tìm độc lập (D-140) ·
 > `xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0
 
 ## 1. Tóm tắt
@@ -56,8 +57,9 @@ khớp). Còn thiếu (→ `chưa biết`): semgrep, osv-scanner, bandit, lint-i
   **Gate:** `python3 -m unittest tests.test_app_compose -k overwrite`
 
 ### Hạ mức khi xác minh (D-140)
-- **AUD-PERF-002** (🟠 → 🟢): `xt.py app --smoke` chạm GitHub và có thể `TimeoutError` — lệnh chỉ chạy tay ("kiểm bản
-  cài", README), không ở CI/cổng; lỗi gây đỏ giả, không xanh giả.
+- **AUD-PERF-002** (🟠 → 🟢): `xt.py app --smoke` chạm GitHub và có thể `TimeoutError` — lệnh dùng để kiểm bản cài
+  (README); ở cổng chỉ chạy trong test với thư mục tạm không có remote (`tests/test_app_cli.py` `AppCwdTest` — `gh` lỗi
+  nhanh, không chạm mạng thật); lỗi gây đỏ giả, không xanh giả.
 - **AUD-XFEAT-022** (🟠 → 🟢): `floor` đọc pha ở cây làm việc, `merge-check`/guard đọc cả nhánh đích — chủ ý ADR-0041;
   PR tự đổi sang build vẫn qua review vì `merge-check` đọc nhánh đích và `xt.yaml` thuộc `merge_risk_paths`. Muốn đồng
   nhất thì cần ADR mới (đổi hành vi CI của dự án pha build).
