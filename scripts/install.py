@@ -377,11 +377,36 @@ def _merge_hook_events(
     return added, synced
 
 
-def settings_changes(ours: dict[str, Any], theirs: dict[str, Any], prov: dict[str, list[str]]) -> dict[str, Any]:
+OWN_PERMISSIONS_RE = re.compile(r"""^harness_permissions:[ \t]*["']?own["']?[ \t]*(?:#.*)?$""", re.M)
+NO_PERMISSION_CHANGES = ("allow_add", "deny_add", "ask_remove", "deny_remove", "ask_unproven")
+
+
+def own_permissions(target: Path) -> bool:
+    """`harness_permissions: own` trong xt.yaml của dự án: dự án giữ mô hình quyền và dạng lệnh hook riêng (dhcb cấm
+    `allow: Bash` trùm, bắt hook `bash .claude/hooks/x.sh` — chủ repo 2026-10-22). Thiếu/không đọc được → False."""
+    try:
+        return bool(OWN_PERMISSIONS_RE.search((target / "xt.yaml").read_text(encoding="utf-8-sig")))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _relative_hooks(ours: dict[str, Any]) -> dict[str, Any]:
+    """Bản sao settings khung với lệnh hook dạng tương đối của dự án (`bash .claude/hooks/x.sh`, bỏ
+    `${CLAUDE_PROJECT_DIR}/` và dấu nháy — `_hook_key`)."""
+    copy: dict[str, Any] = json.loads(json.dumps(ours))
+    for h in (h for entries in copy.get("hooks", {}).values() for e in entries for h in e.get("hooks", [])):
+        h["command"] = _hook_key(h.get("command"))
+    return copy
+
+
+def settings_changes(
+    ours: dict[str, Any], theirs: dict[str, Any], prov: dict[str, list[str]], own: bool = False
+) -> dict[str, Any]:
     """Gộp `ours` vào `theirs` tại chỗ (bộ nhớ) và trả báo cáo: `permissions`, `hooks_added`, `hooks_matcher_updated`,
-    `changes` (tổng số thay đổi; 0 = không cần ghi)."""
-    added, synced = _merge_hook_events(ours, theirs)
-    perms = merge_permissions(ours, theirs, prov)
+    `changes` (tổng số thay đổi; 0 = không cần ghi). `own` (`harness_permissions: own`): không đụng quyền, lệnh hook
+    của khung ghi dạng tương đối như dự án."""
+    added, synced = _merge_hook_events(_relative_hooks(ours) if own else ours, theirs)
+    perms = dict.fromkeys(NO_PERMISSION_CHANGES, []) if own else merge_permissions(ours, theirs, prov)
     total = (
         len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove", "deny_remove"))
     )
@@ -403,7 +428,11 @@ def read_settings_pair(src: Path, dst: Path) -> tuple[dict[str, Any], dict[str, 
 
 
 def merge_hooks(
-    src: Path, dst: Path, prov: dict[str, list[str]] | None = None, report: dict[str, Any] | None = None
+    src: Path,
+    dst: Path,
+    prov: dict[str, list[str]] | None = None,
+    report: dict[str, Any] | None = None,
+    own: bool = False,
 ) -> str:
     """settings.json của dự án đã có: thêm khoá `hooks` của khung còn thiếu (giữ hook riêng) và gộp quyền theo
     ADR-0018 (`merge_permissions`; quyền riêng của dự án giữ nguyên). `prov` = rule khung đã đặt (manifest.json);
@@ -415,7 +444,7 @@ def merge_hooks(
     if isinstance(pair, str):
         return pair
     ours, theirs = pair
-    rep = settings_changes(ours, theirs, prov or {})
+    rep = settings_changes(ours, theirs, prov or {}, own)
     if report is not None:
         report.update(rep)
     if not rep["changes"]:
@@ -530,9 +559,14 @@ def install_settings(
     settings = target / ".claude" / "settings.json"
     if settings.exists() and not force_harness:
         report: dict[str, Any] = {}
-        r = merge_hooks(SRC / ".claude" / "settings.json", settings, prov, report)
+        own = own_permissions(target)
+        r = merge_hooks(SRC / ".claude" / "settings.json", settings, prov, report, own)
         stats[r] += 1
-        if r == "merged-hooks":
+        if r == "merged-hooks" and own:
+            log(
+                "  .claude/settings.json: đã gộp hooks của khung (dạng tương đối); quyền giữ nguyên — harness_permissions: own"
+            )
+        elif r == "merged-hooks":
             log(
                 "  .claude/settings.json: đã gộp hooks + quyền của khung (allow Bash, deny, gỡ ask do khung đặt — ADR-0018)"
             )
@@ -552,16 +586,31 @@ def shadowed_skills(target: Path) -> list[str]:
     return sorted(d.name for d in (SRC / ".claude" / "skills").iterdir() if (commands / f"{d.name}.md").is_file())
 
 
+def registered_hooks() -> set[str]:
+    """Tên file trong `.claude/hooks/` mà settings.json của khung đăng ký, cộng file chúng nạp cạnh (`_lib.sh`,
+    `guard.py`). Hook khung chưa đăng ký (đang chờ duyệt — `post-tool-failure.sh`, T-1822) không chép sang dự án đích:
+    file hook không ai gọi là mồ côi (xboss `tests/claude-hooks.test.ts` bắt)."""
+    hooks = SRC / ".claude" / "hooks"
+    named = set(
+        re.findall(r"\.claude/hooks/([\w.-]+)", (SRC / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    )
+    sources = [hooks / n for n in named if (hooks / n).is_file()]
+    return named | {s for p in sources for s in re.findall(r'\$\(dirname "\$0"\)/([\w.-]+)', p.read_text("utf-8"))}
+
+
 def harness_sources(target: Path) -> list[Path]:
     """File harness của khung cần copy ngoài settings.json: HARNESS_FILES khác settings + mọi file trong HARNESS_DIRS,
-    trừ skill bị lệnh dự án che (`shadowed_skills`)."""
+    trừ skill bị lệnh dự án che (`shadowed_skills`) và hook khung chưa đăng ký (`registered_hooks`)."""
     sources = [SRC / ".claude" / f for f in HARNESS_FILES if f != "settings.json"]
     skip = {SRC / ".claude" / "skills" / name for name in shadowed_skills(target)}
+    hooks = SRC / ".claude" / "hooks"
+    registered = registered_hooks()
+    skip |= {p for p in hooks.iterdir() if p.is_file() and p.name not in registered}
     for d in HARNESS_DIRS:
         sources += [
             p
             for p in sorted((SRC / ".claude" / d).rglob("*"))
-            if p.is_file() and "__pycache__" not in p.parts and not skip.intersection(p.parents)
+            if p.is_file() and "__pycache__" not in p.parts and p not in skip and not skip.intersection(p.parents)
         ]
     return sources
 
@@ -996,7 +1045,7 @@ def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]])
         pair = read_settings_pair(src, dst)
         if isinstance(pair, str):
             return {"action": pair}
-        rep = settings_changes(pair[0], pair[1], prov)
+        rep = settings_changes(pair[0], pair[1], prov, own_permissions(target))
         action = "merged-hooks" if rep.pop("changes") else "kept"
         return {"action": action, **rep}
     return {"action": classify_copy(src, dst, force_harness)[0]}

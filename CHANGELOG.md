@@ -5,6 +5,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.15.4] - 2026-10-22
+
+**Dự án đích: chạy lại `install.py`.** Dự án có luật quyền/dạng hook riêng (dhcb): thêm `harness_permissions: own` vào `xt.yaml` trước khi chạy.
+
+### Added
+- Khoá `xt.yaml` `harness_permissions` (mẫu `xt.yaml`, `harness-files.md`): `own` = `install.py` không thêm `allow: Bash`/`deny` của khung và ghi lệnh hook của khung dạng tương đối `bash .claude/hooks/x.sh` như dự án (lệnh `${CLAUDE_PROJECT_DIR}` đã cài trước được đổi lại); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 như cũ (dhcb cấm quyền Bash trùm và bắt hook dạng tương đối — chủ repo 2026-10-22).
+
+### Fixed
+- `doctor`: file nạp cạnh hook nhận cả đường dẫn (`$(dirname "$0")/nested/x.py`, `../x.py`, `/x.py`, file ẩn `.guard.py`); đường dẫn chỉ gồm `.`/`..` (lên gốc repo) không tính là file; ghép chuỗi thay `Path` nên `guard.py/` không bị coi là có file. Bản 3.15.2 bỏ sót `.guard.py`, `../guard.py`, `nested/guard.py` — port bản sửa và bộ ca test từ xboss #664.
+- `install.py`: hook khung chưa đăng ký trong `settings.json` (`post-tool-failure.sh`, chờ duyệt T-1822) không chép sang dự án đích — hết file hook mồ côi.
+- `scripts/app/app.js`, mẫu `ui-gates/verify-render.mjs`: bỏ biến không dùng (ESLint của dự án đích quét `.xtemplates/` báo lỗi).
+
 ## [3.15.3] - 2026-10-22
 
 **Dự án đích có lệnh riêng trong `.claude/commands/` trùng tên skill khung (`gate`, `review`, `adr`…): chạy lại `install.py`** — skill khung cùng tên không còn được cài; xoá tay skill khung đã cài trước đó nếu muốn lệnh dự án là bản duy nhất.

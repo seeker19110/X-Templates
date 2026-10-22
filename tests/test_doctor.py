@@ -975,3 +975,88 @@ class DoctorDriftTest(DoctorCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DoctorHookSiblingTest(unittest.TestCase):
+    """File nạp cạnh hook (`$(dirname "$0")/<đường dẫn>`) — ca port từ `tests/xt-doctor.test.ts` của xboss (#664)."""
+
+    PRINT, BROKEN_PY, BROKEN_SH = 'print("hook")\n', "def guard(:\n", "#!/usr/bin/env bash\nif then\n"
+    SIBLINGS = {
+        "entry.sh": '#!/usr/bin/env bash\n. "$(dirname "$0")/_lib.sh"\npython3 "$(dirname "$0")/guard.py"\n',
+        "_lib.sh": '#!/usr/bin/env bash\nprintf "%s" "hook"\n',
+        "guard.py": PRINT,
+    }
+
+    def run_doctor(self, files: dict[str, str], dirs: tuple[str, ...] = ()) -> list[xt.Finding]:
+        with tempfile.TemporaryDirectory() as tmp:
+            hooks = Path(tmp) / ".claude" / "hooks"
+            hooks.mkdir(parents=True)
+            for d in dirs:
+                (hooks / d).mkdir(parents=True)
+            for name, body in files.items():
+                (hooks / name).parent.mkdir(parents=True, exist_ok=True)
+                (hooks / name).write_text(body, encoding="utf-8")
+            settings = {"PreToolUse": [{"hooks": [{"type": "command", "command": "bash .claude/hooks/entry.sh"}]}]}
+            return xt._doctor_hook_files(Path(tmp), settings, deep=True)
+
+    def assert_error(self, found: list[xt.Finding], name: str, text: str) -> None:
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual((found[0].code, found[0].level), ("hooks", "error"))
+        self.assertIn(f".claude/hooks/{name}", found[0].msg)
+        self.assertIn(text, found[0].msg)
+
+    def hook(self, path: str) -> str:
+        return f'#!/usr/bin/env bash\npython3 "$(dirname "$0")/{path}"\n'
+
+    def test_root_made_of_dots_is_not_a_sibling(self):
+        for line in (
+            '"$(dirname "$0")/."',
+            '"${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"',
+            '"$(dirname "$0")//.//..///.."',
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(self.run_doctor({"entry.sh": f"#!/usr/bin/env bash\nROOT={line}\n"}), [])
+
+    def test_lib_and_guard_present_missing_or_broken(self):
+        self.assertEqual(self.run_doctor(self.SIBLINGS), [])
+        for name, broken in (("_lib.sh", self.BROKEN_SH), ("guard.py", self.BROKEN_PY)):
+            with self.subTest(name=name):
+                files = {k: v for k, v in self.SIBLINGS.items() if k != name}
+                self.assert_error(self.run_doctor(files), name, "file không có")
+                self.assert_error(self.run_doctor({**self.SIBLINGS, name: broken}), name, "lỗi cú pháp")
+
+    def test_hidden_and_path_siblings(self):
+        cases = [
+            (".guard.py", ".guard.py"),
+            ("./guard.py", "guard.py"),
+            (".//guard.py", "guard.py"),
+            ("/guard.py", "guard.py"),
+            ("nested/guard.py", "nested/guard.py"),
+            ("nested//guard.py", "nested/guard.py"),
+            ("../guard.py", "../guard.py"),
+        ]
+        for path, file in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.run_doctor({"entry.sh": self.hook(path), file: self.PRINT}), [])
+                self.assert_error(self.run_doctor({"entry.sh": self.hook(path)}), path, "file không có")
+                found = self.run_doctor({"entry.sh": self.hook(path), file: self.BROKEN_PY})
+                self.assert_error(found, path, "lỗi cú pháp")
+
+    def test_trailing_slash_is_not_the_file(self):
+        for path in ("guard.py/", "guard.py/."):
+            with self.subTest(path=path):
+                found = self.run_doctor({"entry.sh": self.hook(path), "guard.py": self.PRINT})
+                self.assert_error(found, path, "file không có")
+
+    def test_parent_hops_need_real_intermediate_dirs(self):
+        found = self.run_doctor({"entry.sh": self.hook("missing/../guard.py"), "guard.py": self.PRINT})
+        self.assert_error(found, "missing/../guard.py", "file không có")
+        ok = {"entry.sh": self.hook("nested/../guard.py"), "guard.py": self.PRINT}
+        self.assertEqual(self.run_doctor(ok, ("nested",)), [])
+        broken = {"entry.sh": self.hook("nested/../guard.py"), "guard.py": self.BROKEN_PY}
+        self.assert_error(self.run_doctor(broken, ("nested",)), "nested/../guard.py", "lỗi cú pháp")
+        self.assert_error(self.run_doctor({"entry.sh": self.hook("missing/..")}), "missing/..", "file không có")
+
+    def test_direct_settings_hook_missing_or_broken(self):
+        self.assert_error(self.run_doctor({}), "entry.sh", "file không có")
+        self.assert_error(self.run_doctor({"entry.sh": self.BROKEN_SH}), "entry.sh", "lỗi cú pháp")
