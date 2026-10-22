@@ -987,3 +987,10 @@
 - Chọn: Audit delta 0afa30d..HEAD + A11Y lần đầu, sửa 🔴/🟠, tới release-check GO
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: release-check NO-GO vì review_debt 88 file chưa audit — đó là rủi ro thật chưa đo; 🟢 lẻ không đổi kết luận phát hành; (2) audit chỉ đọc + sổ, sửa theo đợt PR nhỏ
 - Đường lùi: revert commit docs(audit); sổ về SHA cũ
+
+### D-140 · 2026-10-22T10:01:26+00:00 · Xác minh đối kháng 🟠 audit 2026-10-22: giữ mức nào?
+
+- Phương án: (1) Giữ 🟠 cả 3 · (2) Giữ 🟠 /api/blueprint ghi đè (tái hiện, trái ADR-0038 §2); hạ 🟢 smoke (chỉ chạy tay, đỏ giả không xanh giả) và pha floor (chủ ý ADR-0041, đỡ bởi merge-check harden + review + merge_risk_paths)
+- Chọn: Giữ 🟠 /api/blueprint ghi đè (tái hiện, trái ADR-0038 §2); hạ 🟢 smoke (chỉ chạy tay, đỏ giả không xanh giả) và pha floor (chủ ý ADR-0041, đỡ bởi merge-check harden + review + merge_risk_paths)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mức theo audit.md — 🟠 là lỗi thật có điều kiện gây hại; smoke chỉ gây đỏ giả ở lệnh tay; floor theo cây làm việc là quyết định đã ghi, PR đổi pha vẫn qua review vì merge-check đọc nhánh đích; đổi nó cần ADR mới (đề xuất ở báo cáo)
+- Đường lùi: nâng lại mức trong sổ và thêm task sửa

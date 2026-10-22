@@ -30,7 +30,12 @@
 ## Task
 
 ### Lát 1 — Audit delta (sổ + báo cáo)
-- [ ] `T-2301` Quét delta 12 nhóm áp dụng + A11Y lần đầu, xác minh đối kháng 🔴/🟠, ghi sổ (SHA quét = HEAD) và `docs/ops/AUDIT-REPORT-2026-10-22.md`; `audit check --strict` chỉ còn đỏ vì 🔴/🟠 mở (nếu có) (files: docs/ops/AUDIT-STATUS.md, docs/ops/AUDIT-REPORT-2026-10-22.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
+- [x] `T-2301` Quét delta 12 nhóm áp dụng + A11Y lần đầu, xác minh đối kháng 🔴/🟠, ghi sổ (SHA quét = HEAD) và `docs/ops/AUDIT-REPORT-2026-10-22.md`; `audit check --strict` chỉ còn đỏ vì 🔴/🟠 mở (nếu có) (files: docs/ops/AUDIT-STATUS.md, docs/ops/AUDIT-REPORT-2026-10-22.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md`
 
-### Lát 2 — Hội tụ
-- [ ] `T-2309` `audit check --strict` exit 0 và `release-check` GO (trừ `prod_switch` của người) (sau: T-2301; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && XT_E2E_CHROMIUM="${XT_E2E_CHROMIUM:-}" python3 scripts/xt.py release-check`
+### Lát 2 — Sửa đợt 1 (báo cáo §5)
+- [ ] `T-2302` `POST /api/blueprint` chỉ ghi khi đích chưa có hoặc front-matter đích là `kind: blueprint`; ngược lại 400, file nguyên (AUD-SEC-103 🟠) (sau: T-2301; files: scripts/xt_app/api_compose.py, tests/test_app_compose.py) — Gate: `python3 -m unittest tests.test_app_compose -k overwrite`
+- [ ] `T-2303` `measure_test_weights` có `timeout` (id quá giờ là đỏ) — bằng chứng `BASE-ERR-004` đúng lại (AUD-HAR-103) (sau: T-2302; files: scripts/xt.py, tests/test_ci_shard.py) — Gate: `python3 -m unittest tests.test_ci_shard -k test_weights`
+- [ ] `T-2304` Sửa bằng chứng `BASE-DEP-003`, `BASE-CFG-007` theo mã hiện tại; dòng trạng thái ADR-0038; sổ: 4 phát hiện → `đã sửa`; CHANGELOG (AUD-HAR-101/102, AUD-DOC-080) (sau: T-2303; files: BLUEPRINT.md, docs/adr/0038-local-app-on-xt.md, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict && python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
+
+### Lát 3 — Hội tụ
+- [ ] `T-2309` `audit check --strict` exit 0 và `release-check` GO (trừ `prod_switch` của người) (sau: T-2304; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && XT_E2E_CHROMIUM="${XT_E2E_CHROMIUM:-}" python3 scripts/xt.py release-check`
