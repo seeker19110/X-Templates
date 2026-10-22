@@ -966,3 +966,10 @@
 - Chọn: Đặt delivery_phase: harden cố định trong xt.yaml của repo khung, test giữ không trôi
 - Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo; repo khung là sản phẩm phát hành cho dự án đích nên luôn ở chất lượng phát hành: reviewer khác họ model lại bắt buộc ở PR làn chuẩn, guard không nới việc cục bộ (ADR-0040 chỉ áp dự án đích ở build). Thay D-109.
 - Đường lùi: Đặt lại delivery_phase: build trong xt.yaml và sửa test test_delivery_phase_template_and_framework_repo_harden
+
+### D-137 · 2026-10-22T01:01:35+00:00 · merge-check ở pr-steward đọc pha từ checkout nhánh đích nên PR tự đổi xt.yaml (#213) bị tính theo pha cũ
+
+- Phương án: (1) PR sửa xt.yaml luôn tính harden (không thêm lời gọi API, chặt ở cả hai chiều đổi pha) · (2) Đọc thêm xt.yaml ở head PR qua REST contents, lấy pha chặt hơn
+- Chọn: PR sửa xt.yaml luôn tính harden (không thêm lời gọi API, chặt ở cả hai chiều đổi pha)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: PR đổi pha theo chiều nào cũng cần review; đơn giản, không thêm I/O hay chế độ lỗi mạng; chi phí chỉ là PR sửa xt.yaml ở pha build phải chờ review — hiếm
+- Đường lùi: Bỏ nhánh 'PR sửa xt.yaml' trong _merge_eval

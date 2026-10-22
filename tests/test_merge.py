@@ -826,6 +826,17 @@ class MergeConfigTest(unittest.TestCase):
             d, _ = xt._merge_eval(pr(files=small, baseRefName="main"))
         self.assertEqual((d["lane"], d["hard"]), ("chuẩn", ["đường dẫn nhạy cảm (merge_risk_paths): scripts/xt.py"]))
 
+    def test_merge_eval_pr_touching_xt_yaml_is_harden(self):
+        """D-137: steward chạy trên checkout nhánh đích (build) không thấy xt.yaml của PR — PR sửa xt.yaml tính harden."""
+        commit_base_xt(self.base, "delivery_phase: build\n", working="delivery_phase: build\n")
+        other = [{"path": "src/a.py", "additions": 200, "deletions": 0}]
+        with unittest.mock.patch.object(xt, "project_dir", return_value=self.base):
+            d, notes = xt._merge_eval(pr(files=other, baseRefName="main"))
+            self.assertEqual(d["delivery_phase"], "build")
+            d, notes = xt._merge_eval(pr(files=[*other, {"path": "xt.yaml", "additions": 1, "deletions": 1}]))
+        self.assertEqual(d["delivery_phase"], "harden")
+        self.assertIn("PR sửa xt.yaml — tính pha harden (D-137)", notes)
+
     def test_touches_hard_key(self):
         """So giá trị hiệu lực `merge_hard_exceptions` (thiếu = human) của xt.yaml gốc ở đáy/đầu PR, không dò chuỗi patch
         (review #103: dòng ngữ cảnh/comment nhắc tên khoá báo nhầm); không xác minh được → chạm; file khác → không."""
