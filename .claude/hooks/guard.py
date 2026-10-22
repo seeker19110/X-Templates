@@ -1564,6 +1564,9 @@ def _committed_phase(xt: str) -> str:
     return ""
 
 
+XT_READ_MAX = 1 << 20
+
+
 def _read_all(path: str) -> str:
     """File thường tới 1 MiB (dòng trùng cuối file thắng như xt.py — review #213; FIFO/thiết bị không đọc — review #214);
     lỗi → rỗng."""
@@ -1571,9 +1574,10 @@ def _read_all(path: str) -> str:
         return ""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            return f.read(1 << 20)
+            text = f.read(XT_READ_MAX + 1)
     except OSError:
         return ""
+    return text if len(text) <= XT_READ_MAX else ""  # dài hơn trần → không biết dòng cuối → harden (review #214 lần 2)
 
 
 def build_phase(root: str) -> bool:
@@ -1876,7 +1880,8 @@ def _dd_safe(arg: str) -> bool:
 
 def _dd_device_out(arg: str) -> bool:
     """`dd of=/dev/<thiết bị>` (không `if=` thì đọc stdin — vẫn ghi thô lên đĩa); `/dev/null|stdout|stderr` vô hại."""
-    return arg.startswith("of=") and _dd_out_path(arg).startswith("/dev/") and not _dd_safe(arg)
+    path = _dd_out_path(arg)
+    return arg.startswith("of=") and (path == "/dev" or path.startswith("/dev/")) and not _dd_safe(arg)
 
 
 def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[str, str]:

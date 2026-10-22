@@ -107,6 +107,8 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "dd if=/dev/zero of=/tmp/xt-dd bs=1 count=1",
             "dd if=/dev/zero of=out.bin bs=1 count=1",
             "dd if=x.img of=/dev/null",
+            "dd if=x.img of=//dev/null",
+            "dd if=x.img of=/dev/./null",
             "echo K=1 > .env",
             "git checkout other -- .env",
             "python3 -c \"open('.env','w').write('x')\"",
@@ -161,6 +163,11 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "dd of=//dev/sda",
             "dd of=/tmp/../dev/sda",
             "dd of=/dev/null of=/dev/sda",
+            "dd of=/dev/",
+            "git --exec-path=/x reset --hard",
+            "git --namespace x reset --hard",
+            "git -ccore.hookspath=/x reset --hard",
+            "git -C '' reset --hard",
         ):
             self.assertEqual(self.bash(proj, cmd), "deny", cmd)
 
@@ -198,6 +205,9 @@ class BuildPhaseGuardTest(unittest.TestCase):
         proj = make_project(self.tmp, "build")
         (proj / "xt.yaml").write_text("delivery_phase: build\n" + "#" * 70000 + "\ndelivery_phase: harden\n")
         self.assertFalse(guard.build_phase(str(proj)))  # dòng cuối thắng, kể cả sau 64 KiB
+        guard._BUILD_PHASE.clear()
+        (proj / "xt.yaml").write_text("delivery_phase: build\n" + "#" * (2 << 20) + "\ndelivery_phase: harden\n")
+        self.assertFalse(guard.build_phase(str(proj)))  # quá trần 1 MiB → không biết dòng cuối → harden
         self.assertEqual(guard._read_all(str(self.tmp / "khong-co.yaml")), "")
 
     def test_harden_project_unchanged(self) -> None:
