@@ -101,8 +101,14 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "git stash drop",
             "chmod 777 build",
             "chmod -R 777 /tmp/xt-build",
+            "chmod 777 /tmp/xt-a/b",
+            "git -C . reset --hard",
+            "chmod --reference=a.txt b.txt",
             "dd if=/dev/zero of=/tmp/xt-dd bs=1 count=1",
             "dd if=/dev/zero of=out.bin bs=1 count=1",
+            "dd if=x.img of=/dev/null",
+            "dd if=x.img of=//dev/null",
+            "dd if=x.img of=/dev/./null",
             "echo K=1 > .env",
             "git checkout other -- .env",
             "python3 -c \"open('.env','w').write('x')\"",
@@ -134,6 +140,34 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "echo x > .autopilot/state.json",
             "echo x > .claude/hooks/guard.py",
             "git branch -D main",
+            # review #213: đích thật ngoài dự án dù dòng lệnh trông cục bộ
+            "find /etc -exec chmod 777 {} +",
+            "find / -type f | xargs chmod 777",
+            "echo /etc/passwd | xargs chmod 777",
+            "chmod 777",
+            "chmod -R 777 .?",
+            "chmod -R 777 /tmp",
+            "git --work-tree=/ reset --hard",
+            "git --git-dir=/x/.git --work-tree=/x reset --hard",
+            "git -c core.worktree=/home/user reset --hard",
+            "GIT_WORK_TREE=/home/user git reset --hard",
+            "GIT_DIR=/x/.git git reset --hard",
+            "dd of=/dev/sda",
+            "cat x | dd of=/dev/sda",
+            # review #214
+            "GIT_INDEX_FILE=/etc/passwd git reset --hard",
+            "git -c core.hooksPath=/tmp/h reset --hard",
+            "git -C /etc reset --hard",
+            "git -C x* reset --hard",
+            "chmod 777 foo /etc/passwd",
+            "dd of=//dev/sda",
+            "dd of=/tmp/../dev/sda",
+            "dd of=/dev/null of=/dev/sda",
+            "dd of=/dev/",
+            "git --exec-path=/x reset --hard",
+            "git --namespace x reset --hard",
+            "git -ccore.hookspath=/x reset --hard",
+            "git -C '' reset --hard",
         ):
             self.assertEqual(self.bash(proj, cmd), "deny", cmd)
 
@@ -152,9 +186,33 @@ class BuildPhaseGuardTest(unittest.TestCase):
         self.assertFalse(guard.build_local_command(["rm", "x"], ["rm", "x"], p, p))
         self.assertTrue(guard.build_local_command(["git", "clean", "-f"], ["git", "clean", "-f"], p, p))
 
+    def test_project_name_with_glob_chars(self) -> None:
+        """review #214: tên thư mục dự án có `[`/`*` không làm lệnh git cục bộ thành "đích chưa giải"."""
+        (self.tmp / "p[1]").mkdir()
+        proj = make_project(self.tmp / "p[1]", "build")
+        self.assertEqual(self.bash(proj, "git reset --hard"), "")
+
+    def test_xt_yaml_fifo_not_read(self) -> None:
+        self.assertEqual(guard._read_all(str(self.tmp)), "")  # không phải file thường
+        f = self.tmp / "xt.yaml"
+        f.write_text("delivery_phase: build\n")
+        with mock.patch("builtins.open", side_effect=OSError):
+            self.assertEqual(guard._read_all(str(f)), "")
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": "strict"}):
+            self.assertEqual(guard.bash_decision("dd of=/dev/sda", str(self.tmp), str(self.tmp))["decision"], "deny")
+
+    def test_xt_yaml_read_whole_and_unreadable(self) -> None:
+        proj = make_project(self.tmp, "build")
+        (proj / "xt.yaml").write_text("delivery_phase: build\n" + "#" * 70000 + "\ndelivery_phase: harden\n")
+        self.assertFalse(guard.build_phase(str(proj)))  # dòng cuối thắng, kể cả sau 64 KiB
+        guard._BUILD_PHASE.clear()
+        (proj / "xt.yaml").write_text("delivery_phase: build\n" + "#" * (2 << 20) + "\ndelivery_phase: harden\n")
+        self.assertFalse(guard.build_phase(str(proj)))  # quá trần 1 MiB → không biết dòng cuối → harden
+        self.assertEqual(guard._read_all(str(self.tmp / "khong-co.yaml")), "")
+
     def test_harden_project_unchanged(self) -> None:
         proj = make_project(self.tmp, "harden")
-        for cmd in ("git reset --hard", "chmod 777 x", "echo K=1 > .env", "dd if=/dev/zero of=x"):
+        for cmd in ("git reset --hard", "chmod 777 x", "echo K=1 > .env", "dd if=/dev/zero of=x", "dd of=/dev/sda"):
             self.assertEqual(self.bash(proj, cmd), "deny", cmd)
         self.assertEqual(guard.edit_decision(str(proj / ".env"), str(proj))[0], "deny")
 
