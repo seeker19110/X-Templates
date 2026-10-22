@@ -5,7 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.15.5] - 2026-10-22
+
+**Dự án đích: chạy lại `install.py`** (guard mới, `Read` deny mới gộp vào `.claude/settings.json` — trừ `harness_permissions: own`).
+
 ### Fixed
+- `dev-task.sh`: khoá trùng trong `xt.yaml` lấy dòng **cuối** như `xt.py` (trước lấy dòng đầu — hai nơi chạy hai lệnh khác nhau); `doctor` báo lỗi `xt-yaml` "khoá trùng" (AUD-XFEAT-002).
+- `xt.py test-weights`: id đỏ khi đo được chạy lại trên file vừa đo — test kiểm chính file trọng số (`test_committed_weights_cover_every_class`) không còn chặn việc đo lại; còn đỏ thì trả file cũ, exit 1 (AUD-TEST-019).
 - Guard: `shutil.rmtree(os.environ.get("HOME"))` và `rsync --delete-missing-args` lên đích ngoài dự án là xoá ngoài dự án → deny (AUD-SEC-076). `git -C ~+/x commit`/`git -C ~-` → thư mục commit không biết (cổng chạy ở gốc dự án như `cd ~+`), không còn hiểu `~+` là thư mục con (AUD-SEC-100).
 - `.claude/settings.json`: `Read` deny phủ mọi mẫu bí mật guard chặn ghi — thêm `*.p12`, `*.pfx`, `id_rsa`, `id_ed25519`, `.envrc`, `.npmrc`, `.pypirc`, `.netrc`; test giữ hai danh sách khớp nhau (AUD-CFG-004).
 
