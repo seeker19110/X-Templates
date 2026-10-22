@@ -2214,17 +2214,28 @@ def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path) -> Tuple[Dict
 
 def cmd_test_weights(args: argparse.Namespace) -> int:
     """`xt.py test-weights --unit CMD --out FILE`: id test từ stdin → đo từng id bằng `CMD`, ghi `FILE` (JSON, khoá sắp
-    xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → exit 1, không ghi (trọng số của lần chạy đỏ không đáng tin).
-    Chạy tay (`dev-task.sh test-weights`) khi bộ test đổi đáng kể; CI không chạy."""
+    xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → ghi tạm file mới rồi chạy lại riêng các id đó: id đỏ vì chính file
+    cũ (test kiểm file trọng số phủ mọi lớp — AUD-TEST-019) xanh lại thì giữ file; còn đỏ → trả file cũ, exit 1 (trọng số
+    của lần chạy đỏ không đáng tin). Chạy tay (`dev-task.sh test-weights`) khi bộ test đổi đáng kể; CI không chạy."""
     ids = _stdin_ids()
     if not ids:
         print("✗ test-weights: stdin không có id test nào", file=sys.stderr)
         return 1
     weights, red = measure_test_weights(ids, args.unit, project_dir())
+    out = Path(args.out)
+    old = out.read_bytes() if out.is_file() else None
     if red:
+        out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"[test-weights] chạy lại {len(red)} id đỏ trên file vừa đo: {', '.join(red)}", file=sys.stderr)
+        again, red = measure_test_weights(red, args.unit, project_dir())
+        weights.update(again)
+    if red:
+        if old is None:
+            out.unlink()
+        else:
+            out.write_bytes(old)
         print(f"✗ test-weights: {len(red)} id đỏ, không ghi {args.out}: {', '.join(red)}", file=sys.stderr)
         return 1
-    out = Path(args.out)
     out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[test-weights] {len(weights)} id, tổng {sum(weights.values()):.1f} s → {out}", file=sys.stderr)
     return 0
