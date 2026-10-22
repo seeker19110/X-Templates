@@ -2150,6 +2150,19 @@ class ReleaseCheckTest(TmpRepoCase):
         self.assertEqual((rc, r["attack"]["result"], r["perf"]["result"]), (1, "FAIL", "PASS"))
         self.assertIn("exit 4: lo-hong", r["attack"]["evidence"])
         self.assertIn("attack", d["fails"])
+        # review #217: lệnh ghi báo cáo vào cây → hàng `tree` thấy; bí mật trong log bị che; timeout âm → mặc định
+        (self.repo / "xt.yaml").write_text(
+            "delivery_phase: harden\nattack: sh -c 'echo token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 > zap.txt; exit 0'\n"
+            "perf: sh -c 'echo token=ghp_abcdefghijklmnopqrstuvwxyz0123456789; exit 2'\n",
+            encoding="utf-8",
+        )
+        self.git("commit", "-q", "-am", "k2")
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "-5"}):
+            rc, d = self.rows()
+        r = self.by_id(d)
+        self.assertEqual((r["attack"]["result"], r["tree"]["result"]), ("PASS", "FAIL"))
+        self.assertIn("zap.txt", r["tree"]["evidence"])
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz0123456789", r["perf"]["evidence"])
 
     def test_blueprint_failures_and_missing_inputs(self):
         self.git("add", ".")

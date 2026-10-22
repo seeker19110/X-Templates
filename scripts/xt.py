@@ -7950,7 +7950,8 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
                 key, "N/A", f"xt.yaml chưa khai `{key}` ({what}) — khai lệnh, hoặc người ký lý do không áp"
             )
         return _release_row(key, "N/A", f"quy mô {scale or 'không rõ'}: `{key}` không bắt buộc ({what})", "SHOULD")
-    timeout = _record_timeout() or 1800
+    timeout = _record_timeout() or 0
+    timeout = timeout if timeout > 0 else 1800  # sai/âm/0 → mặc định (review #217)
     code, out = run_gate_shell(cmd, base, timeout)
     tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
     if code:
@@ -7963,6 +7964,8 @@ def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
     và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
     hàng BLOCKER nào FAIL; hàng N/A BLOCKER là việc của người (không tính GO, không tính NO-GO — ghi rõ). ADR-0031: pha
     phải là harden (`phase`) và không còn nợ review — file ngoài tài liệu đổi sau SHA quét của sổ audit (`review_debt`)."""
+    # `attack`/`perf` chạy TRƯỚC `tree`: báo cáo công cụ ghi vào cây phải hiện ở hàng `tree` (review #217)
+    runs = {key: _release_run(base, blueprint, key, what) for key, what in RELEASE_RUN_KEYS}
     rows = [
         _release_blueprint(base, blueprint),
         _release_audit(base, status),
@@ -7971,7 +7974,7 @@ def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
         _release_prod_switch(base),
         _release_phase(base),
         _release_review_debt(base, status),
-        *(_release_run(base, blueprint, key, what) for key, what in RELEASE_RUN_KEYS),
+        *runs.values(),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
