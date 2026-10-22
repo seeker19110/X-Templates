@@ -994,3 +994,10 @@
 - Chọn: Giữ 🟠 /api/blueprint ghi đè (tái hiện, trái ADR-0038 §2); hạ 🟢 smoke (chỉ chạy tay, đỏ giả không xanh giả) và pha floor (chủ ý ADR-0041, đỡ bởi merge-check harden + review + merge_risk_paths)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: mức theo audit.md — 🟠 là lỗi thật có điều kiện gây hại; smoke chỉ gây đỏ giả ở lệnh tay; floor theo cây làm việc là quyết định đã ghi, PR đổi pha vẫn qua review vì merge-check đọc nhánh đích; đổi nó cần ADR mới (đề xuất ở báo cáo)
 - Đường lùi: nâng lại mức trong sổ và thêm task sửa
+
+### D-141 · 2026-10-22T10:43:37+00:00 · Gate T-2309 gọi release-check → loop verify --all tự tham chiếu (verify chạy Gate, Gate đọc verify đang chạy) — làm gì?
+
+- Phương án: (1) Đổi Gate T-2309 thành audit check --strict; release-check chạy riêng làm bước kết thúc (autopilot §Kết thúc) · (2) Giữ Gate, bỏ qua hàng verify
+- Chọn: Đổi Gate T-2309 thành audit check --strict; release-check chạy riêng làm bước kết thúc (autopilot §Kết thúc)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: không được nới/bỏ hàng verify; Gate của task không được phụ thuộc kết quả verify của chính vòng; release-check vốn là bước G7 sau done, không phải Gate task. Ghi chú cho khung: loop/plan lint có thể cảnh báo Gate gọi release-check (🟢 HAR)
+- Đường lùi: đổi lại Gate cũ; chạy release-check ngoài vòng

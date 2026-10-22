@@ -38,4 +38,4 @@
 - [x] `T-2304` Sửa bằng chứng `BASE-DEP-003`, `BASE-CFG-007` theo mã hiện tại; dòng trạng thái ADR-0038; sổ: 4 phát hiện → `đã sửa`; CHANGELOG (AUD-HAR-101/102, AUD-DOC-080) (sau: T-2303; files: BLUEPRINT.md, docs/adr/0038-local-app-on-xt.md, docs/ops/AUDIT-STATUS.md, CHANGELOG.md) — Gate: `python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict && python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
 
 ### Lát 3 — Hội tụ
-- [x] `T-2309` `audit check --strict` exit 0 và `release-check` GO (trừ `prod_switch` của người) (sau: T-2304; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && XT_E2E_CHROMIUM="${XT_E2E_CHROMIUM:-}" python3 scripts/xt.py release-check`
+- [x] `T-2309` `audit check --strict` exit 0; `release-check` GO (trừ `prod_switch` của người) chạy riêng ở bước kết thúc, không làm Gate — Gate gọi `release-check` tự tham chiếu `loop verify` (D-141) (sau: T-2304; files: docs/ops/AUDIT-STATUS.md, PROGRESS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict`
