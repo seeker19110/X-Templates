@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.15.3] - 2026-10-22
+
+**Dự án đích có lệnh riêng trong `.claude/commands/` trùng tên skill khung (`gate`, `review`, `adr`…): chạy lại `install.py`** — skill khung cùng tên không còn được cài; xoá tay skill khung đã cài trước đó nếu muốn lệnh dự án là bản duy nhất.
+
+### Changed
+- `install.py`: skill khung trùng tên lệnh riêng của dự án (`.claude/commands/<tên>.md`) không cài — lệnh dự án thắng (chủ repo 2026-10-22; dhcb có `/gate`, `/review`, `/adr` riêng). Cài thật in danh sách bỏ qua; `--plan` báo `skills_shadowed`. `doctor` coi lệnh dự án cùng tên là thay cho skill khung (không báo thiếu).
+
 ## [3.15.2] - 2026-10-22
 
 **Dự án đích cài từ khung 2.x: chạy lại `install.py`** — hook 2.x không còn bị đăng ký hai lần; dự án đã bị cài đôi được gỡ bản lặp.

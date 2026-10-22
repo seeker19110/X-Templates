@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.15.2, pha `harden` — D-136) · Cập nhật: 2026-10-22 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.15.3, pha `harden` — D-136) · Cập nhật: 2026-10-22 · Nhánh: main
 
 ## Đang làm
-- 2026-10-22 **ADR-0040…0042** (#212–#218; D-136, D-137): pha build nới việc trong dự án/tmp, build gọn, `release-check` chạy `attack`/`perf`; repo khung luôn harden. Tag `v3.15.0`, `v3.15.1` (#220/#221: Gate hết giờ dừng cả nhóm tiến trình). 3.15.2: `install.py` không đăng ký đôi hook dạng tương đối của khung 2.x; `doctor` hết bắt nhầm `$(dirname "$0")/..` (lộ khi nâng dhcb 2.0.0). Dự án đích: hotel-manager harden + 26 cổng khôi phục (#119, #120 merge), PR nâng 3.15.1 hotel-manager #121 · X-Company #70; dhcb chờ 3.15.2.
+- 2026-10-22 **ADR-0040…0042** (#212–#218; D-136, D-137): pha build nới việc trong dự án/tmp, build gọn, `release-check` chạy `attack`/`perf`; repo khung luôn harden. Tag `v3.15.0`, `v3.15.1` (#220/#221: Gate hết giờ dừng cả nhóm tiến trình). 3.15.2 (#222): hook khung 2.x không đăng ký đôi. 3.15.3: skill khung trùng lệnh riêng của dự án không cài. Dự án đích: hotel-manager harden (#119, #120), nâng 3.15.1 hotel-manager #121 · X-Company #70 (merge); dhcb, xboss (2.0.0) chờ 3.15.3.
 - 2026-10-21 **PLAN-3.15-audit-gate** (D-130) xong phần mã: [audit tại `ec4c7d2`](docs/ops/AUDIT-REPORT-2026-10-21.md) (commit `d388802`) xác minh lại 7/7 tái hiện được; sửa AUD-CODE-014 🔴, XFEAT-013/020 🟠 ở #207, SEC-102, CI-016, CI-012, CFG-003 ở PR Lát 3–4; `audit check --strict` xanh. CI khung giữ fan-out ([số đo](docs/ops/CI-TIMING-2026-10-21.md), D-131). Mới AUD-XFEAT-021 🟢 (`go test` 0 test).
 - 2026-10-21 **PLAN-3.13 Lát 0** (ADR-0036, D-122): máy chỉ merge ghim head, không auto-merge; bỏ required check `merge-gate` (stub giữ context tới khi chủ repo gỡ khỏi ruleset sống — T-1834). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
 - Nợ 🟢 #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
