@@ -318,7 +318,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
         return "deny", GIT_HOOK_WHY.format(rel) + "."
     if kind == "capability":
         return "ask", "Sửa cấu hình " + CAPABILITY_WHY.format(rel) + "."
-    if kind == "secret":
+    if kind == "secret" and not build_local_secret(path, root, root):
         return "deny", f"Không ghi file bí mật qua agent: {rel} (dùng secret manager/biến môi trường)."
     if kind == "gate":
         return (
@@ -1524,6 +1524,84 @@ def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
     temps = [os.path.realpath(d) for d in (*TEMP_DIRS, tempfile.gettempdir(), os.environ.get("TMPDIR", "/tmp"))]
     inside = [os.path.realpath(root), *temps]
     return not any(p == d or p.startswith(d.rstrip("/") + "/") for d in inside)
+
+
+# Pha build (ADR-0040): hành động chỉ tác động trong dự án hoặc thư mục tạm cho chạy — vứt thay đổi git cục bộ, ghi file
+# bí mật của dự án, `chmod 777`, `dd of=`. Pha có hiệu lực khi CẢ xt.yaml ở cây làm việc LẪN bản đã commit ở nhánh mặc
+# định của remote đều `build` (như `merge-check`, ADR-0031: nhánh không tự chuyển sang build cho chính nó); không đọc
+# được → harden. `XT_GUARD_POLICY=strict` không nới. Ngoài dự án/tmp, đối ngoại, hàng rào, bằng chứng: giữ nguyên.
+PHASE_LINE_RE = re.compile(r"^delivery_phase:[ \t]*([\"']?)([A-Za-z]*)\1[ \t]*(?:#.*)?$", re.M)
+DEFAULT_REFS = ("origin/HEAD", "origin/main", "origin/master")
+LOCAL_GIT = {"reset", "clean", "checkout", "switch", "restore", "stash"}
+_BUILD_PHASE: Dict[str, bool] = {}
+
+
+def _phase_value(text: str) -> str:
+    """Giá trị `delivery_phase` (dòng trùng → dòng cuối, như `yaml_scalar` của xt.py); vắng → rỗng."""
+    found = PHASE_LINE_RE.findall(text)
+    return str(found[-1][1]) if found else ""
+
+
+def _committed_phase(xt: str) -> str:
+    """`delivery_phase` của xt.yaml đã commit ở nhánh mặc định của remote (ref đầu tiên đọc được); không đọc được → rỗng."""
+    for ref in DEFAULT_REFS:
+        try:
+            r = subprocess.run(
+                ["git", "-C", os.path.dirname(xt), "show", f"{ref}:./xt.yaml"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if r.returncode == 0:
+            return _phase_value(r.stdout[:COMMIT_TEXT_MAX])
+    return ""
+
+
+def build_phase(root: str) -> bool:
+    """Pha build có hiệu lực cho guard (ADR-0040); tính một lần mỗi tiến trình. `XT_GUARD_PHASE=harden` ép harden (chỉ
+    chặt hơn — bộ test luật cũ dùng)."""
+    if root not in _BUILD_PHASE:
+        xt = _xt_yaml_for(root)
+        _BUILD_PHASE[root] = (
+            os.environ.get("XT_GUARD_POLICY") != "strict"
+            and os.environ.get("XT_GUARD_PHASE") != "harden"
+            and bool(xt)
+            and _phase_value(_read_head(xt)) == "build"
+            and _committed_phase(xt) == "build"
+        )
+    return _BUILD_PHASE[root]
+
+
+def _local(target: Optional[str], root: str, cwd: Optional[str]) -> bool:
+    """Đích chắc chắn nằm trong dự án hoặc thư mục tạm: thư mục đang đứng biết, không biến/backtick, không `~-`."""
+    if cwd is None or not target or "$" in target or "`" in target or OLDPWD_REF_RE.match(target):
+        return False
+    return not _outside_project(target, root, cwd)
+
+
+def build_local_secret(target: str, root: str, cwd: Optional[str]) -> bool:
+    """Ghi file bí mật trong dự án/tmp ở pha build (ADR-0040) — được phép."""
+    return _local(target, root, cwd) and build_phase(root)
+
+
+def build_local_command(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> bool:
+    """Lệnh bị luật chặn nhưng chỉ tác động trong dự án/tmp, ở pha build (ADR-0040): git vứt thay đổi cục bộ (trừ
+    `clean -x/-X` — xoá cả file bị bỏ qua như `.autopilot/`), `chmod 777`, `dd of=`."""
+    if n[0] == "git":
+        sub = n[1] if len(n) > 1 else ""
+        if sub not in LOCAL_GIT or (sub == "clean" and set("xX") & set(_short_flags(n[2:]))):
+            return False
+        targets: List[Optional[str]] = [_git_dir(argv, cwd)]
+    elif n[0] == "chmod":
+        targets = list(_positionals(n[1:]))
+    elif n[0] == "dd":
+        targets = [a[3:] for a in n[1:] if a.startswith("of=")] or [None]
+    else:
+        return False
+    return all(_local(t, root, cwd) for t in targets) and build_phase(root)
 
 
 FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
@@ -3282,7 +3360,11 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         elif _existing_test(target, root):
             asks.append(f"sửa/xoá test ĐÃ CÓ qua Bash ({target}) — làm yếu test là nới cổng (LOOP-CI-001)")
     restored = [(t, _target_kind(x, root)) for t in _git_file_targets(n) for x in _where(t, root, cwd)]
-    asks += [f"ghi file bí mật qua Bash (git lấy từ commit khác): {t}" for t, k in restored if k == "secret"]
+    asks += [
+        f"ghi file bí mật qua Bash (git lấy từ commit khác): {t}"
+        for t, k in restored
+        if k == "secret" and not build_local_secret(t, root, cwd)
+    ]
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
 
 
@@ -3586,6 +3668,14 @@ def _track_exports(res: Dict[str, object], argv: List[str], n: List[str]) -> Tup
     return names
 
 
+def _command_verdict(
+    n: List[str], argv: List[str], root: str, cwd: Optional[str], gdir: Optional[str]
+) -> Tuple[str, str]:
+    """`command_rules` rồi nới việc chỉ trong dự án/tmp ở pha build (ADR-0040)."""
+    verdict = command_rules(n, root, (gdir if n[0] == "git" else cwd) or root)
+    return ("", "") if verdict[0] in BLOCKING and build_local_command(n, argv, root, cwd) else verdict
+
+
 def _scan_command(
     argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
 ) -> Optional[str]:
@@ -3597,7 +3687,7 @@ def _scan_command(
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
     # Lệnh khác git (rm/find) xét đích theo thư mục đang đứng sau `cd` (`cd ~ && rm -rf projects`).
-    decision, why = command_rules(n, root, (gdir if n[0] == "git" else cwd) or root)
+    decision, why = _command_verdict(n, argv, root, cwd, gdir)
     if decision == "deny":
         return f"Lệnh bị khung chặn ({why}): {' '.join(argv)[:300]}. Muốn làm thật thì người dùng tự chạy."
     if decision == "ask":
@@ -4990,6 +5080,8 @@ def _interp_literal_ask(
         kind = path_kind(rel, root) if ("/" in lit or "." in lit) and lit not in ("..", ".") else ""
         fence, git_hook = _is_fence(target, root), _match_any(rel, GIT_HOOK_PATTERNS)
         if not (fence or git_hook or kind in ("secret", "evidence")):
+            continue
+        if kind == "secret" and not (fence or git_hook) and build_local_secret(target, root, here):
             continue
         # Mã lý do chính xác khi khớp API ghi đã biết; còn lại theo D-105: script không chỉ đọc → chặn như ghi
         # AUD-SEC-084: qua biến/bí danh (`_alias_write`, trong `probe`)

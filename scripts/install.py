@@ -273,22 +273,24 @@ RULE_KEYS = ("allow", "ask", "deny")
 def merge_permissions(
     ours: dict[str, Any], theirs: dict[str, Any], prov: dict[str, list[str]] | None = None
 ) -> dict[str, list[str]]:
-    """ADR-0018: `allow` có `Bash`, thêm `deny` của khung còn thiếu; gỡ `ask` mà manifest (`prov`) chứng minh do khung đặt
-    và khung không còn đặt. Trả báo cáo `allow_add`/`deny_add`/`ask_remove`/`ask_unproven` (tổng độ dài = số thay đổi)."""
+    """ADR-0018: `allow` có `Bash`, thêm `deny` của khung còn thiếu; gỡ `ask`/`deny` mà manifest (`prov`) chứng minh do
+    khung đặt và khung không còn đặt (ADR-0040: deny tĩnh của hành động cục bộ chuyển cho guard quyết theo pha). Trả báo
+    cáo `allow_add`/`deny_add`/`ask_remove`/`deny_remove`/`ask_unproven` (tổng độ dài = số thay đổi)."""
     src, perms = ours.get("permissions", {}), theirs.setdefault("permissions", {})
-    report: dict[str, list[str]] = {"allow_add": [], "deny_add": [], "ask_remove": [], "ask_unproven": []}
+    report: dict[str, list[str]] = {"allow_add": [], "deny_add": [], "ask_remove": [], "deny_remove": []}
     for key in ("allow", "deny"):
         rules = perms.setdefault(key, [])
         missing = [r for r in src.get(key, []) if r not in rules and (key == "deny" or r == "Bash")]
         rules.extend(missing)
         report[f"{key}_add"] = missing
-    ask = perms.get("ask", [])
-    now = set(src.get("ask", []))
-    proven = set((prov or {}).get("ask", [])) - now
-    report["ask_remove"] = [r for r in ask if r in proven]
-    report["ask_unproven"] = [r for r in ask if r in OLD_FRAMEWORK_ASK and r not in proven and r not in now]
-    if report["ask_remove"]:
-        perms["ask"] = [r for r in ask if r not in proven]
+    for key in ("ask", "deny"):
+        rules, now = perms.get(key, []), set(src.get(key, []))
+        proven = set((prov or {}).get(key, [])) - now
+        report[f"{key}_remove"] = [r for r in rules if r in proven]
+        if report[f"{key}_remove"]:
+            perms[key] = [r for r in rules if r not in proven]
+    ask, now = perms.get("ask", []), set(src.get("ask", []))
+    report["ask_unproven"] = [r for r in ask if r in OLD_FRAMEWORK_ASK and r not in now]
     return report
 
 
@@ -345,7 +347,9 @@ def settings_changes(ours: dict[str, Any], theirs: dict[str, Any], prov: dict[st
     `changes` (tổng số thay đổi; 0 = không cần ghi)."""
     added, synced = _merge_hook_events(ours, theirs)
     perms = merge_permissions(ours, theirs, prov)
-    total = len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove"))
+    total = (
+        len(added) + len(synced) + sum(len(perms[k]) for k in ("allow_add", "deny_add", "ask_remove", "deny_remove"))
+    )
     return {"permissions": perms, "hooks_added": added, "hooks_matcher_updated": synced, "changes": total}
 
 
@@ -473,12 +477,13 @@ def our_rules() -> dict[str, list[str]]:
 
 
 def update_provenance(prov: dict[str, list[str]], report: dict[str, Any]) -> dict[str, list[str]]:
-    """Rule do khung đặt sau lần gộp: cũ + vừa thêm (`allow_add`/`deny_add`), bớt `ask` vừa gỡ. Rule người dùng đã có
+    """Rule do khung đặt sau lần gộp: cũ + vừa thêm (`allow_add`/`deny_add`), bớt `ask`/`deny` vừa gỡ. Rule người dùng đã có
     sẵn (không do khung thêm) không bao giờ vào danh sách này. Khử trùng giữ thứ tự: rule bị gỡ rồi khung thêm lại ở lần
     cài sau không làm danh sách phình (PR #173)."""
     perms = report.get("permissions", {})
     out = {k: list(dict.fromkeys([*prov.get(k, []), *perms.get(f"{k}_add", [])])) for k in RULE_KEYS}
-    out["ask"] = [r for r in out["ask"] if r not in perms.get("ask_remove", [])]
+    for key in ("ask", "deny"):
+        out[key] = [r for r in out[key] if r not in perms.get(f"{key}_remove", [])]
     return out
 
 

@@ -26,6 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
 import cpu_budget
 import guard
 
+# Luật guard được test ở pha harden; pha build nới hành động cục bộ (ADR-0040) — test riêng ở BuildPhaseGuardTest.
+os.environ.setdefault("XT_GUARD_PHASE", "harden")
+
 # Lệnh nguy hiểm/không đảo ngược mà guard phải chặn ở mọi dạng viết.
 SEEDS = (
     "rm -rf ~",

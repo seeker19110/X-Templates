@@ -1036,6 +1036,21 @@ class InstallPlanTest(unittest.TestCase):
         self.assertEqual(json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["ask"], ["Bash(mine *)"])
         self.assertEqual(self.manifest()["rules"]["ask"], [])
 
+    def test_install_removes_framework_deny_moved_to_guard(self):
+        """ADR-0040: deny tĩnh khung từng đặt (manifest chứng minh) mà khung bỏ → gỡ; deny riêng của dự án giữ."""
+        self.install()
+        m = self.manifest()
+        m["rules"]["deny"] = [*m["rules"]["deny"], "Bash(git reset --hard *)"]
+        (self.target / ".xtemplates" / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+        data = json.loads(self.settings.read_text(encoding="utf-8"))
+        data["permissions"]["deny"] += ["Bash(git reset --hard *)", "Bash(git clean -*)"]
+        self.settings.write_text(json.dumps(data), encoding="utf-8")
+        self.install()
+        deny = json.loads(self.settings.read_text(encoding="utf-8"))["permissions"]["deny"]
+        self.assertNotIn("Bash(git reset --hard *)", deny)
+        self.assertIn("Bash(git clean -*)", deny)  # không có trong manifest → rule của dự án
+        self.assertNotIn("Bash(git reset --hard *)", self.manifest()["rules"]["deny"])
+
     def test_install_plan_load_rules_tolerates_bad_manifest(self):
         empty = {"allow": [], "ask": [], "deny": []}
         mf = self.target / ".xtemplates" / "manifest.json"

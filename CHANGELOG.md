@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+**Dự án đích: chạy lại `install.py`** để nhận guard theo pha và gỡ 4 deny tĩnh cũ (ADR-0040).
+
+### Changed
+- Pha `build` cho chạy hành động chỉ tác động trong dự án hoặc thư mục tạm ([ADR-0040](docs/adr/0040-build-phase-local-actions-allowed.md); chủ repo 2026-10-22): guard (`build_phase` — `delivery_phase: build` ở cả cây làm việc lẫn nhánh mặc định của remote) cho `git reset --hard`, `clean -f` (trừ `-x/-X`), `checkout .`, `restore .`, `switch -f`, `stash drop`, `chmod 777`, `dd of=`, ghi file bí mật bằng Edit/Write/script khi đích trong dự án/tmp. Ngoài dự án/tmp, chuyển hướng Bash vào file bí mật, đối ngoại, hàng rào, bằng chứng: giữ chặn. `XT_GUARD_PHASE=harden` ép hành vi harden. `.claude/settings.json` bỏ `Bash(git reset --hard *)`, `Bash(git clean -*)`, `Bash(chmod 777 *)`, `Bash(dd *)` (guard chặn ở harden); `install.py` gỡ deny khung từng đặt mà khung bỏ (manifest chứng minh, báo `deny_remove`). `LOOP-HARNESS-022`: ghi khoá sandbox Claude Code đã xác minh.
+
 ## [3.14.0] - 2026-10-21
 
 **Dự án đích: chạy lại `install.py`** để có `xt.py app` (app web cục bộ, ADR-0038) và `xt.py plan waves` — `.xtemplates/scripts/xt_app/` và `.xtemplates/scripts/app/` được chép cạnh `xt.py`; thử bằng `python3 .xtemplates/scripts/xt.py app --smoke`.
