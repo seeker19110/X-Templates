@@ -70,6 +70,12 @@
    ]
   },
   {
+   "reason": "App cục bộ (`xt.py app`, ADR-0038) — ghi file qua HTTP của chính tiến trình app, không phải quyết định cho/chặn của PR, rollup, review hay guard; đỡ bằng `tests.test_app_compose -k overwrite`",
+   "ids": [
+    "AUD-SEC-103"
+   ]
+  },
+  {
    "reason": "Phụ thuộc git/REST thật — nhánh hiện tại của repo (AUD-TEST-005), nội dung xt.yaml đọc qua REST contents (AUD-XFEAT-003); fixture tự chứa không tái hiện được",
    "ids": [
     "AUD-TEST-005",

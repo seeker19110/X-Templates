@@ -11,7 +11,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Fixed
 - `xt.py app`, `POST /api/blueprint`: chỉ ghi khi file đích (và backlog) chưa có hoặc front-matter là `kind: blueprint`/`blueprint-backlog`; README, AGENTS, ADR, file không UTF-8… → 400, không file nào đổi. Trước đây ghi đè được mọi `.md` trong dự án, trái ADR-0038 §2 (AUD-SEC-103).
-- `xt.py test-weights`: mỗi id có timeout `XT_RECORD_TIMEOUT` (như Gate), quá giờ là đỏ và dừng cả nhóm tiến trình; biến sai → exit 2 (AUD-HAR-103).
+- `xt.py test-weights`: mỗi id có timeout `XT_RECORD_TIMEOUT` (như Gate), quá giờ là đỏ và dừng cả nhóm tiến trình, Ctrl-C cũng dừng cả nhóm (không để test mồ côi); biến sai → exit 2 (AUD-HAR-103).
+- `XT_RECORD_TIMEOUT` = 0 hoặc âm bị từ chối như chữ (trước đây nhận, mọi lệnh Gate/`test-weights` hết giờ ngay).
 
 ### Changed
 - Sổ audit: audit delta `0afa30d..1139662` + A11Y lần đầu ([báo cáo](docs/ops/AUDIT-REPORT-2026-10-22.md), #227) — 0 🔴, 1 🟠 (đã sửa ở bản này), 23 🟢. Bằng chứng blueprint `BASE-DEP-003`, `BASE-CFG-007` viết lại theo mã hiện tại (AUD-HAR-101/102).

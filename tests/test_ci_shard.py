@@ -231,10 +231,28 @@ class ShardCliTest(unittest.TestCase):
         self.assertIn("hang", err)
         self.assertLess(time.monotonic() - start, 20)
         self.assertFalse(self.f.exists())
-        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}):
-            rc, _, err = self.run_xt("ok\n", "test-weights", "--unit", "true", "--out", str(self.f))
-        self.assertEqual(rc, 2)
-        self.assertIn("XT_RECORD_TIMEOUT", err)
+        for bad in ("x", "0", "-5"):
+            with self.subTest(bad), unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": bad}):
+                rc, _, err = self.run_xt("ok\n", "test-weights", "--unit", "true", "--out", str(self.f))
+                self.assertEqual(rc, 2)
+                self.assertIn("XT_RECORD_TIMEOUT", err)
+
+    def test_weights_interrupt_stops_process_group(self):
+        """Review Lát 2 (3.15.6): nhóm tiến trình riêng không nhận SIGINT của terminal — Ctrl-C (KeyboardInterrupt) trong
+        lúc đo phải dừng cả nhóm, không để test chạy mồ côi."""
+        real_wait = subprocess.Popen.wait
+        seen = []
+
+        def interrupted_wait(proc, timeout=None):
+            if not seen:
+                seen.append(proc)
+                raise KeyboardInterrupt
+            return real_wait(proc, timeout=timeout)
+
+        with unittest.mock.patch.object(subprocess.Popen, "wait", interrupted_wait):
+            with self.assertRaises(KeyboardInterrupt):
+                xt.measure_test_weights(["a"], "sleep 30", self.tmp, 60)
+        self.assertIsNotNone(seen[0].poll())  # nhóm đã bị dừng, bash không còn chạy
 
     def test_weights_interrupted_rerun_restores_old_file(self):
         """Bị ngắt (Ctrl-C) giữa lần chạy lại id đỏ → file cũ được trả lại, không giữ số đo của lần chạy đỏ."""

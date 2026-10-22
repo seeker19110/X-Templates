@@ -1897,10 +1897,14 @@ def evidence_stale(t: Dict[str, Any], base: Path) -> str:
 
 def _record_timeout() -> Optional[int]:
     try:
-        return int(os.environ.get("XT_RECORD_TIMEOUT", "1800"))
+        value = int(os.environ.get("XT_RECORD_TIMEOUT", "1800"))
     except ValueError:
-        print("✗ XT_RECORD_TIMEOUT phải là số giây nguyên dương", file=sys.stderr)
-        return None
+        value = 0
+    if value > 0:
+        return value
+    # 0/âm: `wait(timeout)` hết giờ ngay → mọi lệnh "quá giờ" (review 3.15.6) — sai như chữ, không phải số
+    print("✗ XT_RECORD_TIMEOUT phải là số giây nguyên dương", file=sys.stderr)
+    return None
 
 
 GUARD_FILE = ".claude/hooks/guard.py"
@@ -2212,6 +2216,9 @@ def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path, timeout: int)
         except subprocess.TimeoutExpired:
             _stop_group(proc)
             rc = 124
+        except BaseException:  # Ctrl-C: nhóm riêng không nhận SIGINT của terminal → dừng cả nhóm rồi ném tiếp
+            _stop_group(proc)
+            raise
         weights[t] = round(time.monotonic() - start, 1)
         if rc != 0:
             red.append(t)
