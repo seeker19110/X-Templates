@@ -218,6 +218,27 @@ class ShardCliTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(self.f.exists())
 
+    def test_weights_interrupted_rerun_restores_old_file(self):
+        """Bị ngắt (Ctrl-C) giữa lần chạy lại id đỏ → file cũ được trả lại, không giữ số đo của lần chạy đỏ."""
+        self.f.write_text('{"keep": 1}', encoding="utf-8")
+        runs = [({"a": 1.0, "b": 2.0}, ["b"]), KeyboardInterrupt()]
+
+        def fake(ids, unit, cwd):
+            r = runs.pop(0)
+            if isinstance(r, BaseException):
+                raise r
+            return r
+
+        args = xt.argparse.Namespace(unit="true", out=str(self.f))
+        with (
+            unittest.mock.patch.object(xt, "measure_test_weights", fake),
+            unittest.mock.patch.object(xt, "_stdin_ids", lambda: ["a", "b"]),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                xt.cmd_test_weights(args)
+        self.assertEqual(self.f.read_text(encoding="utf-8"), '{"keep": 1}')
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class DevTaskProject(unittest.TestCase):

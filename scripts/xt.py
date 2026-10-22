@@ -2212,6 +2212,14 @@ def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path) -> Tuple[Dict
     return weights, red
 
 
+def _restore_bytes(path: Path, old: Optional[bytes]) -> None:
+    """Trả `path` về nội dung `old`; `None` = trước đó không có file → xoá."""
+    if old is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(old)
+
+
 def cmd_test_weights(args: argparse.Namespace) -> int:
     """`xt.py test-weights --unit CMD --out FILE`: id test từ stdin → đo từng id bằng `CMD`, ghi `FILE` (JSON, khoá sắp
     xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → ghi tạm file mới rồi chạy lại riêng các id đó: id đỏ vì chính file
@@ -2227,13 +2235,13 @@ def cmd_test_weights(args: argparse.Namespace) -> int:
     if red:
         out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"[test-weights] chạy lại {len(red)} id đỏ trên file vừa đo: {', '.join(red)}", file=sys.stderr)
-        again, red = measure_test_weights(red, args.unit, project_dir())
-        weights.update(again)
+        try:  # bị ngắt (Ctrl-C) giữa lần chạy lại → `finally` vẫn trả file cũ (review Lát 2)
+            again, red = measure_test_weights(red, args.unit, project_dir())
+            weights.update(again)
+        finally:
+            if red:
+                _restore_bytes(out, old)
     if red:
-        if old is None:
-            out.unlink()
-        else:
-            out.write_bytes(old)
         print(f"✗ test-weights: {len(red)} id đỏ, không ghi {args.out}: {', '.join(red)}", file=sys.stderr)
         return 1
     out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
