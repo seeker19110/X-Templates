@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -218,12 +219,29 @@ class ShardCliTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(self.f.exists())
 
+    def test_weights_hung_id_times_out_red(self):
+        """AUD-HAR-103 (BASE-ERR-004): một id treo quá `XT_RECORD_TIMEOUT` là đỏ — cả nhóm tiến trình bị dừng, không treo;
+        biến sai → exit 2."""
+        unit = 'case "$1" in hang) sleep 30 ;; esac'
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "1"}):
+            start = time.monotonic()
+            rc, _, err = self.run_xt("ok\nhang\n", "test-weights", "--unit", unit, "--out", str(self.f))
+        self.assertEqual(rc, 1, err)
+        self.assertIn("1 id đỏ", err)
+        self.assertIn("hang", err)
+        self.assertLess(time.monotonic() - start, 20)
+        self.assertFalse(self.f.exists())
+        with unittest.mock.patch.dict(os.environ, {"XT_RECORD_TIMEOUT": "x"}):
+            rc, _, err = self.run_xt("ok\n", "test-weights", "--unit", "true", "--out", str(self.f))
+        self.assertEqual(rc, 2)
+        self.assertIn("XT_RECORD_TIMEOUT", err)
+
     def test_weights_interrupted_rerun_restores_old_file(self):
         """Bị ngắt (Ctrl-C) giữa lần chạy lại id đỏ → file cũ được trả lại, không giữ số đo của lần chạy đỏ."""
         self.f.write_text('{"keep": 1}', encoding="utf-8")
         runs = [({"a": 1.0, "b": 2.0}, ["b"]), KeyboardInterrupt()]
 
-        def fake(ids, unit, cwd):
+        def fake(ids, unit, cwd, timeout):
             r = runs.pop(0)
             if isinstance(r, BaseException):
                 raise r
