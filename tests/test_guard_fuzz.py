@@ -36,6 +36,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import xt
 
+# Luật guard được test ở pha harden; pha build nới hành động cục bộ (ADR-0040) — test riêng ở BuildPhaseGuardTest.
+os.environ.setdefault("XT_GUARD_PHASE", "harden")
+
 CORPUS = ROOT / "tests" / "fixtures" / "autonomy"
 PENDING = CORPUS / "pending" / "guard.json"
 SEED = 1811

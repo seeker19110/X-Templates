@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # tests/cpu_budget.py
 import cpu_budget
 
+# Luật guard được test ở pha harden; pha build nới hành động cục bộ (ADR-0040) — test riêng ở BuildPhaseGuardTest.
+os.environ.setdefault("XT_GUARD_PHASE", "harden")
+
 # Test bộ luật ở chế độ strict (hỏi); chính sách mặc định — ask nguy hiểm → deny, còn lại cho qua (ADR-0018) — test riêng ở
 # GuardPolicyTest.
 os.environ["XT_GUARD_POLICY"] = "strict"
@@ -1902,8 +1905,11 @@ class SettingsJsonTest(unittest.TestCase):
         perms = s["permissions"]
         self.assertIn("Bash", perms["allow"])
         self.assertEqual([r for r in perms["allow"] if r.startswith("Bash(")], [])  # thừa khi đã allow cả Bash
-        for rule in ("Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(sudo *)", "Read(**/.env)"):
+        for rule in ("Bash(git push --force *)", "Bash(sudo *)", "Read(**/.env)"):
             self.assertIn(rule, perms["deny"])
+        # ADR-0040: hành động chỉ trong dự án/tmp do guard quyết theo pha — deny tĩnh sẽ chặn cả pha build.
+        for rule in ("Bash(git reset --hard *)", "Bash(git clean -*)", "Bash(chmod 777 *)", "Bash(dd *)"):
+            self.assertNotIn(rule, perms["deny"])
         # ADR-0018: không hỏi — nguy hiểm thì deny (settings + guard), còn lại cho chạy.
         self.assertEqual(perms["ask"], [])
         self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))

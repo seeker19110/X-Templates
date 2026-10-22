@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 import cpu_budget
 
+# Luật guard được test ở pha harden; pha build nới hành động cục bộ (ADR-0040) — test riêng ở BuildPhaseGuardTest.
+os.environ.setdefault("XT_GUARD_PHASE", "harden")
+
 
 def _load_guard():
     sys.path.insert(0, str(ROOT / ".claude" / "hooks"))
