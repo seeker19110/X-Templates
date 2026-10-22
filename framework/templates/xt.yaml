@@ -43,3 +43,4 @@ perf: ""              # kiểm tải có ngưỡng, đỏ khi vượt ngân sác
 claude_min_version: ""   # doctor cảnh báo khi Claude Code thấp hơn (LOOP-HARNESS-026)
 ai_attribution: ""    # forbid = guard chặn commit/PR ghi tên model hay URL phiên AI (LOOP-HARNESS-027)
 pr_title_check: ""    # off = không đòi tiêu đề PR `<type>(scope): mô tả` ≤ 72 ký tự
+harness_permissions: ""   # own = install.py giữ quyền + dạng lệnh hook của dự án (không thêm allow/deny khung)

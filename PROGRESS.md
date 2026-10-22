@@ -1,12 +1,12 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.15.3, pha `harden` — D-136) · Cập nhật: 2026-10-22 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.15.4, pha `harden` — D-136) · Cập nhật: 2026-10-22 · Nhánh: main
 
 ## Đang làm
-- 2026-10-22 **ADR-0040…0042** (#212–#218; D-136, D-137): pha build nới việc trong dự án/tmp, build gọn, `release-check` chạy `attack`/`perf`; repo khung luôn harden. Tag `v3.15.0`, `v3.15.1` (#220/#221: Gate hết giờ dừng cả nhóm tiến trình). 3.15.2 (#222): hook khung 2.x không đăng ký đôi. 3.15.3: skill khung trùng lệnh riêng của dự án không cài. Dự án đích: hotel-manager harden (#119, #120), nâng 3.15.1 hotel-manager #121 · X-Company #70 (merge); dhcb, xboss (2.0.0) chờ 3.15.3.
+- 2026-10-22 **ADR-0040…0042** (#212–#218; D-136, D-137): pha build nới việc trong dự án/tmp, build gọn, `release-check` chạy `attack`/`perf`; repo khung luôn harden. Tag `v3.15.0`, `v3.15.1` (#220/#221: Gate hết giờ dừng cả nhóm tiến trình). 3.15.2 (#222): hook khung 2.x không đăng ký đôi. 3.15.3: skill trùng lệnh dự án không cài. 3.15.4: `harness_permissions: own`, sibling hook có đường dẫn (xboss #664), không chép hook chưa đăng ký. Dự án đích: hotel-manager harden (#119, #120), 3.15.1 (#121, X-Company #70); dhcb, xboss (2.0.0) chờ 3.15.4.
 - 2026-10-21 **PLAN-3.15-audit-gate** (D-130) xong phần mã: [audit tại `ec4c7d2`](docs/ops/AUDIT-REPORT-2026-10-21.md) (commit `d388802`) xác minh lại 7/7 tái hiện được; sửa AUD-CODE-014 🔴, XFEAT-013/020 🟠 ở #207, SEC-102, CI-016, CI-012, CFG-003 ở PR Lát 3–4; `audit check --strict` xanh. CI khung giữ fan-out ([số đo](docs/ops/CI-TIMING-2026-10-21.md), D-131). Mới AUD-XFEAT-021 🟢 (`go test` 0 test).
 - 2026-10-21 **PLAN-3.13 Lát 0** (ADR-0036, D-122): máy chỉ merge ghim head, không auto-merge; bỏ required check `merge-gate` (stub giữ context tới khi chủ repo gỡ khỏi ruleset sống — T-1834). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
-- Nợ 🟢 #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.
+- Nợ 🟢 #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/007/009, SEC-043 #97).
 

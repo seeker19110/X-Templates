@@ -1001,6 +1001,58 @@ class InstallPlanTest(unittest.TestCase):
         manifest = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
         self.assertNotIn(".claude/skills/gate/SKILL.md", manifest["files"])
 
+    def test_unregistered_framework_hook_is_not_installed(self):
+        """Hook khung chưa đăng ký trong settings.json (chờ duyệt — T-1822) không chép: file hook mồ côi ở dự án đích."""
+        self.assertIn("post-tool-failure.sh", {p.name for p in (ROOT / ".claude" / "hooks").iterdir()})
+        self.assertNotIn("post-tool-failure.sh", install.registered_hooks())
+        self.assertEqual(self.install(), 0)
+        hooks = self.target / ".claude" / "hooks"
+        self.assertFalse((hooks / "post-tool-failure.sh").exists())
+        self.assertTrue((hooks / "_lib.sh").is_file())  # file nạp cạnh hook đã đăng ký vẫn chép
+        self.assertTrue((hooks / "guard.py").is_file())
+        self.assertNotIn(".claude/hooks/post-tool-failure.sh", {f["path"] for f in self.plan()["files"]})
+
+    def test_own_permissions_keeps_project_permissions_and_relative_hooks(self):
+        """`harness_permissions: own` (dhcb — chủ repo 2026-10-22): không thêm allow/deny của khung; lệnh hook khung ghi
+        dạng `bash .claude/hooks/x.sh` như dự án, kể cả hook đã cài dạng `${CLAUDE_PROJECT_DIR}` trước đó."""
+        (self.target / "xt.yaml").write_text("lint: x\nharness_permissions: own  # dhcb\n", encoding="utf-8")
+        perms = {"allow": ["Bash(git add:*)"], "ask": ["Read(.env)"], "deny": []}
+        canonical = {
+            "hooks": [{"type": "command", "command": 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-guard.sh"'}]
+        }
+        self.write_settings(perms, hooks={"Stop": [canonical]})
+        plan = self.plan()["settings"]
+        self.assertEqual(plan["permissions"], dict.fromkeys(install.NO_PERMISSION_CHANGES, []))
+        self.assertEqual(self.install(), 0)
+        data = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(data["permissions"], perms)
+        commands = [h["command"] for es in data["hooks"].values() for e in es for h in e["hooks"]]
+        self.assertTrue(commands)
+        self.assertEqual([c for c in commands if not re.fullmatch(r"bash \.claude/hooks/[a-z0-9-]+\.sh", c)], [])
+        self.assertEqual(commands.count("bash .claude/hooks/stop-guard.sh"), 1)
+        self.assertEqual(self.plan()["settings"]["action"], "kept")
+        for text in ("harness_permissions: build\n", "harness_permissions: own"):
+            (self.target / "xt.yaml").write_text(text, encoding="utf-8")
+            self.assertEqual(install.own_permissions(self.target), text.endswith("own"))
+        (self.target / "xt.yaml").write_bytes(b"\xff")
+        self.assertFalse(install.own_permissions(self.target))
+
+    def test_own_permissions_fresh_or_forced_copy_has_no_framework_permissions(self):
+        """Cài mới / `--force-harness` với `harness_permissions: own` (review #224): settings.json chép từ khung không mang
+        `permissions` của khung, lệnh hook dạng tương đối; manifest không ghi rule khung."""
+        (self.target / "xt.yaml").write_text("harness_permissions: own\n", encoding="utf-8")
+        self.assertEqual(self.plan()["settings"]["action"], "copied")
+        for extra in ((), ("--force-harness",)):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.install(*extra), 0)
+                data = json.loads(self.settings.read_text(encoding="utf-8"))
+                self.assertNotIn("permissions", data)
+                commands = [h["command"] for es in data["hooks"].values() for e in es for h in e["hooks"]]
+                self.assertTrue(commands)
+                self.assertFalse([c for c in commands if "CLAUDE_PROJECT_DIR" in c])
+                manifest = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(manifest["rules"], {"allow": [], "ask": [], "deny": []})
+
     def test_install_plan_reports_matcher_update(self):
         ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
         old = json.loads(json.dumps(ours))
