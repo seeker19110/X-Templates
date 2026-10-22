@@ -1925,9 +1925,10 @@ class SettingsJsonTest(unittest.TestCase):
         perms = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
         globs = [r[5:-1].removeprefix("./").removeprefix("**/") for r in perms["deny"] if r.startswith("Read(")]
         for pat in _guard().SECRET_PATTERNS:
-            name = pat.replace("/*", "/x").replace("*", "")  # `*.p12` → `.p12`, `*id_rsa*` → `id_rsa`
-            with self.subTest(pat):
-                self.assertTrue(any(fnmatch.fnmatchcase(name, g) for g in globs), f"{name}: thiếu Read deny")
+            for fill in ("", "x_"):  # `*id_rsa*` → `id_rsa` và `x_id_rsax_` (`id_rsa_work` — review Lát 1)
+                name = pat.replace("/*", "/x").replace("*", fill)
+                with self.subTest(name):
+                    self.assertTrue(any(fnmatch.fnmatchcase(name, g) for g in globs), f"{name}: thiếu Read deny")
 
 
 FAST_PR = {
