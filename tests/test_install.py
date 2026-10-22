@@ -675,6 +675,34 @@ class InstallEdgeTest(unittest.TestCase):
             json.loads(dst.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["matcher"], "mcp__.*merge.*"
         )
 
+    def test_merge_hooks_upgrades_legacy_relative_commands_without_duplicates(self):
+        """Khung 2.x đăng ký hook dạng tương đối: nâng bản đổi sang dạng `${CLAUDE_PROJECT_DIR}`, không đăng ký lần hai
+        (dhcb 2.0.0 → 3.15.1: 7 hook chạy đôi); dự án đã bị cài đôi thì gỡ bản lặp; hook riêng giữ nguyên."""
+        cmd = 'bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre-bash-guard.sh"'
+        legacy, own = "bash .claude/hooks/pre-bash-guard.sh", "bash .claude/hooks/rieng.sh"
+        src = self.tmp / "src.json"
+        src.write_text(
+            json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"command": cmd}]}]}}), encoding="utf-8"
+        )
+        dst = self.tmp / "settings.json"
+
+        def commands() -> list[list[str]]:
+            pre = json.loads(dst.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+            return [[h["command"] for h in e["hooks"]] for e in pre]
+
+        own_entry = {"matcher": "Bash", "hooks": [{"command": own}]}
+        old = {"matcher": "Bash", "hooks": [{"command": legacy, "timeout": 600}]}
+        dst.write_text(json.dumps({"hooks": {"PreToolUse": [own_entry, old]}}), encoding="utf-8")
+        report: dict[str, object] = {}
+        self.assertEqual(install.merge_hooks(src, dst, report=report), "merged-hooks")
+        self.assertEqual(commands(), [[own], [cmd]])
+        self.assertEqual(report["hooks_added"], [])
+        self.assertEqual(install.merge_hooks(src, dst), "kept")
+        doubled = {"matcher": "Bash", "hooks": [{"command": cmd}]}
+        dst.write_text(json.dumps({"hooks": {"PreToolUse": [own_entry, old, doubled]}}), encoding="utf-8")
+        self.assertEqual(install.merge_hooks(src, dst), "merged-hooks")
+        self.assertEqual(commands(), [[own], [cmd]])
+
     def test_merge_hooks_invalid_or_missing_json_is_reported(self):
         src = self.tmp / "src.json"
         src.write_text('{"hooks": {}}', encoding="utf-8")

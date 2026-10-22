@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.15.2] - 2026-10-22
+
+**Dự án đích cài từ khung 2.x: chạy lại `install.py`** — hook 2.x không còn bị đăng ký hai lần; dự án đã bị cài đôi được gỡ bản lặp.
+
+### Fixed
+- `install.py`: hook khung 2.x đăng ký dạng tương đối (`bash .claude/hooks/x.sh`) được nhận là cùng hook với dạng `bash "${CLAUDE_PROJECT_DIR}/.claude/hooks/x.sh"` — đổi sang dạng của khung thay vì thêm mục mới; lệnh khung lặp lại thì gỡ bản sau. Trước đây nâng dhcb 2.0.0 → 3.15.1 đăng ký đôi 7 hook (guard và cổng commit chạy hai lần mỗi lệnh). Báo cáo ở `hooks_matcher_updated` (`command_from`/`command_to`, `duplicate_removed`).
+- `doctor`: `$(dirname "$0")/../..` (hook riêng của dự án lên gốc repo) không còn bị báo "hook cần .claude/hooks/.. nhưng file không có" — tên file nạp cạnh hook không bắt đầu bằng dấu chấm.
+
 ## [3.15.1] - 2026-10-22
 
 **Dự án đích: chạy lại `install.py`** để nhận bản sửa `run_gate_shell` (Gate/`release-check` hết giờ không để sót tiến trình).
