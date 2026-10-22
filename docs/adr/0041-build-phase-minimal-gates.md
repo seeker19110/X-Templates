@@ -23,8 +23,8 @@ Sau ADR-0031/0033/0037, pha build đã bỏ reviewer và audit theo mốc. Còn 
 
 1. Pha `build` (`delivery_phase` ở cây làm việc): sàn Gate M/L **không áp** — `gate_floor_keys` trả rỗng nên `floor`
    (CI mẫu), `loop verify`, `doctor`, `loop init` đều không đòi. Cổng còn lại: `gate` của dự án (lint/typecheck/test do dự án
-   khai) và CI xanh. Đặt `harden` → sàn trở lại ngay; `release-check` đã đòi `harden` (ADR-0031) nên không phát hành được
-   khi chưa qua sàn.
+   khai) và CI xanh. Đặt `harden` → sàn trở lại ngay: CI chạy `floor --run`, `loop verify --all` chạy sàn; `release-check` đòi `harden`
+   (ADR-0031) và kiểm lại cuối của autopilot (`verify`) — dự án không chạy autopilot thì sàn chỉ ở CI (review #216).
 2. Skill `/autopilot`: pha build bỏ `dev-task.sh gate` trước khi đẩy (cổng commit `gate-fast` vẫn chạy; CI là cổng), bỏ
    trần 150 dòng; thiết kế chỉ phần code cần (schema, hợp đồng API khi có), C4/threat model đầy đủ ở harden.
 3. Không đổi: CI mẫu (`floor --run` tự không áp ở build), ruleset, guard; merge vẫn cần CI xanh + không xung đột (ADR-0036).
@@ -32,7 +32,7 @@ Sau ADR-0031/0033/0037, pha build đã bỏ reviewer và audit theo mốc. Còn 
 ## Lý do
 
 - Quyết định của chủ repo; tiêu chí cuối giữ nguyên, chỉ dời **thời điểm** kiểm (như ADR-0029/0031): `release-check` chặn
-  phát hành tới khi `harden` + sàn + audit + review sạch.
+  phát hành tới khi `harden` + audit + review sạch; sàn chạy lại ở CI và `loop verify` khi `harden`.
 - Một chỗ chặn (`gate_floor_keys`) cho mọi lối dùng sàn — không rẽ nhánh ở từng lệnh.
 
 ## Phương án đã cân nhắc
