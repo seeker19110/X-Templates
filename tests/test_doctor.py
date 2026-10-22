@@ -128,6 +128,12 @@ class DoctorHealthyTest(DoctorCase):
         msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
         self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
 
+    def test_xt_yaml_duplicate_key_is_error(self):  # AUD-XFEAT-002
+        self.write("xt.yaml", FILLED_YAML + "lint: true\n")
+        errs = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "error"]
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("khoá trùng: lint", errs[0])
+
     def test_gate_tools_missing_warns(self):  # AUD-HAR-034
         self.write(
             "xt.yaml",
