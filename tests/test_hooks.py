@@ -1450,6 +1450,14 @@ class DevTaskTest(unittest.TestCase):
             env=dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp)),
         )
 
+    def test_duplicate_key_last_wins_like_xt_py(self):
+        """AUD-XFEAT-002: khoá trùng trong xt.yaml — dev-task.sh lấy dòng cuối như `_yaml_keys` của xt.py."""
+        (self.tmp / "xt.yaml").write_text("build: echo first\nbuild: echo last\n", encoding="utf-8")
+        r = self.run_task("build")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("last", r.stdout)
+        self.assertNotIn("first", r.stdout)
+
     def test_format_file_path_is_not_executed(self):
         evil = self.tmp / "x$(touch INJECTED).py"
         evil.write_text("print(1)\n", encoding="utf-8")

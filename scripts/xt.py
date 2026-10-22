@@ -2214,17 +2214,28 @@ def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path) -> Tuple[Dict
 
 def cmd_test_weights(args: argparse.Namespace) -> int:
     """`xt.py test-weights --unit CMD --out FILE`: id test từ stdin → đo từng id bằng `CMD`, ghi `FILE` (JSON, khoá sắp
-    xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → exit 1, không ghi (trọng số của lần chạy đỏ không đáng tin).
-    Chạy tay (`dev-task.sh test-weights`) khi bộ test đổi đáng kể; CI không chạy."""
+    xếp, mỗi id một dòng — diff nhỏ). Có id đỏ → ghi tạm file mới rồi chạy lại riêng các id đó: id đỏ vì chính file
+    cũ (test kiểm file trọng số phủ mọi lớp — AUD-TEST-019) xanh lại thì giữ file; còn đỏ → trả file cũ, exit 1 (trọng số
+    của lần chạy đỏ không đáng tin). Chạy tay (`dev-task.sh test-weights`) khi bộ test đổi đáng kể; CI không chạy."""
     ids = _stdin_ids()
     if not ids:
         print("✗ test-weights: stdin không có id test nào", file=sys.stderr)
         return 1
     weights, red = measure_test_weights(ids, args.unit, project_dir())
+    out = Path(args.out)
+    old = out.read_bytes() if out.is_file() else None
     if red:
+        out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"[test-weights] chạy lại {len(red)} id đỏ trên file vừa đo: {', '.join(red)}", file=sys.stderr)
+        again, red = measure_test_weights(red, args.unit, project_dir())
+        weights.update(again)
+    if red:
+        if old is None:
+            out.unlink()
+        else:
+            out.write_bytes(old)
         print(f"✗ test-weights: {len(red)} id đỏ, không ghi {args.out}: {', '.join(red)}", file=sys.stderr)
         return 1
-    out = Path(args.out)
     out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"[test-weights] {len(weights)} id, tổng {sum(weights.values()):.1f} s → {out}", file=sys.stderr)
     return 0
@@ -4136,8 +4147,12 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         )
         msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
         return [Finding("xt-yaml", "error", msg, fix)]
-    keys = {m[1]: m[2] for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m}
+    lines = [m for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m]
+    keys = {m[1]: m[2] for m in lines}
     out = _doctor_gate_tools(keys)
+    dup = sorted(k for k, n in Counter(m[1] for m in lines).items() if n > 1)
+    if dup:  # AUD-XFEAT-002: dev-task.sh và xt.py đều lấy dòng cuối, nhưng người đọc file dễ hiểu nhầm dòng đầu
+        out.append(Finding("xt-yaml", "error", f"xt.yaml có khoá trùng: {', '.join(dup)} — giữ một dòng mỗi khoá"))
     scalars = {k: yaml_scalar(v) for k, v in keys.items()}
     phase_err = delivery_phase_error(scalars)
     if phase_err:
