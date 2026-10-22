@@ -10,6 +10,7 @@ import json
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -202,6 +203,41 @@ class ShardCliTest(unittest.TestCase):
         rc, _, err = self.run_xt("\n", "test-weights", "--unit", "true", "--out", str(self.f))
         self.assertEqual(rc, 1)
         self.assertIn("không có id", err)
+
+    def test_weights_red_on_old_file_recovers(self):
+        """AUD-TEST-019: id đỏ vì chính file trọng số cũ (`test_committed_weights_cover_every_class`) xanh lại khi chạy
+        lại trên file vừa đo → giữ file mới; file cũ không có thì id còn đỏ cũng không để lại file."""
+        self.f.write_text('{"keep": 1}', encoding="utf-8")
+        unit = f'[ "$1" != b ] || grep -q \'"a"\' {shlex.quote(str(self.f))}'  # b đòi file có trọng số của a
+        rc, _, err = self.run_xt("a\nb\n", "test-weights", "--unit", unit, "--out", str(self.f))
+        self.assertEqual(rc, 0, err)
+        self.assertIn("chạy lại 1 id", err)
+        self.assertEqual(sorted(json.loads(self.f.read_text(encoding="utf-8"))), ["a", "b"])
+        self.f.unlink()
+        rc, _, err = self.run_xt("a\nb\n", "test-weights", "--unit", '[ "$1" != b ]', "--out", str(self.f))
+        self.assertEqual(rc, 1)
+        self.assertFalse(self.f.exists())
+
+    def test_weights_interrupted_rerun_restores_old_file(self):
+        """Bị ngắt (Ctrl-C) giữa lần chạy lại id đỏ → file cũ được trả lại, không giữ số đo của lần chạy đỏ."""
+        self.f.write_text('{"keep": 1}', encoding="utf-8")
+        runs = [({"a": 1.0, "b": 2.0}, ["b"]), KeyboardInterrupt()]
+
+        def fake(ids, unit, cwd):
+            r = runs.pop(0)
+            if isinstance(r, BaseException):
+                raise r
+            return r
+
+        args = xt.argparse.Namespace(unit="true", out=str(self.f))
+        with (
+            unittest.mock.patch.object(xt, "measure_test_weights", fake),
+            unittest.mock.patch.object(xt, "_stdin_ids", lambda: ["a", "b"]),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                xt.cmd_test_weights(args)
+        self.assertEqual(self.f.read_text(encoding="utf-8"), '{"keep": 1}')
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")

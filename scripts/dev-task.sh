@@ -84,8 +84,8 @@ strip_comment() { # bỏ comment YAML: `#` ở đầu giá trị hoặc sau kho�
   printf '%s' "$out"
 }
 yaml_get() { # giá trị khoá $1 trong xt.yaml; bỏ comment, rồi bỏ nháy chỉ khi bọc cả hai đầu ("..." hoặc '...')
-  local v
-  v="$(grep -E "^$1:" "$YAML" | head -1 | sed -E "s/^$1:[[:space:]]*//")"
+  local v # khoá trùng: dòng cuối thắng như `_yaml_keys` của xt.py (AUD-XFEAT-002; `doctor` báo lỗi khoá trùng)
+  v="$(grep -E "^$1:" "$YAML" | tail -1 | sed -E "s/^$1:[[:space:]]*//")"
   strip_comment "$v" | sed -E "s/[[:space:]]+\$//; s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
 }
 declared_cmd() {
