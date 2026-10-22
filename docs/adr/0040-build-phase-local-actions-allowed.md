@@ -67,6 +67,14 @@ làm việc + `$TMPDIR` ở mức hệ điều hành — đúng ranh giới "d�
 
 ## Hệ quả
 
+- Review #213 (reviewer khác họ model, 3 🟠): đích phải nằm **trên dòng lệnh** và cố định — không nới khi lệnh qua
+  `xargs`, `find -exec … {}`, glob (`.?` → `..`), chính gốc thư mục tạm (`chmod -R 777 /tmp`), `chmod` không có đích, git
+  dời cây/repo (`--work-tree`, `--git-dir`, `-c core.worktree`, `GIT_DIR=`/`GIT_WORK_TREE=`); `dd of=/dev/<thiết bị>` không `if=`
+  (`dd of=/dev/sda`) nay bị chặn ở mọi pha (lỗ cũ của luật `dd` mà deny tĩnh `Bash(dd *)` từng che).
+- Rủi ro chấp nhận: bỏ deny tĩnh nghĩa là khi guard ném ngoại lệ (fail-open về luồng, ADR-0002) bốn lệnh đó không còn
+  lớp chặn thứ hai; hook hết giờ hay thiếu `python3` vẫn chặn (`onFailure: block`). `git … export GIT_WORK_TREE=…` ở lệnh
+  trước, sửa tay ref remote: ngoài phạm vi (D-015).
+
 - Pha build: agent tự dọn cây làm việc, tạo `.env` cục bộ, đổi quyền file trong dự án mà không bị chặn.
 - Mỗi tiến trình guard gọi `git show` tối đa 3 lần, và chỉ khi gặp lệnh/đích thuộc diện nới.
 - Dự án đích: chạy lại `install.py` để nhận guard mới và gỡ deny tĩnh cũ.

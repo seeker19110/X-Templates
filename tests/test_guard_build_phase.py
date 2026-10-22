@@ -101,8 +101,10 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "git stash drop",
             "chmod 777 build",
             "chmod -R 777 /tmp/xt-build",
+            "chmod --reference=a.txt b.txt",
             "dd if=/dev/zero of=/tmp/xt-dd bs=1 count=1",
             "dd if=/dev/zero of=out.bin bs=1 count=1",
+            "dd if=x.img of=/dev/null",
             "echo K=1 > .env",
             "git checkout other -- .env",
             "python3 -c \"open('.env','w').write('x')\"",
@@ -134,6 +136,20 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "echo x > .autopilot/state.json",
             "echo x > .claude/hooks/guard.py",
             "git branch -D main",
+            # review #213: đích thật ngoài dự án dù dòng lệnh trông cục bộ
+            "find /etc -exec chmod 777 {} +",
+            "find / -type f | xargs chmod 777",
+            "echo /etc/passwd | xargs chmod 777",
+            "chmod 777",
+            "chmod -R 777 .?",
+            "chmod -R 777 /tmp",
+            "git --work-tree=/ reset --hard",
+            "git --git-dir=/x/.git --work-tree=/x reset --hard",
+            "git -c core.worktree=/home/user reset --hard",
+            "GIT_WORK_TREE=/home/user git reset --hard",
+            "GIT_DIR=/x/.git git reset --hard",
+            "dd of=/dev/sda",
+            "cat x | dd of=/dev/sda",
         ):
             self.assertEqual(self.bash(proj, cmd), "deny", cmd)
 
@@ -152,9 +168,15 @@ class BuildPhaseGuardTest(unittest.TestCase):
         self.assertFalse(guard.build_local_command(["rm", "x"], ["rm", "x"], p, p))
         self.assertTrue(guard.build_local_command(["git", "clean", "-f"], ["git", "clean", "-f"], p, p))
 
+    def test_xt_yaml_read_whole_and_unreadable(self) -> None:
+        proj = make_project(self.tmp, "build")
+        (proj / "xt.yaml").write_text("delivery_phase: build\n" + "#" * 70000 + "\ndelivery_phase: harden\n")
+        self.assertFalse(guard.build_phase(str(proj)))  # dòng cuối thắng, kể cả sau 64 KiB
+        self.assertEqual(guard._read_all(str(self.tmp / "khong-co.yaml")), "")
+
     def test_harden_project_unchanged(self) -> None:
         proj = make_project(self.tmp, "harden")
-        for cmd in ("git reset --hard", "chmod 777 x", "echo K=1 > .env", "dd if=/dev/zero of=x"):
+        for cmd in ("git reset --hard", "chmod 777 x", "echo K=1 > .env", "dd if=/dev/zero of=x", "dd of=/dev/sda"):
             self.assertEqual(self.bash(proj, cmd), "deny", cmd)
         self.assertEqual(guard.edit_decision(str(proj / ".env"), str(proj))[0], "deny")
 

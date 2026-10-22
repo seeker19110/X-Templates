@@ -7,6 +7,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 **Dự án đích: chạy lại `install.py`** để nhận guard theo pha và gỡ 4 deny tĩnh cũ (ADR-0040).
 
+### Fixed
+- Guard pha build (review #213): không nới khi đích không cố định trên dòng lệnh — `xargs`, `find -exec … {}`, glob, gốc thư mục tạm, `chmod` không đích, git `--work-tree`/`--git-dir`/`core.worktree`/`GIT_DIR=`/`GIT_WORK_TREE=`; `xt.yaml` đọc cả file (dòng trùng cuối thắng như `xt.py`). `dd of=/dev/<thiết bị>` không `if=` (`dd of=/dev/sda`; trừ `/dev/null|stdout|stderr`) nay bị chặn ở mọi pha — trước chỉ deny tĩnh `Bash(dd *)` che lỗ này.
+
 ### Changed
 - Pha `build` cho chạy hành động chỉ tác động trong dự án hoặc thư mục tạm ([ADR-0040](docs/adr/0040-build-phase-local-actions-allowed.md); chủ repo 2026-10-22): guard (`build_phase` — `delivery_phase: build` ở cả cây làm việc lẫn nhánh mặc định của remote) cho `git reset --hard`, `clean -f` (trừ `-x/-X`), `checkout .`, `restore .`, `switch -f`, `stash drop`, `chmod 777`, `dd of=`, ghi file bí mật (Edit/Write, chuyển hướng Bash, script) khi đích trong dự án/tmp. Ngoài dự án/tmp, đối ngoại, hàng rào, bằng chứng: giữ chặn. Repo khung luôn production: `xt.yaml` của repo khung đổi `delivery_phase: build` → `harden` (D-136, thay D-109) — reviewer khác họ model lại bắt buộc ở PR làn chuẩn của repo khung. `XT_GUARD_PHASE=harden` ép hành vi harden. `.claude/settings.json` bỏ `Bash(git reset --hard *)`, `Bash(git clean -*)`, `Bash(chmod 777 *)`, `Bash(dd *)` (guard chặn ở harden); `install.py` gỡ deny khung từng đặt mà khung bỏ (manifest chứng minh, báo `deny_remove`). `LOOP-HARNESS-022`: ghi khoá sandbox Claude Code đã xác minh.
 
