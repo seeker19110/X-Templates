@@ -6,6 +6,7 @@ Bổ sung cho test_xt.py: phủ các nhánh lỗi/biên. Chạy: python3 -m unit
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import datetime as _dt
 import json
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
@@ -1324,11 +1326,9 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertFalse((self.base / ".autopilot" / "evidence").exists())
 
     def test_timeout_records_124_and_counts_failure(self):
-        exc = subprocess.TimeoutExpired(cmd="sleep 9", timeout=1)
-        with (
-            unittest.mock.patch("xt.subprocess.run", side_effect=exc),
-            unittest.mock.patch("xt._git_head", return_value=None),
-        ):
+        os.environ["XT_RECORD_TIMEOUT"] = "1"
+        self.addCleanup(os.environ.pop, "XT_RECORD_TIMEOUT", None)
+        with unittest.mock.patch("xt._git_head", return_value=None):
             code, out, _ = self.record(["sleep 9"])
             self.assertEqual(code, 124)
             self.assertIn("timeout", out)
@@ -1339,6 +1339,37 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         st = xt.read_state(self.base)
         self.assertEqual(st["same_failure_count"], 2)  # cùng chữ ký lỗi hai lần liền
         self.assertEqual(st["last_failure_task"], "T-001")
+
+    def test_timeout_stops_whole_process_group(self):
+        """review hotel-manager #119: hết giờ → SIGTERM cả nhóm (trap của script chạy), không đáp thì SIGKILL; tiến trình con
+        nền không sống sót (trước đây chỉ bash bị SIGKILL, app tạm và khoá cổng còn lại)."""
+        pid_file = self.base / "bg.pid"
+        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'echo don-dep; exit 1' TERM; sleep 30 & wait"
+        code, out = xt.run_gate_shell(cmd, self.base, 1)
+        self.assertEqual(code, 124)
+        self.assertIn("đã dừng cả nhóm tiến trình", out)
+        self.assertIn("don-dep", out)  # trap TERM của script đã chạy
+        bg = int(pid_file.read_text())
+        with self.assertRaises(ProcessLookupError):
+            for _ in range(50):
+                os.kill(bg, 0)
+                time.sleep(0.1)
+        with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):  # bỏ qua TERM → SIGKILL sau ân hạn
+            code, out = xt.run_gate_shell("trap '' TERM; sleep 30 & wait; sleep 30", self.base, 1)
+        self.assertEqual(code, 124)
+
+    def test_timeout_returns_when_detached_child_holds_output(self):
+        """review #220: con `setsid` (khác phiên, như app server) còn giữ stdout — trước đây `communicate()` chờ EOF mãi."""
+        pid_file = self.base / "det.pid"
+        cmd = f"setsid sleep 40 & echo $! > {pid_file}; echo bat-dau; sleep 30"
+        t0 = time.monotonic()
+        with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):
+            code, out = xt.run_gate_shell(cmd, self.base, 1)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertEqual(code, 124)
+        self.assertIn("bat-dau", out)
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(int(pid_file.read_text()), 9)  # dọn tiến trình tách phiên của test
 
     def test_failure_then_success_resets_counter_and_redacts(self):
         secret = "gh" + "p_" + "x" * 36
@@ -1383,7 +1414,7 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
 
     def test_missing_bash_records_127(self):
         with (
-            unittest.mock.patch("xt.subprocess.run", side_effect=FileNotFoundError("bash")),
+            unittest.mock.patch("xt.subprocess.Popen", side_effect=FileNotFoundError("bash")),
             unittest.mock.patch("xt._git_head", return_value=None),
         ):
             code, out, _ = self.record(["true"])

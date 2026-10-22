@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `run_gate_shell` (Gate của `loop record`, `loop verify`, `floor`, `blueprint-status --run`, `release-check` `attack`/`perf`): hết giờ thì dừng **cả nhóm tiến trình** — SIGTERM để trap dọn dẹp của script chạy, sau `GATE_KILL_GRACE` (30 s) mới SIGKILL. Trước đây chỉ `bash` bị SIGKILL: trap không chạy, app tạm/DB tạm/container và khoá cổng còn lại, lượt sau báo cổng bận (review hotel-manager #119).
+
 ## [3.15.0] - 2026-10-22
 
 **Dự án đích: chạy lại `install.py`** để nhận guard theo pha và gỡ 4 deny tĩnh cũ (ADR-0040).
