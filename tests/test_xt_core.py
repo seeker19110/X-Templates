@@ -6,6 +6,7 @@ Bổ sung cho test_xt.py: phủ các nhánh lỗi/biên. Chạy: python3 -m unit
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import datetime as _dt
 import json
@@ -1356,6 +1357,19 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):  # bỏ qua TERM → SIGKILL sau ân hạn
             code, out = xt.run_gate_shell("trap '' TERM; sleep 30 & wait; sleep 30", self.base, 1)
         self.assertEqual(code, 124)
+
+    def test_timeout_returns_when_detached_child_holds_output(self):
+        """review #220: con `setsid` (khác phiên, như app server) còn giữ stdout — trước đây `communicate()` chờ EOF mãi."""
+        pid_file = self.base / "det.pid"
+        cmd = f"setsid sleep 40 & echo $! > {pid_file}; echo bat-dau; sleep 30"
+        t0 = time.monotonic()
+        with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):
+            code, out = xt.run_gate_shell(cmd, self.base, 1)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertEqual(code, 124)
+        self.assertIn("bat-dau", out)
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(int(pid_file.read_text()), 9)  # dọn tiến trình tách phiên của test
 
     def test_failure_then_success_resets_counter_and_redacts(self):
         secret = "gh" + "p_" + "x" * 36
