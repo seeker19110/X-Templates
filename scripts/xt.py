@@ -2239,7 +2239,8 @@ def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
         return 126, f"guard chặn, không chạy (LOOP-STOP-027): {why}"
     # Output ra file tạm, không qua pipe: tiến trình con tách phiên (`setsid` app server) giữ pipe thì `communicate()`
     # chờ EOF mãi — chỉ cần chờ chính bash (review #220).
-    with tempfile.TemporaryFile("w+") as sink:
+    # utf-8 + replace: byte lạ trong output (binary, locale khác) không làm `loop record`/`release-check` ném lỗi (review #220)
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as sink:
         try:
             proc = subprocess.Popen(
                 ["bash", "-o", "pipefail", "-c", cmd_str],

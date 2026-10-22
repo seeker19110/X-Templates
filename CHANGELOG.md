@@ -5,7 +5,12 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-10-22
+
+**Dự án đích: chạy lại `install.py`** để nhận bản sửa `run_gate_shell` (Gate/`release-check` hết giờ không để sót tiến trình).
+
 ### Fixed
+- `run_gate_shell`: output có byte không phải UTF-8 (binary, locale khác) không còn làm `loop record`/`release-check` ném `UnicodeDecodeError` — đọc UTF-8 với `errors="replace"` (review #220).
 - `run_gate_shell` (Gate của `loop record`, `loop verify`, `floor`, `blueprint-status --run`, `release-check` `attack`/`perf`): hết giờ thì dừng **cả nhóm tiến trình** — SIGTERM để trap dọn dẹp của script chạy, sau `GATE_KILL_GRACE` (30 s) mới SIGKILL. Trước đây chỉ `bash` bị SIGKILL: trap không chạy, app tạm/DB tạm/container và khoá cổng còn lại, lượt sau báo cổng bận (review hotel-manager #119).
 
 ## [3.15.0] - 2026-10-22

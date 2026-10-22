@@ -1358,6 +1358,10 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             code, out = xt.run_gate_shell("trap '' TERM; sleep 30 & wait; sleep 30", self.base, 1)
         self.assertEqual(code, 124)
 
+    def test_non_utf8_output_does_not_raise(self):
+        code, out = xt.run_gate_shell("printf 'a\\xffb'; exit 3", self.base, 10)
+        self.assertEqual((code, out), (3, "a\ufffdb"))
+
     def test_timeout_returns_when_detached_child_holds_output(self):
         """review #220: con `setsid` (khác phiên, như app server) còn giữ stdout — trước đây `communicate()` chờ EOF mãi."""
         pid_file = self.base / "det.pid"
