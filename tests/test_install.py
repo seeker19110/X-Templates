@@ -984,6 +984,23 @@ class InstallPlanTest(unittest.TestCase):
         self.assertIn("PreToolUse", {h["event"] for h in st["hooks_added"]})
         self.assertEqual(st["hooks_matcher_updated"], [])
 
+    def test_skill_shadowed_by_project_command_is_not_installed(self):
+        """Lệnh riêng của dự án thắng skill khung cùng tên (dhcb `/gate`, `/review`, `/adr` — chủ repo 2026-10-22)."""
+        commands = self.target / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "gate.md").write_text("# /gate của dự án\n", encoding="utf-8")
+        self.assertEqual(self.plan()["skills_shadowed"], ["gate"])
+        self.assertNotIn(".claude/skills/gate/SKILL.md", {f["path"] for f in self.plan()["files"]})
+        self.assertEqual(self.plan("--no-harness")["skills_shadowed"], [])
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(install.main([str(self.target), "--label", "t"]), 0)
+        self.assertIn("không cài skill khung trùng lệnh riêng của dự án (.claude/commands/): gate", err.getvalue())
+        skills = self.target / ".claude" / "skills"
+        self.assertFalse((skills / "gate").exists())
+        self.assertTrue((skills / "review" / "SKILL.md").is_file())
+        manifest = json.loads((self.target / ".xtemplates" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertNotIn(".claude/skills/gate/SKILL.md", manifest["files"])
+
     def test_install_plan_reports_matcher_update(self):
         ours = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
         old = json.loads(json.dumps(ours))

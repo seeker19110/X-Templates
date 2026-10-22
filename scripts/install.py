@@ -545,11 +545,24 @@ def install_settings(
     return our_rules() if r == "copied" else prov
 
 
-def harness_sources() -> list[Path]:
-    """File harness của khung cần copy ngoài settings.json: HARNESS_FILES khác settings + mọi file trong HARNESS_DIRS."""
+def shadowed_skills(target: Path) -> list[str]:
+    """Skill khung trùng tên lệnh riêng của dự án (`.claude/commands/<tên>.md`): không cài — lệnh dự án thắng (chủ repo
+    2026-10-22; dhcb có `/gate`, `/review`, `/adr` riêng); `doctor` nhận lệnh đó thay skill."""
+    commands = target / ".claude" / "commands"
+    return sorted(d.name for d in (SRC / ".claude" / "skills").iterdir() if (commands / f"{d.name}.md").is_file())
+
+
+def harness_sources(target: Path) -> list[Path]:
+    """File harness của khung cần copy ngoài settings.json: HARNESS_FILES khác settings + mọi file trong HARNESS_DIRS,
+    trừ skill bị lệnh dự án che (`shadowed_skills`)."""
     sources = [SRC / ".claude" / f for f in HARNESS_FILES if f != "settings.json"]
+    skip = {SRC / ".claude" / "skills" / name for name in shadowed_skills(target)}
     for d in HARNESS_DIRS:
-        sources += [p for p in sorted((SRC / ".claude" / d).rglob("*")) if p.is_file() and "__pycache__" not in p.parts]
+        sources += [
+            p
+            for p in sorted((SRC / ".claude" / d).rglob("*"))
+            if p.is_file() and "__pycache__" not in p.parts and not skip.intersection(p.parents)
+        ]
     return sources
 
 
@@ -559,7 +572,7 @@ def copy_harness_files(
     """Copy-if-absent từng file harness; trả manifest mới: hash bản khung vừa đưa (`HASHED`, kể cả `.xtemplates-new`),
     giữ hash cũ khi `kept-own`/symlink."""
     new_manifest: dict[str, str] = {}
-    for src in harness_sources():
+    for src in harness_sources(target):
         rel = src.relative_to(SRC).as_posix()
         r = copy_if_absent(src, target / rel, force_harness, installed_hash=manifest.get(rel))
         stats[r] += 1
@@ -590,6 +603,9 @@ def install_harness(target: Path, force_harness: bool) -> None:
     new_manifest.update({k: v for k, v in manifest.items() if k in GITHUB_FILES or k in ROOT_TEMPLATES})
     write_manifests(target, new_manifest, rules)
     log("✓ .claude/: " + " · ".join(f"{k} {v}" for k, v in sorted(stats.items())))
+    shadowed = shadowed_skills(target)
+    if shadowed:
+        log(f"  không cài skill khung trùng lệnh riêng của dự án (.claude/commands/): {', '.join(shadowed)}")
     if stats.get("updated-new"):
         log(
             "  ⚠ có file .xtemplates-new: file sẵn có của dự án khác bản khung — so sánh và gộp tay; hook/settings chưa "
@@ -1007,7 +1023,7 @@ def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github:
     hashes = {**infer_root_hashes(target), **load_manifest(target)}  # manifest thắng hash suy
     jobs: list[PlanJob] = []
     if not no_harness:
-        jobs += [(src, src.relative_to(SRC).as_posix(), force_harness, None, None) for src in harness_sources()]
+        jobs += [(src, src.relative_to(SRC).as_posix(), force_harness, None, None) for src in harness_sources(target)]
     jobs += [(tsrc, name, False, body, root_template_hash(tsrc)) for name, tsrc, body in root_template_jobs(target)]
     if with_github:
         jobs += [(SRC / gsrc, gh, False, github_template(gsrc), None) for gh, gsrc in GITHUB_FILES.items()]
@@ -1025,6 +1041,7 @@ def install_plan(target: Path, force_harness: bool, no_harness: bool, with_githu
         "schema": 1,
         "target": str(target),
         "framework": {"action": "replace", "path": ".xtemplates/framework"},
+        "skills_shadowed": [] if no_harness else shadowed_skills(target),
         "legacy_migration": (target / LEGACY_DIR).is_dir() or (target / LEGACY_YAML).is_file(),
         "settings": {"action": "skipped"} if no_harness else plan_settings(target, force_harness, load_rules(target)),
         "files": plan_files(target, force_harness, no_harness, with_github),

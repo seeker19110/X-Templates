@@ -3842,7 +3842,12 @@ def _doctor_settings(base: Path, deep: bool) -> List[Finding]:
 
 def _doctor_harness_parts(base: Path) -> List[Finding]:
     claude = base / ".claude"
-    missing = [f"skills/{s}/SKILL.md" for s in DOCTOR_SKILLS if not (claude / "skills" / s / "SKILL.md").is_file()]
+    # Skill khung bị lệnh riêng cùng tên của dự án thay (`.claude/commands/<tên>.md` — install.py không cài) không thiếu.
+    missing = [
+        f"skills/{s}/SKILL.md"
+        for s in DOCTOR_SKILLS
+        if not (claude / "skills" / s / "SKILL.md").is_file() and not (claude / "commands" / f"{s}.md").is_file()
+    ]
     missing += [f"agents/{a}.md" for a in DOCTOR_AGENTS if not (claude / "agents" / f"{a}.md").is_file()]
     # `.github/`: bản mới của mẫu `install.py --with-github` (ruleset, mẫu PR, Dependabot, stub merge-gate) — review #115
     roots = (

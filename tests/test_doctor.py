@@ -298,6 +298,12 @@ class DoctorHooksTest(DoctorCase):
         (self.base / ".claude" / "hooks" / "_lib.sh").unlink()
         self.assertIn("_lib.sh nhưng file không có", " ".join(f.msg for f in self.findings() if f.code == "hooks"))
 
+    def test_project_command_replaces_framework_skill(self):
+        """Skill khung bị lệnh riêng cùng tên thay (install.py không cài) — không báo thiếu."""
+        shutil.rmtree(self.base / ".claude" / "skills" / "gate")
+        self.write(".claude/commands/gate.md", "# /gate của dự án\n")
+        self.assertEqual([f.msg for f in self.findings() if f.code == "harness"], [])
+
     def test_python_hook_with_null_byte(self):
         p = self.base / ".claude" / "hooks" / "guard.py"
         p.write_bytes(b"x = 1\x00\n")
