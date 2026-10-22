@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.13.0, pha `build`) · Cập nhật: 2026-10-21 · Nhánh: main
 
 ## Đang làm
-- 2026-10-22 **ADR-0040**: pha build nới việc chỉ trong dự án/tmp (guard theo pha, bỏ 4 deny tĩnh). Auto chặn sửa `.claude/hooks/` → làm ở chế độ hỏi. Tiếp: lát build gọn (CI bỏ `floor`, bỏ trần 150 dòng, PLAN nhẹ), lát harden (`release-check`: `security_attack`, `perf`).
+- 2026-10-22 **ADR-0040**: pha build nới việc chỉ trong dự án/tmp (guard theo pha, bỏ 4 deny tĩnh). Repo khung luôn harden (D-136). Auto chặn sửa `.claude/hooks/` → chế độ hỏi. Tiếp: lát build gọn (CI bỏ `floor`, trần 150 dòng, PLAN nhẹ), lát harden (`release-check`: tấn công thử, `perf`).
 - 2026-10-21 **PLAN-3.15-audit-gate** (D-130) xong phần mã: [audit tại `ec4c7d2`](docs/ops/AUDIT-REPORT-2026-10-21.md) (commit `d388802`) xác minh lại 7/7 tái hiện được; sửa AUD-CODE-014 🔴, XFEAT-013/020 🟠 ở #207, SEC-102, CI-016, CI-012, CFG-003 ở PR Lát 3–4; `audit check --strict` xanh. CI khung giữ fan-out ([số đo](docs/ops/CI-TIMING-2026-10-21.md), D-131). Mới AUD-XFEAT-021 🟢 (`go test` 0 test).
 - 2026-10-21 **PLAN-3.13 Lát 0 (ADR-0036, D-122 — chủ repo chọn "ruleset tối thiểu")**: máy chỉ merge ghim head, không auto-merge của GitHub; bỏ required check `merge-gate` + lệnh `xt.py merge-gate`; guard deny phẳng bật auto-merge (`AUTO_MERGE_ENABLE`); `merge-gate.yml` thành stub `pull_request` giữ context tới khi chủ repo gỡ khỏi ruleset sống (T-1834 xoá); ruleset mẫu 2 check. K-1 đóng (không còn `pull_request_target` ngoài `pr-review.yml`). Nghiên cứu nền: [`research/2026-10-21-next-level-speed-automation-quality.md`](research/2026-10-21-next-level-speed-automation-quality.md) (#197).
 - Nợ 🟢 review #191: gom mệnh đề "Dự án đích" trùng khi `install.py` in bước nâng bản.

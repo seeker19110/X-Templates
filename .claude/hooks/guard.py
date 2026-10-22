@@ -3350,7 +3350,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         elif target and _match_any(rel_path(target, root), GIT_HOOK_PATTERNS):
             asks.append(GIT_HOOK_WHY.format(target))
         elif kind == "secret":
-            asks.append(f"ghi file bí mật qua Bash: {target}")
+            asks += [] if build_local_secret(target, root, cwd) else [f"ghi file bí mật qua Bash: {target}"]
         elif kind in ("gate", "migration"):
             asks.append(f"sửa cấu hình cổng/CI/harness/migration qua Bash ({target}) — nói rõ lý do")
         elif kind == "evidence":

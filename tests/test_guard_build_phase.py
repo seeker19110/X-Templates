@@ -103,6 +103,7 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "chmod -R 777 /tmp/xt-build",
             "dd if=/dev/zero of=/tmp/xt-dd bs=1 count=1",
             "dd if=/dev/zero of=out.bin bs=1 count=1",
+            "echo K=1 > .env",
             "git checkout other -- .env",
             "python3 -c \"open('.env','w').write('x')\"",
         ):
@@ -125,7 +126,6 @@ class BuildPhaseGuardTest(unittest.TestCase):
             "dd if=/dev/zero bs=1 count=1",
             "dd if=/dev/zero of=/dev/sda",
             "echo K=1 > ~/.npmrc",
-            "echo K=1 > .env",  # chuyển hướng Bash vào file bí mật: giữ chặn (chủ repo 2026-10-22)
             "git push origin main",
             "git push --force origin feat",
             "rm -rf ~/x",

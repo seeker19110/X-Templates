@@ -81,10 +81,10 @@ class DeliveryPhaseParseTest(unittest.TestCase):
         self.assertFalse([f for f in xt._doctor_xt_yaml(self.base, self.base) if f.level == "error"])
         self.assertEqual(run_main("ci-check")[0], 0)
 
-    def test_delivery_phase_template_and_framework_repo_build(self):
+    def test_delivery_phase_template_and_framework_repo_harden(self):
         tpl = xt.template_body((ROOT / "framework" / "templates" / "xt.yaml").read_text(encoding="utf-8"))
         self.assertEqual(xt._yaml_keys(tpl).get("delivery_phase"), "build")  # dự án đích mới (install.py copy mẫu)
-        self.assertEqual(xt._xt_keys(ROOT).get("delivery_phase"), "build")  # repo khung: chủ repo chọn build (D-109)
+        self.assertEqual(xt._xt_keys(ROOT).get("delivery_phase"), "harden")  # repo khung luôn production (D-136)
 
 
 class DeliveryPhaseMergeTest(unittest.TestCase):

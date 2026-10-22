@@ -33,10 +33,9 @@ làm việc + `$TMPDIR` ở mức hệ điều hành — đúng ranh giới "d�
    không nới (chỉ chặt hơn; bộ test luật cũ đặt `XT_GUARD_PHASE=harden`).
 2. **Ở pha build cho chạy, khi đích chắc chắn trong dự án hoặc thư mục tạm** (thư mục đang đứng biết, không biến/backtick):
    `git reset --hard`, `clean -f`, `checkout -f`/`.`, `switch -f`, `restore .`, `stash drop/clear` (repo ở `cd`/`-C` tính
-   vào); `chmod 777`; `dd of=`; ghi file bí mật bằng Edit/Write, bằng script trình thông dịch, hay `git checkout <ref> -- .env`.
+   vào); `chmod 777`; `dd of=`; ghi file bí mật bằng Edit/Write, chuyển hướng Bash, script trình thông dịch, hay `git checkout <ref> -- .env`.
 3. **Giữ chặn ở mọi pha:** đích ngoài dự án/tmp hay không giải được; `git clean -x/-X` (xoá cả file bị bỏ qua, gồm
-   `.autopilot/` — trạng thái vòng mà Stop hook đọc); ghi file bí mật bằng chuyển hướng Bash (`echo … > .env` — chủ repo từ
-   chối nới, 2026-10-22); push nhánh chính, force-push, merge chưa đủ điều kiện, bật auto-merge; tắt hook, ghi hàng rào,
+   `.autopilot/` — trạng thái vòng mà Stop hook đọc); push nhánh chính, force-push, merge chưa đủ điều kiện, bật auto-merge; tắt hook, ghi hàng rào,
    ghi tay `.autopilot/`, giả dấu review; `sudo`, `mkfs`, `curl | sh`, container có quyền máy chủ; đọc file bí mật
    (`permissions.deny`); ghi công AI.
 4. **Bỏ 4 deny tĩnh** (`Bash(git reset --hard *)`, `Bash(git clean -*)`, `Bash(chmod 777 *)`, `Bash(dd *)`) khỏi
@@ -45,6 +44,9 @@ làm việc + `$TMPDIR` ở mức hệ điều hành — đúng ranh giới "d�
 5. **Chế độ quyền của phiên** (không cấu hình được từ repo): pha build chạy tốt nhất ở `bypassPermissions` khi tổ chức cho
    phép — guard vẫn chặn mục 3; còn lại dùng Auto và chấp nhận bộ phân loại có thể chặn thêm (`LOOP-STOP-025`), hoặc chế độ
    hỏi khi người trực. **Sandbox** là tuỳ chọn bật thêm (`LOOP-HARNESS-022`), khung không bật mặc định.
+6. **Repo khung luôn là production** (chủ repo 2026-10-22, D-136, thay D-109): `xt.yaml` của repo khung đặt
+   `delivery_phase: harden` (test giữ không trôi) — guard không nới gì ở repo khung, PR làn chuẩn lại cần reviewer khác họ
+   model. Phần nới của ADR này dành cho dự án đích ở pha build.
 
 ## Lý do
 
@@ -60,7 +62,8 @@ làm việc + `$TMPDIR` ở mức hệ điều hành — đúng ranh giới "d�
 - **Guard chặn mọi ghi ngoài dự án/tmp ở pha build** (đúng nghĩa đen "chỉ trong dự án và tmp"). Loại: guard chỉ thấy
   chuyển hướng/đích tường minh, không thấy công cụ ghi cache ở home — vừa chặn oan vừa không phải ranh giới thật; ranh giới
   thật là sandbox OS (D-015).
-- **Nới cả chuyển hướng Bash vào file bí mật.** Chủ repo từ chối lần sửa này (2026-10-22). Loại.
+- **Nới Edit/script nhưng giữ chặn chuyển hướng Bash vào file bí mật.** Loại: hai đường cùng hiệu ứng mà khác quyết định
+  là chặn oan, không thêm an toàn.
 
 ## Hệ quả
 

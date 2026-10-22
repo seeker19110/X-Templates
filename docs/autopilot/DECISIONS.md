@@ -959,3 +959,10 @@
 - Chọn: A: loại thư mục vendored tests_e2e/vendor/ khỏi kiểm này — test nhằm file khung cài sang dự án đích; vendor không cài, đã có vendor-check --strict + sha256 trong SOURCE
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: giữ tệp đúng nguồn (hash khớp npm), kiểm vẫn phủ mọi file khung cài sang; vendor được kiểm bằng vendor-check. Tiêu chí 3: một đường dẫn loại trừ có lý do trong test, không nới cho mã của khung
 - Đường lùi: Bỏ loại trừ và chọn C (tải axe lúc chạy CI)
+
+### D-136 · 2026-10-22T00:14:14+00:00 · Pha giao hàng của chính repo khung (chủ repo 2026-10-22: 'ở dự án khung thì luôn là production')
+
+- Phương án: (1) Đặt delivery_phase: harden cố định trong xt.yaml của repo khung, test giữ không trôi · (2) Giữ build như D-109
+- Chọn: Đặt delivery_phase: harden cố định trong xt.yaml của repo khung, test giữ không trôi
+- Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo; repo khung là sản phẩm phát hành cho dự án đích nên luôn ở chất lượng phát hành: reviewer khác họ model lại bắt buộc ở PR làn chuẩn, guard không nới việc cục bộ (ADR-0040 chỉ áp dự án đích ở build). Thay D-109.
+- Đường lùi: Đặt lại delivery_phase: build trong xt.yaml và sửa test test_delivery_phase_template_and_framework_repo_harden
