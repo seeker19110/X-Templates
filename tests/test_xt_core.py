@@ -1787,6 +1787,16 @@ class GateFloorCliTest(TmpMixin, unittest.TestCase):
         )
         self.assertEqual((rc, "floor: xanh" in out), (0, True))
 
+    def test_gate_floor_cli_build_phase_not_applied(self):
+        """ADR-0041: pha build không áp sàn M/L (CI, `loop verify`, `doctor`); harden áp lại."""
+        yaml = "lint: x\ntest: sh -c 'exit 0'\nformat_check: sh -c 'exit 3'\ndelivery_phase: build\n"
+        rc, out, _ = self.floor(yaml, "--run", "--strict")
+        self.assertEqual(rc, 0)
+        self.assertIn("không áp ở pha build", out)
+        self.assertEqual(xt.gate_floor_issues(self.base), [])
+        rc, out, _ = self.floor(yaml.replace("build", "harden"), "--run")
+        self.assertEqual((rc, "✗ format_check: exit 3" in out), (1, True))
+
     def test_gate_floor_cli_zero_tests_and_json(self):
         yaml = "lint: ruff check .\ntest: pytest -q\nformat_check: sh -c 'exit 0'\ncoverage: python3 -c \"print('Ran 0 tests')\"\n"
         rc, out, _ = self.floor(yaml, "--run", "--json")

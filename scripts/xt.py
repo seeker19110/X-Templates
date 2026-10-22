@@ -3973,10 +3973,11 @@ def build_scope(base: Path, blueprint: Optional[str]) -> Dict[str, Any]:
 
 
 def gate_floor_keys(base: Path) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
-    """([(khoá, mô tả)] sàn đòi ở quy mô hiện tại, giá trị xt.yaml); S/không blueprint/không xt.yaml → ([], {})."""
+    """([(khoá, mô tả)] sàn đòi ở quy mô hiện tại, giá trị xt.yaml); S/không blueprint/không xt.yaml → ([], {}). Pha
+    `build` → không áp (ADR-0041: test tối thiểu, CI xanh là merge; sàn trở lại khi đặt `harden` — `release-check` đòi)."""
     scale, profile = blueprint_scale(base)
     p = base / "xt.yaml"
-    if scale not in ("M", "L"):
+    if scale not in ("M", "L") or _phase_in_tree(base) == "build":
         return [], {}
     # Thiếu cả xt.yaml ở M/L = mọi khoá sàn đều thiếu (không phải "không áp" — review #107).
     rows = map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines() if p.is_file() else [])
@@ -4062,6 +4063,9 @@ def cmd_floor(args: argparse.Namespace) -> int:
         return rc
     if scale not in ("M", "L"):
         print(f"floor: không áp (quy mô {scale or 'không rõ'} — sàn chỉ ở M/L, LOOP-HARNESS-023)")
+        return 0
+    if _phase_in_tree(base) == "build":
+        print("floor: không áp ở pha build (ADR-0041) — sàn chạy lại khi đặt `delivery_phase: harden`")
         return 0
     for m in missing:
         print(f"{'✗' if args.strict else '⚠'} {m}")
