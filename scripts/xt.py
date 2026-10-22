@@ -1897,10 +1897,14 @@ def evidence_stale(t: Dict[str, Any], base: Path) -> str:
 
 def _record_timeout() -> Optional[int]:
     try:
-        return int(os.environ.get("XT_RECORD_TIMEOUT", "1800"))
+        value = int(os.environ.get("XT_RECORD_TIMEOUT", "1800"))
     except ValueError:
-        print("✗ XT_RECORD_TIMEOUT phải là số giây nguyên dương", file=sys.stderr)
-        return None
+        value = 0
+    if value > 0:
+        return value
+    # 0/âm: `wait(timeout)` hết giờ ngay → mọi lệnh "quá giờ" (review 3.15.6) — sai như chữ, không phải số
+    print("✗ XT_RECORD_TIMEOUT phải là số giây nguyên dương", file=sys.stderr)
+    return None
 
 
 GUARD_FILE = ".claude/hooks/guard.py"
@@ -2198,14 +2202,23 @@ def cmd_test_shard_plan(args: argparse.Namespace) -> int:
     return 0
 
 
-def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path) -> Tuple[Dict[str, float], List[str]]:
+def measure_test_weights(ids: Sequence[str], unit: str, cwd: Path, timeout: int) -> Tuple[Dict[str, float], List[str]]:
     """Chạy `unit` (bash, id ở "$1") lần lượt cho từng id, đo giây đồng hồ treo tường (làm tròn 0.1). Trả (trọng số,
-    id đỏ). Nối tiếp có chủ ý: đo song song thì các lớp tranh CPU, số đo lệch theo thứ tự chạy."""
+    id đỏ). Nối tiếp có chủ ý: đo song song thì các lớp tranh CPU, số đo lệch theo thứ tự chạy. Id chạy quá `timeout`
+    giây là đỏ — cả nhóm tiến trình bị dừng như Gate hết giờ (AUD-HAR-103)."""
     weights: Dict[str, float] = {}
     red: List[str] = []
     for t in ids:
         start = time.monotonic()
-        rc = subprocess.run(["bash", "-o", "pipefail", "-c", unit, "_", t], cwd=cwd, check=False).returncode
+        proc = subprocess.Popen(["bash", "-o", "pipefail", "-c", unit, "_", t], cwd=cwd, start_new_session=True)
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _stop_group(proc)
+            rc = 124
+        except BaseException:  # Ctrl-C: nhóm riêng không nhận SIGINT của terminal → dừng cả nhóm rồi ném tiếp
+            _stop_group(proc)
+            raise
         weights[t] = round(time.monotonic() - start, 1)
         if rc != 0:
             red.append(t)
@@ -2229,14 +2242,17 @@ def cmd_test_weights(args: argparse.Namespace) -> int:
     if not ids:
         print("✗ test-weights: stdin không có id test nào", file=sys.stderr)
         return 1
-    weights, red = measure_test_weights(ids, args.unit, project_dir())
+    timeout = _record_timeout()  # cùng trần mỗi lệnh với Gate (`XT_RECORD_TIMEOUT`, mặc định 1800 s)
+    if timeout is None:
+        return 2
+    weights, red = measure_test_weights(ids, args.unit, project_dir(), timeout)
     out = Path(args.out)
     old = out.read_bytes() if out.is_file() else None
     if red:
         out.write_text(json.dumps(weights, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"[test-weights] chạy lại {len(red)} id đỏ trên file vừa đo: {', '.join(red)}", file=sys.stderr)
         try:  # bị ngắt (Ctrl-C) giữa lần chạy lại → `finally` vẫn trả file cũ (review Lát 2)
-            again, red = measure_test_weights(red, args.unit, project_dir())
+            again, red = measure_test_weights(red, args.unit, project_dir(), timeout)
             weights.update(again)
         finally:
             if red:
@@ -2284,7 +2300,7 @@ def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
 GATE_KILL_GRACE = 30  # giây chờ sau SIGTERM để trap dọn dẹp của script (app tạm, khoá cổng, container) chạy
 
 
-def _stop_group(proc: "subprocess.Popen[str]") -> None:
+def _stop_group(proc: "subprocess.Popen[Any]") -> None:
     """Hết giờ: SIGTERM cả nhóm tiến trình (trap EXIT/TERM của script được chạy), quá `GATE_KILL_GRACE` thì SIGKILL rồi
     chờ bash. Trước đây chỉ bash bị SIGKILL nên trap không chạy và tiến trình con (`setsid` app, DB tạm) sống sót."""
     with contextlib.suppress(ProcessLookupError):
