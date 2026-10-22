@@ -1532,8 +1532,10 @@ def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
 PHASE_LINE_RE = re.compile(r"^delivery_phase:[ \t]*([\"']?)([A-Za-z]*)\1[ \t]*(?:#.*)?$", re.M)
 DEFAULT_REFS = ("origin/HEAD", "origin/main", "origin/master")
 LOCAL_GIT = {"reset", "clean", "checkout", "switch", "restore", "stash"}
+# Git dời cây/repo/index/hook ra ngoài cwd: tuỳ chọn toàn cục, khoá cấu hình, mọi biến `GIT_*=` (`GIT_INDEX_FILE=/etc/x`
+# làm `reset --hard` ghi đè file đó qua `.lock` — review #214).
 GIT_TREE_MOVER_RE = re.compile(
-    r"^--(?:git-dir|work-tree|super-prefix)|core\.worktree|^GIT_(?:DIR|WORK_TREE|COMMON_DIR)=", re.I
+    r"^--(?:git-dir|work-tree|super-prefix|exec-path|namespace)|core\.(?:worktree|hookspath)|^GIT_[A-Z_]+=", re.I
 )
 _BUILD_PHASE: Dict[str, bool] = {}
 
@@ -1563,10 +1565,13 @@ def _committed_phase(xt: str) -> str:
 
 
 def _read_all(path: str) -> str:
-    """Cả file (xt.yaml nhỏ; đọc hết để dòng trùng cuối file thắng như xt.py — review #213); lỗi → rỗng."""
+    """File thường tới 1 MiB (dòng trùng cuối file thắng như xt.py — review #213; FIFO/thiết bị không đọc — review #214);
+    lỗi → rỗng."""
+    if not os.path.isfile(path):
+        return ""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
-            return f.read()
+            return f.read(1 << 20)
     except OSError:
         return ""
 
@@ -1594,10 +1599,10 @@ def _temp_roots() -> List[str]:
 UNRESOLVED_TARGET_CHARS = set("$`*?[{}")
 
 
-def _local(target: Optional[str], root: str, cwd: Optional[str]) -> bool:
+def _local(target: Optional[str], root: str, cwd: Optional[str], typed: bool = True) -> bool:
     """Đích chắc chắn nằm trong dự án hoặc thư mục tạm (không phải chính gốc thư mục tạm — `chmod -R 777 /tmp` chạm file
     người khác): thư mục đang đứng biết, không biến/backtick/glob/`{}`, không `~-`."""
-    if cwd is None or not target or UNRESOLVED_TARGET_CHARS & set(target) or OLDPWD_REF_RE.match(target):
+    if cwd is None or not target or (typed and UNRESOLVED_TARGET_CHARS & set(target)) or OLDPWD_REF_RE.match(target):
         return False
     if FIND_FOUND in target:  # `find /etc -exec chmod 777 {} +`: file tìm thấy dưới gốc của find, không phải trong cwd
         return False
@@ -1611,25 +1616,32 @@ def build_local_secret(target: str, root: str, cwd: Optional[str]) -> bool:
     return _local(target, root, cwd) and build_phase(root)
 
 
+def _build_local_git(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> bool:
+    """git vứt thay đổi cục bộ trong repo ở dự án/tmp (trừ `clean -x/-X` — xoá cả `.autopilot/`); git dời cây/repo/index/hook
+    (`GIT_TREE_MOVER_RE`) hay `-C` chưa giải → không nới."""
+    sub = n[1] if len(n) > 1 else ""
+    if sub not in LOCAL_GIT or (sub == "clean" and set("xX") & set(_short_flags(n[2:]))):
+        return False
+    if any(GIT_TREE_MOVER_RE.search(a) for a in argv) or not all(_local(d, root, cwd) for d in _git_C_dirs(argv)):
+        return False
+    # thư mục repo suy từ cwd không phải chữ người gõ: tên dự án có `[`/`*` không làm nó "chưa giải" (review #214)
+    return _local(_git_dir(argv, cwd), root, cwd, typed=False)
+
+
 def build_local_command(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> bool:
-    """Lệnh bị luật chặn nhưng chỉ tác động trong dự án/tmp, ở pha build (ADR-0040): git vứt thay đổi cục bộ (trừ
-    `clean -x/-X` — xoá cả file bị bỏ qua như `.autopilot/`), `chmod 777`, `dd of=`. Đích phải nằm trên dòng lệnh: lệnh
-    qua `xargs` (đích từ stdin), git dời cây/repo (`--work-tree`, `--git-dir`, `core.worktree`, `GIT_DIR=`…) → không nới."""
+    """Lệnh bị luật chặn nhưng chỉ tác động trong dự án/tmp, ở pha build (ADR-0040): git vứt thay đổi cục bộ, `chmod 777`,
+    `dd of=`. Đích phải cố định trên dòng lệnh: qua `xargs` (đích từ stdin) → không nới."""
     if any(posixpath.basename(a) == "xargs" for a in argv):
         return False
+    targets: List[Optional[str]]
     if n[0] == "git":
-        sub = n[1] if len(n) > 1 else ""
-        if sub not in LOCAL_GIT or (sub == "clean" and set("xX") & set(_short_flags(n[2:]))):
-            return False
-        if any(GIT_TREE_MOVER_RE.search(a) for a in argv):
-            return False
-        targets: List[Optional[str]] = [_git_dir(argv, cwd)]
-    elif n[0] == "chmod":
+        return _build_local_git(n, argv, root, cwd) and build_phase(root)
+    if n[0] == "chmod":
         pos = _positionals(n[1:])
         targets = list(pos if any(a.startswith("--reference") for a in n) else pos[1:]) or [None]
     elif n[0] == "dd":
         outs = [a for a in n[1:] if a.startswith("of=")]
-        targets = [a[3:] for a in outs if a not in DD_SAFE_OUT] if outs else [None]
+        targets = [a[3:] for a in outs if not _dd_safe(a)] if outs else [None]
     else:
         return False
     return all(_local(t, root, cwd) for t in targets) and build_phase(root)
@@ -1853,9 +1865,18 @@ def _delete_rule(name: str, args: List[str], root: str, cwd: Optional[str]) -> T
 DD_SAFE_OUT = {"of=/dev/null", "of=/dev/stdout", "of=/dev/stderr"}
 
 
+def _dd_out_path(arg: str) -> str:
+    """Đường `of=` đã chuẩn hoá (`//dev/sda`, `/tmp/../dev/sda` → `/dev/sda` — review #214)."""
+    return re.sub("^/+", "/", posixpath.normpath(arg[3:])) if arg.startswith("of=/") else arg[3:]
+
+
+def _dd_safe(arg: str) -> bool:
+    return "of=" + _dd_out_path(arg) in DD_SAFE_OUT
+
+
 def _dd_device_out(arg: str) -> bool:
     """`dd of=/dev/<thiết bị>` (không `if=` thì đọc stdin — vẫn ghi thô lên đĩa); `/dev/null|stdout|stderr` vô hại."""
-    return arg.startswith("of=/dev/") and arg not in DD_SAFE_OUT
+    return arg.startswith("of=") and _dd_out_path(arg).startswith("/dev/") and not _dd_safe(arg)
 
 
 def command_rules(n: List[str], root: str, cwd: Optional[str] = None) -> Tuple[str, str]:

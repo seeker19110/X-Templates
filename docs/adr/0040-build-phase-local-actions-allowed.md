@@ -72,8 +72,8 @@ làm việc + `$TMPDIR` ở mức hệ điều hành — đúng ranh giới "d�
   dời cây/repo (`--work-tree`, `--git-dir`, `-c core.worktree`, `GIT_DIR=`/`GIT_WORK_TREE=`); `dd of=/dev/<thiết bị>` không `if=`
   (`dd of=/dev/sda`) nay bị chặn ở mọi pha (lỗ cũ của luật `dd` mà deny tĩnh `Bash(dd *)` từng che).
 - Rủi ro chấp nhận: bỏ deny tĩnh nghĩa là khi guard ném ngoại lệ (fail-open về luồng, ADR-0002) bốn lệnh đó không còn
-  lớp chặn thứ hai; hook hết giờ hay thiếu `python3` vẫn chặn (`onFailure: block`). `git … export GIT_WORK_TREE=…` ở lệnh
-  trước, sửa tay ref remote: ngoài phạm vi (D-015).
+  lớp chặn thứ hai; hook hết giờ hay thiếu `python3` vẫn chặn (`onFailure: block`). `export GIT_WORK_TREE=…` hay `git config core.worktree …`
+  ở lệnh trước, sửa tay ref remote: ngoài phạm vi (D-015).
 
 - Pha build: agent tự dọn cây làm việc, tạo `.env` cục bộ, đổi quyền file trong dự án mà không bị chặn.
 - Mỗi tiến trình guard gọi `git show` tối đa 3 lần, và chỉ khi gặp lệnh/đích thuộc diện nới.
