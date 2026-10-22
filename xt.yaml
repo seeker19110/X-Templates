@@ -50,10 +50,9 @@ merge_autonomy: L3
 # Ngoại lệ cứng (tiền/dữ liệu thật/auth/mật mã/bí mật): chủ repo chọn 2026-10-17 "bỏ toàn bộ ngoại lệ cứng" → auto =
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
-# Pha giao hàng (ADR-0031): chủ repo chọn 2026-10-20 "bỏ reviewer, CI xanh là merge" → `build`: PR làn chuẩn merge khi CI
-# xanh, review ghi nợ (D-109) — kể cả ngoại lệ cứng đã miễn và nhãn `risk:`, không giao reviewer (ADR-0037, D-124); chỉ đặt
-# `harden` khi lên production (G7 — `release-check` đòi harden + hết nợ review; reviewer/reviewer-alt chạy lại từ đó).
-delivery_phase: build
+# Pha giao hàng (ADR-0031): repo khung LUÔN là production — chủ repo 2026-10-22 (D-136, thay D-109) → `harden`: PR làn
+# chuẩn cần review sạch ở head bởi reviewer khác họ model; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
+delivery_phase: harden
 # Ghi công AI trong commit (AGENTS.md §3, AUD-HAR-017): forbid = guard chặn commit có tên model/URL phiên AI
 # (LOOP-HARNESS-027).
 ai_attribution: forbid
