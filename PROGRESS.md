@@ -5,7 +5,7 @@
 ## Đang làm
 - 2026-10-22 **ADR-0040…0042** (#212–#218; D-136, D-137): pha build nới việc trong dự án/tmp, build gọn, `release-check` chạy `attack`/`perf`; repo khung luôn harden. Tag `v3.15.0`, `v3.15.1` (#220/#221: Gate hết giờ dừng cả nhóm tiến trình). 3.15.2 (#222): hook khung 2.x không đăng ký đôi. 3.15.3: skill trùng lệnh dự án không cài. 3.15.4: `harness_permissions: own`, sibling hook có đường dẫn (xboss #664), không chép hook chưa đăng ký. Dự án đích: hotel-manager harden (#119, #120), 3.15.1 (#121, X-Company #70); dhcb, xboss (2.0.0) chờ 3.15.4.
 - 2026-10-21 **PLAN-3.15-audit-gate** (D-130) xong phần mã: [audit tại `ec4c7d2`](docs/ops/AUDIT-REPORT-2026-10-21.md) (commit `d388802`) 7/7 tái hiện được, đã sửa cả 7 (#207, Lát 3–4). CI khung giữ fan-out ([số đo](docs/ops/CI-TIMING-2026-10-21.md), D-131). Mới AUD-XFEAT-021 🟢 (`go test` 0 test).
-- 2026-10-22 **PLAN-3.15.5-green-debt** (D-138): dọn 5 🟢 của sổ audit: guard SEC-076/100, `Read` deny CFG-004 (#225); khoá trùng `xt.yaml` XFEAT-002, `test-weights` TEST-019 (#226, tag `v3.15.5`). **PLAN-3.16-audit-delta** (D-139/140): [audit delta tới `1139662`](docs/ops/AUDIT-REPORT-2026-10-22.md) + A11Y lần đầu (#227): 0 🔴, 23 🟢; 🟠 AUD-SEC-103 sửa ở 3.15.6.
+- 2026-10-22 **PLAN-3.15.5-green-debt** (D-138): dọn 5 🟢 sổ audit (#225, #226, tag `v3.15.5`). **PLAN-3.16-audit-delta** (D-139/140): [audit delta tới `1139662`](docs/ops/AUDIT-REPORT-2026-10-22.md) + A11Y lần đầu (#227): 0 🔴, 23 🟢; 🟠 AUD-SEC-103 sửa ở 3.15.6 (#228, tag `v3.15.6`).
 - 2026-10-21 PLAN-3.13 Lát 0 (ADR-0036): stub `merge-gate` chờ chủ repo gỡ khỏi ruleset (T-1834).
 - Nợ 🟢 #191: gom mệnh đề "Dự án đích" trùng của `install.py`.
 - Hoãn tới pha `harden`: PLAN-3.11 T-1690/T-1691 (quét lại SEC-091…099; `release-check` GO).
