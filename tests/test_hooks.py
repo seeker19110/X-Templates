@@ -693,6 +693,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertEqual(cdir("cd $D && git -C b commit -m x"), "")
         self.assertEqual(cdir("git -C commit"), "")  # `-C` thiếu giá trị: không phải commit
         self.assertEqual(cdir("git -c user.name=x commit -m x"), "/w/a")
+        # AUD-SEC-100: `~+`/`~-` là `$PWD`/`$OLDPWD` (như `cd ~+`), không phải thư mục con tên `~+`
+        for tilde in ("git -C ~+/x commit -m x", "git -C ~- commit -m x", "git -C b -C ~+ commit -m x"):
+            self.assertEqual(cdir(tilde), "", tilde)
+        self.assertEqual(cdir("git -C x~+ commit -m x"), "/w/a/x~+")  # `~+` không đứng đầu: chữ thường
         # Subshell: `cd` trong `( … )`/`$( … )` không dời thư mục của lệnh sau.
         self.assertEqual(cdir("(cd ../b && git pull); git commit -m x"), "/w/a")
         self.assertEqual(cdir("x=$(cd ../b; pwd) && git commit -m x"), "/w/a")

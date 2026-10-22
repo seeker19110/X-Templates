@@ -30,7 +30,7 @@
 
 ### Lát 1 — Guard và quyền đọc
 - [x] `T-2201` Guard: `shutil.rmtree(os.environ.get("HOME"))` (và `environ.get('HOME', …)`) là xoá home → deny; `rsync --delete-missing-args`/`--delete-excluded`/`--delete-delay` (tên có `-`) lên đích ngoài dự án → deny (AUD-SEC-076) (files: .claude/hooks/guard.py, tests/test_guard_audit1019.py) — Gate: `python3 -m unittest tests.test_guard_audit1019 -k delete_outside_project -k delete_inside_project`
-- [ ] `T-2202` Guard: `git -C ~+/x commit` / `git -C ~-/x commit` — `~+`/`~-` là `$PWD`/`$OLDPWD`, không phải thư mục con tên `~+` → `commit_dir` không biết (rỗng, cổng chạy ở gốc), như `cd ~+` (AUD-SEC-100) (sau: T-2201; files: .claude/hooks/guard.py, tests/test_hooks.py) — Gate: `python3 -m unittest tests.test_hooks -k commit_dir`
+- [x] `T-2202` Guard: `git -C ~+/x commit` / `git -C ~-/x commit` — `~+`/`~-` là `$PWD`/`$OLDPWD`, không phải thư mục con tên `~+` → `commit_dir` không biết (rỗng, cổng chạy ở gốc), như `cd ~+` (AUD-SEC-100) (sau: T-2201; files: .claude/hooks/guard.py, tests/test_hooks.py) — Gate: `python3 -m unittest tests.test_hooks -k commit_dir`
 - [ ] `T-2203` `.claude/settings.json` `permissions.deny` thêm `Read` cho mọi mẫu bí mật của guard (`.envrc`, `.npmrc`, `.pypirc`, `.netrc`, `*.p12`, `*.pfx`, `id_rsa`, `id_ed25519`); test đối chiếu `SECRET_PATTERNS` ↔ `Read(...)` để hai danh sách không lệch lại (AUD-CFG-004) (files: .claude/settings.json, tests/test_hooks.py) — Gate: `python3 -m unittest tests.test_hooks -k read_deny_covers_secret`
 
 ### Lát 2 — Cổng nhất quán

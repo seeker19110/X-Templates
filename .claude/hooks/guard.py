@@ -914,10 +914,12 @@ def _git_C_dirs(argv: List[str]) -> List[str]:
 
 
 def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
-    """Thư mục repo mà lệnh git (`git -C a -C b …`) tác động: `cwd` đi qua các `-C`; không biết (biến, `cd -`) → None."""
+    """Thư mục repo mà lệnh git (`git -C a -C b …`) tác động: `cwd` đi qua các `-C`; không biết (biến, `cd -`,
+    `~+`/`~-` — AUD-SEC-100) → None."""
     gdir = cwd
     for d in _git_C_dirs(argv):
-        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and "$" not in d else None
+        known = "$" not in d and not TILDE_DIR_RE.match(d)
+        gdir = posixpath.normpath(posixpath.join(gdir, posixpath.expanduser(d))) if gdir and known else None
     return gdir
 
 
