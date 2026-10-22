@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import importlib.util
 import io
 import json
@@ -1917,6 +1918,16 @@ class SettingsJsonTest(unittest.TestCase):
         # ADR-0018: không hỏi — nguy hiểm thì deny (settings + guard), còn lại cho chạy.
         self.assertEqual(perms["ask"], [])
         self.assertTrue(any(g["matcher"] == "Bash" for g in s["hooks"]["PreToolUse"]))
+
+    def test_read_deny_covers_secret_patterns(self):
+        """AUD-CFG-004: tool Read không qua hook guard — mỗi mẫu bí mật mà guard chặn ghi (`SECRET_PATTERNS`) phải có
+        một `Read(...)` deny khớp, để hai danh sách không lệch lại khi thêm mẫu."""
+        perms = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["permissions"]
+        globs = [r[5:-1].removeprefix("./").removeprefix("**/") for r in perms["deny"] if r.startswith("Read(")]
+        for pat in _guard().SECRET_PATTERNS:
+            name = pat.replace("/*", "/x").replace("*", "")  # `*.p12` → `.p12`, `*id_rsa*` → `id_rsa`
+            with self.subTest(pat):
+                self.assertTrue(any(fnmatch.fnmatchcase(name, g) for g in globs), f"{name}: thiếu Read deny")
 
 
 FAST_PR = {

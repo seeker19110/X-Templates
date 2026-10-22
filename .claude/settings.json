@@ -26,6 +26,14 @@
       "Read(./secrets/**)",
       "Read(**/*.pem)",
       "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(**/.envrc)",
+      "Read(**/.npmrc)",
+      "Read(**/.pypirc)",
+      "Read(**/.netrc)",
       "Bash(git push --force-with-lease *)",
       "Bash(git push --mirror *)"
     ]
