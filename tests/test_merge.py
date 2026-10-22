@@ -836,6 +836,14 @@ class MergeConfigTest(unittest.TestCase):
             d, notes = xt._merge_eval(pr(files=[*other, {"path": "xt.yaml", "additions": 1, "deletions": 1}]))
         self.assertEqual(d["delivery_phase"], "harden")
         self.assertIn("PR sửa xt.yaml — tính pha harden (D-137)", notes)
+        # review #215: đổi tên (tên cũ), dự án con trong monorepo, mục không phải dict
+        renamed = [*other, {"path": "old/x.yaml", "previous": "xt.yaml"}, "xt.yaml", None]
+        sub = [*other, {"path": "apps/web/xt.yaml"}]
+        with unittest.mock.patch.object(xt, "project_dir", return_value=self.base):
+            self.assertEqual(xt._merge_eval(pr(files=renamed))[0]["delivery_phase"], "harden")
+            with unittest.mock.patch.object(xt, "project_prefix", return_value="apps/web/"):
+                self.assertEqual(xt._merge_eval(pr(files=sub))[0]["delivery_phase"], "harden")
+            self.assertEqual(xt._merge_eval(pr(files=sub))[0]["delivery_phase"], "build")  # xt.yaml của dự án khác
 
     def test_touches_hard_key(self):
         """So giá trị hiệu lực `merge_hard_exceptions` (thiếu = human) của xt.yaml gốc ở đáy/đầu PR, không dò chuỗi patch
