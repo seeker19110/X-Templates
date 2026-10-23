@@ -199,15 +199,71 @@ class WipeProjectRootTest(unittest.TestCase):
         for cmd in (
             "find . -name '*.pyc' -delete",
             "find . -type f -name '*.log' -delete",
-            "find . -type d -empty -delete",
             "find . -name node_modules -prune -o -print",
-            "find . -name '*.pyc' -name '*' -delete",  # AND: còn một lọc tin được
             "find . -path './build/*' -delete",
             "find . -regex '.*\\.pyc' -delete",
-            "find . -lname '*' -delete",  # chỉ symlink
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_wipe_project_root_find_allowlist(self):
+        """D-151 (review lượt 3): find xoá trên gốc chỉ cho AND thuần các test dương, MỌI test tên/đường hẹp (không
+        khớp `.git` lẫn đường bên trong), mỗi nhánh `-o` (không ngoặc) có ≥ 1 test hẹp."""
+        for cmd in (
+            "find . -name '*.pyc' -prune -o -delete",
+            "find . -path ./node_modules -prune -o -delete",
+            "find . -path '*/.git/*' -delete",
+            "find . -path './.git/*' -delete",
+            "find . -regex '.*/.git/.*' -delete",
+            "find . -name config -path '*/.git/*' -delete",
+            "find . -name config -delete",  # trúng `.git/config`
+            "find . -regextype posix-extended -regex '.*' -delete",
+            "find . \\( -name '*.pyc' -o -name .git \\) -delete",
+            "find . \\( -name '*' \\) -delete",
+            "find . -name '[^x]*' -delete",
+            "find . -newer x -delete",
+            "find . -true -delete",
+            "find . -size +0 -delete",
+            "find . -type d -empty -delete",  # không có test tên/đường hẹp
+            "find . -name '*.pyc' -name '*' -delete",  # một test rộng → không tin
+            "find . -lname '*' -delete",
+            "find . -name .git -prune -o -name '*.pyc' -delete",  # chấp nhận chặn (D-151)
+            "find . ! -path './venv/*' -name '*.pyc' -delete",  # chấp nhận chặn (D-151)
+            "find . -name '*.pyc' -o -delete",
+            "find .git -name '*.pyc' -delete",  # điểm bắt đầu là .git: mẫu hẹp vẫn trúng bên trong .git
+            "find . -maxdepth 1 -delete",
+            "find / \\( -name '*' \\) -delete",  # ngoặc thoát từng cắt find, mất `-delete` (cả luật /, ~)
+            "find \\( -name x \\) -delete",
+            "find . '(' -name '*' ')' -delete",
+            "(find . \\( -name '*' \\) -delete)",
+        ):
+            with self.subTest(cmd=cmd):
+                res = policy(cmd)
+                self.assertEqual(res["decision"], "deny", res)
+        self.assertIn("D-151", str(policy("find . -true -delete")["reason"]))
+        for cmd in (
+            "find . -name '*.pyc' -delete",
+            "find . -name __pycache__ -type d -exec rm -rf {} +",
+            "find . -name .DS_Store -delete",
+            "find . -type f -name '*.log' -delete",
+            "find . -name '*.pyc' -o -name '*.pyo' -delete",
+            "find . -name '*.pyc' -or -name '*.pyo' -delete",
+            "find . -regex '.*\\.pyc' -delete",
+            "find . -regextype posix-extended -regex '.*\\.(pyc|pyo)' -delete",
+            "find . -maxdepth 2 -mindepth 1 -depth -xdev -name '*.tmp' -a -mtime +7 -size -1M -delete",
+            "find . -newer x -iname '*.BAK' -print -delete",
+            "find . -ipath './build/*' -delete",
+            "find build -delete",
+            "find . -name node_modules -prune",
+            f"find {R} -wholename '*/dist/*.map' -delete",
+            "(find . -name '*.pyc' -delete)",  # `)` thừa vẫn đóng subshell
+            "(cd scripts && find . -name '*.pyc' -delete); git status",
+            "find build \\( -name '*.o' -o -name '*.a' \\) -delete",  # không phải gốc
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(policy(f"find {tmp} -delete")["decision"], "")
 
     def test_guard_wipe_project_root_git_glob(self):
         """Review bb606aa: glob nằm dưới `gốc/.git/` → deny."""

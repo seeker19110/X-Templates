@@ -716,12 +716,30 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return list(lex)
+        return _find_parens(list(lex))
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ)
         return re.split(r"\s+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
 
 
 PUNCT = set("();<>|&\n")
+
+
+def _find_parens(tokens: List[str]) -> List[str]:
+    """`find … \\( … \\)`: shlex bỏ dấu thoát nên ngoặc của find thành toán tử subshell, cắt mất `-delete` phía sau
+    (D-151). Giữa lệnh có `find`, `(` không thể là cú pháp shell → đối số `\\(`; `)` khớp với nó cũng vậy, `)` thừa
+    vẫn đóng subshell (`(find . -delete)`)."""
+    out: List[str] = []
+    in_find, depth = False, 0
+    for t in tokens:
+        if in_find and (t == "(" or (t == ")" and depth)):
+            depth += 1 if t == "(" else -1
+            t = "\\" + t
+        elif _is_punct(t) and not _is_redirect(t):
+            in_find, depth = False, 0
+        elif posixpath.basename(t) == "find":
+            in_find = True
+        out.append(t)
+    return out
 
 
 def _is_punct(t: str) -> bool:
@@ -1739,51 +1757,65 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
-    unfiltered = _find_filters(args[i:], roots) <= FIND_NO_FILTER
-    hit = next((r for r in roots if unfiltered and _wipes_root(r, root, cwd)), "")
+    ok = _find_expr_ok(args[i:], roots)
+    hit = next((r for r in roots if _wipes_root(r, root, cwd) and not (ok and _outside_git(r, root, cwd))), "")
     if hit:
-        return "deny", "find: " + ROOT_WIPE_WHY.format(hit)
-    if unfiltered and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
+        return "deny", FIND_ROOT_WHY.format(hit)
+    if not ok and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
         return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
-def _find_filters(expr: List[str], roots: List[str]) -> Set[str]:
-    """Phần biểu thức `find` ngoài khối `-exec … ;|+`, số độ sâu và loại của `-type` (`f`/`d`, review 5ef1a14 M1):
-    rỗng/chỉ `FIND_NO_FILTER` = xoá cả cây."""
-    out: Set[str] = set()
-    skip = broad = False
-    prev = ""
+def _find_tokens(expr: List[str]) -> List[str]:
+    """Biểu thức `find` bỏ khối `-exec … ;|+` (lệnh trong đó đã quét riêng)."""
+    out: List[str] = []
+    skip = False
     for a in expr:
         if a in FIND_EXEC:
             skip = True
         elif skip:
             skip = a not in (";", "+")
-        elif prev in FIND_TREE_TESTS:  # review bb606aa: mẫu khớp mọi thứ/khớp `.git` không phải lọc
-            wide = _broad_find_test(prev, a, roots)
-            broad = broad or wide
-            if not wide:
-                out.add(a)
-        elif not a.isdigit() and prev != "-type" and a not in FIND_TREE_TESTS:
-            out.add(a)
-        prev = a
-    # phủ định làm điều kiện không còn tin được; `-o` với một nhánh rộng = rộng
-    return set() if out & {"!", "-not"} or (broad and out & {"-o", "-or"}) else out
+        else:
+            out.append(a)
+    return out
 
 
-def _broad_find_test(op: str, val: str, roots: List[str]) -> bool:
-    """Test tên/đường của `find` khớp `.git` (nên khớp cả `*`, `.*`): `-name` so với tên, `-path` với `<gốc>/.git`,
-    `-regex` khớp cả đường (regex hỏng → coi là rộng)."""
-    paths = [posixpath.join(r, ".git") for r in roots]
+def _find_expr_ok(expr: List[str], roots: List[str]) -> bool:
+    """D-151: biểu thức là AND thuần các test dương (nhánh `-o` chỉ khi không ngoặc), MỌI test tên/đường đều hẹp và
+    mỗi nhánh có ≥ 1 test đó; `!`/`-not`/`-prune`/ngoặc/test lạ → False."""
+    branches: List[List[bool]] = [[]]
+    toks = iter(_find_tokens(expr))
+    for a in toks:
+        if a in ("-o", "-or"):
+            branches.append([])
+        elif a in FIND_TREE_TESTS:
+            branches[-1].append(_narrow_find_test(a, next(toks, "*"), roots))
+        elif a in FIND_ARG_OK or re.fullmatch(r"-[ac]?newer\w*", a):
+            next(toks, None)
+        elif a not in FIND_FLAG_OK:
+            return False
+    return all(b and all(b) for b in branches)
+
+
+def _narrow_find_test(op: str, val: str, roots: List[str]) -> bool:
+    """Mẫu tên/đường không khớp `.git` lẫn đường đại diện bên trong (`GIT_PROBES`); `-name` so với tên cuối, regex
+    `fullmatch` cả đường (hỏng → không hẹp), glob đổi `[^` → `[!` như shell."""
+    paths = [posixpath.join(r, p) for r in roots for p in GIT_PROBES]
+    paths = [posixpath.basename(p) for p in paths] if op in ("-name", "-iname") else paths
     fold = op.startswith("-i")
     if op.endswith("regex"):
         try:
-            return any(re.fullmatch(val, p, re.I if fold else 0) for p in paths)
+            return not any(re.fullmatch(val, p, re.I if fold else 0) for p in paths)
         except re.error:
-            return True
-    names = [".git"] if op in ("-name", "-iname") else paths
-    return any(fnmatch.fnmatchcase(n.lower(), val.lower()) if fold else fnmatch.fnmatchcase(n, val) for n in names)
+            return False
+    pat = val.replace("[^", "[!")
+    return not any(fnmatch.fnmatchcase(p.lower(), pat.lower()) if fold else fnmatch.fnmatchcase(p, pat) for p in paths)
+
+
+def _outside_git(r: str, root: str, cwd: Optional[str]) -> bool:
+    """Điểm bắt đầu của `find` không phải `gốc/.git` hay bên trong nó (mẫu hẹp đến đâu cũng trúng file của git)."""
+    return not (_real_target(r, root, cwd) + "/").startswith(os.path.join(os.path.realpath(root), ".git/"))
 
 
 def _find_parts(args: List[str]) -> Tuple[List[str], int]:
@@ -1795,7 +1827,7 @@ def _find_parts(args: List[str]) -> Tuple[List[str], int]:
     if args[i : i + 1] == ["-D"]:
         i += 2
     j = i
-    while j < len(args) and not args[j].startswith(("-", "(", "!")):
+    while j < len(args) and not args[j].startswith(("-", "(", "!", "\\(")):
         j += 1
     return args[i:j] or ["."], j
 
@@ -1860,17 +1892,36 @@ def _find_evidence_targets(args: List[str]) -> List[str]:
     return out
 
 
-FIND_NO_FILTER = {
-    "-delete",
+# D-151: biểu thức `find` xoá trên gốc dự án — danh sách cho phép. Có đối số: tuỳ chọn toàn cục + test dương (`-newer*`
+# xét theo tiền tố); không đối số: tuỳ chọn/hành động/AND. Ngoài hai tập và test tên/đường → không cho.
+FIND_ARG_OK = {"-maxdepth", "-mindepth", "-regextype", "-type", "-size", "-user", "-group", "-perm"}
+FIND_ARG_OK |= {f"-{x}{u}" for x in "acm" for u in ("time", "min")}
+FIND_FLAG_OK = {
     "-depth",
-    "-print",
     "-xdev",
     "-mount",
     "-ignore_readdir_race",
-    "-mindepth",
-    "-maxdepth",
-    "-type",
+    "-noleaf",
+    "-empty",
+    "-delete",
+    "-print",
+    "-print0",
 }
+FIND_FLAG_OK |= {"-a", "-and"}
+# Đường/tên đại diện bên trong `.git` mà test hẹp không được khớp (`-name config` trúng `.git/config`).
+GIT_PROBES = (
+    ".git",
+    ".git/info/exclude",
+    ".git/objects/ab",
+    ".git/config",
+    ".git/HEAD",
+    ".git/index",
+    ".git/refs/heads/main",
+)
+FIND_ROOT_WHY = (
+    "find: xoá đệ quy gốc dự án ({}) chỉ cho biểu thức AND có mẫu tên/đường hẹp (không khớp .git) — viết hẹp hơn hoặc "
+    "chạy trong thư mục con (D-151)"
+)
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
 

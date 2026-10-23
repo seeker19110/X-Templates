@@ -5158,6 +5158,39 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-fb1023-find-escaped-parens",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . \\( -name '*' \\) -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-prune-or-delete",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.pyc' -prune -o -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-find-pycache",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "find . -name __pycache__ -type d -exec rm -rf {} +"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

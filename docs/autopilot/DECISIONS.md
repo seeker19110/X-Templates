@@ -1064,3 +1064,10 @@
 - Chọn: Cho: không ghi cây; giữ cat <<EOF | git commit -F - đang dùng
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: luật nhằm lệnh GHI cây trước commit; ba lệnh này chỉ ghi stdout (chuyển hướng ra file vẫn bị chặn); (4) giữ cách viết message commit phổ biến
 - Đường lùi: Bỏ 3 tên khỏi tuple _tree_readonly + đổi test_every_message_source_is_scanned
+
+### D-151 · 2026-10-23T23:34:21+00:00 · Guard find -delete/-exec rm trên cây dự án: vá từng cách viết bộ lọc rộng (3 lượt review vẫn lọt) hay đổi cách?
+
+- Phương án: (1) Danh sách cho phép: chỉ cho khi biểu thức là AND thuần các test dương, có ≥ 1 test tên/đường hẹp (không khớp .git, .git/x), không !, -not, -prune, ngoặc, -regextype, -o (trừ khi mọi nhánh -o đều hẹp và không ngoặc); còn lại deny kèm lý do gợi ý viết hẹp · (2) Tiếp tục vá từng cách
+- Chọn: Danh sách cho phép: chỉ cho khi biểu thức là AND thuần các test dương, có ≥ 1 test tên/đường hẹp (không khớp .git, .git/x), không !, -not, -prune, ngoặc, -regextype, -o (trừ khi mọi nhánh -o đều hẹp và không ngoặc); còn lại deny kèm lý do gợi ý viết hẹp
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: ngữ nghĩa find đủ giàu để danh sách chặn luôn thiếu (3 lượt review, mỗi lượt lộ lớp mới); danh sách cho phép đóng cả lớp; xoá không đảo ngược thì chiều chặt (ADR-0002/0018); (3) đơn giản, test được; chi phí: vài lệnh dọn hợp lệ phức tạp (-prune -o, !) bị chặn — viết lại hẹp hoặc chạy trong thư mục con
+- Đường lùi: Trở lại danh sách chặn ở _find_filters (commit trước)
