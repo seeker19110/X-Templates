@@ -131,7 +131,7 @@ ITEM_RE = re.compile(
 ITEM_LIKE_RE = re.compile(r"^- \[[ xX~]\] `[A-Z][A-Z0-9-]*`")
 # Rộng hơn, cho BLUEPRINT/PLAN của dự án: thụt lề, ô lạ (`[-]`), thiếu backtick — dòng như vậy mà không khớp ITEM_RE/TASK_RE
 # thì báo lỗi; trước đây bị bỏ qua im lặng nên xoá/sửa hỏng mục MUST vẫn ra "0 MUST mở".
-LOOSE_ITEM_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*`?(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)\b")
+LOOSE_ITEM_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*[`*]{0,2}(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)\b")
 MUST_COUNT_RE = re.compile(r"^\|\s*MUST\s*\|\s*(\d+)\s*\|\s*$", re.M)
 FRONT_BLOCK_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 BACKLOG_KEY_RE = re.compile(r"^backlog:[ \t]*(\S+)[ \t]*$", re.M)  # BLUEPRINT.md khai file SHOULD/MAY (ADR-0012)
@@ -1091,6 +1091,19 @@ def unchecked_must_stat(unchecked: List[str], done: int) -> Dict[str, Any]:
     return {"count": count, "total": total, "ratio": round(count / total, 2) if total else 0.0}
 
 
+def _waiver_problem(level: str, seg: str) -> Optional[str]:
+    """Lý do `[~]` không hợp lệ (hậu tố cho thông báo) hoặc None. `Không áp dụng` thuần hợp lệ; `Miễn` ở MUST cần
+    `Duyệt:`; lẫn cả hai không hợp lệ (NA không được dùng làm đường vòng qua `Duyệt:`, LOOP-STOP-024)."""
+    na, waiver = bool(NA_RE.search(seg)), bool(WAIVER_RE.search(seg))
+    if na and waiver:
+        return ": lẫn `Không áp dụng` và `Miễn` — chọn một (đúng là không áp dụng thì bỏ `Miễn`; có áp dụng mà bỏ thì bỏ `Không áp dụng` và thêm `Duyệt:`)"
+    if not (na or waiver):
+        return ""
+    if level == "MUST" and waiver and not APPROVAL_RE.search(seg):
+        return ": MUST `Miễn` thiếu `Duyệt:` của chủ dự án"
+    return None
+
+
 def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
@@ -1111,13 +1124,15 @@ def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
                 open_must.append(m["id"])
         elif st == "~":
             total[lv]["waived"] += 1
-            seg = _note_segment(line)
-            if not (WAIVER_RE.search(seg) or NA_RE.search(seg)):
-                bad_waivers.append(f"{m['id']} ({where}dòng {n})")
-            elif lv == "MUST" and not NA_RE.search(seg) and not APPROVAL_RE.search(seg):
-                bad_waivers.append(f"{m['id']} ({where}dòng {n}: MUST `Miễn` thiếu `Duyệt:` của chủ dự án)")
+            problem = _waiver_problem(lv, _note_segment(line))
+            if problem is not None:
+                bad_waivers.append(f"{m['id']} ({where}dòng {n}{problem})")
         else:
             total[lv]["done"] += 1
+    if not where and not bad_lines and not sum(sum(total[lv].values()) for lv in LEVELS):
+        bad_lines.append(
+            "không nhận diện được mục checklist nào (ID phải trong backtick: `- [ ] `ABC-001` **MUST** …`)"
+        )
     hm = MUST_COUNT_RE.search(text)
     expected = int(hm.group(1)) if hm else None
     counted = sum(total["MUST"].values())
