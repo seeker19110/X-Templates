@@ -807,6 +807,40 @@ class BlueprintStatusTextTest(TmpDirCase):
         self.assertEqual(rc, 1)
         self.assertFalse(json.loads(out)["ok"])
 
+    def test_unchecked_must_ratio_counts_ticked_must_without_check(self):
+        """count = MUST [x] không có `Kiểm:`; total = MUST [x]; [ ], [~], SHOULD/MAY không tính; không cần --run."""
+        f = self.tmp / "BLUEPRINT.md"
+        f.write_text(
+            "- [x] `A-001` **MUST** a — Kiểm: `true`\n"
+            "- [x] `A-002` **MUST** b — Bằng chứng: PR #1\n"
+            "- [x] `A-003` **MUST** c\n"
+            "- [ ] `A-004` **MUST** d\n"
+            "- [~] `A-005` **MUST** e — Không áp dụng: không có\n"
+            "- [x] `A-006` **SHOULD** f\n- [ ] `A-007` **MAY** g\n",
+            encoding="utf-8",
+        )
+        rc, out, _ = run_main("blueprint-status", f, "--json")
+        self.assertEqual(rc, 0)
+        doc = json.loads(out)
+        self.assertEqual(doc["unchecked_must_ratio"], {"count": 2, "total": 3, "ratio": 0.67})
+        self.assertEqual(doc["unchecked_must"], [])  # khoá cũ chỉ điền khi --run
+        rc, out, _ = run_main("blueprint-status", f, "--json", "--run")
+        self.assertEqual(json.loads(out)["unchecked_must"], ["A-002", "A-003"])
+        rc, out, _ = run_main("blueprint-status", f)
+        self.assertIn("unchecked_must: 2/3 MUST đạt không có lệnh kiểm (tỉ lệ 0.67)", out)
+        (self.tmp / "BL.md").write_text("- [x] `B-001` **MUST** h\n", encoding="utf-8")
+        f.write_text(
+            "---\nkind: blueprint\nbacklog: BL.md\n---\n- [x] `A-001` **MUST** a — Kiểm: `true`\n", encoding="utf-8"
+        )
+        _, out, _ = run_main("blueprint-status", f, "--json")
+        self.assertEqual(json.loads(out)["unchecked_must_ratio"], {"count": 1, "total": 2, "ratio": 0.5})
+        _, out, _ = run_main("blueprint-status", "-", stdin="- [x] `A-001` **MUST** a — Kiểm: `true`\n")
+        self.assertNotIn("unchecked_must", out)  # count 0: im lặng
+
+    def test_unchecked_must_ratio_zero_total(self):
+        rc, out, _ = run_main("blueprint-status", "-", "--json", stdin="")
+        self.assertEqual(json.loads(out)["unchecked_must_ratio"], {"count": 0, "total": 0, "ratio": 0.0})
+
     def test_run_executes_check_commands(self):
         # LOOP-DESIGN-023: mục [x] có `— Kiểm: `<lệnh>`` được chạy lại trong thư mục chứa blueprint; đỏ = chưa đạt dù đã tick.
         (self.tmp / "ok.txt").write_text("1\n", encoding="utf-8")
@@ -2115,7 +2149,7 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)
         self.assertEqual(
             [r[k]["result"] for k in xt.RELEASE_ROWS],
-            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A"],
+            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "PASS"],
         )
         self.assertEqual((r["attack"]["level"], r["perf"]["level"]), ("SHOULD", "SHOULD"))  # quy mô S
         self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
@@ -2127,6 +2161,40 @@ class ReleaseCheckTest(TmpRepoCase):
         rc, d = self.rows()
         self.assertEqual((rc, d["fails"]), (1, ["tree"]))
         self.assertIn("1 file chưa commit (x.txt)", self.by_id(d)["tree"]["evidence"])
+
+    def test_release_unchecked_must_row_warn_and_fail(self):
+        """Hàng `unchecked_must`: mặc định `warn` (⚠, không đổi GO/NO-GO); `--unchecked-must fail` → count > 0 là NO-GO."""
+        (self.repo / "BLUEPRINT.md").write_text(
+            self.BP
+            + "- [x] `BASE-X-002` **MUST** b — Bằng chứng: PR #1\n- [~] `BASE-X-003` **MUST** c — Không áp dụng: x\n",
+            encoding="utf-8",
+        )
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        _, d = self.rows()
+        r = self.by_id(d)["unchecked_must"]
+        self.assertEqual((r["result"], r["level"]), ("WARN", "SHOULD"))
+        self.assertIn("1/2 MUST đạt không có lệnh kiểm (tỉ lệ 0.5)", r["evidence"])
+        self.assertNotIn("unchecked_must", d["fails"])
+        rc, out, _ = run_main("release-check")
+        self.assertIn("⚠ SHOULD  unchecked_must WARN", out)
+        rc, d = self.rows("--unchecked-must", "fail")
+        r = self.by_id(d)["unchecked_must"]
+        self.assertEqual((r["result"], r["level"]), ("FAIL", "BLOCKER"))
+        self.assertIn("unchecked_must", d["fails"])
+        self.assertEqual((rc, d["verdict"]), (1, "NO-GO"))
+
+    def test_release_unchecked_must_row_pass_and_missing(self):
+        """0 MUST mở → PASS ở cả hai chế độ (fail không NO-GO); không có blueprint → N/A SHOULD."""
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "c")
+        for mode in ("warn", "fail"):
+            rc, d = self.rows("--unchecked-must", mode)
+            self.assertEqual((rc, d["verdict"], self.by_id(d)["unchecked_must"]["result"]), (0, "GO", "PASS"))
+        (self.repo / "BLUEPRINT.md").unlink()
+        _, d = self.rows()
+        r = self.by_id(d)["unchecked_must"]
+        self.assertEqual((r["result"], r["level"]), ("N/A", "SHOULD"))
 
     def test_release_attack_and_perf_rows(self):
         """ADR-0042: `attack`/`perf` của xt.yaml chạy ở release-check — đỏ = NO-GO; chưa khai ở M/L = việc của người."""
