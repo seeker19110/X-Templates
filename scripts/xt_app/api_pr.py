@@ -92,8 +92,8 @@ def _pr_stats(ctx: Ctx) -> Tuple[int, Dict[str, Any]]:
     xt = ctx.xt
     now = _dt.datetime.now(_dt.timezone.utc)
     try:
-        prs, runs = xt._pr_stats_fetch("repos/{owner}/{repo}", now - _dt.timedelta(days=days))
-        stats = xt.pr_stats(prs, runs, now, days)
+        prs, runs, cut = xt._pr_stats_fetch("repos/{owner}/{repo}", now - _dt.timedelta(days=days))
+        stats = xt.pr_stats(prs, runs, now, days, cut)
     except (xt.PrInputError, *_DATA_ERRORS) as exc:
         return _unavailable(exc)
     return 200, {**dict(stats), "available": True}

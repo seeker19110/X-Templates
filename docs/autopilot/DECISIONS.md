@@ -1043,3 +1043,10 @@
 - Chọn: count = số MUST tick [x] không có lệnh Kiểm (danh sách unchecked_must sẵn có), total = số MUST [x]; khoá mới unchecked_must_ratio, giữ khoá cũ
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: research §55/§112 đo '58 MUST tick không có lệnh kiểm' — MUST [ ] đã bị hàng blueprint của release-check chặn nên cờ fail theo định nghĩa đó vô nghĩa; (2)(3) giữ hợp đồng khoá cũ (blueprint_checks, _release_blueprint, test) — thêm khoá mới
 - Đường lùi: Đổi unchecked_must_stat về đếm [ ]
+
+### D-148 · 2026-10-23T13:03:47+00:00 · Lát 3 (T-2409/2410) và Lát 4 (T-2411 cắt 3.16.0): một PR hay hai?
+
+- Phương án: (1) Một PR: Lát 3 + cắt 3.16.0 (tiền lệ #228 sửa + cắt bản) · (2) Hai PR tuần tự
+- Chọn: Một PR: Lát 3 + cắt 3.16.0 (tiền lệ #228 sửa + cắt bản)
+- Lý do (tiêu chí chất lượng cuối): (3) đơn giản: phiên ràng buộc một nhánh, lát đi tuần tự; Lát 4 chỉ là VERSION/CHANGELOG/PROGRESS — tách PR thêm một vòng review+CI không thêm bằng chứng; (2) revert một PR vẫn gỡ được cả hai
+- Đường lùi: Tách commit cắt bản ra PR riêng

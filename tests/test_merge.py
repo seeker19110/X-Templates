@@ -2860,8 +2860,9 @@ class PrStatsTest(unittest.TestCase):
         self.assertIn("(`xt-standard-lane`) | 1 |", table)
         self.assertIn("| PR revert | 2 |", table)
 
-    def fake_rest(self, prs: list[dict], runs: list[dict], fail: str = ""):
-        """REST giả: `pulls` là mảng, `actions/runs` là object `workflow_runs`; cắt trang theo `per_page`/`page`."""
+    def fake_rest(self, prs: list[dict], runs: list[dict], fail: str = "", total: int | None = None):
+        """REST giả: `pulls` là mảng, `actions/workflows/<ci>/runs` là object `workflow_runs` lọc theo `created=<ngày>`
+        (T-2409); cắt trang theo `per_page`/`page`; `total` ép `total_count` (ngày chạm trần listing)."""
         calls: list[str] = []
 
         def run(cmd, **kw):
@@ -2873,9 +2874,13 @@ class PrStatsTest(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 1, "", "HTTP 403: Resource not accessible")
             page = int(re.search(r"[?&]page=(\d+)", path)[1])
             per = int(re.search(r"[?&]per_page=(\d+)", path)[1])
-            src = runs if "/actions/runs" in path else prs
+            is_runs = "/actions/" in path
+            src = prs
+            if is_runs:
+                day = re.search(r"created=([\d-]+)", path)[1]
+                src = [r for r in runs if str(r.get("created_at")).startswith(day)]
             chunk = src[(page - 1) * per : page * per]
-            body = {"total_count": len(src), "workflow_runs": chunk} if src is runs else chunk
+            body = {"total_count": len(src) if total is None else total, "workflow_runs": chunk} if is_runs else chunk
             return subprocess.CompletedProcess(cmd, 0, json.dumps(body), "")
 
         return calls, unittest.mock.patch("xt.subprocess.run", side_effect=run)
@@ -2890,16 +2895,16 @@ class PrStatsTest(unittest.TestCase):
             rc, out, err = run_main("pr", "stats", "--json")
         self.assertEqual((rc, err), (0, ""))
         s = json.loads(out)
-        self.assertEqual((s["merged"], s["runs_per_pr"]["total"], s["runs_seen"]), (3, 4, len(runs_full)))
-        day = (now - xt._dt.timedelta(hours=50)).date().isoformat()  # ngày mở sớm nhất của PR merge trong kỳ
+        self.assertEqual((s["merged"], s["runs_per_pr"]["total"], s["runs_seen"]), (3, 4, len(runs_full) - 1))
         self.assertEqual(
-            calls,
+            calls[:2],
             [
-                "repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1",
-                "repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=2",
-                f"repos/{{owner}}/{{repo}}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100&page=1",
-                f"repos/{{owner}}/{{repo}}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100&page=2",
+                f"repos/{{owner}}/{{repo}}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page={n}"
+                for n in (1, 2)
             ],
+        )
+        self.assertTrue(
+            all("/actions/workflows/ci.yml/runs?event=pull_request&created=" in c for c in calls[2:]), calls
         )
         calls, patch = self.fake_rest(prs, runs)
         with patch:
@@ -2908,6 +2913,107 @@ class PrStatsTest(unittest.TestCase):
         self.assertTrue(out.startswith("| PR merge trong 30 ngày"), out)
         self.assertIn("| PR revert | 2 |", out)
         self.assertTrue(all(c.startswith("repos/o/r/") for c in calls), calls)
+
+    @staticmethod
+    def day_of(now: Any, hours_ago: float) -> str:
+        return (now - xt._dt.timedelta(hours=hours_ago)).date().isoformat()
+
+    def test_pr_stats_pushes_per_day_queries_dedup_and_truncation(self):
+        now = xt._dt.datetime.now(xt._dt.timezone.utc)
+        prs = [self.mk_pr(1, 50, 1, now)]
+        runs = [
+            self.mk_run("nhanh-1", "a", 49, "success", now) | {"id": 1},
+            self.mk_run("nhanh-1", "a", 49, "success", now) | {"id": 1},  # trùng id → bỏ
+            self.mk_run("nhanh-1", "b", 2, "success", now) | {"id": 2},
+            self.mk_run("nhanh-1", "c", 1, "success", now),  # không id → giữ
+        ]
+        calls, patch = self.fake_rest(prs, runs)
+        with patch:
+            rc, out, _ = run_main("pr", "stats", "--days", "3", "--json")
+        s = json.loads(out)
+        self.assertEqual((rc, s["runs_truncated"]), (0, False))
+        first, today = xt._dt.date.fromisoformat(self.day_of(now, 50)), now.date()
+        want = [(first + xt._dt.timedelta(days=k)).isoformat() for k in range((today - first).days + 1)]
+        got = [re.search(r"created=([\d-]+)", c)[1] for c in calls if "/actions/" in c]
+        self.assertEqual(got, want)
+        self.assertGreaterEqual(len(want), 2)
+        self.assertEqual(s["runs_seen"], 3)
+        self.assertEqual(s["pushes"]["total"], 3)
+        _, patch = self.fake_rest(prs, runs, total=1000)  # mọi ngày chạm trần
+        with patch:
+            _, out, _ = run_main("pr", "stats", "--days", "3", "--json")
+        self.assertIs(json.loads(out)["runs_truncated"], True)
+        _, patch = self.fake_rest(prs, runs, total=1000)
+        with patch:
+            _, out, _ = run_main("pr", "stats", "--days", "3")
+        self.assertIn("⚠ runs_truncated", out)
+        # review T-2409: PR mở 60 ngày trước kỳ 3 ngày → chỉ đọc tới 30 ngày trước đầu kỳ, số liệu thiếu thì cờ cắt
+        calls, patch = self.fake_rest([self.mk_pr(1, 60 * 24, 1, now)], runs)
+        with patch:
+            _, out, _ = run_main("pr", "stats", "--days", "3", "--json")
+        days = [c for c in calls if "/actions/" in c]
+        self.assertEqual(len(days), xt.PR_STATS_LOOKBACK_DAYS + 3 + 1, days[:2])
+        self.assertIs(json.loads(out)["runs_truncated"], True)
+
+    def test_pr_stats_pushes_truncated_by_page_cap_and_env_workflow(self):
+        now = xt._dt.datetime.now(xt._dt.timezone.utc)
+        prs = [self.mk_pr(1, 1, 0.5, now)]
+        runs = [self.mk_run("nhanh-1", "a", 0.8, "success", now) | {"id": 1}]
+        _, patch = self.fake_rest(prs, runs)
+        with (
+            patch,
+            unittest.mock.patch.object(xt, "GH_MAX_PAGES", 1),
+            unittest.mock.patch.dict(os.environ, {"XT_CI_WORKFLOW": "build.yaml"}),
+        ):
+            xt_calls: list[str] = []
+            orig = xt._gh_api_once
+            with unittest.mock.patch.object(xt, "_gh_api_once", side_effect=lambda p: xt_calls.append(p) or orig(p)):
+                prs_, runs_, cut = xt._pr_stats_fetch("repos/o/r", now - xt._dt.timedelta(days=1))
+        self.assertTrue(cut)
+        self.assertEqual(len(runs_), 1)
+        self.assertTrue(any("/actions/workflows/build.yaml/runs?" in c for c in xt_calls), xt_calls)
+        with unittest.mock.patch.dict(os.environ, {"XT_CI_WORKFLOW": "../x"}), self.assertRaises(xt.PrInputError):
+            xt._pr_stats_runs("repos/o/r", now.date(), now.date())
+
+    def test_pr_stats_pushes_numbers_and_edges(self):
+        def r(sha: Any, h: float, concl: Any = "success") -> dict:
+            return self.mk_run("nhanh-1", sha, h, concl) | ({} if sha else {"head_sha": None})
+
+        pr = self.mk_pr(1, 30, 1)
+        s = xt.pr_stats(
+            [pr], [r("a", 20, "failure"), r("a", 19, "cancelled"), r("b", 10), r("c", 5, "cancelled")], self.NOW, 7
+        )
+        row = s["prs"][0]
+        self.assertEqual((row["pushes"], row["first_push_green"], row["cancelled_same_sha"]), (3, False, 1))
+        self.assertEqual((s["pushes"], s["cancelled_same_sha"]), ({"median": 3.0, "p95": 3.0, "total": 3}, 1))
+        self.assertEqual(s["first_push_green"], {"green": 0, "of": 1, "rate": 0.0})
+        self.assertFalse(s["runs_truncated"])
+        table = xt.pr_stats_table(s)
+        self.assertIn("| 3 · 3 · 3 |", table)
+        self.assertIn("| 0/1 (0%) |", table)
+        self.assertIn("cùng SHA với run khác | 1 |", table)
+        self.assertNotIn("runs_truncated", table)
+        # review T-2409: run đầu đã chạy lại (listing chỉ giữ kết luận lần cuối) — không phải xanh lần đầu
+        s = xt.pr_stats([pr], [r("a", 20) | {"run_attempt": 2}, r("b", 10)], self.NOW, 7)
+        self.assertIs(s["prs"][0]["first_push_green"], False)
+        # xanh ngay lần đầu; sắp theo giờ tạo, không theo thứ tự đầu vào
+        s = xt.pr_stats([pr], [r("b", 10, "failure"), r("a", 20)], self.NOW, 7)
+        self.assertEqual((s["prs"][0]["first_push_green"], s["prs"][0]["pushes"]), (True, 2))
+        self.assertEqual(s["first_push_green"]["rate"], 1.0)
+        # PR không run, run không head_sha, mọi run huỷ
+        s = xt.pr_stats([pr], [], self.NOW, 7)
+        self.assertEqual(
+            (s["pushes"]["total"], s["first_push_green"], s["pushes"]["median"]),
+            (0, {"green": 0, "of": 0, "rate": None}, 0.0),
+        )
+        self.assertIn("| 0/0 (—) |", xt.pr_stats_table(s))
+        s = xt.pr_stats([pr], [r(None, 5, "cancelled")], self.NOW, 7)
+        self.assertEqual(
+            (s["prs"][0]["pushes"], s["prs"][0]["first_push_green"], s["prs"][0]["cancelled_same_sha"]), (0, None, 0)
+        )
+        s = xt.pr_stats([pr], [r("a", 5, "cancelled"), r("b", 6, "cancelled")], self.NOW, 7, True)
+        self.assertEqual((s["prs"][0]["cancelled_same_sha"], s["runs_truncated"]), (0, True))
+        self.assertIn("⚠ runs_truncated", xt.pr_stats_table(s))
 
     def test_pr_stats_cli_no_merged_pr_skips_runs(self):
         now = xt._dt.datetime.now(xt._dt.timezone.utc)
@@ -2924,7 +3030,7 @@ class PrStatsTest(unittest.TestCase):
             self.assertIn("--days phải ≥ 1", err)
         now = xt._dt.datetime.now(xt._dt.timezone.utc)
         prs, runs = self.corpus(now)
-        for fail in ("/pulls", "/actions/runs"):  # token thiếu quyền (403) ở từng endpoint → lỗi rõ, exit 2
+        for fail in ("/pulls", "/actions/workflows"):  # token thiếu quyền (403) ở từng endpoint → lỗi rõ, exit 2
             _, patch = self.fake_rest(prs, runs, fail=fail)
             with patch:
                 rc, out, err = run_main("pr", "stats")
