@@ -8718,7 +8718,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    return _steward_apply(out, d, repo, cmds if apply else [])
+    return _steward_apply(out, d, repo, cmds if apply else [], str(pr.get("baseRefName") or "main"))
 
 
 def _steward_key(out: Dict[str, Any], repo: str) -> str:
@@ -8747,7 +8747,10 @@ def _steward_stale(out: Dict[str, Any], repo: str) -> str:
     return ""
 
 
-def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]]) -> Dict[str, Any]:
+def _steward_apply(
+    out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]], base: str = "main"
+) -> Dict[str, Any]:
+    """`base` = nhánh đích của PR: merge thành công bằng GITHUB_TOKEN → dispatch CI trên nhánh đó (T-2402)."""
     can_update = _steward_can_update()
     out["key"] = _steward_key(out, repo)
     if out["action"] == "update" and not can_update:
@@ -8764,6 +8767,8 @@ def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List
             return _add_note(out, f"bỏ qua {out['key']} — {stale}")
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
+        if not err and out["action"] == "merge" and not can_update:  # GITHUB_TOKEN: merge không kích `push` của CI
+            _steward_dispatch_ci(out, repo, base)
         # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
         if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update" and can_update:
             up_err = _steward_run([_update_branch_cmd(repo, str(d["pr"]), str(out["head"]))])
@@ -8771,6 +8776,30 @@ def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List
             if up_err:
                 out["error"] = up_err
     return out
+
+
+CI_WORKFLOW = "ci.yml"  # workflow CI của khung và mẫu dự án đích; dự án đích đặt tên khác: biến XT_CI_WORKFLOW
+CI_WORKFLOW_RE = re.compile(r"[\w.-]+\.ya?ml", re.ASCII)
+
+
+def _steward_dispatch_ci(out: Dict[str, Any], repo: str, base: str) -> None:
+    """Sau merge bằng GITHUB_TOKEN (cùng tín hiệu `_steward_can_update` = False: workflow thiếu `XT_STEWARD_TOKEN`):
+    GitHub không chạy workflow `push` cho commit do GITHUB_TOKEN tạo, nhưng cho GITHUB_TOKEN tạo `workflow_dispatch` →
+    gọi CI trên nhánh đích để commit merge có run CI (T-2402). Lỗi không huỷ merge đã vào: ghi `then` + `warn` (summary,
+    job đỏ để người thấy)."""
+    name = os.environ.get("XT_CI_WORKFLOW", "").strip() or CI_WORKFLOW
+    if CI_WORKFLOW_RE.fullmatch(name):
+        cmd = ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/{name}/dispatches", "-f", f"ref={base}"]
+        err = _steward_run([cmd])
+    else:  # kiểm chặt: tên lạ không đi vào đường dẫn API
+        err = f"XT_CI_WORKFLOW={name!r} không phải tên file workflow (*.yml)"
+    out["then"] = "dispatch CI " + (f"✗ {err}" if err else "✓")
+    if err:
+        text = (
+            f"CI không chạy trên `{base}` sau merge ({err}) — job steward cần `actions: write`"
+            " (chạy lại install.py --with-github) hoặc đặt XT_STEWARD_TOKEN; chạy tay: gh workflow run " + name
+        )
+        out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
 
 
 STEWARD_EVENT_KEYS = ("check_suite", "workflow_run")

@@ -2044,6 +2044,8 @@ class PrStewardTest(unittest.TestCase):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        for key in ("GITHUB_ACTIONS", "XT_STEWARD_UPDATE"):  # CI chạy test trong Actions: steward dispatch CI (T-2402)
+            os.environ.pop(key, None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
 
     def test_comment_marks_only_from_trusted_authors(self):
@@ -2246,6 +2248,8 @@ class PrStewardTrustTest(unittest.TestCase):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        for key in ("GITHUB_ACTIONS", "XT_STEWARD_UPDATE"):  # CI chạy test trong Actions: steward dispatch CI (T-2402)
+            os.environ.pop(key, None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
 
     def steward(self, pull: dict, *extra: str) -> tuple[int, str, StewardGh]:
@@ -2341,6 +2345,8 @@ class StewardEventsTest(unittest.TestCase):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        for key in ("GITHUB_ACTIONS", "XT_STEWARD_UPDATE"):  # CI chạy test trong Actions: steward dispatch CI (T-2402)
+            os.environ.pop(key, None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
 
     def event(self, payload: Any, name: str = "event.json") -> str:
@@ -2538,6 +2544,8 @@ class StewardFollowupTest(unittest.TestCase):
         self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         os.environ.pop("GITHUB_STEP_SUMMARY", None)
+        for key in ("GITHUB_ACTIONS", "XT_STEWARD_UPDATE"):  # CI chạy test trong Actions: steward dispatch CI (T-2402)
+            os.environ.pop(key, None)
         commit_base_xt(self.base, "merge_autonomy: L3\n")
         xt._WRITER_CACHE.clear()
         self.addCleanup(xt._WRITER_CACHE.clear)
@@ -2922,3 +2930,149 @@ class PrStatsTest(unittest.TestCase):
                 rc, out, err = run_main("pr", "stats")
             self.assertEqual((rc, out), (2, ""), fail)
             self.assertIn("HTTP 403", err)
+
+
+class StewardDispatchCiTest(unittest.TestCase):
+    """T-2402: steward merge bằng GITHUB_TOKEN (không `XT_STEWARD_TOKEN`) không kích workflow `push` → sau merge thành công
+    gọi `workflow_dispatch` của CI trên nhánh đích (GitHub cho GITHUB_TOKEN tạo `workflow_dispatch`); có token riêng thì
+    `push` đã kích CI → không dispatch (không chạy đôi)."""
+
+    DISPATCH = [
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        "repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches",
+        "-f",
+        "ref=main",
+    ]
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        for key in ("GITHUB_STEP_SUMMARY", "GITHUB_ACTIONS", "XT_STEWARD_UPDATE", "XT_CI_WORKFLOW"):
+            os.environ.pop(key, None)
+        commit_base_xt(self.base, "merge_autonomy: L3\n")
+
+    def github_token(self, **extra: str) -> None:
+        """Như pr-steward.yml khi thiếu secret `XT_STEWARD_TOKEN`: trong Actions, `XT_STEWARD_UPDATE=off`."""
+        os.environ.update({"GITHUB_ACTIONS": "true", "XT_STEWARD_UPDATE": "off", **extra})
+
+    def steward(self, *extra: str, **kw: Any) -> tuple[int, str, StewardGh]:
+        gh = StewardGh(**kw)
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply", *extra)
+        return rc, out, gh
+
+    def test_steward_dispatch_ci_after_merge_without_token(self):
+        self.github_token()
+        rc, out, gh = self.steward()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("#7 merge ✓ → dispatch CI ✓", out)
+        self.assertEqual([w[3] for w in gh.writes], ["PUT", "POST"])  # merge trước, dispatch sau
+        self.assertEqual(gh.writes[1], self.DISPATCH)  # ref = nhánh đích của PR (`base.ref`)
+
+    def test_steward_dispatch_ci_helper_ref_and_workflow_name(self):
+        gh = StewardGh()
+        out: dict = {}
+        with gh.patch():
+            xt._steward_dispatch_ci(out, "repos/o/r", "trunk")
+        self.assertEqual(
+            gh.writes, [["gh", "api", "-X", "POST", "repos/o/r/actions/workflows/ci.yml/dispatches", "-f", "ref=trunk"]]
+        )
+        self.assertEqual(out, {"then": "dispatch CI ✓"})
+        os.environ["XT_CI_WORKFLOW"] = " build.yaml "  # dự án đích đặt tên khác
+        gh = StewardGh()
+        with gh.patch():
+            xt._steward_dispatch_ci(out, "repos/o/r", "main")
+        self.assertEqual(gh.writes[0][4], "repos/o/r/actions/workflows/build.yaml/dispatches")
+        for bad in ("../ci.yml", "ci.yml/x", "ci.json", "ci yml.yml", "cí.yml"):  # kiểm chặt: không dispatch tên lạ
+            with self.subTest(bad):
+                os.environ["XT_CI_WORKFLOW"] = bad
+                gh, out = StewardGh(), {"warn": "trước"}
+                with gh.patch():
+                    xt._steward_dispatch_ci(out, "repos/o/r", "main")
+                self.assertEqual(gh.writes, [])
+                self.assertTrue(out["then"].startswith("dispatch CI ✗"), out)
+                self.assertTrue(out["warn"].startswith("trước; "), out)  # không đè cảnh báo sẵn có
+                self.assertIn("XT_CI_WORKFLOW", out["warn"])
+
+    def test_steward_dispatch_ci_not_with_own_token(self):
+        for env in (
+            {"GITHUB_ACTIONS": "true", "XT_STEWARD_UPDATE": "on"},
+            {},
+        ):  # secret có / chạy cục bộ bằng gh của người
+            with self.subTest(env=env), unittest.mock.patch.dict(os.environ, env):
+                rc, out, gh = self.steward()
+                self.assertEqual(rc, 0, out)
+                self.assertIn("#7 merge ✓ —", out)
+                self.assertEqual([w[3] for w in gh.writes], ["PUT"])
+
+    def test_steward_dispatch_ci_failure_keeps_merge_applied(self):
+        self.github_token()
+        for err in ("HTTP 403: Resource not accessible by integration", "oserror"):
+            with self.subTest(err):
+                rc, out, gh = self.steward("--json", fail={"gh api -X POST": err})
+                (res,) = json.loads(out)
+                self.assertEqual(rc, 1)  # job đỏ để người thấy
+                self.assertTrue(res["applied"])  # merge đã vào — không huỷ kết quả
+                self.assertNotIn("error", res)
+                self.assertTrue(res["then"].startswith("dispatch CI ✗"), res)
+                self.assertIn("CI không chạy trên", res["warn"])
+                self.assertEqual([w[3] for w in gh.writes], ["PUT", "POST"])
+        rc, out, _ = self.steward(fail={"gh api -X POST": "HTTP 403"})
+        self.assertIn("#7 merge ✓ → dispatch CI ✗ HTTP 403 —", out)
+        self.assertIn("⚠ ", out)
+
+    def test_steward_dispatch_ci_not_after_failed_merge(self):
+        self.github_token()
+        rc, out, gh = self.steward(fail={"gh api -X PUT": "HTTP 405 not mergeable"})
+        self.assertEqual(rc, 1)
+        self.assertIn("#7 merge ✗ HTTP 405 not mergeable", out)
+        self.assertEqual([w[3] for w in gh.writes], ["PUT"])
+        # dry-run (không --apply): không ghi gì
+        gh = StewardGh()
+        with gh.patch():
+            run_main("pr", "steward")
+        self.assertEqual(gh.writes, [])
+        # PR đã merge giữa lúc xét và lúc làm (đọc lại): không merge, không dispatch
+        gh = SeqGh([{}, {"merged": True, "state": "closed"}])
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(gh.writes, [])
+
+    def test_steward_dispatch_ci_not_for_other_actions(self):
+        self.github_token()
+        rc, out, gh = self.steward(pull={"mergeable_state": "behind", "auto_merge": {"merge_method": "squash"}})
+        self.assertIn("#7 disable-auto-merge ✓", out)
+        self.assertNotIn("dispatch", out)
+        self.assertEqual(gh.writes, [["gh", "pr", "merge", "7", "--disable-auto"]])
+        for action in ("update", "review", "wait", "fix"):
+            with self.subTest(action), unittest.mock.patch.object(xt, "_steward_dispatch_ci") as m:
+                out = {"pr": 7, "head": "h", "action": action, "why": ""}
+                with (
+                    unittest.mock.patch.object(xt, "_steward_stale", return_value=""),
+                    unittest.mock.patch.object(xt, "_steward_run", return_value=""),
+                ):
+                    xt._steward_apply(out, {}, "repos/o/r", [["gh", "x"]], "main")
+                m.assert_not_called()
+
+    def test_steward_dispatch_ci_workflows(self):
+        for path in (ROOT / ".github/workflows/ci.yml", ROOT / "framework/templates/ci.yml"):
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                text = path.read_text(encoding="utf-8")
+                on = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+                self.assertRegex(on, r"(?m)^  workflow_dispatch:( \{\})?$")  # không input
+                self.assertNotIn("inputs:", on)
+                self.assertIn("github.head_ref || github.run_id", text)  # dispatch: nhóm run_id riêng, không bị huỷ
+                self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", text)
+                self.assertNotRegex(text, r"if:[^\n]*github\.event_name")  # job/bước không lọc theo sự kiện
+                self.assertEqual(xt.ci_check_text(text), [])
+        steward = (ROOT / ".github/workflows/pr-steward.yml").read_text(encoding="utf-8")
+        job = steward.split("\njobs:\n", 1)[1]
+        perms = job.split("    permissions:\n", 1)[1].split("    steps:", 1)[0]
+        self.assertRegex(perms, r"(?m)^      actions: write # \S")  # job-level, kèm lý do
+        top = steward.split("\npermissions:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(top, "  contents: read")  # không nâng quyền mức workflow
+        self.assertIn("XT_STEWARD_UPDATE: ${{ secrets.XT_STEWARD_TOKEN != '' && 'on' || 'off' }}", steward)
+        self.assertIn("workflow_dispatch", steward.split("\non:\n", 1)[0])  # chú thích đầu file nói hành vi mới

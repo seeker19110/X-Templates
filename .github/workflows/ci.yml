@@ -8,6 +8,9 @@ on:
     # Không `edited`: sửa tiêu đề/thân PR không đổi SHA nhưng chạy lại cả CI nặng rồi `concurrency` huỷ run cũ (T-2401);
     # kiểm tiêu đề PR nằm ở `pr-title.yml` (nghe `edited`, vài giây).
     types: [opened, synchronize, reopened]
+  # pr-steward merge bằng GITHUB_TOKEN (thiếu XT_STEWARD_TOKEN) không kích `push` → steward gọi dispatch trên nhánh đích
+  # (T-2402). Run dispatch trên `main` chạy đủ job như `push` (không job nào lọc theo sự kiện); nhóm concurrency = run_id.
+  workflow_dispatch:
 
 # Mặc định tối thiểu cho MỌI job (GITHUB_TOKEN chỉ đọc). Job nào cần hơn tự khai ở job-level.
 permissions:
