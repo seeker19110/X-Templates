@@ -33,6 +33,13 @@ nhưng GitHub không chạy workflow `push` cho commit đó — steward bù bằ
 (GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402) — và không có token thì steward không cập
 nhật nhánh tụt.
 
+Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` 2026-10-23, D-144): required
+check `quality`, `protection-guard`, `gitleaks`, `dep-audit`; **"up to date" bật** (`strict: true`, khớp
+`.github/rulesets/main.json`) → PR tụt sau `main` phải `update` trước khi merge, nên thiếu `XT_STEWARD_TOKEN` thì PR tụt
+kẹt ở "chỉ báo" (cập nhật tay hoặc đặt token). Lệch file: ruleset sống **tắt** "Require conversation resolution"
+(`required_review_thread_resolution: false`, file `true` — `WF-GIT-002`) và repo **bật** "Allow auto-merge" — chủ repo
+bật/tắt lại ở Settings; file giữ chuẩn, không chép theo bản nới.
+
 ## 2. Triệu chứng và chẩn đoán
 
 Chẩn đoán chỉ đọc (không `--apply`), từ máy dev có `gh` đã đăng nhập:
