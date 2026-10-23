@@ -10,7 +10,7 @@ updated: 2026-10-21
 > cổng nào dùng) rồi phần mẫu trong một khối ```` ```markdown ```` để chép nguyên vào dự án và điền chỗ `<...>`.
 > Không có gì để điền thì ghi "không áp dụng — lý do", không xoá mục. Bốn file `AGENTS.md`, `CLAUDE.md`, `PROGRESS.md`, `xt.yaml` là
 > mẫu harness do `scripts/install.py` copy vào dự án đích (copy-if-absent), có chỗ `[ĐIỀN]` thay vì `<...>`; `PULL-REQUEST.md`,
-> `dependabot.yml`, `ci.yml`, `secret-scan.yml`, `ruleset-main.json` là mẫu `.github/` do `install.py --with-github` copy.
+> `dependabot.yml`, `ci.yml`, `secret-scan.yml`, `pr-title.yml`, `ruleset-main.json` là mẫu `.github/` do `install.py --with-github` copy.
 
 | File | Dùng cho | Giai đoạn · cổng |
 |---|---|---|
@@ -36,5 +36,5 @@ updated: 2026-10-21
 | [`dependabot.yml`](dependabot.yml) | `.github/dependabot.yml` của dự án đích — chỉ hệ `github-actions` (thêm hệ theo manifest thật), gom nhóm, cooldown 14 ngày; `install.py --with-github` copy-if-absent | G5 · `BASE-DEP-007` |
 | [`ci.yml`](ci.yml) | `.github/workflows/ci.yml` của dự án đích — không phụ thuộc stack, tối thiểu số job, song song tối đa trong job (ADR-0039, D-127, D-128): `gate` (`dev-task.sh gate-par`: typecheck ∥ lint ∥ build → test, rồi doctor · ci-check) · `e2e` (matrix 1 shard, tăng khi đo chậm) · `quality` gom + bước protection-guard; `gate` và `e2e` chạy cùng lúc; `install.py --with-github` copy-if-absent | G5 · `WF-CI-001`, `WF-CI-024`, `WF-CI-025` |
 | [`secret-scan.yml`](secret-scan.yml) | `.github/workflows/secret-scan.yml` của dự án đích — job `gitleaks` (required check của ruleset mẫu), quét toàn lịch sử; `install.py --with-github` copy-if-absent | G5 · `WF-CI-001`, `BASE-SEC-002` |
-| [`pr-title.yml`](pr-title.yml) | `.github/workflows/pr-title.yml` của dự án đích — kiểm tiêu đề PR Conventional Commits ≤ 72 ký tự, nghe `edited` (T-2401: `ci.yml` không còn nghe `edited`); miễn `pr_title_check: off`/bot/Revert; không phải required check |
+| [`pr-title.yml`](pr-title.yml) | `.github/workflows/pr-title.yml` của dự án đích — kiểm tiêu đề PR Conventional Commits ≤ 72 ký tự, nghe `edited` (T-2401: `ci.yml` không còn nghe `edited`); miễn `pr_title_check: off`/bot/Revert; không phải required check (`merge-check` vẫn chặn tiêu đề sai) | G5 · `WF-GIT-004` |
 | [`xt.yaml`](xt.yaml) | `xt.yaml` — lệnh chuẩn của dự án cho hook và agent; YAML phẳng, không suy diễn từ văn xuôi. `dev-task.sh` chỉ chạy `format · lint · typecheck · test · build · format_file` (`gate` = build→typecheck→lint→test) và `format_check · test_fast` (`gate-fast`, cổng commit khi `commit_gate: fast`); CI mẫu gọi thêm `e2e`/`e2e_setup` (`dev-task.sh e2e`); khoá khác (`install`, `dev`, `migrate`, `init`, `smoke`, `audit`…) agent đọc và chạy trực tiếp | G5 · `dev-task.sh gate`; `LOOP-HARNESS-008` |

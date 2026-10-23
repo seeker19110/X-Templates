@@ -3180,3 +3180,12 @@ class CiBlockerLatestRunTest(unittest.TestCase):
             self.blocker(self.HEAD_208, [{"context": "gitleaks", "state": "pending"}]),
             ("wait", ["CI đang chạy: gitleaks"]),
         )
+        # rollup GraphQL không có appId: khác workflow cùng tên job là check khác — bản xanh của CI không che bản đỏ/
+        # đang chạy của workflow khác (review T-2404)
+        run = {"__typename": "CheckRun", "workflowName": "Other", "name": "test", "status": "IN_PROGRESS"}
+        red = {**run, "status": "COMPLETED", "conclusion": "FAILURE"}
+        green = {"__typename": "CheckRun", "workflowName": "CI", "name": "test", "status": "COMPLETED"}
+        green.update(conclusion="SUCCESS", startedAt="2026-10-21T15:58:00Z")
+        for old, verdict in ((run, "wait"), (red, "fix")):
+            old = {**old, "startedAt": "2026-10-21T15:50:00Z"}
+            self.assertEqual(xt._ci_blocker({"statusCheckRollup": [old, green]})[0], verdict)

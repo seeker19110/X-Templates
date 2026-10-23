@@ -65,7 +65,7 @@ LEGACY_YAML = "xs.yaml"
 LEGACY_RE = re.compile(r"\.xstored\b|\bxs\.(?:py|yaml)\b|\bXS_[A-Z]")
 # --with-github: hàng rào GitHub mẫu (copy-if-absent), đích → nguồn trong khung. Mọi workflow ở đây KHÔNG phụ thuộc stack
 # (AUD-CI-003): `ci.yml` mẫu chạy lệnh của xt.yaml qua `.xtemplates/scripts/dev-task.sh` (3 job `gate` · `e2e` · `quality`
-# tổng hợp, ADR-0039, WF-CI-025), `secret-scan.yml` (`gitleaks`) và `pr-steward.yml` (ADR-0027) chỉ cần python3 + gh. Ruleset
+# tổng hợp, ADR-0039, WF-CI-025), `secret-scan.yml` (`gitleaks`), `pr-title.yml` (tiêu đề PR) và `pr-steward.yml` (ADR-0027) chỉ cần python3 + gh. Ruleset
 # mẫu (D-116, D-117, D-122) chỉ đòi `quality` · `gitleaks` và không đòi "up to date" (PR merge song song); `protection-guard`
 # là bước của `quality`, `dep-audit` (theo ngôn ngữ, dự án viết) là bước của `gate`. `merge-gate.yml` là STUB TẠM (D-122, ADR-0036):
 # job `merge-gate` luôn xanh, chỉ giữ context cũ còn trong ruleset sống của dự án — vẫn phát để bản cũ (gọi lệnh

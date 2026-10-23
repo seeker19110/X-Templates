@@ -4612,16 +4612,18 @@ def _check_rank(started: Any, cid: Any) -> CheckRank:
 
 
 def _latest_checks(rollup: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Nhiều bản cùng (loại, app, tên) trên cùng head → chỉ giữ bản xếp hạng cao nhất (`_check_rank`); hoà (không có
-    thời điểm/id để xếp) → giữ cả, như trước. Khác app hoặc khác nguồn (check-run/commit status) là check khác (AUD-CODE-007)."""
+    """Nhiều bản cùng (loại, app, workflow, tên) trên cùng head → chỉ giữ bản xếp hạng cao nhất (`_check_rank`); hoà
+    (không có thời điểm/id để xếp) → giữ cả, như trước. Khác app, khác workflow (rollup GraphQL không có `appId`) hoặc
+    khác nguồn (check-run/commit status) là check khác (AUD-CODE-007)."""
 
-    def key(c: Dict[str, Any]) -> Tuple[str, str, str]:
-        return (str(c.get("__typename")), str(c.get("appId")), str(c.get("name") or c.get("context")))
+    def key(c: Dict[str, Any]) -> Tuple[str, str, str, str]:
+        name = str(c.get("name") or c.get("context"))
+        return (str(c.get("__typename")), str(c.get("appId")), str(c.get("workflowName")), name)
 
     def rank(c: Dict[str, Any]) -> CheckRank:
         return _check_rank(c.get("startedAt"), c.get("databaseId"))
 
-    best: Dict[Tuple[str, str, str], CheckRank] = {}
+    best: Dict[Tuple[str, str, str, str], CheckRank] = {}
     for c in rollup:
         best[key(c)] = max(best.get(key(c), rank(c)), rank(c))
     return [c for c in rollup if rank(c) == best[key(c)]]
@@ -4787,7 +4789,7 @@ def _pr_title_suggest(title: str) -> str:
 
 
 def pr_title_problems(title: str) -> List[str]:
-    """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật bước CI `checks` và `merge-check` (D-056): Conventional Commits
+    """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật workflow `pr-title` và `merge-check` (D-056): Conventional Commits
     (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự. Rỗng = hợp lệ."""
     out: List[str] = []
     if len(title) > PR_TITLE_MAX:
@@ -4825,7 +4827,7 @@ def cmd_pr_title_check(args: argparse.Namespace) -> int:
     if not problems:
         print(f"✓ tiêu đề PR hợp lệ ({len(title)}/{PR_TITLE_MAX} ký tự): {title}")
         return 0
-    print(f"✗ tiêu đề PR sai luật CI `checks`/merge-check (D-056): {title[:100]!r}", file=sys.stderr)
+    print(f"✗ tiêu đề PR sai luật CI `pr-title`/merge-check (D-056): {title[:100]!r}", file=sys.stderr)
     for p in problems:
         print(f"  → {p}", file=sys.stderr)
     return 1
@@ -10352,7 +10354,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ptc = prsub.add_parser(
         "title-check",
-        help="tiêu đề PR đúng luật CI `checks`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
+        help="tiêu đề PR đúng luật CI `pr-title`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
     )
     ptc.add_argument("title", nargs="?", help="tiêu đề định đặt (mặc định tiêu đề PR mở của nhánh hiện tại)")
     pss = prsub.add_parser(
