@@ -1,7 +1,7 @@
 ---
 title: Quy ước viết module của khung
 kind: method
-updated: 2026-10-20
+updated: 2026-10-23
 ---
 
 # Quy ước viết module của khung
@@ -73,7 +73,7 @@ Trạng thái trong **blueprint của dự án** (file sinh ra, không phải tr
 ## Checklist             ← 🔒 bắt buộc có (trừ khi file không có mục)
 ## Bẫy thường gặp        ← anti-pattern, lỗi hay gặp, ca biên
 ## Cổng tự động          ← công cụ/lệnh kiểm bằng máy, đặt ở CI hay hook
-## Nguồn                 ← 🔒 bắt buộc: URL chính thống + ngày xác minh
+## Nguồn                 ← 🔒 bắt buộc: URL chính thống + ngày xác minh (máy kiểm: `xt.py validate`)
 ```
 
 Thứ tự giữ như trên; được thêm mục riêng giữa "Quyết định" và "Checklist".

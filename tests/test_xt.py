@@ -94,7 +94,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - x
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     write(
@@ -120,7 +120,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - y
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     write(
@@ -142,7 +142,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - z
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     write(
@@ -165,7 +165,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - w
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     write(
@@ -183,7 +183,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - c
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     write(
@@ -206,7 +206,7 @@ def make_framework(tmp: Path) -> Path:
 
         ## Nguồn
 
-        - f
+        - https://example.org/s — xác minh 2026-10-23
         """,
     )
     return fw
@@ -235,6 +235,37 @@ class ValidateTest(unittest.TestCase):
         self.fw = make_framework(self.tmp)
 
     def test_valid_fixture(self):
+        self.assertEqual(xt.validate(self.fw), [])
+
+    def _sources_errors(self, sources: str) -> list:
+        p = self.fw / "08-backend" / "api.md"
+        text = p.read_text(encoding="utf-8")
+        p.write_text(text[: text.index("## Nguồn")] + "## Nguồn\n\n" + sources + "\n", encoding="utf-8")
+        return [e for e in xt.validate(self.fw) if "## Nguồn" in e]
+
+    def test_sources_section_missing_url_fails(self):
+        errs = self._sources_errors("- RFC 9457, xác minh 2026-10-23")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("api.md", errs[0])
+        self.assertIn("URL", errs[0])
+
+    def test_sources_section_missing_date_fails(self):
+        errs = self._sources_errors("- https://www.rfc-editor.org/rfc/rfc9457")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("ngày", errs[0])
+
+    def test_sources_section_empty_fails_both(self):
+        self.assertEqual(len(self._sources_errors("")), 2)
+
+    def test_sources_section_unverified_passes(self):
+        self.assertEqual(self._sources_errors("- RFC 9457 (chưa xác minh)"), [])
+
+    def test_sources_section_complete_passes(self):
+        self.assertEqual(self._sources_errors("- https://www.rfc-editor.org/rfc/rfc9457 — xác minh 2026-10-23"), [])
+
+    def test_sources_section_other_kinds_not_checked(self):
+        p = self.fw / "01-baseline" / "README.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n## Nguồn\n\n- x\n", encoding="utf-8")
         self.assertEqual(xt.validate(self.fw), [])
 
     def test_fenced_items_ignored(self):
@@ -391,7 +422,7 @@ class ComposeTest(unittest.TestCase):
 
             ## Nguồn
 
-            - w
+            - https://example.org/s — xác minh 2026-10-23
             """,
         )
         p = self.fw / "02-profiles" / "cli-tool.md"
@@ -1765,7 +1796,7 @@ updated: 2026-10-20
 
 ## Nguồn
 
-- z
+- https://example.org/s — xác minh 2026-10-23
 """
 
 

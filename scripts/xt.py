@@ -480,6 +480,31 @@ def _check_sections(d: Doc, where: str) -> List[str]:
         errors.append(f"{where}: thiếu mục '## Checklist'")
     if not any(h.strip().startswith("Nguồn") for h in d.headings):
         errors.append(f"{where}: thiếu mục '## Nguồn'")
+    else:
+        errors += _check_sources_section(d, where)
+    return errors
+
+
+SOURCES_RE = re.compile(r"^## Nguồn[^\n]*\n(.*?)(?=^## |\Z)", re.S | re.M)
+SOURCES_URL_RE = re.compile(r"https://\S")
+SOURCES_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+SOURCES_UNVERIFIED = "(chưa xác minh)"
+
+
+def _check_sources_section(d: Doc, where: str) -> List[str]:
+    """Mục `## Nguồn` có ≥ 1 URL `https://` và một ngày `YYYY-MM-DD`, hoặc ghi `(chưa xác minh)`."""
+    text = "".join(SOURCES_RE.findall(d.body))
+    if SOURCES_UNVERIFIED in text:
+        return []
+    errors: List[str] = []
+    if not SOURCES_URL_RE.search(text):
+        errors.append(
+            f"{where}: mục '## Nguồn' thiếu URL https:// — thêm URL chính thống hoặc ghi '{SOURCES_UNVERIFIED}'"
+        )
+    if not SOURCES_DATE_RE.search(text):
+        errors.append(
+            f"{where}: mục '## Nguồn' thiếu ngày xác minh YYYY-MM-DD — thêm 'xác minh YYYY-MM-DD' hoặc ghi '{SOURCES_UNVERIFIED}'"
+        )
     return errors
 
 
