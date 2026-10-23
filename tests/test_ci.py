@@ -215,7 +215,6 @@ class GateFanOutTest(unittest.TestCase):
             "xt.py autonomy-bench",
             "xt.py compose --profile",
             "## Dùng cho một dự án",
-            "if: github.event_name == 'pull_request'",
             "(đang viết)",
         ):
             with self.subTest(marker=marker):

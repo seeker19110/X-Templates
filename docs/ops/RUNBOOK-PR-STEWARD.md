@@ -11,7 +11,7 @@ với mỗi PR chạy cùng luật với `pr next`, rồi tự làm đúng các 
 
 | Hành động (`pr next`) | Steward làm |
 |---|---|
-| `merge` | `PUT pulls/<N>/merge` squash, ghim `sha=<head>` — chỉ khi `merge-check` = `merge` ở đúng head đó (kể cả PR người đã bật auto-merge: merge ghim head ngay) |
+| `merge` | `PUT pulls/<N>/merge` squash, ghim `sha=<head>` — chỉ khi `merge-check` = `merge` ở đúng head đó (kể cả PR người đã bật auto-merge: merge ghim head ngay). Thiếu `XT_STEWARD_TOKEN`: merge xong thì `POST actions/workflows/ci.yml/dispatches` trên nhánh đích (`→ dispatch CI ✓`; tên khác: biến `XT_CI_WORKFLOW`) |
 | `disable-auto-merge` | `gh pr merge --disable-auto` — auto-merge do người bật trên PR chưa đủ điều kiện (dọn dẹp, không để GitHub merge head chưa đánh giá) |
 | `update` | `PUT pulls/<N>/update-branch` ghim `expected_head_sha` — **chỉ khi có secret `XT_STEWARD_TOKEN`** |
 | `review`, `fix`, `retarget`, `defer-human`, `wait` | chỉ ghi vào bản tóm tắt (Step Summary), không làm gì |
@@ -29,8 +29,16 @@ mỗi hành động, nên sự kiện lặp/sai thứ tự không lặp tác d�
 
 Điều kiện cần: **không** cần "Allow auto-merge" — nên **tắt** ở Settings → General để không ai bật nhầm. Nên đặt secret
 `XT_STEWARD_TOKEN` (fine-grained PAT hoặc GitHub App: contents + pull requests: write): merge bằng `GITHUB_TOKEN` vẫn vào
-nhưng GitHub không chạy workflow `push` cho commit đó (CI không chạy lại trên nhánh chính sau merge — trước D-122 việc này
-do auto-merge của GitHub kích), và không có token thì steward không cập nhật nhánh tụt.
+nhưng GitHub không chạy workflow `push` cho commit đó — steward bù bằng `workflow_dispatch` của `ci.yml` trên nhánh đích
+(GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402) — và không có token thì steward không cập
+nhật nhánh tụt.
+
+Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` 2026-10-23, D-144): required
+check `quality`, `protection-guard`, `gitleaks`, `dep-audit`; **"up to date" bật** (`strict: true`, khớp
+`.github/rulesets/main.json`) → PR tụt sau `main` phải `update` trước khi merge, nên thiếu `XT_STEWARD_TOKEN` thì PR tụt
+kẹt ở "chỉ báo" (cập nhật tay hoặc đặt token). Lệch file: ruleset sống **tắt** "Require conversation resolution"
+(`required_review_thread_resolution: false`, file `true` — `WF-GIT-002`) và repo **bật** "Allow auto-merge" — chủ repo
+bật/tắt lại ở Settings; file giữ chuẩn, không chép theo bản nới.
 
 ## 2. Triệu chứng và chẩn đoán
 
@@ -51,12 +59,12 @@ Summary của run `pr-steward` (mục `## pr-steward`, mỗi PR một dòng).
 | PR treo, không ai merge | `action` = `review` (chưa có dấu review sạch ở đúng head), `fix`, `wait` (CI chưa xanh), hoặc `defer-human` (fork/tác giả không quyền ghi, ngoại lệ cứng) | Đọc `why` của `pr next`; làm đúng `do`. Review xong: `xt.py pr reviewed --pr <N> --head <H> --clean ...` (đăng lên PR; steward kích bằng `issue_comment`) |
 | Auto-merge người bật bị tắt | Đúng thiết kế (D-122): PR chưa đủ điều kiện ở head hiện tại → `disable-auto-merge` | Không bật lại; steward/`pr next` merge ghim head khi đủ điều kiện. Tắt "Allow auto-merge" ở Settings → General |
 | PR đủ điều kiện mà chưa merge | CI chưa xong (`wait`); PR có nhãn `risk:`; push mới đổi head sau review; `merge_autonomy` L1/L2 (làn chuẩn ở L2 là người merge); lệnh `gh` lỗi (thiếu quyền token) | `pr next` cho `why`; review lại ở head mới; sửa quyền token |
-| CI không chạy trên nhánh chính sau merge | Steward merge bằng `GITHUB_TOKEN` (thiếu `XT_STEWARD_TOKEN`) — GitHub không kích workflow `push` | Đặt secret `XT_STEWARD_TOKEN`; tới lúc đó lỗi kết hợp hai PR chỉ lộ ở CI của PR kế tiếp |
+| CI không chạy trên nhánh chính sau merge | Steward merge bằng `GITHUB_TOKEN` (thiếu `XT_STEWARD_TOKEN`) và dispatch CI lỗi: summary có `→ dispatch CI ✗ …` + `warn` (job đỏ) — thường thiếu `actions: write` (pr-steward.yml cũ), `ci.yml` thiếu `workflow_dispatch`, hoặc file CI tên khác | Chạy lại `install.py --with-github` (dự án đích); tên file CI khác: đặt biến `XT_CI_WORKFLOW`; chạy tay `gh workflow run ci.yml --ref main`; hoặc đặt secret `XT_STEWARD_TOKEN` (merge kích `push`) |
 | PR tụt sau nhánh đích, không tự cập nhật | Chưa đặt `XT_STEWARD_TOKEN` (`XT_STEWARD_UPDATE=off`): commit cập nhật bằng `GITHUB_TOKEN` không kích CI nên PR kẹt chờ check; `why` ghi "đặt XT_STEWARD_TOKEN" | Đặt secret `XT_STEWARD_TOKEN`, hoặc cập nhật nhánh tay (`gh pr update-branch <N>`) |
 | Run steward đỏ nhưng PR không bị gì | `warn` không gắn được nhãn `xt-standard-lane` (thiếu `issues: write`) hoặc `error` không đọc lại được PR | Xem Step Summary; lượt sau tự thử lại |
 | Không thấy steward chạy | Workflow bị disable; cron GitHub bị tắt sau 60 ngày repo không hoạt động; `issue_comment` bị lọc (không phải dấu review của người có quyền ghi) | `gh workflow list`; chạy tay `gh workflow run pr-steward.yml` |
 | Merge nhầm | PR đủ điều kiện máy nhưng nội dung sai | Revert commit squash qua PR mới; siết nhãn `risk:`/`merge_hard_exceptions`; ghi nguyên nhân (D-NNN nếu đổi luật) |
-| Token lộ/hết hạn | `XT_STEWARD_TOKEN` | Thu hồi token ở GitHub, tạo mới, cập nhật secret (không dán giá trị vào log/commit). Hết hạn: mất cập nhật nhánh và CI trên nhánh chính sau merge, các việc khác vẫn chạy bằng `GITHUB_TOKEN` |
+| Token lộ/hết hạn | `XT_STEWARD_TOKEN` | Thu hồi token ở GitHub, tạo mới, cập nhật secret (không dán giá trị vào log/commit). Chưa có token mới thì xoá secret: steward chạy bằng `GITHUB_TOKEN` — mất cập nhật nhánh, CI trên nhánh chính sau merge chạy nhờ `workflow_dispatch`, các việc khác như cũ |
 
 Bí mật: chỉ `XT_STEWARD_TOKEN` (Settings → Secrets and variables → Actions) và biến `XT_REVIEW_IDENTITY` (tuỳ chọn);
 giá trị không nằm trong repo. Liên hệ trực: chủ repo (sự cố bảo mật: `SECURITY.md`).

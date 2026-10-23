@@ -26,6 +26,7 @@ from test_ci import ci_jobs, flow_list, job_key, matrix_shards
 TEMPLATES = ROOT / "framework" / "templates"
 CI = TEMPLATES / "ci.yml"
 SCAN = TEMPLATES / "secret-scan.yml"
+PR_TITLE = TEMPLATES / "pr-title.yml"
 DEV_TASK = "bash .xtemplates/scripts/dev-task.sh"  # đường dẫn ở dự án đích (install.py chép scripts vào .xtemplates/)
 SETUP = f"run: {DEV_TASK} setup\n"
 # Dòng YAML khối đơn giản mà mẫu dùng: comment, `khoá:`/`khoá: giá trị`, `- khoá: giá trị`, `- giá trị`.
@@ -106,7 +107,7 @@ class CiTemplateTest(unittest.TestCase):
 
     def test_gate_job_runs_gate_and_framework_checks_in_order(self):
         """`gate`: require (đỏ sớm, D-096) → setup → `dev-task.sh gate-par` (song song trong job, D-128) → sàn M/L `floor --run`
-        → doctor → ci-check → tiêu đề PR."""
+        → doctor → ci-check (tiêu đề PR đã chuyển sang `pr-title.yml`, T-2401)."""
         body = self.jobs["gate"]
         order = [
             body.index("actions/checkout@"),
@@ -116,7 +117,6 @@ class CiTemplateTest(unittest.TestCase):
             step_index(body, "python3 .xtemplates/scripts/xt.py floor --run --skip e2e"),  # AUD-XFEAT-020
             step_index(body, "python3 .xtemplates/scripts/xt.py doctor"),
             step_index(body, "python3 .xtemplates/scripts/xt.py ci-check"),
-            body.index("TITLE: ${{ github.event.pull_request.title }}"),
         ]
         self.assertEqual(order, sorted(order))
         self.assertIn("fetch-depth: 0", body)  # doctor: SHA bàn giao là tổ tiên HEAD
@@ -129,11 +129,13 @@ class CiTemplateTest(unittest.TestCase):
         self.assertNotRegex(code, r"\b(npm|pip|pytest|go test|cargo|ruff|setup-(node|python|go))\b")  # không theo stack
 
     def test_pr_title_step(self):
-        body = self.jobs["gate"]
-        self.assertIn("if: github.event_name == 'pull_request'", body)
+        self.assertNotIn("pull_request.title", self.text)  # không còn ở CI nặng (T-2401)
+        text = PR_TITLE.read_text(encoding="utf-8")
+        body = ci_jobs(text)["title"]
         self.assertIn("TITLE: ${{ github.event.pull_request.title }}", body)  # qua env, không chèn thẳng vào shell
         self.assertNotIn('${{ github.event.pull_request.title }}"', body)
         self.assertIn("pr_title_check", body)
+        self.assertIn("persist-credentials: false", body)
         script = step_run(body, "Tiêu đề PR")
         for title, author, rc in (
             ("feat(ci): gộp job ngắn vào gate", "dev", 0),
@@ -224,7 +226,7 @@ class CiTemplateTest(unittest.TestCase):
         self.assertEqual(job_key(ci_jobs(SCAN.read_text(encoding="utf-8"))["gitleaks"], "name"), "gitleaks")
 
     def test_templates_pass_ci_check_and_are_block_yaml(self):
-        for path in (CI, SCAN):
+        for path in (CI, SCAN, PR_TITLE):
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=path.name):
                 self.assertEqual(xt.ci_check_text(text), [])
@@ -241,7 +243,26 @@ class CiTemplateTest(unittest.TestCase):
                         block = indent
                 self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n")
         self.assertIn("\non:\n  push: { branches: [main] }\n", self.text)
-        self.assertRegex(self.text, r"(?m)^  pull_request: \{ branches: \[main\], types: \[.*\bedited\b.*\] \}$")
+        self.assertRegex(
+            self.text, r"(?m)^  pull_request: \{ branches: \[main\], types: \[opened, synchronize, reopened\] \}$"
+        )
+
+    def test_ci_no_edited_trigger(self):
+        """T-2401: sửa tiêu đề/thân PR (`edited`) không chạy lại CI nặng cùng SHA; workflow tiêu đề riêng nghe `edited`."""
+        ci_types = [CI, ROOT / ".github" / "workflows" / "ci.yml"]
+        for path in ci_types:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertNotRegex(path.read_text(encoding="utf-8"), r"types:\s*\[[^\]]*\bedited\b")
+        for path in (PR_TITLE, ROOT / ".github" / "workflows" / "pr-title.yml"):
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertRegex(text, r"types:\s*\[opened, edited, synchronize, reopened\]")
+                self.assertRegex(text, r'\[ "\$\{#TITLE\}" -(le|gt) 72 \]')
+                self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n")
+                self.assertIn("cancel-in-progress: true", text)
+                self.assertIn("github.event.pull_request.number", text)
+                self.assertEqual(xt.ci_check_text(text), [])
+        self.assertNotIn("pull_request.title", (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")

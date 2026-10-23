@@ -5,8 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # `edited`: sửa tiêu đề PR thì chạy lại bước kiểm tiêu đề (payload chụp tiêu đề lúc sự kiện; re-run dùng payload cũ).
-    types: [opened, synchronize, reopened, edited]
+    # Không `edited`: sửa tiêu đề/thân PR không đổi SHA nhưng chạy lại cả CI nặng rồi `concurrency` huỷ run cũ (T-2401);
+    # kiểm tiêu đề PR nằm ở `pr-title.yml` (nghe `edited`, vài giây).
+    types: [opened, synchronize, reopened]
+  # pr-steward merge bằng GITHUB_TOKEN (thiếu XT_STEWARD_TOKEN) không kích `push` → steward gọi dispatch trên nhánh đích
+  # (T-2402). Run dispatch trên `main` chạy đủ job như `push` (không job nào lọc theo sự kiện); nhóm concurrency = run_id.
+  workflow_dispatch:
 
 # Mặc định tối thiểu cho MỌI job (GITHUB_TOKEN chỉ đọc). Job nào cần hơn tự khai ở job-level.
 permissions:
@@ -230,14 +234,6 @@ jobs:
           bash -euo pipefail "$RUNNER_TEMP/readme.sh"
           test -f "$d/AGENTS.md" && test -f "$d/.claude/settings.json" && test -f "$d/.github/rulesets/main.json"
           echo "OK — lệnh README chạy được"
-
-      - name: Tiêu đề PR theo Conventional Commits, ≤ 72 ký tự (thành tiêu đề squash)
-        if: github.event_name == 'pull_request'
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          printf '%s' "$TITLE" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+$' \
-            && [ "${#TITLE}" -le 72 ] || { echo "::error::Tiêu đề PR phải dạng '<type>(scope): mô tả' và ≤ 72 ký tự: $TITLE"; exit 1; }
 
       - name: Không còn "(đang viết)" / placeholder trong khung
         run: |

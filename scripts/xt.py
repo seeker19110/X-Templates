@@ -4600,6 +4600,35 @@ CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUES
 NOT_RUN_STATES = {"SKIPPED", "NEUTRAL", "CANCELLED", "STALE"}  # GitHub coi required check skipped/neutral là "đạt"
 
 
+CheckRank = Tuple[int, str, int]
+
+
+def _check_rank(started: Any, cid: Any) -> CheckRank:
+    """Thứ hạng "mới nhất" của một bản check (T-2404): thời điểm bắt đầu trước, id sau. Id không đủ: suite cũ còn treo
+    `queued` có thể mang id lớn hơn bản đã chạy xong, và rollup GraphQL (`--pr-json`) không có id. Thiếu thời điểm (vừa
+    xếp hàng, chưa bắt đầu) = mới nhất — chiều chặt: không để bản xanh cũ che lần chạy lại."""
+    has = isinstance(started, str) and bool(started)
+    return (0 if has else 1, started if has else "", cid if type(cid) is int else -1)
+
+
+def _latest_checks(rollup: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Nhiều bản cùng (loại, app, workflow, tên) trên cùng head → chỉ giữ bản xếp hạng cao nhất (`_check_rank`); hoà
+    (không có thời điểm/id để xếp) → giữ cả, như trước. Khác app, khác workflow (rollup GraphQL không có `appId`) hoặc
+    khác nguồn (check-run/commit status) là check khác (AUD-CODE-007)."""
+
+    def key(c: Dict[str, Any]) -> Tuple[str, str, str, str]:
+        name = str(c.get("name") or c.get("context"))
+        return (str(c.get("__typename")), str(c.get("appId")), str(c.get("workflowName")), name)
+
+    def rank(c: Dict[str, Any]) -> CheckRank:
+        return _check_rank(c.get("startedAt"), c.get("databaseId"))
+
+    best: Dict[Tuple[str, str, str, str], CheckRank] = {}
+    for c in rollup:
+        best[key(c)] = max(best.get(key(c), rank(c)), rank(c))
+    return [c for c in rollup if rank(c) == best[key(c)]]
+
+
 def _ci_buckets(
     rollup: List[Dict[str, Any]], required: Sequence[Tuple[str, Optional[int]]] = ()
 ) -> Tuple[List[str], List[str], List[str], List[str]]:
@@ -4609,6 +4638,7 @@ def _ci_buckets(
     nên PR "xanh" mà chưa test nào chạy; check bắt buộc SKIPPED/NEUTRAL/CANCELLED/STALE, hoặc chỉ có bản của app khác
     (`appId` ≠ integration_id) → `not_run` (không đỏ, không xanh). Check bắt buộc vắng hẳn là việc của `missingRequired`."""
     want = {name: app for name, app in required}
+    rollup = _latest_checks(rollup)
     red: List[str] = []
     pending: List[str] = []
     green: List[str] = []
@@ -4759,7 +4789,7 @@ def _pr_title_suggest(title: str) -> str:
 
 
 def pr_title_problems(title: str) -> List[str]:
-    """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật bước CI `checks` và `merge-check` (D-056): Conventional Commits
+    """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật workflow `pr-title` và `merge-check` (D-056): Conventional Commits
     (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự. Rỗng = hợp lệ."""
     out: List[str] = []
     if len(title) > PR_TITLE_MAX:
@@ -4797,7 +4827,7 @@ def cmd_pr_title_check(args: argparse.Namespace) -> int:
     if not problems:
         print(f"✓ tiêu đề PR hợp lệ ({len(title)}/{PR_TITLE_MAX} ký tự): {title}")
         return 0
-    print(f"✗ tiêu đề PR sai luật CI `checks`/merge-check (D-056): {title[:100]!r}", file=sys.stderr)
+    print(f"✗ tiêu đề PR sai luật CI `pr-title`/merge-check (D-056): {title[:100]!r}", file=sys.stderr)
     for p in problems:
         print(f"  → {p}", file=sys.stderr)
     return 1
@@ -5477,13 +5507,16 @@ def local_merge_conflicts(
 def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """`statusCheckRollup` dạng GraphQL từ check-run + status REST của head, hàm thuần.
     Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên, cùng app: chỉ lần mới nhất
-    (id lớn nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58, AUD-HAR-038). Khoá gồm app: check
+    (bắt đầu muộn nhất, rồi id lớn nhất — `_check_rank`, T-2404) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần
+    mới xanh (#58, AUD-HAR-038), bản `queued` treo của suite cũ từng giữ PR ở wait (#208). Khoá gồm app: check
     cùng tên của app khác là check khác, không được che nhau (AUD-CODE-007)."""
     latest: Dict[str, Dict[str, Any]] = {}
     for c in runs:
         app = c.get("app")
         key = f"{app.get('id') if isinstance(app, dict) else ''}/{c.get('name')}"
-        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
+        if key not in latest or _check_rank(c.get("started_at"), c.get("id")) >= _check_rank(
+            latest[key].get("started_at"), latest[key].get("id")
+        ):
             latest[key] = c
     rollup: List[Dict[str, Any]] = [
         {
@@ -5491,6 +5524,7 @@ def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> L
             "name": c.get("name"),
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
+            **({"startedAt": c["started_at"]} if isinstance(c.get("started_at"), str) else {}),
             **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
         }
         for c in latest.values()
@@ -8718,7 +8752,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    return _steward_apply(out, d, repo, cmds if apply else [])
+    return _steward_apply(out, d, repo, cmds if apply else [], str(pr.get("baseRefName") or "main"))
 
 
 def _steward_key(out: Dict[str, Any], repo: str) -> str:
@@ -8747,7 +8781,10 @@ def _steward_stale(out: Dict[str, Any], repo: str) -> str:
     return ""
 
 
-def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]]) -> Dict[str, Any]:
+def _steward_apply(
+    out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]], base: str = "main"
+) -> Dict[str, Any]:
+    """`base` = nhánh đích của PR: merge thành công bằng GITHUB_TOKEN → dispatch CI trên nhánh đó (T-2402)."""
     can_update = _steward_can_update()
     out["key"] = _steward_key(out, repo)
     if out["action"] == "update" and not can_update:
@@ -8764,6 +8801,8 @@ def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List
             return _add_note(out, f"bỏ qua {out['key']} — {stale}")
         err = _steward_run(cmds)
         out.update(applied=not err, **({"error": err} if err else {}))
+        if not err and out["action"] == "merge" and not can_update:  # GITHUB_TOKEN: merge không kích `push` của CI
+            _steward_dispatch_ci(out, repo, base)
         # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
         if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update" and can_update:
             up_err = _steward_run([_update_branch_cmd(repo, str(d["pr"]), str(out["head"]))])
@@ -8771,6 +8810,30 @@ def _steward_apply(out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List
             if up_err:
                 out["error"] = up_err
     return out
+
+
+CI_WORKFLOW = "ci.yml"  # workflow CI của khung và mẫu dự án đích; dự án đích đặt tên khác: biến XT_CI_WORKFLOW
+CI_WORKFLOW_RE = re.compile(r"[\w.-]+\.ya?ml", re.ASCII)
+
+
+def _steward_dispatch_ci(out: Dict[str, Any], repo: str, base: str) -> None:
+    """Sau merge bằng GITHUB_TOKEN (cùng tín hiệu `_steward_can_update` = False: workflow thiếu `XT_STEWARD_TOKEN`):
+    GitHub không chạy workflow `push` cho commit do GITHUB_TOKEN tạo, nhưng cho GITHUB_TOKEN tạo `workflow_dispatch` →
+    gọi CI trên nhánh đích để commit merge có run CI (T-2402). Lỗi không huỷ merge đã vào: ghi `then` + `warn` (summary,
+    job đỏ để người thấy)."""
+    name = os.environ.get("XT_CI_WORKFLOW", "").strip() or CI_WORKFLOW
+    if CI_WORKFLOW_RE.fullmatch(name):
+        cmd = ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/{name}/dispatches", "-f", f"ref={base}"]
+        err = _steward_run([cmd])
+    else:  # kiểm chặt: tên lạ không đi vào đường dẫn API
+        err = f"XT_CI_WORKFLOW={name!r} không phải tên file workflow (*.yml)"
+    out["then"] = "dispatch CI " + (f"✗ {err}" if err else "✓")
+    if err:
+        text = (
+            f"CI không chạy trên `{base}` sau merge ({err}) — job steward cần `actions: write`"
+            " (chạy lại install.py --with-github) hoặc đặt XT_STEWARD_TOKEN; chạy tay: gh workflow run " + name
+        )
+        out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
 
 
 STEWARD_EVENT_KEYS = ("check_suite", "workflow_run")
@@ -10291,7 +10354,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ptc = prsub.add_parser(
         "title-check",
-        help="tiêu đề PR đúng luật CI `checks`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
+        help="tiêu đề PR đúng luật CI `pr-title`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
     )
     ptc.add_argument("title", nargs="?", help="tiêu đề định đặt (mặc định tiêu đề PR mở của nhánh hiện tại)")
     pss = prsub.add_parser(

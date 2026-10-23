@@ -290,7 +290,7 @@ class InstallTest(unittest.TestCase):
         # ADR-0027: PR đủ tiêu chuẩn tự vào nhánh chính khi không còn phiên agent
         self.assertTrue((self.target / ".github" / "workflows" / "pr-steward.yml").exists())
         # CI song song + `quality` tổng hợp và quét bí mật là mẫu không phụ thuộc stack (bản cho dự án đích)
-        for wf in ("ci.yml", "secret-scan.yml"):
+        for wf in ("ci.yml", "secret-scan.yml", "pr-title.yml"):
             self.assertEqual(
                 (self.target / ".github" / "workflows" / wf).read_bytes(),
                 (ROOT / "framework" / "templates" / wf).read_bytes(),
@@ -601,7 +601,7 @@ def make_fake_src(base: Path, ruleset: str | None = None) -> Path:
         (src / "framework" / "templates" / "ruleset-main.json").write_text(ruleset, encoding="utf-8")
         (src / "framework" / "templates" / "PULL-REQUEST.md").write_text("pr\n", encoding="utf-8")
         (src / "framework" / "templates" / "dependabot.yml").write_text("version: 2\n", encoding="utf-8")
-        for wf in ("ci.yml", "secret-scan.yml"):
+        for wf in ("ci.yml", "secret-scan.yml", "pr-title.yml"):
             (src / "framework" / "templates" / wf).write_text("name: x\n", encoding="utf-8")
         (src / ".github" / "workflows").mkdir(parents=True)
         (src / ".github" / "workflows" / "merge-gate.yml").write_text("name: merge-gate\n", encoding="utf-8")
