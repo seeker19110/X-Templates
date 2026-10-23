@@ -2947,6 +2947,13 @@ class PrStatsTest(unittest.TestCase):
         with patch:
             _, out, _ = run_main("pr", "stats", "--days", "3")
         self.assertIn("⚠ runs_truncated", out)
+        # review T-2409: PR mở 60 ngày trước kỳ 3 ngày → chỉ đọc tới 30 ngày trước đầu kỳ, số liệu thiếu thì cờ cắt
+        calls, patch = self.fake_rest([self.mk_pr(1, 60 * 24, 1, now)], runs)
+        with patch:
+            _, out, _ = run_main("pr", "stats", "--days", "3", "--json")
+        days = [c for c in calls if "/actions/" in c]
+        self.assertEqual(len(days), xt.PR_STATS_LOOKBACK_DAYS + 3 + 1, days[:2])
+        self.assertIs(json.loads(out)["runs_truncated"], True)
 
     def test_pr_stats_pushes_truncated_by_page_cap_and_env_workflow(self):
         now = xt._dt.datetime.now(xt._dt.timezone.utc)
@@ -2986,6 +2993,9 @@ class PrStatsTest(unittest.TestCase):
         self.assertIn("| 0/1 (0%) |", table)
         self.assertIn("cùng SHA với run khác | 1 |", table)
         self.assertNotIn("runs_truncated", table)
+        # review T-2409: run đầu đã chạy lại (listing chỉ giữ kết luận lần cuối) — không phải xanh lần đầu
+        s = xt.pr_stats([pr], [r("a", 20) | {"run_attempt": 2}, r("b", 10)], self.NOW, 7)
+        self.assertIs(s["prs"][0]["first_push_green"], False)
         # xanh ngay lần đầu; sắp theo giờ tạo, không theo thứ tự đầu vào
         s = xt.pr_stats([pr], [r("b", 10, "failure"), r("a", 20)], self.NOW, 7)
         self.assertEqual((s["prs"][0]["first_push_green"], s["prs"][0]["pushes"]), (True, 2))

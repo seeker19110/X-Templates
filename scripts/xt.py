@@ -9045,7 +9045,8 @@ def _pr_push_numbers(mine: List[Any]) -> Tuple[int, Optional[bool], int]:
         return 0, None, 0
     shas = [r["head_sha"] for r in sha_runs]
     dup = sum(r.get("conclusion") == "cancelled" and shas.count(r["head_sha"]) > 1 for r in sha_runs)
-    return len(set(shas)), sha_runs[0].get("conclusion") == "success", dup
+    first = sha_runs[0]  # chạy lại (run_attempt > 1): listing chỉ giữ kết luận lần cuối — không coi là xanh lần đầu
+    return len(set(shas)), first.get("conclusion") == "success" and first.get("run_attempt", 1) == 1, dup
 
 
 def _pr_stats_row(pr: Dict[str, Any], runs: List[Dict[str, Any]], since: _dt.datetime) -> Optional[Dict[str, Any]]:
@@ -9174,6 +9175,9 @@ def _pr_stats_runs(repo: str, first: _dt.date, last: _dt.date) -> Tuple[List[Dic
     return runs, cut
 
 
+PR_STATS_LOOKBACK_DAYS = 30  # run CI đọc tới tối đa 30 ngày trước đầu kỳ
+
+
 def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
     """I/O REST: PR đã đóng (mới cập nhật trước) và run CI `pull_request` từ ngày mở sớm nhất của PR merge trong kỳ;
     cờ cuối = có ngày chạm trần listing (`runs_truncated`)."""
@@ -9186,8 +9190,10 @@ def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]
     ]
     if not opened:
         return prs, [], False
-    runs, cut = _pr_stats_runs(repo, min(opened).date(), _dt.datetime.now(_dt.timezone.utc).date())
-    return prs, runs, cut
+    # Kẹp ngày đầu (review T-2409): PR mở lâu trước kỳ không kéo theo một truy vấn mỗi ngày; số liệu thiếu → cờ cắt.
+    first = max(min(opened).date(), (since - _dt.timedelta(days=PR_STATS_LOOKBACK_DAYS)).date())
+    runs, cut = _pr_stats_runs(repo, first, _dt.datetime.now(_dt.timezone.utc).date())
+    return prs, runs, cut or min(opened).date() < first
 
 
 def cmd_pr_stats(args: argparse.Namespace) -> int:

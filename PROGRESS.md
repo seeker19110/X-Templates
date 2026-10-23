@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.15.6, pha `harden` — D-136) · Cập nhật: 2026-10-23 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.16.0, pha `harden` — D-136) · Cập nhật: 2026-10-23 · Nhánh: main
 
 ## Đang làm
 - 2026-10-23 **PLAN-3.16.0-ceiling xong** (D-142…D-148, ADR-0043; #231, #232, PR cắt 3.16.0): `pr-title.yml` tách khỏi CI nặng; steward dispatch CI trên `main` sau merge (đã thấy chạy thật ở `5fcdc1b`); check cùng tên xét bản mới nhất; `validate` đòi Nguồn có URL+ngày; `unchecked_must_ratio` 58/68; trần byte thư mục; `pr stats` đếm push/run huỷ cùng SHA. Đo lại 2026-10-30 bằng `pr stats --days 7`. Phản hồi dự án đích: 10 nhóm `cong-cu` đủ ngưỡng chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
