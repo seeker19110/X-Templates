@@ -5103,6 +5103,28 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-fb1023-glob-dot-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "rm -rf \"$CLAUDE_PROJECT_DIR\"/.*"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-type-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -type f -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
   }
  ]
 }

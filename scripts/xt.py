@@ -131,7 +131,9 @@ ITEM_RE = re.compile(
 ITEM_LIKE_RE = re.compile(r"^- \[[ xX~]\] `[A-Z][A-Z0-9-]*`")
 # Rộng hơn, cho BLUEPRINT/PLAN của dự án: thụt lề, ô lạ (`[-]`), thiếu backtick — dòng như vậy mà không khớp ITEM_RE/TASK_RE
 # thì báo lỗi; trước đây bị bỏ qua im lặng nên xoá/sửa hỏng mục MUST vẫn ra "0 MUST mở".
-LOOSE_ITEM_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*[`*]{0,2}(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)\b")
+LOOSE_ITEM_RE = re.compile(
+    r"^\s*[-*+]\s*\[[^\]]{0,2}\]\s*[`*_]{0,3}(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,}|T-\d+)(?![A-Za-z0-9])"
+)
 MUST_COUNT_RE = re.compile(r"^\|\s*MUST\s*\|\s*(\d+)\s*\|\s*$", re.M)
 FRONT_BLOCK_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 BACKLOG_KEY_RE = re.compile(r"^backlog:[ \t]*(\S+)[ \t]*$", re.M)  # BLUEPRINT.md khai file SHOULD/MAY (ADR-0012)

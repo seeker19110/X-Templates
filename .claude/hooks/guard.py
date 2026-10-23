@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import fnmatch
 import itertools
 import json
 import os
@@ -1525,12 +1526,31 @@ def _wipes_root(target: str, root: str, cwd: Optional[str]) -> bool:
     kể cả khi gốc nằm trong thư mục tạm. Đích không mở được (biến lạ, `$OLDPWD`) → False: luật khác xét."""
     if not root or OLDPWD_REF_RE.match(target):
         return False
-    t = _resolve_target(target, root, cwd)
+    t = _resolve_target(HOME_REF_RE.sub("~", target), root, cwd)
     if "$" in t or "`" in t:
         return False
-    p = _real_target(posixpath.dirname(t) if t.endswith("/*") else t, root, cwd)
+    parts = t.split("/")
+    k = next((i for i, c in enumerate(parts) if GLOB_RE.search(c)), -1)
+    if k >= 0:
+        base = "/".join(parts[:k]) or ("/" if t.startswith("/") else ".")
+        return _glob_wipes_root(_real_target(base, root, cwd), parts[k], any(parts[k + 1 :]), root)
+    p = _real_target(t, root, cwd)
     r = os.path.realpath(root)
-    return p in (r, os.path.join(r, ".git")) or r.startswith(p.rstrip("/") + "/")
+    return p == r or (p + "/").startswith(r + "/.git/") or r.startswith(p.rstrip("/") + "/")
+
+
+GLOB_RE = re.compile(r"[*?\[]")
+HOME_REF_RE = re.compile(r"^(\$HOME|\$\{HOME\})(?=/|$)")
+
+
+def _glob_wipes_root(base: str, pat: str, deeper: bool, root: str) -> bool:
+    """Glob `pat` ở thư mục `base` (review 5ef1a14 B2): `base` là gốc → khớp được `.git` (`*`, `.*`, `.g*`, `?*`; có phần
+    sau thì chỉ khi chủ ý nhắm `.`); `base` là cha của gốc → khớp tên thư mục dẫn tới gốc."""
+    r = os.path.realpath(root)
+    if base == r:
+        return fnmatch.fnmatchcase(".git", pat) and (not deeper or pat.startswith("."))
+    under = r.startswith(base.rstrip("/") + "/")
+    return under and fnmatch.fnmatchcase(r[len(base.rstrip("/")) + 1 :].split("/")[0], pat)
 
 
 def _real_target(t: str, root: str, cwd: Optional[str]) -> str:
@@ -1560,7 +1580,7 @@ def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
     `$OLDPWD` (thư mục trước, không biết) → True (fail-closed, AUD-SEC-099); biến khác/không rõ → False (fail-open)."""
     if OLDPWD_REF_RE.match(target):
         return True
-    t = PWD_REF_RE.sub(".", re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", "~", target))
+    t = PWD_REF_RE.sub(".", HOME_REF_RE.sub("~", target))
     if "$" in t or "`" in t:
         return False
     p = os.path.realpath(os.path.join(cwd or root, os.path.expanduser(t)))
@@ -1728,16 +1748,19 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
 
 
 def _find_filters(expr: List[str]) -> Set[str]:
-    """Phần biểu thức `find` ngoài khối `-exec … ;|+` và số độ sâu: rỗng/chỉ `FIND_NO_FILTER` = xoá cả cây."""
+    """Phần biểu thức `find` ngoài khối `-exec … ;|+`, số độ sâu và loại của `-type` (`f`/`d`, review 5ef1a14 M1):
+    rỗng/chỉ `FIND_NO_FILTER` = xoá cả cây."""
     out: Set[str] = set()
     skip = False
+    prev = ""
     for a in expr:
         if a in FIND_EXEC:
             skip = True
         elif skip:
             skip = a not in (";", "+")
-        elif not a.isdigit():
+        elif not a.isdigit() and prev != "-type":
             out.add(a)
+        prev = a
     return out
 
 
@@ -1814,7 +1837,17 @@ def _find_evidence_targets(args: List[str]) -> List[str]:
     return out
 
 
-FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race", "-mindepth", "-maxdepth"}
+FIND_NO_FILTER = {
+    "-delete",
+    "-depth",
+    "-print",
+    "-xdev",
+    "-mount",
+    "-ignore_readdir_race",
+    "-mindepth",
+    "-maxdepth",
+    "-type",
+}
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
 
@@ -3738,8 +3771,8 @@ def _tree_readonly(argv: List[str]) -> bool:
     `echo`/`printf` (message qua ống: `cat <<'EOF' | git commit -F -`) — không chuyển hướng ra file (trừ /dev/null),
     không `--output`."""
     n = normalize(argv)
-    if any(t in REDIRECTS and argv[i + 1 : i + 2] != ["/dev/null"] for i, t in enumerate(argv)):
-        return False
+    if any(t in REDIRECTS and argv[i + 1 : i + 2] != ["/dev/null"] or "`" in t for i, t in enumerate(argv)):
+        return False  # backtick chạy lệnh như `$(…)` (review 5ef1a14 M2)
     if any(a.startswith("--output") for a in n):
         return False
     return not n or n[0] in ("cd", "export", "true", "cat", "echo", "printf") or tuple(n[:2]) in TREE_READONLY_GIT

@@ -1035,6 +1035,12 @@ class AuditRegressionTest(unittest.TestCase):
         self.assertEqual(len(empty["bad_lines"]), 1)
         self.assertIn("không nhận diện", empty["bad_lines"][0])
         self.assertEqual(self.strict_rc(""), 1)
+        # review T-2512: đậm bọc backtick, gạch dưới — cũng là lỗi định dạng, không bỏ qua im lặng
+        for odd in ("**`ABC-002`**", "__ABC-002__", "*`ABC-002`*"):
+            with self.subTest(odd):
+                text = f"- [x] `ABC-001` **MUST** a\n- [ ] {odd} **MUST** b\n"
+                self.assertEqual(len(xt.blueprint_status_text(text)["bad_lines"]), 1)
+                self.assertEqual(self.strict_rc(text), 1)
         good = "- [x] `ABC-PROOF-001` **MUST** a\n"
         self.assertEqual(xt.blueprint_status_text(good)["bad_lines"], [])
         self.assertEqual(self.strict_rc(good), 0)

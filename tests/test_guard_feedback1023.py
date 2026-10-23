@@ -119,6 +119,59 @@ class WipeProjectRootTest(unittest.TestCase):
         self.assertFalse(guard._wipes_root("~-", R, R))
         self.assertFalse(guard._wipes_root(R, "", R))
 
+    def test_guard_wipe_project_root_home_var(self):
+        """Review 5ef1a14 B1: `$HOME`/`${HOME}` mở như `~` (HOME là cha của gốc)."""
+        with mock.patch.dict(os.environ, {"HOME": str(ROOT.parent)}):
+            for cmd in (f"rm -rf $HOME/{NAME}", f"rm -rf ${{HOME}}/{NAME}/", f"rm -rf ~/{NAME}"):
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(policy(cmd)["decision"], "deny")
+            self.assertEqual(policy(f"rm -rf $HOME/{NAME}/build")["decision"], "")
+
+    def test_guard_wipe_project_root_glob(self):
+        """Review 5ef1a14 B2 + 🟢: glob ngay dưới gốc khớp được `.git` hay mọi mục cấp một; mọi đích trong `gốc/.git/`."""
+        for cmd, cwd in (
+            (f"rm -rf {R}/.*", None),
+            (f"rm -rf {R}/.g*", None),
+            (f"rm -rf {R}/.gi?", None),
+            (f"rm -rf {R}/.[a-z]*", None),
+            (f"cd {R} && rm -rf .[!.]*", None),
+            (f"rm -rf {R}/*/", None),
+            (f"rm -rf {R}/?*", None),
+            ("rm -rf *", f"{R}/scripts"),  # luật cũ (`*`) vẫn chặn ở thư mục con
+            (f"rm -rf {R}/.g*/objects", None),
+            (f"rm -rf {ROOT.parent}/{NAME[:3]}*", None),  # glob ở thư mục cha khớp tên gốc
+            ("rm -rf /*", None),
+            (f"rm -rf {R}/.git/objects", None),
+            (f"rm -rf {R}/.git/refs", None),
+            ("rm -rf .git/objects/", None),
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd, cwd)["decision"], "deny")
+        for cmd, cwd in (
+            (f"rm -rf {R}/build/*", None),
+            ("rm -rf ./dist/*.js", None),
+            (f"rm -rf {R}/*.pyc", None),
+            (f"rm -rf {R}/*/node_modules", None),
+            (f"rm -rf {R}/.github/*", None),
+            ("rm -rf scripts/__pycache__/*", None),
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd, cwd)["decision"], "", cmd)
+        with tempfile.TemporaryDirectory() as tmp:  # gốc trong /tmp: glob ở thư mục cha không khớp tên gốc → cho chạy
+            proj = os.path.join(tmp, "proj")
+            os.mkdir(proj)
+            self.assertEqual(policy(f"rm -rf {tmp}/other*", proj, proj)["decision"], "")
+            self.assertEqual(policy(f"rm -rf {tmp}/p*", proj, proj)["decision"], "deny")
+
+    def test_guard_wipe_project_root_find_type(self):
+        """Review 5ef1a14 M1: `-type` (như độ sâu, `-xdev`) không phải bộ lọc tên — vẫn xoá cả cây."""
+        for cmd in (f"find {R} -type f -delete", "find . -type f -delete", "find . -xdev -type d -maxdepth 1 -delete"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+        for cmd in ("find . -name '*.pyc' -delete", "find . -type f -name '*.pyc' -delete"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
 
 def _git(*args: str) -> str:
     env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
@@ -217,6 +270,9 @@ class CommitAfterWriteTest(unittest.TestCase):
             "cat > f.txt <<'EOF' && git commit -m 'fix: x'\nx\nEOF",
             "echo x | tee f.txt && git commit -m 'fix: x'",
             "git commit -m 'fix: a' && sed -i s/a/b/ f.txt && git commit -m 'fix: b'",
+            "echo `touch f` && git commit -m 'fix: x'",  # review 5ef1a14 M2: backtick như `$(…)`
+            "echo $(touch f) && git commit -m 'fix: x'",
+            "git add \"`touch f`\" && git commit -m 'fix: x'",
         ):
             with self.subTest(cmd=cmd):
                 res = policy(cmd)
