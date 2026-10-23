@@ -1022,3 +1022,10 @@
 - Chọn: Giữ main.json strict=true (đã khớp ruleset sống); chỉ khoá required_review_thread_resolution còn lệch — giữ true trong file, defer chủ repo bật
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ruleset sống nay strict=true (gh api rules/branches/main) — file đã khớp, BASE-GATE-007 đạt theo cách (a); D-143 dựa trên trạng thái cũ, thay bằng quyết định này
 - Đường lùi: Nếu chủ repo tắt strict lại: áp D-143
+
+### D-145 · 2026-10-23T11:47:42+00:00 · T-2404: nguyên nhân gốc wait giả #208 chưa chứng minh từ dữ liệu sống — nhận bản sửa?
+
+- Phương án: (1) Nhận: chọn bản check mới nhất theo started_at rồi id (lớp (a) tái hiện được + _ci_buckets khử trùng ở đường --pr-json); (c) commit status treo đã loại bằng dữ liệu (head 0786dca: 0 status); ghi cách thu dữ liệu filter=all lần sau · (2) Chưa nhận, đợi tái hiện thật lần sau
+- Chọn: Nhận: chọn bản check mới nhất theo started_at rồi id (lớp (a) tái hiện được + _ci_buckets khử trùng ở đường --pr-json); (c) commit status treo đã loại bằng dữ liệu (head 0786dca: 0 status); ghi cách thu dữ liệu filter=all lần sau
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ đổi cách chọn giữa các bản cùng tên/cùng app; bản mới nhất đang chạy/đỏ vẫn chặn, hoà vẫn chặn, khác app/nguồn không che nhau — không nới; (3) test đỏ trước; đợi tái hiện thật để lỗi đã biết tồn tại vô thời hạn
+- Đường lùi: revert commit T-2404

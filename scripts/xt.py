@@ -4600,6 +4600,33 @@ CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUES
 NOT_RUN_STATES = {"SKIPPED", "NEUTRAL", "CANCELLED", "STALE"}  # GitHub coi required check skipped/neutral là "đạt"
 
 
+CheckRank = Tuple[int, str, int]
+
+
+def _check_rank(started: Any, cid: Any) -> CheckRank:
+    """Thứ hạng "mới nhất" của một bản check (T-2404): thời điểm bắt đầu trước, id sau. Id không đủ: suite cũ còn treo
+    `queued` có thể mang id lớn hơn bản đã chạy xong, và rollup GraphQL (`--pr-json`) không có id. Thiếu thời điểm (vừa
+    xếp hàng, chưa bắt đầu) = mới nhất — chiều chặt: không để bản xanh cũ che lần chạy lại."""
+    has = isinstance(started, str) and bool(started)
+    return (0 if has else 1, started if has else "", cid if type(cid) is int else -1)
+
+
+def _latest_checks(rollup: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Nhiều bản cùng (loại, app, tên) trên cùng head → chỉ giữ bản xếp hạng cao nhất (`_check_rank`); hoà (không có
+    thời điểm/id để xếp) → giữ cả, như trước. Khác app hoặc khác nguồn (check-run/commit status) là check khác (AUD-CODE-007)."""
+
+    def key(c: Dict[str, Any]) -> Tuple[str, str, str]:
+        return (str(c.get("__typename")), str(c.get("appId")), str(c.get("name") or c.get("context")))
+
+    def rank(c: Dict[str, Any]) -> CheckRank:
+        return _check_rank(c.get("startedAt"), c.get("databaseId"))
+
+    best: Dict[Tuple[str, str, str], CheckRank] = {}
+    for c in rollup:
+        best[key(c)] = max(best.get(key(c), rank(c)), rank(c))
+    return [c for c in rollup if rank(c) == best[key(c)]]
+
+
 def _ci_buckets(
     rollup: List[Dict[str, Any]], required: Sequence[Tuple[str, Optional[int]]] = ()
 ) -> Tuple[List[str], List[str], List[str], List[str]]:
@@ -4609,6 +4636,7 @@ def _ci_buckets(
     nên PR "xanh" mà chưa test nào chạy; check bắt buộc SKIPPED/NEUTRAL/CANCELLED/STALE, hoặc chỉ có bản của app khác
     (`appId` ≠ integration_id) → `not_run` (không đỏ, không xanh). Check bắt buộc vắng hẳn là việc của `missingRequired`."""
     want = {name: app for name, app in required}
+    rollup = _latest_checks(rollup)
     red: List[str] = []
     pending: List[str] = []
     green: List[str] = []
@@ -5477,13 +5505,16 @@ def local_merge_conflicts(
 def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """`statusCheckRollup` dạng GraphQL từ check-run + status REST của head, hàm thuần.
     Chạy lại một check trên CÙNG head (sửa tiêu đề PR, re-run) tạo check-run mới cùng tên, cùng app: chỉ lần mới nhất
-    (id lớn nhất) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần mới xanh (#58, AUD-HAR-038). Khoá gồm app: check
+    (bắt đầu muộn nhất, rồi id lớn nhất — `_check_rank`, T-2404) có hiệu lực, như GitHub tính — lần cũ đỏ từng che lần
+    mới xanh (#58, AUD-HAR-038), bản `queued` treo của suite cũ từng giữ PR ở wait (#208). Khoá gồm app: check
     cùng tên của app khác là check khác, không được che nhau (AUD-CODE-007)."""
     latest: Dict[str, Dict[str, Any]] = {}
     for c in runs:
         app = c.get("app")
         key = f"{app.get('id') if isinstance(app, dict) else ''}/{c.get('name')}"
-        if key not in latest or int(c.get("id") or 0) >= int(latest[key].get("id") or 0):
+        if key not in latest or _check_rank(c.get("started_at"), c.get("id")) >= _check_rank(
+            latest[key].get("started_at"), latest[key].get("id")
+        ):
             latest[key] = c
     rollup: List[Dict[str, Any]] = [
         {
@@ -5491,6 +5522,7 @@ def rest_rollup(runs: List[Dict[str, Any]], statuses: List[Dict[str, Any]]) -> L
             "name": c.get("name"),
             "status": str(c.get("status", "")).upper(),
             "conclusion": str(c.get("conclusion") or "").upper(),
+            **({"startedAt": c["started_at"]} if isinstance(c.get("started_at"), str) else {}),
             **({"appId": c["app"]["id"]} if isinstance(c.get("app"), dict) and "id" in c["app"] else {}),
         }
         for c in latest.values()

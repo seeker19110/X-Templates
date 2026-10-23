@@ -3076,3 +3076,107 @@ class StewardDispatchCiTest(unittest.TestCase):
         self.assertEqual(top, "  contents: read")  # không nâng quyền mức workflow
         self.assertIn("XT_STEWARD_UPDATE: ${{ secrets.XT_STEWARD_TOKEN != '' && 'on' || 'off' }}", steward)
         self.assertIn("workflow_dispatch", steward.split("\non:\n", 1)[0])  # chú thích đầu file nói hành vi mới
+
+
+def rest_run(
+    cid: int, name: str, status: str, concl: str | None, started: str | None, suite: int, app: int = 15368
+) -> dict:
+    """Check-run đúng shape `GET commits/{sha}/check-runs` (các trường `rest_rollup` đọc + trường thật bên cạnh)."""
+    return {
+        "id": cid,
+        "name": name,
+        "status": status,
+        "conclusion": concl,
+        "started_at": started,
+        "completed_at": None if status != "completed" else started,
+        "check_suite": {"id": suite},
+        "app": {"id": app, "slug": "github-actions"},
+    }
+
+
+class CiBlockerLatestRunTest(unittest.TestCase):
+    """T-2404: steward báo `wait — CI đang chạy: gitleaks` khi check đã completed (run 39630751648, PR #208). Nhiều bản
+    cùng tên trên cùng head (suite cũ, re-run): chỉ bản bắt đầu muộn nhất có hiệu lực; bản mới nhất đang chạy/đỏ vẫn chặn."""
+
+    HEAD_208 = [
+        rest_run(9101, "merge-gate", "completed", "success", "2026-10-21T15:58:20Z", 501),
+        rest_run(9102, "pr-review", "completed", "skipped", "2026-10-21T15:58:23Z", 502),
+        rest_run(9103, "gitleaks", "completed", "success", "2026-10-21T15:58:05Z", 503),
+        rest_run(9104, "dep-audit", "completed", "success", "2026-10-21T15:58:10Z", 504),
+        rest_run(9105, "quality", "completed", "success", "2026-10-21T15:59:40Z", 505),
+        rest_run(9106, "codeql", "completed", "success", "2026-10-21T15:58:30Z", 506),
+    ]
+    REQUIRED = [{"context": c} for c in ("quality", "gitleaks", "dep-audit")]
+
+    def blocker(self, runs: list, statuses: list | None = None) -> Any:
+        rollup = xt.rest_rollup(runs, statuses or [])
+        return xt._ci_blocker({"statusCheckRollup": rollup, "requiredChecks": self.REQUIRED})
+
+    def test_ci_blocker_completed_not_wait_pr208_rest(self):
+        # Suite cũ (503 → 499) để lại check-run `queued` với id lớn hơn nhưng bắt đầu SỚM hơn bản đã xong: trước đây
+        # khoá id lớn nhất chọn bản treo → wait tới lượt cron sau.
+        stale = rest_run(9199, "gitleaks", "queued", None, "2026-10-21T15:57:50Z", 499)
+        self.assertIsNone(self.blocker([*self.HEAD_208, stale]))
+        self.assertIsNone(self.blocker([stale, *self.HEAD_208]))  # thứ tự trang không đổi kết quả
+        d = xt.merge_decision(pr(statusCheckRollup=xt.rest_rollup([*self.HEAD_208, stale], [])), 3)
+        self.assertNotEqual(d["verdict"], "wait")
+
+    def test_ci_blocker_completed_not_wait_graphql_rollup(self):
+        # `--pr-json` (gh pr view): rollup GraphQL không khử trùng — bản IN_PROGRESS cũ không giữ PR ở wait
+        old = {
+            "__typename": "CheckRun",
+            "name": "test",
+            "status": "IN_PROGRESS",
+            "conclusion": "",
+            "startedAt": "2026-10-21T15:50:00Z",
+        }
+        new = {
+            "__typename": "CheckRun",
+            "name": "test",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "startedAt": "2026-10-21T15:58:00Z",
+        }
+        self.assertIsNone(xt._ci_blocker({"statusCheckRollup": [old, new]}))
+        self.assertIsNone(xt._ci_blocker({"statusCheckRollup": [new, old]}))
+
+    def test_ci_blocker_completed_not_wait_latest_running_still_waits(self):
+        # Re-run: bản mới nhất đang chạy → vẫn wait, dù bản cũ xanh (REST và GraphQL)
+        rerun = rest_run(9200, "gitleaks", "in_progress", None, "2026-10-21T16:10:00Z", 503)
+        self.assertEqual(self.blocker([*self.HEAD_208, rerun]), ("wait", ["CI đang chạy: gitleaks"]))
+        # bản mới nhất chưa có started_at (vừa xếp hàng): coi là mới nhất — chiều chặt
+        queued = rest_run(9050, "gitleaks", "queued", None, None, 507)
+        self.assertEqual(self.blocker([*self.HEAD_208, queued]), ("wait", ["CI đang chạy: gitleaks"]))
+        old = {
+            "__typename": "CheckRun",
+            "name": "t",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "startedAt": "2026-10-21T15:50:00Z",
+        }
+        new = {"__typename": "CheckRun", "name": "t", "status": "QUEUED", "conclusion": ""}
+        self.assertEqual(xt._ci_blocker({"statusCheckRollup": [new, old]}), ("wait", ["CI đang chạy: t"]))
+
+    def test_ci_blocker_completed_not_wait_latest_red_still_blocks(self):
+        red = rest_run(9201, "gitleaks", "completed", "failure", "2026-10-21T16:10:00Z", 508)
+        self.assertEqual(self.blocker([*self.HEAD_208, red]), ("fix", ["CI đỏ: gitleaks"]))
+        # bản bắt buộc mới nhất bị skip không được bản xanh cũ che (REC-08)
+        skip = rest_run(9202, "gitleaks", "completed", "skipped", "2026-10-21T16:10:00Z", 508)
+        self.assertEqual(self.blocker([*self.HEAD_208, skip])[0], "human")
+        # bản cũ đỏ, bản mới xanh → không chặn (như #58)
+        old_red = rest_run(9001, "quality", "completed", "failure", "2026-10-21T15:40:00Z", 400)
+        self.assertIsNone(self.blocker([*self.HEAD_208, old_red]))
+
+    def test_ci_blocker_completed_not_wait_keeps_strict_when_unordered(self):
+        # Không có thời điểm/id để xếp: giữ mọi bản (như trước) — bản đang chạy vẫn chặn
+        a = {"__typename": "CheckRun", "name": "t", "status": "IN_PROGRESS", "conclusion": ""}
+        b = {"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        self.assertEqual(xt._ci_blocker({"statusCheckRollup": [a, b]})[0], "wait")
+        # khác app là check khác (AUD-CODE-007): bản app khác đang chạy không bị bản xanh mới che
+        other = rest_run(9300, "gitleaks", "in_progress", None, "2026-10-21T15:50:00Z", 600, app=99)
+        self.assertEqual(self.blocker([*self.HEAD_208, other]), ("wait", ["CI đang chạy: gitleaks"]))
+        # commit status cùng tên không gộp với check-run (nguồn khác) — pending vẫn chặn
+        self.assertEqual(
+            self.blocker(self.HEAD_208, [{"context": "gitleaks", "state": "pending"}]),
+            ("wait", ["CI đang chạy: gitleaks"]),
+        )
