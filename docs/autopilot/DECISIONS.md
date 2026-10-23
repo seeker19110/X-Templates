@@ -1001,3 +1001,10 @@
 - Chọn: Đổi Gate T-2309 thành audit check --strict; release-check chạy riêng làm bước kết thúc (autopilot §Kết thúc)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: không được nới/bỏ hàng verify; Gate của task không được phụ thuộc kết quả verify của chính vòng; release-check vốn là bước G7 sau done, không phải Gate task. Ghi chú cho khung: loop/plan lint có thể cảnh báo Gate gọi release-check (🟢 HAR)
 - Đường lùi: đổi lại Gate cũ; chạy release-check ngoài vòng
+
+### D-142 · 2026-10-23T10:38:30+00:00 · Sau phân tích trần phát triển 2026-10-23 (research/2026-10-23-ceiling-analysis.md): làm gì tiếp để giữ đơn giản · chất lượng · tốc độ?
+
+- Phương án: (1) PLAN-3.16.0-ceiling: cắt lãng phí CI tự gây bằng cấu hình (bỏ edited khỏi CI nặng, CI trên main sau merge steward, đồng bộ ruleset, sửa wait giả), chất lượng nội dung nơi rẻ (checker Nguồn, unchecked_must có cờ, trần byte thư mục), đo thật (pr stats theo push, TARGETS/feedback); đóng băng bề mặt 3.x · (2) Tăng tốc bằng đổi mô hình: tách xt.py thành gói, song song worktree nhiều lát, thêm reviewer LLM cho mọi PR · (3) Dừng: chỉ lưu research, không lập PLAN
+- Chọn: PLAN-3.16.0-ceiling: cắt lãng phí CI tự gây bằng cấu hình (bỏ edited khỏi CI nặng, CI trên main sau merge steward, đồng bộ ruleset, sửa wait giả), chất lượng nội dung nơi rẻ (checker Nguồn, unchecked_must có cờ, trần byte thư mục), đo thật (pr stats theo push, TARGETS/feedback); đóng băng bề mặt 3.x
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: 3/4 run CI bị huỷ là cùng SHA do sự kiện edited và 3 commit mới nhất trên main chưa qua CI — hai lỗ đo được, sửa bằng cấu hình không thêm mã; (2) đường lùi: mỗi lát một PR nhỏ, revert được; (3) đơn giản: phương án 2 thêm mã/độ phức tạp trong khi lượt model (không phải CI) chiếm phần lớn một lát và chưa đo được; phương án 3 bỏ phí lỗ đã có bằng chứng
+- Đường lùi: Revert PR từng lát; xoá PLAN-3.16.0-ceiling.md; ruleset file về strict true nếu chủ repo bật lại strict sống
