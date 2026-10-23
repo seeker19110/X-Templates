@@ -480,6 +480,33 @@ def _check_sections(d: Doc, where: str) -> List[str]:
         errors.append(f"{where}: thiếu mục '## Checklist'")
     if not any(h.strip().startswith("Nguồn") for h in d.headings):
         errors.append(f"{where}: thiếu mục '## Nguồn'")
+    else:
+        errors += _check_sources_section(d, where)
+    return errors
+
+
+SOURCES_RE = re.compile(r"^## Nguồn[^\n]*\n(.*?)(?=^## |\Z)", re.S | re.M)
+SOURCES_URL_RE = re.compile(r"https://\S")
+SOURCES_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+SOURCES_UNVERIFIED = "(chưa xác minh)"
+
+
+def _check_sources_section(d: Doc, where: str) -> List[str]:
+    """Mục `## Nguồn` (ngoài code fence) có ≥ 1 URL `https://` và một ngày `YYYY-MM-DD`; không có URL nào thì phải ghi
+    `(chưa xác minh)` — dấu này không miễn ngày cho mục đã có URL (review T-2405)."""
+    body = "\n".join(line for _, line in _lines_outside_fences(d.body, 1))
+    text = "".join(SOURCES_RE.findall(body))
+    if SOURCES_UNVERIFIED in text and not SOURCES_URL_RE.search(text):
+        return []
+    errors: List[str] = []
+    if not SOURCES_URL_RE.search(text):
+        errors.append(
+            f"{where}: mục '## Nguồn' thiếu URL https:// — thêm URL chính thống hoặc ghi '{SOURCES_UNVERIFIED}'"
+        )
+    if not SOURCES_DATE_RE.search(text):
+        errors.append(
+            f"{where}: mục '## Nguồn' thiếu ngày xác minh YYYY-MM-DD — thêm 'xác minh YYYY-MM-DD' hoặc ghi '{SOURCES_UNVERIFIED}'"
+        )
     return errors
 
 
@@ -982,7 +1009,26 @@ def blueprint_status(path: Path) -> Dict[str, Any]:
             s["levels"][lv][k] += v
     for key in ("open_must", "bad_waivers", "bad_lines", "stale"):
         s[key] += b[key]
+    s["unchecked_must_ratio"] = unchecked_must_stat(
+        blueprint_checks(path)["unchecked_must"], s["levels"]["MUST"]["done"]
+    )
     return s
+
+
+def _scan_checks(raw: str, fname: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Một file blueprint: (mục `[x]` có `— Kiểm:` → {"id","level","cmd","file"}, ID MUST `[x]` không có lệnh kiểm)."""
+    checks: List[Dict[str, Any]] = []
+    unchecked: List[str] = []
+    for line in unicodedata.normalize("NFC", raw).splitlines():
+        m = ITEM_RE.match(line)
+        if not m or m["state"] not in "xX":
+            continue
+        seg = _note_segment(line)
+        if CHECK_NOTE_RE.search(seg):  # `cmd` rỗng = ghi chú Kiểm: sai dạng → run_blueprint_checks trả exit 2
+            checks.append({"id": m["id"], "level": m["level"], "cmd": _check_cmd(seg), "file": fname})
+        elif m["level"] == "MUST":
+            unchecked.append(m["id"])
+    return checks, unchecked
 
 
 def blueprint_checks(path: Path) -> Dict[str, Any]:
@@ -995,15 +1041,9 @@ def blueprint_checks(path: Path) -> Dict[str, Any]:
             raw = f.read_text(encoding="utf-8")
         except OSError:  # thiếu file backlog: blueprint_status đã báo ở bad_lines
             continue
-        for line in unicodedata.normalize("NFC", raw).splitlines():
-            m = ITEM_RE.match(line)
-            if not m or m["state"] not in "xX":
-                continue
-            seg = _note_segment(line)
-            if CHECK_NOTE_RE.search(seg):  # `cmd` rỗng = ghi chú Kiểm: sai dạng → run_blueprint_checks trả exit 2
-                checks.append({"id": m["id"], "level": m["level"], "cmd": _check_cmd(seg), "file": f.name})
-            elif m["level"] == "MUST":
-                unchecked.append(m["id"])
+        c, u = _scan_checks(raw, f.name)
+        checks += c
+        unchecked += u
     return {"checks": checks, "unchecked_must": unchecked}
 
 
@@ -1043,6 +1083,14 @@ def _stale_ids(text: str) -> List[str]:
     ]
 
 
+def unchecked_must_stat(unchecked: List[str], done: int) -> Dict[str, Any]:
+    """{"count": MUST `[x]` không có `— Kiểm:` (danh sách `unchecked_must` của `blueprint_checks`), "total": MUST `[x]`,
+    "ratio"} (total 0 → 0.0)."""
+    count = len(unchecked)
+    total = done
+    return {"count": count, "total": total, "ratio": round(count / total, 2) if total else 0.0}
+
+
 def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
     total = {lv: {"open": 0, "done": 0, "waived": 0} for lv in LEVELS}
     bad_waivers: List[str] = []
@@ -1077,6 +1125,7 @@ def blueprint_status_text(raw: str, where: str = "") -> Dict[str, Any]:
         bad_lines.append(f"chỉ thấy {counted}/{expected} mục MUST so với bảng đầu trang (mục bị xoá?)")
     return {
         "levels": total,
+        "unchecked_must_ratio": unchecked_must_stat(_scan_checks(raw, "")[1], total["MUST"]["done"]),
         "open_must": open_must,
         "bad_waivers": bad_waivers,
         "bad_lines": bad_lines,
@@ -5871,6 +5920,11 @@ def _print_blueprint_run(run: Dict[str, Any]) -> None:
         print(f"ℹ {len(ids)} mục MUST đạt không có lệnh kiểm máy (ghi `— Kiểm: `<lệnh>``): " + ", ".join(ids[:15]))
 
 
+def _print_unchecked_must(u: Dict[str, Any]) -> None:
+    if u["count"]:  # count 0: im lặng
+        print(f"unchecked_must: {u['count']}/{u['total']} MUST đạt không có lệnh kiểm (tỉ lệ {u['ratio']})")
+
+
 def cmd_blueprint_status(args: argparse.Namespace) -> int:
     if args.run and args.file == "-":
         print(
@@ -5893,6 +5947,7 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
         print("✗ Miễn trừ không hợp lệ (thiếu lý do; MUST `Miễn` cần `Duyệt:`): " + ", ".join(s["bad_waivers"]))
     for b in s["bad_lines"]:
         print(f"✗ Sai định dạng/thiếu mục: {b}")
+    _print_unchecked_must(s["unchecked_must_ratio"])
     if s["open_must"]:
         print(f"Còn {len(s['open_must'])} mục MUST chưa đạt: " + ", ".join(s["open_must"][:15]))
     if s["stale"]:
@@ -7878,7 +7933,18 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- release-check (G7 máy đọc, ADR-0029)
 
-RELEASE_ROWS = ("blueprint", "audit", "verify", "tree", "prod_switch", "phase", "review_debt", "attack", "perf")
+RELEASE_ROWS = (
+    "blueprint",
+    "audit",
+    "verify",
+    "tree",
+    "prod_switch",
+    "phase",
+    "review_debt",
+    "attack",
+    "perf",
+    "unchecked_must",
+)
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
 RELEASE_RUN_KEYS = (
     ("attack", "tấn công thử: DAST/fuzz/kịch bản khai thác trên bản chạy cục bộ hay staging"),
@@ -8077,7 +8143,22 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 
-def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
+def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, str]:
+    """Số + tỉ lệ MUST tick `[x]` không có `— Kiểm:` (cùng nguồn `blueprint-status`/hàng `blueprint`). `warn` (mặc định):
+    hàng ⚠ SHOULD, không đổi GO/NO-GO; `fail` (dự án đích bật ở harden): count > 0 là FAIL BLOCKER = NO-GO."""
+    bp = base / blueprint
+    if not bp.is_file():
+        return _release_row("unchecked_must", "N/A", f"không thấy {blueprint} — xem hàng blueprint", "SHOULD")
+    u = blueprint_status(bp)["unchecked_must_ratio"]
+    ev = f"{u['count']}/{u['total']} MUST đạt không có lệnh kiểm (tỉ lệ {u['ratio']})"
+    if not u["count"]:
+        return _release_row("unchecked_must", "PASS", ev, "SHOULD")
+    if mode == "fail":
+        return _release_row("unchecked_must", "FAIL", ev + " — `--unchecked-must fail`")
+    return _release_row("unchecked_must", "WARN", ev, "SHOULD")
+
+
+def release_check(base: Path, blueprint: str, status: str, unchecked_must: str = "warn") -> Dict[str, Any]:
     """Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối của autopilot
     và cây git thành bảng PASS/FAIL/N-A có bằng chứng — cùng nguồn cho GO-NO-GO.md (phần máy) và JSON. GO chỉ khi không
     hàng BLOCKER nào FAIL; hàng N/A BLOCKER là việc của người (không tính GO, không tính NO-GO — ghi rõ). ADR-0031: pha
@@ -8093,6 +8174,7 @@ def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
         _release_phase(base),
         _release_review_debt(base, status),
         *runs.values(),
+        _release_unchecked_must(base, blueprint, unchecked_must),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
@@ -8109,13 +8191,13 @@ def release_check(base: Path, blueprint: str, status: str) -> Dict[str, Any]:
 
 def cmd_release_check(args: argparse.Namespace) -> int:
     base = project_dir()
-    out = release_check(base, args.blueprint, args.status)
+    out = release_check(base, args.blueprint, args.status, args.unchecked_must)
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
     else:
         print(f"release-check @ {(out['head'] or 'không có git')[:12]} — {out['verdict']}")
         for r in out["rows"]:
-            mark = {"PASS": "✓", "FAIL": "✗", "N/A": "–"}[r["result"]]
+            mark = {"PASS": "✓", "FAIL": "✗", "N/A": "–", "WARN": "⚠"}[r["result"]]
             print(f"{mark} {r['level']:<7} {r['id']:<12} {r['result']:<4} {r['evidence']}")
         if out["human"]:
             print("Chờ người: " + ", ".join(out["human"]) + " — máy không thay được chữ ký (GO-NO-GO.md §5)")
@@ -10372,6 +10454,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prc.add_argument("--blueprint", default="BLUEPRINT.md")
     prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")
+    prc.add_argument(
+        "--unchecked-must",
+        choices=("warn", "fail"),
+        default="warn",
+        help="hàng unchecked_must: warn (mặc định) chỉ báo ⚠; fail = còn MUST tick không có lệnh kiểm là NO-GO (dự án đích bật ở harden)",
+    )
     prc.add_argument("--json", action="store_true", help="in JSON {head, rows, fails, human, go, verdict}")
     prc.set_defaults(fn=cmd_release_check)
     pab = sub.add_parser(

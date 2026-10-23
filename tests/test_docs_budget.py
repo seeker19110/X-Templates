@@ -14,9 +14,30 @@ CAPS = {  # byte; nhà của từng trần: PLAN-3.12-lean T-1701…T-1704
     ".claude/skills/autopilot/SKILL.md": 6144,
     "framework/11-autonomous-loop/README.md": 12288,
 }
+# Trần TỔNG byte theo thư mục (ADR-0043, T-2407): đóng băng bề mặt 3.x = kích thước tại 2026-10-23 + 5 %. Thêm mã/chữ thì
+# cắt chỗ khác trong cùng nhóm; mở băng cần ADR mới — không nới số ở đây. Chỉ đếm file git theo dõi (bỏ cache/sinh ra).
+DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- <spec> | xargs -0 cat | wc -c`
+    "scripts (xt.py, install.py, xt_app)": (("scripts/*.py", "scripts/xt_app/"), 711855),  # 677958 B
+    ".claude/hooks": ((".claude/hooks/",), 369393),  # 351803 B
+    "framework/11-autonomous-loop": (("framework/11-autonomous-loop/",), 232307),  # 221245 B
+}
+
+
+def tracked_bytes(specs: "tuple[str, ...]") -> int:
+    out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z", "--", *specs], capture_output=True, check=True)
+    return sum((ROOT / rel.decode()).stat().st_size for rel in out.stdout.split(b"\0") if rel)
 
 
 class DocsBudgetTest(unittest.TestCase):
+    def test_dir_totals_stay_under_caps(self):
+        for group, (specs, cap) in DIR_CAPS.items():
+            with self.subTest(group):
+                size = tracked_bytes(specs)
+                self.assertGreater(size, 0, f"{group}: không thấy file nào — pathspec sai")
+                self.assertLessEqual(
+                    size, cap, f"{group}: {size} B > {cap} B — cắt chỗ khác (ADR-0043), không nới trần"
+                )
+
     def test_guidance_files_stay_under_caps(self):
         for rel, cap in CAPS.items():
             with self.subTest(rel):

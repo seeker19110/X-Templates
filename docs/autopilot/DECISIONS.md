@@ -1029,3 +1029,17 @@
 - Chọn: Nhận: chọn bản check mới nhất theo started_at rồi id (lớp (a) tái hiện được + _ci_buckets khử trùng ở đường --pr-json); (c) commit status treo đã loại bằng dữ liệu (head 0786dca: 0 status); ghi cách thu dữ liệu filter=all lần sau
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ đổi cách chọn giữa các bản cùng tên/cùng app; bản mới nhất đang chạy/đỏ vẫn chặn, hoà vẫn chặn, khác app/nguồn không che nhau — không nới; (3) test đỏ trước; đợi tái hiện thật để lỗi đã biết tồn tại vô thời hạn
 - Đường lùi: revert commit T-2404
+
+### D-146 · 2026-10-23T12:06:35+00:00 · milestone_audit now sau Lát 1 — audit delta 9e1d6f3..HEAD làm thế nào?
+
+- Phương án: (1) Ghi 'quét lại diff' vào AUDIT-STATUS sau khi #231 merge (SHA trên main), bằng chứng = review khác họ model ở head + gate xanh (tiền lệ #228); làm T-2405 trong lúc chờ · (2) Audit đủ 8 nhóm bằng subagent ngay
+- Chọn: Ghi 'quét lại diff' vào AUDIT-STATUS sau khi #231 merge (SHA trên main), bằng chứng = review khác họ model ở head + gate xanh (tiền lệ #228); làm T-2405 trong lúc chờ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: delta chính là diff 2 PR đã có reviewer khác họ model rà toàn bộ (0 chặn, 1 🟠 đã sửa kèm test) và cổng đầy đủ xanh — audit lại cùng diff không thêm bằng chứng; SHA quét phải là SHA trên main; (5) không chặn vòng
+- Đường lùi: Chạy /audit delta đủ nhóm
+
+### D-147 · 2026-10-23T12:26:16+00:00 · T-2406: unchecked_must đo gì và đặt tên khoá thế nào (khoá cũ là danh sách ID MUST tick không có — Kiểm:)?
+
+- Phương án: (1) count = số MUST tick [x] không có lệnh Kiểm (danh sách unchecked_must sẵn có), total = số MUST [x]; khoá mới unchecked_must_ratio, giữ khoá cũ · (2) count = MUST còn [ ] (đã có hàng blueprint chặn) · (3) Đổi kiểu khoá cũ thành dict
+- Chọn: count = số MUST tick [x] không có lệnh Kiểm (danh sách unchecked_must sẵn có), total = số MUST [x]; khoá mới unchecked_must_ratio, giữ khoá cũ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: research §55/§112 đo '58 MUST tick không có lệnh kiểm' — MUST [ ] đã bị hàng blueprint của release-check chặn nên cờ fail theo định nghĩa đó vô nghĩa; (2)(3) giữ hợp đồng khoá cũ (blueprint_checks, _release_blueprint, test) — thêm khoá mới
+- Đường lùi: Đổi unchecked_must_stat về đếm [ ]

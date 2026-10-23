@@ -56,3 +56,6 @@ delivery_phase: harden
 # Ghi công AI trong commit (AGENTS.md §3, AUD-HAR-017): forbid = guard chặn commit có tên model/URL phiên AI
 # (LOOP-HARNESS-027).
 ai_attribution: forbid
+# Hook dùng `onFailure: block` (có từ Claude Code 2.1.295 — changelog, xác minh 2026-10-23); doctor cảnh báo bản cũ hơn
+# (LOOP-HARNESS-026, T-2408).
+claude_min_version: 2.1.295

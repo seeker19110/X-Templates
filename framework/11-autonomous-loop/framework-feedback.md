@@ -3,7 +3,7 @@ title: Phản hồi về khung từ dự án đích
 kind: module
 prefix: LOOP-FB
 applies_to: [all]
-updated: 2026-10-17
+updated: 2026-10-23
 ---
 
 # Phản hồi về khung từ dự án đích
@@ -76,6 +76,6 @@ người duyệt → PR sửa khung theo từng nhóm đủ ngưỡng. Người 
 
 ## Nguồn
 
-- ADR-0010 (`docs/adr/0010-feedback-from-target-projects.md` của repo khung) — chủ repo yêu cầu 2026-10-15.
+- ADR-0010 (`docs/adr/0010-feedback-from-target-projects.md` của repo khung; <https://github.com/seeker19110/X-Templates/blob/main/docs/adr/0010-feedback-from-target-projects.md>) — chủ repo yêu cầu 2026-10-15; xác minh 2026-10-23.
 - `scripts/xt.py` (`feedback_entries`, `write_feedback`, `feedback_aggregate`, `redact`, `redact_feedback` — che cả tên người dùng trong đường dẫn home) và `tests/test_xt_cli.py` `FeedbackTest` — đọc 2026-10-15.
 - Catalog `seeker19110/stored` 23 §4.2, §8 (X-Scanner: adoption pin SHA; thiếu `auto-complete-guard.sh` do adopt trước #287 — drift khung ↔ đích) — đọc 2026-10-16.

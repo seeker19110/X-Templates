@@ -51,7 +51,7 @@ MODULE_BODY = textwrap.dedent(
 
     ## Nguồn
 
-    - x
+    - https://example.org/s — xác minh 2026-10-23
     """
 )
 
@@ -216,7 +216,7 @@ class ValidateBranchesTest(TmpMixin, unittest.TestCase):
             "- [ ] `MOD-002` **SHOULD@L** có ngưỡng sai chỗ.\n"
             "- [ ] `MOD-001` **MUST** trùng ID. → Kiểm: b.\n"
             "- [ ] `OTH-003` **MUST** sai prefix. → Kiểm: c.\n"
-            "- [ ] `MOD-004` **MUST** thiếu kiểm.\n\n## Nguồn\n\n- x\n"
+            "- [ ] `MOD-004` **MUST** thiếu kiểm.\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n"
         )
         errors = self.errors_for({"08-backend/m.md": md({"prefix": "MOD", "applies_to": "all"}, body)})
         self.assertHas(errors, "mục trong khung phải ở trạng thái '[ ]'")
@@ -227,7 +227,7 @@ class ValidateBranchesTest(TmpMixin, unittest.TestCase):
 
     def test_too_many_must_at_m(self):
         rows = "\n".join(f"- [ ] `MOD-{i:03d}` **MUST** m{i}. → Kiểm: t." for i in range(1, 6))
-        body = f"# T\n\n## Checklist\n\n{rows}\n\n## Nguồn\n\n- x\n"
+        body = f"# T\n\n## Checklist\n\n{rows}\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n"
         errors = self.errors_for({"08-backend/m.md": md({"prefix": "MOD", "applies_to": "all"}, body)})
         self.assertHas(errors, "5 MUST hiệu lực ở quy mô M, trần 4")
 
@@ -240,7 +240,7 @@ class ValidateBranchesTest(TmpMixin, unittest.TestCase):
     def test_missing_applies_to_and_unknown_profile_slug(self):
         profile = md(
             {"kind": "profile", "slug": "web", "modules": "[]"},
-            "# P\n\n## Nguồn\n\n- x\n",
+            "# P\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n",
         )
         errors = self.errors_for(
             {
@@ -255,7 +255,7 @@ class ValidateBranchesTest(TmpMixin, unittest.TestCase):
     def test_profile_slug_missing_duplicate_and_unknown_modules(self):
         def prof(**meta: str) -> str:
             meta.setdefault("kind", "profile")
-            return md(meta, "# P\n\n## Nguồn\n\n- x\n")
+            return md(meta, "# P\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n")
 
         errors = self.errors_for(
             {
@@ -291,7 +291,7 @@ class ValidateBranchesTest(TmpMixin, unittest.TestCase):
         """Thứ tự lỗi là hợp đồng: file theo đường dẫn; trong file theo nhóm kiểm; README thư mục ở cuối."""
 
         def profile(**meta: str) -> str:
-            return md({"kind": "profile", **meta}, "# P\n\n## Nguồn\n\n- x\n")
+            return md({"kind": "profile", **meta}, "# P\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n")
 
         body_a = (
             "chữ mở đầu\n\n## Danh sách\n\n"
@@ -345,10 +345,12 @@ class ComposeBranchesTest(TmpMixin, unittest.TestCase):
     def build(self, extra_files: dict[str, str] | None = None) -> Path:
         files = {
             "02-profiles/web.md": md(
-                {"kind": "profile", "slug": "web", "modules": "[08-backend/*]"}, "# W\n\n## Nguồn\n\n- x\n"
+                {"kind": "profile", "slug": "web", "modules": "[08-backend/*]"},
+                "# W\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n",
             ),
             "02-profiles/mobile.md": md(
-                {"kind": "profile", "slug": "mobile", "modules": "[]"}, "# M\n\n## Nguồn\n\n- x\n"
+                {"kind": "profile", "slug": "mobile", "modules": "[]"},
+                "# M\n\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n",
             ),
             "08-backend/web-only.md": md(
                 {"prefix": "WEB", "applies_to": "[web]", "title": "Chỉ web"}, MODULE_BODY.format(prefix="WEB")
@@ -423,7 +425,7 @@ class ComposeBranchesTest(TmpMixin, unittest.TestCase):
                 "01-baseline/b.md": md(
                     {"kind": "baseline", "prefix": "BAS", "applies_to": "[all]"},
                     "# B\n\n## Checklist\n\n- [ ] `BAS-001` **MUST** nền. → Kiểm: t.\n- [ ] `BAS-002` **MAY** tuỳ chọn.\n"
-                    "\n## Nguồn\n\n- x\n",
+                    "\n## Nguồn\n\n- https://example.org/s — xác minh 2026-10-23\n",
                 )
             }
         )
