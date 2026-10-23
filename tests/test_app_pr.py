@@ -52,7 +52,11 @@ CLOSED = [
     {"number": 2, "title": 'Revert "x"', "created_at": iso(50), "merged_at": iso(40), "head": {"ref": "y"}},
     {"number": 1, "title": "chore: c", "created_at": iso(5), "merged_at": None, "head": {"ref": "z"}},
 ]
-RUNS = {"workflow_runs": [{"head_branch": "x", "head_sha": "d" * 40, "created_at": iso(2.5), "conclusion": "failure"}]}
+RUNS = {
+    "workflow_runs": [
+        {"id": 1, "head_branch": "x", "head_sha": "d" * 40, "created_at": iso(2.5), "conclusion": "failure"}
+    ]
+}
 
 
 def gh_pages(path: str) -> List[Any]:
@@ -69,7 +73,7 @@ def gh_pages(path: str) -> List[Any]:
             ],
         ),
         (r"/pulls\?state=closed", [CLOSED]),
-        (r"/actions/runs\?", [RUNS]),
+        (r"/actions/workflows/ci\.yml/runs\?", [RUNS]),
         (r"/pulls/7$", [pr_json(7, SHA7, "docs: sửa")]),
         (r"/pulls/8$", [pr_json(8, SHA8, "feat: mã")]),
         (r"/pulls/7/files", [[{"filename": "docs/a.md", "additions": 2, "deletions": 0, "status": "modified"}]]),

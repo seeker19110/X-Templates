@@ -9009,6 +9009,9 @@ def cmd_pr_steward(args: argparse.Namespace) -> int:
 PR_STATS_DAYS = 30
 PR_RUN_BAD = ("failure", "cancelled")
 PR_REVERT_RE = re.compile(r'Revert "|revert(\([^)]*\))?!?: ')
+RUNS_LISTING_CAP = (
+    1000  # GitHub chỉ trả tối đa 1.000 kết quả mỗi truy vấn listing (chưa xác minh với tài liệu — không đọc được mạng)
+)
 
 
 def _quantiles(vals: List[float]) -> Dict[str, Optional[float]]:
@@ -9034,6 +9037,17 @@ def _pr_runs(pr: Dict[str, Any], runs: List[Dict[str, Any]], opened: _dt.datetim
     return [r for r in runs if mine(r)]
 
 
+def _pr_push_numbers(mine: List[Any]) -> Tuple[int, Optional[bool], int]:
+    """(số head SHA riêng biệt = lần push có CI, run CI đầu của head đầu có xanh không (None = PR không run có SHA),
+    run `cancelled` mà cùng head_sha còn run khác — vết của `edited`/chạy lại cùng SHA)."""
+    sha_runs = sorted((r for r in mine if r.get("head_sha")), key=lambda r: str(r.get("created_at") or "~"))
+    if not sha_runs:
+        return 0, None, 0
+    shas = [r["head_sha"] for r in sha_runs]
+    dup = sum(r.get("conclusion") == "cancelled" and shas.count(r["head_sha"]) > 1 for r in sha_runs)
+    return len(set(shas)), sha_runs[0].get("conclusion") == "success", dup
+
+
 def _pr_stats_row(pr: Dict[str, Any], runs: List[Dict[str, Any]], since: _dt.datetime) -> Optional[Dict[str, Any]]:
     """Một PR đã merge từ `since`: lead time mở → merge (giờ), số run, run đỏ/huỷ, làn chuẩn, revert; khác → None."""
     opened, merged = _parse_iso(str(pr.get("created_at") or "")), _parse_iso(str(pr.get("merged_at") or ""))
@@ -9042,8 +9056,12 @@ def _pr_stats_row(pr: Dict[str, Any], runs: List[Dict[str, Any]], since: _dt.dat
     mine = _pr_runs(pr, runs, opened, merged)
     concl = [str(r.get("conclusion") or "") for r in mine]
     labels = [lb.get("name") for lb in pr.get("labels") or [] if isinstance(lb, dict)]
+    pushes, first_green, cancelled_same = _pr_push_numbers(mine)
     return {
         "number": pr.get("number"),
+        "pushes": pushes,
+        "first_push_green": first_green,
+        "cancelled_same_sha": cancelled_same,
         "lead_hours": round((merged - opened).total_seconds() / 3600, 2),
         "runs": len(mine),
         "failure": concl.count("failure"),
@@ -9053,15 +9071,19 @@ def _pr_stats_row(pr: Dict[str, Any], runs: List[Dict[str, Any]], since: _dt.dat
     }
 
 
-def pr_stats(prs: List[Dict[str, Any]], runs: List[Dict[str, Any]], now: _dt.datetime, days: int) -> Dict[str, Any]:
+def pr_stats(
+    prs: List[Dict[str, Any]], runs: List[Dict[str, Any]], now: _dt.datetime, days: int, truncated: bool = False
+) -> Dict[str, Any]:
     """Số đo PR đã merge trong `days` ngày tới `now` (TD-4, hàm thuần): lead time trung vị/P95, run CI mỗi PR, tỉ lệ run
-    `failure`/`cancelled`, PR làn chuẩn (nhãn `xt-standard-lane`), PR revert."""
+    `failure`/`cancelled`, PR làn chuẩn (nhãn `xt-standard-lane`), PR revert; `pushes` (head SHA riêng biệt mỗi PR),
+    `first_push_green` (PR mà run đầu của head đầu xanh / PR có run), `cancelled_same_sha`; `truncated` → `runs_truncated`."""
     since = now - _dt.timedelta(days=days)
     rows = sorted(
         (r for r in (_pr_stats_row(p, runs, since) for p in prs) if r), key=lambda r: str(r["number"]).zfill(9)
     )
     total = sum(r["runs"] for r in rows)
     bad = sum(r["failure"] + r["cancelled"] for r in rows)
+    judged = [r["first_push_green"] for r in rows if r["first_push_green"] is not None]
     return {
         "days": days,
         "since": since.replace(microsecond=0).isoformat(),
@@ -9074,6 +9096,14 @@ def pr_stats(prs: List[Dict[str, Any]], runs: List[Dict[str, Any]], now: _dt.dat
         "standard_lane": sum(r["standard_lane"] for r in rows),
         "reverts": sum(r["revert"] for r in rows),
         "runs_seen": len(runs),
+        "runs_truncated": truncated,
+        "pushes": {**_quantiles([float(r["pushes"]) for r in rows]), "total": sum(r["pushes"] for r in rows)},
+        "first_push_green": {
+            "green": sum(judged),
+            "of": len(judged),
+            "rate": round(sum(judged) / len(judged), 3) if judged else None,
+        },
+        "cancelled_same_sha": sum(r["cancelled_same_sha"] for r in rows),
         "prs": rows,
     }
 
@@ -9084,7 +9114,7 @@ def _num(x: Optional[float], unit: str = "") -> str:
 
 def pr_stats_table(s: Dict[str, Any]) -> str:
     """Bảng Markdown cho người đọc và cho `/handover` dán vào `PROGRESS.md` mục Bàn giao phiên."""
-    lt, rp = s["lead_time_hours"], s["runs_per_pr"]
+    lt, rp, ps, fg = s["lead_time_hours"], s["runs_per_pr"], s["pushes"], s["first_push_green"]
     rate = "—" if s["bad_run_rate"] is None else f"{s['bad_run_rate']:.0%}"
     rows = [
         ("PR đã merge", str(s["merged"])),
@@ -9096,13 +9126,57 @@ def pr_stats_table(s: Dict[str, Any]) -> str:
         ("Run `failure` · `cancelled` (tỉ lệ)", f"{s['runs_failure']} · {s['runs_cancelled']} ({rate})"),
         (f"PR làn chuẩn (`{STANDARD_LABEL}`)", str(s["standard_lane"])),
         ("PR revert", str(s["reverts"])),
+        (
+            "Push (head SHA riêng biệt) mỗi PR (trung vị · P95 · tổng)",
+            f"{_num(ps['median'])} · {_num(ps['p95'])} · {ps['total']}",
+        ),
+        (
+            "PR xanh ngay lần push đầu",
+            f"{fg['green']}/{fg['of']} ({'—' if fg['rate'] is None else format(fg['rate'], '.0%')})",
+        ),
+        ("Run `cancelled` cùng SHA với run khác", str(s["cancelled_same_sha"])),
     ]
     head = f"| PR merge trong {s['days']} ngày (từ {s['since'][:10]}) | Giá trị |\n|---|---|\n"
-    return head + "".join(f"| {k} | {v} |\n" for k, v in rows)
+    warn = (
+        f"\n⚠ runs_truncated: có ngày chạm trần {RUNS_LISTING_CAP} run — số run/push thấp hơn thực tế\n"
+        if s["runs_truncated"]
+        else ""
+    )
+    return head + "".join(f"| {k} | {v} |\n" for k, v in rows) + warn
 
 
-def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """I/O REST: PR đã đóng (mới cập nhật trước) và run `pull_request` từ ngày mở sớm nhất của PR merge trong kỳ."""
+def _runs_of_day(repo: str, name: str, day: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """Run `pull_request` của workflow CI tạo đúng ngày `day` (UTC) + cờ chạm trần listing (total_count ≥ 1.000 hoặc hết
+    `GH_MAX_PAGES`)."""
+    pages = _gh_api(f"{repo}/actions/workflows/{name}/runs?event=pull_request&created={day}&per_page=100", True)
+    objs = [p for p in pages if isinstance(p, dict)]
+    cut = len(pages) >= GH_MAX_PAGES or any(
+        type(p.get("total_count")) is int and p["total_count"] >= RUNS_LISTING_CAP for p in objs
+    )
+    return [r for p in objs for r in p.get("workflow_runs") or [] if isinstance(r, dict)], cut
+
+
+def _pr_stats_runs(repo: str, first: _dt.date, last: _dt.date) -> Tuple[List[Dict[str, Any]], bool]:
+    """Run CI từng ngày `first`…`last` (mỗi truy vấn dưới trần 1.000 của listing), gộp, khử trùng theo `id`."""
+    name = os.environ.get("XT_CI_WORKFLOW", "").strip() or CI_WORKFLOW
+    if not CI_WORKFLOW_RE.fullmatch(name):
+        raise PrInputError(f"XT_CI_WORKFLOW={name!r} không phải tên file workflow (*.yml)")
+    runs: List[Dict[str, Any]] = []
+    seen: set[Any] = set()
+    cut = False
+    for k in range((last - first).days + 1):
+        got, day_cut = _runs_of_day(repo, name, (first + _dt.timedelta(days=k)).isoformat())
+        cut = cut or day_cut
+        for r in got:
+            if r.get("id") is None or r["id"] not in seen:
+                seen.add(r.get("id"))
+                runs.append(r)
+    return runs, cut
+
+
+def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
+    """I/O REST: PR đã đóng (mới cập nhật trước) và run CI `pull_request` từ ngày mở sớm nhất của PR merge trong kỳ;
+    cờ cuối = có ngày chạm trần listing (`runs_truncated`)."""
     prs = _gh_items(f"{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100")
     opened = [
         o
@@ -9111,16 +9185,9 @@ def _pr_stats_fetch(repo: str, since: _dt.datetime) -> Tuple[List[Dict[str, Any]
         if (o := _parse_iso(str(p.get("created_at") or "")))
     ]
     if not opened:
-        return prs, []
-    day = min(opened).date().isoformat()
-    runs = [
-        r
-        for page in _gh_api(f"{repo}/actions/runs?event=pull_request&created=%3E%3D{day}&per_page=100", True)
-        if isinstance(page, dict)
-        for r in page.get("workflow_runs") or []
-        if isinstance(r, dict)
-    ]
-    return prs, runs
+        return prs, [], False
+    runs, cut = _pr_stats_runs(repo, min(opened).date(), _dt.datetime.now(_dt.timezone.utc).date())
+    return prs, runs, cut
 
 
 def cmd_pr_stats(args: argparse.Namespace) -> int:
@@ -9129,13 +9196,13 @@ def cmd_pr_stats(args: argparse.Namespace) -> int:
         return 2
     now = _dt.datetime.now(_dt.timezone.utc)
     try:
-        prs, runs = _pr_stats_fetch(
+        prs, runs, cut = _pr_stats_fetch(
             f"repos/{args.repo}" if args.repo else "repos/{owner}/{repo}", now - _dt.timedelta(days=args.days)
         )
     except PrInputError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
-    s = pr_stats(prs, runs, now, args.days)
+    s = pr_stats(prs, runs, now, args.days, cut)
     print(json.dumps(s, ensure_ascii=False) if args.json else pr_stats_table(s), end="\n" if args.json else "")
     return 0
 

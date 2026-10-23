@@ -47,7 +47,7 @@
 - [x] `T-2408` `xt.yaml` repo khung khai `claude_min_version: 2.1.295` (`onFailure: block` của hook — changelog Claude Code); PROGRESS ghi lịch xét lại hàng rào 2027-01-21 (LOOP-DESIGN-014) (sau: T-2403; files: xt.yaml, PROGRESS.md) — Gate: `grep -q '^claude_min_version: 2' xt.yaml && grep -q 'xét lại hàng rào' PROGRESS.md && python3 scripts/xt.py checks`
 
 ### Lát 3 — Đo thật
-- [ ] `T-2409` `pr stats`: đọc run theo `actions/workflows/<ci>/runs` chia cửa sổ `created` theo ngày để vượt trần 1.000 của listing (ghi `runs_truncated` khi vẫn chạm); thêm `pushes` (head SHA riêng biệt/PR), `first_push_green`, `cancelled_same_sha`; README/PROGRESS dùng số mới (sau: T-2404; files: scripts/xt.py, tests/test_merge.py, README.md) — Gate: `python3 -m unittest discover -s tests -k pr_stats_pushes`
+- [x] `T-2409` `pr stats`: đọc run theo `actions/workflows/<ci>/runs` chia cửa sổ `created` theo ngày để vượt trần 1.000 của listing (ghi `runs_truncated` khi vẫn chạm); thêm `pushes` (head SHA riêng biệt/PR), `first_push_green`, `cancelled_same_sha`; README/PROGRESS dùng số mới (sau: T-2404; files: scripts/xt.py, tests/test_merge.py, README.md) — Gate: `python3 -m unittest discover -s tests -k pr_stats_pushes`
 - [ ] `T-2410` Vòng phản hồi: `docs/ops/TARGETS.md` thêm X-Company (và dhcb, xboss nếu biết `owner/repo`), ghi ngày kiểm; thử `feedback aggregate` một lần với repo đọc được; Routine tuần và quyền repo private → `loop defer` cho chủ repo (sau: T-2409; files: docs/ops/TARGETS.md) — Gate: `test -s docs/ops/TARGETS.md && python3 scripts/xt.py feedback aggregate --help >/dev/null`
 
 ### Lát 4 — Phát hành
