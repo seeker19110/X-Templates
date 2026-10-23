@@ -260,6 +260,21 @@ class ValidateTest(unittest.TestCase):
     def test_sources_section_unverified_passes(self):
         self.assertEqual(self._sources_errors("- RFC 9457 (chưa xác minh)"), [])
 
+    def test_sources_section_unverified_does_not_waive_date_when_url_present(self):
+        # review T-2405: một dòng "(chưa xác minh)" không miễn ngày cho mục đã có URL
+        errs = self._sources_errors("- https://a.example (chưa xác minh)\n- RFC x")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("ngày", errs[0])
+
+    def test_sources_section_fenced_heading_ignored(self):
+        # review T-2405: `## Nguồn` trong code fence không thay mục Nguồn thật
+        fenced = "```md\n## Nguồn\n- https://a.example 2026-01-01\n```\n\n"
+        p = self.fw / "08-backend" / "api.md"
+        text = p.read_text(encoding="utf-8")
+        i = text.index("## Nguồn")
+        p.write_text(text[:i] + fenced + "## Nguồn\n\n- x\n", encoding="utf-8")
+        self.assertEqual(len([e for e in xt.validate(self.fw) if "## Nguồn" in e]), 2)
+
     def test_sources_section_complete_passes(self):
         self.assertEqual(self._sources_errors("- https://www.rfc-editor.org/rfc/rfc9457 — xác minh 2026-10-23"), [])
 

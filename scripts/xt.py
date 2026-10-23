@@ -492,9 +492,11 @@ SOURCES_UNVERIFIED = "(chưa xác minh)"
 
 
 def _check_sources_section(d: Doc, where: str) -> List[str]:
-    """Mục `## Nguồn` có ≥ 1 URL `https://` và một ngày `YYYY-MM-DD`, hoặc ghi `(chưa xác minh)`."""
-    text = "".join(SOURCES_RE.findall(d.body))
-    if SOURCES_UNVERIFIED in text:
+    """Mục `## Nguồn` (ngoài code fence) có ≥ 1 URL `https://` và một ngày `YYYY-MM-DD`; không có URL nào thì phải ghi
+    `(chưa xác minh)` — dấu này không miễn ngày cho mục đã có URL (review T-2405)."""
+    body = "\n".join(line for _, line in _lines_outside_fences(d.body, 1))
+    text = "".join(SOURCES_RE.findall(body))
+    if SOURCES_UNVERIFIED in text and not SOURCES_URL_RE.search(text):
         return []
     errors: List[str] = []
     if not SOURCES_URL_RE.search(text):

@@ -26,7 +26,8 @@ updated: 2026-10-23
 | NICE | | | |
 
 ## 2. Danh mục kiểm (mỗi dòng có bằng chứng)
-> Hai cột tách bạch: **máy đã chạy** = lệnh + exit/output (agent/CI điền); **người đã đọc** = tên + ngày của người đã mở bằng chứng và đọc — máy không điền; để trống = chưa ai đọc (`unchecked_must` của `release-check` chỉ đo MUST chưa đạt, không thay chữ ký này).
+> Hai cột tách bạch: **máy đã chạy** = lệnh + exit/output (agent/CI điền); **người đã đọc** = tên + ngày của người đã mở bằng chứng và đọc — máy không điền; để trống = chưa ai đọc (`unchecked_must` của `release-check` chỉ đếm MUST đã tick mà không có lệnh kiểm, không thay chữ ký này).
+
 | # | Mức | Mục | Máy đã chạy: kết quả | Nhãn bằng chứng | Máy đã chạy: bằng chứng (file:dòng / lệnh → output / link) | Người đã đọc (tên · ngày) |
 |---|---|---|---|---|---|---|
 | 1 | BLOCKER | Build tái lập từ clone sạch, không lỗi type/lint, không cờ giấu lỗi | PASS/FAIL/N/A | real-path/faithful-fixture/asserted | CI job `<tên>` run #<n>; `rg -n "ignoreBuildErrors|continue-on-error" ` → 0 | |
