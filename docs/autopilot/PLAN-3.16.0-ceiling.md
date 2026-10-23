@@ -51,4 +51,4 @@
 - [x] `T-2410` Vòng phản hồi: `docs/ops/TARGETS.md` thêm X-Company (và dhcb, xboss nếu biết `owner/repo`), ghi ngày kiểm; thử `feedback aggregate` một lần với repo đọc được; Routine tuần và quyền repo private → `loop defer` cho chủ repo (sau: T-2409; files: docs/ops/TARGETS.md) — Gate: `test -s docs/ops/TARGETS.md && python3 scripts/xt.py feedback aggregate --help >/dev/null`
 
 ### Lát 4 — Phát hành
-- [ ] `T-2411` VERSION 3.16.0 + CHANGELOG `[3.16.0]` (mệnh đề "Dự án đích: chạy lại `install.py` — mẫu CI bỏ `edited`, thêm `pr-title.yml`") + PROGRESS (đo lại 2026-10-30 bằng `pr stats`); tag qua `release-tag.yml` (sau: T-2406, T-2407, T-2408, T-2410; files: VERSION, CHANGELOG.md, PROGRESS.md) — Gate: `scripts/dev-task.sh gate`
+- [x] `T-2411` VERSION 3.16.0 + CHANGELOG `[3.16.0]` (mệnh đề "Dự án đích: chạy lại `install.py` — mẫu CI bỏ `edited`, thêm `pr-title.yml`") + PROGRESS (đo lại 2026-10-30 bằng `pr stats`); tag qua `release-tag.yml` (sau: T-2406, T-2407, T-2408, T-2410; files: VERSION, CHANGELOG.md, PROGRESS.md) — Gate: `scripts/dev-task.sh gate`

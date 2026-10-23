@@ -5,9 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-**Dự án đích: chạy lại `install.py` để nhận `pr-title.yml`** (mẫu `ci.yml` bỏ `edited`).
+## [3.16.0] - 2026-10-23
 
-**Dự án đích: chạy lại `install.py --with-github`** (`ci.yml` thêm `workflow_dispatch`, `pr-steward.yml` cần `actions: write`; dự án đã sửa `ci.yml` thì gộp tay `ci.yml.xtemplates-new`).
+**Dự án đích: chạy lại `install.py --with-github`** — mẫu CI bỏ `edited`, thêm `pr-title.yml` (kiểm tiêu đề PR) và `workflow_dispatch` cho `ci.yml`; `pr-steward.yml` cần `actions: write` (bản cũ: dispatch CI sau merge bị 403, job steward đỏ kèm hướng dẫn); dự án đã sửa `ci.yml` thì gộp tay `ci.yml.xtemplates-new`. PLAN-3.16.0-ceiling (D-142…D-148, ADR-0043); đo lại 2026-10-30 bằng `pr stats`.
 
 ### Changed
 - `pr stats` (T-2409): đọc run theo `actions/workflows/<ci>/runs` chia theo ngày (vượt trần 1.000 của listing; ngày vẫn chạm trần → `runs_truncated: true` + cảnh báo trong bảng), thêm `pushes`, `first_push_green`, `cancelled_same_sha` (bảng + JSON; khoá cũ giữ). `_pr_stats_fetch` trả thêm cờ cắt. Test `pr_stats_pushes`.
