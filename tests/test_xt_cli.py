@@ -2639,7 +2639,7 @@ class PrTitleCheckTest(TmpDirCase):
 
     def test_title_check_regex_same_as_ci_step(self):
         """Một hằng cho cả hai đầu: regex của bước CI = `^` + `PR_TITLE_RE` + `$`, trần độ dài = `PR_TITLE_MAX`."""
-        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        ci = (ROOT / ".github" / "workflows" / "pr-title.yml").read_text(encoding="utf-8")
         step = ci.split("Tiêu đề PR theo Conventional Commits", 1)[1].split("\n      - name:", 1)[0]
         self.assertEqual(re.search(r"grep -Eq '([^']+)'", step).group(1), f"^{xt.PR_TITLE_RE.pattern}$")
         self.assertIn(f'[ "${{#TITLE}}" -le {xt.PR_TITLE_MAX} ]', step)

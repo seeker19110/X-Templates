@@ -12,7 +12,7 @@ Kết quả trong dự án đích:
                                 — hash dạng `sha256:<hex>` (cả `harness.sha256.json`); đọc nhận cả hex trần của bản cũ
   .claude/settings.json, hooks/, skills/, agents/   harness (COPY-IF-ABSENT: không đè file đã có; bản mới ghi .xtemplates-new)
   .github/rulesets/main.json, pull_request_template.md, dependabot.yml,
-  .github/workflows/{ci,secret-scan,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest;
+  .github/workflows/{ci,secret-scan,pr-title,merge-gate,pr-steward}.yml   chỉ khi --with-github (copy-if-absent, hash vào manifest;
                                 merge-gate.yml là stub tạm D-122)
   AGENTS.md, CLAUDE.md, PROGRESS.md, xt.yaml       từ framework/templates (copy-if-absent, bỏ frontmatter YAML; mẫu bọc ```markdown thì lấy phần trong)
 
@@ -78,6 +78,7 @@ GITHUB_FILES = {
     ".github/dependabot.yml": "framework/templates/dependabot.yml",
     ".github/workflows/ci.yml": "framework/templates/ci.yml",
     ".github/workflows/secret-scan.yml": "framework/templates/secret-scan.yml",
+    ".github/workflows/pr-title.yml": "framework/templates/pr-title.yml",
     ".github/workflows/merge-gate.yml": ".github/workflows/merge-gate.yml",
     ".github/workflows/pr-steward.yml": ".github/workflows/pr-steward.yml",
 }
@@ -1158,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--with-github",
         action="store_true",
-        help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + pr-steward (+ stub merge-gate tạm, "
+        help="copy ruleset mẫu, PR template, Dependabot, workflow ci + secret-scan + pr-title + pr-steward (+ stub merge-gate tạm, "
         "D-122) vào .github/ (không đè)",
     )
     p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")

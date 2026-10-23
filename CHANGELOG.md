@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+**Dự án đích: chạy lại `install.py` để nhận `pr-title.yml`** (mẫu `ci.yml` bỏ `edited`).
+
+### Changed
+- CI (repo khung và mẫu dự án đích): bỏ `edited` khỏi `types` của `pull_request` — sửa tiêu đề/thân PR không còn chạy lại CI nặng cùng SHA (đo: 57–62/83 run huỷ là chạy lại cùng SHA do `edited`, ~100 phút runner/tuần). Kiểm tiêu đề Conventional Commits ≤ 72 chuyển sang workflow riêng `pr-title.yml` (nghe `opened, edited, synchronize, reopened`, concurrency theo số PR, không checkout ở repo khung); mẫu `framework/templates/pr-title.yml` giữ các miễn `pr_title_check: off`/bot/Revert và `install.py --with-github` chép vào `.github/workflows/pr-title.yml`. Test `ci_no_edited_trigger`.
+
 ## [3.15.6] - 2026-10-22
 
 **Dự án đích: chạy lại `install.py`** (`xt.py app` không còn ghi đè file `.md` không phải blueprint).

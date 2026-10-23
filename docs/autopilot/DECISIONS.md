@@ -1008,3 +1008,17 @@
 - Chọn: PLAN-3.16.0-ceiling: cắt lãng phí CI tự gây bằng cấu hình (bỏ edited khỏi CI nặng, CI trên main sau merge steward, đồng bộ ruleset, sửa wait giả), chất lượng nội dung nơi rẻ (checker Nguồn, unchecked_must có cờ, trần byte thư mục), đo thật (pr stats theo push, TARGETS/feedback); đóng băng bề mặt 3.x
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: 3/4 run CI bị huỷ là cùng SHA do sự kiện edited và 3 commit mới nhất trên main chưa qua CI — hai lỗ đo được, sửa bằng cấu hình không thêm mã; (2) đường lùi: mỗi lát một PR nhỏ, revert được; (3) đơn giản: phương án 2 thêm mã/độ phức tạp trong khi lượt model (không phải CI) chiếm phần lớn một lát và chưa đo được; phương án 3 bỏ phí lỗ đã có bằng chứng
 - Đường lùi: Revert PR từng lát; xoá PLAN-3.16.0-ceiling.md; ruleset file về strict true nếu chủ repo bật lại strict sống
+
+### D-143 · 2026-10-23T11:12:16+00:00 · T-2403: ruleset sống lệch file ở 2 khoá (strict false, required_review_thread_resolution false) — đồng bộ thế nào?
+
+- Phương án: (1) Đồng bộ cả hai khoá theo ruleset sống · (2) Đồng bộ strict=false (BASE-GATE-007 cách b: CI chạy lại trên main, nhờ T-2402); giữ required_review_thread_resolution=true trong file (WF-GIT-002 MUST), loop defer chủ repo bật lại ở ruleset sống · (3) Giữ file nguyên, chỉ ghi lệch vào RUNBOOK
+- Chọn: Đồng bộ strict=false (BASE-GATE-007 cách b: CI chạy lại trên main, nhờ T-2402); giữ required_review_thread_resolution=true trong file (WF-GIT-002 MUST), loop defer chủ repo bật lại ở ruleset sống
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: strict=false là quyết định đã có đường đạt hợp lệ (ADR-0034 §2, BASE-GATE-007 cách b) khi CI chạy trên push main — T-2402 cung cấp; tắt resolve thread không có ADR và trái MUST WF-GIT-002, chép theo sẽ hợp thức hoá việc nới cổng (LOOP-CI-001); (2) đường lùi: một dòng JSON; sửa ruleset sống là việc của chủ repo (LOOP-STOP-014)
+- Đường lùi: Đổi lại strict=true trong main.json; hoặc nếu chủ repo chủ ý tắt resolve thread thì ghi ADR rồi đồng bộ khoá đó
+
+### D-144 · 2026-10-23T11:16:20+00:00 · T-2403 sau khi chủ repo bật lại strict ở ruleset sống (2026-10-23): đồng bộ gì?
+
+- Phương án: (1) Giữ main.json strict=true (đã khớp ruleset sống); chỉ khoá required_review_thread_resolution còn lệch — giữ true trong file, defer chủ repo bật · (2) Làm theo D-143 (đổi file sang strict=false)
+- Chọn: Giữ main.json strict=true (đã khớp ruleset sống); chỉ khoá required_review_thread_resolution còn lệch — giữ true trong file, defer chủ repo bật
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ruleset sống nay strict=true (gh api rules/branches/main) — file đã khớp, BASE-GATE-007 đạt theo cách (a); D-143 dựa trên trạng thái cũ, thay bằng quyết định này
+- Đường lùi: Nếu chủ repo tắt strict lại: áp D-143
