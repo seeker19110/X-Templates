@@ -11,12 +11,12 @@
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043).
 
 ## Tiếp theo
-0. **PLAN-3.14-app xong** (ADR-0038, D-126, D-133…D-135): `v3.14.0` (`7f121a6`); `xt.py app` (14 API, 7 màn, E2E + axe ở `app-e2e`), `plan waves`. PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65. Nợ: 21 MUST blueprint repo khung đổi chữ từ 2026-10-15; 58 MUST tick không có lệnh kiểm (T-2406 thêm cờ, repo khung chưa bật).
+0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65. Nợ: 21 MUST blueprint repo khung đổi chữ từ 2026-10-15; 58/68 MUST tick không có lệnh kiểm (`unchecked_must`, chưa bật `fail`).
 1. PLAN-3.13: Lát 0–C merge (#198–#201), `v3.13.0` (#202); hoãn chờ người T-1814 (AUD-SEC-102 — bản vá trong task), T-1822, T-1832, T-1834. **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (chủ repo bật lại 2026-10-23, D-144 — khớp `main.json`); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1). **Chờ chủ repo**: hotel-manager, X-Company gỡ `merge-gate` khỏi ruleset (`gh api repos/<o>/<r>/rules/branches/main`) rồi mới xoá stub; tắt "Allow auto-merge"; `XT_STEWARD_TOKEN` (T-2402 là lớp đỡ tạm bằng `workflow_dispatch`); App reviewer.
 2. Sau PLAN-3.12: ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task.
 3. Chờ chủ repo: token/app reviewer (T-1508); xoá `/scratch.log` ở gốc container; `x-hotel-manager` dọn/tạo mới; Dependabot security updates (proxy chặn API); Routine tuần `feedback aggregate` + quyền repo đích (T-2410).
 4. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR (PATCH lại thân PR sau khi mở); ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010).
-5. Giới hạn guard đã biết: ghép tên hàm lúc chạy, giải mã qua `$(…)` (D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042); chặn oan script Python chỉ đọc nhắc `.claude/hooks`/`.autopilot` (D-105).
+5. Giới hạn guard đã biết: cổng commit chạy TRƯỚC lệnh nên sửa file + `git commit` trong cùng một lệnh Bash lọt cổng (2026-10-23, `4bc2849` vượt 8 KB — sửa ở commit sau; chưa vá); ghép tên hàm lúc chạy, giải mã qua `$(…)` (D-051); env `GIT_CONFIG_*`; CLI container ngoài docker/podman (AUD-SEC-042); chặn oan script Python chỉ đọc nhắc `.claude/hooks`/`.autopilot` (D-105).
 6. Giữ cổng: C901 ≤ 10, `mypy --strict`, coverage dòng + nhánh 100 %, `changelog-check`, trần byte file + tổng thư mục (`tests/test_docs_budget.py`, ADR-0043) — không `noqa`/pragma, không nới trần.
 7. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
