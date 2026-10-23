@@ -1050,3 +1050,10 @@
 - Chọn: Một PR: Lát 3 + cắt 3.16.0 (tiền lệ #228 sửa + cắt bản)
 - Lý do (tiêu chí chất lượng cuối): (3) đơn giản: phiên ràng buộc một nhánh, lát đi tuần tự; Lát 4 chỉ là VERSION/CHANGELOG/PROGRESS — tách PR thêm một vòng review+CI không thêm bằng chứng; (2) revert một PR vẫn gỡ được cả hai
 - Đường lùi: Tách commit cắt bản ra PR riêng
+
+### D-149 · 2026-10-23T22:01:36+00:00 · Duyệt PLAN-3.17-feedback: /autopilot lần 3 sau 3.16.0 — làm gì?
+
+- Phương án: (1) Sửa 6 🟠 + 2 🟢 cùng file từ phản hồi dự án đích đã tái hiện trên HEAD (guard lọt rm -rf gốc dự án, xanh giả blueprint-status, worktree, Stop hook khác phiên, feedback lộ dữ liệu) → 3.17.0 · (2) Dọn 84 🟢 sổ audit · (3) Dừng chờ đo 2026-10-30
+- Chọn: Sửa 6 🟠 + 2 🟢 cùng file từ phản hồi dự án đích đã tái hiện trên HEAD (guard lọt rm -rf gốc dự án, xanh giả blueprint-status, worktree, Stop hook khác phiên, feedback lộ dữ liệu) → 3.17.0
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: lỗi người dùng thật đã gặp, có tái hiện; #27 là lọt hành động không đảo ngược — hàng rào phải chặn (ADR-0018); 🟢 sổ audit không có tác động đo được tương đương; chờ đo không chặn việc này (2) mỗi lát một PR nhỏ, revert được
+- Đường lùi: revert PR từng lát; phản hồi về lại trạng thái mở trong TARGETS
