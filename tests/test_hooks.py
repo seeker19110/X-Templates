@@ -4109,7 +4109,8 @@ class GuardWave1017Test(unittest.TestCase):
                 "rsync -a src/ dst/",
                 "python3 -c \"print(open('.env.example').read())\"",
                 # heredoc thuộc lệnh sở hữu `<<`, không thuộc trình thông dịch khác trên cùng dòng (gặp khi commit)
-                "python3 a.py 2>&1 | tail -1; git commit -F - <<'EOF'\nopen('.env','w')\nEOF",
+                # (T-2503: trình thông dịch đứng SAU `git commit` — đứng trước thì bị chặn riêng)
+                "git commit -F - <<'EOF'; python3 a.py 2>&1 | tail -1\nopen('.env','w')\nEOF",
             ),
         )
         self.check(
@@ -4584,7 +4585,8 @@ class GuardAiAttributionTest(unittest.TestCase):
             "git commit -F -",
             'grep -n "Claude Opus" x; git status',
             "cat > note.md <<'EOF'\nClaude Opus\nEOF",
-            "python3 - <<'EOF'\nprint('Claude-Session: x')\nEOF\ngit commit -m 'fix: a'",
+            # T-2503: trình thông dịch đứng trước `git commit` giờ bị chặn riêng → lệnh khác sở hữu heredoc là `cat`
+            "cat <<'EOF'\nprint('Claude-Session: x')\nEOF\ngit commit -m 'fix: a'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "")
@@ -4673,7 +4675,7 @@ class GuardAiAttributionTest(unittest.TestCase):
             with self.subTest(cmd[:60]):
                 self.assertEqual(self.decide(cmd, d), "deny")
         # heredoc của lệnh khác trên cùng dòng vẫn là dữ liệu của lệnh đó
-        self.assertEqual(self.decide("python3 - <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
+        self.assertEqual(self.decide("cat <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
         self.assertEqual(self.g._unquoted_seps("a \"b;c\" 'd&&e' f\\;g; h"), [(19, 20)])
 
         # Không bậc hai: nhân 4 cỡ đầu vào thì thời gian CPU tăng ~4 lần (tuyến tính), bậc hai sẽ ~16 lần. So tỉ lệ thay cho

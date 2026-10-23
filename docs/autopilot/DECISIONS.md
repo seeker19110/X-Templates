@@ -1057,3 +1057,10 @@
 - Chọn: Sửa 6 🟠 + 2 🟢 cùng file từ phản hồi dự án đích đã tái hiện trên HEAD (guard lọt rm -rf gốc dự án, xanh giả blueprint-status, worktree, Stop hook khác phiên, feedback lộ dữ liệu) → 3.17.0
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: lỗi người dùng thật đã gặp, có tái hiện; #27 là lọt hành động không đảo ngược — hàng rào phải chặn (ADR-0018); 🟢 sổ audit không có tác động đo được tương đương; chờ đo không chặn việc này (2) mỗi lát một PR nhỏ, revert được
 - Đường lùi: revert PR từng lát; phản hồi về lại trạng thái mở trong TARGETS
+
+### D-150 · 2026-10-23T22:31:58+00:00 · T-2503: cho cat/echo/printf (không chuyển hướng ra file) đứng trước git commit?
+
+- Phương án: (1) Cho: không ghi cây; giữ cat <<EOF | git commit -F - đang dùng · (2) Chặt đúng spec, đổi test cũ
+- Chọn: Cho: không ghi cây; giữ cat <<EOF | git commit -F - đang dùng
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: luật nhằm lệnh GHI cây trước commit; ba lệnh này chỉ ghi stdout (chuyển hướng ra file vẫn bị chặn); (4) giữ cách viết message commit phổ biến
+- Đường lùi: Bỏ 3 tên khỏi tuple _tree_readonly + đổi test_every_message_source_is_scanned

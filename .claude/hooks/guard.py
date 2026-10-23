@@ -1501,17 +1501,58 @@ def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tupl
     recursive = "r" in flags or "R" in flags or "--recursive" in args
     force = "f" in flags or "--force" in args
     targets = _positionals(args)
+    hit = next((t for t in targets if recursive and _wipes_root(t, root, cwd)), "")
+    if hit:  # cả `rm -r` không `-f`: vẫn xoá hết cây (chỉ hỏi file chỉ-đọc)
+        return "deny", ROOT_WIPE_WHY.format(hit)
     if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
         return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
     if recursive and force and not targets:  # `xargs rm -rf`, `… | xargs rm -rf`: đích đến từ stdin (AUD-SEC-024)
         return "ask", "rm -rf không có đích trên dòng lệnh (đích từ xargs/stdin) — xoá dữ liệu cần người duyệt"
     outside = [t for t in targets if recursive and root and _outside_project(t, root, cwd)]
+    own = _own_worktrees(root, cwd) if outside else set()
+    outside = [t for t in outside if _real_target(t, root, cwd) not in own]
     if outside:
         return "ask", f"xoá đệ quy ngoài thư mục dự án ({outside[0]}) — xoá dữ liệu cần người duyệt"
     return "", ""
 
 
 TEMP_DIRS = ("/tmp", "/var/tmp", "/private/tmp", "/private/var/folders")
+ROOT_WIPE_WHY = "xoá đệ quy gốc dự án, thư mục cha hoặc .git của nó ({}) — mất cả dự án và lịch sử"
+
+
+def _wipes_root(target: str, root: str, cwd: Optional[str]) -> bool:
+    """T-2501: đích là gốc dự án, `gốc/*`, `gốc/.git` hay thư mục cha của gốc (`ROOT/..`, `cd .. && rm -rf <gốc>`) —
+    kể cả khi gốc nằm trong thư mục tạm. Đích không mở được (biến lạ, `$OLDPWD`) → False: luật khác xét."""
+    if not root or OLDPWD_REF_RE.match(target):
+        return False
+    t = _resolve_target(target, root, cwd)
+    if "$" in t or "`" in t:
+        return False
+    p = _real_target(posixpath.dirname(t) if t.endswith("/*") else t, root, cwd)
+    r = os.path.realpath(root)
+    return p in (r, os.path.join(r, ".git")) or r.startswith(p.rstrip("/") + "/")
+
+
+def _real_target(t: str, root: str, cwd: Optional[str]) -> str:
+    return os.path.realpath(os.path.join(cwd or root, os.path.expanduser(_resolve_target(t, root, cwd))))
+
+
+def _own_worktrees(root: str, cwd: Optional[str]) -> Set[str]:
+    """T-2502: worktree phụ đã đăng ký của repo (`git worktree list`) — bỏ gốc chính (dòng đầu) và worktree chứa thư
+    mục đang đứng; xoá chúng không mất gì ngoài cây làm việc. Đọc lỗi/hết giờ → rỗng (chặn như cũ)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", root, "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    paths = [os.path.realpath(x[9:]) for x in r.stdout.splitlines() if x.startswith("worktree ")]
+    here = os.path.realpath(cwd or root)
+    return {p for p in paths[1:] if not (here + "/").startswith(p + "/")} if r.returncode == 0 else set()
 
 
 def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
@@ -1676,12 +1717,28 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
-    if {a for a in args[i:] if not a.isdigit()} <= FIND_NO_FILTER and any(
-        _dangerous_rm_target(r) for r in roots
-    ):  # `find . -delete` = `rm -rf .`
+    unfiltered = _find_filters(args[i:]) <= FIND_NO_FILTER
+    hit = next((r for r in roots if unfiltered and _wipes_root(r, root, cwd)), "")
+    if hit:
+        return "deny", "find: " + ROOT_WIPE_WHY.format(hit)
+    if unfiltered and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
         return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
+
+
+def _find_filters(expr: List[str]) -> Set[str]:
+    """Phần biểu thức `find` ngoài khối `-exec … ;|+` và số độ sâu: rỗng/chỉ `FIND_NO_FILTER` = xoá cả cây."""
+    out: Set[str] = set()
+    skip = False
+    for a in expr:
+        if a in FIND_EXEC:
+            skip = True
+        elif skip:
+            skip = a not in (";", "+")
+        elif not a.isdigit():
+            out.add(a)
+    return out
 
 
 def _find_parts(args: List[str]) -> Tuple[List[str], int]:
@@ -3667,6 +3724,36 @@ def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
         elif x[:2] in ("-t", "-b", "-F") and len(x) > 2:  # `-tfeat: x` (pflag)
             out.append((GH_PR_TEXT_OPTS[x[:2]], x[2:]))
     return out
+
+
+COMMIT_AFTER_WRITE_WHY = (
+    "Tách lệnh: sửa file trước, `git commit` ở lệnh riêng — cổng commit chạy trên cây trước khi lệnh chạy, phần "
+    "đứng trước ({}) sẽ vào commit mà cổng chưa thấy (cổng đỏ thì nó cũng không chạy)"
+)
+TREE_READONLY_GIT = {("git", "add"), ("git", "status"), ("git", "diff"), ("git", "log")}
+
+
+def _tree_readonly(argv: List[str]) -> bool:
+    """Lệnh đứng trước `git commit` không ghi cây: `cd`, `export`/gán biến, `true`, `git add|status|diff|log`, `cat`/
+    `echo`/`printf` (message qua ống: `cat <<'EOF' | git commit -F -`) — không chuyển hướng ra file (trừ /dev/null),
+    không `--output`."""
+    n = normalize(argv)
+    if any(t in REDIRECTS and argv[i + 1 : i + 2] != ["/dev/null"] for i, t in enumerate(argv)):
+        return False
+    if any(a.startswith("--output") for a in n):
+        return False
+    return not n or n[0] in ("cd", "export", "true", "cat", "echo", "printf") or tuple(n[:2]) in TREE_READONLY_GIT
+
+
+def _commit_after_write(commands: List[Tuple[List[str], Optional[str]]]) -> str:
+    """T-2503: `git commit` đi sau lệnh có thể ghi file trong CÙNG lệnh Bash → lý do chặn; không thì rỗng."""
+    for k, (argv, _) in enumerate(commands):
+        if normalize(argv)[:2] != ["git", "commit"]:
+            continue
+        bad = next((b for b, _ in commands[:k] if not _tree_readonly(b)), None)
+        if bad is not None:
+            return COMMIT_AFTER_WRITE_WHY.format(" ".join(bad)[:120])
+    return ""
 
 
 def _attribution_target(
@@ -5934,6 +6021,7 @@ def bash_decision(
         return res
     commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
+    deny_reason = deny_reason or _commit_after_write(commands)
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
     )
@@ -5971,6 +6059,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("push thẳng nhánh chính", "PUSH_MAIN"),
     ("push --all/--tags", "PUSH_ALL"),
     ("xoá đệ quy ngoài thư mục dự án", "WIPE_OUTSIDE"),
+    ("xoá đệ quy gốc dự án", "WIPE_OUTSIDE"),
     ("rm -rf không có đích", "WIPE_OUTSIDE"),
     ("find xoá file ngoài thư mục dự án", "WIPE_OUTSIDE"),
     ("xoá thư mục gắn từ máy", "WIPE_OUTSIDE"),

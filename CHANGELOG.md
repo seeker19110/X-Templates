@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `blueprint-status --strict` (T-2511): mục `[~]` mang cả "Không áp dụng:" lẫn "Miễn:" không còn lọt mà không cần `Duyệt:` — lẫn lộn là `bad_waivers`, thông báo chỉ cách sửa.
+- `blueprint-status --strict` (T-2512): mục checklist ghi ID in đậm thay backtick báo lỗi định dạng kèm dòng; blueprint 0 mục nhận diện được là đỏ (trước đây exit 0 — xanh giả; ADR-0011).
+- Guard: xoá đệ quy chính gốc dự án, `gốc/*`, `gốc/.git` hoặc thư mục cha của gốc → **deny** (mã `WIPE_OUTSIDE`) ở mọi cách viết — `rm -rf|-fr|-r -f|--recursive --force|-r`, `"$CLAUDE_PROJECT_DIR"`, `$PWD`/`.` ở gốc, `ROOT/..`, `../<tên gốc>`, `cd .. && rm -rf <tên gốc>`, `find ROOT -delete`/`-exec rm -rf {} +` không lọc — kể cả khi gốc nằm trong thư mục tạm; trước đây cho chạy. Xoá thư mục con/file vẫn cho chạy. Test `wipe_project_root` (T-2501).
+- Guard: `rm -rf <worktree phụ đã đăng ký của chính repo>` (`git worktree list`, khác gốc chính và worktree đang đứng) cho chạy, trước đây bị `WIPE_OUTSIDE` chặn oan; đọc `git worktree list` lỗi/hết giờ (5 s) → chặn như cũ. Test `wipe_own_worktree` (T-2502).
+- Guard: lệnh có thể ghi file đứng trước `git commit` trong cùng lệnh Bash (`sed -i … && git commit`, `echo x > f; git commit`) → **deny** "Tách lệnh…" — cổng commit chạy trên cây trước khi lệnh chạy nên phần sửa từng vào commit mà cổng chưa thấy; cho đứng trước `cd`, `export`/gán biến, `true`, `git add|status|diff|log`, `cat`/`echo`/`printf` (message qua ống `cat <<'EOF' | git commit -F -`) khi không chuyển hướng ra file. Thông báo cổng đỏ nói rõ cả lệnh chưa chạy. Test `commit_after_write` (T-2503).
+
 ## [3.16.0] - 2026-10-23
 
 **Dự án đích: chạy lại `install.py --with-github`** — mẫu CI bỏ `edited`, thêm `pr-title.yml` (kiểm tiêu đề PR) và `workflow_dispatch` cho `ci.yml`; `pr-steward.yml` cần `actions: write` (bản cũ: dispatch CI sau merge bị 403, job steward đỏ kèm hướng dẫn); dự án đã sửa `ci.yml` thì gộp tay `ci.yml.xtemplates-new`. PLAN-3.16.0-ceiling (D-142…D-148, ADR-0043); đo lại 2026-10-30 bằng `pr stats`.
