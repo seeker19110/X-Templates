@@ -172,6 +172,49 @@ class WipeProjectRootTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "", cmd)
 
+    def test_guard_wipe_project_root_find_broad_test(self):
+        """Review bb606aa: test tên/đường khớp mọi thứ hay khớp `.git`, phủ định, `-o` với nhánh rộng → không lọc."""
+        for cmd in (
+            f"find {R} -path '*' -delete",
+            "find . -name '*' -delete",
+            "find . -type f -name '*' -delete",
+            "find . -regex '.*' -delete",
+            "find . -iregex '.*/\\.GIT' -delete",
+            "find . -regex '[' -delete",  # regex hỏng: chiều chặt
+            "find . -name '.*' -delete",
+            "find . -iname '.GIT' -delete",
+            "find . -name .git -exec rm -rf {} +",
+            "find . -type d -name .git -exec rm -rf {} +",
+            "find . -name '.git' -delete",
+            f"find {R} -name .git -delete",
+            "find . -path './.git' -delete",
+            f"find {R} -wholename '*/.git' -delete",
+            "find . ! -name x -delete",
+            "find . -not -name '*.pyc' -delete",
+            "find . -name '*.pyc' -o -name '*' -delete",
+            "cd scripts && find . -name '*' -delete",  # không phải gốc: luật `find .` không lọc
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+        for cmd in (
+            "find . -name '*.pyc' -delete",
+            "find . -type f -name '*.log' -delete",
+            "find . -type d -empty -delete",
+            "find . -name node_modules -prune -o -print",
+            "find . -name '*.pyc' -name '*' -delete",  # AND: còn một lọc tin được
+            "find . -path './build/*' -delete",
+            "find . -regex '.*\\.pyc' -delete",
+            "find . -lname '*' -delete",  # chỉ symlink
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "", cmd)
+
+    def test_guard_wipe_project_root_git_glob(self):
+        """Review bb606aa: glob nằm dưới `gốc/.git/` → deny."""
+        for cmd in ("rm -rf .git/objects/*", f"rm -rf {R}/.git/refs/*", f"rm -rf {R}/.git/*", "rm -rf .git/*/x"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+
 
 def _git(*args: str) -> str:
     env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")

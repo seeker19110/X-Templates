@@ -1547,6 +1547,8 @@ def _glob_wipes_root(base: str, pat: str, deeper: bool, root: str) -> bool:
     """Glob `pat` ở thư mục `base` (review 5ef1a14 B2): `base` là gốc → khớp được `.git` (`*`, `.*`, `.g*`, `?*`; có phần
     sau thì chỉ khi chủ ý nhắm `.`); `base` là cha của gốc → khớp tên thư mục dẫn tới gốc."""
     r = os.path.realpath(root)
+    if (base + "/").startswith(r + "/.git/"):  # mọi glob dưới `gốc/.git/` (review bb606aa)
+        return True
     if base == r:
         return fnmatch.fnmatchcase(".git", pat) and (not deeper or pat.startswith("."))
     under = r.startswith(base.rstrip("/") + "/")
@@ -1737,7 +1739,7 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
-    unfiltered = _find_filters(args[i:]) <= FIND_NO_FILTER
+    unfiltered = _find_filters(args[i:], roots) <= FIND_NO_FILTER
     hit = next((r for r in roots if unfiltered and _wipes_root(r, root, cwd)), "")
     if hit:
         return "deny", "find: " + ROOT_WIPE_WHY.format(hit)
@@ -1747,21 +1749,41 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
-def _find_filters(expr: List[str]) -> Set[str]:
+def _find_filters(expr: List[str], roots: List[str]) -> Set[str]:
     """Phần biểu thức `find` ngoài khối `-exec … ;|+`, số độ sâu và loại của `-type` (`f`/`d`, review 5ef1a14 M1):
     rỗng/chỉ `FIND_NO_FILTER` = xoá cả cây."""
     out: Set[str] = set()
-    skip = False
+    skip = broad = False
     prev = ""
     for a in expr:
         if a in FIND_EXEC:
             skip = True
         elif skip:
             skip = a not in (";", "+")
-        elif not a.isdigit() and prev != "-type":
+        elif prev in FIND_TREE_TESTS:  # review bb606aa: mẫu khớp mọi thứ/khớp `.git` không phải lọc
+            wide = _broad_find_test(prev, a, roots)
+            broad = broad or wide
+            if not wide:
+                out.add(a)
+        elif not a.isdigit() and prev != "-type" and a not in FIND_TREE_TESTS:
             out.add(a)
         prev = a
-    return out
+    # phủ định làm điều kiện không còn tin được; `-o` với một nhánh rộng = rộng
+    return set() if out & {"!", "-not"} or (broad and out & {"-o", "-or"}) else out
+
+
+def _broad_find_test(op: str, val: str, roots: List[str]) -> bool:
+    """Test tên/đường của `find` khớp `.git` (nên khớp cả `*`, `.*`): `-name` so với tên, `-path` với `<gốc>/.git`,
+    `-regex` khớp cả đường (regex hỏng → coi là rộng)."""
+    paths = [posixpath.join(r, ".git") for r in roots]
+    fold = op.startswith("-i")
+    if op.endswith("regex"):
+        try:
+            return any(re.fullmatch(val, p, re.I if fold else 0) for p in paths)
+        except re.error:
+            return True
+    names = [".git"] if op in ("-name", "-iname") else paths
+    return any(fnmatch.fnmatchcase(n.lower(), val.lower()) if fold else fnmatch.fnmatchcase(n, val) for n in names)
 
 
 def _find_parts(args: List[str]) -> Tuple[List[str], int]:
@@ -1810,6 +1832,7 @@ FIND_READONLY_EXEC = {
 }
 FIND_FILE_OUT = {"-fprint", "-fprint0", "-fprintf", "-fls"}  # ghi kết quả vào file (đối số kế tiếp)
 FIND_NAME_TESTS = {"-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-name", "-iname", "-lname"}
+FIND_TREE_TESTS = FIND_NAME_TESTS - {"-lname"}  # `-lname` chỉ khớp symlink
 EVIDENCE_NAMES = {"verified.json", "runs.jsonl", "reviews.json"}  # tên đặc thù của file trong `.autopilot/`
 
 
