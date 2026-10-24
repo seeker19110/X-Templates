@@ -105,9 +105,11 @@ class CheckLinksModuleTest(unittest.TestCase):
         # Review #238 🟢: tiêu đề setext nhiều dòng (GitHub nối bằng khoảng trắng) và setext trong `>`; dòng trống cắt đoạn.
         self.write(
             "b.md",
-            "Dong mot\ndong hai\n===\n\n> Trich dan\n> ---\n\nTruoc\n\n---\n> a\n> b\n> ===\n",
+            "Dong mot\ndong hai\n===\n\n> Trich dan\n> ---\n\nTruoc\n\n---\n> a\n> b\n> ===\n"
+            "\n<!-- c -->\nSau html\n---\n\n***\nSau ke\n---\n",
         )
-        links = "dong-mot-dong-hai trich-dan a-b"
+        # Review #242: dòng HTML hay `***` trước tiêu đề, và riêng dòng cuối của đoạn, vẫn là anchor hợp lệ (như cũ).
+        links = "dong-mot-dong-hai dong-hai trich-dan a-b sau-html sau-ke"
         self.write("a.md", " ".join(f"[{a}](b.md#{a})" for a in links.split()) + " [x](b.md#truoc)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:1: anchor không có trong file -> b.md#truoc"])
 

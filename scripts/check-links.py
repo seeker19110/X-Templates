@@ -134,8 +134,9 @@ def anchors(path: Path) -> set[str]:
         found.update(a.lower() for a in HTML_ANCHOR_RE.findall(line))
         h = HEADING_RE.match(line)
         body = QUOTE_RE.sub("", line).strip()
-        text = h.group(1) if h else (" ".join(para) if para and SETEXT_RE.match(body) else "")
-        for base in slugs(text) if text else ():
+        # Setext: cả đoạn nối (như GitHub) và riêng dòng cuối — dòng HTML/`***` trước tiêu đề không làm đỏ oan link cũ.
+        texts = [h.group(1)] if h else ([" ".join(para), para[-1]] if para and SETEXT_RE.match(body) else [])
+        for base in {s for t in texts for s in slugs(t)}:
             k = seen.get(base, 0)
             seen[base] = k + 1
             found.add(f"{base}-{k}" if k else base)

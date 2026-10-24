@@ -10,7 +10,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`** (`check-links.py` nhận thêm anchor của tiêu đề setext — bớt `lint` đỏ oan).
 
 ### Fixed
-- `check-links.py` (T-2701, review #238): anchor của tiêu đề setext có đoạn nhiều dòng (GitHub nối bằng khoảng trắng) và tiêu đề setext trong trích dẫn `>` — trước đây chỉ xét một dòng ngay trên `===`/`---` ngoài `>`, link hợp lệ bị báo "anchor không có trong file".
+- `check-links.py` (T-2701, review #238): anchor của tiêu đề setext có đoạn nhiều dòng (GitHub nối bằng khoảng trắng; riêng dòng cuối vẫn nhận như cũ) và tiêu đề setext trong trích dẫn `>` — trước đây chỉ xét một dòng ngay trên `===`/`---` ngoài `>`, link hợp lệ bị báo "anchor không có trong file".
 
 ## [3.18.0] - 2026-10-24
 
