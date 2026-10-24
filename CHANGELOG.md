@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** — guard/hook đổi (chặn xoá gốc dự án, từ chối sửa file + `git commit` cùng một lệnh Bash; xem Fixed), `xt.py` đổi (`blueprint-status --strict` đỏ khi lẫn "Không áp dụng" + "Miễn" ở mọi mức hoặc ID in đậm — sửa blueprint trước khi nâng; `loop` theo gốc worktree; Stop hook gắn phiên; `feedback collect` không chép lý do miễn trừ). PLAN-3.17-feedback (D-149…D-156), từ phản hồi 4 dự án đích.
+
 ### Fixed
 - `blueprint-status --strict` (T-2511): mục `[~]` mang cả "Không áp dụng:" lẫn "Miễn:" không còn lọt mà không cần `Duyệt:` — lẫn lộn là `bad_waivers` ở **mọi mức** (dự án đích có dòng SHOULD dạng này sẽ đỏ sau khi nâng — bỏ một trong hai nghĩa), thông báo chỉ cách sửa.
 - `blueprint-status --strict` (T-2512): mục checklist ghi ID in đậm/gạch dưới thay backtick (`**ID**`, `**\`ID\`**`, `__ID__`) báo lỗi định dạng kèm dòng; blueprint 0 mục nhận diện được là đỏ (trước đây exit 0 — xanh giả; ADR-0011).

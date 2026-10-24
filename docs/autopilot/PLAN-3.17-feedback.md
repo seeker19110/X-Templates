@@ -44,4 +44,4 @@
 
 ### Lát 4 — Phản hồi và phát hành
 - [x] `T-2531` `feedback collect`: không chép nguyên văn lý do miễn trừ của dự án (chỉ ID + loại + tóm tắt chuẩn hoá), khử trùng theo (loại, ID) với FB đã có kể cả khi lý do đổi chữ (🟠) (files: scripts/xt.py, tests/test_xt_cli.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k feedback_collect_no_project_data`
-- [ ] `T-2539` VERSION 3.17.0 + CHANGELOG `[3.17.0]` (dự án đích chạy lại `install.py` — guard/hook đổi) + PROGRESS (7 🟢 còn lại) (sau: T-2503, T-2512, T-2522, T-2531; files: VERSION, CHANGELOG.md, PROGRESS.md) — Gate: `scripts/dev-task.sh gate`
+- [x] `T-2539` VERSION 3.17.0 + CHANGELOG `[3.17.0]` (dự án đích chạy lại `install.py` — guard/hook đổi) + PROGRESS (7 🟢 còn lại) (sau: T-2503, T-2512, T-2522, T-2531; files: VERSION, CHANGELOG.md, PROGRESS.md) — Gate: `scripts/dev-task.sh gate`
