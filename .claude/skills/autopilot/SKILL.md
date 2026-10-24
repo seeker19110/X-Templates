@@ -6,7 +6,7 @@ argument-hint: "[mô tả yêu cầu hoặc đường dẫn PROJECT.md]"
 
 # /autopilot — tự động đến khi hoàn thành, dừng đúng chỗ
 
-Giao thức đầy đủ: `<FW>/11-autonomous-loop/README.md` (đọc một lần khi bắt đầu autopilot); file này là checklist. `<FW>` = `.xtemplates/framework` (dự án đích) hoặc `framework` (repo khung); `<XT>` = `python3 .xtemplates/scripts/xt.py` (hoặc `python3 scripts/xt.py`). Máy in sẵn bước kế ở mỗi lệnh (`doctor`, `loop status`, `pr next`, Stop hook) — làm theo output, không đoán. Mục tiêu: xong trong **một phiên** (ADR-0009); việc cần người không chặn cả vòng.
+Giao thức đầy đủ: `<FW>/11-autonomous-loop/README.md` (đọc một lần); file này là checklist. `<FW>` = `.xtemplates/framework` (dự án đích) hoặc `framework` (repo khung); `<XT>` = `python3 .xtemplates/scripts/xt.py` (hoặc `python3 scripts/xt.py`). Máy in sẵn bước kế ở mỗi lệnh — làm theo, không đoán. Mục tiêu: xong trong **một phiên** (ADR-0009); việc cần người không chặn cả vòng.
 
 ## Bước 0 — chuẩn bị
 1. Tên phiên `<Tên repo> — <tên nhánh>` (SessionStart in sẵn; ở nhánh chính thì tạo nhánh `<type>/<mô-tả>` trước).
@@ -14,7 +14,7 @@ Giao thức đầy đủ: `<FW>/11-autonomous-loop/README.md` (đọc một lầ
 3. Chế độ quyền Auto (Stop hook nhắc nếu không).
 
 ## Pha 1 — lập kế hoạch (G0–G4), không code
-Theo README bước 1–8: đọc repo trước (không hỏi điều đã có trong code) → `PROJECT.md` → `<XT> compose … --out BLUEPRINT.md` → `researcher` xác minh stack/chuẩn/luật từ nguồn sống, ADR chọn stack → `SPEC-*.md` (Given/When/Then + ca biên; spec hở → tự quyết) → thiết kế (≥ M: C4, schema, `API-CONTRACT.md`, `THREAT-MODEL.md`; build: chỉ phần code cần — ADR-0041) → `docs/autopilot/PLAN.md` theo mẫu `<FW>/templates/PLAN.md` (task ≤ 1 ngày, mỗi task một Gate máy kiểm, `(sau: …; files: …)`, mục Ủy quyền production nếu cần) → **tự duyệt PLAN**: tóm tắt ≤ 30 dòng đầu PLAN, `<XT> loop decide --question "Duyệt PLAN …" …`, báo người rồi làm tiếp không chờ.
+Theo README bước 1–8: đọc repo trước (không hỏi điều đã có trong code) → `PROJECT.md` → `<XT> compose … --out BLUEPRINT.md` → `researcher` xác minh stack/chuẩn/luật từ nguồn sống, ADR chọn stack → `SPEC-*.md` (Given/When/Then + ca biên; spec hở → tự quyết) → thiết kế (≥ M: C4, schema, `API-CONTRACT.md`, `THREAT-MODEL.md`; build: chỉ phần code cần — ADR-0041) → `docs/autopilot/PLAN.md` (đợt sau: `PLAN-<đợt>.md` mới) theo mẫu `<FW>/templates/PLAN.md` (task ≤ 1 ngày, mỗi task một Gate máy kiểm, `(sau: …; files: …)`, mục Ủy quyền production nếu cần) → **tự duyệt PLAN**: tóm tắt ≤ 30 dòng đầu PLAN, `<XT> loop decide --question "Duyệt PLAN …" …`, báo người rồi làm tiếp không chờ.
 Mọi điểm quyết định (spec hở, công nghệ, thiết kế, phạm vi, bảo mật/pháp lý mơ hồ): tự duyệt theo tiêu chí chất lượng cuối (AGENTS.md §Điểm quyết định), ghi `<XT> loop decide …` → D-NNN; mặc định tự host.
 
 ## Pha 2 — vòng lặp có bằng chứng (G5–G7)

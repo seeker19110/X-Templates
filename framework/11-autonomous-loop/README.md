@@ -54,7 +54,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 5. **G3 Specify** → `SPEC-*.md` (Given/When/Then + ca biên); spec hở → phiên chính quyết tường minh (`<XT> loop decide`,
    D-NNN) theo tiêu chí chất lượng cuối ở [`stop-points-and-escalation.md`](stop-points-and-escalation.md) — tự duyệt, không chờ người.
 6. **G4 Design** → sơ đồ, schema, `API-CONTRACT.md`, `THREAT-MODEL.md` (≥ M).
-7. **`docs/autopilot/PLAN.md`** theo [`../templates/PLAN.md`](../templates/PLAN.md): mỗi task một dòng
+7. **`docs/autopilot/PLAN.md`** (đợt sau: file mới `PLAN-<đợt>.md` — `.autopilot/` không theo git) theo [`../templates/PLAN.md`](../templates/PLAN.md): mỗi task một dòng
    `- [ ] \`T-NNN\` <việc> — Gate: \`<lệnh>\`` (regex thật: `TASK_RE`/`GATE_RE` trong xt.py), ≤ 1 ngày/task,
    `(sau: …; files: …)`; số cho cờ `loop init` theo [`LOOP-DESIGN-001`](loop-design.md); mục Ủy quyền production nếu cần (ADR-0022).
 8. **MỘT cổng duyệt — phiên chính tự duyệt**: tóm tắt ≤ 30 dòng (MUST/SHOULD của blueprint, stack + phiên bản, task, rủi ro)
