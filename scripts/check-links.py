@@ -37,9 +37,11 @@ if ROOT.name == ".xtemplates":  # cài ở dự án đích (.xtemplates/scripts/
 SKIP_DIRS = {".git", "node_modules", ".venv", ".autopilot", "__pycache__", ".xtemplates"}
 LINK_RE = re.compile(r"\[[^\]]*\]\((<[^>]+>|[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
-# Tiêu đề ATX, kể cả trong trích dẫn `>` hay mục danh sách (GitHub vẫn sinh anchor); setext: dòng `===`/`---` dưới chữ
+# Tiêu đề ATX, kể cả trong trích dẫn `>` hay mục danh sách (GitHub vẫn sinh anchor); setext: dòng `===`/`---` dưới một
+# đoạn (nhiều dòng thì nối bằng khoảng trắng), kể cả trong `>` — QUOTE_RE bỏ tiền tố trích dẫn trước khi xét.
 HEADING_RE = re.compile(r"^\s*(?:>\s*|(?:[-*+]|\d+[.)])\s+)*#{1,6}\s+(.*?)(?:\s+#+)?\s*$")
 SETEXT_RE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
+QUOTE_RE = re.compile(r"^ {0,3}(?:>\s?)+")
 HTML_ANCHOR_RE = re.compile(r"<[a-z][a-z0-9]*\s[^>]*\b(?:id|name)=[\"']?([^\"'\s>]+)", re.IGNORECASE)
 LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")  # `#L3`, `#L3-L9`: dòng mã trên GitHub, không phải tiêu đề
 URL_RE = re.compile(r"^https?://[^\s]+$")
@@ -121,22 +123,23 @@ def anchors(path: Path) -> set[str]:
     found = {"top"}
     seen: dict[str, int] = {}
     fence: str | None = None
-    prev = ""
+    para: list[str] = []  # đoạn đang mở (đã bỏ tiền tố `>`): dòng `===`/`---` ngay sau biến cả đoạn thành tiêu đề
     for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         m = FENCE_RE.match(line)
         if m and (fence is None or m.group(1) == fence):
-            fence, prev = (None if fence else m.group(1)), ""
+            fence, para = (None if fence else m.group(1)), []
             continue
         if fence:
             continue
         found.update(a.lower() for a in HTML_ANCHOR_RE.findall(line))
         h = HEADING_RE.match(line)
-        text = h.group(1) if h else (prev.strip() if prev.strip() and SETEXT_RE.match(line) else "")
+        body = QUOTE_RE.sub("", line).strip()
+        text = h.group(1) if h else (" ".join(para) if para and SETEXT_RE.match(body) else "")
         for base in slugs(text) if text else ():
             k = seen.get(base, 0)
             seen[base] = k + 1
             found.add(f"{base}-{k}" if k else base)
-        prev = "" if h or text else line
+        para = [] if h or not body or SETEXT_RE.match(body) else [*para, body]  # đường kẻ `---` cũng cắt đoạn
     return found
 
 
