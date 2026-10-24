@@ -29,3 +29,4 @@
 
 ### Lát 2 — Hiệu năng (tự rà delta sau #242)
 - [x] `T-2702` `anchors()` gom đoạn bằng `append` thay `[*para, body]`, cắt 3.18.2 (chép cả danh sách mỗi dòng → O(n²): đoạn 50 000 dòng 6,3 s); test đoạn 200 000 dòng < 5 s (sau: T-2701; files: scripts/check-links.py, tests/test_check_links.py, CHANGELOG.md, VERSION) — Gate: `python3 -m unittest discover -s tests -k check_links_anchor`
+- [x] `T-2703` CI py311 #243: `DeliveryPhaseReleaseTest` dọn thư mục tạm đỏ "Directory not empty: 'objects'" — git của runner chạy auto-maintenance tách nền sau `commit`; helper `git()` của test tắt `maintenance.auto`/`gc.auto` (sau: T-2702; files: tests/test_delivery_phase.py) — Gate: `python3 -m unittest tests.test_delivery_phase`

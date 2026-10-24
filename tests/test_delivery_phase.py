@@ -297,7 +297,10 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.commit("c0")
 
     def git(self, *args: str) -> str:
+        # Không auto-maintenance/gc: git mới chạy tách nền sau `commit`, ghi `.git/objects` lúc TemporaryDirectory đang
+        # xoá → "Directory not empty: 'objects'" (CI py311, #243).
         cfg = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+        cfg += ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
         r = subprocess.run(["git", "-C", str(self.repo), *cfg, *args], capture_output=True, text=True, check=True)
         return r.stdout.strip()
 
