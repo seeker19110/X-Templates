@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-22
+updated: 2026-10-24
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -63,7 +63,9 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 **Pha 2 — vòng lặp có bằng chứng**
 
 9. `<XT> loop init --plan docs/autopilot/PLAN.md [--blueprint B] --single-session [--hours H]` → `.autopilot/state.json`
-   (gitignore; trần vòng tự tính, `max_same_failure: 3`). **Một phiên đến khi xong** (ADR-0009).
+   (gitignore; trần vòng tự tính, `max_same_failure: 3`; gắn `session_id` của phiên, `loop resume` gắn lại phiên mới).
+   **Một phiên đến khi xong** (ADR-0009). Lệnh `loop` gõ trong một git worktree khác của cùng repo dùng gốc worktree đó
+   (Gate, tick PLAN, `.autopilot/` riêng); `hook-stop`/`checkpoint` luôn theo `CLAUDE_PROJECT_DIR`.
 10. **Mỗi vòng**: `<XT> loop status --json` → `continue` kèm `task`, `executor` (tầng giao việc, ADR-0029; `escalated` =
     chuyển cấp kèm diff + evidence lỗi + giả thuyết đã loại), `milestone_done` + `milestone_audit` (`now` → audit delta theo
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
@@ -82,7 +84,8 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     Luật làn, ngoại lệ cứng, pha build: [`LOOP-STOP-022`](stop-points-and-escalation.md), ADR-0024/0025/0031/0033.
 13. **Stop hook quyết** (`stop-guard.sh` → `<XT> loop hook-stop`): `continue`/`verify` → trả `block` kèm lý do, agent làm
     tiếp (`verify` = task tick mà thiếu/khác bằng chứng, hoặc chưa chạy `<XT> loop verify --all` trên cây cuối —
-    [`LOOP-DESIGN-022`](loop-design.md)); `done`/`blocked`/`budget` → cho dừng.
+    [`LOOP-DESIGN-022`](loop-design.md)); `done`/`blocked`/`budget` → cho dừng. Lượt Stop của phiên khác phiên đã gắn
+    hoặc stdin không phải JSON object → cho dừng, không tăng `iterations`, ghi một dòng `.autopilot/hook-stop.log`.
 14. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <ID> --reason "..."` rồi làm việc khác; mọi việc còn lại
     phụ thuộc → `<XT> loop block --reason "..."`. Nhóm máy chặn / cho chạy / cần người và điểm dừng bắt buộc:
     [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý rồi `<XT> loop resume`.

@@ -1705,7 +1705,8 @@ class LoopCommandsTest(TmpDirCase):
         shutil.rmtree(self.tmp / ".xtemplates")
         self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "default")
         self.assertIn("⚠ Phiên ở chế độ hỏi quyền", run_main("loop", "status")[1])
-        for payload in ('{"permission_mode": "auto"}', "rác {", "[1]", '{"permission_mode": 3}'):
+        # stdin không phải JSON object không chặn nữa (T-2522) — phủ ở test_xt_loop.StopHookSessionBoundTest.
+        for payload in ('{"permission_mode": "auto"}', '{"permission_mode": 3}'):
             with self.subTest(payload):
                 reason = json.loads(run_main("loop", "hook-stop", stdin=payload)[1])["reason"]
                 self.assertNotIn("⚠", reason)

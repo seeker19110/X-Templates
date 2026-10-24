@@ -39,8 +39,8 @@
 - [x] `T-2512` Mục checklist ghi ID in đậm (`**ABC-001**`) thay vì backtick: nhận được hoặc báo lỗi định dạng; file blueprint 0 mục nhận diện được → `--strict` đỏ (cổng rỗng là đỏ — ADR-0011) (🟠) (sau: T-2511; files: scripts/xt.py, tests/test_xt.py) — Gate: `python3 -m unittest discover -s tests -k blueprint_bold_id`
 
 ### Lát 3 — Vòng tự trị
-- [ ] `T-2521` `loop record`/`loop status` chạy trong git worktree: Gate chạy và tick PLAN ở worktree đang đứng (gốc = `git rev-parse --show-toplevel` của cwd khi nằm trong cùng repo), không ở cây chính (🟠) (exec: deep) (files: scripts/xt.py, tests/test_xt_loop.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k loop_worktree_root`
-- [ ] `T-2522` Stop hook chỉ áp vòng cho đúng phiên đã `loop init` (ghi `session_id` khi init; payload khác phiên/không đọc được → không chặn, ghi log), không tăng `iterations` của vòng phiên khác (🟠) (sau: T-2521; exec: deep) (files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k stop_hook_session_bound`
+- [x] `T-2521` `loop record`/`loop status` chạy trong git worktree: Gate chạy và tick PLAN ở worktree đang đứng (gốc = `git rev-parse --show-toplevel` của cwd khi nằm trong cùng repo), không ở cây chính (🟠) (exec: deep) (files: scripts/xt.py, tests/test_xt_loop.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k loop_worktree_root`
+- [x] `T-2522` Stop hook chỉ áp vòng cho đúng phiên đã `loop init` (ghi `session_id` khi init; payload khác phiên/không đọc được → không chặn, ghi log), không tăng `iterations` của vòng phiên khác (🟠) (sau: T-2521; exec: deep) (files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k stop_hook_session_bound`
 
 ### Lát 4 — Phản hồi và phát hành
 - [ ] `T-2531` `feedback collect`: không chép nguyên văn lý do miễn trừ của dự án (chỉ ID + loại + tóm tắt chuẩn hoá), khử trùng theo (loại, ID) với FB đã có kể cả khi lý do đổi chữ (🟠) (files: scripts/xt.py, tests/test_xt_cli.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k feedback_collect_no_project_data`

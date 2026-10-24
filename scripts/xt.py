@@ -1178,6 +1178,31 @@ def project_dir() -> Path:
     return cwd
 
 
+def _git_tree(d: Path) -> Optional[Tuple[Path, Path]]:
+    """(gốc cây làm việc, thư mục git chung) tuyệt đối của repo chứa `d`; không phải repo git → None. Bỏ `GIT_DIR`/
+    `GIT_WORK_TREE`… đặt sẵn: hỏi đúng repo của thư mục, không phải repo biến môi trường trỏ tới."""
+    r = _git(d, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", env=_perf_env())
+    parts = r.stdout.splitlines()
+    if r.returncode != 0 or len(parts) != 2 or not all(os.path.isabs(p) for p in parts):  # git cũ: không hiểu cờ
+        return None
+    return Path(parts[0]).resolve(), Path(parts[1]).resolve()
+
+
+def loop_root(base: Path) -> Path:
+    """Gốc cho `loop` gõ tay (T-2521): cwd nằm trong một git worktree KHÁC của cùng repo với `base` (cùng
+    `--git-common-dir`) → gốc worktree đó — Gate chạy, PLAN được tick, `.autopilot/` (gitignored: sổ riêng mỗi worktree)
+    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới. Mọi trường hợp khác → `base`."""
+    base = base.resolve()
+    try:
+        here = _git_tree(Path.cwd())
+    except OSError:  # cwd đã bị xoá
+        return base
+    if here is None or here[0] == base:
+        return base
+    home = _git_tree(base)
+    return here[0] if home is not None and home[1] == here[1] else base
+
+
 def state_dir(base: Optional[Path] = None) -> Path:
     return (base or project_dir()) / ".autopilot"
 
@@ -2642,13 +2667,18 @@ def _append_run(base: Path, st: Dict[str, Any], ev: Dict[str, Any], signature: O
     đặt sẵn (O_NOFOLLOW, như `write_atomic` — AUD-HAR-009)."""
     row = {k: ev[k] for k in ("task", "exit_code", "started", "finished", "head")}
     row.update({"signature": signature, "loop": st.get("started"), "executor": ev.get("executor")})
-    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(state_dir(base) / RUNS_FILE, flags, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _append_line(base, RUNS_FILE, json.dumps(row, ensure_ascii=False))
     except OSError as exc:
         print(f"⚠ không ghi được .autopilot/{RUNS_FILE} (số đo vòng, LOOP-DESIGN-024): {exc}", file=sys.stderr)
+
+
+def _append_line(base: Path, name: str, line: str) -> None:
+    """Nối một dòng vào `.autopilot/<name>`, không đi theo symlink đặt sẵn (O_NOFOLLOW); lỗi I/O ném OSError."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(state_dir(base) / name, flags, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
 
 
 def read_runs(base: Path) -> List[Dict[str, Any]]:
@@ -2785,12 +2815,45 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt:
     )
 
 
+STOP_LOG_FILE = "hook-stop.log"  # lượt Stop bị bỏ qua (phiên khác, stdin hỏng) — một dòng mỗi lượt khi vòng đang bật
+
+
+def session_id() -> str:
+    """Phiên Claude Code hiện tại: `CLAUDE_CODE_SESSION_ID` (Bash và hook đều có, trùng `session_id` trong stdin hook —
+    docs env-vars, xác minh 2026-10-24); ngoài Claude Code → '' (vòng chưa gắn phiên)."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+
+
+def _stop_skip(stdin_text: str, st: Optional[Dict[str, Any]]) -> str:
+    """Lý do Stop hook KHÔNG áp vòng cho lượt này (T-2522); '' = áp vòng. stdin không phải JSON object → bỏ qua
+    (fail-open về luồng, ADR-0002); vòng đã gắn phiên mà payload mang `session_id` khác → phiên khác, bỏ qua. Vòng chưa
+    gắn phiên (state cũ, init ngoài Claude Code) hay payload không có `session_id` → áp vòng như cũ."""
+    try:
+        data = json.loads(stdin_text or "{}")
+    except json.JSONDecodeError:
+        return "stdin không phải JSON"
+    if not isinstance(data, dict):
+        return "stdin không phải JSON object"
+    bound = str((st or {}).get("session_id") or "")
+    sid = data.get("session_id")
+    if bound and isinstance(sid, str) and sid and sid != bound:
+        return f"phiên {sid[:8]} không phải phiên của vòng ({bound[:8]})"
+    return ""
+
+
 def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
     """Quyết định của Stop hook. Trả (stdout JSON hoặc '', exit code). Luôn fail-open khi có lỗi.
-    Verdict chỉ dựa vào file trên đĩa; từ stdin chỉ lấy `permission_mode` để cảnh báo phiên sẽ đứng chờ hỏi quyền."""
+    Verdict chỉ dựa vào file trên đĩa; từ stdin chỉ lấy `session_id` (lượt của phiên khác không chạm vòng — T-2522) và
+    `permission_mode` để cảnh báo phiên sẽ đứng chờ hỏi quyền."""
     base = base or project_dir()
-    v = loop_verdict(base)
     st = read_state(base)
+    skip = _stop_skip(stdin_text, st)
+    if skip:
+        if st and st.get("active"):
+            with contextlib.suppress(OSError):
+                _append_line(base, STOP_LOG_FILE, f"{now_iso()} bỏ qua, không chặn: {skip}")
+        return "", 0
+    v = loop_verdict(base)
     if st and st.get("active") and v["verdict"] in ("done", PENDING_HUMAN):
         why = final_check(base)
         v = {"verdict": "verify", "reason": why} if why else v
@@ -6022,6 +6085,7 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "deadline": deadline,
         "same_failure_count": 0,
         "blocked": False,
+        "session_id": session_id(),  # Stop hook chỉ áp vòng cho phiên này; '' = chưa gắn phiên (T-2522)
     }
     scope = build_scope(base, args.blueprint)
     if scope:
@@ -6645,6 +6709,7 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
             "resume_reason": args.reason,
         }
     )
+    cur.update({"session_id": sid} if (sid := session_id()) else {})  # phiên mới tiếp vòng → Stop hook theo phiên này
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
     if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
@@ -6706,10 +6771,15 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
 }
 
 
+LOOP_HOOK_CMDS = ("hook-stop", "checkpoint")  # Claude Code gọi từ hook: gốc theo CLAUDE_PROJECT_DIR, không theo cwd
+
+
 def cmd_loop(args: argparse.Namespace) -> int:
-    base = project_dir()
     handler = LOOP_HANDLERS.get(args.loop_cmd)
-    return handler(args, base) if handler else 2
+    if handler is None:
+        return 2
+    base = project_dir()
+    return handler(args, base if args.loop_cmd in LOOP_HOOK_CMDS else loop_root(base))
 
 
 def _plan_waves_print(out: Dict[str, Any]) -> None:
