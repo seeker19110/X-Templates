@@ -203,12 +203,37 @@ class GlobCommandNameTest(unittest.TestCase):
             "/usr/bin/[k]ubectl delete ns prod",
             "d?cker run --privileged alpine",
             "~/bin/r? -rf x",
-            "$HOME/bin/r? -rf x",
+            f"$HOME/bin/r? -rf {R}",  # có `$`: không chặn thẳng — viết lại theo tên (rm) rồi luật xoá gốc chặn
+            "../../../../../../../../usr/bin/p?thon3 -c x",  # `..` đi ra ngoài cây = tuyệt đối
+            "./../bin/[c]p /tmp/x .env",
             "/usr/bin/fi?d . -name x",  # vô hại nhưng tên tuyệt đối viết glob: chặn (không đoán)
             "/bin/r? /tmp/x",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny")
+
+    def test_guard_glob_head_deny_not_overblocked(self):
+        """Review #248 lượt 5 🔴: chặn thẳng từng chặn oan mảng/mở rộng tham số, số học có chỉ số, hậu tố RUNNER có glob,
+        đường tuyệt đối trong nháy có `[…]`/`?` trong tên thư mục."""
+        for cmd in (
+            '"${cmd[@]}" --flag',
+            'cmd=(git status); "${cmd[@]}" --short',
+            '"${arr[0]}" x',
+            '"${EDITOR:?}" file',
+            "${x#*/} y",
+            "(( a[0] > 5 )) && echo big",
+            "(( a[1] += 2 ))",
+            "a[0]=x b[1]=y",
+            "flock /tmp/lock cp *.txt /tmp/dst",
+            "ionice -c3 cp *.iso /mnt/backup/",
+            "fakeroot tar -czf out.tgz *.deb README",
+            "su -c 'ls *.py src' user",
+            '"/opt/My App [beta]/bin/tool" --version',
+            "'/opt/x?/bin/y' -v",
+            "./scripts/dev-task.* gate-fast",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "")
 
     def test_guard_glob_long_head_is_bounded(self):
         """Review #248 lượt 4 🔴: `[:`×N (ngoặc không đóng) làm fnmatch bậc hai — 24K ký tự từng mất 8 s; nay chặn trước."""

@@ -1155,3 +1155,10 @@
 - Chọn: Chặn thẳng tên lệnh glob dạng tên trần hoặc đường tuyệt đối (ngoặc phải đóng, có đối số, không toàn */?); đường tương đối giữ viết lại theo danh sách; head > 256 ký tự chặn trước fnmatch
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: không phụ thuộc danh sách phải đầy đủ — mọi luật theo tên đều được bảo vệ; mỗi vòng mở rộng danh sách đều bị review tìm ra lỗ mới (4 lượt); (3) đơn giản, O(1) trước fnmatch; (4) chặn oan gần 0: không ai gõ /usr/bin/p?thon3 — script tương đối, case, [ ], for vẫn chạy
 - Đường lùi: Bỏ _glob_head_deny, quay về chỉ viết lại theo GLOB_COMMANDS
+
+### D-164 · 2026-10-24T13:04:07+00:00 · PR #248 sau 5 lượt review: mỗi lượt tìm lỗ né mới (đường tương đối ../ đã bịt; còn: trình thông dịch glob đọc stdin không đối số, tên có nháy từng phần ngoài GLOB_COMMANDS, lệnh trong container viết glob). Dừng vòng review ở đâu?
+
+- Phương án: (1) Dừng sau lượt rà delta kế: 0 chặn oan + không hồi quy so main là điều kiện merge; lỗ né cố ý còn lại ghi CHANGELOG/PROGRESS như D-051/D-155 · (2) Tiếp tục đến khi reviewer không tìm ra
+- Chọn: Dừng sau lượt rà delta kế: 0 chặn oan + không hồi quy so main là điều kiện merge; lỗ né cố ý còn lại ghi CHANGELOG/PROGRESS như D-051/D-155
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: guard là lớp chặn sai lầm, không phải sandbox (D-015) — các lỗ còn lại cần cố ý viết (../../usr/bin/p?thon3, p?thon3 đọc stdin, c?'' …), agent không gõ nhầm ra; chặn oan thì có hại thật và đã hết; (2) đường lùi: revert từng commit; (5) mỗi lượt ~25 phút, lợi ích giảm dần
+- Đường lùi: Mở task mới cho từng lỗ còn lại
