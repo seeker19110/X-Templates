@@ -51,7 +51,7 @@ merge_autonomy: L3
 # agent merge như PR khác (ADR-0020); human = người merge (ADR-0016/0019).
 merge_hard_exceptions: auto
 # Pha giao hàng (ADR-0031): repo khung LUÔN là production — chủ repo 2026-10-22 (D-136, thay D-109) → `harden`: PR làn
-# chuẩn cần review sạch ở head bởi reviewer khác họ model; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
+# chuẩn cần review sạch ở head bởi reviewer năng lực cao hơn người viết; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
 delivery_phase: harden
 # Ghi công AI trong commit (AGENTS.md §3, AUD-HAR-017): forbid = guard chặn commit có tên model/URL phiên AI
 # (LOOP-HARNESS-027).

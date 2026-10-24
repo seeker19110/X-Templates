@@ -1,7 +1,7 @@
 ---
 title: Mẫu AGENTS.md cho dự án
 kind: template
-updated: 2026-10-20
+updated: 2026-10-24
 ---
 
 # AGENTS.md — luật vận hành cho AI agent trong dự án này
@@ -44,11 +44,11 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 ## 7. Cổng (lệnh thật ở `xt.yaml`)
 - **Trước commit:** hook chạy `.xtemplates/scripts/dev-task.sh gate-fast` theo `commit_gate`; tự review diff; conventional commit.
 - **Trước khi đẩy/mở PR:** `dev-task.sh gate` **một lần** (= CI).
-- **PR đã mở:** `<XT> pr next --pr <N>` → làm đúng `do` (`review` → giao `reviewer` khác họ model rồi `pr reviewed`); `merge-watch --pr <N>` chạy nền. Luật làn: `LOOP-STOP-022`/`029`; workflow `pr-steward` (`install.py --with-github`) làm thay khi không còn phiên.
+- **PR đã mở:** `<XT> pr next --pr <N>` → làm đúng `do` (`review` → giao reviewer theo §8 rồi `pr reviewed`); `merge-watch --pr <N>` chạy nền. Luật làn: `LOOP-STOP-022`/`029`; workflow `pr-steward` (`install.py --with-github`) làm thay khi không còn phiên.
 - **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha build: audit delta gom về trước G7 (ADR-0033); pha harden: audit delta mỗi mốc PLAN.
 
 ## 8. Skill và subagent (nhà: `11-autonomous-loop/orchestration-and-subagents.md`)
-`/autopilot` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả, ADR-0029) · `reviewer`/`reviewer-alt` (khác **họ** model với người viết; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối; không lồng subagent; song song chỉ khi độc lập về file (trong sản phẩm: `AI-AGENTIC-007`).
+`/autopilot` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả, ADR-0029) · `reviewer`/`reviewer-alt` (năng lực cao hơn người viết, `LOOP-ORCH-005`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối; không lồng subagent; song song chỉ khi độc lập về file (trong sản phẩm: `AI-AGENTIC-007`).
 
 ## 9. Quy ước riêng của dự án
 - Cấu trúc thư mục: [ĐIỀN]
