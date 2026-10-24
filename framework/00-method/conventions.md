@@ -1,7 +1,7 @@
 ---
 title: Quy ước viết module của khung
 kind: method
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 # Quy ước viết module của khung
@@ -122,7 +122,7 @@ Gói ngành thêm: **Khung pháp lý** (Việt Nam + quốc tế, số hiệu v�
 | Tiếp cận (a11y), vùng chạm | `06-design-ux/accessibility.md` | 04 chuẩn: phiên bản; 14 e2e: cách test |
 | Hiệu năng web / test tải / phương pháp | `07-frontend/performance-web-vitals.md` / `14-testing-quality/performance-and-load.md` / `18-cross-cutting/performance-engineering.md` | — |
 | Bảo mật AI (mối đe doạ) / guardrail sản phẩm | `12-security/ai-security.md` / `13-ai-engineering/guardrails-and-safety.md` | — |
-| Vòng lặp tự động khi PHÁT TRIỂN / hệ agentic là SẢN PHẨM | `11-autonomous-loop/` / `13-ai-engineering/agentic-systems.md` | — |
+| Vòng lặp tự động khi PHÁT TRIỂN / hệ agentic là SẢN PHẨM | `11-autonomous-loop/` / `13-ai-engineering/agentic-systems.md` | 11: ba lý do tách agent con trỏ `AI-AGENTIC-011` |
 | Tài liệu cho AI agent (AGENTS.md, SKILL.md) | `18-cross-cutting/docs-for-ai-agents.md` | — |
 | PROGRESS/PLAN/file harness | `11-autonomous-loop/harness-files.md` | 01-baseline: sàn `BASE-DOC-008` |
 | "4 con số" của vòng lặp; lỗi lặp 3 lần → BLOCKED | `11-autonomous-loop/loop-design.md` (`LOOP-DESIGN-001`, `LOOP-DESIGN-005`) | PLAN/skill/README: trỏ |
