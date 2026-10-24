@@ -6062,9 +6062,12 @@ ASK_PREFIX = "Khung cần xác nhận: "
 GLOB_COMMANDS = tuple(
     sorted(
         {"rm", "find", "shred", "unlink", "rsync", "mv", "dd", "sudo", "doas", "git", "env", "mkfs", "eval", "source"}
-        | {"curl", "wget", "gh"}
+        | {"curl", "wget", "gh", "cp", "tee", "ln", "install", "sed", "truncate", "tar", "unzip", "awk", "patch"}
+        | {"chmod", "chown", "ssh", "scp", "claude", "kubectl", "docker", "podman", "terraform", "tofu", "pulumi"}
+        | {"helm", "aws", "gcloud", "az"}
+        | set(FILE_WRITERS)
+        | INTERPRETERS
         | WRAPPERS
-        | SHELLS
         | RUNNERS
     )
 )
@@ -6077,8 +6080,7 @@ GLOB_POSIX_RE = re.compile(r"\[[:.=]")
 GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|()`{!])", r"(?![^\s;&|()<>`}])"
 
 
-GLOB_HEAD_MAX = 256  # tên lệnh dài hơn: không đưa vào fnmatch (bậc hai theo độ dài mẫu) — `_glob_head_deny` chặn
-GLOB_REAL_RE = re.compile(r"[*?]|\[[^\]]+\]")  # glob shell thật mở: `*`, `?`, ngoặc ĐÓNG (`[`, `[[` của test thì không)
+GLOB_HEAD_MAX = 256  # tên lệnh dài hơn: không đưa vào fnmatch (bậc hai theo độ dài mẫu, review #248)
 
 
 def _segment_commands(tokens: List[str]) -> Iterator[List[str]]:
@@ -6089,36 +6091,6 @@ def _segment_commands(tokens: List[str]) -> Iterator[List[str]]:
         if rest:
             yield rest
         start = end + 1
-
-
-ARRAY_ELEM_RE = re.compile(r"\w+\[[^\]]*\](?:\+?=.*)?")  # `a[0]`, `a[0]=x`: phần tử mảng (`(( a[0] > 5 ))`, gán)
-
-
-def _is_glob_command(head: str, cmd: str) -> bool:
-    """Tên lệnh là glob shell sẽ mở, dạng tên trần hay đường tuyệt đối/ra ngoài (`/`, `~`, `..`). Không tính: có `$`
-    (mảng/mở rộng tham số `"${cmd[@]}"` — guard không biết giá trị), phần tử mảng, mẫu toàn `*`/`?`, ngoặc chưa đóng,
-    đường tương đối trong cây (`./scripts/dev-task.*` — `_glob_rewrites` xét), tên không xuất hiện TRẦN trong chuỗi gốc
-    (`"/opt/App [beta]/bin/x"`: trong nháy shell không mở glob). Tên quá dài có glob luôn tính (không vào fnmatch)."""
-    if len(head) > GLOB_HEAD_MAX:
-        return bool(GLOB_RE.search(head))
-    if "$" in head or ARRAY_ELEM_RE.fullmatch(head) or not head.strip("*?") or not GLOB_REAL_RE.search(head):
-        return False
-    inside = "/" in head and not head.startswith(("/", "~", "..")) and "/../" not in head
-    return not inside and bool(re.search(GLOB_WORD_BEFORE + re.escape(head) + GLOB_WORD_AFTER, cmd))
-
-
-def _glob_head_deny(cmd: str, tokens: List[str], rewrites: int) -> str:
-    """D-163: tên lệnh viết bằng glob (`p?thon3`, `/usr/bin/fi?d`, `~/bin/c?`, `../../usr/bin/c?`) CÓ đối số → chặn: shell
-    mở ra tên thật mà mọi luật theo tên của guard không thấy, danh sách tên đóng không bao giờ đủ (review #248). Chỉ xét
-    lệnh gốc (`rewrites == 0`): hậu tố đối số của RUNNER (`flock l cp *.txt d` → `*.txt d`) không phải tên lệnh thật."""
-    for rest in _segment_commands(tokens) if not rewrites else ():
-        head = rest[0]
-        if len(rest) > 1 and _is_glob_command(head, cmd):
-            return (
-                f"Lệnh bị khung chặn (tên lệnh viết bằng glob `{head[:80]}` — shell mở ra tên thật mà luật theo tên "
-                "không thấy; viết tên lệnh thật, D-163). Muốn làm thật thì người dùng tự chạy."
-            )
-    return ""
 
 
 def _glob_names(head: str, bare: bool = False) -> List[str]:
@@ -6200,11 +6172,7 @@ def bash_decision(
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
-    nested_deny = (
-        nested_deny
-        or _glob_head_deny(cmd, tokens, rewrites)
-        or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
-    )
+    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res

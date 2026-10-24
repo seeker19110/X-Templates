@@ -190,9 +190,8 @@ class GlobCommandNameTest(unittest.TestCase):
     def test_guard_glob_commit_then_glob_name_not_overblocked(self):
         self.assertEqual(policy("git commit -m x && ./tools/g?t status")["decision"], "")
 
-    def test_guard_glob_bare_or_absolute_head_denied(self):
-        """D-163 (review #248 lượt 4 🔴): tên trần/đường tuyệt đối viết bằng glob có đối số → chặn, kể cả lệnh vô hại —
-        danh sách tên đóng không bao giờ đủ (trình thông dịch, lệnh ghi, CLI đám mây)."""
+    def test_guard_glob_interpreters_writers_cloud_denied(self):
+        """D-165 (review #248 lượt 4 🔴): danh sách viết lại gồm trình thông dịch, lệnh ghi/chép, CLI đám mây/container."""
         for cmd in (
             f"/usr/bin/p?thon3 -c 'import os;os.system(\"rm -rf {R}\")'",
             f"/usr/bin/[p]erl -e 'system(\"rm -rf {R}\")'",
@@ -200,22 +199,33 @@ class GlobCommandNameTest(unittest.TestCase):
             "c? /dev/null .claude/hooks/guard.py",
             "/bin/[s]ed -i s/deny/allow/ .claude/hooks/guard.py",
             "c? /tmp/x .env",
+            "c? /tmp/x .autopilot/state.json",
             "/usr/bin/[k]ubectl delete ns prod",
             "d?cker run --privileged alpine",
-            "~/bin/r? -rf x",
-            f"$HOME/bin/r? -rf {R}",  # có `$`: không chặn thẳng — viết lại theo tên (rm) rồi luật xoá gốc chặn
-            "../../../../../../../../usr/bin/p?thon3 -c x",  # `..` đi ra ngoài cây = tuyệt đối
+            f"~/bin/r? -rf {R}",
+            f"$HOME/bin/r? -rf {R}",
+            f"../../../../../../../../usr/bin/p?thon3 -c 'import os;os.system(\"rm -rf {R}\")'",
             "./../bin/[c]p /tmp/x .env",
-            "/usr/bin/fi?d . -name x",  # vô hại nhưng tên tuyệt đối viết glob: chặn (không đoán)
-            "/bin/r? /tmp/x",
+            f"flock /tmp/l /usr/bin/p?thon3 -c 'import os;os.system(\"rm -rf {R}\")'",  # sau RUNNER
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny")
 
-    def test_guard_glob_head_deny_not_overblocked(self):
-        """Review #248 lượt 5 🔴: chặn thẳng từng chặn oan mảng/mở rộng tham số, số học có chỉ số, hậu tố RUNNER có glob,
-        đường tuyệt đối trong nháy có `[…]`/`?` trong tên thư mục."""
+    def test_guard_glob_not_overblocked_shell_idioms(self):
+        """Review #248 lượt 5–6 🔴: thành ngữ bash thường ngày (D-163 chặn thẳng từng chặn oan — D-165 rút): mảng/mở rộng
+        tham số, số học, `[[ =~ ]]`, hậu tố RUNNER có glob, đường có glob ở thư mục, tên tuyệt đối viết glob mà vô hại."""
         for cmd in (
+            "n=5; echo $(( n*2 + 1 ))",
+            "sleep $(( 2*60 + 5 ))",
+            "(( n*2 > 10 )) && echo big",
+            "for (( i=0; i*2<n; i++ )); do :; done",
+            "files=(*.py *.sh)",
+            "declare -A cfg=([host]=localhost [port]=8080)",
+            "[[ $branch =~ ^(feat|fix)/[a-z0-9-]+ ]] && echo valid",
+            "/usr/lib/jvm/*/bin/java -version",
+            "~/.nvm/versions/node/v*/bin/node --version",
+            "/usr/bin/fi?d . -name x",
+            "/bin/r? /tmp/x",
             '"${cmd[@]}" --flag',
             'cmd=(git status); "${cmd[@]}" --short',
             '"${arr[0]}" x',
@@ -236,12 +246,12 @@ class GlobCommandNameTest(unittest.TestCase):
                 self.assertEqual(policy(cmd)["decision"], "")
 
     def test_guard_glob_long_head_is_bounded(self):
-        """Review #248 lượt 4 🔴: `[:`×N (ngoặc không đóng) làm fnmatch bậc hai — 24K ký tự từng mất 8 s; nay chặn trước."""
+        """Review #248 lượt 4 🔴: `[:`×N (ngoặc không đóng) làm fnmatch bậc hai — 24K ký tự từng mất 8 s; nay tên dài hơn
+        GLOB_HEAD_MAX không vào fnmatch."""
         for head in ("/bin/" + "[:" * 30000, "./x/" + "[" * 30000):
             start = time.monotonic()
-            out = policy(f"{head} a")
+            policy(f"{head} a")
             self.assertLess(time.monotonic() - start, 3)
-            self.assertEqual(out["decision"], "deny")
         self.assertEqual(guard._glob_names("r?" + "?" * 300), [])
 
 

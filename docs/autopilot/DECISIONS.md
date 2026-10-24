@@ -1162,3 +1162,10 @@
 - Chọn: Dừng sau lượt rà delta kế: 0 chặn oan + không hồi quy so main là điều kiện merge; lỗ né cố ý còn lại ghi CHANGELOG/PROGRESS như D-051/D-155
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: guard là lớp chặn sai lầm, không phải sandbox (D-015) — các lỗ còn lại cần cố ý viết (../../usr/bin/p?thon3, p?thon3 đọc stdin, c?'' …), agent không gõ nhầm ra; chặn oan thì có hại thật và đã hết; (2) đường lùi: revert từng commit; (5) mỗi lượt ~25 phút, lợi ích giảm dần
 - Đường lùi: Mở task mới cho từng lỗ còn lại
+
+### D-165 · 2026-10-24T13:43:31+00:00 · Review #248 lượt 6: chặn thẳng tên glob (D-163) chặn oan số học $(( n*2 )), (( )), mảng, [[ =~ ]] vì tách token quá thô — sửa tiếp hay đổi lại?
+
+- Phương án: (1) Rút D-163: bỏ chặn thẳng; giữ viết lại theo tên (D-162) và mở rộng GLOB_COMMANDS: INTERPRETERS, FILE_WRITERS, cp/tee/ln/sed/tar…, ssh/scp, CLI đám mây/container, claude; giữ trần 256 ký tự trước fnmatch · (2) Giữ chặn thẳng, bỏ qua token trong (( )), [[ ]], NAME=( )
+- Chọn: Rút D-163: bỏ chặn thẳng; giữ viết lại theo tên (D-162) và mở rộng GLOB_COMMANDS: INTERPRETERS, FILE_WRITERS, cp/tee/ln/sed/tar…, ssh/scp, CLI đám mây/container, claude; giữ trần 256 ký tự trước fnmatch
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: viết lại chỉ khớp tên đã biết nên không chặn oan (5 lượt rà không tìm ra chặn oan nào của nó); chặn thẳng phụ thuộc tách cú pháp bash bằng token — mỗi lượt lộ thêm thành ngữ bị chặn oan, có hại thật (chặn cả phiên này); lỗ còn lại của danh sách là tên ngoài danh sách phải cố ý viết (D-164); (3) đơn giản hơn
+- Đường lùi: Khôi phục _glob_head_deny từ commit 26c202f
