@@ -2364,7 +2364,7 @@ def run_gate_shell(cmd_str: str, base: Path, timeout: int) -> Tuple[int, str]:
     Trước khi chạy, lệnh qua guard của dự án: bị cấm → exit 126, không chạy (LOOP-STOP-027)."""
     why = guard_block(cmd_str, base)
     if why:
-        return 126, f"guard chặn, không chạy (LOOP-STOP-027): {why}"
+        return 126, f"guard chặn, không chạy (LOOP-STOP-027): {why} — kiểm mục hàng rào: `xt.py harness-check`"
     # Output ra file tạm, không qua pipe: tiến trình con tách phiên (`setsid` app server) giữ pipe thì `communicate()`
     # chờ EOF mãi — chỉ cần chờ chính bash (review #220).
     # utf-8 + replace: byte lạ trong output (binary, locale khác) không làm `loop record`/`release-check` ném lỗi (review #220)
@@ -4594,6 +4594,66 @@ def _doctor_guard_canary(base: Path) -> List[Finding]:
         return []
     msg = f"guard KHÔNG chặn lệnh nguy hiểm mẫu: {', '.join(missed)} — hàng rào không hoạt động; {INSTALL_HINT}"
     return [Finding("hooks", "error", msg)]
+
+
+# Lệnh mẫu của LOOP-STOP-001/002 guard PHẢI chặn ở chính sách mặc định — `harness-check` (T-2621).
+HARNESS_DENY = (
+    *GUARD_CANARIES,
+    "ls; rm -rf /",
+    "eval 'rm -rf ~'",
+    "find / -exec rm -rf {} +",
+    "gh repo delete o/r --yes",
+    "gh pr merge 1 --auto",
+)
+
+
+def _harness_guard(base: Path) -> str:
+    """Lỗi của guard dự án với bộ lệnh mẫu (rỗng = chặn đủ). Chỉ guard của dự án — guard bản cài khác không che."""
+    path = base / GUARD_FILE
+    if not path.is_file() or _syntax_error(path):
+        return f"không có hoặc lỗi cú pháp: {GUARD_FILE}"
+    with _env_patch("XT_GUARD_POLICY", ""):
+        missed = [c for c in HARNESS_DENY if not guard_block(c, base, [path])]
+    return "không chặn: " + ", ".join(missed) if missed else ""
+
+
+def _harness_settings(base: Path) -> str:
+    """`permissions.ask` của `.claude/settings.json` phải rỗng (ADR-0017/0018 — guard quyết, không hỏi người)."""
+    path = base / ".claude" / "settings.json"
+    if not path.exists():
+        return ""
+    doc = _read_json_obj(path)
+    if doc is None:
+        return f"không đọc được {path.name}"
+    perms = doc.get("permissions")
+    ask = perms.get("ask") if isinstance(perms, dict) else None
+    return f"permissions.ask không rỗng: {ask}" if ask else ""
+
+
+def _harness_agents(base: Path) -> str:
+    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`."""
+    bad = []
+    for f in sorted((base / ".claude" / "agents").glob("*.md")):
+        fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
+        tools = re.search(r"^tools:[ \t]*(.*)$", fm[1], re.M) if fm else None
+        if not tools or not tools[1].strip() or "*" in tools[1]:
+            bad.append(f"{f.name} (tools: thiếu/rộng)")
+        if fm and re.search(r"^permissionMode:", fm[1], re.M):
+            bad.append(f"{f.name} (permissionMode)")
+    return "; ".join(bad)
+
+
+def cmd_harness_check(args: argparse.Namespace) -> int:
+    """Lệnh kiểm chỉ đọc cho mục hàng rào (LOOP-ORCH-003, LOOP-STOP-001/002) — `python3 -c` tự viết bị guard chặn."""
+    base = project_dir()
+    rows = [
+        ("guard", "chặn lệnh mẫu LOOP-STOP-001/002", _harness_guard(base)),
+        ("settings", "permissions.ask rỗng", _harness_settings(base)),
+        ("agents", "tools: tường minh, không permissionMode (LOOP-ORCH-003)", _harness_agents(base)),
+    ]
+    for name, ok_msg, err in rows:
+        print(f"✗ {name}: {err}" if err else f"✓ {name}: {ok_msg}")
+    return 1 if any(err for _, _, err in rows) else 0
 
 
 @contextlib.contextmanager
@@ -10913,6 +10973,8 @@ def build_parser() -> argparse.ArgumentParser:
     fg.add_argument("--from", dest="source", action="append", required=True, metavar="DỰ_ÁN=GỐC_REPO|THƯ_MỤC")
     fg.add_argument("--json", action="store_true")
     pfb.set_defaults(fn=cmd_feedback)
+    phc = sub.add_parser("harness-check", help="lệnh kiểm chỉ đọc mục hàng rào: guard, settings, agents (T-2621)")
+    phc.set_defaults(fn=cmd_harness_check)
     pdr = sub.add_parser("doctor", help="audit khung đã cài (harness, xt.yaml, khung, state) trước /autopilot")
     pdr.add_argument("--fix", action="store_true", help="sửa an toàn, đảo ngược được (không đụng hook/settings)")
     pdr.add_argument("--json", action="store_true")
