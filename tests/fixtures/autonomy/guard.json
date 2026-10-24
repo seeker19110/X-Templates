@@ -5191,6 +5191,28 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-fb1023-case-find-paren",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "case find in (find) rm -rf ~;; esac"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-delete-before-test",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -delete -name x"
+   },
+   "expect": {
+    "allowed": false
+   }
   }
  ]
 }
