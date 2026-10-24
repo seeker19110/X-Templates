@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.19.2] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
+
+### Fixed
+- guard (T-2811, D-155/D-162/D-167): tên lệnh là đường tới thư mục bin hệ thống viết bằng glob không còn qua mặt luật theo tên — `/usr/bin/fi?d … -delete`, `/bin/r? -rf …`, `/bin/[r]m`, `/bin/[^x]m`, `/bin/[[:lower:]]m`, `/usr/bin/ti?e rm …`, `/usr/bin/p?thon3 -c …`, `/bin/c? … .env`, `/bin/[s]ed -i … guard.py`, `/usr/bin/[k]ubectl …`, `/usr/bin/wat?h '…'`, `/bin/ba?h -c '…'`, `echo … | /bin/s?`, `/bin/ba?h <<E`, `/bin/ba?h <(…)`, `~/bin/r? …`, `$HOME/bin/r? …`: chuỗi lệnh GỐC được viết lại cho mỗi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`: lệnh xoá/ghi/chép, trình thông dịch, shell, wrapper, `RUNNERS`, CLI đám mây/container, `claude`; không đoán theo hệ tệp) rồi quét như shell lồng — giữ heredoc/`<(`/nháy từng phần, chịu `ScanBudget`; quá 8 tên glob hay lệnh quá 64 KB thì chặn trước khi dựng bản viết lại. Chỉ xét đường tới `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `/opt/homebrew/bin`, `~/bin`, `~/.local/bin` (thư mục không glob) nên mẫu `case`, số học `$(( n*2 ))`, `[[ =~ ]]`, mảng, `/usr/lib/jvm/*/bin/java` không bị chặn oan (D-167 — các bản chặn thẳng/tách cú pháp D-163…D-166 không hội tụ qua 8 lượt review). Biểu thức ngoặc POSIX nhận bằng regex tuyến tính; tên quá 256 ký tự không vào `fnmatch`. `~user` đã chặn khi user tồn tại — thêm test ghim. Giới hạn còn lại (D-164/D-167): tên trần glob (`s? …`, `c? …` — chỉ mở theo tệp ở thư mục đang đứng), đường glob tới thư mục khác hay có glob ở thư mục, tên ngoài `GLOB_COMMANDS`, extglob, lệnh trong container viết glob, tên lệnh ghép lúc chạy (D-051).
+
 ## [3.19.1] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (`xt.py`, skill `/autopilot`, `/review`) — sửa các lỗi review 🟠 của 3.19.0 (#247 được merge trước khi bản sửa kịp đẩy).
@@ -30,7 +37,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`** (`install.py` in gọn hơn các bước làm tay khi nâng nhiều bản).
 
 ### Changed
-- `install.py` (T-2801, D-159, nợ review #191): "Bước làm tay từ CHANGELOG" gộp mệnh đề trùng hệt xuyên mục — giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ. Trước đó chỉ gộp trong cùng mục: trên CHANGELOG thật 7 trong 108 mệnh đề lặp ở nhiều bản.
+- `install.py` (T-2801, D-159, nợ review #191): "Bước làm tay từ CHANGELOG" gộp mệnh đề trùng hệt xuyên mục — giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ. Trước đó chỉ gộp trong cùng mục: trên CHANGELOG thật 108 → 101 mệnh đề (bỏ 7 bản sao trùng hệt của 6 mệnh đề).
 
 ## [3.18.2] - 2026-10-24
 
