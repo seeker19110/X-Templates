@@ -32,7 +32,7 @@
 
 ### Lát 1 — Liên kết và lệnh kiểm
 - [x] `T-2601` Lệnh kiểm gợi ý của `BASE-SEC-002` không tự khớp chính dòng của mục: mẫu chặt `AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----`; test quét khung + BLUEPRINT bằng mẫu ghi trong mục = 0 khớp (files: framework/01-baseline/security-minimum.md, BLUEPRINT.md, tests/test_xt.py) — Gate: `python3 -m unittest discover -s tests -k base_sec_002_selfmatch`
-- [ ] `T-2602` `compose`: anchor nội trang `(#x)` trong mục module đổi thành `(<link_root>/<doc_rel>#x)` — link không gãy khi mục sang BLUEPRINT/BACKLOG (sau: T-2601; files: scripts/xt.py, tests/test_xt.py) — Gate: `python3 -m unittest discover -s tests -k rebase_links_anchor`
+- [x] `T-2602` `compose`: anchor nội trang `(#x)` trong mục module đổi thành `(<link_root>/<doc_rel>#x)` — link không gãy khi mục sang BLUEPRINT/BACKLOG (sau: T-2601; files: scripts/xt.py, tests/test_xt.py) — Gate: `python3 -m unittest discover -s tests -k rebase_links_anchor`
 - [ ] `T-2603` `check-links.py` kiểm `#anchor` (cùng file và file `.md` khác) theo slug GitHub (chữ thường, bỏ dấu câu, giữ chữ Unicode, khoảng trắng → `-`, trùng → `-1`) + `<a id|name>`; sửa link gãy lộ ra trong repo (sau: T-2602; files: scripts/check-links.py, tests/test_check_links.py) — Gate: `python3 -m unittest discover -s tests -k check_links_anchor && python3 scripts/check-links.py`
 
 ### Lát 2 — Vòng tự trị

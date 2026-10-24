@@ -2068,5 +2068,16 @@ class BaseSec002SelfMatchTest(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+class RebaseLinksAnchorTest(unittest.TestCase):
+    """Phản hồi dự án đích: anchor nội trang `(#x)` của mục module giữ nguyên khi sang BLUEPRINT → link gãy."""
+
+    def test_rebase_links_anchor_points_to_module_file(self):
+        text = "xem [bảng chọn](#quyết-định), [khác](other.md#a), [web](https://x.invalid/#b)"
+        out = xt._rebase_links(text, "06-design-ux/design-system-and-tokens.md", ".xtemplates/framework")
+        self.assertIn("(.xtemplates/framework/06-design-ux/design-system-and-tokens.md#quyết-định)", out)
+        self.assertIn("(.xtemplates/framework/06-design-ux/other.md#a)", out)
+        self.assertIn("(https://x.invalid/#b)", out)
+
+
 if __name__ == "__main__":
     unittest.main()
