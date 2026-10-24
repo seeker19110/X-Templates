@@ -6062,36 +6062,51 @@ ASK_PREFIX = "Khung cần xác nhận: "
 GLOB_COMMANDS = tuple(
     sorted(
         {"rm", "find", "shred", "unlink", "rsync", "mv", "dd", "sudo", "doas", "git", "env", "mkfs", "eval", "source"}
+        | {"curl", "wget", "gh"}
         | WRAPPERS
         | SHELLS
+        | RUNNERS
     )
 )
-GLOB_CLASS_RE = re.compile(r"\[[^\]]*\[:\w+:\][^\]]*\]")  # `[[:lower:]]`: lớp POSIX — fnmatch không hiểu → coi là `?`
+# Biểu thức ngoặc: `[…]` có thể chứa `[:lớp:]`, `[.x.]`, `[=x=]` lồng bên trong (`[[:lower:][:digit:]]`)
+GLOB_BRACKET_RE = re.compile(r"\[(?:[^\[\]]|\[([:.=]).*?\1\])+\]")
+GLOB_POSIX_RE = re.compile(r"\[[:.=]")
+# Từ đầu lệnh trong chuỗi gốc: đứng sau đầu chuỗi/khoảng trắng/`; & | ( ` { !` và trước khoảng trắng/dấu nối lệnh — từ trong
+# nháy (`'/bin/r?'`) không khớp: shell không mở glob trong nháy
+GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|(`{!])", r"(?![^\s;&|()<>`}])"
 
 
-def _glob_names(head: str) -> List[str]:
+def _glob_names(head: str, bare: bool = False) -> List[str]:
     """Tên nhạy cảm khớp mẫu glob của tên lệnh. Không glob, hay mẫu chỉ toàn `*`/`?` (`*)` của `case`, `*` trơn) → rỗng:
-    không đoán. Bash coi `[^x]` như `[!x]` và `[[:alpha:]]` là lớp ký tự — Python `fnmatch` không → đổi trước khi so."""
+    không đoán. `bare` = lệnh không đối số: `sudo`/`doas` trơn vô hại (`s*)` của `case`) nên bỏ. Bash coi `[^x]` như
+    `[!x]`, `[[:alpha:]]`/`[[.r.]]`/`[[=r=]]` là lớp ký tự — Python `fnmatch` không → đổi trước khi so."""
     if not GLOB_RE.search(head) or not head.strip("*?"):
         return []
-    pat = GLOB_CLASS_RE.sub("?", head).replace("[^", "[!")
-    return [name for name in GLOB_COMMANDS if fnmatch.fnmatchcase(name, pat)]
+    pat = GLOB_BRACKET_RE.sub(lambda m: "?" if GLOB_POSIX_RE.search(m[0]) else m[0], head).replace("[^", "[!")
+    return [n for n in GLOB_COMMANDS if fnmatch.fnmatchcase(n, pat) and not (bare and n in ("sudo", "doas"))]
 
 
-def _glob_rewrites(tokens: List[str]) -> List[str]:
-    """Bản viết lại cả lệnh cho MỖI tên nhạy cảm khớp mẫu glob của tên một lệnh đơn (sau gán biến/wrapper) CÓ đối số —
-    lệnh trơn không đối số vô hại (`s*)` của `case`). Quét như shell lồng: `bash_decision` đệ quy chịu ngân sách và
-    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-160)."""
-    out: List[str] = []
+def _glob_heads(tokens: List[str]) -> Dict[str, List[str]]:
+    """Từ đầu lệnh có glob (chữ nguyên, sau gán biến/wrapper) của từng lệnh đơn → các tên nhạy cảm nó có thể mở ra."""
+    heads: Dict[str, List[str]] = {}
     start = 0
     for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
-        seg = tokens[start:end]
-        rest = _strip_prefixes(seg)
-        at = start + len(seg) - len(rest)
-        for name in _glob_names(posixpath.basename(rest[0])) if len(rest) > 1 else ():
-            new = [*tokens[:at], name, *tokens[at + 1 :]]
-            out.append(" ".join(t if _is_punct(t) else shlex.quote(t) for t in new))
+        rest = _strip_prefixes(tokens[start:end])
+        names = _glob_names(posixpath.basename(rest[0]), len(rest) == 1) if rest else []
+        if names:
+            heads[rest[0]] = list(dict.fromkeys([*heads.get(rest[0], []), *names]))
         start = end + 1
+    return heads
+
+
+def _glob_rewrites(cmd: str, tokens: List[str]) -> List[str]:
+    """Bản viết lại CHUỖI LỆNH GỐC (giữ heredoc, `<(`, nháy, gán biến) cho MỖI tên nhạy cảm khớp mẫu glob của tên một lệnh
+    đơn: mọi lần xuất hiện của từ đó thay cùng lúc. Quét như shell lồng — `bash_decision` đệ quy chịu ngân sách và
+    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-160)."""
+    out: List[str] = []
+    for head, names in _glob_heads(tokens).items():
+        word = re.compile(GLOB_WORD_BEFORE + re.escape(head) + GLOB_WORD_AFTER)
+        out += [word.sub(name, cmd) for name in names if word.search(cmd)]  # tên từ danh sách đóng: không có `\`
     return out
 
 
@@ -6138,7 +6153,7 @@ def bash_decision(
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
-    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(tokens), root, cwd, depth, asks, 0, budget, rewrites)
+    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
