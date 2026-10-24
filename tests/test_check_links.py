@@ -52,7 +52,7 @@ class CheckLinksModuleTest(unittest.TestCase):
         self.assertEqual(names, ["a.md", "docs/b.md"])
 
     def test_check_reports_broken_with_file_and_line(self):
-        self.write("docs/ok.md", "x\n")
+        self.write("docs/ok.md", "# Neo\n")
         self.write("a.md", "dòng 1\n[tốt](docs/ok.md#neo) [hỏng](docs/mat.md)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:2: liên kết hỏng -> docs/mat.md"])
 
@@ -60,9 +60,31 @@ class CheckLinksModuleTest(unittest.TestCase):
         self.write("docs/ok.md", "x\n")
         self.write(
             "sub/a.md",
-            "[abs](/docs/ok.md) [neo](#muc) [url](https://x.invalid/a) [mail](mailto:a@b.c) [dir](../docs)\n",
+            "## Mục\n[abs](/docs/ok.md) [neo](#mục) [url](https://x.invalid/a) [mail](mailto:a@b.c) [dir](../docs)\n",
         )
         self.assertEqual(self.cl.check(self.repo), [])
+
+    def test_check_links_anchor_missing_is_error(self):
+        # Phản hồi dự án đích: `[x](a.md#khong-ton-tai) [y](#cung-khong)` từng qua với exit 0.
+        self.write(
+            "docs/b.md", '# Quyết định chọn `xt.py`\n## Lặp\n## Lặp\n```\n# Trong fence\n```\n<a id="Neo-Tay"></a>\n'
+        )
+        self.write(
+            "a.md",
+            "# Tiêu đề [có link](x.md)\n[x](docs/b.md#khong-ton-tai) [y](#cung-khong) [z](#tiêu-đề-có-link)\n"
+            "[ok](docs/b.md#quyết-định-chọn-xtpy) [ok2](docs/b.md#lặp-1) [ok3](docs/b.md#neo-tay)"
+            " [mã](docs/b.md#trong-fence) [enc](docs/b.md#l%E1%BA%B7p) [py](s.py#L3)\n",
+        )
+        self.write("s.py", "x = 1\n")
+        self.write("x.md", "x\n")
+        self.assertEqual(
+            self.cl.check(self.repo),
+            [
+                "a.md:2: anchor không có trong file -> docs/b.md#khong-ton-tai",
+                "a.md:2: anchor không có trong file -> #cung-khong",
+                "a.md:3: anchor không có trong file -> docs/b.md#trong-fence",
+            ],
+        )
 
     def test_check_absolute_link_missing_is_error(self):
         self.write("a.md", "[x](/khong/co.md)\n")
