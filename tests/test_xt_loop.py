@@ -230,10 +230,6 @@ class StopHookSessionBoundTest(TmpRepoCase):
             self.assertNotIn(warn, run_main("loop", "status")[1])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class LoopInitCarryTest(TmpRepoCase):
     """T-2611 (phản hồi dự án đích): `loop init` sau vòng đã dừng mất danh sách chờ người và đòi chạy lại Gate cũ;
     máy mới (`.autopilot/` không theo git) đòi chạy lại mọi task `[x]` mà không nói vì sao."""
@@ -244,9 +240,11 @@ class LoopInitCarryTest(TmpRepoCase):
         self.plan = self.repo / "docs" / "autopilot" / "PLAN.md"
         self.plan.parent.mkdir(parents=True)
         self.plan.write_text(
-            "- [ ] `T-001` a — Gate: `true`\n- [ ] `T-002` cần người — Gate: `true`\n- [ ] `T-003` c — Gate: `true`\n",
+            "- [ ] `T-001` a (files: a.txt) — Gate: `true`\n- [ ] `T-002` cần người — Gate: `true`\n"
+            "- [ ] `T-003` c — Gate: `true`\n",
             encoding="utf-8",
         )
+        (self.repo / "a.txt").write_text("1\n", encoding="utf-8")
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
         os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
         self.enterContext(chdir(self.repo))
@@ -263,6 +261,22 @@ class LoopInitCarryTest(TmpRepoCase):
         st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(list(st["deferred"]), ["T-002"])
         self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-003"))
+
+    def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
+        # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.
+        for change in ("spec", "file"):
+            with self.subTest(change=change):
+                run_main("loop", "init", "--force")
+                self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "true")[0], 0)
+                run_main("loop", "stop", "--reason", "x")
+                if change == "spec":
+                    text = self.plan.read_text(encoding="utf-8").replace("`T-001` a ", "`T-001` việc khác hẳn ")
+                    self.plan.write_text(text, encoding="utf-8")
+                else:
+                    (self.repo / "a.txt").write_text("2\n", encoding="utf-8")
+                self.assertNotIn("mang", run_main("loop", "init")[2])
+                st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+                self.assertNotIn("carried", st)
 
     def test_loop_init_carry_drops_stale_items(self) -> None:
         run_main("loop", "init")
@@ -320,3 +334,19 @@ class DecideWorktreesTest(TmpRepoCase):
         log = (self.wt / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
         self.assertIn("### D-002", log)
         self.assertNotIn("### D-001", log)  # chỉ đọc sổ worktree khác để đánh số, không chép
+
+    def test_decide_worktrees_unreadable_log_is_skipped(self) -> None:
+        self.decide(self.main)
+        real = Path.read_text
+
+        def flaky(path: Path, *a: object, **k: object) -> str:
+            if path.resolve().is_relative_to(self.main.resolve()) and path.name == "DECISIONS.md":
+                raise OSError("không đọc được")
+            return real(path, *a, **k)  # type: ignore[arg-type]
+
+        with unittest.mock.patch.object(Path, "read_text", flaky):
+            self.assertIn("D-001", self.decide(self.wt))  # sổ cây chính không đọc được: bỏ qua
+
+
+if __name__ == "__main__":
+    unittest.main()

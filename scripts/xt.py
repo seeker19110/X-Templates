@@ -6085,15 +6085,13 @@ def _init_warnings(args: argparse.Namespace, base: Path) -> None:
 def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> List[str]:
     """`loop init` lại cùng PLAN sau vòng đã dừng (T-2611): giữ việc chờ người còn mở và bằng chứng xanh khớp Gate hiện
     tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác: không mang gì (ID có thể trùng nghĩa
-    khác). Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
+    khác; so cả blueprint). Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
     tasks = parse_plan(base / state["plan"])
-    notes, same = [], prev.get("plan") == state["plan"]
+    notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
     keep = {i: d for i, d in _deferred(prev).items() if same and i in _still_open(base, state)}
     carried = [
-        t["id"]
-        for t in tasks
-        if same and t["state"] == "x" and t["gate"] and _green_for(read_evidence(t["id"], base), t["gate"])
-    ]
+        t["id"] for t in tasks if same and t["state"] == "x" and t["gate"] and not evidence_stale(t, base)
+    ]  # cùng điều kiện `loop verify` giữ kết quả: lệnh, phạm vi, spec (req_rev), digest file (review #239)
     if keep:
         state["deferred"] = keep
         notes.append(f"ℹ Vòng trước cùng PLAN: giữ {len(keep)} việc chờ người: {', '.join(keep)}")
@@ -6107,13 +6105,6 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
             " lại Gate; `.autopilot/` không theo git nên mỗi đợt một docs/autopilot/PLAN-<đợt>.md mới"
         )
     return notes
-
-
-def _green_for(ev: Optional[Dict[str, Any]], gate: str) -> bool:
-    """Bằng chứng xanh, thời điểm hợp lệ, đúng lệnh Gate hiện tại (dấu vân tay hoặc cùng ngữ nghĩa)."""
-    if not ev or ev.get("exit_code") != 0 or _evidence_time_problem(ev):
-        return False
-    return ev.get("cmd_sha256") == cmd_sha256(gate) or same_command(ev.get("cmd") or "", redact(gate))
 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
@@ -6374,7 +6365,10 @@ def _last_decision(text: str, base: Path, rel: Path) -> int:
     for tree in trees:
         other = tree / rel
         if other.resolve() != (base / rel).resolve() and other.is_file():
-            texts.append(other.read_text(encoding="utf-8", errors="replace"))
+            try:
+                texts.append(other.read_text(encoding="utf-8", errors="replace"))
+            except OSError:  # sổ worktree khác không đọc được: bỏ qua, không làm hỏng `loop decide`
+                pass
     return max((int(n) for t in texts for n in DECISION_ID_RE.findall(t)), default=0)
 
 
