@@ -5,12 +5,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.18.4] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
+
+### Fixed
+- guard (T-2811, D-155/D-160): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `r*`, `ti?e rm …` bị quét như mọi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`, không đoán theo hệ tệp); chuỗi gốc của `find_root_scan` cũng đọc `fi?d` là `find`. `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim.
+
 ## [3.18.3] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (`install.py` in gọn hơn các bước làm tay khi nâng nhiều bản).
 
 ### Changed
-- `install.py` (T-2801, D-159, nợ review #191): "Bước làm tay từ CHANGELOG" gộp mệnh đề trùng hệt xuyên mục — giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ. Trước đó chỉ gộp trong cùng mục: trên CHANGELOG thật 7 trong 108 mệnh đề lặp ở nhiều bản.
+- `install.py` (T-2801, D-159, nợ review #191): "Bước làm tay từ CHANGELOG" gộp mệnh đề trùng hệt xuyên mục — giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ. Trước đó chỉ gộp trong cùng mục: trên CHANGELOG thật 108 → 101 mệnh đề (bỏ 7 bản sao trùng hệt của 6 mệnh đề).
 
 ## [3.18.2] - 2026-10-24
 

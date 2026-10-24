@@ -1127,3 +1127,10 @@
 - Chọn: Gộp trùng hệt xuyên mục: giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ; không đổi mệnh đề khác nhau
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ bỏ bản sao trùng từng chữ, không mất thông tin bước nào; ngữ nghĩa (2) phải đoán câu tự do → có thể nuốt chi tiết; (3) đơn giản, test được trên CHANGELOG thật (108 mệnh đề → 101)
 - Đường lùi: Bỏ biến seen trong upgrade_steps
+
+### D-160 · 2026-10-24T08:44:15+00:00 · Duyệt PLAN-3.21-guard-d155: bịt ba giới hạn guard xoá gốc của D-155
+
+- Phương án: (1) Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR · (2) Mở mọi glob theo hệ tệp thật (glob.glob) rồi quét lại · (3) Chỉ ghi giới hạn vào tài liệu như D-155
+- Chọn: Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: xoá không đảo ngược → chiều chặt; fnmatch trên danh sách đóng không phụ thuộc máy và test được (hệ tệp thì kết quả đổi theo máy, bỏ sót tệp tạo giữa lệnh); (3) đơn giản: tái dùng luật find/rm đã có; (4) chặn oan thấp, lối thoát có sẵn (chạy ở thư mục con)
+- Đường lùi: Revert từng lát PR; biến thể glob và _fd_rule là mã thêm, không đổi luật cũ
