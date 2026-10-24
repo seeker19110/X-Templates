@@ -6081,40 +6081,37 @@ GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|()`{!])", r"(?![^\s;&|()<>`}])"
 
 
 GLOB_HEAD_MAX = 256  # tên lệnh dài hơn: không đưa vào fnmatch (bậc hai theo độ dài mẫu, review #248)
+GLOB_MAX_HEADS = 8  # số tên lệnh glob khác nhau tối đa mỗi lệnh — quá thì chặn trước khi dựng bản viết lại (D-167)
+# D-167: tên lệnh glob CHỈ xét khi là đường tới thư mục bin hệ thống (thư mục không glob) — cách thật để gọi lệnh qua glob;
+# mẫu `case`, số học, nhóm regex, mảng không bao giờ có dạng này nên không chặn oan theo cấu trúc (bộ tách cú pháp bằng
+# token của D-163…D-166 không hội tụ qua 8 lượt review). Tên trần glob (`s?`) chỉ mở theo tệp ở thư mục đang đứng.
+GLOB_BIN_DIRS = frozenset(
+    {"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/opt/homebrew/bin"}
+    | {"~/bin", "~/.local/bin", "$HOME/bin", "$HOME/.local/bin", "${HOME}/bin", "${HOME}/.local/bin"}
+)
 
 
 def _segment_commands(tokens: List[str]) -> Iterator[List[str]]:
-    """Từng lệnh đơn (sau gán biến/wrapper/từ khoá), rỗng bỏ qua. Không phải lệnh nên bỏ (D-166 — từng bị đọc thành tên
-    glob: `''|*[!0-9]*)` → mkfs): vùng `(( … ))`/`$(( … ))` và `[[ … ]]` (toán hạng, nhóm regex `=~ ^([^=]*)`), mẫu nhánh
-    `case` — đoạn (cùng các nhánh nối `|`) kết thúc bằng `)` mà không có `(` mở tương ứng."""
-    group: List[List[str]] = []  # các đoạn nối bằng `|` đang chờ: lệnh trong ống, hay các nhánh của một mẫu `case`
-    seg: List[str] = []
-    depth, close = 0, ""
-    for t in tokens:
-        if close:
-            close = "" if t.startswith(close) else close
-        elif t in ("((", "[["):
-            close = "))" if t == "((" else "]]"
-        elif not _is_punct(t) or _is_redirect(t):
-            seg.append(t)
-        else:
-            group, seg = [*group, seg], []
-            if t == "|":
-                continue
-            pattern = ")" in t and depth == 0  # `)` không có `(` mở: kết thúc mẫu nhánh `case`
-            depth = max(0, depth + t.count("(") - t.count(")"))
-            yield from [] if pattern else (r for s in group if (r := _strip_prefixes(s)))
-            group = []
-    yield from (r for s in [*group, seg] if (r := _strip_prefixes(s)))
+    """Từng lệnh đơn (sau gán biến/wrapper/từ khoá) — rỗng bỏ qua; phần tử mảng `NAME=( … )` không phải lệnh."""
+    start = 0
+    for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
+        array = start >= 2 and tokens[start - 1] == "(" and tokens[start - 2].endswith("=")
+        rest = [] if array else _strip_prefixes(tokens[start:end])
+        if rest:
+            yield rest
+        start = end + 1
 
 
 def _glob_names(head: str, bare: bool = False) -> List[str]:
-    """Tên nhạy cảm khớp mẫu glob của tên lệnh. Không glob, hay mẫu chỉ toàn `*`/`?` (`*)` của `case`, `*` trơn) → rỗng:
-    không đoán. `bare` = lệnh không đối số: `sudo`/`doas` trơn vô hại (`s*)` của `case`) nên bỏ. Bash coi `[^x]` như
-    `[!x]`, `[[:alpha:]]`/`[[.r.]]`/`[[=r=]]` là lớp ký tự — Python `fnmatch` không → đổi trước khi so."""
-    if not GLOB_RE.search(head) or not head.strip("*?") or len(head) > GLOB_HEAD_MAX:
+    """Tên nhạy cảm mà tên lệnh `head` (đường tới thư mục bin hệ thống, phần tên có glob) có thể mở ra. Thư mục khác/có
+    glob, phần tên không glob hay chỉ toàn `*`/`?`, quá dài → rỗng: không đoán. `bare` = lệnh không đối số: `sudo`/`doas`/
+    `mkfs` trơn vô hại nên bỏ. Bash coi `[^x]` như `[!x]`, `[[:alpha:]]`/`[[.r.]]`/`[[=r=]]` là lớp ký tự — Python
+    `fnmatch` không → đổi trước khi so."""
+    directory, base = posixpath.split(head)
+    directory = posixpath.normpath(re.sub("^/+", "/", directory)) if directory.startswith("/") else directory
+    if directory not in GLOB_BIN_DIRS or not GLOB_RE.search(base) or not base.strip("*?") or len(base) > GLOB_HEAD_MAX:
         return []
-    pat = GLOB_BRACKET_RE.sub(lambda m: "?" if GLOB_POSIX_RE.search(m[0]) else m[0], head).replace("[^", "[!")
+    pat = GLOB_BRACKET_RE.sub(lambda m: "?" if GLOB_POSIX_RE.search(m[0]) else m[0], base).replace("[^", "[!")
     return [n for n in GLOB_COMMANDS if fnmatch.fnmatchcase(n, pat) and not (bare and n in ("sudo", "doas", "mkfs"))]
 
 
@@ -6122,18 +6119,37 @@ def _glob_heads(tokens: List[str]) -> Dict[str, List[str]]:
     """Từ đầu lệnh có glob (chữ nguyên, sau gán biến/wrapper) của từng lệnh đơn → các tên nhạy cảm nó có thể mở ra."""
     heads: Dict[str, List[str]] = {}
     for rest in _segment_commands(tokens):
-        names = _glob_names(posixpath.basename(rest[0]), len(rest) == 1)
+        names = _glob_names(rest[0], len(rest) == 1)
         if names:
             heads[rest[0]] = list(dict.fromkeys([*heads.get(rest[0], []), *names]))
     return heads
 
 
-def _glob_rewrites(cmd: str, tokens: List[str]) -> List[str]:
+def _scan_glob_rewrites(
+    cmd: str,
+    tokens: List[str],
+    root: str,
+    cwd: Optional[str],
+    depth: int,
+    asks: List[str],
+    budget: "ScanBudget",
+    rw: int,
+) -> str:
+    """Quét bản viết lại theo tên glob (D-162/D-167); quá `GLOB_MAX_HEADS` tên glob hay lệnh dài quá `REWRITE_MAX_CHARS`
+    → chặn TRƯỚC khi dựng (bản viết lại tốn số tên × độ dài lệnh — review #248 lượt 8: dựng trước rồi mới xét ngân sách
+    từng cạn bộ nhớ → guard chết → lệnh đi tiếp)."""
+    heads = _glob_heads(tokens)
+    if len(heads) > GLOB_MAX_HEADS or (heads and len(cmd) > REWRITE_MAX_CHARS):
+        return "Lệnh quá phức tạp để guard quét hết (vượt ngân sách quét: nhiều tên lệnh glob — D-167): chia nhỏ lệnh."
+    return _scan_scripts(_glob_rewrites(cmd, tokens, heads), root, cwd, depth, asks, 0, budget, rw)
+
+
+def _glob_rewrites(cmd: str, tokens: List[str], heads: Dict[str, List[str]]) -> List[str]:
     """Bản viết lại CHUỖI LỆNH GỐC (giữ heredoc, `<(`, nháy, gán biến) cho MỖI tên nhạy cảm khớp mẫu glob của tên một lệnh
     đơn: mọi lần xuất hiện của từ đó thay cùng lúc. Quét như shell lồng — `bash_decision` đệ quy chịu ngân sách và
-    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-162)."""
+    `rewrites`, nên `/bin/[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-162)."""
     out: List[str] = []
-    for head, names in _glob_heads(tokens).items():
+    for head, names in heads.items():
         word = re.compile(GLOB_WORD_BEFORE + re.escape(head) + GLOB_WORD_AFTER)
         if word.search(cmd):
             out += [word.sub(name, cmd) for name in names]  # tên từ danh sách đóng: không có `\`
@@ -6187,7 +6203,7 @@ def bash_decision(
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
-    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
+    nested_deny = nested_deny or _scan_glob_rewrites(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res

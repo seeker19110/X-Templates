@@ -1176,3 +1176,10 @@
 - Chọn: Tách lệnh hiểu cú pháp: bỏ qua vùng (( … )) và [[ … ]], bỏ mẫu nhánh case (đoạn kết thúc bằng ')' không có '(' mở, kể cả nhánh nối '|'); mkfs trơn vào nhóm bỏ khi không đối số
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: gốc lỗi là tách token coi mẫu/regex/số học là lệnh — sửa ở gốc thì mọi tên trong danh sách đều hết chặn oan, và case nhiều nhánh không còn sinh bản viết lại (hết cạn ngân sách); (3) test được bằng đúng các thành ngữ reviewer nêu. Đính chính D-165: 'không chặn oan' chỉ đúng sau D-166
 - Đường lùi: Khôi phục _segment_commands tách ở mọi dấu nối
+
+### D-167 · 2026-10-24T14:58:08+00:00 · Review #248 lượt 8: tách cú pháp bash bằng token không hội tụ (8 lượt; D-166 đếm ngoặc mở lỗ mới, chặn oan case (s*), $(…)/s*; fail-open cạn bộ nhớ khi dựng bản viết lại). Thu hẹp hay tiếp tục vá?
+
+- Phương án: (1) Thu hẹp: chỉ viết lại khi tên lệnh là đường tuyệt đối trong thư mục bin hệ thống (/bin, /usr/bin, /usr/local/bin, /sbin…, ~/bin, ~/.local/bin) không glob ở thư mục; tách lệnh về bản đơn giản; trần số tên glob và độ dài lệnh trước khi dựng (vượt → chặn BUDGET); tên trần glob ghi giới hạn · (2) Tiếp tục vá bộ tách cú pháp (ngăn xếp đoạn, ngữ cảnh case) · (3) Bỏ PR, giữ guard như main
+- Chọn: Thu hẹp: chỉ viết lại khi tên lệnh là đường tuyệt đối trong thư mục bin hệ thống (/bin, /usr/bin, /usr/local/bin, /sbin…, ~/bin, ~/.local/bin) không glob ở thư mục; tách lệnh về bản đơn giản; trần số tên glob và độ dài lệnh trước khi dựng (vượt → chặn BUDGET); tên trần glob ghi giới hạn
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mẫu case, số học, regex, mảng không bao giờ có dạng /usr/bin/x? nên hết chặn oan theo cấu trúc chứ không theo vá; trần trước khi dựng bịt fail-open; giữ phần giá trị chính (đường tuyệt đối tới lệnh hệ thống là cách thật để gọi tên qua glob — tên trần chỉ mở theo tệp ở cwd); (3) đơn giản, chứng minh được; (5) 8 lượt vá không hội tụ
+- Đường lùi: Khôi phục _segment_commands D-166 từ 4843057
