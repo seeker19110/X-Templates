@@ -6365,6 +6365,19 @@ def _decision_choice(options: List[str], choice: str) -> Optional[str]:
     return None
 
 
+def _last_decision(text: str, base: Path, rel: Path) -> int:
+    """Số D-NNN lớn nhất trong sổ này và sổ cùng đường dẫn ở mọi worktree khác của repo (T-2612) — hai worktree ghi
+    quyết định song song từng cùng ra D-001. Chỉ đọc để đánh số; không phải repo git → chỉ sổ này."""
+    r = _git(base, "worktree", "list", "--porcelain", env=_perf_env())
+    trees = [Path(ln[9:]) for ln in r.stdout.splitlines() if ln.startswith("worktree ")] if r.returncode == 0 else []
+    texts = [text]
+    for tree in trees:
+        other = tree / rel
+        if other.resolve() != (base / rel).resolve() and other.is_file():
+            texts.append(other.read_text(encoding="utf-8", errors="replace"))
+    return max((int(n) for t in texts for n in DECISION_ID_RE.findall(t)), default=0)
+
+
 def _loop_decide(args: argparse.Namespace, base: Path) -> int:
     options = list(dict.fromkeys(o for o in map(_one_line, args.option) if o))
     question, why, revert = _one_line(args.question), _one_line(args.why), _one_line(args.revert)
@@ -6386,7 +6399,7 @@ def _loop_decide(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ --log phải là file trong dự án: {args.log}", file=sys.stderr)
         return 2
     text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
-    did = f"D-{max((int(n) for n in DECISION_ID_RE.findall(text)), default=0) + 1:03d}"
+    did = f"D-{_last_decision(text, base, log.relative_to(base.resolve())) + 1:03d}"
     entry = (
         f"\n### {did} · {now_iso()} · {question}\n\n"
         f"- Phương án: " + " · ".join(f"({i}) {o}" for i, o in enumerate(options, 1)) + "\n"

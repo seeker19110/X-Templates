@@ -37,7 +37,7 @@
 
 ### Lát 2 — Vòng tự trị
 - [x] `T-2611` `loop init` khi vòng trước đã dừng: giữ `deferred` của task còn mở trong PLAN mới; task `[x]` có bằng chứng xanh khớp dấu vân tay Gate hiện tại được mang sang (không đòi chạy lại); cảnh báo số task `[x]` thiếu bằng chứng cục bộ kèm gợi ý mỗi đợt một `PLAN-<đợt>.md` (files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k loop_init_carry`
-- [ ] `T-2612` `loop decide` lấy số D-NNN kế tiếp theo max của sổ ở mọi worktree cùng repo (`git worktree list`), không chỉ cây đang đứng (sau: T-2611; files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k decide_worktrees`
+- [x] `T-2612` `loop decide` lấy số D-NNN kế tiếp theo max của sổ ở mọi worktree cùng repo (`git worktree list`), không chỉ cây đang đứng (sau: T-2611; files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k decide_worktrees`
 - [ ] `T-2613` Mẫu PLAN + skill `/autopilot` + README vòng tự trị: mỗi đợt một `docs/autopilot/PLAN-<đợt>.md` (bằng chứng `.autopilot/` không theo git — máy mới chỉ chạy lại PLAN đang làm) (sau: T-2612; files: framework/templates/PLAN.md, .claude/skills/autopilot/SKILL.md, framework/11-autonomous-loop/README.md) — Gate: `grep -q 'PLAN-<đợt>' framework/templates/PLAN.md && grep -q 'PLAN-<đợt>' .claude/skills/autopilot/SKILL.md`
 
 ### Lát 3 — Lệnh kiểm hàng rào và phát hành

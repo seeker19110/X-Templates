@@ -288,3 +288,35 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(rc, 0)
         self.assertIn("1 task [x] không có bằng chứng ở máy này (T-001)", err)
         self.assertIn("PLAN-<đợt>.md", err)
+
+
+class DecideWorktreesTest(TmpRepoCase):
+    """T-2612 (phản hồi dự án đích): `loop decide` ở hai worktree cùng repo đều ra D-001 — số kế tiếp chỉ đọc sổ cây
+    đang đứng. Nay lấy max qua sổ ở mọi worktree (`git worktree list`)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.main = self.init_repo()
+        (self.main / "README.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "init")
+        self.wt = self.tmp / "wt-b"
+        self.git("worktree", "add", "-q", "-b", "b", str(self.wt))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.main)}))
+
+    def decide(self, where: Path) -> str:
+        with chdir(where):
+            rc, out, err = run_main(
+                "loop", "decide", "--question", "q", "--option", "a", "--option", "b", "--choice", "1",
+                "--why", "w", "--revert", "r",
+            )  # fmt: skip
+        self.assertEqual(rc, 0, err)
+        return out
+
+    def test_decide_worktrees_numbers_do_not_collide(self) -> None:
+        self.assertIn("D-001", self.decide(self.main))
+        self.assertIn("D-002", self.decide(self.wt))
+        self.assertIn("D-003", self.decide(self.main))
+        log = (self.wt / "docs" / "autopilot" / "DECISIONS.md").read_text(encoding="utf-8")
+        self.assertIn("### D-002", log)
+        self.assertNotIn("### D-001", log)  # chỉ đọc sổ worktree khác để đánh số, không chép
