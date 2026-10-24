@@ -1791,10 +1791,47 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last()["reviewer_model"], last()["reviewer_effort"], last()["author_effort"]),
                          ("opus", "max", "high"))  # fmt: skip
         self.assertEqual(run("--reviewer-model", "gpt-5", "--author-model", "gpt-5", *hi)[0], 0)  # họ không bậc
-        for rv, au in (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "claude-fable-5-1")):
+        for rv, au in (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "gpt-5")):
             self.assertEqual(run("--reviewer-model", rv, "--author-model", au)[0], 0, (rv, au))  # không xếp hạng được
+        # review #247: họ Anthropic chưa xếp bậc (mythos) so với họ Anthropic khác → từ chối, không đoán bậc
+        for rv, au in (("claude-haiku-4-5", "claude-mythos-5-1"), ("Mythos 5", "claude-fable-5-1")):
+            rc, _, err = run("--reviewer-model", rv, "--author-model", au, "--reviewer-effort", "max")
+            self.assertEqual(rc, 2, (rv, au))
+            self.assertIn("họ mythos chưa có bậc", err)
+            self.assertIn("MODEL_TIER", err)
+        self.assertIsNone(xt.review_capability_error("mythos", "claude-mythos-5-1", "max", "low"))  # cùng họ: effort
+        # review #247: chữ Unicode gập hoa/thường ra Latin (`ſ` → s) không làm lộ họ model
+        for odd in ("claude-opuſ-5-5", "ſonnet"):
+            self.assertIsNone(xt.MODEL_FAMILY_RE.search(odd), odd)
+            rc, _, err = run("--reviewer-model", "claude-fable-5-1", "--author-model", odd)
+            self.assertEqual(rc, 2, odd)
+            self.assertIn("không nhận diện được họ model", err)
         self.assertEqual(xt.review_capability_error("opus", "sonnet"), None)
         self.assertIn("cùng họ", xt.review_capability_error("mythos", "Mythos 2", "high", "high") or "")
+
+    def test_config_effort_follows_config_model(self):
+        """Review #247: workflow `pr-review` truyền model reviewer thật bằng cờ, họ tác giả lấy từ xt.yaml — effort cấu
+        hình chỉ đi kèm model cấu hình: model từ cờ thì `reviewer_effort` cấu hình không áp, không được ghi vào sổ."""
+
+        def run(*extra: str) -> tuple:
+            return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *extra)
+
+        cfg = "merge_autonomy: L3\nauthor_model_family: opus\nauthor_effort: high\nreviewer_effort: max\n"
+        (self.base / "xt.yaml").write_text(cfg, encoding="utf-8")
+        rc, _, err = run("--reviewer-model", "claude-opus-5-5")
+        self.assertEqual(rc, 2)
+        self.assertIn("cùng họ", err)
+        self.assertIn("effort ?", err)  # effort reviewer cấu hình không áp cho model khai bằng cờ
+        self.assertNotIn("7", xt.read_reviews(self.base))
+        self.assertEqual(run("--reviewer-model", "claude-opus-5-5", "--reviewer-effort", "max")[0], 0)
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual(
+            (last["reviewer_effort"], last["author_model"], last["author_effort"]), ("max", "opus", "high")
+        )
+        (self.base / "xt.yaml").write_text(cfg + "reviewer_model_family: claude-opus-5-5\n", encoding="utf-8")
+        self.assertEqual(run()[0], 0)  # model và effort cùng từ cấu hình → dùng
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual((last["reviewer_model"], last["reviewer_effort"]), ("claude-opus-5-5", "max"))
 
     def test_reviewed_rerun_with_effort_is_idempotent(self):
         """D-161: effort là một phần danh tính người rà — chạy lại cùng effort không thêm bản ghi, đổi effort thì thêm."""
@@ -2739,20 +2776,36 @@ class StewardFollowupTest(unittest.TestCase):
         )
         self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")  # cờ CLI thắng cấu hình
         self.assertEqual((ns.reviewer_effort, ns.author_effort), ("low", "high"))
+        # review #247: model khai bằng cờ → effort cấu hình của phía đó không áp (không ghi effort chưa từng chạy)
+        ns = unittest.mock.Mock(
+            clean=True, reviewer_model="claude-opus-5-5", author_model=None, reviewer_effort=None, author_effort=None
+        )
+        self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")
+        self.assertEqual((ns.reviewer_effort, ns.author_effort), (None, "high"))
+        ns = unittest.mock.Mock(
+            clean=True, reviewer_model=None, author_model="opus", reviewer_effort=None, author_effort=None
+        )
+        self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")  # effort tác giả cấu hình không áp
+        self.assertEqual((ns.reviewer_effort, ns.author_effort), ("max", None))
 
     def test_config_capability_rule_in_ci_check(self):
         base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         cfg = "author_model_family: opus\nreviewer_model_family: opus\n"
-        for extra, bad in (
-            ("reviewer_effort: max\nauthor_effort: high\n", None),
-            ("reviewer_effort: turbo\n", "turbo"),
-        ):
+        wf = base / "wf"  # thư mục workflow rỗng: chỉ kiểm cấu hình, không phụ thuộc workflow của repo
+        wf.mkdir()
+        for extra, want in (("reviewer_effort: max\nauthor_effort: high\n", 0), ("reviewer_effort: turbo\n", 1)):
             (base / "xt.yaml").write_text(cfg + extra, encoding="utf-8")
             with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
-                _, out, _ = run_main("ci-check")
+                rc, out, _ = run_main("ci-check", str(wf))
+            self.assertEqual(rc, want, out)
             self.assertNotIn("cùng họ", out)
-            if bad:
-                self.assertIn(f"reviewer_effort '{bad}'", out)
+            if want:
+                self.assertIn("reviewer_effort 'turbo'", out)
+        (base / "xt.yaml").write_text("author_model_family: claude-mythos-5-1\nreviewer_model_family: haiku\n")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
+            rc, out, _ = run_main("ci-check", str(wf))
+        self.assertEqual(rc, 1)
+        self.assertIn("họ mythos chưa có bậc", out)
 
     def test_same_family_rejected_by_ci_check(self):
         base = Path(self.enterContext(tempfile.TemporaryDirectory()))

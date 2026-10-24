@@ -8723,11 +8723,20 @@ def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return last
 
 
+def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
+    """Bản ghi sạch của sổ còn qua `_review_models_error` (luật hiện hành, không cấu hình) — tức lệnh đăng lại chạy được."""
+    vals = {k: r.get(k) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
+    if not all(v is None or isinstance(v, str) for v in vals.values()):
+        return False
+    return _review_models_error(argparse.Namespace(clean=True, **vals)) is None
+
+
 def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
+    """Lệnh đăng lại; bản ghi sạch đã qua `_ledger_clean_valid` nên luôn có đủ hai model."""
     flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
     efforts = "".join(f" --{k.replace('_', '-')} {r[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
     models = (
-        f" --reviewer-model {r.get('reviewer_model') or '<M>'} --author-model {r.get('author_model') or '<M>'}{efforts}"
+        f" --reviewer-model {r.get('reviewer_model')} --author-model {r.get('author_model')}{efforts}"
         if flag == "--clean"
         else ""
     )
@@ -8820,7 +8829,11 @@ def _pr_next_republish(
     sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn. Review của head cũ không đăng lại: head đã đổi
     thì cần review mới ở head hiện tại, đăng kết luận cũ chỉ thêm một bước thừa."""
     r = unpublished_review(rec)
-    if r is None or r.get("head") != d.get("head") or (r.get("clean") and not r.get("inconclusive") and not review_bad):
+    if r is None or r.get("head") != d.get("head"):
+        return None
+    # Review sạch chỉ đăng lại khi đổi được kết luận VÀ bản ghi còn qua luật hiện hành (bản ghi theo luật cũ, thiếu
+    # model → lệnh đăng lại exit 2 mãi): không thì rơi về bước `review` thường — rà lại (review #247).
+    if r.get("clean") and not r.get("inconclusive") and not (review_bad and _ledger_clean_valid(r)):
         return None
     n = d.get("pr", "")
     why = (
@@ -8855,7 +8868,7 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, 
 MODEL_FAMILY_RE = re.compile(
     r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral"
     r"|(?<![a-z])(?:kimi|glm|phi|command|nova)(?![a-z])|(?<![a-z0-9])o\d",
-    re.I,
+    re.I | re.A,  # re.A: `ſonnet`/`claude-opuſ` (Unicode gập hoa/thường ra Latin) không phải tên họ (review #247)
 )
 
 
@@ -8866,6 +8879,8 @@ def model_family(name: str) -> str:
 
 
 MODEL_TIER = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4}  # bậc năng lực họ Claude (D-161)
+# Họ Anthropic chưa xếp bậc: so với họ Anthropic khác thì từ chối (không đoán bậc) — thêm vào MODEL_TIER (review #247).
+ANTHROPIC_UNTIERED = frozenset({"mythos"})
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # mức effort, tăng dần
 REVIEW_EFFORT_KEYS = ("reviewer_effort", "author_effort")
 REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family", "author_effort", "reviewer_effort")
@@ -8879,6 +8894,13 @@ def review_capability_error(
     → chỉ nhận khi khai cả hai effort và effort reviewer cao hơn. None = nhận."""
     fr, fa = model_family(reviewer), model_family(author)
     if fr != fa:
+        anthropic = ANTHROPIC_UNTIERED | MODEL_TIER.keys()
+        untiered = [f for f in (fr, fa) if f in ANTHROPIC_UNTIERED]
+        if untiered and fr in anthropic and fa in anthropic:
+            return (
+                f"họ {untiered[0]} chưa có bậc để so với {fa if untiered[0] == fr else fr} — thêm vào MODEL_TIER rồi "
+                "ghi lại (D-161): reviewer phải có năng lực cao hơn người viết (LOOP-ORCH-005)"
+            )
         tr, ta = MODEL_TIER.get(fr), MODEL_TIER.get(fa)
         if tr is None or ta is None or tr > ta:
             return None
@@ -8935,10 +8957,14 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
     bad_cfg = review_family_config_error(cfg)
     if bad_cfg:
         return bad_cfg
-    args.reviewer_model = args.reviewer_model or cfg.get("reviewer_model_family")
-    args.author_model = args.author_model or cfg.get("author_model_family")
-    args.reviewer_effort = args.reviewer_effort or cfg.get("reviewer_effort")
-    args.author_effort = args.author_effort or cfg.get("author_effort")
+    # Effort cấu hình đi kèm model cấu hình: model khai bằng cờ (workflow `pr-review` truyền model reviewer thật) thì
+    # effort cấu hình không áp cho model đó — không ghi effort chưa từng chạy (review #247).
+    if not args.reviewer_model:
+        args.reviewer_model = cfg.get("reviewer_model_family")
+        args.reviewer_effort = args.reviewer_effort or cfg.get("reviewer_effort")
+    if not args.author_model:
+        args.author_model = cfg.get("author_model_family")
+        args.author_effort = args.author_effort or cfg.get("author_effort")
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-ORCH-005: reviewer năng lực cao hơn người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):

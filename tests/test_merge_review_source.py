@@ -382,7 +382,8 @@ class ReviewSourceTest(unittest.TestCase):
             "pr": 7,
             "autonomy": 3,
         }
-        rec = xt.with_published({"reviews": [{"head": "H", "clean": True, "at": "1"}]}, [])
+        local = {"head": "H", "clean": True, "at": "1", "reviewer_model": "fable", "author_model": "opus"}
+        rec = xt.with_published({"reviews": [local]}, [])
         act = xt.pr_next(d, False, rec)["action"]
         self.assertFalse(act == "merge" and not xt.merge_eligibility(d, [])["eligible"])
         self.assertEqual(act, "republish-review")
@@ -403,12 +404,13 @@ class ReviewSourceTest(unittest.TestCase):
     def test_unpublished_review_steps(self):
         d = {"pr": 7, "head": HEAD, "verdict": "merge", "lane": "chuẩn", "hard": [], "autonomy": 3}
         d.update({"reasons": ["L3"], "next": "x"})
-        clean = {"reviewer_model": "sonnet", "author_model": "claude-opus-5-5", **mark(True)}
+        clean = {"reviewer_model": "claude-fable-5-1", "author_model": "claude-opus-5-5", **mark(True)}
         r = xt.pr_next(d, False, xt.with_published({"reviews": [clean]}, []))
         self.assertEqual(r["action"], "republish-review")
         self.assertEqual(
             r["do"],
-            f"xt.py pr reviewed --pr 7 --head {HEAD} --clean --reviewer-model sonnet --author-model claude-opus-5-5",
+            f"xt.py pr reviewed --pr 7 --head {HEAD} --clean --reviewer-model claude-fable-5-1"
+            " --author-model claude-opus-5-5",
         )
         eff = {
             **clean,
@@ -438,11 +440,22 @@ class ReviewSourceTest(unittest.TestCase):
         self.assertIsNone(xt.unpublished_review(xt.with_published({"reviews": [clean]}, [later])))
         inc = {**mark(False), "inconclusive": True}
         self.assertIn("--inconclusive", xt.pr_next(d, False, xt.with_published({"reviews": [inc]}, []))["do"])
-        old = {**mark(True)}  # sổ cũ không ghi model: chỗ trống cho agent điền
-        self.assertIn(
-            "--reviewer-model <M> --author-model <M>",
-            xt.pr_next(d, False, xt.with_published({"reviews": [old]}, []))["do"],
+        # Review #247: bản ghi sạch không còn qua luật hiện hành (thiếu model, luật cũ D-045, effort sai kiểu, tên mơ
+        # hồ) → lệnh đăng lại sẽ exit 2 mãi: không đề nghị đăng lại, rơi về `review` thường (rà lại).
+        stale = (
+            {**mark(True)},
+            {**clean, "reviewer_model": "sonnet"},
+            {**clean, "reviewer_model": "opus", "reviewer_effort": "high", "author_effort": "high"},
+            {**clean, "reviewer_effort": 3},
+            {**clean, "reviewer_model": "claude"},
         )
+        for rec in stale:
+            r = xt.pr_next(d, False, xt.with_published({"reviews": [rec]}, []))
+            self.assertEqual(r["action"], "review", rec)
+            self.assertIn("rà cả PR", r["do"])
+            self.assertEqual(
+                xt.pr_next(d, True, xt.with_published({"reviews": [rec]}, []))["action"], "disable-auto-merge"
+            )
         # pha build: review sạch chưa đăng không chặn việc merge (review đang hoãn) — không bắt đăng lại
         b = {**d, "delivery_phase": "build"}
         r = xt.pr_next(b, False, xt.with_published({"reviews": [clean]}, []))
