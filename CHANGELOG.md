@@ -5,6 +5,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py` (chỉ `framework/` đổi) rồi ghép lại blueprint (`compose`)** để nhận chữ mới của `AI-AGENTIC-001` (MUST@L), `AI-AGENTIC-011`, `LOOP-ORCH-017` (MAY → SHOULD) và mục mới `AI-AGENTIC-019`, `LOOP-ORCH-020`. Harness (`xt.py`, hook, `.claude/agents/`, skill, `AGENTS.md`) **không đổi**.
+
+### Changed
+- `AI-AGENTIC-001` (MUST@L; [ADR-0045](docs/adr/0045-split-by-context-measure-before-fold.md), D-168): mọi thay đổi kiến trúc agent — đổi pattern *hay* thêm/bớt agent, context — chấm trên cùng eval end-to-end trước/sau, mỗi task chạy > 1 lần, so từng ca lật; giữ agent con khi bản gộp kém hơn hoặc kiểm kê kết luận `as-tool`/`keep`; chưa có eval → dựng eval nhỏ trước. Thay "thử workflow pattern trước, tự trị sau". Nguồn: bài claude.com *When to fold subagents into your main agent loop* (2026-10-22) + kit `single-agent-loop-kit` (`c437962`) — bài nói "frequently/often", không "always"; kit "It measures." → khung giữ "đo trước", không bỏ subagent (`research/2026-10-24-single-agent-loop.md`). `agentic-systems.md` đổi theo: header, Nguyên tắc 1–2 và 5, bảng Pattern (Routing, Orchestrator-workers, Agent tự trị; "bảng là từ vựng"), §Handoff thêm `result_schema`, mục mới "Kết luận cho từng agent con đang có" (`main`/`fold`/`merge`/`as-tool`/`keep`), 3 bẫy, 1 cổng, Nguồn.
+- `AI-AGENTIC-011` (SHOULD): nhà của **ba lý do context** để tách agent con (context phình đo được · song song với context vứt được hoặc kiểm độc lập · chọn sai tool/chỉ thị mâu thuẫn mà skill không sửa được) và danh sách "không tách vì" (đội sở hữu, loại vấn đề, giọng riêng, prompt dài, nhiều tool, bước cố định); Kiểm bằng bảng kiểm kê agent con. `conventions.md` §7 ghi module 11 trỏ về đây; `13-ai-engineering/README.md` hàng chỉ mục đổi theo.
+- `LOOP-ORCH-017` MAY → SHOULD: tỉ lệ lần chạy Gate đỏ của task đã giao subagent (ngưỡng 20 % theo lần chạy), đo từ `.autopilot/runs.jsonl` và `xt.py loop stats --all --json`. `orchestration-and-subagents.md`: header, Nguyên tắc 3 (tách vì context — **giả định** cho vòng lặp phát triển, đo ở `LOOP-ORCH-020`), hàng `executor` ghi thật "tầng mặc định của harness, chưa phải lý do context đo được", hàng "Làm trực tiếp" thành nhóm đo (`loop record` không `--executor`), gói giao việc thêm `context_reason`, bẫy, cổng, Nguồn (5 agent thật). Tầng executor (ADR-0029), `LOOP-ORCH-002`, `LOOP-ORCH-019` giữ nguyên chữ.
+
+### Added
+- `AI-AGENTIC-019` (SHOULD): gộp agent con vào một vòng lặp theo bước nhỏ có đo — eval nhỏ có ca cho mỗi chuỗi agent (`chains_with`) → gọi như tool (schema kết quả) làm baseline → gộp cặp gắn chặt → fold từng cái, kiểm có/không skill; giữ agent con là kết quả chấp nhận được.
+- `LOOP-ORCH-020` (SHOULD): mặc định giao việc của harness giữ tới khi có số; nhóm "Làm trực tiếp" ghi `executor: null`; báo cáo cuối lát ghi tỉ lệ tự làm/giao + xanh lần đầu hai nhóm; đổi mặc định/tầng chỉ sau ≥ 10 task mỗi nhóm × ≥ 2 vòng (khởi điểm tự đặt, không phải ngưỡng có nguồn) + research note + ADR.
+- `research/2026-10-24-single-agent-loop.md`: dữ kiện bài và kit theo mục, bản đồ phủ 14 khuyến nghị, điều bài không nói, bằng chứng mỏng, phép đo tiếp theo; nợ ghi ở ADR-0045 (skill `/autopilot` bước 5, `templates/AGENTS.md` §8, `llm-app-foundations.md`/`02-profiles` còn chép thang cũ, `evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`).
+
 ## [3.19.2] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
