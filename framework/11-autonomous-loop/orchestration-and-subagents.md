@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-10-21
+updated: 2026-10-24
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng
@@ -74,7 +74,7 @@ Thiếu `acceptance_criteria` → không giao.
 
 - [ ] `LOOP-ORCH-001` **MUST** Chỉ phiên chính điều phối; subagent không gọi subagent (vòng lặp phát triển; sản phẩm agentic theo [`AI-AGENTIC-007`](../13-ai-engineering/agentic-systems.md)). → Kiểm: `.claude/agents/*.md` không có `Agent` trong `tools:` **hoặc** môi trường đặt `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`. · Nguồn: stored 23 §4.4; Claude Code env-vars
 - [ ] `LOOP-ORCH-002` **MUST@L** Mỗi lần giao việc có gói handoff tối thiểu: mục tiêu, tiêu chí chấp nhận là lệnh máy, file trong phạm vi, ngân sách, phạm vi quyền ⊆ phiên chính. → Kiểm: prompt giao việc chứa đủ 5 trường; thiếu Gate → từ chối giao. · Nguồn: `research/2026-10-13-ai-agent-research.md` §2.3
-- [ ] `LOOP-ORCH-003` **MUST** Subagent không được cấp quyền/tool rộng hơn phiên chính và không tự nâng mức tin cậy T0–T4 của hành động. → Kiểm: `tools:` của agent là tập con; hành động T3–T4 trong output subagent bị phiên chính đưa về điểm dừng (`xt.py loop block`). · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
+- [ ] `LOOP-ORCH-003` **MUST** Subagent không được cấp quyền/tool rộng hơn phiên chính và không tự nâng mức tin cậy T0–T4 của hành động. → Kiểm: `xt.py harness-check` exit 0 (lệnh tự viết `python3 -c` bị guard chặn); `tools:` của agent là tập con; hành động T3–T4 trong output subagent bị phiên chính đưa về điểm dừng (`xt.py loop block`). · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
 - [ ] `LOOP-ORCH-004` **MUST** Kết quả "xanh" do subagent khai chỉ được tick task sau khi phiên chính chạy lại Gate bằng `xt.py loop record`. → Kiểm: `.autopilot/evidence/T-xxx.json` tồn tại cho task đã tick; `loop status` không trả `verify`.
 - [ ] `LOOP-ORCH-005` **MUST@L** Reviewer dùng model khác **họ** với agent đã viết diff (kể cả `executor-deep` và phiên chính), chỉ có tool đọc + Bash kiểm, không sửa file; reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file) trả INCONCLUSIVE, phiên chính ghi `pr reviewed --inconclusive` và giao reviewer khác — không ghi sạch. → Kiểm: `.claude/agents/reviewer.md` có `model:` khác `executor.md`, `reviewer-alt.md` khác `executor-deep.md`, cả hai `tools:` không chứa `Edit`/`Write`; `pr reviewed --clean` cùng họ exit 2 (D-045).
 - [ ] `LOOP-ORCH-006` **MUST@L** Hai task chạm cùng file, migration, port hoặc biến môi trường không chạy song song. → Kiểm: `PLAN.md` ghi `files:`/`depends_on:` cho task song song; script kiểm giao nhau tập file trước khi tách. · Nguồn: stored 21 §6

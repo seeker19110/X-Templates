@@ -2806,3 +2806,68 @@ class PrTitleCheckTest(TmpDirCase):
         items.assert_not_called()
         (self.tmp / "xt.yaml").write_text("pr_title_check: on\n", encoding="utf-8")
         self.assertEqual(run_main("pr", "title-check", "sai")[0], 1)
+
+
+class HarnessCheckTest(TmpDirCase):
+    """T-2621 (phản hồi dự án đích): lệnh kiểm `python3 -c` tự viết cho LOOP-ORCH-003/STOP-001/STOP-002 bị guard chặn
+    (đúng) nên `loop verify` đỏ — khung cung cấp lệnh con chỉ đọc `harness-check` cho các mục hàng rào này."""
+
+    AGENT = "---\nname: a\ntools: Read, Grep\nmodel: sonnet\n---\nx\n"
+
+    def setUp(self):
+        super().setUp()
+        (self.tmp / ".claude" / "agents").mkdir(parents=True)
+        (self.tmp / ".claude" / "hooks").symlink_to(ROOT / ".claude" / "hooks")
+        (self.tmp / ".claude" / "settings.json").write_text('{"permissions": {"ask": []}}', encoding="utf-8")
+        (self.tmp / ".claude" / "agents" / "a.md").write_text(self.AGENT, encoding="utf-8")
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp)}))
+
+    def test_harness_check_green_on_framework_and_sound_project(self):
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+            rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 0, out)
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("✓ guard", out)
+        self.assertIn("✓ settings", out)
+        self.assertIn("✓ agents", out)
+
+    def test_harness_check_red_rows(self):
+        agents = self.tmp / ".claude" / "agents"
+        (agents / "b.md").write_text("---\nname: b\nmodel: sonnet\n---\n", encoding="utf-8")  # thiếu tools:
+        (agents / "c.md").write_text(
+            "---\nname: c\ntools: *\npermissionMode: bypassPermissions\n---\n", encoding="utf-8"
+        )
+        (agents / "d.md").write_text("không frontmatter\n", encoding="utf-8")
+        (agents / "e.md").write_text("---\nname: e\ntools:\n  - Read\n  - Grep\n---\n", encoding="utf-8")  # hợp lệ
+        (agents / "f.md").write_text("---\nname: f\ntools:\n  - '*'\n---\n", encoding="utf-8")
+        (self.tmp / ".claude" / "settings.json").write_text('{"permissions": {"ask": ["Bash"]}}', encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ settings", out)
+        for name in ("b.md", "c.md", "d.md", "f.md"):
+            self.assertIn(name, out)
+        self.assertNotIn("e.md", out)
+        self.assertIn("permissionMode", out)
+
+    def test_harness_check_missing_or_broken_guard_and_settings(self):
+        (self.tmp / ".claude" / "hooks").unlink()
+        (self.tmp / ".claude" / "settings.json").write_text("{hỏng", encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ guard", out)
+        self.assertIn("✗ settings", out)
+        (self.tmp / ".claude" / "settings.json").unlink()
+        (self.tmp / ".claude" / "hooks").mkdir()
+        (self.tmp / ".claude" / "hooks" / "guard.py").write_text("def x(:\n", encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("✗ guard", out)
+        self.assertIn("✓ settings", out)  # không có settings.json: không có `ask` nào
+        (self.tmp / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.assertIn("✓ settings", run_main("harness-check")[1])  # không khai `permissions`
+
+    def test_harness_check_hint_when_guard_blocks_check(self):
+        code, text = xt.run_gate_shell("git push --force origin main", ROOT, 30)
+        self.assertEqual(code, 126)
+        self.assertIn("xt.py harness-check", text)
