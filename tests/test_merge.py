@@ -1753,6 +1753,22 @@ class PrNextCliTest(unittest.TestCase):
         for name in ("command_r", "nova_pro", "o3mini", "GLM_4"):  # review #164: thẻ thật không có dấu ngăn
             self.assertTrue(xt.MODEL_FAMILY_RE.search(name), name)
 
+    def test_clean_review_judges_name_tail(self):
+        """Review #249: họ model xét ở đoạn sau `/` cuối (tiền tố nhà cung cấp bỏ) — kiểm tên mơ hồ cũng vậy, không thì
+        `haiku/reviewer` lọt như một họ lạ khác nhà cung cấp."""
+
+        def run(rev: str, aut: str) -> int:
+            args = ("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean")
+            return run_main(*args, "--reviewer-model", rev, "--author-model", aut)[0]
+
+        for rev, aut in (("haiku/reviewer", "claude-opus-5-5"), ("sonnet", "opus/executor-deep"),
+                         ("Qwen/QwQ-32B", "Qwen/Qwen3-235B-A22B"), ("ollama/qwq", "llama3.1:70b"),
+                         ("opus/", "sonnet")):  # fmt: skip
+            self.assertEqual(run(rev, aut), 2, (rev, aut))
+        self.assertEqual(run("openrouter/anthropic/claude-fable-5-1", "anthropic/claude-opus-4-1"), 0)
+        cfg = {"author_model_family": "opus", "reviewer_model_family": "haiku/reviewer"}
+        self.assertIn("không nhận diện được họ model", xt.review_family_config_error(cfg) or "")
+
     def test_clean_review_needs_higher_capability(self):
         """D-161 (LOOP-ORCH-005): review sạch do reviewer năng lực CAO HƠN người viết — khác họ Claude so bậc
         haiku < sonnet < opus < fable (effort không bù bậc); cùng họ chỉ nhận khi khai cả hai effort và effort reviewer

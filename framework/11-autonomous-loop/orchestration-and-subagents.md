@@ -99,7 +99,7 @@ Thiếu `acceptance_criteria` → không giao.
 | Subagent gọi tiếp subagent "cho nhanh" | Không ai nắm ngân sách; lỗi nhân bản theo tầng | Bỏ `Agent` khỏi `tools:`; depth = 1 |
 | Tin báo cáo "test pass" của subagent | Tick task không có bằng chứng; Stop hook trả `verify` muộn | Phiên chính `loop record` lại Gate |
 | Hai executor cùng sửa `schema.prisma`/migration | Xung đột merge, migration lệch số | Khai `files:` trong PLAN; serial hoá task chạm schema |
-| Reviewer cùng model, nhận cả lý luận của executor | Cùng điểm mù, review "xanh" rỗng | Reviewer năng lực cao hơn (`LOOP-ORCH-005`); chỉ đưa diff + SPEC |
+| Reviewer không cao hơn người viết (cùng model, cùng effort), nhận cả lý luận của executor | Cùng điểm mù, review "xanh" rỗng | Reviewer năng lực cao hơn (`LOOP-ORCH-005`); chỉ đưa diff + SPEC |
 | Giao task spec hở để "subagent tự lấp" | Subagent bịa yêu cầu, làm việc khác hẳn | Spec hở → phiên chính quyết D-NNN trước khi giao; subagent trả câu hỏi về, không tự lấp |
 | Mở 10 subagent song song trên máy 8 GB | OOM, timeout giả, chữ ký lỗi nhiễu | Trần 5; giảm khi máy yếu |
 | Subagent được quyền push/publish | Hành động đối ngoại không qua điểm dừng | Chỉ phiên chính push/publish, qua hook guard (deny việc không đảo ngược) và `loop defer` cho việc cần người |
@@ -112,7 +112,7 @@ Thiếu `acceptance_criteria` → không giao.
 | Cấm lồng subagent | Kiểm `tools:` của `.claude/agents/*.md` không có `Agent` (grep) | Test harness `tests/test_hooks.py` hoặc script CI | 0 vi phạm |
 | Bằng chứng task do subagent làm | `xt.py loop record --task T-xxx -- <Gate>` ở phiên chính | Trước khi tick `[x]` | `exit_code: 0` |
 | Giao nhau tập file giữa task song song | Script đọc `files:` trong PLAN, báo cặp giao nhau | Trước khi tách subagent | 0 cặp giao nhau |
-| Reviewer năng lực cao hơn, read-only | Kiểm frontmatter `model:`/`effort:`/`tools:` | Test harness | Bậc cao hơn `executor` (cùng họ: effort cao hơn); không `Edit/Write` |
+| Reviewer năng lực cao hơn, read-only | Kiểm frontmatter `model:`/`effort:`/`tools:` | `xt.py pr reviewed --clean` (từ chối reviewer không cao hơn); `tools:` do `harness-check`, `model:`/`effort:` do review rà | Bậc cao hơn `executor` (cùng họ: effort cao hơn); không `Edit/Write` |
 | Trần turn mỗi subagent | `maxTurns:` trong frontmatter agent | `.claude/agents/*.md` | Có giá trị (repo này: 80–160) |
 
 ## Nguồn

@@ -8874,13 +8874,21 @@ MODEL_FAMILY_RE = re.compile(
 )
 
 
+def _model_tail(name: str) -> str:
+    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)."""
+    return name.rsplit("/", 1)[-1]
+
+
 def model_family(name: str) -> str:
     """Họ model để so năng lực: `claude-opus-5-5`/`Opus 5.5`/`opus` → `opus`; tên lạ → chữ thường bỏ số và dấu."""
-    name = name.rsplit("/", 1)[
-        -1
-    ]  # bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)
+    name = _model_tail(name)
     m = MODEL_FAMILY_RE.search(name)
     return m.group(0).lower() if m else re.sub(r"[^a-z]+", "", name.lower())
+
+
+def _names_family(name: str) -> bool:
+    """Đoạn cuối tên có lộ họ model không — cùng đoạn mà `model_family` so, không thì `haiku/reviewer` lọt (review #249)."""
+    return bool(MODEL_FAMILY_RE.search(_model_tail(name)))
 
 
 MODEL_TIER = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4}  # bậc năng lực họ Claude (D-161)
@@ -8953,7 +8961,7 @@ def review_family_config_error(keys: Dict[str, str]) -> Optional[str]:
     a, r = keys.get("author_model_family", ""), keys.get("reviewer_model_family", "")
     if not (a and r):
         return None
-    if not (MODEL_FAMILY_RE.search(a) and MODEL_FAMILY_RE.search(r)):
+    if not (_names_family(a) and _names_family(r)):
         return f"xt.yaml: author_model_family '{a}' / reviewer_model_family '{r}' không nhận diện được họ model"
     err = review_capability_error(r, a, keys.get("reviewer_effort"), keys.get("author_effort"))
     return f"xt.yaml reviewer_model_family/author_model_family: {err}" if err else None
@@ -8981,7 +8989,7 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
         return "--clean cần --reviewer-model và --author-model (LOOP-ORCH-005: reviewer năng lực cao hơn người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
         return "không nhận diện được tên model (cần chữ, vd sonnet, claude-opus-5-5)"
-    vague = [m for m in (args.reviewer_model, args.author_model) if not MODEL_FAMILY_RE.search(m)]
+    vague = [m for m in (args.reviewer_model, args.author_model) if not _names_family(m)]
     if vague:  # `claude`, `reviewer`: tên không lộ họ thì "khác họ" luôn đúng — né vô ý luật năng lực (AUD-HAR-064)
         return (
             f"không nhận diện được họ model của '{vague[0]}' — ghi tên đủ (vd claude-sonnet-5-5, gpt-5, gemini-2.5-pro)"
