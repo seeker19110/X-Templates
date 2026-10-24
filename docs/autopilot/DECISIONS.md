@@ -1148,3 +1148,10 @@
 - Chọn: Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: xoá không đảo ngược → chiều chặt; fnmatch trên danh sách đóng không phụ thuộc máy và test được (hệ tệp thì kết quả đổi theo máy, bỏ sót tệp tạo giữa lệnh); (3) đơn giản: tái dùng luật find/rm đã có; (4) chặn oan thấp, lối thoát có sẵn (chạy ở thư mục con)
 - Đường lùi: Revert từng lát PR; biến thể glob và _fd_rule là mã thêm, không đổi luật cũ
+
+### D-163 · 2026-10-24T12:17:57+00:00 · Review #248 lượt 4: danh sách đóng GLOB_COMMANDS vẫn sót (trình thông dịch, lệnh ghi, CLI đám mây) và fnmatch bậc hai ngoài ngân sách — sửa tiếp bằng danh sách hay đổi cách?
+
+- Phương án: (1) Chặn thẳng tên lệnh glob dạng tên trần hoặc đường tuyệt đối (ngoặc phải đóng, có đối số, không toàn */?); đường tương đối giữ viết lại theo danh sách; head > 256 ký tự chặn trước fnmatch · (2) Mở rộng GLOB_COMMANDS thêm INTERPRETERS/FILE_WRITERS/CLI đám mây · (3) Giữ danh sách hẹp, ghi giới hạn vào CHANGELOG
+- Chọn: Chặn thẳng tên lệnh glob dạng tên trần hoặc đường tuyệt đối (ngoặc phải đóng, có đối số, không toàn */?); đường tương đối giữ viết lại theo danh sách; head > 256 ký tự chặn trước fnmatch
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: không phụ thuộc danh sách phải đầy đủ — mọi luật theo tên đều được bảo vệ; mỗi vòng mở rộng danh sách đều bị review tìm ra lỗ mới (4 lượt); (3) đơn giản, O(1) trước fnmatch; (4) chặn oan gần 0: không ai gõ /usr/bin/p?thon3 — script tương đối, case, [ ], for vẫn chạy
+- Đường lùi: Bỏ _glob_head_deny, quay về chỉ viết lại theo GLOB_COMMANDS

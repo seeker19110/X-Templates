@@ -72,9 +72,7 @@ class GlobCommandNameTest(unittest.TestCase):
     def test_guard_glob_command_name_not_overblocked(self):
         for cmd in (
             "ls",
-            "/usr/bin/fi?d . -name x",  # find không hành động xoá
-            "/bin/r? /tmp/x",  # rm không đệ quy
-            "/bin/r? -rf /tmp/xx",  # thư mục tạm
+            "./scripts/dev-*.sh x",  # đường tương đối: viết lại theo danh sách, không khớp tên nhạy cảm nào
             "[ -f x ] && echo ok",
             "[[ -f x ]] && echo ok",
             "./scripts/dev-task.* gate-fast",  # glob không khớp tên nhạy cảm nào
@@ -190,7 +188,36 @@ class GlobCommandNameTest(unittest.TestCase):
         self.assertEqual(guard._glob_names("[[:lower:][:digit:]]m"), ["rm"])  # đóng đủ vẫn nhận
 
     def test_guard_glob_commit_then_glob_name_not_overblocked(self):
-        self.assertEqual(policy("git commit -m x && /usr/bin/g?t status")["decision"], "")
+        self.assertEqual(policy("git commit -m x && ./tools/g?t status")["decision"], "")
+
+    def test_guard_glob_bare_or_absolute_head_denied(self):
+        """D-163 (review #248 lượt 4 🔴): tên trần/đường tuyệt đối viết bằng glob có đối số → chặn, kể cả lệnh vô hại —
+        danh sách tên đóng không bao giờ đủ (trình thông dịch, lệnh ghi, CLI đám mây)."""
+        for cmd in (
+            f"/usr/bin/p?thon3 -c 'import os;os.system(\"rm -rf {R}\")'",
+            f"/usr/bin/[p]erl -e 'system(\"rm -rf {R}\")'",
+            f"s?h localhost 'rm -rf {R}'",
+            "c? /dev/null .claude/hooks/guard.py",
+            "/bin/[s]ed -i s/deny/allow/ .claude/hooks/guard.py",
+            "c? /tmp/x .env",
+            "/usr/bin/[k]ubectl delete ns prod",
+            "d?cker run --privileged alpine",
+            "~/bin/r? -rf x",
+            "$HOME/bin/r? -rf x",
+            "/usr/bin/fi?d . -name x",  # vô hại nhưng tên tuyệt đối viết glob: chặn (không đoán)
+            "/bin/r? /tmp/x",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+
+    def test_guard_glob_long_head_is_bounded(self):
+        """Review #248 lượt 4 🔴: `[:`×N (ngoặc không đóng) làm fnmatch bậc hai — 24K ký tự từng mất 8 s; nay chặn trước."""
+        for head in ("/bin/" + "[:" * 30000, "./x/" + "[" * 30000):
+            start = time.monotonic()
+            out = policy(f"{head} a")
+            self.assertLess(time.monotonic() - start, 3)
+            self.assertEqual(out["decision"], "deny")
+        self.assertEqual(guard._glob_names("r?" + "?" * 300), [])
 
 
 class TildeUserTest(unittest.TestCase):

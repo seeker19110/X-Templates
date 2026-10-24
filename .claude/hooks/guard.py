@@ -6077,11 +6077,42 @@ GLOB_POSIX_RE = re.compile(r"\[[:.=]")
 GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|()`{!])", r"(?![^\s;&|()<>`}])"
 
 
+GLOB_HEAD_MAX = 256  # tên lệnh dài hơn: không đưa vào fnmatch (bậc hai theo độ dài mẫu) — `_glob_head_deny` chặn
+GLOB_REAL_RE = re.compile(r"[*?]|\[[^\]]+\]")  # glob shell thật mở: `*`, `?`, ngoặc ĐÓNG (`[`, `[[` của test thì không)
+
+
+def _segment_commands(tokens: List[str]) -> Iterator[List[str]]:
+    """Từng lệnh đơn (sau gán biến/wrapper/từ khoá) — rỗng bỏ qua."""
+    start = 0
+    for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
+        rest = _strip_prefixes(tokens[start:end])
+        if rest:
+            yield rest
+        start = end + 1
+
+
+def _glob_head_deny(tokens: List[str]) -> str:
+    """D-163: tên lệnh viết bằng glob dạng tên trần hay đường tuyệt đối (`p?thon3`, `/usr/bin/fi?d`, `~/bin/c?`) CÓ đối số
+    → chặn: shell mở ra tên thật mà mọi luật theo tên của guard không thấy, danh sách tên đóng không bao giờ đủ (review
+    #248). Đường tương đối (`./scripts/dev-task.*`) do `_glob_rewrites` xét; mẫu toàn `*`/`?` và lệnh không đối số (`*)`,
+    `s*)` của `case`) không đoán; tên quá dài có glob cũng chặn (không đưa vào fnmatch)."""
+    for rest in _segment_commands(tokens):
+        head = rest[0]
+        relative = "/" in head and not head.startswith(("/", "~", "$"))
+        too_long = len(head) > GLOB_HEAD_MAX and bool(GLOB_RE.search(head))
+        if len(rest) > 1 and (too_long or GLOB_REAL_RE.search(head) and head.strip("*?") and not relative):
+            return (
+                f"Lệnh bị khung chặn (tên lệnh viết bằng glob `{head[:80]}` — shell mở ra tên thật mà luật theo tên "
+                "không thấy; viết tên lệnh thật, D-163). Muốn làm thật thì người dùng tự chạy."
+            )
+    return ""
+
+
 def _glob_names(head: str, bare: bool = False) -> List[str]:
     """Tên nhạy cảm khớp mẫu glob của tên lệnh. Không glob, hay mẫu chỉ toàn `*`/`?` (`*)` của `case`, `*` trơn) → rỗng:
     không đoán. `bare` = lệnh không đối số: `sudo`/`doas` trơn vô hại (`s*)` của `case`) nên bỏ. Bash coi `[^x]` như
     `[!x]`, `[[:alpha:]]`/`[[.r.]]`/`[[=r=]]` là lớp ký tự — Python `fnmatch` không → đổi trước khi so."""
-    if not GLOB_RE.search(head) or not head.strip("*?"):
+    if not GLOB_RE.search(head) or not head.strip("*?") or len(head) > GLOB_HEAD_MAX:
         return []
     pat = GLOB_BRACKET_RE.sub(lambda m: "?" if GLOB_POSIX_RE.search(m[0]) else m[0], head).replace("[^", "[!")
     return [n for n in GLOB_COMMANDS if fnmatch.fnmatchcase(n, pat) and not (bare and n in ("sudo", "doas"))]
@@ -6090,13 +6121,10 @@ def _glob_names(head: str, bare: bool = False) -> List[str]:
 def _glob_heads(tokens: List[str]) -> Dict[str, List[str]]:
     """Từ đầu lệnh có glob (chữ nguyên, sau gán biến/wrapper) của từng lệnh đơn → các tên nhạy cảm nó có thể mở ra."""
     heads: Dict[str, List[str]] = {}
-    start = 0
-    for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
-        rest = _strip_prefixes(tokens[start:end])
-        names = _glob_names(posixpath.basename(rest[0]), len(rest) == 1) if rest else []
+    for rest in _segment_commands(tokens):
+        names = _glob_names(posixpath.basename(rest[0]), len(rest) == 1)
         if names:
             heads[rest[0]] = list(dict.fromkeys([*heads.get(rest[0], []), *names]))
-        start = end + 1
     return heads
 
 
@@ -6159,7 +6187,11 @@ def bash_decision(
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
-    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
+    nested_deny = (
+        nested_deny
+        or _glob_head_deny(tokens)
+        or _scan_scripts(_glob_rewrites(cmd, tokens), root, cwd, depth, asks, 0, budget, rewrites)
+    )
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res
