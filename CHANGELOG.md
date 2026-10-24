@@ -9,6 +9,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - `BASE-SEC-002` (T-2601): lệnh kiểm gợi ý đổi sang mẫu chặt `AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----` — mẫu cũ khớp chính dòng của mục khi quét repo có khung/BLUEPRINT (phản hồi dự án đích). Dự án đích: ghép lại blueprint để nhận chữ mới.
 - `compose` (T-2602): anchor nội trang `(#x)` trong mục module thành `(<link_root>/<file module>#x)` — trước đây giữ nguyên nên gãy trong BLUEPRINT/BACKLOG.
 - `check-links.py` (T-2603): kiểm `#anchor` (cùng file và file `.md` khác) theo slug tiêu đề kiểu GitHub hoặc `<a id|name>` — link tới anchor không tồn tại từng qua với exit 0. Dự án đích có link anchor gãy sẽ thấy đỏ ở `lint`: sửa link.
+- `loop init` (T-2611): khởi tạo lại **cùng PLAN** sau vòng đã dừng giữ việc chờ người (`loop defer`) còn mở và mang bằng chứng xanh khớp dấu vân tay Gate hiện tại — trước đây mất danh sách chờ người và đòi chạy lại Gate đã xanh. PLAN khác không mang gì. Task `[x]` không có bằng chứng ở máy này (clone/container mới) → cảnh báo kèm gợi ý mỗi đợt một `docs/autopilot/PLAN-<đợt>.md` (mẫu PLAN, skill `/autopilot`, README vòng tự trị — T-2613).
+- `loop decide` (T-2612): số D-NNN kế tiếp tính theo sổ cùng đường dẫn ở mọi git worktree của repo — hai worktree từng cùng ra D-001.
 
 ## [3.17.0] - 2026-10-24
 
