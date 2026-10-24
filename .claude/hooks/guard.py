@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import fnmatch
 import itertools
 import json
 import os
@@ -1501,17 +1502,80 @@ def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tupl
     recursive = "r" in flags or "R" in flags or "--recursive" in args
     force = "f" in flags or "--force" in args
     targets = _positionals(args)
+    # Luật đích cố định xét trước: `rm -rf ~` giữ mã RULE_DENY dù $HOME là cha của gốc (runner CI, ~/projects/x)
     if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
         return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
+    hit = next((t for t in targets if recursive and _wipes_root(t, root, cwd)), "")
+    if hit:  # cả `rm -r` không `-f`: vẫn xoá hết cây (chỉ hỏi file chỉ-đọc)
+        return "deny", ROOT_WIPE_WHY.format(hit)
     if recursive and force and not targets:  # `xargs rm -rf`, `… | xargs rm -rf`: đích đến từ stdin (AUD-SEC-024)
         return "ask", "rm -rf không có đích trên dòng lệnh (đích từ xargs/stdin) — xoá dữ liệu cần người duyệt"
     outside = [t for t in targets if recursive and root and _outside_project(t, root, cwd)]
+    own = _own_worktrees(root, cwd) if outside else set()
+    outside = [t for t in outside if _real_target(t, root, cwd) not in own]
     if outside:
         return "ask", f"xoá đệ quy ngoài thư mục dự án ({outside[0]}) — xoá dữ liệu cần người duyệt"
     return "", ""
 
 
 TEMP_DIRS = ("/tmp", "/var/tmp", "/private/tmp", "/private/var/folders")
+ROOT_WIPE_WHY = "xoá đệ quy gốc dự án, thư mục cha hoặc .git của nó ({}) — mất cả dự án và lịch sử"
+
+
+def _wipes_root(target: str, root: str, cwd: Optional[str]) -> bool:
+    """T-2501: đích là gốc dự án, `gốc/*`, `gốc/.git` hay thư mục cha của gốc (`ROOT/..`, `cd .. && rm -rf <gốc>`) —
+    kể cả khi gốc nằm trong thư mục tạm. Đích không mở được (biến lạ, `$OLDPWD`) → False: luật khác xét."""
+    if not root or OLDPWD_REF_RE.match(target):
+        return False
+    t = _resolve_target(HOME_REF_RE.sub("~", target), root, cwd)
+    if "$" in t or "`" in t:
+        return False
+    parts = t.split("/")
+    k = next((i for i, c in enumerate(parts) if GLOB_RE.search(c)), -1)
+    if k >= 0:
+        base = "/".join(parts[:k]) or ("/" if t.startswith("/") else ".")
+        return _glob_wipes_root(_real_target(base, root, cwd), parts[k], any(parts[k + 1 :]), root)
+    p = _real_target(t, root, cwd)
+    r = os.path.realpath(root)
+    return p == r or (p + "/").startswith(r + "/.git/") or r.startswith(p.rstrip("/") + "/")
+
+
+GLOB_RE = re.compile(r"[*?\[]")
+HOME_REF_RE = re.compile(r"^(\$HOME|\$\{HOME\})(?=/|$)")
+
+
+def _glob_wipes_root(base: str, pat: str, deeper: bool, root: str) -> bool:
+    """Glob `pat` ở thư mục `base` (review 5ef1a14 B2): `base` là gốc → khớp được `.git` (`*`, `.*`, `.g*`, `?*`; có phần
+    sau thì chỉ khi chủ ý nhắm `.`); `base` là cha của gốc → khớp tên thư mục dẫn tới gốc."""
+    r = os.path.realpath(root)
+    if (base + "/").startswith(r + "/.git/"):  # mọi glob dưới `gốc/.git/` (review bb606aa)
+        return True
+    if base == r:
+        return fnmatch.fnmatchcase(".git", pat) and (not deeper or pat.startswith("."))
+    under = r.startswith(base.rstrip("/") + "/")
+    return under and fnmatch.fnmatchcase(r[len(base.rstrip("/")) + 1 :].split("/")[0], pat)
+
+
+def _real_target(t: str, root: str, cwd: Optional[str]) -> str:
+    return os.path.realpath(os.path.join(cwd or root, os.path.expanduser(_resolve_target(t, root, cwd))))
+
+
+def _own_worktrees(root: str, cwd: Optional[str]) -> Set[str]:
+    """T-2502: worktree phụ đã đăng ký của repo (`git worktree list`) — bỏ gốc chính (dòng đầu) và worktree chứa thư
+    mục đang đứng; xoá chúng không mất gì ngoài cây làm việc. Đọc lỗi/hết giờ → rỗng (chặn như cũ)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", root, "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    paths = [os.path.realpath(x[9:]) for x in r.stdout.splitlines() if x.startswith("worktree ")]
+    here = os.path.realpath(cwd or root)
+    return {p for p in paths[1:] if not (here + "/").startswith(p + "/")} if r.returncode == 0 else set()
 
 
 def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
@@ -1519,7 +1583,7 @@ def _outside_project(target: str, root: str, cwd: Optional[str]) -> bool:
     `$OLDPWD` (thư mục trước, không biết) → True (fail-closed, AUD-SEC-099); biến khác/không rõ → False (fail-open)."""
     if OLDPWD_REF_RE.match(target):
         return True
-    t = PWD_REF_RE.sub(".", re.sub(r"^(\$HOME|\$\{HOME\})(?=/|$)", "~", target))
+    t = PWD_REF_RE.sub(".", HOME_REF_RE.sub("~", target))
     if "$" in t or "`" in t:
         return False
     p = os.path.realpath(os.path.join(cwd or root, os.path.expanduser(t)))
@@ -1672,6 +1736,10 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         if verdict["decision"] in ("deny", "ask"):
             return str(verdict["decision"]), f"find {a}: {verdict['reason']}"
         deleting = deleting or bool(sub) and posixpath.basename(sub[0]) in ("rm", "shred", "unlink")
+    acting = deleting or any(a in FIND_EXEC for a in args[i:]) and not _find_exec_readonly(" ".join(args[i:]))
+    hit = next((r for r in roots if acting and _wipes_root(r, root, cwd)), "")
+    if hit:  # D-153: theo token (biết `cd`); `find_root_scan` quét chuỗi gốc cho phần token bị shlex cắt
+        return "deny", FIND_ROOT_WHY.format(hit)
     if not deleting:
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
@@ -1682,6 +1750,78 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
+
+
+# D-153: `find` có `-delete`/`-exec…` trong CHUỖI GỐC (không qua token — shlex bỏ dấu thoát nên `\(`, `\;` cắt argv).
+FIND_WORD_RE = re.compile(r"(?<![\w.-])find(?![\w.-])")
+FIND_ACT_RE = re.compile(r"(?<![\w-])-(?:delete|exec|execdir|ok|okdir)(?![\w-])")
+FIND_WRITE_RE = re.compile(r"(?<![\w-])-(?:delete|fprint0?|fprintf|fls)(?![\w-])")
+FIND_EXEC_CMD_RE = re.compile(r"(?<![\w-])-(?:exec|execdir|ok|okdir)(?![\w-])(?:[ \t]+(\S+))?")
+FIND_OUT_RE = re.compile(r"(?<![\w-])-(?:fprint0?|fprintf|fls)[ \t]+(\S+)")
+CD_WORD_RE = re.compile(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w.-])")
+# D-154: -exec từ gốc được miễn khi chỉ chạy các lệnh đọc này (danh sách đóng — không shell/trình thông dịch/xargs/env)
+FIND_ROOT_RO_EXEC = frozenset(
+    # không `rg` (`--pre <lệnh>` chạy lệnh tuỳ ý), không `file` (`file -C` ghi magic.mgc)
+    "cat grep egrep fgrep ls head tail wc stat du sha256sum sha1sum md5sum basename dirname realpath echo "
+    "printf test".split()
+)
+FIND_ROOT_WHY = (
+    "find xoá/-exec bắt đầu từ gốc dự án bị chặn ({}; D-153) — chạy trong thư mục con (vd `find build -name '*.o' "
+    "-delete`) hoặc rm đường cụ thể"
+)
+
+
+def _find_starts(rest: str) -> List[str]:
+    """Điểm bắt đầu sau một từ `find` trong chuỗi gốc: bỏ `-H/-L/-P/-O<n>/-D <x>/--`, dừng ở từ bắt đầu bằng `-`, `(`,
+    `\\(`, `!` hay toán tử shell; nháy và `\\` bị bỏ."""
+    out: List[str] = []
+    words = iter(rest.split("\n", 1)[0].split())
+    for w in words:
+        if w in ("-H", "-L", "-P", "--") or re.fullmatch(r"-O\d", w):
+            continue
+        if w == "-D":
+            next(words, None)
+            continue
+        head = re.split(r"[;&|<>()]", w.replace("\\", "").replace('"', "").replace("'", ""), maxsplit=1)
+        if w.startswith(("-", "(", "\\(", "!")) or not head[0] and len(head) > 1:
+            break
+        out.append(head[0])
+        if len(head) > 1:
+            break
+    return out
+
+
+def _find_exec_readonly(rest: str) -> bool:
+    """D-154: không `-delete`/`-fprint*`/`-fls` và MỌI `-exec`/`-execdir`/`-ok`/`-okdir` chạy lệnh TÊN TRẦN (không `/`
+    — `./cat` không phải cat) trong `FIND_ROOT_RO_EXEC`; lệnh là `{}`, biến hay thiếu → không miễn."""
+    if FIND_WRITE_RE.search(rest):
+        return False
+    return all(c.strip("'\"") in FIND_ROOT_RO_EXEC for c in FIND_EXEC_CMD_RE.findall(rest))
+
+
+def _find_bad_start(s: str, root: str, cwd: Optional[str], moved: bool) -> bool:
+    """Điểm bắt đầu rỗng/không xác định, tương đối sau `cd`/`pushd`/`popd` trong cùng lệnh, hay chạm gốc/`.git`."""
+    unknown = not s or bool(set(s) & UNRESOLVED_TARGET_CHARS) or (moved and not s.startswith(("/", "~")))
+    return unknown or _wipes_root(s, root, cwd)
+
+
+def find_root_scan(cmd: str, root: str, cwd: Optional[str]) -> str:
+    """D-153: lý do chặn khi một `find` có hành động xoá/`-exec` bắt đầu từ gốc dự án, tổ tiên hay `gốc/.git`, không có
+    điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`, tương đối sau `cd`);
+    hoặc `-fprint*`/`-fls` ghi vào `gốc/.git`. Quét bản bỏ `"`/`'`/`\\` (`fi""nd`, `f\\ind` vẫn là find)."""
+    norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
+    for m in FIND_WORD_RE.finditer(norm):
+        rest = norm[m.end() :]
+        moved = bool(CD_WORD_RE.search(norm, 0, m.start()))
+        acting = FIND_ACT_RE.search(rest) and not _find_exec_readonly(rest)
+        starts = (_find_starts(rest) or ["."]) if acting else []
+        bad = next((s for s in starts if _find_bad_start(s, root, cwd, moved)), None)
+        bad = (
+            bad if bad is not None else next((o for o in FIND_OUT_RE.findall(rest) if _wipes_root(o, root, cwd)), None)
+        )
+        if bad is not None:
+            return f"Lệnh bị khung chặn ({FIND_ROOT_WHY.format(bad or repr(bad))}): {cmd[:300]}"
+    return ""
 
 
 def _find_parts(args: List[str]) -> Tuple[List[str], int]:
@@ -3667,6 +3807,36 @@ def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
         elif x[:2] in ("-t", "-b", "-F") and len(x) > 2:  # `-tfeat: x` (pflag)
             out.append((GH_PR_TEXT_OPTS[x[:2]], x[2:]))
     return out
+
+
+COMMIT_AFTER_WRITE_WHY = (
+    "Tách lệnh: sửa file trước, `git commit` ở lệnh riêng — cổng commit chạy trên cây trước khi lệnh chạy, phần "
+    "đứng trước ({}) sẽ vào commit mà cổng chưa thấy (cổng đỏ thì nó cũng không chạy)"
+)
+TREE_READONLY_GIT = {("git", "add"), ("git", "status"), ("git", "diff"), ("git", "log")}
+
+
+def _tree_readonly(argv: List[str]) -> bool:
+    """Lệnh đứng trước `git commit` không ghi cây: `cd`, `export`/gán biến, `true`, `git add|status|diff|log`, `cat`/
+    `echo`/`printf` (message qua ống: `cat <<'EOF' | git commit -F -`) — không chuyển hướng ra file (trừ /dev/null),
+    không `--output`."""
+    n = normalize(argv)
+    if any(t in REDIRECTS and argv[i + 1 : i + 2] != ["/dev/null"] or "`" in t for i, t in enumerate(argv)):
+        return False  # backtick chạy lệnh như `$(…)` (review 5ef1a14 M2)
+    if any(a.startswith("--output") for a in n):
+        return False
+    return not n or n[0] in ("cd", "export", "true", "cat", "echo", "printf") or tuple(n[:2]) in TREE_READONLY_GIT
+
+
+def _commit_after_write(commands: List[Tuple[List[str], Optional[str]]]) -> str:
+    """T-2503: `git commit` đi sau lệnh có thể ghi file trong CÙNG lệnh Bash → lý do chặn; không thì rỗng."""
+    for k, (argv, _) in enumerate(commands):
+        if normalize(argv)[:2] != ["git", "commit"]:
+            continue
+        bad = next((b for b, _ in commands[:k] if not _tree_readonly(b)), None)
+        if bad is not None:
+            return COMMIT_AFTER_WRITE_WHY.format(" ".join(bad)[:120])
+    return ""
 
 
 def _attribution_target(
@@ -5934,6 +6104,7 @@ def bash_decision(
         return res
     commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
+    deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
     )
@@ -5971,6 +6142,8 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("push thẳng nhánh chính", "PUSH_MAIN"),
     ("push --all/--tags", "PUSH_ALL"),
     ("xoá đệ quy ngoài thư mục dự án", "WIPE_OUTSIDE"),
+    ("xoá đệ quy gốc dự án", "WIPE_OUTSIDE"),
+    ("bắt đầu từ gốc dự án bị chặn", "WIPE_OUTSIDE"),
     ("rm -rf không có đích", "WIPE_OUTSIDE"),
     ("find xoá file ngoài thư mục dự án", "WIPE_OUTSIDE"),
     ("xoá thư mục gắn từ máy", "WIPE_OUTSIDE"),

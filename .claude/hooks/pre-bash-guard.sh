@@ -122,7 +122,7 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
     fi
     # stdout của cổng sang stderr: stdout của hook chỉ được chứa JSON quyết định.
     if ! CLAUDE_PROJECT_DIR="$groot" "$gate" "$task" >&2; then
-      echo "❌ Cổng trước commit ĐỎ ($task: build/typecheck/lint/test) ở $groot. Sửa rồi commit lại." >&2
+      echo "❌ Cổng trước commit ĐỎ ($task: build/typecheck/lint/test) ở $groot. CẢ lệnh chưa chạy (kể cả phần trước \`git commit\`). Sửa rồi commit lại." >&2
       exit 2
     fi
   fi

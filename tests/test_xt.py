@@ -997,6 +997,54 @@ class AuditRegressionTest(unittest.TestCase):
         should = text.replace("**MUST**", "**SHOULD**") + " — Miễn: V1 chưa cần"
         self.assertEqual(xt.blueprint_status_text(should)["bad_waivers"], [])
 
+    def strict_rc(self, text):
+        f = self.tmp / "bp-strict.md"
+        f.write_text(text, encoding="utf-8")
+        return self.cli("blueprint-status", str(f), "--strict").returncode
+
+    def test_blueprint_waiver_needs_approval(self):
+        # T-2511: `Không áp dụng` + `Miễn` lẫn lộn lọt --strict mà không cần `Duyệt:`.
+        base = "- [~] `L-007` **MUST** a. · Nguồn: x"
+        mixed = (
+            " — Không áp dụng: không có thanh toán — Miễn: hoãn",
+            " (Không áp dụng: CLI cục bộ) (Miễn: hoãn)",
+            " - Không áp dụng: không có DB - Miễn: hoãn",
+        )
+        for note in mixed:
+            with self.subTest(note=note):
+                bad = xt.blueprint_status_text(base + note)["bad_waivers"]
+                self.assertEqual(len(bad), 1, note)
+                self.assertIn("lẫn", bad[0])
+                self.assertIn("Duyệt:", bad[0])
+                r = self.strict_rc(base + note + "\n")
+                self.assertEqual(r, 1)
+        # ca hợp lệ: NA thuần; miễn có Duyệt; SHOULD lẫn không bị chặn mức MUST nhưng vẫn lẫn → đỏ
+        for ok in (" — Không áp dụng: không có DB", ' — Miễn: hoãn — Duyệt: "ok, V1 bỏ" 2026-10-16'):
+            self.assertEqual(xt.blueprint_status_text(base + ok)["bad_waivers"], [], ok)
+        should = base.replace("**MUST**", "**SHOULD**") + mixed[0]
+        self.assertEqual(len(xt.blueprint_status_text(should)["bad_waivers"]), 1)
+
+    def test_blueprint_bold_id_is_format_error_and_empty_is_red(self):
+        # T-2512: ID in đậm thay backtick → 0 mục nhận diện → --strict exit 0 (xanh giả).
+        bold = "- [x] **ABC-PROOF-001** **MUST** a\n- [x] **ABC-PROOF-002** **MUST** b\n"
+        s = xt.blueprint_status_text(bold)
+        self.assertEqual(len([b for b in s["bad_lines"] if "dòng" in b]), 2, s["bad_lines"])
+        self.assertEqual(len(s["bad_lines"]), 2, s["bad_lines"])  # chỉ lỗi từng dòng, không thêm thông báo "rỗng"
+        self.assertEqual(self.strict_rc(bold), 1)
+        empty = xt.blueprint_status_text("# BP\n\nkhông có mục nào\n")
+        self.assertEqual(len(empty["bad_lines"]), 1)
+        self.assertIn("không nhận diện", empty["bad_lines"][0])
+        self.assertEqual(self.strict_rc(""), 1)
+        # review T-2512: đậm bọc backtick, gạch dưới — cũng là lỗi định dạng, không bỏ qua im lặng
+        for odd in ("**`ABC-002`**", "__ABC-002__", "*`ABC-002`*"):
+            with self.subTest(odd):
+                text = f"- [x] `ABC-001` **MUST** a\n- [ ] {odd} **MUST** b\n"
+                self.assertEqual(len(xt.blueprint_status_text(text)["bad_lines"]), 1)
+                self.assertEqual(self.strict_rc(text), 1)
+        good = "- [x] `ABC-PROOF-001` **MUST** a\n"
+        self.assertEqual(xt.blueprint_status_text(good)["bad_lines"], [])
+        self.assertEqual(self.strict_rc(good), 0)
+
     def test_carry_states_keeps_any_note_and_own_items(self):
         new = "# BP\n- [ ] `A-001` **MUST** a. · Nguồn: x\n- [ ] `A-002` **MUST** b. · Nguồn: y\n"
         old = (

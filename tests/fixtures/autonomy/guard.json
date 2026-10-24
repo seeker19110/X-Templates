@@ -5048,6 +5048,204 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-fb1023-wipe-project-dir",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "rm -rf \"$CLAUDE_PROJECT_DIR\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-exec-wipe-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -exec rm -rf {} +"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-wipe-subdir",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "rm -rf node_modules dist"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-fb1023-commit-after-write",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "sed -i s/a/b/ f.txt && git commit -m 'fix: x'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-add-commit",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git add -A && git commit -m 'fix: x'"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-fb1023-glob-dot-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "rm -rf \"$CLAUDE_PROJECT_DIR\"/.*"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-type-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -type f -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-name-star-root",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*' -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-name-git-exec",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name .git -exec rm -rf {} +"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-find-pyc",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "find src -name '*.pyc' -delete"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-fb1023-find-escaped-parens",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . \\( -name '*' \\) -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-prune-or-delete",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.pyc' -prune -o -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-find-pycache",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "find src -name __pycache__ -type d -exec rm -rf {} +"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-fb1023-case-find-paren",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "case find in (find) rm -rf ~;; esac"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-delete-before-test",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -delete -name x"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-exec-escaped-semicolon",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -exec echo {} \\; -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-root-pyc",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.pyc' -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-find-exec-readonly",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.py' -exec grep -l TODO {} \\;"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

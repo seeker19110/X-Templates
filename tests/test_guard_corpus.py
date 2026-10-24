@@ -180,8 +180,8 @@ ALLOW = (
     "rm -rf node_modules",
     "rm -rf build dist .pytest_cache",
     "rm -f AGENTS.md.xtemplates-new",
-    "find . -name '*.pyc' -delete",
-    "find . -name '*.py' -exec grep -l TODO {} \\;",
+    "find src -name '*.pyc' -delete",  # D-153: find xoá/-exec từ gốc (`find .`) bị chặn
+    "find . -name '*.py' -exec grep -l TODO {} \\;",  # D-154: -exec chỉ đọc từ gốc được miễn
     "sed -i 's/a/b/' README.md",
     "export PATH=/root/.local/bin:$PATH",
     "cd /tmp && ls",
@@ -201,7 +201,7 @@ ALLOW = (
     "sh -c 'echo hi'",
     "bash -c 'npm test'",
     "echo `date`",
-    "find . -name '*.py' -exec python3 -m black {} +",
+    "find src -name '*.py' -exec python3 -m black {} +",
     "find .autopilot -name '*.json'",
     "find .autopilot -type f -exec cat {} \\;",
     "find build -delete",
@@ -331,8 +331,9 @@ class GuardCorpusFixesTest(unittest.TestCase):
             "sh -c \"bash <<'E'\ngit reset --hard HEAD~3\nE\"",
             "sh -c 'bash <<E\ngit reset --hard HEAD~3\nE'",
             "echo `bash <<'E'\ngit reset --hard HEAD~3\nE`",
-            "find . -maxdepth 0 -exec bash \\; <<'E'\ngit reset --hard HEAD~3\nE",
-            "find . -maxdepth 0 -execdir sh <<'E' +\ngit reset --hard HEAD~3\nE",
+            # `find src`: `find .` -exec từ gốc bị D-153 chặn trước — giữ răng của ca heredoc
+            "find src -maxdepth 0 -exec bash \\; <<'E'\ngit reset --hard HEAD~3\nE",
+            "find src -maxdepth 0 -execdir sh <<'E' +\ngit reset --hard HEAD~3\nE",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
@@ -540,10 +541,10 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
                 'cmd="rm -rf ~"; echo "$cmd" | sh',
                 'cmd="rm -rf ~"; echo "$cmd" | bash',
                 'cmd="rm -rf ~"; source <(echo $cmd)',
-                "find . -name '*autopilot*' -delete",
-                "find . -iname 'VERIFIED.JSON' -delete",
-                "find . -iname '.AUTOPILOT' -delete",
-                'find . -name "*.json" -path "*autopilot*" -delete',
+                "find src -name '*autopilot*' -delete",  # `src`: giữ răng luật bằng chứng (`.` → D-153 chặn trước)
+                "find src -iname 'VERIFIED.JSON' -delete",
+                "find src -iname '.AUTOPILOT' -delete",
+                'find src -name "*.json" -path "*autopilot*" -delete',
                 "find .Autopilot -print0 | xargs -0 rm",
                 "rm -rf $PWD/.autopilot",
                 "rm -rf ${PWD}/.autopilot",
@@ -638,9 +639,10 @@ FIND_DENY = (
     "find -H -L .autopilot -type f -exec rm {} \\;",
     "find -D tree .autopilot -delete",
     "find -O2 .autopilot -delete",
-    "find . -path './.autopilot/*' -delete",
-    "find . -name verified.json -delete",
-    "find . -iname 'reviews.json' -exec mv {} /tmp \\;",
+    # `find src`: `find .` xoá/-exec từ gốc bị D-153 chặn trước — giữ răng của luật bằng chứng
+    "find src -path '*/.autopilot/*' -delete",
+    "find src -name verified.json -delete",
+    "find src -iname 'reviews.json' -exec mv {} /tmp \\;",
     "find .autopilot -exec mv {} /tmp \\;",
     "find .autopilot -exec sed -i s/a/b/ {} \\;",
     "find .autopilot -exec sh -c 'rm {}' \\;",
@@ -654,10 +656,10 @@ FIND_ALLOW = (
     "find .autopilot -name '*.json'",
     "find .autopilot -type f -exec cat {} \\;",
     "find .autopilot -type f -exec grep -l ok {} +",
-    "find . -name '*.py' -exec python3 -m black {} +",
+    "find src -name '*.py' -exec python3 -m black {} +",
     "find docs -name evidence -delete",
     "find build -delete",
-    "find . -name '*.pyc' -delete",
+    "find src -name '*.pyc' -delete",
     "find . -name x -fprint /tmp/out.txt",
     "find .autopilot -print0 | xargs -0 cat",
     "find src -name '*.tmp' -print0 | xargs -0 rm",

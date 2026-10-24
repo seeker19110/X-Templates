@@ -1193,17 +1193,17 @@ class GuardStoredScanTest(unittest.TestCase):
         self.check(
             "ask", ["find ~/x -delete", "find ~/p -exec rm {} \\;", "find /opt -name '*.log' -execdir shred {} +"]
         )
-        self.check("ask", ["find . -name pkg -execdir npm publish \\;"])
+        self.check("ask", ["find pkgs -name pkg -execdir npm publish \\;"])
+        # D-153: find xoá/-exec bắt đầu từ gốc dự án (kể cả không ghi điểm bắt đầu) → deny
+        self.check("deny", ["find . -name '*.pyc' -delete", "find -name x -delete", "find . -exec"])
         self.check(
             "",
             [
-                "find . -name '*.pyc' -delete",
-                "find -name x -delete",
-                "find . -name x -exec rm -f {} +",
-                "find . -type f -exec grep -l x {} +",
+                "find src -name '*.pyc' -delete",
+                "find src -name x -exec rm -f {} +",
+                "find . -type f -exec grep -l x {} +",  # D-154: -exec chỉ đọc từ gốc được miễn
                 "find / -name x",
                 "find build ( -name a -o -name b ) -delete",
-                "find . -exec",
             ],
         )
 
@@ -3751,8 +3751,8 @@ class GuardEgressAuditTest(EgressCase):
                 "git push origin feat",
                 "git clean -n",
                 "git log --all --oneline",
-                "find . -name '*.pyc' -delete",
-                "find . -type d -name __pycache__ -delete",
+                "find src -name '*.pyc' -delete",  # D-153: từ gốc (`find .`) thì bị chặn
+                "find src -type d -name __pycache__ -delete",
                 "env -S 'python3 -V'",
                 "rm -rf build",
             ),
@@ -3775,7 +3775,7 @@ class GuardEgressAuditTest(EgressCase):
                 "kubectl --context prod exec pod -- sh -c 'git push --force'",
             ),
         )
-        self.assert_all("", ("find . -mindepth 1 -name '*.pyc' -delete", "kubectl -n prod get pods"))
+        self.assert_all("", ("find src -mindepth 1 -name '*.pyc' -delete", "kubectl -n prod get pods"))
 
     def test_guard_other_container_clis(self):  # AUD-SEC-042
         self.assert_all(
@@ -4109,7 +4109,8 @@ class GuardWave1017Test(unittest.TestCase):
                 "rsync -a src/ dst/",
                 "python3 -c \"print(open('.env.example').read())\"",
                 # heredoc thuộc lệnh sở hữu `<<`, không thuộc trình thông dịch khác trên cùng dòng (gặp khi commit)
-                "python3 a.py 2>&1 | tail -1; git commit -F - <<'EOF'\nopen('.env','w')\nEOF",
+                # (T-2503: trình thông dịch đứng SAU `git commit` — đứng trước thì bị chặn riêng)
+                "git commit -F - <<'EOF'; python3 a.py 2>&1 | tail -1\nopen('.env','w')\nEOF",
             ),
         )
         self.check(
@@ -4584,7 +4585,8 @@ class GuardAiAttributionTest(unittest.TestCase):
             "git commit -F -",
             'grep -n "Claude Opus" x; git status',
             "cat > note.md <<'EOF'\nClaude Opus\nEOF",
-            "python3 - <<'EOF'\nprint('Claude-Session: x')\nEOF\ngit commit -m 'fix: a'",
+            # T-2503: trình thông dịch đứng trước `git commit` giờ bị chặn riêng → lệnh khác sở hữu heredoc là `cat`
+            "cat <<'EOF'\nprint('Claude-Session: x')\nEOF\ngit commit -m 'fix: a'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "")
@@ -4673,7 +4675,7 @@ class GuardAiAttributionTest(unittest.TestCase):
             with self.subTest(cmd[:60]):
                 self.assertEqual(self.decide(cmd, d), "deny")
         # heredoc của lệnh khác trên cùng dòng vẫn là dữ liệu của lệnh đó
-        self.assertEqual(self.decide("python3 - <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
+        self.assertEqual(self.decide("cat <<'EOF'; git commit -m ok\nx = 'Claude Opus 5'\nEOF", d), "")
         self.assertEqual(self.g._unquoted_seps("a \"b;c\" 'd&&e' f\\;g; h"), [(19, 20)])
 
         # Không bậc hai: nhân 4 cỡ đầu vào thì thời gian CPU tăng ~4 lần (tuyến tính), bậc hai sẽ ~16 lần. So tỉ lệ thay cho
