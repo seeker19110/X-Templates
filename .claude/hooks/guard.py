@@ -6084,13 +6084,28 @@ GLOB_HEAD_MAX = 256  # tên lệnh dài hơn: không đưa vào fnmatch (bậc h
 
 
 def _segment_commands(tokens: List[str]) -> Iterator[List[str]]:
-    """Từng lệnh đơn (sau gán biến/wrapper/từ khoá) — rỗng bỏ qua."""
-    start = 0
-    for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
-        rest = _strip_prefixes(tokens[start:end])
-        if rest:
-            yield rest
-        start = end + 1
+    """Từng lệnh đơn (sau gán biến/wrapper/từ khoá), rỗng bỏ qua. Không phải lệnh nên bỏ (D-166 — từng bị đọc thành tên
+    glob: `''|*[!0-9]*)` → mkfs): vùng `(( … ))`/`$(( … ))` và `[[ … ]]` (toán hạng, nhóm regex `=~ ^([^=]*)`), mẫu nhánh
+    `case` — đoạn (cùng các nhánh nối `|`) kết thúc bằng `)` mà không có `(` mở tương ứng."""
+    group: List[List[str]] = []  # các đoạn nối bằng `|` đang chờ: lệnh trong ống, hay các nhánh của một mẫu `case`
+    seg: List[str] = []
+    depth, close = 0, ""
+    for t in tokens:
+        if close:
+            close = "" if t.startswith(close) else close
+        elif t in ("((", "[["):
+            close = "))" if t == "((" else "]]"
+        elif not _is_punct(t) or _is_redirect(t):
+            seg.append(t)
+        else:
+            group, seg = [*group, seg], []
+            if t == "|":
+                continue
+            pattern = ")" in t and depth == 0  # `)` không có `(` mở: kết thúc mẫu nhánh `case`
+            depth = max(0, depth + t.count("(") - t.count(")"))
+            yield from [] if pattern else (r for s in group if (r := _strip_prefixes(s)))
+            group = []
+    yield from (r for s in [*group, seg] if (r := _strip_prefixes(s)))
 
 
 def _glob_names(head: str, bare: bool = False) -> List[str]:
@@ -6100,7 +6115,7 @@ def _glob_names(head: str, bare: bool = False) -> List[str]:
     if not GLOB_RE.search(head) or not head.strip("*?") or len(head) > GLOB_HEAD_MAX:
         return []
     pat = GLOB_BRACKET_RE.sub(lambda m: "?" if GLOB_POSIX_RE.search(m[0]) else m[0], head).replace("[^", "[!")
-    return [n for n in GLOB_COMMANDS if fnmatch.fnmatchcase(n, pat) and not (bare and n in ("sudo", "doas"))]
+    return [n for n in GLOB_COMMANDS if fnmatch.fnmatchcase(n, pat) and not (bare and n in ("sudo", "doas", "mkfs"))]
 
 
 def _glob_heads(tokens: List[str]) -> Dict[str, List[str]]:

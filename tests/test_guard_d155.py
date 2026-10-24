@@ -222,6 +222,15 @@ class GlobCommandNameTest(unittest.TestCase):
             "files=(*.py *.sh)",
             "declare -A cfg=([host]=localhost [port]=8080)",
             "[[ $branch =~ ^(feat|fix)/[a-z0-9-]+ ]] && echo valid",
+            # Review #248 lượt 7 🔴 (D-166): mẫu nhánh `case`, nhóm regex `[[ =~ ]]`, toán hạng số học không phải lệnh
+            "case $n in ''|*[!0-9]*) echo bad;; *) echo ok;; esac",
+            "case $1 in\n[0-9]*) echo n;;\n[a-zA-Z]*) echo w;;\nesac",
+            "case $u in *s) echo sec;; m*) echo min;; [[:lower:]]*) echo l;; esac",
+            "case $1 in\n  s*) echo s ;;\n  t*) echo t ;;\n  c*) echo c ;;\nesac",  # từng cạn ngân sách quét
+            "case $1 in [sS]*) a;; [cC]*) b;; [pP]*) c;; esac",
+            "[[ $kv =~ ^([^=]*)=(.*)$ ]] && echo ${BASH_REMATCH[1]}",
+            "[[ $line =~ ^(ERROR|WARN)[A-Za-z]* ]] && echo hit",
+            "echo $(( d*s + 1 ))",
             "/usr/lib/jvm/*/bin/java -version",
             "~/.nvm/versions/node/v*/bin/node --version",
             "/usr/bin/fi?d . -name x",

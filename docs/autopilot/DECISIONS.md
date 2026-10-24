@@ -1169,3 +1169,10 @@
 - Chọn: Rút D-163: bỏ chặn thẳng; giữ viết lại theo tên (D-162) và mở rộng GLOB_COMMANDS: INTERPRETERS, FILE_WRITERS, cp/tee/ln/sed/tar…, ssh/scp, CLI đám mây/container, claude; giữ trần 256 ký tự trước fnmatch
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: viết lại chỉ khớp tên đã biết nên không chặn oan (5 lượt rà không tìm ra chặn oan nào của nó); chặn thẳng phụ thuộc tách cú pháp bash bằng token — mỗi lượt lộ thêm thành ngữ bị chặn oan, có hại thật (chặn cả phiên này); lỗ còn lại của danh sách là tên ngoài danh sách phải cố ý viết (D-164); (3) đơn giản hơn
 - Đường lùi: Khôi phục _glob_head_deny từ commit 26c202f
+
+### D-166 · 2026-10-24T14:15:51+00:00 · Review #248 lượt 7: viết lại theo tên vẫn chặn oan mẫu case (''|*[!0-9]*) → mkfs), nhóm regex [[ =~ ]], toán hạng $(( )); case nhiều nhánh cạn ngân sách — lý do của D-165 ('không chặn oan') sai
+
+- Phương án: (1) Tách lệnh hiểu cú pháp: bỏ qua vùng (( … )) và [[ … ]], bỏ mẫu nhánh case (đoạn kết thúc bằng ')' không có '(' mở, kể cả nhánh nối '|'); mkfs trơn vào nhóm bỏ khi không đối số · (2) Chỉ thêm mkfs vào nhóm bỏ khi không đối số
+- Chọn: Tách lệnh hiểu cú pháp: bỏ qua vùng (( … )) và [[ … ]], bỏ mẫu nhánh case (đoạn kết thúc bằng ')' không có '(' mở, kể cả nhánh nối '|'); mkfs trơn vào nhóm bỏ khi không đối số
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: gốc lỗi là tách token coi mẫu/regex/số học là lệnh — sửa ở gốc thì mọi tên trong danh sách đều hết chặn oan, và case nhiều nhánh không còn sinh bản viết lại (hết cạn ngân sách); (3) test được bằng đúng các thành ngữ reviewer nêu. Đính chính D-165: 'không chặn oan' chỉ đúng sau D-166
+- Đường lùi: Khôi phục _segment_commands tách ở mọi dấu nối
