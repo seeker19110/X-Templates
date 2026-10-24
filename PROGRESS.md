@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.17.0, pha `harden` — D-136) · Cập nhật: 2026-10-23 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.17.0, pha `harden` — D-136) · Cập nhật: 2026-10-24 · Nhánh: main
 
 ## Đang làm
 - 2026-10-24 **PLAN-3.17-feedback** (D-149…D-156): phân loại 30 nhóm phản hồi dự án đích (11 đã sửa, 15 còn lỗi) → sửa 6 🟠 + 2 🟢: guard chặn xoá gốc dự án (7 lượt review đối kháng; D-153 quét chuỗi gốc), blueprint-status không xanh giả, loop theo worktree, Stop hook gắn phiên, feedback không chép dữ liệu dự án. #235 + PR Lát 3–4 + 3.17.0. 🟢 còn: loop init/decide song song, kiểm LOOP-ORCH-003, BASE-SEC-002 tự khớp, anchor check-links/compose.

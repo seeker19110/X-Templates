@@ -2815,6 +2815,10 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt:
     )
 
 
+SESSION_MISMATCH_NOTE = (
+    "⚠ vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop resume`"
+    " (Stop hook chỉ giữ phiên đã gắn)"
+)
 STOP_LOG_FILE = "hook-stop.log"  # lượt Stop bị bỏ qua (phiên khác, stdin hỏng) — một dòng mỗi lượt khi vòng đang bật
 
 
@@ -6050,6 +6054,32 @@ def _live_loop(base: Path) -> str:
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
 
 
+def _init_warnings(args: argparse.Namespace, base: Path) -> None:
+    """Cảnh báo sau `loop init` — không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy."""
+    issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
+    if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
+        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
+        print(
+            f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
+            file=sys.stderr,
+        )
+    hook_root = project_dir()
+    if base.resolve() != hook_root:  # T-2521: vòng ở worktree mà Stop hook đọc `.autopilot/` của gốc hook → không giữ
+        print(
+            f"⚠ Stop hook đọc {hook_root} — mở phiên Claude với thư mục dự án là worktree này để hook giữ vòng",
+            file=sys.stderr,
+        )
+    noop = gate_noop_keys(base)
+    if noop:  # PLAN thường điền xt.yaml ở task đầu nên không chặn init, nhưng cổng đỏ tới khi điền
+        print(
+            f"⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để {', '.join(noop)} rỗng/no-op"
+            " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
+            file=sys.stderr,
+        )
+    for issue in gate_floor_issues(base):  # loop verify sẽ ĐỎ tới khi đạt sàn — đưa vào task PLAN ngay
+        print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
+
+
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
     if live:
@@ -6091,28 +6121,20 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
     if scope:
         state["scope"] = scope
     write_state(state, base)
-    issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
-    if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
-        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
-        print(
-            f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
-            file=sys.stderr,
-        )
-    noop = gate_noop_keys(base)
-    if noop:  # PLAN thường điền xt.yaml ở task đầu nên không chặn init, nhưng cổng đỏ tới khi điền
-        print(
-            f"⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để {', '.join(noop)} rỗng/no-op"
-            " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
-            file=sys.stderr,
-        )
-    for issue in gate_floor_issues(base):  # loop verify sẽ ĐỎ tới khi đạt sàn — đưa vào task PLAN ngay
-        print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
+    _init_warnings(args, base)
     print(
         f"✓ Autopilot bật: plan={args.plan} trần={max_iterations} vòng"
         + (f", hạn {deadline}" if deadline else "")
         + (" · chế độ một phiên" if args.single_session else "")
     )
     return 0
+
+
+def session_mismatch(st: Dict[str, Any]) -> bool:
+    """Vòng đang bật đã gắn một phiên khác phiên hiện tại (`/clear` đổi `CLAUDE_CODE_SESSION_ID`) — Stop hook sẽ bỏ qua
+    phiên này; phiên hiện tại hay vòng chưa gắn → False (không đoán)."""
+    bound, cur = str(st.get("session_id") or ""), session_id()
+    return bool(st.get("active") and bound and cur and bound != cur)
 
 
 def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
@@ -6124,6 +6146,7 @@ def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
     ]
     warn = _mode_warning(st.get("permission_mode")) if st.get("active") else ""
     notes += [warn.strip()] if warn else []
+    notes += [SESSION_MISMATCH_NOTE] if session_mismatch(st) else []
     tasks = _plan_tasks(base, st)
     cycles = plan_cycle_nodes(tasks)
     notes += [f"✗ PLAN có chu trình dependency (sau:) — không bao giờ làm được: {', '.join(cycles)}"] if cycles else []
@@ -6153,6 +6176,7 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
             "unknown_after": plan_unknown_after(tasks),
             "bad_links": plan_bad_links(tasks),
         }
+        extra["session_mismatch"] = session_mismatch(st)
         print(json.dumps({**v, **extra, "deferred": _deferred(st), **plan}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
@@ -6709,7 +6733,7 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
             "resume_reason": args.reason,
         }
     )
-    cur.update({"session_id": sid} if (sid := session_id()) else {})  # phiên mới tiếp vòng → Stop hook theo phiên này
+    cur["session_id"] = session_id()  # phiên mới tiếp vòng → Stop hook theo phiên này; '' = chưa gắn phiên (T-2522)
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
     if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
@@ -7837,6 +7861,12 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
     groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for project, d in sources:
         for e in feedback_entries(d) if d.is_dir() else []:
+            if e.get("kind") == "mien-tru":  # FB cũ chép lý do của dự án → chuẩn hoá lại trước khi ra repo khung public
+                e = {
+                    **e,
+                    "symptom": waiver_summary(e.get("id", "?")),
+                    "source": _collect_source("mien-tru", e.get("id", "?")),
+                }
             key = _feedback_key(e, project)
             g = groups.setdefault(key, {"kind": key[0], "id": e.get("id", "?"), "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})

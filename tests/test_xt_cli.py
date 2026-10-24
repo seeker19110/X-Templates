@@ -1318,7 +1318,15 @@ class FeedbackTest(TmpDirCase):
         self.assertIn("Thêm 0", run_main("feedback", "collect")[1])
         groups = xt.feedback_aggregate([("p", self.fb)])
         self.assertEqual(sorted(g["id"] for g in groups), ["SEC-AUTH-001", "SEC-AUTH-009"])
-        self.assertIn("lý do cũ", [i["symptom"] for g in groups for i in g["items"]][1])
+        # aggregate in ra repo khung public: FB cũ được chuẩn hoá lại, không chép lý do của dự án.
+        item = next(g for g in groups if g["id"] == "SEC-AUTH-009")["items"][0]
+        self.assertEqual(item["symptom"], xt.waiver_summary("SEC-AUTH-009"))
+        self.assertEqual(item["source"], "collect:mien-tru:SEC-AUTH-009")
+        table = run_main("feedback", "aggregate", "--from", f"p={self.fb}")[1]
+        raw = run_main("feedback", "aggregate", "--from", f"p={self.fb}", "--json")[1]
+        for out in (table, raw):
+            self.assertNotIn("lý do cũ", out)
+        self.assertIn(xt.waiver_summary("SEC-AUTH-009"), table)
 
     def test_collect_skips_in_framework_repo(self):  # AUD-HAR-048: luồng phản hồi dành cho dự án đích
         (self.tmp / "BLUEPRINT.md").write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: x\n", encoding="utf-8")

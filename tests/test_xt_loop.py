@@ -56,6 +56,20 @@ class LoopWorktreeRootTest(TmpRepoCase):
         self.assertTrue(self.plan_line(self.main).startswith("- [ ] `T-001`"))  # cây chính không đổi
         self.assertFalse((self.main / ".autopilot").exists())  # sổ của cây chính không bị ghi
 
+    def test_loop_worktree_root_init_warns_hook_root(self) -> None:
+        # Stop hook đọc `.autopilot/` của CLAUDE_PROJECT_DIR (cây chính) → init trong worktree phải nói rõ, không chặn.
+        with chdir(self.wt):
+            rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 0)
+        self.assertIn(f"Stop hook đọc {self.main.resolve()}", err)
+        self.assertIn("mở phiên Claude với thư mục dự án là worktree này", err)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.wt)}), chdir(self.wt):
+            rc, _, err = run_main("loop", "init", "--force")  # phiên mở đúng worktree: không cảnh báo
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Stop hook đọc", err)
+        with chdir(self.main):
+            self.assertNotIn("Stop hook đọc", run_main("loop", "init")[2])
+
     def test_loop_worktree_root_status_and_verify_use_worktree(self) -> None:
         with chdir(self.wt):
             run_main("loop", "init")
@@ -192,7 +206,28 @@ class StopHookSessionBoundTest(TmpRepoCase):
         self.assertEqual(json.loads(out)["decision"], "block")
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": ""}):
             run_main("loop", "resume", "--reason", "chạy tay ngoài phiên")
-        self.assertEqual(xt.read_state(self.tmp)["session_id"], OTHER)  # không có phiên → giữ phiên đã gắn
+        self.assertEqual(xt.read_state(self.tmp)["session_id"], "")  # không có phiên → vòng chưa gắn (hành vi cũ)
+        out, _ = self.stop(json.dumps({"session_id": SESSION}))
+        self.assertEqual(json.loads(out)["decision"], "block")
+
+    def test_stop_hook_session_bound_status_warns_on_mismatch(self) -> None:
+        # /clear đổi CLAUDE_CODE_SESSION_ID: `loop status` (SessionStart in lại) nhắc `loop resume`.
+        run_main("loop", "init")
+        warn = "vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop resume`"
+        cases = {SESSION: False, OTHER: True, "": False}  # chưa biết phiên hiện tại → không đoán
+        for sid, mismatch in cases.items():
+            with self.subTest(sid=sid), unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": sid}):
+                self.assertEqual(warn in run_main("loop", "status")[1], mismatch)
+                self.assertEqual(json.loads(run_main("loop", "status", "--json")[1])["session_mismatch"], mismatch)
+        run_main("loop", "stop", "--reason", "xong")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": OTHER}):  # vòng đã tắt: không cảnh báo
+            self.assertFalse(json.loads(run_main("loop", "status", "--json")[1])["session_mismatch"])
+        st = xt.read_state(self.tmp)
+        st["session_id"] = ""
+        st["active"] = True
+        xt.write_state(st, self.tmp)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": OTHER}):  # vòng chưa gắn phiên
+            self.assertNotIn(warn, run_main("loop", "status")[1])
 
 
 if __name__ == "__main__":

@@ -1396,6 +1396,22 @@ class StopAndSessionTest(unittest.TestCase):
         self.assertIn("checkpoint trước nén", ctx)
         self.assertIn("chế độ một phiên", ctx)
 
+    def test_stop_hook_session_bound_session_start_warns_after_clear(self):
+        # T-2522: /clear đổi CLAUDE_CODE_SESSION_ID → SessionStart phải nhắc `loop resume`, không để vòng dừng im lặng.
+        tmp = self.project_with_loop()
+        sf = tmp / ".autopilot" / "state.json"
+        st = json.loads(sf.read_text(encoding="utf-8"))
+        sf.write_text(json.dumps({**st, "session_id": "aaaa-cu"}), encoding="utf-8")
+
+        def ctx(sid: str) -> str:
+            code, out, _ = run_hook("session-start.sh", {"source": "clear"}, tmp, {"CLAUDE_CODE_SESSION_ID": sid})
+            self.assertEqual(code, 0)
+            return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+        self.assertIn("vòng gắn phiên khác", ctx("bbbb-moi"))
+        self.assertIn("loop resume", ctx("bbbb-moi"))
+        self.assertNotIn("vòng gắn phiên khác", ctx("aaaa-cu"))
+
     def test_pre_compact_never_blocks_when_xt_breaks(self):
         tmp = self.project_with_loop()
         (tmp / "scripts" / "xt.py").write_text('import sys\nprint(\'{"decision": "block"}\')\nsys.exit(2)\n')
