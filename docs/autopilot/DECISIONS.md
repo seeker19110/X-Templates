@@ -1078,3 +1078,17 @@
 - Chọn: Siết D-151: mẫu chỉ nhận dạng literal an toàn — -name/-iname/-path/-ipath: không \, [, $, backtick, không chứa '.git' (ở mọi độ sâu), dạng '*.<đuôi>' hoặc tên không wildcard; -regex/-iregex/-regextype → deny; hành động xoá phải đứng SAU mọi test; mở rộng GIT_PROBES (pack, packed-refs, refs/heads/master, hooks, logs, objects…); _find_parens chỉ áp khi find ở vị trí lệnh (đầu lệnh / sau ; && || | ( $( hoặc sau env/sudo/command/time/nice)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ nhận mẫu mà fnmatch Python và find hiểu giống nhau (literal + * + đuôi) → đóng cả lớp lệch ngữ nghĩa; tokenizer giới hạn vị trí lệnh để hết hồi quy case/echo; (4) giữ dọn dẹp phổ biến (*.pyc, __pycache__, .DS_Store, *.log) — phương án 2 chặn cả các lệnh này
 - Đường lùi: Phương án 2 nếu lượt review 5 còn lọt
+
+### D-153 · 2026-10-24T00:43:00+00:00 · Sau 5 lượt review find vẫn lọt (tokenizer cắt \; và \(, danh sách đường .git không đủ, -exec sh -c) — giữ phân tích biểu thức find hay đổi?
+
+- Phương án: (1) D-153 thay D-151/152: bỏ phân tích biểu thức; trả tokenizer về như trước (gỡ _find_parens); quét CHUỖI GỐC của lệnh: có từ 'find' cùng hành động -delete/-exec/-execdir/-ok/-okdir, và điểm bắt đầu của find là gốc dự án/tổ tiên/.git, hoặc '.'/vắng khi cwd là gốc, hoặc không xác định được (biến, $(…)) → deny; find trong thư mục con (không chứa .git của gốc) vẫn chạy tự do · (2) Tiếp tục vá D-152
+- Chọn: D-153 thay D-151/152: bỏ phân tích biểu thức; trả tokenizer về như trước (gỡ _find_parens); quét CHUỖI GỐC của lệnh: có từ 'find' cùng hành động -delete/-exec/-execdir/-ok/-okdir, và điểm bắt đầu của find là gốc dự án/tổ tiên/.git, hoặc '.'/vắng khi cwd là gốc, hoặc không xác định được (biến, $(…)) → deny; find trong thư mục con (không chứa .git của gốc) vẫn chạy tự do
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: quét chuỗi gốc không phụ thuộc cách shlex tách \( \; ; không cần đoán find sẽ khớp gì; hồi quy tokenizer hết vì gỡ _find_parens; xoá không đảo ngược → chiều chặt; (3) đơn giản nhất, test được. Chi phí: dọn từ gốc (find . -name '*.pyc' -delete) bị chặn — lý do gợi ý chạy trong thư mục con hoặc rm đường cụ thể
+- Đường lùi: Trở lại commit 27df218 (D-152)
+
+### D-154 · 2026-10-24T01:12:57+00:00 · D-153 chặn oan: (1) quét chuỗi gốc bắt cả dữ liệu (heredoc, message); (2) mọi lệnh con chạy từ gốc, kể cả chỉ đọc
+
+- Phương án: (1) (1) giữ chặt; (2) miễn khi mọi lệnh con thuộc danh sách đóng không ghi (cat grep rg ls head tail wc file stat du sha*sum md5sum basename dirname realpath echo printf test) và không có hành động xoá/ghi file · (2) Giữ đúng D-153 cả hai
+- Chọn: (1) giữ chặt; (2) miễn khi mọi lệnh con thuộc danh sách đóng không ghi (cat grep rg ls head tail wc file stat du sha*sum md5sum basename dirname realpath echo printf test) và không có hành động xoá/ghi file
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: dữ liệu nhắc lệnh xoá hiếm, đã có lối Edit/Write (tiền lệ D-105); (4) tìm-rồi-grep từ gốc là việc hằng ngày — danh sách đóng lệnh không ghi vẫn chặn sh -c, mv, truncate và mọi lệnh khác
+- Đường lùi: Bỏ FIND_READONLY_EXEC (D-153 nguyên bản)

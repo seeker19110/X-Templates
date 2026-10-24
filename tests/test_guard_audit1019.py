@@ -57,7 +57,7 @@ class NestTooDeepDeniedTest(unittest.TestCase):
         self.assertEqual(final(nest("docker run alpine echo hi", 3)), "")
         self.assertEqual(final(nest("docker run alpine echo hi", 4)), "deny")  # lệnh trong container ở độ sâu trần
         # review #159: `find -exec bash -c '… sh -c "…"'` (hai shell trong find) là lệnh thật, không bị chặn oan
-        self.assertEqual(final("find . -type f -exec bash -c 'for f; do sh -c \"echo $f\"; done' _ {} +"), "")
+        self.assertEqual(final("find src -type f -exec bash -c 'for f; do sh -c \"echo $f\"; done' _ {} +"), "")
 
     def test_nest_too_deep_strict_still_asks(self):
         res = guard.bash_decision(nest("true", 6), str(ROOT))
@@ -99,7 +99,7 @@ class BraceExpansionTest(unittest.TestCase):
             "echo '{a,b}' \"{x,y}\"",
             "echo ${HOME} ${a:-x,y}",
             "{ ls; echo x; }",
-            "find . -name '*.py' -exec ruff check {} +",
+            "find src -name '*.py' -exec ruff check {} +",  # D-153: `find .` -exec từ gốc bị chặn
             "awk '{print $1,$2}' f.txt",
             'cat > f.json <<E\n{"a":1,"b":2}\nE',
             "echo \\{a,b\\}",

@@ -5153,7 +5153,7 @@
    "origin": "control",
    "refs": [],
    "input": {
-    "command": "find . -name '*.pyc' -delete"
+    "command": "find src -name '*.pyc' -delete"
    },
    "expect": {
     "allowed": true
@@ -5186,7 +5186,7 @@
    "origin": "control",
    "refs": [],
    "input": {
-    "command": "find . -name __pycache__ -type d -exec rm -rf {} +"
+    "command": "find src -name __pycache__ -type d -exec rm -rf {} +"
    },
    "expect": {
     "allowed": true
@@ -5212,6 +5212,39 @@
    },
    "expect": {
     "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-exec-escaped-semicolon",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -exec echo {} \\; -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-find-root-pyc",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.pyc' -delete"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-fb1023-control-find-exec-readonly",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "find . -name '*.py' -exec grep -l TODO {} \\;"
+   },
+   "expect": {
+    "allowed": true
    }
   }
  ]

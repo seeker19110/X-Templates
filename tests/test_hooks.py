@@ -1193,17 +1193,17 @@ class GuardStoredScanTest(unittest.TestCase):
         self.check(
             "ask", ["find ~/x -delete", "find ~/p -exec rm {} \\;", "find /opt -name '*.log' -execdir shred {} +"]
         )
-        self.check("ask", ["find . -name pkg -execdir npm publish \\;"])
+        self.check("ask", ["find pkgs -name pkg -execdir npm publish \\;"])
+        # D-153: find xoá/-exec bắt đầu từ gốc dự án (kể cả không ghi điểm bắt đầu) → deny
+        self.check("deny", ["find . -name '*.pyc' -delete", "find -name x -delete", "find . -exec"])
         self.check(
             "",
             [
-                "find . -name '*.pyc' -delete",
-                "find -name x -delete",
-                "find . -name x -exec rm -f {} +",
-                "find . -type f -exec grep -l x {} +",
+                "find src -name '*.pyc' -delete",
+                "find src -name x -exec rm -f {} +",
+                "find . -type f -exec grep -l x {} +",  # D-154: -exec chỉ đọc từ gốc được miễn
                 "find / -name x",
                 "find build ( -name a -o -name b ) -delete",
-                "find . -exec",
             ],
         )
 
@@ -3751,8 +3751,8 @@ class GuardEgressAuditTest(EgressCase):
                 "git push origin feat",
                 "git clean -n",
                 "git log --all --oneline",
-                "find . -name '*.pyc' -delete",
-                "find . -type d -name __pycache__ -delete",
+                "find src -name '*.pyc' -delete",  # D-153: từ gốc (`find .`) thì bị chặn
+                "find src -type d -name __pycache__ -delete",
                 "env -S 'python3 -V'",
                 "rm -rf build",
             ),
@@ -3775,7 +3775,7 @@ class GuardEgressAuditTest(EgressCase):
                 "kubectl --context prod exec pod -- sh -c 'git push --force'",
             ),
         )
-        self.assert_all("", ("find . -mindepth 1 -name '*.pyc' -delete", "kubectl -n prod get pods"))
+        self.assert_all("", ("find src -mindepth 1 -name '*.pyc' -delete", "kubectl -n prod get pods"))
 
     def test_guard_other_container_clis(self):  # AUD-SEC-042
         self.assert_all(

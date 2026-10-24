@@ -144,7 +144,6 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-audit1020c-cd-autopilot-script": "cd .autopilot → /tmp/.autopilot",
     "guard-audit1020c-tilde-plus-evidence": "~+ là $PWD = /tmp sau cd",
     "guard-har024-bash-state": ".autopilot/state.json tương đối",
-    "guard-har024-find-delete": "find . quét /tmp",
     "guard-har026-git-rm-test": "tests/test_a.py tương đối (file của ca nằm ở thư mục ca)",
     "guard-har026-sed-assert": "tests/test_a.py tương đối (file của ca nằm ở thư mục ca)",
     "guard-review186-os-path-os-chain": ".claude/hooks tương đối → /tmp/.claude/hooks",

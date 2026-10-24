@@ -716,34 +716,12 @@ def tokenize(cmd: str) -> List[str]:
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
-        return _find_parens(list(lex))
+        return list(lex)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ)
         return re.split(r"\s+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
 
 
 PUNCT = set("();<>|&\n")
-
-
-def _find_parens(tokens: List[str]) -> List[str]:
-    """`find … \\( … \\)`: shlex bỏ dấu thoát nên ngoặc của find thành toán tử subshell, cắt mất `-delete` phía sau
-    (D-151). Giữa lệnh có `find`, `(` không thể là cú pháp shell → đối số `\\(`; `)` khớp với nó cũng vậy, `)` thừa
-    vẫn đóng subshell (`(find . -delete)`)."""
-    out: List[str] = []
-    in_find, at_cmd, depth = False, True, 0
-    for t in tokens:
-        if in_find and (t == "(" or (t == ")" and depth)):
-            depth += 1 if t == "(" else -1
-            t = "\\" + t
-        elif _is_punct(t) and not _is_redirect(t):
-            in_find, at_cmd, depth = False, True, 0
-        elif at_cmd:  # chỉ `find` ở VỊ TRÍ LỆNH (review lượt 4: `case find in (find) rm -rf …` từng nuốt lệnh sau)
-            in_find = posixpath.basename(t) == "find"
-            at_cmd = t in CMD_PREFIXES or t[:1] == "-" or t.isdigit() or bool(ENV_ASSIGN_RE.fullmatch(t))
-        out.append(t)
-    return out
-
-
-CMD_PREFIXES = WRAPPERS | {"env", "sudo", "doas", "{", "!", "then", "do", "else"}
 
 
 def _is_punct(t: str) -> bool:
@@ -1757,75 +1735,80 @@ def _find_rule(args: List[str], root: str, cwd: Optional[str]) -> Tuple[str, str
         if verdict["decision"] in ("deny", "ask"):
             return str(verdict["decision"]), f"find {a}: {verdict['reason']}"
         deleting = deleting or bool(sub) and posixpath.basename(sub[0]) in ("rm", "shred", "unlink")
+    acting = deleting or any(a in FIND_EXEC for a in args[i:]) and not _find_exec_readonly(" ".join(args[i:]))
+    hit = next((r for r in roots if acting and _wipes_root(r, root, cwd)), "")
+    if hit:  # D-153: theo token (biết `cd`); `find_root_scan` quét chuỗi gốc cho phần token bị shlex cắt
+        return "deny", FIND_ROOT_WHY.format(hit)
     if not deleting:
         return "", ""
     if any(_rm_target(r) in SYSTEM_ROOTS for r in roots):
         return "deny", "find xoá file dưới /, ~, $HOME"
-    ok = _find_expr_ok(args[i:], roots)
-    hit = next((r for r in roots if _wipes_root(r, root, cwd) and not (ok and _outside_git(r, root, cwd))), "")
-    if hit:
-        return "deny", FIND_ROOT_WHY.format(hit)
-    if not ok and any(_dangerous_rm_target(r) for r in roots):  # `find . -delete` = `rm -rf .`
+    if {a for a in args[i:] if not a.isdigit()} <= FIND_NO_FILTER and any(
+        _dangerous_rm_target(r) for r in roots
+    ):  # `find . -delete` = `rm -rf .`
         return "deny", "find -delete không lọc trên /, ~, ., .git — xoá cả cây"
     outside = [r for r in roots if _outside_project(r, root, cwd)]
     return ("ask", f"find xoá file ngoài thư mục dự án ({outside[0]})") if outside else ("", "")
 
 
-def _find_tokens(expr: List[str]) -> List[str]:
-    """Biểu thức `find`, mỗi khối `-exec … ;|+` thay bằng `-delete` khi lệnh là rm/shred/unlink, bỏ đi khi không (lệnh
-    trong đó đã quét riêng). `\\;` bị shell tách nên khối có thể không đóng."""
+# D-153: `find` có `-delete`/`-exec…` trong CHUỖI GỐC (không qua token — shlex bỏ dấu thoát nên `\(`, `\;` cắt argv).
+FIND_WORD_RE = re.compile(r"(?<![\w.-])find(?![\w.-])")
+FIND_ACT_RE = re.compile(r"(?<![\w-])-(?:delete|exec|execdir|ok|okdir)(?![\w-])")
+FIND_WRITE_RE = re.compile(r"(?<![\w-])-(?:delete|fprint0?|fprintf|fls)(?![\w-])")
+FIND_EXEC_CMD_RE = re.compile(r"(?<![\w-])-(?:exec|execdir|ok|okdir)(?![\w-])(?:[ \t]+(\S+))?")
+# D-154: -exec từ gốc được miễn khi chỉ chạy các lệnh đọc này (danh sách đóng — không shell/trình thông dịch/xargs/env)
+FIND_ROOT_RO_EXEC = frozenset(
+    # không `rg`: `--pre <lệnh>` chạy lệnh tuỳ ý (review D-154)
+    "cat grep egrep fgrep ls head tail wc file stat du sha256sum sha1sum md5sum basename dirname realpath echo "
+    "printf test".split()
+)
+FIND_ROOT_WHY = (
+    "find xoá/-exec bắt đầu từ gốc dự án bị chặn ({}; D-153) — chạy trong thư mục con (vd `find build -name '*.o' "
+    "-delete`) hoặc rm đường cụ thể"
+)
+
+
+def _find_starts(rest: str) -> List[str]:
+    """Điểm bắt đầu sau một từ `find` trong chuỗi gốc: bỏ `-H/-L/-P/-O<n>/-D <x>/--`, dừng ở từ bắt đầu bằng `-`, `(`,
+    `\\(`, `!` hay toán tử shell; nháy và `\\` bị bỏ."""
     out: List[str] = []
-    sub: Optional[List[str]] = None
-    for a in [*expr, ";"]:
-        if sub is None and a in FIND_EXEC:
-            sub = []
-        elif sub is None:
-            out.append(a)
-        elif a in (";", "+"):
-            out += ["-delete"] if sub and posixpath.basename(sub[0]) in ("rm", "shred", "unlink") else []
-            sub = None
-        else:
-            sub.append(a)
-    return out[:-1] if out[-1:] == [";"] else out
+    words = iter(rest.split("\n", 1)[0].split())
+    for w in words:
+        if w in ("-H", "-L", "-P", "--") or re.fullmatch(r"-O\d", w):
+            continue
+        if w == "-D":
+            next(words, None)
+            continue
+        head = re.split(r"[;&|<>()]", w.replace("\\", "").replace('"', "").replace("'", ""), maxsplit=1)
+        if w.startswith(("-", "(", "\\(", "!")) or not head[0] and len(head) > 1:
+            break
+        out.append(head[0])
+        if len(head) > 1:
+            break
+    return out
 
 
-def _find_expr_ok(expr: List[str], roots: List[str]) -> bool:
-    """D-151/D-152: AND thuần các test dương (nhánh `-o` chỉ khi không ngoặc), MỌI test glob tên/đường đều hẹp, mỗi
-    nhánh có ≥ 1 test đó (hoặc là `-type d -empty`), hành động xoá đứng cuối; `!`/`-not`/`-prune`/ngoặc/regex/test
-    lạ → False."""
-    names: List[List[bool]] = [[]]
-    seen: List[Set[str]] = [set()]
-    toks = iter(_find_tokens(expr))
-    for a in toks:
-        if "-delete" in seen[-1]:
-            return False  # D-152: có test/hành động sau hành động xoá
-        if a in ("-o", "-or"):
-            names.append([])
-            seen.append(set())
-        elif a in FIND_GLOB_TESTS:
-            names[-1].append(_narrow_find_test(a, next(toks, "*"), roots))
-        elif a in FIND_ARG_OK or re.fullmatch(r"-[ac]?newer\w*", a):
-            a = f"{a} {next(toks, '')}"
-        elif a not in FIND_FLAG_OK:
-            return False
-        seen[-1].add(a)
-    return all(all(n) and (n or {"-type d", "-empty"} <= s) for n, s in zip(names, seen))
-
-
-def _narrow_find_test(op: str, val: str, roots: List[str]) -> bool:
-    """D-152: mẫu glob không có `\\ [ ] $ \\` {` (cú pháp khó đoán), không chứa `.git` (mọi hoa thường — cả submodule,
-    `.gitkeep`) và không khớp `GIT_PROBES` (`-name` so tên cuối, còn lại so cả đường)."""
-    if re.search(r"[\\\[\]$`{]", val) or ".git" in val.lower():
+def _find_exec_readonly(rest: str) -> bool:
+    """D-154: không `-delete`/`-fprint*`/`-fls` và MỌI `-exec`/`-execdir`/`-ok`/`-okdir` chạy lệnh (basename) trong
+    `FIND_ROOT_RO_EXEC` — lệnh là `{}`, biến hay thiếu → không miễn."""
+    if FIND_WRITE_RE.search(rest):
         return False
-    paths = [posixpath.join(r, p) for r in roots for p in GIT_PROBES]
-    paths = [posixpath.basename(p) for p in paths] if op in ("-name", "-iname") else paths
-    fold = op.startswith("-i")
-    return not any(fnmatch.fnmatchcase(p.lower(), val.lower()) if fold else fnmatch.fnmatchcase(p, val) for p in paths)
+    return all(posixpath.basename(c.strip("'\"")) in FIND_ROOT_RO_EXEC for c in FIND_EXEC_CMD_RE.findall(rest))
 
 
-def _outside_git(r: str, root: str, cwd: Optional[str]) -> bool:
-    """Điểm bắt đầu của `find` không phải `gốc/.git` hay bên trong nó (mẫu hẹp đến đâu cũng trúng file của git)."""
-    return not (_real_target(r, root, cwd) + "/").startswith(os.path.join(os.path.realpath(root), ".git/"))
+def find_root_scan(cmd: str, root: str, cwd: Optional[str]) -> str:
+    """D-153: lý do chặn khi một `find` có hành động xoá/`-exec` bắt đầu từ gốc dự án, tổ tiên hay `gốc/.git`, không có
+    điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`); không thì rỗng."""
+    cmd = join_continuations(cmd)
+    for m in FIND_WORD_RE.finditer(cmd):
+        rest = cmd[m.end() :]
+        if not FIND_ACT_RE.search(rest) or _find_exec_readonly(rest):
+            continue
+        starts = _find_starts(rest) or ["."]
+        bad = next((s for s in starts if not s or set(s) & UNRESOLVED_TARGET_CHARS or _wipes_root(s, root, cwd)), None)
+        if bad is not None:
+            return f"Lệnh bị khung chặn ({FIND_ROOT_WHY.format(bad or repr(bad))}): {cmd[:300]}"
+    return ""
 
 
 def _find_parts(args: List[str]) -> Tuple[List[str], int]:
@@ -1837,7 +1820,7 @@ def _find_parts(args: List[str]) -> Tuple[List[str], int]:
     if args[i : i + 1] == ["-D"]:
         i += 2
     j = i
-    while j < len(args) and not args[j].startswith(("-", "(", "!", "\\(")):
+    while j < len(args) and not args[j].startswith(("-", "(", "!")):
         j += 1
     return args[i:j] or ["."], j
 
@@ -1874,8 +1857,6 @@ FIND_READONLY_EXEC = {
 }
 FIND_FILE_OUT = {"-fprint", "-fprint0", "-fprintf", "-fls"}  # ghi kết quả vào file (đối số kế tiếp)
 FIND_NAME_TESTS = {"-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-name", "-iname", "-lname"}
-# D-152: test glob được nhận (regex của find khác cú pháp Python → không nhận; `-lname` chỉ khớp symlink)
-FIND_GLOB_TESTS = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename"}
 EVIDENCE_NAMES = {"verified.json", "runs.jsonl", "reviews.json"}  # tên đặc thù của file trong `.autopilot/`
 
 
@@ -1903,34 +1884,7 @@ def _find_evidence_targets(args: List[str]) -> List[str]:
     return out
 
 
-# D-151: biểu thức `find` xoá trên gốc dự án — danh sách cho phép. Có đối số: tuỳ chọn toàn cục + test dương (`-newer*`
-# xét theo tiền tố); không đối số: tuỳ chọn/hành động/AND. Ngoài hai tập và test tên/đường → không cho.
-FIND_ARG_OK = {"-maxdepth", "-mindepth", "-type", "-size", "-user", "-group", "-perm"}
-FIND_ARG_OK |= {f"-{x}{u}" for x in "acm" for u in ("time", "min")}
-FIND_FLAG_OK = {
-    "-depth",
-    "-xdev",
-    "-mount",
-    "-ignore_readdir_race",
-    "-noleaf",
-    "-empty",
-    "-delete",
-    "-print",
-    "-print0",
-}
-FIND_FLAG_OK |= {"-a", "-and"}
-# Đường/tên đại diện bên trong `.git` mà test hẹp không được khớp (`-name config` trúng `.git/config`).
-GIT_PROBES = tuple(
-    ".git .git/info/exclude .git/objects/ab .git/config .git/HEAD .git/index .git/refs/heads/main .git/packed-refs "
-    ".git/objects/pack/pack-1.pack .git/objects/pack/pack-1.idx .git/refs/heads/master .git/refs/tags/v1 "
-    ".git/hooks/pre-commit .git/logs/HEAD .git/description .git/COMMIT_EDITMSG .git/FETCH_HEAD .git/ORIG_HEAD "
-    ".git/objects .git/refs .git/hooks .git/logs".split()
-)
-FIND_ROOT_WHY = (
-    "find: xoá đệ quy gốc dự án ({}) chỉ cho AND các test dương có mẫu tên/đường hẹp (không khớp .git, không chứa "
-    "`.git` — kể cả .gitkeep, không `[ ] \\ $ {{`, không -regex), hành động xoá đứng cuối — viết hẹp hơn hoặc chạy trong "
-    "thư mục con (D-151, D-152)"
-)
+FIND_NO_FILTER = {"-delete", "-depth", "-print", "-xdev", "-mount", "-ignore_readdir_race", "-mindepth", "-maxdepth"}
 FIND_FOUND = "xt-find-match"  # thay `{}` khi quét lệnh `-exec`: một file bên dưới gốc của find
 SYSTEM_ROOTS = {"/", "~", "$HOME", "${HOME}"}
 
@@ -6137,7 +6091,7 @@ def bash_decision(
         return res
     commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
-    deny_reason = deny_reason or _commit_after_write(commands)
+    deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
     )
@@ -6176,6 +6130,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("push --all/--tags", "PUSH_ALL"),
     ("xoá đệ quy ngoài thư mục dự án", "WIPE_OUTSIDE"),
     ("xoá đệ quy gốc dự án", "WIPE_OUTSIDE"),
+    ("bắt đầu từ gốc dự án bị chặn", "WIPE_OUTSIDE"),
     ("rm -rf không có đích", "WIPE_OUTSIDE"),
     ("find xoá file ngoài thư mục dự án", "WIPE_OUTSIDE"),
     ("xoá thư mục gắn từ máy", "WIPE_OUTSIDE"),
