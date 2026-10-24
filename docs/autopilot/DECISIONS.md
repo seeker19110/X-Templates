@@ -1092,3 +1092,10 @@
 - Chọn: (1) giữ chặt; (2) miễn khi mọi lệnh con thuộc danh sách đóng không ghi (cat grep rg ls head tail wc file stat du sha*sum md5sum basename dirname realpath echo printf test) và không có hành động xoá/ghi file
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: dữ liệu nhắc lệnh xoá hiếm, đã có lối Edit/Write (tiền lệ D-105); (4) tìm-rồi-grep từ gốc là việc hằng ngày — danh sách đóng lệnh không ghi vẫn chặn sh -c, mv, truncate và mọi lệnh khác
 - Đường lùi: Bỏ FIND_READONLY_EXEC (D-153 nguyên bản)
+
+### D-155 · 2026-10-24T02:07:08+00:00 · Sau 6 lượt review guard xoá gốc: còn giới hạn chưa bịt (tên lệnh qua glob fi?d, công cụ khác như fd -X rm, ~user). Dừng vòng review ở đâu?
+
+- Phương án: (1) Dừng sau lượt review delta kế: không hồi quy so 5ef1a14~1 là điều kiện merge; giới hạn còn lại ghi PROGRESS §Giới hạn guard (như D-051), xử lý ở đợt sau nếu dự án đích gặp · (2) Tiếp tục đến khi reviewer không còn tìm ra
+- Chọn: Dừng sau lượt review delta kế: không hồi quy so 5ef1a14~1 là điều kiện merge; giới hạn còn lại ghi PROGRESS §Giới hạn guard (như D-051), xử lý ở đợt sau nếu dự án đích gặp
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mỗi lượt đã chặt hơn và lượt 6 xác nhận 0 hồi quy; guard là lớp đỡ chuỗi lệnh, không phải sandbox — giới hạn đã biết được ghi như D-051/D-105; (2) đường lùi: revert từng commit; (5) mỗi lượt ~1 giờ, lợi ích giảm dần
+- Đường lùi: Mở task mới cho từng giới hạn

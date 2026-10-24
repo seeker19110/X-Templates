@@ -234,6 +234,27 @@ class WipeProjectRootTest(unittest.TestCase):
             "find . -exec grep -l x {} + -fprint out.txt",
             "find . -exec cat {} + -fls out.txt",
             f"cd .. && find {NAME} -exec mv {{}} /tmp/x \\;",
+            # review lượt 6: `cd`/`pushd`/`popd` trước find → điểm bắt đầu tương đối không xác định
+            f"cd .. && find {NAME} \\( -name a \\) -delete",
+            f"cd / && find {R[1:]} \\( -name a \\) -delete",
+            f"pushd .. && find {NAME} \\( -name a \\) -delete",
+            "cd .git && find objects \\( -name a \\) -delete",
+            "cd src && find ../.git \\( -name a \\) -delete",
+            "popd; find x \\( -name a \\) -delete",
+            # tên `find` bị che bằng nháy/`\\`
+            'fi""nd . \\( -name a \\) -delete',
+            '"fi""nd" .git \\( -name a \\) -delete',
+            "f\\ind . \\( -name a \\) -delete",
+            "fin''d . \\( -name a \\) -delete",
+            # -fprint*/-fls ghi vào .git
+            "find . -fprint .git/config",
+            "find . -fprintf .git/config x",
+            "find . -fls .git/HEAD",
+            f"find src -fprint0 {R}/.git/x",
+            # miễn chỉ cho tên trần; bỏ `file` (`file -C` ghi magic.mgc)
+            "find . -exec ./cat {} \\;",
+            "find . -exec /bin/cat {} \\;",
+            "find . -exec file -C {} +",
             f"cd .. && find {NAME} -delete",
             "bash -c 'find . -name x -delete'",
             "echo ok\nfind . \\\n  -delete",
@@ -262,7 +283,10 @@ class WipeProjectRootTest(unittest.TestCase):
             ("find . -name '*.py' -exec grep -l TODO {} \\;", None),
             ("find . -exec grep -q x {} +", None),
             ("find . -type f -exec wc -l {} +", None),
-            ("find . -name '*.md' -exec /usr/bin/grep -n x {} + -exec 'head' -1 {} \\;", None),
+            ("find . -name '*.md' -exec grep -n x {} + -exec 'head' -1 {} \\;", None),
+            ("cd /tmp && find /tmp/x \\( -name a \\) -delete", None),  # sau `cd`: đích tuyệt đối vẫn giải được
+            ("find . -name x -fprint out.txt", None),  # -fprint ngoài .git
+            ('"find" src \\( -name a \\) -delete', None),
             ("find -execdir sha256sum {} +", None),
             (f"find {R} -okdir stat {{}} \\;", None),
         ):

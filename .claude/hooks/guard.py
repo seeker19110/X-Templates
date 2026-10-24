@@ -1756,10 +1756,12 @@ FIND_WORD_RE = re.compile(r"(?<![\w.-])find(?![\w.-])")
 FIND_ACT_RE = re.compile(r"(?<![\w-])-(?:delete|exec|execdir|ok|okdir)(?![\w-])")
 FIND_WRITE_RE = re.compile(r"(?<![\w-])-(?:delete|fprint0?|fprintf|fls)(?![\w-])")
 FIND_EXEC_CMD_RE = re.compile(r"(?<![\w-])-(?:exec|execdir|ok|okdir)(?![\w-])(?:[ \t]+(\S+))?")
+FIND_OUT_RE = re.compile(r"(?<![\w-])-(?:fprint0?|fprintf|fls)[ \t]+(\S+)")
+CD_WORD_RE = re.compile(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w.-])")
 # D-154: -exec từ gốc được miễn khi chỉ chạy các lệnh đọc này (danh sách đóng — không shell/trình thông dịch/xargs/env)
 FIND_ROOT_RO_EXEC = frozenset(
-    # không `rg`: `--pre <lệnh>` chạy lệnh tuỳ ý (review D-154)
-    "cat grep egrep fgrep ls head tail wc file stat du sha256sum sha1sum md5sum basename dirname realpath echo "
+    # không `rg` (`--pre <lệnh>` chạy lệnh tuỳ ý), không `file` (`file -C` ghi magic.mgc)
+    "cat grep egrep fgrep ls head tail wc stat du sha256sum sha1sum md5sum basename dirname realpath echo "
     "printf test".split()
 )
 FIND_ROOT_WHY = (
@@ -1789,23 +1791,33 @@ def _find_starts(rest: str) -> List[str]:
 
 
 def _find_exec_readonly(rest: str) -> bool:
-    """D-154: không `-delete`/`-fprint*`/`-fls` và MỌI `-exec`/`-execdir`/`-ok`/`-okdir` chạy lệnh (basename) trong
-    `FIND_ROOT_RO_EXEC` — lệnh là `{}`, biến hay thiếu → không miễn."""
+    """D-154: không `-delete`/`-fprint*`/`-fls` và MỌI `-exec`/`-execdir`/`-ok`/`-okdir` chạy lệnh TÊN TRẦN (không `/`
+    — `./cat` không phải cat) trong `FIND_ROOT_RO_EXEC`; lệnh là `{}`, biến hay thiếu → không miễn."""
     if FIND_WRITE_RE.search(rest):
         return False
-    return all(posixpath.basename(c.strip("'\"")) in FIND_ROOT_RO_EXEC for c in FIND_EXEC_CMD_RE.findall(rest))
+    return all(c.strip("'\"") in FIND_ROOT_RO_EXEC for c in FIND_EXEC_CMD_RE.findall(rest))
+
+
+def _find_bad_start(s: str, root: str, cwd: Optional[str], moved: bool) -> bool:
+    """Điểm bắt đầu rỗng/không xác định, tương đối sau `cd`/`pushd`/`popd` trong cùng lệnh, hay chạm gốc/`.git`."""
+    unknown = not s or bool(set(s) & UNRESOLVED_TARGET_CHARS) or (moved and not s.startswith(("/", "~")))
+    return unknown or _wipes_root(s, root, cwd)
 
 
 def find_root_scan(cmd: str, root: str, cwd: Optional[str]) -> str:
     """D-153: lý do chặn khi một `find` có hành động xoá/`-exec` bắt đầu từ gốc dự án, tổ tiên hay `gốc/.git`, không có
-    điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`); không thì rỗng."""
-    cmd = join_continuations(cmd)
-    for m in FIND_WORD_RE.finditer(cmd):
-        rest = cmd[m.end() :]
-        if not FIND_ACT_RE.search(rest) or _find_exec_readonly(rest):
-            continue
-        starts = _find_starts(rest) or ["."]
-        bad = next((s for s in starts if not s or set(s) & UNRESOLVED_TARGET_CHARS or _wipes_root(s, root, cwd)), None)
+    điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`, tương đối sau `cd`);
+    hoặc `-fprint*`/`-fls` ghi vào `gốc/.git`. Quét bản bỏ `"`/`'`/`\\` (`fi""nd`, `f\\ind` vẫn là find)."""
+    norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
+    for m in FIND_WORD_RE.finditer(norm):
+        rest = norm[m.end() :]
+        moved = bool(CD_WORD_RE.search(norm, 0, m.start()))
+        acting = FIND_ACT_RE.search(rest) and not _find_exec_readonly(rest)
+        starts = (_find_starts(rest) or ["."]) if acting else []
+        bad = next((s for s in starts if _find_bad_start(s, root, cwd, moved)), None)
+        bad = (
+            bad if bad is not None else next((o for o in FIND_OUT_RE.findall(rest) if _wipes_root(o, root, cwd)), None)
+        )
         if bad is not None:
             return f"Lệnh bị khung chặn ({FIND_ROOT_WHY.format(bad or repr(bad))}): {cmd[:300]}"
     return ""
