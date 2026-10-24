@@ -5,12 +5,21 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (`xt.py`, skill `/autopilot`, `/review`) — sửa các lỗi review 🟠 của 3.19.0 (#247 được merge trước khi bản sửa kịp đẩy).
+
+### Fixed
+- `xt.py pr reviewed`/`ci-check` (D-161): họ Anthropic chưa có bậc (mythos) so với họ Anthropic khác bị từ chối cho tới khi thêm bậc — 3.19.0 nhận như khác nhà cung cấp nên reviewer yếu hơn lọt qua; effort cấu hình của một phía chỉ dùng khi model phía đó cũng lấy từ cấu hình — workflow `pr-review` truyền model thật từng mượn `reviewer_effort` trong xt.yaml; tên họ chỉ nhận chữ ASCII (`re.A`).
+- `pr next`: bản ghi sổ sạch chưa đăng không còn qua luật mới → trả `review` (rà lại) thay vì đề nghị đăng lại mãi bằng lệnh bị từ chối.
+- Chữ "khác họ model" còn sót đổi theo `LOOP-ORCH-005` ở `LOOP-STOP-022`, `LOOP-OPT-005`, `LOOP-ORCH-018`, skill `/autopilot`, `/review`, prompt `pr-review.yml`; `LOOP-ORCH-005` ghi rõ người viết = agent năng lực cao nhất đã góp vào diff. Dự án đích: ghép lại blueprint để nhận chữ mới.
+
 ## [3.19.0] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (`xt.py`, `.claude/agents/`, mẫu `CLAUDE.md`/`AGENTS.md`/`xt.yaml`) và ghép lại blueprint (`compose`) để nhận chữ mới của `LOOP-ORCH-005`, `LOOP-ORCH-019`. `pr reviewed --clean` với reviewer cùng họ người viết nay cần `--reviewer-effort` > `--author-effort`; reviewer bậc thấp hơn người viết (vd tác giả opus, reviewer sonnet) bị từ chối — dự án có `author_model_family`/`reviewer_model_family` trong `xt.yaml` kiểm lại bằng `xt.py ci-check`. Chọn model phiên chính theo chuỗi mới khi mở phiên.
 
 ### Changed
-- `LOOP-ORCH-005` (D-161, ADR-0044, chủ repo chốt): reviewer phải có **năng lực cao hơn** người viết — model bậc cao hơn (Haiku < Sonnet < Opus < Fable), hoặc cùng họ với effort cao hơn (low < medium < high < xhigh < max); khác nhà cung cấp nhận như trước. Thay "khác họ model" của D-045. `xt.py pr reviewed` thêm `--reviewer-effort`/`--author-effort` (ghi vào sổ review), `xt.yaml` thêm khoá `author_effort`/`reviewer_effort` — effort cấu hình của một phía chỉ dùng khi model phía đó cũng lấy từ cấu hình (workflow `pr-review` truyền model thật nên cùng họ bị từ chối); `ci-check` kiểm cấu hình theo cùng thang. Họ Anthropic chưa có bậc (mythos) so với họ Anthropic khác bị từ chối cho tới khi thêm bậc; tên họ chỉ nhận chữ ASCII. Bản ghi sổ sạch cũ không còn qua luật thì `pr next` trả `review` thay vì đăng lại.
+- `LOOP-ORCH-005` (D-161, ADR-0044, chủ repo chốt): reviewer phải có **năng lực cao hơn** người viết — model bậc cao hơn (Haiku < Sonnet < Opus < Fable), hoặc cùng họ với effort cao hơn (low < medium < high < xhigh < max); khác nhà cung cấp nhận như trước. Thay "khác họ model" của D-045. `xt.py pr reviewed` thêm `--reviewer-effort`/`--author-effort` (ghi vào sổ review), `xt.yaml` thêm khoá `author_effort`/`reviewer_effort`; `ci-check` kiểm cấu hình theo cùng thang.
 - `.claude/agents/reviewer-alt.md`: `model: opus` + `effort: max` (trước: sonnet — yếu hơn `executor-deep` mà nó chấm); `executor-deep.md` khai `effort: high`. Phiên chính chạy Fable → giao `reviewer-alt` kèm `model: fable`.
 - `LOOP-ORCH-019` (D-160, chủ repo chốt): phiên chính — người lập PLAN, viết SPEC/thiết kế, không giao subagent — chạy model cao nhất sẵn có theo thứ tự **Fable → Opus → Sonnet** (trước: "cao nhất sẵn có, không khả dụng thì Opus"). Tầng `executor`/`executor-deep`/`reviewer`/`researcher` giữ model. Cùng chữ ở `AGENTS.md` §8 và mẫu `framework/templates/CLAUDE.md`.
 
