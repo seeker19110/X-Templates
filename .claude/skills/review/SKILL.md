@@ -6,7 +6,7 @@ argument-hint: "[PR number | branch | path]"
 
 # /review — review như người gác cổng, không như người viết
 
-Reviewer khác **họ** model với người viết (`LOOP-ORCH-005`): subagent `reviewer`, hoặc `reviewer-alt` khi người viết cùng họ với `reviewer`; không kết luận được → INCONCLUSIVE (`xt.py pr reviewed --inconclusive`). Trong autopilot chỉ giao khi `xt.py pr next` trả `review` (máy đã biết PR nào cần); ngoài autopilot khi người dùng yêu cầu. Phiên chính tổng hợp. Reviewer **chỉ nhận diff + SPEC/task** (context sạch, không hội thoại của người viết); diff > 150 dòng → đề nghị tách PR (review trên diff lớn kém tin cậy).
+Reviewer có **năng lực cao hơn** người viết (`LOOP-ORCH-005`: model bậc cao hơn, hoặc cùng họ effort cao hơn): subagent `reviewer` cho diff của `executor`, `reviewer-alt` cho diff của `executor-deep`/phiên chính (phiên chính Fable → giao kèm `model: fable`); ghi `pr reviewed` kèm `--reviewer-effort`/`--author-effort` khi cùng họ; không kết luận được → INCONCLUSIVE (`xt.py pr reviewed --inconclusive`). Trong autopilot chỉ giao khi `xt.py pr next` trả `review` (máy đã biết PR nào cần); ngoài autopilot khi người dùng yêu cầu. Phiên chính tổng hợp. Reviewer **chỉ nhận diff + SPEC/task** (context sạch, không hội thoại của người viết); diff > 150 dòng → đề nghị tách PR (review trên diff lớn kém tin cậy).
 
 ## Thứ tự rà
 1. **Đúng việc:** diff làm đúng SPEC/task? có sửa nhầm chỗ khác? phạm vi phình?

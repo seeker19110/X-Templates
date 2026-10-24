@@ -2097,7 +2097,7 @@ MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_metho
 
 
 # Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
-# python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer khác họ model" (D-045, AUD-SEC-069).
+# python, không qua tool Bash/MCP). Đăng tay = bằng chứng review giả, né "reviewer năng lực cao hơn" (D-161, AUD-SEC-069).
 # Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`) hoặc head ghép lúc chạy (`head=$(git rev-parse HEAD)`,
 # `$H`, backtick — re-review #159); mã nguồn/tài liệu nhắc dạng dấu (`head={head}`, `head=<sha>`) không khớp.
 REVIEW_MARK_RE = re.compile(
@@ -6056,7 +6056,7 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
 ASK_PREFIX = "Khung cần xác nhận: "
 
 
-# D-155/D-160: tên lệnh có glob (`/usr/bin/fi?d`, `/bin/r?`, `[r]m`, `ba?h -c …`) — shell mở ra tên thật, guard so tên theo
+# D-155/D-162: tên lệnh có glob (`/usr/bin/fi?d`, `/bin/r?`, `[r]m`, `ba?h -c …`) — shell mở ra tên thật, guard so tên theo
 # chữ nên từng bỏ lọt. Danh sách đóng: lệnh có luật riêng (xoá/ghi/leo quyền), shell, wrapper; không đoán theo hệ tệp
 # (kết quả không đổi theo máy, tệp tạo giữa lệnh vẫn bị tính).
 GLOB_COMMANDS = tuple(
@@ -6103,7 +6103,7 @@ def _glob_heads(tokens: List[str]) -> Dict[str, List[str]]:
 def _glob_rewrites(cmd: str, tokens: List[str]) -> List[str]:
     """Bản viết lại CHUỖI LỆNH GỐC (giữ heredoc, `<(`, nháy, gán biến) cho MỖI tên nhạy cảm khớp mẫu glob của tên một lệnh
     đơn: mọi lần xuất hiện của từ đó thay cùng lúc. Quét như shell lồng — `bash_decision` đệ quy chịu ngân sách và
-    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-160)."""
+    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-162)."""
     out: List[str] = []
     for head, names in _glob_heads(tokens).items():
         word = re.compile(GLOB_WORD_BEFORE + re.escape(head) + GLOB_WORD_AFTER)

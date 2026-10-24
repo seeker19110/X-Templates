@@ -1,11 +1,11 @@
 # PLAN-3.21-guard-d155.md — Khung X-Templates · bịt giới hạn guard xoá gốc đã biết (D-155) → bản 3.18.4/3.18.5
 
 > Lập ngày 2026-10-24. Chủ repo yêu cầu bịt "giới hạn guard đã biết (D-155)" ở PROGRESS §Tiếp theo 5. Phiên chính tự
-> duyệt (D-160). Tái hiện trên HEAD bằng `guard.bash_decision` (pha harden, chính sách mặc định).
+> duyệt (D-162). Tái hiện trên HEAD bằng `guard.bash_decision` (pha harden, chính sách mặc định).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-160)
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-162)
 - Ba giới hạn D-155, đo lại: (1) **tên lệnh qua glob** — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>` đều cho chạy
   (guard so tên theo chữ); (2) **công cụ khác** — `fd . -X rm -rf`, `fdfind … --exec-batch rm`, cùng họ `bfs`/`gfind`
   (cú pháp `find`) cho chạy; (3) **`~user`** — ĐÃ chặn khi user tồn tại (đo bằng `pwd.getpwnam` giả: `rm -rf ~dev`

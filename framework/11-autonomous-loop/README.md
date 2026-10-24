@@ -79,7 +79,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     chưa merge nếu phụ thuộc): `PROGRESS.md` (≤ 8 KB) vào commit cuối của lát → cổng đầy đủ `dev-task.sh gate` **một lần**
     (CI chạy đúng lệnh đó; pha build bỏ bước này, CI là cổng và sàn M/L không áp — ADR-0041) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
     chạy nền và khi thoát in sẵn kết quả `pr next`; mỗi khi PR đổi (push, CI, review) lại `pr next`. Reviewer **chỉ khi** `pr next` trả
-    `review` — khác **họ** model với người viết ([`LOOP-ORCH-005`](orchestration-and-subagents.md); không kết luận được →
+    `review` — năng lực cao hơn người viết ([`LOOP-ORCH-005`](orchestration-and-subagents.md); không kết luận được →
     `<XT> pr reviewed --inconclusive` rồi giao reviewer khác); ghi `<XT> pr reviewed` theo lệnh máy in (đăng lên PR để
     `pr-steward` làm thay khi không còn phiên — ADR-0027). Cần push thêm → gói sửa vào một commit (máy chỉ merge head đã đánh giá — ADR-0036).
     Luật làn, ngoại lệ cứng, pha build: [`LOOP-STOP-022`](stop-points-and-escalation.md), ADR-0024/0025/0031/0033.

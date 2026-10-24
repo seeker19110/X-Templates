@@ -5,12 +5,21 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-## [3.18.4] - 2026-10-24
+## [3.19.1] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
 
 ### Fixed
-- guard (T-2811, D-155/D-160): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `[^x]m`, `[[:lower:]]m`, `[[.r.]]m`, `ti?e rm …`, `nohup fi?d …`, `wat?h '…'`, `fl?ck … rm …`, `ba?h -c '…'`, `echo … | s?`, `ba?h <<E`, `ba?h <(…)`, `ev?l '…'`, `cu?l -d @.env …`: chuỗi lệnh GỐC được viết lại cho mỗi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`: lệnh xoá/ghi/leo quyền, shell, wrapper, `RUNNERS`, curl/wget/gh; không đoán theo hệ tệp) rồi quét như shell lồng — giữ heredoc/`<(`/nháy, chịu `ScanBudget`/`rewrites` (lồng quá nhiều thì chặn thay vì quét mãi). Mẫu chỉ toàn `*`/`?` không bị đoán; `sudo`/`doas` trơn không đối số bỏ (`*)`, `s*)` của `case` không bị chặn oan). `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim. Từ glob có đoạn nháy/`\` (`r?''`, `"/bin/"r?`, `case x)/bin/r?`) ghép lại từ token (chiều chặt); biểu thức ngoặc POSIX nhận bằng regex tuyến tính (bản đầu backtrack hàm mũ trên `[[:a:]…` không đóng). Giới hạn còn lại: `env -S` kèm glob; tên lệnh ghép lúc chạy (D-051).
+- guard (T-2811, D-155/D-162): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `[^x]m`, `[[:lower:]]m`, `[[.r.]]m`, `ti?e rm …`, `nohup fi?d …`, `wat?h '…'`, `fl?ck … rm …`, `ba?h -c '…'`, `echo … | s?`, `ba?h <<E`, `ba?h <(…)`, `ev?l '…'`, `cu?l -d @.env …`: chuỗi lệnh GỐC được viết lại cho mỗi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`: lệnh xoá/ghi/leo quyền, shell, wrapper, `RUNNERS`, curl/wget/gh; không đoán theo hệ tệp) rồi quét như shell lồng — giữ heredoc/`<(`/nháy, chịu `ScanBudget`/`rewrites` (lồng quá nhiều thì chặn thay vì quét mãi). Mẫu chỉ toàn `*`/`?` không bị đoán; `sudo`/`doas` trơn không đối số bỏ (`*)`, `s*)` của `case` không bị chặn oan). `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim. Từ glob có đoạn nháy/`\` (`r?''`, `"/bin/"r?`, `case x)/bin/r?`) ghép lại từ token (chiều chặt); biểu thức ngoặc POSIX nhận bằng regex tuyến tính (bản đầu backtrack hàm mũ trên `[[:a:]…` không đóng). Giới hạn còn lại: `env -S` kèm glob; tên lệnh ghép lúc chạy (D-051).
+
+## [3.19.0] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (`xt.py`, `.claude/agents/`, mẫu `CLAUDE.md`/`AGENTS.md`/`xt.yaml`) và ghép lại blueprint (`compose`) để nhận chữ mới của `LOOP-ORCH-005`, `LOOP-ORCH-019`. `pr reviewed --clean` với reviewer cùng họ người viết nay cần `--reviewer-effort` > `--author-effort`; reviewer bậc thấp hơn người viết (vd tác giả opus, reviewer sonnet) bị từ chối — dự án có `author_model_family`/`reviewer_model_family` trong `xt.yaml` kiểm lại bằng `xt.py ci-check`. Chọn model phiên chính theo chuỗi mới khi mở phiên.
+
+### Changed
+- `LOOP-ORCH-005` (D-161, ADR-0044, chủ repo chốt): reviewer phải có **năng lực cao hơn** người viết — model bậc cao hơn (Haiku < Sonnet < Opus < Fable), hoặc cùng họ với effort cao hơn (low < medium < high < xhigh < max); khác nhà cung cấp nhận như trước. Thay "khác họ model" của D-045. `xt.py pr reviewed` thêm `--reviewer-effort`/`--author-effort` (ghi vào sổ review), `xt.yaml` thêm khoá `author_effort`/`reviewer_effort`; `ci-check` kiểm cấu hình theo cùng thang.
+- `.claude/agents/reviewer-alt.md`: `model: opus` + `effort: max` (trước: sonnet — yếu hơn `executor-deep` mà nó chấm); `executor-deep.md` khai `effort: high`. Phiên chính chạy Fable → giao `reviewer-alt` kèm `model: fable`.
+- `LOOP-ORCH-019` (D-160, chủ repo chốt): phiên chính — người lập PLAN, viết SPEC/thiết kế, không giao subagent — chạy model cao nhất sẵn có theo thứ tự **Fable → Opus → Sonnet** (trước: "cao nhất sẵn có, không khả dụng thì Opus"). Tầng `executor`/`executor-deep`/`reviewer`/`researcher` giữ model. Cùng chữ ở `AGENTS.md` §8 và mẫu `framework/templates/CLAUDE.md`.
 
 ## [3.18.3] - 2026-10-24
 

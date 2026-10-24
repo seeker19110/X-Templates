@@ -1128,7 +1128,21 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ bỏ bản sao trùng từng chữ, không mất thông tin bước nào; ngữ nghĩa (2) phải đoán câu tự do → có thể nuốt chi tiết; (3) đơn giản, test được trên CHANGELOG thật (108 mệnh đề → 101)
 - Đường lùi: Bỏ biến seen trong upgrade_steps
 
-### D-160 · 2026-10-24T08:44:15+00:00 · Duyệt PLAN-3.21-guard-d155: bịt ba giới hạn guard xoá gốc của D-155
+### D-160 · 2026-10-24T08:56:34+00:00 · Model của phiên chính (lập PLAN, viết SPEC) khi model cao nhất không khả dụng
+
+- Phương án: (1) Giữ luật cũ: cao nhất sẵn có, không khả dụng thì Opus · (2) Chuỗi tường minh Fable → Opus → Sonnet; subagent giữ nguyên frontmatter
+- Chọn: Chuỗi tường minh Fable → Opus → Sonnet; subagent giữ nguyên frontmatter
+- Lý do (tiêu chí chất lượng cuối): Chủ repo chốt 2026-10-24. Tiêu chí 1/3: PLAN/SPEC là chỗ sai đắt nhất nên dùng model mạnh nhất; chuỗi tường minh không để phiên tự diễn giải 'cao nhất', có bậc cuối khi cả hai bậc trên không khả dụng. Tầng executor/reviewer không đổi (ADR-0029).
+- Đường lùi: Đổi lại chữ LOOP-ORCH-019, AGENTS.md §8, templates/CLAUDE.md; cắt bản patch.
+
+### D-161 · 2026-10-24T09:00:50+00:00 · Luật reviewer LOOP-ORCH-005: 'khác họ model' hay 'năng lực cao hơn'
+
+- Phương án: (1) Giữ khác họ (D-045) · (2) Năng lực cao hơn theo thang bậc model rồi effort; khác nhà cung cấp nhận như cũ · (3) Năng lực cao hơn và bắt buộc khác nhà cung cấp
+- Chọn: Năng lực cao hơn theo thang bậc model rồi effort; khác nhà cung cấp nhận như cũ
+- Lý do (tiêu chí chất lượng cuối): Chủ repo 2026-10-24: cùng họ khác effort được, review phải năng lực cao hơn. Tiêu chí 1: PA1 cho reviewer yếu hơn người viết (reviewer-alt Sonnet chấm Opus). Tiêu chí 2/3: PA3 kẹt mọi PR làn chuẩn vì pr-review.yml chỉ chạy Claude. PA2 máy kiểm được (thang trong một hàm), giữ đường reviewer ngoài Claude. ADR-0044.
+- Đường lùi: Revert PR; ADR-0044 đổi trạng thái; reviewer-alt về model cũ.
+
+### D-162 · 2026-10-24T08:44:15+00:00 · Duyệt PLAN-3.21-guard-d155: bịt ba giới hạn guard xoá gốc của D-155
 
 - Phương án: (1) Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR · (2) Mở mọi glob theo hệ tệp thật (glob.glob) rồi quét lại · (3) Chỉ ghi giới hạn vào tài liệu như D-155
 - Chọn: Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR
