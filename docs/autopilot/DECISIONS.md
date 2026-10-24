@@ -1120,3 +1120,10 @@
 - Chọn: Sửa trong check-links: gom đoạn (bỏ tiền tố >) đến dòng trống, dòng ===/--- biến cả đoạn thành tiêu đề; bản vá 3.18.1
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: link hợp lệ đang bị báo gãy làm lint dự án đích đỏ oan; nhận thừa anchor an toàn hơn đỏ oan; (3) sửa nhỏ, test được
 - Đường lùi: Revert PR lát; anchors() trở lại chỉ xét một dòng trước
+
+### D-159 · 2026-10-24T08:22:13+00:00 · Duyệt PLAN-3.20-install-dedupe: gom mệnh đề 'Dự án đích' trùng khi install.py nâng nhiều bản (nợ 🟢 #191)
+
+- Phương án: (1) Gộp trùng hệt xuyên mục: giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ; không đổi mệnh đề khác nhau · (2) Gộp theo ngữ nghĩa (mọi 'chạy lại install.py' thành một dòng, parse phần ngoặc) · (3) Để nguyên, chỉ ghi giới hạn
+- Chọn: Gộp trùng hệt xuyên mục: giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ; không đổi mệnh đề khác nhau
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: chỉ bỏ bản sao trùng từng chữ, không mất thông tin bước nào; ngữ nghĩa (2) phải đoán câu tự do → có thể nuốt chi tiết; (3) đơn giản, test được trên CHANGELOG thật (108 mệnh đề → 101)
+- Đường lùi: Bỏ biến seen trong upgrade_steps

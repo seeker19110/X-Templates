@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.18.3] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (`install.py` in gọn hơn các bước làm tay khi nâng nhiều bản).
+
+### Changed
+- `install.py` (T-2801, D-159, nợ review #191): "Bước làm tay từ CHANGELOG" gộp mệnh đề trùng hệt xuyên mục — giữ lần đầu theo thứ tự CHANGELOG, mục hết mệnh đề thì bỏ. Trước đó chỉ gộp trong cùng mục: trên CHANGELOG thật 7 trong 108 mệnh đề lặp ở nhiều bản.
+
 ## [3.18.2] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (`check-links.py` 3.18.1 chậm bậc hai với đoạn văn dài).

@@ -1639,6 +1639,38 @@ class InstallUpgradeTest(unittest.TestCase):
             [["- a"], ["- b"], ["> q", "  q nối"], ["  c"]],
         )
 
+    def test_upgrade_steps_dedupes_identical_clauses_across_sections(self):
+        """D-159 (nợ #191): mệnh đề trùng hệt ở nhiều mục in một lần — giữ lần đầu theo thứ tự CHANGELOG (bản mới nhất);
+        mục hết mệnh đề thì bỏ; mệnh đề khác chữ giữ nguyên; trùng trong cùng mục vẫn một lần."""
+        text = "\n".join(
+            [
+                "## [3.9.0]",
+                "- a Dự án đích: chạy lại `install.py` (guard).",
+                "- b Dự án đích: ghép lại blueprint.",
+                "## [3.8.0]",
+                "- c Dự án đích: chạy lại `install.py` (guard).",
+                "- d Dự án đích: chạy lại `install.py` (guard đổi thêm).",
+                "## [3.7.0]",
+                "- e Dự án đích: chạy lại `install.py` (guard).",
+                "- f Dự án đích: ghép lại blueprint.",
+                "## [3.6.0]",
+                "- g Dự án đích: chạy lại `install.py` (guard).",
+            ]
+        )
+        self.assertEqual(
+            install.upgrade_steps(text, (3, 5, 0)),
+            [
+                ("3.9.0", ["Dự án đích: chạy lại `install.py` (guard).", "Dự án đích: ghép lại blueprint."]),
+                ("3.8.0", ["Dự án đích: chạy lại `install.py` (guard đổi thêm)."]),
+            ],
+        )
+
+    def test_upgrade_steps_real_changelog_has_no_repeated_clause(self):
+        """CHANGELOG thật của khung: không mệnh đề nào xuất hiện hai lần, dù nâng từ bản rất cũ."""
+        text = (install.SRC / "CHANGELOG.md").read_text(encoding="utf-8")
+        clauses = [c for _, cs in install.upgrade_steps(text, (0, 0, 0)) for c in cs]
+        self.assertEqual(len(clauses), len(set(clauses)))
+
     def report(self, previous: str | None, version: str | None, changelog: bytes | None) -> str:
         """`report_upgrade_steps` với khung giả chỉ có VERSION/CHANGELOG (None = không có file)."""
         src = self.tmp / "khung-gia"
