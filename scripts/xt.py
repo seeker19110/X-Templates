@@ -8863,7 +8863,8 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, 
 
 # Luật review sạch (LOOP-ORCH-005, ADR-0044, D-161 thay "khác họ" của D-045): reviewer phải có năng lực CAO HƠN người
 # viết — họ Claude so theo bậc `MODEL_TIER`; cùng họ thì so effort; khác nhà cung cấp máy không xếp hạng được nên nhận
-# như D-045; cùng nhà cung cấp mà một họ chưa có bậc thì từ chối (review #247, #249). Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
+# như D-045; cùng nhà cung cấp mà một họ chưa có bậc thì từ chối (review #247, #249). Họ ngắn (`phi`, `glm`, `nova`,
+# `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
 # (không phải `\b`: `phi4`, `glm4.5`, `command_r`, `o3mini` là tên thẻ thật) — `graphic`/`commander`/`novaX` không phải
 # tên model (review #162, #164).
 MODEL_FAMILY_RE = re.compile(
@@ -8875,6 +8876,9 @@ MODEL_FAMILY_RE = re.compile(
 
 def model_family(name: str) -> str:
     """Họ model để so năng lực: `claude-opus-5-5`/`Opus 5.5`/`opus` → `opus`; tên lạ → chữ thường bỏ số và dấu."""
+    name = name.rsplit("/", 1)[
+        -1
+    ]  # bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)
     m = MODEL_FAMILY_RE.search(name)
     return m.group(0).lower() if m else re.sub(r"[^a-z]+", "", name.lower())
 

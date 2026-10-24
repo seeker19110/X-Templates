@@ -19,7 +19,7 @@ updated: 2026-10-24
 2. **Review để tìm lỗi, không để chứng nhận.** Mỗi review trả lời: đúng spec? ca biên? bảo mật? đảo ngược được?
    test có chứng minh? — có checklist, có bằng chứng (lệnh đã chạy), không "LGTM" trần.
 3. **AI review là claim.** Kết quả của model (kể cả `/review`) phải được người xác nhận hoặc máy chứng minh
-   (test tái hiện); AI không có quyền approve; reviewer năng lực cao hơn implementer (bậc model hoặc cùng họ effort cao hơn) để tránh tự chứng nhận.
+   (test tái hiện); AI không có quyền approve; reviewer năng lực cao hơn implementer (bậc model hoặc cùng họ effort cao hơn; khác nhà cung cấp cũng nhận) để tránh tự chứng nhận.
 4. **Nhỏ và nhanh.** PR ≤ 400 dòng, review ≤ 60 phút/lượt, phản hồi đầu ≤ 24 giờ; quá hạn → leo thang người
    khác, không bao giờ tự merge vì "hết giờ".
 5. **Tôn trọng, cụ thể, có mức.** Nhận xét gắn nhãn `blocker` / `should` / `nit`; blocker phải nêu lý do và

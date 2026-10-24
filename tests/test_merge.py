@@ -1819,6 +1819,9 @@ class PrNextCliTest(unittest.TestCase):
             self.assertIn("xt.py feedback", err)
             self.assertNotIn("MODEL_TIER", err)  # dự án đích không sửa được (install.py ghi đè)
         self.assertEqual((xt.model_vendor("o4"), xt.model_vendor("llama")), ("openai", "llama"))
+        self.assertEqual(
+            (xt.model_family("ollama_chat/gpt-oss:20b"), xt.model_family("gemini/gemma-3-27b-it")), ("gpt", "gemma")
+        )
         self.assertIsNone(xt.review_capability_error("mythos", "claude-mythos-5-1", "max", "low"))  # cùng họ: effort
         # review #247: chữ Unicode gập hoa/thường ra Latin (`ſ` → s) không làm lộ họ model
         for odd in ("claude-opuſ-5-5", "ſonnet"):
