@@ -1,6 +1,6 @@
 # ADR-0045: Tách agent chỉ vì context, đổi kiến trúc agent chỉ qua eval so sánh; vòng lặp phát triển giữ harness và đo trước khi đổi mặc định giao việc
 
-- **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-162; chủ repo chốt phạm vi
+- **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-168; chủ repo chốt phạm vi
   "mục 1 và 2" 2026-10-24)
 - **Trạng thái triển khai:** Đã triển khai — chỉ tài liệu: `framework/13-ai-engineering/agentic-systems.md` (`AI-AGENTIC-001`,
   `011` đổi chữ giữ ID; `019` mới; Nguyên tắc 1–2, 5; bảng Pattern; mục "Kết luận cho từng agent con đang có"; §Handoff; bẫy;
@@ -78,7 +78,7 @@ kiện đổi. `LOOP-ORCH-019` không đổi chữ (luật không nhét vào `·
   search/deferred và đối chiếu ngưỡng 20–30 với 30–50; `XC-DOCAI` DRI + eval chung trước khi ship skill; `AI-APP-007` lý do
   kiến trúc; `LOOP-CTX-010` trùng `LOOP-ORCH-012`; `delegation_rate` trong `loop stats` sau khi đo tay ≥ 2 vòng.
 - Việc phải làm tiếp: báo cáo cuối lát ghi nhóm tự làm/giao (điểm đo đầu: 4 task tài liệu của PLAN-3.21 do phiên chính tự
-  làm, D-162); sau ≥ 2 vòng → research note + ADR kế về mặc định/tầng.
+  làm, D-168); sau ≥ 2 vòng → research note + ADR kế về mặc định/tầng.
 - Đường lùi: revert PR tài liệu; ADR này đổi "Bị thay bởi ADR-NNNN"; `AI-AGENTIC-019`/`LOOP-ORCH-020` giữ ID, hạ MAY "Ngừng dùng".
 
 ## Xác nhận

@@ -2,11 +2,12 @@
 
 > Lập ngày 2026-10-24. Chủ repo gửi bài claude.com *Building agents: When to fold subagents into your main agent loop*
 > (2026-10-22) + kit `anthropics/single-agent-loop-kit`, yêu cầu kiểm chứng rồi "lập PLAN cho mục 1 và 2 rồi làm" (mục 1 =
-> `agentic-systems.md`, mục 2 = `orchestration-and-subagents.md`). Phiên chính tự duyệt (D-162).
+> `agentic-systems.md`, mục 2 = `orchestration-and-subagents.md`). Phiên chính tự duyệt (D-168 — cấp là D-162 lúc lập, đánh số lại
+> khi gộp `main` vì phiên song song đã dùng D-162…D-167; cùng số 3.21 với `PLAN-3.21-guard-d155.md` của phiên đó).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
-## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-162)
+## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-168)
 - Dữ kiện (xác minh 2026-10-24, chi tiết ở `research/2026-10-24-single-agent-loop.md`): bài nói một vòng lặp + skill
   "frequently outperformed" cả một-prompt lẫn router + agent con theo miền — *thường*, không *luôn*; 3 điều kiện giữ agent con
   (context phình đo được · song song với context vứt được · chọn sai tool/chỉ thị mâu thuẫn); quy tắc "đo trước, đổi một thứ

@@ -1142,7 +1142,49 @@
 - Lý do (tiêu chí chất lượng cuối): Chủ repo 2026-10-24: cùng họ khác effort được, review phải năng lực cao hơn. Tiêu chí 1: PA1 cho reviewer yếu hơn người viết (reviewer-alt Sonnet chấm Opus). Tiêu chí 2/3: PA3 kẹt mọi PR làn chuẩn vì pr-review.yml chỉ chạy Claude. PA2 máy kiểm được (thang trong một hàm), giữ đường reviewer ngoài Claude. ADR-0044.
 - Đường lùi: Revert PR; ADR-0044 đổi trạng thái; reviewer-alt về model cũ.
 
-### D-162 · 2026-10-24T16:46:48+00:00 · Duyệt PLAN-3.21-single-loop: áp bài claude.com 'When to fold subagents into your main agent loop' (2026-10-22) + kit single-agent-loop-kit (c437962) vào agentic-systems.md và orchestration-and-subagents.md
+### D-162 · 2026-10-24T08:44:15+00:00 · Duyệt PLAN-3.21-guard-d155: bịt ba giới hạn guard xoá gốc của D-155
+
+- Phương án: (1) Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR · (2) Mở mọi glob theo hệ tệp thật (glob.glob) rồi quét lại · (3) Chỉ ghi giới hạn vào tài liệu như D-155
+- Chọn: Bịt (1) tên lệnh glob bằng biến thể theo tên nhạy cảm (fnmatch, danh sách đóng), (2) fd/fdfind/bfs/gfind theo luật find (cùng chính sách D-153), (3) ghim test cho ~user vì đã chặn; hai lát PR
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: xoá không đảo ngược → chiều chặt; fnmatch trên danh sách đóng không phụ thuộc máy và test được (hệ tệp thì kết quả đổi theo máy, bỏ sót tệp tạo giữa lệnh); (3) đơn giản: tái dùng luật find/rm đã có; (4) chặn oan thấp, lối thoát có sẵn (chạy ở thư mục con)
+- Đường lùi: Revert từng lát PR; biến thể glob và _fd_rule là mã thêm, không đổi luật cũ
+
+### D-163 · 2026-10-24T12:17:57+00:00 · Review #248 lượt 4: danh sách đóng GLOB_COMMANDS vẫn sót (trình thông dịch, lệnh ghi, CLI đám mây) và fnmatch bậc hai ngoài ngân sách — sửa tiếp bằng danh sách hay đổi cách?
+
+- Phương án: (1) Chặn thẳng tên lệnh glob dạng tên trần hoặc đường tuyệt đối (ngoặc phải đóng, có đối số, không toàn */?); đường tương đối giữ viết lại theo danh sách; head > 256 ký tự chặn trước fnmatch · (2) Mở rộng GLOB_COMMANDS thêm INTERPRETERS/FILE_WRITERS/CLI đám mây · (3) Giữ danh sách hẹp, ghi giới hạn vào CHANGELOG
+- Chọn: Chặn thẳng tên lệnh glob dạng tên trần hoặc đường tuyệt đối (ngoặc phải đóng, có đối số, không toàn */?); đường tương đối giữ viết lại theo danh sách; head > 256 ký tự chặn trước fnmatch
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: không phụ thuộc danh sách phải đầy đủ — mọi luật theo tên đều được bảo vệ; mỗi vòng mở rộng danh sách đều bị review tìm ra lỗ mới (4 lượt); (3) đơn giản, O(1) trước fnmatch; (4) chặn oan gần 0: không ai gõ /usr/bin/p?thon3 — script tương đối, case, [ ], for vẫn chạy
+- Đường lùi: Bỏ _glob_head_deny, quay về chỉ viết lại theo GLOB_COMMANDS
+
+### D-164 · 2026-10-24T13:04:07+00:00 · PR #248 sau 5 lượt review: mỗi lượt tìm lỗ né mới (đường tương đối ../ đã bịt; còn: trình thông dịch glob đọc stdin không đối số, tên có nháy từng phần ngoài GLOB_COMMANDS, lệnh trong container viết glob). Dừng vòng review ở đâu?
+
+- Phương án: (1) Dừng sau lượt rà delta kế: 0 chặn oan + không hồi quy so main là điều kiện merge; lỗ né cố ý còn lại ghi CHANGELOG/PROGRESS như D-051/D-155 · (2) Tiếp tục đến khi reviewer không tìm ra
+- Chọn: Dừng sau lượt rà delta kế: 0 chặn oan + không hồi quy so main là điều kiện merge; lỗ né cố ý còn lại ghi CHANGELOG/PROGRESS như D-051/D-155
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: guard là lớp chặn sai lầm, không phải sandbox (D-015) — các lỗ còn lại cần cố ý viết (../../usr/bin/p?thon3, p?thon3 đọc stdin, c?'' …), agent không gõ nhầm ra; chặn oan thì có hại thật và đã hết; (2) đường lùi: revert từng commit; (5) mỗi lượt ~25 phút, lợi ích giảm dần
+- Đường lùi: Mở task mới cho từng lỗ còn lại
+
+### D-165 · 2026-10-24T13:43:31+00:00 · Review #248 lượt 6: chặn thẳng tên glob (D-163) chặn oan số học $(( n*2 )), (( )), mảng, [[ =~ ]] vì tách token quá thô — sửa tiếp hay đổi lại?
+
+- Phương án: (1) Rút D-163: bỏ chặn thẳng; giữ viết lại theo tên (D-162) và mở rộng GLOB_COMMANDS: INTERPRETERS, FILE_WRITERS, cp/tee/ln/sed/tar…, ssh/scp, CLI đám mây/container, claude; giữ trần 256 ký tự trước fnmatch · (2) Giữ chặn thẳng, bỏ qua token trong (( )), [[ ]], NAME=( )
+- Chọn: Rút D-163: bỏ chặn thẳng; giữ viết lại theo tên (D-162) và mở rộng GLOB_COMMANDS: INTERPRETERS, FILE_WRITERS, cp/tee/ln/sed/tar…, ssh/scp, CLI đám mây/container, claude; giữ trần 256 ký tự trước fnmatch
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: viết lại chỉ khớp tên đã biết nên không chặn oan (5 lượt rà không tìm ra chặn oan nào của nó); chặn thẳng phụ thuộc tách cú pháp bash bằng token — mỗi lượt lộ thêm thành ngữ bị chặn oan, có hại thật (chặn cả phiên này); lỗ còn lại của danh sách là tên ngoài danh sách phải cố ý viết (D-164); (3) đơn giản hơn
+- Đường lùi: Khôi phục _glob_head_deny từ commit 26c202f
+
+### D-166 · 2026-10-24T14:15:51+00:00 · Review #248 lượt 7: viết lại theo tên vẫn chặn oan mẫu case (''|*[!0-9]*) → mkfs), nhóm regex [[ =~ ]], toán hạng $(( )); case nhiều nhánh cạn ngân sách — lý do của D-165 ('không chặn oan') sai
+
+- Phương án: (1) Tách lệnh hiểu cú pháp: bỏ qua vùng (( … )) và [[ … ]], bỏ mẫu nhánh case (đoạn kết thúc bằng ')' không có '(' mở, kể cả nhánh nối '|'); mkfs trơn vào nhóm bỏ khi không đối số · (2) Chỉ thêm mkfs vào nhóm bỏ khi không đối số
+- Chọn: Tách lệnh hiểu cú pháp: bỏ qua vùng (( … )) và [[ … ]], bỏ mẫu nhánh case (đoạn kết thúc bằng ')' không có '(' mở, kể cả nhánh nối '|'); mkfs trơn vào nhóm bỏ khi không đối số
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: gốc lỗi là tách token coi mẫu/regex/số học là lệnh — sửa ở gốc thì mọi tên trong danh sách đều hết chặn oan, và case nhiều nhánh không còn sinh bản viết lại (hết cạn ngân sách); (3) test được bằng đúng các thành ngữ reviewer nêu. Đính chính D-165: 'không chặn oan' chỉ đúng sau D-166
+- Đường lùi: Khôi phục _segment_commands tách ở mọi dấu nối
+
+### D-167 · 2026-10-24T14:58:08+00:00 · Review #248 lượt 8: tách cú pháp bash bằng token không hội tụ (8 lượt; D-166 đếm ngoặc mở lỗ mới, chặn oan case (s*), $(…)/s*; fail-open cạn bộ nhớ khi dựng bản viết lại). Thu hẹp hay tiếp tục vá?
+
+- Phương án: (1) Thu hẹp: chỉ viết lại khi tên lệnh là đường tuyệt đối trong thư mục bin hệ thống (/bin, /usr/bin, /usr/local/bin, /sbin…, ~/bin, ~/.local/bin) không glob ở thư mục; tách lệnh về bản đơn giản; trần số tên glob và độ dài lệnh trước khi dựng (vượt → chặn BUDGET); tên trần glob ghi giới hạn · (2) Tiếp tục vá bộ tách cú pháp (ngăn xếp đoạn, ngữ cảnh case) · (3) Bỏ PR, giữ guard như main
+- Chọn: Thu hẹp: chỉ viết lại khi tên lệnh là đường tuyệt đối trong thư mục bin hệ thống (/bin, /usr/bin, /usr/local/bin, /sbin…, ~/bin, ~/.local/bin) không glob ở thư mục; tách lệnh về bản đơn giản; trần số tên glob và độ dài lệnh trước khi dựng (vượt → chặn BUDGET); tên trần glob ghi giới hạn
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: mẫu case, số học, regex, mảng không bao giờ có dạng /usr/bin/x? nên hết chặn oan theo cấu trúc chứ không theo vá; trần trước khi dựng bịt fail-open; giữ phần giá trị chính (đường tuyệt đối tới lệnh hệ thống là cách thật để gọi tên qua glob — tên trần chỉ mở theo tệp ở cwd); (3) đơn giản, chứng minh được; (5) 8 lượt vá không hội tụ
+- Đường lùi: Khôi phục _segment_commands D-166 từ 4843057
+
+### D-168 · 2026-10-24T16:46:48+00:00 · Duyệt PLAN-3.21-single-loop: áp bài claude.com 'When to fold subagents into your main agent loop' (2026-10-22) + kit single-agent-loop-kit (c437962) vào agentic-systems.md và orchestration-and-subagents.md
 
 - Phương án: (1) Giữ nguyên thang 'workflow trước, agent sau' (AI-AGENTIC-001) và executor mặc định 'vì rẻ'; chỉ ghi research note · (2) Đảo toàn bộ theo bài: một vòng lặp là mặc định ở sản phẩm; phiên chính tự làm là mặc định ở vòng lặp phát triển; hạ tầng executor; sửa AGENTS.md/CLAUDE.md/SKILL autopilot/README · (3) Đổi tiêu chí, giữ harness, thêm phép đo: AI-AGENTIC-001 thành luật đổi kiến trúc hai chiều qua cùng eval end-to-end; AI-AGENTIC-011 là nhà ba lý do context + kiểm kê agent con; mục mới AI-AGENTIC-019 (trình tự gộp có đo) và LOOP-ORCH-020 (giữ mặc định giao việc tới khi có số; nhóm 'Làm trực tiếp' ghi executor null); LOOP-ORCH-017 MAY→SHOULD; LOOP-ORCH-019 và harness không đổi; research note + ADR-0045; bản 3.20.0; một lát một PR; task mà SPEC đã là chính nội dung chữ thì phiên chính tự làm, loop record không --executor (điểm đo đầu của LOOP-ORCH-020)
 - Chọn: Đổi tiêu chí, giữ harness, thêm phép đo: AI-AGENTIC-001 thành luật đổi kiến trúc hai chiều qua cùng eval end-to-end; AI-AGENTIC-011 là nhà ba lý do context + kiểm kê agent con; mục mới AI-AGENTIC-019 (trình tự gộp có đo) và LOOP-ORCH-020 (giữ mặc định giao việc tới khi có số; nhóm 'Làm trực tiếp' ghi executor null); LOOP-ORCH-017 MAY→SHOULD; LOOP-ORCH-019 và harness không đổi; research note + ADR-0045; bản 3.20.0; một lát một PR; task mà SPEC đã là chính nội dung chữ thì phiên chính tự làm, loop record không --executor (điểm đo đầu của LOOP-ORCH-020)

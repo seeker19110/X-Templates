@@ -1647,6 +1647,7 @@ class InstallUpgradeTest(unittest.TestCase):
                 "## [3.9.0]",
                 "- a Dự án đích: chạy lại `install.py` (guard).",
                 "- b Dự án đích: ghép lại blueprint.",
+                "- b2 Dự án đích: ghép lại blueprint.",  # trùng ngay trong cùng mục
                 "## [3.8.0]",
                 "- c Dự án đích: chạy lại `install.py` (guard).",
                 "- d Dự án đích: chạy lại `install.py` (guard đổi thêm).",

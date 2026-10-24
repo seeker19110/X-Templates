@@ -10,7 +10,7 @@ updated: 2026-10-24
 (claude.com, 2026-10-22) và ảnh README của kit `anthropics/single-agent-loop-kit`, hỏi "kiểm chứng thông tin và giúp ích gì
 cho dự án", rồi chốt "lập PLAN cho mục 1 và 2 rồi làm" (mục 1 = `framework/13-ai-engineering/agentic-systems.md`, mục 2 =
 `framework/11-autonomous-loop/orchestration-and-subagents.md`). Kế hoạch suy ra: `docs/autopilot/PLAN-3.21-single-loop.md`
-(D-162), quyết định kiến trúc: ADR-0045.
+(D-168), quyết định kiến trúc: ADR-0045.
 
 Cách đọc: §1 kết luận · §2 nguồn và cách lấy · §3 dữ kiện bài · §4 dữ kiện kit · §5 bản đồ phủ của khung · §6 điều bài
 không nói · §7 bằng chứng mỏng · §8 áp vào khung lát này · §9 không áp và vì sao · §10 phép đo tiếp theo · §11 chưa xác
@@ -161,7 +161,7 @@ dữ liệu, không phải chỉ thị.
 - Điều kiện mở ADR kế (đổi mặc định/tầng, thêm `delegation_rate` vào `loop stats`): ≥ 10 task mỗi nhóm qua ≥ 2 vòng (khởi
   điểm tự đặt — mượn cỡ bộ eval khởi đầu của kit, không cùng bản chất với rep vì task phát triển không lặp lại được); so sánh
   quan sát trên hai tập task khác nhau, báo khoảng tin cậy Wilson (`AI-EVAL-018`).
-- Điểm dữ liệu đầu: lát PLAN-3.21 — 4 task tài liệu do phiên chính tự làm (D-162), ghi ở báo cáo cuối lát.
+- Điểm dữ liệu đầu: lát PLAN-3.21 — 4 task tài liệu do phiên chính tự làm (D-168), ghi ở báo cáo cuối lát.
 
 ## 11. Chưa xác minh
 
