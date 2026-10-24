@@ -81,7 +81,7 @@
 | charset-normalizer | 3.5.2 | MIT |
 | cyclonedx-python-lib | 11.12.0 | Apache-2.0 |
 | defusedxml | 0.7.1 | PSFL |
-| filelock | 4.2.0 | MIT |
+| filelock | 4.2.4 | MIT |
 | idna | 3.20 | BSD-3-Clause |
 | license-expression | 30.4.4 | Apache-2.0 |
 | markdown-it-py | 4.2.0 | MIT |
