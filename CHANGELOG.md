@@ -10,7 +10,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
 
 ### Fixed
-- guard (T-2811, D-155/D-160): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `r*`, `ti?e rm …` bị quét như mọi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`, không đoán theo hệ tệp); chuỗi gốc của `find_root_scan` cũng đọc `fi?d` là `find`. `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim.
+- guard (T-2811, D-155/D-160): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `[^x]m`, `[[:lower:]]m`, `ti?e rm …`, `nohup fi?d …`, `ba?h -c '…'`, `ev?l '…'`: lệnh được viết lại cho mỗi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`: lệnh xoá/ghi/leo quyền, shell, wrapper; không đoán theo hệ tệp) rồi quét như shell lồng — chịu `ScanBudget`/`rewrites`, lồng quá nhiều thì chặn thay vì quét mãi. Mẫu chỉ toàn `*`/`?` và lệnh không đối số không bị đoán (`*)`, `s*)` của `case` không bị chặn oan). `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim.
 
 ## [3.18.3] - 2026-10-24
 

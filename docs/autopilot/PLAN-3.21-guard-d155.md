@@ -31,7 +31,7 @@
 ## Task
 
 ### Lát 1 — Tên lệnh glob + ghim `~user`
-- [x] `T-2811` guard: tên lệnh có glob (`fi?d`, `r?`, `[r]m`, `r*`) quét thêm biến thể theo tên nhạy cảm khớp mẫu, ở `_scan_command` và ở `find_root_scan` (chuỗi gốc); test deny/cho chạy + ghim `~user` (home là cha/chính gốc → deny, user không tồn tại → không đổi); CHANGELOG + VERSION 3.18.4; 🟢 review #246 (CHANGELOG 3.18.3 ghi "108 → 101 mệnh đề, bỏ 7 bản sao"; docstring test; khoảng trắng mệnh đề) (files: .claude/hooks/guard.py, tests/test_guard_d155.py, scripts/install.py, tests/test_install.py, CHANGELOG.md, VERSION) — Gate: `python3 -m unittest tests.test_guard_d155 tests.test_install`
+- [x] `T-2811` guard: tên lệnh có glob (`fi?d`, `r?`, `[r]m`, `r*`) quét thêm biến thể theo tên nhạy cảm khớp mẫu, ở `_scan_command` và ở `find_root_scan` (chuỗi gốc); test deny/cho chạy + ghim `~user` (home là cha/chính gốc → deny, user không tồn tại → không đổi); CHANGELOG + VERSION 3.18.4; 🟢 review #246 (CHANGELOG 3.18.3 ghi "108 → 101 mệnh đề, bỏ 7 bản sao"; docstring test; khoảng trắng mệnh đề) (files: .claude/hooks/guard.py, tests/test_guard_d155.py, tests/test_install.py, CHANGELOG.md, VERSION) — Gate: `python3 -m unittest tests.test_guard_d155 tests.test_install`
 
 ### Lát 2 — fd / bfs / gfind
 - [ ] `T-2812` guard: `fd`/`fdfind` với `-x/-X/--exec/--exec-batch` quét lệnh con như `find -exec` và chặn đích tìm kiếm chạm gốc/`.git`/hệ thống khi lệnh con xoá; `bfs`/`gfind` dùng luật `find`; test; CHANGELOG + VERSION 3.18.5; PROGRESS bỏ ba giới hạn đã bịt (sau: T-2811; files: .claude/hooks/guard.py, tests/test_guard_d155.py, CHANGELOG.md, VERSION, PROGRESS.md) — Gate: `python3 -m unittest tests.test_guard_d155`

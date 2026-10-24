@@ -1805,24 +1805,11 @@ def _find_bad_start(s: str, root: str, cwd: Optional[str], moved: bool) -> bool:
     return unknown or _wipes_root(s, root, cwd)
 
 
-CMD_HEAD_RE = re.compile(r"(^|[;&|(\n]\s*)([^\s;&|()<>]+)")  # từ đầu mỗi lệnh đơn trong chuỗi gốc
-
-
-def _unglob_find(norm: str) -> str:
-    """D-160: từ đầu lệnh có glob khớp `find` (`/usr/bin/fi?d`) → `find`, để quét chuỗi gốc thấy nó như `find` thật."""
-
-    def head(m: "re.Match[str]") -> str:
-        base = posixpath.basename(m[2])
-        return m[1] + ("find" if GLOB_RE.search(base) and fnmatch.fnmatchcase("find", base) else m[2])
-
-    return CMD_HEAD_RE.sub(head, norm)
-
-
 def find_root_scan(cmd: str, root: str, cwd: Optional[str]) -> str:
     """D-153: lý do chặn khi một `find` có hành động xoá/`-exec` bắt đầu từ gốc dự án, tổ tiên hay `gốc/.git`, không có
     điểm bắt đầu khi đang đứng ở đó, hoặc điểm bắt đầu không xác định (`$`, backtick, glob, `{}`, tương đối sau `cd`);
     hoặc `-fprint*`/`-fls` ghi vào `gốc/.git`. Quét bản bỏ `"`/`'`/`\\` (`fi""nd`, `f\\ind` vẫn là find)."""
-    norm = _unglob_find(re.sub(r"[\"'\\]", "", join_continuations(cmd)))
+    norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
     for m in FIND_WORD_RE.finditer(norm):
         rest = norm[m.end() :]
         moved = bool(CD_WORD_RE.search(norm, 0, m.start()))
@@ -3927,39 +3914,7 @@ def _command_verdict(
     return ("", "") if verdict[0] in BLOCKING and build_local_command(n, argv, root, cwd) else verdict
 
 
-# D-155/D-160: tên lệnh có glob (`/usr/bin/fi?d`, `/bin/r?`, `[r]m`) — shell mở ra tên thật, guard so tên theo chữ nên
-# từng bỏ lọt. Danh sách đóng: lệnh có luật riêng (xoá/ghi/leo quyền) và wrapper; không đoán theo hệ tệp (kết quả không
-# đổi theo máy, tệp tạo giữa lệnh vẫn bị tính).
-GLOB_COMMANDS = tuple(
-    sorted({"rm", "find", "shred", "unlink", "rsync", "mv", "dd", "sudo", "doas", "git", "env", "mkfs", *WRAPPERS})
-)
-
-
-def _glob_name_variants(argv: List[str]) -> List[List[str]]:
-    """Lệnh viết lại cho MỖI tên nhạy cảm khớp mẫu glob của tên lệnh (sau khi bóc gán biến/wrapper); không glob → rỗng."""
-    a = _strip_prefixes(argv)
-    head = posixpath.basename(a[0]) if a else ""
-    if not GLOB_RE.search(head):
-        return []
-    at = len(argv) - len(a)
-    return [[*argv[:at], name, *a[1:]] for name in GLOB_COMMANDS if fnmatch.fnmatchcase(name, head)]
-
-
-def _scan_glob_variants(
-    argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str]
-) -> Optional[str]:
-    """Lý do deny đầu tiên khi quét từng biến thể tên lệnh glob (`fi?d`, `r?`); không có → None (D-160)."""
-    return next((why for v in _glob_name_variants(argv) if (why := _scan_command(v, root, res, asks, cwd))), None)
-
-
 def _scan_command(
-    argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
-) -> Optional[str]:
-    """Quét một lệnh đơn: biến thể tên lệnh glob trước (D-160), rồi chính lệnh."""
-    return _scan_glob_variants(argv, root, res, asks, cwd) or _scan_plain_command(argv, root, res, asks, cwd)
-
-
-def _scan_plain_command(
     argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
 ) -> Optional[str]:
     """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
@@ -6101,6 +6056,45 @@ def secret_exfil(tokens: List[str], root: str) -> Optional[str]:
 ASK_PREFIX = "Khung cần xác nhận: "
 
 
+# D-155/D-160: tên lệnh có glob (`/usr/bin/fi?d`, `/bin/r?`, `[r]m`, `ba?h -c …`) — shell mở ra tên thật, guard so tên theo
+# chữ nên từng bỏ lọt. Danh sách đóng: lệnh có luật riêng (xoá/ghi/leo quyền), shell, wrapper; không đoán theo hệ tệp
+# (kết quả không đổi theo máy, tệp tạo giữa lệnh vẫn bị tính).
+GLOB_COMMANDS = tuple(
+    sorted(
+        {"rm", "find", "shred", "unlink", "rsync", "mv", "dd", "sudo", "doas", "git", "env", "mkfs", "eval", "source"}
+        | WRAPPERS
+        | SHELLS
+    )
+)
+GLOB_CLASS_RE = re.compile(r"\[[^\]]*\[:\w+:\][^\]]*\]")  # `[[:lower:]]`: lớp POSIX — fnmatch không hiểu → coi là `?`
+
+
+def _glob_names(head: str) -> List[str]:
+    """Tên nhạy cảm khớp mẫu glob của tên lệnh. Không glob, hay mẫu chỉ toàn `*`/`?` (`*)` của `case`, `*` trơn) → rỗng:
+    không đoán. Bash coi `[^x]` như `[!x]` và `[[:alpha:]]` là lớp ký tự — Python `fnmatch` không → đổi trước khi so."""
+    if not GLOB_RE.search(head) or not head.strip("*?"):
+        return []
+    pat = GLOB_CLASS_RE.sub("?", head).replace("[^", "[!")
+    return [name for name in GLOB_COMMANDS if fnmatch.fnmatchcase(name, pat)]
+
+
+def _glob_rewrites(tokens: List[str]) -> List[str]:
+    """Bản viết lại cả lệnh cho MỖI tên nhạy cảm khớp mẫu glob của tên một lệnh đơn (sau gán biến/wrapper) CÓ đối số —
+    lệnh trơn không đối số vô hại (`s*)` của `case`). Quét như shell lồng: `bash_decision` đệ quy chịu ngân sách và
+    `rewrites`, nên `[bcenx]* …` lồng nhiều tầng bị chặn thay vì quét mãi (D-160)."""
+    out: List[str] = []
+    start = 0
+    for end in [i for i, t in enumerate(tokens) if _is_punct(t) and not _is_redirect(t)] + [len(tokens)]:
+        seg = tokens[start:end]
+        rest = _strip_prefixes(seg)
+        at = start + len(seg) - len(rest)
+        for name in _glob_names(posixpath.basename(rest[0])) if len(rest) > 1 else ():
+            new = [*tokens[:at], name, *tokens[at + 1 :]]
+            out.append(" ".join(t if _is_punct(t) else shlex.quote(t) for t in new))
+        start = end + 1
+    return out
+
+
 def bash_decision(
     cmd: str,
     root: str,
@@ -6144,6 +6138,7 @@ def bash_decision(
         if braces is None
         else _scan_scripts(braces, root, cwd, depth, asks, 0, budget, rewrites)
     ) or _scan_nested(cmd, tokens, root, cwd, depth, asks, budget, rewrites)
+    nested_deny = nested_deny or _scan_scripts(_glob_rewrites(tokens), root, cwd, depth, asks, 0, budget, rewrites)
     if nested_deny:
         res.update(decision="deny", reason=nested_deny)
         return res

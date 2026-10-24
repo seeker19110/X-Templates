@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import pwd
 import sys
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -49,6 +50,21 @@ class GlobCommandNameTest(unittest.TestCase):
             f"env X=1 /bin/r? -rf {R}",
             f"ti?e rm -rf {R}",  # wrapper qua glob rồi lệnh thật
             "/bin/r? -rf ~",
+            # Review #247: glob ở sau wrapper/từ khoá, `[^x]`, lớp POSIX, shell và eval qua glob
+            f"nohup /usr/bin/fi?d {R} \\( -name a \\) -delete",
+            f"time /usr/bin/fi?d {R} \\( -name a \\) -delete",
+            f"if /bin/r? -rf {R}; then :; fi",
+            f"{{ /bin/r? -rf {R}; }}",
+            f"/bin/[^x]m -rf {R}",
+            f"/bin/[[:lower:]]m -rf {R}",
+            f"/bin/ba?h -c 'rm -rf {R}'",
+            f"/bin/s? -c 'rm -rf {R}'",
+            f"ev?l 'rm -rf {R}'",
+            "/usr/bin/s?do ls",
+            "/usr/bin/[^x]udo ls",
+            "/usr/bin/[[:lower:]]udo ls",
+            "/usr/bin/su[[:alpha:]]o ls",
+            "/usr/bin/[!x]udo ls",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny")
@@ -63,19 +79,45 @@ class GlobCommandNameTest(unittest.TestCase):
             "[[ -f x ]] && echo ok",
             "./scripts/dev-task.* gate-fast",  # glob không khớp tên nhạy cảm nào
             "echo '/bin/r? -rf x'",  # trong chuỗi nháy là dữ liệu
+            # Review #247 🔴: mẫu nhánh `case` không phải tên lệnh — `*)`, `s*)` từng bị đọc là sudo/doas
+            'case "$x" in a) echo a;; *) echo other;; esac',
+            "case $x in (*) echo u;; esac",
+            "case $x in -*) echo f;; s*) echo s;; esac",
+            'case "$f" in *.py) ruff format "$f" ;; *) : ;; esac',
+            "* --help",
+            "?? --help",
+            "s*",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "")
 
-    def test_guard_glob_name_variants_are_closed_list(self):
-        self.assertEqual(guard._glob_name_variants(["ls", "-l"]), [])
-        self.assertEqual(guard._glob_name_variants([]), [])
-        self.assertEqual(guard._glob_name_variants(["["]), [])
-        self.assertEqual(
-            guard._glob_name_variants(["FOO=1", "/bin/r?", "-rf", "x"]),
-            [["FOO=1", "rm", "-rf", "x"]],
-        )
-        self.assertIn(["find", ".", "-delete"], guard._glob_name_variants(["fin?", ".", "-delete"]))
+    def test_guard_glob_nested_wrappers_stay_within_scan_budget(self):
+        """Review #247 🔴: 7 wrapper khớp `[bcenx]*` từng quét 52 s (bậc mũ, ngoài `ScanBudget`); nay chạm ngân sách → chặn."""
+        cmd = " ".join(["[bcenx]*"] * 7) + " true"
+        start = time.monotonic()
+        out = policy(cmd)
+        self.assertLess(time.monotonic() - start, 15)
+        self.assertEqual(out["decision"], "deny")
+
+    def test_guard_glob_names_closed_list(self):
+        self.assertEqual(guard._glob_names("ls"), [])  # không glob
+        self.assertEqual(guard._glob_names("["), [])  # `[` của test
+        self.assertEqual(guard._glob_names("*"), [])  # toàn `*`/`?` không đoán
+        self.assertEqual(guard._glob_names("??"), [])
+        self.assertEqual(guard._glob_names("r?"), ["rm"])
+        self.assertEqual(guard._glob_names("[r]m"), ["rm"])
+        self.assertEqual(guard._glob_names("[^x]m"), ["rm"])  # bash: `[^…]` = `[!…]`
+        self.assertEqual(guard._glob_names("[[:lower:]]m"), ["rm"])  # lớp POSIX = một ký tự bất kỳ
+        self.assertIn("find", guard._glob_names("fin?"))
+        self.assertIn("bash", guard._glob_names("ba?h"))
+        self.assertIn("eval", guard._glob_names("ev?l"))
+
+    def test_guard_glob_rewrites_one_variant_per_name(self):
+        self.assertEqual(guard._glob_rewrites(guard.tokenize("ls -l")), [])
+        self.assertEqual(guard._glob_rewrites([]), [])
+        self.assertEqual(guard._glob_rewrites(guard.tokenize("s*")), [])  # không đối số
+        self.assertEqual(guard._glob_rewrites(guard.tokenize("FOO=1 /bin/r? -rf x")), ["FOO=1 rm -rf x"])
+        self.assertEqual(guard._glob_rewrites(guard.tokenize("echo a; fin? . -delete")), ["echo a ; find . -delete"])
 
 
 class TildeUserTest(unittest.TestCase):
