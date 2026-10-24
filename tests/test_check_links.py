@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -112,6 +113,13 @@ class CheckLinksModuleTest(unittest.TestCase):
         links = "dong-mot-dong-hai dong-hai trich-dan a-b sau-html sau-ke"
         self.write("a.md", " ".join(f"[{a}](b.md#{a})" for a in links.split()) + " [x](b.md#truoc)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:1: anchor không có trong file -> b.md#truoc"])
+
+    def test_check_links_anchor_long_paragraph_is_linear(self):
+        # Tự rà #242: gom đoạn bằng `[*para, body]` chép cả danh sách mỗi dòng → O(n²) (50 000 dòng mất 6 s).
+        self.write("b.md", "chu\n" * 200_000 + "===\n")
+        start = time.monotonic()
+        self.cl.anchors(self.repo / "b.md")
+        self.assertLess(time.monotonic() - start, 5)
 
     def test_check_absolute_link_missing_is_error(self):
         self.write("a.md", "[x](/khong/co.md)\n")

@@ -140,7 +140,10 @@ def anchors(path: Path) -> set[str]:
             k = seen.get(base, 0)
             seen[base] = k + 1
             found.add(f"{base}-{k}" if k else base)
-        para = [] if h or not body or SETEXT_RE.match(body) else [*para, body]  # đường kẻ `---` cũng cắt đoạn
+        if h or not body or SETEXT_RE.match(body):  # đường kẻ `---` cũng cắt đoạn
+            para = []
+        else:
+            para.append(body)  # không chép lại cả đoạn mỗi dòng (O(n²) với đoạn dài)
     return found
 
 

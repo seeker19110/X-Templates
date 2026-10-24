@@ -286,7 +286,9 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
     """`release-check`: hàng `phase` (FAIL ở build/giá trị lạ) và `review_debt` (file ngoài tài liệu đổi sau SHA quét)."""
 
     def setUp(self):
-        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        # Dọn thư mục tạm không làm đỏ test (assert không đổi): CI py311 #243 từng đỏ "Directory not empty: 'objects'" —
+        # nghi git ghi `.git/objects` tách nền sau `commit` (chưa xác minh); `git()` còn tắt auto-maintenance.
+        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory(ignore_cleanup_errors=True))).resolve()
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
         self.git("init", "-q", "-b", "main")
         (self.repo / "docs" / "ops").mkdir(parents=True)
@@ -297,7 +299,9 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.commit("c0")
 
     def git(self, *args: str) -> str:
+        # Không auto-maintenance/gc tách nền sau `commit` (lớp đỡ cho lỗi dọn thư mục tạm ở setUp).
         cfg = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+        cfg += ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
         r = subprocess.run(["git", "-C", str(self.repo), *cfg, *args], capture_output=True, text=True, check=True)
         return r.stdout.strip()
 
