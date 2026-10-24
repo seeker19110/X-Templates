@@ -3,7 +3,7 @@ title: Phản hồi về khung từ dự án đích
 kind: module
 prefix: LOOP-FB
 applies_to: [all]
-updated: 2026-10-23
+updated: 2026-10-24
 ---
 
 # Phản hồi về khung từ dự án đích
@@ -22,7 +22,8 @@ updated: 2026-10-23
    dùng, không tên khách hàng, không bí mật. `xt.py feedback` gộp một dòng và lọc bí mật bằng `redact`, nhưng người viết
    vẫn chịu trách nhiệm nội dung.
 4. **Máy gom tín hiệu có sẵn.** MUST bị miễn trong blueprint và lý do autopilot bị chặn là dữ liệu khung cần; `feedback
-   collect` gom chúng, không trùng.
+   collect` gom chúng, không trùng. FB `mien-tru` chỉ ghi ID + tóm tắt chuẩn hoá, **không chép lý do miễn trừ** (lý do
+   chứa dữ liệu dự án); khử trùng theo (loại, ID).
 5. **Khung kéo về, không để dự án đẩy sang.** Dự án đích không cần token ghi vào repo khác; repo khung đọc
    `docs/xtemplates-feedback/` của các dự án trong `docs/ops/TARGETS.md` và mở **PR nháp** — người duyệt trước khi công khai.
 6. **Đổi khung khi có bằng chứng.** Một nhóm phản hồi (cùng loại + ID) đủ ngưỡng sửa khi ≥ 2 dự án cùng báo hoặc có bước

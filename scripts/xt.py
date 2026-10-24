@@ -1178,6 +1178,31 @@ def project_dir() -> Path:
     return cwd
 
 
+def _git_tree(d: Path) -> Optional[Tuple[Path, Path]]:
+    """(gốc cây làm việc, thư mục git chung) tuyệt đối của repo chứa `d`; không phải repo git → None. Bỏ `GIT_DIR`/
+    `GIT_WORK_TREE`… đặt sẵn: hỏi đúng repo của thư mục, không phải repo biến môi trường trỏ tới."""
+    r = _git(d, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", env=_perf_env())
+    parts = r.stdout.splitlines()
+    if r.returncode != 0 or len(parts) != 2 or not all(os.path.isabs(p) for p in parts):  # git cũ: không hiểu cờ
+        return None
+    return Path(parts[0]).resolve(), Path(parts[1]).resolve()
+
+
+def loop_root(base: Path) -> Path:
+    """Gốc cho `loop` gõ tay (T-2521): cwd nằm trong một git worktree KHÁC của cùng repo với `base` (cùng
+    `--git-common-dir`) → gốc worktree đó — Gate chạy, PLAN được tick, `.autopilot/` (gitignored: sổ riêng mỗi worktree)
+    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới. Mọi trường hợp khác → `base`."""
+    base = base.resolve()
+    try:
+        here = _git_tree(Path.cwd())
+    except OSError:  # cwd đã bị xoá
+        return base
+    if here is None or here[0] == base:
+        return base
+    home = _git_tree(base)
+    return here[0] if home is not None and home[1] == here[1] else base
+
+
 def state_dir(base: Optional[Path] = None) -> Path:
     return (base or project_dir()) / ".autopilot"
 
@@ -2642,13 +2667,18 @@ def _append_run(base: Path, st: Dict[str, Any], ev: Dict[str, Any], signature: O
     đặt sẵn (O_NOFOLLOW, như `write_atomic` — AUD-HAR-009)."""
     row = {k: ev[k] for k in ("task", "exit_code", "started", "finished", "head")}
     row.update({"signature": signature, "loop": st.get("started"), "executor": ev.get("executor")})
-    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(state_dir(base) / RUNS_FILE, flags, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _append_line(base, RUNS_FILE, json.dumps(row, ensure_ascii=False))
     except OSError as exc:
         print(f"⚠ không ghi được .autopilot/{RUNS_FILE} (số đo vòng, LOOP-DESIGN-024): {exc}", file=sys.stderr)
+
+
+def _append_line(base: Path, name: str, line: str) -> None:
+    """Nối một dòng vào `.autopilot/<name>`, không đi theo symlink đặt sẵn (O_NOFOLLOW); lỗi I/O ném OSError."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(state_dir(base) / name, flags, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
 
 
 def read_runs(base: Path) -> List[Dict[str, Any]]:
@@ -2785,12 +2815,49 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt:
     )
 
 
+SESSION_MISMATCH_NOTE = (
+    "⚠ vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop resume`"
+    " (Stop hook chỉ giữ phiên đã gắn)"
+)
+STOP_LOG_FILE = "hook-stop.log"  # lượt Stop bị bỏ qua (phiên khác, stdin hỏng) — một dòng mỗi lượt khi vòng đang bật
+
+
+def session_id() -> str:
+    """Phiên Claude Code hiện tại: `CLAUDE_CODE_SESSION_ID` (Bash và hook đều có, trùng `session_id` trong stdin hook —
+    docs env-vars, xác minh 2026-10-24); ngoài Claude Code → '' (vòng chưa gắn phiên)."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+
+
+def _stop_skip(stdin_text: str, st: Optional[Dict[str, Any]]) -> str:
+    """Lý do Stop hook KHÔNG áp vòng cho lượt này (T-2522); '' = áp vòng. stdin không phải JSON object → bỏ qua
+    (fail-open về luồng, ADR-0002); vòng đã gắn phiên mà payload mang `session_id` khác → phiên khác, bỏ qua. Vòng chưa
+    gắn phiên (state cũ, init ngoài Claude Code) hay payload không có `session_id` → áp vòng như cũ."""
+    try:
+        data = json.loads(stdin_text or "{}")
+    except json.JSONDecodeError:
+        return "stdin không phải JSON"
+    if not isinstance(data, dict):
+        return "stdin không phải JSON object"
+    bound = str((st or {}).get("session_id") or "")
+    sid = data.get("session_id")
+    if bound and isinstance(sid, str) and sid and sid != bound:
+        return f"phiên {sid[:8]} không phải phiên của vòng ({bound[:8]})"
+    return ""
+
+
 def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
     """Quyết định của Stop hook. Trả (stdout JSON hoặc '', exit code). Luôn fail-open khi có lỗi.
-    Verdict chỉ dựa vào file trên đĩa; từ stdin chỉ lấy `permission_mode` để cảnh báo phiên sẽ đứng chờ hỏi quyền."""
+    Verdict chỉ dựa vào file trên đĩa; từ stdin chỉ lấy `session_id` (lượt của phiên khác không chạm vòng — T-2522) và
+    `permission_mode` để cảnh báo phiên sẽ đứng chờ hỏi quyền."""
     base = base or project_dir()
-    v = loop_verdict(base)
     st = read_state(base)
+    skip = _stop_skip(stdin_text, st)
+    if skip:
+        if st and st.get("active"):
+            with contextlib.suppress(OSError):
+                _append_line(base, STOP_LOG_FILE, f"{now_iso()} bỏ qua, không chặn: {skip}")
+        return "", 0
+    v = loop_verdict(base)
     if st and st.get("active") and v["verdict"] in ("done", PENDING_HUMAN):
         why = final_check(base)
         v = {"verdict": "verify", "reason": why} if why else v
@@ -5987,6 +6054,32 @@ def _live_loop(base: Path) -> str:
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
 
 
+def _init_warnings(args: argparse.Namespace, base: Path) -> None:
+    """Cảnh báo sau `loop init` — không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy."""
+    issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
+    if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
+        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
+        print(
+            f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
+            file=sys.stderr,
+        )
+    hook_root = project_dir()
+    if base.resolve() != hook_root:  # T-2521: vòng ở worktree mà Stop hook đọc `.autopilot/` của gốc hook → không giữ
+        print(
+            f"⚠ Stop hook đọc {hook_root} — mở phiên Claude với thư mục dự án là worktree này để hook giữ vòng",
+            file=sys.stderr,
+        )
+    noop = gate_noop_keys(base)
+    if noop:  # PLAN thường điền xt.yaml ở task đầu nên không chặn init, nhưng cổng đỏ tới khi điền
+        print(
+            f"⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để {', '.join(noop)} rỗng/no-op"
+            " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
+            file=sys.stderr,
+        )
+    for issue in gate_floor_issues(base):  # loop verify sẽ ĐỎ tới khi đạt sàn — đưa vào task PLAN ngay
+        print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
+
+
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
     if live:
@@ -6022,33 +6115,26 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "deadline": deadline,
         "same_failure_count": 0,
         "blocked": False,
+        "session_id": session_id(),  # Stop hook chỉ áp vòng cho phiên này; '' = chưa gắn phiên (T-2522)
     }
     scope = build_scope(base, args.blueprint)
     if scope:
         state["scope"] = scope
     write_state(state, base)
-    issues = [f.msg for f in doctor_findings(base, args.framework, deep=False) if f.level == "error"]
-    if issues:  # không chặn (fail-open về luồng, ADR-0002) nhưng phải thấy: vòng thiếu hook = không có máy kiểm
-        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
-        print(
-            f"⚠ Audit khung còn {len(issues)} lỗi — chạy `xt.py doctor --fix`: " + "; ".join(issues[:3]) + more,
-            file=sys.stderr,
-        )
-    noop = gate_noop_keys(base)
-    if noop:  # PLAN thường điền xt.yaml ở task đầu nên không chặn init, nhưng cổng đỏ tới khi điền
-        print(
-            f"⚠ Cổng sẽ ĐỎ trong vòng (ADR-0011): xt.yaml để {', '.join(noop)} rỗng/no-op"
-            " — khai lệnh thật trước khi tick task (LOOP-HARNESS-008)",
-            file=sys.stderr,
-        )
-    for issue in gate_floor_issues(base):  # loop verify sẽ ĐỎ tới khi đạt sàn — đưa vào task PLAN ngay
-        print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
+    _init_warnings(args, base)
     print(
         f"✓ Autopilot bật: plan={args.plan} trần={max_iterations} vòng"
         + (f", hạn {deadline}" if deadline else "")
         + (" · chế độ một phiên" if args.single_session else "")
     )
     return 0
+
+
+def session_mismatch(st: Dict[str, Any]) -> bool:
+    """Vòng đang bật đã gắn một phiên khác phiên hiện tại (`/clear` đổi `CLAUDE_CODE_SESSION_ID`) — Stop hook sẽ bỏ qua
+    phiên này; phiên hiện tại hay vòng chưa gắn → False (không đoán)."""
+    bound, cur = str(st.get("session_id") or ""), session_id()
+    return bool(st.get("active") and bound and cur and bound != cur)
 
 
 def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
@@ -6060,6 +6146,7 @@ def _status_notes(st: Dict[str, Any], base: Path) -> List[str]:
     ]
     warn = _mode_warning(st.get("permission_mode")) if st.get("active") else ""
     notes += [warn.strip()] if warn else []
+    notes += [SESSION_MISMATCH_NOTE] if session_mismatch(st) else []
     tasks = _plan_tasks(base, st)
     cycles = plan_cycle_nodes(tasks)
     notes += [f"✗ PLAN có chu trình dependency (sau:) — không bao giờ làm được: {', '.join(cycles)}"] if cycles else []
@@ -6089,6 +6176,7 @@ def _loop_status(args: argparse.Namespace, base: Path) -> int:
             "unknown_after": plan_unknown_after(tasks),
             "bad_links": plan_bad_links(tasks),
         }
+        extra["session_mismatch"] = session_mismatch(st)
         print(json.dumps({**v, **extra, "deferred": _deferred(st), **plan}, ensure_ascii=False))
     else:
         print(f"verdict: {v['verdict']} — {v['reason']}")
@@ -6645,6 +6733,7 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
             "resume_reason": args.reason,
         }
     )
+    cur["session_id"] = session_id()  # phiên mới tiếp vòng → Stop hook theo phiên này; '' = chưa gắn phiên (T-2522)
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
     if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
@@ -6706,10 +6795,15 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
 }
 
 
+LOOP_HOOK_CMDS = ("hook-stop", "checkpoint")  # Claude Code gọi từ hook: gốc theo CLAUDE_PROJECT_DIR, không theo cwd
+
+
 def cmd_loop(args: argparse.Namespace) -> int:
-    base = project_dir()
     handler = LOOP_HANDLERS.get(args.loop_cmd)
-    return handler(args, base) if handler else 2
+    if handler is None:
+        return 2
+    base = project_dir()
+    return handler(args, base if args.loop_cmd in LOOP_HOOK_CMDS else loop_root(base))
 
 
 def _plan_waves_print(out: Dict[str, Any]) -> None:
@@ -7689,6 +7783,11 @@ def _feedback_add(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+def waiver_summary(item_id: str) -> str:
+    """Tóm tắt chuẩn hoá của FB `mien-tru`: lý do miễn trừ chứa dữ liệu dự án nên KHÔNG chép (ADR-0010)."""
+    return f"MUST bị miễn: {item_id} — dự án ghi lý do không áp dụng/miễn; xem blueprint dự án"
+
+
 def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
     """Tín hiệu máy có sẵn: MUST bị miễn trong blueprint, lý do `blocked`/verdict cuối `blocked` của autopilot."""
     out = []
@@ -7697,9 +7796,7 @@ def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
         for line in bp.read_text(encoding="utf-8").splitlines():
             m = ITEM_RE.match(line)
             if m and m["state"] == "~" and m["level"] == "MUST":
-                key = next((k for k in ("Miễn:", "Không áp dụng:") if k in line), "")
-                why = line.split(key, 1)[1].strip() if key else "(thiếu lý do)"
-                out.append({"kind": "mien-tru", "id": m["id"], "symptom": f"MUST bị miễn: {why}", "fix": "miễn trừ"})
+                out.append({"kind": "mien-tru", "id": m["id"], "symptom": waiver_summary(m["id"]), "fix": "miễn trừ"})
     st = read_state(base) or {}
     fv_raw = st.get("final_verdict")
     fv: Dict[str, Any] = fv_raw if isinstance(fv_raw, dict) else {}
@@ -7710,15 +7807,23 @@ def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
     return out
 
 
+def _collect_source(kind: str, item_id: str, symptom: str = "") -> str:
+    """Khoá khử trùng `Nguồn:`; `mien-tru` chỉ theo (loại, ID), loại khác kèm triệu chứng."""
+    return f"collect:{kind}:{item_id}" + ("" if kind == "mien-tru" else f":{_one_line(symptom)[:80]}")
+
+
 def _feedback_collect(args: argparse.Namespace, base: Path) -> int:
     if (base / "framework/00-method/conventions.md").is_file() and (base / "scripts/xt.py").is_file():
         print("· Bỏ qua: đây là repo khung — phản hồi tự gom dành cho dự án đích (ADR-0010, AUD-HAR-048)")
         return 0
     d = base / FEEDBACK_DIR
-    seen = {e.get("source") for e in feedback_entries(d)} if d.is_dir() else set()
+    entries = feedback_entries(d) if d.is_dir() else []
+    # Khử trùng `mien-tru` theo (loại, ID) bất kể chữ lý do của FB cũ; loại khác theo khoá `Nguồn`.
+    seen = {e.get("source") for e in entries}
+    seen |= {_collect_source("mien-tru", e.get("id", "")) for e in entries if e.get("kind") == "mien-tru"}
     added = []
     for c in _collect_candidates(base, args.blueprint):
-        source = f"collect:{c['kind']}:{c['id']}:{_one_line(c['symptom'])[:80]}"
+        source = _collect_source(c["kind"], c["id"], c["symptom"])
         if redact(source) in seen:
             continue
         added.append(write_feedback(base, {**c, "source": source}))
@@ -7756,6 +7861,12 @@ def feedback_aggregate(sources: List[Tuple[str, Path]]) -> List[Dict[str, Any]]:
     groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for project, d in sources:
         for e in feedback_entries(d) if d.is_dir() else []:
+            if e.get("kind") == "mien-tru":  # FB cũ chép lý do của dự án → chuẩn hoá lại trước khi ra repo khung public
+                e = {
+                    **e,
+                    "symptom": waiver_summary(e.get("id", "?")),
+                    "source": _collect_source("mien-tru", e.get("id", "?")),
+                }
             key = _feedback_key(e, project)
             g = groups.setdefault(key, {"kind": key[0], "id": e.get("id", "?"), "projects": [], "items": []})
             g["projects"] = sorted(set(g["projects"]) | {project})

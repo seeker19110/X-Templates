@@ -1099,3 +1099,10 @@
 - Chọn: Dừng sau lượt review delta kế: không hồi quy so 5ef1a14~1 là điều kiện merge; giới hạn còn lại ghi PROGRESS §Giới hạn guard (như D-051), xử lý ở đợt sau nếu dự án đích gặp
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: mỗi lượt đã chặt hơn và lượt 6 xác nhận 0 hồi quy; guard là lớp đỡ chuỗi lệnh, không phải sandbox — giới hạn đã biết được ghi như D-051/D-105; (2) đường lùi: revert từng commit; (5) mỗi lượt ~1 giờ, lợi ích giảm dần
 - Đường lùi: Mở task mới cho từng giới hạn
+
+### D-156 · 2026-10-24T02:39:52+00:00 · T-2521/2522: phạm vi gốc worktree, sổ Stop hook khi chạy theo worktree, gắn lại phiên khi resume
+
+- Phương án: (1) (1) mọi lệnh loop gõ tay theo gốc worktree; (2) mỗi lát loop init trong worktree của mình, vòng chính loop verify --all sau merge (ghi README/orchestration); (3) loop resume gắn lại phiên hiện tại · (2) Chỉ record/status/verify; hook theo cwd payload; cờ --rebind
+- Chọn: (1) mọi lệnh loop gõ tay theo gốc worktree; (2) mỗi lát loop init trong worktree của mình, vòng chính loop verify --all sau merge (ghi README/orchestration); (3) loop resume gắn lại phiên hiện tại
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: sổ một worktree nhất quán (tick cần state do init tạo); (3) đơn giản: không đổi hook đọc cwd payload (thêm bề mặt); resume là hành động có chủ ý của phiên mới — gắn lại là đúng ý, không thì Stop hook không giữ vòng
+- Đường lùi: Giới hạn loop_root cho record/status/verify; bỏ gắn lại ở resume

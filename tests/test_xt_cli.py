@@ -1291,13 +1291,42 @@ class FeedbackTest(TmpDirCase):
         self.assertEqual(
             got,
             [
-                ("mien-tru", "SEC-AUTH-001", "MUST bị miễn: dùng SSO ngoài"),
-                ("mien-tru", "SEC-AUTH-002", "MUST bị miễn: (thiếu lý do)"),
+                ("mien-tru", "SEC-AUTH-001", xt.waiver_summary("SEC-AUTH-001")),
+                ("mien-tru", "SEC-AUTH-002", xt.waiver_summary("SEC-AUTH-002")),
                 ("bi-chan", "loop", "autopilot bị chặn: cần khoá thật"),
             ],
         )
         rc, out, _ = run_main("feedback", "collect")
         self.assertEqual(out, "✓ Thêm 0 phản hồi tự gom (không có tín hiệu mới)\n")
+
+    def test_feedback_collect_no_project_data(self):  # T-2531: lý do miễn trừ chứa dữ liệu dự án, không đi vào FB
+        bp = self.tmp / "BLUEPRINT.md"
+        bp.write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: bảng khach_hang ở src/crm/\n", encoding="utf-8")
+        self.assertEqual(run_main("feedback", "collect")[0], 0)
+        text = (self.fb / "FB-001.md").read_text(encoding="utf-8")
+        for secret in ("khach_hang", "src/crm", "bảng"):
+            self.assertNotIn(secret, text)
+        self.assertIn(xt.waiver_summary("SEC-AUTH-001"), text)
+        bp.write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: đổi chữ hoàn toàn\n", encoding="utf-8")
+        rc, out, _ = run_main("feedback", "collect")
+        self.assertEqual(out, "✓ Thêm 0 phản hồi tự gom (không có tín hiệu mới)\n")
+        self.assertEqual(len(xt.feedback_entries(self.fb)), 1)
+        # FB cũ (có lý do) vẫn khử trùng và vẫn được aggregate đọc cùng FB mới.
+        old = {"kind": "mien-tru", "id": "SEC-AUTH-009", "symptom": "MUST bị miễn: lý do cũ", "fix": "miễn trừ"}
+        xt.write_feedback(self.tmp, {**old, "source": "collect:mien-tru:SEC-AUTH-009:MUST bị miễn: lý do cũ"})
+        bp.write_text("- [~] `SEC-AUTH-009` **MUST** a — Miễn: khác\n", encoding="utf-8")
+        self.assertIn("Thêm 0", run_main("feedback", "collect")[1])
+        groups = xt.feedback_aggregate([("p", self.fb)])
+        self.assertEqual(sorted(g["id"] for g in groups), ["SEC-AUTH-001", "SEC-AUTH-009"])
+        # aggregate in ra repo khung public: FB cũ được chuẩn hoá lại, không chép lý do của dự án.
+        item = next(g for g in groups if g["id"] == "SEC-AUTH-009")["items"][0]
+        self.assertEqual(item["symptom"], xt.waiver_summary("SEC-AUTH-009"))
+        self.assertEqual(item["source"], "collect:mien-tru:SEC-AUTH-009")
+        table = run_main("feedback", "aggregate", "--from", f"p={self.fb}")[1]
+        raw = run_main("feedback", "aggregate", "--from", f"p={self.fb}", "--json")[1]
+        for out in (table, raw):
+            self.assertNotIn("lý do cũ", out)
+        self.assertIn(xt.waiver_summary("SEC-AUTH-009"), table)
 
     def test_collect_skips_in_framework_repo(self):  # AUD-HAR-048: luồng phản hồi dành cho dự án đích
         (self.tmp / "BLUEPRINT.md").write_text("- [~] `SEC-AUTH-001` **MUST** a — Miễn: x\n", encoding="utf-8")
@@ -1705,7 +1734,8 @@ class LoopCommandsTest(TmpDirCase):
         shutil.rmtree(self.tmp / ".xtemplates")
         self.assertEqual(xt.read_state(self.tmp)["permission_mode"], "default")
         self.assertIn("⚠ Phiên ở chế độ hỏi quyền", run_main("loop", "status")[1])
-        for payload in ('{"permission_mode": "auto"}', "rác {", "[1]", '{"permission_mode": 3}'):
+        # stdin không phải JSON object không chặn nữa (T-2522) — phủ ở test_xt_loop.StopHookSessionBoundTest.
+        for payload in ('{"permission_mode": "auto"}', '{"permission_mode": 3}'):
             with self.subTest(payload):
                 reason = json.loads(run_main("loop", "hook-stop", stdin=payload)[1])["reason"]
                 self.assertNotIn("⚠", reason)
