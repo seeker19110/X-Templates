@@ -1502,11 +1502,12 @@ def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tupl
     recursive = "r" in flags or "R" in flags or "--recursive" in args
     force = "f" in flags or "--force" in args
     targets = _positionals(args)
+    # Luật đích cố định xét trước: `rm -rf ~` giữ mã RULE_DENY dù $HOME là cha của gốc (runner CI, ~/projects/x)
+    if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
+        return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
     hit = next((t for t in targets if recursive and _wipes_root(t, root, cwd)), "")
     if hit:  # cả `rm -r` không `-f`: vẫn xoá hết cây (chỉ hỏi file chỉ-đọc)
         return "deny", ROOT_WIPE_WHY.format(hit)
-    if "--no-preserve-root" in args or (recursive and force and any(_dangerous_rm_target(t) for t in targets)):
-        return "deny", "rm -rf trên /, ~, $HOME, ., .., *, .git"
     if recursive and force and not targets:  # `xargs rm -rf`, `… | xargs rm -rf`: đích đến từ stdin (AUD-SEC-024)
         return "ask", "rm -rf không có đích trên dòng lệnh (đích từ xargs/stdin) — xoá dữ liệu cần người duyệt"
     outside = [t for t in targets if recursive and root and _outside_project(t, root, cwd)]
