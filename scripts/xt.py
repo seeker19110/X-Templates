@@ -1726,9 +1726,9 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "verdict": "verify",
             "reason": "PLAN có dòng task sai định dạng (cần - [ ] `T-NNN` …): " + ", ".join(bad[:5]),
         }
-    deferred = _deferred(st)
-    for t in tasks:
-        v = _verdict_task(t, base, deferred, str(st.get("started") or ""))
+    deferred, carried = _deferred(st), st.get("carried") or []
+    for t in tasks:  # `carried`: bằng chứng xanh của vòng trước cùng PLAN, `loop init` đã đối chiếu Gate (T-2611)
+        v = _verdict_task(t, base, deferred, "" if t["id"] in carried else str(st.get("started") or ""))
         if v:
             return _with_dispatch(v, t, tasks, base, st) if v["verdict"] == "continue" else v
     return None
@@ -6082,6 +6082,31 @@ def _init_warnings(args: argparse.Namespace, base: Path) -> None:
         print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
 
 
+def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> List[str]:
+    """`loop init` lại cùng PLAN sau vòng đã dừng (T-2611): giữ việc chờ người còn mở và bằng chứng xanh khớp Gate hiện
+    tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác: không mang gì (ID có thể trùng nghĩa
+    khác; so cả blueprint). Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
+    tasks = parse_plan(base / state["plan"])
+    notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
+    keep = {i: d for i, d in _deferred(prev).items() if same and i in _still_open(base, state)}
+    carried = [
+        t["id"] for t in tasks if same and t["state"] == "x" and t["gate"] and not evidence_stale(t, base)
+    ]  # cùng điều kiện `loop verify` giữ kết quả: lệnh, phạm vi, spec (req_rev), digest file (review #239)
+    if keep:
+        state["deferred"] = keep
+        notes.append(f"ℹ Vòng trước cùng PLAN: giữ {len(keep)} việc chờ người: {', '.join(keep)}")
+    if carried:
+        state["carried"] = carried
+        notes.append(f"ℹ Vòng trước cùng PLAN: mang {len(carried)} bằng chứng xanh: {', '.join(carried)}")
+    bare = [t["id"] for t in tasks if t["state"] == "x" and read_evidence(t["id"], base) is None]
+    if bare:
+        notes.append(
+            f"⚠ {len(bare)} task [x] không có bằng chứng ở máy này ({', '.join(bare[:5])}) — `loop verify` sẽ đòi chạy"
+            " lại Gate; `.autopilot/` không theo git nên mỗi đợt một docs/autopilot/PLAN-<đợt>.md mới"
+        )
+    return notes
+
+
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
     if live:
@@ -6122,8 +6147,11 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
     scope = build_scope(base, args.blueprint)
     if scope:
         state["scope"] = scope
+    notes = _carry_previous(read_state(base) or {}, state, base)
     write_state(state, base)
     _init_warnings(args, base)
+    for note in notes:
+        print(note, file=sys.stderr)
     print(
         f"✓ Autopilot bật: plan={args.plan} trần={max_iterations} vòng"
         + (f", hạn {deadline}" if deadline else "")
@@ -6328,6 +6356,22 @@ def _decision_choice(options: List[str], choice: str) -> Optional[str]:
     return None
 
 
+def _last_decision(text: str, base: Path, rel: Path) -> int:
+    """Số D-NNN lớn nhất trong sổ này và sổ cùng đường dẫn ở mọi worktree khác của repo (T-2612) — hai worktree ghi
+    quyết định song song từng cùng ra D-001. Chỉ đọc để đánh số; không phải repo git → chỉ sổ này."""
+    r = _git(base, "worktree", "list", "--porcelain", env=_perf_env())
+    trees = [Path(ln[9:]) for ln in r.stdout.splitlines() if ln.startswith("worktree ")] if r.returncode == 0 else []
+    texts = [text]
+    for tree in trees:
+        other = tree / rel
+        if other.resolve() != (base / rel).resolve() and other.is_file():
+            try:
+                texts.append(other.read_text(encoding="utf-8", errors="replace"))
+            except OSError:  # sổ worktree khác không đọc được: bỏ qua, không làm hỏng `loop decide`
+                pass
+    return max((int(n) for t in texts for n in DECISION_ID_RE.findall(t)), default=0)
+
+
 def _loop_decide(args: argparse.Namespace, base: Path) -> int:
     options = list(dict.fromkeys(o for o in map(_one_line, args.option) if o))
     question, why, revert = _one_line(args.question), _one_line(args.why), _one_line(args.revert)
@@ -6349,7 +6393,7 @@ def _loop_decide(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ --log phải là file trong dự án: {args.log}", file=sys.stderr)
         return 2
     text = log.read_text(encoding="utf-8") if log.exists() else DECISIONS_HEADER
-    did = f"D-{max((int(n) for n in DECISION_ID_RE.findall(text)), default=0) + 1:03d}"
+    did = f"D-{_last_decision(text, base, log.relative_to(base.resolve())) + 1:03d}"
     entry = (
         f"\n### {did} · {now_iso()} · {question}\n\n"
         f"- Phương án: " + " · ".join(f"({i}) {o}" for i, o in enumerate(options, 1)) + "\n"
