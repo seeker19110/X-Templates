@@ -26,3 +26,6 @@
 
 ### Lát 1 — Anchor setext
 - [x] `T-2701` `check-links.py`: tiêu đề setext gồm cả đoạn nhiều dòng (nối bằng khoảng trắng) và setext trong `>`; dòng trống cắt đoạn; test tái hiện (files: scripts/check-links.py, tests/test_check_links.py, CHANGELOG.md, VERSION) — Gate: `python3 -m unittest discover -s tests -k check_links_anchor && python3 scripts/check-links.py`
+
+### Lát 2 — Hiệu năng (tự rà delta sau #242)
+- [x] `T-2702` `anchors()` gom đoạn bằng `append` thay `[*para, body]`, cắt 3.18.2 (chép cả danh sách mỗi dòng → O(n²): đoạn 50 000 dòng 6,3 s); test đoạn 200 000 dòng < 5 s (sau: T-2701; files: scripts/check-links.py, tests/test_check_links.py, CHANGELOG.md, VERSION) — Gate: `python3 -m unittest discover -s tests -k check_links_anchor`

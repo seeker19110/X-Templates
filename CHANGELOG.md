@@ -5,6 +5,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.18.2] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (`check-links.py` 3.18.1 chậm bậc hai với đoạn văn dài).
+
+### Fixed
+- `check-links.py` (T-2702): gom đoạn văn để nhận tiêu đề setext chạy tuyến tính — 3.18.1 chép lại cả đoạn mỗi dòng (đoạn 200 000 dòng ~2 phút, nay < 1 giây).
+
 ## [3.18.1] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (`check-links.py` nhận thêm anchor của tiêu đề setext — bớt `lint` đỏ oan).
