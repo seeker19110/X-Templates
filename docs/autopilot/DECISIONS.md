@@ -1113,3 +1113,10 @@
 - Chọn: Sửa cả 7 trong 3 lát, mỗi lỗi test đỏ trước; mục hàng rào dùng lệnh con chỉ đọc harness-check
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: cả 7 tái hiện được, cỡ S-M; không nới guard (an toàn hơn phương án 3); (3) test được từng lỗi
 - Đường lùi: Revert từng PR lát; harness-check là lệnh mới, bỏ không ảnh hưởng lệnh cũ
+
+### D-158 · 2026-10-24T07:08:54+00:00 · Duyệt PLAN-3.19-setext: anchor setext nhiều dòng/trong > cho check-links (🟢 review #238)
+
+- Phương án: (1) Sửa trong check-links: gom đoạn (bỏ tiền tố >) đến dòng trống, dòng ===/--- biến cả đoạn thành tiêu đề; bản vá 3.18.1 · (2) Để nguyên, chỉ ghi giới hạn trong tài liệu
+- Chọn: Sửa trong check-links: gom đoạn (bỏ tiền tố >) đến dòng trống, dòng ===/--- biến cả đoạn thành tiêu đề; bản vá 3.18.1
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: link hợp lệ đang bị báo gãy làm lint dự án đích đỏ oan; nhận thừa anchor an toàn hơn đỏ oan; (3) sửa nhỏ, test được
+- Đường lùi: Revert PR lát; anchors() trở lại chỉ xét một dòng trước
