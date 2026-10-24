@@ -6068,12 +6068,13 @@ GLOB_COMMANDS = tuple(
         | RUNNERS
     )
 )
-# Biểu thức ngoặc: `[…]` có thể chứa `[:lớp:]`, `[.x.]`, `[=x=]` lồng bên trong (`[[:lower:][:digit:]]`)
-GLOB_BRACKET_RE = re.compile(r"\[(?:[^\[\]]|\[([:.=]).*?\1\])+\]")
+# Biểu thức ngoặc: `[…]` có thể chứa `[:lớp:]`, `[.x.]`, `[=x=]` lồng bên trong (`[[:lower:][:digit:]]`). Các nhánh loại
+# trừ nhau theo ký tự đầu (không lượng từ chồng lấp) — dạng `.*?` trong vòng `+` từng backtrack hàm mũ trên `[[:a:]…` không đóng
+GLOB_BRACKET_RE = re.compile(r"\[!?\]?(?:[^\[\]]|\[:[^\]]*:\]|\[\.[^\]]*\.\]|\[=[^\]]*=\]|\[(?![:.=]))*\]")
 GLOB_POSIX_RE = re.compile(r"\[[:.=]")
-# Từ đầu lệnh trong chuỗi gốc: đứng sau đầu chuỗi/khoảng trắng/`; & | ( ` { !` và trước khoảng trắng/dấu nối lệnh — từ trong
+# Từ đầu lệnh trong chuỗi gốc: đứng sau đầu chuỗi/khoảng trắng/`; & | ( ) ` { !` và trước khoảng trắng/dấu nối lệnh — từ trong
 # nháy (`'/bin/r?'`) không khớp: shell không mở glob trong nháy
-GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|(`{!])", r"(?![^\s;&|()<>`}])"
+GLOB_WORD_BEFORE, GLOB_WORD_AFTER = r"(?<![^\s;&|()`{!])", r"(?![^\s;&|()<>`}])"
 
 
 def _glob_names(head: str, bare: bool = False) -> List[str]:
@@ -6106,7 +6107,12 @@ def _glob_rewrites(cmd: str, tokens: List[str]) -> List[str]:
     out: List[str] = []
     for head, names in _glob_heads(tokens).items():
         word = re.compile(GLOB_WORD_BEFORE + re.escape(head) + GLOB_WORD_AFTER)
-        out += [word.sub(name, cmd) for name in names if word.search(cmd)]  # tên từ danh sách đóng: không có `\`
+        if word.search(cmd):
+            out += [word.sub(name, cmd) for name in names]  # tên từ danh sách đóng: không có `\`
+        else:  # từ có đoạn nháy/`\` ở chuỗi gốc (`r?''`, `"/bin/"r?`): ghép lại từ token — mất heredoc nhưng không lọt
+            out += [
+                " ".join(t if _is_punct(t) else shlex.quote(name if t == head else t) for t in tokens) for name in names
+            ]
     return out
 
 

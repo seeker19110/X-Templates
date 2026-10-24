@@ -137,7 +137,9 @@ class GlobCommandNameTest(unittest.TestCase):
         self.assertEqual(rw("FOO=1 /bin/r? -rf x"), ["FOO=1 rm -rf x"])
         self.assertEqual(rw("echo a; fin? . -delete"), ["echo a; find . -delete"])
         self.assertEqual(rw("r? a; r? b"), ["rm a; rm b"])  # một bản cho cả hai lần xuất hiện
-        self.assertEqual(rw("'/bin/r?' -rf x"), [])  # trong nháy shell không mở glob
+        # từ nháy trọn vẹn (shell không mở glob) không phân biệt được với nháy từng phần (`r?''`, shell vẫn mở) ở mức
+        # token → chiều chặt: ghép lại từ token; lệnh tên literal `/bin/r?` không tồn tại nên không có hại
+        self.assertEqual(rw("'/bin/r?' -rf x"), ["rm -rf x"])
         self.assertEqual(rw("ba?h <(echo hi)"), ["bash <(echo hi)"])  # `<(` giữ nguyên
 
     def test_guard_glob_shell_stdin_and_runners_denied(self):
@@ -158,6 +160,34 @@ class GlobCommandNameTest(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(policy(cmd)["decision"], "deny")
+
+    def test_guard_glob_head_with_quoted_parts_denied(self):
+        """Review #247 lượt 3 🟠: từ glob có đoạn nháy/`\\` — token đã bỏ nháy nhưng chuỗi gốc thì không; shell vẫn mở glob."""
+        for cmd in (
+            f"/bin/r?'' -rf {R}",
+            f"/bin/r''? -rf {R}",
+            f'/bin/"r"? -rf {R}',
+            f'"/bin/"r? -rf {R}',
+            f"'/bin/'r? -rf {R}",
+            f"/usr/bin/fi?d'' {R} -delete",
+            f"/bin/ba?h'' -c 'rm -rf {R}'",
+            f"\\/bin/r? -rf {R}",
+            f"/b\\in/r? -rf {R}",
+            f"/bin/r?\\\n -rf {R}",
+            f"case x in x)/bin/r? -rf {R};; esac",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(policy(cmd)["decision"], "deny")
+
+    def test_guard_glob_unclosed_bracket_is_not_exponential(self):
+        """Review #247 lượt 3 🔴: `[` không đóng + 26 lần `[:a:]` từng mất ~10 s trong regex (N≈34 vượt timeout hook)."""
+        for n in (26, 40, 4000):
+            head = "/bin/[" + "[:a:]" * n + "x"
+            start = time.monotonic()
+            guard._glob_names(head)
+            policy(f"{head}; true")
+            self.assertLess(time.monotonic() - start, 3, n)
+        self.assertEqual(guard._glob_names("[[:lower:][:digit:]]m"), ["rm"])  # đóng đủ vẫn nhận
 
     def test_guard_glob_commit_then_glob_name_not_overblocked(self):
         self.assertEqual(policy("git commit -m x && /usr/bin/g?t status")["decision"], "")
