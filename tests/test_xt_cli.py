@@ -2839,12 +2839,15 @@ class HarnessCheckTest(TmpDirCase):
             "---\nname: c\ntools: *\npermissionMode: bypassPermissions\n---\n", encoding="utf-8"
         )
         (agents / "d.md").write_text("không frontmatter\n", encoding="utf-8")
+        (agents / "e.md").write_text("---\nname: e\ntools:\n  - Read\n  - Grep\n---\n", encoding="utf-8")  # hợp lệ
+        (agents / "f.md").write_text("---\nname: f\ntools:\n  - '*'\n---\n", encoding="utf-8")
         (self.tmp / ".claude" / "settings.json").write_text('{"permissions": {"ask": ["Bash"]}}', encoding="utf-8")
         rc, out, _ = run_main("harness-check")
         self.assertEqual(rc, 1)
         self.assertIn("✗ settings", out)
-        for name in ("b.md", "c.md", "d.md"):
+        for name in ("b.md", "c.md", "d.md", "f.md"):
             self.assertIn(name, out)
+        self.assertNotIn("e.md", out)
         self.assertIn("permissionMode", out)
 
     def test_harness_check_missing_or_broken_guard_and_settings(self):

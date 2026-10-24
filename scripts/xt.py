@@ -4635,7 +4635,8 @@ def _harness_agents(base: Path) -> str:
     bad = []
     for f in sorted((base / ".claude" / "agents").glob("*.md")):
         fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
-        tools = re.search(r"^tools:[ \t]*(.*)$", fm[1], re.M) if fm else None
+        # `tools: Read, Grep`, `tools: [Read]` hoặc danh sách YAML xuống dòng (`tools:\n  - Read`, review #240)
+        tools = re.search(r"^tools:[ \t]*(.*(?:\n[ \t]+-[ \t]*\S.*)*)$", fm[1], re.M) if fm else None
         if not tools or not tools[1].strip() or "*" in tools[1]:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
