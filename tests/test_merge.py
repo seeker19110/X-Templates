@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1752,6 +1753,22 @@ class PrNextCliTest(unittest.TestCase):
         for name in ("command_r", "nova_pro", "o3mini", "GLM_4"):  # review #164: thẻ thật không có dấu ngăn
             self.assertTrue(xt.MODEL_FAMILY_RE.search(name), name)
 
+    def test_clean_review_judges_name_tail(self):
+        """Review #249: họ model xét ở đoạn sau `/` cuối (tiền tố nhà cung cấp bỏ) — kiểm tên mơ hồ cũng vậy, không thì
+        `haiku/reviewer` lọt như một họ lạ khác nhà cung cấp."""
+
+        def run(rev: str, aut: str) -> int:
+            args = ("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean")
+            return run_main(*args, "--reviewer-model", rev, "--author-model", aut)[0]
+
+        for rev, aut in (("haiku/reviewer", "claude-opus-5-5"), ("sonnet", "opus/executor-deep"),
+                         ("Qwen/QwQ-32B", "Qwen/Qwen3-235B-A22B"), ("ollama/qwq", "llama3.1:70b"),
+                         ("opus/", "sonnet")):  # fmt: skip
+            self.assertEqual(run(rev, aut), 2, (rev, aut))
+        self.assertEqual(run("openrouter/anthropic/claude-fable-5-1", "anthropic/claude-opus-4-1"), 0)
+        cfg = {"author_model_family": "opus", "reviewer_model_family": "haiku/reviewer"}
+        self.assertIn("không nhận diện được họ model", xt.review_family_config_error(cfg) or "")
+
     def test_clean_review_needs_higher_capability(self):
         """D-161 (LOOP-ORCH-005): review sạch do reviewer năng lực CAO HƠN người viết — khác họ Claude so bậc
         haiku < sonnet < opus < fable (effort không bù bậc); cùng họ chỉ nhận khi khai cả hai effort và effort reviewer
@@ -1782,6 +1799,14 @@ class PrNextCliTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # effort ngoài 5 mức: argparse từ chối
             run("--reviewer-model", "opus", *opus, "--reviewer-effort", "ultra", "--author-effort", "low")
         self.assertEqual(run("--reviewer-model", "claude-fable-5-1", *opus)[0], 0)  # bậc cao hơn
+        self.assertEqual(run("--reviewer-model", "Fable 5.1", "--author-model", "Opus 5.5")[0], 0)  # tên có dấu cách
+        sp = xt.pr_next(  # review #249: lệnh đăng lại trích dẫn giá trị (shlex) — tên có dấu cách không gãy lệnh
+            {"pr": 7, "head": self.head, "verdict": "merge", "lane": "chuẩn", "hard": []},
+            False,
+            xt.with_published({"reviews": [last()]}, []),
+        )["do"]
+        self.assertIn("--reviewer-model 'Fable 5.1' --author-model 'Opus 5.5'", sp)
+        self.assertEqual(run(*shlex.split(sp.split(" --clean", 1)[1]))[0], 0)  # chạy lại đúng lệnh đó: nhận
         self.assertNotIn("reviewer_effort", last())
         rev = ("--reviewer-effort", "low", "--author-effort", "max")
         self.assertEqual(run("--reviewer-model", "opus", "--author-model", "sonnet", *rev)[0], 0)  # so bậc trước effort
@@ -1791,10 +1816,61 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last()["reviewer_model"], last()["reviewer_effort"], last()["author_effort"]),
                          ("opus", "max", "high"))  # fmt: skip
         self.assertEqual(run("--reviewer-model", "gpt-5", "--author-model", "gpt-5", *hi)[0], 0)  # họ không bậc
-        for rv, au in (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "claude-fable-5-1")):
-            self.assertEqual(run("--reviewer-model", rv, "--author-model", au)[0], 0, (rv, au))  # không xếp hạng được
+        cross = (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "gpt-5"), ("gemma-3", "o3"))
+        for rv, au in cross:  # khác nhà cung cấp: máy không xếp hạng được → nhận
+            self.assertEqual(run("--reviewer-model", rv, "--author-model", au)[0], 0, (rv, au))
+        # review #247, #249: khác họ CÙNG nhà cung cấp mà một họ chưa có bậc → từ chối, không đoán bậc
+        same_vendor = (
+            ("claude-haiku-4-5", "claude-mythos-5-1", "mythos"),
+            ("Mythos 5", "claude-fable-5-1", "mythos"),
+            ("gemma-3-4b", "gemini-2.5-pro", "gemma"),
+            ("o4-mini", "gpt-5", "o4"),
+            ("codex-mini", "gpt-5", "codex"),
+            ("gpt-4o-mini", "o3", "gpt"),
+        )
+        for rv, au, fam in same_vendor:
+            rc, _, err = run("--reviewer-model", rv, "--author-model", au, "--reviewer-effort", "max")
+            self.assertEqual(rc, 2, (rv, au))
+            self.assertIn(f"họ {fam} chưa có bậc", err)
+            self.assertIn("xt.py feedback", err)
+            self.assertNotIn("MODEL_TIER", err)  # dự án đích không sửa được (install.py ghi đè)
+        self.assertEqual((xt.model_vendor("o4"), xt.model_vendor("llama")), ("openai", "llama"))
+        self.assertEqual(
+            (xt.model_family("ollama_chat/gpt-oss:20b"), xt.model_family("gemini/gemma-3-27b-it")), ("gpt", "gemma")
+        )
+        self.assertIsNone(xt.review_capability_error("mythos", "claude-mythos-5-1", "max", "low"))  # cùng họ: effort
+        # review #247: chữ Unicode gập hoa/thường ra Latin (`ſ` → s) không làm lộ họ model
+        for odd in ("claude-opuſ-5-5", "ſonnet"):
+            self.assertIsNone(xt.MODEL_FAMILY_RE.search(odd), odd)
+            rc, _, err = run("--reviewer-model", "claude-fable-5-1", "--author-model", odd)
+            self.assertEqual(rc, 2, odd)
+            self.assertIn("không nhận diện được họ model", err)
         self.assertEqual(xt.review_capability_error("opus", "sonnet"), None)
         self.assertIn("cùng họ", xt.review_capability_error("mythos", "Mythos 2", "high", "high") or "")
+
+    def test_config_effort_follows_config_model(self):
+        """Review #247: workflow `pr-review` truyền model reviewer thật bằng cờ, họ tác giả lấy từ xt.yaml — effort cấu
+        hình chỉ đi kèm model cấu hình: model từ cờ thì `reviewer_effort` cấu hình không áp, không được ghi vào sổ."""
+
+        def run(*extra: str) -> tuple:
+            return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *extra)
+
+        cfg = "merge_autonomy: L3\nauthor_model_family: opus\nauthor_effort: high\nreviewer_effort: max\n"
+        (self.base / "xt.yaml").write_text(cfg, encoding="utf-8")
+        rc, _, err = run("--reviewer-model", "claude-opus-5-5")
+        self.assertEqual(rc, 2)
+        self.assertIn("cùng họ", err)
+        self.assertIn("effort ?", err)  # effort reviewer cấu hình không áp cho model khai bằng cờ
+        self.assertNotIn("7", xt.read_reviews(self.base))
+        self.assertEqual(run("--reviewer-model", "claude-opus-5-5", "--reviewer-effort", "max")[0], 0)
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual(
+            (last["reviewer_effort"], last["author_model"], last["author_effort"]), ("max", "opus", "high")
+        )
+        (self.base / "xt.yaml").write_text(cfg + "reviewer_model_family: claude-opus-5-5\n", encoding="utf-8")
+        self.assertEqual(run()[0], 0)  # model và effort cùng từ cấu hình → dùng
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual((last["reviewer_model"], last["reviewer_effort"]), ("claude-opus-5-5", "max"))
 
     def test_reviewed_rerun_with_effort_is_idempotent(self):
         """D-161: effort là một phần danh tính người rà — chạy lại cùng effort không thêm bản ghi, đổi effort thì thêm."""
@@ -2739,20 +2815,36 @@ class StewardFollowupTest(unittest.TestCase):
         )
         self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")  # cờ CLI thắng cấu hình
         self.assertEqual((ns.reviewer_effort, ns.author_effort), ("low", "high"))
+        # review #247: model khai bằng cờ → effort cấu hình của phía đó không áp (không ghi effort chưa từng chạy)
+        ns = unittest.mock.Mock(
+            clean=True, reviewer_model="claude-opus-5-5", author_model=None, reviewer_effort=None, author_effort=None
+        )
+        self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")
+        self.assertEqual((ns.reviewer_effort, ns.author_effort), (None, "high"))
+        ns = unittest.mock.Mock(
+            clean=True, reviewer_model=None, author_model="opus", reviewer_effort=None, author_effort=None
+        )
+        self.assertIn("cùng họ", xt._review_models_error(ns, {**keys, **eff}) or "")  # effort tác giả cấu hình không áp
+        self.assertEqual((ns.reviewer_effort, ns.author_effort), ("max", None))
 
     def test_config_capability_rule_in_ci_check(self):
         base = Path(self.enterContext(tempfile.TemporaryDirectory()))
         cfg = "author_model_family: opus\nreviewer_model_family: opus\n"
-        for extra, bad in (
-            ("reviewer_effort: max\nauthor_effort: high\n", None),
-            ("reviewer_effort: turbo\n", "turbo"),
-        ):
+        wf = base / "wf"  # thư mục workflow rỗng: chỉ kiểm cấu hình, không phụ thuộc workflow của repo
+        wf.mkdir()
+        for extra, want in (("reviewer_effort: max\nauthor_effort: high\n", 0), ("reviewer_effort: turbo\n", 1)):
             (base / "xt.yaml").write_text(cfg + extra, encoding="utf-8")
             with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
-                _, out, _ = run_main("ci-check")
+                rc, out, _ = run_main("ci-check", str(wf))
+            self.assertEqual(rc, want, out)
             self.assertNotIn("cùng họ", out)
-            if bad:
-                self.assertIn(f"reviewer_effort '{bad}'", out)
+            if want:
+                self.assertIn("reviewer_effort 'turbo'", out)
+        (base / "xt.yaml").write_text("author_model_family: claude-mythos-5-1\nreviewer_model_family: haiku\n")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(base)}):
+            rc, out, _ = run_main("ci-check", str(wf))
+        self.assertEqual(rc, 1)
+        self.assertIn("họ mythos chưa có bậc", out)
 
     def test_same_family_rejected_by_ci_check(self):
         base = Path(self.enterContext(tempfile.TemporaryDirectory()))

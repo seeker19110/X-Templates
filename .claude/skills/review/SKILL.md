@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review diff/PR theo checklist của khung (đúng nghiệp vụ, ca biên, bảo mật, lỗi logic, thống nhất, test) — phát hiện là CLAIM phải có đường tái hiện; reviewer khác HỌ model với người viết. Dùng khi `xt.py pr next` trả `review`, khi người dùng hỏi "có bug không", "rà nhanh diff", hoặc gõ /review.
+description: Review diff/PR theo checklist của khung (đúng nghiệp vụ, ca biên, bảo mật, lỗi logic, thống nhất, test) — phát hiện là CLAIM phải có đường tái hiện; reviewer năng lực cao hơn người viết. Dùng khi `xt.py pr next` trả `review`, khi người dùng hỏi "có bug không", "rà nhanh diff", hoặc gõ /review.
 argument-hint: "[PR number | branch | path]"
 ---
 

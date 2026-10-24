@@ -1,4 +1,4 @@
-# PLAN-3.21-guard-d155.md — Khung X-Templates · bịt giới hạn guard xoá gốc đã biết (D-155) → bản 3.18.4/3.18.5
+# PLAN-3.21-guard-d155.md — Khung X-Templates · bịt giới hạn guard xoá gốc đã biết (D-155) → bản 3.19.2/3.19.3 (đánh lại sau #247/#249)
 
 > Lập ngày 2026-10-24. Chủ repo yêu cầu bịt "giới hạn guard đã biết (D-155)" ở PROGRESS §Tiếp theo 5. Phiên chính tự
 > duyệt (D-162). Tái hiện trên HEAD bằng `guard.bash_decision` (pha harden, chính sách mặc định).

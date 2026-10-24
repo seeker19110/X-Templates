@@ -32,7 +32,7 @@ delivery_phase: build
 # review_identity: ""         # chỉ dấu review của tài khoản này mở được merge (T-1508)
 # author_model_family: ""     # reviewer năng lực cao hơn tác giả: bậc model cao hơn, cùng họ thì effort cao hơn (ci-check kiểm)
 # reviewer_model_family: ""
-# author_effort: ""           # low|medium|high|xhigh|max — cần cả hai khi cùng họ (D-161)
+# author_effort: ""           # low|medium|high|xhigh|max — cần cả hai khi cùng họ (D-161); chỉ dùng cùng model lấy từ cấu hình
 # reviewer_effort: ""
 # CI mẫu 3 job (ADR-0039): job e2e chạy cùng lúc với job gate; khoá rỗng = bỏ qua có log.
 e2e: ""               # suite E2E, CI chạy (`dev-task.sh e2e I N`); dùng $XT_SHARD để chia shard, vd npx playwright test --shard=${XT_SHARD:-1/1}

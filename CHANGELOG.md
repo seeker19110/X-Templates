@@ -5,12 +5,23 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
-## [3.19.1] - 2026-10-24
+## [3.19.2] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** (guard đổi: `.claude/hooks/guard.py` — chạy lại cài để nhận hàng rào mới; dự án có `harness_permissions: own` đọc thêm `settings.json`).
 
 ### Fixed
 - guard (T-2811, D-155/D-162): tên lệnh viết bằng glob không còn qua mặt luật xoá — `/usr/bin/fi?d <gốc> -delete`, `/bin/r? -rf <gốc>`, `[r]m`, `[^x]m`, `[[:lower:]]m`, `[[.r.]]m`, `ti?e rm …`, `nohup fi?d …`, `wat?h '…'`, `fl?ck … rm …`, `ba?h -c '…'`, `echo … | s?`, `ba?h <<E`, `ba?h <(…)`, `ev?l '…'`, `cu?l -d @.env …`: chuỗi lệnh GỐC được viết lại cho mỗi tên nhạy cảm khớp mẫu (danh sách đóng `GLOB_COMMANDS`: lệnh xoá/ghi/leo quyền, shell, wrapper, `RUNNERS`, curl/wget/gh; không đoán theo hệ tệp) rồi quét như shell lồng — giữ heredoc/`<(`/nháy, chịu `ScanBudget`/`rewrites` (lồng quá nhiều thì chặn thay vì quét mãi). Mẫu chỉ toàn `*`/`?` không bị đoán; `sudo`/`doas` trơn không đối số bỏ (`*)`, `s*)` của `case` không bị chặn oan). `~user` đã chặn khi user tồn tại (home là cha/chính gốc) — thêm test ghim. Từ glob có đoạn nháy/`\` (`r?''`, `"/bin/"r?`, `case x)/bin/r?`) ghép lại từ token (chiều chặt); biểu thức ngoặc POSIX nhận bằng regex tuyến tính (bản đầu backtrack hàm mũ trên `[[:a:]…` không đóng). Giới hạn còn lại: `env -S` kèm glob; tên lệnh ghép lúc chạy (D-051).
+
+## [3.19.1] - 2026-10-24
+
+**Dự án đích: chạy lại `install.py`** (`xt.py`, skill `/autopilot`, `/review`) — sửa các lỗi review 🟠 của 3.19.0 (#247 được merge trước khi bản sửa kịp đẩy).
+
+### Fixed
+- `xt.py pr reviewed`/`ci-check` (D-161): họ Anthropic chưa có bậc (mythos) so với họ Anthropic khác bị từ chối cho tới khi thêm bậc — 3.19.0 nhận như khác nhà cung cấp nên reviewer yếu hơn lọt qua; effort cấu hình của một phía chỉ dùng khi model phía đó cũng lấy từ cấu hình — workflow `pr-review` truyền model thật từng mượn `reviewer_effort` trong xt.yaml; tên họ chỉ nhận chữ ASCII (`re.A`); `model_family` và phép kiểm tên mơ hồ cùng bỏ tiền tố nhà cung cấp `<provider>/` (vd `ollama_chat/gpt-oss:20b` là `gpt`, không phải `llama`; tên mà đoạn sau `/` cuối không lộ họ, vd `haiku/reviewer`, `Qwen/QwQ-32B`, `ollama/qwq`, nay bị từ chối). `SEC-TM-009`, `LOOP-DESIGN-021`, `10-workflow/README.md`, `team-and-wip.md`, bẫy/cổng của `orchestration-and-subagents.md` đổi "khác model" → "năng lực cao hơn".
+- `WF-REVIEW-004` (MUST@L) và văn xuôi `10-workflow/code-review.md` (review #249): đòi reviewer AI "khác model" mâu thuẫn `LOOP-ORCH-005` (`reviewer-alt` Opus effort max chấm diff của `executor-deep`) → đổi sang "năng lực cao hơn"; phần `→ Kiểm:` đổi theo. Dự án đích: ghép lại blueprint để nhận chữ mới.
+- `xt.py pr reviewed`/`ci-check` (review #249; **dự án đích: kiểm lại `*_model_family` bằng `xt.py ci-check`** — cấu hình cùng nhà cung cấp mà thiếu bậc, vd `gpt-5`/`o3`, nay đỏ): họ chưa có bậc cùng nhà cung cấp (vd `gemma`/`gemini`, `o4`/`gpt`) bị từ chối như mythos — chỉ **khác nhà cung cấp** mới được nhận; lệnh đăng lại bọc nháy tên model có khoảng trắng.
+- `pr next`: bản ghi sổ sạch chưa đăng không còn qua luật mới → trả `review` (rà lại) thay vì đề nghị đăng lại mãi bằng lệnh bị từ chối.
+- Chữ "khác họ model" còn sót đổi theo `LOOP-ORCH-005` ở `LOOP-STOP-022`, `LOOP-OPT-005`, `LOOP-ORCH-018`, skill `/autopilot`, `/review`, prompt `pr-review.yml`; `LOOP-ORCH-005` ghi rõ người viết = agent năng lực cao nhất đã góp vào diff. Dự án đích: ghép lại blueprint để nhận chữ mới.
 
 ## [3.19.0] - 2026-10-24
 
