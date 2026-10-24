@@ -86,6 +86,21 @@ class CheckLinksModuleTest(unittest.TestCase):
             ],
         )
 
+    def test_check_links_anchor_github_heading_forms(self):
+        # Review #238: setext, nhấn `_x_`, link tham chiếu, BOM, tiêu đề trong `>`/danh sách, `#top`, `#L3`, id không nháy.
+        self.write(
+            "b.md",
+            "\ufeff# Bom\nTitle\n=====\nSub\n---\n\n## _Ghi chú_\n## [ref][r] x\n> ## Quote\n- ## Mục\n"
+            "<h2 id=raw>R</h2>\n```\nTrong\n---\n```\n",
+        )
+        (self.repo / "bad.md").write_bytes(b"# Ok\n\xff\xfe\n")
+        links = "bom title sub ghi-chú ref-x quote mục raw top L3 L3-L9"
+        self.write(
+            "a.md",
+            " ".join(f"[{a}](b.md#{a})" for a in links.split()) + " [o](bad.md#ok) [m](b.md#trong)\n",
+        )
+        self.assertEqual(self.cl.check(self.repo), ["a.md:1: anchor không có trong file -> b.md#trong"])
+
     def test_check_absolute_link_missing_is_error(self):
         self.write("a.md", "[x](/khong/co.md)\n")
         self.assertEqual(self.cl.check(self.repo), ["a.md:1: liên kết hỏng -> /khong/co.md"])
