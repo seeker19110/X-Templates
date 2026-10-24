@@ -3,9 +3,9 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.17.0, pha `harden` — D-136) · Cập nhật: 2026-10-24 · Nhánh: main
 
 ## Đang làm
+- 2026-10-24 **PLAN-3.21-single-loop** (D-162, ADR-0045, 3.20.0): bài claude.com *When to fold subagents* (2026-10-22) + kit single-agent-loop-kit → `AI-AGENTIC-001`/`011` đổi, `019` mới; `LOOP-ORCH-017` MAY→SHOULD, `020` mới (giữ mặc định giao việc tới khi có số). Điểm đo đầu `LOOP-ORCH-020`: 4 task tài liệu phiên chính tự làm (`executor: null`), xanh lần đầu 4/4.
 - 2026-10-24 **PLAN-3.18-feedback2** (D-157): 7 🟢 phản hồi còn lại → 3.18.0: BASE-SEC-002 mẫu chặt, compose/check-links anchor (#238), loop init cùng PLAN giữ defer + bằng chứng còn khớp, decide theo mọi worktree, PLAN mỗi đợt (#239), `harness-check` cho mục hàng rào. PLAN-3.19-setext (D-158): `check-links` nhận setext nhiều dòng/trong `>` (🟢 review #238; #242, `v3.18.1`), 3.18.2 sửa O(n²) của bản đó (#243, `v3.18.2`, GO-NO-GO chờ ký). Trước đó PLAN-3.17 xong (#235–#237, `v3.17.0`, GO-NO-GO chờ ký).
 - 2026-10-23 **PLAN-3.16.0-ceiling xong** (D-142…D-148, ADR-0043; #231, #232, PR cắt 3.16.0): `pr-title.yml` tách khỏi CI nặng; steward dispatch CI trên `main` sau merge (đã thấy chạy thật ở `5fcdc1b`); check cùng tên xét bản mới nhất; `validate` đòi Nguồn có URL+ngày; `unchecked_must_ratio` 58/68; trần byte thư mục; `pr stats` đếm push/run huỷ cùng SHA. Đo lại 2026-10-30 bằng `pr stats --days 7`. Phản hồi dự án đích: 10 nhóm `cong-cu` đủ ngưỡng chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
-- 2026-10-21…22: PLAN-3.15 (D-130, #207), ADR-0040…0042 (#212–#218), 3.15.0…3.15.6 (#219–#228), audit delta + A11Y (#227) — chi tiết ở CHANGELOG và docs/ops/AUDIT-REPORT-2026-10-2*.md. Dự án đích: hotel-manager, X-Company 3.15.1; dhcb 3.15.3; xboss 2.0.0.
 - 2026-10-24 **PLAN-3.20-install-dedupe** (D-159, 3.18.3): `install.py` gộp mệnh đề "Dự án đích" trùng hệt xuyên mục (nợ 🟢 #191 xong). Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043).
 
@@ -32,7 +32,6 @@
 
 ## Bàn giao phiên
 - 2026-10-21 · `main` `3221f95` (#207). PLAN-3.15: #206 sổ + PLAN, #207 Lát 1–2. Lệnh merge của phiên bị bộ phân loại Auto chặn → `pr-steward` merge ghim head (cron 10 phút thực đo cách nhau ~4 giờ; D-132). Dự án đích: chạy lại `install.py --with-github` khi cắt 3.14.0.
-- Lát E (ADR-0039, #204): mẫu CI 3 job + `gate-par`. Dự án đích: hotel-manager #114 13 → 10 job, CI 4m03s; X-Company #60 17 → 8 job, CI 8m14s → 4m52s, `gate` song song 49 s (tuần tự cũ ~220 s).
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - `pr stats --days 7` (2026-10-23, REST đếm đủ): 174 PR merge · lead trung vị 9,4 phút (P95 1,58 h) · push đầu không đỏ 84 % · 0 revert. `pr stats` của khung cắt ở 1.000 run (T-2409).
 - Kiểm nhanh: `scripts/dev-task.sh gate`. SessionStart gần trần 12 KB khi nhiều task hoãn — lý do hoãn viết ngắn.
