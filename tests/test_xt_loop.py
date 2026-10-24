@@ -232,3 +232,59 @@ class StopHookSessionBoundTest(TmpRepoCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoopInitCarryTest(TmpRepoCase):
+    """T-2611 (phản hồi dự án đích): `loop init` sau vòng đã dừng mất danh sách chờ người và đòi chạy lại Gate cũ;
+    máy mới (`.autopilot/` không theo git) đòi chạy lại mọi task `[x]` mà không nói vì sao."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.init_repo()
+        self.plan = self.repo / "docs" / "autopilot" / "PLAN.md"
+        self.plan.parent.mkdir(parents=True)
+        self.plan.write_text(
+            "- [ ] `T-001` a — Gate: `true`\n- [ ] `T-002` cần người — Gate: `true`\n- [ ] `T-003` c — Gate: `true`\n",
+            encoding="utf-8",
+        )
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
+        os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+        self.enterContext(chdir(self.repo))
+
+    def test_loop_init_carry_keeps_deferred_and_green_evidence(self) -> None:
+        run_main("loop", "init")
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "true")[0], 0)
+        self.assertEqual(run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")[0], 0)
+        run_main("loop", "stop", "--reason", "hết ngày")
+        rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 0)
+        self.assertIn("giữ 1 việc chờ người: T-002", err)
+        self.assertIn("mang 1 bằng chứng xanh: T-001", err)
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(st["deferred"]), ["T-002"])
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-003"))
+
+    def test_loop_init_carry_drops_stale_items(self) -> None:
+        run_main("loop", "init")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")
+        run_main("loop", "stop", "--reason", "x")
+        # PLAN mới: Gate T-001 đổi (bằng chứng cũ không còn khớp), T-002 đã xong tay
+        self.plan.write_text(
+            "- [x] `T-001` a — Gate: `true && true`\n- [x] `T-002` cần người — Gate: `true`\n", encoding="utf-8"
+        )
+        rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("giữ", err)
+        self.assertNotIn("mang", err)
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(st.get("deferred", {}), {})
+        self.assertIn("T-001", run_main("loop", "status")[1])  # Gate đổi → verify T-001
+
+    def test_loop_init_carry_warns_ticked_without_local_evidence(self) -> None:
+        # Máy/container mới: PLAN đợt trước đã tick, `.autopilot/evidence/` không có → nói rõ và gợi ý PLAN mỗi đợt.
+        self.plan.write_text("- [x] `T-001` a — Gate: `true`\n- [ ] `T-003` c — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init")
+        self.assertEqual(rc, 0)
+        self.assertIn("1 task [x] không có bằng chứng ở máy này (T-001)", err)
+        self.assertIn("PLAN-<đợt>.md", err)
