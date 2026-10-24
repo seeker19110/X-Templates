@@ -1012,13 +1012,17 @@ def step_clauses(block: list[str]) -> list[str]:
 
 def upgrade_steps(text: str, since: tuple[int, int, int]) -> list[tuple[str, list[str]]]:
     """(tên mục, mệnh đề "Dự án đích …") của mục `[Unreleased]` và mọi mục `[X.Y.Z]` có bản > `since`, thứ tự CHANGELOG;
-    mệnh đề trùng hệt trong cùng mục in một lần."""
+    mệnh đề trùng hệt in một lần — giữ lần đầu theo thứ tự CHANGELOG (bản mới nhất), mục hết mệnh đề thì bỏ (D-159)."""
     out: list[tuple[str, list[str]]] = []
+    seen: set[str] = set()
     for name, lines in changelog_sections(text):
         version = parse_version(name)
         if name != "Unreleased" and (version is None or version <= since):
             continue
-        clauses = list(dict.fromkeys(c for block in text_blocks(lines) for c in step_clauses(block)))
+        clauses = [
+            c for c in dict.fromkeys(c for block in text_blocks(lines) for c in step_clauses(block)) if c not in seen
+        ]
+        seen.update(clauses)
         if clauses:
             out.append((name, clauses))
     return out
