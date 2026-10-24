@@ -3,7 +3,7 @@ title: Bảo mật tối thiểu cho mọi phần mềm
 kind: baseline
 prefix: BASE-SEC
 applies_to: [all]
-updated: 2026-10-14
+updated: 2026-10-24
 ---
 
 # Bảo mật tối thiểu cho mọi phần mềm
@@ -36,7 +36,7 @@ updated: 2026-10-14
 ## Checklist
 
 - [ ] `BASE-SEC-001` **MUST** Mọi đầu vào ngoài ranh giới tin cậy được validate **allowlist** bằng schema runtime (kiểu, độ dài, định dạng, phạm vi, ngữ nghĩa và quan hệ như `end ≥ start`) ở server/tiến trình xử lý, không chỉ ở client/UI — sàn cho mọi loại phần mềm kể cả CLI/thư viện; chi tiết web ở [`SEC-WEB-002`](../12-security/appsec-web.md). → Kiểm: mỗi entrypoint có schema; test gửi input xấu (sai kiểu, quá dài, Unicode lạ, null, quan hệ sai) nhận lỗi 4xx/exit code có kiểm soát. · Nguồn: OWASP Input Validation CS; ASVS 5.0 V2
-- [ ] `BASE-SEC-002` **MUST** Sàn mọi quy mô: không có bí mật (API key, mật khẩu, token, private key) trong mã nguồn, cấu hình commit, lịch sử Git, Dockerfile/image, log hay artefact build; quét, pre-commit, xoay khi lộ theo [`SEC-SECRET-001`](../12-security/secrets-management.md) đến `SEC-SECRET-011`. → Kiểm: gitleaks/trufflehog toàn lịch sử = 0; `grep -rE 'AKIA|-----BEGIN (RSA|EC|OPENSSH)'` sạch. · Nguồn: OWASP Secrets Management CS
+- [ ] `BASE-SEC-002` **MUST** Sàn mọi quy mô: không có bí mật (API key, mật khẩu, token, private key) trong mã nguồn, cấu hình commit, lịch sử Git, Dockerfile/image, log hay artefact build; quét, pre-commit, xoay khi lộ theo [`SEC-SECRET-001`](../12-security/secrets-management.md) đến `SEC-SECRET-011`. → Kiểm: gitleaks/trufflehog toàn lịch sử = 0; `grep -rE 'AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----'` sạch. · Nguồn: OWASP Secrets Management CS
 - [ ] `BASE-SEC-003` **MAY** Ngừng dùng 2026-10-14 — gộp vào [`BASE-DEP-004`](dependencies.md): quét lỗ hổng phụ thuộc trong CI trên mỗi PR và theo lịch, high/critical chưa xử lý chặn merge, ngoại lệ có `approved_by` + `expires`.
 - [ ] `BASE-SEC-004` **MUST** Mọi kênh mạng ra/vào dùng TLS (HTTPS, TLS 1.2+); không tắt xác minh chứng chỉ (`verify=False`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `InsecureSkipVerify`). → Kiểm: grep mã + cấu hình không có cờ tắt verify; test tích hợp gọi `http://` tới dịch vụ ngoài bị chặn/đổi hướng. · Nguồn: ASVS 5.0 V12
 - [ ] `BASE-SEC-005` **MUST** Không có tài khoản/mật khẩu mặc định (`admin/admin`), không khoá cứng trong mã; thiếu bí mật bắt buộc → từ chối khởi động theo [`SEC-SECRET-004`](../12-security/secrets-management.md) (validate cấu hình: [`BASE-CFG-002`](configuration-and-secrets.md)). → Kiểm: grep không có `admin/admin`, `changeme`, `SECRET_KEY = "..."`; tài khoản quản trị đầu tiên tạo qua bước khởi tạo có mật khẩu do người đặt. · Nguồn: ASVS 5.0 V13; catalog 11 §1c, 12 §3i
