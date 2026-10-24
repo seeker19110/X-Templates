@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1782,6 +1783,14 @@ class PrNextCliTest(unittest.TestCase):
         with self.assertRaises(SystemExit):  # effort ngoài 5 mức: argparse từ chối
             run("--reviewer-model", "opus", *opus, "--reviewer-effort", "ultra", "--author-effort", "low")
         self.assertEqual(run("--reviewer-model", "claude-fable-5-1", *opus)[0], 0)  # bậc cao hơn
+        self.assertEqual(run("--reviewer-model", "Fable 5.1", "--author-model", "Opus 5.5")[0], 0)  # tên có dấu cách
+        sp = xt.pr_next(  # review #249: lệnh đăng lại trích dẫn giá trị (shlex) — tên có dấu cách không gãy lệnh
+            {"pr": 7, "head": self.head, "verdict": "merge", "lane": "chuẩn", "hard": []},
+            False,
+            xt.with_published({"reviews": [last()]}, []),
+        )["do"]
+        self.assertIn("--reviewer-model 'Fable 5.1' --author-model 'Opus 5.5'", sp)
+        self.assertEqual(run(*shlex.split(sp.split(" --clean", 1)[1]))[0], 0)  # chạy lại đúng lệnh đó: nhận
         self.assertNotIn("reviewer_effort", last())
         rev = ("--reviewer-effort", "low", "--author-effort", "max")
         self.assertEqual(run("--reviewer-model", "opus", "--author-model", "sonnet", *rev)[0], 0)  # so bậc trước effort
@@ -1791,14 +1800,25 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual((last()["reviewer_model"], last()["reviewer_effort"], last()["author_effort"]),
                          ("opus", "max", "high"))  # fmt: skip
         self.assertEqual(run("--reviewer-model", "gpt-5", "--author-model", "gpt-5", *hi)[0], 0)  # họ không bậc
-        for rv, au in (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "gpt-5")):
-            self.assertEqual(run("--reviewer-model", rv, "--author-model", au)[0], 0, (rv, au))  # không xếp hạng được
-        # review #247: họ Anthropic chưa xếp bậc (mythos) so với họ Anthropic khác → từ chối, không đoán bậc
-        for rv, au in (("claude-haiku-4-5", "claude-mythos-5-1"), ("Mythos 5", "claude-fable-5-1")):
+        cross = (("gpt-5", "claude-opus-5-5"), ("claude-haiku-4-5", "gpt-5"), ("mythos", "gpt-5"), ("gemma-3", "o3"))
+        for rv, au in cross:  # khác nhà cung cấp: máy không xếp hạng được → nhận
+            self.assertEqual(run("--reviewer-model", rv, "--author-model", au)[0], 0, (rv, au))
+        # review #247, #249: khác họ CÙNG nhà cung cấp mà một họ chưa có bậc → từ chối, không đoán bậc
+        same_vendor = (
+            ("claude-haiku-4-5", "claude-mythos-5-1", "mythos"),
+            ("Mythos 5", "claude-fable-5-1", "mythos"),
+            ("gemma-3-4b", "gemini-2.5-pro", "gemma"),
+            ("o4-mini", "gpt-5", "o4"),
+            ("codex-mini", "gpt-5", "codex"),
+            ("gpt-4o-mini", "o3", "gpt"),
+        )
+        for rv, au, fam in same_vendor:
             rc, _, err = run("--reviewer-model", rv, "--author-model", au, "--reviewer-effort", "max")
             self.assertEqual(rc, 2, (rv, au))
-            self.assertIn("họ mythos chưa có bậc", err)
-            self.assertIn("MODEL_TIER", err)
+            self.assertIn(f"họ {fam} chưa có bậc", err)
+            self.assertIn("xt.py feedback", err)
+            self.assertNotIn("MODEL_TIER", err)  # dự án đích không sửa được (install.py ghi đè)
+        self.assertEqual((xt.model_vendor("o4"), xt.model_vendor("llama")), ("openai", "llama"))
         self.assertIsNone(xt.review_capability_error("mythos", "claude-mythos-5-1", "max", "low"))  # cùng họ: effort
         # review #247: chữ Unicode gập hoa/thường ra Latin (`ſ` → s) không làm lộ họ model
         for odd in ("claude-opuſ-5-5", "ſonnet"):

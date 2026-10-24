@@ -11,6 +11,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Fixed
 - `xt.py pr reviewed`/`ci-check` (D-161): họ Anthropic chưa có bậc (mythos) so với họ Anthropic khác bị từ chối cho tới khi thêm bậc — 3.19.0 nhận như khác nhà cung cấp nên reviewer yếu hơn lọt qua; effort cấu hình của một phía chỉ dùng khi model phía đó cũng lấy từ cấu hình — workflow `pr-review` truyền model thật từng mượn `reviewer_effort` trong xt.yaml; tên họ chỉ nhận chữ ASCII (`re.A`).
+- `WF-REVIEW-004` (MUST@L) và văn xuôi `10-workflow/code-review.md` (review #249): đòi reviewer AI "khác model" mâu thuẫn `LOOP-ORCH-005` (`reviewer-alt` Opus effort max chấm diff của `executor-deep`) → đổi sang "năng lực cao hơn"; phần `→ Kiểm:` đổi theo. Dự án đích: ghép lại blueprint để nhận chữ mới.
+- `xt.py pr reviewed` (review #249): họ chưa có bậc cùng nhà cung cấp (vd `gemma`/`gemini`, `o4`/`gpt`) bị từ chối như mythos — chỉ **khác nhà cung cấp** mới được nhận; lệnh đăng lại bọc nháy tên model có khoảng trắng.
 - `pr next`: bản ghi sổ sạch chưa đăng không còn qua luật mới → trả `review` (rà lại) thay vì đề nghị đăng lại mãi bằng lệnh bị từ chối.
 - Chữ "khác họ model" còn sót đổi theo `LOOP-ORCH-005` ở `LOOP-STOP-022`, `LOOP-OPT-005`, `LOOP-ORCH-018`, skill `/autopilot`, `/review`, prompt `pr-review.yml`; `LOOP-ORCH-005` ghi rõ người viết = agent năng lực cao nhất đã góp vào diff. Dự án đích: ghép lại blueprint để nhận chữ mới.
 

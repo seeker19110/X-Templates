@@ -8734,9 +8734,10 @@ def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
 def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
     """Lệnh đăng lại; bản ghi sạch đã qua `_ledger_clean_valid` nên luôn có đủ hai model."""
     flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
-    efforts = "".join(f" --{k.replace('_', '-')} {r[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
+    q = {k: shlex.quote(str(r.get(k))) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
+    efforts = "".join(f" --{k.replace('_', '-')} {q[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
     models = (
-        f" --reviewer-model {r.get('reviewer_model')} --author-model {r.get('author_model')}{efforts}"
+        f" --reviewer-model {q['reviewer_model']} --author-model {q['author_model']}{efforts}"
         if flag == "--clean"
         else ""
     )
@@ -8861,8 +8862,8 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, 
 
 
 # Luật review sạch (LOOP-ORCH-005, ADR-0044, D-161 thay "khác họ" của D-045): reviewer phải có năng lực CAO HƠN người
-# viết — họ Claude so theo bậc `MODEL_TIER`; cùng họ thì so effort; họ không có bậc (khác nhà cung cấp) máy không xếp
-# hạng được nên nhận như D-045. Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
+# viết — họ Claude so theo bậc `MODEL_TIER`; cùng họ thì so effort; khác nhà cung cấp máy không xếp hạng được nên nhận
+# như D-045; cùng nhà cung cấp mà một họ chưa có bậc thì từ chối (review #247, #249). Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
 # (không phải `\b`: `phi4`, `glm4.5`, `command_r`, `o3mini` là tên thẻ thật) — `graphic`/`commander`/`novaX` không phải
 # tên model (review #162, #164).
 MODEL_FAMILY_RE = re.compile(
@@ -8879,8 +8880,15 @@ def model_family(name: str) -> str:
 
 
 MODEL_TIER = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4}  # bậc năng lực họ Claude (D-161)
-# Họ Anthropic chưa xếp bậc: so với họ Anthropic khác thì từ chối (không đoán bậc) — thêm vào MODEL_TIER (review #247).
-ANTHROPIC_UNTIERED = frozenset({"mythos"})
+# Nhà cung cấp theo họ (`model_family`); họ `o\d` (o3, o4) là openai; họ không có ở đây → nhà cung cấp = chính họ đó.
+MODEL_VENDOR = dict.fromkeys(("opus", "sonnet", "haiku", "fable", "mythos"), "anthropic")
+MODEL_VENDOR.update(gpt="openai", codex="openai", gemini="google", gemma="google")
+
+
+def model_vendor(family: str) -> str:
+    return "openai" if re.fullmatch(r"o\d", family) else MODEL_VENDOR.get(family, family)
+
+
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # mức effort, tăng dần
 REVIEW_EFFORT_KEYS = ("reviewer_effort", "author_effort")
 REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family", "author_effort", "reviewer_effort")
@@ -8889,20 +8897,20 @@ REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family"
 def review_capability_error(
     reviewer: str, author: str, reviewer_effort: Optional[str] = None, author_effort: Optional[str] = None
 ) -> Optional[str]:
-    """Reviewer có năng lực cao hơn người viết không (LOOP-ORCH-005, D-161): khác họ mà cả hai có bậc → bậc reviewer phải
-    cao hơn (effort không bù bậc); khác họ mà một bên không có bậc → nhận (máy không xếp hạng được, như D-045); cùng họ
-    → chỉ nhận khi khai cả hai effort và effort reviewer cao hơn. None = nhận."""
+    """Reviewer có năng lực cao hơn người viết không (LOOP-ORCH-005, D-161): khác nhà cung cấp → nhận (máy không xếp hạng
+    được, như D-045); khác họ cùng nhà cung cấp → cả hai phải có bậc và bậc reviewer cao hơn (effort không bù bậc); cùng
+    họ → chỉ nhận khi khai cả hai effort và effort reviewer cao hơn. None = nhận."""
     fr, fa = model_family(reviewer), model_family(author)
     if fr != fa:
-        anthropic = ANTHROPIC_UNTIERED | MODEL_TIER.keys()
-        untiered = [f for f in (fr, fa) if f in ANTHROPIC_UNTIERED]
-        if untiered and fr in anthropic and fa in anthropic:
-            return (
-                f"họ {untiered[0]} chưa có bậc để so với {fa if untiered[0] == fr else fr} — thêm vào MODEL_TIER rồi "
-                "ghi lại (D-161): reviewer phải có năng lực cao hơn người viết (LOOP-ORCH-005)"
-            )
+        if model_vendor(fr) != model_vendor(fa):
+            return None
         tr, ta = MODEL_TIER.get(fr), MODEL_TIER.get(fa)
-        if tr is None or ta is None or tr > ta:
+        if tr is None or ta is None:
+            return (
+                f"họ {fr if tr is None else fa} chưa có bậc để so với {fa if tr is None else fr} cùng nhà cung cấp — "
+                "dùng reviewer khác nhà cung cấp hoặc `xt.py feedback` đề xuất thêm bậc (D-161, LOOP-ORCH-005)"
+            )
+        if tr > ta:
             return None
         return (
             f"reviewer ({reviewer}, họ {fr}) bậc thấp hơn người viết ({author}, họ {fa}) — "
