@@ -1,7 +1,7 @@
 name: pr-review
 
-# Reviewer độc lập chạy trên GitHub (AUTO-03, D-069, T-1508): mỗi PR làn chuẩn cần review sạch ở đúng head do MODEL KHÁC người
-# viết và TÀI KHOẢN KHÁC tác giả (ADR-0024/0028). Job đọc diff qua REST, chạy `claude-code-action` với công cụ chỉ-đọc và
+# Reviewer độc lập chạy trên GitHub (AUTO-03, D-069, T-1508): mỗi PR làn chuẩn cần review sạch ở đúng head do MODEL NĂNG LỰC CAO
+# HƠN người viết (LOOP-ORCH-005, D-161) và TÀI KHOẢN KHÁC tác giả (ADR-0024/0028). Job đọc diff qua REST, chạy `claude-code-action` với công cụ chỉ-đọc và
 # `--json-schema` (kết quả có cấu trúc, không phải văn xuôi), rồi gọi `xt.py pr reviewed` bằng token của danh tính reviewer
 # (`XT_REVIEWER_TOKEN`) — dấu review đăng lên PR là thứ `merge-check`/guard/steward đọc (ADR-0027/0028).
 #
@@ -9,9 +9,9 @@ name: pr-review
 #   1. Tạo tài khoản/GitHub App reviewer (khác tác giả PR) với quyền pull-requests: write, issues: write; token → secret
 #      `XT_REVIEWER_TOKEN` của environment `pr-review` (secret của environment, không phải repo).
 #   2. Secret `ANTHROPIC_API_KEY` (hoặc liên kết workload identity) trong cùng environment `pr-review`.
-#   3. xt.yaml: `review_identity: <login của tài khoản ở bước 1>`, `author_model_family` khác họ model của reviewer (action
+#   3. xt.yaml: `review_identity: <login của tài khoản ở bước 1>`, `author_model_family` bậc thấp hơn model reviewer (action
 #      chỉ chạy model Claude: tác giả họ khác Claude thì dùng Claude làm reviewer; tác giả Claude thì đặt `XT_REVIEWER_MODEL`
-#      ở họ Claude khác — vd tác giả opus, reviewer sonnet); Settings → Variables: `XT_REVIEWER_ENABLED=true`, tuỳ chọn
+#      ở bậc cao hơn — vd tác giả sonnet/opus, reviewer fable; job không truyền effort nên cùng họ bị từ chối); Settings → Variables: `XT_REVIEWER_ENABLED=true`, tuỳ chọn
 #      `XT_REVIEWER_MODEL`, và `XT_REVIEW_IDENTITY` = cùng login ở bước 1 (để pr-steward nhận comment của App/bot không phải
 #      collaborator, nếu không steward chỉ chạy theo cron).
 #
@@ -118,5 +118,5 @@ jobs:
             *) echo "::error::verdict lạ"; exit 1 ;;
           esac
           # Họ reviewer = model THẬT đã chạy (`--reviewer-model`), họ tác giả đọc từ xt.yaml nhánh đích
-          # (`author_model_family`); trùng họ → xt.py từ chối (D-045) — không tin `reviewer_model_family` khai trong cấu hình.
+          # (`author_model_family`); reviewer không cao hơn → xt.py từ chối (D-161) — không tin `reviewer_model_family` khai trong cấu hình.
           python3 scripts/xt.py pr reviewed --pr "$PR" --head "$HEAD_SHA" --reviewer-model "$REVIEW_MODEL" "$flag"

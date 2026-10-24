@@ -171,7 +171,7 @@ tên workflow CI khác thì sửa `workflows:` (tên không khớp = không bao 
   hoặc `update` (cập nhật nhánh ghim head: `gh api -X PUT repos/<o>/<r>/pulls/<N>/update-branch -f expected_head_sha=<head>`);
   hành động khác → kết thúc không làm gì. Ngân sách sửa theo `self-healing-ci.md` (cùng chữ ký lỗi 3 lần → `loop defer`).
 - Danh tính: Routine chạy bằng tài khoản GitHub của chủ Routine — commit/push hiện là người đó. Review từ Routine **không**
-  tính là review độc lập với tác giả (`review_identity`, ADR-0027); `review` vẫn do reviewer khác danh tính/khác họ model.
+  tính là review độc lập với tác giả (`review_identity`, ADR-0027); `review` vẫn do reviewer khác danh tính, năng lực cao hơn người viết.
 - Routine mặc định push nhánh `claude/…`; prompt phải chỉ rõ nhánh head của PR, và ruleset nhánh vẫn là lớp chặn (push
   thẳng nhánh chính bị từ chối). Sự kiện vượt trần theo giờ bị bỏ — steward theo lịch vẫn báo `fix`/`update` còn treo.
 

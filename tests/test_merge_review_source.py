@@ -29,7 +29,7 @@ STANDARD = [
     {"path": "src/cart/total.py", "additions": 400, "deletions": 0},
     {"path": "tests/test_total.py", "additions": 10, "deletions": 0},
 ]
-MODELS = ("--reviewer-model", "sonnet", "--author-model", "claude-opus-5-5")
+MODELS = ("--reviewer-model", "claude-fable-5-1", "--author-model", "claude-opus-5-5")  # bậc cao hơn (D-161)
 
 
 def std(**over: Any) -> dict:
@@ -409,6 +409,17 @@ class ReviewSourceTest(unittest.TestCase):
         self.assertEqual(
             r["do"],
             f"xt.py pr reviewed --pr 7 --head {HEAD} --clean --reviewer-model sonnet --author-model claude-opus-5-5",
+        )
+        eff = {
+            **clean,
+            "reviewer_model": "opus",
+            "reviewer_effort": "max",
+            "author_effort": "high",
+        }  # D-161: kèm effort
+        self.assertTrue(
+            xt.pr_next(d, False, xt.with_published({"reviews": [eff]}, []))["do"].endswith(
+                "--reviewer-model opus --author-model claude-opus-5-5 --reviewer-effort max --author-effort high"
+            )
         )
         r = xt.pr_next(d, True, xt.with_published({"reviews": [clean]}, []))  # đang bật: tắt trước
         self.assertEqual(r["action"], "disable-auto-merge")
