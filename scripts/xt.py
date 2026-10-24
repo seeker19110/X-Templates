@@ -8723,11 +8723,21 @@ def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return last
 
 
+def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
+    """Bản ghi sạch của sổ còn qua `_review_models_error` (luật hiện hành, không cấu hình) — tức lệnh đăng lại chạy được."""
+    vals = {k: r.get(k) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
+    if not all(v is None or isinstance(v, str) for v in vals.values()):
+        return False
+    return _review_models_error(argparse.Namespace(clean=True, **vals)) is None
+
+
 def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
+    """Lệnh đăng lại; bản ghi sạch đã qua `_ledger_clean_valid` nên luôn có đủ hai model."""
     flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
-    efforts = "".join(f" --{k.replace('_', '-')} {r[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
+    q = {k: shlex.quote(str(r.get(k))) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
+    efforts = "".join(f" --{k.replace('_', '-')} {q[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
     models = (
-        f" --reviewer-model {r.get('reviewer_model') or '<M>'} --author-model {r.get('author_model') or '<M>'}{efforts}"
+        f" --reviewer-model {q['reviewer_model']} --author-model {q['author_model']}{efforts}"
         if flag == "--clean"
         else ""
     )
@@ -8820,7 +8830,11 @@ def _pr_next_republish(
     sạch mà PR đã qua (làn nhanh, pha build hoãn review) thì không chặn. Review của head cũ không đăng lại: head đã đổi
     thì cần review mới ở head hiện tại, đăng kết luận cũ chỉ thêm một bước thừa."""
     r = unpublished_review(rec)
-    if r is None or r.get("head") != d.get("head") or (r.get("clean") and not r.get("inconclusive") and not review_bad):
+    if r is None or r.get("head") != d.get("head"):
+        return None
+    # Review sạch chỉ đăng lại khi đổi được kết luận VÀ bản ghi còn qua luật hiện hành (bản ghi theo luật cũ, thiếu
+    # model → lệnh đăng lại exit 2 mãi): không thì rơi về bước `review` thường — rà lại (review #247).
+    if r.get("clean") and not r.get("inconclusive") and not (review_bad and _ledger_clean_valid(r)):
         return None
     n = d.get("pr", "")
     why = (
@@ -8848,24 +8862,45 @@ def _pr_next_final(d: Dict[str, Any], auto_merge: bool, label: str, act: PrAct, 
 
 
 # Luật review sạch (LOOP-ORCH-005, ADR-0044, D-161 thay "khác họ" của D-045): reviewer phải có năng lực CAO HƠN người
-# viết — họ Claude so theo bậc `MODEL_TIER`; cùng họ thì so effort; họ không có bậc (khác nhà cung cấp) máy không xếp
-# hạng được nên nhận như D-045. Họ ngắn (`phi`, `glm`, `nova`, `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
+# viết — họ Claude so theo bậc `MODEL_TIER`; cùng họ thì so effort; khác nhà cung cấp máy không xếp hạng được nên nhận
+# như D-045; cùng nhà cung cấp mà một họ chưa có bậc thì từ chối (review #247, #249). Họ ngắn (`phi`, `glm`, `nova`,
+# `command`, `kimi`, `o3`) cần ranh giới theo CHỮ CÁI
 # (không phải `\b`: `phi4`, `glm4.5`, `command_r`, `o3mini` là tên thẻ thật) — `graphic`/`commander`/`novaX` không phải
 # tên model (review #162, #164).
 MODEL_FAMILY_RE = re.compile(
     r"opus|sonnet|haiku|fable|mythos|gpt|gemini|gemma|codex|grok|llama|qwen|deepseek|mistral"
     r"|(?<![a-z])(?:kimi|glm|phi|command|nova)(?![a-z])|(?<![a-z0-9])o\d",
-    re.I,
+    re.I | re.A,  # re.A: `ſonnet`/`claude-opuſ` (Unicode gập hoa/thường ra Latin) không phải tên họ (review #247)
 )
+
+
+def _model_tail(name: str) -> str:
+    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)."""
+    return name.rsplit("/", 1)[-1]
 
 
 def model_family(name: str) -> str:
     """Họ model để so năng lực: `claude-opus-5-5`/`Opus 5.5`/`opus` → `opus`; tên lạ → chữ thường bỏ số và dấu."""
+    name = _model_tail(name)
     m = MODEL_FAMILY_RE.search(name)
     return m.group(0).lower() if m else re.sub(r"[^a-z]+", "", name.lower())
 
 
+def _names_family(name: str) -> bool:
+    """Đoạn cuối tên có lộ họ model không — cùng đoạn mà `model_family` so, không thì `haiku/reviewer` lọt (review #249)."""
+    return bool(MODEL_FAMILY_RE.search(_model_tail(name)))
+
+
 MODEL_TIER = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4}  # bậc năng lực họ Claude (D-161)
+# Nhà cung cấp theo họ (`model_family`); họ `o\d` (o3, o4) là openai; họ không có ở đây → nhà cung cấp = chính họ đó.
+MODEL_VENDOR = dict.fromkeys(("opus", "sonnet", "haiku", "fable", "mythos"), "anthropic")
+MODEL_VENDOR.update(gpt="openai", codex="openai", gemini="google", gemma="google")
+
+
+def model_vendor(family: str) -> str:
+    return "openai" if re.fullmatch(r"o\d", family) else MODEL_VENDOR.get(family, family)
+
+
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # mức effort, tăng dần
 REVIEW_EFFORT_KEYS = ("reviewer_effort", "author_effort")
 REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family", "author_effort", "reviewer_effort")
@@ -8874,13 +8909,20 @@ REVIEW_KEYS = ("review_identity", "author_model_family", "reviewer_model_family"
 def review_capability_error(
     reviewer: str, author: str, reviewer_effort: Optional[str] = None, author_effort: Optional[str] = None
 ) -> Optional[str]:
-    """Reviewer có năng lực cao hơn người viết không (LOOP-ORCH-005, D-161): khác họ mà cả hai có bậc → bậc reviewer phải
-    cao hơn (effort không bù bậc); khác họ mà một bên không có bậc → nhận (máy không xếp hạng được, như D-045); cùng họ
-    → chỉ nhận khi khai cả hai effort và effort reviewer cao hơn. None = nhận."""
+    """Reviewer có năng lực cao hơn người viết không (LOOP-ORCH-005, D-161): khác nhà cung cấp → nhận (máy không xếp hạng
+    được, như D-045); khác họ cùng nhà cung cấp → cả hai phải có bậc và bậc reviewer cao hơn (effort không bù bậc); cùng
+    họ → chỉ nhận khi khai cả hai effort và effort reviewer cao hơn. None = nhận."""
     fr, fa = model_family(reviewer), model_family(author)
     if fr != fa:
+        if model_vendor(fr) != model_vendor(fa):
+            return None
         tr, ta = MODEL_TIER.get(fr), MODEL_TIER.get(fa)
-        if tr is None or ta is None or tr > ta:
+        if tr is None or ta is None:
+            return (
+                f"họ {fr if tr is None else fa} chưa có bậc để so với {fa if tr is None else fr} cùng nhà cung cấp — "
+                "dùng reviewer khác nhà cung cấp hoặc `xt.py feedback` đề xuất thêm bậc (D-161, LOOP-ORCH-005)"
+            )
+        if tr > ta:
             return None
         return (
             f"reviewer ({reviewer}, họ {fr}) bậc thấp hơn người viết ({author}, họ {fa}) — "
@@ -8919,7 +8961,7 @@ def review_family_config_error(keys: Dict[str, str]) -> Optional[str]:
     a, r = keys.get("author_model_family", ""), keys.get("reviewer_model_family", "")
     if not (a and r):
         return None
-    if not (MODEL_FAMILY_RE.search(a) and MODEL_FAMILY_RE.search(r)):
+    if not (_names_family(a) and _names_family(r)):
         return f"xt.yaml: author_model_family '{a}' / reviewer_model_family '{r}' không nhận diện được họ model"
     err = review_capability_error(r, a, keys.get("reviewer_effort"), keys.get("author_effort"))
     return f"xt.yaml reviewer_model_family/author_model_family: {err}" if err else None
@@ -8935,15 +8977,19 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
     bad_cfg = review_family_config_error(cfg)
     if bad_cfg:
         return bad_cfg
-    args.reviewer_model = args.reviewer_model or cfg.get("reviewer_model_family")
-    args.author_model = args.author_model or cfg.get("author_model_family")
-    args.reviewer_effort = args.reviewer_effort or cfg.get("reviewer_effort")
-    args.author_effort = args.author_effort or cfg.get("author_effort")
+    # Effort cấu hình đi kèm model cấu hình: model khai bằng cờ (workflow `pr-review` truyền model reviewer thật) thì
+    # effort cấu hình không áp cho model đó — không ghi effort chưa từng chạy (review #247).
+    if not args.reviewer_model:
+        args.reviewer_model = cfg.get("reviewer_model_family")
+        args.reviewer_effort = args.reviewer_effort or cfg.get("reviewer_effort")
+    if not args.author_model:
+        args.author_model = cfg.get("author_model_family")
+        args.author_effort = args.author_effort or cfg.get("author_effort")
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-ORCH-005: reviewer năng lực cao hơn người viết)"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
         return "không nhận diện được tên model (cần chữ, vd sonnet, claude-opus-5-5)"
-    vague = [m for m in (args.reviewer_model, args.author_model) if not MODEL_FAMILY_RE.search(m)]
+    vague = [m for m in (args.reviewer_model, args.author_model) if not _names_family(m)]
     if vague:  # `claude`, `reviewer`: tên không lộ họ thì "khác họ" luôn đúng — né vô ý luật năng lực (AUD-HAR-064)
         return (
             f"không nhận diện được họ model của '{vague[0]}' — ghi tên đủ (vd claude-sonnet-5-5, gpt-5, gemini-2.5-pro)"
