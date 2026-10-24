@@ -1106,3 +1106,10 @@
 - Chọn: (1) mọi lệnh loop gõ tay theo gốc worktree; (2) mỗi lát loop init trong worktree của mình, vòng chính loop verify --all sau merge (ghi README/orchestration); (3) loop resume gắn lại phiên hiện tại
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: sổ một worktree nhất quán (tick cần state do init tạo); (3) đơn giản: không đổi hook đọc cwd payload (thêm bề mặt); resume là hành động có chủ ý của phiên mới — gắn lại là đúng ý, không thì Stop hook không giữ vòng
 - Đường lùi: Giới hạn loop_root cho record/status/verify; bỏ gắn lại ở resume
+
+### D-157 · 2026-10-24T04:26:37+00:00 · Duyệt PLAN-3.18-feedback2: sửa 7 lỗi 🟢 còn lại từ phản hồi dự án đích
+
+- Phương án: (1) Sửa cả 7 trong 3 lát, mỗi lỗi test đỏ trước; mục hàng rào dùng lệnh con chỉ đọc harness-check · (2) Chỉ sửa 3 lỗi tài liệu (BASE-SEC-002, PLAN mỗi đợt), để phần loop/check-links sau · (3) Nới guard cho script python -c chỉ đọc
+- Chọn: Sửa cả 7 trong 3 lát, mỗi lỗi test đỏ trước; mục hàng rào dùng lệnh con chỉ đọc harness-check
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: cả 7 tái hiện được, cỡ S-M; không nới guard (an toàn hơn phương án 3); (3) test được từng lỗi
+- Đường lùi: Revert từng PR lát; harness-check là lệnh mới, bỏ không ảnh hưởng lệnh cũ

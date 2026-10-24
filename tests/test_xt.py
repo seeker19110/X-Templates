@@ -2045,5 +2045,39 @@ class EssentialNotCappedTest(unittest.TestCase):
         self.assertEqual(list(essentials), ["08-backend/authn-authz"])  # không bỏ trần đại trà
 
 
+class BaseSec002SelfMatchTest(unittest.TestCase):
+    """Phản hồi dự án đích: mẫu grep gợi ý của BASE-SEC-002 khớp chính dòng của mục → quét repo có khung/BLUEPRINT đỏ."""
+
+    def test_base_sec_002_selfmatch_pattern_finds_nothing_in_framework(self):
+        line = next(
+            ln
+            for ln in (ROOT / "framework/01-baseline/security-minimum.md").read_text(encoding="utf-8").splitlines()
+            if "`BASE-SEC-002`" in ln
+        )
+        pattern = re.search(r"`grep -rE '([^']+)'`", line)
+        assert pattern is not None
+        rx = re.compile(pattern[1])
+        self.assertIsNotNone(rx.search("AKIA" + "ABCDEFGHIJKLMNOP"))  # vẫn bắt khoá thật
+        self.assertIsNotNone(rx.search("-----BEGIN " + "RSA PRIVATE KEY-----"))
+        hits = [
+            f"{f.relative_to(ROOT)}:{n}"
+            for f in [ROOT / "BLUEPRINT.md", *sorted((ROOT / "framework").rglob("*.md"))]
+            for n, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+            if rx.search(ln)
+        ]
+        self.assertEqual(hits, [])
+
+
+class RebaseLinksAnchorTest(unittest.TestCase):
+    """Phản hồi dự án đích: anchor nội trang `(#x)` của mục module giữ nguyên khi sang BLUEPRINT → link gãy."""
+
+    def test_rebase_links_anchor_points_to_module_file(self):
+        text = "xem [bảng chọn](#quyết-định), [khác](other.md#a), [web](https://x.invalid/#b)"
+        out = xt._rebase_links(text, "06-design-ux/design-system-and-tokens.md", ".xtemplates/framework")
+        self.assertIn("(.xtemplates/framework/06-design-ux/design-system-and-tokens.md#quyết-định)", out)
+        self.assertIn("(.xtemplates/framework/06-design-ux/other.md#a)", out)
+        self.assertIn("(https://x.invalid/#b)", out)
+
+
 if __name__ == "__main__":
     unittest.main()

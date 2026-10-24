@@ -5,6 +5,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- `BASE-SEC-002` (T-2601): lệnh kiểm gợi ý đổi sang mẫu chặt `AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----` — mẫu cũ khớp chính dòng của mục khi quét repo có khung/BLUEPRINT (phản hồi dự án đích). Dự án đích: ghép lại blueprint để nhận chữ mới.
+- `compose` (T-2602): anchor nội trang `(#x)` trong mục module thành `(<link_root>/<file module>#x)` — trước đây giữ nguyên nên gãy trong BLUEPRINT/BACKLOG.
+- `check-links.py` (T-2603): kiểm `#anchor` (cùng file và file `.md` khác) theo slug tiêu đề kiểu GitHub hoặc `<a id|name>` — link tới anchor không tồn tại từng qua với exit 0. Dự án đích có link anchor gãy sẽ thấy đỏ ở `lint`: sửa link.
+
 ## [3.17.0] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py`** — guard/hook đổi (chặn xoá gốc dự án, từ chối sửa file + `git commit` cùng một lệnh Bash; xem Fixed), `xt.py` đổi (`blueprint-status --strict` đỏ khi lẫn "Không áp dụng" + "Miễn" ở mọi mức hoặc ID in đậm — sửa blueprint trước khi nâng; `loop` theo gốc worktree; Stop hook gắn phiên; `feedback collect` không chép lý do miễn trừ). PLAN-3.17-feedback (D-149…D-156), từ phản hồi 4 dự án đích.

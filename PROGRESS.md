@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.17.0, pha `harden` — D-136) · Cập nhật: 2026-10-24 · Nhánh: main
 
 ## Đang làm
-- 2026-10-24 **PLAN-3.17-feedback** (D-149…D-156): phân loại 30 nhóm phản hồi dự án đích (11 đã sửa, 15 còn lỗi) → sửa 6 🟠 + 2 🟢: guard chặn xoá gốc dự án (7 lượt review đối kháng; D-153 quét chuỗi gốc), blueprint-status không xanh giả, loop theo worktree, Stop hook gắn phiên, feedback không chép dữ liệu dự án. #235 + PR Lát 3–4 + 3.17.0. 🟢 còn: loop init/decide song song, kiểm LOOP-ORCH-003, BASE-SEC-002 tự khớp, anchor check-links/compose.
+- 2026-10-24 **PLAN-3.18-feedback2** (D-157): 7 🟢 phản hồi còn lại — Lát 1 (BASE-SEC-002 mẫu chặt, compose anchor, check-links kiểm `#anchor`) PR; Lát 2 loop init/decide, Lát 3 `harness-check` + 3.18.0. Trước đó PLAN-3.17-feedback xong (D-149…D-156, #235–#237, `v3.17.0`, GO-NO-GO chờ ký).
 - 2026-10-23 **PLAN-3.16.0-ceiling xong** (D-142…D-148, ADR-0043; #231, #232, PR cắt 3.16.0): `pr-title.yml` tách khỏi CI nặng; steward dispatch CI trên `main` sau merge (đã thấy chạy thật ở `5fcdc1b`); check cùng tên xét bản mới nhất; `validate` đòi Nguồn có URL+ngày; `unchecked_must_ratio` 58/68; trần byte thư mục; `pr stats` đếm push/run huỷ cùng SHA. Đo lại 2026-10-30 bằng `pr stats --days 7`. Phản hồi dự án đích: 10 nhóm `cong-cu` đủ ngưỡng chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - 2026-10-21…22: PLAN-3.15 (D-130, #207), ADR-0040…0042 (#212–#218), 3.15.0…3.15.6 (#219–#228), audit delta + A11Y (#227) — chi tiết ở CHANGELOG và docs/ops/AUDIT-REPORT-2026-10-2*.md. Dự án đích: hotel-manager, X-Company 3.15.1; dhcb 3.15.3; xboss 2.0.0.
 - Nợ 🟢 #191: gom mệnh đề "Dự án đích" trùng của `install.py`. Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).

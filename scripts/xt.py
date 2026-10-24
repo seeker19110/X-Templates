@@ -964,8 +964,10 @@ def _rebase_links(text: str, doc_rel: str, link_root: str) -> str:
 
     def sub(m: "re.Match[str]") -> str:
         target = m.group(2)
-        if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith(("#", "/")):
+        if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith("/"):
             return m.group(0)
+        if target.startswith("#"):  # anchor nội trang của module: sang BLUEPRINT phải trỏ về chính file module
+            return f"{m.group(1)}({link_root}/{doc_rel}{target})"
         return f"{m.group(1)}({link_root}/{posixpath.normpath(posixpath.join(base, target))})"
 
     return LINK_SUB_RE.sub(sub, text)
