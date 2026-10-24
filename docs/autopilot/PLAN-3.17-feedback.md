@@ -43,5 +43,5 @@
 - [x] `T-2522` Stop hook chỉ áp vòng cho đúng phiên đã `loop init` (ghi `session_id` khi init; payload khác phiên/không đọc được → không chặn, ghi log), không tăng `iterations` của vòng phiên khác (🟠) (sau: T-2521; exec: deep) (files: scripts/xt.py, tests/test_xt_loop.py) — Gate: `python3 -m unittest discover -s tests -k stop_hook_session_bound`
 
 ### Lát 4 — Phản hồi và phát hành
-- [ ] `T-2531` `feedback collect`: không chép nguyên văn lý do miễn trừ của dự án (chỉ ID + loại + tóm tắt chuẩn hoá), khử trùng theo (loại, ID) với FB đã có kể cả khi lý do đổi chữ (🟠) (files: scripts/xt.py, tests/test_xt_cli.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k feedback_collect_no_project_data`
+- [x] `T-2531` `feedback collect`: không chép nguyên văn lý do miễn trừ của dự án (chỉ ID + loại + tóm tắt chuẩn hoá), khử trùng theo (loại, ID) với FB đã có kể cả khi lý do đổi chữ (🟠) (files: scripts/xt.py, tests/test_xt_cli.py, CHANGELOG.md) — Gate: `python3 -m unittest discover -s tests -k feedback_collect_no_project_data`
 - [ ] `T-2539` VERSION 3.17.0 + CHANGELOG `[3.17.0]` (dự án đích chạy lại `install.py` — guard/hook đổi) + PROGRESS (7 🟢 còn lại) (sau: T-2503, T-2512, T-2522, T-2531; files: VERSION, CHANGELOG.md, PROGRESS.md) — Gate: `scripts/dev-task.sh gate`

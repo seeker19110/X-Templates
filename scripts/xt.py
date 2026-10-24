@@ -7759,6 +7759,11 @@ def _feedback_add(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+def waiver_summary(item_id: str) -> str:
+    """Tóm tắt chuẩn hoá của FB `mien-tru`: lý do miễn trừ chứa dữ liệu dự án nên KHÔNG chép (ADR-0010)."""
+    return f"MUST bị miễn: {item_id} — dự án ghi lý do không áp dụng/miễn; xem blueprint dự án"
+
+
 def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
     """Tín hiệu máy có sẵn: MUST bị miễn trong blueprint, lý do `blocked`/verdict cuối `blocked` của autopilot."""
     out = []
@@ -7767,9 +7772,7 @@ def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
         for line in bp.read_text(encoding="utf-8").splitlines():
             m = ITEM_RE.match(line)
             if m and m["state"] == "~" and m["level"] == "MUST":
-                key = next((k for k in ("Miễn:", "Không áp dụng:") if k in line), "")
-                why = line.split(key, 1)[1].strip() if key else "(thiếu lý do)"
-                out.append({"kind": "mien-tru", "id": m["id"], "symptom": f"MUST bị miễn: {why}", "fix": "miễn trừ"})
+                out.append({"kind": "mien-tru", "id": m["id"], "symptom": waiver_summary(m["id"]), "fix": "miễn trừ"})
     st = read_state(base) or {}
     fv_raw = st.get("final_verdict")
     fv: Dict[str, Any] = fv_raw if isinstance(fv_raw, dict) else {}
@@ -7780,15 +7783,23 @@ def _collect_candidates(base: Path, blueprint: str) -> List[Dict[str, str]]:
     return out
 
 
+def _collect_source(kind: str, item_id: str, symptom: str = "") -> str:
+    """Khoá khử trùng `Nguồn:`; `mien-tru` chỉ theo (loại, ID), loại khác kèm triệu chứng."""
+    return f"collect:{kind}:{item_id}" + ("" if kind == "mien-tru" else f":{_one_line(symptom)[:80]}")
+
+
 def _feedback_collect(args: argparse.Namespace, base: Path) -> int:
     if (base / "framework/00-method/conventions.md").is_file() and (base / "scripts/xt.py").is_file():
         print("· Bỏ qua: đây là repo khung — phản hồi tự gom dành cho dự án đích (ADR-0010, AUD-HAR-048)")
         return 0
     d = base / FEEDBACK_DIR
-    seen = {e.get("source") for e in feedback_entries(d)} if d.is_dir() else set()
+    entries = feedback_entries(d) if d.is_dir() else []
+    # Khử trùng `mien-tru` theo (loại, ID) bất kể chữ lý do của FB cũ; loại khác theo khoá `Nguồn`.
+    seen = {e.get("source") for e in entries}
+    seen |= {_collect_source("mien-tru", e.get("id", "")) for e in entries if e.get("kind") == "mien-tru"}
     added = []
     for c in _collect_candidates(base, args.blueprint):
-        source = f"collect:{c['kind']}:{c['id']}:{_one_line(c['symptom'])[:80]}"
+        source = _collect_source(c["kind"], c["id"], c["symptom"])
         if redact(source) in seen:
             continue
         added.append(write_feedback(base, {**c, "source": source}))
