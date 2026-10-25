@@ -6172,7 +6172,7 @@ def _live_loop(base: Path) -> str:
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022): verify của đợt kế chỉ chạy Gate PLAN
         # mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
         why = final_check(base)
-        return f"đợt `{verdict}` nhưng {why}" if why else ""
+        return f"đợt `{verdict}` — {why}" if why else ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
 
 
