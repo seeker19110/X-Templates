@@ -49,9 +49,9 @@ updated: 2026-10-24
 | `inactive` | Chưa `loop init` hoặc đã tắt | Cho dừng |
 | `blocked` | `loop block` đã gọi · `same_failure_count ≥ 3` · không thấy PLAN · PLAN không có task | Cho dừng, `active=false`, ghi `final_verdict` |
 | `budget` | `iterations ≥ max_iterations` (mặc định 100; một phiên `max(40, 8 × task chưa làm)`) · quá `deadline` (`--hours`) | Cho dừng, `active=false` |
-| `continue` | Còn task `[ ]`, hoặc blueprint còn MUST mở / miễn trừ không hợp lệ (thiếu lý do, MUST `Miễn` thiếu `Duyệt:`) / dòng mục sai định dạng hoặc bị xoá | **Chặn dừng**, `iterations += 1`, nêu task kế |
+| `continue` | Còn task `[ ]`, hoặc blueprint còn MUST mở (pha harden; pha build không chặn — ADR-0046) / miễn trừ không hợp lệ (thiếu lý do, MUST `Miễn` thiếu `Duyệt:`) / dòng mục sai định dạng hoặc bị xoá | **Chặn dừng**, `iterations += 1`, nêu task kế |
 | `verify` | Task `[x]` nhưng không có evidence, `exit_code ≠ 0`, `cmd ≠ Gate` khai trong PLAN, hoặc evidence có từ trước lần `loop init` này (vòng/PLAN trước) · task `[~]` không ghi `— Bỏ: <lý do>` · dòng task sai định dạng · (ở Stop hook) đủ bằng chứng nhưng chưa `loop verify` xanh trên cây hiện tại | **Chặn dừng**, yêu cầu `loop record` / `loop verify` lại |
-| `done` | Mọi task có bằng chứng xanh đúng Gate và blueprint 0 MUST mở (blueprint khai ở `loop init` phải tồn tại; biến mất giữa chừng thì PLAN là nguồn sự thật và lý do verdict ghi rõ blueprint không được kiểm) | Cho dừng, `active=false` |
+| `done` | Mọi task có bằng chứng xanh đúng Gate và blueprint 0 MUST mở — ở pha build (`delivery_phase: build` trong cây làm việc) MUST mở không chặn, verdict ghi `open_must` và "trả ở `/complete`" (ADR-0046; `release-check` hàng `blueprint` vẫn đòi hết) (blueprint khai ở `loop init` phải tồn tại; biến mất giữa chừng thì PLAN là nguồn sự thật và lý do verdict ghi rõ blueprint không được kiểm) | Cho dừng, `active=false` |
 
 Mặc định khuyến nghị: `--max-iterations` 60–100 cho một PLAN ≤ 10 task; `--hours` ≤ 16; headless thêm `--max-turns`
 và `--max-budget-usd` (cùng `--permission-mode` và `--settings .claude/settings.json` tường minh). Tăng trần chỉ bằng

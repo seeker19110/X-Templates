@@ -317,6 +317,7 @@ class DoctorHooksTest(DoctorCase):
 
     def test_skills_agents_and_pending_new(self):
         shutil.rmtree(self.base / ".claude" / "skills" / "gate")
+        shutil.rmtree(self.base / ".claude" / "skills" / "complete")  # ADR-0046: skill pha harden là bắt buộc
         (self.base / ".claude" / "agents" / "reviewer.md").unlink()
         (self.base / ".claude" / "agents" / "reviewer-alt.md").unlink()  # AUD-HAR-107
         self.write(".claude/hooks/stop-guard.sh.xtemplates-new", "x")
@@ -324,7 +325,10 @@ class DoctorHooksTest(DoctorCase):
         self.write(".github/workflows/merge-gate.yml.xtemplates-new", "x")
         found = [(f.level, f.msg) for f in self.findings() if f.code == "harness"]
         self.assertEqual(len(found), 3)
-        self.assertIn("thiếu skills/gate/SKILL.md, agents/reviewer.md, agents/reviewer-alt.md", found[0][1])
+        self.assertIn(
+            "thiếu skills/complete/SKILL.md, skills/gate/SKILL.md, agents/reviewer.md, agents/reviewer-alt.md",
+            found[0][1],
+        )
         # AUD-HAR-050: hook/settings chưa gộp = hàng rào của khung có thể không chạy → lỗi, không chỉ cảnh báo.
         self.assertEqual(found[1][0], "error")
         self.assertIn(".claude/hooks/stop-guard.sh.xtemplates-new", found[1][1])

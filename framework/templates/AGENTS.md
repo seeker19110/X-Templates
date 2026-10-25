@@ -45,10 +45,10 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 - **Trước commit:** hook chạy `.xtemplates/scripts/dev-task.sh gate-fast` theo `commit_gate`; tự review diff; conventional commit.
 - **Trước khi đẩy/mở PR:** `dev-task.sh gate` **một lần** (= CI).
 - **PR đã mở:** `<XT> pr next --pr <N>` → làm đúng `do` (`review` → giao reviewer theo §8 rồi `pr reviewed`); `merge-watch --pr <N>` chạy nền. Luật làn: `LOOP-STOP-022`/`029`; workflow `pr-steward` (`install.py --with-github`) làm thay khi không còn phiên.
-- **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha build: audit delta gom về trước G7 (ADR-0033); pha harden: audit delta mỗi mốc PLAN.
+- **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha harden = `/complete` (ADR-0046).
 
 ## 8. Skill và subagent (nhà: `11-autonomous-loop/orchestration-and-subagents.md`)
-`/autopilot` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả) · `reviewer`/`reviewer-alt` (năng lực cao hơn người viết, `LOOP-ORCH-005`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối, tự làm hàng "Làm trực tiếp" (`LOOP-ORCH-020`); không lồng subagent; song song chỉ khi độc lập file.
+`/autopilot` · `/complete` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả) · `reviewer`/`reviewer-alt` (năng lực cao hơn người viết, `LOOP-ORCH-005`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối, tự làm hàng "Làm trực tiếp" (`LOOP-ORCH-020`); không lồng subagent; song song chỉ khi độc lập file.
 
 ## 9. Quy ước riêng của dự án
 - Cấu trúc thư mục: [ĐIỀN]
