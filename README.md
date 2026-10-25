@@ -60,7 +60,7 @@ Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 1. Agent lập kế hoạch gọn G0–G4 (pha build dùng đầu ra mức S — ADR-0046): đọc repo, `BLUEPRINT.md`, `PLAN.md` có task, lệnh kiểm và Given/When/Then ngắn; nghiên cứu/spec riêng chỉ khi thêm phụ thuộc hay nghiệp vụ không tầm thường.
 2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
 3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR, máy merge ghim head khi `merge-check` = `merge` ở đúng head (ADR-0036; làn chuẩn sau review sạch — ADR-0024), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã khi `merge_hard_exceptions: human` (ADR-0016, ADR-0020). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
-4. Dừng ở **build xong** (mọi task có bằng chứng xanh, `loop verify --all`; MUST blueprint còn mở ghi số, không chặn ở pha build), khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
+4. Mỗi đợt **build xong** (mọi task có bằng chứng xanh, `loop verify --all`; MUST blueprint còn mở ghi số, không chặn ở pha build) → `/audit delta` → sửa/đợt kế, lặp tới khi **hết việc** (PLAN hết task, 0 MUST mở ngoài việc chờ người, audit toàn diện 0 🔴/🟠) rồi **đề xuất** `/complete` (ADR-0047). Dừng khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
    thao tác không đảo ngược (máy chặn), tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật
    (`loop defer`, gom cho người). Deploy/publish và đổi cấu hình cổng kèm lý do **cho chạy** (ADR-0018, D-023 — lớp đỡ
    là CI/ruleset nhánh/review); mâu thuẫn spec không còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`.
@@ -183,7 +183,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   (`hard`) bị chặn — người merge (bật auto-merge bị chặn phẳng ở mọi PR — ADR-0036).
 - [ADR-0020](docs/adr/0020-hard-exceptions-owner-opt-out.md): chủ dự án tắt được chốt người của ngoại lệ cứng
   (`xt.yaml` `merge_hard_exceptions: auto` đã commit ở nhánh đích; thiếu khoá = `human`; PR đổi khoá luôn người merge);
-  repo khung `auto`, mẫu dự án đích `human`.
+  repo khung `auto`; mẫu dự án đích `auto` từ 3.24.0 (chủ repo 2026-10-25, D-176; trước đó `human`).
 - [ADR-0021](docs/adr/0021-merge-watch-after-opening-pr.md): mở PR xong chạy nền `xt.py merge-watch` (30 giây/lần, gọi lại
   `merge-check`) tới khi PR đã merge hoặc cần hành động.
 - [ADR-0022](docs/adr/0022-production-grants-in-plan.md): duyệt kế hoạch = một lần người duyệt mục Ủy quyền production
@@ -219,14 +219,15 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check` = `merge` ở đúng head, CI chưa xong → `wait`; bỏ required check `merge-gate` (thay ADR-0023, ADR-0035).
 - [ADR-0037](docs/adr/0037-reviewers-only-in-harden.md): reviewer chỉ ở pha `harden`; chuyển `harden` chỉ khi lên production (một chiều).
 - [ADR-0038](docs/adr/0038-local-app-on-xt.md): app web cục bộ `xt.py app` chỉ đọc, không chạy lệnh.
-- [ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md): CI mẫu dự án đích 3 job (`gate` ∥ `e2e` → `quality`).
+- [ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md): CI mẫu dự án đích 3 job: `gate` ∥ `e2e` → `quality`.
 - [ADR-0040](docs/adr/0040-build-phase-local-actions-allowed.md): pha `build` guard cho chạy mọi hành động chỉ tác động trong dự án/thư mục tạm.
 - [ADR-0041](docs/adr/0041-build-phase-minimal-gates.md): pha `build` không áp sàn Gate M/L, không `dev-task.sh gate` trước push (cổng commit vẫn chạy), không trần 150 dòng.
 - [ADR-0042](docs/adr/0042-release-check-attack-and-perf.md): `release-check` chạy `attack`/`perf` của `xt.yaml` trước phát hành.
 - [ADR-0043](docs/adr/0043-size-budget.md): trần byte đóng băng bề mặt 3.x (file hướng dẫn, thư mục mã/hook/mảng 11).
 - [ADR-0044](docs/adr/0044-reviewer-higher-capability.md): reviewer năng lực cao hơn người viết (bậc model, hoặc cùng họ effort cao hơn) thay "khác họ".
 - [ADR-0045](docs/adr/0045-split-by-context-measure-before-fold.md): tách agent con chỉ vì context; đổi kiến trúc agent qua eval so sánh; đo trước khi đổi mặc định giao việc.
-- [ADR-0046](docs/adr/0046-autopilot-build-complete-harden.md): `/autopilot` = pha build dừng ở "build xong" (MUST blueprint mở không chặn `done`); `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`, GO-NO-GO); sàn an toàn không đổi.
+- [ADR-0046](docs/adr/0046-autopilot-build-complete-harden.md): `/autopilot` = pha build, `done` không đòi hết MUST blueprint; `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`, GO-NO-GO); sàn an toàn không đổi.
+- [ADR-0047](docs/adr/0047-build-loop-until-audit-clean.md): pha build không chờ người — mẫu dự án đích `merge_hard_exceptions: auto`; `/autopilot` lặp đợt build → `/audit delta` → đợt kế tới khi hết việc và audit toàn diện sạch, rồi **đề xuất** `/complete` (không tự chạy); `loop init` đợt kế (sau `loop verify --all` trên cây có PLAN mới) không bị vòng `done` chặn và mang việc chờ người cùng ID; tag phát hành tự tạo khi `VERSION` đổi trên `main`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

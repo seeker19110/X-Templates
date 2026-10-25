@@ -35,15 +35,15 @@ updated: 2026-10-25
 6. **Chất lượng theo pha — nhanh ở G6, tin cậy ở G7** (ADR-0029): G5 đặt **sàn máy** (năm cổng + MUST sàn về bảo mật,
    cấu hình, dữ liệu, phân quyền — thứ sai từ đầu thì làm lại cả hệ); G6 chạy **nhanh trên sàn đó**: cổng commit + PR mỗi
    lát + review theo làn, **không** audit toàn repo mỗi PR, **không** tối ưu khi chưa có số ([`../11-autonomous-loop/optimization-loop.md`](../11-autonomous-loop/optimization-loop.md)),
-   UI "đủ dùng" theo MUST của quy mô; audit **theo delta ở mỗi mốc** của PLAN ở pha harden — pha build gom về `/complete`, ADR-0033/0046 ([`audit.md`](audit.md) §1) và **toàn diện ở G7**
+   UI "đủ dùng" theo MUST của quy mô; audit **theo delta ở mỗi mốc** của PLAN ở pha harden — pha build ở cuối mỗi đợt (`done`), ADR-0033/0046/0047 ([`audit.md`](audit.md) §1) và **toàn diện ở G7**
    (`xt.py release-check` gom blueprint `--strict --run`, sổ audit `--strict`, kiểm lại cuối, cây git, tấn công thử và kiểm tải
    — `attack`/`perf` của `xt.yaml`, ADR-0042 → GO/NO-GO máy đọc;
    người ký `GO-NO-GO.md`). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
    cùng tiêu chí cuối, khác **thời điểm** kiểm. Máy merge theo pha bằng khoá `delivery_phase: build|harden` của `xt.yaml`
    — build hoãn review thành nợ, G7 đòi harden và hết nợ (ADR-0031 của repo khung). **Pha build (`/autopilot`, ADR-0046) dùng đầu
    ra mức S cho G0–G4 ở mọi quy mô** (đọc repo, `compose` không tick, PLAN có Gate + Given/When/Then ngắn; `PROJECT.md`/SPEC
-   riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường) và kết thúc ở "build xong"
-   (task xanh, MUST blueprint còn mở ghi số, không chặn); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
+   riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường); mỗi đợt xong (task xanh, MUST
+   blueprint còn mở ghi số, không chặn) → audit delta → sửa/đợt kế, lặp tới khi **hết việc** (PLAN hết task, 0 MUST mở ngoài việc chờ người, 0 🔴/🟠) và audit toàn diện sạch, rồi đề xuất `/complete` (ADR-0047); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
    ca biên) và G7 thuộc pha hoàn thiện (`/complete`). Sàn an toàn (guard, điểm dừng, Gate máy, CI xanh) không đổi theo pha.
 
 ## Quy mô S/M/L — làm nhẹ đi chứ không bỏ
@@ -58,7 +58,7 @@ updated: 2026-10-25
 
 Khi chạy **autopilot** (xem [`../11-autonomous-loop/README.md`](../11-autonomous-loop/README.md)): G0–G4 diễn ra trong
 pha *lập kế hoạch* và kết thúc bằng **một cổng duyệt duy nhất** — phiên chính tự duyệt `PLAN.md` theo tiêu chí chất
-lượng cuối và ghi `D-NNN` (ADR-0008). Sau đó G5–G6 chạy tự động trong vòng lặp có bằng chứng tới "build xong"; G7 chạy bằng
+lượng cuối và ghi `D-NNN` (ADR-0008). Sau đó G5–G6 chạy tự động trong vòng lặp có bằng chứng: đợt build xong → audit delta → đợt kế tới khi hết việc (ADR-0047); G7 chạy bằng
 `/complete` (pha harden, ADR-0046) cùng vòng lặp đó; điểm quyết định chuyên
 môn tự duyệt và ghi lại, chỉ dừng ở các **điểm dừng bắt buộc về hành động** (thao tác không thể hoàn tác, tiền thật, dữ
 liệu người dùng thật, đối ngoại/production, nới cổng) — xem [`../11-autonomous-loop/stop-points-and-escalation.md`](../11-autonomous-loop/stop-points-and-escalation.md).

@@ -39,7 +39,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 
 0. Tên phiên `<Tên repo> — <tên nhánh>` (hook SessionStart in gợi ý). `<XT> doctor --fix` là việc **đầu tiên**: kiểm khung
    đã cài (runtime, hook + file hook + cú pháp, skill/subagent, `AGENTS.md`/`CLAUDE.md`, `xt.yaml`, `.gitignore`, state,
-   khung hợp lệ, `PROGRESS.md`), sửa phần an toàn, đảo ngược được. Còn ✗ (hook/settings/khung cài lệch) → báo người lệnh
+   khung hợp lệ, `PROGRESS.md`), sửa phần an toàn, đảo ngược được. Còn ✗ → báo người lệnh
    `install.py` một lần, vẫn làm tiếp — vòng thiếu máy kiểm: báo cáo cuối ghi rõ, gom vào việc chờ người; `loop init` cảnh
    báo lại trên stderr (không chặn, ADR-0002 fail-open về luồng).
    Phiên ở chế độ quyền Auto (`claude --permission-mode auto`; phiên cloud chọn Auto ở bộ chọn chế độ quyền).
@@ -72,16 +72,16 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
     ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số
     bọc nháy đơn — mỗi `'` trong Gate viết `'\''`; ghi `.autopilot/evidence/T-NNN.json`: `exit_code`, `cmd`, `head`, 40 dòng cuối).
-11. Exit 0 → máy tự tick `[x]` (lệnh khớp Gate; `--no-tick` để tự tay — T-1719), commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
+11. Exit 0 → máy tự tick `[x]` (`--no-tick` để tự tay), commit nhỏ (conventional) qua cổng commit (`commit_gate`, [`LOOP-HARNESS-008`](harness-files.md)).
     Exit ≠ 0 → sửa; cùng chữ ký lỗi lần 2 → đổi cách tiếp cận (ghi D-NNN); lần 3 → máy đặt `blocked`
     ([`LOOP-DESIGN-005`](loop-design.md)). Không skip test, không nới cổng ([`LOOP-CI-001`](self-healing-ci.md)).
 12. **Lát xong → một PR** ([`LOOP-DESIGN-020`](loop-design.md), ADR-0014; nhánh riêng từ nhánh đích mới nhất, chồng lên PR
     chưa merge nếu phụ thuộc): `PROGRESS.md` (≤ 8 KB) vào commit cuối của lát → cổng đầy đủ `dev-task.sh gate` **một lần**
-    (pha build bỏ bước này, CI là cổng — ADR-0041) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
+    (pha build bỏ — ADR-0041) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
     chạy nền và khi thoát in sẵn kết quả `pr next`; mỗi khi PR đổi (push, CI, review) lại `pr next`. Reviewer **chỉ khi** `pr next` trả
     `review` — năng lực cao hơn người viết ([`LOOP-ORCH-005`](orchestration-and-subagents.md); không kết luận được →
     `<XT> pr reviewed --inconclusive` rồi giao reviewer khác); ghi `<XT> pr reviewed` theo lệnh máy in (đăng lên PR để
-    `pr-steward` làm thay khi không còn phiên — ADR-0027). Cần push thêm → gói sửa vào một commit (máy chỉ merge head đã đánh giá — ADR-0036).
+    `pr-steward` làm thay — ADR-0027). Cần push thêm → gói sửa vào một commit (máy merge head đã đánh giá — ADR-0036).
     Luật làn, ngoại lệ cứng, pha build: [`LOOP-STOP-022`](stop-points-and-escalation.md), ADR-0024/0025/0031/0033.
 13. **Stop hook quyết** (`stop-guard.sh` → `<XT> loop hook-stop`): `continue`/`verify` → trả `block` kèm lý do, agent làm
     tiếp (`verify` = task tick mà thiếu/khác bằng chứng, hoặc chưa chạy `<XT> loop verify --all` trên cây cuối —
@@ -89,20 +89,21 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     hoặc stdin không phải JSON object → cho dừng, không tăng `iterations`, ghi một dòng `.autopilot/hook-stop.log`.
     `/clear` đổi session id: `loop status` (SessionStart in lại) báo vòng gắn phiên khác → `<XT> loop resume` gắn lại.
 14. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <ID> --reason "..."` rồi làm việc khác; mọi việc còn lại
-    phụ thuộc → `<XT> loop block --reason "..."`. Nhóm máy chặn / cho chạy / cần người và điểm dừng bắt buộc:
+    phụ thuộc → `<XT> loop block --reason "..."`. Nhóm máy chặn / cho chạy / cần người, điểm dừng bắt buộc:
     [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý rồi `<XT> loop resume`.
 15. **Context đầy** → compaction tự nén (PreCompact ghi checkpoint, SessionStart in lại `loop status`); gần trần máy
     (≥ 80 % vòng/giờ/tiền) → Bàn giao vào PROGRESS, commit + push ([`context-and-token-budget.md`](context-and-token-budget.md)).
-16. **Kết thúc (build xong)**: `done` = mọi task có bằng chứng xanh + `verify --all` khớp cây (pha build: MUST blueprint mở
-    không chặn, ghi `open_must` — ADR-0046) → `<XT> loop stats`, `<XT> feedback collect`, báo cáo ≤ 20 dòng (đã làm · bằng chứng
-    · D-NNN · nợ · còn treo) + dòng «chưa phát hành — gõ `/complete`». `done-pending-human` → như `done` + việc chờ người (ID,
-    lý do, cách làm). `blocked`/`budget` → lý do + bước kế, không khai "xong".
+16. **Kết thúc đợt → đợt kế (ADR-0047)**: `done` = mọi task xanh + `verify --all` khớp cây (build: MUST blueprint mở không
+    chặn, ghi `open_must` — ADR-0046) → `<XT> loop stats`, báo cáo ≤ 20 dòng → không dừng: `/audit delta` (🔴/🟠 → task)
+    + MUST mở → `PLAN-<đợt>.md` (chờ người cùng ID đi theo), `loop verify --all` trên cây có PLAN mới, `loop init` → bước 10. **Hết việc**
+    = PLAN hết task, 0 MUST mở ngoài chờ người, 0 🔴/🟠 → `/audit full` sạch → đề xuất bước 17.
+    `done-pending-human` → như `done` + chờ người. `blocked`/`budget` → lý do + bước kế, không khai "xong".
 17. **Pha 3 — hoàn thiện** (`/complete`, ADR-0046; dự án đã `harden` chạy luật này từ bước 12): PR đặt `delivery_phase: harden`
-    → `/audit` + nợ review theo PR/lát → `PLAN-harden-<ngày>.md` → vòng lặp bước 9–15 luật harden → `<XT> release-check` không
+    → `/audit` + nợ review → `PLAN-harden-<ngày>.md` → vòng lặp bước 9–15 luật harden → `<XT> release-check` không
     NO-GO → `GO-NO-GO.md` (người ký).
 
 ## Lệnh thật
 
-Bảng mọi lệnh con của `scripts/xt.py`: README gốc của repo khung §Công cụ ([`../../README.md`](../../README.md) trong repo khung; dự án đích xem trên GitHub `seeker19110/X-Templates`) và `<XT> --help`.
+Bảng mọi lệnh con của `scripts/xt.py`: README gốc repo khung §Công cụ ([`../../README.md`](../../README.md); dự án đích: GitHub `seeker19110/X-Templates`) và `<XT> --help`.
 Trần ngoài xt.py: Claude Code tự ngừng block Stop sau 8 lần liên tiếp không có tool call
 (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, không đặt `0`); headless thêm `--max-turns`, `--max-budget-usd`.

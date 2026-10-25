@@ -1,10 +1,10 @@
 # ADR-0020: Chủ dự án tắt được chốt người của ngoại lệ cứng (`merge_hard_exceptions: auto`)
 
 - **Trạng thái:** Đã chấp nhận — cách nhận diện "PR chạm khoá" (§2) đổi từ dò chuỗi trong patch sang so giá trị đã
-  parse ở đáy/đầu PR (D-032, 2026-10-18), rồi so danh sách mọi dòng khoá ở merge-base/đầu PR (D-033; CHANGELOG); vế "bật auto-merge" trong cơ chế chặn hết hiệu lực theo ADR-0036 (2026-10-21) — luật giữ
+  parse ở đáy/đầu PR (D-032, 2026-10-18), rồi so danh sách mọi dòng khoá ở merge-base/đầu PR (D-033; CHANGELOG); vế "bật auto-merge" trong cơ chế chặn hết hiệu lực theo ADR-0036 (2026-10-21) — luật giữ; **bị thay một phần bởi ADR-0047** (2026-10-25): mẫu dự án đích đặt `auto` từ 3.24.0 (chủ repo, D-176 — pha build không chờ người; thiếu khoá vẫn = `human`, dự án đã cài giữ giá trị cũ)
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `merge_hard_mode`, `merge_decision(hard_auto=…)` trả
   `hard` rỗng + `hard_waived`, `HARD_KEY_REASON`/`_touches_hard_key`; `xt.yaml` đặt `merge_hard_exceptions: auto`,
-  `framework/templates/xt.yaml` đặt `human` (D-025); test
+  `framework/templates/xt.yaml` đặt `human` (D-025) → `auto` từ 3.24.0 (ADR-0047); test
   `tests/test_merge.py::HardExceptionL3Test::test_hard_auto_merges_and_keeps_reasons`, `MergeConfigTest::test_hard_mode`, `test_touches_hard_key`,
   `MergeCheckCliTest::test_hard_auto_from_xt_yaml`, `tests/test_hooks.py::MergeGuardTest::test_hard_exception_auto_lets_merge_through`
 - **Ngày:** 2026-10-18
