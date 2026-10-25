@@ -24,7 +24,7 @@ updated: 2026-10-25
 | Chỉ gọi LLM một lần/chuỗi cố định (summarize, classify, RAG hỏi-đáp) không tool hành động | `web-app`/`api-service` + [`../13-ai-engineering/llm-app-foundations.md`](../13-ai-engineering/llm-app-foundations.md) |
 | Vòng lặp tự động cho **phát triển phần mềm** (autopilot) | không phải hồ sơ sản phẩm → [`../11-autonomous-loop/README.md`](../11-autonomous-loop/README.md) |
 
-Quy tắc đầu tiên (Anthropic, *Building effective agents*): bắt đầu từ cách đơn giản nhất — một lời gọi + schema; khi đã
+Quy tắc đầu tiên: bắt đầu từ cách đơn giản nhất — một lời gọi + schema (Anthropic, *Building effective agents*); khi đã
 cần agent, một vòng lặp + skill/tool; chỉ thêm workflow hay agent con khi eval đo thấy cần (nhà: [`AI-AGENTIC-001`](../13-ai-engineering/agentic-systems.md)).
 
 ## Kiến trúc tham chiếu

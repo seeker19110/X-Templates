@@ -11,7 +11,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Changed
 - Skill `/autopilot` bước 5 (nợ ADR-0045, D-169): "giao subagent theo trường `executor`" thêm ngoại lệ hàng "Làm trực tiếp" (`LOOP-ORCH-020`) để dự án đích cũng sinh nhóm `executor: null` cho phép đo; cắt cụm "hook chạy cổng commit" (đã có ở README) để giữ trần byte.
-- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Còn nợ (ADR-0045): `evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md` §8.
+- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md`/`CLAUDE.md` §8, README mảng 11, `LOOP-CTX-010`, bảng "Cách xây" của `llm-app-foundations.md`, `delegation_rate`); `AI-APP-010` giữ nguyên vì vẫn đúng.
 
 ## [3.20.0] - 2026-10-24
 
