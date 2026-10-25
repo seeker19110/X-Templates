@@ -4,7 +4,7 @@ kind: profile
 slug: agentic-system
 prefix: PRF-AGENTIC
 modules: [04-standards/*, 05-architecture/*, 08-backend/*, 09-database/*, 10-workflow/*, 11-autonomous-loop/*, 12-security/*, 13-ai-engineering/*, 14-testing-quality/*, 15-operations/*, 16-compliance-privacy/*, 17-product-project/*, 18-cross-cutting/*]
-updated: 2026-10-14
+updated: 2026-10-25
 ---
 
 # Hồ sơ: Hệ agentic (đa agent, tự trị có giới hạn, chạy dài)
@@ -57,7 +57,7 @@ Phiên bản xác minh **2026-10-13** — **xác minh lại trước khi dùng**
 | Thành phần | Mặc định | Phiên bản (xác minh 2026-10-13) | Thay thế + điều kiện |
 |---|---|---|---|
 | Durable execution | Temporal (Signals/Updates, đa ngôn ngữ, worker sống lâu) | server v1.32.1 (2026-10-08) · `temporalio` 1.34.0 (ngày phát hành chưa xác minh) | Restate v1.7.13 (2026-10-01) khi muốn một binary tự host; DBOS khi Postgres là sổ cái; LangGraph 1.2.15 checkpointer (đặt **sync**) khi agent đã là graph; Vercel `@ai-sdk/workflow` (AI SDK 7) khi ở Vercel |
-| Điều phối đa agent | Claude Agent SDK subagents hoặc LangGraph supervisor (độ sâu lồng theo `AI-AGENTIC-007`: khuyến nghị 2, trần 3) | Agent SDK 0.2.165 · LangGraph 1.2.15 | Microsoft Agent Framework 1.21.0 (.NET/Azure); Google ADK 2.x (Gemini); CrewAI Flows (event-driven) |
+| Điều phối đa agent (chỉ khi có lý do context — `AI-AGENTIC-011`; mặc định một vòng lặp) | Claude Agent SDK subagents hoặc LangGraph supervisor (độ sâu lồng theo `AI-AGENTIC-007`: khuyến nghị 2, trần 3) | Agent SDK 0.2.165 · LangGraph 1.2.15 | Microsoft Agent Framework 1.21.0 (.NET/Azure); Google ADK 2.x (Gemini); CrewAI Flows (event-driven) |
 | Giao tiếp agent–agent xuyên hệ | A2A (Agent Card ký số, Task state, Artifact) | v1.0.1 (2026-05-26) | Message queue nội bộ có schema khi cùng một hệ |
 | Tool | MCP spec 2026-07-28 (stateless, handle server cấp, Tasks extension) | `mcp` 2.3.0 | — |
 | Outbox/queue | PostgreSQL outbox table + worker (hoặc Temporal Activity lũy đẳng) | PostgreSQL 18.6 | Kafka/NATS khi khối lượng lớn |

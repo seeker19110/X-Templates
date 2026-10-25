@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.20.1] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (skill `/autopilot` đổi chữ). Chỉ văn xuôi — chữ quy phạm mục checklist không đổi nên blueprint không thành "Cũ".
+
+### Changed
+- Skill `/autopilot` bước 5 (nợ ADR-0045, D-169): "giao subagent theo trường `executor`" thêm ngoại lệ hàng "Làm trực tiếp" (`LOOP-ORCH-020`) để dự án đích cũng sinh nhóm `executor: null` cho phép đo; cắt cụm "hook chạy cổng commit" (đã có ở README) để giữ trần byte.
+- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md`/`CLAUDE.md` §8, README mảng 11, `LOOP-CTX-010`, bảng "Cách xây" của `llm-app-foundations.md`, `delegation_rate`); `AI-APP-010` giữ nguyên vì vẫn đúng.
+
 ## [3.20.0] - 2026-10-24
 
 **Dự án đích: chạy lại `install.py` (chỉ `framework/` đổi) rồi ghép lại blueprint (`compose`)** để nhận chữ mới của `AI-AGENTIC-001` (MUST@L), `AI-AGENTIC-011`, `LOOP-ORCH-017` (MAY → SHOULD) và mục mới `AI-AGENTIC-019`, `LOOP-ORCH-020`. Harness (`xt.py`, hook, `.claude/agents/`, skill, `AGENTS.md`) **không đổi**.

@@ -3,7 +3,7 @@ title: Nền ứng dụng LLM: chọn model, prompt-as-code, structured output, 
 kind: module
 prefix: AI-APP
 applies_to: [ai-agent, agentic-system, data-ml, web-app, mobile-app, desktop-app, static-site, game, monorepo, api-service]
-updated: 2026-10-14
+updated: 2026-10-25
 ---
 
 # Nền ứng dụng LLM: chọn model, prompt-as-code, structured output, chi phí
@@ -18,7 +18,7 @@ updated: 2026-10-14
 1. **Prompt là code**: nằm trong repo, có phiên bản, có golden snapshot, có eval chạy trong CI; đổi prompt = đổi hành vi → PR + eval.
 2. **Đầu ra có hợp đồng**: schema (JSON Schema/Pydantic/Zod) + validate lúc chạy; model có thể trả `refusal`, `max_tokens`, JSON hỏng → mọi nhánh đều xử lý.
 3. **Chọn model theo nhiệm vụ, không theo thói quen**: tier nhỏ cho phân loại/trích xuất có schema; tier lớn cho suy luận nhiều bước; mỗi lựa chọn có eval chứng minh và fallback cùng hợp đồng.
-4. **Đơn giản nhất có thể**: một lời gọi → workflow cố định → agent; chỉ lên bậc khi eval cho thấy bậc dưới không đủ (Anthropic *Building effective agents*).
+4. **Đơn giản nhất có thể**: bắt đầu bằng một lời gọi + schema; chỉ lên workflow hay agent khi eval cho thấy không đủ (Anthropic *Building effective agents*). Khi đã cần agent, khởi điểm là một vòng lặp + skill/tool và mọi tách/gộp agent đi qua eval so sánh — nhà: [`AI-AGENTIC-001`](agentic-systems.md).
 5. **Chi phí là yêu cầu chức năng**: token budget theo request/tenant/ngày; cache prompt và batch khi phù hợp; đo bằng `usage`, không ước.
 6. **Nội dung ngoài là dữ liệu**: tài liệu, web, output tool đưa vào prompt không phải chỉ thị — tách rõ bằng cấu trúc và nói rõ cho model (chi tiết [`../12-security/ai-security.md`](../12-security/ai-security.md)).
 
