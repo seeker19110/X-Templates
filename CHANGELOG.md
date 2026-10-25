@@ -7,13 +7,13 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [3.22.0] - 2026-10-25
 
-**Dự án đích: chạy lại `install.py`** (`xt.py` đổi). Harness khác và blueprint không đổi.
+**Dự án đích: chạy lại `install.py`** (`xt.py` đổi) **rồi ghép lại blueprint (`compose`)**: chữ quy phạm của `LOOP-ORCH-020` đổi nên mục đã `[x]` thành "Cũ" cho tới khi tick lại. Harness khác không đổi.
 
 ### Added
-- `xt.py loop stats` (nợ cuối ADR-0045, D-171): thêm `delegated`, `self_done`, `delegation_rate` (task có `executors` khác rỗng / `task_count`), `first_pass_rate_delegated`, `first_pass_rate_self` vào `--json` và một dòng "Giao việc" ở bản chữ — số hai nhóm mà `LOOP-ORCH-020` đòi, đỡ đếm tay bằng `jq`/`grep`. Nhóm theo executor của LẦN CHẠY ĐẦU của task trong vòng (null = tự làm): task tự làm đỏ rồi chuyển cấp `executor-deep` vẫn là tự làm (D-172 đính chính D-171 — nhóm theo `executors` cuối từng làm nhóm tự làm đẹp hơn thật). Trường mới additive (người đọc JSON cũ không vỡ). Test đủ nhánh (coverage 100 %).
+- `xt.py loop stats` (nợ cuối ADR-0045, D-171): thêm `delegated`, `self_done`, `delegation_rate` (task có lần chạy đầu mang executor / `task_count`), `first_pass_rate_delegated`, `first_pass_rate_self` vào `--json` và một dòng "Giao việc" ở bản chữ — số hai nhóm mà `LOOP-ORCH-020` đòi, đỡ đếm tay bằng `jq`/`grep`. Nhóm theo executor của LẦN CHẠY ĐẦU của task trong vòng (null = tự làm): task tự làm đỏ rồi chuyển cấp `executor-deep` vẫn là tự làm (D-172 đính chính D-171 — nhóm theo `executors` cuối từng làm nhóm tự làm đẹp hơn thật). Trường mới additive (người đọc JSON cũ không vỡ). Test đủ nhánh (coverage 100 %).
 
 ### Changed
-- `LOOP-ORCH-020` (SHOULD): `→ Kiểm:` trỏ các trường mới; chữ quy phạm không đổi. Lát này cũng là điểm đo "giao" đầu tiên: T-3201 do `executor` làm (xanh lần đầu), T-3202/T-3203 phiên chính tự làm. Số tích luỹ (`loop stats --all`, 2026-10-25, 12 task): giao 1 (xanh lần đầu 1/1), tự làm 11 (xanh lần đầu 9/11) — còn xa ngưỡng ≥ 10 task/nhóm để đổi mặc định.
+- `LOOP-ORCH-020` (SHOULD): `→ Kiểm:` trỏ các trường mới; **chữ quy phạm đổi** (D-172): nhóm đối chiếu theo executor của lần chạy đầu, "tỉ lệ giao", task tự làm đã chuyển cấp vẫn là tự làm, lưu ý ID task không đánh lại giữa các đợt. Lát này cũng là điểm đo "giao" đầu tiên: T-3201 do `executor` làm (xanh lần đầu), T-3202/T-3203 phiên chính tự làm. Số tích luỹ (`loop stats --all`, 2026-10-25, 12 task): giao 1 (xanh lần đầu 1/1), tự làm 11 (xanh lần đầu 9/11) — còn xa ngưỡng ≥ 10 task/nhóm để đổi mặc định.
 
 ## [3.21.0] - 2026-10-25
 

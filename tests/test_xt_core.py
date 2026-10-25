@@ -1478,19 +1478,20 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             ("T-003", "true", "executor-deep"),  # giao ngay ở tầng sâu
             ("T-004", "true", None),  # tự làm, xanh lần đầu
             ("T-005", "true", None),
+            ("T-006", "true", None),
         )
         with redirect_stdout(out), redirect_stderr(err):
             for task, cmd, ex in runs:
                 xt.loop_record(task, [cmd], self.base, ex, tick=False)
         s = xt.loop_stats(self.base)
-        self.assertEqual((s["delegated"], s["self_done"]), (["T-002", "T-003"], ["T-001", "T-004", "T-005"]))
-        self.assertEqual(s["delegation_rate"], 0.4)
-        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (1.0, 0.667))
+        self.assertEqual((s["delegated"], s["self_done"]), (["T-002", "T-003"], ["T-001", "T-004", "T-005", "T-006"]))
+        self.assertEqual(s["delegation_rate"], 0.333)  # 2/6: không chẵn → ghim `round(…, 3)`
+        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (1.0, 0.75))
         self.assertEqual(s["tasks"]["T-001"]["executors"], ["executor-deep"])
         out = io.StringIO()
         with redirect_stdout(out):
             xt._loop_stats(argparse.Namespace(json=False, all=False), self.base)
-        self.assertIn("Giao việc: 40% (2/5) · xanh lần đầu: giao 100% · tự làm 67%", out.getvalue())
+        self.assertIn("Giao việc: 33% (2/6) · xanh lần đầu: giao 100% · tự làm 75%", out.getvalue())
 
     def test_executor_tier_escalation_and_stats(self):
         """ADR-0029: `(exec: deep)` → tầng sâu ngay; tầng mặc định đỏ 2 lần cùng task trong vòng này → `loop status`
