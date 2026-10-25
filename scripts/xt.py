@@ -6183,13 +6183,11 @@ def _live_loop(base: Path) -> str:
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    # AUD-HAR-114: `blocked` — PLAN mất/rỗng → `loop stop`; chờ người/lỗi lặp → `loop resume` (loop-design)
-    why, r = "", str(v.get("reason", ""))
+    # AUD-HAR-114: `blocked` từ state (block/lỗi lặp) → resume; PLAN mất/rỗng → stop
+    why = ""
     if verdict == "blocked":
-        end = (
-            "`loop stop`" if r.startswith(("không thấy PLAN", "PLAN không")) else "người xem rồi `loop resume --reason`"
-        )
-        why = f"; verdict `blocked`: {r} — {end}"
+        end = "người xem rồi `loop resume --reason`" if _verdict_loop_state(prev) else "`loop stop`"
+        why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
 
@@ -6280,15 +6278,16 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
-    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại; không gợi `resume`/`--force` (review #262)
+    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại, không gợi `resume`/`--force`
         print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
         return 2
     if live:
-        print(
-            f"✗ Đang có vòng autopilot chạy ({live}) — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách,"
-            " vòng cũ đã chết): `loop init --force` (LOOP-HARNESS-024)",
-            file=sys.stderr,
+        tail = (
+            ""  # `blocked` đã nêu lối ra riêng
+            if "verdict `blocked`" in live
+            else " — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách, vòng cũ đã chết): `loop init --force`"
         )
+        print(f"✗ Đang có vòng autopilot chạy ({live}){tail} (LOOP-HARNESS-024)", file=sys.stderr)
         return 2
     for path in (args.plan, args.blueprint):  # blueprint gõ nhầm → verdict lặng lẽ bỏ qua blueprint (AUD-HAR-016)
         if path and not (base / path).exists():

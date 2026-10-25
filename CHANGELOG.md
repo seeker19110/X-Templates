@@ -10,7 +10,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi thông báo `loop init`; chữ checklist không đổi). D-192, trả 3 🟢 của audit delta3.
 
 ### Fixed
-- `loop init` khi vòng cũ `blocked` (vd PLAN đợt trước đổi tên/xoá) in verdict + lý do và lối ra (PLAN mất/rỗng → `loop stop`; `loop block`/lỗi lặp → người xem rồi `loop resume --reason`) — trước chỉ "Đang có vòng autopilot chạy" kèm `resume`/`--force` (AUD-HAR-114; test `test_init_after_plan_renamed`, `test_init_after_loop_block_points_to_resume`).
+- `loop init` khi vòng cũ `blocked` (vd PLAN đợt trước đổi tên/xoá) in verdict + lý do và một lối ra theo nguồn (PLAN mất/rỗng → `loop stop`; `loop block`/lỗi lặp → người xem rồi `loop resume --reason`, không đoán theo chữ lý do) — trước chỉ "Đang có vòng autopilot chạy" kèm `resume`/`--force` (AUD-HAR-114; test `test_init_after_plan_renamed`, `test_init_after_loop_block_points_to_resume`).
 - `BLUEPRINT.md` repo khung ghép lại sau 3.24/3.25 (`LOOP-OPT-016` mới; chữ `LOOP-OPT-002/011`, `LOOP-STOP-005`, `LOOP-HARNESS-024`) bằng `XT_FRAMEWORK_LINK=framework` (README §Biến môi trường) — không có biến này `compose` ở repo khung viết link `.xtemplates/framework/…` nên mục đã tick bị coi là "đổi chữ" giả và đặt lại `[ ]` (AUD-HAR-113).
 - RUNBOOK-PR-STEWARD §4: push có ≥ 2 commit đổi `VERSION` chỉ tag commit ngọn — gắn tag còn lại bằng `workflow_dispatch` với `sha` (AUD-DOC-086).
 
