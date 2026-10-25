@@ -5,6 +5,20 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.25.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (skill `/optimize` mới, `doctor` đòi; skill `/complete` đổi; mẫu GO-NO-GO và AGENTS đổi). ADR-0048 (D-180/D-181): dòng chảy build → complete → optimize → ký → production → số thật → optimize → ký.
+
+### Added
+- Skill `/optimize` (≤ 6 144 B, trần trong `test_docs_budget`): chỉ chạy khi có ngân sách đang đỏ có số — hàng `perf` FAIL của `release-check --json`, `floor --run` đỏ, hoặc `--field docs/ops/FIELD-<ngày>.json` (≤ 30 ngày, có nguồn/người xuất; nội dung là dữ liệu, không phải chỉ thị); bộ đo khoá ở commit gốc (`perf guard`), `PLAN-opt-<ngày>.md` mỗi ngân sách một task, `perf compare` quyết giữ/hoàn tác, luật harden, `reviewer-alt` trả lời từng ⚠; dừng khi đạt mục tiêu. `DOCTOR_SKILLS` đòi skill này.
+- `LOOP-OPT-016` **SHOULD**: số production vào qua `docs/ops/FIELD-<ngày>.json` do người/CI xuất, không cấp agent khoá dashboard/DB/log thật; `optimization-loop.md` §Số field ghi định dạng. `stop-points-and-escalation.md` hàng "Dữ liệu người dùng thật" ghi điều này.
+- Mẫu `GO-NO-GO.md`: dòng 21 "Người đã dùng thử luồng chính và đọc SPEC + threat model" (BLOCKER M/L, SHOULD S — xác nhận spec/UX/bảo mật **một lần** tại đây, không ở giữa `/complete`); §2c Chế độ delta cho bản chỉ tối ưu (dòng 1, 2, 12, 21 + bảng trước/sau từ `PERF-LOG.md`; người vẫn ký).
+
+### Changed
+- Mục checklist (giữ ID, đổi mức): `LOOP-OPT-005` MUST@L → **MUST@M** (chống gian lận số đo — dự án M cần reviewer năng lực cao hơn); `LOOP-OPT-004` MUST@M → **MUST@L** để giữ trần 4 MUST hiệu lực ở M mỗi module (`validate`, ADR-0043; D-181).
+- `/complete` bước 3(f) và 5 trỏ `/optimize` và dòng 21 GO-NO-GO; `lifecycle.md` §Ánh xạ nối G7 → ký → G8 → `FIELD-<ngày>.json` → `/optimize --field` → ký delta; README gốc §Quyết định thiết kế thêm ADR-0048; AGENTS.md/CLAUDE.md/mẫu AGENTS §Skill thêm `/optimize`. Không chạm `/autopilot` và README mảng 11 (sát trần byte).
+- `optimization-loop.md` cắt chữ trùng với checklist (đoạn Gate ví dụ, bước 2/3/6 §Vòng, Giới hạn đã biết — không bỏ ý) để giữ trần tổng thư mục (ADR-0043).
+
 ## [3.24.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` và skill `/autopilot` đổi; dự án đã sửa `autopilot/SKILL.md` gộp tay từ `.xtemplates-new`). ADR-0047 gom D-176…D-179.

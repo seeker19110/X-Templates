@@ -4,7 +4,9 @@
   UX, bảo mật; trả nợ review) → /optimize (chỉ các ngân sách bị vi phạm, có đo) → release-check + con người ký GO/NO-GO →
   production → quan sát dữ liệu thật → /optimize dựa trên số liệu production → lại qua release-check và ký"; chốt phương án B
   — D-180; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008)
-- **Trạng thái triển khai:** Đang triển khai — PLAN-3.25 (`docs/autopilot/PLAN-3.25-optimize.md`), bản 3.25.0.
+- **Trạng thái triển khai:** Đã triển khai — PLAN-3.25 (`docs/autopilot/PLAN-3.25-optimize.md`), bản 3.25.0: skill
+  `.claude/skills/optimize/SKILL.md`, `DOCTOR_SKILLS`, `LOOP-OPT-016`, `LOOP-OPT-005` MUST@M / `LOOP-OPT-004` MUST@L (D-181), mẫu
+  GO-NO-GO dòng 21 + §2c, `lifecycle.md`, `/complete`, README gốc; test `tests/test_docs_budget.py`, `test_doctor.py`, `test_install.py`.
 - **Ngày:** 2026-10-25
 - **Làm rõ:** ADR-0046 (`/autopilot` build, `/complete` harden), ADR-0047 (vòng đợt build), ADR-0042 (`release-check` hàng
   `attack`/`perf`), ADR-0029 (G7 máy đọc), ADR-0008 (phiên chính tự duyệt), `framework/11-autonomous-loop/optimization-loop.md`

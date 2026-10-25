@@ -1,10 +1,11 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.24.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.25.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
+- 2026-10-25 **PLAN-3.25-optimize** (D-180/D-181, ADR-0048, 3.25.0): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 21 + delta, `LOOP-OPT-005` MUST@M. #263 sổ; lát 2–4 PR kế. Hoãn C (`xt.py field check`) tới khi dự án đích có SLO thật.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 + #260 (`v3.23.0`) + #261 audit delta; 3.24.0 (ADR-0047, #262): mẫu `merge_hard_exceptions: auto` (D-176); `/autopilot` lặp build → audit delta → đợt kế tới khi hết việc (D-177/178); tag tự khi `VERSION` đổi (D-179). GO-NO-GO `v3.18.x`/`v3.20.0`/`v3.23.0` chờ ký. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
-- 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` thêm `delegation_rate`, `first_pass_rate_{delegated,self}` (nhóm theo executor lần chạy đầu); `LOOP-ORCH-020` Kiểm trỏ trường mới. Điểm đo: T-3201 do `executor` (xanh lần đầu), 2 task chữ tự làm. PLAN-3.22-adr0045-rest xong (D-170, `v3.21.0`, #252; `AI-EVAL-021`, `AI-AGENT-024`, `XC-DOCAI-021`, `AI-APP-019`; `LOOP-CTX-010` MAY). Còn: chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
+- 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` có `delegation_rate`, `first_pass_rate_*`; chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173; [báo cáo](docs/ops/AUDIT-REPORT-2026-10-25-delta.md)): 0 🔴, 2 🟠 (SEC-105, HAR-106) + 14 🟢. Sửa 2 🟠 + 3 🟢 ở 3.22.1 (#255, `9041f56`; mới 🟢 SEC-107/HAR-111). BLUEPRINT.md sinh lại + tái kiểm 19 mục (HAR-110): MUST 64 đạt, 0 chưa.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
@@ -32,7 +33,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- **Bàn giao #262** (`claude/dreamy-dirac-l8210z`, `main` `b44857f`): review lượt 2 (Fable max) 4 🟠 đã sửa ở head kế; còn: gate xanh → push → review lượt 3 → `pr reviewed --clean` → merge ghim head → tag `v3.24.0` → `loop verify --all`.
-- `main` `b44857f` (3.24.0). Lệnh merge của phiên có thể bị bộ phân loại Auto chặn → `pr-steward` merge ghim head (cron thực đo ~4 giờ; D-132).
+- `main` `e10e3c3` (3.24.0, #262 — 5 lượt review Fable max, 4+1+1 🟠 sửa trong PR; tag tự tạo bởi `release-tag.yml` lần đầu, D-179). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040) — đặt worktree ngoài `/tmp`. Thư mục `11-autonomous-loop` còn 1 B dưới trần tổng — thêm chữ phải cắt chỗ khác.
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
