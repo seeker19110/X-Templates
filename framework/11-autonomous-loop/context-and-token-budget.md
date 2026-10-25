@@ -3,7 +3,7 @@ title: Ngân sách context/token, compaction, bàn giao phiên
 kind: module
 prefix: LOOP-CTX
 applies_to: [all]
-updated: 2026-10-21
+updated: 2026-10-25
 ---
 
 # Ngân sách context/token, compaction, bàn giao phiên

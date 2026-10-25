@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # 11 — Vòng lặp tự động (autopilot)

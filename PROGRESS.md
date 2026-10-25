@@ -1,10 +1,10 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.20.1, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.21.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
-- 2026-10-25 **PLAN-3.22-adr0045-rest** (D-170, 3.21.0): bốn mục SHOULD mới `AI-EVAL-021`, `AI-AGENT-024`, `XC-DOCAI-021`, `AI-APP-019`; `LOOP-CTX-010` MAY ngừng dùng; `AI-AGENT-006` giữ chữ. Điểm đo thứ ba `LOOP-ORCH-020`: 3 task phiên chính tự làm. Còn nợ: `delegation_rate` (mã `xt.py`, cần số ≥ 2 vòng).
-- 2026-10-25 **PLAN-3.20.1-adr0045-debt** (D-169, `v3.20.1`, #251): skill `/autopilot` bước 5 trỏ hàng "Làm trực tiếp"; thang cũ trỏ `AI-AGENTIC-001`. Điểm đo thứ hai `LOOP-ORCH-020`: 2 task tự làm, xanh lần đầu 1/2.
+- 2026-10-25 **PLAN-3.22-adr0045-rest** (D-170, 3.21.0): bốn mục SHOULD mới `AI-EVAL-021`, `AI-AGENT-024`, `XC-DOCAI-021`, `AI-APP-019`; `LOOP-CTX-010` MAY ngừng dùng; `AI-AGENT-006` giữ chữ. Điểm đo thứ ba `LOOP-ORCH-020`: 3 task tự làm, xanh lần đầu 2/3 (T-3102 đỏ: templates vượt trần). Còn nợ: `delegation_rate` (mã `xt.py`, cần số ≥ 2 vòng).
+- 2026-10-25 **PLAN-3.20.1-adr0045-debt** (D-169, `v3.20.1`, #251): skill `/autopilot` bước 5 trỏ hàng "Làm trực tiếp"; thang cũ trỏ `AI-AGENTIC-001`. Điểm đo thứ hai `LOOP-ORCH-020`: 2 task tự làm, xanh lần đầu 1/2 (T-3002 đỏ: PROGRESS vượt 8 KB).
 - 2026-10-24 **PLAN-3.21-single-loop** (D-168, ADR-0045, `v3.20.0`, #250, GO-NO-GO chờ ký): bài claude.com *When to fold subagents* + kit → `AI-AGENTIC-001`/`011` đổi, `019`; `LOOP-ORCH-017` SHOULD, `020`. Điểm đo đầu: 4 task tự làm, xanh lần đầu 4/4.
 - 2026-10-24 **PLAN-3.18-feedback2** (D-157): 7 🟢 phản hồi còn lại → 3.18.0: BASE-SEC-002 mẫu chặt, compose/check-links anchor (#238), loop init cùng PLAN giữ defer + bằng chứng còn khớp, decide theo mọi worktree, PLAN mỗi đợt (#239), `harness-check` cho mục hàng rào. PLAN-3.19-setext (D-158): `check-links` nhận setext nhiều dòng/trong `>` (🟢 review #238; #242, `v3.18.1`), 3.18.2 sửa O(n²) của bản đó (#243, `v3.18.2`, GO-NO-GO chờ ký). Trước đó PLAN-3.17 xong (#235–#237, `v3.17.0`, GO-NO-GO chờ ký).
 - 2026-10-23 **PLAN-3.16.0-ceiling xong** (D-142…D-148, ADR-0043; #231, #232, `v3.16.0`): chi tiết ở CHANGELOG. Đo lại 2026-10-30 bằng `pr stats --days 7`. Phản hồi dự án đích: 10 nhóm `cong-cu` đủ ngưỡng chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
