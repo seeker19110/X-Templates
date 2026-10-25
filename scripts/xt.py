@@ -2701,6 +2701,27 @@ def read_runs(base: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _delegation_stats(per: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Tỉ lệ giao việc cho subagent và xanh-lần-đầu theo nhóm (giao / tự làm) — nợ ADR-0045."""
+    delegated = sorted(k for k, t in per.items() if t["executors"])
+    self_done = sorted(k for k, t in per.items() if not t["executors"])
+
+    def first_pass(group: List[str]) -> Optional[float]:
+        return round(sum(per[k]["runs_to_green"] == 1 for k in group) / len(group), 3) if group else None
+
+    return {
+        "delegated": delegated,
+        "self_done": self_done,
+        "delegation_rate": round(len(delegated) / len(per), 3) if per else None,
+        "first_pass_rate_delegated": first_pass(delegated),
+        "first_pass_rate_self": first_pass(self_done),
+    }
+
+
+def _pct(x: Optional[float]) -> str:
+    return "—" if x is None else f"{x:.0%}"
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
     ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
@@ -2724,6 +2745,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         if t["executors"][:1] != [EXECUTOR_AGENTS["deep"]] and EXECUTOR_AGENTS["deep"] in t["executors"]
     )
     return {
+        **_delegation_stats(per),
         "tasks": per,
         "task_count": len(per),
         "runs": len(rows),
@@ -2751,6 +2773,10 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     )
     print(
         f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    print(
+        f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
+        f"xanh lần đầu: giao {_pct(s['first_pass_rate_delegated'])} · tự làm {_pct(s['first_pass_rate_self'])}"
     )
     for k, t in sorted(s["tasks"].items()):
         green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"

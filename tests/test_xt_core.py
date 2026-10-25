@@ -1455,6 +1455,16 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         empty = self.tmpdir()
         self.assertEqual(xt.read_runs(empty), [])
         self.assertIsNone(xt.loop_stats(empty)["first_pass_rate"])
+        self.assertEqual((s["delegated"], s["self_done"]), ([], ["T-001", "T-002", "T-003"]))
+        self.assertEqual(
+            (s["delegation_rate"], s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (0.0, None, 0.333)
+        )
+        e = xt.loop_stats(empty)
+        self.assertEqual((e["delegation_rate"], e["first_pass_rate_delegated"], e["first_pass_rate_self"]), (None,) * 3)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(json=False, all=False), empty)
+        self.assertIn("Giao việc: — (0/0) · xanh lần đầu: giao — · tự làm —", out.getvalue())
 
     def test_executor_tier_escalation_and_stats(self):
         """ADR-0029: `(exec: deep)` → tầng sâu ngay; tầng mặc định đỏ 2 lần cùng task trong vòng này → `loop status`
@@ -1504,9 +1514,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertEqual(s["tasks"]["T-002"]["executors"], ["executor", "executor-deep"])
         self.assertEqual((s["escalated"], s["escalation_rate"]), (["T-002"], 0.5))
         self.assertEqual(s["tasks"]["T-001"]["executors"], [])
+        self.assertEqual((s["delegated"], s["self_done"], s["delegation_rate"]), (["T-002"], ["T-001"], 0.5))
+        self.assertEqual(s["tasks"]["T-002"]["runs_to_green"], None)
+        self.assertEqual(s["tasks"]["T-001"]["runs_to_green"], 1)
+        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (0.0, 1.0))
         with redirect_stdout(out):
             self.assertEqual(xt._loop_stats(argparse.Namespace(json=False, all=False), self.base), 0)
         self.assertIn("Chuyển cấp lên tầng sâu: 1 task (50%): T-002", out.getvalue())
+        self.assertIn("Giao việc: 50% (1/2) · xanh lần đầu: giao 0% · tự làm 100%", out.getvalue())
         with redirect_stdout(out), redirect_stderr(err):  # xanh rồi lại đỏ một lần: chỉ đếm chuỗi đỏ sau lần xanh cuối
             xt.loop_record("T-002", ["true"], self.base, "executor", tick=False)  # không tick: còn đỏ tiếp bên dưới
             xt.loop_record("T-002", ["sh -c 'echo ed; exit 1'"], self.base, "executor")
