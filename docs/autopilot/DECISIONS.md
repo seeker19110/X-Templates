@@ -1308,3 +1308,10 @@
 - Chọn: Thu hẹp: chỉ khi người gõ skill (gọi từ /autopilot → subagent); reviewer/reviewer-alt theo người viết; không Explore; không lọc null; một workflow một lúc; opt-in dẫn mô tả tool Workflow 2.1.310
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: review tái hiện 8 phát hiện cam — hộp duyệt lần đầu treo vòng autopilot, reviewer cố định phá LOOP-ORCH-005, null bị lọc làm nhóm chưa quét thành sạch, Explore không có maxTurns/luật repo. Phát hiện 'skill không phải opt-in' bị bác bằng mô tả tool trong binary 2.1.310.
 - Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)
+
+### D-186 · 2026-10-25T16:52:47+00:00 · Review #265 lượt 2: điều kiện dùng Workflow máy quyết được, xác minh null, chọn reviewer
+
+- Phương án: (1) Giữ D-185 ('không có người trực' do agent tự đoán) · (2) Chỉ khi người gõ trực tiếp /audit, /research hoặc /complete … workflow; vòng /autopilot và /complete bước 4 → subagent; xác minh null chạy lại theo §4 rồi mới ghi mở + chưa xác minh; reviewer theo hàng Review bảng điều phối (Fable → model fable, không ai cao hơn → INCONCLUSIVE); nhánh subagent bỏ Explore
+- Chọn: Chỉ khi người gõ trực tiếp /audit, /research hoặc /complete … workflow; vòng /autopilot và /complete bước 4 → subagent; xác minh null chạy lại theo §4 rồi mới ghi mở + chưa xác minh; reviewer theo hàng Review bảng điều phối (Fable → model fable, không ai cao hơn → INCONCLUSIVE); nhánh subagent bỏ Explore
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: 3 cam tái hiện độc lập — 'không có người trực' máy không quyết được nên /complete một phiên vẫn treo ở hộp duyệt lần đầu; xác minh null bỏ qua xác minh đối kháng bắt buộc; ánh xạ reviewer rút gọn cho phép reviewer thấp hơn tác giả Fable. Tiêu chí 3: điều kiện là lời gọi của người — kiểm được.
+- Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)

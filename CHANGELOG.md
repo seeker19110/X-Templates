@@ -7,14 +7,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [3.26.0] - 2026-10-25
 
-**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/complete`, `/research` đổi; chữ checklist không đổi). ADR-0049 (D-184).
+**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/complete`, `/research` đổi; chữ checklist không đổi). ADR-0049 (D-184…D-186). Lần chạy Workflow đầu ở chế độ Auto hỏi duyệt một lần.
 
 ### Changed
 - Skill `/audit` §3, `/complete` bước 2 (nợ review), `/research` bước 3 (≥ 3 mục): có tool Workflow của Claude Code thì chạy
   fan-out thành một workflow (khuôn ở `/audit` §3) — agent chỉ đọc qua `agentType` `reviewer`/`researcher`, xác minh và nợ
   review chọn `reviewer`/`reviewer-alt` theo người viết (`LOOP-ORCH-005`), lô ≤ 5 đồng thời (`LOOP-ORCH-008`), không lọc
-  `null` (cụm hỏng → `chưa quét`, xác minh hỏng → `chưa xác minh`), người xác minh không nhận lý luận của người tìm, phiên
-  chính gộp/ghi sổ/quyết/sửa; không có tool, bị từ chối, hoặc gọi từ `/autopilot` → subagent như cũ. Người gõ skill là đã
+  `null` (chạy lại bằng subagent; cụm vẫn hỏng → `chưa quét`, xác minh vẫn hỏng → `mở` + Ghi chú `chưa xác minh`), người xác
+  minh không nhận lý luận của người tìm, phiên chính gộp/ghi sổ/quyết/sửa. Chỉ khi người gõ trực tiếp `/audit`, `/research`
+  hoặc `/complete … workflow` (argument mới); `/autopilot`, vòng `/complete` bước 4, không có tool, bị từ chối hoặc lỗi →
+  subagent như cũ; nhánh subagent giao `researcher` thay `Explore` cho tài liệu. Người gõ skill là đã
   opt-in (mô tả tool Workflow, Claude Code 2.1.310) — không cần bật `ultracode`; không đặt `ultracode` trong settings.
 - `research/2026-10-21-next-level-speed-automation-quality.md`: đính chính — chỉ **từ khoá** `ultracode` không kích hoạt qua
   `-p`/lịch/webhook; tool Workflow chạy được ở `-p`/SDK khi có rule allow `Workflow` hoặc chế độ auto/bypass.

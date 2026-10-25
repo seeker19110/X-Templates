@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.26.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
-- 2026-10-25 **3.26.0 Workflow trong skill fan-out** (D-184/D-185, ADR-0049): `/audit` §3, `/complete` bước 2, `/research` ≥ 3 mục dùng tool Workflow khi người gõ skill (agent chỉ đọc, lô ≤ 5; từ `/autopilot` → subagent); không bật `ultracode` trong settings. Review đối kháng lượt 1 đã sửa.
+- 2026-10-25 **3.26.0 Workflow trong skill fan-out** (D-184/D-185, ADR-0049): `/audit` §3, `/complete` bước 2, `/research` ≥ 3 mục dùng tool Workflow khi người gõ skill (agent chỉ đọc, lô ≤ 5; chỉ khi người gõ trực tiếp); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token (`/workflows`), kiểm `maxTurns`/guard có áp cho agent.
 - 2026-10-25 **PLAN-3.25-optimize xong** (D-180…D-183, ADR-0048; #263, `v3.25.0`): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta, `LOOP-OPT-005` MUST@M. Audit delta3 `00ead5f..daefc7c`: 0 🔴/🟠 mở; 🟢 HAR-113 (ghép lại BLUEPRINT), HAR-114, DOC-086 (hạn 2026-11-08). Hoãn C tới khi có SLO thật. GO-NO-GO v3.25.0: D-126 giữ tự host (chủ repo 2026-10-25), chờ ký mục 5.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 + #260 (`v3.23.0`) + #261 audit delta; 3.24.0 (ADR-0047, #262): mẫu `merge_hard_exceptions: auto` (D-176); `/autopilot` lặp build → audit delta → đợt kế tới khi hết việc (D-177/178); tag tự khi `VERSION` đổi (D-179). GO-NO-GO `v3.18.x`/`v3.20.0`/`v3.23.0` chờ ký. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` có `delegation_rate`, `first_pass_rate_*`; chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
@@ -23,7 +23,7 @@
 7. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0043) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0049) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage 100 % (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge). Tên: X-stored → X-Templates (ADR-0006/0007).

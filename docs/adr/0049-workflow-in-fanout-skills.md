@@ -1,6 +1,7 @@
 # ADR-0049: Skill fan-out (`/audit`, `/complete` nợ review, `/research`) tự dùng tool Workflow khi có; không bật `ultracode` mặc định
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184; phiên
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184,
+  D-185, D-186 — review #265 hai lượt; phiên
   chính tự duyệt, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/complete/SKILL.md`
   bước 2, `.claude/skills/research/SKILL.md` bước 3.
@@ -45,14 +46,17 @@ kích hoạt ở đó.
 
 1. Ba chỗ dùng Workflow: `/audit` §3–4 (quét theo cụm + xác minh đối kháng 🔴/🟠), `/complete` bước 2 (nợ review, ghép vào
    workflow của `/audit`), `/research` bước 3 (≥ 3 mục độc lập + một agent đối chiếu chéo). Người gõ skill là đã opt-in (Bối
-   cảnh 4) — **không cần bật tay** `ultracode`. Gọi từ `/autopilot` hoặc không có người trực → nhánh subagent (hộp duyệt lần
-   đầu sẽ treo vòng không hỏi người).
+   cảnh 4) — **không cần bật tay** `ultracode`. Điều kiện máy quyết được: chỉ khi người **gõ trực tiếp** `/audit`, `/research`
+   hoặc `/complete … workflow` trong phiên tương tác (người còn đó để duyệt lần đầu); mọi lần gọi trong vòng không hỏi người
+   (`/autopilot`, `/complete` bước 4) → nhánh subagent (hộp duyệt lần đầu sẽ treo vòng).
 2. Khuôn bắt buộc (nhà: `/audit` §3): agent **chỉ đọc** qua `agentType` `reviewer`/`researcher` (`tools` không
    `Edit`/`Write`/`Agent`; không dùng `Explore` — không có frontmatter repo); xác minh và nợ review chọn `reviewer`/`reviewer-alt`
-   theo người viết (`LOOP-ORCH-005`), `model` khác người tìm nếu được; **lô ≤ 5** đồng thời, một workflow một lúc; người xác minh
+   theo hàng Review của bảng điều phối (`LOOP-ORCH-005`: phiên chính Fable → `model: 'fable'`; không ai cao hơn →
+   INCONCLUSIVE), `model` khác người tìm chỉ trong các model vẫn cao hơn người viết; **lô ≤ 5** đồng thời, một workflow một lúc; người xác minh
    không nhận lý luận của người tìm; workflow chỉ trả dữ liệu — phiên chính gộp, đánh ID, ghi sổ, `loop decide`, sửa, push.
-3. Không lọc `null`: agent `null`/INCONCLUSIVE → nhóm giữ `chưa quét` và chạy lại bằng subagent; xác minh `null` → `chưa xác
-   minh`, không hạ, không bác. Không có tool, bị từ chối hoặc lỗi → nhánh subagent cũ; sổ/`audit check` như nhau.
+3. Không lọc `null`: agent `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → nhóm giữ `chưa quét`; xác minh `null`
+   → chạy lại theo `/audit` §4, vẫn không được → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác minh` (giá trị sổ hợp lệ: `audit
+   check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh. Không có tool, bị từ chối hoặc lỗi → nhánh subagent cũ; sổ/`audit check` như nhau.
 4. Không dùng Workflow cho task build (việc `executor`), `/review` một PR, `/optimize`, `release-check`, việc cơ học. Ultracode cả
    phiên là lựa chọn của người cho phiên harden lớn (`/effort ultracode`, tắt bằng `/effort ultracode off`), không đặt trong
    settings của khung.
