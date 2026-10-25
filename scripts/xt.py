@@ -2701,6 +2701,33 @@ def read_runs(base: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _delegation_stats(per: Dict[str, Dict[str, Any]], rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Tỉ lệ giao việc cho subagent và xanh-lần-đầu theo nhóm (giao / tự làm) — nợ ADR-0045, `LOOP-ORCH-020`.
+    Nhóm theo executor của LẦN CHẠY ĐẦU của task trong tập `rows`: có → giao; thiếu (`null`) → tự làm. Task tự làm đỏ
+    rồi được chuyển cấp `executor-deep` vẫn là tự làm — nhóm giao không gánh lỗi của phiên chính (review #253)."""
+    first: Dict[str, Optional[str]] = {}
+    for r in rows:
+        ex = r.get("executor")
+        first.setdefault(r["task"], ex if isinstance(ex, str) else None)
+    delegated = sorted(k for k in per if first[k])
+    self_done = sorted(k for k in per if not first[k])
+
+    def first_pass(group: List[str]) -> Optional[float]:
+        return round(sum(per[k]["runs_to_green"] == 1 for k in group) / len(group), 3) if group else None
+
+    return {
+        "delegated": delegated,
+        "self_done": self_done,
+        "delegation_rate": round(len(delegated) / len(per), 3) if per else None,
+        "first_pass_rate_delegated": first_pass(delegated),
+        "first_pass_rate_self": first_pass(self_done),
+    }
+
+
+def _pct(x: Optional[float]) -> str:
+    return "—" if x is None else f"{x:.0%}"
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
     ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
@@ -2724,6 +2751,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         if t["executors"][:1] != [EXECUTOR_AGENTS["deep"]] and EXECUTOR_AGENTS["deep"] in t["executors"]
     )
     return {
+        **_delegation_stats(per, rows),
         "tasks": per,
         "task_count": len(per),
         "runs": len(rows),
@@ -2745,12 +2773,16 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     if args.json:
         print(json.dumps(s, ensure_ascii=False))
         return 0
-    rate = "—" if s["first_pass_rate"] is None else f"{s['first_pass_rate']:.0%}"
+    rate = _pct(s["first_pass_rate"])
     print(
         f"Task đã chạy Gate: {s['task_count']} · lần chạy: {s['runs']} (đỏ {s['failed_runs']}) · xanh lần đầu: {rate}"
     )
     print(
         f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    print(
+        f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
+        f"xanh lần đầu: giao {_pct(s['first_pass_rate_delegated'])} · tự làm {_pct(s['first_pass_rate_self'])}"
     )
     for k, t in sorted(s["tasks"].items()):
         green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"
