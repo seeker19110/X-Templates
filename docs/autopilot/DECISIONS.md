@@ -1343,3 +1343,10 @@
 - Chọn: Bỏ mọi tự chạy lại: hỏng/null/bị chặn → đánh dấu (chưa quét / mở + chưa xác minh / chưa biết:), cụm khác dùng tiếp, báo người, chạy lại khi người bảo; chỉ không có tool → nhánh subagent; trạng thái cuối = ADR-0049
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1+3: ba cam tái hiện đều ở luật tự chạy lại — null không phân biệt được người dừng với lỗi, chạy lại qua tool Agent phạm LOOP-STOP-025. Không tự chạy lại xoá cả lớp lỗi; người luôn có mặt (điều kiện vào nhánh) nên hỏi rẻ. D-184/D-185/D-186/D-189 phần trái với điều này được thay.
 - Đường lùi: Khôi phục chạy lại bằng subagent cho null do lỗi API
+
+### D-191 · 2026-10-25T18:57:40+00:00 · Review #265 lượt 7: người xác minh bị chặn lệnh với 🔴 giữ mức
+
+- Phương án: (1) Ghi chưa biết: và giữ 🔴 (audit check từ chối) · (2) Người xác minh bị chặn = INCONCLUSIVE (giữ Bằng chứng người tìm, Ghi chú chưa xác minh + bị chặn); chặn trong cụm → chưa biết:, 🔴 chỉ còn chưa biết: → 🟠; agent() lỗi = null; phiên chính không tự chạy lệnh bị chặn
+- Chọn: Người xác minh bị chặn = INCONCLUSIVE (giữ Bằng chứng người tìm, Ghi chú chưa xác minh + bị chặn); chặn trong cụm → chưa biết:, 🔴 chỉ còn chưa biết: → 🟠; agent() lỗi = null; phiên chính không tự chạy lệnh bị chặn
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: cam tái hiện — audit check exit 1 với 🔴 + chưa biết:; hai luật D-190 chồng lên nhau. Khớp luật sổ có sẵn, không thêm trạng thái mới.
+- Đường lùi: Khôi phục chữ D-190

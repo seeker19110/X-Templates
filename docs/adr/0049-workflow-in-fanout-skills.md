@@ -1,7 +1,7 @@
 # ADR-0049: `/audit` và `/research` dùng tool Workflow khi người gõ trực tiếp; không bật `ultracode` mặc định
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-190
-  — review #265 sáu lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-191
+  — review #265 bảy lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/research/SKILL.md`
   bước 3.
 - **Ngày:** 2026-10-25
@@ -55,8 +55,9 @@ kích hoạt ở đó.
 3. Không lọc `null`, **không tự chạy lại** (`null` có thể do người dừng run/agent ở `/workflows`; chạy lại qua tool Agent là đổi
    tool cho cùng hiệu ứng, `LOOP-STOP-025`): cụm `null`/INCONCLUSIVE → ghi nhóm `chưa quét` (xoá SHA/Ngày, kể cả nhóm đang
    `đã quét` ở SHA cũ khi delta); xác minh `null`/INCONCLUSIVE → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác minh` (`audit
-   check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh; lệnh bị chặn bên trong agent → mục đó
-   `chưa biết:`, cụm khác vẫn dùng. Báo người (đang có mặt), chạy lại chỉ khi người bảo. Người chọn No, `deny`/bộ phân loại chặn
+   check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh — cả khi lệnh của người xác minh bị chặn
+   (giữ Bằng chứng của người tìm); lệnh bị chặn trong agent cụm → số đo đó `chưa biết:` (🔴 chỉ còn `chưa biết:` → hạ 🟠),
+   cụm khác vẫn dùng, phiên chính không tự chạy lệnh bị chặn; `agent()` ném lỗi tính như `null`. Báo người (đang có mặt), chạy lại chỉ khi người bảo. Người chọn No, `deny`/bộ phân loại chặn
    lời gọi Workflow → dừng, báo người. Chỉ khi không có tool Workflow → nhánh subagent.
 4. Không dùng Workflow cho nợ review của `/complete` (đơn vị là PR/lát, review theo `LOOP-ORCH-005` và hàng `review_debt` —
    ghép vào cụm nhóm làm mất dấu vết lát hỏng; review #265 lượt 3), task build, `/review` một PR, `/optimize`, `release-check`,
