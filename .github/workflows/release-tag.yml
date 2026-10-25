@@ -1,11 +1,16 @@
 name: Release tag
 
-# Tạo annotated tag `v<VERSION>` trên `main` (BASE-REPO-006). Chạy tay (workflow_dispatch) — phát hành là quyết định của người.
-# Lý do có workflow: phiên agent bị proxy chặn push tag; tag tạo ở đây vẫn là annotated (`git cat-file -t` = `tag`).
+# Tạo annotated tag `v<VERSION>` trên `main` (BASE-REPO-006). Tự chạy khi `VERSION` đổi trên `main` (D-179, chủ repo
+# 2026-10-25) — VERSION chỉ đổi qua PR đã merge theo làn; chữ ký GO-NO-GO vẫn là người, tách khỏi tag. `workflow_dispatch`
+# giữ làm đường lùi (gắn tag cho commit cũ, hay khi GITHUB_TOKEN không đẩy được — xem dưới).
+# Lý do có workflow: phiên agent bị proxy/bộ phân loại chặn push tag; tag tạo ở đây vẫn là annotated (`git cat-file -t` = `tag`).
 # Token: secret tuỳ chọn `XT_RELEASE_TOKEN` (fine-grained PAT: contents + workflows) nếu có, không thì `GITHUB_TOKEN`.
 # GITHUB_TOKEN không được đẩy tag khi commit đích đổi file workflow so với tag trước ("refusing to allow a GitHub App to
 # create or update workflow … without workflows permission", AUD-CI-014): thiếu secret thì người đẩy tag tay.
 on:
+  push:
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
     inputs:
       sha:

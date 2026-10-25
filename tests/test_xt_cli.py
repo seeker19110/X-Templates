@@ -1654,6 +1654,23 @@ class LoopCommandsTest(TmpDirCase):
             (xt.read_state(self.tmp)["max_iterations"], xt.read_state(self.tmp)["single_session"]), (100, False)
         )
 
+    def test_init_after_done_starts_next_batch(self):
+        # D-177/ADR-0047: đợt `done` (mọi task xanh) không phải vòng sống — `loop init` đợt kế chạy, không cần `loop stop`/`--force`.
+        self.write_plan()
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "true")[0], 0)
+        self.assertEqual((xt.read_state(self.tmp)["active"], xt.loop_verdict(self.tmp)["verdict"]), (True, "done"))
+        (self.tmp / "docs" / "autopilot" / "PLAN-2.md").write_text(
+            "- [ ] `T-002` đợt kế — Gate: `true`\n", encoding="utf-8"
+        )
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual((rc, "LOOP-HARNESS-024" in err), (0, False))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-002"))
+        run_main("loop", "defer", "--task", "T-002", "--reason", "khoá thật")  # done-pending-human cũng là hết đợt
+        self.assertEqual(xt.loop_verdict(self.tmp)["verdict"], "done-pending-human")
+        (self.tmp / "docs" / "autopilot" / "PLAN-3.md").write_text("- [ ] `T-003` c — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-3.md")[0], 0)
+
     def test_init_refuses_live_loop(self):
         # LOOP-HARNESS-024 (rà stored 01 §3h): phiên thứ hai không xoá trạng thái vòng đang chạy của phiên kia.
         self.write_plan()

@@ -262,6 +262,97 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(list(st["deferred"]), ["T-002"])
         self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-003"))
 
+    def test_loop_init_carry_keeps_deferred_across_plans(self) -> None:
+        # D-177/ADR-0047: đợt kế dùng PLAN mới — việc chờ người còn mở cùng ID đi theo, bằng chứng xanh thì không; ID hết mở → báo bỏ.
+        run_main("loop", "init")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")
+        run_main("loop", "defer", "--task", "T-003", "--reason", "khoá thật")
+        run_main("loop", "stop", "--reason", "đợt 1 xong")
+        self.plan.with_name("PLAN-2.md").write_text(
+            "- [ ] `T-002` cần người — Gate: `true`\n- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8"
+        )
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 0)
+        self.assertIn("ℹ Vòng trước: giữ 1 việc chờ người: T-002", err)
+        self.assertIn("⚠ 1 việc chờ người của vòng trước không còn mở trong PLAN/blueprint này (T-003) — bỏ", err)
+        self.assertNotIn("bằng chứng xanh", err)
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual((list(st["deferred"]), "carried" in st), (["T-002"], False))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-004"))
+
+    def test_loop_init_carry_drops_reused_id_with_other_spec(self) -> None:
+        # Review #262 lượt 2: PLAN-<đợt> sinh từ mẫu bắt đầu lại ở T-001 — ID chờ người trùng nhưng việc khác là task mới,
+        # không mang lý do cũ sang (trước: T-002 mới bị bỏ qua lặng lẽ, báo cáo cuối "chờ người" với lý do cũ).
+        run_main("loop", "init")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký hợp đồng")
+        run_main("loop", "stop", "--reason", "đợt 1 xong")
+        self.plan.with_name("PLAN-2.md").write_text(
+            "- [ ] `T-002` viết test tích hợp thanh toán — Gate: `true`\n- [ ] `T-003` d — Gate: `true`\n",
+            encoding="utf-8",
+        )
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ 1 ID chờ người của vòng trước nay là việc khác trong PLAN này (T-002) — không mang", err)
+        self.assertNotIn("giữ 1 việc chờ người", err)
+        self.assertNotIn("không còn mở", err)
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertNotIn("deferred", st)
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-002"))
+        run_main("loop", "defer", "--task", "T-002", "--reason", "khoá thật")
+        run_main("loop", "stop", "--reason", "x")
+        self.plan.with_name(
+            "PLAN-2.md"
+        ).unlink()  # PLAN đợt trước không còn đọc được → không so spec, vẫn mang (fail-open)
+        self.plan.with_name("PLAN-3.md").write_text("- [ ] `T-002` khác nữa — Gate: `true`\n", encoding="utf-8")
+        self.assertIn("giữ 1 việc chờ người: T-002", run_main("loop", "init", "--plan", "docs/autopilot/PLAN-3.md")[2])
+
+    def test_loop_init_after_done_needs_final_verify(self) -> None:
+        # Review #262 lượt 2 (LOOP-DESIGN-022): đợt `done` chưa `loop verify --all` trên cây hiện tại không phải "xong" —
+        # `loop init` đợt kế bị chặn như Stop hook, vì verify của đợt kế chỉ chạy Gate PLAN mới (Gate đợt trước đỏ sẽ lọt).
+        self.plan.write_text("- [ ] `T-001` a (files: a.txt) — Gate: `test -f a.txt`\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "plan")
+        run_main("loop", "init")
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "test", "-f", "a.txt")[0], 0)
+        (self.repo / "a.txt").unlink()  # Gate đợt 1 nay đỏ
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: done"))
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-002` b — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("đợt `done` — mọi task có bằng chứng nhưng chưa kiểm lại cuối", err)
+        self.assertIn("rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024", err)
+        self.assertNotIn("resume", err)  # lượt 3: `loop resume` xoá chờ người, `--force` bỏ kiểm cuối — không gợi
+        self.assertNotIn("--force", err)
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 1)
+        self.assertIn("kiểm lại cuối ĐỎ (T-001)", run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[2])
+        (self.repo / "a.txt").write_text("1\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
+        with self.plan.open(
+            "a", encoding="utf-8"
+        ) as f:  # cây đổi sau verify (PLAN/sổ audit viết sau) → verify lại (lượt 3)
+            f.write("- [ ] `T-002` cần người — Gate: `true`\n")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "khoá thật")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual((rc, "đợt `done-pending-human` — " in err), (2, True))
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)  # thứ tự tài liệu: PLAN + sổ → verify → init
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
+        self.assertNotIn("deferred", xt.read_state(self.repo))  # T-002 không có trong PLAN-2 → báo bỏ, không mang
+
+    def test_loop_init_after_budget_needs_no_verify(self) -> None:
+        # Hết ngân sách không phải "xong": `loop init` đợt kế không đòi kiểm lại cuối (nhánh `budget` của `_live_loop`).
+        self.git("add", "-A")  # có commit để vân tay cây hoạt động — PLAN-2 chưa track làm cây đổi (review #262 lượt 4)
+        self.git("commit", "-q", "-m", "plan")
+        run_main("loop", "init", "--max-iterations", "1")
+        st = xt.read_state(self.repo)
+        st["iterations"] = 1
+        xt.write_state(st, self.repo)
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: budget"))
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual((rc, "kiểm lại cuối" in err), (0, False))
+
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
         # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.
         for change in ("spec", "file"):
