@@ -1466,6 +1466,32 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             xt._loop_stats(argparse.Namespace(json=False, all=False), empty)
         self.assertIn("Giao việc: — (0/0) · xanh lần đầu: giao — · tự làm —", out.getvalue())
 
+    def test_delegation_groups_by_first_run(self):
+        """LOOP-ORCH-020 (review #253): nhóm giao/tự làm theo executor của LẦN CHẠY ĐẦU — task tự làm đỏ rồi chuyển cấp
+        `executor-deep` vẫn là tự làm; task chỉ có `executor` hay chỉ `executor-deep` là giao."""
+        out, err = io.StringIO(), io.StringIO()
+        runs = (
+            ("T-001", "sh -c 'echo a; exit 1'", None),  # tự làm, đỏ 2 lần rồi chuyển cấp
+            ("T-001", "sh -c 'echo b; exit 1'", None),
+            ("T-001", "true", "executor-deep"),
+            ("T-002", "true", "executor"),  # giao, xanh lần đầu
+            ("T-003", "true", "executor-deep"),  # giao ngay ở tầng sâu
+            ("T-004", "true", None),  # tự làm, xanh lần đầu
+            ("T-005", "true", None),
+        )
+        with redirect_stdout(out), redirect_stderr(err):
+            for task, cmd, ex in runs:
+                xt.loop_record(task, [cmd], self.base, ex, tick=False)
+        s = xt.loop_stats(self.base)
+        self.assertEqual((s["delegated"], s["self_done"]), (["T-002", "T-003"], ["T-001", "T-004", "T-005"]))
+        self.assertEqual(s["delegation_rate"], 0.4)
+        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (1.0, 0.667))
+        self.assertEqual(s["tasks"]["T-001"]["executors"], ["executor-deep"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(json=False, all=False), self.base)
+        self.assertIn("Giao việc: 40% (2/5) · xanh lần đầu: giao 100% · tự làm 67%", out.getvalue())
+
     def test_executor_tier_escalation_and_stats(self):
         """ADR-0029: `(exec: deep)` → tầng sâu ngay; tầng mặc định đỏ 2 lần cùng task trong vòng này → `loop status`
         chuyển cấp lên `executor-deep`; `--executor` ghi vào evidence + runs.jsonl; `loop stats` đếm task đã chuyển cấp."""

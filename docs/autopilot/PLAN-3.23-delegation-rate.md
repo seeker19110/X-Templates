@@ -5,14 +5,14 @@
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
 ## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-171)
-- Phạm vi: `loop_stats` thêm, qua helper `_delegation_stats(per)`: `delegated` (task có `executors` khác rỗng), `self_done`
-  (task `executors` rỗng), `delegation_rate` (= giao / `task_count`, `None` khi rỗng), `first_pass_rate_delegated`,
+- Phạm vi: `loop_stats` thêm, qua helper `_delegation_stats(per)`: `delegated` (lần chạy đầu của task có executor), `self_done`
+  (lần chạy đầu không có executor), `delegation_rate` (= giao / `task_count`, `None` khi rỗng), `first_pass_rate_delegated`,
   `first_pass_rate_self` (task `runs_to_green == 1` / số task của nhóm, `None` khi nhóm rỗng); bản chữ `loop stats` thêm một
   dòng "Giao việc: …". `LOOP-ORCH-020` Kiểm trỏ trường mới (hết đếm tay bằng `jq`).
 - Không làm: đổi định dạng `runs.jsonl`/cờ `--executor`; chi phí/token mỗi task (harness chưa ghi); đổi mặc định giao việc
   (chờ số ≥ 10 task/nhóm × ≥ 2 vòng — `LOOP-ORCH-020`).
 - Ràng buộc: `mypy --strict`, C901 ≤ 10, coverage dòng + nhánh 100 %, trần byte `scripts/` (còn dư ~6 KB).
-- Rủi ro: task tự làm rồi chuyển cấp tính vào nhóm giao (ghi ở `LOOP-ORCH-020`); trường mới additive nên người đọc JSON cũ
+- Rủi ro: task tự làm rồi chuyển cấp vẫn là tự làm — nhóm theo executor của lần chạy đầu (D-172 đính chính D-171; ghi ở `LOOP-ORCH-020`); trường mới additive nên người đọc JSON cũ
   không vỡ. Đường lùi: revert PR.
 - Cách làm: T-3201 là mã có test → giao `executor` (tầng mặc định, `loop record --executor executor`) — điểm đo "giao" đầu
   tiên của `LOOP-ORCH-020`; T-3202/T-3203 là chữ → phiên chính tự làm.

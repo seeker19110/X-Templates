@@ -2701,10 +2701,16 @@ def read_runs(base: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _delegation_stats(per: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    """Tỉ lệ giao việc cho subagent và xanh-lần-đầu theo nhóm (giao / tự làm) — nợ ADR-0045."""
-    delegated = sorted(k for k, t in per.items() if t["executors"])
-    self_done = sorted(k for k, t in per.items() if not t["executors"])
+def _delegation_stats(per: Dict[str, Dict[str, Any]], rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Tỉ lệ giao việc cho subagent và xanh-lần-đầu theo nhóm (giao / tự làm) — nợ ADR-0045, `LOOP-ORCH-020`.
+    Nhóm theo executor của LẦN CHẠY ĐẦU của task trong tập `rows`: có → giao; thiếu (`null`) → tự làm. Task tự làm đỏ
+    rồi được chuyển cấp `executor-deep` vẫn là tự làm — nhóm giao không gánh lỗi của phiên chính (review #253)."""
+    first: Dict[str, Optional[str]] = {}
+    for r in rows:
+        ex = r.get("executor")
+        first.setdefault(r["task"], ex if isinstance(ex, str) else None)
+    delegated = sorted(k for k in per if first[k])
+    self_done = sorted(k for k in per if not first[k])
 
     def first_pass(group: List[str]) -> Optional[float]:
         return round(sum(per[k]["runs_to_green"] == 1 for k in group) / len(group), 3) if group else None
@@ -2745,7 +2751,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         if t["executors"][:1] != [EXECUTOR_AGENTS["deep"]] and EXECUTOR_AGENTS["deep"] in t["executors"]
     )
     return {
-        **_delegation_stats(per),
+        **_delegation_stats(per, rows),
         "tasks": per,
         "task_count": len(per),
         "runs": len(rows),
@@ -2767,7 +2773,7 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     if args.json:
         print(json.dumps(s, ensure_ascii=False))
         return 0
-    rate = "—" if s["first_pass_rate"] is None else f"{s['first_pass_rate']:.0%}"
+    rate = _pct(s["first_pass_rate"])
     print(
         f"Task đã chạy Gate: {s['task_count']} · lần chạy: {s['runs']} (đỏ {s['failed_runs']}) · xanh lần đầu: {rate}"
     )
