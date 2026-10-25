@@ -62,7 +62,8 @@ chủ repo đề xuất với khung (đo tại `e10e3c3`):
    `CREATE INDEX` cũng là migration cần đường lùi — dòng 8),
    không đổi hành vi, `PERF-LOG.md` có dòng giữ — dùng `GO-NO-GO.md` chế độ delta: dòng 1, 2, 4, 5 (bí mật, phụ thuộc — không có
    hàng tương ứng ở `release-check`), 12, 20 + §2b (bằng chứng chưa chứng minh: lab đo, field chưa) + bảng trước/sau từ
-   `PERF-LOG.md` + mục 1; người vẫn ký mục 5. `release-check` chạy như thường. Chạm manifest/lockfile/migration → bảng đầy đủ (review #263).
+   `PERF-LOG.md` + mục 1; người vẫn ký mục 5. `release-check` chạy như thường. Chạm mục nào ở trên, thêm cache/lưu tạm dữ liệu cá nhân (dòng 11 DPIA/PII) hoặc
+   đổi hành vi → bảng đầy đủ (review #263).
 5. **`LOOP-OPT-005` MUST@L → MUST@M**: tối ưu là việc agent dễ gian lận nhất (METR 2025-06-05: 30 % lượt có hack); dự án M đủ
    lớn để cần reviewer năng lực cao hơn trả lời từng ⚠ của `perf guard`. Trần 4 MUST hiệu lực ở M mỗi module (`validate`,
    ADR-0004) → `LOOP-OPT-004` (một giả thuyết/một thay đổi — kỷ luật quy trình, không tạo kết quả giả) MUST@M → MUST@L

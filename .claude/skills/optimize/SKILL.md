@@ -1,6 +1,6 @@
 ---
 name: optimize
-description: Tối ưu CHỈ ngân sách đang đỏ có số — hàng perf FAIL của release-check, sàn floor đỏ, hoặc số production xuất vào docs/ops/FIELD-<ngày>.json — theo vòng đo → profile → một thay đổi → máy quyết (xt.py perf), bộ đo khoá ở commit gốc, luật harden. Dùng khi release-check báo perf FAIL, số field vượt SLO, người dùng nói "tối ưu", "chậm", "vượt ngân sách", hoặc gõ /optimize. Không số đỏ thì không chạy.
+description: Tối ưu CHỈ ngân sách đang đỏ có số — hàng perf FAIL của release-check hoặc số production xuất vào docs/ops/FIELD-<ngày>.json — theo vòng đo → profile → một thay đổi → máy quyết (xt.py perf), bộ đo khoá ở commit gốc, luật harden. Dùng khi release-check báo perf FAIL, số field vượt SLO, người dùng nói "tối ưu", "chậm", "vượt ngân sách", hoặc gõ /optimize. Không số đỏ thì không chạy.
 argument-hint: "[--field docs/ops/FIELD-<YYYY-MM-DD>.json] [chỉ số]"
 ---
 
@@ -17,7 +17,7 @@ Luật và công cụ: `<FW>/11-autonomous-loop/optimization-loop.md` (LOOP-OPT,
 Với mỗi ngân sách đỏ: harness đo (`bench/`), bộ test tương đương hành vi (`tests/equiv/`), input đo, `scripts/perf-gate.sh` — **đã commit ở nhánh đích** trước khi sửa (PR riêng nếu chưa có). Gate lấy script từ commit gốc: `bash <(git show origin/main:scripts/perf-gate.sh)`; script dùng `xt.py` của worktree commit gốc: `perf guard --base origin/main --locked … --strict`, baseline đo trên commit gốc **cùng lượt**, `perf sample` bản sau, `perf compare`. Ưu tiên đại lượng tất định (`--exact`: số truy vấn, byte, lệnh, token — `LOOP-OPT-009`); thời gian tường chỉ khi ghim máy/lõi và MAD nhỏ.
 
 ## Bước 2 — PLAN-opt (tự duyệt)
-`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi ngân sách đỏ một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`floor`/`FIELD-…`), Gate là `perf-gate.sh` từ commit gốc (+ lượt `perf compare` thứ hai trên held-out nếu có, `LOOP-OPT-007`; `--no-regress` cho chỉ số phụ, `LOOP-OPT-008`). Đổi hành vi (bỏ tính năng, giảm độ chính xác) **không** nằm ở đây — PR riêng có D-NNN (`LOOP-OPT-014`). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
+`docs/autopilot/PLAN-opt-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`: **mỗi ngân sách đỏ một task**, dòng task ghi mục tiêu số + điều kiện đo + nguồn (`perf`/`FIELD-…`), Gate là `perf-gate.sh` từ commit gốc (+ lượt `perf compare` thứ hai trên held-out nếu có, `LOOP-OPT-007`; `--no-regress` cho chỉ số phụ, `LOOP-OPT-008`). Đổi hành vi (bỏ tính năng, giảm độ chính xác) **không** nằm ở đây — PR riêng có D-NNN (`LOOP-OPT-014`). Tóm tắt ≤ 20 dòng → `<XT> loop decide --question "Duyệt PLAN-opt …"` → làm tiếp.
 
 ## Bước 3 — vòng cho mỗi task (`optimization-loop.md` §Vòng)
 `<XT> loop verify --all` rồi `<XT> loop init --plan docs/autopilot/PLAN-opt-<ngày>.md --blueprint BLUEPRINT.md --single-session`; mỗi vòng:
@@ -31,4 +31,4 @@ Với mỗi ngân sách đỏ: harness đo (`bench/`), bộ test tương đươn
 Stop hook `done` (sau `<XT> loop verify --all`) → `<XT> release-check --json` (hàng `perf` phải PASS) → phát hành theo `/complete` bước 5; bản **chỉ tối ưu** (không đổi hành vi) dùng `GO-NO-GO.md` §Chế độ delta — người vẫn ký. Nghiệm thu bằng field sau khi lên (`LOOP-OPT-013`): `FIELD-<ngày>.json` mới so với PERF-LOG; chưa đạt ngoài đời → task vòng kế, không khai "xong". Báo cáo ≤ 15 dòng: ngân sách, số trước/sau (lab + field), giữ/bỏ, D-NNN, còn treo.
 
 ## Không bao giờ
-Tối ưu khi không có số đỏ · đọc baseline từ file agent sửa được · sửa harness/ngưỡng/script Gate · gộp nhiều thay đổi vào một lần đo · tự kéo số từ production hoặc nhận khoá thật · đổi hành vi dưới danh nghĩa tối ưu · khai "nhanh hơn" khi `perf compare` không `improved`.
+Tối ưu khi không có số đỏ · đọc baseline từ file agent sửa được · sửa harness/ngưỡng/script Gate trong task tối ưu · gộp nhiều thay đổi vào một lần đo · tự kéo số từ production hoặc nhận khoá thật · đổi hành vi dưới danh nghĩa tối ưu · khai "nhanh hơn" khi `perf compare` không `improved`.

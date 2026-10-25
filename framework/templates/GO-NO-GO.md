@@ -59,7 +59,7 @@ Những gì cổng xanh **không** chứng minh — để người ký biết m�
 | <vd: thanh toán qua cổng thật> | <chỉ chạy adapter giả + contract test (`faithful-fixture`)> | <trước khi bật cho khách thật — chủ dự án> |
 
 ## 2c. Chế độ delta (bản chỉ tối ưu — ADR-0048)
-Bản phát hành **chỉ tối ưu**: chỉ task của `/optimize`, diff không chạm manifest/lockfile/migration/schema/hạ tầng (`git diff --stat`), không đổi hành vi, `docs/autopilot/PERF-LOG.md` có dòng giữ, bộ test tương đương xanh. Giữ dòng 1, 2, 4, 5, 12, 20, §2b (lab đo — field chưa) và mục 1; thay phần còn lại bằng bảng trước/sau từ `PERF-LOG.md` (chỉ số · nguồn `perf`/`floor`/`FIELD-<ngày>` · trước · sau · `perf compare`); dòng khác ghi "không đổi so với GO/NO-GO <ngày>". `release-check` vẫn chạy đủ; người vẫn ký mục 5. Chạm manifest/lockfile/migration/schema hoặc đổi hành vi → bảng đầy đủ.
+Bản phát hành **chỉ tối ưu**: chỉ task của `/optimize`, diff không chạm manifest/lockfile/migration/schema/hạ tầng (`git diff --stat`), không đổi hành vi, `docs/autopilot/PERF-LOG.md` có dòng giữ, bộ test tương đương xanh. Giữ dòng 1, 2, 4, 5, 12, 20, §2b (lab đo — field chưa) và mục 1; thay phần còn lại bằng bảng trước/sau từ `PERF-LOG.md` (chỉ số · nguồn `perf`/`FIELD-<ngày>` · trước · sau · `perf compare`); dòng khác ghi "không đổi so với GO/NO-GO <ngày>". `release-check` vẫn chạy đủ; người vẫn ký mục 5. Chạm mục nào ở trên, thêm cache/lưu tạm dữ liệu cá nhân (dòng 11), hoặc đổi hành vi → bảng đầy đủ.
 
 ## 3. Bảng FAIL
 | # | Mức | Mục | Bằng chứng | Cách sửa đề xuất | Ticket / chủ / hạn (chỉ SHOULD) |
