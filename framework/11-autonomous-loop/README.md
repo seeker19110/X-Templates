@@ -95,7 +95,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     (≥ 80 % vòng/giờ/tiền) → Bàn giao vào PROGRESS, commit + push ([`context-and-token-budget.md`](context-and-token-budget.md)).
 16. **Kết thúc đợt → đợt kế (ADR-0047)**: `done` = mọi task xanh + `verify --all` khớp cây (build: MUST blueprint mở không
     chặn, ghi `open_must` — ADR-0046) → `<XT> loop stats`, báo cáo ≤ 20 dòng → không dừng: `/audit delta` (🔴/🟠 → task)
-    + MUST mở → `PLAN-<đợt>.md` (việc chờ người cùng ID đi theo), `loop init` (đợt `done` không chặn) → bước 10. **Hết việc**
+    + MUST mở → `PLAN-<đợt>.md` (chờ người cùng ID đi theo), `loop verify --all` trên cây có PLAN mới, `loop init` → bước 10. **Hết việc**
     = PLAN hết task, 0 MUST mở ngoài chờ người, 0 🔴/🟠 → `/audit full` sạch → đề xuất bước 17.
     `done-pending-human` → như `done` + chờ người. `blocked`/`budget` → lý do + bước kế, không khai "xong".
 17. **Pha 3 — hoàn thiện** (`/complete`, ADR-0046; dự án đã `harden` chạy luật này từ bước 12): PR đặt `delivery_phase: harden`

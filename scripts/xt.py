@@ -6169,8 +6169,8 @@ def _live_loop(base: Path) -> str:
     if verdict == "budget":
         return ""  # hết ngân sách: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
     if verdict in ("done", "done-pending-human"):
-        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022) — `loop verify --all` của đợt kế chỉ chạy
-        # Gate của PLAN mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
+        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022): verify của đợt kế chỉ chạy Gate PLAN
+        # mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
         why = final_check(base)
         return f"đợt `{verdict}` nhưng {why}" if why else ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
@@ -6263,6 +6263,10 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
+    if live.startswith("đợt `"):  # đợt xong nhưng cây đổi sau kiểm cuối (PLAN kế, sổ audit): verify lại rồi init;
+        # không gợi `resume` (xoá chờ người) hay `--force` (bỏ kiểm cuối) — review #262 lượt 3
+        print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
+        return 2
     if live:
         print(
             f"✗ Đang có vòng autopilot chạy ({live}) — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách,"

@@ -227,7 +227,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0044](docs/adr/0044-reviewer-higher-capability.md): reviewer năng lực cao hơn người viết (bậc model, hoặc cùng họ effort cao hơn) thay "khác họ".
 - [ADR-0045](docs/adr/0045-split-by-context-measure-before-fold.md): tách agent con chỉ vì context; đổi kiến trúc agent qua eval so sánh; đo trước khi đổi mặc định giao việc.
 - [ADR-0046](docs/adr/0046-autopilot-build-complete-harden.md): `/autopilot` = pha build, `done` không đòi hết MUST blueprint; `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`, GO-NO-GO); sàn an toàn không đổi.
-- [ADR-0047](docs/adr/0047-build-loop-until-audit-clean.md): pha build không chờ người — mẫu dự án đích `merge_hard_exceptions: auto`; `/autopilot` lặp đợt build → `/audit delta` → đợt kế tới khi hết việc và audit toàn diện sạch, rồi **đề xuất** `/complete` (không tự chạy); `loop init` đợt kế không bị vòng `done` chặn và mang việc chờ người cùng ID; tag phát hành tự tạo khi `VERSION` đổi trên `main`.
+- [ADR-0047](docs/adr/0047-build-loop-until-audit-clean.md): pha build không chờ người — mẫu dự án đích `merge_hard_exceptions: auto`; `/autopilot` lặp đợt build → `/audit delta` → đợt kế tới khi hết việc và audit toàn diện sạch, rồi **đề xuất** `/complete` (không tự chạy); `loop init` đợt kế (sau `loop verify --all` trên cây có PLAN mới) không bị vòng `done` chặn và mang việc chờ người cùng ID; tag phát hành tự tạo khi `VERSION` đổi trên `main`.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

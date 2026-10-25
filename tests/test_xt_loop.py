@@ -322,12 +322,32 @@ class LoopInitCarryTest(TmpRepoCase):
         rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
         self.assertEqual(rc, 2)
         self.assertIn("đợt `done` nhưng mọi task có bằng chứng nhưng chưa kiểm lại cuối", err)
-        self.assertIn("LOOP-HARNESS-024", err)
+        self.assertIn("rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024", err)
+        self.assertNotIn("resume", err)  # lượt 3: `loop resume` xoá chờ người, `--force` bỏ kiểm cuối — không gợi
+        self.assertNotIn("--force", err)
         self.assertEqual(run_main("loop", "verify", "--all")[0], 1)
         self.assertIn("kiểm lại cuối ĐỎ (T-001)", run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[2])
         (self.repo / "a.txt").write_text("1\n", encoding="utf-8")
         self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
-        run_main("loop", "defer", "--task", "T-001", "--reason", "x")  # cùng cây: done-pending-human cũng qua
+        with self.plan.open(
+            "a", encoding="utf-8"
+        ) as f:  # cây đổi sau verify (PLAN/sổ audit viết sau) → verify lại (lượt 3)
+            f.write("- [ ] `T-002` cần người — Gate: `true`\n")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "khoá thật")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual((rc, "đợt `done-pending-human` nhưng" in err), (2, True))
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)  # thứ tự tài liệu: PLAN + sổ → verify → init
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
+        self.assertNotIn("deferred", xt.read_state(self.repo))  # T-002 không có trong PLAN-2 → báo bỏ, không mang
+
+    def test_loop_init_after_budget_needs_no_verify(self) -> None:
+        # Hết ngân sách không phải "xong": `loop init` đợt kế không đòi kiểm lại cuối (nhánh `budget` của `_live_loop`).
+        run_main("loop", "init", "--max-iterations", "1")
+        st = xt.read_state(self.repo)
+        st["iterations"] = 1
+        xt.write_state(st, self.repo)
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: budget"))
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
         self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:

@@ -5,8 +5,8 @@
   cho đến khi hoàn thiện"; "đến khi audit không còn lỗi mới đề xuất chuyển qua `/complete`"; "Release tag không tự động được à"
   — D-176, D-177, D-178, D-179; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai (PR #262, bản 3.24.0) — `framework/templates/xt.yaml` (`auto`); skill
-  `.claude/skills/autopilot/SKILL.md` mục Kết thúc; `scripts/xt.py` `_live_loop` (vòng `done`/`done-pending-human` không chặn
-  `loop init`), `_carry_previous` (PLAN khác vẫn mang việc chờ người còn mở cùng ID), chuỗi lý do `milestone_audit: g7`;
+  `.claude/skills/autopilot/SKILL.md` mục Kết thúc; `scripts/xt.py` `_live_loop` (vòng `done`/`done-pending-human` đã kiểm lại cuối trên cây
+  hiện tại không chặn `loop init`), `_carry_previous` (PLAN khác vẫn mang việc chờ người còn mở cùng ID), chuỗi lý do `milestone_audit: g7`;
   `.github/workflows/release-tag.yml` (trigger `push` theo `VERSION`); test `tests/test_xt_cli.py::LoopCommandsTest::
   test_init_after_done_starts_next_batch`, `tests/test_xt_loop.py::LoopInitCarryTest::test_loop_init_carry_keeps_deferred_across_plans`;
   tài liệu README mảng 11 bước 16, `lifecycle.md`, `audit.md` §1, mẫu PLAN, README gốc, RUNBOOK-PR-STEWARD §4.
@@ -43,7 +43,9 @@ chặn gọi REST.
    nhận**: dự án có người dùng thật ở pha build merge PR chạm auth/tiền/PII không có người xem — muốn giữ chốt thì đặt `human`.
 2. `/autopilot` không dừng ở `done`: `/audit delta` (lần đầu `full`; 🔴/🟠 → task) + MUST mở → `PLAN-<đợt>.md` kế → `loop init`
    → lặp. **Hết việc** = PLAN hết task, 0 MUST mở ngoài việc chờ người, 0 🔴/🟠 → `/audit full`; sạch → **đề xuất** `/complete`, dừng.
-3. Máy: `loop init` coi vòng `done`/`done-pending-human` như hết ngân sách (không chặn, không cần `--force`); PLAN khác mang
+3. Máy: `loop init` coi vòng `done`/`done-pending-human` **đã `loop verify --all` trên cây hiện tại** như hết ngân sách (không
+   chặn, không cần `--force`; vân tay cây gồm cả file chưa track nên thứ tự là: viết PLAN đợt kế + sổ audit → `loop verify --all`
+   → `loop init`; cây đổi sau verify → exit 2 bảo verify lại, không gợi `resume`/`--force` — review #262 lượt 2–3); PLAN khác mang
    việc chờ người còn mở cùng ID, báo `⚠` việc không còn mở (chép task cùng ID rồi `loop defer` lại). Bằng chứng xanh vẫn chỉ
    mang khi cùng PLAN + blueprint.
 4. `release-tag.yml` thêm `on: push: branches: [main], paths: [VERSION]`; kiểm SemVer/CHANGELOG/tag trùng giữ; `workflow_dispatch`
