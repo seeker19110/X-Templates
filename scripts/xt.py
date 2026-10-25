@@ -1801,7 +1801,9 @@ def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
         return {"verdict": "verify", "reason": drift}
     s = blueprint_status(bpp)
     open_must = [i for i in s["open_must"] if i not in _deferred(st)]
-    build = _phase_in_tree(base) == "build"  # ADR-0046: pha build dừng ở "build xong", MUST mở trả ở /complete
+    build = (
+        _phase_in_tree(base) == "build"
+    )  # ADR-0046/0047: đợt build `done` không đòi hết MUST, MUST mở trả ở /complete
     if open_must and not build:
         return {
             "verdict": "continue",
@@ -6159,10 +6161,18 @@ def _live_loop(base: Path) -> str:
     (rà stored 01 §3h: "gậy" chỉ là quy ước, không phải khoá)."""
     prev = read_state(base) or {}
     try:
-        if not prev.get("active") or loop_verdict(base)["verdict"] in ("budget", "done", "done-pending-human"):
-            return ""  # hết ngân sách hoặc đợt đã xong: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
+        if not prev.get("active"):
+            return ""
+        verdict = loop_verdict(base)["verdict"]
     except (TypeError, ValueError, AttributeError):  # state.json sai kiểu: không phải vòng đọc được → ghi đè như trước
         return ""
+    if verdict == "budget":
+        return ""  # hết ngân sách: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
+    if verdict in ("done", "done-pending-human"):
+        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022) — `loop verify --all` của đợt kế chỉ chạy
+        # Gate của PLAN mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
+        why = final_check(base)
+        return f"đợt `{verdict}` nhưng {why}" if why else ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
 
 
@@ -6192,16 +6202,42 @@ def _init_warnings(args: argparse.Namespace, base: Path) -> None:
         print(f"⚠ Sàn Gate chưa đạt (LOOP-HARNESS-023, `loop verify` đỏ tới khi sửa): {issue}", file=sys.stderr)
 
 
+def _deferred_to_keep(
+    prev: Dict[str, Any], state: Dict[str, Any], base: Path, tasks: List[Dict[str, Any]]
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Việc chờ người của vòng trước còn mở trong PLAN/blueprint hiện tại. PLAN khác: ID trùng nhưng spec khác là task mới
+    (PLAN-<đợt> sinh từ mẫu bắt đầu lại ở T-001 — review #262 lượt 2) → không mang, trả ở `renamed`; PLAN cũ không còn đọc
+    được thì không so (mục không phải task PLAN, ví dụ MUST blueprint, cũng vậy)."""
+    still = _still_open(base, state)
+    old_plan = base / str(prev.get("plan") or "")
+    old = {t["id"]: task_req_rev(t) for t in parse_plan(old_plan)} if old_plan.is_file() else {}
+    new = {t["id"]: task_req_rev(t) for t in tasks}
+    keep, renamed = {}, []
+    for i, d in _deferred(prev).items():
+        if i not in still:
+            continue
+        if i in old and i in new and old[i] != new[i]:
+            renamed.append(i)
+        else:
+            keep[i] = d
+    return keep, renamed
+
+
 def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> List[str]:
     """`loop init` lại cùng PLAN sau vòng đã dừng (T-2611): giữ việc chờ người còn mở và bằng chứng xanh khớp Gate hiện
     tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác (đợt kế, D-177/ADR-0047): chỉ mang việc chờ
-    người còn mở cùng ID, không mang bằng chứng (ID có thể trùng nghĩa khác; so cả blueprint); việc chờ người không còn mở
-    thì báo. Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
+    người còn mở cùng ID và cùng spec, không mang bằng chứng (so cả blueprint); việc chờ người không còn mở hoặc ID bị dùng
+    lại cho việc khác thì báo. Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify`
+    lặng lẽ đòi."""
     tasks = parse_plan(base / state["plan"])
     notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
-    still = _still_open(base, state)
-    keep = {i: d for i, d in _deferred(prev).items() if i in still}
-    dropped = sorted(set(_deferred(prev)) - set(keep)) if not same else []
+    keep, renamed = _deferred_to_keep(prev, state, base, tasks)
+    dropped = sorted(set(_deferred(prev)) - set(keep) - set(renamed)) if not same else []
+    if renamed:
+        notes.append(
+            f"⚠ {len(renamed)} ID chờ người của vòng trước nay là việc khác trong PLAN này ({', '.join(renamed[:5])})"
+            " — không mang; còn cần người thì chép nguyên dòng cũ (ID đợt trước không dùng lại cho việc khác)"
+        )
     carried = [
         t["id"] for t in tasks if same and t["state"] == "x" and t["gate"] and not evidence_stale(t, base)
     ]  # cùng điều kiện `loop verify` giữ kết quả: lệnh, phạm vi, spec (req_rev), digest file (review #239)

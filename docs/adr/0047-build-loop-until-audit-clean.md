@@ -63,4 +63,4 @@ trong `release-tag.yml`. Mỗi bước là một commit đảo ngược được
 ## Xác nhận
 
 `tests/test_xt_cli.py` (`test_init_after_done_starts_next_batch`), `tests/test_xt_loop.py` (`…_across_plans`),
-`tests/test_docs_budget.py` (trần byte skill/README 11); review #262 lượt 2 sạch; tag `v3.24.0` tạo bởi run tự động hoặc tay.
+`tests/test_docs_budget.py` (trần byte skill/README 11); review #262 (ghi `pr reviewed`, lượt cuối sạch ở head merge); tag `v3.24.0` tạo bởi run tự động hoặc tay.

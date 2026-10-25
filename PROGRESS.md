@@ -32,7 +32,7 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- **Bàn giao #262** (nhánh `claude/dreamy-dirac-l8210z`, `main` `b44857f`): đã sửa review lượt 1 + ADR-0047; chờ review lượt 2. Làm tiếp: gate xanh → push → `reviewer-alt` (fable, max) duyệt delta → `pr reviewed --clean` → merge REST ghim head → `git merge origin/main` → tag `v3.24.0` (workflow tự chạy; đỏ thì tag tay) → `loop verify --all`.
+- **Bàn giao #262** (`claude/dreamy-dirac-l8210z`, `main` `b44857f`): review lượt 2 (Fable max) 4 🟠 đã sửa ở head kế; còn: gate xanh → push → review lượt 3 → `pr reviewed --clean` → merge ghim head → tag `v3.24.0` → `loop verify --all`.
 - `main` `b44857f` (3.24.0). Lệnh merge của phiên có thể bị bộ phân loại Auto chặn → `pr-steward` merge ghim head (cron thực đo ~4 giờ; D-132).
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).

@@ -737,7 +737,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertIn("còn 2 mục MUST", v["reason"])
 
     def test_blueprint_open_must_build_phase_is_done(self):
-        """ADR-0046: pha build dừng ở "build xong" — MUST blueprint mở không chặn `done` (ghi `open_must`, trả ở /complete);
+        """ADR-0046/0047: đợt build — MUST blueprint mở không chặn `done` (ghi `open_must`, trả ở /complete);
         harden/vắng/giá trị lạ giữ `continue`; miễn trừ sai, dòng sai, MUST đã defer vẫn xử lý như cũ."""
         write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
         self.evidence("T-001", 0, "true")
