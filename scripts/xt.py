@@ -3848,7 +3848,7 @@ DOCTOR_HOOK_EVENTS = {
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
 DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
-DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
+DOCTOR_AGENTS = ("executor", "executor-deep", "researcher", "reviewer", "reviewer-alt")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 # File hook nạp/gọi cạnh nó (_lib.sh, guard.py, nested/x.py, ../x.py): cả đường dẫn literal, giữ `/` lặp — đường dẫn chỉ
@@ -4664,16 +4664,23 @@ def _harness_settings(base: Path) -> str:
 
 
 def _harness_agents(base: Path) -> str:
-    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`."""
+    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`; không `Agent`/`Task`
+    (không lồng subagent); `reviewer*` không `Edit`/`Write` (chỉ đọc)."""
     bad = []
     for f in sorted((base / ".claude" / "agents").glob("*.md")):
         fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
         # `tools: Read, Grep`, `tools: [Read]` hoặc danh sách YAML xuống dòng (`tools:\n  - Read`, review #240)
         tools = re.search(r"^tools:[ \t]*(.*(?:\n[ \t]+-[ \t]*\S.*)*)$", fm[1], re.M) if fm else None
-        if not tools or not tools[1].strip() or "*" in tools[1]:
+        t = re.sub(r"(?:^|[ \t])#[^\n]*", "", tools[1], flags=re.M) if tools else ""  # bỏ chú thích YAML
+        if not t.strip() or "*" in t:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
             bad.append(f"{f.name} (permissionMode)")
+        # LOOP-ORCH-005 (reviewer* chỉ đọc), LOOP-ORCH-001 (không lồng subagent; `Task` là tên cũ của `Agent`)
+        if re.search(r"\b(?:Agent|Task)\b", t) or (
+            f.name.startswith("reviewer") and re.search(r"\b(?:(?:Notebook|Multi)?Edit|Write)\b", t)
+        ):
+            bad.append(f"{f.name} (tools: ghi/Agent)")
     return "; ".join(bad)
 
 
@@ -8906,9 +8913,15 @@ MODEL_FAMILY_RE = re.compile(
 )
 
 
+RUNNER_RE = re.compile(
+    r"(?<![a-z0-9])(?:ollama|llama[._-]?cpp|llamafile|llama-(?:server|swap|cli)|gpt4all)(?![a-z0-9])", re.I | re.A
+)
+
+
 def _model_tail(name: str) -> str:
-    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)."""
-    return name.rsplit("/", 1)[-1]
+    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…` và bộ chạy `ollama:`/`gpt4all-`: `llama`/`gpt` trong đó không phải
+    họ (review #249, AUD-SEC-105)."""
+    return RUNNER_RE.sub(" ", name.rsplit("/", 1)[-1])
 
 
 def model_family(name: str) -> str:
