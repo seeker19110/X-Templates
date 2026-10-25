@@ -342,7 +342,8 @@ class LoopInitCarryTest(TmpRepoCase):
 
     def test_loop_init_after_budget_needs_no_verify(self) -> None:
         # Hết ngân sách không phải "xong": `loop init` đợt kế không đòi kiểm lại cuối (nhánh `budget` của `_live_loop`).
-        self.git("add", "-A")  # có commit để vân tay cây hoạt động — PLAN-2 chưa track làm cây đổi (review #262 lượt 4)
+        # Có commit để vân tay cây hoạt động: chưa `loop verify` nên `final_check` ≠ None nếu nhánh `budget` đòi kiểm cuối.
+        self.git("add", "-A")
         self.git("commit", "-q", "-m", "plan")
         run_main("loop", "init", "--max-iterations", "1")
         st = xt.read_state(self.repo)
@@ -352,6 +353,22 @@ class LoopInitCarryTest(TmpRepoCase):
         self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
         rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
         self.assertEqual((rc, "kiểm lại cuối" in err), (0, False))
+
+    def test_init_after_plan_renamed(self) -> None:
+        # AUD-HAR-114: PLAN đợt trước đổi tên sau khi đợt xong → verdict `blocked` (không thấy PLAN) → `loop init` exit 2
+        # "Đang có vòng" mà không nói vì sao. Nay thông báo nêu verdict + lý do và lối ra `loop stop`.
+        run_main("loop", "init")
+        for tid in ("T-001", "T-002", "T-003"):
+            self.assertEqual(run_main("loop", "record", "--task", tid, "--", "true")[0], 0)
+        self.plan.rename(self.plan.with_name("PLAN-1.md"))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: blocked"))
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("verdict `blocked`: không thấy PLAN", err)
+        self.assertIn("`loop stop`", err)
+        self.assertEqual(run_main("loop", "stop", "--reason", "đợt 1 xong")[0], 0)
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
         # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.

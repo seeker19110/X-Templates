@@ -6167,24 +6167,25 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
 
 
 def _live_loop(base: Path) -> str:
-    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn, chưa `done`) — `loop init` không ghi đè (LOOP-HARNESS-024);
-    rỗng nếu không có. `state.json` từng bị ghi đè vô điều kiện: hai phiên cùng dự án xoá trạng thái của nhau
-    (rà stored 01 §3h: "gậy" chỉ là quy ước, không phải khoá)."""
+    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn, chưa `done`) — `loop init` không ghi đè (LOOP-HARNESS-024,
+    hai phiên từng xoá trạng thái của nhau — rà stored 01 §3h); rỗng nếu không có."""
     prev = read_state(base) or {}
     try:
         if not prev.get("active"):
             return ""
-        verdict = loop_verdict(base)["verdict"]
-    except (TypeError, ValueError, AttributeError):  # state.json sai kiểu: không phải vòng đọc được → ghi đè như trước
+        v = loop_verdict(base)
+        verdict = v["verdict"]
+    except (TypeError, ValueError, AttributeError):  # state.json sai kiểu → ghi đè như trước
         return ""
     if verdict == "budget":
-        return ""  # hết ngân sách: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
+        return ""  # hết ngân sách: đợt kế không cần `loop stop`/`--force` (D-177)
     if verdict in ("done", "done-pending-human"):
-        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022): verify của đợt kế chỉ chạy Gate PLAN
-        # mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
+        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
+    # AUD-HAR-114: vòng `blocked` (vd PLAN đợt trước đổi tên) — nói vì sao
+    why = f"; verdict `blocked`: {v.get('reason', '')} — vòng đã kết thúc: `loop stop`" if verdict == "blocked" else ""
+    return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
 
 def _init_warnings(args: argparse.Namespace, base: Path) -> None:

@@ -1,19 +1,18 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.26.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.26.1, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
 - 2026-10-25 **3.26.0 Workflow** (D-184…D-191, ADR-0049): `/audit` §3, `/research` ≥ 3 mục dùng tool Workflow khi người gõ trực tiếp (cùng luật nhánh subagent, lô ≤ 5); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token, kiểm `maxTurns`/`effort`/guard có áp cho agent.
-- 2026-10-25 **PLAN-3.25-optimize xong** (D-180…D-183, ADR-0048; #263, `v3.25.0`): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta, `LOOP-OPT-005` MUST@M. Audit delta3 `00ead5f..daefc7c`: 0 🔴/🟠 mở; 🟢 HAR-113 (ghép lại BLUEPRINT), HAR-114, DOC-086 (hạn 2026-11-08). Hoãn C tới khi có SLO thật. GO-NO-GO v3.25.0: D-126 giữ tự host (chủ repo 2026-10-25), chờ ký mục 5.
+- 2026-10-25 **PLAN-3.25-optimize xong** (D-180…D-183, ADR-0048; #263, `v3.25.0`): `/optimize`, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta. PLAN-3.26.1 (D-192): 3 🟢 delta3 sửa; ghép lại BLUEPRINT repo khung bằng `XT_FRAMEWORK_LINK=framework` (thiếu biến → 19 mục "đổi chữ" giả). GO-NO-GO v3.25.0 chờ ký mục 5.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 + #260 (`v3.23.0`) + #261 audit delta; 3.24.0 (ADR-0047, #262): mẫu `merge_hard_exceptions: auto` (D-176); `/autopilot` lặp build → audit delta → đợt kế tới khi hết việc (D-177/178); tag tự khi `VERSION` đổi (D-179). GO-NO-GO `v3.18.x`, `v3.25.0` (gồm 3.23/3.24) chờ ký. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` có `delegation_rate`, `first_pass_rate_*`; chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
-- 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173): 2 🟠 + 3 🟢 sửa ở 3.22.1 (#255); BLUEPRINT.md sinh lại (#257).
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043).
 
 ## Tiếp theo
-0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65. Nợ: 21 MUST blueprint repo khung đổi chữ từ 2026-10-15; 58/68 MUST tick không có lệnh kiểm (`unchecked_must`, chưa bật `fail`).
+0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65. Nợ: 57/64 MUST tick không có lệnh kiểm (`unchecked_must`, chưa bật `fail`).
 1. PLAN-3.13: Lát 0–C merge (#198–#201), `v3.13.0` (#202); hoãn chờ người T-1814 (AUD-SEC-102 — bản vá trong task), T-1822, T-1832, T-1834. **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (chủ repo bật lại 2026-10-23, D-144 — khớp `main.json`); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1). **Chờ chủ repo**: hotel-manager, X-Company gỡ `merge-gate` khỏi ruleset (`gh api repos/<o>/<r>/rules/branches/main`) rồi mới xoá stub; tắt "Allow auto-merge"; `XT_STEWARD_TOKEN` (T-2402 là lớp đỡ tạm bằng `workflow_dispatch`); App reviewer.
 2. Sau PLAN-3.12: ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task.
 3. Chờ chủ repo: token/app reviewer (T-1508); xoá `/scratch.log` ở gốc container; `x-hotel-manager` dọn/tạo mới; Dependabot security updates (proxy chặn API); Routine tuần `feedback aggregate` + quyền repo đích (T-2410).

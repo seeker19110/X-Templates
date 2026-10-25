@@ -1350,3 +1350,10 @@
 - Chọn: Người xác minh bị chặn = INCONCLUSIVE (giữ Bằng chứng người tìm, Ghi chú chưa xác minh + bị chặn); chặn trong cụm → chưa biết:, 🔴 chỉ còn chưa biết: → 🟠; agent() lỗi = null; phiên chính không tự chạy lệnh bị chặn
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: cam tái hiện — audit check exit 1 với 🔴 + chưa biết:; hai luật D-190 chồng lên nhau. Khớp luật sổ có sẵn, không thêm trạng thái mới.
 - Đường lùi: Khôi phục chữ D-190
+
+### D-192 · 2026-10-25T22:56:32+00:00 · Trả 3 🟢 mở của audit delta3 (AUD-HAR-113/114, AUD-DOC-086) và nợ review_debt VERSION sau #265: phạm vi và cách ghép lại BLUEPRINT?
+
+- Phương án: (1) Ghép lại BLUEPRINT bằng compose mặc định (link .xtemplates/framework) rồi tái kiểm 19 mục MUST bị đặt lại như #257 · (2) Ghép lại với XT_FRAMEWORK_LINK=framework (chỉ 6 mục đổi chữ thật, giữ trạng thái 104 mục), sửa HAR-114 + DOC-086 cùng một PR, cắt 3.26.1 · (3) Đổi mặc định _rel_link theo framework_repo rồi ghép lại
+- Chọn: Ghép lại với XT_FRAMEWORK_LINK=framework (chỉ 6 mục đổi chữ thật, giữ trạng thái 104 mục), sửa HAR-114 + DOC-086 cùng một PR, cắt 3.26.1
+- Lý do (tiêu chí chất lượng cuối): Đúng: đo trên bản nháp — 19 mục 'đổi chữ' của phương án 1 là giả (chỉ khác tiền tố link), đặt lại [ ] làm mất bằng chứng thật; biến môi trường đã có và có test. Đơn giản: không đổi hành vi xt.py cho người gọi khác (phương án 3). Một PR nhỏ cho 3 🟢 cùng hạn.
+- Đường lùi: Revert PR; BLUEPRINT về bản #257
