@@ -1266,3 +1266,31 @@
 - Chọn: Thêm trigger push main với paths VERSION vào release-tag.yml; script giữ nguyên kiểm SemVer, CHANGELOG có mục, tag chưa có; workflow_dispatch vẫn giữ làm đường lùi; thiếu XT_RELEASE_TOKEN thì commit đổi file workflow sẽ không đẩy được tag (AUD-CI-014) → người bấm tay
 - Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ repo; (1) an toàn: VERSION chỉ đổi qua PR đã merge theo làn (CI xanh, review ở harden), script từ chối tag khi CHANGELOG thiếu mục hay tag đã có; chữ ký GO-NO-GO vẫn là người, tách khỏi tag; (2) đường lùi: bỏ trigger push
 - Đường lùi: Xoá khối push trong on: của release-tag.yml
+
+### D-180 · 2026-10-25T13:13:03+00:00 · Dòng chảy chủ repo đề xuất (build → complete → optimize → ký → production → số thật → optimize → ký): làm gì ở khung?
+
+- Phương án: (1) A: chỉ tài liệu — ánh xạ vòng đời + dòng GO-NO-GO người dùng thử · (2) B: A + skill /optimize (chỉ ngân sách đỏ có số), số field qua file docs/ops/FIELD-<ngày>.json, nghiệm thu delta, LOOP-OPT-005 MUST@M; người xác nhận một lần ở GO/NO-GO (không cổng chờ người trong /complete) · (3) C: B + xt.py field check so ngưỡng theo bậc LOOP-DESIGN-019
+- Chọn: B: A + skill /optimize (chỉ ngân sách đỏ có số), số field qua file docs/ops/FIELD-<ngày>.json, nghiệm thu delta, LOOP-OPT-005 MUST@M; người xác nhận một lần ở GO/NO-GO (không cổng chờ người trong /complete)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: tối ưu chỉ khi có số đỏ (LOOP-OPT-001), agent không cầm quyền production, điểm ký duy nhất giữ ADR-0009; bền/đơn giản: skill lặp lại được ở G7 và G8 không cần pha mới; C hoãn vì chưa dự án đích nào có SLO thật — không viết máy cho số chưa có. Chủ repo chốt B 2026-10-25.
+- Đường lùi: ADR-0048 §Đường lùi: xoá skill, bỏ optimize khỏi DOCTOR_SKILLS, LOOP-OPT-005 về MUST@L, LOOP-OPT-016 → MAY Ngừng dùng
+
+### D-181 · 2026-10-25T13:25:42+00:00 · LOOP-OPT-005 lên MUST@M làm module vượt trần 4 MUST@M (validate đỏ): hạ mục nào?
+
+- Phương án: (1) Giữ LOOP-OPT-005 ở MUST@L, bỏ điểm 5 của ADR-0048 · (2) Hạ LOOP-OPT-004 (một giả thuyết/một thay đổi) MUST@M → MUST@L, LOOP-OPT-005 lên MUST@M · (3) Hạ LOOP-OPT-002 hoặc 003 (bộ đo khoá / máy quyết)
+- Chọn: Hạ LOOP-OPT-004 (một giả thuyết/một thay đổi) MUST@M → MUST@L, LOOP-OPT-005 lên MUST@M
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: lỗi của 004 là không quy được nguyên nhân (quy trình), lỗi của 005 là kết quả giả được merge — 005 chặt hơn ở M; 002/003 là lõi chống gian lận, không hạ; không nới trần (ADR-0043).
+- Đường lùi: Đảo mức hai mục về cũ (giữ ID)
+
+### D-182 · 2026-10-25T13:36:51+00:00 · Lát 2–4 của PLAN-3.25 (skill, chữ quy phạm, mẫu + cắt bản) đã commit trên nhánh bị ràng buộc một tên khi #263 (lát 1) còn chờ review: mở PR thế nào?
+
+- Phương án: (1) Chờ #263 merge rồi mỗi lát một PR tuần tự (3 PR, 3 lượt review nối tiếp) · (2) Chờ #263 merge rồi gộp lát 2–4 vào một PR (mã ngoài .md: 1 dòng xt.py + ~5 dòng test — dưới trần 150), một lượt review rà cả PR
+- Chọn: Chờ #263 merge rồi gộp lát 2–4 vào một PR (mã ngoài .md: 1 dòng xt.py + ~5 dòng test — dưới trần 150), một lượt review rà cả PR
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn như nhau (cùng reviewer rà cả PR ở head, CI xanh); đơn giản hơn và tránh ba lượt review nối tiếp cho diff mã 6 dòng; cùng lệ D-175.
+- Đường lùi: Tách lại bằng worktree + cherry-pick nếu reviewer đòi
+
+### D-183 · 2026-10-25T13:42:48+00:00 · Review #263 lượt 1 đòi sửa ADR-0048 (chữ cuối cho lát 2–4 đã commit cục bộ): đẩy thế nào?
+
+- Phương án: (1) Sửa ADR ở head #263 bằng worktree, giữ lát 2–4 chờ PR riêng (D-182) · (2) Gộp cả 4 lát + bản sửa review vào #263 (mã ngoài .md 18 dòng), review lượt 2 rà cả PR ở head
+- Chọn: Gộp cả 4 lát + bản sửa review vào #263 (mã ngoài .md 18 dòng), review lượt 2 rà cả PR ở head
+- Lý do (tiêu chí chất lượng cuối): ADR đổi kéo theo skill/mẫu/CHANGELOG đổi — tách ra chỉ tạo hai PR cùng chữ; reviewer rà cả PR ở head nên an toàn như nhau; thay D-182.
+- Đường lùi: Tách bằng worktree + cherry-pick

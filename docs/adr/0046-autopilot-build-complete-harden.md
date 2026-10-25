@@ -1,6 +1,6 @@
 # ADR-0046: `/autopilot` dừng ở "build xong" (pha build, không đòi hết MUST blueprint); `/complete` là nhà của pha harden — audit, nợ review, hoàn thiện, phát hành
 
-- **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-25: "/autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả
+- **Trạng thái:** Đã chấp nhận; mục 4 (3)(f)/(5) thay một phần bởi ADR-0048 (chủ repo yêu cầu 2026-10-25: "/autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả
   các rào cản, phiên chính tự quyết định với mục tiêu chất lượng cao; thêm /complete mới audit, review, fix, refactor… hoàn
   thiện dự án"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối — D-174); **bị thay một phần bởi ADR-0047**
   (2026-10-25): mục 5 — mẫu dự án đích đặt `merge_hard_exceptions: auto` (D-176); mục 1 "dừng ở build xong" — thành vòng đợt
