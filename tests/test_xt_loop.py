@@ -262,6 +262,25 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(list(st["deferred"]), ["T-002"])
         self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-003"))
 
+    def test_loop_init_carry_keeps_deferred_across_plans(self) -> None:
+        # D-177/ADR-0047: đợt kế dùng PLAN mới — việc chờ người còn mở cùng ID đi theo, bằng chứng xanh thì không; ID hết mở → báo bỏ.
+        run_main("loop", "init")
+        run_main("loop", "record", "--task", "T-001", "--", "true")
+        run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")
+        run_main("loop", "defer", "--task", "T-003", "--reason", "khoá thật")
+        run_main("loop", "stop", "--reason", "đợt 1 xong")
+        self.plan.with_name("PLAN-2.md").write_text(
+            "- [ ] `T-002` cần người — Gate: `true`\n- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8"
+        )
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 0)
+        self.assertIn("ℹ Vòng trước: giữ 1 việc chờ người: T-002", err)
+        self.assertIn("⚠ 1 việc chờ người của vòng trước không còn mở trong PLAN/blueprint này (T-003) — bỏ", err)
+        self.assertNotIn("bằng chứng xanh", err)
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual((list(st["deferred"]), "carried" in st), (["T-002"], False))
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-004"))
+
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
         # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.
         for change in ("spec", "file"):

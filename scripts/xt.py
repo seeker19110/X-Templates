@@ -1750,10 +1750,10 @@ def _with_dispatch(
     done = milestone_done(tasks, t, _deferred(st))
     if done:
         v["milestone_done"] = done
-        # Pha build (ADR-0033/0046): audit delta theo mốc gom về /complete — `release-check` FAIL `phase`/`review_debt` tới khi trả.
+        # Pha build (ADR-0033/0046/0047): audit delta ở cuối đợt (`done`), không theo mốc — `release-check` FAIL `phase`/`review_debt` tới harden.
         v["milestone_audit"] = "g7" if _phase_in_tree(base) == "build" else "now"
         v["reason"] += (
-            f" · mốc «{done}» đã xong · pha build: audit delta gom về /complete (ADR-0046), làm tiếp task kế"
+            f" · mốc «{done}» đã xong · pha build: audit delta ở cuối đợt (D-177), làm tiếp task kế"
             if v["milestone_audit"] == "g7"
             else f" · mốc «{done}» đã xong → audit delta trước khi sang mốc kế"
             " (`xt.py audit plan --status docs/ops/AUDIT-STATUS.md`; 🔴/🟠 thành task mới — audit.md §1)"
@@ -6154,13 +6154,13 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
 
 
 def _live_loop(base: Path) -> str:
-    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn) — `loop init` không ghi đè (LOOP-HARNESS-024);
+    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn, chưa `done`) — `loop init` không ghi đè (LOOP-HARNESS-024);
     rỗng nếu không có. `state.json` từng bị ghi đè vô điều kiện: hai phiên cùng dự án xoá trạng thái của nhau
     (rà stored 01 §3h: "gậy" chỉ là quy ước, không phải khoá)."""
     prev = read_state(base) or {}
     try:
-        if not prev.get("active") or (_verdict_loop_state(prev) or {}).get("verdict") == "budget":
-            return ""
+        if not prev.get("active") or loop_verdict(base)["verdict"] in ("budget", "done", "done-pending-human"):
+            return ""  # hết ngân sách hoặc đợt đã xong: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
     except (TypeError, ValueError, AttributeError):  # state.json sai kiểu: không phải vòng đọc được → ghi đè như trước
         return ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
@@ -6194,17 +6194,25 @@ def _init_warnings(args: argparse.Namespace, base: Path) -> None:
 
 def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> List[str]:
     """`loop init` lại cùng PLAN sau vòng đã dừng (T-2611): giữ việc chờ người còn mở và bằng chứng xanh khớp Gate hiện
-    tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác: không mang gì (ID có thể trùng nghĩa
-    khác; so cả blueprint). Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
+    tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác (đợt kế, D-177/ADR-0047): chỉ mang việc chờ
+    người còn mở cùng ID, không mang bằng chứng (ID có thể trùng nghĩa khác; so cả blueprint); việc chờ người không còn mở
+    thì báo. Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify` lặng lẽ đòi."""
     tasks = parse_plan(base / state["plan"])
     notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
-    keep = {i: d for i, d in _deferred(prev).items() if same and i in _still_open(base, state)}
+    still = _still_open(base, state)
+    keep = {i: d for i, d in _deferred(prev).items() if i in still}
+    dropped = sorted(set(_deferred(prev)) - set(keep)) if not same else []
     carried = [
         t["id"] for t in tasks if same and t["state"] == "x" and t["gate"] and not evidence_stale(t, base)
     ]  # cùng điều kiện `loop verify` giữ kết quả: lệnh, phạm vi, spec (req_rev), digest file (review #239)
     if keep:
         state["deferred"] = keep
-        notes.append(f"ℹ Vòng trước cùng PLAN: giữ {len(keep)} việc chờ người: {', '.join(keep)}")
+        notes.append(f"ℹ Vòng trước{' cùng PLAN' if same else ''}: giữ {len(keep)} việc chờ người: {', '.join(keep)}")
+    if dropped:
+        notes.append(
+            f"⚠ {len(dropped)} việc chờ người của vòng trước không còn mở trong PLAN/blueprint này ({', '.join(dropped[:5])})"
+            " — bỏ; còn cần người thì chép task cùng ID vào PLAN rồi `loop defer` lại"
+        )
     if carried:
         state["carried"] = carried
         notes.append(f"ℹ Vòng trước cùng PLAN: mang {len(carried)} bằng chứng xanh: {', '.join(carried)}")
