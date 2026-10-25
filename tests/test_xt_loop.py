@@ -342,8 +342,7 @@ class LoopInitCarryTest(TmpRepoCase):
 
     def test_loop_init_after_budget_needs_no_verify(self) -> None:
         # Hết ngân sách không phải "xong": `loop init` đợt kế không đòi kiểm lại cuối (nhánh `budget` của `_live_loop`).
-        # Có commit để vân tay cây hoạt động: chưa `loop verify` nên `final_check` ≠ None nếu nhánh `budget` đòi kiểm cuối.
-        self.git("add", "-A")
+        self.git("add", "-A")  # có commit để vân tay cây hoạt động — PLAN-2 chưa track làm cây đổi (review #262 lượt 4)
         self.git("commit", "-q", "-m", "plan")
         run_main("loop", "init", "--max-iterations", "1")
         st = xt.read_state(self.repo)
