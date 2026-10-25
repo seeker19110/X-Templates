@@ -1273,3 +1273,10 @@
 - Chọn: B: A + skill /optimize (chỉ ngân sách đỏ có số), số field qua file docs/ops/FIELD-<ngày>.json, nghiệm thu delta, LOOP-OPT-005 MUST@M; người xác nhận một lần ở GO/NO-GO (không cổng chờ người trong /complete)
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: tối ưu chỉ khi có số đỏ (LOOP-OPT-001), agent không cầm quyền production, điểm ký duy nhất giữ ADR-0009; bền/đơn giản: skill lặp lại được ở G7 và G8 không cần pha mới; C hoãn vì chưa dự án đích nào có SLO thật — không viết máy cho số chưa có. Chủ repo chốt B 2026-10-25.
 - Đường lùi: ADR-0048 §Đường lùi: xoá skill, bỏ optimize khỏi DOCTOR_SKILLS, LOOP-OPT-005 về MUST@L, LOOP-OPT-016 → MAY Ngừng dùng
+
+### D-181 · 2026-10-25T13:25:42+00:00 · LOOP-OPT-005 lên MUST@M làm module vượt trần 4 MUST@M (validate đỏ): hạ mục nào?
+
+- Phương án: (1) Giữ LOOP-OPT-005 ở MUST@L, bỏ điểm 5 của ADR-0048 · (2) Hạ LOOP-OPT-004 (một giả thuyết/một thay đổi) MUST@M → MUST@L, LOOP-OPT-005 lên MUST@M · (3) Hạ LOOP-OPT-002 hoặc 003 (bộ đo khoá / máy quyết)
+- Chọn: Hạ LOOP-OPT-004 (một giả thuyết/một thay đổi) MUST@M → MUST@L, LOOP-OPT-005 lên MUST@M
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: lỗi của 004 là không quy được nguyên nhân (quy trình), lỗi của 005 là kết quả giả được merge — 005 chặt hơn ở M; 002/003 là lõi chống gian lận, không hạ; không nới trần (ADR-0043).
+- Đường lùi: Đảo mức hai mục về cũ (giữ ID)

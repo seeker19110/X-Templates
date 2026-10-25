@@ -55,7 +55,9 @@ chủ repo đề xuất với khung (đo tại `e10e3c3`):
 4. **Nghiệm thu delta.** Bản phát hành chỉ tối ưu (không đổi hành vi, `PERF-LOG.md` có dòng giữ) dùng `GO-NO-GO.md` chế độ
    delta: dòng 1, 2, 12 + bảng trước/sau từ `PERF-LOG.md` + mục 1 đếm; người vẫn ký mục 5. `release-check` chạy như thường.
 5. **`LOOP-OPT-005` MUST@L → MUST@M**: tối ưu là việc agent dễ gian lận nhất (METR 2025-06-05: 30 % lượt có hack); dự án M đủ
-   lớn để cần reviewer năng lực cao hơn trả lời từng ⚠ của `perf guard`. Giữ ID, đổi mức — ghi CHANGELOG mục checklist.
+   lớn để cần reviewer năng lực cao hơn trả lời từng ⚠ của `perf guard`. Trần 4 MUST hiệu lực ở M mỗi module (`validate`,
+   ADR-0043) → `LOOP-OPT-004` (một giả thuyết/một thay đổi — kỷ luật quy trình, không tạo kết quả giả) MUST@M → MUST@L
+   (D-181). Giữ ID, đổi mức — ghi CHANGELOG mục checklist.
 6. **Vòng đời có tên** (`lifecycle.md` §Ánh xạ): G5–G6 `/autopilot` → G7 `/complete` (+ `/optimize` khi `perf`/sàn đỏ) →
    `release-check` + ký → G8 vận hành → số field (file) → `/optimize --field` → `release-check` + ký delta.
 
