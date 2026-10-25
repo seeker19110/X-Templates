@@ -5,6 +5,25 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.26.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/research` và mẫu `AUDIT-REPORT.md` đổi; chữ checklist không đổi). ADR-0049 (D-184…D-191). Lần chạy Workflow đầu ở chế độ Auto hỏi duyệt một lần.
+
+### Changed
+- Skill `/audit` §3 và `/research` bước 3 (≥ 3 mục): người **gõ trực tiếp** skill và có tool Workflow của Claude Code thì chạy
+  fan-out thành một workflow, cùng luật chọn agent và người xác minh với nhánh subagent (khuôn ở `/audit` §3; riêng xử lý
+  `null`/INCONCLUSIVE là của nhánh Workflow) — agent chỉ đọc qua `agentType` `reviewer` (`/research`: `researcher`), người xác minh 🔴/🟠 như `/audit` §4 và không nhận lý luận của người tìm, lô ≤ 5 đồng thời
+  (`LOOP-ORCH-008`), không lọc `null` và **không tự chạy lại** (cụm hỏng → `chưa quét`, xác minh hỏng hay bị chặn → `mở` + Ghi chú `chưa
+  xác minh`, lệnh bị chặn trong cụm → `chưa biết:` (🔴 chỉ còn `chưa biết:` → 🟠); báo người, chạy lại khi người bảo — `LOOP-STOP-025`), phiên chính gộp/ghi sổ/quyết/sửa.
+  Gọi từ `/autopilot` hoặc `/complete`, hoặc không có tool → subagent như cũ; người chọn No hay `deny` cho Workflow → dừng và
+  báo người. Nhánh subagent của `/audit` giao `reviewer` thay `Explore` cho tài liệu, thêm `researcher` cho mục cần nguồn web có
+  ngày (cả hai nhánh). Người gõ skill là
+  đã opt-in (mô tả tool Workflow, Claude Code 2.1.310) — không cần bật `ultracode`; **không** bật ultracode cả phiên cho `/autopilot`/`/complete` và không đặt trong settings (ultracode áp cho mọi task, ở Auto bỏ hộp duyệt lần đầu).
+- Mẫu `AUDIT-REPORT.md`: 🔴/🟠 không xác minh được (agent hỏng, bị chặn, người dừng) ghi `chưa xác minh — <lý do>` ở dòng
+  Xác minh đối kháng, Trạng thái `mở` — khớp `/audit` §3.
+- `research/2026-10-21-next-level-speed-automation-quality.md`: đính chính — chỉ **từ khoá** `ultracode` không kích hoạt qua
+  `-p`/lịch/webhook; tool Workflow chạy được ở `-p`/SDK khi có rule allow `Workflow` hoặc chế độ auto/bypass.
+
 ## [3.25.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py` rồi ghép lại blueprint (`compose`)** (skill `/optimize` mới, `doctor` đòi; skill `/complete` đổi; mẫu GO-NO-GO và AGENTS đổi; `LOOP-OPT-016` mới, 004/005 đổi mức). ADR-0048 (D-180/D-181): dòng chảy build → complete → optimize → ký → production → số thật → optimize → ký.

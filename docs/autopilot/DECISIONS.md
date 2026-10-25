@@ -1294,3 +1294,59 @@
 - Chọn: Gộp cả 4 lát + bản sửa review vào #263 (mã ngoài .md 18 dòng), review lượt 2 rà cả PR ở head
 - Lý do (tiêu chí chất lượng cuối): ADR đổi kéo theo skill/mẫu/CHANGELOG đổi — tách ra chỉ tạo hai PR cùng chữ; reviewer rà cả PR ở head nên an toàn như nhau; thay D-182.
 - Đường lùi: Tách bằng worktree + cherry-pick
+
+### D-184 · 2026-10-25T15:13:14+00:00 · Khi có tool Workflow (Claude Code), skill /audit, /complete, /research có tự dùng Workflow không, và bật ultracode thế nào?
+
+- Phương án: (1) Giữ nguyên: chỉ subagent 2–4 cụm; Workflow chỉ khi người gõ ultracode · (2) Skill /audit §3–4, /complete bước 2 (nợ review), /research (≥ 3 mục) ghi nhánh: có tool Workflow thì dùng — agent chỉ đọc theo agentType researcher/reviewer/Explore, lô ≤ 5 đồng thời, phiên chính gộp/quyết/sửa; không có thì subagent như cũ; không bật ultracode trong settings · (3) Đặt "ultracode": true trong .claude/settings.json cho mọi phiên
+- Chọn: Skill /audit §3–4, /complete bước 2 (nợ review), /research (≥ 3 mục) ghi nhánh: có tool Workflow thì dùng — agent chỉ đọc theo agentType researcher/reviewer/Explore, lô ≤ 5 đồng thời, phiên chính gộp/quyết/sửa; không có thì subagent như cũ; không bật ultracode trong settings
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: agent chỉ đọc theo agentType giữ LOOP-ORCH-001/003/005 (frontmatter model/tools), lô ≤ 5 giữ LOOP-ORCH-008, phiên chính vẫn gộp/quyết/sửa; skill do người gọi có chỉ dẫn gọi Workflow là opt-in nên không cần bật tay. Tiêu chí 3: nhánh dự phòng giữ nguyên hành vi cũ khi không có tool (-p không có rule Workflow, Pro chưa bật). PA3 biến mọi task (cả pha build cơ học) thành workflow — trái ADR-0033/D-142, tốn token. PA1 bỏ phí xác minh đối kháng song song ở nơi tài liệu chính thức khuyên dùng (codebase sweep, cross-checked research).
+- Đường lùi: Xoá đoạn Workflow ở 3 skill; skill quay về chỉ subagent
+
+### D-185 · 2026-10-25T16:01:48+00:00 · Đính chính D-184 sau review đối kháng (PR 3.26.0): phạm vi nhánh Workflow
+
+- Phương án: (1) Giữ D-184 nguyên văn · (2) Thu hẹp: chỉ khi người gõ skill (gọi từ /autopilot → subagent); reviewer/reviewer-alt theo người viết; không Explore; không lọc null; một workflow một lúc; opt-in dẫn mô tả tool Workflow 2.1.310
+- Chọn: Thu hẹp: chỉ khi người gõ skill (gọi từ /autopilot → subagent); reviewer/reviewer-alt theo người viết; không Explore; không lọc null; một workflow một lúc; opt-in dẫn mô tả tool Workflow 2.1.310
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: review tái hiện 8 phát hiện cam — hộp duyệt lần đầu treo vòng autopilot, reviewer cố định phá LOOP-ORCH-005, null bị lọc làm nhóm chưa quét thành sạch, Explore không có maxTurns/luật repo. Phát hiện 'skill không phải opt-in' bị bác bằng mô tả tool trong binary 2.1.310.
+- Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)
+
+### D-186 · 2026-10-25T16:52:47+00:00 · Review #265 lượt 2: điều kiện dùng Workflow máy quyết được, xác minh null, chọn reviewer
+
+- Phương án: (1) Giữ D-185 ('không có người trực' do agent tự đoán) · (2) Chỉ khi người gõ trực tiếp /audit, /research hoặc /complete … workflow; vòng /autopilot và /complete bước 4 → subagent; xác minh null chạy lại theo §4 rồi mới ghi mở + chưa xác minh; reviewer theo hàng Review bảng điều phối (Fable → model fable, không ai cao hơn → INCONCLUSIVE); nhánh subagent bỏ Explore
+- Chọn: Chỉ khi người gõ trực tiếp /audit, /research hoặc /complete … workflow; vòng /autopilot và /complete bước 4 → subagent; xác minh null chạy lại theo §4 rồi mới ghi mở + chưa xác minh; reviewer theo hàng Review bảng điều phối (Fable → model fable, không ai cao hơn → INCONCLUSIVE); nhánh subagent bỏ Explore
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: 3 cam tái hiện độc lập — 'không có người trực' máy không quyết được nên /complete một phiên vẫn treo ở hộp duyệt lần đầu; xác minh null bỏ qua xác minh đối kháng bắt buộc; ánh xạ reviewer rút gọn cho phép reviewer thấp hơn tác giả Fable. Tiêu chí 3: điều kiện là lời gọi của người — kiểm được.
+- Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)
+
+### D-187 · 2026-10-25T17:16:31+00:00 · Review #265 lượt 3: phát hiện lặp lại ở nhánh Workflow — sửa gốc thế nào?
+
+- Phương án: (1) Vá tiếp: thêm luật lát nợ review và luật chọn người xác minh riêng cho Workflow · (2) Thu hẹp gốc: Workflow chỉ cho /audit và /research do người gõ trực tiếp, cùng luật nhánh subagent (người xác minh như /audit §4); bỏ Workflow khỏi /complete (nợ review giữ subagent)
+- Chọn: Thu hẹp gốc: Workflow chỉ cho /audit và /research do người gõ trực tiếp, cùng luật nhánh subagent (người xác minh như /audit §4); bỏ Workflow khỏi /complete (nợ review giữ subagent)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3 (đơn giản, một nhà): ba lượt review đều tìm lỗi ở chỗ nhánh Workflow tự đặt luật khác nhánh subagent; dùng chung luật xoá cả lớp lỗi. Tiêu chí 1: nợ review gộp vào cụm nhóm làm mất dấu lát hỏng (review_debt PASS sai) — tái hiện độc lập. Người vẫn audit bằng Workflow được bằng cách tự gõ /audit.
+- Đường lùi: Xoá đoạn Workflow ở 2 skill (đường lùi D-184)
+
+### D-188 · 2026-10-25T17:42:40+00:00 · Review #265 lượt 4: ADR-0049 còn khuyên bật ultracode cả phiên cho phiên harden
+
+- Phương án: (1) Giữ câu khuyên · (2) Đổi thành: không bật ultracode cả phiên cho /autopilot, /complete (áp mọi task, ở Auto bỏ hộp duyệt); Workflow ở harden do người tự gõ /audit, /research; nhóm cụm hỏng ghi chưa quét cả khi delta; reviewer cho mọi cụm audit
+- Chọn: Đổi thành: không bật ultracode cả phiên cho /autopilot, /complete (áp mọi task, ở Auto bỏ hộp duyệt); Workflow ở harden do người tự gõ /audit, /research; nhóm cụm hỏng ghi chưa quét cả khi delta; reviewer cho mọi cụm audit
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: ultracode cả phiên mở lại đúng các đường D-187 đóng (nợ review, sửa mã thành workflow không hộp duyệt) — tái hiện độc lập theo workflows.md. Lời khuyên trước đó cho chủ repo (bật /effort ultracode cho phiên harden) được đính chính.
+- Đường lùi: Khôi phục câu khuyên ở ADR-0049 mục 4
+
+### D-189 · 2026-10-25T18:08:07+00:00 · Review #265 lượt 5: người chọn No/deny cho Workflow, và lời khuyên /audit thay bước 2 /complete
+
+- Phương án: (1) Giữ: No/deny → subagent; /audit thay bước 2 được · (2) No/deny/bộ phân loại chặn → kết luận LOOP-STOP-025, dừng báo người; chỉ không có tool hoặc workflow lỗi → subagent; Workflow không thay bước nào của /complete; người xác minh có schema ket_luan
+- Chọn: No/deny/bộ phân loại chặn → kết luận LOOP-STOP-025, dừng báo người; chỉ không có tool hoặc workflow lỗi → subagent; Workflow không thay bước nào của /complete; người xác minh có schema ket_luan
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hai cam tái hiện — chạy lại cùng fan-out qua tool Agent sau khi người từ chối là đổi tool cho cùng hiệu ứng (LOOP-STOP-025 MUST@L); /audit thay bước 2 dời SHA quét = HEAD nên review_debt PASS rỗng, bỏ nợ review theo PR/lát.
+- Đường lùi: Khôi phục nhánh dự phòng No/deny → subagent
+
+### D-190 · 2026-10-25T18:33:42+00:00 · Review #265 lượt 6: luật tự chạy lại khi agent workflow hỏng (thay D-184 phần /complete và Explore, D-185, D-186 phần chọn reviewer, D-189 phần workflow lỗi → subagent)
+
+- Phương án: (1) Vá thêm phân loại nguyên nhân null (lỗi API vs người dừng vs chặn) · (2) Bỏ mọi tự chạy lại: hỏng/null/bị chặn → đánh dấu (chưa quét / mở + chưa xác minh / chưa biết:), cụm khác dùng tiếp, báo người, chạy lại khi người bảo; chỉ không có tool → nhánh subagent; trạng thái cuối = ADR-0049
+- Chọn: Bỏ mọi tự chạy lại: hỏng/null/bị chặn → đánh dấu (chưa quét / mở + chưa xác minh / chưa biết:), cụm khác dùng tiếp, báo người, chạy lại khi người bảo; chỉ không có tool → nhánh subagent; trạng thái cuối = ADR-0049
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1+3: ba cam tái hiện đều ở luật tự chạy lại — null không phân biệt được người dừng với lỗi, chạy lại qua tool Agent phạm LOOP-STOP-025. Không tự chạy lại xoá cả lớp lỗi; người luôn có mặt (điều kiện vào nhánh) nên hỏi rẻ. D-184/D-185/D-186/D-189 phần trái với điều này được thay.
+- Đường lùi: Khôi phục chạy lại bằng subagent cho null do lỗi API
+
+### D-191 · 2026-10-25T18:57:40+00:00 · Review #265 lượt 7: người xác minh bị chặn lệnh với 🔴 giữ mức
+
+- Phương án: (1) Ghi chưa biết: và giữ 🔴 (audit check từ chối) · (2) Người xác minh bị chặn = INCONCLUSIVE (giữ Bằng chứng người tìm, Ghi chú chưa xác minh + bị chặn); chặn trong cụm → chưa biết:, 🔴 chỉ còn chưa biết: → 🟠; agent() lỗi = null; phiên chính không tự chạy lệnh bị chặn
+- Chọn: Người xác minh bị chặn = INCONCLUSIVE (giữ Bằng chứng người tìm, Ghi chú chưa xác minh + bị chặn); chặn trong cụm → chưa biết:, 🔴 chỉ còn chưa biết: → 🟠; agent() lỗi = null; phiên chính không tự chạy lệnh bị chặn
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: cam tái hiện — audit check exit 1 với 🔴 + chưa biết:; hai luật D-190 chồng lên nhau. Khớp luật sổ có sẵn, không thêm trạng thái mới.
+- Đường lùi: Khôi phục chữ D-190
