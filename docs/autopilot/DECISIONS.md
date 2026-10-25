@@ -1329,3 +1329,10 @@
 - Chọn: Đổi thành: không bật ultracode cả phiên cho /autopilot, /complete (áp mọi task, ở Auto bỏ hộp duyệt); Workflow ở harden do người tự gõ /audit, /research; nhóm cụm hỏng ghi chưa quét cả khi delta; reviewer cho mọi cụm audit
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: ultracode cả phiên mở lại đúng các đường D-187 đóng (nợ review, sửa mã thành workflow không hộp duyệt) — tái hiện độc lập theo workflows.md. Lời khuyên trước đó cho chủ repo (bật /effort ultracode cho phiên harden) được đính chính.
 - Đường lùi: Khôi phục câu khuyên ở ADR-0049 mục 4
+
+### D-189 · 2026-10-25T18:08:07+00:00 · Review #265 lượt 5: người chọn No/deny cho Workflow, và lời khuyên /audit thay bước 2 /complete
+
+- Phương án: (1) Giữ: No/deny → subagent; /audit thay bước 2 được · (2) No/deny/bộ phân loại chặn → kết luận LOOP-STOP-025, dừng báo người; chỉ không có tool hoặc workflow lỗi → subagent; Workflow không thay bước nào của /complete; người xác minh có schema ket_luan
+- Chọn: No/deny/bộ phân loại chặn → kết luận LOOP-STOP-025, dừng báo người; chỉ không có tool hoặc workflow lỗi → subagent; Workflow không thay bước nào của /complete; người xác minh có schema ket_luan
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hai cam tái hiện — chạy lại cùng fan-out qua tool Agent sau khi người từ chối là đổi tool cho cùng hiệu ứng (LOOP-STOP-025 MUST@L); /audit thay bước 2 dời SHA quét = HEAD nên review_debt PASS rỗng, bỏ nợ review theo PR/lát.
+- Đường lùi: Khôi phục nhánh dự phòng No/deny → subagent
