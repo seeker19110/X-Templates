@@ -29,8 +29,11 @@ updated: 2026-10-25
 | Cấp | Dùng khi | Không dùng khi |
 |---|---|---|
 | Một lời gọi + schema | Phân loại, trích xuất, viết lại, tóm tắt có khuôn | Cần tra cứu ngoài hoặc nhiều bước phụ thuộc |
-| Workflow cố định (chain, routing, parallel, orchestrator, evaluator) | Các bước biết trước, cần dự đoán được | Số bước không biết trước |
-| Agent (model tự chọn tool/bước) | Việc mở, cần khám phá | Có thể viết thành workflow — xem [`agents-and-tools.md`](agents-and-tools.md) |
+| Workflow cố định (chain, routing, parallel, evaluator) | Các bước biết trước, cần dự đoán được | Số bước không biết trước |
+| Orchestrator-workers | Số việc con không biết trước **và** độc lập, context vứt được (lý do 2 của `AI-AGENTIC-011`) | Việc tuần tự hẹp |
+| Agent (model tự chọn tool/bước) | Việc mở, cần khám phá | Một lời gọi + schema đủ (`AI-APP-010`); chọn agent hay workflow qua eval (`AI-AGENTIC-001`) — xem [`agents-and-tools.md`](agents-and-tools.md) |
+
+Bảng là từ vựng, không phải thang leo cố định: khi đã cần agent, khởi điểm và điều kiện tách thêm agent con theo [`AI-AGENTIC-001`](agentic-systems.md)/`011`.
 
 ### Structured output — chọn công cụ
 
@@ -76,6 +79,7 @@ TTL 5 phút (ghi ×1.25) hoặc 1 giờ (ghi ×2), đọc ×0.1; kiểm hiệu q
 - [ ] `AI-APP-016` **SHOULD** Phiên bản model được ghim theo ID có ngày/snapshot; nâng phiên bản qua eval và ADR, không dùng alias trôi trong production.
 - [ ] `AI-APP-017` **MAY** Dùng tính năng nén/compaction context của nhà cung cấp cho hội thoại dài, kèm eval riêng cho việc mất thông tin.
 - [ ] `AI-APP-018` **MAY** Thiết kế fallback đa nhà cung cấp qua gateway (`litellm` 1.105.0, PyPI 2026-10-11) với cùng schema; chỉ khi SLA yêu cầu. · Nguồn: [`observability-and-cost.md`](observability-and-cost.md)
+- [ ] `AI-APP-019` **SHOULD** Trong agent có vòng lặp tool (hàng Agentic RAG của [`rag-and-knowledge.md`](rag-and-knowledge.md); tính năng một lời gọi + schema theo Classic RAG ở đó): tri thức tham chiếu chỉ cần đôi khi (chính sách, định nghĩa, thông số) đặt sau tool tìm/tra hoặc làm file tham chiếu trong skill; không để code lấy rồi dán vào prompt, trừ thứ rẻ và gần như luôn liên quan (vd bước nhận diện thực thể). Phần được dán vẫn theo `AI-APP-007`. → Kiểm: review luồng dựng prompt — mỗi đoạn tri thức nạp bằng code có lý do "luôn liên quan", phần còn lại truy cập qua tool/skill. · Nguồn: claude.com *When to fold subagents into your main agent loop* (2026-10-22, xác minh 2026-10-25, `research/2026-10-24-single-agent-loop.md`) §Knowledge bases, §How to fold ("cheap and almost always relevant")
 
 ## Bẫy thường gặp
 
@@ -108,3 +112,4 @@ TTL 5 phút (ghi ×1.25) hoặc 1 giờ (ghi ×2), đọc ×0.1; kiểm hiệu q
 - PyPI: `instructor` 1.17.0 (2026-09-09) <https://pypi.org/project/instructor/> · `outlines` 1.3.3 (2026-08-06) <https://pypi.org/project/outlines/> · `baml-py` 0.226.2 (2026-09-01) <https://pypi.org/project/baml-py/> · `litellm` 1.105.0 (2026-10-11) <https://pypi.org/project/litellm/> — xác minh 2026-10-13.
 - npm: `promptfoo` 0.124.1 <https://www.npmjs.com/package/promptfoo> · `ai` 7.0.138 <https://www.npmjs.com/package/ai> — xác minh 2026-10-13.
 - `seeker19110/stored` mục 02 (structured output: API đóng → instructor/native; local → outlines; đa ngôn ngữ → BAML), mục 10 — đọc 2026-10-13 (`research/2026-10-13-stored-catalog-extraction.md`).
+- claude.com, *Building agents: When to fold subagents into your main agent loop* (2026-10-22): <https://claude.com/blog/building-agents-when-to-fold-subagents-into-your-main-agent-loop> · kit single-agent-loop-kit (`c437962`, 2026-10-21; "Not maintained"): <https://github.com/anthropics/single-agent-loop-kit> — xác minh 2026-10-25 (`research/2026-10-24-single-agent-loop.md`, ADR-0045).
