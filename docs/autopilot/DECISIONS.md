@@ -1336,3 +1336,10 @@
 - Chọn: No/deny/bộ phân loại chặn → kết luận LOOP-STOP-025, dừng báo người; chỉ không có tool hoặc workflow lỗi → subagent; Workflow không thay bước nào của /complete; người xác minh có schema ket_luan
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: hai cam tái hiện — chạy lại cùng fan-out qua tool Agent sau khi người từ chối là đổi tool cho cùng hiệu ứng (LOOP-STOP-025 MUST@L); /audit thay bước 2 dời SHA quét = HEAD nên review_debt PASS rỗng, bỏ nợ review theo PR/lát.
 - Đường lùi: Khôi phục nhánh dự phòng No/deny → subagent
+
+### D-190 · 2026-10-25T18:33:42+00:00 · Review #265 lượt 6: luật tự chạy lại khi agent workflow hỏng (thay D-184 phần /complete và Explore, D-185, D-186 phần chọn reviewer, D-189 phần workflow lỗi → subagent)
+
+- Phương án: (1) Vá thêm phân loại nguyên nhân null (lỗi API vs người dừng vs chặn) · (2) Bỏ mọi tự chạy lại: hỏng/null/bị chặn → đánh dấu (chưa quét / mở + chưa xác minh / chưa biết:), cụm khác dùng tiếp, báo người, chạy lại khi người bảo; chỉ không có tool → nhánh subagent; trạng thái cuối = ADR-0049
+- Chọn: Bỏ mọi tự chạy lại: hỏng/null/bị chặn → đánh dấu (chưa quét / mở + chưa xác minh / chưa biết:), cụm khác dùng tiếp, báo người, chạy lại khi người bảo; chỉ không có tool → nhánh subagent; trạng thái cuối = ADR-0049
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1+3: ba cam tái hiện đều ở luật tự chạy lại — null không phân biệt được người dừng với lỗi, chạy lại qua tool Agent phạm LOOP-STOP-025. Không tự chạy lại xoá cả lớp lỗi; người luôn có mặt (điều kiện vào nhánh) nên hỏi rẻ. D-184/D-185/D-186/D-189 phần trái với điều này được thay.
+- Đường lùi: Khôi phục chạy lại bằng subagent cho null do lỗi API

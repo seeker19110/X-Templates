@@ -1,7 +1,7 @@
 # ADR-0049: `/audit` và `/research` dùng tool Workflow khi người gõ trực tiếp; không bật `ultracode` mặc định
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-189
-  — review #265 năm lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-190
+  — review #265 sáu lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/research/SKILL.md`
   bước 3.
 - **Ngày:** 2026-10-25
@@ -52,11 +52,12 @@ kích hoạt ở đó.
    `reviewer` (`tools` không `Edit`/`Write`/`Agent`; `/research` dùng `researcher`; không dùng `Explore` — không có frontmatter repo); người xác
    minh đúng như `/audit` §4 (reviewer khác agent đã tìm, model khác nếu được), không nhận lý luận của người tìm; **lô ≤ 5**
    đồng thời, một workflow một lúc; workflow chỉ trả dữ liệu — phiên chính gộp, đánh ID, ghi sổ, `loop decide`, sửa, push.
-3. Không lọc `null`: cụm `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → ghi nhóm `chưa quét` (xoá SHA/Ngày, kể cả nhóm đang `đã quét` ở SHA cũ khi delta); xác minh
-   `null`/INCONCLUSIVE → chạy lại bằng subagent theo `/audit` §4, vẫn không được → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác
-   minh` (`audit check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh. Workflow lỗi hoặc không có
-   tool → nhánh subagent; người chọn No, `deny`/bộ phân loại chặn lời gọi Workflow, hoặc guard chặn
-   lệnh bên trong agent → kết luận (`LOOP-STOP-025`): dừng, báo người, nhánh subagent chỉ khi người bảo.
+3. Không lọc `null`, **không tự chạy lại** (`null` có thể do người dừng run/agent ở `/workflows`; chạy lại qua tool Agent là đổi
+   tool cho cùng hiệu ứng, `LOOP-STOP-025`): cụm `null`/INCONCLUSIVE → ghi nhóm `chưa quét` (xoá SHA/Ngày, kể cả nhóm đang
+   `đã quét` ở SHA cũ khi delta); xác minh `null`/INCONCLUSIVE → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác minh` (`audit
+   check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh; lệnh bị chặn bên trong agent → mục đó
+   `chưa biết:`, cụm khác vẫn dùng. Báo người (đang có mặt), chạy lại chỉ khi người bảo. Người chọn No, `deny`/bộ phân loại chặn
+   lời gọi Workflow → dừng, báo người. Chỉ khi không có tool Workflow → nhánh subagent.
 4. Không dùng Workflow cho nợ review của `/complete` (đơn vị là PR/lát, review theo `LOOP-ORCH-005` và hàng `review_debt` —
    ghép vào cụm nhóm làm mất dấu vết lát hỏng; review #265 lượt 3), task build, `/review` một PR, `/optimize`, `release-check`,
    việc cơ học. **Không bật ultracode cả phiên** (`/effort ultracode`, `--effort ultracode`, setting `ultracode`) cho phiên
