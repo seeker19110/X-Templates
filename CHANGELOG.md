@@ -7,7 +7,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [3.26.0] - 2026-10-25
 
-**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/research` đổi; chữ checklist không đổi). ADR-0049 (D-184…D-191). Lần chạy Workflow đầu ở chế độ Auto hỏi duyệt một lần.
+**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/research` và mẫu `AUDIT-REPORT.md` đổi; chữ checklist không đổi). ADR-0049 (D-184…D-191). Lần chạy Workflow đầu ở chế độ Auto hỏi duyệt một lần.
 
 ### Changed
 - Skill `/audit` §3 và `/research` bước 3 (≥ 3 mục): người **gõ trực tiếp** skill và có tool Workflow của Claude Code thì chạy
