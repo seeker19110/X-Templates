@@ -2,12 +2,12 @@
 
 - **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-25: "/autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả
   các rào cản, phiên chính tự quyết định với mục tiêu chất lượng cao; thêm /complete mới audit, review, fix, refactor… hoàn
-  thiện dự án"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối — D-170)
-- **Trạng thái triển khai:** Đang triển khai — PLAN `docs/autopilot/PLAN-3.21.0-complete.md`: `scripts/xt.py`
+  thiện dự án"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối — D-174)
+- **Trạng thái triển khai:** Đang triển khai — PLAN `docs/autopilot/PLAN-3.23.0-complete.md`: `scripts/xt.py`
   (`_verdict_blueprint` theo pha, chuỗi lý do `_with_dispatch`/`_release_phase`, `DOCTOR_SKILLS`), skill mới
   `.claude/skills/complete/SKILL.md`, skill `/autopilot` viết lại cho pha build, `tests/test_docs_budget.py` (`CAPS`),
   `tests/test_xt_core.py`, `tests/test_delivery_phase.py`, `tests/test_install.py`, tài liệu (README mảng 11, `lifecycle.md`,
-  `audit.md`, mẫu PLAN/AGENTS, AGENTS.md, CLAUDE.md, README gốc), bản 3.21.0.
+  `audit.md`, mẫu PLAN/AGENTS, AGENTS.md, CLAUDE.md, README gốc), bản 3.23.0.
 - **Ngày:** 2026-10-25
 - **Làm rõ:** ADR-0031 (mục Hệ quả "Trước G7: đặt `harden` → audit delta → `release-check`" nay là nội dung của `/complete`),
   ADR-0033 (quyết định 1 "gom audit về trước G7" = gom về `/complete`), ADR-0037 (mục 3–4: chuyển `harden` chỉ khi lên
@@ -100,7 +100,7 @@ cổng đầy đủ trước push và trần 150 dòng (ADR-0041), nới guard c
   `release-check` và merge); MUST sàn bảo mật/cấu hình phụ thuộc PLAN build có task dựng nền (máy chưa có khái niệm "MUST sàn").
 - **Nợ ghi rõ:** job CI theo tag chạy `release-check` ở mẫu dự án đích (chưa có điểm móc "deploy", ADR-0042); định nghĩa máy
   đọc "MUST sàn" nếu số đo cho thấy MUST bảo mật bị bỏ quên ở build; `release-check --skip-run` nếu đo thấy chậm ở M/L;
-  README gốc §Quyết định thiết kế còn thiếu ADR-0037…0045 (bổ sung cùng lát tài liệu); `delegation_rate` và các nợ ADR-0045.
+  README gốc §Quyết định thiết kế còn thiếu ADR-0037…0045 (bổ sung cùng lát tài liệu).
 - Dự án đích: chạy lại `install.py` (skill `/complete` mới, `/autopilot` đổi, `xt.py` đổi); dự án đã sửa `autopilot/SKILL.md`
   nhận bản mới ở `.xtemplates-new` và gộp tay.
 

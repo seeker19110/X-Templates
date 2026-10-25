@@ -8,8 +8,8 @@ updated: 2026-10-25
 
 Đầu vào: chủ repo 2026-10-25 *"tôi muốn lệnh /autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả các rào cản,
 phiên chính tự quyết định với mục tiêu: chất lượng cao; còn thêm lệnh /complete, lúc này mới audit, review, fix,
-refactor… hoàn thiện dự án"*. Khung ở 3.20.1 (`c054540`). Kế hoạch suy ra: `docs/autopilot/PLAN-3.21.0-complete.md`
-(D-170); quyết định: ADR-0046.
+refactor… hoàn thiện dự án"*. Khung ở 3.20.1 (`c054540`). Kế hoạch suy ra: `docs/autopilot/PLAN-3.23.0-complete.md`
+(D-174); quyết định: ADR-0046.
 
 Cách đọc: §1 kết luận · §2 cách làm · §3 hiện trạng đo được · §4 rào cản còn lại ở pha build và xử lý từng cái · §5 lợi ·
 §6 hại và cách đỡ · §7 chỗ phải diễn giải lại ý chủ repo · §8 thiết kế · §9 không làm · §10 phép đo tiếp theo · §11 chưa
@@ -136,7 +136,7 @@ tài liệu — nhưng cả hai là bằng chứng máy (P1), giữ có chủ đ
   `DOCTOR_SKILLS` thêm `complete`; `CAPS` thêm trần 6 144 B cho skill mới.
 - **Tài liệu** (một chủ đề một nhà): `lifecycle.md` quy tắc 6 là nhà của "đầu ra mức S ở pha build, đầy đủ ở `/complete`";
   README mảng 11 bước 12/16 + "Pha 3 — hoàn thiện"; `audit.md` §1; mẫu PLAN; AGENTS.md ×2 §7–8; CLAUDE.md; README gốc;
-  dòng Trạng thái của ADR-0031/0033/0037/0041 ghi "làm rõ bởi ADR-0046". Bản **3.21.0** (skill mới + harness đổi → dự án đích
+  dòng Trạng thái của ADR-0031/0033/0037/0041 ghi "làm rõ bởi ADR-0046". Bản **3.23.0** (skill mới + harness đổi → dự án đích
   chạy lại `install.py`).
 
 ## 9. Không làm và vì sao
@@ -154,7 +154,7 @@ tài liệu — nhưng cả hai là bằng chứng máy (P1), giữ có chủ đ
 
 ## 10. Phép đo tiếp theo
 
-- Thời gian một lát và số lượt `loop record`/task ở ≥ 1 dự án đích chạy bản 3.21.0 (từ `.autopilot/runs.jsonl`
+- Thời gian một lát và số lượt `loop record`/task ở ≥ 1 dự án đích chạy bản 3.23.0 (từ `.autopilot/runs.jsonl`
   `started`/`finished`) so với bản 3.20.x — ≥ 10 task mỗi bản (`LOOP-ORCH-020`).
 - Tỉ lệ `done` ở build có `open_must > 0` và số MUST đó được đóng ở `/complete` (từ sổ audit + `blueprint-status`).
 - Thời gian `release-check` ở dự án M/L thật (quyết `--skip-run` có đáng không).

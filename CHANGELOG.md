@@ -5,13 +5,43 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.22.1] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (`xt.py`, guard đổi); chữ checklist không đổi. Sửa 2 🟠 + 3 🟢 của audit delta `e5ff88c..3ba5828` (D-173, `docs/ops/AUDIT-REPORT-2026-10-25-delta.md`).
+
+### Fixed
+- AUD-SEC-105 (🟠): `--clean` không còn nhận review của model tự chấm mình khi tên có tiền tố bộ chạy — tên bộ chạy `ollama`/`llama.cpp`/`llamacpp`/`llamafile`/`llama-server`/`gpt4all` ở mọi vị trí trong tên (`ollama:x`, `ollama x`, `ollama.x`, hoa/thường; `ollama` trơn bị từ chối) bị bỏ trước khi lấy họ (`_model_tail`), cùng họ thì rơi về luật cùng họ (`LOOP-ORCH-005`).
+- AUD-HAR-106 (🟠): `harness-check` kiểm `tools:` của `reviewer*` không có `Edit`/`Write` và không agent nào có `Agent` (kể cả tên cũ `Task`; chú thích ` # …` sau `tools:` bỏ qua) — đúng như bảng Cổng của `orchestration-and-subagents.md` đã ghi.
+- AUD-SEC-106: guard `GLOB_COMMANDS` thêm `nerdctl`, `docker-compose`, `podman-compose` (cách viết glob không lọt khỏi luật docker). AUD-XFEAT-024: `ai_attribution` của guard chặn cả `Claude Mythos`. AUD-HAR-107: `doctor` kiểm thêm `executor-deep`, `reviewer-alt`.
+
+## [3.22.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (`xt.py` đổi) **rồi ghép lại blueprint (`compose`)**: chữ quy phạm của `LOOP-ORCH-020` đổi nên mục đã `[x]` thành "Cũ" cho tới khi tick lại. Harness khác không đổi.
+
+### Added
+- `xt.py loop stats` (nợ cuối ADR-0045, D-171): thêm `delegated`, `self_done`, `delegation_rate` (task có lần chạy đầu mang executor / `task_count`), `first_pass_rate_delegated`, `first_pass_rate_self` vào `--json` và một dòng "Giao việc" ở bản chữ — số hai nhóm mà `LOOP-ORCH-020` đòi, đỡ đếm tay bằng `jq`/`grep`. Nhóm theo executor của LẦN CHẠY ĐẦU của task trong vòng (null = tự làm): task tự làm đỏ rồi chuyển cấp `executor-deep` vẫn là tự làm (D-172 đính chính D-171 — nhóm theo `executors` cuối từng làm nhóm tự làm đẹp hơn thật). Trường mới additive (người đọc JSON cũ không vỡ). Test đủ nhánh (coverage 100 %).
+
+### Changed
+- `LOOP-ORCH-020` (SHOULD): `→ Kiểm:` trỏ các trường mới; **chữ quy phạm đổi** (D-172): nhóm đối chiếu theo executor của lần chạy đầu, "tỉ lệ giao", task tự làm đã chuyển cấp vẫn là tự làm, lưu ý ID task không đánh lại giữa các đợt. Lát này cũng là điểm đo "giao" đầu tiên: T-3201 do `executor` làm (xanh lần đầu), T-3202/T-3203 phiên chính tự làm. Số tích luỹ (`loop stats --all`, 2026-10-25, 12 task): giao 1 (xanh lần đầu 1/1), tự làm 11 (xanh lần đầu 9/11) — còn xa ngưỡng ≥ 10 task/nhóm để đổi mặc định.
+
+## [3.21.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (chỉ `framework/` đổi) **rồi ghép lại blueprint (`compose`)** để nhận bốn mục SHOULD mới và `LOOP-CTX-010` ngừng dùng. Harness (`xt.py`, hook, agent, skill) không đổi.
+
+### Added
+- Bốn mục SHOULD trả nợ ADR-0045 (D-170), mỗi mục ở nhà đúng, nguồn bài claude.com *When to fold subagents* (2026-10-22) + kit `single-agent-loop-kit`: `AI-EVAL-021` (eval end-to-end khởi đầu ~10 ca; bộ chung có chủ + bộ theo skill; timestamp replay), `AI-AGENT-024` (gom tool theo ý định; tool search khi vượt cỡ 30–50 định nghĩa; ràng buộc cứng trong tool), `XC-DOCAI-021` (khi nhiều đội/người cùng góp skill cho một agent: mỗi skill một DRI + eval theo `AI-EVAL-021`; đội trung tâm nhỏ duyệt), `AI-APP-019` (trong agent có vòng lặp tool: tri thức tham chiếu sau tool tra/skill, không dán bằng code; tính năng một lời gọi theo Classic RAG).
+
+### Changed
+- `LOOP-CTX-010` SHOULD → MAY "Ngừng dùng 2026-10-25 — gộp vào `LOOP-ORCH-012`" (cùng chủ đề; ID giữ). `AI-AGENT-006` (MUST@L) **giữ nguyên chữ**: ngưỡng 30–50 của nguồn là "tends to degrade", `AI-AGENT-024` ghi rõ trần chặt hơn của `AI-AGENT-006` còn hiệu lực.
+- Văn xuôi: bảng "Cách xây" của `llm-app-foundations.md` thành từ vựng (tách `orchestrator-workers` khỏi workflow cố định, trỏ `AI-AGENTIC-001`/`011`); README mảng 11 hàng điều phối; `templates/AGENTS.md` §8 thêm `tự làm hàng "Làm trực tiếp" (`LOOP-ORCH-020`)` (cắt chữ khác giữ trần 8 192 B); `templates/CLAUDE.md` không cần đổi. Sửa hai chỗ chữ ở `[3.20.1]`. Còn nợ (ADR-0045): `delegation_rate` trong `loop stats` (mã `xt.py`) sau khi có số từ ≥ 2 vòng.
+
 ## [3.20.1] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (skill `/autopilot` đổi chữ). Chỉ văn xuôi — chữ quy phạm mục checklist không đổi nên blueprint không thành "Cũ".
 
 ### Changed
 - Skill `/autopilot` bước 5 (nợ ADR-0045, D-169): "giao subagent theo trường `executor`" thêm ngoại lệ hàng "Làm trực tiếp" (`LOOP-ORCH-020`) để dự án đích cũng sinh nhóm `executor: null` cho phép đo; cắt cụm "hook chạy cổng commit" (đã có ở README) để giữ trần byte.
-- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md`/`CLAUDE.md` §8, README mảng 11, `LOOP-CTX-010`, bảng "Cách xây" của `llm-app-foundations.md`, `delegation_rate`); `AI-APP-010` giữ nguyên vì vẫn đúng.
+- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md` §8, `templates/CLAUDE.md`, README mảng 11, `LOOP-CTX-010`, `delegation_rate`) và bảng "Cách xây" của `llm-app-foundations.md` (nợ mới từ review #251); `AI-APP-010` giữ nguyên vì vẫn đúng.
 
 ## [3.20.0] - 2026-10-24
 

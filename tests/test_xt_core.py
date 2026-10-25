@@ -1455,6 +1455,43 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         empty = self.tmpdir()
         self.assertEqual(xt.read_runs(empty), [])
         self.assertIsNone(xt.loop_stats(empty)["first_pass_rate"])
+        self.assertEqual((s["delegated"], s["self_done"]), ([], ["T-001", "T-002", "T-003"]))
+        self.assertEqual(
+            (s["delegation_rate"], s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (0.0, None, 0.333)
+        )
+        e = xt.loop_stats(empty)
+        self.assertEqual((e["delegation_rate"], e["first_pass_rate_delegated"], e["first_pass_rate_self"]), (None,) * 3)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(json=False, all=False), empty)
+        self.assertIn("Giao việc: — (0/0) · xanh lần đầu: giao — · tự làm —", out.getvalue())
+
+    def test_delegation_groups_by_first_run(self):
+        """LOOP-ORCH-020 (review #253): nhóm giao/tự làm theo executor của LẦN CHẠY ĐẦU — task tự làm đỏ rồi chuyển cấp
+        `executor-deep` vẫn là tự làm; task chỉ có `executor` hay chỉ `executor-deep` là giao."""
+        out, err = io.StringIO(), io.StringIO()
+        runs = (
+            ("T-001", "sh -c 'echo a; exit 1'", None),  # tự làm, đỏ 2 lần rồi chuyển cấp
+            ("T-001", "sh -c 'echo b; exit 1'", None),
+            ("T-001", "true", "executor-deep"),
+            ("T-002", "true", "executor"),  # giao, xanh lần đầu
+            ("T-003", "true", "executor-deep"),  # giao ngay ở tầng sâu
+            ("T-004", "true", None),  # tự làm, xanh lần đầu
+            ("T-005", "true", None),
+            ("T-006", "true", None),
+        )
+        with redirect_stdout(out), redirect_stderr(err):
+            for task, cmd, ex in runs:
+                xt.loop_record(task, [cmd], self.base, ex, tick=False)
+        s = xt.loop_stats(self.base)
+        self.assertEqual((s["delegated"], s["self_done"]), (["T-002", "T-003"], ["T-001", "T-004", "T-005", "T-006"]))
+        self.assertEqual(s["delegation_rate"], 0.333)  # 2/6: không chẵn → ghim `round(…, 3)`
+        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (1.0, 0.75))
+        self.assertEqual(s["tasks"]["T-001"]["executors"], ["executor-deep"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(json=False, all=False), self.base)
+        self.assertIn("Giao việc: 33% (2/6) · xanh lần đầu: giao 100% · tự làm 75%", out.getvalue())
 
     def test_executor_tier_escalation_and_stats(self):
         """ADR-0029: `(exec: deep)` → tầng sâu ngay; tầng mặc định đỏ 2 lần cùng task trong vòng này → `loop status`
@@ -1504,9 +1541,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertEqual(s["tasks"]["T-002"]["executors"], ["executor", "executor-deep"])
         self.assertEqual((s["escalated"], s["escalation_rate"]), (["T-002"], 0.5))
         self.assertEqual(s["tasks"]["T-001"]["executors"], [])
+        self.assertEqual((s["delegated"], s["self_done"], s["delegation_rate"]), (["T-002"], ["T-001"], 0.5))
+        self.assertEqual(s["tasks"]["T-002"]["runs_to_green"], None)
+        self.assertEqual(s["tasks"]["T-001"]["runs_to_green"], 1)
+        self.assertEqual((s["first_pass_rate_delegated"], s["first_pass_rate_self"]), (0.0, 1.0))
         with redirect_stdout(out):
             self.assertEqual(xt._loop_stats(argparse.Namespace(json=False, all=False), self.base), 0)
         self.assertIn("Chuyển cấp lên tầng sâu: 1 task (50%): T-002", out.getvalue())
+        self.assertIn("Giao việc: 50% (1/2) · xanh lần đầu: giao 0% · tự làm 100%", out.getvalue())
         with redirect_stdout(out), redirect_stderr(err):  # xanh rồi lại đỏ một lần: chỉ đếm chuỗi đỏ sau lần xanh cuối
             xt.loop_record("T-002", ["true"], self.base, "executor", tick=False)  # không tick: còn đỏ tiếp bên dưới
             xt.loop_record("T-002", ["sh -c 'echo ed; exit 1'"], self.base, "executor")

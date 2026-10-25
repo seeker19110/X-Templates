@@ -4587,6 +4587,7 @@ class GuardAiAttributionTest(unittest.TestCase):
             'git commit -nm "Claude Haiku 4"',
             'git commit --message="Claude Fable 5"',
             "git commit --message 'claude instant'",
+            'git commit -m "Claude Mythos 1"',  # AUD-XFEAT-024
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d), "deny")

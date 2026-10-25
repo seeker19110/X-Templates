@@ -179,6 +179,12 @@ class GlobCommandNameTest(unittest.TestCase):
             policy(cmd)
         self.assertLess(time.monotonic() - start, 15)
 
+    def test_guard_glob_names_container_clis(self):
+        """AUD-SEC-106: `/usr/bin/nerdct?` mở ra CLI container cùng cú pháp docker."""
+        self.assertIn("nerdctl", guard._glob_names("/usr/bin/nerdct?"))
+        self.assertIn("docker-compose", guard._glob_names("/usr/bin/docker-comp*"))
+        self.assertIn("podman-compose", guard._glob_names("/usr/bin/podman-comp*"))
+
     def test_guard_glob_names_bin_dirs_only(self):
         self.assertEqual(guard._glob_names("ls"), [])
         self.assertEqual(guard._glob_names("/bin/ls"), [])  # không glob

@@ -2701,6 +2701,33 @@ def read_runs(base: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _delegation_stats(per: Dict[str, Dict[str, Any]], rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Tỉ lệ giao việc cho subagent và xanh-lần-đầu theo nhóm (giao / tự làm) — nợ ADR-0045, `LOOP-ORCH-020`.
+    Nhóm theo executor của LẦN CHẠY ĐẦU của task trong tập `rows`: có → giao; thiếu (`null`) → tự làm. Task tự làm đỏ
+    rồi được chuyển cấp `executor-deep` vẫn là tự làm — nhóm giao không gánh lỗi của phiên chính (review #253)."""
+    first: Dict[str, Optional[str]] = {}
+    for r in rows:
+        ex = r.get("executor")
+        first.setdefault(r["task"], ex if isinstance(ex, str) else None)
+    delegated = sorted(k for k in per if first[k])
+    self_done = sorted(k for k in per if not first[k])
+
+    def first_pass(group: List[str]) -> Optional[float]:
+        return round(sum(per[k]["runs_to_green"] == 1 for k in group) / len(group), 3) if group else None
+
+    return {
+        "delegated": delegated,
+        "self_done": self_done,
+        "delegation_rate": round(len(delegated) / len(per), 3) if per else None,
+        "first_pass_rate_delegated": first_pass(delegated),
+        "first_pass_rate_self": first_pass(self_done),
+    }
+
+
+def _pct(x: Optional[float]) -> str:
+    return "—" if x is None else f"{x:.0%}"
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
     ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
@@ -2724,6 +2751,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         if t["executors"][:1] != [EXECUTOR_AGENTS["deep"]] and EXECUTOR_AGENTS["deep"] in t["executors"]
     )
     return {
+        **_delegation_stats(per, rows),
         "tasks": per,
         "task_count": len(per),
         "runs": len(rows),
@@ -2745,12 +2773,16 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     if args.json:
         print(json.dumps(s, ensure_ascii=False))
         return 0
-    rate = "—" if s["first_pass_rate"] is None else f"{s['first_pass_rate']:.0%}"
+    rate = _pct(s["first_pass_rate"])
     print(
         f"Task đã chạy Gate: {s['task_count']} · lần chạy: {s['runs']} (đỏ {s['failed_runs']}) · xanh lần đầu: {rate}"
     )
     print(
         f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    print(
+        f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
+        f"xanh lần đầu: giao {_pct(s['first_pass_rate_delegated'])} · tự làm {_pct(s['first_pass_rate_self'])}"
     )
     for k, t in sorted(s["tasks"].items()):
         green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"
@@ -3816,7 +3848,7 @@ DOCTOR_HOOK_EVENTS = {
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
 DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
-DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
+DOCTOR_AGENTS = ("executor", "executor-deep", "researcher", "reviewer", "reviewer-alt")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 # File hook nạp/gọi cạnh nó (_lib.sh, guard.py, nested/x.py, ../x.py): cả đường dẫn literal, giữ `/` lặp — đường dẫn chỉ
@@ -4632,16 +4664,23 @@ def _harness_settings(base: Path) -> str:
 
 
 def _harness_agents(base: Path) -> str:
-    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`."""
+    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`; không `Agent`/`Task`
+    (không lồng subagent); `reviewer*` không `Edit`/`Write` (chỉ đọc)."""
     bad = []
     for f in sorted((base / ".claude" / "agents").glob("*.md")):
         fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
         # `tools: Read, Grep`, `tools: [Read]` hoặc danh sách YAML xuống dòng (`tools:\n  - Read`, review #240)
         tools = re.search(r"^tools:[ \t]*(.*(?:\n[ \t]+-[ \t]*\S.*)*)$", fm[1], re.M) if fm else None
-        if not tools or not tools[1].strip() or "*" in tools[1]:
+        t = re.sub(r"(?:^|[ \t])#[^\n]*", "", tools[1], flags=re.M) if tools else ""  # bỏ chú thích YAML
+        if not t.strip() or "*" in t:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
             bad.append(f"{f.name} (permissionMode)")
+        # LOOP-ORCH-005 (reviewer* chỉ đọc), LOOP-ORCH-001 (không lồng subagent; `Task` là tên cũ của `Agent`)
+        if re.search(r"\b(?:Agent|Task)\b", t) or (
+            f.name.startswith("reviewer") and re.search(r"\b(?:(?:Notebook|Multi)?Edit|Write)\b", t)
+        ):
+            bad.append(f"{f.name} (tools: ghi/Agent)")
     return "; ".join(bad)
 
 
@@ -8874,9 +8913,15 @@ MODEL_FAMILY_RE = re.compile(
 )
 
 
+RUNNER_RE = re.compile(
+    r"(?<![a-z0-9])(?:ollama|llama[._-]?cpp|llamafile|llama-(?:server|swap|cli)|gpt4all)(?![a-z0-9])", re.I | re.A
+)
+
+
 def _model_tail(name: str) -> str:
-    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)."""
-    return name.rsplit("/", 1)[-1]
+    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…` và bộ chạy `ollama:`/`gpt4all-`: `llama`/`gpt` trong đó không phải
+    họ (review #249, AUD-SEC-105)."""
+    return RUNNER_RE.sub(" ", name.rsplit("/", 1)[-1])
 
 
 def model_family(name: str) -> str:

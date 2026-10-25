@@ -3676,7 +3676,7 @@ def _scan_commit(args: List[str], res: Dict[str, object], asks: List[str]) -> Op
 # heredoc trong cùng lệnh Bash (`-F - <<E`, `-m "$(cat <<E …)"` — tokenize bỏ thân heredoc nên đọc từ chuỗi gốc).
 AI_ATTRIBUTION_RE = re.compile(
     r"claude-session\s*:|claude\.ai/code/session_|"
-    r"\bclaude(?:[\s_-]+[\d.]+)*[\s_-]+(?:opus|sonnet|haiku|fable|instant)\b",  # `Claude Opus 5`, `claude-3-5-sonnet`
+    r"\bclaude(?:[\s_-]+[\d.]+)*[\s_-]+(?:opus|sonnet|haiku|fable|mythos|instant)\b",  # `Claude Opus 5`, `claude-3-5-sonnet`
     re.I,
 )
 AI_ATTRIBUTION_KEY_RE = re.compile(r"^ai_attribution:[ \t]*([\"']?)forbid\1[ \t]*(?:#.*)?$", re.M)
@@ -6064,7 +6064,7 @@ GLOB_COMMANDS = tuple(
         {"rm", "find", "shred", "unlink", "rsync", "mv", "dd", "sudo", "doas", "git", "env", "mkfs", "eval", "source"}
         | {"curl", "wget", "gh", "cp", "tee", "ln", "install", "sed", "truncate", "tar", "unzip", "awk", "patch"}
         | {"chmod", "chown", "ssh", "scp", "claude", "kubectl", "docker", "podman", "terraform", "tofu", "pulumi"}
-        | {"helm", "aws", "gcloud", "az"}
+        | {"helm", "aws", "gcloud", "az", "nerdctl", "docker-compose", "podman-compose"}
         | set(FILE_WRITERS)
         | INTERPRETERS
         | WRAPPERS

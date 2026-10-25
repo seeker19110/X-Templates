@@ -2850,6 +2850,45 @@ class HarnessCheckTest(TmpDirCase):
         self.assertNotIn("e.md", out)
         self.assertIn("permissionMode", out)
 
+    def test_harness_check_reviewer_read_only(self):
+        """AUD-HAR-106: LOOP-ORCH-005 — `reviewer*` chỉ đọc (không Edit/Write/Agent), mọi agent không có `Agent`."""
+        agents = self.tmp / ".claude" / "agents"
+        ok = "---\nname: reviewer\ntools: Read, Glob, Grep, Bash\nmodel: opus\n---\n"
+        (agents / "reviewer.md").write_text(ok, encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 0, out)
+        (agents / "reviewer.md").write_text(ok.replace("Bash", "Bash, Edit"), encoding="utf-8")
+        (agents / "reviewer-alt.md").write_text(ok.replace("Bash", "Write"), encoding="utf-8")
+        (agents / "executor.md").write_text(ok.replace("Bash", "Edit, Agent"), encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        for name in ("reviewer.md (", "reviewer-alt.md (", "executor.md ("):
+            self.assertIn(name, out)
+        (agents / "reviewer.md").write_text(ok, encoding="utf-8")
+        (agents / "reviewer-alt.md").write_text(ok, encoding="utf-8")
+        (agents / "executor.md").write_text(ok.replace("Bash", "Edit, Task(researcher)"), encoding="utf-8")
+        rc, out, _ = run_main("harness-check")  # `Task` = tên cũ của `Agent`
+        self.assertEqual(rc, 1)
+        self.assertIn("executor.md (", out)
+        (agents / "executor.md").write_text(
+            ok.replace("Bash", "Bash  # read-only: no Edit/Write/Agent"), encoding="utf-8"
+        )
+        rc, out, _ = run_main("harness-check")  # chú thích không phải tool
+        self.assertEqual(rc, 0, out)
+        (agents / "executor.md").write_text(
+            "---\nname: x\ntools:  # không Edit/Agent\n  - Read\n---\n", encoding="utf-8"
+        )
+        rc, out, _ = run_main("harness-check")  # chú thích ngay sau `tools:`
+        self.assertEqual(rc, 0, out)
+        (agents / "executor.md").write_text("---\nname: x\ntools:  # chỉ đọc\n---\n", encoding="utf-8")
+        rc, out, _ = run_main("harness-check")  # rỗng sau khi bỏ chú thích = thiếu
+        self.assertEqual(rc, 1)
+        (agents / "executor.md").write_text(ok, encoding="utf-8")
+        (agents / "reviewer.md").write_text(ok.replace("Bash", "NotebookEdit"), encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("reviewer.md (", out)
+
     def test_harness_check_missing_or_broken_guard_and_settings(self):
         (self.tmp / ".claude" / "hooks").unlink()
         (self.tmp / ".claude" / "settings.json").write_text("{hỏng", encoding="utf-8")

@@ -1763,9 +1763,18 @@ class PrNextCliTest(unittest.TestCase):
 
         for rev, aut in (("haiku/reviewer", "claude-opus-5-5"), ("sonnet", "opus/executor-deep"),
                          ("Qwen/QwQ-32B", "Qwen/Qwen3-235B-A22B"), ("ollama/qwq", "llama3.1:70b"),
-                         ("opus/", "sonnet")):  # fmt: skip
+                         ("opus/", "sonnet"), ("ollama:qwen3-coder", "qwen3-coder"),
+                         ("ollama-qwq", "qwq-32b"), ("llamacpp:llama3.1", "llama3.1:70b"),
+                         ("gpt4all:gpt-oss", "gpt-oss"), ("llamacpp:qwen3-coder", "qwen3-coder"),
+                         ("gpt4all:qwen3-coder", "qwen3-coder"), ("OLLAMA:qwen3-coder", "qwen3-coder"),
+                         ("llama.cpp:qwen3-coder", "qwen3-coder"), ("llamafile:qwen3-coder", "qwen3-coder"),
+                         ("ollama qwen3-coder", "qwen3-coder"), ("llama.cpp qwen3-coder", "qwen3-coder"),
+                         ("ollama.qwen3-coder", "qwen3-coder"), ("llama-server:qwen3-coder", "qwen3-coder"),
+                         ("Ollama Qwen3-Coder", "qwen3-coder"), ("ollama", "qwen3-coder"), ("ollama:llamacpp:qwen3-coder", "qwen3-coder")):  # fmt: skip  # AUD-SEC-105: tiền tố bộ chạy không phải họ
             self.assertEqual(run(rev, aut), 2, (rev, aut))
         self.assertEqual(run("openrouter/anthropic/claude-fable-5-1", "anthropic/claude-opus-4-1"), 0)
+        self.assertEqual(run("ollama-gemma3:27b", "gemma3:27b"), 2)  # cùng họ gemma sau khi bỏ tiền tố
+        self.assertEqual(run("ollama:gemma3:27b", "llama3.1:70b"), 0)  # khác nhà cung cấp vẫn nhận
         cfg = {"author_model_family": "opus", "reviewer_model_family": "haiku/reviewer"}
         self.assertIn("không nhận diện được họ model", xt.review_family_config_error(cfg) or "")
 
