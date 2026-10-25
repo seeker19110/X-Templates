@@ -1266,3 +1266,10 @@
 - Chọn: Thêm trigger push main với paths VERSION vào release-tag.yml; script giữ nguyên kiểm SemVer, CHANGELOG có mục, tag chưa có; workflow_dispatch vẫn giữ làm đường lùi; thiếu XT_RELEASE_TOKEN thì commit đổi file workflow sẽ không đẩy được tag (AUD-CI-014) → người bấm tay
 - Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ repo; (1) an toàn: VERSION chỉ đổi qua PR đã merge theo làn (CI xanh, review ở harden), script từ chối tag khi CHANGELOG thiếu mục hay tag đã có; chữ ký GO-NO-GO vẫn là người, tách khỏi tag; (2) đường lùi: bỏ trigger push
 - Đường lùi: Xoá khối push trong on: của release-tag.yml
+
+### D-180 · 2026-10-25T13:13:03+00:00 · Dòng chảy chủ repo đề xuất (build → complete → optimize → ký → production → số thật → optimize → ký): làm gì ở khung?
+
+- Phương án: (1) A: chỉ tài liệu — ánh xạ vòng đời + dòng GO-NO-GO người dùng thử · (2) B: A + skill /optimize (chỉ ngân sách đỏ có số), số field qua file docs/ops/FIELD-<ngày>.json, nghiệm thu delta, LOOP-OPT-005 MUST@M; người xác nhận một lần ở GO/NO-GO (không cổng chờ người trong /complete) · (3) C: B + xt.py field check so ngưỡng theo bậc LOOP-DESIGN-019
+- Chọn: B: A + skill /optimize (chỉ ngân sách đỏ có số), số field qua file docs/ops/FIELD-<ngày>.json, nghiệm thu delta, LOOP-OPT-005 MUST@M; người xác nhận một lần ở GO/NO-GO (không cổng chờ người trong /complete)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: tối ưu chỉ khi có số đỏ (LOOP-OPT-001), agent không cầm quyền production, điểm ký duy nhất giữ ADR-0009; bền/đơn giản: skill lặp lại được ở G7 và G8 không cần pha mới; C hoãn vì chưa dự án đích nào có SLO thật — không viết máy cho số chưa có. Chủ repo chốt B 2026-10-25.
+- Đường lùi: ADR-0048 §Đường lùi: xoá skill, bỏ optimize khỏi DOCTOR_SKILLS, LOOP-OPT-005 về MUST@L, LOOP-OPT-016 → MAY Ngừng dùng
