@@ -1322,3 +1322,10 @@
 - Chọn: Thu hẹp gốc: Workflow chỉ cho /audit và /research do người gõ trực tiếp, cùng luật nhánh subagent (người xác minh như /audit §4); bỏ Workflow khỏi /complete (nợ review giữ subagent)
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 3 (đơn giản, một nhà): ba lượt review đều tìm lỗi ở chỗ nhánh Workflow tự đặt luật khác nhánh subagent; dùng chung luật xoá cả lớp lỗi. Tiêu chí 1: nợ review gộp vào cụm nhóm làm mất dấu lát hỏng (review_debt PASS sai) — tái hiện độc lập. Người vẫn audit bằng Workflow được bằng cách tự gõ /audit.
 - Đường lùi: Xoá đoạn Workflow ở 2 skill (đường lùi D-184)
+
+### D-188 · 2026-10-25T17:42:40+00:00 · Review #265 lượt 4: ADR-0049 còn khuyên bật ultracode cả phiên cho phiên harden
+
+- Phương án: (1) Giữ câu khuyên · (2) Đổi thành: không bật ultracode cả phiên cho /autopilot, /complete (áp mọi task, ở Auto bỏ hộp duyệt); Workflow ở harden do người tự gõ /audit, /research; nhóm cụm hỏng ghi chưa quét cả khi delta; reviewer cho mọi cụm audit
+- Chọn: Đổi thành: không bật ultracode cả phiên cho /autopilot, /complete (áp mọi task, ở Auto bỏ hộp duyệt); Workflow ở harden do người tự gõ /audit, /research; nhóm cụm hỏng ghi chưa quét cả khi delta; reviewer cho mọi cụm audit
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: ultracode cả phiên mở lại đúng các đường D-187 đóng (nợ review, sửa mã thành workflow không hộp duyệt) — tái hiện độc lập theo workflows.md. Lời khuyên trước đó cho chủ repo (bật /effort ultracode cho phiên harden) được đính chính.
+- Đường lùi: Khôi phục câu khuyên ở ADR-0049 mục 4

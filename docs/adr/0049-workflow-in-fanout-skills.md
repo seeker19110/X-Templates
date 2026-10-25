@@ -1,7 +1,7 @@
 # ADR-0049: `/audit` và `/research` dùng tool Workflow khi người gõ trực tiếp; không bật `ultracode` mặc định
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-187
-  — review #265 ba lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-188
+  — review #265 bốn lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/research/SKILL.md`
   bước 3.
 - **Ngày:** 2026-10-25
@@ -20,7 +20,8 @@ Claude Code có tool **Workflow** (script JS điều phối nhiều subagent, ch
    allow `Workflow`, chế độ auto/bypass hoặc hook trả allow. Chế độ Auto hỏi duyệt lần chạy đầu một lần (ghi vào settings người dùng).
 2. Ultracode cả phiên: `/effort ultracode` (giữ mức effort hiện có, v2.1.284+), `claude --effort ultracode` (khởi động ở
    `xhigh`), hoặc setting `"ultracode": true`. Bật nó **gỡ** cảnh báo "Large workflow" và giới hạn subagent đồng thời của tool
-   Agent; mọi task tốn token và thời gian hơn.
+   Agent, và ở Auto bỏ hộp duyệt lần chạy đầu; Claude tự lập workflow cho mọi task đáng kể (hiểu, sửa, kiểm) — mọi task tốn
+   token và thời gian hơn.
 3. Model của agent trong workflow chọn theo thứ tự như subagent; `model` truyền trong script là tham số theo lần gọi (thắng
    frontmatter). `agentType` (dùng agent tuỳ biến `.claude/agents/*.md`) có trong skill `/workflow-authoring`, không có ở hai
    trang trên — quan sát 2026-10-25 (Claude Code 2.1.310); `maxTurns` của frontmatter có áp cho agent của workflow: (chưa xác minh).
@@ -48,17 +49,19 @@ kích hoạt ở đó.
    được: chỉ khi người **gõ trực tiếp** `/audit` hoặc `/research` trong phiên tương tác (người có mặt để duyệt lần đầu); gọi
    từ `/autopilot` hay `/complete` → nhánh subagent (hộp duyệt lần đầu sẽ treo vòng không hỏi người).
 2. Khuôn (nhà: `/audit` §3) **cùng luật với nhánh subagent, chỉ khác cách chạy**: agent chỉ đọc qua `agentType`
-   `reviewer`/`researcher` (`tools` không `Edit`/`Write`/`Agent`; không dùng `Explore` — không có frontmatter repo); người xác
+   `reviewer` (`tools` không `Edit`/`Write`/`Agent`; `/research` dùng `researcher`; không dùng `Explore` — không có frontmatter repo); người xác
    minh đúng như `/audit` §4 (reviewer khác agent đã tìm, model khác nếu được), không nhận lý luận của người tìm; **lô ≤ 5**
    đồng thời, một workflow một lúc; workflow chỉ trả dữ liệu — phiên chính gộp, đánh ID, ghi sổ, `loop decide`, sửa, push.
-3. Không lọc `null`: cụm `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → nhóm giữ `chưa quét`; xác minh
+3. Không lọc `null`: cụm `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → ghi nhóm `chưa quét` (xoá SHA/Ngày, kể cả nhóm đang `đã quét` ở SHA cũ khi delta); xác minh
    `null`/INCONCLUSIVE → chạy lại bằng subagent theo `/audit` §4, vẫn không được → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác
    minh` (`audit check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh. Không có tool, người chọn No,
    `deny` cho `Workflow` hoặc workflow lỗi → nhánh subagent; guard chặn một lệnh bên trong agent là kết luận (`LOOP-STOP-025`).
 4. Không dùng Workflow cho nợ review của `/complete` (đơn vị là PR/lát, review theo `LOOP-ORCH-005` và hàng `review_debt` —
    ghép vào cụm nhóm làm mất dấu vết lát hỏng; review #265 lượt 3), task build, `/review` một PR, `/optimize`, `release-check`,
-   việc cơ học. Ultracode cả phiên là lựa chọn của người cho phiên harden lớn (`/effort ultracode`, tắt bằng `/effort ultracode
-   off`), không đặt trong settings của khung.
+   việc cơ học. **Không bật ultracode cả phiên** (`/effort ultracode`, `--effort ultracode`, setting `ultracode`) cho phiên
+   `/autopilot` hay `/complete`: ultracode áp cho mọi task (kể cả nợ review và sửa mã) và ở Auto bỏ hộp duyệt lần đầu — mở lại
+   đúng các đường mục này đóng (ADR-0033, D-142, D-187). Muốn Workflow ở pha harden: người tự gõ `/audit` hoặc `/research`;
+   phiên ultracode chỉ cho việc người tự điều khiển ngoài vòng lặp, tắt bằng `/effort ultracode off`.
 
 ## Hệ quả
 
