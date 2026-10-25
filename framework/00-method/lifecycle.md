@@ -42,8 +42,8 @@ updated: 2026-10-25
    cùng tiêu chí cuối, khác **thời điểm** kiểm. Máy merge theo pha bằng khoá `delivery_phase: build|harden` của `xt.yaml`
    — build hoãn review thành nợ, G7 đòi harden và hết nợ (ADR-0031 của repo khung). **Pha build (`/autopilot`, ADR-0046) dùng đầu
    ra mức S cho G0–G4 ở mọi quy mô** (đọc repo, `compose` không tick, PLAN có Gate + Given/When/Then ngắn; `PROJECT.md`/SPEC
-   riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường) và kết thúc ở "build xong"
-   (task xanh, MUST blueprint còn mở ghi số, không chặn); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
+   riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường); mỗi đợt xong (task xanh, MUST
+   blueprint còn mở ghi số, không chặn) → audit delta → sửa/đợt kế, lặp tới khi hết việc và audit toàn diện sạch, rồi đề xuất `/complete` (D-177/D-178); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
    ca biên) và G7 thuộc pha hoàn thiện (`/complete`). Sàn an toàn (guard, điểm dừng, Gate máy, CI xanh) không đổi theo pha.
 
 ## Quy mô S/M/L — làm nhẹ đi chứ không bỏ

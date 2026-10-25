@@ -10,6 +10,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích mới**: mẫu `xt.yaml` đặt `merge_hard_exceptions: auto` (chủ repo 2026-10-25: pha build không chờ người; D-176, ADR-0020). Dự án **đã cài giữ giá trị cũ** (`xt.yaml` copy-if-absent) — muốn máy merge PR chạm auth/tiền/PII khi CI xanh thì mở PR đặt `auto` (PR đổi khoá luôn người merge). Thiếu khoá vẫn = `human`; guard, `UNWAIVABLE`, review sạch ở head ở pha harden (ADR-0037) không đổi.
 
 ### Changed
+- Skill `/autopilot` (D-177, chủ repo: "xong hết mọi việc thì audit rồi tiếp tục vòng lặp build cho đến khi hoàn thiện"): mục Kết thúc không dừng ở "build xong" — `done` → `/audit delta` (lần đầu `full`; 🔴/🟠 thành task có test tái hiện) + MUST blueprint mở + backlog → `PLAN-<đợt>.md` kế, tự duyệt, `loop init` lại; hết việc (0 MUST mở, backlog rỗng) → `/audit full`, còn 🔴/🟠 thì lặp, sạch mới **đề xuất** `/complete` (không tự chạy — D-178). README mảng 11 bước 16, `lifecycle.md` quy tắc 6, dòng Trạng thái ADR-0046 đổi theo. Máy không đổi; sàn an toàn (guard, điểm dừng) không đổi — chỉ chặn hành động không đảo ngược/lộ bí mật/tắt hook, không phải rào cản tốc độ.
 - `framework/templates/xt.yaml`: `merge_hard_exceptions: auto` (trước: `human`); chú thích ghi cả hai giá trị. README gốc, `stop-points-and-escalation.md` §Mức tự chủ, dòng Trạng thái ADR-0020/ADR-0046 ghi mặc định mới.
 - README gốc §Quyết định thiết kế: mô tả ADR-0039 (`gate` ∥ `e2e` → `quality`) và ADR-0041 (cổng commit vẫn chạy ở build) chính xác hơn — AUD-DOC-084/085; PROGRESS.md cắt dòng cũ (AUD-HAR-112).
 

@@ -1245,3 +1245,17 @@
 - Chọn: Đổi mẫu sang auto (ADR-0020 đã cho phép; repo khung đã auto từ 2026-10-17); thiếu khoá vẫn = human; dự án đã cài giữ nguyên (xt.yaml copy-if-absent), tự đổi khi muốn; cắt 3.24.0
 - Lý do (tiêu chí chất lượng cuối): Quyết định của chủ repo (AGENTS.md §1); (1) an toàn: máy chỉ merge khi CI xanh và ở pha harden còn cần review sạch ở head (ADR-0037); UNWAIVABLE và guard giữ nguyên; PR đổi khoá luôn người merge; (2) đường lùi: một dòng xt.yaml về human; (3) dự án cũ không bị đổi ngầm
 - Đường lùi: Đặt lại merge_hard_exceptions: human trong framework/templates/xt.yaml; dự án đích sửa xt.yaml qua PR do người merge
+
+### D-177 · 2026-10-25T10:35:44+00:00 · Chủ repo 2026-10-25: /autopilot không dừng — xong hết việc thì audit rồi tiếp tục vòng lặp build tới khi hoàn thiện; chấp nhận mọi lệnh, không cấm, không hỏi. Thiết kế thế nào?
+
+- Phương án: (1) Giữ ADR-0046 nguyên: /autopilot dừng ở build xong, người gõ /complete · (2) Kết thúc /autopilot thành vòng: done → /audit delta (lần đầu full) → 🔴/🟠 và MUST mở/backlog thành PLAN đợt kế → loop init → lặp; hết việc (0 🔴/🟠, 0 MUST mở, backlog rỗng) → /complete (harden, release-check GO). Guard/điểm dừng giữ nguyên (chỉ chặn không đảo ngược/lộ bí mật/tắt hook — không tốn tốc độ); 'không hỏi' đã có (loop defer, không block). Sửa skill + README 11 + lifecycle + CHANGELOG, không đổi máy; gộp vào 3.24.0 · (3) Bỏ cả deny của settings và guard theo nghĩa đen 'không cấm'
+- Chọn: Kết thúc /autopilot thành vòng: done → /audit delta (lần đầu full) → 🔴/🟠 và MUST mở/backlog thành PLAN đợt kế → loop init → lặp; hết việc (0 🔴/🟠, 0 MUST mở, backlog rỗng) → /complete (harden, release-check GO). Guard/điểm dừng giữ nguyên (chỉ chặn không đảo ngược/lộ bí mật/tắt hook — không tốn tốc độ); 'không hỏi' đã có (loop defer, không block). Sửa skill + README 11 + lifecycle + CHANGELOG, không đổi máy; gộp vào 3.24.0
+- Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ repo (AGENTS §1) về vòng lặp liên tục khớp máy sẵn có (loop init đợt mới, audit delta, release-check) — không cần cơ chế mới. PA3: deny/guard chỉ chặn hành động không đảo ngược, bí mật, tắt hook — không có hành động build nào cần chúng nên bỏ không tăng tốc mà mất lưới an toàn khi chạy không người trực (ADR-0002/0018, tiêu chí 1); bộ phân loại Auto repo không điều khiển được. Nêu rõ với chủ repo; bỏ thật cần ADR riêng do chủ repo chốt. (2) đường lùi: revert PR
+- Đường lùi: Khôi phục mục Kết thúc của skill /autopilot bản 3.23.0 (dừng ở build xong)
+
+### D-178 · 2026-10-25T10:37:50+00:00 · Đính chính D-177 (chủ repo 2026-10-25): khi hết việc /autopilot tự chạy /complete hay chỉ đề xuất?
+
+- Phương án: (1) Tự chạy /complete ngay khi hết việc · (2) Chạy /audit full; còn 🔴/🟠 → lặp sửa; sạch mới ĐỀ XUẤT /complete, dừng — người quyết lúc phát hành
+- Chọn: Chạy /audit full; còn 🔴/🟠 → lặp sửa; sạch mới ĐỀ XUẤT /complete, dừng — người quyết lúc phát hành
+- Lý do (tiêu chí chất lượng cuối): Lời chủ repo: 'đến khi audit không còn lỗi mới đề xuất chuyển qua /complete'; (1) đúng: chuyển harden là một chiều (ADR-0037) nên là quyết định của người; (2) đường lùi: skill một dòng
+- Đường lùi: Đổi câu Kết thúc của skill về 'hết việc → /complete'

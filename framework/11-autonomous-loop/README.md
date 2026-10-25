@@ -77,7 +77,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     ([`LOOP-DESIGN-005`](loop-design.md)). Không skip test, không nới cổng ([`LOOP-CI-001`](self-healing-ci.md)).
 12. **Lát xong → một PR** ([`LOOP-DESIGN-020`](loop-design.md), ADR-0014; nhánh riêng từ nhánh đích mới nhất, chồng lên PR
     chưa merge nếu phụ thuộc): `PROGRESS.md` (≤ 8 KB) vào commit cuối của lát → cổng đầy đủ `dev-task.sh gate` **một lần**
-    (pha build bỏ bước này, CI là cổng — ADR-0041) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
+    (pha build bỏ — ADR-0041) → đẩy **một lần**, mở PR → `<XT> pr next --pr <N>`, làm đúng `do`; `<XT> merge-watch --pr <N>`
     chạy nền và khi thoát in sẵn kết quả `pr next`; mỗi khi PR đổi (push, CI, review) lại `pr next`. Reviewer **chỉ khi** `pr next` trả
     `review` — năng lực cao hơn người viết ([`LOOP-ORCH-005`](orchestration-and-subagents.md); không kết luận được →
     `<XT> pr reviewed --inconclusive` rồi giao reviewer khác); ghi `<XT> pr reviewed` theo lệnh máy in (đăng lên PR để
@@ -93,12 +93,12 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý rồi `<XT> loop resume`.
 15. **Context đầy** → compaction tự nén (PreCompact ghi checkpoint, SessionStart in lại `loop status`); gần trần máy
     (≥ 80 % vòng/giờ/tiền) → Bàn giao vào PROGRESS, commit + push ([`context-and-token-budget.md`](context-and-token-budget.md)).
-16. **Kết thúc (build xong)**: `done` = mọi task có bằng chứng xanh + `verify --all` khớp cây (pha build: MUST blueprint mở
-    không chặn, ghi `open_must` — ADR-0046) → `<XT> loop stats`, `<XT> feedback collect`, báo cáo ≤ 20 dòng (đã làm · bằng chứng
-    · D-NNN · nợ · còn treo) + dòng «chưa phát hành — gõ `/complete`». `done-pending-human` → như `done` + việc chờ người (ID,
-    lý do, cách làm). `blocked`/`budget` → lý do + bước kế, không khai "xong".
+16. **Kết thúc đợt → đợt kế (D-177)**: `done` = mọi task xanh + `verify --all` khớp cây (pha build: MUST blueprint mở không
+    chặn, ghi `open_must` — ADR-0046) → `<XT> loop stats`, báo cáo ≤ 20 dòng →
+    không dừng: `/audit delta` (🔴/🟠 → task), MUST mở/backlog → `PLAN-<đợt>.md`, `loop init` → bước 10; hết việc → `/audit full` sạch → đề xuất bước 17.
+    `done-pending-human` → như `done` + việc chờ người. `blocked`/`budget` → lý do + bước kế, không khai "xong".
 17. **Pha 3 — hoàn thiện** (`/complete`, ADR-0046; dự án đã `harden` chạy luật này từ bước 12): PR đặt `delivery_phase: harden`
-    → `/audit` + nợ review theo PR/lát → `PLAN-harden-<ngày>.md` → vòng lặp bước 9–15 luật harden → `<XT> release-check` không
+    → `/audit` + nợ review → `PLAN-harden-<ngày>.md` → vòng lặp bước 9–15 luật harden → `<XT> release-check` không
     NO-GO → `GO-NO-GO.md` (người ký).
 
 ## Lệnh thật

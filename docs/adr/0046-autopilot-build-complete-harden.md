@@ -3,7 +3,9 @@
 - **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-25: "/autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả
   các rào cản, phiên chính tự quyết định với mục tiêu chất lượng cao; thêm /complete mới audit, review, fix, refactor… hoàn
   thiện dự án"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối — D-174); mục 5: `merge_hard_exceptions` của mẫu
-  dự án đích đổi sang `auto` theo chủ repo 2026-10-25 (D-176, 3.24.0) — sàn còn lại giữ nguyên
+  dự án đích đổi sang `auto` theo chủ repo 2026-10-25 (D-176, 3.24.0) — sàn còn lại giữ nguyên; mục 1 "dừng ở build xong" đổi
+  thành vòng: đợt build xong → `/audit delta` → sửa/đợt kế, lặp tới khi hết việc và `/audit full` sạch, rồi **đề xuất** `/complete`
+  (không tự chạy — chủ repo 2026-10-25, D-177/D-178)
 - **Trạng thái triển khai:** Đã triển khai (PR #259 + PR cắt bản 3.23.0) — PLAN `docs/autopilot/PLAN-3.23.0-complete.md`: `scripts/xt.py`
   (`_verdict_blueprint` theo pha, chuỗi lý do `_with_dispatch`/`_release_phase`, `DOCTOR_SKILLS`), skill mới
   `.claude/skills/complete/SKILL.md`, skill `/autopilot` viết lại cho pha build, `tests/test_docs_budget.py` (`CAPS`),
