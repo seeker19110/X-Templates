@@ -4,10 +4,10 @@
 
 ## Đang làm
 - 2026-10-25 **3.26.0 Workflow trong skill fan-out** (D-184/D-185, ADR-0049): `/audit` §3, `/complete` bước 2, `/research` ≥ 3 mục dùng tool Workflow khi người gõ skill (agent chỉ đọc, lô ≤ 5; từ `/autopilot` → subagent); không bật `ultracode` trong settings. Review đối kháng lượt 1 đã sửa.
-- 2026-10-25 **PLAN-3.25-optimize** (D-180/D-181, ADR-0048, 3.25.0): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta, `LOOP-OPT-005` MUST@M. Cả 4 lát trong #263 (D-183), review lượt 2 đã sửa. Hoãn C (`xt.py field check`) tới khi dự án đích có SLO thật.
+- 2026-10-25 **PLAN-3.25-optimize xong** (D-180…D-183, ADR-0048; #263, `v3.25.0`): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta, `LOOP-OPT-005` MUST@M. Audit delta3 `00ead5f..daefc7c`: 0 🔴/🟠 mở; 🟢 HAR-113 (ghép lại BLUEPRINT), HAR-114, DOC-086 (hạn 2026-11-08). Hoãn C tới khi có SLO thật. GO-NO-GO v3.25.0: D-126 giữ tự host (chủ repo 2026-10-25), chờ ký mục 5.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 + #260 (`v3.23.0`) + #261 audit delta; 3.24.0 (ADR-0047, #262): mẫu `merge_hard_exceptions: auto` (D-176); `/autopilot` lặp build → audit delta → đợt kế tới khi hết việc (D-177/178); tag tự khi `VERSION` đổi (D-179). GO-NO-GO `v3.18.x`/`v3.20.0`/`v3.23.0` chờ ký. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` có `delegation_rate`, `first_pass_rate_*`; chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
-- 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173; [báo cáo](docs/ops/AUDIT-REPORT-2026-10-25-delta.md)): 0 🔴, 2 🟠 (SEC-105, HAR-106) + 14 🟢. Sửa 2 🟠 + 3 🟢 ở 3.22.1 (#255, `9041f56`; mới 🟢 SEC-107/HAR-111). BLUEPRINT.md sinh lại + tái kiểm 19 mục (HAR-110): MUST 64 đạt, 0 chưa.
+- 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173): 2 🟠 + 3 🟢 sửa ở 3.22.1 (#255); BLUEPRINT.md sinh lại (#257).
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043).
@@ -34,6 +34,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `e10e3c3` (3.24.0, #262 — 5 lượt review reviewer-alt effort max, 4+1+1 🟠 sửa trong PR; tag tự tạo bởi `release-tag.yml` lần đầu, D-179). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040) — đặt worktree ngoài `/tmp`. Thư mục `11-autonomous-loop` còn 1 B dưới trần tổng — thêm chữ phải cắt chỗ khác.
+- `main` `daefc7c` (3.25.0, #263 — 4 lượt review). 3.24.0 (#262 — 5 lượt review reviewer-alt effort max, 4+1+1 🟠 sửa trong PR; tag tự tạo bởi `release-tag.yml` lần đầu, D-179). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040) — đặt worktree ngoài `/tmp`. Thư mục `11-autonomous-loop` còn 10 B dưới trần tổng.
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
