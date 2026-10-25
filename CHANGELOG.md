@@ -5,6 +5,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (`xt.py` đổi). Harness khác và blueprint không đổi.
+
+### Added
+- `xt.py loop stats` (nợ cuối ADR-0045, D-171): thêm `delegated`, `self_done`, `delegation_rate` (task có `executors` khác rỗng / `task_count`), `first_pass_rate_delegated`, `first_pass_rate_self` vào `--json` và một dòng "Giao việc" ở bản chữ — số hai nhóm mà `LOOP-ORCH-020` đòi, hết phải đếm tay bằng `jq`/`grep`. Trường mới additive (người đọc JSON cũ không vỡ). Task tự làm rồi chuyển cấp tính vào nhóm giao. Test đủ nhánh (coverage 100 %).
+
+### Changed
+- `LOOP-ORCH-020` (SHOULD): `→ Kiểm:` trỏ các trường mới; chữ quy phạm không đổi. Lát này cũng là điểm đo "giao" đầu tiên: T-3201 do `executor` làm (xanh lần đầu), T-3202/T-3203 phiên chính tự làm.
+
 ## [3.21.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (chỉ `framework/` đổi) **rồi ghép lại blueprint (`compose`)** để nhận bốn mục SHOULD mới và `LOOP-CTX-010` ngừng dùng. Harness (`xt.py`, hook, agent, skill) không đổi.
