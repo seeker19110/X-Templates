@@ -19,6 +19,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
   báo người. Nhánh subagent của `/audit` giao `reviewer` thay `Explore` cho tài liệu, thêm `researcher` cho mục cần nguồn web có
   ngày (cả hai nhánh). Người gõ skill là
   đã opt-in (mô tả tool Workflow, Claude Code 2.1.310) — không cần bật `ultracode`; **không** bật ultracode cả phiên cho `/autopilot`/`/complete` và không đặt trong settings (ultracode áp cho mọi task, ở Auto bỏ hộp duyệt lần đầu).
+- Mẫu `AUDIT-REPORT.md`: 🔴/🟠 không xác minh được (agent hỏng, bị chặn, người dừng) ghi `chưa xác minh — <lý do>` ở dòng
+  Xác minh đối kháng, Trạng thái `mở` — khớp `/audit` §3.
 - `research/2026-10-21-next-level-speed-automation-quality.md`: đính chính — chỉ **từ khoá** `ultracode` không kích hoạt qua
   `-p`/lịch/webhook; tool Workflow chạy được ở `-p`/SDK khi có rule allow `Workflow` hoặc chế độ auto/bypass.
 
