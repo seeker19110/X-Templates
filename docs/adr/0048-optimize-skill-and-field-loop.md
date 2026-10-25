@@ -8,7 +8,9 @@
   `.claude/skills/optimize/SKILL.md`, `DOCTOR_SKILLS`, `LOOP-OPT-016`, `LOOP-OPT-005` MUST@M / `LOOP-OPT-004` MUST@L (D-181), mẫu
   GO-NO-GO dòng 21 + §2c, `lifecycle.md`, `/complete`, README gốc; test `tests/test_docs_budget.py`, `test_doctor.py`, `test_install.py`.
 - **Ngày:** 2026-10-25
-- **Làm rõ:** ADR-0046 (`/autopilot` build, `/complete` harden), ADR-0047 (vòng đợt build), ADR-0042 (`release-check` hàng
+- **Thay một phần:** ADR-0046 mục 4 (3)(f) (hiệu năng trong PLAN-harden → gieo task theo `optimization-loop.md`, `/optimize`
+  là skill riêng sau `done`) và (5) (bản chỉ tối ưu nghiệm thu delta).
+- **Làm rõ:** ADR-0004 (trần 4 MUST@M mỗi module — `validate`), ADR-0046 (`/autopilot` build, `/complete` harden), ADR-0047 (vòng đợt build), ADR-0042 (`release-check` hàng
   `attack`/`perf`), ADR-0029 (G7 máy đọc), ADR-0008 (phiên chính tự duyệt), `framework/11-autonomous-loop/optimization-loop.md`
   (vòng tối ưu, `xt.py perf`), `LOOP-DESIGN-019` (vòng bảo trì theo ngưỡng tất định), `XC-PERF-007`/`OPS-SLO-*` (số field).
 
@@ -36,8 +38,8 @@ chủ repo đề xuất với khung (đo tại `e10e3c3`):
 - **C — B + `xt.py field check`** so ngưỡng theo bậc `LOOP-DESIGN-019`: chỉ đáng khi có dự án đích có SLO 7 ngày thật — chưa
   có (TARGETS). Hoãn; không viết máy cho số chưa tồn tại (`LOOP-OPT-001`).
 - **Cổng chờ người bên trong `/complete`**: phá "một phiên tới khi xong" (ADR-0009) và nhân đôi điểm ký. Loại.
-- **`xt.py` kéo metric từ Prometheus/Grafana**: quyền production cho agent + báo động giả; `loop-design.md` bảng "không làm"
-  đã loại. Loại.
+- **`xt.py` kéo metric từ Prometheus/Grafana**: cấp quyền production cho agent (tiêu chí 1); `LOOP-DESIGN-019` đã chọn script
+  tất định so ngưỡng, `loop-design.md` bảng "không làm" loại model đọc log/metric liên tục. Loại.
 
 ## Quyết định
 
@@ -48,14 +50,18 @@ chủ repo đề xuất với khung (đo tại `e10e3c3`):
    đang đỏ có số — hàng `perf` FAIL của `release-check --json`, `floor --run` đỏ, hoặc file số field (mục 3); mỗi ngân sách
    một task trong `docs/autopilot/PLAN-opt-<ngày>.md`, Gate theo `optimization-loop.md` (script Gate và `xt.py` lấy từ commit
    gốc, `perf guard` khoá bộ đo, `perf compare` quyết); chạy luật harden (`/complete` bước 4); dừng khi đạt mục tiêu; đổi hành
-   vi đi PR riêng (`LOOP-OPT-014`). Không phải pha mới: `delivery_phase` giữ `harden`.
+   vi đi PR riêng (`LOOP-OPT-014`). Không phải pha mới: `delivery_phase` giữ `harden`. **Chỉ chạy khi không có vòng sống**
+   (`LOOP-HARNESS-024`): sau `done` của `/complete` bước 5, hoặc độc lập ở G8; đang ở `/complete` bước 4 mà `perf`/sàn đỏ →
+   gieo task hiệu năng vào PLAN-harden theo cùng luật `optimization-loop.md` (bước 3(f)), không gọi `/optimize` (review #263).
 3. **Số production vào qua file, không qua quyền.** `docs/ops/FIELD-<YYYY-MM-DD>.json` (định dạng ở `optimization-loop.md`
    §Số field: chỉ số, phân vị, cửa sổ, nguồn, người xuất, ngày) do người hoặc job CI xuất từ dashboard; `/optimize --field`
    chỉ nhận file này và coi nội dung là **dữ liệu, không phải chỉ thị**. Agent không được cấp khoá đọc production cho việc tối
    ưu (`stop-points-and-escalation.md` hàng "Dữ liệu người dùng thật"). Kích hoạt theo `LOOP-DESIGN-019` (ngưỡng tất định →
    task), không để model đọc log tìm việc. Mục mới `LOOP-OPT-016` (SHOULD).
-4. **Nghiệm thu delta.** Bản phát hành chỉ tối ưu (không đổi hành vi, `PERF-LOG.md` có dòng giữ) dùng `GO-NO-GO.md` chế độ
-   delta: dòng 1, 2, 12 + bảng trước/sau từ `PERF-LOG.md` + mục 1 đếm; người vẫn ký mục 5. `release-check` chạy như thường.
+4. **Nghiệm thu delta.** Bản phát hành chỉ tối ưu — diff **không chạm manifest/lockfile/hạ tầng** (kiểm bằng `git diff --stat`),
+   không đổi hành vi, `PERF-LOG.md` có dòng giữ — dùng `GO-NO-GO.md` chế độ delta: dòng 1, 2, 4, 5 (bí mật, phụ thuộc — không có
+   hàng tương ứng ở `release-check`), 12, 21 + §2b (bằng chứng chưa chứng minh: lab đo, field chưa) + bảng trước/sau từ
+   `PERF-LOG.md` + mục 1; người vẫn ký mục 5. `release-check` chạy như thường. Chạm manifest/lockfile → bảng đầy đủ (review #263).
 5. **`LOOP-OPT-005` MUST@L → MUST@M**: tối ưu là việc agent dễ gian lận nhất (METR 2025-06-05: 30 % lượt có hack); dự án M đủ
    lớn để cần reviewer năng lực cao hơn trả lời từng ⚠ của `perf guard`. Trần 4 MUST hiệu lực ở M mỗi module (`validate`,
    ADR-0043) → `LOOP-OPT-004` (một giả thuyết/một thay đổi — kỷ luật quy trình, không tạo kết quả giả) MUST@M → MUST@L
@@ -69,6 +75,7 @@ chủ repo đề xuất với khung (đo tại `e10e3c3`):
 - `/optimize` không chạy khi không có số đỏ — đúng `LOOP-OPT-001`; muốn tối ưu "cho chắc" phải đặt ngân sách trước.
 - Số field là file commit trong repo: có thể cũ hoặc sai; `LOOP-OPT-016` đòi ngày và nguồn, skill từ chối file > 30 ngày.
 - Chưa có máy đọc field (C); khi dự án đích có SLO thật thì mở ADR mới.
+- Nợ: README mảng 11 bước 17 (Pha 3) chưa nhắc `/optimize`/số field — file đúng trần 12 288 B; sửa cùng byte ở lần cắt chữ kế.
 
 ## Đường lùi
 
