@@ -5,13 +5,24 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (chỉ `framework/` đổi) **rồi ghép lại blueprint (`compose`)** để nhận bốn mục SHOULD mới và `LOOP-CTX-010` ngừng dùng. Harness (`xt.py`, hook, agent, skill) không đổi.
+
+### Added
+- Bốn mục SHOULD trả nợ ADR-0045 (D-170), mỗi mục ở nhà đúng, nguồn bài claude.com *When to fold subagents* (2026-10-22) + kit `single-agent-loop-kit`: `AI-EVAL-021` (eval end-to-end khởi đầu ~10 ca; bộ chung có chủ + bộ theo skill; timestamp replay), `AI-AGENT-024` (gom tool theo ý định; tool search khi vượt cỡ 30–50 định nghĩa; ràng buộc cứng trong tool), `XC-DOCAI-021` (mỗi skill một DRI + eval riêng; đội trung tâm nhỏ duyệt), `AI-APP-019` (tri thức tham chiếu sau tool tra/skill, không dán bằng code).
+
+### Changed
+- `LOOP-CTX-010` SHOULD → MAY "Ngừng dùng 2026-10-25 — gộp vào `LOOP-ORCH-012`" (cùng chủ đề; ID giữ). `AI-AGENT-006` (MUST@L) **giữ nguyên chữ**: ngưỡng 30–50 của nguồn là "tends to degrade", `AI-AGENT-024` ghi rõ trần chặt hơn của `AI-AGENT-006` còn hiệu lực.
+- Văn xuôi: bảng "Cách xây" của `llm-app-foundations.md` thành từ vựng (tách `orchestrator-workers` khỏi workflow cố định, trỏ `AI-AGENTIC-001`/`011`); README mảng 11 hàng điều phối; `templates/AGENTS.md` §8 thêm "tự làm khi không cần tách (`LOOP-ORCH-020`)" (cắt chữ khác giữ trần 8 192 B); `templates/CLAUDE.md` không cần đổi. Sửa hai chỗ chữ ở `[3.20.1]`. Còn nợ (ADR-0045): `delegation_rate` trong `loop stats` (mã `xt.py`) sau khi có số từ ≥ 2 vòng.
+
 ## [3.20.1] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (skill `/autopilot` đổi chữ). Chỉ văn xuôi — chữ quy phạm mục checklist không đổi nên blueprint không thành "Cũ".
 
 ### Changed
 - Skill `/autopilot` bước 5 (nợ ADR-0045, D-169): "giao subagent theo trường `executor`" thêm ngoại lệ hàng "Làm trực tiếp" (`LOOP-ORCH-020`) để dự án đích cũng sinh nhóm `executor: null` cho phép đo; cắt cụm "hook chạy cổng commit" (đã có ở README) để giữ trần byte.
-- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md`/`CLAUDE.md` §8, README mảng 11, `LOOP-CTX-010`, bảng "Cách xây" của `llm-app-foundations.md`, `delegation_rate`); `AI-APP-010` giữ nguyên vì vẫn đúng.
+- `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md` "Quy tắc đầu tiên", `02-profiles/agentic-system.md` hàng "Điều phối đa agent": bỏ thang cố định "một lời gọi → workflow → agent", trỏ về `AI-AGENTIC-001`/`011` (một nhà). Nợ còn lại ở ADR-0045 §Hệ quả (`evaluation.md`, `AI-AGENT-006`, `XC-DOCAI`, `AI-APP-007`, `templates/AGENTS.md` §8, `templates/CLAUDE.md`, README mảng 11, `LOOP-CTX-010`, `delegation_rate`) và bảng "Cách xây" của `llm-app-foundations.md` (nợ mới từ review #251); `AI-APP-010` giữ nguyên vì vẫn đúng.
 
 ## [3.20.0] - 2026-10-24
 
