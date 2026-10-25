@@ -4671,14 +4671,14 @@ def _harness_agents(base: Path) -> str:
         fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
         # `tools: Read, Grep`, `tools: [Read]` hoặc danh sách YAML xuống dòng (`tools:\n  - Read`, review #240)
         tools = re.search(r"^tools:[ \t]*(.*(?:\n[ \t]+-[ \t]*\S.*)*)$", fm[1], re.M) if fm else None
-        if not tools or not tools[1].strip() or "*" in tools[1]:
+        t = re.sub(r"(?:^|[ \t])#[^\n]*", "", tools[1], flags=re.M) if tools else ""  # bỏ chú thích YAML
+        if not t.strip() or "*" in t:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
             bad.append(f"{f.name} (permissionMode)")
         # LOOP-ORCH-005 (reviewer* chỉ đọc), LOOP-ORCH-001 (không lồng subagent; `Task` là tên cũ của `Agent`)
-        t = re.sub(r"[ \t]#[^\n]*", "", tools[1]) if tools else ""
         if re.search(r"\b(?:Agent|Task)\b", t) or (
-            f.name.startswith("reviewer") and re.search(r"\b(?:Edit|Write)\b", t)
+            f.name.startswith("reviewer") and re.search(r"\b(?:(?:Notebook|Multi)?Edit|Write)\b", t)
         ):
             bad.append(f"{f.name} (tools: ghi/Agent)")
     return "; ".join(bad)
@@ -8913,16 +8913,15 @@ MODEL_FAMILY_RE = re.compile(
 )
 
 
-RUNNER_PREFIX_RE = re.compile(r"^(?:ollama|llama[._-]?cpp|llamafile|gpt4all)(?:[:_-]|$)", re.I)
+RUNNER_RE = re.compile(
+    r"(?<![a-z0-9])(?:ollama|llama[._-]?cpp|llamafile|llama-(?:server|swap|cli)|gpt4all)(?![a-z0-9])", re.I | re.A
+)
 
 
 def _model_tail(name: str) -> str:
     """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…` và bộ chạy `ollama:`/`gpt4all-`: `llama`/`gpt` trong đó không phải
     họ (review #249, AUD-SEC-105)."""
-    tail = name.rsplit("/", 1)[-1]
-    while (bare := RUNNER_PREFIX_RE.sub("", tail)) != tail:
-        tail = bare
-    return tail
+    return RUNNER_RE.sub(" ", name.rsplit("/", 1)[-1])
 
 
 def model_family(name: str) -> str:

@@ -1768,7 +1768,9 @@ class PrNextCliTest(unittest.TestCase):
                          ("gpt4all:gpt-oss", "gpt-oss"), ("llamacpp:qwen3-coder", "qwen3-coder"),
                          ("gpt4all:qwen3-coder", "qwen3-coder"), ("OLLAMA:qwen3-coder", "qwen3-coder"),
                          ("llama.cpp:qwen3-coder", "qwen3-coder"), ("llamafile:qwen3-coder", "qwen3-coder"),
-                         ("ollama", "qwen3-coder"), ("ollama:llamacpp:qwen3-coder", "qwen3-coder")):  # fmt: skip  # AUD-SEC-105: tiền tố bộ chạy không phải họ
+                         ("ollama qwen3-coder", "qwen3-coder"), ("llama.cpp qwen3-coder", "qwen3-coder"),
+                         ("ollama.qwen3-coder", "qwen3-coder"), ("llama-server:qwen3-coder", "qwen3-coder"),
+                         ("Ollama Qwen3-Coder", "qwen3-coder"), ("ollama", "qwen3-coder"), ("ollama:llamacpp:qwen3-coder", "qwen3-coder")):  # fmt: skip  # AUD-SEC-105: tiền tố bộ chạy không phải họ
             self.assertEqual(run(rev, aut), 2, (rev, aut))
         self.assertEqual(run("openrouter/anthropic/claude-fable-5-1", "anthropic/claude-opus-4-1"), 0)
         self.assertEqual(run("ollama-gemma3:27b", "gemma3:27b"), 2)  # cùng họ gemma sau khi bỏ tiền tố

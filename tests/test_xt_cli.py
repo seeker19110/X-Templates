@@ -2875,6 +2875,19 @@ class HarnessCheckTest(TmpDirCase):
         )
         rc, out, _ = run_main("harness-check")  # chú thích không phải tool
         self.assertEqual(rc, 0, out)
+        (agents / "executor.md").write_text(
+            "---\nname: x\ntools:  # không Edit/Agent\n  - Read\n---\n", encoding="utf-8"
+        )
+        rc, out, _ = run_main("harness-check")  # chú thích ngay sau `tools:`
+        self.assertEqual(rc, 0, out)
+        (agents / "executor.md").write_text("---\nname: x\ntools:  # chỉ đọc\n---\n", encoding="utf-8")
+        rc, out, _ = run_main("harness-check")  # rỗng sau khi bỏ chú thích = thiếu
+        self.assertEqual(rc, 1)
+        (agents / "executor.md").write_text(ok, encoding="utf-8")
+        (agents / "reviewer.md").write_text(ok.replace("Bash", "NotebookEdit"), encoding="utf-8")
+        rc, out, _ = run_main("harness-check")
+        self.assertEqual(rc, 1)
+        self.assertIn("reviewer.md (", out)
 
     def test_harness_check_missing_or_broken_guard_and_settings(self):
         (self.tmp / ".claude" / "hooks").unlink()
