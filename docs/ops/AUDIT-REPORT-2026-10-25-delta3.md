@@ -50,7 +50,7 @@ ADR-0047/0048). PERF/A11Y/DEP/DATA không bị chạm (giữ kết quả cũ).
 - **AUD-HAR-113** 🟢: `BLUEPRINT.md` (sinh ở #257, khung 3.22.x) chưa ghép lại sau 3.24.0/3.25.0 — thiếu `LOOP-OPT-016`, chữ cũ của
   `LOOP-OPT-002`/`011`, `LOOP-STOP-005`, `LOOP-HARNESS-024`. Đo được: `grep -c LOOP-OPT-016 BLUEPRINT.md` = 0. Sửa: `compose` lại + tái
   kiểm bằng chứng như #257, ở lát riêng.
-- **AUD-HAR-114** 🟢 (có sẵn trước PR): PLAN đợt trước bị đổi tên/xoá trước `loop init` đợt kế → `loop_verdict` = `blocked` ("không
+- **AUD-HAR-114** 🟢 (có sẵn trước #262): PLAN đợt trước bị đổi tên/xoá trước `loop init` đợt kế → `loop_verdict` = `blocked` ("không
   thấy PLAN") → exit 2 "Đang có vòng" dù đợt đã xong, không in lý do; lối ra `loop stop` hoặc `loop init --force`. Sửa: in verdict/lý do trong thông báo exit 2.
 - **AUD-DOC-086** 🟢 (do #262 thêm trigger `push`, không sửa trong PR): `RUNBOOK-PR-STEWARD.md` §4 không nói push `main` chứa ≥ 2 commit đổi `VERSION` (không squash)
   chỉ tag đầu push — đường lùi `workflow_dispatch --sha`; một dòng.
