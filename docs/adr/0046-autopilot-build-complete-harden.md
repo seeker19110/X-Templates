@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-25: "/autopilot là pha build, code nhanh nhất có thể, loại bỏ tất cả
   các rào cản, phiên chính tự quyết định với mục tiêu chất lượng cao; thêm /complete mới audit, review, fix, refactor… hoàn
   thiện dự án"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối — D-174)
-- **Trạng thái triển khai:** Đang triển khai — PLAN `docs/autopilot/PLAN-3.23.0-complete.md`: `scripts/xt.py`
+- **Trạng thái triển khai:** Đã triển khai (PR #259 + PR cắt bản 3.23.0) — PLAN `docs/autopilot/PLAN-3.23.0-complete.md`: `scripts/xt.py`
   (`_verdict_blueprint` theo pha, chuỗi lý do `_with_dispatch`/`_release_phase`, `DOCTOR_SKILLS`), skill mới
   `.claude/skills/complete/SKILL.md`, skill `/autopilot` viết lại cho pha build, `tests/test_docs_budget.py` (`CAPS`),
   `tests/test_xt_core.py`, `tests/test_delivery_phase.py`, `tests/test_install.py`, `tests/test_doctor.py`, tài liệu (README mảng 11, `loop-design.md` bảng verdict, `lifecycle.md`,

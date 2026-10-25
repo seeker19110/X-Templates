@@ -5,6 +5,19 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.23.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (`xt.py` đổi; skill `/complete` mới, skill `/autopilot` đổi — dự án đã sửa `autopilot/SKILL.md` nhận bản mới ở `.xtemplates-new`, gộp tay). Chữ checklist không đổi. ADR-0046 (D-174): `/autopilot` là pha build và dừng ở "build xong"; `/complete` là nhà của pha harden.
+
+### Added
+- Skill `/complete` (pha harden, ≤ 6 144 B, trần trong `test_docs_budget`): PR đặt `delivery_phase: harden` + khai khoá sàn M/L và `attack`/`perf` → `/audit` full/delta, nợ review của pha build chia theo PR/lát cho reviewer năng lực cao hơn → `PLAN-harden-<ngày>.md` (🔴/🟠 có test tái hiện, MUST blueprint còn mở, sàn `xt.py floor`, thiết kế đầy đủ theo quy mô, refactor, hiệu năng theo `optimization-loop.md`, hàng FAIL của `release-check --json`) → vòng lặp luật harden (`milestone_audit: now`, PR ≤ 150 dòng, `dev-task.sh gate` trước push, reviewer theo `pr next`) → `release-check` không NO-GO → `GO-NO-GO.md`. Sau phát hành giữ `harden` (ADR-0037). `DOCTOR_SKILLS` đòi skill này (dự án chưa cài lại: `doctor` báo thiếu).
+- `research/2026-10-25-autopilot-build-complete-harden.md`: 5 góc nhìn + phản biện đối kháng; rào cản máy duy nhất còn lại ở pha build là verdict `done` đòi blueprint 0 MUST mở (web-app M: 473 MUST mở sau `compose`); "loại bỏ rào cản" ≠ bỏ sàn an toàn.
+
+### Changed
+- `xt.py loop status`/Stop hook (ADR-0046): ở pha build (`delivery_phase: build` trong cây làm việc) mọi task xanh → `done` dù blueprint còn MUST mở — verdict mang `open_must` và lý do "trả ở /complete"; miễn trừ sai, dòng sai, drift, `loop verify --all`, MUST đã `loop defer` (→ `done-pending-human`) giữ nguyên; pha harden/vắng khoá không đổi. `release-check` hàng `blueprint` vẫn FAIL tới khi hết MUST — chốt G7 không đổi. Chuỗi lý do `milestone_audit: g7` và hàng `phase` trỏ `/complete`.
+- Skill `/autopilot` viết lại cho pha build: Pha 1 dùng đầu ra mức S cho G0–G4 (đọc repo, `compose` không tick, PLAN có Gate + Given/When/Then ngắn; research/ADR chỉ khi thêm phụ thuộc, dịch vụ, luật ngành; SPEC riêng chỉ cho nghiệp vụ không tầm thường); bước 0 đọc `delivery_phase`, không tự đổi pha; Kết thúc = "build xong" + dòng bắt buộc "Chưa phát hành — gõ `/complete`" (bỏ `release-check`/GO-NO-GO khỏi skill); một dòng "Sàn không bỏ" trỏ `stop-points-and-escalation.md`.
+- Tài liệu (chỉ văn xuôi, không đổi chữ quy phạm ID): README mảng 11 bước 12/16 + bước 17 "Pha 3 — hoàn thiện"; `loop-design.md` bảng verdict (`continue`/`done` theo pha); `lifecycle.md` quy tắc 6 (đầu ra mức S ở pha build, G7 ở `/complete`) + ánh xạ tự động; `audit.md` §1; `00-method/README.md`; mẫu PLAN (Mốc, 4 dòng Khung) và mẫu AGENTS.md §7–8; `orchestration-and-subagents.md` bảng review; `harness-files.md` bảng cổng; AGENTS.md/CLAUDE.md §Skill; README gốc §Chạy tự động (bước 5 `/complete`) và §Quyết định thiết kế (bổ sung ADR-0037…0046); dòng Trạng thái ADR-0031/0033/0037/0041 ghi làm rõ bởi ADR-0046.
+
 ## [3.22.1] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py`, guard đổi); chữ checklist không đổi. Sửa 2 🟠 + 3 🟢 của audit delta `e5ff88c..3ba5828` (D-173, `docs/ops/AUDIT-REPORT-2026-10-25-delta.md`).

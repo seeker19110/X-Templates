@@ -1,7 +1,7 @@
 # ADR-0041: Pha `build` — test tối thiểu, CI là cổng; sàn M/L và thiết kế đầy đủ dời sang `harden`
 
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-22: "pha dev code ít nhất, nhanh nhất, test tối thiểu, CI xanh là được
-  merge; pha production mới audit, tấn công tìm lỗ hổng, tối ưu hiệu năng")
+  merge; pha production mới audit, tấn công tìm lỗ hổng, tối ưu hiệu năng"); phần harden của skill `/autopilot` (mục 2) chuyển sang `/complete` (ADR-0046)
 - **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `gate_floor_keys` (pha build → không áp sàn), `cmd_floor` in lý
   do; skill `.claude/skills/autopilot/SKILL.md` Pha 1 + bước 6; `framework/11-autonomous-loop/README.md` bước 12; test
   `tests/test_xt_core.py::GateFloorCliTest::test_gate_floor_cli_build_phase_not_applied`.

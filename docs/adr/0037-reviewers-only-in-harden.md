@@ -1,7 +1,7 @@
 # ADR-0037: Reviewer chỉ chạy ở pha `harden`; chỉ chuyển sang `harden` khi lên production
 
 - **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-21, D-124); bổ sung ADR-0031 — thay mục "Ranh giới ngoại lệ cứng"
-  về `hard_waived` và mục nhãn `risk:` ở pha build. ADR-0025 (nhãn `risk:` là phanh thủ công) còn hiệu lực ở pha `harden`.
+  về `hard_waived` và mục nhãn `risk:` ở pha build. ADR-0025 (nhãn `risk:` là phanh thủ công) còn hiệu lực ở pha `harden`. Chuyển `harden` là bước 1 của `/complete`, một chiều — skill không tự đổi pha (ADR-0046).
 - **Trạng thái triển khai:** `scripts/xt.py` `review_deferrable`/`review_deferred`; `.claude/skills/autopilot/SKILL.md` bước 6;
   test `tests/test_delivery_phase.py`, ca `pr-phase-build-risk-label`, `pr-phase-build-hard-waived-needs-review`,
   `review-phase-build-hard-waived-asks-review` (PLAN-3.13 T-1815).

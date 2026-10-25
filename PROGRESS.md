@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.22.1, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.23.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
-- 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). Lát 1 sổ (#259) → Lát 2 skill → Lát 3 `xt.py` + test → Lát 4 tài liệu + cắt bản. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
+- 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 (sổ + skill + `xt.py` + tài liệu khung, D-175) → PR cắt bản 3.23.0. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` thêm `delegation_rate`, `first_pass_rate_{delegated,self}` (nhóm theo executor lần chạy đầu); `LOOP-ORCH-020` Kiểm trỏ trường mới. Điểm đo: T-3201 do `executor` (xanh lần đầu), 2 task chữ tự làm. PLAN-3.22-adr0045-rest xong (D-170, `v3.21.0`, #252; `AI-EVAL-021`, `AI-AGENT-024`, `XC-DOCAI-021`, `AI-APP-019`; `LOOP-CTX-010` MAY). Còn: chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173; [báo cáo](docs/ops/AUDIT-REPORT-2026-10-25-delta.md)): 0 🔴, 2 🟠 (SEC-105, HAR-106) + 14 🟢. Sửa 2 🟠 + 3 🟢 ở 3.22.1 (#255, `9041f56`; mới 🟢 SEC-107/HAR-111). BLUEPRINT.md sinh lại + tái kiểm 19 mục (HAR-110): MUST 64 đạt, 0 chưa.
 - 2026-10-24 **PLAN-3.18/3.19** (D-157/D-158; `v3.18.0`–`v3.18.2`, #238–#243, GO-NO-GO chờ ký; `v3.20.0` #250 cũng chờ ký): 7 🟢 phản hồi, `check-links` setext. Trước đó PLAN-3.17 xong (#235–#237, `v3.17.0`).
