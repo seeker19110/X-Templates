@@ -10,11 +10,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 **Dự án đích: chạy lại `install.py`** (chỉ `framework/` đổi) **rồi ghép lại blueprint (`compose`)** để nhận bốn mục SHOULD mới và `LOOP-CTX-010` ngừng dùng. Harness (`xt.py`, hook, agent, skill) không đổi.
 
 ### Added
-- Bốn mục SHOULD trả nợ ADR-0045 (D-170), mỗi mục ở nhà đúng, nguồn bài claude.com *When to fold subagents* (2026-10-22) + kit `single-agent-loop-kit`: `AI-EVAL-021` (eval end-to-end khởi đầu ~10 ca; bộ chung có chủ + bộ theo skill; timestamp replay), `AI-AGENT-024` (gom tool theo ý định; tool search khi vượt cỡ 30–50 định nghĩa; ràng buộc cứng trong tool), `XC-DOCAI-021` (mỗi skill một DRI + eval riêng; đội trung tâm nhỏ duyệt), `AI-APP-019` (tri thức tham chiếu sau tool tra/skill, không dán bằng code).
+- Bốn mục SHOULD trả nợ ADR-0045 (D-170), mỗi mục ở nhà đúng, nguồn bài claude.com *When to fold subagents* (2026-10-22) + kit `single-agent-loop-kit`: `AI-EVAL-021` (eval end-to-end khởi đầu ~10 ca; bộ chung có chủ + bộ theo skill; timestamp replay), `AI-AGENT-024` (gom tool theo ý định; tool search khi vượt cỡ 30–50 định nghĩa; ràng buộc cứng trong tool), `XC-DOCAI-021` (khi nhiều đội/người cùng góp skill cho một agent: mỗi skill một DRI + eval theo `AI-EVAL-021`; đội trung tâm nhỏ duyệt), `AI-APP-019` (trong agent có vòng lặp tool: tri thức tham chiếu sau tool tra/skill, không dán bằng code; tính năng một lời gọi theo Classic RAG).
 
 ### Changed
 - `LOOP-CTX-010` SHOULD → MAY "Ngừng dùng 2026-10-25 — gộp vào `LOOP-ORCH-012`" (cùng chủ đề; ID giữ). `AI-AGENT-006` (MUST@L) **giữ nguyên chữ**: ngưỡng 30–50 của nguồn là "tends to degrade", `AI-AGENT-024` ghi rõ trần chặt hơn của `AI-AGENT-006` còn hiệu lực.
-- Văn xuôi: bảng "Cách xây" của `llm-app-foundations.md` thành từ vựng (tách `orchestrator-workers` khỏi workflow cố định, trỏ `AI-AGENTIC-001`/`011`); README mảng 11 hàng điều phối; `templates/AGENTS.md` §8 thêm "tự làm khi không cần tách (`LOOP-ORCH-020`)" (cắt chữ khác giữ trần 8 192 B); `templates/CLAUDE.md` không cần đổi. Sửa hai chỗ chữ ở `[3.20.1]`. Còn nợ (ADR-0045): `delegation_rate` trong `loop stats` (mã `xt.py`) sau khi có số từ ≥ 2 vòng.
+- Văn xuôi: bảng "Cách xây" của `llm-app-foundations.md` thành từ vựng (tách `orchestrator-workers` khỏi workflow cố định, trỏ `AI-AGENTIC-001`/`011`); README mảng 11 hàng điều phối; `templates/AGENTS.md` §8 thêm `tự làm hàng "Làm trực tiếp" (`LOOP-ORCH-020`)` (cắt chữ khác giữ trần 8 192 B); `templates/CLAUDE.md` không cần đổi. Sửa hai chỗ chữ ở `[3.20.1]`. Còn nợ (ADR-0045): `delegation_rate` trong `loop stats` (mã `xt.py`) sau khi có số từ ≥ 2 vòng.
 
 ## [3.20.1] - 2026-10-25
 
