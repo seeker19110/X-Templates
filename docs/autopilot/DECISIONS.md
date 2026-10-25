@@ -1259,3 +1259,10 @@
 - Chọn: Chạy /audit full; còn 🔴/🟠 → lặp sửa; sạch mới ĐỀ XUẤT /complete, dừng — người quyết lúc phát hành
 - Lý do (tiêu chí chất lượng cuối): Lời chủ repo: 'đến khi audit không còn lỗi mới đề xuất chuyển qua /complete'; (1) đúng: chuyển harden là một chiều (ADR-0037) nên là quyết định của người; (2) đường lùi: skill một dòng
 - Đường lùi: Đổi câu Kết thúc của skill về 'hết việc → /complete'
+
+### D-179 · 2026-10-25T10:49:36+00:00 · Tag phát hành: giữ workflow_dispatch tay hay tự tạo khi VERSION đổi trên main? (chủ repo 2026-10-25: 'Release tag không tự động được à')
+
+- Phương án: (1) Giữ chạy tay (người bấm Actions → Release tag) · (2) Thêm trigger push main với paths VERSION vào release-tag.yml; script giữ nguyên kiểm SemVer, CHANGELOG có mục, tag chưa có; workflow_dispatch vẫn giữ làm đường lùi; thiếu XT_RELEASE_TOKEN thì commit đổi file workflow sẽ không đẩy được tag (AUD-CI-014) → người bấm tay
+- Chọn: Thêm trigger push main với paths VERSION vào release-tag.yml; script giữ nguyên kiểm SemVer, CHANGELOG có mục, tag chưa có; workflow_dispatch vẫn giữ làm đường lùi; thiếu XT_RELEASE_TOKEN thì commit đổi file workflow sẽ không đẩy được tag (AUD-CI-014) → người bấm tay
+- Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ repo; (1) an toàn: VERSION chỉ đổi qua PR đã merge theo làn (CI xanh, review ở harden), script từ chối tag khi CHANGELOG thiếu mục hay tag đã có; chữ ký GO-NO-GO vẫn là người, tách khỏi tag; (2) đường lùi: bỏ trigger push
+- Đường lùi: Xoá khối push trong on: của release-tag.yml
