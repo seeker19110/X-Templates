@@ -16,12 +16,12 @@
 | 🟠 | 0 | 13 | 0 | 0 |
 | 🟢 | 3 | 29 | 0 | 0 |
 
-Số đếm lấy từ báo cáo review (sổ `reviews.json` chỉ lưu head/verdict). Bốn ghi chú review không sửa: hai **có sẵn
-trước PR** thành hàng 🟢 mở (AUD-HAR-114 ← #262 lượt 2 🟢9; AUD-DOC-086 ← 🟢10); hai **không tính là phát hiện** (#262 lượt 4 F-3:
+Số đếm lấy từ báo cáo review (sổ `reviews.json` chỉ lưu head/verdict). Bốn ghi chú review không sửa: hai thành hàng 🟢 mở —
+một **có sẵn trước #262** (AUD-HAR-114 ← #262 lượt 2 🟢9), một là 🟢 tài liệu của #262 không sửa trong PR (AUD-DOC-086 ← 🟢10); hai **không tính là phát hiện** (#262 lượt 4 F-3:
 `budget` không đòi kiểm cuối là thiết kế — skill coi `budget` = dừng, không khai xong; #263 lượt 4 🟢3: nghi ngờ, không có quy ước). Mọi 🔴/🟠 phát hiện trong review được sửa **trước khi merge** (không vào sổ dạng mở): #262 — 🔴 lượt 1 (`_live_loop` coi vòng `done`
 là vòng sống), 4 🟠 lượt 2 (verify cuối, ID chờ người dùng lại, chữ `LOOP-STOP-005`/`LOOP-HARNESS-024`), 1 🟠 lượt 3 (thứ tự PLAN
 đợt kế → `verify --all` → `init`), 1 🟠 lượt 4 (test nhánh `budget` không chạm `final_check`); #263 — 🔴 lượt 1 (trần 4 MUST@M,
-ADR-0004 → D-181), 2 🟠 lượt 1, 3 🟠 lượt 2, 2 🟠 lượt 3. Một 🟢 mới còn mở: AUD-HAR-113 (BLUEPRINT.md chưa ghép lại sau 3.25.0).
+ADR-0004 → D-181), 2 🟠 lượt 1, 3 🟠 lượt 2, 2 🟠 lượt 3. Ba 🟢 còn mở: AUD-HAR-113 (từ quét — BLUEPRINT.md chưa ghép lại sau 3.25.0), AUD-HAR-114, AUD-DOC-086 (từ review #262).
 
 ## 2. Phạm vi và tín hiệu
 
@@ -51,8 +51,8 @@ ADR-0047/0048). PERF/A11Y/DEP/DATA không bị chạm (giữ kết quả cũ).
   `LOOP-OPT-002`/`011`, `LOOP-STOP-005`, `LOOP-HARNESS-024`. Đo được: `grep -c LOOP-OPT-016 BLUEPRINT.md` = 0. Sửa: `compose` lại + tái
   kiểm bằng chứng như #257, ở lát riêng.
 - **AUD-HAR-114** 🟢 (có sẵn trước PR): PLAN đợt trước bị đổi tên/xoá trước `loop init` đợt kế → `loop_verdict` = `blocked` ("không
-  thấy PLAN") → exit 2 "Đang có vòng" dù đợt đã xong; lối ra là `loop stop`. Sửa: in verdict/lý do trong thông báo exit 2.
-- **AUD-DOC-086** 🟢 (có sẵn trước PR): `RUNBOOK-PR-STEWARD.md` §4 không nói push `main` chứa ≥ 2 commit đổi `VERSION` (không squash)
+  thấy PLAN") → exit 2 "Đang có vòng" dù đợt đã xong, không in lý do; lối ra `loop stop` hoặc `loop init --force`. Sửa: in verdict/lý do trong thông báo exit 2.
+- **AUD-DOC-086** 🟢 (do #262 thêm trigger `push`, không sửa trong PR): `RUNBOOK-PR-STEWARD.md` §4 không nói push `main` chứa ≥ 2 commit đổi `VERSION` (không squash)
   chỉ tag đầu push — đường lùi `workflow_dispatch --sha`; một dòng.
 
 ## 5. Ghi nhận về quy trình
