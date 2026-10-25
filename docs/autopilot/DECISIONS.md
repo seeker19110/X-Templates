@@ -1294,3 +1294,10 @@
 - Chọn: Gộp cả 4 lát + bản sửa review vào #263 (mã ngoài .md 18 dòng), review lượt 2 rà cả PR ở head
 - Lý do (tiêu chí chất lượng cuối): ADR đổi kéo theo skill/mẫu/CHANGELOG đổi — tách ra chỉ tạo hai PR cùng chữ; reviewer rà cả PR ở head nên an toàn như nhau; thay D-182.
 - Đường lùi: Tách bằng worktree + cherry-pick
+
+### D-184 · 2026-10-25T15:13:14+00:00 · Khi có tool Workflow (Claude Code), skill /audit, /complete, /research có tự dùng Workflow không, và bật ultracode thế nào?
+
+- Phương án: (1) Giữ nguyên: chỉ subagent 2–4 cụm; Workflow chỉ khi người gõ ultracode · (2) Skill /audit §3–4, /complete bước 2 (nợ review), /research (≥ 3 mục) ghi nhánh: có tool Workflow thì dùng — agent chỉ đọc theo agentType researcher/reviewer/Explore, lô ≤ 5 đồng thời, phiên chính gộp/quyết/sửa; không có thì subagent như cũ; không bật ultracode trong settings · (3) Đặt "ultracode": true trong .claude/settings.json cho mọi phiên
+- Chọn: Skill /audit §3–4, /complete bước 2 (nợ review), /research (≥ 3 mục) ghi nhánh: có tool Workflow thì dùng — agent chỉ đọc theo agentType researcher/reviewer/Explore, lô ≤ 5 đồng thời, phiên chính gộp/quyết/sửa; không có thì subagent như cũ; không bật ultracode trong settings
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: agent chỉ đọc theo agentType giữ LOOP-ORCH-001/003/005 (frontmatter model/tools), lô ≤ 5 giữ LOOP-ORCH-008, phiên chính vẫn gộp/quyết/sửa; skill do người gọi có chỉ dẫn gọi Workflow là opt-in nên không cần bật tay. Tiêu chí 3: nhánh dự phòng giữ nguyên hành vi cũ khi không có tool (-p không có rule Workflow, Pro chưa bật). PA3 biến mọi task (cả pha build cơ học) thành workflow — trái ADR-0033/D-142, tốn token. PA1 bỏ phí xác minh đối kháng song song ở nơi tài liệu chính thức khuyên dùng (codebase sweep, cross-checked research).
+- Đường lùi: Xoá đoạn Workflow ở 3 skill; skill quay về chỉ subagent

@@ -31,6 +31,7 @@ Chạy `<XT> audit plan` (thêm `--json` khi cần xử lý máy). Từ output:
 - Mỗi cụm giao một subagent **read-only** (`reviewer` cho mã/bảo mật, `Explore` cho tài liệu), prompt gồm: nhóm, nhà yêu cầu ở bảng §3 của `audit.md`, lệnh/công cụ có sẵn, thư mục scratch để tái hiện, yêu cầu **mỗi phát hiện có file:dòng hoặc lệnh + output**, phân biệt đo được/suy luận/chưa biết, không sửa file.
 - Phiên chính vẫn tự chạy cổng chuẩn (`xt.yaml`/`dev-task.sh gate`), coverage, gitleaks toàn lịch sử (nếu cài được), và đo những gì subagent không làm.
 - Subagent không lồng subagent. Gộp kết quả, bỏ trùng, đánh ID `AUD-<MÃ>-NNN` (không tái sử dụng số cũ trong sổ).
+- **Có tool Workflow** (Claude Code; skill này chỉ dẫn gọi nó nên người gọi `/audit` là đã cho phép — không cần bật `ultracode`, ADR-0049): chạy §3–4 thành **một** workflow thay cho subagent tay — mỗi cụm một `agent()` với `agentType` chỉ đọc (`reviewer`/`Explore`, frontmatter giữ `model`/`tools`/`maxTurns`), `schema` phát hiện (mức, file:dòng hoặc lệnh, đo được/suy luận/chưa biết), mỗi 🔴/🟠 một `agent()` xác minh `agentType: 'reviewer'` nhận phát hiện + file, **không** nhận lý luận của người tìm; chạy theo lô ≤ 5 agent đồng thời (`LOOP-ORCH-008`). Workflow chỉ trả dữ liệu: phiên chính gộp, đánh ID, ghi sổ (§5), duyệt (§6), sửa (§7). Không có tool, bị từ chối hoặc lỗi → subagent như trên.
 
 ## 4. Xác minh đối kháng (bắt buộc với 🔴/🟠)
 Gửi danh sách 🔴/🟠 cho một `reviewer` **khác** subagent đã tìm ra (model khác nếu được) để tái hiện độc lập.

@@ -5,6 +5,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.26.0] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (skill `/audit`, `/complete`, `/research` đổi; chữ checklist không đổi). ADR-0049 (D-184).
+
+### Changed
+- Skill `/audit` §3, `/complete` bước 2 (nợ review), `/research` bước 3 (≥ 3 mục): có tool Workflow của Claude Code thì chạy
+  fan-out thành một workflow — agent chỉ đọc qua `agentType` (`reviewer`/`Explore`/`researcher`), lô ≤ 5 đồng thời
+  (`LOOP-ORCH-008`), người xác minh 🔴/🟠 không nhận lý luận của người tìm, phiên chính gộp/ghi sổ/quyết/sửa; không có tool
+  thì subagent như cũ. Skill do người gọi là opt-in — không cần bật `ultracode`; không đặt `ultracode` trong settings.
+- `research/2026-10-21-next-level-speed-automation-quality.md`: đính chính — chỉ **từ khoá** `ultracode` không kích hoạt qua
+  `-p`/lịch/webhook; tool Workflow chạy được ở `-p`/SDK khi có rule allow `Workflow` hoặc chế độ auto/bypass.
+
 ## [3.25.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py` rồi ghép lại blueprint (`compose`)** (skill `/optimize` mới, `doctor` đòi; skill `/complete` đổi; mẫu GO-NO-GO và AGENTS đổi; `LOOP-OPT-016` mới, 004/005 đổi mức). ADR-0048 (D-180/D-181): dòng chảy build → complete → optimize → ký → production → số thật → optimize → ký.
