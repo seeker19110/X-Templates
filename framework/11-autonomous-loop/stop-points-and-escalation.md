@@ -3,7 +3,7 @@ title: Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
 kind: module
 prefix: LOOP-STOP
 applies_to: [all]
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
@@ -119,7 +119,7 @@ Subagent **không tự nâng tier**; `external_side_effects` là enum trong task
 **Đường lùi tự động:** 2 tuần liên tiếp lỗi lọt xấu hơn baseline, hoặc 1 vi phạm phân tách đặc quyền ⇒ hạ một mức.
 
 Cột "Điều kiện lên mức" là lộ trình đo được; `merge_autonomy` trong `xt.yaml` là lựa chọn của chủ dự án — mẫu dự án đích
-mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở mọi mức, ngoại lệ cứng dưới đây vẫn người merge (ADR-0016) — trừ khi nhánh đích đã commit `merge_hard_exceptions: auto` (ADR-0020; repo khung `auto`, mẫu dự án đích `human`).
+mặc định L3 (ADR-0015) và bỏ qua bậc thang theo lựa chọn đó. Ở mọi mức, ngoại lệ cứng dưới đây vẫn người merge (ADR-0016) — trừ khi nhánh đích đã commit `merge_hard_exceptions: auto` (ADR-0020; repo khung `auto`; mẫu dự án đích `auto` từ 3.24.0 — D-176, dự án đã cài giữ giá trị cũ).
 
 ### Vị từ "làn nhanh" (được tự merge ở L2) — đủ cả 5, thiếu một là làn chuẩn
 

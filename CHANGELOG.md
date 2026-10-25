@@ -5,6 +5,14 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.24.0] - 2026-10-25
+
+**Dự án đích mới**: mẫu `xt.yaml` đặt `merge_hard_exceptions: auto` (chủ repo 2026-10-25: pha build không chờ người; D-176, ADR-0020). Dự án **đã cài giữ giá trị cũ** (`xt.yaml` copy-if-absent) — muốn máy merge PR chạm auth/tiền/PII khi CI xanh thì mở PR đặt `auto` (PR đổi khoá luôn người merge). Thiếu khoá vẫn = `human`; guard, `UNWAIVABLE`, review sạch ở head ở pha harden (ADR-0037) không đổi.
+
+### Changed
+- `framework/templates/xt.yaml`: `merge_hard_exceptions: auto` (trước: `human`); chú thích ghi cả hai giá trị. README gốc, `stop-points-and-escalation.md` §Mức tự chủ, dòng Trạng thái ADR-0020/ADR-0046 ghi mặc định mới.
+- README gốc §Quyết định thiết kế: mô tả ADR-0039 (`gate` ∥ `e2e` → `quality`) và ADR-0041 (cổng commit vẫn chạy ở build) chính xác hơn — AUD-DOC-084/085; PROGRESS.md cắt dòng cũ (AUD-HAR-112).
+
 ## [3.23.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi; skill `/complete` mới, skill `/autopilot` đổi — dự án đã sửa `autopilot/SKILL.md` nhận bản mới ở `.xtemplates-new`, gộp tay). Chữ checklist không đổi. ADR-0046 (D-174): `/autopilot` là pha build và dừng ở "build xong"; `/complete` là nhà của pha harden.
