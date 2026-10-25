@@ -70,6 +70,18 @@
    ]
   },
   {
+   "reason": "Luật năng lực reviewer đọc ở cờ `pr reviewed --reviewer-model/--author-model` và `xt.yaml` (`_review_models_error`, `review_family_config_error`) — corpus review chưa có kiểu ca nhận tên model; đỡ bằng `tests.test_merge -k clean_review_judges_name_tail`",
+   "ids": [
+    "AUD-SEC-105"
+   ]
+  },
+  {
+   "reason": "`harness-check` đọc frontmatter `tools:` của file agent thật — corpus harness chưa có kiểu ca nhận file agent; đỡ bằng `tests.test_xt_cli -k harness_check_reviewer_read_only`",
+   "ids": [
+    "AUD-HAR-106"
+   ]
+  },
+  {
    "reason": "App cục bộ (`xt.py app`, ADR-0038) — ghi file qua HTTP của chính tiến trình app, không phải quyết định cho/chặn của PR, rollup, review hay guard; đỡ bằng `tests.test_app_compose -k overwrite`",
    "ids": [
     "AUD-SEC-103"

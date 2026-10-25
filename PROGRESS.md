@@ -4,9 +4,9 @@
 
 ## Đang làm
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` thêm `delegation_rate`, `first_pass_rate_{delegated,self}` (nhóm theo executor lần chạy đầu); `LOOP-ORCH-020` Kiểm trỏ trường mới. Điểm đo: T-3201 do `executor` (xanh lần đầu), 2 task chữ tự làm. PLAN-3.22-adr0045-rest xong (D-170, `v3.21.0`, #252; `AI-EVAL-021`, `AI-AGENT-024`, `XC-DOCAI-021`, `AI-APP-019`; `LOOP-CTX-010` MAY). Còn: chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
-- 2026-10-25 **PLAN-3.20.1** (D-169, `v3.20.1`, #251): skill `/autopilot` bước 5 trỏ "Làm trực tiếp"; thang cũ trỏ `AI-AGENTIC-001`.
+- 2026-10-25 **PLAN-3.20.1** (D-169, `v3.20.1`, #251): skill `/autopilot` trỏ "Làm trực tiếp".
 - 2026-10-24 **PLAN-3.21-single-loop** (D-168, ADR-0045, `v3.20.0`, #250, GO-NO-GO chờ ký): bài claude.com *When to fold subagents* + kit → `AI-AGENTIC-001`/`011` đổi, `019`; `LOOP-ORCH-017` SHOULD, `020`. Điểm đo đầu: 4 task tự làm, xanh lần đầu 4/4.
-- 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173; [báo cáo](docs/ops/AUDIT-REPORT-2026-10-25-delta.md)): 0 🔴, 2 🟠 mở (AUD-SEC-105 lách `LOOP-ORCH-005` bằng `ollama:`; AUD-HAR-106 `harness-check` không kiểm reviewer chỉ đọc), 14 🟢. Kế tiếp: PR sửa 3.22.1, rồi sinh lại BLUEPRINT.md (HAR-110).
+- 2026-10-25 **Audit delta e5ff88c..3ba5828** (D-173; [báo cáo](docs/ops/AUDIT-REPORT-2026-10-25-delta.md)): 0 🔴, 2 🟠 mở (AUD-SEC-105 lách `LOOP-ORCH-005` bằng `ollama:`; AUD-HAR-106 `harness-check` không kiểm reviewer chỉ đọc), 14 🟢. Đã sửa 2 🟠 + 3 🟢 ở 3.22.1 (#255, `9041f56`; review 3 vòng, mới 🟢 SEC-107/HAR-111). Kế tiếp: sinh lại BLUEPRINT.md (HAR-110).
 - 2026-10-24 **PLAN-3.18/3.19** (D-157/D-158; `v3.18.0`–`v3.18.2`, #238–#243, GO-NO-GO chờ ký): 7 🟢 phản hồi, `check-links` setext. Trước đó PLAN-3.17 xong (#235–#237, `v3.17.0`).
 - 2026-10-23 **PLAN-3.16.0-ceiling xong** (D-142…D-148, ADR-0043; #231, #232, `v3.16.0`): chi tiết ở CHANGELOG. Đo lại 2026-10-30 bằng `pr stats --days 7`. Phản hồi dự án đích: 10 nhóm `cong-cu` đủ ngưỡng chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
