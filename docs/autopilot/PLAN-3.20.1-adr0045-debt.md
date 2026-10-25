@@ -27,4 +27,4 @@
 
 ### Lát 1 — Skill và thang cũ
 - [x] `T-3001` Skill `/autopilot` bước 5 trỏ hàng "Làm trực tiếp" trong trần byte; `llm-app-foundations.md` Nguyên tắc 4, `02-profiles/ai-agent.md`, `02-profiles/agentic-system.md` đổi chữ trỏ `AI-AGENTIC-001`/`011` (files: .claude/skills/autopilot/SKILL.md, framework/13-ai-engineering/llm-app-foundations.md, framework/02-profiles/ai-agent.md, framework/02-profiles/agentic-system.md) — Gate: `python3 -m unittest tests.test_docs_budget && python3 scripts/xt.py validate && python3 scripts/check-links.py && grep -q "LOOP-ORCH-020" .claude/skills/autopilot/SKILL.md && grep -q "AI-AGENTIC-001" framework/13-ai-engineering/llm-app-foundations.md`
-- [ ] `T-3002` CHANGELOG `[3.20.1]`, VERSION 3.20.1, PROGRESS.md ≤ 8 KB (sau: T-3001; files: CHANGELOG.md, VERSION, PROGRESS.md) — Gate: `scripts/dev-task.sh lint`
+- [x] `T-3002` CHANGELOG `[3.20.1]`, VERSION 3.20.1, PROGRESS.md ≤ 8 KB (sau: T-3001; files: CHANGELOG.md, VERSION, PROGRESS.md) — Gate: `scripts/dev-task.sh lint`
