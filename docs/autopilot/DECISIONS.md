@@ -1231,3 +1231,10 @@
 - Chọn: Hai skill; _verdict_blueprint rẽ theo pha (build + MUST mở → done kèm open_must, trả ở /complete), giữ --blueprint, scope drift, verify --all, bad_waivers; Pha 1 mức S ở build (nhà lifecycle quy tắc 6); /complete nối /audit + PLAN-harden + vòng lặp luật harden + release-check; sàn an toàn (guard, điểm dừng, Gate máy, CI xanh, verify --all, release-check FAIL phase) không đổi; không ID/lệnh mới; bản 3.23.0; 4 lát 4 PR, phiên chính tự làm (nhóm Làm trực tiếp)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: rào cản máy duy nhất còn lại ở build là done đòi 0 MUST (web-app M 473 MUST mở sau compose) — đây là tiêu chí G7 đặt nhầm ở cuối G6; mọi chốt phát hành nằm trong release_check, không phụ thuộc verdict, nên dời thời điểm đòi MUST không hạ sàn; sàn an toàn giữ nguyên (loại bỏ rào cản = quy trình, không phải guard/điểm dừng); PA1 không gỡ rào cản máy; PA2 mất scope/drift/Kiểm blueprint/defer theo MUST; PA4 trái ADR-0037 một chiều — dự án có người dùng thật không merge không review theo mặc định. (2) đường lùi: revert PR mã, đặt harden. (3) một hàm rẽ pha có test, không lệnh/ID mới, skill chỉ nối lệnh có sẵn (một nhà). (4) điểm dừng tự nhiên giữa hai pha. (5) tăng tốc chưa đo — ghi ước lượng, đo theo LOOP-ORCH-020
 - Đường lùi: Revert PR mã (verdict về như cũ) và PR skill; ADR-0046 đổi Bị thay bởi ADR-NNNN; dự án đích đặt delivery_phase: harden
+
+### D-175 · 2026-10-25T09:27:10+00:00 · Lát 1 (#259) bị review đòi sửa sổ khi lát 2–3 đã commit trên nhánh bị ràng buộc một tên: tách PR thế nào?
+
+- Phương án: (1) Worktree tách: sửa sổ ở head cũ, push riêng, rồi rebase lát 2–3 lên (rewrite history cục bộ) · (2) Gộp lát 1–3 vào #259 (sổ + skill + verdict xt.py), lát 4 PR riêng; ghi D-175
+- Chọn: Gộp lát 1–3 vào #259 (sổ + skill + verdict xt.py), lát 4 PR riêng; ghi D-175
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: diff mã ≤ 150 dòng vẫn trong trần harden, ba lát cùng một quyết định nên review một lần đọc được toàn cảnh; rebase/force bị guard chặn và không có đường lùi sạch. (2) đường lùi: revert một PR. (5) ít vòng CI/review hơn
+- Đường lùi: Mở lại hai PR riêng từ nhánh phụ nếu reviewer đòi tách

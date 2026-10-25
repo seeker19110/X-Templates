@@ -52,7 +52,7 @@ tổng hợp từ kết quả thô; số đo do ≥ 2 agent tái lập hoặc ph
 | Pha đọc ở đâu | Verdict/sàn: cây làm việc (`_phase_in_tree`); guard và merge: cả nhánh đích đã commit | `scripts/xt.py:1765`, `5262`; `.claude/hooks/guard.py:1649–1660` |
 | Trần byte sát | `AGENTS.md` 7 162/7 168 · `framework/templates/AGENTS.md` 8 188/8 192 · skill `/autopilot` 6 121/6 144 · README mảng 11 11 959/12 288 · thư mục 11 230 173/232 307 | `wc -c`, `tests/test_docs_budget.py` |
 | Máy cài skill | `install.py` chép mọi thư mục `.claude/skills/*` (copy-if-absent); `DOCTOR_SKILLS` liệt kê 8 tên | `scripts/install.py:55`, `scripts/xt.py:3818` |
-| Chi phí khối "hoàn thiện" ở repo khung | 14 báo cáo audit trong 9 ngày (2026-10-14…22), mỗi báo cáo một PR; `release-check` chạy mọi `— Kiểm:` đã tick (868 lệnh ở repo khung) | `docs/ops/AUDIT-REPORT-*`, `grep -c "Kiểm:" BLUEPRINT.md` |
+| Chi phí khối "hoàn thiện" ở repo khung | 13 báo cáo audit trong 9 ngày (2026-10-14…22), mỗi báo cáo một PR; `release-check` chạy mọi `— Kiểm:` đã tick (868 lệnh ở repo khung) | `docs/ops/AUDIT-REPORT-*`, `grep -c "Kiểm:" BLUEPRINT.md` |
 
 ## 4. Rào cản còn lại ở pha build — từng cái và cách xử lý
 
@@ -86,7 +86,7 @@ tài liệu — nhưng cả hai là bằng chứng máy (P1), giữ có chủ đ
   `_verdict_blueprint`; hàng `blueprint` gọi `blueprint_status` trực tiếp (8217–8242).
 - Không đổi nghĩa ID checklist nào; không lệnh `xt.py` mới; skill mới được `install.py` chép tự động; đường lùi là revert
   (verdict về như cũ) hoặc đặt `harden`.
-- Khớp nghiên cứu đã có: "nhanh nghĩa là không audit toàn repo mỗi lát, không phải bỏ cổng lát" (2026-10-19 §2);
+- Khớp nghiên cứu đã có: pha nhanh là không audit toàn repo mỗi PR, không phải bỏ cổng lát (2026-10-19 §1, §7);
   DORA *Working in small batches*: lô nhỏ "reduces the time it takes to get feedback on changes" (xác minh 2026-10-25).
 
 ## 6. Hại và cách đỡ
@@ -119,7 +119,7 @@ tài liệu — nhưng cả hai là bằng chứng máy (P1), giữ có chủ đ
 
 - **`/autopilot`** (pha build; ở `harden` chạy luật harden): Bước 0 giữ, đọc pha; Pha 1 = đầu ra mức S cho G0–G4 (đọc repo →
   `compose` không tick → PLAN có Gate + Given/When/Then ngắn; research/ADR chỉ khi thêm phụ thuộc); Pha 2 giữ nguyên số bước;
-  Kết thúc = `done` của máy (task xanh + `verify --all` + PR merge) + báo cáo ghi số MUST mở, nợ review và dòng "chưa phát hành
+  Kết thúc = `done` của máy (task xanh + `verify --all`; PR merge theo `pr next`, máy không kiểm) + báo cáo ghi số MUST mở, nợ review và dòng "chưa phát hành
   — gõ `/complete`". Bỏ "Trước G7 ở pha build…", `release-check`, GO-NO-GO khỏi skill.
 - **`/complete`** (pha harden): (0) tên phiên, `doctor --fix`, đọc pha — khuyến nghị phiên mới sau `/handover` (context sạch cho
   audit đối kháng); (1) chưa `harden` → PR đặt `delivery_phase: harden` + khai khoá sàn M/L và `attack`/`perf` → merge (review

@@ -6,7 +6,7 @@
 - **Trạng thái triển khai:** Đang triển khai — PLAN `docs/autopilot/PLAN-3.23.0-complete.md`: `scripts/xt.py`
   (`_verdict_blueprint` theo pha, chuỗi lý do `_with_dispatch`/`_release_phase`, `DOCTOR_SKILLS`), skill mới
   `.claude/skills/complete/SKILL.md`, skill `/autopilot` viết lại cho pha build, `tests/test_docs_budget.py` (`CAPS`),
-  `tests/test_xt_core.py`, `tests/test_delivery_phase.py`, `tests/test_install.py`, tài liệu (README mảng 11, `lifecycle.md`,
+  `tests/test_xt_core.py`, `tests/test_delivery_phase.py`, `tests/test_install.py`, `tests/test_doctor.py`, tài liệu (README mảng 11, `loop-design.md` bảng verdict, `lifecycle.md`,
   `audit.md`, mẫu PLAN/AGENTS, AGENTS.md, CLAUDE.md, README gốc), bản 3.23.0.
 - **Ngày:** 2026-10-25
 - **Làm rõ:** ADR-0031 (mục Hệ quả "Trước G7: đặt `harden` → audit delta → `release-check`" nay là nội dung của `/complete`),
@@ -32,7 +32,7 @@ cổng đầy đủ trước push và trần 150 dòng (ADR-0041), nới guard c
 - Chuỗi G0–G4 đầy đủ (PROJECT.md, researcher + ADR stack, SPEC-*.md, thiết kế) do skill đòi ở mọi quy mô; máy chỉ đọc
   PLAN + `xt.yaml` + bằng chứng.
 - Ràng buộc: trần byte ADR-0043 (`AGENTS.md` dư 6 B, `framework/templates/AGENTS.md` dư 4 B, skill `/autopilot` dư 23 B,
-  README mảng 11 dư 329 B); hai module 11 đã đủ 4 MUST; không tên model trong artefact; repo khung luôn `harden` (D-136).
+  README mảng 11 dư 329 B — tại `c054540`; sau khi `main` lên 3.22.1 còn dư 2 B và 288 B); hai module 11 đã đủ 4 MUST; không tên model trong artefact; repo khung luôn `harden` (D-136).
 
 ## Phương án đã xét
 
@@ -49,7 +49,7 @@ cổng đầy đủ trước push và trần 150 dòng (ADR-0041), nới guard c
 ## Quyết định
 
 1. **`/autopilot` là checklist pha build và dừng ở "build xong".** `done` của máy = mọi task có bằng chứng xanh + `loop verify
-   --all` khớp cây + PR của lát đã merge khi CI xanh. Mục Kết thúc không còn `release-check`/`GO-NO-GO`; báo cáo cuối ghi số
+   --all` khớp cây (máy không kiểm PR; PR của lát merge theo `pr next`/`merge-watch` ở bước 6 của skill). Mục Kết thúc không còn `release-check`/`GO-NO-GO`; báo cáo cuối ghi số
    MUST blueprint mở, nợ review và dòng bắt buộc "chưa phát hành — gõ `/complete`". Skill **tôn trọng pha trong `xt.yaml`**:
    ở `harden` (repo khung, dự án đã phát hành) chạy luật harden của README mảng 11 — một dòng, không rẽ nhánh dài.
 2. **Pha build dùng đầu ra mức S cho G0–G4** (nhà: `lifecycle.md` quy tắc 6): đọc repo → `compose` (không tick) → PLAN có Gate

@@ -28,4 +28,4 @@ Mọi điểm quyết định (spec hở, công nghệ, thiết kế, phạm vi,
 
 ## Kết thúc — "build xong", chưa phát hành
 - Stop hook quyết: `continue`/`verify` → làm theo lý do nó in; `done`/`done-pending-human`/`blocked`/`budget` → dừng.
-- `done` = mọi task có bằng chứng xanh + `verify --all` khớp cây + PR của lát đã merge → `<XT> loop stats`, `<XT> feedback collect` → báo cáo ≤ 20 dòng: đã làm · bằng chứng · D-NNN · nợ (số MUST mở, review hoãn) · còn treo (việc chờ người) · dòng bắt buộc **"Chưa phát hành — gõ `/complete`"** (nên phiên mới sau `/handover`). `blocked`/`budget`: lý do + bước kế, không khai "xong".
+- `done` = mọi task có bằng chứng xanh + `verify --all` khớp cây; PR merge: bước 6 → `<XT> loop stats`, `<XT> feedback collect` → báo cáo ≤ 20 dòng: đã làm · bằng chứng · D-NNN · nợ (số MUST mở, review hoãn) · còn treo (việc chờ người) · dòng bắt buộc **"Chưa phát hành — gõ `/complete`"** (nên phiên mới sau `/handover`). `blocked`/`budget`: lý do + bước kế, không khai "xong".

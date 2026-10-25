@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -212,7 +212,7 @@ Nguồn: catalog `seeker19110/stored` 10 §4b (agentmemory), §4c (engram), 03 �
 
 | Công cụ | Lệnh | Đặt ở | Ngưỡng |
 |---|---|---|---|
-| Audit khung | `xt.py doctor --fix` | Đầu mỗi `/autopilot`; `loop init` chạy phần nhanh | 0 lỗi ✗; cảnh báo `gate-floor` thành task PLAN (`LOOP-HARNESS-023`) |
+| Audit khung | `xt.py doctor --fix` | Đầu mỗi `/autopilot`, `/complete`; `loop init` chạy phần nhanh | 0 lỗi ✗; cảnh báo `gate-floor` thành task PLAN (`LOOP-HARNESS-023`) |
 | Parser PLAN | `xt.py loop status --json` | SessionStart, CI | Không `blocked` vì PLAN |
 | Định dạng PROGRESS | `xt.py progress-check` (≤ 8192 byte, 4 mục) | pre-commit, CI | exit 0 |
 | Tươi SHA | `xt.py progress-check` (bên trong: `git merge-base --is-ancestor <SHA> HEAD` và nhánh chính cho mọi SHA ở Bàn giao) | thêm vào `lint` trong `xt.yaml` + CI | exit 0 |
