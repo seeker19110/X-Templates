@@ -49,8 +49,8 @@ updated: 2026-10-25
 | 17 | SHOULD | Tài liệu khớp code (README, PROJECT, ADR không lỗi thời) | | | review <ngày> | |
 | 18 | BLOCKER | Mọi đề xuất "Khi chạy thật" (dịch vụ thay phần tự host) đã được chủ dự án quyết: chuyển (khoá/tài khoản đã cấu hình qua secret store) hoặc giữ tự host (có người vận hành, backup) | | | `rg -n "Khi chạy thật" docs/autopilot/DECISIONS.md` → từng D-NNN có quyết định ghi ở mục 4 | |
 | 19 | NICE | Tối ưu mã nguồn: dead code/dependency thừa đã rà | | | knip/depcheck output | |
-| 21 | BLOCKER (M/L) · SHOULD (S) | **Người** đã dùng thử luồng chính trên bản ứng viên và đọc SPEC (ca biên) + `THREAT-MODEL.md` — xác nhận spec, UX, bảo mật một lần tại đây, không ở giữa `/complete` (ADR-0048); máy không điền được | — | real-path | <bản/URL đã thử, ngày> | <tên · ngày — bắt buộc> |
-| 20 | <mức> | <mục đặc thù hồ sơ/ngành> | | | | |
+| 20 | BLOCKER (M/L) · SHOULD (S) | **Người** đã dùng thử luồng chính trên bản ứng viên và đọc SPEC (ca biên) + `THREAT-MODEL.md` — xác nhận spec, UX, bảo mật một lần tại đây, không ở giữa `/complete` (ADR-0048); máy không điền được | — | real-path | <bản/URL đã thử, ngày> | <tên · ngày — bắt buộc> |
+| 21 | <mức> | <mục đặc thù hồ sơ/ngành> | | | | |
 
 ## 2b. Bằng chứng chưa chứng minh (bắt buộc ghi, kể cả khi GO)
 Những gì cổng xanh **không** chứng minh — để người ký biết mình đang chấp nhận gì:
@@ -59,7 +59,7 @@ Những gì cổng xanh **không** chứng minh — để người ký biết m�
 | <vd: thanh toán qua cổng thật> | <chỉ chạy adapter giả + contract test (`faithful-fixture`)> | <trước khi bật cho khách thật — chủ dự án> |
 
 ## 2c. Chế độ delta (bản chỉ tối ưu — ADR-0048)
-Bản phát hành **chỉ tối ưu**: chỉ task của `/optimize`, diff không chạm manifest/lockfile/hạ tầng (`git diff --stat`), không đổi hành vi, `docs/autopilot/PERF-LOG.md` có dòng giữ, bộ test tương đương xanh. Giữ dòng 1, 2, 4, 5, 12, 21, §2b (lab đo — field chưa) và mục 1; thay phần còn lại bằng bảng trước/sau từ `PERF-LOG.md` (chỉ số · nguồn `perf`/`floor`/`FIELD-<ngày>` · trước · sau · `perf compare`); dòng khác ghi "không đổi so với GO/NO-GO <ngày>". `release-check` vẫn chạy đủ; người vẫn ký mục 5. Chạm manifest/lockfile hoặc đổi hành vi → bảng đầy đủ.
+Bản phát hành **chỉ tối ưu**: chỉ task của `/optimize`, diff không chạm manifest/lockfile/migration/schema/hạ tầng (`git diff --stat`), không đổi hành vi, `docs/autopilot/PERF-LOG.md` có dòng giữ, bộ test tương đương xanh. Giữ dòng 1, 2, 4, 5, 12, 20, §2b (lab đo — field chưa) và mục 1; thay phần còn lại bằng bảng trước/sau từ `PERF-LOG.md` (chỉ số · nguồn `perf`/`floor`/`FIELD-<ngày>` · trước · sau · `perf compare`); dòng khác ghi "không đổi so với GO/NO-GO <ngày>". `release-check` vẫn chạy đủ; người vẫn ký mục 5. Chạm manifest/lockfile/migration/schema hoặc đổi hành vi → bảng đầy đủ.
 
 ## 3. Bảng FAIL
 | # | Mức | Mục | Bằng chứng | Cách sửa đề xuất | Ticket / chủ / hạn (chỉ SHOULD) |

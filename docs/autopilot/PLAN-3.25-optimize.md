@@ -18,7 +18,7 @@
   AGENTS sát trần — đo `wc -c` trước commit); `validate` đòi `updated` và prefix; C901/mypy/coverage khi đổi `DOCTOR_SKILLS`
   (test doctor/install). Đường lùi: ADR-0048 §Đường lùi, revert từng PR.
 - Repo khung ở pha harden: mỗi lát một PR ≤ 150 dòng (không tính `.md`), `dev-task.sh gate` trước push, `pr next` đòi review →
-  `reviewer-alt` (Fable, effort max — người viết là phiên chính); nhánh phiên một tên → lát tuần tự, sau mỗi merge gộp
+  `reviewer-alt` (effort max — người viết là phiên chính); nhánh phiên một tên → lát tuần tự, sau mỗi merge gộp
   `origin/main`.
 - Cách làm: SPEC = ADR-0048 là chữ cuối; phiên chính tự làm (hàng "Làm trực tiếp", `LOOP-ORCH-020`), `loop record` không
   `--executor`.
