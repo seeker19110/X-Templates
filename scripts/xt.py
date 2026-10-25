@@ -3858,7 +3858,18 @@ DOCTOR_HOOK_EVENTS = {
     "TaskCompleted": "warn",  # T-1514: chặn tick task chưa có evidence xanh
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
-DOCTOR_SKILLS = ("autopilot", "complete", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
+DOCTOR_SKILLS = (
+    "autopilot",
+    "complete",
+    "optimize",
+    "gate",
+    "audit",
+    "blueprint",
+    "research",
+    "review",
+    "adr",
+    "handover",
+)
 DOCTOR_AGENTS = ("executor", "executor-deep", "researcher", "reviewer", "reviewer-alt")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")

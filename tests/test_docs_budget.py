@@ -13,6 +13,7 @@ CAPS = {  # byte; nhà của từng trần: PLAN-3.12-lean T-1701…T-1704
     "framework/templates/CLAUDE.md": 2560,
     ".claude/skills/autopilot/SKILL.md": 6144,
     ".claude/skills/complete/SKILL.md": 6144,  # ADR-0046: skill pha harden, cùng trần với /autopilot
+    ".claude/skills/optimize/SKILL.md": 6144,  # ADR-0048: skill tối ưu, cùng trần
     "framework/11-autonomous-loop/README.md": 12288,
 }
 # Trần TỔNG byte theo thư mục (ADR-0043, T-2407): đóng băng bề mặt 3.x = kích thước tại 2026-10-23 + 5 %. Thêm mã/chữ thì
