@@ -4,7 +4,7 @@ kind: profile
 slug: ai-agent
 prefix: PRF-AGENT
 modules: [04-standards/*, 05-architecture/*, 08-backend/*, 09-database/*, 10-workflow/*, 11-autonomous-loop/*, 12-security/*, 13-ai-engineering/*, 14-testing-quality/*, 15-operations/*, 16-compliance-privacy/*, 17-product-project/*, 18-cross-cutting/*]
-updated: 2026-10-18
+updated: 2026-10-25
 ---
 
 # Hồ sơ: AI agent (một agent, có tool, có người giám sát)
@@ -24,8 +24,8 @@ updated: 2026-10-18
 | Chỉ gọi LLM một lần/chuỗi cố định (summarize, classify, RAG hỏi-đáp) không tool hành động | `web-app`/`api-service` + [`../13-ai-engineering/llm-app-foundations.md`](../13-ai-engineering/llm-app-foundations.md) |
 | Vòng lặp tự động cho **phát triển phần mềm** (autopilot) | không phải hồ sơ sản phẩm → [`../11-autonomous-loop/README.md`](../11-autonomous-loop/README.md) |
 
-Quy tắc đầu tiên (Anthropic, *Building effective agents*): bắt đầu từ cách đơn giản nhất — một lời gọi → workflow
-(chaining/routing/parallel/orchestrator/evaluator) → agent; chỉ nâng cấp khi đo thấy cần.
+Quy tắc đầu tiên (Anthropic, *Building effective agents*): bắt đầu từ cách đơn giản nhất — một lời gọi + schema; khi đã
+cần agent, một vòng lặp + skill/tool; chỉ thêm workflow hay agent con khi eval đo thấy cần (nhà: [`AI-AGENTIC-001`](../13-ai-engineering/agentic-systems.md)).
 
 ## Kiến trúc tham chiếu
 
