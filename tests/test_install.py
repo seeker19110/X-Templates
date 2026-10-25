@@ -42,6 +42,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((self.target / ".claude" / "settings.json").exists())
         self.assertTrue((self.target / ".claude" / "hooks" / "stop-guard.sh").exists())
         self.assertTrue((self.target / ".claude" / "skills" / "autopilot" / "SKILL.md").exists())
+        self.assertTrue((self.target / ".claude" / "skills" / "complete" / "SKILL.md").exists())  # ADR-0046
         self.assertIn(".autopilot/", (self.target / ".gitignore").read_text(encoding="utf-8"))
         for name in ("AGENTS.md", "CLAUDE.md", "PROGRESS.md", "xt.yaml"):
             self.assertTrue((self.target / name).exists(), name)

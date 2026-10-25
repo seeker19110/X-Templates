@@ -282,6 +282,54 @@ class DeliveryPhaseCliTest(unittest.TestCase):
         self.assertIn("pha build: bỏ qua review, ghi nợ (ADR-0031)", out)
 
 
+class DeliveryPhaseVerdictTest(unittest.TestCase):
+    """ADR-0046: ở pha build vòng lặp `done` khi mọi task xanh dù blueprint còn MUST mở (`loop status --json` có
+    `open_must`), và Stop hook cho dừng (`hook-stop` ghi `active=False`, `final_verdict.verdict == done`)."""
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        (self.base / "docs" / "autopilot").mkdir(parents=True)
+        (self.base / "docs" / "autopilot" / "PLAN.md").write_text(
+            "- [x] `T-001` xong — Gate: `true`\n", encoding="utf-8"
+        )
+        ev = self.base / ".autopilot" / "evidence"
+        ev.mkdir(parents=True)
+        (ev / "T-001.json").write_text(json.dumps({"task": "T-001", "exit_code": 0, "cmd": "true"}), encoding="utf-8")
+        (self.base / "BP.md").write_text(
+            "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b\n", encoding="utf-8"
+        )
+        (self.base / "xt.yaml").write_text("delivery_phase: build\n", encoding="utf-8")
+        xt.write_state(
+            {
+                "active": True,
+                "iterations": 0,
+                "max_iterations": 9,
+                "plan": "docs/autopilot/PLAN.md",
+                "blueprint": "BP.md",
+                "session_id": "s1",
+            },
+            self.base,
+        )
+
+    def test_build_phase_done_with_open_must_and_hook_stop_releases(self):
+        rc, out, _ = run_main("loop", "status", "--json")
+        d = json.loads(out)
+        self.assertEqual((rc, d["verdict"], d["open_must"]), (0, "done", 2))
+        self.assertIn("trả ở /complete (ADR-0046)", d["reason"])
+        rc, out, _ = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
+        self.assertEqual((rc, out), (0, ""))  # không phải repo git → không kiểm lại cuối, cho dừng
+        st = xt.read_state(self.base) or {}
+        self.assertEqual(
+            (st["active"], st["final_verdict"]["verdict"], st["final_verdict"]["open_must"]), (False, "done", 2)
+        )
+        # Pha harden (xt.yaml đổi tại chỗ): vẫn đòi MUST như cũ.
+        (self.base / "xt.yaml").write_text("delivery_phase: harden\n", encoding="utf-8")
+        xt.write_state({**st, "active": True}, self.base)
+        d = json.loads(run_main("loop", "status", "--json")[1])
+        self.assertEqual((d["verdict"], d["task"]), ("continue", "AAA-001"))
+
+
 class DeliveryPhaseReleaseTest(unittest.TestCase):
     """`release-check`: hàng `phase` (FAIL ở build/giá trị lạ) và `review_debt` (file ngoài tài liệu đổi sau SHA quét)."""
 

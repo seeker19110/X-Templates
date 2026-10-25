@@ -736,6 +736,33 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         self.assertEqual((v["verdict"], v["task"]), ("continue", "AAA-001"))
         self.assertIn("còn 2 mục MUST", v["reason"])
 
+    def test_blueprint_open_must_build_phase_is_done(self):
+        """ADR-0046: pha build dừng ở "build xong" — MUST blueprint mở không chặn `done` (ghi `open_must`, trả ở /complete);
+        harden/vắng/giá trị lạ giữ `continue`; miễn trừ sai, dòng sai, MUST đã defer vẫn xử lý như cũ."""
+        write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
+        self.evidence("T-001", 0, "true")
+        write(self.base / "BP.md", "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n")
+        self.activate(blueprint="BP.md")
+        write(self.base / "xt.yaml", "delivery_phase: build\n")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["verdict"], v["open_must"]), ("done", 2))
+        self.assertIn(
+            "còn 2 MUST blueprint mở (đầu tiên: AAA-001) — pha build không chặn, trả ở /complete", v["reason"]
+        )
+        for phase in ("delivery_phase: harden\n", "", "delivery_phase: nhanh\n"):
+            write(self.base / "xt.yaml", phase)
+            self.assertEqual((xt.loop_verdict(self.base)["verdict"], "open_must" in v), ("continue", True), phase)
+        write(self.base / "xt.yaml", "delivery_phase: build\n")
+        write(self.base / "BP.md", "- [~] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n")
+        v = xt.loop_verdict(self.base)
+        self.assertEqual(v["verdict"], "continue")
+        self.assertIn("miễn trừ không hợp lệ", v["reason"])
+        write(self.base / "BP.md", "- [ ] `AAA-001` **MUST** a → Kiểm: t\n- [x] `AAA-002` **MUST** b\n")
+        self.activate(blueprint="BP.md", deferred={"AAA-001": {"reason": "cần người duyệt miễn"}})
+        self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done-pending-human")
+        self.activate(blueprint="BP.md")
+        self.assertEqual(xt.loop_verdict(self.base)["open_must"], 1)
+
     def test_blueprint_bad_waiver_continues(self):
         write(self.plan, "- [x] `T-001` xong — Gate: `true`\n")
         self.evidence("T-001", 0, "true")
@@ -1588,7 +1615,7 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         write(self.base / "xt.yaml", "delivery_phase: build\n")  # ADR-0033: pha build gom audit theo mốc về trước G7
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["milestone_done"], v["milestone_audit"]), ("Lát 1 — skeleton", "g7"))
-        self.assertIn("pha build: audit delta gom về trước G7 (ADR-0033)", v["reason"])
+        self.assertIn("pha build: audit delta gom về /complete (ADR-0046)", v["reason"])
         self.assertNotIn("audit delta trước khi sang mốc kế", v["reason"])
         for phase in ("Build", "prod", "harden", ""):  # giá trị lạ/vắng = harden → audit theo mốc như cũ (ADR-0031)
             write(self.base / "xt.yaml", f"delivery_phase: {phase}\n")

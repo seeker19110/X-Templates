@@ -1750,10 +1750,10 @@ def _with_dispatch(
     done = milestone_done(tasks, t, _deferred(st))
     if done:
         v["milestone_done"] = done
-        # Pha build (ADR-0033): audit delta theo mốc gom về trước G7 — `release-check` FAIL `phase`/`review_debt` tới khi trả.
+        # Pha build (ADR-0033/0046): audit delta theo mốc gom về /complete — `release-check` FAIL `phase`/`review_debt` tới khi trả.
         v["milestone_audit"] = "g7" if _phase_in_tree(base) == "build" else "now"
         v["reason"] += (
-            f" · mốc «{done}» đã xong · pha build: audit delta gom về trước G7 (ADR-0033), làm tiếp task kế"
+            f" · mốc «{done}» đã xong · pha build: audit delta gom về /complete (ADR-0046), làm tiếp task kế"
             if v["milestone_audit"] == "g7"
             else f" · mốc «{done}» đã xong → audit delta trước khi sang mốc kế"
             " (`xt.py audit plan --status docs/ops/AUDIT-STATUS.md`; 🔴/🟠 thành task mới — audit.md §1)"
@@ -1800,7 +1800,8 @@ def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
         return {"verdict": "verify", "reason": drift}
     s = blueprint_status(bpp)
     open_must = [i for i in s["open_must"] if i not in _deferred(st)]
-    if open_must:
+    build = _phase_in_tree(base) == "build"  # ADR-0046: pha build dừng ở "build xong", MUST mở trả ở /complete
+    if open_must and not build:
         return {
             "verdict": "continue",
             "task": open_must[0],
@@ -1812,6 +1813,13 @@ def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "verdict": "continue",
             "reason": "blueprint có dòng mục sai định dạng: " + "; ".join(s["bad_lines"][:3]),
+        }
+    if open_must:  # `release-check` hàng `blueprint` vẫn FAIL tới khi hết MUST — chốt G7 không đổi
+        return {
+            "verdict": "done",
+            "open_must": len(open_must),
+            "reason": f"mọi task có bằng chứng xanh; còn {len(open_must)} MUST blueprint mở (đầu tiên: {open_must[0]})"
+            " — pha build không chặn, trả ở /complete (ADR-0046)",
         }
     return {"verdict": "done", "reason": "mọi task có bằng chứng xanh và blueprint không còn MUST mở"}
 
@@ -3847,7 +3855,7 @@ DOCTOR_HOOK_EVENTS = {
     "TaskCompleted": "warn",  # T-1514: chặn tick task chưa có evidence xanh
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
-DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
+DOCTOR_SKILLS = ("autopilot", "complete", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
 DOCTOR_AGENTS = ("executor", "executor-deep", "researcher", "reviewer", "reviewer-alt")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
@@ -8352,7 +8360,9 @@ def _release_phase(base: Path) -> Dict[str, str]:
         return _release_row("phase", "FAIL", f"{err} — đặt `{PHASE_KEY}: harden`")
     if keys.get(PHASE_KEY) == "build":
         return _release_row(
-            "phase", "FAIL", f"xt.yaml `{PHASE_KEY}: build` — đặt `{PHASE_KEY}: harden` rồi chạy audit delta (ADR-0031)"
+            "phase",
+            "FAIL",
+            f"xt.yaml `{PHASE_KEY}: build` — đặt `{PHASE_KEY}: harden` rồi chạy audit delta: /complete (ADR-0046)",
         )
     return _release_row("phase", "PASS", f"`{PHASE_KEY}: {keys.get(PHASE_KEY) or 'harden'}` (vắng = harden)")
 
