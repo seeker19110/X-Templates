@@ -1787,7 +1787,8 @@ def _scope_drift(base: Path, st: Dict[str, Any], bp: str) -> str:
 
 
 def _verdict_blueprint(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
-    """Mọi task đã ổn: còn MUST mở / miễn trừ thiếu lý do trong blueprint → continue, không thì done."""
+    """Mọi task đã ổn: miễn trừ thiếu lý do / dòng sai → continue; còn MUST mở → continue ở pha harden, còn pha build →
+    done kèm `open_must` (ADR-0046: trả ở /complete, `release-check` hàng `blueprint` vẫn đòi)."""
     bp = st.get("blueprint")
     bpp = base / bp if bp else None
     if bpp is None:  # loop init không khai blueprint: không có gì để kiểm (đã nói rõ trong lý do)
