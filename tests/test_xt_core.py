@@ -751,7 +751,8 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         )
         for phase in ("delivery_phase: harden\n", "", "delivery_phase: nhanh\n"):
             write(self.base / "xt.yaml", phase)
-            self.assertEqual((xt.loop_verdict(self.base)["verdict"], "open_must" in v), ("continue", True), phase)
+            nv = xt.loop_verdict(self.base)
+            self.assertEqual((nv["verdict"], "open_must" in nv), ("continue", False), phase)
         write(self.base / "xt.yaml", "delivery_phase: build\n")
         write(self.base / "BP.md", "- [~] `AAA-001` **MUST** a → Kiểm: t\n- [ ] `AAA-002` **MUST** b → Kiểm: t\n")
         v = xt.loop_verdict(self.base)

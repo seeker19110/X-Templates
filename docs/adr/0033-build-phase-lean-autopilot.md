@@ -1,6 +1,6 @@
 # ADR-0033: Pha build tối giản autopilot — audit theo mốc gom về G7, reviewer theo `pr next`, PROGRESS theo lát
 
-- **Trạng thái:** Đã chấp nhận
+- **Trạng thái:** Đã chấp nhận; quyết định 1 "gom audit về trước G7" = gom về `/complete` (ADR-0046)
 - **Trạng thái triển khai:** Đã triển khai trong repo — `scripts/xt.py` `_with_dispatch` (`milestone_audit`: `now`|`g7`);
   (`_phase_in_tree`: `xt.yaml` không đọc được → `now`, fail-open); skill `.claude/skills/autopilot/SKILL.md` bước 10/13; `framework/11-autonomous-loop/README.md` bước 11/11b;
   `framework/00-method/audit.md` §1; test `tests/test_xt_core.py::LoopRecordBranchesTest.test_milestone_done_marks_section_transition`.

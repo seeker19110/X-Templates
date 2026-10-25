@@ -57,13 +57,16 @@ Ghép thêm module ngoài hồ sơ bằng `--add`, ví dụ web app có tính n�
 
 Trong Claude Code, sau khi cài khung, gõ `/autopilot <mô tả yêu cầu>`:
 
-1. Agent lập kế hoạch G0–G4: `PROJECT.md`, `BLUEPRINT.md`, nghiên cứu phiên bản, spec, thiết kế, `PLAN.md` có task và lệnh kiểm.
+1. Agent lập kế hoạch gọn G0–G4 (pha build dùng đầu ra mức S — ADR-0046): đọc repo, `BLUEPRINT.md`, `PLAN.md` có task, lệnh kiểm và Given/When/Then ngắn; nghiên cứu/spec riêng chỉ khi thêm phụ thuộc hay nghiệp vụ không tầm thường.
 2. Phiên chính tự duyệt kế hoạch theo tiêu chí chất lượng cuối và ghi `D-NNN` (ADR-0008); bạn can thiệp lúc nào cũng được.
 3. Vòng lặp chạy: làm task, `xt.py loop record` ghi bằng chứng, commit, mỗi lát một PR, máy merge ghim head khi `merge-check` = `merge` ở đúng head (ADR-0036; làn chuẩn sau review sạch — ADR-0024), trừ ngoại lệ cứng auth/tiền/dữ liệu thật/mật mã khi `merge_hard_exceptions: human` (ADR-0016, ADR-0020). Stop hook đọc bằng chứng trên đĩa để quyết làm tiếp.
-4. Dừng khi xong có bằng chứng, khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
+4. Dừng ở **build xong** (mọi task có bằng chứng xanh, `loop verify --all`; MUST blueprint còn mở ghi số, không chặn ở pha build), khi chạm ngân sách, khi cùng một lỗi lặp 3 lần, hoặc ở **điểm dừng bắt buộc**:
    thao tác không đảo ngược (máy chặn), tiền thật, dữ liệu người dùng thật, đăng ký dịch vụ trả phí/nhập khoá thật
    (`loop defer`, gom cho người). Deploy/publish và đổi cấu hình cổng kèm lý do **cho chạy** (ADR-0018, D-023 — lớp đỡ
    là CI/ruleset nhánh/review); mâu thuẫn spec không còn là điểm dừng: phiên chính tự quyết, ghi `D-NNN`.
+5. Hoàn thiện và phát hành bằng `/complete` (pha harden, ADR-0046): PR đặt `delivery_phase: harden` → `/audit` → trả nợ
+   review theo PR/lát → `PLAN-harden` (🔴/🟠, MUST còn mở, sàn Gate M/L, thiết kế đầy đủ, refactor, hiệu năng) chạy cùng vòng
+   lặp với luật harden → `xt.py release-check` GO → `GO-NO-GO.md` (người ký). Lặp lại mỗi bản phát hành.
 
 Hook trong [`.claude/`](.claude/settings.json) chặn thao tác nguy hiểm/không đảo ngược (lệnh phá huỷ, `curl | sh`, push nhánh chính…) mà không hỏi người (ADR-0018),
 chạy cổng chất lượng trước mỗi commit. Luật cho mọi harness ở [`AGENTS.md`](AGENTS.md). Giao thức đầy đủ:
@@ -214,6 +217,16 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0036](docs/adr/0036-pinned-merge-no-auto-merge-drop-merge-gate.md): máy không bao giờ bật auto-merge của GitHub
   (guard `deny`, mã `AUTO_MERGE_ENABLE`); mọi đường merge của máy (phiên qua `pr next`, steward `--apply`) ghim head sau
   `merge-check` = `merge` ở đúng head, CI chưa xong → `wait`; bỏ required check `merge-gate` (thay ADR-0023, ADR-0035).
+- [ADR-0037](docs/adr/0037-reviewers-only-in-harden.md): reviewer chỉ ở pha `harden`; chuyển `harden` chỉ khi lên production (một chiều).
+- [ADR-0038](docs/adr/0038-local-app-on-xt.md): app web cục bộ `xt.py app` chỉ đọc, không chạy lệnh.
+- [ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md): CI mẫu dự án đích 3 job (gate song song · e2e · quality).
+- [ADR-0040](docs/adr/0040-build-phase-local-actions-allowed.md): pha `build` guard cho chạy mọi hành động chỉ tác động trong dự án/thư mục tạm.
+- [ADR-0041](docs/adr/0041-build-phase-minimal-gates.md): pha `build` không áp sàn Gate M/L, không cổng cục bộ trước push, không trần 150 dòng.
+- [ADR-0042](docs/adr/0042-release-check-attack-and-perf.md): `release-check` chạy `attack`/`perf` của `xt.yaml` trước phát hành.
+- [ADR-0043](docs/adr/0043-size-budget.md): trần byte đóng băng bề mặt 3.x (file hướng dẫn, thư mục mã/hook/mảng 11).
+- [ADR-0044](docs/adr/0044-reviewer-higher-capability.md): reviewer năng lực cao hơn người viết (bậc model, hoặc cùng họ effort cao hơn) thay "khác họ".
+- [ADR-0045](docs/adr/0045-split-by-context-measure-before-fold.md): tách agent con chỉ vì context; đổi kiến trúc agent qua eval so sánh; đo trước khi đổi mặc định giao việc.
+- [ADR-0046](docs/adr/0046-autopilot-build-complete-harden.md): `/autopilot` = pha build dừng ở "build xong" (MUST blueprint mở không chặn `done`); `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`, GO-NO-GO); sàn an toàn không đổi.
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
