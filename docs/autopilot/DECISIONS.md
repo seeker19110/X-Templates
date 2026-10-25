@@ -1315,3 +1315,10 @@
 - Chọn: Chỉ khi người gõ trực tiếp /audit, /research hoặc /complete … workflow; vòng /autopilot và /complete bước 4 → subagent; xác minh null chạy lại theo §4 rồi mới ghi mở + chưa xác minh; reviewer theo hàng Review bảng điều phối (Fable → model fable, không ai cao hơn → INCONCLUSIVE); nhánh subagent bỏ Explore
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: 3 cam tái hiện độc lập — 'không có người trực' máy không quyết được nên /complete một phiên vẫn treo ở hộp duyệt lần đầu; xác minh null bỏ qua xác minh đối kháng bắt buộc; ánh xạ reviewer rút gọn cho phép reviewer thấp hơn tác giả Fable. Tiêu chí 3: điều kiện là lời gọi của người — kiểm được.
 - Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)
+
+### D-187 · 2026-10-25T17:16:31+00:00 · Review #265 lượt 3: phát hiện lặp lại ở nhánh Workflow — sửa gốc thế nào?
+
+- Phương án: (1) Vá tiếp: thêm luật lát nợ review và luật chọn người xác minh riêng cho Workflow · (2) Thu hẹp gốc: Workflow chỉ cho /audit và /research do người gõ trực tiếp, cùng luật nhánh subagent (người xác minh như /audit §4); bỏ Workflow khỏi /complete (nợ review giữ subagent)
+- Chọn: Thu hẹp gốc: Workflow chỉ cho /audit và /research do người gõ trực tiếp, cùng luật nhánh subagent (người xác minh như /audit §4); bỏ Workflow khỏi /complete (nợ review giữ subagent)
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 3 (đơn giản, một nhà): ba lượt review đều tìm lỗi ở chỗ nhánh Workflow tự đặt luật khác nhánh subagent; dùng chung luật xoá cả lớp lỗi. Tiêu chí 1: nợ review gộp vào cụm nhóm làm mất dấu lát hỏng (review_debt PASS sai) — tái hiện độc lập. Người vẫn audit bằng Workflow được bằng cách tự gõ /audit.
+- Đường lùi: Xoá đoạn Workflow ở 2 skill (đường lùi D-184)

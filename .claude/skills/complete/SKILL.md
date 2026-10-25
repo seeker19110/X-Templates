@@ -1,7 +1,7 @@
 ---
 name: complete
 description: Pha HARDEN — hoàn thiện dự án khi /autopilot hết việc và đề xuất /complete (hoặc người muốn phát hành): PR đặt delivery_phase: harden, audit toàn diện/delta (/audit), trả nợ review theo PR/lát, PLAN-harden (🔴/🟠, MUST blueprint còn mở, sàn Gate M/L, thiết kế đầy đủ, refactor, hiệu năng, tấn công thử) chạy cùng vòng lặp có bằng chứng với luật harden, rồi release-check GO + GO-NO-GO.md. Dùng khi người dùng muốn "hoàn thiện", "audit và sửa", "chuẩn bị phát hành", trước mỗi bản phát hành, hoặc gõ /complete.
-argument-hint: "[full|delta] [workflow] [phiên bản phát hành]"
+argument-hint: "[full|delta] [phiên bản phát hành]"
 ---
 
 # /complete — pha harden: audit, trả nợ, hoàn thiện, phát hành
@@ -9,14 +9,14 @@ argument-hint: "[full|delta] [workflow] [phiên bản phát hành]"
 Giao thức vòng lặp: `<FW>/11-autonomous-loop/README.md`; audit: `/audit` (`<FW>/00-method/audit.md`); cổng G7: `<XT> release-check`. File này chỉ nối các bước theo thứ tự (ADR-0046). `<FW>` = `.xtemplates/framework` (dự án đích) hoặc `framework` (repo khung); `<XT>` = `python3 .xtemplates/scripts/xt.py` (hoặc `python3 scripts/xt.py`). Lặp lại được mỗi bản phát hành. Sàn an toàn như `/autopilot` — không nới.
 
 ## Bước 0 — chuẩn bị
-1. Tên phiên `<Tên repo> — <tên nhánh>`; `<XT> doctor --fix`; chế độ quyền Auto. Khuyến nghị **phiên mới** sau `/handover` của vòng build (context sạch cho audit đối kháng); cùng phiên vẫn được.
+1. Tên phiên `<Tên repo> — <tên nhánh>`; `<XT> doctor --fix`; chế độ quyền Auto. Khuyến nghị **phiên mới** sau `/handover` của vòng build (context sạch cho audit đối kháng); cùng phiên vẫn chạy được.
 2. Đọc `delivery_phase` trong `xt.yaml`; `docs/ops/AUDIT-STATUS.md` (có sổ → `delta`, chưa → `full`); `<XT> blueprint-status BLUEPRINT.md --strict --json` (MUST mở); `<XT> loop status` (vòng build phải đã `done`/`done-pending-human`; còn `continue` → quay lại `/autopilot`).
 
 ## Bước 1 — vào pha harden (một PR, một lần)
 Còn `build` → PR đặt `delivery_phase: harden`, khai khoá sàn M/L (`format_check`, `coverage`, kiểm kiểu, `e2e` — `<XT> floor` liệt kê) và `attack`/`perf` (ADR-0042; chưa có công cụ → để rỗng kèm lý do) trong `xt.yaml`. PR đụng `xt.yaml` luôn tính harden (D-137): `<XT> pr next` đòi review → giao reviewer → merge. Từ đây PR làn chuẩn cần review sạch ở head (`LOOP-STOP-022`), sàn Gate áp lại, guard không nới việc cục bộ.
 
 ## Bước 2 — audit và nợ review
-`/audit full` (lần đầu) hoặc `/audit delta` (bản sau) đúng checklist của nó: `audit plan` → quét theo nhóm → **xác minh đối kháng 🔴/🟠** → sổ + báo cáo → kế hoạch sửa tự duyệt (D-NNN). Nợ review của pha build = file ngoài tài liệu đổi sau SHA quét (`release-check` hàng `review_debt`): chia theo PR/lát đã merge kể từ SHA đó (`gh pr list --state merged`), mỗi cụm ≤ ~150 dòng cho reviewer năng lực cao hơn người viết (`LOOP-ORCH-005`); người gõ `/complete … workflow` → mỗi lát một `agent()` trong workflow `/audit` §3 (lát `null` → nhóm giữ `chưa quét`); phát hiện có đường tái hiện → vào sổ audit như 🔴/🟠/🟢.
+`/audit full` (lần đầu) hoặc `/audit delta` (bản sau) đúng checklist của nó: `audit plan` → quét theo nhóm → **xác minh đối kháng 🔴/🟠** → sổ + báo cáo → kế hoạch sửa tự duyệt (D-NNN). Nợ review của pha build = file ngoài tài liệu đổi sau SHA quét (`release-check` hàng `review_debt`): chia theo PR/lát đã merge kể từ SHA đó (`gh pr list --state merged`), mỗi cụm ≤ ~150 dòng cho reviewer năng lực cao hơn người viết (`LOOP-ORCH-005`); phát hiện có đường tái hiện → vào sổ audit như 🔴/🟠/🟢.
 
 ## Bước 3 — PLAN-harden (tự duyệt)
 `docs/autopilot/PLAN-harden-<ngày>.md` theo mẫu `<FW>/templates/PLAN.md`, mỗi task một Gate máy, thứ tự: (a) 🔴 rồi 🟠 — bug có test tái hiện đỏ trước khi sửa; (b) MUST blueprint còn mở — tick kèm `— Kiểm:`/`— Bằng chứng:`, `[~] — Không áp dụng:`, MUST muốn miễn → `loop defer` (người duyệt, `LOOP-STOP-024`); (c) sàn Gate M/L đỏ (`<XT> floor --run`); (d) thiết kế đầy đủ theo quy mô: C4, `API-CONTRACT.md`, `THREAT-MODEL.md`, SPEC đủ ca biên cho lát có 🔴/🟠, `PROJECT.md` (`lifecycle.md` G2–G4); (e) refactor từ nhóm CODE/ARCH có Gate (test giữ hành vi; độ phức tạp/trùng lặp đo được); (f) hiệu năng: hàng `perf` đỏ → task trong PLAN này theo `optimization-loop.md` (chỉ khi có số; `/optimize` là skill riêng sau `done` hoặc ở G8 — ADR-0048); (g) từng hàng FAIL của `<XT> release-check --json` (lần 1) thành task. Tóm tắt ≤ 30 dòng đầu PLAN → `<XT> loop decide --question "Duyệt PLAN-harden …"` → làm tiếp không chờ.

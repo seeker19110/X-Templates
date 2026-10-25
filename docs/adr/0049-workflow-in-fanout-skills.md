@@ -1,10 +1,9 @@
-# ADR-0049: Skill fan-out (`/audit`, `/complete` nợ review, `/research`) tự dùng tool Workflow khi có; không bật `ultracode` mặc định
+# ADR-0049: `/audit` và `/research` dùng tool Workflow khi người gõ trực tiếp; không bật `ultracode` mặc định
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184,
-  D-185, D-186 — review #265 hai lượt; phiên
-  chính tự duyệt, ADR-0008)
-- **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/complete/SKILL.md`
-  bước 2, `.claude/skills/research/SKILL.md` bước 3.
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-25: "những chỗ nên dùng thì áp dụng, tự bật khi đã cho phép"; D-184…D-187
+  — review #265 ba lượt thu hẹp phạm vi; phiên chính tự duyệt, ADR-0008)
+- **Trạng thái triển khai:** Đã triển khai — bản 3.26.0: `.claude/skills/audit/SKILL.md` §3, `.claude/skills/research/SKILL.md`
+  bước 3.
 - **Ngày:** 2026-10-25
 - **Làm rõ:** ADR-0033/ADR-0037 (pha build tối giản, không reviewer ở build — giữ nguyên), D-142 (không song song worktree —
   giữ nguyên: workflow ở đây chỉ đọc), `LOOP-ORCH-001/003/005/008`, TD-6 của
@@ -37,39 +36,40 @@ kích hoạt ở đó.
 ## Phương án đã xét
 
 - **A — giữ nguyên** (subagent 2–4 cụm; Workflow chỉ khi người gõ `ultracode`): bỏ phí rà đối kháng song song đúng nơi tài liệu khuyên.
-- **B — skill fan-out tự dùng Workflow khi có, dự phòng subagent** (chọn).
+- **B — skill fan-out dùng Workflow khi người gõ trực tiếp, cùng luật nhánh subagent, dự phòng subagent** (chọn; lượt 1–2 có cả nợ review của `/complete` và luật người xác minh riêng — bỏ ở lượt 3, D-187).
 - **C — `"ultracode": true` trong `.claude/settings.json`**: biến cả việc cơ học pha build thành workflow — trái ADR-0033,
   D-142; tốn token ở mọi task không có số đo. (Ultracode chỉ gỡ giới hạn subagent của tool Agent, không phải trần 5 của
   `LOOP-ORCH-008` — trần đó do khuôn "lô ≤ 5" của script giữ.) Loại.
 
 ## Quyết định
 
-1. Ba chỗ dùng Workflow: `/audit` §3–4 (quét theo cụm + xác minh đối kháng 🔴/🟠), `/complete` bước 2 (nợ review, ghép vào
-   workflow của `/audit`), `/research` bước 3 (≥ 3 mục độc lập + một agent đối chiếu chéo). Người gõ skill là đã opt-in (Bối
-   cảnh 4) — **không cần bật tay** `ultracode`. Điều kiện máy quyết được: chỉ khi người **gõ trực tiếp** `/audit`, `/research`
-   hoặc `/complete … workflow` trong phiên tương tác (người còn đó để duyệt lần đầu); mọi lần gọi trong vòng không hỏi người
-   (`/autopilot`, `/complete` bước 4) → nhánh subagent (hộp duyệt lần đầu sẽ treo vòng).
-2. Khuôn bắt buộc (nhà: `/audit` §3): agent **chỉ đọc** qua `agentType` `reviewer`/`researcher` (`tools` không
-   `Edit`/`Write`/`Agent`; không dùng `Explore` — không có frontmatter repo); xác minh và nợ review chọn `reviewer`/`reviewer-alt`
-   theo hàng Review của bảng điều phối (`LOOP-ORCH-005`: phiên chính Fable → `model: 'fable'`; không ai cao hơn →
-   INCONCLUSIVE), `model` khác người tìm chỉ trong các model vẫn cao hơn người viết; **lô ≤ 5** đồng thời, một workflow một lúc; người xác minh
-   không nhận lý luận của người tìm; workflow chỉ trả dữ liệu — phiên chính gộp, đánh ID, ghi sổ, `loop decide`, sửa, push.
-3. Không lọc `null`: agent `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → nhóm giữ `chưa quét`; xác minh `null`
-   → chạy lại theo `/audit` §4, vẫn không được → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác minh` (giá trị sổ hợp lệ: `audit
-   check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh. Không có tool, bị từ chối hoặc lỗi → nhánh subagent cũ; sổ/`audit check` như nhau.
-4. Không dùng Workflow cho task build (việc `executor`), `/review` một PR, `/optimize`, `release-check`, việc cơ học. Ultracode cả
-   phiên là lựa chọn của người cho phiên harden lớn (`/effort ultracode`, tắt bằng `/effort ultracode off`), không đặt trong
-   settings của khung.
+1. Hai chỗ dùng Workflow: `/audit` §3–4 (quét theo cụm + xác minh đối kháng 🔴/🟠) và `/research` bước 3 (≥ 3 mục độc lập +
+   một agent đối chiếu chéo). Người gõ skill là đã opt-in (Bối cảnh 4) — **không cần bật tay** `ultracode`. Điều kiện máy quyết
+   được: chỉ khi người **gõ trực tiếp** `/audit` hoặc `/research` trong phiên tương tác (người có mặt để duyệt lần đầu); gọi
+   từ `/autopilot` hay `/complete` → nhánh subagent (hộp duyệt lần đầu sẽ treo vòng không hỏi người).
+2. Khuôn (nhà: `/audit` §3) **cùng luật với nhánh subagent, chỉ khác cách chạy**: agent chỉ đọc qua `agentType`
+   `reviewer`/`researcher` (`tools` không `Edit`/`Write`/`Agent`; không dùng `Explore` — không có frontmatter repo); người xác
+   minh đúng như `/audit` §4 (reviewer khác agent đã tìm, model khác nếu được), không nhận lý luận của người tìm; **lô ≤ 5**
+   đồng thời, một workflow một lúc; workflow chỉ trả dữ liệu — phiên chính gộp, đánh ID, ghi sổ, `loop decide`, sửa, push.
+3. Không lọc `null`: cụm `null`/INCONCLUSIVE → chạy lại bằng subagent, vẫn không được → nhóm giữ `chưa quét`; xác minh
+   `null`/INCONCLUSIVE → chạy lại bằng subagent theo `/audit` §4, vẫn không được → Trạng thái `mở`, giữ mức, Ghi chú `chưa xác
+   minh` (`audit check` chỉ nhận `mở`/`đã sửa`/`chấp nhận`/`bác bỏ`), không tính là đã xác minh. Không có tool, người chọn No,
+   `deny` cho `Workflow` hoặc workflow lỗi → nhánh subagent; guard chặn một lệnh bên trong agent là kết luận (`LOOP-STOP-025`).
+4. Không dùng Workflow cho nợ review của `/complete` (đơn vị là PR/lát, review theo `LOOP-ORCH-005` và hàng `review_debt` —
+   ghép vào cụm nhóm làm mất dấu vết lát hỏng; review #265 lượt 3), task build, `/review` một PR, `/optimize`, `release-check`,
+   việc cơ học. Ultracode cả phiên là lựa chọn của người cho phiên harden lớn (`/effort ultracode`, tắt bằng `/effort ultracode
+   off`), không đặt trong settings của khung.
 
 ## Hệ quả
 
-- Audit/nợ review/research nhiều mục (người gõ skill) chạy song song có xác minh đối kháng mà không phải bật `ultracode`; kết quả nằm ngoài context phiên chính.
+- Audit/research nhiều mục do người gõ chạy song song có xác minh đối kháng mà không phải bật `ultracode`; kết quả nằm ngoài
+  context phiên chính. Muốn audit pha harden bằng Workflow: người tự gõ `/audit` (trước `/complete` hoặc thay cho bước 2 của nó).
 - Chi phí token tăng ở các bước này (chưa đo — đo bằng `/workflows` ở lần chạy đầu, `LOOP-ORCH-020`); lợi ích chất lượng chưa có số.
 - Nhà luật `LOOP-ORCH-*` (`orchestration-and-subagents.md`) chưa có dòng về Workflow — thư mục sát trần byte (ADR-0043); khuôn
   nằm ở `/audit` §3 tới khi có chỗ.
-- Chưa xác minh: `maxTurns` của frontmatter áp cho agent của workflow; guard `PreToolUse:Bash` áp cho agent của workflow (reviewer
-  PR này quan sát có, chưa tái hiện độc lập); `/complete` gọi tiếp `/audit` có còn tính là người gọi.
+- Chưa xác minh: frontmatter `maxTurns` và `effort` áp cho agent của workflow; guard `PreToolUse:Bash` áp cho agent của workflow
+  (reviewer PR này quan sát có, chưa tái hiện độc lập).
 
 ## Đường lùi
 
-Xoá đoạn Workflow ở ba skill; hành vi về lại subagent tay.
+Xoá đoạn Workflow ở hai skill; hành vi về lại subagent tay.
