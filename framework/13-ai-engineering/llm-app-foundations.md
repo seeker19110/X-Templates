@@ -76,6 +76,7 @@ TTL 5 phút (ghi ×1.25) hoặc 1 giờ (ghi ×2), đọc ×0.1; kiểm hiệu q
 - [ ] `AI-APP-016` **SHOULD** Phiên bản model được ghim theo ID có ngày/snapshot; nâng phiên bản qua eval và ADR, không dùng alias trôi trong production.
 - [ ] `AI-APP-017` **MAY** Dùng tính năng nén/compaction context của nhà cung cấp cho hội thoại dài, kèm eval riêng cho việc mất thông tin.
 - [ ] `AI-APP-018` **MAY** Thiết kế fallback đa nhà cung cấp qua gateway (`litellm` 1.105.0, PyPI 2026-10-11) với cùng schema; chỉ khi SLA yêu cầu. · Nguồn: [`observability-and-cost.md`](observability-and-cost.md)
+- [ ] `AI-APP-019` **SHOULD** Tri thức tham chiếu chỉ cần đôi khi (chính sách, định nghĩa, thông số) đặt sau tool tìm/tra hoặc làm file tham chiếu trong skill; không để code lấy rồi dán vào prompt, trừ thứ rẻ và gần như luôn liên quan (vd bước nhận diện thực thể). Phần được dán vẫn theo `AI-APP-007`. → Kiểm: review luồng dựng prompt — mỗi đoạn tri thức nạp bằng code có lý do "luôn liên quan", phần còn lại truy cập qua tool/skill. · Nguồn: claude.com *When to fold subagents into your main agent loop* (2026-10-22, xác minh 2026-10-25, `research/2026-10-24-single-agent-loop.md`) §Knowledge bases
 
 ## Bẫy thường gặp
 
