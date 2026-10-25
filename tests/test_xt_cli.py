@@ -2864,6 +2864,17 @@ class HarnessCheckTest(TmpDirCase):
         self.assertEqual(rc, 1)
         for name in ("reviewer.md (", "reviewer-alt.md (", "executor.md ("):
             self.assertIn(name, out)
+        (agents / "reviewer.md").write_text(ok, encoding="utf-8")
+        (agents / "reviewer-alt.md").write_text(ok, encoding="utf-8")
+        (agents / "executor.md").write_text(ok.replace("Bash", "Edit, Task(researcher)"), encoding="utf-8")
+        rc, out, _ = run_main("harness-check")  # `Task` = tên cũ của `Agent`
+        self.assertEqual(rc, 1)
+        self.assertIn("executor.md (", out)
+        (agents / "executor.md").write_text(
+            ok.replace("Bash", "Bash  # read-only: no Edit/Write/Agent"), encoding="utf-8"
+        )
+        rc, out, _ = run_main("harness-check")  # chú thích không phải tool
+        self.assertEqual(rc, 0, out)
 
     def test_harness_check_missing_or_broken_guard_and_settings(self):
         (self.tmp / ".claude" / "hooks").unlink()

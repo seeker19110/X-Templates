@@ -4664,7 +4664,8 @@ def _harness_settings(base: Path) -> str:
 
 
 def _harness_agents(base: Path) -> str:
-    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`."""
+    """LOOP-ORCH-003: mỗi subagent khai `tools:` tường minh (không `*`), không tự đặt `permissionMode`; không `Agent`/`Task`
+    (không lồng subagent); `reviewer*` không `Edit`/`Write` (chỉ đọc)."""
     bad = []
     for f in sorted((base / ".claude" / "agents").glob("*.md")):
         fm = FRONT_BLOCK_RE.match(f.read_text(encoding="utf-8", errors="replace"))
@@ -4674,9 +4675,11 @@ def _harness_agents(base: Path) -> str:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
             bad.append(f"{f.name} (permissionMode)")
-        # LOOP-ORCH-005/-006: reviewer* chỉ đọc; không agent nào được tự gọi agent (không lồng subagent)
-        t = tools[1] if tools else ""
-        if re.search(r"\bAgent\b", t) or (f.name.startswith("reviewer") and re.search(r"\b(?:Edit|Write)\b", t)):
+        # LOOP-ORCH-005 (reviewer* chỉ đọc), LOOP-ORCH-001 (không lồng subagent; `Task` là tên cũ của `Agent`)
+        t = re.sub(r"[ \t]#[^\n]*", "", tools[1]) if tools else ""
+        if re.search(r"\b(?:Agent|Task)\b", t) or (
+            f.name.startswith("reviewer") and re.search(r"\b(?:Edit|Write)\b", t)
+        ):
             bad.append(f"{f.name} (tools: ghi/Agent)")
     return "; ".join(bad)
 
@@ -8910,10 +8913,16 @@ MODEL_FAMILY_RE = re.compile(
 )
 
 
+RUNNER_PREFIX_RE = re.compile(r"^(?:ollama|llama[._-]?cpp|llamafile|gpt4all)(?:[:_-]|$)", re.I)
+
+
 def _model_tail(name: str) -> str:
     """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…` và bộ chạy `ollama:`/`gpt4all-`: `llama`/`gpt` trong đó không phải
     họ (review #249, AUD-SEC-105)."""
-    return re.sub(r"^(?:ollama|llamacpp|gpt4all)[:_-]", "", name.rsplit("/", 1)[-1], flags=re.I)
+    tail = name.rsplit("/", 1)[-1]
+    while (bare := RUNNER_PREFIX_RE.sub("", tail)) != tail:
+        tail = bare
+    return tail
 
 
 def model_family(name: str) -> str:
