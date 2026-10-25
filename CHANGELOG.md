@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- README §Quyết định thiết kế: dòng ADR-0039 (`gate` ∥ `e2e` → `quality`, job `gate` tuần tự) và ADR-0041 (chỉ bỏ `dev-task.sh gate` trước push, cổng commit vẫn chạy) khớp ADR (AUD-DOC-084/085); PROGRESS.md cắt dòng cũ để dư trần (AUD-HAR-112).
+
 ## [3.23.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi; skill `/complete` mới, skill `/autopilot` đổi — dự án đã sửa `autopilot/SKILL.md` nhận bản mới ở `.xtemplates-new`, gộp tay). Chữ checklist không đổi. ADR-0046 (D-174): `/autopilot` là pha build và dừng ở "build xong"; `/complete` là nhà của pha harden.

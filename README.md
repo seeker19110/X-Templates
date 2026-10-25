@@ -219,9 +219,9 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
   `merge-check` = `merge` ở đúng head, CI chưa xong → `wait`; bỏ required check `merge-gate` (thay ADR-0023, ADR-0035).
 - [ADR-0037](docs/adr/0037-reviewers-only-in-harden.md): reviewer chỉ ở pha `harden`; chuyển `harden` chỉ khi lên production (một chiều).
 - [ADR-0038](docs/adr/0038-local-app-on-xt.md): app web cục bộ `xt.py app` chỉ đọc, không chạy lệnh.
-- [ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md): CI mẫu dự án đích 3 job (gate song song · e2e · quality).
+- [ADR-0039](docs/adr/0039-minimal-target-ci-jobs.md): CI mẫu dự án đích 3 job (`gate` ∥ `e2e` → `quality`).
 - [ADR-0040](docs/adr/0040-build-phase-local-actions-allowed.md): pha `build` guard cho chạy mọi hành động chỉ tác động trong dự án/thư mục tạm.
-- [ADR-0041](docs/adr/0041-build-phase-minimal-gates.md): pha `build` không áp sàn Gate M/L, không cổng cục bộ trước push, không trần 150 dòng.
+- [ADR-0041](docs/adr/0041-build-phase-minimal-gates.md): pha `build` không áp sàn Gate M/L, không `dev-task.sh gate` trước push (cổng commit vẫn chạy), không trần 150 dòng.
 - [ADR-0042](docs/adr/0042-release-check-attack-and-perf.md): `release-check` chạy `attack`/`perf` của `xt.yaml` trước phát hành.
 - [ADR-0043](docs/adr/0043-size-budget.md): trần byte đóng băng bề mặt 3.x (file hướng dẫn, thư mục mã/hook/mảng 11).
 - [ADR-0044](docs/adr/0044-reviewer-higher-capability.md): reviewer năng lực cao hơn người viết (bậc model, hoặc cùng họ effort cao hơn) thay "khác họ".
