@@ -29,8 +29,11 @@ updated: 2026-10-25
 | Cấp | Dùng khi | Không dùng khi |
 |---|---|---|
 | Một lời gọi + schema | Phân loại, trích xuất, viết lại, tóm tắt có khuôn | Cần tra cứu ngoài hoặc nhiều bước phụ thuộc |
-| Workflow cố định (chain, routing, parallel, orchestrator, evaluator) | Các bước biết trước, cần dự đoán được | Số bước không biết trước |
+| Workflow cố định (chain, routing, parallel, evaluator) | Các bước biết trước, cần dự đoán được | Số bước không biết trước |
+| Orchestrator-workers | Số việc con không biết trước **và** độc lập, context vứt được (lý do 2 của `AI-AGENTIC-011`) | Việc tuần tự hẹp |
 | Agent (model tự chọn tool/bước) | Việc mở, cần khám phá | Có thể viết thành workflow — xem [`agents-and-tools.md`](agents-and-tools.md) |
+
+Bảng là từ vựng, không phải thang leo cố định: khi đã cần agent, khởi điểm và điều kiện tách thêm agent con theo [`AI-AGENTIC-001`](agentic-systems.md)/`011`.
 
 ### Structured output — chọn công cụ
 

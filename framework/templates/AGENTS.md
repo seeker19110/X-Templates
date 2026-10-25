@@ -48,7 +48,7 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 - **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha build: audit delta gom về trước G7 (ADR-0033); pha harden: audit delta mỗi mốc PLAN.
 
 ## 8. Skill và subagent (nhà: `11-autonomous-loop/orchestration-and-subagents.md`)
-`/autopilot` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả, ADR-0029) · `reviewer`/`reviewer-alt` (năng lực cao hơn người viết, `LOOP-ORCH-005`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối; không lồng subagent; song song chỉ khi độc lập về file (trong sản phẩm: `AI-AGENTIC-007`).
+`/autopilot` · `/blueprint` · `/gate` · `/research` · `/audit` · `/review` · `/adr` · `/handover`. Subagent: `researcher` · `executor`/`executor-deep` (tầng do `loop status` trả) · `reviewer`/`reviewer-alt` (năng lực cao hơn người viết, `LOOP-ORCH-005`; không kết luận được → `pr reviewed --inconclusive`). Phiên chính điều phối, tự làm khi không cần tách (`LOOP-ORCH-020`); không lồng subagent; song song chỉ khi độc lập về file.
 
 ## 9. Quy ước riêng của dự án
 - Cấu trúc thư mục: [ĐIỀN]
