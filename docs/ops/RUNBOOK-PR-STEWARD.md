@@ -92,5 +92,5 @@ Workflow `release-tag.yml` tự chạy khi `VERSION` đổi trên `main` (từ 3
 tuỳ chọn `XT_RELEASE_TOKEN` (fine-grained PAT, chỉ repo này: `contents: write` + `workflows: write`); workflow dùng nó ở bước
 checkout, thiếu thì rơi về `GITHUB_TOKEN`. Thiếu secret mà commit có đổi workflow (lần đầu sau 3.24.0 chính là trường hợp này — `release-tag.yml` đổi): run tự động đỏ, người đẩy tag tay
 (`git tag -a vX.Y.Z -m vX.Y.Z <sha> && git push origin vX.Y.Z`). Xoay/thu hồi như `XT_STEWARD_TOKEN` (§2).
-Một push lên `main` chứa ≥ 2 commit đổi `VERSION` (merge không squash) chỉ tag commit đầu push (`GITHUB_SHA`); gắn tag cho
+Một push lên `main` chứa ≥ 2 commit đổi `VERSION` (merge không squash) chỉ tag commit ngọn của push (`GITHUB_SHA`); gắn tag cho
 commit còn lại bằng `workflow_dispatch` với input `sha` = commit đó (AUD-DOC-086).

@@ -370,6 +370,15 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(run_main("loop", "stop", "--reason", "đợt 1 xong")[0], 0)
         self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
+    def test_init_after_loop_block_points_to_resume(self) -> None:
+        # Review #268: `blocked` do `loop block`/lỗi lặp chờ người xem rồi `loop resume` (loop-design.md) — không gợi `loop stop`.
+        run_main("loop", "init")
+        run_main("loop", "block", "--reason", "cần chủ repo ký")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("verdict `blocked`: cần chủ repo ký — người xem rồi `loop resume --reason`", err)
+        self.assertNotIn("`loop stop`", err)
+
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
         # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.
         for change in ("spec", "file"):

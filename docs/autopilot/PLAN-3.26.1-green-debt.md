@@ -7,9 +7,9 @@
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
 ## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-192)
-- Phạm vi: (1) AUD-HAR-113: ghép lại `BLUEPRINT.md` với `XT_FRAMEWORK_LINK=framework` — đo trên bản nháp: chỉ 6 mục đổi
-  chữ thật (`LOOP-OPT-016` mới, `LOOP-OPT-002/011`, `LOOP-STOP-005`, `LOOP-HARNESS-024`), giữ trạng thái 104 mục; không có
-  biến này, `compose` ở repo khung viết link `.xtemplates/framework/…` nên 19 mục MUST "đổi chữ" giả và bị đặt lại `[ ]`
+- Phạm vi: (1) AUD-HAR-113: ghép lại `BLUEPRINT.md` với `XT_FRAMEWORK_LINK=framework` — đo trên bản nháp: 4 mục đổi chữ
+  thật + 1 mục mới (`LOOP-OPT-016`; đổi `LOOP-OPT-002/011`, `LOOP-STOP-005`, `LOOP-HARNESS-024`), giữ trạng thái 104 mục; không có
+  biến này, `compose` ở repo khung viết link `.xtemplates/framework/…` nên 19 mục (15 MUST + 4 SHOULD) "đổi chữ" giả và bị đặt lại `[ ]`
   (nguồn nhiễu của lần #257) · (2) AUD-HAR-114: `loop init` khi vòng cũ `blocked` (PLAN đợt trước đổi tên/xoá) in verdict
   và lý do, gợi `loop stop` · (3) AUD-DOC-086: RUNBOOK §4 một dòng về push có ≥ 2 commit đổi `VERSION` · (4) sổ audit:
   đánh dấu 3 🟢 đã sửa (SHA quét cập nhật ở PR sổ sau merge — PR có mã không tự trả `review_debt`); CHANGELOG

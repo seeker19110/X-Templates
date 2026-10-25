@@ -6183,8 +6183,13 @@ def _live_loop(base: Path) -> str:
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    # AUD-HAR-114: vòng `blocked` (vd PLAN đợt trước đổi tên) — nói vì sao
-    why = f"; verdict `blocked`: {v.get('reason', '')} — vòng đã kết thúc: `loop stop`" if verdict == "blocked" else ""
+    # AUD-HAR-114: `blocked` — PLAN mất/rỗng → `loop stop`; chờ người/lỗi lặp → `loop resume` (loop-design)
+    why, r = "", str(v.get("reason", ""))
+    if verdict == "blocked":
+        end = (
+            "`loop stop`" if r.startswith(("không thấy PLAN", "PLAN không")) else "người xem rồi `loop resume --reason`"
+        )
+        why = f"; verdict `blocked`: {r} — {end}"
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
 
@@ -6275,8 +6280,7 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
-    if live.startswith("đợt `"):  # đợt xong nhưng cây đổi sau kiểm cuối (PLAN kế, sổ audit): verify lại rồi init;
-        # không gợi `resume` (xoá chờ người) hay `--force` (bỏ kiểm cuối) — review #262 lượt 3
+    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại; không gợi `resume`/`--force` (review #262)
         print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
         return 2
     if live:
