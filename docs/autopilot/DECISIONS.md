@@ -1301,3 +1301,10 @@
 - Chọn: Skill /audit §3–4, /complete bước 2 (nợ review), /research (≥ 3 mục) ghi nhánh: có tool Workflow thì dùng — agent chỉ đọc theo agentType researcher/reviewer/Explore, lô ≤ 5 đồng thời, phiên chính gộp/quyết/sửa; không có thì subagent như cũ; không bật ultracode trong settings
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: agent chỉ đọc theo agentType giữ LOOP-ORCH-001/003/005 (frontmatter model/tools), lô ≤ 5 giữ LOOP-ORCH-008, phiên chính vẫn gộp/quyết/sửa; skill do người gọi có chỉ dẫn gọi Workflow là opt-in nên không cần bật tay. Tiêu chí 3: nhánh dự phòng giữ nguyên hành vi cũ khi không có tool (-p không có rule Workflow, Pro chưa bật). PA3 biến mọi task (cả pha build cơ học) thành workflow — trái ADR-0033/D-142, tốn token. PA1 bỏ phí xác minh đối kháng song song ở nơi tài liệu chính thức khuyên dùng (codebase sweep, cross-checked research).
 - Đường lùi: Xoá đoạn Workflow ở 3 skill; skill quay về chỉ subagent
+
+### D-185 · 2026-10-25T16:01:48+00:00 · Đính chính D-184 sau review đối kháng (PR 3.26.0): phạm vi nhánh Workflow
+
+- Phương án: (1) Giữ D-184 nguyên văn · (2) Thu hẹp: chỉ khi người gõ skill (gọi từ /autopilot → subagent); reviewer/reviewer-alt theo người viết; không Explore; không lọc null; một workflow một lúc; opt-in dẫn mô tả tool Workflow 2.1.310
+- Chọn: Thu hẹp: chỉ khi người gõ skill (gọi từ /autopilot → subagent); reviewer/reviewer-alt theo người viết; không Explore; không lọc null; một workflow một lúc; opt-in dẫn mô tả tool Workflow 2.1.310
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: review tái hiện 8 phát hiện cam — hộp duyệt lần đầu treo vòng autopilot, reviewer cố định phá LOOP-ORCH-005, null bị lọc làm nhóm chưa quét thành sạch, Explore không có maxTurns/luật repo. Phát hiện 'skill không phải opt-in' bị bác bằng mô tả tool trong binary 2.1.310.
+- Đường lùi: Xoá đoạn Workflow ở 3 skill (đường lùi D-184)

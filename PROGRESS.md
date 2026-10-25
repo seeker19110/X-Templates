@@ -1,9 +1,9 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.25.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.26.0, pha `harden` — D-136) · Cập nhật: 2026-10-25 · Nhánh: main
 
 ## Đang làm
-- 2026-10-25 **3.26.0 Workflow trong skill fan-out** (D-184, ADR-0049): `/audit` §3, `/complete` bước 2, `/research` ≥ 3 mục tự dùng tool Workflow khi có (agent chỉ đọc, lô ≤ 5); không bật `ultracode` trong settings.
+- 2026-10-25 **3.26.0 Workflow trong skill fan-out** (D-184/D-185, ADR-0049): `/audit` §3, `/complete` bước 2, `/research` ≥ 3 mục dùng tool Workflow khi người gõ skill (agent chỉ đọc, lô ≤ 5; từ `/autopilot` → subagent); không bật `ultracode` trong settings. Review đối kháng lượt 1 đã sửa.
 - 2026-10-25 **PLAN-3.25-optimize** (D-180/D-181, ADR-0048, 3.25.0): skill `/optimize` chỉ ngân sách đỏ có số, số field qua `FIELD-<ngày>.json`, GO-NO-GO dòng 20 + delta, `LOOP-OPT-005` MUST@M. Cả 4 lát trong #263 (D-183), review lượt 2 đã sửa. Hoãn C (`xt.py field check`) tới khi dự án đích có SLO thật.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046, 3.23.0): `/autopilot` = pha build dừng ở build xong (verdict `done` không đòi 0 MUST ở build), `/complete` = pha harden (audit, nợ review, hoàn thiện, `release-check`). #259 + #260 (`v3.23.0`) + #261 audit delta; 3.24.0 (ADR-0047, #262): mẫu `merge_hard_exceptions: auto` (D-176); `/autopilot` lặp build → audit delta → đợt kế tới khi hết việc (D-177/178); tag tự khi `VERSION` đổi (D-179). GO-NO-GO `v3.18.x`/`v3.20.0`/`v3.23.0` chờ ký. Điểm đo `LOOP-ORCH-020`: phiên chính tự làm.
 - 2026-10-25 **PLAN-3.23-delegation-rate** (D-171/D-172, 3.22.0): `loop stats` có `delegation_rate`, `first_pass_rate_*`; chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
