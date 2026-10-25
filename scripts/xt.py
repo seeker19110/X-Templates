@@ -3848,7 +3848,7 @@ DOCTOR_HOOK_EVENTS = {
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
 }
 DOCTOR_SKILLS = ("autopilot", "gate", "audit", "blueprint", "research", "review", "adr", "handover")
-DOCTOR_AGENTS = ("executor", "researcher", "reviewer")
+DOCTOR_AGENTS = ("executor", "executor-deep", "researcher", "reviewer", "reviewer-alt")
 DOCTOR_YAML_KEYS = ("lint", "typecheck", "test", "build")  # LOOP-HARNESS-008
 HOOK_REF_RE = re.compile(r"\.claude/hooks/([\w.-]+(?:/[\w.-]+)*)")
 # File hook nạp/gọi cạnh nó (_lib.sh, guard.py, nested/x.py, ../x.py): cả đường dẫn literal, giữ `/` lặp — đường dẫn chỉ
@@ -4674,6 +4674,10 @@ def _harness_agents(base: Path) -> str:
             bad.append(f"{f.name} (tools: thiếu/rộng)")
         if fm and re.search(r"^permissionMode:", fm[1], re.M):
             bad.append(f"{f.name} (permissionMode)")
+        # LOOP-ORCH-005/-006: reviewer* chỉ đọc; không agent nào được tự gọi agent (không lồng subagent)
+        t = tools[1] if tools else ""
+        if re.search(r"\bAgent\b", t) or (f.name.startswith("reviewer") and re.search(r"\b(?:Edit|Write)\b", t)):
+            bad.append(f"{f.name} (tools: ghi/Agent)")
     return "; ".join(bad)
 
 
@@ -8907,8 +8911,9 @@ MODEL_FAMILY_RE = re.compile(
 
 
 def _model_tail(name: str) -> str:
-    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…`: `llama` trong đó không phải họ (review #249)."""
-    return name.rsplit("/", 1)[-1]
+    """Tên model bỏ tiền tố nhà cung cấp `ollama_chat/…` và bộ chạy `ollama:`/`gpt4all-`: `llama`/`gpt` trong đó không phải
+    họ (review #249, AUD-SEC-105)."""
+    return re.sub(r"^(?:ollama|llamacpp|gpt4all)[:_-]", "", name.rsplit("/", 1)[-1], flags=re.I)
 
 
 def model_family(name: str) -> str:

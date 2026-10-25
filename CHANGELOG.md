@@ -5,6 +5,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.22.1] - 2026-10-25
+
+**Dự án đích: chạy lại `install.py`** (`xt.py`, guard đổi); chữ checklist không đổi. Sửa 2 🟠 + 3 🟢 của audit delta `e5ff88c..3ba5828` (D-173, `docs/ops/AUDIT-REPORT-2026-10-25-delta.md`).
+
+### Fixed
+- AUD-SEC-105 (🟠): `--clean` không còn nhận review của model tự chấm mình khi tên có tiền tố bộ chạy — `ollama:qwen3-coder`/`ollama-…`/`llamacpp:…`/`gpt4all:…` bỏ tiền tố trước khi lấy họ (`_model_tail`), cùng họ thì rơi về luật cùng họ (`LOOP-ORCH-005`).
+- AUD-HAR-106 (🟠): `harness-check` kiểm `tools:` của `reviewer*` không có `Edit`/`Write` và không agent nào có `Agent` — đúng như bảng Cổng của `orchestration-and-subagents.md` đã ghi.
+- AUD-SEC-106: guard `GLOB_COMMANDS` thêm `nerdctl`, `docker-compose`, `podman-compose` (cách viết glob không lọt khỏi luật docker). AUD-XFEAT-024: `ai_attribution` của guard chặn cả `Claude Mythos`. AUD-HAR-107: `doctor` kiểm thêm `executor-deep`, `reviewer-alt`.
+
 ## [3.22.0] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi) **rồi ghép lại blueprint (`compose`)**: chữ quy phạm của `LOOP-ORCH-020` đổi nên mục đã `[x]` thành "Cũ" cho tới khi tick lại. Harness khác không đổi.
