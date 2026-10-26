@@ -1,0 +1,63 @@
+{
+  "revision": "4e7bade7625ec9f70accfc9f293d533b905533a7",
+  "verified_on": "2026-10-26",
+  "directories": {
+    "scripts (xt.py, install.py, xt_app)": {
+      "bytes": 711824,
+      "cap": 711855,
+      "remaining": 31
+    },
+    ".claude/hooks": {
+      "bytes": 368569,
+      "cap": 369393,
+      "remaining": 824
+    },
+    "framework/11-autonomous-loop": {
+      "bytes": 232297,
+      "cap": 232307,
+      "remaining": 10
+    }
+  },
+  "files": {
+    "AGENTS.md": {
+      "bytes": 7155,
+      "cap": 7168,
+      "remaining": 13
+    },
+    "framework/templates/AGENTS.md": {
+      "bytes": 8159,
+      "cap": 8192,
+      "remaining": 33
+    },
+    "CLAUDE.md": {
+      "bytes": 1655,
+      "cap": 2048,
+      "remaining": 393
+    },
+    "framework/templates/CLAUDE.md": {
+      "bytes": 1951,
+      "cap": 2560,
+      "remaining": 609
+    },
+    ".claude/skills/autopilot/SKILL.md": {
+      "bytes": 6143,
+      "cap": 6144,
+      "remaining": 1
+    },
+    ".claude/skills/complete/SKILL.md": {
+      "bytes": 5994,
+      "cap": 6144,
+      "remaining": 150
+    },
+    ".claude/skills/optimize/SKILL.md": {
+      "bytes": 6106,
+      "cap": 6144,
+      "remaining": 38
+    },
+    "framework/11-autonomous-loop/README.md": {
+      "bytes": 12288,
+      "cap": 12288,
+      "remaining": 0
+    }
+  }
+}

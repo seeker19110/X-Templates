@@ -1,0 +1,36 @@
+{
+  "verified_on": "2026-10-26",
+  "note": "Full sources were read from official GitHub repositories; pinned URLs and conclusions are in the research report. Hashes identify the downloads; external source text is not vendored.",
+  "sources": [
+    {
+      "file": "claude-code-changelog.md",
+      "sha256_download": "27d7a0e1d5c1b98cce5153a4c9e467e8a361550c4cfe9d0aa471f46b8dc0ed83",
+      "bytes": 1085784
+    },
+    {
+      "file": "actions-events.md",
+      "sha256_download": "69e251c1510f84d7b0a05ff8a4146456e657f175133081213805e02b0a655f50",
+      "bytes": 67972
+    },
+    {
+      "file": "actions-security.md",
+      "sha256_download": "0b2d692984fae55eff6334aabb52ca3c97bd38757cca1e2cc3437460cbc4b1d5",
+      "bytes": 37281
+    },
+    {
+      "file": "durable-execution.md",
+      "sha256_download": "0d33a9d4c828ecfe9db28a8217ebe860a7b1ed14be0a76854104f67a78ff001a",
+      "bytes": 4927
+    },
+    {
+      "file": "autoresearch.txt",
+      "sha256_download": "3958fd4195ac2f98ed35c4eaa4f3028a335165ee24945e96426c408d25793a41",
+      "bytes": 8039
+    },
+    {
+      "file": "benchstat.txt",
+      "sha256_download": "b43e6f48691e2b298afe8a8ebe79d70d179522192c4bb39d0d372ccd6db213c1",
+      "bytes": 23342
+    }
+  ]
+}
