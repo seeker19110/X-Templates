@@ -1885,6 +1885,7 @@ class HookFailOpenTest(unittest.TestCase):
         "permission-request.sh",
         "task-completed.sh",
         "subagent-stop.sh",
+        "post-tool-failure.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):
@@ -5581,6 +5582,14 @@ class TriageLocalTest(unittest.TestCase):
     def payload(cmd: str, response: object, **extra: object) -> dict:
         return {"tool_name": "Bash", "tool_input": {"command": cmd}, "tool_response": response, **extra}
 
+    def test_triage_local_live_error_format(self):
+        """Payload đúng tài liệu sống: `error` = `Exit code N` + output; dòng `Exit code` không vào bằng chứng."""
+        err = "Exit code 1\nFAIL: test_x (tests.test_a.T)\nAssertionError: 1 != 2"
+        ctx = self.ctx({"tool_name": "Bash", "tool_input": {"command": "python3 -m unittest t"}, "error": err})
+        assert ctx is not None
+        self.assertIn("AssertionError: 1 != 2", ctx)
+        self.assertNotIn("Exit code 1", ctx)
+
     def test_triage_local_classifies_gate_failure(self):
         log = "Ran 3 tests\nFAIL: test_x (tests.test_a.T)\nAssertionError: 1 != 2\nFAILED (failures=1)\n"
         ctx = self.ctx(self.payload("python3 -m unittest tests.test_a", log))
@@ -5655,6 +5664,9 @@ class TriageLocalTest(unittest.TestCase):
             {"tool_name": "Bash", "tool_input": {"command": 1}, "tool_response": log},
             self.payload("pytest", ""),
             self.payload("pytest", "   \n"),
+            # Định dạng sống (docs hooks §PostToolUseFailure): `error` mở đầu `Exit code N` — riêng dòng đó không phải output
+            {"tool_name": "Bash", "tool_input": {"command": "grep -n mypy xt.yaml"}, "error": "Exit code 1"},
+            {"tool_name": "Bash", "tool_input": {"command": "pytest"}, "error": "Exit code 2\n  \n"},
             self.payload("pytest", 42),
             self.payload("pytest", {"stdout": None}),
             "",

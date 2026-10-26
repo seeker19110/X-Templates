@@ -1378,3 +1378,10 @@
 - Chọn: Gắn — Kiểm: cho cả 37 mục bằng test hành vi có sẵn hoặc grep chỉ đọc; gỡ noqa chết, type: ignore có lý do
 - Lý do (tiêu chí chất lượng cuối): (1) mọi mục áp dụng và đạt, bằng chứng đã trỏ test/grep — chạy lại được là đúng hơn lời khai; [~] sai sự thật; (2) revert một PR; (3) không thêm công cụ
 - Đường lùi: revert PR
+
+### D-196 · 2026-10-26T06:56:30+00:00 · Cách làm 4 việc chủ repo duyệt 2026-10-26 (T-1814/1822/1823/1832)
+
+- Phương án: (1) PLAN-harden-2026-10-26d: T-3531 đăng ký hook (PR 1, gộp đóng sổ T-1814), T-3532 ca đối kháng (PR 2), T-3533 spike mutation (PR 3), cắt 3.27.0 ở lát cuối · (2) Một PR cho cả bốn
+- Chọn: PLAN-harden-2026-10-26d: T-3531 đăng ký hook (PR 1, gộp đóng sổ T-1814), T-3532 ca đối kháng (PR 2), T-3533 spike mutation (PR 3), cắt 3.27.0 ở lát cuối
+- Lý do (tiêu chí chất lượng cuối): (1) mỗi lát nhỏ, review được; hook đổi hành vi dự án đích nên cắt bản; (2) revert từng lát; (3) spike có thể không khả thi — tách để không chặn hook
+- Đường lùi: revert từng PR
