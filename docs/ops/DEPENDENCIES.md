@@ -1,6 +1,6 @@
 # Phụ thuộc và license (`BASE-DEP-005`)
 
-> Xác minh ngày **2026-10-20** (`shellcheck-py`: **2026-10-21**). Phạm vi: mọi gói, kể cả bắc cầu, trong ba file ghim kèm hash: `requirements-dev.txt`
+> Số bản cập nhật theo khoá 2026-10-26 (#275, hash đối chiếu PyPI). Xác minh ngày **2026-10-20** (`shellcheck-py`: **2026-10-21**). Phạm vi: mọi gói, kể cả bắc cầu, trong ba file ghim kèm hash: `requirements-dev.txt`
 > (cổng chất lượng: ruff, mypy, coverage, shellcheck-py), `requirements-audit.txt` (pip-audit, job quét phụ thuộc) và
 > `requirements-e2e.txt` (Playwright, job `app-e2e` — xác minh 2026-10-21), cùng mã chép vào repo của E2E (axe-core). Khung chạy
 > `scripts/xt.py` chỉ bằng thư viện chuẩn Python; các gói dưới đây chỉ chạy trên runner CI/máy dev, không phân phối
@@ -61,13 +61,13 @@
 
 | Gói | Bản | License |
 |---|---|---|
-| ast-serialize | 0.13.0 | MIT |
-| coverage | 7.16.2 | Apache-2.0 |
+| ast-serialize | 0.13.1 | MIT |
+| coverage | 7.17.0 | Apache-2.0 |
 | librt | 0.16.0 | MIT |
 | mypy | 2.4.0 | MIT |
 | mypy-extensions | 1.1.0 | MIT |
 | pathspec | 1.1.1 | MPL-2.0 (classifier PyPI; chấp nhận — xem trên) |
-| ruff | 0.17.1 | MIT |
+| ruff | 0.17.2 | MIT |
 | shellcheck-py | 0.11.0.1 | MIT (binary `shellcheck` kèm theo: GPL-3.0, chỉ chạy dev/CI — xem trên) |
 | typing-extensions | 4.16.0 | PSF-2.0 |
 
@@ -89,11 +89,11 @@
 | msgpack | 1.2.3 | Apache-2.0 |
 | packageurl-python | 0.17.6 | MIT |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
-| pip | 26.2.1 | MIT |
+| pip | 26.2.2 | MIT |
 | pip-api | 0.0.35 | Apache-2.0 |
 | pip-audit | 2.10.1 | Apache-2.0 |
 | pip-requirements-parser | 32.0.1 | MIT |
-| platformdirs | 4.13.3 | MIT |
+| platformdirs | 4.13.5 | MIT |
 | py-serializable | 2.1.0 | Apache-2.0 |
 | pygments | 2.21.0 | BSD-2-Clause |
 | pyparsing | 3.3.3 | MIT |
@@ -110,7 +110,7 @@
 
 | Gói | Bản | License | Dùng ở |
 |---|---|---|---|
-| playwright | 1.64.0 | Apache-2.0 | job CI `app-e2e`, máy dev (`tests_e2e/`) |
+| playwright | 1.64.1 | Apache-2.0 | job CI `app-e2e`, máy dev (`tests_e2e/`) |
 | greenlet | 3.5.6 | MIT AND PSF-2.0 | như trên (bắc cầu của playwright) |
 | pyee | 13.0.1 (Python < 3.12) · 14.0.0 (≥ 3.12) | MIT | như trên (bắc cầu) |
 | typing-extensions | 4.16.0 | PSF-2.0 | như trên (bắc cầu của pyee) |

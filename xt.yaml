@@ -1,7 +1,7 @@
 # xt.yaml — lệnh chuẩn của repo này cho agent, hook và CI (YAML phẳng `task: lệnh`, đọc bởi scripts/dev-task.sh).
 # CI chạy build · typecheck · lint · test bằng ĐÚNG các lệnh dưới đây, mỗi task một job song song (test chia shard qua
 # `dev-task.sh test-shard`), job `quality` tổng hợp; local `scripts/dev-task.sh gate` chạy nối tiếp.
-# Công cụ ghim kèm hash: requirements-dev.txt (ruff 0.17.1, mypy 2.4.0, coverage 7.16.2, shellcheck-py 0.11.0.1 — xem file khoá;
+# Công cụ ghim kèm hash: requirements-dev.txt (ruff, mypy, coverage, shellcheck-py — số bản ở file khoá;
 # `pip install` đặt `shellcheck` vào bin của Python, cùng bản ở máy dev và CI — T-1812). Agent KHÔNG suy diễn lệnh từ văn xuôi.
 format: python3 -m ruff format scripts tests .claude/hooks
 format_file: case {} in *.py) python3 -m ruff format {} ;; esac
