@@ -6167,24 +6167,28 @@ def cmd_blueprint_status(args: argparse.Namespace) -> int:
 
 
 def _live_loop(base: Path) -> str:
-    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn, chưa `done`) — `loop init` không ghi đè (LOOP-HARNESS-024);
-    rỗng nếu không có. `state.json` từng bị ghi đè vô điều kiện: hai phiên cùng dự án xoá trạng thái của nhau
-    (rà stored 01 §3h: "gậy" chỉ là quy ước, không phải khoá)."""
+    """Mô tả vòng autopilot đang chạy ở `base` (bật, chưa hết vòng/hạn, chưa `done`) — `loop init` không ghi đè (LOOP-HARNESS-024,
+    hai phiên từng xoá trạng thái của nhau — rà stored 01 §3h); rỗng nếu không có."""
     prev = read_state(base) or {}
     try:
         if not prev.get("active"):
             return ""
-        verdict = loop_verdict(base)["verdict"]
-    except (TypeError, ValueError, AttributeError):  # state.json sai kiểu: không phải vòng đọc được → ghi đè như trước
+        v = loop_verdict(base)
+        verdict = v["verdict"]
+    except (TypeError, ValueError, AttributeError):  # state.json sai kiểu → ghi đè như trước
         return ""
     if verdict == "budget":
-        return ""  # hết ngân sách: `loop init` đợt kế không cần `loop stop`/`--force` (D-177, ADR-0047)
+        return ""  # hết ngân sách: đợt kế không cần `loop stop`/`--force` (D-177)
     if verdict in ("done", "done-pending-human"):
-        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây hiện tại (LOOP-DESIGN-022): verify của đợt kế chỉ chạy Gate PLAN
-        # mới nên Gate đợt trước đỏ sẽ lọt nếu init ngay (review #262 lượt 2); cùng lý do Stop hook chặn.
+        # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}"
+    # AUD-HAR-114: `blocked` từ state (block/lỗi lặp) → resume; PLAN mất/rỗng → stop
+    why = ""
+    if verdict == "blocked":
+        end = "người xem rồi `loop resume --reason`" if _verdict_loop_state(prev) else "`loop stop`"
+        why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
+    return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
 
 def _init_warnings(args: argparse.Namespace, base: Path) -> None:
@@ -6274,16 +6278,16 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     live = "" if args.force else _live_loop(base)
-    if live.startswith("đợt `"):  # đợt xong nhưng cây đổi sau kiểm cuối (PLAN kế, sổ audit): verify lại rồi init;
-        # không gợi `resume` (xoá chờ người) hay `--force` (bỏ kiểm cuối) — review #262 lượt 3
+    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại, không gợi `resume`/`--force`
         print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
         return 2
     if live:
-        print(
-            f"✗ Đang có vòng autopilot chạy ({live}) — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách,"
-            " vòng cũ đã chết): `loop init --force` (LOOP-HARNESS-024)",
-            file=sys.stderr,
+        tail = (
+            ""  # `blocked` đã nêu lối ra riêng
+            if "verdict `blocked`" in live
+            else " — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách, vòng cũ đã chết): `loop init --force`"
         )
+        print(f"✗ Đang có vòng autopilot chạy ({live}){tail} (LOOP-HARNESS-024)", file=sys.stderr)
         return 2
     for path in (args.plan, args.blueprint):  # blueprint gõ nhầm → verdict lặng lẽ bỏ qua blueprint (AUD-HAR-016)
         if path and not (base / path).exists():
