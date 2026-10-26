@@ -1885,6 +1885,7 @@ class HookFailOpenTest(unittest.TestCase):
         "permission-request.sh",
         "task-completed.sh",
         "subagent-stop.sh",
+        "post-tool-failure.sh",
     )
 
     def test_every_hook_fail_open_on_empty_or_garbage_stdin(self):

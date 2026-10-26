@@ -3854,8 +3854,9 @@ DOCTOR_HOOK_EVENTS = {
     "PreToolUse": "error",
     "Stop": "error",
     "PostToolUse": "warn",
-    "TaskCompleted": "warn",  # T-1514: chặn tick task chưa có evidence xanh
+    "TaskCompleted": "warn",  # T-1514: chặn tick task thiếu evidence xanh
     "SubagentStop": "warn",  # T-1514: block executor thiếu "lệnh + exit code"
+    "PostToolUseFailure": "warn",  # T-1822: Gate đỏ → trích lỗi tại chỗ
 }
 DOCTOR_SKILLS = (
     "autopilot",

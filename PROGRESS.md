@@ -14,7 +14,7 @@
 
 ## Tiếp theo
 0. PLAN-3.14-app (`v3.14.0`): PR nâng dự án đích chờ chủ dự án: hotel-manager #117, X-Company #65. `unchecked_must` 0/64.
-1. PLAN-3.13: Lát 0–C merge (#198–#201), `v3.13.0` (#202); hoãn chờ người T-1814 (AUD-SEC-102 — bản vá trong task), T-1822, T-1832, T-1834. **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (chủ repo bật lại 2026-10-23, D-144 — khớp `main.json`); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1). **Chờ chủ repo**: hotel-manager, X-Company gỡ `merge-gate` khỏi ruleset (`gh api repos/<o>/<r>/rules/branches/main`) rồi mới xoá stub; tắt "Allow auto-merge"; `XT_STEWARD_TOKEN` (T-2402 là lớp đỡ tạm bằng `workflow_dispatch`); App reviewer.
+1. PLAN-3.13: Lát 0–C merge (#198–#201), `v3.13.0` (#202); chờ người còn T-1834 (T-1814 xong ở T-2121; T-1822/1823/1832 duyệt 2026-10-26 → PLAN-harden-2026-10-26d). **Ruleset sống X-Templates**: không `merge-gate`, `strict: true` (chủ repo bật lại 2026-10-23, D-144 — khớp `main.json`); còn tắt resolve thread + bật "Allow auto-merge" (RUNBOOK-PR-STEWARD §1). **Chờ chủ repo**: hotel-manager, X-Company gỡ `merge-gate` khỏi ruleset (`gh api repos/<o>/<r>/rules/branches/main`) rồi mới xoá stub; tắt "Allow auto-merge"; `XT_STEWARD_TOKEN` (T-2402 là lớp đỡ tạm bằng `workflow_dispatch`); App reviewer.
 2. Sau PLAN-3.12: ca đối kháng cho `autonomy-bench`; guard chưa quét nội dung script gọi qua `bash x.sh`/`python3 x.py` (ghi vào LOOP-STOP-027 khi làm); `project-commands.sh` được `source` hai lần mỗi task.
 3. Chờ chủ repo: token/app reviewer (T-1508); xoá `/scratch.log` ở gốc container; `x-hotel-manager` dọn/tạo mới; Dependabot security updates (proxy chặn API); Routine tuần `feedback aggregate` + quyền repo đích (T-2410).
 4. Còn: task `[perf]` trong `loop` (D-041); URL phiên do máy chủ MCP gắn vào thân PR (PATCH lại thân PR sau khi mở); ép báo "đã đo/chưa đo" cho task UI (`LOOP-DESIGN-021`); sàn quyền token; `xt.pyz` (ADR-0010).
@@ -35,5 +35,5 @@
 
 ## Bàn giao phiên
 - `main` `057e0c0` (3.26.1 + #270–#279). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). `scripts/` và `11-autonomous-loop` sát trần byte — sửa thì cắt chú thích bù.
-- Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
+- Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).

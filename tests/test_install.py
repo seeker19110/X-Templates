@@ -1004,15 +1004,20 @@ class InstallPlanTest(unittest.TestCase):
         self.assertNotIn(".claude/skills/gate/SKILL.md", manifest["files"])
 
     def test_unregistered_framework_hook_is_not_installed(self):
-        """Hook khung chưa đăng ký trong settings.json (chờ duyệt — T-1822) không chép: file hook mồ côi ở dự án đích."""
-        self.assertIn("post-tool-failure.sh", {p.name for p in (ROOT / ".claude" / "hooks").iterdir()})
-        self.assertNotIn("post-tool-failure.sh", install.registered_hooks())
-        self.assertEqual(self.install(), 0)
+        """Hook khung chưa đăng ký trong settings.json không chép (file hook mồ côi ở dự án đích); `post-tool-failure.sh`
+        đăng ký từ T-1822 (chủ repo duyệt 2026-10-26) nên chép — ca chưa đăng ký giả bằng cách bỏ nó khỏi tập đăng ký."""
+        registered = install.registered_hooks()
+        self.assertIn("post-tool-failure.sh", registered)
+        self.assertIn(".claude/hooks/post-tool-failure.sh", {f["path"] for f in self.plan()["files"]})
+        with unittest.mock.patch.object(
+            install, "registered_hooks", return_value=registered - {"post-tool-failure.sh"}
+        ):
+            self.assertNotIn(".claude/hooks/post-tool-failure.sh", {f["path"] for f in self.plan()["files"]})
+            self.assertEqual(self.install(), 0)
         hooks = self.target / ".claude" / "hooks"
         self.assertFalse((hooks / "post-tool-failure.sh").exists())
         self.assertTrue((hooks / "_lib.sh").is_file())  # file nạp cạnh hook đã đăng ký vẫn chép
         self.assertTrue((hooks / "guard.py").is_file())
-        self.assertNotIn(".claude/hooks/post-tool-failure.sh", {f["path"] for f in self.plan()["files"]})
 
     def test_own_permissions_keeps_project_permissions_and_relative_hooks(self):
         """`harness_permissions: own` (dhcb — chủ repo 2026-10-22): không thêm allow/deny của khung; lệnh hook khung ghi

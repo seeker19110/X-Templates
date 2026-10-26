@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Hook `PostToolUseFailure` (matcher `Bash`) đăng ký trong `.claude/settings.json`: lệnh cổng/Gate đỏ → `xt.py loop triage-local` đưa ≤ 20 dòng lỗi đã che bí mật vào ngữ cảnh agent (T-1822/T-3531, chủ repo duyệt 2026-10-26); `install.py` chép hook, `doctor` cảnh báo khi thiếu.
+
 ### Changed
 - Repo khung: mọi MUST đã tick có `— Kiểm:` máy chạy lại (`unchecked_must` 37 → 0; test hành vi có sẵn hoặc grep chỉ đọc); gỡ `noqa` chết, `type: ignore` có lý do (D-195).
 - `xt.py`: guard ném lỗi lúc nạp (vd `SyntaxError`) không còn bị nuốt im — báo stderr `[xt] guard … nạp lỗi (…)`, vẫn dùng `_failure_decision` của module dở (BASE-ERR-001, D-194).
