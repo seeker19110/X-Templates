@@ -13,11 +13,11 @@
   REPO-001, REPO-005 (subject squash từ `v3.20.0` qua `pr title-check` — #247 trước đó dài 87 ký tự, lịch sử không sửa),
   GATE-003 (ruff + RUF100 + mọi `type: ignore` có lý do), GATE-006/008, DOC-001/005, DEP-003, ERR-004, SEC-002, REPO-013,
   PRF-CLI-001/003/004/006.
-- 20 mục còn lại kiểm bằng test hành vi có sẵn hoặc grep đúng chữ MUST: CFG-001 (mọi `XT_*` đọc từ env có trong README),
+- 20 mục còn lại kiểm bằng test hành vi có sẵn hoặc grep đúng chữ MUST: CFG-001 (URL/IP literal ngoài allowlist),
   CFG-002/003/006/007, DATA-003/009, DEP-006, ERR-002/003/007/008/009/010, GATE-007 (bản khai `main.json`; ruleset
   sống `gh api …/rules/branches/main` khớp ngày 2026-10-26 theo review #279, lệnh kiểm giữ offline), SEC-001/005/006, PRF-CLI-007/010.
 - Sửa kèm (GATE-003): gỡ 6 `noqa: E402/E731` chết (ruff chỉ bật E9/F/C901), 9 `type: ignore` thêm lý do. Review #279: siết
-  CFG-001 (URL/IP literal), CFG-003 (biến env gồm shell `${XT_…:-}`), CFG-006/PRF-CLI-010, SEC-002/005/006, DATA-001/006.
+  CFG-001 (URL/IP literal), CFG-003 (mọi `XT_*` đọc từ env — Python, hằng `*_ENV`, shell `${XT_…[:+-]` — có trong README), CFG-006/PRF-CLI-010, SEC-002/005/006, DATA-001/006.
 - Rủi ro: lệnh kiểm chậm (test chạy lại ~10 s tổng); REPO-005 phụ thuộc tag `v3.20.0` (CI fetch tag). Đường lùi: revert PR.
 - Cách làm: phiên chính tự làm; một PR làn chuẩn → reviewer-alt.
 
