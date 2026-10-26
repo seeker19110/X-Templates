@@ -10,7 +10,7 @@
   bằng lời — `loop verify --all` không chạy lại được, mục có thể âm thầm hỏng.
 - Phạm vi: gắn `— Kiểm: \`…\`` (chỉ đọc, offline, < 5 giây) cho 19 MUST mà repo đã đạt và kiểm được bằng lệnh tất định:
   BASE-REPO-002/003/004/007/008, BASE-SEC-004/007/009, BASE-DEP-001/002/004/007, BASE-DOC-003/006,
-  BASE-GATE-001/002/004, PRF-CLI-002/005. SEC-004/007 dùng luật bandit của ruff (AST, không grep chữ) — đột biến
+  BASE-GATE-001/002/004, PRF-CLI-002/005. SEC-004/007 dùng luật bandit của ruff (AST; SEC-004 thêm `git grep` cấu hình/shell sau review #274) — đột biến
   `shell=True`/`os.system`/`verify=False`/`_create_unverified_context` bị bắt (exit 1). Mục tiêu: `unchecked_must` 57 → 38.
 - Không làm: BASE-ERR-001 (ruff S110 báo `scripts/xt.py:2048` `except Exception: pass` có chủ đích — sửa mã là lát riêng
   cần review, ghi 🟢 ở sổ khi audit kế); MUST cần API sống (ruleset thật, tag) hay đánh giá người (ADR đủ chất lượng).
