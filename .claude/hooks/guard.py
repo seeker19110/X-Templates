@@ -1467,6 +1467,14 @@ def merge_check(selector: List[str], root: str) -> Dict[str, object]:
     return data
 
 
+ADMIN_MERGE_WHY = "gh pr merge --admin vượt ruleset nhánh — máy không dùng, người merge trên GitHub"
+
+
+def _gh_admin_flag(args: List[str]) -> bool:
+    """`--admin` vượt ruleset (lớp đỡ CI) — chặn ở mọi chính sách (T-3532)."""
+    return any(a == "--admin" or a.startswith("--admin=") for a in args)
+
+
 def _gh_auto_flag(args: List[str]) -> bool:
     """Cờ bật auto-merge của `gh pr merge` (`--auto`, cả dạng gán `--auto=…`) ở bất kỳ vị trí nào — kể cả là giá trị
     của cờ khác (`-b --auto`): chặn thừa an toàn hơn đoán sai cách gh tách cờ."""
@@ -1485,6 +1493,8 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
         return "ask", f"{EXTERNAL_ASK} — tắt auto-merge"
     if _gh_auto_flag(args):
         return "deny", AUTO_MERGE_WHY
+    if _gh_admin_flag(args):
+        return "deny", ADMIN_MERGE_WHY
     sha = _flag_value(args, "--match-head-commit")
     if sum(a == "--match-head-commit" or a.startswith("--match-head-commit=") for a in args) > 1:
         sha = None  # gh lấy lần cuối, guard đã kiểm lần đầu — hai pin là không pin
@@ -2364,6 +2374,8 @@ def _pr_flag_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     merge — vẫn kiểm `hard`/review như merge thiếu ghim."""
     if _gh_auto_flag(args[1:]):
         return "deny", AUTO_MERGE_WHY
+    if _gh_admin_flag(args[1:]):
+        return "deny", ADMIN_MERGE_WHY
     selector, repo = _pr_flag_merge(args, args.index("merge", 2))
     return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
 
@@ -3537,20 +3549,22 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
     mục đang đứng không biết (D-106, `_where`)."""
     asks: List[str] = []
-    if n and n[0] in ("chmod", "chown", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
+    if n and n[0] in ("chmod", "chown", "chgrp", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
         asks += [
             GIT_HOOK_WHY.format(t)
             for t in _positionals(n[1:])
             if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
         ]
+        # `chmod 000 guard.py` → hook fail-open mọi lệnh (T-3532)
+        asks += [
+            FENCE_WHY.format(t) for t in _positionals(n[1:]) if any(_is_fence(x, root) for x in _where(t, root, cwd))
+        ]
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
-    asks += [
-        EVIDENCE_WHY.format(t)
-        for t in (x for t in find_evidence for x in _where(t, root, cwd))
-        if t not in targets and _target_kind(t, root) == "evidence"
-    ]
+    found = [x for t in find_evidence for x in _where(t, root, cwd) if t not in targets]
+    asks += [EVIDENCE_WHY.format(t) for t in found if _target_kind(t, root) == "evidence"]
+    asks += [FENCE_WHY.format(t) for t in found if _is_fence(t, root)]
     for target in (x for t in targets for x in _where(t, root, cwd)):
         kind = _target_kind(target, root)
         if _is_fence(target, root):
@@ -6255,6 +6269,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("xoá thay đổi đã cất", "STASH_DROP"),
     (DESTROY_ASK, "DESTROY"),
     (AUTO_MERGE_WHY, "AUTO_MERGE_ENABLE"),  # bật auto-merge: deny phẳng ở mọi chính sách (ADR-0036)
+    ("--admin vượt ruleset nhánh", "MERGE_ADMIN"),
     (HARD_ASK, "HARD_EXCEPTION"),
     (UNVERIFIED_ASK, "UNVERIFIED"),
     (REVIEW_MISSING_ASK, "REVIEW_MISSING"),

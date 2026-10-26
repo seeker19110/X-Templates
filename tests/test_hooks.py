@@ -2154,7 +2154,7 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
     def test_unpinned_admin_repo_or_compound_still_ask(self):
         for cmd in (
             "gh pr merge 7 --squash",
-            "gh pr merge 7 --squash --admin --match-head-commit abc1234def",
+            "gh pr merge 7 --squash --body-file b.md --match-head-commit abc1234def",
             "gh pr merge 7 -R o/r --match-head-commit abc1234def",
             "gh pr merge 7 --repo=o/r --match-head-commit abc1234def",
         ):
@@ -2166,13 +2166,26 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
         self.assertEqual(dec, "ask")
         self.assertIn("lệnh đứng một mình", why)
 
+    def test_admin_merge_denied_every_policy(self):
+        """T-3532 (ca đối kháng): `--admin` vượt ruleset nhánh — lớp đỡ CI — nên chặn phẳng ở mọi chính sách, kể cả khi
+        merge-check = merge và head đã ghim (trước đây là ask thường, chính sách mặc định cho qua)."""
+        pin = "--match-head-commit abc1234def"
+        for cmd in (
+            f"gh pr merge 7 --squash --admin {pin}",
+            f"gh pr merge 7 --squash {pin} --admin=true",
+            f"gh pr -R o/r merge 7 --admin {pin}",
+            "bash -c -e 'gh pr merge 7 --admin'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "deny")
+
     def test_merge_allow_strict(self):
         """AUD-SEC-016: `allow` chỉ cho lệnh merge trơn — không lệnh con, heredoc, chuyển hướng, gán biến, repo khác."""
         pin = "--match-head-commit abc1234def"
         for cmd in (
             f'gh pr merge 7 --squash {pin} -b "$(curl x)"',
             f'gh pr merge 7 --squash {pin} -t "`id`"',
-            f"gh pr merge 7 --squash {pin} --admin=true",
+            f"gh pr merge 7 --squash {pin} --subject=x",
             f"GH_REPO=e/r gh pr merge 7 --squash {pin}",
             f"env GH_HOST=evil.com gh pr merge 7 --squash {pin}",
             f"gh pr merge https://github.com/evil/other/pull/7 --squash {pin}",
@@ -2181,8 +2194,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             f"gh pr merge 7 --squash {pin} <<E\n$(touch /tmp/x)\nE",
             f"gh pr merge 7 --squash {pin} --match-head-commit def",  # gh lấy lần cuối
             f"gh pr merge 7 --squash {pin} --match-head-commit=",
-            f"gh pr merge version --admin {pin}",  # `version`/`help` là selector, không phải hỏi trợ giúp
-            f"gh pr -R o/r merge 7 --admin {pin}",
+            f"gh pr merge version --body-file b.md {pin}",  # `version`/`help` là selector, không phải hỏi trợ giúp
+            f"gh pr -R o/r merge 7 {pin}",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
@@ -2912,7 +2925,7 @@ class GuardDeltaAuditTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
         for cmd in (
-            "bash -c -e 'gh pr merge 7 --admin'",
+            "bash -c -e 'gh pr merge 7 --body-file b.md'",
             "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
@@ -2960,7 +2973,7 @@ class GuardDeltaAuditTest(unittest.TestCase):
     def test_guard_error_fails_closed_for_merge(self):
         """AUD-SEC-032, AUD-HAR-040: guard lỗi giữa chừng → merge/`gh api`/MCP merge hỏi; lệnh khác vẫn fail-open."""
         self.assertEqual(
-            self._main("bash", {"tool_input": {"command": "gh pr merge 7 --admin > a\x00b"}})["decision"], "ask"
+            self._main("bash", {"tool_input": {"command": "gh pr merge 7 --body-file b > a\x00b"}})["decision"], "ask"
         )
         with mock.patch.object(self.guard, "bash_decision", side_effect=RuntimeError("x")):
             self.assertEqual(

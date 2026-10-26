@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Security
+- Guard: `chmod`/`chown`/`chgrp`/`chattr` (cả qua `find`) vào `.claude/hooks/*`, `.claude/settings*.json` bị chặn `HOOK_BYPASS` — trước đó `chmod 000 guard.py` làm hook fail-open mọi lệnh (AUD-SEC-108 🔴, ca đối kháng T-3532); `gh pr merge --admin` bị chặn ở mọi chính sách, mã `MERGE_ADMIN` (AUD-SEC-109, D-198). `autonomy-bench` thêm 21 ca của reviewer.
+
 ### Added
 - Hook `PostToolUseFailure` (matcher `Bash`) đăng ký trong `.claude/settings.json`: lệnh cổng/Gate đỏ → `xt.py loop triage-local` đưa ≤ 20 dòng lỗi đã che bí mật vào ngữ cảnh agent (T-1822/T-3531, chủ repo duyệt 2026-10-26); `install.py` chép hook, `doctor` cảnh báo khi thiếu.
 
