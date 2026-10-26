@@ -1,0 +1,30 @@
+{
+  "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "before": {
+    "active": true,
+    "iterations": 7,
+    "deferred": {},
+    "same_failure_count": 0
+  },
+  "write_A": {
+    "iterations": 8
+  },
+  "write_B": {
+    "deferred": [
+      "T-900"
+    ]
+  },
+  "final": {
+    "active": true,
+    "iterations": 7,
+    "deferred": {
+      "T-900": {
+        "reason": "cần khoá",
+        "at": "2026-10-26T00:00:00+00:00"
+      }
+    },
+    "same_failure_count": 0
+  },
+  "lost_update": true,
+  "note": "write_atomic chống file ghi dở, không chống hai snapshot cũ đè nhau; tái hiện tuần tự tất định, không cần race thật"
+}

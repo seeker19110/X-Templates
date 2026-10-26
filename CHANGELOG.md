@@ -6,7 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
-- Nghiên cứu nâng mức tự chủ của `/autopilot`, `/complete`, `/optimize` ngày 2026-10-26: đề xuất nối phiên an toàn, kiểm tính hợp lệ phép đo, máy chọn bước kế và gói nghiệm thu; kèm nguồn sống ghim SHA, tái hiện và số đo đối chiếu main 3.27.0 (518 ca, ADR-0050). Chỉ tài liệu và bằng chứng, chưa triển khai thay đổi hành vi.
+- `research/2026-10-26-autopilot-complete-optimize.md` (bản 2): nghiên cứu nâng mức tự chủ của `/autopilot`, `/complete`, `/optimize` — đề xuất nối phiên không xoá việc chờ, verdict không-tiến-triển theo task (ngoài chữ ký lỗi), `rev` cho `state.json`, artefact perf v2 có đơn vị + vân tay cây, bộ bước kế chỉ đọc và gói nghiệm thu; hợp đồng CLI/state/artefact đề xuất, corpus nghiệm thu luồng FLOW-01…26. Bằng chứng ở `research/evidence/2026-10-26-three-loops/`: sáu tái hiện trên `main` 3.27.0 (`resume` xoá `deferred`; `perf compare` nhận 100 ms = 0,1 s là `improved`; `perf sample` không ghi vân tay cây bẩn; mất cập nhật state giữa hai snapshot; Gate đỏ luân phiên A/B 6 lần không `blocked` trong khi cùng lỗi 3 lần thì `blocked`), đo lại `autonomy-bench` 518/518 và trần byte (ADR-0050), 15 dữ kiện nguồn sống 2026-10-26 (Claude Code 2.1.310: payload Stop không có chi phí USD, transcript là định dạng nội bộ; REST merge ghim `sha` → 409, `update-branch` → 422; GitHub lùi ngày cưỡng chế rule `pull_request_target` sang 2026-12-02 — đính chính K-1 của nghiên cứu 2026-10-21). Chỉ tài liệu và bằng chứng, chưa triển khai thay đổi hành vi.
 
 ## [3.27.0] - 2026-10-26
 
