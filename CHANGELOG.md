@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Nghiên cứu nâng mức tự chủ của `/autopilot`, `/complete`, `/optimize` ngày 2026-10-26: đề xuất nối phiên an toàn, kiểm tính hợp lệ phép đo, máy chọn bước kế và gói nghiệm thu; kèm nguồn sống ghim SHA, tái hiện và số đo đối chiếu main 3.27.0 (518 ca, ADR-0050). Chỉ tài liệu và bằng chứng, chưa triển khai thay đổi hành vi.
+
 ## [3.27.0] - 2026-10-26
 
 **Dự án đích: chạy lại `install.py`** — nhận hook `PostToolUseFailure`, bản vá guard (`chmod`/`setfacl` vào hàng rào, `gh pr merge --admin`, `git update-index`) và hook Bash đóng hàng rào khi `guard.py` không nạp được (D-199/D-200: cần `python3` ≥ 3.11 trên PATH). Trần byte thư mục nâng theo ADR-0050. Chữ checklist không đổi.
