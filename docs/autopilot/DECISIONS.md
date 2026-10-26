@@ -1364,3 +1364,10 @@
 - Chọn: Gắn — Kiểm: cho 19 MUST kiểm được bằng lệnh chỉ đọc tất định (ruff bandit cho SEC-004/007)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: mục tick được máy chạy lại, hỏng thì đỏ; (2) đường lùi revert một file; (3) không đổi công cụ; bật fail khi còn 38 mục không kiểm được sẽ chặn oan
 - Đường lùi: revert PR; các mục quay về bằng chứng bằng lời
+
+### D-194 · 2026-10-26T02:59:45+00:00 · Duyệt PLAN-harden-2026-10-26b: ERR-001, lệnh kiểm blueprint trên CI, siết SEC-004
+
+- Phương án: (1) Một PR: sửa _load_guard báo stderr + kiểm S110/S112, bước CI blueprint-status --run, siết regex SEC-004 · (2) Chỉ ghi ERR-001 là Miễn và giữ kiểm cục bộ
+- Chọn: Một PR: sửa _load_guard báo stderr + kiểm S110/S112, bước CI blueprint-status --run, siết regex SEC-004
+- Lý do (tiêu chí chất lượng cuối): (1) lỗi nạp guard không còn im lặng, mục tick hỏng thì đỏ trên mỗi PR; (2) revert một PR; (3) không thêm phụ thuộc (ruff đã ghim)
+- Đường lùi: revert PR

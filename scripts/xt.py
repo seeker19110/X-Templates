@@ -2038,15 +2038,14 @@ def _exec_source(path: Path, mod: Any) -> None:
 
 
 def _load_guard(path: Path) -> Any:
-    """Module guard `path` nạp từ nguồn (`_exec_source`: không đọc pyc độc, không ghi `__pycache__` vào `.claude/hooks` —
-    loop verify so dấu vân tay cây). Guard ném lỗi lúc nạp → trả module dở (còn `_failure_decision` của nó); không tạo
-    được module → None."""
+    """Module guard `path` nạp từ nguồn (`_exec_source`: không pyc, không `__pycache__`). Guard ném lỗi lúc nạp →
+    báo stderr, trả module dở (còn `_failure_decision`)."""
     mod: Any = None
     try:
         mod = types.ModuleType("xt_project_guard")
         _exec_source(path, mod)
-    except Exception:
-        pass  # `_guard_decide` dùng `_failure_decision` của module dở
+    except Exception as e:  # `_guard_decide` dùng `_failure_decision` của module dở
+        print(f"[xt] guard {path} nạp lỗi ({type(e).__name__}: {e}) — dùng module dở", file=sys.stderr)
     return mod
 
 

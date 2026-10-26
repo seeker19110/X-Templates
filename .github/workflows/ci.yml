@@ -206,6 +206,13 @@ jobs:
       - name: autonomy-bench — đỏ khi false-green > 0 (AUTO-07)
         run: python3 scripts/xt.py autonomy-bench
 
+      # D-194: lệnh `— Kiểm:` của mục đã tick trong BLUEPRINT.md chạy trên MỖI PR (trước chỉ `loop verify`/`release-check`
+      # cục bộ) — mục tick mà hỏng thì đỏ. SEC-004/007 cần ruff ghim kèm hash.
+      - name: Công cụ ghim kèm hash (ruff cho lệnh kiểm blueprint)
+        run: pip install --quiet --require-hashes -r requirements-dev.txt
+      - name: blueprint-status --strict --run — lệnh kiểm của mục đã tick
+        run: python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict --run
+
       - name: Ghép thử blueprint cho MỌI hồ sơ × gói ngành (smoke)
         run: |
           set -euo pipefail

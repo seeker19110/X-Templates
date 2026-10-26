@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- `xt.py`: guard ném lỗi lúc nạp (vd `SyntaxError`) không còn bị nuốt im — báo stderr `[xt] guard … nạp lỗi (…)`, vẫn dùng `_failure_decision` của module dở (BASE-ERR-001, D-194).
+- CI job `checks` chạy `blueprint-status BLUEPRINT.md --strict --run`: lệnh `— Kiểm:` của mục đã tick đỏ trên mỗi PR (D-194).
+
 ## [3.26.1] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi thông báo `loop init`; chữ checklist không đổi). D-192, trả 3 🟢 của audit delta3.
