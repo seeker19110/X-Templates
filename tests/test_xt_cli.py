@@ -1681,6 +1681,9 @@ class LoopCommandsTest(TmpDirCase):
         rc, _, err = run_main("loop", "init")
         self.assertEqual(rc, 2)
         self.assertIn("LOOP-HARNESS-024", err)
+        self.assertIn("tiếp tục: `loop resume`", err)  # AUD-TEST-022: vòng sống giữ hai lối ra chung
+        self.assertIn("`loop init --force`", err)
+        self.assertNotIn("verdict `blocked`", err)
         self.assertEqual(xt.read_state(self.tmp)["iterations"], 5)  # không ghi đè
         st["deadline"] = "2000-01-01T00:00:00+00:00"  # vòng đã hết hạn → khởi tạo lại được
         xt.write_state(st, self.tmp)
