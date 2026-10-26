@@ -1414,12 +1414,8 @@ def _flag_value(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
-# Bộ nạp của `py_run` (_lib.sh — giữ GIỐNG HỆT, test so): chạy `main()` của file .py như một module (sys.path[0] = thư
-# mục của file, không lấy cwd). Đối số: <file.py> <đối số…>. Chạy với `-I -B`: cách ly (bỏ PYTHON*, user-site, cwd —
-# AUD-SEC-065) và Python không đọc/ghi bytecode ở chỗ agent ghi được. Bộ nạp KHÔNG cache bytecode: biên dịch từ nguồn
-# mỗi lần. Thư mục agent ghi được không thể tin — header pyc (checked-hash) tính được từ mã nguồn công khai còn phần
-# marshal thì không ai kiểm, nên pyc giả khớp header vẫn chạy thay guard (AUD-SEC-074, review PR #182). Đo: thêm
-# ~80–100 ms mỗi lần gọi `pre-bash-guard.sh` (guard.py ~4.900 dòng).
+# Bộ nạp của `py_run` (_lib.sh — giữ GIỐNG HỆT, test so): chạy `main()` của file .py như module, `-I -B` (AUD-SEC-065),
+# biên dịch từ nguồn mỗi lần — pyc giả khớp header vẫn chạy thay guard (AUD-SEC-074, #182).
 PY_LOADER = """import sys
 p = sys.argv[1]
 d, _, f = p.rpartition("/")
@@ -3034,12 +3030,9 @@ def _bypass_marker(argv: List[str], n: List[str], claude: List[str]) -> str:
     return ""
 
 
-# CLI agent KHÁC Claude Code không chạy hook của khung; chạy nó với cờ tự duyệt = đường vòng quanh guard (LOOP-STOP-028,
-# stored 01 §3g.4). Claude Code lồng vẫn nạp hook của dự án nên chỉ xét cờ tắt hook ở trên (bypass vẫn chịu hook exit 2
-# và deny — docs permission-modes). Cờ dạng `--x giá-trị` so cả cặp `--x=giá-trị`. Đọc 2026-10-18 từ docs/mã nguồn:
-# Codex (learn.chatgpt.com developer-commands, codex-rs shared_options.rs), Gemini CLI docs/cli/cli-reference.md,
-# Copilot CLI command reference, opencode.ai/docs/cli, aider.chat config options, cursor.com/docs/cli/reference/parameters
-# (tên binary `cursor-agent` chưa xác minh), Amp: docs E2B/SDK (`--dangerously-allow-all`, chưa thấy ở docs chính thức).
+# CLI agent KHÁC Claude Code không chạy hook của khung; chạy nó với cờ tự duyệt = đường vòng quanh guard (LOOP-STOP-028).
+# Cờ `--x giá-trị` so cả `--x=giá-trị`. Nguồn 2026-10-18: docs CLI của Codex, Gemini, Copilot, opencode, aider, cursor
+# (`cursor-agent` chưa xác minh), Amp (`--dangerously-allow-all`, chưa thấy ở docs chính thức).
 AGENT_CLI_PKGS = {
     "@openai/codex": "codex",
     "@google/gemini-cli": "gemini",
@@ -3476,6 +3469,26 @@ FENCE_DIRS = {".claude", ".claude/hooks"}
 FENCE_WHY = "ghi/xoá hàng rào qua Bash ({}) — tắt hook của khung; sửa bằng Edit/Write, khôi phục bằng git checkout"
 
 
+PERM_CMDS = ("chmod", "chown", "chgrp", "chattr", "setfacl")
+PERM_NO_TARGET_WHY = "đổi quyền không rõ đích (xargs/stdin) — guard không thấy file"
+
+
+def _fence_glob(target: str, root: str) -> bool:
+    """Glob ở đoạn thư mục (`.claude/*/guard.py`) shell nở ra file hàng rào (T-3532)."""
+    rel = _rel_dir(target, root)
+    if not set(rel) & set("*?["):
+        return False
+    hooks = os.path.join(root, ".claude", "hooks")
+    names = os.listdir(hooks) if os.path.isdir(hooks) else ["guard.py"]
+    known = [
+        *FENCE_DIRS,
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        *(".claude/hooks/" + f for f in names),
+    ]
+    return any(fnmatch.fnmatch(k, rel) for k in known)
+
+
 def _is_fence(target: str, root: str) -> bool:
     if not target or target.startswith("/dev/"):
         return False
@@ -3545,20 +3558,29 @@ def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
     return out
 
 
+def _perm_asks(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Đổi quyền git hook/hàng rào (`chmod 000 guard.py` → hook fail-open); đích từ stdin → chặn."""
+    pos = _positionals(n[1:])
+    asks = [
+        GIT_HOOK_WHY.format(t)
+        for t in pos
+        if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
+    ]
+    asks += [
+        FENCE_WHY.format(t)
+        for t in pos
+        if any(_is_fence(x, root) or _fence_glob(x, root) for x in _where(t, root, cwd))
+    ]
+    lead = n[0] in PERM_CMDS[:3] and not any(a.startswith("--reference") for a in n[1:])
+    if not pos[1 if lead else 0 :] and not set(n[1:]) & {"--help", "--version"}:
+        asks.append(PERM_NO_TARGET_WHY)
+    return asks
+
+
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
     mục đang đứng không biết (D-106, `_where`)."""
-    asks: List[str] = []
-    if n and n[0] in ("chmod", "chown", "chgrp", "chattr"):  # bỏ quyền thực thi = git bỏ qua hook
-        asks += [
-            GIT_HOOK_WHY.format(t)
-            for t in _positionals(n[1:])
-            if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
-        ]
-        # `chmod 000 guard.py` → hook fail-open mọi lệnh (T-3532)
-        asks += [
-            FENCE_WHY.format(t) for t in _positionals(n[1:]) if any(_is_fence(x, root) for x in _where(t, root, cwd))
-        ]
+    asks = _perm_asks(n, root, cwd) if n and n[0] in PERM_CMDS else []
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
@@ -5356,9 +5378,8 @@ def _interp_literal_ask(
     return ""
 
 
-# D-105: thao tác ĐỌC được phép trong script nhắc đường dẫn được canh. Mọi lời gọi khác (kể cả hàm tự viết, gọi qua
-# biến, `getattr`, `eval`), gọi không ngoặc ngoài từ khoá, gán thuộc tính, chuỗi nội suy/f-string có biểu thức, backtick,
-# tuỳ chọn `flag(s)`, mode ghi → script không chỉ đọc → chặn. Phân tích theo từ (không phải AST): đa ngôn ngữ, chặt.
+# D-105: chỉ thao tác ĐỌC được phép trong script nhắc đường dẫn được canh; lời gọi khác, gán thuộc tính, nội suy có
+# biểu thức, backtick, `flag(s)`, mode ghi → chặn. Phân tích theo từ (không AST): đa ngôn ngữ, chặt.
 # Chống mượn tên: tên trong danh sách chỉ được GỌI (`print = os.remove`, `as open`, `{unlinkSync: open}` → chặn); gọi
 # trên biểu thức (`(os.remove)(…)`, `{…}.read(…)`), dunder, gán phần tử, đối tượng có giá trị là hàm → chặn. Hàm nhận
 # hàm gọi lại (`sorted(key=…)`, `JSON.parse(t, reviver)`, `json.dumps(default=…)`) không có trong danh sách hoặc bị
@@ -6282,6 +6303,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
     (UNRESOLVED_PUSH_WHY, UNRESOLVED_TARGET),  # `xargs git push`, `git push origin $(…)` (T-1523)
+    (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
     ("brace expansion quá nhiều", BRACE_OVERFLOW),
 )
