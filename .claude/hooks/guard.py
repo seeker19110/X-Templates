@@ -3471,29 +3471,33 @@ FENCE_WHY = "ghi/xoá hàng rào qua Bash ({}) — tắt hook của khung; sửa
 
 PERM_CMDS = ("chmod", "chown", "chgrp", "chattr", "setfacl")
 PERM_NO_TARGET_WHY = "đổi quyền không rõ đích (xargs/stdin) — guard không thấy file"
+PERM_VALUE_FLAGS: Tuple[str, ...] = ("-m", "--modify", "-x", "--remove", "-M", "--modify-file", "-X", "--remove-file")
+PERM_VALUE_FLAGS += ("--set", "--set-file", "--restore", "-v", "-p")  # setfacl, chattr
 
 
 def _fence_glob(target: str, root: str) -> bool:
-    """Glob ở đoạn thư mục (`.claude/*/guard.py`) shell nở ra file hàng rào (T-3532)."""
-    rel = _rel_dir(target, root)
-    if not set(rel) & set("*?["):
+    """Glob (`.claude/*/guard.py`) shell nở ra file hàng rào — so theo đoạn như shell: `*` không qua `/`, không khớp
+    dotfile (T-3532)."""
+    pat = _rel_dir(target, root).split("/")
+    if not set("".join(pat)) & set("*?["):
         return False
-    hooks = os.path.join(root, ".claude", "hooks")
-    names = os.listdir(hooks) if os.path.isdir(hooks) else ["guard.py"]
-    known = [
-        *FENCE_DIRS,
-        ".claude/settings.json",
-        ".claude/settings.local.json",
-        *(".claude/hooks/" + f for f in names),
-    ]
-    return any(fnmatch.fnmatch(k, rel) for k in known)
+    try:
+        names = os.listdir(os.path.join(root, ".claude", "hooks"))
+    except OSError:
+        names = ["guard.py"]
+    known = [*FENCE_DIRS, ".claude/settings.json", ".claude/settings.local.json"]
+    segs = [k.split("/") for k in [*known, *(".claude/hooks/" + f for f in names)]]
+    return any(
+        len(k) == len(pat) and all((s[:1] != "." or p[:1] == ".") and fnmatch.fnmatchcase(s, p) for p, s in zip(pat, k))
+        for k in segs
+    )
 
 
 def _is_fence(target: str, root: str) -> bool:
     if not target or target.startswith("/dev/"):
         return False
     rel = _rel_dir(target, root)
-    return rel in FENCE_DIRS or _match_any(rel, FENCE_PATTERNS)
+    return rel in FENCE_DIRS or _match_any(rel, FENCE_PATTERNS) or _fence_glob(target, root)
 
 
 def _at(target: str, cwd: Optional[str]) -> str:
@@ -3558,29 +3562,23 @@ def _where(t: str, root: str, cwd: Optional[str]) -> List[str]:
     return out
 
 
-def _perm_asks(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
-    """Đổi quyền git hook/hàng rào (`chmod 000 guard.py` → hook fail-open); đích từ stdin → chặn."""
-    pos = _positionals(n[1:])
+def _perm_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Đổi quyền git hook/hàng rào (`chmod 000 guard.py` → hook fail-open); đích từ xargs/file → chặn."""
+    pos = _positionals(n[1:], PERM_VALUE_FLAGS if n[0] in PERM_CMDS[3:] else ())  # chmod: `-x` là mode
     asks = [
         GIT_HOOK_WHY.format(t)
         for t in pos
         if any(_match_any(rel_path(x, root), GIT_HOOK_PATTERNS) for x in _where(t, root, cwd))
     ]
-    asks += [
-        FENCE_WHY.format(t)
-        for t in pos
-        if any(_is_fence(x, root) or _fence_glob(x, root) for x in _where(t, root, cwd))
-    ]
-    lead = n[0] in PERM_CMDS[:3] and not any(a.startswith("--reference") for a in n[1:])
-    if not pos[1 if lead else 0 :] and not set(n[1:]) & {"--help", "--version"}:
-        asks.append(PERM_NO_TARGET_WHY)
-    return asks
+    asks += [FENCE_WHY.format(t) for t in pos if any(_is_fence(x, root) for x in _where(t, root, cwd))]
+    hidden = _xargs_wrapped(argv) or any(a.split("=")[0] == "--restore" for a in n)
+    return asks + ([PERM_NO_TARGET_WHY] if hidden else [])
 
 
 def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = None) -> List[str]:
     """Câu hỏi xác nhận cho file hàng rào/bí mật/cổng/migration mà lệnh có thể ghi (bỏ qua /dev/*). `cwd` None = thư
     mục đang đứng không biết (D-106, `_where`)."""
-    asks = _perm_asks(n, root, cwd) if n and n[0] in PERM_CMDS else []
+    asks = _perm_asks(n, argv, root, cwd) if n and n[0] in PERM_CMDS else []
     cfg = _git_config_file(n)
     find_evidence = _find_evidence_targets(n[1:]) if n[:1] == ["find"] else []
     targets = [*write_targets(n, argv), *([cfg] if cfg else [])]
@@ -5810,10 +5808,8 @@ def _direct_write(script: str, lit: str) -> bool:
     return bool(re.search(DIRECT_WRITE_FMT.format(q=q), script))
 
 
-# AUD-SEC-084: đường dẫn gán cho biến (`f='.env'`, `p = Path('…')`, `my $f = '…'`, `const f = '…'`, `for f in ['…']`) rồi
-# biến đó (hoặc biến gán lại từ nó, `b = a`) là đối số ĐƯỜNG DẪN của lời gọi ghi/xoá → chặn như ghi trực tiếp. Biến chỉ
-# được in ra, đọc, hay làm NỘI DUNG ghi vào file khác (`writeFileSync('out', 'x' + f)`) không tính — tránh chặn oan
-# script sửa tài liệu/test nhắc `.env`. Còn hở: đường dẫn ghép chuỗi/format, nằm trong dict/đối số hàm tự viết.
+# AUD-SEC-084: đường dẫn gán cho biến (`f='.env'`, `p = Path('…')`, `b = a`) rồi là đối số ĐƯỜNG DẪN của lời gọi ghi/xoá
+# → chặn như ghi trực tiếp; biến chỉ in/đọc/làm NỘI DUNG không tính. Còn hở: ghép chuỗi/format, dict, hàm tự viết.
 ALIAS_NAME = r"\$?[A-Za-z_]\w*"
 ALIAS_BIND_FMT = (
     r"(?<![\w.$])(" + ALIAS_NAME + r")\s*(?::\s*[\w.\[\]]+\s*)?=(?![=~>])[^;\n=]{{0,200}}?{q}"
@@ -6263,11 +6259,9 @@ def bash_decision(
     return res
 
 
-# Chính sách đầu ra (ADR-0018, chủ repo 2026-10-17): chỉ CẤM lệnh nguy hiểm/không đảo ngược, còn lại cho chạy. Bộ luật
-# ở trên vẫn tính `ask` đầy đủ; `XT_GUARD_POLICY=strict` giữ hành vi cũ (hỏi). Quyết định có kiểu (REC-04): mỗi kết quả
-# mang MÃ lý do; `apply_policy` ánh xạ theo mã qua bảng `POLICY`, không theo chuỗi rải rác. Mã do nơi sinh quyết định
-# đặt (`code`), hoặc suy MỘT lần từ lý do qua `REASON_CODES` (luật cũ chưa đặt mã). Regex/hook cùng UID không phải ranh
-# giới cách ly (D-015) — đây là lớp chặn sai lầm, không chặn kẻ tấn công có quyền ghi.
+# Chính sách đầu ra (ADR-0018): chỉ CẤM lệnh nguy hiểm/không đảo ngược; `XT_GUARD_POLICY=strict` hỏi. Mỗi kết quả mang
+# MÃ (REC-04, đặt ở nơi sinh hoặc suy từ `REASON_CODES`); `apply_policy` ánh xạ qua `POLICY`. Lớp chặn sai lầm, không
+# phải ranh giới cách ly (D-015).
 OTHER_ASK = "OTHER_ASK"  # ask không nguy hiểm → cho qua (mặc định)
 RULE_DENY = "RULE_DENY"  # deny của bộ luật chưa có mã riêng
 NO_OBJECTION = "NONE"  # guard không phản đối

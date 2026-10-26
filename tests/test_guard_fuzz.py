@@ -153,6 +153,7 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-sec089-sqlite-evidence": ".autopilot/x.db tương đối",
     "guard-advrev-rm-fence-dir": ".claude tương đối → /tmp/.claude",
     "guard-advrev-chmod-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
+    "guard-advrev-truncate-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
 }
 
 

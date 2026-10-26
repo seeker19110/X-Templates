@@ -30,18 +30,24 @@ if ! command -v python3 >/dev/null 2>&1; then
   fi
   exit 0
 fi
-# guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → chặn mọi lệnh (strict:
-# hỏi) trừ lệnh một dòng để xem/khôi phục và tắt auto-merge, tới khi khôi phục (AUD-SEC-019/046). guard.py có mà lỗi
-# giữa chừng → vẫn fail-open về luồng (ADR-0002).
-if [ ! -f "$(dirname "$0")/guard.py" ]; then
+# Hàng rào bị gỡ → chặn mọi lệnh (strict: hỏi) trừ lệnh một dòng xem/khôi phục và tắt auto-merge (AUD-SEC-019/046/108):
+# guard.py vắng/không đọc được/rỗng, hoặc chết khi đã sửa so với HEAD (`chmod 000`, `echo x > guard.py`). Guard chết ở bản
+# đã commit → fail-open về luồng (ADR-0002, D-199).
+broken() {
   cmd="$(json_field "$payload" tool_input.command)"
   # `install.py` phải là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
   restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]]+[^[:space:];&|`$<>-][^[:space:];&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
   [[ $cmd != *$'\n'* && $cmd != *--output* && $cmd =~ $restore_re ]] && exit 0
-  fence_closed "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
-fi
-if ! guard_fields bash <<<"$payload"; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` chặn (AUD-HAR-040/SEC-045)
+  fence_closed "Khung cần xác nhận: .claude/hooks/guard.py $1 — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
+}
+g="$(dirname "$0")/guard.py"
+[ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
+if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
+  if git -C "$XT_ROOT" rev-parse -q --verify HEAD >/dev/null 2>&1; then # ngoài repo: `git diff` thành --no-index
+    git -C "$XT_ROOT" diff --quiet HEAD -- "$g" 2>/dev/null
+    [ $? -eq 1 ] && broken "đã sửa so với HEAD và lỗi"
+  fi
   exit 0
 fi
 decision="$XG_DECISION"

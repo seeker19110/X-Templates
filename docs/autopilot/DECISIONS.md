@@ -1399,3 +1399,10 @@
 - Chọn: Deny phẳng mọi chính sách (mã MERGE_ADMIN), như AUTO_MERGE_ENABLE
 - Lý do (tiêu chí chất lượng cuối): (1) --admin vượt ruleset nhánh — lớp đỡ CI/duyệt GitHub mà merge-check không mô hình; máy không cần cờ này; cách hiểu chặt hơn thắng; (2) người vẫn merge trên GitHub
 - Đường lùi: gỡ _gh_admin_flag khỏi hai luật merge, bỏ mã MERGE_ADMIN
+
+### D-199 · 2026-10-26T09:33:25+00:00 · Gốc của AUD-SEC-108: hook fail-open khi guard.py hỏng
+
+- Phương án: (1) Hook đóng hàng rào khi guard.py vắng/không đọc được/rỗng, hoặc chạy lỗi mà đã sửa so với HEAD; lỗi ở bản đã commit giữ fail-open (ADR-0002) · (2) Chỉ chặn từng lệnh làm hỏng guard ở luật guard
+- Chọn: Hook đóng hàng rào khi guard.py vắng/không đọc được/rỗng, hoặc chạy lỗi mà đã sửa so với HEAD; lỗi ở bản đã commit giữ fail-open (ADR-0002)
+- Lý do (tiêu chí chất lượng cuối): (1) đóng cả lớp (chmod/setfacl/glob/xargs/$(…)/ghi rỗng) thay vì đuổi từng biến thể; (2) khôi phục bằng git checkout/install.py vẫn được, Edit vẫn sửa được guard; (3) ADR-0002 giữ cho lỗi thật ở bản đã commit
+- Đường lùi: bỏ hàm broken và hai điều kiện mới ở pre-bash-guard.sh

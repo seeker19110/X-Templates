@@ -4024,6 +4024,42 @@ class MissingGuardTest(unittest.TestCase):
             with self.subTest(ok=cmd):
                 self.assertIsNone(dec(cmd))
 
+    def test_empty_or_tampered_guard_closes_fence(self):
+        """AUD-SEC-108 (gốc): guard.py rỗng, hoặc đã sửa so với HEAD mà chạy lỗi (`echo x > guard.py`, ghi rỗng qua glob,
+        `chmod 000` với user thường) → đóng hàng rào như khi vắng; lỗi ở bản ĐÃ commit → vẫn fail-open (ADR-0002)."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        hooks = tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, hooks / f)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+
+        def dec(cmd: str) -> str | None:
+            r = subprocess.run(
+                ["bash", str(hooks / "pre-bash-guard.sh")],
+                input=json.dumps({"tool_input": {"command": cmd}}),
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return decision(r.stdout)
+
+        git = ["git", "-C", str(tmp), "-c", "user.name=t", "-c", "user.email=t@t"]
+        guard = hooks / "guard.py"
+        guard.write_text("", encoding="utf-8")
+        self.assertEqual(dec("echo hi"), "deny")  # rỗng = hàng rào bị gỡ
+        self.assertIsNone(dec("git checkout -- .claude/hooks/guard.py"))
+        guard.write_text("raise SystemExit(3)\n", encoding="utf-8")
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "x"], check=True)
+        self.assertIsNone(dec("echo hi"))  # lỗi ở bản đã commit: fail-open về luồng
+        guard.write_text("syntax error (\n", encoding="utf-8")
+        self.assertEqual(dec("echo hi"), "deny")  # sửa so với HEAD rồi chết = hàng rào hỏng
+        self.assertIsNone(dec("git restore .claude/hooks/guard.py"))
+
 
 class GuardWave1017Test(unittest.TestCase):
     """AUD-SEC-047…049: biến thể push nhánh chính, lệnh huỷ, ghi file bí mật qua Bash lọt chính sách ADR-0018."""
