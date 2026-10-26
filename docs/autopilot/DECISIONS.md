@@ -1406,3 +1406,10 @@
 - Chọn: Hook đóng hàng rào khi guard.py vắng/không đọc được/rỗng, hoặc chạy lỗi mà đã sửa so với HEAD; lỗi ở bản đã commit giữ fail-open (ADR-0002)
 - Lý do (tiêu chí chất lượng cuối): (1) đóng cả lớp (chmod/setfacl/glob/xargs/$(…)/ghi rỗng) thay vì đuổi từng biến thể; (2) khôi phục bằng git checkout/install.py vẫn được, Edit vẫn sửa được guard; (3) ADR-0002 giữ cho lỗi thật ở bản đã commit
 - Đường lùi: bỏ hàm broken và hai điều kiện mới ở pre-bash-guard.sh
+
+### D-200 · 2026-10-26T12:03:42+00:00 · Hook làm gì khi guard.py không nạp được (guard_fields không trả ok)?
+
+- Phương án: (1) Luôn đóng hàng rào (chỉ lệnh xem/khôi phục, install.py); không dựa trạng thái git · (2) Đóng khi khác blob HEAD, mở khi untracked (bản 96e867d) · (3) Đóng khi khác blob HEAD, mở khi lịch sử chưa từng có guard.py (rev-list --all --reflog)
+- Chọn: Luôn đóng hàng rào (chỉ lệnh xem/khôi phục, install.py); không dựa trạng thái git
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: main() của guard đã bắt mọi Exception lúc chạy và trả ok, nên guard_fields hỏng chỉ khi file không nạp/compile được — gần như luôn là hỏng/sửa tay; mọi dấu hiệu dựa trạng thái git (chỉ mục, HEAD, reflog, repo lồng) agent tự đổi được bằng lệnh guard cho qua (review #282 lượt 3-5: 4 lách liên tiếp). (2) đường lùi: Edit vẫn sửa được guard (pre-edit fail-open), git checkout/restore -- path và install.py nằm trong restore_re. (3) đơn giản: bỏ ~10 dòng git. Giá: guard đã commit mà không nạp được cũng đóng — lỗi khung thật, cần sửa ngay, không phải lý do mở mọi lệnh
+- Đường lùi: Khôi phục khối so blob HEAD ở pre-bash-guard.sh (commit 96e867d)

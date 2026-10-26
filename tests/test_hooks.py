@@ -3055,14 +3055,13 @@ class MergeHookFailClosedTest(unittest.TestCase):
             with self.subTest(nopy=payload):
                 self.assertEqual(self.hook(name, payload, env), want)
         default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
-        for name, payload, want in cases:  # thiếu guard.py: Bash chặn cả lệnh thường (MissingGuardTest)
-            with self.subTest(missing=payload):
-                view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
-                self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
-        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
-        for name, payload, want in cases:  # guard.py lỗi
-            with self.subTest(broken=payload):
-                self.assertEqual(self.hook(name, payload, default), want)
+        for label in ("missing", "broken"):  # thiếu hoặc không nạp được guard.py: Bash chặn cả lệnh thường (D-200)
+            if label == "broken":
+                (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+            for name, payload, want in cases:
+                with self.subTest(label, payload=payload):
+                    view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
+                    self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -4055,25 +4054,21 @@ class MissingGuardTest(unittest.TestCase):
         subprocess.run([*git, "init", "-q"], check=True)
         subprocess.run([*git, "add", "-A"], check=True)
         subprocess.run([*git, "commit", "-qm", "x"], check=True)
-        self.assertIsNone(dec("echo hi"))  # lỗi ở bản đã commit: fail-open về luồng
+        # D-200: không nạp được = đóng, kể cả bản đã commit — trạng thái git agent tự đổi được (review #282 lượt 3-5:
+        # `--assume-unchanged`, `reset --soft`, `checkout --orphan`, `git init` lồng, `restore --staged --source=<cây rỗng>`).
+        self.assertEqual(dec("echo hi"), "deny")
         guard.write_text("syntax error (\n", encoding="utf-8")
-        self.assertEqual(dec("echo hi"), "deny")  # sửa so với HEAD rồi chết = hàng rào hỏng
+        for setup in (
+            ["update-index", "--assume-unchanged", ".claude/hooks/guard.py"],
+            ["restore", "--staged", "--source=4b825dc642cb6eb9a060e54bf8d69288fbee4904", "."],
+            ["checkout", "-q", "--orphan", "t"],
+        ):
+            subprocess.run([*git, *setup], check=True)
+            self.assertEqual(dec("echo hi"), "deny", setup)
         self.assertIsNone(dec("git restore .claude/hooks/guard.py"))
-        # Cờ chỉ mục làm `git diff` mù — so nội dung với blob HEAD vẫn thấy (review #282 lượt 3).
-        subprocess.run([*git, "update-index", "--assume-unchanged", ".claude/hooks/guard.py"], check=True)
+        self.assertIsNone(dec("git status"))
+        guard.write_text("def main():\n    raise SystemExit(3)\n", encoding="utf-8")  # chết lúc chạy ngoài try
         self.assertEqual(dec("echo hi"), "deny")
-        subprocess.run([*git, "update-index", "--skip-worktree", ".claude/hooks/guard.py"], check=True)
-        self.assertEqual(dec("echo hi"), "deny")
-        # Repo lồng ở thư mục hook không đánh tráo HEAD; HEAD mất blob mà chỉ mục còn = đã đổi (review #282 lượt 4).
-        subprocess.run(["git", "-C", str(hooks), "init", "-q"], check=True)
-        self.assertEqual(dec("echo hi"), "deny")
-        shutil.rmtree(hooks / ".git")
-        subprocess.run([*git, "checkout", "-q", "--orphan", "t"], check=True)
-        self.assertEqual(dec("echo hi"), "deny")
-        (tmp / "x").mkdir()
-        hooks.rename(tmp / "x" / "hooks")  # untracked (chưa có blob ở HEAD) → mở
-        hooks = tmp / "x" / "hooks"
-        self.assertIsNone(dec("echo hi"))
 
 
 class GuardWave1017Test(unittest.TestCase):

@@ -29,8 +29,8 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 0
 fi
 # Hàng rào bị gỡ → chặn mọi lệnh (strict: hỏi) trừ lệnh một dòng xem/khôi phục và tắt auto-merge (AUD-SEC-019/046/108):
-# guard.py vắng/không đọc được/rỗng, hoặc chết khi đã sửa so với HEAD (`chmod 000`, `echo x > guard.py`). Guard chết ở bản
-# đã commit → fail-open về luồng (ADR-0002, D-199).
+# guard.py vắng/không đọc được/rỗng, hoặc không nạp được. `main()` của guard tự bắt mọi lỗi lúc chạy (fail-open về luồng,
+# ADR-0002), nên không nạp được = file hỏng; không xét trạng thái git — agent tự đổi được (D-199, D-200).
 broken() {
   cmd="$(json_field "$payload" tool_input.command)"
   # `install.py` phải là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
@@ -42,15 +42,7 @@ g="$(dirname "$0")/guard.py"
 [ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
 if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
-  # So với blob HEAD của repo `$XT_ROOT` (`git diff` mù với `--assume-unchanged`; neo repo ngoài để `git init` lồng không
-  # đánh tráo HEAD). Còn trong chỉ mục mà HEAD không có blob (`reset --soft`, `checkout --orphan`) = đã đổi → đóng; chỉ
-  # untracked thật (mới cài) mới mở. `--no-replace-objects`: `git replace` không đổi blob đọc ra.
-  rel="$(git -C "$XT_ROOT" ls-files --full-name -- "$g" 2>/dev/null)"
-  if [ -n "$rel" ]; then
-    h="$(git --no-replace-objects -C "$XT_ROOT" rev-parse -q --verify "HEAD:$rel" 2>/dev/null)"
-    [ "$(git -C "$XT_ROOT" hash-object -- "$g" 2>/dev/null)" != "$h" ] && broken "đã sửa so với HEAD và lỗi"
-  fi
-  exit 0
+  broken "không nạp được (sửa bằng Edit)"
 fi
 decision="$XG_DECISION"
 [ "$decision" = "deny" ] && pretool_decision deny "$XG_REASON"
