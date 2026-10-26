@@ -15,7 +15,7 @@
 - (3) SEC-004: cụm cờ curl có chữ số (`-4k`), dừng ở `;`, `sslverify` mọi hoa/thường và `0|no|off|false`, JSON
   `"sslVerify": false`, `--proxy-insecure`, npm `strict-ssl false`; `git grep …; test $? -eq 1` để regex hỏng/path ngoài
   repo (exit 128) là đỏ (pathspec không tồn tại trong repo vẫn exit 1 — xanh).
-- REPO-006 (review #277 🔴): kiểm tag gần nhất annotated + VERSION = tag hoặc bản đang cắt chưa có tag và chưa lên `main` (HEAD = `origin/main` được miễn khi tag đang tạo) — trước đây đòi tag `v<VERSION>` có sẵn nên PR cắt bản đỏ CI.
+- REPO-006 (review #277 🔴): tag `v<VERSION>` annotated; chưa có tag chỉ xanh khi VERSION chưa lên `main` (PR cắt bản) hoặc commit đổi VERSION trên `main` < 15 phút (release-tag.yml đang tạo — tránh đỏ giả ở PR khác); thiếu `origin/main` → đỏ — trước đây đòi tag `v<VERSION>` có sẵn nên PR cắt bản đỏ CI.
 - Không làm: curl nhiều dòng (`\` nối dòng) — giới hạn của kiểm theo dòng, đã chấp nhận ở review #274.
 - Rủi ro: C901/byte trần `scripts/` (cắt chú thích bù); CI thêm ~10 s. Đường lùi: revert PR.
 - Cách làm: phiên chính tự làm; một PR làn chuẩn (mã + CI) → reviewer-alt.
