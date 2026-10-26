@@ -1,0 +1,69 @@
+{
+  "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "scenario": "Gate của T-001 đỏ luân phiên hai chữ ký (AssertionError A / TypeError B) rồi đỏ cùng chữ ký A ba lần; `loop record` thật trong repo tạm, CLAUDE_PROJECT_DIR trỏ repo tạm, không chạm .autopilot/ của repo khung",
+  "setup": {
+    "plan": "- [ ] `T-001` lỗi luân phiên A/B — Gate: `bash gate.sh`",
+    "gate_sh": "đếm lần chạy vào .n; lẻ → 'AssertionError: widget A broke' exit 1; chẵn → 'TypeError: widget B broke' exit 1",
+    "loop_init": "loop init --plan docs/autopilot/PLAN.md --single-session → trần 40 vòng"
+  },
+  "alternating": [
+    {
+      "run": 1,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 2,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 3,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 4,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 5,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 6,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    }
+  ],
+  "same_signature": [
+    {
+      "run": 1,
+      "same_failure_count": 1,
+      "verdict": "continue"
+    },
+    {
+      "run": 2,
+      "same_failure_count": 2,
+      "verdict": "continue"
+    },
+    {
+      "run": 3,
+      "same_failure_count": 3,
+      "verdict": "blocked"
+    }
+  ],
+  "loop_stats_after": {
+    "runs": 9,
+    "failed_runs": 9,
+    "needs_3_plus": [
+      "T-001"
+    ],
+    "never_green": [
+      "T-001"
+    ]
+  },
+  "conclusion": "max_same_failure chỉ đếm chữ ký liên tiếp giống nhau (scripts/xt.py loop_record: chữ ký khác → đặt lại 1); 6 lần đỏ xen kẽ không chạm `blocked`, chỉ trần vòng (hook-stop) và `loop stats.needs_3_plus` ghi nhận — số đo có nhưng verdict không dùng."
+}

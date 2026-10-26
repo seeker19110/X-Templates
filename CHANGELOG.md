@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `research/2026-10-26-autopilot-complete-optimize.md` (bản 2): nghiên cứu nâng mức tự chủ của `/autopilot`, `/complete`, `/optimize` — đề xuất nối phiên không xoá việc chờ, verdict không-tiến-triển theo task (ngoài chữ ký lỗi), `rev` cho `state.json`, artefact perf v2 có đơn vị + vân tay cây, bộ bước kế chỉ đọc và gói nghiệm thu; hợp đồng CLI/state/artefact đề xuất, corpus nghiệm thu luồng FLOW-01…26. Bằng chứng ở `research/evidence/2026-10-26-three-loops/`: sáu tái hiện trên `main` 3.27.0 (`resume` xoá `deferred`; `perf compare` nhận 100 ms = 0,1 s là `improved`; `perf sample` không ghi vân tay cây bẩn; mất cập nhật state giữa hai snapshot; Gate đỏ luân phiên A/B 6 lần không `blocked` trong khi cùng lỗi 3 lần thì `blocked`), đo lại `autonomy-bench` 518/518 và trần byte (ADR-0050), 15 dữ kiện nguồn sống 2026-10-26 (Claude Code 2.1.310: payload Stop không có chi phí USD, transcript là định dạng nội bộ; REST merge ghim `sha` → 409, `update-branch` → 422; GitHub lùi ngày cưỡng chế rule `pull_request_target` sang 2026-12-02 — đính chính K-1 của nghiên cứu 2026-10-21). Chỉ tài liệu và bằng chứng, chưa triển khai thay đổi hành vi.
+
 ## [3.27.0] - 2026-10-26
 
 **Dự án đích: chạy lại `install.py`** — nhận hook `PostToolUseFailure`, bản vá guard (`chmod`/`setfacl` vào hàng rào, `gh pr merge --admin`, `git update-index`) và hook Bash đóng hàng rào khi `guard.py` không nạp được (D-199/D-200: cần `python3` ≥ 3.11 trên PATH). Trần byte thư mục nâng theo ADR-0050. Chữ checklist không đổi.

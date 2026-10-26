@@ -1,0 +1,39 @@
+{
+  "stdout": [
+    "▶ Autopilot tiếp tục (vòng 7/50): attach new session",
+    "  việc chờ người quay lại hàng làm: T-900"
+  ],
+  "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "exit_code": 0,
+  "before": {
+    "active": true,
+    "blocked": false,
+    "iterations": 7,
+    "max_iterations": 50,
+    "deadline": "2026-10-27T00:00:00+00:00",
+    "same_failure_count": 2,
+    "last_failure_signature": "sig-A",
+    "last_failure_task": "T-001",
+    "session_id": "old",
+    "deferred": {
+      "T-900": {
+        "reason": "need credential",
+        "at": "2026-10-26T00:00:00+00:00"
+      }
+    }
+  },
+  "after": {
+    "active": true,
+    "blocked": false,
+    "iterations": 7,
+    "max_iterations": 50,
+    "deadline": "2026-10-27T00:00:00+00:00",
+    "same_failure_count": 0,
+    "last_failure_signature": null,
+    "session_id": "new",
+    "deferred": null,
+    "resume_reason": "attach new session"
+  },
+  "deferred_lost": true,
+  "failure_count_reset": true
+}

@@ -1,0 +1,37 @@
+{
+  "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "scenario": "`perf sample --runs 3 --warmup 0 -- true` chạy khi README.md có sửa chưa commit (cây bẩn); kiểm file mẫu ghi gì về cây",
+  "sample_doc_keys": [
+    "cmd",
+    "commit",
+    "platform",
+    "python",
+    "runs",
+    "samples",
+    "unit",
+    "warmup"
+  ],
+  "commit_recorded": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "dirty_recorded": false,
+  "unit_recorded": "s",
+  "compare_checks": {
+    "cmd": true,
+    "unit": false,
+    "platform": false,
+    "python": false,
+    "commit": false,
+    "runs_warmup": false
+  },
+  "compare_rerun": {
+    "before_unit_ms_after_unit_s_same_quantity": {
+      "verdict": "improved",
+      "change": -0.999,
+      "exit_code": 0
+    },
+    "different_cmd": {
+      "exit_code": 2,
+      "stderr": "hai file đo hai lệnh khác nhau"
+    }
+  },
+  "conclusion": "Cùng đại lượng 100 ms = 0,1 s vẫn `improved` −99,9 % ở HEAD; `_perf_compare_cmd` chỉ so `cmd`; `perf sample` ghi HEAD SHA, không ghi vân tay cây/diff chưa commit → hai file có thể cùng `commit` mà đo hai cây khác nhau."
+}

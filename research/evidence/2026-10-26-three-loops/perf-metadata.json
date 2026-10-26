@@ -1,0 +1,49 @@
+{
+  "revision": "4e7bade7625ec9f70accfc9f293d533b905533a7",
+  "scenario": "same quantity 100ms = 0.1s, mismatched unit and environment metadata, same command",
+  "before": {
+    "samples": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "cmd": [
+      "bench"
+    ],
+    "unit": "ms",
+    "platform": "linux",
+    "python": "3.11",
+    "commit": "before"
+  },
+  "after": {
+    "samples": [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "cmd": [
+      "bench"
+    ],
+    "unit": "s",
+    "platform": "darwin",
+    "python": "3.13",
+    "commit": "after"
+  },
+  "exit_code": 0,
+  "stdout": "{\"runs_before\": 10, \"runs_after\": 10, \"exact\": false, \"median_before\": 100.0, \"median_after\": 0.1, \"change\": -0.9990000000000001, \"p\": 1.5937911688066275e-05, \"threshold\": 0.02, \"verdict\": \"improved\"}\n",
+  "stderr": ""
+}

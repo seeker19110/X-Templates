@@ -1,0 +1,20 @@
+{
+  "delegated": [],
+  "self_done": [],
+  "delegation_rate": null,
+  "first_pass_rate_delegated": null,
+  "first_pass_rate_self": null,
+  "tasks": {},
+  "task_count": 0,
+  "runs": 0,
+  "failed_runs": 0,
+  "first_pass_rate": null,
+  "needs_3_plus": [],
+  "escalated": [],
+  "escalation_rate": null,
+  "never_green": [],
+  "iterations": 0,
+  "max_iterations": null,
+  "deferred": [],
+  "blocked": false
+}
