@@ -3036,8 +3036,8 @@ class MergeHookFailClosedTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
-        # Mặc định (ADR-0018) thiếu python3 / guard.py vắng hoặc lỗi: lệnh thường đi tiếp, nhưng merge không kiểm được
-        # ngoại lệ cứng → chặn (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005).
+        # Mặc định (ADR-0018) thiếu python3: lệnh thường đi tiếp, nhưng merge không kiểm được ngoại lệ cứng → chặn
+        # (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005). guard.py vắng/lỗi: Bash đóng (D-200, dưới).
         env["XT_GUARD_POLICY"] = ""
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
         off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
@@ -4009,6 +4009,12 @@ class MissingGuardTest(unittest.TestCase):
             "echo hi",
             "python3 -c \"__import__('os').system('id')\" install.py",  # review #97
             "git diff --output=/tmp/x",
+            "git checkout -- .",  # review #282 lượt 6: xoá thay đổi chưa commit
+            "git restore .",
+            "git checkout -f main",
+            "git restore --staged --worktree --source=HEAD~1 .",
+            "git checkout v1 -- .claude/hooks/pre-bash-guard.sh",
+            "python3 /tmp/evil_install.py",
         ):
             with self.subTest(cmd):
                 self.assertEqual(dec(cmd), "deny")
@@ -4024,8 +4030,8 @@ class MissingGuardTest(unittest.TestCase):
                 self.assertIsNone(dec(cmd))
 
     def test_empty_or_tampered_guard_closes_fence(self):
-        """AUD-SEC-108 (gốc): guard.py rỗng, hoặc đã sửa so với HEAD mà chạy lỗi (`echo x > guard.py`, ghi rỗng qua glob,
-        `chmod 000` với user thường) → đóng hàng rào như khi vắng; lỗi ở bản ĐÃ commit → vẫn fail-open (ADR-0002)."""
+        """AUD-SEC-108 (gốc): guard.py rỗng hoặc không nạp được (`echo x > guard.py`, ghi rỗng qua glob, `chmod 000` với
+        user thường) → đóng hàng rào như khi vắng, kể cả bản ĐÃ commit (D-200)."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         hooks = tmp / ".claude" / "hooks"
         hooks.mkdir(parents=True)

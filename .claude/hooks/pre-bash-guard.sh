@@ -33,16 +33,18 @@ fi
 # ADR-0002), nên không nạp được = file hỏng; không xét trạng thái git — agent tự đổi được (D-199, D-200).
 broken() {
   cmd="$(json_field "$payload" tool_input.command)"
-  # `install.py` phải là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
-  restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]]+[^[:space:];&|`$<>-][^[:space:];&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
-  [[ $cmd != *$'\n'* && $cmd != *--output* && $cmd =~ $restore_re ]] && exit 0
+  # Khôi phục CHỈ guard.py (`git checkout -- .`/`restore .` xoá thay đổi chưa commit mà guard lành chặn — review #282
+  # lượt 6); `scripts/install.py` là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
+  restore_re='^[[:space:]]*git[[:space:]]+(checkout([[:space:]]+HEAD)?[[:space:]]+--|restore)[[:space:]]+(\./)?\.claude/hooks/guard\.py[[:space:]]*$'
+  view_re='^[[:space:]]*(git[[:space:]]+(status|diff|log|show)|ls|cat|python3[[:space:]]+([^[:space:];&|`$<>-][^[:space:];&|`$<>]*/)?scripts/install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
+  [[ $cmd != *$'\n'* && $cmd != *--output* && ($cmd =~ $restore_re || $cmd =~ $view_re) ]] && exit 0
   fence_closed "Khung cần xác nhận: .claude/hooks/guard.py $1 — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
 }
 g="$(dirname "$0")/guard.py"
 [ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
 if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
-  broken "không nạp được (sửa bằng Edit)"
+  broken "không nạp được (file hỏng hoặc python3 < 3.11; có thể sửa bằng Edit)"
 fi
 decision="$XG_DECISION"
 [ "$decision" = "deny" ] && pretool_decision deny "$XG_REASON"
