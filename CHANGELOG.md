@@ -5,10 +5,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Security
+- `pre-bash-guard.sh`: `guard.py` không đọc được/rỗng hoặc không nạp được → đóng hàng rào như khi vắng (chỉ lệnh xem/khôi phục, `install.py`; Edit vẫn sửa được guard), kể cả bản đã commit — `main()` của guard tự bắt lỗi lúc chạy nên không nạp được là file hỏng; không xét trạng thái git vì agent tự đổi được (`update-index --assume-unchanged`, `reset --soft`, `checkout --orphan`, `restore --staged --source=<cây rỗng>`, `git init` lồng — review #282 lượt 3–5). Khi đóng chỉ khôi phục đúng `guard.py` (`git checkout -- .claude/hooks/guard.py`, `git restore …`; không còn `git checkout -- .`/`restore .`) và chạy `…/scripts/install.py`. Dự án đích có guard.py không nạp được sẽ bị chặn Bash tới khi chạy lại `install.py` (hoặc nâng `python3` trên PATH lên ≥ 3.11) (AUD-SEC-108 🔴 gốc, D-199/D-200 — trước đó `chmod 000 guard.py`/ghi rỗng làm hook cho qua mọi lệnh).
+- Guard: `chmod`/`chown`/`chgrp`/`chattr`/`setfacl` (cả qua `find`; qua `xargs` → chặn vì không thấy đích) vào `.claude/hooks/*`, `.claude/settings*.json` → `HOOK_BYPASS`; glob ở đoạn thư mục (`.claude/*/guard.py`, so theo đoạn như shell) tính là hàng rào với mọi lệnh ghi (ca đối kháng T-3532); `git update-index` lên hàng rào (`--assume-unchanged`, `--cacheinfo …,path`) → `HOOK_BYPASS`; `gh pr merge --admin` bị chặn ở mọi chính sách, mã `MERGE_ADMIN` (AUD-SEC-109, D-198). `autonomy-bench` thêm 40 ca của reviewer (33 đối kháng).
+
 ### Added
 - Hook `PostToolUseFailure` (matcher `Bash`) đăng ký trong `.claude/settings.json`: lệnh cổng/Gate đỏ → `xt.py loop triage-local` đưa ≤ 20 dòng lỗi đã che bí mật vào ngữ cảnh agent (T-1822/T-3531, chủ repo duyệt 2026-10-26); `install.py` chép hook, `doctor` cảnh báo khi thiếu.
 
 ### Changed
+- Trần tổng byte thư mục (`tests/test_docs_budget.py` `DIR_CAPS`): `scripts/`, `.claude/hooks/`, `framework/11-autonomous-loop/` mỗi nhóm thêm 1 MiB (ADR-0050, chủ repo quyết 2026-10-26) — bản vá không còn phải cắt chú thích ID audit để bù chỗ; trần từng file nạp đầu phiên giữ nguyên.
 - Repo khung: mọi MUST đã tick có `— Kiểm:` máy chạy lại (`unchecked_must` 37 → 0; test hành vi có sẵn hoặc grep chỉ đọc); gỡ `noqa` chết, `type: ignore` có lý do (D-195).
 - `xt.py`: guard ném lỗi lúc nạp (vd `SyntaxError`) không còn bị nuốt im — báo stderr `[xt] guard … nạp lỗi (…)`, vẫn dùng `_failure_decision` của module dở (BASE-ERR-001, D-194).
 - CI job `checks` chạy `blueprint-status BLUEPRINT.md --strict --run` trên mỗi PR: lệnh `— Kiểm:` của mục đã tick hỏng, hoặc còn MUST mở (ghép lại có MUST mới chưa tick), thì CI đỏ (D-194). Kiểm `BASE-REPO-006` của repo khung: VERSION phải đúng dạng `X.Y.Z`, thiếu `origin/main` là đỏ; bản đang cắt (chưa lên `main`) chưa cần tag; VERSION đã lên `main` quá 15 phút mà thiếu tag thì đỏ — chạy lại `release-tag.yml` (RUNBOOK-PR-STEWARD §4).

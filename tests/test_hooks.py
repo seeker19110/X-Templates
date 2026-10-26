@@ -2154,7 +2154,7 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
     def test_unpinned_admin_repo_or_compound_still_ask(self):
         for cmd in (
             "gh pr merge 7 --squash",
-            "gh pr merge 7 --squash --admin --match-head-commit abc1234def",
+            "gh pr merge 7 --squash --body-file b.md --match-head-commit abc1234def",
             "gh pr merge 7 -R o/r --match-head-commit abc1234def",
             "gh pr merge 7 --repo=o/r --match-head-commit abc1234def",
         ):
@@ -2166,13 +2166,26 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
         self.assertEqual(dec, "ask")
         self.assertIn("lệnh đứng một mình", why)
 
+    def test_admin_merge_denied_every_policy(self):
+        """T-3532 (ca đối kháng): `--admin` vượt ruleset nhánh — lớp đỡ CI — nên chặn phẳng ở mọi chính sách, kể cả khi
+        merge-check = merge và head đã ghim (trước đây là ask thường, chính sách mặc định cho qua)."""
+        pin = "--match-head-commit abc1234def"
+        for cmd in (
+            f"gh pr merge 7 --squash --admin {pin}",
+            f"gh pr merge 7 --squash {pin} --admin=true",
+            f"gh pr -R o/r merge 7 --admin {pin}",
+            "bash -c -e 'gh pr merge 7 --admin'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.d(cmd)[0], "deny")
+
     def test_merge_allow_strict(self):
         """AUD-SEC-016: `allow` chỉ cho lệnh merge trơn — không lệnh con, heredoc, chuyển hướng, gán biến, repo khác."""
         pin = "--match-head-commit abc1234def"
         for cmd in (
             f'gh pr merge 7 --squash {pin} -b "$(curl x)"',
             f'gh pr merge 7 --squash {pin} -t "`id`"',
-            f"gh pr merge 7 --squash {pin} --admin=true",
+            f"gh pr merge 7 --squash {pin} --subject=x",
             f"GH_REPO=e/r gh pr merge 7 --squash {pin}",
             f"env GH_HOST=evil.com gh pr merge 7 --squash {pin}",
             f"gh pr merge https://github.com/evil/other/pull/7 --squash {pin}",
@@ -2181,8 +2194,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             f"gh pr merge 7 --squash {pin} <<E\n$(touch /tmp/x)\nE",
             f"gh pr merge 7 --squash {pin} --match-head-commit def",  # gh lấy lần cuối
             f"gh pr merge 7 --squash {pin} --match-head-commit=",
-            f"gh pr merge version --admin {pin}",  # `version`/`help` là selector, không phải hỏi trợ giúp
-            f"gh pr -R o/r merge 7 --admin {pin}",
+            f"gh pr merge version --body-file b.md {pin}",  # `version`/`help` là selector, không phải hỏi trợ giúp
+            f"gh pr -R o/r merge 7 {pin}",
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
@@ -2912,7 +2925,7 @@ class GuardDeltaAuditTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
         for cmd in (
-            "bash -c -e 'gh pr merge 7 --admin'",
+            "bash -c -e 'gh pr merge 7 --body-file b.md'",
             "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
@@ -2960,7 +2973,7 @@ class GuardDeltaAuditTest(unittest.TestCase):
     def test_guard_error_fails_closed_for_merge(self):
         """AUD-SEC-032, AUD-HAR-040: guard lỗi giữa chừng → merge/`gh api`/MCP merge hỏi; lệnh khác vẫn fail-open."""
         self.assertEqual(
-            self._main("bash", {"tool_input": {"command": "gh pr merge 7 --admin > a\x00b"}})["decision"], "ask"
+            self._main("bash", {"tool_input": {"command": "gh pr merge 7 --body-file b > a\x00b"}})["decision"], "ask"
         )
         with mock.patch.object(self.guard, "bash_decision", side_effect=RuntimeError("x")):
             self.assertEqual(
@@ -3023,8 +3036,8 @@ class MergeHookFailClosedTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.hook("pre-bash-guard.sh", {"tool_input": {"command": cmd}}, env), want)
-        # Mặc định (ADR-0018) thiếu python3 / guard.py vắng hoặc lỗi: lệnh thường đi tiếp, nhưng merge không kiểm được
-        # ngoại lệ cứng → chặn (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005).
+        # Mặc định (ADR-0018) thiếu python3: lệnh thường đi tiếp, nhưng merge không kiểm được ngoại lệ cứng → chặn
+        # (ADR-0019, AUD-SEC-045); tắt auto-merge vẫn qua (LOOP-STOP-005). guard.py vắng/lỗi: Bash đóng (D-200, dưới).
         env["XT_GUARD_POLICY"] = ""
         mcp = {"tool_name": "mcp__github__merge_pull_request", "tool_input": {"pullNumber": 7}}
         off = {"tool_name": "mcp__github__disable_pr_auto_merge", "tool_input": {"pullNumber": 7}}
@@ -3042,14 +3055,13 @@ class MergeHookFailClosedTest(unittest.TestCase):
             with self.subTest(nopy=payload):
                 self.assertEqual(self.hook(name, payload, env), want)
         default = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.tmp), XT_GUARD_POLICY="")
-        for name, payload, want in cases:  # thiếu guard.py: Bash chặn cả lệnh thường (MissingGuardTest)
-            with self.subTest(missing=payload):
-                view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
-                self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
-        (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
-        for name, payload, want in cases:  # guard.py lỗi
-            with self.subTest(broken=payload):
-                self.assertEqual(self.hook(name, payload, default), want)
+        for label in ("missing", "broken"):  # thiếu hoặc không nạp được guard.py: Bash chặn cả lệnh thường (D-200)
+            if label == "broken":
+                (self.hooks / "guard.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
+            for name, payload, want in cases:
+                with self.subTest(label, payload=payload):
+                    view = payload.get("tool_input", {}).get("command") == "gh pr view 7"
+                    self.assertEqual(self.hook(name, payload, default), "deny" if view else want)
 
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
@@ -3997,6 +4009,12 @@ class MissingGuardTest(unittest.TestCase):
             "echo hi",
             "python3 -c \"__import__('os').system('id')\" install.py",  # review #97
             "git diff --output=/tmp/x",
+            "git checkout -- .",  # review #282 lượt 6: xoá thay đổi chưa commit
+            "git restore .",
+            "git checkout -f main",
+            "git restore --staged --worktree --source=HEAD~1 .",
+            "git checkout v1 -- .claude/hooks/pre-bash-guard.sh",
+            "python3 /tmp/evil_install.py",
         ):
             with self.subTest(cmd):
                 self.assertEqual(dec(cmd), "deny")
@@ -4010,6 +4028,53 @@ class MissingGuardTest(unittest.TestCase):
         ):
             with self.subTest(ok=cmd):
                 self.assertIsNone(dec(cmd))
+
+    def test_empty_or_tampered_guard_closes_fence(self):
+        """AUD-SEC-108 (gốc): guard.py rỗng hoặc không nạp được (`echo x > guard.py`, ghi rỗng qua glob, `chmod 000` với
+        user thường) → đóng hàng rào như khi vắng, kể cả bản ĐÃ commit (D-200)."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        hooks = tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        for f in ("pre-bash-guard.sh", "_lib.sh"):
+            shutil.copy(HOOKS / f, hooks / f)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp), XT_GUARD_POLICY="")
+
+        def dec(cmd: str) -> str | None:
+            r = subprocess.run(
+                ["bash", str(hooks / "pre-bash-guard.sh")],
+                input=json.dumps({"tool_input": {"command": cmd}}),
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return decision(r.stdout)
+
+        git = ["git", "-C", str(tmp), "-c", "user.name=t", "-c", "user.email=t@t"]
+        guard = hooks / "guard.py"
+        guard.write_text("", encoding="utf-8")
+        self.assertEqual(dec("echo hi"), "deny")  # rỗng = hàng rào bị gỡ
+        self.assertIsNone(dec("git checkout -- .claude/hooks/guard.py"))
+        guard.write_text("raise SystemExit(3)\n", encoding="utf-8")
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-qm", "x"], check=True)
+        # D-200: không nạp được = đóng, kể cả bản đã commit — trạng thái git agent tự đổi được (review #282 lượt 3-5:
+        # `--assume-unchanged`, `reset --soft`, `checkout --orphan`, `git init` lồng, `restore --staged --source=<cây rỗng>`).
+        self.assertEqual(dec("echo hi"), "deny")
+        guard.write_text("syntax error (\n", encoding="utf-8")
+        for setup in (
+            ["update-index", "--assume-unchanged", ".claude/hooks/guard.py"],
+            ["restore", "--staged", "--source=4b825dc642cb6eb9a060e54bf8d69288fbee4904", "."],
+            ["checkout", "-q", "--orphan", "t"],
+        ):
+            subprocess.run([*git, *setup], check=True)
+            self.assertEqual(dec("echo hi"), "deny", setup)
+        self.assertIsNone(dec("git restore .claude/hooks/guard.py"))
+        self.assertIsNone(dec("git status"))
+        guard.write_text("def main():\n    raise SystemExit(3)\n", encoding="utf-8")  # chết lúc chạy ngoài try
+        self.assertEqual(dec("echo hi"), "deny")
 
 
 class GuardWave1017Test(unittest.TestCase):

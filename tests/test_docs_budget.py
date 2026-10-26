@@ -17,11 +17,11 @@ CAPS = {  # byte; nhà của từng trần: PLAN-3.12-lean T-1701…T-1704
     "framework/11-autonomous-loop/README.md": 12288,
 }
 # Trần TỔNG byte theo thư mục (ADR-0043, T-2407): đóng băng bề mặt 3.x = kích thước tại 2026-10-23 + 5 %. Thêm mã/chữ thì
-# cắt chỗ khác trong cùng nhóm; mở băng cần ADR mới — không nới số ở đây. Chỉ đếm file git theo dõi (bỏ cache/sinh ra).
+# cắt chỗ khác trong cùng nhóm; mở băng cần ADR mới (ADR-0050: +1 MiB mỗi nhóm) — không nới số ở đây. Chỉ đếm file git theo dõi (bỏ cache/sinh ra).
 DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- <spec> | xargs -0 cat | wc -c`
-    "scripts (xt.py, install.py, xt_app)": (("scripts/*.py", "scripts/xt_app/"), 711855),  # 677958 B
-    ".claude/hooks": ((".claude/hooks/",), 369393),  # 351803 B
-    "framework/11-autonomous-loop": (("framework/11-autonomous-loop/",), 232307),  # 221245 B
+    "scripts (xt.py, install.py, xt_app)": (("scripts/*.py", "scripts/xt_app/"), 711855 + 1048576),  # 677958 B
+    ".claude/hooks": ((".claude/hooks/",), 369393 + 1048576),  # 351803 B
+    "framework/11-autonomous-loop": (("framework/11-autonomous-loop/",), 232307 + 1048576),  # 221245 B
 }
 
 

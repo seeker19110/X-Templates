@@ -151,6 +151,9 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-sec085-cd-autopilot-evidence": "cd .autopilot → /tmp/.autopilot",
     "guard-sec087-cd-autopilot-pipe-sh": "cd .autopilot → /tmp/.autopilot",
     "guard-sec089-sqlite-evidence": ".autopilot/x.db tương đối",
+    "guard-advrev-rm-fence-dir": ".claude tương đối → /tmp/.claude",
+    "guard-advrev-chmod-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
+    "guard-advrev-truncate-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
 }
 
 

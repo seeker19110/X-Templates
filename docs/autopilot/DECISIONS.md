@@ -1385,3 +1385,31 @@
 - Chọn: PLAN-harden-2026-10-26d: T-3531 đăng ký hook (PR 1, gộp đóng sổ T-1814), T-3532 ca đối kháng (PR 2), T-3533 spike mutation (PR 3), cắt 3.27.0 ở lát cuối
 - Lý do (tiêu chí chất lượng cuối): (1) mỗi lát nhỏ, review được; hook đổi hành vi dự án đích nên cắt bản; (2) revert từng lát; (3) spike có thể không khả thi — tách để không chặn hook
 - Đường lùi: revert từng PR
+
+### D-197 · 2026-10-26T07:10:29+00:00 · T-3533 (T-1832): đưa mutation test guard.py vào CI?
+
+- Phương án: (1) Không — spike: 13 486 mutant, trampoline mutmut 3 phá test tiến trình con, ước hàng giờ/lần; giữ autonomy-bench + đột biến tay của reviewer · (2) Có — job tuần mutmut trên subset test, loại test tiến trình con
+- Chọn: Không — spike: 13 486 mutant, trampoline mutmut 3 phá test tiến trình con, ước hàng giờ/lần; giữ autonomy-bench + đột biến tay của reviewer
+- Lý do (tiêu chí chất lượng cuối): (1) loại test tiến trình con là bỏ đúng lớp kiểm hook như Claude Code gọi — đo sai; (3) không thêm phụ thuộc/workflow khi chưa chạy được; (5) chi phí giờ máy
+- Đường lùi: chạy lại spike khi guard tách module hoặc mutmut chọn được hàm (docs/ops/MUTATION-2026-10-26.md)
+
+### D-198 · 2026-10-26T07:52:05+00:00 · gh pr merge --admin ở chính sách mặc định (AUD-SEC-109)
+
+- Phương án: (1) Deny phẳng mọi chính sách (mã MERGE_ADMIN), như AUTO_MERGE_ENABLE · (2) Giữ ask thường (mặc định cho qua khi merge-check = merge)
+- Chọn: Deny phẳng mọi chính sách (mã MERGE_ADMIN), như AUTO_MERGE_ENABLE
+- Lý do (tiêu chí chất lượng cuối): (1) --admin vượt ruleset nhánh — lớp đỡ CI/duyệt GitHub mà merge-check không mô hình; máy không cần cờ này; cách hiểu chặt hơn thắng; (2) người vẫn merge trên GitHub
+- Đường lùi: gỡ _gh_admin_flag khỏi hai luật merge, bỏ mã MERGE_ADMIN
+
+### D-199 · 2026-10-26T09:33:25+00:00 · Gốc của AUD-SEC-108: hook fail-open khi guard.py hỏng
+
+- Phương án: (1) Hook đóng hàng rào khi guard.py vắng/không đọc được/rỗng, hoặc chạy lỗi mà đã sửa so với HEAD; lỗi ở bản đã commit giữ fail-open (ADR-0002) · (2) Chỉ chặn từng lệnh làm hỏng guard ở luật guard
+- Chọn: Hook đóng hàng rào khi guard.py vắng/không đọc được/rỗng, hoặc chạy lỗi mà đã sửa so với HEAD; lỗi ở bản đã commit giữ fail-open (ADR-0002)
+- Lý do (tiêu chí chất lượng cuối): (1) đóng cả lớp (chmod/setfacl/glob/xargs/$(…)/ghi rỗng) thay vì đuổi từng biến thể; (2) khôi phục bằng git checkout/install.py vẫn được, Edit vẫn sửa được guard; (3) ADR-0002 giữ cho lỗi thật ở bản đã commit
+- Đường lùi: bỏ hàm broken và hai điều kiện mới ở pre-bash-guard.sh
+
+### D-200 · 2026-10-26T12:03:42+00:00 · Hook làm gì khi guard.py không nạp được (guard_fields không trả ok)?
+
+- Phương án: (1) Luôn đóng hàng rào (chỉ lệnh xem/khôi phục, install.py); không dựa trạng thái git · (2) Đóng khi khác blob HEAD, mở khi untracked (bản 96e867d) · (3) Đóng khi khác blob HEAD, mở khi lịch sử chưa từng có guard.py (rev-list --all --reflog)
+- Chọn: Luôn đóng hàng rào (chỉ lệnh xem/khôi phục, install.py); không dựa trạng thái git
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: main() của guard đã bắt mọi Exception lúc chạy và trả ok, nên guard_fields hỏng chỉ khi file không nạp/compile được — gần như luôn là hỏng/sửa tay; mọi dấu hiệu dựa trạng thái git (chỉ mục, HEAD, reflog, repo lồng) agent tự đổi được bằng lệnh guard cho qua (review #282 lượt 3-5: 4 lách liên tiếp). (2) đường lùi: Edit vẫn sửa được guard (pre-edit fail-open), git checkout/restore -- path và install.py nằm trong restore_re. (3) đơn giản: bỏ ~10 dòng git. Giá: guard đã commit mà không nạp được cũng đóng — lỗi khung thật, cần sửa ngay, không phải lý do mở mọi lệnh
+- Đường lùi: Khôi phục khối so blob HEAD ở pre-bash-guard.sh (commit 96e867d)

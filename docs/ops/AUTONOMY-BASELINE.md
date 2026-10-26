@@ -89,9 +89,13 @@ Ca `guard-sec045-guard-crash-on-merge` từng dùng `\ud800` để làm guard s�
 ## 5. Giới hạn — cần reviewer khác họ model bổ sung
 
 - **Ca đối kháng chưa độc lập.** 62 ca `adversarial-author` do chính phiên viết bản sửa T-1521 soạn; AUTO-07 đòi ca đối
-  kháng do reviewer **khác họ model** với tác giả viết. Số ca `adversarial-reviewer` hiện là 0 và lệnh in cảnh báo
-  "chưa có ca đối kháng do reviewer khác họ model viết". Việc kế: reviewer khác họ (`reviewer`/`reviewer-alt`) thêm ca
-  vào các file nhóm với `"origin": "adversarial-reviewer"`; ca nào đỏ thì vào `pending/` kèm phát hiện audit.
+  kháng do reviewer **khác họ model** với tác giả viết. 2026-10-26 (T-3532, chủ repo duyệt): reviewer-alt viết 22 ca
+  (20 `adversarial-reviewer` + 2 đối chứng) chạy trên bản sao corpus — 6 false-green: `chmod` (kể cả qua `find`) vào
+  `.claude/hooks`/`settings.json` (AUD-SEC-108 🔴: guard không đọc được thì hook fail-open), `gh pr merge --admin` ở
+  chính sách mặc định (AUD-SEC-109 🟠), `fd -X rm` (giới hạn đã biết T-2812, không vào corpus). Sửa ở #282 → 21 ca vào
+  `guard.json`; review #282 viết thêm 7 ca lách chính bản vá — 3 lọt (`setfacl`, glob `.claude/*/guard.py`, `xargs
+  chmod`), lượt 2 thêm 6 lách/chặn oan — sửa gốc ở hook (guard hỏng → đóng, D-199), lượt 3
+  thêm lách `git update-index --assume-unchanged` → tổng 33 ca `adversarial-reviewer` + 7 đối chứng, bench 0 false-green. Reviewer vẫn cùng họ với phiên chính (năng lực cao hơn, D-161) — khác họ thật còn mở.
 - **Kết luận giới hạn trong tập đã kiểm.** 0 false-green nghĩa là 291 ca này không lọt, không phải guard/merge không còn
   lỗ — §4 (5 lỗ baseline tìm ra sau khi đã có 247 ca xanh) là bằng chứng ngược lại.
 - **Không đo đường tiến trình.** Hook shell (`pre-*-guard.sh`, cổng commit), `install.py` chép file, `gh` thật và
