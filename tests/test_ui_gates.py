@@ -101,7 +101,7 @@ class CssParseTest(unittest.TestCase):
         self.assertEqual(p("#fff", env), WHITE)
         self.assertEqual(p("#0008", env), (0.0, 0.0, 0.0, 0x88 / 255))
         self.assertEqual(p("#000000", env), BLACK)
-        self.assertEqual(p("#00000080", env)[3], 128 / 255)  # type: ignore[index]
+        self.assertEqual(p("#00000080", env)[3], 128 / 255)  # type: ignore[index]  # kết quả Optional, ca này chắc chắn có giá trị
         self.assertIsNone(p("#12", env))
         self.assertEqual(p("rgb(255 255 255)", env), WHITE)
         self.assertEqual(p("rgba(0, 0, 0, 50%)", env), (0.0, 0.0, 0.0, 0.5))
@@ -110,7 +110,7 @@ class CssParseTest(unittest.TestCase):
         self.assertEqual(p("0 0% 0%", env), BLACK)  # bộ ba trần của shadcn
         self.assertEqual(p("hsl(120deg, 100%, 50%)", env), (0.0, 1.0, 0.0, 1.0))
         oklch = p("oklch(1 0 0)", env)
-        self.assertAlmostEqual(oklch[0], 1.0, places=3)  # type: ignore[index]
+        self.assertAlmostEqual(oklch[0], 1.0, places=3)  # type: ignore[index]  # kết quả Optional, ca này chắc chắn có giá trị
         self.assertEqual(p("oklch(0 0 0)", env), BLACK)
         self.assertEqual(p("transparent", env), (0.0, 0.0, 0.0, 0.0))
         self.assertEqual(p("Black", env), BLACK)
@@ -122,9 +122,9 @@ class CssParseTest(unittest.TestCase):
     def test_ratio_matches_wcag(self) -> None:
         self.assertAlmostEqual(xt.contrast_ratio(BLACK, WHITE), 21.0)
         grey = xt.parse_css_color("#777", {})
-        self.assertAlmostEqual(xt.contrast_ratio(grey, WHITE), 4.48, places=2)  # type: ignore[arg-type]
+        self.assertAlmostEqual(xt.contrast_ratio(grey, WHITE), 4.48, places=2)  # type: ignore[arg-type]  # màu thô dạng tuple cho test
         blue = xt.parse_css_color("#1677ff", {})
-        self.assertAlmostEqual(xt.contrast_ratio(WHITE, blue), 4.10, places=2)  # type: ignore[arg-type]
+        self.assertAlmostEqual(xt.contrast_ratio(WHITE, blue), 4.10, places=2)  # type: ignore[arg-type]  # màu thô dạng tuple cho test
         half = xt.contrast_ratio((0.0, 0.0, 0.0, 0.5), WHITE)  # chữ trong suốt trộn lên nền
         self.assertLess(half, 21.0)
         self.assertGreater(half, 1.0)

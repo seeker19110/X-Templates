@@ -979,11 +979,17 @@ class DoctorDriftTest(DoctorCase):
         self.assertEqual(xt.DOCTOR_HOOK_EVENTS["SubagentStop"], "warn")
         sp = self.base / ".claude" / "settings.json"
         settings = json.loads(sp.read_text(encoding="utf-8"))
-        del settings["hooks"]["TaskCompleted"], settings["hooks"]["SubagentStop"]
+        self.assertEqual(xt.DOCTOR_HOOK_EVENTS["PostToolUseFailure"], "warn")  # T-1822
+        del (
+            settings["hooks"]["TaskCompleted"],
+            settings["hooks"]["SubagentStop"],
+            settings["hooks"]["PostToolUseFailure"],
+        )
         sp.write_text(json.dumps(settings), encoding="utf-8")
         msgs = [f.msg for f in self.findings(deep=False) if f.code == "hooks" and f.level == "warn"]
-        self.assertEqual(len(msgs), 2)
-        self.assertTrue(any("TaskCompleted" in m for m in msgs) and any("SubagentStop" in m for m in msgs))
+        self.assertEqual(len(msgs), 3)
+        for ev in ("TaskCompleted", "SubagentStop", "PostToolUseFailure"):
+            self.assertTrue(any(ev in m for m in msgs), ev)
 
 
 class DoctorHookSiblingTest(unittest.TestCase):

@@ -600,7 +600,7 @@ def shadowed_skills(target: Path) -> list[str]:
 
 def registered_hooks() -> set[str]:
     """Tên file trong `.claude/hooks/` mà settings.json của khung đăng ký, cộng file chúng nạp cạnh (`_lib.sh`,
-    `guard.py`). Hook khung chưa đăng ký (đang chờ duyệt — `post-tool-failure.sh`, T-1822) không chép sang dự án đích:
+    `guard.py`). Hook khung chưa đăng ký không chép sang dự án đích:
     file hook không ai gọi là mồ côi (xboss `tests/claude-hooks.test.ts` bắt)."""
     hooks = SRC / ".claude" / "hooks"
     named = set(

@@ -473,7 +473,7 @@ class DecideWorktreesTest(TmpRepoCase):
         def flaky(path: Path, *a: object, **k: object) -> str:
             if path.resolve().is_relative_to(self.main.resolve()) and path.name == "DECISIONS.md":
                 raise OSError("không đọc được")
-            return real(path, *a, **k)  # type: ignore[arg-type]
+            return real(path, *a, **k)  # type: ignore[arg-type]  # bọc hàm thật, đối số Path hoặc str
 
         with unittest.mock.patch.object(Path, "read_text", flaky):
             self.assertIn("D-001", self.decide(self.wt))  # sổ cây chính không đọc được: bỏ qua
