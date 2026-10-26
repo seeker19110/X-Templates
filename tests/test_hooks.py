@@ -4062,6 +4062,14 @@ class MissingGuardTest(unittest.TestCase):
         # Cờ chỉ mục làm `git diff` mù — so nội dung với blob HEAD vẫn thấy (review #282 lượt 3).
         subprocess.run([*git, "update-index", "--assume-unchanged", ".claude/hooks/guard.py"], check=True)
         self.assertEqual(dec("echo hi"), "deny")
+        subprocess.run([*git, "update-index", "--skip-worktree", ".claude/hooks/guard.py"], check=True)
+        self.assertEqual(dec("echo hi"), "deny")
+        # Repo lồng ở thư mục hook không đánh tráo HEAD; HEAD mất blob mà chỉ mục còn = đã đổi (review #282 lượt 4).
+        subprocess.run(["git", "-C", str(hooks), "init", "-q"], check=True)
+        self.assertEqual(dec("echo hi"), "deny")
+        shutil.rmtree(hooks / ".git")
+        subprocess.run([*git, "checkout", "-q", "--orphan", "t"], check=True)
+        self.assertEqual(dec("echo hi"), "deny")
         (tmp / "x").mkdir()
         hooks.rename(tmp / "x" / "hooks")  # untracked (chưa có blob ở HEAD) → mở
         hooks = tmp / "x" / "hooks"

@@ -42,10 +42,14 @@ g="$(dirname "$0")/guard.py"
 [ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
 if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
-  # So với blob HEAD (`git diff` mù với `--assume-unchanged`); không có blob → mở.
-  d="$(dirname "$g")"
-  h="$(git -C "$d" rev-parse -q --verify HEAD:./guard.py 2>/dev/null)" &&
-    [ "$(git -C "$d" hash-object guard.py)" != "$h" ] && broken "đã sửa so với HEAD và lỗi"
+  # So với blob HEAD của repo `$XT_ROOT` (`git diff` mù với `--assume-unchanged`; neo repo ngoài để `git init` lồng không
+  # đánh tráo HEAD). Còn trong chỉ mục mà HEAD không có blob (`reset --soft`, `checkout --orphan`) = đã đổi → đóng; chỉ
+  # untracked thật (mới cài) mới mở. `--no-replace-objects`: `git replace` không đổi blob đọc ra.
+  rel="$(git -C "$XT_ROOT" ls-files --full-name -- "$g" 2>/dev/null)"
+  if [ -n "$rel" ]; then
+    h="$(git --no-replace-objects -C "$XT_ROOT" rev-parse -q --verify "HEAD:$rel" 2>/dev/null)"
+    [ "$(git -C "$XT_ROOT" hash-object -- "$g" 2>/dev/null)" != "$h" ] && broken "đã sửa so với HEAD và lỗi"
+  fi
   exit 0
 fi
 decision="$XG_DECISION"
