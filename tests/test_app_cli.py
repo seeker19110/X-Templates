@@ -16,8 +16,8 @@ import unittest.mock as mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import xt  # noqa: E402
-from xt_app import server  # noqa: E402
+import xt
+from xt_app import server
 
 
 def run(argv: list[str]) -> tuple[int, str, str]:

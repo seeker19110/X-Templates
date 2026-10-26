@@ -5559,7 +5559,7 @@ class TriageLocalTest(unittest.TestCase):
     def run_cli(self, stdin: str, tty: bool = False) -> tuple[int, str]:
         out = io.StringIO()
         fake = io.StringIO(stdin)
-        fake.isatty = lambda: tty  # type: ignore[method-assign]
+        fake.isatty = lambda: tty  # type: ignore[method-assign]  # giả isatty để thử nhánh TTY
         with (
             contextlib.redirect_stdout(out),
             mock.patch.object(sys, "stdin", fake),

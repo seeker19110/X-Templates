@@ -663,7 +663,7 @@ class CpuBudgetTest(unittest.TestCase):
             return now[0]
 
         def work(n: int) -> None:
-            now[0] += seconds_for(n)  # type: ignore[operator]
+            now[0] += seconds_for(n)  # type: ignore[operator]  # đồng hồ giả: list một phần tử
 
         return clock, work
 

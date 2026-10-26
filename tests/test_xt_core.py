@@ -800,7 +800,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         bp = "---\nkind: blueprint\nprofile: web-app\nscale: M\n---\nnội dung\n"
         write(self.base / "BLUEPRINT.md", bp)
         write(self.base / "pyproject.toml", "[project]\n")
-        args = lambda **kw: argparse.Namespace(  # noqa: E731
+        args = lambda **kw: argparse.Namespace(
             plan="docs/autopilot/PLAN.md",
             blueprint=None,
             hours=None,

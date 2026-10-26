@@ -1371,3 +1371,10 @@
 - Chọn: Một PR: sửa _load_guard báo stderr + kiểm S110/S112, bước CI blueprint-status --run, siết regex SEC-004
 - Lý do (tiêu chí chất lượng cuối): (1) lỗi nạp guard không còn im lặng, mục tick hỏng thì đỏ trên mỗi PR; (2) revert một PR; (3) không thêm phụ thuộc (ruff đã ghim)
 - Đường lùi: revert PR
+
+### D-195 · 2026-10-26T05:07:36+00:00 · Duyệt PLAN-harden-2026-10-26c: 37 MUST còn lại không có lệnh kiểm
+
+- Phương án: (1) Gắn — Kiểm: cho cả 37 mục bằng test hành vi có sẵn hoặc grep chỉ đọc; gỡ noqa chết, type: ignore có lý do · (2) Chỉ 17 mục kiểm được bằng grep, 20 mục giữ bằng chứng bằng lời · (3) Đổi 20 mục sang [~] Không áp dụng
+- Chọn: Gắn — Kiểm: cho cả 37 mục bằng test hành vi có sẵn hoặc grep chỉ đọc; gỡ noqa chết, type: ignore có lý do
+- Lý do (tiêu chí chất lượng cuối): (1) mọi mục áp dụng và đạt, bằng chứng đã trỏ test/grep — chạy lại được là đúng hơn lời khai; [~] sai sự thật; (2) revert một PR; (3) không thêm công cụ
+- Đường lùi: revert PR
