@@ -1357,3 +1357,10 @@
 - Chọn: Ghép lại với XT_FRAMEWORK_LINK=framework (chỉ 6 mục đổi chữ thật, giữ trạng thái 104 mục), sửa HAR-114 + DOC-086 cùng một PR, cắt 3.26.1
 - Lý do (tiêu chí chất lượng cuối): Đúng: đo trên bản nháp — 19 mục 'đổi chữ' của phương án 1 là giả (chỉ khác tiền tố link), đặt lại [ ] làm mất bằng chứng thật; biến môi trường đã có và có test. Đơn giản: không đổi hành vi xt.py cho người gọi khác (phương án 3). Một PR nhỏ cho 3 🟢 cùng hạn.
 - Đường lùi: Revert PR; BLUEPRINT về bản #257
+
+### D-193 · 2026-10-26T01:06:13+00:00 · Duyệt PLAN-harden-2026-10-26: trả nợ unchecked_must bằng lệnh kiểm máy
+
+- Phương án: (1) Gắn — Kiểm: cho 19 MUST kiểm được bằng lệnh chỉ đọc tất định (ruff bandit cho SEC-004/007) · (2) Giữ nguyên, chỉ ghi rủi ro chấp nhận ở GO-NO-GO · (3) Bật unchecked_must fail
+- Chọn: Gắn — Kiểm: cho 19 MUST kiểm được bằng lệnh chỉ đọc tất định (ruff bandit cho SEC-004/007)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mục tick được máy chạy lại, hỏng thì đỏ; (2) đường lùi revert một file; (3) không đổi công cụ; bật fail khi còn 38 mục không kiểm được sẽ chặn oan
+- Đường lùi: revert PR; các mục quay về bằng chứng bằng lời
