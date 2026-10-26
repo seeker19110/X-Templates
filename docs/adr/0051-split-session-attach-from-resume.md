@@ -41,26 +41,28 @@ bước 4: `attach` = `resume` = 6 ký tự; bước 14 thành `resolve`/`unbloc
 
 Chọn **phương án 1**.
 
-- `loop attach [--reason TEXT]`: chỉ khi vòng `active`. Đặt `session_id` = phiên hiện tại, ghi `attached_at`, `attach_reason`.
+- `loop attach [--reason TEXT]`: chỉ khi vòng `active`. Đặt `session_id` = phiên hiện tại, nối `attached[]` `{session, reason, at}` (danh sách để đếm can thiệp — nghiên cứu §11).
   **Không chạm** `deferred`, `same_failure_count`, `last_failure_signature`, `blocked`, `iterations`, `deadline`, `scope`. Đã gắn
   đúng phiên này → exit 0 không đổi state (idempotent). Ngoài Claude Code (không có phiên) → exit 2: lệnh chỉ để gắn phiên không
-  được *gỡ* ràng buộc phiên (khác `resume` đặt `""`). Vòng không `active` → exit 2 kèm lối ra theo `final_verdict`: `blocked`/`stopped`
+  được *gỡ* ràng buộc phiên (khác `resume` đặt `""`). Vòng không `active` → exit 2 kèm **lối ra theo `final_verdict`** (một hàm dùng chung cho cả ba lệnh): `blocked`/`stopped`
   hoặc không có `final_verdict` → `loop unblock --reason`; `done-pending-human` → người đã xử lý: `loop resolve --task <ID>` rồi
   `loop unblock`, chưa: `loop init --plan <đợt kế>` (việc chờ đi theo — ADR-0047 Quyết định 3); `done`/`budget` → `loop init --plan <đợt kế>`.
 - `loop resolve --task ID --reason TEXT` (cả hai bắt buộc): chỉ gỡ **một** mục `deferred`. ID không có trong `deferred` → exit 2
   kèm danh sách đang chờ. Ghi `resolved[]` `{id, reason, deferred_reason, at}`; không chạm `active`, `blocked`, đếm lỗi, vòng, hạn.
-  Task trở lại hàng làm theo PLAN (mục đã tick/đã đạt vẫn không tính). Vòng đã kết thúc thì in nhắc `loop unblock` để chạy tiếp.
-- `loop unblock --reason TEXT` (bắt buộc lý do) — người xem rồi mở. **Nhận**: vòng sống bị chặn (`blocked` do `loop block` hoặc lỗi lặp
-  ≥ `max_same_failure`); vòng đã kết thúc với `final_verdict` `blocked`, `done-pending-human`, `stopped`, hoặc không có `final_verdict`
+  Task trở lại hàng làm theo PLAN (mục đã tick/đã đạt vẫn không tính). Vòng đã kết thúc thì in lối ra theo `final_verdict` như `attach`
+  (`done`/`budget` → `loop init`, không gợi `unblock`).
+- `loop unblock --reason TEXT` (bắt buộc lý do) — người xem rồi mở. **Nhận**: vòng sống bị chặn (cờ `blocked` bất kể nguồn — `loop block`, `ci-triage` —
+  hoặc lỗi lặp ≥ `max_same_failure`); vòng đã kết thúc với `final_verdict` `blocked`, `done-pending-human`, `stopped`, hoặc không có `final_verdict`
   (state cũ). **Từ chối** (exit 2 kèm lối ra): `final_verdict` `done`/`budget` → `loop init --plan <đợt kế>` (không hồi sinh đợt đã xong,
   không mở trần); vòng sống không bị chặn → `loop attach`. Khi nhận: `active` True, `blocked` False, xoá `blocked_reason`/`ended`/
-  `final_verdict`, đặt đếm lỗi và chữ ký về 0/`null`, gắn phiên hiện tại. **Giữ** `deferred`, `iterations`, `deadline`. Ghi `unblocked[]`
+  `final_verdict`, đặt đếm lỗi và chữ ký về 0/`null`, gắn phiên hiện tại (ngoài Claude Code: **giữ** `session_id` cũ,
+  không gỡ ràng buộc — phiên mới dùng `attach`). **Giữ** `deferred`, `iterations`, `deadline`. Ghi `unblocked[]`
   `{reason, prior_verdict, prior_reason, at}`. Mở `done-pending-human` mà chưa `resolve` việc nào thì lượt Stop kế lại kết thúc
-  `done-pending-human` — lệnh in nhắc `resolve` trước.
+  `done-pending-human` — lệnh in nhắc `resolve` trước. Sau khi mở, lệnh tính lại verdict: ra `budget` (vòng vừa bị chặn vừa hết vòng/hạn)
+  → in "hết ngân sách → `loop init --plan <đợt kế>`" và exit 2 thay vì báo đã mở (state vẫn ghi `unblocked[]`).
 - `loop resume` **giữ nguyên hành vi** (cả bốn việc) và in một dòng stderr trỏ ba lệnh mới. Gỡ `resume` ở một ADR sau, khi `docs/ops/TARGETS.md`
   cho thấy dự án đích đã chạy lại `install.py` ≥ 1 bản (không bỏ bằng PR này).
-- Chữ đổi cùng PR triển khai, thay chữ cũ cùng độ dài: `SESSION_MISMATCH_NOTE` → `loop attach`; `_live_loop` (vòng `blocked` do người) →
-  `loop unblock --reason`; `loop init` vòng sống → `loop attach`; `doctor` cảnh báo `BLOCKED` → `loop unblock`; README mảng 11 bước 9/13/14;
+- Chữ đổi cùng PR triển khai (mọi câu mới đổi câu cũ — §Bối cảnh): `SESSION_MISMATCH_NOTE` → `loop attach`; `loop init` vòng sống → `loop attach`; `doctor` cảnh báo `BLOCKED` → `loop unblock`; README mảng 11 bước 9/13/14;
   skill `/autopilot` bước 4; `loop-design.md` bẫy "Nhiều lần `loop init`"; `stop-points-and-escalation.md` hàng "Bế tắc máy";
   `harness-files.md` bảng `state.json` (trường mới); `xt.py --help`; assert chữ ở `tests/test_hooks.py`, `tests/test_xt_loop.py`,
   `tests/test_xt_cli.py`. `_live_loop` nhánh `blocked` (cả `loop block` lẫn lỗi lặp) → `loop unblock --reason`.
@@ -83,14 +85,15 @@ Phiên bản/nguồn: không dính phiên bản/chuẩn ngoài; hành vi hiện 
 
 Test mới (trong PR triển khai, cùng corpus luồng FLOW-01…02 của nghiên cứu §10): `attach` giữ `deferred` + đếm lỗi + `blocked`; `attach` cùng
 phiên không đổi state; `attach` ngoài Claude Code → exit 2; `attach` vòng không `active` → exit 2 kèm đúng lối ra cho từng `final_verdict`
-(`blocked`/`stopped`/`done-pending-human`/`done`/`budget`); `unblock` khi `done`/`budget` hoặc vòng sống không bị chặn → exit 2; `resolve` đúng một ID, ID lạ → exit 2; `unblock` giữ `deferred`, ghi `unblocked[]`, thiếu lý do → exit 2; `resume` cũ
-vẫn qua test hiện có và in cảnh báo; state cũ không có `resolved`/`unblocked`/`attached_at` đọc được. Tái hiện `resume-head.json` chạy với `attach` cho `deferred` còn
+(`blocked`/`stopped`/`done-pending-human`/`done`/`budget`); `unblock` khi `done`/`budget` hoặc vòng sống không bị chặn → exit 2; `unblock` vòng vừa bị chặn vừa hết ngân sách → exit 2 "hết ngân sách"; `unblock`
+ngoài Claude Code giữ `session_id`; `resolve` trên vòng `budget` gợi `loop init`; `resolve` đúng một ID, ID lạ → exit 2; `unblock` giữ `deferred`, ghi `unblocked[]`, thiếu lý do → exit 2; `resume` cũ
+vẫn qua test hiện có và in cảnh báo; state cũ không có `resolved`/`unblocked`/`attached` đọc được. Tái hiện `resume-head.json` chạy với `attach` cho `deferred` còn
 nguyên. `implementation-status` cập nhật theo PR.
 
 ## Đường lùi
 
 Xoá ba lệnh con và cảnh báo ở `loop resume`; đưa SessionStart/README/skill về trỏ `loop resume` — một commit (D-201). State có
-`resolved[]`/`unblocked[]`/`attached_at` vẫn đọc được bởi mã cũ (khoá thừa bị bỏ qua).
+`resolved[]`/`unblocked[]`/`attached[]` vẫn đọc được bởi mã cũ (khoá thừa bị bỏ qua).
 
 ## Ưu / nhược từng phương án
 
