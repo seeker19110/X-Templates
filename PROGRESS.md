@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-26 · Nhánh: main
 
 ## Đang làm
-- 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. Còn mở 🟢 AUD-SEC-108 (ghi ở AUDIT-STATUS). Kế: PR sổ audit (review_debt).
+- 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
 - 2026-10-25 **3.26.0 Workflow** (D-184…D-191, ADR-0049): `/audit` §3, `/research` ≥ 3 mục dùng tool Workflow khi người gõ trực tiếp (cùng luật nhánh subagent, lô ≤ 5); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token, kiểm `maxTurns`/`effort`/guard có áp cho agent.
 - 2026-10-26 **PLAN-harden-2026-10-26 + PLAN-harden-2026-10-26b** (D-193/194, `/complete`): 20 MUST tick có `— Kiểm:` (`unchecked_must` 57 → 37; PLAN-harden-2026-10-26c: → 0, D-195); CI `checks` chạy `blueprint-status --strict --run`; `_load_guard` báo lỗi nạp (ERR-001).
 - 2026-10-26 **PLAN-3.26.1 xong** (D-192; #268, `v3.26.1`): 3 🟢 delta3 sửa; `loop init` nói lý do + một lối ra theo nguồn khi vòng cũ `blocked`; ghép lại BLUEPRINT repo khung bằng `XT_FRAMEWORK_LINK=framework`. Audit delta4 `daefc7c..ce5d9a7`: 0 🔴/🟠 mở; 🟢 TEST-021/022 sửa ở #270 (quét hậu merge sạch). 3.25.0 (#263): `/optimize`.
@@ -35,6 +35,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `45c553c` (3.26.1 + #270–#282; 3.27.0 chờ PR cắt bản). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). Trần byte thư mục nâng +1 MiB (ADR-0050).
+- `main` `e8c8d96` (3.27.0, #270–#283). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). Trần byte thư mục nâng +1 MiB (ADR-0050).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
