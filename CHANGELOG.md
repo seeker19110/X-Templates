@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.27.0] - 2026-10-26
+
+**Dự án đích: chạy lại `install.py`** — nhận hook `PostToolUseFailure`, bản vá guard (`chmod`/`setfacl` vào hàng rào, `gh pr merge --admin`, `git update-index`) và hook Bash đóng hàng rào khi `guard.py` không nạp được (D-199/D-200: cần `python3` ≥ 3.11 trên PATH). Trần byte thư mục nâng theo ADR-0050. Chữ checklist không đổi.
+
 ### Security
 - `pre-bash-guard.sh`: `guard.py` không đọc được/rỗng hoặc không nạp được → đóng hàng rào như khi vắng (chỉ lệnh xem/khôi phục, `install.py`; Edit vẫn sửa được guard), kể cả bản đã commit — `main()` của guard tự bắt lỗi lúc chạy nên không nạp được là file hỏng; không xét trạng thái git vì agent tự đổi được (`update-index --assume-unchanged`, `reset --soft`, `checkout --orphan`, `restore --staged --source=<cây rỗng>`, `git init` lồng — review #282 lượt 3–5). Khi đóng chỉ khôi phục đúng `guard.py` (`git checkout -- .claude/hooks/guard.py`, `git restore …`; không còn `git checkout -- .`/`restore .`) và chạy `…/scripts/install.py`. Dự án đích có guard.py không nạp được sẽ bị chặn Bash tới khi chạy lại `install.py` (hoặc nâng `python3` trên PATH lên ≥ 3.11) (AUD-SEC-108 🔴 gốc, D-199/D-200 — trước đó `chmod 000 guard.py`/ghi rỗng làm hook cho qua mọi lệnh).
 - Guard: `chmod`/`chown`/`chgrp`/`chattr`/`setfacl` (cả qua `find`; qua `xargs` → chặn vì không thấy đích) vào `.claude/hooks/*`, `.claude/settings*.json` → `HOOK_BYPASS`; glob ở đoạn thư mục (`.claude/*/guard.py`, so theo đoạn như shell) tính là hàng rào với mọi lệnh ghi (ca đối kháng T-3532); `git update-index` lên hàng rào (`--assume-unchanged`, `--cacheinfo …,path`) → `HOOK_BYPASS`; `gh pr merge --admin` bị chặn ở mọi chính sách, mã `MERGE_ADMIN` (AUD-SEC-109, D-198). `autonomy-bench` thêm 40 ca của reviewer (33 đối kháng).
