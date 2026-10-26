@@ -4059,6 +4059,13 @@ class MissingGuardTest(unittest.TestCase):
         guard.write_text("syntax error (\n", encoding="utf-8")
         self.assertEqual(dec("echo hi"), "deny")  # sửa so với HEAD rồi chết = hàng rào hỏng
         self.assertIsNone(dec("git restore .claude/hooks/guard.py"))
+        # Cờ chỉ mục làm `git diff` mù — so nội dung với blob HEAD vẫn thấy (review #282 lượt 3).
+        subprocess.run([*git, "update-index", "--assume-unchanged", ".claude/hooks/guard.py"], check=True)
+        self.assertEqual(dec("echo hi"), "deny")
+        (tmp / "x").mkdir()
+        hooks.rename(tmp / "x" / "hooks")  # untracked (chưa có blob ở HEAD) → mở
+        hooks = tmp / "x" / "hooks"
+        self.assertIsNone(dec("echo hi"))
 
 
 class GuardWave1017Test(unittest.TestCase):

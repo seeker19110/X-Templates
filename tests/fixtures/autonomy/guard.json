@@ -5750,6 +5750,70 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-advrev-assume-unchanged-guard",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-108"
+   ],
+   "input": {
+    "command": "git update-index --assume-unchanged .claude/hooks/guard.py"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-advrev-skip-worktree-guard",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-108"
+   ],
+   "input": {
+    "command": "git update-index --skip-worktree .claude/hooks/guard.py"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-advrev-cacheinfo-guard",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-108"
+   ],
+   "input": {
+    "command": "git update-index --add --cacheinfo 100644,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,.claude/hooks/guard.py"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "HOOK_BYPASS"
+   }
+  },
+  {
+   "id": "guard-advrev-control-update-index-refresh",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git update-index --refresh"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-advrev-control-assume-unchanged-src",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git update-index --assume-unchanged src/a.py"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

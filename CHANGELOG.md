@@ -6,8 +6,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Security
-- `pre-bash-guard.sh`: `guard.py` không đọc được/rỗng, hoặc chạy lỗi khi đã sửa so với HEAD → đóng hàng rào như khi vắng (chỉ lệnh xem/khôi phục); lỗi ở bản đã commit vẫn fail-open về luồng (AUD-SEC-108 🔴 gốc, D-199 — trước đó `chmod 000 guard.py`/ghi rỗng làm hook cho qua mọi lệnh).
-- Guard: `chmod`/`chown`/`chgrp`/`chattr`/`setfacl` (cả qua `find`; qua `xargs` → chặn vì không thấy đích) vào `.claude/hooks/*`, `.claude/settings*.json` → `HOOK_BYPASS`; glob ở đoạn thư mục (`.claude/*/guard.py`, so theo đoạn như shell) tính là hàng rào với mọi lệnh ghi (ca đối kháng T-3532); `gh pr merge --admin` bị chặn ở mọi chính sách, mã `MERGE_ADMIN` (AUD-SEC-109, D-198). `autonomy-bench` thêm 35 ca của reviewer (30 đối kháng).
+- `pre-bash-guard.sh`: `guard.py` không đọc được/rỗng, hoặc chạy lỗi khi nội dung khác blob HEAD (so `hash-object`, không `git diff` — mù với `update-index --assume-unchanged`) → đóng hàng rào như khi vắng (chỉ lệnh xem/khôi phục); lỗi ở bản đã commit vẫn fail-open về luồng (AUD-SEC-108 🔴 gốc, D-199 — trước đó `chmod 000 guard.py`/ghi rỗng làm hook cho qua mọi lệnh).
+- Guard: `chmod`/`chown`/`chgrp`/`chattr`/`setfacl` (cả qua `find`; qua `xargs` → chặn vì không thấy đích) vào `.claude/hooks/*`, `.claude/settings*.json` → `HOOK_BYPASS`; glob ở đoạn thư mục (`.claude/*/guard.py`, so theo đoạn như shell) tính là hàng rào với mọi lệnh ghi (ca đối kháng T-3532); `git update-index` lên hàng rào (`--assume-unchanged`, `--cacheinfo …,path`) → `HOOK_BYPASS`; `gh pr merge --admin` bị chặn ở mọi chính sách, mã `MERGE_ADMIN` (AUD-SEC-109, D-198). `autonomy-bench` thêm 40 ca của reviewer (33 đối kháng).
 
 ### Added
 - Hook `PostToolUseFailure` (matcher `Bash`) đăng ký trong `.claude/settings.json`: lệnh cổng/Gate đỏ → `xt.py loop triage-local` đưa ≤ 20 dòng lỗi đã che bí mật vào ngữ cảnh agent (T-1822/T-3531, chủ repo duyệt 2026-10-26); `install.py` chép hook, `doctor` cảnh báo khi thiếu.

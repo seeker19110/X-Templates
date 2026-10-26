@@ -4,9 +4,7 @@
 #     bypassPermissions.
 #  2) ASK (chỉ khi XT_GUARD_POLICY=strict; mặc định guard.py đổi ask nguy hiểm → deny, còn lại cho qua — ADR-0018) lệnh "hành động đối ngoại" (riêng `gh pr merge` qua `xt.py merge-check` → có thể ALLOW, ADR-0013), nới hàng rào, ghi file cổng/bí mật qua Bash (điểm dừng bắt buộc — 11-autonomous-loop).
 #  3) Khi là `git commit`: chạy cổng chất lượng qua dev-task.sh gate (gate-fast khi xt.yaml `commit_gate: fast`); đỏ → chặn (exit 2).
-# Phân tích lệnh nằm ở guard.py (tách theo token shell, chuẩn hoá wrapper/tuỳ chọn git — audit AUD-SEC-001…010).
-# Payload đi qua stdin, không qua argv. guard.py lỗi/thiếu python3 → cho qua (fail-open về luồng), trừ merge: không kiểm
-# được ngoại lệ cứng → chặn (strict: hỏi) — ADR-0019, AUD-SEC-045.
+# Phân tích lệnh ở guard.py; payload qua stdin. Guard hỏng: xem `broken` bên dưới.
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
@@ -44,10 +42,10 @@ g="$(dirname "$0")/guard.py"
 [ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
 if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
-  if git -C "$XT_ROOT" rev-parse -q --verify HEAD >/dev/null 2>&1; then # ngoài repo: `git diff` thành --no-index
-    git -C "$XT_ROOT" diff --quiet HEAD -- "$g" 2>/dev/null
-    [ $? -eq 1 ] && broken "đã sửa so với HEAD và lỗi"
-  fi
+  # So với blob HEAD (`git diff` mù với `--assume-unchanged`); không có blob → mở.
+  d="$(dirname "$g")"
+  h="$(git -C "$d" rev-parse -q --verify HEAD:./guard.py 2>/dev/null)" &&
+    [ "$(git -C "$d" hash-object guard.py)" != "$h" ] && broken "đã sửa so với HEAD và lỗi"
   exit 0
 fi
 decision="$XG_DECISION"

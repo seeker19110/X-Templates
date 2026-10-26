@@ -3397,6 +3397,7 @@ GIT_WRITERS: Dict[str, Callable[[List[str]], List[str]]] = {
     "rm": _positionals,
     "mv": _positionals,
     "checkout-index": _checkout_index_targets,
+    "update-index": lambda a: [p.rsplit(",", 1)[-1] for p in _positionals(a)],  # `--cacheinfo m,sha,path`
 }
 
 
