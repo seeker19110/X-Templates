@@ -219,6 +219,9 @@ class GateFanOutTest(unittest.TestCase):
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, body)
+        # D-194: lệnh `— Kiểm:` của BLUEPRINT.md chạy trên mỗi PR, sau khi cài ruff ghim kèm hash (SEC-004/007)
+        run = body.index("run: python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict --run")
+        self.assertLess(body.index("pip install --quiet --require-hashes -r requirements-dev.txt"), run)
 
     def test_xt_yaml_shard_listing_matches_test(self):
         """`test_list` dùng ĐÚNG cách liệt kê lớp của `test` (CI shard và cổng local không lệch nhau)."""
