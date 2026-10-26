@@ -384,6 +384,14 @@ class LoopInitCarryTest(TmpRepoCase):
             self.assertIn(f"verdict `blocked`: {reason} — người xem rồi `loop resume --reason`)", err)
             self.assertNotIn("`loop stop`", err)
             self.assertNotIn("`loop init --force`", err)  # không nối đuôi gợi lối ra trái nhau
+        run_main("loop", "init", "--force")  # nguồn state thứ hai: lỗi lặp ≥ 3 (LOOP-DESIGN-005) — AUD-TEST-021
+        for _ in range(3):
+            run_main("loop", "record", "--task", "T-001", "--", "false")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("cùng một lỗi lặp 3 lần (T-001)", err)
+        self.assertIn("người xem rồi `loop resume --reason`)", err)
+        self.assertNotIn("`loop stop`", err)
 
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
         # Review #239: cùng đường dẫn PLAN nhưng spec task đổi, hoặc file trong `files:` đổi → không mang.
