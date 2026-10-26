@@ -20,3 +20,7 @@ updates:
     groups:
       dev-tools:
         patterns: ["*"]
+    ignore:
+      # playwright 1.64.x đòi pyee < 15; updater pip không giải ràng buộc này trong file khoá có hash (#275).
+      - dependency-name: pyee
+        update-types: ["version-update:semver-major"]
