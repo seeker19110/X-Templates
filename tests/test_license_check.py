@@ -126,7 +126,7 @@ class LicenseCheckTest(unittest.TestCase):
     def check(
         self, reqs: List[Tuple[str, str, bool]], dists: Dict[str, Tuple[str, Message]], today: dt.date = TODAY
     ) -> Tuple[List[str], List[str]]:
-        lookup: Any = lambda n: dists.get(n)  # noqa: E731
+        lookup: Any = lambda n: dists.get(n)
         return xt.license_check(reqs, {"MIT"}, {"pathspec": EXC}, today, lookup)
 
     def test_allowed_exception_and_drift(self):

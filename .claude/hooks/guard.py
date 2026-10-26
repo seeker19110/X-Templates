@@ -5832,7 +5832,7 @@ def _fetch_values(args: List[str]) -> List[Tuple[str, str]]:
         if a in flags and i + 1 < len(args):
             out.append((a, args[i + 1]))
         elif a.startswith("--") and "=" in a and a.split("=", 1)[0] in flags:
-            out.append(tuple(a.split("=", 1)))  # type: ignore[arg-type]
+            out.append(tuple(a.split("=", 1)))  # type: ignore[arg-type]  # đã có "=" nên đúng hai phần
         elif a[:2] in ("-d", "-F", "-T") and len(a) > 2 and not a.startswith("--"):
             out.append((a[:2], a[2:]))
     return out
