@@ -1,5 +1,6 @@
 {
   "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
+  "setup": "nạp scripts/xt.py làm module; base = thư mục tạm có .autopilot/; write_state(st0); A = read_state(), B = read_state(); A['iterations'] += 1; B['deferred'] = {T-900}; write_state(A); write_state(B); read_state()",
   "before": {
     "active": true,
     "iterations": 7,

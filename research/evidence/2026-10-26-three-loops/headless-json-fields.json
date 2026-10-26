@@ -81,7 +81,7 @@
     "cache_read_input_tokens": 26459
   },
   "modelUsage_keys": [
-    "claude-sonnet-5-5"
+    "<model — ẩn theo LOOP-HARNESS-027>"
   ],
   "modelUsage_fields": [
     "cacheCreationInputTokens",
@@ -97,5 +97,5 @@
     "thinkingTokens",
     "webSearchRequests"
   ],
-  "note": "Một lần chạy thật; `result`, `session_id`, `uuid` không chép vào bằng chứng. Trường `duration_ms`/`num_turns`/`usage` khớp kiểu SDKResultMessage của docs TypeScript SDK; nhiều trường đo tiến trình (process_*, time_to_request_*) docs không liệt kê — không dựa vào."
+  "note": "Một lần chạy thật; `result`, `session_id`, `uuid` và tên model (khoá của `modelUsage`) không chép vào bằng chứng. Trường `duration_ms`/`num_turns`/`usage` khớp kiểu SDKResultMessage của docs TypeScript SDK; nhiều trường đo tiến trình (process_*, time_to_request_*) docs không liệt kê — không dựa vào."
 }

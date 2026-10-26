@@ -1,6 +1,8 @@
-▶ Autopilot tiếp tục (vòng 7/50): attach new session
-  việc chờ người quay lại hàng làm: T-900
 {
+  "stdout": [
+    "▶ Autopilot tiếp tục (vòng 7/50): attach new session",
+    "  việc chờ người quay lại hàng làm: T-900"
+  ],
   "revision": "3c62ab5b933fab2a471d2113f00a088765e0cd61",
   "exit_code": 0,
   "before": {
