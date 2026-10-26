@@ -11,10 +11,11 @@
   S110/S112 (except rộng nuốt lỗi). Except hẹp có lối xử lý (`continue` bỏ file không đọc được, `pass` rồi trả bản
   không SHA) giữ — đó là xử lý, không phải nuốt.
 - (2) CI job `checks`: `blueprint-status BLUEPRINT.md --strict --run` (+ cài `requirements-dev.txt` kèm hash cho ruff) —
-  30 lệnh kiểm chạy trên MỖI PR thay vì chỉ `loop verify`/`release-check` cục bộ (sửa cấu hình CI: lý do này).
+  31 lệnh kiểm chạy trên MỖI PR thay vì chỉ `loop verify`/`release-check` cục bộ (sửa cấu hình CI: lý do này).
 - (3) SEC-004: cụm cờ curl có chữ số (`-4k`), dừng ở `;`, `sslverify` mọi hoa/thường và `0|no|off|false`, JSON
   `"sslVerify": false`, `--proxy-insecure`, npm `strict-ssl false`; `git grep …; test $? -eq 1` để regex/pathspec hỏng
   (exit 128) là đỏ, không xanh giả.
+- REPO-006 (review #277 🔴): kiểm tag gần nhất annotated + VERSION = tag hoặc bản đang cắt chưa có tag — trước đây đòi tag `v<VERSION>` có sẵn nên PR cắt bản đỏ CI.
 - Không làm: curl nhiều dòng (`\` nối dòng) — giới hạn của kiểm theo dòng, đã chấp nhận ở review #274.
 - Rủi ro: C901/byte trần `scripts/` (cắt chú thích bù); CI thêm ~10 s. Đường lùi: revert PR.
 - Cách làm: phiên chính tự làm; một PR làn chuẩn (mã + CI) → reviewer-alt.
