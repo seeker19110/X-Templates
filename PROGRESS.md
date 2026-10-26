@@ -34,6 +34,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `d944b14` (3.26.1 + #270–#277). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). `scripts/` và `11-autonomous-loop` sát trần byte — sửa thì cắt chú thích bù.
+- `main` `057e0c0` (3.26.1 + #270–#279). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). `scripts/` và `11-autonomous-loop` sát trần byte — sửa thì cắt chú thích bù.
 - Chờ người (`loop status` = done-pending-human): T-1814 vá guard (AUD-SEC-102), T-1822 đăng ký hook, T-1832 spike mutation trên CI, T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; T-1823 chờ pha harden.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
