@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- `xt.py`: guard ném lỗi lúc nạp (vd `SyntaxError`) không còn bị nuốt im — báo stderr `[xt] guard … nạp lỗi (…)`, vẫn dùng `_failure_decision` của module dở (BASE-ERR-001, D-194).
+- CI job `checks` chạy `blueprint-status BLUEPRINT.md --strict --run` trên mỗi PR: lệnh `— Kiểm:` của mục đã tick hỏng, hoặc còn MUST mở (ghép lại có MUST mới chưa tick), thì CI đỏ (D-194). Kiểm `BASE-REPO-006` của repo khung: bản đang cắt (chưa lên `main`) chưa cần tag; VERSION đã lên `main` quá 15 phút mà thiếu tag thì đỏ — chạy lại `release-tag.yml` (RUNBOOK-PR-STEWARD §4).
+
 ## [3.26.1] - 2026-10-25
 
 **Dự án đích: chạy lại `install.py`** (`xt.py` đổi thông báo `loop init`; chữ checklist không đổi). D-192, trả 3 🟢 của audit delta3.
