@@ -12,7 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-import xt  # noqa: E402
+import xt
 
 PLAN = """# PLAN
 

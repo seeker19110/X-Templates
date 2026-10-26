@@ -1,6 +1,6 @@
 # ADR-0043: Ngân sách kích thước — đóng băng bề mặt khung 3.x
 
-- **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo D-142 — PLAN-3.16.0-ceiling, chủ repo: "theo khuyến nghị đi")
+- **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo D-142 — PLAN-3.16.0-ceiling, chủ repo: "theo khuyến nghị đi"); số trần thư mục nâng bởi [ADR-0050](0050-raise-dir-size-caps.md)
 - **Trạng thái triển khai:** Đã triển khai — `tests/test_docs_budget.py` `DIR_CAPS`, `test_dir_totals_stay_under_caps`
   (T-2407).
 - **Ngày:** 2026-10-23

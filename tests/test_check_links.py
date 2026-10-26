@@ -191,7 +191,7 @@ class FakeOpener:
 
 
 def http_err(code: int) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError("http://x", code, "m", {}, None)  # type: ignore[arg-type]
+    return urllib.error.HTTPError("http://x", code, "m", {}, None)  # type: ignore[arg-type]  # hdrs=None hợp lệ lúc chạy, stub đòi Message
 
 
 class LinkClassificationTest(unittest.TestCase):

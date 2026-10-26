@@ -4,9 +4,7 @@
 #     bypassPermissions.
 #  2) ASK (chỉ khi XT_GUARD_POLICY=strict; mặc định guard.py đổi ask nguy hiểm → deny, còn lại cho qua — ADR-0018) lệnh "hành động đối ngoại" (riêng `gh pr merge` qua `xt.py merge-check` → có thể ALLOW, ADR-0013), nới hàng rào, ghi file cổng/bí mật qua Bash (điểm dừng bắt buộc — 11-autonomous-loop).
 #  3) Khi là `git commit`: chạy cổng chất lượng qua dev-task.sh gate (gate-fast khi xt.yaml `commit_gate: fast`); đỏ → chặn (exit 2).
-# Phân tích lệnh nằm ở guard.py (tách theo token shell, chuẩn hoá wrapper/tuỳ chọn git — audit AUD-SEC-001…010).
-# Payload đi qua stdin, không qua argv. guard.py lỗi/thiếu python3 → cho qua (fail-open về luồng), trừ merge: không kiểm
-# được ngoại lệ cứng → chặn (strict: hỏi) — ADR-0019, AUD-SEC-045.
+# Phân tích lệnh ở guard.py; payload qua stdin. Guard hỏng: xem `broken` bên dưới.
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
@@ -30,19 +28,23 @@ if ! command -v python3 >/dev/null 2>&1; then
   fi
   exit 0
 fi
-# guard.py bị dời/xoá (vd `mv .claude/hooks/guard.py …`) không phải lỗi chạy: hàng rào đã bị gỡ → chặn mọi lệnh (strict:
-# hỏi) trừ lệnh một dòng để xem/khôi phục và tắt auto-merge, tới khi khôi phục (AUD-SEC-019/046). guard.py có mà lỗi
-# giữa chừng → vẫn fail-open về luồng (ADR-0002).
-if [ ! -f "$(dirname "$0")/guard.py" ]; then
+# Hàng rào bị gỡ → chặn mọi lệnh (strict: hỏi) trừ lệnh một dòng xem/khôi phục và tắt auto-merge (AUD-SEC-019/046/108):
+# guard.py vắng/không đọc được/rỗng, hoặc không nạp được. `main()` của guard tự bắt mọi lỗi lúc chạy (fail-open về luồng,
+# ADR-0002), nên không nạp được = file hỏng; không xét trạng thái git — agent tự đổi được (D-199, D-200).
+broken() {
   cmd="$(json_field "$payload" tool_input.command)"
-  # `install.py` phải là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
-  restore_re='^[[:space:]]*(git[[:space:]]+(checkout|restore|status|diff|log|show)|ls|cat|python3[[:space:]]+[^[:space:];&|`$<>-][^[:space:];&|`$<>]*install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
-  [[ $cmd != *$'\n'* && $cmd != *--output* && $cmd =~ $restore_re ]] && exit 0
-  fence_closed "Khung cần xác nhận: thiếu .claude/hooks/guard.py — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
-fi
-if ! guard_fields bash <<<"$payload"; then # guard.py chết (lỗi cú pháp, bị kill): luồng đi tiếp, riêng merge/`gh api` chặn (AUD-HAR-040/SEC-045)
+  # Khôi phục CHỈ guard.py (`git checkout -- .`/`restore .` xoá thay đổi chưa commit mà guard lành chặn — review #282
+  # lượt 6); `scripts/install.py` là đối số đầu của python3 (không `-c …`); không cờ ghi file (`--output`) — review #97.
+  restore_re='^[[:space:]]*git[[:space:]]+(checkout([[:space:]]+HEAD)?[[:space:]]+--|restore)[[:space:]]+(\./)?\.claude/hooks/guard\.py[[:space:]]*$'
+  view_re='^[[:space:]]*(git[[:space:]]+(status|diff|log|show)|ls|cat|python3[[:space:]]+([^[:space:];&|`$<>-][^[:space:];&|`$<>]*/)?scripts/install\.py|gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+[[:space:]]+--disable-auto)([[:space:]][^;&|`$<>]*)?$'
+  [[ $cmd != *$'\n'* && $cmd != *--output* && ($cmd =~ $restore_re || $cmd =~ $view_re) ]] && exit 0
+  fence_closed "Khung cần xác nhận: .claude/hooks/guard.py $1 — hàng rào bị gỡ; khôi phục (git checkout -- .claude/hooks/guard.py hoặc install.py) rồi làm tiếp"
+}
+g="$(dirname "$0")/guard.py"
+[ -f "$g" ] && [ -r "$g" ] && [ -s "$g" ] || broken "vắng/không đọc được/rỗng"
+if ! guard_fields bash <<<"$payload"; then # guard.py chết: merge/`gh api` chặn (AUD-HAR-040/SEC-045)
   merge_like && fence_closed "Khung cần xác nhận: guard.py lỗi nên không kiểm được merge/ghi GitHub"
-  exit 0
+  broken "không nạp được (file hỏng hoặc python3 < 3.11; có thể sửa bằng Edit)"
 fi
 decision="$XG_DECISION"
 [ "$decision" = "deny" ] && pretool_decision deny "$XG_REASON"

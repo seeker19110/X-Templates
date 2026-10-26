@@ -301,7 +301,7 @@ class GuardReviewMissingTest(unittest.TestCase):
         "gh pr merge 7 --squash",
         "gh pr merge 7",
         "gh pr merge 7 --squash --delete-branch",
-        f"gh pr merge 7 --squash --admin --match-head-commit {HEAD}",
+        f"gh pr merge 7 --squash --body-file b.md --match-head-commit {HEAD}",
         "gh pr -R o/r merge 7 --squash",
         "gh api -X PUT repos/o/r/pulls/7/merge -f merge_method=squash",
     )

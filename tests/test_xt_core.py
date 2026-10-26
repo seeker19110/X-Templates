@@ -800,7 +800,7 @@ class LoopVerdictBranchesTest(TmpMixin, unittest.TestCase):
         bp = "---\nkind: blueprint\nprofile: web-app\nscale: M\n---\nnội dung\n"
         write(self.base / "BLUEPRINT.md", bp)
         write(self.base / "pyproject.toml", "[project]\n")
-        args = lambda **kw: argparse.Namespace(  # noqa: E731
+        args = lambda **kw: argparse.Namespace(
             plan="docs/autopilot/PLAN.md",
             blueprint=None,
             hours=None,
@@ -1795,7 +1795,10 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
 
     def test_broken_guard_module_fails_open(self):
         self.fake_guard("def bash_decision(:\n")
-        self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+        self.assertIn("nạp lỗi (SyntaxError", err.getvalue())  # BASE-ERR-001: lỗi nạp guard không bị nuốt im
         self.fake_guard("def bash_decision(c, r, w):\n    raise RuntimeError()\n")  # không có _failure_decision
         self.assertEqual(xt.guard_block("x", self.base), "")
 
