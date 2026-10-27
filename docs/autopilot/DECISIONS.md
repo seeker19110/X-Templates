@@ -1420,3 +1420,17 @@
 - Chọn: Ba lệnh con riêng loop attach (chỉ gắn phiên) · loop resolve --task ID (gỡ một việc chờ) · loop unblock (mở block); loop resume cũ vẫn chạy như trước nhưng in cảnh báo trỏ ba lệnh mới, bỏ ở ADR sau
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mỗi lệnh một nghĩa, attach không chạm deferred/đếm lỗi/blocked; resume cũ không đổi nghĩa âm thầm với dự án đích đã cài bản cũ (skill autopilot, README, SessionStart) · (2) đường lùi: resume còn chạy nên không phá phiên đang chạy, bỏ lệnh mới là một commit · (3) test được từng nghĩa riêng; phương án 3 làm vỡ mọi tài liệu và hook dự án đích chưa chạy lại install.py giữa hai bản; phương án 2 đổi nghĩa lệnh cũ không báo; phương án 4 để lại hai lệnh nguy hiểm trên đường đổi phiên
 - Đường lùi: Xoá ba lệnh con và cảnh báo ở loop resume; đưa SessionStart/README về trỏ loop resume (một commit)
+
+### D-202 · 2026-10-27T01:36:00+00:00 · Hoàn thành sáu lát nghiên cứu ba vòng (chủ repo 2026-10-27 'hoàn thành hết đi'): thiết kế và thứ tự cho lát 0–3, xử lý lát 4–5?
+
+- Phương án: (1) Máy hoá bước kế và một lần thử trên CLI/state hiện có (ADR-0052): lát 0 corpus FLOW, lát 1 rev/task_runs/attach-resolve-unblock/perf v2 → 3.28.0, lát 2 next-step chỉ đọc → lát 3 perf trial → 3.29.0; mỗi task một PR, lát 4–5 loop defer · (2) Chỉ thêm lời nhắc vào skill · (3) Runner ngoài phiên tự gọi agent/sửa CI/phát hành
+- Chọn: Máy hoá bước kế và một lần thử trên CLI/state hiện có (ADR-0052): lát 0 corpus FLOW, lát 1 rev/task_runs/attach-resolve-unblock/perf v2 → 3.28.0, lát 2 next-step chỉ đọc → lát 3 perf trial → 3.29.0; mỗi task một PR, lát 4–5 loop defer
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bốn tái hiện R2–R5 có test đỏ trước khi sửa, không nới cổng/trần; lát 4–5 cần dữ liệu/quyền chỉ chủ dự án có nên defer; (2) mỗi task một PR đảo ngược được, trần theo task tắt bằng --max-task-runs 0; (3) stdlib, test được; phương án 2 không sửa được R2–R5 và skill hết byte; phương án 3 cần ADR đối chiếu ADR-0009, quyền và chi phí chưa có số
+- Đường lùi: Revert từng PR theo ADR-0052 §Đường lùi; bỏ PLAN-harden-2026-10-27-loops
+
+### D-203 · 2026-10-27T03:07:45+00:00 · perf trial (lát 3) có chốt thiết kế trong ADR-0052 không, sau 3 lượt review #290 (lượt 4–6) mỗi lượt lộ lớp ràng buộc mới?
+
+- Phương án: (1) Rút §7 khỏi ADR-0052; ghi ràng buộc đã tìm làm đầu vào ADR riêng của lát 3 (sau spike môi trường đo); lát 0–2 + perf v2 metadata giữ · (2) Vá tiếp §7 trong ADR-0052 tới khi review sạch
+- Chọn: Rút §7 khỏi ADR-0052; ghi ràng buộc đã tìm làm đầu vào ADR riêng của lát 3 (sau spike môi trường đo); lát 0–2 + perf v2 metadata giữ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 5 🟠 lượt 6 (baseline agent lái được, bộ chấm từ cây candidate, thiếu test tương đương, worktree tạm khác môi trường, không đo đại lượng tất định) cần thử nghiệm thực tế, chốt trên giấy dễ sai; (2) giữ đường lùi: lát 0–2 không phụ thuộc perf trial; (3) ADR riêng test được bằng spike; tốc độ chỉ phá hoà
+- Đường lùi: Đưa §7 trở lại ADR-0052 bằng ADR mới thay thế phần này
