@@ -354,6 +354,29 @@ class LoopInitCarryTest(TmpRepoCase):
         rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
         self.assertEqual((rc, "kiểm lại cuối" in err), (0, False))
 
+    def test_live_loop_budget_blocked_and_exhausted(self) -> None:
+        # T-3537 (ADR-0051, D-177): vòng còn sống vừa `blocked` vừa hết vòng/hạn → `_verdict_loop_state` xét `blocked` trước
+        # trần nên `_live_loop` từng coi là vòng sống và trỏ ngược "mở block" — chu trình. Hết ngân sách thì `loop init` mở được.
+        run_main("loop", "init", "--max-iterations", "1")
+        self.assertEqual(run_main("loop", "defer", "--task", "T-002", "--reason", "khoá thật")[0], 0)
+        self.assertEqual(run_main("loop", "block", "--reason", "chờ khoá")[0], 0)
+        st = xt.read_state(self.repo)
+        st["iterations"] = 1
+        xt.write_state(st, self.repo)
+        self.assertTrue(run_main("loop", "status")[1].startswith("verdict: blocked"))
+        self.plan.with_name("PLAN-2.md").write_text(
+            "- [ ] `T-002` cần người — Gate: `true`\n- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8"
+        )
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
+        self.assertIn("T-002", xt.read_state(self.repo).get("deferred", {}))  # ADR-0051: việc chờ người đi theo
+
+    def test_live_loop_budget_blocked_by_deadline(self) -> None:
+        # Cùng chu trình với hạn: `--hours 0` hết hạn ngay, `loop block` thêm cờ — `loop init` đợt kế không bị chặn.
+        run_main("loop", "init", "--hours", "0")
+        self.assertEqual(run_main("loop", "block", "--reason", "chờ khoá")[0], 0)
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
+
     def test_init_after_plan_renamed(self) -> None:
         # AUD-HAR-114: PLAN đợt trước đổi tên sau khi đợt xong → verdict `blocked` (không thấy PLAN) → `loop init` exit 2
         # "Đang có vòng" mà không nói vì sao. Nay thông báo nêu verdict + lý do và lối ra `loop stop`.

@@ -13,8 +13,8 @@
 | 🟢 | 9 | AUD-DEP-006/007/008, AUD-DOC-087…090, AUD-CI-019, AUD-HAR-116; cập nhật số đếm AUD-HAR-105 |
 
 Kết luận: **không chặn phát hành.** Diff gồm bump phụ thuộc/action có hash và ghim SHA, sổ audit, nghiên cứu ba vòng
-và ADR-0051 (chưa có code). Bốn 🟢 chữ (DEP-006/007, DOC-087, HAR-116) sửa ngay trong PR này; DOC-088 chấp nhận;
-DOC-089 giữ mở (cần tải lại nguồn để đối chiếu).
+và ADR-0051 (chưa có code). Năm 🟢 sửa ngay trong #289 (DEP-006/007, DOC-087/090, HAR-116); DOC-088 chấp nhận; DOC-089, DEP-008, CI-019 giữ mở;
+DEP-009 (gốc của DOC-090) mở ở PR ADR-0052.
 
 ## 2. Phạm vi (`xt.py audit plan`)
 
@@ -38,7 +38,7 @@ Giữ nguyên: ARCH, CODE, TEST, XFEAT (không file mã đổi), PERF/A11Y/CFG (
 | DOC | `xt.py validate` · `changelog-check` · `progress-check` · `check-links.py` · `unittest tests.test_docs_budget` | 0 | — |
 | HAR | `xt.py doctor --json` (không `--fix`) | 0 | 0 phát hiện |
 
-Bị chặn (guard, `curl … \| python3`): tra PyPI JSON — hash/license lấy bằng `pip download` + đọc METADATA cục bộ thay thế;
+Bị chặn (guard, `curl … | python3`): tra PyPI JSON — hash/license lấy bằng `pip download` + đọc METADATA cục bộ thay thế;
 còn chưa biết: metadata pyee 15.0.0, nội dung nguồn của AUD-DOC-089.
 
 ## 4. Phát hiện 🔴/🟠
@@ -47,8 +47,8 @@ Không có.
 
 ## 5. Kế hoạch
 
-Đợt duy nhất = PR audit này: sửa chữ AUD-DEP-006/007, AUD-DOC-087, AUD-HAR-116 → `đã sửa`. Nợ 🟢 giữ: AUD-DOC-089 (mở),
-AUD-DOC-088 (chấp nhận, chủ phiên chính, hạn 2027-01-20), AUD-HAR-105 (mở, đã cập nhật số đếm).
+Đợt duy nhất = PR audit #289: sửa chữ AUD-DEP-006/007, AUD-DOC-087/090, AUD-HAR-116 → `đã sửa`. Nợ 🟢 giữ: AUD-DOC-089, AUD-DEP-008/009,
+AUD-CI-019 (mở), AUD-DOC-088 (chấp nhận, chủ phiên chính, hạn 2027-01-20), AUD-HAR-105 (mở, đã cập nhật số đếm).
 Ngoài diff: `artipacked` ×14 có sẵn từ base (AUD-CI-007); `dependabot-cooldown` ×2 ghi AUD-CI-019. Review #289 (🟠 1, 🟢 4) bổ sung:
 `DEPENDENCIES.md` lệch `certifi` sau #286 (AUD-DOC-090, sửa), chữ e2e cũ ở `DEPENDENCIES.md` (gộp AUD-DEP-006),
 `license-check --requirements requirements-audit.txt` exit 1 vì `sortedcontainers` khai `Apache 2.0` không SPDX (AUD-DEP-008, có từ trước).
