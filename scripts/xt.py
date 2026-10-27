@@ -2098,7 +2098,8 @@ def task_runs_rev(base: Path, st: Dict[str, Any], task: str) -> Optional[str]:
         gate = canonical_command(gate)
     except ValueError:  # nháy lệch: như `same_command`
         gate = gate.strip()
-    return f"{task_req_rev(t)}:{cmd_sha256(gate)[:16]}"
+    spec = " ".join(task_spec(t).split())  # spec cũng bỏ khác biệt khoảng trắng (không đổi `task_req_rev` của evidence)
+    return f"{cmd_sha256(spec)[:16]}:{cmd_sha256(gate)[:16]}"
 
 
 def _digest_members(root: Path) -> List[Path]:
@@ -2807,8 +2808,11 @@ def loop_record(
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")
     sig = None if code == 0 else failure_signature(task, code, out)
     rev = task_runs_rev(base, st, task)  # PLAN đọc ngoài khoá — `fn` dưới đây chỉ so chuỗi
+    plan_t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
+    # Chỉ lần xanh chạy ĐÚNG Gate của task (hoặc task ngoài PLAN) mới xoá `task_runs` — `-- true` không gỡ chặn (review #294).
+    clears = plan_t is None or same_command(cmd_str, str(plan_t.get("gate") or ""))
     # Gate đã chạy xong, NGOÀI khoá; đếm lỗi lặp áp trên state mới nhất trong khoá (ADR-0052 §2) — ghi song song không mất.
-    st = update_state(base, lambda cur: _record_failure_count(cur, task, sig, rev))
+    st = update_state(base, lambda cur: _record_failure_count(cur, task, sig, rev, clears))
     _append_run(base, st, ev, sig)  # sau state: số đo không chặn
     print(f"[xt] {task}: exit {code} — bằng chứng: .autopilot/evidence/{task}.json")
     if code != 0:
@@ -2819,14 +2823,15 @@ def loop_record(
 
 
 def _record_failure_count(
-    cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str] = None
+    cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str] = None, clears: bool = True
 ) -> Optional[Dict[str, Any]]:
     """`fn` của `update_state` cho `loop record`: xanh (`sig` None) → đặt lại đếm lỗi lặp; đỏ cùng chữ ký lần trước → +1,
     khác → 1 (LOOP-DESIGN-005). Kèm đếm lần đỏ theo task (`_count_task_run`). Không có state (chưa `loop init`) → None,
     không ghi."""
     if not cur:
         return None
-    _count_task_run(cur, task, sig, rev)
+    if sig is not None or clears:
+        _count_task_run(cur, task, sig, rev)
     if sig is None:
         cur["same_failure_count"] = 0
         cur["last_failure_signature"] = None
@@ -2842,8 +2847,8 @@ def _record_failure_count(
 
 def _count_task_run(cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str]) -> None:
     """`task_runs[task]` (ADR-0052 §3): đỏ → +1, đếm lại từ 0 khi spec/Gate của task trong PLAN đổi (`rev` khác giá trị
-    lưu ở `task_runs_rev`) — trừ khi task đã chạm trần: khi đó chỉ xanh hoặc `resume`/`unblock` gỡ, sửa PLAN không tự
-    thoát chặn (review #294); xanh → xoá khoá (về 0)."""
+    lưu ở `task_runs_rev`) — trừ khi task đã chạm trần: khi đó chỉ xanh đúng Gate hoặc `loop resume` gỡ, sửa PLAN không
+    tự thoát chặn (review #294); xanh → xoá khoá (về 0)."""
     runs, revs = _task_runs(cur), cur.get("task_runs_rev")
     revs = revs if isinstance(revs, dict) else {}
     if sig is None:
@@ -3100,7 +3105,8 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
     mode = _payload_field(stdin_text, "permission_mode")
     if v["verdict"] in ("continue", "verify") and st:
         st = _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=False))
-        if not st:  # lỗi khoá/rev hoặc state biến mất trong lúc tính verdict → cho dừng (fail-open)
+        # lỗi khoá/rev, state biến mất, hoặc `loop stop` chen vào trong lúc tính verdict → cho dừng (fail-open)
+        if not st or not st.get("active"):
             return "", 0
         return json.dumps(
             {"decision": "block", "reason": _stop_reason(st, v, mode, xt_cmd(base))}, ensure_ascii=False

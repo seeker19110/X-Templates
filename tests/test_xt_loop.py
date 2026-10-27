@@ -758,8 +758,8 @@ class UpdateStateTest(TmpRepoCase):
         self.assertEqual(st["final_verdict"]["verdict"], "blocked")
 
     def test_update_state_stop_hook_skips_loop_stopped_meanwhile(self) -> None:
-        # Review #294: `loop stop` chen giữa verdict và ghi → Stop hook không đè `final_verdict` "stopped".
-        self.init_loop()
+        # Review #294: `loop stop` chen giữa verdict và ghi → Stop hook không đè `final_verdict` "stopped" (nhánh kết
+        # thúc: vòng `blocked`) và không chặn dừng thêm một lượt (nhánh `continue`).
         real = xt.loop_verdict
 
         def verdict_then_stop(base: Path) -> dict:
@@ -767,10 +767,18 @@ class UpdateStateTest(TmpRepoCase):
             self.assertEqual(run_main("loop", "stop", "--reason", "người dừng")[0], 0)
             return v
 
+        self.init_loop()
+        xt.write_state({**xt.read_state(self.tmp), "blocked": True, "blocked_reason": "x"}, self.tmp)
         with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop):
-            xt.hook_stop("{}", self.tmp)
+            self.assertEqual(xt.hook_stop("{}", self.tmp), ("", 0))
         st = xt.read_state(self.tmp)
         self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "stopped"))
+        self.init_loop()
+        it = xt.read_state(self.tmp).get("iterations", 0)
+        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop):
+            self.assertEqual(xt.hook_stop("{}", self.tmp), ("", 0))  # còn task nhưng vòng vừa dừng → cho dừng
+        st = xt.read_state(self.tmp)
+        self.assertEqual((st["active"], st.get("iterations", 0)), (False, it))
 
     def test_update_state_flock_unsupported_runs_unlocked(self) -> None:
         # Review #294: FS không hỗ trợ flock (ENOLCK) → như nhánh không `fcntl`: ghi được, kiểm `rev`, báo một dòng.
@@ -1106,6 +1114,25 @@ class TaskRunsTest(TmpRepoCase):
             self.red()
         self.plan.write_text(TR_PLAN.replace("`bash gate.sh`", "`bash  gate.sh`"), encoding="utf-8")
         self.red(cmd="bash  gate.sh")
+        self.assertEqual(self.runs(), {"T-001": 4})
+
+    def test_task_runs_green_with_other_command_does_not_unblock(self) -> None:
+        # Review #294: xanh bằng lệnh khác Gate (`-- true`) không xoá `task_runs`; xanh đúng Gate thì xoá.
+        run_main("loop", "init", "--max-task-runs", "3")
+        for _ in range(3):
+            self.red()
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--no-tick", "--", "true")[0], 0)
+        self.assertEqual((self.runs(), self.verdict()["verdict"]), ({"T-001": 3}, "blocked"))
+        (self.repo / "green").write_text("", encoding="utf-8")
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "bash gate.sh")[0], 0)
+        self.assertEqual(self.runs(), {})
+
+    def test_task_runs_spec_whitespace_edit_does_not_reset(self) -> None:
+        run_main("loop", "init")
+        for _ in range(3):
+            self.red()
+        self.plan.write_text(TR_PLAN.replace("việc một", "việc  một"), encoding="utf-8")
+        self.red()
         self.assertEqual(self.runs(), {"T-001": 4})
 
     def test_task_runs_rev_unbalanced_quote_gate(self) -> None:

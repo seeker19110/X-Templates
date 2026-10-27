@@ -1448,3 +1448,10 @@
 - Chọn: Gộp 1 PR (3 commit theo task không tách được → 1 commit, ghi 3 task), reviewer-alt rà cả PR
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: trạng thái trung gian chưa từng chạy/test, dựng lại để tách là mã mới chưa kiểm — rủi ro hơn; ba task cùng một chủ đề (an toàn state) và cùng bộ FLOW-04/06/07; (3) review một lần trên mã đã chạy cổng đầy đủ; vượt ~150 dòng chủ yếu là test
 - Đường lùi: Revert PR (một commit squash)
+
+### D-206 · 2026-10-27T05:35:44+00:00 · task_runs đặt lại khi nào (ADR-0052 §3 chỉ nói 'xanh hoặc req_rev đổi')?
+
+- Phương án: (1) Đếm lại khi spec hoặc Gate (dạng chuẩn, bỏ khác biệt khoảng trắng) đổi — trừ task đã chạm trần; chỉ lần xanh chạy đúng Gate hoặc loop resume xoá · (2) Đúng chữ ADR: chỉ req_rev (spec nguyên văn) và mọi lần xanh
+- Chọn: Đếm lại khi spec hoặc Gate (dạng chuẩn, bỏ khác biệt khoảng trắng) đổi — trừ task đã chạm trần; chỉ lần xanh chạy đúng Gate hoặc loop resume xoá
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: review #294 tái hiện agent tự thoát chặn bằng thêm khoảng trắng vào Gate/spec hoặc record xanh bằng -- true; đổi Gate thật trước trần vẫn là 'đổi cách' (nghiên cứu §4B); (2) đường lùi --max-task-runs 0
+- Đường lùi: task_runs_rev về task_req_rev nguyên văn; bỏ điều kiện chạm trần và clears trong loop_record
