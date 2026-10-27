@@ -36,10 +36,7 @@ from test_xt_cli import TmpRepoCase, run_main
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-XFAIL: dict[str, str] = {
-    "FLOW-18": "R2 — `perf compare` báo `improved` khi before `ms`, after `s` (T-3545)",
-    "FLOW-19": "R3 — mẫu perf chưa có v2 (`dirty`/`head`/`harness_sha256`) và `perf compare` chưa có `--base` (T-3545)",
-}
+XFAIL: dict[str, str] = {}
 STRICT: frozenset[str] = frozenset(s.strip() for s in os.environ.get("XT_FLOW_STRICT", "").split(",") if s.strip())
 FLOW_IDS: set[str] = set()
 
@@ -82,6 +79,19 @@ SESSION_B = "22222222-aaaa-bbbb-cccc-000000000002"
 REFUSE = "không đủ điều kiện so"
 SAMPLES_MS = [98.0, 99.0, 100.0, 101.0, 102.0, 100.5, 99.5, 100.2, 99.8, 100.1]
 SAMPLES_S = [x / 1000 for x in SAMPLES_MS]
+# Mẫu v2 đủ trường như `perf sample` ghi (`cmd` là mảng): ca từ chối phải từ chối vì ĐÚNG một điều lệch, không vì mẫu thiếu
+# trường (T-3545 — bản đầu của FLOW-18/19 thiếu `head`/`dirty`/`harness_sha256` và `cmd` là chuỗi nên xanh oan).
+PERF_META: dict[str, Any] = {
+    "schema": 2,
+    "cmd": ["make", "bench"],
+    "unit": "s",
+    "higher_is_better": False,
+    "env": {"platform": "linux-x", "python": "3.11", "nproc": 4},
+    "head": "a" * 40,
+    "dirty": False,
+    "tree_fp": "f" * 64,
+    "harness_sha256": "1" * 64,
+}
 
 
 def _bump(st: dict[str, Any], key: str) -> dict[str, Any]:
@@ -323,50 +333,44 @@ class FlowTest(TmpRepoCase):
 
     @flow("FLOW-18")
     def test_flow_18_perf_compare_refuses_ms_vs_s(self) -> None:
-        """Given hai mẫu giống hệt (cùng `cmd`, `env`) trừ `unit`: before `ms` (~100), after `s` (~0,1) — cô lập R2 ·
-        When `perf compare before after` · Then exit 2 và thông báo có "không đủ điều kiện so" (không chỉ exit 2: argparse
-        lỗi cũng 2). (Hiện báo `improved` → xfail.)"""
-        base = {"schema": 2, "cmd": "make bench", "higher_is_better": False}
-        env = {"platform": "linux-x", "python": "3.11", "nproc": 4}
-        before = self.perf("b.json", **base, unit="ms", samples=SAMPLES_MS, env=env)
-        after = self.perf("a.json", **base, unit="s", samples=SAMPLES_S, env=env)
+        """Given hai mẫu v2 đủ trường, giống hệt trừ `unit`: before `ms` (~100), after `s` (~0,1) — cô lập R2 ·
+        When `perf compare before after` · Then exit 2 và thông báo có "không đủ điều kiện so" và `unit` (không chỉ exit 2:
+        argparse lỗi cũng 2). Đối chứng: cùng `unit` → so được (exit 0, `improved`)."""
+        before = self.perf("b.json", **{**PERF_META, "unit": "ms"}, samples=SAMPLES_MS)
+        after = self.perf("a.json", **PERF_META, samples=SAMPLES_S)
         rc, text = self.perf_compare(before, after)
         self.assertEqual(rc, 2, text)
         self.assertIn(REFUSE, text)
+        self.assertIn("unit", text)
+        same = self.perf("a-ms.json", **{**PERF_META, "unit": "ms"}, samples=SAMPLES_S)
+        self.assertEqual(self.perf_compare(before, same)[0], 0)
 
     @flow("FLOW-19")
     def test_flow_19_perf_compare_refuses_by_role(self) -> None:
         """Given hai mẫu v2 giống nhau trừ một điều · When `perf compare` · Then exit 2 và "không đủ điều kiện so" cho:
-        (a) before `dirty: true`; (b) `--base` là SHA khác `before.head`; (c) `harness_sha256` khác.
-        (Hiện chưa có luật/cờ → xfail.)"""
+        (a) before `dirty: true`; (b) `--base` là SHA khác `before.head`; (c) `harness_sha256` khác. Đối chứng: không lệch,
+        `--base` đúng SHA hoặc ref trỏ về nó (`HEAD~1`), after `dirty` (candidate chưa commit) → so được, exit 0."""
         sha_a = self.git("rev-parse", "HEAD").strip()  # commit thật: `--base` có thể kiểm bằng `rev-parse`
         (self.repo / "later.txt").write_text("1\n", encoding="utf-8")
         self.git("add", "later.txt")
         self.git("commit", "-q", "-m", "later")
         sha_b = self.git("rev-parse", "HEAD").strip()
-        meta = {
-            "schema": 2,
-            "cmd": "make bench",
-            "unit": "s",
-            "higher_is_better": False,
-            "env": {"platform": "linux-x", "python": "3.11", "nproc": 4},
-            "head": sha_a,
-            "dirty": False,
-            "tree_fp": "f" * 64,
-            "harness_sha256": "1" * 64,
-        }
+        meta = {**PERF_META, "head": sha_a}
         cases = {
-            "dirty": ({"dirty": True}, {}, ()),
-            "base": ({}, {}, ("--base", sha_b)),
-            "harness": ({}, {"harness_sha256": "2" * 64}, ()),
+            "dirty": ({"dirty": True}, {}, (), 2),
+            "base": ({}, {}, ("--base", sha_b), 2),
+            "harness": ({}, {"harness_sha256": "2" * 64}, (), 2),
+            "ok": ({}, {}, (), 0),
+            "ok-base-sha": ({}, {}, ("--base", sha_a), 0),
+            "ok-base-ref": ({}, {"dirty": True, "head": sha_b}, ("--base", "HEAD~1"), 0),
         }
-        for name, (b_over, a_over, extra) in cases.items():
+        for name, (b_over, a_over, extra, want) in cases.items():
             with self.subTest(name):
                 before = self.perf(f"b-{name}.json", **{**meta, **b_over}, samples=SAMPLES_MS)
                 after = self.perf(f"a-{name}.json", **{**meta, **a_over}, samples=[x * 0.5 for x in SAMPLES_MS])
                 rc, text = self.perf_compare(before, after, *extra)
-                self.assertEqual(rc, 2, text)
-                self.assertIn(REFUSE, text)
+                self.assertEqual(rc, want, text)
+                self.assertEqual(REFUSE in text, want == 2, text)
 
 
 class FlowRegistryTest(unittest.TestCase):
