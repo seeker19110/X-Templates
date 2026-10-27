@@ -6,6 +6,8 @@ Gọi `xt.main([...])` trong tiến trình; worktree là `git worktree add` th�
 from __future__ import annotations
 
 import contextlib
+import errno
+import io
 import json
 import os
 import subprocess
@@ -755,6 +757,37 @@ class UpdateStateTest(TmpRepoCase):
         self.assertEqual((out, rc, st["active"], st["permission_mode"]), ("", 0, False, "auto"))
         self.assertEqual(st["final_verdict"]["verdict"], "blocked")
 
+    def test_update_state_stop_hook_skips_loop_stopped_meanwhile(self) -> None:
+        # Review #294: `loop stop` chen giữa verdict và ghi → Stop hook không đè `final_verdict` "stopped".
+        self.init_loop()
+        real = xt.loop_verdict
+
+        def verdict_then_stop(base: Path) -> dict:
+            v = real(base)
+            self.assertEqual(run_main("loop", "stop", "--reason", "người dừng")[0], 0)
+            return v
+
+        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop):
+            xt.hook_stop("{}", self.tmp)
+        st = xt.read_state(self.tmp)
+        self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "stopped"))
+
+    def test_update_state_flock_unsupported_runs_unlocked(self) -> None:
+        # Review #294: FS không hỗ trợ flock (ENOLCK) → như nhánh không `fcntl`: ghi được, kiểm `rev`, báo một dòng.
+
+        def no_lock(fd: int, op: int) -> None:
+            raise OSError(errno.ENOLCK, "No locks available")
+
+        with unittest.mock.patch("fcntl.flock", no_lock), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(xt.update_state(self.tmp, lambda cur: {"a": 1}), {"a": 1, "rev": 1})
+        self.assertIn("flock không dùng được", err.getvalue())
+
+        def other(fd: int, op: int) -> None:
+            raise OSError(errno.EIO, "I/O error")
+
+        with unittest.mock.patch("fcntl.flock", other), self.assertRaises(OSError):
+            xt.update_state(self.tmp, lambda cur: {"a": 2})
+
 
 def racing_update_state(base: Path, writes: list[dict]):
     """`update_state` thật, nhưng lần gọi `fn` đầu tiên có "lệnh ghi ngoài khoá" chen vào: ghi `{**state, outsider: True}`
@@ -1065,6 +1098,36 @@ class TaskRunsTest(TmpRepoCase):
         self.red()
         self.assertEqual(self.runs(), {"T-002": 1, "T-001": 1})
         self.assertEqual(self.verdict()["verdict"], "continue")
+
+    def test_task_runs_whitespace_gate_edit_does_not_reset(self) -> None:
+        # Review #294: thêm một dấu cách vào Gate (cùng lệnh theo `same_command`) không phải "đổi cách" → không đếm lại.
+        run_main("loop", "init")
+        for _ in range(3):
+            self.red()
+        self.plan.write_text(TR_PLAN.replace("`bash gate.sh`", "`bash  gate.sh`"), encoding="utf-8")
+        self.red(cmd="bash  gate.sh")
+        self.assertEqual(self.runs(), {"T-001": 4})
+
+    def test_task_runs_rev_unbalanced_quote_gate(self) -> None:
+        # Gate nháy lệch: `canonical_command` từ chối → so chuỗi đã bỏ khoảng trắng hai đầu (như `same_command`).
+        run_main("loop", "init")
+        st = xt.read_state(self.repo)
+        self.plan.write_text("- [ ] `T-001` a — Gate: `echo 'x`\n", encoding="utf-8")
+        one = xt.task_runs_rev(self.repo, st, "T-001")
+        self.plan.write_text("- [ ] `T-001` a — Gate: `echo 'x  `\n", encoding="utf-8")
+        self.assertEqual(xt.task_runs_rev(self.repo, st, "T-001"), one)
+        self.plan.write_text("- [ ] `T-001` a — Gate: `echo 'y`\n", encoding="utf-8")
+        self.assertNotEqual(xt.task_runs_rev(self.repo, st, "T-001"), one)
+
+    def test_task_runs_blocked_task_stays_blocked_after_plan_change(self) -> None:
+        # Review #294: task đã chạm trần — sửa Gate/spec trong PLAN rồi record đỏ không tự thoát chặn; chỉ xanh/resume gỡ.
+        run_main("loop", "init", "--max-task-runs", "3")
+        for _ in range(3):
+            self.red()
+        self.assertEqual(self.verdict()["verdict"], "blocked")
+        self.plan.write_text(TR_PLAN.replace("`bash gate.sh`", "`bash ./gate.sh`"), encoding="utf-8")
+        self.red(cmd="bash ./gate.sh")
+        self.assertEqual((self.runs(), self.verdict()["verdict"]), ({"T-001": 4}, "blocked"))
 
     def test_task_runs_task_outside_plan_counts(self) -> None:
         run_main("loop", "init", "--max-task-runs", "2")

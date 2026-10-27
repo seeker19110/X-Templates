@@ -82,6 +82,7 @@ import base64
 import contextlib
 import copy
 import datetime as _dt
+import errno
 import fnmatch
 import hashlib
 import importlib.util
@@ -1257,6 +1258,7 @@ def write_state(state: Dict[str, Any], base: Optional[Path] = None) -> None:
 STATE_LOCK_FILE = "state.lock"  # khoá `flock` của đọc–so–ghi `state.json` (ADR-0052 §2); file rỗng, giữ lại sau khi nhả
 STATE_LOCK_TIMEOUT = 5.0  # giây chờ khoá; quá → StateLockTimeout. Khoá chỉ bọc đọc–fn–ghi, không bao giờ qua Gate/mạng
 STATE_LOCK_POLL = 0.02  # giây nghỉ giữa hai lần thử LOCK_NB
+_NO_LOCK_ERRNOS = frozenset({errno.ENOLCK, errno.ENOSYS, errno.EOPNOTSUPP})  # FS không hỗ trợ flock → chạy không khoá
 
 
 class StateLockTimeout(TimeoutError):
@@ -1301,6 +1303,12 @@ def _state_lock(base: Path) -> Iterator[None]:
                         f".autopilot/{STATE_LOCK_FILE} bận quá {STATE_LOCK_TIMEOUT:g} s — state.json không ghi; chạy lại lệnh"
                     ) from None
                 time.sleep(STATE_LOCK_POLL)
+            except OSError as exc:
+                if exc.errno not in _NO_LOCK_ERRNOS:
+                    raise
+                # FS không hỗ trợ flock: như nhánh không `fcntl` — vẫn kiểm `rev`, báo một dòng (review #294)
+                print(f"⚠ .autopilot/{STATE_LOCK_FILE}: flock không dùng được — ghi state không khoá", file=sys.stderr)
+                break
         yield
     finally:
         os.close(fd)
@@ -2080,9 +2088,17 @@ def task_req_rev(t: Dict[str, Any]) -> str:
 
 def task_runs_rev(base: Path, st: Dict[str, Any], task: str) -> Optional[str]:
     """Revision spec + lệnh Gate của `task` trong PLAN của vòng (ADR-0052 §3): đổi một trong hai là "đổi cách" → đếm
-    `task_runs` lại từ 0. `task_req_rev` không gồm Gate nên ghép thêm `cmd_sha256`. Task không có trong PLAN → None."""
+    `task_runs` lại từ 0. `task_req_rev` không gồm Gate nên ghép thêm `cmd_sha256` của dạng chuẩn (`canonical_command`:
+    chỉ thêm khoảng trắng không phải đổi cách — review #294). Task không có trong PLAN → None."""
     t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
-    return f"{task_req_rev(t)}:{cmd_sha256(str(t.get('gate') or ''))[:16]}" if t else None
+    if not t:
+        return None
+    gate = str(t.get("gate") or "")
+    try:
+        gate = canonical_command(gate)
+    except ValueError:  # nháy lệch: như `same_command`
+        gate = gate.strip()
+    return f"{task_req_rev(t)}:{cmd_sha256(gate)[:16]}"
 
 
 def _digest_members(root: Path) -> List[Path]:
@@ -2826,14 +2842,16 @@ def _record_failure_count(
 
 def _count_task_run(cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str]) -> None:
     """`task_runs[task]` (ADR-0052 §3): đỏ → +1, đếm lại từ 0 khi spec/Gate của task trong PLAN đổi (`rev` khác giá trị
-    lưu ở `task_runs_rev`); xanh → xoá khoá (về 0)."""
+    lưu ở `task_runs_rev`) — trừ khi task đã chạm trần: khi đó chỉ xanh hoặc `resume`/`unblock` gỡ, sửa PLAN không tự
+    thoát chặn (review #294); xanh → xoá khoá (về 0)."""
     runs, revs = _task_runs(cur), cur.get("task_runs_rev")
     revs = revs if isinstance(revs, dict) else {}
     if sig is None:
         runs.pop(task, None)
         revs.pop(task, None)
     else:
-        runs[task] = (runs.get(task, 0) if revs.get(task) == rev else 0) + 1
+        keep = revs.get(task) == rev or task in _task_runs_blocking(cur)
+        runs[task] = (runs.get(task, 0) if keep else 0) + 1
         revs[task] = rev
     cur["task_runs"], cur["task_runs_rev"] = runs, revs
 
@@ -3094,8 +3112,9 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
 
 def _stop_apply(cur: Dict[str, Any], mode: Optional[str], v: Dict[str, Any], end: bool) -> Optional[Dict[str, Any]]:
     """`fn` của `update_state` cho Stop hook: ghi chế độ quyền của phiên; `end` → tắt vòng kèm verdict cuối, không →
-    thêm một lượt (`iterations`) và verdict lượt này. Không còn state → None, không ghi."""
-    if not cur:
+    thêm một lượt (`iterations`) và verdict lượt này. Không còn state, hoặc vòng đã tắt giữa chừng (`loop stop` chen vào
+    — không đè `final_verdict` của nó, review #294) → None, không ghi."""
+    if not cur or not cur.get("active"):
         return None
     if mode:
         cur["permission_mode"] = mode
