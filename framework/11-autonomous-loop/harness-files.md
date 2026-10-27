@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-25
+updated: 2026-10-27
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -32,7 +32,7 @@ updated: 2026-10-25
 | `BLUEPRINT.md` | Mục có ID ghép từ khung (G1) | `xt.py compose` sinh; chỉ đổi trạng thái tick | Có | `blueprint-status --strict` (cổng phát hành G7) |
 | `docs/autopilot/PLAN.md` | Task `T-NNN` + Gate; 4 con số theo [`LOOP-DESIGN-001`](loop-design.md); điểm dừng dự kiến | Agent soạn, **người duyệt** một lần | Có | `parse_plan` (regex `- [ ] \`T-\d{3,}\``, `Gate:`) |
 | `PROGRESS.md` | 4 mục: Đang làm · Tiếp theo · Quyết định · Bàn giao phiên | Agent, theo lát (commit cuối của lát) và cuối phiên (ADR-0033) | Có | `xt.py progress-check` (≤ 8 KB; SHA là tổ tiên HEAD) — luật ở `LOOP-HARNESS-004`/`005` |
-| `.autopilot/state.json` | `active, plan, blueprint, scope, max_iterations, iterations, deadline, same_failure_count, last_failure_signature, blocked` (`scope` = blueprint/profile/scale/rev/gate_floor khoá lúc `loop init`: blueprint mất/hỏng/đổi quy mô → `verify`, sàn Gate đọc từ đây) | `xt.py loop` (ghi atomic qua `.tmp`) | **Không** (gitignore, theo máy) | `loop status` |
+| `.autopilot/state.json` | `active, plan, blueprint, scope, max_iterations, iterations, deadline, same_failure_count, last_failure_signature, blocked, rev, task_runs, max_task_runs` (`scope` = blueprint/profile/scale/rev/gate_floor khoá lúc `loop init`: blueprint mất/hỏng/đổi quy mô → `verify`, sàn Gate đọc từ đây; `rev` tăng mỗi lần ghi, `task_runs` đếm lần đỏ theo task — ADR-0052) | `xt.py loop` qua `update_state` (khoá `state.lock`, kiểm `rev`, ghi atomic qua `.tmp`; hook lỗi khoá → fail-open, ghi `hook-stop.log`/`hook-checkpoint.log`) | **Không** (gitignore, theo máy) | `loop status` |
 | `.autopilot/evidence/T-NNN.json` | `task, cmd, cmd_sha256, exit_code, started, finished, head, output_tail` (40 dòng; `zero_tests_red: true` khi Gate exit 0 mà `Ran 0 tests`) | `xt.py loop record` | Không (bằng chứng cục bộ); bằng chứng chia sẻ = link CI/PR | `loop_verdict` so `cmd_sha256` rồi dạng chuẩn của `cmd` với Gate (nháy có nghĩa, chỉ khoảng trắng ngoài nháy tự do) |
 | `xt.yaml` | Khoá `format · lint · typecheck · test · build · format_file` (dev-task chạy; `gate-fast` thêm `format_check · test_fast`, chọn bằng `commit_gate`) + khoá khai báo khác (`install`, `dev`, `e2e`, `format_check`, `coverage`, `migrate`, `init`, `smoke`, `audit`…) cho agent đọc | Người/agent ở G5 | Có | `dev-task.sh gate` đọc được (xem `LOOP-HARNESS-008`) |
 | `AGENTS.md` (+ `CLAUDE.md` chứa `@AGENTS.md`) | Luật agent, lệnh, cấu trúc, điểm dừng | Người | Có | Script so bản gốc trong `docs/agents/` ([`XC-DOCAI-007`](../18-cross-cutting/docs-for-ai-agents.md)) |

@@ -1418,6 +1418,61 @@ class StopAndSessionTest(unittest.TestCase):
         code, out, _ = run_hook("pre-compact.sh", {"trigger": "manual"}, tmp)
         self.assertEqual((code, out), (0, ""))
 
+    def test_pre_compact_fail_open_when_state_lock_unusable(self):
+        # T-3559: checkpoint ghi qua `update_state`; khoá không dùng được → không chặn compaction, state giữ nguyên,
+        # một dòng `hook-checkpoint.log` (stderr của hook bị bỏ).
+        tmp = self.project_with_loop()
+        lock = tmp / ".autopilot" / "state.lock"
+        lock.unlink()
+        lock.mkdir()  # mở khoá lỗi I/O (EISDIR)
+        sf = tmp / ".autopilot" / "state.json"
+        before = sf.read_text(encoding="utf-8")
+        code, out, _ = run_hook("pre-compact.sh", {"hook_event_name": "PreCompact", "trigger": "auto"}, tmp)
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(sf.read_text(encoding="utf-8"), before)
+        log = (tmp / ".autopilot" / "hook-checkpoint.log").read_text(encoding="utf-8")
+        self.assertIn("bỏ checkpoint: IsADirectoryError", log)
+
+    def test_pre_compact_checkpoint_bumps_rev(self):
+        tmp = self.project_with_loop()
+        sf = tmp / ".autopilot" / "state.json"
+        rev = json.loads(sf.read_text(encoding="utf-8"))["rev"]
+        self.assertEqual(run_hook("pre-compact.sh", {"trigger": "manual"}, tmp)[:2], (0, ""))
+        st = json.loads(sf.read_text(encoding="utf-8"))
+        self.assertEqual((st["rev"], st["checkpoint"]["trigger"]), (rev + 1, "manual"))
+
+    def assert_stop_fails_open(self, tmp: Path, why: str) -> None:
+        """Còn việc (T-001 mở) nhưng không ghi được state → Stop hook cho dừng (exit 0, không `block`), không đổi state,
+        ghi một dòng `hook-stop.log` (ADR-0052 §2, T-3538)."""
+        sf = tmp / ".autopilot" / "state.json"
+        before = sf.read_text(encoding="utf-8")
+        code, out, _ = run_hook("stop-guard.sh", {"stop_hook_active": False}, tmp)
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(sf.read_text(encoding="utf-8"), before)
+        self.assertIn(f"cho dừng, không ghi state: {why}", (tmp / ".autopilot" / "hook-stop.log").read_text("utf-8"))
+
+    def test_stop_hook_fail_open_when_state_lock_unusable(self):
+        tmp = self.project_with_loop()
+        lock = tmp / ".autopilot" / "state.lock"
+        lock.unlink()  # `loop init` đã tạo file khoá (ghi qua `update_state`, T-3559)
+        lock.mkdir()  # mở khoá lỗi I/O (EISDIR)
+        self.assert_stop_fails_open(tmp, "IsADirectoryError")
+
+    def test_stop_hook_fail_open_when_state_lock_busy(self):
+        # Tiến trình khác giữ khoá suốt: hook chờ hết timeout (5 s) rồi cho dừng — không kẹt phiên.
+        tmp = self.project_with_loop()
+        holder = (
+            "import fcntl, os, sys\nfd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\nprint('held', flush=True)\nsys.stdin.read()\n"
+        )
+        lock = tmp / ".autopilot" / "state.lock"
+        p = subprocess.Popen([sys.executable, "-c", holder, str(lock)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.addCleanup(p.wait, 30)
+        self.addCleanup(p.stdin.close)
+        self.addCleanup(p.stdout.close)
+        self.assertEqual(p.stdout.readline().strip(), b"held")
+        self.assert_stop_fails_open(tmp, "StateLockTimeout")
+
     def test_session_start_outputs_context(self):
         code, out, _ = run_hook("session-start.sh", {"hook_event_name": "SessionStart"})
         self.assertEqual(code, 0)

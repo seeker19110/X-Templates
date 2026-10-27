@@ -1434,3 +1434,24 @@
 - Chọn: Rút §7 khỏi ADR-0052; ghi ràng buộc đã tìm làm đầu vào ADR riêng của lát 3 (sau spike môi trường đo); lát 0–2 + perf v2 metadata giữ
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 5 🟠 lượt 6 (baseline agent lái được, bộ chấm từ cây candidate, thiếu test tương đương, worktree tạm khác môi trường, không đo đại lượng tất định) cần thử nghiệm thực tế, chốt trên giấy dễ sai; (2) giữ đường lùi: lát 0–2 không phụ thuộc perf trial; (3) ADR riêng test được bằng spike; tốc độ chỉ phá hoà
 - Đường lùi: Đưa §7 trở lại ADR-0052 bằng ADR mới thay thế phần này
+
+### D-204 · 2026-10-27T04:14:58+00:00 · T-3559: loop init (retries=0) có ghi nhớ rev trước bước kiểm vòng sống (_live_loop, ngoài khoá) và từ chối nếu rev đổi tới lúc lấy khoá không?
+
+- Phương án: (1) Có — so rev đã thấy trước _live_loop; đổi → StateRevConflict exit 2 · (2) Không — chỉ kiểm rev trong khoá
+- Chọn: Có — so rev đã thấy trước _live_loop; đổi → StateRevConflict exit 2
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: _live_loop quyết định cho phép ghi đè dựa trên state đọc ngoài khoá; không so rev thì retries=0 vô tác dụng và init có thể ghi đè vòng vừa đổi; (2) đường lùi: bỏ dòng so seen
+- Đường lùi: Bỏ so rev seen ở _init_apply
+
+### D-205 · 2026-10-27T04:25:24+00:00 · T-3538/T-3559/T-3539 đã đan trong cùng hàm (update_state, _verdict_loop_state) ở một worktree: tách 3 PR hay gộp 1 PR nhóm an toàn state?
+
+- Phương án: (1) Gộp 1 PR (3 commit theo task không tách được → 1 commit, ghi 3 task), reviewer-alt rà cả PR · (2) Tách 3 PR, dựng lại trạng thái trung gian từng task
+- Chọn: Gộp 1 PR (3 commit theo task không tách được → 1 commit, ghi 3 task), reviewer-alt rà cả PR
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: trạng thái trung gian chưa từng chạy/test, dựng lại để tách là mã mới chưa kiểm — rủi ro hơn; ba task cùng một chủ đề (an toàn state) và cùng bộ FLOW-04/06/07; (3) review một lần trên mã đã chạy cổng đầy đủ; vượt ~150 dòng chủ yếu là test
+- Đường lùi: Revert PR (một commit squash)
+
+### D-206 · 2026-10-27T05:35:44+00:00 · task_runs đặt lại khi nào (ADR-0052 §3 chỉ nói 'xanh hoặc req_rev đổi')?
+
+- Phương án: (1) Đếm lại khi spec hoặc Gate (dạng chuẩn, bỏ khác biệt khoảng trắng) đổi — trừ task đã chạm trần; chỉ lần xanh chạy đúng Gate hoặc loop resume xoá · (2) Đúng chữ ADR: chỉ req_rev (spec nguyên văn) và mọi lần xanh
+- Chọn: Đếm lại khi spec hoặc Gate (dạng chuẩn, bỏ khác biệt khoảng trắng) đổi — trừ task đã chạm trần; chỉ lần xanh chạy đúng Gate hoặc loop resume xoá
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: review #294 tái hiện agent tự thoát chặn bằng thêm khoảng trắng vào Gate/spec hoặc record xanh bằng -- true; đổi Gate thật trước trần vẫn là 'đổi cách' (nghiên cứu §4B); (2) đường lùi --max-task-runs 0
+- Đường lùi: task_runs_rev về task_req_rev nguyên văn; bỏ điều kiện chạm trần và clears trong loop_record

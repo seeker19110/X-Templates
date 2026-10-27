@@ -3,7 +3,7 @@ title: Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằ
 kind: module
 prefix: LOOP-DESIGN
 applies_to: [all]
-updated: 2026-10-25
+updated: 2026-10-27
 ---
 
 # Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng
@@ -47,7 +47,7 @@ updated: 2026-10-25
 | Verdict | Khi nào | Stop hook làm gì |
 |---|---|---|
 | `inactive` | Chưa `loop init` hoặc đã tắt | Cho dừng |
-| `blocked` | `loop block` đã gọi · `same_failure_count ≥ 3` · không thấy PLAN · PLAN không có task | Cho dừng, `active=false`, ghi `final_verdict` |
+| `blocked` | `loop block` đã gọi · `same_failure_count ≥ 3` · `task_runs` của một task ≥ `max_task_runs` (mặc định 6, ADR-0052) · không thấy PLAN · PLAN không có task | Cho dừng, `active=false`, ghi `final_verdict` |
 | `budget` | `iterations ≥ max_iterations` (mặc định 100; một phiên `max(40, 8 × task chưa làm)`) · quá `deadline` (`--hours`) | Cho dừng, `active=false` |
 | `continue` | Còn task `[ ]`, hoặc blueprint còn MUST mở (pha harden; pha build không chặn — ADR-0046) / miễn trừ không hợp lệ (thiếu lý do, MUST `Miễn` thiếu `Duyệt:`) / dòng mục sai định dạng hoặc bị xoá | **Chặn dừng**, `iterations += 1`, nêu task kế |
 | `verify` | Task `[x]` nhưng không có evidence, `exit_code ≠ 0`, `cmd ≠ Gate` khai trong PLAN, hoặc evidence có từ trước lần `loop init` này (vòng/PLAN trước) · task `[~]` không ghi `— Bỏ: <lý do>` · dòng task sai định dạng · (ở Stop hook) đủ bằng chứng nhưng chưa `loop verify` xanh trên cây hiện tại | **Chặn dừng**, yêu cầu `loop record` / `loop verify` lại |
