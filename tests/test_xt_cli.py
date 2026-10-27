@@ -1729,7 +1729,7 @@ class LoopCommandsTest(TmpDirCase):
         rc, out, err = run_main("loop", "resume", "--reason", "đã cấu hình khoá")
         self.assertEqual(rc, 0)
         self.assertEqual(err.strip(), xt.RESUME_WARNING)  # ADR-0051: hành vi cũ giữ, thêm đúng một dòng cảnh báo stderr
-        for cmd in ("`loop attach`", "`loop resolve --task <ID>`", "`loop unblock --reason …`"):
+        for cmd in ("`loop attach`", "`loop resolve --task <ID> --reason …`", "`loop unblock --reason …`"):
             self.assertIn(cmd, err)
         self.assertIn("việc chờ người quay lại hàng làm: T-001", out)
         self.assertNotIn("deferred", xt.read_state(self.tmp))

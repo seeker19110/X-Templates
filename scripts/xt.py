@@ -1667,7 +1667,10 @@ def plan_waves(tasks: List[Dict[str, Any]], deferred: Dict[str, Any], max_parall
 def _plan_tasks(base: Path, st: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Task của PLAN khai trong state; không có state/PLAN → [] (fail-open cho chỗ gọi)."""
     plan = base / str(st.get("plan") or "")
-    return parse_plan(plan) if plan.is_file() else []
+    try:
+        return parse_plan(plan) if plan.is_file() else []
+    except UnicodeDecodeError:  # PLAN không đọc được như UTF-8 = không dùng được — như mất (review #296)
+        return []
 
 
 def open_dependencies(task: str, base: Path, st: Dict[str, Any]) -> List[str]:
@@ -4677,9 +4680,8 @@ def _doctor_state(base: Path) -> List[Finding]:
     out = []
     if st.get("blocked"):
         reason = st.get("blocked_reason") or "?"
-        out.append(
-            Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — người xử lý rồi `loop unblock --reason …`")
-        )
+        end = EXIT_BUDGET if _budget_exhausted(st) else "người xử lý rồi `loop unblock --reason …`"
+        out.append(Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — {end}"))
     plan = st.get("plan")
     if st.get("active") and plan and not (base / str(plan)).is_file():
         out.append(Finding("state", "warn", f"vòng lặp đang bật nhưng không còn PLAN `{plan}` — `loop init` lại"))
@@ -6413,6 +6415,10 @@ def _live_loop(base: Path) -> str:
     why = ""
     if verdict == "blocked":
         end = EXIT_UNBLOCK if _plan_tasks(base, prev) else "`loop stop` rồi `loop init --plan <mới>`"
+        if end != EXIT_UNBLOCK and _blocked_by_state(
+            prev
+        ):  # chặn cần người: người xem trước, không tự stop+init (review #296)
+            end = f"người xem lý do chặn rồi {end}"
         why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
@@ -7251,7 +7257,7 @@ def _resume_apply(cur: Dict[str, Any], change: Dict[str, Any], base: Path, clear
 
 RESUME_WARNING = (
     "⚠ `loop resume` làm cả bốn việc (gắn phiên, mở block, đặt lại đếm lỗi, trả việc chờ) — dùng `loop attach` (đổi phiên),"
-    " `loop resolve --task <ID>` (gỡ một việc chờ), `loop unblock --reason …` (mở block)"
+    " `loop resolve --task <ID> --reason …` (gỡ một việc chờ), `loop unblock --reason …` (mở block)"
 )
 
 

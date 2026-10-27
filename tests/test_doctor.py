@@ -347,8 +347,11 @@ class DoctorStateAndEnvTest(DoctorCase):
         )
         msgs = [f.msg for f in self.findings() if f.code == "state"]
         self.assertEqual(len(msgs), 2)
-        self.assertIn("BLOCKED: cần khoá", msgs[0])
+        self.assertIn("BLOCKED: cần khoá — người xử lý rồi `loop unblock", msgs[0])
         self.assertIn("không còn PLAN `docs/autopilot/PLAN.md`", msgs[1])
+        # review #296: hết vòng/hạn → `unblock` từ chối, nên trỏ đợt kế
+        xt.write_state({"active": True, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base)
+        self.assertIn(xt.EXIT_BUDGET, [f.msg for f in self.findings() if f.code == "state"][0])
         self.write("docs/autopilot/PLAN.md", "")
         xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md", "blocked": True}, self.base)
         self.assertEqual(

@@ -395,10 +395,18 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("verdict `blocked`: không thấy PLAN", err)
         self.assertIn("`loop stop` rồi `loop init --plan <mới>`", err)
-        run_main(
-            "loop", "block", "--reason", "cần khoá API"
-        )  # D-208: có cờ nhưng PLAN mất → vẫn trỏ stop, không unblock
-        self.assertIn("`loop stop` rồi", run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[2])
+        self.assertNotIn("người xem", err)
+        # D-208: có cờ nhưng PLAN mất → vẫn trỏ stop, không unblock; chặn cần người thì người xem trước (review #296)
+        run_main("loop", "block", "--reason", "cần khoá API")
+        err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[2]
+        self.assertIn("cần khoá API — người xem lý do chặn rồi `loop stop` rồi", err)
+        # review #296: PLAN không đọc được như UTF-8 → coi như mất, không traceback
+        self.plan.with_name("PLAN-1.md").rename(self.plan)
+        self.plan.write_bytes("- [ ] `T-001` ".encode("utf-16"))
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("người xem lý do chặn rồi `loop stop`", err)
+        self.plan.unlink()
         self.assertEqual(run_main("loop", "stop", "--reason", "đợt 1 xong")[0], 0)
         self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
