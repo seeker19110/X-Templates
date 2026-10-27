@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202)
 - **Trạng thái triển khai:** Chưa triển khai — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
 - **Ngày:** 2026-10-27
-- **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-004`/`-007`/`-008`/`-011` (tối ưu), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
+- **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-004`/`-007`/`-008`/`-011` (tối ưu; baseline ở commit gốc giữ nguyên), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
 
 ## Bối cảnh
 
@@ -49,18 +49,16 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    `_live_loop`/bảng điểm dừng chỉ ra không mở được. Lần thử tối ưu đi qua `perf trial` (§7, đếm riêng theo điểm nóng), không qua
    `loop record` của cùng task — skill `/optimize` đổi theo ở lát 3. Không nới `max_same_failure`.
 4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `head` (`git rev-parse
-   HEAD` lúc đo), `parent` (cha thứ nhất của `head`), `dirty` (cây có diff/untracked ngoài `.autopilot/`), `tree_fp` (= `tree_fingerprint`,
-   bỏ `.autopilot/`); `--out` phải nằm trong `.autopilot/` (ngoài → exit 2, file mẫu không làm bẩn cây), `harness_sha256` = sha256 của
-   lệnh đo + nội dung các file khớp `--harness GLOB` (lặp được; cùng glob với `perf guard --locked`; không truyền → chỉ hash lệnh, cảnh báo).
-   `perf compare` theo **vai**: `before` là baseline — phải `dirty: false` (đo trên cây sạch của `head`, vd worktree `origin/main` ghim SHA);
-   `after` là candidate — đúng một trong hai: (A) cùng `head` với before, cây bẩn được (sửa chưa commit, luồng `perf trial`/`/optimize`
-   bước 3); (B) đã commit đúng **một** commit trên baseline: `after.dirty` false và `after.parent` == `before.head`. Không chấp nhận
-   "hậu duệ" hay merge-base: một commit giữ trước đó, rebase lên `main` mới hay `--base-ref` tự chọn đều sẽ tính công của commit khác
-   cho candidate (review #290). Baseline của lần thử đo ở HEAD lúc bắt đầu (worktree ghim SHA), không ở `origin/main` khi nhánh đã có
-   commit riêng. Exit 2 "không đủ điều kiện so" khi: lệch `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`;
-   before `dirty`; after không thoả (A) hay (B). Lệch `python`/`nproc` → cảnh báo. File v1/mảng thô → so được nhưng JSON
-   đầu ra `unverified-manual: true` và không bao giờ trả `improved` cho `--no-regress`/ratchet tự động. (FLOW-19 của nghiên cứu §10 viết
-   lại theo vai: baseline bẩn, hoặc candidate không thoả (A)/(B) → từ chối.)
+   HEAD` lúc đo; rỗng ngoài git → mẫu nhãn `unverified-manual`), `dirty` và `tree_fp` (= `tree_fingerprint`; cả hai bỏ `.autopilot/` và
+   chính file `--out`), `harness_sha256` = sha256 của lệnh đo + nội dung các file khớp `--harness GLOB` (lặp được; cùng glob với
+   `perf guard --locked`; không truyền → chỉ hash lệnh, cảnh báo). `perf compare` exit 2 "không đủ điều kiện so" khi lệch
+   `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`, khi `before` `dirty`, hoặc khi có `--base SHA` mà `before.head` khác SHA
+   đó; lệch `python`/`nproc` → cảnh báo. **Không** xét quan hệ head của `after`: baseline là commit gốc do máy ghim (`LOOP-OPT-003`),
+   không do agent chọn — luật head/parent thử ở review #290 lần lượt gán sai công (commit giữ trước, merge `main`) hoặc cho agent tự
+   hạ baseline; gán đúng công cho từng lần thử là việc của `perf trial` (§7). Không thêm luật cho đường dẫn `--out`: Gate mẫu của
+   `optimization-loop.md` (baseline ở worktree `origin/main` ghim, candidate ở cây agent) chạy nguyên trạng ở 3.28.0. File v1/mảng thô
+   → so được nhưng JSON đầu ra `unverified-manual: true` và không bao giờ trả `improved` cho `--no-regress`/ratchet tự động.
+   (FLOW-19 của nghiên cứu §10 viết lại: baseline bẩn, `before.head` khác `--base`, hoặc khác `harness_sha256` → từ chối.)
 5. **`loop next-step --json` chỉ đọc (lát 2, §4D/§9.2).** Hàm thuần nhận state/PLAN/blueprint/sổ audit/`release-check`/JSON `pr next` đã
    có (không gọi GitHub), trả `objective`, `action`, `reason`, `missing`, `key`, `budget`, `inputs`; replay cùng đầu vào → cùng `action`.
    `build-until-clean` dừng ở `ready-for-complete` (đề xuất, không đổi `delivery_phase` — D-178); `harden-to-signoff` dừng ở
@@ -72,12 +70,15 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    "chạy `loop init` trước"; "state cũ" = có `started`, không `final_verdict`. `final_verdict` `blocked` do PLAN mất/rỗng (không cờ, không
    lỗi lặp) → lối ra `loop init --plan <mới>`, `unblock` từ chối — đúng nguồn như `_live_loop`. `attached[]`/`resolved[]`/`unblocked[]`
    được `_carry_previous` mang sang đợt kế (cả `--force`) để đếm can thiệp mỗi mục tiêu.
-7. **`perf trial` (lát 3, §7.2).** `perf trial start --hotspot H --hypothesis … --falsifier …` ghi `.autopilot/perf-trials.jsonl` **trước**
-   khi sửa và ghim `base_sha` + danh sách file bộ đo; `perf trial finish --before … --after …` đòi `before.head` == `base_sha`,
-   `after.head` == `base_sha` và `after.tree_fp` == vân tay cây lúc `finish` (giữ đúng cây đã đo), chạy `perf compare` v2 rồi giữ hoặc thu
-   hồi **đúng file của lần thử** bằng `git stash push --include-untracked -m <nhãn> -- <files>` (không `checkout -- .`/`reset --hard`); `--resume` sau crash khôi
-   phục và ghi "chưa hoàn tất". Khoá trùng = hotspot + hash diff. Ba lần không `improved` cùng hotspot (bền qua restart) → exit 2 "đổi
-   điểm nóng" (`LOOP-OPT-011`). Chỉ số phụ vượt trần đã khai → đỏ dù chính `improved` (`LOOP-OPT-008`).
+7. **`perf trial` (lát 3, §7.2).** `perf trial start --hotspot H --hypothesis … --falsifier …` đòi cây sạch (ngoài `.autopilot/`), ghi
+   `.autopilot/perf-trials.jsonl` **trước** khi sửa (giả thuyết — `LOOP-OPT-004`), ghim `base_sha` = `git merge-base HEAD origin/main`
+   (commit gốc của `LOOP-OPT-003`, máy tính, không phải HEAD agent chọn) và `prev` = mẫu `after` của lần thử được giữ gần nhất (nếu có).
+   `perf trial finish --before … --after …` đòi `perf compare --base <base_sha>` = `improved` (baseline ở commit gốc — agent không hạ
+   được baseline), có `prev` thì `after` cũng phải `improved` so với `prev` (lần thử này không nhận công của lần trước), và `after.tree_fp`
+   == vân tay cây lúc `finish` (giữ đúng cây đã đo); không đạt → thu hồi **đúng file của lần thử** bằng `git stash push --include-untracked
+   -m <nhãn> -- <files>` (không `checkout -- .`/`reset --hard`). `--resume` sau crash khôi phục và ghi "chưa hoàn tất". Khoá trùng =
+   hotspot + hash diff. Ba lần không `improved` cùng hotspot (bền qua restart) → exit 2 "đổi điểm nóng" (`LOOP-OPT-011`). Chỉ số phụ
+   vượt trần đã khai → đỏ dù chính `improved` (`LOOP-OPT-008`).
 8. **Không làm ở ADR này:** lát 4 (pilot phiên thực ≥ 2 dự án đích, cho `next-step` ghi trạng thái) và lát 5 (field trigger, bot nâng bản,
    worker ngoài phiên, event policy `pull_request_target`) cần dữ liệu/quyền của chủ dự án — `loop defer`; ADR riêng khi có số.
 
