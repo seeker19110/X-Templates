@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-10-27 (delta)
 
-> Commit quét: `137a0478824d6c842e8ad31b3f61272ea022930f` (`main`, sau #284–#288, #286) · Chế độ: **delta** từ `e8c8d96` (SEC, DEP, CI, DOC, HAR có file đổi) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
+> Commit quét: `137a0478824d6c842e8ad31b3f61272ea022930f` (`main`, sau #275, #276, #284–#288) · Chế độ: **delta** từ `e8c8d96` (SEC, DEP, CI, DOC, HAR có file đổi) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
 > Người quét: phiên chính + 2 subagent `reviewer` read-only (SEC/DEP/CI · DOC/HAR), lệnh `/complete` Bước 2 · Xác minh đối kháng: không cần (0 🔴/🟠)
 > `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict` → exit 0
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 🔴 | 0 | — |
 | 🟠 | 0 | — |
-| 🟢 | 6 | AUD-DEP-006/007, AUD-DOC-087/088/089, AUD-HAR-116; cập nhật số đếm AUD-HAR-105 |
+| 🟢 | 9 | AUD-DEP-006/007/008, AUD-DOC-087…090, AUD-CI-019, AUD-HAR-116; cập nhật số đếm AUD-HAR-105 |
 
 Kết luận: **không chặn phát hành.** Diff gồm bump phụ thuộc/action có hash và ghim SHA, sổ audit, nghiên cứu ba vòng
 và ADR-0051 (chưa có code). Bốn 🟢 chữ (DEP-006/007, DOC-087, HAR-116) sửa ngay trong PR này; DOC-088 chấp nhận;
@@ -31,7 +31,7 @@ Giữ nguyên: ARCH, CODE, TEST, XFEAT (không file mã đổi), PERF/A11Y/CFG (
 | tất cả | `xt.py blueprint-status BLUEPRINT.md --strict --run` | 0 | 68/68 lệnh Kiểm xanh; MUST 64 đạt, 6 miễn, 0 chưa |
 | CI/SEC | `git ls-remote` 3 action | 0 | SHA ghim khớp tag |
 | CI | `xt.py ci-check` · `unittest tests.test_ci` | 0 | 10 workflow; 36 test |
-| CI/SEC | `zizmor --offline --persona regular --min-severity high .github/workflows` (1.31.1) | 0 | 0 phát hiện; toàn mức 16 medium = base |
+| CI/SEC | `zizmor --offline --persona regular --min-severity high .github/workflows` (1.31.1) · đủ mức trên `.github` | 0 · 13 | 0 phát hiện high; đủ mức `.github` 16 medium = base (14 `artipacked`, 2 `dependabot-cooldown` → AUD-CI-019) |
 | DEP | `pip download --require-hashes --no-deps` · `pip install --dry-run --require-hashes` (3.11, 3.13), 3 khoá | 0 | hash đủ kể cả bắc cầu |
 | DEP | `pip-audit --require-hashes --strict --disable-pip` 3 khoá (bản ghim) | 0 | không lỗ hổng (gồm certifi #286) |
 | DEP | `xt.py license-check` | 0 | 9 gói khớp allowlist |
@@ -49,4 +49,6 @@ Không có.
 
 Đợt duy nhất = PR audit này: sửa chữ AUD-DEP-006/007, AUD-DOC-087, AUD-HAR-116 → `đã sửa`. Nợ 🟢 giữ: AUD-DOC-089 (mở),
 AUD-DOC-088 (chấp nhận, chủ phiên chính, hạn 2027-01-20), AUD-HAR-105 (mở, đã cập nhật số đếm).
-Ngoài diff, chỉ ghi nhận: zizmor `dependabot-cooldown` ×2 và `artipacked` ×14 có sẵn từ base (AUD-CI-007).
+Ngoài diff: `artipacked` ×14 có sẵn từ base (AUD-CI-007); `dependabot-cooldown` ×2 ghi AUD-CI-019. Review #289 (🟠 1, 🟢 4) bổ sung:
+`DEPENDENCIES.md` lệch `certifi` sau #286 (AUD-DOC-090, sửa), chữ e2e cũ ở `DEPENDENCIES.md` (gộp AUD-DEP-006),
+`license-check --requirements requirements-audit.txt` exit 1 vì `sortedcontainers` khai `Apache 2.0` không SPDX (AUD-DEP-008, có từ trước).

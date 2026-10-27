@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-26 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-27 · Nhánh: main
 
 ## Đang làm
 - 2026-10-26 **Nghiên cứu ba vòng bản 2** (#287, `research/2026-10-26-autopilot-complete-optimize.md`) → **lát 1** §11: ADR-0051/D-201 nối phiên (`loop attach`/`resolve`/`unblock`, `resume` giữ + cảnh báo); kế: code, rồi không-tiến-triển theo task, `rev` state, perf metadata v2.
