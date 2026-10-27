@@ -19,7 +19,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ### Fixed
 - `loop init` không còn bị chặn bởi vòng vừa `blocked` vừa hết vòng/hạn (`_live_loop` xét ngân sách trước verdict, helper `_budget_exhausted` dùng chung — T-3537, ADR-0051, D-177).
-- `loop stop` trên vòng đã kết thúc không còn đè `final_verdict` (giữ lý do chặn thật cho `unblocked[]`; đợt `done` không mở lại bằng `stop` + `unblock`). Lối ra khi PLAN mất/rỗng thắng nguồn chặn trong state ở `loop init`/`attach`/`resolve`/`unblock` → `loop stop`/`loop init --plan <mới>` (D-208, review #295).
+- `loop stop` trên vòng đã kết thúc không còn đè `final_verdict` (giữ lý do chặn thật cho `unblocked[]`; đợt `done` không mở lại bằng `stop` + `unblock`). Lối ra khi PLAN mất/rỗng thắng nguồn chặn trong state ở `loop init`/`attach`/`resolve`/`unblock`/`doctor` → `loop stop`/`loop init --plan <mới>`, kèm "người xem lý do chặn" khi state còn cờ/lỗi lặp (D-208, review #295, #296). PLAN không đọc được như UTF-8 coi như mất; state sai kiểu không làm các lệnh này traceback.
 
 ## [3.27.0] - 2026-10-26
 

@@ -412,6 +412,27 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertEqual(run_main("loop", "stop", "--reason", "đợt 1 xong")[0], 0)
         self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
+    def test_utf16_plan_and_bad_types_no_traceback(self) -> None:
+        # Review #296: PLAN không phải UTF-8, không cờ → verdict `blocked` có lý do (không ghi đè vòng sống, status không
+        # traceback); state sai kiểu ở attach/unblock → exit 2 có chữ, không traceback.
+        run_main("loop", "init")
+        started = xt.read_state(self.repo)["started"]
+        self.plan.write_bytes("- [ ] `T-001` ".encode("utf-16"))
+        rc, out, _ = run_main("loop", "status")
+        self.assertEqual(rc, 0)
+        self.assertIn("PLAN không đọc được như UTF-8", out)
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("PLAN mất/rỗng → `loop stop` rồi", err)
+        self.assertEqual(xt.read_state(self.repo)["started"], started)
+        self.plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        # `_blocked_by_state` chịu state sai kiểu (lối ra in cho người); cap sai kiểu → trần mặc định
+        self.assertFalse(xt._blocked_by_state({"same_failure_count": "2"}))
+        self.assertTrue(xt._blocked_by_state({"same_failure_count": 3, "max_same_failure": "x"}))
+        self.assertFalse(xt._blocked_by_state({"same_failure_count": 2, "max_same_failure": None}))
+        self.assertFalse(xt._budget_spent({"iterations": "3"}))
+
     def test_init_after_loop_block_points_to_unblock(self) -> None:
         # Review #268: `blocked` do `loop block`/lỗi lặp chờ người xem rồi `loop unblock` (loop-design.md) — không gợi `loop stop`.
         run_main("loop", "init")
