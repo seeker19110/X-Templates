@@ -2088,8 +2088,8 @@ def task_req_rev(t: Dict[str, Any]) -> str:
 
 def task_runs_rev(base: Path, st: Dict[str, Any], task: str) -> Optional[str]:
     """Revision spec + lệnh Gate của `task` trong PLAN của vòng (ADR-0052 §3): đổi một trong hai là "đổi cách" → đếm
-    `task_runs` lại từ 0. `task_req_rev` không gồm Gate nên ghép thêm `cmd_sha256` của dạng chuẩn (`canonical_command`:
-    chỉ thêm khoảng trắng không phải đổi cách — review #294). Task không có trong PLAN → None."""
+    `task_runs` lại từ 0. Cả hai băm ở dạng bỏ khác biệt khoảng trắng (spec: tách từ; Gate: `canonical_command`) — chỉ
+    thêm khoảng trắng không phải đổi cách (review #294, D-206). Task không có trong PLAN → None."""
     t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
     if not t:
         return None
@@ -2809,8 +2809,9 @@ def loop_record(
     sig = None if code == 0 else failure_signature(task, code, out)
     rev = task_runs_rev(base, st, task)  # PLAN đọc ngoài khoá — `fn` dưới đây chỉ so chuỗi
     plan_t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
-    # Chỉ lần xanh chạy ĐÚNG Gate của task (hoặc task ngoài PLAN) mới xoá `task_runs` — `-- true` không gỡ chặn (review #294).
-    clears = plan_t is None or same_command(cmd_str, str(plan_t.get("gate") or ""))
+    # Chỉ lần xanh chạy ĐÚNG Gate của task trong PLAN mới đặt lại đếm lỗi lặp và `task_runs` — `-- true`, hay tạm bỏ task
+    # khỏi PLAN rồi xanh, không gỡ chặn (review #294, D-206); task ngoài PLAN chỉ `loop resume`/`unblock` gỡ.
+    clears = plan_t is not None and same_command(cmd_str, str(plan_t.get("gate") or ""))
     # Gate đã chạy xong, NGOÀI khoá; đếm lỗi lặp áp trên state mới nhất trong khoá (ADR-0052 §2) — ghi song song không mất.
     st = update_state(base, lambda cur: _record_failure_count(cur, task, sig, rev, clears))
     _append_run(base, st, ev, sig)  # sau state: số đo không chặn
@@ -2830,8 +2831,9 @@ def _record_failure_count(
     không ghi."""
     if not cur:
         return None
-    if sig is not None or clears:
-        _count_task_run(cur, task, sig, rev)
+    if sig is None and not clears:
+        return cur  # xanh nhưng không phải Gate của task: không đổi đếm nào
+    _count_task_run(cur, task, sig, rev)
     if sig is None:
         cur["same_failure_count"] = 0
         cur["last_failure_signature"] = None
@@ -6456,6 +6458,15 @@ def _deferred_to_keep(
     return keep, renamed
 
 
+def _carry_interventions(prev: Dict[str, Any], state: Dict[str, Any]) -> None:
+    """`attached[]`/`resolved[]`/`unblocked[]` của vòng trước sang đợt mới — mọi PLAN, cả `--force` — để đếm can thiệp
+    theo mục tiêu (ADR-0052 §6). Thiếu/sai kiểu → không mang."""
+    for key in INTERVENTION_KEYS:
+        items = _interventions(prev, key)
+        if items:
+            state[key] = items
+
+
 def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> List[str]:
     """`loop init` lại cùng PLAN sau vòng đã dừng (T-2611): giữ việc chờ người còn mở và bằng chứng xanh khớp Gate hiện
     tại — trước đây mất danh sách chờ người và đòi chạy lại mọi Gate. PLAN khác (đợt kế, D-177/ADR-0047): chỉ mang việc chờ
@@ -6463,6 +6474,7 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
     lại cho việc khác thì báo. Task `[x]` không có bằng chứng ở máy này (clone/container mới): báo rõ thay vì để `verify`
     lặng lẽ đòi."""
     tasks = parse_plan(base / state["plan"])
+    _carry_interventions(prev, state)
     notes, same = [], (prev.get("plan"), prev.get("blueprint")) == (state["plan"], state["blueprint"])
     keep, renamed = _deferred_to_keep(prev, state, base, tasks)
     dropped = sorted(set(_deferred(prev)) - set(keep) - set(renamed)) if not same else []
@@ -7221,9 +7233,7 @@ def _resume_apply(cur: Dict[str, Any], change: Dict[str, Any], base: Path, clear
     của task đang chặn — không thì verdict chặn lại ngay, ADR-0052 §3), gắn phiên hiện tại, trả việc chờ người về hàng làm
     (ghi vào `cleared`)."""
     cleared[:] = list(_deferred(cur))
-    blocking = _task_runs_blocking(cur)
-    if blocking:
-        cur["task_runs"] = {t: n for t, n in _task_runs(cur).items() if t not in blocking}
+    _reset_blocking_task_runs(cur)
     cur.update(change)
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
@@ -7252,6 +7262,216 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     print(f"▶ Autopilot tiếp tục (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {args.reason}")
     if cleared:
         print("  việc chờ người quay lại hàng làm: " + ", ".join(cleared))
+    return 0
+
+
+def _reset_blocking_task_runs(cur: Dict[str, Any]) -> None:
+    """Đặt lại `task_runs` của task đang chặn (ADR-0052 §3) cho `resume`/`unblock` — không thì verdict tính lại chặn ngay."""
+    blocking = _task_runs_blocking(cur)
+    if blocking:
+        cur["task_runs"] = {t: n for t, n in _task_runs(cur).items() if t not in blocking}
+
+
+INTERVENTION_KEYS = ("attached", "resolved", "unblocked")  # dấu vết can thiệp (ADR-0051); `loop init` mang sang đợt kế
+EXIT_UNBLOCK = "người xem rồi `loop unblock --reason …`"
+EXIT_PENDING = (
+    "người đã xử lý việc chờ → `loop resolve --task <ID> --reason …` rồi `loop unblock --reason …`;"
+    " chưa → `loop init --plan <đợt kế>` (việc chờ đi theo)"
+)
+EXIT_BUDGET = "hết ngân sách → `loop init --plan <đợt kế>` (việc chờ đi theo)"
+
+
+def _interventions(st: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
+    """`attached[]`/`resolved[]`/`unblocked[]` của state; thiếu (state cũ)/sai kiểu → []."""
+    items = st.get(key)
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _blocked_by_state(st: Dict[str, Any]) -> bool:
+    """Vòng bị chặn từ chính state: cờ `blocked` (mọi nguồn — `loop block`, `ci-triage`), lỗi lặp ≥ `max_same_failure`,
+    task đỏ quá trần. PLAN mất/rỗng không tính: nguồn đó không mở bằng `unblock` (ADR-0052 §6)."""
+    same = st.get("same_failure_count", 0) >= st.get("max_same_failure", MAX_SAME_FAILURE)
+    return bool(st.get("blocked")) or same or bool(_task_runs_blocking(st))
+
+
+def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
+    """Tên `final_verdict` của vòng đã kết thúc; thiếu/sai kiểu (state cũ) → None."""
+    fv = st.get("final_verdict")
+    name = fv.get("verdict") if isinstance(fv, dict) else None
+    return name if isinstance(name, str) and name else None
+
+
+def _loop_exit(st: Dict[str, Any]) -> Tuple[str, str]:
+    """Lối ra của vòng đã kết thúc, dùng chung cho `attach`/`resolve`/`unblock` (ADR-0051, ADR-0052 §6): (loại, chữ), loại
+    `unblock` | `pending` | `init`. `blocked` xét nguồn như `_live_loop`: từ state → `unblock`; PLAN mất/rỗng → `init`.
+    Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
+    fv = _final_verdict(st)
+    if fv == "blocked" and not _blocked_by_state(st):
+        return "init", "PLAN mất/rỗng → `loop init --plan <mới>`"
+    if fv == "budget" or _budget_exhausted(st):
+        return "init", EXIT_BUDGET
+    if fv == PENDING_HUMAN:
+        return "pending", EXIT_PENDING
+    if fv in (None, "blocked", "stopped"):
+        return "unblock", EXIT_UNBLOCK
+    return "init", "đợt đã xong → `loop init --plan <đợt kế>`"
+
+
+def _ended_msg(st: Dict[str, Any], text: str) -> str:
+    return f"✗ Vòng đã kết thúc ({_final_verdict(st) or 'không có final_verdict'}) — {text}"
+
+
+def _attach_problem(cur: Dict[str, Any], sid: str) -> Optional[str]:
+    if not cur.get("started"):  # state do `ci-triage`/`block` sinh, chưa từng `loop init` (ADR-0052 §6)
+        return NO_LOOP_MSG
+    if not cur.get("active"):
+        return _ended_msg(cur, _loop_exit(cur)[1])
+    if not sid:
+        return "✗ Ngoài Claude Code (không có phiên) — `attach` chỉ gắn phiên, không gỡ ràng buộc phiên đã gắn"
+    return None
+
+
+def _attach_apply(
+    cur: Dict[str, Any], item: Dict[str, str], problem: List[str], same: List[bool]
+) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho `loop attach` (`retries=0`): chỉ đặt `session_id` và nối `attached[]` — không chạm
+    việc chờ, đếm lỗi, `blocked`, vòng, hạn, phạm vi. Từ chối hoặc đã gắn đúng phiên này (`same`) → None, không ghi."""
+    problem[:] = [p] if (p := _attach_problem(cur, item["session"])) else []
+    same[:] = [not problem and cur.get("session_id") == item["session"]]
+    if problem or same[0]:
+        return None
+    cur["session_id"] = item["session"]
+    cur["attached"] = [*_interventions(cur, "attached"), item]
+    return cur
+
+
+def _loop_attach(args: argparse.Namespace, base: Path) -> int:
+    item, problem = {"session": session_id(), "reason": _one_line(args.reason), "at": now_iso()}, [NO_LOOP_MSG]
+    same = [False]
+    cur = update_loop_state(base, lambda st: _attach_apply(st, item, problem, same), retries=0)
+    if problem or cur is None:
+        print(problem[0] if problem else NO_LOOP_MSG, file=sys.stderr)
+        return 2
+    print(
+        f"✓ Vòng {'đã gắn sẵn' if same[0] else 'gắn'} phiên {item['session'][:8]} — việc chờ, đếm lỗi, `blocked` giữ nguyên"
+    )
+    return 0
+
+
+def _resolve_problem(cur: Dict[str, Any], task: str, reason: str) -> Optional[str]:
+    if not cur.get("started"):
+        return NO_LOOP_MSG
+    if not reason:
+        return "✗ --reason rỗng — ghi người đã làm gì"
+    waiting = _deferred(cur)
+    if task not in waiting:
+        return f"✗ {task} không có trong việc chờ người — đang chờ: {', '.join(waiting) or 'không có'}"
+    return None
+
+
+def _resolve_apply(cur: Dict[str, Any], task: str, reason: str, problem: List[str]) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho `loop resolve` (áp lại được): gỡ đúng một mục `deferred`, ghi `resolved[]`; không chạm
+    `active`, `blocked`, đếm lỗi, `task_runs`, vòng, hạn."""
+    problem[:] = [p] if (p := _resolve_problem(cur, task, reason)) else []
+    if problem:
+        return None
+    waiting = dict(_deferred(cur))
+    item = waiting.pop(task)
+    cur["deferred"] = waiting
+    done = {"id": task, "reason": reason, "deferred_reason": item.get("reason") if isinstance(item, dict) else None}
+    cur["resolved"] = [*_interventions(cur, "resolved"), {**done, "at": now_iso()}]
+    return cur
+
+
+def _loop_resolve(args: argparse.Namespace, base: Path) -> int:
+    reason, problem = _one_line(args.reason), [NO_LOOP_MSG]
+    cur = update_loop_state(base, lambda st: _resolve_apply(st, args.task, reason, problem))
+    if problem or cur is None:
+        print(problem[0] if problem else NO_LOOP_MSG, file=sys.stderr)
+        return 2
+    print(f"✓ {args.task} hết chờ người: {reason} — quay lại hàng làm theo PLAN")
+    if not cur.get("active"):  # gỡ xong vẫn exit 0; vòng đã dừng thì chỉ bước kế (ADR-0051)
+        kind, text = _loop_exit(cur)
+        print(
+            f"  vòng đã kết thúc ({_final_verdict(cur) or 'không có final_verdict'}) — bước kế: "
+            + (EXIT_UNBLOCK if kind == "pending" else text)
+        )
+    return 0
+
+
+def _unblock_problem(cur: Dict[str, Any], reason: str) -> Optional[str]:
+    if not cur.get("started"):
+        return NO_LOOP_MSG
+    if not reason:
+        return "✗ --reason rỗng — ghi người đã xem gì"
+    if cur.get("active"):
+        if _blocked_by_state(cur):
+            return None
+        why = EXIT_BUDGET if _budget_exhausted(cur) else "phiên mới gắn bằng `loop attach`"
+        return f"✗ Vòng đang chạy, không bị chặn — {why}"
+    kind, text = _loop_exit(cur)
+    return None if kind in ("unblock", "pending") else _ended_msg(cur, text)
+
+
+def _unblock_prior(cur: Dict[str, Any], base: Path) -> Dict[str, Any]:
+    """Verdict trước khi mở cho `unblocked[]`: vòng sống → verdict tính từ state; đã kết thúc → `final_verdict`."""
+    if cur.get("active"):
+        v = _verdict_loop_state(cur, base) or {}
+    else:
+        fv = cur.get("final_verdict")
+        v = fv if isinstance(fv, dict) else {}
+    return {"prior_verdict": v.get("verdict"), "prior_reason": v.get("reason")}
+
+
+def _resolved_since(cur: Dict[str, Any], ended: Any) -> bool:
+    """Có `loop resolve` từ lúc vòng kết thúc — mở `done-pending-human` khi chưa có thì Stop kế lại kết thúc như cũ."""
+    end = _parse_iso(ended) if isinstance(ended, str) else None
+    ats = [_parse_iso(str(r.get("at") or "")) for r in _interventions(cur, "resolved")]
+    return any(at is not None and (end is None or at >= end) for at in ats)
+
+
+def _unblock_apply(
+    cur: Dict[str, Any], item: Dict[str, Any], base: Path, problem: List[str]
+) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho `loop unblock` (`retries=0`): mở vòng, đặt lại đếm lỗi/chữ ký và `task_runs` của task
+    đang chặn, gắn phiên hiện tại (ngoài Claude Code giữ phiên cũ); giữ việc chờ, vòng, hạn. Verdict sau khi mở tính
+    TRƯỚC khi ghi: còn dừng (hết vòng/hạn) → từ chối, không ghi gì (ADR-0051)."""
+    problem[:] = [p] if (p := _unblock_problem(cur, item["reason"])) else []
+    if problem:
+        return None
+    entry = {"reason": item["reason"], **_unblock_prior(cur, base), "at": item["at"]}
+    item["pending_unresolved"] = entry["prior_verdict"] == PENDING_HUMAN and not _resolved_since(cur, cur.get("ended"))
+    _reset_blocking_task_runs(cur)
+    cur.update(active=True, blocked=False, same_failure_count=0, last_failure_signature=None)
+    for key in ("blocked_reason", "ended", "final_verdict"):
+        cur.pop(key, None)
+    cur.update({"session_id": item["session"]} if item["session"] else {})
+    after = _verdict_loop_state(cur, base)
+    if after:
+        problem[:] = [f"✗ Mở ra vẫn dừng ({after['reason']}) — {EXIT_BUDGET}; không ghi gì"]
+        return None
+    cur["unblocked"] = [*_interventions(cur, "unblocked"), entry]
+    return cur
+
+
+def _loop_unblock(args: argparse.Namespace, base: Path) -> int:
+    item: Dict[str, Any] = {"reason": _one_line(args.reason), "session": session_id(), "at": now_iso()}
+    problem = [NO_LOOP_MSG]
+    cur = update_loop_state(base, lambda st: _unblock_apply(st, item, base, problem), retries=0)
+    if problem or cur is None:
+        print(problem[0] if problem else NO_LOOP_MSG, file=sys.stderr)
+        return 2
+    print(f"▶ Autopilot mở lại (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {item['reason']}")
+    waiting = list(_deferred(cur))
+    if waiting:
+        print("  việc chờ người giữ nguyên: " + ", ".join(waiting))
+    if item["pending_unresolved"]:
+        print(
+            "  ⚠ chưa `loop resolve` việc chờ nào — lượt Stop kế lại kết thúc `done-pending-human`;"
+            " người xử lý xong thì `loop resolve --task <ID> --reason …` trước"
+        )
+    if not item["session"]:
+        print("  ngoài Claude Code: giữ phiên đã gắn — phiên mới gắn bằng `loop attach`")
     return 0
 
 
@@ -7293,6 +7513,9 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "triage-local": _loop_triage_local,
     "checkpoint": _loop_checkpoint,
     "resume": _loop_resume,
+    "attach": _loop_attach,
+    "resolve": _loop_resolve,
+    "unblock": _loop_unblock,
     "stop": _loop_stop,
     "hook-stop": _loop_hook_stop,
     "verify": lambda args, base: loop_verify(base, run_all=args.all),
@@ -11403,6 +11626,13 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--log", default="docs/autopilot/DECISIONS.md")
     lrs = lsub.add_parser("resume")
     lrs.add_argument("--reason", default="người đã xử lý điểm dừng")
+    lat = lsub.add_parser("attach", help="gắn phiên hiện tại vào vòng đang chạy; giữ việc chờ, đếm lỗi (ADR-0051)")
+    lat.add_argument("--reason", default="")
+    lrv = lsub.add_parser("resolve", help="người đã xử lý một việc chờ: gỡ khỏi deferred, ghi resolved[] (ADR-0051)")
+    lrv.add_argument("--task", required=True, type=_defer_id, help="ID đang chờ (`loop status` liệt kê)")
+    lrv.add_argument("--reason", required=True)
+    lub = lsub.add_parser("unblock", help="người xem rồi mở vòng bị chặn/đã dừng; giữ việc chờ (ADR-0051)")
+    lub.add_argument("--reason", required=True)
     lst = lsub.add_parser("stop")
     lst.add_argument("--reason", default="dừng thủ công")
     lsub.add_parser("hook-stop")
