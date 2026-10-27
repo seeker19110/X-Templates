@@ -3,11 +3,11 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-27 · Nhánh: main
 
 ## Đang làm
-- 2026-10-26 **Nghiên cứu ba vòng bản 2** (#287, `research/2026-10-26-autopilot-complete-optimize.md`) → **lát 1** §11: ADR-0051/D-201 nối phiên (`loop attach`/`resolve`/`unblock`, `resume` giữ + cảnh báo); kế: code, rồi không-tiến-triển theo task, `rev` state, perf metadata v2.
+- 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge (#290–#296: FLOW, `rev` + khoá state, `task_runs`, `loop attach`/`resolve`/`unblock`); kế T-3544 `perf sample` v2 → T-3545 → audit delta T-3556 → cắt 3.28.0 (T-3546).
+- 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). Ghi dấu `--clean` cho PR của chính phiên: bộ phân loại Auto chặn tự duyệt — cần người cho phép. 🟢 còn treo: comment #298.
 - 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
 - 2026-10-25 **3.26.0 Workflow** (D-184…D-191, ADR-0049): `/audit` §3, `/research` ≥ 3 mục dùng tool Workflow khi người gõ trực tiếp (cùng luật nhánh subagent, lô ≤ 5); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token, kiểm `maxTurns`/`effort`/guard có áp cho agent.
 - 2026-10-26 **PLAN-harden-2026-10-26 + PLAN-harden-2026-10-26b** (D-193/194, `/complete`): 20 MUST tick có `— Kiểm:` (`unchecked_must` 57 → 37; PLAN-harden-2026-10-26c: → 0, D-195); CI `checks` chạy `blueprint-status --strict --run`; `_load_guard` báo lỗi nạp (ERR-001).
-- 2026-10-26 **PLAN-3.26.1 xong** (D-192; #268, `v3.26.1`): 3 🟢 delta3 sửa; `loop init` nói lý do + một lối ra theo nguồn khi vòng cũ `blocked`; ghép lại BLUEPRINT repo khung bằng `XT_FRAMEWORK_LINK=framework`. Audit delta4 `daefc7c..ce5d9a7`: 0 🔴/🟠 mở; 🟢 TEST-021/022 sửa ở #270 (quét hậu merge sạch). 3.25.0 (#263): `/optimize`.
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046): `/autopilot` = pha build, `/complete` = pha harden; 3.24.0 (ADR-0047): lặp build → audit delta tới khi hết việc, tag tự khi `VERSION` đổi (D-179). Mọi GO-NO-GO tới v3.25.0 đã ký GO 2026-10-26.
 - PLAN-3.23-delegation-rate (D-171/172): chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
@@ -36,6 +36,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `137a047` (3.27.0, #270–#288: sổ audit, nghiên cứu ba vòng, ADR-0051 — chưa có code; bump phụ thuộc). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). Trần byte thư mục nâng +1 MiB (ADR-0050).
+- `main` `09cca6a` (#289–#298: audit Lát 0, FLOW, `rev`/`task_runs`, attach/resolve/unblock, ADR-0053). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
