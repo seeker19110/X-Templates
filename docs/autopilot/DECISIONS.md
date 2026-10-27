@@ -1469,3 +1469,10 @@
 - Chọn: PLAN trên đĩa thắng: mất/rỗng → loop stop/loop init dù cờ hay verdict nào
 - Lý do (tiêu chí chất lượng cuối): (1) unblock vòng mất PLAN thì Stop kế chặn ngay — lối ra theo state là đi vòng; (3) một nguồn sự thật (đĩa), không đoán từ đếm lỗi mà loop record đổi sau khi dừng; _live_loop/_loop_exit/unblock cùng thứ tự
 - Đường lùi: đổi _plan_tasks check trong _loop_exit/_unblock_problem/_live_loop về sau _blocked_by_state
+
+### D-209 · 2026-10-27T09:46:43+00:00 · Triển khai PLAN-phase-gated-review (PR #297) tới đâu khi chủ repo yêu cầu 'sửa PR 297 rồi triển khai luôn'?
+
+- Phương án: (1) Lát tối thiểu ngay: ngân sách review mỗi PR = 2 lượt chưa sạch (1 toàn bộ + 1 delta) rồi pr next trả rethink; thêm lượt chỉ qua pr rethink --decision D-NNN; review trước PR ở đúng commit đẩy lên ghi luôn cho head đó; hoãn sổ pha/fingerprint/coverage manifest/pilot tới khi có số đo · (2) Đủ RV-01…RV-07: sổ pha, fingerprint finding, coverage manifest, một PR mỗi pha ở harden · (3) Chỉ sửa tài liệu kế hoạch, chưa đổi hành vi
+- Chọn: Lát tối thiểu ngay: ngân sách review mỗi PR = 2 lượt chưa sạch (1 toàn bộ + 1 delta) rồi pr next trả rethink; thêm lượt chỉ qua pr rethink --decision D-NNN; review trước PR ở đúng commit đẩy lên ghi luôn cho head đó; hoãn sổ pha/fingerprint/coverage manifest/pilot tới khi có số đo
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: chặn đúng lỗi có số (review #282 bảy lượt) bằng cơ chế máy kiểm, không nới cổng — merge vẫn cần review sạch ở head; một PR mỗi pha trái P8/giới hạn 150 dòng và ADR-0037 (review LLM trên diff lớn kém tin cậy); (2) đường lùi: một hằng số và một nhánh trong pr next; (3) đơn giản: dùng lại sổ review/dấu xt-review, rev+khoá và task_runs (ADR-0052) đã có thay vì engine pha mới; phần còn lại cần số đo trước (giả thuyết giảm 50 % chưa đo)
+- Đường lùi: REVIEW_ROUNDS lớn hoặc bỏ nhánh rethink trong _pr_next_review; revert squash PR triển khai

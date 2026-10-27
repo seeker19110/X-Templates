@@ -1,8 +1,8 @@
 # Kế hoạch: một lượt review chính ở cuối pha
 
-> Ngày: 2026-10-27 · Trạng thái: **ĐỀ XUẤT, CHƯA TRIỂN KHAI**.
-> Phạm vi PR này: chỉ thêm kế hoạch; không đổi mã, cấu hình, hook, workflow, quyền merge hay cổng phát hành.
-> Cơ sở khảo sát: `main` tại `9dc4f6a5eb9150d0ecd7c1e8b49604a482c45037`. Khi triển khai phải đối chiếu lại HEAD và PR đang mở.
+> Ngày: 2026-10-27 · Trạng thái: **DUYỆT MỘT PHẦN** — chỉ lát ở §11 được triển khai ([ADR-0053](../adr/0053-review-round-budget-per-pr.md), D-209); §1–§9 giữ làm bối cảnh, phần không có trong §11 là không làm/hoãn.
+> Phạm vi PR này: kế hoạch + kiểm tra bổ sung + quyết định; không đổi mã, cấu hình, hook, workflow, quyền merge hay cổng phát hành (mã ở PR triển khai riêng).
+> Cơ sở khảo sát: `main` tại `9dc4f6a5eb9150d0ecd7c1e8b49604a482c45037`; kiểm bổ sung (§11) tại `ca02729`.
 > Đây không phải PLAN đang chạy: không thay PLAN-harden hiện hữu, không tự khởi tạo vòng lặp, không ghi `.autopilot/` bằng tay.
 
 ## 1. Kết quả cần đạt và giới hạn
@@ -24,7 +24,7 @@ Mặc định tương lai: **code trọn một pha chức năng → kiểm tự 
 | [`reviewer`](../../.claude/agents/reviewer.md): đọc diff thật, kiểm phần bị ảnh hưởng, trả INCONCLUSIVE khi thiếu bằng chứng | Giữ nguyên tính độc lập và quyền chỉ đọc; context bị cắt không được thành APPROVE. |
 | [`orchestration-and-subagents.md`](../../framework/11-autonomous-loop/orchestration-and-subagents.md): một điều phối viên, Gate có bằng chứng | Gắn vào vòng lặp hiện hữu; không thêm tầng điều phối/reviewer thường trực. |
 
-PR #296 đang mở tại lúc khảo sát, liên quan nối phiên và unblock. PR kế hoạch này không sửa các file của công việc đó. Không coi ghi chú trạng thái hoặc lời khai agent là bằng chứng hoàn tất.
+PR #296 (nối phiên và unblock) đã merge ở `ca02729` sau lúc khảo sát; PR kế hoạch này không sửa các file của công việc đó. Không coi ghi chú trạng thái hoặc lời khai agent là bằng chứng hoàn tất.
 
 ## 3. Quyết định thiết kế đề xuất
 
@@ -132,4 +132,25 @@ Phương án phase-gated và các ngân sách/threshold ở đây là **thiết 
 
 ## 10. Tiêu chí hoàn tất PR kế hoạch này
 
-Chỉ tài liệu mới, các liên kết/nội dung được kiểm tra, không thay cấu hình hay ghi nhận triển khai xong. PR nêu rõ kiểm nào đã chạy và kiểm nào chưa chạy; giữ mở để duyệt, không tự merge hoặc bật auto-merge. Khi được triển khai, bắt đầu RV-01, đối chiếu HEAD/PR hiện hành và dùng quy trình hiện hữu cho tới khi chính sách mới thực sự được chấp nhận.
+Chỉ tài liệu (kế hoạch, ADR-0053, D-209), liên kết/nội dung được kiểm tra bằng `scripts/dev-task.sh gate`, không thay cấu hình hay ghi nhận triển khai xong. Chủ repo duyệt 2026-10-27 ("sửa pr 297 rồi triển khai luôn") → merge theo làn như mọi PR tài liệu; triển khai theo §11 ở PR riêng, quy trình hiện hữu áp dụng tới khi PR đó merge.
+
+## 11. Kiểm tra bổ sung và phạm vi triển khai (2026-10-27)
+
+Đối chiếu lại mã tại `ca02729` (sau #294–#296):
+
+| Điểm kế hoạch | Hiện trạng thật | Kết luận |
+|---|---|---|
+| RV-02 cập nhật nguyên tử, chống chạy trùng, resume không xoá ngân sách | Đã có cho `state.json`: `rev` + khoá, `loop attach` không đặt lại đếm (ADR-0051/0052, #294–#296) | Dùng lại, không làm engine pha mới |
+| §5 khoá theo head, delta, không dùng verdict cũ | Đã có: dấu `xt-review v1 head=<SHA>` (ADR-0027), `pr next` rà `H..head`, review chỉ mang qua khi head là cập nhật nhánh không đổi tập thay đổi (`base_merge_of`) | Không làm lại |
+| RV-04 circuit breaker | Có cho task (`task_runs`, ADR-0052 §3); **không có cho review**: PR #282 qua bảy lượt review | **Thiếu thật** → §11 điểm 1 |
+| §5 chống review trùng trước/sau PR | `/complete` bước 4 giao `reviewer-alt` trước PR rồi `pr next` đòi review lần nữa ở cùng commit khi `merge_hard_exceptions: auto` | **Trùng thật** → §11 điểm 2 |
+| §3 một PR cho một pha ở harden | Trái P8, giới hạn 150 dòng của `/review`, bằng chứng ADR-0037 (review LLM trên diff lớn kém tin cậy); D-142 đã loại reviewer LLM mọi PR | Không làm |
+| §8 mục tiêu giảm ≥ 50 % chi phí | Chưa có số đo lượt review/PR | Giả thuyết; xét lại khi `pr stats` (ADR-0043) có số |
+| `pr-review.yml` (chưa bật) | Review mỗi `synchronize`, không qua `pr next` | Còn treo: khi bật phải tôn trọng trần ở điểm 1 |
+
+Triển khai (ADR-0053, PR riêng):
+
+1. **Trần lượt review mỗi PR:** review đã đăng chưa sạch (`blocking`/`inconclusive`) tính sau review sạch cuối; đạt 2 (một lượt toàn PR + một lượt delta) mà head chưa sạch → `pr next` trả `rethink` thay `review`/`fix`. Thêm lượt chỉ qua `xt.py pr rethink --pr N --decision D-NNN` (D-NNN có trong `DECISIONS.md`, mỗi D-NNN một lần mỗi PR). Không nới cổng: merge vẫn cần review sạch ở head.
+2. **Review trước PR dùng cho đúng head:** rà trước PR ở đúng commit đẩy lên → mở PR xong ghi `pr reviewed --head <SHA đó>`, không giao lần hai.
+
+Không làm/hoãn: RV-01 (baseline đầy đủ), RV-02/RV-03 (sổ pha, coverage manifest), RV-04 (fingerprint), RV-05 (ngoài phần trên), RV-07 (pilot).
