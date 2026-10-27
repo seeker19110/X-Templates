@@ -1615,6 +1615,11 @@ def _verdict_loop_state(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "verdict": "blocked",
             "reason": f"cùng một lỗi lặp {st.get('same_failure_count')} lần ({st.get('last_failure_task')}) — dừng để người xem",
         }
+    return _budget_exhausted(st)
+
+
+def _budget_exhausted(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Hết ngân sách (trần vòng hoặc hạn) → verdict `budget`; còn thì None. Dùng chung cho verdict và `_live_loop`."""
     if st.get("iterations", 0) >= st.get("max_iterations", 50):
         return {"verdict": "budget", "reason": f"đã chạm trần {st.get('max_iterations')} vòng"}
     deadline = st.get("deadline")
@@ -6171,14 +6176,13 @@ def _live_loop(base: Path) -> str:
     hai phiên từng xoá trạng thái của nhau — rà stored 01 §3h); rỗng nếu không có."""
     prev = read_state(base) or {}
     try:
-        if not prev.get("active"):
+        # Hết vòng/hạn (kể cả còn `blocked`) → đợt kế không cần `loop stop`/`--force` (D-177, T-3537).
+        if not prev.get("active") or _budget_exhausted(prev):
             return ""
         v = loop_verdict(base)
         verdict = v["verdict"]
     except (TypeError, ValueError, AttributeError):  # state.json sai kiểu → ghi đè như trước
         return ""
-    if verdict == "budget":
-        return ""  # hết ngân sách: đợt kế không cần `loop stop`/`--force` (D-177)
     if verdict in ("done", "done-pending-human"):
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
