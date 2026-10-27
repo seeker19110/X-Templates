@@ -462,6 +462,41 @@ class LoopInitCarryTest(TmpRepoCase):
         self.assertIn("1 task [x] không có bằng chứng ở máy này (T-001)", err)
         self.assertIn("PLAN-<đợt>.md", err)
 
+    def interventions(self) -> dict:
+        st = json.loads((self.repo / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+        return {
+            k: [i.get("session") or i.get("id") or i.get("reason") for i in st.get(k, [])] for k in xt.INTERVENTION_KEYS
+        }
+
+    def test_carry_interventions_across_plans_and_force(self) -> None:
+        # ADR-0052 §6: `attached[]`/`resolved[]`/`unblocked[]` đi theo sang đợt kế (PLAN khác, cả `--force`) để đếm
+        # can thiệp mỗi mục tiêu; `task_runs` thì không (đợt mới đếm lại).
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": OTHER}):
+            self.assertEqual(run_main("loop", "attach", "--reason", "sau /clear")[0], 0)
+        run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")
+        self.assertEqual(run_main("loop", "resolve", "--task", "T-002", "--reason", "đã ký")[0], 0)
+        run_main("loop", "block", "--reason", "cần khoá")
+        self.assertEqual(run_main("loop", "unblock", "--reason", "có khoá")[0], 0)
+        want = {"attached": [OTHER], "resolved": ["T-002"], "unblocked": ["có khoá"]}
+        self.assertEqual(self.interventions(), want)
+        self.assertEqual(run_main("loop", "init", "--force")[0], 0)  # vòng còn sống, `--force`
+        self.assertEqual(self.interventions(), want)
+        run_main("loop", "stop", "--reason", "đợt 1 xong")
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
+        self.assertEqual(self.interventions(), want)
+        self.assertEqual(xt.read_state(self.repo)["task_runs"], {})
+
+    def test_carry_interventions_skips_missing_and_bad_types(self) -> None:
+        state: dict = {}
+        xt._carry_interventions({"attached": "hỏng", "resolved": [], "unblocked": [1, {"reason": "r"}]}, state)
+        self.assertEqual(state, {"unblocked": [{"reason": "r"}]})
+        run_main("loop", "init")
+        run_main("loop", "stop")
+        run_main("loop", "init")
+        self.assertEqual(self.interventions(), {"attached": [], "resolved": [], "unblocked": []})
+
 
 class DecideWorktreesTest(TmpRepoCase):
     """T-2612 (phản hồi dự án đích): `loop decide` ở hai worktree cùng repo đều ra D-001 — số kế tiếp chỉ đọc sổ cây
@@ -1126,6 +1161,26 @@ class TaskRunsTest(TmpRepoCase):
         (self.repo / "green").write_text("", encoding="utf-8")
         self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "bash gate.sh")[0], 0)
         self.assertEqual(self.runs(), {})
+
+    def test_task_runs_green_after_removing_task_from_plan_does_not_unblock(self) -> None:
+        # Review #294 lượt 3: tạm bỏ task khỏi PLAN rồi xanh `-- true`, chép PLAN về → vẫn bị chặn.
+        run_main("loop", "init", "--max-task-runs", "3")
+        for _ in range(3):
+            self.red()
+        self.plan.write_text("- [ ] `T-002` việc hai — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--no-tick", "--", "true")[0], 0)
+        self.plan.write_text(TR_PLAN, encoding="utf-8")
+        self.assertEqual((self.runs(), self.verdict()["verdict"]), ({"T-001": 3}, "blocked"))
+
+    def test_task_runs_green_other_command_keeps_same_failure_block(self) -> None:
+        # Review #294 lượt 3: cùng lỗi 3 lần → blocked; xanh bằng lệnh khác Gate không đặt lại đếm lỗi lặp.
+        run_main("loop", "init", "--max-task-runs", "0")
+        (self.repo / "same").write_text("", encoding="utf-8")
+        for _ in range(3):
+            self.red()
+        self.assertEqual(self.verdict()["verdict"], "blocked")
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--no-tick", "--", "true")[0], 0)
+        self.assertEqual((xt.read_state(self.repo)["same_failure_count"], self.verdict()["verdict"]), (3, "blocked"))
 
     def test_task_runs_spec_whitespace_edit_does_not_reset(self) -> None:
         run_main("loop", "init")

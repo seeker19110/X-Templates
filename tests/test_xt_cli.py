@@ -1980,6 +1980,359 @@ class LoopCommandsTest(TmpDirCase):
         self.assertEqual(xt.cmd_loop(argparse.Namespace(loop_cmd="khong-co")), 2)
 
 
+SID_A = "aaaaaaaa-0000-0000-0000-000000000001"
+SID_B = "bbbbbbbb-0000-0000-0000-000000000002"
+FV_DONE = {"verdict": "done", "reason": "mọi task xanh"}
+
+
+class LoopInterventionsTest(TmpDirCase):
+    """ADR-0051 + ADR-0052 §3/§6 (T-3540…T-3542): `loop attach` chỉ gắn phiên; `loop resolve` gỡ đúng một việc chờ;
+    `loop unblock` mở vòng bị chặn/đã dừng. Lối ra theo `final_verdict` + nguồn `blocked` dùng chung; mọi exit 2 không
+    đổi state (so cả `rev`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.tmp), "CLAUDE_CODE_SESSION_ID": SID_A})
+        )
+        os.environ.pop("XT_DEBUG", None)
+        p = self.tmp / "docs" / "autopilot" / "PLAN.md"
+        p.parent.mkdir(parents=True)
+        p.write_text(
+            "- [ ] `T-001` một — Gate: `true`\n- [ ] `T-002` hai — Gate: `true`\n- [ ] `T-003` ba — Gate: `true`\n",
+            encoding="utf-8",
+        )
+
+    def init(self, **fields) -> dict:
+        """`loop init` (phiên A) + `loop defer T-002`, rồi đè `fields` lên state (ghi thẳng: test dựng ca biên)."""
+        self.assertEqual(run_main("loop", "init", "--hours", "5")[0], 0)
+        self.assertEqual(run_main("loop", "defer", "--task", "T-002", "--reason", "chủ repo ký")[0], 0)
+        st = xt.read_state(self.tmp)
+        st.update(fields)
+        xt.write_state(st, self.tmp)
+        return st
+
+    def ended(self, fv: dict | None, **fields) -> dict:
+        base = {"active": False, "ended": "2026-01-01T00:00:00+00:00", **fields}
+        st = self.init(**base)
+        if fv is None:
+            st.pop("final_verdict", None)
+        else:
+            st["final_verdict"] = fv
+        xt.write_state(st, self.tmp)
+        return st
+
+    def refused(self, *argv: str, msg: str) -> str:
+        """Lệnh exit 2, stderr có `msg`, stdout rỗng, state (cả `rev`) không đổi."""
+        before = xt.read_state(self.tmp)
+        rc, out, err = run_main("loop", *argv)
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertIn(msg, err)
+        self.assertEqual(xt.read_state(self.tmp), before)
+        return err
+
+    # ------------------------------------------------------------------ attach
+
+    def test_attach_new_session_keeps_wait_failures_blocked(self):
+        before = self.init(same_failure_count=2, last_failure_signature="sig", blocked=True, blocked_reason="x")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID_B}):
+            rc, out, err = run_main("loop", "attach", "--reason", "sau /clear")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("gắn phiên bbbbbbbb", out)
+        st = xt.read_state(self.tmp)
+        self.assertEqual(st["session_id"], SID_B)
+        self.assertEqual([(a["session"], a["reason"]) for a in st["attached"]], [(SID_B, "sau /clear")])
+        self.assertEqual(st["rev"], before["rev"] + 1)
+        drop = ("session_id", "attached", "rev")
+        self.assertEqual(
+            {k: v for k, v in st.items() if k not in drop}, {k: v for k, v in before.items() if k not in drop}
+        )
+
+    def test_attach_twice_appends_and_reason_optional(self):
+        self.init(attached="hỏng")  # sai kiểu (tay sửa) → coi như rỗng
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID_B}):
+            self.assertEqual(run_main("loop", "attach")[0], 0)
+        self.assertEqual(run_main("loop", "attach")[0], 0)
+        st = xt.read_state(self.tmp)
+        self.assertEqual([(a["session"], a["reason"]) for a in st["attached"]], [(SID_B, ""), (SID_A, "")])
+
+    def test_attach_same_session_is_noop(self):
+        self.init()
+        before = xt.read_state(self.tmp)
+        rc, out, _ = run_main("loop", "attach")
+        self.assertEqual(rc, 0)
+        self.assertIn("đã gắn sẵn phiên aaaaaaaa", out)
+        self.assertEqual(xt.read_state(self.tmp), before)
+
+    def test_attach_outside_claude_code_exit_2(self):
+        self.init()
+        os.environ.pop("CLAUDE_CODE_SESSION_ID")
+        self.refused("attach", msg="Ngoài Claude Code")
+
+    def test_attach_without_state_or_started_exit_2(self):
+        for cmd in (["attach"], ["resolve", "--task", "T-002", "--reason", "x"], ["unblock", "--reason", "x"]):
+            with self.subTest(cmd=cmd):
+                rc, out, err = run_main("loop", *cmd)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("chạy loop init trước", err)
+                self.assertIsNone(xt.read_state(self.tmp))
+        run_main("loop", "block", "--reason", "ci-triage đỏ")  # state không có `started` (ADR-0052 §6)
+        for cmd in (["attach"], ["resolve", "--task", "T-002", "--reason", "x"], ["unblock", "--reason", "x"]):
+            with self.subTest(cmd=cmd, started=False):
+                self.refused(*cmd, msg="chạy loop init trước")
+
+    def test_attach_ended_loop_exit_by_final_verdict(self):
+        cases = [  # (final_verdict, trường thêm, lối ra mong đợi)
+            ({"verdict": "blocked", "reason": "b"}, {"blocked": True}, xt.EXIT_UNBLOCK),
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"same_failure_count": 3}, xt.EXIT_UNBLOCK),
+            ({"verdict": "blocked", "reason": "task đỏ"}, {"task_runs": {"T-001": 6}}, xt.EXIT_UNBLOCK),
+            # review #295: `loop record` sau khi vòng dừng đổi đếm lỗi — nguồn vẫn là state, PLAN còn → `unblock`
+            (
+                {"verdict": "blocked", "reason": "lỗi lặp"},
+                {"same_failure_count": 1, "task_runs": {"T-001": 4}},
+                xt.EXIT_UNBLOCK,
+            ),
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"plan": "docs/autopilot/PLAN.md.bak"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
+            (None, {}, xt.EXIT_UNBLOCK),
+            ({"reason": "thiếu tên"}, {}, xt.EXIT_UNBLOCK),
+            ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {}, "`loop resolve --task <ID> --reason …` rồi"),
+            (FV_DONE, {}, "đợt đã xong → `loop init --plan <đợt kế>`"),
+            ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
+            ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
+            ({"verdict": "stopped", "reason": "s"}, {"deadline": "2000-01-01T00:00:00+00:00"}, xt.EXIT_BUDGET),
+            ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {"iterations": 100}, xt.EXIT_BUDGET),
+        ]
+        for fv, extra, want in cases:
+            with self.subTest(fv=fv, extra=extra):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                self.ended(fv, **extra)
+                err = self.refused("attach", msg=want)
+                self.assertIn("Vòng đã kết thúc", err)
+
+    # ------------------------------------------------------------------ resolve
+
+    def test_resolve_one_id_records_resolved(self):
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        for t in ("T-002", "T-003"):
+            run_main("loop", "defer", "--task", t, "--reason", f"chờ {t}")
+        st = xt.read_state(self.tmp)
+        st.update(same_failure_count=2, blocked=True, task_runs={"T-001": 6}, iterations=4)
+        xt.write_state(st, self.tmp)
+        rc, out, err = run_main("loop", "resolve", "--task", "T-002", "--reason", "đã  ký\nxong")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("✓ T-002 hết chờ người: đã ký xong", out)
+        self.assertNotIn("bước kế", out)
+        after = xt.read_state(self.tmp)
+        self.assertEqual(list(after["deferred"]), ["T-003"])
+        (r,) = after["resolved"]
+        self.assertEqual((r["id"], r["reason"], r["deferred_reason"]), ("T-002", "đã ký xong", "chờ T-002"))
+        self.assertTrue(xt._parse_iso(r["at"]))
+        for k in ("active", "blocked", "same_failure_count", "task_runs", "iterations", "deadline", "session_id"):
+            self.assertEqual(after.get(k), st.get(k), k)
+
+    def test_resolve_unknown_id_exit_2_lists_waiting(self):
+        self.init()
+        self.refused(
+            "resolve", "--task", "T-003", "--reason", "x", msg="T-003 không có trong việc chờ người — đang chờ: T-002"
+        )
+        run_main("loop", "resolve", "--task", "T-002", "--reason", "xong")
+        self.refused("resolve", "--task", "T-002", "--reason", "x", msg="đang chờ: không có")
+
+    def test_resolve_empty_reason_exit_2(self):
+        self.init()
+        self.refused("resolve", "--task", "T-002", "--reason", "  \n ", msg="--reason rỗng")
+        with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
+            xt.main(["loop", "resolve", "--task", "T-002"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_resolve_legacy_deferred_item(self):
+        self.init(deferred={"T-002": "chuỗi cũ"})
+        self.assertEqual(run_main("loop", "resolve", "--task", "T-002", "--reason", "x")[0], 0)
+        self.assertIsNone(xt.read_state(self.tmp)["resolved"][0]["deferred_reason"])
+
+    def test_resolve_ended_loop_prints_next_step(self):
+        cases = [
+            ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {}, xt.EXIT_UNBLOCK),
+            ({"verdict": "blocked", "reason": "b"}, {"blocked": True}, xt.EXIT_UNBLOCK),
+            ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
+            (None, {}, xt.EXIT_UNBLOCK),
+            ({"verdict": "blocked", "reason": "PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            (FV_DONE, {}, "đợt đã xong → `loop init"),
+            ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
+        ]
+        for fv, extra, want in cases:
+            with self.subTest(fv=fv):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                self.ended(fv, **extra)
+                rc, out, err = run_main("loop", "resolve", "--task", "T-002", "--reason", "đã xử lý")
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f"bước kế: {want}", out)
+                st = xt.read_state(self.tmp)
+                self.assertEqual((st["deferred"], st["active"]), ({}, False))
+
+    def test_resolve_reapplies_after_concurrent_write(self):
+        # Ca đồng thời: lệnh khác ghi state giữa đọc và ghi → `resolve` (áp lại được) đọc lại, không mất cập nhật kia.
+        self.init()
+        real, calls = xt._resolve_apply, []
+
+        def racing(cur, *a):
+            if not calls:
+                st = xt.read_state(self.tmp)
+                xt.write_state({**st, "rev": st["rev"] + 1, "iterations": 9}, self.tmp)
+            calls.append(1)
+            return real(cur, *a)
+
+        with unittest.mock.patch.object(xt, "_resolve_apply", side_effect=racing):
+            self.assertEqual(run_main("loop", "resolve", "--task", "T-002", "--reason", "x")[0], 0)
+        st = xt.read_state(self.tmp)
+        self.assertEqual((len(calls), st["iterations"], st["deferred"]), (2, 9, {}))
+
+    # ------------------------------------------------------------------ unblock
+
+    def assert_opened(self, before: dict, st: dict) -> None:
+        self.assertEqual((st["active"], st["blocked"], st["same_failure_count"]), (True, False, 0))
+        self.assertIsNone(st["last_failure_signature"])
+        for k in ("blocked_reason", "ended", "final_verdict"):
+            self.assertNotIn(k, st)
+        for k in ("deferred", "iterations", "deadline", "max_iterations"):
+            self.assertEqual(st.get(k), before.get(k), k)
+
+    def test_unblock_live_blocked_opens(self):
+        for extra, why in (
+            ({"blocked": True, "blocked_reason": "cần khoá"}, "cần khoá"),
+            ({"same_failure_count": 3, "last_failure_signature": "s", "last_failure_task": "T-001"}, "lỗi lặp 3 lần"),
+        ):
+            with self.subTest(extra=extra):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                before = self.init(iterations=3, **extra)
+                with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID_B}):
+                    rc, out, err = run_main("loop", "unblock", "--reason", "người xem rồi")
+                self.assertEqual(rc, 0, err)
+                self.assertIn("▶ Autopilot mở lại (vòng 3/", out)
+                self.assertIn("việc chờ người giữ nguyên: T-002", out)
+                st = xt.read_state(self.tmp)
+                self.assert_opened(before, st)
+                self.assertEqual(st["session_id"], SID_B)
+                (u,) = st["unblocked"]
+                self.assertEqual((u["reason"], u["prior_verdict"]), ("người xem rồi", "blocked"))
+                self.assertIn(why, u["prior_reason"])
+
+    def test_unblock_resets_blocking_task_runs(self):
+        before = self.init(task_runs={"T-001": 6, "T-003": 2})
+        self.assertEqual(xt.loop_verdict(self.tmp)["verdict"], "blocked")
+        rc, _, err = run_main("loop", "unblock", "--reason", "đổi spec")
+        self.assertEqual(rc, 0, err)
+        st = xt.read_state(self.tmp)
+        self.assert_opened(before, st)
+        self.assertEqual(st["task_runs"], {"T-003": 2})
+        self.assertIn("T-001: 6 lần đỏ", st["unblocked"][0]["prior_reason"])
+        self.assertEqual(xt.loop_verdict(self.tmp)["verdict"], "continue")
+
+    def test_unblock_ended_loop_accepted(self):
+        cases = [
+            ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "blocked_reason": "b"}),
+            # review #295: chặn vì lỗi lặp, rồi một `loop record` đỏ khác chữ ký sau khi vòng dừng → vẫn mở được
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"same_failure_count": 1, "task_runs": {"T-001": 4}}),
+            ({"verdict": "stopped", "reason": "dừng tay"}, {}),
+            (None, {}),
+            ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {}),
+        ]
+        for fv, extra in cases:
+            with self.subTest(fv=fv):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                before = self.ended(fv, **extra)
+                rc, out, err = run_main("loop", "unblock", "--reason", "mở")
+                self.assertEqual(rc, 0, err)
+                st = xt.read_state(self.tmp)
+                self.assert_opened(before, st)
+                u = st["unblocked"][-1]
+                self.assertEqual(u["prior_verdict"], (fv or {}).get("verdict"))
+                self.assertEqual(u["prior_reason"], (fv or {}).get("reason"))
+                self.assertEqual("chưa `loop resolve`" in out, fv is not None and fv["verdict"] == xt.PENDING_HUMAN)
+
+    def test_unblock_pending_after_resolve_no_reminder(self):
+        self.ended({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, resolved=[{"at": "khong-doc-duoc"}])
+        self.assertEqual(run_main("loop", "resolve", "--task", "T-002", "--reason", "ký rồi")[0], 0)
+        rc, out, _ = run_main("loop", "unblock", "--reason", "mở")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("chưa `loop resolve`", out)
+        self.assertNotIn("giữ nguyên", out)
+        # resolve trước lúc vòng kết thúc không tính; vòng không ghi `ended` → mọi resolve đều tính
+        st = xt.read_state(self.tmp)
+        self.assertFalse(xt._resolved_since(st, "2999-01-01T00:00:00+00:00"))
+        self.assertTrue(xt._resolved_since(st, None))
+
+    def test_unblock_refused_exit_2_state_unchanged(self):
+        cases = [  # (final_verdict hoặc "live", trường thêm, chữ mong đợi)
+            (FV_DONE, {}, "đợt đã xong → `loop init --plan <đợt kế>`"),
+            ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
+            ({"verdict": "lạ", "reason": "?"}, {}, "verdict `lạ` không mở lại được → `loop init --plan <mới>`"),
+            ("live", {}, "Vòng đang chạy, không bị chặn — phiên mới gắn bằng `loop attach`"),
+            (
+                "live",
+                {"blocked": True, "plan": "docs/autopilot/MAT.md"},
+                "PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`",
+            ),
+            ("live", {"iterations": 100}, f"Vòng đang chạy, không bị chặn — {xt.EXIT_BUDGET}"),
+            (
+                "live",
+                {"blocked": True, "iterations": 100},
+                f"Mở ra vẫn dừng (đã chạm trần 100 vòng) — {xt.EXIT_BUDGET}",
+            ),
+            ("live", {"blocked": True, "deadline": "2000-01-01T00:00:00+00:00"}, "Mở ra vẫn dừng (quá hạn"),
+        ]
+        for fv, extra, want in cases:
+            with self.subTest(fv=fv, extra=extra):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                if fv == "live":
+                    self.init(**extra)
+                else:
+                    self.ended(fv, **extra)
+                self.refused("unblock", "--reason", "mở", msg=want)
+        self.refused("unblock", "--reason", " ", msg="--reason rỗng")
+        with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
+            xt.main(["loop", "unblock"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_unblock_outside_claude_code_keeps_session(self):
+        self.init(blocked=True)
+        os.environ.pop("CLAUDE_CODE_SESSION_ID")
+        rc, out, err = run_main("loop", "unblock", "--reason", "mở")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("ngoài Claude Code: giữ phiên đã gắn", out)
+        self.assertEqual(xt.read_state(self.tmp)["session_id"], SID_A)
+
+    def test_unblock_and_attach_refuse_concurrent_write(self):
+        # Ca đồng thời: `retries=0` — state đổi giữa đọc và ghi → exit 2, không ghi đè thay đổi kia (ADR-0052 §2).
+        for cmd, fn in ((["unblock", "--reason", "mở"], "_unblock_apply"), (["attach"], "_attach_apply")):
+            with self.subTest(cmd=cmd):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                self.init(blocked=True)
+                real = getattr(xt, fn)
+
+                def racing(cur, *a, real=real):
+                    if racing.calls == 0:  # chỉ chen ở lần đọc đầu: `retries` > 0 thì lần sau đã ghi được (review #295)
+                        st = xt.read_state(self.tmp)
+                        xt.write_state({**st, "rev": st["rev"] + 1, "iterations": 9}, self.tmp)
+                    racing.calls += 1
+                    return real(cur, *a)
+
+                racing.calls = 0
+                with (
+                    unittest.mock.patch.object(xt, fn, side_effect=racing),
+                    unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID_B}),
+                ):
+                    rc, _, err = run_main("loop", *cmd)
+                self.assertEqual((rc, racing.calls), (2, 1))
+                self.assertIn("rev lệch", err)
+                st = xt.read_state(self.tmp)
+                self.assertEqual((st["iterations"], st["blocked"], st["session_id"]), (9, True, SID_A))
+
+
 # --------------------------------------------------------------------------- audit CLI
 
 

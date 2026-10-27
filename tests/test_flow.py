@@ -37,8 +37,6 @@ from test_xt_cli import TmpRepoCase, run_main
 F = TypeVar("F", bound=Callable[..., Any])
 
 XFAIL: dict[str, str] = {
-    "FLOW-01": "R1 — chưa có `loop attach` (T-3540)",
-    "FLOW-02": "§4A — chưa có `loop resolve` (T-3541)",
     "FLOW-18": "R2 — `perf compare` báo `improved` khi before `ms`, after `s` (T-3545)",
     "FLOW-19": "R3 — mẫu perf chưa có v2 (`dirty`/`head`/`harness_sha256`) và `perf compare` chưa có `--base` (T-3545)",
 }
@@ -159,7 +157,7 @@ class FlowTest(TmpRepoCase):
     @flow("FLOW-01")
     def test_flow_01_attach_keeps_deferred_and_failure_count(self) -> None:
         """Given vòng một phiên, deferred T-900, đếm lỗi 2 · When `loop attach` với session mới ·
-        Then exit 0, deferred giữ T-900, đếm lỗi giữ 2, session_id mới. (Hiện chưa có `attach` → xfail.)"""
+        Then exit 0, deferred giữ T-900, đếm lỗi giữ 2, session_id mới."""
         self.seed_wait_and_failures()
         rc, _, err = self.loop("attach", session=SESSION_B)
         self.assertEqual(rc, 0, err)
@@ -171,7 +169,7 @@ class FlowTest(TmpRepoCase):
     @flow("FLOW-02")
     def test_flow_02_resolve_only_named_task_leaves_deferred(self) -> None:
         """Given như FLOW-01 thêm deferred T-901 · When `loop resolve --task T-900 --reason x` ·
-        Then chỉ T-900 rời deferred, `resolved[]` có T-900, đếm lỗi giữ 2. (Hiện chưa có `resolve` → xfail.)"""
+        Then chỉ T-900 rời deferred, `resolved[]` có T-900, đếm lỗi giữ 2."""
         self.seed_wait_and_failures()
         self.assertEqual(self.loop("defer", "--task", "T-901", "--reason", "chủ repo ký nữa")[0], 0)
         rc, _, err = self.loop("resolve", "--task", "T-900", "--reason", "x")
@@ -185,13 +183,19 @@ class FlowTest(TmpRepoCase):
     @flow("FLOW-03")
     def test_flow_03_defer_refused_for_failing_task(self) -> None:
         """Given T-001 vừa đỏ một lần · When `loop defer --task T-001` · Then từ chối (exit ≠ 0), T-001 không vào
-        deferred (`_defer_problem`: không né blocked). Chỉ kiểm `defer`; T-3541 mở rộng cho `resolve`."""
+        deferred (`_defer_problem`: không né blocked). `resolve` không nới `defer` (ADR-0051 §Bối cảnh): task đang lỗi
+        không có trong deferred → `resolve` exit 2, state không đổi."""
         self.assertEqual(self.loop("init")[0], 0)
         self.red()
         rc, _, err = self.loop("defer", "--task", "T-001", "--reason", "né")
         self.assertNotEqual(rc, 0)
         self.assertIn("task đang lỗi", err)
         self.assertNotIn("T-001", self.state().get("deferred", {}))
+        before = self.state()
+        rc, _, err = self.loop("resolve", "--task", "T-001", "--reason", "né")
+        self.assertEqual(rc, 2)
+        self.assertIn("không có trong việc chờ người", err)
+        self.assertEqual(self.state(), before)
 
     @flow("FLOW-04")
     def test_flow_04_alternating_signatures_end_blocked(self) -> None:
