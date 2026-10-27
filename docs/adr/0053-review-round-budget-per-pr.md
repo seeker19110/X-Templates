@@ -1,7 +1,7 @@
 # ADR-0053: Ngân sách review mỗi PR — hai lượt chưa sạch rồi `rethink`; review trước PR dùng cho đúng head
 
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "kiểm tra bổ sung, sửa pr 297 rồi triển khai luôn"; phiên chính tự duyệt phạm vi theo tiêu chí chất lượng cuối, ADR-0008 — D-209)
-- **Trạng thái triển khai:** PR kế của lát này — `scripts/xt.py` (`review_rounds`, `_pr_next_review`, `pr rethink`), skill `/complete` bước 4, `LOOP-STOP-022`.
+- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `REVIEW_ROUNDS`, `review_rounds`, `_pr_next_review` (`rethink`), `_pr_rethink`; skill `/complete` bước 4, `/review`; `LOOP-STOP-022`; test `PrNextTest.test_review_round_budget_stops_fix_review_loop`, `PrNextCliTest.test_rethink_needs_recorded_decision_once_per_pr`.
 - **Ngày:** 2026-10-27
 - **Làm rõ:** [PLAN-phase-gated-review](../specs/PLAN-phase-gated-review.md) (PR #297 — chỉ phần §11 được duyệt), ADR-0025 (`pr next`), ADR-0028 (`merge_eligibility` — không đổi), ADR-0029 (`inconclusive`), ADR-0037 (review chỉ ở harden), ADR-0052 §3 (`task_runs` — cùng tinh thần cho task).
 

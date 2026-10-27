@@ -34,6 +34,8 @@ Lệnh:
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
               [--reviewer-effort E --author-effort E]
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
+  pr rethink --pr N --decision D-NNN
+                                PR quá ngân sách review (`pr next` = rethink): mở thêm 2 lượt theo quyết định (ADR-0053).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -9246,11 +9248,38 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
     return None
 
 
+# Ngân sách review mỗi PR (ADR-0053, D-209): một lượt toàn PR + một lượt delta; quá trần → `rethink`, không review lần ba.
+REVIEW_ROUNDS = 2
+
+
+def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int:
+    """Số review đã đăng chưa sạch (`blocking`/`inconclusive`) sau review sạch cuối và sau lần `pr rethink` cuối (ADR-0053)."""
+    marks = [_iso_key(r.get("at", "")) for r in rethinks if isinstance(r, dict)] if isinstance(rethinks, list) else []
+    since, count = max(marks, default=""), 0
+    for r in reviews:
+        if r.get("clean"):
+            count = 0
+        elif not since or _iso_key(r.get("at", "")) > since:
+            count += 1
+    return count
+
+
 def _pr_next_review(
-    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str
+    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str, rounds: int = 0
 ) -> Optional[Dict[str, Any]]:
-    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`)."""
+    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`); quá ngân sách lượt
+    review (ADR-0053) → `rethink` thay `review`/`fix`."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
+    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS:
+        if auto_merge:
+            return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
+        return act(
+            "rethink",
+            f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: một lượt toàn PR + một lượt delta — ADR-0053) — dừng"
+            " vòng sửa–review, đổi chiến lược",
+            "xt.py loop decide (tách/thu hẹp PR, đổi thiết kế, đóng PR) → xt.py pr rethink --pr"
+            f" {n} --decision D-NNN; việc cần người → xt.py loop defer --task <ID> --reason 'PR #{n}'",
+        )
     if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
         if auto_merge:
@@ -9467,7 +9496,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
-    republish-review · review · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
+    republish-review · review · rethink (quá ngân sách review — ADR-0053) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -9495,7 +9524,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
             d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
         )
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
-        early = _pr_next_review(d, auto_merge, gate, act, disable)
+        early = _pr_next_review(d, auto_merge, gate, act, disable, review_rounds(reviews, rec.get("rethinks")))
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -9684,6 +9713,47 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
     return review_capability_error(args.reviewer_model, args.author_model, args.reviewer_effort, args.author_effort)
 
 
+def _pr_key(pr: object) -> Optional[str]:
+    """Khoá sổ review của `--pr` (7 · #7 · …/pull/7[/files][#…]) — cùng khoá `str(number)` của REST với `pr next`; sai → in lỗi, None."""
+    num = PR_REF_RE.fullmatch(str(pr).strip())
+    if num is None:
+        print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {pr!r}", file=sys.stderr)
+        return None
+    return str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8"
+
+
+DECISION_HEAD_RE = re.compile(r"^### (D-\d{3,}) · ", re.M)
+
+
+def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
+    """`pr rethink` (ADR-0053): mở thêm `REVIEW_ROUNDS` lượt review cho PR đã quá ngân sách — chỉ khi D-NNN (đổi chiến lược)
+    có trong `docs/autopilot/DECISIONS.md` và chưa dùng cho PR này; ghi `rethinks[]` vào sổ review cục bộ."""
+    key = _pr_key(args.pr)
+    if key is None:
+        return 2
+    log = base / "docs/autopilot/DECISIONS.md"
+    known = set(DECISION_HEAD_RE.findall(log.read_text(encoding="utf-8", errors="replace"))) if log.is_file() else set()
+    if args.decision not in known:
+        print(
+            f"✗ {args.decision} không có trong docs/autopilot/DECISIONS.md — ghi `xt.py loop decide` trước",
+            file=sys.stderr,
+        )
+        return 2
+    data = read_reviews(base)
+    rec = _pr_record(data, key)
+    old = rec.get("rethinks")
+    rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    if any(r.get("decision") == args.decision for r in rethinks):
+        print(f"✗ {args.decision} đã mở thêm lượt cho PR #{key} — cần quyết định mới", file=sys.stderr)
+        return 2
+    data[key] = {**rec, "rethinks": [*rethinks, {"decision": args.decision, "at": now_iso()}]}
+    _write_reviews(base, data)
+    print(
+        f"✓ PR #{key}: mở thêm {REVIEW_ROUNDS} lượt review theo {args.decision} — chạy lại `xt.py pr next --pr {key}`"
+    )
+    return 0
+
+
 def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if not FULL_SHA_RE.fullmatch(args.head):
         print(
@@ -9698,11 +9768,9 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ {err}", file=sys.stderr)
         return 2
     data = read_reviews(base)
-    num = PR_REF_RE.fullmatch(str(args.pr).strip())  # 7 · #7 · …/pull/7[/files][#…]: cùng khoá số PR với `pr next`
-    if num is None:
-        print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {args.pr!r}", file=sys.stderr)
+    key = _pr_key(args.pr)
+    if key is None:
         return 2
-    key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
     rec = _pr_record(data, key)
     reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
@@ -10227,6 +10295,8 @@ def cmd_pr(args: argparse.Namespace) -> int:
     base = project_dir()
     if args.pr_cmd == "reviewed":
         return _pr_reviewed(args, base)
+    if args.pr_cmd == "rethink":
+        return _pr_rethink(args, base)
     other = {"steward": cmd_pr_steward, "title-check": cmd_pr_title_check, "stats": cmd_pr_stats}.get(args.pr_cmd)
     if other:
         return other(args)
@@ -11513,6 +11583,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="chỉ ghi sổ cục bộ, không đăng kết quả lên PR (pr-steward và phiên khác sẽ không thấy — ADR-0027)",
     )
+    prt = prsub.add_parser(
+        "rethink", help="PR quá ngân sách review (`pr next` = rethink): mở thêm lượt theo quyết định D-NNN (ADR-0053)"
+    )
+    prt.add_argument("--pr", required=True)
+    prt.add_argument("--decision", required=True, help="D-NNN đổi chiến lược đã ghi bằng `xt.py loop decide`")
     pst = prsub.add_parser(
         "steward", help="mọi PR mở → pr next; --apply tự merge ghim head/tắt auto-merge (workflow pr-steward, ADR-0027)"
     )
