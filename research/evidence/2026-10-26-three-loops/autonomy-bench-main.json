@@ -1,0 +1,78 @@
+{
+  "revision": "74c47aa34755df9e6c38bf74ede31179fb6ad04c",
+  "corpus": "tests/fixtures/autonomy",
+  "cases": 518,
+  "pass": 518,
+  "false_green": 0,
+  "false_red": 0,
+  "mismatch": 0,
+  "error": 0,
+  "groups": {
+    "pr": {
+      "cases": 47,
+      "pass": 47,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    },
+    "rollup": {
+      "cases": 17,
+      "pass": 17,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    },
+    "review": {
+      "cases": 31,
+      "pass": 31,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    },
+    "guard": {
+      "cases": 382,
+      "pass": 382,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    },
+    "ci_log": {
+      "cases": 25,
+      "pass": 25,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    },
+    "harness": {
+      "cases": 16,
+      "pass": 16,
+      "false_green": 0,
+      "false_red": 0,
+      "mismatch": 0,
+      "error": 0
+    }
+  },
+  "origins": {
+    "repro": 85,
+    "audit": 192,
+    "adversarial-author": 120,
+    "adversarial-reviewer": 33,
+    "control": 88
+  },
+  "coverage": {
+    "required": 155,
+    "covered": 92,
+    "out_of_scope": 63,
+    "uncovered": [],
+    "sources": {
+      "remediation": 8,
+      "audit": 147
+    }
+  },
+  "failures": []
+}
