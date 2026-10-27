@@ -150,7 +150,7 @@ Chỉ tài liệu (kế hoạch, ADR-0053, D-209), liên kết/nội dung đư�
 
 Triển khai (ADR-0053, PR riêng):
 
-1. **Trần lượt review mỗi PR:** review đã đăng chưa sạch (`blocking`/`inconclusive`) tính sau review sạch cuối; đạt 2 (một lượt toàn PR + một lượt delta) mà head chưa sạch → `pr next` trả `rethink` thay `review`/`fix`. Thêm lượt chỉ qua `xt.py pr rethink --pr N --decision D-NNN` (D-NNN có trong `DECISIONS.md`, mỗi D-NNN một lần mỗi PR). Không nới cổng: merge vẫn cần review sạch ở head.
+1. **Trần lượt review mỗi PR:** review đã đăng chưa sạch (`blocking`/`inconclusive`) tính sau review sạch cuối; đạt 2 (một lượt toàn PR + một lượt delta) mà head chưa sạch → `pr next` trả `rethink` thay `review`/`fix`. Thêm lượt chỉ qua `xt.py pr rethink --pr N --decision D-NNN` (chỉ khi `pr next` đang là `rethink`; D-NNN mới, câu hỏi nhắc `#N`, ghi sau review chưa sạch cuối — D-210). Không nới cổng: merge vẫn cần review sạch ở head.
 2. **Review trước PR dùng cho đúng head:** rà trước PR ở đúng commit đẩy lên → mở PR xong ghi `pr reviewed --head <SHA đó>`, không giao lần hai.
 
 Không làm/hoãn: RV-01 (baseline đầy đủ), RV-02/RV-03 (sổ pha, coverage manifest), RV-04 (fingerprint), RV-05 (ngoài phần trên), RV-07 (pilot).

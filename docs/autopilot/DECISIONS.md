@@ -1476,3 +1476,17 @@
 - Chọn: Lát tối thiểu ngay: ngân sách review mỗi PR = 2 lượt chưa sạch (1 toàn bộ + 1 delta) rồi pr next trả rethink; thêm lượt chỉ qua pr rethink --decision D-NNN; review trước PR ở đúng commit đẩy lên ghi luôn cho head đó; hoãn sổ pha/fingerprint/coverage manifest/pilot tới khi có số đo
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: chặn đúng lỗi có số (review #282 bảy lượt) bằng cơ chế máy kiểm, không nới cổng — merge vẫn cần review sạch ở head; một PR mỗi pha trái P8/giới hạn 150 dòng và ADR-0037 (review LLM trên diff lớn kém tin cậy); (2) đường lùi: một hằng số và một nhánh trong pr next; (3) đơn giản: dùng lại sổ review/dấu xt-review, rev+khoá và task_runs (ADR-0052) đã có thay vì engine pha mới; phần còn lại cần số đo trước (giả thuyết giảm 50 % chưa đo)
 - Đường lùi: REVIEW_ROUNDS lớn hoặc bỏ nhánh rethink trong _pr_next_review; revert squash PR triển khai
+
+### D-210 · 2026-10-27T10:43:29+00:00 · Review #298 lượt 1 (🟠2): pr rethink nhận D-NNN cũ bất kỳ — siết thế nào?
+
+- Phương án: (1) Chỉ khi pr next đang trả rethink; D-NNN có câu hỏi nhắc #N và ghi sau mọi review chưa sạch đã đăng của PR (so thời điểm ISO, mốc hỏng → từ chối); tra sổ ở loop_root rồi dự án · (2) Giữ chữ ADR: D-NNN có trong sổ, mỗi D-NNN một lần mỗi PR · (3) Đăng dấu rethink lên PR như dấu review để steward thấy
+- Chọn: Chỉ khi pr next đang trả rethink; D-NNN có câu hỏi nhắc #N và ghi sau mọi review chưa sạch đã đăng của PR (so thời điểm ISO, mốc hỏng → từ chối); tra sổ ở loop_root rồi dự án
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: phương án 2 cho 209 lần mở lại không cần quyết định mới (reviewer tái hiện) — phá Hệ quả của ADR-0053; thời điểm sau review cuối buộc quyết định mới, đồng thời làm luật 'mỗi D-NNN một lần' thừa; (3) đơn giản: chạy offline qua cùng đường pr next (load_pr/with_published), không thêm dấu mới — phương án 3 thêm bề mặt guard/steward mà steward không review
+- Đường lùi: Bỏ kiểm action/thời điểm trong _pr_rethink, trở lại kiểm D-NNN có trong sổ
+
+### D-211 · 2026-10-27T12:39:35+00:00 · PR #298 quá trần review (2 lượt chặn: lượt 1 lách bằng D-NNN cũ, lượt 2 test/tài liệu và D-NNN mốc tương lai): đổi chiến lược thế nào?
+
+- Phương án: (1) Tiếp trên PR #298 nhưng thu hẹp: coi pr rethink là DẤU VẾT quyết định, không phải hàng rào chống giả mạo (agent cố ý giả dấu/xoá comment vẫn lách được — merge vẫn cần review sạch ở head); chỉ sửa 4 🟠 đã xác minh + 🟢 rẻ (khôi phục kiểm D-NNN đã dùng, từ chối mốc tương lai, do nhắc #N, test giữa hai review, trả chữ ADR-0053 về bản chấp nhận); giới hạn còn lại ghi ở PR · (2) Đóng #298, tách: PR mới chỉ có rethink trong pr next, pr rethink làm PR sau · (3) Bỏ pr rethink, chỉ còn rethink → loop defer cho người
+- Chọn: Tiếp trên PR #298 nhưng thu hẹp: coi pr rethink là DẤU VẾT quyết định, không phải hàng rào chống giả mạo (agent cố ý giả dấu/xoá comment vẫn lách được — merge vẫn cần review sạch ở head); chỉ sửa 4 🟠 đã xác minh + 🟢 rẻ (khôi phục kiểm D-NNN đã dùng, từ chối mốc tương lai, do nhắc #N, test giữa hai review, trả chữ ADR-0053 về bản chấp nhận); giới hạn còn lại ghi ở PR
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: hai lượt cho thấy cố biến pr rethink thành hàng rào chống giả mạo là đuổi theo đường lách (cùng mẫu #282) — giới hạn mục tiêu về dấu vết là đổi chiến lược thật; 4 🟠 còn lại là lỗ test/tài liệu và một kiểm phòng thủ rẻ; (2) đường lùi: một PR, revert squash; phương án 2 dựng lại trạng thái trung gian chưa test, phương án 3 trả mọi PR quá trần cho người — trái ADR-0008
+- Đường lùi: Revert squash PR #298; hoặc REVIEW_ROUNDS rất lớn

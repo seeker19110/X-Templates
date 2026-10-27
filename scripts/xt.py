@@ -34,6 +34,9 @@ Lệnh:
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
               [--reviewer-effort E --author-effort E]
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
+  pr rethink [--pr N] --decision D-NNN
+                                PR quá ngân sách review (`pr next` = rethink): mở thêm 2 lượt theo D-NNN mới, câu hỏi nhắc
+                                #N, ghi sau review chưa sạch cuối (ADR-0053, D-210).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -9246,11 +9249,50 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
     return None
 
 
+# Ngân sách review mỗi PR (ADR-0053, D-209): một lượt toàn PR + một lượt delta; quá trần → `rethink`, không review lần ba.
+REVIEW_ROUNDS = 2
+
+
+def _iso_time(at: object) -> Optional[_dt.datetime]:
+    """Thời điểm ISO có múi giờ (`Z` hoặc `+00:00`); hỏng/thiếu múi giờ → None."""
+    try:
+        t = _dt.datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else None
+
+
+def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int:
+    """Số review đã đăng chưa sạch (`blocking`/`inconclusive`) sau review sạch cuối và sau lần `pr rethink` cuối (ADR-0053).
+    Mốc `rethinks` hỏng không tính; review thiếu/hỏng `at` vẫn tính — sổ hỏng chỉ làm chặt hơn."""
+    rows = [r for r in rethinks if isinstance(r, dict)] if isinstance(rethinks, list) else []
+    since = max((t for t in (_iso_time(r.get("at")) for r in rows) if t), default=None)
+    count = 0
+    for r in reviews:
+        at = _iso_time(r.get("at"))
+        if r.get("clean"):
+            count = 0
+        elif since is None or at is None or at > since:
+            count += 1
+    return count
+
+
 def _pr_next_review(
-    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str
+    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str, rounds: int = 0
 ) -> Optional[Dict[str, Any]]:
-    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`)."""
+    """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch ở đúng head hiện tại (`review_gate`); quá ngân sách lượt
+    review (ADR-0053) → `rethink` thay `review`/`fix`."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
+    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS:
+        if auto_merge:
+            return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
+        return act(
+            "rethink",
+            f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: một lượt toàn PR + một lượt delta — ADR-0053) — dừng"
+            " vòng sửa–review, đổi chiến lược",
+            f"xt.py loop decide --question 'PR #{n}: …' (tách/thu hẹp PR, đổi thiết kế, đóng PR) → xt.py pr rethink --pr"
+            f" {n} --decision D-NNN; việc cần người → xt.py loop defer --task <ID> --reason 'PR #{n}'",
+        )
     if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
         if auto_merge:
@@ -9467,7 +9509,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
-    republish-review · review · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
+    republish-review · review · rethink (quá ngân sách review — ADR-0053) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -9495,7 +9537,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
             d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
         )
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
-        early = _pr_next_review(d, auto_merge, gate, act, disable)
+        early = _pr_next_review(d, auto_merge, gate, act, disable, review_rounds(reviews, rec.get("rethinks")))
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -9684,6 +9726,88 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
     return review_capability_error(args.reviewer_model, args.author_model, args.reviewer_effort, args.author_effort)
 
 
+def _pr_key(pr: object) -> Optional[str]:
+    """Khoá sổ review của `--pr` (7 · #7 · …/pull/7[/files][#…]) — cùng khoá `str(number)` của REST với `pr next`; sai → in lỗi, None."""
+    num = PR_REF_RE.fullmatch(str(pr).strip())
+    if num is None:
+        print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {pr!r}", file=sys.stderr)
+        return None
+    return str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8"
+
+
+def _decision_at(base: Path, did: str, pr: str) -> Optional[_dt.datetime]:
+    """Thời điểm của quyết định `did` có câu hỏi nhắc `#pr` (tiêu đề `### D-NNN · <ISO> · <câu hỏi>` do `loop decide` ghi) —
+    tìm ở sổ của worktree đang sửa (`loop decide` ghi ở `loop_root`, review #298) rồi sổ của dự án; không có → None."""
+    head = re.compile(rf"^### {re.escape(did)} · (\S+) · (.*)$", re.M)
+    for root in dict.fromkeys((loop_root(base), base.resolve())):
+        log = root / "docs/autopilot/DECISIONS.md"
+        text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        for m in head.finditer(text):
+            if re.search(rf"#{re.escape(pr)}(?!\d)", m[2]):
+                return _iso_time(m[1])
+    return None
+
+
+RETHINK_FUTURE_SLACK = _dt.timedelta(minutes=5)  # lệch giờ chấp nhận cho mốc D-NNN so với đồng hồ máy
+
+
+def _rethink_problem(
+    base: Path, did: str, key: str, rec: Dict[str, Any], rethinks: List[Dict[str, Any]]
+) -> Optional[str]:
+    """Lý do `pr rethink` từ chối D-NNN (D-210/D-211): sai dạng; không có/không nhắc `#N`/mốc hỏng; mốc ở tương lai; không
+    SAU mọi review chưa sạch đã đăng (mốc review hỏng → từ chối); đã dùng cho PR này. Dấu vết quyết định, không phải hàng rào
+    chống giả mạo — merge vẫn cần review sạch ở head."""
+    if not re.fullmatch(r"D-\d{3,}", did):
+        return f"--decision phải dạng D-NNN, không phải {did!r}"
+    when = _decision_at(base, did, key)
+    if when is None:
+        return (
+            f"{did} không có trong docs/autopilot/DECISIONS.md (worktree đang sửa hoặc dự án) với câu hỏi nhắc #{key} và"
+            f" mốc ISO hợp lệ — ghi bằng `xt.py loop decide --question 'PR #{key}: …'`"
+        )
+    if when > _dt.datetime.now(_dt.timezone.utc) + RETHINK_FUTURE_SLACK:
+        return f"{did} có mốc ở tương lai ({when.isoformat()}) — ghi bằng `xt.py loop decide`, không sửa tay sổ"
+    times = [_iso_time(r.get("at")) for r in rec["reviews"] if not r.get("clean")]
+    if any(t is None for t in times):
+        return f"review đã đăng của PR #{key} thiếu/hỏng mốc `at` — không mở thêm lượt được; `xt.py loop defer`"
+    if any(t is not None and t >= when for t in times):
+        return (
+            f"{did} không ghi SAU review chưa sạch cuối của PR #{key} (trước hoặc cùng giây) — cần quyết định mới"
+            " (`xt.py loop decide`)"
+        )
+    if any(r.get("decision") == did for r in rethinks):
+        return f"{did} đã mở thêm lượt cho PR #{key} — cần quyết định mới"
+    return None
+
+
+def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
+    """`pr rethink` (ADR-0053): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `rethink` và D-NNN (đổi
+    chiến lược) qua `_rethink_problem`; ghi `rethinks[]` vào sổ review cục bộ."""
+    try:
+        pr = load_pr(args)
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    d, data, rec = _pr_next_state(pr, base)
+    key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec)["action"]
+    if action != "rethink":
+        print(f"✗ `pr next` của PR #{key} là `{action}`, không phải `rethink` — làm bước đó trước", file=sys.stderr)
+        return 2
+    local = _pr_record(data, key)
+    old = local.get("rethinks")
+    rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    problem = _rethink_problem(base, args.decision, key, rec, rethinks)
+    if problem:
+        print(f"✗ {problem}", file=sys.stderr)
+        return 2
+    data[key] = {**local, "rethinks": [*rethinks, {"decision": args.decision, "at": now_iso()}]}
+    _write_reviews(base, data)
+    print(
+        f"✓ PR #{key}: mở thêm {REVIEW_ROUNDS} lượt review theo {args.decision} — chạy lại `xt.py pr next --pr {key}`"
+    )
+    return 0
+
+
 def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if not FULL_SHA_RE.fullmatch(args.head):
         print(
@@ -9698,11 +9822,9 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ {err}", file=sys.stderr)
         return 2
     data = read_reviews(base)
-    num = PR_REF_RE.fullmatch(str(args.pr).strip())  # 7 · #7 · …/pull/7[/files][#…]: cùng khoá số PR với `pr next`
-    if num is None:
-        print(f"✗ --pr phải là số PR, #N hoặc URL …/pull/N — không phải {args.pr!r}", file=sys.stderr)
+    key = _pr_key(args.pr)
+    if key is None:
         return 2
-    key = str(int(num[1] or num[2]))  # 08, chữ số Unicode → "8": cùng khoá `str(number)` của REST
     rec = _pr_record(data, key)
     reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
@@ -10223,18 +10345,8 @@ def cmd_pr_stats(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_pr(args: argparse.Namespace) -> int:
-    base = project_dir()
-    if args.pr_cmd == "reviewed":
-        return _pr_reviewed(args, base)
-    other = {"steward": cmd_pr_steward, "title-check": cmd_pr_title_check, "stats": cmd_pr_stats}.get(args.pr_cmd)
-    if other:
-        return other(args)
-    try:
-        pr = load_pr(args)
-    except PrInputError as exc:
-        print(f"✗ {exc}", file=sys.stderr)
-        return 2
+def _pr_next_state(pr: Dict[str, Any], base: Path) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """(quyết định `merge-check`, sổ review cục bộ cả file, sổ của PR gộp dấu đã đăng) cho `pr next`/`pr rethink`."""
     d, _ = _merge_eval(pr)
     data = read_reviews(base)
     rec = _pr_record(data, str(d["pr"]))
@@ -10243,9 +10355,25 @@ def cmd_pr(args: argparse.Namespace) -> int:
         data[str(d["pr"])] = rec
         _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
-    out = pr_next(
-        d, bool(pr.get("autoMergeRequest")), with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
-    )
+    return d, data, with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
+
+
+def cmd_pr(args: argparse.Namespace) -> int:
+    base = project_dir()
+    if args.pr_cmd == "reviewed":
+        return _pr_reviewed(args, base)
+    if args.pr_cmd == "rethink":
+        return _pr_rethink(args, base)
+    other = {"steward": cmd_pr_steward, "title-check": cmd_pr_title_check, "stats": cmd_pr_stats}.get(args.pr_cmd)
+    if other:
+        return other(args)
+    try:
+        pr = load_pr(args)
+    except PrInputError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    d, _, rec = _pr_next_state(pr, base)
+    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec)
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
@@ -10634,7 +10762,7 @@ def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     )
     published += [r for r in inp.get("reviews") or [] if isinstance(r, dict)]
     rec = {"reviews": inp.get("local") or [], "standard_seen": bool(inp.get("standard_seen"))}
-    rec = with_published(rec, published, bool(inp.get("identity")))
+    rec = with_published({**rec, "rethinks": inp.get("rethinks")}, published, bool(inp.get("identity")))
     reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
     d = inp["decision"]
     elig = merge_eligibility(d, reviews, rec["standard_seen"])
@@ -11512,6 +11640,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-publish",
         action="store_true",
         help="chỉ ghi sổ cục bộ, không đăng kết quả lên PR (pr-steward và phiên khác sẽ không thấy — ADR-0027)",
+    )
+    prt = prsub.add_parser(
+        "rethink", help="PR quá ngân sách review (`pr next` = rethink): mở thêm lượt theo quyết định D-NNN (ADR-0053)"
+    )
+    prt.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
+    prt.add_argument("--pr-json", help="đọc JSON PR từ FILE hoặc - như merge-check")
+    prt.add_argument(
+        "--decision", required=True, help="D-NNN đổi chiến lược ghi bằng `xt.py loop decide`, câu hỏi nhắc #N"
     )
     pst = prsub.add_parser(
         "steward", help="mọi PR mở → pr next; --apply tự merge ghim head/tắt auto-merge (workflow pr-steward, ADR-0027)"

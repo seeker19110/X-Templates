@@ -734,6 +734,70 @@
     "action": "fix"
    },
    "note": "verdict review với lỗi chặn ở head: pr next đòi sửa, không merge"
+  },
+  {
+   "id": "review-adr0053-rethink-after-two-rounds",
+   "origin": "control",
+   "refs": [
+    "ADR-0053"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "rethink"
+   },
+   "note": "hai review chưa sạch (toàn PR + delta) mà head mới chưa rà: dừng vòng sửa–review, không giao review lần ba, không merge"
+  },
+  {
+   "id": "review-adr0053-rethink-reopens-budget",
+   "origin": "control",
+   "refs": [
+    "ADR-0053"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ],
+    "rethinks": [
+     {
+      "decision": "D-001",
+      "at": "2026-10-27T12:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
+   },
+   "note": "pr rethink theo D-NNN mở thêm lượt: pr next lại đòi review ở head, vẫn không merge khi chưa sạch"
   }
  ]
 }
