@@ -499,7 +499,7 @@ class PerfCliTest(unittest.TestCase):
         doc = json.loads(Path(out_file).read_text())
         self.assertEqual(len(doc["samples"]), 3)
         self.assertEqual(doc["unit"], "s")
-        self.assertIn("commit", doc)
+        self.assertIn("head", doc)
         self.assertEqual(len(xt.perf_load(out_file)), 3)
 
     def test_sample_commit_ignores_git_env(self):
@@ -528,7 +528,7 @@ class PerfCliTest(unittest.TestCase):
                 "pass",
             )
         self.assertEqual(rc, 0)
-        self.assertEqual(json.loads(Path(self.p("s.json")).read_text())["commit"], head)
+        self.assertEqual(json.loads(Path(self.p("s.json")).read_text())["head"], head)
 
     def test_sample_errors(self):
         rc, _, err = run_main("perf", "sample", "--out", self.p("s.json"))
@@ -539,25 +539,6 @@ class PerfCliTest(unittest.TestCase):
         )
         self.assertEqual(rc, 1)
         self.assertIn("thoát 2", err)
-
-    def test_sample_commit_empty_outside_git(self):
-        bad = subprocess.CompletedProcess([], 128, "", "not a repo")
-        with unittest.mock.patch.object(xt, "_git", return_value=bad):
-            rc, _, _ = run_main(
-                "perf",
-                "sample",
-                "--out",
-                self.p("s.json"),
-                "--runs",
-                "1",
-                "--warmup",
-                "0",
-                sys.executable,
-                "-c",
-                "pass",
-            )
-        self.assertEqual(rc, 0)
-        self.assertEqual(json.loads(Path(self.p("s.json")).read_text())["commit"], "")
 
     def test_guard_outside_git_repo(self):
         old_cwd = os.getcwd()
@@ -647,6 +628,278 @@ class PerfCliTest(unittest.TestCase):
             rc, _, err = run_main("perf", "guard", "--base", "no-such-ref")
             self.assertEqual(rc, 2)
             self.assertIn("git diff lỗi", err)
+
+
+class PerfSampleV2Test(unittest.TestCase):
+    """Mẫu perf v2 (ADR-0052 §4, T-3544): head/dirty/tree_fp đo trước lần chạy đầu, harness_sha256, git lỗi → exit 2."""
+
+    def setUp(self):
+        patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(self.repo)
+
+    def init_repo(self, commit: bool = True) -> None:
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(self.repo, *args)
+        git(self.repo, "config", "commit.gpgsign", "false")
+        (self.repo / "bench").mkdir()
+        (self.repo / "bench" / "run.py").write_text("print(1)\n")
+        (self.repo / "app.py").write_text("x = 1\n")
+        if commit:
+            git(self.repo, "add", ".")
+            git(self.repo, "commit", "-qm", "init")
+
+    def sample(
+        self, *extra: str, out: Path | None = None, code: str = "pass", keep: bool = False
+    ) -> tuple[int, str, dict]:
+        """`perf sample` một lần đo; trả (exit, stderr, mẫu — {} khi không ghi file). `keep`: giữ file `--out` cũ."""
+        dest = out or self.tmp / "s.json"
+        if not keep:
+            dest.unlink(missing_ok=True)
+        argv = (
+            "perf",
+            "sample",
+            "--out",
+            dest,
+            "--runs",
+            "1",
+            "--warmup",
+            "0",
+            *extra,
+            "--",
+            sys.executable,
+            "-c",
+            code,
+        )
+        rc, _, err = run_main(*argv)
+        return rc, err, json.loads(dest.read_text()) if dest.exists() else {}
+
+    def test_sample_v2_fields_clean_repo(self):
+        self.init_repo()
+        rc, err, doc = self.sample("--harness", "bench/*")
+        self.assertEqual(rc, 0, err)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.assertEqual((doc["schema"], doc["unit"], doc["runs"], doc["warmup"]), (2, "s", 1, 0))
+        self.assertEqual((doc["head"], doc["dirty"], doc["higher_is_better"]), (head, False, False))
+        self.assertEqual(doc["cmd"], [sys.executable, "-c", "pass"])
+        nproc = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+        self.assertEqual(doc["env"], {"platform": sys.platform, "python": sys.version.split()[0], "nproc": nproc})
+        self.assertEqual(doc["tree_fp"], xt.tree_fingerprint(self.repo))  # cùng vân tay với `loop verify`
+        self.assertRegex(doc["harness_sha256"], r"^[0-9a-f]{64}$")
+        self.assertNotIn("unverified-manual", doc)
+        self.assertNotIn("commit", doc)
+        self.assertEqual(len(xt.perf_load(str(self.tmp / "s.json"))), 1)
+        self.assertEqual(xt.perf_cmd_of(str(self.tmp / "s.json")), doc["cmd"])
+        self.assertNotIn("⚠", err)
+
+    def test_sample_v2_nproc_uses_affinity(self):
+        with unittest.mock.patch.object(xt.os, "sched_getaffinity", lambda _pid: {0, 1}, create=True):
+            self.assertEqual(xt.perf_nproc(), 2)  # lõi được phép chạy (taskset/cgroup), không phải lõi của máy
+        with unittest.mock.patch.object(xt.os, "sched_getaffinity", None, create=True):
+            self.assertEqual(xt.perf_nproc(), os.cpu_count())
+
+    def test_sample_v2_from_subdirectory(self):
+        self.init_repo()
+        _, _, ref = self.sample()
+        os.chdir(self.repo / "bench")
+        rc, err, doc = self.sample("--harness", "app.py", out=Path("s.json"))  # --out tương đối, trong cây con
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((doc["head"], doc["dirty"], doc["tree_fp"]), (ref["head"], False, ref["tree_fp"]))
+        self.assertTrue((self.repo / "bench" / "s.json").is_file())
+
+    def test_sample_v2_git_config_cannot_hide_changes(self):
+        self.init_repo()
+        (self.repo / ".gitattributes").write_text("app.py diff=same\n")
+        git(self.repo, "add", ".gitattributes")
+        git(self.repo, "commit", "-qm", "attrs")
+        git(self.repo, "config", "diff.same.textconv", "sh -c 'echo same' --")
+        _, _, clean = self.sample()
+        self.assertFalse(clean["dirty"])
+
+        cases = {
+            "ext-diff": ({"GIT_EXTERNAL_DIFF": "true"}, lambda: (self.repo / "app.py").write_text("x = 2\n")),
+            "textconv": ({}, lambda: (self.repo / "app.py").write_text("x = 3\n")),
+        }
+        for name, (env, change) in cases.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "--", "app.py")
+                change()
+                with unittest.mock.patch.dict(os.environ, env):
+                    _, err, doc = self.sample()
+                    self.assertEqual(doc["tree_fp"], xt.tree_fingerprint(self.repo))
+                self.assertTrue(doc["dirty"], err)
+                self.assertNotEqual(doc["tree_fp"], clean["tree_fp"])
+
+    def test_sample_v2_higher_is_better(self):
+        self.init_repo()
+        self.assertTrue(self.sample("--higher-is-better")[2]["higher_is_better"])
+
+    def test_sample_v2_out_in_tree_and_autopilot_not_dirty(self):
+        self.init_repo()
+        _, _, ref = self.sample()
+        (self.repo / ".autopilot").mkdir()
+        (self.repo / ".autopilot" / "state.json").write_text("{}")
+        (self.repo / "out").mkdir()
+        dest = self.repo / "out" / "a*b.json"  # tên có ký tự glob: loại đúng file, không loại theo mẫu
+        dest.write_text("cũ")  # mẫu cũ còn nằm trong cây
+        rc, err, doc = self.sample(out=dest, keep=True)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((doc["dirty"], doc["tree_fp"]), (False, ref["tree_fp"]))
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(dest.parent)  # chạy lại từ thư mục con, `--out` tương đối, mẫu lần trước còn đó
+        rc, err, doc = self.sample(out=Path(dest.name), keep=True)
+        self.assertEqual((rc, doc["dirty"], doc["tree_fp"]), (0, False, ref["tree_fp"]), err)
+        os.chdir(old_cwd)
+        (self.repo / "out" / "aXb.json").write_text("khác")  # file khác khớp nếu coi tên là glob
+        self.assertTrue(self.sample(out=dest)[2]["dirty"])
+
+    def test_sample_v2_tree_measured_before_first_run(self):
+        self.init_repo()
+        _, _, ref = self.sample()
+        make = "open('made.txt', 'w').write('x')"  # lệnh đo tạo file trong cây (lần warmup đầu tiên)
+        rc, err, doc = self.sample("--warmup", "1", code=make)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((doc["dirty"], doc["tree_fp"]), (False, ref["tree_fp"]))
+        _, _, after = self.sample()
+        self.assertTrue(after["dirty"])
+        self.assertNotEqual(after["tree_fp"], ref["tree_fp"])
+        (self.repo / "made.txt").unlink()
+        (self.repo / "app.py").write_text("x = 2\n")  # thay đổi file đã track cũng là bẩn
+        self.assertTrue(self.sample()[2]["dirty"])
+
+    def test_sample_v2_untracked_non_file_is_dirty(self):
+        self.init_repo()
+        (self.repo / "dangling").symlink_to(self.tmp / "missing")  # git sẽ commit symlink này dù đích không có
+        self.assertTrue(self.sample()[2]["dirty"])
+
+    def test_sample_v2_outside_repo_labels_unverified(self):
+        with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)}):
+            rc, err, doc = self.sample()
+            self.assertEqual(rc, 0, err)
+            self.assertEqual((doc["head"], doc["unverified-manual"]), ("", True))
+            self.assertIsNone(doc["dirty"])
+            self.assertIsNone(doc["tree_fp"])
+            rc, err, doc = self.sample("--harness", "*")
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("--harness cần repo git", err)
+
+    def test_sample_v2_git_missing_exit_2(self):
+        self.init_repo()
+        with unittest.mock.patch.dict(os.environ, {"PATH": str(self.tmp)}):
+            rc, err, doc = self.sample()
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("không chạy được git", err)
+
+    def test_sample_v2_dubious_ownership_exit_2(self):
+        self.init_repo()
+        with unittest.mock.patch.dict(os.environ, {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}):
+            rc, err, doc = self.sample()
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("dubious ownership", err)
+
+    def test_sample_v2_unborn_head_exit_2(self):
+        self.init_repo(commit=False)
+        rc, err, doc = self.sample()
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("HEAD chưa có commit", err)
+
+    def test_sample_v2_tree_git_error_exit_2(self):
+        self.init_repo()
+        real = xt._git
+
+        def broken(cwd: Path, *args: str, env: object = None, stdin: object = None) -> subprocess.CompletedProcess:
+            if args[:1] == ("ls-files",):
+                return subprocess.CompletedProcess([], 128, "", "fatal: index file corrupt")
+            return real(cwd, *args, env=env, stdin=stdin)
+
+        with unittest.mock.patch.object(xt, "_git", side_effect=broken):
+            rc, err, doc = self.sample()
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("index file corrupt", err)
+
+    def test_sample_v2_harness_hash(self):
+        self.init_repo()
+        _, err, bare = self.sample()
+        self.assertIn("⚠ không có --harness", err)
+        _, _, h1 = self.sample("--harness", "bench/*", "--harness", "app.py")
+        self.assertNotEqual(h1["harness_sha256"], bare["harness_sha256"])
+        _, _, other_cmd = self.sample("--harness", "bench/*", "--harness", "app.py", code="pass  # khác")
+        self.assertNotEqual(other_cmd["harness_sha256"], h1["harness_sha256"])
+        clone = self.tmp / "clone"  # cùng nội dung ở thư mục khác (worktree gốc vs cây agent): cùng hash
+        subprocess.run(["git", "clone", "-q", str(self.repo), str(clone)], check=True, env={**os.environ, **ISOLATED})
+        os.chdir(clone)
+        self.assertEqual(
+            self.sample("--harness", "app.py", "--harness", "bench/*")[2]["harness_sha256"], h1["harness_sha256"]
+        )
+        (clone / "bench" / "run.py").write_text("print(2)\n")
+        self.assertNotEqual(
+            self.sample("--harness", "bench/*", "--harness", "app.py")[2]["harness_sha256"], h1["harness_sha256"]
+        )
+
+    def test_sample_v2_harness_symlink_fifo_missing(self):
+        self.init_repo()
+        target = self.tmp / "outside.txt"
+        target.write_text("a")
+        (self.repo / "bench" / "link").symlink_to(target)  # băm chuỗi đích như git, không đi theo symlink
+        h1 = self.sample("--harness", "bench/*")[2]["harness_sha256"]
+        target.write_text("b")
+        self.assertEqual(self.sample("--harness", "bench/*")[2]["harness_sha256"], h1)
+        (self.repo / "bench" / "link").unlink()
+        (self.repo / "bench" / "link").symlink_to(self.tmp / "other.txt")
+        self.assertNotEqual(self.sample("--harness", "bench/*")[2]["harness_sha256"], h1)
+        (self.repo / "bench" / "run.py").unlink()  # file đã track bị xoá: không băm được → không ghi mẫu
+        rc, err, doc = self.sample("--harness", "bench/*")
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("✗ không ghi mẫu: --harness không đọc được bench/run.py", err)
+        os.mkfifo(
+            self.repo / "bench" / "run.py"
+        )  # FIFO: không mở (không treo) — git diff đã chặn ở CLI, kiểm hàm trực tiếp
+        with self.assertRaisesRegex(RuntimeError, "không phải file thường hay symlink: bench/run.py"):
+            xt._perf_harness_digest(self.repo, "bench/run.py")
+        git(self.repo, "checkout", "-q", "--", "bench/run.py")
+
+    def test_sample_v2_harness_gitlink_exit_2(self):
+        self.init_repo()
+        sub = self.repo / "bench" / "sub"  # gitlink (thư mục) khớp `bench/*`: không băm được như file → không ghi mẫu
+        sub.mkdir()
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
+            git(sub, *args)
+        (sub / "f").write_text("1\n")
+        git(sub, "add", "f")
+        git(sub, "commit", "-qm", "a")
+        git(self.repo, "add", "bench/sub")
+        git(self.repo, "commit", "-qm", "gitlink")
+        rc, err, doc = self.sample("--harness", "bench/*")
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("✗ không ghi mẫu: --harness khớp thứ không phải file thường hay symlink: bench/sub", err)
+
+    def test_sample_v2_harness_rejects_out_and_skips_autopilot(self):
+        self.init_repo()
+        rc, err, doc = self.sample("--harness", "bench/*", out=self.repo / "bench" / "s.json")
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("--out bench/s.json nằm trong --harness", err)
+        (self.repo / ".autopilot").mkdir()
+        (self.repo / ".autopilot" / "state.json").write_text("{}")
+        h1 = self.sample("--harness", "*")[2]["harness_sha256"]
+        (self.repo / ".autopilot" / "state.json").write_text('{"rev": 1}')
+        self.assertEqual(self.sample("--harness", "*")[2]["harness_sha256"], h1)
+        rc, err, _ = self.sample("--harness", ".autopilot/*")
+        self.assertEqual(rc, 2)
+        self.assertIn("không khớp file nào", err)
+
+    def test_sample_v2_harness_dead_glob_exit_2(self):
+        self.init_repo()
+        rc, err, doc = self.sample("--harness", "bench/*", "--harness", "bech/*")
+        self.assertEqual((rc, doc), (2, {}))
+        self.assertIn("--harness không khớp file nào trong repo: bech/*", err)
 
 
 if __name__ == "__main__":

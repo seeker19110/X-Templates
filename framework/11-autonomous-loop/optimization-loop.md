@@ -3,7 +3,7 @@ title: Vòng tối ưu hiệu năng trong autopilot: đo → profile → một t
 kind: module
 prefix: LOOP-OPT
 applies_to: [all]
-updated: 2026-10-25
+updated: 2026-10-27
 ---
 
 # Vòng tối ưu hiệu năng trong autopilot
@@ -38,8 +38,8 @@ wt="$(mktemp -d)"; trap 'git worktree remove --force "$wt"' EXIT
 git worktree add -q --detach "$wt" "$base"
 XT="python3 $wt/.xtemplates/scripts/xt.py"          # công cụ chấm của commit gốc, không phải của cây agent sửa
 $XT perf guard --base "$base" --locked 'bench/*' --locked 'tests/equiv/*' --locked 'scripts/perf-gate.sh' --strict
-(cd "$wt" && $XT perf sample --out "$OLDPWD/before.json" -- ./bench/run.sh)   # baseline trên commit gốc, cùng lượt
-$XT perf sample --out after.json -- ./bench/run.sh
+(cd "$wt" && $XT perf sample --out "$OLDPWD/before.json" --harness 'bench/*' -- ./bench/run.sh)   # baseline trên commit gốc, cùng lượt
+$XT perf sample --out after.json --harness 'bench/*' -- ./bench/run.sh
 $XT perf compare before.json after.json
 ```
 
@@ -49,11 +49,11 @@ Vị trí trong vòng đời: **G5** khoá bộ đo + baseline · **G6** mỗi t
 
 | Lệnh | Việc | Exit |
 |---|---|---|
-| `perf sample --out F [--runs 10 --warmup 2 --timeout 300] -- <lệnh>` | chạy lệnh nhiều lần, ghi thời gian tường (s) + commit + môi trường; lệnh lỗi/quá giờ thì không ghi | 0 · 1 lệnh lỗi · 2 thiếu lệnh |
+| `perf sample --out F [--runs 10 --warmup 2 --timeout 300] [--harness GLOB…] [--higher-is-better] -- <lệnh>` | chạy lệnh nhiều lần, ghi mẫu v2: thời gian tường (s), `env`, `head`/`dirty`/`tree_fp` đo trước lần chạy đầu, `harness_sha256` (lệnh + file khớp `--harness`); ngoài repo git → `head` rỗng, nhãn `unverified-manual`; lệnh lỗi/quá giờ thì không ghi | 0 · 1 lệnh lỗi · 2 thiếu lệnh, git lỗi trong repo, `--harness` ngoài repo git/không khớp/chứa `--out`/khớp gitlink |
 | `perf compare B A [--exact] [--no-regress] [--higher-is-better] [--min-effect 0.02] [--json]` | so hai bộ mẫu bằng Mann-Whitney U + sàn nhiễu MAD; `--exact` cho đại lượng tất định | 0 = `improved` (`--no-regress`: cả `neutral`) · 1 còn lại · 2 file hỏng |
 | `perf guard --base REF [--locked GLOB…] [--strict]` | worktree so với `REF`, gồm cả file chưa theo dõi: file khoá bị đụng/xoá → đỏ; dòng thêm đáng ngờ (cache/memoize, `sleep`, gán đè/patch đồng hồ, `_getframe`/`inspect.stack`, `-O3`) → ⚠ (`--strict`: đỏ) | 0 · 1 · 2 `git diff` lỗi hoặc glob khoá không khớp file nào |
 
-File mẫu: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy. `--locked` khớp kiểu `fnmatch` (`*` đi qua `/`: `bench/*` khoá cả cây; `**/` nhận cả không thư mục con; bỏ `./` đầu). Giới hạn đã biết: p xấp xỉ chuẩn → **bảo thủ** với n = 10 so với p chính xác của `benchstat`; sàn nhiễu MAD như `criterion`; file chưa theo dõi lọc theo `.gitignore` đã commit ở `--base` (guard tin file này); `.gitignore` đổi/mới → kiểm khoá trên mọi file chưa theo dõi và báo ⚠; không dùng `core.excludesFile`/`.git/info/exclude` — file sinh khi đo (`__pycache__`…) phải trong `.gitignore` của repo; file chưa theo dõi quét 1 MiB đầu, symlink chỉ quét chuỗi đích; `perf sample` giết cả nhóm tiến trình khi xong/quá giờ/Ctrl-C, không bắt SIGTERM gửi thẳng `xt.py`; `guard` bắt dấu hiệu, không chứng minh vô tội — reviewer vẫn phải rà.
+File mẫu: mẫu v2 của `perf sample` (`dirty`/`tree_fp` bỏ `.autopilot/` và chính `--out` nếu nằm trong cây; `--harness` khớp như `--locked`, bỏ `.autopilot/`, symlink băm chuỗi đích), mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy. `--locked` khớp kiểu `fnmatch` (`*` đi qua `/`: `bench/*` khoá cả cây; `**/` nhận cả không thư mục con; bỏ `./` đầu). Giới hạn đã biết: p xấp xỉ chuẩn → **bảo thủ** với n = 10 so với p chính xác của `benchstat`; sàn nhiễu MAD như `criterion`; file chưa theo dõi lọc theo `.gitignore` đã commit ở `--base` (guard tin file này); `.gitignore` đổi/mới → kiểm khoá trên mọi file chưa theo dõi và báo ⚠; không dùng `core.excludesFile`/`.git/info/exclude` — file sinh khi đo (`__pycache__`…) phải trong `.gitignore` của repo; file chưa theo dõi quét 1 MiB đầu, symlink chỉ quét chuỗi đích; `perf sample` giết cả nhóm tiến trình khi xong/quá giờ/Ctrl-C, không bắt SIGTERM gửi thẳng `xt.py`; `dirty`/`tree_fp` (= vân tay của `loop verify`) còn tin `.git/info/exclude`, `core.excludesFile`, `diff.ignoreSubmodules`, cờ assume-unchanged/skip-worktree (D-212/D-213); `guard` bắt dấu hiệu, không chứng minh vô tội — reviewer vẫn phải rà.
 
 ## Checklist
 

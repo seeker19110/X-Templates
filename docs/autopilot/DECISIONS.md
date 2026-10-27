@@ -1490,3 +1490,17 @@
 - Chọn: Tiếp trên PR #298 nhưng thu hẹp: coi pr rethink là DẤU VẾT quyết định, không phải hàng rào chống giả mạo (agent cố ý giả dấu/xoá comment vẫn lách được — merge vẫn cần review sạch ở head); chỉ sửa 4 🟠 đã xác minh + 🟢 rẻ (khôi phục kiểm D-NNN đã dùng, từ chối mốc tương lai, do nhắc #N, test giữa hai review, trả chữ ADR-0053 về bản chấp nhận); giới hạn còn lại ghi ở PR
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: hai lượt cho thấy cố biến pr rethink thành hàng rào chống giả mạo là đuổi theo đường lách (cùng mẫu #282) — giới hạn mục tiêu về dấu vết là đổi chiến lược thật; 4 🟠 còn lại là lỗ test/tài liệu và một kiểm phòng thủ rẻ; (2) đường lùi: một PR, revert squash; phương án 2 dựng lại trạng thái trung gian chưa test, phương án 3 trả mọi PR quá trần cho người — trái ADR-0008
 - Đường lùi: Revert squash PR #298; hoặc REVIEW_ROUNDS rất lớn
+
+### D-212 · 2026-10-27T17:34:35+00:00 · PR #300 (T-3544): dirty/tree_fp của perf sample vẫn tin .git/info/exclude, core.excludesFile, assume-unchanged/skip-worktree — có siết không?
+
+- Phương án: (1) Chỉ perf_tree dùng --exclude-per-directory=.gitignore (tree_fp ≠ tree_fingerprint; file bỏ qua toàn cục như .DS_Store làm dirty) · (2) Đổi cả tree_fingerprint (mọi verified.json lệch một lần, ảnh hưởng loop verify) · (3) Giữ tree_fp = tree_fingerprint như ADR-0052 §4; ghi giới hạn đã biết ở CHANGELOG/optimization-loop.md
+- Chọn: Giữ tree_fp = tree_fingerprint như ADR-0052 §4; ghi giới hạn đã biết ở CHANGELOG/optimization-loop.md
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ADR-0052 §4 định nghĩa tree_fp = tree_fingerprint; baseline do máy ghim ở worktree origin/main sạch (LOOP-OPT-003) nên before.dirty là tín hiệu phụ, hàng rào thật là perf guard (đã không tin exclude cục bộ) + guard chặn update-index; (2) đường lùi: siết sau ở perf trial (lát 3) mà không lệch verified.json; (3) đơn giản, một nguồn vân tay; (5) không cần ADR mới
+- Đường lùi: Chọn phương án 1 trong PR riêng trước T-3545 nếu audit delta T-3556 cho thấy agent lách được baseline
+
+### D-213 · 2026-10-27T18:09:23+00:00 · PR #300 quá trần review (lượt 1: ext-diff/textconv che cây bẩn; lượt 2: --ignore-submodules=none đổi vân tay mặc định, lùi loop verify): đổi chiến lược thế nào?
+
+- Phương án: (1) Thu hẹp: bỏ hẳn --ignore-submodules khỏi tree_hash (vân tay ở cấu hình mặc định giống hệt c9befb7, chỉ giữ --no-ext-diff --no-textconv vốn không đổi đầu ra mặc định); che bằng diff.ignoreSubmodules ghi giới hạn đã biết; sửa 🟢 test --out có sẵn + tài liệu; không mở rộng thêm · (2) Đổi none → untracked như reviewer đề xuất, thêm test submodule · (3) Tách PR: chỉ mẫu v2 không đụng tree_hash, phần chống che bằng cấu hình git sang PR sau
+- Chọn: Thu hẹp: bỏ hẳn --ignore-submodules khỏi tree_hash (vân tay ở cấu hình mặc định giống hệt c9befb7, chỉ giữ --no-ext-diff --no-textconv vốn không đổi đầu ra mặc định); che bằng diff.ignoreSubmodules ghi giới hạn đã biết; sửa 🟢 test --out có sẵn + tài liệu; không mở rộng thêm
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mỗi lượt sửa tree_hash dùng chung với loop verify lại mở lớp lỗi mới (cùng mẫu #282) — giữ tree_hash đúng như c9befb7 ở cấu hình mặc định loại hẳn rủi ro lùi verify; ext-diff/textconv đã có test đỏ→xanh và reviewer xác nhận đầu ra mặc định giống hệt; (2) đường lùi: thêm untracked sau ở PR riêng có đo; (3) diff nhỏ nhất; phương án 2 dựa trên tương đương mặc định chỉ thử trên git 2.43, phương án 3 trả lại lỗ dirty=false đã tái hiện
+- Đường lùi: PR riêng thêm --ignore-submodules=untracked kèm test submodule chỉ có file chưa track
