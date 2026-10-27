@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import json
 import os
@@ -1607,8 +1608,19 @@ class PrNextTest(unittest.TestCase):
         before = [{"decision": "D-008", "at": "2026-10-27T00:00:00+00:00"}, "rác"]
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "rethink")
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "rethink")
-        # pha build không đòi review khi chưa có lỗi chặn → không có lượt nào để tính
+        # mốc rethink hỏng không mở lượt (sổ hỏng chỉ chặt hơn); nhiều mốc → mốc MUỘN nhất
+        for at in (None, "x", "9999", "2026-10-27T02:30:00"):
+            with self.subTest(at=at):
+                self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": [{"at": at}]})["action"], "rethink")
+        two = [after[0], {"decision": "D-010", "at": "2026-10-27T04:30:00+00:00"}]
+        self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two})["action"], "fix")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two[::-1]})["action"], "fix")
+        self.assertEqual(xt.review_rounds([{"clean": False}, {"clean": False}], after), 2)  # thiếu `at` vẫn tính
+        # pha build: chưa có review kết luận chặn → hoãn thành nợ, `inconclusive` không chặn; review chặn vẫn đếm lượt
         self.assertEqual(self.act(lane="chuẩn", delivery_phase="build")["action"], "wait")
+        incs = {"reviews": [inc, {**b2, "inconclusive": True}]}
+        self.assertEqual(self.act(rec=incs, delivery_phase="build", verdict="merge")["action"], "merge")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2]}, delivery_phase="build")["action"], "rethink")
 
 
 MODELS = ("--reviewer-model", "claude-fable-5-1", "--author-model", "claude-opus-5-5")  # bậc cao hơn (D-161)
@@ -1655,28 +1667,67 @@ class PrNextCliTest(unittest.TestCase):
         self.assertNotIn("không được thì", out)
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
-    def test_rethink_needs_recorded_decision_once_per_pr(self):
-        """ADR-0053: `pr rethink` chỉ nhận D-NNN có trong DECISIONS.md, mỗi D-NNN một lần mỗi PR; ghi `rethinks[]` — `pr next`
-        trả lại `fix`/`review` thay `rethink`."""
+    def rethink(self, did: str, p: dict | None = None) -> tuple[int, str, str]:
+        p = p or self.big
+        rec = xt.read_reviews(self.base).get("7") or {}
+        marks = [{k: r[k] for k in ("head", "clean", "at", "inconclusive") if k in r} for r in rec.get("reviews", [])]
+        p = {"xtReviews": marks, **p}
+        return run_main("pr", "rethink", "--pr-json", "-", "--decision", did, stdin=json.dumps(p))
+
+    def decisions(self, root: Path, *lines: str) -> None:
+        log = root / "docs/autopilot/DECISIONS.md"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("# Nhật ký\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_rethink_needs_new_decision_naming_pr(self):
+        """ADR-0053 (review #298): `pr rethink` chỉ khi `pr next` = `rethink`, D-NNN có câu hỏi nhắc #N và ghi SAU mọi review
+        chưa sạch đã đăng — D-NNN cũ hay của việc khác không mở lại được; ghi `rethinks[]` → `pr next` về `fix`."""
+        rc, _, err = self.rethink("D-001")
+        self.assertEqual(rc, 2)
+        self.assertIn("`pr next` của PR #7 là `review`, không phải `rethink`", err)
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "rethink")
-        rc, _, err = run_main("pr", "rethink", "--pr", "7", "--decision", "D-001")
-        self.assertEqual(rc, 2)
-        self.assertIn("D-001 không có trong docs/autopilot/DECISIONS.md", err)
-        self.assertEqual(run_main("pr", "rethink", "--pr", "x7", "--decision", "D-001")[0], 2)
-        log = self.base / "docs/autopilot/DECISIONS.md"
-        log.parent.mkdir(parents=True)
-        log.write_text("# Nhật ký\n\n### D-001 · 2026-10-27T00:00:00+00:00 · tách PR?\n", encoding="utf-8")
-        rc, out, _ = run_main("pr", "rethink", "--pr", "#7", "--decision", "D-001")
-        self.assertEqual(
-            (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-001 — chạy lại `xt.py pr next --pr 7`\n")
+        later = "2099-01-01T00:00:00+00:00"
+        self.decisions(
+            self.base,
+            "### D-001 · 2026-01-01T00:00:00+00:00 · PR #7: chọn thư viện log?",  # cũ hơn review
+            f"### D-002 · {later} · chọn thư viện log?",  # không nhắc #7
+            f"### D-003 · {later} · PR #70 tách?",  # #70 không phải #7
+            "### D-004 · hỏng · PR #7 tách?",  # mốc hỏng
+            f"### D-005 · {later} · PR #7 quá trần review: tách PR?",
         )
-        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["decision"], "D-001")
+        for did in ("D-001", "D-002", "D-003", "D-004", "D-009"):
+            with self.subTest(did=did):
+                rc, _, err = self.rethink(did)
+                self.assertEqual(rc, 2)
+                self.assertIn(f"{did} không dùng được: cần quyết định có câu hỏi nhắc #7", err)
+        bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
+        self.assertEqual(self.rethink("D-005", bad_at)[0], 2)  # review thiếu mốc → chặt
+        rc, out, _ = self.rethink("D-005")
+        self.assertEqual(
+            (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-005 — chạy lại `xt.py pr next --pr 7`\n")
+        )
+        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["decision"], "D-005")
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
-        rc, _, err = run_main("pr", "rethink", "--pr", "7", "--decision", "D-001")
+        rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
-        self.assertIn("D-001 đã mở thêm lượt cho PR #7", err)
+        self.assertIn("là `fix`, không phải `rethink`", err)
+        self.assertEqual(run_main("pr", "rethink", "--pr-json", "-", "--decision", "D-005", stdin="[]")[0], 2)
+
+    def test_rethink_reads_decision_of_worktree(self):
+        """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
+        `pr rethink` phải thấy quyết định đó."""
+        run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
+        run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
+        wt = Path(self.enterContext(tempfile.TemporaryDirectory())) / "wt"
+        subprocess.run(["git", "-C", str(self.base), "worktree", "add", "-q", "-b", "lat", str(wt)], check=True)
+        decide = ("loop", "decide", "--question", "PR #7 quá trần review: tách?", "--option", "a", "--option", "b")
+        with contextlib.chdir(wt), unittest.mock.patch.object(xt, "now_iso", return_value="2099-01-01T00:00:00+00:00"):
+            self.assertEqual(run_main(*decide, "--choice", "1", "--why", "x", "--revert", "y")[0], 0)
+            self.assertTrue((wt / "docs/autopilot/DECISIONS.md").is_file())
+            self.assertFalse((self.base / "docs/autopilot/DECISIONS.md").exists())
+            self.assertEqual(self.rethink("D-001")[0], 0)
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản

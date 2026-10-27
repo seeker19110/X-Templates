@@ -38,8 +38,11 @@ Phương án 3 để nguyên vòng lặp đã gây bảy lượt.
    `review_rounds` ≥ trần. `do`: ghi `xt.py loop decide` đổi chiến lược (tách/thu hẹp PR, đổi thiết kế, đóng PR) rồi
    `xt.py pr rethink --pr N --decision D-NNN` (mở thêm hai lượt); việc cần người → `loop defer`. Auto-merge do người bật vẫn
    tắt trước như mọi bước chặn.
-3. **`pr rethink --pr N --decision D-NNN`**: D-NNN phải có tiêu đề `### D-NNN ·` trong `docs/autopilot/DECISIONS.md` và chưa
-   dùng cho PR đó; ghi `rethinks[]` `{decision, at}` vào `.autopilot/reviews.json`. Sổ cục bộ mất → mất lượt mở thêm (chặt hơn).
+3. **`pr rethink --pr N --decision D-NNN`** (siết theo review #298, D-210): chỉ khi `pr next` của PR đang là `rethink`; D-NNN
+   có tiêu đề `### D-NNN · <ISO> · <câu hỏi nhắc #N>` trong `docs/autopilot/DECISIONS.md` của worktree đang sửa (`loop decide`
+   ghi ở `loop_root`) hoặc của dự án, với thời điểm **sau** mọi review chưa sạch đã đăng của PR — nên D-NNN cũ hay của việc
+   khác không mở được, và một D-NNN không mở được hai lần. Ghi `rethinks[]` `{decision, at}` vào `.autopilot/reviews.json`.
+   Sổ cục bộ mất, mốc hỏng → mất lượt mở thêm (chặt hơn).
 4. **Không nới cổng:** `merge_eligibility`, `merge-check`, guard, steward giữ nguyên — merge vẫn cần review sạch ở head;
    `rethink` chỉ đổi bước kế. Steward không đọc sổ cục bộ nên có thể báo `rethink` cho PR đã được mở thêm lượt — chỉ báo, không lệnh.
 5. **Review trước PR = review của head đó:** `/complete` bước 4 — rà trước PR ở đúng commit được đẩy; mở PR xong ghi
@@ -51,8 +54,10 @@ Phương án 3 để nguyên vòng lặp đã gây bảy lượt.
 
 - Tốt: vòng sửa–review dừng ở lượt hai; lượt thêm phải có quyết định ghi lại (D-NNN) — đúng `LOOP-STOP-018`. Bớt một lượt
   review cho mỗi PR ngoại lệ cứng ở `/complete`.
-- Xấu: PR lớn bị `inconclusive` hai lần cũng dừng ở `rethink` — đúng hướng (tách PR) nhưng thêm một bước. Một D-NNN chỉ mở
-  được một lần cho mỗi PR; quyết định không kiểm được chất lượng nội dung, chỉ kiểm có dấu vết.
+- Xấu: PR lớn bị `inconclusive` hai lần cũng dừng ở `rethink` — đúng hướng (tách PR) nhưng thêm một bước. `pr reviewed`
+  chạy lại cùng kết quả, cùng head, cùng khai model/effort là một bản ghi (AUD-HAR-071), nên hai reviewer khai giống hệt
+  nhau ở một head chỉ tính một lượt. Quyết định không kiểm được chất lượng nội dung, chỉ kiểm có dấu vết. So thời điểm
+  dấu GitHub với đồng hồ máy: lệch giờ lớn có thể buộc ghi quyết định lại.
 - Còn treo: `pr-review.yml` (chưa bật) review mỗi `synchronize` không qua `pr next`; khi bật phải bỏ qua PR đang `rethink`.
 
 ## Đường lùi

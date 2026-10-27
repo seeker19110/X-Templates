@@ -14,7 +14,7 @@ với mỗi PR chạy cùng luật với `pr next`, rồi tự làm đúng các 
 | `merge` | `PUT pulls/<N>/merge` squash, ghim `sha=<head>` — chỉ khi `merge-check` = `merge` ở đúng head đó (kể cả PR người đã bật auto-merge: merge ghim head ngay). Thiếu `XT_STEWARD_TOKEN`: merge xong thì `POST actions/workflows/ci.yml/dispatches` trên nhánh đích (`→ dispatch CI ✓`; tên khác: biến `XT_CI_WORKFLOW`) |
 | `disable-auto-merge` | `gh pr merge --disable-auto` — auto-merge do người bật trên PR chưa đủ điều kiện (dọn dẹp, không để GitHub merge head chưa đánh giá) |
 | `update` | `PUT pulls/<N>/update-branch` ghim `expected_head_sha` — **chỉ khi có secret `XT_STEWARD_TOKEN`** |
-| `review`, `fix`, `retarget`, `defer-human`, `wait` | chỉ ghi vào bản tóm tắt (Step Summary), không làm gì |
+| `review`, `fix`, `rethink`, `retarget`, `defer-human`, `wait` | chỉ ghi vào bản tóm tắt (Step Summary), không làm gì |
 
 PR từ fork hoặc tác giả không có quyền ghi repo luôn thành `defer-human` (người merge). PR làn chuẩn được gắn nhãn
 `xt-standard-lane`; không gắn được nhãn thì lượt đó không merge (exit 1, `warn`). Máy **không bao giờ bật auto-merge** của

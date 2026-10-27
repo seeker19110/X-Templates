@@ -1476,3 +1476,10 @@
 - Chọn: Lát tối thiểu ngay: ngân sách review mỗi PR = 2 lượt chưa sạch (1 toàn bộ + 1 delta) rồi pr next trả rethink; thêm lượt chỉ qua pr rethink --decision D-NNN; review trước PR ở đúng commit đẩy lên ghi luôn cho head đó; hoãn sổ pha/fingerprint/coverage manifest/pilot tới khi có số đo
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: chặn đúng lỗi có số (review #282 bảy lượt) bằng cơ chế máy kiểm, không nới cổng — merge vẫn cần review sạch ở head; một PR mỗi pha trái P8/giới hạn 150 dòng và ADR-0037 (review LLM trên diff lớn kém tin cậy); (2) đường lùi: một hằng số và một nhánh trong pr next; (3) đơn giản: dùng lại sổ review/dấu xt-review, rev+khoá và task_runs (ADR-0052) đã có thay vì engine pha mới; phần còn lại cần số đo trước (giả thuyết giảm 50 % chưa đo)
 - Đường lùi: REVIEW_ROUNDS lớn hoặc bỏ nhánh rethink trong _pr_next_review; revert squash PR triển khai
+
+### D-210 · 2026-10-27T10:43:29+00:00 · Review #298 lượt 1 (🟠2): pr rethink nhận D-NNN cũ bất kỳ — siết thế nào?
+
+- Phương án: (1) Chỉ khi pr next đang trả rethink; D-NNN có câu hỏi nhắc #N và ghi sau mọi review chưa sạch đã đăng của PR (so thời điểm ISO, mốc hỏng → từ chối); tra sổ ở loop_root rồi dự án · (2) Giữ chữ ADR: D-NNN có trong sổ, mỗi D-NNN một lần mỗi PR · (3) Đăng dấu rethink lên PR như dấu review để steward thấy
+- Chọn: Chỉ khi pr next đang trả rethink; D-NNN có câu hỏi nhắc #N và ghi sau mọi review chưa sạch đã đăng của PR (so thời điểm ISO, mốc hỏng → từ chối); tra sổ ở loop_root rồi dự án
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: phương án 2 cho 209 lần mở lại không cần quyết định mới (reviewer tái hiện) — phá Hệ quả của ADR-0053; thời điểm sau review cuối buộc quyết định mới, đồng thời làm luật 'mỗi D-NNN một lần' thừa; (3) đơn giản: chạy offline qua cùng đường pr next (load_pr/with_published), không thêm dấu mới — phương án 3 thêm bề mặt guard/steward mà steward không review
+- Đường lùi: Bỏ kiểm action/thời điểm trong _pr_rethink, trở lại kiểm D-NNN có trong sổ
