@@ -4680,7 +4680,10 @@ def _doctor_state(base: Path) -> List[Finding]:
     out = []
     if st.get("blocked"):
         reason = st.get("blocked_reason") or "?"
-        end = EXIT_BUDGET if _budget_exhausted(st) else "người xử lý rồi `loop unblock --reason …`"
+        try:
+            end = EXIT_BUDGET if _budget_exhausted(st) else _blocked_exit(st, base, live=bool(st.get("active")))
+        except TypeError:  # state sai kiểu: vẫn báo BLOCKED (review #296)
+            end = EXIT_UNBLOCK
         out.append(Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — {end}"))
     plan = st.get("plan")
     if st.get("active") and plan and not (base / str(plan)).is_file():
@@ -6405,21 +6408,15 @@ def _live_loop(base: Path) -> str:
             return ""
         v = loop_verdict(base)
         verdict = v["verdict"]
+        end = _blocked_exit(prev, base, live=True) if verdict == "blocked" else ""
     except (TypeError, ValueError, AttributeError):  # state.json sai kiểu → ghi đè như trước
         return ""
     if verdict in ("done", "done-pending-human"):
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    # AUD-HAR-114, D-208: PLAN mất/rỗng → stop (mở lại cũng chặn), kể cả khi có cờ; còn lại `blocked` từ state → unblock
-    why = ""
-    if verdict == "blocked":
-        end = EXIT_UNBLOCK if _plan_tasks(base, prev) else "`loop stop` rồi `loop init --plan <mới>`"
-        if end != EXIT_UNBLOCK and _blocked_by_state(
-            prev
-        ):  # chặn cần người: người xem trước, không tự stop+init (review #296)
-            end = f"người xem lý do chặn rồi {end}"
-        why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
+    # AUD-HAR-114, D-208: PLAN mất/rỗng → stop + init (mở lại cũng chặn), kể cả khi có cờ; còn lại → unblock
+    why = f"; verdict `blocked`: {v.get('reason', '')} — {end}" if end else ""
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
 
@@ -6456,8 +6453,7 @@ def _deferred_to_keep(
     (PLAN-<đợt> sinh từ mẫu bắt đầu lại ở T-001 — review #262 lượt 2) → không mang, trả ở `renamed`; PLAN cũ không còn đọc
     được thì không so (mục không phải task PLAN, ví dụ MUST blueprint, cũng vậy)."""
     still = _still_open(base, state)
-    old_plan = base / str(prev.get("plan") or "")
-    old = {t["id"]: task_req_rev(t) for t in parse_plan(old_plan)} if old_plan.is_file() else {}
+    old = {t["id"]: task_req_rev(t) for t in _plan_tasks(base, prev)}
     new = {t["id"]: task_req_rev(t) for t in tasks}
     keep, renamed = {}, []
     for i, d in _deferred(prev).items():
@@ -7298,13 +7294,29 @@ EXIT_PENDING = (
     " chưa → `loop init --plan <đợt kế>` (việc chờ đi theo)"
 )
 EXIT_BUDGET = "hết ngân sách → `loop init --plan <đợt kế>` (việc chờ đi theo)"
-EXIT_PLAN_LOST = "PLAN mất/rỗng → `loop init --plan <mới>`"
 
 
 def _interventions(st: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
     """`attached[]`/`resolved[]`/`unblocked[]` của state; thiếu (state cũ)/sai kiểu → []."""
     items = st.get(key)
     return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _plan_lost_exit(st: Dict[str, Any], live: bool) -> str:
+    """Lối ra khi PLAN mất/rỗng (D-208), dùng chung cho `loop init`/`attach`/`resolve`/`unblock`/`doctor`: vòng sống thêm
+    `loop stop`; state còn nguồn chặn (cờ, lỗi lặp, task đỏ — cần người) → người xem lý do trước (review #296). State sai
+    kiểu → coi như cần người."""
+    try:
+        human = _blocked_by_state(st)
+    except TypeError:
+        human = True
+    steps = ("người xem lý do chặn rồi " if human else "") + ("`loop stop` rồi " if live else "")
+    return f"PLAN mất/rỗng → {steps}`loop init --plan <mới>`"
+
+
+def _blocked_exit(st: Dict[str, Any], base: Path, live: bool) -> str:
+    """Lối ra của verdict `blocked`: PLAN còn → `unblock`; mất/rỗng → `_plan_lost_exit`."""
+    return EXIT_UNBLOCK if _plan_tasks(base, st) else _plan_lost_exit(st, live)
 
 
 def _blocked_by_state(st: Dict[str, Any]) -> bool:
@@ -7328,7 +7340,7 @@ def _loop_exit(st: Dict[str, Any], base: Path) -> Tuple[str, str]:
     Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
     fv = _final_verdict(st)
     if fv != "done" and not _plan_tasks(base, st):
-        return "init", EXIT_PLAN_LOST
+        return "init", _plan_lost_exit(st, live=False)
     if fv == "budget" or _budget_exhausted(st):
         return "init", EXIT_BUDGET
     if fv == PENDING_HUMAN:
@@ -7429,7 +7441,7 @@ def _unblock_problem(cur: Dict[str, Any], reason: str, base: Path) -> Optional[s
         return "✗ --reason rỗng — ghi người đã xem gì"
     if cur.get("active"):
         if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (D-208)
-            return f"✗ Vòng đang chạy nhưng {EXIT_PLAN_LOST.replace('→', '→ `loop stop` rồi', 1)}"
+            return f"✗ Vòng đang chạy nhưng {_plan_lost_exit(cur, live=True)}"
         if _blocked_by_state(cur):
             return None
         why = EXIT_BUDGET if _budget_exhausted(cur) else "phiên mới gắn bằng `loop attach`"

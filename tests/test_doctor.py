@@ -347,7 +347,7 @@ class DoctorStateAndEnvTest(DoctorCase):
         )
         msgs = [f.msg for f in self.findings() if f.code == "state"]
         self.assertEqual(len(msgs), 2)
-        self.assertIn("BLOCKED: cần khoá — người xử lý rồi `loop unblock", msgs[0])
+        self.assertIn("BLOCKED: cần khoá — PLAN mất/rỗng → người xem lý do chặn rồi `loop stop` rồi", msgs[0])
         self.assertIn("không còn PLAN `docs/autopilot/PLAN.md`", msgs[1])
         # review #296: hết vòng/hạn → `unblock` từ chối, nên trỏ đợt kế
         xt.write_state({"active": True, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base)
@@ -357,6 +357,16 @@ class DoctorStateAndEnvTest(DoctorCase):
         self.assertEqual(
             [f.msg for f in self.findings() if f.code == "state"][0].split(" — ")[0], "autopilot đang BLOCKED: ?"
         )
+        # PLAN còn task → `unblock`; vòng đã kết thúc mà PLAN mất → không có `loop stop`; state sai kiểu vẫn báo (review #296)
+        self.write("docs/autopilot/PLAN.md", "- [ ] `T-001` a — Gate: `true`\n")
+        self.assertIn(xt.EXIT_UNBLOCK, [f.msg for f in self.findings() if f.code == "state"][0])
+        xt.write_state({"active": False, "plan": "MAT.md", "blocked": True}, self.base)
+        msg = [f.msg for f in self.findings() if f.code == "state"][0]
+        self.assertIn("người xem lý do chặn rồi `loop init --plan <mới>`", msg)
+        xt.write_state({"active": True, "blocked": True, "iterations": "3"}, self.base)
+        self.assertIn(xt.EXIT_UNBLOCK, [f.msg for f in self.findings() if f.code == "state"][0])
+        xt.write_state({"active": True, "blocked": True, "same_failure_count": "2", "plan": "MAT.md"}, self.base)
+        self.assertIn("người xem lý do chặn rồi `loop stop`", [f.msg for f in self.findings() if f.code == "state"][0])
         xt.write_state({"active": False}, self.base)
         self.assertNotIn("state", [f.code for f in self.findings()])
 

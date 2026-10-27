@@ -1986,6 +1986,8 @@ class LoopCommandsTest(TmpDirCase):
 SID_A = "aaaaaaaa-0000-0000-0000-000000000001"
 SID_B = "bbbbbbbb-0000-0000-0000-000000000002"
 FV_DONE = {"verdict": "done", "reason": "mọi task xanh"}
+PLAN_LOST = "PLAN mất/rỗng → `loop init --plan <mới>`"
+PLAN_LOST_HUMAN = "PLAN mất/rỗng → người xem lý do chặn rồi `loop init --plan <mới>`"
 
 
 class LoopInterventionsTest(TmpDirCase):
@@ -2095,8 +2097,8 @@ class LoopInterventionsTest(TmpDirCase):
                 {"same_failure_count": 1, "task_runs": {"T-001": 4}},
                 xt.EXIT_UNBLOCK,
             ),
-            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"plan": "docs/autopilot/PLAN.md.bak"}, xt.EXIT_PLAN_LOST),
-            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"plan": "docs/autopilot/PLAN.md.bak"}, PLAN_LOST),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, PLAN_LOST),
             ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
             (None, {}, xt.EXIT_UNBLOCK),
             ({"reason": "thiếu tên"}, {}, xt.EXIT_UNBLOCK),
@@ -2110,11 +2112,11 @@ class LoopInterventionsTest(TmpDirCase):
             (
                 {"verdict": "blocked", "reason": "b"},
                 {"blocked": True, "plan": "docs/autopilot/MAT.md"},
-                xt.EXIT_PLAN_LOST,
+                PLAN_LOST_HUMAN,
             ),
-            ({"verdict": "stopped", "reason": "s"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
-            (None, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
-            ({"verdict": "blocked", "reason": "b"}, {"plan": "docs/autopilot/EMPTY.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "stopped", "reason": "s"}, {"plan": "docs/autopilot/MAT.md"}, PLAN_LOST),
+            (None, {"plan": "docs/autopilot/MAT.md"}, PLAN_LOST),
+            ({"verdict": "blocked", "reason": "b"}, {"plan": "docs/autopilot/EMPTY.md"}, PLAN_LOST),
         ]
         (self.tmp / "docs" / "autopilot" / "EMPTY.md").write_text("# PLAN trống\n", encoding="utf-8")
         for fv, extra, want in cases:
@@ -2171,7 +2173,7 @@ class LoopInterventionsTest(TmpDirCase):
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True}, xt.EXIT_UNBLOCK),
             ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
             (None, {}, xt.EXIT_UNBLOCK),
-            ({"verdict": "blocked", "reason": "PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "PLAN"}, {"plan": "docs/autopilot/MAT.md"}, PLAN_LOST),
             (FV_DONE, {}, "đợt đã xong → `loop init"),
             ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
         ]
@@ -2281,14 +2283,14 @@ class LoopInterventionsTest(TmpDirCase):
         cases = [  # (final_verdict hoặc "live", trường thêm, chữ mong đợi)
             (FV_DONE, {}, "đợt đã xong → `loop init --plan <đợt kế>`"),
             ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
-            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, PLAN_LOST),
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
             ({"verdict": "lạ", "reason": "?"}, {}, "verdict `lạ` không mở lại được → `loop init --plan <mới>`"),
             ("live", {}, "Vòng đang chạy, không bị chặn — phiên mới gắn bằng `loop attach`"),
             (
                 "live",
                 {"blocked": True, "plan": "docs/autopilot/MAT.md"},
-                "PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`",
+                "PLAN mất/rỗng → người xem lý do chặn rồi `loop stop` rồi `loop init --plan <mới>`",
             ),
             ("live", {"iterations": 100}, f"Vòng đang chạy, không bị chặn — {xt.EXIT_BUDGET}"),
             (

@@ -90,7 +90,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     `/clear` đổi session id: `loop status` (SessionStart in lại) báo vòng gắn phiên khác → `<XT> loop attach`.
 14. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <ID> --reason "..."` rồi làm việc khác; mọi việc còn lại
     phụ thuộc → `<XT> loop block --reason "..."`. Điểm dừng bắt buộc:
-    [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý: `<XT> loop resolve --task <ID> --reason …`; vòng dừng → `loop unblock`.
+    [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người: `<XT> loop resolve --task <ID> --reason …`; vòng dừng → `loop unblock --reason …`.
 15. **Context đầy** → compaction tự nén (PreCompact ghi checkpoint, SessionStart in lại `loop status`); gần trần máy
     (≥ 80 % vòng/giờ/tiền) → Bàn giao vào PROGRESS, commit + push ([`context-and-token-budget.md`](context-and-token-budget.md)).
 16. **Kết thúc đợt → đợt kế (ADR-0047)**: `done` = mọi task xanh + `verify --all` khớp cây (build: MUST blueprint mở không
