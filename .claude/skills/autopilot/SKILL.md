@@ -19,7 +19,7 @@ Giao thức đầy đủ: `<FW>/11-autonomous-loop/README.md`; file này là che
 Mọi điểm quyết định (spec hở, công nghệ, thiết kế, phạm vi, bảo mật/pháp lý mơ hồ): tự duyệt (AGENTS.md §Điểm quyết định), `<XT> loop decide …` → D-NNN; mặc định tự host.
 
 ## Pha 2 — vòng lặp có bằng chứng (G5–G6)
-4. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` (exit 2 "đang có vòng" → `<XT> loop resume`, không tự `--force`).
+4. `<XT> loop init --plan docs/autopilot/PLAN.md --blueprint BLUEPRINT.md --single-session [--hours <H>]` (exit 2 "đang có vòng" → `<XT> loop attach`, không tự `--force`).
 5. Mỗi vòng: `<XT> loop status --json` → làm đúng `task` (giao subagent theo trường `executor`, trừ hàng "Làm trực tiếp" (`LOOP-ORCH-020`); `milestone_audit: g7` → làm tiếp; `now` → audit delta trước, 🔴/🟠 thành task) → Gate chạy **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` → exit 0: máy tự tick `[x]`, commit nhỏ; exit ≠ 0: sửa — lần 2 cùng lỗi → đổi cách (D-NNN), máy chuyển cấp `executor-deep` sau 2 lần đỏ, BLOCKED sau 3. Không nới cổng.
 6. Lát xong → một PR: `PROGRESS.md` (≤ 8 KB) vào commit cuối → đẩy **một lần** (CI là cổng — ADR-0041), `<XT> pr title-check '<tiêu đề>'`, mở PR → `<XT> pr next --pr <N>` → làm đúng `do` (build: merge ghim head khi CI xanh, review ghi nợ — ADR-0037) → `<XT> merge-watch --pr <N>` nền, làm lát kế ngay; PR đổi → lại `pr next`. Push thêm: gói sửa vào **một** commit. Pha harden: `/complete` bước 4.
 7. Blueprint: tick `[x]` mục task vừa chứng minh kèm `— Kiểm: `<lệnh>`` chạy lại được (không có lệnh: `— Bằng chứng: <file|URL>`); `[~] — Không áp dụng: <điều kiện>`; MUST muốn miễn → `loop defer`. MUST mở không chặn `done` ở build (đợt kế/`/complete`).

@@ -63,7 +63,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
 **Pha 2 — vòng lặp có bằng chứng**
 
 9. `<XT> loop init --plan docs/autopilot/PLAN.md [--blueprint B] --single-session [--hours H]` → `.autopilot/state.json`
-   (gitignore; trần vòng tự tính, `max_same_failure: 3`; gắn `session_id` của phiên, `loop resume` gắn lại phiên mới).
+   (gitignore; trần vòng tự tính, `max_same_failure: 3`; gắn `session_id` của phiên, `loop attach` gắn lại phiên mới).
    **Một phiên đến khi xong** (ADR-0009). Lệnh `loop` gõ trong một git worktree khác của cùng repo dùng gốc worktree đó
    (Gate, tick PLAN, `.autopilot/` riêng); `hook-stop`/`checkpoint` luôn theo `CLAUDE_PROJECT_DIR` — vòng ở worktree thì mở phiên
    Claude với thư mục dự án là worktree đó (`loop init` cảnh báo khi khác).
@@ -87,10 +87,10 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
     tiếp (`verify` = task tick mà thiếu/khác bằng chứng, hoặc chưa chạy `<XT> loop verify --all` trên cây cuối —
     [`LOOP-DESIGN-022`](loop-design.md)); `done`/`blocked`/`budget` → cho dừng. Lượt Stop của phiên khác phiên đã gắn
     hoặc stdin không phải JSON object → cho dừng, không tăng `iterations`, ghi một dòng `.autopilot/hook-stop.log`.
-    `/clear` đổi session id: `loop status` (SessionStart in lại) báo vòng gắn phiên khác → `<XT> loop resume` gắn lại.
+    `/clear` đổi session id: `loop status` (SessionStart in lại) báo vòng gắn phiên khác → `<XT> loop attach`.
 14. **Việc cần người không chặn cả vòng**: `<XT> loop defer --task <ID> --reason "..."` rồi làm việc khác; mọi việc còn lại
-    phụ thuộc → `<XT> loop block --reason "..."`. Nhóm máy chặn / cho chạy / cần người, điểm dừng bắt buộc:
-    [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý rồi `<XT> loop resume`.
+    phụ thuộc → `<XT> loop block --reason "..."`. Điểm dừng bắt buộc:
+    [`stop-points-and-escalation.md`](stop-points-and-escalation.md). Người xử lý: `<XT> loop resolve --task <ID> --reason …` rồi `loop unblock --reason …`.
 15. **Context đầy** → compaction tự nén (PreCompact ghi checkpoint, SessionStart in lại `loop status`); gần trần máy
     (≥ 80 % vòng/giờ/tiền) → Bàn giao vào PROGRESS, commit + push ([`context-and-token-budget.md`](context-and-token-budget.md)).
 16. **Kết thúc đợt → đợt kế (ADR-0047)**: `done` = mọi task xanh + `verify --all` khớp cây (build: MUST blueprint mở không

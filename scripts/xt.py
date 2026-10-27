@@ -20,7 +20,11 @@ Lệnh:
   loop checkpoint               Dùng cho PreCompact hook: ghi vị trí làm việc vào state trước khi nén (luôn exit 0).
   loop decide --question Q --option A --option B --choice N --why W --revert R [--prod TEXT] [--log FILE]
                                 Phiên chính tự duyệt điểm quyết định, ghi D-NNN vào docs/autopilot/DECISIONS.md.
-  loop resume [--reason TEXT]   Người đã xử lý → bỏ BLOCKED, đặt lại đếm lỗi lặp, giữ số vòng/bằng chứng.
+  loop attach                   Gắn phiên hiện tại vào vòng đang chạy (sau /clear); giữ việc chờ, đếm lỗi, BLOCKED.
+  loop resolve --task ID --reason TEXT
+                                Người đã xử lý một việc chờ: gỡ khỏi deferred, ghi resolved[].
+  loop unblock --reason TEXT    Người xem rồi: mở BLOCKED/đã dừng, đặt lại đếm lỗi; giữ việc chờ, số vòng/bằng chứng.
+  loop resume [--reason TEXT]   Lệnh cũ (làm cả bốn việc trên, in cảnh báo) — dùng attach/resolve/unblock.
   loop stop [--reason TEXT]     Tắt vòng lặp.
   loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
   pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (tắt auto-merge người bật, rà, merge ghim head…).
@@ -2810,7 +2814,7 @@ def loop_record(
     rev = task_runs_rev(base, st, task)  # PLAN đọc ngoài khoá — `fn` dưới đây chỉ so chuỗi
     plan_t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
     # Chỉ lần xanh chạy ĐÚNG Gate của task trong PLAN mới đặt lại đếm lỗi lặp và `task_runs` — `-- true`, hay tạm bỏ task
-    # khỏi PLAN rồi xanh, không gỡ chặn (review #294, D-206); task ngoài PLAN chỉ `loop resume`/`unblock` gỡ.
+    # khỏi PLAN rồi xanh, không gỡ chặn (review #294, D-206); task ngoài PLAN chỉ `loop unblock` gỡ.
     clears = plan_t is not None and same_command(cmd_str, str(plan_t.get("gate") or ""))
     # Gate đã chạy xong, NGOÀI khoá; đếm lỗi lặp áp trên state mới nhất trong khoá (ADR-0052 §2) — ghi song song không mất.
     st = update_state(base, lambda cur: _record_failure_count(cur, task, sig, rev, clears))
@@ -2849,7 +2853,7 @@ def _record_failure_count(
 
 def _count_task_run(cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str]) -> None:
     """`task_runs[task]` (ADR-0052 §3): đỏ → +1, đếm lại từ 0 khi spec/Gate của task trong PLAN đổi (`rev` khác giá trị
-    lưu ở `task_runs_rev`) — trừ khi task đã chạm trần: khi đó chỉ xanh đúng Gate hoặc `loop resume` gỡ, sửa PLAN không
+    lưu ở `task_runs_rev`) — trừ khi task đã chạm trần: khi đó chỉ xanh đúng Gate hoặc `loop unblock` gỡ, sửa PLAN không
     tự thoát chặn (review #294); xanh → xoá khoá (về 0)."""
     runs, revs = _task_runs(cur), cur.get("task_runs_rev")
     revs = revs if isinstance(revs, dict) else {}
@@ -3059,7 +3063,7 @@ def _stop_reason(st: Dict[str, Any], v: Dict[str, Any], mode: Optional[str], xt:
 
 
 SESSION_MISMATCH_NOTE = (
-    "⚠ vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop resume`"
+    "⚠ vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop attach`"
     " (Stop hook chỉ giữ phiên đã gắn)"
 )
 STOP_LOG_FILE = "hook-stop.log"  # lượt Stop bị bỏ qua (phiên khác, stdin hỏng) — một dòng mỗi lượt khi vòng đang bật
@@ -4673,7 +4677,9 @@ def _doctor_state(base: Path) -> List[Finding]:
     out = []
     if st.get("blocked"):
         reason = st.get("blocked_reason") or "?"
-        out.append(Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — người xử lý rồi `loop resume`"))
+        out.append(
+            Finding("state", "warn", f"autopilot đang BLOCKED: {reason} — người xử lý rồi `loop unblock --reason …`")
+        )
     plan = st.get("plan")
     if st.get("active") and plan and not (base / str(plan)).is_file():
         out.append(Finding("state", "warn", f"vòng lặp đang bật nhưng không còn PLAN `{plan}` — `loop init` lại"))
@@ -6403,10 +6409,10 @@ def _live_loop(base: Path) -> str:
         # Đợt chỉ "xong" khi đã kiểm lại cuối trên cây này (LOOP-DESIGN-022) — verify đợt kế chỉ chạy Gate PLAN mới.
         why = final_check(base)
         return f"đợt `{verdict}` — {why}" if why else ""
-    # AUD-HAR-114: `blocked` từ state (block/lỗi lặp) → resume; PLAN mất/rỗng → stop
+    # AUD-HAR-114, D-208: PLAN mất/rỗng → stop (mở lại cũng chặn), kể cả khi có cờ; còn lại `blocked` từ state → unblock
     why = ""
     if verdict == "blocked":
-        end = "người xem rồi `loop resume --reason`" if _verdict_loop_state(prev, base) else "`loop stop`"
+        end = EXIT_UNBLOCK if _plan_tasks(base, prev) else "`loop stop` rồi `loop init --plan <mới>`"
         why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
@@ -6522,14 +6528,14 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
     seen = _state_rev(read_state(base))  # kiểm vòng đang chạy dưới đây ngoài khoá; ghi chỉ khi state chưa đổi từ đây
     live = "" if args.force else _live_loop(base)
-    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại, không gợi `resume`/`--force`
+    if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại, không gợi `attach`/`--force`
         print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
         return 2
     if live:
         tail = (
             ""  # `blocked` đã nêu lối ra riêng
             if "verdict `blocked`" in live
-            else " — tiếp tục: `loop resume`; cố ý khởi tạo lại (đổi PLAN/ngân sách, vòng cũ đã chết): `loop init --force`"
+            else " — đổi phiên: `loop attach`; cố ý khởi tạo lại (đổi PLAN/ngân sách, vòng cũ đã chết): `loop init --force`"
         )
         print(f"✗ Đang có vòng autopilot chạy ({live}){tail} (LOOP-HARNESS-024)", file=sys.stderr)
         return 2
@@ -7243,6 +7249,12 @@ def _resume_apply(cur: Dict[str, Any], change: Dict[str, Any], base: Path, clear
     return cur
 
 
+RESUME_WARNING = (
+    "⚠ `loop resume` làm cả bốn việc (gắn phiên, mở block, đặt lại đếm lỗi, trả việc chờ) — dùng `loop attach` (đổi phiên),"
+    " `loop resolve --task <ID>` (gỡ một việc chờ), `loop unblock --reason …` (mở block)"
+)
+
+
 def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     change = {
         "active": True,
@@ -7262,6 +7274,7 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
     print(f"▶ Autopilot tiếp tục (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {args.reason}")
     if cleared:
         print("  việc chờ người quay lại hàng làm: " + ", ".join(cleared))
+    print(RESUME_WARNING, file=sys.stderr)
     return 0
 
 
@@ -7304,11 +7317,11 @@ def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
 
 def _loop_exit(st: Dict[str, Any], base: Path) -> Tuple[str, str]:
     """Lối ra của vòng đã kết thúc, dùng chung cho `attach`/`resolve`/`unblock` (ADR-0051, ADR-0052 §6): (loại, chữ), loại
-    `unblock` | `pending` | `init`. `blocked` xét PLAN trên đĩa, không đoán từ đếm lỗi (`loop record` sau khi vòng dừng vẫn
-    đổi đếm — review #295): PLAN mất/rỗng → `init`, còn lại → `unblock`. Hết vòng/hạn → `init` dù verdict nào (`unblock`
-    từ chối mở trần — không trỏ vòng tròn)."""
+    `unblock` | `pending` | `init`. PLAN trên đĩa thắng nguồn trong state (D-208): mất/rỗng → `init` dù cờ hay verdict nào
+    (mở lại thì Stop kế chặn ngay); không đoán từ đếm lỗi (`loop record` sau khi vòng dừng vẫn đổi đếm — review #295).
+    Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
     fv = _final_verdict(st)
-    if fv == "blocked" and not _plan_tasks(base, st):
+    if fv != "done" and not _plan_tasks(base, st):
         return "init", EXIT_PLAN_LOST
     if fv == "budget" or _budget_exhausted(st):
         return "init", EXIT_BUDGET
@@ -7409,7 +7422,7 @@ def _unblock_problem(cur: Dict[str, Any], reason: str, base: Path) -> Optional[s
     if not reason:
         return "✗ --reason rỗng — ghi người đã xem gì"
     if cur.get("active"):
-        if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (review #295)
+        if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (D-208)
             return f"✗ Vòng đang chạy nhưng {EXIT_PLAN_LOST.replace('→', '→ `loop stop` rồi', 1)}"
         if _blocked_by_state(cur):
             return None
@@ -7488,7 +7501,12 @@ def _loop_stop(args: argparse.Namespace, base: Path) -> int:
         "stop_reason": args.reason,
         "final_verdict": {"verdict": "stopped", "reason": args.reason},
     }
-    update_loop_state(base, lambda cur: {**cur, **end})
+    ended: List[bool] = []
+    cur = update_loop_state(base, lambda cur: {**cur, **end} if cur.get("active") else ended.append(True))
+    if cur is not None and ended:
+        # vòng đã kết thúc: giữ `final_verdict` thật cho `unblocked[]`, đợt `done` không mở lại qua stop (review #295)
+        print(f"■ Autopilot đã tắt sẵn ({_final_verdict(cur) or 'không có final_verdict'}) — giữ nguyên.")
+        return 0
     print("■ Autopilot tắt.")
     return 0
 

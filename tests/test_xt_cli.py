@@ -1681,7 +1681,7 @@ class LoopCommandsTest(TmpDirCase):
         rc, _, err = run_main("loop", "init")
         self.assertEqual(rc, 2)
         self.assertIn("LOOP-HARNESS-024", err)
-        self.assertIn("tiếp tục: `loop resume`", err)  # AUD-TEST-022: vòng sống giữ hai lối ra chung
+        self.assertIn("đổi phiên: `loop attach`", err)  # AUD-TEST-022: vòng sống giữ hai lối ra chung
         self.assertIn("`loop init --force`", err)
         self.assertNotIn("verdict `blocked`", err)
         self.assertEqual(xt.read_state(self.tmp)["iterations"], 5)  # không ghi đè
@@ -1726,8 +1726,11 @@ class LoopCommandsTest(TmpDirCase):
         st = xt.read_state(self.tmp)
         self.assertEqual((rc, out, st["active"], st["final_verdict"]["verdict"]), (0, "", False, "done-pending-human"))
         self.assertIn("đã kết thúc — done-pending-human", run_main("loop", "status")[1])
-        rc, out, _ = run_main("loop", "resume", "--reason", "đã cấu hình khoá")
+        rc, out, err = run_main("loop", "resume", "--reason", "đã cấu hình khoá")
         self.assertEqual(rc, 0)
+        self.assertEqual(err.strip(), xt.RESUME_WARNING)  # ADR-0051: hành vi cũ giữ, thêm đúng một dòng cảnh báo stderr
+        for cmd in ("`loop attach`", "`loop resolve --task <ID>`", "`loop unblock --reason …`"):
+            self.assertIn(cmd, err)
         self.assertIn("việc chờ người quay lại hàng làm: T-001", out)
         self.assertNotIn("deferred", xt.read_state(self.tmp))
         self.assertTrue(run_main("loop", "status")[1].startswith("verdict: continue — làm task T-001"))
@@ -2103,7 +2106,17 @@ class LoopInterventionsTest(TmpDirCase):
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
             ({"verdict": "stopped", "reason": "s"}, {"deadline": "2000-01-01T00:00:00+00:00"}, xt.EXIT_BUDGET),
             ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {"iterations": 100}, xt.EXIT_BUDGET),
+            # D-208: PLAN trên đĩa thắng nguồn trong state — có cờ, stopped, không verdict, PLAN rỗng đều trỏ `init`
+            (
+                {"verdict": "blocked", "reason": "b"},
+                {"blocked": True, "plan": "docs/autopilot/MAT.md"},
+                xt.EXIT_PLAN_LOST,
+            ),
+            ({"verdict": "stopped", "reason": "s"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            (None, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "b"}, {"plan": "docs/autopilot/EMPTY.md"}, xt.EXIT_PLAN_LOST),
         ]
+        (self.tmp / "docs" / "autopilot" / "EMPTY.md").write_text("# PLAN trống\n", encoding="utf-8")
         for fv, extra, want in cases:
             with self.subTest(fv=fv, extra=extra):
                 (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
@@ -2297,6 +2310,22 @@ class LoopInterventionsTest(TmpDirCase):
         with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
             xt.main(["loop", "unblock"])
         self.assertEqual(cm.exception.code, 2)
+
+    def test_stop_on_ended_loop_keeps_final_verdict(self):
+        # Review #295: `loop stop` trên vòng đã kết thúc từng đè `final_verdict` → `unblocked[]` mất lý do chặn thật, đợt
+        # `done` mở lại được bằng stop + unblock. Nay giữ nguyên, không ghi gì.
+        for fv in ({"verdict": "blocked", "reason": "lỗi lặp"}, FV_DONE):
+            with self.subTest(fv=fv):
+                (self.tmp / ".autopilot" / "state.json").unlink(missing_ok=True)
+                before = self.ended(fv, blocked=fv is not FV_DONE)
+                rc, out, _ = run_main("loop", "stop", "--reason", "dừng tay")
+                self.assertEqual(rc, 0)
+                self.assertIn(f"đã tắt sẵn ({fv['verdict']}) — giữ nguyên", out)
+                self.assertEqual(xt.read_state(self.tmp), before)
+        self.refused("unblock", "--reason", "mở", msg="đợt đã xong")
+        (self.tmp / ".autopilot" / "state.json").unlink()
+        self.ended(None)
+        self.assertIn("đã tắt sẵn (không có final_verdict)", run_main("loop", "stop")[1])
 
     def test_unblock_outside_claude_code_keeps_session(self):
         self.init(blocked=True)
