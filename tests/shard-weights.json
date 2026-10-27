@@ -61,6 +61,8 @@
  "tests.test_doctor.DoctorStateAndEnvTest": 5.4,
  "tests.test_doctor.DoctorVersionTest": 5.1,
  "tests.test_doctor.LoopInitDoctorTest": 0.9,
+ "tests.test_flow.FlowRegistryTest": 0.3,
+ "tests.test_flow.FlowTest": 1.6,
  "tests.test_grants.GrantCheckCliTest": 0.7,
  "tests.test_grants.ParseGrantsTest": 0.3,
  "tests.test_grants.ViolationsTest": 0.3,
