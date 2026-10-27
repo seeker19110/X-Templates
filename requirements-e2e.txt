@@ -2,9 +2,10 @@
 # của khung vẫn chỉ stdlib. Cài: pip install --require-hashes -r requirements-e2e.txt ; trình duyệt cài riêng:
 # python -m playwright install --with-deps --only-shell chromium
 # Hash: sha256 từ PyPI JSON (https://pypi.org/pypi/<gói>/<bản>/json, xác minh 2026-10-21), mọi wheel Linux x86_64 cho
-# CPython 3.11–3.14 (manylinux + musllinux; greenlet có thêm cp314t). Không sửa tay hash; nâng bản: lấy lại từ PyPI JSON.
+# CPython 3.11–3.14 (manylinux + musllinux; greenlet có thêm cp314t); playwright 1.64.1 do Dependabot sinh (#275): 8 wheel
+# mọi nền tảng, sha256 tải về khớp cả 8 (2026-10-27). Không sửa tay hash; nâng bản: lấy lại từ PyPI JSON.
 # `pyee` tách theo Python: 14.x đòi Python >= 3.12; playwright 1.64.x đòi pyee >=13,<15.
-# License (PyPI 2026-10-21): playwright Apache-2.0 · greenlet MIT AND PSF-2.0 · pyee MIT · typing-extensions PSF-2.0.
+# License (PyPI 2026-10-21; playwright 1.64.1 METADATA 2026-10-27): playwright Apache-2.0 · greenlet MIT AND PSF-2.0 · pyee MIT · typing-extensions PSF-2.0.
 greenlet==3.5.6 \
     --hash=sha256:1c20ea32a73d17b9b60e3371240e17b0068120c98a5ec01a224a7dd8c89733ba \
     --hash=sha256:188bf333769b7145e2b0b4a7f09615ec550ed44d3a2a8395fb7b36f0e9901e13 \

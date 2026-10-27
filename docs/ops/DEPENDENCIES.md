@@ -38,8 +38,9 @@
 - **E2E app cục bộ (T-1992, D-133):** `requirements-e2e.txt` (Playwright for Python và bắc cầu) chỉ cài ở job CI
   `app-e2e` và máy dev chạy `tests_e2e/`; không nằm trong `xt.yaml` (`test`/`gate`), không phải phụ thuộc runtime của
   `xt.py app` (vẫn chỉ stdlib), không phân phối kèm khung hay dự án đích. Hash = sha256 từ PyPI JSON từng phiên bản (xác
-  minh 2026-10-21), mọi wheel Linux x86_64 cho CPython 3.11–3.14; `pyee` tách theo marker (`13.0.1` cho Python < 3.12,
-  `14.0.0` cho ≥ 3.12 — `pyee` 14 đòi ≥ 3.12, Playwright 1.64.0 đòi `pyee>=13,<15`). Kiểm cục bộ 2026-10-21:
+  minh 2026-10-21), mọi wheel Linux x86_64 cho CPython 3.11–3.14; Playwright 1.64.1 (#275): 8 wheel mọi nền tảng, sha256
+  khớp (2026-10-27); `pyee` tách theo marker (`13.0.1` cho Python < 3.12, `14.0.0` cho ≥ 3.12 — `pyee` 14 đòi ≥ 3.12,
+  Playwright 1.64.x đòi `pyee>=13,<15`). Kiểm cục bộ 2026-10-21:
   `pip install --require-hashes -r requirements-e2e.txt` vào venv 3.13 và 3.11 exit 0; `license-check --requirements
   requirements-e2e.txt` exit 0 ở cả hai; `pip-audit --require-hashes --strict --disable-pip -r requirements-e2e.txt` 0 lỗ
   hổng. Trình duyệt (Chrome Headless Shell bản Playwright ghim, `playwright install --with-deps --only-shell chromium`)
@@ -77,7 +78,7 @@
 |---|---|---|
 | boolean-py | 5.0 | BSD-2-Clause |
 | cachecontrol | 0.14.4 | Apache-2.0 |
-| certifi | 2026.10.19 | MPL-2.0 (chấp nhận — xem trên) |
+| certifi | 2026.10.23 | MPL-2.0 (chấp nhận — xem trên) |
 | charset-normalizer | 3.5.2 | MIT |
 | cyclonedx-python-lib | 11.12.0 | Apache-2.0 |
 | defusedxml | 0.7.1 | PSFL |

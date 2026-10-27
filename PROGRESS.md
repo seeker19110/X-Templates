@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-26 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-27 · Nhánh: main
 
 ## Đang làm
 - 2026-10-26 **Nghiên cứu ba vòng bản 2** (#287, `research/2026-10-26-autopilot-complete-optimize.md`) → **lát 1** §11: ADR-0051/D-201 nối phiên (`loop attach`/`resolve`/`unblock`, `resume` giữ + cảnh báo); kế: code, rồi không-tiến-triển theo task, `rev` state, perf metadata v2.
@@ -36,6 +36,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `e8c8d96` (3.27.0, #270–#283). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). Trần byte thư mục nâng +1 MiB (ADR-0050).
+- `main` `137a047` (3.27.0, #270–#288: sổ audit, nghiên cứu ba vòng, ADR-0051 — chưa có code; bump phụ thuộc). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040). Trần byte thư mục nâng +1 MiB (ADR-0050).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
