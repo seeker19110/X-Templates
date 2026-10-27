@@ -231,8 +231,8 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0048](docs/adr/0048-optimize-skill-and-field-loop.md): `/optimize` chỉ cho ngân sách đang đỏ có số (`release-check` hàng `perf`, `docs/ops/FIELD-<ngày>.json` do người xuất — agent không cầm khoá production); người xác nhận spec/UX/bảo mật **một lần** ở `GO-NO-GO.md`; bản chỉ tối ưu nghiệm thu delta; `LOOP-OPT-005` MUST@M.
 - [ADR-0049](docs/adr/0049-workflow-in-fanout-skills.md): `/audit` và `/research` nhiều mục dùng tool Workflow khi người gõ trực tiếp và có tool (cùng luật nhánh subagent: agent chỉ đọc, lô ≤ 5, phiên chính gộp và quyết; gọi từ `/autopilot`/`/complete` → subagent); không bật `ultracode` mặc định.
 - [ADR-0050](docs/adr/0050-raise-dir-size-caps.md): trần tổng byte thư mục (`scripts/`, `.claude/hooks/`, `framework/11-autonomous-loop/`) nâng thêm 1 MiB mỗi nhóm theo chủ repo; trần từng file nạp đầu phiên giữ nguyên.
-- [ADR-0052](docs/adr/0052-loop-state-rev-progress-perf-v2-next-step.md): state có `rev`, chặn không-tiến-triển theo task, mẫu perf v2, `loop next-step` chỉ đọc, `perf trial` — lát 0–3 của nghiên cứu ba vòng (D-202, chưa triển khai).
 - [ADR-0051](docs/adr/0051-split-session-attach-from-resume.md): tách "gắn phiên mới" khỏi "giải quyết việc chờ / mở block" — `loop attach`, `loop resolve`, `loop unblock`; `loop resume` giữ nghĩa cũ và in cảnh báo (D-201; lát 1 của nghiên cứu ba vòng, chưa triển khai).
+- [ADR-0052](docs/adr/0052-loop-state-rev-progress-perf-v2-next-step.md): state có `rev`, chặn không-tiến-triển theo task, mẫu perf v2, `loop next-step` chỉ đọc, `perf trial` — lát 0–3 của nghiên cứu ba vòng (D-202, chưa triển khai).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

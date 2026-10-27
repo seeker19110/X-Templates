@@ -30,8 +30,11 @@ R4 hai lệnh `loop` đọc–sửa–ghi `state.json` đè nhau (mất `iterati
 Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với các điểm chốt:
 
 1. **Corpus luồng (lát 0).** `tests/test_flow.py` chạy `xt.py` thật trong repo git tạm (không mock state), ID `FLOW-NN` theo
-   nghiên cứu §10. Ca chưa sửa mang `@unittest.expectedFailure` kèm ID tái hiện — **không** skip: lát sửa phải gỡ decorator
-   (bộ test đỏ "unexpected success" nếu quên). Ca của lát 4–5 (FLOW-24 field) không viết tới khi lát đó được làm.
+   nghiên cứu §10. Ca chưa sửa ghi trong registry `XFAIL = {"FLOW-NN": "<tái hiện>"}` của chính file và nhận
+   `expectedFailure` từ registry — **không** skip. Biến môi trường `XT_FLOW_STRICT=FLOW-NN[,…]` bỏ xfail cho các ID nêu, nên Gate
+   của task sửa chạy `XT_FLOW_STRICT=<ID> python3 -m unittest tests.test_flow` và chỉ xanh khi ca đó thật sự đạt (expected failure
+   tự nó cho suite exit 0). Sửa xong thì gỡ ID khỏi registry (quên → "unexpected success" đỏ). Ca của lát 4–5 (FLOW-24 field)
+   không viết tới khi lát đó được làm.
 2. **`rev` cho `state.json` (§4C).** `write_state` nhận `expect_rev`; giữ khoá `fcntl.flock` trên `.autopilot/state.lock` chỉ quanh
    đọc–so–ghi (timeout 5 s, không giữ qua Gate/mạng). Lệch `rev` → hàm `update_state(base, fn)` đọc lại và áp lại `fn` (tối đa 3 lần);
    lệnh không áp lại được (`init`, `resume`/`attach`/`unblock`) → lỗi exit 2, không ghi đè. State thiếu `rev` = 0. Stop hook lỗi khoá
@@ -39,12 +42,18 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
 3. **Không-tiến-triển theo task (§4B).** `task_runs` `{T-NNN: n}` trong state, tăng ở mỗi `loop record` đỏ, về 0 khi task xanh hoặc
    `req_rev` của task đổi. `_verdict_loop_state`: `task_runs[t] ≥ max_task_runs` → `blocked` "N lần đỏ, M chữ ký khác nhau — đặc tả hoặc
    Gate sai, người xem" (M đếm từ `runs.jsonl`). Mặc định `max_task_runs = 2 × max_same_failure` (= 6); `loop init --max-task-runs N`
-   (0 = tắt, là đường lùi). `attach`/`resolve` không đặt lại; `unblock` đặt lại cho task đang chặn. Không nới `max_same_failure`.
-4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `base_sha`,
-   `candidate_head`, `candidate_fp` (= `tree_fingerprint`), `harness_sha256` (hash lệnh + file bộ đo khoá). `perf compare` exit 2 "không đủ
-   điều kiện so" khi lệch `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`, hoặc hai file khai cùng `candidate_head` mà khác
-   `candidate_fp`; lệch `python`/`nproc` → cảnh báo. File v1/mảng thô → so được nhưng JSON đầu ra `unverified-manual: true` và không
-   bao giờ trả `improved` cho `--no-regress`/ratchet tự động.
+   (0 = tắt, là đường lùi). `attach`/`resolve` không đặt lại; `unblock` và `loop resume` (nghĩa cũ "mở block + đặt lại đếm lỗi",
+   ADR-0051) đặt lại `task_runs` của task đang chặn — nếu không, verdict tính lại từ `task_runs` sẽ chặn ngay và lối ra mà
+   `_live_loop`/bảng điểm dừng chỉ ra không mở được. `perf trial` đếm lần thử riêng (§7), không qua `task_runs`. Không nới `max_same_failure`.
+4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `head` (`git rev-parse
+   HEAD` lúc đo), `dirty` (cây có diff/untracked ngoài `.autopilot/`), `tree_fp` (= `tree_fingerprint`), `harness_sha256` = sha256 của
+   lệnh đo + nội dung các file khớp `--harness GLOB` (lặp được; cùng glob với `perf guard --locked`; không truyền → chỉ hash lệnh, cảnh báo).
+   `perf compare` theo **vai**: `before` là baseline — phải `dirty: false` (đo trên cây sạch của `head`, vd worktree `origin/main` ghim SHA);
+   `after` là candidate — hoặc cùng `head` với before (sửa chưa commit, luồng `perf trial`/`/optimize` bước 3), hoặc `head` là hậu duệ của
+   head before (đã commit). Exit 2 "không đủ điều kiện so" khi: lệch `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`;
+   before `dirty`; after không cùng head và không là hậu duệ. Lệch `python`/`nproc` → cảnh báo. File v1/mảng thô → so được nhưng JSON
+   đầu ra `unverified-manual: true` và không bao giờ trả `improved` cho `--no-regress`/ratchet tự động. (FLOW-19 của nghiên cứu §10 viết
+   lại theo vai: baseline bẩn, hoặc candidate không cùng/không hậu duệ head baseline → từ chối.)
 5. **`loop next-step --json` chỉ đọc (lát 2, §4D/§9.2).** Hàm thuần nhận state/PLAN/blueprint/sổ audit/`release-check`/JSON `pr next` đã
    có (không gọi GitHub), trả `objective`, `action`, `reason`, `missing`, `key`, `budget`, `inputs`; replay cùng đầu vào → cùng `action`.
    `build-until-clean` dừng ở `ready-for-complete` (đề xuất, không đổi `delivery_phase` — D-178); `harden-to-signoff` dừng ở
@@ -58,7 +67,7 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    được `_carry_previous` mang sang đợt kế (cả `--force`) để đếm can thiệp mỗi mục tiêu.
 7. **`perf trial` (lát 3, §7.2).** `perf trial start --hotspot H --hypothesis … --falsifier …` ghi `.autopilot/perf-trials.jsonl` **trước**
    khi sửa và ghim `base_sha` + danh sách file bộ đo; `perf trial finish --before … --after …` chạy `perf compare` v2 rồi giữ hoặc thu
-   hồi **đúng file của lần thử** bằng `git stash push -- <files>` có nhãn (không `checkout -- .`/`reset --hard`); `--resume` sau crash khôi
+   hồi **đúng file của lần thử** bằng `git stash push --include-untracked -m <nhãn> -- <files>` (không `checkout -- .`/`reset --hard`); `--resume` sau crash khôi
    phục và ghi "chưa hoàn tất". Khoá trùng = hotspot + hash diff. Ba lần không `improved` cùng hotspot (bền qua restart) → exit 2 "đổi
    điểm nóng" (`LOOP-OPT-011`). Chỉ số phụ vượt trần đã khai → đỏ dù chính `improved` (`LOOP-OPT-008`).
 8. **Không làm ở ADR này:** lát 4 (pilot phiên thực ≥ 2 dự án đích, cho `next-step` ghi trạng thái) và lát 5 (field trigger, bot nâng bản,
