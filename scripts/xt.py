@@ -34,8 +34,9 @@ Lệnh:
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
               [--reviewer-effort E --author-effort E]
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
-  pr rethink --pr N --decision D-NNN
-                                PR quá ngân sách review (`pr next` = rethink): mở thêm 2 lượt theo quyết định (ADR-0053).
+  pr rethink [--pr N] --decision D-NNN
+                                PR quá ngân sách review (`pr next` = rethink): mở thêm 2 lượt theo D-NNN mới, câu hỏi nhắc
+                                #N, ghi sau review chưa sạch cuối (ADR-0053, D-210).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -9289,7 +9290,7 @@ def _pr_next_review(
             "rethink",
             f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: một lượt toàn PR + một lượt delta — ADR-0053) — dừng"
             " vòng sửa–review, đổi chiến lược",
-            "xt.py loop decide (tách/thu hẹp PR, đổi thiết kế, đóng PR) → xt.py pr rethink --pr"
+            f"xt.py loop decide --question 'PR #{n}: …' (tách/thu hẹp PR, đổi thiết kế, đóng PR) → xt.py pr rethink --pr"
             f" {n} --decision D-NNN; việc cần người → xt.py loop defer --task <ID> --reason 'PR #{n}'",
         )
     if gate["state"] == "missing":
@@ -9742,15 +9743,40 @@ def _decision_at(base: Path, did: str, pr: str) -> Optional[_dt.datetime]:
         log = root / "docs/autopilot/DECISIONS.md"
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
         for m in head.finditer(text):
-            if re.search(rf"#{pr}(?!\d)", m[2]):
+            if re.search(rf"#{re.escape(pr)}(?!\d)", m[2]):
                 return _iso_time(m[1])
     return None
 
 
+RETHINK_FUTURE_SLACK = _dt.timedelta(minutes=5)  # lệch giờ chấp nhận cho mốc D-NNN so với đồng hồ máy
+
+
+def _rethink_problem(
+    base: Path, did: str, key: str, rec: Dict[str, Any], rethinks: List[Dict[str, Any]]
+) -> Optional[str]:
+    """Lý do `pr rethink` từ chối D-NNN (D-210/D-211): sai dạng; không có/không nhắc `#N`/mốc hỏng; mốc ở tương lai; không
+    SAU mọi review chưa sạch đã đăng (mốc review hỏng → từ chối); đã dùng cho PR này. Dấu vết quyết định, không phải hàng rào
+    chống giả mạo — merge vẫn cần review sạch ở head."""
+    if not re.fullmatch(r"D-\d{3,}", did):
+        return f"--decision phải dạng D-NNN, không phải {did!r}"
+    when = _decision_at(base, did, key)
+    if when is None:
+        return (
+            f"{did} không có trong docs/autopilot/DECISIONS.md (worktree đang sửa hoặc dự án) với câu hỏi nhắc #{key} và"
+            f" mốc ISO hợp lệ — ghi bằng `xt.py loop decide --question 'PR #{key}: …'`"
+        )
+    if when > _dt.datetime.now(_dt.timezone.utc) + RETHINK_FUTURE_SLACK:
+        return f"{did} có mốc ở tương lai ({when.isoformat()}) — ghi bằng `xt.py loop decide`, không sửa tay sổ"
+    if any(t is None or t >= when for t in (_iso_time(r.get("at")) for r in rec["reviews"] if not r.get("clean"))):
+        return f"{did} ghi trước review chưa sạch cuối của PR #{key} — cần quyết định mới (`xt.py loop decide`)"
+    if any(r.get("decision") == did for r in rethinks):
+        return f"{did} đã mở thêm lượt cho PR #{key} — cần quyết định mới"
+    return None
+
+
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
-    """`pr rethink` (ADR-0053): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `rethink` VÀ D-NNN (đổi
-    chiến lược) có câu hỏi nhắc `#N`, ghi SAU mọi review chưa sạch đã đăng của PR (review #298: D-NNN cũ bất kỳ từng mở lại
-    được) — nên một D-NNN không mở được hai lần; ghi `rethinks[]` vào sổ review cục bộ."""
+    """`pr rethink` (ADR-0053): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `rethink` và D-NNN (đổi
+    chiến lược) qua `_rethink_problem`; ghi `rethinks[]` vào sổ review cục bộ."""
     try:
         pr = load_pr(args)
     except PrInputError as exc:
@@ -9759,20 +9785,15 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     d, data, rec = _pr_next_state(pr, base)
     key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec)["action"]
     if action != "rethink":
-        print(f"✗ `pr next` của PR #{key} là `{action}`, không phải `rethink` — chưa chạm trần review", file=sys.stderr)
-        return 2
-    when = _decision_at(base, args.decision, key)
-    times = [_iso_time(r.get("at")) for r in rec["reviews"] if not r.get("clean")]
-    if when is None or any(t is None or t >= when for t in times):  # mốc review hỏng → chặt
-        print(
-            f"✗ {args.decision} không dùng được: cần quyết định có câu hỏi nhắc #{key}, ghi bằng `xt.py loop decide` sau"
-            " review chưa sạch cuối của PR",
-            file=sys.stderr,
-        )
+        print(f"✗ `pr next` của PR #{key} là `{action}`, không phải `rethink` — làm bước đó trước", file=sys.stderr)
         return 2
     local = _pr_record(data, key)
     old = local.get("rethinks")
     rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    problem = _rethink_problem(base, args.decision, key, rec, rethinks)
+    if problem:
+        print(f"✗ {problem}", file=sys.stderr)
+        return 2
     data[key] = {**local, "rethinks": [*rethinks, {"decision": args.decision, "at": now_iso()}]}
     _write_reviews(base, data)
     print(

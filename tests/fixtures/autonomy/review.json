@@ -765,7 +765,7 @@
    "note": "hai review chưa sạch (toàn PR + delta) mà head mới chưa rà: dừng vòng sửa–review, không giao review lần ba, không merge"
   },
   {
-   "id": "review-adr0053-rethink-reopens-one-round",
+   "id": "review-adr0053-rethink-reopens-budget",
    "origin": "control",
    "refs": [
     "ADR-0053"

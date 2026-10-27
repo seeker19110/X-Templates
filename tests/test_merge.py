@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -1667,11 +1668,12 @@ class PrNextCliTest(unittest.TestCase):
         self.assertNotIn("không được thì", out)
         self.assertEqual(len(xt.read_reviews(self.base)["7"]["reviews"]), 2)
 
-    def rethink(self, did: str, p: dict | None = None) -> tuple[int, str, str]:
-        p = p or self.big
+    def marks(self) -> list:
         rec = xt.read_reviews(self.base).get("7") or {}
-        marks = [{k: r[k] for k in ("head", "clean", "at", "inconclusive") if k in r} for r in rec.get("reviews", [])]
-        p = {"xtReviews": marks, **p}
+        return [{k: r[k] for k in ("head", "clean", "at", "inconclusive") if k in r} for r in rec.get("reviews", [])]
+
+    def rethink(self, did: str, p: dict | None = None) -> tuple[int, str, str]:
+        p = {"xtReviews": self.marks(), **(p or self.big)}
         return run_main("pr", "rethink", "--pr-json", "-", "--decision", did, stdin=json.dumps(p))
 
     def decisions(self, root: Path, *lines: str) -> None:
@@ -1679,31 +1681,55 @@ class PrNextCliTest(unittest.TestCase):
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("# Nhật ký\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
 
+    @staticmethod
+    def soon(seconds: int) -> str:
+        """Mốc ISO cách bây giờ `seconds` giây (âm = quá khứ) — quyết định ghi sau review nhưng không ở tương lai xa."""
+        now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+        return (now + datetime.timedelta(seconds=seconds)).isoformat()
+
     def test_rethink_needs_new_decision_naming_pr(self):
-        """ADR-0053 (review #298): `pr rethink` chỉ khi `pr next` = `rethink`, D-NNN có câu hỏi nhắc #N và ghi SAU mọi review
-        chưa sạch đã đăng — D-NNN cũ hay của việc khác không mở lại được; ghi `rethinks[]` → `pr next` về `fix`."""
+        """ADR-0053 (review #298, D-210/D-211): `pr rethink` chỉ khi `pr next` = `rethink`, D-NNN đúng dạng, câu hỏi nhắc #N,
+        mốc không ở tương lai và SAU mọi review chưa sạch đã đăng — D-NNN cũ hay của việc khác không mở lại được; ghi
+        `rethinks[]` → `pr next` về `fix`."""
         rc, _, err = self.rethink("D-001")
         self.assertEqual(rc, 2)
-        self.assertIn("`pr next` của PR #7 là `review`, không phải `rethink`", err)
+        self.assertIn("`pr next` của PR #7 là `review`, không phải `rethink` — làm bước đó trước", err)
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
-        self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "rethink")
-        later = "2099-01-01T00:00:00+00:00"
+        r = json.loads(self.nxt(self.big, "--json")[1])
+        self.assertEqual(r["action"], "rethink")
+        self.assertIn("xt.py loop decide --question 'PR #7: …'", r["do"])  # `do` nói luật #N (review #298)
+        later = self.soon(2)
         self.decisions(
             self.base,
             "### D-001 · 2026-01-01T00:00:00+00:00 · PR #7: chọn thư viện log?",  # cũ hơn review
             f"### D-002 · {later} · chọn thư viện log?",  # không nhắc #7
             f"### D-003 · {later} · PR #70 tách?",  # #70 không phải #7
             "### D-004 · hỏng · PR #7 tách?",  # mốc hỏng
+            "### D-006 · 2099-01-01T00:00:00+00:00 · PR #7 tách?",  # mốc tương lai: dùng lại được mãi (review #298)
             f"### D-005 · {later} · PR #7 quá trần review: tách PR?",
         )
-        for did in ("D-001", "D-002", "D-003", "D-004", "D-009"):
+        missing = "không có trong docs/autopilot/DECISIONS.md (worktree đang sửa hoặc dự án) với câu hỏi nhắc #7"
+        for did, why in (
+            ("D-001", "D-001 ghi trước review chưa sạch cuối của PR #7"),
+            ("D-002", missing),
+            ("D-003", missing),
+            ("D-004", missing),
+            ("D-009", missing),
+            ("D-006", "D-006 có mốc ở tương lai (2099-01-01T00:00:00+00:00)"),
+            ("D-5", "--decision phải dạng D-NNN, không phải 'D-5'"),
+            ("D-005|.*", "--decision phải dạng D-NNN"),
+        ):
             with self.subTest(did=did):
                 rc, _, err = self.rethink(did)
                 self.assertEqual(rc, 2)
-                self.assertIn(f"{did} không dùng được: cần quyết định có câu hỏi nhắc #7", err)
+                self.assertIn(why, err)
         bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
-        self.assertEqual(self.rethink("D-005", bad_at)[0], 2)  # review thiếu mốc → chặt
+        self.assertIn(
+            "D-005 ghi trước review chưa sạch cuối", self.rethink("D-005", bad_at)[2]
+        )  # mốc review hỏng → chặt
+        auto = {**self.big, "autoMergeRequest": {"enabledAt": "x"}}
+        self.assertIn("là `disable-auto-merge`, không phải `rethink`", self.rethink("D-005", auto)[2])
         rc, out, _ = self.rethink("D-005")
         self.assertEqual(
             (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-005 — chạy lại `xt.py pr next --pr 7`\n")
@@ -1715,19 +1741,49 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("là `fix`, không phải `rethink`", err)
         self.assertEqual(run_main("pr", "rethink", "--pr-json", "-", "--decision", "D-005", stdin="[]")[0], 2)
 
+    def test_rethink_decision_must_follow_every_unclean_review(self):
+        """Review #298 lượt 2: quyết định ghi GIỮA hai review chưa sạch (cũ hơn review cuối) không mở được trần; một D-NNN
+        không mở trần hai lần cho cùng PR (kể cả khi mốc của nó sau các review mới, trong độ lệch giờ cho phép)."""
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": self.head, "clean": False, "at": "2026-10-27T03:00:00Z"}
+        p = {**self.big, "xtReviews": [r1, r2]}
+        self.decisions(
+            self.base,
+            "### D-020 · 2026-10-27T02:00:00+00:00 · PR #7: giữa hai review?",
+            f"### D-021 · {self.soon(180)} · PR #7 quá trần: tách?",
+        )
+        rc, _, err = self.rethink("D-020", p)
+        self.assertEqual(rc, 2)
+        self.assertIn("D-020 ghi trước review chưa sạch cuối của PR #7", err)
+        self.assertEqual(self.rethink("D-021", p)[0], 0)
+        r3 = {"head": self.head, "clean": False, "at": self.soon(60)}  # sau mốc rethink, trước mốc D-021
+        r4 = {**r3, "at": self.soon(120)}
+        p2 = {**self.big, "xtReviews": [r1, r2, r3, r4]}
+        self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "rethink")
+        rc, _, err = self.rethink("D-021", p2)
+        self.assertEqual(rc, 2)
+        self.assertIn("D-021 đã mở thêm lượt cho PR #7 — cần quyết định mới", err)
+
     def test_rethink_reads_decision_of_worktree(self):
         """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
-        `pr rethink` phải thấy quyết định đó."""
+        `pr rethink` phải thấy quyết định đó; quyết định ở sổ của dự án vẫn được tra khi đứng trong worktree."""
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         wt = Path(self.enterContext(tempfile.TemporaryDirectory())) / "wt"
         subprocess.run(["git", "-C", str(self.base), "worktree", "add", "-q", "-b", "lat", str(wt)], check=True)
         decide = ("loop", "decide", "--question", "PR #7 quá trần review: tách?", "--option", "a", "--option", "b")
-        with contextlib.chdir(wt), unittest.mock.patch.object(xt, "now_iso", return_value="2099-01-01T00:00:00+00:00"):
+        with contextlib.chdir(wt), unittest.mock.patch.object(xt, "now_iso", return_value=self.soon(2)):
             self.assertEqual(run_main(*decide, "--choice", "1", "--why", "x", "--revert", "y")[0], 0)
-            self.assertTrue((wt / "docs/autopilot/DECISIONS.md").is_file())
-            self.assertFalse((self.base / "docs/autopilot/DECISIONS.md").exists())
-            self.assertEqual(self.rethink("D-001")[0], 0)
+        self.assertTrue((wt / "docs/autopilot/DECISIONS.md").is_file())
+        self.assertFalse((self.base / "docs/autopilot/DECISIONS.md").exists())
+        r3 = {"head": self.head, "clean": False, "at": self.soon(10)}  # hai lượt mới sau lần rethink đầu
+        p2 = {**self.big, "xtReviews": [*self.marks(), r3, {**r3, "at": self.soon(20)}]}
+        self.decisions(self.base, f"### D-030 · {self.soon(30)} · PR #7 quá trần lần hai (sổ dự án)?")
+        with contextlib.chdir(wt):
+            self.assertEqual(self.rethink("D-001")[0], 0)  # sổ của worktree đang sửa
+            self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "rethink")
+            self.assertEqual(self.rethink("D-030", p2)[0], 0)  # sổ dự án, đứng trong worktree
+        self.assertEqual([r["decision"] for r in xt.read_reviews(self.base)["7"]["rethinks"]], ["D-001", "D-030"])
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
