@@ -357,20 +357,25 @@ class DoctorStateAndEnvTest(DoctorCase):
         xt.write_state({"active": True, "plan": plan}, self.base)  # không cờ, PLAN mất → một dòng, có `loop stop`
         self.assertEqual(
             msgs(),
-            [
-                f"vòng lặp đang bật nhưng PLAN `{plan}` mất/rỗng — PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`"
-            ],
+            [f"vòng lặp đang bật (PLAN `{plan}`) nhưng PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`"],
         )
         self.write(plan, "")  # PLAN rỗng cũng vậy
         self.assertIn("mất/rỗng", msgs()[0])
         xt.write_state({"active": True, "plan": plan, "blocked": True}, self.base)
         self.assertEqual(msgs()[0].split(" — ")[0], "autopilot đang BLOCKED: ?")
-        # hết vòng/hạn → `unblock` từ chối, nên trỏ đợt kế
+        # hết vòng/hạn + PLAN mất: không cờ vẫn cảnh báo, không `loop stop` (init chạy thẳng); có cờ → người xem trước
+        xt.write_state({"active": True, "plan": plan, "iterations": 50, "max_iterations": 50}, self.base)
+        self.assertEqual(msgs(), [f"vòng lặp đang bật (PLAN `{plan}`) nhưng PLAN mất/rỗng → `loop init --plan <mới>`"])
+        xt.write_state(
+            {"active": True, "plan": plan, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base
+        )
+        self.assertIn("người xem lý do chặn rồi `loop init --plan <mới>`", msgs()[0])
+        # hết vòng/hạn, PLAN còn → `unblock` từ chối, nên trỏ đợt kế
+        self.write(plan, "- [x] `T-001` a — Gate: `true`\n")
         xt.write_state(
             {"active": True, "plan": plan, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base
         )
         self.assertIn(xt.EXIT_BUDGET, msgs()[0])
-        self.write(plan, "- [x] `T-001` a — Gate: `true`\n")
         xt.write_state({"active": True, "plan": plan, "blocked": True}, self.base)  # PLAN còn → `unblock`
         self.assertIn(xt.EXIT_UNBLOCK, msgs()[0])
         xt.write_state(

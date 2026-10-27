@@ -4685,18 +4685,19 @@ def _doctor_state(base: Path) -> List[Finding]:
 
 def _doctor_loop(st: Dict[str, Any], base: Path) -> List[Finding]:
     """Cảnh báo vòng bị chặn/mất PLAN — lối ra lấy từ đúng helper của `loop init`/`attach`/`unblock` (D-208, review #296)."""
-    live = bool(st.get("active")) and not _budget_spent(st)
-    if st.get("blocked"):
-        if not st.get("active"):
+    active = bool(st.get("active"))
+    live, plan_ok = active and not _budget_spent(st), bool(_plan_tasks(base, st))
+    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: PLAN trước ngân sách
+        if not active:
             end = _loop_exit(st, base)[1]
+        elif not plan_ok:
+            end = _plan_lost_exit(st, live)
         else:
-            end = _blocked_exit(st, base, live=True) if live else EXIT_BUDGET
+            end = EXIT_UNBLOCK if live else EXIT_BUDGET
         return [Finding("state", "warn", f"autopilot đang BLOCKED: {st.get('blocked_reason') or '?'} — {end}")]
     plan = st.get("plan")
-    if live and plan and not _plan_tasks(base, st):
-        return [
-            Finding("state", "warn", f"vòng lặp đang bật nhưng PLAN `{plan}` mất/rỗng — {_plan_lost_exit(st, True)}")
-        ]
+    if active and plan and not plan_ok:
+        return [Finding("state", "warn", f"vòng lặp đang bật (PLAN `{plan}`) nhưng {_plan_lost_exit(st, live)}")]
     return []
 
 
@@ -7335,10 +7336,10 @@ def _blocked_exit(st: Dict[str, Any], base: Path, live: bool) -> str:
 def _blocked_by_state(st: Dict[str, Any]) -> bool:
     """Vòng bị chặn từ chính state: cờ `blocked` (mọi nguồn — `loop block`, `ci-triage`), lỗi lặp ≥ `max_same_failure`,
     task đỏ quá trần. PLAN mất/rỗng không tính: nguồn đó không mở bằng `unblock` (ADR-0052 §6)."""
-    cnt, cap = st.get("same_failure_count", 0), st.get("max_same_failure", MAX_SAME_FAILURE)
-    same = type(cnt) is int and cnt >= (
-        cap if type(cap) is int else MAX_SAME_FAILURE
-    )  # sai kiểu → không tính, không traceback
+    try:  # cùng phép so với verdict (`_verdict_loop_state`); sai kiểu không so được → không tính (review #296)
+        same = st.get("same_failure_count", 0) >= st.get("max_same_failure", MAX_SAME_FAILURE)
+    except TypeError:
+        same = False
     return bool(st.get("blocked")) or same or bool(_task_runs_blocking(st))
 
 
