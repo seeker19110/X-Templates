@@ -11059,11 +11059,19 @@ def cmd_autonomy_bench(args: argparse.Namespace) -> int:
 
 def perf_load(path: str) -> List[float]:
     """Mẫu đo từ file: mảng JSON, `{"samples": [...]}` hoặc các số cách nhau bằng khoảng trắng/dấu phẩy."""
-    text = Path(path).read_text(encoding="utf-8")
+    return perf_samples(Path(path).read_text(encoding="utf-8"), path)
+
+
+def _perf_json(text: str) -> Any:
     try:
-        data: Any = json.loads(text)
+        return json.loads(text)
     except ValueError:
-        data = None
+        return None
+
+
+def perf_samples(text: str, path: str) -> List[float]:
+    """Các số đo trong nội dung `text` của file `path` (định dạng như `perf_load`)."""
+    data = _perf_json(text)
     if isinstance(data, dict):
         data = data.get("samples")
     if not isinstance(data, list):
@@ -11310,12 +11318,9 @@ def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]
     return touched, suspect
 
 
-def perf_cmd_of(path: str) -> Any:
-    """`cmd` đã ghi trong file mẫu của `perf sample` (không có → None)."""
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except ValueError:
-        return None
+def perf_cmd_of(text: str) -> Any:
+    """`cmd` đã ghi trong nội dung file mẫu của `perf sample` (không có → None)."""
+    data = _perf_json(text)
     return data.get("cmd") if isinstance(data, dict) else None
 
 
@@ -11333,12 +11338,10 @@ PERF_V2_SAME = ("unit", "cmd", "higher_is_better", "harness_sha256")  # cùng `e
 PerfMeta = Optional[Dict[str, Any]]
 
 
-def perf_meta(path: str) -> PerfMeta:
-    """Mẫu v2 (`schema: 2`) của file; v1/mảng/số thô → None. ValueError khi `schema` khác 2 hoặc trường thiếu/sai kiểu."""
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except ValueError:
-        return None
+def perf_meta(text: str, path: str) -> PerfMeta:
+    """Mẫu v2 (`schema: 2`) trong nội dung `text` của file `path`; v1/mảng/số thô → None. ValueError khi `schema` khác 2
+    hoặc trường thiếu/sai kiểu."""
+    data = _perf_json(text)
     if not isinstance(data, dict) or "schema" not in data:
         return None
     if type(data["schema"]) is not int or data["schema"] != 2:
@@ -11388,14 +11391,15 @@ def perf_gaps(mb: PerfMeta, ma: PerfMeta, higher: bool, base: Optional[Tuple[str
 
 
 def _perf_compare_cmd(args: argparse.Namespace) -> int:
-    try:
-        before, after = perf_load(args.before), perf_load(args.after)
-        mb, ma = perf_meta(args.before), perf_meta(args.after)
+    try:  # đọc MỘT lần mỗi file: `<(cat b.json)`/FIFO chỉ đọc được một lần (lần sau rỗng → v2 thành v1)
+        tb, ta = (Path(f).read_text(encoding="utf-8") for f in (args.before, args.after))
+        before, after = perf_samples(tb, args.before), perf_samples(ta, args.after)
+        mb, ma = perf_meta(tb, args.before), perf_meta(ta, args.after)
         base = None if args.base is None else (args.base, perf_rev(args.base))
     except (ValueError, RuntimeError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
-    cb, ca = perf_cmd_of(args.before), perf_cmd_of(args.after)
+    cb, ca = perf_cmd_of(tb), perf_cmd_of(ta)
     if cb is not None and ca is not None and cb != ca:  # cả khi một bên v1 (mảng `cmd` tự ghi)
         print(f"✗ {PERF_REFUSE}: hai file đo hai lệnh khác nhau (cmd): {cb} ≠ {ca}", file=sys.stderr)
         return 2

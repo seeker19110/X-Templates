@@ -467,9 +467,9 @@ class PerfCliTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         rc, _, _ = run_main("perf", "compare", self.p("a.json"), self.p("slow.json"), "--no-regress")
         self.assertEqual(rc, 0)  # một bên không ghi lệnh (tay làm): không chặn
-        self.assertIsNone(xt.perf_cmd_of(self.p("slow.json")))  # mảng JSON, không phải đối tượng
+        self.assertIsNone(xt.perf_cmd_of((self.tmp / "slow.json").read_text()))  # mảng JSON, không phải đối tượng
         (self.tmp / "t.txt").write_text("1 2 3")
-        self.assertIsNone(xt.perf_cmd_of(self.p("t.txt")))
+        self.assertIsNone(xt.perf_cmd_of((self.tmp / "t.txt").read_text()))
 
     def test_runs_must_be_positive(self):
         for argv in (
@@ -696,7 +696,7 @@ class PerfSampleV2Test(unittest.TestCase):
         self.assertNotIn("unverified-manual", doc)
         self.assertNotIn("commit", doc)
         self.assertEqual(len(xt.perf_load(str(self.tmp / "s.json"))), 1)
-        self.assertEqual(xt.perf_cmd_of(str(self.tmp / "s.json")), doc["cmd"])
+        self.assertEqual(xt.perf_cmd_of((self.tmp / "s.json").read_text()), doc["cmd"])
         self.assertNotIn("⚠", err)
 
     def test_sample_v2_nproc_uses_affinity(self):
@@ -1059,6 +1059,43 @@ class PerfCompareV2Test(unittest.TestCase):
         rc, _, err = self.compare(slow, self.pair()[1], "--base", "main")
         self.assertEqual(rc, 2)  # v1 không có head: không chứng minh được baseline là --base
         self.assertIn("before.head None ≠ --base main", err)
+
+    def test_v2_strict_against_raw_array(self):
+        """Hai lựa chọn chặt khi bên kia là mảng thô (v1): bên v2 vẫn bị xét — baseline bẩn, chiều tốt lệch cờ → exit 2."""
+        raw = self.put("raw.json", FAST)
+        for name, over, msg in (
+            ("dirty", {"dirty": True}, "before.dirty"),
+            ("hib", {"higher_is_better": True}, "--higher"),
+        ):
+            with self.subTest(name):
+                before = self.put(f"b-{name}.json", {**V2, **over, "samples": SLOW})
+                rc, doc, err = self.compare(before, raw)
+                self.assertEqual((rc, doc), (2, {}))
+                self.assertIn(REFUSE, err)
+                self.assertIn(msg, err)
+
+    def test_compare_reads_pipe_once(self):
+        """`perf compare <(cat b.json) a.json`: ống chỉ đọc được một lần — mẫu v2 qua ống vẫn là v2 (luật từ chối áp,
+        không nhãn `unverified-manual`), cả bên trước lẫn bên sau."""
+
+        def via_pipe(data: dict) -> str:
+            r, w = os.pipe()
+            self.addCleanup(os.close, r)
+            os.write(w, json.dumps(data).encode())
+            os.close(w)
+            return f"/dev/fd/{r}"
+
+        bad = {**V2, "dirty": True, "harness_sha256": "2" * 64, "samples": SLOW}
+        rc, _, err = self.compare(via_pipe(bad), self.pair()[1])
+        self.assertEqual(rc, 2)
+        self.assertIn("before.dirty", err)
+        self.assertIn("lệch harness_sha256", err)
+        rc, _, err = self.compare(self.pair()[0], via_pipe({**V2, "harness_sha256": "2" * 64, "samples": FAST}))
+        self.assertEqual(rc, 2)
+        self.assertIn("lệch harness_sha256", err)
+        rc, doc, err = self.compare(via_pipe({**V2, "samples": SLOW}), via_pipe({**V2, "samples": FAST}))
+        self.assertEqual((rc, doc["verdict"]), (0, "improved"), err)
+        self.assertNotIn("unverified-manual", doc)
 
     def test_base_outside_repo_exit_2(self):
         with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)}):
