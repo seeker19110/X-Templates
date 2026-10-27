@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-26 · Nhánh: main
 
 ## Đang làm
-- 2026-10-26 **Nghiên cứu ba vòng bản 2** (#287): `research/2026-10-26-autopilot-complete-optimize.md` — 6 tái hiện (A/B luân phiên không `blocked`, mất cập nhật state, perf metadata/vân tay cây), hợp đồng §9, FLOW-01…26, lát §11; chưa D-NNN/ADR.
+- 2026-10-26 **Nghiên cứu ba vòng bản 2** (#287, `research/2026-10-26-autopilot-complete-optimize.md`) → **lát 1** §11: ADR-0051/D-201 nối phiên (`loop attach`/`resolve`/`unblock`, `resume` giữ + cảnh báo); kế: code, rồi không-tiến-triển theo task, `rev` state, perf metadata v2.
 - 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
 - 2026-10-25 **3.26.0 Workflow** (D-184…D-191, ADR-0049): `/audit` §3, `/research` ≥ 3 mục dùng tool Workflow khi người gõ trực tiếp (cùng luật nhánh subagent, lô ≤ 5); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token, kiểm `maxTurns`/`effort`/guard có áp cho agent.
 - 2026-10-26 **PLAN-harden-2026-10-26 + PLAN-harden-2026-10-26b** (D-193/194, `/complete`): 20 MUST tick có `— Kiểm:` (`unchecked_must` 57 → 37; PLAN-harden-2026-10-26c: → 0, D-195); CI `checks` chạy `blueprint-status --strict --run`; `_load_guard` báo lỗi nạp (ERR-001).
@@ -25,7 +25,7 @@
 7. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0049) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0051) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage 100 % (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge). Tên: X-stored → X-Templates (ADR-0006/0007).
