@@ -2618,17 +2618,25 @@ def tree_fingerprint(base: Path) -> Optional[str]:
     head = _git(base, "rev-parse", "HEAD")
     if head.returncode != 0:
         return None
-    excl = ":(exclude).autopilot"
-    h = hashlib.sha256(head.stdout.encode())
-    h.update(_git(base, "diff", "HEAD", "--binary", "--", ".", excl).stdout.encode())
-    for name in _git(base, "ls-files", "--others", "--exclude-standard", "-z", "--", ".", excl).stdout.split("\0"):
+    return tree_hash(base, head.stdout, lambda *a: _git(base, *a).stdout, [])[0]
+
+
+def tree_hash(base: Path, head: str, git: Callable[..., str], excl: List[str]) -> Tuple[str, bool]:
+    """(sha256, bẩn?) của cây: `head` + diff so HEAD + tên/nội dung file chưa track, trừ `.autopilot/` và pathspec `excl`.
+    `git(*args)` trả stdout — nuốt lỗi (`tree_fingerprint`) hay ném (`perf sample`) là việc của bên gọi."""
+    spec = ["--", ".", ":(exclude).autopilot", *excl]
+    h = hashlib.sha256(head.encode())
+    diff = git("diff", "HEAD", "--binary", *spec)
+    h.update(diff.encode())
+    names = [n for n in git("ls-files", "--others", "--exclude-standard", "-z", *spec).split("\0") if n]
+    for name in names:
         f = base / name
-        if not name or not f.is_file():
+        if not f.is_file():
             continue
         h.update(name.encode() + b"\0")
         size = f.stat().st_size
         h.update(f.read_bytes() if size <= FINGERPRINT_MAX_FILE else str(size).encode())
-    return h.hexdigest()
+    return h.hexdigest(), bool(diff or names)
 
 
 def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all: bool) -> List[Dict[str, Any]]:
@@ -11325,27 +11333,81 @@ def _perf_compare_cmd(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+PERF_NOT_REPO = "fatal: not a git repository (or any "  # chỉ câu "đi hết lên cha không thấy repo" (LC_ALL=C)
+
+
+def perf_where(cwd: Path) -> Optional[Path]:
+    """Gốc repo git của `cwd`; None chỉ khi git (LC_ALL=C) nói chắc "không phải repo" — exit 128 với câu `PERF_NOT_REPO`.
+    Mọi thứ khác là repo lỗi → RuntimeError: không có git trên PATH (không biết có phải repo không), `dubious ownership`,
+    file `.git` trỏ gitdir mất ("not a git repository: <đường>" — khác câu trên), đứng trong `.git`/repo bare, quá giờ."""
+    try:
+        r = _git(cwd, "rev-parse", "--show-toplevel", env={**_perf_env(), "LC_ALL": "C"})
+    except OSError as exc:
+        raise RuntimeError(f"không chạy được git: {exc}") from None
+    if r.returncode == 0:
+        return Path(r.stdout.rstrip("\n"))
+    if r.returncode == 128 and r.stderr.startswith(PERF_NOT_REPO):
+        return None
+    raise RuntimeError(f"git rev-parse lỗi: {r.stderr.strip() or r.returncode}")
+
+
+def perf_tree(out: str) -> Tuple[Optional[Path], Dict[str, Any]]:
+    """(gốc repo, `head`/`dirty`/`tree_fp`) của thư mục đang đứng — gọi TRƯỚC lần chạy đầu (lệnh đo tạo file không làm đổi
+    mẫu). Bỏ `.autopilot/` và file `out` khi nó nằm trong cây (so đường thật, khớp literal); git lỗi → RuntimeError, không
+    coi là sạch. Không phải repo → `head` rỗng, `dirty`/`tree_fp` null, nhãn `unverified-manual`."""
+    base = perf_where(Path.cwd())
+    if base is None:
+        return None, {"head": "", "dirty": None, "tree_fp": None, "unverified-manual": True}
+    head = _git(base, "rev-parse", "--verify", "HEAD", env=_perf_env())
+    if head.returncode != 0:
+        raise RuntimeError(f"HEAD chưa có commit hoặc không đọc được: {head.stderr.strip() or head.returncode}")
+    dest = Path(out).absolute()
+    excl: List[str] = []
+    with contextlib.suppress(ValueError):  # `out` ngoài cây: không loại gì
+        excl.append(":(exclude,literal)" + (dest.parent.resolve() / dest.name).relative_to(base.resolve()).as_posix())
+    fp, dirty = tree_hash(base, head.stdout, lambda *a: _perf_git(base, *a), excl)
+    return base, {"head": head.stdout.strip(), "dirty": dirty, "tree_fp": fp}
+
+
+def perf_harness(base: Optional[Path], cmd: List[str], globs: List[str]) -> str:
+    """sha256 của lệnh đo + (tên tương đối, sha256 nội dung) các file khớp `--harness` (sắp theo tên; cùng glob với
+    `perf guard --locked`) — cùng bộ đo ở worktree khác cho cùng hash. Glob không khớp file nào → RuntimeError (như
+    `--locked`); không có `--harness` → chỉ hash lệnh, cảnh báo. Ngoài repo git mà có `--harness` → RuntimeError: không
+    có danh sách file của repo để khớp cùng ngữ nghĩa, và mẫu đó đằng nào cũng `unverified-manual`."""
+    parts: List[List[str]] = []
+    if not globs:
+        print("⚠ không có --harness: harness_sha256 chỉ phủ lệnh đo — đổi bộ đo không bị phát hiện", file=sys.stderr)
+    elif base is None:
+        raise RuntimeError("--harness cần repo git (khớp glob trên file của repo như `perf guard --locked`)")
+    else:
+        known = sorted(set(perf_known(base)))
+        dead = [g for g in globs if not any(perf_match(f, g) for f in known)]
+        if dead:
+            raise RuntimeError(f"--harness không khớp file nào trong repo: {', '.join(dead)}")
+        matched = [f for f in known if any(perf_match(f, g) for g in globs)]
+        parts = [[f, hashlib.sha256((base / f).read_bytes()).hexdigest()] for f in matched]
+    return hashlib.sha256(json.dumps([cmd, parts]).encode()).hexdigest()
+
+
 def _perf_sample_cmd(args: argparse.Namespace) -> int:
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         print("✗ thiếu lệnh cần đo: xt.py perf sample --out F -- <lệnh>", file=sys.stderr)
+        return 2
+    try:  # mọi thứ về cây và bộ đo đo TRƯỚC lần chạy đầu (thư mục đang đứng — worktree gốc ≠ CLAUDE_PROJECT_DIR)
+        base, tree = perf_tree(args.out)
+        harness = perf_harness(base, cmd, args.harness or [])
+    except RuntimeError as exc:
+        print(f"✗ không ghi mẫu: {exc}", file=sys.stderr)
         return 2
     try:
         samples = perf_sample(cmd, args.runs, args.warmup, args.timeout)
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
-    sha = _git(Path.cwd(), "rev-parse", "HEAD", env=_perf_env())  # thư mục đang đo (worktree gốc ≠ CLAUDE_PROJECT_DIR)
-    doc = {
-        "samples": samples,
-        "unit": "s",
-        "cmd": cmd,
-        "runs": args.runs,
-        "warmup": args.warmup,
-        "commit": sha.stdout.strip() if sha.returncode == 0 else "",
-        "python": sys.version.split()[0],
-        "platform": sys.platform,
-    }
+    env = {"platform": sys.platform, "python": sys.version.split()[0], "nproc": os.cpu_count()}
+    doc = {"schema": 2, "samples": samples, "unit": "s", "cmd": cmd, "runs": args.runs, "warmup": args.warmup}
+    doc.update(higher_is_better=args.higher_is_better, env=env, **tree, harness_sha256=harness)
     Path(args.out).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"✓ {len(samples)} mẫu → {args.out} (trung vị {statistics.median(samples):.6g} s)")
     return 0
@@ -11933,6 +11995,8 @@ def build_parser() -> argparse.ArgumentParser:
     psa.add_argument("--runs", type=_positive_int, default=PERF_MIN_RUNS)
     psa.add_argument("--warmup", type=_nonneg_int, default=2)
     psa.add_argument("--timeout", type=float, default=300.0)
+    psa.add_argument("--higher-is-better", action="store_true", help="ghi vào mẫu: đại lượng càng cao càng tốt")
+    psa.add_argument("--harness", action="append", metavar="GLOB", help="file bộ đo (lặp được) đưa vào harness_sha256")
     psa.add_argument("cmd", nargs=argparse.REMAINDER)
     pgu = ppsub.add_parser("guard", help="diff so với --base không được đụng file khoá; báo dòng đáng ngờ")
     pgu.add_argument("--base", required=True, help="ref gốc (vd origin/main)")
