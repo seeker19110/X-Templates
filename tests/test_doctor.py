@@ -342,18 +342,52 @@ class DoctorHooksTest(DoctorCase):
 
 class DoctorStateAndEnvTest(DoctorCase):
     def test_state_blocked_and_missing_plan(self):
-        xt.write_state(
-            {"active": True, "plan": "docs/autopilot/PLAN.md", "blocked": True, "blocked_reason": "cần khoá"}, self.base
-        )
-        msgs = [f.msg for f in self.findings() if f.code == "state"]
-        self.assertEqual(len(msgs), 2)
-        self.assertIn("BLOCKED: cần khoá", msgs[0])
-        self.assertIn("không còn PLAN `docs/autopilot/PLAN.md`", msgs[1])
-        self.write("docs/autopilot/PLAN.md", "")
-        xt.write_state({"active": True, "plan": "docs/autopilot/PLAN.md", "blocked": True}, self.base)
+        # Lối ra lấy từ đúng helper của `loop init`/`attach`/`unblock` (D-208, review #296).
+        def msgs() -> list:
+            return [f.msg for f in self.findings() if f.code == "state"]
+
+        plan = "docs/autopilot/PLAN.md"
+        xt.write_state({"active": True, "plan": plan, "blocked": True, "blocked_reason": "cần khoá"}, self.base)
         self.assertEqual(
-            [f.msg for f in self.findings() if f.code == "state"][0].split(" — ")[0], "autopilot đang BLOCKED: ?"
+            msgs(),
+            [
+                "autopilot đang BLOCKED: cần khoá — PLAN mất/rỗng → người xem lý do chặn rồi `loop stop` rồi `loop init --plan <mới>`"
+            ],
         )
+        xt.write_state({"active": True, "plan": plan}, self.base)  # không cờ, PLAN mất → một dòng, có `loop stop`
+        self.assertEqual(
+            msgs(),
+            [f"vòng lặp đang bật (PLAN `{plan}`) nhưng PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`"],
+        )
+        self.write(plan, "")  # PLAN rỗng cũng vậy
+        self.assertIn("mất/rỗng", msgs()[0])
+        xt.write_state({"active": True, "plan": plan, "blocked": True}, self.base)
+        self.assertEqual(msgs()[0].split(" — ")[0], "autopilot đang BLOCKED: ?")
+        # hết vòng/hạn + PLAN mất: không cờ vẫn cảnh báo, không `loop stop` (init chạy thẳng); có cờ → người xem trước
+        xt.write_state({"active": True, "plan": plan, "iterations": 50, "max_iterations": 50}, self.base)
+        self.assertEqual(msgs(), [f"vòng lặp đang bật (PLAN `{plan}`) nhưng PLAN mất/rỗng → `loop init --plan <mới>`"])
+        xt.write_state(
+            {"active": True, "plan": plan, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base
+        )
+        self.assertIn("người xem lý do chặn rồi `loop init --plan <mới>`", msgs()[0])
+        # hết vòng/hạn, PLAN còn → `unblock` từ chối, nên trỏ đợt kế
+        self.write(plan, "- [x] `T-001` a — Gate: `true`\n")
+        xt.write_state(
+            {"active": True, "plan": plan, "blocked": True, "iterations": 50, "max_iterations": 50}, self.base
+        )
+        self.assertIn(xt.EXIT_BUDGET, msgs()[0])
+        xt.write_state({"active": True, "plan": plan, "blocked": True}, self.base)  # PLAN còn → `unblock`
+        self.assertIn(xt.EXIT_UNBLOCK, msgs()[0])
+        xt.write_state(
+            {"active": True, "plan": plan, "blocked": True, "iterations": "3"}, self.base
+        )  # sai kiểu: vẫn báo
+        self.assertIn(xt.EXIT_UNBLOCK, msgs()[0])
+        # vòng đã kết thúc: như `_loop_exit` — đợt `done` bị gắn cờ sau đó không trỏ `unblock`; PLAN mất → không `loop stop`
+        fv = {"verdict": "done", "reason": "xong"}
+        xt.write_state({"active": False, "plan": plan, "blocked": True, "final_verdict": fv}, self.base)
+        self.assertIn("đợt đã xong → `loop init --plan <đợt kế>`", msgs()[0])
+        xt.write_state({"active": False, "plan": "MAT.md", "blocked": True}, self.base)
+        self.assertIn("người xem lý do chặn rồi `loop init --plan <mới>`", msgs()[0])
         xt.write_state({"active": False}, self.base)
         self.assertNotIn("state", [f.code for f in self.findings()])
 

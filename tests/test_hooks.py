@@ -1397,7 +1397,7 @@ class StopAndSessionTest(unittest.TestCase):
         self.assertIn("chế độ một phiên", ctx)
 
     def test_stop_hook_session_bound_session_start_warns_after_clear(self):
-        # T-2522: /clear đổi CLAUDE_CODE_SESSION_ID → SessionStart phải nhắc `loop resume`, không để vòng dừng im lặng.
+        # T-2522: /clear đổi CLAUDE_CODE_SESSION_ID → SessionStart phải nhắc `loop attach`, không để vòng dừng im lặng.
         tmp = self.project_with_loop()
         sf = tmp / ".autopilot" / "state.json"
         st = json.loads(sf.read_text(encoding="utf-8"))
@@ -1409,7 +1409,7 @@ class StopAndSessionTest(unittest.TestCase):
             return json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
         self.assertIn("vòng gắn phiên khác", ctx("bbbb-moi"))
-        self.assertIn("loop resume", ctx("bbbb-moi"))
+        self.assertIn("loop attach", ctx("bbbb-moi"))
         self.assertNotIn("vòng gắn phiên khác", ctx("aaaa-cu"))
 
     def test_pre_compact_never_blocks_when_xt_breaks(self):

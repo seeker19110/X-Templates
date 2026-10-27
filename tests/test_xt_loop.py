@@ -216,9 +216,9 @@ class StopHookSessionBoundTest(TmpRepoCase):
         self.assertEqual(json.loads(out)["decision"], "block")
 
     def test_stop_hook_session_bound_status_warns_on_mismatch(self) -> None:
-        # /clear đổi CLAUDE_CODE_SESSION_ID: `loop status` (SessionStart in lại) nhắc `loop resume`.
+        # /clear đổi CLAUDE_CODE_SESSION_ID: `loop status` (SessionStart in lại) nhắc `loop attach`.
         run_main("loop", "init")
-        warn = "vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop resume`"
+        warn = "vòng gắn phiên khác — nếu đây là phiên tiếp tục (sau /clear) chạy `xt.py loop attach`"
         cases = {SESSION: False, OTHER: True, "": False}  # chưa biết phiên hiện tại → không đoán
         for sid, mismatch in cases.items():
             with self.subTest(sid=sid), unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": sid}):
@@ -394,12 +394,47 @@ class LoopInitCarryTest(TmpRepoCase):
         rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
         self.assertEqual(rc, 2)
         self.assertIn("verdict `blocked`: không thấy PLAN", err)
-        self.assertIn("`loop stop`", err)
+        self.assertIn("`loop stop` rồi `loop init --plan <mới>`", err)
+        self.assertNotIn("người xem", err)
+        # D-208: có cờ nhưng PLAN mất → vẫn trỏ stop, không unblock; chặn cần người thì người xem trước (review #296)
+        run_main("loop", "block", "--reason", "cần khoá API")
+        err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[2]
+        self.assertIn("cần khoá API — PLAN mất/rỗng → người xem lý do chặn rồi `loop stop` rồi", err)
+        # review #296: PLAN không đọc được như UTF-8 → coi như mất, không traceback
+        self.plan.with_name("PLAN-1.md").rename(self.plan)
+        self.plan.write_bytes("- [ ] `T-001` ".encode("utf-16"))
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("người xem lý do chặn rồi `loop stop`", err)
+        # làm theo lối ra với PLAN UTF-16 còn trên đĩa: stop + init không traceback (`_deferred_to_keep`, review #296)
+        self.assertEqual(run_main("loop", "stop", "--reason", "người đã xem")[0], 0)
+        self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
         self.assertEqual(run_main("loop", "stop", "--reason", "đợt 1 xong")[0], 0)
         self.assertEqual(run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")[0], 0)
 
-    def test_init_after_loop_block_points_to_resume(self) -> None:
-        # Review #268: `blocked` do `loop block`/lỗi lặp chờ người xem rồi `loop resume` (loop-design.md) — không gợi `loop stop`.
+    def test_utf16_plan_and_bad_types_no_traceback(self) -> None:
+        # Review #296: PLAN không phải UTF-8, không cờ → verdict `blocked` có lý do (không ghi đè vòng sống, status không
+        # traceback); helper lối ra chịu state sai kiểu.
+        run_main("loop", "init")
+        started = xt.read_state(self.repo)["started"]
+        self.plan.write_bytes("- [ ] `T-001` ".encode("utf-16"))
+        rc, out, _ = run_main("loop", "status")
+        self.assertEqual(rc, 0)
+        self.assertIn("PLAN không đọc được như UTF-8", out)
+        self.plan.with_name("PLAN-2.md").write_text("- [ ] `T-004` d — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("PLAN mất/rỗng → `loop stop` rồi", err)
+        self.assertEqual(xt.read_state(self.repo)["started"], started)
+        self.plan.write_text("- [ ] `T-001` a — Gate: `true`\n", encoding="utf-8")
+        # `_blocked_by_state` chịu state sai kiểu (lối ra in cho người); cap sai kiểu → trần mặc định
+        self.assertFalse(xt._blocked_by_state({"same_failure_count": "2"}))
+        self.assertFalse(xt._blocked_by_state({"same_failure_count": 3, "max_same_failure": "x"}))
+        self.assertTrue(xt._blocked_by_state({"same_failure_count": 3.0}))  # số thực: như verdict
+        self.assertFalse(xt._budget_spent({"iterations": "3"}))
+
+    def test_init_after_loop_block_points_to_unblock(self) -> None:
+        # Review #268: `blocked` do `loop block`/lỗi lặp chờ người xem rồi `loop unblock` (loop-design.md) — không gợi `loop stop`.
         run_main("loop", "init")
         for reason in (
             "cần chủ repo ký",
@@ -409,7 +444,7 @@ class LoopInitCarryTest(TmpRepoCase):
             run_main("loop", "block", "--reason", reason)
             rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")
             self.assertEqual(rc, 2)
-            self.assertIn(f"verdict `blocked`: {reason} — người xem rồi `loop resume --reason`)", err)
+            self.assertIn(f"verdict `blocked`: {reason} — người xem rồi `loop unblock --reason …`)", err)
             self.assertNotIn("`loop stop`", err)
             self.assertNotIn("`loop init --force`", err)  # không nối đuôi gợi lối ra trái nhau
         run_main("loop", "init", "--force")  # nguồn state thứ hai: lỗi lặp ≥ 3 (LOOP-DESIGN-005) — AUD-TEST-021
@@ -418,7 +453,7 @@ class LoopInitCarryTest(TmpRepoCase):
         rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN.md")
         self.assertEqual(rc, 2)
         self.assertIn("cùng một lỗi lặp 3 lần (T-001)", err)
-        self.assertIn("người xem rồi `loop resume --reason`)", err)
+        self.assertIn("người xem rồi `loop unblock --reason …`)", err)
         self.assertNotIn("`loop stop`", err)
 
     def test_loop_init_carry_needs_same_spec_and_files(self) -> None:
@@ -1095,11 +1130,11 @@ class TaskRunsTest(TmpRepoCase):
         v = self.verdict()
         self.assertEqual((v["verdict"], v["reason"], v["task"]), ("blocked", TR_REASON.format(n=6, m=2), "T-001"))
         self.assertTrue(run_main("loop", "status")[1].startswith("verdict: blocked"))
-        # vòng bị chặn vì `task_runs` là vòng sống: `loop init` chỉ lối ra `resume`, không ghi đè
+        # vòng bị chặn vì `task_runs` là vòng sống: `loop init` chỉ lối ra `unblock`, không ghi đè
         rc, _, err = run_main("loop", "init")
         self.assertEqual(rc, 2)
         self.assertIn("6 lần đỏ, 2 chữ ký khác nhau", err)
-        self.assertIn("loop resume --reason", err)
+        self.assertIn("loop unblock --reason", err)
 
     def test_task_runs_r6_same_signature_unchanged(self) -> None:
         run_main("loop", "init")
