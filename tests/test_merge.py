@@ -1617,6 +1617,9 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two})["action"], "fix")
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two[::-1]})["action"], "fix")
         self.assertEqual(xt.review_rounds([{"clean": False}, {"clean": False}], after), 2)  # thiếu `at` vẫn tính
+        # review cùng giây với mốc rethink tính là trước nó (không đếm); muộn hơn một giây thì đếm
+        self.assertEqual(xt.review_rounds([{"clean": False, "at": "2026-10-27T02:30:00Z"}], after), 0)
+        self.assertEqual(xt.review_rounds([{"clean": False, "at": "2026-10-27T02:30:01Z"}], after), 1)
         # pha build: chưa có review kết luận chặn → hoãn thành nợ, `inconclusive` không chặn; review chặn vẫn đếm lượt
         self.assertEqual(self.act(lane="chuẩn", delivery_phase="build")["action"], "wait")
         incs = {"reviews": [inc, {**b2, "inconclusive": True}]}
@@ -1707,16 +1710,18 @@ class PrNextCliTest(unittest.TestCase):
             f"### D-003 · {later} · PR #70 tách?",  # #70 không phải #7
             "### D-004 · hỏng · PR #7 tách?",  # mốc hỏng
             "### D-006 · 2099-01-01T00:00:00+00:00 · PR #7 tách?",  # mốc tương lai: dùng lại được mãi (review #298)
+            f"### D-007 · {self.soon(600)} · PR #7 tách?",  # quá độ lệch 5 phút
             f"### D-005 · {later} · PR #7 quá trần review: tách PR?",
         )
         missing = "không có trong docs/autopilot/DECISIONS.md (worktree đang sửa hoặc dự án) với câu hỏi nhắc #7"
         for did, why in (
-            ("D-001", "D-001 ghi trước review chưa sạch cuối của PR #7"),
+            ("D-001", "D-001 không ghi SAU review chưa sạch cuối của PR #7 (trước hoặc cùng giây)"),
             ("D-002", missing),
             ("D-003", missing),
             ("D-004", missing),
             ("D-009", missing),
             ("D-006", "D-006 có mốc ở tương lai (2099-01-01T00:00:00+00:00)"),
+            ("D-007", "D-007 có mốc ở tương lai"),
             ("D-5", "--decision phải dạng D-NNN, không phải 'D-5'"),
             ("D-005|.*", "--decision phải dạng D-NNN"),
         ):
@@ -1725,9 +1730,7 @@ class PrNextCliTest(unittest.TestCase):
                 self.assertEqual(rc, 2)
                 self.assertIn(why, err)
         bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
-        self.assertIn(
-            "D-005 ghi trước review chưa sạch cuối", self.rethink("D-005", bad_at)[2]
-        )  # mốc review hỏng → chặt
+        self.assertIn("review đã đăng của PR #7 thiếu/hỏng mốc `at`", self.rethink("D-005", bad_at)[2])  # chặt
         auto = {**self.big, "autoMergeRequest": {"enabledAt": "x"}}
         self.assertIn("là `disable-auto-merge`, không phải `rethink`", self.rethink("D-005", auto)[2])
         rc, out, _ = self.rethink("D-005")
@@ -1754,7 +1757,9 @@ class PrNextCliTest(unittest.TestCase):
         )
         rc, _, err = self.rethink("D-020", p)
         self.assertEqual(rc, 2)
-        self.assertIn("D-020 ghi trước review chưa sạch cuối của PR #7", err)
+        self.assertIn("D-020 không ghi SAU review chưa sạch cuối của PR #7", err)
+        tie = {**self.big, "xtReviews": [r1, {**r2, "at": "2026-10-27T02:00:00Z"}]}  # cùng giây với D-020 → từ chối
+        self.assertIn("(trước hoặc cùng giây)", self.rethink("D-020", tie)[2])
         self.assertEqual(self.rethink("D-021", p)[0], 0)
         r3 = {"head": self.head, "clean": False, "at": self.soon(60)}  # sau mốc rethink, trước mốc D-021
         r4 = {**r3, "at": self.soon(120)}

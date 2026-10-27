@@ -9767,8 +9767,14 @@ def _rethink_problem(
         )
     if when > _dt.datetime.now(_dt.timezone.utc) + RETHINK_FUTURE_SLACK:
         return f"{did} có mốc ở tương lai ({when.isoformat()}) — ghi bằng `xt.py loop decide`, không sửa tay sổ"
-    if any(t is None or t >= when for t in (_iso_time(r.get("at")) for r in rec["reviews"] if not r.get("clean"))):
-        return f"{did} ghi trước review chưa sạch cuối của PR #{key} — cần quyết định mới (`xt.py loop decide`)"
+    times = [_iso_time(r.get("at")) for r in rec["reviews"] if not r.get("clean")]
+    if any(t is None for t in times):
+        return f"review đã đăng của PR #{key} thiếu/hỏng mốc `at` — không mở thêm lượt được; `xt.py loop defer`"
+    if any(t is not None and t >= when for t in times):
+        return (
+            f"{did} không ghi SAU review chưa sạch cuối của PR #{key} (trước hoặc cùng giây) — cần quyết định mới"
+            " (`xt.py loop decide`)"
+        )
     if any(r.get("decision") == did for r in rethinks):
         return f"{did} đã mở thêm lượt cho PR #{key} — cần quyết định mới"
     return None
