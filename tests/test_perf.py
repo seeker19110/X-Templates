@@ -8,6 +8,7 @@ import json
 import re
 import shutil
 import os
+import shutil
 import signal
 import statistics
 import subprocess
@@ -1564,27 +1565,111 @@ class PerfCompareV2Test(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("--base HEAD: không phân giải được thành commit", err)
 
-    def test_gate_example_runs_unchanged(self):
-        """Gate mẫu của optimization-loop.md: baseline `perf sample` ở worktree commit gốc (out ghi ra cây agent), candidate
-        ở cây agent chưa commit (bẩn) → so được, không nhãn `unverified-manual`; `--base` là ref gốc khớp `before.head`."""
-        repo, wt = self.tmp / "repo", self.tmp / "wt"
-        repo.mkdir()
+
+GATE_DOC = ROOT / "framework" / "11-autonomous-loop" / "optimization-loop.md"
+SLOWER = "sleep 0.05\n"  # candidate chậm hơn gốc (0,02 s) thật: verdict thật là regressed, không phụ thuộc nhiễu
+# Candidate gian lận (AUD-XFEAT-026/027): mã chạy trong lượt đo after, cùng uid với Gate.
+TAMPER_BASELINE = SLOWER + (  # sửa `samples` của mọi before.json tìm được, ngay trong lúc đang đo
+    'find "${TMPDIR:-/tmp}" . -name before.json -exec python3 -c \'import json, sys\n'
+    "for p in sys.argv[1:]:\n"
+    '    d = json.load(open(p)); d["samples"] = [x * 10 for x in d["samples"]]; json.dump(d, open(p, "w"))\' {} +\n'
+)
+TAMPER_TOOL = SLOWER + (  # tìm worktree gốc qua `git worktree list`, sửa công cụ chấm ở đó
+    "git worktree list --porcelain | sed -n '2,$s/^worktree //p' | while read -r wt; do python3 -c 'import sys\n"
+    'p = sys.argv[1] + "/.xtemplates/scripts/xt.py"; m = "def _perf_compare_cmd(args: argparse.Namespace) -> int:"\n'
+    's = open(p).read().replace(m, m + "\\n    print(\\"improved: GIẢ\\"); return 0", 1); open(p, "w").write(s)\' "$wt"; done\n'
+)
+TAMPER_USERSITE = SLOWER + (  # python3 không `-I` nạp usercustomize.py của user site
+    'd="$(python3 -m site --user-site)"; mkdir -p "$d"\n'
+    "printf '%s\\n' 'import sys' 'if \"compare\" in sys.argv: print(\"improved: GIẢ\"); raise SystemExit(0)' "
+    '>"$d/usercustomize.py"\n'
+)
+
+
+class PerfGateExampleTest(unittest.TestCase):
+    """Gate mẫu của optimization-loop.md chạy NGUYÊN VĂN (trích từ tài liệu) trên repo giả có `.xtemplates/scripts/xt.py`
+    và `origin/main`; candidate là `app.sh` chưa commit trong cây agent (bench gọi `./app.sh` của cây đang đứng)."""
+
+    def setUp(self):
+        patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        found = re.search(r"```bash\n(# scripts/perf-gate\.sh.*?)```", GATE_DOC.read_text(encoding="utf-8"), re.S)
+        self.assertIsNotNone(found, "không thấy khối Gate mẫu trong optimization-loop.md")
+        self.script = found.group(1)
+        (self.tmp / "bin").mkdir()
+        (self.tmp / "bin" / "python3").symlink_to(sys.executable)  # `python3` của Gate = Python chạy test
+
+    def gate(self, candidate: str) -> tuple[subprocess.CompletedProcess, Path, Path]:
+        """Dựng repo gốc + cây agent có `candidate`, chạy Gate; trả (kết quả, cây agent, TMPDIR của Gate)."""
+        root = Path(tempfile.mkdtemp(dir=self.tmp))
+        repo, tmpdir = root / "repo", root / "t"
+        (repo / ".xtemplates" / "scripts").mkdir(parents=True)
+        tmpdir.mkdir()
+        shutil.copy(ROOT / "scripts" / "xt.py", repo / ".xtemplates" / "scripts" / "xt.py")
+        files = {
+            "bench/run.sh": "#!/bin/sh\nexec sh ./app.sh\n",
+            "tests/equiv/check.sh": "true\n",
+            "scripts/perf-gate.sh": self.script,
+            "app.sh": "sleep 0.02\n",
+        }
+        for rel, body in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(body, encoding="utf-8")
+        (repo / "bench" / "run.sh").chmod(0o755)
         git(repo, "init", "-q", "-b", "main")
-        (repo / "bench").mkdir()
-        (repo / "bench" / "run.py").write_text("pass\n")
         git(repo, "add", ".")
-        git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
-        git(repo, "worktree", "add", "-q", "--detach", str(wt), "main")
-        (repo / "app.py").write_text("x = 2\n")  # thay đổi của agent, chưa commit
-        cmd = ("--runs", "3", "--warmup", "0", "--harness", "bench/*", "--", sys.executable, "bench/run.py")
-        os.chdir(wt)
-        self.assertEqual(run_main("perf", "sample", "--out", str(repo / "before.json"), *cmd)[0], 0)
-        os.chdir(repo)
-        self.assertEqual(run_main("perf", "sample", "--out", "after.json", *cmd)[0], 0)
-        rc, doc, err = self.compare("before.json", "after.json", "--base", "main", "--min-runs", "3")
-        self.assertIn(rc, (0, 1), err)
-        self.assertNotIn("unverified-manual", doc)
-        self.assertTrue(json.loads((repo / "after.json").read_text())["dirty"])
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "gốc")
+        git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        (repo / "app.sh").write_text(candidate, encoding="utf-8")  # thay đổi của agent, chưa commit
+        env = {
+            **os.environ,
+            "TMPDIR": str(tmpdir),
+            "PYTHONUSERBASE": str(root / "user"),  # user site riêng của test, không đụng HOME thật
+            "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
+        }
+        r = subprocess.run(["bash", "-c", self.script], cwd=repo, env=env, capture_output=True, text=True, timeout=300)
+        return r, repo, tmpdir
+
+    def test_gate_example_runs_unchanged(self):
+        """Candidate nhanh thật → improved, exit 0, không nhãn `unverified-manual`; mẫu đo không rơi vào cây agent; trap dọn
+        cả worktree lẫn thư mục tạm."""
+        r, repo, tmpdir = self.gate(": nhanh\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("improved:", r.stdout)
+        self.assertNotIn("unverified-manual", r.stdout)
+        status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True)
+        self.assertEqual(status.stdout, " M app.sh\n")
+        self.assertEqual(list(tmpdir.iterdir()), [])
+        wts = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"], capture_output=True, text=True
+        )
+        self.assertEqual(wts.stdout.count("worktree "), 1)
+
+    def test_gate_example_tamper_baseline_turns_red(self):
+        """(a) candidate sửa `samples` của before.json trong lúc đo → sha256 lệch → Gate đỏ, không improved giả."""
+        r, _, _ = self.gate(TAMPER_BASELINE)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("before.json bị sửa trong lượt đo", r.stderr)
+        self.assertNotIn("improved", r.stdout)
+
+    def test_gate_example_tamper_grader_scores_real(self):
+        """(b) candidate sửa `xt.py` ở worktree gốc, hoặc đặt usercustomize.py → công cụ chấm (xuất từ SHA gốc, `-I`)
+        vẫn chấm thật: regressed, exit 1, không in improved giả."""
+        for name, candidate in (("worktree", TAMPER_TOOL), ("usercustomize", TAMPER_USERSITE)):
+            with self.subTest(name):
+                r, _, _ = self.gate(candidate)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("regressed:", r.stdout)
+                self.assertNotIn("GIẢ", r.stdout + r.stderr)
+
+    def test_gate_example_tamper_control_fast_candidate_passes(self):
+        """(c) đối chứng: candidate nhanh thật, có đọc (không sửa) before.json → Gate xanh; kiểm tra không chặn oan."""
+        r, _, _ = self.gate('find "${TMPDIR:-/tmp}" . -name before.json -exec cat {} + >/dev/null\n')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("improved:", r.stdout)
 
 
 if __name__ == "__main__":
