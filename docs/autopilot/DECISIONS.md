@@ -1462,3 +1462,10 @@
 - Chọn: Giữ một PR: ba lệnh dùng chung _loop_exit, _interventions, _carry_interventions; tách ra thì PR đầu chứa code chung chưa có lệnh gọi
 - Lý do (tiêu chí chất lượng cuối): (3) bảng lối ra là một giao ước chung, review một lần thấy đủ ca; (2) đường lùi vẫn là revert một squash commit; như D-205
 - Đường lùi: revert squash #295; đợt sau tách theo task
+
+### D-208 · 2026-10-27T07:21:28+00:00 · Lối ra vòng bị chặn khi PLAN mất/rỗng mà state cũng có nguồn chặn (cờ/lỗi lặp): theo PLAN hay theo state? (review #295 lượt 2 🟢1)
+
+- Phương án: (1) PLAN trên đĩa thắng: mất/rỗng → loop stop/loop init dù cờ hay verdict nào · (2) State thắng như chữ ADR-0051/0052 §6: có cờ → unblock
+- Chọn: PLAN trên đĩa thắng: mất/rỗng → loop stop/loop init dù cờ hay verdict nào
+- Lý do (tiêu chí chất lượng cuối): (1) unblock vòng mất PLAN thì Stop kế chặn ngay — lối ra theo state là đi vòng; (3) một nguồn sự thật (đĩa), không đoán từ đếm lỗi mà loop record đổi sau khi dừng; _live_loop/_loop_exit/unblock cùng thứ tự
+- Đường lùi: đổi _plan_tasks check trong _loop_exit/_unblock_problem/_live_loop về sau _blocked_by_state

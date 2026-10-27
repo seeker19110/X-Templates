@@ -96,7 +96,7 @@ và `--max-budget-usd` (cùng `--permission-mode` và `--settings .claude/settin
 | Đặt `permissions.defaultMode: auto` trong `.claude/settings.json` của dự án | Bị bỏ qua; vẫn hỏi quyền | Đặt ở settings người dùng/managed hoặc cờ `--permission-mode auto` |
 | Runaway: một tool lỗi bị gọi hàng trăm lần | Đốt ngân sách, không tiến triển | Chữ ký lỗi 3 lần → blocked; trần vòng; cap 8 lần chặn liên tiếp |
 | "Context anxiety": agent vội kết luận xong khi context đầy | Code dở, tài liệu thiếu | Bàn giao theo `context-and-token-budget.md`; verdict không cho dừng khi còn task |
-| Nhiều lần `loop init` để "reset" chuỗi lỗi | Mất lịch sử lỗi lặp, lặp lại sai lầm | Sau BLOCKED dùng `loop resume --reason` (giữ số vòng, đặt lại đếm lỗi) khi người đã xem lý do và ghi vào PROGRESS; `loop init` chỉ khi đổi PLAN/ngân sách |
+| Nhiều lần `loop init` để "reset" chuỗi lỗi | Mất lịch sử lỗi lặp, lặp lại sai lầm | Sau BLOCKED dùng `loop unblock --reason` (giữ số vòng, việc chờ; đặt lại đếm lỗi) khi người đã xem lý do và ghi vào PROGRESS; `loop init` chỉ khi đổi PLAN/ngân sách |
 | Agent nhìn ảnh chụp rồi khai "giao diện đã đúng"; sửa snapshot cho test xanh | Nhận định cảm tính thay phép đo; baseline bị đổi âm thầm | Ghi kỳ vọng + falsifier trước khi xem; tách `measured`/`unmeasured`; nhãn `asserted-not-measured`; đổi snapshot kèm ảnh trước/sau và review khác model (`LOOP-DESIGN-021`) |
 
 ## Cổng tự động
