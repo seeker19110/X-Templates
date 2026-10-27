@@ -10,7 +10,7 @@ Lệnh:
   blueprint-status FILE [--strict] [--run] [--json]
                                 Đếm mục đạt/chưa/miễn; --run: chạy lại lệnh ghi chú `— Kiểm:` của mục [x] trong thư mục
                                 chứa FILE; --strict: còn MUST chưa đạt hoặc lệnh kiểm đỏ -> exit 1.
-  loop init --plan FILE [--blueprint FILE] [--max-iterations N] [--hours H] [--single-session]
+  loop init --plan FILE [--blueprint FILE] [--max-iterations N] [--hours H] [--single-session] [--max-task-runs N]
   loop status [--json]          Verdict máy tính từ PLAN + bằng chứng (không do model tự khai).
   loop record --task T-001 -- <lệnh...>
                                 Chạy lệnh kiểm của task, ghi bằng chứng (exit code, thời gian, đuôi output).
@@ -80,6 +80,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import copy
 import datetime as _dt
 import fnmatch
 import hashlib
@@ -1248,7 +1249,101 @@ def write_atomic(path: Path, text: str, keep_mode: bool = False) -> None:
 
 
 def write_state(state: Dict[str, Any], base: Optional[Path] = None) -> None:
+    """Ghi đè `state.json` nguyên trạng, không khoá, không kiểm `rev`. Chỉ `update_state` gọi hàm này (ADR-0052 §2, T-3559):
+    lệnh ghi state đi qua `update_state`, ghi ngoài khoá làm lệch `rev` mà `update_state` phát hiện."""
     write_atomic(state_dir(base) / "state.json", json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+
+
+STATE_LOCK_FILE = "state.lock"  # khoá `flock` của đọc–so–ghi `state.json` (ADR-0052 §2); file rỗng, giữ lại sau khi nhả
+STATE_LOCK_TIMEOUT = 5.0  # giây chờ khoá; quá → StateLockTimeout. Khoá chỉ bọc đọc–fn–ghi, không bao giờ qua Gate/mạng
+STATE_LOCK_POLL = 0.02  # giây nghỉ giữa hai lần thử LOCK_NB
+
+
+class StateLockTimeout(TimeoutError):
+    """Không lấy được khoá `.autopilot/state.lock` trong STATE_LOCK_TIMEOUT. Là OSError: `main` in một dòng, exit 2;
+    Stop hook bắt OSError → cho dừng (fail-open)."""
+
+
+class StateRevConflict(OSError):
+    """`rev` trên đĩa đổi giữa đọc và ghi (lệnh ghi ngoài khoá) quá số lần áp lại cho phép — không ghi đè. OSError vì
+    cùng đường xử lý với StateLockTimeout (`main` exit 2, Stop hook fail-open)."""
+
+
+def _fcntl() -> Optional[types.ModuleType]:
+    """Module `fcntl` hoặc None khi nền tảng không có (không POSIX) — khi đó bỏ khoá, vẫn kiểm `rev` (ADR-0052 §2)."""
+    try:
+        import fcntl
+    except ImportError:
+        return None
+    return fcntl
+
+
+@contextlib.contextmanager
+def _state_lock(base: Path) -> Iterator[None]:
+    """Giữ `flock(LOCK_EX)` trên `.autopilot/state.lock`: thử LOCK_NB lặp, nghỉ STATE_LOCK_POLL, quá STATE_LOCK_TIMEOUT →
+    StateLockTimeout. Không đi theo symlink đặt sẵn (O_NOFOLLOW, như `_append_line`). Đóng fd là nhả khoá."""
+    fc = _fcntl()
+    if fc is None:
+        yield
+        return
+    d = state_dir(base)
+    d.mkdir(parents=True, exist_ok=True)
+    fd = os.open(d / STATE_LOCK_FILE, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        deadline = time.monotonic() + STATE_LOCK_TIMEOUT
+        while True:
+            try:
+                fc.flock(fd, fc.LOCK_EX | fc.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise StateLockTimeout(
+                        f".autopilot/{STATE_LOCK_FILE} bận quá {STATE_LOCK_TIMEOUT:g} s — state.json không ghi; chạy lại lệnh"
+                    ) from None
+                time.sleep(STATE_LOCK_POLL)
+        yield
+    finally:
+        os.close(fd)
+
+
+def _state_rev(st: Optional[Dict[str, Any]]) -> int:
+    """`rev` của state; thiếu/không phải số nguyên (state cũ trước ADR-0052) → 0."""
+    rev = (st or {}).get("rev")
+    return rev if type(rev) is int else 0
+
+
+StateFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
+
+
+def update_state(base: Optional[Path], fn: StateFn, retries: int = 3) -> Dict[str, Any]:
+    """Đọc–sửa–ghi `state.json` không mất cập nhật (ADR-0052 §2, R4). Trong khoá `state.lock`: đọc state (thiếu → {}),
+    gọi `fn(bản sao)`, kiểm `rev` trên đĩa còn bằng `rev` đã đọc, ghi kết quả với `rev + 1`. `fn` trả None → không ghi,
+    trả state hiện tại. Lệch `rev` (lệnh ghi ngoài khoá) → đọc lại, áp lại `fn` tối đa `retries` lần; hết → StateRevConflict
+    (`retries=0` cho thay đổi không áp lại được). `fn` phải thuần trên state, nhanh — không chạy Gate/mạng trong `fn`:
+    khoá giữ suốt lời gọi. Không có `fcntl` → bỏ khoá, vẫn kiểm `rev`."""
+    base = base or project_dir()
+    for _ in range(retries + 1):
+        with _state_lock(base):
+            cur = read_state(base) or {}
+            rev = _state_rev(cur)
+            new = fn(copy.deepcopy(cur))
+            if new is None:
+                return cur
+            if _state_rev(read_state(base)) == rev:
+                new["rev"] = rev + 1
+                write_state(new, base)
+                return new
+    raise StateRevConflict(
+        f"state.json đổi trong lúc ghi (rev lệch sau {retries + 1} lần) — không ghi đè; xem `loop status` rồi chạy lại"
+    )
+
+
+def update_loop_state(base: Path, fn: StateFn, retries: int = 3) -> Optional[Dict[str, Any]]:
+    """`update_state` cho lệnh chỉ sửa vòng đã có: chưa `loop init` (không có state) → None, không khoá, không tạo
+    `.autopilot/`; state biến mất trước khi lấy khoá → None, không ghi. `fn` chỉ nhận state khác rỗng."""
+    if not read_state(base):
+        return None
+    return update_state(base, lambda cur: fn(cur) if cur else None, retries) or None
 
 
 EXEC_TIER_RE = re.compile(r"\bexec:\s*(default|deep)\b")  # `(exec: deep)` trong dòng task → tầng executor (ADR-0029)
@@ -1601,8 +1696,9 @@ def read_evidence(task_id: str, base: Optional[Path] = None) -> Optional[Dict[st
     return _read_json_obj(state_dir(base) / "evidence" / f"{task_id}.json")
 
 
-def _verdict_loop_state(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Trạng thái vòng lặp: chưa bật / bị chặn / lỗi lặp / hết ngân sách (vòng, hạn) → verdict dừng; ổn thì None."""
+def _verdict_loop_state(st: Dict[str, Any], base: Path) -> Optional[Dict[str, Any]]:
+    """Trạng thái vòng lặp: chưa bật / bị chặn / lỗi lặp / task đỏ quá trần / hết ngân sách (vòng, hạn) → verdict dừng;
+    ổn thì None."""
     if not st.get("active"):
         fv = st.get("final_verdict")
         if isinstance(fv, dict) and fv.get("verdict"):  # phiên sau thấy vòng trước kết thúc thế nào (vd chờ người)
@@ -1615,7 +1711,45 @@ def _verdict_loop_state(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "verdict": "blocked",
             "reason": f"cùng một lỗi lặp {st.get('same_failure_count')} lần ({st.get('last_failure_task')}) — dừng để người xem",
         }
-    return _budget_exhausted(st)
+    return _verdict_task_runs(st, base) or _budget_exhausted(st)
+
+
+MAX_SAME_FAILURE = 3  # `max_same_failure` mặc định của `loop init` (LOOP-DESIGN-005)
+MAX_TASK_RUNS_DEFAULT = 2 * MAX_SAME_FAILURE  # trần lần đỏ theo task (ADR-0052 §3, R5); số để pilot đo lại
+
+
+def _task_runs(st: Dict[str, Any]) -> Dict[str, int]:
+    """`task_runs` {T-NNN: số lần `loop record` đỏ} của state; thiếu (state trước ADR-0052)/sai kiểu → {}."""
+    tr = st.get("task_runs")
+    return {k: v for k, v in tr.items() if type(v) is int} if isinstance(tr, dict) else {}
+
+
+def _max_task_runs(st: Dict[str, Any]) -> int:
+    """Trần lần đỏ theo task; thiếu (state cũ) → 2 × `max_same_failure`. 0 = tắt (đường lùi)."""
+    m, same = st.get("max_task_runs"), st.get("max_same_failure")
+    return m if type(m) is int else 2 * (same if type(same) is int else MAX_SAME_FAILURE)
+
+
+def _task_runs_blocking(st: Dict[str, Any]) -> List[str]:
+    """Task có `task_runs` ≥ trần (trần > 0), theo thứ tự ID."""
+    limit = _max_task_runs(st)
+    return sorted(t for t, n in _task_runs(st).items() if 0 < limit <= n)
+
+
+def _verdict_task_runs(st: Dict[str, Any], base: Path) -> Optional[Dict[str, Any]]:
+    """Không-tiến-triển theo task (ADR-0052 §3, R5): lỗi luân phiên A/B không chạm đếm cùng chữ ký nhưng task đỏ đủ trần
+    → `blocked`. M = số chữ ký khác nhau trong N lần đỏ cuối của task ở vòng này (runs.jsonl — cùng lọc như `loop stats`)."""
+    hit = _task_runs_blocking(st)
+    if not hit:
+        return None
+    t, n = hit[0], _task_runs(st)[hit[0]]
+    reds = [r for r in read_runs(base) if r["task"] == t and r.get("loop") == st.get("started") and r["exit_code"]]
+    m = len({r.get("signature") for r in reds[-n:]})
+    return {
+        "verdict": "blocked",
+        "reason": f"{t}: {n} lần đỏ, {m} chữ ký khác nhau — đặc tả hoặc Gate sai, người xem",
+        "task": t,
+    }
 
 
 def _budget_exhausted(st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1836,7 +1970,7 @@ def loop_verdict(base: Optional[Path] = None) -> Dict[str, Any]:
     """Tính verdict CHỈ từ artifact trên đĩa. Model không tự khai 'xong'."""
     base = base or project_dir()
     st = read_state(base) or {}  # không có state ≡ chưa bật: `_verdict_loop_state` trả inactive
-    v = _verdict_loop_state(st) or _verdict_plan(base, st) or _verdict_blueprint(base, st)
+    v = _verdict_loop_state(st, base) or _verdict_plan(base, st) or _verdict_blueprint(base, st)
     return _with_pending_human(v, base, st) if v["verdict"] == "done" else v
 
 
@@ -1942,6 +2076,13 @@ def task_spec(t: Dict[str, Any]) -> str:
 def task_req_rev(t: Dict[str, Any]) -> str:
     """Revision nội dung yêu cầu của task: đổi chữ spec trong PLAN → evidence cũ không chứng minh yêu cầu mới."""
     return hashlib.sha256(task_spec(t).encode("utf-8")).hexdigest()[:16]
+
+
+def task_runs_rev(base: Path, st: Dict[str, Any], task: str) -> Optional[str]:
+    """Revision spec + lệnh Gate của `task` trong PLAN của vòng (ADR-0052 §3): đổi một trong hai là "đổi cách" → đếm
+    `task_runs` lại từ 0. `task_req_rev` không gồm Gate nên ghép thêm `cmd_sha256`. Task không có trong PLAN → None."""
+    t = next((x for x in _plan_tasks(base, st) if x["id"] == task), None)
+    return f"{task_req_rev(t)}:{cmd_sha256(str(t.get('gate') or ''))[:16]}" if t else None
 
 
 def _digest_members(root: Path) -> List[Path]:
@@ -2648,26 +2789,53 @@ def loop_record(
     d = state_dir(base) / "evidence"
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / f"{task}.json", json.dumps(ev, ensure_ascii=False, indent=2) + "\n")
-    if st:
-        if code == 0:
-            st["same_failure_count"] = 0
-            st["last_failure_signature"] = None
-        else:
-            sig = failure_signature(task, code, out)
-            if sig == st.get("last_failure_signature"):
-                st["same_failure_count"] = st.get("same_failure_count", 0) + 1
-            else:
-                st["same_failure_count"] = 1
-                st["last_failure_signature"] = sig
-            st["last_failure_task"] = task
-        write_state(st, base)
-    _append_run(base, st, ev, None if code == 0 else failure_signature(task, code, out))  # sau state: số đo không chặn
+    sig = None if code == 0 else failure_signature(task, code, out)
+    rev = task_runs_rev(base, st, task)  # PLAN đọc ngoài khoá — `fn` dưới đây chỉ so chuỗi
+    # Gate đã chạy xong, NGOÀI khoá; đếm lỗi lặp áp trên state mới nhất trong khoá (ADR-0052 §2) — ghi song song không mất.
+    st = update_state(base, lambda cur: _record_failure_count(cur, task, sig, rev))
+    _append_run(base, st, ev, sig)  # sau state: số đo không chặn
     print(f"[xt] {task}: exit {code} — bằng chứng: .autopilot/evidence/{task}.json")
     if code != 0:
         print(ev["output_tail"][-2000:])
     else:
         _tick_after_green(base, st, task, cmd_str, tick and not ev.get("zero_tests_red", False))
     return code
+
+
+def _record_failure_count(
+    cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho `loop record`: xanh (`sig` None) → đặt lại đếm lỗi lặp; đỏ cùng chữ ký lần trước → +1,
+    khác → 1 (LOOP-DESIGN-005). Kèm đếm lần đỏ theo task (`_count_task_run`). Không có state (chưa `loop init`) → None,
+    không ghi."""
+    if not cur:
+        return None
+    _count_task_run(cur, task, sig, rev)
+    if sig is None:
+        cur["same_failure_count"] = 0
+        cur["last_failure_signature"] = None
+        return cur
+    if sig == cur.get("last_failure_signature"):
+        cur["same_failure_count"] = cur.get("same_failure_count", 0) + 1
+    else:
+        cur["same_failure_count"] = 1
+        cur["last_failure_signature"] = sig
+    cur["last_failure_task"] = task
+    return cur
+
+
+def _count_task_run(cur: Dict[str, Any], task: str, sig: Optional[str], rev: Optional[str]) -> None:
+    """`task_runs[task]` (ADR-0052 §3): đỏ → +1, đếm lại từ 0 khi spec/Gate của task trong PLAN đổi (`rev` khác giá trị
+    lưu ở `task_runs_rev`); xanh → xoá khoá (về 0)."""
+    runs, revs = _task_runs(cur), cur.get("task_runs_rev")
+    revs = revs if isinstance(revs, dict) else {}
+    if sig is None:
+        runs.pop(task, None)
+        revs.pop(task, None)
+    else:
+        runs[task] = (runs.get(task, 0) if revs.get(task) == rev else 0) + 1
+        revs[task] = rev
+    cur["task_runs"], cur["task_runs_rev"] = runs, revs
 
 
 def _tick_after_green(base: Path, st: Dict[str, Any], task: str, cmd_str: str, tick: bool) -> None:
@@ -2912,21 +3080,42 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
         why = final_check(base)
         v = {"verdict": "verify", "reason": why} if why else v
     mode = _payload_field(stdin_text, "permission_mode")
-    if st and mode:
-        st["permission_mode"] = mode
     if v["verdict"] in ("continue", "verify") and st:
-        st["iterations"] = st.get("iterations", 0) + 1
-        st["last_verdict"] = v
-        write_state(st, base)
+        st = _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=False))
+        if not st:  # lỗi khoá/rev hoặc state biến mất trong lúc tính verdict → cho dừng (fail-open)
+            return "", 0
         return json.dumps(
             {"decision": "block", "reason": _stop_reason(st, v, mode, xt_cmd(base))}, ensure_ascii=False
         ), 0
     if st and st.get("active") and v["verdict"] in ("done", "blocked", "budget", PENDING_HUMAN):
-        st["active"] = False
-        st["ended"] = now_iso()
-        st["final_verdict"] = v
-        write_state(st, base)
+        _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=True))
     return "", 0
+
+
+def _stop_apply(cur: Dict[str, Any], mode: Optional[str], v: Dict[str, Any], end: bool) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho Stop hook: ghi chế độ quyền của phiên; `end` → tắt vòng kèm verdict cuối, không →
+    thêm một lượt (`iterations`) và verdict lượt này. Không còn state → None, không ghi."""
+    if not cur:
+        return None
+    if mode:
+        cur["permission_mode"] = mode
+    if end:
+        cur.update(active=False, ended=now_iso(), final_verdict=v)
+    else:
+        cur.update(iterations=cur.get("iterations", 0) + 1, last_verdict=v)
+    return cur
+
+
+def _stop_write(base: Path, fn: StateFn) -> Optional[Dict[str, Any]]:
+    """Ghi của Stop hook qua `update_state`; khoá bận/`rev` lệch/lỗi I/O (OSError) → None kèm dòng stderr và
+    `hook-stop.log`: hook không được kẹt phiên (fail-open, ADR-0052 §2)."""
+    try:
+        return update_state(base, fn)
+    except OSError as exc:
+        print(f"[xt hook-stop] không ghi được state, cho dừng: {type(exc).__name__}: {exc}", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            _append_line(base, STOP_LOG_FILE, f"{now_iso()} cho dừng, không ghi state: {type(exc).__name__}: {exc}")
+        return None
 
 
 # --------------------------------------------------------------------------- progress-check
@@ -6190,7 +6379,7 @@ def _live_loop(base: Path) -> str:
     # AUD-HAR-114: `blocked` từ state (block/lỗi lặp) → resume; PLAN mất/rỗng → stop
     why = ""
     if verdict == "blocked":
-        end = "người xem rồi `loop resume --reason`" if _verdict_loop_state(prev) else "`loop stop`"
+        end = "người xem rồi `loop resume --reason`" if _verdict_loop_state(prev, base) else "`loop stop`"
         why = f"; verdict `blocked`: {v.get('reason', '')} — {end}"
     return f"bắt đầu {prev.get('started', '?')}, {prev.get('iterations', 0)} vòng, PLAN {prev.get('plan', '?')}{why}"
 
@@ -6280,7 +6469,21 @@ def _carry_previous(prev: Dict[str, Any], state: Dict[str, Any], base: Path) -> 
     return notes
 
 
+def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Path, notes: List[str]) -> Dict[str, Any]:
+    """`fn` của `update_state` cho `loop init` (không áp lại được, `retries=0`): `rev` đã đổi từ lúc kiểm vòng đang chạy
+    (`_live_loop` chạy ngoài khoá) → StateRevConflict, không ghi đè; không thì state mới thay toàn bộ, mang phần cần giữ
+    của state cũ đọc trong cùng khoá (`_carry_previous`). `rev` mới = `rev` đĩa + 1 do `update_state` đặt."""
+    if _state_rev(cur) != seen:
+        raise StateRevConflict(
+            "state.json đổi sau khi `loop init` kiểm vòng đang chạy — không ghi đè; xem `loop status` rồi chạy lại"
+        )
+    new = copy.deepcopy(state)
+    notes[:] = _carry_previous(cur, new, base)
+    return new
+
+
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
+    seen = _state_rev(read_state(base))  # kiểm vòng đang chạy dưới đây ngoài khoá; ghi chỉ khi state chưa đổi từ đây
     live = "" if args.force else _live_loop(base)
     if live.startswith("đợt `"):  # cây đổi sau kiểm cuối: verify lại, không gợi `resume`/`--force`
         print(f"✗ {live} — rồi `loop init` lại trên cùng cây (LOOP-HARNESS-024, LOOP-DESIGN-022)", file=sys.stderr)
@@ -6314,7 +6517,10 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         "blueprint": args.blueprint,
         "single_session": args.single_session,
         "max_iterations": max_iterations,
-        "max_same_failure": 3,
+        "max_same_failure": MAX_SAME_FAILURE,
+        # 0 = tắt trần lần đỏ theo task (ADR-0052 §3); Namespace dựng tay (không qua argparse) → mặc định
+        "max_task_runs": getattr(args, "max_task_runs", MAX_TASK_RUNS_DEFAULT),
+        "task_runs": {},  # đợt mới đếm lại: `_carry_previous` không mang
         "iterations": 0,
         "deadline": deadline,
         "same_failure_count": 0,
@@ -6324,8 +6530,8 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
     scope = build_scope(base, args.blueprint)
     if scope:
         state["scope"] = scope
-    notes = _carry_previous(read_state(base) or {}, state, base)
-    write_state(state, base)
+    notes: List[str] = []
+    update_state(base, lambda cur: _init_apply(cur, seen, state, base, notes), retries=0)
     _init_warnings(args, base)
     for note in notes:
         print(note, file=sys.stderr)
@@ -6501,9 +6707,8 @@ def _loop_record(args: argparse.Namespace, base: Path) -> int:
 
 
 def _loop_block(args: argparse.Namespace, base: Path) -> int:
-    st = read_state(base) or {"active": True}
-    st.update({"blocked": True, "blocked_reason": args.reason, "blocked_at": now_iso()})
-    write_state(st, base)
+    mark = {"blocked": True, "blocked_reason": args.reason, "blocked_at": now_iso()}
+    update_state(base, lambda cur: {**(cur or {"active": True}), **mark})
     print(f"■ BLOCKED: {args.reason}")
     return 0
 
@@ -6595,20 +6800,30 @@ def _defer_problem(st: Dict[str, Any], task: str, reason: str, base: Path) -> Op
     return None
 
 
-def _loop_defer(args: argparse.Namespace, base: Path) -> int:
-    cur = read_state(base)
-    if not cur:
-        print("✗ Chưa có vòng lặp (chạy loop init trước)", file=sys.stderr)
-        return 2
-    problem = _defer_problem(cur, args.task, _one_line(args.reason), base)
+NO_LOOP_MSG = "✗ Chưa có vòng lặp (chạy loop init trước)"
+
+
+def _defer_apply(
+    cur: Dict[str, Any], task: str, item: Dict[str, str], base: Path, problem: List[str]
+) -> Optional[Dict[str, Any]]:
+    """`fn` của `update_state` cho `loop defer`: kiểm `_defer_problem` trên state mới đọc trong khoá (áp lại được) — có
+    lý do từ chối → ghi vào `problem`, không ghi state."""
+    problem[:] = [p] if (p := _defer_problem(cur, task, item["reason"], base)) else []
     if problem:
-        print(f"✗ Không defer {args.task}: {problem}", file=sys.stderr)
+        return None
+    cur["deferred"] = {**_deferred(cur), task: item}
+    return cur
+
+
+def _loop_defer(args: argparse.Namespace, base: Path) -> int:
+    item, problem = {"reason": _one_line(args.reason), "at": now_iso()}, ["chưa có state"]
+    if update_loop_state(base, lambda cur: _defer_apply(cur, args.task, item, base, problem)) is None:
+        print(NO_LOOP_MSG, file=sys.stderr)
         return 2
-    cur["deferred"] = {**_deferred(cur), args.task: {"reason": _one_line(args.reason), "at": now_iso()}}
-    write_state(cur, base)
-    print(
-        f"⏸ {args.task} chờ người: {_one_line(args.reason)} — làm tiếp việc khác; gom cho người khi hết việc tự làm được"
-    )
+    if problem:
+        print(f"✗ Không defer {args.task}: {problem[0]}", file=sys.stderr)
+        return 2
+    print(f"⏸ {args.task} chờ người: {item['reason']} — làm tiếp việc khác; gom cho người khi hết việc tự làm được")
     return 0
 
 
@@ -6800,6 +7015,27 @@ def _ci_triage_print(out: Dict[str, Any]) -> None:
     print(f"  episode {ep['task'] or '—'}: re-run {ep['rerun_used']}/1 · sửa {ep['fix_attempts']} · chi phí {cost}")
 
 
+def _ci_triage_state(
+    cur: Dict[str, Any], run: str, task: Optional[str], text: Optional[str], cost: Optional[float], got: Dict[str, Any]
+) -> Dict[str, Any]:
+    """`fn` của `update_state` cho `loop ci-triage` (áp lại được): triage trên episode của state mới đọc trong khoá — run
+    đã có (kể cả do lệnh song song vừa ghi) → dùng lại, không đếm lại; chưa có → đếm trên log `text` đã đọc ngoài khoá.
+    Run đã có lúc đọc trước mà nay mất (state bị thay giữa chừng) → không có log để đếm: StateRevConflict, chạy lại."""
+    st = cur or {"active": False}
+    ep = _ci_episode(st, task)
+    rec = ep["runs"].get(run)
+    if not isinstance(rec, dict):
+        if text is None:
+            raise StateRevConflict(
+                f"state.json đổi trong lúc triage (run {run} không còn trong episode) — chạy lại lệnh"
+            )
+        rec = _ci_triage_new(ep, run, text, cost)
+    st["episode"] = ep
+    _ci_apply(st, run, rec, task)
+    got.update(rec=rec, ep=ep)
+    return st
+
+
 def _loop_ci_triage(args: argparse.Namespace, base: Path) -> int:
     if not CI_RUN_ID_RE.fullmatch(args.run):
         print(f"✗ --run phải là ID số của run GitHub Actions: {args.run!r}", file=sys.stderr)
@@ -6807,11 +7043,9 @@ def _loop_ci_triage(args: argparse.Namespace, base: Path) -> int:
     if args.cost_usd is not None and not (math.isfinite(args.cost_usd) and args.cost_usd >= 0):
         print("✗ --cost-usd phải là số ≥ 0 (chưa đo thì bỏ trống — ghi null, không ghi 0)", file=sys.stderr)
         return 2
-    st = read_state(base) or {"active": False}
-    ep = _ci_episode(st, args.task)
-    rec = ep["runs"].get(args.run)
-    if not isinstance(rec, dict):  # run đã triage → trả lại kết quả cũ, không đếm lại (restart không tiêu ngân sách)
-        try:
+    text = None
+    if not isinstance(_ci_episode(read_state(base) or {}, args.task)["runs"].get(args.run), dict):
+        try:  # đọc log (có thể gọi `gh`, mạng) NGOÀI khoá state; run đã triage → trả lại kết quả cũ, không đếm lại
             text = _ci_log_text(args.run, args.log, base)
         except OSError as exc:
             print(f"✗ Không đọc được --log {args.log}: {exc}", file=sys.stderr)
@@ -6819,10 +7053,9 @@ def _loop_ci_triage(args: argparse.Namespace, base: Path) -> int:
         except PrInputError as exc:
             print(f"✗ {exc}", file=sys.stderr)
             return 3
-        rec = _ci_triage_new(ep, args.run, text, args.cost_usd)
-    st["episode"] = ep
-    _ci_apply(st, args.run, rec, args.task)
-    write_state(st, base)
+    got: Dict[str, Any] = {}
+    update_state(base, lambda cur: _ci_triage_state(cur, args.run, args.task, text, args.cost_usd, got))
+    rec, ep = got["rec"], got["ep"]
     out = {"run": args.run, **rec, "episode": {k: ep.get(k) for k in CI_EPISODE_KEYS}}
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -6903,10 +7136,14 @@ def _evidence_latest(base: Path) -> Optional[Dict[str, Any]]:
     return {k: ev.get(k) for k in ("task", "cmd", "exit_code", "finished")} if ev else None
 
 
+CHECKPOINT_LOG_FILE = "hook-checkpoint.log"  # checkpoint PreCompact không ghi được state (khoá bận, rev lệch, I/O)
+
+
 def loop_checkpoint(stdin_text: str, base: Path) -> None:
-    """PreCompact: ghi vị trí làm việc vào state để SessionStart(compact) nạp lại. Không có vòng lặp → không làm gì."""
-    st = read_state(base)
-    if not st:
+    """PreCompact: ghi vị trí làm việc vào state để SessionStart(compact) nạp lại. Không có vòng lặp → không làm gì.
+    Verdict/git đọc ngoài khoá; ghi qua `update_state`. Khoá bận/`rev` lệch/lỗi I/O → bỏ checkpoint, một dòng stderr và
+    `hook-checkpoint.log` — PreCompact không được chặn compaction (fail-open như Stop hook, ADR-0052 §2)."""
+    if not read_state(base):
         return
     v = loop_verdict(base)
     try:  # quotePath=false: tên file tiếng Việt giữ nguyên; thiếu git trong PATH → bỏ qua, vẫn ghi checkpoint
@@ -6916,7 +7153,7 @@ def loop_checkpoint(stdin_text: str, base: Path) -> None:
     except OSError:
         out = ""
     dirty = out.splitlines()
-    st["checkpoint"] = {
+    point = {
         "at": now_iso(),
         "trigger": _payload_field(stdin_text, "trigger") or "?",
         "verdict": v["verdict"],
@@ -6924,13 +7161,26 @@ def loop_checkpoint(stdin_text: str, base: Path) -> None:
         "head": _git_head(base),
         "dirty": [line[3:] for line in dirty[:20]],
         "last_evidence": _evidence_latest(base),
-        "same_failure_count": st.get("same_failure_count", 0),
-        "last_failure_task": st.get("last_failure_task"),
     }
     mode = _payload_field(stdin_text, "permission_mode")
+    try:
+        update_loop_state(base, lambda cur: _checkpoint_apply(cur, point, mode))
+    except OSError as exc:
+        print(f"[xt checkpoint] không ghi được state, bỏ checkpoint: {type(exc).__name__}: {exc}", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            _append_line(base, CHECKPOINT_LOG_FILE, f"{now_iso()} bỏ checkpoint: {type(exc).__name__}: {exc}")
+
+
+def _checkpoint_apply(cur: Dict[str, Any], point: Dict[str, Any], mode: Optional[str]) -> Dict[str, Any]:
+    """`fn` của `update_state` cho checkpoint (áp lại được): đếm lỗi lặp lấy từ state mới đọc trong khoá."""
+    cur["checkpoint"] = {
+        **point,
+        "same_failure_count": cur.get("same_failure_count", 0),
+        "last_failure_task": cur.get("last_failure_task"),
+    }
     if mode:
-        st["permission_mode"] = mode
-    write_state(st, base)
+        cur["permission_mode"] = mode
+    return cur
 
 
 def _loop_checkpoint(args: argparse.Namespace, base: Path) -> int:
@@ -6941,30 +7191,39 @@ def _loop_checkpoint(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
-def _loop_resume(args: argparse.Namespace, base: Path) -> int:
-    cur = read_state(base)
-    if not cur:
-        print("✗ Chưa có vòng lặp (chạy loop init trước)", file=sys.stderr)
-        return 2
-    cleared = list(_deferred(cur))
-    cur.update(
-        {
-            "active": True,
-            "blocked": False,
-            "blocked_reason": None,
-            "same_failure_count": 0,
-            "last_failure_signature": None,
-            "resumed_at": now_iso(),
-            "resume_reason": args.reason,
-        }
-    )
-    cur["session_id"] = session_id()  # phiên mới tiếp vòng → Stop hook theo phiên này; '' = chưa gắn phiên (T-2522)
+def _resume_apply(cur: Dict[str, Any], change: Dict[str, Any], base: Path, cleared: List[str]) -> Dict[str, Any]:
+    """`fn` của `update_state` cho `loop resume` (không áp lại được, `retries=0`): mở vòng, đặt lại đếm lỗi (cả `task_runs`
+    của task đang chặn — không thì verdict chặn lại ngay, ADR-0052 §3), gắn phiên hiện tại, trả việc chờ người về hàng làm
+    (ghi vào `cleared`)."""
+    cleared[:] = list(_deferred(cur))
+    blocking = _task_runs_blocking(cur)
+    if blocking:
+        cur["task_runs"] = {t: n for t, n in _task_runs(cur).items() if t not in blocking}
+    cur.update(change)
     cur.pop("ended", None)
     cur.pop("final_verdict", None)
     if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
         cur.update({"scope": sc} if (sc := build_scope(base, str(cur["blueprint"]))) else {})
     cur.pop("deferred", None)  # người đã xử lý: việc chờ quay lại hàng làm; còn cần người thì agent defer lại
-    write_state(cur, base)
+    return cur
+
+
+def _loop_resume(args: argparse.Namespace, base: Path) -> int:
+    change = {
+        "active": True,
+        "blocked": False,
+        "blocked_reason": None,
+        "same_failure_count": 0,
+        "last_failure_signature": None,
+        "resumed_at": now_iso(),
+        "resume_reason": args.reason,
+        "session_id": session_id(),  # phiên mới tiếp vòng → Stop hook theo phiên này; '' = chưa gắn phiên (T-2522)
+    }
+    cleared: List[str] = []
+    cur = update_loop_state(base, lambda st: _resume_apply(st, change, base, cleared), retries=0)
+    if cur is None:
+        print(NO_LOOP_MSG, file=sys.stderr)
+        return 2
     print(f"▶ Autopilot tiếp tục (vòng {cur.get('iterations', 0)}/{cur.get('max_iterations', 50)}): {args.reason}")
     if cleared:
         print("  việc chờ người quay lại hàng làm: " + ", ".join(cleared))
@@ -6972,17 +7231,13 @@ def _loop_resume(args: argparse.Namespace, base: Path) -> int:
 
 
 def _loop_stop(args: argparse.Namespace, base: Path) -> int:
-    cur = read_state(base)
-    if cur:
-        cur.update(
-            {
-                "active": False,
-                "ended": now_iso(),
-                "stop_reason": args.reason,
-                "final_verdict": {"verdict": "stopped", "reason": args.reason},
-            }
-        )
-        write_state(cur, base)
+    end = {
+        "active": False,
+        "ended": now_iso(),
+        "stop_reason": args.reason,
+        "final_verdict": {"verdict": "stopped", "reason": args.reason},
+    }
+    update_loop_state(base, lambda cur: {**cur, **end})
     print("■ Autopilot tắt.")
     return 0
 
@@ -11066,6 +11321,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     li.add_argument("--hours", type=float)
     li.add_argument("--force", action="store_true", help="ghi đè vòng đang chạy (đổi PLAN/ngân sách, vòng cũ đã chết)")
+    li.add_argument(
+        "--max-task-runs",
+        type=_nonneg_int,
+        default=MAX_TASK_RUNS_DEFAULT,
+        help=f"task đỏ từng này lần (mọi chữ ký) → blocked; mặc định {MAX_TASK_RUNS_DEFAULT} (2 × max_same_failure); 0 = tắt",
+    )
     ls = lsub.add_parser("status")
     ls.add_argument("--json", action="store_true")
     lne = lsub.add_parser("next", help="task sẵn sàng theo `sau:` và cặp giao nhau `files:` (T-1511)")

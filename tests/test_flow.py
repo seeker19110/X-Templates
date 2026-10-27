@@ -39,9 +39,6 @@ F = TypeVar("F", bound=Callable[..., Any])
 XFAIL: dict[str, str] = {
     "FLOW-01": "R1 — chưa có `loop attach` (T-3540)",
     "FLOW-02": "§4A — chưa có `loop resolve` (T-3541)",
-    "FLOW-04": "R5 — lỗi A/B luân phiên không bao giờ blocked: verdict `continue` (T-3539)",
-    "FLOW-06": "§4B — state chưa có `task_runs` (T-3539)",
-    "FLOW-07": "R4 — chưa có `update_state`/`rev`: hai lệnh đọc–sửa–ghi đè nhau (T-3538)",
     "FLOW-18": "R2 — `perf compare` báo `improved` khi before `ms`, after `s` (T-3545)",
     "FLOW-19": "R3 — mẫu perf chưa có v2 (`dirty`/`head`/`harness_sha256`) và `perf compare` chưa có `--base` (T-3545)",
 }
