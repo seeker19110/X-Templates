@@ -108,6 +108,7 @@ import statistics
 import subprocess
 import tempfile
 import sys
+import threading
 import time
 import traceback
 import types
@@ -11176,31 +11177,55 @@ def _perf_report(doc: Dict[str, Any]) -> str:
     )
 
 
-def _perf_run(cmd: List[str], timeout: float) -> int:
-    """Chạy `cmd` trong nhóm tiến trình riêng và giết cả nhóm khi xong, quá giờ hoặc bị Ctrl-C — tiến trình nền/cháu không
-    được sống tiếp làm nhiễu lần đo sau. (SIGTERM gửi thẳng cho xt.py không được bắt: giới hạn đã biết.)"""
+def _perf_watchdog(pid: int, fired: threading.Event) -> None:
+    """Thread canh giờ của `_perf_run`: đánh dấu quá giờ rồi giết cả nhóm (nhóm đã biến mất → bỏ qua)."""
+    fired.set()
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pid, signal.SIGKILL)
+
+
+def _perf_run(cmd: List[str], timeout: float) -> Tuple[int, float]:
+    """Chạy `cmd` trong nhóm tiến trình riêng; trả (mã thoát, giây từ trước khi khởi chạy tới lúc tiến trình kết thúc).
+
+    Chờ CHẶN bằng `proc.wait()` không timeout (waitpid, không thăm dò): `wait(timeout=…)` của CPython thăm dò với chu kỳ
+    tăng dần tới 50 ms nên số đo bị lượng tử theo bậc (AUD-PERF-003). Quá giờ do thread canh giờ (`threading.Timer`) giết
+    cả nhóm → waitpid trả về → `TimeoutExpired`. Mốc kết thúc lấy ngay sau waitpid, trước khi huỷ canh giờ và dọn nhóm,
+    nên không cộng độ trễ của chúng. Không dùng `os.pidfd_open` (chỉ Linux) hay `os.wait4` (không có timeout).
+    Canh giờ được huỷ và join trước khi trả về: không bắn muộn vào một pgid có thể đã bị tái dùng.
+    Giết cả nhóm khi xong, quá giờ hoặc bị Ctrl-C (SIGINT làm waitpid nhả → KeyboardInterrupt) — tiến trình nền/cháu
+    không được sống tiếp làm nhiễu lần đo sau. (SIGTERM gửi thẳng cho xt.py không được bắt: giới hạn đã biết.)"""
+    fired = threading.Event()
+    t0 = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    watchdog = threading.Timer(timeout, _perf_watchdog, (proc.pid, fired))
+    watchdog.daemon = True
+    watchdog.start()
     try:
-        return proc.wait(timeout=timeout)
+        rc = proc.wait()
+        elapsed = time.perf_counter() - t0
     finally:
+        watchdog.cancel()
+        watchdog.join()
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, 9)
+            os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+    if fired.is_set():
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return rc, elapsed
 
 
 def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[float]:
     """Chạy `cmd` warmup + runs lần, trả thời gian tường (giây) của các lần đo; lệnh thoát khác 0 → RuntimeError."""
     out: List[float] = []
     for i in range(warmup + runs):
-        t0 = time.perf_counter()
         try:
-            rc = _perf_run(cmd, timeout)
+            rc, elapsed = _perf_run(cmd, timeout)
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"lệnh quá {timeout:g} s ở lần {i + 1}") from None
         if rc != 0:
             raise RuntimeError(f"lệnh thoát {rc} ở lần {i + 1} — không đo trên lệnh lỗi")
         if i >= warmup:
-            out.append(time.perf_counter() - t0)
+            out.append(elapsed)
     return out
 
 

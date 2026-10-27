@@ -7,9 +7,12 @@ import json
 import re
 import shutil
 import os
+import signal
+import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -161,6 +164,70 @@ class PerfSampleTest(unittest.TestCase):
     def test_sample_timeout(self):
         with self.assertRaisesRegex(RuntimeError, "quá 0.2 s ở lần 1"):
             xt.perf_sample([sys.executable, "-c", "import time; time.sleep(5)"], runs=1, warmup=0, timeout=0.2)
+
+    # AUD-PERF-003 (T-3561): đo thời gian không lượng tử. Kiểm đặc tính, không ghim ranh giới bậc (phụ thuộc máy); lấy
+    # min mỗi thời lượng vì tải máy (test chạy song song) chỉ cộng thêm thời gian, không bớt.
+    def test_sample_timing_resolution_tracks_sleep_duration(self):
+        durations = [0.02 + 0.01 * k for k in range(11)]  # 0,02…0,12 s, bước 10 ms (< bậc thăm dò 50 ms của mã cũ)
+        best = [min(xt.perf_sample(["sleep", f"{d:.3f}"], runs=3, warmup=0, timeout=30)) for d in durations]
+        errors = [b - d for b, d in zip(best, durations)]
+        steps = [b - a for a, b in zip(best, best[1:])]
+        bias = statistics.median(errors)  # chi phí khởi chạy cố định (fork/exec), không phải lượng tử
+        spread = statistics.median(abs(e - bias) for e in errors)
+        self.assertGreater(min(errors), -0.002, errors)  # không bao giờ đo ngắn hơn lệnh
+        self.assertLess(bias, 0.015, errors)
+        self.assertLess(spread, 0.005, errors)  # mã cũ: sai số nhảy 2…45 ms theo bậc, độ lệch trung vị ~10 ms
+        self.assertTrue(0.005 < statistics.median(steps) < 0.015, steps)  # mã cũ: phần lớn bước ≈ 0 (cùng bậc)
+
+    def test_sample_timing_resolution_excludes_cleanup(self):
+        real_killpg = os.killpg
+
+        def slow_killpg(pgid: int, sig: int) -> None:  # dọn nhóm chậm không được tính vào số đo
+            time.sleep(0.3)
+            real_killpg(pgid, sig)
+
+        with unittest.mock.patch.object(os, "killpg", slow_killpg):
+            out = xt.perf_sample(["sleep", "0.02"], runs=1, warmup=0, timeout=30)
+        self.assertLess(out[0], 0.2, out)
+
+    def test_sample_timing_resolution_watchdog_cancelled_after_exit(self):
+        # Ca đồng thời: lệnh xong trước hạn → canh giờ phải bị huỷ và đã dừng khi `_perf_run` trả về, không bắn muộn
+        # vào nhóm (pgid có thể đã bị tái dùng).
+        real_killpg = os.killpg
+        calls: list[int] = []
+
+        def spy(pgid: int, sig: int) -> None:
+            calls.append(pgid)
+            real_killpg(pgid, sig)
+
+        before = threading.active_count()
+        with unittest.mock.patch.object(os, "killpg", spy):
+            rc, elapsed = xt._perf_run(["sleep", "0.01"], 0.2)
+            self.assertEqual(threading.active_count(), before)
+            time.sleep(0.4)
+        self.assertEqual((rc, len(calls)), (0, 1))  # chỉ lần dọn nhóm sau khi xong
+        self.assertLess(elapsed, 0.2)
+
+    def test_sample_timing_resolution_real_sigint_interrupts_blocking_wait(self):
+        # Chờ chặn (waitpid) vẫn phải nhả khi Ctrl-C thật: SIGINT gửi đúng luồng chính → KeyboardInterrupt, nhóm bị giết.
+        old = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                pidfile = Path(d) / "pid"
+                script = f"sleep 30 & echo $! > {pidfile}; wait"
+                main = threading.main_thread().ident
+                assert main is not None
+                sender = threading.Timer(0.5, signal.pthread_kill, (main, signal.SIGINT))
+                sender.start()
+                t0 = time.perf_counter()
+                with self.assertRaises(KeyboardInterrupt):
+                    xt._perf_run(["sh", "-c", script], 30)
+                sender.join()
+                self.assertLess(time.perf_counter() - t0, 10)
+                pid = int(pidfile.read_text())
+        finally:
+            signal.signal(signal.SIGINT, old)
+        self.assert_dead(pid)
 
 
 ISOLATED = {
