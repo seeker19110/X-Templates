@@ -24,6 +24,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ### Fixed
 - `loop init` không còn bị chặn bởi vòng vừa `blocked` vừa hết vòng/hạn (`_live_loop` xét ngân sách trước verdict, helper `_budget_exhausted` dùng chung — T-3537, ADR-0051, D-177).
 - `loop stop` trên vòng đã kết thúc không còn đè `final_verdict` (giữ lý do chặn thật cho `unblocked[]`; đợt `done` không mở lại bằng `stop` + `unblock`). Lối ra khi PLAN mất/rỗng thắng nguồn chặn trong state ở `loop init`/`attach`/`resolve`/`unblock`/`doctor` → `loop stop`/`loop init --plan <mới>`, kèm "người xem lý do chặn" khi state còn cờ/lỗi lặp (D-208, review #295, #296). PLAN không đọc được như UTF-8 coi như mất; state sai kiểu không làm `attach`/`resolve`/`doctor` traceback (`unblock` vẫn có thể — verdict chưa chịu sai kiểu).
+- `perf guard`: diff chạy `--text` nên thuộc tính `-diff`/`binary` (`.gitattributes`, `.git/info/attributes`, `core.attributesFile`) không giấu được dòng thêm; `.gitattributes` đổi/mới/tự ẩn báo ⚠ như `.gitignore` (AUD-SEC-116). `--base` phân giải thành SHA commit trước khi tới `git diff` — `--base=--output=F` không còn ghi file và in ✓, ref không ra commit → exit 2 (AUD-SEC-115, T-3560, D-214).
 
 ## [3.27.0] - 2026-10-26
 

@@ -10671,6 +10671,11 @@ PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
 PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 PERF_UNTRACKED = ("ls-files", "-z", "--others", "--exclude-per-directory=.gitignore")
+PERF_RULE_FILES = {  # file luật git đổi/mới trong lượt: guard báo ⚠ (đổi luật = đổi thứ guard nhìn thấy)
+    ".gitignore": "đổi luật ignore — có thể giấu file mới trong vùng khoá",
+    ".gitattributes": "đổi luật thuộc tính — có thể giấu dòng",
+}
+PERF_RULE_SPECS = tuple(f"{p}{n}" for n in PERF_RULE_FILES for p in ("", "**/"))
 PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõi khi quét dòng đáng ngờ
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
@@ -11209,13 +11214,13 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
     return [n for n in _perf_git(base, *args).split("\0") if n]
 
 
-def _perf_self_hidden_ignores(base: Path) -> List[str]:
-    """`.gitignore` chưa theo dõi mà chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005): bị ignore nhưng thư
-    mục chứa nó thì không. `.gitignore` trong thư mục đã ignore sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới
-    (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
+def _perf_self_hidden_rules(base: Path) -> List[str]:
+    """File luật chưa theo dõi (`.gitignore`; `.gitattributes` từ AUD-SEC-116) bị ignore nhưng thư mục chứa nó thì không —
+    vd `.gitignore` chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005). File luật trong thư mục đã ignore
+    sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
     tự khớp cả thư mục `bench/sub/`, và `info/exclude`/`excludesFile` không được tin (như `PERF_UNTRACKED`; review #162 ×2)."""
     hidden = _perf_git_names(
-        base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".gitignore", "**/.gitignore"
+        base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", *PERF_RULE_SPECS
     )
     parents = sorted({h.rpartition("/")[0] + "/" for h in hidden if "/" in h})
     if not parents:
@@ -11268,29 +11273,31 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
     return out
 
 
-def _perf_is_ignore_file(path: str) -> bool:
-    return path.rpartition("/")[2] == ".gitignore"
+def _perf_rule_file(path: str) -> str:
+    """Lý do ⚠ nếu `path` là file luật git (PERF_RULE_FILES), không thì chuỗi rỗng."""
+    return PERF_RULE_FILES.get(path.rpartition("/")[2], "")
 
 
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     """(file đổi gồm file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
     (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` đã có ở `ref` — có `.gitignore`
     đổi/mới thì kiểm khoá trên MỌI file chưa theo dõi (perf_guard còn báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được
-    mà không để dấu nên không dùng."""
+    mà không để dấu nên không dùng. `--text`: thuộc tính `-diff`/`binary` (cây, `info/attributes`, `core.attributesFile`)
+    không biến dòng thêm thành "Binary files differ" (AUD-SEC-116)."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
     untracked = _perf_git_names(base, *PERF_UNTRACKED)
     scanned = untracked
-    new_ignores = _perf_self_hidden_ignores(base)
+    hidden = _perf_self_hidden_rules(base)
     if any(
-        _perf_is_ignore_file(f) for f in names + untracked + new_ignores
+        f.rpartition("/")[2] == ".gitignore" for f in names + untracked + hidden
     ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
         untracked = _perf_git_names(base, "ls-files", "-z", "--others")
     text = _perf_git(
         base,
-        *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
+        *("diff", "--unified=0", "--text", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
+    return names + sorted({*untracked, *hidden}), _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
 
 
 def perf_known(base: Path) -> List[str]:
@@ -11307,11 +11314,7 @@ def perf_match(path: str, glob: str) -> bool:
 def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]) -> Tuple[List[str], List[str]]:
     """(file khoá bị đụng, dòng thêm đáng ngờ) — bộ đo/test tương đương không phải thứ agent được sửa để 'đạt'."""
     touched = [f for f in files if any(perf_match(f, g) for g in locked)]
-    suspect = [
-        f"{f}: đổi luật ignore — có thể giấu file mới trong vùng khoá"
-        for f in files
-        if f.rpartition("/")[2] == ".gitignore"
-    ]
+    suspect = [f"{f}: {_perf_rule_file(f)}" for f in files if _perf_rule_file(f)]
     suspect += [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
     # Tên file không phải UTF-8: `_git` đã thay byte lạ bằng U+FFFD nên không mở lại được để quét nội dung — fail-closed
     suspect += [f"{f}: tên file không phải UTF-8 — không quét được nội dung" for f in files if "\ufffd" in f]
@@ -11542,7 +11545,8 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
     locked: List[str] = args.locked or []
     try:
         base = perf_repo()
-        files, added = perf_diff(base, args.base)
+        # SHA, không phải chuỗi thô: `--base=--output=F` thành tuỳ chọn của `git diff` (AUD-SEC-115)
+        files, added = perf_diff(base, perf_rev(args.base))
         known = perf_known(base) if locked else []
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
@@ -11555,7 +11559,7 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
     for f in touched:
         print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
     for s in suspect:
-        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore) — reviewer phải rà: {s}")
+        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore/thuộc tính) — reviewer phải rà: {s}")
     if not touched and not suspect:
         print(f"✓ {len(files)} file đổi, không đụng file khoá, không dòng đáng ngờ")
     return 1 if touched or (suspect and args.strict) else 0
