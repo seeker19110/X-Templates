@@ -77,7 +77,7 @@ jobs:
       - name: Review (công cụ chỉ-đọc, kết quả có cấu trúc)
         id: claude
         if: steps.diff.outputs.complete == 'true'
-        uses: anthropics/claude-code-action@16f9f71ab9c490faf367f94dd294897edc25be33 # v1.0.261
+        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
