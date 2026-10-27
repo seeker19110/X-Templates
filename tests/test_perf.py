@@ -656,10 +656,13 @@ class PerfSampleV2Test(unittest.TestCase):
             git(self.repo, "add", ".")
             git(self.repo, "commit", "-qm", "init")
 
-    def sample(self, *extra: str, out: Path | None = None, code: str = "pass") -> tuple[int, str, dict]:
-        """`perf sample` một lần đo; trả (exit, stderr, mẫu — {} khi không ghi file)."""
+    def sample(
+        self, *extra: str, out: Path | None = None, code: str = "pass", keep: bool = False
+    ) -> tuple[int, str, dict]:
+        """`perf sample` một lần đo; trả (exit, stderr, mẫu — {} khi không ghi file). `keep`: giữ file `--out` cũ."""
         dest = out or self.tmp / "s.json"
-        dest.unlink(missing_ok=True)
+        if not keep:
+            dest.unlink(missing_ok=True)
         argv = (
             "perf",
             "sample",
@@ -714,28 +717,15 @@ class PerfSampleV2Test(unittest.TestCase):
     def test_sample_v2_git_config_cannot_hide_changes(self):
         self.init_repo()
         (self.repo / ".gitattributes").write_text("app.py diff=same\n")
-        sub = self.repo / "sub"
-        sub.mkdir()
-        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"), ("config", "user.name", "t")):
-            git(sub, *args)
-        (sub / "f").write_text("1\n")
-        git(sub, "add", "f")
-        git(sub, "commit", "-qm", "a")
-        git(self.repo, "add", ".gitattributes", "sub")
-        git(self.repo, "commit", "-qm", "attrs + gitlink")
+        git(self.repo, "add", ".gitattributes")
+        git(self.repo, "commit", "-qm", "attrs")
         git(self.repo, "config", "diff.same.textconv", "sh -c 'echo same' --")
         _, _, clean = self.sample()
         self.assertFalse(clean["dirty"])
 
-        def bump_sub() -> None:
-            (sub / "f").write_text("2\n")
-            git(sub, "commit", "-qam", "b")
-
-        hide_sub = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "diff.ignoreSubmodules", "GIT_CONFIG_VALUE_0": "all"}
         cases = {
             "ext-diff": ({"GIT_EXTERNAL_DIFF": "true"}, lambda: (self.repo / "app.py").write_text("x = 2\n")),
             "textconv": ({}, lambda: (self.repo / "app.py").write_text("x = 3\n")),
-            "submodule": (hide_sub, bump_sub),
         }
         for name, (env, change) in cases.items():
             with self.subTest(name):
@@ -759,9 +749,15 @@ class PerfSampleV2Test(unittest.TestCase):
         (self.repo / "out").mkdir()
         dest = self.repo / "out" / "a*b.json"  # tên có ký tự glob: loại đúng file, không loại theo mẫu
         dest.write_text("cũ")  # mẫu cũ còn nằm trong cây
-        rc, err, doc = self.sample(out=dest)
+        rc, err, doc = self.sample(out=dest, keep=True)
         self.assertEqual(rc, 0, err)
         self.assertEqual((doc["dirty"], doc["tree_fp"]), (False, ref["tree_fp"]))
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(dest.parent)  # chạy lại từ thư mục con, `--out` tương đối, mẫu lần trước còn đó
+        rc, err, doc = self.sample(out=Path(dest.name), keep=True)
+        self.assertEqual((rc, doc["dirty"], doc["tree_fp"]), (0, False, ref["tree_fp"]), err)
+        os.chdir(old_cwd)
         (self.repo / "out" / "aXb.json").write_text("khác")  # file khác khớp nếu coi tên là glob
         self.assertTrue(self.sample(out=dest)[2]["dirty"])
 

@@ -2624,11 +2624,11 @@ def tree_fingerprint(base: Path) -> Optional[str]:
 def tree_hash(base: Path, head: str, git: Callable[..., str], excl: List[str]) -> Tuple[str, bool]:
     """(sha256, bẩn?) của cây: `head` + diff so HEAD + tên/nội dung file chưa track, trừ `.autopilot/` và pathspec `excl`.
     `git(*args)` trả stdout — nuốt lỗi (`tree_fingerprint`) hay ném (`perf sample`) là việc của bên gọi. Cấu hình/biến môi
-    trường không được giấu thay đổi khỏi diff: tắt ext-diff (`GIT_EXTERNAL_DIFF`), textconv, `ignoreSubmodules` — cấu
-    hình mặc định cho đầu ra y hệt (review T-3544)."""
+    trường không được giấu thay đổi khỏi diff: tắt ext-diff (`GIT_EXTERNAL_DIFF`) và textconv — cấu hình mặc định cho đầu
+    ra y hệt (review T-3544). Không ép `--ignore-submodules`: khác mặc định `untracked`, đổi vân tay của `loop verify` (D-213)."""
     spec = ["--", ".", ":(exclude).autopilot", *excl]
     h = hashlib.sha256(head.encode())
-    diff = git("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", *spec)
+    diff = git("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", *spec)
     h.update(diff.encode())
     names = [n for n in git("ls-files", "--others", "--exclude-standard", "-z", *spec).split("\0") if n]
     for name in names:
