@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202; §7 hoãn — D-203)
 - **Trạng thái triển khai:** Chưa triển khai — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
 - **Ngày:** 2026-10-27
-- **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-004`/`-007`/`-008`/`-011` (tối ưu; baseline ở commit gốc giữ nguyên), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
+- **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-008`/`-009` (tối ưu — mẫu perf v2; ràng buộc `perf trial` ở §7), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
 
 ## Bối cảnh
 
@@ -46,7 +46,7 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    Gate sai, người xem" (M đếm từ `runs.jsonl`). Mặc định `max_task_runs = 2 × max_same_failure` (= 6); `loop init --max-task-runs N`
    (0 = tắt, là đường lùi). `attach`/`resolve` không đặt lại; `unblock` và `loop resume` (nghĩa cũ "mở block + đặt lại đếm lỗi",
    ADR-0051) đặt lại `task_runs` của task đang chặn — nếu không, verdict tính lại từ `task_runs` sẽ chặn ngay và lối ra mà
-   `_live_loop`/bảng điểm dừng chỉ ra không mở được. Lần thử tối ưu đi qua `perf trial` (§7, đếm riêng theo điểm nóng), không qua
+   `_live_loop`/bảng điểm dừng chỉ ra không mở được. Lần thử tối ưu đi qua `perf trial` (lát 3, ADR riêng — đếm riêng theo điểm nóng), không qua
    `loop record` của cùng task — skill `/optimize` đổi theo ở lát 3. Không nới `max_same_failure`.
 4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `head` (`git rev-parse
    HEAD` lúc đo; thư mục không phải repo git → `head` rỗng, mẫu nhãn `unverified-manual`; là repo mà git lỗi → exit 2), `dirty` và `tree_fp` (= `tree_fingerprint`, tính **trước** lần chạy
@@ -78,7 +78,10 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    lệnh đo, glob bộ đo, bộ test tương đương và chính `xt.py` chấm lấy từ commit gốc, không từ cây candidate (`LOOP-OPT-002`/`-003`);
    đo được đại lượng tất định và chỉ số phụ (`LOOP-OPT-008`/`-009`); giữ chỉ khi `improved` so với cả trạng thái giữ gần nhất và commit
    gốc, kèm test tương đương xanh; thu hồi đúng file bằng `git stash push --include-untracked` và kiểm cây về vân tay lúc start;
-   PERF-LOG ghi sau quyết định. Có ca FLOW riêng cho đường giữ, đường thu hồi, baseline bị lái và bộ chấm bị sửa.
+   PERF-LOG ghi sau quyết định; `start` đòi cây sạch ngoài `.autopilot/` và `start_head` có tree bằng cây giữ gần nhất (hoặc đo luôn cây
+   đó); ghi giả thuyết trước khi sửa (`LOOP-OPT-004`); ba lần không `improved` mỗi điểm nóng bền qua restart (`LOOP-OPT-011`);
+   `--resume` sau crash; chỉ số phụ vượt trần → đỏ (`LOOP-OPT-008`). Có ca FLOW riêng cho đường giữ, đường thu hồi, baseline bị lái và
+   bộ chấm bị sửa.
 8. **Không làm ở ADR này:** lát 4 (pilot phiên thực ≥ 2 dự án đích, cho `next-step` ghi trạng thái) và lát 5 (field trigger, bot nâng bản,
    worker ngoài phiên, event policy `pull_request_target`) cần dữ liệu/quyền của chủ dự án — `loop defer`; ADR riêng khi có số.
 
@@ -92,7 +95,7 @@ Phát hành: lát 1 đổi hành vi dự án đích → cắt bản 3.28.0 sau l
 
 ### Xác nhận
 
-FLOW-01…23 xanh trong CI (trừ ca lát 4–5); `autonomy-bench` không lùi; `dev-task.sh gate` xanh; review sạch ở head mỗi PR.
+FLOW-01…19 xanh trong CI (FLOW-20 trở đi do ADR `perf trial` xác nhận; lát 4–5 ngoài phạm vi); `autonomy-bench` không lùi; `dev-task.sh gate` xanh; review sạch ở head mỗi PR.
 
 ## Đường lùi
 
