@@ -7279,6 +7279,7 @@ EXIT_PENDING = (
     " chưa → `loop init --plan <đợt kế>` (việc chờ đi theo)"
 )
 EXIT_BUDGET = "hết ngân sách → `loop init --plan <đợt kế>` (việc chờ đi theo)"
+EXIT_PLAN_LOST = "PLAN mất/rỗng → `loop init --plan <mới>`"
 
 
 def _interventions(st: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
@@ -7301,42 +7302,45 @@ def _final_verdict(st: Dict[str, Any]) -> Optional[str]:
     return name if isinstance(name, str) and name else None
 
 
-def _loop_exit(st: Dict[str, Any]) -> Tuple[str, str]:
+def _loop_exit(st: Dict[str, Any], base: Path) -> Tuple[str, str]:
     """Lối ra của vòng đã kết thúc, dùng chung cho `attach`/`resolve`/`unblock` (ADR-0051, ADR-0052 §6): (loại, chữ), loại
-    `unblock` | `pending` | `init`. `blocked` xét nguồn như `_live_loop`: từ state → `unblock`; PLAN mất/rỗng → `init`.
-    Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
+    `unblock` | `pending` | `init`. `blocked` xét PLAN trên đĩa, không đoán từ đếm lỗi (`loop record` sau khi vòng dừng vẫn
+    đổi đếm — review #295): PLAN mất/rỗng → `init`, còn lại → `unblock`. Hết vòng/hạn → `init` dù verdict nào (`unblock`
+    từ chối mở trần — không trỏ vòng tròn)."""
     fv = _final_verdict(st)
-    if fv == "blocked" and not _blocked_by_state(st):
-        return "init", "PLAN mất/rỗng → `loop init --plan <mới>`"
+    if fv == "blocked" and not _plan_tasks(base, st):
+        return "init", EXIT_PLAN_LOST
     if fv == "budget" or _budget_exhausted(st):
         return "init", EXIT_BUDGET
     if fv == PENDING_HUMAN:
         return "pending", EXIT_PENDING
     if fv in (None, "blocked", "stopped"):
         return "unblock", EXIT_UNBLOCK
-    return "init", "đợt đã xong → `loop init --plan <đợt kế>`"
+    if fv == "done":
+        return "init", "đợt đã xong → `loop init --plan <đợt kế>`"
+    return "init", f"verdict `{fv}` không mở lại được → `loop init --plan <mới>`"
 
 
 def _ended_msg(st: Dict[str, Any], text: str) -> str:
     return f"✗ Vòng đã kết thúc ({_final_verdict(st) or 'không có final_verdict'}) — {text}"
 
 
-def _attach_problem(cur: Dict[str, Any], sid: str) -> Optional[str]:
+def _attach_problem(cur: Dict[str, Any], sid: str, base: Path) -> Optional[str]:
     if not cur.get("started"):  # state do `ci-triage`/`block` sinh, chưa từng `loop init` (ADR-0052 §6)
         return NO_LOOP_MSG
     if not cur.get("active"):
-        return _ended_msg(cur, _loop_exit(cur)[1])
+        return _ended_msg(cur, _loop_exit(cur, base)[1])
     if not sid:
         return "✗ Ngoài Claude Code (không có phiên) — `attach` chỉ gắn phiên, không gỡ ràng buộc phiên đã gắn"
     return None
 
 
 def _attach_apply(
-    cur: Dict[str, Any], item: Dict[str, str], problem: List[str], same: List[bool]
+    cur: Dict[str, Any], item: Dict[str, str], base: Path, problem: List[str], same: List[bool]
 ) -> Optional[Dict[str, Any]]:
     """`fn` của `update_state` cho `loop attach` (`retries=0`): chỉ đặt `session_id` và nối `attached[]` — không chạm
     việc chờ, đếm lỗi, `blocked`, vòng, hạn, phạm vi. Từ chối hoặc đã gắn đúng phiên này (`same`) → None, không ghi."""
-    problem[:] = [p] if (p := _attach_problem(cur, item["session"])) else []
+    problem[:] = [p] if (p := _attach_problem(cur, item["session"], base)) else []
     same[:] = [not problem and cur.get("session_id") == item["session"]]
     if problem or same[0]:
         return None
@@ -7348,7 +7352,7 @@ def _attach_apply(
 def _loop_attach(args: argparse.Namespace, base: Path) -> int:
     item, problem = {"session": session_id(), "reason": _one_line(args.reason), "at": now_iso()}, [NO_LOOP_MSG]
     same = [False]
-    cur = update_loop_state(base, lambda st: _attach_apply(st, item, problem, same), retries=0)
+    cur = update_loop_state(base, lambda st: _attach_apply(st, item, base, problem, same), retries=0)
     if problem or cur is None:
         print(problem[0] if problem else NO_LOOP_MSG, file=sys.stderr)
         return 2
@@ -7391,7 +7395,7 @@ def _loop_resolve(args: argparse.Namespace, base: Path) -> int:
         return 2
     print(f"✓ {args.task} hết chờ người: {reason} — quay lại hàng làm theo PLAN")
     if not cur.get("active"):  # gỡ xong vẫn exit 0; vòng đã dừng thì chỉ bước kế (ADR-0051)
-        kind, text = _loop_exit(cur)
+        kind, text = _loop_exit(cur, base)
         print(
             f"  vòng đã kết thúc ({_final_verdict(cur) or 'không có final_verdict'}) — bước kế: "
             + (EXIT_UNBLOCK if kind == "pending" else text)
@@ -7399,17 +7403,19 @@ def _loop_resolve(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
-def _unblock_problem(cur: Dict[str, Any], reason: str) -> Optional[str]:
+def _unblock_problem(cur: Dict[str, Any], reason: str, base: Path) -> Optional[str]:
     if not cur.get("started"):
         return NO_LOOP_MSG
     if not reason:
         return "✗ --reason rỗng — ghi người đã xem gì"
     if cur.get("active"):
+        if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (review #295)
+            return f"✗ Vòng đang chạy nhưng {EXIT_PLAN_LOST.replace('→', '→ `loop stop` rồi', 1)}"
         if _blocked_by_state(cur):
             return None
         why = EXIT_BUDGET if _budget_exhausted(cur) else "phiên mới gắn bằng `loop attach`"
         return f"✗ Vòng đang chạy, không bị chặn — {why}"
-    kind, text = _loop_exit(cur)
+    kind, text = _loop_exit(cur, base)
     return None if kind in ("unblock", "pending") else _ended_msg(cur, text)
 
 
@@ -7436,7 +7442,7 @@ def _unblock_apply(
     """`fn` của `update_state` cho `loop unblock` (`retries=0`): mở vòng, đặt lại đếm lỗi/chữ ký và `task_runs` của task
     đang chặn, gắn phiên hiện tại (ngoài Claude Code giữ phiên cũ); giữ việc chờ, vòng, hạn. Verdict sau khi mở tính
     TRƯỚC khi ghi: còn dừng (hết vòng/hạn) → từ chối, không ghi gì (ADR-0051)."""
-    problem[:] = [p] if (p := _unblock_problem(cur, item["reason"])) else []
+    problem[:] = [p] if (p := _unblock_problem(cur, item["reason"], base)) else []
     if problem:
         return None
     entry = {"reason": item["reason"], **_unblock_prior(cur, base), "at": item["at"]}

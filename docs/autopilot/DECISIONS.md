@@ -1455,3 +1455,10 @@
 - Chọn: Đếm lại khi spec hoặc Gate (dạng chuẩn, bỏ khác biệt khoảng trắng) đổi — trừ task đã chạm trần; chỉ lần xanh chạy đúng Gate hoặc loop resume xoá
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: review #294 tái hiện agent tự thoát chặn bằng thêm khoảng trắng vào Gate/spec hoặc record xanh bằng -- true; đổi Gate thật trước trần vẫn là 'đổi cách' (nghiên cứu §4B); (2) đường lùi --max-task-runs 0
 - Đường lùi: task_runs_rev về task_req_rev nguyên văn; bỏ điều kiện chạm trần và clears trong loop_record
+
+### D-207 · 2026-10-27T06:48:32+00:00 · Gộp T-3540/3541/3542 (attach/resolve/unblock) vào một PR #295 dù PLAN ghi mỗi task một PR, ≤ 150 dòng?
+
+- Phương án: (1) Giữ một PR: ba lệnh dùng chung _loop_exit, _interventions, _carry_interventions; tách ra thì PR đầu chứa code chung chưa có lệnh gọi · (2) Tách ba PR theo PLAN
+- Chọn: Giữ một PR: ba lệnh dùng chung _loop_exit, _interventions, _carry_interventions; tách ra thì PR đầu chứa code chung chưa có lệnh gọi
+- Lý do (tiêu chí chất lượng cuối): (3) bảng lối ra là một giao ước chung, review một lần thấy đủ ca; (2) đường lùi vẫn là revert một squash commit; như D-205
+- Đường lùi: revert squash #295; đợt sau tách theo task

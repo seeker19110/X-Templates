@@ -2086,7 +2086,14 @@ class LoopInterventionsTest(TmpDirCase):
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True}, xt.EXIT_UNBLOCK),
             ({"verdict": "blocked", "reason": "lỗi lặp"}, {"same_failure_count": 3}, xt.EXIT_UNBLOCK),
             ({"verdict": "blocked", "reason": "task đỏ"}, {"task_runs": {"T-001": 6}}, xt.EXIT_UNBLOCK),
-            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {}, "PLAN mất/rỗng → `loop init --plan <mới>`"),
+            # review #295: `loop record` sau khi vòng dừng đổi đếm lỗi — nguồn vẫn là state, PLAN còn → `unblock`
+            (
+                {"verdict": "blocked", "reason": "lỗi lặp"},
+                {"same_failure_count": 1, "task_runs": {"T-001": 4}},
+                xt.EXIT_UNBLOCK,
+            ),
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"plan": "docs/autopilot/PLAN.md.bak"}, xt.EXIT_PLAN_LOST),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
             ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
             (None, {}, xt.EXIT_UNBLOCK),
             ({"reason": "thiếu tên"}, {}, xt.EXIT_UNBLOCK),
@@ -2095,6 +2102,7 @@ class LoopInterventionsTest(TmpDirCase):
             ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
             ({"verdict": "stopped", "reason": "s"}, {"deadline": "2000-01-01T00:00:00+00:00"}, xt.EXIT_BUDGET),
+            ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {"iterations": 100}, xt.EXIT_BUDGET),
         ]
         for fv, extra, want in cases:
             with self.subTest(fv=fv, extra=extra):
@@ -2150,7 +2158,7 @@ class LoopInterventionsTest(TmpDirCase):
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True}, xt.EXIT_UNBLOCK),
             ({"verdict": "stopped", "reason": "s"}, {}, xt.EXIT_UNBLOCK),
             (None, {}, xt.EXIT_UNBLOCK),
-            ({"verdict": "blocked", "reason": "PLAN"}, {}, "PLAN mất/rỗng"),
+            ({"verdict": "blocked", "reason": "PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
             (FV_DONE, {}, "đợt đã xong → `loop init"),
             ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
         ]
@@ -2225,6 +2233,8 @@ class LoopInterventionsTest(TmpDirCase):
     def test_unblock_ended_loop_accepted(self):
         cases = [
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "blocked_reason": "b"}),
+            # review #295: chặn vì lỗi lặp, rồi một `loop record` đỏ khác chữ ký sau khi vòng dừng → vẫn mở được
+            ({"verdict": "blocked", "reason": "lỗi lặp"}, {"same_failure_count": 1, "task_runs": {"T-001": 4}}),
             ({"verdict": "stopped", "reason": "dừng tay"}, {}),
             (None, {}),
             ({"verdict": xt.PENDING_HUMAN, "reason": "chờ"}, {}),
@@ -2258,10 +2268,15 @@ class LoopInterventionsTest(TmpDirCase):
         cases = [  # (final_verdict hoặc "live", trường thêm, chữ mong đợi)
             (FV_DONE, {}, "đợt đã xong → `loop init --plan <đợt kế>`"),
             ({"verdict": "budget", "reason": "trần"}, {}, xt.EXIT_BUDGET),
-            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {}, "PLAN mất/rỗng → `loop init --plan <mới>`"),
+            ({"verdict": "blocked", "reason": "không thấy PLAN"}, {"plan": "docs/autopilot/MAT.md"}, xt.EXIT_PLAN_LOST),
             ({"verdict": "blocked", "reason": "b"}, {"blocked": True, "iterations": 100}, xt.EXIT_BUDGET),
-            ({"verdict": "lạ", "reason": "?"}, {}, "đợt đã xong"),
+            ({"verdict": "lạ", "reason": "?"}, {}, "verdict `lạ` không mở lại được → `loop init --plan <mới>`"),
             ("live", {}, "Vòng đang chạy, không bị chặn — phiên mới gắn bằng `loop attach`"),
+            (
+                "live",
+                {"blocked": True, "plan": "docs/autopilot/MAT.md"},
+                "PLAN mất/rỗng → `loop stop` rồi `loop init --plan <mới>`",
+            ),
             ("live", {"iterations": 100}, f"Vòng đang chạy, không bị chặn — {xt.EXIT_BUDGET}"),
             (
                 "live",
@@ -2300,16 +2315,19 @@ class LoopInterventionsTest(TmpDirCase):
                 real = getattr(xt, fn)
 
                 def racing(cur, *a, real=real):
-                    st = xt.read_state(self.tmp)
-                    xt.write_state({**st, "rev": st["rev"] + 1, "iterations": 9}, self.tmp)
+                    if racing.calls == 0:  # chỉ chen ở lần đọc đầu: `retries` > 0 thì lần sau đã ghi được (review #295)
+                        st = xt.read_state(self.tmp)
+                        xt.write_state({**st, "rev": st["rev"] + 1, "iterations": 9}, self.tmp)
+                    racing.calls += 1
                     return real(cur, *a)
 
+                racing.calls = 0
                 with (
                     unittest.mock.patch.object(xt, fn, side_effect=racing),
                     unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": SID_B}),
                 ):
                     rc, _, err = run_main("loop", *cmd)
-                self.assertEqual(rc, 2)
+                self.assertEqual((rc, racing.calls), (2, 1))
                 self.assertIn("rev lệch", err)
                 st = xt.read_state(self.tmp)
                 self.assertEqual((st["iterations"], st["blocked"], st["session_id"]), (9, True, SID_A))
