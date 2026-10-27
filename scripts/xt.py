@@ -11319,18 +11319,97 @@ def perf_cmd_of(path: str) -> Any:
     return data.get("cmd") if isinstance(data, dict) else None
 
 
+PERF_REFUSE = "không đủ điều kiện so"
+PERF_V2_TYPES: Dict[str, Tuple[type, ...]] = {
+    "unit": (str,),
+    "cmd": (list,),
+    "higher_is_better": (bool,),
+    "harness_sha256": (str,),
+    "env": (dict,),
+    "head": (str,),
+    "dirty": (bool, type(None)),
+}
+PERF_V2_SAME = ("unit", "cmd", "higher_is_better", "harness_sha256")  # cùng `env.platform`: lệch → không so
+PerfMeta = Optional[Dict[str, Any]]
+
+
+def perf_meta(path: str) -> PerfMeta:
+    """Mẫu v2 (`schema: 2`) của file; v1/mảng/số thô → None. ValueError khi `schema` khác 2 hoặc trường thiếu/sai kiểu."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or "schema" not in data:
+        return None
+    if type(data["schema"]) is not int or data["schema"] != 2:
+        raise ValueError(f"{path}: schema {data['schema']!r} không hỗ trợ (v2 ghi 2; v1 không có trường schema)")
+    bad = [k for k, t in PERF_V2_TYPES.items() if not isinstance(data.get(k, ...), t)]
+    if not bad and not isinstance(data["env"].get("platform"), str):
+        bad.append("env.platform")
+    if bad:
+        raise ValueError(f"{path}: mẫu v2 thiếu hoặc sai kiểu trường: {', '.join(bad)}")
+    return data
+
+
+def perf_rev(ref: str) -> str:
+    """SHA commit của `ref` trong repo của thư mục đang đứng (`--base` nhận SHA hoặc ref); không ra commit → RuntimeError."""
+    r = _git(Path.cwd(), "rev-parse", "--verify", "--quiet", "--end-of-options", ref + "^{commit}", env=_perf_env())
+    if r.returncode != 0:
+        raise RuntimeError(f"--base {ref}: không phân giải được thành commit")
+    return r.stdout.strip()
+
+
+def _perf_side_gaps(mb: PerfMeta, ma: PerfMeta, higher: bool, base: Optional[Tuple[str, str]]) -> List[str]:
+    """Lý do từ chối theo từng bên. Chiều `higher_is_better` của mẫu lệch cờ `--higher-is-better` → từ chối (chặt: không
+    đoán bên nào đúng). Baseline phải sạch (`dirty` true → từ chối; null = đo ngoài repo, chỉ nhãn); có `--base` thì
+    `before.head` phải bằng SHA của nó — v1 không có head, mẫu ngoài repo head rỗng → từ chối. Không xét head của after."""
+    gaps = [
+        f"mẫu {side} ghi higher_is_better={m['higher_is_better']} ≠ cờ --higher-is-better={higher}"
+        for side, m in (("trước", mb), ("sau", ma))
+        if m is not None and m["higher_is_better"] != higher
+    ]
+    if mb is not None and mb["dirty"] is True:
+        gaps.append("baseline đo trên cây bẩn (before.dirty)")
+    head = None if mb is None else mb["head"]
+    if base is not None and head != base[1]:
+        gaps.append(f"before.head {head!r} ≠ --base {base[0]} ({base[1]})")
+    return gaps
+
+
+def perf_gaps(mb: PerfMeta, ma: PerfMeta, higher: bool, base: Optional[Tuple[str, str]]) -> Tuple[List[str], List[str]]:
+    """(lý do từ chối, cảnh báo) của cặp mẫu (ADR-0052 §4). Hai bên v2 → lệch `unit`/`cmd`/`higher_is_better`/
+    `harness_sha256`/`env.platform` thì từ chối, lệch `env.python`/`env.nproc` chỉ cảnh báo. `base` = (ref, SHA) hoặc None."""
+    gaps = _perf_side_gaps(mb, ma, higher, base)
+    if mb is None or ma is None:
+        return gaps, []
+    b, a = ({**{k: m[k] for k in PERF_V2_SAME}, **{f"env.{k}": m["env"].get(k) for k in m["env"]}} for m in (mb, ma))
+    gaps += [f"lệch {k}: {b[k]!r} ≠ {a[k]!r}" for k in (*PERF_V2_SAME, "env.platform") if b[k] != a[k]]
+    return gaps, [f"lệch {k}: {b.get(k)!r} ≠ {a.get(k)!r}" for k in ("env.python", "env.nproc") if b.get(k) != a.get(k)]
+
+
 def _perf_compare_cmd(args: argparse.Namespace) -> int:
-    cb, ca = perf_cmd_of(args.before), perf_cmd_of(args.after)
-    if cb is not None and ca is not None and cb != ca:
-        print(f"✗ hai file đo hai lệnh khác nhau: {cb} ≠ {ca} — không so được", file=sys.stderr)
-        return 2
     try:
         before, after = perf_load(args.before), perf_load(args.after)
-    except ValueError as exc:
+        mb, ma = perf_meta(args.before), perf_meta(args.after)
+        base = None if args.base is None else (args.base, perf_rev(args.base))
+    except (ValueError, RuntimeError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
+    cb, ca = perf_cmd_of(args.before), perf_cmd_of(args.after)
+    if cb is not None and ca is not None and cb != ca:  # cả khi một bên v1 (mảng `cmd` tự ghi)
+        print(f"✗ {PERF_REFUSE}: hai file đo hai lệnh khác nhau (cmd): {cb} ≠ {ca}", file=sys.stderr)
+        return 2
+    gaps, warn = perf_gaps(mb, ma, args.higher_is_better, base)
+    for w in warn:
+        print(f"⚠ {w} — số đo có thể không so được", file=sys.stderr)
+    if gaps:
+        print(f"✗ {PERF_REFUSE}: " + "; ".join(gaps), file=sys.stderr)
+        return 2
     doc = perf_compare(before, after, args.higher_is_better, args.alpha, args.min_effect, args.min_runs, args.exact)
-    print(json.dumps(doc, ensure_ascii=False) if args.json else _perf_report(doc))
+    if any(m is None or m.get("unverified-manual") or m["dirty"] is None for m in (mb, ma)):
+        doc["unverified-manual"] = True  # v1/mảng thô/đo ngoài repo: so như cũ, không chứng minh được nguồn mẫu
+    text = _perf_report(doc) + (" [unverified-manual]" if doc.get("unverified-manual") else "")
+    print(json.dumps(doc, ensure_ascii=False) if args.json else text)
     ok = doc["verdict"] == "improved" or (args.no_regress and doc["verdict"] == "neutral")
     return 0 if ok else 1
 
@@ -12022,6 +12101,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--min-runs", type=_positive_int, default=PERF_MIN_RUNS)
     pc.add_argument("--exact", action="store_true", help="đại lượng tất định (số lệnh, byte): không cần kiểm định")
     pc.add_argument("--no-regress", action="store_true", help="cổng chống hồi quy: neutral cũng exit 0")
+    pc.add_argument("--base", help="SHA/ref commit gốc: before.head phải đúng commit này (so sau git rev-parse)")
     pc.add_argument("--json", action="store_true")
     psa = ppsub.add_parser("sample", help="chạy lệnh nhiều lần, ghi thời gian tường ra file mẫu")
     psa.add_argument("--out", required=True)

@@ -902,6 +902,193 @@ class PerfSampleV2Test(unittest.TestCase):
         self.assertIn("--harness không khớp file nào trong repo: bech/*", err)
 
 
+REFUSE = "không đủ điều kiện so"
+V2 = {
+    "schema": 2,
+    "cmd": ["./bench/run.sh"],
+    "unit": "s",
+    "higher_is_better": False,
+    "env": {"platform": "linux", "python": "3.12.1", "nproc": 4},
+    "head": "a" * 40,
+    "dirty": False,
+    "tree_fp": "f" * 64,
+    "harness_sha256": "1" * 64,
+}
+
+
+class PerfCompareV2Test(unittest.TestCase):
+    """`perf compare` với mẫu v2 (ADR-0052 §4, T-3545): lệch trường trọng yếu, baseline bẩn, `--base` lệch → exit 2;
+    v1/mảng thô/mẫu đo ngoài repo → so như cũ, nhãn `unverified-manual`."""
+
+    def setUp(self):
+        patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        os.chdir(self.tmp)
+
+    def put(self, name: str, data: object) -> str:
+        (self.tmp / name).write_text(json.dumps(data))
+        return str(self.tmp / name)
+
+    def pair(self, b_over: dict | None = None, a_over: dict | None = None) -> tuple[str, str]:
+        b = self.put("b.json", {**V2, **(b_over or {}), "samples": SLOW})
+        return b, self.put("a.json", {**V2, **(a_over or {}), "samples": FAST})
+
+    def compare(self, before: str, after: str, *extra: str) -> tuple[int, dict, str]:
+        rc, out, err = run_main("perf", "compare", before, after, "--json", *extra)
+        return rc, json.loads(out) if out else {}, err
+
+    def test_v2_same_meta_compares_without_label(self):
+        rc, doc, err = self.compare(*self.pair({}, {"dirty": True, "head": "b" * 40, "tree_fp": "e" * 64}))
+        self.assertEqual((rc, doc["verdict"]), (0, "improved"), err)  # after bẩn/head khác: không xét (candidate)
+        self.assertNotIn("unverified-manual", doc)
+        self.assertEqual(err, "")
+
+    def test_v2_refuses_each_key_mismatch(self):
+        env2 = {**V2["env"], "platform": "darwin"}
+        for key, val in (
+            ("unit", "ms"),
+            ("cmd", ["./bench/other.sh"]),
+            ("harness_sha256", "2" * 64),
+            ("env.platform", env2),
+        ):
+            with self.subTest(key):
+                rc, doc, err = self.compare(*self.pair({}, {key.partition(".")[0]: val}))
+                self.assertEqual((rc, doc), (2, {}))
+                self.assertIn(REFUSE, err)
+                self.assertIn(key, err)
+
+    def test_v2_higher_is_better_sample_vs_flag(self):
+        rc, _, err = self.compare(*self.pair({}, {"higher_is_better": True}), "--higher-is-better")
+        self.assertEqual(rc, 2)  # hai mẫu lệch nhau: cờ không gỡ được
+        self.assertIn("higher_is_better", err)
+        both = {"higher_is_better": True}
+        rc, _, err = self.compare(*self.pair(both, both))
+        self.assertEqual(rc, 2)  # mẫu nói cao là tốt, cờ vắng → chặt: từ chối, không đoán chiều
+        self.assertIn("--higher-is-better", err)
+        rc, doc, _ = self.compare(*self.pair(both, both), "--higher-is-better")
+        self.assertEqual((rc, doc["verdict"]), (1, "regressed"))
+        rc, _, err = self.compare(*self.pair(), "--higher-is-better")
+        self.assertEqual(rc, 2)
+        self.assertIn(REFUSE, err)
+
+    def test_v2_python_nproc_only_warn(self):
+        env2 = {"platform": "linux", "python": "3.13.0", "nproc": 8}
+        rc, doc, err = self.compare(*self.pair({}, {"env": env2}))
+        self.assertEqual((rc, doc["verdict"]), (0, "improved"))
+        self.assertIn("⚠ lệch env.python: '3.12.1' ≠ '3.13.0'", err)
+        self.assertIn("⚠ lệch env.nproc: 4 ≠ 8", err)
+
+    def test_v2_dirty_baseline_refused(self):
+        rc, _, err = self.compare(*self.pair({"dirty": True}))
+        self.assertEqual(rc, 2)
+        self.assertIn(REFUSE, err)
+        self.assertIn("bẩn", err)
+
+    def test_v2_manual_sample_labelled_and_base_refused(self):
+        manual = {"head": "", "dirty": None, "tree_fp": None, "unverified-manual": True}
+        for b_over, a_over in ((manual, {}), ({}, manual)):
+            with self.subTest(before=bool(b_over)):
+                rc, doc, _ = self.compare(*self.pair(b_over, a_over))
+                self.assertEqual((rc, doc["unverified-manual"]), (0, True))  # null không phải "sạch"
+        git(self.tmp, "init", "-q", "-b", "main")
+        git(self.tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+        rc, _, err = self.compare(*self.pair(manual), "--base", "HEAD")
+        self.assertEqual(rc, 2)  # head rỗng ≠ base
+        self.assertIn("before.head '' ≠ --base", err)
+
+    def test_v1_and_mixed_labelled_unverified(self):
+        slow, fast = self.put("slow.json", SLOW), self.put("fast.json", FAST)
+        b2, a2 = self.pair()
+        for before, after in ((slow, fast), (b2, fast), (slow, a2)):
+            with self.subTest(before=before, after=after):
+                rc, doc, err = self.compare(before, after)
+                self.assertEqual((rc, doc["verdict"], doc["unverified-manual"]), (0, "improved", True), err)
+        (self.tmp / "one.txt").write_text("1000 1001")  # số thô, không phải JSON
+        (self.tmp / "two.txt").write_text("900 901")
+        rc, doc, _ = self.compare(str(self.tmp / "one.txt"), str(self.tmp / "two.txt"), "--exact")
+        self.assertEqual((rc, doc["unverified-manual"]), (0, True))
+        rc, out, _ = run_main("perf", "compare", slow, fast)
+        self.assertIn("[unverified-manual]", out)
+        rc, out, _ = run_main("perf", "compare", b2, a2)
+        self.assertNotIn("unverified-manual", out)
+        v1cmd = self.put("v1cmd.json", {"samples": FAST, "cmd": ["./bench/other.sh"]})
+        rc, _, err = self.compare(b2, v1cmd)
+        self.assertEqual(rc, 2)  # một bên v1: `cmd` lệch vẫn chặn như trước
+        self.assertIn("hai lệnh khác nhau", err)
+
+    def test_v2_bad_schema_or_fields_exit_2(self):
+        for name, data, msg in (
+            ("s3", {**V2, "schema": 3}, "schema 3 không hỗ trợ"),
+            ("sstr", {**V2, "schema": "2"}, "schema '2' không hỗ trợ"),
+            ("sbool", {**V2, "schema": True}, "schema True không hỗ trợ"),
+            ("noharness", {k: v for k, v in V2.items() if k != "harness_sha256"}, "harness_sha256"),
+            ("nodirty", {k: v for k, v in V2.items() if k != "dirty"}, "dirty"),
+            ("dirtystr", {**V2, "dirty": "no"}, "dirty"),
+            ("cmdstr", {**V2, "cmd": "make bench"}, "cmd"),
+            ("envlist", {**V2, "env": []}, "env"),
+            ("noplatform", {**V2, "env": {"python": "3.12"}}, "env.platform"),
+        ):
+            with self.subTest(name):
+                bad = self.put(f"{name}.json", {**data, "samples": SLOW})
+                for before, after in ((bad, self.pair()[1]), (self.pair()[0], bad)):
+                    rc, doc, err = self.compare(before, after)
+                    self.assertEqual((rc, doc), (2, {}))
+                    self.assertIn(msg, err)
+
+    def test_base_mismatch_and_resolution(self):
+        git(self.tmp, "init", "-q", "-b", "main")
+        for msg in ("one", "two"):
+            git(self.tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", msg)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        rc, doc, err = self.compare(*self.pair({"head": head}), "--base", "main")
+        self.assertEqual((rc, doc["verdict"]), (0, "improved"), err)
+        rc, _, err = self.compare(*self.pair({"head": head}), "--base", "HEAD~1")
+        self.assertEqual(rc, 2)
+        self.assertIn(f"before.head '{head}' ≠ --base HEAD~1", err)
+        for ref in ("nope", "--help", "HEAD~9"):
+            with self.subTest(ref):
+                rc, _, err = self.compare(*self.pair({"head": head}), f"--base={ref}")
+                self.assertEqual(rc, 2)
+                self.assertIn(f"--base {ref}: không phân giải được thành commit", err)
+        slow = self.put("slow.json", SLOW)
+        rc, _, err = self.compare(slow, self.pair()[1], "--base", "main")
+        self.assertEqual(rc, 2)  # v1 không có head: không chứng minh được baseline là --base
+        self.assertIn("before.head None ≠ --base main", err)
+
+    def test_base_outside_repo_exit_2(self):
+        with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.tmp)}):
+            rc, _, err = self.compare(*self.pair(), "--base", "HEAD")
+        self.assertEqual(rc, 2)
+        self.assertIn("--base HEAD: không phân giải được thành commit", err)
+
+    def test_gate_example_runs_unchanged(self):
+        """Gate mẫu của optimization-loop.md: baseline `perf sample` ở worktree commit gốc (out ghi ra cây agent), candidate
+        ở cây agent chưa commit (bẩn) → so được, không nhãn `unverified-manual`; `--base` là ref gốc khớp `before.head`."""
+        repo, wt = self.tmp / "repo", self.tmp / "wt"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / "bench").mkdir()
+        (repo / "bench" / "run.py").write_text("pass\n")
+        git(repo, "add", ".")
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+        git(repo, "worktree", "add", "-q", "--detach", str(wt), "main")
+        (repo / "app.py").write_text("x = 2\n")  # thay đổi của agent, chưa commit
+        cmd = ("--runs", "3", "--warmup", "0", "--harness", "bench/*", "--", sys.executable, "bench/run.py")
+        os.chdir(wt)
+        self.assertEqual(run_main("perf", "sample", "--out", str(repo / "before.json"), *cmd)[0], 0)
+        os.chdir(repo)
+        self.assertEqual(run_main("perf", "sample", "--out", "after.json", *cmd)[0], 0)
+        rc, doc, err = self.compare("before.json", "after.json", "--base", "main", "--min-runs", "3")
+        self.assertIn(rc, (0, 1), err)
+        self.assertNotIn("unverified-manual", doc)
+        self.assertTrue(json.loads((repo / "after.json").read_text())["dirty"])
+
+
 if __name__ == "__main__":
     unittest.main()
 
