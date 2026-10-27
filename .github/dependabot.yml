@@ -10,7 +10,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-  # Công cụ cổng (ruff, mypy) khoá kèm hash ở requirements-dev.txt — gom một PR mỗi tuần.
+  # Ba file khoá có hash (requirements-dev/audit/e2e.txt: công cụ cổng, audit, E2E) — gom một PR mỗi tuần.
   - package-ecosystem: pip
     directory: /
     schedule:
@@ -22,5 +22,6 @@ updates:
         patterns: ["*"]
     ignore:
       # playwright 1.64.x đòi pyee < 15; updater pip không giải ràng buộc này trong file khoá có hash (#275).
+      # Gỡ khi playwright cho phép pyee >= 15 (METADATA `Requires-Dist: pyee`), rồi nâng pyee cùng PR.
       - dependency-name: pyee
         update-types: ["version-update:semver-major"]
