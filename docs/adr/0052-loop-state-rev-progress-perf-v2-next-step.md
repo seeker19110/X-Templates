@@ -30,7 +30,7 @@ R4 hai lệnh `loop` đọc–sửa–ghi `state.json` đè nhau (mất `iterati
 Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với các điểm chốt:
 
 1. **Corpus luồng (lát 0).** `tests/test_flow.py` chạy `xt.py` thật trong repo git tạm (không mock state), ID `FLOW-NN` theo
-   nghiên cứu §10. Ca chưa sửa ghi trong registry `XFAIL = {"FLOW-NN": "<tái hiện>"}` của chính file và nhận
+   nghiên cứu §10; ca đồng thời (FLOW-07) xen kẽ tất định bằng barrier, không trông may rủi race. Ca chưa sửa ghi trong registry `XFAIL = {"FLOW-NN": "<tái hiện>"}` của chính file và nhận
    `expectedFailure` từ registry — **không** skip. Biến môi trường `XT_FLOW_STRICT=FLOW-NN[,…]` bỏ xfail cho các ID nêu, nên Gate
    của task sửa chạy `XT_FLOW_STRICT=<ID> python3 -m unittest tests.test_flow` và chỉ xanh khi ca đó thật sự đạt (expected failure
    tự nó cho suite exit 0). ID nêu trong `XT_FLOW_STRICT` mà không có test mang ID đó → đỏ (một test so tập STRICT với tập ID đã
@@ -49,16 +49,18 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    `_live_loop`/bảng điểm dừng chỉ ra không mở được. Lần thử tối ưu đi qua `perf trial` (§7, đếm riêng theo điểm nóng), không qua
    `loop record` của cùng task — skill `/optimize` đổi theo ở lát 3. Không nới `max_same_failure`.
 4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `head` (`git rev-parse
-   HEAD` lúc đo), `base` (= `git merge-base HEAD <--base-ref>`, mặc định `origin/main`), `dirty` (cây có diff/untracked ngoài
-   `.autopilot/`; file gitignore không tính — nên ghi `--out` vào `.autopilot/`), `tree_fp` (= `tree_fingerprint`), `harness_sha256` = sha256 của
+   HEAD` lúc đo), `parent` (cha thứ nhất của `head`), `dirty` (cây có diff/untracked ngoài `.autopilot/`), `tree_fp` (= `tree_fingerprint`,
+   bỏ `.autopilot/`); `--out` phải nằm trong `.autopilot/` (ngoài → exit 2, file mẫu không làm bẩn cây), `harness_sha256` = sha256 của
    lệnh đo + nội dung các file khớp `--harness GLOB` (lặp được; cùng glob với `perf guard --locked`; không truyền → chỉ hash lệnh, cảnh báo).
    `perf compare` theo **vai**: `before` là baseline — phải `dirty: false` (đo trên cây sạch của `head`, vd worktree `origin/main` ghim SHA);
-   `after` là candidate — hoặc cùng `head` với before (sửa chưa commit, luồng `perf trial`/`/optimize` bước 3), hoặc đã commit với
-   `after.base` == `before.head` (gốc của thay đổi đúng là baseline — "hậu duệ" thôi chưa đủ: một commit giữ trước đó hay rebase lên
-   `main` mới sẽ bị tính cho candidate). Exit 2 "không đủ điều kiện so" khi: lệch `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`;
-   before `dirty`; after không thoả một trong hai điều kiện trên. Lệch `python`/`nproc` → cảnh báo. File v1/mảng thô → so được nhưng JSON
+   `after` là candidate — đúng một trong hai: (A) cùng `head` với before, cây bẩn được (sửa chưa commit, luồng `perf trial`/`/optimize`
+   bước 3); (B) đã commit đúng **một** commit trên baseline: `after.dirty` false và `after.parent` == `before.head`. Không chấp nhận
+   "hậu duệ" hay merge-base: một commit giữ trước đó, rebase lên `main` mới hay `--base-ref` tự chọn đều sẽ tính công của commit khác
+   cho candidate (review #290). Baseline của lần thử đo ở HEAD lúc bắt đầu (worktree ghim SHA), không ở `origin/main` khi nhánh đã có
+   commit riêng. Exit 2 "không đủ điều kiện so" khi: lệch `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`;
+   before `dirty`; after không thoả (A) hay (B). Lệch `python`/`nproc` → cảnh báo. File v1/mảng thô → so được nhưng JSON
    đầu ra `unverified-manual: true` và không bao giờ trả `improved` cho `--no-regress`/ratchet tự động. (FLOW-19 của nghiên cứu §10 viết
-   lại theo vai: baseline bẩn, hoặc candidate không cùng head và có `base` khác head baseline → từ chối.)
+   lại theo vai: baseline bẩn, hoặc candidate không thoả (A)/(B) → từ chối.)
 5. **`loop next-step --json` chỉ đọc (lát 2, §4D/§9.2).** Hàm thuần nhận state/PLAN/blueprint/sổ audit/`release-check`/JSON `pr next` đã
    có (không gọi GitHub), trả `objective`, `action`, `reason`, `missing`, `key`, `budget`, `inputs`; replay cùng đầu vào → cùng `action`.
    `build-until-clean` dừng ở `ready-for-complete` (đề xuất, không đổi `delivery_phase` — D-178); `harden-to-signoff` dừng ở
