@@ -769,10 +769,10 @@ class PerfSampleV2Test(unittest.TestCase):
         self.init_repo()
         real = xt._git
 
-        def broken(cwd: Path, *args: str, **kw: object) -> subprocess.CompletedProcess:
+        def broken(cwd: Path, *args: str, env: object = None, stdin: object = None) -> subprocess.CompletedProcess:
             if args[:1] == ("ls-files",):
                 return subprocess.CompletedProcess([], 128, "", "fatal: index file corrupt")
-            return real(cwd, *args, **kw)  # type: ignore[arg-type]
+            return real(cwd, *args, env=env, stdin=stdin)
 
         with unittest.mock.patch.object(xt, "_git", side_effect=broken):
             rc, err, doc = self.sample()
