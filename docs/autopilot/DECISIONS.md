@@ -1427,3 +1427,10 @@
 - Chọn: Máy hoá bước kế và một lần thử trên CLI/state hiện có (ADR-0052): lát 0 corpus FLOW, lát 1 rev/task_runs/attach-resolve-unblock/perf v2 → 3.28.0, lát 2 next-step chỉ đọc → lát 3 perf trial → 3.29.0; mỗi task một PR, lát 4–5 loop defer
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bốn tái hiện R2–R5 có test đỏ trước khi sửa, không nới cổng/trần; lát 4–5 cần dữ liệu/quyền chỉ chủ dự án có nên defer; (2) mỗi task một PR đảo ngược được, trần theo task tắt bằng --max-task-runs 0; (3) stdlib, test được; phương án 2 không sửa được R2–R5 và skill hết byte; phương án 3 cần ADR đối chiếu ADR-0009, quyền và chi phí chưa có số
 - Đường lùi: Revert từng PR theo ADR-0052 §Đường lùi; bỏ PLAN-harden-2026-10-27-loops
+
+### D-203 · 2026-10-27T03:07:45+00:00 · perf trial (lát 3) có chốt thiết kế trong ADR-0052 không, sau 3 lượt review #290 (lượt 4–6) mỗi lượt lộ lớp ràng buộc mới?
+
+- Phương án: (1) Rút §7 khỏi ADR-0052; ghi ràng buộc đã tìm làm đầu vào ADR riêng của lát 3 (sau spike môi trường đo); lát 0–2 + perf v2 metadata giữ · (2) Vá tiếp §7 trong ADR-0052 tới khi review sạch
+- Chọn: Rút §7 khỏi ADR-0052; ghi ràng buộc đã tìm làm đầu vào ADR riêng của lát 3 (sau spike môi trường đo); lát 0–2 + perf v2 metadata giữ
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 5 🟠 lượt 6 (baseline agent lái được, bộ chấm từ cây candidate, thiếu test tương đương, worktree tạm khác môi trường, không đo đại lượng tất định) cần thử nghiệm thực tế, chốt trên giấy dễ sai; (2) giữ đường lùi: lát 0–2 không phụ thuộc perf trial; (3) ADR riêng test được bằng spike; tốc độ chỉ phá hoà
+- Đường lùi: Đưa §7 trở lại ADR-0052 bằng ADR mới thay thế phần này

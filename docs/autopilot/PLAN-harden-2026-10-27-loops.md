@@ -1,14 +1,14 @@
 # PLAN-harden-2026-10-27-loops.md — Khung X-Templates · nâng tự chủ ba vòng, lát 0–3
 
 > Lập ngày 2026-10-27 theo `/complete` (pha harden) và yêu cầu chủ repo "hoàn thành hết đi" (sáu lát của
-> [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md) §11). Thiết kế: ADR-0051, ADR-0052. Phiên chính tự duyệt (D-202).
+> [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md) §11). Thiết kế: ADR-0051, ADR-0052 (lát 3: ADR riêng, D-203). Phiên chính tự duyệt (D-202, D-203).
 >
 > **Cú pháp bắt buộc cho máy:** mỗi task một dòng `- [ ] \`T-NNNN\` <việc> — Gate: \`<lệnh>\``.
 
 ## Tóm tắt (cổng duyệt — phiên chính tự duyệt, D-202)
 - Hiện trạng: `main` 3.27.0, audit delta `e8c8d96..137a047` 0 🔴/🟠 (#289); `release-check` chỉ còn chữ ký người.
 - Phạm vi: lát 0 corpus luồng FLOW (§10) · lát 1 `rev` state, không-tiến-triển theo task, `loop attach/resolve/unblock`, mẫu perf v2 →
-  3.28.0 · lát 2 `loop next-step` chỉ đọc, gom việc harden, gói nghiệm thu nháp · lát 3 `perf trial` → 3.29.0.
+  3.28.0 · lát 2 `loop next-step` chỉ đọc, gom việc harden, gói nghiệm thu nháp · lát 3 ADR riêng + `perf trial` (D-203) → 3.29.0.
 - Không làm (defer, cần người/dữ liệu): lát 4 pilot phiên thực ≥ 2 dự án đích; lát 5 field trigger, bot nâng bản, worker ngoài phiên,
   event policy `pull_request_target` (T-3554, T-3555).
 - `release-check` không nằm trong Gate task, kể cả trong ống lệnh (`run_gate_shell` chạy `bash -o pipefail`; hàng `verify` đòi chính
@@ -47,8 +47,8 @@
 - [ ] `T-3549` Gói nghiệm thu nháp (`candidate_head`, `evidence_fp`, `human_pending`); FLOW-16/17 (sau: T-3548; files: scripts/xt.py, tests/test_next_step.py, tests/test_flow.py) — Gate: `XT_FLOW_STRICT=FLOW-16,FLOW-17 python3 -m unittest -q tests.test_next_step tests.test_flow`
 - [ ] `T-3550` Stop hook in gợi ý `next-step`; skill `/autopilot` `/complete` gọi `next-step` (đổi chữ trong trần byte) (sau: T-3549) — Gate: `python3 -m unittest -q -k test_stop_hint_next_step tests.test_hooks && python3 -m unittest -q tests.test_docs_budget tests.test_next_step`
 ### Lát 3 — một lần thử tối ưu
-- [ ] `T-3551` `perf trial start/finish` (máy tự đo base/start_head/candidate trong một lượt, ghim bộ đo, `HEAD == start_head`) + `.autopilot/perf-trials.jsonl`, trần 3 lần/điểm nóng; FLOW-20/22 + ca đường giữ (sau: T-3550; files: scripts/xt.py, tests/test_perf_trial.py, tests/test_flow.py, tests/shard-weights.json) — Gate: `XT_FLOW_STRICT=FLOW-20,FLOW-22 python3 -m unittest -q tests.test_perf_trial tests.test_flow`
-- [ ] `T-3552` `perf trial --resume` sau crash, chỉ số phụ vượt trần đỏ; FLOW-21/23; skill `/optimize` gọi `perf trial` thay `loop record` cho lần thử, `optimization-loop.md` dùng `perf trial` (baseline ở commit gốc, `--base`) (sau: T-3551; files: scripts/xt.py, tests/test_perf_trial.py, tests/test_flow.py, .claude/skills/optimize/SKILL.md, framework/11-autonomous-loop/optimization-loop.md) — Gate: `XT_FLOW_STRICT=FLOW-21,FLOW-23 python3 -m unittest -q tests.test_perf_trial tests.test_flow tests.test_docs_budget`
+- [ ] `T-3551` ADR riêng cho `perf trial` từ ràng buộc ADR-0052 §7 (D-203): spike môi trường đo (worktree tạm, cài editable, `node_modules`, `--setup`), bộ chấm và bộ test tương đương từ commit gốc, đại lượng tất định; ID FLOW cho đường giữ/thu hồi/baseline bị lái/bộ chấm bị sửa (sau: T-3550; files: docs/adr, research) — Gate: `git grep -qE '^# ADR-[0-9]+: .*perf trial' -- docs/adr ':!docs/adr/0052-*'`
+- [ ] `T-3552` Triển khai `perf trial` theo ADR của T-3551, skill `/optimize` và `optimization-loop.md` gọi nó (tách task khi làm; sau: T-3551; files: scripts/xt.py, tests/test_perf_trial.py, tests/test_flow.py, tests/shard-weights.json, .claude/skills/optimize/SKILL.md, framework/11-autonomous-loop/optimization-loop.md) — Gate: `XT_FLOW_STRICT=FLOW-20,FLOW-21,FLOW-22,FLOW-23 python3 -m unittest -q tests.test_perf_trial tests.test_flow tests.test_docs_budget`
 - [ ] `T-3557` Audit delta lát 2–3 (sau: T-3552; files: docs/ops/AUDIT-STATUS.md) — Gate: `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md --strict && python3 -c "import sys; sys.path.insert(0,'scripts'); import xt; from pathlib import Path; d,s=xt.review_debt(Path('.'),Path('docs/ops/AUDIT-STATUS.md')); print(*d,sep=chr(10)); sys.exit(1 if d or not s else 0)"`
 - [ ] `T-3553` Cắt 3.29.0 + PROGRESS (`release-check` ở G7 sau vòng) (sau: T-3557) — Gate: `python3 scripts/xt.py changelog-check && grep -qx '3.29.0' VERSION && python3 scripts/xt.py progress-check && python3 scripts/xt.py blueprint-status BLUEPRINT.md --strict --run`
 ### Lát 4–5 — cần người (defer)

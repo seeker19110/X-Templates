@@ -1,6 +1,6 @@
-# ADR-0052: State có revision, chặn không-tiến-triển theo task, mẫu perf v2, `loop next-step` chỉ đọc và `perf trial` — lát 0–3 của nghiên cứu ba vòng
+# ADR-0052: State có revision, chặn không-tiến-triển theo task, mẫu perf v2 và `loop next-step` chỉ đọc — lát 0–2 của nghiên cứu ba vòng; `perf trial` (lát 3) hoãn sang ADR riêng
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202)
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202; §7 hoãn — D-203)
 - **Trạng thái triển khai:** Chưa triển khai — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
 - **Ngày:** 2026-10-27
 - **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-004`/`-007`/`-008`/`-011` (tối ưu; baseline ở commit gốc giữ nguyên), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
@@ -49,7 +49,7 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    `_live_loop`/bảng điểm dừng chỉ ra không mở được. Lần thử tối ưu đi qua `perf trial` (§7, đếm riêng theo điểm nóng), không qua
    `loop record` của cùng task — skill `/optimize` đổi theo ở lát 3. Không nới `max_same_failure`.
 4. **Mẫu perf v2 (§7.1).** `perf sample` ghi `schema: 2`, `unit`, `higher_is_better`, `env {platform, python, nproc}`, `head` (`git rev-parse
-   HEAD` lúc đo; rỗng ngoài git → mẫu nhãn `unverified-manual`), `dirty` và `tree_fp` (= `tree_fingerprint`, tính **trước** lần chạy
+   HEAD` lúc đo; thư mục không phải repo git → `head` rỗng, mẫu nhãn `unverified-manual`; là repo mà git lỗi → exit 2), `dirty` và `tree_fp` (= `tree_fingerprint`, tính **trước** lần chạy
    đầu; bỏ `.autopilot/`, và bỏ file `--out` chỉ khi nó nằm trong cây; lệnh git lỗi → exit 2, không coi là sạch), `harness_sha256` = sha256 của lệnh đo + nội dung các file khớp `--harness GLOB` (lặp được; cùng glob với
    `perf guard --locked`; không truyền → chỉ hash lệnh, cảnh báo). `perf compare` exit 2 "không đủ điều kiện so" khi lệch
    `unit`/`cmd`/`higher_is_better`/`harness_sha256`/`env.platform`, khi `before` `dirty`, hoặc khi có `--base SHA` mà `before.head` khác SHA
@@ -71,21 +71,14 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    "chạy `loop init` trước"; "state cũ" = có `started`, không `final_verdict`. `final_verdict` `blocked` do PLAN mất/rỗng (không cờ, không
    lỗi lặp) → lối ra `loop init --plan <mới>`, `unblock` từ chối — đúng nguồn như `_live_loop`. `attached[]`/`resolved[]`/`unblocked[]`
    được `_carry_previous` mang sang đợt kế (cả `--force`) để đếm can thiệp mỗi mục tiêu.
-7. **`perf trial` (lát 3, §7.2) — máy tự đo, một tiến trình.** `perf trial start --hotspot H --hypothesis … --falsifier … --harness GLOB…
-   -- <lệnh đo>` đòi cây sạch (ngoài `.autopilot/`), ghi `.autopilot/perf-trials.jsonl` **trước** khi sửa (`LOOP-OPT-004`) và ghim:
-   `start_head` (HEAD lúc start), `base_sha` = merge-base của HEAD với nhánh gốc (`progress_base_ref`: `XT_PROGRESS_BASE` > `origin/HEAD` >
-   `origin/main` > `origin/master`; không tìm được → exit 2, không lùi về HEAD), lệnh đo, glob bộ đo và hash bộ đo ở `base_sha`.
-   Candidate là phần **chưa commit** trên `start_head`. `perf trial finish` đòi `HEAD == start_head` (commit/merge giữa lần thử → exit 2,
-   lần thử hỏng), bộ đo ở cây hiện tại khớp hash đã ghim (sửa bộ đo → exit 2, như `perf guard --locked` — `LOOP-OPT-002`), rồi **tự đo
-   xen kẽ trong cùng lượt** ba cây: worktree tạm ở `base_sha`, worktree tạm ở `start_head`, và cây candidate; số mẫu/warm-up đã khai
-   lúc start. Giữ chỉ khi candidate `improved` so với **cả** `start_head` (không nhận công của lần thử trước hay của `main`) **và**
-   `base_sha` (commit gốc của `LOOP-OPT-003` — commit làm chậm có chủ đích trước lần thử không thành baseline thấp). Không đạt → thu
-   hồi **đúng file của lần thử** bằng `git stash push --include-untracked -m <nhãn> -- <files>` (không `checkout -- .`/`reset --hard`),
-   kiểm cây về đúng vân tay lúc start. `finish` tự ghi dòng `PERF-LOG.md` (giữ/bỏ — `LOOP-OPT-010`) **sau** khi quyết, nên không bị
-   stash. Mẫu đo nằm trong `.autopilot/` do `xt.py` ghi, không do agent cung cấp. `--resume` sau crash dọn worktree tạm, khôi phục và
-   ghi "chưa hoàn tất". Khoá trùng = hotspot + hash diff. Ba lần không `improved` cùng hotspot (bền qua restart) → exit 2 "đổi điểm
-   nóng" (`LOOP-OPT-011`). Chỉ số phụ khai lúc start vượt trần → đỏ dù chính `improved` (`LOOP-OPT-008`). Thiếu một trong các điều
-   kiện → không giữ; cài đặt phải có ca FLOW cho cả đường giữ lẫn đường thu hồi.
+7. **`perf trial` (lát 3, §7.2) — hoãn sang ADR riêng (D-203).** Ba lượt review #290 (4–6) cho thấy thiết kế cần thử thực tế trước khi
+   chốt. Ràng buộc đầu vào cho ADR đó: baseline ghim một lần cho cả vòng (không đọc `XT_PROGRESS_BASE`, không theo HEAD agent chọn);
+   candidate là phần chưa commit trên `start_head`, `finish` đòi `HEAD == start_head`; máy tự đo base/`start_head`/candidate trong cùng
+   lượt, cùng môi trường (bước `--setup` ghim từ commit gốc; cài editable/`node_modules`/submodule không được trỏ về cây candidate);
+   lệnh đo, glob bộ đo, bộ test tương đương và chính `xt.py` chấm lấy từ commit gốc, không từ cây candidate (`LOOP-OPT-002`/`-003`);
+   đo được đại lượng tất định và chỉ số phụ (`LOOP-OPT-008`/`-009`); giữ chỉ khi `improved` so với cả trạng thái giữ gần nhất và commit
+   gốc, kèm test tương đương xanh; thu hồi đúng file bằng `git stash push --include-untracked` và kiểm cây về vân tay lúc start;
+   PERF-LOG ghi sau quyết định. Có ca FLOW riêng cho đường giữ, đường thu hồi, baseline bị lái và bộ chấm bị sửa.
 8. **Không làm ở ADR này:** lát 4 (pilot phiên thực ≥ 2 dự án đích, cho `next-step` ghi trạng thái) và lát 5 (field trigger, bot nâng bản,
    worker ngoài phiên, event policy `pull_request_target`) cần dữ liệu/quyền của chủ dự án — `loop defer`; ADR riêng khi có số.
 
@@ -104,7 +97,7 @@ FLOW-01…23 xanh trong CI (trừ ca lát 4–5); `autonomy-bench` không lùi; 
 ## Đường lùi
 
 Mỗi quyết định một PR đảo ngược được: bỏ kiểm `rev` (ghi vẫn atomic), `--max-task-runs 0`, `perf compare --schema 1` tạm, skill bỏ gọi
-`next-step`, `perf trial` không `--apply`.
+`next-step`.
 
 ## Thông tin thêm
 
