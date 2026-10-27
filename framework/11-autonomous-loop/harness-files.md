@@ -70,6 +70,11 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `pyenv exec`, `asdf exec`, `volta run`, `fnm exec`, `direnv exec`, `bundle exec`, `nix develop -c`, `pnpm exec`)
   không được bóc để trích script; lồng hơn 8 lớp lệnh chạy hộ cũng không; đích `rm -rf` là thay thế lệnh khác `$(pwd)` (`$(pwd -P)/..`,
   `$(dirname $PWD)`, `$(realpath ..)`) là không rõ nên cho qua — D-051 (AUD-SEC-101).
+- **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
+  (`REMOTE_REF_FORGE`), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
+  hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;
+  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`). Gate đọc `origin/main` chỉ chống nhầm lẫn — rào thật của vòng
+  tối ưu là `perf trial` (ADR-0052 §7).
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
   bị coi là cũ hơn. Lớp đỡ: `pr reviewed` đăng ngay kết luận (dấu đã đăng là nguồn của `merge-check`/steward/guard).

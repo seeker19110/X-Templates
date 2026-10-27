@@ -1271,6 +1271,221 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
     return "", ""
 
 
+# AUD-SEC-119 (T-3563): Gate mẫu tối ưu đọc script/baseline từ `origin/main` (optimization-loop.md), nhưng ref remote là
+# ref CỤC BỘ: `update-ref refs/remotes/origin/main HEAD`, `fetch . HEAD:refs/remotes/origin/main`, `push . HEAD:origin/main`
+# ghi thẳng nó; `tag`/`branch`/`checkout -b`/`switch -c`/`worktree add -b`/`stash branch`/`update-ref` tạo ref cùng tên mà
+# git giải trước (`$GIT_DIR/<tên>`, `refs/<tên>`, `refs/tags/`, `refs/heads/` trước `refs/remotes/` — gitrevisions). Chặn
+# (deny ở mọi chính sách và mọi pha, không nới ở pha build): ghi/xoá ref dưới `refs/remotes/`, tạo/đổi tên/sao chép ref
+# có tên ngắn `<remote>/…`. Tên remote: `git remote` ở repo của lệnh ∪ REMOTE_NAMES (đọc lỗi vẫn giữ tên mặc định), so
+# không phân biệt hoa thường (macOS: `refs/heads/Origin/main` là cùng file với ref git tìm khi giải `origin/main`).
+# Cho qua: `fetch origin [main]` (refspec cấu hình cập nhật `origin/main`), refspec đúng dạng cấu hình
+# `[+]refs/heads/X:refs/remotes/<R>/X` khi <R> là remote ĐÃ cấu hình (tên khác là đường dẫn: `./origin`); xoá/đổi tên ref
+# giả đi (`branch -D origin/x`, `tag -d`, `branch -dr` — Gate đỏ chứ không xanh giả); upstream/điểm bắt đầu là ref remote.
+# Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file `.git/refs/…`/`.git/packed-refs`/
+# `.git/<remote>/…`; đổi URL/refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `-c remote.<r>.*`);
+# `git replace`, `fast-import`; ref trong biến/thay lệnh. Rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
+REMOTE_REF_MARK = "ghi ref theo dõi remote"  # dấu của mã REMOTE_REF_FORGE (REASON_CODES)
+REMOTE_REF_WHY = REMOTE_REF_MARK + " / tạo ref trùng tên remote ({}) — giả `<remote>/<nhánh>` mà Gate đọc (AUD-SEC-119)"
+UNRESOLVED_REF_MARK = "ref đọc từ stdin, guard không thấy"  # dấu của UNRESOLVED_TARGET
+UNRESOLVED_REF_WHY = "git {} --stdin: " + UNRESOLVED_REF_MARK + " có phải ref của remote (AUD-SEC-119)"
+REMOTE_NAMES = frozenset({"origin", "upstream"})
+FETCH_VALUE_OPTS = (
+    *("--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--jobs", "--negotiation-tip", "--refmap"),
+    *("--upload-pack", "--server-option", "--filter", "--strategy", "--strategy-option"),
+)
+TAG_VALUE_OPTS = ("--message", "--file", "--local-user", "--cleanup", "--format", "--sort", "--trailer")
+TAG_NO_CREATE = {"-l", "-d", "-v", "-n", "--list", "--delete", "--verify", "--contains", "--no-contains", "--merged"}
+TAG_NO_CREATE |= {"--no-merged", "--points-at"}
+BRANCH_NO_CREATE = {"-l", "-a", "-r", "-d", "-D", "-u", "--list", "--all", "--remotes", "--delete", "--contains"}
+BRANCH_NO_CREATE |= {"--no-contains", "--merged", "--no-merged", "--points-at", "--set-upstream-to", "--unset-upstream"}
+BRANCH_NO_CREATE |= {"--show-current", "--edit-description"}
+BRANCH_RENAME = {"-m", "-M", "-c", "-C", "--move", "--copy"}
+BRANCH_VALUE_OPTS = ("--set-upstream-to", "--contains", "--no-contains", "--points-at", "--format", "--sort")
+# Lệnh con → (chữ cờ ngắn nhận giá trị, tuỳ chọn dài nhận giá trị) mà GIÁ TRỊ là tên nhánh mới.
+NEW_BRANCH_OPTS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    "checkout": ("bB", ("--orphan",)),
+    "switch": ("cC", ("--create", "--force-create", "--orphan")),
+    "worktree": ("bB", ()),
+}
+ParsedOpts = Tuple[Set[str], List[str], List[Tuple[str, str]]]
+
+
+def _long_match(key: str, opts: Tuple[str, ...]) -> bool:
+    """`key` (tuỳ chọn dài) là một trong `opts` hoặc viết tắt của nó — git nhận viết tắt không mơ hồ (`--force-c`)."""
+    return key in opts or (key.startswith("--") and len(key) > 3 and any(o.startswith(key) for o in opts))
+
+
+def _short_cluster(a: str, nxt: List[str], short_val: str) -> Tuple[List[str], List[Tuple[str, str]], int]:
+    """Một cụm cờ ngắn (`-fb`, `-bx`): (cờ, [(cờ nhận giá trị, giá trị)], số token kế tiếp bị ăn làm giá trị)."""
+    k = next((j for j, c in enumerate(a[1:], 1) if c in short_val), len(a))
+    flags = ["-" + c for c in a[1 : k + 1]]
+    if k == len(a):
+        return flags, [], 0
+    took = [a[k + 1 :]] if k + 1 < len(a) else nxt
+    return flags, [("-" + a[k], v) for v in took], len(took) if k + 1 == len(a) else 0
+
+
+def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> ParsedOpts:
+    """(cờ đã gặp, đối số vị trí, [(tuỳ chọn, giá trị)]) theo kiểu parse-options của git: cụm cờ ngắn dừng ở chữ nhận
+    giá trị (`-fb x`, `-bx`), `--opt=v`/`--opt v`, viết tắt tuỳ chọn dài, sau `--` là đối số vị trí."""
+    flags: Set[str] = set()
+    pos: List[str] = []
+    vals: List[Tuple[str, str]] = []
+    i = 0
+    while i < len(args):
+        a, nxt = args[i], args[i + 1 : i + 2]
+        i += 1
+        if a == "--":
+            return flags, pos + args[i:], vals
+        if a.startswith("--"):
+            key, eq, val = a.partition("=")
+            flags.add(key)
+            took = ([val] if eq else nxt) if _long_match(key, long_val) else []
+            vals += [(key, v) for v in took]
+            i += 0 if eq else len(took)
+        elif a.startswith("-") and len(a) > 1:
+            short, got, ate = _short_cluster(a, nxt, short_val)
+            flags.update(short)
+            vals += got
+            i += ate
+        else:
+            pos.append(a)
+    return flags, pos, vals
+
+
+def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
+    longs = tuple(o for o in opts if o.startswith("--"))
+    return any(f in opts or _long_match(f, longs) for f in flags)
+
+
+RefNames = Optional[List[str]]  # tên ref lệnh sẽ ghi/tạo; None = không thấy được (đọc từ stdin)
+
+
+def _update_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """update-ref: ref là đối số vị trí đầu (cả `-d`); `--stdin` → None."""
+    flags, pos, _ = _parse_opts(args, "m", ())
+    return None if _has_opt(flags, {"--stdin"}) else pos[:1]
+
+
+def _symbolic_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """symbolic-ref: ghi khi có `<tên> <ref>` hoặc xoá (`-d`); một đối số = đọc."""
+    flags, pos, _ = _parse_opts(args, "m", ())
+    return pos[:1] if len(pos) > 1 or _has_opt(flags, {"-d", "--delete"}) else []
+
+
+def _tag_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """tag: tên tag mới là đối số vị trí đầu, trừ chế độ liệt kê/xoá/kiểm (`-l`, `-d`, `-v`, `-n<số>`, `--contains`…)."""
+    flags, pos, _ = _parse_opts(args, "mFu", TAG_VALUE_OPTS)
+    return [] if _has_opt(flags, TAG_NO_CREATE) else pos[:1]
+
+
+def _branch_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """branch: tạo (`[-f] <tên> [<điểm>]`) → đối số đầu; `-m/-M/-c/-C [<cũ>] <mới>` → đối số cuối; liệt kê/xoá/upstream
+    → không tạo. `-v` có tên vẫn TẠO nhánh (đo trên git 2.43)."""
+    flags, pos, _ = _parse_opts(args, "u", BRANCH_VALUE_OPTS)
+    if _has_opt(flags, BRANCH_NO_CREATE):
+        return []
+    return pos[-1:] if _has_opt(flags, BRANCH_RENAME) else pos[:1]
+
+
+def _new_branch_names(sub: str) -> Callable[[List[str], Optional[str]], RefNames]:
+    """Tên nhánh mới là GIÁ TRỊ của cờ: `checkout -b|-B|--orphan`, `switch -c|-C|--create|--force-create|--orphan`,
+    `worktree add -b|-B`."""
+    short, longs = NEW_BRANCH_OPTS[sub]
+
+    def names(args: List[str], _cwd: Optional[str]) -> RefNames:
+        if sub == "worktree" and args[:1] != ["add"]:
+            return []
+        return [v for _, v in _parse_opts(args, short, longs)[2]]
+
+    return names
+
+
+def _stash_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """`stash branch <tên>` tạo nhánh."""
+    return _positionals(args[1:2]) if args[:1] == ["branch"] else []
+
+
+def _push_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """push: đích của refspec (`src:dst`; không `:` thì đích = nguồn) — `push . HEAD:origin/main` ghi chính repo này."""
+    return [r.split(":")[-1] for r in _positionals(args, PUSH_VALUE_OPTS)[1:]]
+
+
+def _canonical_fetch(repo: str, spec: str, remotes: FrozenSet[str]) -> bool:
+    """Refspec đúng dạng cấu hình mặc định `[+]refs/heads/X:refs/remotes/<repo>/X` của remote ĐÃ cấu hình."""
+    src, _, dst = spec.lstrip("+").partition(":")
+    head = re.fullmatch(r"refs/heads/(.+)", src)
+    return head is not None and repo in remotes and dst == f"refs/remotes/{repo}/{head.group(1)}"
+
+
+def _fetch_names(args: List[str], cwd: Optional[str]) -> RefNames:
+    """fetch/pull: đích của refspec tường minh (kể cả `--refmap`), trừ dạng cấu hình của remote đã cấu hình; `--stdin`
+    → None. `fetch origin main` (không `:`) không có đích tường minh."""
+    flags, pos, vals = _parse_opts(args, "joXs", FETCH_VALUE_OPTS)
+    if _has_opt(flags, {"--stdin"}):
+        return None
+    specs = [s for s in pos[1:] + [v for k, v in vals if _long_match(k, ("--refmap",))] if ":" in s]
+    remotes = _configured_remotes(cwd) if specs else frozenset()
+    repo = pos[0] if pos else ""
+    return [s.split(":", 1)[1] for s in specs if not _canonical_fetch(repo, s, remotes)]
+
+
+def _configured_remotes(cwd: Optional[str]) -> FrozenSet[str]:
+    """Remote đã cấu hình ở repo `cwd` (`git remote`); lỗi/quá hạn/không phải repo → rỗng."""
+    try:
+        r = subprocess.run(["git", "-C", cwd or ".", "remote"], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(r.stdout.split()) if r.returncode == 0 else frozenset()
+
+
+def _short_ref(ref: str) -> Tuple[bool, str]:
+    """(dưới `refs/remotes/`, tên ngắn git so khi giải `<remote>/<nhánh>`) — bỏ `+`, `//`, `./`, `refs/`, `refs/heads/`,
+    `refs/tags/`; chữ thường."""
+    parts = [p for p in ref.lstrip("+").casefold().split("/") if p not in ("", ".")]
+    if parts[:2] == ["refs", "remotes"]:
+        return True, ""
+    if parts[:1] == ["refs"]:
+        parts = parts[2:] if parts[1:2] in (["heads"], ["tags"]) else parts[1:]
+    return False, "/".join(parts)
+
+
+def _remote_ref_hit(names: List[str], cwd: Optional[str]) -> str:
+    """Tên đầu tiên là ref theo dõi remote hoặc trùng `<remote>/…`; rỗng nếu không. `git remote` chỉ chạy khi cần."""
+    shorts = [(x, *_short_ref(x)) for x in names]
+    hit = next((x for x, remote, _ in shorts if remote), "")
+    if hit or not any("/" in s for _, _, s in shorts):
+        return hit
+    remotes = {r.casefold() + "/" for r in REMOTE_NAMES | _configured_remotes(cwd)}
+    return next((x for x, _, s in shorts if any(s.startswith(r) for r in remotes)), "")
+
+
+REMOTE_REF_NAMES: Dict[str, Callable[[List[str], Optional[str]], RefNames]] = {
+    "update-ref": _update_ref_names,
+    "symbolic-ref": _symbolic_ref_names,
+    "tag": _tag_names,
+    "branch": _branch_names,
+    "checkout": _new_branch_names("checkout"),
+    "switch": _new_branch_names("switch"),
+    "worktree": _new_branch_names("worktree"),
+    "stash": _stash_names,
+    "fetch": _fetch_names,
+    "pull": _fetch_names,
+    "push": _push_names,
+}
+# Lệnh con git mà `_scan_command` giải repo thật (`git -C`, `cd`): commit (cổng), push (nhánh hiện tại), ghi ref (remote).
+GIT_DIR_SUBS = {"commit", *REMOTE_REF_NAMES}
+
+
+def _remote_ref_rule(sub: str, args: List[str], cwd: Optional[str]) -> Tuple[str, str]:
+    """AUD-SEC-119: deny khi lệnh git ghi ref theo dõi remote hoặc tạo ref trùng tên remote; ref từ stdin → hỏi (unsure)."""
+    names = REMOTE_REF_NAMES[sub](args, cwd)
+    if names is None:
+        return "ask", UNRESOLVED_REF_WHY.format(sub)
+    hit = _remote_ref_hit(names, cwd)
+    return ("deny", REMOTE_REF_WHY.format(hit)) if hit else ("", "")
+
+
 GIT_RULES: Dict[str, GitRule] = {
     "reset": _git_reset,
     "clean": _git_clean,
@@ -1298,10 +1513,14 @@ def _git_long(a: str) -> str:
 
 
 def git_rules(n: List[str], cwd: Optional[str] = None) -> Tuple[str, str]:
-    """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua."""
+    """Luật theo lệnh con của git (bảng GIT_RULES; `push` riêng vì cần thư mục để biết nhánh hiện tại); không có luật → cho qua.
+    Ghi ref remote/tạo ref trùng tên remote (AUD-SEC-119) xét trước, `cwd` để đọc tên remote của repo."""
     if len(n) < 2:
         return "", ""
     args = [_git_long(a) for a in n[2:]]
+    forged = _remote_ref_rule(n[1], args, cwd) if n[1] in REMOTE_REF_NAMES else ("", "")
+    if forged[0]:
+        return forged
     if n[1] == "push":  # AUD-SEC-102: `git push origin 2>&1` trên nhánh chính — chuyển hướng không phải refspec
         return _stricter(_git_push(args, cwd), _git_push(_drop_redirects(args), cwd))
     rule = GIT_RULES.get(n[1])
@@ -3946,7 +4165,8 @@ def _command_verdict(
 ) -> Tuple[str, str]:
     """`command_rules` rồi nới việc chỉ trong dự án/tmp ở pha build (ADR-0040)."""
     verdict = command_rules(n, root, (gdir if n[0] == "git" else cwd) or root)
-    return ("", "") if verdict[0] in BLOCKING and build_local_command(n, argv, root, cwd) else verdict
+    forged = verdict[1].startswith(REMOTE_REF_MARK)  # giả ref remote: không nới ở pha build (AUD-SEC-119)
+    return ("", "") if verdict[0] in BLOCKING and not forged and build_local_command(n, argv, root, cwd) else verdict
 
 
 def _scan_command(
@@ -3958,7 +4178,8 @@ def _scan_command(
         asks.extend(_write_asks(n, argv, root, cwd))
         return None
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
-    gdir = _git_dir(argv, cwd) if n[:2] in (["git", "commit"], ["git", "push"]) else None
+    # Lệnh git ghi ref (AUD-SEC-119) cũng cần repo thật để đọc tên remote của nó.
+    gdir = _git_dir(argv, cwd) if n[0] == "git" and n[1:2] and n[1] in GIT_DIR_SUBS else None
     # Lệnh khác git (rm/find) xét đích theo thư mục đang đứng sau `cd` (`cd ~ && rm -rf projects`).
     decision, why = _command_verdict(n, argv, root, cwd, gdir)
     if decision == "deny":
@@ -6298,6 +6519,8 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
     (UNRESOLVED_PUSH_WHY, UNRESOLVED_TARGET),  # `xargs git push`, `git push origin $(…)` (T-1523)
+    (UNRESOLVED_REF_MARK, UNRESOLVED_TARGET),  # `git update-ref --stdin` (AUD-SEC-119)
+    (REMOTE_REF_MARK, "REMOTE_REF_FORGE"),  # giả `origin/main` mà Gate đọc (AUD-SEC-119, T-3563)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
     ("brace expansion quá nhiều", BRACE_OVERFLOW),

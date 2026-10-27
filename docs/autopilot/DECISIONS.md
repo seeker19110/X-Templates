@@ -1511,3 +1511,10 @@
 - Chọn: Bốn task mỗi task một PR trước T-3556/T-3546: T-3560 perf guard --text + cảnh báo .gitattributes + --base qua perf_rev (SEC-116, SEC-115); T-3561 perf sample đo không lượng tử (PERF-003); T-3562 Gate mẫu: before.json ngoài cả hai cây + sha256 giữ trong biến shell, công cụ chấm lấy từ SHA gốc bằng git show chạy python3 -I, ghi giới hạn còn lại (cùng uid) tới perf trial (XFEAT-026/027); T-3563 guard chặn ghi refs/remotes/* và tag/nhánh trùng tên remote (SEC-119, nếu xác minh lần hai tái hiện)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: PLAN ghi 🔴/🟠 sửa trước khi cắt bản; 3.28.0 chính là bản đưa perf v2 + Gate mẫu tới dự án đích — phát hành với Gate báo improved giả trái LOOP-OPT-002/003; (2) đường lùi: mỗi task một PR nhỏ revert được; (3) theo chuẩn: sửa gốc (--text, đo không thăm dò, công cụ chấm bất biến) thay vì chấp nhận; phương án 3 bỏ đường dùng được duy nhất của /optimize tới lát 3
 - Đường lùi: Revert từng PR; hoặc chấp nhận 🟠 có chủ/hạn và cắt bản
+
+### D-215 · 2026-10-27T23:21:06+00:00 · T-3563 (guard REMOTE_REF_FORGE, AUD-SEC-119): diff guard +229 dòng > 150; lỗ đổi URL remote; Gate mẫu đọc tên ngắn origin/main — làm gì?
+
+- Phương án: (1) Giữ một PR (luật guard gắn kết, tách ra thì nửa chặn nửa hở); lỗ remote URL/config/ghi thẳng .git/refs ghi giới hạn đã biết tới perf trial; Gate mẫu đọc refs/remotes/origin/main (tag/nhánh trùng tên không che được); ca autonomy-bench để 🟢 · (2) Tách PR: update-ref/fetch trước, tag/branch/checkout/switch sau · (3) Chặn thêm remote set-url/config remote.*.url khi URL cục bộ
+- Chọn: Giữ một PR (luật guard gắn kết, tách ra thì nửa chặn nửa hở); lỗ remote URL/config/ghi thẳng .git/refs ghi giới hạn đã biết tới perf trial; Gate mẫu đọc refs/remotes/origin/main (tag/nhánh trùng tên không che được); ca autonomy-bench để 🟢
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: tách để lại khe giữa hai PR mà agent đi được; tên ref đầy đủ loại hẳn lớp che bằng tag/nhánh độc lập với guard; chặn remote URL dễ chặn oan đổi sang SSH; (2) đường lùi: revert một PR; (3) diff phần lớn là bảng lệnh + bộ tách tuỳ chọn có test 129 lệnh
+- Đường lùi: Revert PR T-3563; Gate mẫu quay về origin/main

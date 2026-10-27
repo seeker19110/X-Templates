@@ -5813,5 +5813,256 @@ class TriageLocalTest(unittest.TestCase):
         self.assertIn("loại test", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
 
 
+class GuardRemoteRefTest(unittest.TestCase):
+    """AUD-SEC-119 (T-3563): Gate mẫu tối ưu đọc script/baseline từ `origin/main` — guard chặn mọi lối ghi ref theo dõi
+    remote và tạo ref trùng `<remote>/…` (git giải `$GIT_DIR/<tên>`, `refs/tags/`, `refs/heads/` trước `refs/remotes/`);
+    `fetch`/`pull`/`branch`/`tag` thường vẫn chạy. Repo tạm có remote `origin` và `fork` (tên lấy từ `git remote`)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for args in (
+            ("init", "-q", "-b", "main"),
+            ("remote", "add", "origin", "https://example.invalid/o.git"),
+            ("remote", "add", "fork", "https://example.invalid/f.git"),
+        ):
+            subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
+
+    def raw(self, cmd: str, root: Path | None = None) -> dict:
+        return self.g.bash_decision(cmd, str(root or self.root))
+
+    def assert_forged(self, cmd: str, root: Path | None = None) -> None:
+        out = self.raw(cmd, root)
+        self.assertEqual(out["decision"], "deny", (cmd, out))  # strict: deny, không hỏi
+        self.assertIn("ghi ref theo dõi remote", str(out["reason"]), cmd)
+        res = self.g.apply_policy(out)
+        self.assertEqual((res["decision"], res["code"]), ("deny", "REMOTE_REF_FORGE"), cmd)
+
+    def assert_allowed(self, cmd: str, root: Path | None = None) -> None:
+        out = self.raw(cmd, root)
+        self.assertEqual(out["decision"], "", (cmd, out))
+        self.assertEqual(self.g.apply_policy(out)["decision"], "", cmd)
+
+    def test_guard_remote_ref_forge_denied(self):
+        """Bốn lệnh của AUD-SEC-119 và các lối ghi tương đương (tạo/đổi tên/sao chép, `-d`, ref ngắn, hoa thường)."""
+        for cmd in (
+            "git update-ref refs/remotes/origin/main HEAD",
+            "git tag origin/main HEAD",
+            "git branch -f origin/main HEAD",
+            "git fetch . HEAD:refs/remotes/origin/main",
+            "git update-ref -d refs/remotes/origin/main",
+            "git update-ref -m msg --no-deref refs/remotes/upstream/dev HEAD",
+            "git update-ref --create-reflog origin/main HEAD",  # ghi `.git/origin/main` — git ưu tiên nhất
+            "git update-ref refs/origin/main HEAD",
+            "git update-ref refs/heads/origin/main HEAD",
+            "git update-ref refs/tags/origin/main HEAD",
+            "git update-ref REFS/Remotes/origin/main HEAD",  # hệ file không phân biệt hoa thường (macOS)
+            "git update-ref refs/remotes//origin/main HEAD",
+            "git update-ref refs/remotes/./origin/main HEAD",
+            "git update-ref -- refs/remotes/x/main HEAD",  # remote không biết tên: `refs/remotes/` luôn chặn
+            "git symbolic-ref refs/remotes/origin/HEAD refs/heads/evil",
+            "git symbolic-ref -d refs/remotes/origin/HEAD",
+            "git tag -f -a -m msg origin/main",
+            "git tag -mdone origin/main",  # giá trị dính vào cụm cờ, có chữ `d`/`l`/`v`
+            "git tag --sort=refname origin/main HEAD",
+            "git tag --message msg Origin/main",
+            "git branch origin/main",
+            "git branch -v origin/main HEAD",  # `-v` không phải chế độ liệt kê khi có tên
+            "git branch --track upstream/x origin/main",
+            "git branch --format x origin/main",
+            "git branch -m feature origin/main",
+            "git branch -M origin/main",
+            "git branch -C main origin/main",
+            "git branch --copy main fork/main",
+            "git checkout -b origin/main",
+            "git checkout -fb origin/main origin/feature",
+            "git checkout -borigin/main",
+            "git checkout --orphan=origin/main",
+            "git checkout -B refs/remotes/origin/main",
+            "git switch -c origin/main",
+            "git switch --create origin/main",
+            "git switch --force-c origin/main",  # viết tắt tuỳ chọn dài
+            "git worktree add -b origin/main ../wt",
+            "git worktree add -fB origin/main ../wt HEAD",
+            "git stash branch origin/main",
+            "git fetch . HEAD:origin/main",  # đích ngắn → refs/heads/origin/main
+            "git fetch origin main:refs/remotes/origin/main",  # nguồn ngắn: tag `main` của remote thắng nhánh
+            "git fetch origin refs/heads/evil:refs/remotes/origin/main",
+            "git fetch origin +refs/heads/main:refs/remotes/fork/main",
+            "git fetch ./origin refs/heads/main:refs/remotes/./origin/main",
+            "git fetch upstream refs/heads/main:refs/remotes/upstream/main",  # `upstream` chưa cấu hình: là đường dẫn
+            "git fetch origin main --refmap=+refs/heads/evil:refs/remotes/origin/main",
+            "git fetch --refmap +refs/heads/evil:refs/remotes/origin/main origin main",
+            "git fetch --depth 1 . HEAD:refs/remotes/origin/main",
+            "git pull . HEAD:refs/remotes/origin/main",
+            "git pull -s ours origin refs/heads/x:refs/remotes/origin/main",
+            "git push . HEAD:refs/remotes/origin/main",
+            "git push . HEAD:origin/main",
+            "git push origin HEAD:refs/remotes/origin/main 2>&1",
+            # dạng lách: tuỳ chọn toàn cục, wrapper, gán biến, đường dẫn git, shell lồng, nhiều lệnh
+            "git -C . update-ref refs/remotes/origin/main HEAD",
+            "git -c core.x=1 --no-pager fetch . HEAD:refs/remotes/origin/main",
+            "git --git-dir=.git tag origin/main",
+            "command git tag origin/main",
+            "X=1 git branch -f origin/main HEAD",
+            "env -i /usr/bin/git update-ref refs/remotes/origin/main HEAD",
+            "sh -c 'git update-ref refs/remotes/origin/main HEAD'",
+            "git fetch origin && git update-ref refs/remotes/origin/main HEAD",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+
+    def test_guard_remote_ref_legit_allowed(self):
+        """Không chặn oan: fetch/pull thường, refspec đúng dạng cấu hình của remote đã cấu hình, nhánh/tag thường, đọc,
+        liệt kê, xoá/đổi tên ref giả đi (sửa sai — Gate đỏ chứ không xanh giả), upstream là ref remote."""
+        for cmd in (
+            "git fetch",
+            "git fetch origin",
+            "git fetch origin main",
+            "git fetch --all --prune",
+            "git fetch --multiple origin fork",
+            "git fetch origin refs/heads/main:refs/remotes/origin/main",
+            "git fetch origin +refs/heads/*:refs/remotes/origin/*",
+            "git fetch fork +refs/heads/dev:refs/remotes/fork/dev",
+            "git fetch origin pull/7/head:pr-7",
+            "git fetch origin main:",
+            "git pull",
+            "git pull origin main",
+            "git pull --rebase origin main",
+            "git branch feature/x",
+            "git branch feature/x origin/main",
+            "git branch -t feature origin/main",
+            "git branch -d foo",
+            "git branch -D origin/main",
+            "git branch -dr origin/stale",
+            "git branch -u origin/main",
+            "git branch --set-upstream-to=origin/main feature",
+            "git branch --set-upstream-to origin/main",
+            "git branch --list 'origin/*'",
+            "git branch -r",
+            "git branch -a --contains HEAD",
+            "git branch --points-at HEAD origin/x",
+            "git branch -m origin/x fixed",
+            "git branch",
+            "git tag v1.2.3",
+            "git tag -a v1 -m origin/main",
+            "git tag v2 origin/main",
+            "git tag -l 'origin/*'",
+            "git tag -n3 origin/x",
+            "git tag -d origin/main",
+            "git tag --contains HEAD",
+            "git tag",
+            "git update-ref refs/heads/x HEAD",
+            "git update-ref -d refs/heads/x",
+            "git update-ref refs/heads/feature/x origin/main",
+            "git update-ref",
+            "git symbolic-ref HEAD",
+            "git symbolic-ref --short refs/remotes/origin/HEAD",
+            "git symbolic-ref HEAD refs/heads/main",
+            "git push origin HEAD:refs/heads/x",
+            "git push origin feature/x",
+            "git push -u origin feat",  # (`HEAD` ở repo tạm là `main` → luật push nhánh chính, không phải luật này)
+            "git push origin refs/remotes/origin/main:refs/heads/backup",
+            "git checkout -b feature/x origin/main",
+            "git checkout origin/main",
+            "git checkout -t origin/feature",
+            "git checkout -b",
+            "git switch -c fix origin/main",
+            "git switch --detach origin/main",
+            "git worktree add ../wt origin/main",
+            "git worktree add -b feat ../wt origin/main",
+            "git worktree list",
+            "git stash branch feat",
+            "git stash list",
+            "git rev-parse origin/main",
+            "git show origin/main:scripts/perf-gate.sh",
+            "git log origin/main..HEAD",
+            "git -C . fetch origin main",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_stdin_unresolved(self):
+        """`update-ref --stdin`/`fetch --stdin`: ref đến từ stdin, guard không thấy → strict hỏi, mặc định chặn (unsure)."""
+        for cmd in (
+            "git update-ref --stdin <<'E'\nupdate refs/remotes/origin/main abc\nE",
+            "git update-ref -z --stdin < refs.txt",
+            "git fetch --stdin . < specs.txt",
+            "git update-ref --std < refs.txt",  # viết tắt tuỳ chọn dài
+        ):
+            with self.subTest(cmd):
+                out = self.raw(cmd)
+                self.assertEqual(out["decision"], "ask", cmd)
+                res = self.g.apply_policy(out)
+                self.assertEqual(
+                    (res["decision"], res["code"], res["confidence"]), ("deny", "UNRESOLVED_TARGET", "unsure")
+                )
+
+    def test_guard_remote_ref_remote_names(self):
+        """Tên remote: `git remote` ở repo của lệnh (`git -C`) ∪ `origin`/`upstream`; đọc lỗi → chỉ tên mặc định."""
+        self.assert_forged("git tag fork/main")
+        self.assert_allowed("git tag forked/main")
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()  # không phải repo: chỉ tên mặc định
+        self.assert_allowed("git tag fork/main", plain)
+        self.assert_forged("git tag upstream/main", plain)
+        self.assert_forged(f"git -C {self.root} tag fork/main", plain)
+        self.assert_forged(f"cd {self.root} && git checkout -b fork/x", plain)
+        self.assert_forged(f"git -C {self.root} fetch fork refs/heads/x:refs/remotes/fork/y", plain)
+        self.assert_forged("git fetch fork refs/heads/x:refs/remotes/fork/x", plain)  # `fork` chưa cấu hình ở đây
+        self.assertEqual(self.g._configured_remotes(str(self.root)), frozenset({"origin", "fork"}))
+        self.assertEqual(self.g._configured_remotes(str(plain)), frozenset())
+        with mock.patch.object(self.g.subprocess, "run", side_effect=OSError):
+            self.assertEqual(self.g._configured_remotes(str(self.root)), frozenset())
+            self.assert_forged("git branch origin/x")
+            self.assert_allowed("git branch fork/x")
+        with mock.patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 5)):
+            self.assertEqual(self.g._configured_remotes(None), frozenset())
+
+    def test_guard_remote_ref_parse_opts(self):
+        """Bộ tách tuỳ chọn: cụm cờ ngắn dừng ở chữ nhận giá trị, `--opt=v`, viết tắt tuỳ chọn dài, `--`, thiếu giá trị."""
+        parse = self.g._parse_opts
+        self.assertEqual(parse(["-fb", "x", "y"], "b", ()), ({"-f", "-b"}, ["y"], [("-b", "x")]))
+        self.assertEqual(parse(["-bx", "-q"], "b", ()), ({"-b", "-q"}, [], [("-b", "x")]))
+        self.assertEqual(parse(["--orph=x", "--", "-y"], "", ("--orphan",)), ({"--orph"}, ["-y"], [("--orph", "x")]))
+        self.assertEqual(parse(["--orphan"], "", ("--orphan",)), ({"--orphan"}, [], []))
+        self.assertEqual(parse(["-b"], "b", ()), ({"-b"}, [], []))
+        self.assertEqual(parse(["-", "a"], "", ()), (set(), ["-", "a"], []))
+        self.assertTrue(self.g._long_match("--force-c", ("--force-create",)))
+        self.assertFalse(self.g._long_match("--f", ("--force-create",)))
+        self.assertFalse(self.g._long_match("-f", ("--force-create",)))
+
+    def test_guard_remote_ref_build_phase_not_relaxed(self):
+        """Pha build nới git cục bộ (`checkout`/`stash`, ADR-0040) — không nới tạo ref trùng tên remote."""
+        with mock.patch.object(self.g, "build_phase", return_value=True):
+            for cmd in ("git checkout -b origin/main", "git stash branch origin/main", "git checkout -f -b origin/x"):
+                with self.subTest(cmd):
+                    out = self.g.apply_policy(self.g.bash_decision(cmd, str(self.root), str(self.root)))
+                    self.assertEqual((out["decision"], out["code"]), ("deny", "REMOTE_REF_FORGE"), cmd)
+            out = self.g.apply_policy(self.g.bash_decision("git checkout -f -b feat", str(self.root), str(self.root)))
+            self.assertEqual(out["decision"], "", "đối chứng: checkout -f trong dự án vẫn được nới ở pha build")
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_guard_remote_ref_via_hook(self):
+        """Đường ống hook thật ở chính sách mặc định và strict."""
+        for policy in ("", "strict"):
+            code, out, _ = run_hook(
+                "pre-bash-guard.sh",
+                {"tool_input": {"command": "git update-ref refs/remotes/origin/main HEAD"}},
+                self.root,
+                {"XT_GUARD_POLICY": policy},
+            )
+            self.assertEqual((code, decision(out)), (0, "deny"), policy)
+        code, out, _ = run_hook(
+            "pre-bash-guard.sh",
+            {"tool_input": {"command": "git fetch origin main"}},
+            self.root,
+            {"XT_GUARD_POLICY": ""},
+        )
+        self.assertEqual((code, decision(out)), (0, None))
+
+
 if __name__ == "__main__":
     unittest.main()
