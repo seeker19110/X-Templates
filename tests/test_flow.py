@@ -14,6 +14,7 @@ Cơ chế xfail (không skip):
 
 from __future__ import annotations
 
+import functools
 import json
 import multiprocessing
 import os
@@ -30,6 +31,7 @@ from typing import Any, TypeVar
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import xt
 from test_xt_cli import TmpRepoCase, run_main
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -87,15 +89,19 @@ SAMPLES_MS = [98.0, 99.0, 100.0, 101.0, 102.0, 100.5, 99.5, 100.2, 99.8, 100.1]
 SAMPLES_S = [x / 1000 for x in SAMPLES_MS]
 
 
+def _bump(st: dict[str, Any], key: str) -> dict[str, Any]:
+    """`fn` của FLOW-07: sửa tại chỗ VÀ trả state — hợp với cả hai kiểu hợp đồng của `update_state`."""
+    st[key] = st.get(key, 0) + 1
+    return st
+
+
 def _bump_worker(base: str, key: str, n: int, barrier: Any, errors: Any) -> None:
     """Tiến trình con của FLOW-07: `n` lần `update_state`, Barrier trước MỖI lần để hai bên luôn gọi đồng thời."""
-    import xt  # noqa: PLC0415 — cần ở tiến trình con (spawn không thừa hưởng module)
-
     try:
         for _ in range(n):
             barrier.wait(timeout=20)
-            xt.update_state(Path(base), lambda st: {**st, key: st.get(key, 0) + 1})
-    except BaseException as exc:  # noqa: BLE001 — báo lại cho cha rồi dừng, không treo bên kia
+            xt.update_state(Path(base), functools.partial(_bump, key=key))
+    except BaseException as exc:  # báo lại cho cha rồi dừng, không treo bên kia
         errors.put(f"{key}: {type(exc).__name__}: {exc}")
         barrier.abort()
         raise SystemExit(1) from None
@@ -260,19 +266,28 @@ class FlowTest(TmpRepoCase):
 
     @flow("FLOW-08")
     def test_flow_08_crash_after_gate_before_evidence_is_not_done(self) -> None:
-        """Given vòng đã `loop init` · When `loop record --task T-001 -- true` bị `os._exit(9)` sau khi Gate chạy xong,
-        đúng trước lúc ghi bằng chứng · Then tiến trình chết mã 9; `loop status` không `done`; PLAN không tick T-001;
-        không có file `*.tmp` dở trong `.autopilot/`. (Đối chứng: xanh hôm nay.)"""
+        """Given vòng đã `loop init`, T-001 xanh, T-900/T-901 chờ người — T-002 (Gate `true`) là task mở cuối · When
+        `loop record --task T-002 -- true` bị `os._exit` đúng lúc ghi bằng chứng — mã 9 nếu Gate ĐÃ chạy, 8 nếu chưa ·
+        Then mã 9 (Gate chạy trước bằng chứng); không bằng chứng T-002; verdict làm lại T-002, không `done`; PLAN không
+        tick T-002 (lệnh khớp Gate nên tick trước bằng chứng sẽ lộ); không file `*.tmp` dở. (Đối chứng: xanh hôm nay.)"""
         self.assertEqual(self.loop("init")[0], 0)
+        (self.repo / "green").write_text("", encoding="utf-8")
+        self.assertEqual(self.loop("record", "--task", "T-001", "--", "bash gate.sh")[0], 0)
+        for tid in ("T-900", "T-901"):
+            self.assertEqual(self.loop("defer", "--task", tid, "--reason", "cần người")[0], 0)
         code = (
             "import os, sys; sys.path.insert(0, sys.argv[1]); import xt\n"
-            "real = xt.write_atomic\n"
+            "ran = []\n"
+            "real_gate, real_write = xt.run_gate_shell, xt.write_atomic\n"
+            "def gate(*a, **k):\n"
+            "    ran.append(1)\n"
+            "    return real_gate(*a, **k)\n"
             "def crash(path, *a, **k):\n"
-            "    if os.path.basename(str(path)) == 'T-001.json':\n"
-            "        os._exit(9)\n"
-            "    return real(path, *a, **k)\n"
-            "xt.write_atomic = crash\n"
-            "sys.exit(xt.main(['loop', 'record', '--task', 'T-001', '--', 'true']))\n"
+            "    if os.path.basename(str(path)) == 'T-002.json':\n"
+            "        os._exit(9 if ran else 8)\n"
+            "    return real_write(path, *a, **k)\n"
+            "xt.run_gate_shell, xt.write_atomic = gate, crash\n"
+            "sys.exit(xt.main(['loop', 'record', '--task', 'T-002', '--', 'true']))\n"
         )
         env = {**os.environ, "CLAUDE_PROJECT_DIR": str(self.repo)}
         r = subprocess.run(
@@ -284,10 +299,11 @@ class FlowTest(TmpRepoCase):
             timeout=60,
         )
         self.assertEqual(r.returncode, 9, r.stdout + r.stderr)
-        self.assertFalse((self.repo / ".autopilot" / "evidence" / "T-001.json").exists())
-        self.assertNotEqual(self.verdict()["verdict"], "done")
+        self.assertFalse((self.repo / ".autopilot" / "evidence" / "T-002.json").exists())
+        v = self.verdict()
+        self.assertEqual((v["verdict"], v.get("task")), ("continue", "T-002"), v)
         plan = (self.repo / "docs" / "autopilot" / "PLAN.md").read_text(encoding="utf-8")
-        self.assertIn("- [ ] `T-001`", plan)
+        self.assertIn("- [ ] `T-002`", plan)
         self.assertEqual([], [str(p) for p in (self.repo / ".autopilot").rglob("*.tmp")])
 
     def perf(self, name: str, **doc: Any) -> str:
@@ -306,14 +322,13 @@ class FlowTest(TmpRepoCase):
 
     @flow("FLOW-18")
     def test_flow_18_perf_compare_refuses_ms_vs_s(self) -> None:
-        """Given hai mẫu cùng `cmd`, before `unit: ms` (~100), after `unit: s` (~0,1), `platform`/`python` khác ·
+        """Given hai mẫu giống hệt (cùng `cmd`, `env`) trừ `unit`: before `ms` (~100), after `s` (~0,1) — cô lập R2 ·
         When `perf compare before after` · Then exit 2 và thông báo có "không đủ điều kiện so" (không chỉ exit 2: argparse
         lỗi cũng 2). (Hiện báo `improved` → xfail.)"""
         base = {"schema": 2, "cmd": "make bench", "higher_is_better": False}
-        before = self.perf(
-            "b.json", **base, unit="ms", samples=SAMPLES_MS, env={"platform": "linux-x", "python": "3.11"}
-        )
-        after = self.perf("a.json", **base, unit="s", samples=SAMPLES_S, env={"platform": "darwin-y", "python": "3.13"})
+        env = {"platform": "linux-x", "python": "3.11", "nproc": 4}
+        before = self.perf("b.json", **base, unit="ms", samples=SAMPLES_MS, env=env)
+        after = self.perf("a.json", **base, unit="s", samples=SAMPLES_S, env=env)
         rc, text = self.perf_compare(before, after)
         self.assertEqual(rc, 2, text)
         self.assertIn(REFUSE, text)
@@ -323,7 +338,11 @@ class FlowTest(TmpRepoCase):
         """Given hai mẫu v2 giống nhau trừ một điều · When `perf compare` · Then exit 2 và "không đủ điều kiện so" cho:
         (a) before `dirty: true`; (b) `--base` là SHA khác `before.head`; (c) `harness_sha256` khác.
         (Hiện chưa có luật/cờ → xfail.)"""
-        sha_a, sha_b = "a" * 40, "b" * 40
+        sha_a = self.git("rev-parse", "HEAD").strip()  # commit thật: `--base` có thể kiểm bằng `rev-parse`
+        (self.repo / "later.txt").write_text("1\n", encoding="utf-8")
+        self.git("add", "later.txt")
+        self.git("commit", "-q", "-m", "later")
+        sha_b = self.git("rev-parse", "HEAD").strip()
         meta = {
             "schema": 2,
             "cmd": "make bench",
