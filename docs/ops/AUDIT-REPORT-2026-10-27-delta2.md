@@ -1,7 +1,7 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-10-27 (delta 2, lát 1)
 
 > Commit quét: `6acc57380efc98736928fad9e7de26da7fb4916d` (`main`, sau #291, #293–#301) · Chế độ: **delta** từ `95fa52a` (ARCH, SEC, CODE, TEST, PERF, A11Y, CI, DOC, XFEAT, HAR, CFG) · Quy trình: [`framework/00-method/audit.md`](../../framework/00-method/audit.md)
-> Người quét: phiên chính + 3 subagent `reviewer` read-only (SEC/CFG/DEP/CI · ARCH/CODE/TEST/PERF/XFEAT · DOC/HAR/A11Y), task T-3556 của PLAN-harden-2026-10-27-loops · Xác minh đối kháng: `reviewer-alt` (Opus 5.5, effort max) cho 5 🟠 của người tìm, `reviewer` thứ hai cho 2 🟠 do người xác minh tìm thêm
+> Người quét: phiên chính + 3 subagent `reviewer` read-only (SEC/CFG/DEP/CI · ARCH/CODE/TEST/PERF/XFEAT · DOC/HAR/A11Y), task T-3556 của PLAN-harden-2026-10-27-loops · Xác minh đối kháng: `reviewer-alt` (effort max) cho 5 🟠 của người tìm, `reviewer` thứ hai cho 2 🟠 do người xác minh tìm thêm
 > `python3 scripts/xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 · `--strict` đỏ tới khi 5 🟠 sửa (D-214)
 
 ## 1. Tóm tắt
@@ -10,7 +10,7 @@
 |---|---|---|
 | 🔴 | 0 | — |
 | 🟠 | 5 | AUD-SEC-116, AUD-SEC-119, AUD-PERF-003, AUD-XFEAT-026, AUD-XFEAT-027 — đều quanh vòng tối ưu (`perf guard`, `perf sample`, Gate mẫu) |
-| 🟢 | 20 | AUD-SEC-115/117/118, AUD-XFEAT-028/029, AUD-TEST-023/024, AUD-CODE-024, AUD-DOC-091…097, AUD-HAR-117…120; cập nhật AUD-TEST-020 |
+| 🟢 | 19 | AUD-SEC-115/117/118, AUD-XFEAT-028/029, AUD-TEST-023/024, AUD-CODE-024, AUD-DOC-091…097, AUD-HAR-117…120; cập nhật AUD-TEST-020 |
 
 Kết luận: **chặn cắt 3.28.0 tới khi 5 🟠 sửa** (PLAN: "🔴/🟠 sửa trước khi cắt bản"). Mã lát 1 (`rev`/khoá, `task_runs`,
 attach/resolve/unblock, `pr rethink`, mẫu perf v2) không có 🟠 riêng; 🟠 nằm ở đường chấm điểm tối ưu mà 3.28.0 đưa tới dự án đích
@@ -32,7 +32,7 @@ Giữ nguyên: DEP (không manifest/lockfile đổi — #291 kiểm ở CI), DAT
 | CI/DEP | `xt.py ci-check` · `git ls-remote` claude-code-action | 0 | 10 workflow; `925afb5…` = `v1.0.262` |
 | SEC | `ruff check --select S scripts/xt.py` | 1 | 17 = base `95fa52a` (không mới) |
 | CODE | `ruff check` · `mypy --strict scripts/xt.py` | 0 | C901 ≤ 10 |
-| TEST | `XT_FLOW_STRICT=FLOW-01…08,18,19 unittest tests.test_flow` · 27 đột biến | 0 | 26/27 đột biến bị bắt (sống: AUD-TEST-024) |
+| TEST | `XT_FLOW_STRICT=FLOW-01…08,18,19 unittest tests.test_flow` · 32 đột biến | 0 | 31/32 đột biến bị bắt (sống: AUD-TEST-024) |
 | DOC | `validate` · `check-links` · `changelog-check` · `progress-check` · `test_docs_budget` | 0 | — |
 | HAR | `doctor --json` (không `--fix`) · `autonomy-bench` · `unittest tests.test_merge tests.test_flow` | 0 | 0 phát hiện; 167 OK |
 | A11Y | `git diff --stat 9e1d6f3 HEAD -- scripts/app …` · check run `app-e2e` #301 | 0 | UI không đổi; e2e xanh |
