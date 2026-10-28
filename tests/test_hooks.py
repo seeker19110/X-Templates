@@ -6454,6 +6454,8 @@ class GuardRemoteRefTest(unittest.TestCase):
             f"V={script} git --config-env=core.sshCommand=V fetch origin",
             f"V={script} git --config-env core.fsmonitor=V status",
             "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!sh -c id' git x",
+            # D-216: biến guard không thấy gán (có thể từ `source`/`read`) — không biết giá trị → không an toàn
+            "git --config-env=core.fsmonitor=UNSET_VAR_XT status",
         ):
             with self.subTest(cmd):
                 out = self.g.apply_policy(self.raw(cmd))
@@ -6461,7 +6463,6 @@ class GuardRemoteRefTest(unittest.TestCase):
         for cmd in (
             "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0='ssh -i ~/.ssh/k' git fetch origin",
             "V=true git --config-env=core.fsmonitor=V status",
-            "git --config-env=core.fsmonitor=UNSET_VAR_XT status",  # biến không có: git dừng, không chạy gì
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.g.apply_policy(self.raw(cmd))["decision"], "", cmd)
@@ -6515,6 +6516,149 @@ class GuardRemoteRefTest(unittest.TestCase):
         out = self.raw("git fetch origin main:refs/remotes/origin/main")
         self.assertIn("refs/heads/main:refs/remotes/origin/main", str(out["reason"]))
         self.assert_allowed("git fetch origin refs/heads/main:refs/remotes/origin/main")
+
+    def assert_code(self, cmd: str, code: str) -> None:
+        res = self.g.apply_policy(self.raw(cmd))
+        self.assertEqual((res["decision"], res["code"]), ("deny", code), cmd)
+
+    def test_guard_remote_ref_git_global_opts(self):
+        """🔴 review #306 lượt 2 (D-216): mọi tuỳ chọn toàn cục có giá trị của git 2.43 (`handle_options` của git.c:
+        `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`) ăn token
+        kế — trước đây `--attr-source`/`--shallow-file` thiếu nên giá trị bị coi là lệnh con và mọi luật git bị bỏ qua.
+        `--exec-path` trần in đường dẫn rồi thoát (giá trị chỉ ở dạng `=`): không ăn token kế."""
+        opts = (
+            "--attr-source HEAD",
+            "--attr-source=HEAD",
+            "--shallow-file x",
+            "--shallow-file=x",
+            "-C r --shallow-file x",
+            "--shallow-file x -C r",
+            "--namespace n --attr-source HEAD",
+            "--work-tree=w --shallow-file x",
+            "--exec-path",
+        )
+        for opt in opts:
+            with self.subTest(opt):
+                self.assert_code(f"git {opt} update-ref refs/remotes/origin/main HEAD", "REMOTE_REF_FORGE")
+                self.assert_code(f"git {opt} push --force origin main", "RULE_DENY")
+                self.assert_code(f"git {opt} -c core.fsmonitor=./x.sh status", "HOOK_BYPASS")
+        g = self.g
+        self.assertEqual(g.normalize(["git", "--attr-source", "HEAD", "push", "-f"]), ["git", "push", "-f"])
+        self.assertEqual(g.normalize(["git", "--exec-path", "push", "-f"]), ["git", "push", "-f"])
+        self.assertEqual(
+            g._git_globals(["git", "--shallow-file", "x", "-c", "a=b", "st"]),
+            [
+                ("--shallow-file", "x"),
+                ("-c", "a=b"),
+            ],
+        )
+
+    def test_guard_remote_ref_git_unknown_global(self):
+        """Fail-closed (D-216): tuỳ chọn toàn cục `--…` guard không biết (git sau này thêm tuỳ chọn có giá trị) đứng
+        trước lệnh con → không biết lệnh con là gì: UNRESOLVED_TARGET (strict hỏi, mặc định chặn). Tuỳ chọn đã biết
+        (kể cả `--no-lazy-fetch`/`--no-advice` của git mới hơn 2.43) vẫn chạy."""
+        for cmd in (
+            "git --xt-future-opt v push --force origin main",
+            "git --xt-future-opt v update-ref refs/remotes/origin/main HEAD",
+            "git --xt-future-opt status",
+            "git -C r --xt-future-opt=v status",
+            "git --no-pager --xt-future-opt v status",
+            "env -i git --xt-future-opt v status",
+            "cd sub && git --xt-future-opt v status",
+            "bash -c 'git --xt-future-opt v status'",
+        ):
+            with self.subTest(cmd):
+                out = self.raw(cmd)
+                self.assertIn(out["decision"], ("ask", "deny"), (cmd, out))
+                self.assertIn("tuỳ chọn toàn cục git guard không biết", str(out["reason"]), cmd)
+                res = self.g.apply_policy(out)
+                self.assertEqual((res["decision"], res["code"]), ("deny", "UNRESOLVED_TARGET"), cmd)
+        for cmd in (
+            "git --no-pager log -1",
+            "git --version",
+            "git --help",
+            "git -P diff",
+            "git -p log",
+            "git --paginate log",
+            "git --literal-pathspecs diff -- a",
+            "git --no-literal-pathspecs status",
+            "git --glob-pathspecs ls-files '*.py'",
+            "git --noglob-pathspecs status",
+            "git --icase-pathspecs ls-files",
+            "git --no-optional-locks status",
+            "git --no-replace-objects log",
+            "git --bare rev-parse HEAD",
+            "git --attr-source HEAD diff",
+            "git --attr-source=HEAD log",
+            "git --shallow-file x log",
+            "git --exec-path",
+            "git --exec-path=/usr/lib/git-core status",
+            "git --html-path",
+            "git --man-path",
+            "git --info-path",
+            "git --list-cmds=main",
+            "git --no-lazy-fetch status",
+            "git --no-advice status",
+            "git --git-dir .git --work-tree . status",
+            "git --namespace=n log",
+            "git --config-env=user.name=USER log -1",
+            "git log --xt-unknown-subcommand-opt",  # tuỳ chọn của lệnh con: không phải tuỳ chọn toàn cục
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_oneshot_export(self):
+        """🟠 review #306 lượt 2 (D-216): khoá chạy lệnh đặt một lần qua biến đã `export` (hoặc gán trần) ở lệnh trước
+        trong cùng chuỗi tính như gán đầu lệnh → HOOK_BYPASS; `--config-env=<khoá chạy lệnh>=VAR` mà guard không biết
+        giá trị VAR → không an toàn."""
+        for cmd in (
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh; git status",
+            "export GIT_CONFIG_COUNT=1; export GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh && git status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor; GIT_CONFIG_VALUE_0=./x.sh git status",
+            "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='sh -c id'; git log",
+            "export F=./x.sh; git --config-env=core.fsmonitor=F status",
+            "export F=./x.sh; git --config-env core.fsmonitor=F status",
+            "F=./x.sh; git --config-env=core.fsmonitor=F status",  # gán trần: chiều chặt như `_git_alias_sources`
+            "export GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='./x.sh'\"; git status",
+            "git --config-env=core.fsmonitor=XT_UNSET_VAR status",
+            "git --config-env core.sshCommand=XT_UNSET_VAR fetch",
+            "source env.sh; git --config-env=core.fsmonitor=F status",
+            "export F=$(cat x); git --config-env=core.fsmonitor=F status",
+        ):
+            with self.subTest(cmd):
+                self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false; git status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x; git status",
+            "export F=false; git --config-env=core.fsmonitor=F status",
+            "git --config-env=http.extraHeader=XT_UNSET_VAR status",  # khoá không chạy lệnh: giá trị không cần biết
+            "export F=./x.sh; git status",
+            "export F=./x.sh; echo $F",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        with mock.patch.dict(os.environ, {"XT_SAFE_FSM": "false"}):
+            self.assert_allowed("git --config-env=core.fsmonitor=XT_SAFE_FSM status")
+        # Biến của chuỗi lệnh trước không lọt sang quyết định sau (mỗi lệnh Bash là một shell mới của guard).
+        self.assert_code("export F=./x.sh; git --config-env=core.fsmonitor=F status", "HOOK_BYPASS")
+        self.assert_allowed("export F=false; git --config-env=core.fsmonitor=F status")
+
+    def test_guard_remote_ref_oneshot_export_concurrent(self):
+        """Quyết định đồng thời: môi trường `export` của chuỗi lệnh này không lẫn sang chuỗi lệnh khác."""
+        import concurrent.futures
+
+        cmds = [
+            "export F=./x.sh; git --config-env=core.fsmonitor=F status",
+            "export F=false; git --config-env=core.fsmonitor=F status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh; git status",
+            "git status",
+            "git --attr-source HEAD push --force origin main",
+        ] * 6
+        want = [self.g.apply_policy(self.raw(c))["code"] for c in cmds]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda c: self.g.apply_policy(self.raw(c))["code"], cmds))
+        self.assertEqual(got, want)
+        self.assertEqual(want[:5], ["HOOK_BYPASS", "NONE", "HOOK_BYPASS", "NONE", "RULE_DENY"])
 
     @unittest.skipIf(shutil.which("bash") is None, "cần bash")
     def test_guard_remote_ref_via_hook(self):

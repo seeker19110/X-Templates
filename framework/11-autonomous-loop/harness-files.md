@@ -88,7 +88,12 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   (`git -C "$D"`, lệnh lồng không rõ thư mục) → đọc alias ở gốc dự án; git cũ hơn 2.43 thiếu một lệnh dựng sẵn có trong
   danh sách của guard (alias trùng tên đó git vẫn chạy); alias `!` quét ở thư mục của lệnh, không ở gốc repo nơi git chạy
   nó. Khoá chạy lệnh (`core.fsmonitor`, `core.pager`, `include.path`…) đặt một lần qua `-c`, `--config-env`,
-  `GIT_CONFIG_KEY_*`, `GIT_CONFIG_PARAMETERS` là `HOOK_BYPASS`; khoá là biến (`git -c "$K=$V" status`) thì chưa. Gate đọc
+  `GIT_CONFIG_KEY_*`, `GIT_CONFIG_PARAMETERS` — gán ở đầu lệnh hay gán/`export` ở lệnh trước trong cùng chuỗi — là
+  `HOOK_BYPASS`; `--config-env=<khoá chạy lệnh>=VAR` mà guard không thấy giá trị VAR cũng vậy; khoá là biến
+  (`git -c "$K=$V" status`) và biến `export` ở shell cha của lệnh lồng (`export …; bash -c 'git status'`) thì chưa.
+  Tuỳ chọn toàn cục của git đối chiếu `handle_options` (git.c 2.43 và master): đủ tuỳ chọn ăn token kế (`-C`, `-c`,
+  `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`); tuỳ chọn `--…` guard
+  không biết đứng trước lệnh con → `UNRESOLVED_TARGET` (D-216). Gate đọc
   `origin/main` chỉ chống nhầm lẫn — rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch

@@ -54,7 +54,21 @@ SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
 INTERPRETERS = SHELLS | {"python", "python3", "node", "perl", "ruby", "php", "deno", "bun", "pwsh"}
 FETCHERS = {"curl", "wget"}
 MAIN_BRANCHES = {"main", "master"}
-GIT_OPTS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+# Tuỳ chọn toàn cục của git theo `handle_options` (git.c, đối chiếu v2.43.0 và master ngày 2026-10-28 — D-216). Ăn
+# token kế làm giá trị: thiếu một tên là giá trị bị coi là lệnh con, mọi luật git bỏ qua (`git --attr-source HEAD push
+# --force …`). `--exec-path` trần in đường dẫn rồi thoát — giá trị chỉ ở dạng `--exec-path=…`, không ăn token kế.
+GIT_OPTS_WITH_VALUE = {
+    *("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--shallow-file", "--attr-source"),
+}
+# Tuỳ chọn dài nhận giá trị dạng `--opt=v` (git không nhận `--shallow-file=v` — lỗi, vô hại) và cờ dài không giá trị
+# (`--no-lazy-fetch`, `--no-advice` của git sau 2.43). Tuỳ chọn `--…` ngoài hai tập này đứng trước lệnh con → guard không
+# biết nó có ăn token kế không: UNRESOLVED_TARGET (fail-closed, `_git_unknown_global`).
+GIT_LONG_OPTS_EQ = {o for o in GIT_OPTS_WITH_VALUE if o.startswith("--")} | {"--exec-path", "--list-cmds"}
+GIT_LONG_FLAGS = {
+    *("--help", "--version", "--exec-path", "--html-path", "--man-path", "--info-path", "--paginate", "--no-pager"),
+    *("--no-replace-objects", "--bare", "--literal-pathspecs", "--no-literal-pathspecs", "--glob-pathspecs"),
+    *("--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch", "--no-advice"),
+}
 DANGEROUS_RM_TARGETS = {"/", "~", "$HOME", "${HOME}", ".", "..", "*", "/*", "~/*", ".*"}
 
 # Đường dẫn được bảo vệ (dùng chung cho Edit/Write và cho lệnh Bash ghi file).
@@ -1564,6 +1578,7 @@ ALIAS_ENV_RE = re.compile(
 )
 ALIAS_TABLE_KEY_RE = re.compile(r"(?:alias|include|includeif)\..*", re.I | re.S)  # khoá mà giá trị đổi bảng alias
 UNRESOLVED_ALIAS_MARK = "alias git guard không giải được"  # dấu của UNRESOLVED_TARGET
+UNKNOWN_GIT_OPT_MARK = "tuỳ chọn toàn cục git guard không biết"  # dấu của UNRESOLVED_TARGET (D-216)
 SHELL_EXPANDS = set("$`")  # giá trị còn biến/thay lệnh: guard không biết giá trị thật
 AliasTable = List[Tuple[str, Optional[str]]]  # (tên sau `alias.`, giá trị; None = không giá trị) theo thứ tự git đọc
 AliasRead = Tuple[List[str], Dict[str, str]]  # (tuỳ chọn toàn cục cho `git config`, biến ghi đè môi trường)
@@ -1581,6 +1596,28 @@ def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
             val, i = s[i], i + 1
         out.append((opt, val))
     return out
+
+
+def _git_unknown_global(s: List[str]) -> str:
+    """Tuỳ chọn toàn cục `--…` đầu tiên của lệnh git `s` (đã bỏ tiền tố) mà guard không biết (ngoài GIT_LONG_FLAGS,
+    GIT_OPTS_WITH_VALUE, dạng `=` của GIT_LONG_OPTS_EQ); rỗng nếu không. Không biết nó có ăn token kế không thì cũng
+    không biết lệnh con là gì (D-216)."""
+    i = 1
+    while i < len(s) and s[i].startswith("-"):
+        a = s[i]
+        known = (
+            a in GIT_LONG_FLAGS or a in GIT_OPTS_WITH_VALUE or ("=" in a and a.partition("=")[0] in GIT_LONG_OPTS_EQ)
+        )
+        if a.startswith("--") and not known:
+            return a
+        i += 2 if a in GIT_OPTS_WITH_VALUE else 1
+    return ""
+
+
+def _unknown_git_opt_asks(n: List[str], argv: List[str]) -> List[str]:
+    """Câu hỏi UNRESOLVED_TARGET khi lệnh git có tuỳ chọn toàn cục guard không biết (D-216, fail-closed)."""
+    unknown = _git_unknown_global(_strip_prefixes(argv)) if n[:1] == ["git"] else ""
+    return [f"{UNKNOWN_GIT_OPT_MARK} (`{unknown}`) — không biết lệnh con: {' '.join(argv)[:200]}"] if unknown else []
 
 
 def _expands(text: str) -> bool:
@@ -3580,15 +3617,18 @@ def agent_self_approve(argv: List[str], n: List[str], exported: Tuple[str, ...] 
     return ""
 
 
-def hook_bypass(argv: List[str], n: List[str], exported: Tuple[str, ...] = ()) -> str:
-    """Lý do hỏi nếu lệnh tắt/bỏ qua hook của dự án; chuỗi rỗng nếu không."""
+def hook_bypass(
+    argv: List[str], n: List[str], exported: Tuple[str, ...] = (), env: Optional[Dict[str, str]] = None
+) -> str:
+    """Lý do hỏi nếu lệnh tắt/bỏ qua hook của dự án; chuỗi rỗng nếu không. `exported`: tên biến đã `export` trước đó
+    trong chuỗi; `env`: biến (kèm giá trị) mà chuỗi lệnh đã đặt (`_track_env`)."""
     claude = _claude_args(n) or []
     hit = _bypass_marker(argv, n, claude)
     if hit:
         return f"lệnh đặt `{hit}` (tắt hook của khung)"
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
-    key = _git_exec_config(n, argv) if n[:1] == ["git"] else ""
+    key = _git_exec_config(n, argv, env) if n[:1] == ["git"] else ""
     if key:
         return f"cấu hình git `{key}` chạy lệnh ngầm ngoài guard — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
@@ -3681,29 +3721,33 @@ def _git_hooks_off(n: List[str]) -> bool:
     return bool(pos) and pos[0].lower() == "core.hookspath" and (len(pos) > 1 or bool(set(n) & GIT_CONFIG_UNSET))
 
 
-def _git_oneshot_config(argv: List[str]) -> List[Tuple[str, str]]:
+def _git_oneshot_config(argv: List[str], exported: Optional[Dict[str, str]] = None) -> List[Tuple[str, str]]:
     """(khoá, giá trị) cấu hình một lần của lệnh git `argv` qua MỌI kênh (review #306): `-c k=v`/`-ck=v`,
-    `--config-env[=]k=VAR` (VAR gán ở đầu lệnh hay có trong môi trường; không có → git dừng, bỏ qua), mọi
-    `GIT_CONFIG_KEY_<i>`/`GIT_CONFIG_VALUE_<i>` gán ở đầu lệnh (kể cả i ≥ COUNT — chiều chặt), `GIT_CONFIG_PARAMETERS`."""
+    `--config-env[=]k=VAR`, mọi `GIT_CONFIG_KEY_<i>`/`GIT_CONFIG_VALUE_<i>` (kể cả i ≥ COUNT — chiều chặt),
+    `GIT_CONFIG_PARAMETERS`. Biến = gán ở đầu lệnh ∪ `exported` (gán/`export` ở lệnh trước trong chuỗi — D-216). VAR của
+    `--config-env` không gán ở đâu cả, không có trong môi trường của guard (có thể đến từ `source`, `read`…) → giá trị
+    `${VAR}`: guard không biết, khoá chạy lệnh tính là không an toàn (như `_push_spread_opt`)."""
     s = _strip_prefixes(argv)
-    env = _assign_values(argv[: len(argv) - len(s)])
+    env = {**(exported or {}), **_assign_values(argv[: len(argv) - len(s)])}
     keys = sorted((k for k in env if re.fullmatch(r"GIT_CONFIG_KEY_\d+", k)), key=lambda k: int(k[15:]))
     pairs = [(env[k], env.get("GIT_CONFIG_VALUE_" + k[15:], "")) for k in keys]
     pairs += [(k, v) for w in _split_words(env.get("GIT_CONFIG_PARAMETERS", "")) for k, _, v in [w.partition("=")]]
     for opt, val in _git_globals(s):
         key, _, v = val.partition("=")
-        got = v if opt == "-c" else env.get(v, os.environ.get(v)) if opt == "--config-env" else None
-        pairs += [(key, got)] if got is not None else []
+        if opt == "-c":
+            pairs.append((key, v))
+        elif opt == "--config-env":
+            pairs.append((key, env.get(v, os.environ.get(v, "${" + v + "}"))))
     return pairs
 
 
-def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
+def _git_exec_config(n: List[str], argv: Optional[List[str]] = None, exported: Optional[Dict[str, str]] = None) -> str:
     """Khoá git chạy lệnh tuỳ ý: đặt bằng `git config` hoặc một lần (`-c`, `--config-env`, `GIT_CONFIG_*`); rỗng nếu
     không. Khoá là biến (`-c "$K=$V"`, `GIT_CONFIG_PARAMETERS=$P`) chưa xét ở đây (giới hạn — harness-files.md)."""
     pos = _git_config_write(n)
     if len(pos) >= 2 and GIT_EXEC_KEY_RE.fullmatch(pos[0]) and _git_exec_value_unsafe(pos[0], pos[1]):
         return pos[0]
-    one_shot = _git_oneshot_config(argv) if argv and n[:1] == ["git"] else []
+    one_shot = _git_oneshot_config(argv, exported) if argv and n[:1] == ["git"] else []
     # URL `ext::` chỉ ở lệnh con nhận URL/cấu hình và ở cấu hình một lần — không quét `commit -m "… ext:: …"`.
     scan = n[2:] if n[1:2] and n[1] in GIT_URL_SUBCMDS else []
     scan += [f"{k}={v}" for k, v in one_shot]
@@ -4408,6 +4452,23 @@ def _track_exports(res: Dict[str, object], argv: List[str], n: List[str]) -> Tup
     return names
 
 
+def _chain_assign(exported: Dict[str, str], c: List[str]) -> None:
+    """Gộp biến mà lệnh `c` đặt cho các lệnh sau trong cùng chuỗi vào `exported`: `export`/`declare`… hay gán trần
+    (`F=x; git …` — chiều chặt: gán trần cũng tính; `unset` không trừ)."""
+    s = _strip_prefixes(c)
+    if not s or s[0] in DECLARE_CMDS:
+        exported.update(_assign_values(c))
+
+
+def _track_env(res: Dict[str, object], argv: List[str]) -> Dict[str, str]:
+    """Môi trường (tên → giá trị) mà chuỗi lệnh đã đặt tới lệnh `argv` (kể cả nó), như `_git_alias_sources` (D-216)."""
+    prev = res.get("exported_env")
+    env: Dict[str, str] = dict(prev) if isinstance(prev, dict) else {}
+    _chain_assign(env, argv)
+    res["exported_env"] = env
+    return env
+
+
 def _command_verdict(
     n: List[str], argv: List[str], root: str, cwd: Optional[str], gdir: Optional[str]
 ) -> Tuple[str, str]:
@@ -4421,10 +4482,12 @@ def _scan_command(
     argv: List[str], root: str, res: Dict[str, object], asks: List[str], cwd: Optional[str] = None
 ) -> Optional[str]:
     """Quét một lệnh đơn: thêm câu hỏi vào `asks`, ghi cờ commit (kèm thư mục commit) vào `res`; trả lý do deny nếu phải chặn."""
+    env = _track_env(res, argv)
     n = normalize(argv)
     if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
         asks.extend(_write_asks(n, argv, root, cwd))
         return None
+    asks.extend(_unknown_git_opt_asks(n, argv))
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     # Lệnh git ghi ref (AUD-SEC-119) cũng cần repo thật để đọc tên remote của nó.
     gdir = _git_dir(argv, cwd) if n[0] == "git" and n[1:2] and n[1] in GIT_DIR_SUBS else None
@@ -4436,7 +4499,7 @@ def _scan_command(
         asks.append(f"{why}: {' '.join(argv)[:200]}")
     if decision == "allow":  # chỉ hiệu lực khi cả lệnh Bash là đúng một lệnh này (bash_decision)
         res["allow"] = why
-    bypass = hook_bypass(argv, n, _track_exports(res, argv, n))
+    bypass = hook_bypass(argv, n, _track_exports(res, argv, n), env)
     if bypass:
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
     asks.extend(_write_asks(n, argv, root, cwd))
@@ -5517,8 +5580,7 @@ def _git_alias_sources(
     exported: Dict[str, str] = {}
     for c, here in placed:
         s = _strip_prefixes(c)
-        if not s or s[0] in DECLARE_CMDS:
-            exported.update(_assign_values(c))
+        _chain_assign(exported, c)
         g, wrapped, fed = _stdin_fed(c, s)
         n = normalize(g)
         sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
@@ -6849,6 +6911,7 @@ def bash_decision(
         return res
     commands = _commands_with_cwd(tokens, cwd)
     deny_reason = next((r for argv, here in commands if (r := _scan_command(argv, root, res, asks, here))), "")
+    res.pop("exported_env", None)
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
         ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
@@ -6908,6 +6971,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (UNRESOLVED_PUSH_WHY, UNRESOLVED_TARGET),  # `xargs git push`, `git push origin $(…)` (T-1523)
     (UNRESOLVED_REF_MARK, UNRESOLVED_TARGET),  # `git update-ref --stdin` (AUD-SEC-119)
     (UNRESOLVED_ALIAS_MARK, UNRESOLVED_TARGET),  # alias git đọc lỗi/là biến/vòng (AUD-SEC-119, review T-3563)
+    (UNKNOWN_GIT_OPT_MARK, UNRESOLVED_TARGET),  # `git --<lạ> v push …`: không biết lệnh con (D-216)
     (REMOTE_REF_MARK, "REMOTE_REF_FORGE"),  # giả `origin/main` mà Gate đọc (AUD-SEC-119, T-3563)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
