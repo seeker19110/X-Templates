@@ -30,8 +30,8 @@ mỗi hành động, nên sự kiện lặp/sai thứ tự không lặp tác d�
 Điều kiện cần: **không** cần "Allow auto-merge" — nên **tắt** ở Settings → General để không ai bật nhầm. Nên đặt secret
 `XT_STEWARD_TOKEN` (fine-grained PAT hoặc GitHub App: contents + pull requests: write): merge bằng `GITHUB_TOKEN` vẫn vào
 nhưng GitHub không chạy workflow `push` cho commit đó — steward bù bằng `workflow_dispatch` của `ci.yml` trên nhánh đích
-(GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402) — và không có token thì steward không cập
-nhật nhánh tụt.
+(GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402; PR đổi `VERSION` thì cả `release-tag.yml` — §4) — và
+không có token thì steward không cập nhật nhánh tụt.
 
 Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` 2026-10-23, D-144): required
 check `quality`, `protection-guard`, `gitleaks`, `dep-audit`; **"up to date" bật** (`strict: true`, khớp
@@ -87,7 +87,7 @@ Workflow bị sửa hỏng: revert commit qua PR; dự án đích chạy lại `
 
 ## 4. Đẩy tag phát hành (`release-tag.yml`)
 
-Workflow `release-tag.yml` tự chạy khi `VERSION` đổi trên `main` (từ 3.24.0, ADR-0047; `workflow_dispatch` là đường lùi) và đẩy tag bằng `GITHUB_TOKEN`; GitHub từ chối khi commit đích đổi file workflow so với tag trước
+Workflow `release-tag.yml` tự chạy khi `VERSION` đổi trên `main` (từ 3.24.0, ADR-0047; `workflow_dispatch` là đường lùi — steward merge bằng `GITHUB_TOKEN` không kích `push`, nên steward tự dispatch nó ghim commit merge, AUD-HAR-124) và đẩy tag bằng `GITHUB_TOKEN`; GitHub từ chối khi commit đích đổi file workflow so với tag trước
 ("refusing to allow a GitHub App to create or update workflow … without workflows permission", AUD-CI-014). Sửa: đặt secret
 tuỳ chọn `XT_RELEASE_TOKEN` (fine-grained PAT, chỉ repo này: `contents: write` + `workflows: write`); workflow dùng nó ở bước
 checkout, thiếu thì rơi về `GITHUB_TOKEN`. Thiếu secret mà commit có đổi workflow (lần đầu sau 3.24.0 chính là trường hợp này — `release-tag.yml` đổi): run tự động đỏ, người đẩy tag tay

@@ -3533,6 +3533,81 @@ class StewardDispatchCiTest(unittest.TestCase):
                     xt._steward_apply(out, {}, "repos/o/r", [["gh", "x"]], "main")
                 m.assert_not_called()
 
+    MERGED = "9" * 40
+    FILES = "repos/{owner}/{repo}/pulls/7/files?per_page=100"
+
+    def version_pr(
+        self, files: tuple[str, ...] = ("VERSION", "CHANGELOG.md", "tests/test_version.py"), workflow: bool = True
+    ) -> dict:
+        """PR đổi `files`; repo có `release-tag.yml` khi `workflow` (AUD-HAR-124)."""
+        if workflow:
+            wf = self.base / xt.RELEASE_WORKFLOW_FILE
+            wf.parent.mkdir(parents=True, exist_ok=True)
+            wf.write_text("on: push\n", encoding="utf-8")
+        return {self.FILES: json.dumps([{"filename": f, "additions": 1, "deletions": 1} for f in files])}
+
+    def test_steward_dispatch_tag_after_version_merge(self):
+        """AUD-HAR-124 (#314): merge bằng GITHUB_TOKEN của PR đổi VERSION không kích `push` của release-tag.yml → steward
+        dispatch nó, ghim commit merge đọc lại từ PR (không theo đầu nhánh)."""
+        self.github_token()
+        gh = SeqGh(
+            [{}, {}, {"merged": True, "state": "closed", "merge_commit_sha": self.MERGED}], raw=self.version_pr()
+        )
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("dispatch CI ✓; dispatch tag ✓", out)
+        tag = ["gh", "api", "-X", "POST", "repos/{owner}/{repo}/actions/workflows/release-tag.yml/dispatches"]
+        self.assertEqual(gh.writes[2], tag + ["-f", "ref=main", "-f", f"inputs[sha]={self.MERGED}"])
+
+    def test_steward_no_tag_dispatch_without_version_workflow_or_with_token(self):
+        for name, raw, env in (
+            ("không đổi VERSION", self.version_pr(("CHANGELOG.md", "tests/test_version.py")), "off"),
+            ("có token riêng: push đã kích tag", self.version_pr(), "on"),
+        ):
+            with self.subTest(name):
+                self.github_token(XT_STEWARD_UPDATE=env)
+                rc, out, gh = self.steward(raw=raw)
+                self.assertEqual(rc, 0, out)
+                self.assertNotIn("dispatch tag", out)
+                self.assertNotIn("release-tag.yml", " ".join(" ".join(w) for w in gh.writes))
+        self.github_token()  # trả XT_STEWARD_UPDATE về off: đường dispatch sau merge phải chạy (review #316)
+        (self.base / xt.RELEASE_WORKFLOW_FILE).unlink()  # dự án đích không có workflow tag
+        rc, out, gh = self.steward(raw=self.version_pr(workflow=False))
+        self.assertIn("dispatch CI ✓", out)
+        self.assertNotIn("dispatch tag", out)
+        self.assertNotIn("release-tag.yml", " ".join(" ".join(w) for w in gh.writes))
+        for ref, want in (("main", True), ("develop", False)):  # như trigger `push` của release-tag.yml: chỉ main
+            with self.subTest(ref=ref), unittest.mock.patch.object(xt, "_steward_apply", return_value={}) as m:
+                gh = StewardGh(raw=self.version_pr(), pull={"base": {"ref": ref}})
+                with gh.patch():
+                    xt._steward_one("7", "repos/{owner}/{repo}", self.base, True, [])
+                self.assertEqual(m.call_args.args[4:], (ref, want))
+
+    def test_steward_dispatch_tag_unreadable_merge_warns(self):
+        self.github_token()
+        for last in (
+            {"merged": False, "merge_commit_sha": self.MERGED},  # GitHub trả commit merge thử cho PR chưa merge
+            {"merged": True, "merge_commit_sha": "không-phải-sha"},
+            "FAIL",
+        ):
+            with self.subTest(last=last):
+                gh = SeqGh([{}, {}, last], raw=self.version_pr())
+                with gh.patch():
+                    rc, out, _ = run_main("pr", "steward", "--apply", "--json")
+                (res,) = json.loads(out)
+                self.assertEqual(rc, 1)  # cảnh báo → job đỏ để người thấy
+                self.assertTrue(res["applied"])  # merge đã vào — không huỷ
+                self.assertIn("dispatch tag ✗", res["then"])
+                self.assertIn("tag phát hành chưa gắn", res["warn"])
+                self.assertEqual([w[3] for w in gh.writes], ["PUT", "POST"])  # merge + dispatch CI, không dispatch tag
+        gh = SeqGh([{}, {}, {"merged": True, "merge_commit_sha": self.MERGED}], raw=self.version_pr())
+        gh.fail = {"gh api -X POST repos/{owner}/{repo}/actions/workflows/release-tag.yml": "HTTP 404"}
+        with gh.patch():
+            rc, out, _ = run_main("pr", "steward", "--apply")
+        self.assertIn("dispatch tag ✗ HTTP 404", out)
+        self.assertIn(f"gh workflow run release-tag.yml -f sha={self.MERGED}", out)  # lệnh chạy tay chép dùng được
+
     def test_steward_dispatch_ci_workflows(self):
         for path in (ROOT / ".github/workflows/ci.yml", ROOT / "framework/templates/ci.yml"):
             with self.subTest(path=str(path.relative_to(ROOT))):

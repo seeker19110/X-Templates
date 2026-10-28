@@ -14,6 +14,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
 
 ### Fixed
+- `pr steward`: merge bằng `GITHUB_TOKEN` của PR vào `main` đổi `VERSION` → dispatch `.github/workflows/release-tag.yml` (nếu repo có) với input `sha` = commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm lệnh chạy tay. **Dự án đích:** không có file này → không đổi; có file cùng tên thì nó phải nhận `workflow_dispatch` với input `sha` (như bản của khung), không thì job steward đỏ (422) sau mỗi merge đổi `VERSION`.
 - Fixture timeout (D-220) chờ reap tiến trình con trước marker/exit để không báo sai với PID zombie trong container; giữ kiểm marker, PID biến mất và nhánh SIGKILL, mutant chỉ TERM cha vẫn bị bắt.
 
 ## [3.28.0] - 2026-10-28

@@ -136,6 +136,7 @@ WRITERS = (
     "_steward_run",
     "_steward_apply",
     "_steward_dispatch_ci",
+    "_steward_dispatch_tag",
     "_steward_one",
     "_publish_review",
     "_pr_reviewed",

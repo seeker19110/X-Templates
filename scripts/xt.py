@@ -10003,7 +10003,10 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    return _steward_apply(out, d, repo, cmds if apply else [], str(pr.get("baseRefName") or "main"))
+    target = str(pr.get("baseRefName") or "main")
+    # như trigger `push` của release-tag.yml: chỉ nhánh `main` (nhánh khác: job bị bỏ qua, bản cũ thiếu input → 422)
+    tag = target == "main" and "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()
+    return _steward_apply(out, d, repo, cmds if apply else [], target, tag)
 
 
 def _steward_key(out: Dict[str, Any], repo: str) -> str:
@@ -10033,9 +10036,10 @@ def _steward_stale(out: Dict[str, Any], repo: str) -> str:
 
 
 def _steward_apply(
-    out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]], base: str = "main"
+    out: Dict[str, Any], d: Dict[str, Any], repo: str, cmds: List[List[str]], base: str = "main", tag: bool = False
 ) -> Dict[str, Any]:
-    """`base` = nhánh đích của PR: merge thành công bằng GITHUB_TOKEN → dispatch CI trên nhánh đó (T-2402)."""
+    """`base` = nhánh đích của PR: merge thành công bằng GITHUB_TOKEN → dispatch CI trên nhánh đó (T-2402); `tag` (PR đổi
+    `VERSION`, repo có `release-tag.yml`) → dispatch cả tag ghim commit merge (AUD-HAR-124)."""
     can_update = _steward_can_update()
     out["key"] = _steward_key(out, repo)
     if out["action"] == "update" and not can_update:
@@ -10054,6 +10058,8 @@ def _steward_apply(
         out.update(applied=not err, **({"error": err} if err else {}))
         if not err and out["action"] == "merge" and not can_update:  # GITHUB_TOKEN: merge không kích `push` của CI
             _steward_dispatch_ci(out, repo, base)
+            if tag:
+                _steward_dispatch_tag(out, repo, base, str(d["pr"]))
         # Tụt sau nhánh đích mà auto-merge đang bật: vừa tắt xong thì cập nhật nhánh luôn trong lượt này.
         if not err and out["action"] == "disable-auto-merge" and d.get("verdict") == "update" and can_update:
             up_err = _steward_run([_update_branch_cmd(repo, str(d["pr"]), str(out["head"]))])
@@ -10084,6 +10090,37 @@ def _steward_dispatch_ci(out: Dict[str, Any], repo: str, base: str) -> None:
             f"CI không chạy trên `{base}` sau merge ({err}) — job steward cần `actions: write`"
             " (chạy lại install.py --with-github) hoặc đặt XT_STEWARD_TOKEN; chạy tay: gh workflow run " + name
         )
+        out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
+
+
+RELEASE_WORKFLOW_FILE = ".github/workflows/release-tag.yml"  # tag phát hành khi `VERSION` đổi trên nhánh chính (D-179)
+
+
+def _steward_dispatch_tag(out: Dict[str, Any], repo: str, base: str, n: str) -> None:
+    """Merge bằng GITHUB_TOKEN của PR đổi `VERSION` không kích `push` của `release-tag.yml` → tag phát hành không được gắn
+    (AUD-HAR-124, #314). Đọc commit merge của PR rồi dispatch workflow ghim đúng commit đó (không theo đầu nhánh — merge
+    khác chen vào thì tag vẫn đúng bản cắt). Không đọc được → không dispatch, cảnh báo (workflow tự kiểm VERSION/CHANGELOG
+    và từ chối tag đã có)."""
+    sha, err = "", ""
+    try:
+        pull = _gh_one(f"{repo}/pulls/{n}")
+        sha = str(pull.get("merge_commit_sha") or "") if pull.get("merged") else ""
+    except PrInputError as exc:
+        err = str(exc)
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        err = err or "PR chưa merge hoặc không có merge_commit_sha"
+    else:
+        name = Path(RELEASE_WORKFLOW_FILE).name
+        cmd = ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/{name}/dispatches", "-f", f"ref={base}"]
+        err = _steward_run([cmd + ["-f", f"inputs[sha]={sha}"]])
+    out["then"] = "; ".join(x for x in (out.get("then"), "dispatch tag " + (f"✗ {err}" if err else "✓")) if x)
+    if err:
+        how = (
+            f"gh workflow run release-tag.yml -f sha={sha}"
+            if sha and not err.startswith("PR chưa")
+            else "sha commit merge"
+        )
+        text = f"tag phát hành chưa gắn ({err}) — chạy tay workflow_dispatch release-tag.yml ({how})"
         out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
 
 
