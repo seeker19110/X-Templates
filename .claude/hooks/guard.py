@@ -1284,20 +1284,22 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 # Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file `.git/refs/…`/`.git/packed-refs`/
 # `.git/<remote>/…`; đổi URL/refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `-c remote.<r>.*`);
 # `git replace`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
-# (khối "Alias git" dưới); giới hạn của nó: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng (`printf … > f &&
-# GIT_CONFIG_GLOBAL=f git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`), git cũ thiếu một lệnh dựng
-# sẵn trong GIT_BUILTINS (alias trùng tên đó chạy mà guard không tra), alias `!` quét ở thư mục của lệnh chứ không ở gốc
-# repo. Rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
+# (khối "Alias git" dưới); đối số từ stdin (`xargs`/`parallel`/`find -exec {}`) → UNRESOLVED_TARGET (khối "Đối số không
+# thấy"). Giới hạn của alias: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng (`printf … > f && GIT_CONFIG_GLOBAL=f
+# git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`), lệnh xoá biến môi trường (`env -i/-u`, `unset`),
+# `includeIf "onbranch:"` định nghĩa alias, thư mục repo là biến (đọc ở gốc dự án), git cũ thiếu một lệnh dựng sẵn trong
+# GIT_BUILTINS (alias trùng tên đó chạy mà guard không tra), alias `!` quét ở thư mục của lệnh chứ không ở gốc repo. Rào
+# thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
 REMOTE_REF_MARK = "ghi ref theo dõi remote"  # dấu của mã REMOTE_REF_FORGE (REASON_CODES)
 REMOTE_REF_WHY = REMOTE_REF_MARK + " / tạo ref trùng tên remote ({}) — giả `<remote>/<nhánh>` mà Gate đọc (AUD-SEC-119)"
-UNRESOLVED_REF_MARK = "ref đọc từ stdin, guard không thấy"  # dấu của UNRESOLVED_TARGET
-UNRESOLVED_REF_WHY = "git {} --stdin: " + UNRESOLVED_REF_MARK + " có phải ref của remote (AUD-SEC-119)"
+UNRESOLVED_REF_MARK = "ref đến từ stdin/xargs/find, guard không thấy"  # dấu của UNRESOLVED_TARGET
+UNRESOLVED_ARGS_WHY = "git {} ({}): " + UNRESOLVED_REF_MARK + " có phải ref của remote (AUD-SEC-119)"
 REMOTE_NAMES = frozenset({"origin", "upstream"})
 FETCH_VALUE_OPTS = (
     *("--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--jobs", "--negotiation-tip", "--refmap"),
     *("--upload-pack", "--server-option", "--filter", "--strategy", "--strategy-option"),
 )
-TAG_VALUE_OPTS = ("--message", "--file", "--local-user", "--cleanup", "--format", "--sort", "--trailer")
+TAG_VALUE_OPTS = ("--message", "--file", "--local-user", "--cleanup", "--format", "--sort", "--trailer", "--points-at")
 TAG_NO_CREATE = {"-l", "-d", "-v", "-n", "--list", "--delete", "--verify", "--contains", "--no-contains", "--merged"}
 TAG_NO_CREATE |= {"--no-merged", "--points-at"}
 BRANCH_NO_CREATE = {"-l", "-a", "-r", "-d", "-D", "-u", "--list", "--all", "--remotes", "--delete", "--contains"}
@@ -1329,9 +1331,23 @@ def _short_cluster(a: str, nxt: List[str], short_val: str) -> Tuple[List[str], L
     return flags, [("-" + a[k], v) for v in took], len(took) if k + 1 == len(a) else 0
 
 
+# Cờ ngắn có tên dài phủ định được (`-d, --[no-]delete`…): `--no-<tên>` đứng sau huỷ cả dạng ngắn (đo trên git 2.43:
+# `branch -d --no-delete X`, `-m --no-move X`, `-l --no-list X` TẠO nhánh X).
+NEGATABLE_SHORT = {"--delete": "-d", "--list": "-l", "--copy": "-c", "--move": "-m", "--set-upstream-to": "-u"}
+
+
+def _negate(flags: Set[str], full: str) -> None:
+    """`--no-<x>`: bỏ cờ đã gặp mà nó phủ định — dạng dài (cả viết tắt hai chiều: `--del`/`--no-delete`, `--delete`/
+    `--no-del`) và dạng ngắn trong NEGATABLE_SHORT. Bỏ thừa chỉ làm guard coi lệnh là có tạo ref (chiều chặt)."""
+    longs = {f for f in flags if f.startswith("--") and not f.startswith("--no-")}
+    flags.difference_update(f for f in longs if f.startswith(full) or full.startswith(f))
+    flags.difference_update(short for name, short in NEGATABLE_SHORT.items() if name.startswith(full))
+
+
 def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> ParsedOpts:
     """(cờ đã gặp, đối số vị trí, [(tuỳ chọn, giá trị)]) theo kiểu parse-options của git: cụm cờ ngắn dừng ở chữ nhận
-    giá trị (`-fb x`, `-bx`), `--opt=v`/`--opt v`, viết tắt tuỳ chọn dài, sau `--` là đối số vị trí."""
+    giá trị (`-fb x`, `-bx`), `--opt=v`/`--opt v`, viết tắt tuỳ chọn dài, `--no-<x>` huỷ `--<x>`/cờ ngắn của nó đứng
+    trước, sau `--` là đối số vị trí."""
     flags: Set[str] = set()
     pos: List[str] = []
     vals: List[Tuple[str, str]] = []
@@ -1343,6 +1359,8 @@ def _parse_opts(args: List[str], short_val: str, long_val: Tuple[str, ...]) -> P
             return flags, pos + args[i:], vals
         if a.startswith("--"):
             key, eq, val = a.partition("=")
+            if key.startswith("--no-") and len(key) > 5:
+                _negate(flags, "--" + key[5:])
             flags.add(key)
             took = ([val] if eq else nxt) if _long_match(key, long_val) else []
             vals += [(key, v) for v in took]
@@ -1483,25 +1501,44 @@ GIT_DIR_SUBS = {"commit", "config", *REMOTE_REF_NAMES}
 
 
 def _remote_ref_rule(sub: str, args: List[str], cwd: Optional[str]) -> Tuple[str, str]:
-    """AUD-SEC-119: deny khi lệnh git ghi ref theo dõi remote hoặc tạo ref trùng tên remote; ref từ stdin → hỏi (unsure)."""
+    """AUD-SEC-119: deny khi lệnh git ghi ref theo dõi remote hoặc tạo ref trùng tên remote; ref từ stdin hay là file mà
+    `find -exec … {}` tìm thấy (`find refs/remotes -exec git update-ref {} HEAD`) → hỏi (unsure)."""
     names = REMOTE_REF_NAMES[sub](args, cwd)
     if names is None:
-        return "ask", UNRESOLVED_REF_WHY.format(sub)
+        return "ask", UNRESOLVED_ARGS_WHY.format(sub, "--stdin")
+    if any(FIND_FOUND in x for x in names):
+        return "ask", UNRESOLVED_ARGS_WHY.format(sub, "đối số `{}` của find -exec")
     hit = _remote_ref_hit(names, cwd)
-    return ("deny", REMOTE_REF_WHY.format(hit)) if hit else ("", "")
+    return ("deny", REMOTE_REF_WHY.format(hit) + _fetch_hint(sub, hit)) if hit else ("", "")
 
 
-# Alias git (AUD-SEC-119, review T-3563): `git -c alias.x=update-ref x refs/remotes/origin/main HEAD` chạy `update-ref`
-# dưới tên khác. Guard mở alias như git (git.c `run_argv`, đo trên git 2.43): lệnh con dựng sẵn KHÔNG BAO GIỜ là alias;
-# tên khác → alias một lần (`GIT_CONFIG_KEY_<i>`/`GIT_CONFIG_VALUE_<i>` < `GIT_CONFIG_PARAMETERS` < `-c`/`--config-env`
-# theo thứ tự — sau thắng trước) hoặc alias bền (`git config --get alias.<tên>` ở repo của lệnh, cùng biến chọn tệp cấu
-# hình của lệnh), thay vào, lặp tới lệnh dựng sẵn rồi xét bản viết lại như lệnh thật; alias `!` là shell → quét như shell
-# lồng. Không giải được (đọc cấu hình lỗi/quá hạn, giá trị/khoá là biến, `--config-env` trỏ biến không gán, alias vòng hay
-# sâu quá ALIAS_MAX_DEPTH) → UNRESOLVED_TARGET (strict hỏi, mặc định chặn). Đặt alias trỏ `update-ref`, `symbolic-ref`
-# trần hay giá trị đã đủ đối số ghi ref remote (`git config alias.f 'fetch . HEAD:refs/remotes/origin/main'`) → chặn lúc
-# đặt; `tag`/`branch`/`fetch` trần thì chỉ xét được lúc dùng (alias chưa có đối số). Danh sách lệnh dựng sẵn: `git
-# --list-cmds=builtins` của git 2.43, đóng (không gọi git lúc chạy chỉ để lấy danh sách) — lệnh dựng sẵn của git mới hơn
-# mà danh sách thiếu vẫn bị tra alias (chiều chặt); `git-<tên>` trong PATH được git chạy trước alias, guard vẫn tra alias.
+def _fetch_hint(sub: str, hit: str) -> str:
+    """Gợi ý dạng được cho qua khi chặn refspec của fetch/pull (`main:refs/remotes/origin/main` → nguồn đầy đủ)."""
+    if sub not in ("fetch", "pull"):
+        return ""
+    m = re.fullmatch(r"refs/remotes/([^/]+)/(.+)", hit.lstrip("+"))
+    spec = f"refs/heads/{m.group(2)}:refs/remotes/{m.group(1)}/{m.group(2)}" if m else ""
+    spec = spec or "refs/heads/<nhánh>:refs/remotes/<remote>/<nhánh>"
+    return f"; dạng được cho qua: `git {sub} <remote đã cấu hình> {spec}`"
+
+
+# Alias git (AUD-SEC-119, review T-3563, review #306): `git -c alias.x=update-ref x refs/remotes/origin/main HEAD` chạy
+# `update-ref` dưới tên khác. Guard mở alias như git (git.c `run_argv` + alias.c `alias_lookup`, đo trên git 2.43): lệnh
+# con dựng sẵn KHÔNG BAO GIỜ là alias; MỌI tên khác — bất kể hình dạng (`a.b`, `y_x.z`, `1.x`) — đều được tra. Bảng
+# alias do CHÍNH git dựng (`_git_alias_table`): `git -C <repo> [-c/--config-env/--git-dir/--bare của lệnh, giữ thứ tự]
+# config --list -z` với môi trường của guard ghi đè bởi biến cấu hình của lệnh (ALIAS_ENV_RE + biến mà `--config-env`
+# trỏ tới; gán đầu lệnh ∪ `export` trước đó) — `GIT_CONFIG_COUNT` (git bỏ `KEY_<i>` với i ≥ COUNT, bỏ hết khi thiếu
+# COUNT), include/includeIf, thứ tự ưu tiên đều do git xử lý. Tên so như alias.c: cả phần sau `alias.` so strcasecmp
+# (subsection `alias.A.B` gọi bằng `git a.b`), mục sau thắng; mục không giá trị bị bỏ qua (git dừng — chiều chặt). Thay
+# vào, lặp tới lệnh dựng sẵn rồi xét bản viết lại như lệnh thật; alias `!` là shell → quét như shell lồng. `git config
+# --list` chỉ đọc tệp: không chạy fsmonitor/pager/hook/credential/textconv (test đối chứng với git thật); khoá chạy lệnh
+# đặt một lần qua mọi kênh là HOOK_BYPASS (`_git_exec_config`). Không giải được (đọc lỗi/quá hạn/hết ngân sách TỔNG
+# ALIAS_SECONDS của cả quyết định, khoá hay giá trị đổi bảng alias là biến/thay lệnh, alias vòng hay sâu quá
+# ALIAS_MAX_DEPTH, lệnh con là file `find` tìm thấy) → UNRESOLVED_TARGET (strict hỏi, mặc định chặn). Đặt alias trỏ
+# `update-ref`, `symbolic-ref` trần hay giá trị đã đủ đối số ghi ref remote (`git config alias.f 'fetch .
+# HEAD:refs/remotes/origin/main'`) → chặn lúc đặt; `tag`/`branch`/`fetch` trần thì chỉ xét được lúc dùng. Danh sách lệnh
+# dựng sẵn: `git --list-cmds=builtins` của git 2.43, đóng — lệnh dựng sẵn của git mới hơn mà danh sách thiếu vẫn bị tra
+# alias (chiều chặt); `git-<tên>` trong PATH được git chạy trước alias, guard vẫn tra alias (chiều chặt).
 GIT_BUILTINS = frozenset(
     """add am annotate apply archive bisect blame branch bugreport bundle cat-file check-attr check-ignore check-mailmap
     check-ref-format checkout checkout--worker checkout-index cherry cherry-pick clean clone column commit commit-graph
@@ -1518,20 +1555,18 @@ GIT_BUILTINS = frozenset(
     verify-pack verify-tag version whatchanged worktree write-tree""".split()
 )
 ALIAS_MAX_DEPTH = 8  # số tầng alias lồng tối đa (git tự dừng ở vòng; guard không dựa vào đó)
-ALIAS_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")  # tên biến cấu hình hợp lệ — tên khác git báo `invalid key`
-ALIAS_ANY = "*"  # khoá của AliasDefs: có alias một lần mà guard không biết tên (`GIT_CONFIG_PARAMETERS=$P`)
-# Biến của lệnh quyết định git đọc tệp cấu hình nào (đi cùng lần đọc alias bền); `--git-dir` thành GIT_DIR.
-ALIAS_CONFIG_ENV = (
-    "HOME",
-    "XDG_CONFIG_HOME",
-    "GIT_DIR",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
-    "GIT_CONFIG_NOSYSTEM",
+ALIAS_SECONDS = (
+    5.0  # ngân sách thời gian TỔNG của mọi lần đọc bảng alias trong MỘT quyết định (cả lệnh lồng, find -exec)
 )
+# Biến của lệnh mà git dùng khi dựng cấu hình — đi cùng lần đọc bảng alias (`GIT_CONFIG` thì chỉ `git config` đọc: bỏ).
+ALIAS_ENV_RE = re.compile(
+    r"GIT_CONFIG_(?:COUNT|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM|KEY_\d+|VALUE_\d+)|HOME|XDG_CONFIG_HOME|GIT_DIR"
+)
+ALIAS_TABLE_KEY_RE = re.compile(r"(?:alias|include|includeif)\..*", re.I | re.S)  # khoá mà giá trị đổi bảng alias
 UNRESOLVED_ALIAS_MARK = "alias git guard không giải được"  # dấu của UNRESOLVED_TARGET
 SHELL_EXPANDS = set("$`")  # giá trị còn biến/thay lệnh: guard không biết giá trị thật
-AliasDefs = Dict[str, Optional[str]]  # tên alias (chữ thường) → giá trị; None = không biết
+AliasTable = List[Tuple[str, Optional[str]]]  # (tên sau `alias.`, giá trị; None = không giá trị) theo thứ tự git đọc
+AliasRead = Tuple[List[str], Dict[str, str]]  # (tuỳ chọn toàn cục cho `git config`, biến ghi đè môi trường)
 
 
 def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
@@ -1548,29 +1583,45 @@ def _git_globals(s: List[str]) -> List[Tuple[str, str]]:
     return out
 
 
-def _alias_pairs(s: List[str], env: Dict[str, str]) -> List[Tuple[str, Optional[str]]]:
-    """(khoá, giá trị) cấu hình một lần của lệnh git `s` theo thứ tự git áp; giá trị None = biến không gán."""
-    keys = sorted((k for k in env if re.fullmatch(r"GIT_CONFIG_KEY_\d+", k)), key=lambda k: int(k[15:]))
-    pairs: List[Tuple[str, Optional[str]]] = [(env[k], env.get("GIT_CONFIG_VALUE_" + k[15:], "")) for k in keys]
-    pairs += [(k, v) for w in _split_words(env.get("GIT_CONFIG_PARAMETERS", "")) for k, _, v in [w.partition("=")]]
+def _expands(text: str) -> bool:
+    return bool(SHELL_EXPANDS & set(text))
+
+
+def _alias_read_args(s: List[str], env: Dict[str, str]) -> Optional[AliasRead]:
+    """Đầu vào để git dựng bảng alias như lệnh git `s` (đã bỏ tiền tố) sẽ thấy: tuỳ chọn `-c`/`--config-env`/
+    `--git-dir`/`--bare` (giữ thứ tự) và biến ALIAS_ENV_RE của lệnh (`env`) cùng biến mà `--config-env` trỏ tới. None =
+    khoá, giá trị của khoá đổi bảng alias (ALIAS_TABLE_KEY_RE), biến chọn tệp/COUNT/PARAMETERS hay `--git-dir` là
+    biến/thay lệnh — guard không biết git sẽ thấy gì."""
+    over = {k: v for k, v in env.items() if ALIAS_ENV_RE.fullmatch(k)}
+    opts: List[str] = []
+    pairs: List[Tuple[str, str]] = []
+    literal: List[str] = []  # tên biến của `--config-env`, đường dẫn `--git-dir`: phải là chữ
     for opt, val in _git_globals(s):
         key, _, v = val.partition("=")
         if opt == "-c":
+            opts += ["-c", val]
             pairs.append((key, v))
         elif opt == "--config-env":
-            pairs.append((key, env.get(v)))
-    return pairs
+            opts.append("--config-env=" + val)
+            over.update((name, env[name]) for name in [v] if name in env)
+            pairs.append((key, over.get(v, "")))
+            literal.append(v)
+        elif opt in ("--git-dir", "--bare"):
+            opts.append(f"--git-dir={val}" if opt == "--git-dir" else opt)
+            literal.append(val)
+    unknown = any(_expands(k) or (_expands(v) and ALIAS_TABLE_KEY_RE.fullmatch(k)) for k, v in pairs)
+    return None if unknown or _env_unknown(over) or any(map(_expands, literal)) else (opts, over)
 
 
-def _oneshot_aliases(s: List[str], env: Dict[str, str]) -> AliasDefs:
-    """Alias một lần của lệnh git `s`: sau thắng trước; khoá là biến → mọi tên trước đó thành không biết (ALIAS_ANY)."""
-    defs: AliasDefs = {}
-    for key, val in _alias_pairs(s, env):
-        if SHELL_EXPANDS & set(key):
-            defs = {ALIAS_ANY: None}
-        elif key.casefold().startswith("alias."):
-            defs[key[6:].casefold()] = None if val is None or SHELL_EXPANDS & set(val) else val
-    return defs
+def _env_unknown(over: Dict[str, str]) -> bool:
+    """Biến cấu hình của lệnh có giá trị là biến/thay lệnh — trừ `GIT_CONFIG_VALUE_<i>` của khoá chữ không đổi bảng
+    alias (`http.extraHeader="X: $T"`: git đọc nguyên chữ, bảng alias không đổi)."""
+    for name, v in over.items():
+        idx = name[17:] if name.startswith("GIT_CONFIG_VALUE_") else ""
+        key = over.get("GIT_CONFIG_KEY_" + idx, os.environ.get("GIT_CONFIG_KEY_" + idx, "")) if idx else ""
+        if _expands(v) and not (key and not _expands(key) and not ALIAS_TABLE_KEY_RE.fullmatch(key)):
+            return True
+    return False
 
 
 def _existing_dir(d: str) -> str:
@@ -1580,35 +1631,73 @@ def _existing_dir(d: str) -> str:
     return d
 
 
-def _git_alias_config(name: str, gdir: str, env: Dict[str, str]) -> Optional[str]:
-    """`git config --get alias.<name>` ở repo `gdir` với biến chọn tệp cấu hình của lệnh (ALIAS_CONFIG_ENV): giá trị; ""
-    = không có alias; None = đọc lỗi/quá hạn/biến không biết (fail-closed: UNRESOLVED_TARGET). `git config --get` chỉ
-    đọc tệp, không chạy chương trình cấu hình."""
-    over = {k: env[k] for k in ALIAS_CONFIG_ENV if k in env}
-    if any(SHELL_EXPANDS & set(v) for v in over.values()):
-        return None
-    cmd = ["git", "-C", _existing_dir(gdir), "config", "--get", "alias." + name]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False, env={**os.environ, **over})
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return {0: r.stdout.rstrip("\n"), 1: ""}.get(r.returncode)
+def _alias_entries(raw: bytes) -> AliasTable:
+    """Mục `alias.*` của `git config --list -z` (`khoá<LF>giá trị<NUL>`; không giá trị: `khoá<NUL>`), theo thứ tự."""
+    out: AliasTable = []
+    for item in raw.decode("utf-8", "surrogateescape").split("\0"):
+        key, nl, val = item.partition("\n")
+        if key[:6].lower() == "alias.":
+            out.append((key[6:], val if nl else None))
+    return out
 
 
-def _git_alias_expand(n: List[str], defs: AliasDefs, gdir: str, env: Dict[str, str]) -> Tuple[str, List[str]]:
-    """Mở chuỗi alias của lệnh git `n` (đã chuẩn hoá): ("git", argv thật) · ("shell", [script, đối số…]) cho alias `!`
-    · ("unresolved", [lý do]) · ("", []) khi lệnh con không phải alias. Alias một lần (`defs`) thắng alias bền."""
-    seen: List[str] = []
-    while len(n) > 1 and n[1] not in GIT_BUILTINS and ALIAS_NAME_RE.fullmatch(n[1]):
-        name = n[1].casefold()
-        if name in seen or len(seen) >= ALIAS_MAX_DEPTH:
-            return "unresolved", [f"alias vòng hoặc lồng quá {ALIAS_MAX_DEPTH} tầng: {' → '.join([*seen, name])}"]
-        val = defs[name] if name in defs else None if ALIAS_ANY in defs else _git_alias_config(name, gdir, env)
-        if val is None:
-            return "unresolved", [f"không biết giá trị `alias.{name}`"]
+def _git_alias_table(
+    gdir: str, opts: List[str], over: Dict[str, str], budget: Optional["ScanBudget"]
+) -> Optional[AliasTable]:
+    """Bảng alias mà git dựng cho lệnh: `git --no-pager -C <gdir> <opts> config --list -z` (stdin rỗng) với môi trường
+    của guard ghi đè bởi `over`. None = đọc lỗi/quá hạn/hết ngân sách (fail-closed: UNRESOLVED_TARGET). Thời hạn là phần
+    còn lại của ngân sách TỔNG của quyết định (`budget.alias`); cùng đầu vào chỉ đọc một lần. `git config` chỉ đọc tệp,
+    không chạy chương trình cấu hình."""
+    clock = budget.alias if budget else AliasClock()
+    cmd = ["git", "--no-pager", "-C", _existing_dir(gdir), *opts, "config", "--list", "-z"]
+    key = (tuple(cmd), tuple(sorted(over.items())))
+    left = clock.deadline - time.monotonic()
+    if key not in clock.cache and left <= 0:
+        return None  # hết ngân sách tổng: không gọi git nữa
+    if key not in clock.cache:
+        env = {**{k: v for k, v in os.environ.items() if k != "GIT_CONFIG"}, **over}
+        try:
+            r = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=left, check=False, env=env)
+            clock.cache[key] = _alias_entries(r.stdout) if r.returncode == 0 else None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            clock.cache[key] = None
+    return clock.cache[key]
+
+
+class AliasClock:
+    """Ngân sách TỔNG đọc bảng alias của một quyết định (ALIAS_SECONDS): hạn chót chung và bảng đã đọc theo đầu vào."""
+
+    def __init__(self) -> None:
+        self.deadline = time.monotonic() + ALIAS_SECONDS
+        self.cache: Dict[Tuple[Tuple[str, ...], Tuple[Tuple[str, str], ...]], Optional[AliasTable]] = {}
+
+
+def _ascii_fold(text: str) -> bytes:
+    """Khoá so tên alias như strcasecmp của git: chỉ A–Z thành chữ thường (bytes.lower), byte khác giữ nguyên."""
+    return text.encode("utf-8", "surrogateescape").lower()
+
+
+def _alias_value(table: AliasTable, name: str) -> str:
+    """Giá trị alias `name` trong bảng (mục sau thắng, bỏ mục không giá trị); "" = không phải alias."""
+    want = _ascii_fold(name)
+    vals = [v for k, v in table if v is not None and _ascii_fold(k) == want]
+    return vals[-1] if vals else ""
+
+
+def _git_alias_expand(n: List[str], table: AliasTable) -> Tuple[str, List[str]]:
+    """Mở chuỗi alias của lệnh git `n` (đã chuẩn hoá) theo bảng git dựng: ("git", argv thật) · ("shell", [script,
+    đối số…]) cho alias `!` · ("unresolved", [lý do]) · ("", []) khi lệnh con không phải alias."""
+    seen: List[bytes] = []
+    names: List[str] = []
+    while len(n) > 1 and n[1] and not n[1].startswith("-") and n[1] not in GIT_BUILTINS:
+        fold = _ascii_fold(n[1])
+        if fold in seen or len(seen) >= ALIAS_MAX_DEPTH:
+            return "unresolved", [f"alias vòng hoặc lồng quá {ALIAS_MAX_DEPTH} tầng: {' → '.join([*names, n[1]])}"]
+        val = _alias_value(table, n[1])
         if not val:
             break
-        seen.append(name)
+        seen.append(fold)
+        names.append(n[1])
         if val.startswith("!"):
             return "shell", [val[1:], *n[2:]]
         n = _strip_git_global_opts(["git", *_split_words(val), *n[2:]])
@@ -3592,20 +3681,36 @@ def _git_hooks_off(n: List[str]) -> bool:
     return bool(pos) and pos[0].lower() == "core.hookspath" and (len(pos) > 1 or bool(set(n) & GIT_CONFIG_UNSET))
 
 
+def _git_oneshot_config(argv: List[str]) -> List[Tuple[str, str]]:
+    """(khoá, giá trị) cấu hình một lần của lệnh git `argv` qua MỌI kênh (review #306): `-c k=v`/`-ck=v`,
+    `--config-env[=]k=VAR` (VAR gán ở đầu lệnh hay có trong môi trường; không có → git dừng, bỏ qua), mọi
+    `GIT_CONFIG_KEY_<i>`/`GIT_CONFIG_VALUE_<i>` gán ở đầu lệnh (kể cả i ≥ COUNT — chiều chặt), `GIT_CONFIG_PARAMETERS`."""
+    s = _strip_prefixes(argv)
+    env = _assign_values(argv[: len(argv) - len(s)])
+    keys = sorted((k for k in env if re.fullmatch(r"GIT_CONFIG_KEY_\d+", k)), key=lambda k: int(k[15:]))
+    pairs = [(env[k], env.get("GIT_CONFIG_VALUE_" + k[15:], "")) for k in keys]
+    pairs += [(k, v) for w in _split_words(env.get("GIT_CONFIG_PARAMETERS", "")) for k, _, v in [w.partition("=")]]
+    for opt, val in _git_globals(s):
+        key, _, v = val.partition("=")
+        got = v if opt == "-c" else env.get(v, os.environ.get(v)) if opt == "--config-env" else None
+        pairs += [(key, got)] if got is not None else []
+    return pairs
+
+
 def _git_exec_config(n: List[str], argv: Optional[List[str]] = None) -> str:
-    """Khoá git chạy lệnh tuỳ ý: đặt bằng `git config` hoặc một lần qua `git -c k=v …`; rỗng nếu không."""
+    """Khoá git chạy lệnh tuỳ ý: đặt bằng `git config` hoặc một lần (`-c`, `--config-env`, `GIT_CONFIG_*`); rỗng nếu
+    không. Khoá là biến (`-c "$K=$V"`, `GIT_CONFIG_PARAMETERS=$P`) chưa xét ở đây (giới hạn — harness-files.md)."""
     pos = _git_config_write(n)
     if len(pos) >= 2 and GIT_EXEC_KEY_RE.fullmatch(pos[0]) and _git_exec_value_unsafe(pos[0], pos[1]):
         return pos[0]
-    one_shot = argv or []
-    # URL `ext::` chỉ ở lệnh con nhận URL/cấu hình và ở giá trị `-c` — không quét `commit -m "… ext:: …"`.
+    one_shot = _git_oneshot_config(argv) if argv and n[:1] == ["git"] else []
+    # URL `ext::` chỉ ở lệnh con nhận URL/cấu hình và ở cấu hình một lần — không quét `commit -m "… ext:: …"`.
     scan = n[2:] if n[1:2] and n[1] in GIT_URL_SUBCMDS else []
-    scan += [one_shot[k + 1] for k, a in enumerate(one_shot[:-1]) if a == "-c"]
+    scan += [f"{k}={v}" for k, v in one_shot]
     if any(GIT_EXT_URL_RE.search(a) for a in scan):  # `git fetch ext::…`, `remote add x ext::…`, `insteadOf`
         return "ext::"
-    for k, a in enumerate(one_shot[:-1]):
-        key, _, val = one_shot[k + 1].partition("=") if a == "-c" else ("", "", "")
-        if key and GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
+    for key, val in one_shot:
+        if GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
             return key
     return ""
 
@@ -4364,10 +4469,17 @@ class ScanBudget:
     """Ngân sách quét MỘT quyết định: số lệnh con, hạn giờ, tập script đã quét (chặn nổ tổ hợp của bản viết lại như
     `a="$a$a"` lặp, `flock l flock l …`). Hết ngân sách → chặn (fail-closed), không để guard chạy quá hạn rồi bị bỏ qua."""
 
-    def __init__(self) -> None:
+    current_alias: Optional[AliasClock] = None  # ngân sách alias của quyết định gốc gần nhất (lời gọi lồng dùng chung)
+
+    def __init__(self, nested: bool = False) -> None:
         self.calls = SCAN_CALLS
         self.deadline = time.monotonic() + SCAN_SECONDS
         self.seen: Set[Tuple[str, Optional[str]]] = set()  # (script, thư mục chạy): cùng chuỗi ở thư mục khác vẫn quét
+        # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
+        # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
+        if not nested or ScanBudget.current_alias is None:
+            ScanBudget.current_alias = AliasClock()
+        self.alias = ScanBudget.current_alias
 
     def exhausted(self) -> bool:
         self.calls -= 1
@@ -5265,7 +5377,7 @@ def _scan_nested(
         return push_deny
     asks += push_asks
     asks += _container_asks(_wrapped_scripts(tokens)[1], depth, budget)  # mọi lệnh, không cắt (review #82)
-    rewritten, nested, opaque = _nested_sources(cmd, tokens, cwd, root)
+    rewritten, nested, opaque = _nested_sources(cmd, tokens, cwd, root, budget)
     asks += opaque
     for here, (rw, ns) in _moved_groups(rewritten, nested, cwd).items():
         moved = _scan_scripts(rw, root, here, depth, asks, 0, budget, rewrites)
@@ -5277,15 +5389,17 @@ def _scan_nested(
     )
 
 
-def _nested_sources(cmd: str, tokens: List[str], start: Optional[str], root: str) -> Tuple[Placed, Placed, List[str]]:
+def _nested_sources(
+    cmd: str, tokens: List[str], start: Optional[str], root: str, budget: Optional["ScanBudget"] = None
+) -> Tuple[Placed, Placed, List[str]]:
     """MỘT danh sách nguồn lệnh lồng cho cả lượt quét ở thư mục ban đầu lẫn sau `cd`/`pushd`/`env -C` (AUD-SEC-087,
     AUD-SEC-094 — hai danh sách riêng từng lệch nhau): (bản viết lại cùng lệnh, lệnh lồng, câu hỏi chặn), mỗi script
     kèm thư mục nó chạy. Bản viết lại: thay biến/gán thay lệnh (cả dòng, gồm `cd`) và hậu tố lệnh bọc (`flock`,
     `script -qc`, `su -c`, `watch`…), lệnh git gọi alias. Lệnh lồng: `_nested_pairs`, lệnh bọc trên máy (`uv run bash
     -c`), `os.system` trong script trình thông dịch, ống giải mã vào shell, ssh chạy tại máy này, magic ipython, alias
-    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết."""
+    git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định."""
     placed = _commands_with_cwd(tokens, start)
-    alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root)
+    alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root, budget)
     rewritten: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw
     rewritten += [(s, here) for c, here in placed for s in _runner_scripts(c)]
     rewritten += [(s, start) for s in _lifted_scripts(cmd)]
@@ -5302,26 +5416,122 @@ def _assign_values(tokens: List[str]) -> Dict[str, str]:
     return {k: v for t in tokens if ENV_ASSIGN_RE.fullmatch(t) for k, _, v in [t.partition("=")]}
 
 
-def _git_alias_sources(placed: PlacedCmds, root: str) -> Tuple[Placed, Placed, List[str]]:
-    """Lệnh git gọi alias (AUD-SEC-119): (bản viết lại thay alias bằng lệnh thật, giữ tuỳ chọn toàn cục như `-C`; script
-    của alias `!` kèm repo nó chạy; câu hỏi UNRESOLVED_TARGET). Môi trường của git = gán đầu lệnh ∪ gán/`export` ở lệnh
-    trước trong cùng chuỗi (chiều chặt: gán trần cũng tính)."""
+# Đối số không thấy (review #306 G): `… | xargs git update-ref` nối ref từ stdin vào cuối, `xargs -I{} git tag {}` /
+# `parallel git tag {} ::: …` thay vào chỗ `{}`. Lệnh con ghi ref (REMOTE_REF_NAMES, kể cả sau khi mở alias) nhận đối số
+# đó → UNRESOLVED_TARGET như tiền lệ `xargs git push` (T-1523) — đối số từ stdin còn có thể là CỜ (`-b origin/main`,
+# `--no-delete`). Cho qua khi phần thấy được đã khoá chế độ không tạo ref bất kể đối số thêm (đo trên git 2.43):
+# `branch -D` (`-d` thì không — `--no-delete` từ stdin bật lại tạo nhánh), `tag -d` (chế độ loại trừ, cờ khác lỗi 129),
+# `--` trước chỗ thay (`checkout --`: phần sau là đường dẫn), `stash <lệnh con ≠ branch>`, `worktree <lệnh con ≠ add>`;
+# hoặc chuỗi thay không nằm trong đối số của lệnh con (`xargs -I{} git -C {} pull`). `find -exec … {}`: `_remote_ref_rule`.
+XARGS_REPLACE_RE = re.compile(r"-[0rtpx]*([Ii])(.*)")  # `-I R`, `-IR`, `-i[R]`, cả cụm `-0I{}`
+PARALLEL_REPLACE_RE = re.compile(r"\{[^{}\s]*\}")  # chuỗi thay của GNU parallel: `{}`, `{.}`, `{/}`, `{1}`…
+PARALLEL_ARG_SEPS = {":::", "::::", ":::+", "::::+"}
+Fed = Optional[Callable[[str], bool]]  # nhận ra token bị thay bằng đối số không thấy; None = nối vào cuối
+
+
+def _xargs_replace(opts: List[str]) -> Optional[str]:
+    """Chuỗi thay của `xargs -I R|-IR|-i[R]|--replace[=R]` trong tuỳ chọn của xargs; None = nối đối số vào cuối."""
+    for i, t in enumerate(opts):
+        if t.startswith("--replace"):
+            return t.partition("=")[2] or "{}"
+        m = XARGS_REPLACE_RE.fullmatch(t)
+        if m:
+            later = opts[i + 1] if m.group(1) == "I" and i + 1 < len(opts) else "{}"
+            return m.group(2) or later
+    return None
+
+
+def _stdin_fed(c: List[str], s: List[str]) -> Tuple[List[str], bool, Fed]:
+    """(argv git, có nhận đối số không thấy, cách nhận) của lệnh `c` (`s` = đã bỏ tiền tố): `xargs [-I R] git …`,
+    `parallel [cờ] git …|'git …' [::: …]`; lệnh khác → (s, False, None)."""
+    head = c[: len(c) - len(s)]
+    base = [posixpath.basename(t) for t in head]
+    if "xargs" in base:
+        mark = _xargs_replace(head[len(base) - base[::-1].index("xargs") :])
+        return s, True, (lambda t: mark in t) if mark else None
+    if not s or posixpath.basename(s[0]) != "parallel":
+        return s, False, None
+    end = next((k for k, t in enumerate(s) if t in PARALLEL_ARG_SEPS), len(s))
+    for k in range(1, end):
+        words = _split_words(s[k]) if " " in s[k] else [s[k]]
+        if words and posixpath.basename(words[0]) == "git":
+            g = words + s[k + 1 : end]
+            replaced = any(PARALLEL_REPLACE_RE.search(t) for t in g)
+            return g, True, (lambda t: bool(PARALLEL_REPLACE_RE.search(t))) if replaced else None
+    return s, False, None
+
+
+def _fixed_no_create(sub: str, seen: List[str]) -> bool:
+    """Phần đối số thấy được `seen` đã khoá lệnh con vào chế độ không tạo/ghi ref, bất kể đối số thêm phía sau."""
+    if sub == "tag":
+        return _has_opt(_parse_opts(seen, "mFu", TAG_VALUE_OPTS)[0], {"-d", "--delete"})
+    if sub == "branch":
+        return "-D" in _parse_opts(seen, "u", BRANCH_VALUE_OPTS)[0]
+    if sub in ("stash", "worktree") and seen[:1] and not seen[0].startswith("-"):
+        return seen[0] != {"stash": "branch", "worktree": "add"}[sub]
+    return sub in NEW_BRANCH_OPTS and "--" in seen
+
+
+def _fed_ref_why(n: List[str], fed: Fed, shell: bool = False) -> str:
+    """Lệnh git `n` (đã mở alias) nhận đối số không thấy (`fed`): lý do UNRESOLVED_TARGET nếu nó có thể ghi/tạo ref
+    remote; rỗng nếu không. `shell`: `n` = [script, đối số…] của alias `!` — đối số lạ đi thẳng vào script."""
+    if shell:
+        return UNRESOLVED_ARGS_WHY.format("<alias !>", "alias `!` nhận đối số từ xargs/parallel")
+    if len(n) < 2 or (fed is not None and fed(n[1])):
+        return UNRESOLVED_ARGS_WHY.format("<lệnh con>", "lệnh con đến từ stdin")
+    sub, args = n[1], n[2:]
+    if sub not in REMOTE_REF_NAMES:
+        return ""
+    k = len(args) if fed is None else next((i for i, a in enumerate(args) if fed(a)), -1)
+    if k < 0 or _fixed_no_create(sub, args[:k]):
+        return ""
+    return UNRESOLVED_ARGS_WHY.format(sub, "đối số từ xargs/parallel")
+
+
+def _alias_resolve(
+    n: List[str], g: List[str], gdir: str, env: Dict[str, str], budget: Optional["ScanBudget"]
+) -> Tuple[str, List[str]]:
+    """Mở alias của lệnh git `n` (`g` = argv chưa chuẩn hoá, `env` = biến của lệnh) bằng bảng git dựng ở `gdir`: như
+    `_git_alias_expand`, lệnh con không phải alias → ("", n); lệnh con là file `find -exec {}` tìm thấy (`find
+    update-ref -exec git {} …`) hay không đọc được cấu hình → ("unresolved", [lý do])."""
+    if FIND_FOUND in n[1]:
+        return "unresolved", ["lệnh con là file `find` tìm thấy"]
+    read = _alias_read_args(g, env)
+    table = _git_alias_table(gdir, *read, budget) if read else None
+    if table is None:
+        return "unresolved", ["không đọc được cấu hình alias của lệnh (biến, lỗi, quá hạn)"]
+    kind, out = _git_alias_expand(n, table)
+    return (kind, out) if kind else ("", n)
+
+
+def _git_alias_sources(
+    placed: PlacedCmds, root: str, budget: Optional["ScanBudget"]
+) -> Tuple[Placed, Placed, List[str]]:
+    """Lệnh git gọi alias (AUD-SEC-119) hay nhận đối số không thấy (xargs/parallel): (bản viết lại thay alias bằng lệnh
+    thật, giữ tuỳ chọn toàn cục như `-C`; script của alias `!` kèm repo nó chạy; câu hỏi UNRESOLVED_TARGET). Mọi lệnh con
+    ngoài GIT_BUILTINS đều tra bảng alias do git dựng với cấu hình của lệnh (`_alias_read_args`) — môi trường = gán đầu
+    lệnh ∪ gán/`export` ở lệnh trước trong cùng chuỗi (chiều chặt: gán trần cũng tính)."""
     rewritten: Placed = []
     nested: Placed = []
     asks: List[str] = []
     exported: Dict[str, str] = {}
     for c, here in placed:
-        s, n = _strip_prefixes(c), normalize(c)
-        if not n or n[0] in DECLARE_CMDS:
+        s = _strip_prefixes(c)
+        if not s or s[0] in DECLARE_CMDS:
             exported.update(_assign_values(c))
-        if n[:1] != ["git"] or len(n) < 2 or n[1] in GIT_BUILTINS:
+        g, wrapped, fed = _stdin_fed(c, s)
+        n = normalize(g)
+        sub = n[1] if n[:1] == ["git"] and len(n) > 1 else ""
+        aliased = bool(sub) and not sub.startswith("-") and sub not in GIT_BUILTINS
+        if n[:1] != ["git"] or not (aliased or wrapped):
             continue
+        gdir = _git_dir(g, here) or root
         env = {**exported, **_assign_values(c[: len(c) - len(s)])}
-        env.update(("GIT_DIR", v) for opt, v in _git_globals(s) if opt == "--git-dir")
-        gdir = _git_dir(c, here) or root
-        kind, out = _git_alias_expand(n, _oneshot_aliases(s, env), gdir, env)
+        kind, out = _alias_resolve(n, g, gdir, env, budget) if aliased else ("", n)
+        why = "" if not wrapped or kind == "unresolved" else _fed_ref_why(out, fed, kind == "shell")
+        asks += [f"{why}: {' '.join(c)[:200]}"] if why else []
         if kind == "git":
-            rewritten.append((_join_tokens([*s[: len(s) - len(n) + 1], *out[1:]]), here))
+            rewritten.append((_join_tokens([*g[: len(g) - len(n) + 1], *out[1:]]), here))
         elif kind == "shell":
             nested.append((" ".join([out[0], _join_tokens(out[1:])]), gdir))
         elif kind:
@@ -6603,7 +6813,7 @@ def bash_decision(
     `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
     if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
         cwd = cwd or root
-    budget = budget or ScanBudget()
+    budget = budget or ScanBudget(nested=depth > 0)
     cmd = clean_text(cmd)
     res: Dict[str, object] = {"decision": "", "reason": "", "commit": False, "no_verify": False, "commit_dir": ""}
     if budget.exhausted() or len(cmd) > CMD_MAX_CHARS:

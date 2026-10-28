@@ -73,13 +73,23 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
   (`REMOTE_REF_FORGE`), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
   hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;
-  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`). Alias git được mở và xét như lệnh thật (alias một lần qua `-c`,
-  `--config-env`, `GIT_CONFIG_*`; alias bền đọc bằng `git config --get` ở repo của lệnh; alias `!` quét như shell lồng;
-  không giải được → `UNRESOLVED_TARGET`), nhưng còn lọt: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng
-  (`printf '[alias]…' > f && GIT_CONFIG_GLOBAL=f git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`),
-  git cũ hơn 2.43 thiếu một lệnh dựng sẵn có trong danh sách của guard (alias trùng tên đó git vẫn chạy); alias `!` quét
-  ở thư mục của lệnh, không ở gốc repo nơi git chạy nó. Gate đọc `origin/main` chỉ chống nhầm lẫn — rào thật của vòng
-  tối ưu là `perf trial` (ADR-0052 §7).
+  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`) hay biến trong script lồng (`xargs sh -c 'git update-ref "$@"'`).
+  Alias git: mọi lệnh con ngoài danh sách dựng sẵn (bất kể tên: `a.b`, `y_x.z`, `1.x`) được tra trong bảng alias do
+  CHÍNH git dựng (`git -C <repo> [-c/--config-env/--git-dir của lệnh] config --list -z` với `GIT_CONFIG_COUNT/KEY_*/
+  VALUE_*/PARAMETERS/GLOBAL/SYSTEM/NOSYSTEM`, `HOME`, `XDG_CONFIG_HOME`, `GIT_DIR` của lệnh hợp môi trường của guard —
+  COUNT, include, thứ tự ưu tiên do git xử lý; tên so như git, không phân biệt hoa thường cả subsection), ngân sách đọc
+  tổng 5 s mỗi quyết định; alias `!` quét như shell lồng; không giải được → `UNRESOLVED_TARGET`. Đối số từ stdin
+  (`xargs`, `xargs -I`, `parallel`, `find -exec {}`) cho lệnh ghi ref → `UNRESOLVED_TARGET`, trừ dạng đã khoá chế độ
+  không tạo ref (`branch -D`, `tag -d`, `checkout --`, `stash drop`, `worktree remove`); `xargs git branch -d` bị chặn vì
+  stdin có thể thêm `--no-delete` (dùng `-D`). Còn lọt/lệch: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng
+  (`printf '[alias]…' > f && GIT_CONFIG_GLOBAL=f git y …` — lúc guard đọc, tệp chưa có); lệnh con là biến (`git $S …`);
+  lệnh xoá biến môi trường (`env -i`, `env -u`, `unset`) — guard vẫn đọc theo môi trường của nó; `includeIf "onbranch:"`
+  định nghĩa alias (`git config --list` xét nhánh, lúc mở alias git chưa dựng repo nên không xét); thư mục repo là biến
+  (`git -C "$D"`, lệnh lồng không rõ thư mục) → đọc alias ở gốc dự án; git cũ hơn 2.43 thiếu một lệnh dựng sẵn có trong
+  danh sách của guard (alias trùng tên đó git vẫn chạy); alias `!` quét ở thư mục của lệnh, không ở gốc repo nơi git chạy
+  nó. Khoá chạy lệnh (`core.fsmonitor`, `core.pager`, `include.path`…) đặt một lần qua `-c`, `--config-env`,
+  `GIT_CONFIG_KEY_*`, `GIT_CONFIG_PARAMETERS` là `HOOK_BYPASS`; khoá là biến (`git -c "$K=$V" status`) thì chưa. Gate đọc
+  `origin/main` chỉ chống nhầm lẫn — rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
   bị coi là cũ hơn. Lớp đỡ: `pr reviewed` đăng ngay kết luận (dấu đã đăng là nguồn của `merge-check`/steward/guard).
