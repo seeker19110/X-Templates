@@ -19,7 +19,8 @@ name: pr-steward
 # trước D-122 việc này do auto-merge của GitHub kích). Không có thì dùng GITHUB_TOKEN: merge vẫn vào, nhưng GitHub không
 # chạy workflow `push` cho commit do GITHUB_TOKEN tạo (trừ `workflow_dispatch`/`repository_dispatch`) → sau merge thành
 # công steward gọi `workflow_dispatch` của `ci.yml` trên nhánh đích (T-2402; job cần `actions: write`; tên khác: biến
-# `XT_CI_WORKFLOW`); dispatch lỗi → merge giữ nguyên, job đỏ kèm lý do ở summary. GitHub cũng không chạy `pull_request`
+# `XT_CI_WORKFLOW`), và PR đổi `VERSION` (repo có `release-tag.yml`) → dispatch cả `release-tag.yml` ghim commit merge
+# (AUD-HAR-124); dispatch lỗi → merge giữ nguyên, job đỏ kèm lý do ở summary. GitHub cũng không chạy `pull_request`
 # cho commit cập nhật nhánh do GITHUB_TOKEN tạo → không có XT_STEWARD_TOKEN thì steward không tự cập nhật nhánh, chỉ báo.
 #
 # Theo sự kiện (AUTO-05, T-1517): xét lại PR ngay khi check xong thay vì chờ lịch — `workflow_run` khi workflow `CI` (job
@@ -75,7 +76,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write # merge
-      actions: write # CHỈ để dispatch `ci.yml` trên nhánh đích sau merge bằng GITHUB_TOKEN (push không kích CI) — T-2402
+      actions: write # CHỈ để dispatch `ci.yml` (T-2402) và `release-tag.yml` khi PR đổi VERSION (AUD-HAR-124) sau merge bằng GITHUB_TOKEN
       pull-requests: write # tắt auto-merge do người bật, cập nhật nhánh, đọc PR
       issues: write # đọc comment review; gắn nhãn xt-standard-lane
       checks: read # merge-check đọc check-run

@@ -6,6 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- `pr steward`: merge bằng `GITHUB_TOKEN` của PR đổi `VERSION` (repo có `.github/workflows/release-tag.yml`) → dispatch `release-tag.yml` ghim commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm cảnh báo. **Dự án đích:** không đổi gì nếu không có workflow tag.
 - `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
 - ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
 
