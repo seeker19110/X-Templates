@@ -5270,7 +5270,6 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
         self.assert_policy(
             "deny",
             (
-                "echo main | xargs git push origin",
                 "echo main | xargs -I{} git push origin {}",
                 "printf 'main\\n' | xargs -n1 git -C . push origin",
                 "bash -c 'echo main | xargs git push origin'",
@@ -5811,6 +5810,874 @@ class TriageLocalTest(unittest.TestCase):
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("loại test", json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"])
+
+
+class GuardRemoteRefTest(unittest.TestCase):
+    """AUD-SEC-119 (T-3563): Gate mẫu tối ưu đọc script/baseline từ `origin/main` — guard chặn mọi lối ghi ref theo dõi
+    remote và tạo ref trùng `<remote>/…` (git giải `$GIT_DIR/<tên>`, `refs/tags/`, `refs/heads/` trước `refs/remotes/`);
+    `fetch`/`pull`/`branch`/`tag` thường vẫn chạy. Repo tạm có remote `origin` và `fork` (tên lấy từ `git remote`)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        # Cấu hình một lần của môi trường chạy test (`GIT_CONFIG_COUNT/KEY_*/VALUE_*` của máy CI/phiên) không lọt vào
+        # ca thử: git (và bộ đọc alias của guard) đọc chúng như của lệnh.
+        clean = {k: v for k, v in os.environ.items() if not re.fullmatch(r"GIT_CONFIG(_\w+)?", k)}
+        self.enterContext(mock.patch.dict(os.environ, clean, clear=True))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for args in (
+            ("init", "-q", "-b", "main"),
+            ("remote", "add", "origin", "https://example.invalid/o.git"),
+            ("remote", "add", "fork", "https://example.invalid/f.git"),
+        ):
+            subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
+
+    def raw(self, cmd: str, root: Path | None = None) -> dict:
+        return self.g.bash_decision(cmd, str(root or self.root))
+
+    def assert_forged(self, cmd: str, root: Path | None = None) -> None:
+        out = self.raw(cmd, root)
+        self.assertEqual(out["decision"], "deny", (cmd, out))  # strict: deny, không hỏi
+        self.assertIn("ghi ref theo dõi remote", str(out["reason"]), cmd)
+        res = self.g.apply_policy(out)
+        self.assertEqual((res["decision"], res["code"]), ("deny", "REMOTE_REF_FORGE"), cmd)
+
+    def assert_allowed(self, cmd: str, root: Path | None = None) -> None:
+        out = self.raw(cmd, root)
+        self.assertEqual(out["decision"], "", (cmd, out))
+        self.assertEqual(self.g.apply_policy(out)["decision"], "", cmd)
+
+    def test_guard_remote_ref_forge_denied(self):
+        """Bốn lệnh của AUD-SEC-119 và các lối ghi tương đương (tạo/đổi tên/sao chép, `-d`, ref ngắn, hoa thường)."""
+        for cmd in (
+            "git update-ref refs/remotes/origin/main HEAD",
+            "git tag origin/main HEAD",
+            "git branch -f origin/main HEAD",
+            "git fetch . HEAD:refs/remotes/origin/main",
+            "git update-ref -d refs/remotes/origin/main",
+            "git update-ref -m msg --no-deref refs/remotes/upstream/dev HEAD",
+            "git update-ref --create-reflog origin/main HEAD",  # ghi `.git/origin/main` — git ưu tiên nhất
+            "git update-ref refs/origin/main HEAD",
+            "git update-ref refs/heads/origin/main HEAD",
+            "git update-ref refs/tags/origin/main HEAD",
+            "git update-ref REFS/Remotes/origin/main HEAD",  # hệ file không phân biệt hoa thường (macOS)
+            "git update-ref refs/remotes//origin/main HEAD",
+            "git update-ref refs/remotes/./origin/main HEAD",
+            "git update-ref -- refs/remotes/x/main HEAD",  # remote không biết tên: `refs/remotes/` luôn chặn
+            "git symbolic-ref refs/remotes/origin/HEAD refs/heads/evil",
+            "git symbolic-ref -d refs/remotes/origin/HEAD",
+            "git tag -f -a -m msg origin/main",
+            "git tag -mdone origin/main",  # giá trị dính vào cụm cờ, có chữ `d`/`l`/`v`
+            "git tag --sort=refname origin/main HEAD",
+            "git tag --message msg Origin/main",
+            "git branch origin/main",
+            "git branch -v origin/main HEAD",  # `-v` không phải chế độ liệt kê khi có tên
+            "git branch --track upstream/x origin/main",
+            "git branch --format x origin/main",
+            "git branch -m feature origin/main",
+            "git branch -M origin/main",
+            "git branch -C main origin/main",
+            "git branch --copy main fork/main",
+            "git checkout -b origin/main",
+            "git checkout -fb origin/main origin/feature",
+            "git checkout -borigin/main",
+            "git checkout --orphan=origin/main",
+            "git checkout -B refs/remotes/origin/main",
+            "git switch -c origin/main",
+            "git switch --create origin/main",
+            "git switch --force-c origin/main",  # viết tắt tuỳ chọn dài
+            "git worktree add -b origin/main ../wt",
+            "git worktree add -fB origin/main ../wt HEAD",
+            "git stash branch origin/main",
+            "git fetch . HEAD:origin/main",  # đích ngắn → refs/heads/origin/main
+            "git fetch origin main:refs/remotes/origin/main",  # nguồn ngắn: tag `main` của remote thắng nhánh
+            "git fetch origin refs/heads/evil:refs/remotes/origin/main",
+            "git fetch origin +refs/heads/main:refs/remotes/fork/main",
+            "git fetch ./origin refs/heads/main:refs/remotes/./origin/main",
+            "git fetch upstream refs/heads/main:refs/remotes/upstream/main",  # `upstream` chưa cấu hình: là đường dẫn
+            "git fetch origin main --refmap=+refs/heads/evil:refs/remotes/origin/main",
+            "git fetch --refmap +refs/heads/evil:refs/remotes/origin/main origin main",
+            "git fetch --depth 1 . HEAD:refs/remotes/origin/main",
+            "git pull . HEAD:refs/remotes/origin/main",
+            "git pull -s ours origin refs/heads/x:refs/remotes/origin/main",
+            "git push . HEAD:refs/remotes/origin/main",
+            "git push . HEAD:origin/main",
+            "git push origin HEAD:refs/remotes/origin/main 2>&1",
+            # dạng lách: tuỳ chọn toàn cục, wrapper, gán biến, đường dẫn git, shell lồng, nhiều lệnh
+            "git -C . update-ref refs/remotes/origin/main HEAD",
+            "git -c core.x=1 --no-pager fetch . HEAD:refs/remotes/origin/main",
+            "git --git-dir=.git tag origin/main",
+            "command git tag origin/main",
+            "X=1 git branch -f origin/main HEAD",
+            "env -i /usr/bin/git update-ref refs/remotes/origin/main HEAD",
+            "sh -c 'git update-ref refs/remotes/origin/main HEAD'",
+            "git fetch origin && git update-ref refs/remotes/origin/main HEAD",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+
+    def test_guard_remote_ref_legit_allowed(self):
+        """Không chặn oan: fetch/pull thường, refspec đúng dạng cấu hình của remote đã cấu hình, nhánh/tag thường, đọc,
+        liệt kê, xoá/đổi tên ref giả đi (sửa sai — Gate đỏ chứ không xanh giả), upstream là ref remote."""
+        for cmd in (
+            "git fetch",
+            "git fetch origin",
+            "git fetch origin main",
+            "git fetch --all --prune",
+            "git fetch --multiple origin fork",
+            "git fetch origin refs/heads/main:refs/remotes/origin/main",
+            "git fetch origin +refs/heads/*:refs/remotes/origin/*",
+            "git fetch fork +refs/heads/dev:refs/remotes/fork/dev",
+            "git fetch origin pull/7/head:pr-7",
+            "git fetch origin main:",
+            "git pull",
+            "git pull origin main",
+            "git pull --rebase origin main",
+            "git branch feature/x",
+            "git branch feature/x origin/main",
+            "git branch -t feature origin/main",
+            "git branch -d foo",
+            "git branch -D origin/main",
+            "git branch -dr origin/stale",
+            "git branch -u origin/main",
+            "git branch --set-upstream-to=origin/main feature",
+            "git branch --set-upstream-to origin/main",
+            "git branch --list 'origin/*'",
+            "git branch -r",
+            "git branch -a --contains HEAD",
+            "git branch --points-at HEAD origin/x",
+            "git branch -m origin/x fixed",
+            "git branch",
+            "git tag v1.2.3",
+            "git tag -a v1 -m origin/main",
+            "git tag v2 origin/main",
+            "git tag -l 'origin/*'",
+            "git tag -n3 origin/x",
+            "git tag -d origin/main",
+            "git tag --contains HEAD",
+            "git tag",
+            "git update-ref refs/heads/x HEAD",
+            "git update-ref -d refs/heads/x",
+            "git update-ref refs/heads/feature/x origin/main",
+            "git update-ref",
+            "git symbolic-ref HEAD",
+            "git symbolic-ref --short refs/remotes/origin/HEAD",
+            "git symbolic-ref HEAD refs/heads/main",
+            "git push origin HEAD:refs/heads/x",
+            "git push origin feature/x",
+            "git push -u origin feat",  # (`HEAD` ở repo tạm là `main` → luật push nhánh chính, không phải luật này)
+            "git push origin refs/remotes/origin/main:refs/heads/backup",
+            "git checkout -b feature/x origin/main",
+            "git checkout origin/main",
+            "git checkout -t origin/feature",
+            "git checkout -b",
+            "git switch -c fix origin/main",
+            "git switch --detach origin/main",
+            "git worktree add ../wt origin/main",
+            "git worktree add -b feat ../wt origin/main",
+            "git worktree list",
+            "git stash branch feat",
+            "git stash list",
+            "git rev-parse origin/main",
+            "git show origin/main:scripts/perf-gate.sh",
+            "git log origin/main..HEAD",
+            "git -C . fetch origin main",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_stdin_unresolved(self):
+        """`update-ref --stdin`/`fetch --stdin`: ref đến từ stdin, guard không thấy → strict hỏi, mặc định chặn (unsure)."""
+        for cmd in (
+            "git update-ref --stdin <<'E'\nupdate refs/remotes/origin/main abc\nE",
+            "git update-ref -z --stdin < refs.txt",
+            "git fetch --stdin . < specs.txt",
+            "git update-ref --std < refs.txt",  # viết tắt tuỳ chọn dài
+        ):
+            with self.subTest(cmd):
+                out = self.raw(cmd)
+                self.assertEqual(out["decision"], "ask", cmd)
+                res = self.g.apply_policy(out)
+                self.assertEqual(
+                    (res["decision"], res["code"], res["confidence"]), ("deny", "UNRESOLVED_TARGET", "unsure")
+                )
+
+    def test_guard_remote_ref_remote_names(self):
+        """Tên remote: `git remote` ở repo của lệnh (`git -C`) ∪ `origin`/`upstream`; đọc lỗi → chỉ tên mặc định."""
+        self.assert_forged("git tag fork/main")
+        self.assert_allowed("git tag forked/main")
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()  # không phải repo: chỉ tên mặc định
+        self.assert_allowed("git tag fork/main", plain)
+        self.assert_forged("git tag upstream/main", plain)
+        self.assert_forged(f"git -C {self.root} tag fork/main", plain)
+        self.assert_forged(f"cd {self.root} && git checkout -b fork/x", plain)
+        self.assert_forged(f"git -C {self.root} fetch fork refs/heads/x:refs/remotes/fork/y", plain)
+        self.assert_forged("git fetch fork refs/heads/x:refs/remotes/fork/x", plain)  # `fork` chưa cấu hình ở đây
+        self.assertEqual(self.g._configured_remotes(str(self.root)), frozenset({"origin", "fork"}))
+        self.assertEqual(self.g._configured_remotes(str(plain)), frozenset())
+        with mock.patch.object(self.g.subprocess, "run", side_effect=OSError):
+            self.assertEqual(self.g._configured_remotes(str(self.root)), frozenset())
+            self.assert_forged("git branch origin/x")
+            self.assert_allowed("git branch fork/x")
+        with mock.patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 5)):
+            self.assertEqual(self.g._configured_remotes(None), frozenset())
+
+    def test_guard_remote_ref_parse_opts(self):
+        """Bộ tách tuỳ chọn: cụm cờ ngắn dừng ở chữ nhận giá trị, `--opt=v`, viết tắt tuỳ chọn dài, `--`, thiếu giá trị."""
+        parse = self.g._parse_opts
+        self.assertEqual(parse(["-fb", "x", "y"], "b", ()), ({"-f", "-b"}, ["y"], [("-b", "x")]))
+        self.assertEqual(parse(["-bx", "-q"], "b", ()), ({"-b", "-q"}, [], [("-b", "x")]))
+        self.assertEqual(parse(["--orph=x", "--", "-y"], "", ("--orphan",)), ({"--orph"}, ["-y"], [("--orph", "x")]))
+        self.assertEqual(parse(["--orphan"], "", ("--orphan",)), ({"--orphan"}, [], []))
+        self.assertEqual(parse(["-b"], "b", ()), ({"-b"}, [], []))
+        self.assertEqual(parse(["-", "a"], "", ()), (set(), ["-", "a"], []))
+        self.assertTrue(self.g._long_match("--force-c", ("--force-create",)))
+        self.assertFalse(self.g._long_match("--f", ("--force-create",)))
+        self.assertFalse(self.g._long_match("-f", ("--force-create",)))
+
+    def test_guard_remote_ref_build_phase_not_relaxed(self):
+        """Pha build nới git cục bộ (`checkout`/`stash`, ADR-0040) — không nới tạo ref trùng tên remote."""
+        with mock.patch.object(self.g, "build_phase", return_value=True):
+            for cmd in ("git checkout -b origin/main", "git stash branch origin/main", "git checkout -f -b origin/x"):
+                with self.subTest(cmd):
+                    out = self.g.apply_policy(self.g.bash_decision(cmd, str(self.root), str(self.root)))
+                    self.assertEqual((out["decision"], out["code"]), ("deny", "REMOTE_REF_FORGE"), cmd)
+            out = self.g.apply_policy(self.g.bash_decision("git checkout -f -b feat", str(self.root), str(self.root)))
+            self.assertEqual(out["decision"], "", "đối chứng: checkout -f trong dự án vẫn được nới ở pha build")
+
+    def git_config(self, *args: str, root: Path | None = None) -> None:
+        subprocess.run(["git", "-C", str(root or self.root), "config", *args], check=True, capture_output=True)
+
+    def assert_unresolved(self, cmd: str) -> None:
+        out = self.raw(cmd)
+        self.assertEqual(out["decision"], "ask", (cmd, out))  # strict hỏi
+        self.assertIn("alias git guard không giải được", str(out["reason"]), cmd)
+        res = self.g.apply_policy(out)
+        self.assertEqual(
+            (res["decision"], res["code"], res["confidence"]), ("deny", "UNRESOLVED_TARGET", "unsure"), cmd
+        )
+
+    def test_guard_remote_ref_alias_bypass_denied(self):
+        """Lách qua alias (review T-3563 B1, tái hiện bằng git thật): alias một lần (`-c`, `GIT_CONFIG_KEY_<i>`,
+        `GIT_CONFIG_PARAMETERS`, `--config-env`, `export` ở lệnh trước), alias bền đọc từ `git config` của repo lệnh tác
+        động, alias lồng, alias có đối số, alias `!` → xét lệnh con thật; đặt alias trỏ lệnh ghi ref → chặn lúc đặt."""
+        self.git_config("alias.y", "update-ref")
+        self.git_config("alias.up", "y")  # alias lồng: up → y → update-ref
+        self.git_config("alias.sy", "!sh -c 'git update-ref refs/remotes/origin/main HEAD'")
+        self.git_config("alias.gu", "!git update-ref")  # đối số của lệnh nối sau script
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for cmd in (
+            "git -c alias.x=update-ref x refs/remotes/origin/main HEAD",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=update-ref git x refs/remotes/origin/main HEAD",
+            "git y refs/remotes/origin/main HEAD",
+            "git -c alias.t=tag t origin/main HEAD",
+            "git -c alias.b=branch b -f origin/main HEAD",
+            "git config alias.y update-ref",  # đặt alias trỏ `update-ref`: chặn ngay lúc đặt
+            "git config --global alias.y update-ref",
+            "git config set alias.u update-ref",
+            "git config --add alias.s symbolic-ref",
+            "git config alias.f 'fetch . HEAD:refs/remotes/origin/main'",
+            "git config alias.t 'tag origin/main'",
+            "git -calias.x=update-ref x refs/remotes/origin/main HEAD",
+            "git -c alias.X=update-ref x refs/remotes/origin/main HEAD",  # tên alias không phân biệt hoa thường
+            "git -c alias.x=status -c alias.x=update-ref x refs/remotes/origin/main HEAD",  # sau thắng trước
+            "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.x GIT_CONFIG_VALUE_0=1 GIT_CONFIG_KEY_1=alias.x"
+            " GIT_CONFIG_VALUE_1=update-ref git x refs/remotes/origin/main HEAD",
+            "GIT_CONFIG_PARAMETERS=\"'alias.x'='update-ref'\" git x refs/remotes/origin/main HEAD",
+            "V=update-ref git --config-env=alias.x=V x refs/remotes/origin/main HEAD",
+            "V=update-ref git --config-env alias.x=V x refs/remotes/origin/main HEAD",
+            "export GIT_CONFIG_PARAMETERS=\"'alias.x=update-ref'\"; git x refs/remotes/origin/main HEAD",
+            "git -c alias.f='fetch .' f HEAD:refs/remotes/origin/main",
+            "git -c alias.a=b -c 'alias.b=update-ref --no-deref' a refs/remotes/origin/main HEAD",
+            "git -c 'alias.e=-c core.x=1 update-ref' e refs/remotes/origin/main HEAD",  # tuỳ chọn toàn cục trong alias
+            "git up refs/remotes/origin/main HEAD",
+            "git sy",
+            "git gu refs/remotes/origin/main HEAD",
+            "sh -c 'git y refs/remotes/origin/main HEAD'",
+            "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=tag git x origin/main",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+        self.assert_forged(f"git -C {self.root} y refs/remotes/origin/main HEAD", plain)  # alias của repo `-C`
+        self.assert_forged(f"cd {self.root} && git y refs/remotes/origin/main HEAD", plain)
+        self.assert_forged(f"git --git-dir={self.root}/.git y refs/remotes/origin/main HEAD", plain)
+        self.assert_allowed("git y refs/remotes/origin/main HEAD", plain)  # repo khác: không có alias `y`
+
+    def test_guard_remote_ref_alias_legit_allowed(self):
+        """Alias thường vẫn chạy: lệnh con thật không ghi ref remote; lệnh không phải alias (`git lfs`, `git lg` chưa
+        đặt); đặt alias đọc (`symbolic-ref --short HEAD`), alias `tag`/`branch` trần (chỉ xét lúc dùng)."""
+        self.git_config("alias.co", "checkout")
+        self.git_config("alias.cur", "symbolic-ref --short HEAD")
+        self.git_config("alias.hi", "!echo hi")
+        self.git_config("alias.t", "tag")
+        for cmd in (
+            "git -c alias.st=status st",
+            "git co main",
+            "git co -b feature/x origin/main",
+            "git lg",
+            "git lfs version",
+            "git cur",
+            "git hi",
+            "git t v1",
+            "git -c core.quotepath=off -c alias.l='log --oneline' l -3",
+            "git -c alias.b=branch b feature/x origin/main",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=status git x",
+            "GIT_CONFIG_KEY_0=alias.x git x",  # thiếu giá trị: git dừng, không chạy gì
+            "git -c alias.x x",
+            "git config alias.co checkout",
+            "git config alias.lg 'log --oneline --graph'",
+            "git config alias.cur 'symbolic-ref --short HEAD'",
+            "git config alias.t tag",
+            "git config --get alias.y",
+            "git config --unset alias.y",
+            "git config alias.y",
+            "git -c alias.status=update-ref status",  # git bỏ qua alias trùng tên lệnh dựng sẵn
+            "git -c alias.Y=update-ref y_x refs/remotes/origin/main HEAD",  # `y_x` không phải tên alias hợp lệ
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_alias_nested_and_loop(self):
+        """Alias đọc qua hàm đọc cấu hình (mock): lồng nhiều tầng tới lệnh ghi ref → chặn; vòng hoặc sâu quá
+        ALIAS_MAX_DEPTH → UNRESOLVED_TARGET; alias `!` lồng shell được quét như `sh -c`."""
+        table = {
+            "a": "b --quiet",
+            "b": "c",
+            "c": "update-ref",
+            "l1": "l2",
+            "l2": "l1",
+            "me": "me --x",
+            "sh1": "!sh -c 'git update-ref refs/remotes/origin/main HEAD'",
+            "sh2": "s3",
+            "s3": "!git tag",
+            "ok": "!git status",
+            "q": "log 'unclosed",
+        }
+        table |= {f"d{k}": f"d{k + 1}" for k in range(self.g.ALIAS_MAX_DEPTH + 1)}
+        fake = mock.patch.object(self.g, "_git_alias_table", return_value=list(table.items()))
+        with fake as reader:
+            self.assert_forged("git a refs/remotes/origin/main HEAD")
+            self.assert_forged("git sh1")
+            self.assert_forged("git sh2 origin/main")
+            for cmd in ("git l1", "git me", "git d0"):
+                with self.subTest(cmd):
+                    self.assert_unresolved(cmd)
+            self.assert_allowed("git ok")
+            self.assert_allowed("git q")
+            self.assert_allowed("git -C sub a refs/heads/x HEAD")
+            self.assertIn(str(self.root / "sub"), [c.args[0] for c in reader.call_args_list])
+
+    def test_guard_remote_ref_alias_unresolved(self):
+        """Guard không giải được alias → UNRESOLVED_TARGET (strict hỏi, mặc định chặn): đọc cấu hình lỗi/quá hạn/mã lạ,
+        giá trị hay tên alias là biến, `--config-env` trỏ biến không gán, biến chọn tệp cấu hình là biến."""
+        for side in (OSError, subprocess.TimeoutExpired("git", 5), None):
+            run = mock.Mock(side_effect=side) if side else mock.Mock(return_value=mock.Mock(returncode=3, stdout=b""))
+            with self.subTest(side), mock.patch.object(self.g.subprocess, "run", run):
+                self.assertIsNone(self.g._git_alias_table(str(self.root), [], {}, None))
+                self.assert_unresolved("git zz refs/remotes/origin/main HEAD")
+        for cmd in (
+            "git -c alias.x=$V x",
+            'git -c "alias.x=$(echo update-ref)" x',
+            "git --config-env=alias.x=NOPE x",
+            "GIT_CONFIG_PARAMETERS=$P git x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=$K GIT_CONFIG_VALUE_0=update-ref git x",
+            "GIT_CONFIG_GLOBAL=$F git x",
+        ):
+            with self.subTest(cmd):
+                self.assert_unresolved(cmd)
+        # Cấu hình một lần có phần là biến: guard không biết git sẽ thấy gì — kể cả khi khoá rõ đứng sau (chiều chặt).
+        self.assert_unresolved("GIT_CONFIG_PARAMETERS=$P git -c alias.x=status x")
+        self.assert_unresolved(
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=status GIT_CONFIG_PARAMETERS=$P git x"
+        )
+        self.assert_unresolved("GIT_CONFIG_COUNT=$N GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=status git x")
+        self.assert_unresolved("V=$(cat f) git --config-env=alias.x=V x")
+        # Giá trị là biến của khoá không đụng bảng alias: git đọc nguyên chữ, không đổi kết quả tra alias.
+        self.assert_allowed(
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="X: $T" git lfs env'
+        )
+        self.assert_allowed('git -c http.extraHeader="X: $T" lfs env')
+
+    def alias_of(self, name: str, gdir: Path, over: dict | None = None, opts: list | None = None) -> str | None:
+        table = self.g._git_alias_table(str(gdir), opts or [], over or {}, None)
+        return None if table is None else self.g._alias_value(table, name)
+
+    def test_guard_remote_ref_alias_reader(self):
+        """`git config --list -z` thật: có/không có alias, tên so như git (không phân biệt hoa thường cả subsection),
+        thư mục chưa tồn tại (`mkdir x && cd x`) → thư mục cha gần nhất, biến chọn tệp cấu hình của lệnh
+        (`GIT_CONFIG_GLOBAL`, `GIT_DIR`) và `-c` đi cùng; lệnh dựng sẵn không tra."""
+        self.git_config("alias.y", "update-ref")
+        self.git_config("alias.P.q", "tag")
+        self.assertEqual(self.alias_of("y", self.root), "update-ref")
+        self.assertEqual(self.alias_of("Y", self.root), "update-ref")
+        self.assertEqual(self.alias_of("p.Q", self.root), "tag")
+        self.assertEqual(self.alias_of("nope", self.root), "")
+        self.assertEqual(self.alias_of("y", self.root / "new" / "deeper"), "update-ref")
+        self.assertEqual(self.alias_of("y", self.root, opts=["-c", "alias.y=status"]), "status")  # -c sau tệp: thắng
+        self.assertEqual(self.alias_of("x", self.root, opts=["-c", "alias.x"]), "")  # không giá trị: git dừng
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        cfg = plain / "cfg"
+        cfg.write_text("[alias]\n\tg = tag\n", encoding="utf-8")
+        self.assertEqual(self.alias_of("g", plain, {"GIT_CONFIG_GLOBAL": str(cfg)}), "tag")
+        self.assertEqual(self.alias_of("y", plain, {"GIT_DIR": str(self.root / ".git")}), "update-ref")
+        self.assertEqual(self.alias_of("y", plain, opts=[f"--git-dir={self.root / '.git'}"]), "update-ref")
+        self.assert_forged(f"GIT_CONFIG_GLOBAL={cfg} git g origin/main")
+        self.assert_allowed(f"mkdir -p {plain}/n && cd {plain}/n && git lfs version", plain)
+        self.assertTrue(set(self.g.REMOTE_REF_NAMES) <= self.g.GIT_BUILTINS)
+        with mock.patch.object(self.g, "_git_alias_table", return_value=[]) as reader:
+            self.assert_allowed("git status && git log -1 && git -c core.x=1 --no-pager show")
+            reader.assert_not_called()
+            self.assert_allowed("git -c alias.x=tag x v1")
+            reader.assert_called_once()
+
+    def test_guard_remote_ref_alias_dotted_names(self):
+        """Review #306 B: tên alias có dấu chấm/gạch dưới/chữ số đầu (`alias.a.b`, `alias.y_x.z`, `alias.1.x`) và
+        subsection khác hoa thường (`alias.A.B` gọi bằng `a.b`) — git so cả tên bằng strcasecmp; mọi kênh."""
+        self.git_config("alias.P.q", "update-ref")
+        for cmd in (
+            "git -c alias.a.b=update-ref a.b refs/remotes/origin/main HEAD",
+            "git -c alias.y_x.z=update-ref y_x.z refs/remotes/origin/main HEAD",
+            "git -c alias.A.B=update-ref a.b refs/remotes/origin/main HEAD",
+            "git -c alias.A.B=update-ref A.B refs/remotes/origin/main HEAD",
+            "git -c alias.1.x=tag 1.x origin/main",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.a.b GIT_CONFIG_VALUE_0=update-ref git a.b refs/remotes/origin/main HEAD",
+            "GIT_CONFIG_PARAMETERS=\"'alias.a.b'='tag'\" git a.b origin/main",
+            "V=update-ref git --config-env=alias.a.b=V a.b refs/remotes/origin/main HEAD",
+            "git P.q refs/remotes/origin/main HEAD",  # alias bền có subsection, đọc qua git thật
+            "git p.Q refs/remotes/origin/main HEAD",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+        # Đối chứng với git thật: tên có chấm/subsection khác hoa thường đúng là alias git chạy.
+        env = dict(os.environ, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="alias.A.B", GIT_CONFIG_VALUE_0="tag")
+        self.make_commit()
+        subprocess.run(["git", "-C", str(self.root), "a.b", "probe-b"], env=env, check=True, capture_output=True)
+        self.assertIn("probe-b", self.tags())
+
+    def tags(self) -> list:
+        out = subprocess.run(["git", "-C", str(self.root), "tag"], capture_output=True, text=True, check=True)
+        return out.stdout.split()
+
+    def test_guard_remote_ref_alias_config_count(self):
+        """Review #306 C: git chỉ đọc `GIT_CONFIG_KEY_<i>` với i < `GIT_CONFIG_COUNT`, bỏ hết khi thiếu COUNT — mục bị
+        bỏ qua không được che alias bền `t=tag`. COUNT ở môi trường của phiên (không ở lệnh) git vẫn đọc."""
+        self.git_config("alias.t", "tag")
+        for cmd in (
+            "GIT_CONFIG_COUNT=0 GIT_CONFIG_KEY_0=alias.t GIT_CONFIG_VALUE_0=status git t origin/main",
+            "GIT_CONFIG_KEY_0=alias.t GIT_CONFIG_VALUE_0=status git t origin/main",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.x GIT_CONFIG_VALUE_0=1 GIT_CONFIG_KEY_1=alias.t"
+            " GIT_CONFIG_VALUE_1=status git t origin/main",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+        self.assert_allowed("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.t GIT_CONFIG_VALUE_0=status git t origin/main")
+        # COUNT=2 mà thiếu KEY_0: git dừng ("missing config key") — guard không đoán, UNRESOLVED_TARGET.
+        self.assert_unresolved(
+            "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_1=alias.t GIT_CONFIG_VALUE_1=status git t origin/main"
+        )
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_COUNT": "1"}):
+            self.assert_allowed("GIT_CONFIG_KEY_0=alias.t GIT_CONFIG_VALUE_0=status git t origin/main")
+        env = dict(os.environ, GIT_CONFIG_COUNT="0", GIT_CONFIG_KEY_0="alias.t", GIT_CONFIG_VALUE_0="status")
+        self.make_commit()
+        subprocess.run(["git", "-C", str(self.root), "t", "probe-c"], env=env, check=True, capture_output=True)
+        self.assertIn("probe-c", self.tags(), "đối chứng: git chạy alias bền `tag`, không phải mục COUNT=0")
+
+    def make_commit(self) -> None:
+        (self.root / "f").write_text("x", encoding="utf-8")
+        ident = {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+        env = dict(
+            os.environ, **ident, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="commit.gpgsign", GIT_CONFIG_VALUE_0="false"
+        )
+        for args in (("add", "f"), ("commit", "-q", "-m", "x")):
+            subprocess.run(["git", "-C", str(self.root), *args], env=env, check=True, capture_output=True)
+
+    def test_guard_remote_ref_alias_include_path(self):
+        """Review #306 D: `include.path` một lần (`-c`, `--config-env`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_PARAMETERS`)
+        nạp tệp định nghĩa alias — git đọc include nên bộ đọc của guard thấy alias. Đặt `include.path` một lần còn là
+        HOOK_BYPASS (tệp có thể đặt khoá chạy lệnh); bỏ luật đó ra thì alias vẫn bị mở và chặn."""
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        cfg = plain / "cli.cfg"
+        cfg.write_text("[alias]\n\tcli = update-ref\n", encoding="utf-8")
+        cmds = (
+            f"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0={cfg} git cli refs/remotes/origin/main HEAD",
+            f"I={cfg} git --config-env=include.path=I cli refs/remotes/origin/main HEAD",
+            f"git -c include.path={cfg} cli refs/remotes/origin/main HEAD",
+            f"GIT_CONFIG_PARAMETERS=\"'include.path'='{cfg}'\" git cli refs/remotes/origin/main HEAD",
+        )
+        for cmd in cmds:
+            with self.subTest(cmd):
+                self.assertEqual(self.g.apply_policy(self.raw(cmd))["decision"], "deny", cmd)
+                hook = self.g.apply_policy(self.raw(cmd.replace(" cli refs/remotes/origin/main HEAD", " status")))
+                self.assertEqual((hook["decision"], hook["code"]), ("deny", "HOOK_BYPASS"), cmd)
+        with mock.patch.object(self.g, "hook_bypass", return_value=""):
+            for cmd in cmds:
+                with self.subTest(cmd):
+                    self.assert_forged(cmd)
+        self.assertEqual(self.alias_of("cli", plain, opts=["-c", f"include.path={cfg}"]), "update-ref")
+
+    def assert_unknown_ref(self, cmd: str, root: Path | None = None) -> None:
+        out = self.raw(cmd, root)
+        self.assertEqual(out["decision"], "ask", (cmd, out))
+        res = self.g.apply_policy(out)
+        self.assertEqual(
+            (res["decision"], res["code"], res["confidence"]), ("deny", "UNRESOLVED_TARGET", "unsure"), cmd
+        )
+
+    def test_guard_remote_ref_xargs_unresolved(self):
+        """Review #306 G: đối số nối thêm/thay vào từ stdin (`xargs`, `xargs -I`, `parallel`, `find -exec {}`) cho lệnh
+        ghi ref → UNRESOLVED_TARGET như tiền lệ `xargs git push` (T-1523); trừ khi phần thấy được đã khoá chế độ không
+        tạo ref (`branch -D`, `tag -d`, `checkout --`, `stash drop`, `worktree remove`) hay chuỗi thay không nằm trong
+        đối số của lệnh con (`xargs -I{} git -C {} pull`). `branch -d` không đủ: stdin có thể thêm `--no-delete`."""
+        self.git_config("alias.y", "update-ref")
+        self.git_config("alias.gu", "!git update-ref")
+        for cmd in (
+            "echo refs/remotes/origin/main HEAD | xargs git update-ref",
+            "echo origin/main HEAD | xargs git branch -f",
+            "echo origin/main | xargs git tag",
+            "echo --no-delete origin/main HEAD | xargs git branch -d",
+            "echo -b origin/main | xargs git checkout",
+            "echo x | xargs git fetch origin",
+            "echo origin/main | xargs git stash branch",
+            "echo origin/main | xargs git stash",
+            "echo -b origin/main ../wt | xargs git worktree add",
+            "echo update-ref refs/remotes/origin/main HEAD | xargs git",
+            "echo refs/remotes/origin/main HEAD | xargs -0 -r git update-ref",
+            "xargs -I{} git update-ref {} HEAD < f",
+            "xargs -I % git checkout -b % < f",
+            "xargs -i git tag {} < f",
+            "xargs --replace=@ git branch @ HEAD < f",
+            "xargs -I{} git {} refs/remotes/origin/main HEAD < f",
+            "echo refs/remotes/origin/main HEAD | xargs git y",
+            "echo refs/remotes/origin/main HEAD | xargs git gu",
+            "parallel git update-ref {} HEAD ::: refs/remotes/origin/main",
+            "parallel -j2 git tag ::: origin/main",
+            "parallel 'git tag {}' ::: origin/main",
+            "find sub -name update-ref -exec git {} refs/remotes/origin/main HEAD \\;",
+            "find sub -exec git update-ref {} HEAD \\;",
+            "find sub -execdir git checkout -b {} \\;",
+        ):
+            with self.subTest(cmd):
+                self.assert_unknown_ref(cmd)
+        for cmd in (
+            "git branch --merged | xargs git branch -D",
+            "git tag -l 'v0*' | xargs git tag -d",
+            "git ls-files -m | xargs git checkout --",
+            "git stash list | cut -d: -f1 | xargs git stash show",
+            "echo ../wt | xargs git worktree remove",
+            "ls | xargs -I{} git -C {} pull",
+            "echo a | xargs git log",
+            "echo a | xargs git rev-parse",
+            "parallel echo ::: a b",
+            "find sub -exec git branch -d {} \\;",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_negated_options(self):
+        """Cờ phủ định của parse-options huỷ chế độ không-tạo đứng trước (đo bằng git thật): `branch -d --no-delete X`,
+        `branch -m --no-move X`, `branch -l --no-list X`, `tag --points-at H --no-points-at X` TẠO ref; `update-ref
+        --stdin --no-stdin X` ghi X."""
+        for cmd in (
+            "git branch -d --no-delete origin/main HEAD",
+            "git branch -d --no-del origin/main HEAD",
+            "git branch -m --no-move origin/x HEAD",
+            "git branch -l --no-list origin/main HEAD",
+            "git tag --points-at HEAD --no-points-at origin/main HEAD",
+            "git update-ref --stdin --no-stdin refs/remotes/origin/main HEAD",
+        ):
+            with self.subTest(cmd):
+                self.assert_forged(cmd)
+        for cmd in ("git branch --no-delete -d origin/x", "git branch -D --no-delete origin/x"):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        self.make_commit()
+        subprocess.run(["git", "-C", str(self.root), "branch", "-d", "--no-delete", "probe-n", "HEAD"], check=True)
+        out = subprocess.run(
+            ["git", "-C", str(self.root), "branch", "--list", "probe-n"], capture_output=True, text=True
+        )
+        self.assertIn("probe-n", out.stdout, "đối chứng: `-d --no-delete` tạo nhánh")
+
+    def test_guard_remote_ref_alias_legit_common(self):
+        """Không chặn oan alias thường và lệnh git ngoài dựng sẵn: `co`, `st`, `lg` (bền và một lần), `git lfs`,
+        `git submodule`, tên có chấm không phải alias."""
+        self.git_config("alias.co", "checkout")
+        self.git_config("alias.st", "status -sb")
+        self.git_config("alias.lg", "log --oneline --graph")
+        for cmd in (
+            "git co main",
+            "git co -b feature/x origin/main",
+            "git st",
+            "git lg -5",
+            "git -c alias.lg='log --oneline' lg",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0=status git st",
+            "git lfs version",
+            "git lfs pull",
+            "git submodule update --init",
+            "git submodule status",
+            "git a.b",
+            "echo x | xargs git st",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_alias_reader_no_exec(self):
+        """Bộ đọc (`git config --list`) không chạy chương trình cấu hình: fsmonitor/pager/sshCommand/credential/diff
+        đặt bền, qua `-c` và qua `GIT_CONFIG_*` không chạy (đối chứng: `git status` chạy fsmonitor đó). Đặt các khoá
+        đó một lần qua `-c`, `GIT_CONFIG_*`, `GIT_CONFIG_PARAMETERS`, `--config-env` → HOOK_BYPASS."""
+        plain = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        mark = plain / "RAN"
+        script = plain / "x.sh"
+        script.write_text(f"#!/bin/sh\ntouch '{mark}'\n", encoding="utf-8")
+        script.chmod(0o755)
+        for key in ("core.fsmonitor", "core.pager", "pager.config", "core.sshCommand", "diff.external"):
+            self.git_config(key, str(script))
+        opts = ["-c", f"core.fsmonitor={script}", "-c", f"core.pager={script}", "-c", f"credential.helper=!{script}"]
+        over = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.fsmonitor", "GIT_CONFIG_VALUE_0": str(script)}
+        self.assertIsNotNone(self.g._git_alias_table(str(self.root), opts, over, None))
+        self.assertIsNotNone(self.g._git_alias_table(str(self.root), [], {}, None))
+        self.raw(f"git -c core.fsmonitor={script} lg")  # guard tự đọc cấu hình của lệnh này
+        self.assertFalse(mark.exists(), "bộ đọc alias không được chạy chương trình cấu hình")
+        subprocess.run(["git", "-C", str(self.root), "status"], capture_output=True, check=False)
+        self.assertTrue(mark.exists(), "đối chứng: git status chạy fsmonitor")
+        for cmd in (
+            f"git -c core.fsmonitor={script} lg",
+            f"git -ccore.fsmonitor={script} status",
+            f"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0={script} git status",
+            f"GIT_CONFIG_PARAMETERS=\"'core.pager'='{script}'\" git log",
+            f"V={script} git --config-env=core.sshCommand=V fetch origin",
+            f"V={script} git --config-env core.fsmonitor=V status",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0='!sh -c id' git x",
+            # D-216: biến guard không thấy gán (có thể từ `source`/`read`) — không biết giá trị → không an toàn
+            "git --config-env=core.fsmonitor=UNSET_VAR_XT status",
+        ):
+            with self.subTest(cmd):
+                out = self.g.apply_policy(self.raw(cmd))
+                self.assertEqual((out["decision"], out["code"]), ("deny", "HOOK_BYPASS"), cmd)
+        for cmd in (
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0='ssh -i ~/.ssh/k' git fetch origin",
+            "V=true git --config-env=core.fsmonitor=V status",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.g.apply_policy(self.raw(cmd))["decision"], "", cmd)
+
+    def test_guard_remote_ref_alias_budget(self):
+        """Ngân sách thời gian TỔNG cho mọi lần đọc cấu hình alias của một quyết định (không phải mỗi tầng/lệnh): lần
+        đọc sau nhận phần còn lại; hết ngân sách → UNRESOLVED_TARGET, không gọi git nữa. Cùng cấu hình chỉ đọc một lần."""
+        timeouts = []
+
+        def run(cmd, **kw):
+            if "--list" not in cmd:
+                return mock.Mock(returncode=1, stdout=b"", stderr=b"")
+            timeouts.append(kw["timeout"])
+            if kw["timeout"] < 0.2:  # như subprocess thật: chờ hết hạn rồi mới báo quá hạn
+                time.sleep(kw["timeout"])
+                raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+            time.sleep(0.2)
+            return mock.Mock(returncode=0, stdout=b"", stderr=b"")
+
+        with mock.patch.object(self.g, "ALIAS_SECONDS", 0.3), mock.patch.object(self.g.subprocess, "run", run):
+            self.assert_allowed("git lfs a && git lfs b && git -C . lfs c")  # một cấu hình: một lần đọc
+            self.assertEqual(len(timeouts), 1)
+            timeouts.clear()
+            self.assert_unresolved("git -c k.a=1 a1 && git -c k.b=1 a2 && git -c k.c=1 a3 && git -c k.d=1 a4")
+        self.assertLessEqual(timeouts[0], 0.3)
+        self.assertLess(len(timeouts), 4, "hết ngân sách thì không gọi git nữa")
+        self.assertLessEqual(sum(timeouts[1:]), 0.3 - 0.2 + 0.05)
+
+    def test_guard_remote_ref_alias_concurrent(self):
+        """Quyết định chạy đồng thời (nhiều luồng, ngân sách alias là trạng thái chung của lớp) cho cùng kết quả như chạy
+        tuần tự: không luồng nào mượn bảng alias/cấu hình của luồng khác."""
+        import concurrent.futures
+
+        self.git_config("alias.y", "update-ref")
+        cmds = [
+            "git y refs/remotes/origin/main HEAD",
+            "git -c alias.a.b=tag a.b origin/main",
+            "git -c alias.st=status st",
+            "git lfs version",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.y GIT_CONFIG_VALUE_0=status git y",
+        ] * 4
+        want = [self.g.apply_policy(self.raw(c))["code"] for c in cmds]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda c: self.g.apply_policy(self.raw(c))["code"], cmds))
+        self.assertEqual(got, want)
+        self.assertEqual(want[:2], ["REMOTE_REF_FORGE"] * 2)
+        self.assertNotIn("REMOTE_REF_FORGE", want[2:5])
+
+    def test_guard_remote_ref_fetch_hint(self):
+        """🟢 review #306: lý do chặn `fetch origin main:refs/remotes/origin/main` gợi ý dạng được cho qua."""
+        out = self.raw("git fetch origin main:refs/remotes/origin/main")
+        self.assertIn("refs/heads/main:refs/remotes/origin/main", str(out["reason"]))
+        self.assert_allowed("git fetch origin refs/heads/main:refs/remotes/origin/main")
+
+    def assert_code(self, cmd: str, code: str) -> None:
+        res = self.g.apply_policy(self.raw(cmd))
+        self.assertEqual((res["decision"], res["code"]), ("deny", code), cmd)
+
+    def test_guard_remote_ref_git_global_opts(self):
+        """🔴 review #306 lượt 2 (D-216): mọi tuỳ chọn toàn cục có giá trị của git 2.43 (`handle_options` của git.c:
+        `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`) ăn token
+        kế — trước đây `--attr-source`/`--shallow-file` thiếu nên giá trị bị coi là lệnh con và mọi luật git bị bỏ qua.
+        `--exec-path` trần in đường dẫn rồi thoát (giá trị chỉ ở dạng `=`): không ăn token kế."""
+        opts = (
+            "--attr-source HEAD",
+            "--attr-source=HEAD",
+            "--shallow-file x",
+            "--shallow-file=x",
+            "-C r --shallow-file x",
+            "--shallow-file x -C r",
+            "--namespace n --attr-source HEAD",
+            "--work-tree=w --shallow-file x",
+            "--exec-path",
+        )
+        for opt in opts:
+            with self.subTest(opt):
+                self.assert_code(f"git {opt} update-ref refs/remotes/origin/main HEAD", "REMOTE_REF_FORGE")
+                self.assert_code(f"git {opt} push --force origin main", "RULE_DENY")
+                self.assert_code(f"git {opt} -c core.fsmonitor=./x.sh status", "HOOK_BYPASS")
+        g = self.g
+        self.assertEqual(g.normalize(["git", "--attr-source", "HEAD", "push", "-f"]), ["git", "push", "-f"])
+        self.assertEqual(g.normalize(["git", "--exec-path", "push", "-f"]), ["git", "push", "-f"])
+        self.assertEqual(
+            g._git_globals(["git", "--shallow-file", "x", "-c", "a=b", "st"]),
+            [
+                ("--shallow-file", "x"),
+                ("-c", "a=b"),
+            ],
+        )
+
+    def test_guard_remote_ref_git_unknown_global(self):
+        """Fail-closed (D-216): tuỳ chọn toàn cục `--…` guard không biết (git sau này thêm tuỳ chọn có giá trị) đứng
+        trước lệnh con → không biết lệnh con là gì: UNRESOLVED_TARGET (strict hỏi, mặc định chặn). Tuỳ chọn đã biết
+        (kể cả `--no-lazy-fetch`/`--no-advice` của git mới hơn 2.43) vẫn chạy."""
+        for cmd in (
+            "git --xt-future-opt v push --force origin main",
+            "git --xt-future-opt v update-ref refs/remotes/origin/main HEAD",
+            "git --xt-future-opt status",
+            "git -C r --xt-future-opt=v status",
+            "git --no-pager --xt-future-opt v status",
+            "env -i git --xt-future-opt v status",
+            "cd sub && git --xt-future-opt v status",
+            "bash -c 'git --xt-future-opt v status'",
+        ):
+            with self.subTest(cmd):
+                out = self.raw(cmd)
+                self.assertIn(out["decision"], ("ask", "deny"), (cmd, out))
+                self.assertIn("tuỳ chọn toàn cục git guard không biết", str(out["reason"]), cmd)
+                res = self.g.apply_policy(out)
+                self.assertEqual((res["decision"], res["code"]), ("deny", "UNRESOLVED_TARGET"), cmd)
+        for cmd in (
+            "git --no-pager log -1",
+            "git --version",
+            "git --help",
+            "git -P diff",
+            "git -p log",
+            "git --paginate log",
+            "git --literal-pathspecs diff -- a",
+            "git --no-literal-pathspecs status",
+            "git --glob-pathspecs ls-files '*.py'",
+            "git --noglob-pathspecs status",
+            "git --icase-pathspecs ls-files",
+            "git --no-optional-locks status",
+            "git --no-replace-objects log",
+            "git --bare rev-parse HEAD",
+            "git --attr-source HEAD diff",
+            "git --attr-source=HEAD log",
+            "git --shallow-file x log",
+            "git --exec-path",
+            "git --exec-path=/usr/lib/git-core status",
+            "git --html-path",
+            "git --man-path",
+            "git --info-path",
+            "git --list-cmds=main",
+            "git --no-lazy-fetch status",
+            "git --no-advice status",
+            "git --git-dir .git --work-tree . status",
+            "git --namespace=n log",
+            "git --config-env=user.name=USER log -1",
+            "git log --xt-unknown-subcommand-opt",  # tuỳ chọn của lệnh con: không phải tuỳ chọn toàn cục
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_remote_ref_oneshot_export(self):
+        """🟠 review #306 lượt 2 (D-216): khoá chạy lệnh đặt một lần qua biến đã `export` (hoặc gán trần) ở lệnh trước
+        trong cùng chuỗi tính như gán đầu lệnh → HOOK_BYPASS; `--config-env=<khoá chạy lệnh>=VAR` mà guard không biết
+        giá trị VAR → không an toàn."""
+        for cmd in (
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh; git status",
+            "export GIT_CONFIG_COUNT=1; export GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh && git status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor; GIT_CONFIG_VALUE_0=./x.sh git status",
+            "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='sh -c id'; git log",
+            "export F=./x.sh; git --config-env=core.fsmonitor=F status",
+            "export F=./x.sh; git --config-env core.fsmonitor=F status",
+            "F=./x.sh; git --config-env=core.fsmonitor=F status",  # gán trần: chiều chặt như `_git_alias_sources`
+            "export GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='./x.sh'\"; git status",
+            "git --config-env=core.fsmonitor=XT_UNSET_VAR status",
+            "git --config-env core.sshCommand=XT_UNSET_VAR fetch",
+            "source env.sh; git --config-env=core.fsmonitor=F status",
+            "export F=$(cat x); git --config-env=core.fsmonitor=F status",
+        ):
+            with self.subTest(cmd):
+                self.assert_code(cmd, "HOOK_BYPASS")
+        for cmd in (
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false; git status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x; git status",
+            "export F=false; git --config-env=core.fsmonitor=F status",
+            "git --config-env=http.extraHeader=XT_UNSET_VAR status",  # khoá không chạy lệnh: giá trị không cần biết
+            "export F=./x.sh; git status",
+            "export F=./x.sh; echo $F",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        with mock.patch.dict(os.environ, {"XT_SAFE_FSM": "false"}):
+            self.assert_allowed("git --config-env=core.fsmonitor=XT_SAFE_FSM status")
+        # Biến của chuỗi lệnh trước không lọt sang quyết định sau (mỗi lệnh Bash là một shell mới của guard).
+        self.assert_code("export F=./x.sh; git --config-env=core.fsmonitor=F status", "HOOK_BYPASS")
+        self.assert_allowed("export F=false; git --config-env=core.fsmonitor=F status")
+
+    def test_guard_remote_ref_oneshot_export_concurrent(self):
+        """Quyết định đồng thời: môi trường `export` của chuỗi lệnh này không lẫn sang chuỗi lệnh khác."""
+        import concurrent.futures
+
+        cmds = [
+            "export F=./x.sh; git --config-env=core.fsmonitor=F status",
+            "export F=false; git --config-env=core.fsmonitor=F status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh; git status",
+            "git status",
+            "git --attr-source HEAD push --force origin main",
+        ] * 6
+        want = [self.g.apply_policy(self.raw(c))["code"] for c in cmds]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            got = list(pool.map(lambda c: self.g.apply_policy(self.raw(c))["code"], cmds))
+        self.assertEqual(got, want)
+        self.assertEqual(want[:5], ["HOOK_BYPASS", "NONE", "HOOK_BYPASS", "NONE", "RULE_DENY"])
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_guard_remote_ref_via_hook(self):
+        """Đường ống hook thật ở chính sách mặc định và strict."""
+        for policy in ("", "strict"):
+            code, out, _ = run_hook(
+                "pre-bash-guard.sh",
+                {"tool_input": {"command": "git update-ref refs/remotes/origin/main HEAD"}},
+                self.root,
+                {"XT_GUARD_POLICY": policy},
+            )
+            self.assertEqual((code, decision(out)), (0, "deny"), policy)
+        code, out, _ = run_hook(
+            "pre-bash-guard.sh",
+            {"tool_input": {"command": "git fetch origin main"}},
+            self.root,
+            {"XT_GUARD_POLICY": ""},
+        )
+        self.assertEqual((code, decision(out)), (0, None))
 
 
 if __name__ == "__main__":
