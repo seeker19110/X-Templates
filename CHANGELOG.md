@@ -6,6 +6,15 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+Mục checklist từ đợt rà `seeker19110/stored` 2026-10-28 (stored `a1a1f51..9f87dd1`; chi tiết ở
+`research/2026-10-28-stored-delta-extraction.md`). Dự án đích: ghép lại blueprint để nhận các ID mới.
+- `CMP-LIC-023` SHOULD: code fork/chép từ repo MIT, BSD, Apache-2.0 giữ nguyên dòng copyright và thông báo license của tác giả gốc (Apache giữ cả `NOTICE`); credit trong README không thay được — rà seeker19110/stored 2026-10-28.
+- `AI-AGENT-025` SHOULD: mức T0–T4 của hành động UI/trình duyệt xét theo tác động của phần tử đích; `click` lên nút gửi/thanh toán/xoá xếp như `submit` và qua HITL — rà seeker19110/stored 2026-10-28.
+- `XC-DOCAI-022` SHOULD: định nghĩa subagent khai `tools:` tối thiểu (bỏ trống là thừa hưởng mọi tool); bộ agent bên thứ ba chỉ cài phần cần vào `.claude/agents/` của dự án — rà seeker19110/stored 2026-10-28.
+- `XC-DOCAI-023` SHOULD: skill/automation do model sinh có xác nhận hoặc `--dry-run` trước bước có tác dụng phụ và trần số mục; người đọc lại `SKILL.md` trước khi cài — rà seeker19110/stored 2026-10-28.
+- `PRF-AGENT-023` SHOULD: sản phẩm khởi chạy CLI agent của người dùng truyền allowlist tool qua cờ của CLI, từ chối cờ bỏ quyền, không qua shell, env con tối thiểu — rà seeker19110/stored 2026-10-28.
+- `CMP-PRIV-023` SHOULD: che PII/bí mật ở mọi đường dữ liệu ra model hoặc bên thứ ba qua một hàm egress chung — rà seeker19110/stored 2026-10-28.
+- `IND-MEDIA-023` SHOULD: nội dung có AI hỗ trợ có người kiểm sự thật và metadata trước khi đăng, không sinh hàng loạt trang theo mẫu để xếp hạng (Google *Spam policies* — scaled content abuse) — rà seeker19110/stored 2026-10-28.
 - [ADR-0053](docs/adr/0053-review-round-budget-per-pr.md) (D-209; triển khai ở mục *Changed*) và `docs/specs/PLAN-phase-gated-review.md` (#297): kế hoạch review một lần cuối pha kèm kiểm bổ sung trên `ca02729` (§11) — hạ tầng review theo head/delta, `rev` + khoá, `task_runs` đã có; thiếu thật là trần lượt review mỗi PR (#282 bảy lượt) và review trùng trước/sau PR ở cùng commit. Chỉ hai điểm đó được duyệt; một PR mỗi pha ở harden, sổ pha, fingerprint, pilot: không làm/hoãn tới khi có số đo.
 - `loop attach [--reason]`, `loop resolve --task ID --reason`, `loop unblock --reason` ([ADR-0051](docs/adr/0051-split-session-attach-from-resume.md), ADR-0052 §3/§6; T-3540…T-3542): `attach` chỉ gắn phiên (giữ việc chờ, đếm lỗi, `blocked`); `resolve` gỡ đúng một việc chờ, ghi `resolved[]`; `unblock` mở vòng bị chặn/đã dừng, đặt lại đếm lỗi và `task_runs` task đang chặn, giữ việc chờ, ghi `unblocked[]`. Vòng đã kết thúc → lối ra theo `final_verdict` và nguồn `blocked`; mọi exit 2 không đổi state; `loop init` mang `attached/resolved/unblocked` sang đợt kế. FLOW-01/02 xanh.
 - `tests/test_flow.py` (T-3536, T-3558, ADR-0052 §1): corpus luồng FLOW-01…08, 18, 19 chạy `xt.py` thật trong repo git tạm; ca chưa sửa ở registry `XFAIL`, `XT_FLOW_STRICT=<ID>` buộc ca đó đạt thật.
