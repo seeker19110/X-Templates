@@ -141,6 +141,7 @@ class NextStepPureTest(unittest.TestCase):
             "không giảm": ([batch(1, "t0"), batch(3, "t1"), batch(3, "t2")], "budget", "t1"),
             "tăng rồi giảm": ([batch(3, "t1"), batch(5, "t2")], "replan", None),  # 3 → 5 → 3: đợt cuối có giảm
             "khác sổ": ([batch(3, "t1"), batch(3, "t2", "KHÁC.md")], "replan", None),
+            "khác sổ ở mốc trước": ([batch(3, "t1", "KHÁC.md"), batch(3, "t2")], "replan", None),
         }
         for name, (batches, action, since) in cases.items():
             with self.subTest(name):
@@ -153,6 +154,8 @@ class NextStepPureTest(unittest.TestCase):
 
     def test_no_progress_needs_open_work(self) -> None:
         self.assertIsNone(xt._no_progress([batch(0, "t1"), batch(0, "t2")], 0, "S.md"))
+        broken = [{"status": ["S.md"], "open": 1, "at": "t1"}, batch(1, "t2")]  # state hỏng: không văng TypeError
+        self.assertIsNone(xt._no_progress(broken, 1, "S.md"))
 
     def test_no_progress_counts_must_only(self) -> None:
         out = self.step(open_must=3, state={"batches": [batch(3, "t1"), batch(3, "t2")]})
@@ -162,6 +165,8 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(audit={"errors": ["nhóm 2: chưa quét", "x"]})
         self.assertEqual(out["action"], "audit")
         self.assertIn("trượt `audit check --strict` (2 lỗi, đầu tiên: nhóm 2: chưa quét)", out["reason"])
+        out = self.step(audit={"errors": ["nhóm 1: chưa quét"], "scanned": []})  # sổ mẫu vừa cài: gợi ý audit full
+        self.assertIn("chưa có nhóm nào đã quét", out["reason"])
 
     def test_loop_before_prs(self) -> None:
         wait = [{"pr": "4", "head": "4" * 40, "action": "wait", "why": ""}]
@@ -236,6 +241,13 @@ class NextStepStateTest(StateCase):
         self.assertEqual(same["batches"], [mark])  # cùng PLAN, cùng spec: cùng đợt, giữ mốc đầu đợt
         (self.base / "P.md").write_text("- [x] `T-001` xong đổi spec — Gate: `true`\n", encoding="utf-8")
         self.assertEqual(len(xt._batch_mark({"objective": {"batches": [mark]}}, new, self.base)["batches"]), 2)
+        live = {"active": True, "objective": {"batches": [mark]}}
+        self.assertEqual(
+            xt._batch_mark(live, new, self.base)["batches"], [mark]
+        )  # `--force` giữa đợt dù spec đổi (D-226)
+        (self.base / "P2.md").write_text((self.base / "P.md").read_text(encoding="utf-8"), encoding="utf-8")
+        other = xt._batch_mark(live, {**new, "plan": "P2.md"}, self.base)["batches"]
+        self.assertEqual([b["plan"] for b in other], ["P.md", "P2.md"])  # PLAN khác đường dẫn, cùng task: đợt mới
         with unittest.mock.patch.object(xt, "blueprint_status", side_effect=OSError("hỏng")):
             self.assertIsNone(xt._batch_mark({}, new, self.base)["batches"][-1]["open"])
         book.write_bytes(b"\xff\xfe")  # không phải UTF-8 → ValueError

@@ -1587,3 +1587,10 @@
 - Chọn: Đợt = PLAN (đường dẫn + băm ID/spec task); loop init cùng PLAN giữ mốc đầu đợt; mốc ghi đường sổ và null khi chưa có sổ, chỉ so hai mốc cùng sổ; sổ trượt audit check --strict (trừ lỗi 🔴/🟠 còn mở) → audit; st.blocked sau final_verdict done → blocked; chưa đặt trần số đợt (để T-3548/pilot đo)
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: --force đổi ngân sách hay /optimize không được tạo đợt giả (báo budget sai); sổ trượt --strict mà báo ready-for-complete là khai xong sai; trần số đợt cần số đo từ pilot (ADR-0052 §Thông tin thêm: ngưỡng là số để pilot đo lại) — chưa có số thì không chốt hằng số
 - Đường lùi: Bỏ nhánh errors ở _step_audit, bỏ kiểm plan_rev ở _batch_mark (mỗi init một mốc)
+
+### D-226 · 2026-10-28T17:00:21+00:00 · PR #318: hai lượt review chưa sạch (ADR-0053) — ranh giới đợt của FLOW-13 đoán từ nội dung PLAN vẫn sinh đợt giả khi sửa spec giữa đợt rồi loop init --force; đổi chiến lược thế nào
+
+- Phương án: (1) Đổi thiết kế ranh giới đợt theo vòng đời thay vì nội dung: đè lên vòng còn bật (prev.active) cùng đường dẫn PLAN = cùng đợt dù spec đổi; vòng đã kết thúc hoặc PLAN khác đường dẫn/spec = đợt mới; giữ PR, sửa kèm 4 🟢 (thứ tự scanned trước errors, chữ /optimize, _no_progress so từng mốc, ca P02/P04) · (2) Thu hẹp PR: bỏ FLOW-13 và objective.batches khỏi #318, tách task mới (Gate T-3547 bỏ FLOW-13) · (3) Thêm cờ loop init --new-batch để người/skill khai đợt mới tường minh
+- Chọn: Đổi thiết kế ranh giới đợt theo vòng đời thay vì nội dung: đè lên vòng còn bật (prev.active) cùng đường dẫn PLAN = cùng đợt dù spec đổi; vòng đã kết thúc hoặc PLAN khác đường dẫn/spec = đợt mới; giữ PR, sửa kèm 4 🟢 (thứ tự scanned trước errors, chữ /optimize, _no_progress so từng mốc, ca P02/P04)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: --force giữa đợt (đổi ngân sách/sửa spec) không bao giờ là đợt mới (LOOP-HARNESS-024), vòng đã kết thúc rồi init lại mới là đợt kế (D-177) — vòng đời là sự thật máy đã có, nội dung PLAN chỉ là dấu hiệu; tách PR phải sửa Gate đã duyệt; cờ tường minh dựa vào agent nhớ khai (dễ quên, sai lệch ngầm)
+- Đường lùi: Bỏ nhánh prev.active ở _batch_mark (về so plan_rev như e536a0f)

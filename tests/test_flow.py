@@ -454,6 +454,13 @@ class FlowTest(TmpRepoCase):
         self.assertEqual(self.next_step()["action"], "replan")
         self.finish_batch("--force")
         self.assertEqual(self.next_step()["action"], "replan")
+        plan = (
+            self.repo / "docs" / "autopilot" / "PLAN.md"
+        )  # sửa spec giữa đợt rồi `--force` nâng trần: vẫn đợt 1 (D-226)
+        plan.write_text(plan.read_text(encoding="utf-8").replace("việc hai", "việc hai sửa spec"), encoding="utf-8")
+        self.finish_batch("--force", "--max-iterations", "300")
+        self.assertEqual(len(self.state()["objective"]["batches"]), 1)
+        self.assertEqual(self.next_step()["action"], "replan")
         plan2 = "docs/autopilot/PLAN-2.md"
         (self.repo / plan2).write_text(PLAN.replace("việc", "đợt 2 việc"), encoding="utf-8")
         self.finish_batch("--plan", plan2, "--force")

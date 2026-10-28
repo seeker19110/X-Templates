@@ -6738,18 +6738,19 @@ def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _plan_rev(base: Path, plan: str) -> str:
-    """Định danh đợt: băm ID + spec các task của PLAN (tick `[x]` không đổi spec) — `loop init` lại cùng PLAN để đổi ngân
-    sách, `--force`, `/optimize` vẫn là cùng đợt (review #318)."""
+    """Băm ID + spec các task của PLAN (tick `[x]` không đổi spec) — một phần định danh đợt của `_batch_mark`."""
     tasks = parse_plan(base / plan)
     return hashlib.sha256("\n".join(f"{t['id']}:{task_req_rev(t)}" for t in tasks).encode()).hexdigest()[:16]
 
 
 def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:
     """`objective` sau `loop init`: mốc đầu mỗi đợt — số 🔴/🟠 mở trong sổ mặc định + MUST mở ngoài việc chờ người. Cùng
-    PLAN (đường dẫn + spec) với mốc cuối → cùng đợt, giữ mốc cũ. Chưa có sổ, sổ/blueprint không đọc được → `open` null
-    (FLOW-13 không so qua mốc thiếu số)."""
+    đợt (giữ mốc cũ) khi cùng đường dẫn PLAN với mốc cuối VÀ hoặc đè lên vòng còn bật (`--force` đổi ngân sách/sửa spec
+    giữa đợt — D-226), hoặc cùng spec; vòng đã kết thúc hay PLAN khác → đợt mới. Chưa có sổ, sổ/blueprint không đọc được
+    → `open` null (FLOW-13 không so qua mốc thiếu số)."""
     batches, rev = _objective_batches(prev), _plan_rev(base, new["plan"])
-    if not batches or (batches[-1].get("plan"), batches[-1].get("plan_rev")) != (new["plan"], rev):
+    last = batches[-1] if batches else {}
+    if last.get("plan") != new["plan"] or not (prev.get("active") is True or last.get("plan_rev") == rev):
         status = base / AUDIT_STATUS_DEFAULT
         try:
             n = audit_open_count(status) + len(_open_must(base, new)) if status.is_file() else None
@@ -6764,7 +6765,7 @@ def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[s
 def _no_progress(batches: List[Dict[str, Any]], now: int, status: str) -> Optional[str]:
     """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0, hai mốc đếm
     cùng sổ `status`) → `at` của mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
-    if len(batches) < 2 or now <= 0 or {b.get("status") for b in batches[-2:]} != {status}:
+    if len(batches) < 2 or now <= 0 or any(b.get("status") != status for b in batches[-2:]):
         return None
     a, b = batches[-2].get("open"), batches[-1].get("open")
     return str(batches[-2].get("at")) if type(a) is int and type(b) is int and a <= b <= now else None
@@ -6872,20 +6873,21 @@ def _step_prs(f: Dict[str, Any]) -> StepPart:
 
 
 def _step_audit(f: Dict[str, Any]) -> StepPart:
-    """Sổ audit phải phủ tới HEAD (FLOW-10): không có sổ/chưa nhóm nào quét → audit full; file nợ → audit delta từ SHA quét."""
+    """Sổ audit phải phủ tới HEAD (FLOW-10): không có sổ/chưa nhóm nào quét → audit full; trượt `audit check --strict` →
+    audit; file nợ → audit delta từ SHA quét."""
     a = f["audit"]
-    if a["exists"] and a["errors"]:
-        return {
-            "action": "audit",
-            "reason": f"sổ {a['status']} trượt `audit check --strict` ({len(a['errors'])} lỗi, đầu tiên: {a['errors'][0]})",
-            "missing": ["`audit check --strict` exit 0"],
-        }
     if not a["exists"] or not a["scanned"]:
         what = "chưa có nhóm nào đã quét trong" if a["exists"] else "chưa có"
         return {
             "action": "audit",
             "reason": f"{what} sổ {a['status']} — audit full (`/audit`)",
             "missing": ["sổ audit"],
+        }
+    if a["errors"]:
+        return {
+            "action": "audit",
+            "reason": f"sổ {a['status']} trượt `audit check --strict` ({len(a['errors'])} lỗi, đầu tiên: {a['errors'][0]})",
+            "missing": ["`audit check --strict` exit 0"],
         }
     if not a["debt"]:
         return None
