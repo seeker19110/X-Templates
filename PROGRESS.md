@@ -36,6 +36,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `6799550` (#307–#314: guard T-3564, sổ T-3556, ADR-0054/0055/0056, **3.28.0** `b260a9b`). Tag `v3.28.0` chưa có: merge của pr-steward (GITHUB_TOKEN) không kích `release-tag.yml` — chủ repo chạy `workflow_dispatch` sha `b260a9b`. Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040).
+- `main` `6799550` (#307–#314: guard T-3564, sổ T-3556, ADR-0054/0055/0056, **3.28.0** `b260a9b`). Tag `v3.28.0` → `b260a9b` (chủ repo `workflow_dispatch`; steward merge bằng GITHUB_TOKEN không kích tag — AUD-HAR-124). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
