@@ -6680,5 +6680,197 @@ class GuardRemoteRefTest(unittest.TestCase):
         self.assertEqual((code, decision(out)), (0, None))
 
 
+class GuardAppendParallelTest(unittest.TestCase):
+    """T-3564 (D-217): AUD-SEC-125 — gán `TÊN+=v` là phép gán của bash (`X+=1 rm -rf /` chạy rm), không phải tên lệnh;
+    giá trị nối vào giá trị cũ guard không biết. AUD-SEC-121 — `parallel ::: '<lệnh>'` không mẫu lệnh chạy mỗi đối số
+    như dòng lệnh shell. Chạy đồng thời: không áp dụng (không thêm trạng thái dùng chung giữa các quyết định)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = _guard()
+
+    def setUp(self):
+        clean = {k: v for k, v in os.environ.items() if not re.fullmatch(r"GIT_CONFIG(_\w+)?", k)}
+        self.enterContext(mock.patch.dict(os.environ, clean, clear=True))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.root)], check=True, capture_output=True)
+
+    def verdict(self, cmd: str) -> tuple:
+        res = self.g.apply_policy(self.g.bash_decision(cmd, str(self.root)))
+        return res["decision"], res["code"]
+
+    def assert_denied(self, cmd: str, code: str = "") -> None:
+        got = self.verdict(cmd)
+        self.assertEqual(got[0], "deny", (cmd, got))
+        if code:
+            self.assertEqual(got[1], code, cmd)
+
+    def assert_allowed(self, cmd: str) -> None:
+        self.assertEqual(self.verdict(cmd)[0], "", cmd)
+
+    def test_guard_assign_append_denied(self):
+        for cmd in (
+            "X+=1 rm -rf /",
+            "X+=1 git push --force origin main",
+            "A=1 B+=2 git reset --hard HEAD~1",
+            "X+=1 sudo ls",
+            "A+=x B=1 rm -rf ~",
+            "PATH+=:/x rm -rf /",
+            "c=r; c+=m; $c -rf /",
+            "if true; then X+=1 rm -rf ~; fi",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+        self.assertEqual(self.g.normalize(["X+=1", "A=2", "rm", "-rf", "/"])[:1], ["rm"])
+
+    def test_guard_assign_append_git_config(self):
+        """Giá trị `TÊN+=v` không biết: khoá/giá trị cấu hình git một lần nối thêm → đường fail-closed của khoá chạy lệnh."""
+        for cmd in (
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh git status",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=core.fsmonitor GIT_CONFIG_VALUE_0=true git status",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0+=false git status",
+            "GIT_CONFIG_PARAMETERS+=\"'core.fsmonitor=./x.sh'\" git status",
+            "GIT_CONFIG_PARAMETERS+=\" 'core.fsmonitor=./x.sh'\" git status",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh; git status",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+            "CLAUDE_CODE_SIMPLE+=1 claude -p x",
+            "AIDER_YES_ALWAYS+=1 aider",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd, "HOOK_BYPASS")
+        self.assert_denied(
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.st GIT_CONFIG_VALUE_0+='!rm -rf /' git st", "UNRESOLVED_TARGET"
+        )
+        self.assertTrue(self.g._commit_hooks_path(["GIT_CONFIG_KEY_0+=core.hooksPath", "git", "commit"]))
+        self.assertEqual(self.g._env_assigns(["A+=1", "B=2", "ls"]), ["A", "B"])
+        self.assertEqual(self.g._assign_values(["A+=1", "B=2"]), {"A": "${A}1", "B": "2"})
+        env: dict = {}
+        self.g._record_assigns(["X+=a"], env)
+        self.assertEqual(env, {})  # giá trị cũ không biết → không ghi
+        self.g._record_assigns(["X=r"], env)
+        self.g._record_assigns(["export", "X+=m"], env)
+        self.assertEqual(env, {"X": "rm"})
+        for cmd in ("GIT_CONFIG_PARAMETERS+=\" 'user.name=x'\" git status", "GIT_CONFIG_KEY_0+=user.name git status"):
+            with self.subTest(cmd):  # lý do nói đúng điều guard không biết (rà trước T-3564 🟢6)
+                why = self.g.bash_decision(cmd, str(self.root))["reason"]
+                self.assertIn("nối thêm", why)
+                self.assertNotIn("chạy lệnh ngầm", why)
+        raw = self.g.bash_decision("DOCKER_HOST+=ssh://h docker ps", str(self.root))
+        self.assertEqual(raw["decision"], "ask", raw)  # đích daemon không biết: hỏi (strict) như gán thẳng
+
+    def test_guard_assign_append_allowed(self):
+        for cmd in (
+            "X+=1 ls",
+            "PATH+=:/x make",
+            "CFLAGS+=-O2 make",
+            "export PATH+=:/x; make",
+            "X=a; X+=b; echo $X",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0+=x git status",
+            "a+=(x y); echo ${a[@]}",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_parallel_args_denied(self):
+        for cmd in (
+            'parallel ::: "rm -rf /"',
+            'parallel ::: "rm -rf /" "ls"',
+            'parallel ::: "git push --force origin main"',
+            'parallel -j2 ::: "git reset --hard HEAD~1"',
+            'parallel -j 2 -k ::: "rm -rf ~"',
+            'parallel --jobs=2 --tag ::: "rm -rf /"',
+            'parallel -kj 4 ::: "rm -rf /"',
+            'parallel -- ::: "rm -rf /"',
+            'parallel --la-option-moi x ::: "rm -rf /"',
+            'parallel -kZ x ::: "rm -rf /"',
+            'parallel ::: echo ::: "a; rm -rf /"',
+            'parallel ::: "echo a" :::+ "; rm -rf /"',
+            'parallel --arg-sep ,, ,, "rm -rf /"',
+            'parallel --argsep=@@ @@ "rm -rf /"',
+            'nohup parallel ::: "git reset --hard HEAD~1"',
+            # nhóm `:::` rỗng: GNU parallel thay nguồn rỗng bằng "" và vẫn chạy nhóm kia (rà trước T-3564 🟢1)
+            "parallel ::: 'rm -rf /' :::",
+            "parallel ::: ::: 'rm -rf /'",
+            "parallel --link ::: 'rm -rf /' :::",
+            # tuỳ chọn lạ ăn giá trị đứng trước tuỳ chọn đã biết: giá trị không phải mẫu lệnh (rà trước T-3564 🟢2)
+            "parallel --er v -k ::: 'rm -rf /'",
+            "parallel --memsuspend 2G -j4 ::: 'rm -rf /' ls",
+            "parallel --maxargs 1 -k ::: 'git reset --hard HEAD~1'",
+            "parallel --tmpd /tmp -k ::: 'rm -rf /'",
+            # đọc tệp kèm nhóm `:::` thấy được: nhóm tệp coi như "", vẫn quét nhóm thấy được (rà trước T-3564)
+            "parallel ::: 'rm -rf /' :::: cmds.txt",
+            "parallel -a cmds.txt ::: 'rm -rf /'",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+        many = "parallel " + " ".join(f"::: a{k} b{k}" for k in range(8))
+        for cmd in (
+            "parallel --arg-s ,, ,, x",
+            many,
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd, "UNRESOLVED_TARGET")
+
+    def test_guard_parallel_args_allowed(self):
+        for cmd in (
+            'parallel ::: "echo a" "ls"',
+            "parallel echo ::: a b",
+            'parallel echo ::: "rm -rf /"',
+            "parallel -j4 'gzip {}' ::: a.log b.log",
+            "parallel -k gzip :::: files.txt",
+            "parallel ::: ls ::: -l -a",
+            "parallel --version",
+            "parallel -j",
+            "parallel ::: ls :::",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_parallel_args_from_file_allowed(self):
+        """Không mẫu lệnh mà lệnh đọc từ tệp (`::::`, `-a`, `--arg-file`) = chạy tệp script như `bash cmds.txt` — không
+        chặn (rà trước T-3564 🟠1)."""
+        for cmd in (
+            "parallel :::: cmds.txt",
+            "parallel -a cmds.txt",
+            "parallel -j4 :::: jobs.txt",
+            "parallel ::: ls :::: cmds.txt",
+            "parallel --arg-file=cmds.txt ::: ls",
+            "parallel --arg-file-sep ,, ,, cmds.txt",
+            "parallel --tmpd /tmp -k :::: cmds.txt",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_parallel_args_over_cap_with_template(self):
+        """Quá 64 tổ hợp mà có thể có mẫu lệnh (tuỳ chọn lạ đứng trước): quét từng token của từng nhóm `:::`, không
+        UNRESOLVED_TARGET (review #308); tuỳ chọn GNU parallel bổ sung không còn là tuỳ chọn lạ."""
+        urls = " ".join(f"u{k}" for k in range(1, 66))
+        for cmd in (
+            "parallel --resume --joblog sweep.log python3 train.py --lr {1} --bs {2} --seed {3}"
+            " ::: 0.1 0.01 0.001 0.0001 ::: 16 32 64 128 ::: 1 2 3 4 5",
+            f"parallel --resume-failed --joblog j.log -j8 'curl -sO {{}}' ::: {urls}",
+            f"parallel --la-option-moi -j8 'curl -sO {{}}' ::: {urls}",
+            f"parallel --la-option-moi -j8 echo ::: {urls} :::: more.txt",
+            f"parallel --retry-failed --ctag --csv --plain --transfer --memsuspend 1G --group-by 1 --ctagstring x"
+            f" echo ::: {urls}",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        for cmd in (
+            "parallel --resume ::: 'rm -rf /'",
+            "parallel --unknownopt ::: 'rm -rf /'",
+            "parallel --resume-failed ::: 'git reset --hard HEAD~1'",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+        for cmd in (
+            f"parallel --la-option-moi -j8 echo ::: {urls} 'rm -rf /'",
+            f"parallel --la-option-moi x echo ::: {urls} ::: 'git reset --hard HEAD~1'",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+                self.assertNotEqual(self.verdict(cmd)[1], "UNRESOLVED_TARGET", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

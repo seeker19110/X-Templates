@@ -95,6 +95,13 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--shallow-file`, `--attr-source`); tuỳ chọn `--…` guard
   không biết đứng trước lệnh con → `UNRESOLVED_TARGET` (D-216). Gate đọc
   `origin/main` chỉ chống nhầm lẫn — rào thật của vòng tối ưu là `perf trial` (ADR-0052 §7).
+- **Gán `TÊN+=v` và `parallel :::`** (AUD-SEC-125/121): `X+=1 cmd` xét `cmd`; giá trị nối thêm là không biết (khoá cấu
+  hình git nối thêm → `HOOK_BYPASS`). `parallel` không mẫu lệnh (hay có tuỳ chọn guard không biết): mỗi tổ hợp đối số
+  sau `:::` quét như shell lồng, nhóm rỗng và nhóm đọc từ tệp (`::::`, `-a`) thành `""` — chỉ đọc tệp thì như chạy
+  tệp script, không chặn; quá 64 tổ hợp khi không có mẫu → `UNRESOLVED_TARGET`, có thể có mẫu → chỉ quét từng token.
+  Còn lọt: gán phần tử mảng đầu lệnh (`a[0]=1 cmd` — bash báo lỗi rồi vẫn chạy `cmd`), lệnh đưa vào `parallel` qua
+  stdin (`… | parallel`) hay từ tệp, `x+=$(echo …)`, `sem '<lệnh>'`, tuỳ chọn đến từ `$PARALLEL`/`~/.parallel/config`/
+  `-J` (vd `--arg-sep`), mẫu là shell (`parallel bash -c ::: '<lệnh>'`, `parallel eval ::: …`).
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
   bị coi là cũ hơn. Lớp đỡ: `pr reviewed` đăng ngay kết luận (dấu đã đăng là nguồn của `merge-check`/steward/guard).
