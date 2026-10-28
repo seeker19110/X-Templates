@@ -34,7 +34,7 @@ def facts(**over: Any) -> dict[str, Any]:
         "audit": {"status": "S.md", "exists": True, "sha256": "0" * 64, "open": 0, "debt": {}, "scanned": ["b" * 40]}
         | {"errors": []},
         "open_must": 0,
-        "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None, "batches": []},
+        "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None},
     }
     for k, v in over.items():
         if isinstance(v, dict) and isinstance(f.get(k), dict) and k != "verdict":
@@ -42,10 +42,6 @@ def facts(**over: Any) -> dict[str, Any]:
         else:
             f[k] = v
     return f
-
-
-def batch(open_: int | None, at: str, status: str = "S.md") -> dict[str, Any]:
-    return {"plan": "P.md", "at": at, "open": open_, "status": status}
 
 
 class NextStepPureTest(unittest.TestCase):
@@ -69,7 +65,7 @@ class NextStepPureTest(unittest.TestCase):
             out["budget"],
             {
                 "iterations": [2, 40],
-                "batches": [0, None],
+                "batches": None,
                 "deadline": None,
                 "cost_usd": None,
                 "no_progress_since": None,
@@ -128,38 +124,12 @@ class NextStepPureTest(unittest.TestCase):
         self.assertIn(f"`{'b' * 12}..HEAD`, `{'c' * 12}..HEAD`", out["reason"])
         self.assertIn(HEAD[:12], out["missing"][0])
 
-    def test_open_work_replans_until_two_batches_without_progress(self) -> None:
+    def test_open_work_replans(self) -> None:
         out = self.step(audit={"open": 1}, open_must=2)
         self.assertEqual(out["action"], "replan")
         self.assertIn("1 🔴/🟠", out["reason"])
         self.assertIn("2 MUST", out["reason"])
-        cases = {
-            "giảm": ([batch(5, "t1"), batch(3, "t2")], "replan", None),
-            "một đợt": ([batch(3, "t1")], "replan", None),
-            "mốc thiếu số": ([batch(None, "t1"), batch(3, "t2")], "replan", None),
-            "đợt cuối giảm": ([batch(3, "t1"), batch(3, "t2")], "replan", None),
-            "không giảm": ([batch(1, "t0"), batch(3, "t1"), batch(3, "t2")], "budget", "t1"),
-            "tăng rồi giảm": ([batch(3, "t1"), batch(5, "t2")], "replan", None),  # 3 → 5 → 3: đợt cuối có giảm
-            "khác sổ": ([batch(3, "t1"), batch(3, "t2", "KHÁC.md")], "replan", None),
-            "khác sổ ở mốc trước": ([batch(3, "t1", "KHÁC.md"), batch(3, "t2")], "replan", None),
-        }
-        for name, (batches, action, since) in cases.items():
-            with self.subTest(name):
-                now = 2 if name == "đợt cuối giảm" else 3
-                out = self.step(audit={"open": now}, state={"batches": batches})
-                self.assertEqual((out["action"], out["budget"]["no_progress_since"]), (action, since))
-        out = self.step(audit={"open": 3}, state={"batches": [batch(3, "t1"), batch(3, "t2")]})
-        self.assertIn("3 → 3 → 3", out["reason"])
-        self.assertEqual(out["budget"]["batches"], [2, None])
-
-    def test_no_progress_needs_open_work(self) -> None:
-        self.assertIsNone(xt._no_progress([batch(0, "t1"), batch(0, "t2")], 0, "S.md"))
-        broken = [{"status": ["S.md"], "open": 1, "at": "t1"}, batch(1, "t2")]  # state hỏng: không văng TypeError
-        self.assertIsNone(xt._no_progress(broken, 1, "S.md"))
-
-    def test_no_progress_counts_must_only(self) -> None:
-        out = self.step(open_must=3, state={"batches": [batch(3, "t1"), batch(3, "t2")]})
-        self.assertEqual((out["action"], out["budget"]["no_progress_since"]), ("budget", "t1"))
+        self.assertEqual(self.step(open_must=3)["action"], "replan")  # chỉ MUST mở cũng là việc
 
     def test_audit_book_failing_strict_is_audit(self) -> None:
         out = self.step(audit={"errors": ["nhóm 2: chưa quét", "x"]})
@@ -167,6 +137,8 @@ class NextStepPureTest(unittest.TestCase):
         self.assertIn("trượt `audit check --strict` (2 lỗi, đầu tiên: nhóm 2: chưa quét)", out["reason"])
         out = self.step(audit={"errors": ["nhóm 1: chưa quét"], "scanned": []})  # sổ mẫu vừa cài: gợi ý audit full
         self.assertIn("chưa có nhóm nào đã quét", out["reason"])
+        unread = {"errors": ["không đọc được sổ: utf-8"], "scanned": [], "sha256": ""}
+        self.assertIn("không đọc được sổ: utf-8", self.step(audit=unread)["reason"])  # lỗi đọc, không gợi audit full
 
     def test_loop_before_prs(self) -> None:
         wait = [{"pr": "4", "head": "4" * 40, "action": "wait", "why": ""}]
@@ -224,38 +196,6 @@ class NextStepStateTest(StateCase):
         self.assertEqual(xt._open_must(self.base, self.st(blueprint=None)), [])
         self.assertEqual(xt._open_must(self.base, self.st(blueprint="mất.md")), [])
 
-    def test_batch_mark_appends_and_caps(self) -> None:
-        new = {"plan": "P.md", "started": "t9", "blueprint": "BP.md"}
-        prev = {"objective": {"batches": [batch(i, f"t{i}") for i in range(25)] + ["rác"]}}
-        out = xt._batch_mark(prev, new, self.base)
-        self.assertEqual(out["name"], "build-until-clean")
-        self.assertEqual(len(out["batches"]), xt.OBJECTIVE_BATCHES_KEEP)
-        rev = xt._plan_rev(self.base, "P.md")
-        mark = {"plan": "P.md", "plan_rev": rev, "status": xt.AUDIT_STATUS_DEFAULT, "at": "t9", "open": None}
-        self.assertEqual(out["batches"][-1], mark)  # chưa có sổ: không biết số 🔴/🟠 → null
-        book = self.base / xt.AUDIT_STATUS_DEFAULT
-        book.parent.mkdir(parents=True)
-        book.write_text("## Phát hiện\n\n| ID | Mức | Trạng thái |\n|---|---|---|\n| A-1 | 🟠 | mở |\n", "utf-8")
-        self.assertEqual(xt._batch_mark({}, new, self.base)["batches"], [{**mark, "open": 3}])  # 1 🟠 + 2 MUST
-        same = xt._batch_mark({"objective": {"batches": [mark]}}, {**new, "started": "t10"}, self.base)
-        self.assertEqual(same["batches"], [mark])  # cùng PLAN, cùng spec: cùng đợt, giữ mốc đầu đợt
-        (self.base / "P.md").write_text("- [x] `T-001` xong đổi spec — Gate: `true`\n", encoding="utf-8")
-        self.assertEqual(len(xt._batch_mark({"objective": {"batches": [mark]}}, new, self.base)["batches"]), 2)
-        live = {"active": True, "objective": {"batches": [mark]}}
-        self.assertEqual(
-            xt._batch_mark(live, new, self.base)["batches"], [mark]
-        )  # `--force` giữa đợt dù spec đổi (D-226)
-        (self.base / "P2.md").write_text((self.base / "P.md").read_text(encoding="utf-8"), encoding="utf-8")
-        other = xt._batch_mark(live, {**new, "plan": "P2.md"}, self.base)["batches"]
-        self.assertEqual([b["plan"] for b in other], ["P.md", "P2.md"])  # PLAN khác đường dẫn, cùng task: đợt mới
-        with unittest.mock.patch.object(xt, "blueprint_status", side_effect=OSError("hỏng")):
-            self.assertIsNone(xt._batch_mark({}, new, self.base)["batches"][-1]["open"])
-        book.write_bytes(b"\xff\xfe")  # không phải UTF-8 → ValueError
-        self.assertIsNone(xt._batch_mark({}, new, self.base)["batches"][-1]["open"])
-        for bad in ({"objective": []}, {"objective": {"batches": "x"}}):
-            self.assertEqual(xt._objective_batches(bad), [])
-        self.assertEqual(xt._objective_batches({"objective": {"batches": [1, mark]}}), [mark])
-
     def test_audit_open_count(self) -> None:
         self.assertEqual(xt.audit_open_count(self.base / "không.md"), 0)
         book = self.base / "S.md"
@@ -263,26 +203,6 @@ class NextStepStateTest(StateCase):
         rows += ["| A-5 | 🔴 | chấp nhận |", "| A-6 | 🟠 | bác bỏ |"]
         book.write_text("## Phát hiện\n\n| ID | Mức | Trạng thái |\n|---|---|---|\n" + "\n".join(rows) + "\n", "utf-8")
         self.assertEqual(xt.audit_open_count(book), 2)
-
-    def test_init_records_batch_mark_after_carrying_deferred(self) -> None:
-        """Mốc đếm SAU `_carry_previous`: MUST chờ người mang từ vòng trước không tính; `--force` cùng PLAN không thêm mốc."""
-        book = self.base / xt.AUDIT_STATUS_DEFAULT
-        book.parent.mkdir(parents=True)
-        book.write_text("## Phát hiện\n\n| ID | Mức | Trạng thái |\n|---|---|---|\n", "utf-8")
-        rc, _, err = run_main("loop", "init", "--plan", "P.md", "--blueprint", "BP.md")
-        self.assertEqual(rc, 0, err)
-        st = xt.read_state(self.base) or {}
-        self.assertEqual([(b["at"], b["open"]) for b in st["objective"]["batches"]], [(st["started"], 2)])
-        self.assertEqual(run_main("loop", "defer", "--task", "AAA-001", "--reason", "ký")[0], 0)
-        (self.base / "P2.md").write_text("- [x] `T-001` xong đợt 2 — Gate: `true`\n", encoding="utf-8")
-        rc, _, err = run_main("loop", "init", "--plan", "P2.md", "--blueprint", "BP.md", "--force")
-        self.assertEqual(rc, 0, err)
-        st = xt.read_state(self.base) or {}
-        self.assertIn("AAA-001", st["deferred"])
-        self.assertEqual([b["open"] for b in st["objective"]["batches"]], [2, 1])
-        rc, _, err = run_main("loop", "init", "--plan", "P2.md", "--blueprint", "BP.md", "--force")
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(len((xt.read_state(self.base) or {})["objective"]["batches"]), 2)
 
 
 class NextStepCliTest(StateCase):

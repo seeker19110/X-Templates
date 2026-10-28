@@ -6556,7 +6556,6 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
         )
     new = copy.deepcopy(state)
     notes[:] = _carry_previous(cur, new, base)
-    new["objective"] = _batch_mark(cur, new, base)  # sau `_carry_previous`: MUST chờ người đã mang sang không tính
     return new
 
 
@@ -6709,7 +6708,6 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
 
 NEXT_STEP_OBJECTIVES = ("build-until-clean",)  # `harden-to-signoff` (T-3548); `optimize-budget` sau `perf trial`
 AUDIT_STATUS_DEFAULT = "docs/ops/AUDIT-STATUS.md"
-OBJECTIVE_BATCHES_KEEP = 20  # mốc đầu đợt giữ trong `objective.batches` (FLOW-13 chỉ cần hai mốc cuối)
 PR_SETTLED = ("done", "closed")  # `pr next` không còn việc cho PR
 LOOP_TO_STEP = {"continue": "task", "verify": "verify", "blocked": "blocked", "budget": "budget"}
 
@@ -6728,47 +6726,6 @@ def _open_must(base: Path, st: Dict[str, Any]) -> List[str]:
     if not bp or not (base / bp).is_file():
         return []
     return [i for i in blueprint_status(base / bp)["open_must"] if i not in _deferred(st)]
-
-
-def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """`objective.batches` của state (mốc đầu mỗi đợt); thiếu/sai kiểu → []."""
-    obj = st.get("objective")
-    raw = obj.get("batches") if isinstance(obj, dict) else None
-    return [b for b in raw if isinstance(b, dict)] if isinstance(raw, list) else []
-
-
-def _plan_rev(base: Path, plan: str) -> str:
-    """Băm ID + spec các task của PLAN (tick `[x]` không đổi spec) — một phần định danh đợt của `_batch_mark`."""
-    tasks = parse_plan(base / plan)
-    return hashlib.sha256("\n".join(f"{t['id']}:{task_req_rev(t)}" for t in tasks).encode()).hexdigest()[:16]
-
-
-def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:
-    """`objective` sau `loop init`: mốc đầu mỗi đợt — số 🔴/🟠 mở trong sổ mặc định + MUST mở ngoài việc chờ người. Cùng
-    đợt (giữ mốc cũ) khi cùng đường dẫn PLAN với mốc cuối VÀ hoặc đè lên vòng còn bật (`--force` đổi ngân sách/sửa spec
-    giữa đợt — D-226), hoặc cùng spec; vòng đã kết thúc hay PLAN khác → đợt mới. Chưa có sổ, sổ/blueprint không đọc được
-    → `open` null (FLOW-13 không so qua mốc thiếu số)."""
-    batches, rev = _objective_batches(prev), _plan_rev(base, new["plan"])
-    last = batches[-1] if batches else {}
-    if last.get("plan") != new["plan"] or not (prev.get("active") is True or last.get("plan_rev") == rev):
-        status = base / AUDIT_STATUS_DEFAULT
-        try:
-            n = audit_open_count(status) + len(_open_must(base, new)) if status.is_file() else None
-        except (OSError, ValueError):
-            n = None
-        batches.append(
-            {"plan": new["plan"], "plan_rev": rev, "status": AUDIT_STATUS_DEFAULT, "at": new["started"], "open": n}
-        )
-    return {"name": NEXT_STEP_OBJECTIVES[0], "batches": batches[-OBJECTIVE_BATCHES_KEEP:]}
-
-
-def _no_progress(batches: List[Dict[str, Any]], now: int, status: str) -> Optional[str]:
-    """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0, hai mốc đếm
-    cùng sổ `status`) → `at` của mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
-    if len(batches) < 2 or now <= 0 or any(b.get("status") != status for b in batches[-2:]):
-        return None
-    a, b = batches[-2].get("open"), batches[-1].get("open")
-    return str(batches[-2].get("at")) if type(a) is int and type(b) is int and a <= b <= now else None
 
 
 def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
@@ -6804,7 +6761,6 @@ def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[L
             "iterations": st.get("iterations", 0),
             "max_iterations": st.get("max_iterations"),
             "deadline": st.get("deadline"),
-            "batches": _objective_batches(st),
         },
     }
 
@@ -6876,7 +6832,8 @@ def _step_audit(f: Dict[str, Any]) -> StepPart:
     """Sổ audit phải phủ tới HEAD (FLOW-10): không có sổ/chưa nhóm nào quét → audit full; trượt `audit check --strict` →
     audit; file nợ → audit delta từ SHA quét."""
     a = f["audit"]
-    if not a["exists"] or not a["scanned"]:
+    unread = a["exists"] and not a["sha256"]  # đọc sổ lỗi: nêu lỗi đọc, không gợi audit full (review #318)
+    if not unread and (not a["exists"] or not a["scanned"]):
         what = "chưa có nhóm nào đã quét trong" if a["exists"] else "chưa có"
         return {
             "action": "audit",
@@ -6901,19 +6858,11 @@ def _step_audit(f: Dict[str, Any]) -> StepPart:
 
 
 def _step_work(f: Dict[str, Any]) -> StepPart:
-    """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11); hai đợt liền không giảm → `budget` (FLOW-13)."""
+    """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11). Không-tiến-triển qua các đợt (FLOW-13) là
+    T-3578 (D-227)."""
     n_audit, n_must = f["audit"]["open"], f["open_must"]
-    batches = f["state"]["batches"]
     if not n_audit + n_must:
         return None
-    since = _no_progress(batches, n_audit + n_must, f["audit"]["status"])
-    if since:
-        chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n_audit + n_must}"
-        return {
-            "action": "budget",
-            "reason": f"hai đợt liên tiếp không giảm 🔴/🟠/MUST mở ({chain}, từ {since}) — kế hoạch/đặc tả cần người xem",
-            "missing": ["đợt kế giảm số việc mở"],
-        }
     return {
         "action": "replan",
         "reason": f"còn {n_audit} 🔴/🟠 mở trong sổ, {n_must} MUST mở ngoài việc chờ người — lập đợt kế (PLAN mới, `loop init`)",
@@ -6931,7 +6880,7 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "PLAN hết task, PR đã xong, sổ audit phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
             f"{pending} — đề xuất `/complete`; máy không đổi `delivery_phase` (D-178)",
         }
-    st, batches = f["state"], f["state"]["batches"]
+    st = f["state"]
     return {
         "objective": f["objective"],
         "action": part["action"],
@@ -6946,10 +6895,10 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
         },
         "budget": {
             "iterations": [st["iterations"], st["max_iterations"]],
-            "batches": [len(batches), None],
+            "batches": None,  # đếm đợt và không-tiến-triển mục tiêu: T-3578 (D-227)
             "deadline": st["deadline"],
             "cost_usd": None,  # phiên tương tác không có nguồn chi phí — null, không 0 (nghiên cứu §4D)
-            "no_progress_since": _no_progress(batches, f["audit"]["open"] + f["open_must"], f["audit"]["status"]),
+            "no_progress_since": None,
         },
         "inputs": f,
     }
