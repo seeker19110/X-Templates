@@ -1,7 +1,7 @@
 # ADR-0057: Review sạch ở head của PR đã merge phủ nợ review khi phát hành — bớt PR sổ sau squash-merge
 
-- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-28: "làm hướng 1" — tối ưu tốc độ, ADR-0056 §Chưa làm; phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-222)
-- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `reviewed_debt`, `_merged_clean`, `_review_debt_since`, `_release_review_debt`; test `DeliveryPhaseReleaseTest.test_delivery_phase_review_debt_*` (4 test).
+- **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-28: "làm hướng 1" — tối ưu tốc độ, ADR-0056 §Chưa làm; phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-222; gốc tin cậy thu hẹp ở D-223)
+- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `reviewed_debt`, `_merged_clean`, `_review_debt_since`, `_release_review_debt`; test `DeliveryPhaseReleaseTest.test_delivery_phase_review_debt_*`.
 - **Ngày:** 2026-10-28
 - **Làm rõ:** ADR-0031 (nợ review chặn phát hành — giữ; thêm một nguồn phủ), ADR-0027/0028 (dấu `xt-review v1`, `review_gate`), ADR-0056 (§Chưa làm: "review sạch ở head thay một phần audit delta"), AUD-HAR-122.
 
@@ -26,8 +26,9 @@ PR đó merge — bằng một PR sổ riêng. Đợt 2026-10-28 cần #310, #31
    sau SHA quét cũ nhất là commit merge của một PR — tiêu đề kết thúc `(#N)`, PR #N `merged` với `merge_commit_sha` đúng commit —
    có review sạch ở head cuối theo `review_gate` (dấu đã đăng của người có quyền ghi; mang qua "cập nhật nhánh" sạch). Hàng ghi
    PASS kèm danh sách PR. Mỗi file xét commit từ đúng SHA quét đưa nó vào nợ (file nhiều nhóm: SHA cũ nhất trong các nhóm còn nợ
-   nó). `review_identity` đọc ở `xt.yaml` **đã commit tại SHA quét cũ nhất**, không ở HEAD, không fallback cây làm việc — PR trong
-   vùng nợ không tự đặt gốc tin cậy (review #317), cùng nguyên tắc với merge-check đọc ở nhánh đích trước khi PR vào.
+   nó). `review_identity` (gốc tin cậy của dấu) phải **trùng** giữa `xt.yaml` đã commit ở SHA quét cũ nhất và ở HEAD (D-223); khác
+   — PR trong vùng nợ đặt/đổi danh tính, hay danh tính bị thu hồi/áp sau lần quét — thì không phủ gì (về như trước ADR-0057: audit
+   delta). Dấu chỉ được tin khi cả cấu hình đã audit lẫn cấu hình hiện hành cùng tin (review #317 hai lượt).
 2. Không đọc được GitHub (offline, token thiếu quyền), commit không phải squash của PR, PR làn nhanh không có review → vẫn là nợ (FAIL
    như cũ — chặt). Gate máy đọc offline (`xt.review_debt` trong PLAN) không đổi.
 3. Sổ audit vẫn là nơi ghi kết quả audit theo nhóm; PR sổ chỉ cần khi có audit thật (đợt quét, phát hiện mới), không cần để dời SHA

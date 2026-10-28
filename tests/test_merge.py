@@ -3611,6 +3611,15 @@ class StewardDispatchCiTest(unittest.TestCase):
             f"gh workflow run release-tag.yml --ref main -f sha={self.MERGED}", out
         )  # lệnh chạy tay chép dùng được
 
+    def test_steward_dispatch_tag_hint_quotes_ref(self):
+        """Review #317: tên nhánh có ký tự shell (`;` hợp lệ trong ref git) được trích dẫn trong lệnh chạy tay gợi ý."""
+        gh = SeqGh([{"merged": True, "merge_commit_sha": self.MERGED}])
+        gh.fail = {"gh api -X POST": "HTTP 422"}
+        out: dict = {}
+        with gh.patch():
+            xt._steward_dispatch_tag(out, "repos/{owner}/{repo}", "rel;x", "7")
+        self.assertIn(f"gh workflow run release-tag.yml --ref 'rel;x' -f sha={self.MERGED}", out["warn"])
+
     def test_steward_dispatch_ci_workflows(self):
         for path in (ROOT / ".github/workflows/ci.yml", ROOT / "framework/templates/ci.yml"):
             with self.subTest(path=str(path.relative_to(ROOT))):

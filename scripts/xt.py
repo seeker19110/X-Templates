@@ -9059,7 +9059,8 @@ def _review_debt_since(root: Path, status: Path) -> Tuple[Dict[str, str], List[s
     }
     changed: Dict[str, List[str]] = {}
     for sha in set(scanned.values()):
-        names = _git(root, "-c", "core.quotePath=false", "diff", "--name-only", f"{sha}..HEAD").stdout.splitlines()
+        # -z: tên chứa `"`/`\\`/ký tự điều khiển không bị trích dẫn kiểu C (trích dẫn → lệch nhóm, bỏ sót nợ — review #317)
+        names = _git(root, "diff", "-z", "--name-only", f"{sha}..HEAD").stdout.split("\0")
         changed[sha] = [f for f in names if f and not DOC_PATH_RE.search(f)]
     ahead = {s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout.strip() or 0) for s in changed}
     since: Dict[str, str] = {}
@@ -9100,14 +9101,20 @@ def _merged_clean(repo: str, commit: str, subject: str, identity: str) -> Option
 def reviewed_debt(root: Path, since: Dict[str, str], repo: str = "repos/{owner}/{repo}") -> Dict[str, str]:
     """{file nợ: "#N, #M"} cho file mà MỌI commit first-parent chạm nó sau đúng SHA quét đưa nó vào nợ (`since`) là commit
     merge của PR có review sạch ở head (ADR-0057) — review đó chính là audit delta cho diff của PR; squash-merge làm SHA
-    trong PR không bao giờ thành tổ tiên nhánh chính nên sổ không tự phủ được. Danh tính reviewer đọc ở SHA quét cũ nhất
-    (không fallback cây làm việc). Mỗi commit hỏi GitHub một lần; lỗi đầu tiên → thôi hỏi, phần còn lại vẫn là nợ."""
+    trong PR không bao giờ thành tổ tiên nhánh chính nên sổ không tự phủ được. `review_identity` (gốc tin cậy của dấu)
+    phải TRÙNG giữa xt.yaml đã commit ở SHA quét cũ nhất và ở HEAD (D-223): khác — PR trong vùng nợ đặt/đổi danh tính, hay
+    danh tính bị thu hồi/áp sau lần quét — thì không phủ gì (như trước ADR-0057: audit delta). Mỗi commit hỏi GitHub một
+    lần; lỗi đầu tiên → thôi hỏi, phần còn lại vẫn là nợ."""
     oldest = max(since.values(), key=lambda s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout or 0))
-    identity = _yaml_keys(_committed_xt_text(root, oldest) or "").get("review_identity", "")
+    identity, now = (_yaml_keys(_committed_xt_text(root, r) or "").get("review_identity", "") for r in (oldest, "HEAD"))
+    if identity != now:
+        return {}
     seen: Dict[str, Optional[str]] = {}
     out: Dict[str, str] = {}
     for f, sha in since.items():
-        log = _git(root, "log", "--first-parent", "--format=%H%x00%s", f"{sha}..HEAD", "--", f).stdout.splitlines()
+        log = _git(
+            root, "--literal-pathspecs", "log", "--first-parent", "--format=%H%x00%s", f"{sha}..HEAD", "--", f
+        ).stdout.splitlines()  # fmt: skip
         prs = []
         for line in log:
             commit, _, subject = line.partition("\0")
