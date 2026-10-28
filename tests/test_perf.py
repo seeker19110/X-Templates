@@ -8,7 +8,6 @@ import json
 import re
 import shutil
 import os
-import shutil
 import signal
 import statistics
 import subprocess
