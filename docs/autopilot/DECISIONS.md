@@ -1573,3 +1573,31 @@
 - Chọn: Thu hẹp gốc tin cậy: chỉ phủ khi review_identity đã commit ở SHA quét cũ nhất TRÙNG với ở HEAD (khác → không phủ, như trước ADR-0057 — phải audit delta); danh sách file qua diff -z (tên đặc biệt); test ghim từng điều kiện (R1 thu hồi, R2 áp sau, since theo file với lần đẩy thẳng giữa hai SHA, chọn SHA cũ nhất, shlex.quote) — đột biến đều đỏ
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: dấu chỉ được tin khi cả cấu hình đã audit lẫn cấu hình hiện hành cùng tin — đóng cả hai lớp lỗ (PR tự đặt, thu hồi bị bỏ qua) bằng một phép so, mọi khác biệt rơi về chặt; phương án 2 làm mất tính năng ở dự án dùng review_identity (T-1508); (2) đường lùi một dòng; (3) đơn giản hơn thêm luật đọc theo nhóm 13; (5) giữ lợi ích bớt PR sổ — trên dữ liệu thật hàng đã PASS (#316)
 - Đường lùi: Bỏ lời gọi reviewed_debt trong _release_review_debt; hoặc đóng PR #317
+
+### D-224 · 2026-10-28T15:54:42+00:00 · T-3547 loop next-step: thiếu JSON pr next thì làm gì, đo không-tiến-triển mục tiêu (FLOW-13) từ đâu, PR vượt ~150 dòng mã có tách không
+
+- Phương án: (1) Thiếu --prs → action pr kèm missing (không đoán PR đã xong); loop init ghi mốc đầu đợt objective.batches (🔴/🟠 mở + MUST mở ngoài chờ người), next-step so hai mốc cuối với hiện tại; giữ một PR vì Gate T-3547 đòi FLOW-09…13 cùng nhau · (2) Thiếu --prs coi như không có PR; next-step tự ghi lịch sử đợt vào state; tách FLOW-13 sang task mới
+- Chọn: Thiếu --prs → action pr kèm missing (không đoán PR đã xong); loop init ghi mốc đầu đợt objective.batches (🔴/🟠 mở + MUST mở ngoài chờ người), next-step so hai mốc cuối với hiện tại; giữ một PR vì Gate T-3547 đòi FLOW-09…13 cùng nhau
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: không có dữ liệu PR thì không được báo hết việc (cách hiểu chặt); next-step giữ chỉ đọc (ADR-0052 §5) nên mốc đợt phải ghi ở lệnh ghi state sẵn có là loop init; tách FLOW-13 phải sửa Gate T-3547 đã duyệt — giữ Gate, mã ~250 dòng gồm chú thích
+- Đường lùi: Bỏ khoá objective ở _init_apply và _step_work về replan; next-step chỉ đọc nên gỡ lệnh con không ảnh hưởng state
+
+### D-225 · 2026-10-28T16:30:58+00:00 · Review #318 lượt 1 (🟠 A/F/B/T): định danh đợt cho FLOW-13, sổ phải qua --strict, cờ blocked sau done, trần số đợt (🟢 O)
+
+- Phương án: (1) Đợt = PLAN (đường dẫn + băm ID/spec task); loop init cùng PLAN giữ mốc đầu đợt; mốc ghi đường sổ và null khi chưa có sổ, chỉ so hai mốc cùng sổ; sổ trượt audit check --strict (trừ lỗi 🔴/🟠 còn mở) → audit; st.blocked sau final_verdict done → blocked; chưa đặt trần số đợt (để T-3548/pilot đo) · (2) Mỗi loop init một mốc như cũ, sổ chỉ đếm 🔴/🟠 mở, thêm max_batches mặc định ngay
+- Chọn: Đợt = PLAN (đường dẫn + băm ID/spec task); loop init cùng PLAN giữ mốc đầu đợt; mốc ghi đường sổ và null khi chưa có sổ, chỉ so hai mốc cùng sổ; sổ trượt audit check --strict (trừ lỗi 🔴/🟠 còn mở) → audit; st.blocked sau final_verdict done → blocked; chưa đặt trần số đợt (để T-3548/pilot đo)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: --force đổi ngân sách hay /optimize không được tạo đợt giả (báo budget sai); sổ trượt --strict mà báo ready-for-complete là khai xong sai; trần số đợt cần số đo từ pilot (ADR-0052 §Thông tin thêm: ngưỡng là số để pilot đo lại) — chưa có số thì không chốt hằng số
+- Đường lùi: Bỏ nhánh errors ở _step_audit, bỏ kiểm plan_rev ở _batch_mark (mỗi init một mốc)
+
+### D-226 · 2026-10-28T17:00:21+00:00 · PR #318: hai lượt review chưa sạch (ADR-0053) — ranh giới đợt của FLOW-13 đoán từ nội dung PLAN vẫn sinh đợt giả khi sửa spec giữa đợt rồi loop init --force; đổi chiến lược thế nào
+
+- Phương án: (1) Đổi thiết kế ranh giới đợt theo vòng đời thay vì nội dung: đè lên vòng còn bật (prev.active) cùng đường dẫn PLAN = cùng đợt dù spec đổi; vòng đã kết thúc hoặc PLAN khác đường dẫn/spec = đợt mới; giữ PR, sửa kèm 4 🟢 (thứ tự scanned trước errors, chữ /optimize, _no_progress so từng mốc, ca P02/P04) · (2) Thu hẹp PR: bỏ FLOW-13 và objective.batches khỏi #318, tách task mới (Gate T-3547 bỏ FLOW-13) · (3) Thêm cờ loop init --new-batch để người/skill khai đợt mới tường minh
+- Chọn: Đổi thiết kế ranh giới đợt theo vòng đời thay vì nội dung: đè lên vòng còn bật (prev.active) cùng đường dẫn PLAN = cùng đợt dù spec đổi; vòng đã kết thúc hoặc PLAN khác đường dẫn/spec = đợt mới; giữ PR, sửa kèm 4 🟢 (thứ tự scanned trước errors, chữ /optimize, _no_progress so từng mốc, ca P02/P04)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: --force giữa đợt (đổi ngân sách/sửa spec) không bao giờ là đợt mới (LOOP-HARNESS-024), vòng đã kết thúc rồi init lại mới là đợt kế (D-177) — vòng đời là sự thật máy đã có, nội dung PLAN chỉ là dấu hiệu; tách PR phải sửa Gate đã duyệt; cờ tường minh dựa vào agent nhớ khai (dễ quên, sai lệch ngầm)
+- Đường lùi: Bỏ nhánh prev.active ở _batch_mark (về so plan_rev như e536a0f)
+
+### D-227 · 2026-10-28T17:29:25+00:00 · PR #318 lượt 3 chưa sạch: ranh giới đợt của FLOW-13 (mốc objective.batches) sai ở ca biên lần thứ ba (cờ active không phân biệt đợt xong/dở) — sửa tiếp trong #318 hay tách
+
+- Phương án: (1) Tách: bỏ objective.batches/_batch_mark/_no_progress khỏi #318, FLOW-13 vào XFAIL trỏ T-3578 (task mới: dấu đợt xong ghi khi loop verify --all xanh với verdict done hoặc Stop hook kết thúc done/chờ người; stopped/blocked không đóng đợt; D-NNN cho hết ngân sách); Gate T-3547 bỏ FLOW-13 · (2) Sửa tiếp trong #318 theo dấu đợt xong (thêm điểm ghi state ở loop verify + hook, lượt review thứ tư)
+- Chọn: Tách: bỏ objective.batches/_batch_mark/_no_progress khỏi #318, FLOW-13 vào XFAIL trỏ T-3578 (task mới: dấu đợt xong ghi khi loop verify --all xanh với verdict done hoặc Stop hook kết thúc done/chờ người; stopped/blocked không đóng đợt; D-NNN cho hết ngân sách); Gate T-3547 bỏ FLOW-13
+- Lý do (tiêu chí chất lượng cuối): PLAN cho phép tách khi task vượt cỡ (~150 dòng); giữ đường lùi: next-step không có FLOW-13 chỉ thiếu budget không-tiến-triển (an toàn: replan), không báo sai ready-for-complete; thiết kế dấu đợt xong chạm loop verify/Stop hook — đáng PR và review riêng thay vì vòng sửa–review thứ tư trên PR đã 250+ dòng (ADR-0053)
+- Đường lùi: Gộp T-3578 lại vào PR sau; mã mốc đợt có ở commit 2c69aac
