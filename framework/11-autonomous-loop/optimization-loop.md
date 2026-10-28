@@ -20,7 +20,7 @@ Mỗi task tối ưu là một dòng `T-NNN` thường trong `PLAN.md` (parser k
 
 1. **Mở task chỉ khi có mục tiêu số** (`XC-PERF-001`) hoặc ngân sách đang bị vượt. Không số thì không tối ưu (tránh tối ưu sớm, vi tối ưu không đo được).
 2. **Khoá bộ đo trước khi sửa** (kiểu `prepare.py` của autoresearch): harness đo, bộ test tương đương hành vi, input đo nằm ngoài quyền sửa của agent; `xt.py perf guard --base <ref> --locked <glob>…` đỏ khi diff đụng — kể cả **xoá** — chúng.
-3. **Baseline đo lại trong chính lượt Gate, trên commit gốc** (`git worktree` của `--base`), cùng máy với lượt đo sau: `xt.py perf sample --out before.json -- <lệnh đo>` (≥ 10 lần, bỏ warm-up) hoặc số tất định (lệnh, byte, truy vấn, token). Không đọc baseline từ file trong cây agent sửa được; baseline đã lưu thì commit vào đường dẫn khoá. `perf compare` từ chối (exit 2) cặp mẫu không so được: khác lệnh; mẫu v2 lệch `unit`/`higher_is_better`/`harness_sha256`/`env.platform`, baseline `dirty`, `before.head` ≠ `--base`.
+3. **Baseline đo lại trong chính lượt Gate, trên commit gốc** (`git worktree` của `--base`), cùng máy với lượt đo sau: `xt.py perf sample --out before.json -- <lệnh đo>` (≥ 10 lần, bỏ warm-up) hoặc số tất định (lệnh, byte, truy vấn, token). Mã candidate chạy cùng lượt nên baseline ghi ra thư mục tạm ngoài cả cây agent lẫn worktree, sha256 giữ trong biến shell và kiểm lại trước `perf compare`; không đọc baseline từ file agent sửa được; baseline đã lưu thì commit vào đường dẫn khoá. `perf compare` từ chối (exit 2) cặp mẫu không so được: khác lệnh; mẫu v2 lệch `unit`/`higher_is_better`/`harness_sha256`/`env.platform`, baseline `dirty`, `before.head` ≠ `--base`.
 4. **Profile, rồi mới chọn điểm nóng** (flamegraph, `EXPLAIN (ANALYZE, BUFFERS)`, `pg_stat_statements`, py-spy…). Chỉ nhận ứng viên có **trần tăng tốc** Amdahl `1/((1−p)+p/s)` đủ cho mục tiêu: tăng tốc 10 000× phần chiếm 10 % chỉ cho ≈ 1,11×.
 5. **Một giả thuyết, một thay đổi:** ghi kỳ vọng và *falsifier* (số nào thì bỏ) **trước** khi đo.
 6. **Máy quyết:** đo bản sau cùng máy/điều kiện ngay sau baseline (xen kẽ nếu được), `xt.py perf compare before.json after.json`:
@@ -28,20 +28,27 @@ Mỗi task tối ưu là một dòng `T-NNN` thường trong `PLAN.md` (parser k
 7. **Ghi sổ, siết ratchet:** thử nào cũng vào `docs/autopilot/PERF-LOG.md` (giữ hay bỏ); giữ thì commit baseline/ngân sách mới, không nới.
 8. **Dừng:** đạt mục tiêu thì dừng (không tối ưu vượt); 3 lần liên tiếp không `improved` cùng điểm nóng → đổi điểm nóng hoặc `loop defer`.
 
-Gate ví dụ — **script Gate và công cụ chấm cũng là bộ đo khoá** (agent sửa được `xt.py` hay script thì `perf compare` nói gì cũng được): Gate trong `PLAN.md` lấy script từ commit gốc — ``Gate: `bash <(git show origin/main:scripts/perf-gate.sh)` `` — script dùng `xt.py` của commit gốc trong worktree (commit gốc phải có khung ở `.xtemplates/`; repo khung: `scripts/xt.py`). `perf guard`/`perf sample` làm việc trên gốc repo git của cwd, không theo `CLAUDE_PROJECT_DIR`, bỏ qua `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` — script chạy từ cây agent sửa thì rà đúng cây đó:
+Gate ví dụ — **script Gate và công cụ chấm cũng là bộ đo khoá** (agent sửa được `xt.py` hay script thì `perf compare` nói gì cũng được): Gate trong `PLAN.md` lấy script từ commit gốc — ``Gate: `bash <(git show refs/remotes/origin/main:scripts/perf-gate.sh)` `` — script phân giải `origin/main` thành SHA một lần trước mọi mã candidate; đo bằng `xt.py` của worktree gốc, còn công cụ chấm (`guard`/`compare`, chỉ cần stdlib) xuất lại từ SHA đó **sau** lượt đo candidate và chạy `python3 -I` (bỏ user site, `PYTHON*`) bằng đường tuyệt đối phân giải ở đầu Gate: candidate tìm được worktree (`git worktree list`) và sửa `xt.py` ở đó. Commit gốc phải có khung ở `.xtemplates/` (repo khung: `scripts/xt.py`). `perf guard`/`perf sample` làm việc trên gốc repo git của cwd, không theo `CLAUDE_PROJECT_DIR`, bỏ qua `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` — script chạy từ cây agent sửa thì rà đúng cây đó:
 
 ```bash
 # scripts/perf-gate.sh (dự án tự viết)
 set -euo pipefail
-base=origin/main
-wt="$(mktemp -d)"; trap 'git worktree remove --force "$wt"' EXIT
-git worktree add -q --detach "$wt" "$base"
-XT="python3 $wt/.xtemplates/scripts/xt.py"          # công cụ chấm của commit gốc, không phải của cây agent sửa
+PY="$(command -v python3)" GIT="$(command -v git)" SHA="$(command -v sha256sum)"   # đường tuyệt đối, đầu Gate, trước mọi mã candidate
+base="$("$GIT" rev-parse --verify 'refs/remotes/origin/main^{commit}')"   # SHA một lần, trước mọi mã candidate
+wt="$(mktemp -d)"; out="$(mktemp -d)"; trap 'rm -rf "$out"; "$GIT" worktree remove --force "$wt"' EXIT
+"$GIT" worktree add -q --detach "$wt" "$base"
+XT="$PY -I $wt/.xtemplates/scripts/xt.py"   # chỉ để đo: candidate sửa được bản này khi chạy
+(cd "$wt" && $XT perf sample --out "$out/before.json" --harness 'bench/*' -- ./bench/run.sh)   # baseline: commit gốc, ngoài hai cây
+sum="$("$SHA" <"$out/before.json")"          # biến shell: candidate không sửa được
+$XT perf sample --out "$out/after.json" --harness 'bench/*' -- ./bench/run.sh   # mã candidate chạy từ đây
+tool="$(mktemp -d "$out/tool.XXXXXX")"; "$GIT" cat-file blob "$base:.xtemplates/scripts/xt.py" >"$tool/xt.py"
+XT="$PY -I $tool/xt.py"                     # công cụ chấm xuất lại từ SHA gốc, không lấy từ $wt
 $XT perf guard --base "$base" --locked 'bench/*' --locked 'tests/equiv/*' --locked 'scripts/perf-gate.sh' --strict
-(cd "$wt" && $XT perf sample --out "$OLDPWD/before.json" --harness 'bench/*' -- ./bench/run.sh)   # baseline trên commit gốc, cùng lượt
-$XT perf sample --out after.json --harness 'bench/*' -- ./bench/run.sh
-$XT perf compare --base "$base" before.json after.json
+[ "$("$SHA" <"$out/before.json")" = "$sum" ] || { echo "✗ before.json bị sửa trong lượt đo" >&2; exit 1; }
+$XT perf compare --base "$base" "$out/before.json" "$out/after.json"
 ```
+
+Giới hạn đã biết của Gate mẫu: candidate chạy cùng uid vẫn can thiệp được (1) tiến trình đang chạy (cả `after.json`, công cụ vừa xuất); (2) kho git: object rời, config/hook của `.git`, config git toàn cục (`~/.gitconfig`, `$XDG_CONFIG_HOME/git/config`, vd `core.fsmonitor` chạy khi công cụ chấm gọi git); (3) môi trường: lệnh giả trên thư mục `PATH` ghi được đứng trước bản thật (shim pyenv/asdf, `~/.local/bin`, bin của venv) hoặc ghi đè nhị phân `python3`/`git`/`sha256sum`; cài Python ghi được (venv, pyenv, Homebrew) thì `.pth`/`sitecustomize.py` vẫn chạy cả khi có `-I`; (4) cây agent trong lượt đo: tráo file khoá (bộ đo) giữa các lần chạy rồi trả lại nguyên byte trước `perf guard` — `harness_sha256` chỉ băm trước lần chạy đầu, guard chỉ thấy trạng thái cuối. `-I` và `git cat-file` vô dụng khi chính `python3` là bản giả. `command -v` chỉ ghim `python3`/`git`/`sha256sum` mà chính script gọi; `mktemp` của Gate và `git` do `xt.py` gọi bên trong vẫn tra `PATH` lúc chạy — có thư mục `PATH` ghi được đứng trước bản thật thì shim đặt ngay trong lượt đo cũng đủ (đã tái hiện: `improved −100 %`). Không có `sha256sum` (macOS không có coreutils) thì Gate đỏ không kèm thông báo. Rào thật là `perf trial` (lát 3, ADR-0052 §7). Lệnh git đổi ref: guard chặn từ T-3563; ghi thẳng `.git/refs`/đổi URL remote chưa chặn (`harness-files.md`, D-215).
 
 Vị trí trong vòng đời: **G5** khoá bộ đo + baseline · **G6** mỗi task tối ưu theo vòng trên, một PR mỗi lát · **G7** nhóm "hiệu năng" của `/audit` và số đo trong GO/NO-GO (`QA-PERF-006`) · **G8** field data/SLO dẫn dắt backlog tối ưu kế tiếp (`LOOP-DESIGN-019`). Skill `/optimize` (ADR-0048) nối các bước này; chỉ khi có ngân sách đỏ.
 
