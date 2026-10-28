@@ -1573,3 +1573,10 @@
 - Chọn: Thu hẹp gốc tin cậy: chỉ phủ khi review_identity đã commit ở SHA quét cũ nhất TRÙNG với ở HEAD (khác → không phủ, như trước ADR-0057 — phải audit delta); danh sách file qua diff -z (tên đặc biệt); test ghim từng điều kiện (R1 thu hồi, R2 áp sau, since theo file với lần đẩy thẳng giữa hai SHA, chọn SHA cũ nhất, shlex.quote) — đột biến đều đỏ
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: dấu chỉ được tin khi cả cấu hình đã audit lẫn cấu hình hiện hành cùng tin — đóng cả hai lớp lỗ (PR tự đặt, thu hồi bị bỏ qua) bằng một phép so, mọi khác biệt rơi về chặt; phương án 2 làm mất tính năng ở dự án dùng review_identity (T-1508); (2) đường lùi một dòng; (3) đơn giản hơn thêm luật đọc theo nhóm 13; (5) giữ lợi ích bớt PR sổ — trên dữ liệu thật hàng đã PASS (#316)
 - Đường lùi: Bỏ lời gọi reviewed_debt trong _release_review_debt; hoặc đóng PR #317
+
+### D-224 · 2026-10-28T15:54:42+00:00 · T-3547 loop next-step: thiếu JSON pr next thì làm gì, đo không-tiến-triển mục tiêu (FLOW-13) từ đâu, PR vượt ~150 dòng mã có tách không
+
+- Phương án: (1) Thiếu --prs → action pr kèm missing (không đoán PR đã xong); loop init ghi mốc đầu đợt objective.batches (🔴/🟠 mở + MUST mở ngoài chờ người), next-step so hai mốc cuối với hiện tại; giữ một PR vì Gate T-3547 đòi FLOW-09…13 cùng nhau · (2) Thiếu --prs coi như không có PR; next-step tự ghi lịch sử đợt vào state; tách FLOW-13 sang task mới
+- Chọn: Thiếu --prs → action pr kèm missing (không đoán PR đã xong); loop init ghi mốc đầu đợt objective.batches (🔴/🟠 mở + MUST mở ngoài chờ người), next-step so hai mốc cuối với hiện tại; giữ một PR vì Gate T-3547 đòi FLOW-09…13 cùng nhau
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: không có dữ liệu PR thì không được báo hết việc (cách hiểu chặt); next-step giữ chỉ đọc (ADR-0052 §5) nên mốc đợt phải ghi ở lệnh ghi state sẵn có là loop init; tách FLOW-13 phải sửa Gate T-3547 đã duyệt — giữ Gate, mã ~250 dòng gồm chú thích
+- Đường lùi: Bỏ khoá objective ở _init_apply và _step_work về replan; next-step chỉ đọc nên gỡ lệnh con không ảnh hưởng state

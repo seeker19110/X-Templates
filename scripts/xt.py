@@ -12,6 +12,8 @@ Lệnh:
                                 chứa FILE; --strict: còn MUST chưa đạt hoặc lệnh kiểm đỏ -> exit 1.
   loop init --plan FILE [--blueprint FILE] [--max-iterations N] [--hours H] [--single-session] [--max-task-runs N]
   loop status [--json]          Verdict máy tính từ PLAN + bằng chứng (không do model tự khai).
+  loop next-step [--prs FILE] [--status F] [--json]
+                                Bước kế của mục tiêu build-until-clean (task/verify/pr/audit/replan/ready-for-complete…).
   loop record --task T-001 -- <lệnh...>
                                 Chạy lệnh kiểm của task, ghi bằng chứng (exit code, thời gian, đuôi output).
   loop block --reason TEXT      Đánh dấu BLOCKED (điểm dừng an toàn — cần người, mọi việc còn lại phụ thuộc nó).
@@ -6554,6 +6556,7 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
         )
     new = copy.deepcopy(state)
     notes[:] = _carry_previous(cur, new, base)
+    new["objective"] = _batch_mark(cur, new, base)  # sau `_carry_previous`: MUST chờ người đã mang sang không tính
     return new
 
 
@@ -6701,6 +6704,249 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
         print(f"  ⚠ {' ∩ '.join(o['tasks'])} cùng ghi {', '.join(o['files'])} — làm tuần tự")
     for u in out["unscoped"]:
         print(f"  · {u} chưa khai files: — coi như giao với mọi task")
+    return 0
+
+
+NEXT_STEP_OBJECTIVES = ("build-until-clean",)  # `harden-to-signoff` (T-3548); `optimize-budget` sau `perf trial`
+AUDIT_STATUS_DEFAULT = "docs/ops/AUDIT-STATUS.md"
+OBJECTIVE_BATCHES_KEEP = 20  # mốc đầu đợt giữ trong `objective.batches` (FLOW-13 chỉ cần hai mốc cuối)
+PR_SETTLED = ("done", "closed")  # `pr next` không còn việc cho PR
+LOOP_TO_STEP = {"continue": "task", "verify": "verify", "blocked": "blocked", "budget": "budget"}
+
+
+def audit_open_count(status: Path) -> int:
+    """🔴/🟠 còn `mở` trong bảng `## Phát hiện` của sổ; không có sổ → 0."""
+    if not status.is_file():
+        return 0
+    rows = md_tables(status.read_text(encoding="utf-8")).get("Phát hiện", [])
+    return sum(r.get("Mức") in ("🔴", "🟠") and r.get("Trạng thái") == "mở" for r in rows)
+
+
+def _open_must(base: Path, st: Dict[str, Any]) -> List[str]:
+    """MUST blueprint chưa đạt ngoài việc chờ người; `loop init` không khai blueprint → []."""
+    bp = st.get("blueprint")
+    if not bp or not (base / bp).is_file():
+        return []
+    return [i for i in blueprint_status(base / bp)["open_must"] if i not in _deferred(st)]
+
+
+def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`objective.batches` của state (mốc đầu mỗi đợt); thiếu/sai kiểu → []."""
+    obj = st.get("objective")
+    raw = obj.get("batches") if isinstance(obj, dict) else None
+    return [b for b in raw if isinstance(b, dict)] if isinstance(raw, list) else []
+
+
+def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:
+    """`objective` của đợt mới (`loop init`): mốc các đợt trước + mốc đợt này — số 🔴/🟠 mở trong sổ + MUST mở ngoài việc
+    chờ người lúc khởi tạo. Sổ/blueprint không đọc được → `open` null (FLOW-13 không so qua mốc thiếu số)."""
+    try:
+        n: Optional[int] = audit_open_count(base / AUDIT_STATUS_DEFAULT) + len(_open_must(base, new))
+    except (OSError, ValueError):
+        n = None
+    mark = {"plan": new["plan"], "at": new["started"], "open": n}
+    return {"name": NEXT_STEP_OBJECTIVES[0], "batches": (_objective_batches(prev) + [mark])[-OBJECTIVE_BATCHES_KEEP:]}
+
+
+def _no_progress(batches: List[Dict[str, Any]], now: int) -> Optional[str]:
+    """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0) → `at` của
+    mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
+    if len(batches) < 2 or now <= 0:
+        return None
+    a, b = batches[-2].get("open"), batches[-1].get("open")
+    return str(batches[-2].get("at")) if type(a) is int and type(b) is int and a <= b <= now else None
+
+
+def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
+    """Verdict đợt cho `next-step`: vòng đã tắt sau `done`/chờ người (Stop hook ghi `final_verdict`) → tính lại từ PLAN
+    và blueprint trên cây hiện tại; tắt vì chặn/dừng tay → `blocked`, hết ngân sách → `budget`."""
+    v = loop_verdict(base)
+    fv = _final_verdict(st)
+    if v["verdict"] != "inactive" or fv is None:
+        return v
+    if fv not in ("done", PENDING_HUMAN):
+        return {"verdict": "budget" if fv == "budget" else "blocked", "reason": v["reason"]}
+    v = _verdict_plan(base, st) or _verdict_blueprint(base, st)
+    return _with_pending_human(v, base, st) if v["verdict"] == "done" else v
+
+
+def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[List[Dict[str, str]]]) -> Dict[str, Any]:
+    """Đầu vào của `next_step` (đọc đĩa/git, không gọi GitHub, không ghi): verdict đợt, kiểm lại cuối, PR, sổ audit, MUST."""
+    v = _batch_verdict(base, st)
+    p = base / status
+    debt = _review_debt_since(base, p) if p.is_file() else ({}, [])
+    return {
+        "objective": NEXT_STEP_OBJECTIVES[0],
+        "repo": base.name,
+        "head": _git_head(base),
+        "verdict": {k: v[k] for k in ("verdict", "reason", "task") if k in v},
+        "final_check": final_check(base) if v["verdict"] in ("done", PENDING_HUMAN) else None,
+        "prs": prs,
+        "audit": {
+            "status": status,
+            "exists": p.is_file(),
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else "",
+            "open": audit_open_count(p),
+            "debt": debt[0],
+            "scanned": debt[1],
+        },
+        "open_must": len(_open_must(base, st)),
+        "state": {
+            "rev": _state_rev(st),
+            "plan": st.get("plan"),
+            "iterations": st.get("iterations", 0),
+            "max_iterations": st.get("max_iterations"),
+            "deadline": st.get("deadline"),
+            "batches": _objective_batches(st),
+        },
+    }
+
+
+StepPart = Optional[Dict[str, Any]]
+
+
+def _step_loop(f: Dict[str, Any]) -> StepPart:
+    """Đợt chưa xong (hoặc xong mà chưa kiểm lại cuối trên cây này) → bước của vòng."""
+    v = f["verdict"]
+    if v["verdict"] in ("done", PENDING_HUMAN):
+        why = f["final_check"]
+        return (
+            {"action": "verify", "reason": why, "missing": ["`loop verify --all` xanh trên cây hiện tại"]}
+            if why
+            else None
+        )
+    if v["verdict"] == "inactive":
+        return {
+            "action": "replan",
+            "reason": f"{v['reason']} — lập PLAN đợt rồi `loop init`",
+            "missing": ["vòng đang bật"],
+        }
+    return {"action": LOOP_TO_STEP.get(v["verdict"], "blocked"), "reason": v["reason"], "task": v.get("task")}
+
+
+def _step_prs(f: Dict[str, Any]) -> StepPart:
+    """PR của đợt phải `done`/`closed` theo `pr next` trước khi báo hết việc (FLOW-09)."""
+    if f["prs"] is None:
+        return {
+            "action": "pr",
+            "reason": "chưa có JSON `pr next` của các PR trong đợt — đối soát trước khi báo hết việc",
+            "missing": ["`--prs FILE` (JSON `pr next --json`, một hoặc mảng; `[]` khi đợt không mở PR)"],
+        }
+    for p in f["prs"]:
+        if p["action"] not in PR_SETTLED:
+            why = f"PR #{p['pr']} còn `{p['action']}`" + (f": {p['why']}" if p["why"] else "")
+            return {
+                "action": "pr",
+                "reason": why,
+                "pr": p["pr"],
+                "head": p["head"],
+                "missing": [f"PR #{p['pr']} `done`"],
+            }
+    return None
+
+
+def _step_audit(f: Dict[str, Any]) -> StepPart:
+    """Sổ audit phải phủ tới HEAD (FLOW-10): không có sổ/chưa nhóm nào quét → audit full; file nợ → audit delta từ SHA quét."""
+    a = f["audit"]
+    if not a["exists"] or not a["scanned"]:
+        what = "chưa có nhóm nào đã quét trong" if a["exists"] else "chưa có"
+        return {
+            "action": "audit",
+            "reason": f"{what} sổ {a['status']} — audit full (`/audit`)",
+            "missing": ["sổ audit"],
+        }
+    if not a["debt"]:
+        return None
+    files = sorted(a["debt"])
+    scope = ", ".join(f"`{s[:12]}..HEAD`" for s in sorted(set(a["debt"].values())))
+    return {
+        "action": "audit",
+        "reason": f"{len(files)} file ngoài tài liệu đổi sau SHA quét (vd {', '.join(files[:3])}) — audit delta {scope}",
+        "missing": [f"sổ audit quét tới `{(f['head'] or '')[:12]}`"],
+    }
+
+
+def _step_work(f: Dict[str, Any]) -> StepPart:
+    """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11); hai đợt liền không giảm → `budget` (FLOW-13)."""
+    n_audit, n_must = f["audit"]["open"], f["open_must"]
+    batches = f["state"]["batches"]
+    if not n_audit + n_must:
+        return None
+    since = _no_progress(batches, n_audit + n_must)
+    if since:
+        chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n_audit + n_must}"
+        return {
+            "action": "budget",
+            "reason": f"hai đợt liên tiếp không giảm 🔴/🟠/MUST mở ({chain}, từ {since}) — kế hoạch/đặc tả cần người xem",
+            "missing": ["đợt kế giảm số việc mở"],
+        }
+    return {
+        "action": "replan",
+        "reason": f"còn {n_audit} 🔴/🟠 mở trong sổ, {n_must} MUST mở ngoài việc chờ người — lập đợt kế (PLAN mới, `loop init`)",
+    }
+
+
+def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Bước kế của mục tiêu `build-until-clean` (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết
+    quả; `inputs` trả nguyên `f` để phát lại. Dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178)."""
+    part = _step_loop(f) or _step_prs(f) or _step_audit(f) or _step_work(f)
+    if part is None:
+        pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
+        part = {
+            "action": "ready-for-complete",
+            "reason": "PLAN hết task, PR đã xong, sổ audit phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
+            f"{pending} — đề xuất `/complete`; máy không đổi `delivery_phase` (D-178)",
+        }
+    st, batches = f["state"], f["state"]["batches"]
+    return {
+        "objective": f["objective"],
+        "action": part["action"],
+        "reason": part["reason"],
+        "missing": part.get("missing", []),
+        "key": {
+            "repo": f["repo"],
+            "objective": f["objective"],
+            "task": part.get("task"),
+            "pr": part.get("pr"),
+            "head": part.get("head") or f["head"],
+        },
+        "budget": {
+            "iterations": [st["iterations"], st["max_iterations"]],
+            "batches": [len(batches), None],
+            "deadline": st["deadline"],
+            "cost_usd": None,  # phiên tương tác không có nguồn chi phí — null, không 0 (nghiên cứu §4D)
+            "no_progress_since": _no_progress(batches, f["audit"]["open"] + f["open_must"]),
+        },
+        "inputs": f,
+    }
+
+
+def _read_prs(src: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """`--prs FILE|-`: JSON của `pr next --json` (một đối tượng hoặc mảng) → [{pr, head, action, why}]; vắng → None.
+    Sai dạng → ValueError (exit 2 — không đoán trạng thái PR)."""
+    if src is None:
+        return None
+    raw = json.loads(sys.stdin.read() if src == "-" else Path(src).read_text(encoding="utf-8"))
+    items = raw if isinstance(raw, list) else [raw]
+    if not all(isinstance(p, dict) and isinstance(p.get("action"), str) and p["action"] for p in items):
+        raise ValueError("mỗi mục phải là JSON `pr next --json` có `action`")
+    return [{k: str(p.get(k) or "") for k in ("pr", "head", "action", "why")} for p in items]
+
+
+def _loop_next_step(args: argparse.Namespace, base: Path) -> int:
+    """`loop next-step` chỉ đọc (ADR-0052 §5): in bước kế của mục tiêu; không ghi state, không gọi GitHub."""
+    try:
+        prs = _read_prs(args.prs)
+    except (OSError, ValueError) as exc:
+        print(f"✗ --prs: {exc}", file=sys.stderr)
+        return 2
+    out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs))
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+    print(f"{out['action']} — {out['reason']}")
+    for m in out["missing"]:
+        print(f"  thiếu: {m}")
     return 0
 
 
@@ -7605,6 +7851,7 @@ LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "status": _loop_status,
     "record": _loop_record,
     "next": _loop_next,
+    "next-step": _loop_next_step,
     "block": _loop_block,
     "decide": _loop_decide,
     "defer": _loop_defer,
@@ -12214,6 +12461,11 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--json", action="store_true")
     lne = lsub.add_parser("next", help="task sẵn sàng theo `sau:` và cặp giao nhau `files:` (T-1511)")
     lne.add_argument("--json", action="store_true")
+    lns = lsub.add_parser("next-step", help="bước kế của mục tiêu, chỉ đọc (ADR-0052 §5)")
+    lns.add_argument("--objective", choices=NEXT_STEP_OBJECTIVES, default=NEXT_STEP_OBJECTIVES[0])
+    lns.add_argument("--prs", help="JSON `pr next --json` của PR trong đợt (FILE hoặc -; `[]` khi không có PR)")
+    lns.add_argument("--status", default=AUDIT_STATUS_DEFAULT, help="sổ audit")
+    lns.add_argument("--json", action="store_true")
     lr = lsub.add_parser("record")
     lr.add_argument("--task", required=True, type=_task_id)
     lr.add_argument(
