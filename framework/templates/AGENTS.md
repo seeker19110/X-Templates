@@ -43,7 +43,7 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 
 ## 7. Cổng (lệnh thật ở `xt.yaml`)
 - **Trước commit:** hook chạy `.xtemplates/scripts/dev-task.sh gate-fast` theo `commit_gate`; tự review diff; conventional commit.
-- **Trước khi đẩy/mở PR:** `gate-fast`; cổng đầy đủ = CI (không CI/cắt bản: `gate`).
+- **Trước khi đẩy/mở PR:** `gate-fast`; cổng đầy đủ = CI (cắt bản/không CI: `gate`).
 - **PR đã mở:** `<XT> pr next --pr <N>` → làm đúng `do` (`review` → giao reviewer theo §8 rồi `pr reviewed`); `merge-watch --pr <N>` chạy nền. Luật làn: `LOOP-STOP-022`/`029`; workflow `pr-steward` (`install.py --with-github`) làm thay khi không còn phiên.
 - **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha harden = `/complete` (ADR-0046).
 
