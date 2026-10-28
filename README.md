@@ -140,7 +140,7 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 | `python3 scripts/xt.py stats` | Đếm file theo loại và mục theo mức |
 | `python3 scripts/xt.py --version` · `--help` | Phiên bản khung (file `VERSION`) · ví dụ và mã thoát (0 ổn · 1 chưa đạt · 2 sai cách dùng · 3 lỗi GitHub/hết giờ · 126 guard cấm lệnh) |
 | `python3 scripts/check-links.py` | Kiểm liên kết Markdown toàn repo |
-| `scripts/dev-task.sh gate` | Cổng đầy đủ: chạy lệnh trong `xt.yaml` (build · typecheck · lint · test), CI chạy đúng lệnh này; chạy một lần trước khi đẩy/mở PR |
+| `scripts/dev-task.sh gate` | Cổng đầy đủ: chạy lệnh trong `xt.yaml` (build · typecheck · lint · test), CI chạy đúng lệnh này và là cổng đầy đủ; cục bộ trước cắt bản (ADR-0056) |
 | `scripts/dev-task.sh gate-fast` | Cổng commit nhanh (hook chạy khi `xt.yaml` `commit_gate: fast`; vắng = `full` = `gate`): `format_check` · lint · typecheck · `test_fast` với `XT_CHANGED_FILES` (file đổi so với HEAD + file mới); `test_fast` trống hoặc không biết file đổi → `test`; không build, không ngưỡng coverage |
 | `python3 scripts/xt.py test-select [FILE…] [--tests DIR] [--unittest]` | Test liên quan file đổi (đối số hoặc `XT_CHANGED_FILES`): chính file test, `test_<tên>.py`, test nhắc tên file, test quét theo đuôi (`*.md`); file không ánh xạ được → cả suite; `--unittest` in id lớp (`tests.test_x.Lop`), module lỗi import → exit 1 |
 | `python3 scripts/xt.py commit-gate` | In `fast`\|`full`: cổng trước commit theo `commit_gate` của `xt.yaml` (đọc như `doctor`; vắng/lạ → `full`) — hook `pre-bash-guard.sh` gọi |
@@ -246,6 +246,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0051](docs/adr/0051-split-session-attach-from-resume.md): tách "gắn phiên mới" khỏi "giải quyết việc chờ / mở block" — `loop attach`, `loop resolve`, `loop unblock`; `loop resume` giữ nghĩa cũ và in cảnh báo (D-201; lát 1 của nghiên cứu ba vòng, chưa triển khai).
 - [ADR-0052](docs/adr/0052-loop-state-rev-progress-perf-v2-next-step.md): state có `rev`, chặn không-tiến-triển theo task, mẫu perf v2, `loop next-step` chỉ đọc — lát 0–2 của nghiên cứu ba vòng; `perf trial` hoãn sang ADR riêng (D-202, D-203, chưa triển khai).
 - [ADR-0053](docs/adr/0053-review-round-budget-per-pr.md): ngân sách review mỗi PR — hai lượt chưa sạch rồi `pr next` trả `rethink`, thêm lượt qua `pr rethink --decision D-NNN`; review trước PR dùng cho đúng head (D-209; phần duyệt của PLAN-phase-gated-review).
+- [ADR-0056](docs/adr/0056-delivery-speed-review-scope-ci-gate-ids.md): tốc độ giao hàng — lỗi có từ trước không chặn PR (sổ audit chặn phát hành), CI là cổng đầy đủ mọi pha, `loop decide` đánh số qua nhánh remote (D-221).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.

@@ -387,7 +387,7 @@ class CommitGateFastHookTest(CommitGateFastHookBase):
                 self.assertIn("FAST-RAN", err)
                 self.assertNotIn("FULL-RAN", err)
                 self.assertIn("Commit nhanh (commit_gate: fast)", err)
-                self.assertIn("cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI", err)
+                self.assertIn("cổng đầy đủ (scripts/dev-task.sh gate) chạy ở CI", err)
 
     def test_commit_gate_fast_full_absent_or_unknown_runs_full_gate(self):
         # AUD-XFEAT-017: hook đọc như xt.py (`commit-gate`): dòng trùng lấy dòng cuối; `#` dính liền là một phần giá trị

@@ -1553,3 +1553,9 @@
 - Chọn: Sửa fixture wait trước marker/exit, grace 1 giây trong test; giữ assertion marker và PID biến mất, xác minh mutant chỉ TERM cha vẫn đỏ
 - Lý do (tiêu chí chất lượng cuối): Đã tái hiện 1/5 lượt fixture cũ để lại Z, 5/5 lượt fixture wait thu hồi đủ; mutant parent-only thiếu marker và không đạt. Sửa vòng đời tiến trình thử nghiệm, không giảm ngưỡng, không bỏ test, không sửa mã thực thi sản phẩm.
 - Đường lùi: Revert riêng commit fixture; test cũ vẫn phải báo đỏ nếu môi trường không reap.
+### D-221 · 2026-10-28T11:58:56+00:00 · Tối ưu quy trình cho tốc độ (chủ repo 2026-10-28): vòng sửa–review 2–3 lượt/PR, lượt 2 hay chặn vì lỗi có từ trước (#306, #308); gate cục bộ trùng CI; D-219/AUD-SEC-129 trùng giữa phiên song song — đổi gì?
+
+- Phương án: (1) Bỏ nguyên nhân, giữ cổng chặn merge/phát hành: lỗi có từ trước không chặn PR (sổ audit --strict chặn phát hành), CI là cổng đầy đủ mọi pha (gate-fast trước khi đẩy), loop decide đánh số qua nhánh remote, khoá setup (ADR-0056) · (2) Nới cổng: bỏ review ở harden hoặc tăng REVIEW_ROUNDS · (3) Chỉ ghi khuyến nghị, không đổi luật
+- Chọn: Bỏ nguyên nhân, giữ cổng chặn merge/phát hành: lỗi có từ trước không chặn PR (sổ audit --strict chặn phát hành), CI là cổng đầy đủ mọi pha (gate-fast trước khi đẩy), loop decide đánh số qua nhánh remote, khoá setup (ADR-0056)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mọi cổng chặn merge (CI xanh, review sạch delta) và phát hành (audit --strict, release-check) giữ nguyên, lỗi cũ dời sang sổ + task chứ không mất; phương án 2 trái AGENTS §3; (2) đường lùi: mỗi điểm một commit; (3) đơn giản: một đoạn luật + một git grep; số đo ở research/2026-10-28-velocity.md; (5) tốc độ: bớt lượt review 30–45 phút và vài phút cổng cục bộ mỗi lần đẩy
+- Đường lùi: Revert PR ADR-0056 hoặc từng điểm (review skill, gate skill + AGENTS §6, _remote_decisions, khoá setup)

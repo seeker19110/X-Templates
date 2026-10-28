@@ -14,6 +14,9 @@ typecheck: python3 -m mypy --strict --python-version 3.11 scripts/xt.py scripts/
 # tập test, cùng ngưỡng, 180 s → ~70 s trên 4 CPU. Một lớp đỏ → xargs exit ≠ 0 → cổng đỏ.
 test: d="$(mktemp -d)" && export COVERAGE_FILE="$d/.coverage" && python3 -m coverage erase && python3 -c 'import sys,unittest;S=set();f=lambda s:[f(t) if isinstance(t,unittest.TestSuite) else S.add("tests."+t.__class__.__module__+"."+t.__class__.__name__) for t in s if not isinstance(t,unittest.loader._FailedTest) or print(t._exception,file=sys.stderr) or sys.exit(1)];f(unittest.TestLoader().discover("tests"));print("\n".join(sorted(S)))' | xargs -r -P "$(nproc 2>/dev/null || echo 2)" -n 1 python3 -m coverage run -m unittest && python3 -m coverage combine -q && python3 -m coverage report --fail-under=100; rc=$?; rm -rf "$d"; exit $rc
 build: python3 scripts/xt.py stats
+# setup: cài công cụ dev ghim hash (ruff, mypy, coverage, shellcheck) — container mới thiếu chúng thì `gate` đỏ sau 1 s.
+# Môi trường cloud gọi `scripts/dev-task.sh setup` trong setup script (ADR-0056); CI vẫn cài bằng bước riêng của nó.
+setup: python3 -m pip install --quiet --require-hashes -r requirements-dev.txt
 # Chia test cho CI song song (`dev-task.sh test-shard I N [DIR]` / `test-combine DIR`, fan-out/fan-in — WF-CI-024):
 # test_list = ĐÚNG cách liệt kê lớp của `test` ở trên (test kiểm hai chuỗi trùng nhau), chạy bằng ${XT_PY:-python3} để
 # job py311 bắt cả lỗi import trên 3.11; test_unit chạy MỘT lớp ("$1"): có XT_COV_DIR → coverage ghi vào đó, không → không
@@ -30,8 +33,8 @@ test_combine: export COVERAGE_FILE="$XT_COV_DIR/.coverage" && python3 -m coverag
 # python3.11 → bỏ qua có log, exit 0 (CI py311 vẫn giữ sàn).
 test_floor: if command -v python3.11 >/dev/null 2>&1; then XT_PY=python3.11 XT_MIN_TESTS="${XT_MIN_TESTS:-100}" scripts/dev-task.sh test-shard 1 1; else echo "[dev-task] test_floor: không có python3.11 — bỏ qua sàn 3.11 (job CI py311 vẫn chạy)" >&2; fi
 # Cổng trước commit (hook pre-bash-guard): fast = `dev-task.sh gate-fast` — lint (gồm format --check) · typecheck ·
-# test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) chạy trước
-# khi mở PR và ở CI `quality`. Vắng = full.
+# test_fast (chỉ lớp test liên quan file đổi, KHÔNG coverage); cổng đầy đủ `dev-task.sh gate` (ngưỡng 100 %) là CI
+# `quality`; cục bộ trước cắt bản (ADR-0056). Vắng = full.
 commit_gate: fast
 # test_fast: `xt.py test-select` đọc XT_CHANGED_FILES (dev-task.sh đặt) → id lớp test liên quan (file không ánh xạ được →
 # cả suite), mỗi lớp một tiến trình như `test`. Module test lỗi import → test-select exit 1 → cổng đỏ.
