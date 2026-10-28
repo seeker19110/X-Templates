@@ -3600,13 +3600,16 @@ class StewardDispatchCiTest(unittest.TestCase):
                 self.assertTrue(res["applied"])  # merge đã vào — không huỷ
                 self.assertIn("dispatch tag ✗", res["then"])
                 self.assertIn("tag phát hành chưa gắn", res["warn"])
+                self.assertIn("(sha commit merge)", res["warn"])  # không gợi lệnh với sha không dùng được
                 self.assertEqual([w[3] for w in gh.writes], ["PUT", "POST"])  # merge + dispatch CI, không dispatch tag
         gh = SeqGh([{}, {}, {"merged": True, "merge_commit_sha": self.MERGED}], raw=self.version_pr())
         gh.fail = {"gh api -X POST repos/{owner}/{repo}/actions/workflows/release-tag.yml": "HTTP 404"}
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertIn("dispatch tag ✗ HTTP 404", out)
-        self.assertIn(f"gh workflow run release-tag.yml -f sha={self.MERGED}", out)  # lệnh chạy tay chép dùng được
+        self.assertIn(
+            f"gh workflow run release-tag.yml --ref main -f sha={self.MERGED}", out
+        )  # lệnh chạy tay chép dùng được
 
     def test_steward_dispatch_ci_workflows(self):
         for path in (ROOT / ".github/workflows/ci.yml", ROOT / "framework/templates/ci.yml"):

@@ -407,6 +407,60 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.commit("sổ lệch")
         self.assertEqual(xt.review_debt(self.repo, self.status)[0], ["src/app.py"])
 
+    def test_delivery_phase_review_debt_covered_by_merged_review(self):
+        """ADR-0057: file nợ mà mọi commit nhánh chính chạm nó là squash của PR có review sạch ở head → PASS, không cần PR
+        sổ chỉ để dời SHA (squash-merge làm SHA trong PR không bao giờ thành tổ tiên nhánh chính)."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.scanned({1: s0, 9: s0})
+        self.commit("sổ")
+        (self.repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        c5 = self.commit("feat: x (#5)")
+        head, old = "a" * 40, "b" * 40
+        state: dict = {}
+
+        def reset(**pull: object) -> None:
+            state.update(
+                pulls={
+                    "5": {"merged": True, "merge_commit_sha": c5, "head": {"sha": head}, "base": {"sha": s0}, **pull}
+                },
+                marks=[{"head": head, "clean": True, "at": "2026-10-28T10:00:00Z"}],
+                chain=[],
+            )
+
+        def one(path: str) -> dict:
+            n = path.rsplit("/", 1)[-1]
+            if n not in state["pulls"]:
+                raise xt.PrInputError(f"gh api {path} lỗi: HTTP 404")
+            return state["pulls"][n]
+
+        self.enterContext(unittest.mock.patch.object(xt, "_gh_one", side_effect=one))
+        self.enterContext(unittest.mock.patch.object(xt, "_published_marks", side_effect=lambda *a: state["marks"]))
+        self.enterContext(unittest.mock.patch.object(xt, "_base_merge_chain", side_effect=lambda *a: state["chain"]))
+        reset()
+        r = self.rows()["review_debt"]
+        self.assertEqual(r["result"], "PASS", r)
+        self.assertIn("1 file đổi sau SHA quét đều từ PR có review sạch ở head (#5; ADR-0057)", r["evidence"])
+        self.assertEqual(xt.review_debt(self.repo, self.status)[0], ["src/app.py"])  # Gate offline của PLAN không đổi
+        for name, pull, marks in (
+            ("review ở head còn lỗi chặn", {}, [{"head": head, "clean": False, "at": "x"}]),
+            ("chưa rà head cuối", {}, [{"head": old, "clean": True, "at": "x"}]),
+            ("merge_commit_sha khác commit", {"merge_commit_sha": "c" * 40}, None),
+            ("PR chưa merge", {"merged": False}, None),
+        ):
+            with self.subTest(name):
+                reset(**pull)
+                state["marks"] = marks if marks is not None else state["marks"]
+                self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        reset()
+        state["pulls"].clear()  # không đọc được PR (404/offline) → vẫn là nợ
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        reset()
+        state.update(marks=[{"head": old, "clean": True, "at": "x"}], chain=[old])  # head cuối = cập nhật nhánh sạch
+        self.assertEqual(self.rows()["review_debt"]["result"], "PASS")
+        (self.repo / "src" / "app.py").write_text("x = 3\n", encoding="utf-8")
+        self.commit("sửa thẳng không qua PR")  # commit chạm file mà không phải squash của PR → còn nợ
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+
     def test_delivery_phase_release_review_debt_unreadable_or_foreign_sha(self):
         self.scanned({1: "f" * 40})  # SHA không có trong lịch sử: hàng audit FAIL, review_debt không có SHA để so
         r = self.rows()["review_debt"]

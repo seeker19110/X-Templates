@@ -6,6 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- `release-check` hàng `review_debt` (ADR-0057, D-222): file nợ được coi là đã phủ khi mọi commit nhánh chính chạm nó sau SHA quét là squash `(#N)` của PR đã merge (`merge_commit_sha` khớp) có review sạch ở head — dấu `xt-review` của người có quyền ghi, mang qua cập nhật nhánh sạch; ghi PASS kèm danh sách PR. Không đọc được GitHub → FAIL như cũ; Gate offline `xt.review_debt` của PLAN không đổi. Bớt PR sổ chỉ để dời SHA sau squash-merge (AUD-HAR-122). Lệnh chạy tay khi dispatch tag lỗi thêm `--ref <nhánh>`.
 - `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
 - ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
 

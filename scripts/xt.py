@@ -9061,6 +9061,50 @@ def review_debt(root: Path, status: Path) -> Tuple[List[str], List[str]]:
     return sorted(debt), sorted(set(scanned.values()))
 
 
+SQUASH_PR_RE = re.compile(r"\(#(\d+)\)$")  # tiêu đề commit squash của GitHub: "<tiêu đề PR> (#N)"
+
+
+def _merged_clean(repo: str, commit: str, subject: str, base: Path) -> str:
+    """Số PR nếu commit `commit` trên nhánh chính là commit merge của PR có review sạch ở head (ADR-0057): tiêu đề
+    "(#N)", PR #N `merged` với `merge_commit_sha` = `commit`, dấu `xt-review` của người có quyền ghi sạch ở head cuối —
+    hoặc ở head cũ mà head cuối chỉ là "cập nhật nhánh" sạch (`_base_merge_chain`, cùng luật `review_gate`). Không khớp
+    hay không đọc được GitHub → "" (file vẫn là nợ — chặt)."""
+    m = SQUASH_PR_RE.search(subject)
+    if not m:
+        return ""
+    try:
+        pull = _gh_one(f"{repo}/pulls/{m[1]}")
+    except PrInputError:
+        return ""
+    head = (pull.get("head") or {}).get("sha") if isinstance(pull.get("head"), dict) else None
+    if not (pull.get("merged") and pull.get("merge_commit_sha") == commit and isinstance(head, str) and head):
+        return ""
+    base_sha = str((pull.get("base") or {}).get("sha", "")) if isinstance(pull.get("base"), dict) else ""
+    cfg = review_config(base, "HEAD")
+    marks = _published_marks(repo, m[1], cfg.get("review_identity", ""))
+    d = {"head": head, "lane": "chuẩn", "base_merge_of": _base_merge_chain(repo, base_sha, head)}
+    return m[1] if review_gate(d, marks)["state"] == "ok" else ""
+
+
+def reviewed_debt(root: Path, debt: List[str], since: str, repo: str = "repos/{owner}/{repo}") -> Dict[str, str]:
+    """{file nợ: "#N, #M"} cho file mà MỌI commit nhánh chính chạm nó sau `since` (SHA quét cũ nhất) là commit merge của
+    PR có review sạch ở head (ADR-0057) — review đó chính là audit delta cho diff của PR; squash-merge làm SHA trong PR
+    không bao giờ thành tổ tiên nhánh chính nên sổ không tự phủ được. Mỗi commit hỏi GitHub một lần."""
+    seen: Dict[str, str] = {}
+    out: Dict[str, str] = {}
+    for f in debt:
+        log = _git(root, "log", "--first-parent", "--format=%H%x00%s", f"{since}..HEAD", "--", f).stdout.splitlines()
+        prs = []
+        for line in log:
+            commit, _, subject = line.partition("\0")
+            if commit not in seen:
+                seen[commit] = _merged_clean(repo, commit, subject, root)
+            prs.append(seen[commit])
+        if prs and all(prs):
+            out[f] = ", ".join(f"#{n}" for n in dict.fromkeys(prs))
+    return out
+
+
 def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     """Nợ review (ADR-0031). Sổ vắng/không đọc được hay không có SHA quét dùng được → N/A: hàng `audit` đã FAIL hoặc mọi
     nhóm N/A (`audit check --strict` soát N/A trôi) — một vấn đề một hàng chặn."""
@@ -9071,6 +9115,8 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     if not shas:
         why = f"{status} không có nhóm đã quét với SHA là tổ tiên HEAD — không có SHA quét để so"
         return _release_row("review_debt", "N/A", why, "SHOULD")
+    covered = reviewed_debt(base, debt, _oldest_ancestor(base, shas)) if debt else {}
+    debt = [f for f in debt if f not in covered]
     if debt:
         return _release_row(
             "review_debt",
@@ -9078,7 +9124,17 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
             f"{len(debt)} file ngoài tài liệu đổi sau SHA quét ({', '.join(debt[:5])}) — chạy audit delta "
             f"(`xt.py audit plan --status {status}`), cập nhật sổ (ADR-0031)",
         )
+    if covered:
+        prs = ", ".join(dict.fromkeys(x for v in covered.values() for x in v.split(", ")))
+        why = f"{len(covered)} file đổi sau SHA quét đều từ PR có review sạch ở head ({prs}; ADR-0057)"
+        return _release_row("review_debt", "PASS", why)
     return _release_row("review_debt", "PASS", f"không có file ngoài tài liệu đổi sau SHA quét ({len(shas)} SHA)")
+
+
+def _oldest_ancestor(root: Path, shas: List[str]) -> str:
+    """SHA quét xa HEAD nhất (nhiều commit phía sau nhất) — phạm vi rộng nhất cho `reviewed_debt`."""
+    ahead = {s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout.strip() or 0) for s in shas}
+    return max(shas, key=lambda s: ahead[s])
 
 
 def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
@@ -10107,7 +10163,8 @@ def _steward_dispatch_tag(out: Dict[str, Any], repo: str, base: str, n: str) -> 
         sha = str(pull.get("merge_commit_sha") or "") if pull.get("merged") else ""
     except PrInputError as exc:
         err = str(exc)
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    ok = re.fullmatch(r"[0-9a-f]{40}", sha) is not None
+    if not ok:
         err = err or "PR chưa merge hoặc không có merge_commit_sha"
     else:
         name = Path(RELEASE_WORKFLOW_FILE).name
@@ -10115,11 +10172,7 @@ def _steward_dispatch_tag(out: Dict[str, Any], repo: str, base: str, n: str) -> 
         err = _steward_run([cmd + ["-f", f"inputs[sha]={sha}"]])
     out["then"] = "; ".join(x for x in (out.get("then"), "dispatch tag " + (f"✗ {err}" if err else "✓")) if x)
     if err:
-        how = (
-            f"gh workflow run release-tag.yml -f sha={sha}"
-            if sha and not err.startswith("PR chưa")
-            else "sha commit merge"
-        )
+        how = f"gh workflow run release-tag.yml --ref {base} -f sha={sha}" if ok else "sha commit merge"
         text = f"tag phát hành chưa gắn ({err}) — chạy tay workflow_dispatch release-tag.yml ({how})"
         out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
 

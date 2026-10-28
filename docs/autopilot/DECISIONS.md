@@ -1559,3 +1559,10 @@
 - Chọn: Bỏ nguyên nhân, giữ cổng chặn merge/phát hành: lỗi có từ trước không chặn PR (sổ audit --strict chặn phát hành), CI là cổng đầy đủ mọi pha (gate-fast trước khi đẩy), loop decide đánh số qua nhánh remote, khoá setup (ADR-0056)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mọi cổng chặn merge (CI xanh, review sạch delta) và phát hành (audit --strict, release-check) giữ nguyên, lỗi cũ dời sang sổ + task chứ không mất; phương án 2 trái AGENTS §3; (2) đường lùi: mỗi điểm một commit; (3) đơn giản: một đoạn luật + một git grep; số đo ở research/2026-10-28-velocity.md; (5) tốc độ: bớt lượt review 30–45 phút và vài phút cổng cục bộ mỗi lần đẩy
 - Đường lùi: Revert PR ADR-0056 hoặc từng điểm (review skill, gate skill + AGENTS §6, _remote_decisions, khoá setup)
+
+### D-222 · 2026-10-28T14:37:03+00:00 · Squash-merge làm mỗi PR mã đã review kéo theo một PR sổ chỉ để dời SHA (đợt 2026-10-28: #310, #313, #315; PR cắt bản luôn NO-GO ở head — AUD-HAR-122) — giảm thế nào mà không nới cổng phát hành?
+
+- Phương án: (1) release-check hỏi GitHub dấu xt-review của PR tạo mỗi commit nợ: mọi commit chạm file là squash (#N) có merge_commit_sha khớp và review sạch ở head (review_gate, cả cập nhật nhánh sạch) → phủ; offline → FAIL như cũ (ADR-0057) · (2) Trailer Xt-Reviewed trong thông điệp squash, đọc offline · (3) Giữ nguyên, gộp nhiều PR vào một PR sổ
+- Chọn: release-check hỏi GitHub dấu xt-review của PR tạo mỗi commit nợ: mọi commit chạm file là squash (#N) có merge_commit_sha khớp và review sạch ở head (review_gate, cả cập nhật nhánh sạch) → phủ; offline → FAIL như cũ (ADR-0057)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: nguồn tin là dấu review của người có quyền ghi (cùng luật merge), không giả được bằng nội dung commit — trailer (2) giả được vì thông điệp squash mặc định gồm commit của tác giả; offline vẫn chặt; Gate offline của PLAN không đổi; (2) đường lùi: một dòng; (3) đơn giản, dùng lại review_gate/_published_marks/_base_merge_chain; (5) tốc độ: bớt một PR sổ (30–60 phút) mỗi PR mã đã review
+- Đường lùi: Bỏ lời gọi reviewed_debt trong _release_review_debt
