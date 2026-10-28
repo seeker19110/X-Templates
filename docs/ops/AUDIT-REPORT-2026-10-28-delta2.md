@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Củng cố sau đánh giá, 2026-10-28
 
-> Gốc `main`: `07c428f` (#308); phạm vi tiếp theo là các commit `ce47da2` (corpus), `f4bd90f` (guard/state), `7f8b9a1` (preset) theo PLAN-hardening-assessment-2026-10-28, D-219, ADR-0054/0055. Đây là báo cáo delta; không thay báo cáo lịch sử trước #308.
+> Gốc `main`: `07c428f` (#308); phạm vi tiếp theo là các commit nhánh (không còn tới được từ `main` sau squash — xem PR #311, merge `6799550`) `ce47da2` (corpus), `f4bd90f` (guard/state), `7f8b9a1` (preset) theo PLAN-hardening-assessment-2026-10-28, D-219, ADR-0054/0055. Đây là báo cáo delta; không thay báo cáo lịch sử trước #308.
 
 Main cập nhật thêm `b7a8de6` (#309) trong lúc nghiệm thu: đã gộp 7 mục SHOULD mới, giữ cả hai nhóm thay đổi CHANGELOG. Code guard/state/installer không đổi; cây gộp được kiểm lại trước bàn giao.
 
@@ -31,6 +31,6 @@ Hai mục CODE-025/SEC-130 sửa trong PR #311 (commit nhánh `f4bd90f`, không 
 
 - Không đổi mặc định tự chủ của repo hoặc dự án đã cài; không tự bật/tắt sandbox, không cấu hình credential hay quyền persistent.
 - Python cục bộ 3.12; browser E2E và ma trận CI sống chưa được xác nhận trong phiên này. Log Gate (container khác, không kiểm lại được): `/tmp/xt-hardening-gate-final.log`; kiểm cây bàn giao lưu riêng ngoài repo để không đổi đầu vào đã kiểm.
-- Gate trên cây đã gộp #309 (`d44689d`) cũng đạt 1.899 test/100%; sau chỉnh fixture D-220 chạy lại Gate và verify trên cây bàn giao cuối, log `/tmp/xt-hardening-gate-handoff.log` và `/tmp/xt-hardening-verify-handoff.log`.
+- Gate trên cây đã gộp #309 (`d44689d`) cũng đạt 1.899 test/100%; sau chỉnh fixture D-220 chạy lại Gate và verify trên cây bàn giao cuối, log `/tmp/xt-hardening-gate-handoff.log` và `/tmp/xt-hardening-verify-handoff.log` (container khác, không kiểm lại được; commit nhánh `d44689d`).
 - Fetch main và Git push dry-run thành công; `gh auth status` trong/ngoài sandbox báo token không hợp lệ, nên không suy ra trạng thái quyền API từ trạng thái Git. Xuất bản chỉ nhánh và PR nháp khi quyền cho phép; kết quả xác minh remote được bàn giao riêng. Không merge, deploy hoặc cắt tag; thay đổi ở Unreleased.
 - Chưa thay việc xác nhận pháp lý bằng chuyên gia, pilot nhóm độc lập, hay số liệu ROI. Không tách monolith hoặc tuyên bố tăng tốc khi chưa có ngân sách vi phạm và phép đo phù hợp.
