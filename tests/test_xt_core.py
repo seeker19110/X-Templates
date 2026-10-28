@@ -1374,8 +1374,11 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         """review hotel-manager #119: hết giờ → SIGTERM cả nhóm (trap của script chạy), không đáp thì SIGKILL; tiến trình con
         nền không sống sót (trước đây chỉ bash bị SIGKILL, app tạm và khoá cổng còn lại)."""
         pid_file = self.base / "bg.pid"
-        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'echo don-dep; exit 1' TERM; sleep 30 & wait"
-        code, out = xt.run_gate_shell(cmd, self.base, 1)
+        # Thu hồi con trước khi thoát trap: PID1 của container có thể không reap zombie (kill(pid, 0) còn thấy PID).
+        # Marker SAU wait cũng bắt mutant chỉ TERM cha: hết grace, KILL không cho trap in marker giả hoàn tất.
+        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'wait; echo don-dep; exit 1' TERM; sleep 30 & wait"
+        with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):
+            code, out = xt.run_gate_shell(cmd, self.base, 1)
         self.assertEqual(code, 124)
         self.assertIn("đã dừng cả nhóm tiến trình", out)
         self.assertIn("don-dep", out)  # trap TERM của script đã chạy

@@ -11,6 +11,7 @@ Main cập nhật thêm `b7a8de6` (#309) trong lúc nghiệm thu: đã gộp 7 m
 - AUD-CODE-025: fallback không khóa của state có thể mất cập nhật. Test mới đỏ trước, sau sửa lỗi trước callback, state không đổi; CLI exit 2, hook Stop giữ cho dừng và ghi lỗi. Đường có flock tiếp tục được kiểm bởi UpdateStateTest/FLOW-07.
 - AUD-SEC-129: lỗi nạp/fallback guard từng cho qua hoặc dùng module dở. Canary tái hiện đỏ trước, sau sửa không chạy; no-harness và runtime fallback khỏe giữ tương thích. Rà độc lập còn tái hiện raw `ask` thành allow khi `apply_policy` lỗi ở mặc định: bổ sung canary với fallback thật và sửa đường đó.
 - Preset safe là lựa chọn merge/review khi tạo `xt.yaml`, không đổi quyền OS/network. Rà độc lập phát hiện mất provenance có thể làm hạ safe về autonomous; 24 biến thể đỏ trước, sau sửa giữ policy và xuất `.xtemplates-new` nếu khác, không tạo provenance giả.
+- Kiểm lại module core bắt race có từ trước trong fixture timeout: trap thoát trước khi reap khiến PID zombie còn tồn tại dưới PID1 không reap. D-220 sửa fixture chờ con trước marker/exit, giữ assertion marker và PID biến mất, grace 1 giây trong test; code sản phẩm không đổi. Scratch: fixture cũ 1/5 lượt để lại Z, fixture chờ 5/5 đạt; mutant chỉ TERM cha vẫn bị bắt. Hai tag thật v3.20.0/v3.27.0 được fetch để kiểm lại bằng chứng Git của blueprint, không tạo tag giả.
 
 ## Kiểm chứng
 
@@ -30,5 +31,6 @@ Hai mục CODE-025/SEC-129 đóng bằng commit `f4bd90f`; không dùng SHA #308
 
 - Không đổi mặc định tự chủ của repo hoặc dự án đã cài; không tự bật/tắt sandbox, không cấu hình credential hay quyền persistent.
 - Python cục bộ 3.12; browser E2E và ma trận CI sống chưa được xác nhận trong phiên này. Log Gate: `/tmp/xt-hardening-gate-final.log`; kiểm cây bàn giao lưu riêng ngoài repo để không đổi đầu vào đã kiểm.
+- Gate trên cây đã gộp #309 (`d44689d`) cũng đạt 1.899 test/100%; sau chỉnh fixture D-220 chạy lại Gate và verify trên cây bàn giao cuối, log `/tmp/xt-hardening-gate-handoff.log` và `/tmp/xt-hardening-verify-handoff.log`.
 - Fetch main và Git push dry-run thành công; `gh auth status` trong/ngoài sandbox báo token không hợp lệ, nên không suy ra trạng thái quyền API từ trạng thái Git. Xuất bản chỉ nhánh và PR nháp khi quyền cho phép; kết quả xác minh remote được bàn giao riêng. Không merge, deploy hoặc cắt tag; thay đổi ở Unreleased.
 - Chưa thay việc xác nhận pháp lý bằng chuyên gia, pilot nhóm độc lập, hay số liệu ROI. Không tách monolith hoặc tuyên bố tăng tốc khi chưa có ngân sách vi phạm và phép đo phù hợp.

@@ -1546,3 +1546,10 @@
 - Chọn: Giữ chính sách hiện hữu; bổ sung corpus #308, chặn ghi state thiếu khóa, chặn guard lỗi nạp/fallback hỏng, thêm safe opt-in và tài liệu có bằng chứng
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: sửa mất cập nhật và thực thi thiếu kiểm tra đã tái hiện; không coi guard là sandbox. Giữ đường lùi: từng lát có test, không tự đổi lựa chọn dự án đang chạy. Stdlib và diff nhỏ; tách monolith, đổi luật pháp hay tuyên bố nhanh hơn cần phạm vi và số đo riêng.
 - Đường lùi: Revert từng lát; preset mặc định và cấu hình dự án hiện hữu giữ nguyên; không hạ ngưỡng Gate.
+
+### D-220 · 2026-10-28T11:31:45+00:00 · Kiểm lại cuối gặp race fixture timeout: shell trap thoát trước reap khiến os.kill(pid,0) còn thấy zombie trong container PID1 không reap — xử lý thế nào?
+
+- Phương án: (1) Chấp nhận lần kiểm lại đỏ, giữ fixture cũ; báo riêng hạn chế môi trường · (2) Sửa fixture wait trước marker/exit, grace 1 giây trong test; giữ assertion marker và PID biến mất, xác minh mutant chỉ TERM cha vẫn đỏ
+- Chọn: Sửa fixture wait trước marker/exit, grace 1 giây trong test; giữ assertion marker và PID biến mất, xác minh mutant chỉ TERM cha vẫn đỏ
+- Lý do (tiêu chí chất lượng cuối): Đã tái hiện 1/5 lượt fixture cũ để lại Z, 5/5 lượt fixture wait thu hồi đủ; mutant parent-only thiếu marker và không đạt. Sửa vòng đời tiến trình thử nghiệm, không giảm ngưỡng, không bỏ test, không sửa mã thực thi sản phẩm.
+- Đường lùi: Revert riêng commit fixture; test cũ vẫn phải báo đỏ nếu môi trường không reap.
