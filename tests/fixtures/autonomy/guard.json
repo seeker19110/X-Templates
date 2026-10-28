@@ -5853,6 +5853,214 @@
    "expect": {
     "allowed": true
    }
+  },
+ {
+  "id": "guard-sec125-assign-append-rm-root",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "X+=1 rm -rf /"
+  },
+  "expect": {
+   "allowed": false
   }
+ },
+ {
+  "id": "guard-sec125-assign-append-force-push",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "X+=1 git push --force origin main"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-mixed-prefix",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "A=1 B+=2 git reset --hard HEAD~1"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-tracked-command",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "c=r; c+=m; $c -rf /"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-git-config-key",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0+=core.fsmonitor GIT_CONFIG_VALUE_0=./x.sh git status"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-conditional",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "if true; then X+=1 rm -rf ~; fi"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-control-ls",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "X+=1 ls"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec125-assign-append-control-build",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-125"
+  ],
+  "input": {
+   "command": "CFLAGS+=-O2 make"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-rm-root",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel ::: \"rm -rf /\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-options",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel -j2 --tag ::: \"git push --force origin main\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-custom-separator",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel --argsep=@@ @@ \"rm -rf /\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-cross-product",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel ::: echo ::: \"a; rm -rf /\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-empty-source",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel ::: ::: \"rm -rf /\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-wrapper",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "nohup parallel ::: \"git reset --hard HEAD~1\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-control-echo-data",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel echo ::: \"rm -rf /\""
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec121-parallel-args-control-gzip-template",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-121"
+  ],
+  "input": {
+   "command": "parallel -j4 'gzip {}' ::: a.log b.log"
+  },
+  "expect": {
+   "allowed": true
+  }
+ }
  ]
 }
