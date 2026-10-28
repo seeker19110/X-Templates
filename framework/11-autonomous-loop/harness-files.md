@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -73,7 +73,12 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
   (`REMOTE_REF_FORGE`), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
   hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;
-  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`). Gate đọc `origin/main` chỉ chống nhầm lẫn — rào thật của vòng
+  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`). Alias git được mở và xét như lệnh thật (alias một lần qua `-c`,
+  `--config-env`, `GIT_CONFIG_*`; alias bền đọc bằng `git config --get` ở repo của lệnh; alias `!` quét như shell lồng;
+  không giải được → `UNRESOLVED_TARGET`), nhưng còn lọt: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng
+  (`printf '[alias]…' > f && GIT_CONFIG_GLOBAL=f git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`),
+  git cũ hơn 2.43 thiếu một lệnh dựng sẵn có trong danh sách của guard (alias trùng tên đó git vẫn chạy); alias `!` quét
+  ở thư mục của lệnh, không ở gốc repo nơi git chạy nó. Gate đọc `origin/main` chỉ chống nhầm lẫn — rào thật của vòng
   tối ưu là `perf trial` (ADR-0052 §7).
 - **`merge-check` so giờ sổ review cục bộ với giờ GitHub** (AUD-XFEAT-019, D-104): review chặn chỉ có ở sổ cục bộ được
   tính khi ghi sau dấu đã đăng mới nhất ở cùng head; đồng hồ máy chậm hơn GitHub thì review chặn ghi ngay sau một dấu sạch
