@@ -3,7 +3,7 @@ title: Privacy by design: tối thiểu hoá, mục đích, lưu trữ, xoá, DP
 kind: module
 prefix: CMP-PRIV
 applies_to: [all]
-updated: 2026-10-14
+updated: 2026-10-28
 ---
 
 # Privacy by design: tối thiểu hoá, mục đích, lưu trữ, xoá, DPIA
@@ -66,6 +66,7 @@ trong cùng file → sinh cấu hình job xoá và mục DPIA từ đó (một n
 - [ ] `CMP-PRIV-020` **MAY** Dùng differential privacy hoặc tổng hợp có nhiễu cho thống kê công khai từ dữ liệu người dùng. → Kiểm: tài liệu tham số epsilon và lý do. · Nguồn: NIST Privacy Framework 1.0
 - [ ] `CMP-PRIV-021` **MAY** Cấp "privacy budget" cho mỗi tính năng mới: số trường PII tối đa được thêm, vượt phải qua review riêng tư. → Kiểm: CI đếm trường PII mới trong PR so với ngưỡng. · Nguồn: thực hành nội bộ
 - [ ] `CMP-PRIV-022` **MAY** Hiển thị "nhãn dinh dưỡng dữ liệu" (data nutrition label) trong app: thu gì, vì sao, giữ bao lâu — sinh từ data map. → Kiểm: trang có thật và sinh tự động. · Nguồn: GDPR Art. 12 (minh bạch)
+- [ ] `CMP-PRIV-023` **SHOULD** Che PII/bí mật áp ở **mọi** đường dữ liệu ra model hoặc bên thứ ba: lời gọi ra ngoài đi qua một hàm egress có redact; đường phụ (dựng báo cáo, sinh skill, gói debug) không gọi client trực tiếp. → Kiểm: test liệt kê call site client LLM/HTTP ra ngoài (grep/AST) — chỉ hàm egress chung; test redact trên dữ liệu mẫu có token và email.
 
 ## Bẫy thường gặp
 
@@ -98,3 +99,4 @@ trong cùng file → sinh cấu hình job xoá và mục DPIA từ đó (một n
 - LINDDUN privacy threat modeling: <https://linddun.org/> — (chưa xác minh phiên bản tài liệu ngày 2026-10-13).
 - Microsoft Presidio: <https://pypi.org/pypi/presidio-analyzer/json> — phiên bản 2.2.364, MIT, xác minh 2026-10-13.
 - Mẫu DPIA của khung: [`../templates/DPIA.md`](../templates/DPIA.md).
+- Catalog `seeker19110/stored` 20 §3i (bước phân tích che dữ liệu nhưng bước dựng skill gửi tiêu đề cửa sổ, URL đầy đủ, lệnh terminal cho model mà không qua bộ che) — đọc mã 2026-10-26, đọc catalog 2026-10-28.
