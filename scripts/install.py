@@ -26,8 +26,9 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
 
 Dùng:
-  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--label v1.0.0] [--plan]
+  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--preset safe|autonomous] [--label v1.0.0] [--plan]
   --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ), không ghi gì (REC-09)
+  --preset: chính sách merge/review cho xt.yaml mới; cài lại giữ lựa chọn dự án (không cấu hình sandbox).
   (chạy từ bản clone của X-Templates; hoặc: python3 -c "$(curl ...)" KHÔNG được khuyến khích — tải về, kiểm checksum rồi chạy)
 Thoát 0 = ổn; 2 = lỗi tham số.
 """
@@ -59,6 +60,11 @@ ROOT_TEMPLATES = {
     "PROGRESS.md": "PROGRESS.md",
     "xt.yaml": "xt.yaml",
 }
+INSTALL_PRESETS = {
+    "safe": {"merge_autonomy": "L1", "merge_hard_exceptions": "human", "delivery_phase": "harden"},
+    "autonomous": {"merge_autonomy": "L3", "merge_hard_exceptions": "auto", "delivery_phase": "build"},
+}
+YAML_POLICY_KEYS = frozenset(key.encode("ascii") for key in INSTALL_PRESETS["safe"])
 # Tên trước 3.0.0 (ADR-0007): dự án đã cài bản ≤ 2.x được chuyển tự động khi chạy lại install.
 LEGACY_DIR = ".xstored"
 LEGACY_YAML = "xs.yaml"
@@ -191,6 +197,55 @@ def load_rules(target: Path) -> dict[str, list[str]]:
         return {k: [] for k in RULE_KEYS}
 
 
+def installed_preset(target: Path) -> str | None:
+    """Preset đã áp dụng khi tạo xt.yaml; thiếu/hỏng/không biết → hành vi mẫu cũ, không suy từ cấu hình dự án."""
+    try:
+        value = json.loads((target / MANIFEST_V2).read_text(encoding="utf-8")).get("policy", {}).get("install_preset")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) and value in INSTALL_PRESETS else None
+
+
+def has_project_yaml(target: Path) -> bool:
+    """Có cấu hình hiện hữu (kể cả legacy/symlink hỏng): --preset không được thay lựa chọn của dự án."""
+    return any(p.exists() or p.is_symlink() for p in (target / "xt.yaml", target / LEGACY_YAML))
+
+
+def select_preset(target: Path, requested: str | None) -> str | None:
+    """Chỉ chọn preset mới khi tạo xt.yaml; cài lại dùng preset đã lưu, không nâng/hạ quyền ngầm."""
+    saved = installed_preset(target)
+    return saved if has_project_yaml(target) else requested or saved
+
+
+def yaml_with_preset(text: str, preset: str | None) -> str:
+    """Thay đúng ba khoá chính sách của mẫu; không sửa nội dung dự án hay cấu hình quyền/sandbox."""
+    if preset is None:
+        return text
+    for key, value in INSTALL_PRESETS[preset].items():
+        text = re.sub(rf"^{key}:.*$", f"{key}: {value}", text, flags=re.M)
+    return text
+
+
+def manifest_policy(target: Path, preset: str | None = None) -> dict[str, str]:
+    """Chính sách manifest: chỉ ghi preset đã áp dụng thật, hoặc giữ lựa chọn hợp lệ của lần cài trước."""
+    policy = {"ask_removal": "manifest-only"}
+    selected = preset or installed_preset(target)
+    if selected is not None:
+        policy["install_preset"] = selected
+    return policy
+
+
+def yaml_policy_unchanged(current: bytes, replacement: bytes, preserve: bool) -> bool:
+    """Khi cập nhật xt.yaml, chỉ tự ghi nếu ba dòng chính sách giữ nguyên; không suy preset từ file dự án."""
+    if not preserve:
+        return True
+
+    def policy(data: bytes) -> list[bytes]:
+        return [line for line in data.splitlines() if line.partition(b":")[0] in YAML_POLICY_KEYS]
+
+    return policy(current) == policy(replacement)
+
+
 def source_bytes(src: Path, transform: Callable[[str], str] | None = None) -> bytes:
     """Nội dung file khung sẽ ghi vào dự án (sau biến đổi) — cũng là nội dung được băm vào manifest."""
     data = src.read_bytes()
@@ -209,6 +264,7 @@ def classify_copy(
     transform: Callable[[str], str] | None = None,
     installed_hash: str | None = None,
     template_hash: str | None = None,
+    preserve_yaml_policy: bool = False,
 ) -> tuple[str, bytes]:
     """Quyết định (không ghi gì) cho một file khung: ('copied' | 'kept' | 'updated' | 'kept-own' | 'updated-new' |
     'skipped-symlink', nội dung bản khung). `installed_hash` = hash bản khung ghi ở lần cài trước: file còn đúng hash đó
@@ -228,7 +284,7 @@ def classify_copy(
         return "updated-new", data
     installed = manifest_hash(installed_hash)
     if sha256(current) == installed:
-        return "updated", data
+        return ("updated" if yaml_policy_unchanged(current, data, preserve_yaml_policy) else "updated-new"), data
     return ("kept-own" if manifest_hash(template_hash or sha256(data)) == installed else "updated-new"), data
 
 
@@ -644,12 +700,14 @@ def copy_harness_files(
     return new_manifest
 
 
-def write_manifests(target: Path, files: dict[str, str], rules: dict[str, list[str]]) -> None:
+def write_manifests(
+    target: Path, files: dict[str, str], rules: dict[str, list[str]], preset: str | None = None
+) -> None:
     """Ghi `harness.sha256.json` (hash file) và `manifest.json` (hash file + rule khung đặt + chính sách, REC-09); mọi
     hash ghi dạng `sha256:<hex>` (`hash_label`), kể cả hash hex trần giữ lại từ manifest cũ."""
     labelled = {rel: hash_label(digest) for rel, digest in files.items()}
     write_atomic(target / MANIFEST, json.dumps(labelled, indent=2, sort_keys=True) + "\n")
-    doc = {"schema": 1, "files": labelled, "rules": rules, "policy": {"ask_removal": "manifest-only"}}
+    doc = {"schema": 1, "files": labelled, "rules": rules, "policy": manifest_policy(target, preset)}
     write_atomic(target / MANIFEST_V2, json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
@@ -674,21 +732,24 @@ def install_harness(target: Path, force_harness: bool) -> None:
         )
 
 
-def root_template_jobs(target: Path) -> list[tuple[str, Path, Callable[[str], str]]]:
+def root_template_jobs(target: Path, preset: str | None = None) -> list[tuple[str, Path, Callable[[str], str]]]:
     """(tên, mẫu nguồn, hàm biến đổi) của file gốc từ framework/templates có mặt trong khung."""
     jobs: list[tuple[str, Path, Callable[[str], str]]] = []
     for name, tmpl in ROOT_TEMPLATES.items():
         tsrc = SRC / "framework" / "templates" / tmpl
         if tsrc.exists():
             body = template_body if name != "PROGRESS.md" else lambda t: progress_with_head(template_body(t), target)
+            if name == "xt.yaml":
+                body = lambda t: yaml_with_preset(template_body(t), preset)
             jobs.append((name, tsrc, body))
     return jobs
 
 
-def root_template_hash(tmpl: Path) -> str:
+def root_template_hash(tmpl: Path, preset: str | None = None) -> str:
     """Hash nhận diện mẫu file gốc (ghi vào manifest): mẫu đã bỏ frontmatter, TRƯỚC khi thay SHA HEAD — PROGRESS.md mang
     SHA đổi theo HEAD của dự án, không được làm mẫu "đổi" (D-114)."""
-    return sha256(source_bytes(tmpl, template_body))
+    body = source_bytes(tmpl, template_body).decode("utf-8")
+    return sha256((yaml_with_preset(body, preset) if tmpl.name == "xt.yaml" else body).encode("utf-8"))
 
 
 def infer_root_hashes(target: Path) -> dict[str, str]:
@@ -718,23 +779,36 @@ YAML_HAS_KEY_RE = re.compile(r"^(?:#[ \t]*)?([A-Za-z_][\w-]*):", re.M)  # dự �
 YAML_MARKER = '# Khoá mới của khung (bản {label}) — bật bằng cách bỏ "# "; vắng khoá = hành vi cũ'
 
 
-def install_root_templates(target: Path, label: str, inferred: dict[str, str] | None = None) -> None:
+def install_root_templates(
+    target: Path, label: str, inferred: dict[str, str] | None = None, preset: str | None = None
+) -> None:
     """Bước 3: file gốc từ framework/templates — copy-if-absent, bỏ frontmatter; hash mẫu (`root_template_hash`) vào
     CÙNG map `files` của manifest với harness: chưa sửa → cập nhật tại chỗ; đã sửa mà mẫu không đổi → `kept-own` (im
     lặng); đã sửa và mẫu đổi → `.xtemplates-new` một lần. Manifest chưa có hash file gốc → dùng hash suy từ mẫu cũ
     (`inferred`, chỉ để phân loại). `xt.yaml` của dự án nhận khoá mới của mẫu dạng chú thích (`label`)."""
     manifest = load_manifest(target)
     hints = inferred or {}
-    for name, tsrc, body in root_template_jobs(target):
-        th = root_template_hash(tsrc)
-        r, data = classify_copy(tsrc, target / name, False, body, manifest.get(name, hints.get(name)), th)
+    applied = None
+    for name, tsrc, body in root_template_jobs(target, preset):
+        th = root_template_hash(tsrc, preset)
+        r, data = classify_copy(
+            tsrc,
+            target / name,
+            False,
+            body,
+            manifest.get(name, hints.get(name)),
+            th,
+            preserve_yaml_policy=name == "xt.yaml",
+        )
         write_copy(tsrc, target / name, r, data)
         log(f"  {name}: " + ROOT_MESSAGES.get(r, r).format(name=name))
         if r != "skipped-symlink":  # `HASHED` ghi hash mẫu mới; `kept-own`: hash mẫu = hash đã cài, ghi lại như giữ
             manifest[name] = th
         if name == "xt.yaml" and r in YAML_MERGE:
             append_yaml_keys(target / name, data.decode("utf-8"), label)
-    write_manifests(target, manifest, load_rules(target))
+        if name == "xt.yaml" and r == "copied":
+            applied = preset
+    write_manifests(target, manifest, load_rules(target), applied)
 
 
 def missing_yaml_keys(template: str, own: str) -> list[tuple[str, str]]:
@@ -1074,7 +1148,9 @@ def plan_entry(target: Path, job: PlanJob, installed_hash: str | None) -> dict[s
     """Một file của kế hoạch: {path, action}; `xt.yaml` của dự án (`kept-own`/`updated-new`) kèm `keys_add` — khoá mới
     của mẫu sẽ được nối dạng chú thích (chỉ báo, không ghi)."""
     src, rel, force, tf, template_hash = job
-    action, data = classify_copy(src, target / rel, force, tf, installed_hash, template_hash)
+    action, data = classify_copy(
+        src, target / rel, force, tf, installed_hash, template_hash, preserve_yaml_policy=rel == "xt.yaml"
+    )
     entry: dict[str, Any] = {"path": rel, "action": action}
     if rel == "xt.yaml" and action in YAML_MERGE:
         own = read_own_yaml(target / rel)
@@ -1082,26 +1158,36 @@ def plan_entry(target: Path, job: PlanJob, installed_hash: str | None) -> dict[s
     return entry
 
 
-def plan_files(target: Path, force_harness: bool, no_harness: bool, with_github: bool) -> list[dict[str, Any]]:
+def plan_files(
+    target: Path, force_harness: bool, no_harness: bool, with_github: bool, preset: str | None = None
+) -> list[dict[str, Any]]:
     """Hành động dự kiến cho từng file harness/gốc/GitHub: copied | kept | updated | kept-own | updated-new |
     skipped-symlink. Cùng hash như cài thật: manifest, file gốc chưa có hash thì suy từ mẫu cũ (`infer_root_hashes`)."""
     hashes = {**infer_root_hashes(target), **load_manifest(target)}  # manifest thắng hash suy
     jobs: list[PlanJob] = []
     if not no_harness:
         jobs += [(src, src.relative_to(SRC).as_posix(), force_harness, None, None) for src in harness_sources(target)]
-    jobs += [(tsrc, name, False, body, root_template_hash(tsrc)) for name, tsrc, body in root_template_jobs(target)]
+    jobs += [
+        (tsrc, name, False, body, root_template_hash(tsrc, preset))
+        for name, tsrc, body in root_template_jobs(target, preset)
+    ]
     if with_github:
         jobs += [(SRC / gsrc, gh, False, github_template(gsrc), None) for gh, gsrc in GITHUB_FILES.items()]
     return [plan_entry(target, job, hashes.get(job[1])) for job in jobs]
 
 
-def install_plan(target: Path, force_harness: bool, no_harness: bool, with_github: bool = False) -> int:
+def install_plan(
+    target: Path, force_harness: bool, no_harness: bool, with_github: bool = False, preset: str | None = None
+) -> int:
     """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
     error = target_error(target, with_github)
     if error:
         log(error)
         return 2
+    selected = select_preset(target, preset)
+    files = plan_files(target, force_harness, no_harness, with_github, selected)
+    creates_yaml = any(f["path"] == "xt.yaml" and f["action"] == "copied" for f in files)
     plan: dict[str, Any] = {
         "schema": 1,
         "target": str(target),
@@ -1109,23 +1195,39 @@ def install_plan(target: Path, force_harness: bool, no_harness: bool, with_githu
         "skills_shadowed": [] if no_harness else shadowed_skills(target),
         "legacy_migration": (target / LEGACY_DIR).is_dir() or (target / LEGACY_YAML).is_file(),
         "settings": {"action": "skipped"} if no_harness else plan_settings(target, force_harness, load_rules(target)),
-        "files": plan_files(target, force_harness, no_harness, with_github),
+        "files": files,
+        "preset": {
+            "requested": preset,
+            "template": selected or "autonomous",
+            "existing_yaml": has_project_yaml(target),
+            "applied": creates_yaml and selected is not None,
+        },
         "manifest": {
             "path": MANIFEST_V2,
             "present": (target / MANIFEST_V2).is_file(),
-            "policy": {"ask_removal": "manifest-only"},
+            "policy": manifest_policy(target, selected if creates_yaml else None),
         },
     }
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
-def install(target: Path, force_harness: bool, no_harness: bool, label: str | None, with_github: bool = False) -> int:
+def install(
+    target: Path,
+    force_harness: bool,
+    no_harness: bool,
+    label: str | None,
+    with_github: bool = False,
+    preset: str | None = None,
+) -> int:
     target = target.resolve()
     error = target_error(target, with_github)
     if error:
         log(error)
         return 2
+    selected = select_preset(target, preset)
+    if preset is not None and has_project_yaml(target):
+        log("  --preset chỉ áp dụng khi tạo xt.yaml mới — giữ chính sách và lựa chọn hiện có của dự án")
     xt_dir = target / ".xtemplates"
     previous = installed_label(xt_dir)  # đọc trước khi install_framework ghi nhãn mới
     xt_dir.mkdir(exist_ok=True)
@@ -1135,7 +1237,7 @@ def install(target: Path, force_harness: bool, no_harness: bool, label: str | No
     version = install_framework(xt_dir, label)
     if not no_harness:
         install_harness(target, force_harness)
-    install_root_templates(target, version, inferred)
+    install_root_templates(target, version, inferred, selected)
     if with_github:
         install_github(target)
     ensure_gitignore(target)
@@ -1167,10 +1269,15 @@ def main(argv: list[str] | None = None) -> int:
         "D-122) vào .github/ (không đè)",
     )
     p.add_argument("--plan", action="store_true", help="in JSON kế hoạch (quyền/hook/file) ra stdout, không ghi gì")
+    p.add_argument(
+        "--preset",
+        choices=INSTALL_PRESETS,
+        help="chính sách merge/review cho xt.yaml mới: safe hoặc autonomous; cài lại giữ lựa chọn cũ",
+    )
     a = p.parse_args(argv)
     if a.plan:
-        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github)
-    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github)
+        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset)
+    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset)
 
 
 if __name__ == "__main__":

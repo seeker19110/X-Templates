@@ -2,7 +2,7 @@
 
 > Thư viện **yêu cầu có ID** cho mọi loại phần mềm và ngành nghề, kèm công cụ ghép thành checklist dự án, kiểm "xong" bằng máy,
 > và harness để AI agent **tự làm đến khi hoàn thành** mà vẫn dừng đúng chỗ cần người.
-> Nội dung tiếng Việt; phiên bản, chuẩn và luật xác minh từ nguồn sống ngày 2026-10-13.
+> Nội dung tiếng Việt; phiên bản, chuẩn và luật có nguồn và ngày kiểm tra theo từng mục. Mục ghi **chưa xác minh** cần đối chiếu trước khi áp dụng.
 
 ## Có gì trong khung
 
@@ -48,10 +48,22 @@ python3 .xtemplates/scripts/xt.py blueprint-status BLUEPRINT.md --strict --run
 Dự án đã cài bản ≤ 2.x (thư mục `.xstored/`, `xs.py`, `xs.yaml`): chạy lại bước 1 — `install.py` tự chuyển sang
 `.xtemplates/`, `xt.py`, `xt.yaml` và liệt kê file còn nhắc tên cũ để sửa tay ([ADR-0007](docs/adr/0007-rename-technical-identifiers-to-xtemplates.md)).
 
+Với **dự án mới** muốn người duyệt mọi merge, thêm `--preset safe`: tạo `xt.yaml` với `L1` / `human` / `harden`.
+Xem trước bằng `install.py <dự-án> --preset safe --plan`. `--preset autonomous` dùng `L3` / `auto` / `build` như mẫu
+hiện tại; không truyền cờ giữ hành vi cũ. Cài lại giữ preset và tùy chỉnh đã có, kể cả khi truyền preset khác.
+Preset chỉ chọn chính sách merge/review, **không tạo sandbox** ([ADR-0055](docs/adr/0055-optional-install-policy-presets.md)).
+Sau cài đặt, khai lệnh thật ở `xt.yaml`, chạy `doctor`, rồi kiểm Gate trước khi dùng autopilot.
+
 Quy mô quyết định khối lượng: `web-app` có 70 MUST ở **S** (prototype), 473 ở **M** (production), 1.146 ở **L** (đo 2026-10-19).
 `--out BLUEPRINT.md` ghi file chính chỉ chứa MUST theo quy mô (web-app + ecommerce: 41 KB ở S thay vì ~690 KB) và
 `BLUEPRINT-BACKLOG.md` chứa SHOULD/MAY ([ADR-0012](docs/adr/0012-blueprint-by-scale-and-task-iteration-cap.md)).
 Ghép thêm module ngoài hồ sơ bằng `--add`, ví dụ web app có tính năng AI: `--add "13-ai-engineering/*"`.
+
+Để giảm ngữ cảnh mỗi task, dùng `xt.py context --task T-NNN --plan <PLAN>` thay vì nạp toàn bộ blueprint; chọn
+quy mô theo rủi ro thật và giải trình mục không áp dụng. Thư viện dùng được qua nhiều công cụ; harness tự động
+hiện tập trung vào Claude Code + Bash + GitHub. CLI cần Python ≥ 3.11; cập nhật state cần `fcntl` và filesystem
+hỗ trợ `flock` (thiếu → exit 2, không ghi). CI khai Python 3.11/3.14 trên Linux; không suy ra hỗ trợ mọi OS/harness.
+Tài liệu ngành là đầu vào rà soát; yêu cầu pháp lý chưa xác minh cần người có chuyên môn xác nhận.
 
 ## Chạy tự động đến khi xong
 
@@ -102,7 +114,7 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 | `python3 scripts/xt.py loop ci-triage/triage-local/stats/verify/hook-stop` | `ci-triage` phân loại lỗi một run CI và trừ ngân sách sửa (AUTO-04; exit 1 = block/defer) · `triage-local` đọc JSON hook `PostToolUseFailure` từ stdin, lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật, phân loại như `ci-triage`, không trừ ngân sách; luôn exit 0 (fail-open) · `stats` số đo vòng từ `.autopilot/runs.jsonl` · `verify` kiểm lại cuối: chạy lại Gate có đầu vào đổi · `hook-stop` dùng bởi Stop hook |
 | `python3 scripts/xt.py pr next/reviewed/rethink/steward/title-check/stats` | Merge theo làn (ADR-0024/0027): `next` in MỘT hành động kế tiếp cho PR · `reviewed --pr N --head SHA --clean\|--blocking\|--inconclusive` ghi sổ review và đăng lên PR · `rethink --pr N --decision D-NNN` mở thêm 2 lượt review khi `next` trả `rethink` — D-NNN mới, câu hỏi nhắc `#N` (ADR-0053) · `steward [--apply]` chạy `pr next` cho mọi PR mở (workflow `pr-steward`) · `title-check [TITLE]` kiểm tiêu đề TRƯỚC `gh pr create` bằng đúng luật bước CI `checks`/`merge-check` (Conventional Commits, ≤ 72 ký tự — D-056): 0 hợp lệ · 1 sai kèm gợi ý · 2 không có TITLE và không đọc được PR mở của nhánh · `stats [--days 30] [--repo R] [--json]` số đo PR đã merge trong N ngày chỉ qua REST: lead time mở → merge (trung vị, P95), run CI `pull_request` mỗi PR (theo `head_branch` + `head_sha`), tỉ lệ run `failure`/`cancelled`, PR nhãn `xt-standard-lane`, PR revert, `pushes` (head SHA riêng biệt mỗi PR), `first_push_green` (PR xanh ngay run đầu của push đầu), `cancelled_same_sha` (run huỷ mà cùng SHA còn run khác — vết `edited`); run đọc theo workflow CI (`XT_CI_WORKFLOW`) từng ngày để vượt trần 1.000 của listing, ngày vẫn chạm trần → `runs_truncated: true` + cảnh báo — bảng Markdown `/handover` dán vào `PROGRESS.md` (run CI hết hạn sau retention 90 ngày) |
 | `python3 scripts/xt.py grant-check GROUP [KHOÁ=GIÁ_TRỊ …]` | Việc production có nằm trong mục Ủy quyền production của PLAN.md không: exit 0 làm, 1 `loop defer` (ADR-0022) |
-| `python3 scripts/xt.py guard-check -- <lệnh>` | exit 126 nếu guard của dự án cấm lệnh — `dev-task.sh` gọi trước mỗi lệnh `xt.yaml`; Gate/`Kiểm:` do `loop record`/`verify`/`blueprint-status --run` chạy cũng qua cùng kiểm (LOOP-STOP-027) |
+| `python3 scripts/xt.py guard-check -- <lệnh>` | exit 126 nếu guard cấm lệnh, lỗi nạp hoặc fallback cũng hỏng (ADR-0054); `dev-task.sh`, Gate/`Kiểm:` qua cùng kiểm (LOOP-STOP-027). Dự án chưa cài harness giữ tương thích |
 | `python3 scripts/xt.py harness-check` | lệnh kiểm chỉ đọc cho mục hàng rào (`LOOP-ORCH-003`, `LOOP-STOP-001/002`): guard của dự án chặn bộ lệnh mẫu, `permissions.ask` rỗng, agent khai `tools:` tường minh, không `permissionMode`, không `Agent`/`Task`, `reviewer*` không `Edit`/`Write`; exit 1 nếu hàng nào hỏng |
 | `python3 scripts/xt.py release-check [--blueprint F] [--status F] [--unchecked-must {warn,fail}] [--json]` | Cổng G7 máy đọc (ADR-0029): gom `blueprint-status --strict --run`, `audit check --strict`, kiểm lại cuối khớp cây, cây git sạch + HEAD, đề xuất "Khi chạy thật" chờ người, pha `harden` và nợ review sau SHA quét (ADR-0031), lệnh `attack`/`perf` của xt.yaml (ADR-0042), số + tỉ lệ MUST tick không có lệnh kiểm (`unchecked_must`: `warn` mặc định, `fail` = NO-GO) → PASS/WARN/FAIL/N-A có bằng chứng, `verdict` GO / GO (chờ người) / NO-GO; exit 1 khi NO-GO — phần máy của `GO-NO-GO.md` |
 | `python3 scripts/xt.py autonomy-bench [--corpus DIR] [--json]` | Corpus PR/rollup/review/guard/log CI ở `tests/fixtures/autonomy/` chạy qua hàm thật (merge-check, `_ci_blocker`, `pr next`, guard + chính sách): exit 1 khi false-green > 0 (máy cho merge/chạy/tính xanh ở ca phải chặn), khi có ca lệch (kể cả `code` khác mong đợi) hoặc ID bắt buộc chưa có ca; 2 khi corpus hỏng/ca không chạy được; báo chặn oan và độ phủ REC §2 + 🔴/🟠 đã sửa; job CI `checks` chạy (tổng hợp vào `quality`) (AUTO-07, [baseline](docs/ops/AUTONOMY-BASELINE.md)) |
@@ -112,7 +124,7 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `review` (chưa đủ review sạch ở head, exit 1, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) máy merge ghim head mọi làn (làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở đúng head — ADR-0024, ADR-0036; không bật auto-merge của GitHub) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
-| `python3 scripts/install.py DỰ_ÁN [--with-github]` | Cài khung + harness vào dự án đích; `--with-github` thêm ruleset, CI song song + `quality` tổng hợp, kiểm tiêu đề PR (`pr-title`), quét bí mật, `pr-steward`, stub `merge-gate` tới khi gỡ khỏi ruleset ([`framework/templates/`](framework/templates/README.md)) |
+| `python3 scripts/install.py DỰ_ÁN [--with-github] [--preset safe\|autonomous] [--plan]` | Cài khung + harness; preset chỉ chọn chính sách cho `xt.yaml` mới, cài lại giữ lựa chọn; `--plan` xem trước. `--with-github` thêm ruleset, CI, kiểm tiêu đề PR, quét bí mật và steward ([`framework/templates/`](framework/templates/README.md)) |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
 | `python3 scripts/xt.py changelog-check [FILE]` | `CHANGELOG.md` theo Keep a Changelog 1.1.0: `## [Unreleased]` đầu tiên, bản `## [X.Y.Z] - YYYY-MM-DD` giảm dần, nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` cùng thư mục (nếu có) |
 | `python3 scripts/xt.py license-check [--requirements F]… [--allow F] [--today D]` | License (`importlib.metadata`) của mọi gói ghim `==` trong `requirements-dev.txt` (hoặc file chỉ định) đối chiếu allowlist SPDX của `license-allow.json`; ngoại lệ cần `approved_by` + `expires`, chỉ khớp đúng license đã duyệt; vi phạm, gói ghim chưa cài hoặc ngoại lệ quá hạn → exit 1 (BASE-DEP-005); chạy trong `lint` |
