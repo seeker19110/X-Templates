@@ -11202,17 +11202,18 @@ def _perf_run(cmd: List[str], timeout: float) -> Tuple[int, float]:
     done = threading.Event()
     t0 = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    reaper = threading.Thread(target=_perf_reap, args=(proc, ended, done), name="xt-perf-reap", daemon=True)
-    try:
+    reaper: Optional[threading.Thread] = None
+    try:  # dựng + khởi chạy thread trong `try`: Ctrl-C ở bất kỳ bước nào vẫn giết nhóm (review #304)
+        reaper = threading.Thread(target=_perf_reap, args=(proc, ended, done), name="xt-perf-reap", daemon=True)
         reaper.start()
         finished = done.wait(timeout)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
-        if reaper.ident is None:  # thread chờ chưa khởi chạy được: tự thu dọn
-            proc.wait()
-        else:
+        if reaper is not None and reaper.is_alive():
             reaper.join()
+        else:  # chưa dựng/chưa chạy được (`ident` có thể đã gán mà chưa started) hoặc đã xong: tự thu dọn
+            proc.wait()
     if not finished:
         raise subprocess.TimeoutExpired(cmd, timeout)
     return proc.returncode, ended[0] - t0
