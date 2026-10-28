@@ -31,8 +31,8 @@ Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngư�
 | Việc | Lệnh |
 |---|---|
 | Audit khung + sửa an toàn (đầu `/autopilot`) | `python3 scripts/xt.py doctor --fix` |
-| Cổng commit (hook tự chạy theo `commit_gate`) | `scripts/dev-task.sh gate-fast` |
-| Cổng đầy đủ, một lần trước khi đẩy/mở PR (= CI) | `scripts/dev-task.sh gate` |
+| Cổng commit và trước khi đẩy (hook chạy lúc commit) | `scripts/dev-task.sh gate-fast` |
+| Cổng đầy đủ = CI; cục bộ trước cắt bản (ADR-0056) | `scripts/dev-task.sh gate` |
 | Bước kế của PR đã mở · theo dõi nền | `python3 scripts/xt.py pr next --pr <N>` · `merge-watch --pr <N>` |
 | Cổng G7 máy đọc | `python3 scripts/xt.py release-check` |
 

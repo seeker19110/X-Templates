@@ -137,4 +137,4 @@ Gói ngành thêm: **Khung pháp lý** (Việt Nam + quốc tế, số hiệu v�
 
 - Thêm/sửa mục: giữ ID cũ ổn định; cập nhật `updated`; ghi `CHANGELOG.md`.
 - Đổi quyết định lớn về cấu trúc khung: ghi ADR ở `docs/adr/`.
-- Cổng commit do hook chạy (`scripts/dev-task.sh gate-fast` theo `commit_gate` trong `xt.yaml`); trước khi đẩy/mở PR chạy `scripts/dev-task.sh gate` một lần — lệnh thật ở `xt.yaml`.
+- Cổng commit do hook chạy (`scripts/dev-task.sh gate-fast` theo `commit_gate` trong `xt.yaml`); cổng đầy đủ `scripts/dev-task.sh gate` là CI (cục bộ trước cắt bản — ADR-0056) — lệnh thật ở `xt.yaml`.
