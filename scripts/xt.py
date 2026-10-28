@@ -108,6 +108,7 @@ import statistics
 import subprocess
 import tempfile
 import sys
+import threading
 import time
 import traceback
 import types
@@ -11176,31 +11177,60 @@ def _perf_report(doc: Dict[str, Any]) -> str:
     )
 
 
-def _perf_run(cmd: List[str], timeout: float) -> int:
-    """Chạy `cmd` trong nhóm tiến trình riêng và giết cả nhóm khi xong, quá giờ hoặc bị Ctrl-C — tiến trình nền/cháu không
-    được sống tiếp làm nhiễu lần đo sau. (SIGTERM gửi thẳng cho xt.py không được bắt: giới hạn đã biết.)"""
+def _perf_reap(proc: "subprocess.Popen[bytes]", ended: List[float], done: threading.Event) -> None:
+    """Thread chờ của `_perf_run`: chờ CHẶN tới khi tiến trình kết thúc (waitpid), ghi mốc kết thúc ngay rồi báo xong."""
+    proc.wait()
+    ended.append(time.perf_counter())
+    done.set()
+
+
+def _perf_run(cmd: List[str], timeout: float) -> Tuple[int, float]:
+    """Chạy `cmd` trong nhóm tiến trình riêng; trả (mã thoát, giây từ trước khi khởi chạy tới lúc tiến trình kết thúc).
+
+    Đo không lượng tử (AUD-PERF-003): `wait(timeout=…)` của CPython thăm dò với chu kỳ tăng dần tới 50 ms nên số đo bị
+    làm tròn theo bậc. Vì vậy thread chờ (`_perf_reap`) gọi `proc.wait()` CHẶN (waitpid) và ghi mốc kết thúc ngay khi
+    waitpid trả về — trước mọi bước dọn, nên không cộng độ trễ của chúng. Luồng chính giữ hạn giờ bằng
+    `Event.wait(timeout)` (khoá có timeout, không thăm dò; SIGINT vẫn làm nó nhả → KeyboardInterrupt). Hạn giờ và mọi
+    lỗi khi dọn (vd `killpg` ném PermissionError vì nhóm có tiến trình khác real uid, như `sudo -n …`) nảy ra ở luồng
+    chính đúng hạn; không giao việc giết cho thread phụ, nơi lỗi sẽ bị nuốt và luồng chính treo tới khi lệnh tự xong.
+    Không dùng `os.pidfd_open` (chỉ Linux) hay `os.wait4` (không có timeout).
+    Giết cả nhóm khi xong, quá giờ, bị Ctrl-C hoặc không khởi chạy được thread chờ (thread được khởi chạy trong `try`) —
+    tiến trình nền/cháu không được sống tiếp làm nhiễu lần đo sau. Sau khi giết, join thread chờ (nó thu dọn tiến trình,
+    không để zombie) trước khi trả về: không rò thread. Ngoại lệ đã biết: `killpg` lỗi quyền → không giết được, lỗi nảy
+    ngay và thread chờ (daemon) sống tới khi lệnh tự kết thúc. (SIGTERM gửi thẳng cho xt.py không được bắt.)"""
+    ended: List[float] = []
+    done = threading.Event()
+    t0 = time.perf_counter()
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    try:
-        return proc.wait(timeout=timeout)
+    reaper: Optional[threading.Thread] = None
+    try:  # dựng + khởi chạy thread trong `try`: Ctrl-C ở bất kỳ bước nào vẫn giết nhóm (review #304)
+        reaper = threading.Thread(target=_perf_reap, args=(proc, ended, done), name="xt-perf-reap", daemon=True)
+        reaper.start()
+        finished = done.wait(timeout)
     finally:
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, 9)
-        proc.wait()
+            os.killpg(proc.pid, signal.SIGKILL)
+        if reaper is not None and reaper.is_alive():
+            reaper.join()
+        else:  # chưa dựng/chưa chạy được (`ident` có thể đã gán mà chưa started) hoặc đã xong: tự thu dọn
+            proc.wait()
+    if not finished:
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return proc.returncode, ended[0] - t0
 
 
 def perf_sample(cmd: List[str], runs: int, warmup: int, timeout: float) -> List[float]:
     """Chạy `cmd` warmup + runs lần, trả thời gian tường (giây) của các lần đo; lệnh thoát khác 0 → RuntimeError."""
     out: List[float] = []
     for i in range(warmup + runs):
-        t0 = time.perf_counter()
         try:
-            rc = _perf_run(cmd, timeout)
+            rc, elapsed = _perf_run(cmd, timeout)
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"lệnh quá {timeout:g} s ở lần {i + 1}") from None
         if rc != 0:
             raise RuntimeError(f"lệnh thoát {rc} ở lần {i + 1} — không đo trên lệnh lỗi")
         if i >= warmup:
-            out.append(time.perf_counter() - t0)
+            out.append(elapsed)
     return out
 
 
@@ -11679,6 +11709,17 @@ def _nonneg_int(value: str) -> int:
     if not value.isdigit():
         raise argparse.ArgumentTypeError(f"cần số nguyên ≥ 0, không phải {value!r}")
     return int(value)
+
+
+def _positive_seconds(value: str) -> float:
+    """Số giây hữu hạn > 0, kẹp tới `threading.TIMEOUT_MAX` (lớn hơn → OverflowError ở `Event.wait`)."""
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = math.nan
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise argparse.ArgumentTypeError(f"cần số giây hữu hạn > 0, không phải {value!r}")
+    return min(seconds, threading.TIMEOUT_MAX)
 
 
 def _defer_id(value: str) -> str:
@@ -12200,7 +12241,7 @@ def build_parser() -> argparse.ArgumentParser:
     psa.add_argument("--out", required=True)
     psa.add_argument("--runs", type=_positive_int, default=PERF_MIN_RUNS)
     psa.add_argument("--warmup", type=_nonneg_int, default=2)
-    psa.add_argument("--timeout", type=float, default=300.0)
+    psa.add_argument("--timeout", type=_positive_seconds, default=300.0)
     psa.add_argument("--higher-is-better", action="store_true", help="ghi vào mẫu: đại lượng càng cao càng tốt")
     psa.add_argument("--harness", action="append", metavar="GLOB", help="file bộ đo (lặp được) đưa vào harness_sha256")
     psa.add_argument("cmd", nargs=argparse.REMAINDER)

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import re
 import shutil
 import os
+import signal
+import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -130,19 +134,22 @@ class PerfSampleTest(unittest.TestCase):
         self.assert_dead(pid)
 
     def test_interrupt_kills_and_reraises(self):
-        real_wait = subprocess.Popen.wait
-        calls: list[int] = []
-
-        def wait(proc, timeout=None):
-            calls.append(1)
-            if len(calls) == 1:
-                raise KeyboardInterrupt
-            return real_wait(proc, timeout)
-
-        with unittest.mock.patch.object(subprocess.Popen, "wait", wait):
+        # Ctrl-C trong lúc chờ hạn giờ: nhóm bị giết, tiến trình đã được thu dọn (không zombie), thread chờ đã dừng.
+        procs = self.spawned()
+        before = threading.active_count()
+        old = signal.signal(signal.SIGINT, signal.default_int_handler)
+        main = threading.main_thread().ident
+        assert main is not None
+        sender = threading.Timer(0.3, signal.pthread_kill, (main, signal.SIGINT))
+        try:
+            sender.start()
             with self.assertRaises(KeyboardInterrupt):
                 xt._perf_run([sys.executable, "-c", "import time; time.sleep(30)"], 30)
-        self.assertEqual(len(calls), 2)  # sau khi giết nhóm vẫn wait để không để zombie
+            sender.join()
+        finally:
+            signal.signal(signal.SIGINT, old)
+        self.assertEqual([p.returncode for p in procs], [-signal.SIGKILL])
+        self.assertEqual(threading.active_count(), before)
 
     def test_group_already_gone(self):
         with unittest.mock.patch.object(os, "killpg", side_effect=ProcessLookupError):
@@ -159,8 +166,164 @@ class PerfSampleTest(unittest.TestCase):
             xt.perf_sample([sys.executable, "-c", "raise SystemExit(3)"], runs=2, warmup=0, timeout=60)
 
     def test_sample_timeout(self):
+        before = threading.active_count()
+        t0 = time.perf_counter()
         with self.assertRaisesRegex(RuntimeError, "quá 0.2 s ở lần 1"):
             xt.perf_sample([sys.executable, "-c", "import time; time.sleep(5)"], runs=1, warmup=0, timeout=0.2)
+        self.assertLess(time.perf_counter() - t0, 2)
+        self.assertEqual(threading.active_count(), before)  # thread chờ đã join
+
+    # AUD-PERF-003 (T-3561): đo thời gian không lượng tử. Kiểm đặc tính, không ghim ranh giới bậc (phụ thuộc máy); lấy
+    # min mỗi thời lượng vì tải máy (test chạy song song) chỉ cộng thêm thời gian, không bớt.
+    def test_sample_timing_resolution_tracks_sleep_duration(self):
+        durations = [0.02 + 0.01 * k for k in range(11)]  # 0,02…0,12 s, bước 10 ms (< bậc thăm dò 50 ms của mã cũ)
+        best = [min(xt.perf_sample(["sleep", f"{d:.3f}"], runs=3, warmup=0, timeout=30)) for d in durations]
+        errors = [b - d for b, d in zip(best, durations)]
+        steps = [b - a for a, b in zip(best, best[1:])]
+        bias = statistics.median(errors)  # chi phí khởi chạy cố định (fork/exec), không phải lượng tử
+        spread = statistics.median(abs(e - bias) for e in errors)
+        self.assertGreater(min(errors), -0.002, errors)  # không bao giờ đo ngắn hơn lệnh
+        self.assertLess(bias, 0.015, errors)
+        self.assertLess(spread, 0.005, errors)  # mã cũ: sai số nhảy 2…45 ms theo bậc, độ lệch trung vị ~10 ms
+        self.assertTrue(0.005 < statistics.median(steps) < 0.015, steps)  # mã cũ: phần lớn bước ≈ 0 (cùng bậc)
+
+    def test_sample_timing_resolution_excludes_cleanup(self):
+        real_killpg = os.killpg
+
+        def slow_killpg(pgid: int, sig: int) -> None:  # dọn nhóm chậm không được tính vào số đo
+            time.sleep(0.3)
+            real_killpg(pgid, sig)
+
+        with unittest.mock.patch.object(os, "killpg", slow_killpg):
+            out = xt.perf_sample(["sleep", "0.02"], runs=1, warmup=0, timeout=30)
+        self.assertLess(out[0], 0.2, out)
+
+    def test_sample_timing_resolution_watchdog_cancelled_after_exit(self):
+        # Ca đồng thời: lệnh xong trước hạn → không có lần giết muộn nào sau khi `_perf_run` trả về (pgid có thể đã bị
+        # tái dùng) và thread chờ đã dừng.
+        real_killpg = os.killpg
+        calls: list[int] = []
+
+        def spy(pgid: int, sig: int) -> None:
+            calls.append(pgid)
+            real_killpg(pgid, sig)
+
+        before = threading.active_count()
+        with unittest.mock.patch.object(os, "killpg", spy):
+            rc, elapsed = xt._perf_run(["sleep", "0.01"], 0.2)
+            self.assertEqual(threading.active_count(), before)
+            time.sleep(0.4)
+        self.assertEqual((rc, len(calls)), (0, 1))  # chỉ lần dọn nhóm sau khi xong
+        self.assertLess(elapsed, 0.2)
+
+    def test_sample_timing_resolution_real_sigint_interrupts_blocking_wait(self):
+        # Chờ chặn (waitpid) vẫn phải nhả khi Ctrl-C thật: SIGINT gửi đúng luồng chính → KeyboardInterrupt, nhóm bị giết.
+        old = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                pidfile = Path(d) / "pid"
+                script = f"sleep 30 & echo $! > {pidfile}; wait"
+                main = threading.main_thread().ident
+                assert main is not None
+                sender = threading.Timer(0.5, signal.pthread_kill, (main, signal.SIGINT))
+                sender.start()
+                t0 = time.perf_counter()
+                with self.assertRaises(KeyboardInterrupt):
+                    xt._perf_run(["sh", "-c", script], 30)
+                sender.join()
+                self.assertLess(time.perf_counter() - t0, 10)
+                pid = int(pidfile.read_text())
+        finally:
+            signal.signal(signal.SIGINT, old)
+        self.assert_dead(pid)
+
+    def test_sample_timing_resolution_concurrent_runs_independent(self):
+        # Ca đồng thời: nhiều `_perf_run` song song (mỗi lần một thread chờ, một Event riêng) không lẫn mốc của nhau.
+        durations = [0.05, 0.15, 0.3]
+        results: dict[float, tuple[int, float]] = {}
+        before = threading.active_count()
+
+        def run(d: float) -> None:
+            results[d] = xt._perf_run(["sleep", f"{d}"], 30)
+
+        workers = [threading.Thread(target=run, args=(d,)) for d in durations]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        self.assertEqual(sorted(results), durations)
+        for d, (rc, elapsed) in results.items():
+            self.assertEqual(rc, 0)
+            self.assertTrue(d - 0.002 < elapsed < d + 1.0, (d, elapsed))
+        self.assertEqual(threading.active_count(), before)
+
+    def spawned(self) -> list[subprocess.Popen]:
+        """Ghi lại các Popen do `_perf_run` tạo trong test (để kiểm đã thu dọn/đã chết, và dọn khi test đỏ)."""
+        procs: list[subprocess.Popen] = []
+
+        class Spy(subprocess.Popen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                procs.append(self)
+
+        self.enterContext(unittest.mock.patch.object(xt.subprocess, "Popen", Spy))
+        return procs
+
+    def settle_threads(self, before: int) -> None:
+        deadline = time.monotonic() + 10
+        while threading.active_count() > before and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(threading.active_count(), before)
+
+    def test_sample_timing_resolution_eperm_raises_on_time(self):
+        # Nhóm có tiến trình khác real uid (vd `sudo -n bench` khi không chạy bằng root): killpg ném PermissionError.
+        # Lỗi phải về luồng chính đúng hạn như trước T-3561, không treo tới khi lệnh tự xong.
+        procs = self.spawned()
+        before = threading.active_count()
+        real_killpg = os.killpg
+        t0 = time.perf_counter()
+        try:
+            with unittest.mock.patch.object(os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
+                with self.assertRaises(PermissionError):
+                    xt.perf_sample(["sleep", "3"], runs=1, warmup=0, timeout=0.3)
+            spent = time.perf_counter() - t0
+        finally:
+            for proc in procs:
+                with contextlib.suppress(ProcessLookupError):
+                    real_killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+        self.assertTrue(0.29 <= spent < 1.0, spent)
+        self.settle_threads(before)  # thread chờ chỉ sống tới khi lệnh kết thúc, không rò
+
+    def test_sample_timing_resolution_thread_start_failure_kills_child(self):
+        # Không khởi chạy được thread (hết tài nguyên): lệnh đã Popen không được chạy nền tiếp.
+        procs = self.spawned()
+        try:
+            with unittest.mock.patch.object(
+                threading.Thread, "start", side_effect=RuntimeError("can't start new thread")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "can't start"):
+                    xt._perf_run(["sleep", "30"], 30)
+            self.assertEqual(len(procs), 1)
+            self.assertEqual(procs[0].returncode, -signal.SIGKILL)  # đã bị giết và đã thu dọn (không zombie)
+        finally:
+            for proc in procs:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+
+    def test_sample_timing_resolution_timeout_arg_positive_finite(self):
+        # `inf`/`1e10` làm hạn giờ tràn (OverflowError trong thread → mất hạn giờ lặng lẽ), `nan` quá giờ ngay.
+        for bad in ("inf", "-inf", "nan", "1e400", "0", "-1", "x", ""):  # 1e400 tràn float thành inf
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as cm, unittest.mock.patch.object(sys, "stderr", io.StringIO()):
+                    run_main("perf", "sample", "--out", os.devnull, "--timeout", bad, "--", "true")
+                self.assertEqual(cm.exception.code, 2)
+        parser = xt.build_parser()
+        for given, want in (("0.5", 0.5), ("300", 300.0), ("1e10", threading.TIMEOUT_MAX)):  # quá TIMEOUT_MAX → kẹp
+            with self.subTest(given=given):
+                ns = parser.parse_args(["perf", "sample", "--out", "o", "--timeout", given, "--", "true"])
+                self.assertEqual(ns.timeout, want)
 
 
 ISOLATED = {
