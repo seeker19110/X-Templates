@@ -1266,7 +1266,7 @@ def write_state(state: Dict[str, Any], base: Optional[Path] = None) -> None:
 STATE_LOCK_FILE = "state.lock"  # khoá `flock` của đọc–so–ghi `state.json` (ADR-0052 §2); file rỗng, giữ lại sau khi nhả
 STATE_LOCK_TIMEOUT = 5.0  # giây chờ khoá; quá → StateLockTimeout. Khoá chỉ bọc đọc–fn–ghi, không bao giờ qua Gate/mạng
 STATE_LOCK_POLL = 0.02  # giây nghỉ giữa hai lần thử LOCK_NB
-_NO_LOCK_ERRNOS = frozenset({errno.ENOLCK, errno.ENOSYS, errno.EOPNOTSUPP})  # FS không hỗ trợ flock → chạy không khoá
+_NO_LOCK_ERRNOS = frozenset({errno.ENOLCK, errno.ENOSYS, errno.EOPNOTSUPP})  # FS không hỗ trợ flock → không ghi state
 
 
 class StateLockTimeout(TimeoutError):
@@ -1280,7 +1280,7 @@ class StateRevConflict(OSError):
 
 
 def _fcntl() -> Optional[types.ModuleType]:
-    """Module `fcntl` hoặc None khi nền tảng không có (không POSIX) — khi đó bỏ khoá, vẫn kiểm `rev` (ADR-0052 §2)."""
+    """Module `fcntl` hoặc None khi nền tảng không có — `_state_lock` chặn ghi state (ADR-0054)."""
     try:
         import fcntl
     except ImportError:
@@ -1294,8 +1294,7 @@ def _state_lock(base: Path) -> Iterator[None]:
     StateLockTimeout. Không đi theo symlink đặt sẵn (O_NOFOLLOW, như `_append_line`). Đóng fd là nhả khoá."""
     fc = _fcntl()
     if fc is None:
-        yield
-        return
+        raise OSError("không có fcntl — không ghi state; dùng môi trường hỗ trợ flock (ADR-0054)")
     d = state_dir(base)
     d.mkdir(parents=True, exist_ok=True)
     fd = os.open(d / STATE_LOCK_FILE, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -1314,9 +1313,9 @@ def _state_lock(base: Path) -> Iterator[None]:
             except OSError as exc:
                 if exc.errno not in _NO_LOCK_ERRNOS:
                     raise
-                # FS không hỗ trợ flock: như nhánh không `fcntl` — vẫn kiểm `rev`, báo một dòng (review #294)
-                print(f"⚠ .autopilot/{STATE_LOCK_FILE}: flock không dùng được — ghi state không khoá", file=sys.stderr)
-                break
+                raise OSError(
+                    "flock không dùng được — không ghi state; dùng filesystem hỗ trợ khóa (ADR-0054)"
+                ) from exc
         yield
     finally:
         os.close(fd)
@@ -1336,7 +1335,7 @@ def update_state(base: Optional[Path], fn: StateFn, retries: int = 3) -> Dict[st
     gọi `fn(bản sao)`, kiểm `rev` trên đĩa còn bằng `rev` đã đọc, ghi kết quả với `rev + 1`. `fn` trả None → không ghi,
     trả state hiện tại. Lệch `rev` (lệnh ghi ngoài khoá) → đọc lại, áp lại `fn` tối đa `retries` lần; hết → StateRevConflict
     (`retries=0` cho thay đổi không áp lại được). `fn` phải thuần trên state, nhanh — không chạy Gate/mạng trong `fn`:
-    khoá giữ suốt lời gọi. Không có `fcntl` → bỏ khoá, vẫn kiểm `rev`."""
+    khoá giữ suốt lời gọi. Không có `fcntl`/flock → lỗi trước `fn`, không ghi (ADR-0054)."""
     base = base or project_dir()
     for _ in range(retries + 1):
         with _state_lock(base):
@@ -2216,30 +2215,34 @@ def _exec_source(path: Path, mod: Any) -> None:
 
 def _load_guard(path: Path) -> Any:
     """Module guard `path` nạp từ nguồn (`_exec_source`: không pyc, không `__pycache__`). Guard ném lỗi lúc nạp →
-    báo stderr, trả module dở (còn `_failure_decision`)."""
+    báo stderr, trả None để chặn; module dở không được dùng dù đã định nghĩa hàm cho qua (ADR-0054)."""
     mod: Any = None
     try:
         mod = types.ModuleType("xt_project_guard")
         _exec_source(path, mod)
-    except Exception as e:  # `_guard_decide` dùng `_failure_decision` của module dở
-        print(f"[xt] guard {path} nạp lỗi ({type(e).__name__}: {e}) — dùng module dở", file=sys.stderr)
+    except Exception as e:
+        print(f"[xt] guard {path} nạp lỗi ({type(e).__name__}: {e}) — chặn lệnh", file=sys.stderr)
+        return None
     return mod
 
 
 def _guard_decide(mod: Any, cmd_str: str, base: Path, strict: bool) -> Dict[str, Any]:
-    """Quyết định của guard đã nạp cho lệnh (như hook: chính sách mặc định trừ strict). Guard ném lỗi →
-    `_failure_decision` của nó (merge/`gh api` hỏi → bị chặn; lệnh khác cho qua — fail-open về luồng, ADR-0002)."""
+    """Guard không nạp được hoặc xử lý lỗi cũng hỏng → chặn (ADR-0054). Guard đã nạp mà ném lỗi lúc kiểm →
+    `_failure_decision` khỏe của nó (merge/`gh api` hỏi → bị chặn; lệnh khác cho qua — ADR-0002)."""
+    closed = {"decision": "deny", "reason": "guard không hoạt động — khôi phục bằng install.py rồi chạy lại"}
+    if mod is None:
+        return closed
     try:
         out: Dict[str, Any] = mod.bash_decision(cmd_str, str(base), str(base))
     except Exception:
         try:
-            out = mod._failure_decision("bash", {}, cmd_str) if mod is not None else {"decision": ""}
+            out = mod._failure_decision("bash", {}, cmd_str)
         except Exception:  # guard hỏng tới mức không có cả `_failure_decision`
-            out = {"decision": ""}
+            return closed
     try:
-        return out if strict or mod is None else dict(mod.apply_policy(out))
+        return out if strict else dict(mod.apply_policy(out))
     except Exception:
-        return out
+        return closed if out.get("decision") == "ask" else out
 
 
 def guard_blocks(cmds: List[str], base: Path, only: Optional[List[Path]] = None) -> List[str]:
