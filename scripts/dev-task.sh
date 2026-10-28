@@ -15,8 +15,8 @@
 #
 # Task hỗ trợ: format | lint | typecheck | test | build | gate | gate-par | gate-fast | test-shard | test-combine |
 #   test-weights | test-mode | e2e-mode | e2e | require | setup
-#   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI, bước
-#          mở PR, `xt.py loop record` dùng đúng lệnh này. Khai `test_floor` (lệnh, chỉ khai báo) → chạy thêm sau `test`.
+#   gate = chạy tuần tự build→typecheck→lint→test (cái nào phân giải được), đỏ 1 cái → fail. Cổng đầy đủ: CI (cục bộ
+#          trước cắt bản/khi không có CI — ADR-0056), `xt.py loop record` dùng đúng lệnh này. Khai `test_floor` (lệnh, chỉ khai báo) → chạy thêm sau `test`.
 #   gate-par = cùng các lệnh của `gate` nhưng chia nhóm độc lập chạy nền CÙNG LÚC (D-128, job `gate` của CI mẫu):
 #          typecheck ∥ lint ∥ build → test (→ test_floor). Guard hỏi một lần cho mọi lệnh trước khi chạy nhóm nào; mỗi
 #          nhóm log riêng, in lại nguyên khối kèm nhãn nhóm khi xong (theo thứ tự nhóm); đỏ khi nhóm nào đỏ — exit code
