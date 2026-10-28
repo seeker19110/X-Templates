@@ -873,6 +873,186 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertIn("[install] Xong.", r.stderr)
 
 
+class InstallPresetTest(unittest.TestCase):
+    """Preset merge/review chỉ khởi tạo xt.yaml mới; plan, hash và các lần nâng bản giữ đúng lựa chọn."""
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.target = self.tmp / "dich"
+        self.target.mkdir()
+
+    def install(self, *extra: str, harness: bool = False) -> str:
+        err = io.StringIO()
+        flags = [] if harness else ["--no-harness"]
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target), "--label", "t", *flags, *extra]), 0)
+        return err.getvalue()
+
+    def plan(self, *extra: str) -> dict:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            self.assertEqual(install.main([str(self.target), "--plan", "--no-harness", *extra]), 0)
+        return json.loads(out.getvalue())
+
+    def policy(self) -> dict:
+        return json.loads((self.target / install.MANIFEST_V2).read_text(encoding="utf-8"))["policy"]
+
+    def yaml(self) -> str:
+        return (self.target / "xt.yaml").read_text(encoding="utf-8")
+
+    def assert_preset(self, name: str) -> None:
+        text = self.yaml()
+        for key, value in install.INSTALL_PRESETS[name].items():
+            self.assertRegex(text, rf"(?m)^{key}: {value}$")
+
+    def test_fresh_plan_matches_policy_and_installed_hash(self):
+        for preset in (None, "safe", "autonomous"):
+            with self.subTest(preset=preset):
+                self.target = self.tmp / str(preset)
+                self.target.mkdir()
+                flags = [] if preset is None else ["--preset", preset]
+                plan = self.plan(*flags)
+                self.assertEqual(list(self.target.iterdir()), [])
+                self.assertEqual(plan["preset"]["template"], preset or "autonomous")
+                self.assertEqual(plan["preset"]["applied"], preset is not None)
+                self.install(*flags)
+                self.assert_preset(preset or "autonomous")
+                self.assertEqual(plan["manifest"]["policy"], self.policy())
+                self.assertEqual(self.policy().get("install_preset"), preset)
+                self.assertEqual(install.load_manifest(self.target)["xt.yaml"], install.sha256(self.yaml().encode()))
+
+    def test_reinstall_keeps_safe_even_with_other_explicit_preset(self):
+        self.install("--preset", "safe")
+        before = self.yaml()
+        for flags in ((), ("--preset", "autonomous"), ("--preset", "safe")):
+            with self.subTest(flags=flags):
+                plan = self.plan(*flags)
+                self.assertEqual(plan["preset"]["template"], "safe")
+                self.assertFalse(plan["preset"]["applied"])
+                self.assertEqual(next(f["action"] for f in plan["files"] if f["path"] == "xt.yaml"), "kept")
+                self.install(*flags, "--with-github", harness=True)
+                self.assertEqual(self.yaml(), before)
+                self.assertEqual(self.policy(), plan["manifest"]["policy"])
+                self.assertEqual(self.policy()["install_preset"], "safe")
+                self.assertFalse((self.target / "xt.yaml.xtemplates-new").exists())
+
+    def test_existing_project_is_not_changed_or_marked_as_safe(self):
+        own = install.template_body((ROOT / "framework/templates/xt.yaml").read_text(encoding="utf-8"))
+        own = own.replace("merge_autonomy: L3", "merge_autonomy: L2") + "\n# lựa chọn riêng\n"
+        (self.target / "xt.yaml").write_text(own, encoding="utf-8")
+        plan = self.plan("--preset", "safe")
+        self.assertTrue(plan["preset"]["existing_yaml"])
+        self.assertFalse(plan["preset"]["applied"])
+        self.assertNotIn("install_preset", plan["manifest"]["policy"])
+        self.assertIn("giữ chính sách", self.install("--preset", "safe"))
+        self.assertEqual(self.yaml(), own)
+        self.assertNotIn("install_preset", self.policy())
+        self.install()
+        self.assertEqual(self.yaml(), own)
+
+    def test_own_changes_survive_reinstall_and_template_updates_keep_safe(self):
+        self.install("--preset", "safe")
+        original = self.yaml()
+        (self.target / "xt.yaml").write_text(
+            original.replace("merge_autonomy: L1", "merge_autonomy: L2"), encoding="utf-8"
+        )
+        own = self.yaml()
+        self.install("--preset", "autonomous")
+        self.assertEqual(self.yaml(), own)
+        self.assertEqual(self.policy()["install_preset"], "safe")
+        (self.target / "xt.yaml").write_text(original, encoding="utf-8")
+        source_bytes = install.source_bytes
+
+        def newer(src: Path, transform=None) -> bytes:
+            data = source_bytes(src, transform)
+            return data + b"\n# template revision\n" if src.name == "xt.yaml" else data
+
+        with mock.patch.object(install, "source_bytes", newer):
+            plan = self.plan()
+            self.assertEqual(next(f["action"] for f in plan["files"] if f["path"] == "xt.yaml"), "updated")
+            self.install()
+        self.assertIn("# template revision", self.yaml())
+        self.assert_preset("safe")
+        self.assertEqual(install.load_manifest(self.target)["xt.yaml"], install.sha256(self.yaml().encode()))
+
+    def test_legacy_yaml_preserves_project_choice(self):
+        own = install.template_body((ROOT / "framework/templates/xt.yaml").read_text(encoding="utf-8"))
+        own = own.replace("merge_autonomy: L3", "merge_autonomy: L2")
+        (self.target / "xs.yaml").write_text(own, encoding="utf-8")
+        self.assertFalse(self.plan("--preset", "safe")["preset"]["applied"])
+        self.install("--preset", "safe")
+        self.assertEqual(self.yaml(), own)
+        self.assertFalse((self.target / "xs.yaml").exists())
+        self.assertNotIn("install_preset", self.policy())
+
+    def test_symlinks_never_persist_an_unapplied_preset(self):
+        outside = self.tmp / "outside.yaml"
+        outside.write_text("private: keep\n", encoding="utf-8")
+        for rel in ("xt.yaml", "xt.yaml.xtemplates-new"):
+            with self.subTest(rel=rel):
+                self.target = self.tmp / rel
+                self.target.mkdir()
+                (self.target / rel).symlink_to(outside)
+                plan = self.plan("--preset", "safe")
+                self.assertFalse(plan["preset"]["applied"])
+                self.assertNotIn("install_preset", plan["manifest"]["policy"])
+                self.install("--preset", "safe")
+                self.assertNotIn("install_preset", self.policy())
+                self.assertEqual(outside.read_text(encoding="utf-8"), "private: keep\n")
+
+    def test_invalid_persisted_preset_is_ignored(self):
+        path = self.target / install.MANIFEST_V2
+        path.parent.mkdir()
+        for data in (
+            b"invalid",
+            b"[]",
+            b'{"policy": null}',
+            b'{"policy": {"install_preset": []}}',
+            b'{"policy": {"install_preset": "other"}}',
+        ):
+            with self.subTest(data=data):
+                path.write_bytes(data)
+                self.assertIsNone(install.installed_preset(self.target))
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as err:
+            install.main([str(self.target), "--preset", "unknown"])
+        self.assertEqual(err.exception.code, 2)
+
+    def test_lost_preset_provenance_never_reverts_existing_policy(self):
+        corruptions = {
+            "missing": None,
+            "invalid-json": b"not-json",
+            "invalid-utf8": b"\xff",
+            "no-policy": b'{"schema": 1}',
+            "no-preset": b'{"policy": {"ask_removal": "manifest-only"}}',
+            "unknown-preset": b'{"policy": {"install_preset": "unknown"}}',
+            "null-policy": b'{"policy": null}',
+            "null-preset": b'{"policy": {"install_preset": null}}',
+        }
+        for name, content in corruptions.items():
+            for requested in (None, "safe", "autonomous"):
+                with self.subTest(corruption=name, requested=requested):
+                    self.target = self.tmp / f"{name}-{requested}"
+                    self.target.mkdir()
+                    self.install("--preset", "safe")
+                    before = self.yaml()
+                    manifest = self.target / install.MANIFEST_V2
+                    if content is None:
+                        manifest.unlink()
+                    else:
+                        manifest.write_bytes(content)
+                    flags = [] if requested is None else ["--preset", requested]
+                    plan = self.plan(*flags)
+                    entry = next(f for f in plan["files"] if f["path"] == "xt.yaml")
+                    self.assertEqual(entry["action"], "updated-new")
+                    self.assertFalse(plan["preset"]["applied"])
+                    self.assertNotIn("install_preset", plan["manifest"]["policy"])
+                    self.install(*flags)
+                    self.assertEqual(self.yaml(), before)
+                    self.assertNotIn("install_preset", self.policy())
+                    self.install()
+                    self.assertEqual(self.yaml(), before)
+
+
 class InstallPlanTest(unittest.TestCase):
     """`--plan` + manifest.json (REC-09): kế hoạch không ghi gì; chỉ gỡ `ask` mà manifest chứng minh do khung đặt."""
 
