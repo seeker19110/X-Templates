@@ -3638,6 +3638,11 @@ def hook_bypass(
     if _git_hooks_off(n):
         return "tắt git hook của dự án (`core.hooksPath`) — bỏ qua hook của dự án"
     key = _git_exec_config(n, argv, env) if n[:1] == ["git"] else ""
+    if key and GIT_APPENDED_KEY_RE.match(key):
+        return (
+            f"khoá cấu hình git một lần bị nối thêm (`{key}`) — không biết khoá nào, có thể là khoá chạy lệnh ngoài guard"
+            " — bỏ qua hook của dự án"
+        )
     if key:
         return f"cấu hình git `{key}` chạy lệnh ngầm ngoài guard — bỏ qua hook của dự án"
     flag = next((a.split("=", 1)[0] for a in claude if a.split("=", 1)[0] in HOOK_BYPASS_FLAGS), "")
@@ -5515,7 +5520,8 @@ PARALLEL_ARG_SEPS = {":::", "::::", ":::+", "::::+"}
 Fed = Optional[Callable[[str], bool]]  # nhận ra token bị thay bằng đối số không thấy; None = nối vào cuối
 # Tuỳ chọn của GNU parallel (`options_hash` trong src/parallel; Getopt::Long `bundling`, `require_order`): chữ ngắn ăn
 # giá trị, cờ ngắn, tên dài ăn giá trị, tên dài là cờ. Ngoài các bảng này (tên viết tắt, bản mới, giá trị tuỳ chọn
-# `-i`/`-e`/`-l`) → không biết có ăn token kế không (`_parallel_jobs` đi chiều chặt).
+# `-i`/`-e`/`-l`) → không biết có ăn token kế không, nên cũng không biết token nào là mẫu lệnh: đã gặp tuỳ chọn lạ ở
+# bất kỳ chỗ nào thì `_parallel_jobs` quét các nhóm `:::` như không có mẫu (chiều chặt).
 PARALLEL_SHORT_VALUE = set("aBCdDEHIjJLnNPsSUW")
 PARALLEL_SHORT_FLAGS = set("0ghkmMpqrtTuvVxXY")
 PARALLEL_LONG_VALUE = set(
@@ -5554,17 +5560,18 @@ def _parallel_opt(tok: str) -> Tuple[str, Optional[bool], str]:
 
 def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
     """`parallel [tuỳ chọn] ::: a b [:::|:::+ …]` KHÔNG có mẫu lệnh chạy mỗi đối số (tổ hợp các nhóm) như một dòng lệnh
-    shell (AUD-SEC-121) → (dòng lệnh để quét lồng, lý do UNRESOLVED_TARGET khi lệnh đến từ tệp/stdin — `::::`, `-a` —,
-    dấu tách đổi qua tên viết tắt, hay quá PARALLEL_JOBS_MAX tổ hợp). Có mẫu lệnh → ([], ""): đối số là dữ liệu
-    (`_stdin_fed`, `_runner_scripts`). Tuỳ chọn lạ đứng trước đúng một token: không biết token là giá trị hay mẫu → coi
-    như không mẫu (chiều chặt). Không `:::`/`-a` (đọc stdin) chưa xét ở đây."""
+    shell (AUD-SEC-121) → (dòng lệnh để quét lồng, lý do UNRESOLVED_TARGET khi dấu tách đổi qua tên viết tắt hay quá
+    PARALLEL_JOBS_MAX tổ hợp). Nhóm rỗng thành [""] như GNU parallel (nguồn rỗng thay bằng chuỗi rỗng). Có mẫu lệnh →
+    ([], ""): đối số là dữ liệu (`_stdin_fed`, `_runner_scripts`). Lệnh đọc từ tệp (`::::`, `-a`, `--arg-file`) → ([],
+    ""): như chạy tệp script (`bash cmds.txt`), guard không đọc nội dung tệp. Đã gặp tuỳ chọn lạ: không biết token nào
+    là giá trị, token nào là mẫu → coi như không mẫu (chiều chặt). Không `:::`/`-a` (đọc stdin) chưa xét ở đây."""
     s = _strip_prefixes(c)
     if not s or posixpath.basename(s[0]) != "parallel":
         return [], ""
     seps, files = [":::", ":::+"], ["::::", "::::+"]
-    i, unsure, from_file, why = _parallel_head(s, seps, files)
+    i, odd, from_file, why = _parallel_head(s, seps, files)
     end = next((k for k in range(i, len(s)) if s[k] in seps + files), len(s))
-    if why or end - i > 1 or (end > i and not unsure):
+    if why or (end > i and not odd):
         return [], why
     groups: List[List[str]] = []
     for t in s[end:]:  # s[end] là dấu tách: nhóm đầu luôn có trước đối số đầu
@@ -5574,7 +5581,9 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
         else:
             groups[-1].append(t)
     if from_file:
-        return [], f"{PARALLEL_UNSEEN_MARK} (lệnh đọc từ tệp/stdin)"
+        return [], ""
+    if any(groups):
+        groups = [g or [""] for g in groups]
     total = 1
     for g in groups:
         total = min(total * len(g), PARALLEL_JOBS_MAX + 1)
@@ -5584,10 +5593,10 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
 
 
 def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int, bool, bool, str]:
-    """Bỏ tuỳ chọn của `parallel` (`s[0]`): (chỉ số token đầu sau tuỳ chọn, tuỳ chọn cuối là tuỳ chọn lạ, có `-a`/
+    """Bỏ tuỳ chọn của `parallel` (`s[0]`): (chỉ số token đầu sau tuỳ chọn, đã gặp tuỳ chọn lạ — giữ suốt, có `-a`/
     `--arg-file`, lý do UNRESOLVED_TARGET). `--arg-sep`/`--arg-file-sep` đổi `seps`/`files` tại chỗ; viết tắt `--arg-s`,
     `--argf`… → không biết dấu tách/tệp đối số."""
-    i, unsure, from_file = 1, False, False
+    i, odd, from_file = 1, False, False
     while i < len(s) and s[i].startswith("-") and s[i] not in seps + files:
         tok = s[i]
         i += 1
@@ -5596,13 +5605,13 @@ def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int
         name, takes, val = _parallel_opt(tok)
         if takes and i < len(s):
             val, i = s[i], i + 1
-        unsure = takes is None
+        odd = odd or takes is None
         if name in PARALLEL_SEP_OPTS:
             (files if PARALLEL_SEP_OPTS[name] else seps)[:] = [val, val + "+"]
         from_file = from_file or name in ("a", "arg-file")
-        if unsure and name.startswith("arg"):
-            return i, unsure, from_file, f"{PARALLEL_UNSEEN_MARK} (tuỳ chọn `{tok}`)"
-    return i, unsure, from_file, ""
+        if takes is None and name.startswith("arg"):
+            return i, odd, from_file, f"{PARALLEL_UNSEEN_MARK} (tuỳ chọn `{tok}`)"
+    return i, odd, from_file, ""
 
 
 def _xargs_replace(opts: List[str]) -> Optional[str]:
@@ -7085,7 +7094,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (UNRESOLVED_REF_MARK, UNRESOLVED_TARGET),  # `git update-ref --stdin` (AUD-SEC-119)
     (UNRESOLVED_ALIAS_MARK, UNRESOLVED_TARGET),  # alias git đọc lỗi/là biến/vòng (AUD-SEC-119, review T-3563)
     (UNKNOWN_GIT_OPT_MARK, UNRESOLVED_TARGET),  # `git --<lạ> v push …`: không biết lệnh con (D-216)
-    (PARALLEL_UNSEEN_MARK, UNRESOLVED_TARGET),  # `parallel :::: cmds.txt`: lệnh từ tệp/stdin (AUD-SEC-121)
+    (PARALLEL_UNSEEN_MARK, UNRESOLVED_TARGET),  # `parallel --arg-s ,, ,, x`: không biết dấu tách (AUD-SEC-121)
     (REMOTE_REF_MARK, "REMOTE_REF_FORGE"),  # giả `origin/main` mà Gate đọc (AUD-SEC-119, T-3563)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),

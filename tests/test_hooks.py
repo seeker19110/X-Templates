@@ -6750,6 +6750,11 @@ class GuardAppendParallelTest(unittest.TestCase):
         self.g._record_assigns(["X=r"], env)
         self.g._record_assigns(["export", "X+=m"], env)
         self.assertEqual(env, {"X": "rm"})
+        for cmd in ("GIT_CONFIG_PARAMETERS+=\" 'user.name=x'\" git status", "GIT_CONFIG_KEY_0+=user.name git status"):
+            with self.subTest(cmd):  # lý do nói đúng điều guard không biết (rà trước T-3564 🟢6)
+                why = self.g.bash_decision(cmd, str(self.root))["reason"]
+                self.assertIn("nối thêm", why)
+                self.assertNotIn("chạy lệnh ngầm", why)
         raw = self.g.bash_decision("DOCKER_HOST+=ssh://h docker ps", str(self.root))
         self.assertEqual(raw["decision"], "ask", raw)  # đích daemon không biết: hỏi (strict) như gán thẳng
 
@@ -6783,16 +6788,20 @@ class GuardAppendParallelTest(unittest.TestCase):
             'parallel --arg-sep ,, ,, "rm -rf /"',
             'parallel --argsep=@@ @@ "rm -rf /"',
             'nohup parallel ::: "git reset --hard HEAD~1"',
+            # nhóm `:::` rỗng: GNU parallel thay nguồn rỗng bằng "" và vẫn chạy nhóm kia (rà trước T-3564 🟢1)
+            "parallel ::: 'rm -rf /' :::",
+            "parallel ::: ::: 'rm -rf /'",
+            "parallel --link ::: 'rm -rf /' :::",
+            # tuỳ chọn lạ ăn giá trị đứng trước tuỳ chọn đã biết: giá trị không phải mẫu lệnh (rà trước T-3564 🟢2)
+            "parallel --er v -k ::: 'rm -rf /'",
+            "parallel --memsuspend 2G -j4 ::: 'rm -rf /' ls",
+            "parallel --maxargs 1 -k ::: 'git reset --hard HEAD~1'",
+            "parallel --tmpd /tmp -k ::: 'rm -rf /'",
         ):
             with self.subTest(cmd):
                 self.assert_denied(cmd)
         many = "parallel " + " ".join(f"::: a{k} b{k}" for k in range(8))
         for cmd in (
-            "parallel :::: cmds.txt",
-            "parallel ::: ls :::: cmds.txt",
-            "parallel -a cmds.txt",
-            "parallel --arg-file=cmds.txt ::: ls",
-            "parallel --arg-file-sep ,, ,, cmds.txt",
             "parallel --arg-s ,, ,, x",
             many,
         ):
@@ -6810,6 +6819,21 @@ class GuardAppendParallelTest(unittest.TestCase):
             "parallel --version",
             "parallel -j",
             "parallel ::: ls :::",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+
+    def test_guard_parallel_args_from_file_allowed(self):
+        """Không mẫu lệnh mà lệnh đọc từ tệp (`::::`, `-a`, `--arg-file`) = chạy tệp script như `bash cmds.txt` — không
+        chặn (rà trước T-3564 🟠1)."""
+        for cmd in (
+            "parallel :::: cmds.txt",
+            "parallel -a cmds.txt",
+            "parallel -j4 :::: jobs.txt",
+            "parallel ::: ls :::: cmds.txt",
+            "parallel --arg-file=cmds.txt ::: ls",
+            "parallel --arg-file-sep ,, ,, cmds.txt",
+            "parallel --tmpd /tmp -k :::: cmds.txt",
         ):
             with self.subTest(cmd):
                 self.assert_allowed(cmd)
