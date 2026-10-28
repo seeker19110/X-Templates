@@ -2,6 +2,8 @@
 
 > Gốc `main`: `07c428f` (#308); phạm vi tiếp theo là các commit `ce47da2` (corpus), `f4bd90f` (guard/state), `7f8b9a1` (preset) theo PLAN-hardening-assessment-2026-10-28, D-219, ADR-0054/0055. Đây là báo cáo delta; không thay báo cáo lịch sử trước #308.
 
+Main cập nhật thêm `b7a8de6` (#309) trong lúc nghiệm thu: đã gộp 7 mục SHOULD mới, giữ cả hai nhóm thay đổi CHANGELOG. Code guard/state/installer không đổi; cây gộp được kiểm lại trước bàn giao.
+
 ## Phạm vi và kết quả
 
 - #308 đã sửa AUD-SEC-125/121: test gán nối 3 ca, parallel 4 ca đạt; probe chỉ phân tích chặn 126 và đối chứng an toàn 0. Không chạy thao tác phá hủy.

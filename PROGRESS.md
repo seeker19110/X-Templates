@@ -36,6 +36,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- Gốc `main` `07c428f` (#308); nhánh `work` đang củng cố theo D-219. Git dry-run đẩy được; gh auth báo token lỗi, quyền API xác minh riêng. Chỉ nhánh/PR nháp, không merge/tag. Gate cần mở localhost và không bị mount `/tmp/.git` giả ảnh hưởng.
+- Gốc `main` `b7a8de6` (#309); nhánh `work` đang củng cố theo D-219. Git dry-run đẩy được; gh auth báo token lỗi, quyền API xác minh riêng. Chỉ nhánh/PR nháp, không merge/tag. Gate cần mở localhost và không bị mount `/tmp/.git` giả ảnh hưởng.
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
