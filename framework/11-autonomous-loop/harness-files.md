@@ -98,7 +98,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 - **Gán `TÊN+=v` và `parallel :::`** (AUD-SEC-125/121): `X+=1 cmd` xét `cmd`; giá trị nối thêm là không biết (khoá cấu
   hình git nối thêm → `HOOK_BYPASS`). `parallel` không mẫu lệnh (hay có tuỳ chọn guard không biết): mỗi tổ hợp đối số
   sau `:::` quét như shell lồng, nhóm rỗng và nhóm đọc từ tệp (`::::`, `-a`) thành `""` — chỉ đọc tệp thì như chạy
-  tệp script, không chặn.
+  tệp script, không chặn; quá 64 tổ hợp khi không có mẫu → `UNRESOLVED_TARGET`, có thể có mẫu → chỉ quét từng token.
   Còn lọt: gán phần tử mảng đầu lệnh (`a[0]=1 cmd` — bash báo lỗi rồi vẫn chạy `cmd`), lệnh đưa vào `parallel` qua
   stdin (`… | parallel`) hay từ tệp, `x+=$(echo …)`, `sem '<lệnh>'`, tuỳ chọn đến từ `$PARALLEL`/`~/.parallel/config`/
   `-J` (vd `--arg-sep`), mẫu là shell (`parallel bash -c ::: '<lệnh>'`, `parallel eval ::: …`).

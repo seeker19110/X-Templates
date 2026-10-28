@@ -6841,6 +6841,36 @@ class GuardAppendParallelTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assert_allowed(cmd)
 
+    def test_guard_parallel_args_over_cap_with_template(self):
+        """Quá 64 tổ hợp mà có thể có mẫu lệnh (tuỳ chọn lạ đứng trước): quét từng token của từng nhóm `:::`, không
+        UNRESOLVED_TARGET (review #308); tuỳ chọn GNU parallel bổ sung không còn là tuỳ chọn lạ."""
+        urls = " ".join(f"u{k}" for k in range(1, 66))
+        for cmd in (
+            "parallel --resume --joblog sweep.log python3 train.py --lr {1} --bs {2} --seed {3}"
+            " ::: 0.1 0.01 0.001 0.0001 ::: 16 32 64 128 ::: 1 2 3 4 5",
+            f"parallel --resume-failed --joblog j.log -j8 'curl -sO {{}}' ::: {urls}",
+            f"parallel --la-option-moi -j8 'curl -sO {{}}' ::: {urls}",
+            f"parallel --la-option-moi -j8 echo ::: {urls} :::: more.txt",
+            f"parallel --retry-failed --ctag --csv --plain --transfer --memsuspend 1G --group-by 1 --ctagstring x"
+            f" echo ::: {urls}",
+        ):
+            with self.subTest(cmd):
+                self.assert_allowed(cmd)
+        for cmd in (
+            "parallel --resume ::: 'rm -rf /'",
+            "parallel --unknownopt ::: 'rm -rf /'",
+            "parallel --resume-failed ::: 'git reset --hard HEAD~1'",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+        for cmd in (
+            f"parallel --la-option-moi -j8 echo ::: {urls} 'rm -rf /'",
+            f"parallel --la-option-moi x echo ::: {urls} ::: 'git reset --hard HEAD~1'",
+        ):
+            with self.subTest(cmd):
+                self.assert_denied(cmd)
+                self.assertNotEqual(self.verdict(cmd)[1], "UNRESOLVED_TARGET", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

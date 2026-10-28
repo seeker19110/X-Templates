@@ -5521,25 +5521,29 @@ Fed = Optional[Callable[[str], bool]]  # nhận ra token bị thay bằng đối
 # Tuỳ chọn của GNU parallel (`options_hash` trong src/parallel; Getopt::Long `bundling`, `require_order`): chữ ngắn ăn
 # giá trị, cờ ngắn, tên dài ăn giá trị, tên dài là cờ. Ngoài các bảng này (tên viết tắt, bản mới, giá trị tuỳ chọn
 # `-i`/`-e`/`-l`) → không biết có ăn token kế không, nên cũng không biết token nào là mẫu lệnh: đã gặp tuỳ chọn lạ ở
-# bất kỳ chỗ nào thì `_parallel_jobs` quét các nhóm `:::` như không có mẫu (chiều chặt).
+# bất kỳ chỗ nào thì `_parallel_jobs` quét các nhóm `:::` như không có mẫu (chiều chặt). Bổ sung đối chiếu man page
+# parallel(1) Debian unstable (bản 20240222, manpages.debian.org, đọc 2026-10-28): cờ `resume` `resume-failed`
+# `retry-failed` `ctag` `csv` `plain` `transfer`; ăn giá trị `memsuspend` `group-by` `ctagstring`.
 PARALLEL_SHORT_VALUE = set("aBCdDEHIjJLnNPsSUW")
 PARALLEL_SHORT_FLAGS = set("0ghkmMpqrtTuvVxXY")
 PARALLEL_LONG_VALUE = set(
     """arg-file arg-file-sep argfilesep arg-sep argsep basefile bf block block-size blocksize colsep col-sep
-    compress-program decompress-program delay delimiter env halt halt-on-error header jl joblog jobs load max-args
-    max-chars max-procs max-replace-args memfree nice parens profile recend recstart res result results retries return
+    compress-program ctagstring decompress-program delay delimiter env group-by halt halt-on-error header jl joblog jobs
+    load max-args max-chars max-procs max-replace-args memfree memsuspend nice parens profile recend recstart res result
+    results retries return
     rpl semaphorename semaphoretimeout ssh sshdelay sshlogin sshloginfile slf tagstring tag-string tempdir termseq
     term-seq tf timeout tmpdir transferfile transfer-file transferfiles transfer-files trc trim wd workdir work-dir
     """.split()
 )
 PARALLEL_LONG_FLAGS = set(
-    """bar bg cat citation cleanup compress dry-run dryrun eta fg fifo files group gnu help keep-order keeporder lb
-    line-buffer linebuffer link no-keep-order no-notice no-run-if-empty nonall nonotice null onall pipe pipe-part
-    pipepart plus progress quote shellquote shuf silent tag tee tty ungroup verbose version will-cite xapply xargs
+    """bar bg cat citation cleanup compress csv ctag dry-run dryrun eta fg fifo files group gnu help keep-order
+    keeporder lb line-buffer linebuffer link no-keep-order no-notice no-run-if-empty nonall nonotice null onall pipe
+    pipe-part pipepart plain plus progress quote resume resume-failed retry-failed shellquote shuf silent tag tee transfer
+    tty ungroup verbose version will-cite xapply xargs
     """.split()
 )
 PARALLEL_SEP_OPTS = {"arg-sep": 0, "argsep": 0, "arg-file-sep": 1, "argfilesep": 1}  # 0 = `:::`, 1 = `::::`
-PARALLEL_JOBS_MAX = 64  # số dòng lệnh tối đa (tổ hợp các nhóm `:::`) quét lồng; nhiều hơn → UNRESOLVED_TARGET
+PARALLEL_JOBS_MAX = 64  # tổ hợp nhóm `:::` tối đa quét lồng; hơn: không mẫu → UNRESOLVED_TARGET, có thể có → từng token
 PARALLEL_UNSEEN_MARK = "lệnh của parallel guard không thấy"  # dấu của UNRESOLVED_TARGET
 
 
@@ -5564,8 +5568,9 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
     PARALLEL_JOBS_MAX tổ hợp). Nhóm rỗng thành [""] như GNU parallel (nguồn rỗng thay bằng chuỗi rỗng). Có mẫu lệnh →
     ([], ""): đối số là dữ liệu (`_stdin_fed`, `_runner_scripts`). Nhóm đọc từ tệp (`::::`, `-a`, `--arg-file`) coi như
     [""] — guard không đọc nội dung tệp, như chạy tệp script (`bash cmds.txt`) — các nhóm `:::` thấy được vẫn quét. Đã
-    gặp tuỳ chọn lạ: không biết token nào là giá trị, token nào là mẫu → coi như không mẫu (chiều chặt). Không `:::`/`-a`
-    (đọc stdin) chưa xét ở đây."""
+    gặp tuỳ chọn lạ: không biết token nào là giá trị, token nào là mẫu → coi như không mẫu (chiều chặt); khi đó quá
+    PARALLEL_JOBS_MAX tổ hợp mà có thể có mẫu (token trước `:::`) thì quét từng token của từng nhóm (review #308). Không
+    `:::`/`-a` (đọc stdin) chưa xét ở đây."""
     s = _strip_prefixes(c)
     if not s or posixpath.basename(s[0]) != "parallel":
         return [], ""
@@ -5587,6 +5592,8 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
     total = 1
     for g in groups:
         total = min(total * len(g), PARALLEL_JOBS_MAX + 1)
+    if total > PARALLEL_JOBS_MAX and end > i:
+        return [t for g in groups for t in g if t], ""
     if total > PARALLEL_JOBS_MAX:
         return [], f"{PARALLEL_UNSEEN_MARK} (quá {PARALLEL_JOBS_MAX} tổ hợp đối số)"
     return ([" ".join(p) for p in itertools.product(*groups)] if groups else []), ""
