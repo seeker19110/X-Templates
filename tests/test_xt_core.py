@@ -1374,8 +1374,11 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         """review hotel-manager #119: hết giờ → SIGTERM cả nhóm (trap của script chạy), không đáp thì SIGKILL; tiến trình con
         nền không sống sót (trước đây chỉ bash bị SIGKILL, app tạm và khoá cổng còn lại)."""
         pid_file = self.base / "bg.pid"
-        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'echo don-dep; exit 1' TERM; sleep 30 & wait"
-        code, out = xt.run_gate_shell(cmd, self.base, 1)
+        # Thu hồi con trước khi thoát trap: PID1 của container có thể không reap zombie (kill(pid, 0) còn thấy PID).
+        # Marker SAU wait cũng bắt mutant chỉ TERM cha: hết grace, KILL không cho trap in marker giả hoàn tất.
+        cmd = f"sleep 30 & echo $! > {pid_file}; trap 'wait; echo don-dep; exit 1' TERM; sleep 30 & wait"
+        with unittest.mock.patch.object(xt, "GATE_KILL_GRACE", 1):
+            code, out = xt.run_gate_shell(cmd, self.base, 1)
         self.assertEqual(code, 124)
         self.assertIn("đã dừng cả nhóm tiến trình", out)
         self.assertIn("don-dep", out)  # trap TERM của script đã chạy
@@ -1762,6 +1765,13 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertTrue(xt.guard_block("git push origin main", self.base))
         self.assertIn(ROOT / xt.GUARD_FILE, xt.guard_paths(self.base))
 
+    def test_guard_paths_parent_of_install_only_for_xtemplates(self):
+        # Review #311: repo khung ở ~/X-Templates → cấp trên là ~/.claude/hooks của người dùng, không phải guard dự án.
+        self.assertNotIn(ROOT.parent / xt.GUARD_FILE, xt.guard_paths(self.base))
+        scripts = self.base / ".xtemplates" / "scripts"
+        with unittest.mock.patch.object(xt, "SCRIPT_DIR", scripts):
+            self.assertEqual(xt.guard_paths(self.base)[-1], self.base / xt.GUARD_FILE)
+
     def test_permissive_project_guard_does_not_win(self):
         # guard giả ở dự án (cho qua mọi thứ) không thắng guard của bản cài (review #117 lần 2).
         (self.base / xt.GUARD_FILE).write_text(
@@ -1793,14 +1803,68 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertEqual(xt.guard_block("gh pr merge 1", self.base), "lỗi merge")  # merge: đóng như hook
         self.assertEqual(xt.guard_block("pytest", self.base), "")  # lệnh khác: fail-open về luồng
 
-    def test_broken_guard_module_fails_open(self):
+    def test_broken_guard_module_fails_closed(self):
         self.fake_guard("def bash_decision(:\n")
         err = io.StringIO()
         with redirect_stderr(err):
-            self.assertEqual(xt.guard_block("git push origin main", self.base), "")
+            self.assertIn("khôi phục", xt.guard_block("git push origin main", self.base))
         self.assertIn("nạp lỗi (SyntaxError", err.getvalue())  # BASE-ERR-001: lỗi nạp guard không bị nuốt im
-        self.fake_guard("def bash_decision(c, r, w):\n    raise RuntimeError()\n")  # không có _failure_decision
-        self.assertEqual(xt.guard_block("x", self.base), "")
+
+    def test_guard_failure_without_healthy_fallback_fails_closed(self):
+        for fallback in ("", "def _failure_decision(mode, payload, cmd):\n    raise RuntimeError()\n"):
+            with self.subTest(fallback=fallback):
+                self.fake_guard("def bash_decision(c, r, w):\n    raise RuntimeError()\n" + fallback)
+                self.assertIn("khôi phục", xt.guard_block("pytest -q", self.base))
+
+    def test_partial_guard_module_is_never_used(self):
+        self.fake_guard(
+            """
+            def bash_decision(c, r, w):
+                return {"decision": ""}
+
+            def _failure_decision(mode, payload, cmd):
+                return {"decision": ""}
+
+            def apply_policy(o):
+                return o
+
+            raise RuntimeError("nạp dở")
+            """
+        )
+        for policy in ("", "strict"):
+            with self.subTest(policy=policy), unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": policy}):
+                with redirect_stderr(io.StringIO()):
+                    self.assertIn("khôi phục", xt.guard_block("pytest -q", self.base))
+
+    def test_broken_guard_gate_never_runs_command(self):
+        for body in (
+            "def bash_decision(:\n",
+            "def bash_decision(c, r, w):\n    return {'decision': ''}\nraise RuntimeError('nạp dở')\n",
+        ):
+            with self.subTest(body=body):
+                self.fake_guard(body)
+                with redirect_stderr(io.StringIO()):
+                    code, out = xt.run_gate_shell(f"touch {self.canary}", self.base, 30)
+                self.assertEqual(code, 126)
+                self.assertIn("khôi phục", out)
+                self.assertFalse(self.canary.exists())
+
+    def test_broken_guard_check_stdin_does_not_report_success(self):
+        self.fake_guard("def bash_decision(:\n")
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(b"pytest -q\0ruff check .\0"), encoding="utf-8")
+        with (
+            redirect_stdout(out),
+            redirect_stderr(err),
+            unittest.mock.patch("sys.stdin", stdin),
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}),
+        ):
+            rc = xt.main(["guard-check", "--stdin"])
+        self.assertEqual(rc, 126)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("LOOP-STOP-027", err.getvalue())
+        self.assertIn("lệnh: pytest -q", err.getvalue())
+        self.assertIn("lệnh: ruff check .", err.getvalue())
 
     def test_apply_policy_error_keeps_raw_decision(self):
         self.fake_guard(
@@ -1813,6 +1877,29 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
             """
         )
         self.assertEqual(xt.guard_block("x", self.base), "guard chặn")
+        for raw in ('{"decision": "allow"}', '{"decision": ""}', "{}"):
+            # Review #311: quyết định cho rõ ràng giữ nguyên khi `apply_policy` lỗi — chỉ `ask` mới bị chặn.
+            self.fake_guard(
+                f"def bash_decision(c, r, w):\n    return {raw}\n\ndef apply_policy(o):\n    raise RuntimeError()\n"
+            )
+            self.assertEqual(xt.guard_block("x", self.base), "", raw)
+
+    def test_policy_failure_cannot_allow_fallback_ask(self):
+        self.use_real_guard()
+        mod = xt._load_guard(self.base / xt.GUARD_FILE)
+        command = f"gh() {{ :; }}; touch {self.canary}; gh pr merge 123"
+        for policy in ("", "strict"):
+            self.canary.unlink(missing_ok=True)
+            with (
+                self.subTest(policy=policy),
+                unittest.mock.patch.dict(os.environ, {"XT_GUARD_POLICY": policy}),
+                unittest.mock.patch.object(xt, "_load_guard", return_value=mod),
+                unittest.mock.patch.object(mod, "bash_decision", side_effect=RuntimeError("guard failed")),
+                unittest.mock.patch.object(mod, "apply_policy", side_effect=RuntimeError("policy failed")),
+            ):
+                code, out = xt.run_gate_shell(command, self.base, 30)
+                self.assertEqual(code, 126, out)
+                self.assertFalse(self.canary.exists())
 
     def test_guard_check_command(self):
         self.use_real_guard()

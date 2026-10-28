@@ -5,6 +5,18 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
+- Corpus #308: 16 ca gán nối/`parallel :::`, có đối chứng; kiểm độ nhạy bằng gỡ hai bảo vệ trong bộ nhớ phải báo false-green (T-3570). Benchmark 539 ca, giới hạn trong tập đã kiểm.
+- ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
+
+### Changed
+- State không có `fcntl` hoặc FS trả ENOLCK/ENOSYS/EOPNOTSUPP nay exit 2 trước callback và không ghi, thay cho cập nhật không khóa có thể mất dữ liệu (ADR-0054, T-3572). Đọc vẫn được; Stop/PreCompact giữ fail-open có log. **Dự án đích:** dùng môi trường và filesystem hỗ trợ flock; chạy lại `install.py` để nhận sửa.
+- CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
+
+### Fixed
+- Fixture timeout (D-220) chờ reap tiến trình con trước marker/exit để không báo sai với PID zombie trong container; giữ kiểm marker, PID biến mất và nhánh SIGKILL, mutant chỉ TERM cha vẫn bị bắt.
+
 ## [3.28.0] - 2026-10-28
 
 **Dự án đích: chạy lại `install.py`** — nhận `loop attach`/`resolve`/`unblock` (`loop resume` cũ cảnh báo), `rev` + khoá cho `state.json`, chặn không-tiến-triển theo task (`--max-task-runs`, mặc định 6; 0 = tắt), `pr next` trả `rethink` sau 2 review chưa sạch, mẫu `perf sample` v2 và `perf compare` từ chối so khi lệch đơn vị/lệnh/bộ đo/nền tảng/chiều (`--higher-is-better` phải có ở cả `sample` lẫn `compare` — Gate kiểu 3.27 chỉ truyền ở `compare` sẽ đỏ) hoặc baseline bẩn, bản vá guard (T-3563/T-3564), skill `/review` `/gate` `/complete` `/optimize` theo ADR-0056. **Bước tay:** chép lại `scripts/perf-gate.sh` theo mẫu `optimization-loop.md` (Gate mẫu cũ báo `improved` giả được); ghép tay mẫu `AGENTS.md`/`PULL-REQUEST.md` (`install.py` không ghi đè); ghép lại blueprint — ID mới đợt stored 2026-10-28, đổi chữ `LOOP-HARNESS-008`, `LOOP-HARNESS-024`, `LOOP-STOP-021`, `LOOP-STOP-022`. `/optimize` tới 3.29.0 vẫn ghi lần thử qua `loop record` — trần `task_runs` có thể chặn; khi tối ưu dùng `loop init --max-task-runs 0`.

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import contextlib
 import errno
-import io
 import json
 import os
 import subprocess
@@ -780,18 +779,23 @@ class UpdateStateTest(TmpRepoCase):
             t.join(60)
         self.assertEqual(xt.read_state(self.tmp), {"rev": 50, "a": 25, "b": 25})
 
-    def test_update_state_without_fcntl_skips_lock_but_checks_rev(self) -> None:
+    def test_update_state_without_fcntl_refuses_write(self) -> None:
+        self.seed(active=True, rev=4, iterations=7)
+        path = self.tmp / ".autopilot" / "state.json"
+        before = path.read_bytes()
+        mutate = unittest.mock.Mock(return_value={"a": 1})
         with unittest.mock.patch.dict(sys.modules, {"fcntl": None}):
             self.assertIsNone(xt._fcntl())
-            self.assertEqual(xt.update_state(self.tmp, lambda cur: {"a": 1}), {"a": 1, "rev": 1})
+            with self.assertRaisesRegex(OSError, "fcntl"):
+                xt.update_state(self.tmp, mutate)
+            mutate.assert_not_called()
+            self.assertEqual(path.read_bytes(), before)
             self.assertFalse((self.tmp / ".autopilot" / xt.STATE_LOCK_FILE).exists())
-
-            def moved(cur: dict) -> dict:
-                xt.write_state({"rev": 9}, self.tmp)
-                return cur
-
-            with self.assertRaises(xt.StateRevConflict):
-                xt.update_state(self.tmp, moved, retries=0)
+            fresh = self.tmp / "fresh"
+            fresh.mkdir()
+            with self.assertRaisesRegex(OSError, "fcntl"):
+                xt.update_state(fresh, mutate)
+            self.assertFalse((fresh / ".autopilot" / "state.json").exists())
         self.assertIsNotNone(xt._fcntl())
 
     def test_update_state_loop_record_gate_runs_outside_lock(self) -> None:
@@ -892,21 +896,36 @@ class UpdateStateTest(TmpRepoCase):
         st = xt.read_state(self.tmp)
         self.assertEqual((st["active"], st.get("iterations", 0)), (False, it))
 
-    def test_update_state_flock_unsupported_runs_unlocked(self) -> None:
-        # Review #294: FS không hỗ trợ flock (ENOLCK) → như nhánh không `fcntl`: ghi được, kiểm `rev`, báo một dòng.
-
-        def no_lock(fd: int, op: int) -> None:
-            raise OSError(errno.ENOLCK, "No locks available")
-
-        with unittest.mock.patch("fcntl.flock", no_lock), contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(xt.update_state(self.tmp, lambda cur: {"a": 1}), {"a": 1, "rev": 1})
-        self.assertIn("flock không dùng được", err.getvalue())
+    def test_update_state_flock_unsupported_refuses_write(self) -> None:
+        self.seed(active=True, rev=4)
+        path = self.tmp / ".autopilot" / "state.json"
+        before = path.read_bytes()
+        mutate = unittest.mock.Mock(return_value={"a": 1})
+        for code in (errno.ENOLCK, errno.ENOSYS, errno.EOPNOTSUPP):
+            with self.subTest(errno=code), unittest.mock.patch("fcntl.flock", side_effect=OSError(code, "no lock")):
+                with self.assertRaisesRegex(OSError, "flock"):
+                    xt.update_state(self.tmp, mutate)
+                mutate.assert_not_called()
+                self.assertEqual(path.read_bytes(), before)
 
         def other(fd: int, op: int) -> None:
             raise OSError(errno.EIO, "I/O error")
 
         with unittest.mock.patch("fcntl.flock", other), self.assertRaises(OSError):
             xt.update_state(self.tmp, lambda cur: {"a": 2})
+
+    def test_update_state_lock_unavailable_cli_and_hook(self) -> None:
+        self.init_loop()
+        path = self.tmp / ".autopilot" / "state.json"
+        before = path.read_bytes()
+        with unittest.mock.patch.object(xt, "_fcntl", return_value=None):
+            rc, out, err = run_main("loop", "block", "--reason", "test lock")
+            self.assertEqual(rc, 2, out + err)
+            self.assertIn("fcntl", err)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(xt.hook_stop("{}", self.tmp), ("", 0))
+            self.assertEqual(path.read_bytes(), before)
+        self.assertIn("fcntl", (self.tmp / ".autopilot" / "hook-stop.log").read_text())
 
 
 def racing_update_state(base: Path, writes: list[dict]):
