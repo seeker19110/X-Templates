@@ -10003,8 +10003,10 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
-    tag = "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()
-    return _steward_apply(out, d, repo, cmds if apply else [], str(pr.get("baseRefName") or "main"), tag)
+    target = str(pr.get("baseRefName") or "main")
+    # như trigger `push` của release-tag.yml: chỉ nhánh `main` (nhánh khác: job bị bỏ qua, bản cũ thiếu input → 422)
+    tag = target == "main" and "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()
+    return _steward_apply(out, d, repo, cmds if apply else [], target, tag)
 
 
 def _steward_key(out: Dict[str, Any], repo: str) -> str:
@@ -10113,7 +10115,12 @@ def _steward_dispatch_tag(out: Dict[str, Any], repo: str, base: str, n: str) -> 
         err = _steward_run([cmd + ["-f", f"inputs[sha]={sha}"]])
     out["then"] = "; ".join(x for x in (out.get("then"), "dispatch tag " + (f"✗ {err}" if err else "✓")) if x)
     if err:
-        text = f"tag phát hành chưa gắn ({err}) — chạy tay workflow_dispatch release-tag.yml với sha commit merge"
+        how = (
+            f"gh workflow run release-tag.yml -f sha={sha}"
+            if sha and not err.startswith("PR chưa")
+            else "sha commit merge"
+        )
+        text = f"tag phát hành chưa gắn ({err}) — chạy tay workflow_dispatch release-tag.yml ({how})"
         out["warn"] = "; ".join(x for x in (out.get("warn"), text) if x)
 
 

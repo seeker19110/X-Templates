@@ -6,7 +6,6 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
-- `pr steward`: merge bằng `GITHUB_TOKEN` của PR đổi `VERSION` (repo có `.github/workflows/release-tag.yml`) → dispatch `release-tag.yml` ghim commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm cảnh báo. **Dự án đích:** không đổi gì nếu không có workflow tag.
 - `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
 - ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
 
@@ -15,6 +14,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
 
 ### Fixed
+- `pr steward`: merge bằng `GITHUB_TOKEN` của PR vào `main` đổi `VERSION` → dispatch `.github/workflows/release-tag.yml` (nếu repo có) với input `sha` = commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm lệnh chạy tay. **Dự án đích:** không có file này → không đổi; có file cùng tên thì nó phải nhận `workflow_dispatch` với input `sha` (như bản của khung), không thì job steward đỏ (422) sau mỗi merge đổi `VERSION`.
 - Fixture timeout (D-220) chờ reap tiến trình con trước marker/exit để không báo sai với PID zombie trong container; giữ kiểm marker, PID biến mất và nhánh SIGKILL, mutant chỉ TERM cha vẫn bị bắt.
 
 ## [3.28.0] - 2026-10-28

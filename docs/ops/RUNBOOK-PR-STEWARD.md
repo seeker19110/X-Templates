@@ -30,8 +30,8 @@ mỗi hành động, nên sự kiện lặp/sai thứ tự không lặp tác d�
 Điều kiện cần: **không** cần "Allow auto-merge" — nên **tắt** ở Settings → General để không ai bật nhầm. Nên đặt secret
 `XT_STEWARD_TOKEN` (fine-grained PAT hoặc GitHub App: contents + pull requests: write): merge bằng `GITHUB_TOKEN` vẫn vào
 nhưng GitHub không chạy workflow `push` cho commit đó — steward bù bằng `workflow_dispatch` của `ci.yml` trên nhánh đích
-(GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402) — và không có token thì steward không cập
-nhật nhánh tụt.
+(GitHub cho `GITHUB_TOKEN` tạo sự kiện này; job cần `actions: write`, T-2402; PR đổi `VERSION` thì cả `release-tag.yml` — §4) — và
+không có token thì steward không cập nhật nhánh tụt.
 
 Ruleset sống của repo khung (kiểm `gh api repos/seeker19110/X-Templates/rules/branches/main` 2026-10-23, D-144): required
 check `quality`, `protection-guard`, `gitleaks`, `dep-audit`; **"up to date" bật** (`strict: true`, khớp

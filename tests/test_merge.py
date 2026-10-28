@@ -3571,13 +3571,26 @@ class StewardDispatchCiTest(unittest.TestCase):
                 self.assertEqual(rc, 0, out)
                 self.assertNotIn("dispatch tag", out)
                 self.assertNotIn("release-tag.yml", " ".join(" ".join(w) for w in gh.writes))
+        self.github_token()  # trả XT_STEWARD_UPDATE về off: đường dispatch sau merge phải chạy (review #316)
         (self.base / xt.RELEASE_WORKFLOW_FILE).unlink()  # dự án đích không có workflow tag
         rc, out, gh = self.steward(raw=self.version_pr(workflow=False))
+        self.assertIn("dispatch CI ✓", out)
         self.assertNotIn("dispatch tag", out)
+        self.assertNotIn("release-tag.yml", " ".join(" ".join(w) for w in gh.writes))
+        for ref, want in (("main", True), ("develop", False)):  # như trigger `push` của release-tag.yml: chỉ main
+            with self.subTest(ref=ref), unittest.mock.patch.object(xt, "_steward_apply", return_value={}) as m:
+                gh = StewardGh(raw=self.version_pr(), pull={"base": {"ref": ref}})
+                with gh.patch():
+                    xt._steward_one("7", "repos/{owner}/{repo}", self.base, True, [])
+                self.assertEqual(m.call_args.args[4:], (ref, want))
 
     def test_steward_dispatch_tag_unreadable_merge_warns(self):
         self.github_token()
-        for last in ({"merged": False}, {"merged": True, "merge_commit_sha": "không-phải-sha"}, "FAIL"):
+        for last in (
+            {"merged": False, "merge_commit_sha": self.MERGED},  # GitHub trả commit merge thử cho PR chưa merge
+            {"merged": True, "merge_commit_sha": "không-phải-sha"},
+            "FAIL",
+        ):
             with self.subTest(last=last):
                 gh = SeqGh([{}, {}, last], raw=self.version_pr())
                 with gh.patch():
@@ -3593,6 +3606,7 @@ class StewardDispatchCiTest(unittest.TestCase):
         with gh.patch():
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertIn("dispatch tag ✗ HTTP 404", out)
+        self.assertIn(f"gh workflow run release-tag.yml -f sha={self.MERGED}", out)  # lệnh chạy tay chép dùng được
 
     def test_steward_dispatch_ci_workflows(self):
         for path in (ROOT / ".github/workflows/ci.yml", ROOT / "framework/templates/ci.yml"):
