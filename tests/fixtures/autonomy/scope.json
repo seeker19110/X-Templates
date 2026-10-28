@@ -128,6 +128,20 @@
    "ids": [
     "AUD-SEC-074"
    ]
+  },
+  {
+   "reason": "`perf guard` không phải guard của hook — không có nhóm ca autonomy-bench cho lệnh này (AUD-SEC-116); đã có Gate unittest `-k test_guard_text_attr tests.test_perf`",
+   "ids": [
+    "AUD-SEC-116"
+   ]
+  },
+  {
+   "reason": "Đo thời gian mẫu / Gate mẫu (perf, `examples/`) — không thuộc lớp quyết định cho/chặn mà autonomy-bench kiểm; đỡ bằng Gate unittest `-k test_sample_timing_resolution` (AUD-PERF-003) và `-k test_gate_example_tamper` (AUD-XFEAT-026, AUD-XFEAT-027)",
+   "ids": [
+    "AUD-PERF-003",
+    "AUD-XFEAT-026",
+    "AUD-XFEAT-027"
+   ]
   }
  ]
 }
