@@ -70,7 +70,7 @@ dữ liệu vẫn là điểm dừng về hành động (tiền thật, dữ li�
 
 **Cách làm:** dữ kiện trước (đọc repo, `/research` khi cần nguồn sống) → ≥ 2 phương án → áp tiêu chí →
 `xt.py loop decide --question … --option … --option … --choice N --why "<tiêu chí quyết định>" --revert "<đường lùi>" [--prod "<đề xuất khi chạy thật>"]`
-(ghi `docs/autopilot/DECISIONS.md`, commit cùng thay đổi) → làm tiếp, không block, không chờ. Báo cáo cuối việc liệt kê
+(ghi `docs/autopilot/DECISIONS.md`, commit cùng thay đổi; số D-NNN lấy max qua sổ ở worktree và nhánh remote đã fetch — `git fetch` trước, ADR-0056) → làm tiếp, không block, không chờ. Báo cáo cuối việc liệt kê
 các D-NNN mới để người xem lại; người đổi ý → quyết định mới "thay D-NNN", không sửa mục cũ.
 
 ### Điểm dừng bắt buộc về hành động (máy chặn hoặc gom cho người — ADR-0018, ADR-0019)
