@@ -10671,12 +10671,23 @@ PERF_DIFF_PLAIN = "diff --git a/"
 PERF_ODD_NAME = "(tên có ký tự đặc biệt)"
 PERF_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 PERF_UNTRACKED = ("ls-files", "-z", "--others", "--exclude-per-directory=.gitignore")
+PERF_RULE_FILES = {  # file luật git đổi/mới trong lượt: guard báo ⚠ (đổi luật = đổi thứ guard nhìn thấy)
+    ".gitignore": "đổi luật ignore — có thể giấu file mới trong vùng khoá",
+    ".gitattributes": "đổi luật thuộc tính — có thể giấu dòng",
+}
+PERF_RULE_SPECS = tuple(f"{p}{n}" for n in PERF_RULE_FILES for p in ("", "**/"))
 PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõi khi quét dòng đáng ngờ
+PERF_BINARY_PEEK = 8000  # NUL trong ngần này byte đầu = nhị phân, không khớp mẫu (heuristic `buffer_is_binary` của git)
+PERF_SNIPPET = 60  # ký tự mỗi bên chỗ khớp trong đoạn trích ⚠
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
     r"(?:perf_counter|process_time|monotonic|time\.time|performance\.now|Date\.now)(?:_ns)?\s*=(?!=)|"
-    r"patch\(\s*[\"']time\.|setattr\(\s*time\b|_getframe|inspect\.stack|-O3"
+    r"patch\(\s*[\"']time\.|setattr\(\s*time\b|_getframe|inspect\.stack|(?<![\w-])-O3\b"
 )
+# Thuộc tính khiến git đổi nội dung đọc từ worktree trước khi diff — `--text` không gỡ được; chỉ unset/unspecified không báo
+# (`filter=lfs` cũng báo: clean filter `lfs` có sẵn trong config system/global của nhiều máy, hoặc đặt qua `GIT_CONFIG_*`)
+PERF_CONTENT_ATTRS = ("working-tree-encoding", "filter", "ident")
+PERF_CONTENT_WARN = "thuộc tính đổi nội dung git đọc — dòng thêm có thể bị che"
 
 
 # --------------------------------------------------------------------------- autonomy-bench (AUTO-07, T-1521)
@@ -11209,13 +11220,26 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
     return [n for n in _perf_git(base, *args).split("\0") if n]
 
 
-def _perf_self_hidden_ignores(base: Path) -> List[str]:
-    """`.gitignore` chưa theo dõi mà chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005): bị ignore nhưng thư
-    mục chứa nó thì không. `.gitignore` trong thư mục đã ignore sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới
-    (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
+def _perf_git_raw(base: Path, *args: str) -> bytes:
+    """stdout bytes của git: `_git` chạy `text=True` (universal newlines đổi `\\r` thành `\\n`) — không dùng cho nội dung diff."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(base), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=_perf_env()
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"git {args[0]} quá {GIT_TIMEOUT} s") from None
+    if r.returncode != 0:
+        raise RuntimeError(f"git {args[0]} lỗi: {r.stderr.decode('utf-8', 'replace').strip() or r.returncode}")
+    return r.stdout
+
+
+def _perf_self_hidden_rules(base: Path) -> List[str]:
+    """File luật chưa theo dõi (`.gitignore`; `.gitattributes` từ AUD-SEC-116) bị ignore nhưng thư mục chứa nó thì không —
+    vd `.gitignore` chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005). File luật trong thư mục đã ignore
+    sẵn (`.venv/`, `node_modules/pkg/`) không phải luật mới (review #162) — "đã ignore sẵn" chỉ khi luật khớp nằm trong `.gitignore` ĐÃ THEO DÕI: `bench/sub/.gitignore` = `*`
     tự khớp cả thư mục `bench/sub/`, và `info/exclude`/`excludesFile` không được tin (như `PERF_UNTRACKED`; review #162 ×2)."""
     hidden = _perf_git_names(
-        base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".gitignore", "**/.gitignore"
+        base, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", *PERF_RULE_SPECS
     )
     parents = sorted({h.rpartition("/")[0] + "/" for h in hidden if "/" in h})
     if not parents:
@@ -11233,28 +11257,36 @@ def _perf_self_hidden_ignores(base: Path) -> List[str]:
     return [h for h in hidden if "/" not in h or h.rpartition("/")[0] + "/" not in ignored_dirs]
 
 
-def _perf_diff_lines(text: str) -> List[Tuple[str, str]]:
-    """Dòng thêm của `git diff --unified=0` kèm file; tên bị git quote (có `"`, `\\`, ký tự điều khiển) ghi là PERF_ODD_NAME."""
+def _perf_diff_lines(raw: bytes) -> List[Tuple[str, str]]:
+    """Dòng thêm của `git diff --unified=0` kèm file; tên bị git quote (có `"`, `\\`, ký tự điều khiển) ghi là PERF_ODD_NAME.
+    Đọc bytes, tách CHỈ theo `\\n` rồi decode từng dòng: `\\r`, `\\x1c`, U+2028… nằm trong một dòng thật không cắt mất
+    tiền tố `+` của phần sau, và mảnh `diff --git` sau chúng không thành tiêu đề giả. Chỉ dòng sau `@@` là nội dung —
+    dòng thêm `++ x` (in `+++ x`) không bị coi là tiêu đề `+++ b/…`."""
     added: List[Tuple[str, str]] = []
-    cur = ""
-    for line in text.splitlines():
+    cur, hunk = "", False
+    for line in (b.decode("utf-8", "replace") for b in raw.split(b"\n")):
         if line.startswith(PERF_DIFF_HEAD):  # tên từ tiêu đề (`a/P b/P`, không đổi tên) để file bị XOÁ cũng được tính
             rest = line[len(PERF_DIFF_PLAIN) :]
             cur = rest[: (len(rest) - 3) // 2] if line.startswith(PERF_DIFF_PLAIN) else PERF_ODD_NAME
-        elif cur and line.startswith("+") and not line.startswith("+++ "):
+            hunk = False
+        elif line.startswith("@@"):
+            hunk = True
+        elif hunk and line.startswith("+"):
             added.append((cur, line[1:]))
     return added
 
 
 def _perf_untracked_text(path: Path) -> str:
-    """Thứ git sẽ commit: symlink → chuỗi đích (không đi theo: có thể trỏ FIFO/thiết bị/file ngoài repo); file thường → ≤ 1 MiB; còn lại rỗng."""
+    """Thứ git sẽ commit: symlink → chuỗi đích (không đi theo: có thể trỏ FIFO/thiết bị/file ngoài repo); file thường → ≤ 1 MiB
+    (nhị phân — NUL trong PERF_BINARY_PEEK byte đầu — rỗng); còn lại rỗng."""
     mode = os.lstat(path).st_mode
     if stat.S_ISLNK(mode):
         return os.readlink(path)
     if not stat.S_ISREG(mode):
         return ""
     with open(path, "rb") as fh:
-        return fh.read(PERF_UNTRACKED_MAX).decode("utf-8", "replace")
+        data = fh.read(PERF_UNTRACKED_MAX)
+    return "" if b"\0" in data[:PERF_BINARY_PEEK] else data.decode("utf-8", "replace")
 
 
 def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]:
@@ -11268,29 +11300,87 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
     return out
 
 
-def _perf_is_ignore_file(path: str) -> bool:
-    return path.rpartition("/")[2] == ".gitignore"
+def _perf_blob_head(base: Path, spec: str) -> bytes:
+    """≤ PERF_BINARY_PEEK byte đầu của blob `spec` (không có → b""): đọc qua ống rồi giết git, không nạp cả blob."""
+    cmd = ["git", "-C", str(base), "cat-file", "blob", spec]
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_perf_env()) as proc:
+        head = proc.stdout.read(PERF_BINARY_PEEK) if proc.stdout else b""
+        proc.kill()
+    return head
+
+
+def _perf_binary(base: Path, ref: str, name: str) -> bool:
+    """File `name` là nhị phân theo heuristic của git (NUL trong PERF_BINARY_PEEK byte đầu), không theo thuộc tính: đọc
+    worktree; không còn ở worktree (xoá, cha thành file) → blob ở `ref`. Tên giả PERF_ODD_NAME, symlink, file đặc biệt →
+    không (vẫn quét: fail-closed — file thật đặt trùng tên giả không che được dòng của tên bị quote)."""
+    if name == PERF_ODD_NAME:
+        return False
+    path = base / name
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        with open(path, "rb") as fh:
+            head = fh.read(PERF_BINARY_PEEK)
+    except OSError:
+        head = _perf_blob_head(base, f"{ref}:{name}")
+    return b"\0" in head
+
+
+def _perf_snippet(text: str, m: "re.Match[str]") -> str:
+    """Đoạn trích quanh chỗ khớp (không từ đầu dòng: tiền tố dài không đẩy chỗ khớp ra ngoài), ký tự không in được escape
+    (`\\r`, ESC, U+202E… không ra terminal thô)."""
+    lo, hi = max(0, m.start() - PERF_SNIPPET), m.end() + PERF_SNIPPET
+    cut = text[lo:hi].strip()
+    body = "".join(c if c.isprintable() else repr(c)[1:-1] for c in cut)
+    return ("…" if lo else "") + body + ("…" if hi < len(text) else "")
+
+
+def _perf_rule_file(path: str) -> str:
+    """Lý do ⚠ nếu `path` là file luật git (PERF_RULE_FILES), không thì chuỗi rỗng."""
+    return PERF_RULE_FILES.get(path.rpartition("/")[2], "")
 
 
 def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     """(file đổi gồm file chưa theo dõi, [(file, dòng thêm)]) của worktree so với `ref`. Tên file lấy từ `--name-only -z`
     (không phụ thuộc tiền tố diff hay cách quote). File chưa theo dõi chỉ lọc theo `.gitignore` đã có ở `ref` — có `.gitignore`
     đổi/mới thì kiểm khoá trên MỌI file chưa theo dõi (perf_guard còn báo ⚠); `core.excludesFile`/`.git/info/exclude` đổi được
-    mà không để dấu nên không dùng."""
+    mà không để dấu nên không dùng. `--text`: thuộc tính `-diff`/`binary` (cây, `info/attributes`, `core.attributesFile`)
+    không biến dòng thêm thành "Binary files differ" (AUD-SEC-116); bỏ dòng của file nhị phân thật (`_perf_binary`)."""
     names = _perf_git_names(base, "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ref, "--")
     untracked = _perf_git_names(base, *PERF_UNTRACKED)
     scanned = untracked
-    new_ignores = _perf_self_hidden_ignores(base)
+    hidden = _perf_self_hidden_rules(base)
     if any(
-        _perf_is_ignore_file(f) for f in names + untracked + new_ignores
+        f.rpartition("/")[2] == ".gitignore" for f in names + untracked + hidden
     ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
         untracked = _perf_git_names(base, "ls-files", "-z", "--others")
-    text = _perf_git(
+    raw = _perf_git_raw(
         base,
-        *("diff", "--unified=0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
+        *("diff", "--unified=0", "--text", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + untracked, _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
+    diff = _perf_diff_lines(raw)
+    binary = {f for f in {f for f, _ in diff} if _perf_binary(base, ref, f)}
+    added = [(f, t) for f, t in diff if f not in binary]
+    return names + sorted({*untracked, *hidden}), added + _perf_untracked_lines(base, scanned)
+
+
+def perf_content_attrs(base: Path, files: List[str]) -> List[str]:
+    """⚠ cho file có thuộc tính đổi nội dung git đọc từ worktree (PERF_CONTENT_ATTRS: `working-tree-encoding`, `filter`
+    + clean, `ident`) — từ mọi nguồn git dùng (cây, `info/attributes`, `core.attributesFile` kể cả qua `GIT_CONFIG_*`).
+    Dòng thêm bị đổi/xoá trước khi tới diff; `--text` không giúp. git lỗi → RuntimeError."""
+    if not files:
+        return []
+    r = _git(base, "check-attr", "-z", "--stdin", *PERF_CONTENT_ATTRS, env=_perf_env(), stdin="\0".join(files))
+    if r.returncode != 0:
+        raise RuntimeError(f"git check-attr lỗi: {r.stderr.strip() or r.returncode}")
+    fields = r.stdout.split("\0")  # -z: <đường> <thuộc tính> <giá trị> cho mỗi cặp
+    out = []
+    for i in range(0, len(fields) - 2, 3):
+        path, attr, value = fields[i : i + 3]
+        if value not in ("unset", "unspecified"):
+            out.append(f"{path}: {PERF_CONTENT_WARN} ({attr if value == 'set' else f'{attr}={value}'})")
+    return out
 
 
 def perf_known(base: Path) -> List[str]:
@@ -11307,12 +11397,8 @@ def perf_match(path: str, glob: str) -> bool:
 def perf_guard(files: List[str], added: List[Tuple[str, str]], locked: List[str]) -> Tuple[List[str], List[str]]:
     """(file khoá bị đụng, dòng thêm đáng ngờ) — bộ đo/test tương đương không phải thứ agent được sửa để 'đạt'."""
     touched = [f for f in files if any(perf_match(f, g) for g in locked)]
-    suspect = [
-        f"{f}: đổi luật ignore — có thể giấu file mới trong vùng khoá"
-        for f in files
-        if f.rpartition("/")[2] == ".gitignore"
-    ]
-    suspect += [f"{f}: {t.strip()[:120]}" for f, t in added if PERF_SUSPECT_RE.search(t)]
+    suspect = [f"{f}: {_perf_rule_file(f)}" for f in files if _perf_rule_file(f)]
+    suspect += [f"{f}: {_perf_snippet(t, m)}" for f, t in added if (m := PERF_SUSPECT_RE.search(t))]
     # Tên file không phải UTF-8: `_git` đã thay byte lạ bằng U+FFFD nên không mở lại được để quét nội dung — fail-closed
     suspect += [f"{f}: tên file không phải UTF-8 — không quét được nội dung" for f in files if "\ufffd" in f]
     return touched, suspect
@@ -11542,7 +11628,9 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
     locked: List[str] = args.locked or []
     try:
         base = perf_repo()
-        files, added = perf_diff(base, args.base)
+        # SHA, không phải chuỗi thô: `--base=--output=F` thành tuỳ chọn của `git diff` (AUD-SEC-115)
+        files, added = perf_diff(base, perf_rev(args.base))
+        attrs = perf_content_attrs(base, files)
         known = perf_known(base) if locked else []
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
@@ -11552,10 +11640,11 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
         print(f"✗ --locked không khớp file nào trong repo: {', '.join(dead)}", file=sys.stderr)
         return 2
     touched, suspect = perf_guard(files, added, locked)
+    suspect += attrs
     for f in touched:
         print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
     for s in suspect:
-        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore) — reviewer phải rà: {s}")
+        print(f"⚠ đáng ngờ (cache/sleep/đổi đồng hồ/soi stack/đổi ignore/thuộc tính) — reviewer phải rà: {s}")
     if not touched and not suspect:
         print(f"✓ {len(files)} file đổi, không đụng file khoá, không dòng đáng ngờ")
     return 1 if touched or (suspect and args.strict) else 0
