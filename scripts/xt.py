@@ -6812,14 +6812,18 @@ DECISION_REMOTE_REFS = 100  # số nhánh remote mới nhất đọc sổ khi đ
 
 def _remote_decisions(base: Path, rel: Path) -> str:
     """Dòng tiêu đề D-NNN của sổ `rel` ở các nhánh remote-tracking mới nhất (T-3577): phiên song song ở container khác
-    (nhánh chưa merge) từng cùng lấy D-219 — chỉ thấy được qua ref đã fetch. Một lần `git grep` trên mọi ref."""
+    (nhánh chưa merge) từng cùng lấy D-219 — chỉ thấy được qua ref đã fetch. Một lần `git grep` trên mọi ref; tắt số
+    dòng/cột/màu do cấu hình người dùng bật (tiền tố làm `^### D-` không khớp — review #312) và đọc `rel` nguyên văn."""
     refs = _git(
         base, "for-each-ref", "--sort=-committerdate", f"--count={DECISION_REMOTE_REFS}", "--format=%(refname)",
         "refs/remotes", env=_perf_env(),
     ).stdout.split()  # fmt: skip
     if not refs:
         return ""
-    return _git(base, "grep", "-h", "-E", r"^### D-[0-9]{3,}", *refs, "--", rel.as_posix(), env=_perf_env()).stdout
+    return _git(
+        base, "--literal-pathspecs", "grep", "--no-line-number", "--no-column", "--no-color", "-h", "-E",
+        r"^### D-[0-9]{3,}", *refs, "--", rel.as_posix(), env=_perf_env(),
+    ).stdout  # fmt: skip
 
 
 def _last_decision(text: str, base: Path, rel: Path) -> int:

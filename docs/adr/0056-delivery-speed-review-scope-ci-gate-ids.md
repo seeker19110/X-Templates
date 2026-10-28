@@ -3,7 +3,7 @@
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-28: "nghiên cứu sâu và tối ưu lại quy trình, mục tiêu phát triển phần mềm càng nhanh càng tốt"; phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-221)
 - **Trạng thái triển khai:** Đã triển khai — `.claude/skills/review/SKILL.md` (Cách báo), `.claude/skills/gate/SKILL.md` bước 4, AGENTS.md §6, `scripts/xt.py` `_remote_decisions`/`_last_decision` (T-3577, test `DecideWorktreesTest.test_decide_remote_branch_numbers_do_not_collide`), `xt.yaml` khoá `setup`.
 - **Ngày:** 2026-10-28
-- **Làm rõ:** ADR-0033 (giữ "`gate` một lần trước khi đẩy" — nay chỉ khi không có CI hoặc trước cắt bản), ADR-0041 §2 (CI là cổng ở pha build — nay mọi pha), ADR-0053 (trần lượt review — giữ), ADR-0031 (nợ review/sổ audit chặn phát hành — giữ), T-2612 (đánh số qua worktree).
+- **Làm rõ:** ADR-0033 và ADR-0046 (giữ "`gate` một lần trước khi đẩy" ở harden — nay chỉ khi không có CI hoặc trước cắt bản), ADR-0041 §2 (CI là cổng ở pha build — nay mọi pha), ADR-0053 (trần lượt review — giữ), ADR-0031 (nợ review/sổ audit chặn phát hành — giữ), T-2612 (đánh số qua worktree).
 
 ## Bối cảnh
 
@@ -25,16 +25,16 @@ container khác nhau cùng giữ D-219 và `AUD-SEC-129` vì `loop decide` chỉ
 1. **Lỗi có từ trước không chặn PR.** Reviewer tách phát hiện tái hiện được ở base mà diff không tạo ra, không làm tệ hơn và không
    nằm trên đường mã diff vừa thêm thành mục "Có từ trước" kèm mức thật; phiên chính ghi sổ audit + task mới. 🔴 mở trong sổ vẫn
    chặn phát hành (`audit check --strict`, hàng `audit` của `release-check`) — cổng dời từ merge sang phát hành, không biến mất.
-2. **CI là cổng đầy đủ ở mọi pha** khi CI chạy đúng các khoá `xt.yaml` và merge đòi CI xanh: trước khi đẩy chạy `gate-fast`
-   (cổng commit). `gate` cục bộ còn cho lần đẩy cuối trước cắt bản, khi không có CI, hoặc khi người gọi `/gate`. Lý do giữ của
+2. **CI là cổng đầy đủ ở mọi pha** khi CI chạy đúng các khoá `xt.yaml` và merge đòi CI xanh: trước khi đẩy chỉ cần cổng commit
+   `gate-fast` đã chạy ở mỗi commit. `gate` cục bộ còn cho lần đẩy cuối trước cắt bản, khi không có CI, hoặc khi người gọi `/gate`. Lý do giữ của
    ADR-0033 (auto-merge không ghim head) đã hết từ ADR-0036 (merge ghim head); CI đỏ chỉ tốn một lượt ≈ 2 phút.
 3. **Đánh số D-NNN đọc thêm sổ ở 100 nhánh remote-tracking mới nhất** (một `git grep`, không gọi API; không phải repo git/không
-   có remote → như cũ). Phiên phải `git fetch` trước `loop decide` để thấy nhánh mới.
+   có remote → như cũ). Phiên `git fetch` trước `loop decide` để thấy nhánh mới; chỉ thấy D-NNN đã đẩy — hai phiên quyết định cùng lúc trước khi ai đẩy vẫn có thể trùng (đổi số khi gộp).
 4. **`xt.yaml` khai `setup`** (cài công cụ ghim hash) để setup script của môi trường cloud gọi `scripts/dev-task.sh setup`.
 
 ## Hệ quả
 
-- Tốt: bớt lượt review và PR phình vì lỗi cũ; mỗi lần đẩy bớt vài phút cổng cục bộ; hết trùng D-NNN giữa phiên song song đã fetch.
+- Tốt: bớt lượt review và PR phình vì lỗi cũ; mỗi lần đẩy bớt vài phút cổng cục bộ; hết trùng D-NNN với nhánh đã đẩy và đã fetch.
 - Xấu: lỗi cũ nghiêm trọng có thể nằm trên `main` lâu hơn (tới khi task sửa chạy) — đỡ bằng sổ `--strict` chặn phát hành và task
   mới ngay; thỉnh thoảng một lượt CI đỏ mà `gate` cục bộ đã bắt được (coverage chỉ đo ở CI/`gate`).
 - Chưa làm (cần số/ADR): máy báo PR > 150 dòng ở `pr next`; review sạch ở head thay một phần audit delta (đổi ADR-0031); ID

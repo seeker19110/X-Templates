@@ -578,6 +578,11 @@ class DecideWorktreesTest(TmpRepoCase):
 
     def test_decide_remote_branch_numbers_do_not_collide(self) -> None:
         """T-3577: phiên ở container khác ghi D-007 trên nhánh chưa merge — sau fetch, số kế tiếp phải vượt nó."""
+        self.remote_log_d007()
+        self.git("update-ref", "refs/remotes/origin/plain", "HEAD")  # ref không có sổ: không làm hỏng
+        self.assertIn("D-008", self.decide(self.main))
+
+    def remote_log_d007(self) -> None:
         log = self.wt / "docs" / "autopilot" / "DECISIONS.md"
         log.parent.mkdir(parents=True)
         log.write_text("# x\n\n### D-007 · t · q\n", encoding="utf-8")
@@ -587,8 +592,31 @@ class DecideWorktreesTest(TmpRepoCase):
         self.git(
             "-C", str(self.wt), "reset", "-q", "--hard", "HEAD~1"
         )  # worktree không còn sổ: chỉ ref remote giữ D-007
-        self.git("update-ref", "refs/remotes/origin/plain", "HEAD")  # ref không có sổ: không làm hỏng
-        self.assertIn("D-008", self.decide(self.main))
+
+    def test_decide_remote_numbers_ignore_user_grep_config(self) -> None:
+        """Review #312: `grep.lineNumber`/`grep.column`/`color.ui=always` của người dùng thêm tiền tố vào đầu ra `git grep`
+        → `^### D-` không khớp, lặng lẽ lùi về đánh số cũ (trùng lại)."""
+        self.remote_log_d007()
+        cfg = self.tmp / "gitconfig"
+        cfg.write_text("[grep]\n\tlineNumber = true\n\tcolumn = true\n[color]\n\tui = always\n", encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
+            self.assertIn("D-008", self.decide(self.main))
+
+    def test_decide_remote_log_path_is_literal(self) -> None:
+        """Review #312: `--log` có ký tự glob/magic không được khớp sổ khác ở ref remote (`[a]` → `a`)."""
+        other = self.wt / "notes" / "a" / "D.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("### D-500 · t · q\n", encoding="utf-8")
+        self.git("-C", str(self.wt), "add", "-A")
+        self.git("-C", str(self.wt), "commit", "-q", "-m", "d500")
+        self.git("update-ref", "refs/remotes/origin/b", "b")
+        with chdir(self.main):
+            rc, out, err = run_main(
+                "loop", "decide", "--question", "q", "--option", "a", "--option", "b", "--choice", "1",
+                "--why", "w", "--revert", "r", "--log", "notes/[a]/D.md",
+            )  # fmt: skip
+        self.assertEqual(rc, 0, err)
+        self.assertIn("D-001", out)
 
 
 # Tiến trình giữ `flock(LOCK_EX)` trên file argv[1]: in "held" khi đã giữ, nhả sau argv[2] giây (âm → tới khi stdin đóng).

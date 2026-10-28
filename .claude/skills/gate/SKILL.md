@@ -13,7 +13,7 @@ description: Chạy cổng chất lượng đầy đủ (build · typecheck · l
 3. Commit message conventional (`feat|fix|refactor|docs|test|chore|perf|ci|build(scope): ...`), ≤ 72 ký tự dòng đầu.
 
 ## Trước khi đẩy/mở PR (`/gate`)
-4. Có CI chạy đúng các khoá `xt.yaml` và merge đòi CI xanh: `<DT> gate-fast` (lint · typecheck · test liên quan) rồi đẩy — **CI là cổng đầy đủ** (song song, nhanh hơn chạy nối tiếp ở máy; lọt lỗi chỉ tốn một lượt CI — ADR-0056). Không có CI, lần đẩy cuối trước cắt bản, hoặc người gọi `/gate`: `<DT> gate` (build → typecheck → lint → test; đỏ một cái là dừng), đọc output thật. Nhánh cập nhật/xung đột/CI do `xt.py merge-check` quyết sau khi mở PR.
+4. Có CI chạy đúng các khoá `xt.yaml` và merge đòi CI xanh: đẩy ngay — mỗi commit đã qua `gate-fast` (format · lint · typecheck · test liên quan file đổi, hook cổng commit); **CI là cổng đầy đủ** (song song, nhanh hơn chạy nối tiếp ở máy; lọt lỗi chỉ tốn một lượt CI — ADR-0056). Không có CI, lần đẩy cuối trước cắt bản, hoặc người dùng gõ `/gate`: `<DT> gate` (build → typecheck → lint → test; đỏ một cái là dừng), đọc output thật. Nhánh cập nhật/xung đột/CI do `xt.py merge-check` quyết sau khi mở PR.
 5. Đối chiếu tiêu chí chấp nhận trong SPEC + mục blueprint liên quan (tick kèm bằng chứng).
 6. Nếu đổi schema: migration có phiên bản + đường lùi. Nếu đổi API: hợp đồng + CHANGELOG.
 7. Rà bảo mật nhanh: quyền kiểm ở server, không lộ dữ liệu, không nới cấu hình cổng.

@@ -101,7 +101,7 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
   done
   if [ -n "$gate" ]; then
     # `commit_gate: fast` (xt.yaml của repo nhận commit) → cổng nhanh: format/lint/typecheck + test liên quan file đổi;
-    # cổng đầy đủ (`dev-task.sh gate`, ngưỡng coverage) chạy ở bước mở PR và CI. Vắng/giá trị khác → đầy đủ như trước.
+    # cổng đầy đủ (`dev-task.sh gate`, ngưỡng coverage) là CI (cục bộ trước cắt bản). Vắng/giá trị khác → đầy đủ như trước.
     # Đọc `commit_gate` bằng chính xt.py của khung cài cùng hook này (`commit-gate`: cùng cách đọc khoá với `doctor`/
     # `ci-check` — bỏ comment, dòng trùng lấy dòng cuối; AUD-XFEAT-017), không grep riêng. Không chạy được/giá trị lạ → full.
     task="gate"
@@ -118,9 +118,9 @@ if [ "$XG_COMMIT" = "true" ] && { [ "$XG_NO_VERIFY" != "true" ] || [ "${XT_GUARD
     # T-1713): cổng nhanh chạy MỌI lớp test qua `test_list`/`test_unit` song song, không coverage; chưa khai hai khoá đó → `test`.
     if [ "$task" = "gate-fast" ] && gate_config_changed "$groot"; then
       export XT_GATE_ALL_TESTS=1
-      echo "🔒 Commit đụng cấu hình cổng nên cổng nhanh chạy MỌI lớp test (test_list/test_unit, không ngưỡng coverage; chưa khai hai khoá đó thì chạy 'test' đầy đủ) — coverage ở cổng trước PR/CI." >&2
+      echo "🔒 Commit đụng cấu hình cổng nên cổng nhanh chạy MỌI lớp test (test_list/test_unit, không ngưỡng coverage; chưa khai hai khoá đó thì chạy 'test' đầy đủ) — coverage ở CI." >&2
     elif [ "$task" = "gate-fast" ]; then
-      echo "⚡ Commit nhanh (commit_gate: fast): format/lint/typecheck + test liên quan file đổi; cổng đầy đủ (scripts/dev-task.sh gate) chạy ở bước mở PR/CI." >&2
+      echo "⚡ Commit nhanh (commit_gate: fast): format/lint/typecheck + test liên quan file đổi; cổng đầy đủ (scripts/dev-task.sh gate) chạy ở CI." >&2
     fi
     # stdout của cổng sang stderr: stdout của hook chỉ được chứa JSON quyết định.
     if ! CLAUDE_PROJECT_DIR="$groot" "$gate" "$task" >&2; then
