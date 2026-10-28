@@ -771,7 +771,16 @@ def pipelines(tokens: List[str]) -> List[List[List[str]]]:
     return [[c for c in g if c] for g in groups if any(g)]
 
 
-ENV_ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+# Gán biến đầu lệnh/đối số `export`: `TÊN=v` và `TÊN+=v` (bash nối vào giá trị cũ — `X+=1 rm -rf /` vẫn chạy rm,
+# AUD-SEC-125). Tên không mang `+`: tách bằng `_assign_split`.
+ENV_ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=.*")
+
+
+def _assign_split(t: str) -> Tuple[str, str]:
+    """(tên, giá trị) của gán `t` (đã khớp ENV_ASSIGN_RE). `TÊN+=v` nối vào giá trị cũ mà guard không biết → giá trị
+    `${TÊN}v`: còn biến (`_expands`), đi theo đường "không biết" sẵn có (khoá git chạy lệnh tính là không an toàn)."""
+    name, _, val = t.partition("=")
+    return (name[:-1], "${%s}%s" % (name[:-1], val)) if name.endswith("+") else (name, val)
 
 
 def _split_words(text: str) -> List[str]:
@@ -3478,13 +3487,13 @@ def _claude_args(n: List[str]) -> Optional[List[str]]:
 def _env_assigns(argv: List[str]) -> List[str]:
     """Tên biến được gán thật: gán đầu lệnh (kể cả sau `env [-u X] [-C d]` và wrapper), hoặc đối số của `export`/`declare`…"""
     if argv and argv[0] in DECLARE_CMDS:
-        return [t.split("=", 1)[0] for t in argv[1:] if ENV_ASSIGN_RE.fullmatch(t)]
+        return [_assign_split(t)[0] for t in argv[1:] if ENV_ASSIGN_RE.fullmatch(t)]
     names: List[str] = []
     a = list(argv)
     while a:
         head = posixpath.basename(a[0])
         if ENV_ASSIGN_RE.fullmatch(a[0]):
-            names.append(a.pop(0).split("=", 1)[0])
+            names.append(_assign_split(a.pop(0))[0])
         elif head == "env":
             a.pop(0)
             _skip_env_args_keep_assigns(a)
@@ -3646,6 +3655,9 @@ GIT_EXEC_KEY_RE = re.compile(
     r"|.+\.(textconv|clean|smudge|process|driver|cmd|command|program|helper|uploadpack|receivepack|path)",
     re.I,
 )
+# Khoá cấu hình một lần nối thêm (`GIT_CONFIG_KEY_0+=core.fsmonitor`, `GIT_CONFIG_PARAMETERS+=…` — `_assign_split`):
+# phần đầu là giá trị cũ guard không biết → có thể là khoá chạy lệnh bất kỳ (AUD-SEC-125).
+GIT_APPENDED_KEY_RE = re.compile(r"\$\{GIT_CONFIG_(?:KEY_\d+|PARAMETERS)\}")
 # Giao thức `ext::` chạy lệnh tuỳ ý (git mặc định cấm); URL `ext::` ở bất kỳ lệnh git nào → chặn.
 GIT_URL_SUBCMDS = {"fetch", "clone", "pull", "push", "ls-remote", "remote", "submodule", "archive", "config"}
 GIT_EXT_URL_RE = re.compile(r"(^|[=\s'\".])ext::", re.I)
@@ -3754,7 +3766,7 @@ def _git_exec_config(n: List[str], argv: Optional[List[str]] = None, exported: O
     if any(GIT_EXT_URL_RE.search(a) for a in scan):  # `git fetch ext::…`, `remote add x ext::…`, `insteadOf`
         return "ext::"
     for key, val in one_shot:
-        if GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
+        if GIT_APPENDED_KEY_RE.match(key) or GIT_EXEC_KEY_RE.fullmatch(key) and _git_exec_value_unsafe(key, val):
             return key
     return ""
 
@@ -4201,7 +4213,7 @@ def _commit_hooks_path(argv: List[str]) -> bool:
     """Lệnh commit đặt `core.hooksPath` qua `-c` hoặc biến `GIT_CONFIG_KEY_<n>` (git ≥ 2.31)."""
     low = [a.lower() for a in argv]
     return any(a.startswith("core.hookspath=") for a in low) or any(
-        re.fullmatch(r"git_config_key_\d+=core\.hookspath", a) for a in low
+        re.fullmatch(r"git_config_key_\d+\+?=core\.hookspath", a) for a in low
     )
 
 
@@ -4504,8 +4516,9 @@ def _scan_command(
         asks.append(f"{bypass}: {' '.join(argv)[:200]}")
     asks.extend(_write_asks(n, argv, root, cwd))
     if n[0] in (*DB_CLIENTS, "docker", "podman") and decision != "ask":  # `PGHOST=… psql`: normalize đã bóc phần gán
-        assigns = [t for t in argv[: len(argv) - len(n)] if ENV_ASSIGN_RE.fullmatch(t)]
-        docker = [v for k, _, v in (a.partition("=") for a in assigns) if k == "DOCKER_HOST" and _docker_remote(v)]
+        pairs = [_assign_split(t) for t in argv[: len(argv) - len(n)] if ENV_ASSIGN_RE.fullmatch(t)]
+        assigns = [f"{k}={v}" for k, v in pairs]
+        docker = [v for k, v in pairs if k == "DOCKER_HOST" and _docker_remote(v)]
         remote = next((h for h in _env_hosts(assigns) if not _is_local_host(h)), "") or next(iter(docker), "")
         if remote:
             asks.append(f"{EGRESS_ASK} — {n[0]} tới máy chủ {remote}: {' '.join(argv)[:200]}")
@@ -5022,7 +5035,7 @@ def _join_tokens(words: List[str]) -> str:
     return " ".join(t if _is_punct(t) else shlex.quote(t) for t in words)
 
 
-ASSIGN_ANY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)  # giá trị có thể nhiều dòng (`x='bash <<E …'`)
+ASSIGN_ANY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=.*", re.S)  # giá trị có thể nhiều dòng (`x='bash <<E …'`)
 VAR_REF_RE = re.compile(r"\$(\w+)|\$\{(\w+)\}")
 VAR_DEFAULT_RE = re.compile(r"\$\{(\w+):?[-=]([^{}$`]*)\}")  # `${y:-rm}`, `${y=rm}`: chưa gán thì lấy giá trị mặc định
 
@@ -5043,7 +5056,8 @@ FOR_NUM_RE = re.compile(r"-?[0-9]+")
 
 def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
     """`x='…'`, `export x=…`: gán đứng riêng (không kèm lệnh) có hiệu lực cho các lệnh sau; `for x in a b`: x lấy từ thứ
-    `pick` của danh sách."""
+    `pick` của danh sách. `x+=…` nối vào giá trị đã ghi (`c=r; c+=m; $c` → `rm`); giá trị cũ không biết → bỏ ghi nhận
+    (biến thành không biết, AUD-SEC-125)."""
     c = [t for t in c if t not in SHELL_KEYWORDS] if c[0] in SHELL_KEYWORDS else c  # `then x=…`, `do x=…`, `{ x=…`
     words = _for_values(c)
     if words:
@@ -5054,6 +5068,12 @@ def _record_assigns(c: List[str], env: Dict[str, str], pick: int = 0) -> None:
         for t in words:
             k, _, v = t.partition("=")
             val = _sub_vars(v, env)
+            if k.endswith("+"):  # nối vào giá trị đã ghi; dài quá trần thì bỏ luôn (không giữ giá trị cũ đã sai)
+                k = k[:-1]
+                old = env.pop(k, None)
+                if old is None:
+                    continue
+                val = old + val
             if len(val) <= VAR_VALUE_MAX:
                 env[k] = val
 
@@ -5471,12 +5491,15 @@ def _nested_sources(
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     nested += [(s, here) for raw, here in _interp_scripts_at(cmd, tokens, start) for s in _exec_api_scripts([raw])]
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
+    jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
+    nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
+    opaque += [f"{why}: {' '.join(c)[:200]}" for c, _, _, why in jobs if why]
     return rewritten, nested + _ipython_nested(cmd, tokens, start) + alias_ns, opaque + alias_asks
 
 
 def _assign_values(tokens: List[str]) -> Dict[str, str]:
     """Gán biến `TÊN=giá trị` trong `tokens` (tiền tố của lệnh, đối số của `export`)."""
-    return {k: v for t in tokens if ENV_ASSIGN_RE.fullmatch(t) for k, _, v in [t.partition("=")]}
+    return dict(_assign_split(t) for t in tokens if ENV_ASSIGN_RE.fullmatch(t))
 
 
 # Đối số không thấy (review #306 G): `… | xargs git update-ref` nối ref từ stdin vào cuối, `xargs -I{} git tag {}` /
@@ -5490,6 +5513,96 @@ XARGS_REPLACE_RE = re.compile(r"-[0rtpx]*([Ii])(.*)")  # `-I R`, `-IR`, `-i[R]`,
 PARALLEL_REPLACE_RE = re.compile(r"\{[^{}\s]*\}")  # chuỗi thay của GNU parallel: `{}`, `{.}`, `{/}`, `{1}`…
 PARALLEL_ARG_SEPS = {":::", "::::", ":::+", "::::+"}
 Fed = Optional[Callable[[str], bool]]  # nhận ra token bị thay bằng đối số không thấy; None = nối vào cuối
+# Tuỳ chọn của GNU parallel (`options_hash` trong src/parallel; Getopt::Long `bundling`, `require_order`): chữ ngắn ăn
+# giá trị, cờ ngắn, tên dài ăn giá trị, tên dài là cờ. Ngoài các bảng này (tên viết tắt, bản mới, giá trị tuỳ chọn
+# `-i`/`-e`/`-l`) → không biết có ăn token kế không (`_parallel_jobs` đi chiều chặt).
+PARALLEL_SHORT_VALUE = set("aBCdDEHIjJLnNPsSUW")
+PARALLEL_SHORT_FLAGS = set("0ghkmMpqrtTuvVxXY")
+PARALLEL_LONG_VALUE = set(
+    """arg-file arg-file-sep argfilesep arg-sep argsep basefile bf block block-size blocksize colsep col-sep
+    compress-program decompress-program delay delimiter env halt halt-on-error header jl joblog jobs load max-args
+    max-chars max-procs max-replace-args memfree nice parens profile recend recstart res result results retries return
+    rpl semaphorename semaphoretimeout ssh sshdelay sshlogin sshloginfile slf tagstring tag-string tempdir termseq
+    term-seq tf timeout tmpdir transferfile transfer-file transferfiles transfer-files trc trim wd workdir work-dir
+    """.split()
+)
+PARALLEL_LONG_FLAGS = set(
+    """bar bg cat citation cleanup compress dry-run dryrun eta fg fifo files group gnu help keep-order keeporder lb
+    line-buffer linebuffer link no-keep-order no-notice no-run-if-empty nonall nonotice null onall pipe pipe-part
+    pipepart plus progress quote shellquote shuf silent tag tee tty ungroup verbose version will-cite xapply xargs
+    """.split()
+)
+PARALLEL_SEP_OPTS = {"arg-sep": 0, "argsep": 0, "arg-file-sep": 1, "argfilesep": 1}  # 0 = `:::`, 1 = `::::`
+PARALLEL_JOBS_MAX = 64  # số dòng lệnh tối đa (tổ hợp các nhóm `:::`) quét lồng; nhiều hơn → UNRESOLVED_TARGET
+PARALLEL_UNSEEN_MARK = "lệnh của parallel guard không thấy"  # dấu của UNRESOLVED_TARGET
+
+
+def _parallel_opt(tok: str) -> Tuple[str, Optional[bool], str]:
+    """(tên, ăn token kế — None = không biết, giá trị viết liền) của tuỳ chọn `tok` của parallel (`-kj2`, `--jobs=2`)."""
+    if tok.startswith("--"):
+        name, eq, val = tok[2:].partition("=")
+        if eq or name in PARALLEL_LONG_FLAGS:
+            return name, False, val
+        return name, (True if name in PARALLEL_LONG_VALUE else None), ""
+    for k, ch in enumerate(tok[1:], 1):
+        if ch in PARALLEL_SHORT_VALUE:
+            return ch, k == len(tok) - 1, tok[k + 1 :]
+        if ch not in PARALLEL_SHORT_FLAGS:
+            return ch, None, ""
+    return "", False, ""
+
+
+def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
+    """`parallel [tuỳ chọn] ::: a b [:::|:::+ …]` KHÔNG có mẫu lệnh chạy mỗi đối số (tổ hợp các nhóm) như một dòng lệnh
+    shell (AUD-SEC-121) → (dòng lệnh để quét lồng, lý do UNRESOLVED_TARGET khi lệnh đến từ tệp/stdin — `::::`, `-a` —,
+    dấu tách đổi qua tên viết tắt, hay quá PARALLEL_JOBS_MAX tổ hợp). Có mẫu lệnh → ([], ""): đối số là dữ liệu
+    (`_stdin_fed`, `_runner_scripts`). Tuỳ chọn lạ đứng trước đúng một token: không biết token là giá trị hay mẫu → coi
+    như không mẫu (chiều chặt). Không `:::`/`-a` (đọc stdin) chưa xét ở đây."""
+    s = _strip_prefixes(c)
+    if not s or posixpath.basename(s[0]) != "parallel":
+        return [], ""
+    seps, files = [":::", ":::+"], ["::::", "::::+"]
+    i, unsure, from_file, why = _parallel_head(s, seps, files)
+    end = next((k for k in range(i, len(s)) if s[k] in seps + files), len(s))
+    if why or end - i > 1 or (end > i and not unsure):
+        return [], why
+    groups: List[List[str]] = []
+    for t in s[end:]:  # s[end] là dấu tách: nhóm đầu luôn có trước đối số đầu
+        if t in seps + files:
+            from_file = from_file or t in files
+            groups.append([])
+        else:
+            groups[-1].append(t)
+    if from_file:
+        return [], f"{PARALLEL_UNSEEN_MARK} (lệnh đọc từ tệp/stdin)"
+    total = 1
+    for g in groups:
+        total = min(total * len(g), PARALLEL_JOBS_MAX + 1)
+    if total > PARALLEL_JOBS_MAX:
+        return [], f"{PARALLEL_UNSEEN_MARK} (quá {PARALLEL_JOBS_MAX} tổ hợp đối số)"
+    return ([" ".join(p) for p in itertools.product(*groups)] if groups else []), ""
+
+
+def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int, bool, bool, str]:
+    """Bỏ tuỳ chọn của `parallel` (`s[0]`): (chỉ số token đầu sau tuỳ chọn, tuỳ chọn cuối là tuỳ chọn lạ, có `-a`/
+    `--arg-file`, lý do UNRESOLVED_TARGET). `--arg-sep`/`--arg-file-sep` đổi `seps`/`files` tại chỗ; viết tắt `--arg-s`,
+    `--argf`… → không biết dấu tách/tệp đối số."""
+    i, unsure, from_file = 1, False, False
+    while i < len(s) and s[i].startswith("-") and s[i] not in seps + files:
+        tok = s[i]
+        i += 1
+        if tok == "--":
+            break
+        name, takes, val = _parallel_opt(tok)
+        if takes and i < len(s):
+            val, i = s[i], i + 1
+        unsure = takes is None
+        if name in PARALLEL_SEP_OPTS:
+            (files if PARALLEL_SEP_OPTS[name] else seps)[:] = [val, val + "+"]
+        from_file = from_file or name in ("a", "arg-file")
+        if unsure and name.startswith("arg"):
+            return i, unsure, from_file, f"{PARALLEL_UNSEEN_MARK} (tuỳ chọn `{tok}`)"
+    return i, unsure, from_file, ""
 
 
 def _xargs_replace(opts: List[str]) -> Optional[str]:
@@ -6972,6 +7085,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     (UNRESOLVED_REF_MARK, UNRESOLVED_TARGET),  # `git update-ref --stdin` (AUD-SEC-119)
     (UNRESOLVED_ALIAS_MARK, UNRESOLVED_TARGET),  # alias git đọc lỗi/là biến/vòng (AUD-SEC-119, review T-3563)
     (UNKNOWN_GIT_OPT_MARK, UNRESOLVED_TARGET),  # `git --<lạ> v push …`: không biết lệnh con (D-216)
+    (PARALLEL_UNSEEN_MARK, UNRESOLVED_TARGET),  # `parallel :::: cmds.txt`: lệnh từ tệp/stdin (AUD-SEC-121)
     (REMOTE_REF_MARK, "REMOTE_REF_FORGE"),  # giả `origin/main` mà Gate đọc (AUD-SEC-119, T-3563)
     (PERM_NO_TARGET_WHY, UNRESOLVED_TARGET),  # `… | xargs chmod 000` (T-3532)
     ("vượt ngân sách quét", BUDGET),
