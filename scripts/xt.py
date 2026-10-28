@@ -6737,21 +6737,34 @@ def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [b for b in raw if isinstance(b, dict)] if isinstance(raw, list) else []
 
 
+def _plan_rev(base: Path, plan: str) -> str:
+    """Định danh đợt: băm ID + spec các task của PLAN (tick `[x]` không đổi spec) — `loop init` lại cùng PLAN để đổi ngân
+    sách, `--force`, `/optimize` vẫn là cùng đợt (review #318)."""
+    tasks = parse_plan(base / plan)
+    return hashlib.sha256("\n".join(f"{t['id']}:{task_req_rev(t)}" for t in tasks).encode()).hexdigest()[:16]
+
+
 def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:
-    """`objective` của đợt mới (`loop init`): mốc các đợt trước + mốc đợt này — số 🔴/🟠 mở trong sổ + MUST mở ngoài việc
-    chờ người lúc khởi tạo. Sổ/blueprint không đọc được → `open` null (FLOW-13 không so qua mốc thiếu số)."""
-    try:
-        n: Optional[int] = audit_open_count(base / AUDIT_STATUS_DEFAULT) + len(_open_must(base, new))
-    except (OSError, ValueError):
-        n = None
-    mark = {"plan": new["plan"], "at": new["started"], "open": n}
-    return {"name": NEXT_STEP_OBJECTIVES[0], "batches": (_objective_batches(prev) + [mark])[-OBJECTIVE_BATCHES_KEEP:]}
+    """`objective` sau `loop init`: mốc đầu mỗi đợt — số 🔴/🟠 mở trong sổ mặc định + MUST mở ngoài việc chờ người. Cùng
+    PLAN (đường dẫn + spec) với mốc cuối → cùng đợt, giữ mốc cũ. Chưa có sổ, sổ/blueprint không đọc được → `open` null
+    (FLOW-13 không so qua mốc thiếu số)."""
+    batches, rev = _objective_batches(prev), _plan_rev(base, new["plan"])
+    if not batches or (batches[-1].get("plan"), batches[-1].get("plan_rev")) != (new["plan"], rev):
+        status = base / AUDIT_STATUS_DEFAULT
+        try:
+            n = audit_open_count(status) + len(_open_must(base, new)) if status.is_file() else None
+        except (OSError, ValueError):
+            n = None
+        batches.append(
+            {"plan": new["plan"], "plan_rev": rev, "status": AUDIT_STATUS_DEFAULT, "at": new["started"], "open": n}
+        )
+    return {"name": NEXT_STEP_OBJECTIVES[0], "batches": batches[-OBJECTIVE_BATCHES_KEEP:]}
 
 
-def _no_progress(batches: List[Dict[str, Any]], now: int) -> Optional[str]:
-    """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0) → `at` của
-    mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
-    if len(batches) < 2 or now <= 0:
+def _no_progress(batches: List[Dict[str, Any]], now: int, status: str) -> Optional[str]:
+    """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0, hai mốc đếm
+    cùng sổ `status`) → `at` của mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
+    if len(batches) < 2 or now <= 0 or {b.get("status") for b in batches[-2:]} != {status}:
         return None
     a, b = batches[-2].get("open"), batches[-1].get("open")
     return str(batches[-2].get("at")) if type(a) is int and type(b) is int and a <= b <= now else None
@@ -6766,6 +6779,8 @@ def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
         return v
     if fv not in ("done", PENDING_HUMAN):
         return {"verdict": "budget" if fv == "budget" else "blocked", "reason": v["reason"]}
+    if st.get("blocked"):  # `loop block` sau khi đợt dừng `done` (review #318)
+        return {"verdict": "blocked", "reason": str(st.get("blocked_reason") or "cần người quyết định")}
     v = _verdict_plan(base, st) or _verdict_blueprint(base, st)
     return _with_pending_human(v, base, st) if v["verdict"] == "done" else v
 
@@ -6773,8 +6788,6 @@ def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
 def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[List[Dict[str, str]]]) -> Dict[str, Any]:
     """Đầu vào của `next_step` (đọc đĩa/git, không gọi GitHub, không ghi): verdict đợt, kiểm lại cuối, PR, sổ audit, MUST."""
     v = _batch_verdict(base, st)
-    p = base / status
-    debt = _review_debt_since(base, p) if p.is_file() else ({}, [])
     return {
         "objective": NEXT_STEP_OBJECTIVES[0],
         "repo": base.name,
@@ -6782,14 +6795,7 @@ def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[L
         "verdict": {k: v[k] for k in ("verdict", "reason", "task") if k in v},
         "final_check": final_check(base) if v["verdict"] in ("done", PENDING_HUMAN) else None,
         "prs": prs,
-        "audit": {
-            "status": status,
-            "exists": p.is_file(),
-            "sha256": hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else "",
-            "open": audit_open_count(p),
-            "debt": debt[0],
-            "scanned": debt[1],
-        },
+        "audit": _audit_facts(base, status),
         "open_must": len(_open_must(base, st)),
         "state": {
             "rev": _state_rev(st),
@@ -6800,6 +6806,26 @@ def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[L
             "batches": _objective_batches(st),
         },
     }
+
+
+def _audit_facts(base: Path, status: str) -> Dict[str, Any]:
+    """Sổ audit cho `next-step`: lỗi `audit check --strict` trừ "🔴/🟠 còn mở" (`_step_work` xử lý), số 🔴/🟠 mở, nợ review
+    offline (không hỏi GitHub). Sổ không đọc được → một lỗi, không traceback."""
+    p = base / status
+    out: Dict[str, Any] = {"status": status, "exists": p.is_file(), "sha256": "", "errors": [], "open": 0, "debt": {}}
+    out["scanned"] = []
+    if not out["exists"]:
+        return out
+    try:
+        errors = audit_check(p, strict=True)[0]
+        debt, scanned = _review_debt_since(base, p)
+        out.update(
+            sha256=hashlib.sha256(p.read_bytes()).hexdigest(), open=audit_open_count(p), debt=debt, scanned=scanned
+        )
+        out["errors"] = [e for e in errors if not e.endswith(" còn mở (--strict)")]
+    except (OSError, ValueError) as exc:
+        out["errors"] = [f"không đọc được sổ: {exc}"]
+    return out
 
 
 StepPart = Optional[Dict[str, Any]]
@@ -6848,6 +6874,12 @@ def _step_prs(f: Dict[str, Any]) -> StepPart:
 def _step_audit(f: Dict[str, Any]) -> StepPart:
     """Sổ audit phải phủ tới HEAD (FLOW-10): không có sổ/chưa nhóm nào quét → audit full; file nợ → audit delta từ SHA quét."""
     a = f["audit"]
+    if a["exists"] and a["errors"]:
+        return {
+            "action": "audit",
+            "reason": f"sổ {a['status']} trượt `audit check --strict` ({len(a['errors'])} lỗi, đầu tiên: {a['errors'][0]})",
+            "missing": ["`audit check --strict` exit 0"],
+        }
     if not a["exists"] or not a["scanned"]:
         what = "chưa có nhóm nào đã quét trong" if a["exists"] else "chưa có"
         return {
@@ -6872,7 +6904,7 @@ def _step_work(f: Dict[str, Any]) -> StepPart:
     batches = f["state"]["batches"]
     if not n_audit + n_must:
         return None
-    since = _no_progress(batches, n_audit + n_must)
+    since = _no_progress(batches, n_audit + n_must, f["audit"]["status"])
     if since:
         chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n_audit + n_must}"
         return {
@@ -6915,7 +6947,7 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
             "batches": [len(batches), None],
             "deadline": st["deadline"],
             "cost_usd": None,  # phiên tương tác không có nguồn chi phí — null, không 0 (nghiên cứu §4D)
-            "no_progress_since": _no_progress(batches, f["audit"]["open"] + f["open_must"]),
+            "no_progress_since": _no_progress(batches, f["audit"]["open"] + f["open_must"], f["audit"]["status"]),
         },
         "inputs": f,
     }
@@ -6937,7 +6969,7 @@ def _loop_next_step(args: argparse.Namespace, base: Path) -> int:
     """`loop next-step` chỉ đọc (ADR-0052 §5): in bước kế của mục tiêu; không ghi state, không gọi GitHub."""
     try:
         prs = _read_prs(args.prs)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:  # JSON lồng quá sâu → RecursionError (review #318)
         print(f"✗ --prs: {exc}", file=sys.stderr)
         return 2
     out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs))
@@ -12463,7 +12495,11 @@ def build_parser() -> argparse.ArgumentParser:
     lne.add_argument("--json", action="store_true")
     lns = lsub.add_parser("next-step", help="bước kế của mục tiêu, chỉ đọc (ADR-0052 §5)")
     lns.add_argument("--objective", choices=NEXT_STEP_OBJECTIVES, default=NEXT_STEP_OBJECTIVES[0])
-    lns.add_argument("--prs", help="JSON `pr next --json` của PR trong đợt (FILE hoặc -; `[]` khi không có PR)")
+    lns.add_argument(
+        "--prs",
+        help="JSON `pr next --json` của PR trong đợt (`-` = stdin; `[]` khi không có PR) — file trong cây làm việc (ngoài"
+        " `.autopilot/`) đổi vân tay cây → `verify`",
+    )
     lns.add_argument("--status", default=AUDIT_STATUS_DEFAULT, help="sổ audit")
     lns.add_argument("--json", action="store_true")
     lr = lsub.add_parser("record")

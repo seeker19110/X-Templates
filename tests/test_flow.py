@@ -326,15 +326,22 @@ class FlowTest(TmpRepoCase):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "sổ audit")
 
-    def finish_batch(self, *init: str) -> None:
-        """`loop init` → mọi task xanh (T-001 qua `green`) → `loop verify --all`: đợt `done` và đã kiểm lại cuối."""
+    def finish_batch(self, *init: str, verify: bool = True, defer: tuple[str, ...] = ()) -> None:
+        """`loop init` → mọi task xanh (T-001 qua `green`; ID trong `defer` thì `loop defer`) → `loop verify --all`:
+        đợt `done` (hoặc chờ người) và đã kiểm lại cuối."""
         self.assertEqual(self.loop("init", *init)[0], 0)
         (self.repo / "green").write_text("", encoding="utf-8")
         self.assertEqual(self.loop("record", "--task", "T-001", "--", "bash gate.sh")[0], 0)
         for tid in ("T-002", "T-900", "T-901"):
-            self.assertEqual(self.loop("record", "--task", tid, "--", "true")[0], 0)
-        rc, out, err = self.loop("verify", "--all")
-        self.assertEqual(rc, 0, out + err)
+            cmd = (
+                ("defer", "--task", tid, "--reason", "cần người")
+                if tid in defer
+                else ("record", "--task", tid, "--", "true")
+            )
+            self.assertEqual(self.loop(*cmd)[0], 0)
+        if verify:
+            rc, out, err = self.loop("verify", "--all")
+            self.assertEqual(rc, 0, out + err)
 
     def next_step(self, prs: Any = (), *extra: str) -> dict[str, Any]:
         """`loop next-step --json` với JSON `pr next` (mặc định `[]`); state trước/sau phải y nguyên (chỉ đọc)."""
@@ -403,17 +410,53 @@ class FlowTest(TmpRepoCase):
         self.assertEqual(out["action"], "ready-for-complete", out)
         self.assertIn("D-178", out["reason"])
         self.assertEqual((self.repo / "xt.yaml").read_text(encoding="utf-8"), "delivery_phase: build\n")
+        # Sổ trượt `audit check --strict` (nhóm 2 "chưa quét") → `audit`, không "phủ tới HEAD" (review #318).
+        book = self.repo / "docs" / "ops" / "AUDIT-STATUS.md"
+        book.write_text(
+            book.read_text(encoding="utf-8").replace("| 2 | SEC | Bảo mật | N/A |", "| 2 | SEC | Bảo mật | chưa quét |")
+        )
+        self.git("commit", "-q", "-am", "sổ: nhóm 2 chưa quét")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        out = self.next_step([])
+        self.assertEqual(out["action"], "audit", out)
+        self.assertIn("audit check --strict", out["reason"])
+
+    @flow("FLOW-12")
+    def test_flow_12_final_check_gates_ready(self) -> None:
+        """Đối chứng của FLOW-12: hết việc nhưng chưa `loop verify --all`, hay cây đổi sau đó (commit), hay đợt chờ người
+        chưa kiểm lại cuối → `verify`, không `ready-for-complete`."""
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        self.finish_batch(verify=False)
+        self.assertEqual(self.next_step()["action"], "verify")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        self.assertEqual(self.next_step()["action"], "ready-for-complete")
+        (self.repo / "NOTE.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "NOTE.md")
+        self.git("commit", "-q", "-m", "ghi chú")
+        self.assertEqual(self.next_step()["action"], "verify")
+        plan2 = "docs/autopilot/PLAN-2.md"
+        (self.repo / plan2).write_text(PLAN.replace("việc", "đợt 2 việc"), encoding="utf-8")
+        self.finish_batch("--plan", plan2, "--force", verify=False, defer=("T-900",))
+        out = self.next_step()
+        self.assertEqual(out["action"], "verify", out)
+        self.assertEqual(out["inputs"]["verdict"]["verdict"], xt.PENDING_HUMAN)
 
     @flow("FLOW-13")
     def test_flow_13_two_batches_without_progress_end_budget(self) -> None:
-        """Given 🟠 mở trong sổ ở đầu đợt 1 và đầu đợt 2, đợt 2 `done` vẫn còn nó · When `next-step` · Then `budget`
-        (không-tiến-triển mục tiêu) kèm `no_progress_since`; một đợt thôi → `replan`."""
+        """Given 🟠 mở trong sổ ở đầu đợt 1 và đầu đợt 2 (PLAN khác), đợt 2 `done` vẫn còn nó · When `next-step` · Then
+        `budget` (không-tiến-triển mục tiêu) kèm `no_progress_since`; một đợt thôi, hay `loop init --force` lại cùng PLAN
+        (đổi ngân sách — vẫn đợt 1), → `replan`."""
         finding = "AUD-ARCH-001 | 🟠 | mở | lỗi | đo được: x | `true` | —"
         self.audit_book(self.git("rev-parse", "HEAD"))
         self.audit_book(self.git("rev-parse", "HEAD"), (finding,))
         self.finish_batch()
         self.assertEqual(self.next_step()["action"], "replan")
         self.finish_batch("--force")
+        self.assertEqual(self.next_step()["action"], "replan")
+        plan2 = "docs/autopilot/PLAN-2.md"
+        (self.repo / plan2).write_text(PLAN.replace("việc", "đợt 2 việc"), encoding="utf-8")
+        self.finish_batch("--plan", plan2, "--force")
         self.assertEqual([b["open"] for b in self.state()["objective"]["batches"]], [1, 1])
         out = self.next_step()
         self.assertEqual(out["action"], "budget", out)

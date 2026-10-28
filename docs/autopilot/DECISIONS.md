@@ -1580,3 +1580,10 @@
 - Chọn: Thiếu --prs → action pr kèm missing (không đoán PR đã xong); loop init ghi mốc đầu đợt objective.batches (🔴/🟠 mở + MUST mở ngoài chờ người), next-step so hai mốc cuối với hiện tại; giữ một PR vì Gate T-3547 đòi FLOW-09…13 cùng nhau
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: không có dữ liệu PR thì không được báo hết việc (cách hiểu chặt); next-step giữ chỉ đọc (ADR-0052 §5) nên mốc đợt phải ghi ở lệnh ghi state sẵn có là loop init; tách FLOW-13 phải sửa Gate T-3547 đã duyệt — giữ Gate, mã ~250 dòng gồm chú thích
 - Đường lùi: Bỏ khoá objective ở _init_apply và _step_work về replan; next-step chỉ đọc nên gỡ lệnh con không ảnh hưởng state
+
+### D-225 · 2026-10-28T16:30:58+00:00 · Review #318 lượt 1 (🟠 A/F/B/T): định danh đợt cho FLOW-13, sổ phải qua --strict, cờ blocked sau done, trần số đợt (🟢 O)
+
+- Phương án: (1) Đợt = PLAN (đường dẫn + băm ID/spec task); loop init cùng PLAN giữ mốc đầu đợt; mốc ghi đường sổ và null khi chưa có sổ, chỉ so hai mốc cùng sổ; sổ trượt audit check --strict (trừ lỗi 🔴/🟠 còn mở) → audit; st.blocked sau final_verdict done → blocked; chưa đặt trần số đợt (để T-3548/pilot đo) · (2) Mỗi loop init một mốc như cũ, sổ chỉ đếm 🔴/🟠 mở, thêm max_batches mặc định ngay
+- Chọn: Đợt = PLAN (đường dẫn + băm ID/spec task); loop init cùng PLAN giữ mốc đầu đợt; mốc ghi đường sổ và null khi chưa có sổ, chỉ so hai mốc cùng sổ; sổ trượt audit check --strict (trừ lỗi 🔴/🟠 còn mở) → audit; st.blocked sau final_verdict done → blocked; chưa đặt trần số đợt (để T-3548/pilot đo)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: --force đổi ngân sách hay /optimize không được tạo đợt giả (báo budget sai); sổ trượt --strict mà báo ready-for-complete là khai xong sai; trần số đợt cần số đo từ pilot (ADR-0052 §Thông tin thêm: ngưỡng là số để pilot đo lại) — chưa có số thì không chốt hằng số
+- Đường lùi: Bỏ nhánh errors ở _step_audit, bỏ kiểm plan_rev ở _batch_mark (mỗi init một mốc)
