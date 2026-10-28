@@ -5814,6 +5814,45 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec119-update-ref-origin",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-119"
+   ],
+   "input": {
+    "command": "git update-ref refs/remotes/origin/main HEAD"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REMOTE_REF_FORGE"
+   }
+  },
+  {
+   "id": "guard-sec119-alias-update-ref-origin",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-119"
+   ],
+   "input": {
+    "command": "git -c alias.x=update-ref x refs/remotes/origin/main HEAD"
+   },
+   "expect": {
+    "allowed": false,
+    "code": "REMOTE_REF_FORGE"
+   }
+  },
+  {
+   "id": "guard-control-fetch-origin",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git fetch origin"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

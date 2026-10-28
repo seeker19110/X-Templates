@@ -1,6 +1,6 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-27 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-28 · Nhánh: main
 
 ## Đang làm
 - 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge (#290–#306: FLOW, `rev`/khoá, `task_runs`, attach/resolve/unblock, perf mẫu v2 + `compare` từ chối; D-212/D-213); T-3560…T-3563 merge (#303–#306, D-214…D-216); quét lại (#307): 🔴 AUD-SEC-125 → T-3564 (D-217) → T-3556 `--strict` → cắt 3.28.0.
