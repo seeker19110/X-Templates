@@ -6,6 +6,7 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
+- `release-check` hàng `review_debt` (ADR-0057, D-222): file nợ được coi là đã phủ khi mọi commit nhánh chính chạm nó sau SHA quét là squash `(#N)` của PR đã merge (`merge_commit_sha` khớp) có review sạch ở head — dấu `xt-review` của người có quyền ghi, mang qua cập nhật nhánh sạch; ghi PASS kèm danh sách PR. Không đọc được GitHub → FAIL như cũ; Gate offline `xt.review_debt` của PLAN không đổi. Bớt PR sổ chỉ để dời SHA sau squash-merge (AUD-HAR-122). `review_identity` phải trùng giữa `xt.yaml` đã commit ở SHA quét và ở HEAD, khác → không phủ (D-223).
 - `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
 - ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
 
@@ -14,6 +15,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
 
 ### Fixed
+- `review_debt` (hàng `release-check`, Gate offline của PLAN): tên file chứa `"`, `\\` hay ký tự điều khiển bị git trích dẫn nên lệch nhóm, nợ chỉ tính từ SHA quét mới nhất — bỏ sót nợ; nay đọc `diff -z` (AUD-SEC-132).
+- Lệnh chạy tay gợi ý khi steward dispatch tag lỗi thêm `--ref <nhánh>` (trích dẫn shell) — thiếu thì chạy ở nhánh mặc định, job tag bị bỏ qua (review #316).
 - `pr steward`: merge bằng `GITHUB_TOKEN` của PR vào `main` đổi `VERSION` → dispatch `.github/workflows/release-tag.yml` (nếu repo có) với input `sha` = commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm lệnh chạy tay. **Dự án đích:** không có file này → không đổi; có file cùng tên thì nó phải nhận `workflow_dispatch` với input `sha` (như bản của khung), không thì job steward đỏ (422) sau mỗi merge đổi `VERSION`.
 - Fixture timeout (D-220) chờ reap tiến trình con trước marker/exit để không báo sai với PID zombie trong container; giữ kiểm marker, PID biến mất và nhánh SIGKILL, mutant chỉ TERM cha vẫn bị bắt.
 

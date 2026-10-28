@@ -407,6 +407,193 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.commit("sổ lệch")
         self.assertEqual(xt.review_debt(self.repo, self.status)[0], ["src/app.py"])
 
+    def merged_pr_world(self, pulls: dict, comments: dict, chain: list) -> None:
+        """GitHub giả cho ADR-0057: `pulls/N` → `pulls[N]` (vắng → 404), comment PR → `comments[N]`; `_base_merge_chain`
+        ghi lại đối số và trả `chain`."""
+
+        def one(path: str) -> dict:
+            n = path.rsplit("/", 1)[-1]
+            if n not in pulls:
+                raise xt.PrInputError(f"gh api {path} lỗi: HTTP 404")
+            return pulls[n]
+
+        def items(path: str) -> list:
+            return comments.get(path.split("/issues/")[1].split("/")[0], [])
+
+        self.chain_calls: list = []
+        self.gh_one = self.enterContext(unittest.mock.patch.object(xt, "_gh_one", side_effect=one))
+        self.enterContext(unittest.mock.patch.object(xt, "_gh_items", side_effect=items))
+        self.enterContext(
+            unittest.mock.patch.object(
+                xt, "_base_merge_chain", side_effect=lambda *a: self.chain_calls.append(a) or chain
+            )
+        )
+
+    @staticmethod
+    def mark(head: str, verdict: str = "clean", login: str = "chu", assoc: str = "OWNER") -> dict:
+        body = f"<!-- xt-review v1 head={head} verdict={verdict} -->"
+        return {
+            "body": body,
+            "author_association": assoc,
+            "user": {"login": login},
+            "created_at": "2026-10-28T10:00:00Z",
+        }
+
+    def test_delivery_phase_review_debt_covered_by_merged_review(self):
+        """ADR-0057: file nợ mà mọi commit nhánh chính chạm nó là squash của PR có review sạch ở head → PASS, không cần PR
+        sổ chỉ để dời SHA (squash-merge làm SHA trong PR không bao giờ thành tổ tiên nhánh chính)."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.scanned({1: s0, 9: s0})
+        self.commit("sổ")
+        (self.repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        c5 = self.commit("feat: x (#5)")
+        head, old = "a" * 40, "b" * 40
+        pull = {"merged": True, "merge_commit_sha": c5, "head": {"sha": head}, "base": {"sha": s0}}
+        pulls, comments, chain = {"5": dict(pull)}, {"5": [self.mark(head)]}, []
+        self.merged_pr_world(pulls, comments, chain)
+        r = self.rows()["review_debt"]
+        self.assertEqual(r["result"], "PASS", r)
+        self.assertIn("1 file đổi sau SHA quét đều từ PR có review sạch ở head (#5; ADR-0057)", r["evidence"])
+        self.assertEqual(self.chain_calls[-1][1:], (s0, head))  # base.sha của PR đã merge vào phép mang review qua
+        self.assertEqual(xt.review_debt(self.repo, self.status)[0], ["src/app.py"])  # Gate offline của PLAN không đổi
+        for name, change, marks in (
+            ("review ở head còn lỗi chặn", {}, [self.mark(head, "blocking")]),
+            ("chưa rà head cuối", {}, [self.mark(old)]),
+            ("dấu của người không có quyền ghi", {}, [self.mark(head, assoc="NONE", login="la")]),
+            ("merge_commit_sha khác commit", {"merge_commit_sha": "c" * 40}, None),
+            ("PR chưa merge", {"merged": False}, None),
+        ):
+            with self.subTest(name):
+                pulls["5"] = {**pull, **change}
+                comments["5"] = marks if marks is not None else [self.mark(head)]
+                self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        pulls.clear()  # không đọc được PR (404/offline) → vẫn là nợ
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        pulls["5"], comments["5"] = dict(pull), [self.mark(old)]
+        chain.append(old)  # head cuối chỉ là "cập nhật nhánh" sạch của head đã rà → review mang qua
+        self.assertEqual(self.rows()["review_debt"]["result"], "PASS")
+        (self.repo / "src" / "app.py").write_text("x = 3\n", encoding="utf-8")
+        self.commit("sửa thẳng không qua PR")  # commit chạm file mà không phải squash của PR → còn nợ
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+
+    def identity_case(self, at_scan: str | None, at_head: str | None, login: str, assoc: str) -> str:
+        """SHA quét có `review_identity: at_scan` (None = không có xt.yaml), PR #5 đặt `at_head` ở HEAD rồi sửa
+        `src/app.py`; `login` (`assoc`) đăng dấu sạch → kết quả hàng `review_debt`."""
+        s0 = self.git("rev-parse", "HEAD")
+        if at_scan is not None:
+            (self.repo / "xt.yaml").write_text(f"review_identity: {at_scan}\n", encoding="utf-8")
+            s0 = self.commit("cấu hình lúc quét")
+        self.scanned({1: s0, 9: s0, 13: s0})
+        self.commit("sổ")
+        (self.repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        if at_head is not None:
+            (self.repo / "xt.yaml").write_text(f"review_identity: {at_head}\n", encoding="utf-8")
+        c5 = self.commit("feat: x (#5)")
+        head = "a" * 40
+        pulls = {"5": {"merged": True, "merge_commit_sha": c5, "head": {"sha": head}, "base": {"sha": s0}}}
+        self.merged_pr_world(pulls, {"5": [self.mark(head, login=login, assoc=assoc)]}, [])
+        return str(self.rows()["review_debt"]["result"])
+
+    def test_delivery_phase_review_debt_identity_set_in_debt(self):
+        """Review #317 🔴: PR trong vùng nợ thêm `review_identity: mallory` rồi mallory (không quyền ghi) đăng dấu sạch."""
+        self.assertEqual(self.identity_case(None, "mallory", "mallory", "NONE"), "FAIL")
+
+    def test_delivery_phase_review_debt_identity_revoked(self):
+        """D-223 (R1): danh tính ở SHA quét là oldbot, HEAD đã thu hồi sang newbot — dấu của oldbot không phủ."""
+        self.assertEqual(self.identity_case("oldbot", "newbot", "oldbot", "NONE"), "FAIL")
+
+    def test_delivery_phase_review_debt_identity_applied_after_scan(self):
+        """D-223 (R2): SHA quét chưa có danh tính, HEAD áp `bot` — dấu của tác giả (OWNER, cái T-1508 loại ra) không phủ."""
+        self.assertEqual(self.identity_case(None, "bot", "chu", "OWNER"), "FAIL")
+
+    def test_delivery_phase_review_debt_identity_unchanged(self):
+        """Danh tính trùng ở SHA quét và HEAD: dấu của đúng tài khoản đó được tin (như merge-check)."""
+        self.assertEqual(self.identity_case("bot", None, "bot", "NONE"), "PASS")
+
+    def test_delivery_phase_review_debt_since_per_file(self):
+        """Review #317 🟠: mỗi file xét commit từ đúng SHA đưa nó vào nợ — lần đẩy thẳng mà sổ nhóm của file đã phủ (trước
+        SHA của nhóm) không bị kéo vào chỉ vì một nhóm khác quét cũ hơn."""
+        s0 = self.git("rev-parse", "HEAD")
+        (self.repo / "ruff.toml").write_text(
+            "line-length = 99\n", encoding="utf-8"
+        )  # không thuộc nhóm: từ SHA mới nhất
+        s1 = self.commit("cấu hình")
+        (self.repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        s2 = self.commit("sửa thẳng, đã được audit nhóm src phủ")
+        self.scanned({1: s2, 2: s2, 3: s2, 12: s2, 9: s1, 13: s0})
+        self.commit("sổ")
+        (self.repo / "src" / "app.py").write_text("x = 3\n", encoding="utf-8")
+        (self.repo / "ruff.toml").write_text("line-length = 100\n", encoding="utf-8")
+        (self.repo / "xt.yaml").write_text("delivery_phase: harden\n", encoding="utf-8")  # nhóm HAR quét cũ nhất (s0)
+        c5 = self.commit("feat: x (#5)")
+        head = "a" * 40
+        pulls = {"5": {"merged": True, "merge_commit_sha": c5, "head": {"sha": head}, "base": {"sha": s2}}}
+        self.merged_pr_world(pulls, {"5": [self.mark(head)]}, [])
+        since, _ = xt._review_debt_since(self.repo, self.status)
+        self.assertEqual(since, {"src/app.py": s2, "ruff.toml": s2, "xt.yaml": s0})  # app.py không bị kéo về s0
+        r = self.rows()["review_debt"]
+        self.assertEqual(r["result"], "PASS", r)
+        # file thuộc nhiều nhóm (ARCH quét ở s0, SEC ở s2): nhóm cũ hơn chưa phủ lần đẩy thẳng s0..s2 → xét từ s0, còn nợ
+        self.scanned({1: s0, 2: s2, 3: s2, 12: s2, 9: s2, 13: s2})
+        self.commit("sổ lệch nhóm")
+        since, _ = xt._review_debt_since(self.repo, self.status)
+        self.assertEqual(since["src/app.py"], s0)
+        self.assertNotIn("src/app.py", xt.reviewed_debt(self.repo, since))
+
+    def test_delivery_phase_review_debt_identity_read_at_oldest_scan(self):
+        """`review_identity` so ở SHA quét CŨ nhất của các file nợ (phạm vi rộng nhất) với HEAD: đổi danh tính giữa hai
+        lần quét → không phủ (chặt)."""
+        (self.repo / "xt.yaml").write_text("review_identity: a\n", encoding="utf-8")
+        s0 = self.commit("danh tính a")
+        (self.repo / "xt.yaml").write_text("review_identity: b\n", encoding="utf-8")
+        s1 = self.commit("danh tính b")
+        self.scanned({1: s0, 2: s0, 3: s0, 12: s0, 9: s1, 13: s1})
+        self.commit("sổ")
+        (self.repo / "src" / "app.py").write_text("x = 2\n", encoding="utf-8")
+        (self.repo / "ruff.toml").write_text(
+            "line-length = 99\n", encoding="utf-8"
+        )  # không nhóm: nợ từ s1 (danh tính b)
+        c5 = self.commit("feat: x (#5)")
+        head = "a" * 40
+        pulls = {"5": {"merged": True, "merge_commit_sha": c5, "head": {"sha": head}, "base": {"sha": s1}}}
+        self.merged_pr_world(pulls, {"5": [self.mark(head, login="b", assoc="NONE")]}, [])
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+
+    def test_delivery_phase_review_debt_special_file_names(self):
+        """Review #317 (có từ trước): tên chứa `"`/`[` bị git trích dẫn / hiểu là glob → lệch nhóm, bỏ sót nợ. `diff -z` và
+        `--literal-pathspecs`: tên thật được xếp đúng nhóm, PR có review phủ đúng file đó."""
+        s_old = self.git("rev-parse", "HEAD")
+        (self.repo / "src" / 'a"b.py').write_text("y = 1\n", encoding="utf-8")
+        (self.repo / "src" / "[c].py").write_text("z = 1\n", encoding="utf-8")
+        s_new = self.commit("tên đặc biệt")
+        self.scanned({1: s_old, 9: s_new})
+        self.commit("sổ")
+        self.assertEqual(xt.review_debt(self.repo, self.status)[0], ["src/[c].py", 'src/a"b.py'])
+        (self.repo / "src" / "c.py").write_text("w = 1\n", encoding="utf-8")  # glob `[c].py` không được khớp nhầm
+        self.commit("feat: c (#5)")
+        self.merged_pr_world({}, {}, [])
+        since, _ = xt._review_debt_since(self.repo, self.status)
+        self.assertEqual(xt.reviewed_debt(self.repo, {"src/[c].py": since["src/[c].py"]}), {})
+        self.assertEqual(self.gh_one.call_count, 0)  # `[c].py` chỉ có commit trực tiếp — không hỏi PR #5 của c.py
+
+    def test_delivery_phase_review_debt_no_commit_is_not_covered(self):
+        """File nợ mà `git log` không thấy commit nào (lệch tên, lịch sử lạ) không được coi là đã phủ — all([]) = True."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.merged_pr_world({}, {}, [])
+        self.assertEqual(xt.reviewed_debt(self.repo, {"src/khong-co.py": s0}), {})
+
+    def test_delivery_phase_review_debt_stops_asking_after_error(self):
+        """Lỗi GitHub đầu tiên (404/offline) → thôi hỏi các commit còn lại (mỗi lượt có thể chờ GH_TIMEOUT); file vẫn là nợ."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.scanned({1: s0, 9: s0})
+        self.commit("sổ")
+        for n in (5, 6):
+            (self.repo / "src" / "app.py").write_text(f"x = {n}\n", encoding="utf-8")
+            self.commit(f"feat: {n} (#{n})")
+        self.merged_pr_world({}, {}, [])  # mọi PR 404
+        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        self.assertEqual(self.gh_one.call_count, 1)  # chỉ hỏi commit đầu (#6)
+
     def test_delivery_phase_release_review_debt_unreadable_or_foreign_sha(self):
         self.scanned({1: "f" * 40})  # SHA không có trong lịch sử: hàng audit FAIL, review_debt không có SHA để so
         r = self.rows()["review_debt"]
