@@ -1,7 +1,7 @@
 # ADR-0052: State có revision, chặn không-tiến-triển theo task, mẫu perf v2 và `loop next-step` chỉ đọc — lát 0–2 của nghiên cứu ba vòng; `perf trial` (lát 3) hoãn sang ADR riêng
 
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202; §7 hoãn — D-203)
-- **Trạng thái triển khai:** Lát 0–1 đã triển khai (3.28.0); lát 2 đang làm — §5 `build-until-clean` (T-3547, D-224; không-tiến-triển qua đợt T-3578, D-227); còn `harden-to-signoff`, gói nghiệm thu, Stop hook in gợi ý (T-3548…T-3550) — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
+- **Trạng thái triển khai:** Lát 0–1 đã triển khai (3.28.0); lát 2 đang làm — §5 `build-until-clean` (T-3547, D-224; không-tiến-triển qua đợt T-3578, D-227/D-228); còn `harden-to-signoff`, gói nghiệm thu, Stop hook in gợi ý (T-3548…T-3550) — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
 - **Ngày:** 2026-10-27
 - **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-008`/`-009` (tối ưu — mẫu perf v2; ràng buộc `perf trial` ở §7), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
 
