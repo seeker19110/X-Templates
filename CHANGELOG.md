@@ -6,9 +6,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 ## [Unreleased]
 
 ### Added
-- `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox.
+- `install.py --preset safe|autonomous` (ADR-0055, D-219): safe chọn L1/human/harden cho `xt.yaml` mới; không cờ giữ mặc định. Cài lại giữ preset thực sự áp dụng và tùy chỉnh, kể cả khi truyền preset khác; `--plan`, hash và manifest cùng lựa chọn. Khi provenance mất/hỏng, không tự đổi policy dù hash file cũ còn đúng: xuất `.xtemplates-new`. Preset không tạo sandbox. **Dự án đích:** dự án cài trước ADR-0055 (không có provenance) mà `xt.yaml` chưa sửa: khi mẫu đổi một trong ba khoá chính sách, cài lại xuất `xt.yaml.xtemplates-new` thay cho ghi đè.
 - Corpus #308: 16 ca gán nối/`parallel :::`, có đối chứng; kiểm độ nhạy bằng gỡ hai bảo vệ trong bộ nhớ phải báo false-green (T-3570). Benchmark 539 ca, giới hạn trong tập đã kiểm.
 - ADR-0054 và PLAN-hardening-assessment-2026-10-28 (D-219): chặn ghi/thực thi khi cơ chế khóa hoặc guard không hoạt động; giữ chính sách tự chủ hiện hữu.
+
 Mục checklist từ đợt rà `seeker19110/stored` 2026-10-28 (stored `a1a1f51..9f87dd1`; chi tiết ở
 `research/2026-10-28-stored-delta-extraction.md`). Dự án đích: ghép lại blueprint để nhận các ID mới.
 - `CMP-LIC-023` SHOULD: code fork/chép từ repo MIT, BSD, Apache-2.0 giữ nguyên dòng copyright và thông báo license của tác giả gốc (Apache giữ cả `NOTICE`); credit trong README không thay được — rà seeker19110/stored 2026-10-28.

@@ -2193,8 +2193,11 @@ GUARD_FILE = ".claude/hooks/guard.py"
 
 def guard_paths(base: Path) -> List[Path]:
     """Guard của dự án `base`, rồi guard cùng bản cài với `xt.py` này (repo khung: `scripts/` → gốc; dự án đích:
-    `.xtemplates/scripts/` → gốc dự án) — đổi `CLAUDE_PROJECT_DIR` sang thư mục không có guard không thoát được kiểm."""
-    return [base / GUARD_FILE, SCRIPT_DIR.parent / GUARD_FILE, SCRIPT_DIR.parent.parent / GUARD_FILE]
+    `.xtemplates/scripts/` → gốc dự án) — đổi `CLAUDE_PROJECT_DIR` sang thư mục không có guard không thoát được kiểm.
+    Gốc dự án chỉ khi `xt.py` nằm trong `.xtemplates/`: repo khung ở `~/X-Templates` thì cấp đó là `~/.claude/hooks`
+    của người dùng — guard lạ ở đó không được chặn mọi lệnh (review #311)."""
+    paths = [base / GUARD_FILE, SCRIPT_DIR.parent / GUARD_FILE]
+    return paths + [SCRIPT_DIR.parent.parent / GUARD_FILE] if SCRIPT_DIR.parent.name == ".xtemplates" else paths
 
 
 def _exec_source(path: Path, mod: Any) -> None:

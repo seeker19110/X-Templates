@@ -2,7 +2,8 @@
 
 - **Trạng thái:** Đã chấp nhận, D-219.
 - **Ngày:** 2026-10-28.
-- **Làm rõ:** ADR-0052 §2 và ADR-0002; không sửa nội dung quyết định cũ.
+- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `_state_lock`/`update_state`, `_load_guard`/`_guard_decide`/`guard_paths`; test `tests/test_xt_core.py` (GuardChokePointTest), `tests/test_xt_loop.py`.
+- **Làm rõ:** ADR-0002; **thay một phần** ADR-0052 §2 (nhánh không khoá: "không có `fcntl` → bỏ khoá, vẫn kiểm `rev`" nay là lỗi, không ghi) — không sửa chữ ADR cũ.
 
 ## Bối cảnh
 
@@ -31,6 +32,11 @@ cài harness vẫn giữ tương thích; có harness thiếu guard đã thuộc 
 giảm sai lầm; sandbox OS và egress mới là ranh giới cách ly, không được suy ra từ exit 0 của benchmark.
 Nếu `apply_policy` lỗi hoặc thiếu, quyết định `ask` không được biến thành cho chạy ở chế độ mặc định;
 chặn trường hợp đó. Quyết định cho/chặn rõ ràng từ guard cũ vẫn được giữ khi không có bộ chuyển policy.
+
+## Hệ quả
+
+- Tốt: không còn mất cập nhật state lặng lẽ; Gate không chạy với guard dở.
+- Xấu: nền tảng không có `fcntl` (Python Windows gốc, kể cả qua Git Bash) hoặc FS không hỗ trợ flock không ghi được `state.json` — `loop` exit 2; đọc state, Stop/PreCompact hook vẫn chạy.
 
 ## Kiểm chứng và đường lùi
 

@@ -25,12 +25,12 @@ Main cập nhật thêm `b7a8de6` (#309) trong lúc nghiệm thu: đã gộp 7 m
 | Ruff, mypy strict | đạt trên code thay đổi |
 | Full Gate | exit 0: 1.899 test; coverage 13.224 câu lệnh, 4.900 nhánh, 100%; Python 3.12.14. Sàn Python 3.11 bỏ qua có log vì máy không có; lượt đầu phát hiện tiêu đề ADR mới sai định dạng, đã sửa và test ADR xanh |
 
-Hai mục CODE-025/SEC-129 đóng bằng commit `f4bd90f`; không dùng SHA #308 làm bằng chứng cho code mới. Review độc lập chấp thuận sau khi kiểm lại hai lỗi phát hiện thêm; không có phát hiện chặn còn mở trong diff đã rà. Audit strict và verify chạy lại trên cây bàn giao. Corpus chỉ kiểm hàm quyết định; state lock/loader/Gate có file thật được kiểm riêng ở UpdateStateTest/GuardChokePointTest, ghi rõ trong scope.json.
+Hai mục CODE-025/SEC-130 sửa trong PR #311 (commit nhánh `f4bd90f`, không còn tới được từ `main` sau squash); không dùng SHA #308 làm bằng chứng cho code mới. Review độc lập chấp thuận sau khi kiểm lại hai lỗi phát hiện thêm; không có phát hiện chặn còn mở trong diff đã rà. Audit strict và verify chạy lại trên cây bàn giao. Corpus chỉ kiểm hàm quyết định; state lock/loader/Gate có file thật được kiểm riêng ở UpdateStateTest/GuardChokePointTest, ghi rõ trong scope.json.
 
 ## Giới hạn và bàn giao
 
 - Không đổi mặc định tự chủ của repo hoặc dự án đã cài; không tự bật/tắt sandbox, không cấu hình credential hay quyền persistent.
-- Python cục bộ 3.12; browser E2E và ma trận CI sống chưa được xác nhận trong phiên này. Log Gate: `/tmp/xt-hardening-gate-final.log`; kiểm cây bàn giao lưu riêng ngoài repo để không đổi đầu vào đã kiểm.
+- Python cục bộ 3.12; browser E2E và ma trận CI sống chưa được xác nhận trong phiên này. Log Gate (container khác, không kiểm lại được): `/tmp/xt-hardening-gate-final.log`; kiểm cây bàn giao lưu riêng ngoài repo để không đổi đầu vào đã kiểm.
 - Gate trên cây đã gộp #309 (`d44689d`) cũng đạt 1.899 test/100%; sau chỉnh fixture D-220 chạy lại Gate và verify trên cây bàn giao cuối, log `/tmp/xt-hardening-gate-handoff.log` và `/tmp/xt-hardening-verify-handoff.log`.
 - Fetch main và Git push dry-run thành công; `gh auth status` trong/ngoài sandbox báo token không hợp lệ, nên không suy ra trạng thái quyền API từ trạng thái Git. Xuất bản chỉ nhánh và PR nháp khi quyền cho phép; kết quả xác minh remote được bàn giao riêng. Không merge, deploy hoặc cắt tag; thay đổi ở Unreleased.
 - Chưa thay việc xác nhận pháp lý bằng chuyên gia, pilot nhóm độc lập, hay số liệu ROI. Không tách monolith hoặc tuyên bố tăng tốc khi chưa có ngân sách vi phạm và phép đo phù hợp.

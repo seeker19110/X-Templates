@@ -1765,6 +1765,13 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
         self.assertTrue(xt.guard_block("git push origin main", self.base))
         self.assertIn(ROOT / xt.GUARD_FILE, xt.guard_paths(self.base))
 
+    def test_guard_paths_parent_of_install_only_for_xtemplates(self):
+        # Review #311: repo khung ở ~/X-Templates → cấp trên là ~/.claude/hooks của người dùng, không phải guard dự án.
+        self.assertNotIn(ROOT.parent / xt.GUARD_FILE, xt.guard_paths(self.base))
+        scripts = self.base / ".xtemplates" / "scripts"
+        with unittest.mock.patch.object(xt, "SCRIPT_DIR", scripts):
+            self.assertEqual(xt.guard_paths(self.base)[-1], self.base / xt.GUARD_FILE)
+
     def test_permissive_project_guard_does_not_win(self):
         # guard giả ở dự án (cho qua mọi thứ) không thắng guard của bản cài (review #117 lần 2).
         (self.base / xt.GUARD_FILE).write_text(
@@ -1870,6 +1877,12 @@ class GuardChokePointTest(TmpMixin, unittest.TestCase):
             """
         )
         self.assertEqual(xt.guard_block("x", self.base), "guard chặn")
+        for raw in ('{"decision": "allow"}', '{"decision": ""}', "{}"):
+            # Review #311: quyết định cho rõ ràng giữ nguyên khi `apply_policy` lỗi — chỉ `ask` mới bị chặn.
+            self.fake_guard(
+                f"def bash_decision(c, r, w):\n    return {raw}\n\ndef apply_policy(o):\n    raise RuntimeError()\n"
+            )
+            self.assertEqual(xt.guard_block("x", self.base), "", raw)
 
     def test_policy_failure_cannot_allow_fallback_ask(self):
         self.use_real_guard()
