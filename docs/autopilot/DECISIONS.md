@@ -1539,3 +1539,10 @@
 - Chọn: Áp nhất quán mô hình đe doạ D-015 (guard = lớp chặn sai lầm bằng phân tích tĩnh, không phải ranh giới cách ly; tiền lệ D-164/D-167): lối lách đòi che giấu cú pháp cố ý (X+=1, parallel :::, export+eval alias, a[0]=, sem, |parallel) là giới hạn đã biết — vẫn merge T-3564 vì đã làm và rẻ (review chỉ xét delta + hồi quy), phần còn lại ghi giới hạn ở harness-files.md, sổ: chấp nhận có chủ/hạn 2027-01-21 với lý do D-015 (không phải 'chỉ chạy chương trình')
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: lý do D-217 sai phải đính chính; mô hình đe doạ thật của guard (D-015) — tác tử hợp tác mắc sai lầm, không cố che giấu; lớp đỡ cho kẻ cố ý là sandbox/egress (LOOP-HARNESS-022), deny của settings, bộ phân loại Auto; (3) không hội tụ: #282 bảy lượt, #248 tám lượt, #306 + T-3564 mỗi lượt thêm lối — vá token bash không bao giờ đủ; (2) đường lùi: chấp nhận có hạn, xét lại cùng mốc hàng rào
 - Đường lùi: Nâng lại các mục chấp nhận thành 🔴/🟠 mở và mở task vá
+
+### D-219 · 2026-10-28T10:57:35+00:00 · Duyệt PLAN-hardening-assessment-2026-10-28: xác minh main #308, bảo vệ state/guard khi cơ chế kiểm không dùng được, thêm preset cài safe tùy chọn?
+
+- Phương án: (1) Vá từng luật shell và đổi mặc định mọi dự án sang quyền thấp · (2) Giữ chính sách hiện hữu; bổ sung corpus #308, chặn ghi state thiếu khóa, chặn guard lỗi nạp/fallback hỏng, thêm safe opt-in và tài liệu có bằng chứng
+- Chọn: Giữ chính sách hiện hữu; bổ sung corpus #308, chặn ghi state thiếu khóa, chặn guard lỗi nạp/fallback hỏng, thêm safe opt-in và tài liệu có bằng chứng
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: sửa mất cập nhật và thực thi thiếu kiểm tra đã tái hiện; không coi guard là sandbox. Giữ đường lùi: từng lát có test, không tự đổi lựa chọn dự án đang chạy. Stdlib và diff nhỏ; tách monolith, đổi luật pháp hay tuyên bố nhanh hơn cần phạm vi và số đo riêng.
+- Đường lùi: Revert từng lát; preset mặc định và cấu hình dự án hiện hữu giữ nguyên; không hạ ngưỡng Gate.

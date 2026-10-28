@@ -1,17 +1,17 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-28 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.27.0, pha `harden` — D-136) · Cập nhật: 2026-10-28 · Nhánh: work
 
 ## Đang làm
-- 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge (#290–#306: FLOW, `rev`/khoá, `task_runs`, attach/resolve/unblock, perf mẫu v2 + `compare` từ chối; D-212/D-213); T-3560…T-3563 merge (#303–#306, D-214…D-216); quét lại (#307): 🔴 AUD-SEC-125 → T-3564 (D-217) → T-3556 `--strict` → cắt 3.28.0.
+- 2026-10-28 **PLAN-hardening-assessment-2026-10-28** (D-219, ADR-0054/0055): main `07c428f` (#308) đã vá SEC-125/121; thêm corpus, chặn state thiếu khóa/guard hỏng, preset safe tùy chọn. Gate xanh: 1.899 test, coverage 100%; review sạch, ba commit code đã tạo.
+- PLAN-harden-2026-10-27-loops: lát 0–1 đã merge #290–#308; T-3556/cắt 3.28.0 theo audit delta mới.
 - 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.
-- 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
+- **3.27.0** đã phát hành (#281–#283; D-196…D-200, ADR-0050): hook PostToolUseFailure và đóng hàng rào khi guard lỗi nạp. Chi tiết ở CHANGELOG; giới hạn đang áp dụng ở mục Tiếp theo.
 - 2026-10-25 **3.26.0 Workflow** (D-184…D-191, ADR-0049): `/audit` §3, `/research` ≥ 3 mục dùng tool Workflow khi người gõ trực tiếp (cùng luật nhánh subagent, lô ≤ 5); không bật `ultracode`. Lần `/audit` Workflow đầu: ghi token, kiểm `maxTurns`/`effort`/guard có áp cho agent.
 - 2026-10-26 **PLAN-harden-2026-10-26 + PLAN-harden-2026-10-26b** (D-193/194, `/complete`): 20 MUST tick có `— Kiểm:` (`unchecked_must` 57 → 37; PLAN-harden-2026-10-26c: → 0, D-195); CI `checks` chạy `blueprint-status --strict --run`; `_load_guard` báo lỗi nạp (ERR-001).
 - 2026-10-25 **PLAN-3.23.0-complete** (D-174, ADR-0046): `/autopilot` = pha build, `/complete` = pha harden; 3.24.0 (ADR-0047): lặp build → audit delta tới khi hết việc, tag tự khi `VERSION` đổi (D-179). Mọi GO-NO-GO tới v3.25.0 đã ký GO 2026-10-26.
 - PLAN-3.23-delegation-rate (D-171/172): chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
-- Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
 - Rà `seeker19110/stored` 2026-10-18: chờ chủ repo (HAR-036/041, SEC-026, CI-006/7/9, SEC-043).
 
 ## Tiếp theo
@@ -36,6 +36,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `fcf83b3` (#289–#306: audit Lát 0, FLOW, `rev`/`task_runs`, attach/resolve/unblock, ADR-0053, perf v2). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040).
+- Gốc `main` `07c428f` (#308); nhánh `work` đang củng cố theo D-219. Git dry-run đẩy được; gh auth báo token lỗi, quyền API xác minh riêng. Chỉ nhánh/PR nháp, không merge/tag. Gate cần mở localhost và không bị mount `/tmp/.git` giả ảnh hưởng.
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Kiểm nhanh: `scripts/dev-task.sh gate`. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
