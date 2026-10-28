@@ -5,6 +5,10 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+## [3.28.0] - 2026-10-28
+
+**Dự án đích: chạy lại `install.py`** — nhận `loop attach`/`resolve`/`unblock` (`loop resume` cũ cảnh báo), `rev` + khoá cho `state.json`, chặn không-tiến-triển theo task (`--max-task-runs`, mặc định 6; 0 = tắt), `pr next` trả `rethink` sau 2 review chưa sạch, mẫu `perf sample` v2 và `perf compare` từ chối so khi lệch đơn vị/lệnh/bộ đo/nền tảng/chiều (`--higher-is-better` phải có ở cả `sample` lẫn `compare` — Gate kiểu 3.27 chỉ truyền ở `compare` sẽ đỏ) hoặc baseline bẩn, bản vá guard (T-3563/T-3564), skill `/review` `/gate` `/complete` `/optimize` theo ADR-0056. **Bước tay:** chép lại `scripts/perf-gate.sh` theo mẫu `optimization-loop.md` (Gate mẫu cũ báo `improved` giả được); ghép tay mẫu `AGENTS.md`/`PULL-REQUEST.md` (`install.py` không ghi đè); ghép lại blueprint — ID mới đợt stored 2026-10-28, đổi chữ `LOOP-HARNESS-008`, `LOOP-HARNESS-024`, `LOOP-STOP-021`, `LOOP-STOP-022`. `/optimize` tới 3.29.0 vẫn ghi lần thử qua `loop record` — trần `task_runs` có thể chặn; khi tối ưu dùng `loop init --max-task-runs 0`.
+
 ### Added
 Mục checklist từ đợt rà `seeker19110/stored` 2026-10-28 (stored `a1a1f51..9f87dd1`; chi tiết ở
 `research/2026-10-28-stored-delta-extraction.md`). Dự án đích: ghép lại blueprint để nhận các ID mới.
