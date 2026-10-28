@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -83,6 +84,34 @@ class AutonomyBenchRepoTest(unittest.TestCase):
         self.assertIn("rollup-har058-only-merge-gate", bad)
         self.assertIn("rollup-rec08-required-skipped", bad)
         self.assertIn("pr-rec08-required-skipped", bad)
+
+    def test_autonomy_bench_guard_append_parallel_have_controls_and_audit_refs(self):
+        """Giữ tái hiện #308 và đối chứng trong cổng: mỗi lỗi có ca chặn và ca hợp lệ. Phạm vi là lệnh nhìn thấy
+        trong mô hình guard (D-218), không bảo đảm mọi cách dựng lệnh shell đều được phân tích."""
+        cases, _ = xt.autonomy_corpus(CORPUS)
+        for ref in ("AUD-SEC-125", "AUD-SEC-121"):
+            with self.subTest(ref=ref):
+                rows = [c for c in cases if ref in c["refs"]]
+                self.assertTrue(rows, ref)
+                self.assertEqual({c["group"] for c in rows}, {"guard"})
+                self.assertEqual({c["expect"]["allowed"] for c in rows}, {False, True})
+                self.assertTrue(any(c["origin"] == "control" and c["expect"]["allowed"] for c in rows))
+
+    def test_autonomy_bench_guard_append_parallel_regressions_are_false_green(self):
+        """Gỡ hai bảo vệ của #308 trong bộ nhớ: corpus phải bắt lại lỗi thay vì tiếp tục báo xanh."""
+        ids = {"guard-sec125-assign-append-rm-root", "guard-sec121-parallel-args-rm-root"}
+        cases, _ = xt.autonomy_corpus(CORPUS)
+        selected = [c for c in cases if c["id"] in ids]
+        self.assertEqual({c["id"] for c in selected}, ids)
+        with tempfile.TemporaryDirectory(prefix="xt-bench-regression-") as tmp:
+            env = xt.BenchEnv(Path(tmp))
+            guard = env.module("guard")
+            with (
+                unittest.mock.patch.object(guard, "ENV_ASSIGN_RE", re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")),
+                unittest.mock.patch.object(guard, "_parallel_jobs", return_value=([], "")),
+            ):
+                rows = [xt._bench_run(c, env) for c in selected]
+        self.assertEqual({r["id"] for r in rows if r["status"] == "false_green"}, ids)
 
     def test_autonomy_bench_pending_reproduces_open_gaps(self):
         """`pending/`: false-green mới phát hiện, chưa sửa (không vào cổng). T-1523 sửa guard cho cả 5 ca → chuyển sang
