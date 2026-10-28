@@ -638,8 +638,14 @@ class PerfGuardTextAttrTest(unittest.TestCase):
         patcher = unittest.mock.patch.dict(os.environ, ISOLATED)
         patcher.start()
         self.addCleanup(patcher.stop)
+        old_cwd = os.getcwd()
+        self.addCleanup(os.chdir, old_cwd)
+        self.fresh()
+
+    def fresh(self) -> Path:
+        """Repo mới (cwd chuyển vào): mỗi subtest một repo để luật/thuộc tính của ca trước không lọt sang ca sau."""
         self.d = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: __import__("shutil").rmtree(self.d, ignore_errors=True))
+        self.addCleanup(shutil.rmtree, self.d, True)
         git(self.d, "init", "-q", "-b", "main")
         for k, v in (("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false")):
             git(self.d, "config", k, v)
@@ -648,41 +654,162 @@ class PerfGuardTextAttrTest(unittest.TestCase):
         (self.d / "app.py").write_text("x = 1\n")
         git(self.d, "add", ".")
         git(self.d, "commit", "-qm", "init")
-        old_cwd = os.getcwd()
-        self.addCleanup(os.chdir, old_cwd)
         os.chdir(self.d)
+        return self.d
 
     def guard(self, *args: str) -> "tuple[int, str, str]":
         return run_main("perf", "guard", "--strict", *args)
 
     def test_guard_text_attr_binary_attr_cannot_hide_lines(self):
-        attrs = self.d.parent / (self.d.name + ".attrs")
-        attrs.write_text("app.py -diff\n")
-        self.addCleanup(attrs.unlink)
-        info = self.d / ".git" / "info" / "attributes"
-        sources = {
-            "tree": (lambda: (self.d / ".gitattributes").write_text("app.py -diff\n"), {}),
-            "info": (lambda: info.write_text("app.py binary\n"), {}),
-            "config": (
-                lambda: None,
-                {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.attributesFile", "GIT_CONFIG_VALUE_0": str(attrs)},
-            ),
-        }
-        for name, (plant, env) in sources.items():
+        def tree(d: Path) -> dict:  # luật đã commit ở --base: không ⚠ đổi luật, chỉ còn dòng lru_cache để bắt
+            (d / ".gitattributes").write_text("app.py -diff\n")
+            git(d, "add", ".gitattributes")
+            git(d, "commit", "-qm", "attrs")
+            return {}
+
+        def config(d: Path) -> dict:
+            attrs = d / ".git" / "attrs"  # ngoài cây: không phải file chưa theo dõi
+            attrs.write_text("app.py -diff\n")
+            return {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "core.attributesFile",
+                "GIT_CONFIG_VALUE_0": str(attrs),
+            }
+
+        def info(d: Path) -> dict:
+            (d / ".git" / "info" / "attributes").write_text("app.py binary\n")
+            return {}
+
+        sources = {"tree": tree, "info": info, "config": config}
+        for name, plant in sources.items():
             with self.subTest(name):
-                plant()
-                if name == "tree":  # luật đã commit ở --base: không ⚠ đổi luật, chỉ còn dòng lru_cache để bắt
-                    git(self.d, "add", ".gitattributes")
-                    git(self.d, "commit", "-qm", "attrs")
-                (self.d / "app.py").write_text("import functools\n@functools.lru_cache\ndef f(): pass\n")
+                d = self.fresh()  # repo riêng: `.gitattributes` của "tree" không được che hộ ca sau (F4)
+                env = plant(d)
+                (d / "app.py").write_text("import functools\n@functools.lru_cache\ndef f(): pass\n")
                 with unittest.mock.patch.dict(os.environ, env):
                     rc, out, _ = self.guard("--base", "HEAD")
                 self.assertEqual(rc, 1, out)
                 self.assertIn("⚠", out)
                 self.assertIn("lru_cache", out)
                 self.assertNotIn(".gitattributes", out)
+
+    def test_guard_text_attr_line_separators_cannot_hide_lines(self):
+        """`git diff` đọc dạng bytes, tách theo `\\n`: `\\r` (universal newlines) và dấu ngắt dòng Unicode
+        (`str.splitlines`) trong một dòng thật không cắt mất tiền tố `+` của phần sau (F2)."""
+        for sep in ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029", "\r\n"):
+            with self.subTest(repr(sep)):
+                body = f'x = 1{sep}@__import__("functools").lru_cache{sep}def f(): pass\n'
+                (self.d / "app.py").write_bytes(body.encode("utf-8"))
+                rc, out, _ = self.guard("--base", "HEAD")
+                self.assertEqual(rc, 1, out)
+                self.assertIn("lru_cache", out)
+                if sep != "\r\n":  # ca đối chứng `\r\n`: hai dòng thật; còn lại là MỘT dòng thật
+                    self.assertIn("app.py: x = 1", out)
                 git(self.d, "checkout", "-q", "--", "app.py")
-                info.unlink(missing_ok=True)
+
+    def test_guard_text_attr_fake_diff_header_in_content(self):
+        """Tiêu đề `diff --git` chỉ nhận ở đầu dòng thật; nội dung giả tiêu đề (sau `\\r`) không đổi/xoá tên file
+        hiện hành, nên dòng thêm sau đó vẫn được quét (F2)."""
+        for fake in ("diff --git a/", "diff --git a/bench/run.py b/bench/run.py", 'diff --git "a/x" "b/x"'):
+            with self.subTest(fake):
+                (self.d / "app.py").write_bytes(f"x = 2\r{fake}\n@functools.lru_cache\ndef f(): pass\n".encode())
+                rc, out, _ = self.guard("--base", "HEAD")
+                self.assertEqual(rc, 1, out)
+                self.assertIn("app.py: @functools.lru_cache", out)
+                git(self.d, "checkout", "-q", "--", "app.py")
+        added = xt._perf_diff_lines(
+            b"diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,2 @@\n-x\n+++ y\n+\xff\rz\n"
+            b"+diff --git a/b b/b\n\\ No newline at end of file\n"
+        )
+        self.assertEqual(added, [("a.py", "++ y"), ("a.py", "\ufffd\rz"), ("a.py", "diff --git a/b b/b")])
+
+    def test_guard_text_attr_plus_prefixed_line_is_not_header(self):
+        """Dòng thêm bắt đầu bằng `++ ` (diff in `+++ …`) là nội dung, không phải tiêu đề `+++ b/…`: `++ 0 if setattr(…)`
+        là Python hợp lệ."""
+        (self.d / "app.py").write_text('import time\n++ 0 if setattr(time, "perf_counter", lambda: 0) else 0\n')
+        rc, out, _ = self.guard("--base", "HEAD")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("setattr(time", out)
+
+    def test_guard_text_attr_content_attrs_warn(self):
+        """Thuộc tính làm git đổi nội dung đọc từ worktree (`working-tree-encoding`, `filter` + clean, `ident`) che được
+        dòng thêm kể cả với `--text`: guard báo ⚠ theo `git check-attr` (F1)."""
+        warn = "thuộc tính đổi nội dung git đọc — dòng thêm có thể bị che"
+        hide = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "filter.hide.clean", "GIT_CONFIG_VALUE_0": "sed /lru_/d"}
+        cases = {
+            "app.py working-tree-encoding=IBM037": ({}, "working-tree-encoding=IBM037"),
+            "app.py working-tree-encoding=UTF-16LE": ({}, "working-tree-encoding=UTF-16LE"),
+            "*.py filter=hide": (hide, "filter=hide"),
+            "app.py ident": ({}, "ident"),
+        }
+        for rule, (env, label) in cases.items():
+            with self.subTest(rule):
+                d = self.fresh()
+                (d / ".git" / "info" / "attributes").write_text(rule + "\n")
+                (d / "app.py").write_text("import functools\n@functools.lru_cache\ndef f(): pass\n")
+                with unittest.mock.patch.dict(os.environ, env):
+                    rc, out, _ = self.guard("--base", "HEAD")
+                self.assertEqual(rc, 1, out)
+                self.assertIn(f"— reviewer phải rà: app.py: {warn} ({label})", out)
+                self.assertEqual(run_main("perf", "guard", "--base", "HEAD")[0], 0)  # không --strict: chỉ báo
+        # clean filter khai qua GIT_CONFIG_* trỏ core.attributesFile ngoài cây (guard không chặn được env) vẫn bị thấy
+        d = self.fresh()
+        attrs = d / ".git" / "attrs"
+        attrs.write_text("app.py filter=hide\n")
+        env = {
+            **hide,
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_1": "core.attributesFile",
+            "GIT_CONFIG_VALUE_1": str(attrs),
+        }
+        (d / "app.py").write_text("@functools.lru_cache\n")
+        with unittest.mock.patch.dict(os.environ, env):
+            rc, out, _ = self.guard("--base", "HEAD")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"app.py: {warn} (filter=hide)", out)
+
+    def test_guard_text_attr_content_attrs_harmless_values(self):
+        """unset/unspecified và `filter=lfs` không báo; file xoá, file chưa theo dõi cũng được hỏi thuộc tính."""
+        rules = (
+            "app.py -working-tree-encoding -filter -ident",
+            "app.py !working-tree-encoding !filter",
+            "*.py filter=lfs",
+        )
+        for rule in rules:
+            with self.subTest(rule):
+                d = self.fresh()
+                (d / ".git" / "info" / "attributes").write_text(rule + "\n")
+                (d / "app.py").write_text("x = 2\n")
+                rc, out, _ = self.guard("--base", "HEAD")
+                self.assertEqual(rc, 0, out)
+        d = self.fresh()
+        (d / ".git" / "info" / "attributes").write_text("*.py ident\n")
+        (d / "bench" / "run.py").unlink()
+        (d / "new.py").write_text("y = 1\n")
+        _rc, out, _ = self.guard("--base", "HEAD")
+        self.assertIn("bench/run.py: thuộc tính", out)
+        self.assertIn("new.py: thuộc tính", out)
+        self.assertEqual(xt.perf_content_attrs(d, []), [])
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside, True)
+        with unittest.mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(outside.parent)}):
+            with self.assertRaisesRegex(RuntimeError, "git check-attr lỗi"):
+                xt.perf_content_attrs(outside, ["x"])  # ngoài repo git → guard exit 2
+
+    def test_guard_text_attr_diff_raw_git_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "git diff lỗi"):
+            xt._perf_git_raw(self.d, "diff", "no-such-ref", "--")
+        timeout = subprocess.TimeoutExpired(["git"], 1)
+        with unittest.mock.patch.object(xt.subprocess, "run", side_effect=timeout):
+            with self.assertRaisesRegex(RuntimeError, "git diff quá"):
+                xt._perf_git_raw(self.d, "diff")
+
+    def test_guard_text_attr_o3_word_boundary(self):
+        """`-O3` chỉ tính khi là cờ đứng riêng (F3): dữ liệu nhị phân/chuỗi dài chứa `-O3` không báo oan."""
+        for hit in ("CFLAGS = -O3", "gcc -O3 x.c", "opts=['-O3']", '"-O3"', "-O3"):
+            self.assertTrue(xt.PERF_SUSPECT_RE.search(hit), hit)
+        for miss in ("x-O3", "a_-O3", "--O3", "-O30", "-O3x", "ab-O3_", "\x00\x01QZ-O3a"):
+            self.assertFalse(xt.PERF_SUSPECT_RE.search(miss), miss)
 
     def test_guard_text_attr_rule_file_change_warns(self):
         warn = "đổi luật thuộc tính — có thể giấu dòng"

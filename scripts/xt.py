@@ -10680,8 +10680,11 @@ PERF_UNTRACKED_MAX = 1 << 20  # đọc tối đa 1 MiB mỗi file chưa theo dõ
 PERF_SUSPECT_RE = re.compile(
     r"lru_cache|functools\.cache\b|@cache\b|memoi[sz]e|time\.sleep\(|"
     r"(?:perf_counter|process_time|monotonic|time\.time|performance\.now|Date\.now)(?:_ns)?\s*=(?!=)|"
-    r"patch\(\s*[\"']time\.|setattr\(\s*time\b|_getframe|inspect\.stack|-O3"
+    r"patch\(\s*[\"']time\.|setattr\(\s*time\b|_getframe|inspect\.stack|(?<![\w-])-O3\b"
 )
+# Thuộc tính khiến git đổi nội dung đọc từ worktree trước khi diff — `--text` không gỡ được; giá trị vô hại không báo
+PERF_CONTENT_ATTRS = {"working-tree-encoding": (), "filter": ("lfs",), "ident": ()}
+PERF_CONTENT_WARN = "thuộc tính đổi nội dung git đọc — dòng thêm có thể bị che"
 
 
 # --------------------------------------------------------------------------- autonomy-bench (AUTO-07, T-1521)
@@ -11214,6 +11217,19 @@ def _perf_git_names(base: Path, *args: str) -> List[str]:
     return [n for n in _perf_git(base, *args).split("\0") if n]
 
 
+def _perf_git_raw(base: Path, *args: str) -> bytes:
+    """stdout bytes của git: `_git` chạy `text=True` (universal newlines đổi `\\r` thành `\\n`) — không dùng cho nội dung diff."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(base), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=_perf_env()
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"git {args[0]} quá {GIT_TIMEOUT} s") from None
+    if r.returncode != 0:
+        raise RuntimeError(f"git {args[0]} lỗi: {r.stderr.decode('utf-8', 'replace').strip() or r.returncode}")
+    return r.stdout
+
+
 def _perf_self_hidden_rules(base: Path) -> List[str]:
     """File luật chưa theo dõi (`.gitignore`; `.gitattributes` từ AUD-SEC-116) bị ignore nhưng thư mục chứa nó thì không —
     vd `.gitignore` chỉ chính nó che mình (`bench/.gitignore` = `*`, AUD-XFEAT-005). File luật trong thư mục đã ignore
@@ -11238,15 +11254,21 @@ def _perf_self_hidden_rules(base: Path) -> List[str]:
     return [h for h in hidden if "/" not in h or h.rpartition("/")[0] + "/" not in ignored_dirs]
 
 
-def _perf_diff_lines(text: str) -> List[Tuple[str, str]]:
-    """Dòng thêm của `git diff --unified=0` kèm file; tên bị git quote (có `"`, `\\`, ký tự điều khiển) ghi là PERF_ODD_NAME."""
+def _perf_diff_lines(raw: bytes) -> List[Tuple[str, str]]:
+    """Dòng thêm của `git diff --unified=0` kèm file; tên bị git quote (có `"`, `\\`, ký tự điều khiển) ghi là PERF_ODD_NAME.
+    Đọc bytes, tách CHỈ theo `\\n` rồi decode từng dòng: `\\r`, `\\x1c`, U+2028… nằm trong một dòng thật không cắt mất
+    tiền tố `+` của phần sau, và mảnh `diff --git` sau chúng không thành tiêu đề giả. Chỉ dòng sau `@@` là nội dung —
+    dòng thêm `++ x` (in `+++ x`) không bị coi là tiêu đề `+++ b/…`."""
     added: List[Tuple[str, str]] = []
-    cur = ""
-    for line in text.splitlines():
+    cur, hunk = "", False
+    for line in (b.decode("utf-8", "replace") for b in raw.split(b"\n")):
         if line.startswith(PERF_DIFF_HEAD):  # tên từ tiêu đề (`a/P b/P`, không đổi tên) để file bị XOÁ cũng được tính
             rest = line[len(PERF_DIFF_PLAIN) :]
             cur = rest[: (len(rest) - 3) // 2] if line.startswith(PERF_DIFF_PLAIN) else PERF_ODD_NAME
-        elif cur and line.startswith("+") and not line.startswith("+++ "):
+            hunk = False
+        elif line.startswith("@@"):
+            hunk = True
+        elif hunk and line.startswith("+"):
             added.append((cur, line[1:]))
     return added
 
@@ -11292,12 +11314,30 @@ def perf_diff(base: Path, ref: str) -> Tuple[List[str], List[Tuple[str, str]]]:
         f.rpartition("/")[2] == ".gitignore" for f in names + untracked + hidden
     ):  # luật ignore đổi trong lượt này: không tin nó để giấu file
         untracked = _perf_git_names(base, "ls-files", "-z", "--others")
-    text = _perf_git(
+    raw = _perf_git_raw(
         base,
         *("diff", "--unified=0", "--text", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv"),
         *("--src-prefix=a/", "--dst-prefix=b/", ref, "--"),
     )
-    return names + sorted({*untracked, *hidden}), _perf_diff_lines(text) + _perf_untracked_lines(base, scanned)
+    return names + sorted({*untracked, *hidden}), _perf_diff_lines(raw) + _perf_untracked_lines(base, scanned)
+
+
+def perf_content_attrs(base: Path, files: List[str]) -> List[str]:
+    """⚠ cho file có thuộc tính đổi nội dung git đọc từ worktree (PERF_CONTENT_ATTRS: `working-tree-encoding`, `filter`
+    + clean, `ident`) — từ mọi nguồn git dùng (cây, `info/attributes`, `core.attributesFile` kể cả qua `GIT_CONFIG_*`).
+    Dòng thêm bị đổi/xoá trước khi tới diff; `--text` không giúp. git lỗi → RuntimeError."""
+    if not files:
+        return []
+    r = _git(base, "check-attr", "-z", "--stdin", *PERF_CONTENT_ATTRS, env=_perf_env(), stdin="\0".join(files))
+    if r.returncode != 0:
+        raise RuntimeError(f"git check-attr lỗi: {r.stderr.strip() or r.returncode}")
+    fields = r.stdout.split("\0")  # -z: <đường> <thuộc tính> <giá trị> cho mỗi cặp
+    out = []
+    for i in range(0, len(fields) - 2, 3):
+        path, attr, value = fields[i : i + 3]
+        if value not in ("unset", "unspecified", *PERF_CONTENT_ATTRS[attr]):
+            out.append(f"{path}: {PERF_CONTENT_WARN} ({attr if value == 'set' else f'{attr}={value}'})")
+    return out
 
 
 def perf_known(base: Path) -> List[str]:
@@ -11547,6 +11587,7 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
         base = perf_repo()
         # SHA, không phải chuỗi thô: `--base=--output=F` thành tuỳ chọn của `git diff` (AUD-SEC-115)
         files, added = perf_diff(base, perf_rev(args.base))
+        attrs = perf_content_attrs(base, files)
         known = perf_known(base) if locked else []
     except RuntimeError as exc:
         print(f"✗ {exc}", file=sys.stderr)
@@ -11556,6 +11597,7 @@ def _perf_guard_cmd(args: argparse.Namespace) -> int:
         print(f"✗ --locked không khớp file nào trong repo: {', '.join(dead)}", file=sys.stderr)
         return 2
     touched, suspect = perf_guard(files, added, locked)
+    suspect += attrs
     for f in touched:
         print(f"✗ đụng file khoá (bộ đo/test tương đương): {f}")
     for s in suspect:
