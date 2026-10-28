@@ -6797,6 +6797,9 @@ class GuardAppendParallelTest(unittest.TestCase):
             "parallel --memsuspend 2G -j4 ::: 'rm -rf /' ls",
             "parallel --maxargs 1 -k ::: 'git reset --hard HEAD~1'",
             "parallel --tmpd /tmp -k ::: 'rm -rf /'",
+            # đọc tệp kèm nhóm `:::` thấy được: nhóm tệp coi như "", vẫn quét nhóm thấy được (rà trước T-3564)
+            "parallel ::: 'rm -rf /' :::: cmds.txt",
+            "parallel -a cmds.txt ::: 'rm -rf /'",
         ):
             with self.subTest(cmd):
                 self.assert_denied(cmd)

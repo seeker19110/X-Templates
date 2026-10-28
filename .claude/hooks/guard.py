@@ -5562,26 +5562,26 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
     """`parallel [tuỳ chọn] ::: a b [:::|:::+ …]` KHÔNG có mẫu lệnh chạy mỗi đối số (tổ hợp các nhóm) như một dòng lệnh
     shell (AUD-SEC-121) → (dòng lệnh để quét lồng, lý do UNRESOLVED_TARGET khi dấu tách đổi qua tên viết tắt hay quá
     PARALLEL_JOBS_MAX tổ hợp). Nhóm rỗng thành [""] như GNU parallel (nguồn rỗng thay bằng chuỗi rỗng). Có mẫu lệnh →
-    ([], ""): đối số là dữ liệu (`_stdin_fed`, `_runner_scripts`). Lệnh đọc từ tệp (`::::`, `-a`, `--arg-file`) → ([],
-    ""): như chạy tệp script (`bash cmds.txt`), guard không đọc nội dung tệp. Đã gặp tuỳ chọn lạ: không biết token nào
-    là giá trị, token nào là mẫu → coi như không mẫu (chiều chặt). Không `:::`/`-a` (đọc stdin) chưa xét ở đây."""
+    ([], ""): đối số là dữ liệu (`_stdin_fed`, `_runner_scripts`). Nhóm đọc từ tệp (`::::`, `-a`, `--arg-file`) coi như
+    [""] — guard không đọc nội dung tệp, như chạy tệp script (`bash cmds.txt`) — các nhóm `:::` thấy được vẫn quét. Đã
+    gặp tuỳ chọn lạ: không biết token nào là giá trị, token nào là mẫu → coi như không mẫu (chiều chặt). Không `:::`/`-a`
+    (đọc stdin) chưa xét ở đây."""
     s = _strip_prefixes(c)
     if not s or posixpath.basename(s[0]) != "parallel":
         return [], ""
     seps, files = [":::", ":::+"], ["::::", "::::+"]
-    i, odd, from_file, why = _parallel_head(s, seps, files)
+    i, odd, why = _parallel_head(s, seps, files)
     end = next((k for k in range(i, len(s)) if s[k] in seps + files), len(s))
     if why or (end > i and not odd):
         return [], why
     groups: List[List[str]] = []
+    from_file = False
     for t in s[end:]:  # s[end] là dấu tách: nhóm đầu luôn có trước đối số đầu
         if t in seps + files:
-            from_file = from_file or t in files
-            groups.append([])
-        else:
+            from_file = t in files
+            groups.append([""] if from_file else [])  # tên tệp không phải lệnh; nội dung tệp không thấy
+        elif not from_file:
             groups[-1].append(t)
-    if from_file:
-        return [], ""
     if any(groups):
         groups = [g or [""] for g in groups]
     total = 1
@@ -5592,11 +5592,11 @@ def _parallel_jobs(c: List[str]) -> Tuple[List[str], str]:
     return ([" ".join(p) for p in itertools.product(*groups)] if groups else []), ""
 
 
-def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int, bool, bool, str]:
-    """Bỏ tuỳ chọn của `parallel` (`s[0]`): (chỉ số token đầu sau tuỳ chọn, đã gặp tuỳ chọn lạ — giữ suốt, có `-a`/
-    `--arg-file`, lý do UNRESOLVED_TARGET). `--arg-sep`/`--arg-file-sep` đổi `seps`/`files` tại chỗ; viết tắt `--arg-s`,
-    `--argf`… → không biết dấu tách/tệp đối số."""
-    i, odd, from_file = 1, False, False
+def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int, bool, str]:
+    """Bỏ tuỳ chọn của `parallel` (`s[0]`): (chỉ số token đầu sau tuỳ chọn, đã gặp tuỳ chọn lạ — giữ suốt, lý do
+    UNRESOLVED_TARGET). `--arg-sep`/`--arg-file-sep` đổi `seps`/`files` tại chỗ; viết tắt `--arg-s`, `--argf`… → không
+    biết dấu tách/tệp đối số."""
+    i, odd = 1, False
     while i < len(s) and s[i].startswith("-") and s[i] not in seps + files:
         tok = s[i]
         i += 1
@@ -5608,10 +5608,9 @@ def _parallel_head(s: List[str], seps: List[str], files: List[str]) -> Tuple[int
         odd = odd or takes is None
         if name in PARALLEL_SEP_OPTS:
             (files if PARALLEL_SEP_OPTS[name] else seps)[:] = [val, val + "+"]
-        from_file = from_file or name in ("a", "arg-file")
         if takes is None and name.startswith("arg"):
-            return i, odd, from_file, f"{PARALLEL_UNSEEN_MARK} (tuỳ chọn `{tok}`)"
-    return i, odd, from_file, ""
+            return i, odd, f"{PARALLEL_UNSEEN_MARK} (tuỳ chọn `{tok}`)"
+    return i, odd, ""
 
 
 def _xargs_replace(opts: List[str]) -> Optional[str]:
