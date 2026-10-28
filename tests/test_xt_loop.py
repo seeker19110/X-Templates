@@ -576,6 +576,20 @@ class DecideWorktreesTest(TmpRepoCase):
         with unittest.mock.patch.object(Path, "read_text", flaky):
             self.assertIn("D-001", self.decide(self.wt))  # sổ cây chính không đọc được: bỏ qua
 
+    def test_decide_remote_branch_numbers_do_not_collide(self) -> None:
+        """T-3577: phiên ở container khác ghi D-007 trên nhánh chưa merge — sau fetch, số kế tiếp phải vượt nó."""
+        log = self.wt / "docs" / "autopilot" / "DECISIONS.md"
+        log.parent.mkdir(parents=True)
+        log.write_text("# x\n\n### D-007 · t · q\n", encoding="utf-8")
+        self.git("-C", str(self.wt), "add", "-A")
+        self.git("-C", str(self.wt), "commit", "-q", "-m", "d7")
+        self.git("update-ref", "refs/remotes/origin/b", "b")
+        self.git(
+            "-C", str(self.wt), "reset", "-q", "--hard", "HEAD~1"
+        )  # worktree không còn sổ: chỉ ref remote giữ D-007
+        self.git("update-ref", "refs/remotes/origin/plain", "HEAD")  # ref không có sổ: không làm hỏng
+        self.assertIn("D-008", self.decide(self.main))
+
 
 # Tiến trình giữ `flock(LOCK_EX)` trên file argv[1]: in "held" khi đã giữ, nhả sau argv[2] giây (âm → tới khi stdin đóng).
 LOCK_HOLDER = (

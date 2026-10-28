@@ -6807,12 +6807,28 @@ def _decision_choice(options: List[str], choice: str) -> Optional[str]:
     return None
 
 
+DECISION_REMOTE_REFS = 100  # số nhánh remote mới nhất đọc sổ khi đánh số D-NNN (T-3577)
+
+
+def _remote_decisions(base: Path, rel: Path) -> str:
+    """Dòng tiêu đề D-NNN của sổ `rel` ở các nhánh remote-tracking mới nhất (T-3577): phiên song song ở container khác
+    (nhánh chưa merge) từng cùng lấy D-219 — chỉ thấy được qua ref đã fetch. Một lần `git grep` trên mọi ref."""
+    refs = _git(
+        base, "for-each-ref", "--sort=-committerdate", f"--count={DECISION_REMOTE_REFS}", "--format=%(refname)",
+        "refs/remotes", env=_perf_env(),
+    ).stdout.split()  # fmt: skip
+    if not refs:
+        return ""
+    return _git(base, "grep", "-h", "-E", r"^### D-[0-9]{3,}", *refs, "--", rel.as_posix(), env=_perf_env()).stdout
+
+
 def _last_decision(text: str, base: Path, rel: Path) -> int:
-    """Số D-NNN lớn nhất trong sổ này và sổ cùng đường dẫn ở mọi worktree khác của repo (T-2612) — hai worktree ghi
-    quyết định song song từng cùng ra D-001. Chỉ đọc để đánh số; không phải repo git → chỉ sổ này."""
+    """Số D-NNN lớn nhất trong sổ này, sổ cùng đường dẫn ở mọi worktree khác của repo (T-2612 — hai worktree ghi
+    quyết định song song từng cùng ra D-001) và ở các nhánh remote đã fetch (T-3577). Chỉ đọc để đánh số; không phải
+    repo git → chỉ sổ này."""
     r = _git(base, "worktree", "list", "--porcelain", env=_perf_env())
     trees = [Path(ln[9:]) for ln in r.stdout.splitlines() if ln.startswith("worktree ")] if r.returncode == 0 else []
-    texts = [text]
+    texts = [text, _remote_decisions(base, rel)]
     for tree in trees:
         other = tree / rel
         if other.resolve() != (base / rel).resolve() and other.is_file():
