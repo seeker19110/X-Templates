@@ -10044,10 +10044,7 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
     if led["status"] == "awaiting_approval":
         sub = led["submitted"]
         print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
-        if sub.get("preview") or sub.get("verified"):
-            print(
-                f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}"
-            )
+        print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
         print(
             f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
         )
