@@ -5574,8 +5574,10 @@ def _risk_labels(pr: Dict[str, Any]) -> List[str]:
 
 
 def squash_subject(pr: Dict[str, Any]) -> str:
-    """Subject commit squash = tiêu đề PR (đã qua `pr title-check`) + ` (#N)`. GitHub mặc định `COMMIT_OR_PR_TITLE`: PR một
-    commit lấy subject của commit đó — dài/sai dạng thì lách luật tiêu đề, `main` đỏ BASE-REPO-005 (#340). '' khi thiếu."""
+    """Subject commit squash = tiêu đề PR (đã qua `pr title-check`) + ` (#N)` — steward gửi `commit_title` (không qua guard).
+    GitHub mặc định `COMMIT_OR_PR_TITLE`: PR một commit lấy subject của commit đó — dài/sai dạng thì lách luật tiêu đề,
+    `main` đỏ BASE-REPO-005 (#340). Lệnh in cho agent/MCP giữ dạng chuẩn guard allow; repo đặt `squash_merge_commit_title:
+    PR_TITLE` để mọi đường merge lấy tiêu đề PR (D-254). '' khi thiếu."""
     title, n = str(pr.get("title") or "").strip(), pr.get("number")
     return f"{title} (#{n})" if title and n else ""
 
@@ -5617,10 +5619,8 @@ def merge_decision(
     if waived:
         reasons.append(f"ngoại lệ cứng không giữ người ({HARD_KEY}: auto, ADR-0020): {'; '.join(waived)}")
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
-    subject = squash_subject(pr)
     nxt = {
-        "merge": f"gh pr merge {n} --squash --match-head-commit {head}"
-        + (f" --subject {shlex.quote(subject)}" if subject else ""),
+        "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
         "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
         "wait": "chờ rồi chạy lại merge-check",
         "fix": (
@@ -5652,7 +5652,6 @@ def merge_decision(
         **(
             {
                 "next_rest": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/merge -f sha={head} -f merge_method=squash"
-                + (f" -f commit_title={shlex.quote(subject)}" if subject else "")
             }
             if verdict == "merge"
             else {}

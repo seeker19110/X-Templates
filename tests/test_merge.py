@@ -2462,13 +2462,13 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "merge")
 
     def test_merge_sets_squash_subject_from_pr_title(self):
-        """BASE-REPO-005 (#340): subject squash = tiêu đề PR + ` (#N)` — PR một commit không còn lấy subject commit dài."""
-        d = xt.merge_decision(pr(title="fix(x): it's ok"), autonomy=2)
-        self.assertIn("--subject 'fix(x): it'\"'\"'s ok (#7)'", d["next"])
-        self.assertIn("-f commit_title='fix(x): it'\"'\"'s ok (#7)'", d["next_rest"])
-        bare = xt.merge_decision(pr(), autonomy=2)  # không có tiêu đề: lệnh như cũ
-        self.assertNotIn("--subject", bare["next"])
-        self.assertNotIn("commit_title", bare["next_rest"])
+        """AUD-HAR-126 (D-254): steward gửi `commit_title` = tiêu đề PR + ` (#N)`; lệnh in cho agent giữ dạng chuẩn guard
+        allow (không `--subject` — review #342), subject do thiết lập repo `squash_merge_commit_title: PR_TITLE`."""
+        self.assertEqual(xt.squash_subject(pr(title="fix(x): a")), "fix(x): a (#7)")
+        self.assertEqual(xt.squash_subject(pr()), "")
+        d = xt.merge_decision(pr(title="fix(x): a"), autonomy=2)
+        self.assertEqual(d["next"], "gh pr merge 7 --squash --match-head-commit abc1234def")
+        self.assertNotIn("commit_title", d["next_rest"])
         cmd = xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r", "fix(x): a (#7)")
         self.assertEqual(cmd[0][-2:], ["-f", "commit_title=fix(x): a (#7)"])
         self.assertNotIn("-f", xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r")[0][9:])
