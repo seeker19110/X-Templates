@@ -122,7 +122,7 @@ Chỉ `completed(1)` hợp lệ mở stage 2, chỉ `completed(2)` hợp lệ m�
 
 G0–G8 vẫn được tái sử dụng bên trong mô hình; không tạo thêm chín cổng duyệt thủ công. Bước nghiên cứu/thiết kế đã có đầu ra còn phù hợp được dùng lại; thay đổi chỉ cập nhật phần ảnh hưởng.
 
-### Khóa bằng máy cần có — chưa triển khai
+### Khóa bằng máy — lát A+B đã triển khai (ADR-0058), phần còn lại chưa
 
 Hồ sơ mỗi chu kỳ cần version schema, cycle ID, stage, revision phạm vi, tham chiếu PLAN, baseline và lịch sử. Task phải thuộc stage/cycle hiện tại; scheduler không được chọn task tương lai dù dependency trống hoặc tên PLAN bị sửa.
 
