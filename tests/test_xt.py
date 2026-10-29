@@ -1715,6 +1715,13 @@ class AuditPlanTest(GitRepoMixin, unittest.TestCase):
         )
         self.commit_files({'.github/workflows/c"i.yml': "x"}, 1_700_000_300)  # git trích dẫn tên có `"` nếu không -z
         self.assertIn(8, xt.audit_rescan(self.repo, self.repo / "docs/ops/AUDIT-STATUS.md"))
+        head = self.git("rev-parse", "HEAD")
+        self.commit_files(
+            {"docs/ops/AUDIT-STATUS.md": audit_status_text({8: ("đã quét", head, "2026-10-14", "")})}, 1_700_000_400
+        )
+        self.git("mv", '.github/workflows/c"i.yml', "docs/ci.md")  # rename ra khỏi nhóm: phải còn tên cũ (--no-renames)
+        self.git("commit", "-q", "-m", "mv")
+        self.assertIn(8, xt.audit_rescan(self.repo, self.repo / "docs/ops/AUDIT-STATUS.md"))
 
     def test_audit_plan_cli_json(self):
         self.init_repo()

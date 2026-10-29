@@ -375,7 +375,7 @@ class NextStepStateTest(StateCase):
         self.assertEqual(rc, 0, err)
         self.assertIn("ℹ Đợt trước đã xong mà P.md không đổi hoặc chỉ nối thêm task", err)
         self.assertEqual(len((xt.read_state(self.base) or {})["objective"]["batches"]), 1)
-        cases = {  # không ℹ: đợt mới (PLAN khác, cùng giây cũng vậy — review #319), đợt dở, init lần đầu
+        cases = {  # không ℹ: đợt mới (PLAN khác), đợt dở — tín hiệu từ `_same_batch`, không so `at` (review #319)
             "PLAN khác": ({**mark, "at": "t0"}, "P2.md"),
             "đợt dở": ({k: v for k, v in mark.items() if k not in ("done", "tasks")}, "P.md"),
         }
@@ -427,6 +427,11 @@ class NextStepCliTest(StateCase):
         rc, _, err = run_main("loop", "init", "--plan", "P.md")
         self.assertEqual(rc, 2)
         self.assertIn("✗ Không đọc được P.md như UTF-8", err)
+        (self.base / "P.md").write_text("- [ ] `T-001` x — Gate: `true`\n", "utf-8")
+        (self.base / "BP.md").write_bytes(b"\xe9\xff")
+        rc, _, err = run_main("loop", "init", "--plan", "P.md", "--blueprint", "BP.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("✗ Không đọc được BP.md như UTF-8", err)
 
     def test_facts_read_audit_book(self) -> None:
         book = self.base / "S.md"

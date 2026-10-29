@@ -3893,7 +3893,7 @@ def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
         if not sha or _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
             out[no] = f"SHA `{sha or '—'}` không còn là tổ tiên HEAD — quét lại từ đầu"
             continue
-        names = _git(root, "diff", "-z", "--name-only", f"{sha}..HEAD").stdout.split(
+        names = _git(root, "diff", "-z", "--no-renames", "--name-only", f"{sha}..HEAD").stdout.split(
             "\0"
         )  # -z: tên lạ không bị trích dẫn
         changed = [f for f in names if f and no in _path_groups(f)]
@@ -6600,10 +6600,11 @@ def _init_input_problem(args: argparse.Namespace, base: Path) -> str:
     for path in (args.plan, args.blueprint):
         if path and not (base / path).exists():
             return f"Không thấy {path}"
-    try:
-        (base / args.plan).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return f"Không đọc được {args.plan} như UTF-8: {exc}"
+    for path in (args.plan, args.blueprint):
+        try:
+            (base / path).read_text(encoding="utf-8") if path else ""
+        except (OSError, UnicodeDecodeError) as exc:
+            return f"Không đọc được {path} như UTF-8: {exc}"
     return ""
 
 
@@ -9324,7 +9325,7 @@ def _release_blueprint(base: Path, blueprint: str) -> Dict[str, str]:
         s = blueprint_status(bp)
         run = _verified_blueprint_run(base, bp) or _blueprint_run(bp)
     except (OSError, ValueError) as exc:  # ValueError: không phải UTF-8 — FAIL có JSON, không traceback (AUD-CODE-017)
-        return _release_row("blueprint", "FAIL", f"không đọc được {blueprint}: {exc}")
+        return _release_row("blueprint", "FAIL", f"không đọc được {blueprint} (hoặc backlog nó khai): {exc}")
     if run is None:
         return _release_row("blueprint", "FAIL", "không chạy được lệnh kiểm (XT_RECORD_TIMEOUT sai)")
     bad = [f"MUST mở {len(s['open_must'])}"] if s["open_must"] else []
@@ -9399,6 +9400,8 @@ def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -
         text = (base / log).read_text(encoding="utf-8")
     except OSError:
         return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
+    except ValueError as exc:  # không phải UTF-8: có thể giấu đề xuất "Khi chạy thật" → FAIL, không traceback
+        return _release_row("prod_switch", "FAIL", f"không đọc được {log}: {exc}")
     n = text.count(PROD_SWITCH_LABEL)
     if n:
         return _release_row(
@@ -9412,7 +9415,10 @@ def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -
 
 def _release_phase(base: Path) -> Dict[str, str]:
     """Phát hành chỉ ở pha harden (ADR-0031): pha build là "merge trước, review sau" — chưa phải chất lượng phát hành."""
-    keys = _xt_keys(base)
+    try:
+        keys = _xt_keys(base)
+    except (OSError, ValueError) as exc:  # xt.yaml không phải UTF-8: không biết pha → FAIL, không traceback
+        return _release_row("phase", "FAIL", f"không đọc được xt.yaml: {exc}")
     err = delivery_phase_error(keys)
     if err:
         return _release_row("phase", "FAIL", f"{err} — đặt `{PHASE_KEY}: harden`")
@@ -9446,7 +9452,7 @@ def _review_debt_since(root: Path, status: Path) -> Tuple[Dict[str, str], List[s
     changed: Dict[str, List[str]] = {}
     for sha in set(scanned.values()):
         # -z: tên chứa `"`/`\\`/ký tự điều khiển không bị trích dẫn kiểu C (trích dẫn → lệch nhóm, bỏ sót nợ — review #317)
-        names = _git(root, "diff", "-z", "--name-only", f"{sha}..HEAD").stdout.split("\0")
+        names = _git(root, "diff", "-z", "--no-renames", "--name-only", f"{sha}..HEAD").stdout.split("\0")
         changed[sha] = [f for f in names if f and not DOC_PATH_RE.search(f)]
     ahead = {s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout.strip() or 0) for s in changed}
     since: Dict[str, str] = {}
@@ -9550,7 +9556,10 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
 def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
     """Hàng chạy lệnh `key` của xt.yaml (ADR-0042). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
     lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
-    cmd = _xt_keys(base).get(key, "")
+    try:
+        cmd = _xt_keys(base).get(key, "")
+    except (OSError, ValueError) as exc:  # xt.yaml không phải UTF-8: không biết lệnh → FAIL, không traceback
+        return _release_row(key, "FAIL", f"không đọc được xt.yaml: {exc}")
     if gate_noop(cmd):
         scale = (_blueprint_front(base, blueprint) or ("", ""))[0]
         if scale in ("M", "L"):
@@ -9577,7 +9586,10 @@ def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, 
         u = blueprint_status(bp)["unchecked_must_ratio"]
     except (OSError, ValueError) as exc:  # không phải UTF-8: hàng blueprint đã FAIL (AUD-CODE-017)
         return _release_row(
-            "unchecked_must", "N/A", f"không đọc được {blueprint} ({exc}) — xem hàng blueprint", "SHOULD"
+            "unchecked_must",
+            "N/A",
+            f"không đọc được {blueprint} hoặc backlog nó khai ({exc}) — xem hàng blueprint",
+            "SHOULD",
         )
     ev = f"{u['count']}/{u['total']} MUST đạt không có lệnh kiểm (tỉ lệ {u['ratio']})"
     if not u["count"]:
@@ -12819,8 +12831,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         except (OSError, ValueError):  # stdout không có fd thật (test, thư viện) — không còn gì để xả
             pass
         return 141
-    except OSError as exc:  # file thiếu/không đọc được: một dòng dễ hiểu; XT_DEBUG=1 để xem traceback
-        if os.environ.get("XT_DEBUG"):
+    except (OSError, UnicodeDecodeError) as exc:  # file thiếu/không đọc được (cả không phải UTF-8): một dòng dễ hiểu;
+        if os.environ.get("XT_DEBUG"):  # XT_DEBUG=1 để xem traceback
             raise
         print(f"✗ {exc}", file=sys.stderr)
         return 2

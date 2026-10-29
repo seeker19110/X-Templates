@@ -514,6 +514,18 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         """Danh tính trùng ở SHA quét và HEAD: dấu của đúng tài khoản đó được tin (như merge-check)."""
         self.assertEqual(self.identity_case("bot", None, "bot", "NONE"), "PASS")
 
+    def test_delivery_phase_review_debt_rename_into_docs(self):
+        """Review #320 (lớp AUD-SEC-132): `git mv src/app.py docs/app.md` sau SHA quét — `diff` dò rename chỉ cho tên
+        mới (tài liệu) nên nợ bị bỏ sót; `--no-renames` cho cả tên cũ."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.scanned({1: s0, 2: s0, 3: s0, 9: s0, 12: s0, 13: s0})
+        self.commit("sổ")
+        (self.repo / "docs").mkdir(exist_ok=True)
+        self.git("mv", "src/app.py", "docs/app.md")
+        self.commit("chuyển mã vào tài liệu")
+        debt, _ = xt.review_debt(self.repo, self.status)
+        self.assertIn("src/app.py", debt)
+
     def test_delivery_phase_review_debt_since_per_file(self):
         """Review #317 🟠: mỗi file xét commit từ đúng SHA đưa nó vào nợ — lần đẩy thẳng mà sổ nhóm của file đã phủ (trước
         SHA của nhóm) không bị kéo vào chỉ vì một nhóm khác quét cũ hơn."""

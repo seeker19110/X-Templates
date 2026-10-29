@@ -111,12 +111,13 @@
    ]
   },
   {
-   "reason": "Sổ audit/blueprint — `audit check` đọc SHA và gốc repo git thật (SHA quét trên nhánh chính, `--strict` lấy gốc repo chứa sổ), `blueprint-status` đối chiếu MUST `[x]` với lệnh `— Kiểm:`; không phải quyết định cho/chặn của PR, rollup, review hay guard; test `-k audit_sha_on_base`, `NaReevaluatedTest`, `blueprint-status --run`; `review_debt` đọc `git diff -z` thật (AUD-SEC-132, `-k review_debt_special_file_names`)",
+   "reason": "Sổ audit/blueprint — `audit check` đọc SHA và gốc repo git thật (SHA quét trên nhánh chính, `--strict` lấy gốc repo chứa sổ), `blueprint-status` đối chiếu MUST `[x]` với lệnh `— Kiểm:`; không phải quyết định cho/chặn của PR, rollup, review hay guard; test `-k audit_sha_on_base`, `NaReevaluatedTest`, `blueprint-status --run`; `review_debt` đọc `git diff -z --no-renames` thật (AUD-SEC-132, `-k review_debt_special_file_names`; AUD-SEC-133, `-k review_debt_rename_into_docs`)",
    "ids": [
     "AUD-HAR-077",
     "AUD-HAR-078",
     "AUD-HAR-079",
-    "AUD-SEC-132"
+    "AUD-SEC-132",
+    "AUD-SEC-133"
    ]
   },
   {

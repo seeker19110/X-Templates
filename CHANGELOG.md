@@ -17,6 +17,8 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
 
 ### Fixed
+- `review_debt` (hàng BLOCKER của `release-check`, Gate offline của PLAN) và `audit plan` (quét lại theo sổ) đọc `git diff --no-renames`: đổi tên file mã vào tài liệu (`git mv src/x.py docs/x.md`) trước đây chỉ cho tên mới nên nợ bị bỏ sót (review #320).
+- `release-check` khi `docs/autopilot/DECISIONS.md` hay `xt.yaml` không phải UTF-8: hàng `prod_switch`/`phase`/lệnh chạy FAIL kèm lý do, JSON vẫn in; mọi lệnh CLI khác gặp file không phải UTF-8 → exit 2 một dòng (`main`); `loop init --blueprint` không phải UTF-8 → exit 2.
 - `release-check` không còn traceback khi BLUEPRINT.md hoặc sổ audit không phải UTF-8: hàng `blueprint`/`audit` FAIL kèm lý do, `unchecked_must` N/A, JSON vẫn in (AUD-CODE-017). `audit check` thiếu file/không phải UTF-8 → exit 2, báo gọn.
 - `loop init` với PLAN không đọc được như UTF-8 → exit 2 kèm lý do thay cho traceback; dòng ℹ "mở lại cùng đợt" lấy tín hiệu từ chính luật đợt (không so thời điểm — hai lệnh cùng giây báo nhầm) và nêu đúng "không đổi hoặc chỉ nối thêm task" (review #319).
 - `release-check` hàng `review_debt` FAIL nêu lý do khi `review_identity` ở SHA quét khác ở HEAD — review PR không phủ nợ (D-223).
