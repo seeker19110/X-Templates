@@ -128,7 +128,7 @@ Hồ sơ mỗi chu kỳ cần version schema, cycle ID, stage, revision phạm v
 
 Biên nhận hoàn thành phải gắn stage/cycle/phạm vi, bản build hoặc artefact được thử, fingerprint Gate, kết quả kiểm tra và nguồn phê duyệt có thể xác minh. Chuỗi `approved: true`, tên người trong Markdown, quyết định do agent tự ghi hay lời “ok” trước khi bản thử tồn tại không đủ. Thiếu phương tiện xác minh thì giữ chờ duyệt, không tự nâng quyền.
 
-Mọi entry point — CLI/API, `loop init`, `loop next-step`, scheduler, Stop hook, `/autopilot`, `/complete`, `/optimize` — phải dùng chung luật stage. Chặn trước side effect. Transition dùng khóa/rev/ghi nguyên tử hiện có, không tự ghi `.autopilot/` hoặc tạo cờ force vượt cổng.
+Mọi entry point — CLI/API, `loop init`, `loop next-step`, scheduler, Stop hook, `/autopilot`, `/complete`, `/optimize` — phải dùng chung luật stage. **Đã triển khai khác thiết kế (D-241):** khoá chỉ ở `loop init/next/record`, lệnh `stage` và `release-check`; verdict của vòng (`loop status`, Stop hook) không đọc khoá — đưa khoá vào verdict làm lệch các lối ra `unblock`/`attach`/`doctor` (review #327 hai lượt). `record` không nhận bằng chứng của PLAN khoá nên bất biến vẫn giữ. Chặn trước side effect. Transition dùng khóa/rev/ghi nguyên tử hiện có, không tự ghi `.autopilot/` hoặc tạo cờ force vượt cổng.
 
 Tách rõ `batch_done`, `stage_ready_for_approval`, `stage_completed`. `loop next-step` chỉ đề xuất bước hợp lệ; đề xuất không tự thực hiện chuyển stage. Resume/đổi PLAN/init lại/hết ngân sách không reset lịch sử hoặc mở stage bị khóa.
 
