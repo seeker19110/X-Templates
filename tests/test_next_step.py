@@ -241,14 +241,27 @@ class NextStepStateTest(StateCase):
         self.assertEqual(xt._batch_mark(dở, new, self.base)["batches"], [mark])  # đợt dở cùng PLAN: cùng đợt
         stopped = {**dở, "active": False, "final_verdict": {"verdict": "stopped"}}
         self.assertEqual(xt._batch_mark(stopped, new, self.base)["batches"], [mark])  # dừng tay không đóng đợt
+        pairs = xt._plan_pairs(self.base, "P.md")
+        self.assertEqual(pairs, [f"T-001:{xt.task_req_rev(xt.parse_plan(self.base / 'P.md')[0])}"])
         for name, p in {
-            "dấu xong": {**dở, "objective": {"batches": [{**mark, "done": "t5"}]}},
+            "dấu xong": {**dở, "objective": {"batches": [{**mark, "done": "t5", "tasks": pairs + ["T-009:x"]}]}},
+            "dấu xong không có tasks (mốc cũ)": {**dở, "objective": {"batches": [{**mark, "done": "t5"}]}},
             "hết vòng": {**dở, "iterations": 9},
             "Stop hook kết thúc vì hết ngân sách": {**stopped, "final_verdict": {"verdict": "budget"}},
         }.items():
             with self.subTest(name):
                 self.assertEqual(len(xt._batch_mark(p, new, self.base)["batches"]), 2)
         self.assertEqual(len(xt._batch_mark(dở, {**new, "plan": "P2.md"}, self.base)["batches"]), 2)  # PLAN khác
+        # Dấu xong rồi PLAN chỉ nối thêm task (mọi `ID:req_rev` lúc đánh dấu còn) → cùng đợt, gỡ dấu (review #319).
+        done = {**dở, "objective": {"batches": [{**mark, "done": "t5", "tasks": pairs}]}}
+        (self.base / "P.md").write_text(
+            "- [x] `T-001` xong — Gate: `true`\n- [ ] `T-002` thêm — Gate: `true`\n", encoding="utf-8"
+        )
+        self.assertEqual(xt._batch_mark(done, new, self.base)["batches"], [mark])
+        (self.base / "P.md").write_text("- [x] `T-001` xong đổi spec — Gate: `true`\n", encoding="utf-8")
+        self.assertEqual(len(xt._batch_mark(done, new, self.base)["batches"]), 2)  # viết lại spec: đợt mới
+        self.assertEqual(xt._plan_pairs(self.base, None), [])
+        self.assertEqual(xt._plan_pairs(self.base, "mất.md"), [])
         self.assertEqual(xt._batch_mark({**dở, "iterations": "x"}, new, self.base)["batches"], [mark])  # state sai kiểu
         with unittest.mock.patch.object(xt, "blueprint_status", side_effect=OSError("hỏng")):
             self.assertIsNone(xt._batch_mark({}, new, self.base)["batches"][-1]["open"])
@@ -258,15 +271,31 @@ class NextStepStateTest(StateCase):
             self.assertEqual(xt._objective_batches(bad), [])
         self.assertEqual(xt._objective_batches({"objective": {"batches": [1, mark]}}), [mark])
 
-    def test_mark_batch_done(self) -> None:
-        self.assertIsNone(xt._mark_batch_done({}))
+    def test_mark_and_reopen_batch(self) -> None:
+        self.assertIsNone(xt._mark_batch_done({}, []))
         cur = {"objective": {"name": "x", "batches": [batch(1, "t1"), batch(2, "t2")]}}
-        out = xt._mark_batch_done(cur)
+        out = xt._mark_batch_done(cur, ["T-1:a"])
         assert out is not None
         self.assertNotIn("done", out["objective"]["batches"][0])
         self.assertTrue(out["objective"]["batches"][-1]["done"])
+        self.assertEqual(out["objective"]["batches"][-1]["tasks"], ["T-1:a"])
         self.assertEqual(out["objective"]["name"], "x")
-        self.assertIsNone(xt._mark_batch_done(out))  # đã có dấu: không ghi lại
+        self.assertIsNone(xt._mark_batch_done(out, []))  # đã có dấu: không ghi lại
+        xt._reopen_last_batch(out)
+        self.assertEqual(out["objective"]["batches"][-1], batch(2, "t2"))
+        xt._reopen_last_batch(out)  # không có dấu: không đổi
+        self.assertEqual(out["objective"]["name"], "x")
+
+    def test_unblock_and_resume_reopen_batch(self) -> None:
+        """Mở lại vòng (`unblock`, `resume`) → đợt chưa xong: gỡ dấu (review #319, đường EXIT_PENDING)."""
+        marked = {**batch(1, "t1"), "done": "t2", "tasks": ["T-001:x"]}
+        for cmd in (("unblock", "--reason", "người xem"), ("resume", "--reason", "người xem")):
+            with self.subTest(cmd[0]):
+                st = self.st(active=False, blocked=True, started="t0", objective={"batches": [marked]})
+                xt.write_state(st, self.base)
+                rc, _, err = run_main("loop", *cmd)
+                self.assertEqual(rc, 0, err)
+                self.assertEqual((xt.read_state(self.base) or {})["objective"]["batches"][-1], batch(1, "t1"))
 
     def test_close_batch_only_when_done_and_fail_open(self) -> None:
         xt.write_state(self.st(objective={"batches": [batch(1, "t1")]}), self.base)
@@ -280,6 +309,11 @@ class NextStepStateTest(StateCase):
         with unittest.mock.patch.object(xt, "update_loop_state", side_effect=OSError("khoá bận")), redirect_stderr(err):
             xt._close_batch(self.base)
         self.assertIn("không ghi được dấu đợt xong (OSError: khoá bận)", err.getvalue())
+        xt.write_state(self.st(iterations="x", objective={"batches": [batch(1, "t1")]}), self.base)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            xt._close_batch(self.base)  # state sai kiểu: không văng, verify giữ exit (review #319)
+        self.assertIn("không ghi được dấu đợt xong (TypeError", err.getvalue())
 
     def test_init_records_mark_after_carrying_deferred(self) -> None:
         """Mốc đếm SAU `_carry_previous`: MUST chờ người mang từ vòng trước không tính."""
@@ -305,6 +339,15 @@ class NextStepStateTest(StateCase):
         st = xt.read_state(self.base) or {}
         self.assertEqual(st["final_verdict"]["verdict"], "done")
         self.assertTrue(st["objective"]["batches"][-1]["done"])
+        self.assertEqual(st["objective"]["batches"][-1]["tasks"], xt._plan_pairs(self.base, "P.md"))
+        for verdict, deferred in (("blocked", {}), (xt.PENDING_HUMAN, {"AAA-001": {"reason": "ký"}})):
+            with self.subTest(verdict):  # blocked không đóng đợt; chờ người đóng (D-228)
+                extra = {"blocked": True, "blocked_reason": "x"} if verdict == "blocked" else {"deferred": deferred}
+                xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}, **extra), self.base)
+                run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
+                st = xt.read_state(self.base) or {}
+                self.assertEqual(st["final_verdict"]["verdict"], verdict)
+                self.assertEqual("done" in st["objective"]["batches"][-1], verdict != "blocked")
 
     def test_audit_open_count(self) -> None:
         self.assertEqual(xt.audit_open_count(self.base / "không.md"), 0)

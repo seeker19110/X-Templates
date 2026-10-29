@@ -501,6 +501,59 @@ class FlowTest(TmpRepoCase):
         self.assertEqual([b["open"] for b in self.state()["objective"]["batches"]], [2, 1])
         self.assertEqual(self.next_step()["action"], "replan")
 
+    def hook_stop(self) -> None:
+        with chdir(self.repo):
+            self.assertEqual(run_main("loop", "hook-stop", stdin=json.dumps({"session_id": SESSION_A}))[0], 0)
+
+    def last_mark(self) -> dict[str, Any]:
+        mark = self.state()["objective"]["batches"][-1]
+        assert isinstance(mark, dict)
+        return mark
+
+    @flow("FLOW-13")
+    def test_flow_13_block_mid_batch_then_respec_is_same_batch(self) -> None:
+        """S3 với `loop block` + Stop hook (`final_verdict: blocked`, review #319 M7): bị chặn không đóng đợt — sửa spec
+        rồi `loop init --force` cùng PLAN-2 vẫn là đợt 2 → `replan`."""
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        two = (
+            "AUD-ARCH-001 | 🟠 | mở | lỗi | đo được: x | `true` | —",
+            "AUD-ARCH-002 | 🟠 | mở | lỗi | đo được: y | `true` | —",
+        )
+        self.audit_book(self.git("rev-parse", "HEAD"), two)
+        self.finish_batch()
+        self.audit_book(self.git("rev-parse", "HEAD"), two[:1])
+        plan2 = self.repo / "docs" / "autopilot" / "PLAN-2.md"
+        plan2.write_text(PLAN.replace("việc", "đợt 2 việc"), encoding="utf-8")
+        self.assertEqual(self.loop("init", "--plan", "docs/autopilot/PLAN-2.md", "--force")[0], 0)
+        self.assertEqual(self.loop("block", "--reason", "cần người")[0], 0)
+        self.hook_stop()
+        self.assertEqual(self.state()["final_verdict"]["verdict"], "blocked")
+        self.assertNotIn("done", self.last_mark())
+        plan2.write_text(PLAN.replace("việc", "đợt 2 việc sửa spec"), encoding="utf-8")
+        self.finish_batch("--plan", "docs/autopilot/PLAN-2.md", "--force")
+        self.assertEqual([b["open"] for b in self.state()["objective"]["batches"]], [2, 1])
+        self.assertEqual(self.next_step()["action"], "replan")
+
+    @flow("FLOW-13")
+    def test_flow_13_only_green_full_verify_marks_batch_done(self) -> None:
+        """Dấu đợt xong chỉ khi `loop verify --all` XANH lúc đợt `done`/chờ người (review #319 M2/M3/M4): `loop verify`
+        không `--all` → không dấu; `--all` đỏ → không dấu; `--all` xanh → có dấu; đợt chờ người cũng có dấu."""
+        self.finish_batch(verify=False)
+        self.assertEqual(self.loop("verify")[0], 0)
+        self.assertNotIn("done", self.last_mark())
+        (self.repo / "green").unlink()
+        self.assertNotEqual(self.loop("verify", "--all")[0], 0)
+        self.assertNotIn("done", self.last_mark())
+        (self.repo / "green").write_text("", encoding="utf-8")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        self.assertTrue(self.last_mark()["done"])
+        plan2 = "docs/autopilot/PLAN-2.md"
+        (self.repo / plan2).write_text(PLAN.replace("việc", "đợt 2 việc"), encoding="utf-8")
+        self.finish_batch("--plan", plan2, "--force", defer=("T-900",))
+        self.assertEqual(self.verdict()["verdict"], xt.PENDING_HUMAN)
+        self.assertEqual(len(self.state()["objective"]["batches"]), 2)
+        self.assertTrue(self.last_mark()["done"])
+
     def perf(self, name: str, **doc: Any) -> str:
         path = self.repo / name
         path.write_text(json.dumps(doc), encoding="utf-8")

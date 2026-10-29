@@ -1608,3 +1608,10 @@
 - Chọn: Dấu done trên mốc cuối khi loop verify --all xanh lúc verdict done/chờ người và khi Stop hook kết thúc done/chờ người; loop init mở đợt mới khi mốc cuối có dấu, vòng trước hết ngân sách (D-177: init sau đó là đợt kế), hoặc PLAN khác đường dẫn; stopped/blocked không đóng đợt; ghi dấu lỗi → cảnh báo, verify giữ exit
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: dấu ghi lúc máy chứng minh đợt done (verify --all hoặc Stop hook) nên viết đè PLAN sau đó không lừa được; budget theo D-177 và EXIT_BUDGET gọi init sau là đợt kế — nhất quán; stopped/blocked chưa xong việc (lối ra unblock); verify không đỏ vì dấu (dấu chỉ phục vụ next-step, fail-open về luồng ADR-0002)
 - Đường lùi: Bỏ _close_batch trong loop_verify và _mark_batch_done trong Stop hook; _batch_mark về mỗi PLAN khác một đợt
+
+### D-229 · 2026-10-29T00:16:25+00:00 · PR #319 review lượt 1: dấu đợt xong còn sau khi đợt mở lại (unblock/resume) hoặc PLAN được nối thêm task rồi init --force — giữ hay gỡ
+
+- Phương án: (1) unblock/resume gỡ dấu ở mốc cuối; dấu ghi kèm tasks = ID:req_rev của PLAN lúc đánh dấu, init cùng PLAN mà mọi cặp cũ còn nguyên (chỉ nối thêm) là cùng đợt, gỡ dấu; viết lại spec → đợt mới; hạn trôi qua lúc vòng dừng vẫn đóng đợt (D-177, ghi CHANGELOG) · (2) Giữ dấu, ghi rõ hành vi trong CHANGELOG (đợt giả → budget sai, lớp lỗi S3 của #318)
+- Chọn: unblock/resume gỡ dấu ở mốc cuối; dấu ghi kèm tasks = ID:req_rev của PLAN lúc đánh dấu, init cùng PLAN mà mọi cặp cũ còn nguyên (chỉ nối thêm) là cùng đợt, gỡ dấu; viết lại spec → đợt mới; hạn trôi qua lúc vòng dừng vẫn đóng đợt (D-177, ghi CHANGELOG)
+- Lý do (tiêu chí chất lượng cuối): Đúng: vòng mở lại hay PLAN nối thêm là đợt chưa xong — giữ dấu sinh đợt giả, báo budget sai đúng lớp lỗi đã bác #318; ID:req_rev phân biệt nối thêm (cặp cũ còn) với viết lại đợt kế cùng đường dẫn (S1 — spec đổi); hạn giữ theo D-177 để nhất quán EXIT_BUDGET
+- Đường lùi: Bỏ _reopen_last_batch ở unblock/resume và nhánh tasks ở _same_batch
