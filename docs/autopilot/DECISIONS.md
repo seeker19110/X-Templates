@@ -1720,3 +1720,10 @@
 - Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
 - Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
+
+### D-245 · 2026-10-29T07:41:00+00:00 · PR #326 (tiếp quản từ phiên khác theo yêu cầu chủ repo): 2 lượt review chưa sạch, chi tiết lỗi chặn chỉ có ở phiên cũ (dấu xt-review chỉ ghi verdict); đã gộp main (#327) và đổi số D trùng. Đi tiếp thế nào
+
+- Phương án: (1) Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta · (2) Tách PR theo ba commit task (T-3548/T-3549/T-3550) thành ba PR nhỏ · (3) Đóng PR, làm lại từ đầu
+- Chọn: Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta
+- Lý do (tiêu chí chất lượng cuối): Đúng: không biết lỗi chặn cũ thì không sửa được — review toàn PR ở head mới là nguồn sự thật duy nhất; ba task sửa chung next_step/next_step_facts (D-244) nên tách PR tốn rebase/xung đột mà không giảm rủi ro; đóng PR bỏ phí 880 dòng đã qua gate-fast
+- Đường lùi: Tách PR theo ba commit 1271133, 64cbd2a, 6ff2b99
