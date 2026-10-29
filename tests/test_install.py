@@ -2022,5 +2022,57 @@ class CheckLinksTest(unittest.TestCase):
         self.assertNotIn("d.md", r.stdout)
 
 
+class InstallStageTest(unittest.TestCase):
+    """ADR-0058 lát E (D-249): installer không đoán giai đoạn — chỉ `--stage-init` tạo sổ; sổ có sẵn giữ nguyên và được
+    kiểm bằng xt.py vừa cài."""
+
+    def setUp(self):
+        self.target = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.ledger = self.target / install.STAGE_LEDGER
+
+    def install(self, *extra: str) -> str:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(install.main([str(self.target), "--label", "t", "--no-harness", *extra]), 0)
+        return err.getvalue()
+
+    def plan(self, *extra: str) -> dict:
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            self.assertEqual(install.main([str(self.target), "--plan", "--no-harness", *extra]), 0)
+        return json.loads(out.getvalue())["stage"]
+
+    def test_no_flag_does_not_create_ledger(self):
+        self.assertEqual(self.plan(), {"path": install.STAGE_LEDGER, "present": False, "init": False})
+        self.assertIn("chưa dùng — dự án mới", self.install())
+        self.assertFalse(self.ledger.exists())
+
+    def test_stage_init_creates_then_keeps(self):
+        self.assertTrue(self.plan("--stage-init")["init"])
+        out = self.install("--stage-init")
+        self.assertIn("C-001 · giai đoạn 1 · active", out)
+        self.assertIn("vừa tạo — commit + push", out)
+        before = self.ledger.read_bytes()
+        self.assertEqual(self.plan("--stage-init"), {"path": install.STAGE_LEDGER, "present": True, "init": False})
+        out = self.install("--stage-init")  # đã có sổ: không init lại
+        self.assertIn("giữ nguyên", out)
+        self.assertEqual(self.ledger.read_bytes(), before)
+
+    def test_broken_ledger_and_failures_warn(self):
+        self.ledger.parent.mkdir(parents=True)
+        self.ledger.write_text("{}", encoding="utf-8")
+        self.assertIn("⚠ sổ giai đoạn:", self.install())
+        self.ledger.unlink()
+        fail = subprocess.CompletedProcess([], 2, "", "sổ đã có trong lịch sử git")
+        ok = subprocess.CompletedProcess([], 0, json.dumps({"stage": None}), "")
+        with mock.patch.object(install, "run_stage", side_effect=[fail, ok]):
+            self.assertIn("⚠ --stage-init không tạo được sổ: sổ đã có trong lịch sử git", self.install("--stage-init"))
+        with mock.patch.object(install, "run_stage", side_effect=subprocess.TimeoutExpired("xt", 120)):
+            self.assertIn("⚠ không kiểm được sổ giai đoạn", self.install())
+        empty = subprocess.CompletedProcess([], 0, "", "")  # xt.py tối giản/cũ không có `stage` JSON
+        with mock.patch.object(install, "run_stage", return_value=empty):
+            self.assertIn("⚠ không kiểm được sổ giai đoạn (JSONDecodeError", self.install())
+
+
 if __name__ == "__main__":
     unittest.main()

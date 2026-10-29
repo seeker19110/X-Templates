@@ -52,6 +52,9 @@ Với **dự án mới** muốn người duyệt mọi merge, thêm `--preset sa
 Xem trước bằng `install.py <dự-án> --preset safe --plan`. `--preset autonomous` dùng `L3` / `auto` / `build` như mẫu
 hiện tại; không truyền cờ giữ hành vi cũ. Cài lại giữ preset và tùy chỉnh đã có, kể cả khi truyền preset khác.
 Preset chỉ chọn chính sách merge/review, **không tạo sandbox** ([ADR-0055](docs/adr/0055-optional-install-policy-presets.md)).
+Dự án mới muốn khoá ba giai đoạn sản phẩm (MVP → hoàn thiện → tối ưu) thêm `--stage-init`; installer không tự đoán giai
+đoạn — dự án đã chạy: người `xt.py stage init --adopt 2|3 --evidence …`. Sổ có sẵn giữ nguyên và được kiểm bằng bản mới
+([ADR-0058](docs/adr/0058-product-stages-machine-lock.md)).
 Sau cài đặt, khai lệnh thật ở `xt.yaml`, chạy `doctor`, rồi kiểm Gate trước khi dùng autopilot.
 
 Quy mô quyết định khối lượng: `web-app` có 70 MUST ở **S** (prototype), 473 ở **M** (production), 1.146 ở **L** (đo 2026-10-19).
@@ -125,7 +128,7 @@ nghe 127.0.0.1, đòi token mỗi lần chạy, kiểm `Host`/`Origin` và đặ
 | `python3 scripts/xt.py merge-watch [--pr N] [--interval 30]` | Chạy nền sau khi mở PR: gọi `merge-check` mỗi 30 giây tới khi PR đã merge hoặc cần hành động (ADR-0021) |
 | `python3 scripts/xt.py merge-check [--pr N] [--json]` | Máy quyết khi nào merge PR đã mở: `merge` · `review` (chưa đủ review sạch ở head, exit 1, không in lệnh merge — ADR-0032) · `wait` · `update` · `fix` · `human` · `closed`; `merge_autonomy`: L3 (mặc định) máy merge ghim head mọi làn (làn nhanh khi CI xanh, làn chuẩn khi CI xanh + review sạch ở đúng head — ADR-0024, ADR-0036; không bật auto-merge của GitHub) trừ ngoại lệ cứng (`merge_hard_exceptions: auto` thì cả ngoại lệ cứng — ADR-0020), L2 chỉ làn nhanh, L1 người merge (ADR-0013, ADR-0015, ADR-0016) |
 | `python3 scripts/xt.py feedback add/collect/list/aggregate` | Phản hồi lỗi do khung + cách khắc phục từ dự án đích (`docs/xtemplates-feedback/FB-NNN.md`, qua `redact`); repo khung gộp theo (loại, ID) — ADR-0010 |
-| `python3 scripts/install.py DỰ_ÁN [--with-github] [--preset safe\|autonomous] [--plan]` | Cài khung + harness; preset chỉ chọn chính sách cho `xt.yaml` mới, cài lại giữ lựa chọn; `--plan` xem trước. `--with-github` thêm ruleset, CI, kiểm tiêu đề PR, quét bí mật và steward ([`framework/templates/`](framework/templates/README.md)) |
+| `python3 scripts/install.py DỰ_ÁN [--with-github] [--preset safe\|autonomous] [--stage-init] [--plan]` | Cài khung + harness; preset chỉ chọn chính sách cho `xt.yaml` mới, cài lại giữ lựa chọn; `--stage-init` tạo sổ giai đoạn 1 khi chưa có; `--plan` xem trước. `--with-github` thêm ruleset, CI, kiểm tiêu đề PR, quét bí mật và steward ([`framework/templates/`](framework/templates/README.md)) |
 | `python3 scripts/xt.py progress-check [FILE]` | `PROGRESS.md` ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính (`XT_PROGRESS_BASE`, mặc định `origin/HEAD` → `origin/main` → `origin/master`; CI cần `fetch-depth: 0`) |
 | `python3 scripts/xt.py changelog-check [FILE]` | `CHANGELOG.md` theo Keep a Changelog 1.1.0: `## [Unreleased]` đầu tiên, bản `## [X.Y.Z] - YYYY-MM-DD` giảm dần, nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` cùng thư mục (nếu có) |
 | `python3 scripts/xt.py license-check [--requirements F]… [--allow F] [--today D]` | License (`importlib.metadata`) của mọi gói ghim `==` trong `requirements-dev.txt` (hoặc file chỉ định) đối chiếu allowlist SPDX của `license-allow.json`; ngoại lệ cần `approved_by` + `expires`, chỉ khớp đúng license đã duyệt; vi phạm, gói ghim chưa cài hoặc ngoại lệ quá hạn → exit 1 (BASE-DEP-005); chạy trong `lint` |

@@ -1142,6 +1142,47 @@ def report_upgrade_steps(previous: str | None, label: str) -> None:
             log(f"  - {clause}")
 
 
+STAGE_LEDGER = "docs/autopilot/STAGE.json"  # sổ giai đoạn sản phẩm (ADR-0058) — file của dự án, installer không ghi tay
+
+
+def run_stage(target: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """`xt.py stage …` của bản VỪA CÀI, gốc = dự án đích (bỏ CLAUDE_PROJECT_DIR của phiên đang chạy installer)."""
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    cmd = [sys.executable, str(target / ".xtemplates" / "scripts" / "xt.py"), "stage", *args]
+    return subprocess.run(cmd, cwd=target, env=env, capture_output=True, text=True, timeout=120)
+
+
+def report_stage(target: Path, stage_init: bool) -> None:
+    """Giai đoạn sản phẩm sau cài (ADR-0058 lát E, D-249): không đoán giai đoạn — chỉ `--stage-init` (dự án mới) tạo sổ;
+    sổ có sẵn không bị chạm, nhưng được kiểm bằng xt.py mới (sổ không hợp lệ với bản mới lộ ngay lúc nâng). Không kiểm
+    được (xt.py thiếu/lỗi) → một dòng ⚠, không làm hỏng lần cài (fail-open như `report_upgrade_steps`)."""
+    created = False
+    try:
+        if stage_init and not (target / STAGE_LEDGER).exists():
+            r = run_stage(target, "init")
+            created = r.returncode == 0
+            if not created:
+                log(f"⚠ --stage-init không tạo được sổ: {r.stderr.strip()}")
+        r = run_stage(target, "status", "--json")
+        led = json.loads(r.stdout)["stage"] if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+        log(f"⚠ không kiểm được sổ giai đoạn ({exc!r}) — chạy `python3 .xtemplates/scripts/xt.py stage status`")
+        return
+    if r.returncode:
+        log(f"⚠ sổ giai đoạn: {r.stderr.strip()} — sửa trước khi chạy vòng (ADR-0058)")
+    elif led is None:
+        log(
+            "Giai đoạn sản phẩm (ADR-0058): chưa dùng — dự án mới: `python3 .xtemplates/scripts/xt.py stage init`"
+            " (hoặc cài lại với --stage-init); đã chạy/production: người chạy `stage init --adopt 2|3 --evidence …`"
+            " ở terminal ngoài phiên agent"
+        )
+    else:
+        how = "vừa tạo — commit + push" if created else "giữ nguyên"
+        log(
+            f"✓ giai đoạn sản phẩm: {led['cycle']} · giai đoạn {led['stage']} · {led['status']} ({STAGE_LEDGER}, {how})"
+        )
+
+
 def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]]) -> dict[str, Any]:
     """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi matcher (không ghi gì)."""
     src, dst = SRC / ".claude" / "settings.json", target / ".claude" / "settings.json"
@@ -1191,7 +1232,12 @@ def plan_files(
 
 
 def install_plan(
-    target: Path, force_harness: bool, no_harness: bool, with_github: bool = False, preset: str | None = None
+    target: Path,
+    force_harness: bool,
+    no_harness: bool,
+    with_github: bool = False,
+    preset: str | None = None,
+    stage_init: bool = False,
 ) -> int:
     """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
@@ -1221,6 +1267,11 @@ def install_plan(
             "present": (target / MANIFEST_V2).is_file(),
             "policy": manifest_policy(target, selected if creates_yaml else None),
         },
+        "stage": {  # sổ giai đoạn: chỉ `--stage-init` tạo, sổ có sẵn không bị chạm (D-249)
+            "path": STAGE_LEDGER,
+            "present": (target / STAGE_LEDGER).exists(),
+            "init": stage_init and not (target / STAGE_LEDGER).exists(),
+        },
     }
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
@@ -1233,6 +1284,7 @@ def install(
     label: str | None,
     with_github: bool = False,
     preset: str | None = None,
+    stage_init: bool = False,
 ) -> int:
     target = target.resolve()
     error = target_error(target, with_github)
@@ -1261,7 +1313,8 @@ def install(
             "  ⚠ còn nhắc tên cũ (.xstored/xs.py/xs.yaml/XS_*) — đổi tay sang .xtemplates/xt.py/xt.yaml/XT_*: "
             + ", ".join(stale)
         )
-    report_upgrade_steps(previous, version)
+    report_stage(target, stage_init)
+    report_upgrade_steps(previous, version)  # cuối: khối bước làm tay đứng ngay trước "Xong."
 
     log(
         "Xong. Bước tiếp: `python3 .xtemplates/scripts/xt.py doctor` (audit khung vừa cài), đọc AGENTS.md, điền xt.yaml, "
@@ -1288,10 +1341,15 @@ def main(argv: list[str] | None = None) -> int:
         choices=INSTALL_PRESETS,
         help="chính sách merge/review cho xt.yaml mới: safe hoặc autonomous; cài lại giữ lựa chọn cũ",
     )
+    p.add_argument(
+        "--stage-init",
+        action="store_true",
+        help="dự án mới: tạo sổ giai đoạn sản phẩm ở giai đoạn 1 (ADR-0058) khi chưa có; dự án đã chạy dùng `stage init --adopt`",
+    )
     a = p.parse_args(argv)
     if a.plan:
-        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset)
-    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset)
+        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init)
+    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset, a.stage_init)
 
 
 if __name__ == "__main__":
