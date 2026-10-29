@@ -39,14 +39,17 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
    tự của bản đã trình; mở giai đoạn kế; duyệt giai đoạn 3 → `completed`, PLAN giai đoạn 3 của chu kỳ đó vẫn chạy — bảo trì/cải tiến
    bản đã phát hành) · `new-cycle --reason` (bài toán lớn mới sau `completed` → chu kỳ kế ở giai đoạn 1; vá bản đang chạy làm trên
    nhánh phát hành, nơi sổ còn ở chu kỳ cũ) · `init --adopt 2|3 --evidence` (**chỉ người**: dự án đã chạy, công nhận bằng chứng lịch
-   sử, không ép chạy lại từ MVP). Đọc–sửa–ghi trong khoá `state.lock` (ADR-0052 §2); sổ kết quả phải hợp lệ mới ghi; file mới 0644.
+   sử, không ép chạy lại từ MVP). Đọc–sửa–ghi trong khoá `state.lock` (ADR-0052 §2); sổ kết quả phải hợp lệ mới ghi; file mới theo umask (ghi lỗi → xoá, không để sổ rỗng).
 3. **Chỉ người duyệt — hai lớp chặn nhầm, không phải ranh giới cách ly (D-015):** `xt.py` từ chối `approve`/`init --adopt` khi tiến
    trình mang biến môi trường của phiên agent (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `AI_AGENT`); guard deny lệnh đó (mã
    `STAGE_APPROVE`) và coi sổ là `evidence` (ghi tay qua Edit/Bash bị chặn như `.autopilot/`). `by` lấy từ `git config user.email`
    (thiếu thì `user.name`) của máy chạy lệnh. Lời "ok" trong chat, comment GitHub hay `loop decide` không phải phê duyệt.
 4. **Khoá ở mọi lối vào vòng:** PLAN khai **đúng một** dòng `Giai đoạn sản phẩm: N (C-NNN)`; khi có sổ, `loop init`, `loop next`,
    `loop record` và verdict của vòng (`loop status`, Stop hook → `blocked`) từ chối PLAN không khai, khai nhiều dòng, khai giai
-   đoạn/chu kỳ khác giai đoạn đang mở — kể cả PLAN sửa sau `loop init` hay người vừa duyệt (lời báo: PLAN đợt mới khai N+1). Đang
+   đoạn/chu kỳ khác giai đoạn đang mở (dòng trong code fence không tính) — kể cả PLAN sửa sau `loop init` hay người vừa duyệt
+   (lời báo: PLAN đợt mới khai N+1). Vòng như vậy coi như đã chết, giống PLAN mất (D-208, D-240): lối ra mọi nơi (`loop init`,
+   `attach`, `unblock`) là `loop init --plan <PLAN khai đúng giai đoạn>`, không cần `--force`, `unblock` từ chối. `loop record`
+   ngoài vòng (chưa `loop init`) không biết PLAN nên không kiểm giai đoạn — `loop init` và kiểm lại cuối vẫn chặn. Đang
    `awaiting_approval` vẫn chạy PLAN của **cùng** giai đoạn (sửa theo phản hồi); hết việc thì agent `stage submit`, báo người, dừng.
 5. **`release-check` thêm hàng `stage`:** sổ vắng (chưa từng có) → N/A SHOULD; giai đoạn 1 (kể cả chờ duyệt) → FAIL BLOCKER ("MVP
    chưa mở Production" — preview/demo không phải Production); giai đoạn 2/3 → PASS (phát hành ở giai đoạn 2 không đợi xong giai đoạn
@@ -60,7 +63,9 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
 - Xấu: máy so giai đoạn PLAN **tự khai**, không đọc nội dung task — review vẫn là lớp kiểm phạm vi. Chủ dự án phải chạy một lệnh ở
   terminal **ngoài phiên Claude Code** (Remote Control vẫn là phiên agent → bị từ chối) — chủ chỉ dùng app thì giai đoạn dừng ở
   `awaiting_approval`. Agent khác Claude có thể không mang các biến môi trường trên (chưa xác minh); guard chỉ chạy dưới Claude Code.
-  Ai có quyền ghi repo sửa được sổ và tự viết `approve` hợp lệ (như sổ audit); `by` là cấu hình git tự khai, không phải chữ ký. Squash
+  Sổ "từng có" tính trên **mọi ref** (`git log --all --source`, lời báo nêu ref): `stage init` trên nhánh lát chặn mọi worktree
+  khác tới khi merge; mỗi lệnh đọc khoá (kể cả verdict, Stop hook) tốn một lượt `git log --all` khi chưa có sổ — tuyến tính theo số
+  commit (đo ≈ 2,5 s ở 300k commit), repo cực lớn cần cache (việc sau). Ai có quyền ghi repo sửa được sổ và tự viết `approve` hợp lệ (như sổ audit); `by` là cấu hình git tự khai, không phải chữ ký. Squash
   merge làm SHA đã trình không còn trên nhánh chính — `approve` so chuỗi SHA đã trình. Chữ ký thật (attestation SLSA/in-toto, tag ký,
   tree-hash) là việc sau nếu cần.
 - Chưa làm (đặc tả §8): Gate MVP/preview, định tuyến `/complete`/`/optimize` theo giai đoạn ngoài dòng nhắc trong skill, `/optimize`

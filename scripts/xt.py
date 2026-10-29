@@ -6516,7 +6516,8 @@ def _live_loop(base: Path) -> str:
     prev = read_state(base) or {}
     try:
         # Hết vòng/hạn (kể cả còn `blocked`) → đợt kế không cần `loop stop`/`--force` (D-177, T-3537).
-        if not prev.get("active") or _budget_exhausted(prev):
+        # PLAN không còn hợp lệ với sổ giai đoạn: vòng đó đã chết, `loop init` PLAN mới không cần `--force` (D-240)
+        if not prev.get("active") or _budget_exhausted(prev) or _stage_lock_exit(prev, base):
             return ""
         v = loop_verdict(base)
         verdict = v["verdict"]
@@ -7803,9 +7804,17 @@ def _plan_lost_exit(st: Dict[str, Any], live: bool) -> str:
     return f"PLAN mất/rỗng → {steps}`loop init --plan <mới>`"
 
 
+def _stage_lock_exit(st: Dict[str, Any], base: Path) -> str:
+    """Lối ra khi PLAN của vòng không còn hợp lệ với sổ giai đoạn (ADR-0058, D-240) — như PLAN mất (D-208): `unblock` không
+    mở được, vòng đó coi như đã chết; '' khi không khoá."""
+    why = stage_plan_problem(base, str(st["plan"])) if st.get("plan") else ""
+    return f"{why} → `loop init --plan <PLAN khai đúng giai đoạn>`" if why else ""
+
+
 def _blocked_exit(st: Dict[str, Any], base: Path, live: bool) -> str:
-    """Lối ra của verdict `blocked`: PLAN còn → `unblock`; mất/rỗng → `_plan_lost_exit`."""
-    return EXIT_UNBLOCK if _plan_tasks(base, st) else _plan_lost_exit(st, live)
+    """Lối ra của verdict `blocked`: khoá giai đoạn → `_stage_lock_exit`; PLAN còn → `unblock`; mất/rỗng → `_plan_lost_exit`."""
+    lock = _stage_lock_exit(st, base)
+    return lock or (EXIT_UNBLOCK if _plan_tasks(base, st) else _plan_lost_exit(st, live))
 
 
 def _blocked_by_state(st: Dict[str, Any]) -> bool:
@@ -7831,6 +7840,9 @@ def _loop_exit(st: Dict[str, Any], base: Path) -> Tuple[str, str]:
     (mở lại thì Stop kế chặn ngay); không đoán từ đếm lỗi (`loop record` sau khi vòng dừng vẫn đổi đếm — review #295).
     Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
     fv = _final_verdict(st)
+    lock = _stage_lock_exit(st, base)
+    if lock:
+        return "init", lock
     if fv != "done" and not _plan_tasks(base, st):
         return "init", _plan_lost_exit(st, live=False)
     if fv == "budget" or _budget_spent(st):
@@ -7931,6 +7943,9 @@ def _unblock_problem(cur: Dict[str, Any], reason: str, base: Path) -> Optional[s
         return NO_LOOP_MSG
     if not reason:
         return "✗ --reason rỗng — ghi người đã xem gì"
+    lock = _stage_lock_exit(cur, base)
+    if lock:  # PLAN của giai đoạn đã duyệt/khoá: mở lại vô ích (D-240)
+        return f"✗ Không mở lại: {lock}"
     if cur.get("active"):
         if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (D-208)
             return f"✗ Vòng đang chạy nhưng {_plan_lost_exit(cur, live=not _budget_spent(cur))}"
@@ -9454,7 +9469,7 @@ def read_stage(base: Path) -> Optional[Dict[str, Any]]:
         if seen:  # xoá/dời sổ, nhánh tách trước sổ: không tắt khoá bằng thao tác thường (review #327)
             raise StageError(
                 f"{STAGE_LEDGER} vắng nhưng có trong lịch sử git ({seen}) — không coi là bỏ dùng giai đoạn; "
-                f"khôi phục sổ (`git log --all -- {STAGE_LEDGER}`); bỏ hẳn là quyết định của người"
+                "khôi phục sổ hoặc merge ref đó vào nhánh này; nhánh thử bỏ đi thì người xoá nó"
             )
         return None
     try:
@@ -9468,9 +9483,9 @@ def read_stage(base: Path) -> Optional[Dict[str, Any]]:
 
 
 def _stage_git_seen(base: Path) -> str:
-    """Commit (rút gọn) gần nhất trên mọi ref có chạm sổ; '' khi chưa bao giờ có, không phải repo git hay không chạy được git."""
+    """`<commit rút gọn> <ref>` gần nhất trên mọi ref có chạm sổ; '' khi chưa bao giờ có, không phải repo git hay không chạy được git."""
     try:
-        r = _git(base, "log", "--all", "-1", "--format=%h", "--", STAGE_LEDGER)
+        r = _git(base, "log", "--all", "--source", "-1", "--format=%h %S", "--", STAGE_LEDGER)
     except OSError:
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -9485,8 +9500,14 @@ def update_stage(base: Path, fn: Callable[[Optional[Dict[str, Any]]], Dict[str, 
             raise StageError(f"chuyển giai đoạn tạo sổ sai: {why}")
         p = base / STAGE_LEDGER
         p.parent.mkdir(parents=True, exist_ok=True)
+        fresh = not p.exists()
         p.touch()  # file mới theo umask như tài liệu khác (mkstemp tạo 0600 — review #327); keep_mode giữ quyền đó
-        write_atomic(p, json.dumps(new, ensure_ascii=False, indent=2) + "\n", keep_mode=True)
+        try:
+            write_atomic(p, json.dumps(new, ensure_ascii=False, indent=2) + "\n", keep_mode=True)
+        except BaseException:
+            if fresh:  # không để lại sổ rỗng (= hỏng, chặn mọi lối vào mà agent không dọn được — review #327)
+                p.unlink(missing_ok=True)
+            raise
         return new
 
 
@@ -9510,7 +9531,8 @@ def _stage_by(base: Path) -> str:
 
 def plan_stage(text: str) -> List[Tuple[int, str]]:
     """Mọi (giai đoạn, chu kỳ) PLAN khai ở dòng `Giai đoạn sản phẩm: N (C-NNN)`, theo thứ tự."""
-    return [(int(m[1]), m[2]) for m in PLAN_STAGE_RE.finditer(text)]
+    body = "\n".join(line for _, line in _lines_outside_fences(text, 1))  # ví dụ trong code fence không tính
+    return [(int(m[1]), m[2]) for m in PLAN_STAGE_RE.finditer(body)]
 
 
 def stage_plan_problem(base: Path, plan: str) -> str:
@@ -9537,6 +9559,8 @@ def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: 
     cải tiến của chu kỳ đã phát hành — review #327)."""
     if got == (led["stage"], led["cycle"]):
         return ""
+    if led["status"] == "completed" and got[1] != led["cycle"]:
+        return f"chu kỳ {led['cycle']} đã xong cả ba giai đoạn — chu kỳ mới: `xt.py stage new-cycle --reason …`"
     if got[1] == led["cycle"] and got[0] < led["stage"]:
         return f"giai đoạn {got[0]} của {got[1]} đã được người duyệt — PLAN đợt mới khai `{want}`"
     return (

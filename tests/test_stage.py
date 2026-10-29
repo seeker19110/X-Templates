@@ -307,6 +307,35 @@ class StageCliTest(TmpRepoCase):
             xt.update_stage(self.repo, lambda led: {"schema": 1})
         self.assertEqual(json.loads((self.repo / xt.STAGE_LEDGER).read_text(encoding="utf-8")), ledger())
 
+    def test_failed_write_leaves_no_empty_ledger(self):
+        with unittest.mock.patch.object(xt, "write_atomic", side_effect=OSError(28, "đầy đĩa")):
+            self.assertIn("đầy đĩa", self.stage("init")[2])
+        self.assertFalse((self.repo / xt.STAGE_LEDGER).exists())
+        self.stage("init")
+        with unittest.mock.patch.object(xt, "write_atomic", side_effect=OSError(28, "đầy đĩa")):
+            with self.assertRaises(OSError):
+                xt.update_stage(self.repo, lambda led: led)
+        self.assertEqual(self.led()["history"][0]["event"], "init")  # sổ có sẵn không bị xoá khi ghi lỗi
+
+    def test_stage_uses_worktree_root_and_no_abbrev(self):
+        other = self.tmp / "khac"
+        other.mkdir()
+        with unittest.mock.patch.object(xt, "loop_root", return_value=other):
+            self.assertEqual(self.stage("init")[0], 0)
+        self.assertTrue((other / xt.STAGE_LEDGER).exists())
+        self.assertFalse((self.repo / xt.STAGE_LEDGER).exists())
+        with self.assertRaises(SystemExit):
+            run_main("stage", "approve", "--sh", "abcdef1", "--note", "x")
+
+    def test_seen_message_names_ref(self):
+        self.git("switch", "-q", "-c", "thu")
+        self.stage("init")
+        self.commit("sổ ở nhánh thử")
+        self.git("switch", "-q", "main")
+        err = self.stage("status")[2]
+        self.assertIn("refs/heads/thu", err)
+        self.assertIn("merge ref đó", err)
+
     def test_unknown_subcommand_is_read_only(self):
         args = unittest.mock.Mock(stage_cmd="khác")
         self.assertIsNone(xt._stage_dispatch(args, self.repo))
@@ -391,6 +420,41 @@ class StageLockTest(TmpRepoCase):
         v = xt.loop_verdict(self.repo)
         self.assertEqual(v["verdict"], "blocked")
         self.assertIn("đã được người duyệt — PLAN đợt mới khai `Giai đoạn sản phẩm: 2 (C-001)`", v["reason"])
+
+    def test_stage_lock_exits_point_to_new_plan(self):
+        """D-240 (review #327 lượt 2): lối ra của vòng khoá giai đoạn là `loop init` PLAN mới — không `unblock`/`--force`."""
+        self.write_ledger(ledger())
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        self.assertEqual(run_main("loop", "init", "--plan", self.PLAN, "--single-session")[0], 0)
+        self.write_ledger(ledger([ev("init", 1), *approve(1)], stage=2))
+        rc, _, err = run_main("loop", "unblock", "--reason", "đã duyệt")
+        self.assertEqual(rc, 2)
+        self.assertIn("✗ Không mở lại: giai đoạn 1 của C-001 đã được người duyệt", err)
+        self.assertIn("`loop init --plan <PLAN khai đúng giai đoạn>`", err)
+        st = xt.read_state(self.repo)
+        self.assertEqual(xt._loop_exit(st, self.repo)[0], "init")
+        self.assertIn("loop init --plan", xt._blocked_exit(st, self.repo, live=True))
+        st.update(active=False, final_verdict={"verdict": "blocked", "reason": "x"})  # sau Stop hook
+        kind, text = xt._loop_exit(st, self.repo)
+        self.assertEqual(kind, "init")
+        self.assertIn("đã được người duyệt", text)
+        two = self.repo / "docs/autopilot/PLAN-2.md"
+        two.write_text("# P\n> Giai đoạn sản phẩm: 2 (C-001)\n\n- [ ] `T-002` việc — Gate: `true`\n", encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md", "--single-session")
+        self.assertEqual(rc, 0, err)  # vòng khoá coi như đã chết: không cần `--force`
+        self.assertEqual(xt.read_state(self.repo)["plan"], "docs/autopilot/PLAN-2.md")
+        self.assertEqual(xt._stage_lock_exit({}, self.repo), "")
+
+    def test_fenced_example_and_new_cycle_hint(self):
+        self.write_ledger(ledger())
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)", "```markdown", "> Giai đoạn sản phẩm: 2 (C-001)", "```")
+        self.assertEqual(self.problem(), "")  # ví dụ trong code fence không tính
+        self.write_ledger(completed())
+        self.plan("> Giai đoạn sản phẩm: 1 (C-002)")
+        self.assertIn("chu kỳ mới: `xt.py stage new-cycle", self.problem())
+        fake = completed()
+        fake["status"] = "active"  # lịch sử xong cả ba mà sổ ghi active (đột biến N10)
+        self.assertIn("lịch sử dựng ra C-001/3/completed", xt.stage_problem(fake))
 
     def test_release_row(self):
         row = xt._release_stage(self.repo)
