@@ -7399,8 +7399,8 @@ def _stage_changed(base: Path, sub: Dict[str, Any]) -> Optional[List[str]]:
         return []
     changed = _changed_since(base, sub["sha"])
     if changed is not None:
-        return [c for c in changed if c != STAGE_LEDGER] or (["(nội dung khác bản trình)"] if fp else [])
-    return ["(nội dung khác bản trình)"] if fp else None
+        return [c for c in changed if c != STAGE_LEDGER] or ([STAGE_DIFF_UNKNOWN] if fp else [])
+    return [STAGE_DIFF_UNKNOWN] if fp else None
 
 
 def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
@@ -7408,7 +7408,11 @@ def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
     người đang duyệt một bản cũ; mở lại giai đoạn rồi trình lại sau khi làm xong."""
     changed = f["stage"].get("changed")
     if changed:
-        what = f"{len(changed)} file đổi (vd {', '.join(changed[:3])})"
+        what = (
+            "nội dung cây khác bản trình (không liệt kê được file — SHA bản trình không còn trong repo)"
+            if changed == [STAGE_DIFF_UNKNOWN]
+            else f"{len(changed)} file đổi (vd {', '.join(changed[:3])})"
+        )
     elif loop and loop["action"] == "task":  # `replan` = vòng chưa bật (container mới) — không phải còn việc
         what = f"vòng còn việc ({loop['action']}: {loop.get('task') or loop['reason']})"
     else:
@@ -9799,6 +9803,9 @@ STAGE_SHA_RE = COMMIT_SHA_RE  # SHA-1 hoặc SHA-256 (`--object-format=sha256`) 
 # Dòng khai của PLAN: `Giai đoạn sản phẩm: 2 (C-001)` (có thể nằm trong `> …`) — đúng MỘT dòng mỗi PLAN.
 PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((C-\d{3,})\)", re.MULTILINE)
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
+STAGE_DIFF_UNKNOWN = (
+    "(nội dung khác bản trình)"  # vân tay lệch mà SHA bản trình không còn trong repo — không liệt kê được file
+)
 STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
 
 
@@ -10040,7 +10047,12 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     if st:
         v = _batch_verdict(base, st)
         if v["verdict"] not in ("done", PENDING_HUMAN):  # PLAN còn task: bản trình thiếu việc (review #330)
-            raise StageError(f"chưa trình được — vòng chưa xong ({v['verdict']}: {v.get('reason', '')})")
+            hint = (
+                " — đợt đã xong mà vòng bị dừng/chặn: `loop resume`/`loop unblock` rồi trình"
+                if v["verdict"] == "blocked"
+                else ""
+            )
+            raise StageError(f"chưa trình được — vòng chưa xong ({v['verdict']}: {v.get('reason', '')}){hint}")
         why = final_check(base)
         if why:
             raise StageError(f"chưa trình được — {why}")
