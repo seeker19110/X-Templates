@@ -2709,7 +2709,8 @@ class ReleaseCheckTest(TmpRepoCase):
         rc, d = self.rows()
         self.assertEqual(rc, 1)
         self.assertIn("không đọc được BLUEPRINT.md", self.by_id(d)["blueprint"]["evidence"])
-        self.assertEqual(self.by_id(d)["unchecked_must"]["result"], "N/A")
+        r = self.by_id(d)["unchecked_must"]
+        self.assertEqual((r["result"], r["level"]), ("N/A", "SHOULD"))  # không rơi vào `human` (review #320)
 
     def test_autopilot_verify_and_prod_switch_rows(self):
         self.git("add", ".")
@@ -2749,6 +2750,23 @@ class ReleaseCheckTest(TmpRepoCase):
         self.assertIn("Chờ người: prod_switch", out)
         rc, d = self.rows()
         self.assertEqual((d["human"], d["go"], d["verdict"]), (["prod_switch"], True, "GO (chờ người)"))
+        log.write_bytes(b"\xff\xfe")  # không phải UTF-8: có thể giấu đề xuất → FAIL, JSON vẫn in (review #320)
+        (self.repo / "xt.yaml").write_bytes(b"lint: \xff\n")
+        rc, d = self.rows()
+        r = self.by_id(d)
+        self.assertEqual(rc, 1)
+        for rid in ("prod_switch", "phase", "attack", "perf"):
+            self.assertEqual(r[rid]["result"], "FAIL", rid)
+            self.assertIn("không đọc được", r[rid]["evidence"], rid)
+
+    def test_cli_undecodable_file_exits_2(self):
+        """Lớp lỗi AUD-CODE-017 ở mọi lệnh CLI: file không phải UTF-8 → `main` exit 2 một dòng, không traceback."""
+        bp = self.repo / "B.md"
+        bp.write_bytes(b"\xff\xfe")
+        rc, out, err = run_main("blueprint-status", bp)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertTrue(err.startswith("✗ "), err)
+        self.assertNotIn("Traceback", err)
 
 
 class ContextPackTest(TmpDirCase):
