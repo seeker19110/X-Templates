@@ -9338,7 +9338,7 @@ STAGE_SCHEMA = 1
 STAGE_NAMES = {1: "MVP", 2: "hoàn thiện", 3: "tối ưu"}
 STAGE_STATUSES = ("active", "awaiting_approval", "completed")
 STAGE_CYCLE_RE = re.compile(r"C-\d{3,}")
-STAGE_SHA_RE = re.compile(r"[0-9a-f]{40}")
+STAGE_SHA_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # SHA-1 hoặc SHA-256 (`--object-format=sha256`)
 # Dòng khai của PLAN: `Giai đoạn sản phẩm: 2 (C-001)` (có thể nằm trong `> …`) — đúng MỘT dòng mỗi PLAN.
 PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((C-\d{3,})\)", re.MULTILINE)
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
@@ -9512,9 +9512,17 @@ def _stage_by(base: Path) -> str:
 
 
 def plan_stage(text: str) -> List[Tuple[int, str]]:
-    """Mọi (giai đoạn, chu kỳ) PLAN khai ở dòng `Giai đoạn sản phẩm: N (C-NNN)`, theo thứ tự."""
-    body = "\n".join(line for _, line in _lines_outside_fences(text, 1))  # ví dụ trong code fence không tính
-    return [(int(m[1]), m[2]) for m in PLAN_STAGE_RE.finditer(body)]
+    """Mọi (giai đoạn, chu kỳ) PLAN khai ở dòng `Giai đoạn sản phẩm: N (C-NNN)`, theo thứ tự; dòng trong code fence ``` hay
+    ~~~ không tính (ví dụ), chữ chuẩn hoá NFC (bàn phím/IME gõ dấu tách rời — review #327)."""
+    kept: List[str] = []
+    fence: Optional[str] = None
+    for line in unicodedata.normalize("NFC", text).splitlines():
+        m = FENCE_RE.match(line)
+        if m and (fence is None or m.group(1) == fence):
+            fence = None if fence else m.group(1)
+        elif fence is None:
+            kept.append(line)
+    return [(int(m[1]), m[2]) for m in PLAN_STAGE_RE.finditer("\n".join(kept))]
 
 
 def stage_plan_problem(base: Path, plan: str) -> str:
@@ -9656,13 +9664,18 @@ def _stage_dispatch(
 
 
 def _stage_clean_head(base: Path) -> str:
-    """HEAD 40 hex của cây sạch (trừ chính sổ): bản trình duyệt phải xác định được (P1) — file chưa commit thì không trình."""
+    """HEAD (SHA đầy đủ) của cây sạch (trừ chính sổ): bản trình duyệt phải xác định được (P1) — file chưa commit thì không trình."""
     head = _git_head(base)
     if not head:
         raise StageError("không có commit — trình duyệt cần một bản xác định")
     # sổ là siêu dữ liệu về bản trình, `.autopilot/` là sổ máy; file chưa track tính dù cấu hình ẩn (review #327)
     spec = ["--untracked-files=all", "--", ".", f":(exclude){STAGE_LEDGER}", ":(exclude).autopilot"]
-    r = subprocess.run(["git", "status", "--porcelain", *spec], cwd=base, capture_output=True, text=True, timeout=30)
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain", *spec], cwd=base, capture_output=True, text=True, timeout=30
+        )
+    except subprocess.TimeoutExpired:
+        raise StageError("`git status` quá 30 s — không xác định được cây sạch") from None
     if r.returncode != 0 or r.stdout.strip():
         raise StageError("cây có thay đổi chưa commit — commit rồi trình bản đó")
     return head
@@ -9677,6 +9690,10 @@ def cmd_stage(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     _stage_print(led, getattr(args, "json", False))
+    if fn is not None and not getattr(
+        args, "json", False
+    ):  # sổ theo git: chưa commit thì container mới/người khác không thấy
+        print(f"  → commit + push `{STAGE_LEDGER}` (bản trình/duyệt chỉ có hiệu lực khi sổ lên git)")
     return 0
 
 
