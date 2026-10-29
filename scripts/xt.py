@@ -5104,9 +5104,14 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (
         "phụ thuộc",
         re.compile(
-            r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|pyproject\.toml|uv\.lock|poetry\.lock"
-            r"|(?i:[^/]*(requirements|constraints)[^/]*\.txt|requirements/.*\.txt)"  # D-234: constraints, cấp sâu
-            r"|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock))$"
+            r"(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.(jsonc?|lock)"
+            r"|pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|setup\.(py|cfg)|environment\.ya?ml"
+            r"|(?i:[^/]*(requirements|constraints)[^/]*\.(txt|in)|requirements/.*\.(txt|in))"  # D-234: constraints, cấp sâu
+            r"|go\.(mod|sum|work)|Cargo\.(toml|lock)|Gemfile(\.lock)?|[^/]+\.gemspec|composer\.(json|lock)"
+            # D-235 (review #323): .NET/JVM/Dart/Swift/Elixir/C++ — `*.csproj`, `packages.lock.json` có trong BASE-DEP-001
+            r"|[^/]+\.(cs|fs|vb)proj|packages\.lock\.json|packages\.config|Directory\.Packages\.props|global\.json"
+            r"|pom\.xml|(build|settings)\.gradle(\.kts)?|gradle\.lockfile|libs\.versions\.toml|pubspec\.(yaml|lock)"
+            r"|Podfile(\.lock)?|Package\.(swift|resolved)|mix\.(exs|lock)|conanfile\.(txt|py)|vcpkg\.json)$"
         ),
     ),
 )
@@ -5137,17 +5142,19 @@ def _gate_path(path: str) -> bool:
 
 
 LOCKFILE_RE = re.compile(
-    r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
+    r"(^|/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock|uv\.lock|poetry\.lock"
+    r"|Pipfile\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock|packages\.lock\.json|gradle\.lockfile|pubspec\.lock"
+    r"|Podfile\.lock|Package\.resolved|mix\.lock)$"  # review #324 T3: lockfile của thẻ phụ thuộc D-235
 )
 # Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
-# rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`);
+# rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`, `conanfile.txt`);
 # đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
 # repo. Trước đây mọi `…/docs/…` ở mọi độ sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review
 # (hàng BLOCKER `review_debt`) và làn merge (AUD-SEC-134).
 DOC_TEXT_EXT = ("md", "mdx", "rst", "txt")
 DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
 # Rộng (đóng khi nghi ngờ — review #323): `docs/design-constraints.txt` thành mã chỉ tốn một lượt review
-DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists)\.txt$", re.I)
+DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists|conanfile)\.txt$", re.I)
 # Hậu tố gạch nối (LICENSE-MIT, NOTICE-3rdparty — review #322) chỉ khi gốc VIẾT HOA: `scripts/license-check` là mã (#323)
 LICENSE_NAME_RE = re.compile(
     r"(?i:LICEN[CS]E|NOTICE|COPYING)(\.(?i:md|txt|rst))?"
