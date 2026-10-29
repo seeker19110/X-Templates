@@ -313,9 +313,32 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(stage=mvp)
         self.assertEqual((out["action"], out["missing"][0]), ("stage-submit", "`stage submit`"))
         self.assertIn("không sang giai đoạn sau", out["reason"])
-        out = self.step(stage={**mvp, "status": "awaiting_approval", "sha": "c" * 40})
+        wait = {**mvp, "status": "awaiting_approval", "sha": "c" * 40, "changed": []}
+        out = self.step(stage=wait)
         self.assertEqual(out["action"], "wait-approval")
         self.assertIn(f"đã trình bản {'c' * 12}", out["reason"])
+        # Review #330: chỉ sổ/PROGRESS đổi sau bản trình → bỏ `verify`; mã đổi / không so được / vòng còn việc → reopen
+        unchecked = {"final_check": "chưa kiểm lại cuối"}
+        self.assertEqual(self.step(stage=wait, **unchecked)["action"], "wait-approval")
+        out = self.step(stage={**wait, "changed": ["src/a.py"]})
+        self.assertEqual(out["action"], "stage-reopen")
+        self.assertIn("1 file đổi (vd src/a.py)", out["reason"])
+        # Không so được (bản trình cũ, SHA mất sau squash) hay container mới chưa bật vòng → vẫn chờ, không reopen
+        self.assertEqual(self.step(stage={**wait, "changed": None})["action"], "wait-approval")
+        off = {"verdict": "inactive", "reason": "vòng lặp chưa bật"}
+        self.assertEqual(self.step(stage=wait, verdict=off)["action"], "wait-approval")
+        stuck = {"verdict": "blocked", "reason": "cần người"}
+        self.assertEqual(self.step(stage=wait, verdict=stuck)["action"], "blocked")  # chặn không bị nuốt
+        busy = {"verdict": "continue", "reason": "còn task", "task": "T-002"}
+        out = self.step(stage=wait, verdict=busy)
+        self.assertEqual(out["action"], "stage-reopen")
+        self.assertIn("vòng còn việc (task: T-002)", out["reason"])
+        pend = {"verdict": xt.PENDING_HUMAN, "reason": "T-009 chờ pháp lý"}
+        self.assertIn("T-009 chờ pháp lý", self.step(stage=wait, verdict=pend)["reason"])
+        # Mặt nạ chỉ cho giai đoạn 1 đang chờ duyệt, chỉ ở build
+        self.assertEqual(self.step(stage={**wait, "stage": 2}, **unchecked)["action"], "verify")
+        self.assertEqual(self.step(stage=mvp, **unchecked)["action"], "verify")
+        self.assertEqual(self.step(objective=HARDEN, stage=wait, **unchecked)["action"], "verify")
         self.assertEqual(self.step(stage={**mvp, "stage": 2})["action"], "ready-for-complete")
         self.assertEqual(self.step(stage={"error": "STAGE.json hỏng: x"})["action"], "blocked")
         self.assertEqual(self.step(objective=HARDEN, stage=mvp)["action"], "release-check")
@@ -656,7 +679,8 @@ class HardenWorkTest(StateCase):
             ),
             encoding="utf-8",
         )
-        self.assertEqual(xt.stage_facts(self.base), {"cycle": "C-001", "stage": 1, "status": "active", "sha": None})
+        want = {"cycle": "C-001", "stage": 1, "status": "active", "sha": None, "changed": []}
+        self.assertEqual(xt.stage_facts(self.base), want)
         led.write_text("{", encoding="utf-8")
         self.assertIn("không đọc được", xt.stage_facts(self.base)["error"])
 
