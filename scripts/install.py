@@ -557,12 +557,20 @@ def target_error(target: Path, with_github: bool = False) -> str | None:
     return github_root_error(target) if with_github else None
 
 
+GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+
+
 def git_subdir_of(target: Path) -> Path | None:
     """Gốc repo git khi `target` là thư mục CON của nó (monorepo `apps/web`); gốc repo, không phải repo git hay git lỗi → None
-    (chưa có gốc để so)."""
+    (chưa có gốc để so). Bỏ `GIT_DIR`… của môi trường (hook, tự động hoá): gốc là của `target`, như `xt.py` thấy."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_ENV}
     try:
         r = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=10
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1174,7 +1182,7 @@ def report_stage(target: Path, stage_init: bool) -> None:
             f" `release-check` đọc ở đây; chưa hỗ trợ, không tạo/kiểm sổ{skip} (ADR-0058)"
         )
         return
-    created, warned = False, ""
+    created, warned = False, None
     try:
         if stage_init and not (target / STAGE_LEDGER).exists():
             r = run_stage(target, "init")
@@ -1188,7 +1196,7 @@ def report_stage(target: Path, stage_init: bool) -> None:
         log(f"⚠ không kiểm được sổ giai đoạn ({exc!r}) — chạy `python3 .xtemplates/scripts/xt.py stage status`")
         return
     if r.returncode:
-        if r.stderr.strip() != warned:  # cùng lý do với lần `init` vừa báo: không lặp (review #339)
+        if warned is None or r.stderr.strip() != warned:  # cùng lý do với lần `init` vừa báo: không lặp (review #339)
             log(f"⚠ sổ giai đoạn: {r.stderr.strip()} — sửa trước khi chạy vòng (ADR-0058)")
     elif led is None:
         log(

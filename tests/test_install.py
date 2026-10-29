@@ -2029,6 +2029,8 @@ class InstallStageTest(unittest.TestCase):
     def setUp(self):
         self.target = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.ledger = self.target / install.STAGE_LEDGER
+        # TMPDIR nằm trong một repo git không biến đích thành "thư mục con của repo"
+        self.enterContext(mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.target.parent)}))
 
     def install(self, *extra: str) -> str:
         err = io.StringIO()
@@ -2075,6 +2077,11 @@ class InstallStageTest(unittest.TestCase):
         same = subprocess.CompletedProcess([], 2, "", "sổ ở ref khác")  # init và status cùng lý do: một dòng ⚠
         with mock.patch.object(install, "run_stage", side_effect=[same, same]):
             self.assertEqual(self.install("--stage-init").count("sổ ở ref khác"), 1)
+        killed = subprocess.CompletedProcess(
+            [], -9, "", ""
+        )  # init không chạy, status chết không stderr: vẫn một dòng ⚠
+        with mock.patch.object(install, "run_stage", return_value=killed):
+            self.assertIn("⚠ sổ giai đoạn:", self.install())
 
     def test_git_subdir_not_initialised(self):
         """Review #339: đích là thư mục con của repo git — `xt.py stage` dùng gốc repo, `release-check` đọc dự án → không
@@ -2089,6 +2096,10 @@ class InstallStageTest(unittest.TestCase):
         self.assertIn("bỏ qua --stage-init", out)
         self.assertFalse((root / install.STAGE_LEDGER).exists() or self.ledger.exists())
         self.assertNotIn("bỏ qua --stage-init", self.install())
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):  # môi trường hook: gốc vẫn là của đích
+            self.assertEqual(install.git_subdir_of(self.target), root)
 
     def test_stage_ignores_session_project_dir(self):
         """Review #339: installer chạy dưới hook (CLAUDE_PROJECT_DIR = repo khác) vẫn tạo sổ ở dự án đích."""
