@@ -155,6 +155,10 @@ class StageCliTest(TmpRepoCase):
         super().setUp()
         self.init_repo()
         self.git("config", "user.email", "chu@example.invalid")
+        self.git(
+            "config", "user.name", "chu"
+        )  # smoke tự `git commit` không qua `self.git` — CI không có user.name toàn cục
+        self.git("config", "commit.gpgsign", "false")
         self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
         self.commit("khởi tạo")
 
@@ -364,7 +368,7 @@ class StageCliTest(TmpRepoCase):
     def test_gate_tail_redacts_then_cuts(self):
         """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
         pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
-        self.assertNotIn("QUJDREVGR0g", xt._gate_tail(1, pem))
+        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- *** fail")  # cắt trước → lộ dòng thân cuối
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
         self.assertEqual(xt._gate_tail(1, "x\na\nb\nc"), "a b c")
