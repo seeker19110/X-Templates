@@ -1685,3 +1685,10 @@
 - Chọn: systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: không chặn, không ghi — cho Stop hook đọc/chuyển trạng thái là lát 4 sau pilot; decision block (1) sẽ đổi luồng. (4) trải nghiệm: người thấy bước kế thật thay vì chỉ lệnh (3). Fail-open như mọi Stop hook (ADR-0002).
 - Đường lùi: Trả hook_stop về '' ở nhánh kết thúc vòng; bỏ stop_hint trong scripts/xt.py và test_stop_hint_next_step
+
+### D-240 · 2026-10-29T05:10:42+00:00 · T-3548, T-3549, T-3550 đã commit nối tiếp trên một nhánh (phiên bị ràng buộc một nhánh, #324 chiếm nhánh lúc làm): một PR hay ba PR?
+
+- Phương án: (1) Ba PR tuần tự (mỗi task một PR như dòng trạng thái ADR-0052) · (2) Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
+- Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
