@@ -276,6 +276,11 @@ class StageCliTest(TmpRepoCase):
         self.assertIn("chưa trình được — kiểm lại cuối ĐỎ (T-001)", err)
         with done, unittest.mock.patch.object(xt, "final_check", return_value=None):
             self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.stage("reopen", "--reason", "x")
+        pend = {"verdict": xt.PENDING_HUMAN, "reason": "T-9 chờ người"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=pend):  # chờ người vẫn trình được
+            with unittest.mock.patch.object(xt, "final_check", return_value=None):
+                self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
         self.assertEqual(self.led()["submitted"]["verified"], "loop verify --all xanh trên cây này")
         with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
             self.assertEqual(xt._stage_submit_proof(self.tmp)["preview"], "")
@@ -524,6 +529,18 @@ class StageLockTest(TmpRepoCase):
             | {"verdict": {"verdict": xt.PENDING_HUMAN, "reason": "T-009 chờ người duyệt pháp lý"}, "final_check": None}
         )
         self.assertIn("T-009 chờ người duyệt pháp lý", pending["reason"])  # không mất lý do chờ người (review #330)
+        sub = json.loads((self.repo / xt.STAGE_LEDGER).read_text(encoding="utf-8"))["submitted"]
+        with unittest.mock.patch.object(xt, "_changed_since", return_value=None):  # SHA mất (squash, clone mới)
+            self.assertEqual(xt._stage_changed(self.repo, sub), [])  # vân tay nội dung khớp
+            self.assertIsNone(xt._stage_changed(self.repo, {**sub, "tree": None}))  # bản trình cũ: không so được
+            self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), ["(nội dung khác bản trình)"])
+        self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), ["(nội dung khác bản trình)"])
+        (self.repo / "moi.py").write_text("x = 1\n", encoding="utf-8")  # mã đổi sau bản trình → mở lại giai đoạn
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "mã mới")
+        out = self.step()
+        self.assertEqual(out["action"], "stage-reopen")
+        self.assertIn("moi.py", out["reason"])
 
     def test_after_human_approval_switch_plan_with_force(self):
         """Ca W (review #327), D-241: người duyệt khi vòng giai đoạn 1 còn task → `record` từ chối kèm lối ra đúng; verdict và

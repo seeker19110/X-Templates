@@ -320,14 +320,15 @@ class NextStepPureTest(unittest.TestCase):
         # Review #330: chỉ sổ/PROGRESS đổi sau bản trình → bỏ `verify`; mã đổi / không so được / vòng còn việc → reopen
         unchecked = {"final_check": "chưa kiểm lại cuối"}
         self.assertEqual(self.step(stage=wait, **unchecked)["action"], "wait-approval")
-        for stage, why in (
-            ({**wait, "changed": ["src/a.py"]}, "1 file đổi (vd src/a.py)"),
-            ({**wait, "changed": None}, "không so được với bản trình"),
-        ):
-            with self.subTest(why):
-                out = self.step(stage=stage)
-                self.assertEqual(out["action"], "stage-reopen")
-                self.assertIn(why, out["reason"])
+        out = self.step(stage={**wait, "changed": ["src/a.py"]})
+        self.assertEqual(out["action"], "stage-reopen")
+        self.assertIn("1 file đổi (vd src/a.py)", out["reason"])
+        # Không so được (bản trình cũ, SHA mất sau squash) hay container mới chưa bật vòng → vẫn chờ, không reopen
+        self.assertEqual(self.step(stage={**wait, "changed": None})["action"], "wait-approval")
+        off = {"verdict": "inactive", "reason": "vòng lặp chưa bật"}
+        self.assertEqual(self.step(stage=wait, verdict=off)["action"], "wait-approval")
+        stuck = {"verdict": "blocked", "reason": "cần người"}
+        self.assertEqual(self.step(stage=wait, verdict=stuck)["action"], "blocked")  # chặn không bị nuốt
         busy = {"verdict": "continue", "reason": "còn task", "task": "T-002"}
         out = self.step(stage=wait, verdict=busy)
         self.assertEqual(out["action"], "stage-reopen")

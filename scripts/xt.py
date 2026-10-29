@@ -7122,14 +7122,16 @@ def _signoff_excluded(path: str) -> bool:
     return name == "DECISIONS.md" or fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
 
 
-def evidence_fingerprint(base: Path) -> Optional[str]:
-    """sha256 nội dung cây làm việc trừ GO-NO-GO/DECISIONS/thư mục trạng thái: blob của HEAD (`ls-tree`, không SHA commit)
-    + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None."""
+def evidence_fingerprint(base: Path, skip: Tuple[str, ...] = ()) -> Optional[str]:
+    """sha256 nội dung cây làm việc trừ GO-NO-GO/DECISIONS/PROGRESS/thư mục trạng thái (và đường dẫn `skip`): blob của
+    HEAD (`ls-tree`, không SHA commit) + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None."""
     tree = _git(base, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
     if tree.returncode != 0:
         return None
-    kept = "\0".join(e for e in tree.stdout.split("\0") if e and not _signoff_excluded(e.partition("\t")[2]))
-    return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, SIGNOFF_EXCLUDE)[0]
+    paths = ((e, e.partition("\t")[2]) for e in tree.stdout.split("\0") if e)
+    kept = "\0".join(e for e, p in paths if not (_signoff_excluded(p) or p in skip))
+    extra = [f":(exclude){p}" for p in skip]
+    return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, [*SIGNOFF_EXCLUDE, *extra])[0]
 
 
 def _changed_since(base: Path, sha: str) -> Optional[List[str]]:
@@ -7379,18 +7381,35 @@ def stage_facts(base: Path) -> Optional[Dict[str, Any]]:
         return None
     sub = led.get("submitted") or {}
     sha = sub.get("sha")
-    changed = _changed_since(base, sha) if sha else []  # file đổi sau bản trình (trừ sổ/PROGRESS/GO-NO-GO/DECISIONS)
-    changed = None if changed is None else [c for c in changed if c != STAGE_LEDGER]
-    return {"cycle": led["cycle"], "stage": led["stage"], "status": led["status"], "sha": sha, "changed": changed}
+    return {
+        "cycle": led["cycle"],
+        "stage": led["stage"],
+        "status": led["status"],
+        "sha": sha,
+        "changed": _stage_changed(base, sub) if sha else [],
+    }
+
+
+def _stage_changed(base: Path, sub: Dict[str, Any]) -> Optional[List[str]]:
+    """File đổi so với bản trình (trừ sổ/PROGRESS/GO-NO-GO/DECISIONS). So theo vân tay NỘI DUNG ghi lúc `submit` trước —
+    bền qua squash-merge, clone mới/nông, nhánh đã xoá (review #330); vân tay khớp → []. Khác → liệt kê theo SHA khi
+    SHA còn trong repo, không thì một mục mô tả. Bản trình cũ không có vân tay mà SHA mất → None (không so được)."""
+    fp = sub.get("tree")
+    if fp and evidence_fingerprint(base, (STAGE_LEDGER,)) == fp:
+        return []
+    changed = _changed_since(base, sub["sha"])
+    if changed is not None:
+        return [c for c in changed if c != STAGE_LEDGER] or (["(nội dung khác bản trình)"] if fp else [])
+    return ["(nội dung khác bản trình)"] if fp else None
 
 
 def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
     """Đã trình MVP mà mã đổi sau bản trình (ngoài sổ/PROGRESS/GO-NO-GO/DECISIONS) hay vòng còn giao việc → `stage-reopen`:
     người đang duyệt một bản cũ; mở lại giai đoạn rồi trình lại sau khi làm xong."""
     changed = f["stage"].get("changed")
-    if changed is None or changed:
-        what = f"{len(changed)} file đổi (vd {', '.join(changed[:3])})" if changed else "không so được với bản trình"
-    elif loop and loop["action"] in ("task", "replan"):
+    if changed:
+        what = f"{len(changed)} file đổi (vd {', '.join(changed[:3])})"
+    elif loop and loop["action"] == "task":  # `replan` = vòng chưa bật (container mới) — không phải còn việc
         what = f"vòng còn việc ({loop['action']}: {loop.get('task') or loop['reason']})"
     else:
         return None
@@ -7440,8 +7459,10 @@ def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
         stale = _stale_submission(f, loop)
         if stale:  # mã/PLAN đổi sau bản trình: bản người đang xem không còn là HEAD (review #330)
             return stale
-        if loop and loop["action"] == "verify":
-            loop = None  # chỉ sổ/PROGRESS đổi sau bản đã kiểm lại cuối lúc `submit`: không bắt chạy lại mọi Gate
+        if loop and loop["action"] in ("verify", "replan"):
+            # chỉ sổ/PROGRESS đổi (hay không so được) sau bản đã kiểm lại cuối lúc `submit`, hoặc container mới chưa bật
+            # vòng: không bắt chạy lại mọi Gate/lập đợt mới — vẫn chờ người (review #330)
+            loop = None
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
     if part is None and harden:
         part = _step_signoff(f)
@@ -10030,7 +10051,7 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
         preview = _xt_keys(base).get("preview", "")
     except (OSError, ValueError):
         preview = ""
-    return {"verified": proof, "preview": preview}
+    return {"verified": proof, "preview": preview, "tree": evidence_fingerprint(base, (STAGE_LEDGER,))}
 
 
 def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str, extra: Dict[str, Any]) -> Dict[str, Any]:
