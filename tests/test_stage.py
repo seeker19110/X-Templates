@@ -270,6 +270,7 @@ class StageCliTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("vòng chưa xong (continue: còn T-002)", err)
         self.assertNotIn("loop resume", err)
+        self.assertNotIn("PLAN mất", err)  # vòng còn việc: không kèm lối ra của vòng dừng (review #334)
         stopped = {"verdict": "blocked", "reason": "vòng lặp đã kết thúc — stopped"}
         with unittest.mock.patch.object(xt, "_batch_verdict", return_value=stopped):  # lối ra từ helper chung (#332)
             self.assertIn("PLAN mất/rỗng → `loop init --plan <mới>`", self.stage("submit", "--evidence", "x")[2])
@@ -470,6 +471,43 @@ class StageLockTest(TmpRepoCase):
         self.write_ledger(completed())  # bảo trì/cải tiến chu kỳ đã phát hành vẫn chạy (review #327)
         self.plan("> Giai đoạn sản phẩm: 3 (C-001)")
         self.assertEqual(self.problem(), "")
+
+    def test_skill_plans_need_their_stage(self):
+        """D-246: PLAN của `/complete` (`PLAN-harden-*`) từ giai đoạn 2, của `/optimize` (`PLAN-opt-*`) chỉ giai đoạn 3."""
+        cases = [  # (tên PLAN, giai đoạn mở, được chạy?)
+            ("PLAN-harden-2026-10-29.md", 1, False),
+            ("PLAN-harden.md", 1, False),
+            ("PLAN-harden-x.md", 2, True),
+            ("PLAN-opt-2026-10-29.md", 2, False),
+            ("PLAN-opt-x.md", 3, True),
+            ("PLAN-options.md", 1, True),  # chỉ đúng tiền tố skill đặt
+            ("PLAN-hardening.md", 1, True),
+            ("plan-Harden-x.md", 1, False),  # macOS/Windows: cùng file với PLAN-harden-x.md (review #338)
+            ("PLAN-OPT-x.md", 2, False),
+            ("PLAN-mvp.md", 1, True),
+        ]
+        hist = {1: [ev("init", 1)], 2: [ev("init", 1), *approve(1)], 3: [ev("init", 1), *approve(1), *approve(2)]}
+        for name, stage, ok in cases:
+            with self.subTest(name=name, stage=stage):
+                self.PLAN = f"docs/autopilot/{name}"
+                self.write_ledger(ledger(hist[stage], stage=stage))
+                self.plan(f"> Giai đoạn sản phẩm: {stage} (C-001)")
+                why = self.problem()
+                self.assertEqual(why == "", ok, why)
+                if not ok:
+                    self.assertIn(f"đang mở giai đoạn {stage} (C-001)", why)
+                    self.assertIn("/optimize" if "opt" in name.lower() else "/complete", why)
+        self.PLAN = "docs/autopilot/PLAN-opt-y.md"  # giai đoạn 3 đã xong: bảo trì vẫn tối ưu được
+        self.write_ledger(completed())
+        self.plan("> Giai đoạn sản phẩm: 3 (C-001)")
+        self.assertEqual(self.problem(), "")
+        self.PLAN = "docs/autopilot/PLAN-harden-z.md"  # lối vào vòng thật từ chối, không ghi state
+        self.write_ledger(ledger())
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        rc, _, err = run_main("loop", "init", "--plan", self.PLAN)
+        self.assertEqual(rc, 2)
+        self.assertIn("là PLAN của `/complete`", err)
+        self.assertIsNone(xt.read_state(self.repo))
 
     def test_loop_entry_points_refuse_locked_stage(self):
         self.write_ledger(ledger())
