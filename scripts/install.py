@@ -1162,8 +1162,9 @@ STAGE_LEDGER = "docs/autopilot/STAGE.json"  # sổ giai đoạn sản phẩm (AD
 
 
 def run_stage(target: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """`xt.py stage …` của bản VỪA CÀI, gốc = dự án đích (bỏ CLAUDE_PROJECT_DIR của phiên đang chạy installer)."""
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    """`xt.py stage …` của bản VỪA CÀI, gốc = dự án đích (bỏ CLAUDE_PROJECT_DIR của phiên đang chạy installer và GIT_DIR…
+    của môi trường — lịch sử sổ phải là của dự án đích, review #339)."""
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR" and k not in GIT_LOCATION_ENV}
     cmd = [sys.executable, str(target / ".xtemplates" / "scripts" / "xt.py"), "stage", *args]
     return subprocess.run(cmd, cwd=target, env=env, capture_output=True, text=True, timeout=120)
 
@@ -1197,7 +1198,8 @@ def report_stage(target: Path, stage_init: bool) -> None:
         return
     if r.returncode:
         if warned is None or r.stderr.strip() != warned:  # cùng lý do với lần `init` vừa báo: không lặp (review #339)
-            log(f"⚠ sổ giai đoạn: {r.stderr.strip()} — sửa trước khi chạy vòng (ADR-0058)")
+            why = r.stderr.strip() or f"`xt.py stage status` thoát {r.returncode} không kèm lý do"
+            log(f"⚠ sổ giai đoạn: {why} — sửa trước khi chạy vòng (ADR-0058)")
     elif led is None:
         log(
             "Giai đoạn sản phẩm (ADR-0058): chưa dùng — dự án mới: `python3 .xtemplates/scripts/xt.py stage init`"

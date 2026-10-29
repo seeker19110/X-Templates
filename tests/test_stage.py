@@ -54,6 +54,8 @@ class StageProblemTest(unittest.TestCase):
             (ledger(schema=2), "schema"),
             (ledger(cycle="X"), "C-NNN"),
             (ledger(stage=4), "`stage` phải"),
+            (ledger(stage=[1]), "`stage` phải"),  # không băm được: sổ hỏng, không TypeError (review #338)
+            (ledger(stage=True), "`stage` phải"),
             (ledger(status="locked"), "`stage` phải"),
             (ledger(status="completed"), "chỉ có ở giai đoạn 3"),
             (ledger(status="awaiting_approval"), "submitted.sha"),
@@ -375,7 +377,9 @@ class StageCliTest(TmpRepoCase):
     def test_gate_tail_redacts_then_cuts(self):
         """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
         pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
-        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- ***")  # cắt trước → lộ dòng thân cuối
+        self.assertEqual(
+            xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- *** fail"
+        )  # cắt trước → lộ thân; chữ sau giữ
         self.assertEqual(xt._gate_tail(1, "deploy --password\nhunter2-secret"), "deploy --password ***")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
@@ -707,6 +711,36 @@ class StageLockTest(TmpRepoCase):
         fake["status"] = "active"  # lịch sử xong cả ba mà sổ ghi active (đột biến N10)
         self.assertIn("lịch sử dựng ra C-001/3/completed", xt.stage_problem(fake))
 
+    def test_release_hotfix_exit_end_to_end(self):
+        """Review #341: làm đúng lời khuyên trên git thật — (a) bản phát hành ở giai đoạn 2: nhánh vá từ tag mang sổ C-001/2
+        → PASS; (b) dự án `adopt` có bản chạy từ trước sổ: nhánh vá từ tag không có sổ → FAIL (sổ vắng mà git có), đặt
+        lên đó bản sổ trước `new-cycle` → PASS."""
+
+        def commit(msg):
+            self.git("add", "-A")
+            self.git("commit", "-q", "-m", msg)
+            return self.git("rev-parse", "HEAD").strip()
+
+        (self.repo / "app.txt").write_text("v0\n", encoding="utf-8")
+        commit("v0 trước sổ")
+        self.git("tag", "v0")
+        led2 = ledger([ev("init", 1), *approve(1)], stage=2)
+        self.write_ledger(led2)
+        commit("C-001 giai đoạn 2")
+        self.git("tag", "v1")
+        done = completed()
+        self.write_ledger(done)
+        before = commit("C-001 xong")
+        self.write_ledger(ledger([*done["history"], ev("init", 1, "C-002")], cycle="C-002"))
+        commit("C-002 MVP")
+        self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")
+        self.git("switch", "-q", "-c", "hotfix-v1", "v1")  # (a)
+        self.assertEqual(xt._release_stage(self.repo)["result"], "PASS")
+        self.git("switch", "-q", "-c", "hotfix-v0", "v0")  # (b)
+        self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")
+        self.git("checkout", before, "--", xt.STAGE_LEDGER)  # "đặt lên đó sổ C-001 giai đoạn ≥ 2 (bản trước new-cycle)"
+        self.assertEqual(xt._release_stage(self.repo)["result"], "PASS")
+
     def test_release_row(self):
         row = xt._release_stage(self.repo)
         self.assertEqual((row["result"], row["level"]), ("N/A", "SHOULD"))
@@ -720,18 +754,15 @@ class StageLockTest(TmpRepoCase):
         self.write_ledger(ledger(hist, cycle="C-002"))  # chu kỳ mới ở MVP: sự cố bản cũ đi nhánh vá (review #338)
         row = xt._release_stage(self.repo)
         self.assertEqual(row["result"], "FAIL")
-        self.assertIn("vá trên nhánh cắt từ tag/commit đang chạy production của C-001", row["evidence"])
+        self.assertIn("sự cố bản production C-001: nhánh vá cắt từ bản đang chạy, đặt lên đó sổ C-001", row["evidence"])
         self.assertIn("không phát hành MVP C-002", row["evidence"])
-        self.assertIn(f"bản nghiệm thu cuối C-001: `{rel}` (chỉ tham chiếu", row["evidence"])  # đủ 40 hex (review #341)
+        self.assertIn(f"nghiệm thu C-001: `{rel}` (tham chiếu)", row["evidence"])  # đủ 40 hex (review #341)
         rel2 = "c" * 40  # nhiều chu kỳ: nêu chu kỳ liền trước
         hist += [*approve(1, cycle="C-002"), *approve(2, cycle="C-002"), *approve(3, sha=rel2, cycle="C-002")]
         self.write_ledger(ledger([*hist, ev("init", 1, "C-003")], cycle="C-003"))
         row = xt._release_stage(self.repo)
-        self.assertIn("production C-002: vá", row["evidence"])
+        self.assertIn("production C-002: nhánh vá", row["evidence"])
         self.assertIn(f"`{rel2}`", row["evidence"])
-        adopt = [ev("adopt", 3, by="p@x", evidence="v1 đang chạy"), *approve(3, sha=rel), ev("init", 1, "C-002")]
-        self.write_ledger(ledger(adopt, cycle="C-002"))  # dự án công nhận (adopt) rồi chu kỳ mới
-        self.assertIn("production C-001: vá", xt._release_stage(self.repo)["evidence"])
         waiting = ledger([ev("init", 1), ev("submit", 1, sha=SHA)], status="awaiting_approval", submitted={"sha": SHA})
         self.write_ledger(waiting)  # MVP chờ duyệt vẫn chưa phát hành được
         self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")

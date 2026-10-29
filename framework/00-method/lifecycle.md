@@ -66,7 +66,7 @@ Khi chạy **autopilot** (xem [`../11-autonomous-loop/README.md`](../11-autonomo
 pha *lập kế hoạch* và kết thúc bằng **một cổng duyệt duy nhất** — phiên chính tự duyệt `PLAN.md` theo tiêu chí chất
 lượng cuối và ghi `D-NNN` (ADR-0008). Sau đó G5–G6 chạy tự động trong vòng lặp có bằng chứng: đợt build xong → audit delta → đợt kế tới khi hết việc (ADR-0047); G7 chạy bằng
 `/complete` (pha harden, ADR-0046) cùng vòng lặp đó (hàng `perf` đỏ → task hiệu năng trong PLAN-harden; `/optimize` chỉ sau `done`, ADR-0048) — rồi `release-check` + người ký
-`GO-NO-GO.md` (một điểm xác nhận spec/UX/bảo mật); G8: số thật vào `docs/ops/FIELD-<ngày>.json` → `/optimize --field` → `release-check` + ký delta; điểm quyết định chuyên
+`GO-NO-GO.md` (một điểm xác nhận spec/UX/bảo mật); G8: số thật vào `docs/ops/FIELD-<ngày>.json` → `/optimize --field` (có sổ giai đoạn: chỉ giai đoạn 3) → `release-check` + ký delta; điểm quyết định chuyên
 môn tự duyệt và ghi lại, chỉ dừng ở các **điểm dừng bắt buộc về hành động** (thao tác không thể hoàn tác, tiền thật, dữ
 liệu người dùng thật, đối ngoại/production, nới cổng) — xem [`../11-autonomous-loop/stop-points-and-escalation.md`](../11-autonomous-loop/stop-points-and-escalation.md).
 

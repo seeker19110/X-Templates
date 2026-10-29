@@ -210,7 +210,8 @@ SECRET_PATTERNS = (
     # thường, từng bị che (AUD-CFG-007).
     (re.compile(r"\b(npm_)[A-Za-z0-9]{36}\b|\b(hf_)[A-Za-z0-9]{20,}\b|\b(pypi-AgE)[A-Za-z0-9_-]{8,}"), r"\1\2\3***"),
     (
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
+        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
         "-----BEGIN PRIVATE KEY----- ***",
     ),
 )
@@ -3180,14 +3181,12 @@ def stop_hint(base: Path) -> str:
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
     harden = _xt_keys(base).get(PHASE_KEY) != "build"
-    if (
-        harden
-    ):  # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338)
-        with contextlib.suppress(StageError):  # sổ hỏng: giữ harden, khoá báo lỗi sổ
-            led = read_stage(base)
-            harden = not led or led["stage"] != 1
-    objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
     try:
+        # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338);
+        # sổ hỏng ({"error"}) giữ harden để khoá báo lỗi sổ
+        sf = stage_facts(base) if harden else None
+        harden = harden and (not sf or sf.get("stage") != 1)
+        objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         print(f"[xt hook-stop] không tính được gợi ý next-step: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -9928,7 +9927,8 @@ def stage_problem(led: Any) -> str:
         return f"không phải object `schema: {STAGE_SCHEMA}`"
     if not STAGE_CYCLE_RE.fullmatch(str(led.get("cycle", ""))):
         return "`cycle` không phải C-NNN"
-    if led.get("stage") not in STAGE_NAMES or led.get("status") not in STAGE_STATUSES:
+    # `type is int`: `[1]` (không băm được) hay `true` (== 1) là sổ hỏng, không phải TypeError/giai đoạn 1 (review #338)
+    if type(led.get("stage")) is not int or led["stage"] not in STAGE_NAMES or led.get("status") not in STAGE_STATUSES:
         return "`stage` phải 1–3, `status` phải " + "|".join(STAGE_STATUSES)
     if led["status"] == "completed" and led["stage"] != 3:
         return "`completed` chỉ có ở giai đoạn 3"
@@ -10288,20 +10288,19 @@ def _release_stage(base: Path) -> Dict[str, str]:
 
 
 def _stage_hotfix(led: Dict[str, Any]) -> str:
-    """Chu kỳ mới ở MVP mà chu kỳ trước đã lên Production: lối ra cho sự cố của bản đang chạy là nhánh vá cắt từ đúng
-    tag/commit đang chạy production — sổ ở đó còn chu kỳ cũ giai đoạn ≥ 2 nên hàng `stage` PASS — không mở giai đoạn phát
-    triển (đặc tả §8, ADR-0058 §2). Không trỏ bản nghiệm thu: sổ không ghi bản phát hành (§6), bảo trì sau `completed`
-    phát hành bản mới hơn, và SHA trình có thể mất sau squash-merge (review #341) — SHA đó chỉ in đủ để tham chiếu.
-    Theo bất biến của sổ (chu kỳ mới chỉ sau `completed`), lần duyệt cuối của chu kỳ khác là giai đoạn 3 chu kỳ liền trước."""
+    """Chu kỳ mới ở MVP mà chu kỳ trước đã lên Production: lối ra cho sự cố của bản đang chạy là nhánh vá cắt từ bản đó,
+    mang sổ chu kỳ cũ ở giai đoạn ≥ 2 (bản sổ trước `stage new-cycle`) — không mở giai đoạn phát triển (đặc tả §6/§8,
+    ADR-0058 §2). Máy không biết bản nào đang chạy (sổ không ghi bản phát hành, §6) và bản đó có thể có từ trước sổ
+    (`adopt`) nên chỉ nêu điều kiện, không hứa PASS; SHA nghiệm thu in đủ để tham chiếu (có thể mất sau squash-merge —
+    review #341). Theo bất biến của sổ, lần duyệt cuối của chu kỳ khác là giai đoạn 3 của chu kỳ liền trước."""
     done = [e for e in led["history"] if e["event"] == "approve" and e["cycle"] != led["cycle"] and e["stage"] >= 2]
     if not done:
         return ""
-    last = done[-1]
-    cyc = last["cycle"]
+    cyc, sha = done[-1]["cycle"], done[-1]["sha"]
     return (
-        f"; sự cố của bản production {cyc}: vá trên nhánh cắt từ tag/commit đang chạy production của {cyc} (sổ ở đó còn"
-        f" {cyc} giai đoạn ≥ 2 → hàng `stage` PASS), không phát hành MVP {led['cycle']}; bản nghiệm thu cuối {cyc}:"
-        f" `{last['sha']}` (chỉ tham chiếu — có thể không còn sau squash-merge)"
+        f"; sự cố bản production {cyc}: nhánh vá cắt từ bản đang chạy, đặt lên đó sổ {cyc} giai đoạn ≥ 2 (bản trước"
+        f" `stage new-cycle`: `git log -- {STAGE_LEDGER}`) rồi `release-check` — không phát hành MVP {led['cycle']};"
+        f" nghiệm thu {cyc}: `{sha}` (tham chiếu)"
     )
 
 
