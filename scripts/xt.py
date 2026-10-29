@@ -2711,6 +2711,8 @@ def loop_verify(base: Optional[Path] = None, run_all: bool = False) -> int:
     d = state_dir(base)
     d.mkdir(parents=True, exist_ok=True)
     write_atomic(d / VERIFIED_FILE, json.dumps(rec, ensure_ascii=False, indent=2) + "\n")
+    if ok and run_all:
+        _close_batch(base)
     if not stable:
         print(
             "✗ Gate/lệnh sàn làm đổi cây làm việc (format ghi file? artefact như `.coverage`, `c.out`?) — lệnh kiểm không"
@@ -2723,6 +2725,20 @@ def loop_verify(base: Optional[Path] = None, run_all: bool = False) -> int:
     ran = len(results) - kept
     print(f"[xt] kiểm lại cuối: {'XANH' if ok else 'ĐỎ'} ({ran} Gate{more}) — .autopilot/{VERIFIED_FILE}")
     return 0 if ok else 1
+
+
+def _close_batch(base: Path) -> None:
+    """`loop verify --all` xanh khi đợt `done`/chờ người → dấu "đợt xong" (T-3578). Ghi state lỗi (khoá, `rev`) → báo
+    stderr, không đổi exit của verify: dấu chỉ phục vụ `next-step` (FLOW-13)."""
+    try:
+        if loop_verdict(base)["verdict"] not in ("done", PENDING_HUMAN):
+            return
+        update_loop_state(base, lambda cur: _mark_batch_done(cur, _plan_pairs(base, cur.get("plan"))))
+    except (OSError, TypeError, ValueError, AttributeError) as exc:  # state sai kiểu: verify giữ exit (review #319)
+        print(
+            f"⚠ không ghi được dấu đợt xong ({type(exc).__name__}: {exc}) — `next-step` có thể gộp đợt này với đợt kế",
+            file=sys.stderr,
+        )
 
 
 def _verify_floor(base: Path, gates: List[Dict[str, Any]], timeout: int) -> List[Dict[str, Any]]:
@@ -3146,11 +3162,14 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
             {"decision": "block", "reason": _stop_reason(st, v, mode, xt_cmd(base))}, ensure_ascii=False
         ), 0
     if st and st.get("active") and v["verdict"] in ("done", "blocked", "budget", PENDING_HUMAN):
-        _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=True))
+        tasks = _plan_pairs(base, st.get("plan"))
+        _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=True, tasks=tasks))
     return "", 0
 
 
-def _stop_apply(cur: Dict[str, Any], mode: Optional[str], v: Dict[str, Any], end: bool) -> Optional[Dict[str, Any]]:
+def _stop_apply(
+    cur: Dict[str, Any], mode: Optional[str], v: Dict[str, Any], end: bool, tasks: Optional[List[str]] = None
+) -> Optional[Dict[str, Any]]:
     """`fn` của `update_state` cho Stop hook: ghi chế độ quyền của phiên; `end` → tắt vòng kèm verdict cuối, không →
     thêm một lượt (`iterations`) và verdict lượt này. Không còn state, hoặc vòng đã tắt giữa chừng (`loop stop` chen vào
     — không đè `final_verdict` của nó, review #294) → None, không ghi."""
@@ -3160,6 +3179,8 @@ def _stop_apply(cur: Dict[str, Any], mode: Optional[str], v: Dict[str, Any], end
         cur["permission_mode"] = mode
     if end:
         cur.update(active=False, ended=now_iso(), final_verdict=v)
+        if v["verdict"] in ("done", PENDING_HUMAN):
+            _mark_batch_done(cur, tasks or [])
     else:
         cur.update(iterations=cur.get("iterations", 0) + 1, last_verdict=v)
     return cur
@@ -6556,7 +6577,22 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
         )
     new = copy.deepcopy(state)
     notes[:] = _carry_previous(cur, new, base)
+    new["objective"] = _batch_mark(cur, new, base)  # sau `_carry_previous`: MUST chờ người đã mang sang không tính
+    notes += _reopen_note(_objective_batches(cur), new["objective"]["batches"], new["plan"])
     return new
+
+
+def _reopen_note(before: List[Dict[str, Any]], after: List[Dict[str, Any]], plan: str) -> List[str]:
+    """Dòng ℹ khi `loop init` mở lại đợt đã có dấu xong vì PLAN chỉ nối thêm task (D-230): PLAN dài dần qua nhiều đợt cùng
+    đường dẫn thì `next-step` không đếm được đợt (FLOW-13) — báo để đợt kế dùng PLAN-<đợt>.md mới."""
+    if not (before and before[-1].get("done") and not after[-1].get("done")):
+        return []
+    if after[-1].get("at") != before[-1].get("at"):
+        return []
+    return [
+        f"ℹ Đợt trước đã xong mà {plan} chỉ nối thêm task → tính là mở lại cùng đợt; đợt kế dùng PLAN-<đợt>.md mới để"
+        " `loop next-step` đếm đợt (FLOW-13)"
+    ]
 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
@@ -6709,6 +6745,7 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
 NEXT_STEP_OBJECTIVES = ("build-until-clean",)  # `harden-to-signoff` (T-3548); `optimize-budget` sau `perf trial`
 AUDIT_STATUS_DEFAULT = "docs/ops/AUDIT-STATUS.md"
 PR_SETTLED = ("done", "closed")  # `pr next` không còn việc cho PR
+OBJECTIVE_BATCHES_KEEP = 20  # mốc đầu đợt giữ trong `objective.batches` (FLOW-13 chỉ cần hai mốc cuối)
 LOOP_TO_STEP = {"continue": "task", "verify": "verify", "blocked": "blocked", "budget": "budget"}
 
 
@@ -6726,6 +6763,90 @@ def _open_must(base: Path, st: Dict[str, Any]) -> List[str]:
     if not bp or not (base / bp).is_file():
         return []
     return [i for i in blueprint_status(base / bp)["open_must"] if i not in _deferred(st)]
+
+
+def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`objective.batches` của state (mốc đầu mỗi đợt); thiếu/sai kiểu → []."""
+    obj = st.get("objective")
+    raw = obj.get("batches") if isinstance(obj, dict) else None
+    return [b for b in raw if isinstance(b, dict)] if isinstance(raw, list) else []
+
+
+def _plan_pairs(base: Path, plan: Any) -> List[str]:
+    """`ID:req_rev` các task của PLAN (spec, không tick) — vân tay đợt ghi kèm dấu đợt xong. PLAN mất/không đọc được như
+    UTF-8 → [] (`_plan_tasks`, review #296): Stop hook vẫn đóng được vòng `blocked` (review #319)."""
+    return sorted(f"{t['id']}:{task_req_rev(t)}" for t in _plan_tasks(base, {"plan": plan}))
+
+
+def _same_batch(prev: Dict[str, Any], last: Dict[str, Any], plan: str, base: Path) -> bool:
+    """`loop init` tiếp cùng đợt với mốc cuối (T-3578, D-228): cùng đường dẫn PLAN, vòng trước chưa hết ngân sách (init sau
+    đó là đợt kế — D-177, kể cả hạn trôi qua lúc vòng dừng), và đợt chưa có dấu xong — hoặc có dấu mà PLAN chỉ nối thêm
+    task (mọi `ID:req_rev` lúc đánh dấu còn nguyên: đợt mở lại, review #319). State sai kiểu → coi chưa hết ngân sách."""
+    try:
+        ended = _budget_exhausted(prev) is not None or _final_verdict(prev) == "budget"
+    except (TypeError, ValueError, AttributeError):
+        ended = False
+    if ended or last.get("plan") != plan:
+        return False
+    if not last.get("done"):
+        return True
+    tasks = last.get("tasks")
+    if not (isinstance(tasks, list) and tasks and all(isinstance(t, str) for t in tasks)):
+        return False  # mốc cũ không có `tasks`, hay sai kiểu (review #319) → đợt mới
+    return set(tasks) <= set(_plan_pairs(base, plan))
+
+
+def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:
+    """`objective` sau `loop init`: mốc đầu mỗi đợt — số 🔴/🟠 mở trong sổ mặc định + MUST mở ngoài việc chờ người. Đợt
+    mới khi không `_same_batch` (mốc cuối đã xong, vòng trước hết ngân sách, PLAN khác đường dẫn); cùng đợt mà mốc có
+    dấu xong (PLAN nối thêm task) → gỡ dấu. Chưa có sổ, sổ/blueprint không đọc được → `open` null (FLOW-13 không so qua
+    mốc thiếu số). Giữ `OBJECTIVE_BATCHES_KEEP` mốc cuối."""
+    batches = [dict(b) for b in _objective_batches(prev)]  # không sửa mốc của state cũ
+    if batches and _same_batch(prev, batches[-1], new["plan"], base):
+        _reopen_batch(batches[-1])
+    else:
+        status = base / AUDIT_STATUS_DEFAULT
+        try:
+            n = audit_open_count(status) + len(_open_must(base, new)) if status.is_file() else None
+        except (OSError, ValueError):
+            n = None
+        batches.append({"plan": new["plan"], "status": AUDIT_STATUS_DEFAULT, "at": new["started"], "open": n})
+    return {"name": NEXT_STEP_OBJECTIVES[0], "batches": batches[-OBJECTIVE_BATCHES_KEEP:]}
+
+
+def _reopen_batch(mark: Dict[str, Any]) -> None:
+    """Đợt mở lại (`unblock`/`resume`, PLAN nối thêm task): gỡ dấu xong của mốc."""
+    mark.pop("done", None)
+    mark.pop("tasks", None)
+
+
+def _reopen_last_batch(cur: Dict[str, Any]) -> None:
+    """`loop unblock`/`resume` mở lại vòng → đợt chưa xong: gỡ dấu xong ở mốc cuối (review #319)."""
+    batches = _objective_batches(cur)
+    if batches and batches[-1].get("done"):
+        _reopen_batch(batches[-1])
+        cur["objective"] = {**cur["objective"], "batches": batches}
+
+
+def _mark_batch_done(cur: Dict[str, Any], tasks: List[str]) -> Optional[Dict[str, Any]]:
+    """Dấu "đợt xong" trên mốc cuối (T-3578) kèm `tasks` (`_plan_pairs` lúc đánh dấu): đợt `done`/chờ người đã kiểm lại
+    cuối — `loop init` sau đó là đợt kế dù vòng còn bật (Stop hook chưa chạy) và PLAN bị viết đè cùng đường dẫn. Không có
+    mốc/đã có dấu → None (không ghi)."""
+    batches = _objective_batches(cur)
+    if not batches or batches[-1].get("done"):
+        return None
+    batches[-1].update(done=now_iso(), tasks=tasks)
+    cur["objective"] = {**cur["objective"], "batches": batches}
+    return cur
+
+
+def _no_progress(batches: List[Dict[str, Any]], now: int, status: str) -> Optional[str]:
+    """Hai đợt liên tiếp không giảm việc mở (mốc đầu đợt kế trước ≤ mốc đầu đợt này ≤ hiện tại, hiện tại > 0, hai mốc đếm
+    cùng sổ `status`) → `at` của mốc đầu chuỗi; không thì None (ADR-0052 §5, FLOW-13)."""
+    if len(batches) < 2 or now <= 0 or any(b.get("status") != status for b in batches[-2:]):
+        return None
+    a, b = batches[-2].get("open"), batches[-1].get("open")
+    return str(batches[-2].get("at")) if type(a) is int and type(b) is int and a <= b <= now else None
 
 
 def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
@@ -6761,6 +6882,7 @@ def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[L
             "iterations": st.get("iterations", 0),
             "max_iterations": st.get("max_iterations"),
             "deadline": st.get("deadline"),
+            "batches": _objective_batches(st),
         },
     }
 
@@ -6858,11 +6980,19 @@ def _step_audit(f: Dict[str, Any]) -> StepPart:
 
 
 def _step_work(f: Dict[str, Any]) -> StepPart:
-    """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11). Không-tiến-triển qua các đợt (FLOW-13) là
-    T-3578 (D-227)."""
+    """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11); hai đợt liền không giảm → `budget` (FLOW-13)."""
     n_audit, n_must = f["audit"]["open"], f["open_must"]
+    batches = f["state"]["batches"]
     if not n_audit + n_must:
         return None
+    since = _no_progress(batches, n_audit + n_must, f["audit"]["status"])
+    if since:
+        chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n_audit + n_must}"
+        return {
+            "action": "budget",
+            "reason": f"hai đợt liên tiếp không giảm 🔴/🟠/MUST mở ({chain}, từ {since}) — kế hoạch/đặc tả cần người xem",
+            "missing": ["đợt kế giảm số việc mở"],
+        }
     return {
         "action": "replan",
         "reason": f"còn {n_audit} 🔴/🟠 mở trong sổ, {n_must} MUST mở ngoài việc chờ người — lập đợt kế (PLAN mới, `loop init`)",
@@ -6880,7 +7010,7 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "PLAN hết task, PR đã xong, sổ audit phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
             f"{pending} — đề xuất `/complete`; máy không đổi `delivery_phase` (D-178)",
         }
-    st = f["state"]
+    st, batches = f["state"], f["state"]["batches"]
     return {
         "objective": f["objective"],
         "action": part["action"],
@@ -6895,10 +7025,10 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
         },
         "budget": {
             "iterations": [st["iterations"], st["max_iterations"]],
-            "batches": None,  # đếm đợt và không-tiến-triển mục tiêu: T-3578 (D-227)
+            "batches": [len(batches), None],  # số mốc giữ trong state (≤ OBJECTIVE_BATCHES_KEEP)
             "deadline": st["deadline"],
             "cost_usd": None,  # phiên tương tác không có nguồn chi phí — null, không 0 (nghiên cứu §4D)
-            "no_progress_since": None,
+            "no_progress_since": _no_progress(batches, f["audit"]["open"] + f["open_must"], f["audit"]["status"]),
         },
         "inputs": f,
     }
@@ -7527,6 +7657,7 @@ def _resume_apply(cur: Dict[str, Any], change: Dict[str, Any], base: Path, clear
     if cur.get("blueprint") and not cur.get("scope"):  # state cũ (bản < 3.9): ghi scope từ blueprint hiện tại (T-1503)
         cur.update({"scope": sc} if (sc := build_scope(base, str(cur["blueprint"]))) else {})
     cur.pop("deferred", None)  # người đã xử lý: việc chờ quay lại hàng làm; còn cần người thì agent defer lại
+    _reopen_last_batch(cur)
     return cur
 
 
@@ -7774,6 +7905,7 @@ def _unblock_apply(
         problem[:] = [f"✗ Mở ra vẫn dừng ({after['reason']}) — {EXIT_BUDGET}; không ghi gì"]
         return None
     cur["unblocked"] = [*_interventions(cur, "unblocked"), entry]
+    _reopen_last_batch(cur)
     return cur
 
 

@@ -1601,3 +1601,31 @@
 - Chọn: Tách: bỏ objective.batches/_batch_mark/_no_progress khỏi #318, FLOW-13 vào XFAIL trỏ T-3578 (task mới: dấu đợt xong ghi khi loop verify --all xanh với verdict done hoặc Stop hook kết thúc done/chờ người; stopped/blocked không đóng đợt; D-NNN cho hết ngân sách); Gate T-3547 bỏ FLOW-13
 - Lý do (tiêu chí chất lượng cuối): PLAN cho phép tách khi task vượt cỡ (~150 dòng); giữ đường lùi: next-step không có FLOW-13 chỉ thiếu budget không-tiến-triển (an toàn: replan), không báo sai ready-for-complete; thiết kế dấu đợt xong chạm loop verify/Stop hook — đáng PR và review riêng thay vì vòng sửa–review thứ tư trên PR đã 250+ dòng (ADR-0053)
 - Đường lùi: Gộp T-3578 lại vào PR sau; mã mốc đợt có ở commit 2c69aac
+
+### D-228 · 2026-10-28T22:49:41+00:00 · T-3578: ranh giới đợt của next-step (FLOW-13) — dấu đợt xong ghi ở đâu, vòng hết ngân sách / dừng tay / bị chặn có đóng đợt không
+
+- Phương án: (1) Dấu done trên mốc cuối khi loop verify --all xanh lúc verdict done/chờ người và khi Stop hook kết thúc done/chờ người; loop init mở đợt mới khi mốc cuối có dấu, vòng trước hết ngân sách (D-177: init sau đó là đợt kế), hoặc PLAN khác đường dẫn; stopped/blocked không đóng đợt; ghi dấu lỗi → cảnh báo, verify giữ exit · (2) Suy ranh giới từ cờ active/spec PLAN lúc init (bị bác ba lượt review #318) · (3) Hết ngân sách không đóng đợt (init sau budget là cùng đợt)
+- Chọn: Dấu done trên mốc cuối khi loop verify --all xanh lúc verdict done/chờ người và khi Stop hook kết thúc done/chờ người; loop init mở đợt mới khi mốc cuối có dấu, vòng trước hết ngân sách (D-177: init sau đó là đợt kế), hoặc PLAN khác đường dẫn; stopped/blocked không đóng đợt; ghi dấu lỗi → cảnh báo, verify giữ exit
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: dấu ghi lúc máy chứng minh đợt done (verify --all hoặc Stop hook) nên viết đè PLAN sau đó không lừa được; budget theo D-177 và EXIT_BUDGET gọi init sau là đợt kế — nhất quán; stopped/blocked chưa xong việc (lối ra unblock); verify không đỏ vì dấu (dấu chỉ phục vụ next-step, fail-open về luồng ADR-0002)
+- Đường lùi: Bỏ _close_batch trong loop_verify và _mark_batch_done trong Stop hook; _batch_mark về mỗi PLAN khác một đợt
+
+### D-229 · 2026-10-29T00:16:25+00:00 · PR #319 review lượt 1: dấu đợt xong còn sau khi đợt mở lại (unblock/resume) hoặc PLAN được nối thêm task rồi init --force — giữ hay gỡ
+
+- Phương án: (1) unblock/resume gỡ dấu ở mốc cuối; dấu ghi kèm tasks = ID:req_rev của PLAN lúc đánh dấu, init cùng PLAN mà mọi cặp cũ còn nguyên (chỉ nối thêm) là cùng đợt, gỡ dấu; viết lại spec → đợt mới; hạn trôi qua lúc vòng dừng vẫn đóng đợt (D-177, ghi CHANGELOG) · (2) Giữ dấu, ghi rõ hành vi trong CHANGELOG (đợt giả → budget sai, lớp lỗi S3 của #318)
+- Chọn: unblock/resume gỡ dấu ở mốc cuối; dấu ghi kèm tasks = ID:req_rev của PLAN lúc đánh dấu, init cùng PLAN mà mọi cặp cũ còn nguyên (chỉ nối thêm) là cùng đợt, gỡ dấu; viết lại spec → đợt mới; hạn trôi qua lúc vòng dừng vẫn đóng đợt (D-177, ghi CHANGELOG)
+- Lý do (tiêu chí chất lượng cuối): Đúng: vòng mở lại hay PLAN nối thêm là đợt chưa xong — giữ dấu sinh đợt giả, báo budget sai đúng lớp lỗi đã bác #318; ID:req_rev phân biệt nối thêm (cặp cũ còn) với viết lại đợt kế cùng đường dẫn (S1 — spec đổi); hạn giữ theo D-177 để nhất quán EXIT_BUDGET
+- Đường lùi: Bỏ _reopen_last_batch ở unblock/resume và nhánh tasks ở _same_batch
+
+### D-230 · 2026-10-29T00:45:23+00:00 · PR #319: hai lượt review chưa sạch (ADR-0053) — lượt 2 còn 🟠 Stop hook không đóng vòng khi PLAN không đọc được UTF-8 (_plan_pairs gọi thẳng parse_plan) và 🟢 PLAN dài dần cùng đường dẫn gộp đợt; đổi chiến lược thế nào
+
+- Phương án: (1) Thu hẹp phạm vi sửa: _plan_pairs dùng _plan_tasks (PLAN mất/không giải mã được → [], như review #296), tasks chỉ nhận chuỗi; loop init in ℹ khi mở lại đợt đã xong vì PLAN chỉ nối thêm task (trỏ PLAN-<đợt>.md); giới hạn PLAN dài dần cùng đường dẫn ghi vào CHANGELOG — không đổi thiết kế ranh giới đợt (D-228/D-229) · (2) Bỏ luật nối thêm task (về D-228: dấu xong luôn mở đợt mới) · (3) Thêm cờ loop init --new-batch
+- Chọn: Thu hẹp phạm vi sửa: _plan_pairs dùng _plan_tasks (PLAN mất/không giải mã được → [], như review #296), tasks chỉ nhận chuỗi; loop init in ℹ khi mở lại đợt đã xong vì PLAN chỉ nối thêm task (trỏ PLAN-<đợt>.md); giới hạn PLAN dài dần cùng đường dẫn ghi vào CHANGELOG — không đổi thiết kế ranh giới đợt (D-228/D-229)
+- Lý do (tiêu chí chất lượng cuối): Lỗi 🟠 là dùng sai helper (đã có _plan_tasks xử lý PLAN hỏng) — sửa tại gốc, không đổi thiết kế; PLAN dài dần cùng đường dẫn trái quy ước PLAN-<đợt>.md (README, skill autopilot, mẫu PLAN), state không có tín hiệu phân biệt đợt kế với mở lại → báo rõ thay vì đoán; bỏ luật nối thêm sẽ đưa lại đợt giả (review #319 lượt 1)
+- Đường lùi: Về _plan_pairs gọi parse_plan; bỏ dòng ℹ
+
+### D-231 · 2026-10-29T00:45:43+00:00 · PR #319: ghi lại quyết định đổi chiến lược sau review lượt 2 (D-230 ghi cùng giây với review nên pr rethink không nhận)
+
+- Phương án: (1) Theo D-230: thu hẹp phạm vi sửa (_plan_pairs qua _plan_tasks, tasks chỉ nhận chuỗi, ℹ khi mở lại đợt vì PLAN nối thêm, giới hạn ghi CHANGELOG), không đổi thiết kế ranh giới đợt · (2) Bỏ luật nối thêm task
+- Chọn: Theo D-230: thu hẹp phạm vi sửa (_plan_pairs qua _plan_tasks, tasks chỉ nhận chuỗi, ℹ khi mở lại đợt vì PLAN nối thêm, giới hạn ghi CHANGELOG), không đổi thiết kế ranh giới đợt
+- Lý do (tiêu chí chất lượng cuối): Như D-230: lỗi 🟠 là dùng sai helper — sửa tại gốc; PLAN dài dần cùng đường dẫn trái quy ước PLAN-<đợt>.md, báo rõ thay vì đoán
+- Đường lùi: Như D-230
