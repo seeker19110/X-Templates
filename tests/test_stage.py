@@ -54,6 +54,8 @@ class StageProblemTest(unittest.TestCase):
             (ledger(schema=2), "schema"),
             (ledger(cycle="X"), "C-NNN"),
             (ledger(stage=4), "`stage` phải"),
+            (ledger(stage=[1]), "`stage` phải"),  # không băm được: sổ hỏng, không TypeError (review #338)
+            (ledger(stage=True), "`stage` phải"),
             (ledger(status="locked"), "`stage` phải"),
             (ledger(status="completed"), "chỉ có ở giai đoạn 3"),
             (ledger(status="awaiting_approval"), "submitted.sha"),
@@ -375,7 +377,9 @@ class StageCliTest(TmpRepoCase):
     def test_gate_tail_redacts_then_cuts(self):
         """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
         pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
-        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- ***")  # cắt trước → lộ dòng thân cuối
+        self.assertEqual(
+            xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- *** fail"
+        )  # cắt trước → lộ thân; chữ sau giữ
         self.assertEqual(xt._gate_tail(1, "deploy --password\nhunter2-secret"), "deploy --password ***")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
