@@ -10009,7 +10009,18 @@ def stage_plan_problem(base: Path, plan: str) -> str:
     want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
     if len(got) != 1:
         return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
-    return _stage_mismatch(plan, got[0], led, want)
+    return _stage_mismatch(plan, got[0], led, want) or _stage_opt_problem(plan, led)
+
+
+def _stage_opt_problem(plan: str, led: Dict[str, Any]) -> str:
+    """PLAN của `/optimize` (`PLAN-opt-*`) chỉ chạy ở giai đoạn 3 (ADR-0058, D-248) — lớp chặn nhầm theo tên: giai đoạn 1/2
+    sửa hiệu năng tới sàn trong PLAN của chính giai đoạn đó; đổi tên PLAN lách được, review là lớp kiểm phạm vi."""
+    if led["stage"] == 3 or not Path(plan).name.startswith("PLAN-opt"):
+        return ""
+    return (
+        f"{plan} là PLAN của `/optimize` — chỉ ở giai đoạn 3, đang mở giai đoạn {led['stage']} ({led['cycle']}): task hiệu"
+        " năng tới sàn vào PLAN của giai đoạn này (ADR-0058, D-248)"
+    )
 
 
 def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:
