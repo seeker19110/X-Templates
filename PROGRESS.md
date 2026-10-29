@@ -3,12 +3,11 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.28.0, pha `harden` — D-136) · Cập nhật: 2026-10-29 · Nhánh: main
 
 ## Đang làm
-- 2026-10-29 **ADR-0058** (PR #327 thay #325, D-239): ba giai đoạn sản phẩm khoá bằng máy — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, chỉ người `approve`; lát A+B. Kế: lát C–F (đặc tả §8); đóng #325 khi #327 merge.
+- 2026-10-29 **ADR-0058** (#327–#331, D-239…D-241): ba giai đoạn sản phẩm khoá bằng máy — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, chỉ người `approve`; lát A–D phần máy (`submit` đòi kiểm lại cuối + vân tay, `next-step` `stage-submit`/`wait-approval`/`stage-reopen`). Kế: Gate MVP smoke, harden/`/optimize` theo giai đoạn, installer tạo sổ, cắt bản. #326 tiếp quản và merge (D-245).
 - 2026-10-28 **ADR-0056** (#312, D-221, `research/2026-10-28-velocity.md`): lỗi có từ trước không chặn PR, CI là cổng đầy đủ, `loop decide` đánh số qua nhánh remote, `xt.yaml` `setup`. **ADR-0054/0055** (#311, D-219/D-220): khoá/guard hỏng → chặn; `install.py --preset`. 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
 - 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge (#290–#310); T-3556 xong (#313) → **3.28.0** (T-3546); kế lát 2 T-3547 `loop next-step`.
 - 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.
 - 2026-10-26 **3.27.0** (PLAN-harden-2026-10-26d, #281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được (review #282 bảy lượt); trần byte thư mục +1 MiB. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
-- 2026-10-26 **PLAN-harden-2026-10-26 + PLAN-harden-2026-10-26b** (D-193/194, `/complete`): 20 MUST tick có `— Kiểm:` (`unchecked_must` 57 → 37; PLAN-harden-2026-10-26c: → 0, D-195); CI `checks` chạy `blueprint-status --strict --run`; `_load_guard` báo lỗi nạp (ERR-001).
 - PLAN-3.23-delegation-rate (D-171/172): chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).

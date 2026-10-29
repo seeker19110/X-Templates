@@ -269,6 +269,10 @@ class StageCliTest(TmpRepoCase):
             rc, _, err = self.stage("submit", "--evidence", "x")
         self.assertEqual(rc, 2)
         self.assertIn("vòng chưa xong (continue: còn T-002)", err)
+        self.assertNotIn("loop resume", err)
+        stopped = {"verdict": "blocked", "reason": "vòng lặp đã kết thúc — stopped"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=stopped):  # có lối ra (review #331)
+            self.assertIn("`loop resume`/`loop unblock` rồi trình", self.stage("submit", "--evidence", "x")[2])
         done = unittest.mock.patch.object(xt, "_batch_verdict", return_value={"verdict": "done", "reason": "x"})
         with done, unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
             rc, _, err = self.stage("submit", "--evidence", "x")
@@ -533,8 +537,8 @@ class StageLockTest(TmpRepoCase):
         with unittest.mock.patch.object(xt, "_changed_since", return_value=None):  # SHA mất (squash, clone mới)
             self.assertEqual(xt._stage_changed(self.repo, sub), [])  # vân tay nội dung khớp
             self.assertIsNone(xt._stage_changed(self.repo, {**sub, "tree": None}))  # bản trình cũ: không so được
-            self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), ["(nội dung khác bản trình)"])
-        self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), ["(nội dung khác bản trình)"])
+            self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), [xt.STAGE_DIFF_UNKNOWN])
+        self.assertEqual(xt._stage_changed(self.repo, {**sub, "tree": "0" * 64}), [xt.STAGE_DIFF_UNKNOWN])
         (self.repo / "moi.py").write_text("x = 1\n", encoding="utf-8")  # mã đổi sau bản trình → mở lại giai đoạn
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "mã mới")
