@@ -870,7 +870,8 @@ class UpdateStateTest(TmpRepoCase):
         xt.write_state({**xt.read_state(self.tmp), "blocked": True, "blocked_reason": "x"}, self.tmp)
         out, rc = xt.hook_stop(json.dumps({"permission_mode": "auto"}), self.tmp)
         st = xt.read_state(self.tmp)
-        self.assertEqual((out, rc, st["active"], st["permission_mode"]), ("", 0, False, "auto"))
+        self.assertEqual((rc, st["active"], st["permission_mode"]), (0, False, "auto"))
+        self.assertIn("blocked", json.loads(out)["systemMessage"])  # vòng kết thúc: cho dừng kèm gợi ý (T-3550)
         self.assertEqual(st["final_verdict"]["verdict"], "blocked")
 
     def test_update_state_stop_hook_skips_loop_stopped_meanwhile(self) -> None:
@@ -885,8 +886,12 @@ class UpdateStateTest(TmpRepoCase):
 
         self.init_loop()
         xt.write_state({**xt.read_state(self.tmp), "blocked": True, "blocked_reason": "x"}, self.tmp)
-        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop):
+        hint = unittest.mock.patch.object(
+            xt, "stop_hint", return_value="gợi ý"
+        )  # vòng do `loop stop` đóng: không gợi ý
+        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop), hint as called:
             self.assertEqual(xt.hook_stop("{}", self.tmp), ("", 0))
+        called.assert_not_called()
         st = xt.read_state(self.tmp)
         self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "stopped"))
         self.init_loop()
