@@ -5138,7 +5138,9 @@ def _gate_path(path: str) -> bool:
 
 
 LOCKFILE_RE = re.compile(
-    r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
+    r"(^|/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock|uv\.lock|poetry\.lock"
+    r"|Pipfile\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock|packages\.lock\.json|gradle\.lockfile|pubspec\.lock"
+    r"|Podfile\.lock|Package\.resolved|mix\.lock)$"  # review #324 T3: lockfile của thẻ phụ thuộc D-235
 )
 # Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
 # rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`, `conanfile.txt`);

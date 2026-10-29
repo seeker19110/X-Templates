@@ -615,6 +615,45 @@ class MergeDecisionTest(unittest.TestCase):
                     "conanfile.txt",
                     "gradle/libs.versions.toml",
                     "x.gemspec",
+                    # review #324: mỗi tên/biến thể một ca — bỏ tên nào khỏi regex là đỏ (đột biến T1/P4)
+                    "Package.swift",
+                    "App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+                    "build.gradle",
+                    "settings.gradle.kts",
+                    "global.json",
+                    "Directory.Packages.props",
+                    "packages.config",
+                    "vcpkg.json",
+                    "gradle.lockfile",
+                    "npm-shrinkwrap.json",
+                    "bun.lock",
+                    "bun.lockb",
+                    "deno.lock",
+                    "deno.jsonc",
+                    "Pipfile",
+                    "environment.yaml",
+                    "requirements/dev.in",
+                    "go.work",
+                    "lib/F.fsproj",
+                    "pubspec.lock",
+                    "ios/Podfile.lock",
+                    "mix.lock",
+                    "conanfile.py",
+                    "setup.cfg",
+                    "pnpm-lock.yaml",
+                    "yarn.lock",
+                    "pyproject.toml",
+                    "poetry.lock",
+                    "uv.lock",
+                    "go.mod",
+                    "go.sum",
+                    "Cargo.toml",
+                    "Cargo.lock",
+                    "Gemfile",
+                    "Gemfile.lock",
+                    "composer.json",
+                    "composer.lock",
+                    "package-lock.json",
                 )
             },
             "lớn": ([{"path": "src/a.py", "additions": 140, "deletions": 20}, *f], "161 dòng > 150"),
@@ -655,6 +694,13 @@ class MergeDecisionTest(unittest.TestCase):
                 "đổi mã mà không đổi test",
             ),
         }
+        # Neo `(^|/)…$` của thẻ phụ thuộc (review #324 T2): tên dài hơn/chứa tên manifest không phải manifest
+        for p in ("notpom.xml", "setup.py.bak", "myglobal.json", "App.csproj.user", "deno.json5", "src/mysetup.py"):
+            with self.subTest(p):
+                self.assertNotIn(
+                    "(phụ thuộc)",
+                    " · ".join(xt.merge_lane_reasons(pr(files=[{"path": p, "additions": 1, "deletions": 0}, *f]), [])),
+                )
         for name, (files, reason) in cases.items():
             with self.subTest(name):
                 d = xt.merge_decision(pr(files=files), 2)
@@ -814,6 +860,10 @@ class MergeDecisionTest(unittest.TestCase):
         lock = [*files, {"path": "uv.lock", "additions": 900, "deletions": 50}]
         d = xt.merge_decision(pr(files=lock), 2)
         self.assertEqual(d["reasons"], ["đường dẫn nhạy cảm (phụ thuộc): uv.lock"])  # không tính 950 dòng
+        for name in ("Pipfile.lock", "pubspec.lock", "gradle.lockfile", "Package.resolved", "mix.lock", "bun.lock"):
+            with self.subTest(name):  # lockfile D-235 cũng không tính dòng (review #324 T3)
+                d = xt.merge_decision(pr(files=[*files, {"path": name, "additions": 900, "deletions": 50}]), 2)
+                self.assertEqual(d["reasons"], [f"đường dẫn nhạy cảm (phụ thuộc): {name}"])
 
 
 class MergeConfigTest(unittest.TestCase):
