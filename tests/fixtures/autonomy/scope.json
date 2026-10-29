@@ -46,7 +46,9 @@
     "AUD-CFG-001",
     "AUD-CFG-002",
     "AUD-CFG-005",
-    "AUD-CFG-006"
+    "AUD-CFG-006",
+    "AUD-SEC-141",
+    "AUD-SEC-142"
    ]
   },
   {
@@ -68,7 +70,8 @@
     "AUD-XFEAT-020",
     "AUD-CFG-003",
     "AUD-CODE-025",
-    "AUD-SEC-130"
+    "AUD-SEC-130",
+    "AUD-HAR-125"
    ]
   },
   {
