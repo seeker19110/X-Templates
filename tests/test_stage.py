@@ -271,8 +271,15 @@ class StageCliTest(TmpRepoCase):
         self.assertIn("vòng chưa xong (continue: còn T-002)", err)
         self.assertNotIn("loop resume", err)
         stopped = {"verdict": "blocked", "reason": "vòng lặp đã kết thúc — stopped"}
-        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=stopped):  # có lối ra (review #331)
-            self.assertIn("`loop resume`/`loop unblock` rồi trình", self.stage("submit", "--evidence", "x")[2])
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=stopped):  # lối ra từ helper chung (#332)
+            self.assertIn("PLAN mất/rỗng → `loop init --plan <mới>`", self.stage("submit", "--evidence", "x")[2])
+        spent = {"verdict": "budget", "reason": "hết vòng"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=spent):
+            self.assertNotIn("loop init", self.stage("submit", "--evidence", "x")[2])
+        (self.repo / "P.md").write_text("- [ ] `T-001` x — Gate: `true`\n", encoding="utf-8")
+        live = {"active": True, "plan": "P.md"}
+        self.assertEqual(xt._stage_loop_exit(live, self.repo), xt.EXIT_UNBLOCK)  # vòng còn bật, PLAN còn
+        (self.repo / "P.md").unlink()
         done = unittest.mock.patch.object(xt, "_batch_verdict", return_value={"verdict": "done", "reason": "x"})
         with done, unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
             rc, _, err = self.stage("submit", "--evidence", "x")
