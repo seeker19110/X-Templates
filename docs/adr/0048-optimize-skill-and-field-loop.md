@@ -4,6 +4,7 @@
   UX, bảo mật; trả nợ review) → /optimize (chỉ các ngân sách bị vi phạm, có đo) → release-check + con người ký GO/NO-GO →
   production → quan sát dữ liệu thật → /optimize dựa trên số liệu production → lại qua release-check và ký"; chốt phương án B
   — D-180; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008)
+- **Mở rộng bởi:** ADR-0058 (D-248) — ở giai đoạn sản phẩm 3 `/optimize` nhận thêm mục tiêu cải tiến chưa đỏ có số + baseline (`LOOP-OPT-017`); dự án không có sổ giữ nguyên luật "chỉ ngân sách đỏ"; có sổ ở giai đoạn 1/2 thì không chạy `/optimize` (D-246) — ngân sách đỏ vào PLAN của giai đoạn đó.
 - **Trạng thái triển khai:** Đã triển khai — PLAN-3.25 (`docs/autopilot/PLAN-3.25-optimize.md`), bản 3.25.0: skill
   `.claude/skills/optimize/SKILL.md`, `DOCTOR_SKILLS`, `LOOP-OPT-016`, `LOOP-OPT-005` MUST@M / `LOOP-OPT-004` MUST@L (D-181), mẫu
   GO-NO-GO dòng 20 + §2c, `lifecycle.md`, `/complete`, README gốc; test `tests/test_docs_budget.py`, `test_doctor.py`, `test_install.py`.
