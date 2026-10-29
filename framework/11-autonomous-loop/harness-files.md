@@ -165,6 +165,7 @@ YAML phẳng `khoá: lệnh`; `""` = không có, thiếu khoá = tự dò từ m
 | `e2e_affected` · `audit` · `migrate` · `init` · `smoke` · `install` · `dev`… | Agent đọc và chạy trực tiếp | Khai báo; `dev-task.sh` không chạy. `e2e_affected` = chỉ spec của lát đang làm (Gate mỗi task), suite đầy đủ `e2e` khi push `main`/trước phát hành (`QA-E2E-023`) |
 | `attack` · `perf` | `release-check` (pha harden, ADR-0042) | Tấn công thử (DAST như ZAP baseline/API scan, fuzz API như Schemathesis, kịch bản khai thác) trên bản chạy cục bộ/staging · kiểm tải có ngưỡng (vd k6 `thresholds`) — đỏ khi có lỗ/vượt ngân sách; chưa khai ở M/L → người ký lý do |
 | `preview` | `xt.py stage submit` (ghi, không chạy) | Cách chạy thử bản trình người duyệt giai đoạn (ADR-0058) — chỉ ghi vào sổ và in ở `stage status` |
+| `preview_smoke` | `xt.py stage submit` (chạy qua guard) | Gate bản trình (D-247): exit ≠ 0 hay để lại thay đổi trong cây → không trình; trống → sổ ghi "không có smoke" |
 | `claude_min_version` · `ai_attribution` | `doctor` · guard | Cảnh báo Claude Code thấp hơn (`LOOP-HARNESS-026`) · `forbid` chặn commit/PR ghi tên model hay URL phiên AI (`LOOP-HARNESS-027`) |
 | `harness_permissions` | `install.py` | `own` = dự án giữ mô hình quyền riêng: không thêm `allow: Bash`/`deny` của khung, lệnh hook của khung ghi dạng tương đối `bash .claude/hooks/x.sh` như dự án (dhcb — chủ repo 2026-10-22); guard vẫn chạy trong hook. Vắng = gộp quyền theo ADR-0018 |
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import stat
@@ -304,6 +305,40 @@ class StageCliTest(TmpRepoCase):
         self.assertEqual(self.led()["submitted"]["verified"], "loop verify --all xanh trên cây này")
         with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
             self.assertEqual(xt._stage_submit_proof(self.tmp)["preview"], "")
+
+    def test_submit_runs_preview_smoke(self):
+        """ADR-0058 lát C (D-247): `preview_smoke` chạy trên bản trình — đỏ hay để lại thay đổi trong cây → không trình;
+        chưa khai → trình được, sổ ghi rõ "không có"; xt.yaml hỏng → không trình."""
+        self.stage("init")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.assertIn("chưa khai `preview_smoke`", self.led()["submitted"]["smoke"])
+        self.assertIn("smoke: không có", self.stage("status")[1])
+        self.stage("reopen", "--reason", "x")
+        (self.repo / "xt.yaml").write_text("preview_smoke: echo hong; exit 3\n", encoding="utf-8")
+        self.commit("smoke đỏ")
+        rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("smoke `echo hong; exit 3` exit 3: hong", err)
+        self.assertEqual(self.led()["status"], "active")  # không ghi sổ
+        (self.repo / "xt.yaml").write_text("preview_smoke: touch smoke-out.txt\n", encoding="utf-8")
+        self.commit("smoke bẩn cây")
+        self.assertIn("để lại thay đổi trong cây", self.stage("submit", "--evidence", "x")[2])
+        (self.repo / "smoke-out.txt").unlink()
+        (self.repo / "xt.yaml").write_text("preview_smoke: test -f f.txt\n", encoding="utf-8")
+        self.commit("smoke xanh")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.assertEqual(self.led()["submitted"]["smoke"], "`test -f f.txt` exit 0")
+        self.assertIn("smoke: `test -f f.txt` exit 0", self.stage("status")[1])
+        self.stage("reopen", "--reason", "x")
+        with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
+            self.assertIn("không đọc được xt.yaml (utf-8)", self.stage("submit", "--evidence", "x")[2])
+        led = self.led()
+        led["submitted"] = {**led["history"][1], "sha": "c" * 40}  # bản trình trước D-247: không có trường smoke
+        led["status"] = "awaiting_approval"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            xt._stage_print(led, False)
+        self.assertIn("smoke: (bản trình trước D-247)", out.getvalue())
 
     def test_autopilot_dir_does_not_dirty_submit(self):
         self.git("rm", "-q", "--cached", "f.txt")  # repo không ignore .autopilot/: khoá state.lock nằm ở đó

@@ -45,6 +45,7 @@ audit: ""             # audit phụ thuộc (npm audit · pip-audit …)
 attack: ""            # tấn công thử: DAST (ZAP baseline/API scan) · fuzz API (schemathesis run …) trên bản chạy cục bộ/staging
 perf: ""              # kiểm tải có ngưỡng, đỏ khi vượt ngân sách (vd k6 run với thresholds)
 preview: ""           # cách chạy thử bản trình người duyệt (`xt.py stage submit` ghi lại — ADR-0058); vd npm run preview
+preview_smoke: ""     # Gate bản trình: `stage submit` chạy (qua guard), exit ≠ 0 → không trình (D-247); vd npm run build && npx playwright test smoke
 claude_min_version: ""   # doctor cảnh báo khi Claude Code thấp hơn (LOOP-HARNESS-026)
 ai_attribution: ""    # forbid = guard chặn commit/PR ghi tên model hay URL phiên AI (LOOP-HARNESS-027)
 pr_title_check: ""    # off = không đòi tiêu đề PR `<type>(scope): mô tả` ≤ 72 ký tự

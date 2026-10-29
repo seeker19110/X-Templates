@@ -10066,6 +10066,30 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     return {"verified": proof, "preview": preview, "tree": evidence_fingerprint(base, (STAGE_LEDGER,))}
 
 
+def _stage_smoke(base: Path) -> str:
+    """Gate bản trình (ADR-0058 lát C, D-247): `preview_smoke` của xt.yaml chạy qua guard trên đúng HEAD sạch, sau kiểm lại
+    cuối — exit ≠ 0 hay để lại thay đổi trong cây (lệch vân tay bản trình) → không trình. Chưa khai → trình được, sổ ghi
+    rõ "không có" (thư viện/CLI không có bản thử chạy được); xt.yaml hỏng → không trình (không đoán cổng)."""
+    try:
+        cmd = _xt_keys(base).get("preview_smoke", "")
+    except (OSError, ValueError) as exc:
+        raise StageError(f"chưa trình được — không đọc được xt.yaml ({exc})") from None
+    if gate_noop(cmd):
+        return "không có — xt.yaml chưa khai `preview_smoke`"
+    code, out = run_gate_shell(cmd, base, _record_timeout() or 1800)
+    if code:
+        tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
+        raise StageError(f"chưa trình được — smoke `{redact(cmd)}` exit {code}: {tail}")
+    try:
+        _stage_clean_head(base)
+    except StageError:
+        raise StageError(
+            f"chưa trình được — smoke `{redact(cmd)}` để lại thay đổi trong cây: ghi đầu ra ra ngoài repo hoặc vào"
+            " .gitignore, rồi trình lại"
+        ) from None
+    return f"`{redact(cmd)}` exit 0"
+
+
 def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     if led is None or led["status"] != "active":
         raise StageError("chỉ trình duyệt khi giai đoạn đang `active` — xem `xt.py stage status`")
@@ -10122,6 +10146,7 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
         sub = led["submitted"]
         print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
         print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
+        print(f"  smoke: {sub.get('smoke') or '(bản trình trước D-247)'}")
         print(
             f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
         )
@@ -10142,7 +10167,7 @@ def _stage_dispatch(
         return lambda led: _stage_init(led, args.adopt, by, args.evidence or "")
     if cmd == "submit":
         sha = _stage_clean_head(base)
-        extra = _stage_submit_proof(base)
+        extra = {**_stage_submit_proof(base), "smoke": _stage_smoke(base)}
         return lambda led: _stage_submit(led, sha, args.evidence, extra)
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)

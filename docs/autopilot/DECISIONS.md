@@ -1727,3 +1727,10 @@
 - Chọn: Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta
 - Lý do (tiêu chí chất lượng cuối): Đúng: không biết lỗi chặn cũ thì không sửa được — review toàn PR ở head mới là nguồn sự thật duy nhất; ba task sửa chung next_step/next_step_facts (D-244) nên tách PR tốn rebase/xung đột mà không giảm rủi ro; đóng PR bỏ phí 880 dòng đã qua gate-fast
 - Đường lùi: Tách PR theo ba commit 1271133, 64cbd2a, 6ff2b99
+
+### D-247 · 2026-10-29T13:09:32+00:00 · ADR-0058 lát C: Gate MVP (smoke trên bản trình) thế nào — hiện stage submit chỉ ghi chuỗi preview, không chạy gì?
+
+- Phương án: (1) Khoá mới preview_smoke của xt.yaml: stage submit chạy qua guard (run_gate_shell) sau kiểm lại cuối, trên đúng HEAD sạch; exit khác 0 → từ chối trình kèm đuôi log; smoke để lại thay đổi trong cây → từ chối; chưa khai → trình được nhưng sổ ghi rõ 'không có smoke', stage status in ra · (2) Chạy chính khoá preview (lệnh dựng bản thử) như smoke · (3) Chưa khai smoke thì từ chối trình (cổng rỗng là đỏ, ADR-0011)
+- Chọn: Khoá mới preview_smoke của xt.yaml: stage submit chạy qua guard (run_gate_shell) sau kiểm lại cuối, trên đúng HEAD sạch; exit khác 0 → từ chối trình kèm đuôi log; smoke để lại thay đổi trong cây → từ chối; chưa khai → trình được nhưng sổ ghi rõ 'không có smoke', stage status in ra
+- Lý do (tiêu chí chất lượng cuối): Đúng: preview là lệnh chạy server lâu dài cho người thử, không phải kiểm có exit — chạy nó làm treo tới timeout; smoke có exit 0/≠0 là bằng chứng máy (P1). Đơn giản/theo chuẩn: cùng đường run_gate_shell + guard như attack/perf của release-check. Không ép (phương án 3): thư viện/CLI không có bản thử chạy được — nhưng người duyệt thấy rõ 'không có smoke' trong sổ và stage status, không im lặng. Smoke ghi vào cây làm lệch vân tay bản trình → từ chối thay cho stage-reopen giả về sau.
+- Đường lùi: Bỏ _stage_smoke khỏi nhánh submit của _stage_dispatch và khoá preview_smoke khỏi mẫu xt.yaml (sổ cũ có trường smoke vẫn hợp lệ — trường thêm)
