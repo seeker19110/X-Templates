@@ -2,7 +2,7 @@
 
 Ngày: 2026-10-29. Phạm vi yêu cầu: **mọi dự án đích** của X-Templates, không phụ thuộc loại phần mềm hoặc stack.
 
-**Trạng thái: lát A+B đã triển khai bằng máy ([ADR-0058](../../adr/0058-product-stages-machine-lock.md), D-239)** — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, khoá ở `loop init/next/record`, hàng `stage` của `release-check`, guard chặn agent duyệt/ghi tay sổ; test `tests/test_stage.py`. Lát C–F (§8) **chưa** làm: các mục khác bên dưới vẫn là thiết kế đề xuất, không phải khả năng đang có. Dự án chỉ chịu khoá khi có sổ (`xt.py stage init`); chưa dự án đích nào được nâng.
+**Trạng thái: lát A+B và phần máy của C–D đã triển khai (C: `stage submit` đòi kiểm lại cuối xanh, ghi `preview`; D: `next-step` trả `stage-submit`/`wait-approval`) ([ADR-0058](../../adr/0058-product-stages-machine-lock.md), D-239)** — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, khoá ở `loop init/next/record`, hàng `stage` của `release-check`, guard chặn agent duyệt/ghi tay sổ; test `tests/test_stage.py`. Lát C–F (§8) **chưa** làm: các mục khác bên dưới vẫn là thiết kế đề xuất, không phải khả năng đang có. Dự án chỉ chịu khoá khi có sổ (`xt.py stage init`); chưa dự án đích nào được nâng.
 
 ## 1. Hợp đồng sản phẩm đã chốt
 
@@ -169,7 +169,7 @@ Lát A+B đã có mã + test (ADR-0058); C–F là việc cần làm, **chưa c�
 | Lát | Phạm vi | Nghiệm thu |
 |---|---|---|
 | A — hợp đồng ✅ | ADR-0058, `schema: 1` stage/cycle/approval, mapping 11 bước (§3), `tests/test_stage.py` | phân biệt batch/stage/control mode; schema có version; sổ hỏng/lịch sử lệch → chặn, không đoán |
-| B — máy trạng thái ✅ (trừ `next-step`) | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng. Còn: `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 |
+| B — máy trạng thái ✅ | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng. Còn: `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 |
 | C — MVP và duyệt | bản thử/artefact, Gate MVP, approval xác thực | đủ task nhưng chưa duyệt vẫn ở stage 1; yêu cầu sửa mở lại vòng stage 1 |
 | D — hoàn thiện và tối ưu | routing skill, release-check, mục tiêu performance/feature/code | stage 2 xử lý sàn; stage 3 có baseline/no-regression/rollback; giữ cổng phát hành |
 | E — mẫu và migration | installer, AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng; dự án cũ giữ quyền/state; báo diff và đường lùi |
