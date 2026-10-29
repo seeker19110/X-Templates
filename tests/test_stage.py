@@ -106,6 +106,7 @@ class StageProblemTest(unittest.TestCase):
                 "sai thứ tự",
             ),
             "submit sha ngắn": (ledger([ev("init", 1), ev("submit", 1, sha="abc")]), "sai thứ tự"),
+            "submit sha 50 hex": (ledger([ev("init", 1), ev("submit", 1, sha="a" * 50)]), "sai thứ tự"),
             "reopen khi active": (ledger([ev("init", 1), ev("reopen", 1)]), "sai thứ tự"),
             "sự kiện lạ": (ledger([ev("init", 1), ev("skip", 1)]), "sai thứ tự"),
             "B4 init chu kỳ khi chưa xong": (
@@ -134,6 +135,10 @@ class StageProblemTest(unittest.TestCase):
         self.assertEqual(xt.plan_stage(two), [(1, "C-001"), (2, "C-001")])
         tilde = "> Giai đoạn sản phẩm: 1 (C-001)\n~~~\n> Giai đoạn sản phẩm: 2 (C-001)\n```\n~~~\n"
         self.assertEqual(xt.plan_stage(tilde), [(1, "C-001")])  # fence ~~~ (``` bên trong không đóng nó)
+        inner = "~~~\n```\n> Giai đoạn sản phẩm: 2 (C-001)\n~~~\n> Giai đoạn sản phẩm: 1 (C-001)\n"
+        self.assertEqual(
+            xt.plan_stage(inner), [(1, "C-001")]
+        )  # ~~~ đóng đúng fence, dòng sau đó vẫn tính (review #328)
         nfd = unicodedata.normalize("NFD", "> Giai đoạn sản phẩm: 2 (C-003)")
         self.assertEqual(xt.plan_stage(nfd), [(2, "C-003")])
 

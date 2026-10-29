@@ -7105,7 +7105,9 @@ def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, A
 # Gói nghiệm thu nháp (ADR-0052 §5, nghiên cứu §6.2, T-3549): vân tay bằng chứng theo NỘI DUNG cây (không theo SHA HEAD),
 # trừ GO-NO-GO/DECISIONS — commit chỉ ghi chữ ký/quyết định không làm gói hết hạn (FLOW-17).
 SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", ":(exclude,glob)**/DECISIONS.md", ":(exclude)PROGRESS.md"]
-SHA40_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # SHA commit đầy đủ: SHA-1 hoặc SHA-256 (`--object-format=sha256`)
+COMMIT_SHA_RE = re.compile(
+    r"[0-9a-f]{40}|[0-9a-f]{64}"
+)  # SHA commit đầy đủ: SHA-1 hoặc SHA-256 (`--object-format=sha256`)
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -7132,7 +7134,7 @@ def evidence_fingerprint(base: Path) -> Optional[str]:
 def _changed_since(base: Path, sha: str) -> Optional[List[str]]:
     """File khác giữa commit `sha` và cây làm việc (cả file chưa track), trừ GO-NO-GO/DECISIONS/thư mục trạng thái; `sha`
     không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
-    if not SHA40_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
+    if not COMMIT_SHA_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         return None
     spec = ["--", ".", ":(exclude).autopilot", *SIGNOFF_EXCLUDE]
     diff = _git(base, "diff", "-z", "--no-renames", "--name-only", sha, *spec).stdout
@@ -7428,11 +7430,11 @@ def _str_list(v: Any) -> bool:
 
 def _read_release(src: Optional[str]) -> Optional[Dict[str, Any]]:
     """`--release FILE`: JSON của `release-check --json` → {head, fails, human, verdict}; vắng → None. Sai dạng (thiếu
-    `head` SHA đủ 40 ký tự, `fails`/`human` không phải mảng chuỗi) → ValueError: không đoán kết quả cổng phát hành."""
+    `head` SHA commit đầy đủ (40/64 hex), `fails`/`human` không phải mảng chuỗi) → ValueError: không đoán kết quả cổng phát hành."""
     if src is None:
         return None
     raw = json.loads(Path(src).read_text(encoding="utf-8"))
-    ok = isinstance(raw, dict) and isinstance(raw.get("head"), str) and SHA40_RE.fullmatch(raw["head"]) is not None
+    ok = isinstance(raw, dict) and isinstance(raw.get("head"), str) and COMMIT_SHA_RE.fullmatch(raw["head"]) is not None
     if not (ok and _str_list(raw.get("fails")) and _str_list(raw.get("human")) and isinstance(raw.get("verdict"), str)):
         raise ValueError("phải là JSON `release-check --json` có `head` (SHA), `fails`, `human`, `verdict`")
     return {k: raw[k] for k in ("head", "fails", "human", "verdict")}
@@ -7446,7 +7448,9 @@ def _read_package(src: Optional[str]) -> Optional[Dict[str, Any]]:
     raw = json.loads(Path(src).read_text(encoding="utf-8"))
     pkg: Dict[str, Any] = raw.get("package", raw) if isinstance(raw, dict) else {}
     head, fp = (pkg.get(k) if isinstance(pkg, dict) else None for k in ("candidate_head", "evidence_fp"))
-    if not (isinstance(head, str) and isinstance(fp, str) and SHA40_RE.fullmatch(head) and SHA256_RE.fullmatch(fp)):
+    if not (
+        isinstance(head, str) and isinstance(fp, str) and COMMIT_SHA_RE.fullmatch(head) and SHA256_RE.fullmatch(fp)
+    ):
         raise ValueError("phải là gói `signoff-package` có `candidate_head` (SHA), `evidence_fp` (sha256)")
     if not _str_list(pkg.get("human_pending")):
         raise ValueError("`human_pending` phải là mảng chuỗi")
@@ -9791,7 +9795,7 @@ def stage_problem(led: Any) -> str:
     if (led["status"] == "awaiting_approval") != (
         isinstance(sub, dict) and bool(STAGE_SHA_RE.fullmatch(str(sub.get("sha", ""))))
     ):
-        return "`submitted.sha` 40 hex phải có đúng khi `awaiting_approval`"
+        return "`submitted.sha` (SHA đầy đủ, 40/64 hex) phải có đúng khi `awaiting_approval`"
     return _stage_history_problem(led)
 
 
