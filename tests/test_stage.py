@@ -714,6 +714,17 @@ class StageLockTest(TmpRepoCase):
         row = xt._release_stage(self.repo)
         self.assertEqual(row["result"], "FAIL")
         self.assertIn("MVP chưa mở Production", row["evidence"])
+        self.assertNotIn("nhánh vá", row["evidence"])  # chưa có bản production nào
+        rel = "b" * 40
+        hist = [ev("init", 1), *approve(1), *approve(2), *approve(3, sha=rel), ev("init", 1, "C-002")]
+        self.write_ledger(ledger(hist, cycle="C-002"))  # chu kỳ mới ở MVP: sự cố bản cũ đi nhánh vá (review #338)
+        row = xt._release_stage(self.repo)
+        self.assertEqual(row["result"], "FAIL")
+        self.assertIn(
+            f"sự cố của bản production C-001: `release-check` trên nhánh vá cắt từ bản đã duyệt `{rel[:12]}`",
+            row["evidence"],
+        )
+        self.assertIn("không phát hành MVP C-002", row["evidence"])
         waiting = ledger([ev("init", 1), ev("submit", 1, sha=SHA)], status="awaiting_approval", submitted={"sha": SHA})
         self.write_ledger(waiting)  # MVP chờ duyệt vẫn chưa phát hành được
         self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")

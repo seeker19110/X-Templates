@@ -10281,8 +10281,23 @@ def _release_stage(base: Path) -> Dict[str, str]:
         return _release_row("stage", "N/A", f"không dùng giai đoạn sản phẩm ({STAGE_LEDGER} vắng)", "SHOULD")
     where = f"{led['cycle']} giai đoạn {led['stage']} ({STAGE_NAMES[led['stage']]}, {led['status']})"
     if led["stage"] == 1:
-        return _release_row("stage", "FAIL", f"{where} — MVP chưa mở Production; người duyệt MVP trước")
+        return _release_row(
+            "stage", "FAIL", f"{where} — MVP chưa mở Production; người duyệt MVP trước{_stage_hotfix(led)}"
+        )
     return _release_row("stage", "PASS", where)
+
+
+def _stage_hotfix(led: Dict[str, Any]) -> str:
+    """Chu kỳ mới ở MVP mà chu kỳ trước đã có bản người duyệt cho Production: lối ra cho sự cố của bản đó là nhánh vá cắt từ
+    đúng SHA đã duyệt — sổ ở commit đó mở Production — không mở giai đoạn phát triển (đặc tả §8, review #338)."""
+    done = [e for e in led["history"] if e["event"] == "approve" and e["cycle"] != led["cycle"] and e["stage"] >= 2]
+    if not done:
+        return ""
+    last = done[-1]
+    return (
+        f"; sự cố của bản production {last['cycle']}: `release-check` trên nhánh vá cắt từ bản đã duyệt"
+        f" `{str(last['sha'])[:12]}` (không phát hành MVP {led['cycle']})"
+    )
 
 
 RELEASE_ROWS = (
