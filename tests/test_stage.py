@@ -275,14 +275,17 @@ class StageCliTest(TmpRepoCase):
             self.assertIn("PLAN mất/rỗng → `loop init --plan <mới>`", self.stage("submit", "--evidence", "x")[2])
         spent = {"verdict": "budget", "reason": "hết vòng"}
         with unittest.mock.patch.object(xt, "_batch_verdict", return_value=spent):
-            self.assertNotIn("loop unblock", self.stage("submit", "--evidence", "x")[2])
+            err = self.stage("submit", "--evidence", "x")[2]
+        self.assertNotIn("loop unblock", err)
+        self.assertIn("`loop init --plan", err)  # hết ngân sách cũng nêu lối ra (review #333)
         (self.repo / "P.md").write_text("- [ ] `T-001` x — Gate: `true`\n", encoding="utf-8")
         live = {"active": True, "plan": "P.md"}
-        self.assertEqual(xt._stage_loop_exit(live, self.repo), xt.EXIT_UNBLOCK)  # vòng còn bật, PLAN còn
+        self.assertEqual(xt._halted_loop_exit(live, self.repo), xt.EXIT_UNBLOCK)  # vòng còn bật, PLAN còn
         spent = {**live, "iterations": 50, "max_iterations": 50}
-        self.assertEqual(xt._stage_loop_exit(spent, self.repo), xt.EXIT_BUDGET)  # như `doctor`
+        self.assertEqual(xt._halted_loop_exit(spent, self.repo), xt.EXIT_BUDGET)  # như `doctor`
         (self.repo / "P.md").unlink()
-        self.assertIn("`loop stop` rồi", xt._stage_loop_exit(live, self.repo))  # vòng bật + PLAN mất
+        self.assertIn("`loop stop` rồi", xt._halted_loop_exit(live, self.repo))  # vòng bật + PLAN mất
+        self.assertIn("PLAN mất/rỗng", xt._halted_loop_exit(spent, self.repo))  # PLAN trước ngân sách (#333)
         done = unittest.mock.patch.object(xt, "_batch_verdict", return_value={"verdict": "done", "reason": "x"})
         with done, unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
             rc, _, err = self.stage("submit", "--evidence", "x")
