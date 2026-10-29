@@ -1939,6 +1939,26 @@ class InstallUpgradeTest(unittest.TestCase):
         self.assertNotIn("khoá mới của khung dạng chú thích", err)
         self.assertEqual(self.plan()["xt.yaml"]["keys_add"], [])
 
+    def test_xt_yaml_new_keeps_project_policy(self):
+        """AUD-HAR-123: xt.yaml của dự án đã sửa (đặt L1) + mẫu đổi → `.xtemplates-new` giữ dòng chính sách của dự án;
+        khoá dự án không khai thành chú thích (không mời nâng quyền theo mặc định của mẫu)."""
+        self.install_quiet()
+        y = self.target / "xt.yaml"
+        y.write_bytes(b"lint: x\r\nmerge_autonomy: L1\r\n")
+        self.set_installed_hash("xt.yaml", b'lint: ""\n')
+        self.install_quiet()
+        new = y.with_name("xt.yaml.xtemplates-new").read_bytes()
+        keys = [ln.partition(b":")[0] for ln in new.splitlines()]
+        self.assertIn(b"merge_autonomy: L1", new.splitlines())  # dòng của dự án, không phải L3 của mẫu
+        for key in (b"merge_hard_exceptions", b"delivery_phase"):
+            self.assertNotIn(key, keys, key)  # mẫu đặt, dự án không khai → `# key: …`
+            self.assertTrue(any(ln.startswith(b"# " + key + b":") for ln in new.splitlines()), key)
+        self.assertEqual(keys.count(b"merge_autonomy"), 1)
+        self.assertEqual(
+            install.yaml_keep_policy(b"a: 1\nmerge_autonomy: L3\r\ndelivery_phase: build", b"merge_autonomy: L1\n"),
+            b"a: 1\nmerge_autonomy: L1\r\n# delivery_phase: build",
+        )
+
     def test_xt_yaml_keys_crlf_updated_new_and_unreadable(self):
         """Mẫu đổi + xt.yaml của dự án (`updated-new`): vừa `.xtemplates-new` vừa nối khoá; giữ CRLF và dòng cuối thiếu
         xuống dòng; lần sau `kept-own` không nối thêm. Không phải UTF-8 → log, không ghi; lỗi ghi → log (fail-open)."""

@@ -2465,6 +2465,11 @@ class AuditCheckCliTest(TmpDirCase):
         self.assertEqual(rc, 1)
         self.assertIn(f"✗ {f}: thiếu bảng `## Nhóm`", out)
         self.assertTrue(out.rstrip().endswith(f"✗ {f}: trống (--strict)"))
+        f.write_bytes(b"\xff\xfe")  # không phải UTF-8 / thiếu file → exit 2, báo gọn (không traceback)
+        for path in (f, self.tmp / "khong-co.md"):
+            rc, out, err = run_main("audit", "check", path, "--strict")
+            self.assertEqual((rc, out), (2, ""))
+            self.assertIn(f"✗ {path}: không đọc được sổ: ", err)
 
 
 # --------------------------------------------------------------------------- version / main
@@ -2700,6 +2705,11 @@ class ReleaseCheckTest(TmpRepoCase):
         with unittest.mock.patch.object(xt, "audit_check", side_effect=OSError("EIO")):  # không đọc được sổ
             _, d = self.rows()
         self.assertIn("không đọc được docs/ops/AUDIT-STATUS.md: EIO", self.by_id(d)["audit"]["evidence"])
+        (self.repo / "BLUEPRINT.md").write_bytes(b"\xff\xfe")  # không phải UTF-8: FAIL có JSON (AUD-CODE-017)
+        rc, d = self.rows()
+        self.assertEqual(rc, 1)
+        self.assertIn("không đọc được BLUEPRINT.md", self.by_id(d)["blueprint"]["evidence"])
+        self.assertEqual(self.by_id(d)["unchecked_must"]["result"], "N/A")
 
     def test_autopilot_verify_and_prod_switch_rows(self):
         self.git("add", ".")

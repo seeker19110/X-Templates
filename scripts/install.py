@@ -246,6 +246,19 @@ def yaml_policy_unchanged(current: bytes, replacement: bytes, preserve: bool) ->
     return policy(current) == policy(replacement)
 
 
+def yaml_keep_policy(template: bytes, own: bytes) -> bytes:
+    """`xt.yaml.xtemplates-new` giữ ba dòng chính sách của file dự án (AUD-HAR-123): khoá dự án có → lấy dòng của dự án;
+    dự án không khai (= hành vi mặc định) → dòng của mẫu thành chú thích. Gộp tay không vô tình nâng quyền theo mẫu."""
+    mine = {k: line for line in own.splitlines() if (k := line.partition(b":")[0]) in YAML_POLICY_KEYS}
+    out = []
+    for line in template.splitlines(keepends=True):
+        key, body = line.partition(b":")[0], line.rstrip(b"\r\n")
+        if key in YAML_POLICY_KEYS:
+            line = mine.get(key, b"# " + body) + line[len(body) :]
+        out.append(line)
+    return b"".join(out)
+
+
 def source_bytes(src: Path, transform: Callable[[str], str] | None = None) -> bytes:
     """Nội dung file khung sẽ ghi vào dự án (sau biến đổi) — cũng là nội dung được băm vào manifest."""
     data = src.read_bytes()
@@ -800,7 +813,8 @@ def install_root_templates(
             th,
             preserve_yaml_policy=name == "xt.yaml",
         )
-        write_copy(tsrc, target / name, r, data)
+        new = yaml_keep_policy(data, (target / name).read_bytes()) if name == "xt.yaml" and r == "updated-new" else data
+        write_copy(tsrc, target / name, r, new)  # nối khoá (dưới) vẫn so với mẫu gốc
         log(f"  {name}: " + ROOT_MESSAGES.get(r, r).format(name=name))
         if r != "skipped-symlink":  # `HASHED` ghi hash mẫu mới; `kept-own`: hash mẫu = hash đã cài, ghi lại như giữ
             manifest[name] = th

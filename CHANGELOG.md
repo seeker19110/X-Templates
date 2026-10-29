@@ -17,6 +17,11 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 - CLI/Gate chặn mã 126 khi guard lỗi nạp, thiếu/hỏng fallback; không sử dụng module nạp dở dù đã định nghĩa hàm cho qua. `apply_policy` lỗi không để raw `ask` thành cho chạy ở mặc định (ADR-0054, T-3571). Runtime fallback khỏe và dự án chưa cài harness giữ tương thích. Lý do: đồng nhất hàng rào thực thi với hook Bash khi guard hỏng. **Dự án đích:** chạy lại `install.py`.
 
 ### Fixed
+- `release-check` không còn traceback khi BLUEPRINT.md hoặc sổ audit không phải UTF-8: hàng `blueprint`/`audit` FAIL kèm lý do, `unchecked_must` N/A, JSON vẫn in (AUD-CODE-017). `audit check` thiếu file/không phải UTF-8 → exit 2, báo gọn.
+- `loop init` với PLAN không đọc được như UTF-8 → exit 2 kèm lý do thay cho traceback; dòng ℹ "mở lại cùng đợt" lấy tín hiệu từ chính luật đợt (không so thời điểm — hai lệnh cùng giây báo nhầm) và nêu đúng "không đổi hoặc chỉ nối thêm task" (review #319).
+- `release-check` hàng `review_debt` FAIL nêu lý do khi `review_identity` ở SHA quét khác ở HEAD — review PR không phủ nợ (D-223).
+- `audit plan` (quét lại theo sổ) đọc `git diff -z`: tên file có `"`/`\\`/ký tự điều khiển không bị trích dẫn nên không lệch nhóm.
+- `install.py`: `xt.yaml.xtemplates-new` giữ ba dòng chính sách (`merge_autonomy`, `merge_hard_exceptions`, `delivery_phase`) của file dự án; khoá dự án không khai thành chú thích — gộp tay không nâng quyền theo mẫu (AUD-HAR-123). **Dự án đích:** chạy lại `install.py` để nhận sửa.
 - `review_debt` (hàng `release-check`, Gate offline của PLAN): tên file chứa `"`, `\\` hay ký tự điều khiển bị git trích dẫn nên lệch nhóm, nợ chỉ tính từ SHA quét mới nhất — bỏ sót nợ; nay đọc `diff -z` (AUD-SEC-132).
 - Lệnh chạy tay gợi ý khi steward dispatch tag lỗi thêm `--ref <nhánh>` (trích dẫn shell) — thiếu thì chạy ở nhánh mặc định, job tag bị bỏ qua (review #316).
 - `pr steward`: merge bằng `GITHUB_TOKEN` của PR vào `main` đổi `VERSION` → dispatch `.github/workflows/release-tag.yml` (nếu repo có) với input `sha` = commit merge đọc lại từ PR — trước đây tag phát hành không được gắn (#314, AUD-HAR-124); đọc/dispatch lỗi → merge giữ nguyên, job đỏ kèm lệnh chạy tay. **Dự án đích:** không có file này → không đổi; có file cùng tên thì nó phải nhận `workflow_dispatch` với input `sha` (như bản của khung), không thì job steward đỏ (422) sau mỗi merge đổi `VERSION`.
