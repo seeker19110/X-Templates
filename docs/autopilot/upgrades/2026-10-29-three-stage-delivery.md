@@ -172,7 +172,7 @@ Lát A+B đã có mã + test (ADR-0058); C–F là việc cần làm, **chưa c�
 | B — máy trạng thái ✅ | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng. Còn: `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 |
 | C — MVP và duyệt ✅ | bản thử/artefact (`preview`), Gate MVP (`preview_smoke`, D-247), approval (`stage approve` chỉ người) | đủ task nhưng chưa duyệt vẫn ở stage 1; yêu cầu sửa mở lại vòng stage 1 |
 | D — hoàn thiện và tối ưu ✅ | routing skill (`next-step` harden ở giai đoạn 1 → `blocked`; `PLAN-harden-*` từ giai đoạn 2, `PLAN-opt-*` chỉ giai đoạn 3 — D-246), release-check, mục tiêu performance/feature/code (`LOOP-OPT-017`) | stage 2 xử lý sàn; stage 3 có baseline/no-regression/rollback; giữ cổng phát hành |
-| E — mẫu và migration | installer, AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng; dự án cũ giữ quyền/state; báo diff và đường lùi |
+| E — mẫu và migration ✅ | installer (`--stage-init`, kiểm sổ sau cài — D-249), AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng; dự án cũ giữ quyền/state; báo diff và đường lùi |
 | F — nghiệm thu và áp dụng | test xuyên suốt, CI, review độc lập, release khung và nâng từng target | có bằng chứng từng bước; không nới ngưỡng/hook; kiểm target sau nâng |
 
 Chỉ giao các lát phụ thuộc khi tiền đề đạt; không mở cả sáu lát song song. Thay đổi chính sách có ADR và CHANGELOG theo quy ước khung; không sửa đè ADR cũ. Không thêm lock/state/approval engine riêng nếu có thể mở rộng cơ chế hiện hành.

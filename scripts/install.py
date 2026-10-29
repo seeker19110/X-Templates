@@ -26,9 +26,11 @@ Dự án đã cài bản ≤ 2.x (`.xstored/`, `xs.py`, `xs.yaml`, `XS_*`): ch�
   giữ manifest hash, đổi `xs.yaml` → `xt.yaml`, xoá bản sao `.xstored/`; file người dùng còn nhắc tên cũ được liệt kê để sửa tay.
 
 Dùng:
-  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--preset safe|autonomous] [--label v1.0.0] [--plan]
+  python3 scripts/install.py <thư-mục-dự-án> [--force-harness] [--no-harness] [--with-github] [--preset safe|autonomous] [--stage-init] [--label v1.0.0] [--plan]
   --plan: in JSON kế hoạch (quyền thêm/bớt, hook thêm/đổi matcher, file đè/giữ), không ghi gì (REC-09)
   --preset: chính sách merge/review cho xt.yaml mới; cài lại giữ lựa chọn dự án (không cấu hình sandbox).
+  --stage-init: dự án mới — tạo sổ giai đoạn sản phẩm docs/autopilot/STAGE.json (giai đoạn 1, ADR-0058) khi chưa có; không
+                cờ thì không tạo. Sau cài luôn kiểm sổ bằng `xt.py stage status` (sổ có sẵn giữ nguyên).
   (chạy từ bản clone của X-Templates; hoặc: python3 -c "$(curl ...)" KHÔNG được khuyến khích — tải về, kiểm checksum rồi chạy)
 Thoát 0 = ổn; 2 = lỗi tham số.
 """
@@ -555,18 +557,32 @@ def target_error(target: Path, with_github: bool = False) -> str | None:
     return github_root_error(target) if with_github else None
 
 
-def github_root_error(target: Path) -> str | None:
-    """`--with-github` vào thư mục con của repo git (monorepo `apps/web`): GitHub chỉ chạy workflow ở `.github/workflows`
-    của GỐC repo — ghi vào thư mục con là CI không bao giờ chạy mà không ai biết (AUD-CI-012). Không phải repo git / git
-    lỗi → không chặn (chưa có gốc để so)."""
+GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+
+
+def git_subdir_of(target: Path) -> Path | None:
+    """Gốc repo git khi `target` là thư mục CON của nó (monorepo `apps/web`); gốc repo, không phải repo git hay git lỗi → None
+    (chưa có gốc để so). Bỏ `GIT_DIR`… của môi trường (hook, tự động hoá): gốc là của `target`, như `xt.py` thấy."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_ENV}
     try:
         r = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=10
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     top = Path(r.stdout.strip()).resolve() if r.returncode == 0 and r.stdout.strip() else None
-    if top is None or top == target:
+    return None if top is None or top == target else top
+
+
+def github_root_error(target: Path) -> str | None:
+    """`--with-github` vào thư mục con của repo git: GitHub chỉ chạy workflow ở `.github/workflows` của GỐC repo — ghi vào
+    thư mục con là CI không bao giờ chạy mà không ai biết (AUD-CI-012)."""
+    top = git_subdir_of(target)
+    if top is None:
         return None
     return (
         f"✗ --with-github: {target} không phải gốc repo git ({top}) — GitHub chỉ chạy workflow ở {top / '.github'}; "
@@ -1142,6 +1158,59 @@ def report_upgrade_steps(previous: str | None, label: str) -> None:
             log(f"  - {clause}")
 
 
+STAGE_LEDGER = "docs/autopilot/STAGE.json"  # sổ giai đoạn sản phẩm (ADR-0058) — file của dự án, installer không ghi tay
+
+
+def run_stage(target: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """`xt.py stage …` của bản VỪA CÀI, gốc = dự án đích (bỏ CLAUDE_PROJECT_DIR của phiên đang chạy installer)."""
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    cmd = [sys.executable, str(target / ".xtemplates" / "scripts" / "xt.py"), "stage", *args]
+    return subprocess.run(cmd, cwd=target, env=env, capture_output=True, text=True, timeout=120)
+
+
+def report_stage(target: Path, stage_init: bool) -> None:
+    """Giai đoạn sản phẩm sau cài (ADR-0058 lát E, D-249): không đoán giai đoạn — chỉ `--stage-init` (dự án mới) tạo sổ;
+    sổ có sẵn không bị chạm, nhưng được kiểm bằng xt.py mới (sổ không hợp lệ với bản mới lộ ngay lúc nâng). Không kiểm
+    được (xt.py thiếu/lỗi) → một dòng ⚠, không làm hỏng lần cài (fail-open như `report_upgrade_steps`). Thư mục con của
+    repo git: `xt.py stage` dùng sổ ở gốc repo còn `release-check` đọc ở dự án (lệch `loop_root` có từ trước) → không
+    tạo/kiểm, một dòng ⚠ (review #339)."""
+    top = git_subdir_of(target)
+    if top is not None:
+        skip = " — bỏ qua --stage-init" if stage_init else ""
+        log(
+            f"⚠ giai đoạn sản phẩm: {target} là thư mục con của repo git ({top}) — `xt.py stage` sẽ dùng sổ ở gốc repo,"
+            f" `release-check` đọc ở đây; chưa hỗ trợ, không tạo/kiểm sổ{skip} (ADR-0058)"
+        )
+        return
+    created, warned = False, None
+    try:
+        if stage_init and not (target / STAGE_LEDGER).exists():
+            r = run_stage(target, "init")
+            created = r.returncode == 0
+            if not created:
+                warned = r.stderr.strip()
+                log(f"⚠ --stage-init không tạo được sổ: {warned}")
+        r = run_stage(target, "status", "--json")
+        led = json.loads(r.stdout)["stage"] if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+        log(f"⚠ không kiểm được sổ giai đoạn ({exc!r}) — chạy `python3 .xtemplates/scripts/xt.py stage status`")
+        return
+    if r.returncode:
+        if warned is None or r.stderr.strip() != warned:  # cùng lý do với lần `init` vừa báo: không lặp (review #339)
+            log(f"⚠ sổ giai đoạn: {r.stderr.strip()} — sửa trước khi chạy vòng (ADR-0058)")
+    elif led is None:
+        log(
+            "Giai đoạn sản phẩm (ADR-0058): chưa dùng — dự án mới: `python3 .xtemplates/scripts/xt.py stage init`"
+            " (hoặc cài lại với --stage-init); đã chạy/production: người chạy `stage init --adopt 2|3 --evidence …`"
+            " ở terminal ngoài phiên agent"
+        )
+    else:
+        how = "vừa tạo — commit + push" if created else "giữ nguyên"
+        log(
+            f"✓ giai đoạn sản phẩm: {led['cycle']} · giai đoạn {led['stage']} · {led['status']} ({STAGE_LEDGER}, {how})"
+        )
+
+
 def plan_settings(target: Path, force_harness: bool, prov: dict[str, list[str]]) -> dict[str, Any]:
     """Kế hoạch cho .claude/settings.json: quyền thêm/bớt, hook thêm/đổi matcher (không ghi gì)."""
     src, dst = SRC / ".claude" / "settings.json", target / ".claude" / "settings.json"
@@ -1191,7 +1260,12 @@ def plan_files(
 
 
 def install_plan(
-    target: Path, force_harness: bool, no_harness: bool, with_github: bool = False, preset: str | None = None
+    target: Path,
+    force_harness: bool,
+    no_harness: bool,
+    with_github: bool = False,
+    preset: str | None = None,
+    stage_init: bool = False,
 ) -> int:
     """`--plan`: in JSON kế hoạch (quyền/hook/file) ra stdout, KHÔNG ghi gì vào dự án. Thoát 0; 2 nếu đích không hợp lệ."""
     target = target.resolve()
@@ -1221,6 +1295,12 @@ def install_plan(
             "present": (target / MANIFEST_V2).is_file(),
             "policy": manifest_policy(target, selected if creates_yaml else None),
         },
+        "stage": {  # sổ giai đoạn: chỉ `--stage-init` tạo, sổ có sẵn không bị chạm (D-249)
+            "path": STAGE_LEDGER,
+            "present": (target / STAGE_LEDGER).exists(),
+            # sẽ THỬ `stage init` (sổ ở ref khác → xt.py từ chối lúc cài); thư mục con của repo git: không thử
+            "init": stage_init and not (target / STAGE_LEDGER).exists() and git_subdir_of(target) is None,
+        },
     }
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
@@ -1233,6 +1313,7 @@ def install(
     label: str | None,
     with_github: bool = False,
     preset: str | None = None,
+    stage_init: bool = False,
 ) -> int:
     target = target.resolve()
     error = target_error(target, with_github)
@@ -1261,7 +1342,8 @@ def install(
             "  ⚠ còn nhắc tên cũ (.xstored/xs.py/xs.yaml/XS_*) — đổi tay sang .xtemplates/xt.py/xt.yaml/XT_*: "
             + ", ".join(stale)
         )
-    report_upgrade_steps(previous, version)
+    report_stage(target, stage_init)
+    report_upgrade_steps(previous, version)  # cuối: khối bước làm tay đứng ngay trước "Xong."
 
     log(
         "Xong. Bước tiếp: `python3 .xtemplates/scripts/xt.py doctor` (audit khung vừa cài), đọc AGENTS.md, điền xt.yaml, "
@@ -1288,10 +1370,15 @@ def main(argv: list[str] | None = None) -> int:
         choices=INSTALL_PRESETS,
         help="chính sách merge/review cho xt.yaml mới: safe hoặc autonomous; cài lại giữ lựa chọn cũ",
     )
+    p.add_argument(
+        "--stage-init",
+        action="store_true",
+        help="dự án mới: tạo sổ giai đoạn sản phẩm ở giai đoạn 1 (ADR-0058) khi chưa có; dự án đã chạy dùng `stage init --adopt`",
+    )
     a = p.parse_args(argv)
     if a.plan:
-        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset)
-    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset)
+        return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init)
+    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset, a.stage_init)
 
 
 if __name__ == "__main__":
