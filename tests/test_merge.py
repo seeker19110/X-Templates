@@ -587,6 +587,11 @@ class MergeDecisionTest(unittest.TestCase):
             "migration": ([{"path": "db/migrations/0002.sql", "additions": 2, "deletions": 0}, *f], "(schema)"),
             "cổng": ([{"path": ".github/workflows/ci.yml", "additions": 2, "deletions": 0}, *f], "(cổng/CI)"),
             "phụ thuộc": ([{"path": "package.json", "additions": 1, "deletions": 1}, *f], "(phụ thuộc)"),
+            # D-234 (review #323): constraints, requirements/ mọi cấp, chữ hoa
+            **{
+                f"phụ thuộc {d}": ([{"path": d, "additions": 1, "deletions": 1}, *f], "(phụ thuộc)")
+                for d in ("upper-constraints.txt", "requirements/edx/base.txt", "Requirements-Dev.TXT")
+            },
             "lớn": ([{"path": "src/a.py", "additions": 140, "deletions": 20}, *f], "161 dòng > 150"),
             "hai gói": (
                 [
@@ -640,12 +645,52 @@ class MergeDecisionTest(unittest.TestCase):
     def test_is_doc_path(self):
         """D-232 (review #322): tài liệu theo danh sách cho phép — mọi thứ khác là mã (đóng khi nghi ngờ)."""
         docs = ("README.md", "pkg/docs/x.md", "notes.txt", "docs/img/a.png", "docs/ops/x.json", "LICENSE", "COPYING")
-        docs += ("LICENSE.md", "NOTICE.txt", "Docs/a.PNG", "x.rst", "y.mdx")
+        docs += (
+            "LICENSE.md",
+            "NOTICE.txt",
+            "Docs/a.PNG",
+            "x.rst",
+            "y.mdx",
+            "license",
+            "LICENSE-MIT",
+            "NOTICE-3rdparty",
+        )
+        docs += (
+            "LICENSE-APACHE-2.0",
+            "requirements/REQ-001.md",
+            "requirements/README.md",
+        )
         code = ("docs/conf.py", "docs/run", "docs/.nojekyll", "src/api/docs/routes.py", "src/LicenseManager.java")
         code += ("license-allow.json", "requirements.txt", "dev-requirements.txt", "constraints.txt", "CMakeLists.txt")
-        code += ("requirements/prod.txt", "packages/web/docs/a.png", "docs/x\ny.png", "docs/x\r.md")
+        code += ("requirements/prod.txt", "packages/web/docs/a.png", "docs/x\ny.png", "docs/x\r.md", "Requirements.txt")
+        code += ("LICENSE-x.py", ".md", "docs/.md")
+        # review #323: txt phụ thuộc rộng (đóng khi nghi ngờ); hậu tố gạch nối chỉ khi gốc viết hoa
+        code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
+        code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
         self.assertEqual([p for p in code if xt.is_doc_path(p)], [])
+
+    def test_is_test_path_and_docs_lane(self):
+        """Review #322: thư mục test/spec dưới docs không phải test (spec OpenAPI), tên test trong docs vẫn là test."""
+        tests = ("app/docs/page.test.tsx", "src/api/docs/test_routes.py", "src/doc/x_test.go", "tests/test_a.py")
+        tests += ("app/docs/__tests__/page.test.tsx", "docs/spec/x.test.py")
+        not_tests = ("docs/spec/openapi.yaml", "packages/api/docs/spec/openapi.json", "Docs/spec/x.yaml", "src/a.py")
+        not_tests += ("docs/v1/spec/openapi.yaml", "docs/tests/deploy.sh", "docs/__tests__/x.js", "docs/e2e/x.ts")
+        self.assertEqual([t for t in tests if not xt._is_test_path(t)], [])
+        self.assertEqual([t for t in not_tests if xt._is_test_path(t)], [])
+
+        def files(*ps: str) -> list[dict[str, object]]:
+            return [{"path": x, "additions": 3, "deletions": 0} for x in ps]
+
+        ok = xt.merge_lane_reasons({"files": files("app/docs/page.tsx", "app/docs/page.test.tsx")}, [])
+        self.assertNotIn("đổi mã mà không đổi test", ok)
+        for pair in (
+            ("packages/api/src/routes.ts", "packages/api/docs/spec/openapi.json"),
+            ("src/a.py", "Docs/spec/x.yaml"),
+            ("docs/spec/run.py",),  # mã trong thư mục test dưới docs: không tự làm test cho chính nó (review #323)
+        ):
+            with self.subTest(pair):
+                self.assertIn("đổi mã mà không đổi test", xt.merge_lane_reasons({"files": files(*pair)}, []))
 
     def test_merge_gate_paths(self):
         """AUD-HAR-021: luật agent và file cổng (cả ở thư mục con) luôn để người merge — cùng danh sách với guard."""

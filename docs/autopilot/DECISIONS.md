@@ -1643,3 +1643,10 @@
 - Chọn: Đổi sang danh sách cho phép (is_doc_path): đuôi văn bản md/mdx/rst/txt trừ txt phụ thuộc, đúng tên LICENSE/LICENCE/NOTICE/COPYING, tài sản png/jpg/gif/svg/webp/ico/pdf/csv/json/bib trong docs/ gốc; còn lại là mã; file dưới thư mục docs không tính là test; tên có xuống dòng là mã
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: luật quyết định review/nợ phải đóng khi nghi ngờ — danh sách chặn luôn thiếu đuôi mới (Makefile-less script, .bat, .vue); danh sách cho phép chỉ cho qua những gì chắc chắn là tài liệu; tài sản lồng trong docs con thành mã (chặt hơn, đã ghi CHANGELOG cho dự án đích)
 - Đường lùi: Đặt lại DOC_PATH_RE của #321 (D-232 bản đầu)
+
+### D-234 · 2026-10-29T03:06:46+00:00 · Review #323: thẻ 'phụ thuộc' của làn merge (RISK_PATH_RES) chỉ bắt requirements*.txt ở cuối tên — upper-constraints.txt, requirements/edx/base.txt lọt làn nhanh. Mở rộng thế nào?
+
+- Phương án: (1) Giữ nguyên, ghi sổ 🟢 làm sau · (2) Mở rộng cùng độ rộng DEP_TXT_RE: [^/]*(requirements|constraints)[^/]*.txt, requirements/ mọi cấp, không phân biệt hoa thường · (3) Coi mọi .txt ngoài docs là phụ thuộc
+- Chọn: Mở rộng cùng độ rộng DEP_TXT_RE: [^/]*(requirements|constraints)[^/]*.txt, requirements/ mọi cấp, không phân biệt hoa thường
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: file phụ thuộc thật không lọt làn nhanh; một nguồn độ rộng với DEP_TXT_RE; phương án 3 chặn oan notes.txt mà không thêm an toàn đáng kể. (3) đơn giản, test được.
+- Đường lùi: Trả regex thẻ phụ thuộc về requirements[^/]*\.txt trong scripts/xt.py (RISK_PATH_RES) và bỏ ca test D-234

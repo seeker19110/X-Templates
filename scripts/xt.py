@@ -5101,7 +5101,8 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
         "phụ thuộc",
         re.compile(
             r"(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|pyproject\.toml|uv\.lock|poetry\.lock"
-            r"|requirements[^/]*\.txt|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock))$"
+            r"|(?i:[^/]*(requirements|constraints)[^/]*\.txt|requirements/.*\.txt)"  # D-234: constraints, cấp sâu
+            r"|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock))$"
         ),
     ),
 )
@@ -5135,15 +5136,21 @@ LOCKFILE_RE = re.compile(
     r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
 )
 # Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
-# rst/txt ở mọi nơi trừ file phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/…`, `CMakeLists.txt`);
-# đúng tên LICENSE/LICENCE/NOTICE/COPYING (± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
+# rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`);
+# đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
 # repo. Trước đây mọi `…/docs/…` ở mọi độ sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review
 # (hàng BLOCKER `review_debt`) và làn merge (AUD-SEC-134).
 DOC_TEXT_EXT = ("md", "mdx", "rst", "txt")
 DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
-DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*\.txt|requirements/.*|CMakeLists\.txt)$", re.I)
-LICENSE_NAME_RE = re.compile(r"(LICEN[CS]E|NOTICE|COPYING)(\.(md|txt|rst))?", re.I)
-DOCS_DIR_RE = re.compile(r"(^|/)docs?/", re.I)
+# Rộng (đóng khi nghi ngờ — review #323): `docs/design-constraints.txt` thành mã chỉ tốn một lượt review
+DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists)\.txt$", re.I)
+# Hậu tố gạch nối (LICENSE-MIT, NOTICE-3rdparty — review #322) chỉ khi gốc VIẾT HOA: `scripts/license-check` là mã (#323)
+LICENSE_NAME_RE = re.compile(
+    r"(?i:LICEN[CS]E|NOTICE|COPYING)(\.(?i:md|txt|rst))?"
+    r"|(LICEN[CS]E|NOTICE|COPYING)(-[A-Za-z0-9]+)*(\.[0-9]+)*(\.(?i:md|txt|rst))?"
+)
+# Thư mục test nằm dưới thư mục docs (`docs/spec/openapi.yaml`) không phải test — tên test (`*.test.*`) thì vẫn là test
+DOCS_TEST_DIR_RE = re.compile(r"(^|/)docs?/(.*/)?(tests?|__tests__|spec|e2e)/", re.I)
 
 
 def is_doc_path(path: str) -> bool:
@@ -5161,6 +5168,18 @@ def is_doc_path(path: str) -> bool:
 
 
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|__tests__|spec|e2e)/|(_test|\.test|\.spec|_spec)\.[^/]+$|(^|/)test_[^/]+$")
+
+
+def _is_test_path(path: str) -> bool:
+    """Test của làn merge: `TEST_PATH_RE`, trừ file trong thư mục test/spec nằm dưới thư mục docs (review #322) — tên
+    test trong docs (`app/docs/page.test.tsx`) vẫn là test."""
+    if not TEST_PATH_RE.search(path):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    by_name = re.search(r"(_test|\.test|\.spec|_spec)\.[^/]+$|^test_", name) is not None
+    return by_name or not DOCS_TEST_DIR_RE.search(path)
+
+
 MONO_DIRS = ("packages", "apps", "services", "libs", "crates", "modules")
 CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}
 CI_PENDING = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
@@ -5304,11 +5323,10 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     if lines > FAST_LANE_MAX_LINES:
         out.append(f"{lines} dòng > {FAST_LANE_MAX_LINES} (không tính tài liệu/lockfile)")
     code = [p for p in paths if not is_doc_path(p) and not LOCKFILE_RE.search(p)]
-    pkgs = sorted({_package_of(p) for p in code if not TEST_PATH_RE.search(p)})
+    pkgs = sorted({_package_of(p) for p in code if not _is_test_path(p)})
     if len(pkgs) > 1:
         out.append(f"nhiều gói: {', '.join(pkgs[:4])}")
-    # File trong thư mục docs không tính là test (`docs/spec/openapi.yaml` — review #322): chỉ là mã
-    if pkgs and not any(TEST_PATH_RE.search(p) and not DOCS_DIR_RE.search(p) for p in code):
+    if pkgs and not any(_is_test_path(p) for p in code):
         out.append("đổi mã mà không đổi test")
     return out
 
