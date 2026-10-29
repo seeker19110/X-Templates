@@ -635,6 +635,8 @@ class MergeDecisionTest(unittest.TestCase):
                     "requirements/dev.in",
                     "go.work",
                     "lib/F.fsproj",
+                    "lib/V.vbproj",
+                    "requirements/a/b/c.txt",
                     "pubspec.lock",
                     "ios/Podfile.lock",
                     "mix.lock",
@@ -847,6 +849,27 @@ class MergeDecisionTest(unittest.TestCase):
                     (d["verdict"], d["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
                 )
 
+    def test_lockfile_re_inside_dependency_tag(self):
+        """D-238 (review #324): mọi file `LOCKFILE_RE` bỏ khỏi trần dòng/gói/"đổi mã không test" PHẢI mang thẻ phụ thuộc —
+        không thì lockfile (hay tên giống lockfile) lách làn chuẩn. Neo của `LOCKFILE_RE`: tên dài hơn là mã."""
+        locks = ("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb")
+        locks += ("deno.lock", "uv.lock", "poetry.lock", "Pipfile.lock", "go.sum", "Cargo.lock", "Gemfile.lock")
+        locks += ("composer.lock", "packages.lock.json", "gradle.lockfile", "pubspec.lock", "Podfile.lock")
+        locks += ("Package.resolved", "mix.lock")
+        dep = dict(xt.RISK_PATH_RES)["phụ thuộc"]
+        for name in locks:
+            for path in (name, f"apps/web/{name}"):
+                with self.subTest(path):
+                    self.assertTrue(xt.LOCKFILE_RE.search(path))
+                    self.assertTrue(dep.search(path))
+        for path in ("src/yarn.lock.py", "src/myuv.lock", "src/Cargo.LOCK", "x/go.sum.bak"):
+            with self.subTest(path):
+                self.assertIsNone(xt.LOCKFILE_RE.search(path))
+                self.assertIn(
+                    "đổi mã mà không đổi test",
+                    xt.merge_lane_reasons(pr(files=[{"path": path, "additions": 120, "deletions": 0}]), []),
+                )
+
     def test_lockfiles_and_docs_do_not_count_as_size_or_package(self):
         files = [
             {"path": "docs/guide.md", "additions": 400, "deletions": 0},
@@ -860,7 +883,8 @@ class MergeDecisionTest(unittest.TestCase):
         lock = [*files, {"path": "uv.lock", "additions": 900, "deletions": 50}]
         d = xt.merge_decision(pr(files=lock), 2)
         self.assertEqual(d["reasons"], ["đường dẫn nhạy cảm (phụ thuộc): uv.lock"])  # không tính 950 dòng
-        for name in ("Pipfile.lock", "pubspec.lock", "gradle.lockfile", "Package.resolved", "mix.lock", "bun.lock"):
+        new_locks = ("Pipfile.lock", "pubspec.lock", "gradle.lockfile", "Package.resolved", "mix.lock", "bun.lock")
+        for name in (*new_locks, "npm-shrinkwrap.json", "deno.lock", "packages.lock.json", "Podfile.lock"):
             with self.subTest(name):  # lockfile D-235 cũng không tính dòng (review #324 T3)
                 d = xt.merge_decision(pr(files=[*files, {"path": name, "additions": 900, "deletions": 50}]), 2)
                 self.assertEqual(d["reasons"], [f"đường dẫn nhạy cảm (phụ thuộc): {name}"])

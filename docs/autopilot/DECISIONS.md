@@ -1657,3 +1657,10 @@
 - Chọn: Thêm danh sách tên manifest/lockfile phổ biến vào RISK_PATH_RES (tên chính xác, neo (^|/)…$), conanfile.txt vào DEP_TXT_RE
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: đổi phụ thuộc phải qua review (BASE-DEP-001); tên chính xác không chặn oan file cấu hình khác như phương án 3. (3) đơn giản, test được từng tên.
 - Đường lùi: Bỏ các tên D-235 khỏi thẻ phụ thuộc RISK_PATH_RES và conanfile khỏi DEP_TXT_RE trong scripts/xt.py; bỏ ca test D-235 và ca corpus pr-sec136
+
+### D-238 · 2026-10-29T04:46:59+00:00 · PR #324: 2 lượt review chưa sạch (ADR-0053) — lượt 2 còn 🟠 thiếu ca *.vbproj (bỏ 'vb' khỏi regex thẻ phụ thuộc mà test vẫn xanh) và 🟢 4 lockfile chưa có ca, bất biến LOCKFILE_RE ⊆ thẻ phụ thuộc chưa có test. Đổi chiến lược thế nào?
+
+- Phương án: (1) Giữ PR, thêm ca vbproj + 4 lockfile + test bất biến (mọi tên lockfile × tiền tố thư mục đều có lý do phụ thuộc; ca âm src/yarn.lock.py) — vòng review cuối rà đúng phần này · (2) Sinh regex và test từ một hằng danh sách tên (một nguồn) · (3) Đóng PR, tách thành PR nhỏ hơn
+- Chọn: Giữ PR, thêm ca vbproj + 4 lockfile + test bất biến (mọi tên lockfile × tiền tố thư mục đều có lý do phụ thuộc; ca âm src/yarn.lock.py) — vòng review cuối rà đúng phần này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: lỗi còn lại là thiếu ca test, mã đã đúng (reviewer xác nhận 77/102 đột biến chết, phần sống còn lại là nới an toàn); thêm ca là sửa gốc cho 'test được từng tên'. Phương án 2 làm đột biến bỏ tên khỏi hằng cũng xoá luôn ca test — mất khả năng bắt; phương án 3 tốn thêm vòng mà không đổi rủi ro. (3) đơn giản, giữ đường lùi.
+- Đường lùi: Bỏ các ca thêm ở test_standard_lane_reasons/test_lockfiles… trong tests/test_merge.py
