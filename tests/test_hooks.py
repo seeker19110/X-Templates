@@ -1375,9 +1375,10 @@ class StopAndSessionTest(unittest.TestCase):
     def test_stop_hint_next_step(self):
         """T-3550 (ADR-0052 §5): vòng kết thúc (done) → Stop hook cho dừng kèm `systemMessage` gợi ý bước kế từ
         `next-step` (mục tiêu theo `delivery_phase`); không `decision`, không ghi gì thêm. Lỗi tính gợi ý → cho dừng im."""
-        for phase, objective in (("build", "build-until-clean"), ("harden", "harden-to-signoff")):
+        cases = (("build", "build-until-clean"), ("harden", "harden-to-signoff"), ("", "harden-to-signoff"))
+        for phase, objective in cases:  # vắng `delivery_phase` = harden như mọi nơi (review #326)
             with self.subTest(phase):
-                tmp = self.project_with_loop(f"delivery_phase: {phase}\n")
+                tmp = self.project_with_loop(f"delivery_phase: {phase}\n" if phase else "")
                 env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
                 cmd = [
                     sys.executable,

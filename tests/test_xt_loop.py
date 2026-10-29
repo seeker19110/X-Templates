@@ -886,8 +886,12 @@ class UpdateStateTest(TmpRepoCase):
 
         self.init_loop()
         xt.write_state({**xt.read_state(self.tmp), "blocked": True, "blocked_reason": "x"}, self.tmp)
-        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop):
+        hint = unittest.mock.patch.object(
+            xt, "stop_hint", return_value="gợi ý"
+        )  # vòng do `loop stop` đóng: không gợi ý
+        with unittest.mock.patch.object(xt, "loop_verdict", verdict_then_stop), hint as called:
             self.assertEqual(xt.hook_stop("{}", self.tmp), ("", 0))
+        called.assert_not_called()
         st = xt.read_state(self.tmp)
         self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "stopped"))
         self.init_loop()

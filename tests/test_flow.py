@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from collections.abc import Callable
@@ -584,22 +585,28 @@ class FlowTest(TmpRepoCase):
     @flow("FLOW-15")
     def test_flow_15_regather_keeps_one_task_stable_id_and_tick(self) -> None:
         """Given 🟠 mở trong sổ đã commit (mô tả có `(sau: …)` và lệnh trong backtick) · When gom việc harden hai lần ·
-        Then một mục, cùng ID, khoá có SHA commit đưa hàng vào sổ, mô tả không thành Gate/`sau:`. Dán `line` vào
-        PLAN-harden, làm xanh (máy tick) → gom lại: cùng ID, `checked`, `audit` (nguồn còn mở), không task trùng; phát hiện
-        mới chỉ thêm một việc mới."""
+        Then một mục, cùng ID, khoá `nguồn:ID` (không SHA — D-242), mô tả không thành Gate/`sau:`. Dán `line` vào
+        PLAN-harden rồi lịch sử bị squash (SHA mọi commit đổi, như `gh pr merge --squash`) → vẫn nhận đúng task. Làm xanh
+        (máy tick) → gom lại: cùng ID, `checked`, `audit` (nguồn còn mở), không task trùng; phát hiện mới chỉ thêm việc mới."""
         finding = "AUD-ARCH-001 | 🟠 | mở | lỗi (sau: T-001) `rm -rf x` | đo được: x | `true` | —"
         self.audit_book(self.git("rev-parse", "HEAD"))
         self.audit_book(self.git("rev-parse", "HEAD"), (finding,))
-        intro = self.git("rev-parse", "HEAD").strip()
         self.finish_batch()
         first = self.next_step([], "--objective", "harden-to-signoff")
         second = self.next_step([], "--objective", "harden-to-signoff")
         self.assertEqual((first["action"], first["work"]), ("replan", second["work"]), first)
         self.assertEqual(len(first["work"]), 1)
         w = first["work"][0]
-        self.assertEqual((w["id"], w["key"], w["gate"]), ("T-902", f"audit:AUD-ARCH-001@{intro[:12]}", "true"))
+        self.assertEqual((w["id"], w["key"], w["gate"]), ("T-902", "audit:AUD-ARCH-001", "true"))
         task = xt.parse_plan(self.write("docs/autopilot/PLAN-harden.md", w["line"] + "\n"))[0]
         self.assertEqual((task["id"], task["gate"], task["after"]), ("T-902", "true", []))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "PLAN-harden")
+        self.git("checkout", "-q", "--orphan", "squashed")  # cùng cây, lịch sử một commit mới: SHA phát hiện đổi
+        self.git("commit", "-q", "-m", "squash")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        pasted = self.next_step([], "--objective", "harden-to-signoff")
+        self.assertEqual([(x["id"], x["planned"]) for x in pasted["work"]], [("T-902", True)], pasted)
         self.assertEqual(self.loop("init", "--plan", "docs/autopilot/PLAN-harden.md", "--force")[0], 0)
         self.assertEqual(self.loop("record", "--task", "T-902", "--", "true")[0], 0)  # khớp Gate → máy tick [x]
         self.assertEqual(self.loop("verify", "--all")[0], 0)
@@ -619,6 +626,10 @@ class FlowTest(TmpRepoCase):
         self.assertEqual(out["action"], "budget", out)  # sửa một, phát hiện một: hai đợt 1 → 1 → 1 (FLOW-13 thắng)
         self.assertEqual([(x["id"], x["planned"]) for x in out["work"]], [("T-903", False)])
 
+    @functools.cached_property
+    def outside(self) -> Path:
+        return Path(self.enterContext(tempfile.TemporaryDirectory()))
+
     def harden_done(self) -> None:
         """Đợt `done` đã kiểm lại cuối, sổ sạch phủ tới HEAD, không việc harden nào, cây sạch (tick PLAN đã commit — như
         `release-check` hàng `tree` đòi): chỉ còn cổng phát hành."""
@@ -630,8 +641,8 @@ class FlowTest(TmpRepoCase):
     def signoff(self, *extra: str, **release: Any) -> dict[str, Any]:
         """`next-step --objective harden-to-signoff` kèm JSON `release-check` (`release` rỗng → không truyền)."""
         args = ["--objective", "harden-to-signoff", *extra]
-        if release:
-            path = self.repo / ".autopilot" / "release.json"
+        if release:  # ngoài cây: file trong cây làm `release-check` FAIL `tree` và đổi vân tay (review #326)
+            path = self.outside / "release.json"
             path.write_text(json.dumps({"head": self.git("rev-parse", "HEAD").strip(), **release}), encoding="utf-8")
             args += ["--release", str(path)]
         return self.next_step([], *args)
@@ -661,7 +672,7 @@ class FlowTest(TmpRepoCase):
         không theo SHA HEAD); When sửa mã (commit, sổ quét lại) → gói hết hạn, `release-check`, nêu file mã đổi."""
         self.harden_done()
         out = self.signoff(fails=[], human=["prod_switch"], verdict="GO (chờ người)")
-        pkg = self.repo / ".autopilot" / "package.json"
+        pkg = self.outside / "package.json"
         pkg.write_text(json.dumps(out), encoding="utf-8")
         (self.repo / "docs" / "ops" / "GO-NO-GO-v1.md").write_text("# GO\n\nKý: chủ dự án\n", encoding="utf-8")
         (self.repo / "docs" / "autopilot" / "DECISIONS.md").write_text("# D\n\n- D-001 ký\n", encoding="utf-8")
@@ -675,6 +686,18 @@ class FlowTest(TmpRepoCase):
         rc, text, err = self.loop("next-step", "--objective", "harden-to-signoff", "--prs", prs, "--package", str(pkg))
         self.assertEqual(rc, 0, err)
         self.assertIn("  gói: {", text)
+        decisions = self.repo / "docs" / "autopilot" / "DECISIONS.md"
+        decisions.write_text("# D\n\n- D-001 ký\n- D-002 chưa commit\n", encoding="utf-8")  # như `loop decide` vừa ghi
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        self.assertEqual(self.signoff("--package", str(pkg))["action"], "signoff-package")
+        stray = self.repo / "tools" / "new.py"  # file mã chưa track cũng là bằng chứng đổi
+        stray.parent.mkdir()
+        stray.write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        out_new = self.signoff("--package", str(pkg))
+        self.assertEqual(out_new["action"], "release-check", out_new)
+        self.assertIn("tools/new.py", out_new["reason"])
+        stray.unlink()
         (self.repo / "app.py").write_text("x = 2\n", encoding="utf-8")
         self.git("add", "app.py")
         self.git("commit", "-q", "-m", "sửa mã sau gói")

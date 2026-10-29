@@ -1692,3 +1692,10 @@
 - Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
 - Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
+
+### D-242 · 2026-10-29T05:43:39+00:00 · Review #326 🔴: khoá việc harden 'nguồn:ID@SHA phát hiện' (D-236, theo ADR-0052 §5) đổi sau squash-merge (commit đưa hàng vào sổ trên nhánh không lên main) → gom lại ra task trùng; SHA cũng không phát hiện được ID tái dùng (git log -S lấy commit cũ nhất). Sửa thế nào?
+
+- Phương án: (1) Giữ SHA, tìm SHA trên nhánh chính (git log origin/main -S) · (2) Bỏ SHA khỏi khoá: khớp theo (nguồn, ID gốc) trên PLAN của vòng + docs/autopilot/PLAN*.md (cùng phạm vi cấp ID); @sha cũ trong dòng task vẫn đọc được, bị bỏ qua · (3) Băm nội dung hàng sổ làm khoá
+- Chọn: Bỏ SHA khỏi khoá: khớp theo (nguồn, ID gốc) trên PLAN của vòng + docs/autopilot/PLAN*.md (cùng phạm vi cấp ID); @sha cũ trong dòng task vẫn đọc được, bị bỏ qua
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ID sổ/MUST không tái dùng theo conventions nên (nguồn, ID) đã đủ định danh; phương án 1 vẫn lệch khi chưa merge (nhánh mới từ nhánh làm việc) và cần ref remote; phương án 3 đổi khoá mỗi lần sửa chữ trong hàng. (3) đơn giản, bỏ một git log -S mỗi hàng (Stop hook nhanh hơn). Lệch có chủ đích với chữ 'SHA phát hiện' của ADR-0052 §5 — ghi ở dòng trạng thái ADR.
+- Đường lùi: Trả HARDEN_KEY_RE/harden_work về khoá có @sha và _found_at (D-236)

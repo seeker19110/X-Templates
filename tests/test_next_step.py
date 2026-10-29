@@ -188,11 +188,11 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(objective=HARDEN)
         self.assertEqual((out["action"], out["work"], out["key"]["objective"]), ("release-check", [], HARDEN))
         self.assertEqual(out["missing"], ["`release-check --json` trên HEAD"])
-        items = [work("audit:AUD-A-001@abc1234", "T-010"), work("must:AAA-001", "T-009", planned=True)]
+        items = [work("audit:AUD-A-001", "T-010"), work("must:AAA-001", "T-009", planned=True)]
         out = self.step(objective=HARDEN, harden=items, audit={"open": 1}, open_must=1)
         self.assertEqual((out["action"], out["work"]), ("replan", items))
-        self.assertIn("1 việc harden chưa có trong PLAN (vd T-010 ← audit:AUD-A-001@abc1234)", out["reason"])
-        self.assertEqual(out["missing"], ["task cho audit:AUD-A-001@abc1234"])
+        self.assertIn("1 việc harden chưa có trong PLAN (vd T-010 ← audit:AUD-A-001)", out["reason"])
+        self.assertEqual(out["missing"], ["task cho audit:AUD-A-001"])
         stale = [
             work("audit:AUD-A-001", "T-010", planned=True, checked=True),
             work("must:AAA-001", "T-9", planned=True),
@@ -213,7 +213,7 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(objective=HARDEN, verdict=off, harden=[work("audit:AUD-A-001", "T-010", planned=True)])
         self.assertEqual(out["action"], "replan")
         self.assertIn("loop init", out["reason"])
-        self.assertEqual(out["work"], [])
+        self.assertEqual(out["work"], [work("audit:AUD-A-001", "T-010", planned=True)])  # harden luôn trả việc nháp
 
     def test_harden_no_progress_is_budget_with_work(self) -> None:
         items = [work("audit:AUD-A-001", "T-010")]
@@ -244,6 +244,11 @@ class NextStepPureTest(unittest.TestCase):
         self.assertEqual((out["action"], out["package"]), ("replan", None))
         self.assertIn("release-check NO-GO: FAIL audit, phase", out["reason"])
         self.assertEqual(out["missing"], ["`audit` PASS", "`phase` PASS"])
+        stalled = {"batches": [batch(1, "t1"), batch(1, "t2")]}  # FAIL vì 🟠 chờ người lặp: không replan mãi
+        out = self.step(
+            objective=HARDEN, signoff={"release": rel, "release_changed": []}, audit={"open": 1}, state=stalled
+        )
+        self.assertEqual(out["action"], "budget")
         ok = {**rel, "fails": [], "verdict": "GO"}
         for changed, note in ((["app.py"], f"1 file đổi sau {'b' * 12} (vd app.py)"), (None, "không có trong repo")):
             with self.subTest(changed):
@@ -259,6 +264,9 @@ class NextStepPureTest(unittest.TestCase):
         pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": ["prod_switch"], "release_verdict": "GO"}
         out = self.step(objective=HARDEN, signoff={"package": pkg, "package_changed": ["GO-NO-GO.md?"]})
         self.assertEqual((out["action"], out["package"]), ("signoff-package", pkg))
+        late = self.step(objective=HARDEN, signoff={"package": pkg, "deferred": ["T-777"]})  # defer sau khi dựng gói
+        self.assertEqual(late["package"]["human_pending"], ["T-777", "prod_switch"])
+        self.assertIn("người xác nhận T-777", late["missing"])
         self.assertIn(f"gói nghiệm thu ở {'c' * 12} còn hiệu lực", out["reason"])
         old = {**pkg, "evidence_fp": "e" * 64}
         for changed, note in (
@@ -539,27 +547,30 @@ class HardenWorkTest(StateCase):
         plan.write_text("".join(f"{x}\n" for x in lines), "utf-8")
         return plan
 
-    def test_planned_keeps_id_tick_and_reused_id_is_new(self) -> None:
-        self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —")
+    def test_planned_keeps_id_and_tick_across_plans(self) -> None:
+        """D-242 (review #326): khớp theo (nguồn, ID gốc) — `@sha` cũ trong dòng bị bỏ qua; task dán ở PLAN khác của
+        `docs/autopilot/` (chưa `loop init`) vẫn được nhận; cùng khoá ở hai PLAN → PLAN của vòng thắng."""
+        self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —", "AUD-B-002 | 🔴 | mở | b | x | `true` | —")
         self.write_plan(
             "- [x] `T-001` xong — Gate: `true`",
             "- [x] `T-050` Sửa AUD-A-001 (nguồn: audit:AUD-A-001@abcdef123456) — Gate: `true`",
             "- [ ] `T-051` Đạt MUST AAA-001 (nguồn: must:AAA-001) — Gate: `true`",
             "- [ ] `T-052` giả (Gate: `x` (nguồn: must:AAA-002)) — Gate: `true`",
         )
+        other = self.base / "docs" / "autopilot"
+        other.mkdir(parents=True)
+        (other / "PLAN-harden-mới.md").write_text(
+            "- [ ] `T-060` Sửa AUD-B-002 (nguồn: audit:AUD-B-002) — Gate: `true`\n"
+            "- [ ] `T-061` cũ (nguồn: audit:AUD-A-001) — Gate: `true`\n",
+            "utf-8",
+        )
         items = {w["key"]: w for w in xt.harden_work(self.base, self.st(), "S.md")}
         self.assertEqual((items["audit:AUD-A-001"]["id"], items["audit:AUD-A-001"]["checked"]), ("T-050", True))
+        self.assertEqual((items["audit:AUD-B-002"]["id"], items["audit:AUD-B-002"]["planned"]), ("T-060", True))
         self.assertEqual((items["must:AAA-001"]["id"], items["must:AAA-001"]["checked"]), ("T-051", False))
         self.assertEqual(
-            (items["must:AAA-002"]["id"], items["must:AAA-002"]["planned"]), ("T-053", False)
+            (items["must:AAA-002"]["id"], items["must:AAA-002"]["planned"]), ("T-062", False)
         )  # khoá trong Gate
-        with unittest.mock.patch.object(xt, "_found_at", return_value="0123456789ab"):  # cùng ID gốc, phát hiện khác
-            again = {w["ref"]: w for w in xt.harden_work(self.base, self.st(), "S.md")}
-        self.assertEqual((again["AUD-A-001"]["id"], again["AUD-A-001"]["planned"]), ("T-053", False))  # cấp theo khoá
-        with unittest.mock.patch.object(xt, "_found_at", return_value="abcdef123456"):
-            same = {w["ref"]: w for w in xt.harden_work(self.base, self.st(), "S.md")}
-        self.assertEqual(same["AUD-A-001"]["key"], "audit:AUD-A-001@abcdef123456")
-        self.assertEqual((same["AUD-A-001"]["id"], same["AUD-A-001"]["checked"]), ("T-050", True))
 
     def test_ids_continue_after_other_plans_and_bad_inputs(self) -> None:
         self.book("AUD-A-001 | 🟠 | mở | " + "dài " * 60 + " | x | `true` | —")
@@ -573,7 +584,6 @@ class HardenWorkTest(StateCase):
         self.assertEqual(len(items[0]["title"]), xt.HARDEN_TITLE_MAX)
         (self.base / "S.md").write_bytes(b"\xff")
         self.assertEqual(xt.harden_work(self.base, self.st(blueprint=None), "S.md"), [])
-        self.assertEqual(xt._found_at(self.base, "S.md", "AUD-A-001"), "")  # không phải repo git
         self.assertIsNone(xt.evidence_fingerprint(self.base))
         self.assertIsNone(xt._changed_since(self.base, "a" * 40))  # không phải commit có trong repo
         self.assertIsNone(xt._changed_since(self.base, "HEAD"))  # chỉ nhận SHA đủ 40 ký tự
