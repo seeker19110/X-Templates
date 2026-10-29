@@ -1,7 +1,7 @@
 ---
 title: Mẫu PLAN
 kind: template
-updated: 2026-10-25
+updated: 2026-10-29
 ---
 
 # Mẫu PLAN.md
@@ -13,11 +13,13 @@ updated: 2026-10-25
 > **Trạng thái:** `[ ]` chưa · `[x]` xong (chỉ khi `.autopilot/evidence/T-NNN.json` có `exit_code: 0` và `cmd` đúng Gate) · `[~]` bỏ (ghi `— Bỏ: <lý do>`, thiếu thì `loop status` ra `verify`).
 > **Tầng executor (ADR-0029):** mặc định `executor`; task khó/bất định/rủi ro cao/phạm vi rộng (giao ước xuyên module, auth/phân quyền/tenant, migration dữ liệu thật, đồng thời/retry, lỗi không ổn định) ghi `(exec: deep)` trong ngoặc của dòng task → `executor-deep`; tầng mặc định đỏ 2 lần → máy tự chuyển cấp. Tên tầng, không tên model.
 > **Mốc:** mỗi mục `### Lát N — …` là một mốc; `loop status` báo `milestone_done` khi mọi task của mục trước đã đóng → audit delta (`xt.py audit plan --status …`) trước khi làm task đầu của mục kế; pha build (`milestone_audit: g7`) không audit theo mốc mà ở cuối đợt (`done` → `/audit delta`, ADR-0033/0046/0047 của khung); khi chưa có `PROJECT.md`, 4 dòng Khung (vấn đề · người dùng · 1 chỉ số · không làm) đặt ngay dưới dòng Duyệt.
+> **Giai đoạn sản phẩm (ADR-0058 của khung):** dự án có `docs/autopilot/STAGE.json` thì PLAN khai đúng giai đoạn + chu kỳ đang mở; khai khác/thiếu → `loop init`/`next`/`record` exit 2 (giai đoạn sau khoá tới khi người `stage approve`).
 > Máy đọc: dòng task và mục "Ủy quyền production" (`xt.py grant-check`). "Ngân sách (4 con số)" theo [`LOOP-DESIGN-001`](../11-autonomous-loop/loop-design.md) là số truyền cho cờ `loop init` (`--max-iterations`, `--hours`) và `XT_RECORD_TIMEOUT`; "Điểm dừng bắt buộc" và "Hạn" để người đọc — điểm dừng thật đi qua `loop defer`/`loop block` lúc chạy.
 
 ```markdown
 # docs/autopilot/PLAN.md — <Tên dự án> · <mốc/lát>
 
+> Giai đoạn sản phẩm: <1|2|3> (C-<NNN>) — chỉ khi có `docs/autopilot/STAGE.json`; lấy từ `xt.py stage status`
 > Duyệt: D-<NNN> (phiên chính tự duyệt) hoặc <tên> ngày <YYYY-MM-DD> · Spec gốc: docs/specs/SPEC-<slug>.md (F-<NNN>) · Blueprint: BLUEPRINT.md
 
 ## Mục tiêu của kế hoạch này

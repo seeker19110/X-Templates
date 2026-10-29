@@ -2627,7 +2627,7 @@ def tree_fingerprint(base: Path) -> Optional[str]:
     head = _git(base, "rev-parse", "HEAD")
     if head.returncode != 0:
         return None
-    return tree_hash(base, head.stdout, lambda *a: _git(base, *a).stdout, [])[0]
+    return tree_hash(base, head.stdout, lambda *a: _git(base, *a).stdout, [f":(exclude){STAGE_LEDGER}"])[0]
 
 
 def tree_hash(base: Path, head: str, git: Callable[..., str], excl: List[str]) -> Tuple[str, bool]:
@@ -2830,6 +2830,10 @@ def loop_record(
     bad = plan_bad_links(_plan_tasks(base, st)).get(task)
     if bad:  # fail-closed: không biết dependency/phạm vi thật thì không nhận bằng chứng (review delta PR #173)
         print(f"✗ {task} có ghi chú `sau:`/`files:` không đọc được: {', '.join(bad)} — sửa PLAN trước", file=sys.stderr)
+        return 2
+    locked = stage_plan_problem(base, str(st.get("plan"))) if st.get("plan") else ""
+    if locked:  # không nhận bằng chứng cho task của giai đoạn khoá (ADR-0058)
+        print(f"✗ {locked}", file=sys.stderr)
         return 2
     meta = evidence_meta(base, st, task)  # digest file TRƯỚC khi chạy: đầu vào mà Gate đã kiểm (AUTO-02)
     started = now_iso()
@@ -6677,7 +6681,7 @@ def _init_input_problem(args: argparse.Namespace, base: Path) -> str:
             (base / path).read_text(encoding="utf-8") if path else ""
         except (OSError, UnicodeDecodeError) as exc:
             return f"Không đọc được {path} như UTF-8: {exc}"
-    return ""
+    return stage_plan_problem(base, args.plan)  # giai đoạn sau khoá (ADR-0058)
 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
@@ -6802,6 +6806,10 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
     tasks = _plan_tasks(base, st)
     if not tasks:
         print("✗ Không đọc được PLAN của vòng — chạy `loop init --plan …` trước", file=sys.stderr)
+        return 2
+    locked = stage_plan_problem(base, str(st.get("plan")))
+    if locked:  # PLAN sửa sau `loop init` sang giai đoạn khoá → không giao task (ADR-0058)
+        print(f"✗ {locked}", file=sys.stderr)
         return 2
     ready = plan_ready(tasks, _deferred(st))
     unknown = plan_unknown_after(tasks)
@@ -9658,6 +9666,368 @@ def cmd_merge_check(args: argparse.Namespace) -> int:
 
 # --------------------------------------------------------------------------- release-check (G7 máy đọc, ADR-0029)
 
+# --- Giai đoạn sản phẩm (ADR-0058): MVP → hoàn thiện → tối ưu, giai đoạn sau khoá tới khi người duyệt giai đoạn trước ---
+STAGE_LEDGER = "docs/autopilot/STAGE.json"  # sổ theo git (bền qua container); chỉ `xt.py stage …` ghi (guard: evidence)
+STAGE_SCHEMA = 1
+STAGE_NAMES = {1: "MVP", 2: "hoàn thiện", 3: "tối ưu"}
+STAGE_STATUSES = ("active", "awaiting_approval", "completed")
+STAGE_CYCLE_RE = re.compile(r"C-\d{3,}")
+STAGE_SHA_RE = re.compile(r"[0-9a-f]{40}")
+# Dòng khai của PLAN: `Giai đoạn sản phẩm: 2 (C-001)` (có thể nằm trong `> …`) — đúng MỘT dòng mỗi PLAN.
+PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((C-\d{3,})\)", re.MULTILINE)
+STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
+STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
+
+
+class StageError(Exception):
+    """Lệnh `stage` bị từ chối: một dòng cho người, exit 2, không ghi sổ."""
+
+
+def agent_session() -> bool:
+    """Tiến trình chạy trong phiên agent (Claude Code đặt các biến này cho lệnh Bash). Là lớp chặn nhầm, không phải ranh
+    giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ."""
+    return any(os.environ.get(k, "").strip() for k in STAGE_AGENT_ENV)
+
+
+def _stage_first(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
+    """Sự kiện đầu: `init` (giai đoạn 1) hoặc `adopt` (giai đoạn 2|3, có `by` + `evidence` — người công nhận)."""
+    kind, stage = ev.get("event"), ev.get("stage")
+    if kind == "init" and stage == 1:
+        r.update(cycle=ev["cycle"], stage=1, status="active", sha=None)
+        return ""
+    if kind == "adopt" and stage in (2, 3) and ev.get("by") and ev.get("evidence"):
+        r.update(cycle=ev["cycle"], stage=stage, status="active", sha=None)
+        return ""
+    return "sự kiện đầu phải là `init` giai đoạn 1 hoặc `adopt` 2|3 có `by` + `evidence`"
+
+
+def _stage_next_cycle(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
+    """`init` sau sự kiện đầu: chỉ khi chu kỳ trước `completed`, số chu kỳ kế tiếp liền, giai đoạn 1."""
+    want = f"C-{int(r['cycle'][2:]) + 1:03d}"
+    if r["status"] != "completed" or ev["cycle"] != want or ev.get("stage") != 1:
+        return f"`init` {ev['cycle']} khi {r['cycle']} chưa xong cả ba giai đoạn hoặc không phải chu kỳ kế ({want})"
+    r.update(cycle=want, stage=1, status="active", sha=None)
+    return ""
+
+
+def _stage_step(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
+    """submit/reopen/approve của chu kỳ + giai đoạn đang mở, đúng thứ tự: approve chỉ ngay sau submit cùng `sha`."""
+    kind, sha = ev.get("event"), str(ev.get("sha", ""))
+    if ev["cycle"] != r["cycle"] or ev.get("stage") != r["stage"]:
+        return f"`{kind}` ở {ev['cycle']}/{ev.get('stage')} trong khi đang mở {r['cycle']}/{r['stage']}"
+    if kind == "submit" and r["status"] == "active" and STAGE_SHA_RE.fullmatch(sha):
+        r.update(status="awaiting_approval", sha=sha)
+    elif kind == "reopen" and r["status"] == "awaiting_approval":
+        r.update(status="active", sha=None)
+    elif kind == "approve" and r["status"] == "awaiting_approval" and sha == r["sha"] and ev.get("by"):
+        done = r["stage"] == 3
+        r.update(stage=r["stage"] if done else r["stage"] + 1, status="completed" if done else "active", sha=None)
+    else:
+        return f"`{kind}` sai thứ tự hoặc thiếu `sha`/`by` ở {r['cycle']}/{r['stage']} ({r['status']})"
+    return ""
+
+
+def _stage_replay(ev: Any, r: Dict[str, Any]) -> str:
+    """Áp một sự kiện lên trạng thái dựng lại `r`; lý do sai hoặc ''."""
+    if not isinstance(ev, dict) or not STAGE_CYCLE_RE.fullmatch(str(ev.get("cycle", ""))):
+        return "sự kiện lịch sử không phải object có `cycle` C-NNN"
+    if r.get("cycle") is None:
+        return _stage_first(ev, r)
+    if ev.get("event") == "init":
+        return _stage_next_cycle(ev, r)
+    return _stage_step(ev, r)
+
+
+def _stage_history_problem(led: Dict[str, Any]) -> str:
+    """Lịch sử phải tự dựng lại ĐÚNG trạng thái hiện tại, theo thứ tự: mở giai đoạn N+1 chỉ qua `approve` ngay sau
+    `submit` cùng SHA của giai đoạn N; `adopt` chỉ là sự kiện đầu; chu kỳ mới chỉ sau khi chu kỳ trước xong (sửa tay
+    `stage`/`history` bị lộ ở đây — review #327)."""
+    hist = led.get("history")
+    if not isinstance(hist, list) or not hist:
+        return "thiếu `history`"
+    r: Dict[str, Any] = {"cycle": None}
+    for ev in hist:
+        why = _stage_replay(ev, r)
+        if why:
+            return why
+    sub = (led.get("submitted") or {}).get("sha")
+    got = (r["cycle"], r["stage"], r["status"], r["sha"])
+    if got != (led["cycle"], led["stage"], led["status"], sub):
+        return f"lịch sử dựng ra {r['cycle']}/{r['stage']}/{r['status']}, sổ ghi {led['cycle']}/{led['stage']}/{led['status']}"
+    return ""
+
+
+def stage_problem(led: Any) -> str:
+    """Lý do sổ giai đoạn không hợp lệ; '' = hợp lệ. Sổ hỏng → mọi lệnh đọc nó chặn (fail-closed về chuyển giai đoạn)."""
+    if not isinstance(led, dict) or led.get("schema") != STAGE_SCHEMA:
+        return f"không phải object `schema: {STAGE_SCHEMA}`"
+    if not STAGE_CYCLE_RE.fullmatch(str(led.get("cycle", ""))):
+        return "`cycle` không phải C-NNN"
+    if led.get("stage") not in STAGE_NAMES or led.get("status") not in STAGE_STATUSES:
+        return "`stage` phải 1–3, `status` phải " + "|".join(STAGE_STATUSES)
+    if led["status"] == "completed" and led["stage"] != 3:
+        return "`completed` chỉ có ở giai đoạn 3"
+    sub = led.get("submitted")
+    if sub is not None and not isinstance(sub, dict):
+        return "`submitted` phải là object hoặc null"
+    if (led["status"] == "awaiting_approval") != (
+        isinstance(sub, dict) and bool(STAGE_SHA_RE.fullmatch(str(sub.get("sha", ""))))
+    ):
+        return "`submitted.sha` 40 hex phải có đúng khi `awaiting_approval`"
+    return _stage_history_problem(led)
+
+
+def read_stage(base: Path) -> Optional[Dict[str, Any]]:
+    """Sổ giai đoạn; chưa dùng (không có file) → None. Có file mà hỏng → StageError (không coi như chưa dùng)."""
+    p = base / STAGE_LEDGER
+    if not p.exists():
+        seen = _stage_git_seen(base)
+        if seen:  # xoá/dời sổ, nhánh tách trước sổ: không tắt khoá bằng thao tác thường (review #327)
+            raise StageError(
+                f"{STAGE_LEDGER} vắng nhưng có trong lịch sử git (commit + ref: {seen}) — không coi là bỏ dùng giai "
+                f"đoạn; người khôi phục sổ (`git log --all -- {STAGE_LEDGER}`) hoặc dọn ref thử chứa nó"
+            )
+        return None
+    try:
+        led = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise StageError(f"{STAGE_LEDGER} không đọc được: {exc} — người sửa hoặc khôi phục từ git") from None
+    why = stage_problem(led)
+    if why or not isinstance(led, dict):
+        raise StageError(f"{STAGE_LEDGER} hỏng: {why} — không đoán giai đoạn; người sửa hoặc khôi phục từ git")
+    return led
+
+
+def _stage_git_seen(base: Path) -> str:
+    """`<commit rút gọn> <ref>` gần nhất trên mọi ref có chạm sổ; '' khi chưa bao giờ có, không phải repo git hay không chạy được git."""
+    try:
+        r = _git(base, "log", "--all", "--source", "-1", "--format=%h %S", "--", STAGE_LEDGER)
+    except OSError:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def update_stage(base: Path, fn: Callable[[Optional[Dict[str, Any]]], Dict[str, Any]]) -> Dict[str, Any]:
+    """Đọc–sửa–ghi sổ trong khoá `state.lock` (cùng khoá với state.json, ADR-0052 §2); sổ mới phải hợp lệ mới ghi."""
+    with _state_lock(base):
+        new = fn(read_stage(base))
+        why = stage_problem(new)
+        if why:  # lỗi lập trình: chặn trước khi ghi sổ sai
+            raise StageError(f"chuyển giai đoạn tạo sổ sai: {why}")
+        p = base / STAGE_LEDGER
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fresh = not p.exists()
+        p.touch()  # file mới theo umask như tài liệu khác (mkstemp tạo 0600 — review #327); keep_mode giữ quyền đó
+        try:
+            write_atomic(p, json.dumps(new, ensure_ascii=False, indent=2) + "\n", keep_mode=True)
+        except BaseException:
+            if fresh:  # không để lại sổ rỗng (= hỏng, chặn mọi lối vào mà agent không dọn được — review #327)
+                p.unlink(missing_ok=True)
+            raise
+        return new
+
+
+def _stage_event(led: Dict[str, Any], kind: str, **extra: Any) -> None:
+    led["history"].append({"event": kind, "cycle": led["cycle"], "stage": led["stage"], "at": now_iso(), **extra})
+
+
+def _stage_by(base: Path) -> str:
+    """Người duyệt: `git config user.email` (hoặc tên) của máy chạy lệnh; trống → StageError."""
+    for key in ("user.email", "user.name"):
+        try:
+            r = subprocess.run(
+                ["git", "config", key], cwd=base, capture_output=True, text=True, timeout=10, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.stdout.strip():
+            return r.stdout.strip()
+    raise StageError("không biết người duyệt — đặt `git config user.email` trước")
+
+
+def plan_stage(text: str) -> List[Tuple[int, str]]:
+    """Mọi (giai đoạn, chu kỳ) PLAN khai ở dòng `Giai đoạn sản phẩm: N (C-NNN)`, theo thứ tự."""
+    body = "\n".join(line for _, line in _lines_outside_fences(text, 1))  # ví dụ trong code fence không tính
+    return [(int(m[1]), m[2]) for m in PLAN_STAGE_RE.finditer(body)]
+
+
+def stage_plan_problem(base: Path, plan: str) -> str:
+    """Lý do PLAN không được chạy dưới sổ giai đoạn hiện tại; '' = được. Không dùng sổ → ''. `loop init/next/record` gọi
+    hàm này nên sửa PLAN giữa chừng hay người vừa duyệt cũng bị chặn ở bước kế (ADR-0058; verdict không đọc khoá — D-241)."""
+    try:
+        led = read_stage(base)
+    except StageError as exc:
+        return str(exc)
+    if led is None:
+        return ""
+    try:
+        got = plan_stage((base / plan).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"không đọc được {plan}: {exc}"
+    want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
+    if len(got) != 1:
+        return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
+    return _stage_mismatch(plan, got[0], led, want)
+
+
+def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:
+    """Lý do giai đoạn PLAN khai khác giai đoạn đang mở; '' = khớp. Giai đoạn 3 đã `completed` vẫn chạy được (bảo trì,
+    cải tiến của chu kỳ đã phát hành — review #327)."""
+    if got == (led["stage"], led["cycle"]):
+        return ""
+    if led["status"] == "completed" and got[1] != led["cycle"]:
+        return f"chu kỳ {led['cycle']} đã xong cả ba giai đoạn — chu kỳ mới: `xt.py stage new-cycle --reason …`"
+    if got[1] == led["cycle"] and got[0] < led["stage"]:  # vòng còn sống: đổi PLAN bằng `--force` (LOOP-HARNESS-024)
+        return (
+            f"giai đoạn {got[0]} của {got[1]} đã được người duyệt — PLAN đợt mới khai `{want}` rồi "
+            "`loop init --plan <PLAN đó>` (vòng cũ còn bật: thêm `--force`)"
+        )
+    return (
+        f"{plan} khai giai đoạn {got[0]} ({got[1]}) nhưng đang mở giai đoạn {led['stage']} ({led['cycle']}) — "
+        "giai đoạn sau khoá tới khi người duyệt giai đoạn trước (`xt.py stage status`)"
+    )
+
+
+def _stage_init(led: Optional[Dict[str, Any]], adopt: Optional[int], by: str, evidence: str) -> Dict[str, Any]:
+    if led is not None:
+        raise StageError(f"{STAGE_LEDGER} đã có ({led['cycle']}, giai đoạn {led['stage']}) — xem `xt.py stage status`")
+    stage = adopt or 1
+    new: Dict[str, Any] = {"schema": STAGE_SCHEMA, "cycle": "C-001", "stage": stage, "status": "active"}
+    new.update(submitted=None, history=[])
+    if adopt:  # dự án đã chạy: người công nhận bằng chứng lịch sử, không ép chạy lại từ MVP
+        _stage_event(new, "adopt", by=by, evidence=evidence)
+    else:
+        _stage_event(new, "init", session=session_id())
+    return new
+
+
+def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str) -> Dict[str, Any]:
+    if led is None or led["status"] != "active":
+        raise StageError("chỉ trình duyệt khi giai đoạn đang `active` — xem `xt.py stage status`")
+    led["status"] = "awaiting_approval"
+    led["submitted"] = {"sha": sha, "at": now_iso(), "evidence": evidence, "session": session_id()}
+    _stage_event(led, "submit", sha=sha, evidence=evidence)
+    return led
+
+
+def _stage_reopen(led: Optional[Dict[str, Any]], reason: str) -> Dict[str, Any]:
+    if led is None or led["status"] != "awaiting_approval":
+        raise StageError("chỉ mở lại giai đoạn đang chờ duyệt")
+    led.update(status="active", submitted=None)
+    _stage_event(led, "reopen", reason=reason)
+    return led
+
+
+def _stage_approve(led: Optional[Dict[str, Any]], sha: str, by: str, note: str) -> Dict[str, Any]:
+    if led is None or led["status"] != "awaiting_approval":
+        raise StageError("không có giai đoạn chờ duyệt — agent trình bằng `xt.py stage submit` trước")
+    want = led["submitted"]["sha"]
+    if len(sha) < 7:
+        raise StageError(f"--sha cần ≥ 7 ký tự của bản đã trình ({want[:12]})")
+    if not want.startswith(sha.lower()):
+        raise StageError(f"--sha {sha!r} không phải bản đã trình ({want[:12]}) — duyệt đúng bản đã chạy thử")
+    _stage_event(led, "approve", sha=want, by=by, note=note)
+    led["submitted"] = None
+    if led["stage"] == 3:
+        led["status"] = "completed"
+    else:
+        led.update(stage=led["stage"] + 1, status="active")
+    return led
+
+
+def _stage_new_cycle(led: Optional[Dict[str, Any]], reason: str) -> Dict[str, Any]:
+    if led is None or led["status"] != "completed":
+        raise StageError("chu kỳ mới chỉ mở sau khi chu kỳ hiện tại xong giai đoạn 3")
+    n = int(led["cycle"][2:]) + 1
+    led.update(cycle=f"C-{n:03d}", stage=1, status="active", submitted=None)
+    _stage_event(led, "init", session=session_id(), reason=reason)
+    return led
+
+
+def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps({"ledger": STAGE_LEDGER, "stage": led}, ensure_ascii=False))
+        return
+    if led is None:
+        print(f"Chưa dùng giai đoạn sản phẩm ({STAGE_LEDGER} vắng) — dự án mới: `xt.py stage init`")
+        return
+    name = STAGE_NAMES[led["stage"]]
+    print(f"{led['cycle']} · giai đoạn {led['stage']} ({name}) · {led['status']}")
+    if led["status"] == "awaiting_approval":
+        sub = led["submitted"]
+        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
+        print(
+            f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
+        )
+    elif led["status"] == "active" and led["stage"] < 3:
+        locked = "3" if led["stage"] == 2 else "2–3"
+        print(f"  giai đoạn {locked} khoá; PLAN đợt này khai `Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})`")
+
+
+def _stage_dispatch(
+    args: argparse.Namespace, base: Path
+) -> Optional[Callable[[Optional[Dict[str, Any]]], Dict[str, Any]]]:
+    """Hàm chuyển trạng thái của lệnh con; None = chỉ đọc (`status`). Kiểm người/agent và HEAD TRƯỚC khi lấy khoá."""
+    cmd = args.stage_cmd
+    if cmd == "init":
+        if args.adopt and (agent_session() or not args.evidence):
+            raise StageError(f"`init --adopt` cần `--evidence` và {STAGE_HUMAN_ONLY}")
+        by = _stage_by(base) if args.adopt else ""
+        return lambda led: _stage_init(led, args.adopt, by, args.evidence or "")
+    if cmd == "submit":
+        sha = _stage_clean_head(base)
+        return lambda led: _stage_submit(led, sha, args.evidence)
+    if cmd == "reopen":
+        return lambda led: _stage_reopen(led, args.reason)
+    if cmd == "approve":
+        if agent_session():
+            raise StageError(f"`stage approve` {STAGE_HUMAN_ONLY}")
+        by = _stage_by(base)
+        return lambda led: _stage_approve(led, args.sha, by, args.note)
+    if cmd == "new-cycle":
+        return lambda led: _stage_new_cycle(led, args.reason)
+    return None
+
+
+def _stage_clean_head(base: Path) -> str:
+    """HEAD 40 hex của cây sạch (trừ chính sổ): bản trình duyệt phải xác định được (P1) — file chưa commit thì không trình."""
+    head = _git_head(base)
+    if not head:
+        raise StageError("không có commit — trình duyệt cần một bản xác định")
+    # sổ là siêu dữ liệu về bản trình, `.autopilot/` là sổ máy; file chưa track tính dù cấu hình ẩn (review #327)
+    spec = ["--untracked-files=all", "--", ".", f":(exclude){STAGE_LEDGER}", ":(exclude).autopilot"]
+    r = subprocess.run(["git", "status", "--porcelain", *spec], cwd=base, capture_output=True, text=True, timeout=30)
+    if r.returncode != 0 or r.stdout.strip():
+        raise StageError("cây có thay đổi chưa commit — commit rồi trình bản đó")
+    return head
+
+
+def cmd_stage(args: argparse.Namespace) -> int:
+    base = loop_root(project_dir())  # cùng gốc với `loop` (worktree đang sửa — review #327)
+    try:
+        fn = _stage_dispatch(args, base)
+        led = read_stage(base) if fn is None else update_stage(base, fn)
+    except StageError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        return 2
+    _stage_print(led, getattr(args, "json", False))
+    return 0
+
+
+def _release_stage(base: Path) -> Dict[str, str]:
+    """Production không mở ở giai đoạn MVP (ADR-0058); giai đoạn 2 phát hành được, không đợi xong giai đoạn 3."""
+    try:
+        led = read_stage(base)
+    except StageError as exc:
+        return _release_row("stage", "FAIL", str(exc))
+    if led is None:
+        return _release_row("stage", "N/A", f"không dùng giai đoạn sản phẩm ({STAGE_LEDGER} vắng)", "SHOULD")
+    where = f"{led['cycle']} giai đoạn {led['stage']} ({STAGE_NAMES[led['stage']]}, {led['status']})"
+    if led["stage"] == 1:
+        return _release_row("stage", "FAIL", f"{where} — MVP chưa mở Production; người duyệt MVP trước")
+    return _release_row("stage", "PASS", where)
+
+
 RELEASE_ROWS = (
     "blueprint",
     "audit",
@@ -9665,6 +10035,7 @@ RELEASE_ROWS = (
     "tree",
     "prod_switch",
     "phase",
+    "stage",
     "review_debt",
     "attack",
     "perf",
@@ -10001,6 +10372,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_tree(base),
         _release_prod_switch(base),
         _release_phase(base),
+        _release_stage(base),
         _release_review_debt(base, status),
         *runs.values(),
         _release_unchecked_must(base, blueprint, unchecked_must),
@@ -13080,6 +13452,29 @@ def build_parser() -> argparse.ArgumentParser:
     lrv.add_argument("--reason", required=True)
     lub = lsub.add_parser("unblock", help="người xem rồi mở vòng bị chặn/đã dừng; giữ việc chờ (ADR-0051)")
     lub.add_argument("--reason", required=True)
+    pstg = sub.add_parser(
+        "stage",
+        allow_abbrev=False,
+        help="giai đoạn sản phẩm MVP → hoàn thiện → tối ưu; sau khoá tới khi người duyệt (ADR-0058)",
+    )
+    ssub = pstg.add_subparsers(dest="stage_cmd", required=True)
+    sst = ssub.add_parser("status", allow_abbrev=False, help="giai đoạn, trạng thái, bản chờ duyệt (chỉ đọc)")
+    sst.add_argument("--json", action="store_true")
+    sin = ssub.add_parser(
+        "init", allow_abbrev=False, help=f"tạo {STAGE_LEDGER} ở giai đoạn 1; `--adopt N` cho dự án đã chạy (người)"
+    )
+    sin.add_argument("--adopt", type=int, choices=(2, 3), help="công nhận dự án đã qua giai đoạn trước (người)")
+    sin.add_argument("--evidence", default="", help="bằng chứng công nhận (tag, GO-NO-GO, URL)")
+    ssm = ssub.add_parser("submit", allow_abbrev=False, help="trình bản HEAD (cây sạch) chờ người duyệt")
+    ssm.add_argument("--evidence", required=True, help="cách chạy thử + bằng chứng tiêu chí")
+    sro = ssub.add_parser("reopen", allow_abbrev=False, help="người yêu cầu sửa: chờ duyệt → active cùng giai đoạn")
+    sro.add_argument("--reason", required=True)
+    sap = ssub.add_parser("approve", allow_abbrev=False, help="người duyệt đúng bản đã trình → mở giai đoạn kế")
+    sap.add_argument("--sha", required=True, help="SHA (≥ 7 ký tự) của bản đã trình")
+    sap.add_argument("--note", required=True, help="phạm vi/điều kiện duyệt")
+    snc = ssub.add_parser("new-cycle", allow_abbrev=False, help="chu kỳ mới (bài toán lớn) sau khi xong giai đoạn 3")
+    snc.add_argument("--reason", required=True)
+    pstg.set_defaults(fn=cmd_stage)
     lst = lsub.add_parser("stop")
     lst.add_argument("--reason", default="dừng thủ công")
     lsub.add_parser("hook-stop")

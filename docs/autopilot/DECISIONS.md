@@ -1679,19 +1679,26 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: lỗi còn lại là thiếu ca test, mã đã đúng (reviewer xác nhận 77/102 đột biến chết, phần sống còn lại là nới an toàn); thêm ca là sửa gốc cho 'test được từng tên'. Phương án 2 làm đột biến bỏ tên khỏi hằng cũng xoá luôn ca test — mất khả năng bắt; phương án 3 tốn thêm vòng mà không đổi rủi ro. (3) đơn giản, giữ đường lùi.
 - Đường lùi: Bỏ các ca thêm ở test_standard_lane_reasons/test_lockfiles… trong tests/test_merge.py
 
-### D-239 · 2026-10-29T04:53:28+00:00 · T-3550: Stop hook in gợi ý next-step thế nào khi lệnh chỉ đọc và Stop hook không được đổi luồng (ADR-0052 §5)?
+### D-239 · 2026-10-29T05:04:06+00:00 · Ba giai đoạn sản phẩm (PR #325): khoá giai đoạn sau và nguồn phê duyệt của người bằng máy thế nào
 
-- Phương án: (1) additionalContext/decision block để model đọc · (2) systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr · (3) Chỉ in lệnh, không tính next-step
-- Chọn: systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr
-- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không chặn, không ghi — cho Stop hook đọc/chuyển trạng thái là lát 4 sau pilot; decision block (1) sẽ đổi luồng. (4) trải nghiệm: người thấy bước kế thật thay vì chỉ lệnh (3). Fail-open như mọi Stop hook (ADR-0002).
-- Đường lùi: Trả hook_stop về '' ở nhánh kết thúc vòng; bỏ stop_hint trong scripts/xt.py và test_stop_hint_next_step
+- Phương án: (1) Sổ docs/autopilot/STAGE.json theo git, chỉ xt.py stage ghi (guard coi là evidence), lịch sử phải dựng lại đúng giai đoạn; bản trình gắn SHA HEAD cây sạch; approve/init --adopt từ chối trong phiên agent (biến môi trường) và guard deny; loop init/next/record và release-check đọc khoá; không có sổ = không dùng (tương thích) · (2) Trạng thái trong .autopilot/stage.json (gitignored): guard đã rào sẵn nhưng mất khi đổi container/clone — không bền, sai với phiên cloud · (3) Duyệt qua GitHub (comment/review/Environment required reviewers): cùng tài khoản với token agent nên không phân biệt được người với agent ở chủ repo một người; tự duyệt deployment được khi tắt prevent self-review
+- Chọn: Sổ docs/autopilot/STAGE.json theo git, chỉ xt.py stage ghi (guard coi là evidence), lịch sử phải dựng lại đúng giai đoạn; bản trình gắn SHA HEAD cây sạch; approve/init --adopt từ chối trong phiên agent (biến môi trường) và guard deny; loop init/next/record và release-check đọc khoá; không có sổ = không dùng (tương thích)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: không đường 1→3 kể cả sửa tay sổ (lịch sử lộ), agent không tự duyệt (hai lớp: xt.py + guard; guard là lớp chặn nhầm D-015 — nêu rõ); bền qua container nhờ git; đường lùi: xoá sổ = về hành vi cũ; đơn giản, stdlib, test được; GitHub không cho tách người/agent khi cùng tài khoản (nghiên cứu 2026-10-29)
+- Đường lùi: Xoá docs/autopilot/STAGE.json ở dự án; hoặc bỏ lời gọi stage_plan_problem ở loop và hàng stage của release-check
 
-### D-240 · 2026-10-29T05:10:42+00:00 · T-3548, T-3549, T-3550 đã commit nối tiếp trên một nhánh (phiên bị ràng buộc một nhánh, #324 chiếm nhánh lúc làm): một PR hay ba PR?
+### D-240 · 2026-10-29T06:18:23+00:00 · PR #327: 2 lượt review chưa sạch (ADR-0053) — lượt 2 còn 🟠 lối ra của verdict blocked do khoá giai đoạn trỏ sai (unblock/budget) và 8 🟢; đổi chiến lược thế nào
 
-- Phương án: (1) Ba PR tuần tự (mỗi task một PR như dòng trạng thái ADR-0052) · (2) Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
-- Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
-- Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
-- Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
+- Phương án: (1) Khoá giai đoạn trong verdict là PLAN không còn hợp lệ (như PLAN mất, D-208): một helper lối ra dùng chung cho _live_loop (không coi là vòng sống — loop init PLAN mới không cần --force), _blocked_exit, _loop_exit, _unblock_problem; kèm 🟢 rẻ (ghi lỗi xoá sổ mới, gợi ý new-cycle, record không state, code fence, ref chứa sổ trong lời báo, test đột biến) · (2) Tách PR: sổ + lệnh stage riêng, khoá loop/verdict sang PR sau · (3) Bỏ kiểm khoá ở verdict, chỉ giữ ở loop init/next/record
+- Chọn: Khoá giai đoạn trong verdict là PLAN không còn hợp lệ (như PLAN mất, D-208): một helper lối ra dùng chung cho _live_loop (không coi là vòng sống — loop init PLAN mới không cần --force), _blocked_exit, _loop_exit, _unblock_problem; kèm 🟢 rẻ (ghi lỗi xoá sổ mới, gợi ý new-cycle, record không state, code fence, ref chứa sổ trong lời báo, test đột biến)
+- Lý do (tiêu chí chất lượng cuối): Đúng: lối ra phải trùng nguyên nhân — PLAN của giai đoạn đã duyệt/khoá không mở lại được bằng unblock, đúng mô hình PLAN mất sẵn có; một helper sửa mọi lối ra cùng lúc (gốc), không đổi thiết kế khoá; tách PR tốn thêm vòng review mà không giảm rủi ro; bỏ kiểm verdict đưa lại lỗi lượt 1 (status giao task bị record từ chối)
+- Đường lùi: Bỏ helper _stage_lock_exit và nhánh khoá ở verdict
+
+### D-241 · 2026-10-29T07:01:07+00:00 · PR #327: lượt 3 và 4 sau D-240 vẫn chưa sạch — mỗi lần đưa khoá giai đoạn vào verdict/lối ra lại làm lệch một lối ra cũ (unblock/attach/doctor/init, budget). Đổi chiến lược thế nào
+
+- Phương án: (1) Thu hẹp: bỏ khoá ở verdict và toàn bộ lối ra D-240 (_stage_lock_exit, ngoại lệ LOOP-HARNESS-024); khoá giai đoạn chỉ ở loop init/next/record (từ chối kèm lời đúng: PLAN đợt mới khai N+1); đổi PLAN khi vòng còn sống dùng đường có sẵn loop init --force (LOOP-HARNESS-024 nguyên bản) · (2) Sửa tiếp từng lối ra (thêm _stage_fix_exit cho ledger/declare, EXIT_BUDGET có điều kiện, doctor) · (3) Thêm verdict mới 'stage' với lối ra riêng ở mọi nơi
+- Chọn: Thu hẹp: bỏ khoá ở verdict và toàn bộ lối ra D-240 (_stage_lock_exit, ngoại lệ LOOP-HARNESS-024); khoá giai đoạn chỉ ở loop init/next/record (từ chối kèm lời đúng: PLAN đợt mới khai N+1); đổi PLAN khi vòng còn sống dùng đường có sẵn loop init --force (LOOP-HARNESS-024 nguyên bản)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: bất biến chính (không mở N+1 khi chưa duyệt) do loop init/next/record giữ — record không nhận bằng chứng của PLAN khoá; verdict chỉ phục vụ tiện lợi nhưng nhân số tổ hợp với 5 lối ra cũ, hai lượt review liền chỉ ra lỗi dây chuyền; thu hẹp trả hành vi vòng về đường đã được review (D-208, LOOP-HARNESS-024), đơn giản, giữ đường lùi; phương án 2/3 tiếp tục nhân bề mặt
+- Đường lùi: Áp lại commit 8d97085 + c88c4c8 (verdict + _stage_lock_exit)
 
 ### D-242 · 2026-10-29T05:43:39+00:00 · Review #326 🔴: khoá việc harden 'nguồn:ID@SHA phát hiện' (D-236, theo ADR-0052 §5) đổi sau squash-merge (commit đưa hàng vào sổ trên nhánh không lên main) → gom lại ra task trùng; SHA cũng không phát hiện được ID tái dùng (git log -S lấy commit cũ nhất). Sửa thế nào?
 
@@ -1699,3 +1706,17 @@
 - Chọn: Bỏ SHA khỏi khoá: khớp theo (nguồn, ID gốc) trên PLAN của vòng + docs/autopilot/PLAN*.md (cùng phạm vi cấp ID); @sha cũ trong dòng task vẫn đọc được, bị bỏ qua
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ID sổ/MUST không tái dùng theo conventions nên (nguồn, ID) đã đủ định danh; phương án 1 vẫn lệch khi chưa merge (nhánh mới từ nhánh làm việc) và cần ref remote; phương án 3 đổi khoá mỗi lần sửa chữ trong hàng. (3) đơn giản, bỏ một git log -S mỗi hàng (Stop hook nhanh hơn). Lệch có chủ đích với chữ 'SHA phát hiện' của ADR-0052 §5 — ghi ở dòng trạng thái ADR.
 - Đường lùi: Trả HARDEN_KEY_RE/harden_work về khoá có @sha và _found_at (D-236)
+
+### D-243 · 2026-10-29T04:53:28+00:00 · T-3550: Stop hook in gợi ý next-step thế nào khi lệnh chỉ đọc và Stop hook không được đổi luồng (ADR-0052 §5)?
+
+- Phương án: (1) additionalContext/decision block để model đọc · (2) systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr · (3) Chỉ in lệnh, không tính next-step
+- Chọn: systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không chặn, không ghi — cho Stop hook đọc/chuyển trạng thái là lát 4 sau pilot; decision block (1) sẽ đổi luồng. (4) trải nghiệm: người thấy bước kế thật thay vì chỉ lệnh (3). Fail-open như mọi Stop hook (ADR-0002).
+- Đường lùi: Trả hook_stop về '' ở nhánh kết thúc vòng; bỏ stop_hint trong scripts/xt.py và test_stop_hint_next_step
+
+### D-244 · 2026-10-29T05:10:42+00:00 · T-3548, T-3549, T-3550 đã commit nối tiếp trên một nhánh (phiên bị ràng buộc một nhánh, #324 chiếm nhánh lúc làm): một PR hay ba PR?
+
+- Phương án: (1) Ba PR tuần tự (mỗi task một PR như dòng trạng thái ADR-0052) · (2) Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
+- Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
