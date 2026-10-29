@@ -1727,3 +1727,10 @@
 - Chọn: Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta
 - Lý do (tiêu chí chất lượng cuối): Đúng: không biết lỗi chặn cũ thì không sửa được — review toàn PR ở head mới là nguồn sự thật duy nhất; ba task sửa chung next_step/next_step_facts (D-244) nên tách PR tốn rebase/xung đột mà không giảm rủi ro; đóng PR bỏ phí 880 dòng đã qua gate-fast
 - Đường lùi: Tách PR theo ba commit 1271133, 64cbd2a, 6ff2b99
+
+### D-246 · 2026-10-29T12:55:12+00:00 · loop next-step --objective harden-to-signoff ở giai đoạn 1 (MVP) đi tới release-check, hàng stage luôn FAIL → replan mãi, không đề xuất stage submit (dự án preset safe mặc định harden). Sửa thế nào?
+
+- Phương án: (1) Giai đoạn 1 kết thúc ở stage-submit/wait-approval/stage-reopen cho CẢ hai mục tiêu: delivery_phase là chế độ kiểm soát, không phải giai đoạn (ADR-0031, ADR-0058 §Làm rõ); harden vẫn gom việc 🔴/🟠/MUST trước, chỉ thay đích release-check/signoff-package bằng trình MVP · (2) Giữ nguyên, dựa lời skill /complete (giai đoạn 1 → chờ người) · (3) harden-to-signoff ở giai đoạn 1 trả blocked
+- Chọn: Giai đoạn 1 kết thúc ở stage-submit/wait-approval/stage-reopen cho CẢ hai mục tiêu: delivery_phase là chế độ kiểm soát, không phải giai đoạn (ADR-0031, ADR-0058 §Làm rõ); harden vẫn gom việc 🔴/🟠/MUST trước, chỉ thay đích release-check/signoff-package bằng trình MVP
+- Lý do (tiêu chí chất lượng cuối): Đúng: MVP không mở Production (release-check FAIL hàng stage là chắc chắn) nên đích signoff-package ở giai đoạn 1 không bao giờ đạt — replan lặp tới budget là lời gợi ý sai; harden ở MVP là hợp lệ (preset safe). Đơn giản: một nhánh _step_stage dùng chung, không nhánh mới; blocked sai vì không có gì cần người ngoài duyệt MVP sau submit. Giữ cổng: release-check không đổi.
+- Đường lùi: Trả điều kiện not harden ở _awaiting_mvp và gọi _step_stage chỉ khi build (một commit)

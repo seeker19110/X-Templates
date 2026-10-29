@@ -7431,14 +7431,15 @@ def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
     }
 
 
-def _awaiting_mvp(f: Dict[str, Any], harden: bool) -> bool:
-    """Build ở giai đoạn 1 đã trình, chờ người duyệt (ADR-0058)."""
+def _awaiting_mvp(f: Dict[str, Any]) -> bool:
+    """Giai đoạn 1 đã trình, chờ người duyệt (ADR-0058) — mọi mục tiêu: `delivery_phase` không phải giai đoạn (D-246)."""
     sf = f.get("stage") or {}
-    return not harden and sf.get("stage") == 1 and sf.get("status") == "awaiting_approval"
+    return sf.get("stage") == 1 and sf.get("status") == "awaiting_approval"
 
 
 def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
-    """Build hết việc ở giai đoạn MVP (ADR-0058 lát D): không đề xuất `/complete` khi người chưa duyệt MVP — `stage-submit`
+    """Hết việc ở giai đoạn MVP (ADR-0058 lát D), build hay harden (D-246: MVP không mở Production — đích `release-check`/
+    gói nghiệm thu không đạt được): không đề xuất `/complete` khi người chưa duyệt MVP — `stage-submit`
     (trình bản HEAD, báo người, dừng) hay `wait-approval` (đã trình, chờ người); sổ hỏng → `blocked`. Giai đoạn 2/3 → None."""
     if sf is None:
         return None
@@ -7465,7 +7466,7 @@ def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
     """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: vòng → PR → sổ audit → việc → gói/giai đoạn."""
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
-    if _awaiting_mvp(f, harden):
+    if _awaiting_mvp(f):
         stale = _stale_submission(f, loop)
         if stale:  # mã/PLAN đổi sau bản trình: bản người đang xem không còn là HEAD (review #330)
             return stale
@@ -7474,11 +7475,11 @@ def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
             # vòng: không bắt chạy lại mọi Gate/lập đợt mới — vẫn chờ người (review #330)
             loop = None
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
+    pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
+    if part is None:
+        part = _step_stage(f.get("stage"), pending)
     if part is None and harden:
         part = _step_signoff(f)
-    pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
-    if part is None and not harden:
-        part = _step_stage(f.get("stage"), pending)
     if part is None:
         part = {
             "action": "ready-for-complete",
@@ -7490,9 +7491,9 @@ def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
 
 def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
     """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
-    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178) —
-    hoặc, có sổ giai đoạn ở giai đoạn 1, ở `stage-submit`/`wait-approval` (ADR-0058);
-    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký)."""
+    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178);
+    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký). Có sổ
+    giai đoạn ở giai đoạn 1, cả hai dừng ở `stage-submit`/`wait-approval` (ADR-0058, D-246)."""
     harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
     part = _next_step_part(f, harden)
     st, batches = f["state"], f["state"]["batches"]

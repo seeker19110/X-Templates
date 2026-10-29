@@ -308,7 +308,7 @@ class NextStepPureTest(unittest.TestCase):
 
     def test_stage_gates_ready_for_complete(self) -> None:
         """ADR-0058 lát D: build hết việc ở giai đoạn MVP → `stage-submit` / `wait-approval` thay `ready-for-complete`;
-        giai đoạn 2/3 hay không dùng sổ → như cũ; sổ hỏng → `blocked`; harden không đọc sổ."""
+        giai đoạn 2/3 hay không dùng sổ → như cũ; sổ hỏng → `blocked`. Harden ở giai đoạn 1 cũng vậy (D-246)."""
         mvp = {"cycle": "C-001", "stage": 1, "status": "active", "sha": None}
         out = self.step(stage=mvp)
         self.assertEqual((out["action"], out["missing"][0]), ("stage-submit", "`stage submit`"))
@@ -339,13 +339,19 @@ class NextStepPureTest(unittest.TestCase):
         self.assertIn("vòng còn việc (task: T-002)", out["reason"])
         pend = {"verdict": xt.PENDING_HUMAN, "reason": "T-009 chờ pháp lý"}
         self.assertIn("T-009 chờ pháp lý", self.step(stage=wait, verdict=pend)["reason"])
-        # Mặt nạ chỉ cho giai đoạn 1 đang chờ duyệt, chỉ ở build
+        # Mặt nạ chỉ cho giai đoạn 1 đang chờ duyệt
         self.assertEqual(self.step(stage={**wait, "stage": 2}, **unchecked)["action"], "verify")
         self.assertEqual(self.step(stage=mvp, **unchecked)["action"], "verify")
-        self.assertEqual(self.step(objective=HARDEN, stage=wait, **unchecked)["action"], "verify")
         self.assertEqual(self.step(stage={**mvp, "stage": 2})["action"], "ready-for-complete")
         self.assertEqual(self.step(stage={"error": "STAGE.json hỏng: x"})["action"], "blocked")
-        self.assertEqual(self.step(objective=HARDEN, stage=mvp)["action"], "release-check")
+        # D-246: harden ở MVP (preset safe) không đi tới `release-check` — hàng `stage` FAIL chắc chắn → `replan` mãi
+        self.assertEqual(self.step(objective=HARDEN, stage=mvp)["action"], "stage-submit")
+        self.assertEqual(self.step(objective=HARDEN, stage=wait, **unchecked)["action"], "wait-approval")
+        self.assertEqual(self.step(objective=HARDEN, stage={**wait, "changed": ["a.py"]})["action"], "stage-reopen")
+        self.assertEqual(self.step(objective=HARDEN, stage={"error": "x"})["action"], "blocked")
+        self.assertEqual(self.step(objective=HARDEN, stage={**mvp, "stage": 2})["action"], "release-check")
+        nogo = {"release": {"head": HEAD, "fails": ["stage"], "human": [], "verdict": "NO-GO"}, "release_changed": []}
+        self.assertEqual(self.step(objective=HARDEN, stage=mvp, signoff=nogo)["action"], "stage-submit")
         busy = {"verdict": "continue", "reason": "còn task", "task": "T-002"}
         self.assertEqual(self.step(stage=mvp, verdict=busy)["action"], "task")  # còn việc thì làm trước
         old = facts()
