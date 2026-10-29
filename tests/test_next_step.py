@@ -1,6 +1,6 @@
-"""Test cho `loop next-step` (ADR-0052 §5, T-3547, T-3578): hàm thuần `next_step` theo từng nhánh, đầu vào
-`next_step_facts`, mốc và dấu đợt xong (`loop init`, `loop verify --all`, Stop hook), và CLI. Luồng đầu–cuối trong repo git
-thật ở `tests/test_flow.py` (FLOW-09…13)."""
+"""Test cho `loop next-step` (ADR-0052 §5, T-3547, T-3578, T-3548): hàm thuần `next_step` theo từng nhánh, đầu vào
+`next_step_facts`, mốc và dấu đợt xong (`loop init`, `loop verify --all`, Stop hook), việc harden nháp, và CLI. Luồng
+đầu–cuối trong repo git thật ở `tests/test_flow.py` (FLOW-09…15)."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ import xt
 from test_xt_cli import run_main
 
 HEAD = "a" * 40
+FP = "f" * 64
 
 
 def facts(**over: Any) -> dict[str, Any]:
@@ -37,6 +38,9 @@ def facts(**over: Any) -> dict[str, Any]:
         "audit": {"status": "S.md", "exists": True, "sha256": "0" * 64, "open": 0, "debt": {}, "scanned": ["b" * 40]}
         | {"errors": []},
         "open_must": 0,
+        "harden": [],
+        "signoff": {"release": None, "release_changed": None, "package": None, "package_changed": None}
+        | {"evidence_fp": FP, "deferred": []},
         "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None, "batches": []},
     }
     for k, v in over.items():
@@ -45,6 +49,15 @@ def facts(**over: Any) -> dict[str, Any]:
         else:
             f[k] = v
     return f
+
+
+def work(key: str, tid: str, planned: bool = False, checked: bool = False) -> dict[str, Any]:
+    """Một mục việc harden nháp như `harden_work` trả."""
+    src, _, ref = key.partition(":")
+    return {"source": src, "ref": ref.split("@")[0], "key": key, "id": tid, "planned": planned, "checked": checked}
+
+
+HARDEN = "harden-to-signoff"
 
 
 def batch(open_: int | None, at: str, status: str = "S.md") -> dict[str, Any]:
@@ -168,6 +181,129 @@ class NextStepPureTest(unittest.TestCase):
         self.assertIn("chưa có nhóm nào đã quét", out["reason"])
         unread = {"errors": ["không đọc được sổ: utf-8"], "scanned": [], "sha256": ""}
         self.assertIn("không đọc được sổ: utf-8", self.step(audit=unread)["reason"])  # lỗi đọc, không gợi audit full
+
+    def test_harden_gathers_work_then_release_check(self) -> None:
+        """T-3548: harden gom việc nháp (`work`) → `replan`; task đã tick mà nguồn còn mở → `audit`; task đã gom chưa tick
+        là việc của vòng; hết việc → `release-check` (không `ready-for-complete`)."""
+        out = self.step(objective=HARDEN)
+        self.assertEqual((out["action"], out["work"], out["key"]["objective"]), ("release-check", [], HARDEN))
+        self.assertEqual(out["missing"], ["`release-check --json` trên HEAD"])
+        items = [work("audit:AUD-A-001", "T-010"), work("must:AAA-001", "T-009", planned=True)]
+        out = self.step(objective=HARDEN, harden=items, audit={"open": 1}, open_must=1)
+        self.assertEqual((out["action"], out["work"]), ("replan", items))
+        self.assertIn("1 việc harden chưa có trong PLAN (vd T-010 ← audit:AUD-A-001)", out["reason"])
+        self.assertEqual(out["missing"], ["task cho audit:AUD-A-001"])
+        stale = [
+            work("audit:AUD-A-001", "T-010", planned=True, checked=True),
+            work("must:AAA-001", "T-9", planned=True),
+        ]
+        out = self.step(objective=HARDEN, harden=stale)
+        self.assertEqual(out["action"], "audit")
+        self.assertIn("1 task đã tick mà nguồn còn mở: T-010 (audit:AUD-A-001)", out["reason"])
+        # Đã gom chưa tick, đợt cũ `done` (vòng không chạy) → `loop init` PLAN chứa nó, không khai "0 🔴/🟠" (review #326)
+        out = self.step(objective=HARDEN, harden=stale[1:], audit={"open": 1})
+        self.assertEqual(out["action"], "replan")
+        self.assertIn("(T-9) mà vòng không chạy — `loop init`", out["reason"])
+        waiting = {"signoff": {"deferred": ["T-9"]}}  # task đó chờ người → hết việc máy làm được
+        out = self.step(objective=HARDEN, harden=stale[1:], audit={"open": 1}, **waiting)
+        self.assertEqual(out["action"], "release-check")
+        self.assertIn("còn 1 🔴/🟠/MUST mở do chờ người", out["reason"])
+        running = {"verdict": "continue", "reason": "còn task", "task": "T-9"}
+        self.assertEqual(self.step(objective=HARDEN, harden=stale[1:], verdict=running)["action"], "task")
+        self.assertEqual(self.step(harden=items)["action"], "ready-for-complete")  # build không đọc `harden`
+
+    def test_harden_inactive_loop_gathers_first(self) -> None:
+        """Harden: vòng chưa bật không phải `replan` ngay — gom việc trước; PLAN đã có task gom chưa tick → `loop init`."""
+        off = {"verdict": "inactive", "reason": "vòng lặp chưa bật"}
+        self.assertEqual(self.step(objective=HARDEN, verdict=off)["action"], "release-check")
+        items = [work("audit:AUD-A-001", "T-010")]
+        out = self.step(objective=HARDEN, verdict=off, harden=items)
+        self.assertEqual((out["action"], len(out["work"])), ("replan", 1))
+        out = self.step(objective=HARDEN, verdict=off, harden=[work("audit:AUD-A-001", "T-010", planned=True)])
+        self.assertEqual(out["action"], "replan")
+        self.assertIn("loop init", out["reason"])
+        self.assertEqual(out["work"], [work("audit:AUD-A-001", "T-010", planned=True)])  # harden luôn trả việc nháp
+
+    def test_harden_no_progress_is_budget_with_work(self) -> None:
+        items = [work("audit:AUD-A-001", "T-010")]
+        stalled = {"batches": [batch(1, "t1"), batch(1, "t2")]}
+        out = self.step(objective=HARDEN, harden=items, audit={"open": 1}, state=stalled)
+        self.assertEqual((out["action"], out["work"], out["budget"]["no_progress_since"]), ("budget", items, "t1"))
+
+    def test_signoff_package_from_release(self) -> None:
+        """T-3549 (FLOW-16): harden hết việc + `release-check` trên cây này không FAIL → `signoff-package` kèm gói nháp
+        (`candidate_head`, `evidence_fp`, `human_pending` = `human` ∪ việc chờ người); không "đã phát hành"."""
+        rel = {"head": "b" * 40, "fails": [], "human": ["prod_switch"], "verdict": "GO (chờ người)"}
+        out = self.step(objective=HARDEN, signoff={"release": rel, "release_changed": [], "deferred": ["T-9"]})
+        self.assertEqual(out["action"], "signoff-package", out)
+        want = {"candidate_head": HEAD, "evidence_fp": FP, "human_pending": ["T-9", "prod_switch"]}
+        self.assertEqual(out["package"], want | {"release_verdict": "GO (chờ người)"})
+        self.assertIn("CHƯA phát hành", out["reason"])
+        self.assertIn("chờ người: T-9, prod_switch", out["reason"])
+        self.assertEqual(out["missing"], ["chữ ký GO-NO-GO §5", "người xác nhận T-9", "người xác nhận prod_switch"])
+        go = {**rel, "human": [], "verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"release": go, "release_changed": []})
+        self.assertIn("chờ người: không", out["reason"])
+        self.assertEqual(out["missing"], ["chữ ký GO-NO-GO §5"])
+        self.assertIsNone(self.step()["package"])  # build không dựng gói
+
+    def test_signoff_needs_fresh_passing_release(self) -> None:
+        rel = {"head": "b" * 40, "fails": ["audit", "phase"], "human": [], "verdict": "NO-GO"}
+        out = self.step(objective=HARDEN, signoff={"release": rel, "release_changed": []})
+        self.assertEqual((out["action"], out["package"]), ("replan", None))
+        self.assertIn("release-check NO-GO: FAIL audit, phase", out["reason"])
+        self.assertEqual(out["missing"], ["`audit` PASS", "`phase` PASS"])
+        stalled = {"batches": [batch(1, "t1"), batch(1, "t2")]}  # FAIL vì 🟠 chờ người lặp: không replan mãi
+        out = self.step(
+            objective=HARDEN, signoff={"release": rel, "release_changed": []}, audit={"open": 1}, state=stalled
+        )
+        self.assertEqual(out["action"], "budget")
+        ok = {**rel, "fails": [], "verdict": "GO"}
+        for changed, note in ((["app.py"], f"1 file đổi sau {'b' * 12} (vd app.py)"), (None, "không có trong repo")):
+            with self.subTest(changed):
+                out = self.step(objective=HARDEN, signoff={"release": ok, "release_changed": changed})
+                self.assertEqual(out["action"], "release-check")
+                self.assertIn(note, out["reason"])
+        out = self.step(objective=HARDEN, signoff={"release": ok, "release_changed": [], "evidence_fp": None})
+        self.assertEqual(out["action"], "release-check")  # không có git: không dựng được gói
+        self.assertNotIn("kết quả có ở", out["reason"])
+
+    def test_signoff_package_expiry(self) -> None:
+        """FLOW-17 (hàm thuần): gói khớp vân tay → còn hiệu lực; lệch → `release-check`, nêu phần đổi."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": ["prod_switch"], "release_verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "package_changed": ["GO-NO-GO.md?"]})
+        self.assertEqual((out["action"], out["package"]), ("signoff-package", pkg))
+        late = self.step(objective=HARDEN, signoff={"package": pkg, "deferred": ["T-777"]})  # defer sau khi dựng gói
+        self.assertEqual(late["package"]["human_pending"], ["T-777", "prod_switch"])
+        self.assertIn("người xác nhận T-777", late["missing"])
+        self.assertIn(f"gói nghiệm thu ở {'c' * 12} còn hiệu lực", out["reason"])
+        old = {**pkg, "evidence_fp": "e" * 64}
+        for changed, note in (
+            (["app.py", "b.py"], f"2 file đổi sau {'c' * 12} (vd app.py, b.py)"),
+            ([], "vân tay khác"),
+            (None, f"head {'c' * 12} không có trong repo"),
+        ):
+            with self.subTest(changed):
+                out = self.step(objective=HARDEN, signoff={"package": old, "package_changed": changed})
+                self.assertEqual((out["action"], out["package"]), ("release-check", None))
+                self.assertIn(f"gói nghiệm thu hết hạn: {note}", out["reason"])
+
+    def test_expired_package_with_fresh_release(self) -> None:
+        """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →
+        `replan`; `release-check` mới FAIL thắng cả gói còn hiệu lực cùng nội dung (kết quả chặt hơn)."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        old = {**pkg, "evidence_fp": "e" * 64}
+        go = {"head": "b" * 40, "fails": [], "human": [], "verdict": "GO"}
+        nogo = {**go, "fails": ["review_debt"], "verdict": "NO-GO"}
+        fresh = {"release_changed": [], "package_changed": ["app.py"]}
+        out = self.step(objective=HARDEN, signoff={"package": old, "release": go, **fresh})
+        self.assertEqual((out["action"], out["package"]["candidate_head"]), ("signoff-package", HEAD))
+        out = self.step(objective=HARDEN, signoff={"package": old, "release": nogo, **fresh})
+        self.assertEqual((out["action"], out["missing"]), ("replan", ["`review_debt` PASS"]))
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "release": nogo, "release_changed": []})
+        self.assertEqual(out["action"], "replan")
+        stale = {"package": old, "release": go, "release_changed": ["app.py"], "package_changed": ["app.py"]}
+        self.assertIn("gói nghiệm thu hết hạn", self.step(objective=HARDEN, signoff=stale)["reason"])
 
     def test_loop_before_prs(self) -> None:
         wait = [{"pr": "4", "head": "4" * 40, "action": "wait", "why": ""}]
@@ -338,7 +474,7 @@ class NextStepStateTest(StateCase):
     def test_stop_hook_marks_batch_done(self) -> None:
         xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}), self.base)
         rc, out, _ = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
-        self.assertEqual((rc, out), (0, ""))  # không phải repo git → không kiểm lại cuối, cho dừng ở done
+        self.assertEqual((rc, sorted(json.loads(out))), (0, ["systemMessage"]))  # không git: không kiểm lại cuối, dừng
         st = xt.read_state(self.base) or {}
         self.assertEqual(st["final_verdict"]["verdict"], "done")
         self.assertTrue(st["objective"]["batches"][-1]["done"])
@@ -357,7 +493,7 @@ class NextStepStateTest(StateCase):
         xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}), self.base)
         (self.base / "P.md").write_bytes(b"\xe9\xff")
         rc, out, err = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
-        self.assertEqual((rc, out), (0, ""))
+        self.assertEqual((rc, sorted(json.loads(out))), (0, ["systemMessage"]))
         self.assertNotIn("Traceback", err)
         st = xt.read_state(self.base) or {}
         self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "blocked"))
@@ -396,6 +532,106 @@ class NextStepStateTest(StateCase):
         self.assertEqual(xt.audit_open_count(book), 2)
 
 
+class HardenWorkTest(StateCase):
+    """`harden_work` trên đĩa (không phải repo git: SHA phát hiện rỗng — khoá có SHA trong repo git ở FLOW-15)."""
+
+    ROW = "| ID | Mức | Trạng thái | Tóm tắt | Bằng chứng | Gate | Ghi chú |\n|---|---|---|---|---|---|---|\n"
+
+    def book(self, *rows: str) -> None:
+        (self.base / "S.md").write_text("## Phát hiện\n\n" + self.ROW + "".join(f"| {r} |\n" for r in rows), "utf-8")
+
+    def test_sources_ids_and_lines(self) -> None:
+        self.book(
+            "AUD-B-002 | 🔴 | mở | b (sau: T-001; files: x) exec: deep Gate: `rm -rf /` | x | `true` | —",
+            "AUD-A-001 | 🟠 | mở | a | x | tay: bấm thử | —",
+            "AUD-C-003 | 🟠 | đã sửa | c | x | `true` | #1",
+            "AUD-D-004 | 🟢 | mở | d | x | `true` | —",
+            "rác | 🟠 | mở | e | x | `true` | —",
+        )
+        items = xt.harden_work(self.base, self.st(), "S.md")
+        self.assertEqual(
+            [(w["id"], w["key"], w["gate"]) for w in items],
+            [
+                ("T-002", "audit:AUD-A-001", None),
+                ("T-003", "audit:AUD-B-002", "true"),
+                ("T-004", "must:AAA-001", None),
+                ("T-005", "must:AAA-002", None),
+            ],
+        )
+        self.assertEqual(xt.harden_work(self.base, self.st(), "S.md"), items)  # cùng đầu vào → cùng ID
+        line = items[1]["line"]
+        self.assertTrue(
+            line.startswith("- [ ] `T-003` Sửa AUD-B-002 🔴: b [sau: T-001; files: x] exec deep Gate: rm"), line
+        )
+        self.assertTrue(line.endswith("(nguồn: audit:AUD-B-002) — Gate: `true`"), line)
+        task = xt.parse_plan(self.write_plan(line))[0]
+        self.assertEqual((task["gate"], task["after"], task["files"], task["tier"]), ("true", [], [], "default"))
+        self.assertIn("Gate: chưa có — phiên chính điền lệnh kiểm", items[0]["line"])
+
+    def write_plan(self, *lines: str) -> Path:
+        plan = self.base / "P.md"
+        plan.write_text("".join(f"{x}\n" for x in lines), "utf-8")
+        return plan
+
+    def test_planned_keeps_id_and_tick_across_plans(self) -> None:
+        """D-242 (review #326): khớp theo (nguồn, ID gốc) — `@sha` cũ trong dòng bị bỏ qua; task dán ở PLAN khác của
+        `docs/autopilot/` (chưa `loop init`) vẫn được nhận; cùng khoá ở hai PLAN → PLAN của vòng thắng."""
+        self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —", "AUD-B-002 | 🔴 | mở | b | x | `true` | —")
+        self.write_plan(
+            "- [x] `T-001` xong — Gate: `true`",
+            "- [x] `T-050` Sửa AUD-A-001 (nguồn: audit:AUD-A-001@abcdef123456) — Gate: `true`",
+            "- [ ] `T-051` Đạt MUST AAA-001 (nguồn: must:AAA-001) — Gate: `true`",
+            "- [ ] `T-052` giả (Gate: `x` (nguồn: must:AAA-002)) — Gate: `true`",
+        )
+        other = self.base / "docs" / "autopilot"
+        other.mkdir(parents=True)
+        (other / "PLAN-harden-mới.md").write_text(
+            "- [ ] `T-060` Sửa AUD-B-002 (nguồn: audit:AUD-B-002) — Gate: `true`\n"
+            "- [ ] `T-061` cũ (nguồn: audit:AUD-A-001) — Gate: `true`\n",
+            "utf-8",
+        )
+        items = {w["key"]: w for w in xt.harden_work(self.base, self.st(), "S.md")}
+        self.assertEqual((items["audit:AUD-A-001"]["id"], items["audit:AUD-A-001"]["checked"]), ("T-050", True))
+        self.assertEqual((items["audit:AUD-B-002"]["id"], items["audit:AUD-B-002"]["planned"]), ("T-060", True))
+        self.assertEqual((items["must:AAA-001"]["id"], items["must:AAA-001"]["checked"]), ("T-051", False))
+        self.assertEqual(
+            (items["must:AAA-002"]["id"], items["must:AAA-002"]["planned"]), ("T-062", False)
+        )  # khoá trong Gate
+
+    def test_ids_continue_after_other_plans_and_bad_inputs(self) -> None:
+        self.book("AUD-A-001 | 🟠 | mở | " + "dài " * 60 + " | x | `true` | —")
+        old = self.base / "docs" / "autopilot"
+        old.mkdir(parents=True)
+        (old / "PLAN-cũ.md").write_text("- [x] `T-3600` cũ — Gate: `true`\n", "utf-8")
+        (old / "PLAN-hỏng.md").write_bytes(b"\xff")
+        items = xt.harden_work(self.base, self.st(blueprint=None), "S.md")
+        self.assertEqual([w["id"] for w in items], ["T-3601"])
+        self.assertTrue(items[0]["title"].endswith("…"))
+        self.assertEqual(len(items[0]["title"]), xt.HARDEN_TITLE_MAX)
+        (self.base / "S.md").write_bytes(b"\xff")
+        self.assertEqual(xt.harden_work(self.base, self.st(blueprint=None), "S.md"), [])
+        self.assertIsNone(xt.evidence_fingerprint(self.base))
+        self.assertIsNone(xt._changed_since(self.base, "a" * 40))  # không phải commit có trong repo
+        self.assertIsNone(xt._changed_since(self.base, "HEAD"))  # chỉ nhận SHA đủ 40 ký tự
+
+    def test_signoff_excluded_paths(self) -> None:
+        for path in ("GO-NO-GO.md", "docs/ops/GO-NO-GO-2026-10-28-v3.28.0.md", "docs/autopilot/DECISIONS.md"):
+            with self.subTest(path):
+                self.assertTrue(xt._signoff_excluded(path))
+        for path in ("app.py", "docs/GO-NO-GO.txt", "DECISIONS.md.bak", "x/autopilot/a", "MY-GO-NO-GO.md"):
+            with self.subTest(path):
+                self.assertFalse(xt._signoff_excluded(path))
+        self.assertTrue(xt._signoff_excluded(".autopilot/state.json"))
+        self.assertTrue(xt._signoff_excluded("PROGRESS.md"))  # commit cuối mọi PR mang PROGRESS (review #326)
+        self.assertFalse(xt._signoff_excluded("docs/PROGRESS.md"))
+
+    def test_facts_only_gather_for_harden(self) -> None:
+        self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —")
+        self.assertEqual(xt.next_step_facts(self.base, self.st(), "S.md", [])["harden"], [])
+        f = xt.next_step_facts(self.base, self.st(), "S.md", [], "harden-to-signoff")
+        self.assertEqual((f["objective"], len(f["harden"])), ("harden-to-signoff", 3))
+
+
 class NextStepCliTest(StateCase):
     def test_cli_text_json_and_bad_prs(self) -> None:
         xt.write_state(self.st(), self.base)
@@ -420,6 +656,55 @@ class NextStepCliTest(StateCase):
                 self.assertIn("✗ --prs", err)
         rc, _, err = run_main("loop", "next-step", "--prs", str(self.base / "mất.json"))
         self.assertEqual(rc, 2, err)
+
+    def test_cli_harden_prints_work_lines(self) -> None:
+        self.write_state_done()
+        self.enterContext(unittest.mock.patch.object(xt, "_step_audit", return_value=None))  # sổ: ca riêng
+        rc, out, _ = run_main("loop", "next-step", "--objective", "harden-to-signoff", "--prs", "-", stdin="[]")
+        self.assertEqual(rc, 0)
+        self.assertIn("  mới - [ ] `T-002` Đạt MUST AAA-001 (blueprint) (nguồn: must:AAA-001)", out)
+        (self.base / "P.md").write_text(
+            "- [x] `T-001` xong — Gate: `true`\n- [x] `T-002` m (nguồn: must:AAA-001) — Gate: `true`\n"
+            "- [ ] `T-003` m (nguồn: must:AAA-002) — Gate: `true`\n",
+            encoding="utf-8",
+        )
+        ev = next(self.base.rglob("T-001.json")).with_name("T-002.json")  # bằng chứng xanh như T-001 của setUp
+        ev.write_text(json.dumps({"task": "T-002", "exit_code": 0, "cmd": "true"}), encoding="utf-8")
+        done = self.st(active=False, final_verdict={"verdict": "done", "reason": "x"})
+        xt.write_state({**done, "deferred": {"T-003": {"reason": "ký"}}}, self.base)
+        rc, out, _ = run_main("loop", "next-step", "--objective", "harden-to-signoff", "--prs", "-", stdin="[]")
+        self.assertIn("  [x] - [ ] `T-002`", out)
+        self.assertIn("  [ ] - [ ] `T-003`", out)
+
+    def test_cli_release_and_package_inputs(self) -> None:
+        """`--release`/`--package` sai dạng → exit 2 nêu tên cờ (không đoán kết quả cổng); gói nhận cả JSON `next-step`."""
+        self.write_state_done()
+        f = self.base / "in.json"
+        rel = {"head": "b" * 40, "fails": [], "human": [], "verdict": "GO"}
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": []}
+        bad = {
+            "--release": ("{", "[]", json.dumps({**rel, "head": "HEAD"}), json.dumps({**rel, "fails": "x"})),
+            "--package": (json.dumps({"package": None}), json.dumps({**pkg, "evidence_fp": "x"}))
+            + (json.dumps({**pkg, "human_pending": [1]}), "[]"),
+        }
+        for flag, texts in bad.items():
+            for text in texts:
+                with self.subTest(flag=flag, text=text):
+                    f.write_text(text, encoding="utf-8")
+                    rc, _, err = run_main(
+                        "loop", "next-step", "--objective", HARDEN, "--prs", "-", flag, str(f), stdin="[]"
+                    )
+                    self.assertEqual(rc, 2)
+                    self.assertIn(f"✗ {flag}: ", err)
+        rc, _, err = run_main("loop", "next-step", "--release", str(self.base / "mất.json"), "--prs", "-", stdin="[]")
+        self.assertEqual(rc, 2, err)
+        f.write_text(json.dumps({"action": "signoff-package", "package": pkg}), encoding="utf-8")
+        self.assertEqual(xt._read_package(str(f)), pkg | {"release_verdict": ""})
+        f.write_text(json.dumps(rel | {"rows": [], "go": True}), encoding="utf-8")
+        self.assertEqual(xt._read_release(str(f)), rel)
+
+    def write_state_done(self) -> None:
+        xt.write_state(self.st(active=False, final_verdict={"verdict": "done", "reason": "x"}), self.base)
 
     def test_init_refuses_undecodable_plan(self) -> None:
         """PLAN không đọc được như UTF-8 → `loop init` exit 2 kèm lý do, không traceback (review #319)."""

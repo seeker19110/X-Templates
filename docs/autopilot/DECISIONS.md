@@ -1658,6 +1658,20 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: đổi phụ thuộc phải qua review (BASE-DEP-001); tên chính xác không chặn oan file cấu hình khác như phương án 3. (3) đơn giản, test được từng tên.
 - Đường lùi: Bỏ các tên D-235 khỏi thẻ phụ thuộc RISK_PATH_RES và conanfile khỏi DEP_TXT_RE trong scripts/xt.py; bỏ ca test D-235 và ca corpus pr-sec136
 
+### D-236 · 2026-10-29T03:51:17+00:00 · T-3548 harden-to-signoff: next-step gom việc harden nháp có ID ổn định thế nào khi lệnh chỉ đọc (ADR-0052 §5: khoá = nguồn + ID gốc + SHA phát hiện)?
+
+- Phương án: (1) Máy ghi thẳng PLAN-harden (thêm/giữ dòng task) · (2) Chỉ đọc: trả work[] (id, key, line dán được); khoá ghi trong dòng task '(nguồn: audit:ID@sha12)'; SHA phát hiện = commit đầu tiên đưa hàng vào sổ; khớp PLAN của vòng theo nguồn+ID, SHA khác (cả hai có) = phát hiện mới; ID mới cấp sau số lớn nhất của docs/autopilot/PLAN*.md theo thứ tự khoá · (3) ID băm từ khoá (T-9xxxx), không khớp PLAN
+- Chọn: Chỉ đọc: trả work[] (id, key, line dán được); khoá ghi trong dòng task '(nguồn: audit:ID@sha12)'; SHA phát hiện = commit đầu tiên đưa hàng vào sổ; khớp PLAN của vòng theo nguồn+ID, SHA khác (cả hai có) = phát hiện mới; ID mới cấp sau số lớn nhất của docs/autopilot/PLAN*.md theo thứ tự khoá
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: giữ next-step chỉ đọc (ADR-0052 §5), mô tả audit là dữ liệu — bỏ backtick/ngoặc/exec: để không thành Gate/sau:/tầng; phiên chính duyệt trước khi dán. (2) đường lùi: không ghi file. (3) tick giữ vì khớp theo khoá trong PLAN; ID băm (3) có thể trùng và không đọc được. Nguồn T-3548: 🔴/🟠 mở + MUST mở; release-check.fails vào ở T-3549 (--release); nợ review offline vẫn bảo thủ (không hỏi GitHub về PR đã review — ADR-0057), T-3549 dùng hàng review_debt của release-check. Thứ tự harden: task tick mà nguồn còn mở → audit, trước budget; budget trước replan việc mới.
+- Đường lùi: Bỏ harden-to-signoff khỏi NEXT_STEP_OBJECTIVES và các hàm harden_work/_step_harden trong scripts/xt.py; test FLOW-14/15 và HardenWorkTest
+
+### D-237 · 2026-10-29T04:12:16+00:00 · T-3549 gói nghiệm thu nháp: vân tay bằng chứng và hết hạn gói thế nào để sửa mã làm gói hết hạn mà commit chỉ GO-NO-GO/DECISIONS thì không (FLOW-17), lệnh vẫn chỉ đọc?
+
+- Phương án: (1) evidence_fp = tree_fingerprint (theo SHA HEAD + diff) · (2) evidence_fp theo NỘI DUNG: blob ls-tree HEAD + diff + file chưa track, trừ **/GO-NO-GO*.md, **/DECISIONS.md, .autopilot; phần đổi = git diff --name-only <candidate_head> (cùng tập trừ); gói và release-check đọc từ file (--package/--release), next-step không tự chạy release-check (không gọi GitHub) · (3) Máy ghi gói vào GO-NO-GO phần máy
+- Chọn: evidence_fp theo NỘI DUNG: blob ls-tree HEAD + diff + file chưa track, trừ **/GO-NO-GO*.md, **/DECISIONS.md, .autopilot; phần đổi = git diff --name-only <candidate_head> (cùng tập trừ); gói và release-check đọc từ file (--package/--release), next-step không tự chạy release-check (không gọi GitHub)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: commit ký GO-NO-GO đổi SHA HEAD nên phương án 1 làm gói hết hạn oan; nội dung trừ hai file đó giữ đúng nghĩa 'bằng chứng không đổi'. (2) đường lùi: chỉ đọc, gói là JSON phiên chính lưu; không chạm GO-NO-GO (ADR-0048: máy không điền chữ ký). release-check head cũ vẫn dùng được khi chỉ đổi GO-NO-GO/DECISIONS; fails còn → replan (lý do nêu hàng FAIL, không thành task tự động). human_pending = release.human ∪ loop defer.
+- Đường lùi: Bỏ --release/--package, signoff_facts/_step_signoff/evidence_fingerprint trong scripts/xt.py; harden hết việc trở lại action release-check
+
 ### D-238 · 2026-10-29T04:46:59+00:00 · PR #324: 2 lượt review chưa sạch (ADR-0053) — lượt 2 còn 🟠 thiếu ca *.vbproj (bỏ 'vb' khỏi regex thẻ phụ thuộc mà test vẫn xanh) và 🟢 4 lockfile chưa có ca, bất biến LOCKFILE_RE ⊆ thẻ phụ thuộc chưa có test. Đổi chiến lược thế nào?
 
 - Phương án: (1) Giữ PR, thêm ca vbproj + 4 lockfile + test bất biến (mọi tên lockfile × tiền tố thư mục đều có lý do phụ thuộc; ca âm src/yarn.lock.py) — vòng review cuối rà đúng phần này · (2) Sinh regex và test từ một hằng danh sách tên (một nguồn) · (3) Đóng PR, tách thành PR nhỏ hơn
@@ -1685,3 +1699,31 @@
 - Chọn: Thu hẹp: bỏ khoá ở verdict và toàn bộ lối ra D-240 (_stage_lock_exit, ngoại lệ LOOP-HARNESS-024); khoá giai đoạn chỉ ở loop init/next/record (từ chối kèm lời đúng: PLAN đợt mới khai N+1); đổi PLAN khi vòng còn sống dùng đường có sẵn loop init --force (LOOP-HARNESS-024 nguyên bản)
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: bất biến chính (không mở N+1 khi chưa duyệt) do loop init/next/record giữ — record không nhận bằng chứng của PLAN khoá; verdict chỉ phục vụ tiện lợi nhưng nhân số tổ hợp với 5 lối ra cũ, hai lượt review liền chỉ ra lỗi dây chuyền; thu hẹp trả hành vi vòng về đường đã được review (D-208, LOOP-HARNESS-024), đơn giản, giữ đường lùi; phương án 2/3 tiếp tục nhân bề mặt
 - Đường lùi: Áp lại commit 8d97085 + c88c4c8 (verdict + _stage_lock_exit)
+
+### D-242 · 2026-10-29T05:43:39+00:00 · Review #326 🔴: khoá việc harden 'nguồn:ID@SHA phát hiện' (D-236, theo ADR-0052 §5) đổi sau squash-merge (commit đưa hàng vào sổ trên nhánh không lên main) → gom lại ra task trùng; SHA cũng không phát hiện được ID tái dùng (git log -S lấy commit cũ nhất). Sửa thế nào?
+
+- Phương án: (1) Giữ SHA, tìm SHA trên nhánh chính (git log origin/main -S) · (2) Bỏ SHA khỏi khoá: khớp theo (nguồn, ID gốc) trên PLAN của vòng + docs/autopilot/PLAN*.md (cùng phạm vi cấp ID); @sha cũ trong dòng task vẫn đọc được, bị bỏ qua · (3) Băm nội dung hàng sổ làm khoá
+- Chọn: Bỏ SHA khỏi khoá: khớp theo (nguồn, ID gốc) trên PLAN của vòng + docs/autopilot/PLAN*.md (cùng phạm vi cấp ID); @sha cũ trong dòng task vẫn đọc được, bị bỏ qua
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ID sổ/MUST không tái dùng theo conventions nên (nguồn, ID) đã đủ định danh; phương án 1 vẫn lệch khi chưa merge (nhánh mới từ nhánh làm việc) và cần ref remote; phương án 3 đổi khoá mỗi lần sửa chữ trong hàng. (3) đơn giản, bỏ một git log -S mỗi hàng (Stop hook nhanh hơn). Lệch có chủ đích với chữ 'SHA phát hiện' của ADR-0052 §5 — ghi ở dòng trạng thái ADR.
+- Đường lùi: Trả HARDEN_KEY_RE/harden_work về khoá có @sha và _found_at (D-236)
+
+### D-243 · 2026-10-29T04:53:28+00:00 · T-3550: Stop hook in gợi ý next-step thế nào khi lệnh chỉ đọc và Stop hook không được đổi luồng (ADR-0052 §5)?
+
+- Phương án: (1) additionalContext/decision block để model đọc · (2) systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr · (3) Chỉ in lệnh, không tính next-step
+- Chọn: systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không chặn, không ghi — cho Stop hook đọc/chuyển trạng thái là lát 4 sau pilot; decision block (1) sẽ đổi luồng. (4) trải nghiệm: người thấy bước kế thật thay vì chỉ lệnh (3). Fail-open như mọi Stop hook (ADR-0002).
+- Đường lùi: Trả hook_stop về '' ở nhánh kết thúc vòng; bỏ stop_hint trong scripts/xt.py và test_stop_hint_next_step
+
+### D-244 · 2026-10-29T05:10:42+00:00 · T-3548, T-3549, T-3550 đã commit nối tiếp trên một nhánh (phiên bị ràng buộc một nhánh, #324 chiếm nhánh lúc làm): một PR hay ba PR?
+
+- Phương án: (1) Ba PR tuần tự (mỗi task một PR như dòng trạng thái ADR-0052) · (2) Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Chọn: Một PR lát 2 phần còn lại (835 dòng, cùng hàm next_step/next_step_facts, ba commit tách theo task để review theo commit)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ba task sửa cùng next_step/next_step_facts/_loop_next_step và cùng hai file test — review riêng từng phần không thấy tương tác (thứ tự harden → signoff, cờ CLI chung); (5) tách cần dựng lại lịch sử qua worktree và ba vòng review nối tiếp mà không giảm rủi ro. Reviewer rà theo từng commit.
+- Đường lùi: Đóng PR gộp, mở lại ba PR từ ba commit 1271133, 64cbd2a, 6ff2b99
+
+### D-245 · 2026-10-29T07:41:00+00:00 · PR #326 (tiếp quản từ phiên khác theo yêu cầu chủ repo): 2 lượt review chưa sạch, chi tiết lỗi chặn chỉ có ở phiên cũ (dấu xt-review chỉ ghi verdict); đã gộp main (#327) và đổi số D trùng. Đi tiếp thế nào
+
+- Phương án: (1) Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta · (2) Tách PR theo ba commit task (T-3548/T-3549/T-3550) thành ba PR nhỏ · (3) Đóng PR, làm lại từ đầu
+- Chọn: Một lượt review toàn PR mới (reviewer-alt) ở head đã gộp main để xác lập lỗi chặn hiện có, sửa trong PR, rồi một lượt delta
+- Lý do (tiêu chí chất lượng cuối): Đúng: không biết lỗi chặn cũ thì không sửa được — review toàn PR ở head mới là nguồn sự thật duy nhất; ba task sửa chung next_step/next_step_facts (D-244) nên tách PR tốn rebase/xung đột mà không giảm rủi ro; đóng PR bỏ phí 880 dòng đã qua gate-fast
+- Đường lùi: Tách PR theo ba commit 1271133, 64cbd2a, 6ff2b99

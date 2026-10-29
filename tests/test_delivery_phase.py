@@ -318,7 +318,9 @@ class DeliveryPhaseVerdictTest(unittest.TestCase):
         self.assertEqual((rc, d["verdict"], d["open_must"]), (0, "done", 2))
         self.assertIn("trả ở /complete (ADR-0046)", d["reason"])
         rc, out, _ = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
-        self.assertEqual((rc, out), (0, ""))  # không phải repo git → không kiểm lại cuối, cho dừng
+        self.assertEqual(
+            (rc, sorted(json.loads(out))), (0, ["systemMessage"])
+        )  # không git: không kiểm lại cuối, cho dừng
         st = xt.read_state(self.base) or {}
         self.assertEqual(
             (st["active"], st["final_verdict"]["verdict"], st["final_verdict"]["open_must"]), (False, "done", 2)

@@ -1,7 +1,7 @@
 # ADR-0052: State có revision, chặn không-tiến-triển theo task, mẫu perf v2 và `loop next-step` chỉ đọc — lát 0–2 của nghiên cứu ba vòng; `perf trial` (lát 3) hoãn sang ADR riêng
 
 - **Trạng thái:** Đã chấp nhận (chủ repo 2026-10-27: "hoàn thành hết đi" — sáu lát của [nghiên cứu 2026-10-26](../../research/2026-10-26-autopilot-complete-optimize.md); phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008 — D-202; §7 hoãn — D-203)
-- **Trạng thái triển khai:** Lát 0–1 đã triển khai (3.28.0); lát 2 đang làm — §5 `build-until-clean` (T-3547, D-224; không-tiến-triển qua đợt T-3578, D-227/D-228); còn `harden-to-signoff`, gói nghiệm thu, Stop hook in gợi ý (T-3548…T-3550) — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR.
+- **Trạng thái triển khai:** Lát 0–1 đã triển khai (3.28.0); lát 2 đã triển khai (vào 3.29.0) — §5 `build-until-clean` (T-3547, D-224; không-tiến-triển qua đợt T-3578, D-227/D-228; `harden-to-signoff` gom việc T-3548, D-236 — khoá bỏ SHA phát hiện vì squash-merge đổi SHA, D-242; gói nghiệm thu nháp T-3549, D-237; Stop hook in gợi ý T-3550, D-243) — `docs/autopilot/PLAN-harden-2026-10-27-loops.md`, mỗi task một PR (T-3548…T-3550 gộp một PR — D-244).
 - **Ngày:** 2026-10-27
 - **Làm rõ:** [ADR-0051](0051-split-session-attach-from-resume.md) (ba điểm review #288 — §Quyết định 6), `LOOP-DESIGN-005`/`-011` (lỗi lặp), `LOOP-OPT-002`/`-003`/`-008`/`-009` (tối ưu — mẫu perf v2; ràng buộc `perf trial` ở §7), ADR-0046/0047/0048 (ba điểm vào giữ nguyên), ADR-0009 (một phiên).
 
@@ -65,7 +65,7 @@ Chọn **phương án 1**, theo hợp đồng §9 của nghiên cứu, với cá
    `build-until-clean` dừng ở `ready-for-complete` (đề xuất, không đổi `delivery_phase` — D-178); `harden-to-signoff` dừng ở
    `signoff-package` (không điền chữ ký/dòng 20 — ADR-0048). Gom việc harden thành danh sách nháp ID ổn định (khoá nguồn + ID gốc +
    SHA phát hiện); mô tả audit là dữ liệu, không thành lệnh. Gói nghiệm thu nháp ghi `candidate_head`, `evidence_fp` (hash file bằng chứng
-   trừ `GO-NO-GO.md`/`DECISIONS.md`), `human_pending[]`. Stop hook **chỉ in gợi ý** từ `next-step`; cho nó ghi/chuyển trạng thái là lát 4,
+   trừ `GO-NO-GO.md`/`DECISIONS.md`/`PROGRESS.md` gốc — review #326), `human_pending[]`. Stop hook **chỉ in gợi ý** từ `next-step`; cho nó ghi/chuyển trạng thái là lát 4,
    sau pilot.
 6. **Làm rõ ADR-0051** (review #288 🟢 1/2/4): không có state hoặc state không có `started` (do `ci-triage`/`block` sinh) → cả ba lệnh exit 2
    "chạy `loop init` trước"; "state cũ" = có `started`, không `final_verdict`. `final_verdict` `blocked` do PLAN mất/rỗng (không cờ, không

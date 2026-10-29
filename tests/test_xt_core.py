@@ -959,7 +959,8 @@ class LoopVerifyTest(TmpMixin, unittest.TestCase):
         rc, text = self.verify()
         self.assertEqual(rc, 0, text)
         self.assertIn("XANH (1 Gate)", text)  # hai task cùng lệnh (khác khoảng trắng) → chạy một lần
-        self.assertEqual(xt.hook_stop("{}", self.base), ("", 0))
+        out, rc = xt.hook_stop("{}", self.base)
+        self.assertEqual((sorted(json.loads(out)), rc), (["systemMessage"], 0))  # cho dừng, kèm gợi ý (T-3550)
         self.assertFalse(xt.read_state(self.base)["active"])
 
     def test_partial_verify_not_enough_for_done(self):
