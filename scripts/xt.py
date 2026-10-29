@@ -7104,15 +7104,19 @@ def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, A
 
 # Gói nghiệm thu nháp (ADR-0052 §5, nghiên cứu §6.2, T-3549): vân tay bằng chứng theo NỘI DUNG cây (không theo SHA HEAD),
 # trừ GO-NO-GO/DECISIONS — commit chỉ ghi chữ ký/quyết định không làm gói hết hạn (FLOW-17).
-SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", ":(exclude,glob)**/DECISIONS.md"]
-SHA40_RE = re.compile(r"[0-9a-f]{40}")
+SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", ":(exclude,glob)**/DECISIONS.md", ":(exclude)PROGRESS.md"]
+SHA40_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # SHA commit đầy đủ: SHA-1 hoặc SHA-256 (`--object-format=sha256`)
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _signoff_excluded(path: str) -> bool:
     """Cùng tập với `SIGNOFF_EXCLUDE` + thư mục trạng thái mà `tree_hash` bỏ (glob `**/X` = tên file ở mọi cấp)."""
     name = path.rsplit("/", 1)[-1]
-    return path.startswith(".autopilot/") or name == "DECISIONS.md" or fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
+    if (
+        path.startswith(".autopilot/") or path == "PROGRESS.md"
+    ):  # PROGRESS vào commit cuối mọi PR (skill /autopilot bước 6)
+        return True
+    return name == "DECISIONS.md" or fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
 
 
 def evidence_fingerprint(base: Path) -> Optional[str]:
@@ -7274,9 +7278,14 @@ def _step_harden(f: Dict[str, Any]) -> StepPart:
             "work": work,
         }
     if not new:
-        idle = f["verdict"]["verdict"] == "inactive" and any(w["planned"] for w in work)
+        # Đã gom, chưa tick, không chờ người, mà vòng không chạy (chưa bật, đợt cũ `done`/chờ người) → `loop init` PLAN chứa
+        # nó; vòng đang chạy thì `_step_loop` đã giao task (review #326 lượt 3: rơi xuống `release-check` khai sai).
+        waiting = set((f["signoff"] or {}).get("deferred") or [])
+        todo = [w for w in work if w["planned"] and not w["checked"] and w["id"] not in waiting]
+        idle = f["verdict"]["verdict"] in ("inactive", "done", PENDING_HUMAN) and bool(todo)
+        eg = ", ".join(w["id"] for w in todo[:3])
         return (
-            {"action": "replan", "reason": "PLAN có task harden chưa tick mà vòng chưa bật — `loop init`"}
+            {"action": "replan", "reason": f"PLAN có task harden chưa tick ({eg}) mà vòng không chạy — `loop init`"}
             if idle
             else None
         )
@@ -7304,16 +7313,9 @@ def _signoff_part(pkg: Dict[str, Any], why: str) -> Dict[str, Any]:
     }
 
 
-def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
-    """Harden hết việc gom được (T-3549): gói đã dựng còn khớp vân tay → `signoff-package` (chờ người); lệch → hết hạn,
-    nêu file đổi (FLOW-17); chưa có gói: cần `release-check` trên cây này — `fails` còn → `replan`, rỗng → dựng gói nháp
-    (`candidate_head`, `evidence_fp`, `human_pending`) — máy đã đạt, không phải "đã phát hành" (FLOW-16)."""
+def _signoff_rerun(f: Dict[str, Any], pkg: Optional[Dict[str, Any]], rel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Cần `release-check` trên cây hiện tại: gói cũ hết hạn (nêu file đổi), kết quả cũ lệch cây, hoặc chưa có."""
     s = f["signoff"]
-    fp, pkg, rel = s["evidence_fp"], s["package"], s["release"]
-    if pkg is not None and pkg["evidence_fp"] == fp:
-        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326)
-        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]))}
-        return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
     if pkg is not None:
         note = _changed_note(s["package_changed"], pkg["candidate_head"])
         return {
@@ -7321,15 +7323,25 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
             "reason": f"gói nghiệm thu hết hạn: {note} — chạy lại `release-check` trên HEAD rồi dựng gói mới",
             "missing": ["`release-check --json` trên HEAD"],
         }
-    if rel is None or fp is None or s["release_changed"] != []:
-        stale = f": kết quả có ở {_changed_note(s['release_changed'], rel['head'])}" if rel and fp else ""
-        return {
-            "action": "release-check",
-            "reason": "việc harden máy gom được đã xong: PLAN hết task, PR đã xong, sổ phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
-            f" ngoài việc chờ người — chạy `release-check`{stale}; `fails` rỗng → gói nghiệm thu",
-            "missing": ["`release-check --json` trên HEAD"],
-        }
-    if rel["fails"]:
+    stale = f": kết quả có ở {_changed_note(s['release_changed'], rel['head'])}" if rel and s["evidence_fp"] else ""
+    left = f["audit"].get("open", 0) + f["open_must"]
+    done = "0 🔴/🟠 và 0 MUST mở ngoài việc chờ người" if not left else f"còn {left} 🔴/🟠/MUST mở do chờ người"
+    return {
+        "action": "release-check",
+        "reason": f"việc harden máy gom được đã xong: PLAN hết task, PR đã xong, sổ phủ tới HEAD, {done} — chạy"
+        f" `release-check`{stale}; `fails` rỗng → gói nghiệm thu",
+        "missing": ["`release-check --json` trên HEAD"],
+    }
+
+
+def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Harden hết việc gom được (T-3549): gói đã dựng còn khớp vân tay → `signoff-package` (chờ người); lệch → hết hạn,
+    nêu file đổi (FLOW-17); chưa có gói: cần `release-check` trên cây này — `fails` còn → `replan`, rỗng → dựng gói nháp
+    (`candidate_head`, `evidence_fp`, `human_pending`) — máy đã đạt, không phải "đã phát hành" (FLOW-16)."""
+    s = f["signoff"]
+    fp, pkg, rel = s["evidence_fp"], s["package"], s["release"]
+    fresh = rel is not None and fp is not None and s["release_changed"] == []  # `release-check` đúng cây hiện tại
+    if fresh and rel["fails"]:  # kết quả chặt hơn thắng gói cũ cùng nội dung (review #326: `review_debt`/`attack` đổi)
         stalled = _step_stalled(f)  # FAIL do việc chờ người (🟠 `mở` đã defer) lặp mãi → `budget` (review #326)
         if stalled:
             return stalled
@@ -7338,6 +7350,12 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
             "reason": f"release-check {rel['verdict']}: FAIL {', '.join(rel['fails'])} — sửa ở đợt kế rồi chạy lại",
             "missing": [f"`{x}` PASS" for x in rel["fails"]],
         }
+    if pkg is not None and pkg["evidence_fp"] == fp:
+        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326)
+        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]))}
+        return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+    if not fresh:
+        return _signoff_rerun(f, pkg, rel)
     pkg = {
         "candidate_head": f["head"],
         "evidence_fp": fp,

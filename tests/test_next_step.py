@@ -200,7 +200,16 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(objective=HARDEN, harden=stale)
         self.assertEqual(out["action"], "audit")
         self.assertIn("1 task đã tick mà nguồn còn mở: T-010 (audit:AUD-A-001)", out["reason"])
-        self.assertEqual(self.step(objective=HARDEN, harden=stale[1:])["action"], "release-check")  # chờ vòng/người
+        # Đã gom chưa tick, đợt cũ `done` (vòng không chạy) → `loop init` PLAN chứa nó, không khai "0 🔴/🟠" (review #326)
+        out = self.step(objective=HARDEN, harden=stale[1:], audit={"open": 1})
+        self.assertEqual(out["action"], "replan")
+        self.assertIn("(T-9) mà vòng không chạy — `loop init`", out["reason"])
+        waiting = {"signoff": {"deferred": ["T-9"]}}  # task đó chờ người → hết việc máy làm được
+        out = self.step(objective=HARDEN, harden=stale[1:], audit={"open": 1}, **waiting)
+        self.assertEqual(out["action"], "release-check")
+        self.assertIn("còn 1 🔴/🟠/MUST mở do chờ người", out["reason"])
+        running = {"verdict": "continue", "reason": "còn task", "task": "T-9"}
+        self.assertEqual(self.step(objective=HARDEN, harden=stale[1:], verdict=running)["action"], "task")
         self.assertEqual(self.step(harden=items)["action"], "ready-for-complete")  # build không đọc `harden`
 
     def test_harden_inactive_loop_gathers_first(self) -> None:
@@ -278,6 +287,23 @@ class NextStepPureTest(unittest.TestCase):
                 out = self.step(objective=HARDEN, signoff={"package": old, "package_changed": changed})
                 self.assertEqual((out["action"], out["package"]), ("release-check", None))
                 self.assertIn(f"gói nghiệm thu hết hạn: {note}", out["reason"])
+
+    def test_expired_package_with_fresh_release(self) -> None:
+        """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →
+        `replan`; `release-check` mới FAIL thắng cả gói còn hiệu lực cùng nội dung (kết quả chặt hơn)."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        old = {**pkg, "evidence_fp": "e" * 64}
+        go = {"head": "b" * 40, "fails": [], "human": [], "verdict": "GO"}
+        nogo = {**go, "fails": ["review_debt"], "verdict": "NO-GO"}
+        fresh = {"release_changed": [], "package_changed": ["app.py"]}
+        out = self.step(objective=HARDEN, signoff={"package": old, "release": go, **fresh})
+        self.assertEqual((out["action"], out["package"]["candidate_head"]), ("signoff-package", HEAD))
+        out = self.step(objective=HARDEN, signoff={"package": old, "release": nogo, **fresh})
+        self.assertEqual((out["action"], out["missing"]), ("replan", ["`review_debt` PASS"]))
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "release": nogo, "release_changed": []})
+        self.assertEqual(out["action"], "replan")
+        stale = {"package": old, "release": go, "release_changed": ["app.py"], "package_changed": ["app.py"]}
+        self.assertIn("gói nghiệm thu hết hạn", self.step(objective=HARDEN, signoff=stale)["reason"])
 
     def test_loop_before_prs(self) -> None:
         wait = [{"pr": "4", "head": "4" * 40, "action": "wait", "why": ""}]
@@ -596,6 +622,8 @@ class HardenWorkTest(StateCase):
             with self.subTest(path):
                 self.assertFalse(xt._signoff_excluded(path))
         self.assertTrue(xt._signoff_excluded(".autopilot/state.json"))
+        self.assertTrue(xt._signoff_excluded("PROGRESS.md"))  # commit cuối mọi PR mang PROGRESS (review #326)
+        self.assertFalse(xt._signoff_excluded("docs/PROGRESS.md"))
 
     def test_facts_only_gather_for_harden(self) -> None:
         self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —")
