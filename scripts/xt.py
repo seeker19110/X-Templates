@@ -188,9 +188,10 @@ SECRET_PATTERNS = (
     (
         # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
         re.compile(
-            r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY( BLOCK)?-----|\Z)",
+            r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----(?! \*\*\*)"
+            r".*?(-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----|\Z)",
             re.S,
-        ),  # `( BLOCK)?`: khoá PGP armored (review #342)
+        ),  # `( BLOCK)?`: khoá PGP armored (review #342); `SECRET KEY BLOCK`: armor PGP cũ GnuPG vẫn đọc
         "-----BEGIN PRIVATE KEY----- ***",
     ),
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
@@ -7967,15 +7968,18 @@ def _ci_log_lines(text: str) -> List[str]:
 
 def ci_classify(text: str) -> Dict[str, Any]:
     """Phân loại log job CI: loại thắng, mọi loại khớp, dòng lỗi làm bằng chứng và chữ ký (số → N, ổn định qua run).
-    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó."""
-    lines = _ci_log_lines(text)
+    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó. Bằng chứng vào
+    `.autopilot/state.json` và ngữ cảnh agent nên che (AUD-SEC-145): khối PEM nhiều dòng che trên CẢ log trước khi tách dòng,
+    phần còn lại của `redact` che từng dòng bằng chứng — che cả log trước làm mất dòng nhận diện loại `secret`."""
+    pem_rx, pem_repl = SECRET_PATTERNS[0]
+    lines = _ci_log_lines(pem_rx.sub(pem_repl, text))
     hits = {cat: [line for line in lines if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
     cats = [cat for cat, _ in CI_TRIAGE_RULES if hits[cat]]
     category = cats[0] if cats else "unknown"
     evidence = list(dict.fromkeys(hits.get(category) or lines[-CI_TRIAGE_EVIDENCE:]))[:CI_TRIAGE_EVIDENCE]
     norm = "\n".join(re.sub(r"\d+", "N", line) for line in evidence)
     signature = hashlib.sha256(f"{category}\n{norm}".encode()).hexdigest()[:16]
-    shown = [] if category == "secret" else evidence
+    shown = [] if category == "secret" else [redact(line) for line in evidence]
     return {"category": category, "categories": cats, "signature": signature, "evidence": shown}
 
 

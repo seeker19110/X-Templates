@@ -2656,7 +2656,7 @@ class PrStewardTest(unittest.TestCase):
         self.assertTrue(out.startswith("#7 merge — làn nhanh"))
         self.assertEqual(gh.writes, [])  # không --apply: chỉ báo
         summary = self.base / "summary.md"
-        gh = StewardGh()
+        gh = StewardGh(pull={"title": "fix(x): it's ok"})
         with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 0)
@@ -2674,9 +2674,11 @@ class PrStewardTest(unittest.TestCase):
                     "merge_method=squash",
                     "-f",
                     f"sha={FakeGh.SHA}",
+                    "-f",
+                    "commit_title=fix(x): it's ok (#7)",
                 ]
             ],
-        )  # merge ghim head, không bật auto-merge (ADR-0036)
+        )  # merge ghim head, không bật auto-merge (ADR-0036); subject = tiêu đề PR (AUD-HAR-126/127)
         self.assertIn("## pr-steward", summary.read_text(encoding="utf-8"))
 
     def test_steward_waits_without_required_checks(self):

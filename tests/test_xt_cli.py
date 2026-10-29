@@ -2931,6 +2931,15 @@ class CiTriageTest(TmpDirCase):
         tail = xt.ci_classify("\n".join(f"dòng {i}" for i in range(30)))
         self.assertEqual(tail["evidence"][0], "dòng 20")  # không khớp loại nào: 10 dòng cuối
 
+    def test_ci_triage_redacts_whole_log_before_lines(self):
+        """AUD-SEC-145: bằng chứng che trên CẢ log — thân khoá PEM nhiều dòng, token sau `token=` không vào state/ngữ cảnh."""
+        begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"
+        body, token = "MIIEpAIBAAKCAQEA", "ghp_" + "B" * 36
+        d = xt.ci_classify(f"FAIL: test_x (t.T)\n{begin}\n{body}\n{end}\nFAIL: token={token}\nexit 1\n")
+        self.assertEqual(d["category"], "test")
+        self.assertNotIn(body, "\n".join(d["evidence"]))
+        self.assertNotIn(token, "\n".join(d["evidence"]))
+
     def test_ci_triage_signature_ignores_numbers_and_timestamps(self):
         a = xt.ci_classify(GH_PREFIX + "FAILED tests/a.py::t - assert 1 == 2 (0.12s)\n")
         b = xt.ci_classify(GH_PREFIX.replace("10:00", "11:59") + "FAILED tests/a.py::t - assert 3 == 4 (9.87s)\n")
