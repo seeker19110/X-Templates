@@ -334,7 +334,7 @@ class StageCliTest(TmpRepoCase):
         self.git("switch", "-q", "main")
         err = self.stage("status")[2]
         self.assertIn("refs/heads/thu", err)
-        self.assertIn("merge ref đó", err)
+        self.assertIn("người khôi phục sổ", err)
 
     def test_unknown_subcommand_is_read_only(self):
         args = unittest.mock.Mock(stage_cmd="khác")
@@ -444,6 +444,45 @@ class StageLockTest(TmpRepoCase):
         self.assertEqual(rc, 0, err)  # vòng khoá coi như đã chết: không cần `--force`
         self.assertEqual(xt.read_state(self.repo)["plan"], "docs/autopilot/PLAN-2.md")
         self.assertEqual(xt._stage_lock_exit({}, self.repo), "")
+
+    def test_only_stage_mismatch_kills_the_loop(self):
+        """Review #327 lượt 3: sổ hỏng, PLAN mất, PLAN khai 0/nhiều dòng không làm vòng "đã chết" — `loop init` không ghi
+        đè vòng đang sống (LOOP-HARNESS-024), lối ra cũ (người sửa/khôi phục, D-208) giữ nguyên."""
+        self.write_ledger(ledger())
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        self.assertEqual(run_main("loop", "init", "--plan", self.PLAN, "--single-session")[0], 0)
+        other = self.repo / "docs/autopilot/PLAN-B.md"
+        other.write_text("# B\n> Giai đoạn sản phẩm: 1 (C-001)\n\n- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
+        st = xt.read_state(self.repo)
+        cases = {
+            "khai 0 dòng": lambda: self.plan(),
+            "khai 2 dòng": lambda: self.plan("> Giai đoạn sản phẩm: 1 (C-001)", "> Giai đoạn sản phẩm: 1 (C-001)"),
+            "sổ hỏng": lambda: (self.repo / xt.STAGE_LEDGER).write_text("<<<<<<< HEAD", encoding="utf-8"),
+        }
+        for name, breaks in cases.items():
+            with self.subTest(name):
+                breaks()
+                self.assertEqual(xt._stage_lock_exit(st, self.repo), "")
+                self.assertEqual(xt.loop_verdict(self.repo)["verdict"], "blocked")
+                rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-B.md")
+                self.assertEqual(rc, 2)
+                self.assertEqual(xt.read_state(self.repo)["plan"], self.PLAN)  # vòng đang sống không bị ghi đè
+                self.write_ledger(ledger())
+                self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        (self.repo / xt.STAGE_LEDGER).write_text("{", encoding="utf-8")
+        self.assertIn("người sửa hoặc khôi phục từ git", self.problem())
+        self.write_ledger(ledger())
+        (self.repo / self.PLAN).unlink()  # PLAN mất ở dự án có sổ: vẫn lối ra D-208
+        self.assertEqual(xt._stage_lock_exit(st, self.repo), "")
+        self.assertIn("PLAN mất/rỗng", xt._blocked_exit(st, self.repo, live=True))
+
+    def test_doctor_names_stage_exit(self):
+        self.write_ledger(ledger([ev("init", 1), *approve(1)], stage=2))
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        st = {"active": True, "blocked": True, "blocked_reason": "x", "plan": self.PLAN}
+        msg = xt._doctor_loop(st, self.repo)[0].msg
+        self.assertIn("`loop init --plan <PLAN khai đúng giai đoạn>`", msg)
+        self.assertNotIn("loop unblock", msg)
 
     def test_fenced_example_and_new_cycle_hint(self):
         self.write_ledger(ledger())

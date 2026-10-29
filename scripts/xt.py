@@ -4738,9 +4738,10 @@ def _doctor_loop(st: Dict[str, Any], base: Path) -> List[Finding]:
     """Cảnh báo vòng bị chặn/mất PLAN — lối ra lấy từ đúng helper của `loop init`/`attach`/`unblock` (D-208, review #296)."""
     active = bool(st.get("active"))
     live, plan_ok = active and not _budget_spent(st), bool(_plan_tasks(base, st))
-    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: PLAN trước ngân sách
-        if not active:
-            end = _loop_exit(st, base)[1]
+    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: khoá giai đoạn, PLAN, rồi ngân sách
+        lock = _stage_lock_exit(st, base)
+        if lock or not active:
+            end = lock or _loop_exit(st, base)[1]
         elif not plan_ok:
             end = _plan_lost_exit(st, live)
         else:
@@ -7805,10 +7806,11 @@ def _plan_lost_exit(st: Dict[str, Any], live: bool) -> str:
 
 
 def _stage_lock_exit(st: Dict[str, Any], base: Path) -> str:
-    """Lối ra khi PLAN của vòng không còn hợp lệ với sổ giai đoạn (ADR-0058, D-240) — như PLAN mất (D-208): `unblock` không
-    mở được, vòng đó coi như đã chết; '' khi không khoá."""
-    why = stage_plan_problem(base, str(st["plan"])) if st.get("plan") else ""
-    return f"{why} → `loop init --plan <PLAN khai đúng giai đoạn>`" if why else ""
+    """Lối ra khi PLAN của vòng khai một giai đoạn khác giai đoạn đang mở (người vừa duyệt, PLAN đổi giai đoạn — ADR-0058,
+    D-240): `unblock` không mở được, vòng đó coi như đã chết. Sổ hỏng, PLAN mất, khai 0/nhiều dòng → '' (lối ra cũ: người
+    khôi phục/sửa rồi `unblock`, D-208)."""
+    kind, why = _stage_plan_check(base, str(st["plan"])) if st.get("plan") else ("", "")
+    return f"{why} → `loop init --plan <PLAN khai đúng giai đoạn>`" if kind == "mismatch" else ""
 
 
 def _blocked_exit(st: Dict[str, Any], base: Path, live: bool) -> str:
@@ -9468,14 +9470,14 @@ def read_stage(base: Path) -> Optional[Dict[str, Any]]:
         seen = _stage_git_seen(base)
         if seen:  # xoá/dời sổ, nhánh tách trước sổ: không tắt khoá bằng thao tác thường (review #327)
             raise StageError(
-                f"{STAGE_LEDGER} vắng nhưng có trong lịch sử git ({seen}) — không coi là bỏ dùng giai đoạn; "
-                "khôi phục sổ hoặc merge ref đó vào nhánh này; nhánh thử bỏ đi thì người xoá nó"
+                f"{STAGE_LEDGER} vắng nhưng có trong lịch sử git (commit + ref: {seen}) — không coi là bỏ dùng giai "
+                f"đoạn; người khôi phục sổ (`git log --all -- {STAGE_LEDGER}`) hoặc dọn ref thử chứa nó"
             )
         return None
     try:
         led = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise StageError(f"{STAGE_LEDGER} không đọc được: {exc}") from None
+        raise StageError(f"{STAGE_LEDGER} không đọc được: {exc} — người sửa hoặc khôi phục từ git") from None
     why = stage_problem(led)
     if why or not isinstance(led, dict):
         raise StageError(f"{STAGE_LEDGER} hỏng: {why} — không đoán giai đoạn; người sửa hoặc khôi phục từ git")
@@ -9537,21 +9539,29 @@ def plan_stage(text: str) -> List[Tuple[int, str]]:
 
 def stage_plan_problem(base: Path, plan: str) -> str:
     """Lý do PLAN không được chạy dưới sổ giai đoạn hiện tại; '' = được. Không dùng sổ → ''. Mọi lối vào vòng
-    (`loop init/next/record`) gọi hàm này nên sửa PLAN giữa chừng cũng bị chặn."""
+    (`loop init/next/record`, verdict) gọi hàm này nên sửa PLAN giữa chừng cũng bị chặn."""
+    return _stage_plan_check(base, plan)[1]
+
+
+def _stage_plan_check(base: Path, plan: str) -> Tuple[str, str]:
+    """(loại, lý do) của `stage_plan_problem`; loại `ledger` (sổ hỏng/vắng mà git có — người khôi phục), `plan` (PLAN không
+    đọc được — D-208 xử lý), `declare` (PLAN khai 0 hay nhiều dòng — sửa tại chỗ), `mismatch` (khai một dòng khác giai
+    đoạn đang mở — PLAN đó hết dùng được). Chỉ `mismatch` làm vòng coi như đã chết (D-240, review #327 lượt 3)."""
     try:
         led = read_stage(base)
     except StageError as exc:
-        return str(exc)
+        return "ledger", str(exc)
     if led is None:
-        return ""
+        return "", ""
     try:
         got = plan_stage((base / plan).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
-        return f"không đọc được {plan}: {exc}"
+        return "plan", f"không đọc được {plan}: {exc}"
     want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
     if len(got) != 1:
-        return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
-    return _stage_mismatch(plan, got[0], led, want)
+        return "declare", f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
+    why = _stage_mismatch(plan, got[0], led, want)
+    return ("mismatch" if why else ""), why
 
 
 def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:

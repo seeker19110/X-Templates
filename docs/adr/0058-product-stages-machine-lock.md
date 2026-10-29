@@ -47,8 +47,10 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
 4. **Khoá ở mọi lối vào vòng:** PLAN khai **đúng một** dòng `Giai đoạn sản phẩm: N (C-NNN)`; khi có sổ, `loop init`, `loop next`,
    `loop record` và verdict của vòng (`loop status`, Stop hook → `blocked`) từ chối PLAN không khai, khai nhiều dòng, khai giai
    đoạn/chu kỳ khác giai đoạn đang mở (dòng trong code fence không tính) — kể cả PLAN sửa sau `loop init` hay người vừa duyệt
-   (lời báo: PLAN đợt mới khai N+1). Vòng như vậy coi như đã chết, giống PLAN mất (D-208, D-240): lối ra mọi nơi (`loop init`,
-   `attach`, `unblock`) là `loop init --plan <PLAN khai đúng giai đoạn>`, không cần `--force`, `unblock` từ chối. `loop record`
+   (lời báo: PLAN đợt mới khai N+1). Riêng PLAN khai **một** dòng khác giai đoạn đang mở: vòng coi như đã chết (D-240) — lối ra
+   ở `loop init`/`attach`/`unblock`/`doctor` là `loop init --plan <PLAN khai đúng giai đoạn>`, không cần `--force` (ngoại lệ ghi ở
+   LOOP-HARNESS-024), `unblock` từ chối. Sổ hỏng/vắng mà git có, PLAN mất, khai 0/nhiều dòng: vòng không chết, giữ lối ra cũ
+   (người khôi phục/sửa rồi `unblock`; PLAN mất theo D-208). `loop record`
    ngoài vòng (chưa `loop init`) không biết PLAN nên không kiểm giai đoạn — `loop init` và kiểm lại cuối vẫn chặn. Đang
    `awaiting_approval` vẫn chạy PLAN của **cùng** giai đoạn (sửa theo phản hồi); hết việc thì agent `stage submit`, báo người, dừng.
 5. **`release-check` thêm hàng `stage`:** sổ vắng (chưa từng có) → N/A SHOULD; giai đoạn 1 (kể cả chờ duyệt) → FAIL BLOCKER ("MVP
