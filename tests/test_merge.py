@@ -590,7 +590,73 @@ class MergeDecisionTest(unittest.TestCase):
             # D-234 (review #323): constraints, requirements/ mọi cấp, chữ hoa
             **{
                 f"phụ thuộc {d}": ([{"path": d, "additions": 1, "deletions": 1}, *f], "(phụ thuộc)")
-                for d in ("upper-constraints.txt", "requirements/edx/base.txt", "Requirements-Dev.TXT")
+                for d in (
+                    "upper-constraints.txt",
+                    "requirements/edx/base.txt",
+                    "Requirements-Dev.TXT",
+                    "requirements.in",
+                )
+            },
+            # D-235 (review #323): manifest/lockfile các hệ sinh thái khác
+            **{
+                f"phụ thuộc {d}": ([{"path": d, "additions": 1, "deletions": 1}, *f], "(phụ thuộc)")
+                for d in (
+                    "src/App/App.csproj",
+                    "packages.lock.json",
+                    "pom.xml",
+                    "app/build.gradle.kts",
+                    "Pipfile.lock",
+                    "setup.py",
+                    "environment.yml",
+                    "pubspec.yaml",
+                    "ios/Podfile",
+                    "mix.exs",
+                    "deno.json",
+                    "conanfile.txt",
+                    "gradle/libs.versions.toml",
+                    "x.gemspec",
+                    # review #324: mỗi tên/biến thể một ca — bỏ tên nào khỏi regex là đỏ (đột biến T1/P4)
+                    "Package.swift",
+                    "App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+                    "build.gradle",
+                    "settings.gradle.kts",
+                    "global.json",
+                    "Directory.Packages.props",
+                    "packages.config",
+                    "vcpkg.json",
+                    "gradle.lockfile",
+                    "npm-shrinkwrap.json",
+                    "bun.lock",
+                    "bun.lockb",
+                    "deno.lock",
+                    "deno.jsonc",
+                    "Pipfile",
+                    "environment.yaml",
+                    "requirements/dev.in",
+                    "go.work",
+                    "lib/F.fsproj",
+                    "lib/V.vbproj",
+                    "requirements/a/b/c.txt",
+                    "pubspec.lock",
+                    "ios/Podfile.lock",
+                    "mix.lock",
+                    "conanfile.py",
+                    "setup.cfg",
+                    "pnpm-lock.yaml",
+                    "yarn.lock",
+                    "pyproject.toml",
+                    "poetry.lock",
+                    "uv.lock",
+                    "go.mod",
+                    "go.sum",
+                    "Cargo.toml",
+                    "Cargo.lock",
+                    "Gemfile",
+                    "Gemfile.lock",
+                    "composer.json",
+                    "composer.lock",
+                    "package-lock.json",
+                )
             },
             "lớn": ([{"path": "src/a.py", "additions": 140, "deletions": 20}, *f], "161 dòng > 150"),
             "hai gói": (
@@ -630,6 +696,13 @@ class MergeDecisionTest(unittest.TestCase):
                 "đổi mã mà không đổi test",
             ),
         }
+        # Neo `(^|/)…$` của thẻ phụ thuộc (review #324 T2): tên dài hơn/chứa tên manifest không phải manifest
+        for p in ("notpom.xml", "setup.py.bak", "myglobal.json", "App.csproj.user", "deno.json5", "src/mysetup.py"):
+            with self.subTest(p):
+                self.assertNotIn(
+                    "(phụ thuộc)",
+                    " · ".join(xt.merge_lane_reasons(pr(files=[{"path": p, "additions": 1, "deletions": 0}, *f]), [])),
+                )
         for name, (files, reason) in cases.items():
             with self.subTest(name):
                 d = xt.merge_decision(pr(files=files), 2)
@@ -667,6 +740,7 @@ class MergeDecisionTest(unittest.TestCase):
         # review #323: txt phụ thuộc rộng (đóng khi nghi ngờ); hậu tố gạch nối chỉ khi gốc viết hoa
         code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
         code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
+        code += ("requirements-dev.txt", "src/license.py", "conanfile.txt")  # đột biến D8/L6 (review #323 lượt 2)
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
         self.assertEqual([p for p in code if xt.is_doc_path(p)], [])
 
@@ -676,6 +750,7 @@ class MergeDecisionTest(unittest.TestCase):
         tests += ("app/docs/__tests__/page.test.tsx", "docs/spec/x.test.py")
         not_tests = ("docs/spec/openapi.yaml", "packages/api/docs/spec/openapi.json", "Docs/spec/x.yaml", "src/a.py")
         not_tests += ("docs/v1/spec/openapi.yaml", "docs/tests/deploy.sh", "docs/__tests__/x.js", "docs/e2e/x.ts")
+        not_tests += ("docs/test/run.sh", "doc/spec/x.yaml")  # đột biến M6/M8 (review #323 lượt 2)
         self.assertEqual([t for t in tests if not xt._is_test_path(t)], [])
         self.assertEqual([t for t in not_tests if xt._is_test_path(t)], [])
 
@@ -774,6 +849,27 @@ class MergeDecisionTest(unittest.TestCase):
                     (d["verdict"], d["reasons"]), ("human", ["không có check CI nào xanh — không có bằng chứng"])
                 )
 
+    def test_lockfile_re_inside_dependency_tag(self):
+        """D-238 (review #324): mọi file `LOCKFILE_RE` bỏ khỏi trần dòng/gói/"đổi mã không test" PHẢI mang thẻ phụ thuộc —
+        không thì lockfile (hay tên giống lockfile) lách làn chuẩn. Neo của `LOCKFILE_RE`: tên dài hơn là mã."""
+        locks = ("package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb")
+        locks += ("deno.lock", "uv.lock", "poetry.lock", "Pipfile.lock", "go.sum", "Cargo.lock", "Gemfile.lock")
+        locks += ("composer.lock", "packages.lock.json", "gradle.lockfile", "pubspec.lock", "Podfile.lock")
+        locks += ("Package.resolved", "mix.lock")
+        dep = dict(xt.RISK_PATH_RES)["phụ thuộc"]
+        for name in locks:
+            for path in (name, f"apps/web/{name}"):
+                with self.subTest(path):
+                    self.assertTrue(xt.LOCKFILE_RE.search(path))
+                    self.assertTrue(dep.search(path))
+        for path in ("src/yarn.lock.py", "src/myuv.lock", "src/Cargo.LOCK", "x/go.sum.bak"):
+            with self.subTest(path):
+                self.assertIsNone(xt.LOCKFILE_RE.search(path))
+                self.assertIn(
+                    "đổi mã mà không đổi test",
+                    xt.merge_lane_reasons(pr(files=[{"path": path, "additions": 120, "deletions": 0}]), []),
+                )
+
     def test_lockfiles_and_docs_do_not_count_as_size_or_package(self):
         files = [
             {"path": "docs/guide.md", "additions": 400, "deletions": 0},
@@ -787,6 +883,11 @@ class MergeDecisionTest(unittest.TestCase):
         lock = [*files, {"path": "uv.lock", "additions": 900, "deletions": 50}]
         d = xt.merge_decision(pr(files=lock), 2)
         self.assertEqual(d["reasons"], ["đường dẫn nhạy cảm (phụ thuộc): uv.lock"])  # không tính 950 dòng
+        new_locks = ("Pipfile.lock", "pubspec.lock", "gradle.lockfile", "Package.resolved", "mix.lock", "bun.lock")
+        for name in (*new_locks, "npm-shrinkwrap.json", "deno.lock", "packages.lock.json", "Podfile.lock"):
+            with self.subTest(name):  # lockfile D-235 cũng không tính dòng (review #324 T3)
+                d = xt.merge_decision(pr(files=[*files, {"path": name, "additions": 900, "deletions": 50}]), 2)
+                self.assertEqual(d["reasons"], [f"đường dẫn nhạy cảm (phụ thuộc): {name}"])
 
 
 class MergeConfigTest(unittest.TestCase):
