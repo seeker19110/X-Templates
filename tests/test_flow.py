@@ -559,6 +559,71 @@ class FlowTest(TmpRepoCase):
         path.write_text(json.dumps(doc), encoding="utf-8")
         return str(path)
 
+    @flow("FLOW-14")
+    def test_flow_14_head_change_after_clean_review_rereviews_delta(self) -> None:
+        """Given PR làn chuẩn pha harden có review sạch ở head cũ O, rồi push head mới N · When `pr next` (hàm thuần, không
+        GitHub) rồi `next-step --objective harden-to-signoff` với JSON đó · Then `review` rà đúng `O..N`; `next-step` trả
+        `pr` ở head N, giữ khoảng. Đối chứng: review sạch ở N → `merge` ghim N; `next-step` với PR `done` đi tiếp."""
+        old, new = "1" * 40, "2" * 40
+        d = {"pr": 7, "head": new, "verdict": "merge", "lane": "chuẩn", "stacked": False, "hard": [], "autonomy": 3}
+        d |= {"reasons": ["ok"], "next": "gh pr merge 7", "delivery_phase": "harden"}
+        rec: dict[str, Any] = {"reviews": [{"head": old, "clean": True}]}
+        p = xt.pr_next(d, False, rec)
+        self.assertEqual(p["action"], "review", p)
+        self.assertIn(f"{old}..{new}", p["why"])
+        self.finish_batch()
+        out = self.next_step([p], "--objective", "harden-to-signoff")
+        self.assertEqual((out["action"], out["key"]["pr"], out["key"]["head"]), ("pr", "7", new), out)
+        self.assertIn(f"{old}..{new}", out["reason"])
+        rec["reviews"].append({"head": new, "clean": True})
+        p = xt.pr_next(d, False, rec)
+        self.assertEqual((p["action"], p["head"]), ("merge", new), p)
+        done = {**p, "action": "done"}
+        self.assertNotEqual(self.next_step([done], "--objective", "harden-to-signoff")["action"], "pr")
+
+    @flow("FLOW-15")
+    def test_flow_15_regather_keeps_one_task_stable_id_and_tick(self) -> None:
+        """Given 🟠 mở trong sổ đã commit (mô tả có `(sau: …)` và lệnh trong backtick) · When gom việc harden hai lần ·
+        Then một mục, cùng ID, khoá có SHA commit đưa hàng vào sổ, mô tả không thành Gate/`sau:`. Dán `line` vào
+        PLAN-harden, làm xanh (máy tick) → gom lại: cùng ID, `checked`, `audit` (nguồn còn mở), không task trùng; phát hiện
+        mới chỉ thêm một việc mới."""
+        finding = "AUD-ARCH-001 | 🟠 | mở | lỗi (sau: T-001) `rm -rf x` | đo được: x | `true` | —"
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        self.audit_book(self.git("rev-parse", "HEAD"), (finding,))
+        intro = self.git("rev-parse", "HEAD").strip()
+        self.finish_batch()
+        first = self.next_step([], "--objective", "harden-to-signoff")
+        second = self.next_step([], "--objective", "harden-to-signoff")
+        self.assertEqual((first["action"], first["work"]), ("replan", second["work"]), first)
+        self.assertEqual(len(first["work"]), 1)
+        w = first["work"][0]
+        self.assertEqual((w["id"], w["key"], w["gate"]), ("T-902", f"audit:AUD-ARCH-001@{intro[:12]}", "true"))
+        task = xt.parse_plan(self.write("docs/autopilot/PLAN-harden.md", w["line"] + "\n"))[0]
+        self.assertEqual((task["id"], task["gate"], task["after"]), ("T-902", "true", []))
+        self.assertEqual(self.loop("init", "--plan", "docs/autopilot/PLAN-harden.md", "--force")[0], 0)
+        self.assertEqual(self.loop("record", "--task", "T-902", "--", "true")[0], 0)  # khớp Gate → máy tick [x]
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        again = self.next_step([], "--objective", "harden-to-signoff")
+        self.assertEqual(again["action"], "audit", again)
+        self.assertEqual([(x["id"], x["checked"]) for x in again["work"]], [("T-902", True)])
+        more = (finding, "AUD-ARCH-002 | 🟠 | mở | lỗi khác | đo được: y | `true` | —")
+        self.audit_book(self.git("rev-parse", "HEAD"), more)
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        out = self.next_step([], "--objective", "harden-to-signoff")
+        self.assertEqual(out["action"], "audit", out)  # nguồn của T-902 chưa ghi đóng: trước việc mới
+        self.assertEqual([(x["id"], x["planned"]) for x in out["work"]], [("T-902", True), ("T-903", False)])
+        fixed = (finding.replace("| mở |", "| đã sửa |").removesuffix("—") + "đã sửa ở #1", more[1])
+        self.audit_book(self.git("rev-parse", "HEAD"), fixed)
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        out = self.next_step([], "--objective", "harden-to-signoff")
+        self.assertEqual(out["action"], "budget", out)  # sửa một, phát hiện một: hai đợt 1 → 1 → 1 (FLOW-13 thắng)
+        self.assertEqual([(x["id"], x["planned"]) for x in out["work"]], [("T-903", False)])
+
+    def write(self, rel: str, text: str) -> Path:
+        path = self.repo / rel
+        path.write_text(text, encoding="utf-8")
+        return path
+
     def perf_compare(self, before: str, after: str, *extra: str) -> tuple[int, str]:
         """`xt.py perf compare` trong repo tạm; `SystemExit` của argparse → mã thoát + chữ thông báo."""
         with chdir(self.repo):

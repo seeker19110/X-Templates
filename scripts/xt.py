@@ -6804,7 +6804,7 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
-NEXT_STEP_OBJECTIVES = ("build-until-clean",)  # `harden-to-signoff` (T-3548); `optimize-budget` sau `perf trial`
+NEXT_STEP_OBJECTIVES = ("build-until-clean", "harden-to-signoff")  # `optimize-budget` sau `perf trial`
 AUDIT_STATUS_DEFAULT = "docs/ops/AUDIT-STATUS.md"
 PR_SETTLED = ("done", "closed")  # `pr next` không còn việc cho PR
 OBJECTIVE_BATCHES_KEEP = 20  # mốc đầu đợt giữ trong `objective.batches` (FLOW-13 chỉ cần hai mốc cuối)
@@ -6926,11 +6926,18 @@ def _batch_verdict(base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
     return _with_pending_human(v, base, st) if v["verdict"] == "done" else v
 
 
-def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[List[Dict[str, str]]]) -> Dict[str, Any]:
-    """Đầu vào của `next_step` (đọc đĩa/git, không gọi GitHub, không ghi): verdict đợt, kiểm lại cuối, PR, sổ audit, MUST."""
+def next_step_facts(
+    base: Path,
+    st: Dict[str, Any],
+    status: str,
+    prs: Optional[List[Dict[str, str]]],
+    objective: str = NEXT_STEP_OBJECTIVES[0],
+) -> Dict[str, Any]:
+    """Đầu vào của `next_step` (đọc đĩa/git, không gọi GitHub, không ghi): verdict đợt, kiểm lại cuối, PR, sổ audit, MUST;
+    mục tiêu harden thêm danh sách việc nháp (`harden_work`)."""
     v = _batch_verdict(base, st)
     return {
-        "objective": NEXT_STEP_OBJECTIVES[0],
+        "objective": objective,
         "repo": base.name,
         "head": _git_head(base),
         "verdict": {k: v[k] for k in ("verdict", "reason", "task") if k in v},
@@ -6938,6 +6945,7 @@ def next_step_facts(base: Path, st: Dict[str, Any], status: str, prs: Optional[L
         "prs": prs,
         "audit": _audit_facts(base, status),
         "open_must": len(_open_must(base, st)),
+        "harden": harden_work(base, st, status) if objective == NEXT_STEP_OBJECTIVES[1] else [],
         "state": {
             "rev": _state_rev(st),
             "plan": st.get("plan"),
@@ -6967,6 +6975,110 @@ def _audit_facts(base: Path, status: str) -> Dict[str, Any]:
     except (OSError, ValueError) as exc:
         out["errors"] = [f"không đọc được sổ: {exc}"]
     return out
+
+
+# Việc harden nháp (ADR-0052 §5, nghiên cứu §6.1, T-3548): khoá = nguồn + ID gốc + SHA phát hiện, ghi vào dòng task PLAN
+# dạng `(nguồn: audit:AUD-SEC-001@<sha12>)` để lần gom sau nhận lại đúng task (ID ổn định, tick giữ — FLOW-15).
+HARDEN_KEY_RE = re.compile(
+    r"\(nguồn: (?P<src>audit|must):(?P<ref>[A-Z0-9]+(?:-[A-Z0-9]+)*)(?:@(?P<sha>[0-9a-f]{7,40}))?\)"
+)
+HARDEN_TITLE_MAX = 100
+
+
+def _found_at(base: Path, status: str, ref: str) -> str:
+    """SHA (12 ký tự) của commit đầu tiên đưa hàng `ref` vào sổ — "SHA phát hiện" của khoá; chưa commit/không phải repo
+    git → "" (khớp mọi SHA: hàng mới viết chưa commit vẫn nhận lại task đã gom)."""
+    log = _git(base, "--literal-pathspecs", "log", "--reverse", "--format=%H", "-S", f"| {ref} |", "--", status)
+    first = log.stdout.split("\n", 1)[0].strip() if log.returncode == 0 else ""
+    return first[:12]
+
+
+def _harden_title(text: str) -> str:
+    """Mô tả audit là DỮ LIỆU (ADR-0052 §5): bỏ backtick/ngoặc/`|`/ký tự điều khiển để không thành Gate, `sau:`/`files:`
+    hay `exec:` của dòng task; cắt HARDEN_TITLE_MAX ký tự."""
+    t = re.sub(r"[`|\x00-\x1f\x7f]", " ", text.replace("(", "[").replace(")", "]"))
+    t = re.sub(r"\s+", " ", re.sub(r"\bexec:", "exec", t, flags=re.I)).strip()
+    return t if len(t) <= HARDEN_TITLE_MAX else t[: HARDEN_TITLE_MAX - 1].rstrip() + "…"
+
+
+def _harden_sources(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, Any]]:
+    """Nguồn việc harden: 🔴/🟠 `mở` trong sổ (Gate đề nghị = cột Gate khi là một lệnh trong backtick) và MUST mở ngoài
+    việc chờ người. `release-check.fails` vào ở T-3549 (`--release`). Sổ không đọc được → bỏ nguồn sổ (`_step_audit` báo)."""
+    out: List[Dict[str, Any]] = []
+    try:
+        rows = md_tables((base / status).read_text(encoding="utf-8")).get("Phát hiện", [])
+    except (OSError, ValueError):
+        rows = []
+    for r in rows:
+        ref = r.get("ID", "")
+        if r.get("Mức") not in ("🔴", "🟠") or r.get("Trạng thái") != "mở" or not REQ_ID_RE.fullmatch(ref):
+            continue
+        gate = re.fullmatch(r"`([^`\n]+)`", r.get("Gate", "").strip())
+        title = _harden_title(f"Sửa {ref} {r['Mức']}: {r.get('Tóm tắt', '')}")
+        out.append(
+            {
+                "source": "audit",
+                "ref": ref,
+                "sha": _found_at(base, status, ref),
+                "title": title,
+                "gate": gate and gate[1],
+            }
+        )
+    for ref in _open_must(base, st):
+        out.append({"source": "must", "ref": ref, "sha": "", "title": f"Đạt MUST {ref} (blueprint)", "gate": None})
+    return out
+
+
+def _planned_keys(base: Path, st: Dict[str, Any]) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+    """(nguồn, ID gốc, SHA, task) của các task PLAN của vòng có khoá `(nguồn: …)` trước Gate."""
+    out = []
+    for t in _plan_tasks(base, st):
+        g = GATE_RE.search(t["rest"])
+        m = HARDEN_KEY_RE.search(t["rest"][: g.start()] if g else t["rest"])
+        if m:
+            out.append((m["src"], m["ref"], (m["sha"] or "")[:12], t))
+    return out
+
+
+def _max_task_number(base: Path, st: Dict[str, Any]) -> int:
+    """Số task lớn nhất trong `docs/autopilot/PLAN*.md` và PLAN của vòng — ID mới cấp tiếp sau đó (không trùng PLAN cũ)."""
+    paths = sorted((base / "docs" / "autopilot").glob("PLAN*.md")) + [base / str(st.get("plan") or "")]
+    best = 0
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        except (OSError, ValueError):
+            continue
+        best = max([best] + [int(m[1]) for m in re.finditer(r"^- \[[ xX~]\] `T-(\d{3,})`", text, re.M)])
+    return best
+
+
+def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, Any]]:
+    """Danh sách việc harden nháp có ID ổn định (FLOW-15): nguồn đã có task mang cùng khoá trong PLAN của vòng → dùng lại ID
+    và trạng thái tick; SHA hai bên khác nhau (ID gốc bị dùng lại cho phát hiện khác) → việc mới. Việc mới cấp ID tiếp sau
+    số lớn nhất, theo thứ tự khoá — cùng đầu vào → cùng ID. Máy không ghi PLAN: phiên chính duyệt rồi dán `line`."""
+    planned = _planned_keys(base, st)
+    items: List[Dict[str, Any]] = []
+    for src in sorted(_harden_sources(base, st, status), key=lambda x: (x["source"], x["ref"])):
+        key = f"{src['source']}:{src['ref']}" + (f"@{src['sha']}" if src["sha"] else "")
+        task = next(
+            (
+                t
+                for s, ref, sha, t in planned
+                if (s, ref) == (src["source"], src["ref"]) and (not sha or not src["sha"] or sha == src["sha"])
+            ),
+            None,
+        )
+        tid, state = (task["id"], task["state"]) if task else ("", "")
+        items.append({**src, "key": key, "id": tid, "planned": task is not None, "checked": state not in ("", " ")})
+    nxt = _max_task_number(base, st)
+    for it in items:
+        if not it["planned"]:
+            nxt += 1
+            it["id"] = f"T-{nxt:03d}"
+        gate = f"Gate: `{it['gate']}`" if it["gate"] else "Gate: chưa có — phiên chính điền lệnh kiểm"
+        it["line"] = f"- [ ] `{it['id']}` {it['title']} (nguồn: {it['key']}) — {gate}"
+    return items
 
 
 StepPart = Optional[Dict[str, Any]]
@@ -7041,30 +7153,85 @@ def _step_audit(f: Dict[str, Any]) -> StepPart:
     }
 
 
+def _step_stalled(f: Dict[str, Any]) -> StepPart:
+    """Hai đợt liền không giảm 🔴/🟠/MUST mở → `budget` (FLOW-13), chung cho hai mục tiêu."""
+    n, batches = f["audit"]["open"] + f["open_must"], f["state"]["batches"]
+    since = _no_progress(batches, n, f["audit"]["status"]) if n else None
+    if not since:
+        return None
+    chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n}"
+    return {
+        "action": "budget",
+        "reason": f"hai đợt liên tiếp không giảm 🔴/🟠/MUST mở ({chain}, từ {since}) — kế hoạch/đặc tả cần người xem",
+        "missing": ["đợt kế giảm số việc mở"],
+    }
+
+
 def _step_work(f: Dict[str, Any]) -> StepPart:
     """Còn 🔴/🟠 mở hoặc MUST mở ngoài việc chờ người → đợt kế (FLOW-11); hai đợt liền không giảm → `budget` (FLOW-13)."""
     n_audit, n_must = f["audit"]["open"], f["open_must"]
-    batches = f["state"]["batches"]
     if not n_audit + n_must:
         return None
-    since = _no_progress(batches, n_audit + n_must, f["audit"]["status"])
-    if since:
-        chain = " → ".join(str(b.get("open")) for b in batches[-2:]) + f" → {n_audit + n_must}"
-        return {
-            "action": "budget",
-            "reason": f"hai đợt liên tiếp không giảm 🔴/🟠/MUST mở ({chain}, từ {since}) — kế hoạch/đặc tả cần người xem",
-            "missing": ["đợt kế giảm số việc mở"],
-        }
+    stalled = _step_stalled(f)
+    if stalled:
+        return stalled
     return {
         "action": "replan",
         "reason": f"còn {n_audit} 🔴/🟠 mở trong sổ, {n_must} MUST mở ngoài việc chờ người — lập đợt kế (PLAN mới, `loop init`)",
     }
 
 
+def _step_harden(f: Dict[str, Any]) -> StepPart:
+    """Harden (T-3548): task đã tick mà nguồn còn mở → `audit` (sổ/blueprint chưa cập nhật, hay sửa chưa trọn — mở lại
+    task) — trước `budget`: số việc mở chưa giảm chỉ vì nguồn chưa ghi; hai đợt không giảm → `budget`; việc nháp chưa có
+    trong PLAN → `replan` kèm `work`. Task đã gom mà chưa tick là việc của vòng/chờ người."""
+    work = f["harden"]
+    new = [w for w in work if not w["planned"]]
+    stale = [w for w in work if w["checked"]]
+    if stale:
+        ids = ", ".join(f"{w['id']} ({w['key']})" for w in stale[:3])
+        return {
+            "action": "audit",
+            "reason": f"{len(stale)} task đã tick mà nguồn còn mở: {ids} — cập nhật sổ/blueprint theo bằng chứng, hoặc"
+            " mở lại task",
+            "missing": [f"{w['key']} đóng ở nguồn" for w in stale],
+            "work": work,
+        }
+    if not new:
+        idle = f["verdict"]["verdict"] == "inactive" and any(w["planned"] for w in work)
+        return (
+            {"action": "replan", "reason": "PLAN có task harden chưa tick mà vòng chưa bật — `loop init`"}
+            if idle
+            else None
+        )
+    stalled = _step_stalled(f)
+    if stalled:
+        return {**stalled, "work": work}
+    eg = ", ".join(f"{w['id']} ← {w['key']}" for w in new[:3])
+    return {
+        "action": "replan",
+        "reason": f"{len(new)} việc harden chưa có trong PLAN (vd {eg}) — duyệt `work[].line`, dán vào PLAN-harden mới,"
+        " `loop init`",
+        "missing": [f"task cho {w['key']}" for w in new],
+        "work": work,
+    }
+
+
 def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
-    """Bước kế của mục tiêu `build-until-clean` (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết
-    quả; `inputs` trả nguyên `f` để phát lại. Dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178)."""
-    part = _step_loop(f) or _step_prs(f) or _step_audit(f) or _step_work(f)
+    """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
+    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178);
+    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `release-check` (gói nghiệm thu: T-3549)."""
+    harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
+    # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
+    loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
+    part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
+    if part is None and harden:
+        part = {
+            "action": "release-check",
+            "reason": "việc harden máy gom được đã xong: PLAN hết task, PR đã xong, sổ phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
+            " ngoài việc chờ người — chạy `release-check`; `fails` rỗng → gói nghiệm thu",
+            "missing": ["`release-check --json` trên HEAD"],
+        }
     if part is None:
         pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
         part = {
@@ -7078,6 +7245,7 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
         "action": part["action"],
         "reason": part["reason"],
         "missing": part.get("missing", []),
+        "work": part.get("work", []),
         "key": {
             "repo": f["repo"],
             "objective": f["objective"],
@@ -7115,13 +7283,15 @@ def _loop_next_step(args: argparse.Namespace, base: Path) -> int:
     except (OSError, ValueError, RecursionError) as exc:  # JSON lồng quá sâu → RecursionError (review #318)
         print(f"✗ --prs: {exc}", file=sys.stderr)
         return 2
-    out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs))
+    out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs, args.objective))
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
     print(f"{out['action']} — {out['reason']}")
     for m in out["missing"]:
         print(f"  thiếu: {m}")
+    for w in out["work"]:
+        print(f"  {'[x]' if w['checked'] else 'mới' if not w['planned'] else '[ ]'} {w['line']}")
     return 0
 
 

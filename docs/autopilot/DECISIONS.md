@@ -1657,3 +1657,10 @@
 - Chọn: Thêm danh sách tên manifest/lockfile phổ biến vào RISK_PATH_RES (tên chính xác, neo (^|/)…$), conanfile.txt vào DEP_TXT_RE
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: đổi phụ thuộc phải qua review (BASE-DEP-001); tên chính xác không chặn oan file cấu hình khác như phương án 3. (3) đơn giản, test được từng tên.
 - Đường lùi: Bỏ các tên D-235 khỏi thẻ phụ thuộc RISK_PATH_RES và conanfile khỏi DEP_TXT_RE trong scripts/xt.py; bỏ ca test D-235 và ca corpus pr-sec136
+
+### D-236 · 2026-10-29T03:51:17+00:00 · T-3548 harden-to-signoff: next-step gom việc harden nháp có ID ổn định thế nào khi lệnh chỉ đọc (ADR-0052 §5: khoá = nguồn + ID gốc + SHA phát hiện)?
+
+- Phương án: (1) Máy ghi thẳng PLAN-harden (thêm/giữ dòng task) · (2) Chỉ đọc: trả work[] (id, key, line dán được); khoá ghi trong dòng task '(nguồn: audit:ID@sha12)'; SHA phát hiện = commit đầu tiên đưa hàng vào sổ; khớp PLAN của vòng theo nguồn+ID, SHA khác (cả hai có) = phát hiện mới; ID mới cấp sau số lớn nhất của docs/autopilot/PLAN*.md theo thứ tự khoá · (3) ID băm từ khoá (T-9xxxx), không khớp PLAN
+- Chọn: Chỉ đọc: trả work[] (id, key, line dán được); khoá ghi trong dòng task '(nguồn: audit:ID@sha12)'; SHA phát hiện = commit đầu tiên đưa hàng vào sổ; khớp PLAN của vòng theo nguồn+ID, SHA khác (cả hai có) = phát hiện mới; ID mới cấp sau số lớn nhất của docs/autopilot/PLAN*.md theo thứ tự khoá
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: giữ next-step chỉ đọc (ADR-0052 §5), mô tả audit là dữ liệu — bỏ backtick/ngoặc/exec: để không thành Gate/sau:/tầng; phiên chính duyệt trước khi dán. (2) đường lùi: không ghi file. (3) tick giữ vì khớp theo khoá trong PLAN; ID băm (3) có thể trùng và không đọc được. Nguồn T-3548: 🔴/🟠 mở + MUST mở; release-check.fails vào ở T-3549 (--release); nợ review offline vẫn bảo thủ (không hỏi GitHub về PR đã review — ADR-0057), T-3549 dùng hàng review_debt của release-check. Thứ tự harden: task tick mà nguồn còn mở → audit, trước budget; budget trước replan việc mới.
+- Đường lùi: Bỏ harden-to-signoff khỏi NEXT_STEP_OBJECTIVES và các hàm harden_work/_step_harden trong scripts/xt.py; test FLOW-14/15 và HardenWorkTest
