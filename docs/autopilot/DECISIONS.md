@@ -1629,3 +1629,17 @@
 - Chọn: Theo D-230: thu hẹp phạm vi sửa (_plan_pairs qua _plan_tasks, tasks chỉ nhận chuỗi, ℹ khi mở lại đợt vì PLAN nối thêm, giới hạn ghi CHANGELOG), không đổi thiết kế ranh giới đợt
 - Lý do (tiêu chí chất lượng cuối): Như D-230: lỗi 🟠 là dùng sai helper — sửa tại gốc; PLAN dài dần cùng đường dẫn trái quy ước PLAN-<đợt>.md, báo rõ thay vì đoán
 - Đường lùi: Như D-230
+
+### D-232 · 2026-10-29T01:54:06+00:00 · DOC_PATH_RE (review #320/#321): '(^|/)docs?/' coi mọi file trong thư mục doc/docs ở bất kỳ độ sâu là tài liệu — src/api/docs/routes.py, docs/conf.py bị loại khỏi nợ review (release-check BLOCKER) và khỏi đếm dòng/gói/test của làn merge (PR chỉ sửa mã đó vào làn nhanh, không review)
+
+- Phương án: (1) Tài liệu = đuôi md/mdx/rst/txt ở mọi nơi, LICENSE/NOTICE, hoặc thư mục docs/doc ở GỐC repo trừ file có đuôi mã/cấu hình (py, js, ts, sh, go, rs, yml, toml…) · (2) Chỉ theo đuôi tài liệu, bỏ hẳn luật thư mục (ảnh/json trong docs/ thành mã → mọi PR sổ/ảnh vào làn chuẩn, nợ review giả) · (3) Giữ nguyên, chỉ ghi sổ
+- Chọn: Tài liệu = đuôi md/mdx/rst/txt ở mọi nơi, LICENSE/NOTICE, hoặc thư mục docs/doc ở GỐC repo trừ file có đuôi mã/cấu hình (py, js, ts, sh, go, rs, yml, toml…)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: mã trong thư mục tên docs không còn lách review/nợ; vẫn giữ tài liệu không phải văn bản ở docs/ gốc (ảnh, json bằng chứng) là tài liệu để không sinh nợ/làn chuẩn giả — phương án 2 chặt hơn nhưng phá luồng PR sổ hằng ngày; chạm luật làn (cổng) nên ghi D
+- Đường lùi: Đặt lại DOC_PATH_RE về '(^|/)docs?/|…'
+
+### D-233 · 2026-10-29T02:22:50+00:00 · PR #322 review lượt 1: CODE_EXT là danh sách chặn (thiếu .dart/.vue/.html/.bat… và file không đuôi vẫn lọt); tên license*/notice* và .txt phụ thuộc là tài liệu (có từ trước); file trong docs/ tính là test
+
+- Phương án: (1) Đổi sang danh sách cho phép (is_doc_path): đuôi văn bản md/mdx/rst/txt trừ txt phụ thuộc, đúng tên LICENSE/LICENCE/NOTICE/COPYING, tài sản png/jpg/gif/svg/webp/ico/pdf/csv/json/bib trong docs/ gốc; còn lại là mã; file dưới thư mục docs không tính là test; tên có xuống dòng là mã · (2) Bổ sung CODE_EXT từ LANG_EXT ∪ UI_EXT (vẫn danh sách chặn — không đuôi/đuôi mới vẫn lọt)
+- Chọn: Đổi sang danh sách cho phép (is_doc_path): đuôi văn bản md/mdx/rst/txt trừ txt phụ thuộc, đúng tên LICENSE/LICENCE/NOTICE/COPYING, tài sản png/jpg/gif/svg/webp/ico/pdf/csv/json/bib trong docs/ gốc; còn lại là mã; file dưới thư mục docs không tính là test; tên có xuống dòng là mã
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: luật quyết định review/nợ phải đóng khi nghi ngờ — danh sách chặn luôn thiếu đuôi mới (Makefile-less script, .bat, .vue); danh sách cho phép chỉ cho qua những gì chắc chắn là tài liệu; tài sản lồng trong docs con thành mã (chặt hơn, đã ghi CHANGELOG cho dự án đích)
+- Đường lùi: Đặt lại DOC_PATH_RE của #321 (D-232 bản đầu)

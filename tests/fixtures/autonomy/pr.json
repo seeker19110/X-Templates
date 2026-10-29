@@ -1184,6 +1184,29 @@
     "review": "missing"
    },
    "note": "PR từng vào làn chuẩn (sổ cục bộ, chưa có nhãn) rồi thu về làn nhanh: vẫn đòi review ở head như pr next"
+  },
+  {
+   "id": "pr-sec134-nested-docs-code",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-134"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/api/docs/routes.py",
+       "additions": 3,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
   }
  ]
 }

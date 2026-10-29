@@ -266,7 +266,8 @@ run_task() { # $1=task -> chạy; 0 nếu ok hoặc no-op, khác 0 nếu lệnh 
 changed_files() { # file đổi so với HEAD (theo gốc dự án) + file mới chưa ignore; không phải repo git/chưa có HEAD → 1
   git -C "$ROOT" rev-parse -q --verify HEAD >/dev/null 2>&1 || return 1
   # core.quotePath=false: tên file Unicode (tiếng Việt) ra nguyên văn, không thành "\303\241…" có nháy.
-  { git -C "$ROOT" -c core.quotePath=false diff --relative --name-only HEAD -- &&
+  # --no-renames: đổi tên giữ cả tên cũ để chọn đúng test của file cũ (như pre-bash-guard.sh — review #321).
+  { git -C "$ROOT" -c core.quotePath=false diff --no-renames --relative --name-only HEAD -- &&
     git -C "$ROOT" -c core.quotePath=false ls-files --others --exclude-standard; } | sort -u
 }
 fast_test_task() { # in task test cho gate-fast: test_fast nếu có lệnh thật và biết file đổi, ngược lại test

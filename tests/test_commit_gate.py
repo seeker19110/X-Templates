@@ -256,6 +256,19 @@ class DevTaskGateFastTest(unittest.TestCase):
             self.assertEqual((self.tmp / f"ran-{name}").exists(), ran, name)
         self.assertIn("GATE-FAST XANH (4 lệnh)", r.stderr)
 
+    def test_commit_gate_fast_changed_files_keep_renamed_source(self):
+        """`git mv` giữ cả tên cũ trong XT_CHANGED_FILES (`--no-renames`, review #321): test của file cũ vẫn được chọn."""
+        self.git("init", "-q")
+        (self.tmp / "old.txt").write_text("1\n", encoding="utf-8")
+        (self.tmp / ".gitignore").write_text("seen\n", encoding="utf-8")
+        self.yaml("lint: sh -c 'exit 0'\ntest_fast: sh -c 'printf \"%s\\n\" \"$XT_CHANGED_FILES\" > seen'\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "init")
+        self.git("mv", "old.txt", "new.txt")
+        r = self.run_task("gate-fast")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted((self.tmp / "seen").read_text(encoding="utf-8").splitlines()), ["new.txt", "old.txt"])
+
     def test_commit_gate_fast_red_stops(self):
         self.git("init", "-q")
         self.commit_init()

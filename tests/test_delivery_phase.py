@@ -526,6 +526,26 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         debt, _ = xt.review_debt(self.repo, self.status)
         self.assertIn("src/app.py", debt)
 
+    def test_delivery_phase_review_debt_nested_docs_dir_is_code(self):
+        """D-232: `src/api/docs/routes.py` là mã — sửa sau SHA quét vẫn là nợ (trước đây `(^|/)docs?/` loại nó)."""
+        s0 = self.git("rev-parse", "HEAD")
+        self.scanned({1: s0, 2: s0, 3: s0, 9: s0, 12: s0, 13: s0})
+        self.commit("sổ")
+        f = self.repo / "src" / "api" / "docs" / "routes.py"
+        f.parent.mkdir(parents=True)
+        f.write_text("x = 1\n", encoding="utf-8")
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "guide.md").write_text("x\n", encoding="utf-8")
+        self.commit("mã trong docs lồng + tài liệu")
+        (self.repo / "requirements.txt").write_text("x==1\n", encoding="utf-8")  # .txt phụ thuộc là mã (review #322)
+        (self.repo / "license-allow.json").write_text("{}\n", encoding="utf-8")
+        self.commit("phụ thuộc + allowlist license")
+        debt, _ = xt.review_debt(self.repo, self.status)
+        self.assertIn("src/api/docs/routes.py", debt)
+        self.assertNotIn("docs/guide.md", debt)
+        self.assertIn("requirements.txt", debt)
+        self.assertIn("license-allow.json", debt)
+
     def test_delivery_phase_review_debt_since_per_file(self):
         """Review #317 🟠: mỗi file xét commit từ đúng SHA đưa nó vào nợ — lần đẩy thẳng mà sổ nhóm của file đã phủ (trước
         SHA của nhóm) không bị kéo vào chỉ vì một nhóm khác quét cũ hơn."""
