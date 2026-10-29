@@ -1671,3 +1671,17 @@
 - Chọn: evidence_fp theo NỘI DUNG: blob ls-tree HEAD + diff + file chưa track, trừ **/GO-NO-GO*.md, **/DECISIONS.md, .autopilot; phần đổi = git diff --name-only <candidate_head> (cùng tập trừ); gói và release-check đọc từ file (--package/--release), next-step không tự chạy release-check (không gọi GitHub)
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: commit ký GO-NO-GO đổi SHA HEAD nên phương án 1 làm gói hết hạn oan; nội dung trừ hai file đó giữ đúng nghĩa 'bằng chứng không đổi'. (2) đường lùi: chỉ đọc, gói là JSON phiên chính lưu; không chạm GO-NO-GO (ADR-0048: máy không điền chữ ký). release-check head cũ vẫn dùng được khi chỉ đổi GO-NO-GO/DECISIONS; fails còn → replan (lý do nêu hàng FAIL, không thành task tự động). human_pending = release.human ∪ loop defer.
 - Đường lùi: Bỏ --release/--package, signoff_facts/_step_signoff/evidence_fingerprint trong scripts/xt.py; harden hết việc trở lại action release-check
+
+### D-238 · 2026-10-29T04:46:59+00:00 · PR #324: 2 lượt review chưa sạch (ADR-0053) — lượt 2 còn 🟠 thiếu ca *.vbproj (bỏ 'vb' khỏi regex thẻ phụ thuộc mà test vẫn xanh) và 🟢 4 lockfile chưa có ca, bất biến LOCKFILE_RE ⊆ thẻ phụ thuộc chưa có test. Đổi chiến lược thế nào?
+
+- Phương án: (1) Giữ PR, thêm ca vbproj + 4 lockfile + test bất biến (mọi tên lockfile × tiền tố thư mục đều có lý do phụ thuộc; ca âm src/yarn.lock.py) — vòng review cuối rà đúng phần này · (2) Sinh regex và test từ một hằng danh sách tên (một nguồn) · (3) Đóng PR, tách thành PR nhỏ hơn
+- Chọn: Giữ PR, thêm ca vbproj + 4 lockfile + test bất biến (mọi tên lockfile × tiền tố thư mục đều có lý do phụ thuộc; ca âm src/yarn.lock.py) — vòng review cuối rà đúng phần này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: lỗi còn lại là thiếu ca test, mã đã đúng (reviewer xác nhận 77/102 đột biến chết, phần sống còn lại là nới an toàn); thêm ca là sửa gốc cho 'test được từng tên'. Phương án 2 làm đột biến bỏ tên khỏi hằng cũng xoá luôn ca test — mất khả năng bắt; phương án 3 tốn thêm vòng mà không đổi rủi ro. (3) đơn giản, giữ đường lùi.
+- Đường lùi: Bỏ các ca thêm ở test_standard_lane_reasons/test_lockfiles… trong tests/test_merge.py
+
+### D-239 · 2026-10-29T04:53:28+00:00 · T-3550: Stop hook in gợi ý next-step thế nào khi lệnh chỉ đọc và Stop hook không được đổi luồng (ADR-0052 §5)?
+
+- Phương án: (1) additionalContext/decision block để model đọc · (2) systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr · (3) Chỉ in lệnh, không tính next-step
+- Chọn: systemMessage (hiển thị cho người, docs hooks xác minh 2026-10-29) khi vòng vừa kết thúc (done/chờ người/blocked/budget) và ghi state thành công; mục tiêu theo delivery_phase cây làm việc; không có --prs nên bước PR nhắc đối soát; lỗi tính → không gợi ý, stderr
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: không chặn, không ghi — cho Stop hook đọc/chuyển trạng thái là lát 4 sau pilot; decision block (1) sẽ đổi luồng. (4) trải nghiệm: người thấy bước kế thật thay vì chỉ lệnh (3). Fail-open như mọi Stop hook (ADR-0002).
+- Đường lùi: Trả hook_stop về '' ở nhánh kết thúc vòng; bỏ stop_hint trong scripts/xt.py và test_stop_hint_next_step

@@ -440,7 +440,7 @@ class NextStepStateTest(StateCase):
     def test_stop_hook_marks_batch_done(self) -> None:
         xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}), self.base)
         rc, out, _ = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
-        self.assertEqual((rc, out), (0, ""))  # không phải repo git → không kiểm lại cuối, cho dừng ở done
+        self.assertEqual((rc, sorted(json.loads(out))), (0, ["systemMessage"]))  # không git: không kiểm lại cuối, dừng
         st = xt.read_state(self.base) or {}
         self.assertEqual(st["final_verdict"]["verdict"], "done")
         self.assertTrue(st["objective"]["batches"][-1]["done"])
@@ -459,7 +459,7 @@ class NextStepStateTest(StateCase):
         xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}), self.base)
         (self.base / "P.md").write_bytes(b"\xe9\xff")
         rc, out, err = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
-        self.assertEqual((rc, out), (0, ""))
+        self.assertEqual((rc, sorted(json.loads(out))), (0, ["systemMessage"]))
         self.assertNotIn("Traceback", err)
         st = xt.read_state(self.base) or {}
         self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "blocked"))

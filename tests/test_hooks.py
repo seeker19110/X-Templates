@@ -1372,13 +1372,51 @@ class StopAndSessionTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["decision"], "block")
 
-    def project_with_loop(self) -> Path:
+    def test_stop_hint_next_step(self):
+        """T-3550 (ADR-0052 §5): vòng kết thúc (done) → Stop hook cho dừng kèm `systemMessage` gợi ý bước kế từ
+        `next-step` (mục tiêu theo `delivery_phase`); không `decision`, không ghi gì thêm. Lỗi tính gợi ý → cho dừng im."""
+        for phase, objective in (("build", "build-until-clean"), ("harden", "harden-to-signoff")):
+            with self.subTest(phase):
+                tmp = self.project_with_loop(f"delivery_phase: {phase}\n")
+                env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
+                cmd = [
+                    sys.executable,
+                    str(tmp / "scripts" / "xt.py"),
+                    "loop",
+                    "record",
+                    "--task",
+                    "T-001",
+                    "--",
+                    "true",
+                ]
+                subprocess.run(cmd, check=True, env=env, capture_output=True)  # khớp Gate → tick, đợt done
+                code, out, _ = run_hook("stop-guard.sh", {"stop_hook_active": False}, tmp)
+                data = json.loads(out)
+                self.assertEqual((code, sorted(data)), (0, ["systemMessage"]))
+                self.assertIn(f"[autopilot] vòng đã dừng — bước kế ({objective}): ", data["systemMessage"])
+                self.assertIn(f"loop next-step --objective {objective} --prs <JSON pr next>", data["systemMessage"])
+                st = json.loads((tmp / ".autopilot" / "state.json").read_text(encoding="utf-8"))
+                self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "done"))
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        err = io.StringIO()
+        with (
+            mock.patch.object(xt, "next_step_facts", side_effect=OSError("hỏng")),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(xt.stop_hint(tmp), "")
+        self.assertIn("không tính được gợi ý next-step: OSError: hỏng", err.getvalue())
+
+    def project_with_loop(self, xt_yaml: str = "") -> Path:
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
         shutil.copy(ROOT / "scripts" / "xt.py", tmp / "scripts" / "xt.py")
         (tmp / "docs" / "autopilot").mkdir(parents=True)
         (tmp / "docs" / "autopilot" / "PLAN.md").write_text("- [ ] `T-001` việc — Gate: `true`\n", encoding="utf-8")
+        if xt_yaml:
+            (tmp / "xt.yaml").write_text(xt_yaml, encoding="utf-8")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp))
         cmd = [sys.executable, str(tmp / "scripts" / "xt.py"), "loop", "init", "--single-session"]
         subprocess.run(cmd, check=True, env=env, capture_output=True)

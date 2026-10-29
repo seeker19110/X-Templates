@@ -870,7 +870,8 @@ class UpdateStateTest(TmpRepoCase):
         xt.write_state({**xt.read_state(self.tmp), "blocked": True, "blocked_reason": "x"}, self.tmp)
         out, rc = xt.hook_stop(json.dumps({"permission_mode": "auto"}), self.tmp)
         st = xt.read_state(self.tmp)
-        self.assertEqual((out, rc, st["active"], st["permission_mode"]), ("", 0, False, "auto"))
+        self.assertEqual((rc, st["active"], st["permission_mode"]), (0, False, "auto"))
+        self.assertIn("blocked", json.loads(out)["systemMessage"])  # vòng kết thúc: cho dừng kèm gợi ý (T-3550)
         self.assertEqual(st["final_verdict"]["verdict"], "blocked")
 
     def test_update_state_stop_hook_skips_loop_stopped_meanwhile(self) -> None:

@@ -3163,8 +3163,28 @@ def hook_stop(stdin_text: str, base: Optional[Path] = None) -> Tuple[str, int]:
         ), 0
     if st and st.get("active") and v["verdict"] in ("done", "blocked", "budget", PENDING_HUMAN):
         tasks = _plan_pairs(base, st.get("plan"))
-        _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=True, tasks=tasks))
+        new = _stop_write(base, lambda cur: _stop_apply(cur, mode, v, end=True, tasks=tasks))
+        if new and new.get("final_verdict") == v:  # chính lượt này đóng vòng (không phải `loop stop` chen vào)
+            hint = stop_hint(base)
+            return (json.dumps({"systemMessage": hint}, ensure_ascii=False), 0) if hint else ("", 0)
     return "", 0
+
+
+def stop_hint(base: Path) -> str:
+    """Vòng vừa kết thúc → gợi ý bước kế từ `next-step` cho NGƯỜI (`systemMessage` — docs hooks, xác minh 2026-10-29):
+    chỉ in, không chặn, không ghi (ADR-0052 §5; cho Stop hook đọc/chuyển trạng thái là lát 4). Mục tiêu theo
+    `delivery_phase` của cây làm việc; không có JSON `pr next` nên bước PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
+    harden = _xt_keys(base).get(PHASE_KEY) == "harden"
+    objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
+    try:
+        out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        print(f"[xt hook-stop] không tính được gợi ý next-step: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return ""
+    return (
+        f"[autopilot] vòng đã dừng — bước kế ({objective}): {out['action']} — {out['reason']}. Kiểm lại:"
+        f" `{xt_cmd(base)} loop next-step --objective {objective} --prs <JSON pr next>`"
+    )
 
 
 def _stop_apply(

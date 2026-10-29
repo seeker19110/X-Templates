@@ -692,7 +692,7 @@ class LoopTest(unittest.TestCase):
             xt.loop_record("T-002", ["true"], self.base)
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "done")
         out, code = xt.hook_stop("{}", self.base)
-        self.assertEqual((out, code), ("", 0))
+        self.assertEqual((sorted(json.loads(out)), code), (["systemMessage"], 0))  # cho dừng, kèm gợi ý (T-3550)
         self.assertFalse(xt.read_state(self.base)["active"])
 
     def test_same_failure_three_times_blocks(self):
@@ -703,7 +703,7 @@ class LoopTest(unittest.TestCase):
         v = xt.loop_verdict(self.base)
         self.assertEqual(v["verdict"], "blocked")
         out, _ = xt.hook_stop("{}", self.base)
-        self.assertEqual(out, "")  # blocked -> cho dừng
+        self.assertNotIn("decision", json.loads(out))  # blocked -> cho dừng (chỉ gợi ý next-step)
 
     def test_different_failures_do_not_block(self):
         self.run_cli("loop", "init")
@@ -720,7 +720,7 @@ class LoopTest(unittest.TestCase):
             self.assertIn("block", out)
         self.assertEqual(xt.loop_verdict(self.base)["verdict"], "budget")
         out, _ = xt.hook_stop("{}", self.base)
-        self.assertEqual(out, "")
+        self.assertIn("budget", json.loads(out)["systemMessage"])
 
     def test_manual_block(self):
         self.run_cli("loop", "init")
