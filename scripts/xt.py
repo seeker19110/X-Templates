@@ -10040,7 +10040,12 @@ def _stage_init(led: Optional[Dict[str, Any]], adopt: Optional[int], by: str, ev
 def _stage_loop_exit(st: Dict[str, Any], base: Path) -> str:
     """Lối ra của vòng bị chặn/dừng — cùng nhà với `attach`/`unblock` (review #332): vòng còn bật → `_blocked_exit`, đã
     kết thúc → `_loop_exit`."""
-    return _blocked_exit(st, base, live=True) if st.get("active") else _loop_exit(st, base)[1]
+    if not st.get("active"):
+        return _loop_exit(st, base)[1]
+    live = not _budget_spent(st)  # cùng nhánh với `_doctor_loop`: hết ngân sách → `loop init`, không `unblock` (#332)
+    if not _plan_tasks(base, st):
+        return _plan_lost_exit(st, live)
+    return EXIT_UNBLOCK if live else EXIT_BUDGET
 
 
 def _stage_submit_proof(base: Path) -> Dict[str, Any]:
