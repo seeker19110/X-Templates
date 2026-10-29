@@ -676,6 +676,9 @@ class FlowTest(TmpRepoCase):
         pkg.write_text(json.dumps(out), encoding="utf-8")
         (self.repo / "docs" / "ops" / "GO-NO-GO-v1.md").write_text("# GO\n\nKý: chủ dự án\n", encoding="utf-8")
         (self.repo / "docs" / "autopilot" / "DECISIONS.md").write_text("# D\n\n- D-001 ký\n", encoding="utf-8")
+        (self.repo / "PROGRESS.md").write_text(
+            "# P\n\n- ký GO-NO-GO\n", encoding="utf-8"
+        )  # commit cuối mọi PR (review #326)
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "ký GO-NO-GO")
         self.assertEqual(self.loop("verify", "--all")[0], 0)
@@ -688,6 +691,7 @@ class FlowTest(TmpRepoCase):
         self.assertIn("  gói: {", text)
         decisions = self.repo / "docs" / "autopilot" / "DECISIONS.md"
         decisions.write_text("# D\n\n- D-001 ký\n- D-002 chưa commit\n", encoding="utf-8")  # như `loop decide` vừa ghi
+        (self.repo / "PROGRESS.md").write_text("# P\n\n- bàn giao chưa commit\n", encoding="utf-8")
         self.assertEqual(self.loop("verify", "--all")[0], 0)
         self.assertEqual(self.signoff("--package", str(pkg))["action"], "signoff-package")
         stray = self.repo / "tools" / "new.py"  # file mã chưa track cũng là bằng chứng đổi

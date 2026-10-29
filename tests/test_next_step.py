@@ -612,7 +612,7 @@ class HardenWorkTest(StateCase):
         self.assertEqual(xt.harden_work(self.base, self.st(blueprint=None), "S.md"), [])
         self.assertIsNone(xt.evidence_fingerprint(self.base))
         self.assertIsNone(xt._changed_since(self.base, "a" * 40))  # không phải commit có trong repo
-        self.assertIsNone(xt._changed_since(self.base, "HEAD"))  # chỉ nhận SHA đủ 40 ký tự
+        self.assertIsNone(xt._changed_since(self.base, "HEAD"))  # chỉ nhận SHA commit đầy đủ (40/64 hex)
 
     def test_signoff_excluded_paths(self) -> None:
         for path in ("GO-NO-GO.md", "docs/ops/GO-NO-GO-2026-10-28-v3.28.0.md", "docs/autopilot/DECISIONS.md"):
@@ -702,6 +702,14 @@ class NextStepCliTest(StateCase):
         self.assertEqual(xt._read_package(str(f)), pkg | {"release_verdict": ""})
         f.write_text(json.dumps(rel | {"rows": [], "go": True}), encoding="utf-8")
         self.assertEqual(xt._read_release(str(f)), rel)
+        sha256 = "d" * 64  # repo `--object-format=sha256` (review #326)
+        f.write_text(json.dumps(rel | {"head": sha256}), encoding="utf-8")
+        self.assertEqual(xt._read_release(str(f))["head"], sha256)
+        f.write_text(json.dumps({"package": pkg | {"candidate_head": sha256}}), encoding="utf-8")
+        self.assertEqual(xt._read_package(str(f))["candidate_head"], sha256)
+        f.write_text(json.dumps(rel | {"head": "d" * 50}), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            xt._read_release(str(f))
 
     def write_state_done(self) -> None:
         xt.write_state(self.st(active=False, final_verdict={"verdict": "done", "reason": "x"}), self.base)
