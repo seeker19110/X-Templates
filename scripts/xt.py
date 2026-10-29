@@ -10066,27 +10066,32 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     return {"verified": proof, "preview": preview, "tree": evidence_fingerprint(base, (STAGE_LEDGER,))}
 
 
-def _stage_smoke(base: Path) -> str:
+def _stage_smoke(base: Path, sha: str) -> str:
     """Gate bản trình (ADR-0058 lát C, D-247): `preview_smoke` của xt.yaml chạy qua guard trên đúng HEAD sạch, sau kiểm lại
-    cuối — exit ≠ 0 hay để lại thay đổi trong cây (lệch vân tay bản trình) → không trình. Chưa khai → trình được, sổ ghi
-    rõ "không có" (thư viện/CLI không có bản thử chạy được); xt.yaml hỏng → không trình (không đoán cổng)."""
+    cuối — exit ≠ 0, để lại thay đổi trong cây hay HEAD đổi trong lúc chạy (smoke tự commit, tiến trình khác commit: "exit 0"
+    không còn thuộc `sha` — review #336) → không trình. Chưa khai/no-op → trình được, sổ ghi rõ "không có" (thư viện/CLI
+    không có bản thử chạy được); xt.yaml hỏng → không trình (không đoán cổng)."""
     try:
         cmd = _xt_keys(base).get("preview_smoke", "")
     except (OSError, ValueError) as exc:
         raise StageError(f"chưa trình được — không đọc được xt.yaml ({exc})") from None
     if gate_noop(cmd):
-        return "không có — xt.yaml chưa khai `preview_smoke`"
+        return "không có — xt.yaml chưa khai `preview_smoke` (hoặc lệnh no-op)"
     code, out = run_gate_shell(cmd, base, _record_timeout() or 1800)
     if code:
-        tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
-        raise StageError(f"chưa trình được — smoke `{redact(cmd)}` exit {code}: {tail}")
+        raise StageError(f"chưa trình được — smoke `{redact(cmd)}` exit {code}: {_gate_tail(code, out)}")
     try:
-        _stage_clean_head(base)
+        head = _stage_clean_head(base)
     except StageError:
         raise StageError(
             f"chưa trình được — smoke `{redact(cmd)}` để lại thay đổi trong cây: ghi đầu ra ra ngoài repo hoặc vào"
             " .gitignore, rồi trình lại"
         ) from None
+    if head != sha:
+        raise StageError(
+            f"chưa trình được — HEAD đổi trong lúc smoke `{redact(cmd)}` chạy ({sha[:12]} → {head[:12]}): smoke không"
+            " được commit; trình lại bản mới"
+        )
     return f"`{redact(cmd)}` exit 0"
 
 
@@ -10167,7 +10172,10 @@ def _stage_dispatch(
         return lambda led: _stage_init(led, args.adopt, by, args.evidence or "")
     if cmd == "submit":
         sha = _stage_clean_head(base)
-        extra = {**_stage_submit_proof(base), "smoke": _stage_smoke(base)}
+        _stage_submit(
+            read_stage(base), sha, args.evidence, {}
+        )  # trạng thái sai → từ chối trước khi chạy smoke (≤ 30 phút)
+        extra = {**_stage_submit_proof(base), "smoke": _stage_smoke(base, sha)}
         return lambda led: _stage_submit(led, sha, args.evidence, extra)
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)
@@ -10513,6 +10521,16 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     return _release_row("review_debt", "PASS", f"không có file ngoài tài liệu đổi sau SHA quét ({len(shas)} SHA)")
 
 
+def _gate_tail(code: int, out: str) -> str:
+    """Đuôi log ≤ 300 ký tự cho lời báo: che bí mật trên CẢ output trước khi cắt (khối PEM mất dòng BEGIN thì không còn
+    che được — review #336), hết giờ giữ dòng `timeout:` đầu output."""
+    lines = redact(out).strip().splitlines()
+    keep = lines[-3:]
+    if code == 124 and lines[:1] != keep[:1]:
+        keep = lines[:1] + keep
+    return " ".join(keep)[:300]
+
+
 def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
     """Hàng chạy lệnh `key` của xt.yaml (ADR-0042). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
     lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
@@ -10530,9 +10548,8 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     timeout = _record_timeout() or 0
     timeout = timeout if timeout > 0 else 1800  # sai/âm/0 → mặc định (review #217)
     code, out = run_gate_shell(cmd, base, timeout)
-    tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
     if code:
-        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {tail}")
+        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {_gate_tail(code, out)}")
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 

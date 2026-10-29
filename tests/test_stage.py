@@ -340,6 +340,35 @@ class StageCliTest(TmpRepoCase):
             xt._stage_print(led, False)
         self.assertIn("smoke: (bản trình trước D-247)", out.getvalue())
 
+    def test_preview_smoke_head_and_state(self):
+        """Review #336: smoke tự commit → HEAD lệch bản trình → không trình; ghi vào thư mục `.gitignore` → trình được;
+        sổ không `active` → từ chối TRƯỚC khi chạy smoke."""
+        self.stage("init")
+        (self.repo / "smoke.sh").write_text("echo moved >> f.txt; git commit -qam smoke-artefact\n", encoding="utf-8")
+        (self.repo / "xt.yaml").write_text("preview_smoke: bash smoke.sh\n", encoding="utf-8")
+        self.commit("smoke commit")
+        rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("HEAD đổi trong lúc smoke `bash smoke.sh` chạy", err)
+        self.assertEqual(self.led()["status"], "active")
+        (self.repo / ".gitignore").write_text("out/\n", encoding="utf-8")
+        (self.repo / "smoke.sh").write_text("mkdir -p out; date > out/report.txt\n", encoding="utf-8")
+        self.commit("smoke ra thư mục bỏ qua")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        mark = self.repo.parent / "smoke-ran.txt"
+        (self.repo / "smoke.sh").write_text(f"date >> {mark}\n", encoding="utf-8")
+        self.commit("smoke ghi dấu")  # sổ đang `awaiting_approval`
+        self.assertIn("chỉ trình duyệt khi giai đoạn đang `active`", self.stage("submit", "--evidence", "x")[2])
+        self.assertFalse(mark.exists())
+
+    def test_gate_tail_redacts_then_cuts(self):
+        """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
+        pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
+        self.assertNotIn("QUJDREVGR0g", xt._gate_tail(1, pem))
+        self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
+        self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
+        self.assertEqual(xt._gate_tail(1, "x\na\nb\nc"), "a b c")
+
     def test_autopilot_dir_does_not_dirty_submit(self):
         self.git("rm", "-q", "--cached", "f.txt")  # repo không ignore .autopilot/: khoá state.lock nằm ở đó
         self.commit("lại")
