@@ -7409,7 +7409,7 @@ def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
     changed = f["stage"].get("changed")
     if changed:
         what = (
-            "nội dung cây khác bản trình (không liệt kê được file — SHA bản trình không còn trong repo)"
+            "nội dung cây khác vân tay bản trình (không liệt kê được file)"
             if changed == [STAGE_DIFF_UNKNOWN]
             else f"{len(changed)} file đổi (vd {', '.join(changed[:3])})"
         )
@@ -9803,9 +9803,7 @@ STAGE_SHA_RE = COMMIT_SHA_RE  # SHA-1 hoặc SHA-256 (`--object-format=sha256`) 
 # Dòng khai của PLAN: `Giai đoạn sản phẩm: 2 (C-001)` (có thể nằm trong `> …`) — đúng MỘT dòng mỗi PLAN.
 PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((C-\d{3,})\)", re.MULTILINE)
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang
-STAGE_DIFF_UNKNOWN = (
-    "(nội dung khác bản trình)"  # vân tay lệch mà SHA bản trình không còn trong repo — không liệt kê được file
-)
+STAGE_DIFF_UNKNOWN = "(nội dung khác bản trình)"  # vân tay lệch mà diff theo SHA không chỉ ra file (hay SHA mất)
 STAGE_HUMAN_ONLY = "chỉ người duyệt — chạy ở terminal của chủ dự án, ngoài phiên agent (ADR-0058)"
 
 
@@ -10039,6 +10037,17 @@ def _stage_init(led: Optional[Dict[str, Any]], adopt: Optional[int], by: str, ev
     return new
 
 
+def _stage_loop_exit(st: Dict[str, Any], base: Path) -> str:
+    """Lối ra của vòng bị chặn/dừng — cùng nhà với `attach`/`unblock` (review #332): vòng còn bật → `_blocked_exit`, đã
+    kết thúc → `_loop_exit`."""
+    if not st.get("active"):
+        return _loop_exit(st, base)[1]
+    live = not _budget_spent(st)  # cùng nhánh với `_doctor_loop`: hết ngân sách → `loop init`, không `unblock` (#332)
+    if not _plan_tasks(base, st):
+        return _plan_lost_exit(st, live)
+    return EXIT_UNBLOCK if live else EXIT_BUDGET
+
+
 def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     """Bằng chứng máy cho bản trình (ADR-0058 lát C): dự án chạy vòng (`state.json` có) → kiểm lại cuối phải xanh trên
     đúng cây này (`loop verify --all`, LOOP-DESIGN-022); không chạy vòng → ghi rõ "không có". Cách chạy thử: khoá
@@ -10047,11 +10056,7 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     if st:
         v = _batch_verdict(base, st)
         if v["verdict"] not in ("done", PENDING_HUMAN):  # PLAN còn task: bản trình thiếu việc (review #330)
-            hint = (
-                " — đợt đã xong mà vòng bị dừng/chặn: `loop resume`/`loop unblock` rồi trình"
-                if v["verdict"] == "blocked"
-                else ""
-            )
+            hint = f" — {_stage_loop_exit(st, base)}" if v["verdict"] == "blocked" else ""
             raise StageError(f"chưa trình được — vòng chưa xong ({v['verdict']}: {v.get('reason', '')}){hint}")
         why = final_check(base)
         if why:

@@ -326,6 +326,7 @@ class NextStepPureTest(unittest.TestCase):
         out = self.step(stage={**wait, "changed": [xt.STAGE_DIFF_UNKNOWN]})  # SHA bản trình mất, vân tay lệch
         self.assertEqual(out["action"], "stage-reopen")
         self.assertIn("không liệt kê được file", out["reason"])
+        self.assertNotIn("không còn trong repo", out["reason"])  # SHA có thể vẫn còn (review #332)
         # Không so được (bản trình cũ, SHA mất sau squash) hay container mới chưa bật vòng → vẫn chờ, không reopen
         self.assertEqual(self.step(stage={**wait, "changed": None})["action"], "wait-approval")
         off = {"verdict": "inactive", "reason": "vòng lặp chưa bật"}
