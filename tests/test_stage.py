@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import stat
@@ -154,6 +155,10 @@ class StageCliTest(TmpRepoCase):
         super().setUp()
         self.init_repo()
         self.git("config", "user.email", "chu@example.invalid")
+        self.git(
+            "config", "user.name", "chu"
+        )  # smoke tự `git commit` không qua `self.git` — CI không có user.name toàn cục
+        self.git("config", "commit.gpgsign", "false")
         self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
         self.commit("khởi tạo")
 
@@ -305,6 +310,76 @@ class StageCliTest(TmpRepoCase):
         self.assertEqual(self.led()["submitted"]["verified"], "loop verify --all xanh trên cây này")
         with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
             self.assertEqual(xt._stage_submit_proof(self.tmp)["preview"], "")
+
+    def test_submit_runs_preview_smoke(self):
+        """ADR-0058 lát C (D-247): `preview_smoke` chạy trên bản trình — đỏ hay để lại thay đổi trong cây → không trình;
+        chưa khai → trình được, sổ ghi rõ "không có"; xt.yaml hỏng → không trình."""
+        self.stage("init")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.assertIn("chưa khai `preview_smoke`", self.led()["submitted"]["smoke"])
+        self.assertIn("smoke: không có", self.stage("status")[1])
+        self.stage("reopen", "--reason", "x")
+        (self.repo / "xt.yaml").write_text("preview_smoke: echo hong; exit 3\n", encoding="utf-8")
+        self.commit("smoke đỏ")
+        rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("smoke `echo hong; exit 3` exit 3: hong", err)
+        self.assertEqual(self.led()["status"], "active")  # không ghi sổ
+        (self.repo / "xt.yaml").write_text("preview_smoke: touch smoke-out.txt\n", encoding="utf-8")
+        self.commit("smoke bẩn cây")
+        self.assertIn("để lại thay đổi trong cây", self.stage("submit", "--evidence", "x")[2])
+        (self.repo / "smoke-out.txt").unlink()
+        (self.repo / "xt.yaml").write_text("preview_smoke: test -f f.txt\n", encoding="utf-8")
+        self.commit("smoke xanh")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.assertEqual(self.led()["submitted"]["smoke"], "`test -f f.txt` exit 0")
+        self.assertIn("smoke: `test -f f.txt` exit 0", self.stage("status")[1])
+        self.stage("reopen", "--reason", "x")
+        with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
+            self.assertIn("không đọc được xt.yaml (utf-8)", self.stage("submit", "--evidence", "x")[2])
+        led = self.led()
+        led["submitted"] = {**led["history"][1], "sha": "c" * 40}  # bản trình trước D-247: không có trường smoke
+        led["status"] = "awaiting_approval"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            xt._stage_print(led, False)
+        self.assertIn("smoke: (bản trình trước D-247)", out.getvalue())
+
+    def test_preview_smoke_head_and_state(self):
+        """Review #336: smoke tự commit → HEAD lệch bản trình → không trình; ghi vào thư mục `.gitignore` → trình được;
+        sổ không `active` → từ chối TRƯỚC khi chạy smoke."""
+        self.stage("init")
+        (self.repo / "smoke.sh").write_text("echo moved >> f.txt; git commit -qam smoke-artefact\n", encoding="utf-8")
+        (self.repo / "xt.yaml").write_text("preview_smoke: bash smoke.sh\n", encoding="utf-8")
+        self.commit("smoke commit")
+        rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("HEAD đổi trong lúc smoke `bash smoke.sh` chạy", err)
+        self.assertEqual(self.led()["status"], "active")
+        (self.repo / ".gitignore").write_text("out/\n", encoding="utf-8")
+        (self.repo / "smoke.sh").write_text("mkdir -p out; date > out/report.txt\n", encoding="utf-8")
+        self.commit("smoke ra thư mục bỏ qua")
+        self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        mark = self.repo.parent / "smoke-ran.txt"
+        (self.repo / "smoke.sh").write_text(f"date >> {mark}\n", encoding="utf-8")
+        self.commit("smoke ghi dấu")  # sổ đang `awaiting_approval`
+        self.assertIn("chỉ trình duyệt khi giai đoạn đang `active`", self.stage("submit", "--evidence", "x")[2])
+        self.assertFalse(mark.exists())
+        self.stage("reopen", "--reason", "x")
+        xt.write_state({"active": False, "plan": "P.md"}, self.repo)
+        busy = {"verdict": "continue", "reason": "còn T-002", "task": "T-002"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=busy):  # kiểm lại cuối trước smoke
+            self.assertIn("vòng chưa xong", self.stage("submit", "--evidence", "x")[2])
+        self.assertFalse(mark.exists())
+
+    def test_gate_tail_redacts_then_cuts(self):
+        """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
+        pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
+        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- ***")  # cắt trước → lộ dòng thân cuối
+        self.assertEqual(xt._gate_tail(1, "deploy --password\nhunter2-secret"), "deploy --password ***")
+        self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
+        self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
+        self.assertEqual(xt._gate_tail(1, "x\na\nb\nc"), "a b c")
 
     def test_autopilot_dir_does_not_dirty_submit(self):
         self.git("rm", "-q", "--cached", "f.txt")  # repo không ignore .autopilot/: khoá state.lock nằm ở đó
