@@ -619,6 +619,72 @@ class FlowTest(TmpRepoCase):
         self.assertEqual(out["action"], "budget", out)  # sửa một, phát hiện một: hai đợt 1 → 1 → 1 (FLOW-13 thắng)
         self.assertEqual([(x["id"], x["planned"]) for x in out["work"]], [("T-903", False)])
 
+    def harden_done(self) -> None:
+        """Đợt `done` đã kiểm lại cuối, sổ sạch phủ tới HEAD, không việc harden nào, cây sạch (tick PLAN đã commit — như
+        `release-check` hàng `tree` đòi): chỉ còn cổng phát hành."""
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        self.finish_batch()
+        self.audit_book(self.git("rev-parse", "HEAD"))  # commit tick PLAN cùng sổ phủ tới HEAD đó
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+
+    def signoff(self, *extra: str, **release: Any) -> dict[str, Any]:
+        """`next-step --objective harden-to-signoff` kèm JSON `release-check` (`release` rỗng → không truyền)."""
+        args = ["--objective", "harden-to-signoff", *extra]
+        if release:
+            path = self.repo / ".autopilot" / "release.json"
+            path.write_text(json.dumps({"head": self.git("rev-parse", "HEAD").strip(), **release}), encoding="utf-8")
+            args += ["--release", str(path)]
+        return self.next_step([], *args)
+
+    @flow("FLOW-16")
+    def test_flow_16_release_without_fails_builds_signoff_package(self) -> None:
+        """Given harden hết việc gom được · When `next-step` không có/có `release-check` (`fails` rỗng, `human` có) · Then
+        `release-check` rồi `signoff-package`: gói có `candidate_head` = HEAD, `evidence_fp`, `human_pending`; lý do nói
+        CHƯA phát hành; không ghi GO-NO-GO, không đổi state. Đối chứng: `fails` còn → `replan`, không gói."""
+        self.harden_done()
+        self.assertEqual(self.signoff()["action"], "release-check")
+        out = self.signoff(fails=[], human=["prod_switch"], verdict="GO (chờ người)")
+        self.assertEqual(out["action"], "signoff-package", out)
+        pkg = out["package"]
+        self.assertEqual(pkg["candidate_head"], self.git("rev-parse", "HEAD").strip())
+        self.assertRegex(pkg["evidence_fp"], r"^[0-9a-f]{64}$")
+        self.assertEqual(pkg["human_pending"], ["prod_switch"])
+        self.assertIn("CHƯA phát hành", out["reason"])
+        self.assertNotIn("đã phát hành", out["reason"])
+        self.assertEqual(list(self.repo.rglob("GO-NO-GO*")), [])
+        out = self.signoff(fails=["review_debt"], human=[], verdict="NO-GO")
+        self.assertEqual((out["action"], out["package"]), ("replan", None))
+
+    @flow("FLOW-17")
+    def test_flow_17_code_change_expires_package_go_no_go_does_not(self) -> None:
+        """Given gói nghiệm thu từ FLOW-16 · When commit chỉ GO-NO-GO/DECISIONS → gói còn hiệu lực (vân tay theo nội dung,
+        không theo SHA HEAD); When sửa mã (commit, sổ quét lại) → gói hết hạn, `release-check`, nêu file mã đổi."""
+        self.harden_done()
+        out = self.signoff(fails=[], human=["prod_switch"], verdict="GO (chờ người)")
+        pkg = self.repo / ".autopilot" / "package.json"
+        pkg.write_text(json.dumps(out), encoding="utf-8")
+        (self.repo / "docs" / "ops" / "GO-NO-GO-v1.md").write_text("# GO\n\nKý: chủ dự án\n", encoding="utf-8")
+        (self.repo / "docs" / "autopilot" / "DECISIONS.md").write_text("# D\n\n- D-001 ký\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "ký GO-NO-GO")
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        kept = self.signoff("--package", str(pkg))
+        self.assertEqual((kept["action"], kept["package"]), ("signoff-package", out["package"]), kept)
+        self.assertIn("còn hiệu lực", kept["reason"])
+        prs = str(self.repo / ".autopilot" / "prs.json")  # `[]` do `next_step` ghi
+        rc, text, err = self.loop("next-step", "--objective", "harden-to-signoff", "--prs", prs, "--package", str(pkg))
+        self.assertEqual(rc, 0, err)
+        self.assertIn("  gói: {", text)
+        (self.repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+        self.git("add", "app.py")
+        self.git("commit", "-q", "-m", "sửa mã sau gói")
+        self.audit_book(self.git("rev-parse", "HEAD"))
+        self.assertEqual(self.loop("verify", "--all")[0], 0)
+        gone = self.signoff("--package", str(pkg))
+        self.assertEqual((gone["action"], gone["package"]), ("release-check", None), gone)
+        self.assertIn("gói nghiệm thu hết hạn:", gone["reason"])
+        self.assertIn("app.py", gone["reason"])
+
     def write(self, rel: str, text: str) -> Path:
         path = self.repo / rel
         path.write_text(text, encoding="utf-8")

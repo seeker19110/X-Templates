@@ -6932,10 +6932,13 @@ def next_step_facts(
     status: str,
     prs: Optional[List[Dict[str, str]]],
     objective: str = NEXT_STEP_OBJECTIVES[0],
+    signoff: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Đầu vào của `next_step` (đọc đĩa/git, không gọi GitHub, không ghi): verdict đợt, kiểm lại cuối, PR, sổ audit, MUST;
-    mục tiêu harden thêm danh sách việc nháp (`harden_work`)."""
+    mục tiêu harden thêm danh sách việc nháp (`harden_work`) và dữ kiện gói nghiệm thu (`signoff_facts`; `signoff` =
+    {"release", "package"} đã đọc từ `--release`/`--package`)."""
     v = _batch_verdict(base, st)
+    harden = objective == NEXT_STEP_OBJECTIVES[1]
     return {
         "objective": objective,
         "repo": base.name,
@@ -6945,7 +6948,8 @@ def next_step_facts(
         "prs": prs,
         "audit": _audit_facts(base, status),
         "open_must": len(_open_must(base, st)),
-        "harden": harden_work(base, st, status) if objective == NEXT_STEP_OBJECTIVES[1] else [],
+        "harden": harden_work(base, st, status) if harden else [],
+        "signoff": signoff_facts(base, st, **(signoff or {})) if harden else None,
         "state": {
             "rev": _state_rev(st),
             "plan": st.get("plan"),
@@ -7079,6 +7083,61 @@ def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, A
         gate = f"Gate: `{it['gate']}`" if it["gate"] else "Gate: chưa có — phiên chính điền lệnh kiểm"
         it["line"] = f"- [ ] `{it['id']}` {it['title']} (nguồn: {it['key']}) — {gate}"
     return items
+
+
+# Gói nghiệm thu nháp (ADR-0052 §5, nghiên cứu §6.2, T-3549): vân tay bằng chứng theo NỘI DUNG cây (không theo SHA HEAD),
+# trừ GO-NO-GO/DECISIONS — commit chỉ ghi chữ ký/quyết định không làm gói hết hạn (FLOW-17).
+SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", ":(exclude,glob)**/DECISIONS.md"]
+SHA40_RE = re.compile(r"[0-9a-f]{40}")
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _signoff_excluded(path: str) -> bool:
+    """Cùng tập với `SIGNOFF_EXCLUDE` + thư mục trạng thái mà `tree_hash` bỏ (glob `**/X` = tên file ở mọi cấp)."""
+    name = path.rsplit("/", 1)[-1]
+    return path.startswith(".autopilot/") or name == "DECISIONS.md" or fnmatch.fnmatchcase(name, "GO-NO-GO*.md")
+
+
+def evidence_fingerprint(base: Path) -> Optional[str]:
+    """sha256 nội dung cây làm việc trừ GO-NO-GO/DECISIONS/thư mục trạng thái: blob của HEAD (`ls-tree`, không SHA commit)
+    + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None."""
+    tree = _git(base, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+    if tree.returncode != 0:
+        return None
+    kept = "\0".join(e for e in tree.stdout.split("\0") if e and not _signoff_excluded(e.partition("\t")[2]))
+    return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, SIGNOFF_EXCLUDE)[0]
+
+
+def _changed_since(base: Path, sha: str) -> Optional[List[str]]:
+    """File khác giữa commit `sha` và cây làm việc (cả file chưa track), trừ GO-NO-GO/DECISIONS/thư mục trạng thái; `sha`
+    không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
+    if not SHA40_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
+        return None
+    spec = ["--", ".", ":(exclude).autopilot", *SIGNOFF_EXCLUDE]
+    diff = _git(base, "diff", "-z", "--no-renames", "--name-only", sha, *spec).stdout
+    new = _git(base, "ls-files", "--others", "--exclude-standard", "-z", *spec).stdout
+    return sorted({n for n in f"{diff}\0{new}".split("\0") if n})
+
+
+def signoff_facts(
+    base: Path, st: Dict[str, Any], release: Optional[Dict[str, Any]] = None, package: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Dữ kiện cho `signoff-package`: kết quả `release-check --json` và gói đã dựng (nếu có) kèm file đổi sau head của
+    chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người."""
+    return {
+        "release": release,
+        "release_changed": _changed_since(base, release["head"]) if release else None,
+        "package": package,
+        "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
+        "evidence_fp": evidence_fingerprint(base),
+        "deferred": sorted(_deferred(st)),
+    }
+
+
+def _changed_note(changed: Optional[List[str]], sha: str) -> str:
+    if changed is None:
+        return f"head {sha[:12]} không có trong repo — không biết phần nào đổi"
+    return f"{len(changed)} file đổi sau {sha[:12]} (vd {', '.join(changed[:3])})" if changed else "vân tay khác"
 
 
 StepPart = Optional[Dict[str, Any]]
@@ -7217,21 +7276,65 @@ def _step_harden(f: Dict[str, Any]) -> StepPart:
     }
 
 
+def _signoff_part(pkg: Dict[str, Any], why: str) -> Dict[str, Any]:
+    human = pkg["human_pending"]
+    return {
+        "action": "signoff-package",
+        "reason": f"{why}; chờ người: {', '.join(human) if human else 'không'} — CHƯA phát hành: người ký GO-NO-GO §5,"
+        " máy không điền chữ ký/dòng 20 (ADR-0048)",
+        "missing": ["chữ ký GO-NO-GO §5"] + [f"người xác nhận {h}" for h in human],
+        "package": pkg,
+    }
+
+
+def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Harden hết việc gom được (T-3549): gói đã dựng còn khớp vân tay → `signoff-package` (chờ người); lệch → hết hạn,
+    nêu file đổi (FLOW-17); chưa có gói: cần `release-check` trên cây này — `fails` còn → `replan`, rỗng → dựng gói nháp
+    (`candidate_head`, `evidence_fp`, `human_pending`) — máy đã đạt, không phải "đã phát hành" (FLOW-16)."""
+    s = f["signoff"]
+    fp, pkg, rel = s["evidence_fp"], s["package"], s["release"]
+    if pkg is not None and pkg["evidence_fp"] == fp:
+        return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+    if pkg is not None:
+        note = _changed_note(s["package_changed"], pkg["candidate_head"])
+        return {
+            "action": "release-check",
+            "reason": f"gói nghiệm thu hết hạn: {note} — chạy lại `release-check` trên HEAD rồi dựng gói mới",
+            "missing": ["`release-check --json` trên HEAD"],
+        }
+    if rel is None or fp is None or s["release_changed"] != []:
+        stale = f": kết quả có ở {_changed_note(s['release_changed'], rel['head'])}" if rel and fp else ""
+        return {
+            "action": "release-check",
+            "reason": "việc harden máy gom được đã xong: PLAN hết task, PR đã xong, sổ phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
+            f" ngoài việc chờ người — chạy `release-check`{stale}; `fails` rỗng → gói nghiệm thu",
+            "missing": ["`release-check --json` trên HEAD"],
+        }
+    if rel["fails"]:
+        return {
+            "action": "replan",
+            "reason": f"release-check {rel['verdict']}: FAIL {', '.join(rel['fails'])} — sửa ở đợt kế rồi chạy lại",
+            "missing": [f"`{x}` PASS" for x in rel["fails"]],
+        }
+    pkg = {
+        "candidate_head": f["head"],
+        "evidence_fp": fp,
+        "human_pending": sorted(set(rel["human"]) | set(s["deferred"])),
+        "release_verdict": rel["verdict"],
+    }
+    return _signoff_part(pkg, "máy đã đạt (`release-check` không FAIL BLOCKER); gói nghiệm thu nháp")
+
+
 def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
     """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
     nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178);
-    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `release-check` (gói nghiệm thu: T-3549)."""
+    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký)."""
     harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
     if part is None and harden:
-        part = {
-            "action": "release-check",
-            "reason": "việc harden máy gom được đã xong: PLAN hết task, PR đã xong, sổ phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
-            " ngoài việc chờ người — chạy `release-check`; `fails` rỗng → gói nghiệm thu",
-            "missing": ["`release-check --json` trên HEAD"],
-        }
+        part = _step_signoff(f)
     if part is None:
         pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
         part = {
@@ -7246,6 +7349,7 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
         "reason": part["reason"],
         "missing": part.get("missing", []),
         "work": part.get("work", []),
+        "package": part.get("package"),
         "key": {
             "repo": f["repo"],
             "objective": f["objective"],
@@ -7276,14 +7380,58 @@ def _read_prs(src: Optional[str]) -> Optional[List[Dict[str, str]]]:
     return [{k: str(p.get(k) or "") for k in ("pr", "head", "action", "why")} for p in items]
 
 
+def _str_list(v: Any) -> bool:
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def _read_release(src: Optional[str]) -> Optional[Dict[str, Any]]:
+    """`--release FILE`: JSON của `release-check --json` → {head, fails, human, verdict}; vắng → None. Sai dạng (thiếu
+    `head` SHA đủ 40 ký tự, `fails`/`human` không phải mảng chuỗi) → ValueError: không đoán kết quả cổng phát hành."""
+    if src is None:
+        return None
+    raw = json.loads(Path(src).read_text(encoding="utf-8"))
+    ok = isinstance(raw, dict) and isinstance(raw.get("head"), str) and SHA40_RE.fullmatch(raw["head"]) is not None
+    if not (ok and _str_list(raw.get("fails")) and _str_list(raw.get("human")) and isinstance(raw.get("verdict"), str)):
+        raise ValueError("phải là JSON `release-check --json` có `head` (SHA), `fails`, `human`, `verdict`")
+    return {k: raw[k] for k in ("head", "fails", "human", "verdict")}
+
+
+def _read_package(src: Optional[str]) -> Optional[Dict[str, Any]]:
+    """`--package FILE`: gói nghiệm thu `next-step` đã dựng (trường `package` của JSON, hoặc chính đối tượng gói); vắng →
+    None. Sai dạng → ValueError."""
+    if src is None:
+        return None
+    raw = json.loads(Path(src).read_text(encoding="utf-8"))
+    pkg: Dict[str, Any] = raw.get("package", raw) if isinstance(raw, dict) else {}
+    head, fp = (pkg.get(k) if isinstance(pkg, dict) else None for k in ("candidate_head", "evidence_fp"))
+    if not (isinstance(head, str) and isinstance(fp, str) and SHA40_RE.fullmatch(head) and SHA256_RE.fullmatch(fp)):
+        raise ValueError("phải là gói `signoff-package` có `candidate_head` (SHA), `evidence_fp` (sha256)")
+    if not _str_list(pkg.get("human_pending")):
+        raise ValueError("`human_pending` phải là mảng chuỗi")
+    return {k: pkg[k] for k in ("candidate_head", "evidence_fp", "human_pending")} | {
+        "release_verdict": str(pkg.get("release_verdict") or "")
+    }
+
+
+def _next_step_inputs(args: argparse.Namespace) -> Tuple[Any, Dict[str, Any]]:
+    """(PR, {release, package}) từ cờ; lỗi → ValueError mang tên cờ."""
+    out: Dict[str, Any] = {}
+    for flag, reader in (("prs", _read_prs), ("release", _read_release), ("package", _read_package)):
+        try:
+            out[flag] = reader(getattr(args, flag))
+        except (OSError, ValueError, RecursionError) as exc:  # JSON lồng quá sâu → RecursionError (review #318)
+            raise ValueError(f"--{flag}: {exc}") from None
+    return out.pop("prs"), out
+
+
 def _loop_next_step(args: argparse.Namespace, base: Path) -> int:
     """`loop next-step` chỉ đọc (ADR-0052 §5): in bước kế của mục tiêu; không ghi state, không gọi GitHub."""
     try:
-        prs = _read_prs(args.prs)
-    except (OSError, ValueError, RecursionError) as exc:  # JSON lồng quá sâu → RecursionError (review #318)
-        print(f"✗ --prs: {exc}", file=sys.stderr)
+        prs, signoff = _next_step_inputs(args)
+    except ValueError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
         return 2
-    out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs, args.objective))
+    out = next_step(next_step_facts(base, read_state(base) or {}, args.status, prs, args.objective, signoff))
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
@@ -7292,6 +7440,8 @@ def _loop_next_step(args: argparse.Namespace, base: Path) -> int:
         print(f"  thiếu: {m}")
     for w in out["work"]:
         print(f"  {'[x]' if w['checked'] else 'mới' if not w['planned'] else '[ ]'} {w['line']}")
+    if out["package"]:
+        print("  gói: " + json.dumps(out["package"], ensure_ascii=False))
     return 0
 
 
@@ -12855,6 +13005,10 @@ def build_parser() -> argparse.ArgumentParser:
         " `.autopilot/`) đổi vân tay cây → `verify`",
     )
     lns.add_argument("--status", default=AUDIT_STATUS_DEFAULT, help="sổ audit")
+    lns.add_argument(
+        "--release", help="harden: JSON `release-check --json` (file) — `fails` rỗng → gói nghiệm thu nháp"
+    )
+    lns.add_argument("--package", help="harden: gói `signoff-package` đã dựng (file) — kiểm còn hiệu lực theo vân tay")
     lns.add_argument("--json", action="store_true")
     lr = lsub.add_parser("record")
     lr.add_argument("--task", required=True, type=_task_id)
