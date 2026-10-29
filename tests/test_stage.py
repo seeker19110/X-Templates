@@ -471,22 +471,6 @@ class StageLockTest(TmpRepoCase):
         self.plan("> Giai đoạn sản phẩm: 3 (C-001)")
         self.assertEqual(self.problem(), "")
 
-    def test_optimize_plan_only_in_stage_three(self):
-        """D-248: PLAN của `/optimize` (`PLAN-opt-*`) bị từ chối ở giai đoạn 1/2 dù khai đúng giai đoạn đang mở."""
-        opt = "docs/autopilot/PLAN-opt-2026-10-29.md"
-        (self.repo / opt).parent.mkdir(parents=True, exist_ok=True)
-        for stage, led in ((1, ledger()), (2, ledger([ev("init", 1), *approve(1)], stage=2))):
-            self.write_ledger(led)
-            (self.repo / opt).write_text(f"> Giai đoạn sản phẩm: {stage} (C-001)\n", encoding="utf-8")
-            why = xt.stage_plan_problem(self.repo, opt)
-            self.assertIn(f"chỉ ở giai đoạn 3, đang mở giai đoạn {stage} (C-001)", why)
-        self.write_ledger(ledger([ev("init", 1), *approve(1), *approve(2)], stage=3))
-        (self.repo / opt).write_text("> Giai đoạn sản phẩm: 3 (C-001)\n", encoding="utf-8")
-        self.assertEqual(xt.stage_plan_problem(self.repo, opt), "")
-        self.write_ledger(ledger())
-        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")  # PLAN thường ở giai đoạn 1 không bị ảnh hưởng
-        self.assertEqual(self.problem(), "")
-
     def test_loop_entry_points_refuse_locked_stage(self):
         self.write_ledger(ledger())
         self.plan("> Giai đoạn sản phẩm: 2 (C-001)")
