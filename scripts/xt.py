@@ -6578,7 +6578,21 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
     new = copy.deepcopy(state)
     notes[:] = _carry_previous(cur, new, base)
     new["objective"] = _batch_mark(cur, new, base)  # sau `_carry_previous`: MUST chờ người đã mang sang không tính
+    notes += _reopen_note(_objective_batches(cur), new["objective"]["batches"], new["plan"])
     return new
+
+
+def _reopen_note(before: List[Dict[str, Any]], after: List[Dict[str, Any]], plan: str) -> List[str]:
+    """Dòng ℹ khi `loop init` mở lại đợt đã có dấu xong vì PLAN chỉ nối thêm task (D-230): PLAN dài dần qua nhiều đợt cùng
+    đường dẫn thì `next-step` không đếm được đợt (FLOW-13) — báo để đợt kế dùng PLAN-<đợt>.md mới."""
+    if not (before and before[-1].get("done") and not after[-1].get("done")):
+        return []
+    if after[-1].get("at") != before[-1].get("at"):
+        return []
+    return [
+        f"ℹ Đợt trước đã xong mà {plan} chỉ nối thêm task → tính là mở lại cùng đợt; đợt kế dùng PLAN-<đợt>.md mới để"
+        " `loop next-step` đếm đợt (FLOW-13)"
+    ]
 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
@@ -6759,9 +6773,9 @@ def _objective_batches(st: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _plan_pairs(base: Path, plan: Any) -> List[str]:
-    """`ID:req_rev` các task của PLAN (spec, không tick) — vân tay đợt ghi kèm dấu đợt xong."""
-    path = base / str(plan) if plan else None
-    return sorted(f"{t['id']}:{task_req_rev(t)}" for t in parse_plan(path)) if path and path.is_file() else []
+    """`ID:req_rev` các task của PLAN (spec, không tick) — vân tay đợt ghi kèm dấu đợt xong. PLAN mất/không đọc được như
+    UTF-8 → [] (`_plan_tasks`, review #296): Stop hook vẫn đóng được vòng `blocked` (review #319)."""
+    return sorted(f"{t['id']}:{task_req_rev(t)}" for t in _plan_tasks(base, {"plan": plan}))
 
 
 def _same_batch(prev: Dict[str, Any], last: Dict[str, Any], plan: str, base: Path) -> bool:
@@ -6774,10 +6788,12 @@ def _same_batch(prev: Dict[str, Any], last: Dict[str, Any], plan: str, base: Pat
         ended = False
     if ended or last.get("plan") != plan:
         return False
+    if not last.get("done"):
+        return True
     tasks = last.get("tasks")
-    return not last.get("done") or (
-        isinstance(tasks, list) and bool(tasks) and set(tasks) <= set(_plan_pairs(base, plan))
-    )
+    if not (isinstance(tasks, list) and tasks and all(isinstance(t, str) for t in tasks)):
+        return False  # mốc cũ không có `tasks`, hay sai kiểu (review #319) → đợt mới
+    return set(tasks) <= set(_plan_pairs(base, plan))
 
 
 def _batch_mark(prev: Dict[str, Any], new: Dict[str, Any], base: Path) -> Dict[str, Any]:

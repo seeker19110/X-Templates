@@ -260,6 +260,8 @@ class NextStepStateTest(StateCase):
         self.assertEqual(xt._batch_mark(done, new, self.base)["batches"], [mark])
         (self.base / "P.md").write_text("- [x] `T-001` xong đổi spec — Gate: `true`\n", encoding="utf-8")
         self.assertEqual(len(xt._batch_mark(done, new, self.base)["batches"]), 2)  # viết lại spec: đợt mới
+        bad = {**dở, "objective": {"batches": [{**mark, "done": "t5", "tasks": [["T-001", "x"]]}]}}
+        self.assertEqual(len(xt._batch_mark(bad, new, self.base)["batches"]), 2)  # tasks sai kiểu: đợt mới, không văng
         self.assertEqual(xt._plan_pairs(self.base, None), [])
         self.assertEqual(xt._plan_pairs(self.base, "mất.md"), [])
         self.assertEqual(xt._batch_mark({**dở, "iterations": "x"}, new, self.base)["batches"], [mark])  # state sai kiểu
@@ -348,6 +350,33 @@ class NextStepStateTest(StateCase):
                 st = xt.read_state(self.base) or {}
                 self.assertEqual(st["final_verdict"]["verdict"], verdict)
                 self.assertEqual("done" in st["objective"]["batches"][-1], verdict != "blocked")
+
+    def test_stop_hook_closes_loop_when_plan_undecodable(self) -> None:
+        """Review #319 🟠: PLAN không đọc được như UTF-8 → verdict `blocked`; Stop hook vẫn đóng vòng (không traceback)."""
+        xt.write_state(self.st(session_id="s1", objective={"batches": [batch(1, "t1")]}), self.base)
+        (self.base / "P.md").write_bytes(b"\xe9\xff")
+        rc, out, err = run_main("loop", "hook-stop", stdin=json.dumps({"session_id": "s1"}))
+        self.assertEqual((rc, out), (0, ""))
+        self.assertNotIn("Traceback", err)
+        st = xt.read_state(self.base) or {}
+        self.assertEqual((st["active"], st["final_verdict"]["verdict"]), (False, "blocked"))
+        self.assertNotIn("done", st["objective"]["batches"][-1])
+        self.assertEqual(xt._plan_pairs(self.base, "P.md"), [])
+
+    def test_init_notes_reopened_batch(self) -> None:
+        """D-230: init mở lại đợt đã xong vì PLAN chỉ nối thêm task → dòng ℹ trỏ PLAN-<đợt>.md."""
+        mark = {**batch(1, "t1"), "plan": "P.md", "done": "t2", "tasks": xt._plan_pairs(self.base, "P.md")}
+        xt.write_state(self.st(started="t0", objective={"batches": [mark]}), self.base)
+        (self.base / "P.md").write_text(
+            "- [x] `T-001` xong — Gate: `true`\n- [ ] `T-002` thêm — Gate: `true`\n", "utf-8"
+        )
+        rc, _, err = run_main("loop", "init", "--plan", "P.md", "--blueprint", "BP.md", "--force")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("ℹ Đợt trước đã xong mà P.md chỉ nối thêm task", err)
+        self.assertEqual(len((xt.read_state(self.base) or {})["objective"]["batches"]), 1)
+        self.assertEqual(xt._reopen_note([], [mark], "P.md"), [])
+        self.assertEqual(xt._reopen_note([mark], [mark], "P.md"), [])  # vẫn có dấu: không mở lại
+        self.assertEqual(xt._reopen_note([mark], [{**batch(1, "t9")}], "P.md"), [])  # đợt mới, không phải mở lại
 
     def test_audit_open_count(self) -> None:
         self.assertEqual(xt.audit_open_count(self.base / "không.md"), 0)
