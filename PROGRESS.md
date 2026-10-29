@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.28.0, pha `harden` — D-136) · Cập nhật: 2026-10-29 · Nhánh: main
 
 ## Đang làm
-- 2026-10-29 **ADR-0058** (#327–#331, D-239…D-241): ba giai đoạn sản phẩm khoá bằng máy — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, chỉ người `approve`; lát A–D phần máy (`submit` đòi kiểm lại cuối + vân tay, `next-step` `stage-submit`/`wait-approval`/`stage-reopen`). Kế: Gate MVP smoke, harden/`/optimize` theo giai đoạn, installer tạo sổ, cắt bản. #326 tiếp quản và merge (D-245).
+- 2026-10-29 **ADR-0058** (#327–#339, D-239…D-252): ba giai đoạn sản phẩm khoá bằng máy, lát A–E đã merge — `xt.py stage` + sổ `docs/autopilot/STAGE.json` (chỉ người `approve`), smoke (#336), khoá `/complete`/`/optimize` theo tên PLAN (#338 thay #335, D-250), `/optimize` giai đoạn 3 (#337), `install.py --stage-init` (#339). Kế: cắt bản, nâng dự án đích (F). Treo có từ trước: `loop_root` lệch `release-check` ở monorepo (🟠); `output_tail` cắt trước redact (🟠); Ctrl-C mồ côi Gate.
 - 2026-10-28 **ADR-0056** (#312, D-221, `research/2026-10-28-velocity.md`): lỗi có từ trước không chặn PR, CI là cổng đầy đủ, `loop decide` đánh số qua nhánh remote, `xt.yaml` `setup`. **ADR-0054/0055** (#311, D-219/D-220): khoá/guard hỏng → chặn; `install.py --preset`. 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
 - 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge (#290–#310); T-3556 xong (#313) → **3.28.0** (T-3546); kế lát 2 T-3547 `loop next-step`.
 - 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.

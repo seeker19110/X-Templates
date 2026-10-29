@@ -2,7 +2,7 @@
 
 Ngày: 2026-10-29. Phạm vi yêu cầu: **mọi dự án đích** của X-Templates, không phụ thuộc loại phần mềm hoặc stack.
 
-**Trạng thái: lát A+B và phần máy của C–D đã triển khai (C: `stage submit` đòi kiểm lại cuối xanh, ghi `preview`, chạy smoke `preview_smoke` — D-247; D: `next-step` trả `stage-submit`/`wait-approval`) ([ADR-0058](../../adr/0058-product-stages-machine-lock.md), D-239)** — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, khoá ở `loop init/next/record`, hàng `stage` của `release-check`, guard chặn agent duyệt/ghi tay sổ; test `tests/test_stage.py`. Lát C–F (§8) **chưa** làm: các mục khác bên dưới vẫn là thiết kế đề xuất, không phải khả năng đang có. Dự án chỉ chịu khoá khi có sổ (`xt.py stage init`); chưa dự án đích nào được nâng.
+**Trạng thái: lát A–E đã triển khai (C: `stage submit` đòi kiểm lại cuối xanh, ghi `preview`, chạy smoke `preview_smoke` — D-247; D: `next-step` trả `stage-submit`/`wait-approval`, `/complete`/`/optimize` khoá theo giai đoạn — D-246, `/optimize` nhận mục tiêu chưa đỏ ở giai đoạn 3 — D-248; E: `install.py --stage-init` — D-249) ([ADR-0058](../../adr/0058-product-stages-machine-lock.md), D-239)** — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, khoá ở `loop init/next/record`, hàng `stage` của `release-check`, guard chặn agent duyệt/ghi tay sổ; test `tests/test_stage.py`. Lát F (§8: nâng dự án đích, nghiệm thu trên dự án thật) **chưa** làm; mục nào bên dưới không gắn ✅/D-NNN vẫn là thiết kế đề xuất. Dự án chỉ chịu khoá khi có sổ (`xt.py stage init`); chưa dự án đích nào được nâng.
 
 ## 1. Hợp đồng sản phẩm đã chốt
 
@@ -164,15 +164,15 @@ Auth, quyền, tiền, migration, secrets, thay đổi cổng/hook và rủi ro 
 
 ## 8. Kế hoạch triển khai kỹ thuật
 
-Lát A+B đã có mã + test (ADR-0058); C–F là việc cần làm, **chưa có bằng chứng hoàn tất bằng mã**.
+Lát A–E đã có mã + test (ADR-0058, D-246…D-249); F là việc cần làm, **chưa có bằng chứng trên dự án đích**.
 
 | Lát | Phạm vi | Nghiệm thu |
 |---|---|---|
 | A — hợp đồng ✅ | ADR-0058, `schema: 1` stage/cycle/approval, mapping 11 bước (§3), `tests/test_stage.py` | phân biệt batch/stage/control mode; schema có version; sổ hỏng/lịch sử lệch → chặn, không đoán |
-| B — máy trạng thái ✅ | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng. Còn: `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 |
+| B — máy trạng thái ✅ | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng; `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 (#330) |
 | C — MVP và duyệt ✅ | bản thử/artefact (`preview`), Gate MVP (`preview_smoke`, D-247), approval (`stage approve` chỉ người) | đủ task nhưng chưa duyệt vẫn ở stage 1; yêu cầu sửa mở lại vòng stage 1 |
 | D — hoàn thiện và tối ưu ✅ | routing skill (`next-step` harden ở giai đoạn 1 → `blocked`; `PLAN-harden-*` từ giai đoạn 2, `PLAN-opt-*` chỉ giai đoạn 3 — D-246), release-check, mục tiêu performance/feature/code (`LOOP-OPT-017`) | stage 2 xử lý sàn; stage 3 có baseline/no-regression/rollback; giữ cổng phát hành |
-| E — mẫu và migration ✅ | installer (`--stage-init`, kiểm sổ sau cài — D-249), AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng; dự án cũ giữ quyền/state; báo diff và đường lùi |
+| E — mẫu và migration ✅ | installer (`--stage-init`, kiểm sổ sau cài — D-249), AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng (trừ thư mục con của repo git: chưa hỗ trợ, installer báo ⚠ — `loop_root` lệch `release-check`); dự án cũ giữ quyền/state; báo diff và đường lùi |
 | F — nghiệm thu và áp dụng | test xuyên suốt, CI, review độc lập, release khung và nâng từng target | có bằng chứng từng bước; không nới ngưỡng/hook; kiểm target sau nâng |
 
 Chỉ giao các lát phụ thuộc khi tiền đề đạt; không mở cả sáu lát song song. Thay đổi chính sách có ADR và CHANGELOG theo quy ước khung; không sửa đè ADR cũ. Không thêm lock/state/approval engine riêng nếu có thể mở rộng cơ chế hiện hành.
@@ -231,7 +231,7 @@ Nghiên cứu bổ sung đối chiếu 2026-10-29 qua `researcher` (WebFetch tó
 
 ## 11. Trạng thái bàn giao
 
-**Cập nhật 2026-10-29 (ADR-0058):** lát A+B có mã, test và guard; PR riêng. Lát C–D phần máy: `stage submit` đòi kiểm lại cuối + vân tay, `next-step` `stage-submit`/`wait-approval`/`stage-reopen`, `/complete`/`/optimize` khoá theo giai đoạn (D-246). Vẫn chưa: Gate MVP smoke trên preview (C), `/optimize` cho mục tiêu tính năng/mã nguồn (D), installer/migration (E), nâng dự án đích (F). Phần dưới là trạng thái của PR đặc tả gốc.
+**Cập nhật 2026-10-29 (ADR-0058):** lát A+B có mã, test và guard; PR riêng. Lát C–D phần máy: `stage submit` đòi kiểm lại cuối + vân tay, `next-step` `stage-submit`/`wait-approval`/`stage-reopen`, `/complete`/`/optimize` khoá theo giai đoạn (D-246). Sau đó: Gate MVP `preview_smoke` (C, D-247), `/optimize` mục tiêu chưa đỏ ở giai đoạn 3 (D, D-248), `install.py --stage-init` (E, D-249). Vẫn chưa: nâng dự án đích (F). Phần dưới là trạng thái của PR đặc tả gốc.
 
 
 PR này hoàn tất phần nghiên cứu/đặc tả: chu trình 11 bước được giữ nguyên, ma trận ba giai đoạn, vòng lặp/cổng, điểm tích hợp, migration và test cases. **Chưa sửa mã engine; chưa chạy kiểm thử engine mới; chưa phát hành; chưa áp dụng sang dự án đích.** Khi triển khai phải báo riêng: tài liệu, mã, test, merge, phát hành và target đã nâng. Không gọi tài liệu hoặc lời nhắc trong prompt là cơ chế khóa bằng máy.

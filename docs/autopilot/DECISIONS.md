@@ -1770,6 +1770,13 @@
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: đặc tả §4 chỉ đòi 'có tiêu chí và nghiệm thu', không bắt buộc qua sổ; GO-NO-GO đã có chữ ký người (ADR-0048) nên completed vẫn có người nghiệm thu, không làm được việc máy không cho (stage submit ở completed). (2) đường lùi: không thêm trạng thái sổ. Phương án 2 bắt chu kỳ mới cho mọi chỉnh UX nhỏ — chu kỳ mới là cho bài toán lớn mới (ADR-0058 §2). Phương án 3 bỏ người khỏi đổi hành vi — sai LOOP-OPT-014.
 - Đường lùi: Sửa câu LOOP-OPT-017 về 'qua stage submit' và mở lát cho phép submit ở completed
 
+### D-252 · 2026-10-29T14:57:20+00:00 · Đính chính D-251: phương án chọn ghi 'completed → người duyệt PR riêng và ký GO-NO-GO', nhưng mẫu dự án đích merge_autonomy L3 cho PR làn chuẩn merge không cần người (merge_decision). Nghiệm thu đổi hành vi sau completed là gì?
+
+- Phương án: (1) Chỉ chữ ký GO-NO-GO.md (không chế độ delta) của bản phát hành chứa thay đổi; PR theo làn merge thường · (2) Bắt PR đổi hành vi sau completed đi làn cần người (merge_risk_paths)
+- Chọn: Chỉ chữ ký GO-NO-GO.md (không chế độ delta) của bản phát hành chứa thay đổi; PR theo làn merge thường
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: lời D-251 hứa điều máy không bảo đảm (L3 không có người duyệt PR) — chỉ giữ cái máy có: chữ ký người ở GO-NO-GO (ADR-0048), không delta vì đổi hành vi. (3) đơn giản: không thêm luật làn mới. LOOP-OPT-017, ADR-0058, CHANGELOG đã ghi 'chữ ký GO-NO-GO.md' từ #337; D này khớp sổ với văn bản. Phương án 2 đổi cấu hình merge của dự án đích — quyết định của chủ dự án.
+- Đường lùi: Bỏ D này; thêm luật làn cần người cho PR đổi hành vi ở giai đoạn 3 completed
+
 ### D-253 · 2026-10-29T15:12:58+00:00 · AUD-SEC-135: đuôi văn bản .md/.mdx/.txt ở mọi nơi là tài liệu (D-232) — app/admin/page.mdx (JSX chạy), prompts/system.md (prompt chạy thật), src/security/allowed_hosts.txt, packages.txt/apt.txt/runtime.txt vào làn nhanh và không thành nợ review. Thu hẹp thế nào?
 
 - Phương án: (1) Thu hẹp theo loại + vị trí (đóng khi nghi ngờ): .mdx luôn là mã; .txt chỉ là tài liệu trong docs/ gốc hoặc tên README/CHANGELOG/CHANGES/HISTORY/AUTHORS/CONTRIBUTORS/LICENSE; .md/.rst là tài liệu trừ khi (ngoài docs/ gốc) nằm dưới thư mục chạy thật prompts?/src/app/pages/lib/server/api/templates?/agents?/skills? · (2) Giữ đuôi văn bản ở mọi nơi, thêm danh sách chặn (.mdx, prompts/, tên .txt phụ thuộc đã biết) · (3) Chỉ docs/ gốc + README/CHANGELOG/ADR là tài liệu, mọi .md khác là mã
