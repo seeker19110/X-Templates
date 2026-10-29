@@ -720,11 +720,18 @@ class StageLockTest(TmpRepoCase):
         self.write_ledger(ledger(hist, cycle="C-002"))  # chu kỳ mới ở MVP: sự cố bản cũ đi nhánh vá (review #338)
         row = xt._release_stage(self.repo)
         self.assertEqual(row["result"], "FAIL")
-        self.assertIn(
-            f"sự cố của bản production C-001: `release-check` trên nhánh vá cắt từ bản đã duyệt `{rel[:12]}`",
-            row["evidence"],
-        )
+        self.assertIn("vá trên nhánh cắt từ tag/commit đang chạy production của C-001", row["evidence"])
         self.assertIn("không phát hành MVP C-002", row["evidence"])
+        self.assertIn(f"bản nghiệm thu cuối C-001: `{rel}` (chỉ tham chiếu", row["evidence"])  # đủ 40 hex (review #341)
+        rel2 = "c" * 40  # nhiều chu kỳ: nêu chu kỳ liền trước
+        hist += [*approve(1, cycle="C-002"), *approve(2, cycle="C-002"), *approve(3, sha=rel2, cycle="C-002")]
+        self.write_ledger(ledger([*hist, ev("init", 1, "C-003")], cycle="C-003"))
+        row = xt._release_stage(self.repo)
+        self.assertIn("production C-002: vá", row["evidence"])
+        self.assertIn(f"`{rel2}`", row["evidence"])
+        adopt = [ev("adopt", 3, by="p@x", evidence="v1 đang chạy"), *approve(3, sha=rel), ev("init", 1, "C-002")]
+        self.write_ledger(ledger(adopt, cycle="C-002"))  # dự án công nhận (adopt) rồi chu kỳ mới
+        self.assertIn("production C-001: vá", xt._release_stage(self.repo)["evidence"])
         waiting = ledger([ev("init", 1), ev("submit", 1, sha=SHA)], status="awaiting_approval", submitted={"sha": SHA})
         self.write_ledger(waiting)  # MVP chờ duyệt vẫn chưa phát hành được
         self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")

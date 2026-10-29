@@ -10288,15 +10288,20 @@ def _release_stage(base: Path) -> Dict[str, str]:
 
 
 def _stage_hotfix(led: Dict[str, Any]) -> str:
-    """Chu kỳ mới ở MVP mà chu kỳ trước đã có bản người duyệt cho Production: lối ra cho sự cố của bản đó là nhánh vá cắt từ
-    đúng SHA đã duyệt — sổ ở commit đó mở Production — không mở giai đoạn phát triển (đặc tả §8, review #338)."""
+    """Chu kỳ mới ở MVP mà chu kỳ trước đã lên Production: lối ra cho sự cố của bản đang chạy là nhánh vá cắt từ đúng
+    tag/commit đang chạy production — sổ ở đó còn chu kỳ cũ giai đoạn ≥ 2 nên hàng `stage` PASS — không mở giai đoạn phát
+    triển (đặc tả §8, ADR-0058 §2). Không trỏ bản nghiệm thu: sổ không ghi bản phát hành (§6), bảo trì sau `completed`
+    phát hành bản mới hơn, và SHA trình có thể mất sau squash-merge (review #341) — SHA đó chỉ in đủ để tham chiếu.
+    Theo bất biến của sổ (chu kỳ mới chỉ sau `completed`), lần duyệt cuối của chu kỳ khác là giai đoạn 3 chu kỳ liền trước."""
     done = [e for e in led["history"] if e["event"] == "approve" and e["cycle"] != led["cycle"] and e["stage"] >= 2]
     if not done:
         return ""
     last = done[-1]
+    cyc = last["cycle"]
     return (
-        f"; sự cố của bản production {last['cycle']}: `release-check` trên nhánh vá cắt từ bản đã duyệt"
-        f" `{str(last['sha'])[:12]}` (không phát hành MVP {led['cycle']})"
+        f"; sự cố của bản production {cyc}: vá trên nhánh cắt từ tag/commit đang chạy production của {cyc} (sổ ở đó còn"
+        f" {cyc} giai đoạn ≥ 2 → hàng `stage` PASS), không phát hành MVP {led['cycle']}; bản nghiệm thu cuối {cyc}:"
+        f" `{last['sha']}` (chỉ tham chiếu — có thể không còn sau squash-merge)"
     )
 
 
