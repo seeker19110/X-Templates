@@ -1,7 +1,7 @@
 # ADR-0058: Ba giai đoạn sản phẩm (MVP → hoàn thiện → tối ưu) khoá bằng máy, người duyệt từng giai đoạn
 
 - **Trạng thái:** Đã chấp nhận (chủ dự án 2026-10-29: ưu tiên tốc độ qua ba giai đoạn tuần tự, giai đoạn trước chưa xong thì giai đoạn sau bị khoá — đặc tả #325; phiên chính tự duyệt cách khoá theo tiêu chí chất lượng cuối, ADR-0008 — D-239)
-- **Trạng thái triển khai:** Lát A+B đã triển khai — `scripts/xt.py` `stage …`, `stage_plan_problem` ở `loop init/next/record` và verdict của vòng, hàng `stage` của `release-check`; guard: sổ là `evidence`, `stage approve`/`init --adopt` bị deny; test `tests/test_stage.py`. Lát C–F (Gate MVP/preview, `/complete` `/optimize` theo giai đoạn, installer/migration, nâng dự án đích) chưa làm — [đặc tả](../autopilot/upgrades/2026-10-29-three-stage-delivery.md) §8.
+- **Trạng thái triển khai:** Lát A+B đã triển khai — `scripts/xt.py` `stage …`, `stage_plan_problem` ở `loop init/next/record`, hàng `stage` của `release-check`; guard: sổ là `evidence`, `stage approve`/`init --adopt` bị deny; test `tests/test_stage.py`. Lát C–F (Gate MVP/preview, `/complete` `/optimize` theo giai đoạn, installer/migration, nâng dự án đích) chưa làm — [đặc tả](../autopilot/upgrades/2026-10-29-three-stage-delivery.md) §8.
 - **Ngày:** 2026-10-29
 - **Làm rõ:** ADR-0031 (`delivery_phase: build|harden` là chế độ kiểm soát, KHÔNG phải giai đoạn sản phẩm — giữ nguyên), ADR-0046/0047 (`/autopilot` lặp tới hết việc, `/complete` harden), ADR-0048 (`/optimize`), ADR-0026 (ghi tay `.autopilot/` = bằng chứng giả), ADR-0052 §2 (khoá `state.lock`).
 
@@ -44,15 +44,14 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
    trình mang biến môi trường của phiên agent (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `AI_AGENT`); guard deny lệnh đó (mã
    `STAGE_APPROVE`) và coi sổ là `evidence` (ghi tay qua Edit/Bash bị chặn như `.autopilot/`). `by` lấy từ `git config user.email`
    (thiếu thì `user.name`) của máy chạy lệnh. Lời "ok" trong chat, comment GitHub hay `loop decide` không phải phê duyệt.
-4. **Khoá ở mọi lối vào vòng:** PLAN khai **đúng một** dòng `Giai đoạn sản phẩm: N (C-NNN)`; khi có sổ, `loop init`, `loop next`,
-   `loop record` và verdict của vòng (`loop status`, Stop hook → `blocked`) từ chối PLAN không khai, khai nhiều dòng, khai giai
-   đoạn/chu kỳ khác giai đoạn đang mở (dòng trong code fence không tính) — kể cả PLAN sửa sau `loop init` hay người vừa duyệt
-   (lời báo: PLAN đợt mới khai N+1). Riêng PLAN khai **một** dòng khác giai đoạn đang mở: vòng coi như đã chết (D-240) — lối ra
-   ở `loop init`/`attach`/`unblock`/`doctor` là `loop init --plan <PLAN khai đúng giai đoạn>`, không cần `--force` (ngoại lệ ghi ở
-   LOOP-HARNESS-024), `unblock` từ chối. Sổ hỏng/vắng mà git có, PLAN mất, khai 0/nhiều dòng: vòng không chết, giữ lối ra cũ
-   (người khôi phục/sửa rồi `unblock`; PLAN mất theo D-208). `loop record`
-   ngoài vòng (chưa `loop init`) không biết PLAN nên không kiểm giai đoạn — `loop init` và kiểm lại cuối vẫn chặn. Đang
-   `awaiting_approval` vẫn chạy PLAN của **cùng** giai đoạn (sửa theo phản hồi); hết việc thì agent `stage submit`, báo người, dừng.
+4. **Khoá ở lối vào vòng:** PLAN khai **đúng một** dòng `Giai đoạn sản phẩm: N (C-NNN)` (dòng trong code fence không tính); khi
+   có sổ, `loop init`, `loop next`, `loop record` từ chối PLAN không khai, khai nhiều dòng, khai giai đoạn/chu kỳ khác giai đoạn đang
+   mở — kể cả PLAN sửa sau `loop init` hay người vừa duyệt. `record` không nhận bằng chứng của PLAN khoá nên không task nào của
+   giai đoạn khoá được tick. Verdict của vòng (`loop status`, Stop hook) và các lối ra `unblock`/`attach`/`doctor` **không** đọc
+   khoá (D-241, sau hai lượt review: đưa khoá vào verdict làm lệch lần lượt từng lối ra cũ); người vừa duyệt mà vòng còn bật thì
+   lời từ chối của `record`/`next` chỉ lối ra: PLAN đợt mới khai N+1 rồi `loop init --plan … --force` (LOOP-HARNESS-024 nguyên
+   bản: cố ý đổi PLAN). Đang `awaiting_approval` vẫn chạy PLAN của **cùng** giai đoạn; hết việc thì agent `stage submit`, báo
+   người, dừng. `loop record` ngoài vòng (chưa `loop init`) không biết PLAN nên không kiểm giai đoạn.
 5. **`release-check` thêm hàng `stage`:** sổ vắng (chưa từng có) → N/A SHOULD; giai đoạn 1 (kể cả chờ duyệt) → FAIL BLOCKER ("MVP
    chưa mở Production" — preview/demo không phải Production); giai đoạn 2/3 → PASS (phát hành ở giai đoạn 2 không đợi xong giai đoạn
    3); sổ hỏng/vắng mà git có → FAIL. Mọi hàng cũ giữ. Sổ không tính vào vân tay cây của `loop verify`.
@@ -66,7 +65,7 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
   terminal **ngoài phiên Claude Code** (Remote Control vẫn là phiên agent → bị từ chối) — chủ chỉ dùng app thì giai đoạn dừng ở
   `awaiting_approval`. Agent khác Claude có thể không mang các biến môi trường trên (chưa xác minh); guard chỉ chạy dưới Claude Code.
   Sổ "từng có" tính trên **mọi ref** (`git log --all --source`, lời báo nêu ref): `stage init` trên nhánh lát chặn mọi worktree
-  khác tới khi merge; mỗi lệnh đọc khoá (kể cả verdict, Stop hook) tốn một lượt `git log --all` khi chưa có sổ — tuyến tính theo số
+  khác tới khi merge; mỗi lệnh đọc khoá (`loop init/next/record`, `stage`, `release-check`) tốn một lượt `git log --all` khi chưa có sổ — tuyến tính theo số
   commit (đo ≈ 2,5 s ở 300k commit), repo cực lớn cần cache (việc sau). Ai có quyền ghi repo sửa được sổ và tự viết `approve` hợp lệ (như sổ audit); `by` là cấu hình git tự khai, không phải chữ ký. Squash
   merge làm SHA đã trình không còn trên nhánh chính — `approve` so chuỗi SHA đã trình. Chữ ký thật (attestation SLSA/in-toto, tag ký,
   tree-hash) là việc sau nếu cần.
@@ -76,5 +75,5 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
 ## Đường lùi
 
 Dự án: xoá sổ bị chặn có chủ đích (lịch sử git còn); muốn bỏ khoá thì người duyệt lần lượt tới giai đoạn 3 (PLAN giai đoạn 3 không
-còn bị khoá) hoặc nâng khung lên bản bỏ ADR này. Khung: bỏ lời gọi `stage_plan_problem` ở `loop`/verdict và `_release_stage` ở
+còn bị khoá) hoặc nâng khung lên bản bỏ ADR này. Khung: bỏ lời gọi `stage_plan_problem` ở `loop` và `_release_stage` ở
 `release-check`; bỏ `STAGE_LEDGER`/`_approves_stage` ở guard.

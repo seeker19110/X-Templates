@@ -408,81 +408,27 @@ class StageLockTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("đang mở giai đoạn 1", err)
         self.assertFalse((self.repo / ".autopilot" / "evidence" / "T-001.json").exists())
-        v = xt.loop_verdict(self.repo)
-        self.assertEqual((v["verdict"], "đang mở giai đoạn 1" in v["reason"]), ("blocked", True))
 
-    def test_verdict_blocks_after_human_approval(self):
-        """Ca W (review #327): người duyệt khi vòng giai đoạn 1 còn task → vòng dừng kèm lời đúng, không giao task."""
-        self.write_ledger(ledger())
-        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
-        self.assertEqual(run_main("loop", "init", "--plan", self.PLAN)[0], 0)
-        self.write_ledger(ledger([ev("init", 1), *approve(1)], stage=2))
-        v = xt.loop_verdict(self.repo)
-        self.assertEqual(v["verdict"], "blocked")
-        self.assertIn("đã được người duyệt — PLAN đợt mới khai `Giai đoạn sản phẩm: 2 (C-001)`", v["reason"])
-
-    def test_stage_lock_exits_point_to_new_plan(self):
-        """D-240 (review #327 lượt 2): lối ra của vòng khoá giai đoạn là `loop init` PLAN mới — không `unblock`/`--force`."""
+    def test_after_human_approval_switch_plan_with_force(self):
+        """Ca W (review #327), D-241: người duyệt khi vòng giai đoạn 1 còn task → `record` từ chối kèm lối ra đúng; verdict và
+        mọi lối ra của vòng giữ như cũ (không đọc khoá); đổi PLAN khi vòng còn bật bằng `--force` (LOOP-HARNESS-024)."""
         self.write_ledger(ledger())
         self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
         self.assertEqual(run_main("loop", "init", "--plan", self.PLAN, "--single-session")[0], 0)
         self.write_ledger(ledger([ev("init", 1), *approve(1)], stage=2))
-        rc, _, err = run_main("loop", "unblock", "--reason", "đã duyệt")
+        rc, _, err = run_main("loop", "record", "--task", "T-001", "--", "true")
         self.assertEqual(rc, 2)
-        self.assertIn("✗ Không mở lại: giai đoạn 1 của C-001 đã được người duyệt", err)
-        self.assertIn("`loop init --plan <PLAN khai đúng giai đoạn>`", err)
-        st = xt.read_state(self.repo)
-        self.assertEqual(xt._loop_exit(st, self.repo)[0], "init")
-        self.assertIn("loop init --plan", xt._blocked_exit(st, self.repo, live=True))
-        st.update(active=False, final_verdict={"verdict": "blocked", "reason": "x"})  # sau Stop hook
-        kind, text = xt._loop_exit(st, self.repo)
-        self.assertEqual(kind, "init")
-        self.assertIn("đã được người duyệt", text)
-        two = self.repo / "docs/autopilot/PLAN-2.md"
-        two.write_text("# P\n> Giai đoạn sản phẩm: 2 (C-001)\n\n- [ ] `T-002` việc — Gate: `true`\n", encoding="utf-8")
-        rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-2.md", "--single-session")
-        self.assertEqual(rc, 0, err)  # vòng khoá coi như đã chết: không cần `--force`
-        self.assertEqual(xt.read_state(self.repo)["plan"], "docs/autopilot/PLAN-2.md")
-        self.assertEqual(xt._stage_lock_exit({}, self.repo), "")
-
-    def test_only_stage_mismatch_kills_the_loop(self):
-        """Review #327 lượt 3: sổ hỏng, PLAN mất, PLAN khai 0/nhiều dòng không làm vòng "đã chết" — `loop init` không ghi
-        đè vòng đang sống (LOOP-HARNESS-024), lối ra cũ (người sửa/khôi phục, D-208) giữ nguyên."""
-        self.write_ledger(ledger())
-        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
-        self.assertEqual(run_main("loop", "init", "--plan", self.PLAN, "--single-session")[0], 0)
-        other = self.repo / "docs/autopilot/PLAN-B.md"
-        other.write_text("# B\n> Giai đoạn sản phẩm: 1 (C-001)\n\n- [ ] `T-009` b — Gate: `true`\n", encoding="utf-8")
-        st = xt.read_state(self.repo)
-        cases = {
-            "khai 0 dòng": lambda: self.plan(),
-            "khai 2 dòng": lambda: self.plan("> Giai đoạn sản phẩm: 1 (C-001)", "> Giai đoạn sản phẩm: 1 (C-001)"),
-            "sổ hỏng": lambda: (self.repo / xt.STAGE_LEDGER).write_text("<<<<<<< HEAD", encoding="utf-8"),
-        }
-        for name, breaks in cases.items():
-            with self.subTest(name):
-                breaks()
-                self.assertEqual(xt._stage_lock_exit(st, self.repo), "")
-                self.assertEqual(xt.loop_verdict(self.repo)["verdict"], "blocked")
-                rc, _, err = run_main("loop", "init", "--plan", "docs/autopilot/PLAN-B.md")
-                self.assertEqual(rc, 2)
-                self.assertEqual(xt.read_state(self.repo)["plan"], self.PLAN)  # vòng đang sống không bị ghi đè
-                self.write_ledger(ledger())
-                self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
-        (self.repo / xt.STAGE_LEDGER).write_text("{", encoding="utf-8")
-        self.assertIn("người sửa hoặc khôi phục từ git", self.problem())
-        self.write_ledger(ledger())
-        (self.repo / self.PLAN).unlink()  # PLAN mất ở dự án có sổ: vẫn lối ra D-208
-        self.assertEqual(xt._stage_lock_exit(st, self.repo), "")
-        self.assertIn("PLAN mất/rỗng", xt._blocked_exit(st, self.repo, live=True))
-
-    def test_doctor_names_stage_exit(self):
-        self.write_ledger(ledger([ev("init", 1), *approve(1)], stage=2))
-        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
-        st = {"active": True, "blocked": True, "blocked_reason": "x", "plan": self.PLAN}
-        msg = xt._doctor_loop(st, self.repo)[0].msg
-        self.assertIn("`loop init --plan <PLAN khai đúng giai đoạn>`", msg)
-        self.assertNotIn("loop unblock", msg)
+        self.assertIn("đã được người duyệt — PLAN đợt mới khai `Giai đoạn sản phẩm: 2 (C-001)` rồi", err)
+        self.assertIn("vòng cũ còn bật: thêm `--force`", err)
+        self.assertEqual(xt.loop_verdict(self.repo)["verdict"], "continue")  # verdict không đọc khoá (D-241)
+        two = "docs/autopilot/PLAN-2.md"
+        text = "# P\n> Giai đoạn sản phẩm: 2 (C-001)\n\n- [ ] `T-002` v — Gate: `true`\n"
+        (self.repo / two).write_text(text, encoding="utf-8")
+        rc, _, err = run_main("loop", "init", "--plan", two, "--single-session")
+        self.assertEqual(rc, 2)  # vòng đang sống không bị ghi đè khi thiếu `--force`
+        self.assertIn("`loop init --force`", err)
+        self.assertEqual(run_main("loop", "init", "--plan", two, "--single-session", "--force")[0], 0)
+        self.assertEqual(xt.read_state(self.repo)["plan"], two)
 
     def test_fenced_example_and_new_cycle_hint(self):
         self.write_ledger(ledger())

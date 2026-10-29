@@ -1731,9 +1731,6 @@ def _verdict_loop_state(st: Dict[str, Any], base: Path) -> Optional[Dict[str, An
             "verdict": "blocked",
             "reason": f"cùng một lỗi lặp {st.get('same_failure_count')} lần ({st.get('last_failure_task')}) — dừng để người xem",
         }
-    locked = stage_plan_problem(base, str(st["plan"])) if st.get("plan") else ""
-    if locked:  # giai đoạn đổi (người duyệt) hoặc PLAN sửa sang giai đoạn khoá: không giao task (ADR-0058, review #327)
-        return {"verdict": "blocked", "reason": locked}
     return _verdict_task_runs(st, base) or _budget_exhausted(st)
 
 
@@ -4738,10 +4735,9 @@ def _doctor_loop(st: Dict[str, Any], base: Path) -> List[Finding]:
     """Cảnh báo vòng bị chặn/mất PLAN — lối ra lấy từ đúng helper của `loop init`/`attach`/`unblock` (D-208, review #296)."""
     active = bool(st.get("active"))
     live, plan_ok = active and not _budget_spent(st), bool(_plan_tasks(base, st))
-    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: khoá giai đoạn, PLAN, rồi ngân sách
-        lock = _stage_lock_exit(st, base)
-        if lock or not active:
-            end = lock or _loop_exit(st, base)[1]
+    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: PLAN trước ngân sách
+        if not active:
+            end = _loop_exit(st, base)[1]
         elif not plan_ok:
             end = _plan_lost_exit(st, live)
         else:
@@ -6517,8 +6513,7 @@ def _live_loop(base: Path) -> str:
     prev = read_state(base) or {}
     try:
         # Hết vòng/hạn (kể cả còn `blocked`) → đợt kế không cần `loop stop`/`--force` (D-177, T-3537).
-        # PLAN không còn hợp lệ với sổ giai đoạn: vòng đó đã chết, `loop init` PLAN mới không cần `--force` (D-240)
-        if not prev.get("active") or _budget_exhausted(prev) or _stage_lock_exit(prev, base):
+        if not prev.get("active") or _budget_exhausted(prev):
             return ""
         v = loop_verdict(base)
         verdict = v["verdict"]
@@ -7805,18 +7800,9 @@ def _plan_lost_exit(st: Dict[str, Any], live: bool) -> str:
     return f"PLAN mất/rỗng → {steps}`loop init --plan <mới>`"
 
 
-def _stage_lock_exit(st: Dict[str, Any], base: Path) -> str:
-    """Lối ra khi PLAN của vòng khai một giai đoạn khác giai đoạn đang mở (người vừa duyệt, PLAN đổi giai đoạn — ADR-0058,
-    D-240): `unblock` không mở được, vòng đó coi như đã chết. Sổ hỏng, PLAN mất, khai 0/nhiều dòng → '' (lối ra cũ: người
-    khôi phục/sửa rồi `unblock`, D-208)."""
-    kind, why = _stage_plan_check(base, str(st["plan"])) if st.get("plan") else ("", "")
-    return f"{why} → `loop init --plan <PLAN khai đúng giai đoạn>`" if kind == "mismatch" else ""
-
-
 def _blocked_exit(st: Dict[str, Any], base: Path, live: bool) -> str:
-    """Lối ra của verdict `blocked`: khoá giai đoạn → `_stage_lock_exit`; PLAN còn → `unblock`; mất/rỗng → `_plan_lost_exit`."""
-    lock = _stage_lock_exit(st, base)
-    return lock or (EXIT_UNBLOCK if _plan_tasks(base, st) else _plan_lost_exit(st, live))
+    """Lối ra của verdict `blocked`: PLAN còn → `unblock`; mất/rỗng → `_plan_lost_exit`."""
+    return EXIT_UNBLOCK if _plan_tasks(base, st) else _plan_lost_exit(st, live)
 
 
 def _blocked_by_state(st: Dict[str, Any]) -> bool:
@@ -7842,9 +7828,6 @@ def _loop_exit(st: Dict[str, Any], base: Path) -> Tuple[str, str]:
     (mở lại thì Stop kế chặn ngay); không đoán từ đếm lỗi (`loop record` sau khi vòng dừng vẫn đổi đếm — review #295).
     Hết vòng/hạn → `init` dù verdict nào (`unblock` từ chối mở trần — không trỏ vòng tròn)."""
     fv = _final_verdict(st)
-    lock = _stage_lock_exit(st, base)
-    if lock:
-        return "init", lock
     if fv != "done" and not _plan_tasks(base, st):
         return "init", _plan_lost_exit(st, live=False)
     if fv == "budget" or _budget_spent(st):
@@ -7945,9 +7928,6 @@ def _unblock_problem(cur: Dict[str, Any], reason: str, base: Path) -> Optional[s
         return NO_LOOP_MSG
     if not reason:
         return "✗ --reason rỗng — ghi người đã xem gì"
-    lock = _stage_lock_exit(cur, base)
-    if lock:  # PLAN của giai đoạn đã duyệt/khoá: mở lại vô ích (D-240)
-        return f"✗ Không mở lại: {lock}"
     if cur.get("active"):
         if not _plan_tasks(base, cur):  # mở ra Stop kế lại chặn vì PLAN — như `_live_loop` (D-208)
             return f"✗ Vòng đang chạy nhưng {_plan_lost_exit(cur, live=not _budget_spent(cur))}"
@@ -9538,30 +9518,22 @@ def plan_stage(text: str) -> List[Tuple[int, str]]:
 
 
 def stage_plan_problem(base: Path, plan: str) -> str:
-    """Lý do PLAN không được chạy dưới sổ giai đoạn hiện tại; '' = được. Không dùng sổ → ''. Mọi lối vào vòng
-    (`loop init/next/record`, verdict) gọi hàm này nên sửa PLAN giữa chừng cũng bị chặn."""
-    return _stage_plan_check(base, plan)[1]
-
-
-def _stage_plan_check(base: Path, plan: str) -> Tuple[str, str]:
-    """(loại, lý do) của `stage_plan_problem`; loại `ledger` (sổ hỏng/vắng mà git có — người khôi phục), `plan` (PLAN không
-    đọc được — D-208 xử lý), `declare` (PLAN khai 0 hay nhiều dòng — sửa tại chỗ), `mismatch` (khai một dòng khác giai
-    đoạn đang mở — PLAN đó hết dùng được). Chỉ `mismatch` làm vòng coi như đã chết (D-240, review #327 lượt 3)."""
+    """Lý do PLAN không được chạy dưới sổ giai đoạn hiện tại; '' = được. Không dùng sổ → ''. `loop init/next/record` gọi
+    hàm này nên sửa PLAN giữa chừng hay người vừa duyệt cũng bị chặn ở bước kế (ADR-0058; verdict không đọc khoá — D-241)."""
     try:
         led = read_stage(base)
     except StageError as exc:
-        return "ledger", str(exc)
+        return str(exc)
     if led is None:
-        return "", ""
+        return ""
     try:
         got = plan_stage((base / plan).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
-        return "plan", f"không đọc được {plan}: {exc}"
+        return f"không đọc được {plan}: {exc}"
     want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
     if len(got) != 1:
-        return "declare", f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
-    why = _stage_mismatch(plan, got[0], led, want)
-    return ("mismatch" if why else ""), why
+        return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
+    return _stage_mismatch(plan, got[0], led, want)
 
 
 def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:
@@ -9571,8 +9543,11 @@ def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: 
         return ""
     if led["status"] == "completed" and got[1] != led["cycle"]:
         return f"chu kỳ {led['cycle']} đã xong cả ba giai đoạn — chu kỳ mới: `xt.py stage new-cycle --reason …`"
-    if got[1] == led["cycle"] and got[0] < led["stage"]:
-        return f"giai đoạn {got[0]} của {got[1]} đã được người duyệt — PLAN đợt mới khai `{want}`"
+    if got[1] == led["cycle"] and got[0] < led["stage"]:  # vòng còn sống: đổi PLAN bằng `--force` (LOOP-HARNESS-024)
+        return (
+            f"giai đoạn {got[0]} của {got[1]} đã được người duyệt — PLAN đợt mới khai `{want}` rồi "
+            "`loop init --plan <PLAN đó>` (vòng cũ còn bật: thêm `--force`)"
+        )
     return (
         f"{plan} khai giai đoạn {got[0]} ({got[1]}) nhưng đang mở giai đoạn {led['stage']} ({led['cycle']}) — "
         "giai đoạn sau khoá tới khi người duyệt giai đoạn trước (`xt.py stage status`)"
