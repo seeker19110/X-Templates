@@ -3180,6 +3180,12 @@ def stop_hint(base: Path) -> str:
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
     harden = _xt_keys(base).get(PHASE_KEY) != "build"
+    if (
+        harden
+    ):  # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338)
+        with contextlib.suppress(StageError):  # sổ hỏng: giữ harden, khoá báo lỗi sổ
+            led = read_stage(base)
+            harden = not led or led["stage"] != 1
     objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
     try:
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
@@ -7461,8 +7467,33 @@ def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
     }
 
 
+def _harden_stage_lock(sf: Optional[Dict[str, Any]]) -> StepPart:
+    """`harden-to-signoff` khi sổ giai đoạn hỏng hoặc MVP chưa được người duyệt → `blocked` trước mọi bước khác: không gom
+    việc harden, không trả gói nghiệm thu (ADR-0058, D-246). Không sổ / giai đoạn 2–3 → None."""
+    if sf is None or sf.get("stage") not in (None, 1):
+        return None
+    if "error" in sf:
+        return {**(_step_stage(sf) or {}), "work": []}
+    route = (
+        "chờ người `stage approve` bản đã trình"
+        if sf.get("status") == "awaiting_approval"
+        else ("build `loop next-step` tới `stage-submit`, người `stage approve`")
+    )
+    return {
+        "action": "blocked",
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được người duyệt — `/complete` khoá (ADR-0058, D-246): {route}"
+        " rồi mới harden",
+        "missing": ["người duyệt MVP (`stage approve`)"],
+        "work": [],  # không gom việc harden ở MVP: `work[].line` là thứ `/complete` dán vào PLAN-harden (review #338)
+    }
+
+
 def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
-    """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: vòng → PR → sổ audit → việc → gói/giai đoạn."""
+    """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: khoá giai đoạn của harden → vòng → PR → sổ audit →
+    việc → gói/giai đoạn."""
+    lock = _harden_stage_lock(f.get("stage")) if harden else None
+    if lock:
+        return lock
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
     if _awaiting_mvp(f, harden):
@@ -10009,7 +10040,24 @@ def stage_plan_problem(base: Path, plan: str) -> str:
     want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
     if len(got) != 1:
         return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
-    return _stage_mismatch(plan, got[0], led, want)
+    return _stage_mismatch(plan, got[0], led, want) or _stage_kind_problem(plan, led)
+
+
+STAGE_SKILL_PLANS = (("harden", 2, "/complete"), ("opt", 3, "/optimize"))  # tên PLAN do skill đặt (D-246)
+
+
+def _stage_kind_problem(plan: str, led: Dict[str, Any]) -> str:
+    """PLAN của `/complete` (`PLAN-harden-*`) chỉ từ giai đoạn 2, của `/optimize` (`PLAN-opt-*`) chỉ ở giai đoạn 3; '' = được.
+    Audit/tối ưu vừa đủ của giai đoạn đang mở đi trong PLAN thường của nó (ADR-0058 §3, D-246)."""
+    kinds = "|".join(kind for kind, _, _ in STAGE_SKILL_PLANS)  # không phân biệt hoa/thường: macOS/Windows là cùng file
+    m = re.match(rf"PLAN-({kinds})(?![A-Za-z0-9])", Path(plan).name, re.I)
+    for kind, need, skill in STAGE_SKILL_PLANS:
+        if m and m.group(1).lower() == kind and led["stage"] < need:
+            return (
+                f"{plan} là PLAN của `{skill}` — chỉ từ giai đoạn {need}, đang mở giai đoạn {led['stage']} ({led['cycle']});"
+                " việc audit/sửa/tối ưu của giai đoạn này vào PLAN thường của nó (ADR-0058, D-246)"
+            )
+    return ""
 
 
 def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:
