@@ -1629,3 +1629,10 @@
 - Chọn: Theo D-230: thu hẹp phạm vi sửa (_plan_pairs qua _plan_tasks, tasks chỉ nhận chuỗi, ℹ khi mở lại đợt vì PLAN nối thêm, giới hạn ghi CHANGELOG), không đổi thiết kế ranh giới đợt
 - Lý do (tiêu chí chất lượng cuối): Như D-230: lỗi 🟠 là dùng sai helper — sửa tại gốc; PLAN dài dần cùng đường dẫn trái quy ước PLAN-<đợt>.md, báo rõ thay vì đoán
 - Đường lùi: Như D-230
+
+### D-232 · 2026-10-29T01:54:06+00:00 · DOC_PATH_RE (review #320/#321): '(^|/)docs?/' coi mọi file trong thư mục doc/docs ở bất kỳ độ sâu là tài liệu — src/api/docs/routes.py, docs/conf.py bị loại khỏi nợ review (release-check BLOCKER) và khỏi đếm dòng/gói/test của làn merge (PR chỉ sửa mã đó vào làn nhanh, không review)
+
+- Phương án: (1) Tài liệu = đuôi md/mdx/rst/txt ở mọi nơi, LICENSE/NOTICE, hoặc thư mục docs/doc ở GỐC repo trừ file có đuôi mã/cấu hình (py, js, ts, sh, go, rs, yml, toml…) · (2) Chỉ theo đuôi tài liệu, bỏ hẳn luật thư mục (ảnh/json trong docs/ thành mã → mọi PR sổ/ảnh vào làn chuẩn, nợ review giả) · (3) Giữ nguyên, chỉ ghi sổ
+- Chọn: Tài liệu = đuôi md/mdx/rst/txt ở mọi nơi, LICENSE/NOTICE, hoặc thư mục docs/doc ở GỐC repo trừ file có đuôi mã/cấu hình (py, js, ts, sh, go, rs, yml, toml…)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: mã trong thư mục tên docs không còn lách review/nợ; vẫn giữ tài liệu không phải văn bản ở docs/ gốc (ảnh, json bằng chứng) là tài liệu để không sinh nợ/làn chuẩn giả — phương án 2 chặt hơn nhưng phá luồng PR sổ hằng ngày; chạm luật làn (cổng) nên ghi D
+- Đường lùi: Đặt lại DOC_PATH_RE về '(^|/)docs?/|…'

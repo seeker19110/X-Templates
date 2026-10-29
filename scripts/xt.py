@@ -1232,7 +1232,7 @@ def _read_json_obj(p: Path) -> Optional[Dict[str, Any]]:
         return None
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError gồm JSONDecodeError và file không phải UTF-8 (review #321)
         return None
     return data if isinstance(data, dict) else None
 
@@ -5134,7 +5134,10 @@ def _gate_path(path: str) -> bool:
 LOCKFILE_RE = re.compile(
     r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
 )
-DOC_PATH_RE = re.compile(r"(^|/)docs?/|\.(md|mdx|rst|txt)$|(^|/)(LICENSE|NOTICE)[^/]*$", re.I)
+# Tài liệu (D-232): đuôi văn bản ở mọi nơi · LICENSE/NOTICE · thư mục docs/doc ở GỐC repo trừ file mã/cấu hình — trước đây
+# mọi `…/docs/…` ở mọi độ sâu (src/api/docs/routes.py, docs/conf.py) lách nợ review và đếm làn merge (review #321).
+CODE_EXT = r"py|pyi|js|mjs|cjs|jsx|ts|tsx|sh|bash|zsh|ps1|rb|go|rs|java|kt|kts|scala|php|cs|c|h|cc|cpp|hpp|swift|pl|lua|sql|ya?ml|toml|ini|cfg"
+DOC_PATH_RE = re.compile(rf"\.(md|mdx|rst|txt)$|(^|/)(LICENSE|NOTICE)[^/]*$|^docs?/(?!.*\.({CODE_EXT})$)", re.I)
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|__tests__|spec|e2e)/|(_test|\.test|\.spec|_spec)\.[^/]+$|(^|/)test_[^/]+$")
 MONO_DIRS = ("packages", "apps", "services", "libs", "crates", "modules")
 CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}
@@ -9398,9 +9401,12 @@ def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -
     """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm."""
     try:
         text = (base / log).read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
-    except ValueError as exc:  # không phải UTF-8: có thể giấu đề xuất "Khi chạy thật" → FAIL, không traceback
+    except (
+        OSError,
+        ValueError,
+    ) as exc:  # thư mục/thiếu quyền/không phải UTF-8: có thể giấu đề xuất → FAIL (review #321)
         return _release_row("prod_switch", "FAIL", f"không đọc được {log}: {exc}")
     n = text.count(PROD_SWITCH_LABEL)
     if n:
@@ -9558,8 +9564,8 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
     try:
         cmd = _xt_keys(base).get(key, "")
-    except (OSError, ValueError) as exc:  # xt.yaml không phải UTF-8: không biết lệnh → FAIL, không traceback
-        return _release_row(key, "FAIL", f"không đọc được xt.yaml: {exc}")
+    except (OSError, ValueError):  # xt.yaml hỏng: hàng `phase` đã FAIL — một vấn đề một hàng chặn (review #321)
+        return _release_row(key, "N/A", "không đọc được xt.yaml — xem hàng phase", "SHOULD")
     if gate_noop(cmd):
         scale = (_blueprint_front(base, blueprint) or ("", ""))[0]
         if scale in ("M", "L"):
@@ -12834,7 +12840,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (OSError, UnicodeDecodeError) as exc:  # file thiếu/không đọc được (cả không phải UTF-8): một dòng dễ hiểu;
         if os.environ.get("XT_DEBUG"):  # XT_DEBUG=1 để xem traceback
             raise
-        print(f"✗ {exc}", file=sys.stderr)
+        why = (
+            f"file không phải UTF-8 ({exc}) — XT_DEBUG=1 để xem file nào"
+            if isinstance(exc, UnicodeDecodeError)
+            else exc
+        )
+        print(f"✗ {why}", file=sys.stderr)
         return 2
 
 

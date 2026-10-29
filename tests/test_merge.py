@@ -597,6 +597,12 @@ class MergeDecisionTest(unittest.TestCase):
                 "nhiều gói: packages/api, packages/web",
             ),
             "không test": ([{"path": "src/a.py", "additions": 3, "deletions": 0}], "đổi mã mà không đổi test"),
+            # D-232: mã trong thư mục tên docs ở sâu (hay docs/conf.py) là mã — không lách làn nhanh (review #321)
+            "mã trong docs/ lồng": (
+                [{"path": "src/api/docs/routes.py", "additions": 3, "deletions": 0}],
+                "đổi mã mà không đổi test",
+            ),
+            "docs/conf.py": ([{"path": "docs/conf.py", "additions": 3, "deletions": 0}], "đổi mã mà không đổi test"),
         }
         for name, (files, reason) in cases.items():
             with self.subTest(name):

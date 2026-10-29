@@ -2755,9 +2755,16 @@ class ReleaseCheckTest(TmpRepoCase):
         rc, d = self.rows()
         r = self.by_id(d)
         self.assertEqual(rc, 1)
-        for rid in ("prod_switch", "phase", "attack", "perf"):
+        for rid in ("prod_switch", "phase"):
             self.assertEqual(r[rid]["result"], "FAIL", rid)
             self.assertIn("không đọc được", r[rid]["evidence"], rid)
+        for rid in ("attack", "perf"):  # một vấn đề một hàng chặn: xt.yaml hỏng đã FAIL ở `phase` (review #321)
+            self.assertEqual((r[rid]["result"], r[rid]["level"]), ("N/A", "SHOULD"), rid)
+            self.assertIn("xem hàng phase", r[rid]["evidence"], rid)
+        log.unlink()
+        log.mkdir()  # thư mục trùng tên: không phải "không có" → FAIL (review #321)
+        _, d = self.rows()
+        self.assertEqual(self.by_id(d)["prod_switch"]["result"], "FAIL")
 
     def test_cli_undecodable_file_exits_2(self):
         """Lớp lỗi AUD-CODE-017 ở mọi lệnh CLI: file không phải UTF-8 → `main` exit 2 một dòng, không traceback."""
@@ -2765,8 +2772,12 @@ class ReleaseCheckTest(TmpRepoCase):
         bp.write_bytes(b"\xff\xfe")
         rc, out, err = run_main("blueprint-status", bp)
         self.assertEqual((rc, out), (2, ""))
-        self.assertTrue(err.startswith("✗ "), err)
+        self.assertTrue(err.startswith("✗ file không phải UTF-8"), err)
+        self.assertIn("XT_DEBUG=1", err)
         self.assertNotIn("Traceback", err)
+        j = self.repo / "x.json"
+        j.write_bytes(b'{"x": "\xe1\xba')  # JSON cắt giữa ký tự UTF-8 → None như docstring hứa (review #321)
+        self.assertIsNone(xt._read_json_obj(j))
 
 
 class ContextPackTest(TmpDirCase):
