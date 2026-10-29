@@ -350,8 +350,12 @@ class NextStepPureTest(unittest.TestCase):
             out = self.step(objective=HARDEN, stage=sf, verdict=busy, **unchecked)
             self.assertEqual((out["action"], out["missing"]), ("blocked", ["người duyệt MVP (`stage approve`)"]))
             self.assertIn("`/complete` khoá", out["reason"])
-        out = self.step(objective=HARDEN, stage={"error": "STAGE.json hỏng: x"})
+            self.assertEqual(out["work"], [])  # việc harden không lộ ra `work[].line` để dán vào PLAN (review #338)
+        self.assertIn("build `loop next-step` tới `stage-submit`", self.step(objective=HARDEN, stage=mvp)["reason"])
+        self.assertIn("chờ người `stage approve` bản đã trình", self.step(objective=HARDEN, stage=wait)["reason"])
+        out = self.step(objective=HARDEN, stage={"error": "STAGE.json hỏng: x"}, **unchecked)
         self.assertEqual((out["action"], out["reason"]), ("blocked", "sổ giai đoạn: STAGE.json hỏng: x"))
+        self.assertEqual(out["work"], [])
         self.assertEqual(self.step(objective=HARDEN, stage={**mvp, "stage": 2})["action"], "release-check")
         self.assertEqual(self.step(objective=HARDEN)["action"], "release-check")  # không dùng sổ
         busy = {"verdict": "continue", "reason": "còn task", "task": "T-002"}

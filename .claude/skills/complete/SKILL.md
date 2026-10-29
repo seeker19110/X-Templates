@@ -10,7 +10,7 @@ Giao thức vòng lặp: `<FW>/11-autonomous-loop/README.md`; audit: `/audit` (`
 
 ## Bước 0 — chuẩn bị
 1. Tên phiên `<Tên repo> — <tên nhánh>`; `<XT> doctor --fix`; chế độ quyền Auto. Nên mở phiên mới (context sạch).
-2. Đọc `delivery_phase` trong `xt.yaml`; `docs/ops/AUDIT-STATUS.md` (có sổ → `delta`, chưa → `full`); `<XT> blueprint-status BLUEPRINT.md --strict --json` (MUST mở); `<XT> loop status` (vòng build phải đã `done`/`done-pending-human`; còn `continue` → quay lại `/autopilot`); có sổ giai đoạn (`<XT> stage status`, ADR-0058): giai đoạn ≥ 2 (1: máy khoá, D-246), PLAN khai đúng `<XT> stage status`.
+2. Đọc `delivery_phase` trong `xt.yaml`; `docs/ops/AUDIT-STATUS.md` (có sổ → `delta`, chưa → `full`); `<XT> blueprint-status BLUEPRINT.md --strict --json` (MUST mở); `<XT> loop status` (vòng build phải đã `done`/`done-pending-human`; còn `continue` → quay lại `/autopilot`); có sổ giai đoạn (`<XT> stage status`, ADR-0058): giai đoạn ≥ 2 (1: máy khoá — dừng, báo), PLAN khai đúng `<XT> stage status`.
 
 ## Bước 1 — vào pha harden (một PR, một lần)
 Còn `build` → PR đặt `delivery_phase: harden`, khai khoá sàn M/L (`format_check`, `coverage`, kiểm kiểu, `e2e` — `<XT> floor` liệt kê) và `attack`/`perf` (ADR-0042; chưa có công cụ → để rỗng kèm lý do) trong `xt.yaml`. PR đụng `xt.yaml` luôn tính harden (D-137): review rồi merge. Từ đây PR làn chuẩn cần review sạch ở head (`LOOP-STOP-022`), sàn Gate áp lại, guard không nới việc cục bộ.

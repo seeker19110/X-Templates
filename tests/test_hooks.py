@@ -1409,6 +1409,26 @@ class StopAndSessionTest(unittest.TestCase):
             self.assertEqual(xt.stop_hint(tmp), "")
         self.assertIn("không tính được gợi ý next-step: OSError: hỏng", err.getvalue())
 
+    def test_stop_hint_stage_one_is_build(self):
+        """Review #338: `delivery_phase: harden` (preset safe) ở giai đoạn 1 — vòng là build tới trình MVP, gợi ý Stop hook
+        dùng `build-until-clean` để khoá `/complete` không che lý do dừng thật (`loop block`, hết ngân sách)."""
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        step = {"action": "blocked", "reason": "cần chủ dự án"}
+        cases = (({"stage": 1}, "build-until-clean"), ({"stage": 2}, "harden-to-signoff"), (None, "harden-to-signoff"))
+        for led, objective in (*cases, (xt.StageError("hỏng"), "harden-to-signoff")):
+            with (
+                self.subTest(objective=objective, led=led),
+                mock.patch.object(xt, "_xt_keys", return_value={"delivery_phase": "harden"}),
+                mock.patch.object(xt, "read_stage", side_effect=[led]),
+                mock.patch.object(xt, "read_state", return_value={}),
+                mock.patch.object(xt, "next_step_facts") as facts,
+                mock.patch.object(xt, "next_step", return_value=step),
+            ):
+                self.assertIn(f"({objective}): blocked — cần chủ dự án", xt.stop_hint(ROOT))
+                self.assertEqual(facts.call_args.args[-1], objective)
+
     def project_with_loop(self, xt_yaml: str = "") -> Path:
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)

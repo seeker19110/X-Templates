@@ -482,6 +482,8 @@ class StageLockTest(TmpRepoCase):
             ("PLAN-opt-x.md", 3, True),
             ("PLAN-options.md", 1, True),  # chỉ đúng tiền tố skill đặt
             ("PLAN-hardening.md", 1, True),
+            ("plan-Harden-x.md", 1, False),  # macOS/Windows: cùng file với PLAN-harden-x.md (review #338)
+            ("PLAN-OPT-x.md", 2, False),
             ("PLAN-mvp.md", 1, True),
         ]
         hist = {1: [ev("init", 1)], 2: [ev("init", 1), *approve(1)], 3: [ev("init", 1), *approve(1), *approve(2)]}
@@ -494,7 +496,7 @@ class StageLockTest(TmpRepoCase):
                 self.assertEqual(why == "", ok, why)
                 if not ok:
                     self.assertIn(f"đang mở giai đoạn {stage} (C-001)", why)
-                    self.assertIn("/optimize" if "opt" in name else "/complete", why)
+                    self.assertIn("/optimize" if "opt" in name.lower() else "/complete", why)
         self.PLAN = "docs/autopilot/PLAN-opt-y.md"  # giai đoạn 3 đã xong: bảo trì vẫn tối ưu được
         self.write_ledger(completed())
         self.plan("> Giai đoạn sản phẩm: 3 (C-001)")

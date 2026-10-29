@@ -3180,6 +3180,12 @@ def stop_hint(base: Path) -> str:
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
     harden = _xt_keys(base).get(PHASE_KEY) != "build"
+    if (
+        harden
+    ):  # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338)
+        with contextlib.suppress(StageError):  # sổ hỏng: giữ harden, khoá báo lỗi sổ
+            led = read_stage(base)
+            harden = not led or led["stage"] != 1
     objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
     try:
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
@@ -7467,17 +7473,24 @@ def _harden_stage_lock(sf: Optional[Dict[str, Any]]) -> StepPart:
     if sf is None or sf.get("stage") not in (None, 1):
         return None
     if "error" in sf:
-        return _step_stage(sf)
+        return {**(_step_stage(sf) or {}), "work": []}
+    route = (
+        "chờ người `stage approve` bản đã trình"
+        if sf.get("status") == "awaiting_approval"
+        else ("build `loop next-step` tới `stage-submit`, người `stage approve`")
+    )
     return {
         "action": "blocked",
-        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được người duyệt — `/complete` khoá (ADR-0058, D-246): build"
-        " `loop next-step` tới `stage-submit`, người `stage approve` rồi mới harden",
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được người duyệt — `/complete` khoá (ADR-0058, D-246): {route}"
+        " rồi mới harden",
         "missing": ["người duyệt MVP (`stage approve`)"],
+        "work": [],  # không gom việc harden ở MVP: `work[].line` là thứ `/complete` dán vào PLAN-harden (review #338)
     }
 
 
 def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
-    """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: vòng → PR → sổ audit → việc → gói/giai đoạn."""
+    """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: khoá giai đoạn của harden → vòng → PR → sổ audit →
+    việc → gói/giai đoạn."""
     lock = _harden_stage_lock(f.get("stage")) if harden else None
     if lock:
         return lock
@@ -10036,9 +10049,10 @@ STAGE_SKILL_PLANS = (("harden", 2, "/complete"), ("opt", 3, "/optimize"))  # tê
 def _stage_kind_problem(plan: str, led: Dict[str, Any]) -> str:
     """PLAN của `/complete` (`PLAN-harden-*`) chỉ từ giai đoạn 2, của `/optimize` (`PLAN-opt-*`) chỉ ở giai đoạn 3; '' = được.
     Audit/tối ưu vừa đủ của giai đoạn đang mở đi trong PLAN thường của nó (ADR-0058 §3, D-246)."""
-    m = re.match(r"PLAN-(harden|opt)(?![A-Za-z0-9])", Path(plan).name)
+    kinds = "|".join(kind for kind, _, _ in STAGE_SKILL_PLANS)  # không phân biệt hoa/thường: macOS/Windows là cùng file
+    m = re.match(rf"PLAN-({kinds})(?![A-Za-z0-9])", Path(plan).name, re.I)
     for kind, need, skill in STAGE_SKILL_PLANS:
-        if m and m.group(1) == kind and led["stage"] < need:
+        if m and m.group(1).lower() == kind and led["stage"] < need:
             return (
                 f"{plan} là PLAN của `{skill}` — chỉ từ giai đoạn {need}, đang mở giai đoạn {led['stage']} ({led['cycle']});"
                 " việc audit/sửa/tối ưu của giai đoạn này vào PLAN thường của nó (ADR-0058, D-246)"
