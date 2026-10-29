@@ -264,6 +264,12 @@ class PathGroupsTest(unittest.TestCase):
             "README.md": [9],
             "src/main.py": [1, 2, 3, 12],
             "notes.txt": [],
+            # AUD-SEC-138: mọi manifest của thẻ "phụ thuộc" thuộc nhóm DEP (7) — trước trả [] nên nợ chỉ tính từ SHA mới nhất
+            "src/App/App.csproj": [2, 7],
+            "mix.exs": [2, 7],
+            "Podfile": [2, 7],
+            "deno.json": [2, 7],
+            "requirements/prod.in": [2, 7],
         }
         for path, expected in cases.items():
             with self.subTest(path=path):

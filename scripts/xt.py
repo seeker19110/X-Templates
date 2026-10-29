@@ -3856,7 +3856,8 @@ def _path_groups(path: str) -> List[int]:
     g: List[int] = []
     if path.startswith(".github/workflows/") or name == ".gitlab-ci.yml":
         g += [8, 2]
-    if name in MANIFESTS or name in LOCKFILES or re.match(r"requirements.*\.txt$", name):
+    # cùng regex với thẻ "phụ thuộc" của làn merge: manifest nào làm PR vào làn chuẩn cũng có nợ theo nhóm DEP (AUD-SEC-138)
+    if name in MANIFESTS or name in LOCKFILES or DEP_PATH_RE.search(path):
         g += [7, 2]
     if re.search(r"(^|/)(tests?|__tests__|spec)/", path) or re.search(
         r"(_test\.go|\.(test|spec)\.[jt]sx?|test_[^/]+\.py)$", path
@@ -5124,6 +5125,17 @@ MERGE_FIELDS = (
 )
 FAST_LANE_MAX_LINES = 150  # vị từ làn nhanh, 11-autonomous-loop/stop-points-and-escalation.md
 GH_TIMEOUT = 60
+# Manifest/lockfile phụ thuộc: thẻ làn merge, nhóm audit DEP (`_path_groups`) và không bao giờ là tài liệu (AUD-SEC-138/139)
+DEP_PATH_RE = re.compile(
+    r"(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.(jsonc?|lock)"
+    r"|pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|setup\.(py|cfg)|environment\.ya?ml"
+    r"|(?i:[^/]*(requirements|constraints)[^/]*\.(txt|in)|requirements/.*\.(txt|in))"  # D-234: constraints, cấp sâu
+    r"|go\.(mod|sum|work)|Cargo\.(toml|lock)|Gemfile(\.lock)?|[^/]+\.gemspec|composer\.(json|lock)"
+    # D-235 (review #323): .NET/JVM/Dart/Swift/Elixir/C++ — `*.csproj`, `packages.lock.json` có trong BASE-DEP-001
+    r"|[^/]+\.(cs|fs|vb)proj|packages\.lock\.json|packages\.config|Directory\.Packages\.props|global\.json"
+    r"|pom\.xml|(build|settings)\.gradle(\.kts)?|gradle\.lockfile|libs\.versions\.toml|pubspec\.(yaml|lock)"
+    r"|Podfile(\.lock)?|Package\.(swift|resolved)|mix\.(exs|lock)|conanfile\.(txt|py)|vcpkg\.json)$"
+)
 # Đường dẫn nhạy cảm → làn chuẩn (người merge). Bắt rộng có chủ đích: báo oan chỉ làm người phải bấm merge.
 RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("bí mật", re.compile(r"(^|/)(\.env|secrets?/)|\.(pem|key|p12)$", re.I)),
@@ -5134,19 +5146,7 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("cổng/CI", re.compile(r"(^|/)(\.github|\.claude|\.xtemplates)/|ruleset", re.I)),
     ("nguồn gói", re.compile(r"(^|/)(\.npmrc|\.yarnrc(\.yml)?|\.pypirc|pip\.(conf|ini)|uv\.toml|bunfig\.toml)$")),
     ("ảnh/container", re.compile(r"(^|/)(Dockerfile[^/]*|Containerfile[^/]*|(docker-)?compose[^/]*\.ya?ml)$", re.I)),
-    (
-        "phụ thuộc",
-        re.compile(
-            r"(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.(jsonc?|lock)"
-            r"|pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|setup\.(py|cfg)|environment\.ya?ml"
-            r"|(?i:[^/]*(requirements|constraints)[^/]*\.(txt|in)|requirements/.*\.(txt|in))"  # D-234: constraints, cấp sâu
-            r"|go\.(mod|sum|work)|Cargo\.(toml|lock)|Gemfile(\.lock)?|[^/]+\.gemspec|composer\.(json|lock)"
-            # D-235 (review #323): .NET/JVM/Dart/Swift/Elixir/C++ — `*.csproj`, `packages.lock.json` có trong BASE-DEP-001
-            r"|[^/]+\.(cs|fs|vb)proj|packages\.lock\.json|packages\.config|Directory\.Packages\.props|global\.json"
-            r"|pom\.xml|(build|settings)\.gradle(\.kts)?|gradle\.lockfile|libs\.versions\.toml|pubspec\.(yaml|lock)"
-            r"|Podfile(\.lock)?|Package\.(swift|resolved)|mix\.(exs|lock)|conanfile\.(txt|py)|vcpkg\.json)$"
-        ),
-    ),
+    ("phụ thuộc", DEP_PATH_RE),
 )
 # File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
 # `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
@@ -5179,12 +5179,17 @@ LOCKFILE_RE = re.compile(
     r"|Pipfile\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock|packages\.lock\.json|gradle\.lockfile|pubspec\.lock"
     r"|Podfile\.lock|Package\.resolved|mix\.lock)$"  # review #324 T3: lockfile của thẻ phụ thuộc D-235
 )
-# Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
-# rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`, `conanfile.txt`);
-# đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
-# repo. Trước đây mọi `…/docs/…` ở mọi độ sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review
-# (hàng BLOCKER `review_debt`) và làn merge (AUD-SEC-134).
-DOC_TEXT_EXT = ("md", "mdx", "rst", "txt")
+# Tài liệu (D-232, review #322; D-253) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): `.md`/`.rst`
+# trừ khi (ngoài `docs/` gốc) nằm dưới thư mục chạy thật (`RUNTIME_DOC_DIR_RE`: prompt, mã app, mẫu, agent/skill); `.txt`
+# chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
+# allowlist host); `.mdx` luôn là mã (biên dịch thành JSX); đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết
+# hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC repo; khớp `DEP_PATH_RE` (manifest
+# phụ thuộc, kể cả `docs/package.json`) không bao giờ là tài liệu (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
+# sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review (hàng BLOCKER `review_debt`) và làn merge
+# (AUD-SEC-134).
+DOC_TEXT_EXT = ("md", "rst")
+DOC_TXT_NAME_RE = re.compile(r"(README|CHANGELOG|CHANGES|HISTORY|AUTHORS|CONTRIBUTORS)\.txt", re.I)
+RUNTIME_DOC_DIR_RE = re.compile(r"(^|/)(prompts?|src|app|pages|lib|server|api|templates?|agents?|skills?)/", re.I)
 DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
 # Rộng (đóng khi nghi ngờ — review #323): `docs/design-constraints.txt` thành mã chỉ tốn một lượt review
 DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists|conanfile)\.txt$", re.I)
@@ -5200,15 +5205,18 @@ DOCS_TEST_DIR_RE = re.compile(r"(^|/)docs?/(.*/)?(tests?|__tests__|spec|e2e)/", 
 def is_doc_path(path: str) -> bool:
     """File là tài liệu (không tính nợ review, không tính dòng/gói/test của làn merge) — xem chú thích trên. Tên có xuống
     dòng → mã (không đoán)."""
-    if "\n" in path or "\r" in path:
+    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path):
         return False
     name = path.rsplit("/", 1)[-1]
     if LICENSE_NAME_RE.fullmatch(name):
         return True
     ext = name.rsplit(".", 1)[1].lower() if "." in name.lstrip(".") else ""
+    in_docs = re.match(r"docs?/", path, re.I) is not None
     if ext in DOC_TEXT_EXT:
-        return not DEP_TXT_RE.search(path)
-    return ext in DOC_ASSET_EXT and re.match(r"docs?/", path, re.I) is not None
+        return in_docs or not RUNTIME_DOC_DIR_RE.search(path)
+    if ext == "txt":
+        return (in_docs or DOC_TXT_NAME_RE.fullmatch(name) is not None) and not DEP_TXT_RE.search(path)
+    return ext in DOC_ASSET_EXT and in_docs
 
 
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|__tests__|spec|e2e)/|(_test|\.test|\.spec|_spec)\.[^/]+$|(^|/)test_[^/]+$")

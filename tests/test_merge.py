@@ -717,13 +717,20 @@ class MergeDecisionTest(unittest.TestCase):
 
     def test_is_doc_path(self):
         """D-232 (review #322): tài liệu theo danh sách cho phép — mọi thứ khác là mã (đóng khi nghi ngờ)."""
-        docs = ("README.md", "pkg/docs/x.md", "notes.txt", "docs/img/a.png", "docs/ops/x.json", "LICENSE", "COPYING")
+        docs = (
+            "README.md",
+            "pkg/docs/x.md",
+            "docs/notes.txt",
+            "docs/img/a.png",
+            "docs/ops/x.json",
+            "LICENSE",
+            "COPYING",
+        )
         docs += (
             "LICENSE.md",
             "NOTICE.txt",
             "Docs/a.PNG",
             "x.rst",
-            "y.mdx",
             "license",
             "LICENSE-MIT",
             "NOTICE-3rdparty",
@@ -733,6 +740,8 @@ class MergeDecisionTest(unittest.TestCase):
             "requirements/REQ-001.md",
             "requirements/README.md",
         )
+        # D-253: README.txt/CHANGELOG.txt ở mọi nơi; .md trong docs/ gốc dù có thư mục chạy thật trong đường dẫn
+        docs += ("README.txt", "pkg/CHANGELOG.txt", "docs/src/x.md", "docs/prompts/x.md", "framework/00-method/x.md")
         code = ("docs/conf.py", "docs/run", "docs/.nojekyll", "src/api/docs/routes.py", "src/LicenseManager.java")
         code += ("license-allow.json", "requirements.txt", "dev-requirements.txt", "constraints.txt", "CMakeLists.txt")
         code += ("requirements/prod.txt", "packages/web/docs/a.png", "docs/x\ny.png", "docs/x\r.md", "Requirements.txt")
@@ -741,8 +750,23 @@ class MergeDecisionTest(unittest.TestCase):
         code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
         code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
         code += ("requirements-dev.txt", "src/license.py", "conanfile.txt")  # đột biến D8/L6 (review #323 lượt 2)
+        # AUD-SEC-135 (D-253): .mdx chạy JSX, prompt/mã app/mẫu/agent bằng .md, .txt ngoài docs/ là mã
+        code += ("y.mdx", "app/admin/page.mdx", "docs/x.mdx", "prompts/system.md", "src/README.md", "app/x.md")
+        code += ("notes.txt", "src/security/allowed_hosts.txt", "packages.txt", "apt.txt", "runtime.txt")
+        code += ("vendor/modules.txt", ".claude/agents/reviewer.md", "x/skills/a/SKILL.md", "templates/mail.md")
+        # AUD-SEC-139: manifest phụ thuộc trong docs/ gốc không phải tài liệu
+        code += ("docs/package.json", "docs/package-lock.json", "docs/deno.json", "docs/vcpkg.json")
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
         self.assertEqual([p for p in code if xt.is_doc_path(p)], [])
+
+    def test_runtime_text_takes_standard_lane(self):
+        """AUD-SEC-135 (D-253): `.mdx`, prompt `.md`, `.txt` cấu hình không còn vào làn nhanh như tài liệu."""
+        for path in ("app/admin/page.mdx", "prompts/system.md", "src/security/allowed_hosts.txt", "packages.txt"):
+            with self.subTest(path=path):
+                pr = {"files": [{"path": path, "additions": 3, "deletions": 0}]}
+                self.assertNotEqual(xt.merge_lane_reasons(pr, []), [])
+        doc = {"files": [{"path": "docs/guide.md", "additions": 3, "deletions": 0}]}
+        self.assertEqual(xt.merge_lane_reasons(doc, []), [])
 
     def test_is_test_path_and_docs_lane(self):
         """Review #322: thư mục test/spec dưới docs không phải test (spec OpenAPI), tên test trong docs vẫn là test."""
