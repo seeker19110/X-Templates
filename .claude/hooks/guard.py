@@ -233,8 +233,10 @@ def _match_any(rel: str, patterns: Tuple[str, ...]) -> bool:
 
 def classify_path(rel: str) -> str:
     """'secret' | 'gate' | 'evidence' | 'capability' | 'migration' | ''."""
-    if rel == ".autopilot" or rel.startswith(".autopilot/"):
-        return "evidence"  # bằng chứng + trạng thái vòng: chỉ `xt.py loop …` ghi (AUD-HAR-024)
+    if rel == ".autopilot" or rel.startswith(".autopilot/") or rel == STAGE_LEDGER:
+        return (
+            "evidence"  # bằng chứng + trạng thái vòng/giai đoạn: chỉ `xt.py loop|stage …` ghi (AUD-HAR-024, ADR-0058)
+        )
     if _match_any(rel, SECRET_PATTERNS) and not rel.endswith((".example", ".sample", ".template")):
         return "secret"
     if _match_any(rel, GATE_PATTERNS):
@@ -343,7 +345,7 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
     if kind == "evidence":
         return "ask", (
             f"Ghi tay bằng chứng/trạng thái autopilot ({rel}) = bằng chứng giả (P1, ADR-0026). Dùng `xt.py loop …`/"
-            "`xt.py pr reviewed`; cần sửa tay thì người làm."
+            "`xt.py stage …`/`xt.py pr reviewed`; cần sửa tay thì người làm."
         )
     if kind == "migration" and os.path.exists(os.path.join(root, rel)):
         return "ask", (
@@ -2620,6 +2622,22 @@ MCP_REVIEW_POST_RE = re.compile(
 REVIEW_FORGE_WHY = (
     "ghi tay bằng chứng review (dấu `xt-review v1` trên PR) — chỉ `xt.py pr reviewed` đăng (ADR-0026/0027)"
 )
+# Sổ giai đoạn sản phẩm (ADR-0058) — chỉ `xt.py stage …` ghi; duyệt/công nhận giai đoạn là việc của người.
+STAGE_LEDGER = "docs/autopilot/STAGE.json"
+STAGE_APPROVE_WHY = (
+    "duyệt giai đoạn sản phẩm (`xt.py stage approve`/`init --adopt`) — chỉ người, ngoài phiên agent (ADR-0058)"
+)
+
+
+def _approves_stage(argv: List[str]) -> bool:
+    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ)."""
+    n = normalize(argv)
+    at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
+    rest = n[at + 1 :]
+    if "stage" not in rest:
+        return False
+    tail = rest[rest.index("stage") + 1 :]
+    return "approve" in tail or ("init" in tail and any(t.startswith("--adopt") for t in tail))
 
 
 def _forges_review(argv: List[str]) -> bool:
@@ -7027,6 +7045,7 @@ def bash_decision(
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
     asks += [REVIEW_FORGE_WHY] if any(_forges_review(c) for c in split_commands(tokens)) else []
+    asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (
         "Lệnh quá phức tạp để guard quét hết (brace expansion quá nhiều biến thể): chia nhỏ lệnh."
@@ -7093,6 +7112,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("bỏ qua hook của dự án", "HOOK_BYPASS"),
     ("ghi file bí mật qua Bash", "SECRET_WRITE"),
     ("bằng chứng review", "REVIEW_FORGE"),
+    ("duyệt giai đoạn sản phẩm", "STAGE_APPROVE"),  # chỉ người duyệt giai đoạn (ADR-0058)
     ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
     (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)

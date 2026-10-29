@@ -1,7 +1,7 @@
 ---
 title: Vòng đời dự án và các cổng
 kind: method
-updated: 2026-10-25
+updated: 2026-10-29
 ---
 
 # Vòng đời dự án và các cổng
@@ -45,6 +45,12 @@ updated: 2026-10-25
    riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường); mỗi đợt xong (task xanh, MUST
    blueprint còn mở ghi số, không chặn) → audit delta → sửa/đợt kế, lặp tới khi **hết việc** (PLAN hết task, 0 MUST mở ngoài việc chờ người, 0 🔴/🟠) và audit toàn diện sạch, rồi đề xuất `/complete` (ADR-0047); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
    ca biên) và G7 thuộc pha hoàn thiện (`/complete`). Sàn an toàn (guard, điểm dừng, Gate máy, CI xanh) không đổi theo pha.
+7. **Ba giai đoạn sản phẩm khoá tuần tự (ADR-0058 của repo khung).** Trên cùng chu trình Ý tưởng → Nghiên cứu → Đặc tả →
+   Thiết kế → Lập trình → Kiểm thử → Audit → Tối ưu → Production → Vận hành → Tăng trưởng, dự án đi **MVP** (bản thử chủ dự án
+   duyệt) → **hoàn thiện** (phạm vi đã duyệt, G7, phát hành) → **tối ưu** (cải tiến có số). Giai đoạn chưa được **người** duyệt
+   (`xt.py stage approve`) thì giai đoạn sau khoá bằng máy: PLAN khai `Giai đoạn sản phẩm: N (C-NNN)`, `loop` từ chối giai đoạn
+   khoá, `release-check` FAIL ở MVP. Giai đoạn ≠ pha build/harden (chế độ kiểm soát merge). Dùng khi có `docs/autopilot/STAGE.json`
+   (`xt.py stage init`); ma trận 11 bước × 3 giai đoạn: `docs/autopilot/upgrades/2026-10-29-three-stage-delivery.md` của repo khung.
 
 ## Quy mô S/M/L — làm nhẹ đi chứ không bỏ
 
