@@ -4752,18 +4752,24 @@ def _doctor_state(base: Path) -> List[Finding]:
     return _doctor_loop(st, base)
 
 
+def _halted_loop_exit(st: Dict[str, Any], base: Path) -> str:
+    """Lối ra của vòng bị chặn/dừng — một nhà cho `doctor` và `stage submit` (review #332/#333): đã kết thúc →
+    `_loop_exit`; còn bật → thứ tự như `_unblock_problem`: PLAN trước ngân sách."""
+    if not st.get("active"):
+        return _loop_exit(st, base)[1]
+    live = not _budget_spent(st)
+    if not _plan_tasks(base, st):
+        return _plan_lost_exit(st, live)
+    return EXIT_UNBLOCK if live else EXIT_BUDGET
+
+
 def _doctor_loop(st: Dict[str, Any], base: Path) -> List[Finding]:
     """Cảnh báo vòng bị chặn/mất PLAN — lối ra lấy từ đúng helper của `loop init`/`attach`/`unblock` (D-208, review #296)."""
+    if st.get("blocked"):
+        end = _halted_loop_exit(st, base)
+        return [Finding("state", "warn", f"autopilot đang BLOCKED: {st.get('blocked_reason') or '?'} — {end}")]
     active = bool(st.get("active"))
     live, plan_ok = active and not _budget_spent(st), bool(_plan_tasks(base, st))
-    if st.get("blocked"):  # thứ tự như `_unblock_problem`/`_loop_exit`: PLAN trước ngân sách
-        if not active:
-            end = _loop_exit(st, base)[1]
-        elif not plan_ok:
-            end = _plan_lost_exit(st, live)
-        else:
-            end = EXIT_UNBLOCK if live else EXIT_BUDGET
-        return [Finding("state", "warn", f"autopilot đang BLOCKED: {st.get('blocked_reason') or '?'} — {end}")]
     plan = st.get("plan")
     if active and plan and not plan_ok:
         return [Finding("state", "warn", f"vòng lặp đang bật (PLAN `{plan}`) nhưng {_plan_lost_exit(st, live)}")]
@@ -10037,17 +10043,6 @@ def _stage_init(led: Optional[Dict[str, Any]], adopt: Optional[int], by: str, ev
     return new
 
 
-def _stage_loop_exit(st: Dict[str, Any], base: Path) -> str:
-    """Lối ra của vòng bị chặn/dừng — cùng nhà với `attach`/`unblock` (review #332): vòng còn bật → `_blocked_exit`, đã
-    kết thúc → `_loop_exit`."""
-    if not st.get("active"):
-        return _loop_exit(st, base)[1]
-    live = not _budget_spent(st)  # cùng nhánh với `_doctor_loop`: hết ngân sách → `loop init`, không `unblock` (#332)
-    if not _plan_tasks(base, st):
-        return _plan_lost_exit(st, live)
-    return EXIT_UNBLOCK if live else EXIT_BUDGET
-
-
 def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     """Bằng chứng máy cho bản trình (ADR-0058 lát C): dự án chạy vòng (`state.json` có) → kiểm lại cuối phải xanh trên
     đúng cây này (`loop verify --all`, LOOP-DESIGN-022); không chạy vòng → ghi rõ "không có". Cách chạy thử: khoá
@@ -10056,7 +10051,7 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     if st:
         v = _batch_verdict(base, st)
         if v["verdict"] not in ("done", PENDING_HUMAN):  # PLAN còn task: bản trình thiếu việc (review #330)
-            hint = f" — {_stage_loop_exit(st, base)}" if v["verdict"] == "blocked" else ""
+            hint = f" — {_halted_loop_exit(st, base)}" if v["verdict"] in ("blocked", "budget") else ""
             raise StageError(f"chưa trình được — vòng chưa xong ({v['verdict']}: {v.get('reason', '')}){hint}")
         why = final_check(base)
         if why:
