@@ -2072,6 +2072,31 @@ class InstallStageTest(unittest.TestCase):
         empty = subprocess.CompletedProcess([], 0, "", "")  # xt.py tối giản/cũ không có `stage` JSON
         with mock.patch.object(install, "run_stage", return_value=empty):
             self.assertIn("⚠ không kiểm được sổ giai đoạn (JSONDecodeError", self.install())
+        same = subprocess.CompletedProcess([], 2, "", "sổ ở ref khác")  # init và status cùng lý do: một dòng ⚠
+        with mock.patch.object(install, "run_stage", side_effect=[same, same]):
+            self.assertEqual(self.install("--stage-init").count("sổ ở ref khác"), 1)
+
+    def test_git_subdir_not_initialised(self):
+        """Review #339: đích là thư mục con của repo git — `xt.py stage` dùng gốc repo, `release-check` đọc dự án → không
+        tạo/kiểm sổ, một dòng ⚠; plan báo không init."""
+        subprocess.run(["git", "init", "-q", str(self.target)], check=True)
+        root, self.target = self.target, self.target / "apps" / "web"
+        self.target.mkdir(parents=True)
+        self.ledger = self.target / install.STAGE_LEDGER
+        self.assertFalse(self.plan("--stage-init")["init"])
+        out = self.install("--stage-init")
+        self.assertIn(f"là thư mục con của repo git ({root}) — `xt.py stage` sẽ dùng sổ ở gốc repo", out)
+        self.assertIn("bỏ qua --stage-init", out)
+        self.assertFalse((root / install.STAGE_LEDGER).exists() or self.ledger.exists())
+        self.assertNotIn("bỏ qua --stage-init", self.install())
+
+    def test_stage_ignores_session_project_dir(self):
+        """Review #339: installer chạy dưới hook (CLAUDE_PROJECT_DIR = repo khác) vẫn tạo sổ ở dự án đích."""
+        decoy = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(decoy)}):
+            self.install("--stage-init")
+        self.assertTrue(self.ledger.exists())
+        self.assertEqual(list(decoy.iterdir()), [])
 
 
 if __name__ == "__main__":
