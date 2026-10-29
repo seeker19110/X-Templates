@@ -364,11 +364,18 @@ class StageCliTest(TmpRepoCase):
         self.commit("smoke ghi dấu")  # sổ đang `awaiting_approval`
         self.assertIn("chỉ trình duyệt khi giai đoạn đang `active`", self.stage("submit", "--evidence", "x")[2])
         self.assertFalse(mark.exists())
+        self.stage("reopen", "--reason", "x")
+        xt.write_state({"active": False, "plan": "P.md"}, self.repo)
+        busy = {"verdict": "continue", "reason": "còn T-002", "task": "T-002"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=busy):  # kiểm lại cuối trước smoke
+            self.assertIn("vòng chưa xong", self.stage("submit", "--evidence", "x")[2])
+        self.assertFalse(mark.exists())
 
     def test_gate_tail_redacts_then_cuts(self):
         """Review #336: che bí mật trên cả output rồi mới cắt đuôi; hết giờ giữ dòng `timeout:`."""
         pem = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0g=\nSUpLTE1OT1A=\n-----END PRIVATE KEY-----\nfail"
-        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- *** fail")  # cắt trước → lộ dòng thân cuối
+        self.assertEqual(xt._gate_tail(1, pem), "-----BEGIN PRIVATE KEY----- ***")  # cắt trước → lộ dòng thân cuối
+        self.assertEqual(xt._gate_tail(1, "deploy --password\nhunter2-secret"), "deploy --password ***")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na\nb\nc"), "timeout: quá 1 giây a b c")
         self.assertEqual(xt._gate_tail(124, "timeout: quá 1 giây\na"), "timeout: quá 1 giây a")
         self.assertEqual(xt._gate_tail(1, "x\na\nb\nc"), "a b c")

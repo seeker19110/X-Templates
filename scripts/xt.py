@@ -10523,12 +10523,12 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
 
 def _gate_tail(code: int, out: str) -> str:
     """Đuôi log ≤ 300 ký tự cho lời báo: che bí mật trên CẢ output trước khi cắt (khối PEM mất dòng BEGIN thì không còn
-    che được — review #336), hết giờ giữ dòng `timeout:` đầu output."""
+    che được) và lại trên đuôi đã nối (review #336); hết giờ giữ dòng `timeout:` đầu output."""
     lines = redact(out).strip().splitlines()
     keep = lines[-3:]
     if code == 124 and lines[:1] != keep[:1]:
         keep = lines[:1] + keep
-    return " ".join(keep)[:300]
+    return redact(" ".join(keep))[:300]  # lần hai trên một dòng: cờ ở dòng trước, giá trị ở dòng sau (`--password⏎x`)
 
 
 def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
