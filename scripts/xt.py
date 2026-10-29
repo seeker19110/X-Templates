@@ -7381,7 +7381,13 @@ def stage_facts(base: Path) -> Optional[Dict[str, Any]]:
     return {"cycle": led["cycle"], "stage": led["stage"], "status": led["status"], "sha": sub.get("sha")}
 
 
-def _step_stage(sf: Optional[Dict[str, Any]]) -> StepPart:
+def _awaiting_mvp(f: Dict[str, Any], harden: bool) -> bool:
+    """Build ở giai đoạn 1 đã trình, chờ người duyệt (ADR-0058)."""
+    sf = f.get("stage") or {}
+    return not harden and sf.get("stage") == 1 and sf.get("status") == "awaiting_approval"
+
+
+def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
     """Build hết việc ở giai đoạn MVP (ADR-0058 lát D): không đề xuất `/complete` khi người chưa duyệt MVP — `stage-submit`
     (trình bản HEAD, báo người, dừng) hay `wait-approval` (đã trình, chờ người); sổ hỏng → `blocked`. Giai đoạn 2/3 → None."""
     if sf is None:
@@ -7393,32 +7399,35 @@ def _step_stage(sf: Optional[Dict[str, Any]]) -> StepPart:
     if sf["status"] == "awaiting_approval":
         return {
             "action": "wait-approval",
-            "reason": f"MVP ({sf['cycle']}) đã trình bản {str(sf['sha'])[:12]}, chờ người `stage approve` — dừng; người yêu"
-            " cầu sửa → `stage reopen` rồi làm tiếp giai đoạn 1",
+            "reason": f"MVP ({sf['cycle']}) đã trình bản {str(sf['sha'])[:12]}, chờ người `stage approve`{pending} — dừng;"
+            " người yêu cầu sửa → `stage reopen` rồi làm tiếp giai đoạn 1",
             "missing": ["người duyệt MVP (`stage approve`)"],
         }
     return {
         "action": "stage-submit",
-        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) hết việc máy làm được — `stage submit --evidence <cách chạy thử +"
-        " tiêu chí>`, commit + push sổ, báo người duyệt, dừng; không sang giai đoạn sau (ADR-0058)",
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) hết việc máy làm được{pending} — `stage submit --evidence <cách chạy"
+        " thử + tiêu chí>`, commit + push sổ, báo người duyệt, dừng; không sang giai đoạn sau (ADR-0058)",
         "missing": ["`stage submit`", "người duyệt MVP (`stage approve`)"],
     }
 
 
 def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
     """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
-    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178);
+    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178) —
+    hoặc, có sổ giai đoạn ở giai đoạn 1, ở `stage-submit`/`wait-approval` (ADR-0058);
     `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký)."""
     harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
+    if loop and loop["action"] == "verify" and _awaiting_mvp(f, harden):
+        loop = None  # bản trình đã kiểm lại cuối lúc `submit`; commit sổ/PROGRESS sau đó không bắt chạy lại Gate (review #330)
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
     if part is None and harden:
         part = _step_signoff(f)
+    pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
     if part is None and not harden:
-        part = _step_stage(f.get("stage"))
+        part = _step_stage(f.get("stage"), pending)
     if part is None:
-        pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
         part = {
             "action": "ready-for-complete",
             "reason": "PLAN hết task, PR đã xong, sổ audit phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
@@ -9981,7 +9990,7 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
             raise StageError(f"chưa trình được — {why}")
         proof = "loop verify --all xanh trên cây này"
     else:
-        proof = "không chạy vòng autopilot — không có kiểm lại cuối"
+        proof = "không có `.autopilot/state.json` ở cây này — không có kiểm lại cuối"
     try:
         preview = _xt_keys(base).get("preview", "")
     except (OSError, ValueError):

@@ -258,7 +258,8 @@ class StageCliTest(TmpRepoCase):
         self.assertEqual(rc, 0)
         sub = self.led()["submitted"]
         self.assertEqual(
-            (sub["preview"], sub["verified"]), ("make demo", "không chạy vòng autopilot — không có kiểm lại cuối")
+            (sub["preview"], sub["verified"]),
+            ("make demo", "không có `.autopilot/state.json` ở cây này — không có kiểm lại cuối"),
         )
         self.assertIn("chạy thử: make demo", self.stage("status")[1])
         self.stage("reopen", "--reason", "sửa")
@@ -458,6 +459,65 @@ class StageLockTest(TmpRepoCase):
         self.assertEqual(rc, 2)
         self.assertIn("đang mở giai đoạn 1", err)
         self.assertFalse((self.repo / ".autopilot" / "evidence" / "T-001.json").exists())
+
+    def step(self):
+        """`next-step` build trên dữ kiện thật của repo (sổ, vòng, kiểm lại cuối); sổ audit/MUST coi như sạch."""
+        f = xt.next_step_facts(self.repo, xt.read_state(self.repo) or {}, "S.md", [])
+        f.update(
+            audit={
+                **f["audit"],
+                "exists": True,
+                "sha256": "0" * 64,
+                "scanned": ["b" * 40],
+                "errors": [],
+                "open": 0,
+                "debt": {},
+            },
+            open_must=0,
+        )
+        return xt.next_step(f)
+
+    def test_submit_then_commit_ledger_still_waits(self):
+        """Review #330: verify xanh → `stage-submit`; trình → `wait-approval`; commit sổ (đổi HEAD) vẫn `wait-approval`,
+        không bắt chạy lại mọi Gate. Đường nối thật `next_step_facts` → `stage_facts` (SHA bản trình)."""
+        self.assertEqual(run_main("stage", "init")[0], 0)
+        self.plan("> Giai đoạn sản phẩm: 1 (C-001)")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "khởi tạo")
+        self.assertEqual(run_main("loop", "init", "--plan", self.PLAN)[0], 0)
+        self.assertEqual(run_main("loop", "record", "--task", "T-001", "--", "true")[0], 0)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "T-001")
+        self.assertEqual(run_main("loop", "verify", "--all")[0], 0)
+        self.assertEqual(self.step()["action"], "stage-submit")
+        self.assertEqual(run_main("stage", "submit", "--evidence", "demo")[0], 0)
+        sha = self.git("rev-parse", "HEAD").strip()
+        out = self.step()
+        self.assertEqual(out["action"], "wait-approval")
+        self.assertIn(sha[:12], out["reason"])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "sổ: trình MVP")
+        self.assertEqual(self.step()["action"], "wait-approval")
+        f = xt.next_step_facts(self.repo, xt.read_state(self.repo), "S.md", [])
+        self.assertEqual(f["stage"]["sha"], sha)
+        pending = xt.next_step(
+            {
+                **f,
+                "audit": {
+                    **f["audit"],
+                    "exists": True,
+                    "sha256": "0" * 64,
+                    "scanned": ["b" * 40],
+                    "errors": [],
+                    "open": 0,
+                    "debt": {},
+                },
+                "open_must": 0,
+            }
+            | {"stage": {**f["stage"], "status": "active", "sha": None}}
+            | {"verdict": {"verdict": xt.PENDING_HUMAN, "reason": "T-009 chờ người duyệt pháp lý"}, "final_check": None}
+        )
+        self.assertIn("T-009 chờ người duyệt pháp lý", pending["reason"])  # không mất lý do chờ người (review #330)
 
     def test_after_human_approval_switch_plan_with_force(self):
         """Ca W (review #327), D-241: người duyệt khi vòng giai đoạn 1 còn task → `record` từ chối kèm lối ra đúng; verdict và
