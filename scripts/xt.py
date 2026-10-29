@@ -7461,8 +7461,26 @@ def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
     }
 
 
+def _harden_stage_lock(sf: Optional[Dict[str, Any]]) -> StepPart:
+    """`harden-to-signoff` khi sổ giai đoạn hỏng hoặc MVP chưa được người duyệt → `blocked` trước mọi bước khác: không gom
+    việc harden, không trả gói nghiệm thu (ADR-0058, D-246). Không sổ / giai đoạn 2–3 → None."""
+    if sf is None or sf.get("stage") not in (None, 1):
+        return None
+    if "error" in sf:
+        return _step_stage(sf)
+    return {
+        "action": "blocked",
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) chưa được người duyệt — `/complete` khoá (ADR-0058, D-246): build"
+        " `loop next-step` tới `stage-submit`, người `stage approve` rồi mới harden",
+        "missing": ["người duyệt MVP (`stage approve`)"],
+    }
+
+
 def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
     """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: vòng → PR → sổ audit → việc → gói/giai đoạn."""
+    lock = _harden_stage_lock(f.get("stage")) if harden else None
+    if lock:
+        return lock
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
     if _awaiting_mvp(f, harden):
@@ -10009,7 +10027,23 @@ def stage_plan_problem(base: Path, plan: str) -> str:
     want = f"Giai đoạn sản phẩm: {led['stage']} ({led['cycle']})"
     if len(got) != 1:
         return f"{plan} phải khai đúng một dòng `{want}` (đang có {len(got)}) — ADR-0058"
-    return _stage_mismatch(plan, got[0], led, want)
+    return _stage_mismatch(plan, got[0], led, want) or _stage_kind_problem(plan, led)
+
+
+STAGE_SKILL_PLANS = (("harden", 2, "/complete"), ("opt", 3, "/optimize"))  # tên PLAN do skill đặt (D-246)
+
+
+def _stage_kind_problem(plan: str, led: Dict[str, Any]) -> str:
+    """PLAN của `/complete` (`PLAN-harden-*`) chỉ từ giai đoạn 2, của `/optimize` (`PLAN-opt-*`) chỉ ở giai đoạn 3; '' = được.
+    Audit/tối ưu vừa đủ của giai đoạn đang mở đi trong PLAN thường của nó (ADR-0058 §3, D-246)."""
+    m = re.match(r"PLAN-(harden|opt)(?![A-Za-z0-9])", Path(plan).name)
+    for kind, need, skill in STAGE_SKILL_PLANS:
+        if m and m.group(1) == kind and led["stage"] < need:
+            return (
+                f"{plan} là PLAN của `{skill}` — chỉ từ giai đoạn {need}, đang mở giai đoạn {led['stage']} ({led['cycle']});"
+                " việc audit/sửa/tối ưu của giai đoạn này vào PLAN thường của nó (ADR-0058, D-246)"
+            )
+    return ""
 
 
 def _stage_mismatch(plan: str, got: Tuple[int, str], led: Dict[str, Any], want: str) -> str:
