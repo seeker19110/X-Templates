@@ -1,7 +1,7 @@
 # ADR-0058: Ba giai đoạn sản phẩm (MVP → hoàn thiện → tối ưu) khoá bằng máy, người duyệt từng giai đoạn
 
 - **Trạng thái:** Đã chấp nhận (chủ dự án 2026-10-29: ưu tiên tốc độ qua ba giai đoạn tuần tự, giai đoạn trước chưa xong thì giai đoạn sau bị khoá — đặc tả #325; phiên chính tự duyệt cách khoá theo tiêu chí chất lượng cuối, ADR-0008 — D-239)
-- **Trạng thái triển khai:** Lát A+B đã triển khai — `scripts/xt.py` `stage …`, `stage_plan_problem` ở `loop init/next/record`, hàng `stage` của `release-check`; guard: sổ là `evidence`, `stage approve`/`init --adopt` bị deny; test `tests/test_stage.py`. Lát C–F (Gate MVP/preview, `/complete` `/optimize` theo giai đoạn, installer/migration, nâng dự án đích) chưa làm — [đặc tả](../autopilot/upgrades/2026-10-29-three-stage-delivery.md) §8.
+- **Trạng thái triển khai:** Lát C–D (phần máy) đã triển khai: `stage submit` đòi kiểm lại cuối xanh trên cây (`loop verify --all`) khi dự án chạy vòng và ghi khoá `preview` của `xt.yaml`; `loop next-step` (build) trả `stage-submit`/`wait-approval` thay `ready-for-complete` ở giai đoạn 1. Lát A+B đã triển khai — `scripts/xt.py` `stage …`, `stage_plan_problem` ở `loop init/next/record`, hàng `stage` của `release-check`; guard: sổ là `evidence`, `stage approve`/`init --adopt` bị deny; test `tests/test_stage.py`. Lát C–F (Gate MVP/preview, `/complete` `/optimize` theo giai đoạn, installer/migration, nâng dự án đích) chưa làm — [đặc tả](../autopilot/upgrades/2026-10-29-three-stage-delivery.md) §8.
 - **Ngày:** 2026-10-29
 - **Làm rõ:** ADR-0031 (`delivery_phase: build|harden` là chế độ kiểm soát, KHÔNG phải giai đoạn sản phẩm — giữ nguyên), ADR-0046/0047 (`/autopilot` lặp tới hết việc, `/complete` harden), ADR-0048 (`/optimize`), ADR-0026 (ghi tay `.autopilot/` = bằng chứng giả), ADR-0052 §2 (khoá `state.lock`).
 
@@ -69,8 +69,9 @@ attestation = mệnh đề có chủ thể (artefact) + vị ngữ (metadata), g
   commit (đo ≈ 2,5 s ở 300k commit), repo cực lớn cần cache (việc sau). Ai có quyền ghi repo sửa được sổ và tự viết `approve` hợp lệ (như sổ audit); `by` là cấu hình git tự khai, không phải chữ ký. Squash
   merge làm SHA đã trình không còn trên nhánh chính — `approve` so chuỗi SHA đã trình. Chữ ký thật (attestation SLSA/in-toto, tag ký,
   tree-hash) là việc sau nếu cần.
-- Chưa làm (đặc tả §8): Gate MVP/preview, định tuyến `/complete`/`/optimize` theo giai đoạn ngoài dòng nhắc trong skill, `/optimize`
-  cho mục tiêu tính năng/mã nguồn khi chưa đỏ, `loop next-step` đề xuất `stage submit`, installer tạo sổ, nâng dự án đích.
+- Chưa làm (đặc tả §8): Gate MVP riêng ngoài kiểm lại cuối (smoke trên bản preview), định tuyến `/complete`/`/optimize` theo giai
+  đoạn ngoài dòng nhắc trong skill và `next-step` harden, `/optimize` cho mục tiêu tính năng/mã nguồn khi chưa đỏ, installer tạo
+  sổ, nâng dự án đích.
 
 ## Đường lùi
 

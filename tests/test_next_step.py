@@ -41,6 +41,7 @@ def facts(**over: Any) -> dict[str, Any]:
         "harden": [],
         "signoff": {"release": None, "release_changed": None, "package": None, "package_changed": None}
         | {"evidence_fp": FP, "deferred": []},
+        "stage": None,
         "state": {"rev": 3, "plan": "P.md", "iterations": 2, "max_iterations": 40, "deadline": None, "batches": []},
     }
     for k, v in over.items():
@@ -304,6 +305,25 @@ class NextStepPureTest(unittest.TestCase):
         self.assertEqual(out["action"], "replan")
         stale = {"package": old, "release": go, "release_changed": ["app.py"], "package_changed": ["app.py"]}
         self.assertIn("gói nghiệm thu hết hạn", self.step(objective=HARDEN, signoff=stale)["reason"])
+
+    def test_stage_gates_ready_for_complete(self) -> None:
+        """ADR-0058 lát D: build hết việc ở giai đoạn MVP → `stage-submit` / `wait-approval` thay `ready-for-complete`;
+        giai đoạn 2/3 hay không dùng sổ → như cũ; sổ hỏng → `blocked`; harden không đọc sổ."""
+        mvp = {"cycle": "C-001", "stage": 1, "status": "active", "sha": None}
+        out = self.step(stage=mvp)
+        self.assertEqual((out["action"], out["missing"][0]), ("stage-submit", "`stage submit`"))
+        self.assertIn("không sang giai đoạn sau", out["reason"])
+        out = self.step(stage={**mvp, "status": "awaiting_approval", "sha": "c" * 40})
+        self.assertEqual(out["action"], "wait-approval")
+        self.assertIn(f"đã trình bản {'c' * 12}", out["reason"])
+        self.assertEqual(self.step(stage={**mvp, "stage": 2})["action"], "ready-for-complete")
+        self.assertEqual(self.step(stage={"error": "STAGE.json hỏng: x"})["action"], "blocked")
+        self.assertEqual(self.step(objective=HARDEN, stage=mvp)["action"], "release-check")
+        busy = {"verdict": "continue", "reason": "còn task", "task": "T-002"}
+        self.assertEqual(self.step(stage=mvp, verdict=busy)["action"], "task")  # còn việc thì làm trước
+        old = facts()
+        del old["stage"]  # `inputs` cũ (trước lát D) vẫn phát lại được
+        self.assertEqual(xt.next_step(old)["action"], "ready-for-complete")
 
     def test_loop_before_prs(self) -> None:
         wait = [{"pr": "4", "head": "4" * 40, "action": "wait", "why": ""}]
@@ -625,6 +645,21 @@ class HardenWorkTest(StateCase):
         self.assertTrue(xt._signoff_excluded("PROGRESS.md"))  # commit cuối mọi PR mang PROGRESS (review #326)
         self.assertFalse(xt._signoff_excluded("docs/PROGRESS.md"))
 
+    def test_stage_facts(self) -> None:
+        self.assertIsNone(xt.stage_facts(self.base))
+        led = self.base / xt.STAGE_LEDGER
+        led.parent.mkdir(parents=True, exist_ok=True)
+        hist = [{"event": "init", "cycle": "C-001", "stage": 1}]
+        led.write_text(
+            json.dumps(
+                {"schema": 1, "cycle": "C-001", "stage": 1, "status": "active", "submitted": None, "history": hist}
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(xt.stage_facts(self.base), {"cycle": "C-001", "stage": 1, "status": "active", "sha": None})
+        led.write_text("{", encoding="utf-8")
+        self.assertIn("không đọc được", xt.stage_facts(self.base)["error"])
+
     def test_facts_only_gather_for_harden(self) -> None:
         self.book("AUD-A-001 | 🟠 | mở | a | x | `true` | —")
         self.assertEqual(xt.next_step_facts(self.base, self.st(), "S.md", [])["harden"], [])
@@ -685,7 +720,7 @@ class NextStepCliTest(StateCase):
         bad = {
             "--release": ("{", "[]", json.dumps({**rel, "head": "HEAD"}), json.dumps({**rel, "fails": "x"})),
             "--package": (json.dumps({"package": None}), json.dumps({**pkg, "evidence_fp": "x"}))
-            + (json.dumps({**pkg, "human_pending": [1]}), "[]"),
+            + (json.dumps({**pkg, "human_pending": [1]}), "[]", json.dumps({**pkg, "candidate_head": "c" * 50})),
         }
         for flag, texts in bad.items():
             for text in texts:
