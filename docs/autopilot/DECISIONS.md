@@ -1728,6 +1728,13 @@
 - Lý do (tiêu chí chất lượng cuối): Đúng: không biết lỗi chặn cũ thì không sửa được — review toàn PR ở head mới là nguồn sự thật duy nhất; ba task sửa chung next_step/next_step_facts (D-244) nên tách PR tốn rebase/xung đột mà không giảm rủi ro; đóng PR bỏ phí 880 dòng đã qua gate-fast
 - Đường lùi: Tách PR theo ba commit 1271133, 64cbd2a, 6ff2b99
 
+### D-246 · 2026-10-29T13:19:59+00:00 · ADR-0058 lát D: chặn /complete và /optimize theo giai đoạn bằng máy (trước chỉ là dòng nhắc trong skill) — dấu hiệu nào?
+
+- Phương án: (1) Tên PLAN do skill đặt: PLAN-harden-* cần giai đoạn ≥ 2, PLAN-opt-* cần giai đoạn 3 (kiểm ở stage_plan_problem = loop init/next/record); next-step harden-to-signoff ở giai đoạn 1 hoặc sổ hỏng → blocked · (2) Dòng khai mới trong PLAN (Loại: harden|opt) — đổi mẫu PLAN và mọi dự án đích · (3) Theo delivery_phase của xt.yaml
+- Chọn: Tên PLAN do skill đặt: PLAN-harden-* cần giai đoạn ≥ 2, PLAN-opt-* cần giai đoạn 3 (kiểm ở stage_plan_problem = loop init/next/record); next-step harden-to-signoff ở giai đoạn 1 hoặc sổ hỏng → blocked
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: khoá ở đúng ba lối vào vòng đã có (D-241), next-step harden không còn trả signoff-package ở MVP; phương án 3 sai vì dự án giữ harden sau phát hành (ADR-0037) nên chu kỳ mới ở giai đoạn 1 sẽ bị khoá oan; (3) đơn giản: tên PLAN đã do skill cố định, không đổi mẫu/dự án đích như phương án 2; đổi tên để lách là lỗi cố ý — guard là lớp đỡ nhầm (ADR-0058)
+- Đường lùi: Bỏ _stage_kind_problem khỏi stage_plan_problem và _harden_stage_lock khỏi _next_step_part; skill quay về dòng nhắc
+
 ### D-249 · 2026-10-29T13:18:02+00:00 · ADR-0058 lát E: installer/migration với sổ giai đoạn — install.py tạo sổ cho dự án mới thế nào, dự án cũ thì sao?
 
 - Phương án: (1) install.py không tự đoán giai đoạn: cờ --stage-init (chỉ khi người/agent chọn, dự án mới) chạy xt.py stage init của bản vừa cài; mọi lần cài, sau khi cài chạy 'stage status' bằng xt.py mới (kiểm sau cài: sổ cũ còn hợp lệ với bản mới) rồi báo: có sổ → giữ nguyên, in giai đoạn; sổ hỏng → ⚠ + lý do; vắng → in hai lối (dự án mới: stage init; đã chạy/production: người stage init --adopt ở terminal riêng); --plan có khoá stage · (2) Cài mới (chưa có xt.yaml) tự tạo sổ giai đoạn 1 · (3) Không đổi installer, chỉ ghi tài liệu

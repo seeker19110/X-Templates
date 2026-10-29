@@ -231,7 +231,7 @@ Nghiên cứu bổ sung đối chiếu 2026-10-29 qua `researcher` (WebFetch tó
 
 ## 11. Trạng thái bàn giao
 
-**Cập nhật 2026-10-29 (ADR-0058):** lát A+B có mã, test và guard; PR riêng. Vẫn chưa: Gate MVP/preview (C), định tuyến `/complete`/`/optimize` theo giai đoạn ngoài dòng nhắc trong skill và `/optimize` cho mục tiêu tính năng/mã nguồn (D), installer/migration (E), nâng dự án đích (F). Phần dưới là trạng thái của PR đặc tả gốc.
+**Cập nhật 2026-10-29 (ADR-0058):** lát A+B có mã, test và guard; PR riêng. Lát C–D phần máy: `stage submit` đòi kiểm lại cuối + vân tay, `next-step` `stage-submit`/`wait-approval`/`stage-reopen`, `/complete`/`/optimize` khoá theo giai đoạn (D-246). Vẫn chưa: Gate MVP smoke trên preview (C), `/optimize` cho mục tiêu tính năng/mã nguồn (D), installer/migration (E), nâng dự án đích (F). Phần dưới là trạng thái của PR đặc tả gốc.
 
 
 PR này hoàn tất phần nghiên cứu/đặc tả: chu trình 11 bước được giữ nguyên, ma trận ba giai đoạn, vòng lặp/cổng, điểm tích hợp, migration và test cases. **Chưa sửa mã engine; chưa chạy kiểm thử engine mới; chưa phát hành; chưa áp dụng sang dự án đích.** Khi triển khai phải báo riêng: tài liệu, mã, test, merge, phát hành và target đã nâng. Không gọi tài liệu hoặc lời nhắc trong prompt là cơ chế khóa bằng máy.
