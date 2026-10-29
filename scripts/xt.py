@@ -9484,10 +9484,9 @@ def update_stage(base: Path, fn: Callable[[Optional[Dict[str, Any]]], Dict[str, 
         if why:  # lỗi lập trình: chặn trước khi ghi sổ sai
             raise StageError(f"chuyển giai đoạn tạo sổ sai: {why}")
         p = base / STAGE_LEDGER
-        fresh = not p.exists()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch()  # file mới theo umask như tài liệu khác (mkstemp tạo 0600 — review #327); keep_mode giữ quyền đó
         write_atomic(p, json.dumps(new, ensure_ascii=False, indent=2) + "\n", keep_mode=True)
-        if fresh:  # mkstemp tạo 0600 — sổ theo git như tài liệu: người khác đọc được (review #327)
-            os.chmod(p, 0o644)
         return new
 
 

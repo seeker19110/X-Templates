@@ -170,7 +170,9 @@ class StageCliTest(TmpRepoCase):
         self.assertIn("Chưa dùng", self.stage("status")[1])
         self.assertEqual(self.stage("init", agent=True)[0], 0)
         mode = stat.S_IMODE((self.repo / xt.STAGE_LEDGER).stat().st_mode)
-        self.assertEqual(mode, 0o644)  # sổ theo git: người khác đọc được
+        umask = os.umask(0)
+        os.umask(umask)
+        self.assertEqual(mode, 0o666 & ~umask)  # sổ theo git: quyền theo umask như file khác, không 0600 của mkstemp
         rc, _, err = self.stage("init")
         self.assertEqual(rc, 2)
         self.assertIn("đã có (C-001, giai đoạn 1)", err)
