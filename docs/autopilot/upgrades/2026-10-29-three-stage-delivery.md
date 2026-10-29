@@ -2,7 +2,7 @@
 
 Ngày: 2026-10-29. Phạm vi yêu cầu: **mọi dự án đích** của X-Templates, không phụ thuộc loại phần mềm hoặc stack.
 
-**Trạng thái: nghiên cứu và đặc tả nâng cấp, CHƯA triển khai engine.** Tài liệu này không tự thay đổi `xt.yaml`, scheduler, hook, CI, installer hoặc dự án đích. Những trường/lệnh mới được mô tả bên dưới là thiết kế đề xuất, không phải khả năng đang có. Merge tài liệu không đồng nghĩa máy đã khóa được chuyển giai đoạn.
+**Trạng thái: lát A+B đã triển khai bằng máy ([ADR-0058](../../adr/0058-product-stages-machine-lock.md), D-239)** — `xt.py stage`, sổ `docs/autopilot/STAGE.json`, khoá ở `loop init/next/record`, hàng `stage` của `release-check`, guard chặn agent duyệt/ghi tay sổ; test `tests/test_stage.py`. Lát C–F (§8) **chưa** làm: các mục khác bên dưới vẫn là thiết kế đề xuất, không phải khả năng đang có. Dự án chỉ chịu khoá khi có sổ (`xt.py stage init`); chưa dự án đích nào được nâng.
 
 ## 1. Hợp đồng sản phẩm đã chốt
 
@@ -116,6 +116,8 @@ Có thể cải tiến khi các chỉ số chưa đỏ nếu có mục tiêu gi�
 
 Trạng thái stage đề xuất: `locked → active → verifying → awaiting_approval → completed`. Có thể quay từ verifying/awaiting_approval về active khi cần sửa. `blocked` và `budget_exhausted` là lý do dừng, không phải hoàn thành.
 
+**Đã triển khai (ADR-0058):** sổ chỉ lưu `active | awaiting_approval | completed`. `locked` không ghi riêng — mọi giai đoạn sau giai đoạn đang mở là khoá. `verifying` gộp vào `active`: bằng chứng kiểm là của máy (`loop verify --all`, `release-check`), không phải một trạng thái người đọc. `blocked`/`budget_exhausted` vẫn là verdict của vòng (`loop status`), không chạm sổ. `completed` chỉ có sau khi người duyệt giai đoạn 3 — đóng chu kỳ; bài toán lớn mới mở chu kỳ kế bằng `stage new-cycle`. Ánh xạ thêm từ nghiên cứu: quyết định gate kiểu Stage-Gate (Go/Kill/Hold/Recycle) chỉ dùng **Go** (`approve`) và **Recycle** (`reopen`); Kill/Hold là quyết định của chủ dự án ngoài máy (dừng vòng, `loop block`). Kết quả "red" của GOV.UK service assessment = ở lại giai đoạn hiện tại — đúng nghĩa `reopen`.
+
 Chỉ `completed(1)` hợp lệ mở stage 2, chỉ `completed(2)` hợp lệ mở stage 3. Không có đường `1→3`. Không dùng CI xanh, hết task, hết phiên, hết tiền/token, `done-pending-human` hoặc sự im lặng của chủ dự án làm giấy phép chuyển stage.
 
 G0–G8 vẫn được tái sử dụng bên trong mô hình; không tạo thêm chín cổng duyệt thủ công. Bước nghiên cứu/thiết kế đã có đầu ra còn phù hợp được dùng lại; thay đổi chỉ cập nhật phần ảnh hưởng.
@@ -162,12 +164,12 @@ Auth, quyền, tiền, migration, secrets, thay đổi cổng/hook và rủi ro 
 
 ## 8. Kế hoạch triển khai kỹ thuật
 
-Các lát dưới đây là việc cần làm, **chưa có bằng chứng hoàn tất bằng mã** trong PR tài liệu này.
+Lát A+B đã có mã + test (ADR-0058); C–F là việc cần làm, **chưa có bằng chứng hoàn tất bằng mã**.
 
 | Lát | Phạm vi | Nghiệm thu |
 |---|---|---|
-| A — hợp đồng | ADR, schema stage/cycle/approval, mapping 11 bước, fixture | phân biệt batch/stage/control mode; schema có version; không tự công nhận state cũ/hỏng |
-| B — máy trạng thái | mở rộng state/lock, transition, task selector, next-step | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi entry point; không side effect khi từ chối |
+| A — hợp đồng ✅ | ADR-0058, `schema: 1` stage/cycle/approval, mapping 11 bước (§3), `tests/test_stage.py` | phân biệt batch/stage/control mode; schema có version; sổ hỏng/lịch sử lệch → chặn, không đoán |
+| B — máy trạng thái ✅ (trừ `next-step`) | `xt.py stage`, khoá `state.lock`, `loop init/next/record`, `release-check` | chặn 1→3, 2 trước 1, 3 trước 2 ở mọi lối vào vòng; từ chối không ghi sổ/bằng chứng. Còn: `loop next-step` đề xuất `stage submit` khi hết việc giai đoạn 1 |
 | C — MVP và duyệt | bản thử/artefact, Gate MVP, approval xác thực | đủ task nhưng chưa duyệt vẫn ở stage 1; yêu cầu sửa mở lại vòng stage 1 |
 | D — hoàn thiện và tối ưu | routing skill, release-check, mục tiêu performance/feature/code | stage 2 xử lý sàn; stage 3 có baseline/no-regression/rollback; giữ cổng phát hành |
 | E — mẫu và migration | installer, AGENTS, tài liệu, API/UI liên quan | dự án mới khóa đúng; dự án cũ giữ quyền/state; báo diff và đường lùi |
@@ -216,6 +218,20 @@ Không đặt cam kết nhanh hơn theo phần trăm khi chưa có baseline. Nha
 - **Anthropic — Effective harnesses for long-running agents:** tiến triển tăng dần, bàn giao rõ và test xuyên suốt để tránh tự kết luận hoàn tất. Bài gốc 2025. <https://www.anthropic.com/research/effective-harnesses-for-long-running-agents>
 - **GOV.UK — Beta / Live:** thử với nhóm giới hạn, lặp theo phản hồi, chuẩn bị vận hành rồi tiếp tục cải tiến sau phát hành; tham khảo cách tách trưởng thành và vòng lặp, không sao chép thủ tục hành chính. <https://www.gov.uk/service-manual/agile-delivery/how-the-beta-phase-works> và <https://www.gov.uk/service-manual/agile-delivery/how-the-live-phase-works>
 
+- **Stage-Gate (Cooper):** gate là điểm quyết định đầu tư do người giữ nguồn lực; kết quả Go/Kill/Hold/Recycle; bản lai Agile–Stage-Gate (RTM 59(1), 2016) giữ gate, chạy sprint bên trong stage. Nguồn vendor (Stage-Gate International), nghĩa Hold/Recycle chưa xác minh từ nguồn gốc. <https://www.stage-gate.com/blog/the-stage-gate-model-an-overview/>
+- **GOV.UK alpha + service assessment:** alpha "should not be available for the public to use"; kết quả đánh giá green (sang giai đoạn kế) / amber (đi tiếp, sửa trong ~3 tháng) / red (ở lại, đánh giá lại). <https://www.gov.uk/service-manual/agile-delivery/how-the-alpha-phase-works>, <https://www.gov.uk/service-manual/service-assessments/how-service-assessments-work>
+- **Eric Ries — MVP:** "that version of a new product which allows a team to collect the maximum amount of validated learning about customers" — mục đích MVP là học, nên giai đoạn 1 kết thúc ở duyệt/phản hồi, không ở phát hành. <https://leanstartup.co/what-is-an-mvp/>
+- **GitHub Environments:** required reviewers; người kích hoạt tự duyệt được khi tắt "Prevent self-review", admin bypass mặc định bật — ở repo một chủ, hành động GitHub của agent cùng tài khoản với chủ nên không làm nguồn phê duyệt (lý do chọn terminal ngoài phiên agent, ADR-0058). <https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-deployments/managing-environments-for-deployment>
+- **Google SRE — Reliable Product Launches:** Launch Coordination Engineering "acting as gatekeepers and signing off on launches"; checklist theo nhóm (dung lượng, failover, giám sát, bảo mật, rollout) — tham chiếu cho cổng giai đoạn 2. <https://sre.google/sre-book/reliable-product-launches/>
+- **DORA 2025:** AI là bộ khuếch đại điểm mạnh/yếu sẵn có; tăng throughput nhưng vẫn gắn với bất ổn khi thiếu test tự động, kiểm soát phiên bản, phản hồi nhanh — lý do giữ nguyên sàn an toàn ở cả ba giai đoạn. <https://dora.dev/research/2025/dora-report/>, chỉ số rework rate: <https://dora.dev/guides/dora-metrics/>
+- **SLSA attestation:** mệnh đề có xác thực gồm chủ thể (artefact) + vị ngữ (metadata), ký bởi bên tạo — hướng nâng cấp nếu cần chữ ký thật cho `approve` (hiện `by` là `git config` tự khai). <https://slsa.dev/spec/v1.0/attestation-model>
+- **Shape Up:** appetite = thời gian sẵn sàng bỏ ra, định hình phạm vi; circuit breaker = hết chu kỳ thì mặc định không gia hạn — khớp luật hết ngân sách không tự `completed`. <https://basecamp.com/shapeup/1.2-chapter-03>, <https://basecamp.com/shapeup/2.2-chapter-08>
+
+Nghiên cứu bổ sung đối chiếu 2026-10-29 qua `researcher` (WebFetch tóm tắt, không chép nguyên văn); mục ghi "chưa xác minh" giữ nguyên mức đó.
+
 ## 11. Trạng thái bàn giao
+
+**Cập nhật 2026-10-29 (ADR-0058):** lát A+B có mã, test và guard; PR riêng. Vẫn chưa: Gate MVP/preview (C), định tuyến `/complete`/`/optimize` theo giai đoạn ngoài dòng nhắc trong skill và `/optimize` cho mục tiêu tính năng/mã nguồn (D), installer/migration (E), nâng dự án đích (F). Phần dưới là trạng thái của PR đặc tả gốc.
+
 
 PR này hoàn tất phần nghiên cứu/đặc tả: chu trình 11 bước được giữ nguyên, ma trận ba giai đoạn, vòng lặp/cổng, điểm tích hợp, migration và test cases. **Chưa sửa mã engine; chưa chạy kiểm thử engine mới; chưa phát hành; chưa áp dụng sang dự án đích.** Khi triển khai phải báo riêng: tài liệu, mã, test, merge, phát hành và target đã nâng. Không gọi tài liệu hoặc lời nhắc trong prompt là cơ chế khóa bằng máy.

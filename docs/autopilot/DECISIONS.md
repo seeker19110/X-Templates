@@ -1650,3 +1650,10 @@
 - Chọn: Mở rộng cùng độ rộng DEP_TXT_RE: [^/]*(requirements|constraints)[^/]*.txt, requirements/ mọi cấp, không phân biệt hoa thường
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: file phụ thuộc thật không lọt làn nhanh; một nguồn độ rộng với DEP_TXT_RE; phương án 3 chặn oan notes.txt mà không thêm an toàn đáng kể. (3) đơn giản, test được.
 - Đường lùi: Trả regex thẻ phụ thuộc về requirements[^/]*\.txt trong scripts/xt.py (RISK_PATH_RES) và bỏ ca test D-234
+
+### D-239 · 2026-10-29T05:04:06+00:00 · Ba giai đoạn sản phẩm (PR #325): khoá giai đoạn sau và nguồn phê duyệt của người bằng máy thế nào
+
+- Phương án: (1) Sổ docs/autopilot/STAGE.json theo git, chỉ xt.py stage ghi (guard coi là evidence), lịch sử phải dựng lại đúng giai đoạn; bản trình gắn SHA HEAD cây sạch; approve/init --adopt từ chối trong phiên agent (biến môi trường) và guard deny; loop init/next/record và release-check đọc khoá; không có sổ = không dùng (tương thích) · (2) Trạng thái trong .autopilot/stage.json (gitignored): guard đã rào sẵn nhưng mất khi đổi container/clone — không bền, sai với phiên cloud · (3) Duyệt qua GitHub (comment/review/Environment required reviewers): cùng tài khoản với token agent nên không phân biệt được người với agent ở chủ repo một người; tự duyệt deployment được khi tắt prevent self-review
+- Chọn: Sổ docs/autopilot/STAGE.json theo git, chỉ xt.py stage ghi (guard coi là evidence), lịch sử phải dựng lại đúng giai đoạn; bản trình gắn SHA HEAD cây sạch; approve/init --adopt từ chối trong phiên agent (biến môi trường) và guard deny; loop init/next/record và release-check đọc khoá; không có sổ = không dùng (tương thích)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: không đường 1→3 kể cả sửa tay sổ (lịch sử lộ), agent không tự duyệt (hai lớp: xt.py + guard; guard là lớp chặn nhầm D-015 — nêu rõ); bền qua container nhờ git; đường lùi: xoá sổ = về hành vi cũ; đơn giản, stdlib, test được; GitHub không cho tách người/agent khi cùng tài khoản (nghiên cứu 2026-10-29)
+- Đường lùi: Xoá docs/autopilot/STAGE.json ở dự án; hoặc bỏ lời gọi stage_plan_problem ở loop và hàng stage của release-check

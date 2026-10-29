@@ -2588,7 +2588,7 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)
         self.assertEqual(
             [r[k]["result"] for k in xt.RELEASE_ROWS],
-            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "PASS"],
+            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "N/A", "PASS"],
         )
         self.assertEqual((r["attack"]["level"], r["perf"]["level"]), ("SHOULD", "SHOULD"))  # quy mô S
         self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
