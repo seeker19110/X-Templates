@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import stat
+import unicodedata
 import subprocess
 import sys
 import unittest
@@ -70,6 +71,7 @@ class StageProblemTest(unittest.TestCase):
             ledger([ev("init", 1), ev("submit", 1, sha=SHA)], status="awaiting_approval", submitted={"sha": SHA}),
             ledger([ev("init", 1), ev("submit", 1, sha=SHA), ev("reopen", 1), *approve(1, SHA2)], stage=2),
             ledger([ev("adopt", 3, by="p", evidence="v1.0")], stage=3),
+            ledger([ev("init", 1), *approve(1, "c" * 64)], stage=2),  # repo SHA-256
             completed(),
             ledger([*completed()["history"], ev("init", 1, "C-002")], cycle="C-002"),
         ]
@@ -130,6 +132,10 @@ class StageProblemTest(unittest.TestCase):
         self.assertEqual(xt.plan_stage("> Giai đoạn: G4 → G6\n"), [])
         two = "> Giai đoạn sản phẩm: 1 (C-001)\n## Lát 2\n> Giai đoạn sản phẩm: 2 (C-001)\n"
         self.assertEqual(xt.plan_stage(two), [(1, "C-001"), (2, "C-001")])
+        tilde = "> Giai đoạn sản phẩm: 1 (C-001)\n~~~\n> Giai đoạn sản phẩm: 2 (C-001)\n```\n~~~\n"
+        self.assertEqual(xt.plan_stage(tilde), [(1, "C-001")])  # fence ~~~ (``` bên trong không đóng nó)
+        nfd = unicodedata.normalize("NFD", "> Giai đoạn sản phẩm: 2 (C-003)")
+        self.assertEqual(xt.plan_stage(nfd), [(2, "C-003")])
 
     def test_agent_session(self):
         with unittest.mock.patch.dict(os.environ, HUMAN):
@@ -222,6 +228,21 @@ class StageCliTest(TmpRepoCase):
         led = self.led()
         self.assertEqual((led["stage"], led["status"], led["submitted"]), (1, "active", None))
         self.assertEqual([e["event"] for e in led["history"]], ["init", "submit", "reopen"])
+
+    def test_commit_hint_and_status_timeout(self):
+        out = self.stage("init")[1]
+        self.assertIn(f"commit + push `{xt.STAGE_LEDGER}`", out)
+        self.assertNotIn("commit + push", self.stage("status")[1])
+        self.assertNotIn("commit + push", self.stage("reopen", "--reason", "x")[1])  # từ chối: không gợi ý
+        real = subprocess.run
+
+        def slow(cmd, *a, **k):
+            if cmd[:2] == ["git", "status"]:
+                raise subprocess.TimeoutExpired(cmd, 30)
+            return real(cmd, *a, **k)
+
+        with unittest.mock.patch.object(xt.subprocess, "run", side_effect=slow):
+            self.assertIn("quá 30 s", self.stage("submit", "--evidence", "x")[2])
 
     def test_autopilot_dir_does_not_dirty_submit(self):
         self.git("rm", "-q", "--cached", "f.txt")  # repo không ignore .autopilot/: khoá state.lock nằm ở đó
@@ -342,7 +363,7 @@ class StageCliTest(TmpRepoCase):
 
 
 class StageLockTest(TmpRepoCase):
-    """Giai đoạn sau khoá ở mọi lối vào vòng (`loop init/next/record`, verdict) và ở `release-check`."""
+    """Giai đoạn sau khoá ở lối vào vòng (`loop init/next/record`; verdict không đọc khoá — D-241) và ở `release-check`."""
 
     PLAN = "docs/autopilot/PLAN.md"
 
