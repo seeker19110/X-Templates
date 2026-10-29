@@ -210,7 +210,8 @@ SECRET_PATTERNS = (
     # thường, từng bị che (AUD-CFG-007).
     (re.compile(r"\b(npm_)[A-Za-z0-9]{36}\b|\b(hf_)[A-Za-z0-9]{20,}\b|\b(pypi-AgE)[A-Za-z0-9_-]{8,}"), r"\1\2\3***"),
     (
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
+        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
         "-----BEGIN PRIVATE KEY----- ***",
     ),
 )
@@ -3180,14 +3181,12 @@ def stop_hint(base: Path) -> str:
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
     harden = _xt_keys(base).get(PHASE_KEY) != "build"
-    if (
-        harden
-    ):  # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338)
-        with contextlib.suppress(StageError):  # sổ hỏng: giữ harden, khoá báo lỗi sổ
-            led = read_stage(base)
-            harden = not led or led["stage"] != 1
-    objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
     try:
+        # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338);
+        # sổ hỏng ({"error"}) giữ harden để khoá báo lỗi sổ
+        sf = stage_facts(base) if harden else None
+        harden = harden and (not sf or sf.get("stage") != 1)
+        objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         print(f"[xt hook-stop] không tính được gợi ý next-step: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -9928,7 +9927,8 @@ def stage_problem(led: Any) -> str:
         return f"không phải object `schema: {STAGE_SCHEMA}`"
     if not STAGE_CYCLE_RE.fullmatch(str(led.get("cycle", ""))):
         return "`cycle` không phải C-NNN"
-    if led.get("stage") not in STAGE_NAMES or led.get("status") not in STAGE_STATUSES:
+    # `type is int`: `[1]` (không băm được) hay `true` (== 1) là sổ hỏng, không phải TypeError/giai đoạn 1 (review #338)
+    if type(led.get("stage")) is not int or led["stage"] not in STAGE_NAMES or led.get("status") not in STAGE_STATUSES:
         return "`stage` phải 1–3, `status` phải " + "|".join(STAGE_STATUSES)
     if led["status"] == "completed" and led["stage"] != 3:
         return "`completed` chỉ có ở giai đoạn 3"

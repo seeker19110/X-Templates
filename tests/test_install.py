@@ -2081,7 +2081,7 @@ class InstallStageTest(unittest.TestCase):
             [], -9, "", ""
         )  # init không chạy, status chết không stderr: vẫn một dòng ⚠
         with mock.patch.object(install, "run_stage", return_value=killed):
-            self.assertIn("⚠ sổ giai đoạn:", self.install())
+            self.assertIn("⚠ sổ giai đoạn: `xt.py stage status` thoát -9 không kèm lý do", self.install())
 
     def test_git_subdir_not_initialised(self):
         """Review #339: đích là thư mục con của repo git — `xt.py stage` dùng gốc repo, `release-check` đọc dự án → không
@@ -2108,6 +2108,10 @@ class InstallStageTest(unittest.TestCase):
             self.install("--stage-init")
         self.assertTrue(self.ledger.exists())
         self.assertEqual(list(decoy.iterdir()), [])
+        hook = {"CLAUDE_PROJECT_DIR": str(decoy), "GIT_DIR": str(decoy / ".git"), "GIT_WORK_TREE": str(decoy)}
+        with mock.patch.dict(os.environ, hook), mock.patch.object(install.subprocess, "run") as run:
+            install.run_stage(self.target, "status")  # lịch sử sổ phải của dự án đích, không của repo GIT_DIR
+        self.assertFalse(set(hook) & set(run.call_args.kwargs["env"]))
 
 
 if __name__ == "__main__":
