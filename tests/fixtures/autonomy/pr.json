@@ -1207,6 +1207,34 @@
     "auto_merge_ok": false,
     "lane": "chuẩn"
    }
+  },
+  {
+   "id": "pr-sec136-csproj-dependency",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-136"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/App/App.csproj",
+       "additions": 1,
+       "deletions": 1
+      },
+      {
+       "path": "tests/test_x.py",
+       "additions": 1,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
   }
  ]
 }

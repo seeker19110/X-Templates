@@ -1650,3 +1650,10 @@
 - Chọn: Mở rộng cùng độ rộng DEP_TXT_RE: [^/]*(requirements|constraints)[^/]*.txt, requirements/ mọi cấp, không phân biệt hoa thường
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: file phụ thuộc thật không lọt làn nhanh; một nguồn độ rộng với DEP_TXT_RE; phương án 3 chặn oan notes.txt mà không thêm an toàn đáng kể. (3) đơn giản, test được.
 - Đường lùi: Trả regex thẻ phụ thuộc về requirements[^/]*\.txt trong scripts/xt.py (RISK_PATH_RES) và bỏ ca test D-234
+
+### D-235 · 2026-10-29T03:34:45+00:00 · Review #323 lượt 2 (có từ trước): thẻ 'phụ thuộc' thiếu manifest .NET/JVM/Dart/Swift/Elixir/C++/Deno/Pipenv (*.csproj, packages.lock.json do BASE-DEP-001 nêu tên) — PR đổi các file này vào làn nhanh. Sửa thế nào?
+
+- Phương án: (1) Ghi sổ, để task riêng · (2) Thêm danh sách tên manifest/lockfile phổ biến vào RISK_PATH_RES (tên chính xác, neo (^|/)…$), conanfile.txt vào DEP_TXT_RE · (3) Mọi file .json/.toml/.xml/.yaml ở gốc gói là phụ thuộc
+- Chọn: Thêm danh sách tên manifest/lockfile phổ biến vào RISK_PATH_RES (tên chính xác, neo (^|/)…$), conanfile.txt vào DEP_TXT_RE
+- Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: đổi phụ thuộc phải qua review (BASE-DEP-001); tên chính xác không chặn oan file cấu hình khác như phương án 3. (3) đơn giản, test được từng tên.
+- Đường lùi: Bỏ các tên D-235 khỏi thẻ phụ thuộc RISK_PATH_RES và conanfile khỏi DEP_TXT_RE trong scripts/xt.py; bỏ ca test D-235 và ca corpus pr-sec136

@@ -590,7 +590,32 @@ class MergeDecisionTest(unittest.TestCase):
             # D-234 (review #323): constraints, requirements/ mọi cấp, chữ hoa
             **{
                 f"phụ thuộc {d}": ([{"path": d, "additions": 1, "deletions": 1}, *f], "(phụ thuộc)")
-                for d in ("upper-constraints.txt", "requirements/edx/base.txt", "Requirements-Dev.TXT")
+                for d in (
+                    "upper-constraints.txt",
+                    "requirements/edx/base.txt",
+                    "Requirements-Dev.TXT",
+                    "requirements.in",
+                )
+            },
+            # D-235 (review #323): manifest/lockfile các hệ sinh thái khác
+            **{
+                f"phụ thuộc {d}": ([{"path": d, "additions": 1, "deletions": 1}, *f], "(phụ thuộc)")
+                for d in (
+                    "src/App/App.csproj",
+                    "packages.lock.json",
+                    "pom.xml",
+                    "app/build.gradle.kts",
+                    "Pipfile.lock",
+                    "setup.py",
+                    "environment.yml",
+                    "pubspec.yaml",
+                    "ios/Podfile",
+                    "mix.exs",
+                    "deno.json",
+                    "conanfile.txt",
+                    "gradle/libs.versions.toml",
+                    "x.gemspec",
+                )
             },
             "lớn": ([{"path": "src/a.py", "additions": 140, "deletions": 20}, *f], "161 dòng > 150"),
             "hai gói": (
@@ -667,6 +692,7 @@ class MergeDecisionTest(unittest.TestCase):
         # review #323: txt phụ thuộc rộng (đóng khi nghi ngờ); hậu tố gạch nối chỉ khi gốc viết hoa
         code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
         code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
+        code += ("requirements-dev.txt", "src/license.py", "conanfile.txt")  # đột biến D8/L6 (review #323 lượt 2)
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
         self.assertEqual([p for p in code if xt.is_doc_path(p)], [])
 
@@ -676,6 +702,7 @@ class MergeDecisionTest(unittest.TestCase):
         tests += ("app/docs/__tests__/page.test.tsx", "docs/spec/x.test.py")
         not_tests = ("docs/spec/openapi.yaml", "packages/api/docs/spec/openapi.json", "Docs/spec/x.yaml", "src/a.py")
         not_tests += ("docs/v1/spec/openapi.yaml", "docs/tests/deploy.sh", "docs/__tests__/x.js", "docs/e2e/x.ts")
+        not_tests += ("docs/test/run.sh", "doc/spec/x.yaml")  # đột biến M6/M8 (review #323 lượt 2)
         self.assertEqual([t for t in tests if not xt._is_test_path(t)], [])
         self.assertEqual([t for t in not_tests if xt._is_test_path(t)], [])
 
