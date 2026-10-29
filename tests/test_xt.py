@@ -1705,6 +1705,16 @@ class AuditPlanTest(GitRepoMixin, unittest.TestCase):
         self.assertIn("không còn là tổ tiên", r[2])
         self.assertIn(9, r)  # AUDIT-STATUS.md là .md đổi sau SHA quét nhóm 9
         self.assertNotIn(6, r)  # N/A
+        self.commit_files(
+            {
+                "docs/ops/AUDIT-STATUS.md": audit_status_text(
+                    {8: ("đã quét", self.git("rev-parse", "HEAD"), "2026-10-14", "")}
+                )
+            },
+            1_700_000_200,
+        )
+        self.commit_files({'.github/workflows/c"i.yml': "x"}, 1_700_000_300)  # git trích dẫn tên có `"` nếu không -z
+        self.assertIn(8, xt.audit_rescan(self.repo, self.repo / "docs/ops/AUDIT-STATUS.md"))
 
     def test_audit_plan_cli_json(self):
         self.init_repo()

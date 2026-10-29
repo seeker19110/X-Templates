@@ -474,7 +474,9 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.assertEqual(self.rows()["review_debt"]["result"], "PASS")
         (self.repo / "src" / "app.py").write_text("x = 3\n", encoding="utf-8")
         self.commit("sửa thẳng không qua PR")  # commit chạm file mà không phải squash của PR → còn nợ
-        self.assertEqual(self.rows()["review_debt"]["result"], "FAIL")
+        r = self.rows()["review_debt"]
+        self.assertEqual(r["result"], "FAIL")
+        self.assertNotIn("D-223", r["evidence"])  # danh tính không đổi: không nêu lý do danh tính
 
     def identity_case(self, at_scan: str | None, at_head: str | None, login: str, assoc: str) -> str:
         """SHA quét có `review_identity: at_scan` (None = không có xt.yaml), PR #5 đặt `at_head` ở HEAD rồi sửa
@@ -499,8 +501,10 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.assertEqual(self.identity_case(None, "mallory", "mallory", "NONE"), "FAIL")
 
     def test_delivery_phase_review_debt_identity_revoked(self):
-        """D-223 (R1): danh tính ở SHA quét là oldbot, HEAD đã thu hồi sang newbot — dấu của oldbot không phủ."""
+        """D-223 (R1): danh tính ở SHA quét là oldbot, HEAD đã thu hồi sang newbot — dấu của oldbot không phủ; FAIL nêu
+        lý do danh tính (không để người đọc tưởng PR thiếu review)."""
         self.assertEqual(self.identity_case("oldbot", "newbot", "oldbot", "NONE"), "FAIL")
+        self.assertIn("`review_identity` ở SHA quét khác ở HEAD (D-223)", self.rows()["review_debt"]["evidence"])
 
     def test_delivery_phase_review_debt_identity_applied_after_scan(self):
         """D-223 (R2): SHA quét chưa có danh tính, HEAD áp `bot` — dấu của tác giả (OWNER, cái T-1508 loại ra) không phủ."""
@@ -599,9 +603,14 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         r = self.rows()["review_debt"]
         self.assertEqual(r["result"], "N/A")
         self.assertIn("không có SHA quét để so", r["evidence"])
-        self.status.write_bytes(b"\xff\xfe")  # không phải UTF-8 (hàng audit còn sập ở ca này: AUD-CODE-017, ngoài lát)
+        self.status.write_bytes(
+            b"\xff\xfe"
+        )  # không phải UTF-8: hàng audit FAIL có lý do, không traceback (AUD-CODE-017)
         r = xt._release_review_debt(self.repo, "docs/ops/AUDIT-STATUS.md")
         self.assertIn("không đọc được docs/ops/AUDIT-STATUS.md", r["evidence"])
+        a = self.rows()["audit"]
+        self.assertEqual(a["result"], "FAIL")
+        self.assertIn("không đọc được docs/ops/AUDIT-STATUS.md", a["evidence"])
         self.status.unlink()
         r = self.rows()["review_debt"]
         self.assertEqual((r["result"], r["level"]), ("N/A", "SHOULD"))

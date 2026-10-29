@@ -260,8 +260,9 @@ class NextStepStateTest(StateCase):
         self.assertEqual(xt._batch_mark(done, new, self.base)["batches"], [mark])
         (self.base / "P.md").write_text("- [x] `T-001` xong đổi spec — Gate: `true`\n", encoding="utf-8")
         self.assertEqual(len(xt._batch_mark(done, new, self.base)["batches"]), 2)  # viết lại spec: đợt mới
-        bad = {**dở, "objective": {"batches": [{**mark, "done": "t5", "tasks": [["T-001", "x"]]}]}}
-        self.assertEqual(len(xt._batch_mark(bad, new, self.base)["batches"]), 2)  # tasks sai kiểu: đợt mới, không văng
+        for tasks in ([["T-001", "x"]], []):  # sai kiểu / rỗng → đợt mới, không văng
+            bad = {**dở, "objective": {"batches": [{**mark, "done": "t5", "tasks": tasks}]}}
+            self.assertEqual(len(xt._batch_mark(bad, new, self.base)["batches"]), 2, tasks)
         self.assertEqual(xt._plan_pairs(self.base, None), [])
         self.assertEqual(xt._plan_pairs(self.base, "mất.md"), [])
         self.assertEqual(xt._batch_mark({**dở, "iterations": "x"}, new, self.base)["batches"], [mark])  # state sai kiểu
@@ -372,11 +373,19 @@ class NextStepStateTest(StateCase):
         )
         rc, _, err = run_main("loop", "init", "--plan", "P.md", "--blueprint", "BP.md", "--force")
         self.assertEqual(rc, 0, err)
-        self.assertIn("ℹ Đợt trước đã xong mà P.md chỉ nối thêm task", err)
+        self.assertIn("ℹ Đợt trước đã xong mà P.md không đổi hoặc chỉ nối thêm task", err)
         self.assertEqual(len((xt.read_state(self.base) or {})["objective"]["batches"]), 1)
-        self.assertEqual(xt._reopen_note([], [mark], "P.md"), [])
-        self.assertEqual(xt._reopen_note([mark], [mark], "P.md"), [])  # vẫn có dấu: không mở lại
-        self.assertEqual(xt._reopen_note([mark], [{**batch(1, "t9")}], "P.md"), [])  # đợt mới, không phải mở lại
+        cases = {  # không ℹ: đợt mới (PLAN khác, cùng giây cũng vậy — review #319), đợt dở, init lần đầu
+            "PLAN khác": ({**mark, "at": "t0"}, "P2.md"),
+            "đợt dở": ({k: v for k, v in mark.items() if k not in ("done", "tasks")}, "P.md"),
+        }
+        (self.base / "P2.md").write_text("- [x] `T-001` xong — Gate: `true`\n", "utf-8")
+        for name, (last, plan) in cases.items():
+            with self.subTest(name):
+                xt.write_state(self.st(started="t0", objective={"batches": [last]}), self.base)
+                rc, _, err = run_main("loop", "init", "--plan", plan, "--blueprint", "BP.md", "--force")
+                self.assertEqual(rc, 0, err)
+                self.assertNotIn("ℹ Đợt trước đã xong", err)
 
     def test_audit_open_count(self) -> None:
         self.assertEqual(xt.audit_open_count(self.base / "không.md"), 0)
@@ -411,6 +420,13 @@ class NextStepCliTest(StateCase):
                 self.assertIn("✗ --prs", err)
         rc, _, err = run_main("loop", "next-step", "--prs", str(self.base / "mất.json"))
         self.assertEqual(rc, 2, err)
+
+    def test_init_refuses_undecodable_plan(self) -> None:
+        """PLAN không đọc được như UTF-8 → `loop init` exit 2 kèm lý do, không traceback (review #319)."""
+        (self.base / "P.md").write_bytes(b"\xe9\xff")
+        rc, _, err = run_main("loop", "init", "--plan", "P.md")
+        self.assertEqual(rc, 2)
+        self.assertIn("✗ Không đọc được P.md như UTF-8", err)
 
     def test_facts_read_audit_book(self) -> None:
         book = self.base / "S.md"

@@ -3893,9 +3893,10 @@ def audit_rescan(root: Path, status: Path) -> Dict[int, str]:
         if not sha or _git(root, "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
             out[no] = f"SHA `{sha or '—'}` không còn là tổ tiên HEAD — quét lại từ đầu"
             continue
-        changed = [
-            f for f in _git(root, "diff", "--name-only", f"{sha}..HEAD").stdout.splitlines() if no in _path_groups(f)
-        ]
+        names = _git(root, "diff", "-z", "--name-only", f"{sha}..HEAD").stdout.split(
+            "\0"
+        )  # -z: tên lạ không bị trích dẫn
+        changed = [f for f in names if f and no in _path_groups(f)]
         if changed:
             out[no] = f"{len(changed)} file đổi từ `{sha[:7]}` (vd {', '.join(changed[:3])})"
     return out
@@ -6578,21 +6579,32 @@ def _init_apply(cur: Dict[str, Any], seen: int, state: Dict[str, Any], base: Pat
     new = copy.deepcopy(state)
     notes[:] = _carry_previous(cur, new, base)
     new["objective"] = _batch_mark(cur, new, base)  # sau `_carry_previous`: MUST chờ người đã mang sang không tính
-    notes += _reopen_note(_objective_batches(cur), new["objective"]["batches"], new["plan"])
+    before = _objective_batches(cur)
+    if before and before[-1].get("done") and _same_batch(cur, before[-1], new["plan"], base):
+        notes.append(
+            REOPEN_NOTE.format(plan=new["plan"])
+        )  # tín hiệu đúng của `_batch_mark`, không so `at` (review #319)
     return new
 
 
-def _reopen_note(before: List[Dict[str, Any]], after: List[Dict[str, Any]], plan: str) -> List[str]:
-    """Dòng ℹ khi `loop init` mở lại đợt đã có dấu xong vì PLAN chỉ nối thêm task (D-230): PLAN dài dần qua nhiều đợt cùng
-    đường dẫn thì `next-step` không đếm được đợt (FLOW-13) — báo để đợt kế dùng PLAN-<đợt>.md mới."""
-    if not (before and before[-1].get("done") and not after[-1].get("done")):
-        return []
-    if after[-1].get("at") != before[-1].get("at"):
-        return []
-    return [
-        f"ℹ Đợt trước đã xong mà {plan} chỉ nối thêm task → tính là mở lại cùng đợt; đợt kế dùng PLAN-<đợt>.md mới để"
-        " `loop next-step` đếm đợt (FLOW-13)"
-    ]
+# D-230: PLAN dài dần qua nhiều đợt cùng đường dẫn → `next-step` không đếm được đợt (FLOW-13); báo để đợt kế dùng PLAN mới.
+REOPEN_NOTE = (
+    "ℹ Đợt trước đã xong mà {plan} không đổi hoặc chỉ nối thêm task → tính là mở lại cùng đợt; đợt kế dùng"
+    " PLAN-<đợt>.md mới để `loop next-step` đếm đợt (FLOW-13)"
+)
+
+
+def _init_input_problem(args: argparse.Namespace, base: Path) -> str:
+    """Lý do `loop init` không nhận PLAN/blueprint; rỗng = ổn. Blueprint gõ nhầm → verdict lặng lẽ bỏ qua blueprint
+    (AUD-HAR-016); PLAN không đọc được như UTF-8 → báo gọn thay cho traceback (review #319)."""
+    for path in (args.plan, args.blueprint):
+        if path and not (base / path).exists():
+            return f"Không thấy {path}"
+    try:
+        (base / args.plan).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"Không đọc được {args.plan} như UTF-8: {exc}"
+    return ""
 
 
 def _loop_init(args: argparse.Namespace, base: Path) -> int:
@@ -6609,10 +6621,10 @@ def _loop_init(args: argparse.Namespace, base: Path) -> int:
         )
         print(f"✗ Đang có vòng autopilot chạy ({live}){tail} (LOOP-HARNESS-024)", file=sys.stderr)
         return 2
-    for path in (args.plan, args.blueprint):  # blueprint gõ nhầm → verdict lặng lẽ bỏ qua blueprint (AUD-HAR-016)
-        if path and not (base / path).exists():
-            print(f"✗ Không thấy {path}", file=sys.stderr)
-            return 2
+    problem = _init_input_problem(args, base)
+    if problem:
+        print(f"✗ {problem}", file=sys.stderr)
+        return 2
     deadline = None
     if args.hours is not None:
         deadline = (
@@ -8900,7 +8912,16 @@ def cmd_audit(args: argparse.Namespace) -> int:
             "\nCông cụ thiếu → bằng chứng nhóm đó là `chưa biết:` cho tới khi cài/chạy được. Phương pháp: framework/00-method/audit.md"
         )
         return 0
-    errors, counts = audit_check(Path(args.file), strict=args.strict)
+    return _audit_check_cmd(args)
+
+
+def _audit_check_cmd(args: argparse.Namespace) -> int:
+    """`audit check FILE [--strict]`: lỗi sổ → exit 1; thiếu file / không phải UTF-8 → exit 2, báo gọn, không traceback."""
+    try:
+        errors, counts = audit_check(Path(args.file), strict=args.strict)
+    except (OSError, ValueError) as exc:
+        print(f"✗ {args.file}: không đọc được sổ: {exc}", file=sys.stderr)
+        return 2
     for e in errors:
         print(f"✗ {args.file}: {e}")
     summary = " · ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "trống"
@@ -9299,8 +9320,11 @@ def _release_blueprint(base: Path, blueprint: str) -> Dict[str, str]:
     bp = base / blueprint
     if not bp.is_file():
         return _release_row("blueprint", "FAIL", f"không thấy {blueprint} — `xt.py compose` rồi tick theo bằng chứng")
-    s = blueprint_status(bp)
-    run = _verified_blueprint_run(base, bp) or _blueprint_run(bp)
+    try:
+        s = blueprint_status(bp)
+        run = _verified_blueprint_run(base, bp) or _blueprint_run(bp)
+    except (OSError, ValueError) as exc:  # ValueError: không phải UTF-8 — FAIL có JSON, không traceback (AUD-CODE-017)
+        return _release_row("blueprint", "FAIL", f"không đọc được {blueprint}: {exc}")
     if run is None:
         return _release_row("blueprint", "FAIL", "không chạy được lệnh kiểm (XT_RECORD_TIMEOUT sai)")
     bad = [f"MUST mở {len(s['open_must'])}"] if s["open_must"] else []
@@ -9330,7 +9354,7 @@ def _release_audit(base: Path, status: str) -> Dict[str, str]:
         )
     try:
         errors, counts = audit_check(st, strict=True)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError: sổ không phải UTF-8
         return _release_row("audit", "FAIL", f"không đọc được {status}: {exc}")
     if errors:
         return _release_row("audit", "FAIL", f"`audit check --strict` {len(errors)} lỗi: {errors[0]}")
@@ -9460,6 +9484,13 @@ def _merged_clean(repo: str, commit: str, subject: str, identity: str) -> Option
     return m[1] if review_gate(d, marks)["state"] == "ok" else ""
 
 
+def _scan_identities(root: Path, since: Dict[str, str]) -> Tuple[str, str]:
+    """(`review_identity` trong xt.yaml đã commit ở SHA quét CŨ nhất của `since`, ở HEAD) — gốc tin cậy của dấu review."""
+    oldest = max(since.values(), key=lambda s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout or 0))
+    keys = (_yaml_keys(_committed_xt_text(root, r) or "").get("review_identity", "") for r in (oldest, "HEAD"))
+    return next(keys), next(keys)
+
+
 def reviewed_debt(root: Path, since: Dict[str, str], repo: str = "repos/{owner}/{repo}") -> Dict[str, str]:
     """{file nợ: "#N, #M"} cho file mà MỌI commit first-parent chạm nó sau đúng SHA quét đưa nó vào nợ (`since`) là commit
     merge của PR có review sạch ở head (ADR-0057) — review đó chính là audit delta cho diff của PR; squash-merge làm SHA
@@ -9467,8 +9498,7 @@ def reviewed_debt(root: Path, since: Dict[str, str], repo: str = "repos/{owner}/
     phải TRÙNG giữa xt.yaml đã commit ở SHA quét cũ nhất và ở HEAD (D-223): khác — PR trong vùng nợ đặt/đổi danh tính, hay
     danh tính bị thu hồi/áp sau lần quét — thì không phủ gì (như trước ADR-0057: audit delta). Mỗi commit hỏi GitHub một
     lần; lỗi đầu tiên → thôi hỏi, phần còn lại vẫn là nợ."""
-    oldest = max(since.values(), key=lambda s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout or 0))
-    identity, now = (_yaml_keys(_committed_xt_text(root, r) or "").get("review_identity", "") for r in (oldest, "HEAD"))
+    identity, now = _scan_identities(root, since)
     if identity != now:
         return {}
     seen: Dict[str, Optional[str]] = {}
@@ -9502,11 +9532,13 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     covered = reviewed_debt(base, since) if since else {}
     debt = sorted(f for f in since if f not in covered)
     if debt:
+        moved = len(set(_scan_identities(base, since))) > 1
+        why = " · review PR không phủ: `review_identity` ở SHA quét khác ở HEAD (D-223)" if moved else ""
         return _release_row(
             "review_debt",
             "FAIL",
             f"{len(debt)} file ngoài tài liệu đổi sau SHA quét ({', '.join(debt[:5])}) — chạy audit delta "
-            f"(`xt.py audit plan --status {status}`), cập nhật sổ (ADR-0031)",
+            f"(`xt.py audit plan --status {status}`), cập nhật sổ (ADR-0031){why}",
         )
     if covered:
         prs = ", ".join(dict.fromkeys(x for v in covered.values() for x in v.split(", ")))
@@ -9541,7 +9573,12 @@ def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, 
     bp = base / blueprint
     if not bp.is_file():
         return _release_row("unchecked_must", "N/A", f"không thấy {blueprint} — xem hàng blueprint", "SHOULD")
-    u = blueprint_status(bp)["unchecked_must_ratio"]
+    try:
+        u = blueprint_status(bp)["unchecked_must_ratio"]
+    except (OSError, ValueError) as exc:  # không phải UTF-8: hàng blueprint đã FAIL (AUD-CODE-017)
+        return _release_row(
+            "unchecked_must", "N/A", f"không đọc được {blueprint} ({exc}) — xem hàng blueprint", "SHOULD"
+        )
     ev = f"{u['count']}/{u['total']} MUST đạt không có lệnh kiểm (tỉ lệ {u['ratio']})"
     if not u["count"]:
         return _release_row("unchecked_must", "PASS", ev, "SHOULD")
