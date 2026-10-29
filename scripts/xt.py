@@ -9734,7 +9734,7 @@ STAGE_SCHEMA = 1
 STAGE_NAMES = {1: "MVP", 2: "hoàn thiện", 3: "tối ưu"}
 STAGE_STATUSES = ("active", "awaiting_approval", "completed")
 STAGE_CYCLE_RE = re.compile(r"C-\d{3,}")
-STAGE_SHA_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")  # SHA-1 hoặc SHA-256 (`--object-format=sha256`)
+STAGE_SHA_RE = COMMIT_SHA_RE  # SHA-1 hoặc SHA-256 (`--object-format=sha256`) — một định nghĩa (review #329)
 # Dòng khai của PLAN: `Giai đoạn sản phẩm: 2 (C-001)` (có thể nằm trong `> …`) — đúng MỘT dòng mỗi PLAN.
 PLAN_STAGE_RE = re.compile(r"^\s*>?\s*Giai đoạn sản phẩm:\s*([1-3])\s*\((C-\d{3,})\)", re.MULTILINE)
 STAGE_AGENT_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "AI_AGENT")  # biến môi trường mà phiên agent mang

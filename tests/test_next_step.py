@@ -720,7 +720,7 @@ class NextStepCliTest(StateCase):
         bad = {
             "--release": ("{", "[]", json.dumps({**rel, "head": "HEAD"}), json.dumps({**rel, "fails": "x"})),
             "--package": (json.dumps({"package": None}), json.dumps({**pkg, "evidence_fp": "x"}))
-            + (json.dumps({**pkg, "human_pending": [1]}), "[]"),
+            + (json.dumps({**pkg, "human_pending": [1]}), "[]", json.dumps({**pkg, "candidate_head": "c" * 50})),
         }
         for flag, texts in bad.items():
             for text in texts:
