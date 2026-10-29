@@ -1173,16 +1173,7 @@ def report_stage(target: Path, stage_init: bool) -> None:
     """Giai đoạn sản phẩm sau cài (ADR-0058 lát E, D-249): không đoán giai đoạn — chỉ `--stage-init` (dự án mới) tạo sổ;
     sổ có sẵn không bị chạm, nhưng được kiểm bằng xt.py mới (sổ không hợp lệ với bản mới lộ ngay lúc nâng). Không kiểm
     được (xt.py thiếu/lỗi) → một dòng ⚠, không làm hỏng lần cài (fail-open như `report_upgrade_steps`). Thư mục con của
-    repo git: `xt.py stage` dùng sổ ở gốc repo còn `release-check` đọc ở dự án (lệch `loop_root` có từ trước) → không
-    tạo/kiểm, một dòng ⚠ (review #339)."""
-    top = git_subdir_of(target)
-    if top is not None:
-        skip = " — bỏ qua --stage-init" if stage_init else ""
-        log(
-            f"⚠ giai đoạn sản phẩm: {target} là thư mục con của repo git ({top}) — `xt.py stage` sẽ dùng sổ ở gốc repo,"
-            f" `release-check` đọc ở đây; chưa hỗ trợ, không tạo/kiểm sổ{skip} (ADR-0058)"
-        )
-        return
+    repo git (monorepo `apps/web`): sổ ở chính thư mục dự án — `xt.py stage` và `release-check` cùng gốc (`loop_root`)."""
     created, warned = False, None
     try:
         if stage_init and not (target / STAGE_LEDGER).exists():
@@ -1190,7 +1181,9 @@ def report_stage(target: Path, stage_init: bool) -> None:
             created = r.returncode == 0
             if not created:
                 warned = r.stderr.strip()
-                log(f"⚠ --stage-init không tạo được sổ: {warned}")
+                log(
+                    f"⚠ --stage-init không tạo được sổ: {warned or f'`xt.py stage init` thoát {r.returncode} không kèm lý do'}"
+                )
         r = run_stage(target, "status", "--json")
         led = json.loads(r.stdout)["stage"] if r.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
@@ -1300,8 +1293,8 @@ def install_plan(
         "stage": {  # sổ giai đoạn: chỉ `--stage-init` tạo, sổ có sẵn không bị chạm (D-249)
             "path": STAGE_LEDGER,
             "present": (target / STAGE_LEDGER).exists(),
-            # sẽ THỬ `stage init` (sổ ở ref khác → xt.py từ chối lúc cài); thư mục con của repo git: không thử
-            "init": stage_init and not (target / STAGE_LEDGER).exists() and git_subdir_of(target) is None,
+            # sẽ THỬ `stage init` (sổ ở ref khác → xt.py từ chối lúc cài)
+            "init": stage_init and not (target / STAGE_LEDGER).exists(),
         },
     }
     print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))

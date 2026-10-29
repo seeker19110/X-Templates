@@ -575,6 +575,25 @@ class LoopTest(unittest.TestCase):
             self.assertNotIn(leak if name != "aws" else leak[4:], out, name)
         self.assertIn("postgres://admin:***@db/x", out)
 
+    def test_redact_pem_before_flag_and_assignment(self):
+        """Review #340: khối PEM che TRƯỚC mẫu cờ/gán — trước `--password -----BEGIN …` và `KEY="-----BEGIN …` ăn mất
+        header nên thân khoá lộ; chuỗi đã che chạy lại cho kết quả như cũ."""
+        body = "MIIEpAIBAAKCAQEA"
+        for text in (
+            f'PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n{body}\n-----END RSA PRIVATE KEY-----"',
+            f"deploy --password -----BEGIN RSA PRIVATE KEY-----\n{body}",
+        ):
+            with self.subTest(text=text[:20]):
+                once = xt.redact(text)
+                self.assertNotIn(body, once)
+                self.assertEqual(xt.redact(once), once)
+        tail = xt._gate_tail(
+            1,
+            f"-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\nrun --password "
+            f"-----BEGIN RSA PRIVATE KEY----- {body}",
+        )
+        self.assertNotIn(body, tail)
+
     def test_redact_home_paths(self):  # AUD-HAR-054: tên người dùng/máy không lọt vào báo cáo repo khung public
         self.assertEqual(xt.redact_feedback("lỗi ở /home/alice/proj/x.py"), "lỗi ở /home/<user>/proj/x.py")
         self.assertEqual(

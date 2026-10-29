@@ -346,6 +346,10 @@ class StageCliTest(TmpRepoCase):
         with contextlib.redirect_stdout(out):
             xt._stage_print(led, False)
         self.assertIn("smoke: (bản trình trước D-247)", out.getvalue())
+        del led["submitted"]["evidence"]  # sổ sửa tay thiếu `evidence`: in "?" thay vì KeyError (review #340)
+        with contextlib.redirect_stdout(io.StringIO()) as out2:
+            xt._stage_print(led, False)
+        self.assertIn(": ?", out2.getvalue())
 
     def test_preview_smoke_head_and_state(self):
         """Review #336: smoke tự commit → HEAD lệch bản trình → không trình; ghi vào thư mục `.gitignore` → trình được;

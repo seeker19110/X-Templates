@@ -184,6 +184,12 @@ SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:p
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
+    # Khối PEM ĐẦU TIÊN: mẫu cờ/gán (`--password `, `KEY="…`) chạy trước từng ăn mất header nên thân khoá lộ (review #340)
+    (
+        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
+        "-----BEGIN PRIVATE KEY----- ***",
+    ),
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
     # Mỗi loại nháy một mẫu: nháy loại kia nằm trong giá trị (`"it's a b"`) và nháy chưa đóng (tới hết dòng) cũng che hết
     # (AUD-CFG-006). `(?<!\w)` neo đầu từ: không có nó `\w*` thử mọi vị trí → bậc hai trên dòng dài (reviewer #61).
@@ -209,11 +215,6 @@ SECRET_PATTERNS = (
     # npm/Hugging Face/PyPI: đúng dạng khoá (độ dài, bảng chữ) — `npm_config_cache`, `hf_hub_download` là định danh
     # thường, từng bị che (AUD-CFG-007).
     (re.compile(r"\b(npm_)[A-Za-z0-9]{36}\b|\b(hf_)[A-Za-z0-9]{20,}\b|\b(pypi-AgE)[A-Za-z0-9_-]{8,}"), r"\1\2\3***"),
-    (
-        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
-        "-----BEGIN PRIVATE KEY----- ***",
-    ),
 )
 
 
@@ -1088,7 +1089,7 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
             hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
         elif hit is None:
             code, text = run_gate_shell(c["cmd"], base, timeout)
-            hit = (code, redact("\n".join(text.strip().splitlines()[-20:])))
+            hit = (code, "\n".join(redact(text).strip().splitlines()[-20:]))
             done.append((c["cmd"], *hit))
         out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
     return out
@@ -1207,7 +1208,8 @@ def _git_tree(d: Path) -> Optional[Tuple[Path, Path]]:
 def loop_root(base: Path) -> Path:
     """Gốc cho `loop` gõ tay (T-2521): cwd nằm trong một git worktree KHÁC của cùng repo với `base` (cùng
     `--git-common-dir`) → gốc worktree đó — Gate chạy, PLAN được tick, `.autopilot/` (gitignored: sổ riêng mỗi worktree)
-    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới. Mọi trường hợp khác → `base`."""
+    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới; dự án ở thư mục con của repo → cùng thư mục con
+    trong worktree đó. Mọi trường hợp khác (kể cả cwd trong chính worktree của dự án ở thư mục con) → `base`."""
     base = base.resolve()
     try:
         here = _git_tree(Path.cwd())
@@ -1216,7 +1218,9 @@ def loop_root(base: Path) -> Path:
     if here is None or here[0] == base:
         return base
     home = _git_tree(base)
-    return here[0] if home is not None and home[1] == here[1] else base
+    if home is None or home[1] != here[1] or home[0] == here[0]:
+        return base  # repo khác, hay cùng worktree với dự án ở thư mục con (monorepo `apps/web`) — giữ gốc dự án (review #339)
+    return here[0] / base.relative_to(home[0])  # worktree khác: cùng thư mục con trong cây đang sửa
 
 
 def state_dir(base: Optional[Path] = None) -> Path:
@@ -2665,7 +2669,7 @@ def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all
             print(f"[xt] verify {t['id']}: giữ — evidence v2 khớp lệnh, phạm vi, yêu cầu, digest file")
             continue
         code, out = run_gate_shell(t["gate"], base, timeout)
-        tail = redact("\n".join(out.strip().splitlines()[-20:]))
+        tail = "\n".join(redact(out).strip().splitlines()[-20:])
         results.append(
             {"task": t["id"], "gate": t["gate"], "exit_code": code, "rerun": reasons[0], "output_tail": tail}
         )
@@ -2749,7 +2753,7 @@ def _verify_floor(base: Path, gates: List[Dict[str, Any]], timeout: int) -> List
         if any(same_command(cmd, r["gate"]) for r in gates) or any(same_command(cmd, r["cmd"]) for r in out):
             continue
         code, text = run_gate_shell(cmd, base, timeout)
-        tail = redact("\n".join(text.strip().splitlines()[-20:]))
+        tail = "\n".join(redact(text).strip().splitlines()[-20:])
         out.append({"key": key, "cmd": cmd, "exit_code": code, "output_tail": tail})
         print(f"[xt] verify sàn Gate `{key}`: exit {code}")
     for r in out:
@@ -2850,7 +2854,9 @@ def loop_record(
         "started": started,
         "finished": now_iso(),
         "head": _git_head(base),
-        "output_tail": redact("\n".join(out.strip().splitlines()[-40:])),
+        "output_tail": "\n".join(
+            redact(out).strip().splitlines()[-40:]
+        ),  # che trước khi cắt: khối PEM dài hơn cửa sổ (review #340)
     }
     if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
         ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
@@ -3180,12 +3186,14 @@ def stop_hint(base: Path) -> str:
     chỉ in, không chặn, không ghi (ADR-0052 §5; cho Stop hook đọc/chuyển trạng thái là lát 4). Mục tiêu theo
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
-    harden = _xt_keys(base).get(PHASE_KEY) != "build"
     try:
+        harden = _xt_keys(base).get(PHASE_KEY) != "build"
         # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338);
-        # sổ hỏng ({"error"}) giữ harden để khoá báo lỗi sổ
-        sf = stage_facts(base) if harden else None
-        harden = harden and (not sf or sf.get("stage") != 1)
+        # sổ hỏng (StageError) giữ harden để khoá báo lỗi sổ; đọc sổ thô, không `stage_facts` (vân tay/diff chạy lại ở
+        # `next_step_facts` — review #340)
+        with contextlib.suppress(StageError):
+            led = read_stage(base) if harden else None
+            harden = harden and (not led or led["stage"] != 1)
         objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
@@ -10205,7 +10213,7 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
     print(f"{led['cycle']} · giai đoạn {led['stage']} ({name}) · {led['status']}")
     if led["status"] == "awaiting_approval":
         sub = led["submitted"]
-        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
+        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub.get('evidence', '?')}")
         print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
         print(f"  smoke: {sub.get('smoke') or '(bản trình trước D-247)'}")
         print(

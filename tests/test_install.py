@@ -2082,20 +2082,27 @@ class InstallStageTest(unittest.TestCase):
         )  # init không chạy, status chết không stderr: vẫn một dòng ⚠
         with mock.patch.object(install, "run_stage", return_value=killed):
             self.assertIn("⚠ sổ giai đoạn: `xt.py stage status` thoát -9 không kèm lý do", self.install())
+        with mock.patch.object(install, "run_stage", return_value=killed):  # init cũng chết không stderr (review #340)
+            self.assertIn("`xt.py stage init` thoát -9 không kèm lý do", self.install("--stage-init"))
 
-    def test_git_subdir_not_initialised(self):
-        """Review #339: đích là thư mục con của repo git — `xt.py stage` dùng gốc repo, `release-check` đọc dự án → không
-        tạo/kiểm sổ, một dòng ⚠; plan báo không init."""
+    def test_git_subdir_ledger_in_project(self):
+        """Review #339/#340: đích là thư mục con của repo git (monorepo) — sổ ở chính thư mục dự án; `xt.py stage` và
+        `release-check` chạy từ đó cùng đọc nó (trước `loop_root` trả gốc repo nên khoá MVP không tới `release-check`)."""
         subprocess.run(["git", "init", "-q", str(self.target)], check=True)
         root, self.target = self.target, self.target / "apps" / "web"
         self.target.mkdir(parents=True)
         self.ledger = self.target / install.STAGE_LEDGER
-        self.assertFalse(self.plan("--stage-init")["init"])
-        out = self.install("--stage-init")
-        self.assertIn(f"là thư mục con của repo git ({root}) — `xt.py stage` sẽ dùng sổ ở gốc repo", out)
-        self.assertIn("bỏ qua --stage-init", out)
-        self.assertFalse((root / install.STAGE_LEDGER).exists() or self.ledger.exists())
-        self.assertNotIn("bỏ qua --stage-init", self.install())
+        self.assertTrue(self.plan("--stage-init")["init"])
+        self.assertIn("C-001 · giai đoạn 1 · active", self.install("--stage-init"))
+        self.assertTrue(self.ledger.exists())
+        self.assertFalse((root / install.STAGE_LEDGER).exists())
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        xt_cmd = [sys.executable, str(self.target / ".xtemplates" / "scripts" / "xt.py")]
+        r = subprocess.run(
+            [*xt_cmd, "release-check", "--json"], cwd=self.target, env=env, capture_output=True, text=True
+        )
+        rows = {row["id"]: row for row in json.loads(r.stdout)["rows"]}
+        self.assertEqual(rows["stage"]["result"], "FAIL")
         other = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(other)], check=True)
         with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):  # môi trường hook: gốc vẫn là của đích

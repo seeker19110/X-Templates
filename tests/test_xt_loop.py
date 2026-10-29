@@ -116,6 +116,17 @@ class LoopWorktreeRootTest(TmpRepoCase):
             gone.rmdir()  # cwd đã bị xoá: không ném lỗi, giữ gốc cũ
             self.assertEqual(xt.loop_root(base), base)
 
+    def test_loop_root_project_in_repo_subdir(self) -> None:
+        """Review #339/#340: dự án ở thư mục con của repo (monorepo `apps/web`) — cwd trong chính worktree đó giữ gốc dự
+        án (trước trả gốc repo nên `stage` và `release-check` đọc hai sổ khác nhau); worktree khác → cùng thư mục con."""
+        base = (self.main / "apps" / "web").resolve()
+        base.mkdir(parents=True)
+        for cwd in (base, self.main):
+            with self.subTest(cwd=str(cwd)), chdir(cwd):
+                self.assertEqual(xt.loop_root(base), base)
+        with chdir(self.wt):
+            self.assertEqual(xt.loop_root(base), self.wt.resolve() / "apps" / "web")
+
     def test_loop_worktree_root_ignores_git_env_redirect(self) -> None:
         # GIT_DIR đặt sẵn không được lái phép so `--git-common-dir` sang repo khác.
         other = self.tmp / "other"
