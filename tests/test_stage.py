@@ -264,11 +264,17 @@ class StageCliTest(TmpRepoCase):
         self.assertIn("chạy thử: make demo", self.stage("status")[1])
         self.stage("reopen", "--reason", "sửa")
         xt.write_state({"active": False, "plan": "P.md"}, self.repo)
-        with unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
+        busy = {"verdict": "continue", "reason": "còn T-002", "task": "T-002"}
+        with unittest.mock.patch.object(xt, "_batch_verdict", return_value=busy):  # PLAN còn task (review #330)
+            rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("vòng chưa xong (continue: còn T-002)", err)
+        done = unittest.mock.patch.object(xt, "_batch_verdict", return_value={"verdict": "done", "reason": "x"})
+        with done, unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
             rc, _, err = self.stage("submit", "--evidence", "x")
         self.assertEqual(rc, 2)
         self.assertIn("chưa trình được — kiểm lại cuối ĐỎ (T-001)", err)
-        with unittest.mock.patch.object(xt, "final_check", return_value=None):
+        with done, unittest.mock.patch.object(xt, "final_check", return_value=None):
             self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
         self.assertEqual(self.led()["submitted"]["verified"], "loop verify --all xanh trên cây này")
         with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):

@@ -7378,7 +7378,28 @@ def stage_facts(base: Path) -> Optional[Dict[str, Any]]:
     if led is None:
         return None
     sub = led.get("submitted") or {}
-    return {"cycle": led["cycle"], "stage": led["stage"], "status": led["status"], "sha": sub.get("sha")}
+    sha = sub.get("sha")
+    changed = _changed_since(base, sha) if sha else []  # file đổi sau bản trình (trừ sổ/PROGRESS/GO-NO-GO/DECISIONS)
+    changed = None if changed is None else [c for c in changed if c != STAGE_LEDGER]
+    return {"cycle": led["cycle"], "stage": led["stage"], "status": led["status"], "sha": sha, "changed": changed}
+
+
+def _stale_submission(f: Dict[str, Any], loop: StepPart) -> StepPart:
+    """Đã trình MVP mà mã đổi sau bản trình (ngoài sổ/PROGRESS/GO-NO-GO/DECISIONS) hay vòng còn giao việc → `stage-reopen`:
+    người đang duyệt một bản cũ; mở lại giai đoạn rồi trình lại sau khi làm xong."""
+    changed = f["stage"].get("changed")
+    if changed is None or changed:
+        what = f"{len(changed)} file đổi (vd {', '.join(changed[:3])})" if changed else "không so được với bản trình"
+    elif loop and loop["action"] in ("task", "replan"):
+        what = f"vòng còn việc ({loop['action']}: {loop.get('task') or loop['reason']})"
+    else:
+        return None
+    return {
+        "action": "stage-reopen",
+        "reason": f"MVP đã trình bản {str(f['stage']['sha'])[:12]} nhưng {what} sau đó — `stage reopen --reason …`, làm"
+        " xong, kiểm lại cuối rồi `stage submit` lại (ADR-0058)",
+        "missing": ["`stage reopen`", "trình lại bản HEAD"],
+    }
 
 
 def _awaiting_mvp(f: Dict[str, Any], harden: bool) -> bool:
@@ -7411,16 +7432,16 @@ def _step_stage(sf: Optional[Dict[str, Any]], pending: str = "") -> StepPart:
     }
 
 
-def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
-    """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
-    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178) —
-    hoặc, có sổ giai đoạn ở giai đoạn 1, ở `stage-submit`/`wait-approval` (ADR-0058);
-    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký)."""
-    harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
+def _next_step_part(f: Dict[str, Any], harden: bool) -> Dict[str, Any]:
+    """Bước kế (action/reason/…) của `next_step`, theo thứ tự ưu tiên: vòng → PR → sổ audit → việc → gói/giai đoạn."""
     # Harden: vòng chưa bật chưa phải việc — gom việc trước để có PLAN-harden (`work`), rồi mới `loop init`.
     loop = None if harden and f["verdict"]["verdict"] == "inactive" else _step_loop(f)
-    if loop and loop["action"] == "verify" and _awaiting_mvp(f, harden):
-        loop = None  # bản trình đã kiểm lại cuối lúc `submit`; commit sổ/PROGRESS sau đó không bắt chạy lại Gate (review #330)
+    if _awaiting_mvp(f, harden):
+        stale = _stale_submission(f, loop)
+        if stale:  # mã/PLAN đổi sau bản trình: bản người đang xem không còn là HEAD (review #330)
+            return stale
+        if loop and loop["action"] == "verify":
+            loop = None  # chỉ sổ/PROGRESS đổi sau bản đã kiểm lại cuối lúc `submit`: không bắt chạy lại mọi Gate
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
     if part is None and harden:
         part = _step_signoff(f)
@@ -7433,6 +7454,16 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "PLAN hết task, PR đã xong, sổ audit phủ tới HEAD, 0 🔴/🟠 và 0 MUST mở"
             f"{pending} — đề xuất `/complete`; máy không đổi `delivery_phase` (D-178)",
         }
+    return part
+
+
+def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
+    """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
+    nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178) —
+    hoặc, có sổ giai đoạn ở giai đoạn 1, ở `stage-submit`/`wait-approval` (ADR-0058);
+    `harden-to-signoff` gom việc harden (`work`) rồi dừng ở `signoff-package` (gói nghiệm thu nháp, chờ người ký)."""
+    harden = f["objective"] == NEXT_STEP_OBJECTIVES[1]
+    part = _next_step_part(f, harden)
     st, batches = f["state"], f["state"]["batches"]
     return {
         "objective": f["objective"],
@@ -9984,7 +10015,11 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     """Bằng chứng máy cho bản trình (ADR-0058 lát C): dự án chạy vòng (`state.json` có) → kiểm lại cuối phải xanh trên
     đúng cây này (`loop verify --all`, LOOP-DESIGN-022); không chạy vòng → ghi rõ "không có". Cách chạy thử: khoá
     `preview` của `xt.yaml` nếu khai."""
-    if read_state(base):
+    st = read_state(base)
+    if st:
+        v = _batch_verdict(base, st)
+        if v["verdict"] not in ("done", PENDING_HUMAN):  # PLAN còn task: bản trình thiếu việc (review #330)
+            raise StageError(f"chưa trình được — vòng chưa xong ({v['verdict']}: {v.get('reason', '')})")
         why = final_check(base)
         if why:
             raise StageError(f"chưa trình được — {why}")
