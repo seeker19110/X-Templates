@@ -187,7 +187,10 @@ SECRET_PATTERNS = (
     # Khối PEM ĐẦU TIÊN: mẫu cờ/gán (`--password `, `KEY="…`) chạy trước từng ăn mất header nên thân khoá lộ (review #340)
     (
         # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY( BLOCK)?-----|\Z)",
+            re.S,
+        ),  # `( BLOCK)?`: khoá PGP armored (review #342)
         "-----BEGIN PRIVATE KEY----- ***",
     ),
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
@@ -226,6 +229,12 @@ def redact(text: str) -> str:
     for rx, repl in SECRET_PATTERNS:
         text = rx.sub(repl, text)
     return SECRET_RE.sub(r"\1\2***", text)
+
+
+def redact_tail(text: str, n: int) -> str:
+    """`n` dòng cuối của output đã che — che trên CẢ output rồi mới cắt: khối PEM dài hơn cửa sổ mất dòng BEGIN thì không
+    còn che được (AUD-SEC-142). Dùng cho mọi `output_tail` ghi vào `.autopilot/` hay lời báo."""
+    return "\n".join(redact(text).strip().splitlines()[-n:])
 
 
 def redact_feedback(text: str) -> str:
@@ -1089,7 +1098,7 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
             hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
         elif hit is None:
             code, text = run_gate_shell(c["cmd"], base, timeout)
-            hit = (code, "\n".join(redact(text).strip().splitlines()[-20:]))
+            hit = (code, redact_tail(text, 20))
             done.append((c["cmd"], *hit))
         out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
     return out
@@ -1220,7 +1229,10 @@ def loop_root(base: Path) -> Path:
     home = _git_tree(base)
     if home is None or home[1] != here[1] or home[0] == here[0]:
         return base  # repo khác, hay cùng worktree với dự án ở thư mục con (monorepo `apps/web`) — giữ gốc dự án (review #339)
-    return here[0] / base.relative_to(home[0])  # worktree khác: cùng thư mục con trong cây đang sửa
+    if not base.is_relative_to(home[0]):  # `core.worktree` lạ: không đoán
+        return base
+    sub = here[0] / base.relative_to(home[0])  # worktree khác: cùng thư mục con trong cây đang sửa
+    return sub if sub.is_dir() else base  # thư mục con chưa có ở worktree kia: Gate không chạy được ở đó (review #342)
 
 
 def state_dir(base: Optional[Path] = None) -> Path:
@@ -2669,7 +2681,7 @@ def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all
             print(f"[xt] verify {t['id']}: giữ — evidence v2 khớp lệnh, phạm vi, yêu cầu, digest file")
             continue
         code, out = run_gate_shell(t["gate"], base, timeout)
-        tail = "\n".join(redact(out).strip().splitlines()[-20:])
+        tail = redact_tail(out, 20)
         results.append(
             {"task": t["id"], "gate": t["gate"], "exit_code": code, "rerun": reasons[0], "output_tail": tail}
         )
@@ -2753,7 +2765,7 @@ def _verify_floor(base: Path, gates: List[Dict[str, Any]], timeout: int) -> List
         if any(same_command(cmd, r["gate"]) for r in gates) or any(same_command(cmd, r["cmd"]) for r in out):
             continue
         code, text = run_gate_shell(cmd, base, timeout)
-        tail = "\n".join(redact(text).strip().splitlines()[-20:])
+        tail = redact_tail(text, 20)
         out.append({"key": key, "cmd": cmd, "exit_code": code, "output_tail": tail})
         print(f"[xt] verify sàn Gate `{key}`: exit {code}")
     for r in out:
@@ -2854,9 +2866,7 @@ def loop_record(
         "started": started,
         "finished": now_iso(),
         "head": _git_head(base),
-        "output_tail": "\n".join(
-            redact(out).strip().splitlines()[-40:]
-        ),  # che trước khi cắt: khối PEM dài hơn cửa sổ (review #340)
+        "output_tail": redact_tail(out, 40),
     }
     if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
         ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
@@ -5196,7 +5206,9 @@ LOCKFILE_RE = re.compile(
 # (AUD-SEC-134).
 DOC_TEXT_EXT = ("md", "rst")
 DOC_TXT_NAME_RE = re.compile(r"(README|CHANGELOG|CHANGES|HISTORY|AUTHORS|CONTRIBUTORS)\.txt", re.I)
-RUNTIME_DOC_DIR_RE = re.compile(r"(^|/)(prompts?|src|app|pages|lib|server|api|templates?|agents?|skills?)/", re.I)
+RUNTIME_DOC_DIR_RE = re.compile(
+    r"(^|/)(prompts?|src|app|pages|lib|server|api|templates?|agents?|skills?|commands?)/", re.I
+)
 DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
 # Rộng (đóng khi nghi ngờ — review #323): `docs/design-constraints.txt` thành mã chỉ tốn một lượt review
 DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists|conanfile)\.txt$", re.I)
@@ -5222,7 +5234,8 @@ def is_doc_path(path: str) -> bool:
     if ext in DOC_TEXT_EXT:
         return in_docs or not RUNTIME_DOC_DIR_RE.search(path)
     if ext == "txt":
-        return (in_docs or DOC_TXT_NAME_RE.fullmatch(name) is not None) and not DEP_TXT_RE.search(path)
+        named = DOC_TXT_NAME_RE.fullmatch(name) is not None and not RUNTIME_DOC_DIR_RE.search(path)
+        return (in_docs or named) and not DEP_TXT_RE.search(path)
     return ext in DOC_ASSET_EXT and in_docs
 
 
@@ -5560,6 +5573,13 @@ def _risk_labels(pr: Dict[str, Any]) -> List[str]:
     ]
 
 
+def squash_subject(pr: Dict[str, Any]) -> str:
+    """Subject commit squash = tiêu đề PR (đã qua `pr title-check`) + ` (#N)`. GitHub mặc định `COMMIT_OR_PR_TITLE`: PR một
+    commit lấy subject của commit đó — dài/sai dạng thì lách luật tiêu đề, `main` đỏ BASE-REPO-005 (#340). '' khi thiếu."""
+    title, n = str(pr.get("title") or "").strip(), pr.get("number")
+    return f"{title} (#{n})" if title and n else ""
+
+
 def merge_decision(
     pr: Dict[str, Any], autonomy: int = 1, risk_paths: Optional[List[str]] = None, hard_auto: bool = False
 ) -> Dict[str, Any]:
@@ -5597,8 +5617,10 @@ def merge_decision(
     if waived:
         reasons.append(f"ngoại lệ cứng không giữ người ({HARD_KEY}: auto, ADR-0020): {'; '.join(waived)}")
     base, head = pr.get("baseRefName") or "main", pr.get("headRefOid", "")
+    subject = squash_subject(pr)
     nxt = {
-        "merge": f"gh pr merge {n} --squash --match-head-commit {head}",
+        "merge": f"gh pr merge {n} --squash --match-head-commit {head}"
+        + (f" --subject {shlex.quote(subject)}" if subject else ""),
         "update": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/update-branch -f expected_head_sha={head} (hoặc git merge origin/{base} && git push)",
         "wait": "chờ rồi chạy lại merge-check",
         "fix": (
@@ -5630,6 +5652,7 @@ def merge_decision(
         **(
             {
                 "next_rest": f"gh api -X PUT repos/{{owner}}/{{repo}}/pulls/{n}/merge -f sha={head} -f merge_method=squash"
+                + (f" -f commit_title={shlex.quote(subject)}" if subject else "")
             }
             if verdict == "merge"
             else {}
@@ -11444,12 +11467,26 @@ def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive:
 # --------------------------------------------------------------------------- pr steward (ADR-0027)
 
 
-def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
+def _steward_command(out: Dict[str, Any], repo: str, subject: str = "") -> List[List[str]]:
     """Lệnh gh cho hành động `pr next` mà steward tự làm; [] = chỉ báo (review, fix, defer-human, chờ…). Merge luôn ghim
-    head (REST `sha`); không bao giờ bật auto-merge (ADR-0036)."""
+    head (REST `sha`) và đặt subject squash = tiêu đề PR (`squash_subject`); không bao giờ bật auto-merge (ADR-0036)."""
     n, head, action = str(out["pr"]), str(out["head"]), out["action"]
     if action == "merge":
-        return [["gh", "api", "-X", "PUT", f"{repo}/pulls/{n}/merge", "-f", "merge_method=squash", "-f", f"sha={head}"]]
+        title = ["-f", f"commit_title={subject}"] if subject else []
+        return [
+            [
+                "gh",
+                "api",
+                "-X",
+                "PUT",
+                f"{repo}/pulls/{n}/merge",
+                "-f",
+                "merge_method=squash",
+                "-f",
+                f"sha={head}",
+                *title,
+            ]
+        ]
     if action == "disable-auto-merge":
         return [["gh", "pr", "merge", n, "--disable-auto"]]
     if action == "update" and _steward_can_update():  # tụt sau nhánh đích: GitHub tạo merge commit, ghim head đang thấy
@@ -11527,7 +11564,8 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             out["warn"] = f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
-    cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
+    steward = _steward_command(out, repo, squash_subject(pr))
+    cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in steward]
     target = str(pr.get("baseRefName") or "main")
     # như trigger `push` của release-tag.yml: chỉ nhánh `main` (nhánh khác: job bị bỏ qua, bản cũ thiếu input → 422)
     tag = target == "main" and "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()

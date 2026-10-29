@@ -754,6 +754,7 @@ class MergeDecisionTest(unittest.TestCase):
         code += ("y.mdx", "app/admin/page.mdx", "docs/x.mdx", "prompts/system.md", "src/README.md", "app/x.md")
         code += ("notes.txt", "src/security/allowed_hosts.txt", "packages.txt", "apt.txt", "runtime.txt")
         code += ("vendor/modules.txt", ".claude/agents/reviewer.md", "x/skills/a/SKILL.md", "templates/mail.md")
+        code += ("prompts/README.txt", ".claude/commands/deploy.md")  # review #342
         # AUD-SEC-139: manifest phụ thuộc trong docs/ gốc không phải tài liệu
         code += ("docs/package.json", "docs/package-lock.json", "docs/deno.json", "docs/vcpkg.json")
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
@@ -2459,6 +2460,18 @@ class BaseMergeCarryTest(unittest.TestCase):
         fixed = {"reviews": [*late_clean["reviews"], {"head": head, "clean": True, "at": "2026-10-19T10:09:00Z"}]}
         self.assertEqual(xt.pr_next(d, False, fixed)["action"], "merge")
         self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "merge")
+
+    def test_merge_sets_squash_subject_from_pr_title(self):
+        """BASE-REPO-005 (#340): subject squash = tiêu đề PR + ` (#N)` — PR một commit không còn lấy subject commit dài."""
+        d = xt.merge_decision(pr(title="fix(x): it's ok"), autonomy=2)
+        self.assertIn("--subject 'fix(x): it'\"'\"'s ok (#7)'", d["next"])
+        self.assertIn("-f commit_title='fix(x): it'\"'\"'s ok (#7)'", d["next_rest"])
+        bare = xt.merge_decision(pr(), autonomy=2)  # không có tiêu đề: lệnh như cũ
+        self.assertNotIn("--subject", bare["next"])
+        self.assertNotIn("commit_title", bare["next_rest"])
+        cmd = xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r", "fix(x): a (#7)")
+        self.assertEqual(cmd[0][-2:], ["-f", "commit_title=fix(x): a (#7)"])
+        self.assertNotIn("-f", xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r")[0][9:])
 
     def test_steward_updates_branch(self):
         cmds = xt._steward_command({"pr": 7, "head": "h", "action": "update"}, "repos/o/r")

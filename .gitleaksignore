@@ -1,2 +1,5 @@
 # Chuỗi giả trong test che bí mật (tests/test_xt.py) ở commit c295f48 — đã thay bằng chuỗi ghép lúc chạy; giữ để quét lịch sử PR #20 không đỏ.
 c295f4818229e5ea59054d91f8a37c9b9aff1ae1:tests/test_xt.py:generic-api-key:454
+# Header PEM giả trong test che bí mật (tests/test_xt.py) ở commit 619a1b2 (PR #342) — đã thay bằng chuỗi ghép lúc chạy; giữ để quét lịch sử PR không đỏ.
+619a1b2c72a2f1aa4c652aeab9676105f0f345b9:tests/test_xt.py:private-key:583
+619a1b2c72a2f1aa4c652aeab9676105f0f345b9:tests/test_xt.py:private-key:592

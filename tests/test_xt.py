@@ -576,22 +576,19 @@ class LoopTest(unittest.TestCase):
         self.assertIn("postgres://admin:***@db/x", out)
 
     def test_redact_pem_before_flag_and_assignment(self):
-        """Review #340: khối PEM che TRƯỚC mẫu cờ/gán — trước `--password -----BEGIN …` và `KEY="-----BEGIN …` ăn mất
-        header nên thân khoá lộ; chuỗi đã che chạy lại cho kết quả như cũ."""
+        """Review #340: khối PEM che TRƯỚC mẫu cờ/gán — trước `--password <header>` và `KEY="<header>…` ăn mất header nên
+        thân khoá lộ; chuỗi đã che chạy lại cho kết quả như cũ. Header ghép lúc chạy (gitleaks)."""
+        begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"
         body = "MIIEpAIBAAKCAQEA"
-        for text in (
-            f'PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n{body}\n-----END RSA PRIVATE KEY-----"',
-            f"deploy --password -----BEGIN RSA PRIVATE KEY-----\n{body}",
-        ):
+        for text in (f'PRIVATE_KEY="{begin}\n{body}\n{end}"', f"deploy --password {begin}\n{body}"):
             with self.subTest(text=text[:20]):
                 once = xt.redact(text)
                 self.assertNotIn(body, once)
                 self.assertEqual(xt.redact(once), once)
-        tail = xt._gate_tail(
-            1,
-            f"-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\nrun --password "
-            f"-----BEGIN RSA PRIVATE KEY----- {body}",
-        )
+        pgp = "-----BEGIN PGP " + "PRIVATE KEY BLOCK-----"  # khoá PGP armored (review #342)
+        self.assertNotIn(body, xt.redact(f"{pgp}\n\n{body}\n=abcd\n-----END PGP PRIVATE KEY BLOCK-----\nok"))
+        self.assertTrue(xt.redact(f"{pgp}\n{body}\n-----END PGP PRIVATE KEY BLOCK-----\nok").endswith("ok"))
+        tail = xt._gate_tail(1, f"{begin}\nAAAA\n{end}\nrun --password {begin} {body}")
         self.assertNotIn(body, tail)
 
     def test_redact_home_paths(self):  # AUD-HAR-054: tên người dùng/máy không lọt vào báo cáo repo khung public
@@ -677,6 +674,21 @@ class LoopTest(unittest.TestCase):
             xt.loop_record("T-009", ["echo --token SUPERSECRETVALUE; exit 1"], self.base)
         ev = xt.read_evidence("T-009", self.base)
         self.assertNotIn("SUPERSECRETVALUE", ev["cmd"] + ev["output_tail"])
+
+    def test_record_tail_redacts_long_pem(self):
+        """AUD-SEC-142: khối PEM dài hơn cửa sổ đuôi (40 dòng) — che trên cả output rồi mới cắt; trước đây cắt mất dòng
+        BEGIN nên thân khoá vào `.autopilot/` nguyên văn. Header ghép lúc chạy (gitleaks)."""
+        begin = "-----BEGIN " + "RSA PRIVATE KEY-----"
+        script = self.base / "pem.sh"
+        lines = [begin, *(f"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo{i:02d}" for i in range(60))]
+        script.write_text("".join(f"echo '{x}'\n" for x in lines) + "exit 1\n", encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            xt.loop_record("T-009", [f"bash {script}"], self.base)
+        tail = xt.read_evidence("T-009", self.base)["output_tail"]
+        self.assertNotIn("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo", tail)
+        self.assertEqual(
+            xt.redact_tail(begin + "\nAAAA\nx", 1), "-----BEGIN PRIVATE KEY----- ***"
+        )  # khối chưa đóng: tới hết
 
     def test_inactive_allows_stop(self):
         out, code = xt.hook_stop("{}", self.base)
