@@ -537,9 +537,14 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         (self.repo / "docs").mkdir(exist_ok=True)
         (self.repo / "docs" / "guide.md").write_text("x\n", encoding="utf-8")
         self.commit("mã trong docs lồng + tài liệu")
+        (self.repo / "requirements.txt").write_text("x==1\n", encoding="utf-8")  # .txt phụ thuộc là mã (review #322)
+        (self.repo / "license-allow.json").write_text("{}\n", encoding="utf-8")
+        self.commit("phụ thuộc + allowlist license")
         debt, _ = xt.review_debt(self.repo, self.status)
         self.assertIn("src/api/docs/routes.py", debt)
         self.assertNotIn("docs/guide.md", debt)
+        self.assertIn("requirements.txt", debt)
+        self.assertIn("license-allow.json", debt)
 
     def test_delivery_phase_review_debt_since_per_file(self):
         """Review #317 🟠: mỗi file xét commit từ đúng SHA đưa nó vào nợ — lần đẩy thẳng mà sổ nhóm của file đã phủ (trước

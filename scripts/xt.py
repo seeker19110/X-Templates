@@ -5134,10 +5134,32 @@ def _gate_path(path: str) -> bool:
 LOCKFILE_RE = re.compile(
     r"(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|uv\.lock|poetry\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock)$"
 )
-# Tài liệu (D-232): đuôi văn bản ở mọi nơi · LICENSE/NOTICE · thư mục docs/doc ở GỐC repo trừ file mã/cấu hình — trước đây
-# mọi `…/docs/…` ở mọi độ sâu (src/api/docs/routes.py, docs/conf.py) lách nợ review và đếm làn merge (review #321).
-CODE_EXT = r"py|pyi|js|mjs|cjs|jsx|ts|tsx|sh|bash|zsh|ps1|rb|go|rs|java|kt|kts|scala|php|cs|c|h|cc|cpp|hpp|swift|pl|lua|sql|ya?ml|toml|ini|cfg"
-DOC_PATH_RE = re.compile(rf"\.(md|mdx|rst|txt)$|(^|/)(LICENSE|NOTICE)[^/]*$|^docs?/(?!.*\.({CODE_EXT})$)", re.I)
+# Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
+# rst/txt ở mọi nơi trừ file phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/…`, `CMakeLists.txt`);
+# đúng tên LICENSE/LICENCE/NOTICE/COPYING (± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
+# repo. Trước đây mọi `…/docs/…` ở mọi độ sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review
+# (hàng BLOCKER `review_debt`) và làn merge (AUD-SEC-134).
+DOC_TEXT_EXT = ("md", "mdx", "rst", "txt")
+DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
+DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*\.txt|requirements/.*|CMakeLists\.txt)$", re.I)
+LICENSE_NAME_RE = re.compile(r"(LICEN[CS]E|NOTICE|COPYING)(\.(md|txt|rst))?", re.I)
+DOCS_DIR_RE = re.compile(r"(^|/)docs?/", re.I)
+
+
+def is_doc_path(path: str) -> bool:
+    """File là tài liệu (không tính nợ review, không tính dòng/gói/test của làn merge) — xem chú thích trên. Tên có xuống
+    dòng → mã (không đoán)."""
+    if "\n" in path or "\r" in path:
+        return False
+    name = path.rsplit("/", 1)[-1]
+    if LICENSE_NAME_RE.fullmatch(name):
+        return True
+    ext = name.rsplit(".", 1)[1].lower() if "." in name.lstrip(".") else ""
+    if ext in DOC_TEXT_EXT:
+        return not DEP_TXT_RE.search(path)
+    return ext in DOC_ASSET_EXT and re.match(r"docs?/", path, re.I) is not None
+
+
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|__tests__|spec|e2e)/|(_test|\.test|\.spec|_spec)\.[^/]+$|(^|/)test_[^/]+$")
 MONO_DIRS = ("packages", "apps", "services", "libs", "crates", "modules")
 CI_RED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}
@@ -5277,15 +5299,16 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     lines = sum(
         int(f.get("additions", 0)) + int(f.get("deletions", 0))
         for f in files
-        if not LOCKFILE_RE.search(str(f.get("path", ""))) and not DOC_PATH_RE.search(str(f.get("path", "")))
+        if not LOCKFILE_RE.search(str(f.get("path", ""))) and not is_doc_path(str(f.get("path", "")))
     )
     if lines > FAST_LANE_MAX_LINES:
         out.append(f"{lines} dòng > {FAST_LANE_MAX_LINES} (không tính tài liệu/lockfile)")
-    code = [p for p in paths if not DOC_PATH_RE.search(p) and not LOCKFILE_RE.search(p)]
+    code = [p for p in paths if not is_doc_path(p) and not LOCKFILE_RE.search(p)]
     pkgs = sorted({_package_of(p) for p in code if not TEST_PATH_RE.search(p)})
     if len(pkgs) > 1:
         out.append(f"nhiều gói: {', '.join(pkgs[:4])}")
-    if pkgs and not any(TEST_PATH_RE.search(p) for p in code):
+    # File trong thư mục docs không tính là test (`docs/spec/openapi.yaml` — review #322): chỉ là mã
+    if pkgs and not any(TEST_PATH_RE.search(p) and not DOCS_DIR_RE.search(p) for p in code):
         out.append("đổi mã mà không đổi test")
     return out
 
@@ -9459,7 +9482,7 @@ def _review_debt_since(root: Path, status: Path) -> Tuple[Dict[str, str], List[s
     for sha in set(scanned.values()):
         # -z: tên chứa `"`/`\\`/ký tự điều khiển không bị trích dẫn kiểu C (trích dẫn → lệch nhóm, bỏ sót nợ — review #317)
         names = _git(root, "diff", "-z", "--no-renames", "--name-only", f"{sha}..HEAD").stdout.split("\0")
-        changed[sha] = [f for f in names if f and not DOC_PATH_RE.search(f)]
+        changed[sha] = [f for f in names if f and not is_doc_path(f)]
     ahead = {s: int(_git(root, "rev-list", "--count", f"{s}..HEAD").stdout.strip() or 0) for s in changed}
     since: Dict[str, str] = {}
     for no, sha in scanned.items():
@@ -12841,9 +12864,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if os.environ.get("XT_DEBUG"):  # XT_DEBUG=1 để xem traceback
             raise
         why = (
-            f"file không phải UTF-8 ({exc}) — XT_DEBUG=1 để xem file nào"
-            if isinstance(exc, UnicodeDecodeError)
-            else exc
+            f"file không phải UTF-8 ({exc}) — XT_DEBUG=1 để xem chỗ đọc" if isinstance(exc, UnicodeDecodeError) else exc
         )
         print(f"✗ {why}", file=sys.stderr)
         return 2
