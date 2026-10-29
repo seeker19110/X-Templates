@@ -6981,6 +6981,7 @@ def next_step_facts(
         "open_must": len(_open_must(base, st)),
         "harden": harden_work(base, st, status) if harden else [],
         "signoff": signoff_facts(base, st, **(signoff or {})) if harden else None,
+        "stage": stage_facts(base),
         "state": {
             "rev": _state_rev(st),
             "plan": st.get("plan"),
@@ -7367,6 +7368,43 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
     return _signoff_part(pkg, "máy đã đạt (`release-check` không FAIL BLOCKER); gói nghiệm thu nháp")
 
 
+def stage_facts(base: Path) -> Optional[Dict[str, Any]]:
+    """Sổ giai đoạn cho `next-step` (ADR-0058): None khi không dùng; sổ hỏng → {"error"}; còn lại chu kỳ/giai đoạn/trạng
+    thái và SHA chờ duyệt."""
+    try:
+        led = read_stage(base)
+    except StageError as exc:
+        return {"error": str(exc)}
+    if led is None:
+        return None
+    sub = led.get("submitted") or {}
+    return {"cycle": led["cycle"], "stage": led["stage"], "status": led["status"], "sha": sub.get("sha")}
+
+
+def _step_stage(sf: Optional[Dict[str, Any]]) -> StepPart:
+    """Build hết việc ở giai đoạn MVP (ADR-0058 lát D): không đề xuất `/complete` khi người chưa duyệt MVP — `stage-submit`
+    (trình bản HEAD, báo người, dừng) hay `wait-approval` (đã trình, chờ người); sổ hỏng → `blocked`. Giai đoạn 2/3 → None."""
+    if sf is None:
+        return None
+    if "error" in sf:
+        return {"action": "blocked", "reason": f"sổ giai đoạn: {sf['error']}", "missing": ["sổ giai đoạn hợp lệ"]}
+    if sf["stage"] != 1:
+        return None
+    if sf["status"] == "awaiting_approval":
+        return {
+            "action": "wait-approval",
+            "reason": f"MVP ({sf['cycle']}) đã trình bản {str(sf['sha'])[:12]}, chờ người `stage approve` — dừng; người yêu"
+            " cầu sửa → `stage reopen` rồi làm tiếp giai đoạn 1",
+            "missing": ["người duyệt MVP (`stage approve`)"],
+        }
+    return {
+        "action": "stage-submit",
+        "reason": f"giai đoạn 1 (MVP, {sf['cycle']}) hết việc máy làm được — `stage submit --evidence <cách chạy thử +"
+        " tiêu chí>`, commit + push sổ, báo người duyệt, dừng; không sang giai đoạn sau (ADR-0058)",
+        "missing": ["`stage submit`", "người duyệt MVP (`stage approve`)"],
+    }
+
+
 def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
     """Bước kế của mục tiêu (ADR-0052 §5, nghiên cứu 2026-10-26 §9.2), hàm thuần: cùng `f` → cùng kết quả; `inputs` trả
     nguyên `f` để phát lại. `build-until-clean` dừng ở `ready-for-complete` — đề xuất, không đổi `delivery_phase` (D-178);
@@ -7377,6 +7415,8 @@ def next_step(f: Dict[str, Any]) -> Dict[str, Any]:
     part = loop or _step_prs(f) or _step_audit(f) or (_step_harden(f) if harden else _step_work(f))
     if part is None and harden:
         part = _step_signoff(f)
+    if part is None and not harden:
+        part = _step_stage(f.get("stage"))
     if part is None:
         pending = f"; {f['verdict']['reason']}" if f["verdict"]["verdict"] == PENDING_HUMAN else ""
         part = {
@@ -9931,11 +9971,29 @@ def _stage_init(led: Optional[Dict[str, Any]], adopt: Optional[int], by: str, ev
     return new
 
 
-def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str) -> Dict[str, Any]:
+def _stage_submit_proof(base: Path) -> Dict[str, Any]:
+    """Bằng chứng máy cho bản trình (ADR-0058 lát C): dự án chạy vòng (`state.json` có) → kiểm lại cuối phải xanh trên
+    đúng cây này (`loop verify --all`, LOOP-DESIGN-022); không chạy vòng → ghi rõ "không có". Cách chạy thử: khoá
+    `preview` của `xt.yaml` nếu khai."""
+    if read_state(base):
+        why = final_check(base)
+        if why:
+            raise StageError(f"chưa trình được — {why}")
+        proof = "loop verify --all xanh trên cây này"
+    else:
+        proof = "không chạy vòng autopilot — không có kiểm lại cuối"
+    try:
+        preview = _xt_keys(base).get("preview", "")
+    except (OSError, ValueError):
+        preview = ""
+    return {"verified": proof, "preview": preview}
+
+
+def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     if led is None or led["status"] != "active":
         raise StageError("chỉ trình duyệt khi giai đoạn đang `active` — xem `xt.py stage status`")
     led["status"] = "awaiting_approval"
-    led["submitted"] = {"sha": sha, "at": now_iso(), "evidence": evidence, "session": session_id()}
+    led["submitted"] = {"sha": sha, "at": now_iso(), "evidence": evidence, "session": session_id(), **extra}
     _stage_event(led, "submit", sha=sha, evidence=evidence)
     return led
 
@@ -9986,6 +10044,10 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
     if led["status"] == "awaiting_approval":
         sub = led["submitted"]
         print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
+        if sub.get("preview") or sub.get("verified"):
+            print(
+                f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}"
+            )
         print(
             f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
         )
@@ -10006,7 +10068,8 @@ def _stage_dispatch(
         return lambda led: _stage_init(led, args.adopt, by, args.evidence or "")
     if cmd == "submit":
         sha = _stage_clean_head(base)
-        return lambda led: _stage_submit(led, sha, args.evidence)
+        extra = _stage_submit_proof(base)
+        return lambda led: _stage_submit(led, sha, args.evidence, extra)
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)
     if cmd == "approve":

@@ -249,6 +249,30 @@ class StageCliTest(TmpRepoCase):
         with unittest.mock.patch.object(xt.subprocess, "run", side_effect=slow):
             self.assertIn("quá 30 s", self.stage("submit", "--evidence", "x")[2])
 
+    def test_submit_needs_final_verify_and_records_preview(self):
+        """ADR-0058 lát C: dự án chạy vòng → `submit` đòi kiểm lại cuối xanh trên cây này; ghi `preview` của xt.yaml."""
+        (self.repo / "xt.yaml").write_text("preview: make demo\n", encoding="utf-8")
+        self.commit("xt.yaml")
+        self.stage("init")
+        rc, out, _ = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 0)
+        sub = self.led()["submitted"]
+        self.assertEqual(
+            (sub["preview"], sub["verified"]), ("make demo", "không chạy vòng autopilot — không có kiểm lại cuối")
+        )
+        self.assertIn("chạy thử: make demo", self.stage("status")[1])
+        self.stage("reopen", "--reason", "sửa")
+        xt.write_state({"active": False, "plan": "P.md"}, self.repo)
+        with unittest.mock.patch.object(xt, "final_check", return_value="kiểm lại cuối ĐỎ (T-001)"):
+            rc, _, err = self.stage("submit", "--evidence", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("chưa trình được — kiểm lại cuối ĐỎ (T-001)", err)
+        with unittest.mock.patch.object(xt, "final_check", return_value=None):
+            self.assertEqual(self.stage("submit", "--evidence", "x")[0], 0)
+        self.assertEqual(self.led()["submitted"]["verified"], "loop verify --all xanh trên cây này")
+        with unittest.mock.patch.object(xt, "_xt_keys", side_effect=ValueError("utf-8")):
+            self.assertEqual(xt._stage_submit_proof(self.tmp)["preview"], "")
+
     def test_autopilot_dir_does_not_dirty_submit(self):
         self.git("rm", "-q", "--cached", "f.txt")  # repo không ignore .autopilot/: khoá state.lock nằm ở đó
         self.commit("lại")
