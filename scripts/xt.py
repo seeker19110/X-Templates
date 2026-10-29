@@ -10114,6 +10114,35 @@ def _stage_submit_proof(base: Path) -> Dict[str, Any]:
     return {"verified": proof, "preview": preview, "tree": evidence_fingerprint(base, (STAGE_LEDGER,))}
 
 
+def _stage_smoke(base: Path, sha: str) -> str:
+    """Gate bản trình (ADR-0058 lát C, D-247): `preview_smoke` của xt.yaml chạy qua guard trên đúng HEAD sạch, sau kiểm lại
+    cuối — exit ≠ 0, để lại thay đổi trong cây hay HEAD đổi trong lúc chạy (smoke tự commit, tiến trình khác commit: "exit 0"
+    không còn thuộc `sha` — review #336) → không trình. Chưa khai/no-op → trình được, sổ ghi rõ "không có" (thư viện/CLI
+    không có bản thử chạy được); xt.yaml hỏng → không trình (không đoán cổng)."""
+    try:
+        cmd = _xt_keys(base).get("preview_smoke", "")
+    except (OSError, ValueError) as exc:
+        raise StageError(f"chưa trình được — không đọc được xt.yaml ({exc})") from None
+    if gate_noop(cmd):
+        return "không có — xt.yaml chưa khai `preview_smoke` (hoặc lệnh no-op)"
+    code, out = run_gate_shell(cmd, base, _record_timeout() or 1800)
+    if code:
+        raise StageError(f"chưa trình được — smoke `{redact(cmd)}` exit {code}: {_gate_tail(code, out)}")
+    try:
+        head = _stage_clean_head(base)
+    except StageError:
+        raise StageError(
+            f"chưa trình được — smoke `{redact(cmd)}` để lại thay đổi trong cây: ghi đầu ra ra ngoài repo hoặc vào"
+            " .gitignore, rồi trình lại"
+        ) from None
+    if head != sha:
+        raise StageError(
+            f"chưa trình được — HEAD đổi trong lúc smoke `{redact(cmd)}` chạy ({sha[:12]} → {head[:12]}): smoke không"
+            " được commit; trình lại bản mới"
+        )
+    return f"`{redact(cmd)}` exit 0"
+
+
 def _stage_submit(led: Optional[Dict[str, Any]], sha: str, evidence: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     if led is None or led["status"] != "active":
         raise StageError("chỉ trình duyệt khi giai đoạn đang `active` — xem `xt.py stage status`")
@@ -10170,6 +10199,7 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
         sub = led["submitted"]
         print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
         print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
+        print(f"  smoke: {sub.get('smoke') or '(bản trình trước D-247)'}")
         print(
             f"  người: `python3 <xt.py> stage approve --sha {sub['sha'][:12]} --note …` ở terminal riêng; sửa: `stage reopen`"
         )
@@ -10190,7 +10220,10 @@ def _stage_dispatch(
         return lambda led: _stage_init(led, args.adopt, by, args.evidence or "")
     if cmd == "submit":
         sha = _stage_clean_head(base)
-        extra = _stage_submit_proof(base)
+        _stage_submit(
+            read_stage(base), sha, args.evidence, {}
+        )  # trạng thái sai → từ chối trước khi chạy smoke (≤ 30 phút)
+        extra = {**_stage_submit_proof(base), "smoke": _stage_smoke(base, sha)}
         return lambda led: _stage_submit(led, sha, args.evidence, extra)
     if cmd == "reopen":
         return lambda led: _stage_reopen(led, args.reason)
@@ -10536,6 +10569,16 @@ def _release_review_debt(base: Path, status: str) -> Dict[str, str]:
     return _release_row("review_debt", "PASS", f"không có file ngoài tài liệu đổi sau SHA quét ({len(shas)} SHA)")
 
 
+def _gate_tail(code: int, out: str) -> str:
+    """Đuôi log ≤ 300 ký tự cho lời báo: che bí mật trên CẢ output trước khi cắt (khối PEM mất dòng BEGIN thì không còn
+    che được) và lại trên đuôi đã nối (review #336); hết giờ giữ dòng `timeout:` đầu output."""
+    lines = redact(out).strip().splitlines()
+    keep = lines[-3:]
+    if code == 124 and lines[:1] != keep[:1]:
+        keep = lines[:1] + keep
+    return redact(" ".join(keep))[:300]  # lần hai trên một dòng: cờ ở dòng trước, giá trị ở dòng sau (`--password⏎x`)
+
+
 def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, str]:
     """Hàng chạy lệnh `key` của xt.yaml (ADR-0042). Chưa khai/no-op: M/L → N/A BLOCKER (người xác nhận không áp hoặc khai
     lệnh), S/không rõ → N/A SHOULD. Khai → chạy qua guard (`run_gate_shell`): exit 0 PASS, khác FAIL kèm đuôi log."""
@@ -10553,9 +10596,8 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     timeout = _record_timeout() or 0
     timeout = timeout if timeout > 0 else 1800  # sai/âm/0 → mặc định (review #217)
     code, out = run_gate_shell(cmd, base, timeout)
-    tail = redact(" ".join(out.strip().splitlines()[-3:]))[:300]
     if code:
-        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {tail}")
+        return _release_row(key, "FAIL", f"`{redact(cmd)}` exit {code}: {_gate_tail(code, out)}")
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 
