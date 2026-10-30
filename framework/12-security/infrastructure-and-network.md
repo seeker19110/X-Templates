@@ -3,7 +3,7 @@ title: Hạ tầng & mạng: least privilege, egress, TLS, sandbox, container
 kind: module
 prefix: SEC-INFRA
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain, static-site, mobile-app, desktop-app, embedded-iot]
-updated: 2026-10-14
+updated: 2026-10-30
 ---
 
 # Hạ tầng & mạng: least privilege, egress, TLS, sandbox, container
@@ -64,6 +64,8 @@ updated: 2026-10-14
 - [ ] `SEC-INFRA-022` **SHOULD** Có kiểm thử thoát sandbox/escalation cơ bản trong CI cho môi trường chạy agent (đọc file ngoài workspace, gọi metadata, gọi domain ngoài allowlist, fork bomb bị giới hạn). → Kiểm: bộ test `tests/sandbox/` chạy trong job riêng, mọi ca bị chặn. · Nguồn: OWASP ASI05; khung cũ spec C2-FR-08
 - [ ] `SEC-INFRA-023` **MAY** Dùng CDN/anycast + cache cho nội dung tĩnh để hấp thụ DDoS lớp 7 cơ bản; bật "under attack"/challenge khi cần. → Kiểm: cấu hình CDN; smoke test qua CDN. · Nguồn: nhà cung cấp CDN (phòng thủ)
 - [ ] `SEC-INFRA-024` **MAY** Ký và verify image node/VM (Secure Boot, attestation) cho hạ tầng xử lý dữ liệu nhạy cảm. → Kiểm: cấu hình attestation; log verify. · Nguồn: NIST SP 800-190
+- [ ] `SEC-INFRA-025` **SHOULD** Chuẩn bị **mật mã hậu lượng tử**: (1) kiểm kê mật mã (thuật toán, độ dài khoá, thư viện, nơi dùng: TLS, chữ ký, JWT, mã hoá lưu trữ, khoá dài hạn) để đổi được thuật toán bằng cấu hình (crypto-agility); (2) TLS ở edge và nội bộ bật trao đổi khoá lai `X25519MLKEM768` khi stack hỗ trợ (Go ≥ 1.24 bật mặc định; OpenSSL ≥ 3.5 có ML-KEM) — dữ liệu cần giữ bí mật nhiều năm bị đe doạ "thu trước, giải mã sau" ngay bây giờ; (3) kế hoạch thay RSA/ECC theo lộ trình NIST IR 8547 (bản final 2026-10-27). → Kiểm: file kiểm kê mật mã trong `docs/security/`; bắt tay TLS với `openssl s_client -groups X25519MLKEM768` (OpenSSL ≥ 3.5) thành công hoặc ghi lý do chưa bật. · Nguồn: NIST FIPS 203/204/205 (2024-08-13); RFC 10024; NIST IR 8547
+- [ ] `SEC-INFRA-026` **SHOULD** Chứng chỉ client cho mTLS (service↔service, thiết bị, đối tác) cấp từ CA riêng (private PKI/mesh CA/cert-manager issuer nội bộ), không dùng chứng chỉ WebPKI công khai có EKU `clientAuth`; server mTLS chỉ tin CA riêng đó, không tin kho CA hệ thống. → Kiểm: rà cấu hình mTLS: `openssl x509 -in client.pem -noout -ext extendedKeyUsage -issuer` → issuer là CA nội bộ; trust store phía server (`ssl_client_certificate`/`PeerAuthentication`/`ca.crt`) chỉ chứa CA riêng; test chứng chỉ client do CA công khai ký → bị từ chối. · Nguồn: Let's Encrypt *Ending TLS Client Authentication* (2025-05-14, cập nhật 2026-03-16)
 
 ## Bẫy thường gặp
 
@@ -85,6 +87,7 @@ updated: 2026-10-14
 | IaC misconfig (IAM wildcard, cổng mở, public DB, IMDSv1) | checkov 3.3.28 (Apache-2.0) | `checkov -d infra --framework terraform,kubernetes,dockerfile` | CI PR | HIGH/CRITICAL = đỏ |
 | Dockerfile/compose | hadolint (GPL-3.0) + conftest | `hadolint Dockerfile`; policy cấm `privileged`, `docker.sock` | pre-commit + CI | vi phạm = đỏ |
 | K8s manifest | kube-score / Pod Security Admission `restricted` | `kube-score score manifests/*.yaml`; namespace label enforce | CI + cluster | critical = đỏ; PSA từ chối pod |
+| Mật mã hậu lượng tử | `openssl s_client -connect host:443 -groups X25519MLKEM768` (OpenSSL ≥ 3.5) | Sau deploy, khi đổi stack TLS | bắt tay thành công hoặc lý do ghi trong kiểm kê (`SEC-INFRA-025`) |
 | TLS | testssl.sh (GPL-2.0) hoặc sslyze (AGPL-3.0) | `testssl.sh --severity HIGH https://host` | CI đêm + sau deploy | TLS 1.0/1.1 hoặc HIGH = đỏ |
 | CIS host/K8s/Docker | kube-bench, docker-bench-security (Apache-2.0) | theo lịch tuần | job lịch | Level 1 fail = ticket |
 | Image | OSV-Scanner v2.7.0 / Trivy (ghim SHA + checksum) | `osv-scanner scan image <ref>` | CI build | critical = đỏ |
@@ -104,3 +107,7 @@ updated: 2026-10-14
 - OWASP SSRF Prevention CS (dải IP nội bộ, IMDSv2): <https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html> — xác minh 2026-10-13.
 - Catalog `seeker19110/stored` 12 §3b (bridge loopback), §3i (mặc định rủi ro), §4 quy tắc 4/7; 23 §8.1 (Hermes-Agents, ai-gateway); 11 §1c (telemetry) — đọc 2026-10-13. Khung cũ spec §A4.5 C5-FR-05 (egress allowlist), commit `1b80fe4`.
 - (chưa xác minh 2026-10-13) OWASP CRS, hadolint/kube-score/testssl.sh phiên bản & license — xác minh trước khi dùng.
+- NIST — Post-Quantum Cryptography standardization (FIPS 203 ML-KEM, 204 ML-DSA, 205 SLH-DSA công bố 2024-08-13; FIPS 206 FN-DSA "in development"; HQC chọn 2025-03-11): <https://csrc.nist.gov/projects/post-quantum-cryptography/post-quantum-cryptography-standardization> — xác minh 2026-10-30. NIST IR 8547 *Transition to Post-Quantum Cryptography Standards* bản final 2026-10-27: <https://csrc.nist.gov/pubs/ir/8547/final> — trạng thái xác minh 2026-10-30; mốc "deprecate sau 2030, disallow sau 2035" cho RSA/ECC theo nguồn thứ cấp (chưa đối chiếu PDF gốc).
+- RFC 10024 *PQ/T Hybrid Key Agreement Mechanisms for TLS 1.3* (Proposed Standard, 2026-08; gồm X25519MLKEM768): <https://www.rfc-editor.org/info/rfc10024> · Go 1.24 release notes (X25519MLKEM768 mặc định, tắt bằng `GODEBUG=tlsmlkem=0`): <https://go.dev/doc/go1.24> · OpenSSL 3.5 (ML-KEM/ML-DSA/SLH-DSA): <https://openssl-library.org/post/2025-04-08-openssl-35-final-release/> — xác minh 2026-10-30. Chrome/Firefox bật mặc định: chỉ nguồn thứ cấp (chưa xác minh).
+- Classic bỏ EKU Client Authentication từ 2026-02-11; tlsclient (mở 2025-10-01) ngừng 2026-07-08; cập nhật 2026-03-16: chỉ ai dùng tlsclient trước 2026-05-13 mới được giữ đến 2026-07-08; lý do là Chrome Root Program đặt hạn 06/2026 phải tách PKI client/server (`SEC-INFRA-026`): <https://letsencrypt.org/2025/05/14/ending-tls-client-authentication/> — xác minh 2026-10-30.
+- Mốc chi tiết của Chrome Root Program (2026-06-15 sub-CA mới chỉ serverAuth; 2027-03-15 leaf chỉ serverAuth): các blog bên thứ ba không thống nhất, chưa đọc văn bản chính sách Chrome (`SEC-INFRA-026`): <https://www.encryptionconsulting.com/?p=90740> — chưa xác minh.

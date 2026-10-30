@@ -3,7 +3,7 @@ title: License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu
 kind: module
 prefix: CMP-LIC
 applies_to: [all]
-updated: 2026-10-28
+updated: 2026-10-30
 ---
 
 # License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu, điều khoản dịch vụ
@@ -73,6 +73,7 @@ updated: 2026-10-28
 ## Bẫy thường gặp
 
 - **"Trên GitHub public là được dùng":** không có LICENSE = không có quyền.
+- **License chỉ ghi trong metadata** (`license: MIT` ở frontmatter `SKILL.md`/`plugin.json`/`package.json`) mà repo không có file LICENSE, hoặc GitHub báo `NOASSERTION`/"not specified": chưa đủ quyền theo `CMP-LIC-004` — đọc file LICENSE thật hoặc hỏi tác giả; muốn dùng ý thì tự viết lại, không chép nguyên văn (catalog stored 20 §3k.3, 06 §7m.2 — đọc 2026-10-30).
 - **Gói MIT nhưng kéo phụ thuộc bắc cầu AGPL** → cổng phải quét toàn cây, không chỉ dependencies trực tiếp.
 - **Model "open" nhưng license cấm thương mại hoặc giới hạn ngành** (NC, use-restriction).
 - **Dataset Kaggle/HF không license** hoặc chứa dữ liệu cá nhân/bản quyền → sản phẩm thừa hưởng rủi ro.

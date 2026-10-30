@@ -3,7 +3,7 @@ title: Nền ứng dụng LLM: chọn model, prompt-as-code, structured output, 
 kind: module
 prefix: AI-APP
 applies_to: [ai-agent, agentic-system, data-ml, web-app, mobile-app, desktop-app, static-site, game, monorepo, api-service]
-updated: 2026-10-25
+updated: 2026-10-30
 ---
 
 # Nền ứng dụng LLM: chọn model, prompt-as-code, structured output, chi phí
@@ -80,6 +80,7 @@ TTL 5 phút (ghi ×1.25) hoặc 1 giờ (ghi ×2), đọc ×0.1; kiểm hiệu q
 - [ ] `AI-APP-017` **MAY** Dùng tính năng nén/compaction context của nhà cung cấp cho hội thoại dài, kèm eval riêng cho việc mất thông tin.
 - [ ] `AI-APP-018` **MAY** Thiết kế fallback đa nhà cung cấp qua gateway (`litellm` 1.105.0, PyPI 2026-10-11) với cùng schema; chỉ khi SLA yêu cầu. · Nguồn: [`observability-and-cost.md`](observability-and-cost.md)
 - [ ] `AI-APP-019` **SHOULD** Trong agent có vòng lặp tool (hàng Agentic RAG của [`rag-and-knowledge.md`](rag-and-knowledge.md); tính năng một lời gọi + schema theo Classic RAG ở đó): tri thức tham chiếu chỉ cần đôi khi (chính sách, định nghĩa, thông số) đặt sau tool tìm/tra hoặc làm file tham chiếu trong skill; không để code lấy rồi dán vào prompt, trừ thứ rẻ và gần như luôn liên quan (vd bước nhận diện thực thể). Phần được dán vẫn theo `AI-APP-007`. → Kiểm: review luồng dựng prompt — mỗi đoạn tri thức nạp bằng code có lý do "luôn liên quan", phần còn lại truy cập qua tool/skill. · Nguồn: claude.com *When to fold subagents into your main agent loop* (2026-10-22, xác minh 2026-10-25, `research/2026-10-24-single-agent-loop.md`) §Knowledge bases, §How to fold ("cheap and almost always relevant")
+- [ ] `AI-APP-020` **SHOULD** Sổ model đang dùng (mở rộng AI-BOM của `SEC-SUPPLY-028`/system card `STD-AI-013`, hoặc `docs/ai/models.md` nếu chưa có AI-BOM) liệt kê mọi model ID ghim (sinh, embed, rerank, judge) và phiên bản API/header của nhà cung cấp, kèm trạng thái vòng đời (active/legacy/deprecated) và ngày khai tử lấy từ trang deprecation chính thức (hoặc trường `shutdown_date` khi API có). Job định kỳ (tuần, như `OPS-MAINT-003`) cảnh báo khi model đang dùng bị deprecated, và đỏ khi ngày khai tử ≤ 60 ngày mà chưa có PR/ADR di trú đã qua eval (`AI-APP-016`). Nâng phiên bản API coi như nâng model: tham số bị bỏ trả 400. → Kiểm: job lịch tuần (không chặn PR) đọc sổ model (hoặc `shutdown_date` từ List models khi có): model có `retire_date − hôm nay ≤ 60` ngày mà không có PR/ADR di trú liên kết → exit 1; grep code/cấu hình chỉ thấy model ID có trong sổ. · Nguồn: Anthropic *Model deprecations*; OpenAI *Deprecations* (`shutdown_date`)
 
 ## Bẫy thường gặp
 
@@ -113,3 +114,5 @@ TTL 5 phút (ghi ×1.25) hoặc 1 giờ (ghi ×2), đọc ×0.1; kiểm hiệu q
 - npm: `promptfoo` 0.124.1 <https://www.npmjs.com/package/promptfoo> · `ai` 7.0.138 <https://www.npmjs.com/package/ai> — xác minh 2026-10-13.
 - `seeker19110/stored` mục 02 (structured output: API đóng → instructor/native; local → outlines; đa ngôn ngữ → BAML), mục 10 — đọc 2026-10-13 (`research/2026-10-13-stored-catalog-extraction.md`).
 - claude.com, *Building agents: When to fold subagents into your main agent loop* (2026-10-22): <https://claude.com/blog/building-agents-when-to-fold-subagents-into-your-main-agent-loop> · kit single-agent-loop-kit (`c437962`, 2026-10-21; "Not maintained"): <https://github.com/anthropics/single-agent-loop-kit> — xác minh 2026-10-25 (`research/2026-10-24-single-agent-loop.md`, ADR-0045).
+- Vòng đời Active/Legacy/Deprecated/Retired; 'Requests to models past the retirement date will fail'; báo trước ≥ 60 ngày với model công khai; claude-sonnet-4-5-20250929 deprecated 2026-09-30, retire 2026-11-30; temperature/top_p/top_k bị bỏ ở API version 2026-10-21 → 400 (`AI-APP-020`): <https://platform.claude.com/docs/en/about-claude/model-deprecations> — xác minh 2026-10-30.
+- GA ≥ 6 tháng, biến thể chuyên biệt ≥ 3 tháng, preview có thể ~2 tuần; trường `shutdown_date` (YYYY-MM-DD hoặc null) ở List/Retrieve model; snapshot gpt-5/o3 gỡ 2026-12-11, thông báo 2026-06-11 (`AI-APP-020`): <https://developers.openai.com/api/docs/deprecations> — xác minh 2026-10-30.
