@@ -10954,6 +10954,18 @@ def _rethink_pending(reviews: List[Dict[str, Any]], rethinks: object, head: str)
     return last.get("head") == head and not after
 
 
+MERGES_KEEP = 20  # head cập nhật nhánh nhớ trong sổ review cục bộ mỗi PR (`_reviewed_contents`)
+
+
+def _reviewed_contents(window: List[Dict[str, Any]], merges: object, head: str, base_merge_of: object) -> Set[str]:
+    """Head đã rà có kết luận, gộp head chỉ là cập nhật nhánh đích của head đã rà khác (cùng nội dung — không phải lần
+    sửa): `merges` = {head: [head nguồn]} `pr next` nhớ lúc thấy, cộng `base_merge_of` của head hiện tại (AUD-HAR-136)."""
+    alias = {k: v for k, v in merges.items() if isinstance(v, list)} if isinstance(merges, dict) else {}
+    alias[head] = [x for x in base_merge_of if isinstance(x, str)] if isinstance(base_merge_of, list) else []
+    heads = {str(r.get("head")) for r in window if not r.get("inconclusive")}
+    return {h for h in heads if not set(alias.get(h, [])) & heads}
+
+
 def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int:
     """Số lượt review chưa sạch trong ngân sách (`review_window`)."""
     return len(review_window(reviews, rethinks))
@@ -11256,12 +11268,12 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
         unclean = [r for r in reviews if not r.get("clean")]
         unsure = bool(unclean) and bool(unclean[-1].get("inconclusive"))
         window = review_window(reviews, rec.get("rethinks"))
-        heads = {r.get("head") for r in window if not r.get("inconclusive")}
-        if head in heads:  # head chỉ là cập nhật nhánh đích của head đã rà: chưa phải lần sửa
-            heads -= set(d.get("base_merge_of") or [])
-        fixed = len(heads) >= 2
+        fixed = len(_reviewed_contents(window, rec.get("merges"), head, d.get("base_merge_of"))) >= 2
         identity = bool(rec.get("published_only"))
-        if gate["state"] in ("missing", "blocking") and _rethink_pending(reviews, rec.get("rethinks"), head):
+        pending = gate["state"] in ("missing", "blocking") and _rethink_pending(reviews, rec.get("rethinks"), head)
+        if pending and auto_merge:  # cần push: tắt auto-merge người bật TRƯỚC (AUD-HAR-137)
+            early = act("disable-auto-merge", "sắp sửa thêm sau `pr rethink` mà auto-merge đang bật", disable)
+        elif pending:
             early = act(
                 "fix",
                 f"vừa `pr rethink` ở {head[:7]} — lần sửa thêm chưa push (ADR-0059: sửa HẾT phát hiện, cả 🟠/🟢)",
@@ -11534,11 +11546,39 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     if problem:
         print(f"✗ {problem}", file=sys.stderr)
         return 2
-    entry = {"decision": args.decision, "at": now_iso(), "head": str(d.get("head", ""))}  # `_rethink_pending`
+    entry = {"decision": args.decision, "at": now_iso()}
+    head = str(d.get("head", ""))
+    if action == "debt":  # còn 🔴 mà cây chưa đổi ngoài sổ/cập nhật nhánh → lần sửa chưa push (`_rethink_pending`)
+        last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))
+        error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
+        if not error and not extra:
+            entry["head"] = head
     data[key] = {**local, "rethinks": [*rethinks, entry]}
     _write_reviews(base, data)
     print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
+
+
+def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Optional[str], List[str], str]:
+    """(lỗi đọc git, file mã đổi từ review `last` tới `head`, sổ audit ở head) — so cây `--no-renames`; miễn sổ audit và file
+    giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) trừ file PR đã đổi lúc review: trả nó về bản nhánh đích hay
+    xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135)."""
+    since = _git(base, "diff", "--no-renames", "--name-only", last, head)
+    other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
+    fork = _git(base, "merge-base", f"origin/{target}", last)
+    show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
+    reviewed = _git(base, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
+    bad = next((r for r in (since, other, fork, show, reviewed) if r.returncode), None)
+    if bad is not None:
+        return (
+            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
+            f" ({_one_line(bad.stderr) or 'không có tổ tiên chung — clone nông? `git fetch --unshallow`'})"
+            " — fetch nhánh PR và nhánh đích rồi chạy lại",
+            [],
+            "",
+        )
+    mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
+    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT}), show.stdout
 
 
 def _debt_problem(
@@ -11551,29 +11591,16 @@ def _debt_problem(
     if not ids or any(not REQ_ID_RE.fullmatch(i) for i in ids):
         return "--findings cần ≥ 1 ID sổ audit (AUD-…), cách nhau bằng dấu phẩy"
     last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))  # `pr next` = debt: blocking kết luận
-    since = _git(base, "diff", "--no-renames", "--name-only", last, head)
-    other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
-    fork = _git(base, "merge-base", f"origin/{target}", last)
-    show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
-    reviewed = _git(base, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
-    bad = next((r for r in (since, other, fork, show, reviewed) if r.returncode), None)
-    if bad is not None:
-        return (
-            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
-            f" ({_one_line(bad.stderr) or 'không có tổ tiên chung — clone nông? `git fetch --unshallow`'})"
-            " — fetch nhánh PR và nhánh đích rồi chạy lại"
-        )
-    # Miễn file giống hệt nhánh đích (cập nhật nhánh) — trừ file PR đã đổi lúc review cuối: trả nó về bản nhánh đích hay
-    # xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154).
-    mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
-    extra = sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT})
+    error, extra, ledger = _review_drift(base, last, head, target)
+    if error:
+        return error
     if extra:
         return (
             f"sau review cuối ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 2 lần, sửa 1 lần:"
             f" chỉ commit sổ {AUDIT_STATUS_DEFAULT}; sửa thêm thì cần lượt review mới (`pr rethink`) — nếu đó là cập nhật"
             f" nhánh mà origin/{target} cục bộ cũ: `git fetch origin {target}` rồi chạy lại (AUD-HAR-133)"
         )
-    rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
+    rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
     for i in ids:
         r = rows.get(i)
         tag = REVIEW_DEBT_RE.search(r.get("Ghi chú", "")) if r else None
@@ -12229,6 +12256,13 @@ def _pr_next_state(pr: Dict[str, Any], base: Path) -> Tuple[Dict[str, Any], Dict
         rec = {**rec, "standard_seen": True}
         data[str(d["pr"])] = rec
         _write_reviews(base, data)
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:  # nhớ head cập nhật nhánh (AUD-HAR-136)
+        keep = dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])
+        rec = {**rec, "merges": keep}
+        data[str(d["pr"])] = rec
+        _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
     return d, data, with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
 
@@ -12650,7 +12684,8 @@ def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     )
     published += [r for r in inp.get("reviews") or [] if isinstance(r, dict)]
     rec = {"reviews": inp.get("local") or [], "standard_seen": bool(inp.get("standard_seen"))}
-    rec = with_published({**rec, "rethinks": inp.get("rethinks")}, published, bool(inp.get("identity")))
+    rec = {**rec, "rethinks": inp.get("rethinks"), "merges": inp.get("merges")}
+    rec = with_published(rec, published, bool(inp.get("identity")))
     reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
     d = inp["decision"]
     elig = merge_eligibility(d, reviews, rec["standard_seen"])

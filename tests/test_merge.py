@@ -1845,6 +1845,21 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2x], "rethinks": rough})["action"], "debt")
         # head chỉ là cập nhật nhánh đích của head đã rà (`base_merge_of`): chưa phải lần sửa → sửa, không ghi nợ
         self.assertEqual(self.act(rec={"reviews": [b1, b2]}, base_merge_of=[self.H2])["action"], "fix")
+        # AUD-HAR-136: head cập nhật nhánh đã rà (`merges` nhớ lúc `pr next` thấy) gộp với head nguồn — bản sửa ở head mới
+        # chưa ai rà → `review`, không ghi nợ; lần sửa thật rồi cập nhật nhánh → vẫn ghi nợ (AUD-TEST-028)
+        e = "e" * 40
+        b2e = {**b2, "head": e}
+        self.assertEqual(self.act(rec={"reviews": [b1, b2e], "merges": {e: [self.H2]}})["action"], "review")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2e], "merges": "rác"})["action"], "debt")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2e]}, base_merge_of=[e])["action"], "debt")
+        # AUD-TEST-028: mốc rethink lệch thứ tự → mốc MUỘN nhất quyết; review thiếu `at` tính là sau mốc
+        marks = [{**after[0], "at": "2026-10-27T02:40:00+00:00", "head": self.H}, {**after[0], "head": e}]
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x], "rethinks": marks})["action"], "fix")
+        no_at = {"head": self.H2, "clean": False}
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x, no_at], "rethinks": at_head})["action"], "debt")
+        self.assertEqual(
+            self.act(True, rec={"reviews": [b1, b2x], "rethinks": at_head})["action"], "disable-auto-merge"
+        )
         before = [{"decision": "D-008", "at": "2026-10-27T00:00:00+00:00"}, "rác"]
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "debt")
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "debt")
@@ -1978,7 +1993,7 @@ class PrNextCliTest(unittest.TestCase):
             (rc, out), (0, "✓ PR #7: mở thêm một lần sửa theo D-005 — sửa hết, push, chạy lại `xt.py pr next --pr 7`\n")
         )
         self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["decision"], "D-005")
-        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["head"], self.head)  # `_rethink_pending`
+        self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])  # SHA giả: không so được cây
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
@@ -2020,6 +2035,30 @@ class PrNextCliTest(unittest.TestCase):
             self.base, f"### D-040 · {self.soon(5)} · PR #7: review cuối chưa kết luận — giao reviewer khác?"
         )
         self.assertEqual(self.rethink("D-040", p)[0], 0)
+        # AUD-HAR-135: rethink từ `rethink` không có gì để sửa → `review` (reviewer khác), không `fix` mãi
+        self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "review")
+
+    def test_rethink_marks_unfixed_head_only_from_debt(self):
+        """AUD-HAR-135: `pr rethink` từ `debt` ghi head "chưa sửa" chỉ khi cây chưa đổi ngoài sổ — `pr next` = `fix`; head
+        đã có bản sửa → không ghi, `pr next` = `review`."""
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        booked = self.commit({xt.AUDIT_STATUS_DEFAULT: "## Phát hiện\n"})
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
+        p = {**self.big, "headRefOid": booked, "baseRefName": "main", "xtReviews": [r1, r2]}
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "debt")
+        self.decisions(self.base, f"### D-050 · {self.soon(5)} · PR #7: còn 🔴 — sửa hết?")
+        self.assertEqual(self.rethink("D-050", p)[0], 0)
+        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["head"], booked)
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "fix")
+        fixed = self.commit({"src/a.py": "x = 2\n"})  # đã sửa trước khi rethink: không đánh dấu
+        q = {**p, "headRefOid": fixed}
+        self.decisions(self.base, f"### D-051 · {self.soon(6)} · PR #7: còn 🔴 lần hai — sửa hết?")
+        xt._write_reviews(self.base, {})
+        self.assertEqual(self.rethink("D-051", q)[0], 0)
+        self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])
+        self.assertEqual(json.loads(self.nxt(q, "--json")[1])["action"], "review")
 
     def test_rethink_reads_decision_of_worktree(self):
         """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
@@ -2159,6 +2198,24 @@ class PrNextCliTest(unittest.TestCase):
         self.git("rm", "-q", "src/a.py")  # PR thêm lúc review, nay xoá: giống nhánh đích nhưng là sửa chưa ai rà
         self.git("commit", "-qm", "drop")
         refused(self.git("rev-parse", "HEAD"), "src/a.py")
+
+    def test_pr_next_remembers_base_merges_and_unshallow_hint(self):
+        """AUD-HAR-136: `pr next` nhớ head cập nhật nhánh (`baseMergeOf`) vào sổ cục bộ, giữ tối đa MERGES_KEEP; AUD-TEST-028:
+        nhánh đích không có tổ tiên chung (clone nông) → `pr debt` gợi ý `--unshallow`."""
+        old = {f"{i:040x}": ["a" * 40] for i in range(xt.MERGES_KEEP)}
+        xt._write_reviews(self.base, {"7": {"merges": old}})
+        self.nxt({**self.big, "baseMergeOf": ["d" * 40]})
+        merges = xt.read_reviews(self.base)["7"]["merges"]
+        self.assertEqual((len(merges), merges[self.head]), (xt.MERGES_KEEP, ["d" * 40]))
+        self.nxt({**self.big, "baseMergeOf": ["d" * 40]})  # đã nhớ: không ghi lại
+        self.assertEqual(xt.read_reviews(self.base)["7"]["merges"], merges)
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        head = self.commit({xt.AUDIT_STATUS_DEFAULT: "## Phát hiện\n"})
+        tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # cây rỗng của git: commit mồ côi làm nhánh đích
+        self.git("update-ref", "refs/remotes/origin/zz", self.git("commit-tree", tree, "-m", "mồ côi"))
+        rec = {"reviews": [{"head": reviewed, "clean": False}]}
+        err = xt._debt_problem(self.base, "7", head, rec, ["AUD-SEC-001"], "zz")
+        self.assertIn("clone nông? `git fetch --unshallow`", str(err))
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
