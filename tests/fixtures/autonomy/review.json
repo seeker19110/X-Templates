@@ -864,6 +864,37 @@
     "action": "rethink"
    },
    "note": "review #345: lượt 2 chưa kết luận — chưa biết còn 🔴 nên không ghi nợ được, về rethink (không merge bản sửa chưa ai rà)"
+  },
+  {
+   "id": "review-har131-inconclusive-first-no-debt",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-HAR-131",
+    "ADR-0059"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "inconclusive": true,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "blocking",
+    "action": "fix"
+   },
+   "note": "lượt đầu chưa kết luận rồi lượt hai chặn ở cùng head: chưa có lần sửa nào — được sửa một lần, không ghi nợ ngay"
   }
  ]
 }

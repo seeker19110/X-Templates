@@ -1815,10 +1815,13 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(ident["action"], "rethink")
         self.assertIn("`review_identity`", ident["why"])
         b2_old = {**b2, "head": self.H2}
-        self.assertEqual(self.act(rec={"reviews": [b1, b2_old]})["action"], "debt")  # thay review lần ba
+        # AUD-HAR-131: hai review ở CÙNG head = chưa có lần sửa nào được rà → rà head mới, không ghi nợ
+        self.assertEqual(self.act(rec={"reviews": [b1, b2_old]})["action"], "review")
         self.assertEqual(self.act(True, rec={"reviews": [b1, b2]})["action"], "disable-auto-merge")
         inc = {**b1, "inconclusive": True}
-        self.assertEqual(self.act(rec={"reviews": [inc, b2]})["action"], "debt")
+        self.assertEqual(
+            self.act(rec={"reviews": [inc, b2]})["action"], "fix"
+        )  # inconclusive lượt đầu không đốt lần sửa
         clean_mid = {"head": self.H2, "clean": True, "at": "2026-10-27T01:30:00Z"}
         self.assertEqual(self.act(rec={"reviews": [b1, clean_mid, b2]})["action"], "fix")  # sạch đặt lại đếm
         clean_head = {"head": self.H, "clean": True, "at": "2026-10-27T03:00:00Z"}
@@ -1827,7 +1830,9 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": after})["action"], "fix")  # mở thêm lượt
         b3 = {"head": self.H, "clean": False, "at": "2026-10-27T04:00:00Z"}
         b4 = {**b3, "at": "2026-10-27T05:00:00Z"}
-        self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": after})["action"], "debt")
+        # AUD-HAR-132: sau rethink, review chưa sạch cuối trước mốc là lượt 1 → đúng MỘT lần sửa nữa rồi ghi nợ
+        b2x = {**b2, "head": "e" * 40}
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x, b3], "rethinks": after})["action"], "debt")
         before = [{"decision": "D-008", "at": "2026-10-27T00:00:00+00:00"}, "rác"]
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "debt")
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "debt")
@@ -1839,9 +1844,10 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two})["action"], "fix")
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two[::-1]})["action"], "fix")
         self.assertEqual(xt.review_rounds([{"clean": False}, {"clean": False}], after), 2)  # thiếu `at` vẫn tính
-        # review cùng giây với mốc rethink tính là trước nó (không đếm); muộn hơn một giây thì đếm
-        self.assertEqual(xt.review_rounds([{"clean": False, "at": "2026-10-27T02:30:00Z"}], after), 0)
-        self.assertEqual(xt.review_rounds([{"clean": False, "at": "2026-10-27T02:30:01Z"}], after), 1)
+        # review cùng giây với mốc rethink tính là trước nó (giữ làm lượt 1 — AUD-HAR-132); muộn hơn một giây thì sau mốc
+        early, late = {"clean": False, "at": "2026-10-27T02:30:00Z"}, {"clean": False, "at": "2026-10-27T02:30:01Z"}
+        self.assertEqual(xt.review_window([early, late], after), [early, late])
+        self.assertEqual(xt.review_window([{**early, "at": "2026-10-27T01:00:00Z"}, early], after), [early])
         # pha build: chưa có review kết luận chặn → hoãn thành nợ, `inconclusive` không chặn; review chặn vẫn đếm lượt
         self.assertEqual(self.act(lane="chuẩn", delivery_phase="build")["action"], "wait")
         incs = {"reviews": [inc, {**b2, "inconclusive": True}]}
@@ -1951,7 +1957,7 @@ class PrNextCliTest(unittest.TestCase):
                 rc, _, err = self.rethink(did)
                 self.assertEqual(rc, 2)
                 self.assertIn(why, err)
-        bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
+        bad_at = {**self.big, "xtReviews": [{"head": "d" * 40, "clean": False}, {"head": self.head, "clean": False}]}
         self.assertIn("review đã đăng của PR #7 thiếu/hỏng mốc `at`", self.rethink("D-005", bad_at)[2])  # chặt
         auto = {**self.big, "autoMergeRequest": {"enabledAt": "x"}}
         self.assertIn("là `disable-auto-merge`, không phải `debt`/`rethink`", self.rethink("D-005", auto)[2])
@@ -1983,13 +1989,24 @@ class PrNextCliTest(unittest.TestCase):
         tie = {**self.big, "xtReviews": [r1, {**r2, "at": "2026-10-27T02:00:00Z"}]}  # cùng giây với D-020 → từ chối
         self.assertIn("(trước hoặc cùng giây)", self.rethink("D-020", tie)[2])
         self.assertEqual(self.rethink("D-021", p)[0], 0)
-        r3 = {"head": self.head, "clean": False, "at": self.soon(60)}  # sau mốc rethink, trước mốc D-021
-        r4 = {**r3, "at": self.soon(120)}
+        r3 = {"head": "f" * 40, "clean": False, "at": self.soon(60)}  # sau mốc rethink, trước mốc D-021
+        r4 = {**r3, "head": self.head, "at": self.soon(120)}
         p2 = {**self.big, "xtReviews": [r1, r2, r3, r4]}
         self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "debt")
         rc, _, err = self.rethink("D-021", p2)
         self.assertEqual(rc, 2)
         self.assertIn("D-021 đã mở thêm lượt cho PR #7 — cần quyết định mới", err)
+
+    def test_rethink_from_unsure_last_review(self):
+        """AUD-TEST-027: hết lượt mà review cuối chưa kết luận → `pr next` = `rethink`; `pr rethink` nhận bước đó."""
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": self.head, "clean": False, "inconclusive": True, "at": "2026-10-27T02:00:00Z"}
+        p = {**self.big, "xtReviews": [r1, r2]}
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "rethink")
+        self.decisions(
+            self.base, f"### D-040 · {self.soon(5)} · PR #7: review cuối chưa kết luận — giao reviewer khác?"
+        )
+        self.assertEqual(self.rethink("D-040", p)[0], 0)
 
     def test_rethink_reads_decision_of_worktree(self):
         """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
@@ -2003,8 +2020,8 @@ class PrNextCliTest(unittest.TestCase):
             self.assertEqual(run_main(*decide, "--choice", "1", "--why", "x", "--revert", "y")[0], 0)
         self.assertTrue((wt / "docs/autopilot/DECISIONS.md").is_file())
         self.assertFalse((self.base / "docs/autopilot/DECISIONS.md").exists())
-        r3 = {"head": self.head, "clean": False, "at": self.soon(10)}  # hai lượt mới sau lần rethink đầu
-        p2 = {**self.big, "xtReviews": [*self.marks(), r3, {**r3, "at": self.soon(20)}]}
+        r3 = {"head": "f" * 40, "clean": False, "at": self.soon(10)}  # hai lượt mới sau lần rethink đầu
+        p2 = {**self.big, "xtReviews": [*self.marks(), r3, {**r3, "head": self.head, "at": self.soon(20)}]}
         self.decisions(self.base, f"### D-030 · {self.soon(30)} · PR #7 quá trần lần hai (sổ dự án)?")
         with contextlib.chdir(wt):
             self.assertEqual(self.rethink("D-001")[0], 0)  # sổ của worktree đang sửa
@@ -2084,44 +2101,51 @@ class PrNextCliTest(unittest.TestCase):
         return subprocess.run([*git, *args], check=True, capture_output=True, text=True).stdout.strip()
 
     def test_debt_tree_check_base_update_merge_and_rename(self):
-        """Review #345 🟠: "chỉ sổ đổi sau review cuối" so CÂY (`--no-renames`), không đếm commit — cập nhật nhánh đích
-        vào PR (file giống hệt `origin/main`) được nhận; merge sửa thêm mã, `git mv` mã thành sổ bị từ chối."""
-        self.commit({"src/authz.py": "ok = 1\n"})
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")  # nhánh đích có authz.py
+        """Review #345 🟠 + AUD-TEST-027/AUD-SEC-154: "chỉ sổ đổi sau review cuối" so CÂY (`--no-renames`) với nhánh đích
+        của PR (`baseRefName`) — cập nhật nhánh (file giống hệt nhánh đích) được nhận; commit MERGE sửa thêm mã, đổi tên
+        thuần mã thành sổ, xoá file PR đã thêm lúc review đều bị từ chối."""
+        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
+        self.commit({"src/authz.py": ledger})  # cùng nội dung với sổ: `git mv` là đổi tên thuần (100 %)
+        self.git("branch", "trunk")
+        self.git("update-ref", "refs/remotes/origin/trunk", "HEAD")  # nhánh đích của PR là `trunk`, không phải main
         self.git("checkout", "-q", "-b", "pr")
         reviewed = self.commit({"src/a.py": "x = 1\n"})
-        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
-        self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
-        self.git("checkout", "-q", "-b", "trunk", "origin/main")  # nhánh đích tiến thêm, PR cập nhật nhánh
-        self.git("update-ref", "refs/remotes/origin/main", self.commit({"src/b.py": "y = 1\n"}))
+        booked = self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
+        self.git("checkout", "-q", "trunk")
+        self.git("update-ref", "refs/remotes/origin/trunk", self.commit({"src/b.py": "y = 1\n"}))
         self.git("checkout", "-q", "pr")
-        self.git("merge", "-q", "--no-edit", "origin/main")
+        self.git("merge", "-q", "--no-edit", "origin/trunk")
+        good = self.git("rev-parse", "HEAD")
         r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
         r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
 
         def debt(head: str) -> tuple[int, str, str]:
-            p = {**self.big, "headRefOid": head, "baseRefName": "main", "xtReviews": [r1, r2]}
-            return run_main(
-                "pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", "--no-publish", stdin=json.dumps(p)
-            )
+            p = {**self.big, "headRefOid": head, "baseRefName": "trunk", "xtReviews": [r1, r2]}
+            args = ("pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", "--no-publish")
+            return run_main(*args, stdin=json.dumps(p))
 
-        self.assertEqual(debt(self.git("rev-parse", "HEAD"))[0], 0)  # src/b.py giống hệt nhánh đích
-        (self.base / "src/b.py").write_text("y = 2\n", encoding="utf-8")  # merge "ác": sửa thêm mã trong commit merge
-        self.git("commit", "-qam", "merge sửa thêm")
-        rc, _, err = debt(self.git("rev-parse", "HEAD"))
-        self.assertEqual(rc, 2)
-        self.assertIn("đã đổi src/b.py", err)
-        self.git("reset", "-q", "--hard", "HEAD~1")
+        def refused(head: str, path: str) -> None:
+            rc, _, err = debt(head)
+            self.assertEqual(rc, 2)
+            self.assertIn(f"đã đổi {path}", err)
+
+        self.assertEqual(debt(good)[0], 0)  # src/b.py giống hệt nhánh đích `trunk`
+        self.git("checkout", "-q", "-b", "evil", booked)  # merge "ác": sửa thêm mã NGAY TRONG commit merge
+        self.git("merge", "-q", "--no-commit", "--no-ff", "origin/trunk")
+        (self.base / "src/b.py").write_text("y = 2\n", encoding="utf-8")
+        self.git("add", "src/b.py")
+        self.git("commit", "-qm", "merge")
+        refused(self.git("rev-parse", "HEAD"), "src/b.py")
+        self.git("checkout", "-q", "-b", "mv", good)
         self.git("rm", "-q", xt.AUDIT_STATUS_DEFAULT)
         (self.base / xt.AUDIT_STATUS_DEFAULT).parent.mkdir(parents=True, exist_ok=True)
-        self.git(
-            "mv", "src/authz.py", xt.AUDIT_STATUS_DEFAULT
-        )  # đổi tên mã thành sổ: xoá authz.py bị che nếu theo rename
-        (self.base / xt.AUDIT_STATUS_DEFAULT).write_text(ledger, encoding="utf-8")
-        self.git("commit", "-qam", "mv")
-        rc, _, err = debt(self.git("rev-parse", "HEAD"))
-        self.assertEqual(rc, 2)
-        self.assertIn("đã đổi src/authz.py", err)
+        self.git("mv", "src/authz.py", xt.AUDIT_STATUS_DEFAULT)  # đổi tên thuần: theo rename thì xoá authz.py bị che
+        self.git("commit", "-qm", "mv")
+        refused(self.git("rev-parse", "HEAD"), "src/authz.py")
+        self.git("checkout", "-q", "-b", "drop", good)
+        self.git("rm", "-q", "src/a.py")  # PR thêm lúc review, nay xoá: giống nhánh đích nhưng là sửa chưa ai rà
+        self.git("commit", "-qm", "drop")
+        refused(self.git("rev-parse", "HEAD"), "src/a.py")
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
