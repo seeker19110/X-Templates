@@ -371,6 +371,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
             f"gh issue comment 5 -b '{MARK}'",
             f"gh api repos/o/r/issues/5/comments -f body='{MARK}'",
             f"gh pr edit 5 --body '{MARK}'",
+            f"gh pr comment 5 --body '{MARK.replace('clean', 'debt')}'",  # ghi nợ mở được merge (ADR-0059)
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

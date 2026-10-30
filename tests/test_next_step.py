@@ -208,7 +208,7 @@ class NextStepPureTest(unittest.TestCase):
         waiting = {"signoff": {"deferred": ["T-9"]}}  # task đó chờ người → hết việc máy làm được
         out = self.step(objective=HARDEN, harden=stale[1:], audit={"open": 1}, **waiting)
         self.assertEqual(out["action"], "release-check")
-        self.assertIn("còn 1 🔴/🟠/MUST mở do chờ người", out["reason"])
+        self.assertIn("còn 1 🔴/🟠/nợ review/MUST mở do chờ người", out["reason"])
         running = {"verdict": "continue", "reason": "còn task", "task": "T-9"}
         self.assertEqual(self.step(objective=HARDEN, harden=stale[1:], verdict=running)["action"], "task")
         self.assertEqual(self.step(harden=items)["action"], "ready-for-complete")  # build không đọc `harden`
@@ -589,6 +589,16 @@ class NextStepStateTest(StateCase):
         rows += ["| A-5 | 🔴 | chấp nhận |", "| A-6 | 🟠 | bác bỏ |"]
         book.write_text("## Phát hiện\n\n| ID | Mức | Trạng thái |\n|---|---|---|\n" + "\n".join(rows) + "\n", "utf-8")
         self.assertEqual(xt.audit_open_count(book), 2)
+        # nợ review (ADR-0059) mọi mức tính là việc mở; đã trả thì không
+        rows = [
+            "| A-7 | 🟢 | mở | nợ-review: #3 |",
+            "| A-8 | 🟢 | đã sửa | nợ-review: #3 · #4 |",
+            "| A-9 | 🟢 | mở | — |",
+        ]
+        book.write_text(
+            "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n" + "\n".join(rows), "utf-8"
+        )
+        self.assertEqual(xt.audit_open_count(book), 1)
 
 
 class HardenWorkTest(StateCase):
@@ -605,6 +615,7 @@ class HardenWorkTest(StateCase):
             "AUD-A-001 | 🟠 | mở | a | x | tay: bấm thử | —",
             "AUD-C-003 | 🟠 | đã sửa | c | x | `true` | #1",
             "AUD-D-004 | 🟢 | mở | d | x | `true` | —",
+            "AUD-E-005 | 🟢 | mở | e | x | `true` | nợ-review: #9",
             "rác | 🟠 | mở | e | x | `true` | —",
         )
         items = xt.harden_work(self.base, self.st(), "S.md")
@@ -613,8 +624,9 @@ class HardenWorkTest(StateCase):
             [
                 ("T-002", "audit:AUD-A-001", None),
                 ("T-003", "audit:AUD-B-002", "true"),
-                ("T-004", "must:AAA-001", None),
-                ("T-005", "must:AAA-002", None),
+                ("T-004", "audit:AUD-E-005", "true"),  # nợ review 🟢 (ADR-0059) trả cuối pha
+                ("T-005", "must:AAA-001", None),
+                ("T-006", "must:AAA-002", None),
             ],
         )
         self.assertEqual(xt.harden_work(self.base, self.st(), "S.md"), items)  # cùng đầu vào → cùng ID

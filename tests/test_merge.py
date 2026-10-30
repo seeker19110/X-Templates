@@ -1791,20 +1791,34 @@ class PrNextTest(unittest.TestCase):
                 self.assertEqual((r["action"], r["strict"]), ("review", True))
 
     def test_review_round_budget_stops_fix_review_loop(self):
-        """ADR-0053 (D-209): hai review chưa sạch (một toàn PR + một delta) mà head chưa sạch → `rethink`, không review lần
-        ba; review sạch đặt lại đếm; `inconclusive` cũng tính; `pr rethink` mở thêm hai lượt; merge vẫn cần review sạch."""
+        """ADR-0053 → ADR-0059 (D-257): hai review chưa sạch (review 2 lần, sửa 1 lần) mà head chưa sạch → `debt` (ghi nợ,
+        tiếp tục), không review lần ba; review sạch/ghi nợ đặt lại đếm; `inconclusive` cũng tính; `pr rethink` (còn 🔴) mở
+        thêm hai lượt; merge vẫn cần review sạch hoặc ghi nợ ở head."""
         b1 = {"head": self.H2, "clean": False, "at": "2026-10-27T01:00:00Z"}
         b2 = {"head": self.H, "clean": False, "at": "2026-10-27T02:00:00Z"}
         self.assertEqual(self.act(rec={"reviews": [b1]})["action"], "review")  # lượt delta còn trong ngân sách
         r = self.act(rec={"reviews": [b1, b2]})
-        self.assertEqual(r["action"], "rethink")  # thay `fix`
-        self.assertIn("2 lượt review chưa sạch (trần 2", r["why"])
-        self.assertIn("xt.py pr rethink --pr 7 --decision D-NNN", r["do"])
+        self.assertEqual(r["action"], "debt")  # thay `fix`
+        self.assertIn("2 lượt review chưa sạch (trần 2: review 2 lần, sửa 1 lần", r["why"])
+        self.assertIn("`nợ-review: #7` ở Ghi chú", r["do"])
+        self.assertIn("xt.py pr debt --pr 7 --findings AUD-", r["do"])
+        self.assertIn("Còn 🔴: không ghi nợ — thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢)", r["do"])
+        debt_head = {"head": self.H, "clean": True, "debt": True, "at": "2026-10-27T03:00:00Z"}
+        self.assertEqual(self.act(rec={"reviews": [b1, b2, debt_head]}, verdict="merge")["action"], "merge")
+        # review #345 🔴: review chưa sạch cuối chưa kết luận → chưa biết còn 🔴, không ghi nợ; danh tính reviewer → tác
+        # giả không đăng được dấu `debt`: cả hai về `rethink` (ADR-0053)
+        unsure = self.act(rec={"reviews": [b1, {**b2, "inconclusive": True}]})
+        self.assertEqual(unsure["action"], "rethink")
+        self.assertIn("chưa kết luận — chưa biết còn 🔴", unsure["why"])
+        self.assertIn("xt.py pr rethink --pr 7 --decision D-NNN", unsure["do"])
+        ident = self.act(rec={"reviews": [b1, b2], "published_only": True})
+        self.assertEqual(ident["action"], "rethink")
+        self.assertIn("`review_identity`", ident["why"])
         b2_old = {**b2, "head": self.H2}
-        self.assertEqual(self.act(rec={"reviews": [b1, b2_old]})["action"], "rethink")  # thay review lần ba
+        self.assertEqual(self.act(rec={"reviews": [b1, b2_old]})["action"], "debt")  # thay review lần ba
         self.assertEqual(self.act(True, rec={"reviews": [b1, b2]})["action"], "disable-auto-merge")
         inc = {**b1, "inconclusive": True}
-        self.assertEqual(self.act(rec={"reviews": [inc, b2]})["action"], "rethink")
+        self.assertEqual(self.act(rec={"reviews": [inc, b2]})["action"], "debt")
         clean_mid = {"head": self.H2, "clean": True, "at": "2026-10-27T01:30:00Z"}
         self.assertEqual(self.act(rec={"reviews": [b1, clean_mid, b2]})["action"], "fix")  # sạch đặt lại đếm
         clean_head = {"head": self.H, "clean": True, "at": "2026-10-27T03:00:00Z"}
@@ -1813,14 +1827,14 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": after})["action"], "fix")  # mở thêm lượt
         b3 = {"head": self.H, "clean": False, "at": "2026-10-27T04:00:00Z"}
         b4 = {**b3, "at": "2026-10-27T05:00:00Z"}
-        self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": after})["action"], "rethink")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": after})["action"], "debt")
         before = [{"decision": "D-008", "at": "2026-10-27T00:00:00+00:00"}, "rác"]
-        self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "rethink")
-        self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "rethink")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "debt")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "debt")
         # mốc rethink hỏng không mở lượt (sổ hỏng chỉ chặt hơn); nhiều mốc → mốc MUỘN nhất
         for at in (None, "x", "9999", "2026-10-27T02:30:00"):
             with self.subTest(at=at):
-                self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": [{"at": at}]})["action"], "rethink")
+                self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": [{"at": at}]})["action"], "debt")
         two = [after[0], {"decision": "D-010", "at": "2026-10-27T04:30:00+00:00"}]
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two})["action"], "fix")
         self.assertEqual(self.act(rec={"reviews": [b1, b2, b3, b4], "rethinks": two[::-1]})["action"], "fix")
@@ -1832,7 +1846,7 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(lane="chuẩn", delivery_phase="build")["action"], "wait")
         incs = {"reviews": [inc, {**b2, "inconclusive": True}]}
         self.assertEqual(self.act(rec=incs, delivery_phase="build", verdict="merge")["action"], "merge")
-        self.assertEqual(self.act(rec={"reviews": [b1, b2]}, delivery_phase="build")["action"], "rethink")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2]}, delivery_phase="build")["action"], "debt")
 
 
 MODELS = ("--reviewer-model", "claude-fable-5-1", "--author-model", "claude-opus-5-5")  # bậc cao hơn (D-161)
@@ -1904,11 +1918,11 @@ class PrNextCliTest(unittest.TestCase):
         `rethinks[]` → `pr next` về `fix`."""
         rc, _, err = self.rethink("D-001")
         self.assertEqual(rc, 2)
-        self.assertIn("`pr next` của PR #7 là `review`, không phải `rethink` — làm bước đó trước", err)
+        self.assertIn("`pr next` của PR #7 là `review`, không phải `debt`/`rethink` — làm bước đó trước", err)
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         r = json.loads(self.nxt(self.big, "--json")[1])
-        self.assertEqual(r["action"], "rethink")
+        self.assertEqual(r["action"], "debt")
         self.assertIn("xt.py loop decide --question 'PR #7: …'", r["do"])  # `do` nói luật #N (review #298)
         later = self.soon(2)
         self.decisions(
@@ -1940,7 +1954,7 @@ class PrNextCliTest(unittest.TestCase):
         bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
         self.assertIn("review đã đăng của PR #7 thiếu/hỏng mốc `at`", self.rethink("D-005", bad_at)[2])  # chặt
         auto = {**self.big, "autoMergeRequest": {"enabledAt": "x"}}
-        self.assertIn("là `disable-auto-merge`, không phải `rethink`", self.rethink("D-005", auto)[2])
+        self.assertIn("là `disable-auto-merge`, không phải `debt`/`rethink`", self.rethink("D-005", auto)[2])
         rc, out, _ = self.rethink("D-005")
         self.assertEqual(
             (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-005 — chạy lại `xt.py pr next --pr 7`\n")
@@ -1949,7 +1963,7 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
-        self.assertIn("là `fix`, không phải `rethink`", err)
+        self.assertIn("là `fix`, không phải `debt`/`rethink`", err)
         self.assertEqual(run_main("pr", "rethink", "--pr-json", "-", "--decision", "D-005", stdin="[]")[0], 2)
 
     def test_rethink_decision_must_follow_every_unclean_review(self):
@@ -1972,7 +1986,7 @@ class PrNextCliTest(unittest.TestCase):
         r3 = {"head": self.head, "clean": False, "at": self.soon(60)}  # sau mốc rethink, trước mốc D-021
         r4 = {**r3, "at": self.soon(120)}
         p2 = {**self.big, "xtReviews": [r1, r2, r3, r4]}
-        self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "rethink")
+        self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "debt")
         rc, _, err = self.rethink("D-021", p2)
         self.assertEqual(rc, 2)
         self.assertIn("D-021 đã mở thêm lượt cho PR #7 — cần quyết định mới", err)
@@ -1994,9 +2008,120 @@ class PrNextCliTest(unittest.TestCase):
         self.decisions(self.base, f"### D-030 · {self.soon(30)} · PR #7 quá trần lần hai (sổ dự án)?")
         with contextlib.chdir(wt):
             self.assertEqual(self.rethink("D-001")[0], 0)  # sổ của worktree đang sửa
-            self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "rethink")
+            self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["action"], "debt")
             self.assertEqual(self.rethink("D-030", p2)[0], 0)  # sổ dự án, đứng trong worktree
         self.assertEqual([r["decision"] for r in xt.read_reviews(self.base)["7"]["rethinks"]], ["D-001", "D-030"])
+
+    def commit(self, files: dict[str, str]) -> str:
+        """Commit `files` vào repo tạm `self.base`, trả SHA."""
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        for rel, text in files.items():
+            (self.base / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.base / rel).write_text(text, encoding="utf-8")
+            subprocess.run([*git, "add", rel], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-qm", "x"], check=True, capture_output=True)
+        return subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_debt_records_ledger_findings(self):
+        """ADR-0059 (D-257): hết lượt review → `pr debt` chỉ nhận khi sau review chưa sạch cuối CHỈ sổ audit đổi (sửa 1
+        lần) và mỗi ID là dòng `mở`, không 🔴, `nợ-review: #N` đúng PR ở sổ của head; ghi review `debt` (hợp lệ ở head),
+        đăng dấu `verdict=debt`, chạy lại không ghi/đăng trùng; đăng lỗi → `pr next` đăng lại bằng `pr debt`."""
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        rows = (
+            ("AUD-SEC-001", "🟢", "mở", "nợ-review: #7"),
+            ("AUD-SEC-002", "🔴", "mở", "nợ-review: #7"),
+            ("AUD-SEC-003", "🟠", "mở", "nợ-review: #8"),
+            ("AUD-SEC-004", "🟠", "đã sửa", "nợ-review: #7 · #9"),
+        )
+        table = "".join(f"| {i} | {lv} | {st} | x | {note} |\n" for i, lv, st, note in rows)
+        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Tóm tắt | Ghi chú |\n|---|---|---|---|---|\n" + table
+        head = self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
+        p = {**self.big, "headRefOid": head, "xtReviews": [r1, r2]}
+
+        def debt(ids: str, q: dict | None = None, *extra: str) -> tuple[int, str, str]:
+            return run_main("pr", "debt", "--pr-json", "-", "--findings", ids, *extra, stdin=json.dumps(q or p))
+
+        self.assertIn("không phải `debt`", debt("AUD-SEC-001", {**p, "xtReviews": [r2]})[2])
+        self.assertIn("--findings cần ≥ 1 ID", debt(" , ")[2])
+        self.assertIn("--findings cần ≥ 1 ID", debt("x")[2])
+        for ids in ("AUD-SEC-009", "AUD-SEC-003", "AUD-SEC-004"):
+            with self.subTest(ids=ids):
+                self.assertIn(f"{ids}: cần dòng `mở` trong {xt.AUDIT_STATUS_DEFAULT} ở head", debt(ids)[2])
+        rc, _, err = debt("AUD-SEC-001,AUD-SEC-002")
+        self.assertEqual(rc, 2)
+        self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện", err)
+        lost = {**p, "xtReviews": [r1, {**r2, "head": "e" * 40}]}
+        self.assertIn("không đọc được cây eeeeeee", debt("AUD-SEC-001", lost)[2])
+        fixed = self.commit({"src/a.py": "x = 2\n"})  # sửa lần hai sau review cuối → không ghi nợ được
+        rc, _, err = debt("AUD-SEC-001", {**p, "headRefOid": fixed})
+        self.assertEqual(rc, 2)
+        self.assertIn("đã đổi src/a.py — review 2 lần, sửa 1 lần", err)
+        self.published.return_value = 3  # đăng lỗi: sổ cục bộ đã ghi, `pr next` đòi đăng lại bằng `pr debt`
+        rc, out, _ = debt("AUD-SEC-001")
+        self.assertEqual((rc, out), (3, f"✓ PR #7: ghi nợ review ở {head[:7]} (AUD-SEC-001) — sửa cuối pha\n"))
+        self.published.assert_called_once_with("7", "7", head, True, debt=["AUD-SEC-001"])
+        self.assertEqual(xt.read_reviews(self.base)["7"]["reviews"][-1]["debt"], ["AUD-SEC-001"])
+        r = json.loads(self.nxt(p, "--json")[1])
+        self.assertEqual((r["action"], r["do"]), ("republish-review", "xt.py pr debt --pr 7 --findings AUD-SEC-001"))
+        self.published.return_value = 0
+        rc, out, _ = debt("AUD-SEC-001")
+        self.assertEqual(rc, 0)
+        self.assertIn("(đã ghi trước đó — không ghi thêm)", out)
+        self.assertEqual(self.published.call_count, 2)
+        self.assertEqual(debt("AUD-SEC-001")[0], 0)  # đã đăng: không đăng lại
+        self.assertEqual(self.published.call_count, 2)
+        mark = {"head": head, "clean": True, "debt": True, "at": "2026-10-27T03:00:00Z"}
+        self.assertIn("MERGE · PR #7", self.nxt({**p, "xtReviews": [r1, r2, mark]})[1])
+        self.assertEqual(debt("AUD-SEC-001", None, "--no-publish")[0], 0)
+        self.assertEqual(run_main("pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", stdin="[]")[0], 2)
+        self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": "AUD-SEC-001"}))
+        self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": [1]}))
+
+    def git(self, *args: str) -> str:
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        return subprocess.run([*git, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_debt_tree_check_base_update_merge_and_rename(self):
+        """Review #345 🟠: "chỉ sổ đổi sau review cuối" so CÂY (`--no-renames`), không đếm commit — cập nhật nhánh đích
+        vào PR (file giống hệt `origin/main`) được nhận; merge sửa thêm mã, `git mv` mã thành sổ bị từ chối."""
+        self.commit({"src/authz.py": "ok = 1\n"})
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")  # nhánh đích có authz.py
+        self.git("checkout", "-q", "-b", "pr")
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
+        self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
+        self.git("checkout", "-q", "-b", "trunk", "origin/main")  # nhánh đích tiến thêm, PR cập nhật nhánh
+        self.git("update-ref", "refs/remotes/origin/main", self.commit({"src/b.py": "y = 1\n"}))
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-edit", "origin/main")
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
+
+        def debt(head: str) -> tuple[int, str, str]:
+            p = {**self.big, "headRefOid": head, "baseRefName": "main", "xtReviews": [r1, r2]}
+            return run_main(
+                "pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", "--no-publish", stdin=json.dumps(p)
+            )
+
+        self.assertEqual(debt(self.git("rev-parse", "HEAD"))[0], 0)  # src/b.py giống hệt nhánh đích
+        (self.base / "src/b.py").write_text("y = 2\n", encoding="utf-8")  # merge "ác": sửa thêm mã trong commit merge
+        self.git("commit", "-qam", "merge sửa thêm")
+        rc, _, err = debt(self.git("rev-parse", "HEAD"))
+        self.assertEqual(rc, 2)
+        self.assertIn("đã đổi src/b.py", err)
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.git("rm", "-q", xt.AUDIT_STATUS_DEFAULT)
+        (self.base / xt.AUDIT_STATUS_DEFAULT).parent.mkdir(parents=True, exist_ok=True)
+        self.git(
+            "mv", "src/authz.py", xt.AUDIT_STATUS_DEFAULT
+        )  # đổi tên mã thành sổ: xoá authz.py bị che nếu theo rename
+        (self.base / xt.AUDIT_STATUS_DEFAULT).write_text(ledger, encoding="utf-8")
+        self.git("commit", "-qam", "mv")
+        rc, _, err = debt(self.git("rev-parse", "HEAD"))
+        self.assertEqual(rc, 2)
+        self.assertIn("đã đổi src/authz.py", err)
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
@@ -2041,8 +2166,10 @@ class PrNextCliTest(unittest.TestCase):
         published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
         self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "merge")
         rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
-        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": []})
-        self.assertEqual(xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"]})
+        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": [], "published_only": True})
+        self.assertEqual(
+            xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"], "published_only": False}
+        )
 
     def test_review_identity_edited_mark_is_ignored(self):
         def by(updated: str) -> dict:
@@ -2601,6 +2728,15 @@ class PrStewardTest(unittest.TestCase):
         self.assertEqual(merged["local_reviews"], rec["reviews"])
         self.assertEqual(xt.with_published(rec, None)["reviews"], [])
         self.assertEqual(xt.with_published(rec, ["rác"])["reviews"], [])
+
+    def test_debt_mark_counts_as_review_at_head(self):
+        """ADR-0059: dấu `verdict=debt` (do `pr debt` đăng) là review hợp lệ ở head, nêu ID nợ; không mang tên model."""
+        body = xt.review_comment_body(self.H, True, debt=["AUD-SEC-001", "AUD-DOC-002"])
+        self.assertIn("verdict=debt -->", body)
+        self.assertIn("ghi nợ ở sổ audit (AUD-SEC-001, AUD-DOC-002), sửa cuối pha", body)
+        self.assertNotRegex(body, xt.MODEL_FAMILY_RE)
+        got = xt.published_reviews([mark(self.H, "debt", "2026-10-19T01:00:00Z")])
+        self.assertEqual(got, [{"head": self.H, "clean": True, "at": "2026-10-19T01:00:00Z", "debt": True}])
 
     def test_pr_rest_reads_marks_and_pr_next_uses_them(self):
         big = [{"path": "src/a.py", "additions": 400, "deletions": 0}]
