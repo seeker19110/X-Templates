@@ -1846,3 +1846,24 @@
 - Chọn: 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn trước: SEC-155 là lỗ cổng duyệt của người nên đi đầu; PR nhỏ giữ đường lùi và review 2 lần/sửa 1 lần khả thi (ADR-0059); gộp làm review lớn, dễ hết lượt
 - Đường lùi: Revert từng PR squash; sổ giữ dòng mở
+
+### D-263 · 2026-10-30T17:22:14+00:00 · PR #352: review lượt 2 còn 🔴 (chuyển hướng giữa xt.py và stage lọt — hồi quy) — ghi nợ hay sửa thêm?
+
+- Phương án: (1) Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước · (2) Revert lượt sửa về 82302d7 rồi ghi nợ · (3) Đóng PR, làm lại từ đầu
+- Chọn: Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); sửa hết giữ tiến bộ của hai lượt, hướng sửa F1 đã thử trong scratch không chặn oan; revert vẫn để lại 🟠 lượt 1
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-264 · 2026-10-30T18:22:01+00:00 · PR #352: review lượt 3 còn 3 🔴 (hồi quy so với main: fd {tên}, đối số giống toán tử, runs sai, parallel :::) — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + chỉ agent_session và vài dạng mờ đơn giản, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc (reviewer đã thử: fuzz 0 hồi quy); vẫn giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-265 · 2026-10-30T18:22:18+00:00 · PR #352: review lượt 3 còn 3 🔴 hồi quy so với main — làm gì? (thay D-264, ghi trùng giây với dấu review)
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + agent_session, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc; giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main

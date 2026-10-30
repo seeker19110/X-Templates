@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Security
+- Guard chặn duyệt giai đoạn sản phẩm theo luật chữ cũ cộng luật token mờ: ở mọi vị trí script (`-m xt`, lồng trong `perf sample --`), qua chuyển hướng/fd (`2>/dev/null`, `{fd}>`), khi lệnh con, cờ/giá trị `--framework`, tuỳ chọn `init` hay đường script mờ (`stage "$(echo approve)"`, backtick, biến, glob), là chuỗi thay chỗ (`xargs -I`/`-i`, mẫu `{…}`, `:::`) hay từ stdin — giới hạn còn lại ở `harness-files.md` (AUD-SEC-161); `xt.py --framework "$FW"` nay bị guard chặn, dùng `XT_FRAMEWORK`; `xt.py` coi biến phiên agent có mặt (kể cả rỗng, `CLAUDECODE= …`) là phiên agent (AUD-SEC-155, ADR-0058). **Dự án đích:** chạy lại `install.py`; người duyệt chạy `stage approve` ở terminal không có các biến này.
+
 ### Changed
 - PR cắt bản không ghi nợ review (ADR-0059 §6, D-259 — chủ dự án yêu cầu máy hoá): `merge-check` thêm khoá `release` (PR đổi `VERSION` gốc); hết lượt review thì `pr next` trả `rethink` thay `debt` — ghi nợ rồi merge sẽ gắn tag ở commit mà `release-check` FAIL; `pr rethink` mở thêm một lần sửa hết (đánh dấu head chưa sửa → `fix`; review cuối chưa kết luận → `review`). PR cắt bản = đổi/đổi tên/xoá `VERSION` gốc nhắm `main` — cùng vị từ steward gắn tag (`is_release_pr`). **Dự án đích:** chạy lại `install.py`; ghép lại `BLUEPRINT.md` theo ID — đổi chữ `LOOP-STOP-022`; skill `/review` mới.
 

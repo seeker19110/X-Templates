@@ -11,6 +11,7 @@ import stat
 import unicodedata
 import subprocess
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -21,7 +22,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import xt
 from test_xt_cli import TmpRepoCase, run_main
 
-HUMAN = {k: "" for k in xt.STAGE_AGENT_ENV}  # ngoài phiên agent
+
+@contextlib.contextmanager
+def human_env(**extra):
+    """Ngoài phiên agent: không có biến của `STAGE_AGENT_ENV` (đặt rỗng vẫn tính là agent)."""
+    with unittest.mock.patch.dict(os.environ, extra):
+        for k in set(xt.STAGE_AGENT_ENV) - set(extra):
+            os.environ.pop(k, None)
+        yield
+
+
 SHA = "a" * 40
 SHA2 = "b" * 40
 
@@ -146,10 +156,13 @@ class StageProblemTest(unittest.TestCase):
         self.assertEqual(xt.plan_stage(nfd), [(2, "C-003")])
 
     def test_agent_session(self):
-        with unittest.mock.patch.dict(os.environ, HUMAN):
+        with human_env():
             self.assertFalse(xt.agent_session())
-        with unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDECODE": "1"}):
+        with human_env(CLAUDECODE="1"):
             self.assertTrue(xt.agent_session())
+        for k in xt.STAGE_AGENT_ENV:  # đặt mà rỗng vẫn là phiên agent (`CLAUDECODE= … stage approve`, AUD-SEC-155)
+            with self.subTest(k=k), human_env(**{k: ""}):
+                self.assertTrue(xt.agent_session())
 
 
 class StageCliTest(TmpRepoCase):
@@ -161,7 +174,7 @@ class StageCliTest(TmpRepoCase):
             "config", "user.name", "chu"
         )  # smoke tự `git commit` không qua `self.git` — CI không có user.name toàn cục
         self.git("config", "commit.gpgsign", "false")
-        self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
+        self.enterContext(human_env(CLAUDE_PROJECT_DIR=str(self.repo)))
         self.commit("khởi tạo")
 
     def commit(self, msg):
@@ -516,7 +529,7 @@ class StageLockTest(TmpRepoCase):
         super().setUp()
         self.init_repo()
         self.git("config", "user.email", "chu@example.invalid")
-        self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
+        self.enterContext(human_env(CLAUDE_PROJECT_DIR=str(self.repo)))
         self.enterContext(unittest.mock.patch.object(xt, "loop_root", lambda base: base))
 
     def plan(self, *markers, tasks=("T-001",)):
@@ -816,17 +829,136 @@ class StageGuardTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(cmd), "deny")
 
+    def test_opaque_approve_denied(self):
+        """Lệnh con/tuỳ chọn mờ (`$(…)`, backtick, biến) có thể là approve/adopt — chặn (AUD-SEC-155)."""
+        for cmd in (
+            'CLAUDECODE= CLAUDE_CODE_SESSION_ID= AI_AGENT= python3 scripts/xt.py stage "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py stage `echo approve` --sha 1234567",
+            "python3 scripts/xt.py stage $(echo approve) --sha 1234567",
+            "python3 scripts/xt.py $(echo stage approve) --sha 1234567",
+            'python3 scripts/xt.py --framework fw "$(echo stage)" approve --sha 1234567',
+            'python3 scripts/xt.py --fr fw "$(echo stage)" approve --sha 1234567',
+            'python3 scripts/xt.py stage init "$(echo --adopt)" 3 --evidence x',
+            'python3 "$XT" stage approve --sha 1234567',
+            'env -u CLAUDECODE python3 "$(echo scripts/xt.py)" stage "$V" --sha 1234567',
+            # review #352 lượt 1: mọi vị trí script, `stage` là giá trị `--framework`, cờ/giá trị mờ, glob, stdin
+            "python3 scripts/xt.py perf sample --out o.json --runs 1 -- python3 scripts/xt.py stage approve --sha 1",
+            "python3 -X pycache_prefix=/tmp/xt.py scripts/xt.py stage approve --sha 1234567",
+            'python3 scripts/xt.py --framework stage stage "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py --fr stage stage `echo approve` --sha 1234567",
+            "python3 scripts/xt.py --framework $(echo fw) stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework <(true) stage approve --sha 1234567",
+            "python3 scripts/xt.py -$(echo -framework fw stage) approve --sha 1234567",
+            'python3 "$XT" --framework fw stage approve --sha 1234567',
+            'python3 "$XT" -- stage approve --sha 1234567',
+            "python3 scripts/xt.py -- stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework=fw stage approve --sha 1234567",
+            'python3 scripts/xt.py stage -- "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py `echo stage` approve --sha 1234567",
+            "python3 scripts/x?.py stage approve --sha 1234567",
+            "python3 scripts/xt.py stage appro?e --sha 1234567",
+            "python3 scripts/xt.py stage init --adop? 3 --evidence x",
+            "echo approve | xargs python3 scripts/xt.py stage",
+            "cd scripts && python3 -m xt stage approve --sha 1234567",
+            # review #352 lượt 2: chuyển hướng giữa script và `stage` (cả số fd), stdin/thay chỗ, `-m` viết dính, `=` rỗng
+            "python3 scripts/xt.py 2>/dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py </dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py 2>&1 stage init --adopt 3 --evidence x",
+            "python3 scripts/xt.py --framework fw >>f stage approve --sha 1234567",
+            'python3 scripts/xt.py stage 2>/dev/null "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py stage 2>&1 `echo approve` --sha 1234567",
+            "echo approve | xargs -I{} python3 scripts/xt.py stage {} --sha 1234567",
+            "echo approve | xargs -I % python3 scripts/xt.py stage % --sha 1234567",
+            "echo stage approve --sha 1234567 | xargs python3 scripts/xt.py",
+            "find approve -maxdepth 0 -exec python3 scripts/xt.py stage {} --sha 1234567 ';'",
+            "cd scripts && python3 -mxt stage approve --sha 1234567",
+            "cd scripts && python3 -Bm xt stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework=<(true) stage approve --sha 1234567",
+            'uv run python3 scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            '"$XT" stage approve --sha 1234567',
+            'scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            # review #352 lượt 3: fd `{tên}`, đối số giống toán tử, trình chạy không phải python, `:::`, đích chuyển
+            # hướng bị cắt, thay chỗ `-iQ`/`-0I`/`{.}`, `-m scripts.xt`, `-I%`, `python3 -B`
+            "python3 scripts/xt.py {fd}>/dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework '>' stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework 2 >/dev/null stage approve --sha 1234567",
+            'python3 scripts/xt.py stage {fd}>/dev/null "$(echo approve)" --sha 1234567',
+            "uv run scripts/xt.py $EMPTY stage approve --sha 1234567",
+            "echo e | xargs -I e uv run scripts/xt.py stage approve --sha 1234567",
+            "parallel python3 scripts/xt.py ::: stage ::: approve ::: --sha ::: 1234567",
+            "python3 scripts/xt.py > >(cat) stage approve --sha 1234567",
+            "python3 scripts/xt.py 2>$(mktemp) stage approve --sha 1234567",
+            "echo approve | xargs -iQ python3 scripts/xt.py stage Q --sha 1234567",
+            "echo approve | xargs -rI Q python3 scripts/xt.py stage Q --sha 1234567",
+            "printf approve | xargs -0I Q python3 scripts/xt.py stage Q --sha 1234567",
+            "echo approve | parallel python3 scripts/xt.py stage {.} --sha 1234567",
+            "python3 -m scripts.xt stage approve --sha 1234567",
+            'uv run scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            'pypy3 scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            "echo approve | xargs -I% python3 scripts/xt.py stage % --sha 1234567",
+            'python3 -B scripts/xt.py "$(echo stage)" approve --sha 1234567',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+
     def test_agent_steps_and_reads_allowed(self):
         for cmd in (
             "python3 scripts/xt.py stage status",
             "python3 scripts/xt.py stage submit --evidence demo",
             "python3 scripts/xt.py stage init",
+            'python3 scripts/xt.py stage submit --evidence "$(git rev-parse HEAD)"',
+            "python3 scripts/xt.py --framework fw stage status",
+            'python3 scripts/xt.py pr next --pr "$N"',
+            "python3 scripts/xt.py --version",
+            'scripts/deploy.sh "$APP" stage "$TAG"',
+            'python3 scripts/xt.py stage init > "$LOG" 2> "$ERR"',
+            'cat scripts/xt.py "$F"',
+            "python3 scripts/xt.py stage --help",
+            "python3 scripts/xt.py stage",
+            'python3 scripts/xt.py loop record --task "$T" -- "$CMD"',
+            'python3 manage.py "$CMD" stage',
+            'python3 -m pytest -k "$K" stage',
+            "git diff origin/main -- scripts/xt.py stage",
+            'python3 scripts/xt.py stage init > "$LOG" 2>&1',
+            "cd scripts && python3 -m xt loop status",
+            'grep -n stage scripts/xt.py "$F"',
+            "rg approve scripts/xt.py",
+            'python3 scripts/xt.py stage submit 2>"$ERR"',
+            'ruff check scripts/*.py "$F"',
             "python3 scripts/xt.py loop status",
             "grep approve scripts/xt.py",
             "cat docs/autopilot/STAGE.json",
         ):
             with self.subTest(cmd=cmd):
                 self.assertNotEqual(self.decide(cmd), "deny")
+
+    def test_placeholder_and_feeders(self):
+        """Chuỗi thay chỗ (`find -exec {}`, `xargs -I %`) và lệnh con từ stdin là mờ — kiểm thẳng luật duyệt, không qua
+        luật `find`/`xargs` khác (review #352 lượt 2)."""
+        approves = self.g._approves_stage
+        self.assertTrue(approves(["find", "a", "-exec", "python3", "scripts/xt.py", "stage", "{}", ";"]))
+        self.assertTrue(approves(["xargs", "-I", "%", "python3", "scripts/xt.py", "stage", "%"]))
+        self.assertTrue(approves(["xargs", "--replace=@@", "python3", "scripts/xt.py", "stage", "@@"]))
+        self.assertTrue(approves(["xargs", "python3", "scripts/xt.py"]))
+        self.assertTrue(approves(["xargs", "python3", "scripts/xt.py", "stage"]))
+        self.assertFalse(approves(["xargs", "python3", "scripts/xt.py", "stage", "--help"]))
+        self.assertFalse(approves(["python3", "-I", "%", "scripts/xt.py", "stage", "status"]))  # `-I` của python
+        self.assertFalse(approves(["xargs", "grep", "-l", "x"]))
+        self.assertTrue(approves(["find", "stage", "-exec", "scripts/xt.py", "{}", "approve", ";"]))
+
+    def test_many_opaque_tokens_linear(self):
+        """Nhiều token mờ không làm guard chạy bậc hai (review #352 lượt 2)."""
+        argv = ["python3", "x.py"] + ["$a"] * 80000
+        start = time.monotonic()
+        self.assertFalse(self.g._approves_stage(argv))
+        self.assertLess(time.monotonic() - start, 2.0)
+
+    def test_many_dash_tokens_linear(self):
+        """Nhiều token `-a` không làm guard chạy bậc hai (review #352 lượt 3)."""
+        argv = ["python3", "tool.py"] + ["-a"] * 16000
+        start = time.monotonic()
+        self.assertFalse(self.g._approves_stage(argv))
+        self.assertLess(time.monotonic() - start, 2.0)
 
     def test_handwrite_ledger_denied(self):
         self.assertEqual(self.g.classify_path(xt.STAGE_LEDGER), "evidence")

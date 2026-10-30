@@ -9953,8 +9953,9 @@ class StageError(Exception):
 
 def agent_session() -> bool:
     """Tiến trình chạy trong phiên agent (Claude Code đặt các biến này cho lệnh Bash). Là lớp chặn nhầm, không phải ranh
-    giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ."""
-    return any(os.environ.get(k, "").strip() for k in STAGE_AGENT_ENV)
+    giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ. Biến có mặt là đủ — đặt rỗng (`CLAUDECODE= …`)
+    vẫn là phiên agent (AUD-SEC-155)."""
+    return any(k in os.environ for k in STAGE_AGENT_ENV)
 
 
 def _stage_first(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
