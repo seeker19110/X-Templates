@@ -2815,7 +2815,7 @@ def _api_path(p: str) -> str:
     vẫn đọc như endpoint graphql — chặt hơn, không nới)."""
     raw = p.split("?", 1)[0].split("#", 1)[0]
     m = API_URL_PREFIX_RE.match(raw)
-    if not m or not urllib.parse.unquote(raw[m.end() :]).strip("/"):  # `https://graphql/%2F` (AUD-SEC-152)
+    if not m or not urllib.parse.unquote(raw[m.end() :]).strip("/"):  # đường dẫn chỉ gồm `%2F` (AUD-SEC-152)
         return urllib.parse.unquote(raw)
     path = urllib.parse.unquote(raw[m.end() :])
     v3 = API_V3_RE.match(path)
