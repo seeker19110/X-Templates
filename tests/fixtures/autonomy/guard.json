@@ -6061,6 +6061,134 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-har029-long-pr-title-at-create",
+  "origin": "repro",
+  "refs": [],
+  "input": {
+   "command": "gh pr create --title 'fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)' --body x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "tiêu đề > 72 ký tự chặn lúc đặt, không đợi CI pr-title (LOOP-HARNESS-029, D-255)"
+ },
+ {
+  "id": "guard-har029-long-commit-subject",
+  "origin": "repro",
+  "refs": [],
+  "input": {
+   "command": "git commit -q -F - <<'EOF'\nfix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)\n\nthân\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "subject commit 83 ký tự (#340) chặn lúc commit (LOOP-HARNESS-029)"
+ },
+ {
+  "id": "guard-har029-good-title-control",
+  "origin": "control",
+  "refs": [],
+  "input": {
+   "command": "gh pr create --title 'fix(guard): chặn tiêu đề lúc đặt' --body x"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-har029-title-check-off",
+  "origin": "control",
+  "refs": [],
+  "input": {
+   "command": "gh pr create --title 'fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)' --body x",
+   "files": {
+    "xt.yaml": "pr_title_check: off\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "dự án tắt luật tiêu đề (`pr_title_check: off`)"
+ },
+ {
+  "id": "guard-har128-mcp-merge-commit-title",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-128"
+  ],
+  "input": {
+   "tool": "mcp",
+   "tool_name": "mcp__github__merge_pull_request",
+   "tool_input": {
+    "owner": "o",
+    "repo": "r",
+    "pullNumber": 7,
+    "expectedHeadSha": "abc1234def",
+    "commit_title": "fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)"
+   },
+   "merge_check": {
+    "verdict": "merge",
+    "head": "abc1234def",
+    "hard": [],
+    "reasons": [
+     "làn nhanh"
+    ],
+    "eligible": true,
+    "repo": "o/r"
+   }
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "commit_title tường minh đè PR_TITLE (review #342) — trước: allow RULE_ALLOW"
+ },
+ {
+  "id": "guard-har128-gh-merge-subject",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-128"
+  ],
+  "input": {
+   "command": "gh pr merge 7 --squash --match-head-commit abc1234def --subject 'x'",
+   "merge_check": {
+    "verdict": "merge",
+    "head": "abc1234def",
+    "hard": [],
+    "reasons": [
+     "làn nhanh"
+    ],
+    "eligible": true,
+    "repo": "o/r"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har128-rest-merge-commit-title",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-128"
+  ],
+  "input": {
+   "command": "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f commit_title=x",
+   "merge_check": {
+    "verdict": "merge",
+    "head": "abc1234def",
+    "hard": [],
+    "reasons": [
+     "làn nhanh"
+    ],
+    "eligible": true,
+    "repo": "o/r"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
  }
  ]
 }

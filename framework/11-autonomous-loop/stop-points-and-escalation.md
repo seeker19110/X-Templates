@@ -3,7 +3,7 @@ title: Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
 kind: module
 prefix: LOOP-STOP
 applies_to: [all]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang
@@ -85,6 +85,7 @@ chuyên môn. Guard **không hỏi người** (ADR-0018): bộ luật vẫn tín
 |---|---|---|---|
 | Thao tác không đảo ngược | `rm -rf`, `git push --force`, `reset --hard`, push thẳng nhánh chính, xoá đệ quy ngoài dự án hoặc chính gốc dự án/thư mục cha/`.git` của nó (worktree phụ đã đăng ký của repo thì cho xoá), `gh repo delete`, ghi ruleset qua `gh api`, `kubectl delete`, `terraform destroy`, drop/alter phá vỡ, xoá dữ liệu | `pre-bash-guard.sh` → **deny**; `permissions.deny`. Pha `build` (`delivery_phase` ở cả cây làm việc lẫn nhánh mặc định của remote, ADR-0040): việc **chỉ trong dự án hoặc thư mục tạm** cho chạy — `reset --hard`/`clean -f` (trừ `-x`)/`checkout .`/`restore .`/`stash drop`, `chmod 777`, `dd of=`, ghi file bí mật trong dự án | Người tự chạy tay |
 | Lọt cổng commit | Lệnh có thể ghi file đứng trước `git commit` trong cùng lệnh Bash (`sed -i … && git commit`) — cổng commit chạy trên cây trước khi lệnh chạy | `pre-bash-guard.sh` → **deny**; chỉ cho đứng trước: `cd`, `export`/gán biến, `true`, `git add\|status\|diff\|log`, `cat`/`echo`/`printf` không chuyển hướng ra file | Tách lệnh: sửa trước, commit ở lệnh riêng |
+| Tiêu đề/subject sai luật | `gh pr create`/`edit -t` dài > 72 ký tự hoặc sai `<type>(scope): mô tả`, `git commit` có subject > 72 ký tự, tool MCP tạo/sửa PR/commit tương tự; `gh pr merge --subject/-t`, REST/MCP `commit_title` (đè `squash_merge_commit_title: PR_TITLE`) | `pre-bash-guard.sh`/`pre-mcp-guard.sh` → **deny** lúc đặt (`LOOP-HARNESS-029`, D-255); `pr_title_check: off` bỏ luật tiêu đề/subject (không bỏ chặn subject merge tường minh); giá trị không đọc được (`$…`, `--fill`) → CI `pr-title` | Không cần: agent viết lại tiêu đề |
 | Tiền thật | Thanh toán, hoàn tiền, đổi giá, gọi API thu phí ngoài sandbox, đăng ký dịch vụ trả phí | `loop defer`/`loop block --reason` + SPEC phải có ca test; PR chạm tiền → `merge-check` `hard` → merge bị **deny** (`merge_hard_exceptions: human`); việc trong `- grant:` của PLAN và còn hạn mức thì tự làm (`grant-check`, ADR-0022) | Chủ sản phẩm (qua PR ủy quyền) |
 | Dữ liệu người dùng thật | Migration phá vỡ trên DB production, export PII, xoá tài khoản, gửi tin tới người dùng thật | `loop defer`; PR `risk:pii` → `hard` → merge bị **deny** (`human`); sửa migration đã tồn tại: cho chạy, §3 AGENTS.md cấm sửa migration đã áp; việc trong `- grant:` của PLAN và còn hạn mức thì tự làm (`grant-check`, ADR-0022); tối ưu theo số production: số qua `docs/ops/FIELD-<ngày>.json` người xuất, không cấp khoá thật (`LOOP-OPT-016`) | Người trực + chủ dữ liệu (qua PR ủy quyền) |
 | Đổi quyền / nới cổng | Sửa `eslint`/`tsconfig`/coverage/workflows/`.claude/settings.json`/`.xtemplates/`, cập nhật snapshot/baseline ảnh | `pre-edit-guard.sh` → cho chạy, lý do ghi ở commit/PR, PR không vào làn nhanh; tắt/bỏ qua hook, giả ref remote mà Gate đọc (`update-ref refs/remotes/…`, `tag`/`branch` tên `origin/…` — AUD-SEC-119) → **deny** | Review PR |

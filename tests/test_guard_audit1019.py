@@ -397,7 +397,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
         self.assertEqual(guard.mcp_decision("mcp__github__create_or_update_file", commit_mark, str(ROOT))[0], "")
         mention = {"body": "dấu `xt-review v1` qua `gh pr comment` bị chặn"}  # thân PR nói về luật, không mang dấu
         self.assertEqual(guard.mcp_decision("mcp__github__create_pull_request", mention, str(ROOT))[0], "")
-        self.assertEqual(final("gh pr create -t x -b 'dấu `xt-review v1` bị chặn'"), "")
+        self.assertEqual(final("gh pr create -t 'fix: x' -b 'dấu `xt-review v1` bị chặn'"), "")
 
 
 class BraceSequenceMiddleTest(unittest.TestCase):
