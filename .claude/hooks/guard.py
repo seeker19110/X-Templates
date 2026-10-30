@@ -2812,6 +2812,8 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
     quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
     không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
     sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
+    if path == os.devnull:  # `gh … < /dev/null` tắt prompt — thân rỗng
+        return False
     if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
     full = os.path.join(cwd or ".", os.path.expanduser(path))
@@ -2837,14 +2839,32 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
         return True
 
 
+def _stdin_redirects(argv: List[str]) -> List[str]:
+    """Đích chuyển hướng vào stdin của lệnh: `< f`, `0<> f`/`<> f`; `<&N` là fd của shell (`/dev/fd/N` — guard không
+    đọc được, AUD-SEC-176)."""
+    out: List[str] = []
+    for i, t in enumerate(argv[:-1]):
+        if t in ("<", "<>"):
+            out.append(argv[i + 1])
+        elif t == "<&" and argv[i + 1] != "-":  # `<&-` đóng stdin; `<&3-` chuyển fd 3 (review #357)
+            out.append("/dev/fd/" + argv[i + 1].removesuffix("-"))
+    return out
+
+
 def _reader_files(argv: List[str]) -> List[str]:
-    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c`) sau khi bỏ chuyển
-    hướng (`2>/dev/null`); không có file hay `-` → đọc stdin (`-`)."""
+    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c` của `head`/`tail` —
+    với `cat`, `-n` là cờ, AUD-SEC-174) sau khi bỏ chuyển hướng (`2>/dev/null`), cộng đích `< f` (AUD-SEC-176); không
+    có file hay `-` → đọc stdin (`-`)."""
     n = normalize(_no_redirects(argv))
     if not n[:1] or n[0] not in STDIN_READERS:
         return []
-    out = [t for i, t in enumerate(n[1:], 1) if (t[:1] != "-" or t == "-") and n[i - 1] not in READER_VALUE_OPTS]
-    return out or ["-"]
+    valued = n[0] in ("head", "tail")
+    out = [
+        t
+        for i, t in enumerate(n[1:], 1)
+        if (t[:1] != "-" or t == "-") and not (valued and n[i - 1] in READER_VALUE_OPTS)
+    ]
+    return out + _stdin_redirects(argv) or ["-"]
 
 
 def _subst_files(arg: str) -> List[str]:
@@ -2868,9 +2888,10 @@ def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
         own = _gh_api_files(args)
     else:
         own = _gh_flag_files(args, split_at=False)
-    own += [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
-    own += [f for t in args for f in _subst_files(t)]
-    piped = any(f in STDIN_PATHS for f in own) or "$" in args
+    own += _stdin_redirects(args)
+    # backtick không nháy bị tách thành nhiều token — quét cả đối số ghép lại (`<<< \`cat f\``, AUD-SEC-175)
+    own += [f for t in [*args, " ".join(args)] for f in _subst_files(t)]
+    piped = any(f in STDIN_PATHS for f in own) or "$" in args or any(t.count("`") % 2 for t in args)
     return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
 
 
@@ -2887,6 +2908,10 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
         return True
     cats = [f for c in cmds for f in _reader_files(c)]
     srcs = [f for c in posts for f in _body_sources(c, cats)]
+    # backtick lẻ ở đối số `gh`: thay lệnh không nháy bị tách lệnh ở `;`/`|`/xuống dòng (`<<< \`cat f;\``) — đọc nó
+    # trên chữ thô của cả chuỗi lệnh (review #357)
+    srcs += _subst_files(cmd) if any(t.count("`") % 2 for c in posts for t in c) else []
+    srcs = list(dict.fromkeys(srcs))  # mỗi nguồn đọc một lần, đếm một lần
     return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
 
 

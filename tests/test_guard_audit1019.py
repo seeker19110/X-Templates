@@ -538,6 +538,53 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 self.assertFalse(guard._file_has_mark("n.md", d))
         self.assertEqual(guard.mcp_decision("mcp__github__add_issue_comment", {MARK: "x"}, str(ROOT))[0], "deny")
 
+    def test_review_marker_debt_354(self):
+        """Nợ review #354: `cat -n f` (AUD-SEC-174), backtick không nháy (AUD-SEC-175), thân qua chuyển hướng stdin
+        `cat < f |`, `<&N`, `<>` (AUD-SEC-176)."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            for cmd in (
+                'gh pr comment 5 --body "$(cat -n b.md)"',
+                "cat -n b.md | gh pr comment 5 -F -",
+                'gh pr comment 5 -F - <<< "$(cat -n b.md)"',
+                "gh pr comment 5 -F - <<< `cat b.md`",
+                "gh pr comment 5 --body-file - <<< `cat b.md`",
+                "gh api repos/o/r/issues/5/comments --input - <<< `cat b.md`",
+                "IFS=; gh pr comment 5 --body `cat b.md`",
+                "cat < b.md | gh pr comment 5 -F -",
+                "head -c 9999 < b.md | gh pr comment 5 -F -",
+                "exec 3<b.md; gh pr comment 5 -F - <&3",
+                "gh pr comment 5 -F - 0<>b.md",
+                "gh pr comment 5 -F - <> b.md",
+                # review #357: backtick không nháy có toán tử/xuống dòng, `<&N-`, mệnh đề backtick lẻ, `tail`
+                "gh pr comment 5 -F - <<< `cat b.md;`",
+                "gh pr comment 5 -F - <<< `cat b.md | cat`",
+                "gh pr comment 5 -F - <<< `cat b.md && true`",
+                "gh pr comment 5 -F - <<< `cat b.md\n`",
+                "IFS=; gh pr comment 5 --body `cat b.md;`",
+                "gh api repos/o/r/issues/5/comments --input - <<< `cat b.md;`",
+                "exec 3< b.md; gh pr comment 5 -F - <&3-",
+                "cat b.md | gh pr comment 5 --body `cat;`",
+                "cat b.md | gh pr comment 5 --body `cat -`",
+                "tail -c 99 b.md | gh pr comment 5 -F -",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                'gh pr comment 5 --body "$(head -n 3 n.md)"',
+                "cat -n n.md | gh pr comment 5 -F -",
+                "gh pr comment 5 -F - < n.md",
+                "gh pr comment 5 --body `date`",
+                "gh pr comment 5 -F - <&-",
+                "gh pr comment 5 --body x < /dev/null",
+                "gh pr comment 5 --body 'dùng `xt.py` để kiểm'",
+                'gh pr comment 5 --body "$(cat n.md) $(cat n.md) $(cat n.md) $(cat n.md) $(cat n.md)"',
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,
         cả chuỗi lồng trong danh sách/đối tượng (`comments[].body`)."""
