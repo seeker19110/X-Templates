@@ -1874,7 +1874,7 @@ AUTO_MERGE_WHY = (
 # Subject commit squash tường minh (`gh pr merge -t/--subject`, REST/MCP `commit_title`) đè thiết lập repo
 # `squash_merge_commit_title: PR_TITLE` — subject dài/sai dạng lên nhánh chính (AUD-HAR-126/128, D-255) → deny phẳng.
 SQUASH_SUBJECT_WHY = (
-    "đặt subject commit squash tường minh (`--subject`/`-t`/`commit_title`) — subject = tiêu đề PR do thiết lập repo "
+    "đặt subject commit merge tường minh (`--subject`/`-t`/`commit_title`) — subject = tiêu đề PR do thiết lập repo "
     "`squash_merge_commit_title: PR_TITLE` (D-254/D-255): bỏ cờ/khoá đó; sửa tiêu đề bằng `gh pr edit <N> --title …`"
 )
 # Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
@@ -1882,6 +1882,8 @@ GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
     *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
     *("-A", "--author-email", "-R", "--repo"),
 )
+# `-t` của `gh pr merge`, kể cả gộp sau cờ bool ngắn `-s/-m/-r/-d` (pflag: `-st x`, `-dtx` — review #343).
+GH_MERGE_SUBJECT_RE = re.compile(r"-[smrd]*t")
 MERGE_CHECK_TIMEOUT = 90
 # Cờ được phép khi tự merge (AUD-SEC-016): cờ khác (`--admin…`, `--repo`, `--body-file`, `-b`…) → hỏi người.
 MERGE_ALLOW_FLAGS = {
@@ -2009,11 +2011,11 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
 
 
 def _merge_subject_flag(args: List[str]) -> bool:
-    """`gh pr merge` có `-t`/`--subject` (cả `--subject=x`, `-tx` kiểu pflag) — subject squash tường minh; giá trị của cờ
-    khác (`-b "-t x"`) không tính."""
+    """`gh pr merge` có `-t`/`--subject` (cả `--subject=x`, `-tx`, `-st'x'` kiểu pflag) — subject squash tường minh; giá
+    trị của cờ khác (`-b "-t x"`) không tính."""
     skip = False
     for a in args:
-        if not skip and (a == "--subject" or a.startswith("--subject=") or a[:2] == "-t"):
+        if not skip and (a == "--subject" or a.startswith("--subject=") or GH_MERGE_SUBJECT_RE.match(a)):
             return True
         skip = not skip and a in GH_MERGE_VALUE_FLAGS
     return False
@@ -4391,7 +4393,7 @@ def _xt_yaml_for(d: str) -> str:
 
 
 # `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
-GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|edit|merge)\b")
+GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|new|edit|merge)\b")
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
 
 
@@ -4400,7 +4402,7 @@ def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
     rest = list(args)
     while rest[:1] in (["-R"], ["--repo"]) or rest[:1] and rest[0].startswith("--repo="):
         rest = rest[2:] if rest[0] in ("-R", "--repo") else rest[1:]
-    if rest[:1] not in (["create"], ["edit"], ["merge"]):
+    if rest[:1] not in (["create"], ["new"], ["edit"], ["merge"]):  # `new`: alias của `create`
         return None
     out: List[Tuple[str, str]] = []
     for i, x in enumerate(rest[1:], 1):
@@ -4554,8 +4556,10 @@ def _gh_pr_titles(args: List[str]) -> List[str]:
     rest = list(args)
     while rest[:1] in (["-R"], ["--repo"]) or rest[:1] and rest[0].startswith("--repo="):
         rest = rest[2:] if rest[0] in ("-R", "--repo") else rest[1:]
-    if rest[:1] not in (["create"], ["edit"]):
+    if rest[:1] not in (["create"], ["new"], ["edit"]):
         return []
+    # pflag: `-t` gộp sau cờ bool ngắn của `create` (`-dt x`, `-ftx`); `-t=x` là giá trị `x` (review #343).
+    short = re.compile(r"-t(=?)(.*)" if rest[0] == "edit" else r"-[dfw]*t(=?)(.*)", re.S)
     out: List[str] = []
     skip = False
     for i, x in enumerate(rest[1:], 1):
@@ -4563,13 +4567,14 @@ def _gh_pr_titles(args: List[str]) -> List[str]:
             skip = False
             continue
         key, sep, val = x.partition("=")
-        if x in ("-t", "--title"):
+        m = short.fullmatch(x)
+        if x == "--title" or m and not m.group(1) and not m.group(2):
             out.append(rest[i + 1] if i + 1 < len(rest) else "")
             skip = True
         elif sep and key == "--title":
             out.append(val)
-        elif x[:2] == "-t" and len(x) > 2:  # `-tfeat: x` (pflag)
-            out.append(x[2:])
+        elif m:  # `-tfeat: x`, `-t=feat: x`, `-dtfeat: x`
+            out.append(m.group(2))
         skip = skip or x in GH_PR_VALUE_FLAGS
     return out
 

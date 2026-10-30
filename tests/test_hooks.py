@@ -4999,6 +4999,10 @@ class GuardTitleRuleTest(unittest.TestCase):
             "gh pr create -tfix-thieu-hai-cham",
             f"gh pr edit 7 --title='{self.LONG}'",
             f"gh pr -R o/r edit 7 -t '{self.LONG}'",
+            "gh pr new --title 'Sửa lỗi tiêu đề' --body x",  # `new` là alias của `create` (review #343)
+            "gh pr create -dt 'Sửa lỗi tiêu đề' -b x",  # `-t` gộp sau cờ bool `-d` (pflag)
+            "gh pr create -dtSua-loi -b x",
+            "gh pr create -t='Sửa lỗi' -b x",  # pflag: `-t=x` là giá trị `x`
         ):
             with self.subTest(cmd):
                 dec, why = self.decide(cmd, d)
@@ -5015,6 +5019,9 @@ class GuardTitleRuleTest(unittest.TestCase):
             'gh pr create --title "$T" --body x',
             "gh pr create -b '-t Fix sai' --title 'fix: a'",  # giá trị của `-b` không phải tiêu đề
             "gh pr view 7 --json title",
+            "gh pr create -t='fix: a' -b x",  # `=` không thuộc giá trị (review #343: từng chặn oan)
+            "gh pr create -dt 'fix: a' -b x",
+            "gh pr create -d -b '-dt Sai' --title 'fix: a'",  # giá trị của `-b` không phải tiêu đề
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.decide(cmd, d)[0], "")
@@ -5060,6 +5067,10 @@ class GuardTitleRuleTest(unittest.TestCase):
             "gh pr merge 7 --squash --subject=x",
             "gh pr merge 7 -s -tx",
             "gh pr -R o/r merge 7 --subject x",
+            f"gh pr merge 7 -st'{self.LONG}'",  # `-t` gộp sau cờ bool (pflag — review #343)
+            f"gh pr merge 7 --squash -dt'{self.LONG}' --match-head-commit abc1234def",
+            f"gh pr -R o/r merge 7 -st'{self.LONG}'",
+            "gh pr merge 7 -mt x",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc -f merge_method=squash -f commit_title=x",
             "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc -f commit_title=x",
         ):
@@ -5069,6 +5080,7 @@ class GuardTitleRuleTest(unittest.TestCase):
                 self.assertIn("squash_merge_commit_title: PR_TITLE", why)
         check.assert_not_called()
         self.assertFalse(self.g._merge_subject_flag(["7", "-b", "-t ghi chú", "--squash"]))  # giá trị của `-b`
+        self.assertFalse(self.g._merge_subject_flag(["7", "-sd", "--squash"]))  # cờ bool gộp không có `t`
         inp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc", "commit_title": "x"}
         dec, why = self.g.mcp_decision("mcp__github__merge_pull_request", inp, d)
         self.assertEqual((dec, "PR_TITLE" in why), ("deny", True))
