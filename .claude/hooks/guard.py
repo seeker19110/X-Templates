@@ -2627,7 +2627,7 @@ MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_metho
 # Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`) hoặc head ghép lúc chạy (`head=$(git rev-parse HEAD)`,
 # `$H`, backtick — re-review #159); mã nguồn/tài liệu nhắc dạng dấu (`head={head}`, `head=<sha>`) không khớp.
 REVIEW_MARK_RE = re.compile(
-    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`][^>]{0,200}?)\s+verdict=(?:clean|blocking)"
+    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`][^>]{0,200}?)\s+verdict=(?:clean|blocking|debt)"
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
