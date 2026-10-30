@@ -10950,8 +10950,9 @@ def _pr_next_review(
             f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: review 2 lần, sửa 1 lần — ADR-0059) — không sửa nữa,"
             " ghi nợ phát hiện còn lại rồi tiếp tục; nợ sửa cuối pha",
             f"mỗi phát hiện 🟠/🟢 còn lại → một dòng `mở` ở {AUDIT_STATUS_DEFAULT} có `{REVIEW_DEBT_TAG} #{n}` ở Ghi chú;"
-            f" commit chỉ sổ, push → xt.py pr debt --pr {n} --findings AUD-…[,AUD-…]. Còn 🔴: không ghi nợ —"
-            f" xt.py loop decide --question 'PR #{n}: …' → xt.py pr rethink --pr {n} --decision D-NNN",
+            f" commit chỉ sổ, push → xt.py pr debt --pr {n} --findings AUD-…[,AUD-…]. Còn 🔴: không ghi nợ — thêm một"
+            f" lần sửa, sửa HẾT phát hiện (cả 🟠/🟢): xt.py loop decide --question 'PR #{n}: …' → xt.py pr rethink --pr"
+            f" {n} --decision D-NNN",
         )
     if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
@@ -11502,8 +11503,8 @@ def _debt_problem(base: Path, key: str, head: str, rec: Dict[str, Any], ids: Lis
             return f"{i}: cần dòng `mở` trong {AUDIT_STATUS_DEFAULT} ở head, Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
         if r.get("Mức") == "🔴":
             return (
-                f"{i} là 🔴 — không ghi nợ: xt.py loop decide --question 'PR #{key}: …' → xt.py pr rethink --pr {key}"
-                " --decision D-NNN"
+                f"{i} là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide"
+                f" --question 'PR #{key}: …' → xt.py pr rethink --pr {key} --decision D-NNN"
             )
     return None
 

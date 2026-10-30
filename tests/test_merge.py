@@ -1802,9 +1802,7 @@ class PrNextTest(unittest.TestCase):
         self.assertIn("2 lượt review chưa sạch (trần 2: review 2 lần, sửa 1 lần", r["why"])
         self.assertIn("`nợ-review: #7` ở Ghi chú", r["do"])
         self.assertIn("xt.py pr debt --pr 7 --findings AUD-", r["do"])
-        self.assertIn(
-            "Còn 🔴: không ghi nợ — xt.py loop decide --question 'PR #7: …' → xt.py pr rethink --pr 7", r["do"]
-        )
+        self.assertIn("Còn 🔴: không ghi nợ — thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢)", r["do"])
         debt_head = {"head": self.H, "clean": True, "debt": True, "at": "2026-10-27T03:00:00Z"}
         self.assertEqual(self.act(rec={"reviews": [b1, b2, debt_head]}, verdict="merge")["action"], "merge")
         b2_old = {**b2, "head": self.H2}
@@ -2044,7 +2042,7 @@ class PrNextCliTest(unittest.TestCase):
                 self.assertIn(f"{ids}: cần dòng `mở` trong {xt.AUDIT_STATUS_DEFAULT} ở head", debt(ids)[2])
         rc, _, err = debt("AUD-SEC-001,AUD-SEC-002")
         self.assertEqual(rc, 2)
-        self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ", err)
+        self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện", err)
         lost = {**p, "xtReviews": [r1, {**r2, "head": "e" * 40}]}
         self.assertIn("không đọc được commit eeeeeee..", debt("AUD-SEC-001", lost)[2])
         fixed = self.commit({"src/a.py": "x = 2\n"})  # sửa lần hai sau review cuối → không ghi nợ được
