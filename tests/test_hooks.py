@@ -4397,6 +4397,12 @@ class GuardReview97Test(unittest.TestCase):
                 'gh api graphql -f query="$Q"',
                 "gh api -X PUT 'repos/o/r/pulls/7/merge?x=1'",
                 "gh api -X PUT repos/o/r/pulls/7/%6Derge",
+                # URL đầy đủ, cả GHES `/api/v3` (AUD-SEC-149): từng cho qua như ghi thường
+                "gh api -X PUT https://api.github.com/repos/o/r/pulls/7/merge -f sha=abc1234def",
+                "gh api --method PUT HTTPS://api.github.com/repos/o/r/pulls/7/merge",
+                "gh api -X PUT https://ghe.example.com/api/v3/repos/o/r/pulls/7/merge -f sha=abc1234def",
+                "gh api -X PUT https://api.github.com/repos/o/r/pulls/7/merge -f sha=abc -f commit_title=x",
+                "gh api -X DELETE https://api.github.com/repos/o/r/rulesets/1",
             ),
         )
 

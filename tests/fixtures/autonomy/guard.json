@@ -6189,6 +6189,56 @@
   "expect": {
    "allowed": false
   }
+ },
+ {
+  "id": "guard-sec149-rest-full-url",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-149"
+  ],
+  "input": {
+   "command": "gh api -X PUT https://api.github.com/repos/o/r/pulls/5/merge -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "merge_check": {
+    "verdict": "human",
+    "hard": [
+     "đường dẫn nhạy cảm (auth): src/auth.py"
+    ],
+    "repo": "o/r",
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "autonomy": 3,
+    "reasons": [
+     "ngoại lệ cứng"
+    ]
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec149-rest-ghes-url",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-149"
+  ],
+  "input": {
+   "command": "gh api -X PUT https://ghe.example.com/api/v3/repos/o/r/pulls/5/merge -f sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "merge_check": {
+    "verdict": "human",
+    "hard": [
+     "đường dẫn nhạy cảm (auth): src/auth.py"
+    ],
+    "repo": "o/r",
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "autonomy": 3,
+    "reasons": [
+     "ngoại lệ cứng"
+    ]
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
  }
  ]
 }

@@ -2803,9 +2803,16 @@ GRAPHQL_MERGE_RE = re.compile(r"\bmergePullRequest\b")
 GRAPHQL_AUTO_MERGE_RE = re.compile(r"\benablePullRequestAutoMerge\b")
 
 
+# `gh api` nhận URL đầy đủ: `https://api.github.com/repos/…`, GHES `https://<host>/api/v3/repos/…` (AUD-SEC-149).
+API_URL_PREFIX_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^/]*(/api/v3(?=/|$))?", re.I)
+
+
 def _api_path(p: str) -> str:
-    """Đường dẫn REST như GitHub hiểu: giải mã `%xx`, bỏ query/fragment (`…/%6Derge?x=1` = `…/merge`)."""
-    return urllib.parse.unquote(p.split("?", 1)[0].split("#", 1)[0])
+    """Đường dẫn REST như GitHub hiểu: giải mã `%xx`, bỏ query/fragment (`…/%6Derge?x=1` = `…/merge`) và scheme/host
+    của URL đầy đủ (`https://api.github.com/repos/…` = `/repos/…`)."""
+    path = urllib.parse.unquote(p.split("?", 1)[0].split("#", 1)[0])
+    m = API_URL_PREFIX_RE.match(path)
+    return path[m.end() :] if m else path
 
 
 def _graphql_opaque(args: List[str]) -> bool:
