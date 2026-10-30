@@ -75,10 +75,27 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `pyenv exec`, `asdf exec`, `volta run`, `fnm exec`, `direnv exec`, `bundle exec`, `nix develop -c`, `pnpm exec`)
   không được bóc để trích script; lồng hơn 8 lớp lệnh chạy hộ cũng không; đích `rm -rf` là thay thế lệnh khác `$(pwd)` (`$(pwd -P)/..`,
   `$(dirname $PWD)`, `$(realpath ..)`) là không rõ nên cho qua — D-051 (AUD-SEC-101).
+- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155): luật chữ (`xt.py … stage … approve`/`init … --adopt`) cộng luật token
+  mờ: ở mọi vị trí script (`-m xt`/`-mxt`/`-m scripts.xt`, lồng trong `perf sample --`), bỏ chuyển hướng và fd
+  (`2>/dev/null`, `{fd}>f`; đích bị cắt như `> >(cat)` là mờ), lệnh con, cờ/giá trị `--framework` (cả `=` rỗng) hay tuỳ
+  chọn `init` mờ (`$(…)`, backtick, biến, glob), chuỗi thay chỗ (`xargs -I`/`-i`/`--replace`, mẫu `{…}`, `:::`) hay đến
+  từ stdin. Lệnh con mờ không tính khi lệnh chỉ đọc file (`cat`/`grep`/`git`… `scripts/xt.py "$F"`); đường script mờ chỉ
+  tính khi có `python` đứng trước hoặc nó là lệnh, và lệnh con là `stage`. `xt.py` coi biến phiên agent có mặt (kể cả
+  rỗng) là agent. `--framework "$FW"` bị chặn với mọi lệnh con — dùng `XT_FRAMEWORK`. Còn lọt (AUD-SEC-161): đường
+  script mờ sau trình chạy không phải python (`uv run "$XT" "$(…)"`), bản sao/tên khác của `xt.py`, `python3 -c`/`runpy`, alias, script lồng.
+- **Dấu review đăng tay** (AUD-SEC-069/156/157): guard chặn lệnh `gh` đăng chữ khi dấu `xt-review v1` ở argv, ở bất
+  kỳ đâu trong chuỗi lệnh (heredoc, `printf`), hay trong nguồn thân của chính lệnh đó (`-F f`, `--body-file`, `-F k=@f`,
+  `--input`, `< f`, file đọc trong `$(…)`/backtick, `cat f |`, `$(cat)` đọc stdin; cả chuỗi JSON, cả khoá) — nguồn có mà
+  không đọc được (glob, fd của shell `/dev/fd/N`, không phải file thường, > 256 KiB, quá 8 nguồn, lỗi đọc, JSON lồng quá
+  sâu) bị chặn, lỗi khi quét cũng chặn; MCP quét mọi chuỗi thô. Còn lọt: dấu mã hoá lúc chạy (`printf '\74!-- …'`,
+  `base64 -d`), thân từ stdin hay file do chương trình khác sinh trong cùng lệnh (`cmd | gh … -F -`, `gen > f && gh -F f`,
+  `$(xargs cat <<< f)`), thay lệnh lồng (`$(cat $(echo f))`), heredoc không nháy chứa `$(cat f)`, stdin chuyển hướng ở cấp shell/nhóm lệnh
+  (`exec < f; gh … -F -`, `{ gh …; } < f` — AUD-SEC-180), file tương đối sau `cd`, tool MCP ngoài `MCP_REVIEW_POST_RE` (steward chỉ đọc comment issue).
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
-  (`REMOTE_REF_FORGE`), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
+  (`REMOTE_REF_FORGE`) và ghi `refs/replace/…` (`git replace`, AUD-SEC-158 — `xt.py` cũng đọc git với
+  `--no-replace-objects`, không theo grafts — AUD-SEC-168), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
   hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;
-  `git replace`/`fast-import`; ref là thay lệnh (`$(…)`) hay biến trong script lồng (`xargs sh -c 'git update-ref "$@"'`).
+  ghi thẳng `.git/refs/replace/…`, grafts (`.git/info/grafts`, `GIT_GRAFT_FILE`) với lệnh git ngoài `xt.py`, `fast-import`; ref là thay lệnh (`$(…)`) hay biến trong script lồng (`xargs sh -c 'git update-ref "$@"'`).
   Alias git: mọi lệnh con ngoài danh sách dựng sẵn (bất kể tên: `a.b`, `y_x.z`, `1.x`) được tra trong bảng alias do
   CHÍNH git dựng (`git -C <repo> [-c/--config-env/--git-dir của lệnh] config --list -z` với `GIT_CONFIG_COUNT/KEY_*/
   VALUE_*/PARAMETERS/GLOBAL/SYSTEM/NOSYSTEM`, `HOME`, `XDG_CONFIG_HOME`, `GIT_DIR` của lệnh hợp môi trường của guard —

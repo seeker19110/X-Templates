@@ -3267,10 +3267,21 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
+# Đọc git không theo `refs/replace/` (AUD-SEC-158) và không in cảnh báo grafts deprecated mà `GIT_GRAFT_FILE` gây ra
+# (thông báo lỗi giữ nguyên — `_no_grafts`).
+GIT_SAFE_READ = ("git", "--no-replace-objects", "-c", "advice.graftFileDeprecated=false")
+
+
+def _no_grafts(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """Môi trường git không đọc grafts (`.git/info/grafts`, `GIT_GRAFT_FILE` kế thừa): grafts đổi cha của commit nên
+    `merge-base` của phép so review lệch (AUD-SEC-168) — `--no-replace-objects` không tắt chúng."""
+    return {**(os.environ if env is None else env), "GIT_GRAFT_FILE": os.devnull}
+
+
 def _git(
     cwd: Path, *args: str, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None
 ) -> "subprocess.CompletedProcess[str]":
-    cmd = ["git", "-C", str(cwd), *args]
+    cmd = [*GIT_SAFE_READ, "-C", str(cwd), *args]  # `refs/replace/` không đổi nội dung đọc (AUD-SEC-158)
     try:
         return subprocess.run(
             cmd,
@@ -3279,7 +3290,7 @@ def _git(
             errors="replace",  # tên file không phải UTF-8 (`merge-tree -z`) không được làm sập cổng (review #165)
             check=False,
             timeout=GIT_TIMEOUT,
-            env=env,
+            env=_no_grafts(env),
             input=stdin,
         )
     except subprocess.TimeoutExpired:
@@ -3892,7 +3903,8 @@ def _path_groups(path: str) -> List[int]:
         g.append(4)
     if "/migrations/" in f"/{path}" or path.endswith((".sql", "schema.prisma")):
         g.append(10)
-    if name in ("AGENTS.md", "CLAUDE.md", "xt.yaml", "PROGRESS.md", "BLUEPRINT.md") or path.startswith(".claude/"):
+    harness = name in ("xt.yaml", "PROGRESS.md", "BLUEPRINT.md") or path.startswith(".claude/")
+    if harness or _gate_path(path, AGENT_RULE_GLOBS):
         g.append(13)
     if name.startswith(".env") or name in ("Dockerfile", "compose.yaml", "docker-compose.yml"):
         g += [11, 8]
@@ -5187,6 +5199,13 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("ảnh/container", re.compile(r"(^|/)(Dockerfile[^/]*|Containerfile[^/]*|(docker-)?compose[^/]*\.ya?ml)$", re.I)),
     ("phụ thuộc", DEP_PATH_RE),
 )
+# File luật agent (chỉ dẫn agent đọc như luật, không phải tài liệu) — danh sách theo nhà của nó,
+# `framework/18-cross-cutting/docs-for-ai-agents.md` (file gốc, bridge, luật theo vùng mã): làn merge coi là đường cổng,
+# `is_doc_path` coi là mã, `_path_groups` xếp vào nhóm HAR — cùng một danh sách để PR pha build hoãn review chúng thì
+# `review_debt` thu nợ (AUD-XFEAT-030)
+AGENT_RULE_GLOBS: Tuple[str, ...] = ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".claude/rules/*")
+AGENT_RULE_GLOBS += (".cursorrules", ".cursor/rules/*", ".windsurfrules", ".clinerules", ".clinerules/*")
+AGENT_RULE_GLOBS += (".github/copilot-instructions.md", ".github/instructions/*")
 # File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
 # `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
 MERGE_GATE_GLOBS = (
@@ -5200,7 +5219,7 @@ MERGE_GATE_GLOBS = (
     *(".semgrep*", "sonar-project.properties", "requirements-dev.txt"),
     *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*", ".flake8", ".golangci.y*ml"),
     *(".nycrc*", ".c8rc*", "phpunit.xml*", "karma.conf.*", ".mocharc*"),
-    *("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*"),
+    *AGENT_RULE_GLOBS,
     *(".stylelintrc*", "stylelint.config.*", "*-snapshots/*", "__snapshots__/*"),
     # Năng lực agent (LOOP-STOP-023; khớp `CAPABILITY_PATTERNS` của guard): MCP server, plugin, skill — PR chỉ đổi những
     # file này + một test từng vào làn nhanh (rà stored 2026-10-16).
@@ -5208,9 +5227,9 @@ MERGE_GATE_GLOBS = (
 )
 
 
-def _gate_path(path: str) -> bool:
+def _gate_path(path: str, globs: Tuple[str, ...] = MERGE_GATE_GLOBS) -> bool:
     parts = path.split("/")
-    return any(fnmatch.fnmatchcase("/".join(parts[i:]), g) for i in range(len(parts)) for g in MERGE_GATE_GLOBS)
+    return any(fnmatch.fnmatchcase("/".join(parts[i:]), g) for i in range(len(parts)) for g in globs)
 
 
 LOCKFILE_RE = re.compile(
@@ -5223,7 +5242,8 @@ LOCKFILE_RE = re.compile(
 # `command(s)/`); `.txt` chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (README.txt dưới thư mục chạy thật là mã) (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
 # allowlist host); `.mdx` luôn là mã (biên dịch thành JSX); đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết
 # hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC repo; khớp `DEP_PATH_RE` (manifest
-# phụ thuộc, kể cả `docs/package.json`) không bao giờ là tài liệu (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
+# phụ thuộc, kể cả `docs/package.json`) và file luật agent (`AGENT_RULE_GLOBS`, AUD-XFEAT-030) không bao giờ là tài liệu
+# (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
 # sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review (hàng BLOCKER `review_debt`) và làn merge
 # (AUD-SEC-134).
 DOC_TEXT_EXT = ("md", "rst")
@@ -5246,7 +5266,7 @@ DOCS_TEST_DIR_RE = re.compile(r"(^|/)docs?/(.*/)?(tests?|__tests__|spec|e2e)/", 
 def is_doc_path(path: str) -> bool:
     """File là tài liệu (không tính nợ review, không tính dòng/gói/test của làn merge) — xem chú thích trên. Tên có xuống
     dòng → mã (không đoán)."""
-    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path):
+    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path) or _gate_path(path, AGENT_RULE_GLOBS):
         return False
     name = path.rsplit("/", 1)[-1]
     if LICENSE_NAME_RE.fullmatch(name):
@@ -9953,8 +9973,9 @@ class StageError(Exception):
 
 def agent_session() -> bool:
     """Tiến trình chạy trong phiên agent (Claude Code đặt các biến này cho lệnh Bash). Là lớp chặn nhầm, không phải ranh
-    giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ."""
-    return any(os.environ.get(k, "").strip() for k in STAGE_AGENT_ENV)
+    giới cách ly (D-015): guard chặn thêm lệnh duyệt và ghi tay sổ. Biến có mặt là đủ — đặt rỗng (`CLAUDECODE= …`)
+    vẫn là phiên agent (AUD-SEC-155)."""
+    return any(k in os.environ for k in STAGE_AGENT_ENV)
 
 
 def _stage_first(ev: Dict[str, Any], r: Dict[str, Any]) -> str:
@@ -13170,7 +13191,11 @@ def _perf_git_raw(base: Path, *args: str) -> bytes:
     """stdout bytes của git: `_git` chạy `text=True` (universal newlines đổi `\\r` thành `\\n`) — không dùng cho nội dung diff."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(base), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=_perf_env()
+            [*GIT_SAFE_READ, "-C", str(base), *args],
+            capture_output=True,
+            check=False,
+            timeout=GIT_TIMEOUT,
+            env=_no_grafts(_perf_env()),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"git {args[0]} quá {GIT_TIMEOUT} s") from None
@@ -13248,8 +13273,8 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
 
 def _perf_blob_head(base: Path, spec: str) -> bytes:
     """≤ PERF_BINARY_PEEK byte đầu của blob `spec` (không có → b""): đọc qua ống rồi giết git, không nạp cả blob."""
-    cmd = ["git", "-C", str(base), "cat-file", "blob", spec]
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_perf_env()) as proc:
+    cmd = [*GIT_SAFE_READ, "-C", str(base), "cat-file", "blob", spec]
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_no_grafts(_perf_env())) as proc:
         head = proc.stdout.read(PERF_BINARY_PEEK) if proc.stdout else b""
         proc.kill()
     return head

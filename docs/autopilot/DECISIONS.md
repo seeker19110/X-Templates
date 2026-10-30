@@ -1839,3 +1839,45 @@
 - Chọn: Cổng 3.29.0 = phủ review theo ADR-0057 (mọi file nợ từ PR có review sạch/ghi nợ ở head, release-check review_debt PASS) + nợ review đã trả; audit delta lát 2 và các PR #316–#347 dời sang T-3557, chạy trước khi cắt 3.30.0
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ADR-0057 là cổng máy đã duyệt — review reviewer-alt năng lực cao hơn ở head mỗi PR là audit delta cho diff đó; release-check GO. (3) đơn giản/tốc độ chỉ phá hoà: audit đủ nhóm trên 34 file ≈ một phiên, giữ ADR-0059/LOOP-HARNESS-029 khỏi dự án đích thêm; rủi ro còn lại có lớp đỡ là T-3557 trước 3.30.0. Tiền lệ 3.28.0 audit delta tìm 🟠 — nên T-3557 không được bỏ.
 - Đường lùi: Chạy T-3557 ngay; phát hiện 🟠/🔴 thì cắt 3.29.1
+
+### D-262 · 2026-10-30T16:09:02+00:00 · Kế hoạch sửa audit delta 6799550..28c2089 (5 🟠, 16 🟢)
+
+- Phương án: (1) 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha · (2) Một PR gộp cả 5 🟠 · (3) Ghi nợ 🟠, chỉ sửa trước khi cắt 3.30.0
+- Chọn: 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn trước: SEC-155 là lỗ cổng duyệt của người nên đi đầu; PR nhỏ giữ đường lùi và review 2 lần/sửa 1 lần khả thi (ADR-0059); gộp làm review lớn, dễ hết lượt
+- Đường lùi: Revert từng PR squash; sổ giữ dòng mở
+
+### D-263 · 2026-10-30T17:22:14+00:00 · PR #352: review lượt 2 còn 🔴 (chuyển hướng giữa xt.py và stage lọt — hồi quy) — ghi nợ hay sửa thêm?
+
+- Phương án: (1) Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước · (2) Revert lượt sửa về 82302d7 rồi ghi nợ · (3) Đóng PR, làm lại từ đầu
+- Chọn: Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); sửa hết giữ tiến bộ của hai lượt, hướng sửa F1 đã thử trong scratch không chặn oan; revert vẫn để lại 🟠 lượt 1
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-264 · 2026-10-30T18:22:01+00:00 · PR #352: review lượt 3 còn 3 🔴 (hồi quy so với main: fd {tên}, đối số giống toán tử, runs sai, parallel :::) — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + chỉ agent_session và vài dạng mờ đơn giản, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc (reviewer đã thử: fuzz 0 hồi quy); vẫn giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-265 · 2026-10-30T18:22:18+00:00 · PR #352: review lượt 3 còn 3 🔴 hồi quy so với main — làm gì? (thay D-264, ghi trùng giây với dấu review)
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + agent_session, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc; giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-266 · 2026-10-30T20:17:07+00:00 · PR #354: review lượt 2 còn 🔴 (JSON lồng sâu làm _file_has_mark ném RecursionError → guard fail-open, tắt mọi luật sau) — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết: bắt mọi lỗi đọc nguồn thân → coi như có dấu, quét chữ thô trước JSON; O1/G1/FIFO · (2) Bỏ đọc JSON, ghi nợ phần còn lại · (3) Thu hẹp PR về argv/toàn văn lệnh, bỏ đọc file
+- Chọn: Thêm một lần sửa hết: bắt mọi lỗi đọc nguồn thân → coi như có dấu, quét chữ thô trước JSON; O1/G1/FIFO
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); lỗi đọc nguồn → chặn là chiều chặt nhất và loại cả lớp fail-open; giữ tiến bộ đọc nguồn thân đã review
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-267 · 2026-10-30T20:44:20+00:00 · PR #354: review lượt 3 — 🔴 B1 (test JSON lồng sâu phụ thuộc Python 3.14, đã sửa ở de4c963) + 🟠 O1 ($(cat) đọc stdin, backtick) + 7 🟢 — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết O1 + G1–G7 (cục bộ trong khối nguồn thân), giới hạn byte đọc · (2) Thu hẹp: bỏ đọc file nguồn thân, ghi nợ · (3) Ghi nợ 🟠/🟢, merge
+- Chọn: Thêm một lần sửa hết O1 + G1–G7 (cục bộ trong khối nguồn thân), giới hạn byte đọc
+- Lý do (tiêu chí chất lượng cuối): Lượt có 🔴 thì sửa hết (ADR-0059); 🔴 chỉ là test, thiết kế đã đúng — các sửa còn lại nhỏ, cục bộ, có test; thu hẹp sẽ mất bảo vệ đã review
+- Đường lùi: Revert squash PR; guard về bản main

@@ -161,6 +161,26 @@
     "AUD-XFEAT-026",
     "AUD-XFEAT-027"
    ]
+  },
+  {
+   "reason": "Grafts trong phép so review của `xt.py` (`_git` đặt `GIT_GRAFT_FILE=/dev/null`) — không thuộc lớp quyết định cho/chặn của guard; đỡ bằng Gate unittest `-k test_review_drift_ignores_grafts tests.test_xt_cli` (AUD-SEC-168)",
+   "ids": [
+    "AUD-SEC-168"
+   ]
+  },
+  {
+   "reason": "Nợ review của file luật agent ở `release-check` hàng `review_debt` (`is_doc_path` ↔ `AGENT_RULE_GLOBS`) — không thuộc lớp quyết định cho/chặn mà autonomy-bench kiểm; đỡ bằng Gate unittest `-k test_delivery_phase_review_debt_agent_rule_files tests.test_delivery_phase` (AUD-XFEAT-030)",
+   "ids": [
+    "AUD-XFEAT-030"
+   ]
+  },
+  {
+   "reason": "Nguồn thân `gh` đọc từ file thật trên đĩa (`cat -n f`, `<<< \\`cat f\\``, `cat < f |`, `<&N`) — corpus chỉ có lệnh, không có file; đỡ bằng Gate unittest `-k test_review_marker_debt_354 tests.test_guard_audit1019` (AUD-SEC-174, AUD-SEC-175, AUD-SEC-176)",
+   "ids": [
+    "AUD-SEC-174",
+    "AUD-SEC-175",
+    "AUD-SEC-176"
+   ]
   }
  ]
 }

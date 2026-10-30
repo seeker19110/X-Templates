@@ -31,6 +31,7 @@ import os
 import posixpath
 import re
 import shlex
+import stat
 import subprocess
 import urllib.parse
 import sys
@@ -1308,7 +1309,7 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 # giả đi (`branch -D origin/x`, `tag -d`, `branch -dr` — Gate đỏ chứ không xanh giả); upstream/điểm bắt đầu là ref remote.
 # Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file `.git/refs/…`/`.git/packed-refs`/
 # `.git/<remote>/…`; đổi URL/refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `-c remote.<r>.*`);
-# `git replace`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
+# ghi thẳng `.git/refs/replace/…`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
 # (khối "Alias git" dưới); đối số từ stdin (`xargs`/`parallel`/`find -exec {}`) → UNRESOLVED_TARGET (khối "Đối số không
 # thấy"). Giới hạn của alias: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng (`printf … > f && GIT_CONFIG_GLOBAL=f
 # git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`), lệnh xoá biến môi trường (`env -i/-u`, `unset`),
@@ -1406,12 +1407,22 @@ def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
 
 
 RefNames = Optional[List[str]]  # tên ref lệnh sẽ ghi/tạo; None = không thấy được (đọc từ stdin)
+REPLACE_REF_PREFIX = "refs/replace/"  # `git replace` đổi nội dung mọi lệnh git đọc (AUD-SEC-158)
 
 
 def _update_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     """update-ref: ref là đối số vị trí đầu (cả `-d`); `--stdin` → None."""
     flags, pos, _ = _parse_opts(args, "m", ())
     return None if _has_opt(flags, {"--stdin"}) else pos[:1]
+
+
+def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """replace: mọi dạng ghi `refs/replace/<đối tượng>` (`<obj> <thay>`, `-f`, `--graft`, `--edit`,
+    `--convert-graft-file`); liệt kê (không đối số, `-l`/`--list`, `--format`) và xoá (`-d`) thì không (AUD-SEC-158)."""
+    flags, pos, _ = _parse_opts(args, "", ())
+    if _has_opt(flags, {"-d", "--delete", "-l", "--list"}) or not (pos or _has_opt(flags, {"--convert-graft-file"})):
+        return []
+    return [REPLACE_REF_PREFIX + (pos[0] if pos else "*")]
 
 
 def _symbolic_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
@@ -1499,6 +1510,9 @@ def _short_ref(ref: str) -> Tuple[bool, str]:
 
 def _remote_ref_hit(names: List[str], cwd: Optional[str]) -> str:
     """Tên đầu tiên là ref theo dõi remote hoặc trùng `<remote>/…`; rỗng nếu không. `git remote` chỉ chạy khi cần."""
+    replaced = next((x for x in names if x.lstrip("+").startswith(REPLACE_REF_PREFIX)), "")
+    if replaced:  # thay đối tượng mà Gate/`pr debt` đọc — cùng hiệu ứng giả `origin/main` (AUD-SEC-158)
+        return replaced
     shorts = [(x, *_short_ref(x)) for x in names]
     hit = next((x for x, remote, _ in shorts if remote), "")
     if hit or not any("/" in s for _, _, s in shorts):
@@ -1509,6 +1523,7 @@ def _remote_ref_hit(names: List[str], cwd: Optional[str]) -> str:
 
 REMOTE_REF_NAMES: Dict[str, Callable[[List[str], Optional[str]], RefNames]] = {
     "update-ref": _update_ref_names,
+    "replace": _replace_names,
     "symbolic-ref": _symbolic_ref_names,
     "tag": _tag_names,
     "branch": _branch_names,
@@ -2627,7 +2642,7 @@ MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_metho
 # Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`) hoặc head ghép lúc chạy (`head=$(git rev-parse HEAD)`,
 # `$H`, backtick — re-review #159); mã nguồn/tài liệu nhắc dạng dấu (`head={head}`, `head=<sha>`) không khớp.
 REVIEW_MARK_RE = re.compile(
-    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`][^>]{0,200}?)\s+verdict=(?:clean|blocking|debt)"
+    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`%][^>]{0,200}?)\s+verdict=(?:clean|blocking|inconclusive|debt|[$`%])"
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
@@ -2650,9 +2665,119 @@ STAGE_APPROVE_WHY = (
 )
 
 
+def _vague(tok: str) -> bool:
+    """Token mờ với guard: mở rộng lúc chạy (`$`, backtick) hay glob (`appro?e`, `x?.py`) — AUD-SEC-155."""
+    return _opaque(tok) or any(c in tok for c in "*?[")
+
+
+# `-m xt`, `-mxt`, `-Bm xt`, `-m scripts.xt` (cờ ngắn ghép của python; module dạng gói)
+XT_MODULE_RE = re.compile(r"-[A-Za-z]*m((?:[\w.]*\.)?xt)?")
+XT_MODULE_NAME_RE = re.compile(r"(?:[\w.]*\.)?xt")
+STDIN_FEEDERS = ("xargs", "parallel")  # thêm đối số từ stdin vào lệnh
+FD_NAME_RE = re.compile(r"\d+|\{\w+\}")  # fd trước chuyển hướng: `2>`, `{fd}>`
+# Lệnh chỉ đọc/so/chép file, không chạy script — `cat scripts/xt.py "$F"` không phải gọi `xt.py`
+STAGE_READERS = frozenset(
+    {"cat", "grep", "rg", "git", "ruff", "black", "mypy", "shellcheck", "wc", "head", "tail", "less", "more", "bat"}
+    | {"diff", "ls", "cp", "mv", "ln", "sed", "awk", "file", "stat", "echo", "printf", "sha256sum", "md5sum", "touch"}
+    | {"vim", "vi", "nano", "code", "chmod", "rm"}
+)
+
+
+def _xt_sub(n: List[str], i: int) -> Tuple[int, str]:
+    """(vị trí, lệnh con) của `xt.py` từ `n[i]`, sau tuỳ chọn toàn cục (`--framework X`, cả viết tắt `--fr X`); cờ mờ,
+    giá trị `--framework` mờ/thiếu (`$(`, `<(` cắt lệnh; `--framework=` rỗng) → lệnh con mờ `$`."""
+    k = i
+    while k < len(n) and n[k].startswith("-"):
+        if _vague(n[k]) or n[k].endswith("="):
+            return k, "$"
+        if len(n[k]) > 2 and "=" not in n[k] and "--framework".startswith(n[k]):
+            if k + 1 >= len(n) or _vague(n[k + 1]):
+                return k, "$"
+            k += 2
+        else:
+            k += 1
+    return k, (n[k] if k < len(n) else "")
+
+
+def _xt_named(n: List[str], k: int) -> bool:
+    """`n[k]` gọi `xt.py` theo tên: đường `…/xt.py`, `-m xt`, `-mxt`, `-Bm xt`, `-m scripts.xt`."""
+    m = XT_MODULE_RE.fullmatch(n[k])
+    module = k > 0 and bool(XT_MODULE_NAME_RE.fullmatch(n[k])) and bool(XT_MODULE_RE.fullmatch(n[k - 1]))
+    return posixpath.basename(n[k]) == "xt.py" or bool(m and m.group(1)) or module
+
+
+def _no_redirects(args: List[str]) -> List[str]:
+    """Bỏ chuyển hướng, đích và fd đứng trước nó (`2>/dev/null`, `{fd}>f`, `> "$LOG"` không phải đối số của lệnh);
+    đích bị cắt (`> >(cat)`, `2>$(mktemp)` — tách lệnh ở `(`) hay thiếu → token mờ `$`."""
+    out: List[str] = []
+    skip = False
+    for i, t in enumerate(args):
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if skip:
+            skip = False
+        elif _is_redirect(t):
+            skip = True
+            out += ["$"] if nxt in ("", "$") or _is_punct(nxt) else []
+        elif not (FD_NAME_RE.fullmatch(t) and _is_redirect(nxt)):
+            out.append(t)
+    return out
+
+
+def _placeholders(argv: List[str], feeds: bool) -> Set[str]:
+    """Chuỗi thay chỗ do lệnh khác điền lúc chạy: `xargs -I R|-IR|-i[R]|-0I R|--replace[=R]` (khi có xargs/parallel);
+    mẫu `{…}` của `find -exec`/`parallel` tính riêng ở `_approves_stage`."""
+    out: Set[str] = set()
+    for i, t in enumerate(argv if feeds else []):
+        r = _xargs_replace(argv[i : i + 2])
+        out |= {r} if r and (t.startswith("--replace") or XARGS_REPLACE_RE.fullmatch(t)) else set()
+    return out
+
+
+def _approves_at(n: List[str], k: int, runs: Tuple[bool, bool], feeds: bool) -> bool:
+    """`n[k]` là script `xt.py` (theo tên, hay đường mờ của lệnh chạy script mà lệnh con là `stage`) và lệnh có thể là
+    `stage approve`/`init --adopt`. `runs` = (lệnh không chỉ đọc file — `cat scripts/xt.py "$F"` thì không; có `python`
+    đứng trước hay là lệnh — đường mờ của `deploy.sh "$APP" stage "$TAG"` thì không)."""
+    named = _xt_named(n, k)
+    if not named and not (runs[1] and _vague(n[k])):
+        return False
+    j, sub = _xt_sub(n, k + 1)
+    if not named and sub != "stage":
+        return False
+    if sub != "stage":
+        return runs[0] and (_vague(sub) or (feeds and not sub))
+    tail = n[j + 1 :]
+    act = next((t for t in tail if not t.startswith("-")), "")
+    if not act:  # lệnh con từ stdin (`xargs … stage`); không thì argparse đòi lệnh con
+        return feeds and not {"-h", "--help"} & set(tail)
+    return (
+        "approve" in tail or _vague(act) or ("init" in tail and any(t.startswith("--adopt") or _vague(t) for t in tail))
+    )
+
+
 def _approves_stage(argv: List[str]) -> bool:
-    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ)."""
-    n = normalize(argv)
+    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ) ở MỌI vị
+    trí script (`perf sample -- python3 xt.py stage approve`); lệnh con, tuỳ chọn `init`, đường script mờ hay chuỗi
+    thay chỗ có thể là chúng nên cũng tính (`stage "$(echo approve)"`, `xargs -I{} … stage {}` — AUD-SEC-155). Luật
+    chữ cũ (`_approves_literal`) luôn áp thêm để không bao giờ yếu hơn trước (review #352 lượt 3, D-265)."""
+    if _approves_literal(normalize(argv)):
+        return True
+    feeds = any(posixpath.basename(t) in STDIN_FEEDERS for t in argv)
+    ph = _placeholders(argv, feeds)
+    n = [
+        ("$" if any(p in t for p in ph) or PARALLEL_REPLACE_RE.search(t) or (feeds and t in PARALLEL_ARG_SEPS) else t)
+        for t in normalize(_no_redirects(argv))
+    ]
+    reads = bool(n) and posixpath.basename(n[0]) in STAGE_READERS
+    py = False
+    for k, t in enumerate(n):
+        if _approves_at(n, k, (not reads, k == 0 or py), feeds):
+            return True
+        py = py or bool(PYTHON_RE.fullmatch(posixpath.basename(t)))
+    return False
+
+
+def _approves_literal(n: List[str]) -> bool:
+    """Luật chữ: `xt.py … stage … approve` hay `… stage … init … --adopt` sau `xt.py` đầu tiên."""
     at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
     rest = n[at + 1 :]
     if "stage" not in rest:
@@ -2670,8 +2795,157 @@ def _forges_review(argv: List[str]) -> bool:
     )
 
 
+REVIEW_BODY_FILES_MAX = 8  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
+# Thân comment GitHub tối đa 65 536 ký tự (≤ 256 KiB UTF-8): lớn hơn thì không đọc — coi như không đọc được; cùng trần
+# số nguồn giữ một quyết định trong ngân sách quét (review #354 lượt 3)
+REVIEW_BODY_FILE_BYTES = 1 << 18
+STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
+READER_VALUE_OPTS = ("-n", "-c", "--lines", "--bytes")  # tuỳ chọn của lệnh đọc ăn giá trị (`head -n "$N" f`)
+STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # thân đọc từ stdin
+FD_PATH_RE = re.compile(r"/dev/(?:fd/\d+|std(?:out|err))|/proc/[^/]+/fd/\d+")  # fd mở trong shell — guard không thấy
+SUBST_BODY_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")  # nội dung `$(…)` không lồng / backtick trong một đối số
+
+
+def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
+    """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (chữ thô, rồi cả chuỗi JSON — `gh api
+    --input` viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, fd của shell, không phải file thường,
+    quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
+    không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
+    sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
+    if path == os.devnull:  # `gh … < /dev/null` tắt prompt — thân rỗng
+        return False
+    if _vague(path) or FD_PATH_RE.fullmatch(path):
+        return True
+    full = os.path.join(cwd or ".", os.path.expanduser(path))
+    try:
+        os.lstat(full)
+    except FileNotFoundError:
+        return False
+    except OSError:  # đường quá dài, quyền… — có thể có mà guard không thấy
+        return True
+    try:
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > REVIEW_BODY_FILE_BYTES:
+                return True
+            text = fh.read(REVIEW_BODY_FILE_BYTES + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
+        if len(text) > REVIEW_BODY_FILE_BYTES or REVIEW_MARK_RE.search(text):
+            return True
+        return any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
+    except ValueError:  # không phải JSON: chữ thô đã quét
+        return False
+    except Exception:  # OSError, RecursionError (JSON lồng sâu) … — không đọc được thì coi như có dấu
+        return True
+
+
+def _stdin_redirects(argv: List[str]) -> List[str]:
+    """Đích chuyển hướng vào stdin của lệnh: `< f`, `0<> f`/`<> f`; `<&N` là fd của shell (`/dev/fd/N` — guard không
+    đọc được, AUD-SEC-176)."""
+    out: List[str] = []
+    for i, t in enumerate(argv[:-1]):
+        if t in ("<", "<>"):
+            out.append(argv[i + 1])
+        elif t == "<&" and argv[i + 1] != "-":  # `<&-` đóng stdin; `<&3-` chuyển fd 3 (review #357)
+            out.append("/dev/fd/" + argv[i + 1].removesuffix("-"))
+    return out
+
+
+def _reader_files(argv: List[str]) -> List[str]:
+    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c` của `head`/`tail` —
+    với `cat`, `-n` là cờ, AUD-SEC-174) sau khi bỏ chuyển hướng (`2>/dev/null`), cộng đích `< f` (AUD-SEC-176); không
+    có file hay `-` → đọc stdin (`-`)."""
+    n = normalize(_no_redirects(argv))
+    if not n[:1] or n[0] not in STDIN_READERS:
+        return []
+    valued = n[0] in ("head", "tail")
+    out = [
+        t
+        for i, t in enumerate(n[1:], 1)
+        if (t[:1] != "-" or t == "-") and not (valued and n[i - 1] in READER_VALUE_OPTS)
+    ]
+    return out + _stdin_redirects(argv) or ["-"]
+
+
+def _subst_files(arg: str) -> List[str]:
+    """File mà lệnh đọc trong `$(…)`/backtick của một đối số đọc ra (`$(cat -- 'f' 2>/dev/null | head)`,
+    `$(head -c N f)`, `$(< f)`, `` `cat f` ``); `$(cat)` đọc stdin → `-`."""
+    out: List[str] = []
+    for groups in SUBST_BODY_RE.findall(arg):
+        toks = tokenize(groups[0] or groups[1])
+        out += [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
+        out += [f for c in split_commands(toks) for f in _reader_files(c)]
+    return out
+
+
+def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
+    """File làm thân của lệnh `gh` đăng chữ: `gh api` — `-F k=@f`/`--field k=@f`/`--input f`; `gh pr|issue` — `-F f`,
+    `--body-file f` (giá trị nguyên văn, kể cả `x=@y`); `< f`; file đọc trong `$(…)` của đối số; file của `cat`/`head`…
+    trong cùng chuỗi khi thân đọc stdin (`-`, `/dev/stdin`) hay đối số là thay lệnh không nháy (`$`). Stdin không phải
+    file."""
+    args = normalize(argv)[1:]
+    if args[:1] == ["api"]:
+        own = _gh_api_files(args)
+    else:
+        own = _gh_flag_files(args, split_at=False)
+    own += _stdin_redirects(args)
+    # backtick không nháy bị tách thành nhiều token — quét cả đối số ghép lại (`<<< \`cat f\``, AUD-SEC-175)
+    own += [f for t in [*args, " ".join(args)] for f in _subst_files(t)]
+    piped = any(f in STDIN_PATHS for f in own) or "$" in args or any(t.count("`") % 2 for t in args)
+    return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
+
+
+def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
+    """Lệnh có `gh` đăng chữ (`_forges_review` không cần dấu ở argv) mà dấu nằm ở argv của nó, ở bất kỳ đâu trong chuỗi
+    lệnh (heredoc, `printf … > f &&`, `printf '…%s…' | gh -F -`) hay trong nguồn thân của chính lệnh `gh` đó
+    (`_body_sources`; không đọc được → chặn) — AUD-SEC-157. Lệnh không đăng thì chữ nhắc dấu không bị chặn; file chỉ được
+    nhắc tên (`--body "xem docs/ops/AUDIT-STATUS.md"`) không phải nguồn thân."""
+    cmds = split_commands(tokens)
+    posts = [c for c in cmds if _gh_posts(c)]
+    if not posts:
+        return False
+    if REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts):
+        return True
+    cats = [f for c in cmds for f in _reader_files(c)]
+    srcs = [f for c in posts for f in _body_sources(c, cats)]
+    # backtick lẻ ở đối số `gh`: thay lệnh không nháy bị tách lệnh ở `;`/`|`/xuống dòng (`<<< \`cat f;\``) — đọc nó
+    # trên chữ thô của cả chuỗi lệnh (review #357)
+    srcs += _subst_files(cmd) if any(t.count("`") % 2 for c in posts for t in c) else []
+    srcs = list(dict.fromkeys(srcs))  # mỗi nguồn đọc một lần, đếm một lần
+    return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
+
+
+def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
+    """`_forges_review_cmd` mà lỗi khi quét (đầu vào lạ) thì coi như có dấu — không để ngoại lệ thoát khỏi
+    `bash_decision` (hook fail-open, tắt mọi luật đứng sau — review #354 lượt 2)."""
+    try:
+        return _forges_review_cmd(cmd, tokens, cwd)
+    except Exception:
+        return True
+
+
+def _gh_posts(argv: List[str]) -> bool:
+    """`gh` đăng/sửa comment, review, thân PR/issue, hay `gh api` ghi."""
+    n = normalize(argv)
+    return bool(n) and n[0] == "gh" and bool(GH_POST_RE.search(" ".join(n)))
+
+
+def _strings(value: object) -> Iterator[str]:
+    """Mọi chuỗi thô trong `tool_input` (cả lồng trong danh sách/đối tượng) — không qua `json.dumps`, vốn thoát ký tự
+    điều khiển (`\\n` sau `<!--`) làm regex dấu không khớp (AUD-SEC-156)."""
+    stack = [value]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, str):
+            yield v
+        elif isinstance(v, dict):  # cả khoá — như `json.dumps` trước đây (review #354 lượt 3)
+            stack.extend([*v.keys(), *v.values()])
+        elif isinstance(v, list):
+            stack.extend(v)
+
+
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
-    if MCP_REVIEW_POST_RE.fullmatch(tool_name) and REVIEW_MARK_RE.search(json.dumps(tool_input, ensure_ascii=False)):
+    if MCP_REVIEW_POST_RE.fullmatch(tool_name) and any(REVIEW_MARK_RE.search(s) for s in _strings(tool_input)):
         return "deny", f"Lệnh bị khung chặn ({REVIEW_FORGE_WHY}): {tool_name}"
     hit = mcp_attribution(tool_name, tool_input, root) or mcp_title(tool_name, tool_input, root)
     if hit:
@@ -6929,9 +7203,9 @@ def _gh_api_files(args: List[str]) -> List[str]:
     return out
 
 
-def _gh_flag_files(args: List[str]) -> List[str]:
+def _gh_flag_files(args: List[str], split_at: bool = True) -> List[str]:
     """Giá trị của cờ đọc file (`GH_FILE_FLAGS`) ở mọi dạng: `--body-file f`, `--body-file=f`, `-F f`, `-Ff`, `-F=f`
-    (review PR #182); giá trị `k=@f` thêm cả `f`."""
+    (review PR #182); giá trị `k=@f` thêm cả `f` (`split_at` — `gh pr|issue -F x=@y` đọc file tên nguyên văn thì tắt)."""
     out: List[str] = []
     for i, a in enumerate(args):
         if a in GH_FILE_FLAGS:
@@ -6942,7 +7216,7 @@ def _gh_flag_files(args: List[str]) -> List[str]:
             val = a[3:] if a[2] == "=" else a[2:]
         else:
             continue
-        out += [val, val.split("@", 1)[1]] if "=@" in val else [val]
+        out += [val, val.split("@", 1)[1]] if split_at and "=@" in val else [val]
     return out
 
 
@@ -7222,7 +7496,7 @@ def bash_decision(
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
-    asks += [REVIEW_FORGE_WHY] if any(_forges_review(c) for c in split_commands(tokens)) else []
+    asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd) else []
     asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (
