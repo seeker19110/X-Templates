@@ -3270,7 +3270,7 @@ GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được l�
 def _git(
     cwd: Path, *args: str, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None
 ) -> "subprocess.CompletedProcess[str]":
-    cmd = ["git", "-C", str(cwd), *args]
+    cmd = ["git", "--no-replace-objects", "-C", str(cwd), *args]  # `refs/replace/` không đổi nội dung đọc (AUD-SEC-158)
     try:
         return subprocess.run(
             cmd,
@@ -13171,7 +13171,11 @@ def _perf_git_raw(base: Path, *args: str) -> bytes:
     """stdout bytes của git: `_git` chạy `text=True` (universal newlines đổi `\\r` thành `\\n`) — không dùng cho nội dung diff."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(base), *args], capture_output=True, check=False, timeout=GIT_TIMEOUT, env=_perf_env()
+            ["git", "--no-replace-objects", "-C", str(base), *args],
+            capture_output=True,
+            check=False,
+            timeout=GIT_TIMEOUT,
+            env=_perf_env(),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"git {args[0]} quá {GIT_TIMEOUT} s") from None
@@ -13249,7 +13253,7 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
 
 def _perf_blob_head(base: Path, spec: str) -> bytes:
     """≤ PERF_BINARY_PEEK byte đầu của blob `spec` (không có → b""): đọc qua ống rồi giết git, không nạp cả blob."""
-    cmd = ["git", "-C", str(base), "cat-file", "blob", spec]
+    cmd = ["git", "--no-replace-objects", "-C", str(base), "cat-file", "blob", spec]
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_perf_env()) as proc:
         head = proc.stdout.read(PERF_BINARY_PEEK) if proc.stdout else b""
         proc.kill()

@@ -6616,6 +6616,58 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec158-replace-origin-main",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-158"
+  ],
+  "input": {
+   "command": "git replace -f origin/main HEAD"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec158-replace-graft",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-158"
+  ],
+  "input": {
+   "command": "git replace --graft origin/main HEAD"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec158-update-ref-replace",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-158"
+  ],
+  "input": {
+   "command": "git update-ref refs/replace/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HEAD"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec158-replace-list-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-158"
+  ],
+  "input": {
+   "command": "git replace -l"
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }
