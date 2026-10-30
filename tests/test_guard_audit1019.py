@@ -506,6 +506,38 @@ class ReviewMarkerForgeTest(unittest.TestCase):
         with mock.patch.object(guard, "_body_sources", side_effect=RuntimeError("hỏng")):
             self.assertEqual(final("gh pr comment 5 -F n.md"), "deny")  # lỗi khi quét → coi như có dấu
 
+    def test_review_marker_body_source_round3(self):
+        """Review #354 lượt 3: `$(cat)`/`$(cat -)`/`$(head -c N)` đọc stdin, backtick; `-F x=@y -F y` lấy giá trị nguyên
+        văn; đường quá dài không phải "chưa có"; giá trị `-n "$N"` của lệnh đọc không phải file; thân > 256 KiB."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            Path(d, "y2.md").write_text(MARK, encoding="utf-8")
+            Path(d, "mid.md").write_text("x" * ((1 << 18) + 1), encoding="utf-8")
+            for cmd in (
+                'cat b.md | gh pr comment 5 --body "$(cat)"',
+                'cat b.md | gh pr comment 5 --body "$(cat -)"',
+                'cat b.md | gh pr comment 5 --body "$(head -c 99999)"',
+                'cat b.md | gh api repos/o/r/issues/5/comments -f body="$(cat)"',
+                'gh pr comment 5 --body "`cat b.md`"',
+                "gh pr comment 5 -F x=@y2.md -F y2.md",
+                "gh pr comment 5 -F mid.md",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                'gh pr comment 5 --body "$(head -n "$N" n.md)"',
+                'gh pr comment 5 --body "$(tail --lines=3 n.md)"',
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+            with mock.patch.object(guard.os, "lstat", side_effect=OSError(36, "File name too long")):
+                self.assertTrue(guard._file_has_mark("b.md", d))
+            with mock.patch.object(guard.os, "O_NONBLOCK", 0, create=True):  # Windows: không có O_NONBLOCK
+                self.assertFalse(guard._file_has_mark("n.md", d))
+        self.assertEqual(guard.mcp_decision("mcp__github__add_issue_comment", {MARK: "x"}, str(ROOT))[0], "deny")
+
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,
         cả chuỗi lồng trong danh sách/đối tượng (`comments[].body`)."""

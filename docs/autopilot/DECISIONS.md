@@ -1874,3 +1874,10 @@
 - Chọn: Thêm một lần sửa hết: bắt mọi lỗi đọc nguồn thân → coi như có dấu, quét chữ thô trước JSON; O1/G1/FIFO
 - Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); lỗi đọc nguồn → chặn là chiều chặt nhất và loại cả lớp fail-open; giữ tiến bộ đọc nguồn thân đã review
 - Đường lùi: Revert squash PR; guard về bản main
+
+### D-267 · 2026-10-30T20:44:20+00:00 · PR #354: review lượt 3 — 🔴 B1 (test JSON lồng sâu phụ thuộc Python 3.14, đã sửa ở de4c963) + 🟠 O1 ($(cat) đọc stdin, backtick) + 7 🟢 — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết O1 + G1–G7 (cục bộ trong khối nguồn thân), giới hạn byte đọc · (2) Thu hẹp: bỏ đọc file nguồn thân, ghi nợ · (3) Ghi nợ 🟠/🟢, merge
+- Chọn: Thêm một lần sửa hết O1 + G1–G7 (cục bộ trong khối nguồn thân), giới hạn byte đọc
+- Lý do (tiêu chí chất lượng cuối): Lượt có 🔴 thì sửa hết (ADR-0059); 🔴 chỉ là test, thiết kế đã đúng — các sửa còn lại nhỏ, cục bộ, có test; thu hẹp sẽ mất bảo vệ đã review
+- Đường lùi: Revert squash PR; guard về bản main

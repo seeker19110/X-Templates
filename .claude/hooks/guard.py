@@ -2795,12 +2795,15 @@ def _forges_review(argv: List[str]) -> bool:
     )
 
 
-REVIEW_BODY_FILES_MAX = 16  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
-REVIEW_BODY_FILE_BYTES = 1 << 20  # thân lớn hơn không đọc — coi như không đọc được
+REVIEW_BODY_FILES_MAX = 8  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
+# Thân comment GitHub tối đa 65 536 ký tự (≤ 256 KiB UTF-8): lớn hơn thì không đọc — coi như không đọc được; cùng trần
+# số nguồn giữ một quyết định trong ngân sách quét (review #354 lượt 3)
+REVIEW_BODY_FILE_BYTES = 1 << 18
 STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
+READER_VALUE_OPTS = ("-n", "-c", "--lines", "--bytes")  # tuỳ chọn của lệnh đọc ăn giá trị (`head -n "$N" f`)
 STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # thân đọc từ stdin
 FD_PATH_RE = re.compile(r"/dev/(?:fd/\d+|std(?:out|err))|/proc/[^/]+/fd/\d+")  # fd mở trong shell — guard không thấy
-SUBST_BODY_RE = re.compile(r"\$\(([^()]*)\)")  # nội dung `$(…)` không lồng trong một đối số
+SUBST_BODY_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")  # nội dung `$(…)` không lồng / backtick trong một đối số
 
 
 def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
@@ -2812,16 +2815,22 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
     if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
     full = os.path.join(cwd or ".", os.path.expanduser(path))
-    if not os.path.lexists(full):
-        return False
     try:
-        fd = os.open(full, os.O_RDONLY | os.O_NONBLOCK)
+        os.lstat(full)
+    except FileNotFoundError:
+        return False
+    except OSError:  # đường quá dài, quyền… — có thể có mà guard không thấy
+        return True
+    try:
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode) or st.st_size > REVIEW_BODY_FILE_BYTES:
                 return True
-            text = fh.read()
-        return bool(REVIEW_MARK_RE.search(text)) or any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
+            text = fh.read(REVIEW_BODY_FILE_BYTES + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
+        if len(text) > REVIEW_BODY_FILE_BYTES or REVIEW_MARK_RE.search(text):
+            return True
+        return any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
     except ValueError:  # không phải JSON: chữ thô đã quét
         return False
     except Exception:  # OSError, RecursionError (JSON lồng sâu) … — không đọc được thì coi như có dấu
@@ -2829,17 +2838,21 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
 
 
 def _reader_files(argv: List[str]) -> List[str]:
-    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn sau khi bỏ chuyển hướng (`2>/dev/null`)."""
+    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c`) sau khi bỏ chuyển
+    hướng (`2>/dev/null`); không có file hay `-` → đọc stdin (`-`)."""
     n = normalize(_no_redirects(argv))
-    return [t for t in n[1:] if t[:1] != "-"] if n[:1] and n[0] in STDIN_READERS else []
+    if not n[:1] or n[0] not in STDIN_READERS:
+        return []
+    out = [t for i, t in enumerate(n[1:], 1) if (t[:1] != "-" or t == "-") and n[i - 1] not in READER_VALUE_OPTS]
+    return out or ["-"]
 
 
 def _subst_files(arg: str) -> List[str]:
-    """File mà lệnh đọc trong `$(…)` của một đối số đọc ra (`$(cat -- 'f' 2>/dev/null | head)`, `$(head -c N f)`,
-    `$(< f)`)."""
+    """File mà lệnh đọc trong `$(…)`/backtick của một đối số đọc ra (`$(cat -- 'f' 2>/dev/null | head)`,
+    `$(head -c N f)`, `$(< f)`, `` `cat f` ``); `$(cat)` đọc stdin → `-`."""
     out: List[str] = []
-    for body in SUBST_BODY_RE.findall(arg):
-        toks = tokenize(body)
+    for groups in SUBST_BODY_RE.findall(arg):
+        toks = tokenize(groups[0] or groups[1])
         out += [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
         out += [f for c in split_commands(toks) for f in _reader_files(c)]
     return out
@@ -2854,8 +2867,7 @@ def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
     if args[:1] == ["api"]:
         own = _gh_api_files(args)
     else:
-        flags = _gh_flag_files(args)
-        own = [f for f in flags if not any(w != f and w.endswith("=@" + f) for w in flags)]
+        own = _gh_flag_files(args, split_at=False)
     own += [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
     own += [f for t in args for f in _subst_files(t)]
     piped = any(f in STDIN_PATHS for f in own) or "$" in args
@@ -2901,8 +2913,8 @@ def _strings(value: object) -> Iterator[str]:
         v = stack.pop()
         if isinstance(v, str):
             yield v
-        elif isinstance(v, dict):
-            stack.extend(v.values())
+        elif isinstance(v, dict):  # cả khoá — như `json.dumps` trước đây (review #354 lượt 3)
+            stack.extend([*v.keys(), *v.values()])
         elif isinstance(v, list):
             stack.extend(v)
 
@@ -7166,9 +7178,9 @@ def _gh_api_files(args: List[str]) -> List[str]:
     return out
 
 
-def _gh_flag_files(args: List[str]) -> List[str]:
+def _gh_flag_files(args: List[str], split_at: bool = True) -> List[str]:
     """Giá trị của cờ đọc file (`GH_FILE_FLAGS`) ở mọi dạng: `--body-file f`, `--body-file=f`, `-F f`, `-Ff`, `-F=f`
-    (review PR #182); giá trị `k=@f` thêm cả `f`."""
+    (review PR #182); giá trị `k=@f` thêm cả `f` (`split_at` — `gh pr|issue -F x=@y` đọc file tên nguyên văn thì tắt)."""
     out: List[str] = []
     for i, a in enumerate(args):
         if a in GH_FILE_FLAGS:
@@ -7179,7 +7191,7 @@ def _gh_flag_files(args: List[str]) -> List[str]:
             val = a[3:] if a[2] == "=" else a[2:]
         else:
             continue
-        out += [val, val.split("@", 1)[1]] if "=@" in val else [val]
+        out += [val, val.split("@", 1)[1]] if split_at and "=@" in val else [val]
     return out
 
 
