@@ -1839,3 +1839,10 @@
 - Chọn: Cổng 3.29.0 = phủ review theo ADR-0057 (mọi file nợ từ PR có review sạch/ghi nợ ở head, release-check review_debt PASS) + nợ review đã trả; audit delta lát 2 và các PR #316–#347 dời sang T-3557, chạy trước khi cắt 3.30.0
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: ADR-0057 là cổng máy đã duyệt — review reviewer-alt năng lực cao hơn ở head mỗi PR là audit delta cho diff đó; release-check GO. (3) đơn giản/tốc độ chỉ phá hoà: audit đủ nhóm trên 34 file ≈ một phiên, giữ ADR-0059/LOOP-HARNESS-029 khỏi dự án đích thêm; rủi ro còn lại có lớp đỡ là T-3557 trước 3.30.0. Tiền lệ 3.28.0 audit delta tìm 🟠 — nên T-3557 không được bỏ.
 - Đường lùi: Chạy T-3557 ngay; phát hiện 🟠/🔴 thì cắt 3.29.1
+
+### D-262 · 2026-10-30T16:09:02+00:00 · Kế hoạch sửa audit delta 6799550..28c2089 (5 🟠, 16 🟢)
+
+- Phương án: (1) 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha · (2) Một PR gộp cả 5 🟠 · (3) Ghi nợ 🟠, chỉ sửa trước khi cắt 3.30.0
+- Chọn: 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn trước: SEC-155 là lỗ cổng duyệt của người nên đi đầu; PR nhỏ giữ đường lùi và review 2 lần/sửa 1 lần khả thi (ADR-0059); gộp làm review lớn, dễ hết lượt
+- Đường lùi: Revert từng PR squash; sổ giữ dòng mở
