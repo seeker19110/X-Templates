@@ -58,7 +58,7 @@ chuyên mục NN, mục x của catalog.
   xác minh đối kháng (mặc định loại khi nghi ngờ; fetch lại URL; sửa dữ kiện sai). 31 đề xuất → **27 giữ, 4 loại** (đã phủ bởi `OPS-MAINT-003`,
   `SEC-INFRA-004`, mirror git cho DR, transcript agent bản rõ).
 - Hiệu chỉnh từ bước xác minh: phạm vi Android verification 2026-09-30 chỉ ở store tham gia (BR/ID/SG/TH); quyền LNA tách hai từ Chrome 145;
-  endpoint EPSS là `api.first.org/data/v1/epss`; zizmor ghi cache cần ≥ 1.31.0 (bản ghim trong khung 1.30.1); OpenVEX cho `impact_statement`
+  endpoint EPSS là `api.first.org/data/v1/epss`; zizmor ghi cache cần ≥ 1.31.0 (tài liệu khung nâng lên bản đang ghim 1.31.1); OpenVEX cho `impact_statement`
   thay justification — khung chọn chặt hơn; settings repo chỉ đọc ở phiên cloud **một repo** (bẫy `enabledPlugins` ở đợt 1 thiếu ý này).
 - Chưa xác minh/lưu ý: mốc Chrome Root Program cho clientAuth; nghĩa vụ hiển thị cảnh báo SIMO của tổ chức không phải ngân hàng; WebSocket
   bị gate LNA từ bản Chrome nào; tình trạng tố tụng SB2420 đổi nhanh (mục đòi rà ≤ 90 ngày).
@@ -87,7 +87,7 @@ chuyên mục NN, mục x của catalog.
 | `IND-ECOM-025` | SHOULD | `03-industries/ecommerce.md` |
 | `IND-FIN-023` | SHOULD | `03-industries/fintech.md` |
 | `OPS-DEPLOY-022` | MUST@L | `15-operations/deployment-strategies.md` |
-| `WF-CI-026` | MUST@L | `10-workflow/ci-cd-pipeline.md` |
+| `WF-CI-027` | MUST@L | `10-workflow/ci-cd-pipeline.md` |
 | `LOOP-CI-020` | MUST@L | `11-autonomous-loop/self-healing-ci.md` |
 | `LOOP-HARNESS-031` | SHOULD | `11-autonomous-loop/harness-files.md` |
 | `LOOP-STOP-030` | SHOULD | `11-autonomous-loop/stop-points-and-escalation.md` |
