@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Added
+- Mục checklist mới (SHOULD) từ catalog `seeker19110/stored` `9f87dd1..fa02a75` và nguồn sống tra 2026-10-30 (`research/2026-10-30-stored-delta-and-web.md`): `LOOP-HARNESS-030` (bảng kênh dữ liệu rời máy trước khi bật công cụ memory/quan sát cho agent — telemetry, model nén, hosted; context chèn lại là lời khai), `LOOP-DESIGN-025` (hook/skill đổi hành vi agent chỉ bật mặc định sau eval bật/tắt; `claude plugin eval --ablation with-without`), `WF-REVIEW-021` (mỗi hunk truy được về yêu cầu, dọn dẹp ngoài phạm vi tách PR), `SEC-INFRA-025` (mật mã hậu lượng tử: kiểm kê, TLS lai `X25519MLKEM768`, lộ trình NIST IR 8547), `SEC-LOG-021` (báo cáo lỗ hổng/sự cố theo EU Cyber Resilience Act từ 2026-09-11), `SEC-SUPPLY-028` (AI-BOM theo CycloneDX/SPDX 3.0, CISA + G7). Bẫy mới: license chỉ ghi trong metadata (`licensing-and-ip.md`), plugin `enabledPlugins` không nạp ở phiên cloud (`harness-files.md`). **Dự án đích:** ghép lại `BLUEPRINT.md` theo ID để nhận sáu mục mới; không đổi công cụ.
+
 ### Changed
 - PR cắt bản không ghi nợ review (ADR-0059 §6, D-259 — chủ dự án yêu cầu máy hoá): `merge-check` thêm khoá `release` (PR đổi `VERSION` gốc); hết lượt review thì `pr next` trả `rethink` thay `debt` — ghi nợ rồi merge sẽ gắn tag ở commit mà `release-check` FAIL; `pr rethink` mở thêm một lần sửa hết (đánh dấu head chưa sửa → `fix`; review cuối chưa kết luận → `review`). PR cắt bản = đổi/đổi tên/xoá `VERSION` gốc nhắm `main` — cùng vị từ steward gắn tag (`is_release_pr`). **Dự án đích:** chạy lại `install.py`; ghép lại `BLUEPRINT.md` theo ID — đổi chữ `LOOP-STOP-022`; skill `/review` mới.
 

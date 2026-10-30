@@ -3,7 +3,7 @@ title: Code review: người + AI, checklist, SLA, ranh giới
 kind: module
 prefix: WF-REVIEW
 applies_to: [all]
-updated: 2026-10-24
+updated: 2026-10-30
 ---
 
 # Code review: người + AI, checklist, SLA, ranh giới
@@ -58,6 +58,7 @@ updated: 2026-10-24
 - [ ] `WF-REVIEW-018` **MAY** Spot-check: review ngẫu nhiên ≥ 10% PR fast-lane đã merge để hiệu chuẩn vị từ. → Kiểm: nhật ký spot-check hàng tuần. · Nguồn: khung cũ spec L2 (review mẫu ≥ 10%)
 - [ ] `WF-REVIEW-019` **SHOULD** PR template có mục bắt buộc **"Hỗ trợ AI"**: phần nào do AI sinh, phần nào người đã tự kiểm và kiểm thế nào, phần nào chỉ AI kiểm; không cần (và theo [`XC-DOCAI-005`](../18-cross-cutting/docs-for-ai-agents.md) không ghi) tên model/phiên. → Kiểm: `pull_request_template.md` có mục; `pr-policy` job kiểm mục không rỗng. · Nguồn: `seeker19110/stored` 13 §6d (PR template của Homebrew/BrewUI)
 - [ ] `WF-REVIEW-020` **SHOULD** PR `fix:` có mục **"Rà cùng khuôn"** trong body: lệnh `rg`/Semgrep đã chạy để tìm cùng mẫu lỗi ở nơi khác, số chỗ trùng tìm thấy, cách xử lý từng chỗ (sửa trong PR / issue / không áp dụng kèm lý do); lỗi lặp còn ghi hàng rào mới theo `WF-REVIEW-016`. → Kiểm: `pr-policy` cảnh báo (không chặn) khi PR `fix:` thiếu mục hoặc mục rỗng. · Nguồn: `seeker19110/stored` 23 §4.5 (Sales-Hunter: template `TRAPS.md` cứng có mục "rà cả họ"; đọc 2026-10-16)
+- [ ] `WF-REVIEW-021` **SHOULD** Mỗi hunk của diff **truy được về yêu cầu** của PR (tiêu chí chấp nhận, bug, task ghi trong mô tả); dọn dẹp, đổi tên, format, refactor ngoài yêu cầu tách PR riêng; tác giả chỉ dọn phần thừa do chính thay đổi tạo ra (import, biến, hàm hết dùng). Áp như nhau cho diff do agent viết — agent hay "tiện tay" sửa thêm. → Kiểm: reviewer gắn `should` cho hunk không truy được; mô tả PR liệt kê thay đổi ngoài yêu cầu (nếu giữ) kèm lý do. · Nguồn: catalog `seeker19110/stored` 20 §3k.3 (nguyên tắc "Surgical Changes"); Google eng-practices Small CLs (tách refactor)
 
 ## Bẫy thường gặp
 
@@ -96,3 +97,4 @@ updated: 2026-10-24
 - `research/2026-10-13-stored-catalog-extraction.md` §2.11 (reviewer khác model; human gate 24h leo thang; `/hoc` thang mức bền), §4; catalog `23-own-repos-lessons` §2.3, §2.5, §2.6, §4.1, §4.3; `13-dev-stack-devops` §6 (AI code review, open-code-review).
 - Catalog `seeker19110/stored` 13 §6d (Homebrew/BrewUI: PR template có mục bắt buộc "AI assistance", tách phần người kiểm và phần AI kiểm) — đọc 2026-10-15.
 - Catalog `seeker19110/stored` 23 §4.5 (Sales-Hunter: `TRAPS.md` có template triệu chứng / nguyên nhân / bằng chứng đỏ-xanh / rà cả họ / lần sau) — đọc 2026-10-16.
+- Catalog `seeker19110/stored` 20 §3k.3 (`multica-ai/andrej-karpathy-skills`: "mọi dòng thay đổi phải truy được về yêu cầu", chỉ dọn rác do chính mình tạo) — đọc 2026-10-30.

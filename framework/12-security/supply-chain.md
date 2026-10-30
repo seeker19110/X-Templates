@@ -3,7 +3,7 @@ title: Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
 kind: module
 prefix: SEC-SUPPLY
 applies_to: [all]
-updated: 2026-10-21
+updated: 2026-10-30
 ---
 
 # Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
@@ -70,6 +70,7 @@ updated: 2026-10-21
 - [ ] `SEC-SUPPLY-025` **SHOULD** Đánh giá dependency/skill/tool trên **repo gốc**, không trên bản mirror hay fork: chủ repo khớp đường dẫn module (`go.mod`, `package.json` `repository`, trang registry) và tác giả commit; sao/fork của mirror không phải tín hiệu chất lượng (repo gốc có thể đã bị gỡ vì lạm dụng). → Kiểm: mục "Đánh giá" trong PR thêm dependency ghi URL repo gốc + bằng chứng khớp (dòng `module`/`repository`). · Nguồn: `seeker19110/stored` 12 §3k (ARTEX, mirror Hinln/ARTEX)
 - [ ] `SEC-SUPPLY-026` **SHOULD** Số commit, số sao và bảng thống kê trong README không dùng làm bằng chứng "còn bảo trì": đọc lịch sử thật (`git log --format='%an %s'`), loại commit bot/tự động ghi timestamp, xem ngày commit người viết gần nhất và lịch sử advisory/gỡ bỏ; tool dual-use đã có lạm dụng thật hoặc bị tác giả rút về thì không đưa vào dự án. → Kiểm: mục "Đánh giá" ghi số commit người viết trong 12 tháng (lệnh + kết quả) và kết quả tra advisory. · Nguồn: `seeker19110/stored` 12 §3j (s4ntrx: 5.340/5.571 commit là bot), 12 §3k
 - [ ] `SEC-SUPPLY-027` **SHOULD** Mục "Đánh giá" trong PR thêm phụ thuộc/skill/plugin (`SEC-SUPPLY-008`, `025`, `026`) ghi thêm bốn ý: **SHA commit đã đọc** (README/ảnh chụp không phải bằng chứng bền); kết quả `git log --follow -- LICENSE*` ([`CMP-LIC-019`](../16-compliance-privacy/licensing-and-ip.md)) **kể cả license thành phần tải lúc chạy** (engine, binary, model — [`CMP-LIC-021`](../16-compliance-privacy/licensing-and-ip.md)); **repo trùng tên đã loại** (một tên nhiều repo: liệt kê hết, nói rõ đã chọn repo nào); **con số tự công bố** (số test, cổng, benchmark) đã đo lại hay chưa, ghi "tuyên bố → tự đo". → Kiểm: review PR có đủ 4 ý; CI (khi diff chạm manifest) `rg` mục "Đánh giá" trong mô tả PR không rỗng. · Nguồn: `seeker19110/stored` README §22–§27, 08 §2d.1–2d.3 (rà 2026-10-18); phương pháp đánh giá nguồn ở `.claude/skills/research/SKILL.md`
+- [ ] `SEC-SUPPLY-028` **SHOULD** Hệ có model AI (gọi API, tự host hay fine-tune) sinh **AI-BOM** cùng SBOM ([`CMP-LIC-003`](../16-compliance-privacy/licensing-and-ip.md)): mỗi model ghi nhà cung cấp, tên + revision/hash trọng số hoặc phiên bản API ghim, license, dataset huấn luyện/fine-tune (nguồn, license), nơi chạy; định dạng CycloneDX ≥ 1.6 (thành phần `machine-learning-model`, model card) hoặc SPDX 3.0 AI/Dataset profile; đối chiếu bộ phần tử tối thiểu "SBOM for AI" của CISA + G7 (2026). → Kiểm: artifact AI-BOM đính kèm release; đổi model/phiên bản mà AI-BOM không đổi → CI đỏ. · Nguồn: CycloneDX 1.7 (ECMA-424); SPDX 3.0; CISA/G7 *SBOM for AI – Minimum Elements* (2026)
 
 ## Bẫy thường gặp
 
@@ -117,3 +118,4 @@ updated: 2026-10-21
 - Catalog `seeker19110/stored` 12 §3 (7 quy tắc, supply chain, CI có AI), 23 §8.1 (ma trận vệ sinh), 20 §3b (vendor-with-lock), đọc 2026-10-13. Sự cố tj-actions/changed-files 2025 và Trivy CVE-2026-33634: ghi theo catalog, (chưa xác minh lại nguồn gốc ngày 2026-10-13).
 - Catalog `seeker19110/stored` 12 §3j (số commit do bot ghi timestamp, bảng thống kê README sai), 12 §3k (ARTEX: tool dual-use bị lạm dụng, tác giả gỡ, sao dồn về mirror) — đọc 2026-10-15.
 - Catalog `seeker19110/stored` README §22–§27, 08 §2d.1–2d.3 (hai phép thử "chính chủ", license tầng dưới, repo trùng tên, số tự công bố, SHA đã đọc) — rà 2026-10-18; quy trình ở `/research` (`.claude/skills/research/SKILL.md`).
+- CycloneDX 1.7 (2025-10-21; ECMA-424) và ML-BOM: <https://cyclonedx.org/specification/overview/> · <https://cyclonedx.org/capabilities/mlbom/> — xác minh 2026-10-30. SPDX 3.0 (2024-04-16, AI và Dataset profile): <https://github.com/spdx/spdx-3-model> — xác minh 2026-10-30. CISA + G7 Cybersecurity Working Group, *Software Bill of Materials for AI – Minimum Elements* (05/2026, tự nguyện, 7 cụm): <https://cyber.gouv.fr/en/publications/jointly-led-international-publications/software-bill-of-materials-sbom-for-artificial-intelligence/> — theo trang ANSSI và nguồn thứ cấp, chưa mở trang CISA gốc.
