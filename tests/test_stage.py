@@ -11,6 +11,7 @@ import stat
 import unicodedata
 import subprocess
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -859,6 +860,23 @@ class StageGuardTest(unittest.TestCase):
             "python3 scripts/xt.py stage init --adop? 3 --evidence x",
             "echo approve | xargs python3 scripts/xt.py stage",
             "cd scripts && python3 -m xt stage approve --sha 1234567",
+            # review #352 lượt 2: chuyển hướng giữa script và `stage` (cả số fd), stdin/thay chỗ, `-m` viết dính, `=` rỗng
+            "python3 scripts/xt.py 2>/dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py </dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py 2>&1 stage init --adopt 3 --evidence x",
+            "python3 scripts/xt.py --framework fw >>f stage approve --sha 1234567",
+            'python3 scripts/xt.py stage 2>/dev/null "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py stage 2>&1 `echo approve` --sha 1234567",
+            "echo approve | xargs -I{} python3 scripts/xt.py stage {} --sha 1234567",
+            "echo approve | xargs -I % python3 scripts/xt.py stage % --sha 1234567",
+            "echo stage approve --sha 1234567 | xargs python3 scripts/xt.py",
+            "find approve -maxdepth 0 -exec python3 scripts/xt.py stage {} --sha 1234567 ';'",
+            "cd scripts && python3 -mxt stage approve --sha 1234567",
+            "cd scripts && python3 -Bm xt stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework=<(true) stage approve --sha 1234567",
+            'uv run python3 scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            '"$XT" stage approve --sha 1234567',
+            'scripts/xt.py "$(echo stage)" approve --sha 1234567',
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(cmd), "deny")
@@ -876,6 +894,13 @@ class StageGuardTest(unittest.TestCase):
             'python3 scripts/xt.py stage init > "$LOG" 2> "$ERR"',
             'cat scripts/xt.py "$F"',
             "python3 scripts/xt.py stage --help",
+            "python3 scripts/xt.py stage",
+            'python3 scripts/xt.py loop record --task "$T" -- "$CMD"',
+            'python3 manage.py "$CMD" stage',
+            'python3 -m pytest -k "$K" stage',
+            "git diff origin/main -- scripts/xt.py stage",
+            'python3 scripts/xt.py stage init > "$LOG" 2>&1',
+            "cd scripts && python3 -m xt loop status",
             'ruff check scripts/*.py "$F"',
             "python3 scripts/xt.py loop status",
             "grep approve scripts/xt.py",
@@ -883,6 +908,26 @@ class StageGuardTest(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertNotEqual(self.decide(cmd), "deny")
+
+    def test_placeholder_and_feeders(self):
+        """Chuỗi thay chỗ (`find -exec {}`, `xargs -I %`) và lệnh con từ stdin là mờ — kiểm thẳng luật duyệt, không qua
+        luật `find`/`xargs` khác (review #352 lượt 2)."""
+        approves = self.g._approves_stage
+        self.assertTrue(approves(["find", "a", "-exec", "python3", "scripts/xt.py", "stage", "{}", ";"]))
+        self.assertTrue(approves(["xargs", "-I", "%", "python3", "scripts/xt.py", "stage", "%"]))
+        self.assertTrue(approves(["xargs", "--replace=@@", "python3", "scripts/xt.py", "stage", "@@"]))
+        self.assertTrue(approves(["xargs", "python3", "scripts/xt.py"]))
+        self.assertTrue(approves(["xargs", "python3", "scripts/xt.py", "stage"]))
+        self.assertFalse(approves(["xargs", "python3", "scripts/xt.py", "stage", "--help"]))
+        self.assertFalse(approves(["python3", "-I", "%", "scripts/xt.py", "stage", "status"]))  # `-I` của python
+        self.assertFalse(approves(["xargs", "grep", "-l", "x"]))
+
+    def test_many_opaque_tokens_linear(self):
+        """Nhiều token mờ không làm guard chạy bậc hai (review #352 lượt 2)."""
+        argv = ["python3", "x.py"] + ["$a"] * 80000
+        start = time.monotonic()
+        self.assertFalse(self.g._approves_stage(argv))
+        self.assertLess(time.monotonic() - start, 2.0)
 
     def test_handwrite_ledger_denied(self):
         self.assertEqual(self.g.classify_path(xt.STAGE_LEDGER), "evidence")

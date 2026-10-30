@@ -2655,53 +2655,70 @@ def _vague(tok: str) -> bool:
     return _opaque(tok) or any(c in tok for c in "*?[")
 
 
-def _xt_sub(rest: List[str]) -> Tuple[int, str]:
-    """(vị trí, lệnh con) của `xt.py` sau tuỳ chọn toàn cục (`--framework X`, cả viết tắt `--fr X`); cờ mờ hay giá trị
-    `--framework` mờ/thiếu (`$(`, `<(` cắt lệnh) → lệnh con mờ `$`."""
-    k = 0
-    while k < len(rest) and rest[k].startswith("-"):
-        if _vague(rest[k]):
+XT_MODULE_RE = re.compile(r"-[A-Za-z]*m(xt)?")  # `-m xt`, `-mxt`, `-Bm xt` (cờ ngắn ghép của python)
+STDIN_FEEDERS = ("xargs", "parallel")  # thêm đối số từ stdin vào lệnh
+
+
+def _xt_sub(n: List[str], i: int) -> Tuple[int, str]:
+    """(vị trí, lệnh con) của `xt.py` từ `n[i]`, sau tuỳ chọn toàn cục (`--framework X`, cả viết tắt `--fr X`); cờ mờ,
+    giá trị `--framework` mờ/thiếu (`$(`, `<(` cắt lệnh; `--framework=` rỗng) → lệnh con mờ `$`."""
+    k = i
+    while k < len(n) and n[k].startswith("-"):
+        if _vague(n[k]) or n[k].endswith("="):
             return k, "$"
-        if len(rest[k]) > 2 and "=" not in rest[k] and "--framework".startswith(rest[k]):
-            if k + 1 >= len(rest) or _vague(rest[k + 1]):
+        if len(n[k]) > 2 and "=" not in n[k] and "--framework".startswith(n[k]):
+            if k + 1 >= len(n) or _vague(n[k + 1]):
                 return k, "$"
             k += 2
         else:
             k += 1
-    return k, (rest[k] if k < len(rest) else "")
+    return k, (n[k] if k < len(n) else "")
 
 
-def _xt_script(n: List[str], k: int, runs: bool) -> bool:
-    """`n[k]` là script `xt.py`: theo tên (`-m xt`), hay đường mờ/glob (`"$XT"`, `x?.py`) của lệnh chạy script
-    (`runs`) mà lệnh con là `stage` — `deploy.sh "$APP" stage` không tính."""
-    t = n[k]
-    if posixpath.basename(t) == "xt.py" or (t == "xt" and n[k - 1 : k] == ["-m"]):
-        return True
-    return runs and _vague(t) and _xt_sub(n[k + 1 :])[1] == "stage"
+def _xt_named(n: List[str], k: int) -> bool:
+    """`n[k]` gọi `xt.py` theo tên: đường `…/xt.py`, `-m xt`, `-mxt`, `-Bm xt`."""
+    m = XT_MODULE_RE.fullmatch(n[k])
+    module = n[k] == "xt" and k > 0 and bool(XT_MODULE_RE.fullmatch(n[k - 1]))
+    return posixpath.basename(n[k]) == "xt.py" or bool(m and m.group(1)) or module
 
 
 def _no_redirects(args: List[str]) -> List[str]:
-    """Bỏ chuyển hướng và đích của nó (`> "$LOG"` không phải đối số của lệnh)."""
+    """Bỏ chuyển hướng, đích và số fd đứng trước nó (`2>/dev/null`, `> "$LOG"` không phải đối số của lệnh)."""
     out: List[str] = []
     skip = False
-    for t in args:
+    for i, t in enumerate(args):
         if skip:
             skip = False
         elif _is_redirect(t):
             skip = True
-        else:
+        elif not (t.isdigit() and i + 1 < len(args) and _is_redirect(args[i + 1])):
             out.append(t)
     return out
 
 
-def _approves_rest(rest: List[str], runs: bool) -> bool:
-    k, sub = _xt_sub(rest)
-    if sub != "stage":  # lệnh con mờ chỉ tính khi script được chạy (`cat scripts/xt.py "$F"` thì không)
-        return runs and _vague(sub)
-    tail = _no_redirects(rest[k + 1 :])
+def _placeholders(argv: List[str], feeds: bool) -> Set[str]:
+    """Chuỗi thay chỗ mà `find -exec`/`parallel` (`{}`) hay `xargs -I %`/`--replace=` điền lúc chạy."""
+    out = {"{}"}
+    for i, t in enumerate(argv[:-1] if feeds else []):
+        out |= {argv[i + 1]} if t == "-I" else {t[2:]} if t.startswith("-I") else set()
+        out |= {t.partition("=")[2]} if t.startswith("--replace=") else set()
+    return {p for p in out if p}
+
+
+def _approves_at(n: List[str], k: int, runs: bool, feeds: bool) -> bool:
+    """`n[k]` là script `xt.py` (theo tên, hay đường mờ của lệnh chạy script mà lệnh con là `stage`) và lệnh có thể là
+    `stage approve`/`init --adopt`. Lệnh con mờ chỉ tính khi script được chạy (`runs` — `cat scripts/xt.py "$F"` thì
+    không); đường mờ cũng vậy (`deploy.sh "$APP" stage "$TAG"` thì không)."""
+    named = _xt_named(n, k)
+    j, sub = _xt_sub(n, k + 1)
+    if not (named or (runs and _vague(n[k]) and sub == "stage")):
+        return False
+    if sub != "stage":
+        return runs and (_vague(sub) or (feeds and not sub))
+    tail = n[j + 1 :]
     act = next((t for t in tail if not t.startswith("-")), "")
-    if not act:  # lệnh con từ stdin (`xargs … stage`) hay sau `--`; `--help` thì thôi
-        return not {"-h", "--help"} & set(tail)
+    if not act:  # lệnh con từ stdin (`xargs … stage`); không thì argparse đòi lệnh con
+        return feeds and not {"-h", "--help"} & set(tail)
     return (
         "approve" in tail or _vague(act) or ("init" in tail and any(t.startswith("--adopt") or _vague(t) for t in tail))
     )
@@ -2709,11 +2726,17 @@ def _approves_rest(rest: List[str], runs: bool) -> bool:
 
 def _approves_stage(argv: List[str]) -> bool:
     """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ) ở MỌI vị
-    trí script (`perf sample -- python3 xt.py stage approve`); lệnh con, tuỳ chọn `init` hay đường script mờ có thể là
-    chúng nên cũng tính (`stage "$(echo approve)"` — AUD-SEC-155)."""
-    n = normalize(argv)
-    runs = bool(n) and (bool(PYTHON_RE.fullmatch(n[0])) or posixpath.basename(n[0]) == "xt.py" or _vague(n[0]))
-    return any(_approves_rest(n[k + 1 :], runs) for k in range(len(n)) if _xt_script(n, k, runs))
+    trí script (`perf sample -- python3 xt.py stage approve`); lệnh con, tuỳ chọn `init`, đường script mờ hay chuỗi
+    thay chỗ có thể là chúng nên cũng tính (`stage "$(echo approve)"`, `xargs -I{} … stage {}` — AUD-SEC-155)."""
+    feeds = any(posixpath.basename(t) in STDIN_FEEDERS for t in argv)
+    ph = _placeholders(argv, feeds)
+    n = [("$" if any(p in t for p in ph) else t) for t in normalize(_no_redirects(argv))]
+    py = False
+    for k, t in enumerate(n):
+        if _approves_at(n, k, k == 0 or py, feeds):
+            return True
+        py = py or bool(PYTHON_RE.fullmatch(posixpath.basename(t)))
+    return False
 
 
 def _forges_review(argv: List[str]) -> bool:

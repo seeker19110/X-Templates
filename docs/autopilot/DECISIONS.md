@@ -1846,3 +1846,10 @@
 - Chọn: 4 PR 🟠 theo thứ tự SEC-155 → SEC-158 → SEC-156/157 → XFEAT-030, test đỏ trước; 🟢 gom gói cuối pha
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn trước: SEC-155 là lỗ cổng duyệt của người nên đi đầu; PR nhỏ giữ đường lùi và review 2 lần/sửa 1 lần khả thi (ADR-0059); gộp làm review lớn, dễ hết lượt
 - Đường lùi: Revert từng PR squash; sổ giữ dòng mở
+
+### D-263 · 2026-10-30T17:22:14+00:00 · PR #352: review lượt 2 còn 🔴 (chuyển hướng giữa xt.py và stage lọt — hồi quy) — ghi nợ hay sửa thêm?
+
+- Phương án: (1) Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước · (2) Revert lượt sửa về 82302d7 rồi ghi nợ · (3) Đóng PR, làm lại từ đầu
+- Chọn: Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); sửa hết giữ tiến bộ của hai lượt, hướng sửa F1 đã thử trong scratch không chặn oan; revert vẫn để lại 🟠 lượt 1
+- Đường lùi: Revert squash PR; guard về bản main

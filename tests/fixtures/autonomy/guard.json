@@ -6408,6 +6408,110 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec155-stage-redirect-between",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py 2>/dev/null stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-redirect-tail",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py stage 2>&1 \"$(echo approve)\" --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-xargs-replace",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "echo approve | xargs -I{} python3 scripts/xt.py stage {} --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-module-joined",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "cd scripts && python3 -mxt stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-framework-eq-empty",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py --framework=<(true) stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-uv-run-opaque",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "uv run python3 scripts/xt.py \"$(echo stage)\" approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-manage-stage-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 manage.py \"$CMD\" stage"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec155-loop-record-opaque-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py loop record --task \"$T\" -- \"$CMD\""
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }
