@@ -474,7 +474,6 @@ class ReviewMarkerForgeTest(unittest.TestCase):
             Path(d, "y.md").write_text("thường\n", encoding="utf-8")
             for cmd in (
                 "gh pr comment 5 -F deep.md",
-                "gh pr comment 5 -F deep.json",
                 "git push --force origin main; false && gh pr comment 1 -F deep.json",
                 'gh pr comment 5 --body "$(cat -- b.md)"',
                 "gh pr comment 5 --body \"$(cat 'b.md')\"",
@@ -499,6 +498,11 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                     self.assertEqual(final(cmd, root), "")
         ledger = 'head -20 docs/ops/AUDIT-STATUS.md; gh pr comment 5 --body "Sửa ở $(git rev-parse --short HEAD)"'
         self.assertEqual(final(ledger), "")
+        with tempfile.TemporaryDirectory() as d:  # giới hạn đệ quy của `json` khác theo bản Python — ép lỗi bằng mock
+            Path(d, "j.json").write_text("[]", encoding="utf-8")
+            with mock.patch.object(guard.json, "loads", side_effect=RecursionError("sâu")):
+                self.assertTrue(guard._file_has_mark("j.json", d))
+                self.assertEqual(final("gh pr comment 5 -F j.json", Path(d)), "deny")
         with mock.patch.object(guard, "_body_sources", side_effect=RuntimeError("hỏng")):
             self.assertEqual(final("gh pr comment 5 -F n.md"), "deny")  # lỗi khi quét → coi như có dấu
 
