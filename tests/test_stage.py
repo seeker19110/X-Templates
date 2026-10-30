@@ -717,8 +717,8 @@ class StageLockTest(TmpRepoCase):
 
     def test_release_hotfix_exit_end_to_end(self):
         """Review #341: làm đúng lời khuyên trên git thật — (a) bản phát hành ở giai đoạn 2: nhánh vá từ tag mang sổ C-001/2
-        → PASS; (b) dự án `adopt` có bản chạy từ trước sổ: nhánh vá từ tag không có sổ → FAIL (sổ vắng mà git có), đặt
-        lên đó bản sổ trước `new-cycle` → PASS."""
+        → PASS; (b) dự án `adopt` có bản chạy từ trước sổ: nhánh vá từ tag không có sổ → FAIL (sổ vắng mà git có) — lời
+        báo không hướng dẫn đặt sổ, ca này để người theo đặc tả §8 (D-256)."""
 
         def commit(msg):
             self.git("add", "-A")
@@ -734,7 +734,7 @@ class StageLockTest(TmpRepoCase):
         self.git("tag", "v1")
         done = ledger([*adopt, *approve(2), *approve(3)], stage=3, status="completed")
         self.write_ledger(done)
-        before = commit("C-001 xong")
+        commit("C-001 xong")
         self.write_ledger(ledger([*done["history"], ev("init", 1, "C-002")], cycle="C-002"))
         commit("C-002 MVP")
         self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")
@@ -742,8 +742,6 @@ class StageLockTest(TmpRepoCase):
         self.assertEqual(xt._release_stage(self.repo)["result"], "PASS")
         self.git("switch", "-q", "-c", "hotfix-v0", "v0")  # (b)
         self.assertEqual(xt._release_stage(self.repo)["result"], "FAIL")
-        self.git("checkout", before, "--", xt.STAGE_LEDGER)  # "đặt lên đó sổ C-001 giai đoạn ≥ 2 (bản trước new-cycle)"
-        self.assertEqual(xt._release_stage(self.repo)["result"], "PASS")
 
     def test_release_row(self):
         row = xt._release_stage(self.repo)
@@ -759,7 +757,7 @@ class StageLockTest(TmpRepoCase):
         row = xt._release_stage(self.repo)
         self.assertEqual(row["result"], "FAIL")
         self.assertIn("sự cố bản production C-001: nhánh vá cắt từ bản đang chạy rồi `release-check`", row["evidence"])
-        self.assertIn("thì người đặt sổ C-001 bản trước `stage new-cycle` (`git log --all --", row["evidence"])
+        self.assertNotIn("đặt sổ", row["evidence"])  # máy không biết bản đang chạy — không hướng dẫn đặt sổ (D-256)
         self.assertIn("không phát hành MVP C-002", row["evidence"])
         self.assertIn(f"nghiệm thu C-001: `{rel}` (tham chiếu)", row["evidence"])  # đủ 40 hex (review #341)
         rel2 = "c" * 40  # nhiều chu kỳ: nêu chu kỳ liền trước
