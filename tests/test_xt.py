@@ -1861,6 +1861,12 @@ class AuditCheckTest(GitRepoMixin, unittest.TestCase):
         errs = self.check(audit_status_text(findings=[debt]), strict=True)
         self.assertEqual(errs, ["AUD-SEC-002: 🟢 nợ review còn mở (--strict)"])  # ADR-0059: nợ review trả cuối pha
         self.assertEqual(self.check(audit_status_text(findings=[debt])), [])
+        paid = "AUD-SEC-002 | 🟢 | đã sửa | x | đo được: a | `t` | nợ-review: #12"  # thẻ nợ không phải PR sửa (review #345)
+        self.assertEqual(
+            self.check(audit_status_text(findings=[paid])),
+            ["AUD-SEC-002: `đã sửa` phải ghi PR (#N) hoặc SHA ở Ghi chú"],
+        )
+        self.assertEqual(self.check(audit_status_text(findings=[paid + " · đã sửa ở #13"])), [])
 
     def test_audit_check_sha_must_be_ancestor(self):
         self.init_repo()

@@ -833,6 +833,37 @@
     "action": "merge"
    },
    "note": "pr debt đã ghi nợ phát hiện còn lại vào sổ audit và đăng dấu debt ở đúng head: review hợp lệ, merge ghim head"
+  },
+  {
+   "id": "review-adr0059-inconclusive-no-debt",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "ADR-0059",
+    "ADR-0029"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "inconclusive": true,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "rethink"
+   },
+   "note": "review #345: lượt 2 chưa kết luận — chưa biết còn 🔴 nên không ghi nợ được, về rethink (không merge bản sửa chưa ai rà)"
   }
  ]
 }

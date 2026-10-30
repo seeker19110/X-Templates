@@ -4109,7 +4109,8 @@ def _audit_finding_closure_errors(r: Dict[str, str], where: str, today: _dt.date
     """Trạng thái kết thúc phải kèm ghi chú: `đã sửa` có PR/SHA · `chấp nhận` có chủ + hạn chưa quá · `bác bỏ` có lý do."""
     errors: List[str] = []
     st, note = r.get("Trạng thái", ""), r.get("Ghi chú", "")
-    if st == "đã sửa" and not re.search(r"#\d+|\b[0-9a-f]{7,40}\b", note):
+    fixed_by = REVIEW_DEBT_RE.sub("", note)  # thẻ nợ `nợ-review: #N` không phải PR sửa (review #345)
+    if st == "đã sửa" and not re.search(r"#\d+|\b[0-9a-f]{7,40}\b", fixed_by):
         errors.append(f"{where}: `đã sửa` phải ghi PR (#N) hoặc SHA ở Ghi chú")
     if st == "chấp nhận":
         owner = re.search(r"chủ:\s*\S", note)
@@ -10937,14 +10938,35 @@ def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int
 
 
 def _pr_next_review(
-    d: Dict[str, Any], auto_merge: bool, gate: Dict[str, Any], act: PrAct, disable: str, rounds: int = 0
+    d: Dict[str, Any],
+    auto_merge: bool,
+    gate: Dict[str, Any],
+    act: PrAct,
+    disable: str,
+    rounds: int = 0,
+    unsure: bool = False,
+    identity: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
-    review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix`."""
+    review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
+    luận (`unsure`: không biết còn 🔴 hay không — ADR-0029) hoặc dấu chỉ tính của danh tính reviewer (`identity`: tác giả
+    không đăng được dấu `debt`): `rethink` như ADR-0053."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
     if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS:
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
+        if unsure or identity:
+            why = (
+                "review chưa sạch cuối chưa kết luận — chưa biết còn 🔴, không ghi nợ được (ADR-0029/0059)"
+                if unsure
+                else "dấu review chỉ tính của danh tính reviewer (`review_identity`) — tác giả không đăng được dấu `debt`"
+            )
+            return act(
+                "rethink",
+                f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}) — {why}",
+                f"xt.py loop decide --question 'PR #{n}: …' (review khác, tách/thu hẹp PR) → xt.py pr rethink --pr {n}"
+                " --decision D-NNN",
+            )
         return act(
             "debt",
             f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: review 2 lần, sửa 1 lần — ADR-0059) — không sửa nữa,"
@@ -11088,6 +11110,7 @@ def with_published(rec: Dict[str, Any], marks: object, published_only: bool = Fa
         **rec,
         "reviews": sorted(pub, key=lambda r: _iso_key(r.get("at", ""))),
         "local_reviews": sorted(local, key=lambda r: _iso_key(r.get("at", ""))),
+        "published_only": published_only,
     }
 
 
@@ -11177,7 +11200,8 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
 
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
-    republish-review · review · rethink (quá ngân sách review — ADR-0053) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
+    republish-review · review · debt (hết lượt review: ghi nợ — ADR-0059) · rethink (hết lượt mà review cuối chưa kết luận
+    hoặc có `review_identity` — ADR-0053) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -11205,7 +11229,10 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
             d, auto_merge, rec, gate["state"] in ("missing", "blocking") and not deferred, act, disable
         )
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
-        early = _pr_next_review(d, auto_merge, gate, act, disable, review_rounds(reviews, rec.get("rethinks")))
+        unclean = [r for r in reviews if not r.get("clean")]
+        unsure = bool(unclean) and bool(unclean[-1].get("inconclusive"))
+        rounds = review_rounds(reviews, rec.get("rethinks"))
+        early = _pr_next_review(d, auto_merge, gate, act, disable, rounds, unsure, bool(rec.get("published_only")))
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -11449,8 +11476,8 @@ def _rethink_problem(
 
 
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
-    """`pr rethink` (ADR-0053): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `rethink` và D-NNN (đổi
-    chiến lược) qua `_rethink_problem`; ghi `rethinks[]` vào sổ review cục bộ."""
+    """`pr rethink` (ADR-0053/0059): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `debt` (còn 🔴:
+    thêm một lần sửa hết) hoặc `rethink`, và D-NNN (đổi chiến lược) qua `_rethink_problem`; ghi `rethinks[]` vào sổ."""
     try:
         pr = load_pr(args)
     except PrInputError as exc:
@@ -11458,8 +11485,10 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         return 2
     d, data, rec = _pr_next_state(pr, base)
     key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec)["action"]
-    if action != "debt":  # ADR-0059: hết lượt review → `debt`; còn 🔴 (không ghi nợ được) thì đổi chiến lược ở đây
-        print(f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt` — làm bước đó trước", file=sys.stderr)
+    if action not in ("debt", "rethink"):  # ADR-0059: hết lượt → `debt` (còn 🔴 thì thêm lần sửa ở đây) hoặc `rethink`
+        print(
+            f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt`/`rethink` — làm bước đó trước", file=sys.stderr
+        )
         return 2
     local = _pr_record(data, key)
     old = local.get("rethinks")
@@ -11476,23 +11505,30 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
-def _debt_problem(base: Path, key: str, head: str, rec: Dict[str, Any], ids: List[str]) -> Optional[str]:
-    """Lý do `pr debt` từ chối (ADR-0059): sửa 1 lần — sau review chưa sạch cuối chỉ sổ audit đổi (commit không phải merge);
-    mỗi ID là dòng `mở`, không 🔴, Ghi chú `nợ-review: #N` của đúng PR, trong sổ ở head."""
+def _debt_problem(
+    base: Path, key: str, head: str, rec: Dict[str, Any], ids: List[str], target: str = "main"
+) -> Optional[str]:
+    """Lý do `pr debt` từ chối (ADR-0059): sửa 1 lần — cây ở head khác cây ở review chưa sạch cuối CHỈ ở sổ audit, hoặc ở
+    file mà head giống hệt nhánh đích `origin/<target>` (cập nhật nhánh); so cây, không đổi tên (`--no-renames`) — merge
+    sửa thêm mã hay `git mv` mã thành sổ không lọt (review #345); mỗi ID là dòng `mở`, không 🔴, Ghi chú `nợ-review: #N`
+    của đúng PR, trong sổ ở head."""
     if not ids or any(not REQ_ID_RE.fullmatch(i) for i in ids):
         return "--findings cần ≥ 1 ID sổ audit (AUD-…), cách nhau bằng dấu phẩy"
-    last = [r for r in rec["reviews"] if not r.get("clean")][-1]
-    log = _git(base, "log", "--no-merges", "--name-only", "--format=", f"{last.get('head')}..{head}")
+    last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))  # `pr next` = debt: blocking kết luận
+    since = _git(base, "diff", "--no-renames", "--name-only", last, head)
+    other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
     show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
-    if log.returncode or show.returncode:
+    bad = next((r for r in (since, other, show) if r.returncode), None)
+    if bad is not None:
         return (
-            f"không đọc được commit {str(last.get('head'))[:7]}..{head[:7]} hoặc sổ ở head ({_one_line(log.stderr or show.stderr)})"
-            " — fetch nhánh PR rồi chạy lại"
+            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head ({_one_line(bad.stderr)})"
+            " — fetch nhánh PR và nhánh đích rồi chạy lại"
         )
-    extra = sorted({f for f in log.stdout.splitlines() if f} - {AUDIT_STATUS_DEFAULT})
+    mine = set(other.stdout.splitlines())  # file head khác nhánh đích: thay đổi của PR, không phải cập nhật nhánh
+    extra = sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT})
     if extra:
         return (
-            f"sau review cuối ở {str(last.get('head'))[:7]} đã đổi {', '.join(extra[:5])} — review 2 lần, sửa 1 lần:"
+            f"sau review cuối ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 2 lần, sửa 1 lần:"
             f" chỉ commit sổ {AUDIT_STATUS_DEFAULT}; sửa thêm thì cần lượt review mới (`pr rethink`)"
         )
     rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
@@ -11528,7 +11564,7 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         problem = (
             f"`pr next` của PR #{key} là `{action}`, không phải `debt` — làm bước đó trước"
             if action != "debt"
-            else _debt_problem(base, key, head, rec, ids)
+            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"))
         )
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
@@ -11616,7 +11652,7 @@ def _publish_review(
     if r.returncode != 0:
         print(
             f"⚠ chưa đăng được review lên PR #{key} ({_one_line(r.stderr)}) — pr-steward không thấy review này; "
-            f"chạy lại `xt.py pr reviewed …` khi có gh, hoặc comment tay: {body!r}",
+            f"chạy lại `xt.py pr {'debt' if debt else 'reviewed'} …` khi có gh (comment tay mang dấu bị guard chặn)",
             file=sys.stderr,
         )
         return 3

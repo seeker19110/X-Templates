@@ -1805,6 +1805,15 @@ class PrNextTest(unittest.TestCase):
         self.assertIn("Còn 🔴: không ghi nợ — thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢)", r["do"])
         debt_head = {"head": self.H, "clean": True, "debt": True, "at": "2026-10-27T03:00:00Z"}
         self.assertEqual(self.act(rec={"reviews": [b1, b2, debt_head]}, verdict="merge")["action"], "merge")
+        # review #345 🔴: review chưa sạch cuối chưa kết luận → chưa biết còn 🔴, không ghi nợ; danh tính reviewer → tác
+        # giả không đăng được dấu `debt`: cả hai về `rethink` (ADR-0053)
+        unsure = self.act(rec={"reviews": [b1, {**b2, "inconclusive": True}]})
+        self.assertEqual(unsure["action"], "rethink")
+        self.assertIn("chưa kết luận — chưa biết còn 🔴", unsure["why"])
+        self.assertIn("xt.py pr rethink --pr 7 --decision D-NNN", unsure["do"])
+        ident = self.act(rec={"reviews": [b1, b2], "published_only": True})
+        self.assertEqual(ident["action"], "rethink")
+        self.assertIn("`review_identity`", ident["why"])
         b2_old = {**b2, "head": self.H2}
         self.assertEqual(self.act(rec={"reviews": [b1, b2_old]})["action"], "debt")  # thay review lần ba
         self.assertEqual(self.act(True, rec={"reviews": [b1, b2]})["action"], "disable-auto-merge")
@@ -1909,7 +1918,7 @@ class PrNextCliTest(unittest.TestCase):
         `rethinks[]` → `pr next` về `fix`."""
         rc, _, err = self.rethink("D-001")
         self.assertEqual(rc, 2)
-        self.assertIn("`pr next` của PR #7 là `review`, không phải `debt` — làm bước đó trước", err)
+        self.assertIn("`pr next` của PR #7 là `review`, không phải `debt`/`rethink` — làm bước đó trước", err)
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         r = json.loads(self.nxt(self.big, "--json")[1])
@@ -1945,7 +1954,7 @@ class PrNextCliTest(unittest.TestCase):
         bad_at = {**self.big, "xtReviews": [{"head": self.head, "clean": False}, {"head": self.head, "clean": False}]}
         self.assertIn("review đã đăng của PR #7 thiếu/hỏng mốc `at`", self.rethink("D-005", bad_at)[2])  # chặt
         auto = {**self.big, "autoMergeRequest": {"enabledAt": "x"}}
-        self.assertIn("là `disable-auto-merge`, không phải `debt`", self.rethink("D-005", auto)[2])
+        self.assertIn("là `disable-auto-merge`, không phải `debt`/`rethink`", self.rethink("D-005", auto)[2])
         rc, out, _ = self.rethink("D-005")
         self.assertEqual(
             (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-005 — chạy lại `xt.py pr next --pr 7`\n")
@@ -1954,7 +1963,7 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
-        self.assertIn("là `fix`, không phải `debt`", err)
+        self.assertIn("là `fix`, không phải `debt`/`rethink`", err)
         self.assertEqual(run_main("pr", "rethink", "--pr-json", "-", "--decision", "D-005", stdin="[]")[0], 2)
 
     def test_rethink_decision_must_follow_every_unclean_review(self):
@@ -2044,7 +2053,7 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện", err)
         lost = {**p, "xtReviews": [r1, {**r2, "head": "e" * 40}]}
-        self.assertIn("không đọc được commit eeeeeee..", debt("AUD-SEC-001", lost)[2])
+        self.assertIn("không đọc được cây eeeeeee", debt("AUD-SEC-001", lost)[2])
         fixed = self.commit({"src/a.py": "x = 2\n"})  # sửa lần hai sau review cuối → không ghi nợ được
         rc, _, err = debt("AUD-SEC-001", {**p, "headRefOid": fixed})
         self.assertEqual(rc, 2)
@@ -2069,6 +2078,50 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(run_main("pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", stdin="[]")[0], 2)
         self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": "AUD-SEC-001"}))
         self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": [1]}))
+
+    def git(self, *args: str) -> str:
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        return subprocess.run([*git, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_debt_tree_check_base_update_merge_and_rename(self):
+        """Review #345 🟠: "chỉ sổ đổi sau review cuối" so CÂY (`--no-renames`), không đếm commit — cập nhật nhánh đích
+        vào PR (file giống hệt `origin/main`) được nhận; merge sửa thêm mã, `git mv` mã thành sổ bị từ chối."""
+        self.commit({"src/authz.py": "ok = 1\n"})
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")  # nhánh đích có authz.py
+        self.git("checkout", "-q", "-b", "pr")
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
+        self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
+        self.git("checkout", "-q", "-b", "trunk", "origin/main")  # nhánh đích tiến thêm, PR cập nhật nhánh
+        self.git("update-ref", "refs/remotes/origin/main", self.commit({"src/b.py": "y = 1\n"}))
+        self.git("checkout", "-q", "pr")
+        self.git("merge", "-q", "--no-edit", "origin/main")
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
+
+        def debt(head: str) -> tuple[int, str, str]:
+            p = {**self.big, "headRefOid": head, "baseRefName": "main", "xtReviews": [r1, r2]}
+            return run_main(
+                "pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", "--no-publish", stdin=json.dumps(p)
+            )
+
+        self.assertEqual(debt(self.git("rev-parse", "HEAD"))[0], 0)  # src/b.py giống hệt nhánh đích
+        (self.base / "src/b.py").write_text("y = 2\n", encoding="utf-8")  # merge "ác": sửa thêm mã trong commit merge
+        self.git("commit", "-qam", "merge sửa thêm")
+        rc, _, err = debt(self.git("rev-parse", "HEAD"))
+        self.assertEqual(rc, 2)
+        self.assertIn("đã đổi src/b.py", err)
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.git("rm", "-q", xt.AUDIT_STATUS_DEFAULT)
+        (self.base / xt.AUDIT_STATUS_DEFAULT).parent.mkdir(parents=True, exist_ok=True)
+        self.git(
+            "mv", "src/authz.py", xt.AUDIT_STATUS_DEFAULT
+        )  # đổi tên mã thành sổ: xoá authz.py bị che nếu theo rename
+        (self.base / xt.AUDIT_STATUS_DEFAULT).write_text(ledger, encoding="utf-8")
+        self.git("commit", "-qam", "mv")
+        rc, _, err = debt(self.git("rev-parse", "HEAD"))
+        self.assertEqual(rc, 2)
+        self.assertIn("đã đổi src/authz.py", err)
 
     def test_reviewed_rerun_is_idempotent(self):
         """AUD-HAR-071 (BASE-DATA-008): chạy lại `pr reviewed` cùng kết quả (thông báo lỗi khuyên chạy lại) không thêm bản
@@ -2113,8 +2166,10 @@ class PrNextCliTest(unittest.TestCase):
         published = {**pinned, "xtReviews": [{"head": self.head, "clean": True, "at": "2026-10-19T01:00:00Z"}]}
         self.assertEqual(json.loads(self.nxt(published, "--json")[1])["action"], "merge")
         rec = {"reviews": [{"head": self.head, "clean": True, "at": "1"}]}
-        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": []})
-        self.assertEqual(xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"]})
+        self.assertEqual(xt.with_published(rec, [], True), {"reviews": [], "local_reviews": [], "published_only": True})
+        self.assertEqual(
+            xt.with_published(rec, [], False), {"reviews": [], "local_reviews": rec["reviews"], "published_only": False}
+        )
 
     def test_review_identity_edited_mark_is_ignored(self):
         def by(updated: str) -> dict:
