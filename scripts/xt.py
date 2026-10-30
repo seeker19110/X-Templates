@@ -5375,6 +5375,12 @@ def _risky_paths(pr: Dict[str, Any]) -> List[str]:
     return [str(f.get("path", "")) for f in files] + [str(f["previous"]) for f in files if f.get("previous")]
 
 
+def is_release_pr(pr: Dict[str, Any]) -> bool:
+    """PR cắt bản: đổi/đổi tên/xoá `VERSION` ở gốc repo, nhắm `main` — như trigger `push` của `release-tag.yml`. Một
+    vị từ cho `merge-check` (không ghi nợ review — ADR-0059 §6) và steward (dispatch tag)."""
+    return str(pr.get("baseRefName") or "main") == "main" and "VERSION" in _risky_paths(pr)
+
+
 def merge_hard_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
     """Lý do thuộc ngoại lệ cứng (rỗng = không): nhãn `HARD_RISK_LABELS`, đường dẫn bí mật/auth/thanh toán/mật mã,
     `merge_risk_paths` của dự án (chủ dự án tự khai là nhạy cảm)."""
@@ -5664,6 +5670,8 @@ def merge_decision(
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "base_merge_of": [str(x) for x in pr.get("baseMergeOf") or [] if isinstance(x, str)],
+        # PR cắt bản (đổi `VERSION` gốc — tag gắn lúc merge): không ghi nợ review (ADR-0059 §6, D-259)
+        "release": is_release_pr(pr),
         "hard": hard,  # ngoại lệ cứng: máy không merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "risk_labels": _risk_labels(
@@ -10910,7 +10918,8 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
 
 
 # Ngân sách review mỗi PR (ADR-0053 → ADR-0059, D-257): review 2 lần, sửa 1 lần — một lượt toàn PR + một lượt delta; quá
-# trần → `debt` (ghi nợ phát hiện còn lại, tiếp tục; 🔴 → `pr rethink`), không review lần ba.
+# trần → `debt` (ghi nợ phát hiện còn lại, tiếp tục; 🔴 → `pr rethink`), không review lần ba — trừ PR cắt bản: `rethink`,
+# sửa hết, review lại tới khi sạch (ADR-0059 §6).
 REVIEW_ROUNDS = 2
 
 
@@ -10985,17 +10994,20 @@ def _pr_next_review(
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
     review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
     luận (`unsure`: không biết còn 🔴 hay không — ADR-0029) hoặc dấu chỉ tính của danh tính reviewer (`identity`: tác giả
-    không đăng được dấu `debt`): `rethink` như ADR-0053. `fixed` = trong ngân sách có review đã kết luận ở ≥ 2 head (đã có
+    không đăng được dấu `debt`) hoặc PR cắt bản (`release`, ADR-0059 §6): `rethink` như ADR-0053. `fixed` = trong ngân sách có review đã kết luận ở ≥ 2 head (đã có
     một lần sửa được rà); chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131)."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
     if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and (unsure or identity or fixed):
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
-        if unsure or identity:
+        if unsure or identity or d.get("release"):
             why = (
                 "review chưa sạch cuối chưa kết luận — chưa biết còn 🔴, không ghi nợ được (ADR-0029/0059)"
                 if unsure
                 else "dấu review chỉ tính của danh tính reviewer (`review_identity`) — tác giả không đăng được dấu `debt`"
+                if identity
+                else "PR cắt bản (đổi `VERSION`): không ghi nợ — tag gắn lúc merge, phát hành mang nợ (ADR-0059 §6);"
+                " thêm một lần sửa HẾT phát hiện"
             )
             return act(
                 "rethink",
@@ -11237,7 +11249,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
     GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
     republish-review · review · debt (hết lượt review: ghi nợ — ADR-0059) · rethink (hết lượt mà review cuối chưa kết luận
-    hoặc có `review_identity` — ADR-0053) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
+    hoặc có `review_identity` — ADR-0053; PR cắt bản — ADR-0059 §6) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
@@ -11548,8 +11560,11 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         return 2
     entry = {"decision": args.decision, "at": now_iso()}
     head = str(d.get("head", ""))
-    if action == "debt":  # còn 🔴 mà cây chưa đổi ngoài sổ/cập nhật nhánh → lần sửa chưa push (`_rethink_pending`)
-        last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))
+    # còn 🔴 (hay PR cắt bản — ADR-0059 §6) mà cây chưa đổi ngoài sổ/cập nhật nhánh → lần sửa chưa push (`_rethink_pending`)
+    unclean = [r for r in rec["reviews"] if not r.get("clean")]
+    # review cuối chưa kết luận: không có phát hiện để sửa → không đánh dấu, `pr next` về `review` (review #349)
+    if (action == "debt" or (action == "rethink" and d.get("release"))) and not unclean[-1].get("inconclusive"):
+        last = str(unclean[-1].get("head"))
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
             entry["head"] = head
@@ -11836,7 +11851,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in steward]
     target = str(pr.get("baseRefName") or "main")
     # như trigger `push` của release-tag.yml: chỉ nhánh `main` (nhánh khác: job bị bỏ qua, bản cũ thiếu input → 422)
-    tag = target == "main" and "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()
+    tag = is_release_pr(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()
     return _steward_apply(out, d, repo, cmds if apply else [], target, tag)
 
 
