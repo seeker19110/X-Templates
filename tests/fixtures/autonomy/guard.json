@@ -6512,6 +6512,110 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec155-stage-fd-name",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py {fd}>/dev/null stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-operator-arg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py --framework '>' stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-uv-empty",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "uv run scripts/xt.py $EMPTY stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-parallel-sep",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "parallel python3 scripts/xt.py ::: stage ::: approve ::: --sha ::: 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-procsub-target",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py > >(cat) stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-xargs-i-joined",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "echo approve | xargs -iQ python3 scripts/xt.py stage Q --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-module-pkg",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 -m scripts.xt stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-grep-xt-opaque-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "grep -n stage scripts/xt.py \"$F\""
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }

@@ -1853,3 +1853,17 @@
 - Chọn: Thêm một lần sửa hết F1–F6 (🔴 + 🟠 + 🟢), test đỏ trước
 - Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); sửa hết giữ tiến bộ của hai lượt, hướng sửa F1 đã thử trong scratch không chặn oan; revert vẫn để lại 🟠 lượt 1
 - Đường lùi: Revert squash PR; guard về bản main
+
+### D-264 · 2026-10-30T18:22:01+00:00 · PR #352: review lượt 3 còn 3 🔴 (hồi quy so với main: fd {tên}, đối số giống toán tử, runs sai, parallel :::) — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + chỉ agent_session và vài dạng mờ đơn giản, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới (không bao giờ yếu hơn main) + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc (reviewer đã thử: fuzz 0 hồi quy); vẫn giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main
+
+### D-265 · 2026-10-30T18:22:18+00:00 · PR #352: review lượt 3 còn 3 🔴 hồi quy so với main — làm gì? (thay D-264, ghi trùng giây với dấu review)
+
+- Phương án: (1) Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4 · (2) Thu hẹp PR về luật main + agent_session, ghi nợ phần còn lại · (3) Revert guard về main, chỉ giữ agent_session
+- Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4
+- Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc; giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
+- Đường lùi: Revert squash PR; guard về bản main

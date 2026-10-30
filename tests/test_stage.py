@@ -877,6 +877,26 @@ class StageGuardTest(unittest.TestCase):
             'uv run python3 scripts/xt.py "$(echo stage)" approve --sha 1234567',
             '"$XT" stage approve --sha 1234567',
             'scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            # review #352 lượt 3: fd `{tên}`, đối số giống toán tử, trình chạy không phải python, `:::`, đích chuyển
+            # hướng bị cắt, thay chỗ `-iQ`/`-0I`/`{.}`, `-m scripts.xt`, `-I%`, `python3 -B`
+            "python3 scripts/xt.py {fd}>/dev/null stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework '>' stage approve --sha 1234567",
+            "python3 scripts/xt.py --framework 2 >/dev/null stage approve --sha 1234567",
+            'python3 scripts/xt.py stage {fd}>/dev/null "$(echo approve)" --sha 1234567',
+            "uv run scripts/xt.py $EMPTY stage approve --sha 1234567",
+            "echo e | xargs -I e uv run scripts/xt.py stage approve --sha 1234567",
+            "parallel python3 scripts/xt.py ::: stage ::: approve ::: --sha ::: 1234567",
+            "python3 scripts/xt.py > >(cat) stage approve --sha 1234567",
+            "python3 scripts/xt.py 2>$(mktemp) stage approve --sha 1234567",
+            "echo approve | xargs -iQ python3 scripts/xt.py stage Q --sha 1234567",
+            "echo approve | xargs -rI Q python3 scripts/xt.py stage Q --sha 1234567",
+            "printf approve | xargs -0I Q python3 scripts/xt.py stage Q --sha 1234567",
+            "echo approve | parallel python3 scripts/xt.py stage {.} --sha 1234567",
+            "python3 -m scripts.xt stage approve --sha 1234567",
+            'uv run scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            'pypy3 scripts/xt.py "$(echo stage)" approve --sha 1234567',
+            "echo approve | xargs -I% python3 scripts/xt.py stage % --sha 1234567",
+            'python3 -B scripts/xt.py "$(echo stage)" approve --sha 1234567',
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(cmd), "deny")
@@ -901,6 +921,9 @@ class StageGuardTest(unittest.TestCase):
             "git diff origin/main -- scripts/xt.py stage",
             'python3 scripts/xt.py stage init > "$LOG" 2>&1',
             "cd scripts && python3 -m xt loop status",
+            'grep -n stage scripts/xt.py "$F"',
+            "rg approve scripts/xt.py",
+            'python3 scripts/xt.py stage submit 2>"$ERR"',
             'ruff check scripts/*.py "$F"',
             "python3 scripts/xt.py loop status",
             "grep approve scripts/xt.py",
@@ -921,10 +944,18 @@ class StageGuardTest(unittest.TestCase):
         self.assertFalse(approves(["xargs", "python3", "scripts/xt.py", "stage", "--help"]))
         self.assertFalse(approves(["python3", "-I", "%", "scripts/xt.py", "stage", "status"]))  # `-I` của python
         self.assertFalse(approves(["xargs", "grep", "-l", "x"]))
+        self.assertTrue(approves(["find", "stage", "-exec", "scripts/xt.py", "{}", "approve", ";"]))
 
     def test_many_opaque_tokens_linear(self):
         """Nhiều token mờ không làm guard chạy bậc hai (review #352 lượt 2)."""
         argv = ["python3", "x.py"] + ["$a"] * 80000
+        start = time.monotonic()
+        self.assertFalse(self.g._approves_stage(argv))
+        self.assertLess(time.monotonic() - start, 2.0)
+
+    def test_many_dash_tokens_linear(self):
+        """Nhiều token `-a` không làm guard chạy bậc hai (review #352 lượt 3)."""
+        argv = ["python3", "tool.py"] + ["-a"] * 16000
         start = time.monotonic()
         self.assertFalse(self.g._approves_stage(argv))
         self.assertLess(time.monotonic() - start, 2.0)
