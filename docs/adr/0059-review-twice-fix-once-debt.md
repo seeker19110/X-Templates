@@ -1,7 +1,7 @@
 # ADR-0059: Review 2 lần, sửa 1 lần — hết lượt thì ghi nợ và tiếp tục, nợ trả cuối pha
 
 - **Trạng thái:** Đã chấp nhận (chủ dự án 2026-10-30: "luật mới áp dụng cho cả dự án khung và đích: review 2 lần, sửa 1 lần, còn đâu ghi nợ và tiếp tục, nợ sẽ sửa cuối pha"; phiên chính tự duyệt cách máy hoá theo tiêu chí chất lượng cuối, ADR-0008 — D-257; chủ dự án xác nhận cùng ngày: "giữ không được nợ đỏ, có nợ đỏ thì cho phép sửa hết")
-- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `_pr_next_review` (`debt`), `pr debt` (`_pr_debt`, `_debt_problem`), dấu `verdict=debt` (`review_comment_body`, `published_reviews`), `REVIEW_DEBT_RE`/`is_review_debt` (`audit check --strict`, `audit_open_count`, `_harden_sources`); guard chặn đăng tay dấu `debt`; test `PrNextTest.test_review_round_budget_stops_fix_review_loop`, `PrNextCliTest.test_debt_records_ledger_findings`, `PrStewardTest.test_debt_mark_counts_as_review_at_head`, ca `autonomy-bench` `review-adr0059-debt-mark-at-head`.
+- **Trạng thái triển khai:** Đã triển khai — `scripts/xt.py` `_pr_next_review` (`debt`; PR cắt bản → `rethink`, khoá `release` của `merge_decision` — §6), `pr debt` (`_pr_debt`, `_debt_problem`), dấu `verdict=debt` (`review_comment_body`, `published_reviews`), `REVIEW_DEBT_RE`/`is_review_debt` (`audit check --strict`, `audit_open_count`, `_harden_sources`); guard chặn đăng tay dấu `debt`; test `PrNextTest.test_review_round_budget_stops_fix_review_loop`, `PrNextCliTest.test_debt_records_ledger_findings`, `PrStewardTest.test_debt_mark_counts_as_review_at_head`, ca `autonomy-bench` `review-adr0059-debt-mark-at-head`.
 - **Ngày:** 2026-10-30
 - **Thay:** quyết định 2 của ADR-0053 (`rethink` khi hết lượt). Giữ: đếm lượt (`REVIEW_ROUNDS = 2`), `pr rethink` (nay cho: còn 🔴, review cuối chưa kết luận, `review_identity`), review trước PR dùng cho đúng head.
 - **Làm rõ:** ADR-0027/0028 (dấu `xt-review v1`, `review_gate` — một điều kiện merge), ADR-0029 (`inconclusive` = cần review khác — không ghi nợ trên nó), ADR-0031 (nợ review của pha build), ADR-0056 (lỗi có từ trước không chặn PR).
@@ -49,6 +49,10 @@ vẫn đứng — trái luật mới.
    `debt` như dấu `clean`/`blocking` (AUD-SEC-069).
 5. **Nợ trả cuối pha:** dòng `mở` có `nợ-review: #N` ở mọi mức làm `audit check --strict` đỏ (`release-check` hàng `audit`
    BLOCKER), tính vào việc mở của `loop next-step` (build: `replan` trước `ready-for-complete`/trình MVP; harden: gom thành task).
+6. **PR cắt bản không ghi nợ** (D-259, chủ dự án 2026-10-30: "đưa D-259 vào ADR-0059 và máy hoá luôn"): PR đổi `VERSION` ở gốc
+   repo (`merge-check` khoá `release`) là cuối pha — ghi nợ rồi merge thì tag gắn lúc merge ở commit mà `release-check` FAIL
+   (phát hành mang nợ). Hết lượt review → `pr next` trả `rethink` thay `debt`; `pr rethink` mở thêm **một lần sửa hết** mọi
+   phát hiện (đánh dấu head chưa sửa như nhánh còn 🔴 → `fix`), rồi review lại tới khi sạch.
 
 ## Hệ quả
 

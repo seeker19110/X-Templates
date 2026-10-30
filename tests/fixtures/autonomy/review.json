@@ -1007,6 +1007,38 @@
     "action": "disable-auto-merge"
    },
    "note": "sau pr rethink sắp push lần sửa thêm mà auto-merge người bật: tắt trước, không để GitHub merge head chưa rà"
+  },
+  {
+   "id": "review-adr0059-release-pr-no-debt",
+   "origin": "control",
+   "refs": [
+    "ADR-0059"
+   ],
+   "input": {
+    "decision": {
+     "release": true
+    },
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "rethink"
+   },
+   "note": "PR cắt bản (đổi VERSION) hết lượt review: không ghi nợ — tag gắn lúc merge sẽ phát hành mang nợ; rethink, sửa hết (D-259)"
   }
  ]
 }

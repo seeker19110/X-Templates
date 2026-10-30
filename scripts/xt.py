@@ -5664,6 +5664,8 @@ def merge_decision(
         "autonomy": autonomy,
         "stacked": _stacked_blocker(pr) is not None,
         "base_merge_of": [str(x) for x in pr.get("baseMergeOf") or [] if isinstance(x, str)],
+        # PR cắt bản (đổi `VERSION` gốc — tag gắn lúc merge): không ghi nợ review (ADR-0059 §6, D-259)
+        "release": any(isinstance(f, dict) and f.get("path") == "VERSION" for f in pr.get("files") or []),
         "hard": hard,  # ngoại lệ cứng: máy không merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
         "risk_labels": _risk_labels(
@@ -10991,11 +10993,14 @@ def _pr_next_review(
     if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and (unsure or identity or fixed):
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
-        if unsure or identity:
+        if unsure or identity or d.get("release"):
             why = (
                 "review chưa sạch cuối chưa kết luận — chưa biết còn 🔴, không ghi nợ được (ADR-0029/0059)"
                 if unsure
                 else "dấu review chỉ tính của danh tính reviewer (`review_identity`) — tác giả không đăng được dấu `debt`"
+                if identity
+                else "PR cắt bản (đổi `VERSION`): không ghi nợ — tag gắn lúc merge, phát hành mang nợ (ADR-0059 §6);"
+                " thêm một lần sửa HẾT phát hiện"
             )
             return act(
                 "rethink",
@@ -11548,7 +11553,8 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         return 2
     entry = {"decision": args.decision, "at": now_iso()}
     head = str(d.get("head", ""))
-    if action == "debt":  # còn 🔴 mà cây chưa đổi ngoài sổ/cập nhật nhánh → lần sửa chưa push (`_rethink_pending`)
+    # còn 🔴 (hay PR cắt bản — ADR-0059 §6) mà cây chưa đổi ngoài sổ/cập nhật nhánh → lần sửa chưa push (`_rethink_pending`)
+    if action == "debt" or (action == "rethink" and d.get("release")):
         last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
