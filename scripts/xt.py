@@ -10356,8 +10356,26 @@ def _release_stage(base: Path) -> Dict[str, str]:
         return _release_row("stage", "N/A", f"không dùng giai đoạn sản phẩm ({STAGE_LEDGER} vắng)", "SHOULD")
     where = f"{led['cycle']} giai đoạn {led['stage']} ({STAGE_NAMES[led['stage']]}, {led['status']})"
     if led["stage"] == 1:
-        return _release_row("stage", "FAIL", f"{where} — MVP chưa mở Production; người duyệt MVP trước")
+        return _release_row(
+            "stage", "FAIL", f"{where} — MVP chưa mở Production; người duyệt MVP trước{_stage_hotfix(led)}"
+        )
     return _release_row("stage", "PASS", where)
+
+
+def _stage_hotfix(led: Dict[str, Any]) -> str:
+    """Chu kỳ mới ở MVP mà chu kỳ trước đã lên Production: lối ra cho sự cố của bản đang chạy là nhánh vá cắt từ bản đó
+    — không mở giai đoạn phát triển (đặc tả §6/§8, ADR-0058 §2). Máy không biết bản nào đang chạy (sổ không ghi bản
+    phát hành, §6) nên chỉ nêu điều nó biết chắc, không hướng dẫn đặt sổ (D-256); SHA nghiệm thu in đủ để tham chiếu
+    (có thể mất sau squash-merge). Theo bất biến của sổ, lần duyệt cuối của chu kỳ khác là giai đoạn 3 của chu kỳ liền
+    trước."""
+    done = [e for e in led["history"] if e["event"] == "approve" and e["cycle"] != led["cycle"] and e["stage"] >= 2]
+    if not done:
+        return ""
+    cyc, sha = done[-1]["cycle"], done[-1]["sha"]
+    return (
+        f"; sự cố bản production {cyc}: nhánh vá cắt từ bản đang chạy rồi `release-check` trên nhánh đó"
+        f" — không phát hành MVP {led['cycle']}; nghiệm thu {cyc}: `{sha}` (tham chiếu)"
+    )
 
 
 RELEASE_ROWS = (
