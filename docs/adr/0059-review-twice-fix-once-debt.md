@@ -49,10 +49,11 @@ vẫn đứng — trái luật mới.
    `debt` như dấu `clean`/`blocking` (AUD-SEC-069).
 5. **Nợ trả cuối pha:** dòng `mở` có `nợ-review: #N` ở mọi mức làm `audit check --strict` đỏ (`release-check` hàng `audit`
    BLOCKER), tính vào việc mở của `loop next-step` (build: `replan` trước `ready-for-complete`/trình MVP; harden: gom thành task).
-6. **PR cắt bản không ghi nợ** (D-259, chủ dự án 2026-10-30: "đưa D-259 vào ADR-0059 và máy hoá luôn"): PR đổi `VERSION` ở gốc
-   repo (`merge-check` khoá `release`) là cuối pha — ghi nợ rồi merge thì tag gắn lúc merge ở commit mà `release-check` FAIL
+6. **PR cắt bản không ghi nợ** (D-259, chủ dự án 2026-10-30: "đưa D-259 vào ADR-0059 và máy hoá luôn"): PR đổi/đổi tên/xoá
+   `VERSION` ở gốc repo, nhắm `main` (`is_release_pr` — cùng vị từ steward dùng để gắn tag; `merge-check` khoá `release`) là cuối pha — ghi nợ rồi merge thì tag gắn lúc merge ở commit mà `release-check` FAIL
    (phát hành mang nợ). Hết lượt review → `pr next` trả `rethink` thay `debt`; `pr rethink` mở thêm **một lần sửa hết** mọi
-   phát hiện (đánh dấu head chưa sửa như nhánh còn 🔴 → `fix`), rồi review lại tới khi sạch.
+   phát hiện (đánh dấu head chưa sửa như nhánh còn 🔴 → `fix`; review cuối chưa kết luận thì không đánh dấu → `review`), rồi
+   review lại tới khi sạch — mỗi lượt thêm cần một D-NNN mới, không trần số lượt.
 
 ## Hệ quả
 

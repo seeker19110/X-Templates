@@ -2073,6 +2073,32 @@ class PrNextCliTest(unittest.TestCase):
         self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])
         self.assertEqual(json.loads(self.nxt(q, "--json")[1])["action"], "review")
 
+    def test_release_pr_predicate_and_unsure_rethink(self):
+        """ADR-0059 §6 (review #349): PR cắt bản = `VERSION` GỐC (đổi, đổi tên, xoá) nhắm `main` — một vị từ cho merge-check
+        và steward; PR cắt bản mà review cuối chưa kết luận → `pr rethink` không đánh dấu head, `pr next` về `review`."""
+
+        def rel(*files: dict, base: str = "main") -> bool:
+            return xt.is_release_pr({"baseRefName": base, "files": list(files)})
+
+        self.assertTrue(rel({"path": "VERSION"}))
+        self.assertTrue(rel({"path": "VERSION.old", "previous": "VERSION"}))  # đổi tên/xoá VERSION gốc
+        self.assertTrue(xt.is_release_pr({"files": [{"path": "VERSION"}]}))  # không có nhánh đích → main
+        for path in (".xtemplates/VERSION", "apps/web/VERSION", "VERSION.md"):
+            with self.subTest(path=path):
+                self.assertFalse(rel({"path": path}))
+        self.assertFalse(rel({"path": "VERSION"}, base="develop"))
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        booked = self.commit({xt.AUDIT_STATUS_DEFAULT: "## Phát hiện\n"})
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "inconclusive": True, "at": "2026-10-27T02:00:00Z"}
+        files = [*self.big["files"], {"path": "VERSION", "additions": 1, "deletions": 1}]
+        p = {**self.big, "headRefOid": booked, "baseRefName": "main", "files": files, "xtReviews": [r1, r2]}
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "rethink")
+        self.decisions(self.base, f"### D-060 · {self.soon(5)} · PR #7: cắt bản, review cuối chưa kết luận?")
+        self.assertEqual(self.rethink("D-060", p)[0], 0)
+        self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])
+        self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "review")
+
     def test_rethink_reads_decision_of_worktree(self):
         """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
         `pr rethink` phải thấy quyết định đó; quyết định ở sổ của dự án vẫn được tra khi đứng trong worktree."""
