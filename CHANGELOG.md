@@ -5,6 +5,9 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Fixed
+- File luật agent (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`, `.github/instructions/*`) không còn là tài liệu khi tính nợ review: PR pha build hoãn review chúng thì `release-check` hàng `review_debt` thu nợ (AUD-XFEAT-030) — cùng danh sách với đường cổng của làn merge (`AGENT_RULE_GLOBS`). **Hệ quả có thể làm đỏ:** dự án đích đổi các file này sau SHA quét mà chưa review → `review_debt` FAIL tới khi rà.
+
 ### Security
 - Dấu review đăng tay bị chặn cả khi nằm trong nguồn thân của lệnh `gh` (`-F f`, `--body-file`, `gh api -F k=@f`/`--input`, `$(cat f)`, `< f`, `cat f |`; nguồn có mà guard không đọc được cũng bị chặn), ở bất kỳ đâu trong chuỗi lệnh (heredoc, `printf … | gh -F -`), hay `verdict=` ghép lúc chạy/`inconclusive` (AUD-SEC-157) — chỉ nhắc tên file trong thân không bị chặn; qua MCP với ký tự điều khiển sau `<!--` hay chuỗi lồng (AUD-SEC-156). `xt.py` đọc git không theo grafts (`GIT_GRAFT_FILE=/dev/null`) nên phép so của `pr debt`/`pr rethink` không bị lừa (AUD-SEC-168).
 - `git replace` không còn qua mặt được phép so của `pr debt`/`pr rethink`: guard chặn ghi `refs/replace/` (`git replace …`, `update-ref refs/replace/…`; liệt kê/xoá vẫn được) như ref remote, và `xt.py` đọc git với `--no-replace-objects` (AUD-SEC-158). **Dự án đích:** chạy lại `install.py`.

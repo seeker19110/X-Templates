@@ -5200,6 +5200,10 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
 )
 # File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
 # `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
+# File luật agent (chỉ dẫn agent đọc như luật, không phải tài liệu): làn merge coi là đường cổng và `is_doc_path` coi là
+# mã — cùng một danh sách để PR pha build hoãn review chúng thì `review_debt` thu nợ (AUD-XFEAT-030)
+AGENT_RULE_GLOBS: Tuple[str, ...] = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*")
+AGENT_RULE_GLOBS += (".github/copilot-instructions.md", ".github/instructions/*")
 MERGE_GATE_GLOBS = (
     *(".github/workflows/*", ".github/rulesets/*", ".github/dependabot.yml", ".gitlab-ci.yml"),
     *(".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/*", ".xtemplates/*"),
@@ -5211,7 +5215,7 @@ MERGE_GATE_GLOBS = (
     *(".semgrep*", "sonar-project.properties", "requirements-dev.txt"),
     *("pytest.ini", "tox.ini", "noxfile.py", "conftest.py", "vite.config.*", ".flake8", ".golangci.y*ml"),
     *(".nycrc*", ".c8rc*", "phpunit.xml*", "karma.conf.*", ".mocharc*"),
-    *("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*"),
+    *AGENT_RULE_GLOBS,
     *(".stylelintrc*", "stylelint.config.*", "*-snapshots/*", "__snapshots__/*"),
     # Năng lực agent (LOOP-STOP-023; khớp `CAPABILITY_PATTERNS` của guard): MCP server, plugin, skill — PR chỉ đổi những
     # file này + một test từng vào làn nhanh (rà stored 2026-10-16).
@@ -5219,9 +5223,9 @@ MERGE_GATE_GLOBS = (
 )
 
 
-def _gate_path(path: str) -> bool:
+def _gate_path(path: str, globs: Tuple[str, ...] = MERGE_GATE_GLOBS) -> bool:
     parts = path.split("/")
-    return any(fnmatch.fnmatchcase("/".join(parts[i:]), g) for i in range(len(parts)) for g in MERGE_GATE_GLOBS)
+    return any(fnmatch.fnmatchcase("/".join(parts[i:]), g) for i in range(len(parts)) for g in globs)
 
 
 LOCKFILE_RE = re.compile(
@@ -5257,7 +5261,7 @@ DOCS_TEST_DIR_RE = re.compile(r"(^|/)docs?/(.*/)?(tests?|__tests__|spec|e2e)/", 
 def is_doc_path(path: str) -> bool:
     """File là tài liệu (không tính nợ review, không tính dòng/gói/test của làn merge) — xem chú thích trên. Tên có xuống
     dòng → mã (không đoán)."""
-    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path):
+    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path) or _gate_path(path, AGENT_RULE_GLOBS):
         return False
     name = path.rsplit("/", 1)[-1]
     if LICENSE_NAME_RE.fullmatch(name):
