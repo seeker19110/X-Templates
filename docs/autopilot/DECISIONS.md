@@ -1811,3 +1811,10 @@
 - Chọn: Máy: sau 2 lượt review chưa sạch, pr next trả debt thay rethink; phát hiện còn lại vào sổ audit (mở, Ghi chú nợ-review: #N), commit chỉ sổ; xt.py pr debt --findings đăng dấu verdict=debt ở head (tính là review hợp lệ); 🔴 không ghi nợ được (pr rethink như cũ); nợ review mở làm audit check --strict đỏ, next-step build replan, harden gom việc — cuối pha phải trả
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: theo đúng luật người đặt cho 🟠/🟢; 🔴 vẫn không vào nhánh chính vì dự án đích có thể triển khai liên tục từ main — cách hiểu chặt hơn, người đổi được; nợ không mất vì release-check (audit --strict) chặn tới khi trả. (2) đường lùi: REVIEW_ROUNDS lớn hoặc bỏ nhánh debt. (3) test được: dấu verdict=debt máy đọc, pr debt kiểm sau lượt review cuối chỉ sổ audit đổi (sửa 1 lần) và mỗi ID mở, không 🔴, ghi nợ-review: #N. Phương án 3 là kỷ luật — rethink hiện hành vẫn dừng PR, trái luật mới.
 - Đường lùi: Bỏ nhánh debt trong _pr_next_review (về rethink ADR-0053); pr debt và verdict=debt vô hại khi không dùng
+
+### D-258 · 2026-10-30T13:03:50+00:00 · PLAN-harden-2026-10-27-loops (D-202) đặt 3.29.0 sau lát 3 (perf trial, T-3551/3552/3557 còn mở); nay đã có ADR-0058, ADR-0059, LOOP-HARNESS-029, AUD-SEC-149 trên main và release-check GO. Cắt 3.29.0 bây giờ hay chờ lát 3?
+
+- Phương án: (1) Cắt 3.29.0 ngay từ main aed0ce4; lát 3 (perf trial) sang 3.30.0 — sửa T-3553 và dòng phạm vi PLAN · (2) Chờ xong lát 3 rồi mới cắt 3.29.0
+- Chọn: Cắt 3.29.0 ngay từ main aed0ce4; lát 3 (perf trial) sang 3.30.0 — sửa T-3553 và dòng phạm vi PLAN
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: AGENTS.md §7 — đổi điều dự án đích phải làm thì cắt bản sớm; luật review mới (ADR-0059) và chặn subject commit đổi việc của dự án đích ngay; lát 3 chưa bắt đầu, chờ nó giữ các thay đổi đó khỏi dự án đích không thời hạn. (2) đường lùi: lát 3 vẫn trong PLAN, chỉ đổi số bản. (3) đơn giản: release-check đã GO ở aed0ce4.
+- Đường lùi: Đổi T-3553 về 3.29.0 không được (bản đã cắt) — gộp lát 3 vào 3.30.0 là đường duy nhất
