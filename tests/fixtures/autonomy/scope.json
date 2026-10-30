@@ -167,6 +167,12 @@
    "ids": [
     "AUD-SEC-168"
    ]
+  },
+  {
+   "reason": "Nợ review của file luật agent ở `release-check` hàng `review_debt` (`is_doc_path` ↔ `AGENT_RULE_GLOBS`) — không thuộc lớp quyết định cho/chặn mà autonomy-bench kiểm; đỡ bằng Gate unittest `-k test_delivery_phase_review_debt_agent_rule_files tests.test_delivery_phase` (AUD-XFEAT-030)",
+   "ids": [
+    "AUD-XFEAT-030"
+   ]
   }
  ]
 }

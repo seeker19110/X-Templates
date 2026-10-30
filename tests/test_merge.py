@@ -746,6 +746,10 @@ class MergeDecisionTest(unittest.TestCase):
         code += ("license-allow.json", "requirements.txt", "dev-requirements.txt", "constraints.txt", "CMakeLists.txt")
         code += ("requirements/prod.txt", "packages/web/docs/a.png", "docs/x\ny.png", "docs/x\r.md", "Requirements.txt")
         code += ("LICENSE-x.py", ".md", "docs/.md")
+        # AUD-XFEAT-030: file luật agent là đường cổng — không phải tài liệu (nợ review của pha build)
+        code += ("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/a.md", "apps/web/AGENTS.md")
+        code += (".github/copilot-instructions.md", ".github/instructions/py.instructions.md", ".claude/rules/a.md")
+        code += ("AGENTS.override.md", ".windsurfrules", ".clinerules", ".clinerules/a.md")
         # review #323: txt phụ thuộc rộng (đóng khi nghi ngờ); hậu tố gạch nối chỉ khi gốc viết hoa
         code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
         code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
