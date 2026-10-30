@@ -1833,6 +1833,18 @@ class PrNextTest(unittest.TestCase):
         # AUD-HAR-132: sau rethink, review chưa sạch cuối trước mốc là lượt 1 → đúng MỘT lần sửa nữa rồi ghi nợ
         b2x = {**b2, "head": "e" * 40}
         self.assertEqual(self.act(rec={"reviews": [b1, b2x, b3], "rethinks": after})["action"], "debt")
+        # review #346: rethink ghi head; head chưa đổi từ lúc rethink, chưa review sau mốc → `fix` (không đòi review head
+        # chưa sửa — lần sửa sẽ bị đốt); có review sau mốc thì về luật thường
+        at_head = [{**after[0], "head": self.H}]
+        pending = self.act(rec={"reviews": [b1, b2x], "rethinks": at_head})
+        self.assertEqual(pending["action"], "fix")
+        self.assertIn("vừa `pr rethink`", pending["why"])
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x], "rethinks": after})["action"], "review")
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x, b3], "rethinks": at_head})["action"], "debt")
+        rough = [{"at": "x", "head": self.H}, "rác"]
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x], "rethinks": rough})["action"], "debt")
+        # head chỉ là cập nhật nhánh đích của head đã rà (`base_merge_of`): chưa phải lần sửa → sửa, không ghi nợ
+        self.assertEqual(self.act(rec={"reviews": [b1, b2]}, base_merge_of=[self.H2])["action"], "fix")
         before = [{"decision": "D-008", "at": "2026-10-27T00:00:00+00:00"}, "rác"]
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": before})["action"], "debt")
         self.assertEqual(self.act(rec={"reviews": [b1, b2], "rethinks": "rác"})["action"], "debt")
@@ -1963,9 +1975,10 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn("là `disable-auto-merge`, không phải `debt`/`rethink`", self.rethink("D-005", auto)[2])
         rc, out, _ = self.rethink("D-005")
         self.assertEqual(
-            (rc, out), (0, "✓ PR #7: mở thêm 2 lượt review theo D-005 — chạy lại `xt.py pr next --pr 7`\n")
+            (rc, out), (0, "✓ PR #7: mở thêm một lần sửa theo D-005 — sửa hết, push, chạy lại `xt.py pr next --pr 7`\n")
         )
         self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["decision"], "D-005")
+        self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["head"], self.head)  # `_rethink_pending`
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
