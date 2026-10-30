@@ -21,7 +21,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import xt
 from test_xt_cli import TmpRepoCase, run_main
 
-HUMAN = {k: "" for k in xt.STAGE_AGENT_ENV}  # ngoài phiên agent
+
+@contextlib.contextmanager
+def human_env(**extra):
+    """Ngoài phiên agent: không có biến của `STAGE_AGENT_ENV` (đặt rỗng vẫn tính là agent)."""
+    with unittest.mock.patch.dict(os.environ, extra):
+        for k in set(xt.STAGE_AGENT_ENV) - set(extra):
+            os.environ.pop(k, None)
+        yield
+
+
 SHA = "a" * 40
 SHA2 = "b" * 40
 
@@ -146,10 +155,13 @@ class StageProblemTest(unittest.TestCase):
         self.assertEqual(xt.plan_stage(nfd), [(2, "C-003")])
 
     def test_agent_session(self):
-        with unittest.mock.patch.dict(os.environ, HUMAN):
+        with human_env():
             self.assertFalse(xt.agent_session())
-        with unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDECODE": "1"}):
+        with human_env(CLAUDECODE="1"):
             self.assertTrue(xt.agent_session())
+        for k in xt.STAGE_AGENT_ENV:  # đặt mà rỗng vẫn là phiên agent (`CLAUDECODE= … stage approve`, AUD-SEC-155)
+            with self.subTest(k=k), human_env(**{k: ""}):
+                self.assertTrue(xt.agent_session())
 
 
 class StageCliTest(TmpRepoCase):
@@ -161,7 +173,7 @@ class StageCliTest(TmpRepoCase):
             "config", "user.name", "chu"
         )  # smoke tự `git commit` không qua `self.git` — CI không có user.name toàn cục
         self.git("config", "commit.gpgsign", "false")
-        self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
+        self.enterContext(human_env(CLAUDE_PROJECT_DIR=str(self.repo)))
         self.commit("khởi tạo")
 
     def commit(self, msg):
@@ -516,7 +528,7 @@ class StageLockTest(TmpRepoCase):
         super().setUp()
         self.init_repo()
         self.git("config", "user.email", "chu@example.invalid")
-        self.enterContext(unittest.mock.patch.dict(os.environ, {**HUMAN, "CLAUDE_PROJECT_DIR": str(self.repo)}))
+        self.enterContext(human_env(CLAUDE_PROJECT_DIR=str(self.repo)))
         self.enterContext(unittest.mock.patch.object(xt, "loop_root", lambda base: base))
 
     def plan(self, *markers, tasks=("T-001",)):
@@ -816,11 +828,31 @@ class StageGuardTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.decide(cmd), "deny")
 
+    def test_opaque_approve_denied(self):
+        """Lệnh con/tuỳ chọn mờ (`$(…)`, backtick, biến) có thể là approve/adopt — chặn (AUD-SEC-155)."""
+        for cmd in (
+            'CLAUDECODE= CLAUDE_CODE_SESSION_ID= AI_AGENT= python3 scripts/xt.py stage "$(echo approve)" --sha 1234567',
+            "python3 scripts/xt.py stage `echo approve` --sha 1234567",
+            "python3 scripts/xt.py stage $(echo approve) --sha 1234567",
+            "python3 scripts/xt.py $(echo stage approve) --sha 1234567",
+            'python3 scripts/xt.py --framework fw "$(echo stage)" approve --sha 1234567',
+            'python3 scripts/xt.py --fr fw "$(echo stage)" approve --sha 1234567',
+            'python3 scripts/xt.py stage init "$(echo --adopt)" 3 --evidence x',
+            'python3 "$XT" stage approve --sha 1234567',
+            'env -u CLAUDECODE python3 "$(echo scripts/xt.py)" stage "$V" --sha 1234567',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+
     def test_agent_steps_and_reads_allowed(self):
         for cmd in (
             "python3 scripts/xt.py stage status",
             "python3 scripts/xt.py stage submit --evidence demo",
             "python3 scripts/xt.py stage init",
+            'python3 scripts/xt.py stage submit --evidence "$(git rev-parse HEAD)"',
+            "python3 scripts/xt.py --framework fw stage status",
+            'python3 scripts/xt.py pr next --pr "$N"',
+            "python3 scripts/xt.py --version",
             "python3 scripts/xt.py loop status",
             "grep approve scripts/xt.py",
             "cat docs/autopilot/STAGE.json",

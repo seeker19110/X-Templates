@@ -6239,6 +6239,84 @@
   "expect": {
    "allowed": false
   }
+ },
+ {
+  "id": "guard-sec155-stage-approve-subst",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "CLAUDECODE= CLAUDE_CODE_SESSION_ID= AI_AGENT= python3 scripts/xt.py stage \"$(echo approve)\" --sha 1234567 --note x"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-approve-backtick",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py stage `echo approve` --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-sub-opaque",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py --fr fw \"$(echo stage)\" approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-adopt-opaque",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py stage init \"$(echo --adopt)\" 3 --evidence x"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-script-opaque",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 \"$XT\" stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-submit-subst-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py stage submit --evidence \"$(git rev-parse HEAD)\""
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }

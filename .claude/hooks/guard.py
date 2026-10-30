@@ -2650,15 +2650,41 @@ STAGE_APPROVE_WHY = (
 )
 
 
+def _xt_args(n: List[str]) -> List[str]:
+    """Đối số sau `xt.py` — hay sau đường script mờ đứng ngay trước `stage` (`python3 "$XT" stage …`)."""
+    at = next(
+        (
+            k
+            for k, t in enumerate(n)
+            if posixpath.basename(t) == "xt.py" or (_opaque(t) and n[k + 1 : k + 2] == ["stage"])
+        ),
+        len(n),
+    )
+    return n[at + 1 :]
+
+
+def _xt_sub(rest: List[str]) -> str:
+    """Lệnh con của `xt.py`: bỏ tuỳ chọn toàn cục (`--framework X`, cả dạng viết tắt argparse `--fr X`)."""
+    k = 0
+    while k < len(rest) and rest[k].startswith("-"):
+        k += 2 if len(rest[k]) > 2 and "=" not in rest[k] and "--framework".startswith(rest[k]) else 1
+    return rest[k] if k < len(rest) else ""
+
+
 def _approves_stage(argv: List[str]) -> bool:
-    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ)."""
-    n = normalize(argv)
-    at = next((k for k, t in enumerate(n) if posixpath.basename(t) == "xt.py"), len(n))
-    rest = n[at + 1 :]
-    if "stage" not in rest:
-        return False
+    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ); lệnh
+    con hay tuỳ chọn `init` mờ có thể là chúng nên cũng tính (`stage "$(echo approve)"` — AUD-SEC-155)."""
+    rest = _xt_args(normalize(argv))
+    sub = _xt_sub(rest)
+    if sub != "stage":
+        return _opaque(sub)
     tail = rest[rest.index("stage") + 1 :]
-    return "approve" in tail or ("init" in tail and any(t.startswith("--adopt") for t in tail))
+    act = next((t for t in tail if not t.startswith("-")), "")
+    return (
+        "approve" in tail
+        or _opaque(act)
+        or ("init" in tail and any(t.startswith("--adopt") or _opaque(t) for t in tail))
+    )
 
 
 def _forges_review(argv: List[str]) -> bool:
