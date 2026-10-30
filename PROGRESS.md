@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-10-30 · Nhánh: main
 
 ## Đang làm
-- 2026-10-30 **3.29.0** (#344–#347, D-257, ADR-0059): luật chủ dự án **review 2 lần, sửa 1 lần, còn lại ghi nợ, nợ trả cuối pha** — `pr next` trả `debt`, `pr debt`; 🔴 không ghi nợ, thêm một lần sửa hết (`pr rethink`). Nợ #344–#346 đã trả ở #346/#347; `release-check` GO ở `aed0ce4`. Gồm ADR-0058 ba giai đoạn sản phẩm (#327–#341), `LOOP-HARNESS-029` (#343), AUD-SEC-149 (#344). 🟢 mở mới: AUD-HAR-139…141 (140: `merges` hỏng làm sập), AUD-TEST-029, AUD-DOC-104; AUD-HAR-138 nặng thêm (vòng update→review không trần). Tag `v3.29.0` → `3a3c101` (GO chờ người: `prod_switch`). Sau bản: #349 máy hoá D-259 (ADR-0059 §6, PR cắt bản không ghi nợ, `is_release_pr`). Kế: audit delta sớm #316–#349 ưu tiên `guard.py` (AUD-HAR-142); nâng dự án đích (F); lát 3 `perf trial` → 3.30.0 (D-258). Treo có từ trước: Ctrl-C mồ côi Gate.
+- 2026-10-30 **3.29.0** (ADR-0058/0059, D-257/259) đã phát hành; GO chờ người `prod_switch`. Audit delta `6799550..28c2089` (#351, D-262): 5 🟠 đã sửa — AUD-SEC-155 (#352, D-263/265), 158 (#353), 156/157/168 (#354, D-266/267), XFEAT-030 (#355); 8 nhóm `chưa quét` (T-3557). Nợ review mở: AUD-SEC-174…179 (`nợ-review: #354`, 3 🟠 — sửa đầu gói cuối pha). Kế: gói nợ cuối pha → T-3557 → lát 3 `perf trial` → 3.30.0 (D-258).
 - 2026-10-28 **ADR-0056** (#312, D-221, `research/2026-10-28-velocity.md`): lỗi có từ trước không chặn PR, CI là cổng đầy đủ, `loop decide` đánh số qua nhánh remote, `xt.yaml` `setup`. **ADR-0054/0055** (#311, D-219/D-220): khoá/guard hỏng → chặn; `install.py --preset`. 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
 - 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–2 merge (lát 2 vào **3.29.0**); kế lát 3 `perf trial` + T-3557 audit delta (D-261) → 3.30.0.
 - 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.
@@ -34,6 +34,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `9fb9209` (#344–#349, tag `v3.29.0` ở `3a3c101`). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge` — chủ dự án yêu cầu 2026-10-30. `release-check` chạy trên worktree của `main` (first-parent nhánh làm `review_debt` FAIL oan).
+- `main` `08b62c5` (#351–#355). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge` — chủ dự án yêu cầu 2026-10-30; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ để không yếu hơn `main` (bài học #352).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
