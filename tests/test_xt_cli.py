@@ -3384,3 +3384,22 @@ class HarnessCheckTest(TmpDirCase):
         code, text = xt.run_gate_shell("git push --force origin main", ROOT, 30)
         self.assertEqual(code, 126)
         self.assertIn("xt.py harness-check", text)
+
+
+class GitNoReplaceTest(TmpRepoCase):
+    """`refs/replace/` không đổi được nội dung mà `xt.py` đọc: `_review_drift` (`pr debt`/`pr rethink`) vẫn thấy file
+    sửa sau review khi SHA review bị thay bằng commit mang cây của head (AUD-SEC-158)."""
+
+    def test_review_drift_ignores_replace_refs(self):
+        self.init_repo()
+        base = self.commit_files({"README.md": "r\n", "docs/ops/AUDIT-STATUS.md": "# sổ\n"}, 1)
+        self.git("update-ref", "refs/remotes/origin/main", base)
+        last = self.commit_files({"app.py": "ok\n"}, 2)
+        head = self.commit_files({"app.py": "sửa sau review\n", "evil.py": "x\n"}, 3)
+        fake = self.git("commit-tree", head + "^{tree}", "-p", base, "-m", "giả")
+        self.git("replace", last, fake)
+        self.assertEqual(self.git("diff", "--name-only", last, head), "")  # git thường đã bị lừa
+        err, extra, _ = xt._review_drift(self.repo, last, head, "main")
+        self.assertIsNone(err)
+        self.assertEqual(sorted(extra), ["app.py", "evil.py"])
+        self.assertEqual(xt._git(self.repo, "show", f"{last}:app.py").stdout, "ok\n")

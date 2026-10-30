@@ -6157,6 +6157,24 @@ class GuardRemoteRefTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assert_forged(cmd)
 
+    def test_guard_replace_ref_denied(self):
+        """`git replace` thay đối tượng mà Gate/`pr debt` đọc (`origin/main`, SHA review) — ghi `refs/replace/` bị chặn
+        như ref remote; liệt kê/xoá thay thế thì cho qua (AUD-SEC-158)."""
+        for cmd in (
+            "git replace " + "a" * 40 + " HEAD",
+            "git replace -f origin/main HEAD",
+            "git replace --graft origin/main HEAD",
+            "git replace --edit HEAD",
+            "git replace --convert-graft-file",
+            "git update-ref refs/replace/" + "a" * 40 + " HEAD",
+            "git -C . replace $(git rev-parse origin/main) HEAD",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assert_forged(cmd)
+        for cmd in ("git replace", "git replace -l", "git replace --list 'a*'", "git replace -d " + "a" * 40):
+            with self.subTest(cmd=cmd):
+                self.assert_allowed(cmd)
+
     def test_guard_remote_ref_legit_allowed(self):
         """Không chặn oan: fetch/pull thường, refspec đúng dạng cấu hình của remote đã cấu hình, nhánh/tag thường, đọc,
         liệt kê, xoá/đổi tên ref giả đi (sửa sai — Gate đỏ chứ không xanh giả), upstream là ref remote."""

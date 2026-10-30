@@ -1308,7 +1308,7 @@ def _git_branch(args: List[str]) -> Tuple[str, str]:
 # giả đi (`branch -D origin/x`, `tag -d`, `branch -dr` — Gate đỏ chứ không xanh giả); upstream/điểm bắt đầu là ref remote.
 # Giới hạn đã biết (lệnh cố ý né, D-015 — harness-files.md): ghi thẳng file `.git/refs/…`/`.git/packed-refs`/
 # `.git/<remote>/…`; đổi URL/refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `-c remote.<r>.*`);
-# `git replace`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
+# ghi thẳng `.git/refs/replace/…`, `fast-import`; ref trong biến/thay lệnh. Alias git (lệnh con khác tên) được mở và xét như lệnh thật
 # (khối "Alias git" dưới); đối số từ stdin (`xargs`/`parallel`/`find -exec {}`) → UNRESOLVED_TARGET (khối "Đối số không
 # thấy"). Giới hạn của alias: tệp cấu hình tạo trong CÙNG lệnh Bash rồi mới dùng (`printf … > f && GIT_CONFIG_GLOBAL=f
 # git y …` — lúc guard đọc, tệp chưa có), lệnh con là biến (`git $S …`), lệnh xoá biến môi trường (`env -i/-u`, `unset`),
@@ -1406,12 +1406,22 @@ def _has_opt(flags: Set[str], opts: Set[str]) -> bool:
 
 
 RefNames = Optional[List[str]]  # tên ref lệnh sẽ ghi/tạo; None = không thấy được (đọc từ stdin)
+REPLACE_REF_PREFIX = "refs/replace/"  # `git replace` đổi nội dung mọi lệnh git đọc (AUD-SEC-158)
 
 
 def _update_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
     """update-ref: ref là đối số vị trí đầu (cả `-d`); `--stdin` → None."""
     flags, pos, _ = _parse_opts(args, "m", ())
     return None if _has_opt(flags, {"--stdin"}) else pos[:1]
+
+
+def _replace_names(args: List[str], _cwd: Optional[str]) -> RefNames:
+    """replace: mọi dạng ghi `refs/replace/<đối tượng>` (`<obj> <thay>`, `-f`, `--graft`, `--edit`,
+    `--convert-graft-file`); liệt kê (không đối số, `-l`/`--list`, `--format`) và xoá (`-d`) thì không (AUD-SEC-158)."""
+    flags, pos, _ = _parse_opts(args, "", ())
+    if _has_opt(flags, {"-d", "--delete", "-l", "--list"}) or not (pos or _has_opt(flags, {"--convert-graft-file"})):
+        return []
+    return [REPLACE_REF_PREFIX + (pos[0] if pos else "*")]
 
 
 def _symbolic_ref_names(args: List[str], _cwd: Optional[str]) -> RefNames:
@@ -1499,6 +1509,9 @@ def _short_ref(ref: str) -> Tuple[bool, str]:
 
 def _remote_ref_hit(names: List[str], cwd: Optional[str]) -> str:
     """Tên đầu tiên là ref theo dõi remote hoặc trùng `<remote>/…`; rỗng nếu không. `git remote` chỉ chạy khi cần."""
+    replaced = next((x for x in names if x.lstrip("+").startswith(REPLACE_REF_PREFIX)), "")
+    if replaced:  # thay đối tượng mà Gate/`pr debt` đọc — cùng hiệu ứng giả `origin/main` (AUD-SEC-158)
+        return replaced
     shorts = [(x, *_short_ref(x)) for x in names]
     hit = next((x for x, remote, _ in shorts if remote), "")
     if hit or not any("/" in s for _, _, s in shorts):
@@ -1509,6 +1522,7 @@ def _remote_ref_hit(names: List[str], cwd: Optional[str]) -> str:
 
 REMOTE_REF_NAMES: Dict[str, Callable[[List[str], Optional[str]], RefNames]] = {
     "update-ref": _update_ref_names,
+    "replace": _replace_names,
     "symbolic-ref": _symbolic_ref_names,
     "tag": _tag_names,
     "branch": _branch_names,
