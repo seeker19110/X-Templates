@@ -89,8 +89,8 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   không đọc được (glob, fd của shell `/dev/fd/N`, không phải file thường, > 256 KiB, quá 8 nguồn, lỗi đọc, JSON lồng quá
   sâu) bị chặn, lỗi khi quét cũng chặn; MCP quét mọi chuỗi thô. Còn lọt: dấu mã hoá lúc chạy (`printf '\74!-- …'`,
   `base64 -d`), thân từ stdin hay file do chương trình khác sinh trong cùng lệnh (`cmd | gh … -F -`, `gen > f && gh -F f`,
-  `$(xargs cat <<< f)`), thay lệnh lồng (`$(cat $(echo f))`), heredoc không nháy chứa `$(cat f)`, file tương đối sau
-  `cd`, tool MCP ngoài `MCP_REVIEW_POST_RE` (steward chỉ đọc comment issue).
+  `$(xargs cat <<< f)`), thay lệnh lồng (`$(cat $(echo f))`), heredoc không nháy chứa `$(cat f)`, stdin chuyển hướng ở cấp shell/nhóm lệnh
+  (`exec < f; gh … -F -`, `{ gh …; } < f` — AUD-SEC-180), file tương đối sau `cd`, tool MCP ngoài `MCP_REVIEW_POST_RE` (steward chỉ đọc comment issue).
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
   (`REMOTE_REF_FORGE`) và ghi `refs/replace/…` (`git replace`, AUD-SEC-158 — `xt.py` cũng đọc git với
   `--no-replace-objects`, không theo grafts — AUD-SEC-168), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL

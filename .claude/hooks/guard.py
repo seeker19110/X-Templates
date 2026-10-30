@@ -2812,6 +2812,8 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
     quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
     không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
     sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
+    if path == os.devnull:  # `gh … < /dev/null` tắt prompt — thân rỗng
+        return False
     if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
     full = os.path.join(cwd or ".", os.path.expanduser(path))
@@ -2844,8 +2846,8 @@ def _stdin_redirects(argv: List[str]) -> List[str]:
     for i, t in enumerate(argv[:-1]):
         if t in ("<", "<>"):
             out.append(argv[i + 1])
-        elif t == "<&":
-            out.append("/dev/fd/" + argv[i + 1])
+        elif t == "<&" and argv[i + 1] != "-":  # `<&-` đóng stdin; `<&3-` chuyển fd 3 (review #357)
+            out.append("/dev/fd/" + argv[i + 1].removesuffix("-"))
     return out
 
 
@@ -2906,6 +2908,10 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
         return True
     cats = [f for c in cmds for f in _reader_files(c)]
     srcs = [f for c in posts for f in _body_sources(c, cats)]
+    # backtick lẻ ở đối số `gh`: thay lệnh không nháy bị tách lệnh ở `;`/`|`/xuống dòng (`<<< \`cat f;\``) — đọc nó
+    # trên chữ thô của cả chuỗi lệnh (review #357)
+    srcs += _subst_files(cmd) if any(t.count("`") % 2 for c in posts for t in c) else []
+    srcs = list(dict.fromkeys(srcs))  # mỗi nguồn đọc một lần, đếm một lần
     return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
 
 

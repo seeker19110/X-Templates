@@ -558,6 +558,17 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 "exec 3<b.md; gh pr comment 5 -F - <&3",
                 "gh pr comment 5 -F - 0<>b.md",
                 "gh pr comment 5 -F - <> b.md",
+                # review #357: backtick không nháy có toán tử/xuống dòng, `<&N-`, mệnh đề backtick lẻ, `tail`
+                "gh pr comment 5 -F - <<< `cat b.md;`",
+                "gh pr comment 5 -F - <<< `cat b.md | cat`",
+                "gh pr comment 5 -F - <<< `cat b.md && true`",
+                "gh pr comment 5 -F - <<< `cat b.md\n`",
+                "IFS=; gh pr comment 5 --body `cat b.md;`",
+                "gh api repos/o/r/issues/5/comments --input - <<< `cat b.md;`",
+                "exec 3< b.md; gh pr comment 5 -F - <&3-",
+                "cat b.md | gh pr comment 5 --body `cat;`",
+                "cat b.md | gh pr comment 5 --body `cat -`",
+                "tail -c 99 b.md | gh pr comment 5 -F -",
             ):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "deny")
@@ -566,6 +577,10 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 "cat -n n.md | gh pr comment 5 -F -",
                 "gh pr comment 5 -F - < n.md",
                 "gh pr comment 5 --body `date`",
+                "gh pr comment 5 -F - <&-",
+                "gh pr comment 5 --body x < /dev/null",
+                "gh pr comment 5 --body 'dùng `xt.py` để kiểm'",
+                'gh pr comment 5 --body "$(cat n.md) $(cat n.md) $(cat n.md) $(cat n.md) $(cat n.md)"',
             ):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
