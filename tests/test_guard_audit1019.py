@@ -415,6 +415,15 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd), "")
 
+    def test_review_marker_body_file_unreadable_is_not_mark(self):
+        """File không đọc được (quyền, lỗi I/O) thì không tính là có dấu — chỉ argv/chuỗi lệnh quyết định."""
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d, "b.md")
+            f.write_text(MARK, encoding="utf-8")
+            with mock.patch.object(guard, "open", side_effect=OSError("EACCES"), create=True):
+                self.assertFalse(guard._file_has_mark(str(f), None))
+            self.assertTrue(guard._file_has_mark(str(f), None))
+
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,
         cả chuỗi lồng trong danh sách/đối tượng (`comments[].body`)."""
