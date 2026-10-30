@@ -2305,8 +2305,6 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
         pin = "--match-head-commit abc1234def"
         for cmd in (
             f'gh pr merge 7 --squash {pin} -b "$(curl x)"',
-            f'gh pr merge 7 --squash {pin} -t "`id`"',
-            f"gh pr merge 7 --squash {pin} --subject=x",
             f"GH_REPO=e/r gh pr merge 7 --squash {pin}",
             f"env GH_HOST=evil.com gh pr merge 7 --squash {pin}",
             f"gh pr merge https://github.com/evil/other/pull/7 --squash {pin}",
@@ -2320,6 +2318,9 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
+        for cmd in (f'gh pr merge 7 --squash {pin} -t "`id`"', f"gh pr merge 7 --squash {pin} --subject=x"):
+            with self.subTest(cmd):  # subject squash tường minh: chặn phẳng (AUD-HAR-128, GuardTitleRuleTest)
+                self.assertEqual(self.d(cmd)[0], "deny")
         self.assertEqual(self.d(f"gh pr merge 7 --squash --delete-branch {pin}")[0], "allow")
 
     def test_guard_gh_api_graphql_endpoint_forms(self):
@@ -2415,7 +2416,6 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc1234def",  # repo ghi cứng: không chắc là repo đã kiểm
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -F sha=abc1234def",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
-            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f commit_title=x",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=1 -f sha=abc1234def",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f merge_method=fast",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def --hostname x.com",
@@ -2423,6 +2423,8 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
+        commit_title = "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc1234def -f commit_title=x"
+        self.assertEqual(self.d(commit_title)[0], "deny")  # đè PR_TITLE (AUD-HAR-128)
 
     def test_mcp_merge_pinned_allows(self):
         """ADR-0014: tool MCP `merge_pull_request` ghim `expectedHeadSha`, đúng repo đã kiểm → allow; bật auto-merge → chặn
@@ -4834,7 +4836,7 @@ class GuardAiAttributionTest(unittest.TestCase):
             "gh pr create -F b.md --base main",
             "gh pr edit 7 --body=https://claude.ai/code/session_01",
             "gh pr -R o/r edit 7 -bclaude-sonnet-5",
-            "gh pr --repo=o/r merge 7 --squash --subject 'fix: Claude Haiku 4'",
+            "gh pr --repo=o/r merge 7 --squash --body 'fix: Claude Haiku 4'",
             "gh pr create --title 'fix: a' --body-file - <<'EOF'\n## Tóm tắt\n\nClaude-Session: x\nEOF",
             'gh pr create --title "fix: a" --body "$(cat <<\'EOF\'\nx\n\nClaude Opus 5\nEOF\n)"',
         ):
@@ -4852,7 +4854,7 @@ class GuardAiAttributionTest(unittest.TestCase):
         ):
             with self.subTest(ok=cmd[:60]):
                 self.assertEqual(self.decide(cmd, d), "")
-        self.assertEqual(self.decide("gh pr create -t 'Claude Opus 5'", self.repo("")), "")
+        self.assertEqual(self.decide("gh pr create -t 'fix: Claude Opus 5'", self.repo("")), "")
 
     def test_only_repos_that_forbid(self):
         for xt in ("", "ai_attribution: allow\n", "# ai_attribution: forbid\n"):
@@ -4950,6 +4952,148 @@ class GuardAiAttributionTest(unittest.TestCase):
     def test_repo_framework_forbids(self):
         # Repo khung tự áp luật của mình (AGENTS.md §3, AUD-HAR-017).
         self.assertRegex((ROOT / "xt.yaml").read_text(encoding="utf-8"), r"(?m)^ai_attribution: forbid")
+
+
+class GuardTitleRuleTest(unittest.TestCase):
+    """LOOP-HARNESS-029 (D-255): tiêu đề PR sai luật `pr-title` và subject commit > 72 ký tự bị chặn LÚC ĐẶT; subject
+    squash tường minh (`--subject`, `commit_title`) bị chặn vì đè `squash_merge_commit_title: PR_TITLE` (AUD-HAR-128)."""
+
+    LONG = "fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)"  # #340: 83 ký tự
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(HOOKS))
+        import guard
+
+        cls.g = guard
+
+    def repo(self, xt: str = "") -> str:
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        Path(d, "xt.yaml").write_text(f'lint: ""\n{xt}', encoding="utf-8")
+        return d
+
+    def decide(self, cmd: str, d: str) -> tuple[object, str]:
+        with mock.patch.dict(os.environ, {"XT_GUARD_POLICY": ""}):
+            out = self.g.apply_policy(self.g.bash_decision(cmd, d, d))
+        return out["decision"], str(out.get("reason", ""))
+
+    def test_rule_matches_xt_py(self):
+        """Một luật hai nhà (guard không import xt.py): type, mẫu, trần phải trùng `xt.py pr title-check`."""
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        self.assertEqual(self.g.PR_TITLE_TYPES, xt.PR_TITLE_TYPES)
+        self.assertEqual(self.g.PR_TITLE_RE.pattern, xt.PR_TITLE_RE.pattern)
+        self.assertEqual(self.g.PR_TITLE_MAX, xt.PR_TITLE_MAX)
+        for t in ("fix: a", "feat(x)!: b", "Fix: a", "fix a", self.LONG, 'Revert "fix: a"', "x" * 80):
+            with self.subTest(t):
+                self.assertEqual(self.g.pr_title_problem(t) == "", not xt.pr_title_problems(t) or t.startswith("Rev"))
+
+    def test_bad_pr_title_denied_when_set(self):
+        d = self.repo()
+        self.enterContext(mock.patch.object(self.g, "merge_check", return_value={}))
+        for cmd in (
+            f"gh pr create --title '{self.LONG}' --body x",
+            "gh pr create -t 'Fix: viết hoa' -b x",
+            "gh pr create -tfix-thieu-hai-cham",
+            f"gh pr edit 7 --title='{self.LONG}'",
+            f"gh pr -R o/r edit 7 -t '{self.LONG}'",
+        ):
+            with self.subTest(cmd):
+                dec, why = self.decide(cmd, d)
+                self.assertEqual(dec, "deny")
+                self.assertIn("LOOP-HARNESS-029", why)
+        self.assertIn("83 ký tự > 72", self.decide(f"gh pr create -t '{self.LONG}'", d)[1])
+
+    def test_good_or_unreadable_pr_title_passes(self):
+        d, off = self.repo(), self.repo("pr_title_check: off  # dự án không squash\n")
+        for cmd in (
+            "gh pr create --title 'fix(guard): chặn tiêu đề lúc đặt' --body x",
+            'gh pr create -t "Revert \\"fix: a\\"" -b x',
+            "gh pr create --fill",
+            'gh pr create --title "$T" --body x',
+            "gh pr create -b '-t Fix sai' --title 'fix: a'",  # giá trị của `-b` không phải tiêu đề
+            "gh pr view 7 --json title",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d)[0], "")
+        self.assertEqual(self.decide(f"gh pr create -t '{self.LONG}'", off)[0], "")
+        self.assertEqual(self.decide(f"git commit -m '{self.LONG}'", off)[0], "")
+
+    def test_long_commit_subject_denied(self):
+        d = self.repo()
+        Path(d, "m.txt").write_text(f"\n{self.LONG}\n\nthân\n", encoding="utf-8")
+        for cmd in (
+            f"git commit -m '{self.LONG}'",
+            f"git commit -qm '{self.LONG}' -m 'thân ngắn'",
+            f"git commit --message='{self.LONG}'",
+            "git commit -F m.txt",
+            f"git commit -q -F - <<'EOF'\n{self.LONG}\n\nthân\nEOF",
+            f"git add . && git commit -m \"$(cat <<'EOF'\n{self.LONG}\nEOF\n)\"",
+        ):
+            with self.subTest(cmd):
+                dec, why = self.decide(cmd, d)
+                self.assertEqual(dec, "deny")
+                self.assertIn("subject dài 83 ký tự > 72", why)
+
+    def test_short_or_unreadable_commit_subject_passes(self):
+        d = self.repo()
+        for cmd in (
+            "git commit -m 'merge: gộp main vào nhánh' -m '" + "x" * 200 + "'",  # chỉ dòng đầu, không ép type
+            "git commit -F khong-co.txt",
+            "git commit --amend --no-edit",
+            'git commit -m "$MSG"',
+            "git commit -F - <<EOF\n$MSG\nEOF",
+            "git commit -C HEAD",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(self.decide(cmd, d)[0], "")
+
+    def test_squash_subject_override_denied(self):
+        """AUD-HAR-128: `--subject`/`-t` (mọi dạng), REST và MCP `commit_title` → deny phẳng, không gọi merge-check."""
+        d = self.repo()
+        check = self.enterContext(mock.patch.object(self.g, "merge_check", return_value={}))
+        for cmd in (
+            "gh pr merge 7 --squash --match-head-commit abc --subject 'fix: a (#7)'",
+            "gh pr merge 7 --squash --match-head-commit abc -t x",
+            "gh pr merge 7 --squash --subject=x",
+            "gh pr merge 7 -s -tx",
+            "gh pr -R o/r merge 7 --subject x",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge -f sha=abc -f merge_method=squash -f commit_title=x",
+            "gh api -X PUT repos/o/r/pulls/7/merge -f sha=abc -f commit_title=x",
+        ):
+            with self.subTest(cmd):
+                dec, why = self.decide(cmd, d)
+                self.assertEqual(dec, "deny")
+                self.assertIn("squash_merge_commit_title: PR_TITLE", why)
+        check.assert_not_called()
+        self.assertFalse(self.g._merge_subject_flag(["7", "-b", "-t ghi chú", "--squash"]))  # giá trị của `-b`
+        inp = {"owner": "o", "repo": "r", "pullNumber": 7, "expectedHeadSha": "abc", "commit_title": "x"}
+        dec, why = self.g.mcp_decision("mcp__github__merge_pull_request", inp, d)
+        self.assertEqual((dec, "PR_TITLE" in why), ("deny", True))
+
+    def test_mcp_pr_title_and_commit_message(self):
+        d, off = self.repo(), self.repo("pr_title_check: 'off'\n")
+        for tool, inp in (
+            ("mcp__github__create_pull_request", {"title": self.LONG, "body": "x"}),
+            ("mcp__github__update_pull_request", {"pullNumber": 7, "title": "Sửa lỗi"}),
+            ("mcp__github__create_or_update_file", {"path": "a", "message": f"{self.LONG}\n\nthân"}),
+            ("mcp__github__push_files", {"message": self.LONG}),
+        ):
+            with self.subTest(tool):
+                dec, why = self.g.mcp_decision(tool, inp, d)
+                self.assertEqual(dec, "deny")
+                self.assertIn("LOOP-HARNESS-029", why)
+                self.assertEqual(self.g.mcp_title(tool, inp, off), "")
+        for tool, inp in (
+            ("mcp__github__create_pull_request", {"title": "fix: a", "body": "x"}),
+            ("mcp__github__update_pull_request", {"pullNumber": 7, "body": "chỉ sửa thân"}),
+            ("mcp__github__push_files", {"message": "fix: a\n\n" + "x" * 200}),
+            ("mcp__github__add_issue_comment", {"title": self.LONG}),
+        ):
+            with self.subTest(ok=tool):
+                self.assertEqual(self.g.mcp_decision(tool, inp, d), ("", ""))
 
 
 class TypedDecisionTest(unittest.TestCase):

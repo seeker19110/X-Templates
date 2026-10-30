@@ -1871,6 +1871,12 @@ REVIEW_MISSING_ASK = "chưa có review hợp lệ ở head (ADR-0028)"
 AUTO_MERGE_WHY = (
     "bật auto-merge của GitHub (không ghim head) — máy chỉ merge ghim head sau `xt.py merge-check` (ADR-0036)"
 )
+# Subject commit squash tường minh (`gh pr merge -t/--subject`, REST/MCP `commit_title`) đè thiết lập repo
+# `squash_merge_commit_title: PR_TITLE` — subject dài/sai dạng lên nhánh chính (AUD-HAR-126/128, D-255) → deny phẳng.
+SQUASH_SUBJECT_WHY = (
+    "đặt subject commit squash tường minh (`--subject`/`-t`/`commit_title`) — subject = tiêu đề PR do thiết lập repo "
+    "`squash_merge_commit_title: PR_TITLE` (D-254/D-255): bỏ cờ/khoá đó; sửa tiêu đề bằng `gh pr edit <N> --title …`"
+)
 # Cờ của `gh pr merge` ăn thêm một token giá trị — không bóc thì giá trị bị hiểu là số PR.
 GH_MERGE_VALUE_FLAGS: Tuple[str, ...] = (
     *("--match-head-commit", "-b", "--body", "-F", "--body-file", "-t", "--subject"),
@@ -1990,6 +1996,8 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
         return "deny", AUTO_MERGE_WHY
     if _gh_admin_flag(args):
         return "deny", ADMIN_MERGE_WHY
+    if _merge_subject_flag(args):
+        return "deny", SQUASH_SUBJECT_WHY
     sha = _flag_value(args, "--match-head-commit")
     if sum(a == "--match-head-commit" or a.startswith("--match-head-commit=") for a in args) > 1:
         sha = None  # gh lấy lần cuối, guard đã kiểm lần đầu — hai pin là không pin
@@ -1998,6 +2006,17 @@ def gh_pr_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
         why = "tự merge cần `--match-head-commit <sha>` từ `xt.py merge-check`, chỉ cờ"
         return _merge_ask(f"{EXTERNAL_ASK} — {why} {', '.join(sorted(MERGE_ALLOW_FLAGS))}", selector, root, repo)
     return _merge_verdict(selector, sha, root)
+
+
+def _merge_subject_flag(args: List[str]) -> bool:
+    """`gh pr merge` có `-t`/`--subject` (cả `--subject=x`, `-tx` kiểu pflag) — subject squash tường minh; giá trị của cờ
+    khác (`-b "-t x"`) không tính."""
+    skip = False
+    for a in args:
+        if not skip and (a == "--subject" or a.startswith("--subject=") or a[:2] == "-t"):
+            return True
+        skip = not skip and a in GH_MERGE_VALUE_FLAGS
+    return False
 
 
 def _rm_rule(args: List[str], root: str = "", cwd: Optional[str] = None) -> Tuple[str, str]:
@@ -2598,7 +2617,7 @@ def _gh_api_writes(args: List[str]) -> bool:
 # merge-check (ADR-0036 §3). Regex vẫn khớp `auto_merge`: tool bật/tắt đi qua guard; guard lỗi thì chặn
 # (`_failure_decision`).
 MCP_MERGE_RE = re.compile(r"mcp__.+__\w*(merge_pull_request|auto_merge)\w*")
-MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_method", "commit_title", "commit_message"}
+MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_method", "commit_message"}
 
 
 # Dấu review trên PR mà steward/`pr next` tin (ADR-0027) — chỉ `xt.py pr reviewed` đăng (gọi `gh api` từ tiến trình
@@ -2652,11 +2671,13 @@ def _forges_review(argv: List[str]) -> bool:
 def mcp_decision(tool_name: str, tool_input: Dict[str, object], root: str) -> Tuple[str, str]:
     if MCP_REVIEW_POST_RE.fullmatch(tool_name) and REVIEW_MARK_RE.search(json.dumps(tool_input, ensure_ascii=False)):
         return "deny", f"Lệnh bị khung chặn ({REVIEW_FORGE_WHY}): {tool_name}"
-    hit = mcp_attribution(tool_name, tool_input, root)
+    hit = mcp_attribution(tool_name, tool_input, root) or mcp_title(tool_name, tool_input, root)
     if hit:
         return "deny", hit
     if not MCP_MERGE_RE.fullmatch(tool_name):
         return "", ""
+    if tool_input.get("commit_title") is not None:  # subject squash tường minh đè PR_TITLE (AUD-HAR-128)
+        return "deny", f"Lệnh bị khung chặn ({SQUASH_SUBJECT_WHY}): {tool_name}"
     if "enable" in tool_name and "auto_merge" in tool_name:  # bật auto-merge: chặn phẳng (ADR-0036 §3)
         return "deny", f"Lệnh bị khung chặn ({AUTO_MERGE_WHY}): {tool_name}"
     if "disable" in tool_name:  # tắt auto-merge do người bật: máy phải tắt được (ADR-0036, LOOP-STOP-005) — không chặn
@@ -2764,6 +2785,8 @@ def _gh_api_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
     m = REST_MERGE_PATH_RE.fullmatch(pos[0]) if len(pos) == 1 else None  # dạng chuẩn: không giải mã
     pairs = [v.partition("=") for v in _gh_api_field_values(args)]
     fields = {k: v for k, _, v in pairs}
+    if "commit_title" in fields and len(pos) == 1 and ANY_REST_MERGE_RE.fullmatch(_api_path(pos[0])):
+        return "deny", SQUASH_SUBJECT_WHY
     flags = {a.split("=", 1)[0] for a in args if a.startswith("-")} - {"-X", "--method", "-f", "--raw-field"}
     bad = not m or _gh_api_methods(args) != ["PUT"] or flags or len(fields) != len(pairs) or not fields.get("sha")
     if bad or set(fields) - {"sha", "merge_method"} or fields.get("merge_method", "squash") not in MERGE_METHODS:
@@ -2887,6 +2910,8 @@ def _pr_flag_merge_rule(args: List[str], root: str) -> Tuple[str, str]:
         return "deny", AUTO_MERGE_WHY
     if _gh_admin_flag(args[1:]):
         return "deny", ADMIN_MERGE_WHY
+    if _merge_subject_flag(args[args.index("merge", 2) + 1 :]):
+        return "deny", SQUASH_SUBJECT_WHY
     selector, repo = _pr_flag_merge(args, args.index("merge", 2))
     return _merge_ask(f"{EXTERNAL_ASK} — `gh pr <cờ> merge` không tự merge", selector, root, repo)
 
@@ -4475,6 +4500,140 @@ def mcp_attribution(tool_name: str, tool_input: Dict[str, object], root: str) ->
         f"Ghi công AI qua {tool_name} bị khung chặn (`{hit}` — xt.yaml `ai_attribution: forbid`, LOOP-HARNESS-027): "
         "bỏ dòng tên model/URL phiên khỏi tiêu đề/thân/message rồi gọi lại."
     )
+
+
+# Tiêu đề PR và subject commit kiểm LÚC ĐẶT (LOOP-HARNESS-029, D-255) — cùng luật workflow `pr-title`, `merge-check` và
+# `xt.py pr title-check` (D-056; test đối chiếu với xt.py). Subject commit chỉ ép độ dài: commit merge/revert của git
+# không theo type. `pr_title_check: off` ở xt.yaml gần nhất → bỏ. Giá trị guard không đọc được lúc quyết định (`$…`,
+# backtick, `--fill`, message qua ống) → cho qua; CI `pr-title`/BASE-REPO-005 là lớp sau.
+PR_TITLE_TYPES = ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert")
+PR_TITLE_RE = re.compile(rf"({'|'.join(PR_TITLE_TYPES)})(\([a-z0-9._/-]+\))?!?: .+")
+PR_TITLE_MAX = 72
+PR_TITLE_OFF_RE = re.compile(r"^pr_title_check:[ \t]*([\"']?)off\1[ \t]*(?:#.*)?$", re.M)
+# Cờ của `gh pr create|edit` ăn một token giá trị — bóc để `-b "-t x"` không bị đọc thành tiêu đề.
+GH_PR_VALUE_FLAGS = {
+    *("-b", "--body", "-F", "--body-file", "-B", "--base", "-H", "--head", "-a", "--assignee", "-l", "--label"),
+    *("-m", "--milestone", "-p", "--project", "-r", "--reviewer", "-T", "--template", "-R", "--repo"),
+    *("--add-assignee", "--add-label", "--add-project", "--add-reviewer", "--remove-assignee", "--remove-label"),
+    *("--remove-project", "--remove-reviewer", "--recover"),
+}
+MCP_PR_TITLE_RE = re.compile(r"mcp__.+__(create_pull_request|update_pull_request)")
+MCP_COMMIT_RE = re.compile(r"mcp__.+__(create_or_update_file|push_files|delete_file)")
+COMMIT_MESSAGE_OPTS = {"-m": "m", "--message": "m", "-F": "F", "--file": "F"}
+TITLE_FIX = (
+    "viết lại dạng `<type>(scope): mô tả` ≤ 72 ký tự rồi chạy lại (kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
+)
+
+
+def _opaque(text: str) -> bool:
+    """Chữ shell còn mở rộng lúc chạy (biến, `$(…)`, backtick) — guard không biết giá trị thật."""
+    return "$" in text or "`" in text
+
+
+def pr_title_problem(title: str) -> str:
+    """Lỗi của tiêu đề PR theo luật `pr-title` ('' = hợp lệ); `Revert "…"` của nút Revert được miễn như merge-check."""
+    title = title.strip()
+    if title.startswith('Revert "'):
+        return ""
+    bad = [f"dài {len(title)} ký tự > {PR_TITLE_MAX}"] if len(title) > PR_TITLE_MAX else []
+    if not PR_TITLE_RE.fullmatch(title):
+        bad.append(f"sai dạng `<type>(scope): mô tả` (type: {'|'.join(PR_TITLE_TYPES)})")
+    return "; ".join(bad)
+
+
+def commit_subject_problem(message: str) -> str:
+    """Subject (dòng không trống đầu tiên, như git dọn) dài hơn PR_TITLE_MAX → lỗi; '' = hợp lệ hoặc không đọc được."""
+    subject = next((ln.rstrip() for ln in message.splitlines() if ln.strip()), "")
+    if _opaque(subject) or len(subject) <= PR_TITLE_MAX:
+        return ""
+    return f"subject dài {len(subject)} ký tự > {PR_TITLE_MAX}"
+
+
+def _gh_pr_titles(args: List[str]) -> List[str]:
+    """Giá trị `-t/--title` của `gh pr create|edit` (sau `pr`, bỏ `-R/--repo x`); lệnh khác → []."""
+    rest = list(args)
+    while rest[:1] in (["-R"], ["--repo"]) or rest[:1] and rest[0].startswith("--repo="):
+        rest = rest[2:] if rest[0] in ("-R", "--repo") else rest[1:]
+    if rest[:1] not in (["create"], ["edit"]):
+        return []
+    out: List[str] = []
+    skip = False
+    for i, x in enumerate(rest[1:], 1):
+        if skip:
+            skip = False
+            continue
+        key, sep, val = x.partition("=")
+        if x in ("-t", "--title"):
+            out.append(rest[i + 1] if i + 1 < len(rest) else "")
+            skip = True
+        elif sep and key == "--title":
+            out.append(val)
+        elif x[:2] == "-t" and len(x) > 2:  # `-tfeat: x` (pflag)
+            out.append(x[2:])
+        skip = skip or x in GH_PR_VALUE_FLAGS
+    return out
+
+
+def _commit_message(args: List[str], gdir: str, bodies: List[str]) -> Optional[str]:
+    """Message của `git commit` guard đọc được: `-m` đầu tiên (subject nằm ở đó), file `-F`, thân heredoc (`-F -`,
+    `-m "$(cat <<E…)"`); không có/không đọc được → None."""
+    for i, x in enumerate(args):
+        key, sep, val = x.partition("=")
+        m = COMMIT_SHORT_VALUE_RE.match(x)
+        if x in COMMIT_MESSAGE_OPTS:
+            kind, v = COMMIT_MESSAGE_OPTS[x], args[i + 1] if i + 1 < len(args) else ""
+        elif sep and key in ("--message", "--file"):
+            kind, v = COMMIT_MESSAGE_OPTS[key], val
+        elif m and m.group(2) in "mF" and not x.startswith("--"):
+            kind, v = m.group(2), x[m.end() :] or (args[i + 1] if i + 1 < len(args) else "")
+        else:
+            continue
+        if v == "-" and kind == "F" or kind == "m" and "$(" in v:
+            return bodies[0] if bodies else None
+        return (_read_head(posixpath.join(gdir, v)) or None) if kind == "F" else v
+    return None
+
+
+def title_rule(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: str) -> str:
+    """Lý do chặn khi `gh pr create|edit` đặt tiêu đề sai luật `pr-title` hoặc `git commit` có subject quá dài; không thì
+    rỗng (LOOP-HARNESS-029)."""
+    for argv, here in commands:
+        target = _attribution_target(argv, here, root)
+        if target is None or PR_TITLE_OFF_RE.search(_read_head(_xt_yaml_for(target[0]))):
+            continue
+        gdir, _, kind = target
+        n = normalize(argv)
+        if kind == "pr":
+            bad = next(
+                ((t, p) for t in _gh_pr_titles(n[2:]) if not _opaque(t) for p in [pr_title_problem(t)] if p), None
+            )
+            if bad:
+                return f"Tiêu đề PR bị khung chặn ({bad[1]}: {bad[0][:100]!r} — LOOP-HARNESS-029, D-056): {TITLE_FIX}."
+            continue
+        message = _commit_message(n[2:], gdir, _heredoc_bodies(cmd))
+        problem = commit_subject_problem(message) if message is not None else ""
+        if problem:
+            return (
+                f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029: subject có thể thành subject commit squash): "
+                "rút gọn dòng đầu ≤ 72 ký tự, chi tiết đưa xuống thân rồi chạy lại."
+            )
+    return ""
+
+
+def mcp_title(tool_name: str, tool_input: Dict[str, object], root: str) -> str:
+    """Tiêu đề PR (`create|update_pull_request`) và subject commit (`create_or_update_file`, `push_files`, `delete_file`)
+    qua tool MCP — cùng luật `title_rule`; không thì rỗng."""
+    if PR_TITLE_OFF_RE.search(_read_head(_xt_yaml_for(root))):
+        return ""
+    title, message = tool_input.get("title"), tool_input.get("message")
+    if MCP_PR_TITLE_RE.fullmatch(tool_name) and isinstance(title, str) and pr_title_problem(title):
+        return f"Tiêu đề PR qua {tool_name} bị khung chặn ({pr_title_problem(title)} — LOOP-HARNESS-029): {TITLE_FIX}."
+    if MCP_COMMIT_RE.fullmatch(tool_name) and isinstance(message, str) and commit_subject_problem(message):
+        return (
+            f"Commit qua {tool_name} bị khung chặn ({commit_subject_problem(message)} — LOOP-HARNESS-029): rút gọn "
+            "dòng đầu ≤ 72 ký tự rồi gọi lại."
+        )
+    return ""
 
 
 def _track_exports(res: Dict[str, object], argv: List[str], n: List[str]) -> Tuple[str, ...]:
@@ -7061,7 +7220,9 @@ def bash_decision(
     res.pop("exported_env", None)
     deny_reason = deny_reason or find_root_scan(cmd, root, cwd) or _commit_after_write(commands)
     deny_reason = deny_reason or (
-        ai_attribution(cmd, commands, root) if res["commit"] or GH_PR_TEXT_RE.search(cmd) else ""
+        ai_attribution(cmd, commands, root) or title_rule(cmd, commands, root)
+        if res["commit"] or GH_PR_TEXT_RE.search(cmd)
+        else ""
     )
     if deny_reason:
         res.update(decision="deny", reason=deny_reason)
