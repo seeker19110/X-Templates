@@ -3403,3 +3403,23 @@ class GitNoReplaceTest(TmpRepoCase):
         self.assertIsNone(err)
         self.assertEqual(sorted(extra), ["app.py", "evil.py"])
         self.assertEqual(xt._git(self.repo, "show", f"{last}:app.py").stdout, "ok\n")
+
+    def test_review_drift_ignores_grafts(self):
+        """Grafts (`.git/info/grafts`, `GIT_GRAFT_FILE`) đổi cha của commit nên `merge-base` lệch — trả file PR đã sửa
+        về bản nhánh đích sau review vẫn bị thấy (review #353; AUD-SEC-168)."""
+        self.init_repo()
+        base = self.commit_files({"app.py": "v0\n", "docs/ops/AUDIT-STATUS.md": "# sổ\n"}, 1)
+        self.git("update-ref", "refs/remotes/origin/main", base)
+        last = self.commit_files({"app.py": "v1\n"}, 2)
+        head = self.commit_files({"app.py": "v0\n"}, 3)
+        root = self.git("commit-tree", last + "^{tree}", "-m", "gốc giả")
+        grafts = f"{last} {root}\n{base} {root}\n"
+        self.assertEqual(xt._review_drift(self.repo, last, head, "main")[1], ["app.py"])
+        (self.repo / ".git" / "info" / "grafts").write_text(grafts, encoding="utf-8")
+        self.assertEqual(xt._review_drift(self.repo, last, head, "main")[1], ["app.py"])
+        self.assertEqual(xt._git(self.repo, "show", "--no-patch", last).stderr, "")  # không lẫn cảnh báo grafts
+        (self.repo / ".git" / "info" / "grafts").unlink()
+        alt = self.tmp / "grafts"
+        alt.write_text(grafts, encoding="utf-8")
+        with unittest.mock.patch.dict(os.environ, {"GIT_GRAFT_FILE": str(alt)}):
+            self.assertEqual(xt._review_drift(self.repo, last, head, "main")[1], ["app.py"])
