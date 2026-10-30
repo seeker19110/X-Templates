@@ -182,15 +182,29 @@ SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|privat
 # Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9).
 SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
+# Khối khoá theo dòng cho bằng chứng triage (`_pem_mask_lines`); chỉ đúng chuỗi `PEM_MASK` (đã che) không mở khối.
+PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
+PEM_MASK = "-----BEGIN PRIVATE KEY----- ***"
+PEM_END_RE = re.compile(r"-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
+    # Khối PEM ĐẦU TIÊN: mẫu cờ/gán (`--password `, `KEY="…`) chạy trước từng ăn mất header nên thân khoá lộ (review #340)
+    (
+        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
+        re.compile(
+            r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----(?! \*\*\*)"
+            r".*?(-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----|\Z)",
+            re.S,
+        ),  # `( BLOCK)?`: khoá PGP armored (review #342); `SECRET KEY BLOCK`: armor PGP cũ GnuPG vẫn đọc
+        PEM_MASK,
+    ),
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
     # Mỗi loại nháy một mẫu: nháy loại kia nằm trong giá trị (`"it's a b"`) và nháy chưa đóng (tới hết dòng) cũng che hết
     # (AUD-CFG-006). `(?<!\w)` neo đầu từ: không có nó `\w*` thử mọi vị trí → bậc hai trên dòng dài (reviewer #61).
     (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)\"[^\"\n]*(?:\"|$)"), r'\1"***"'),
     (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)'[^'\n]*(?:'|$)"), r"\1'***'"),
     (re.compile(r"(?i)\b(bearer|basic|token)(\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1\2***"),
-    (re.compile(r"(?i)(--(?:password|passwd|token|secret|api-key)[= ])(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
+    (re.compile(r"(?i)(--(?:password|passwd|passphrase|token|secret|api-key)[= ])(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
     # AUD-CFG-002: user rỗng (`redis://:pw@`); token làm user (`https://<key>@`); `curl -u u:p`; `mysql -pPW`; JWT;
     # tiền tố khoá npm/PyPI/Hugging Face/Google/Stripe restricted.
     (re.compile(r"(://[^/\s:@]*:)[^@\s/]+@"), r"\1***@"),
@@ -209,11 +223,6 @@ SECRET_PATTERNS = (
     # npm/Hugging Face/PyPI: đúng dạng khoá (độ dài, bảng chữ) — `npm_config_cache`, `hf_hub_download` là định danh
     # thường, từng bị che (AUD-CFG-007).
     (re.compile(r"\b(npm_)[A-Za-z0-9]{36}\b|\b(hf_)[A-Za-z0-9]{20,}\b|\b(pypi-AgE)[A-Za-z0-9_-]{8,}"), r"\1\2\3***"),
-    (
-        # `(?! \*\*\*)`: không ăn lại chính chuỗi đã che khi redact lần hai (`_gate_tail`) — chữ sau khối còn nguyên
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?! \*\*\*).*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
-        "-----BEGIN PRIVATE KEY----- ***",
-    ),
 )
 
 
@@ -225,6 +234,12 @@ def redact(text: str) -> str:
     for rx, repl in SECRET_PATTERNS:
         text = rx.sub(repl, text)
     return SECRET_RE.sub(r"\1\2***", text)
+
+
+def redact_tail(text: str, n: int) -> str:
+    """`n` dòng cuối của output đã che — che trên CẢ output rồi mới cắt: khối PEM dài hơn cửa sổ mất dòng BEGIN thì không
+    còn che được (AUD-SEC-142). Dùng cho mọi `output_tail` ghi vào `.autopilot/` hay lời báo."""
+    return "\n".join(redact(text).strip().splitlines()[-n:])
 
 
 def redact_feedback(text: str) -> str:
@@ -1088,7 +1103,7 @@ def run_blueprint_checks(checks: List[Dict[str, Any]], base: Path, timeout: int)
             hit = (2, "ghi chú `Kiểm:` phải có đúng một lệnh trong một cặp backtick (nhiều lệnh gộp bằng `&&`)")
         elif hit is None:
             code, text = run_gate_shell(c["cmd"], base, timeout)
-            hit = (code, redact("\n".join(text.strip().splitlines()[-20:])))
+            hit = (code, redact_tail(text, 20))
             done.append((c["cmd"], *hit))
         out.append({"id": c["id"], "cmd": redact(c["cmd"]), "exit_code": hit[0], "output_tail": hit[1]})
     return out
@@ -1207,7 +1222,8 @@ def _git_tree(d: Path) -> Optional[Tuple[Path, Path]]:
 def loop_root(base: Path) -> Path:
     """Gốc cho `loop` gõ tay (T-2521): cwd nằm trong một git worktree KHÁC của cùng repo với `base` (cùng
     `--git-common-dir`) → gốc worktree đó — Gate chạy, PLAN được tick, `.autopilot/` (gitignored: sổ riêng mỗi worktree)
-    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới. Mọi trường hợp khác → `base`."""
+    đều ở cây đang sửa, không ở cây chính `CLAUDE_PROJECT_DIR` trỏ tới; dự án ở thư mục con của repo → cùng thư mục con
+    trong worktree đó. Mọi trường hợp khác (kể cả cwd trong chính worktree của dự án ở thư mục con) → `base`."""
     base = base.resolve()
     try:
         here = _git_tree(Path.cwd())
@@ -1216,7 +1232,12 @@ def loop_root(base: Path) -> Path:
     if here is None or here[0] == base:
         return base
     home = _git_tree(base)
-    return here[0] if home is not None and home[1] == here[1] else base
+    if home is None or home[1] != here[1] or home[0] == here[0]:
+        return base  # repo khác, hay cùng worktree với dự án ở thư mục con (monorepo `apps/web`) — giữ gốc dự án (review #339)
+    if not base.is_relative_to(home[0]):  # `core.worktree` lạ: không đoán
+        return base
+    sub = here[0] / base.relative_to(home[0])  # worktree khác: cùng thư mục con trong cây đang sửa
+    return sub if sub.is_dir() else base  # thư mục con chưa có ở worktree kia: Gate không chạy được ở đó (review #342)
 
 
 def state_dir(base: Optional[Path] = None) -> Path:
@@ -2665,7 +2686,7 @@ def _verify_gates(base: Path, tasks: List[Dict[str, Any]], timeout: int, run_all
             print(f"[xt] verify {t['id']}: giữ — evidence v2 khớp lệnh, phạm vi, yêu cầu, digest file")
             continue
         code, out = run_gate_shell(t["gate"], base, timeout)
-        tail = redact("\n".join(out.strip().splitlines()[-20:]))
+        tail = redact_tail(out, 20)
         results.append(
             {"task": t["id"], "gate": t["gate"], "exit_code": code, "rerun": reasons[0], "output_tail": tail}
         )
@@ -2749,7 +2770,7 @@ def _verify_floor(base: Path, gates: List[Dict[str, Any]], timeout: int) -> List
         if any(same_command(cmd, r["gate"]) for r in gates) or any(same_command(cmd, r["cmd"]) for r in out):
             continue
         code, text = run_gate_shell(cmd, base, timeout)
-        tail = redact("\n".join(text.strip().splitlines()[-20:]))
+        tail = redact_tail(text, 20)
         out.append({"key": key, "cmd": cmd, "exit_code": code, "output_tail": tail})
         print(f"[xt] verify sàn Gate `{key}`: exit {code}")
     for r in out:
@@ -2850,7 +2871,7 @@ def loop_record(
         "started": started,
         "finished": now_iso(),
         "head": _git_head(base),
-        "output_tail": redact("\n".join(out.strip().splitlines()[-40:])),
+        "output_tail": redact_tail(out, 40),
     }
     if code == ZERO_TESTS_EXIT and ZERO_TESTS_MARK in out:
         ev["zero_tests_red"] = True  # lý do đỏ dù lệnh exit 0 — Stop hook/người đọc evidence thấy ngay
@@ -3180,12 +3201,14 @@ def stop_hint(base: Path) -> str:
     chỉ in, không chặn, không ghi (ADR-0052 §5; cho Stop hook đọc/chuyển trạng thái là lát 4). Mục tiêu theo
     `delivery_phase` của cây làm việc — vắng/lạ là harden như mọi nơi khác (review #326); không có JSON `pr next` nên bước
     PR nhắc đối soát. Lỗi đọc → '' (fail-open)."""
-    harden = _xt_keys(base).get(PHASE_KEY) != "build"
     try:
+        harden = _xt_keys(base).get(PHASE_KEY) != "build"
         # giai đoạn 1: vòng nào cũng là build tới trình MVP — khoá `/complete` không che lý do dừng thật (review #338);
-        # sổ hỏng ({"error"}) giữ harden để khoá báo lỗi sổ
-        sf = stage_facts(base) if harden else None
-        harden = harden and (not sf or sf.get("stage") != 1)
+        # sổ hỏng (StageError) giữ harden để khoá báo lỗi sổ; đọc sổ thô, không `stage_facts` (vân tay/diff chạy lại ở
+        # `next_step_facts` — review #340)
+        with contextlib.suppress(StageError):
+            led = read_stage(base) if harden else None
+            harden = harden and (not led or led["stage"] != 1)
         objective = NEXT_STEP_OBJECTIVES[1] if harden else NEXT_STEP_OBJECTIVES[0]
         out = next_step(next_step_facts(base, read_state(base) or {}, AUDIT_STATUS_DEFAULT, None, objective))
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
@@ -3855,7 +3878,8 @@ def _path_groups(path: str) -> List[int]:
     g: List[int] = []
     if path.startswith(".github/workflows/") or name == ".gitlab-ci.yml":
         g += [8, 2]
-    if name in MANIFESTS or name in LOCKFILES or re.match(r"requirements.*\.txt$", name):
+    # cùng regex với thẻ "phụ thuộc" của làn merge: manifest nào làm PR vào làn chuẩn cũng có nợ theo nhóm DEP (AUD-SEC-138)
+    if name in MANIFESTS or name in LOCKFILES or DEP_PATH_RE.search(path):
         g += [7, 2]
     if re.search(r"(^|/)(tests?|__tests__|spec)/", path) or re.search(
         r"(_test\.go|\.(test|spec)\.[jt]sx?|test_[^/]+\.py)$", path
@@ -5123,6 +5147,17 @@ MERGE_FIELDS = (
 )
 FAST_LANE_MAX_LINES = 150  # vị từ làn nhanh, 11-autonomous-loop/stop-points-and-escalation.md
 GH_TIMEOUT = 60
+# Manifest/lockfile phụ thuộc: thẻ làn merge, nhóm audit DEP (`_path_groups`) và không bao giờ là tài liệu (AUD-SEC-138/139)
+DEP_PATH_RE = re.compile(
+    r"(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.(jsonc?|lock)"
+    r"|pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|setup\.(py|cfg)|environment\.ya?ml"
+    r"|(?i:[^/]*(requirements|constraints)[^/]*\.(txt|in)|requirements/.*\.(txt|in))"  # D-234: constraints, cấp sâu
+    r"|go\.(mod|sum|work)|Cargo\.(toml|lock)|Gemfile(\.lock)?|[^/]+\.gemspec|composer\.(json|lock)"
+    # D-235 (review #323): .NET/JVM/Dart/Swift/Elixir/C++ — `*.csproj`, `packages.lock.json` có trong BASE-DEP-001
+    r"|[^/]+\.(cs|fs|vb)proj|packages\.lock\.json|packages\.config|Directory\.Packages\.props|global\.json"
+    r"|pom\.xml|(build|settings)\.gradle(\.kts)?|gradle\.lockfile|libs\.versions\.toml|pubspec\.(yaml|lock)"
+    r"|Podfile(\.lock)?|Package\.(swift|resolved)|mix\.(exs|lock)|conanfile\.(txt|py)|vcpkg\.json)$"
+)
 # Đường dẫn nhạy cảm → làn chuẩn (người merge). Bắt rộng có chủ đích: báo oan chỉ làm người phải bấm merge.
 RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("bí mật", re.compile(r"(^|/)(\.env|secrets?/)|\.(pem|key|p12)$", re.I)),
@@ -5133,19 +5168,7 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("cổng/CI", re.compile(r"(^|/)(\.github|\.claude|\.xtemplates)/|ruleset", re.I)),
     ("nguồn gói", re.compile(r"(^|/)(\.npmrc|\.yarnrc(\.yml)?|\.pypirc|pip\.(conf|ini)|uv\.toml|bunfig\.toml)$")),
     ("ảnh/container", re.compile(r"(^|/)(Dockerfile[^/]*|Containerfile[^/]*|(docker-)?compose[^/]*\.ya?ml)$", re.I)),
-    (
-        "phụ thuộc",
-        re.compile(
-            r"(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.(jsonc?|lock)"
-            r"|pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|setup\.(py|cfg)|environment\.ya?ml"
-            r"|(?i:[^/]*(requirements|constraints)[^/]*\.(txt|in)|requirements/.*\.(txt|in))"  # D-234: constraints, cấp sâu
-            r"|go\.(mod|sum|work)|Cargo\.(toml|lock)|Gemfile(\.lock)?|[^/]+\.gemspec|composer\.(json|lock)"
-            # D-235 (review #323): .NET/JVM/Dart/Swift/Elixir/C++ — `*.csproj`, `packages.lock.json` có trong BASE-DEP-001
-            r"|[^/]+\.(cs|fs|vb)proj|packages\.lock\.json|packages\.config|Directory\.Packages\.props|global\.json"
-            r"|pom\.xml|(build|settings)\.gradle(\.kts)?|gradle\.lockfile|libs\.versions\.toml|pubspec\.(yaml|lock)"
-            r"|Podfile(\.lock)?|Package\.(swift|resolved)|mix\.(exs|lock)|conanfile\.(txt|py)|vcpkg\.json)$"
-        ),
-    ),
+    ("phụ thuộc", DEP_PATH_RE),
 )
 # File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
 # `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
@@ -5178,12 +5201,19 @@ LOCKFILE_RE = re.compile(
     r"|Pipfile\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|composer\.lock|packages\.lock\.json|gradle\.lockfile|pubspec\.lock"
     r"|Podfile\.lock|Package\.resolved|mix\.lock)$"  # review #324 T3: lockfile của thẻ phụ thuộc D-235
 )
-# Tài liệu (D-232, review #322) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): đuôi văn bản md/mdx/
-# rst/txt ở mọi nơi trừ `.txt` phụ thuộc (`*requirements*.txt`, `*constraints*.txt`, `requirements/**.txt`, `CMakeLists.txt`, `conanfile.txt`);
-# đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC
-# repo. Trước đây mọi `…/docs/…` ở mọi độ sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review
-# (hàng BLOCKER `review_debt`) và làn merge (AUD-SEC-134).
-DOC_TEXT_EXT = ("md", "mdx", "rst", "txt")
+# Tài liệu (D-232, review #322; D-253) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): `.md`/`.rst`
+# trừ khi (ngoài `docs/` gốc) nằm dưới thư mục chạy thật (`RUNTIME_DOC_DIR_RE`: prompt, mã app, mẫu, agent/skill, mọi thư mục
+# `command(s)/`); `.txt` chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (README.txt dưới thư mục chạy thật là mã) (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
+# allowlist host); `.mdx` luôn là mã (biên dịch thành JSX); đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết
+# hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC repo; khớp `DEP_PATH_RE` (manifest
+# phụ thuộc, kể cả `docs/package.json`) không bao giờ là tài liệu (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
+# sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review (hàng BLOCKER `review_debt`) và làn merge
+# (AUD-SEC-134).
+DOC_TEXT_EXT = ("md", "rst")
+DOC_TXT_NAME_RE = re.compile(r"(README|CHANGELOG|CHANGES|HISTORY|AUTHORS|CONTRIBUTORS)\.txt", re.I)
+RUNTIME_DOC_DIR_RE = re.compile(
+    r"(^|/)(prompts?|src|app|pages|lib|server|api|templates?|agents?|skills?|commands?)/", re.I
+)
 DOC_ASSET_EXT = ("png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf", "csv", "json", "bib")
 # Rộng (đóng khi nghi ngờ — review #323): `docs/design-constraints.txt` thành mã chỉ tốn một lượt review
 DEP_TXT_RE = re.compile(r"(^|/)([^/]*(requirements|constraints)[^/]*|requirements/.*|CMakeLists|conanfile)\.txt$", re.I)
@@ -5199,15 +5229,19 @@ DOCS_TEST_DIR_RE = re.compile(r"(^|/)docs?/(.*/)?(tests?|__tests__|spec|e2e)/", 
 def is_doc_path(path: str) -> bool:
     """File là tài liệu (không tính nợ review, không tính dòng/gói/test của làn merge) — xem chú thích trên. Tên có xuống
     dòng → mã (không đoán)."""
-    if "\n" in path or "\r" in path:
+    if "\n" in path or "\r" in path or DEP_PATH_RE.search(path):
         return False
     name = path.rsplit("/", 1)[-1]
     if LICENSE_NAME_RE.fullmatch(name):
         return True
     ext = name.rsplit(".", 1)[1].lower() if "." in name.lstrip(".") else ""
+    in_docs = re.match(r"docs?/", path, re.I) is not None
     if ext in DOC_TEXT_EXT:
-        return not DEP_TXT_RE.search(path)
-    return ext in DOC_ASSET_EXT and re.match(r"docs?/", path, re.I) is not None
+        return in_docs or not RUNTIME_DOC_DIR_RE.search(path)
+    if ext == "txt":
+        named = DOC_TXT_NAME_RE.fullmatch(name) is not None and not RUNTIME_DOC_DIR_RE.search(path)
+        return (in_docs or named) and not DEP_TXT_RE.search(path)
+    return ext in DOC_ASSET_EXT and in_docs
 
 
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|__tests__|spec|e2e)/|(_test|\.test|\.spec|_spec)\.[^/]+$|(^|/)test_[^/]+$")
@@ -5542,6 +5576,16 @@ def _risk_labels(pr: Dict[str, Any]) -> List[str]:
         for n in (str(lb.get("name", "")) for lb in pr.get("labels") or [] if isinstance(lb, dict))
         if n.startswith("risk:")
     ]
+
+
+def squash_subject(pr: Dict[str, Any]) -> str:
+    """Subject commit squash = tiêu đề PR (đã qua `pr title-check`) + ` (#N)` — steward gửi `commit_title` (không qua guard).
+    GitHub mặc định `COMMIT_OR_PR_TITLE`: PR một commit lấy subject của commit đó — dài/sai dạng thì lách luật tiêu đề,
+    `main` đỏ BASE-REPO-005 (#340). Lệnh in cho agent/MCP giữ dạng chuẩn guard allow; repo đặt `squash_merge_commit_title:
+    PR_TITLE` để merge không truyền `commit_title`/`--subject` lấy tiêu đề PR (D-254) — truyền tường minh thì đè (AUD-HAR-128).
+    '' khi thiếu."""
+    title, n = str(pr.get("title") or "").strip(), pr.get("number")
+    return f"{title} (#{n})" if title and n else ""
 
 
 def merge_decision(
@@ -7927,17 +7971,48 @@ def _ci_log_lines(text: str) -> List[str]:
     return [line for line in lines if line]
 
 
+def _pem_mask_lines(lines: List[str]) -> List[str]:
+    """Che khối khoá theo dòng, GIỮ số dòng: từ header tới END (chưa đóng → tới hết) bị che; sau END quét tiếp phần còn
+    lại của dòng (khoá kế mở ngay sau END); đúng `PEM_MASK` (đã che) giữ nguyên. Dòng thô vẫn dùng để phân loại — che
+    trước trên cả log (`|\\Z`) thì header chưa đóng nuốt dòng nhận diện `secret` (review #342). Tìm theo vị trí, không
+    cắt chuỗi: tuyến tính trên dòng dài nhiều cặp BEGIN/END."""
+    out: List[str] = []
+    inside = False
+    for line in lines:
+        kept, pos = "", 0
+        while pos < len(line):
+            m = (PEM_END_RE if inside else PEM_BEGIN_RE).search(line, pos)
+            if not m:
+                kept += "" if inside else line[pos:]
+                break
+            if not inside:
+                kept += line[pos : m.start()] + PEM_MASK
+                if line.startswith(PEM_MASK, m.start()):
+                    pos = m.start() + len(PEM_MASK)
+                    continue
+            inside, pos = not inside, m.end()
+        out.append(kept or "***")
+    return out
+
+
 def ci_classify(text: str) -> Dict[str, Any]:
     """Phân loại log job CI: loại thắng, mọi loại khớp, dòng lỗi làm bằng chứng và chữ ký (số → N, ổn định qua run).
-    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó."""
+    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó. Phân loại và chữ ký trên
+    dòng thô; bằng chứng vào `.autopilot/state.json` và ngữ cảnh agent nên che (AUD-SEC-145): khối khoá theo dòng
+    (`_pem_mask_lines`), rồi `redact` từng dòng — giá trị bí mật nằm ở dòng sau khoá (`password:⏎…`) không được che."""
     lines = _ci_log_lines(text)
-    hits = {cat: [line for line in lines if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
+    hits = {cat: [i for i, line in enumerate(lines) if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
     cats = [cat for cat, _ in CI_TRIAGE_RULES if hits[cat]]
     category = cats[0] if cats else "unknown"
-    evidence = list(dict.fromkeys(hits.get(category) or lines[-CI_TRIAGE_EVIDENCE:]))[:CI_TRIAGE_EVIDENCE]
-    norm = "\n".join(re.sub(r"\d+", "N", line) for line in evidence)
+    picked = hits.get(category) or range(max(0, len(lines) - CI_TRIAGE_EVIDENCE), len(lines))
+    first: Dict[str, int] = {}
+    for i in picked:  # bỏ trùng theo nội dung, giữ lần đầu
+        first.setdefault(lines[i], i)
+    idx = list(first.values())[:CI_TRIAGE_EVIDENCE]
+    norm = "\n".join(re.sub(r"\d+", "N", lines[i]) for i in idx)
     signature = hashlib.sha256(f"{category}\n{norm}".encode()).hexdigest()[:16]
-    shown = [] if category == "secret" else evidence
+    masked = _pem_mask_lines(lines)
+    shown = [] if category == "secret" else [redact(masked[i]) for i in idx]
     return {"category": category, "categories": cats, "signature": signature, "evidence": shown}
 
 
@@ -10197,7 +10272,7 @@ def _stage_print(led: Optional[Dict[str, Any]], as_json: bool) -> None:
     print(f"{led['cycle']} · giai đoạn {led['stage']} ({name}) · {led['status']}")
     if led["status"] == "awaiting_approval":
         sub = led["submitted"]
-        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub['evidence']}")
+        print(f"  chờ người duyệt bản {sub['sha'][:12]}: {sub.get('evidence', '?')}")
         print(f"  chạy thử: {sub.get('preview') or '(xt.yaml chưa khai `preview`)'} · máy: {sub.get('verified', '?')}")
         print(f"  smoke: {sub.get('smoke') or '(bản trình trước D-247)'}")
         print(
@@ -11428,12 +11503,26 @@ def _publish_review(pr_arg: str, key: str, head: str, clean: bool, inconclusive:
 # --------------------------------------------------------------------------- pr steward (ADR-0027)
 
 
-def _steward_command(out: Dict[str, Any], repo: str) -> List[List[str]]:
+def _steward_command(out: Dict[str, Any], repo: str, subject: str = "") -> List[List[str]]:
     """Lệnh gh cho hành động `pr next` mà steward tự làm; [] = chỉ báo (review, fix, defer-human, chờ…). Merge luôn ghim
-    head (REST `sha`); không bao giờ bật auto-merge (ADR-0036)."""
+    head (REST `sha`) và đặt subject squash = tiêu đề PR (`squash_subject`); không bao giờ bật auto-merge (ADR-0036)."""
     n, head, action = str(out["pr"]), str(out["head"]), out["action"]
     if action == "merge":
-        return [["gh", "api", "-X", "PUT", f"{repo}/pulls/{n}/merge", "-f", "merge_method=squash", "-f", f"sha={head}"]]
+        title = ["-f", f"commit_title={subject}"] if subject else []
+        return [
+            [
+                "gh",
+                "api",
+                "-X",
+                "PUT",
+                f"{repo}/pulls/{n}/merge",
+                "-f",
+                "merge_method=squash",
+                "-f",
+                f"sha={head}",
+                *title,
+            ]
+        ]
     if action == "disable-auto-merge":
         return [["gh", "pr", "merge", n, "--disable-auto"]]
     if action == "update" and _steward_can_update():  # tụt sau nhánh đích: GitHub tạo merge commit, ghim head đang thấy
@@ -11511,7 +11600,8 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
             out["warn"] = f"không gắn được nhãn {STANDARD_LABEL}: {label_err} — lượt sau thử lại"
             if out["action"] != "disable-auto-merge":  # tắt auto-merge (giữ PR lại) vẫn chạy
                 return out
-    cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in _steward_command(out, repo)]
+    steward = _steward_command(out, repo, squash_subject(pr))
+    cmds = [c[:3] + gh_repo + c[3:] if c[:3] == ["gh", "pr", "merge"] else c for c in steward]
     target = str(pr.get("baseRefName") or "main")
     # như trigger `push` của release-tag.yml: chỉ nhánh `main` (nhánh khác: job bị bỏ qua, bản cũ thiếu input → 422)
     tag = target == "main" and "VERSION" in _risky_paths(pr) and (base / RELEASE_WORKFLOW_FILE).is_file()

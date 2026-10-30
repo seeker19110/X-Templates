@@ -717,13 +717,20 @@ class MergeDecisionTest(unittest.TestCase):
 
     def test_is_doc_path(self):
         """D-232 (review #322): tài liệu theo danh sách cho phép — mọi thứ khác là mã (đóng khi nghi ngờ)."""
-        docs = ("README.md", "pkg/docs/x.md", "notes.txt", "docs/img/a.png", "docs/ops/x.json", "LICENSE", "COPYING")
+        docs = (
+            "README.md",
+            "pkg/docs/x.md",
+            "docs/notes.txt",
+            "docs/img/a.png",
+            "docs/ops/x.json",
+            "LICENSE",
+            "COPYING",
+        )
         docs += (
             "LICENSE.md",
             "NOTICE.txt",
             "Docs/a.PNG",
             "x.rst",
-            "y.mdx",
             "license",
             "LICENSE-MIT",
             "NOTICE-3rdparty",
@@ -733,6 +740,8 @@ class MergeDecisionTest(unittest.TestCase):
             "requirements/REQ-001.md",
             "requirements/README.md",
         )
+        # D-253: README.txt/CHANGELOG.txt ở mọi nơi; .md trong docs/ gốc dù có thư mục chạy thật trong đường dẫn
+        docs += ("README.txt", "pkg/CHANGELOG.txt", "docs/src/x.md", "docs/prompts/x.md", "framework/00-method/x.md")
         code = ("docs/conf.py", "docs/run", "docs/.nojekyll", "src/api/docs/routes.py", "src/LicenseManager.java")
         code += ("license-allow.json", "requirements.txt", "dev-requirements.txt", "constraints.txt", "CMakeLists.txt")
         code += ("requirements/prod.txt", "packages/web/docs/a.png", "docs/x\ny.png", "docs/x\r.md", "Requirements.txt")
@@ -741,8 +750,24 @@ class MergeDecisionTest(unittest.TestCase):
         code += ("upper-constraints.txt", "requirements/edx/base.txt", "docs/design-constraints.txt")
         code += ("scripts/license-check", "bin/notice-gen", "copying-tool", "NOTICE-run.sh")
         code += ("requirements-dev.txt", "src/license.py", "conanfile.txt")  # đột biến D8/L6 (review #323 lượt 2)
+        # AUD-SEC-135 (D-253): .mdx chạy JSX, prompt/mã app/mẫu/agent bằng .md, .txt ngoài docs/ là mã
+        code += ("y.mdx", "app/admin/page.mdx", "docs/x.mdx", "prompts/system.md", "src/README.md", "app/x.md")
+        code += ("notes.txt", "src/security/allowed_hosts.txt", "packages.txt", "apt.txt", "runtime.txt")
+        code += ("vendor/modules.txt", ".claude/agents/reviewer.md", "x/skills/a/SKILL.md", "templates/mail.md")
+        code += ("prompts/README.txt", ".claude/commands/deploy.md")  # review #342
+        # AUD-SEC-139: manifest phụ thuộc trong docs/ gốc không phải tài liệu
+        code += ("docs/package.json", "docs/package-lock.json", "docs/deno.json", "docs/vcpkg.json")
         self.assertEqual([p for p in docs if not xt.is_doc_path(p)], [])
         self.assertEqual([p for p in code if xt.is_doc_path(p)], [])
+
+    def test_runtime_text_takes_standard_lane(self):
+        """AUD-SEC-135 (D-253): `.mdx`, prompt `.md`, `.txt` cấu hình không còn vào làn nhanh như tài liệu."""
+        for path in ("app/admin/page.mdx", "prompts/system.md", "src/security/allowed_hosts.txt", "packages.txt"):
+            with self.subTest(path=path):
+                pr = {"files": [{"path": path, "additions": 3, "deletions": 0}]}
+                self.assertNotEqual(xt.merge_lane_reasons(pr, []), [])
+        doc = {"files": [{"path": "docs/guide.md", "additions": 3, "deletions": 0}]}
+        self.assertEqual(xt.merge_lane_reasons(doc, []), [])
 
     def test_is_test_path_and_docs_lane(self):
         """Review #322: thư mục test/spec dưới docs không phải test (spec OpenAPI), tên test trong docs vẫn là test."""
@@ -2436,6 +2461,18 @@ class BaseMergeCarryTest(unittest.TestCase):
         self.assertEqual(xt.pr_next(d, False, fixed)["action"], "merge")
         self.assertEqual(xt.pr_next(d, False, {"reviews": late_clean["reviews"][1:]})["action"], "merge")
 
+    def test_merge_sets_squash_subject_from_pr_title(self):
+        """AUD-HAR-126 (D-254): steward gửi `commit_title` = tiêu đề PR + ` (#N)`; lệnh in cho agent giữ dạng chuẩn guard
+        allow (không `--subject` — review #342), subject do thiết lập repo `squash_merge_commit_title: PR_TITLE`."""
+        self.assertEqual(xt.squash_subject(pr(title="fix(x): a")), "fix(x): a (#7)")
+        self.assertEqual(xt.squash_subject(pr()), "")
+        d = xt.merge_decision(pr(title="fix(x): a"), autonomy=2)
+        self.assertEqual(d["next"], "gh pr merge 7 --squash --match-head-commit abc1234def")
+        self.assertNotIn("commit_title", d["next_rest"])
+        cmd = xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r", "fix(x): a (#7)")
+        self.assertEqual(cmd[0][-2:], ["-f", "commit_title=fix(x): a (#7)"])
+        self.assertNotIn("-f", xt._steward_command({"pr": 7, "head": "h", "action": "merge"}, "repos/o/r")[0][9:])
+
     def test_steward_updates_branch(self):
         cmds = xt._steward_command({"pr": 7, "head": "h", "action": "update"}, "repos/o/r")
         self.assertEqual(
@@ -2619,7 +2656,7 @@ class PrStewardTest(unittest.TestCase):
         self.assertTrue(out.startswith("#7 merge — làn nhanh"))
         self.assertEqual(gh.writes, [])  # không --apply: chỉ báo
         summary = self.base / "summary.md"
-        gh = StewardGh()
+        gh = StewardGh(pull={"title": "fix(x): it's ok"})
         with gh.patch(), unittest.mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
             rc, out, _ = run_main("pr", "steward", "--apply")
         self.assertEqual(rc, 0)
@@ -2637,9 +2674,11 @@ class PrStewardTest(unittest.TestCase):
                     "merge_method=squash",
                     "-f",
                     f"sha={FakeGh.SHA}",
+                    "-f",
+                    "commit_title=fix(x): it's ok (#7)",
                 ]
             ],
-        )  # merge ghim head, không bật auto-merge (ADR-0036)
+        )  # merge ghim head, không bật auto-merge (ADR-0036); subject = tiêu đề PR (AUD-HAR-126/127)
         self.assertIn("## pr-steward", summary.read_text(encoding="utf-8"))
 
     def test_steward_waits_without_required_checks(self):

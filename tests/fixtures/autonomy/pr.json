@@ -1209,6 +1209,98 @@
    }
   },
   {
+   "id": "pr-sec135-mdx-page",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-135"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "app/admin/page.mdx",
+       "additions": 3,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-sec135-prompt-md",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-135"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "prompts/system.md",
+       "additions": 3,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-sec135-txt-config",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-135"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "src/security/allowed_hosts.txt",
+       "additions": 3,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
+  },
+  {
+   "id": "pr-sec135-heroku-txt",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-135"
+   ],
+   "input": {
+    "pr": {
+     "files": [
+      {
+       "path": "runtime.txt",
+       "additions": 3,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "lane": "chuẩn"
+   }
+  },
+  {
    "id": "pr-sec136-csproj-dependency",
    "origin": "audit",
    "refs": [
