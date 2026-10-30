@@ -173,6 +173,14 @@
    "ids": [
     "AUD-XFEAT-030"
    ]
+  },
+  {
+   "reason": "Nguồn thân `gh` đọc từ file thật trên đĩa (`cat -n f`, `<<< \\`cat f\\``, `cat < f |`, `<&N`) — corpus chỉ có lệnh, không có file; đỡ bằng Gate unittest `-k test_review_marker_debt_354 tests.test_guard_audit1019` (AUD-SEC-174, AUD-SEC-175, AUD-SEC-176)",
+   "ids": [
+    "AUD-SEC-174",
+    "AUD-SEC-175",
+    "AUD-SEC-176"
+   ]
   }
  ]
 }

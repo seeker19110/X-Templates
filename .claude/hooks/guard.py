@@ -2837,14 +2837,32 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
         return True
 
 
+def _stdin_redirects(argv: List[str]) -> List[str]:
+    """Đích chuyển hướng vào stdin của lệnh: `< f`, `0<> f`/`<> f`; `<&N` là fd của shell (`/dev/fd/N` — guard không
+    đọc được, AUD-SEC-176)."""
+    out: List[str] = []
+    for i, t in enumerate(argv[:-1]):
+        if t in ("<", "<>"):
+            out.append(argv[i + 1])
+        elif t == "<&":
+            out.append("/dev/fd/" + argv[i + 1])
+    return out
+
+
 def _reader_files(argv: List[str]) -> List[str]:
-    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c`) sau khi bỏ chuyển
-    hướng (`2>/dev/null`); không có file hay `-` → đọc stdin (`-`)."""
+    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c` của `head`/`tail` —
+    với `cat`, `-n` là cờ, AUD-SEC-174) sau khi bỏ chuyển hướng (`2>/dev/null`), cộng đích `< f` (AUD-SEC-176); không
+    có file hay `-` → đọc stdin (`-`)."""
     n = normalize(_no_redirects(argv))
     if not n[:1] or n[0] not in STDIN_READERS:
         return []
-    out = [t for i, t in enumerate(n[1:], 1) if (t[:1] != "-" or t == "-") and n[i - 1] not in READER_VALUE_OPTS]
-    return out or ["-"]
+    valued = n[0] in ("head", "tail")
+    out = [
+        t
+        for i, t in enumerate(n[1:], 1)
+        if (t[:1] != "-" or t == "-") and not (valued and n[i - 1] in READER_VALUE_OPTS)
+    ]
+    return out + _stdin_redirects(argv) or ["-"]
 
 
 def _subst_files(arg: str) -> List[str]:
@@ -2868,9 +2886,10 @@ def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
         own = _gh_api_files(args)
     else:
         own = _gh_flag_files(args, split_at=False)
-    own += [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
-    own += [f for t in args for f in _subst_files(t)]
-    piped = any(f in STDIN_PATHS for f in own) or "$" in args
+    own += _stdin_redirects(args)
+    # backtick không nháy bị tách thành nhiều token — quét cả đối số ghép lại (`<<< \`cat f\``, AUD-SEC-175)
+    own += [f for t in [*args, " ".join(args)] for f in _subst_files(t)]
+    piped = any(f in STDIN_PATHS for f in own) or "$" in args or any(t.count("`") % 2 for t in args)
     return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
 
 
