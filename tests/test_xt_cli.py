@@ -2931,14 +2931,22 @@ class CiTriageTest(TmpDirCase):
         tail = xt.ci_classify("\n".join(f"dòng {i}" for i in range(30)))
         self.assertEqual(tail["evidence"][0], "dòng 20")  # không khớp loại nào: 10 dòng cuối
 
-    def test_ci_triage_redacts_whole_log_before_lines(self):
-        """AUD-SEC-145: bằng chứng che trên CẢ log — thân khoá PEM nhiều dòng, token sau `token=` không vào state/ngữ cảnh."""
+    def test_ci_triage_masks_key_blocks_in_evidence_keeps_category(self):
+        """AUD-SEC-145: bằng chứng che khối khoá theo dòng (cả header chưa đóng) và token; phân loại vẫn trên dòng thô —
+        header chưa đóng không nuốt dòng nhận diện `secret` (review #342)."""
         begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"
         body, token = "MIIEpAIBAAKCAQEA", "ghp_" + "B" * 36
-        d = xt.ci_classify(f"FAIL: test_x (t.T)\n{begin}\n{body}\n{end}\nFAIL: token={token}\nexit 1\n")
-        self.assertEqual(d["category"], "test")
+        d = xt.ci_classify(f"lạ\n{begin}\n{body}\n{end}\ntoken={token}\nexit 2\n")
+        self.assertEqual(d["category"], "unknown")
+        self.assertEqual(d["evidence"][:3], ["lạ", "-----BEGIN PRIVATE KEY----- ***", "***"])
         self.assertNotIn(body, "\n".join(d["evidence"]))
         self.assertNotIn(token, "\n".join(d["evidence"]))
+        self.assertEqual(xt.ci_classify(f"{begin}\n{body}")["evidence"], ["-----BEGIN PRIVATE KEY----- ***", "***"])
+        self.assertEqual(
+            xt.ci_classify(f"{begin} {body} {end}\nok")["evidence"], ["-----BEGIN PRIVATE KEY----- ***", "ok"]
+        )
+        hdr = xt.ci_classify(f"FAILED t.py::test_k\nE  where False = startswith('{begin}')\nleaks found: 1\n")
+        self.assertEqual((hdr["category"], hdr["categories"]), ("secret", ["secret", "test"]))
 
     def test_ci_triage_signature_ignores_numbers_and_timestamps(self):
         a = xt.ci_classify(GH_PREFIX + "FAILED tests/a.py::t - assert 1 == 2 (0.12s)\n")

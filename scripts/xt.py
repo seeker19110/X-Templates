@@ -182,6 +182,8 @@ SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|privat
 # Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9).
 SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
+PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
+PEM_END_RE = re.compile(r"-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
     # Khối PEM ĐẦU TIÊN: mẫu cờ/gán (`--password `, `KEY="…`) chạy trước từng ăn mất header nên thân khoá lộ (review #340)
@@ -200,7 +202,7 @@ SECRET_PATTERNS = (
     (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)\"[^\"\n]*(?:\"|$)"), r'\1"***"'),
     (re.compile(rf"(?im)((?<!\w)[\"']?{SECRET_KEY}[\"']?\s*[=:]\s*)'[^'\n]*(?:'|$)"), r"\1'***'"),
     (re.compile(r"(?i)\b(bearer|basic|token)(\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1\2***"),
-    (re.compile(r"(?i)(--(?:password|passwd|token|secret|api-key)[= ])(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
+    (re.compile(r"(?i)(--(?:password|passwd|passphrase|token|secret|api-key)[= ])(\"[^\"]*\"|'[^']*'|\S+)"), r"\1***"),
     # AUD-CFG-002: user rỗng (`redis://:pw@`); token làm user (`https://<key>@`); `curl -u u:p`; `mysql -pPW`; JWT;
     # tiền tố khoá npm/PyPI/Hugging Face/Google/Stripe restricted.
     (re.compile(r"(://[^/\s:@]*:)[^@\s/]+@"), r"\1***@"),
@@ -7966,20 +7968,43 @@ def _ci_log_lines(text: str) -> List[str]:
     return [line for line in lines if line]
 
 
+def _pem_mask_lines(lines: List[str]) -> List[str]:
+    """Che khối khoá theo dòng, GIỮ số dòng: từ header tới END (chưa đóng → tới hết) thành `***`. Dòng thô vẫn dùng để
+    phân loại — che trước trên cả log (`|\\Z`) thì header chưa đóng nuốt dòng nhận diện `secret` (review #342)."""
+    out: List[str] = []
+    inside = False
+    for line in lines:
+        if inside:
+            inside = not PEM_END_RE.search(line)
+            out.append("***")
+            continue
+        m = PEM_BEGIN_RE.search(line)
+        if not m:
+            out.append(line)
+            continue
+        out.append(line[: m.start()] + "-----BEGIN PRIVATE KEY----- ***")
+        inside = not PEM_END_RE.search(line, m.end())
+    return out
+
+
 def ci_classify(text: str) -> Dict[str, Any]:
     """Phân loại log job CI: loại thắng, mọi loại khớp, dòng lỗi làm bằng chứng và chữ ký (số → N, ổn định qua run).
-    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó. Bằng chứng vào
-    `.autopilot/state.json` và ngữ cảnh agent nên che (AUD-SEC-145): khối PEM nhiều dòng che trên CẢ log trước khi tách dòng,
-    phần còn lại của `redact` che từng dòng bằng chứng — che cả log trước làm mất dòng nhận diện loại `secret`."""
-    pem_rx, pem_repl = SECRET_PATTERNS[0]
-    lines = _ci_log_lines(pem_rx.sub(pem_repl, text))
-    hits = {cat: [line for line in lines if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
+    Loại `secret` không trả dòng log — có thể chứa chính bí mật; chữ ký vẫn tính trên các dòng đó. Phân loại và chữ ký trên
+    dòng thô; bằng chứng vào `.autopilot/state.json` và ngữ cảnh agent nên che (AUD-SEC-145): khối khoá theo dòng
+    (`_pem_mask_lines`), rồi `redact` từng dòng — giá trị bí mật nằm ở dòng sau khoá (`password:⏎…`) không được che."""
+    lines = _ci_log_lines(text)
+    hits = {cat: [i for i, line in enumerate(lines) if rx.search(line)] for cat, rx in CI_TRIAGE_RULES}
     cats = [cat for cat, _ in CI_TRIAGE_RULES if hits[cat]]
     category = cats[0] if cats else "unknown"
-    evidence = list(dict.fromkeys(hits.get(category) or lines[-CI_TRIAGE_EVIDENCE:]))[:CI_TRIAGE_EVIDENCE]
-    norm = "\n".join(re.sub(r"\d+", "N", line) for line in evidence)
+    picked = hits.get(category) or range(max(0, len(lines) - CI_TRIAGE_EVIDENCE), len(lines))
+    first: Dict[str, int] = {}
+    for i in picked:  # bỏ trùng theo nội dung, giữ lần đầu
+        first.setdefault(lines[i], i)
+    idx = list(first.values())[:CI_TRIAGE_EVIDENCE]
+    norm = "\n".join(re.sub(r"\d+", "N", lines[i]) for i in idx)
     signature = hashlib.sha256(f"{category}\n{norm}".encode()).hexdigest()[:16]
-    shown = [] if category == "secret" else [redact(line) for line in evidence]
+    masked = _pem_mask_lines(lines)
+    shown = [] if category == "secret" else [redact(masked[i]) for i in idx]
     return {"category": category, "categories": cats, "signature": signature, "evidence": shown}
 
 
