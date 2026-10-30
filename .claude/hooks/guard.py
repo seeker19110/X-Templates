@@ -2650,41 +2650,70 @@ STAGE_APPROVE_WHY = (
 )
 
 
-def _xt_args(n: List[str]) -> List[str]:
-    """Đối số sau `xt.py` — hay sau đường script mờ đứng ngay trước `stage` (`python3 "$XT" stage …`)."""
-    at = next(
-        (
-            k
-            for k, t in enumerate(n)
-            if posixpath.basename(t) == "xt.py" or (_opaque(t) and n[k + 1 : k + 2] == ["stage"])
-        ),
-        len(n),
-    )
-    return n[at + 1 :]
+def _vague(tok: str) -> bool:
+    """Token mờ với guard: mở rộng lúc chạy (`$`, backtick) hay glob (`appro?e`, `x?.py`) — AUD-SEC-155."""
+    return _opaque(tok) or any(c in tok for c in "*?[")
 
 
-def _xt_sub(rest: List[str]) -> str:
-    """Lệnh con của `xt.py`: bỏ tuỳ chọn toàn cục (`--framework X`, cả dạng viết tắt argparse `--fr X`)."""
+def _xt_sub(rest: List[str]) -> Tuple[int, str]:
+    """(vị trí, lệnh con) của `xt.py` sau tuỳ chọn toàn cục (`--framework X`, cả viết tắt `--fr X`); cờ mờ hay giá trị
+    `--framework` mờ/thiếu (`$(`, `<(` cắt lệnh) → lệnh con mờ `$`."""
     k = 0
     while k < len(rest) and rest[k].startswith("-"):
-        k += 2 if len(rest[k]) > 2 and "=" not in rest[k] and "--framework".startswith(rest[k]) else 1
-    return rest[k] if k < len(rest) else ""
+        if _vague(rest[k]):
+            return k, "$"
+        if len(rest[k]) > 2 and "=" not in rest[k] and "--framework".startswith(rest[k]):
+            if k + 1 >= len(rest) or _vague(rest[k + 1]):
+                return k, "$"
+            k += 2
+        else:
+            k += 1
+    return k, (rest[k] if k < len(rest) else "")
+
+
+def _xt_script(n: List[str], k: int, runs: bool) -> bool:
+    """`n[k]` là script `xt.py`: theo tên (`-m xt`), hay đường mờ/glob (`"$XT"`, `x?.py`) của lệnh chạy script
+    (`runs`) mà lệnh con là `stage` — `deploy.sh "$APP" stage` không tính."""
+    t = n[k]
+    if posixpath.basename(t) == "xt.py" or (t == "xt" and n[k - 1 : k] == ["-m"]):
+        return True
+    return runs and _vague(t) and _xt_sub(n[k + 1 :])[1] == "stage"
+
+
+def _no_redirects(args: List[str]) -> List[str]:
+    """Bỏ chuyển hướng và đích của nó (`> "$LOG"` không phải đối số của lệnh)."""
+    out: List[str] = []
+    skip = False
+    for t in args:
+        if skip:
+            skip = False
+        elif _is_redirect(t):
+            skip = True
+        else:
+            out.append(t)
+    return out
+
+
+def _approves_rest(rest: List[str], runs: bool) -> bool:
+    k, sub = _xt_sub(rest)
+    if sub != "stage":  # lệnh con mờ chỉ tính khi script được chạy (`cat scripts/xt.py "$F"` thì không)
+        return runs and _vague(sub)
+    tail = _no_redirects(rest[k + 1 :])
+    act = next((t for t in tail if not t.startswith("-")), "")
+    if not act:  # lệnh con từ stdin (`xargs … stage`) hay sau `--`; `--help` thì thôi
+        return not {"-h", "--help"} & set(tail)
+    return (
+        "approve" in tail or _vague(act) or ("init" in tail and any(t.startswith("--adopt") or _vague(t) for t in tail))
+    )
 
 
 def _approves_stage(argv: List[str]) -> bool:
-    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ); lệnh
-    con hay tuỳ chọn `init` mờ có thể là chúng nên cũng tính (`stage "$(echo approve)"` — AUD-SEC-155)."""
-    rest = _xt_args(normalize(argv))
-    sub = _xt_sub(rest)
-    if sub != "stage":
-        return _opaque(sub)
-    tail = rest[rest.index("stage") + 1 :]
-    act = next((t for t in tail if not t.startswith("-")), "")
-    return (
-        "approve" in tail
-        or _opaque(act)
-        or ("init" in tail and any(t.startswith("--adopt") or _opaque(t) for t in tail))
-    )
+    """`… xt.py stage approve …` hay `… xt.py stage init --adopt …` (qua `python3`, `env`, đường dẫn bất kỳ) ở MỌI vị
+    trí script (`perf sample -- python3 xt.py stage approve`); lệnh con, tuỳ chọn `init` hay đường script mờ có thể là
+    chúng nên cũng tính (`stage "$(echo approve)"` — AUD-SEC-155)."""
+    n = normalize(argv)
+    runs = bool(n) and (bool(PYTHON_RE.fullmatch(n[0])) or posixpath.basename(n[0]) == "xt.py" or _vague(n[0]))
+    return any(_approves_rest(n[k + 1 :], runs) for k in range(len(n)) if _xt_script(n, k, runs))
 
 
 def _forges_review(argv: List[str]) -> bool:

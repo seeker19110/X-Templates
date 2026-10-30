@@ -75,9 +75,11 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `pyenv exec`, `asdf exec`, `volta run`, `fnm exec`, `direnv exec`, `bundle exec`, `nix develop -c`, `pnpm exec`)
   không được bóc để trích script; lồng hơn 8 lớp lệnh chạy hộ cũng không; đích `rm -rf` là thay thế lệnh khác `$(pwd)` (`$(pwd -P)/..`,
   `$(dirname $PWD)`, `$(realpath ..)`) là không rõ nên cho qua — D-051 (AUD-SEC-101).
-- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155): guard chặn `xt.py stage approve`/`init --adopt` cả khi lệnh con, tuỳ
-  chọn `init` hay đường script trước `stage` mờ (`$(…)`, backtick, biến); `xt.py` coi biến phiên agent có mặt (kể cả
-  rỗng) là agent. Còn lọt: đường script và lệnh con cùng mờ (`python3 "$X" "$Y" …`), `env -u` các biến rồi chạy qua script lồng.
+- **Duyệt giai đoạn** (ADR-0058, AUD-SEC-155): guard chặn `xt.py stage approve`/`init --adopt` ở mọi vị trí script
+  (`-m xt`, lồng trong `perf sample --`), cả khi lệnh con, cờ/giá trị `--framework`, tuỳ chọn `init` mờ (`$(…)`,
+  backtick, biến, glob) hay lệnh con từ stdin (`xargs`); đường script mờ/glob chỉ tính khi lệnh là `python`/chính script
+  và lệnh con là `stage`. `xt.py` coi biến phiên agent có mặt (kể cả rỗng) là agent. Còn lọt (AUD-SEC-161): đường
+  script và lệnh con cùng mờ (`python3 "$X" "$Y"`), bản sao/tên khác của `xt.py`, `python3 -c`/`runpy`, alias, script lồng.
 - **Ref remote là ref cục bộ** (AUD-SEC-119): guard chặn lệnh git ghi `refs/remotes/…` hay tạo ref trùng `<remote>/…`
   (`REMOTE_REF_FORGE`), nhưng không chặn ghi thẳng file `.git/refs/…`, `.git/packed-refs`, `.git/<remote>/…`; đổi URL
   hay refspec của remote (`remote add|set-url|rename`, `config remote.<r>.*`, `git -c remote.<r>.fetch=…`) rồi `fetch`;

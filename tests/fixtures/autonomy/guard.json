@@ -6317,6 +6317,97 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec155-stage-nested-perf",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py perf sample --out o.json --runs 1 -- python3 scripts/xt.py stage approve --sha 1"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-framework-value",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py --framework stage stage \"$(echo approve)\" --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-framework-opaque",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py --framework $(echo fw) stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-xargs",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "echo approve | xargs python3 scripts/xt.py stage"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-stage-glob",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/x?.py stage approve --sha 1234567"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec155-deploy-stage-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "scripts/deploy.sh \"$APP\" stage \"$TAG\""
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec155-stage-redirect-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-155"
+  ],
+  "input": {
+   "command": "python3 scripts/xt.py stage init > \"$LOG\""
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }
