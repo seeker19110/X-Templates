@@ -1790,3 +1790,10 @@
 - Chọn: Thiết lập repo squash_merge_commit_title=PR_TITLE (mọi đường merge: agent, MCP, steward); lệnh in cho agent giữ dạng chuẩn guard allow; steward REST vẫn gửi commit_title làm lớp đỡ cho dự án đích chưa đặt
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: thiết lập repo phủ cả đường MCP và agent khi không truyền commit_title/--subject (truyền tường minh thì đè — AUD-HAR-128, guard so ở lát chặn tiêu đề) mà cờ không phủ hết (review #342 🟠); không nới guard (phương án 2 chạm hàng rào AUD-SEC-016, rủi ro lách). (2) đường lùi: đổi lại thiết lập repo một lệnh. (3) đơn giản: không thêm trường/luật guard. Phương án 3 để lọt merge do agent/MCP.
 - Đường lùi: gh api -X PATCH repos/<o>/<r> -f squash_merge_commit_title=COMMIT_OR_PR_TITLE; khôi phục --subject trong next/next_rest
+
+### D-256 · 2026-10-30T04:54:06+00:00 · PR #341: 3 lượt review chặn liên tiếp đều về lời khuyên đặt sổ ở nhánh vá (máy không biết bản nào chạy production) — đổi chiến lược thế nào?
+
+- Phương án: (1) Thu hẹp: lời báo chỉ nêu điều máy biết chắc — sự cố bản production chu kỳ trước đi nhánh vá cắt từ bản đang chạy rồi release-check trên nhánh đó, không phát hành MVP chu kỳ mới, SHA nghiệm thu tham chiếu; bỏ hướng dẫn đặt sổ cũ (ca adopt để người theo đặc tả §8) · (2) Giữ head 0d211a9, thêm một lượt review delta · (3) Đóng PR #341, ghi treo vào AUDIT-STATUS
+- Chọn: Thu hẹp: lời báo chỉ nêu điều máy biết chắc — sự cố bản production chu kỳ trước đi nhánh vá cắt từ bản đang chạy rồi release-check trên nhánh đó, không phát hành MVP chu kỳ mới, SHA nghiệm thu tham chiếu; bỏ hướng dẫn đặt sổ cũ (ca adopt để người theo đặc tả §8)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mọi 🟠 của 3 lượt nằm ở bước đặt sổ phụ thuộc bản đang chạy mà sổ không ghi (§6) — bỏ bước đó thì không còn lời khuyên sai được; hàng stage vẫn FAIL như cũ. (2) đường lùi: chỉ đổi chuỗi lời báo. (3) đơn giản, test được. Phương án 2 lặp vòng đã thất bại 3 lần; phương án 3 mất lối ra §8 mà review #338 yêu cầu.
+- Đường lùi: Khôi phục _stage_hotfix ở 0d211a9 (git revert commit thu hẹp)
