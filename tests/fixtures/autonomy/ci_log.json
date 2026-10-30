@@ -344,6 +344,22 @@
     "shown": 0
    },
    "note": "dòng phát hiện thật có chữ FAILED/failed hay mệnh đề `no/0 X` vẫn block (review delta PR #173)"
+  },
+  {
+   "id": "ci-unclosed-key-header-before-leak",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-145"
+   ],
+   "input": {
+    "log": "FAILED tests/t.py::test_k - AssertionError\nE  where False = startswith('-----BEGIN OPENSSH PRIVATE KEY-----')\nFinding: REDACTED\nleaks found: 1"
+   },
+   "expect": {
+    "proceed": false,
+    "category": "secret",
+    "shown": 0
+   },
+   "note": "che khối khoá chỉ ở bằng chứng hiển thị: header chưa đóng (dòng assert) không nuốt dòng nhận diện secret (review #342)"
   }
  ]
 }

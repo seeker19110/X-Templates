@@ -548,6 +548,28 @@ class DeliveryPhaseReleaseTest(unittest.TestCase):
         self.assertIn("requirements.txt", debt)
         self.assertIn("license-allow.json", debt)
 
+    def test_delivery_phase_review_debt_dep_manifests_and_runtime_text(self):
+        """AUD-SEC-138: manifest của thẻ "phụ thuộc" sửa giữa lần quét nhóm DEP (S1) và lần quét nhóm khác mới hơn (S2) là
+        nợ (trước: `_path_groups` trả [] → chỉ tính từ S2). AUD-SEC-139: `docs/package.json` không phải tài liệu.
+        AUD-SEC-135 (D-253): `.mdx`, prompt `.md`, `.txt` ngoài docs/ là mã."""
+        s1 = self.git("rev-parse", "HEAD")
+        manifests = ("src/App/App.csproj", "mix.exs", "Podfile", "deno.json", "pom.xml")
+        for m in manifests:
+            (self.repo / m).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / m).write_text("x\n", encoding="utf-8")
+        s2 = self.commit("manifest sau lần quét DEP")
+        self.scanned({7: s1, 1: s2, 2: s2, 3: s2, 9: s2, 12: s2, 13: s2})
+        self.commit("sổ")
+        text = ("docs/package.json", "app/admin/page.mdx", "prompts/system.md", "runtime.txt", "docs/guide.md")
+        for t in text:
+            (self.repo / t).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / t).write_text("x\n", encoding="utf-8")
+        self.commit("văn bản chạy thật")
+        debt, _ = xt.review_debt(self.repo, self.status)
+        self.assertEqual([m for m in manifests if m not in debt], [])
+        self.assertEqual([t for t in text[:4] if t not in debt], [])
+        self.assertNotIn("docs/guide.md", debt)
+
     def test_delivery_phase_review_debt_since_per_file(self):
         """Review #317 🟠: mỗi file xét commit từ đúng SHA đưa nó vào nợ — lần đẩy thẳng mà sổ nhóm của file đã phủ (trước
         SHA của nhóm) không bị kéo vào chỉ vì một nhóm khác quét cũ hơn."""

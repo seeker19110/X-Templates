@@ -1417,11 +1417,11 @@ class StopAndSessionTest(unittest.TestCase):
 
         step = {"action": "blocked", "reason": "cần chủ dự án"}
         cases = (({"stage": 1}, "build-until-clean"), ({"stage": 2}, "harden-to-signoff"), (None, "harden-to-signoff"))
-        for led, objective in (*cases, ({"error": "hỏng"}, "harden-to-signoff")):
+        for led, objective in (*cases, (xt.StageError("hỏng"), "harden-to-signoff")):
             with (
                 self.subTest(objective=objective, led=led),
                 mock.patch.object(xt, "_xt_keys", return_value={"delivery_phase": "harden"}),
-                mock.patch.object(xt, "stage_facts", return_value=led),
+                mock.patch.object(xt, "read_stage", side_effect=[led]),
                 mock.patch.object(xt, "read_state", return_value={}),
                 mock.patch.object(xt, "next_step_facts") as facts,
                 mock.patch.object(xt, "next_step", return_value=step),
@@ -1429,13 +1429,12 @@ class StopAndSessionTest(unittest.TestCase):
                 self.assertIn(f"({objective}): blocked — cần chủ dự án", xt.stop_hint(ROOT))
                 self.assertEqual(facts.call_args.args[-1], objective)
         err = io.StringIO()
-        with (  # sổ lạ làm `stage_facts` ném lỗi khác StageError: vẫn fail-open, một dòng stderr (review #338)
-            mock.patch.object(xt, "_xt_keys", return_value={"delivery_phase": "harden"}),
-            mock.patch.object(xt, "stage_facts", side_effect=TypeError("unhashable type: 'list'")),
+        with (  # lỗi đọc ngoài StageError (sổ, xt.yaml không UTF-8): gợi ý trống, một dòng stderr (review #338/#340)
+            mock.patch.object(xt, "_xt_keys", side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")),
             contextlib.redirect_stderr(err),
         ):
             self.assertEqual(xt.stop_hint(ROOT), "")
-        self.assertIn("TypeError: unhashable", err.getvalue())
+        self.assertIn("UnicodeDecodeError", err.getvalue())
 
     def project_with_loop(self, xt_yaml: str = "") -> Path:
         tmp = Path(tempfile.mkdtemp())

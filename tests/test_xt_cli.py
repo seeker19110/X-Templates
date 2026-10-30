@@ -264,6 +264,12 @@ class PathGroupsTest(unittest.TestCase):
             "README.md": [9],
             "src/main.py": [1, 2, 3, 12],
             "notes.txt": [],
+            # AUD-SEC-138: mọi manifest của thẻ "phụ thuộc" thuộc nhóm DEP (7) — trước trả [] nên nợ chỉ tính từ SHA mới nhất
+            "src/App/App.csproj": [2, 7],
+            "mix.exs": [2, 7],
+            "Podfile": [2, 7],
+            "deno.json": [2, 7],
+            "requirements/prod.in": [2, 7],
         }
         for path, expected in cases.items():
             with self.subTest(path=path):
@@ -2924,6 +2930,30 @@ class CiTriageTest(TmpDirCase):
         self.assertEqual((empty["category"], empty["evidence"], empty["categories"]), ("unknown", [], []))
         tail = xt.ci_classify("\n".join(f"dòng {i}" for i in range(30)))
         self.assertEqual(tail["evidence"][0], "dòng 20")  # không khớp loại nào: 10 dòng cuối
+
+    def test_ci_triage_masks_key_blocks_in_evidence_keeps_category(self):
+        """AUD-SEC-145: bằng chứng che khối khoá theo dòng (cả header chưa đóng) và token; phân loại vẫn trên dòng thô —
+        header chưa đóng không nuốt dòng nhận diện `secret` (review #342)."""
+        begin, end = "-----BEGIN " + "RSA PRIVATE KEY-----", "-----END " + "RSA PRIVATE KEY-----"
+        body, token = "MIIEpAIBAAKCAQEA", "ghp_" + "B" * 36
+        d = xt.ci_classify(f"lạ\n{begin}\n{body}\n{end}\ntoken={token}\nexit 2\n")
+        self.assertEqual(d["category"], "unknown")
+        mask = xt.PEM_MASK  # không viết nguyên văn: header + `KEY-----` dòng sau khớp luật private-key của gitleaks
+        self.assertEqual(d["evidence"][:3], ["lạ", mask, "***"])
+        self.assertNotIn(body, "\n".join(d["evidence"]))
+        self.assertNotIn(token, "\n".join(d["evidence"]))
+        self.assertEqual(xt.ci_classify(f"{begin}\n{body}")["evidence"], [mask, "***"])
+        self.assertEqual(xt.ci_classify(f"{begin} {body} {end}\nok")["evidence"], [mask, "ok"])
+        two = xt.ci_classify(f"x\n{begin} {body} {end} {begin}\nSECONDBODY\n{end} sau\nok")["evidence"]
+        self.assertEqual(two, ["x", f"{mask} {mask}", "***", " sau", "ok"])  # khoá kế mở ngay sau END (review #342)
+        again = xt.ci_classify(f"{mask}\nok\nexit 1")["evidence"]  # chuỗi đã che không mở khối
+        self.assertEqual(again, [mask, "ok", "exit 1"])
+        starred = xt.ci_classify(f"x\n{begin} ***\n{body}\n{end}\nexit 1")["evidence"]  # nhãn khác + ` ***` vẫn là khoá
+        self.assertEqual(starred, ["x", mask, "***", "***", "exit 1"])
+        long_line = (f"{begin}x{end}" * 20000).replace("\n", "")
+        self.assertEqual(xt._pem_mask_lines([long_line]), [mask * 20000])  # tuyến tính (vị trí, không cắt chuỗi)
+        hdr = xt.ci_classify(f"FAILED t.py::test_k\nE  where False = startswith('{begin}')\nleaks found: 1\n")
+        self.assertEqual((hdr["category"], hdr["categories"]), ("secret", ["secret", "test"]))
 
     def test_ci_triage_signature_ignores_numbers_and_timestamps(self):
         a = xt.ci_classify(GH_PREFIX + "FAILED tests/a.py::t - assert 1 == 2 (0.12s)\n")
