@@ -4410,6 +4410,8 @@ class GuardReview97Test(unittest.TestCase):
                 # host tên `graphql`, không đường dẫn: đọc như endpoint graphql như trước (không nới)
                 "gh api https://graphql -f query='mutation { mergePullRequest(input: {}) { x } }'",
                 "gh api https://graphql/ -F query=@q.graphql",
+                "gh api https://graphql/%2F -F query=@q.graphql",  # AUD-SEC-152
+                "gh api -X PUT https://api.github.com/repos/o/r/pulls/7/%6Derge -f sha=abc",  # AUD-TEST-026: giải mã %xx
             ),
         )
         # repo trong URL khác repo đã kiểm → không xác minh được, kể cả PR không có ngoại lệ cứng

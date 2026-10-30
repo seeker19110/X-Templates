@@ -41,8 +41,9 @@ Lệnh:
                                 `mở` + `nợ-review: #N` ở sổ audit, sau review cuối chỉ sổ đổi → review `debt` ở head, đăng
                                 dấu; nợ làm `audit check --strict` đỏ tới khi trả cuối pha (ADR-0059).
   pr rethink [--pr N] --decision D-NNN
-                                PR hết lượt review còn 🔴 (`pr next` = debt): mở thêm 2 lượt theo D-NNN mới, câu hỏi nhắc
-                                #N, ghi sau review chưa sạch cuối (ADR-0053, D-210).
+                                PR hết lượt review (`pr next` = debt mà còn 🔴 — thêm một lần sửa hết; hoặc = rethink: review
+                                cuối chưa kết luận, `review_identity`): mở thêm một lần sửa theo D-NNN mới, câu hỏi nhắc #N, ghi sau
+                                review chưa sạch cuối (ADR-0053/0059, D-210).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -10922,19 +10923,40 @@ def _iso_time(at: object) -> Optional[_dt.datetime]:
     return t if t.tzinfo is not None else None
 
 
-def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int:
-    """Số review đã đăng chưa sạch (`blocking`/`inconclusive`) sau review sạch cuối và sau lần `pr rethink` cuối (ADR-0053).
-    Mốc `rethinks` hỏng không tính; review thiếu/hỏng `at` vẫn tính — sổ hỏng chỉ làm chặt hơn."""
+def review_window(reviews: List[Dict[str, Any]], rethinks: object = None) -> List[Dict[str, Any]]:
+    """Review đã đăng chưa sạch (`blocking`/`inconclusive`) trong ngân sách: sau review sạch cuối và sau lần `pr rethink`
+    cuối (ADR-0053) — review chưa sạch cuối TRƯỚC mốc rethink giữ làm lượt 1, để lượt mở thêm là đúng một lần sửa (ADR-0059,
+    AUD-HAR-132). Mốc `rethinks` hỏng không tính; review thiếu/hỏng `at` vẫn tính — sổ hỏng chỉ làm chặt hơn."""
     rows = [r for r in rethinks if isinstance(r, dict)] if isinstance(rethinks, list) else []
     since = max((t for t in (_iso_time(r.get("at")) for r in rows) if t), default=None)
-    count = 0
+    window: List[Dict[str, Any]] = []
+    carry: List[Dict[str, Any]] = []
     for r in reviews:
         at = _iso_time(r.get("at"))
         if r.get("clean"):
-            count = 0
+            window, carry = [], []
         elif since is None or at is None or at > since:
-            count += 1
-    return count
+            window.append(r)
+        else:
+            carry = [r]
+    return carry + window
+
+
+def _rethink_pending(reviews: List[Dict[str, Any]], rethinks: object, head: str) -> bool:
+    """`pr rethink` cuối ghi ở đúng head hiện tại và chưa có review nào sau nó: lần sửa thêm chưa push — `fix`, không
+    `review` (review head chưa sửa sẽ đốt lần sửa — review #346)."""
+    rows = [r for r in rethinks if isinstance(r, dict)] if isinstance(rethinks, list) else []
+    marks = [(t, r) for r in rows for t in [_iso_time(r.get("at"))] if t]
+    if not marks:
+        return False
+    since, last = max(marks, key=lambda m: m[0])
+    after = [t for t in (_iso_time(r.get("at")) for r in reviews) if t is None or t > since]
+    return last.get("head") == head and not after
+
+
+def review_rounds(reviews: List[Dict[str, Any]], rethinks: object = None) -> int:
+    """Số lượt review chưa sạch trong ngân sách (`review_window`)."""
+    return len(review_window(reviews, rethinks))
 
 
 def _pr_next_review(
@@ -10946,13 +10968,15 @@ def _pr_next_review(
     rounds: int = 0,
     unsure: bool = False,
     identity: bool = False,
+    fixed: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
     review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
     luận (`unsure`: không biết còn 🔴 hay không — ADR-0029) hoặc dấu chỉ tính của danh tính reviewer (`identity`: tác giả
-    không đăng được dấu `debt`): `rethink` như ADR-0053."""
+    không đăng được dấu `debt`): `rethink` như ADR-0053. `fixed` = trong ngân sách có review đã kết luận ở ≥ 2 head (đã có
+    một lần sửa được rà); chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131)."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
-    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS:
+    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and (unsure or identity or fixed):
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
         if unsure or identity:
@@ -11231,8 +11255,20 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
     if early is None and strict and not deferred:  # review ở head quyết trước review mang qua (AUD-HAR-059)
         unclean = [r for r in reviews if not r.get("clean")]
         unsure = bool(unclean) and bool(unclean[-1].get("inconclusive"))
-        rounds = review_rounds(reviews, rec.get("rethinks"))
-        early = _pr_next_review(d, auto_merge, gate, act, disable, rounds, unsure, bool(rec.get("published_only")))
+        window = review_window(reviews, rec.get("rethinks"))
+        heads = {r.get("head") for r in window if not r.get("inconclusive")}
+        if head in heads:  # head chỉ là cập nhật nhánh đích của head đã rà: chưa phải lần sửa
+            heads -= set(d.get("base_merge_of") or [])
+        fixed = len(heads) >= 2
+        identity = bool(rec.get("published_only"))
+        if gate["state"] in ("missing", "blocking") and _rethink_pending(reviews, rec.get("rethinks"), head):
+            early = act(
+                "fix",
+                f"vừa `pr rethink` ở {head[:7]} — lần sửa thêm chưa push (ADR-0059: sửa HẾT phát hiện, cả 🟠/🟢)",
+                "sửa hết phát hiện của review cuối, push, chạy lại pr next",
+            )
+        else:
+            early = _pr_next_review(d, auto_merge, gate, act, disable, len(window), unsure, identity, fixed)
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -11476,7 +11512,8 @@ def _rethink_problem(
 
 
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
-    """`pr rethink` (ADR-0053/0059): mở thêm `REVIEW_ROUNDS` lượt review — chỉ khi `pr next` đang trả `debt` (còn 🔴:
+    """`pr rethink` (ADR-0053/0059): mở thêm đúng một lần sửa (review chưa sạch cuối giữ làm lượt 1) — chỉ khi `pr next`
+    đang trả `debt` (còn 🔴:
     thêm một lần sửa hết) hoặc `rethink`, và D-NNN (đổi chiến lược) qua `_rethink_problem`; ghi `rethinks[]` vào sổ."""
     try:
         pr = load_pr(args)
@@ -11497,11 +11534,10 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     if problem:
         print(f"✗ {problem}", file=sys.stderr)
         return 2
-    data[key] = {**local, "rethinks": [*rethinks, {"decision": args.decision, "at": now_iso()}]}
+    entry = {"decision": args.decision, "at": now_iso(), "head": str(d.get("head", ""))}  # `_rethink_pending`
+    data[key] = {**local, "rethinks": [*rethinks, entry]}
     _write_reviews(base, data)
-    print(
-        f"✓ PR #{key}: mở thêm {REVIEW_ROUNDS} lượt review theo {args.decision} — chạy lại `xt.py pr next --pr {key}`"
-    )
+    print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
 
 
@@ -11517,26 +11553,35 @@ def _debt_problem(
     last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))  # `pr next` = debt: blocking kết luận
     since = _git(base, "diff", "--no-renames", "--name-only", last, head)
     other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
+    fork = _git(base, "merge-base", f"origin/{target}", last)
     show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
-    bad = next((r for r in (since, other, show) if r.returncode), None)
+    reviewed = _git(base, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
+    bad = next((r for r in (since, other, fork, show, reviewed) if r.returncode), None)
     if bad is not None:
         return (
-            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head ({_one_line(bad.stderr)})"
+            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
+            f" ({_one_line(bad.stderr) or 'không có tổ tiên chung — clone nông? `git fetch --unshallow`'})"
             " — fetch nhánh PR và nhánh đích rồi chạy lại"
         )
-    mine = set(other.stdout.splitlines())  # file head khác nhánh đích: thay đổi của PR, không phải cập nhật nhánh
+    # Miễn file giống hệt nhánh đích (cập nhật nhánh) — trừ file PR đã đổi lúc review cuối: trả nó về bản nhánh đích hay
+    # xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154).
+    mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
     extra = sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT})
     if extra:
         return (
             f"sau review cuối ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 2 lần, sửa 1 lần:"
-            f" chỉ commit sổ {AUDIT_STATUS_DEFAULT}; sửa thêm thì cần lượt review mới (`pr rethink`)"
+            f" chỉ commit sổ {AUDIT_STATUS_DEFAULT}; sửa thêm thì cần lượt review mới (`pr rethink`) — nếu đó là cập nhật"
+            f" nhánh mà origin/{target} cục bộ cũ: `git fetch origin {target}` rồi chạy lại (AUD-HAR-133)"
         )
     rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
     for i in ids:
         r = rows.get(i)
         tag = REVIEW_DEBT_RE.search(r.get("Ghi chú", "")) if r else None
         if r is None or r.get("Trạng thái") != "mở" or not tag or tag[1] != key:
-            return f"{i}: cần dòng `mở` trong {AUDIT_STATUS_DEFAULT} ở head, Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
+            return (
+                f"{i}: cần dòng `mở` trong {AUDIT_STATUS_DEFAULT} ở head {head[:7]} (head theo GitHub — vừa push thì đợi"
+                f" GitHub cập nhật rồi chạy lại), Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
+            )
         if r.get("Mức") == "🔴":
             return (
                 f"{i} là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide"
@@ -13772,7 +13817,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prt = prsub.add_parser(
         "rethink",
-        help="PR hết lượt review còn 🔴 (`pr next` = debt): mở thêm lượt theo quyết định D-NNN (ADR-0053/0059)",
+        help="PR hết lượt review (`pr next` = debt còn 🔴, hoặc rethink): mở thêm một lần sửa theo D-NNN (ADR-0053/0059)",
     )
     prt.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     prt.add_argument("--pr-json", help="đọc JSON PR từ FILE hoặc - như merge-check")
