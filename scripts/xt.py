@@ -3267,10 +3267,21 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 GIT_TIMEOUT = 60  # giây; git treo (ổ mạng, khoá index) không được làm treo cổng — BASE-ERR-004
 
 
+# Đọc git không theo `refs/replace/` (AUD-SEC-158) và không in cảnh báo grafts deprecated mà `GIT_GRAFT_FILE` gây ra
+# (thông báo lỗi giữ nguyên — `_no_grafts`).
+GIT_SAFE_READ = ("git", "--no-replace-objects", "-c", "advice.graftFileDeprecated=false")
+
+
+def _no_grafts(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """Môi trường git không đọc grafts (`.git/info/grafts`, `GIT_GRAFT_FILE` kế thừa): grafts đổi cha của commit nên
+    `merge-base` của phép so review lệch (AUD-SEC-168) — `--no-replace-objects` không tắt chúng."""
+    return {**(os.environ if env is None else env), "GIT_GRAFT_FILE": os.devnull}
+
+
 def _git(
     cwd: Path, *args: str, env: Optional[Dict[str, str]] = None, stdin: Optional[str] = None
 ) -> "subprocess.CompletedProcess[str]":
-    cmd = ["git", "--no-replace-objects", "-C", str(cwd), *args]  # `refs/replace/` không đổi nội dung đọc (AUD-SEC-158)
+    cmd = [*GIT_SAFE_READ, "-C", str(cwd), *args]  # `refs/replace/` không đổi nội dung đọc (AUD-SEC-158)
     try:
         return subprocess.run(
             cmd,
@@ -3279,7 +3290,7 @@ def _git(
             errors="replace",  # tên file không phải UTF-8 (`merge-tree -z`) không được làm sập cổng (review #165)
             check=False,
             timeout=GIT_TIMEOUT,
-            env=env,
+            env=_no_grafts(env),
             input=stdin,
         )
     except subprocess.TimeoutExpired:
@@ -13171,11 +13182,11 @@ def _perf_git_raw(base: Path, *args: str) -> bytes:
     """stdout bytes của git: `_git` chạy `text=True` (universal newlines đổi `\\r` thành `\\n`) — không dùng cho nội dung diff."""
     try:
         r = subprocess.run(
-            ["git", "--no-replace-objects", "-C", str(base), *args],
+            [*GIT_SAFE_READ, "-C", str(base), *args],
             capture_output=True,
             check=False,
             timeout=GIT_TIMEOUT,
-            env=_perf_env(),
+            env=_no_grafts(_perf_env()),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"git {args[0]} quá {GIT_TIMEOUT} s") from None
@@ -13253,8 +13264,8 @@ def _perf_untracked_lines(base: Path, names: List[str]) -> List[Tuple[str, str]]
 
 def _perf_blob_head(base: Path, spec: str) -> bytes:
     """≤ PERF_BINARY_PEEK byte đầu của blob `spec` (không có → b""): đọc qua ống rồi giết git, không nạp cả blob."""
-    cmd = ["git", "--no-replace-objects", "-C", str(base), "cat-file", "blob", spec]
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_perf_env()) as proc:
+    cmd = [*GIT_SAFE_READ, "-C", str(base), "cat-file", "blob", spec]
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_no_grafts(_perf_env())) as proc:
         head = proc.stdout.read(PERF_BINARY_PEEK) if proc.stdout else b""
         proc.kill()
     return head

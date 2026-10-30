@@ -161,6 +161,12 @@
     "AUD-XFEAT-026",
     "AUD-XFEAT-027"
    ]
+  },
+  {
+   "reason": "Grafts trong phép so review của `xt.py` (`_git` đặt `GIT_GRAFT_FILE=/dev/null`) — không thuộc lớp quyết định cho/chặn của guard; đỡ bằng Gate unittest `-k test_review_drift_ignores_grafts tests.test_xt_cli` (AUD-SEC-168)",
+   "ids": [
+    "AUD-SEC-168"
+   ]
   }
  ]
 }

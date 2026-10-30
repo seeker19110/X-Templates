@@ -168,10 +168,10 @@ class ProcSpy:
                 return subprocess.CompletedProcess(cmd, 1, "", str(exc))
             return subprocess.CompletedProcess(cmd, 0, "\n".join(json.dumps(p) for p in pages), "")
         if cmd[0] == "git":
-            rest = (
-                cmd[2:] if cmd[1] == "--no-replace-objects" else cmd[1:]
-            )  # `_git` bỏ qua `refs/replace/` (AUD-SEC-158)
-            sub = rest[2] if rest[0] == "-C" else rest[0]
+            rest = cmd[1:]  # bỏ cờ toàn cục: `--no-replace-objects`, `-c k=v`, `-C dir` (`GIT_SAFE_READ`, AUD-SEC-158)
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in ("-c", "-C") else rest[1:]
+            sub = rest[0]
             assert sub in GIT_READ, cmd
             return subprocess.CompletedProcess(cmd, 128, "", "fatal: giả")
         raise AssertionError(f"lệnh lạ: {cmd}")
