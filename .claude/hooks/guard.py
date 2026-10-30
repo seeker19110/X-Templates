@@ -31,6 +31,7 @@ import os
 import posixpath
 import re
 import shlex
+import stat
 import subprocess
 import urllib.parse
 import sys
@@ -2797,43 +2798,68 @@ def _forges_review(argv: List[str]) -> bool:
 REVIEW_BODY_FILES_MAX = 16  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
 REVIEW_BODY_FILE_BYTES = 1 << 20  # thân lớn hơn không đọc — coi như không đọc được
 STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
-CAT_SUBST_RE = re.compile(r"\$\(\s*(?:cat\s+|<\s*)([^)\s]+)\s*\)")
+STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # thân đọc từ stdin
+FD_PATH_RE = re.compile(r"/dev/(?:fd/\d+|std(?:out|err))|/proc/[^/]+/fd/\d+")  # fd mở trong shell — guard không thấy
+SUBST_BODY_RE = re.compile(r"\$\(([^()]*)\)")  # nội dung `$(…)` không lồng trong một đối số
 
 
 def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
-    """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (cả trong chuỗi JSON — `gh api --input`
-    viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, không phải file thường, quá cỡ, lỗi đọc) — chiều
-    chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó
-    (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác sinh ra là giới hạn đã ghi)."""
-    if _vague(path):
+    """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (chữ thô, rồi cả chuỗi JSON — `gh api
+    --input` viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, fd của shell, không phải file thường,
+    quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
+    không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
+    sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
+    if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
     full = os.path.join(cwd or ".", os.path.expanduser(path))
+    if not os.path.lexists(full):
+        return False
     try:
-        if not os.path.lexists(full):
-            return False
-        if not os.path.isfile(full) or os.path.getsize(full) > REVIEW_BODY_FILE_BYTES:
-            return True
-        with open(full, encoding="utf-8", errors="replace") as fh:
+        fd = os.open(full, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > REVIEW_BODY_FILE_BYTES:
+                return True
             text = fh.read()
-    except OSError:
+        return bool(REVIEW_MARK_RE.search(text)) or any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
+    except ValueError:  # không phải JSON: chữ thô đã quét
+        return False
+    except Exception:  # OSError, RecursionError (JSON lồng sâu) … — không đọc được thì coi như có dấu
         return True
-    try:
-        texts = [text, *_strings(json.loads(text))]
-    except ValueError:
-        texts = [text]
-    return any(REVIEW_MARK_RE.search(t) for t in texts)
+
+
+def _reader_files(argv: List[str]) -> List[str]:
+    """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn sau khi bỏ chuyển hướng (`2>/dev/null`)."""
+    n = normalize(_no_redirects(argv))
+    return [t for t in n[1:] if t[:1] != "-"] if n[:1] and n[0] in STDIN_READERS else []
+
+
+def _subst_files(arg: str) -> List[str]:
+    """File mà lệnh đọc trong `$(…)` của một đối số đọc ra (`$(cat -- 'f' 2>/dev/null | head)`, `$(head -c N f)`,
+    `$(< f)`)."""
+    out: List[str] = []
+    for body in SUBST_BODY_RE.findall(arg):
+        toks = tokenize(body)
+        out += [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
+        out += [f for c in split_commands(toks) for f in _reader_files(c)]
+    return out
 
 
 def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
     """File làm thân của lệnh `gh` đăng chữ: `gh api` — `-F k=@f`/`--field k=@f`/`--input f`; `gh pr|issue` — `-F f`,
-    `--body-file f`; `< f`; `$(cat f)` trong đối số; file của `cat`/`head`… trong cùng chuỗi khi thân đọc stdin (`-`) hay
-    là thay lệnh (`$`). `-` không phải file."""
+    `--body-file f` (giá trị nguyên văn, kể cả `x=@y`); `< f`; file đọc trong `$(…)` của đối số; file của `cat`/`head`…
+    trong cùng chuỗi khi thân đọc stdin (`-`, `/dev/stdin`) hay đối số là thay lệnh không nháy (`$`). Stdin không phải
+    file."""
     args = normalize(argv)[1:]
-    own = _gh_api_files(args) if args[:1] == ["api"] else [f for f in _gh_flag_files(args) if "=@" not in f]
+    if args[:1] == ["api"]:
+        own = _gh_api_files(args)
+    else:
+        flags = _gh_flag_files(args)
+        own = [f for f in flags if not any(w != f and w.endswith("=@" + f) for w in flags)]
     own += [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
-    own += [m for t in args for m in CAT_SUBST_RE.findall(t)]
-    piped = "-" in own or any("$" in t for t in args)
-    return [f for f in own if f != "-"] + (cats if piped else [])
+    own += [f for t in args for f in _subst_files(t)]
+    piped = any(f in STDIN_PATHS for f in own) or "$" in args
+    return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
 
 
 def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
@@ -2847,9 +2873,18 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
         return False
     if REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts):
         return True
-    cats = [t for c in cmds for n in [normalize(c)] if n[:1] and n[0] in STDIN_READERS for t in n[1:] if t[:1] != "-"]
+    cats = [f for c in cmds for f in _reader_files(c)]
     srcs = [f for c in posts for f in _body_sources(c, cats)]
     return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
+
+
+def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
+    """`_forges_review_cmd` mà lỗi khi quét (đầu vào lạ) thì coi như có dấu — không để ngoại lệ thoát khỏi
+    `bash_decision` (hook fail-open, tắt mọi luật đứng sau — review #354 lượt 2)."""
+    try:
+        return _forges_review_cmd(cmd, tokens, cwd)
+    except Exception:
+        return True
 
 
 def _gh_posts(argv: List[str]) -> bool:
@@ -7424,7 +7459,7 @@ def bash_decision(
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
-    asks += [REVIEW_FORGE_WHY] if _forges_review_cmd(cmd, tokens, cwd) else []
+    asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd) else []
     asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (

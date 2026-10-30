@@ -427,7 +427,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
             f, plain = Path(d, "b.md"), Path(d, "n.md")
             f.write_text(MARK, encoding="utf-8")
             plain.write_text("thường\n", encoding="utf-8")
-            with mock.patch.object(guard, "open", side_effect=OSError("EACCES"), create=True):
+            with mock.patch.object(guard.os, "open", side_effect=OSError("EACCES")):
                 self.assertTrue(guard._file_has_mark(str(plain), None))
             self.assertFalse(guard._file_has_mark(str(plain), None))
             Path(d, "body").write_text(MARK, encoding="utf-8")  # tên không có `.`/`/`
@@ -459,6 +459,48 @@ class ReviewMarkerForgeTest(unittest.TestCase):
             ):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
+
+    def test_review_marker_body_source_round2(self):
+        """Review #354 lượt 2: JSON lồng sâu không làm guard ném lỗi rồi cho qua (tắt mọi luật sau); lệnh đọc chỉ là nguồn
+        thân khi nối ống vào `gh` hay nằm trong `$(…)` của đối số nó (chuyển hướng không phải nguồn); `$(cat -- f)`,
+        `$(cat 'f' | head)`, `$(head -c N f)`, `-F x=@y` (tên file nguyên văn), `/dev/fd/N` là nguồn."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "deep.md").write_text("[" * 20000 + "\n" + MARK, encoding="utf-8")
+            Path(d, "deep.json").write_text("[" * 20000, encoding="utf-8")
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            Path(d, "x=@y.md").write_text(MARK, encoding="utf-8")
+            Path(d, "y.md").write_text("thường\n", encoding="utf-8")
+            for cmd in (
+                "gh pr comment 5 -F deep.md",
+                "gh pr comment 5 -F deep.json",
+                "git push --force origin main; false && gh pr comment 1 -F deep.json",
+                'gh pr comment 5 --body "$(cat -- b.md)"',
+                "gh pr comment 5 --body \"$(cat 'b.md')\"",
+                'gh pr comment 5 --body "$(cat b.md 2>/dev/null)"',
+                'gh pr comment 5 --body "$(cat n.md b.md)"',
+                'gh pr comment 5 --body "$(cat b.md | head -100)"',
+                'gh pr comment 5 --body "$(head -c 9999 b.md)"',
+                "gh pr comment 5 -F x=@y.md",
+                "exec 9<b.md; gh pr comment 5 -F /dev/fd/9",
+                'gh pr comment 5 --body "$(< b.md)"',
+                "cat b.md | gh pr comment 5 -F /dev/stdin",
+                "gh pr comment 5 --body $(cat b.md)",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                "cat n.md 2>/dev/null | gh pr comment 5 -F -",
+                'cat b.md 2>/dev/null | head -3; gh pr comment 5 --body "ok $(date)"',
+                "gh api repos/o/r/issues/5/comments -F body=@y.md",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+        ledger = 'head -20 docs/ops/AUDIT-STATUS.md; gh pr comment 5 --body "Sửa ở $(git rev-parse --short HEAD)"'
+        self.assertEqual(final(ledger), "")
+        with mock.patch.object(guard, "_body_sources", side_effect=RuntimeError("hỏng")):
+            self.assertEqual(final("gh pr comment 5 -F n.md"), "deny")  # lỗi khi quét → coi như có dấu
 
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,

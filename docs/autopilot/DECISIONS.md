@@ -1867,3 +1867,10 @@
 - Chọn: Thêm một lần sửa hết: luật = luật chữ của main OR luật mới + O1/O2/G1–G4
 - Lý do (tiêu chí chất lượng cuối): Gốc chung của 3 🔴 là bộ phân tích mới yếu hơn main ở vài đường — OR với luật main loại bỏ cả lớp hồi quy theo cấu trúc; giữ tiến bộ chặn dạng mờ; 🔴 không ghi nợ (ADR-0059)
 - Đường lùi: Revert squash PR; guard về bản main
+
+### D-266 · 2026-10-30T20:17:07+00:00 · PR #354: review lượt 2 còn 🔴 (JSON lồng sâu làm _file_has_mark ném RecursionError → guard fail-open, tắt mọi luật sau) — làm gì?
+
+- Phương án: (1) Thêm một lần sửa hết: bắt mọi lỗi đọc nguồn thân → coi như có dấu, quét chữ thô trước JSON; O1/G1/FIFO · (2) Bỏ đọc JSON, ghi nợ phần còn lại · (3) Thu hẹp PR về argv/toàn văn lệnh, bỏ đọc file
+- Chọn: Thêm một lần sửa hết: bắt mọi lỗi đọc nguồn thân → coi như có dấu, quét chữ thô trước JSON; O1/G1/FIFO
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); lỗi đọc nguồn → chặn là chiều chặt nhất và loại cả lớp fail-open; giữ tiến bộ đọc nguồn thân đã review
+- Đường lùi: Revert squash PR; guard về bản main
