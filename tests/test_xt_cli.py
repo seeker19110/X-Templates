@@ -3417,6 +3417,7 @@ class GitNoReplaceTest(TmpRepoCase):
         self.assertEqual(xt._review_drift(self.repo, last, head, "main")[1], ["app.py"])
         (self.repo / ".git" / "info" / "grafts").write_text(grafts, encoding="utf-8")
         self.assertEqual(xt._review_drift(self.repo, last, head, "main")[1], ["app.py"])
+        self.assertEqual(xt._git(self.repo, "show", "--no-patch", last).stderr, "")  # không lẫn cảnh báo grafts
         (self.repo / ".git" / "info" / "grafts").unlink()
         alt = self.tmp / "grafts"
         alt.write_text(grafts, encoding="utf-8")

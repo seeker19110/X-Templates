@@ -2641,7 +2641,7 @@ MCP_MERGE_KEYS = {"owner", "repo", "pullNumber", "expectedHeadSha", "merge_metho
 # Đúng dạng dấu mà `xt.py` đọc (`head=<40 hex> verdict=…`) hoặc head ghép lúc chạy (`head=$(git rev-parse HEAD)`,
 # `$H`, backtick — re-review #159); mã nguồn/tài liệu nhắc dạng dấu (`head={head}`, `head=<sha>`) không khớp.
 REVIEW_MARK_RE = re.compile(
-    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`%][^>]{0,200}?)\s+verdict=(?:clean|blocking|debt|[$`%])"
+    r"<!--\s*xt-review\s+v1\s+head=(?:[0-9a-f]{40}|[$`%][^>]{0,200}?)\s+verdict=(?:clean|blocking|inconclusive|debt|[$`%])"
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
@@ -2794,34 +2794,62 @@ def _forges_review(argv: List[str]) -> bool:
     )
 
 
-REVIEW_BODY_FILES_MAX = 64  # số đường dẫn tối đa mỗi lệnh `gh` đăng chữ được đọc để tìm dấu
-REVIEW_BODY_FILE_BYTES = 1 << 20  # file lớn hơn không phải thân comment — bỏ qua
-PATH_CHUNK_RE = re.compile(r"[^\s\"'`$()<>|;&=]+")
+REVIEW_BODY_FILES_MAX = 16  # số nguồn thân tối đa mỗi lệnh `gh` đăng chữ — vượt thì coi như không đọc được
+REVIEW_BODY_FILE_BYTES = 1 << 20  # thân lớn hơn không đọc — coi như không đọc được
+STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
+CAT_SUBST_RE = re.compile(r"\$\(\s*(?:cat\s+|<\s*)([^)\s]+)\s*\)")
 
 
 def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
-    """File (tương đối với `cwd`) có dấu review — thân mà `gh … -F f`, `$(cat f)`, `< f` sẽ đăng."""
+    """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (cả trong chuỗi JSON — `gh api --input`
+    viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, không phải file thường, quá cỡ, lỗi đọc) — chiều
+    chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó
+    (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác sinh ra là giới hạn đã ghi)."""
+    if _vague(path):
+        return True
     full = os.path.join(cwd or ".", os.path.expanduser(path))
     try:
-        if not os.path.isfile(full) or os.path.getsize(full) > REVIEW_BODY_FILE_BYTES:
+        if not os.path.lexists(full):
             return False
+        if not os.path.isfile(full) or os.path.getsize(full) > REVIEW_BODY_FILE_BYTES:
+            return True
         with open(full, encoding="utf-8", errors="replace") as fh:
-            return bool(REVIEW_MARK_RE.search(fh.read()))
+            text = fh.read()
     except OSError:
-        return False
+        return True
+    try:
+        texts = [text, *_strings(json.loads(text))]
+    except ValueError:
+        texts = [text]
+    return any(REVIEW_MARK_RE.search(t) for t in texts)
+
+
+def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
+    """File làm thân của lệnh `gh` đăng chữ: `gh api` — `-F k=@f`/`--field k=@f`/`--input f`; `gh pr|issue` — `-F f`,
+    `--body-file f`; `< f`; `$(cat f)` trong đối số; file của `cat`/`head`… trong cùng chuỗi khi thân đọc stdin (`-`) hay
+    là thay lệnh (`$`). `-` không phải file."""
+    args = normalize(argv)[1:]
+    own = _gh_api_files(args) if args[:1] == ["api"] else [f for f in _gh_flag_files(args) if "=@" not in f]
+    own += [args[i + 1] for i, t in enumerate(args[:-1]) if t == "<"]
+    own += [m for t in args for m in CAT_SUBST_RE.findall(t)]
+    piped = "-" in own or any("$" in t for t in args)
+    return [f for f in own if f != "-"] + (cats if piped else [])
 
 
 def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
     """Lệnh có `gh` đăng chữ (`_forges_review` không cần dấu ở argv) mà dấu nằm ở argv của nó, ở bất kỳ đâu trong chuỗi
-    lệnh (heredoc, `printf … > f &&`, `printf '…%s…' | gh -F -`) hay trong file mà chuỗi lệnh nhắc tới (`-F f`,
-    `--body-file f`, `$(cat f)`, `< f`, `cat f |`) — AUD-SEC-157. Lệnh không đăng thì chữ nhắc dấu không bị chặn."""
-    posts = [c for c in split_commands(tokens) if _gh_posts(c)]
+    lệnh (heredoc, `printf … > f &&`, `printf '…%s…' | gh -F -`) hay trong nguồn thân của chính lệnh `gh` đó
+    (`_body_sources`; không đọc được → chặn) — AUD-SEC-157. Lệnh không đăng thì chữ nhắc dấu không bị chặn; file chỉ được
+    nhắc tên (`--body "xem docs/ops/AUDIT-STATUS.md"`) không phải nguồn thân."""
+    cmds = split_commands(tokens)
+    posts = [c for c in cmds if _gh_posts(c)]
     if not posts:
         return False
     if REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts):
         return True
-    paths = [p for t in tokens for p in PATH_CHUNK_RE.findall(t) if "/" in p or "." in p]
-    return any(_file_has_mark(p, cwd) for p in paths[:REVIEW_BODY_FILES_MAX])
+    cats = [t for c in cmds for n in [normalize(c)] if n[:1] and n[0] in STDIN_READERS for t in n[1:] if t[:1] != "-"]
+    srcs = [f for c in posts for f in _body_sources(c, cats)]
+    return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
 
 
 def _gh_posts(argv: List[str]) -> bool:

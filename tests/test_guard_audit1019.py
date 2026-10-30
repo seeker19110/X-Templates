@@ -411,18 +411,54 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 f"cat {f}",  # đọc file có dấu, không đăng
                 "gh pr create -t 'fix: x' --body \"$(cat <<'EOF'\nthân thường\nEOF\n)\"",
                 f"gh pr view 5 && grep -c xt-review {f}",  # gh chỉ đọc
+                # chỉ nhắc tên file có dạng dấu (sổ, corpus, test) — không phải nguồn thân (review #354)
+                'gh pr create --title "fix(guard): x" --body "Sổ docs/ops/AUDIT-STATUS.md cập nhật"',
+                'git add docs/ops/AUDIT-STATUS.md && git commit -m "docs: sổ" && gh pr create --title "docs: sổ" --body x',
+                'gh pr comment 354 --body "Đã sửa, xem tests/test_guard_audit1019.py"',
+                "gh pr create -t 'fix: x' --body \"$(cat <<'EOF'\nxem tests/fixtures/autonomy/guard.json\nEOF\n)\"",
             ):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd), "")
 
-    def test_review_marker_body_file_unreadable_is_not_mark(self):
-        """File không đọc được (quyền, lỗi I/O) thì không tính là có dấu — chỉ argv/chuỗi lệnh quyết định."""
+    def test_review_marker_body_source_unreadable_denied(self):
+        """Nguồn thân guard không đọc được (lỗi I/O, không có, glob, quá cỡ, quá nhiều nguồn) → coi như mang dấu; JSON
+        thoát `<` thành `\\u003c` vẫn bị đọc ra (review #354)."""
         with tempfile.TemporaryDirectory() as d:
-            f = Path(d, "b.md")
+            f, plain = Path(d, "b.md"), Path(d, "n.md")
             f.write_text(MARK, encoding="utf-8")
+            plain.write_text("thường\n", encoding="utf-8")
             with mock.patch.object(guard, "open", side_effect=OSError("EACCES"), create=True):
-                self.assertFalse(guard._file_has_mark(str(f), None))
-            self.assertTrue(guard._file_has_mark(str(f), None))
+                self.assertTrue(guard._file_has_mark(str(plain), None))
+            self.assertFalse(guard._file_has_mark(str(plain), None))
+            Path(d, "body").write_text(MARK, encoding="utf-8")  # tên không có `.`/`/`
+            Path(d, "big.md").write_text("x" * ((1 << 20) + 1), encoding="utf-8")
+            Path(d, "esc.json").write_text(json.dumps({"body": MARK}).replace("<", "\\u003c"), encoding="utf-8")
+            Path(d, "inc.md").write_text(MARK.replace("clean", "inconclusive"), encoding="utf-8")
+            Path(d, "sub").mkdir()
+            root = Path(d)
+            for cmd in (
+                "gh pr comment 5 -F body",
+                "gh pr comment 5 --body-file=body",
+                "gh api repos/o/r/issues/5/comments -F body=@b.md",
+                f"gh api repos/o/r/issues/5/comments --field body=@{f}",
+                "gh api repos/o/r/issues/5/comments --input esc.json",
+                "gh pr comment 5 -F big.md",
+                "gh pr comment 5 -F b*.md",
+                "gh pr comment 5 -F sub",  # có nhưng không phải file thường
+                "gh pr comment 5 -F inc.md",
+                "echo " + " ".join(f"x{i}.md" for i in range(64)) + "; gh pr comment 5 -F b.md",
+                "gh pr comment 5 " + " ".join(f"-F n{i}.md" for i in range(20)),
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                "gh pr comment 5 -F n.md",
+                "gh api repos/o/r/issues/5/comments -F body=hello -f x=@b.md",  # `-f` là chữ, `-F k=v` không phải file
+                "gh pr comment 5 --body 'xem b.md'",
+                "gh pr comment 5 -F khong-co.md",  # chưa có: gh cũng không đọc được
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
 
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,

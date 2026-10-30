@@ -6793,6 +6793,45 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec157-mention-ledger-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-157"
+  ],
+  "input": {
+   "command": "gh pr create --title \"fix(guard): x\" --body \"Sổ docs/ops/AUDIT-STATUS.md cập nhật\""
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec157-api-field-glob",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-157"
+  ],
+  "input": {
+   "command": "gh api repos/o/r/issues/5/comments -F body=@b?.md"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec157-body-file-glob",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-157"
+  ],
+  "input": {
+   "command": "gh pr comment 5 -F b*.md"
+  },
+  "expect": {
+   "allowed": false
+  }
  }
  ]
 }
