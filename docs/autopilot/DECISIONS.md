@@ -1811,3 +1811,31 @@
 - Chọn: Máy: sau 2 lượt review chưa sạch, pr next trả debt thay rethink; phát hiện còn lại vào sổ audit (mở, Ghi chú nợ-review: #N), commit chỉ sổ; xt.py pr debt --findings đăng dấu verdict=debt ở head (tính là review hợp lệ); 🔴 không ghi nợ được (pr rethink như cũ); nợ review mở làm audit check --strict đỏ, next-step build replan, harden gom việc — cuối pha phải trả
 - Lý do (tiêu chí chất lượng cuối): (1) đúng/an toàn: theo đúng luật người đặt cho 🟠/🟢; 🔴 vẫn không vào nhánh chính vì dự án đích có thể triển khai liên tục từ main — cách hiểu chặt hơn, người đổi được; nợ không mất vì release-check (audit --strict) chặn tới khi trả. (2) đường lùi: REVIEW_ROUNDS lớn hoặc bỏ nhánh debt. (3) test được: dấu verdict=debt máy đọc, pr debt kiểm sau lượt review cuối chỉ sổ audit đổi (sửa 1 lần) và mỗi ID mở, không 🔴, ghi nợ-review: #N. Phương án 3 là kỷ luật — rethink hiện hành vẫn dừng PR, trái luật mới.
 - Đường lùi: Bỏ nhánh debt trong _pr_next_review (về rethink ADR-0053); pr debt và verdict=debt vô hại khi không dùng
+
+### D-258 · 2026-10-30T13:03:50+00:00 · PLAN-harden-2026-10-27-loops (D-202) đặt 3.29.0 sau lát 3 (perf trial, T-3551/3552/3557 còn mở); nay đã có ADR-0058, ADR-0059, LOOP-HARNESS-029, AUD-SEC-149 trên main và release-check GO. Cắt 3.29.0 bây giờ hay chờ lát 3?
+
+- Phương án: (1) Cắt 3.29.0 ngay từ main aed0ce4; lát 3 (perf trial) sang 3.30.0 — sửa T-3553 và dòng phạm vi PLAN · (2) Chờ xong lát 3 rồi mới cắt 3.29.0
+- Chọn: Cắt 3.29.0 ngay từ main aed0ce4; lát 3 (perf trial) sang 3.30.0 — sửa T-3553 và dòng phạm vi PLAN
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: AGENTS.md §7 — đổi điều dự án đích phải làm thì cắt bản sớm; luật review mới (ADR-0059) và chặn subject commit đổi việc của dự án đích ngay; lát 3 chưa bắt đầu, chờ nó giữ các thay đổi đó khỏi dự án đích không thời hạn. (2) đường lùi: lát 3 vẫn trong PLAN, chỉ đổi số bản. (3) đơn giản: release-check đã GO ở aed0ce4.
+- Đường lùi: Đổi T-3553 về 3.29.0 không được (bản đã cắt) — gộp lát 3 vào 3.30.0 là đường duy nhất
+
+### D-259 · 2026-10-30T13:20:00+00:00 · PR #348 (cắt 3.29.0) hết lượt review với 🟠/🟢 còn lại: ghi nợ thì tag v3.29.0 tự gắn lúc merge ở commit mà release-check FAIL (audit --strict đỏ vì nợ) — PR cắt bản xử lý phần còn lại thế nào?
+
+- Phương án: (1) PR cắt bản không ghi nợ: cuối pha chính là nó — hết lượt thì pr rethink, sửa hết phát hiện còn lại trong một lần sửa, review lại rồi merge (tag chỉ gắn khi sổ sạch) · (2) Ghi nợ, merge, chấp nhận tag mang nợ rồi trả ở 3.29.1 · (3) Ghi nợ, đóng PR cắt bản, trả nợ ở PR riêng rồi mở PR cắt bản mới
+- Chọn: PR cắt bản không ghi nợ: cuối pha chính là nó — hết lượt thì pr rethink, sửa hết phát hiện còn lại trong một lần sửa, review lại rồi merge (tag chỉ gắn khi sổ sạch)
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ADR-0059 'nợ trả cuối pha' và release-check là cổng phát hành — phương án 2 phát hành mang nợ, trái cả hai. (3) đơn giản: phương án 3 thêm một PR và một vòng review cho cùng thay đổi chữ; phương án 1 dùng đúng lối pr rethink đã có (một lần sửa thêm). (2) đường lùi: chỉ áp cho PR đổi VERSION.
+- Đường lùi: Bỏ D này; PR cắt bản theo luật thường (ghi nợ) và tắt tự gắn tag
+
+### D-260 · 2026-10-30T13:20:29+00:00 · PR #348: áp D-259 (PR cắt bản không ghi nợ) — mở thêm một lần sửa?
+
+- Phương án: (1) pr rethink theo D-259: sửa hết 🟠 F2 (ghi D cổng 3.29.0 = phủ review ADR-0057, audit delta lát 2 dời T-3557 trước 3.30.0), 🟢 F1 (CHANGELOG nhóm .md dưới thư mục chạy thật), 🟢 PROGRESS lát 2 đã xong · (2) Không mở lượt, ghi nợ (trái D-259)
+- Chọn: pr rethink theo D-259: sửa hết 🟠 F2 (ghi D cổng 3.29.0 = phủ review ADR-0057, audit delta lát 2 dời T-3557 trước 3.30.0), 🟢 F1 (CHANGELOG nhóm .md dưới thư mục chạy thật), 🟢 PROGRESS lát 2 đã xong
+- Lý do (tiêu chí chất lượng cuối): (1) theo D-259: cắt bản là cuối pha, không phát hành mang nợ
+- Đường lùi: Như D-259
+
+### D-261 · 2026-10-30T13:20:44+00:00 · Cắt 3.29.0 sớm (D-258) bỏ qua T-3557 (audit delta lát 2–3, sổ quét tới 6799550): 34 file mã của lát 2, ADR-0058/0059, LOOP-HARNESS-029, AUD-SEC-149 chưa qua audit delta — cổng phát hành của 3.29.0 là gì?
+
+- Phương án: (1) Cổng 3.29.0 = phủ review theo ADR-0057 (mọi file nợ từ PR có review sạch/ghi nợ ở head, release-check review_debt PASS) + nợ review đã trả; audit delta lát 2 và các PR #316–#347 dời sang T-3557, chạy trước khi cắt 3.30.0 · (2) Chạy audit delta đủ nhóm trước khi tag 3.29.0
+- Chọn: Cổng 3.29.0 = phủ review theo ADR-0057 (mọi file nợ từ PR có review sạch/ghi nợ ở head, release-check review_debt PASS) + nợ review đã trả; audit delta lát 2 và các PR #316–#347 dời sang T-3557, chạy trước khi cắt 3.30.0
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: ADR-0057 là cổng máy đã duyệt — review reviewer-alt năng lực cao hơn ở head mỗi PR là audit delta cho diff đó; release-check GO. (3) đơn giản/tốc độ chỉ phá hoà: audit đủ nhóm trên 34 file ≈ một phiên, giữ ADR-0059/LOOP-HARNESS-029 khỏi dự án đích thêm; rủi ro còn lại có lớp đỡ là T-3557 trước 3.30.0. Tiền lệ 3.28.0 audit delta tìm 🟠 — nên T-3557 không được bỏ.
+- Đường lùi: Chạy T-3557 ngay; phát hiện 🟠/🔴 thì cắt 3.29.1

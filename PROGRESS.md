@@ -1,13 +1,12 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.28.0, pha `harden` — D-136) · Cập nhật: 2026-10-30 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-10-30 · Nhánh: main
 
 ## Đang làm
-- 2026-10-29 **ADR-0058** (#327–#339, D-239…D-252): ba giai đoạn sản phẩm khoá bằng máy, lát A–E đã merge — `xt.py stage` + sổ `docs/autopilot/STAGE.json` (chỉ người `approve`), smoke (#336), khoá `/complete`/`/optimize` theo tên PLAN (#338 thay #335, D-250), `/optimize` giai đoạn 3 (#337), `install.py --stage-init` (#339). Lát chặn tiêu đề PR/subject commit lúc đặt (`LOOP-HARNESS-029`, D-255, sửa AUD-HAR-128). Kế: cắt bản, nâng dự án đích (F). Treo có từ trước: `loop_root` lệch `release-check` ở monorepo (🟠); `output_tail` cắt trước redact (🟠); Ctrl-C mồ côi Gate.
+- 2026-10-30 **3.29.0** (#344–#347, D-257, ADR-0059): luật chủ dự án **review 2 lần, sửa 1 lần, còn lại ghi nợ, nợ trả cuối pha** — `pr next` trả `debt`, `pr debt`; 🔴 không ghi nợ, thêm một lần sửa hết (`pr rethink`). Nợ #344–#346 đã trả ở #346/#347; `release-check` GO ở `aed0ce4`. Gồm ADR-0058 ba giai đoạn sản phẩm (#327–#341), `LOOP-HARNESS-029` (#343), AUD-SEC-149 (#344). 🟢 mở mới: AUD-HAR-139…141 (140: `merges` hỏng làm sập), AUD-TEST-029, AUD-DOC-104; AUD-HAR-138 nặng thêm (vòng update→review không trần). Kế: tag `v3.29.0`, nâng dự án đích (F); lát 3 `perf trial` → 3.30.0 (D-258). Treo có từ trước: Ctrl-C mồ côi Gate.
 - 2026-10-28 **ADR-0056** (#312, D-221, `research/2026-10-28-velocity.md`): lỗi có từ trước không chặn PR, CI là cổng đầy đủ, `loop decide` đánh số qua nhánh remote, `xt.yaml` `setup`. **ADR-0054/0055** (#311, D-219/D-220): khoá/guard hỏng → chặn; `install.py --preset`. 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
-- 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–1 merge, **3.28.0**; kế lát 2 T-3547 `loop next-step`.
+- 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–2 merge (lát 2 vào **3.29.0**); kế lát 3 `perf trial` + T-3557 audit delta (D-261) → 3.30.0.
 - 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.
-- 2026-10-26 **3.27.0** (#281 #282, D-196…D-200, ADR-0050): hook `PostToolUseFailure`; guard chặn `chmod`/`setfacl`/`update-index` vào hàng rào, `gh pr merge --admin`; hook Bash đóng khi `guard.py` không nạp được. `v3.27.0` (#283); sổ audit tới `e8c8d96`, 🟢 mới AUD-SEC-110…114, AUD-HAR-115.
 - PLAN-3.23-delegation-rate (D-171/172): chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
@@ -35,6 +34,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `6799550` (#307–#314: guard T-3564, sổ T-3556, ADR-0054/0055/0056, **3.28.0** `b260a9b`). Tag `v3.28.0` → `b260a9b` (chủ repo `workflow_dispatch`; steward merge bằng GITHUB_TOKEN không kích tag — AUD-HAR-124). Worktree dưới `/tmp` làm `test_guard_audit1020b` đỏ oan (ADR-0040).
+- `main` `aed0ce4` (#344–#347). PR cắt bản 3.29.0 (`VERSION`, CHANGELOG, sổ) — merge xong thì tag qua `release-tag.yml` (steward dispatch, #316). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge` — chủ dự án yêu cầu 2026-10-30. `release-check` chạy trên worktree của `main` (first-parent nhánh làm `review_debt` FAIL oan).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
