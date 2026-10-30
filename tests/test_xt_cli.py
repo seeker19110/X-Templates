@@ -2948,6 +2948,10 @@ class CiTriageTest(TmpDirCase):
         self.assertEqual(two, ["x", f"{mask} {mask}", "***", " sau", "ok"])  # khoá kế mở ngay sau END (review #342)
         again = xt.ci_classify(f"{mask}\nok\nexit 1")["evidence"]  # chuỗi đã che không mở khối
         self.assertEqual(again, [mask, "ok", "exit 1"])
+        starred = xt.ci_classify(f"x\n{begin} ***\n{body}\n{end}\nexit 1")["evidence"]  # nhãn khác + ` ***` vẫn là khoá
+        self.assertEqual(starred, ["x", mask, "***", "***", "exit 1"])
+        long_line = (f"{begin}x{end}" * 20000).replace("\n", "")
+        self.assertEqual(xt._pem_mask_lines([long_line]), [mask * 20000])  # tuyến tính (vị trí, không cắt chuỗi)
         hdr = xt.ci_classify(f"FAILED t.py::test_k\nE  where False = startswith('{begin}')\nleaks found: 1\n")
         self.assertEqual((hdr["category"], hdr["categories"]), ("secret", ["secret", "test"]))
 

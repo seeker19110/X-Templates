@@ -182,8 +182,8 @@ SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|privat
 # Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9).
 SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
-# Khối khoá theo dòng cho bằng chứng triage (`_pem_mask_lines`); `(?! \*\*\*)`: chuỗi đã che không mở khối.
-PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----(?! \*\*\*)")
+# Khối khoá theo dòng cho bằng chứng triage (`_pem_mask_lines`); chỉ đúng chuỗi `PEM_MASK` (đã che) không mở khối.
+PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
 PEM_MASK = "-----BEGIN PRIVATE KEY----- ***"
 PEM_END_RE = re.compile(r"-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
@@ -7973,19 +7973,24 @@ def _ci_log_lines(text: str) -> List[str]:
 
 def _pem_mask_lines(lines: List[str]) -> List[str]:
     """Che khối khoá theo dòng, GIỮ số dòng: từ header tới END (chưa đóng → tới hết) bị che; sau END quét tiếp phần còn
-    lại của dòng (khoá kế mở ngay sau END). Dòng thô vẫn dùng để phân loại — che trước trên cả log (`|\\Z`) thì header
-    chưa đóng nuốt dòng nhận diện `secret` (review #342)."""
+    lại của dòng (khoá kế mở ngay sau END); đúng `PEM_MASK` (đã che) giữ nguyên. Dòng thô vẫn dùng để phân loại — che
+    trước trên cả log (`|\\Z`) thì header chưa đóng nuốt dòng nhận diện `secret` (review #342). Tìm theo vị trí, không
+    cắt chuỗi: tuyến tính trên dòng dài nhiều cặp BEGIN/END."""
     out: List[str] = []
     inside = False
     for line in lines:
-        kept, rest = "", line
-        while rest:
-            m = (PEM_END_RE if inside else PEM_BEGIN_RE).search(rest)
+        kept, pos = "", 0
+        while pos < len(line):
+            m = (PEM_END_RE if inside else PEM_BEGIN_RE).search(line, pos)
             if not m:
-                kept += "" if inside else rest
+                kept += "" if inside else line[pos:]
                 break
-            kept += "" if inside else rest[: m.start()] + PEM_MASK
-            inside, rest = not inside, rest[m.end() :]
+            if not inside:
+                kept += line[pos : m.start()] + PEM_MASK
+                if line.startswith(PEM_MASK, m.start()):
+                    pos = m.start() + len(PEM_MASK)
+                    continue
+            inside, pos = not inside, m.end()
         out.append(kept or "***")
     return out
 
