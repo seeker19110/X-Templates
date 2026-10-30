@@ -3,7 +3,7 @@ title: Guardrail runtime, chính sách nội dung, fallback, an toàn người d
 kind: module
 prefix: AI-GUARD
 applies_to: [ai-agent, agentic-system, data-ml, api-service, web-app]
-updated: 2026-10-14
+updated: 2026-10-30
 ---
 
 # Guardrail runtime, chính sách nội dung, fallback, an toàn người dùng
@@ -71,6 +71,8 @@ updated: 2026-10-14
 - [ ] `AI-GUARD-015` **SHOULD** Đo độ trễ thêm của guardrail (p95) và tỉ lệ chặn sai (false positive) qua mẫu người chấm hàng tháng; FP cao → hiệu chỉnh.
 - [ ] `AI-GUARD-016` **MAY** Dùng khung có cấu hình (guardrails-ai/NeMo) khi số luật > 10 hoặc cần luồng hội thoại; dưới đó tự viết tầng 1 + gọi model phân loại đơn giản hơn.
 - [ ] `AI-GUARD-017` **MAY** Red-team guardrail định kỳ với bộ tấn công mới; ca lọt → thêm vào tầng 1 nếu tất định hoá được.
+- [ ] `AI-GUARD-018` **MUST@L** Tầng kiểm tất định (`AI-GUARD-001`) loại ký tự vô hình khỏi input người dùng, đoạn RAG và kết quả tool trước khi vào context, và khỏi output trước khi hiển thị. Ký tự vô hình gồm khối Tag U+E0000–U+E007F, surrogate mồ côi, và zero-width/điều khiển bidi theo cùng luật với `SEC-AI-018`. Lọc lặp tới khi chuỗi không đổi; giữ chuỗi tag hợp lệ của cờ emoji (England/Scotland/Wales); ghi số ký tự bị gỡ vào log guardrail (`AI-GUARD-006`). → Kiểm: Unit test: chuỗi chứa chỉ thị mã hoá bằng Tag characters (kể cả lồng để tái hợp sau một lượt lọc) → sau sanitize không còn code point trong U+E0000–U+E007F/ZW/bidi; cờ England (chuỗi tag hợp lệ) giữ nguyên; log có `stripped_count`. · Nguồn: AWS Security Blog *Defending LLM applications against Unicode character smuggling* (2025-09-30)
+- [ ] `AI-GUARD-019` **SHOULD** Tầng kiểm bằng model chấm cả cửa sổ hội thoại (N lượt gần nhất + tóm tắt phiên), không chỉ tin nhắn cuối; bộ test guardrail có ca tấn công nhiều lượt leo thang dần (kiểu Crescendo) mà từng lượt riêng lẻ trông vô hại. → Kiểm: Bộ test guardrail có nhãn `multi_turn` (≥ 10 ca, ≥ 3 lượt mỗi ca) chạy trong CI cùng AI-GUARD-009; test đơn vị xác nhận input của classifier gồm các lượt trước; tỉ lệ chặn ca multi_turn báo riêng. · Nguồn: Russinovich và cộng sự, *Crescendo* (USENIX Security 2025, arXiv 2404.01833)
 
 ## Bẫy thường gặp
 
@@ -102,3 +104,5 @@ updated: 2026-10-14
 - NIST AI RMF 1.0 (2023-01-26) và AI 600-1 Generative AI Profile (2024-07-26): <https://www.nist.gov/itl/ai-risk-management-framework> — xác minh 2026-10-13 (`research/2026-10-13-ai-agent-research.md` §5).
 - OWASP Top 10 for LLM Applications 2026 (04/08/2026; mã đổi so với 2025 — bảng ở [`../12-security/ai-security.md`](../12-security/ai-security.md)): <https://github.com/GenAI-Security-Project/GenAI-LLM-Top10> — xác minh 2026-10-14. Agentic Top 10 2026: <https://genai.owasp.org/> — (chưa xác minh — 403 ngày 2026-10-13).
 - `seeker19110/stored` mục 12 §2 (hai tầng: từ khoá tất định + model nhỏ; fallback khi model lỗi; fail-closed) — đọc 2026-10-13 (`research/2026-10-13-stored-catalog-extraction.md`).
+- AWS Security Blog 2025-09-30: khối Tag U+E0000–U+E007F giấu payload; lọc lặp 'until no more changes are made'; gỡ surrogate đứng riêng; gỡ tag có thể làm hỏng cờ England/Scotland/Wales; Bedrock Guardrails chặn ở prompt và response; một lớp trong defense-in-depth (`AI-GUARD-018`): <https://aws.amazon.com/blogs/security/defending-llm-applications-against-unicode-character-smuggling/> — xác minh 2026-10-30.
+- Crescendo (Russinovich, Salem, Eldan; USENIX Security 2025): jailbreak nhiều lượt bắt đầu bằng câu hỏi vô hại rồi leo thang dựa trên câu trả lời trước; tỉ lệ thành công cao trên mọi model và tác vụ đã đánh giá (`AI-GUARD-019`): <https://arxiv.org/abs/2404.01833> — xác minh 2026-10-30.

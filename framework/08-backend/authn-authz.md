@@ -4,7 +4,7 @@ kind: module
 prefix: BE-AUTH
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain]
 essential: [BE-AUTH-003@auth, BE-AUTH-006@jwt, BE-AUTH-008@oauth, BE-AUTH-015@reset]
-updated: 2026-10-20
+updated: 2026-10-30
 ---
 
 # Xác thực, phiên, token, phân quyền (RBAC/ABAC), đa yếu tố
@@ -71,6 +71,7 @@ updated: 2026-10-20
 - [ ] `BE-AUTH-023` **MAY** Sender-constrained token (DPoP RFC 9449 hoặc mTLS RFC 8705) cho API giá trị cao. → Kiểm: test dùng token với khoá DPoP khác → 401. · Nguồn: RFC 9700 §2.2.1
 - [ ] `BE-AUTH-024` **MAY** Bước xác thực theo rủi ro (thiết bị/vị trí mới → yêu cầu MFA), không dùng vị trí làm yếu tố xác thực. → Kiểm: test đăng nhập từ UA/IP mới → prompt MFA. · Nguồn: OWASP MFA Cheat Sheet
 - [ ] `BE-AUTH-025` **MUST@L** Nhận lời mời vào workspace/tenant chỉ sau khi **xác minh quyền sở hữu email bằng token** gửi tới đúng email đó (link/mã một lần trong thư mời); không suy từ việc đã có tài khoản đăng ký với email trùng, kể cả khi tài khoản ấy bị gắn `email_verified=true` bởi đường tự đăng ký. → Kiểm: test tạo tài khoản chưa xác minh trùng email người được mời → không có membership trong tenant; chỉ token từ thư mời mới nhận được lời mời. · Nguồn: `seeker19110/stored` 07 (Overmind tự host: `LocalSessionView` tạo tài khoản `email_verified=True` rồi `claim_pending_invites()` coi email trùng là bằng chứng sở hữu; đọc 2026-10-16)
+- [ ] `BE-AUTH-026` **SHOULD** API key/token do hệ thống phát hành cho khách có định dạng nhận diện được: tiền tố riêng theo sản phẩm và môi trường (vd `acme_live_`/`acme_test_`), phần ngẫu nhiên entropy cao và checksum (vd 32-bit), để từ chối nhanh chuỗi sai định dạng trước khi tra CSDL và để quét bí mật bắt được khi key lộ. Regex được công bố, có rule gitleaks hoặc custom pattern trong repo; dự án L có key công khai cân nhắc đăng ký GitHub secret scanning partner program. → Kiểm: Unit test bộ sinh key khớp regex công bố + checksum hợp lệ; rule gitleaks/custom pattern của repo bắt mẫu key giả; key sai checksum → 401 không truy vấn CSDL. · Nguồn: GitHub secret scanning partner program (tiền tố + entropy + checksum 32-bit)
 
 ## Bẫy thường gặp
 
@@ -116,3 +117,4 @@ updated: 2026-10-20
 - OWASP Forgot Password Cheat Sheet (thông báo như nhau dù tài khoản có hay không, thời gian đồng đều; token sinh bằng thuật toán an toàn mật mã, đủ dài, lưu an toàn, dùng một lần, hết hạn): <https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html> — xác minh 2026-10-20
 - `research/2026-10-13-stored-catalog-extraction.md` §2.5 (IDOR, Server Action), §2.11 (prompt không phải cơ chế bảo mật); catalog `09-engineering-checklists` §1.3 mục 4.4; `23-own-repos-lessons` §4.1 (API phải `validateAuth()` + user_id từ token).
 - Catalog `seeker19110/stored` 07 (Overmind: nhận lời mời theo email trùng với `email_verified=True` tự gán) — đọc 2026-10-16.
+- GitHub liệt kê đặc điểm của bí mật chất lượng cao, nhận diện được: tiền tố định nghĩa duy nhất, chuỗi ngẫu nhiên entropy cao, checksum 32-bit; phát hiện tự động trên GitHub cần tham gia chương trình partner (`BE-AUTH-026`): <https://docs.github.com/en/code-security/secret-scanning/secret-scanning-partnership-program/secret-scanning-partner-program> — xác minh 2026-10-30.

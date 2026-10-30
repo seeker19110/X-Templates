@@ -51,3 +51,46 @@ chuyên mục NN, mục x của catalog.
 - NIST IR 8547 final: chỉ xác minh ngày và trạng thái; nội dung mốc từ nguồn thứ cấp (một nguồn nói bản final mở rộng phạm vi deprecate 2030).
 - Mục mới đều SHOULD: luật áp theo điều kiện (bán vào EU, có model AI) hoặc chưa đủ bằng chứng để buộc mọi dự án; không đụng trần 4 MUST/module (ADR-0004).
 - `PROGRESS.md` không ghi đợt này (gần trần 8 KB); dấu vết ở file này và `CHANGELOG.md`.
+
+## 5. Rà khoảng trống toàn khung (đợt 2, cùng ngày)
+
+- Cách làm: 8 agent tìm (mỗi nhóm mảng một agent: grep khung bằng nhiều từ đồng nghĩa, đọc catalog stored, fetch nguồn sống) → mỗi nhóm một agent
+  xác minh đối kháng (mặc định loại khi nghi ngờ; fetch lại URL; sửa dữ kiện sai). 31 đề xuất → **27 giữ, 4 loại** (đã phủ bởi `OPS-MAINT-003`,
+  `SEC-INFRA-004`, mirror git cho DR, transcript agent bản rõ).
+- Hiệu chỉnh từ bước xác minh: phạm vi Android verification 2026-09-30 chỉ ở store tham gia (BR/ID/SG/TH); quyền LNA tách hai từ Chrome 145;
+  endpoint EPSS là `api.first.org/data/v1/epss`; zizmor ghi cache cần ≥ 1.31.0 (bản ghim trong khung 1.30.1); OpenVEX cho `impact_statement`
+  thay justification — khung chọn chặt hơn; settings repo chỉ đọc ở phiên cloud **một repo** (bẫy `enabledPlugins` ở đợt 1 thiếu ý này).
+- Chưa xác minh/lưu ý: mốc Chrome Root Program cho clientAuth; nghĩa vụ hiển thị cảnh báo SIMO của tổ chức không phải ngân hàng; WebSocket
+  bị gate LNA từ bản Chrome nào; tình trạng tố tụng SB2420 đổi nhanh (mục đòi rà ≤ 90 ngày).
+- **Lưu ý cho phiên này:** phiên cloud gắn hai repo (X-Templates + stored) thuộc loại "nhiều repo" — hook/guard của `.claude/settings.json` có thể
+  không chạy; Gate được chạy tay (`gate-fast`) trước mỗi lần đẩy.
+
+| ID | Mức | File |
+|---|---|---|
+| `DB-BACKUP-019` | SHOULD | `09-database/backup-and-recovery.md` |
+| `DB-PERF-021` | SHOULD | `09-database/indexing-and-query-performance.md` |
+| `BE-AUTH-026` | SHOULD | `08-backend/authn-authz.md` |
+| `FE-PERF-022` | SHOULD | `07-frontend/performance-web-vitals.md` |
+| `FE-PERF-023` | SHOULD | `07-frontend/performance-web-vitals.md` |
+| `SEC-WEB-028` | SHOULD | `12-security/appsec-web.md` |
+| `XC-I18N-020` | SHOULD | `18-cross-cutting/i18n-and-l10n.md` |
+| `SEC-SUPPLY-029` | MUST@L | `12-security/supply-chain.md` |
+| `SEC-SUPPLY-030` | SHOULD | `12-security/supply-chain.md` |
+| `SEC-SUPPLY-031` | SHOULD | `12-security/supply-chain.md` |
+| `SEC-INFRA-026` | SHOULD | `12-security/infrastructure-and-network.md` |
+| `AI-APP-020` | SHOULD | `13-ai-engineering/llm-app-foundations.md` |
+| `AI-GUARD-018` | MUST@L | `13-ai-engineering/guardrails-and-safety.md` |
+| `AI-GUARD-019` | SHOULD | `13-ai-engineering/guardrails-and-safety.md` |
+| `AI-PROTO-018` | SHOULD | `13-ai-engineering/protocols-mcp-a2a.md` |
+| `AI-PROTO-019` | MUST@L | `13-ai-engineering/protocols-mcp-a2a.md` |
+| `IND-ECOM-024` | MUST@L | `03-industries/ecommerce.md` |
+| `IND-ECOM-025` | SHOULD | `03-industries/ecommerce.md` |
+| `IND-FIN-023` | SHOULD | `03-industries/fintech.md` |
+| `OPS-DEPLOY-022` | MUST@L | `15-operations/deployment-strategies.md` |
+| `WF-CI-026` | MUST@L | `10-workflow/ci-cd-pipeline.md` |
+| `LOOP-CI-020` | MUST@L | `11-autonomous-loop/self-healing-ci.md` |
+| `LOOP-HARNESS-031` | SHOULD | `11-autonomous-loop/harness-files.md` |
+| `LOOP-STOP-030` | SHOULD | `11-autonomous-loop/stop-points-and-escalation.md` |
+| `PRF-MOB-022` | SHOULD | `02-profiles/mobile-app.md` |
+| `PRF-MOB-023` | SHOULD | `02-profiles/mobile-app.md` |
+| `PRF-WEB-019` | SHOULD | `02-profiles/web-app.md` |
