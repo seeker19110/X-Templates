@@ -5,16 +5,16 @@ Thay đổi **mục checklist** (thêm ID, đổi mức, ngừng dùng) ghi rõ 
 
 ## [Unreleased]
 
+### Changed
+- PR cắt bản không ghi nợ review (ADR-0059 §6, D-259 — chủ dự án yêu cầu máy hoá): `merge-check` thêm khoá `release` (PR đổi `VERSION` gốc); hết lượt review thì `pr next` trả `rethink` thay `debt` — ghi nợ rồi merge sẽ gắn tag ở commit mà `release-check` FAIL; `pr rethink` mở thêm một lần sửa hết (đánh dấu head chưa sửa → `fix`; review cuối chưa kết luận → `review`). PR cắt bản = đổi/đổi tên/xoá `VERSION` gốc nhắm `main` — cùng vị từ steward gắn tag (`is_release_pr`). **Dự án đích:** chạy lại `install.py`; ghép lại `BLUEPRINT.md` theo ID — đổi chữ `LOOP-STOP-022`; skill `/review` mới.
+
 ### Fixed
-- File luật agent (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`, `.github/instructions/*`) không còn là tài liệu khi tính nợ review: PR pha build hoãn review chúng thì `release-check` hàng `review_debt` thu nợ (AUD-XFEAT-030) — cùng danh sách với đường cổng của làn merge (`AGENT_RULE_GLOBS`). **Hệ quả có thể làm đỏ:** dự án đích đổi các file này sau SHA quét mà chưa review → `review_debt` FAIL tới khi rà.
+- File luật agent (`AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/rules/*`, `.cursorrules`, `.cursor/rules/*`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`, `.github/instructions/*` — danh sách theo `docs-for-ai-agents.md`) không còn là tài liệu khi tính nợ review: PR pha build hoãn review chúng thì `release-check` hàng `review_debt` thu nợ (AUD-XFEAT-030) — cùng danh sách với đường cổng của làn merge và nhóm HAR của audit (`AGENT_RULE_GLOBS`); `.windsurfrules`/`.clinerules` nay cũng vào làn chuẩn. **Hệ quả có thể làm đỏ:** dự án đích đổi các file này sau SHA quét mà chưa review → `review_debt` FAIL tới khi rà.
 
 ### Security
 - Dấu review đăng tay bị chặn cả khi nằm trong nguồn thân của lệnh `gh` (`-F f`, `--body-file`, `gh api -F k=@f`/`--input`, `$(cat f)`, `< f`, `cat f |`; nguồn có mà guard không đọc được cũng bị chặn), ở bất kỳ đâu trong chuỗi lệnh (heredoc, `printf … | gh -F -`), hay `verdict=` ghép lúc chạy/`inconclusive` (AUD-SEC-157) — chỉ nhắc tên file trong thân không bị chặn; qua MCP với ký tự điều khiển sau `<!--` hay chuỗi lồng (AUD-SEC-156). `xt.py` đọc git không theo grafts (`GIT_GRAFT_FILE=/dev/null`) nên phép so của `pr debt`/`pr rethink` không bị lừa (AUD-SEC-168).
 - `git replace` không còn qua mặt được phép so của `pr debt`/`pr rethink`: guard chặn ghi `refs/replace/` (`git replace …`, `update-ref refs/replace/…`; liệt kê/xoá vẫn được) như ref remote, và `xt.py` đọc git với `--no-replace-objects` (AUD-SEC-158). **Dự án đích:** chạy lại `install.py`.
 - Guard chặn duyệt giai đoạn sản phẩm theo luật chữ cũ cộng luật token mờ: ở mọi vị trí script (`-m xt`, lồng trong `perf sample --`), qua chuyển hướng/fd (`2>/dev/null`, `{fd}>`), khi lệnh con, cờ/giá trị `--framework`, tuỳ chọn `init` hay đường script mờ (`stage "$(echo approve)"`, backtick, biến, glob), là chuỗi thay chỗ (`xargs -I`/`-i`, mẫu `{…}`, `:::`) hay từ stdin — giới hạn còn lại ở `harness-files.md` (AUD-SEC-161); `xt.py --framework "$FW"` nay bị guard chặn, dùng `XT_FRAMEWORK`; `xt.py` coi biến phiên agent có mặt (kể cả rỗng, `CLAUDECODE= …`) là phiên agent (AUD-SEC-155, ADR-0058). **Dự án đích:** chạy lại `install.py`; người duyệt chạy `stage approve` ở terminal không có các biến này.
-
-### Changed
-- PR cắt bản không ghi nợ review (ADR-0059 §6, D-259 — chủ dự án yêu cầu máy hoá): `merge-check` thêm khoá `release` (PR đổi `VERSION` gốc); hết lượt review thì `pr next` trả `rethink` thay `debt` — ghi nợ rồi merge sẽ gắn tag ở commit mà `release-check` FAIL; `pr rethink` mở thêm một lần sửa hết (đánh dấu head chưa sửa → `fix`; review cuối chưa kết luận → `review`). PR cắt bản = đổi/đổi tên/xoá `VERSION` gốc nhắm `main` — cùng vị từ steward gắn tag (`is_release_pr`). **Dự án đích:** chạy lại `install.py`; ghép lại `BLUEPRINT.md` theo ID — đổi chữ `LOOP-STOP-022`; skill `/review` mới.
 
 ## [3.29.0] - 2026-10-30
 

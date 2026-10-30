@@ -3903,7 +3903,8 @@ def _path_groups(path: str) -> List[int]:
         g.append(4)
     if "/migrations/" in f"/{path}" or path.endswith((".sql", "schema.prisma")):
         g.append(10)
-    if name in ("AGENTS.md", "CLAUDE.md", "xt.yaml", "PROGRESS.md", "BLUEPRINT.md") or path.startswith(".claude/"):
+    harness = name in ("xt.yaml", "PROGRESS.md", "BLUEPRINT.md") or path.startswith(".claude/")
+    if harness or _gate_path(path, AGENT_RULE_GLOBS):
         g.append(13)
     if name.startswith(".env") or name in ("Dockerfile", "compose.yaml", "docker-compose.yml"):
         g += [11, 8]
@@ -5198,12 +5199,15 @@ RISK_PATH_RES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("ảnh/container", re.compile(r"(^|/)(Dockerfile[^/]*|Containerfile[^/]*|(docker-)?compose[^/]*\.ya?ml)$", re.I)),
     ("phụ thuộc", DEP_PATH_RE),
 )
+# File luật agent (chỉ dẫn agent đọc như luật, không phải tài liệu) — danh sách theo nhà của nó,
+# `framework/18-cross-cutting/docs-for-ai-agents.md` (file gốc, bridge, luật theo vùng mã): làn merge coi là đường cổng,
+# `is_doc_path` coi là mã, `_path_groups` xếp vào nhóm HAR — cùng một danh sách để PR pha build hoãn review chúng thì
+# `review_debt` thu nợ (AUD-XFEAT-030)
+AGENT_RULE_GLOBS: Tuple[str, ...] = ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".claude/rules/*")
+AGENT_RULE_GLOBS += (".cursorrules", ".cursor/rules/*", ".windsurfrules", ".clinerules", ".clinerules/*")
+AGENT_RULE_GLOBS += (".github/copilot-instructions.md", ".github/instructions/*")
 # File cổng/luật agent khớp ở gốc hoặc bất kỳ thư mục con (như `_match_any` của guard). Phải chứa mọi mẫu
 # `GATE_PATTERNS` của `.claude/hooks/guard.py` — test giữ hai nhà khớp nhau (AUD-HAR-021); thêm luật agent.
-# File luật agent (chỉ dẫn agent đọc như luật, không phải tài liệu): làn merge coi là đường cổng và `is_doc_path` coi là
-# mã — cùng một danh sách để PR pha build hoãn review chúng thì `review_debt` thu nợ (AUD-XFEAT-030)
-AGENT_RULE_GLOBS: Tuple[str, ...] = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules/*")
-AGENT_RULE_GLOBS += (".github/copilot-instructions.md", ".github/instructions/*")
 MERGE_GATE_GLOBS = (
     *(".github/workflows/*", ".github/rulesets/*", ".github/dependabot.yml", ".gitlab-ci.yml"),
     *(".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/*", ".xtemplates/*"),
@@ -5238,7 +5242,8 @@ LOCKFILE_RE = re.compile(
 # `command(s)/`); `.txt` chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (README.txt dưới thư mục chạy thật là mã) (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
 # allowlist host); `.mdx` luôn là mã (biên dịch thành JSX); đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết
 # hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC repo; khớp `DEP_PATH_RE` (manifest
-# phụ thuộc, kể cả `docs/package.json`) không bao giờ là tài liệu (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
+# phụ thuộc, kể cả `docs/package.json`) và file luật agent (`AGENT_RULE_GLOBS`, AUD-XFEAT-030) không bao giờ là tài liệu
+# (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
 # sâu và mọi tên bắt đầu `license`/`notice` là tài liệu — mã lách nợ review (hàng BLOCKER `review_debt`) và làn merge
 # (AUD-SEC-134).
 DOC_TEXT_EXT = ("md", "rst")
