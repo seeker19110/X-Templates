@@ -936,6 +936,77 @@
     "action": "debt"
    },
    "note": "sau pr rethink (còn 🔴): đúng một lần sửa nữa — review chưa sạch cuối trước mốc là lượt 1, lượt sau mốc còn chặn thì ghi nợ, không mở lần sửa thứ hai"
+  },
+  {
+   "id": "review-har136-base-update-not-a-fix",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-HAR-136"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ],
+    "merges": {
+     "3333333333333333333333333333333333333333": [
+      "1111111111111111111111111111111111111111"
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
+   },
+   "note": "lượt 2 ở head chỉ là cập nhật nhánh của head lượt 1 (cùng nội dung): chưa có lần sửa được rà — rà bản sửa ở head mới, không ghi nợ"
+  },
+  {
+   "id": "review-har137-rethink-fix-disables-auto-merge",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-HAR-137"
+   ],
+   "input": {
+    "auto_merge": true,
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     }
+    ],
+    "rethinks": [
+     {
+      "decision": "D-001",
+      "at": "2026-10-27T12:00:00+00:00",
+      "head": "2222222222222222222222222222222222222222"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "disable-auto-merge"
+   },
+   "note": "sau pr rethink sắp push lần sửa thêm mà auto-merge người bật: tắt trước, không để GitHub merge head chưa rà"
   }
  ]
 }

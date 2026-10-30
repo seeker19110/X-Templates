@@ -34,8 +34,10 @@ vẫn đứng — trái luật mới.
    dấu `debt`) → `rethink` như ADR-0053 (review #345). `do`: mỗi phát hiện
    🟠/🟢 còn lại → một dòng `mở` ở `docs/ops/AUDIT-STATUS.md` có `nợ-review: #N` ở Ghi chú; commit chỉ sổ, push; rồi
    `xt.py pr debt --pr N --findings AUD-…[,AUD-…]`. Còn 🔴 → không ghi nợ; thêm **một lần sửa, sửa hết** mọi phát hiện (cả
-   🟠/🟢, không ghi nợ phần nào) — `loop decide` + `pr rethink` mở thêm đúng một lần sửa (ghi head lúc rethink: head chưa đổi thì `pr next` trả `fix`, không đòi
-   review head chưa sửa); hết lần đó lại theo luật này. Head chỉ là cập nhật nhánh đích (`base_merge_of`) không tính là lần sửa.
+   🟠/🟢, không ghi nợ phần nào) — `loop decide` + `pr rethink` mở thêm đúng một lần sửa (rethink từ `debt` mà cây chưa đổi ngoài sổ/cập nhật nhánh thì ghi head:
+   head chưa đổi → `pr next` trả `fix`, auto-merge người bật thì tắt trước — AUD-HAR-135/137); hết lần đó lại theo luật này. Head
+   chỉ là cập nhật nhánh đích của head đã rà (`base_merge_of`, `pr next` nhớ vào `merges` của sổ cục bộ) gộp với head nguồn —
+   cùng nội dung, không tính là lần sửa (AUD-HAR-136).
 3. **`pr debt`** chỉ nhận khi: `pr next` đang là `debt`; cây ở head khác cây ở review chưa sạch cuối **chỉ** ở sổ audit hoặc ở
    file giống hệt nhánh đích (cập nhật nhánh) mà PR không đổi lúc review (trả về bản nhánh đích/xoá file PR thêm là sửa thêm —
    AUD-SEC-154) — so cây, `--no-renames`, nên merge sửa thêm mã hay `git mv` mã thành sổ không lọt
