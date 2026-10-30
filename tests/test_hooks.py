@@ -4403,8 +4403,17 @@ class GuardReview97Test(unittest.TestCase):
                 "gh api -X PUT https://ghe.example.com/api/v3/repos/o/r/pulls/7/merge -f sha=abc1234def",
                 "gh api -X PUT https://api.github.com/repos/o/r/pulls/7/merge -f sha=abc -f commit_title=x",
                 "gh api -X DELETE https://api.github.com/repos/o/r/rulesets/1",
+                # `%2F` trong userinfo không cắt host sớm: host kết thúc ở `/` thô đầu tiên (review #344)
+                "gh api -X PUT 'https://x%2Fy@api.github.com/repos/o/r/pulls/7/merge' -f sha=abc1234def",
+                "gh api -X DELETE 'https://x%2Fy@api.github.com/repos/o/r'",
+                "gh api -X DELETE https://api.github.com/repos/o/r",  # AUD-SEC-048 qua URL đầy đủ
+                # host tên `graphql`, không đường dẫn: đọc như endpoint graphql như trước (không nới)
+                "gh api https://graphql -f query='mutation { mergePullRequest(input: {}) { x } }'",
+                "gh api https://graphql/ -F query=@q.graphql",
             ),
         )
+        # repo trong URL khác repo đã kiểm → không xác minh được, kể cả PR không có ngoại lệ cứng
+        self.check("deny", ("gh api -X PUT https://api.github.com/repos/x/y/pulls/7/merge -f sha=a",), hard=False)
 
     def test_api_secrets_permissions_rulesets(self):
         self.check(

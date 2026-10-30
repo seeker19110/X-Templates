@@ -2804,15 +2804,22 @@ GRAPHQL_AUTO_MERGE_RE = re.compile(r"\benablePullRequestAutoMerge\b")
 
 
 # `gh api` nhận URL đầy đủ: `https://api.github.com/repos/…`, GHES `https://<host>/api/v3/repos/…` (AUD-SEC-149).
-API_URL_PREFIX_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^/]*(/api/v3(?=/|$))?", re.I)
+# Host kết thúc ở `/` THÔ đầu tiên (như Go): khớp trước khi giải mã, để `%2F` trong userinfo không cắt host sớm.
+API_URL_PREFIX_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^/]*", re.I)
+API_V3_RE = re.compile(r"/api/v3(?=/|$)", re.I)
 
 
 def _api_path(p: str) -> str:
     """Đường dẫn REST như GitHub hiểu: giải mã `%xx`, bỏ query/fragment (`…/%6Derge?x=1` = `…/merge`) và scheme/host
-    của URL đầy đủ (`https://api.github.com/repos/…` = `/repos/…`)."""
-    path = urllib.parse.unquote(p.split("?", 1)[0].split("#", 1)[0])
-    m = API_URL_PREFIX_RE.match(path)
-    return path[m.end() :] if m else path
+    của URL đầy đủ (`https://api.github.com/repos/…` = `/repos/…`); URL không có đường dẫn giữ nguyên (`https://graphql`
+    vẫn đọc như endpoint graphql — chặt hơn, không nới)."""
+    raw = p.split("?", 1)[0].split("#", 1)[0]
+    m = API_URL_PREFIX_RE.match(raw)
+    if not m or not raw[m.end() :].strip("/"):
+        return urllib.parse.unquote(raw)
+    path = urllib.parse.unquote(raw[m.end() :])
+    v3 = API_V3_RE.match(path)
+    return path[v3.end() :] if v3 else path
 
 
 def _graphql_opaque(args: List[str]) -> bool:
