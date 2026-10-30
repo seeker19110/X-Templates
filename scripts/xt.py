@@ -182,7 +182,9 @@ SECRET_WORDS = r"(?:token|secret|passw(?:or)?d|api[_-]?key|access[_-]?key|privat
 # Không dùng `\w++`/`(?>…)`: chỉ có từ Python 3.11, mà hook gọi `python3` của máy dev (macOS: 3.9).
 SECRET_KEY = rf"(?:(?=\w*{SECRET_WORDS})\w+|\w+_(?:pwd|pass|passphrase)|pass(?:phrase)?)"
 SECRET_RE = re.compile(rf"(?i)(?<!\w)({SECRET_KEY})(\s*[=:]\s*)\S+")
-PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
+# Khối khoá theo dòng cho bằng chứng triage (`_pem_mask_lines`); `(?! \*\*\*)`: chuỗi đã che không mở khối.
+PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----(?! \*\*\*)")
+PEM_MASK = "-----BEGIN PRIVATE KEY----- ***"
 PEM_END_RE = re.compile(r"-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----")
 # Dạng bí mật phổ biến khác (AUD-CFG-001): giá trị bị thay bằng *** nhưng giữ tiền tố để còn đọc được ngữ cảnh.
 SECRET_PATTERNS = (
@@ -194,7 +196,7 @@ SECRET_PATTERNS = (
             r".*?(-----END [A-Z ]*(?:PRIVATE|SECRET) KEY( BLOCK)?-----|\Z)",
             re.S,
         ),  # `( BLOCK)?`: khoá PGP armored (review #342); `SECRET KEY BLOCK`: armor PGP cũ GnuPG vẫn đọc
-        "-----BEGIN PRIVATE KEY----- ***",
+        PEM_MASK,
     ),
     # Giá trị trong nháy trước (có khoảng trắng: `password: "a b"`, `--password="a b"`, `-p"a b"`), rồi mới tới dạng \S+.
     # Mỗi loại nháy một mẫu: nháy loại kia nằm trong giá trị (`"it's a b"`) và nháy chưa đóng (tới hết dòng) cũng che hết
@@ -5200,8 +5202,8 @@ LOCKFILE_RE = re.compile(
     r"|Podfile\.lock|Package\.resolved|mix\.lock)$"  # review #324 T3: lockfile của thẻ phụ thuộc D-235
 )
 # Tài liệu (D-232, review #322; D-253) — DANH SÁCH CHO PHÉP, đuôi lạ/không đuôi là mã (đóng khi nghi ngờ): `.md`/`.rst`
-# trừ khi (ngoài `docs/` gốc) nằm dưới thư mục chạy thật (`RUNTIME_DOC_DIR_RE`: prompt, mã app, mẫu, agent/skill); `.txt`
-# chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
+# trừ khi (ngoài `docs/` gốc) nằm dưới thư mục chạy thật (`RUNTIME_DOC_DIR_RE`: prompt, mã app, mẫu, agent/skill, mọi thư mục
+# `command(s)/`); `.txt` chỉ trong `docs/`/`doc/` gốc hoặc tên README/CHANGELOG/… (README.txt dưới thư mục chạy thật là mã) (`.txt` khác hay là cấu hình/phụ thuộc: `runtime.txt`, `apt.txt`,
 # allowlist host); `.mdx` luôn là mã (biên dịch thành JSX); đúng tên LICENSE/LICENCE/NOTICE/COPYING (± hậu tố `-X` khi viết
 # hoa, ± .md/.txt/.rst); tài sản (ảnh, pdf, csv, json…) trong `docs/`/`doc/` ở GỐC repo; khớp `DEP_PATH_RE` (manifest
 # phụ thuộc, kể cả `docs/package.json`) không bao giờ là tài liệu (AUD-SEC-135/139). Trước đây mọi `…/docs/…` ở mọi độ
@@ -5580,7 +5582,8 @@ def squash_subject(pr: Dict[str, Any]) -> str:
     """Subject commit squash = tiêu đề PR (đã qua `pr title-check`) + ` (#N)` — steward gửi `commit_title` (không qua guard).
     GitHub mặc định `COMMIT_OR_PR_TITLE`: PR một commit lấy subject của commit đó — dài/sai dạng thì lách luật tiêu đề,
     `main` đỏ BASE-REPO-005 (#340). Lệnh in cho agent/MCP giữ dạng chuẩn guard allow; repo đặt `squash_merge_commit_title:
-    PR_TITLE` để mọi đường merge lấy tiêu đề PR (D-254). '' khi thiếu."""
+    PR_TITLE` để merge không truyền `commit_title`/`--subject` lấy tiêu đề PR (D-254) — truyền tường minh thì đè (AUD-HAR-128).
+    '' khi thiếu."""
     title, n = str(pr.get("title") or "").strip(), pr.get("number")
     return f"{title} (#{n})" if title and n else ""
 
@@ -7969,21 +7972,21 @@ def _ci_log_lines(text: str) -> List[str]:
 
 
 def _pem_mask_lines(lines: List[str]) -> List[str]:
-    """Che khối khoá theo dòng, GIỮ số dòng: từ header tới END (chưa đóng → tới hết) thành `***`. Dòng thô vẫn dùng để
-    phân loại — che trước trên cả log (`|\\Z`) thì header chưa đóng nuốt dòng nhận diện `secret` (review #342)."""
+    """Che khối khoá theo dòng, GIỮ số dòng: từ header tới END (chưa đóng → tới hết) bị che; sau END quét tiếp phần còn
+    lại của dòng (khoá kế mở ngay sau END). Dòng thô vẫn dùng để phân loại — che trước trên cả log (`|\\Z`) thì header
+    chưa đóng nuốt dòng nhận diện `secret` (review #342)."""
     out: List[str] = []
     inside = False
     for line in lines:
-        if inside:
-            inside = not PEM_END_RE.search(line)
-            out.append("***")
-            continue
-        m = PEM_BEGIN_RE.search(line)
-        if not m:
-            out.append(line)
-            continue
-        out.append(line[: m.start()] + "-----BEGIN PRIVATE KEY----- ***")
-        inside = not PEM_END_RE.search(line, m.end())
+        kept, rest = "", line
+        while rest:
+            m = (PEM_END_RE if inside else PEM_BEGIN_RE).search(rest)
+            if not m:
+                kept += "" if inside else rest
+                break
+            kept += "" if inside else rest[: m.start()] + PEM_MASK
+            inside, rest = not inside, rest[m.end() :]
+        out.append(kept or "***")
     return out
 
 

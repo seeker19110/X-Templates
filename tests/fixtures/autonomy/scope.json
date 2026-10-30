@@ -37,7 +37,12 @@
     "AUD-DEP-001",
     "AUD-DEP-003",
     "AUD-CI-014",
-    "AUD-CI-016",
+    "AUD-CI-016"
+   ]
+  },
+  {
+   "reason": "Subject commit squash (D-254) — thiết lập repo `squash_merge_commit_title` và chỗ nối steward `commit_title`: đỡ bằng `tests.test_merge -k test_steward_dry_run_and_apply`; corpus pr chưa có kiểu ca merge REST, thiết lập repo chưa máy kiểm (AUD-HAR-128)",
+   "ids": [
     "AUD-HAR-126",
     "AUD-HAR-127"
    ]

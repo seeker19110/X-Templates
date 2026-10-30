@@ -2938,13 +2938,16 @@ class CiTriageTest(TmpDirCase):
         body, token = "MIIEpAIBAAKCAQEA", "ghp_" + "B" * 36
         d = xt.ci_classify(f"lạ\n{begin}\n{body}\n{end}\ntoken={token}\nexit 2\n")
         self.assertEqual(d["category"], "unknown")
-        self.assertEqual(d["evidence"][:3], ["lạ", "-----BEGIN PRIVATE KEY----- ***", "***"])
+        mask = xt.PEM_MASK  # không viết nguyên văn: header + `KEY-----` dòng sau khớp luật private-key của gitleaks
+        self.assertEqual(d["evidence"][:3], ["lạ", mask, "***"])
         self.assertNotIn(body, "\n".join(d["evidence"]))
         self.assertNotIn(token, "\n".join(d["evidence"]))
-        self.assertEqual(xt.ci_classify(f"{begin}\n{body}")["evidence"], ["-----BEGIN PRIVATE KEY----- ***", "***"])
-        self.assertEqual(
-            xt.ci_classify(f"{begin} {body} {end}\nok")["evidence"], ["-----BEGIN PRIVATE KEY----- ***", "ok"]
-        )
+        self.assertEqual(xt.ci_classify(f"{begin}\n{body}")["evidence"], [mask, "***"])
+        self.assertEqual(xt.ci_classify(f"{begin} {body} {end}\nok")["evidence"], [mask, "ok"])
+        two = xt.ci_classify(f"x\n{begin} {body} {end} {begin}\nSECONDBODY\n{end} sau\nok")["evidence"]
+        self.assertEqual(two, ["x", f"{mask} {mask}", "***", " sau", "ok"])  # khoá kế mở ngay sau END (review #342)
+        again = xt.ci_classify(f"{mask}\nok\nexit 1")["evidence"]  # chuỗi đã che không mở khối
+        self.assertEqual(again, [mask, "ok", "exit 1"])
         hdr = xt.ci_classify(f"FAILED t.py::test_k\nE  where False = startswith('{begin}')\nleaks found: 1\n")
         self.assertEqual((hdr["category"], hdr["categories"]), ("secret", ["secret", "test"]))
 

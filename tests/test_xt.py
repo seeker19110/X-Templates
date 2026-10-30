@@ -588,6 +588,7 @@ class LoopTest(unittest.TestCase):
         pgp = "-----BEGIN PGP " + "PRIVATE KEY BLOCK-----"  # khoá PGP armored (review #342)
         self.assertNotIn(body, xt.redact(f"{pgp}\n\n{body}\n=abcd\n-----END PGP PRIVATE KEY BLOCK-----\nok"))
         self.assertTrue(xt.redact(f"{pgp}\n{body}\n-----END PGP PRIVATE KEY BLOCK-----\nok").endswith("ok"))
+        self.assertEqual(xt.redact("gpg --passphrase hunter2 -d x"), "gpg --passphrase *** -d x")
         old_pgp = "-----BEGIN PGP " + "SECRET KEY BLOCK-----"  # armor PGP cũ, GnuPG vẫn đọc
         self.assertNotIn(body, xt.redact(f"{old_pgp}\n\n{body}\n-----END PGP SECRET KEY BLOCK-----\nok"))
         tail = xt._gate_tail(1, f"{begin}\nAAAA\n{end}\nrun --password {begin} {body}")

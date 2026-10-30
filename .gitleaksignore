@@ -3,3 +3,5 @@ c295f4818229e5ea59054d91f8a37c9b9aff1ae1:tests/test_xt.py:generic-api-key:454
 # Header PEM giả trong test che bí mật (tests/test_xt.py) ở commit 619a1b2 (PR #342) — đã thay bằng chuỗi ghép lúc chạy; giữ để quét lịch sử PR không đỏ.
 619a1b2c72a2f1aa4c652aeab9676105f0f345b9:tests/test_xt.py:private-key:583
 619a1b2c72a2f1aa4c652aeab9676105f0f345b9:tests/test_xt.py:private-key:592
+# Header PEM đã che viết nguyên văn trong test (tests/test_xt_cli.py) ở commit a147b8a (PR #342) — đã thay bằng `xt.PEM_MASK`; giữ để quét lịch sử PR không đỏ.
+a147b8aa805a0f2ae94bfb988e74d326992f5134:tests/test_xt_cli.py:private-key:2944
