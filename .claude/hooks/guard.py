@@ -2811,7 +2811,7 @@ API_V3_RE = re.compile(r"/api/v3(?=/|$)", re.I)
 
 def _api_path(p: str) -> str:
     """Đường dẫn REST như GitHub hiểu: giải mã `%xx`, bỏ query/fragment (`…/%6Derge?x=1` = `…/merge`) và scheme/host
-    của URL đầy đủ (`https://api.github.com/repos/…` = `/repos/…`); URL không có đường dẫn giữ nguyên (`https://graphql`
+    của URL đầy đủ (`https://api.github.com/repos/…` = `/repos/…`); URL không có đường dẫn giữ nguyên (host tên `graphql`
     vẫn đọc như endpoint graphql — chặt hơn, không nới)."""
     raw = p.split("?", 1)[0].split("#", 1)[0]
     m = API_URL_PREFIX_RE.match(raw)
