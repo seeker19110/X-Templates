@@ -13422,6 +13422,84 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec196-heredoc-apostrophe-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's $(rm -rf ~)\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec196-heredoc-apostrophe-backtick-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's `rm -rf ~`\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec196-heredoc-quoted-subst-push",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n'$(git push --force origin main)'\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec196-quoted-delim-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<'EOF'\nit's $(rm -rf ~)\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec196-escaped-subst-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's \\$(rm -rf ~)\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-control-sec196-heredoc-arith-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's $((1<<2))\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }

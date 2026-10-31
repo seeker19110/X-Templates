@@ -2442,5 +2442,34 @@ class CommentAfterParenTest(unittest.TestCase):
         self.assertEqual(guard.strip_comments("echo a"), "echo a")
 
 
+class HeredocBodyApostropheTest(unittest.TestCase):
+    """AUD-SEC-196: thân heredoc dấu kết KHÔNG nháy — bash coi `'`/`"` là chữ và vẫn thay `$(…)`/backtick; guard từng
+    đọc `'` như nháy nên bỏ qua thay lệnh sau nó. Dấu kết có nháy (`<<'EOF'`, `<<"EOF"`, `<<\\EOF`) thì thân là chữ."""
+
+    def test_heredoc_body_apostrophe(self):
+        for cmd in (
+            "cat <<EOF\nit's $(rm -rf ~)\nEOF",
+            "cat <<EOF\nit's `rm -rf ~`\nEOF",
+            "cat <<EOF\n'$(rm -rf ~)'\nEOF",
+            "cat <<-EOF\n\tit's $(rm -rf ~)\n\tEOF",
+            "x=1; cat <<EOF > out.txt\nit's ${x} $(cd / && rm -rf ~)\nEOF",
+            "cat <<EOF\nit's $(git push --force origin main)\nEOF",
+            "cat <<EOF\nit's $(rm -rf ~\nEOF",  # thay lệnh không đóng: quét cả thân (chiều chặt)
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "cat <<'EOF'\nit's $(rm -rf ~)\nEOF",
+            'cat <<"EOF"\nit\'s $(rm -rf ~)\nEOF',
+            "cat <<\\EOF\nit's $(rm -rf ~)\nEOF",
+            "cat <<EOF\nit's \\$(rm -rf ~)\nEOF",
+            "cat <<EOF\nit's fine $(date)\nEOF",
+            "cat <<EOF\nit's $((1<<2))\nEOF",  # số học, không phải thay lệnh
+            "x=$(cat <<EOF\n$((2<<3)) `date`\nEOF\n); echo $x",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6284,6 +6284,15 @@ def _expanded_heredocs(cmd: str) -> List[str]:
     return ["\n".join(body) for _, m, body in _heredocs(join_continuations(cmd)) if not _heredoc_word(m)[1]]
 
 
+def _heredoc_body_scripts(body: str) -> List[str]:
+    """Thân thay lệnh (`$(…)`, backtick) trong thân heredoc dấu kết không nháy, đọc như bash: `'`/`"` trong thân là chữ,
+    không mở nháy (AUD-SEC-196: `it's $(rm -rf ~)`). Thay lệnh không đóng → phần từ thân nó tới hết là script (chiều
+    chặt). `$((…))` là số học, không phải thay lệnh (như `_dollar_spans`)."""
+    scan = _ShellScan(body, heredoc=True)
+    spans = [b for st in scan.stages for k, b, _, _ in st.spans if not (k == "$" and _arith_at(f"$({b})", 0))]
+    return spans + [body[scan.stack[scan.base][1] :]] if scan.open else spans
+
+
 def _eval_scripts(tokens: List[str]) -> List[str]:
     """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
     return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
@@ -6318,7 +6327,7 @@ def _nested_pairs(
     out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
     visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
-    bodies = [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
+    bodies = [s for body in _expanded_heredocs(cmd) for s in _heredoc_body_scripts(body)]
     out += [(s, d) for s in bodies for d in visited]  # thân heredoc mở rộng: thư mục mọi lệnh (chiều chặt)
     out += _shell_feeds(tokens, placed)
     out += [(s, here) for c, here in placed for s in _here_strings(c)]
