@@ -2406,7 +2406,14 @@ class ShellParseGapsTest(unittest.TestCase):
             "a=($IFS#); rm -rf ~",
             "echo hi >$IFS#; rm -rf ~",
             "bash -c 'echo $IFS#; rm -rf ~'",  # script lồng: `IFS_RE` từng viết lại trong nháy đơn → mất dấu `#`
-            'sh -c "echo ${IFS}#; git push --force origin main"',
+            "sh -c 'echo ${IFS}#; git push --force origin main'",
+            # nháy xen giữa biến IFS và dấu thăng vẫn là một từ trong bash (review #372 lượt 2)
+            "bash -c 'echo $IFS''#; rm -rf ~'",
+            "eval 'echo ${IFS}''#; rm -rf ~'",
+            "sh -c 'echo $IFS'\\#'; rm -rf ~'",
+            "bash -c 'echo $IFS'$'#; rm -rf ~'",
+            "x=$IFS''#; rm -rf ~",
+            "docker run --rm -v $PWD:/w alpine sh -c 'echo $IFS''#; rm -rf /w'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -2431,6 +2438,8 @@ class ShellParseGapsTest(unittest.TestCase):
             "docker run --rm -v $PWD:/w alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /w'",
             "docker run --rm -v /srv/data:/d alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /d'",
             "docker run --rm -v $PWD:/w alpine sh -c 'true $(true)#'$'\\n''rm -rf /w'",
+            # `_wipes_bind` luôn được tính: xoá mount kèm lệnh khác không còn lọt (có từ trước, review #372 lượt 2)
+            "docker run --rm -v $PWD:/w alpine sh -c 'rm -rf /w && git push --force origin main'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

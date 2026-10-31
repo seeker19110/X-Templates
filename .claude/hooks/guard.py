@@ -927,7 +927,7 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
 ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
 ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
 # `IFS` liền `#` không viết lại: giữ nguyên để kiểm strict của script lồng (`bash -c '…'`) còn thấy (AUD-SEC-232)
-IFS_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))(?!#)")
+IFS_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))(?![\\'\"]*#)")  # cả khi nháy/`\` xen giữa (`$IFS''#`)
 IFS_HASH_WHY = "`IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
 
 
