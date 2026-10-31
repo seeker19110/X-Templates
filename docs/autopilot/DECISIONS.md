@@ -1992,3 +1992,10 @@
 - Chọn: Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa lượt 4 đo được (255 test guard, 300 hooks, bench 997 ca xanh) và các lớp còn lại có từ trước (base cũng lọt, fuzz: base 400 ca lọt, head giảm mạnh, không ca nào lọt ở head mà base chặn); gộp vào sổ riêng tránh phình PR
 - Đường lùi: Hoàn nguyên commit sửa; đưa AUD-SEC-195 về mở
+
+### D-287 · 2026-10-31T22:49:32+00:00 · PR #363: mở lượt rà mới sau khi đổi số ID trùng và gộp main (nhánh đã đổi sau review cuối)
+
+- Phương án: (1) Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại · (2) Đóng PR
+- Chọn: Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: nội dung sửa của PR đã có 4 lượt review; thay đổi mới chỉ là đổi số ID và đồng bộ chính sách với main, đo bằng bench 1043 ca xanh; đóng PR bỏ sửa guard đã kiểm
+- Đường lùi: Hoàn nguyên commit gộp và đổi số; đưa PR về head 0486151
