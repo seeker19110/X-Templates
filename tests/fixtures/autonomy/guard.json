@@ -12448,6 +12448,32 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d271-many-heredocs-one-line-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-221"
+   ],
+   "input": {
+    "command": "cat <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A \nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nrm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-control-many-heredocs-one-line",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-221"
+   ],
+   "input": {
+    "command": "cat <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A <<A \nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nA\nls"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
