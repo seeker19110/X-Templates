@@ -3,7 +3,7 @@ title: Hạ tầng & mạng: least privilege, egress, TLS, sandbox, container
 kind: module
 prefix: SEC-INFRA
 applies_to: [web-app, api-service, ai-agent, agentic-system, data-ml, monorepo, blockchain, static-site, mobile-app, desktop-app, embedded-iot]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Hạ tầng & mạng: least privilege, egress, TLS, sandbox, container
@@ -66,6 +66,7 @@ updated: 2026-10-30
 - [ ] `SEC-INFRA-024` **MAY** Ký và verify image node/VM (Secure Boot, attestation) cho hạ tầng xử lý dữ liệu nhạy cảm. → Kiểm: cấu hình attestation; log verify. · Nguồn: NIST SP 800-190
 - [ ] `SEC-INFRA-025` **SHOULD** Chuẩn bị **mật mã hậu lượng tử**: (1) kiểm kê mật mã (thuật toán, độ dài khoá, thư viện, nơi dùng: TLS, chữ ký, JWT, mã hoá lưu trữ, khoá dài hạn) để đổi được thuật toán bằng cấu hình (crypto-agility); (2) TLS ở edge và nội bộ bật trao đổi khoá lai `X25519MLKEM768` khi stack hỗ trợ (Go ≥ 1.24 bật mặc định; OpenSSL ≥ 3.5 có ML-KEM) — dữ liệu cần giữ bí mật nhiều năm bị đe doạ "thu trước, giải mã sau" ngay bây giờ; (3) kế hoạch thay RSA/ECC theo lộ trình NIST IR 8547 (bản final 2026-10-27). → Kiểm: file kiểm kê mật mã trong `docs/security/`; bắt tay TLS với `openssl s_client -groups X25519MLKEM768` (OpenSSL ≥ 3.5) thành công hoặc ghi lý do chưa bật. · Nguồn: NIST FIPS 203/204/205 (2024-08-13); RFC 10024; NIST IR 8547
 - [ ] `SEC-INFRA-026` **SHOULD** Chứng chỉ client cho mTLS (service↔service, thiết bị, đối tác) cấp từ CA riêng (private PKI/mesh CA/cert-manager issuer nội bộ), không dùng chứng chỉ WebPKI công khai có EKU `clientAuth`; server mTLS chỉ tin CA riêng đó, không tin kho CA hệ thống. → Kiểm: rà cấu hình mTLS: `openssl x509 -in client.pem -noout -ext extendedKeyUsage -issuer` → issuer là CA nội bộ; trust store phía server (`ssl_client_certificate`/`PeerAuthentication`/`ca.crt`) chỉ chứa CA riêng; test chứng chỉ client do CA công khai ký → bị từ chối. · Nguồn: Let's Encrypt *Ending TLS Client Authentication* (2025-05-14, cập nhật 2026-03-16)
+- [ ] `SEC-INFRA-027` **SHOULD** Bổ sung `SEC-INFRA-018`: mỗi công cụ dev/agent đã cài có dòng trong bảng **công tắc telemetry riêng** (biến, cờ hoặc lệnh), vì `DO_NOT_TRACK=1` không phủ hết — có công cụ chỉ tắt bằng cờ dòng lệnh (`chrome-devtools-mcp --no-usage-statistics`, `--no-performance-crux`), biến riêng (`ANONYMIZED_TELEMETRY=false` của browser-use) hoặc **không đọc** `DO_NOT_TRACK` (`CCT_NO_TRACKING=true` của claude-code-templates); CI/devcontainer đặt cả `DO_NOT_TRACK=1` lẫn công tắc riêng. → Kiểm: bảng trong `docs/` liệt kê mọi công cụ trong manifest/cấu hình MCP; env CI chứa các biến của bảng. · Nguồn: catalog stored `X-TEMPLATES.md` §2 (đọc mã 2026-10-30/31)
 
 ## Bẫy thường gặp
 
@@ -79,6 +80,7 @@ updated: 2026-10-30
 8. **`/metrics`, dashboard queue, pgAdmin public không auth** — thấy nhiều ở repo cá nhân. Tránh: `SEC-INFRA-010`.
 9. **Telemetry mặc định** của tool dev gửi task/URL ra ngoài (ví dụ `chrome-devtools-mcp`, codegraph theo catalog 11/16). Tránh: `SEC-INFRA-018`.
 10. **Resource limit không đặt** → vòng lặp agent/leak bộ nhớ hạ cả node, kéo theo dịch vụ khác (OWASP LLM 2026 LLM06). Tránh: `SEC-INFRA-013`.
+11. **Tin `DO_NOT_TRACK=1` là đủ** → công cụ chỉ có cờ riêng hoặc không đọc biến chuẩn vẫn gửi dữ liệu; còn `DISABLE_TELEMETRY` của Claude Code thì tắt luôn Advisor Tool. Tránh: `SEC-INFRA-027`.
 
 ## Cổng tự động
 
@@ -111,3 +113,4 @@ updated: 2026-10-30
 - RFC 10024 *PQ/T Hybrid Key Agreement Mechanisms for TLS 1.3* (Proposed Standard, 2026-08; gồm X25519MLKEM768): <https://www.rfc-editor.org/info/rfc10024> · Go 1.24 release notes (X25519MLKEM768 mặc định, tắt bằng `GODEBUG=tlsmlkem=0`): <https://go.dev/doc/go1.24> · OpenSSL 3.5 (ML-KEM/ML-DSA/SLH-DSA): <https://openssl-library.org/post/2025-04-08-openssl-35-final-release/> — xác minh 2026-10-30. Chrome/Firefox bật mặc định: chỉ nguồn thứ cấp (chưa xác minh).
 - Classic bỏ EKU Client Authentication từ 2026-02-11; tlsclient (mở 2025-10-01) ngừng 2026-07-08; cập nhật 2026-03-16: chỉ ai dùng tlsclient trước 2026-05-13 mới được giữ đến 2026-07-08; lý do là Chrome Root Program đặt hạn 06/2026 phải tách PKI client/server (`SEC-INFRA-026`): <https://letsencrypt.org/2025/05/14/ending-tls-client-authentication/> — xác minh 2026-10-30.
 - Mốc chi tiết của Chrome Root Program (2026-06-15 sub-CA mới chỉ serverAuth; 2027-03-15 leaf chỉ serverAuth): các blog bên thứ ba không thống nhất, chưa đọc văn bản chính sách Chrome (`SEC-INFRA-026`): <https://www.encryptionconsulting.com/?p=90740> — chưa xác minh.
+- Catalog `seeker19110/stored` `X-TEMPLATES.md` §2 (bảng công tắc telemetry 13 công cụ agent: caveman, claude-mem, codegraph, chrome-devtools-mcp, browser-use, claude-code-templates…) — rà 2026-10-31

@@ -3,7 +3,7 @@ title: Tài liệu cho AI agent: AGENTS.md, CLAUDE.md, llms.txt, runtime.yaml, S
 kind: module
 prefix: XC-DOCAI
 applies_to: [all]
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Tài liệu cho AI agent: AGENTS.md, CLAUDE.md, llms.txt, runtime.yaml, SCOPE.md
@@ -63,6 +63,8 @@ updated: 2026-10-28
 - [ ] `XC-DOCAI-021` **SHOULD** Khi nhiều đội/người cùng góp skill cho một agent: mỗi skill có một người chịu trách nhiệm (DRI) và eval theo [`AI-EVAL-021`](../13-ai-engineering/evaluation.md); một đội trung tâm nhỏ sở hữu system prompt/`AGENTS.md` và duyệt skill, tool, eval mới; skill không ai nạp hoặc trùng nhau thì xoá. → Kiểm: CODEOWNERS có dòng cho `.claude/skills/` và file prompt; PR thêm skill kèm eval theo `AI-EVAL-021`; báo cáo mức dùng skill (vd `/skill-doctor`) xem định kỳ. · Nguồn: claude.com *When to fold subagents into your main agent loop* (2026-10-22, xác minh 2026-10-25, `research/2026-10-24-single-agent-loop.md`) §Skills, §How several teams can contribute; kit `anthropics/single-agent-loop-kit` (`c437962`, 2026-10-21; "Not maintained") `skill/templates/CONTRIBUTING-skills.md`
 - [ ] `XC-DOCAI-022` **SHOULD** Mỗi định nghĩa subagent (`.claude/agents/*.md` và tương đương) khai `tools:` tối thiểu cho vai — bỏ trống là thừa hưởng mọi tool kể cả MCP; bộ agent bên thứ ba chỉ cài phần cần vào `.claude/agents/` của dự án, không chép hàng loạt vào `~/.claude/agents/` (áp lên mọi dự án). → Kiểm: `grep -L '^tools:' .claude/agents/*.md` rỗng. · Nguồn: Claude Code docs *Create custom subagents* (`tools`: "Inherits every tool available to subagents if omitted")
 - [ ] `XC-DOCAI-023` **SHOULD** Skill/automation **do model sinh** (từ bản ghi thao tác hoặc mô tả) có bước xác nhận hoặc `--dry-run` trước mọi bước gửi, xoá, ghi ra ngoài và trần số mục mỗi lần chạy; người đọc lại `SKILL.md` trước khi cài, không cài thẳng từ công cụ sinh. → Kiểm: review PR thêm skill — mọi bước có tác dụng phụ kèm xác nhận và trần.
+- [ ] `XC-DOCAI-024` **SHOULD** Công cụ dev có cả biến thể **CLI + skill** và MCP thì coding agent dùng CLI + skill mặc định (không nạp schema tool và cây trang vào mỗi lượt); MCP khi cần phiên bền hoặc client chỉ nói MCP — ghi lựa chọn và lý do. → Kiểm: `AGENTS.md`/ADR liệt kê công cụ và biến thể đã chọn. · Nguồn: README `microsoft/playwright-mcp` mục "Playwright CLI vs Playwright MCP" (2026-10-31)
+- [ ] `XC-DOCAI-025` **SHOULD** Repo có ≥ 5 skill có **test kích hoạt tất định** trong Gate: bộ prompt mẫu → skill mong đợi đứng đầu theo so khớp từ vựng với `description` (không gọi model), và hai `description` gần trùng bị báo; thay đổi `description` bị loại vì test này ghi vào sổ cạnh `.out-of-scope/`. → Kiểm: test chạy trong `gate-fast`, ngưỡng tỉ lệ đứng đầu ghi trong test. · Nguồn: `addyosmani/agent-skills` `evals/README.md` (tầng 2 trigger & routing, `run-evals.js --min-rank1 95`) — đọc 2026-10-31
 
 ## Bẫy thường gặp
 
@@ -78,6 +80,7 @@ updated: 2026-10-28
 - **llms.txt liệt kê 400 link không ghi chú** → agent không biết chọn. Nhóm, ghi chú một dòng, mục `Optional`.
 - **`AGENTS.md` ghi tên model/phiên AI** → lỗi thời sau một tháng và vi phạm quy ước khung. Ghi năng lực cần, không ghi tên.
 - **Chép `DESIGN.md` của thương hiệu khác** làm file dự án ("Copy it into your project root") → logo/màu/font có thể có quyền riêng, và file văn xuôi không có token thì không lint được. Tự viết theo spec, token sinh từ nguồn gốc (`XC-DOCAI-020`).
+- **Description skill viết theo tên nội bộ, không theo lời người dùng** → skill không bao giờ được chọn, hoặc hai skill tranh nhau một yêu cầu; không ai biết cho tới khi có test kích hoạt (`XC-DOCAI-025`).
 
 ## Cổng tự động
 
@@ -112,3 +115,5 @@ updated: 2026-10-28
 - claude.com, *Building agents: When to fold subagents into your main agent loop* (2026-10-22): <https://claude.com/blog/building-agents-when-to-fold-subagents-into-your-main-agent-loop> · kit single-agent-loop-kit (`c437962`, 2026-10-21; "Not maintained"): <https://github.com/anthropics/single-agent-loop-kit> — xác minh 2026-10-25 (`research/2026-10-24-single-agent-loop.md`, ADR-0045).
 - Claude Code docs *Create custom subagents* (frontmatter `tools`, thứ tự ưu tiên `.claude/agents/` > `~/.claude/agents/`): <https://code.claude.com/docs/en/sub-agents> — xác minh 2026-10-28.
 - Catalog `seeker19110/stored` 20 §3j (bộ 283 persona subagent, 266 không khai `tools:`, installer chép vào `~/.claude/agents/` và ghi đè file trùng tên), 20 §3i (công cụ ghi màn hình sinh `SKILL.md`, prompt tổng quát hoá ra "mọi mục" không đòi xác nhận) — đọc 2026-10-28.
+- `addyosmani/agent-skills` `evals/README.md` (ba tầng eval: cấu trúc, trigger & routing tất định trong CI, hành vi chạy tay; `skill-impact.md` sổ thay đổi bị từ chối): <https://github.com/addyosmani/agent-skills> — đọc 2026-10-31
+- Catalog `seeker19110/stored` 20 §3o.2, 11 §1f–§1g.1 — rà 2026-10-31
