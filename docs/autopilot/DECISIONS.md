@@ -2019,3 +2019,10 @@
 - Chọn: Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: nội dung sửa của PR đã có 4 lượt review; thay đổi mới chỉ là đổi số ID và đồng bộ chính sách với main, đo bằng bench 1043 ca xanh; đóng PR bỏ sửa guard đã kiểm
 - Đường lùi: Hoàn nguyên commit gộp và đổi số; đưa PR về head 0486151
+
+### D-288 · 2026-10-31T23:29:50+00:00 · PR #372: lượt rà kế sau review lượt 4 chưa sạch (ADR-0053/0059)
+
+- Phương án: (1) Áp bản sửa reviewer đã đo (chặn dấu thoát trước biến IFS trong thân nháy kép), mở thêm lượt rà; lớp có từ trước ghi sổ riêng · (2) Đóng PR và đưa AUD-SEC-232 về mở
+- Chọn: Áp bản sửa reviewer đã đo (chặn dấu thoát trước biến IFS trong thân nháy kép), mở thêm lượt rà; lớp có từ trước ghi sổ riêng
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: lỗi do bản sửa gây ra phải đóng, bản sửa đo 831/831 ca và 0 đổi quyết định trên kho literal; lớp mới không thuộc PR ghi AUD-SEC-245
+- Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-232 về mở
