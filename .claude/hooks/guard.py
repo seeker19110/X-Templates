@@ -1348,7 +1348,7 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
 # Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
 CD_FLAG_RE = re.compile(r"-[LPe@]+")
 # `~+`/`~-` đứng đầu: bash mở thành `$PWD`/`$OLDPWD` (biến gán lại được) — `cd` tới đó như `cd $PWD`: không biết
-TILDE_DIR_RE = re.compile(r"~(?:[+-][0-9]*|[0-9]+)(?=/|$)")  # cả `~N`/`~+N`/`~-N` (ngăn xếp thư mục, AUD-SEC-232)
+TILDE_DIR_RE = re.compile(r"~[+-](?=/|$)")
 
 
 def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
@@ -3369,12 +3369,10 @@ class _ShellScan:
     ở dấu nối cấp ngoài (`;`, `&&`, `||`, `|`, `&`, xuống dòng, ngoặc subshell) và lấy thân thay lệnh ngoài cùng của mỗi
     đoạn. Backtick ghép tuần tự theo ngữ cảnh nháy, không theo chữ thô: backtick nguyên văn đứng trước không làm lệch cặp
     (AUD-SEC-181); `#` trong `$'…'` không mở comment (review #361). `heredoc`: chữ là thân heredoc không nháy — như
-    trong nháy kép mà `"` là chữ. `raw_tick`: thân backtick đọc nguyên văn tới backtick đóng như bash (chỉ `\\` thoát —
-    `#`, nháy trong đó là chữ; D-279, chỉ bộ đọc thân heredoc dùng). `open`: còn nháy/thay lệnh chưa đóng — không phân
-    tích được."""
+    trong nháy kép mà `"` là chữ. `open`: còn nháy/thay lệnh chưa đóng — không phân tích được."""
 
-    def __init__(self, text: str, heredoc: bool = False, raw_tick: bool = False) -> None:
-        self.text, self.start, self.param, self.raw_tick = text, 0, False, raw_tick
+    def __init__(self, text: str, heredoc: bool = False) -> None:
+        self.text, self.start, self.param = text, 0, False
         self.stack: List[Tuple[str, int]] = [("h", 0)] if heredoc else []  # (loại ngữ cảnh, vị trí thân)
         self.base, self.subs = len(self.stack), 0  # `subs` = số thay lệnh đang mở trong `stack`
         self.stages: List[Stage] = []
@@ -3398,8 +3396,6 @@ class _ShellScan:
         c, top = self.text[i], (self.stack[-1][0] if self.stack else "")
         if c == "\\":
             return i + 2
-        if top == "`" and self.raw_tick:
-            return self._close(i) or i + 1
         self.param = self.param or bool(PARAM_RE.match(self.text, i))
         if top in ('"', "h"):
             return self._quoted(i, top)
@@ -5203,10 +5199,9 @@ def _at(target: str, cwd: Optional[str]) -> str:
 EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
 
 
-# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106).
-# `~N`/`~+N`/`~-N` là phần tử ngăn xếp thư mục (`dirs +N`/`-N`): `~0`/`~+0` = `$PWD`, số khác không biết (AUD-SEC-232)
-PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+|~\+?0+)(?=/|$)")
-OLDPWD_REF_RE = re.compile(r"^(~-[0-9]*|~\+?0*[1-9][0-9]*|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
+# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106)
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+)(?=/|$)")
+OLDPWD_REF_RE = re.compile(r"^(~-|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
 PROJECT_REF_RE = re.compile(r"^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})(?=/|$)")
 
 
@@ -6176,28 +6171,6 @@ def _expanded_heredocs(cmd: str) -> List[str]:
     return ["\n".join(body) for _, m, body in _heredocs(join_continuations(cmd)) if not _heredoc_word(m)[1]]
 
 
-def _heredoc_body_scripts(body: str) -> List[str]:
-    """Thân thay lệnh (`$(…)`, backtick) trong thân heredoc dấu kết không nháy, đọc như bash: `'`/`"` trong thân là chữ,
-    không mở nháy (AUD-SEC-196: `it's $(rm -rf ~)`); thân backtick đọc nguyên văn (`` `echo #` ``, `` `: '` `` không
-    nuốt backtick sau). Thay lệnh không đóng → phần từ thân nó tới hết là script (chiều chặt). `$((…))` là số học nhưng
-    thay lệnh trong nó vẫn chạy → quét thân nó như thân heredoc. Hợp với bộ tìm cũ (`_dollar_scripts`,
-    `_backtick_scripts`): chỉ thêm script, không bớt (D-279 — bản thay thế từng cho lọt 123 lệnh bản cũ chặn)."""
-    out = _dollar_scripts(body) + _backtick_scripts(body)
-    todo = [body]
-    while todo:
-        text = todo.pop()
-        scan = _ShellScan(text, heredoc=True, raw_tick=True)
-        for st in scan.stages:
-            for k, b, _, _ in st.spans:
-                if k == "$" and _arith_at(f"$({b})", 0):
-                    todo.append(b[1:-1])
-                else:
-                    out.append(b)
-        if scan.open:
-            out.append(text[scan.stack[scan.base][1] :])
-    return list(dict.fromkeys(out))
-
-
 def _eval_scripts(tokens: List[str]) -> List[str]:
     """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
     return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
@@ -6232,7 +6205,7 @@ def _nested_pairs(
     out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
     visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
-    bodies = [s for body in _expanded_heredocs(cmd) for s in _heredoc_body_scripts(body)]
+    bodies = [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
     out += [(s, d) for s in bodies for d in visited]  # thân heredoc mở rộng: thư mục mọi lệnh (chiều chặt)
     out += _shell_feeds(tokens, placed)
     out += [(s, here) for c, here in placed for s in _here_strings(c)]
