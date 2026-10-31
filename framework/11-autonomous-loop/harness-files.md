@@ -51,8 +51,14 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   Dự án chưa cài harness giữ tương thích. Cài mới có thể chọn chính sách merge/review `--preset safe`
   (ADR-0055); preset không tạo sandbox hoặc thay cấu hình dự án đã có.
 - **Guard chỉ hiểu dạng heredoc đơn giản; dạng khác bị chặn (BUDGET)** (D-270): dấu kết `[A-Za-z0-9_.-]+` trần, bọc trọn
-  nháy hay một `\` đầu, ở cấp ngoài/`(…)`/`$(…)`/`"$(…)"`, dòng mở cân nháy/ngoặc — `<<` khác mà bash có thể đọc là
-  heredoc (dấu kết có `$`/backtick/nháy pha, `\<<`, trong backtick/`${…}`/`<(…)`/số học không đơn giản…) không được đoán.
+  nháy hay một `\` đầu, ở cấp ngoài/`(…)`/`$(…)`/`"$(…)"`, dòng mở cân nháy/ngoặc — `<<` khác mà bộ đọc nhận ra là có
+  thể là heredoc (dấu kết có `$`/backtick/nháy pha, `\<<`, trong backtick/`${…}`/`<(…)`/số học không đơn giản, lệnh có
+  `case`…) không được đoán. Dòng kết so nguyên văn, trừ heredoc trong `$(…)`/`<(…)`: dòng thân bắt đầu bằng dấu kết rồi
+  có `)` (bash 5.2 kết heredoc ở đó) → chặn (D-271). Còn hở: `#` ngay sau `)` bị coi là comment (AUD-SEC-195).
+- **Guard chặn `\` cuối dòng sau `#` và alias khi `expand_aliases`** (D-271): bash không nối dòng trong comment, đọc
+  nháy để phân định `#` cũng lệch — dòng có `#` đầu từ (bất kể nháy) kết bằng `\` lẻ bị chặn; lệnh có `expand_aliases`
+  cùng từ `alias` bị chặn. Bật alias kiểu khác (`set -o posix`, `POSIXLY_CORRECT=1`, `sh -c` khi `sh` là dash,
+  `bash -i`) chưa được xét (AUD-SEC-222).
 - **Guard không xét gửi bí mật ra mạng bằng thư viện của trình thông dịch** (AUD-SEC-086): luật "gửi file bí mật/biến môi
   trường ra mạng" chỉ nhận CLI (`curl`/`wget`, `scp`/`rsync`, `nc`/`socat`/`ssh`, `gh gist|release upload`) và `/dev/tcp`.
   `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` gửi bí mật đi thì không bị xét
