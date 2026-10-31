@@ -538,6 +538,51 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 self.assertFalse(guard._file_has_mark("n.md", d))
         self.assertEqual(guard.mcp_decision("mcp__github__add_issue_comment", {MARK: "x"}, str(ROOT))[0], "deny")
 
+    def test_review_marker_debt_357(self):
+        """Nợ review #357: file lệnh đọc > 256 KiB không chặn oan, chỉ lệnh nối ống vào `gh` là nguồn (AUD-SEC-177); tên
+        file có ngoặc (AUD-SEC-178); tên do `xargs -I`/`find -exec`/`parallel` điền là nguồn mờ (AUD-SEC-179); chỉ thay
+        lệnh của `gh` được quét (AUD-SEC-182); `/dev/null` chỉ miễn khi là thiết bị null thật (AUD-SEC-183)."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "x(1).md").write_text(MARK, encoding="utf-8")
+            Path(d, "big.md").write_text("# nhật ký\n" + "dòng thường\n" * 40000, encoding="utf-8")  # > 256 KiB
+            Path(d, "bigmark.md").write_text("dòng thường\n" * 40000 + MARK, encoding="utf-8")
+            for cmd in (
+                'gh pr comment 5 --body "$(head -c 99 bigmark.md)"',  # dấu ở bất kỳ đâu trong file đọc → chặn
+                "gh pr comment 5 --body \"$(cat 'x(1).md')\"",
+                "echo b.md | xargs -I{} gh pr comment 5 -F {}",
+                "echo b.md | xargs -I R gh pr comment 5 --body-file R",
+                "find . -name b.md -exec gh pr comment 5 -F {} \\;",
+                "parallel gh pr comment 5 -F {} ::: b.md",
+                "gh pr comment 5 -F big.md",  # file thân trực tiếp > 256 KiB: GitHub không nhận — không đọc
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                'gh pr comment 5 --body "$(head -40 big.md)"',
+                "head -20 big.md; echo ok | gh pr comment 5 -F -",
+                "cat < big.md | wc -l; echo hi | gh pr comment 5 -F -",
+                "cat big.md | wc; gh pr comment 5 --body 'dấu ` lẻ'",
+                "cat > x.md <<'EOF'\n$(cat *.md)\nEOF\ngh pr comment 5 --body 'dau ` le'",
+                "echo 5 | xargs -I{} gh pr comment {} --body ok",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+            with mock.patch.object(guard, "REVIEW_READ_BYTES", 1000):  # quá trần đọc → không đọc được → chặn
+                self.assertEqual(final('gh pr comment 5 --body "$(head -40 big.md)"', root), "deny")
+        real_stat = os.stat
+        fake = os.stat_result((0o100644, 0, 0, 1, 0, 0, 10, 0, 0, 0))
+
+        def stat_as(result):
+            return lambda p, *a, **k: result(p) if p == os.devnull else real_stat(p, *a, **k)
+
+        self.assertFalse(guard._file_has_mark(os.devnull, None))
+        with mock.patch.object(guard.os, "stat", side_effect=stat_as(lambda p: fake)):  # `/dev/null` bị thay
+            self.assertTrue(guard._file_has_mark(os.devnull, None))
+        with mock.patch.object(guard.os, "stat", side_effect=stat_as(lambda p: (_ for _ in ()).throw(OSError(p)))):
+            self.assertTrue(guard._file_has_mark(os.devnull, None))
+
     def test_review_marker_debt_354(self):
         """Nợ review #354: `cat -n f` (AUD-SEC-174), backtick không nháy (AUD-SEC-175), thân qua chuyển hướng stdin
         `cat < f |`, `<&N`, `<>` (AUD-SEC-176)."""

@@ -2799,6 +2799,9 @@ REVIEW_BODY_FILES_MAX = 8  # số nguồn thân tối đa mỗi lệnh `gh` đă
 # Thân comment GitHub tối đa 65 536 ký tự (≤ 256 KiB UTF-8): lớn hơn thì không đọc — coi như không đọc được; cùng trần
 # số nguồn giữ một quyết định trong ngân sách quét (review #354 lượt 3)
 REVIEW_BODY_FILE_BYTES = 1 << 18
+# File mà lệnh đọc (`$(head -40 CHANGELOG.md)`, `grep x f |`) chỉ góp một phần vào thân: quét cả file tới trần lớn hơn
+# (8 lệnh × 8 MiB vẫn trong ngân sách giờ của hook) thay vì chặn oan file > 256 KiB (AUD-SEC-177)
+REVIEW_READ_BYTES = 1 << 23
 STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
 READER_VALUE_OPTS = ("-n", "-c", "--lines", "--bytes")  # tuỳ chọn của lệnh đọc ăn giá trị (`head -n "$N" f`)
 STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # thân đọc từ stdin
@@ -2810,13 +2813,23 @@ BACKTICK_ESCAPE_RE = re.compile(r"\\([\\`$])")  # thân backtick: `\``, `\\`, `\
 POST_NEST_MAX = 4  # số tầng thay lệnh lồng được đọc nguồn thân; sâu hơn → nguồn mờ (chặn)
 
 
-def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
+def _null_device(path: str) -> bool:
+    """`path` là thiết bị null thật (ký tự; Linux: số thiết bị 1:3) — không chỉ tên `/dev/null` mà root có thể thay bằng
+    symlink tới file mang dấu (AUD-SEC-183)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    return stat.S_ISCHR(st.st_mode) and (sys.platform != "linux" or st.st_rdev == os.makedev(1, 3))
+
+
+def _file_has_mark(path: str, cwd: Optional[str], limit: int = REVIEW_BODY_FILE_BYTES) -> bool:
     """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (chữ thô, rồi cả chuỗi JSON — `gh api
     --input` viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, fd của shell, không phải file thường,
     quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
     không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
     sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
-    if path == os.devnull:  # `gh … < /dev/null` tắt prompt — thân rỗng
+    if path == os.devnull and _null_device(path):  # `gh … < /dev/null` tắt prompt — thân rỗng
         return False
     if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
@@ -2831,10 +2844,10 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
         fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
             st = os.fstat(fd)
-            if not stat.S_ISREG(st.st_mode) or st.st_size > REVIEW_BODY_FILE_BYTES:
+            if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
                 return True
-            text = fh.read(REVIEW_BODY_FILE_BYTES + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
-        if len(text) > REVIEW_BODY_FILE_BYTES or REVIEW_MARK_RE.search(text):
+            text = fh.read(limit + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
+        if len(text) > limit or REVIEW_MARK_RE.search(text):
             return True
         return any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
     except ValueError:  # không phải JSON: chữ thô đã quét
@@ -2855,13 +2868,10 @@ def _stdin_redirects(argv: List[str]) -> List[str]:
     return out
 
 
-def _reader_files(argv: List[str]) -> List[str]:
+def _reader_files(n: List[str], argv: List[str]) -> List[str]:
     """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c` của `head`/`tail` —
     với `cat`, `-n` là cờ, AUD-SEC-174) sau khi bỏ chuyển hướng (`2>/dev/null`), cộng đích `< f` (AUD-SEC-176); không
-    có file hay `-` → đọc stdin (`-`)."""
-    n = normalize(_no_redirects(argv))
-    if not n[:1] or n[0] not in STDIN_READERS:
-        return []
+    có file hay `-` → đọc stdin (`-`). `n` = argv đã bỏ chuyển hướng và chuẩn hoá, `n[0]` thuộc `STDIN_READERS`."""
     valued = n[0] in ("head", "tail")
     out = [
         t
@@ -2889,7 +2899,7 @@ def _any_reader_files(argv: List[str]) -> List[str]:
     if any(posixpath.basename(t) in STDIN_FEEDERS for t in argv):
         return ["$"]
     if n[0] in STDIN_READERS:
-        return _reader_files(argv)
+        return _reader_files(n, argv)
     pos = [t for t in n[1:] if t == "-" or t[:1] != "-"]  # cả `''` (script rỗng của `sed ''`)
     if n[0] in SCRIPT_FIRST and not any(SCRIPT_OPT_RE.fullmatch(t) for t in n[1:]):
         pos = pos[1:]
@@ -2990,7 +3000,7 @@ def _span_scan(span: Tuple[str, str], depth: int) -> Tuple[str, Optional[_ShellS
 def _span_gh(span: Tuple[str, str], depth: int) -> List[str]:
     """Nguồn thân của `gh` đăng chữ lồng trong thay lệnh của lệnh khác (`x=$(gh … -F f)`)."""
     scan = _span_scan(span, depth)[1]
-    return ["`"] if scan is None else _gh_sources(scan, depth + 1)
+    return ["`"] if scan is None else sum(_gh_sources(scan, depth + 1), [])
 
 
 def _span_files(span: Tuple[str, str], depth: int) -> List[str]:
@@ -3003,7 +3013,7 @@ def _span_files(span: Tuple[str, str], depth: int) -> List[str]:
     out = [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
     out += [f for c in split_commands(toks) for f in _any_reader_files(c)]
     out += [f for st in scan.stages for sp in st[2] for f in _span_files(sp, depth + 1)]
-    return out + _gh_sources(scan, depth + 1)
+    return out + sum(_gh_sources(scan, depth + 1), [])
 
 
 def _gh_wrapped(argv: List[str]) -> bool:
@@ -3012,8 +3022,18 @@ def _gh_wrapped(argv: List[str]) -> bool:
     return not _gh_posts(argv) and bool(GH_POST_RE.search(" ".join(argv)))
 
 
-def _body_sources(st: Stage, depth: int) -> Tuple[List[str], bool]:
-    """(nguồn thân, có đọc stdin) của một đoạn lệnh: `gh` đăng chữ — `gh api -F k=@f`/`--field k=@f`/`--input f`, `gh
+def _gh_files(argv: List[str]) -> List[str]:
+    """File cờ của `gh` đăng chữ trong argv — cả khi bị bọc (`xargs -I{} gh …`, `find … -exec gh … {} ;`, `parallel gh
+    …`); giá trị là chuỗi thay chỗ lệnh bọc điền lúc chạy (`{}`, `-I R`) → nguồn mờ (AUD-SEC-179)."""
+    k = next((i for i, t in enumerate(argv) if posixpath.basename(t) == "gh"), len(argv))
+    args = normalize(argv[k:])[1:]
+    files = _gh_api_files(args) if args[:1] == ["api"] else _gh_flag_files(args, split_at=False)
+    ph = _placeholders(argv, any(posixpath.basename(t) in STDIN_FEEDERS for t in argv))
+    return ["$" if PARALLEL_REPLACE_RE.search(f) or any(p in f for p in ph) else f for f in files]
+
+
+def _body_sources(st: Stage, depth: int) -> Tuple[List[str], List[str], bool]:
+    """(file thân, file lệnh đọc, có đọc stdin) của một đoạn lệnh: `gh` đăng chữ — `gh api -F k=@f`/`--field k=@f`/`--input f`, `gh
     pr|issue -F f`/`--body-file f` (giá trị nguyên văn, kể cả `x=@y`), `< f` (cả trước tên lệnh), file đọc trong thay lệnh
     sống của đoạn; lệnh bọc `gh` (`sh -c '…' < f`) — đích stdin, đọc stdin khi là shell/trình thông dịch; đoạn khác — chỉ
     nguồn của `gh` đăng chữ lồng trong thay lệnh (`x=$(gh … -F f)`)."""
@@ -3022,13 +3042,12 @@ def _body_sources(st: Stage, depth: int) -> Tuple[List[str], bool]:
     if not _gh_posts(argv):
         nested = [f for sp in spans if GH_POST_RE.search(sp[1]) for f in _span_gh(sp, depth)]
         if not _gh_wrapped(argv):
-            return nested, False
+            return [], nested, False
         head = posixpath.basename((normalize(argv) or [""])[0])
-        return _stdin_redirects(argv) + nested, head in INTERPRETERS
-    args = normalize(argv)[1:]
-    own = _gh_api_files(args) if args[:1] == ["api"] else _gh_flag_files(args, split_at=False)
-    own += _stdin_redirects(argv) + [f for sp in spans for f in _span_files(sp, depth)]
-    return own, any(f in STDIN_PATHS for f in own)
+        return _gh_files(argv) + _stdin_redirects(argv), nested, head in INTERPRETERS
+    own = _gh_files(argv) + _stdin_redirects(argv)
+    read = [f for sp in spans for f in _span_files(sp, depth)]
+    return own, read, any(f in STDIN_PATHS for f in own + read)
 
 
 SHELL_LEVEL_WORDS = {"exec", "}", "done", "fi", "esac"}  # chuyển hướng của chúng đổi stdin của lệnh khác
@@ -3047,13 +3066,15 @@ def _feed_sources(st: Stage, depth: int) -> List[str]:
     return out + [f for sp in spans for f in _span_files(sp, depth)]
 
 
-def _gh_sources(scan: _ShellScan, depth: int) -> List[str]:
-    """Nguồn thân của mọi `gh` đăng chữ trong chuỗi đã quét; `gh` đọc stdin thì thêm nguồn đưa vào stdin."""
+def _gh_sources(scan: _ShellScan, depth: int) -> Tuple[List[str], List[str]]:
+    """(file thân, file lệnh đọc) của mọi `gh` đăng chữ trong chuỗi đã quét; `gh` đọc stdin thì thêm nguồn đưa vào
+    stdin."""
     found = [_body_sources(st, depth) for st in scan.stages]
-    out = [f for srcs, _ in found for f in srcs]
-    if any(reads for _, reads in found):
-        out += [f for st in scan.stages for f in _feed_sources(st, depth)]
-    return out
+    own = [f for srcs, _, _ in found for f in srcs]
+    read = [f for _, srcs, _ in found for f in srcs]
+    if any(stdin for _, _, stdin in found):
+        read += [f for st in scan.stages for f in _feed_sources(st, depth)]
+    return own, read
 
 
 def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
@@ -3067,9 +3088,12 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
     if not GH_POST_RE.search(cmd):
         return False
     scan = _scan(cmd)
-    srcs = ["`"] if scan.open else _gh_sources(scan, 0)
-    srcs = list(dict.fromkeys(f for f in srcs if f not in STDIN_PATHS))  # mỗi nguồn đọc một lần, đếm một lần
-    return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
+    own, read = (["`"], []) if scan.open else _gh_sources(scan, 0)
+    own = list(dict.fromkeys(f for f in own if f not in STDIN_PATHS))  # mỗi nguồn đọc một lần, đếm một lần
+    read = list(dict.fromkeys(f for f in read if f not in STDIN_PATHS and f not in own))
+    if len(own) + len(read) > REVIEW_BODY_FILES_MAX:
+        return True
+    return any(_file_has_mark(f, cwd) for f in own) or any(_file_has_mark(f, cwd, REVIEW_READ_BYTES) for f in read)
 
 
 def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
