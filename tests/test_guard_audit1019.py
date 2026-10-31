@@ -2350,5 +2350,27 @@ class SecretExfilOtherChannelsDelta2Test(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class ShellParseGapsTest(unittest.TestCase):
+    """AUD-SEC-195/225/226: `)#`, `$"…"`, thân `trap` — bash chạy, guard từng cho qua."""
+
+    def test_comment_after_paren(self) -> None:
+        self.assertEqual(final("true $(true)#; rm -rf ~"), "deny")
+        self.assertEqual(final("(true) # ghi chú; rm -rf ~"), "")  # comment thật vẫn bị bỏ
+
+    def test_locale_string_dollar_double_quote(self) -> None:
+        for cmd in ('$"rm" -rf ~', '$"git" push --force origin main', 'eval $"rm -rf ~"', '$"bash" -c "rm -rf ~"'):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        self.assertEqual(final('echo $"hello"'), "")
+
+    def test_trap_body_scanned(self) -> None:
+        for cmd in ("trap 'rm -rf ~' EXIT", "trap -- 'git push --force origin main' EXIT"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("trap 'echo bye' EXIT", "trap - EXIT", "trap -p", "trap -l"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
 if __name__ == "__main__":
     unittest.main()

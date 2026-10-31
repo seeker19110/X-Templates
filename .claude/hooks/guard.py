@@ -908,7 +908,7 @@ def strip_comments(cmd: str) -> str:
         elif c in "'\"":
             quote = c
         out.append(c)
-        word_start = not quote and c in WORD_END
+        word_start = not quote and c in WORD_END and c != ")"  # `$(…)#`: `#` nối từ, không mở comment (AUD-SEC-195)
         i += 1
     return "".join(out)
 
@@ -942,6 +942,8 @@ def expand_ansi_c(cmd: str) -> str:
         elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
             i, ws = i + 2, False
+        elif not q and cmd.startswith('$"', i):  # `$"…"` (dịch locale) = `"…"`; bỏ `$` (AUD-SEC-225)
+            i, ws = i + 1, False
         elif not q and cmd.startswith("$'", i):
             j = i + 2
             while j < len(cmd) and cmd[j] != "'":
@@ -953,7 +955,7 @@ def expand_ansi_c(cmd: str) -> str:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
-            ws = not q and c in WORD_END
+            ws = not q and c in WORD_END and c != ")"
             i += 1
     return "".join(out)
 
@@ -6091,7 +6093,12 @@ def _expanded_heredocs(cmd: str) -> List[str]:
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
     """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
-    return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    out = [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    for c in split_commands(tokens):  # `trap '<lệnh>' SIGNAL`: bash chạy thân như `eval` (AUD-SEC-226)
+        n = [a for a in normalize(c) if a != "--"]
+        if n[:1] == ["trap"] and len(n) > 1 and n[1] not in ("-", "-p", "-l"):
+            out.append(n[1])
+    return out
 
 
 def _cat_heredoc_bodies(script: str) -> List[str]:
