@@ -154,6 +154,17 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-advrev-rm-fence-dir": ".claude tương đối → /tmp/.claude",
     "guard-advrev-chmod-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
     "guard-advrev-truncate-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
+    "guard-rev361b-dd-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-dddd-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-arith-semi-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-locale-delim-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-trail-sp-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-dd-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-dddd-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-arith-semi-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-locale-delim-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-trail-sp-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-oldarith-ap": ".autopilot/state.json tương đối",
 }
 
 
