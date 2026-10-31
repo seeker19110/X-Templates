@@ -12199,6 +12199,159 @@
    "expect": {
     "allowed": false
    }
+  },
+  {
+   "id": "guard-d271-commit-terminator-paren-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nmsg\nEOF)\"; rm -rf ~\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-commit-terminator-paren-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nmsg\nEOF)\"; gh pr comment 5 -F b.md\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-pr-body-terminator-paren-state",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "gh pr create --title 'fix(x): y' --body \"$(cat <<'EOF'\nbody\nEOF)\"\necho x > .autopilot/state.json\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-unquoted-terminator-paren-state",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<EOF\nmsg\nEOF)\"\necho x > .autopilot/state.json\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-tabs-terminator-paren-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "x=$(cat <<-X\n\tX)\nrm -rf ~\nX"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-procsub-terminator-paren-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "cat <(cat <<X\nX); git push --force origin main\nX\n)"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-control-terminator-prefix-body",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "x=$(cat <<'EOF'\nEOF handling\nEOF\n)\necho \"$x\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d271-control-comsub-heredoc",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: x (partial\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d271-case-comsub-heredoc-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-218"
+   ],
+   "input": {
+    "command": "x=\"$(case a in a) cat <<X;; esac)\"\n'\nX\ngit push --force origin main\n'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-case-comsub-heredoc-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-218"
+   ],
+   "input": {
+    "command": "echo \"$(case x in a) cat <<X;; esac)\"\n'\nX\ngh pr comment 5 -F b.md\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-control-case-no-heredoc",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-218"
+   ],
+   "input": {
+    "command": "case \"$1\" in a) echo hi;; esac"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

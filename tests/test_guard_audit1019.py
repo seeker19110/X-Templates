@@ -1421,6 +1421,59 @@ class HeredocAllowlistTest(unittest.TestCase):
         self.assertEqual(got, [want for _, want in cmds])
 
 
+class HeredocRound4Test(unittest.TestCase):
+    """D-271 (review #361 sau D-270, đã thử bash 5.2): dòng thân heredoc trong `$(…)` bắt đầu bằng dấu kết rồi có `)`
+    kết heredoc (tương thích cũ của bash); `case` trong `$(…)` làm lệch ngăn xếp; `\\` + xuống dòng trong comment không
+    nối dòng; alias khi `expand_aliases`; nhiều heredoc trên một dòng không đọc lại dòng mở mỗi lần."""
+
+    setUp = HeredocAllowlistTest.setUp
+    assert_all = HeredocAllowlistTest.assert_all
+
+    def test_comsub_terminator_with_paren_denied(self):
+        self.assert_all(
+            "deny",
+            (
+                'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF)"; {x}\nEOF\n)"',
+                "gh pr create --title 'fix(x): y' --body \"$(cat <<'EOF'\nbody\nEOF)\"\n{x}\nEOF\n)\"",
+                'echo "$(cat <<EOF\nmsg\nEOF)"\n{x}\nEOF\n)"',
+                'git commit -m "$(cat <<\'EOF\'\nmsg\nEOF)"\n{x}\nEOF\n)"',
+                "x=$(cat <<-X\n\tX)\n{x}\nX",
+                "x=$(cat <<-X\n\tX); {x}\nX",
+                "x=$(cat <<X\nXa); {x}\nX\n)",  # dấu kết là tiền tố, `)` ở sau
+                "x=$(cat <<X\nX; {x})\nX\n)",
+                "cat <(cat <<X\nX); {x}\nX\n)",  # thay tiến trình như thay lệnh
+                "x=$( (cat <<X\nX)); {x}\nX\n)",  # subshell trong thay lệnh
+            ),
+        )
+        res = guard.bash_decision("x=$(cat <<-X\n\tX)\nrm -rf ~\nX", str(self.root))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+
+    def test_comsub_terminator_controls_allowed(self):
+        self.assert_all(
+            "",
+            (
+                "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\"",
+                "x=$(cat <<'EOF'\nEOF handling\nEOF\n)",  # bắt đầu bằng dấu kết nhưng không có `)`: thân
+                "x=$(cat <<EOF\nEOFX is (fine\nEOF\n)",
+                "x=$(cat <<-EOF\n\tEOF\n)",
+                "(cat <<X\nX)\nX\n)",  # subshell thường: `X)` là thân (bash 5.2)
+                "cat <<X\nX)\nX",  # cấp ngoài: `X)` là thân
+            ),
+        )
+
+    def test_case_in_comsub_with_heredoc_denied(self):
+        self.assert_all(
+            "deny",
+            (
+                "x=\"$(case a in a) cat <<X;; esac)\"\n'\nX\n{x}\n'",
+                "echo \"$(case x in a) cat <<X;; esac)\"\n'\nX\n{x}\n'",
+            ),
+        )
+        self.assert_all("", ('case "$1" in a) echo hi;; esac', "case a in a) cat <<<x;; esac"))
+        with self.assertRaises(guard.ScanTooComplex):
+            guard.strip_heredocs('x="$(case a in a) cat <<X;; esac)"')
+
+
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""
 

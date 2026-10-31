@@ -389,6 +389,8 @@ BRACE_PLAIN_RE = re.compile(r"[^}{\\'\"`$<]+")
 ARITH_PLAIN_RE = {"A(": re.compile(r"[^'\"\\`$()<{}]+"), "A[": re.compile(r"[^'\"\\`$\[\]<{}]+")}
 ARITH_PAIR = {"A(": ("(", ")"), "A[": ("[", "]")}
 SIMPLE_VAR_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9#@?*!$-])")
+HERE_OP_RE = re.compile(r"(?<!<)<<(?!<)")  # `<<`/`<<-` có thể là heredoc (không phải `<<<`)
+SUBST_KINDS = ("$(", "<(")  # thay lệnh/thay tiến trình: bash đọc heredoc trong đó theo luật tương thích cũ (D-271)
 Frame = Tuple[str, int]  # (loại: `(` `$(` `<(` `"` `'` `$'` backtick `${` `A(` `A[`, số ngoặc còn mở của `A…`)
 HereSpan = Tuple[int, "re.Match[str]", int, int, bool]  # (dòng mở, match, đầu thân, cuối thân, nằm trong `"$(`)
 
@@ -436,6 +438,7 @@ class _HereScan:
         # nháy kép chỉ khi ngay trong nó là `$(` (`-m "$(cat <<'EOF'`); giữ theo push/pop để mỗi lần hỏi O(1)
         self.struct: List[bool] = []
         self.dq = 0  # số khung nháy kép đang mở
+        self.subst = 0  # số khung `$(`/`<(` đang mở
         self.taint = False
         self.ops: List[Tuple["re.Match[str]", int]] = []
         self.low = 0  # độ sâu ngăn xếp thấp nhất từ heredoc đầu tiên của dòng
@@ -469,9 +472,12 @@ class _HereScan:
             for m, _ in self.ops:
                 end = ends.find(m, i)
                 end = len(self.lines) if end is None else end
+                if self.subst:
+                    _check_subst_body(self.lines, m, i, end)
                 out.append((opener, m, i, end, in_dq))
                 i = end + 1
-        if out and self.taint:
+        # `case` trong `$(…)`: mẫu `a)` đóng khung `$(` nên `<<` sau đó bị đọc như chữ — có `<<` ở đâu cũng chặn (D-271)
+        if self.taint and any(HERE_OP_RE.search(line) for line in self.lines):
             raise ScanTooComplex("heredoc cùng chỗ guard không đọc chắc (`case`, gán mảng, backtick, `${…}`, số học)")
         return out
 
@@ -491,10 +497,13 @@ class _HereScan:
         self.struct.append(kind in ("(", "$(") and below and (kind == "$(" or not dq_below))
         self.stack.append((kind, depth))
         self.dq += kind == '"'
+        self.subst += kind in SUBST_KINDS
         return j
 
     def _pop(self, j: int) -> int:
-        self.dq -= self.stack.pop()[0] == '"'
+        kind = self.stack.pop()[0]
+        self.dq -= kind == '"'
+        self.subst -= kind in SUBST_KINDS
         self.struct.pop()
         self.low = min(self.low, len(self.stack))
         return j
@@ -627,6 +636,17 @@ class _HereScan:
             self.stack[-1] = (kind, depth)
             return j + 1 if depth else self._pop(j + 1)
         return self._opaque(line, j, opener)  # `opener` đã xét ở trên: chỉ còn `<<`, `$tên`, ký tự làm `taint`
+
+
+def _check_subst_body(lines: List[str], m: "re.Match[str]", start: int, end: int) -> None:
+    """Heredoc trong `$(…)`/`<(…)`: bash 5.2 (tương thích cũ) kết thân ở dòng BẮT ĐẦU bằng dấu kết mà sau đó có `)` —
+    phần còn lại của dòng là lệnh (`-m "$(cat <<'EOF'` ↵ `EOF)"; rm -rf ~` ↵ `EOF` ↵ `)"`). Guard không mô phỏng →
+    chặn (D-271). Dòng chỉ bắt đầu bằng dấu kết mà không có `)` (`EOF handling`) vẫn là thân."""
+    word, tabs = _heredoc_word(m)[0], m.group().startswith("<<-")
+    for line in lines[start:end]:
+        body = line.lstrip("\t") if tabs else line
+        if body.startswith(word) and ")" in body[len(word) :]:
+            raise ScanTooComplex(f"dòng thân heredoc trong `$(…)` bắt đầu bằng dấu kết rồi `)`: {line[:80]}")
 
 
 def _here_scan(cmd: str) -> Tuple[HereSpan, ...]:
