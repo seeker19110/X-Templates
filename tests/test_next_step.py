@@ -8,6 +8,7 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -826,6 +827,51 @@ class NextStepCliTest(StateCase):
         a = xt.next_step_facts(self.base, self.st(), "S.md", [])["audit"]
         self.assertEqual((a["exists"], a["open"], a["sha256"]), (True, 0, ""))
         self.assertTrue(a["errors"][0].startswith("không đọc được sổ: "), a["errors"])
+
+
+class MonorepoFingerprintTest(unittest.TestCase):
+    """AUD-HAR-149: dự án ở thư mục con của repo (monorepo `apps/web`) — vân tay và file đổi tính theo đường dẫn từ dự án:
+    commit chỉ sổ giai đoạn/PROGRESS của dự án, hay chỉ app khác, không làm bản trình/gói hết hạn."""
+
+    def setUp(self) -> None:
+        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.web = self.repo / "apps" / "web"
+        (self.web / "docs" / "autopilot").mkdir(parents=True)
+        (self.repo / "apps" / "api").mkdir()
+        (self.web / "app.py").write_text("x = 1\n", encoding="utf-8")
+        (self.repo / "apps" / "api" / "b.py").write_text("y = 1\n", encoding="utf-8")
+        self.git("init", "-q")
+        self.commit("khởi tạo")
+
+    def git(self, *args: str) -> str:
+        cfg = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *cfg, *args], check=True, capture_output=True, text=True
+        ).stdout
+
+    def commit(self, msg: str) -> str:
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", msg)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def test_monorepo_fingerprint(self) -> None:
+        sha = self.git("rev-parse", "HEAD").strip()
+        fp = xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,))
+        sub = {"sha": sha, "tree": fp}
+        (self.web / xt.STAGE_LEDGER).write_text("{}\n", encoding="utf-8")
+        (self.web / "PROGRESS.md").write_text("tiến độ\n", encoding="utf-8")
+        self.commit("sổ: trình MVP")  # chỉ sổ giai đoạn + PROGRESS của dự án
+        self.assertEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), [])
+        self.assertEqual(xt._changed_since(self.web, sha), [xt.STAGE_LEDGER])  # đường dẫn tính từ dự án
+        (self.repo / "apps" / "api" / "b.py").write_text("y = 2\n", encoding="utf-8")
+        self.commit("app khác")
+        self.assertEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), [])
+        (self.web / "app.py").write_text("x = 2\n", encoding="utf-8")
+        self.commit("mã dự án")
+        self.assertNotEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), ["app.py"])
 
 
 if __name__ == "__main__":

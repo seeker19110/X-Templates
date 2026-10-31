@@ -7225,8 +7225,9 @@ def _signoff_excluded(path: str) -> bool:
 
 def evidence_fingerprint(base: Path, skip: Tuple[str, ...] = ()) -> Optional[str]:
     """sha256 nội dung cây làm việc trừ GO-NO-GO/DECISIONS/PROGRESS/thư mục trạng thái (và đường dẫn `skip`): blob của
-    HEAD (`ls-tree`, không SHA commit) + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None."""
-    tree = _git(base, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+    HEAD (`ls-tree`, không SHA commit) + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None. Chỉ cây
+    dự án, đường dẫn tính từ dự án — dự án ở thư mục con (`apps/web`) không lệch `skip`/app khác (AUD-HAR-149)."""
+    tree = _git(base, "ls-tree", "-r", "-z", "HEAD", "--", ".")
     if tree.returncode != 0:
         return None
     paths = ((e, e.partition("\t")[2]) for e in tree.stdout.split("\0") if e)
@@ -7241,7 +7242,7 @@ def _changed_since(base: Path, sha: str) -> Optional[List[str]]:
     if not COMMIT_SHA_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         return None
     spec = ["--", ".", ":(exclude).autopilot", *SIGNOFF_EXCLUDE]
-    diff = _git(base, "diff", "-z", "--no-renames", "--name-only", sha, *spec).stdout
+    diff = _git(base, "diff", "-z", "--no-renames", "--name-only", "--relative", sha, *spec).stdout  # AUD-HAR-149
     new = _git(base, "ls-files", "--others", "--exclude-standard", "-z", *spec).stdout
     return sorted({n for n in f"{diff}\0{new}".split("\0") if n})
 
