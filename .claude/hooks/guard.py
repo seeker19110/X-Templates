@@ -8460,6 +8460,11 @@ def _glob_rewrites(cmd: str, tokens: List[str], heads: Dict[str, List[str]]) -> 
     return out
 
 
+IFS_ANY_RE = re.compile(r"\$\{?IFS")
+IFS_LEGACY_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")  # cách đọc cũ của main: mọi biến IFS thành khoảng trắng
+_DECISION_RANK = {"": 0, "ask": 1, "deny": 2}
+
+
 def bash_decision(
     cmd: str,
     root: str,
@@ -8467,6 +8472,27 @@ def bash_decision(
     depth: int = 0,
     budget: Optional[ScanBudget] = None,
     rewrites: int = 0,
+) -> Dict[str, object]:
+    """Quyết định cuối = hợp chặt hơn của hai cách đọc biến IFS: cách hiện tại và cách cũ của main (viết mọi biến IFS
+    thành khoảng trắng). Chỉ thêm, không bớt so với main — mỗi bản sửa riêng lẻ cho `IFS#` từng để lọt một ngữ cảnh mới
+    (backtick, heredoc, nháy lệch) mà main chặn (AUD-SEC-232, review #372 lượt 1…5)."""
+    out = _decide_once(cmd, root, cwd, depth, budget, rewrites)
+    if IFS_ANY_RE.search(cmd):
+        legacy = IFS_LEGACY_RE.sub(" ", cmd)
+        if legacy != cmd:
+            alt = _decide_once(legacy, root, cwd, depth, budget, rewrites)
+            if _DECISION_RANK.get(str(alt["decision"]), 0) > _DECISION_RANK.get(str(out["decision"]), 0):
+                return alt
+    return out
+
+
+def _decide_once(
+    cmd: str,
+    root: str,
+    cwd: Optional[str],
+    depth: int,
+    budget: Optional[ScanBudget],
+    rewrites: int,
 ) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.

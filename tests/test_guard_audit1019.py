@@ -2548,6 +2548,13 @@ class ShellParseGapsTest(unittest.TestCase):
             "bash -c \"rm -rf ~/\\$IFS'#'\"",
             "bash -c \"rm -rf ~/\\${IFS}''#\"",
             "trap \"rm -rf ~/\\$IFS''#\" EXIT",
+            # backtick ngoài nháy, heredoc không nháy vào shell, nháy lệch trong backtick: hợp với cách đọc cũ của main
+            "echo `rm -rf ~/\\$IFS''#`",
+            "x=`rm -rf ~/\\$IFS''#`",
+            "echo `rm -rf ~/\\${IFS}#`",
+            "bash <<EOF\nrm -rf ~/\\$IFS''#\nEOF",
+            "cat <<EOF | bash\nrm -rf ~/\\$IFS''#\nEOF",
+            "echo \"`: '\"'`\"; rm -rf ~/$IFS''#",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
