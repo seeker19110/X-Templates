@@ -1965,3 +1965,10 @@
 - Chọn: Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): phương án 1 đóng cả 11 ca lách và 3 ca chặn oan, đo bằng 23 ca lách bị chặn và 17 ca hợp lệ chạy, coverage 100 phần trăm; phương án 2 để hở lỗ đã tái hiện được
 - Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-195 về mở trong sổ audit
+
+### D-283 · 2026-10-31T20:20:15+00:00 · PR #368: lượt rà thứ 5 sau khi đóng họ pwd# (reviewer lượt 4 báo 1 đỏ: kiểm strict chạy sau khi thay pwd)
+
+- Phương án: (1) Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR · (2) Dừng PR, bỏ AUD-SEC-195 về mở
+- Chọn: Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa lượt 4 đo được (255 test guard, 300 hooks, bench 997 ca xanh) và các lớp còn lại có từ trước (base cũng lọt, fuzz: base 400 ca lọt, head giảm mạnh, không ca nào lọt ở head mà base chặn); gộp vào sổ riêng tránh phình PR
+- Đường lùi: Hoàn nguyên commit sửa; đưa AUD-SEC-195 về mở
