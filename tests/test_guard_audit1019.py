@@ -539,7 +539,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
         self.assertEqual(guard.mcp_decision("mcp__github__add_issue_comment", {MARK: "x"}, str(ROOT))[0], "deny")
 
     def test_review_marker_debt_357(self):
-        """Nợ review #357: file lệnh đọc > 256 KiB không chặn oan, chỉ lệnh nối ống vào `gh` là nguồn (AUD-SEC-177); tên
+        """Nợ review #357: file lệnh đọc > 256 KiB được quét tới 8 MiB, không chặn oan (AUD-SEC-177); tên
         file có ngoặc (AUD-SEC-178); tên do `xargs -I`/`find -exec`/`parallel` điền là nguồn mờ (AUD-SEC-179); chỉ thay
         lệnh của `gh` được quét (AUD-SEC-182); `/dev/null` chỉ miễn khi là thiết bị null thật (AUD-SEC-183)."""
         with tempfile.TemporaryDirectory() as d:
@@ -778,6 +778,195 @@ class ReviewMarkerForgeTest(unittest.TestCase):
         mention = {"body": "dấu `xt-review v1` qua `gh pr comment` bị chặn"}  # thân PR nói về luật, không mang dấu
         self.assertEqual(guard.mcp_decision("mcp__github__create_pull_request", mention, str(ROOT))[0], "")
         self.assertEqual(final("gh pr create -t 'fix: x' -b 'dấu `xt-review v1` bị chặn'"), "")
+
+
+class ReviewMarkerReview361Test(unittest.TestCase):
+    """Review #361: nguồn thân đọc bằng `_ShellScan` không được mở lại lỗ mà bản trước đã chặn (comment trong `$'…'`,
+    biến mang thân, thay lệnh trong heredoc không nháy, `>(…)`), không chặn oan lệnh thường (thư mục, trần nguồn, ống
+    trong thay lệnh), không chậm theo hàm mũ khi lồng."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        for rel, text in {
+            "b.md": MARK + "\n",
+            "n.md": "thường\n",
+            "docmark.md": "<!-- xt-review v1 head=$(git rev-parse HEAD) verdict=clean -->\n",
+            "docs/a.md": "x\n",
+            "docs/sub/b.md": MARK + "\n",
+            "tests/t.py": "x\n",
+        }.items():
+            Path(self.root, rel).parent.mkdir(parents=True, exist_ok=True)
+            Path(self.root, rel).write_text(text, encoding="utf-8")
+
+    def check(self, want, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd, self.root), want)
+
+    def test_review_marker_361_comment_in_ansi_c(self):
+        """R1: `#` trong `$'…'` không mở comment — đoạn `gh` sau nó vẫn được quét; `gh` mà bộ quét không thấy → mờ."""
+        self.check(
+            "deny",
+            (
+                "echo $'\\' #'; gh pr comment 5 -F b.md",
+                "echo $'\\' #'; gh pr comment 5 -F - <<< `cat b.md`",
+                "echo $'\\' #'\ngh pr comment 5 -F b.md",
+                "echo $'\\' #'; cat b.md | gh pr comment 5 -F -",
+                'gh pr comment 5 --body "$(cat b.md # chú thích\n)"',
+            ),
+        )
+        self.check(
+            "",
+            (
+                "echo $'\\' #'; gh pr comment 5 -F n.md",
+                "echo hi # gh pr comment 5 -F b.md",
+                "echo $(date)#x; gh pr comment 5 --body ok",
+            ),
+        )
+        with mock.patch.object(guard, "_scan", return_value=guard._ShellScan("true")):
+            self.assertEqual(final("gh pr comment 5 --body ok", self.root), "deny")
+
+    def test_review_marker_361_variable_body(self):
+        """R2: `gh` đăng chữ có mở rộng tham số (`$x`, `${…}`) — nguồn là file mọi lệnh trong chuỗi đọc (gán từ thay
+        lệnh, `read`/`mapfile`/`done < f`)."""
+        self.check(
+            "deny",
+            (
+                'x=$(cat b.md); gh pr comment 5 --body "$x"',
+                "x=$(cat b.md); gh pr comment 5 --body $x",
+                'x=$(head -c 999 b.md) && gh pr comment 5 --body "$x"',
+                'x=$(cat b.md)\ngh pr comment 5 --body "$x"',
+                'x=$(grep . b.md); gh pr comment 5 --body "$x"',
+                'x=$(<b.md); gh pr comment 5 --body "$x"',
+                'read -r x < b.md; gh pr comment 5 --body "$x"',
+                'mapfile -t a < b.md; gh pr comment 5 --body "${a[0]}"',
+                'while read -r l; do gh pr comment 5 --body "$l"; done < b.md',
+                'cat b.md | while read -r l; do gh pr comment 5 --body "$l"; done',
+                'x=$(cat b.md); echo "$(gh pr comment 5 --body "$x")"',
+                'x=$(cat b.md); gh pr comment 5 -F - <<< "$x"',
+                "x=$(cat b.md); gh pr comment 5 -F - <<E\n$x\nE",
+            ),
+        )
+        self.check(
+            "",
+            (
+                'x=$(cat n.md); gh pr comment 5 --body "$x"',
+                'cat b.md | wc -l; gh pr comment 5 --body "ok $(date)"',
+                "gh pr comment 5 --body '$x'",
+                "x=$(cat b.md); gh pr comment 5 -F - <<'E'\n$x\nE",
+            ),
+        )
+
+    def test_review_marker_361_heredoc_substitution(self):
+        """R3: thay lệnh trong thân heredoc dấu kết không nháy (bash thay trước khi đưa vào lệnh) là nguồn của lệnh mở
+        heredoc; nháy trong thân là chữ."""
+        self.check(
+            "deny",
+            (
+                'gh pr comment 5 --body "$(cat <<EOF\n$(cat b.md)\nEOF\n)"',
+                'gh pr comment 5 --body "$(cat <<EOF\n`cat b.md`\nEOF\n)"',
+                'gh pr create --title "fix: x" --body "$(cat <<EOF\n## Summary\n$(cat b.md)\nEOF\n)"',
+                "gh pr comment 5 -F - <<EOF\n$(cat b.md)\nEOF",
+                "gh pr comment 5 -F - <<EOF\nit's $(cat b.md)\nEOF",
+                "gh pr comment 5 -F - <<EOF; echo hi\n$(cat b.md)\nEOF",
+                "cat <<EOF | gh pr comment 5 -F -\n$(cat b.md)\nEOF",
+                "gh pr comment 5 -F - <<EOF\n$(cat b.md\nEOF",  # thay lệnh không đóng trong thân: mờ
+            ),
+        )
+        self.check(
+            "",
+            (
+                'gh pr create --title "fix: x" --body "$(cat <<EOF\n## Tóm tắt\n$(git log -1 --format=%s)\nEOF\n)"',
+                "gh pr comment 5 -F - <<'EOF'\n$(cat b.md)\nEOF",
+                "gh pr comment 5 -F - <<EOF\nit's $(cat n.md)\nEOF",
+                "cat <<EOF > x.md\n$(cat b.md)\nEOF\ngh pr comment 5 --body ok",
+            ),
+        )
+
+    def test_review_marker_361_process_substitution_out(self):
+        """R4: `gh` đọc stdin trong `>(…)` nhận đầu ra của lệnh bao nó — file lệnh đó đọc và đích stdin của nó."""
+        self.check(
+            "deny",
+            (
+                "cat b.md > >(gh pr comment 5 -F -)",
+                "grep . b.md > >(gh pr comment 5 -F -)",
+                "tee >(gh pr comment 5 -F -) < b.md",
+                "cat > >(gh pr comment 5 -F -) < b.md",
+            ),
+        )
+        self.check("", ("cat n.md > >(gh pr comment 5 -F -)", "echo hi > >(gh pr comment 5 -F -)"))
+
+    def test_review_marker_361_no_false_block(self):
+        """Thư mục chỉ là nguồn với lệnh đọc đệ quy; trần số nguồn đếm sau khi bỏ tên không có; `-` của lệnh sau ống
+        trong thay lệnh là ống đó, không phải stdin của `gh`; `xargs` chạy lệnh không in nội dung file."""
+        self.check(
+            "",
+            (
+                'gh pr comment 5 --body "Tests: $(python3 -m pytest -q tests 2>&1 | tail -1)"',
+                'gh pr comment 5 --body "$(ls docs | wc -l) files"',
+                'gh pr comment 5 --body "$(ls -la .)"',
+                'gh pr comment 5 --body "$(git log --oneline -3 -- docs)"',
+                "gh pr comment 5 --body \"$(find . -name '*.py' | wc -l)\"",
+                'gh pr comment 5 --body "$(du -sh docs)"',
+                'gh pr comment 5 --body "$(git status --short .)"',
+                'gh pr comment 5 --body "$(make -C docs lint 2>&1 | tail -3)"',
+                'gh pr comment 5 --body "$(git ls-files | xargs wc -l | tail -1)"',
+                'gh pr comment 5 --body "$(git show --stat HEAD) $(git log -1 --format=%s main)'
+                ' $(git diff --name-only a1 b1 c1 d1)"',
+                'cat docmark.md | wc -l; gh pr comment 5 --body "$(echo x | grep x)"',
+                'cat docmark.md | wc -l; gh pr create --title "fix: x" --body "$(cat <<\'EOF\'\nthân\nEOF\n)"',
+                'gh pr comment 5 --body "$(cat n.md)$(cat n.md)`cat n.md`" -F n.md',
+            ),
+        )
+        self.assertFalse(guard._present(guard.DIR_OK + "docs", str(self.root)))  # thư mục với lệnh không đệ quy
+        self.assertTrue(guard._present("docs", str(self.root)))
+        self.assertFalse(guard._present("khong-co.md", str(self.root)))
+        with mock.patch.object(guard.os, "lstat", side_effect=OSError(36, "File name too long")):
+            self.assertTrue(guard._present("n.md", str(self.root)))
+        nine = " ".join(f"m{i}.md" for i in range(9))
+        for i in range(9):
+            Path(self.root, f"m{i}.md").write_text("thường\n", encoding="utf-8")
+        self.check(
+            "deny",
+            (
+                'gh pr comment 5 --body "$(grep -r xt-review docs)"',
+                'gh pr comment 5 --body "$(rg xt-review docs)"',
+                'gh pr comment 5 --body "$(grep -c x docs b.md)"',
+                'gh pr comment 5 --body "$(wc -l b.md)"',
+                'gh pr comment 5 --body "$(cat docs/sub/b.md | wc -l)"',
+                'gh pr comment 5 --body "$(git ls-files | xargs cat)"',
+                'gh pr comment 5 --body "$(cat b.md | xargs -0 wc -l 2>&1)"',
+                'gh pr comment 5 --body "$(xargs -a b.md wc -l 2>&1)"',
+                "gh pr comment 5 --body \"$(find . -name '*.md' -exec cat {} +)\"",
+                f'gh pr comment 5 --body "$(wc -l {nine})"',
+                'cat b.md | gh pr comment 5 --body "$(cat -)"',
+                "gh pr comment 5 --body $(cat n.md) -F b.md",
+            ),
+        )
+
+    def test_review_marker_361_scan_bounded(self):
+        """Thân thay lệnh giống nhau ở cùng tầng chỉ quét một lần (lồng 5 tầng × 2 thay lệnh từng tốn ~80 s ở 256 KiB);
+        hết hạn giờ của quyết định giữa lúc đọc nguồn → coi như có dấu."""
+
+        def fan(k):
+            if not k:
+                return "cat n.md y"
+            inner = fan(k - 1)
+            return f'gh pr comment 5 -F - --body "$({inner})" --body "$({inner})" | cat n.md'
+
+        cmd = fan(3)  # tầng 4 trở đi là nguồn mờ (POST_NEST_MAX)
+        real = guard._ShellScan
+        with mock.patch.object(guard, "_ShellScan", side_effect=real) as scans:
+            self.assertFalse(guard._review_forge_hit(cmd, guard.tokenize(cmd), str(self.root)))
+        self.assertLessEqual(scans.call_count, 6)  # chuỗi gốc + mỗi tầng một thân; không nhớ: 2 + 4 + 8 + …
+        late = guard.ScanBudget()
+        late.deadline = 0.0
+        self.assertTrue(guard._review_forge_hit(cmd, guard.tokenize(cmd), str(self.root), late))
+        blk = "$((" * 300 + "1" + "))" * 300
+        with mock.patch.object(guard, "_paren_pairs", side_effect=guard._paren_pairs) as pairs:
+            guard._dollar_spans('echo "' + blk * 3 + '"')
+        self.assertEqual(pairs.call_count, 1)  # một lượt cho cả chuỗi, không quét lại từ mỗi `$((`
+        self.assertTrue(guard._arith_at(")$((1))", 1))  # `)` lẻ đứng trước không làm lệch cặp
 
 
 class HeredocDelimiterTest(unittest.TestCase):
