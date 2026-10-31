@@ -5567,8 +5567,9 @@ def _xt_yaml_for(d: str) -> str:
 # `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
 GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|new|edit|merge)\b")
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
-# cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `merge -sdb x` (AUD-SEC-188)
-GH_PR_BOOL_SHORT = {"create": "dfw", "new": "dfw", "edit": "", "merge": "smrd"}
+# cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `-et x` (`--editor`), `merge -sdb x`
+# (AUD-SEC-188)
+GH_PR_BOOL_SHORT = {"create": "dfwe", "new": "dfwe", "edit": "", "merge": "smrd"}
 
 
 def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
