@@ -959,6 +959,8 @@ class ReviewMarkerReview361Test(unittest.TestCase):
         with mock.patch.object(guard, "_ShellScan", side_effect=real) as scans:
             self.assertFalse(guard._review_forge_hit(cmd, guard.tokenize(cmd), str(self.root)))
         self.assertLessEqual(scans.call_count, 6)  # chuỗi gốc + mỗi tầng một thân; không nhớ: 2 + 4 + 8 + …
+        found = guard._gh_sources(guard._BodyScan(None), guard._scan(cmd), 0)
+        self.assertEqual(sorted(found.read), ["-", "n.md", "y"])  # tập nguồn, không nhân lên theo số thay lệnh
         late = guard.ScanBudget()
         late.deadline = 0.0
         self.assertTrue(guard._review_forge_hit(cmd, guard.tokenize(cmd), str(self.root), late))

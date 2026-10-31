@@ -3172,19 +3172,25 @@ def _stage_argv(st: Stage) -> List[str]:
 class _Sources:
     """Nguồn thân gom được: `own` — file `gh` đăng chữ đọc làm thân (trần 256 KiB); `read` — file lệnh khác đọc góp vào
     thân (trần 8 MiB; tiền tố `DIR_OK` = thư mục thì bỏ); `param` — `gh` có mở rộng tham số; `posts` — thấy `gh` đăng
-    chữ (hay lệnh bọc nó). `-`/`/dev/stdin` = đọc stdin."""
+    chữ (hay lệnh bọc nó). `-`/`/dev/stdin` = đọc stdin. Tập có thứ tự (dict): gộp lại cùng nguồn qua nhiều thay lệnh
+    giống nhau không làm danh sách nở theo hàm mũ."""
 
     def __init__(self, own: Optional[List[str]] = None, read: Optional[List[str]] = None, posts: bool = False) -> None:
-        self.own, self.read = own or [], read or []
+        self.own, self.read = dict.fromkeys(own or []), dict.fromkeys(read or [])
         self.param, self.posts = False, posts
 
+    def stdin(self) -> bool:
+        return any(f in self.own or f in self.read for f in STDIN_PATHS)
+
     def merge(self, other: "_Sources") -> "_Sources":
-        self.own += other.own
-        return self.add(_Sources(read=other.read), True)._flags(other)
+        self.own.update(other.own)
+        self.read.update(other.read)
+        return self._flags(other)
 
     def add(self, other: "_Sources", stdin: bool = True) -> "_Sources":
         """Gộp `other` — mọi nguồn của nó thành `read` (`stdin=False`: bỏ `-` của nó)."""
-        self.read += [f for f in other.own + other.read if stdin or f not in STDIN_PATHS]
+        for src in (other.own, other.read):
+            self.read.update((f, None) for f in src if stdin or f not in STDIN_PATHS)
         return self._flags(other)
 
     def _flags(self, other: "_Sources") -> "_Sources":
@@ -3252,7 +3258,9 @@ def _scan_reads(ctx: _BodyScan, scan: _ShellScan, depth: int) -> _Sources:
     for k, st in enumerate(scan.stages):
         argv = ctx.argv(st)
         piped = k > 0 and scan.stages[k - 1].op in ("|", "|&")
-        out.read += [f for f in _stage_files(argv) + _stdin_redirects(argv) if not (piped and f in STDIN_PATHS)]
+        out.read.update(
+            (f, None) for f in _stage_files(argv) + _stdin_redirects(argv) if not (piped and f in STDIN_PATHS)
+        )
         for sp in st.spans:
             out.add(_span_files(ctx, sp, depth))
     return out
@@ -3295,9 +3303,9 @@ def _nested_gh(ctx: _BodyScan, st: Stage, argv: List[str], depth: int) -> Tuple[
         if not GH_POST_RE.search(sp[1]):
             continue
         sub = _span_gh(ctx, sp, depth)
-        piped = any(f in STDIN_PATHS for f in sub.own + sub.read)
+        piped = sub.stdin()
         feeds = _any_reader_files(argv) if sp[0] == ">" and piped else []
-        out.read += feeds
+        out.read.update(dict.fromkeys(feeds))
         stdin = stdin or (any(f in STDIN_PATHS for f in feeds) if sp[0] == ">" else piped)
         out.add(sub, sp[0] != ">")
     return out, stdin
@@ -3314,12 +3322,12 @@ def _body_sources(ctx: _BodyScan, st: Stage, depth: int) -> Tuple[_Sources, bool
         out.param = st.param
         for sp in st.spans:
             out.add(_span_files(ctx, sp, depth))
-        return out, any(f in STDIN_PATHS for f in out.own + out.read)
+        return out, out.stdin()
     out, stdin = _nested_gh(ctx, st, argv, depth)
     if not _gh_wrapped(argv):
         return out, stdin
     head = posixpath.basename((normalize(argv) or [""])[0])
-    out.own += _gh_files(argv) + _stdin_redirects(argv)
+    out.own.update(dict.fromkeys(_gh_files(argv) + _stdin_redirects(argv)))
     out.param, out.posts = out.param or "$" in st.text, True
     return out, stdin or head in INTERPRETERS
 
@@ -3372,9 +3380,9 @@ def _present(src: str, cwd: Optional[str]) -> bool:
 def _sources_marked(ctx: _BodyScan, found: _Sources, cwd: Optional[str]) -> bool:
     """Nguồn thân có (thể có) dấu: quá `REVIEW_BODY_FILES_MAX` nguồn (file `gh` đọc, cộng file lệnh khác đọc mà có trên
     đĩa) → coi như có; mỗi nguồn đọc một lần, kiểm hạn giờ trước mỗi file."""
-    own = list(dict.fromkeys(f for f in found.own if f not in STDIN_PATHS))
-    read = dict.fromkeys(f for f in found.read if f not in STDIN_PATHS and f.lstrip(DIR_OK) not in own)
-    names = [f for f in read if _present(f, cwd)]
+    own = [f for f in found.own if f not in STDIN_PATHS]
+    named = (f for f in found.read if f not in STDIN_PATHS and f.lstrip(DIR_OK) not in found.own and _present(f, cwd))
+    names = list(itertools.islice(named, max(REVIEW_BODY_FILES_MAX + 1 - len(own), 0)))  # dừng khi đã quá trần
     if len(own) + len(names) > REVIEW_BODY_FILES_MAX:
         return True
     checks = [(f, REVIEW_BODY_FILE_BYTES) for f in own] + [(f.lstrip(DIR_OK), REVIEW_READ_BYTES) for f in names]
