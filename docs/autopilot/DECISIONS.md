@@ -1888,3 +1888,66 @@
 - Chọn: Sửa theo 5 lát A–E trong PLAN, mỗi lát một PR, executor-deep viết + reviewer-alt rà, rồi cắt 3.30.0
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn trước (tiêu chí 1): release-check FAIL khi còn 🟠 mở; lát nhỏ giữ đường lùi (revert từng PR); test tái hiện đỏ trước khi sửa
 - Đường lùi: Revert PR của lát; PLAN đánh [~] kèm lý do
+
+### D-269 · 2026-10-31T03:47:26+00:00 · PR #361: review lượt 2 còn 5 🔴 mới (g''h, ((…), $[…], $"…", $$') + 🔴 có từ trước cùng lớp — xử lý thế nào
+
+- Phương án: (1) rethink: một lần sửa hết A–I và P-1…P-4 theo bản vá reviewer đã thử, mọi ca tái hiện của hai lượt review vào bench/test, rồi review lại · (2) Bỏ toàn bộ thay đổi guard của #361 (revert về origin/main), làm lại lát A sau với thiết kế khác · (3) Giữ thay đổi, ghi 🔴 thành nợ
+- Chọn: rethink: một lần sửa hết A–I và P-1…P-4 theo bản vá reviewer đã thử, mọi ca tái hiện của hai lượt review vào bench/test, rồi review lại
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): lượt 1 đã đóng R1–R4 và AUD-SEC-190 (base để lọt); revert mất các bản sửa đó. Phương án 3 trái ADR-0059 (🔴 không ghi nợ). Bản vá A+B+D+E đã được reviewer thử: 0 chặn oan trên ~250 ca
+- Đường lùi: Revert các commit guard của #361 về origin/main; mở lại AUD-SEC-180/181/186/190
+
+### D-270 · 2026-10-31T05:08:22+00:00 · PR #361: sau rethink D-269 review vẫn 5 🔴 mới trong bộ đọc heredoc/số học chính xác như bash + 5 🔴 có từ trước cùng lớp — đổi cách làm thế nào
+
+- Phương án: (1) Danh sách cho phép: heredoc chỉ hiểu dạng đơn giản (dấu kết [A-Za-z0-9_.-]+ trần, hoặc bọc trọn '…'/"…", hoặc một \ đầu; <<, <<-; dòng mở cân nháy/ngoặc; << không nằm trong $((, $[, ${, ((, <((, >((); mọi dạng khác → ScanTooComplex (chặn); che thân heredoc có nháy trước _ShellScan (🟠6) · (2) Tiếp tục vá chính xác từng trường hợp bash (đã 3 lượt không hội tụ) · (3) Revert toàn bộ thay đổi guard của #361 về main
+- Chọn: Danh sách cho phép: heredoc chỉ hiểu dạng đơn giản (dấu kết [A-Za-z0-9_.-]+ trần, hoặc bọc trọn '…'/"…", hoặc một \ đầu; <<, <<-; dòng mở cân nháy/ngoặc; << không nằm trong $((, $[, ${, ((, <((, >((); mọi dạng khác → ScanTooComplex (chặn); che thân heredoc có nháy trước _ShellScan (🟠6)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): chặn khi không chắc thay cho mô phỏng bash; đóng cả 🔴 mới lẫn có từ trước cùng lớp bằng một luật; dạng agent thực dùng (cat <<'EOF', <<EOF, <<-EOF, git commit -F - <<EOF) vẫn chạy — bench đối chứng giữ; đơn giản, test được (tiêu chí 3). Revert mất bản sửa R1–R4/AUD-SEC-190
+- Đường lùi: Revert commit của lượt này về 9ee24d2; chặn oan lộ ra → thêm dạng vào danh sách cho phép kèm test
+
+### D-271 · 2026-10-31T07:07:12+00:00 · PR #361: review sau D-270 còn 2 🔴 (luật bash 5.2 'dấu kết + )' trong $(…) kết heredoc; case đóng khung $( làm taint không chặn)
+
+- Phương án: (1) Một lần sửa nữa đúng hai chỗ reviewer chỉ: op trong $( có dòng thân bắt đầu bằng dấu kết rồi ')' → ScanTooComplex; taint + có '<<' (không phải '<<<') → ScanTooComplex; ghi sổ 2 🔴 + 1 🟠 có từ trước · (2) Revert guard #361 về main
+- Chọn: Một lần sửa nữa đúng hai chỗ reviewer chỉ: op trong $( có dòng thân bắt đầu bằng dấu kết rồi ')' → ScanTooComplex; taint + có '<<' (không phải '<<<') → ScanTooComplex; ghi sổ 2 🔴 + 1 🟠 có từ trước
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: lượt D-270 đóng 15 lỗ, còn 2 chỗ hẹp đã chỉ rõ cách sửa fail-closed; revert mở lại các lỗ đã đóng
+- Đường lùi: Revert commit lượt này về 6fe090e
+
+### D-272 · 2026-10-31T08:09:36+00:00 · PR #361: review sau D-271 còn 1 🔴 (\ nối dòng né luật EOF) trong $(…)) + alias: Claude Code bật sẵn expand_aliases
+
+- Phương án: (1) Một lần sửa: áp bản nguyên mẫu reviewer (kiểm << trên chuỗi đã nối dòng, từ gợi ý dấu kết từ cả hai chuỗi, _joined_terminator bắt dòng sau \ lẻ bắt đầu bằng dấu kết rồi ')'); chặn mọi định nghĩa 'alias NAME=' (mọi dạng né: ${}, \ nối, printf) · (2) Ghi 🔴 thành nợ
+- Chọn: Một lần sửa: áp bản nguyên mẫu reviewer (kiểm << trên chuỗi đã nối dòng, từ gợi ý dấu kết từ cả hai chuỗi, _joined_terminator bắt dòng sau \ lẻ bắt đầu bằng dấu kết rồi ')'); chặn mọi định nghĩa 'alias NAME=' (mọi dạng né: ${}, \ nối, printf)
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); bản vá đã được reviewer thử 0 hồi quy/489 ca; alias: snapshot shell của Claude Code đã bật expand_aliases nên luật hiện tại vô tác dụng — chặn định nghĩa alias là fail-closed, agent hiếm khi cần alias
+- Đường lùi: Revert commit lượt này về 51b54a3
+
+### D-273 · 2026-10-31T09:25:02+00:00 · PR #361: review sau D-272 còn 2 🔴 trong mã alias mới (fnmatch bậc hai; BASH_ALIAS$''ES né luật) + 2 🔴 có từ trước ($"rm", trap)
+
+- Phương án: (1) Áp đúng hai bản vá reviewer đã thử + test; ghi sổ 2 🔴 có từ trước để sửa ở lát B · (2) Gỡ luật alias khỏi PR này
+- Chọn: Áp đúng hai bản vá reviewer đã thử + test; ghi sổ 2 🔴 có từ trước để sửa ở lát B
+- Lý do (tiêu chí chất lượng cuối): Bản vá hai dòng đã thử: 549 ca không đổi, V9 chặn sau 1,6 s; gỡ luật alias mở lại AUD-SEC-220/224
+- Đường lùi: Revert commit lượt này về 5948c3f
+
+### D-274 · 2026-10-31T09:55:22+00:00 · PR #361: luật alias/BASH_ALIASES bị né lặp lại qua nháy/ANSI-C/comment (3 🔴 sau D-273) — đổi cách
+
+- Phương án: (1) Chuẩn hoá thô không phụ thuộc nháy: bỏ mở rộng $name/${…}, rồi chỉ giữ chữ-số; 'bashaliases' xuất hiện → chặn; token mà phần chữ của nó là 'alias' và lệnh có đối số chứa '=' → chặn (liệt kê không '=' cho chạy) · (2) Áp bản vá reviewer (_alias_norms ba cách đọc) · (3) Gỡ luật alias khỏi PR, ghi sổ
+- Chọn: Chuẩn hoá thô không phụ thuộc nháy: bỏ mở rộng $name/${…}, rồi chỉ giữ chữ-số; 'bashaliases' xuất hiện → chặn; token mà phần chữ của nó là 'alias' và lệnh có đối số chứa '=' → chặn (liệt kê không '=' cho chạy)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: không phụ thuộc trạng thái nháy nên các lớp né (nháy lẻ, $'' trong comment, ANSI-C, toán tử có nháy) cùng đóng; đơn giản, test được; chặn oan chỉ ở chuỗi nhắc BASH_ALIASES/alias kèm '=' (đã chấp nhận ở D-272)
+- Đường lùi: Revert commit lượt này về e4db80e
+
+### D-275 · 2026-10-31T10:31:44+00:00 · PR #361: review sau D-274 — 0 hồi quy so với main; 3 🔴 né luật đã ghi 'đã sửa' (tilde/extglob alias; \u sau nháy lẻ; comment sau backtick) + 🔴 có từ trước nháy trong comment lệch ANSI-C
+
+- Phương án: (1) Áp bản vá 4 chỗ reviewer đã thử (danh sách cho phép đối số alias, giải mọi escape ANSI-C, backtick mở comment) + luật hẹp: comment có nháy mà dòng sau có $' → chặn; bỏ nhánh $" (chặn oan, không thêm an toàn) · (2) Ghi 🔴 thành nợ
+- Chọn: Áp bản vá 4 chỗ reviewer đã thử (danh sách cho phép đối số alias, giải mọi escape ANSI-C, backtick mở comment) + luật hẹp: comment có nháy mà dòng sau có $' → chặn; bỏ nhánh $" (chặn oan, không thêm an toàn)
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ; bản vá đã thử: 917 ca chỉ chặn thêm đúng ca né; luật hẹp đóng thêm 🔴 có từ trước cùng gốc mà không chặn oan comment thường
+- Đường lùi: Revert commit lượt này về ecebc98
+
+### D-276 · 2026-10-31T11:08:48+00:00 · PR #361: lượt 9 vẫn 4 🔴 né các lớp 'comment/ANSI-C lệch', 'ghép tên BASH_ALIASES', 'tách thô khi shlex lỗi' + 🟠 chặn oan ~5% commit — dừng vòng vá vô hạn thế nào
+
+- Phương án: (1) Áp một lần cách sửa tổng hợp reviewer đã thử (expand_ansi_c bỏ qua comment theo luật đầu-từ, bỏ luật đếm nháy; `# xét trên dòng đã nối và gấp heredoc; _letter_forms 8 dạng; tách thô bỏ nháy) rồi ghi sổ trung thực các lớp này là 'đã giảm, còn mở' (không 'đã sửa'); lượt review cuối chỉ chặn khi hồi quy so với main hoặc chặn oan · (2) Tiếp tục vá theo từng lượt review · (3) Revert toàn bộ guard #361
+- Chọn: Áp một lần cách sửa tổng hợp reviewer đã thử (expand_ansi_c bỏ qua comment theo luật đầu-từ, bỏ luật đếm nháy; `# xét trên dòng đã nối và gấp heredoc; _letter_forms 8 dạng; tách thô bỏ nháy) rồi ghi sổ trung thực các lớp này là 'đã giảm, còn mở' (không 'đã sửa'); lượt review cuối chỉ chặn khi hồi quy so với main hoặc chặn oan
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: PR mạnh hơn main (0 hồi quy/1673 ca), guard regex không thể đóng tuyệt đối các lớp này (guard không phải sandbox — LOOP-HARNESS-022); ghi 'còn mở' là trung thực, giữ đường đến sửa tiếp; chặn oan 5% commit là hồi quy trải nghiệm phải bỏ; vòng vá vô hạn trái tiêu chí bền/đơn giản
+- Đường lùi: Revert commit lượt này về 69947b5; sổ đổi lại
+
+### D-277 · 2026-10-31T11:42:22+00:00 · PR #361: review cuối D-276 tìm 1 hồi quy (# sau ký tự đã thoát bị expand_ansi_c coi là comment)
+
+- Phương án: (1) Áp bản sửa cờ đầu-từ reviewer đã thử (0 hồi quy/1314 ca, replay 400 commit giống hệt) · (2) Revert D-276
+- Chọn: Áp bản sửa cờ đầu-từ reviewer đã thử (0 hồi quy/1314 ca, replay 400 commit giống hệt)
+- Lý do (tiêu chí chất lượng cuối): Hồi quy so với main phải sửa; bản sửa 5 dòng khớp strip_comments, đã thử
+- Đường lùi: Revert commit lượt này về e2988da

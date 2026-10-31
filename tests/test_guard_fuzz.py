@@ -134,7 +134,7 @@ WRAPS: Dict[str, Wrap] = {
 HARMLESS = ("env", "command", "nice", "timeout", "seq", "and")
 
 # Biến thể đỏ đã biết: id biến thể → lý do (ID sổ audit). Phải khớp tests/fixtures/autonomy/pending/guard.json.
-KNOWN_RED: Dict[str, str] = {}
+KNOWN_RED: Dict[str, str] = {}  # biến thể AUD-SEC-202 cũ nay bị chặn bởi luật D-275 (`` `# ``/nháy lẻ trước `$'`)
 
 # Loại trừ có lý do (không phải lỗ của guard): ca gốc chặn vì ĐÍCH TƯƠNG ĐỐI theo thư mục dự án (`.autopilot/…`,
 # `tests/…`, `.claude/hooks` viết không `/` đầu, `~+` = `$PWD`). Sau `cd /tmp &&` lệnh ghi vào `/tmp/…`, không chạm dự
@@ -154,6 +154,17 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-advrev-rm-fence-dir": ".claude tương đối → /tmp/.claude",
     "guard-advrev-chmod-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
     "guard-advrev-truncate-dirglob-guard": ".claude/*/guard.py tương đối → /tmp/.claude",
+    "guard-rev361b-dd-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-dddd-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-arith-semi-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-trail-sp-ap": ".autopilot/state.json tương đối",
+    "guard-rev361b-dd-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-dddd-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-arith-semi-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-trail-sp-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-rev361b-oldarith-ap": ".autopilot/state.json tương đối",
+    "guard-rev361c-dq-body-ap": ".autopilot/state.json tương đối",
+    "guard-rev361c-dq-body-stage": "docs/autopilot/STAGE.json tương đối",
 }
 
 

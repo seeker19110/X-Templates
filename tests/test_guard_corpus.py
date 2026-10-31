@@ -437,6 +437,7 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
                 'echo "x\n<<E\ny"' + body,  # nháy kép mở từ dòng trước
                 "echo `echo <<E`" + body,  # backtick đóng cùng dòng: thân rỗng
                 'echo "$(cat <<E)"' + body,  # `$(` đóng cùng dòng
+                "echo `cat <<E\nx git reset --hard\nE\n`",  # backtick còn mở: ngoài danh sách cho phép (D-270)
             ),
         )
         self.assert_all(
@@ -445,7 +446,6 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
                 "git commit -q -m \"$(cat <<'EOF'\nrevert: git reset --hard\nEOF\n)\"",
                 'echo "$(cat <<E\nx git reset --hard\nE\n)"',
                 'echo "$(\ncat <<E\nx git reset --hard\nE\n)"',  # `$(` ở dòng trước
-                "echo `cat <<E\nx git reset --hard\nE\n`",  # backtick còn mở: thân thật
             ),
         )
 

@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -50,6 +50,17 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `flock` → exit 2, không gọi mutator/ghi state; Stop/PreCompact vẫn cho dừng/compaction và ghi log lỗi khóa.
   Dự án chưa cài harness giữ tương thích. Cài mới có thể chọn chính sách merge/review `--preset safe`
   (ADR-0055); preset không tạo sandbox hoặc thay cấu hình dự án đã có.
+- **Guard chỉ hiểu dạng heredoc đơn giản; dạng khác bị chặn (BUDGET)** (D-270): dấu kết `[A-Za-z0-9_.-]+` trần, bọc trọn
+  nháy hay một `\` đầu, ở cấp ngoài/`(…)`/`$(…)`/`"$(…)"`, dòng mở cân nháy/ngoặc — `<<` khác mà bộ đọc nhận ra là có
+  thể là heredoc (dấu kết có `$`/backtick/nháy pha, `\<<`, trong backtick/`${…}`/`<(…)`/số học không đơn giản, lệnh có
+  `case`…) không được đoán. Dòng kết so nguyên văn, trừ heredoc trong `$(…)`/`<(…)`: dòng thân bắt đầu bằng dấu kết rồi
+  có `)` (bash 5.2 kết heredoc ở đó) → chặn (D-271), kể cả khi `\` nối dòng tách `$(`/`<<` (D-272). Còn hở: `#` ngay
+  sau `)` bị coi là comment (AUD-SEC-195).
+- **Guard chặn `\` cuối dòng sau `#` và mọi định nghĩa alias** (D-271, D-272): bash không nối dòng trong comment, đọc
+  nháy để phân định `#` cũng lệch — dòng có `#` đầu từ (bất kể nháy) kết bằng `\` lẻ bị chặn (đưa `#NN` sang dòng không
+  kết bằng `\`). Snapshot shell của Claude Code đã bật `expand_aliases`, nên định nghĩa alias (tên lệnh có thể thành
+  `alias` sau bỏ nháy/nối dòng/`${…}`/glob, đối số không phải tên trơn) và `BASH_ALIASES` bị chặn bất kể cách bật;
+  liệt kê (`alias`, `alias -p`) vẫn chạy. Tên lệnh hoàn toàn động (`$x`, `$(…)`) là giới hạn chung của phân tích tĩnh.
 - **Guard không xét gửi bí mật ra mạng bằng thư viện của trình thông dịch** (AUD-SEC-086): luật "gửi file bí mật/biến môi
   trường ra mạng" chỉ nhận CLI (`curl`/`wget`, `scp`/`rsync`, `nc`/`socat`/`ssh`, `gh gist|release upload`) và `/dev/tcp`.
   `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` gửi bí mật đi thì không bị xét

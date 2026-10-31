@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import bisect
 import contextlib
 import fnmatch
+import functools
 import itertools
 import json
 import os
@@ -38,7 +40,7 @@ import sys
 import tempfile
 import time
 import unicodedata
-from typing import Any, Callable, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, NamedTuple, Optional, Set, Tuple, cast
 
 WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "nice", "stdbuf", "xargs", "timeout", "setsid"}
 # Tuỳ chọn của wrapper ăn thêm một token giá trị (`nice -n 5`) — không bóc thì giá trị bị hiểu là tên lệnh (AUD-SEC-011).
@@ -365,105 +367,468 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
 # --------------------------------------------------------------------------- tách lệnh
 
 
-# `<<<` là here-string (không có thân, không có dấu kết) — chỉ `<<`/`<<-` đứng riêng mới là heredoc.
-HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-# Ký tự kết thúc một từ trong bash: `#` đứng ngay sau chúng (hoặc đầu chuỗi) mới mở comment.
-WORD_END = set(" \t\r\n;&|()<>")
+class ScanTooComplex(Exception):
+    """Guard không phân định được bash đọc lệnh thế nào → `bash_decision` chặn (fail-closed, mã BUDGET), không đoán.
+    Heredoc theo danh sách cho phép (D-270): `<<` mà bash có thể đọc là heredoc nhưng ngoài dạng guard hiểu → lỗi này."""
 
 
-def _quote_states(line: str, q: str) -> Tuple[List[str], str]:
-    """Trạng thái từng ký tự của dòng: "" ngoài nháy, `'`/`"`/`` ` `` trong nháy/backtick, `#` trong comment; `q` = trạng
-    thái mang từ dòng trước, trả trạng thái cuối dòng (comment hết ở cuối dòng)."""
-    out: List[str] = []
-    i = 0
-    while i < len(line):
-        c = line[i]
-        if not q and c == "#" and (i == 0 or line[i - 1] in WORD_END):  # comment: `# don't` không mở nháy
-            out += ["#"] * (len(line) - i)
-            break
-        out.append(q)
-        if q == "'":
-            q = "" if c == "'" else q
-        elif c == "\\":
-            out.append(q)
-            i += 2
+# Heredoc guard hiểu (D-270): `<<`/`<<-`, khoảng trắng, dấu kết `[A-Za-z0-9_.-]+` trần, bọc trọn `'…'`/`"…"` hay một
+# `\` đầu, rồi hết từ (ký tự meta hay cuối dòng). Dạng khác (`$`, backtick, nháy pha, `\` giữa từ, Unicode…) → chặn.
+HERE_WORD = r"[A-Za-z0-9_.-]+"
+HEREDOC_RE = re.compile(
+    rf"<<-?[ \t]*(?:({HERE_WORD})|'({HERE_WORD})'|\"({HERE_WORD})\"|\\({HERE_WORD}))(?=[ \t;&|()<>]|$)"
+)
+HERE_WORD_HINT_RE = re.compile(r"<<-?[ \t'\"\\]*([A-Za-z0-9_.-]+)")  # từ có thể là dấu kết, kể cả trong chuỗi lồng
+HERE_WORD_RUN_RE = re.compile(r"[A-Za-z0-9_.-]+")  # dãy ký tự có thể của dấu kết ở đầu dòng (`_paren_terminator`)
+CODE_PLAIN_RE = re.compile(r"[^\\'\"`$()<>#]+")
+CASE_WORD_RE = re.compile(r"(?:^|[\s;&|])case(?=\s|$)")
+ARRAY_BAD_RE = re.compile(r"[;|&<>]|(?<!\$)\(")  # trần trong gán mảng `x=(…)`: bash báo lỗi rồi bỏ cả dòng
+DQ_PLAIN_RE = re.compile(r'[^"\\$`]+')
+ANSI_PLAIN_RE = re.compile(r"[^'\\]+")
+TICK_PLAIN_RE = re.compile(r"[^`\\'\"$<]+")
+BRACE_PLAIN_RE = re.compile(r"[^}{\\'\"`$<]+")
+ARITH_PLAIN_RE = {"A(": re.compile(r"[^'\"\\`$()<{}]+"), "A[": re.compile(r"[^'\"\\`$\[\]<{}]+")}
+ARITH_PAIR = {"A(": ("(", ")"), "A[": ("[", "]")}
+SIMPLE_VAR_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9#@?*!$-])")
+HERE_OP_RE = re.compile(r"(?<!<)<<(?!<)")  # `<<`/`<<-` có thể là heredoc (không phải `<<<`)
+SUBST_KINDS = ("$(", "<(")  # thay lệnh/thay tiến trình: bash đọc heredoc trong đó theo luật tương thích cũ (D-271)
+Frame = Tuple[str, int]  # (loại: `(` `$(` `<(` `"` `'` `$'` backtick `${` `A(` `A[`, số ngoặc còn mở của `A…`)
+HereSpan = Tuple[int, "re.Match[str]", int, int, bool]  # (dòng mở, match, đầu thân, cuối thân, nằm trong `"$(`)
+
+
+def _heredoc_word(m: "re.Match[str]") -> Tuple[str, bool]:
+    """(dấu kết, có nháy/`\\`) của heredoc khớp `HEREDOC_RE` — có nháy: thân là chữ (không thay `$(…)`/backtick)."""
+    return m.group(cast(int, m.lastindex)), m.lastindex != 1
+
+
+def _arith_end(line: str, k: int, kind: str) -> int:
+    """Cuối vùng số học bắt đầu ở `line[k]` (sau `((`/`$((`/`$[`) khi nó đơn giản và đóng trên dòng: chỉ chữ/toán tử/
+    `$tên`, ngoặc cân, `((…))` đóng bằng `))` liền (như bash) — `<<` trong đó là dịch bit. Không đơn giản → 0."""
+    opener, closer = ARITH_PAIR[kind]
+    depth = 0
+    while k < len(line):
+        var = SIMPLE_VAR_RE.match(line, k)
+        run = ARITH_PLAIN_RE[kind].match(line, k) or var
+        c = line[k]
+        if run or c == "<":
+            k = run.end() if run else k + 1
             continue
-        elif q:
-            q = "" if c == q else q
-        elif c in "'\"`":
-            q = c
-        i += 1
-    return out, q
+        if c == opener:
+            depth += 1
+        elif c != closer:
+            return 0
+        elif depth:
+            depth -= 1
+        else:
+            return k + 1 if kind == "A[" else (k + 2 if line.startswith("))", k) else 0)
+        k += 1
+    return 0
 
 
-def _unquoted_positions(line: str, q: str) -> Tuple[List[bool], str]:
-    """Với từng ký tự của dòng: có nằm NGOÀI nháy/backtick/comment không. `<<` trong `sh -c "…"`/backtick thuộc script
-    lồng, không phải heredoc của lệnh ngoài."""
-    states, q = _quote_states(line, q)
-    return [not st for st in states], q
+class _HereScan:
+    """Đọc heredoc theo danh sách cho phép (D-270), một lượt trên mọi dòng: ngăn xếp ngữ cảnh (nháy, `$(`, `(`,
+    backtick, `${`, số học) mang qua dòng; thân heredoc bỏ qua theo dòng kết. `<<` trong nháy đơn/kép, comment hay số
+    học đơn giản là chữ/dịch bit; `<<` ở chỗ khác ngoài dạng cho phép → `ScanTooComplex`. Gặp chỗ không đọc chắc
+    (`case`, gán mảng lỗi cú pháp, nháy/`\\`/thay lệnh trong backtick, `${…}`, số học không đơn giản) → `taint`: lệnh có
+    heredoc thì chặn."""
+
+    def __init__(self, lines: List[str]) -> None:
+        self.lines = lines
+        self.stack: List[Frame] = []
+        # `struct[i]`: ngăn xếp tới khung i là ngữ cảnh guard hiểu cho heredoc — cấp ngoài, subshell `(`, thay lệnh `$(`,
+        # nháy kép chỉ khi ngay trong nó là `$(` (`-m "$(cat <<'EOF'`); giữ theo push/pop để mỗi lần hỏi O(1)
+        self.struct: List[bool] = []
+        self.dq = 0  # số khung nháy kép đang mở
+        self.subst = 0  # số khung `$(`/`<(` đang mở
+        self.taint = False
+        self.ops: List[Tuple["re.Match[str]", int]] = []
+        self.low = 0  # độ sâu ngăn xếp thấp nhất từ heredoc đầu tiên của dòng
+        self.esc = -1  # vị trí ngay sau ký tự thoát `\x` gần nhất
+        self.handlers: Dict[str, Callable[[str, int], int]] = {
+            "": self._code,
+            "(": self._code,
+            "$(": self._code,
+            "<(": self._code,
+            "=(": self._array,
+            '"': self._dq,
+            "'": self._sq,
+            "$'": self._ansi,
+            "`": self._tick,
+            "${": self._brace,
+            "A(": self._arith,
+            "A[": self._arith,
+        }
+
+    def spans(self) -> List[HereSpan]:
+        out: List[HereSpan] = []
+        i, ends = 0, _HereEnds(self.lines)
+        while i < len(self.lines):
+            line, opener, i = self.lines[i], i, i + 1
+            start_ok, self.ops, self.esc = self._structural(), [], -1
+            j = 0
+            while j < len(line):
+                j = self.handlers[self.stack[-1][0] if self.stack else ""](line, j)
+            self._check_opener(line, start_ok)
+            in_dq = self.dq > 0
+            for m, _ in self.ops:
+                end = ends.find(m, i)
+                end = len(self.lines) if end is None else end
+                if self.subst:
+                    _check_subst_body(self.lines, m, i, end)
+                out.append((opener, m, i, end, in_dq))
+                i = end + 1
+        # `case` trong `$(…)`: mẫu `a)` đóng khung `$(` nên `<<` sau đó bị đọc như chữ — có `<<` ở đâu cũng chặn (D-271)
+        if self.taint and any(HERE_OP_RE.search(line) for line in self.lines):
+            raise ScanTooComplex("heredoc cùng chỗ guard không đọc chắc (`case`, gán mảng, backtick, `${…}`, số học)")
+        return out
+
+    def _check_opener(self, line: str, start_ok: bool) -> None:
+        """Dòng mở heredoc phải trọn: đầu dòng, chỗ `<<` và cuối dòng cùng ngữ cảnh cho phép, ngữ cảnh chứa `<<` không
+        đóng trên dòng (`(cat <<E)`, `<<E "` → chặn)."""
+        depth = len(self.stack)
+        if self.ops and (not start_ok or self.low < depth or any(d != depth for _, d in self.ops)):
+            raise ScanTooComplex(f"dòng mở heredoc chưa trọn: {line[:80]}")
+
+    def _structural(self) -> bool:
+        return not self.struct or self.struct[-1]
+
+    def _push(self, kind: str, j: int, depth: int = 0) -> int:
+        dq_below = bool(self.stack) and self.stack[-1][0] == '"'
+        below = self.struct[-2] if dq_below and len(self.struct) > 1 else (dq_below or self._structural())
+        self.struct.append(kind in ("(", "$(") and below and (kind == "$(" or not dq_below))
+        self.stack.append((kind, depth))
+        self.dq += kind == '"'
+        self.subst += kind in SUBST_KINDS
+        return j
+
+    def _pop(self, j: int) -> int:
+        kind = self.stack.pop()[0]
+        self.dq -= kind == '"'
+        self.subst -= kind in SUBST_KINDS
+        self.struct.pop()
+        self.low = min(self.low, len(self.stack))
+        return j
+
+    def _code(self, line: str, j: int) -> int:
+        run = CODE_PLAIN_RE.match(line, j)
+        if run:  # `case`: mẫu `a)` đóng ngoặc lẻ — ngăn xếp lệch so với bash
+            self.taint = self.taint or bool(CASE_WORD_RE.search(run.group()))
+            return run.end()
+        c = line[j]
+        if c == "\\":
+            if line.startswith("<<", j + 1):
+                raise ScanTooComplex(f"`\\<<` không phân định: {line[j : j + 80]}")
+            self.esc = j + 2
+            return j + 2
+        if c == "#":
+            word_start = j == 0 or (line[j - 1] in WORD_END and self.esc != j)
+            return len(line) if word_start else j + 1
+        if c == "<":
+            return self._lt(line, j)
+        if c == "$":
+            return self._dollar(line, j, True)
+        if c == ">":
+            return self._push("<(", j + 2) if line.startswith(">(", j) else j + 1
+        if c in "()":
+            return self._paren(line, j)
+        return self._push(c, j + 1)  # `'`, `"`, backtick
+
+    def _lt(self, line: str, j: int) -> int:
+        if line.startswith("<<<", j):
+            return j + 3
+        if line.startswith("<<", j):
+            m = HEREDOC_RE.match(line, j)
+            if not m or not self._structural():
+                raise ScanTooComplex(f"heredoc ngoài danh sách cho phép: {line[j : j + 80]}")
+            if not self.ops:
+                self.low = len(self.stack)
+            self.ops.append((m, len(self.stack)))
+            return m.end()
+        return self._push("<(", j + 2) if line.startswith("<(", j) else j + 1
+
+    def _paren(self, line: str, j: int) -> int:
+        if line[j] == ")":  # `)` lẻ ở cấp ngoài: lỗi cú pháp, bash dừng ở đó (mẫu `case` đã `taint` ở `_code`)
+            return self._pop(j + 1) if self.stack else j + 1
+        if j and line[j - 1] == "=":
+            return self._push("=(", j + 1)
+        if line.startswith("((", j):
+            return self._arith_open(line, j, 2, "A(")
+        return self._push("(", j + 1)
+
+    def _array(self, line: str, j: int) -> int:
+        """Gán mảng `x=(…)`, `declare -a x=(…)`: đọc như mã; `(`, `;`, `|`, `&`, `<`, `>` trần trong đó là lỗi cú pháp
+        mà bash -c báo rồi bỏ phần còn lại của dòng — kể cả `<<` sau đó, thân heredoc thành lệnh (`x=((1)) <<X` ↵
+        `rm -rf ~` ↵ `X`) → `taint`."""
+        end = self._code(line, j)
+        self.taint = self.taint or bool(ARRAY_BAD_RE.search(line, j, end))
+        return end
+
+    def _arith_open(self, line: str, j: int, n: int, kind: str) -> int:
+        end = _arith_end(line, j + n, kind)
+        return end or self._push(kind, j + n, 1 if kind == "A[" else 2)
+
+    def _dollar(self, line: str, j: int, code: bool) -> int:
+        if line.startswith("$((", j):
+            return self._arith_open(line, j, 3, "A(")
+        two = line[j : j + 2]
+        if two == "$[":
+            return self._arith_open(line, j, 2, "A[")
+        if two in ("$(", "${") or (code and two == "$'"):
+            return self._push(two, j + 2)
+        if code and two == '$"':
+            return self._push('"', j + 2)
+        return j + (2 if two == "$$" else 1)
+
+    def _dq(self, line: str, j: int) -> int:
+        run = DQ_PLAIN_RE.match(line, j)
+        if run:
+            return run.end()
+        c = line[j]
+        if c == '"':
+            return self._pop(j + 1)
+        if c == "\\":
+            return j + 2
+        if c == "`":
+            return self._push("`", j + 1)
+        return self._dollar(line, j, False)
+
+    def _sq(self, line: str, j: int) -> int:
+        k = line.find("'", j)
+        return len(line) if k < 0 else self._pop(k + 1)
+
+    def _ansi(self, line: str, j: int) -> int:
+        run = ANSI_PLAIN_RE.match(line, j)
+        if run:
+            return run.end()
+        return j + 2 if line[j] == "\\" else self._pop(j + 1)
+
+    def _opaque(self, line: str, j: int, closer: str) -> int:
+        """Trong backtick/`${…}`/số học không đơn giản: `closer` đóng; `<<` → chặn; `$tên` được; nháy, `\\`, thay lệnh
+        lồng → `taint`."""
+        c = line[j]
+        if c == closer:
+            return self._pop(j + 1)
+        if line.startswith("<<", j):
+            raise ScanTooComplex(f"`<<` trong backtick/`${{…}}`/số học không đơn giản: {line[j : j + 80]}")
+        var = SIMPLE_VAR_RE.match(line, j)
+        if var:
+            return var.end()
+        self.taint = self.taint or c != "<"
+        return j + (2 if c == "\\" else 1)
+
+    def _tick(self, line: str, j: int) -> int:
+        run = TICK_PLAIN_RE.match(line, j)
+        return run.end() if run else self._opaque(line, j, "`")
+
+    def _brace(self, line: str, j: int) -> int:
+        run = BRACE_PLAIN_RE.match(line, j)
+        return run.end() if run else self._opaque(line, j, "}")
+
+    def _arith(self, line: str, j: int) -> int:
+        """Số học không đơn giản/nhiều dòng: đếm ngoặc tới khi đóng; `<<` trong đó → chặn."""
+        kind, depth = self.stack[-1]
+        run = ARITH_PLAIN_RE[kind].match(line, j)
+        if run:
+            return run.end()
+        opener, closer = ARITH_PAIR[kind]
+        c = line[j]
+        if c in (opener, closer):
+            depth += 1 if c == opener else -1
+            self.stack[-1] = (kind, depth)
+            return j + 1 if depth else self._pop(j + 1)
+        return self._opaque(line, j, opener)  # `opener` đã xét ở trên: chỉ còn `<<`, `$tên`, ký tự làm `taint`
 
 
-SUBST_OPEN_RE = re.compile(r"\$\((?!\()")
+def _check_subst_body(lines: List[str], m: "re.Match[str]", start: int, end: int) -> None:
+    """Heredoc trong `$(…)`/`<(…)`: bash 5.2 (tương thích cũ) kết thân ở dòng BẮT ĐẦU bằng dấu kết mà sau đó có `)` —
+    phần còn lại của dòng là lệnh (`-m "$(cat <<'EOF'` ↵ `EOF)"; rm -rf ~` ↵ `EOF` ↵ `)"`). Guard không mô phỏng →
+    chặn (D-271). Dòng chỉ bắt đầu bằng dấu kết mà không có `)` (`EOF handling`) vẫn là thân."""
+    word, tabs = _heredoc_word(m)[0], m.group().startswith("<<-")
+    for line in lines[start:end]:
+        body = line.lstrip("\t") if tabs else line
+        if body.startswith(word) and ")" in body[len(word) :]:
+            raise ScanTooComplex(f"dòng thân heredoc trong `$(…)` bắt đầu bằng dấu kết rồi `)`: {line[:80]}")
 
 
-def _subst_depth(text: str, depth: int) -> int:
-    """Độ sâu `$(…)` sau khi đọc `text` (xuất phát từ `depth`); `$((…))` là số học, không tính."""
-    return depth + len(SUBST_OPEN_RE.findall(text)) - text.count(")")
+def _here_scan(cmd: str) -> Tuple[HereSpan, ...]:
+    """Heredoc của chuỗi lệnh (`_HereScan`); một quyết định đọc cùng chuỗi nhiều lần (tách token, nguồn thân, lệnh lồng)
+    → nhớ vài chuỗi gần nhất."""
+    return _here_scan_cached(cmd) if "<<" in cmd else ()
 
 
-def _dq_run_start(states: List[str], pos: int) -> int:
-    start = pos
-    while start > 0 and states[start - 1] == '"':
-        start -= 1
-    return start
+@functools.lru_cache(maxsize=16)
+def _here_scan_cached(cmd: str) -> Tuple[HereSpan, ...]:
+    return tuple(_HereScan(cmd.split("\n")).spans())
 
 
-def _opens_body(line: str, states: List[str], m: "re.Match[str]", carried: int) -> bool:
-    """`<<TAG` nằm TRONG nháy kép/backtick: có thật sự mở heredoc (thân ở các dòng sau) không? Trong `"…"` chỉ khi nó
-    nằm trong `$(…)` còn mở sau cả dòng (`-m "$(cat <<'EOF'`); trong backtick chỉ khi backtick chưa đóng cùng dòng
-    (bash phân tích riêng thân backtick: `` echo `cat <<E` `` đóng ngay thì thân rỗng, dòng sau là lệnh thật). `echo
-    "<<E"` chỉ là chữ."""
-    if states[m.start()] == "`":
-        return "`" not in line[m.end() :]
-    start = _dq_run_start(states, m.start())
-    depth = _subst_depth(line[start : m.start()], carried if start == 0 else 0)
-    return depth > 0 and _subst_depth(line[m.end() :], depth) > 0
+def _joined_terminator(cmd: str) -> bool:
+    """Có chuỗi dòng nối bằng `\\` lẻ mà dòng thô cuối chuỗi, hay cả chuỗi đã nối, trông như dấu kết heredoc của
+    lệnh không: bash không nối dòng trong thân heredoc có nháy (`foo\\` ↵ `X`: `X` là dòng kết; `X\\` ↵ ``: không) mà
+    guard đọc trên chữ đã nối — hai cách đọc lệch nhau đúng ở dòng kết. Từ gợi ý lấy từ cả chuỗi thô lẫn chuỗi đã nối
+    (`<\\` ↵ `<'EOF'`, `$\\` ↵ `(cat <<'EOF'`: chỉ chuỗi đã nối có `<<EOF`); dòng thô ngay sau `\\` lẻ bắt đầu bằng dấu
+    kết rồi `)` (`foo\\` ↵ `EOF)"; rm -rf ~` — luật `EOF)` của `$(…)` mà guard không thấy vì đã nối) cũng tính (D-272)."""
+    words = set(HERE_WORD_HINT_RE.findall(cmd)) | set(HERE_WORD_HINT_RE.findall(join_continuations(cmd)))
+    lens = {len(w) for w in words}
+    chain: List[str] = []
+    for line in cmd.split("\n"):
+        if chain and _paren_terminator(line.lstrip("\t"), words, lens):
+            return True
+        chain.append(line)
+        if (len(line) - len(line.rstrip("\\"))) % 2:
+            continue  # dòng giữa chuỗi kết bằng `\\` lẻ: không thể bằng dấu kết (chỉ `[A-Za-z0-9_.-]`)
+        if len(chain) > 1 and any(c.lstrip("\t") in words for c in (line, join_continuations("\n".join(chain)))):
+            return True
+        chain = []
+    return False
+
+
+def _paren_terminator(line: str, words: Set[str], lens: Set[int]) -> bool:
+    """`line` bắt đầu bằng một từ trong `words` (tiền tố của dãy `[A-Za-z0-9_.-]` đầu dòng) rồi sau đó có `)`. Chỉ xét
+    độ dài có trong `lens` (không cắt chuỗi mọi độ dài: dòng dài không bậc hai)."""
+    run = HERE_WORD_RUN_RE.match(line)
+    if not run:
+        return False
+    end = min(run.end(), line.rfind(")"))
+    return any(k <= end and line[:k] in words for k in lens)
+
+
+def _heredoc_precheck(cmd: str, root: bool) -> None:
+    """Trước khi quét (D-270): dòng nối bằng `\\` chạm dấu kết heredoc (`_joined_terminator`) → chặn; lời gọi gốc
+    (`root`): heredoc không có dòng kết → chặn (lệnh lồng/mảnh do guard cắt: thân là phần còn lại như bash)."""
+    joined = join_continuations(cmd)
+    if "<<" not in joined:  # `<\\` ↵ `<'EOF'`: chỉ chuỗi đã nối có `<<` (D-272)
+        return
+    if _joined_terminator(cmd):
+        raise ScanTooComplex("dòng nối `\\` chạm dòng kết heredoc")
+    last = joined.count("\n")  # chỉ số dòng cuối: thân kết ở sau nó = không có dòng kết
+    if root and any(b > last for *_, b, _ in _here_scan(joined)):
+        raise ScanTooComplex("heredoc không có dòng kết")
+
+
+# `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
+COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>`])#")  # backtick mở từ (D-275)
+COMMENT_CONTINUED_WHY = (
+    "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
+    " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
+)
+# D-272: Claude Code chạy lệnh trong snapshot shell đã `shopt -s expand_aliases` → định nghĩa alias nào cũng đổi nghĩa
+# lệnh sau mà guard không thấy (AUD-SEC-220/222). Tên lệnh có thể thành `alias` sau mở rộng (`al${v}ias`, glob `al?as`)
+# cũng tính; tên hoàn toàn động (`$x`, `$(…)`) là giới hạn chung của phân tích tĩnh (biến gán trong cùng lệnh đã được
+# viết lại thành chữ). Đối số chỉ là tên trơn (`alias`, `alias -p`, `alias ll`: in) thì cho chạy.
+HEAD_EXPANSION_RE = re.compile(r"\$\{[^}]*\}?|\$\((?:[^()]|\([^()]*\))*\)?|`[^`]*`?|\$[A-Za-z_]\w*|\$.?")
+# D-274: định nghĩa alias cần `=` (hoặc mở rộng/glob tạo ra nó); liệt kê (`alias ll`, kèm chuyển hướng) không có — xét
+# trên token đã bỏ nháy nên `'>'` có nháy không che được `c=…` như phép bỏ chuyển hướng cũ (review #361 sau D-273).
+ALIAS_ARG_OK_RE = re.compile(r"[\w.:%,/<>&-]+")  # danh sách cho phép (D-275): ngoài ra = tilde/glob/mở rộng/`=`
+ALIAS_TABLE = "BASH_ALIASES"  # gán phần tử mảng này (`BASH_ALIASES[c]=…`, `printf -v`, `read`) = định nghĩa alias
+ALIAS_TABLE_LETTERS = "BASHALIASES"
+
+
+def _letter_forms(cmd: str) -> List[str]:
+    """D-274: các dạng chỉ-chữ-số của lệnh (đã nối dòng) — thô, bỏ mở rộng `$x`/`${…}`/`$(…)`, và sau giải ANSI-C:
+    không phụ thuộc trạng thái nháy/comment/heredoc, nên ghép `$''`, `\\E`, `"$x"`, `$'\\x45'`, `{ES,}` sau nháy lẻ
+    hay `$'` trong comment đều không che được tên (review #361 sau D-273)."""
+    j = join_continuations(cmd)
+    bases = (j, expand_ansi_c(j), ANSI_ESCAPE_RE.sub(_ansi_c_char, j), re.sub(r"\\(.)", r"\1", j))
+    return [re.sub(r"[^A-Za-z0-9]", "", y) for x in bases for y in (x, HEAD_EXPANSION_RE.sub("", x))]  # 8 dạng (D-276)
+
+
+def _shell_precheck(cmd: str) -> None:
+    """Trước khi quét (D-271), chỗ guard không đọc như bash → chặn:
+    - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
+      `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
+      lẻ trong thân heredoc) — không đoán;
+    - `BASH_ALIASES` ở đâu cũng vậy, so trên dạng chỉ-chữ-số (`_letter_forms`, D-274): thân alias thành lệnh mà guard
+      không thấy. Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272/D-274)."""
+    if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
+        raise ScanTooComplex(COMMENT_CONTINUED_WHY)
+    if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
+        raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
+    if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
+        raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
+
+
+def _may_be_alias(head: str) -> bool:
+    """Tên lệnh `head` (đã bỏ nháy, chưa bỏ thư mục) có chữ cho thấy có thể thành `alias` sau mở rộng của bash không
+    (`al${v}ias`, `al?as`). Đường dẫn → không (dựng sẵn không gọi qua đường dẫn); tên hoàn toàn động (`$x`, `$(…)`) →
+    không: giới hạn chung của phân tích tĩnh (`r${v}m -rf ~` cũng vậy), biến gán trong lệnh đã được viết lại thành chữ."""
+    pat = HEAD_EXPANSION_RE.sub("*", head)
+    if "/" in pat or not pat.strip("*"):
+        return False
+    if not any(c in pat for c in "*?["):
+        return pat == "alias"
+    return len(pat) > 64 or fnmatch.fnmatchcase("alias", pat)  # `fnmatch` bậc hai với nhiều `[` không đóng (D-273)
+
+
+def _alias_rule(argv: List[str]) -> None:
+    """Lệnh đơn định nghĩa alias (tên lệnh có thể là `alias`, đối số không phải tên trơn: `c=…`, `$d`, glob) → chặn."""
+    a = _strip_prefixes(argv)
+    if a and _may_be_alias(a[0]) and not all(ALIAS_ARG_OK_RE.fullmatch(x) for x in a[1:]):
+        raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
+
+
+def _comment_desyncs_ansi(cmd: str) -> bool:
+    """D-274…D-276: `$'` trong comment (một dòng sau đó) hoặc `` `# `` (comment trong backtick nuốt dấu đóng) → chặn.
+    Xét trên dòng đã nối `\\`↵ và đã gấp thân heredoc có nháy (dữ liệu, không phải lệnh: thân commit/PR có `` `#` ``
+    vẫn chạy). `expand_ansi_c` bỏ qua comment nên nháy trong comment không còn làm lệch `$'…'` của dòng sau."""
+    lines = _fold_heredocs(join_continuations(cmd), True).split("\n")
+    for line in lines[:-1]:
+        if "`#" in line:
+            return True
+        m = COMMENT_START_RE.search(line)
+        if m is not None and "$'" in line[m.start() :]:
+            return True
+    return False
+
+
+def _comment_continued(line: str) -> bool:
+    return bool((len(line) - len(line.rstrip("\\"))) % 2 and COMMENT_START_RE.search(line))
+
+
+def _line_index(lines: List[str], tabs: bool) -> Dict[str, List[int]]:
+    """Dòng (nguyên văn; `tabs`: bỏ tab đầu dòng như `<<-`) → các chỉ số của nó: tìm dấu kết không quét lại mọi dòng."""
+    out: Dict[str, List[int]] = {}
+    for j, line in enumerate(lines):
+        out.setdefault(line.lstrip("\t") if tabs else line, []).append(j)
+    return out
+
+
+class _HereEnds:
+    """Dòng kết heredoc: so NGUYÊN VĂN với dấu kết như bash — `EOF ` hay `EOF` + NBSP không kết (AUD-SEC-200); `<<-`
+    chỉ bỏ tab đầu dòng. Chỉ mục dựng một lần mỗi loại."""
+
+    def __init__(self, lines: List[str]) -> None:
+        self.lines = lines
+        self.index: Dict[bool, Dict[str, List[int]]] = {}
+
+    def find(self, m: "re.Match[str]", start: int) -> Optional[int]:
+        """Chỉ số dòng dấu kết đầu tiên từ `start` của heredoc `m`; không có → None (heredoc không đóng)."""
+        tabs = m.group().startswith("<<-")
+        if tabs not in self.index:
+            self.index[tabs] = _line_index(self.lines, tabs)
+        rows = self.index[tabs].get(_heredoc_word(m)[0], [])
+        k = bisect.bisect_left(rows, start)
+        return rows[k] if k < len(rows) else None
 
 
 def _heredocs(cmd: str) -> List[Tuple[str, "re.Match[str]", List[str]]]:
-    """(dòng mở, match, thân) của mọi heredoc có thể thật: bỏ `<<` trong comment/nháy đơn và trong nháy kép ngoài `$(…)`
-    (không mở heredoc); giữ trong `$(…)`/backtick (`-m "$(cat <<'EOF'`). Không thấy dấu kết → thân là phần còn lại."""
+    """(dòng mở, match, thân) của mọi heredoc (cả trong `$(…)`/`"$(…)"`: `-m "$(cat <<'EOF'`). Không thấy dấu kết → thân
+    là phần còn lại."""
     lines = cmd.split("\n")
-    return [(lines[o], m, lines[a:b]) for o, m, a, b in _heredoc_spans(lines)]
+    return [(lines[o], m, lines[a:b]) for o, m, a, b, _ in _here_scan(cmd)]
 
 
 def literal_bodies_masked(cmd: str) -> str:
     """Dòng lệnh bỏ thân heredoc có dấu kết trong nháy (`<<'EOF'`): bash không thay `` `…` ``/`$(…)` trong thân đó —
     code span trong message commit (`-m "$(cat <<'EOF'` ↵ ``chặn `rm -rf ~` `` ↵ `EOF`) là chữ, không phải lệnh."""
     lines = cmd.split("\n")
-    drop = {j for _, m, a, b in _heredoc_spans(lines) if m.group(1) for j in range(a, b)}  # giữ dòng dấu kết
+    # giữ dòng dấu kết; heredoc không đóng: phần còn lại vẫn quét như lệnh (AUD-SEC-190)
+    drop = {j for _, m, a, b, _ in _here_scan(cmd) if _heredoc_word(m)[1] and b < len(lines) for j in range(a, b)}
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
 def _heredoc_spans(lines: List[str]) -> List[Tuple[int, "re.Match[str]", int, int]]:
     """(chỉ số dòng mở, match, đầu thân, cuối thân) — xem `_heredocs`."""
-    out: List[Tuple[int, "re.Match[str]", int, int]] = []
-    q, i, carried = "", 0, 0
-    while i < len(lines):
-        line, opener, i = lines[i], i, i + 1
-        states, q = _quote_states(line, q)
-        for m in HEREDOC_RE.finditer(line):
-            if states[m.start()] in ("#", "'") or (
-                states[m.start()] in ('"', "`") and not _opens_body(line, states, m, carried)
-            ):
-                continue
-            # không thấy dấu kết: như bash, thân là phần còn lại (`bash <<E` ↵ `rm -rf ~` vẫn chạy)
-            end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), len(lines))
-            out.append((opener, m, i, end))
-            i = end + 1
-        run = _dq_run_start(states, len(states))
-        carried = _subst_depth(line[run:], carried if run == 0 else 0) if q == '"' else 0
-    return out
+    return [(o, m, a, b) for o, m, a, b, _ in _here_scan("\n".join(lines))]
 
 
 def join_continuations(cmd: str) -> str:
@@ -489,20 +854,38 @@ def join_continuations(cmd: str) -> str:
 
 
 def strip_heredocs(cmd: str) -> str:
-    """Bỏ thân heredoc (dữ liệu, không phải lệnh) — giữ dòng mở heredoc. Chỉ `<<` ngoài nháy/backtick mở heredoc của
-    lệnh ngoài; `<<` trong chuỗi lồng (`sh -c "bash <<E …"`) giữ nguyên để script lồng được quét cả thân."""
-    out: List[str] = []
-    pending: List[str] = []
-    q = ""
-    for line in cmd.split("\n"):
-        if pending:
-            if line.strip() == pending[0]:
-                pending.pop(0)
+    """Bỏ thân heredoc (dữ liệu, không phải lệnh) cùng dòng kết — giữ dòng mở. Thân heredoc trong `"$(…)"` giữ lại (quét
+    chặt như chữ của thay lệnh; bộ đọc heredoc không lấy `"`/`<<` trong thân làm nháy/heredoc — review #361 lượt 3).
+    Heredoc không đóng tới cuối lệnh: phần còn lại giữ như lệnh — đọc sai dấu kết không nuốt lệnh thật (AUD-SEC-190)."""
+    return _fold_heredocs(cmd, False)
+
+
+def _fold_heredocs(cmd: str, subst: bool, escape: bool = False) -> str:
+    """`strip_heredocs`; `subst` (cho `_ShellScan`): thay lệnh/mở rộng tham số trong thân heredoc dấu kết không nháy
+    (bash thay trước khi đưa vào lệnh) ghép vào ngay sau `<<TAG` của dòng mở (`_heredoc_feed`, review #361); thân CÓ nháy
+    trong `"$(…)"` thành dòng trống — chữ, không phải lệnh (`--body "$(cat <<'EOF'` ↵ `Fixed (partially` …; D-270).
+    `escape` (cho `tokenize`): thân trong `"$(…)"` thoát `\\`/`"` — shlex đọc thân như chữ trong nháy kép, giữ nguyên
+    nội dung (`bash -c "$(cat <<'E'` …), `"` lẻ trong thân không làm lệnh sau đó lọt vào một chuỗi."""
+    lines = cmd.split("\n")
+    keep = [True] * len(lines)
+    adds: Dict[int, List[Tuple[int, str]]] = {}
+    for o, m, a, b, in_dq in _here_scan(cmd):
+        quoted = _heredoc_word(m)[1]
+        if b >= len(lines):
             continue
-        out.append(line)
-        free, q = _unquoted_positions(line, q)
-        pending = [m.group(2) for m in HEREDOC_RE.finditer(line) if free[m.start()]]
-    return "\n".join(out)
+        if in_dq:
+            if subst and quoted:
+                lines[a:b] = [""] * (b - a)
+            elif escape:
+                lines[a:b] = [line.replace("\\", "\\\\").replace('"', '\\"') for line in lines[a:b]]
+            continue
+        if subst and not quoted:
+            adds.setdefault(o, []).append((m.end(), _heredoc_feed("\n".join(lines[a:b]))))
+        keep[a : b + 1] = [False] * (b + 1 - a)
+    for o, extra in adds.items():
+        for pos, text in reversed(extra):
+            lines[o] = lines[o][:pos] + text + lines[o][pos:]
+    return "\n".join(line for line, k in zip(lines, keep) if k)
 
 
 def strip_comments(cmd: str) -> str:
@@ -546,25 +929,31 @@ def _ansi_c_char(m: "re.Match[str]") -> str:
 
 def expand_ansi_c(cmd: str) -> str:
     """`$'…'` (ANSI-C quoting) ngoài nháy → chuỗi nháy đơn đã giải mã (`sh -c $'rm -rf ~'`: shlex đọc `$` là chữ và
-    giữ nguyên chuỗi nên lệnh bên trong lọt)."""
+    giữ nguyên chuỗi nên lệnh bên trong lọt). `$$'…'` là `$$` + nháy đơn, không phải ANSI-C (AUD-SEC-198)."""
     out: List[str] = []
-    i, q = 0, ""
+    i, q, ws = 0, "", True
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and q != "'":
+        if not q and c == "#" and ws:  # comment: chép nguyên tới hết dòng (D-276) —
+            e = cmd.find("\n", i)  # nháy trong comment không làm lệch `$'…'` của dòng sau
+            e = len(cmd) if e < 0 else e
+            out.append(cmd[i:e])
+            i = e
+        elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
-            i += 2
+            i, ws = i + 2, False
         elif not q and cmd.startswith("$'", i):
             j = i + 2
             while j < len(cmd) and cmd[j] != "'":
                 j += 2 if cmd[j] == "\\" else 1
             body = ANSI_ESCAPE_RE.sub(_ansi_c_char, cmd[i + 2 : j])
             out.append("'" + body.replace("'", "'\\''") + "'")
-            i = j + 1
+            i, ws = j + 1, False
         else:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
+            ws = not q and c in WORD_END
             i += 1
     return "".join(out)
 
@@ -635,6 +1024,10 @@ def _unquoted(s: str, i: int = 0) -> Iterator[Tuple[int, str]]:
             j += 2
         elif stack[-1:] == ['"']:
             j = _in_double(s, j, stack)
+        elif s.startswith("$$", j):  # `$$'…'` = `$$` + nháy đơn, không phải ANSI-C
+            yield j, c
+            yield j + 1, c
+            j += 2
         elif c == "'" or s.startswith("$'", j):
             j = _skip_single(s, j)
         elif c == '"':
@@ -726,7 +1119,7 @@ PWD_SUBST_RE = re.compile(
 
 
 def tokenize(cmd: str) -> List[str]:
-    cmd = IFS_RE.sub(" ", expand_ansi_c(strip_heredocs(join_continuations(cmd))))
+    cmd = IFS_RE.sub(" ", expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)))
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
@@ -734,8 +1127,10 @@ def tokenize(cmd: str) -> List[str]:
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
         return list(lex)
-    except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ)
-        return re.split(r"\s+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
+    except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
+        # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
+        raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
+        return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
 
 PUNCT = set("();<>|&\n")
@@ -2650,6 +3045,15 @@ GH_POST_RE = re.compile(
     r"|api\b.*?(?:\s-[fF]\b|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
     re.S,
 )
+GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
+
+
+def _gh_post_text(text: str) -> bool:
+    """Chữ thô có thể chứa `gh` đăng chữ — cả sau khi bỏ nháy/`\\` và thay `${IFS}` (`g''h pr co\\mment`): lọc nhanh
+    trước khi quét không được bỏ qua dạng mà token (đã bỏ nháy) thấy là `gh` đăng chữ (review #361 lượt 2)."""
+    return bool(GH_POST_RE.search(text) or GH_POST_RE.search(IFS_RE.sub(" ", GH_TEXT_NOISE_RE.sub("", text))))
+
+
 # Tool MCP đăng chữ lên PR/issue mà steward đọc dấu từ đó (commit file nhắc dấu thì không — review #159).
 MCP_REVIEW_POST_RE = re.compile(
     r"mcp__.+__\w*(?:issue_comment|pull_request_review_write|comment_to_pending_review|reply_to_pull_request_comment"
@@ -2799,20 +3203,37 @@ REVIEW_BODY_FILES_MAX = 8  # số nguồn thân tối đa mỗi lệnh `gh` đă
 # Thân comment GitHub tối đa 65 536 ký tự (≤ 256 KiB UTF-8): lớn hơn thì không đọc — coi như không đọc được; cùng trần
 # số nguồn giữ một quyết định trong ngân sách quét (review #354 lượt 3)
 REVIEW_BODY_FILE_BYTES = 1 << 18
+# File mà lệnh đọc (`$(head -40 CHANGELOG.md)`, `grep x f |`) chỉ góp một phần vào thân: quét cả file tới trần lớn hơn
+# (8 lệnh × 8 MiB vẫn trong ngân sách giờ của hook) thay vì chặn oan file > 256 KiB (AUD-SEC-177)
+REVIEW_READ_BYTES = 1 << 23
 STDIN_READERS = ("cat", "tac", "head", "tail")  # `cat f | gh … -F -`, `--body "$(cat f)"`
 READER_VALUE_OPTS = ("-n", "-c", "--lines", "--bytes")  # tuỳ chọn của lệnh đọc ăn giá trị (`head -n "$N" f`)
 STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")  # thân đọc từ stdin
 FD_PATH_RE = re.compile(r"/dev/(?:fd/\d+|std(?:out|err))|/proc/[^/]+/fd/\d+")  # fd mở trong shell — guard không thấy
-SUBST_BODY_RE = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")  # nội dung `$(…)` không lồng / backtick trong một đối số
+# Dấu nối cấp ngoài (`2>&1`, `&>f`, `<&3` không phải); ngoặc subshell cũng là ranh giới đoạn lệnh
+SEG_SEP_RE = re.compile(r"\|\||&&|\|&?|;;?|\n|(?<![<>&])&(?![>&])|[()]")
+SCAN_PLAIN_RE = re.compile(r"[^\\'\"`$<>()|&;\n#]+")  # ký tự không đổi trạng thái quét ở ngữ cảnh nào
+BACKTICK_ESCAPE_RE = re.compile(r"\\([\\`$])")  # thân backtick: `\``, `\\`, `\$` là ký tự đã thoát
+POST_NEST_MAX = 4  # số tầng thay lệnh lồng được đọc nguồn thân; sâu hơn → nguồn mờ (chặn)
 
 
-def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
+def _null_device(path: str) -> bool:
+    """`path` là thiết bị null thật (ký tự; Linux: số thiết bị 1:3) — không chỉ tên `/dev/null` mà root có thể thay bằng
+    symlink tới file mang dấu (AUD-SEC-183)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    return stat.S_ISCHR(st.st_mode) and (sys.platform != "linux" or st.st_rdev == os.makedev(1, 3))
+
+
+def _file_has_mark(path: str, cwd: Optional[str], limit: int = REVIEW_BODY_FILE_BYTES) -> bool:
     """Nguồn thân `path` (tương đối với `cwd`) có thể mang dấu review: có dấu (chữ thô, rồi cả chuỗi JSON — `gh api
     --input` viết `<` thành `\\u003c`), hay có mà guard không đọc được (mờ/glob, fd của shell, không phải file thường,
     quá cỡ, lỗi đọc/giải mã kể cả JSON lồng quá sâu) — chiều chặt (AUD-SEC-157, review #354). Chưa có thì `gh` cũng
     không đọc được — trừ khi lệnh trước trong chuỗi tạo ra nó (chữ dấu trong chuỗi lệnh đã bị quét; do chương trình khác
     sinh ra là giới hạn đã ghi). Mở `O_NONBLOCK` rồi `fstat`: FIFO đổi chỗ sau khi kiểm không làm guard treo."""
-    if path == os.devnull:  # `gh … < /dev/null` tắt prompt — thân rỗng
+    if path == os.devnull and _null_device(path):  # `gh … < /dev/null` tắt prompt — thân rỗng
         return False
     if _vague(path) or FD_PATH_RE.fullmatch(path):
         return True
@@ -2827,10 +3248,10 @@ def _file_has_mark(path: str, cwd: Optional[str]) -> bool:
         fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
             st = os.fstat(fd)
-            if not stat.S_ISREG(st.st_mode) or st.st_size > REVIEW_BODY_FILE_BYTES:
+            if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
                 return True
-            text = fh.read(REVIEW_BODY_FILE_BYTES + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
-        if len(text) > REVIEW_BODY_FILE_BYTES or REVIEW_MARK_RE.search(text):
+            text = fh.read(limit + 1)  # file lớn lên sau `fstat` không làm đọc quá trần
+        if len(text) > limit or REVIEW_MARK_RE.search(text):
             return True
         return any(REVIEW_MARK_RE.search(t) for t in _strings(json.loads(text)))
     except ValueError:  # không phải JSON: chữ thô đã quét
@@ -2851,13 +3272,10 @@ def _stdin_redirects(argv: List[str]) -> List[str]:
     return out
 
 
-def _reader_files(argv: List[str]) -> List[str]:
+def _reader_files(n: List[str], argv: List[str]) -> List[str]:
     """File mà `cat`/`head`/`tail`/`tac` đọc: đối số không phải tuỳ chọn (bỏ giá trị của `-n`/`-c` của `head`/`tail` —
     với `cat`, `-n` là cờ, AUD-SEC-174) sau khi bỏ chuyển hướng (`2>/dev/null`), cộng đích `< f` (AUD-SEC-176); không
-    có file hay `-` → đọc stdin (`-`)."""
-    n = normalize(_no_redirects(argv))
-    if not n[:1] or n[0] not in STDIN_READERS:
-        return []
+    có file hay `-` → đọc stdin (`-`). `n` = argv đã bỏ chuyển hướng và chuẩn hoá, `n[0]` thuộc `STDIN_READERS`."""
     valued = n[0] in ("head", "tail")
     out = [
         t
@@ -2867,59 +3285,468 @@ def _reader_files(argv: List[str]) -> List[str]:
     return out + _stdin_redirects(argv) or ["-"]
 
 
-def _subst_files(arg: str) -> List[str]:
-    """File mà lệnh đọc trong `$(…)`/backtick của một đối số đọc ra (`$(cat -- 'f' 2>/dev/null | head)`,
-    `$(head -c N f)`, `$(< f)`, `` `cat f` ``); `$(cat)` đọc stdin → `-`."""
-    out: List[str] = []
-    for groups in SUBST_BODY_RE.findall(arg):
-        toks = tokenize(groups[0] or groups[1])
-        out += [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
-        out += [f for c in split_commands(toks) for f in _reader_files(c)]
+NO_FILE_READ = frozenset({"echo", "printf"})  # đối số là chữ, không phải file
+# không đối số thì cũng không đọc stdin (`$(date)`, `$(git log -1)`) — lệnh khác không file → đọc stdin
+NO_STDIN_READ = frozenset({"date", "git", "gh", "pwd", "ls", "whoami", "hostname", "uname", "id", "nproc", "true"})
+SCRIPT_FIRST = frozenset({"grep", "egrep", "fgrep", "rg", "sed", "awk", "gawk", "mawk", "nawk", "jq"})
+SCRIPT_OPT_RE = re.compile(r"-[A-Za-z]*[ef].*|--(?:regexp|file|expression|from-file)(?:=.*)?")  # mẫu/script qua cờ
+# Thư mục chỉ là nguồn của lệnh đọc đệ quy (`grep -r x docs`, `rg`, `tar`); lệnh khác nhận thư mục (`ls docs`, `du -sh
+# docs`, `git log -- docs`, `make -C docs`) không in nội dung file trong đó (review #361)
+RECURSIVE_READERS = frozenset({"rg", "ag", "ack", "tar", "bsdtar", "zip", "7z"})
+RECURSIVE_FLAG_READERS = frozenset({"grep", "egrep", "fgrep", "zgrep", "ugrep", "diff"})
+RECURSIVE_OPT_RE = re.compile(r"-[A-Za-z]*[rR][A-Za-z]*|--(?:dereference-)?recursive|(?:--directories=)?recurse")
+# Lệnh chỉ in số đếm/kích thước/tên/băm — chạy qua `xargs` (`git ls-files | xargs wc -l`) thì đầu ra mang tên đọc từ
+# stdin (lỗi `2>&1` in lại tên), không mang nội dung file
+FEED_SAFE = frozenset(
+    {"wc", "ls", "du", "stat", "file", "md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum"}
+)
+FEED_FILE_OPT_RE = re.compile(r"-[0-9A-Za-z]*a.*|--arg-file(?:=.*)?")  # `xargs -a f`: tên lấy từ file
+FIND_RUN = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-files0-from"})  # `find` in nội dung/đọc tên từ file
+DIR_OK = "\0"  # tiền tố nguồn của lệnh không đệ quy: là thư mục thì bỏ (`clean_text` thay NUL — không có trong lệnh)
+HERE_OPS = ("<<", "<<<")  # stdin của lệnh là heredoc/here-string của chính nó, không phải stdin chung
+
+
+def _recursive(n: List[str]) -> bool:
+    flagged = n[0] in RECURSIVE_FLAG_READERS and any(RECURSIVE_OPT_RE.fullmatch(t) for t in n[1:])
+    return n[0] in RECURSIVE_READERS or flagged
+
+
+def _fed_files(n: List[str], argv: List[str]) -> List[str]:
+    """Lệnh chạy qua `xargs`/`parallel` (tên lấy từ stdin): lệnh thuộc `FEED_SAFE` đọc stdin (`-`) — tên trong đó có
+    thể hiện ra; lệnh khác, không lệnh (`xargs` = `echo`) hay `xargs -a f` → nguồn mờ."""
+    k = next(i for i, t in enumerate(argv) if posixpath.basename(t) in STDIN_FEEDERS)
+    opts = argv[k + 1 :]
+    cut = next((i for i, t in enumerate(opts) if n and posixpath.basename(t) == n[0]), len(opts))
+    safe = bool(n) and n[0] in FEED_SAFE and not any(FEED_FILE_OPT_RE.fullmatch(t) for t in opts[:cut])
+    return ["-"] if safe else ["$"]
+
+
+def _plain_files(n: List[str], argv: List[str]) -> List[str]:
+    """File mà lệnh không phải `cat`/`head`… có thể đọc ra stdout: mọi đối số không phải tuỳ chọn (bỏ mẫu/script đầu
+    của `grep`/`sed`/`awk`/`jq` khi không qua `-e`/`-f`) cộng đích `< f`; thư mục bỏ qua trừ lệnh đọc đệ quy (`DIR_OK`);
+    `find` chỉ in tên (có `-exec`… → nguồn mờ); không file → stdin (`-`), trừ `NO_STDIN_READ`."""
+    if n[0] == "find":
+        return ["$"] if FIND_RUN & set(n) else []
+    pos = [t for t in n[1:] if t == "-" or t[:1] != "-"]  # cả `''` (script rỗng của `sed ''`)
+    if n[0] in SCRIPT_FIRST and not any(SCRIPT_OPT_RE.fullmatch(t) for t in n[1:]):
+        pos = pos[1:]
+    soft = "" if _recursive(n) else DIR_OK
+    out = [t if t in STDIN_PATHS else soft + t for t in pos if t] + _stdin_redirects(argv)
+    return out or ([] if n[0] in NO_STDIN_READ else ["-"])
+
+
+def _any_reader_files(argv: List[str]) -> List[str]:
+    """File mà lệnh bất kỳ có thể đọc ra stdout (AUD-SEC-186, chiều chặt): `cat`/`head`… như `_reader_files`; lệnh chạy
+    qua `xargs`/`parallel` như `_fed_files`; `echo`/`printf` không đọc file; lệnh khác như `_plain_files`. Lệnh có
+    heredoc/here-string của chính nó không đọc stdin chung."""
+    n = normalize(_no_redirects(argv))
+    if any(posixpath.basename(t) in STDIN_FEEDERS for t in argv):
+        out = _fed_files(n, argv)
+    elif not n or n[0] in NO_FILE_READ:
+        return []
+    else:
+        out = _reader_files(n, argv) if n[0] in STDIN_READERS else _plain_files(n, argv)
+    return [f for f in out if f not in STDIN_PATHS] if any(t in HERE_OPS for t in argv) else out
+
+
+ScanSpan = Tuple[str, str, int, int]  # (loại: `$` thay lệnh, backtick, `<`/`>` thay tiến trình; thân; đầu; sau cuối)
+PARAM_RE = re.compile(r"\$[A-Za-z_0-9{@*#?$!-]")  # mở rộng tham số (`$x`, `${a[0]}`, `$1`) — không `$(`/`$'`
+COMMENT_AFTER = frozenset(" \t\n;&|<>(")  # `#` sau chúng mở comment; sau `)` thì không (`$(x)#y` là một từ)
+
+
+class Stage(NamedTuple):
+    """Đoạn lệnh: chữ, toán tử nối sau nó, thay lệnh ngoài cùng (vị trí trong `text`), có mở rộng tham số (mọi tầng,
+    ngoài nháy đơn)."""
+
+    text: str
+    op: str
+    spans: List[ScanSpan]
+    param: bool
+
+
+class _ShellScan:
+    """Quét chữ lệnh như bash — nháy đơn/kép, `\\`, `$'…'`, backtick, `$(…)`, `<(…)`/`>(…)`, comment — để tách ĐOẠN LỆNH
+    ở dấu nối cấp ngoài (`;`, `&&`, `||`, `|`, `&`, xuống dòng, ngoặc subshell) và lấy thân thay lệnh ngoài cùng của mỗi
+    đoạn. Backtick ghép tuần tự theo ngữ cảnh nháy, không theo chữ thô: backtick nguyên văn đứng trước không làm lệch cặp
+    (AUD-SEC-181); `#` trong `$'…'` không mở comment (review #361). `heredoc`: chữ là thân heredoc không nháy — như
+    trong nháy kép mà `"` là chữ. `open`: còn nháy/thay lệnh chưa đóng — không phân tích được."""
+
+    def __init__(self, text: str, heredoc: bool = False) -> None:
+        self.text, self.start, self.param = text, 0, False
+        self.stack: List[Tuple[str, int]] = [("h", 0)] if heredoc else []  # (loại ngữ cảnh, vị trí thân)
+        self.base, self.subs = len(self.stack), 0  # `subs` = số thay lệnh đang mở trong `stack`
+        self.stages: List[Stage] = []
+        self.spans: List[ScanSpan] = []
+        i = 0
+        while i < len(text):
+            i = self._step(i)
+        self._cut(len(text), len(text), "")
+        self.open = len(self.stack) > self.base
+
+    def _cut(self, a: int, b: int, op: str) -> None:
+        o = self.start
+        spans = [(k, body, x - o, y - o) for k, body, x, y in self.spans]
+        self.stages.append(Stage(self.text[o:a], op, spans, self.param))
+        self.spans, self.start, self.param = [], b, False
+
+    def _step(self, i: int) -> int:
+        plain = SCAN_PLAIN_RE.match(self.text, i)
+        if plain:
+            return plain.end()
+        c, top = self.text[i], (self.stack[-1][0] if self.stack else "")
+        if c == "\\":
+            return i + 2
+        self.param = self.param or bool(PARAM_RE.match(self.text, i))
+        if top in ('"', "h"):
+            return self._quoted(i, top)
+        if c == "#":
+            return self._comment(i)
+        if self.text.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn, không phải ANSI-C
+            return i + 2
+        if c == "'" or self.text.startswith("$'", i):
+            return _skip_single(self.text, i)
+        return self._close(i) or self._open(i, False) or self._word(i)
+
+    def _quoted(self, i: int, top: str) -> int:
+        if self.text[i] == '"' == top:
+            self.stack.pop()
+            return i + 1
+        return self._open(i, True) or i + 1
+
+    def _comment(self, i: int) -> int:
+        if i and self.text[i - 1] not in COMMENT_AFTER:
+            return i + 1
+        eol = self.text.find("\n", i)
+        return len(self.text) if eol < 0 else eol  # giữ `\n`: vẫn là ranh giới đoạn
+
+    def _open(self, i: int, quoted: bool) -> int:
+        t = self.text
+        if t.startswith("$(", i) or (not quoted and t.startswith(("<(", ">("), i)):
+            self.stack.append((t[i], i + 2))
+        elif t[i] == "`":
+            self.stack.append(("`", i + 1))
+        else:
+            return 0
+        self.subs += 1
+        return self.stack[-1][1]  # thân bắt đầu ngay sau dấu mở
+
+    def _close(self, i: int) -> int:
+        top, c = (self.stack[-1][0] if self.stack else ""), self.text[i]
+        if not (c == "`" == top or (c == ")" and top in ("$", "<", ">", "("))):
+            return 0
+        kind, body = self.stack.pop()
+        self.subs -= kind != "("
+        if kind != "(" and not self.subs:
+            self.spans.append((kind, self.text[body:i], body - (1 if kind == "`" else 2), i + 1))
+        return i + 1
+
+    def _word(self, i: int) -> int:
+        c = self.text[i]
+        if c == '"' or (c == "(" and self.stack):
+            self.stack.append((c, i))
+            return i + 1
+        sep = None if self.stack else SEG_SEP_RE.match(self.text, i)
+        if sep:
+            self._cut(i, sep.end(), sep.group())
+            return sep.end()
+        return i + 1
+
+
+def _heredoc_feed(body: str) -> str:
+    """Chữ ghép vào dòng mở heredoc không nháy: thay lệnh trong thân (bash thay trước khi đưa vào lệnh) và dấu có mở
+    rộng tham số, dạng here-string mà argv bỏ qua; thay lệnh không đóng → `$(` làm cả chuỗi lệnh mờ."""
+    scan = _ShellScan(body, heredoc=True)
+    if scan.open:
+        return " $("
+    spans = "".join(scan.text[a:b] for st in scan.stages for _, _, a, b in st.spans)
+    param = any(st.param for st in scan.stages)
+    return f' <<<"{spans}{"$_" if param else ""}"' if spans or param else ""
+
+
+def _scan(text: str) -> _ShellScan:
+    """`_ShellScan` trên chữ lệnh đã nối dòng; thân heredoc bỏ, trừ thay lệnh trong thân không nháy — ghép vào dòng mở
+    (review #361); comment do bộ quét bỏ (hiểu `$'…'`)."""
+    return _ShellScan(_fold_heredocs(join_continuations(text), True))
+
+
+# Chữ thay chỗ thay lệnh khi đọc argv một đoạn — mờ như nó (không `$` trơn: `_no_redirects` dành nó cho đích bị cắt)
+SUBST_WORD = "$_"
+
+
+def _stage_argv(st: Stage) -> List[str]:
+    """argv của đoạn lệnh: thay lệnh → chữ mờ `SUBST_WORD`, thay tiến trình (`<(…)`/`>(…)`) → `/dev/null` (fd không
+    mang thân; nguồn của thân nó tính riêng) — `$(…)` không nháy không cắt mất đối số sau nó (`--body $(…) -F f`); các
+    thay lệnh liền nhau thành một chữ (từ dài làm `shlex` chậm bậc hai)."""
+    parts: List[str] = []
+    pos = 0
+    for kind, _, a, b in st.spans:
+        word = os.devnull if kind in ("<", ">") else SUBST_WORD
+        if not (a == pos and word == SUBST_WORD and "".join(parts[-1:]).endswith(SUBST_WORD)):
+            parts += [st.text[pos:a], word]
+        pos = b
+    return next(iter(split_commands(tokenize("".join(parts) + st.text[pos:]))), [])
+
+
+class _Sources:
+    """Nguồn thân gom được: `own` — file `gh` đăng chữ đọc làm thân (trần 256 KiB); `read` — file lệnh khác đọc góp vào
+    thân (trần 8 MiB; tiền tố `DIR_OK` = thư mục thì bỏ); `param` — `gh` có mở rộng tham số; `posts` — thấy `gh` đăng
+    chữ (hay lệnh bọc nó). `-`/`/dev/stdin` = đọc stdin. Tập có thứ tự (dict): gộp lại cùng nguồn qua nhiều thay lệnh
+    giống nhau không làm danh sách nở theo hàm mũ."""
+
+    def __init__(self, own: Optional[List[str]] = None, read: Optional[List[str]] = None, posts: bool = False) -> None:
+        self.own, self.read = dict.fromkeys(own or []), dict.fromkeys(read or [])
+        self.param, self.posts = False, posts
+
+    def stdin(self) -> bool:
+        return any(f in self.own or f in self.read for f in STDIN_PATHS)
+
+    def merge(self, other: "_Sources") -> "_Sources":
+        self.own.update(other.own)
+        self.read.update(other.read)
+        return self._flags(other)
+
+    def add(self, other: "_Sources", stdin: bool = True) -> "_Sources":
+        """Gộp `other` — mọi nguồn của nó thành `read` (`stdin=False`: bỏ `-` của nó)."""
+        for src in (other.own, other.read):
+            self.read.update((f, None) for f in src if stdin or f not in STDIN_PATHS)
+        return self._flags(other)
+
+    def _flags(self, other: "_Sources") -> "_Sources":
+        self.param, self.posts = self.param or other.param, self.posts or other.posts
+        return self
+
+
+class _BodyScan:
+    """Ngữ cảnh đọc nguồn thân của một quyết định: nhớ kết quả theo (thân, tầng) — thay lệnh giống nhau chỉ quét một lần
+    (5 tầng × 2 thay lệnh từng tốn ~80 s ở 256 KiB, review #361) — và hạn giờ của `ScanBudget`: hết giờ → `TimeoutError`
+    → `_review_forge_hit` coi như có dấu."""
+
+    def __init__(self, budget: Optional["ScanBudget"]) -> None:
+        self.deadline = budget.deadline if budget else time.monotonic() + SCAN_SECONDS
+        self.memo: Dict[Tuple[str, str, str, int], _Sources] = {}
+        self.scans: Dict[Tuple[str, str], _ShellScan] = {}
+        self.argvs: Dict[str, List[str]] = {}
+
+    def tick(self) -> None:
+        if time.monotonic() > self.deadline:
+            raise TimeoutError("hết hạn giờ quét nguồn thân")
+
+    def argv(self, st: Stage) -> List[str]:
+        if st.text not in self.argvs:
+            self.argvs[st.text] = _stage_argv(st)
+        return self.argvs[st.text]
+
+    def cached(self, key: Tuple[str, str, str, int], work: Callable[[], _Sources]) -> _Sources:
+        if key not in self.memo:
+            self.tick()
+            self.memo[key] = work()
+        return self.memo[key]
+
+
+def _span_scan(ctx: _BodyScan, sp: ScanSpan, depth: int) -> Optional[_ShellScan]:
+    """Kết quả quét thân thay lệnh — trong backtick `\\`` là backtick lồng; còn mở hay lồng quá sâu → None."""
+    if depth >= POST_NEST_MAX:
+        return None
+    kind, body = sp[0], sp[1]
+    if (kind, body) not in ctx.scans:
+        ctx.scans[kind, body] = _scan(BACKTICK_ESCAPE_RE.sub(r"\1", body) if kind == "`" else body)
+    scan = ctx.scans[kind, body]
+    return None if scan.open else scan
+
+
+def _span_gh(ctx: _BodyScan, sp: ScanSpan, depth: int) -> _Sources:
+    """Nguồn thân của `gh` đăng chữ lồng trong thay lệnh của lệnh khác (`x=$(gh … -F f)`)."""
+
+    def work() -> _Sources:
+        scan = _span_scan(ctx, sp, depth)
+        return _Sources(own=["`"], posts=True) if scan is None else _gh_sources(ctx, scan, depth + 1)
+
+    return ctx.cached(("g", sp[0], sp[1], depth), work)
+
+
+def _stage_files(argv: List[str]) -> List[str]:
+    """`_any_reader_files` — trừ `gh` đăng chữ: đối số của nó không phải file nó in ra (nguồn của nó tính riêng)."""
+    return [] if _gh_posts(argv) else _any_reader_files(argv)
+
+
+def _scan_reads(ctx: _BodyScan, scan: _ShellScan, depth: int) -> _Sources:
+    """File mọi đoạn lệnh của `scan` đọc ra, cả đích `< f` (`read`/`mapfile`/`done < f`) và trong thay lệnh; `-` của
+    lệnh sau ống là ống đó, không phải stdin chung (review #361)."""
+    out = _Sources()
+    for k, st in enumerate(scan.stages):
+        argv = ctx.argv(st)
+        piped = k > 0 and scan.stages[k - 1].op in ("|", "|&")
+        out.read.update(
+            (f, None) for f in _stage_files(argv) + _stdin_redirects(argv) if not (piped and f in STDIN_PATHS)
+        )
+        for sp in st.spans:
+            out.add(_span_files(ctx, sp, depth))
     return out
 
 
-def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
-    """File làm thân của lệnh `gh` đăng chữ: `gh api` — `-F k=@f`/`--field k=@f`/`--input f`; `gh pr|issue` — `-F f`,
-    `--body-file f` (giá trị nguyên văn, kể cả `x=@y`); `< f`; file đọc trong `$(…)` của đối số; file của `cat`/`head`…
-    trong cùng chuỗi khi thân đọc stdin (`-`, `/dev/stdin`) hay đối số là thay lệnh không nháy (`$`). Stdin không phải
-    file."""
-    args = normalize(argv)[1:]
-    if args[:1] == ["api"]:
-        own = _gh_api_files(args)
-    else:
-        own = _gh_flag_files(args, split_at=False)
-    own += _stdin_redirects(args)
-    # backtick không nháy bị tách thành nhiều token — quét cả đối số ghép lại (`<<< \`cat f\``, AUD-SEC-175)
-    own += [f for t in [*args, " ".join(args)] for f in _subst_files(t)]
-    piped = any(f in STDIN_PATHS for f in own) or "$" in args or any(t.count("`") % 2 for t in args)
-    return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
+def _span_files(ctx: _BodyScan, sp: ScanSpan, depth: int) -> _Sources:
+    """File mà lệnh trong thân thay lệnh đọc ra (`$(cat -- f | head)`, `$(< f)`, `` `head -c N f` ``, lồng nhau);
+    `$(cat)` → `-` (stdin); `gh` đăng chữ trong thân thì nguồn của nó cũng tính. Không phân tích được → nguồn mờ."""
+
+    def work() -> _Sources:
+        scan = _span_scan(ctx, sp, depth)
+        if scan is None:
+            return _Sources(read=["`"])
+        return _scan_reads(ctx, scan, depth + 1).add(_gh_sources(ctx, scan, depth + 1))
+
+    return ctx.cached(("f", sp[0], sp[1], depth), work)
 
 
-def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
-    """Lệnh có `gh` đăng chữ (`_forges_review` không cần dấu ở argv) mà dấu nằm ở argv của nó, ở bất kỳ đâu trong chuỗi
+def _gh_wrapped(argv: List[str]) -> bool:
+    """Lệnh khác bọc `gh` đăng chữ trong chuỗi của nó (`sh -c 'gh … -F -' < f`) — guard không biết `gh` đọc gì từ stdin
+    của nó (AUD-SEC-180)."""
+    return not _gh_posts(argv) and bool(GH_POST_RE.search(" ".join(argv)))
+
+
+def _gh_files(argv: List[str]) -> List[str]:
+    """File cờ của `gh` đăng chữ trong argv — cả khi bị bọc (`xargs -I{} gh …`, `find … -exec gh … {} ;`, `parallel gh
+    …`); giá trị là chuỗi thay chỗ lệnh bọc điền lúc chạy (`{}`, `-I R`) → nguồn mờ (AUD-SEC-179)."""
+    k = next((i for i, t in enumerate(argv) if posixpath.basename(t) == "gh"), len(argv))
+    args = normalize(argv[k:])[1:]
+    files = _gh_api_files(args) if args[:1] == ["api"] else _gh_flag_files(args, split_at=False)
+    ph = _placeholders(argv, any(posixpath.basename(t) in STDIN_FEEDERS for t in argv))
+    return ["$" if PARALLEL_REPLACE_RE.search(f) or any(p in f for p in ph) else f for f in files]
+
+
+def _nested_gh(ctx: _BodyScan, st: Stage, argv: List[str], depth: int) -> Tuple[_Sources, bool]:
+    """(nguồn, có đọc stdin) của `gh` đăng chữ lồng trong thay lệnh của đoạn không phải `gh`: trong `$(…)`/`<(…)` nó
+    đọc stdin của đoạn; trong `>(…)` stdin của nó là đầu ra của chính đoạn — nguồn là file đoạn đó đọc (review #361)."""
+    out, stdin = _Sources(), False
+    for sp in st.spans:
+        if not _gh_post_text(sp[1]):
+            continue
+        sub = _span_gh(ctx, sp, depth)
+        piped = sub.stdin()
+        feeds = _any_reader_files(argv) if sp[0] == ">" and piped else []
+        out.read.update(dict.fromkeys(feeds))
+        stdin = stdin or (any(f in STDIN_PATHS for f in feeds) if sp[0] == ">" else piped)
+        out.add(sub, sp[0] != ">")
+    return out, stdin
+
+
+def _body_sources(ctx: _BodyScan, st: Stage, depth: int) -> Tuple[_Sources, bool]:
+    """(nguồn, có đọc stdin) của một đoạn lệnh: `gh` đăng chữ — `gh api -F k=@f`/`--field k=@f`/`--input f`, `gh
+    pr|issue -F f`/`--body-file f` (giá trị nguyên văn, kể cả `x=@y`), `< f` (cả trước tên lệnh), file đọc trong thay
+    lệnh sống của đoạn; lệnh bọc `gh` (`sh -c '…' < f`) — đích stdin, đọc stdin khi là shell/trình thông dịch; đoạn khác
+    — nguồn của `gh` đăng chữ lồng trong thay lệnh (`_nested_gh`)."""
+    argv = ctx.argv(st)
+    if _gh_posts(argv):
+        out = _Sources(own=_gh_files(argv) + _stdin_redirects(argv), posts=True)
+        out.param = st.param
+        for sp in st.spans:
+            out.add(_span_files(ctx, sp, depth))
+        return out, out.stdin()
+    out, stdin = _nested_gh(ctx, st, argv, depth)
+    if not _gh_wrapped(argv):
+        return out, stdin
+    head = posixpath.basename((normalize(argv) or [""])[0])
+    out.own.update(dict.fromkeys(_gh_files(argv) + _stdin_redirects(argv)))
+    out.param, out.posts = out.param or "$" in st.text, True
+    return out, stdin or head in INTERPRETERS
+
+
+SHELL_LEVEL_WORDS = {"exec", "}", "done", "fi", "esac"}  # chuyển hướng của chúng đổi stdin của lệnh khác
+
+
+def _feed_sources(ctx: _BodyScan, st: Stage, depth: int) -> _Sources:
+    """Nguồn một đoạn lệnh đưa vào stdin của `gh`: đoạn ghi vào ống (`cat f |`) — file của lệnh đọc và thay lệnh của
+    nó; đoạn cấp shell hay nhóm lệnh (`exec < f`, `{ …; } < f`, `(…) <<< \\`cat f\\``, `done < f` — AUD-SEC-180) —
+    đích stdin và thay lệnh của nó."""
+    argv = ctx.argv(st)
+    level = set(_no_redirects(argv)) <= SHELL_LEVEL_WORDS
+    if st.op not in ("|", "|&") and not level:
+        return _Sources()
+    out = _Sources(read=_stdin_redirects(argv) if level else _stage_files(argv))
+    for sp in st.spans:
+        out.add(_span_files(ctx, sp, depth))
+    return out
+
+
+def _gh_sources(ctx: _BodyScan, scan: _ShellScan, depth: int) -> _Sources:
+    """Nguồn của mọi `gh` đăng chữ trong chuỗi đã quét; `gh` đọc stdin thì thêm nguồn đưa vào stdin."""
+    out, stdin = _Sources(), False
+    for st in scan.stages:
+        src, piped = _body_sources(ctx, st, depth)
+        out.merge(src)
+        stdin = stdin or piped
+    for st in scan.stages if stdin else []:
+        out.merge(_feed_sources(ctx, st, depth))
+    return out
+
+
+def _present(src: str, cwd: Optional[str]) -> bool:
+    """Nguồn đọc có thể góp thân: tên mờ/fd, hay có trên đĩa (thư mục với lệnh không đệ quy thì không) — trần số nguồn
+    đếm sau bước này, tên không có không làm chặn oan (review #361)."""
+    path = src.lstrip(DIR_OK)
+    if _vague(path) or FD_PATH_RE.fullmatch(path):
+        return True
+    full = os.path.join(cwd or ".", os.path.expanduser(path))
+    try:
+        os.lstat(full)
+    except FileNotFoundError:
+        return False
+    except OSError:  # đường quá dài, quyền… — có thể có mà guard không thấy
+        return True
+    return not (src.startswith(DIR_OK) and os.path.isdir(full))
+
+
+def _sources_marked(ctx: _BodyScan, found: _Sources, cwd: Optional[str]) -> bool:
+    """Nguồn thân có (thể có) dấu: quá `REVIEW_BODY_FILES_MAX` nguồn (file `gh` đọc, cộng file lệnh khác đọc mà có trên
+    đĩa) → coi như có; mỗi nguồn đọc một lần, kiểm hạn giờ trước mỗi file."""
+    own = [f for f in found.own if f not in STDIN_PATHS]
+    named = (f for f in found.read if f not in STDIN_PATHS and f.lstrip(DIR_OK) not in found.own and _present(f, cwd))
+    names = list(itertools.islice(named, max(REVIEW_BODY_FILES_MAX + 1 - len(own), 0)))  # dừng khi đã quá trần
+    if len(own) + len(names) > REVIEW_BODY_FILES_MAX:
+        return True
+    checks = [(f, REVIEW_BODY_FILE_BYTES) for f in own] + [(f.lstrip(DIR_OK), REVIEW_READ_BYTES) for f in names]
+    for path, limit in checks:
+        ctx.tick()
+        if _file_has_mark(path, cwd, limit):
+            return True
+    return False
+
+
+def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str], budget: Optional["ScanBudget"] = None) -> bool:
+    """Lệnh Bash đăng/sửa comment hay thân PR/issue mang dấu review: dấu nằm trong argv `gh`, ở bất kỳ đâu trong chuỗi
     lệnh (heredoc, `printf … > f &&`, `printf '…%s…' | gh -F -`) hay trong nguồn thân của chính lệnh `gh` đó
     (`_body_sources`; không đọc được → chặn) — AUD-SEC-157. Lệnh không đăng thì chữ nhắc dấu không bị chặn; file chỉ được
-    nhắc tên (`--body "xem docs/ops/AUDIT-STATUS.md"`) không phải nguồn thân."""
-    cmds = split_commands(tokens)
-    posts = [c for c in cmds if _gh_posts(c)]
-    if not posts:
-        return False
-    if REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts):
+    nhắc tên (`--body "xem docs/ops/AUDIT-STATUS.md"`) không phải nguồn thân. `gh` có mở rộng tham số (`--body "$x"`) →
+    nguồn là mọi file chuỗi lệnh đọc (review #361); token thấy `gh` đăng chữ mà bộ quét không thấy → mờ."""
+    posts = [c for c in split_commands(tokens) if _gh_posts(c)]
+    if posts and (REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts)):
         return True
-    cats = [f for c in cmds for f in _reader_files(c)]
-    srcs = [f for c in posts for f in _body_sources(c, cats)]
-    # backtick lẻ ở đối số `gh`: thay lệnh không nháy bị tách lệnh ở `;`/`|`/xuống dòng (`<<< \`cat f;\``) — đọc nó
-    # trên chữ thô của cả chuỗi lệnh (review #357)
-    srcs += _subst_files(cmd) if any(t.count("`") % 2 for c in posts for t in c) else []
-    srcs = list(dict.fromkeys(srcs))  # mỗi nguồn đọc một lần, đếm một lần
-    return len(srcs) > REVIEW_BODY_FILES_MAX or any(_file_has_mark(f, cwd) for f in srcs)
+    if not posts and not _gh_post_text(cmd):
+        return False
+    ctx, scan = _BodyScan(budget), _scan(cmd)
+    if scan.open:
+        return True
+    found = _gh_sources(ctx, scan, 0)
+    if posts and not found.posts:
+        return True
+    if found.param or _own_written(found, tokens, cwd):
+        found.add(_scan_reads(ctx, scan, 0))
+    return _sources_marked(ctx, found, cwd)
 
 
-def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
-    """`_forges_review_cmd` mà lỗi khi quét (đầu vào lạ) thì coi như có dấu — không để ngoại lệ thoát khỏi
+def _own_written(found: _Sources, tokens: List[str], cwd: Optional[str]) -> bool:
+    """File thân của `gh` do chính chuỗi lệnh ghi ra (`cat f > x.md; gh … -F - < x.md`, `cp f x.md`, `>> x.md`) hay chưa
+    có trên đĩa (lệnh trước sẽ tạo): file đọc lúc kiểm không phải thân thật → nguồn là mọi file chuỗi lệnh đọc (review
+    #361 lượt 2)."""
+    own = {posixpath.normpath(f) for f in found.own if f not in STDIN_PATHS}
+    written = {posixpath.normpath(t) for c in split_commands(tokens) for t in write_targets(normalize(c), c)}
+    return bool(own & written) or not all(_present(f, cwd) for f in own)
+
+
+def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str], budget: Optional["ScanBudget"] = None) -> bool:
+    """`_forges_review_cmd` mà lỗi khi quét (đầu vào lạ, hết hạn giờ) thì coi như có dấu — không để ngoại lệ thoát khỏi
     `bash_decision` (hook fail-open, tắt mọi luật đứng sau — review #354 lượt 2)."""
     try:
-        return _forges_review_cmd(cmd, tokens, cwd)
+        return _forges_review_cmd(cmd, tokens, cwd, budget)
     except Exception:
         return True
 
@@ -4643,9 +5470,10 @@ def _unquoted_seps(line: str) -> List[Tuple[int, int]]:
 
 def _segment_at(line: str, pos: int, seps: List[Tuple[int, int]]) -> Tuple[int, int]:
     """(đầu, cuối) của pipeline chứa `pos`, tách theo dấu nối ngoài nháy/escape (`seps` từ `_unquoted_seps`)."""
-    start = max((e for s, e in seps if e <= pos), default=0)
-    end = min((s for s, e in seps if s >= pos), default=len(line))
-    return start, end
+    k = bisect.bisect_right(seps, pos, key=lambda se: se[1])  # `seps` theo thứ tự, không chồng: tìm nhị phân
+    start = seps[k - 1][1] if k else 0
+    k = bisect.bisect_left(seps, pos, key=lambda se: se[0])
+    return start, seps[k][0] if k < len(seps) else len(line)
 
 
 def _commit_window(line: str, pos: int, seps: List[Tuple[int, int]]) -> str:
@@ -4660,8 +5488,11 @@ def _heredoc_bodies(cmd: str, pat: "re.Pattern[str]" = GIT_COMMIT_TEXT_RE) -> Li
     — hay lệnh khớp `pat` (`gh pr create --body-file - <<E`); heredoc của lệnh khác trong cùng chuỗi
     (`python3 - <<E …; git commit`) là dữ liệu của lệnh đó, không quét."""
     out: List[str] = []
+    seps: Dict[str, List[Tuple[int, int]]] = {}  # dòng mở → dấu nối: nhiều heredoc một dòng không quét lại dòng
     for opener, m, body in _heredocs(join_continuations(cmd)):  # nối dòng `\` như shell (`git commit \` ↵ `-F - <<E`)
-        if pat.search(_commit_window(opener, m.start(), _unquoted_seps(opener))):
+        if opener not in seps:
+            seps[opener] = _unquoted_seps(opener)
+        if pat.search(_commit_window(opener, m.start(), seps[opener])):
             out.append("\n".join(body))
     return out
 
@@ -4974,6 +5805,7 @@ def _scan_command(
     if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
         asks.extend(_write_asks(n, argv, root, cwd))
         return None
+    _alias_rule(argv)
     asks.extend(_unknown_git_opt_asks(n, argv))
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     # Lệnh git ghi ref (AUD-SEC-119) cũng cần repo thật để đọc tên remote của nó.
@@ -5034,7 +5866,11 @@ class ScanBudget:
 
     def exhausted(self) -> bool:
         self.calls -= 1
-        return self.calls < 0 or time.monotonic() > self.deadline
+        return self.calls < 0 or self.overdue()
+
+    def overdue(self) -> bool:
+        """Quá hạn giờ (không tiêu lượt gọi) — cho vòng lặp dài trong một lượt quét."""
+        return time.monotonic() > self.deadline
 
 
 # Độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi (mặc định: chặn — AUD-SEC-063). 4: `find -exec`
@@ -5118,12 +5954,25 @@ def _shell_c_script(argv: List[str]) -> Optional[str]:
     return script if has_c else None
 
 
-def _heredoc_scripts(cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell) -> List[str]:
-    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`; `pred` chọn lệnh nhận) — là lệnh, không phải dữ liệu."""
+def _heredoc_scripts(
+    cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell, budget: Optional[ScanBudget] = None
+) -> List[str]:
+    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`; `pred` chọn lệnh nhận) — là lệnh, không phải dữ liệu. Mỗi dòng mở
+    tìm dấu nối một lần, mỗi pipeline tách token một lần (`cat <<A <<A …` × n: cũ tách lại mỗi heredoc — bậc hai, n=2000
+    ~58 s); quá hạn `budget` → chặn (D-271)."""
     out: List[str] = []
+    seps: Dict[str, List[Tuple[int, int]]] = {}
+    hits: Dict[Tuple[str, int, int], bool] = {}
     for opener, m, body in _heredocs(join_continuations(cmd)):
-        start, end = _segment_at(opener, m.start(), _unquoted_seps(opener))
-        if any(pred(c) for c in split_commands(tokenize(opener[start:end]))):
+        if budget is not None and budget.overdue():
+            raise ScanTooComplex("quá hạn khi đọc heredoc vào shell/trình thông dịch")
+        if opener not in seps:
+            seps[opener] = _unquoted_seps(opener)
+        start, end = _segment_at(opener, m.start(), seps[opener])
+        key = (opener, start, end)
+        if key not in hits:
+            hits[key] = any(pred(c) for c in split_commands(tokenize(opener[start:end])))
+        if hits[key]:
             out.append("\n".join(body))
     return out
 
@@ -5186,8 +6035,35 @@ def _dollar_scripts(cmd: str) -> List[str]:
     return [body for _, _, body in _dollar_spans(cmd)]
 
 
+ARITH_SCAN_MAX = 4096  # `$((` chưa thấy ngoặc đóng trong chừng này ký tự → coi là thay lệnh (quét, không bỏ qua)
+
+
+def _paren_pairs(cmd: str) -> Dict[int, int]:
+    """Vị trí `(` → vị trí `)` khớp nó trong cả chuỗi (đếm thô, không theo nháy), một lượt — `_arith_at` không quét lại
+    từ mỗi `$((` (800 `$((` lồng × 256 KiB từng tốn ~11 s, review #361)."""
+    out: Dict[int, int] = {}
+    stack: List[int] = []
+    for m in re.finditer(r"[()]", cmd):
+        if m.group() == "(":
+            stack.append(m.start())
+        elif stack:
+            out[stack.pop()] = m.start()
+    return out
+
+
+def _arith_at(cmd: str, i: int, pairs: Optional[Dict[int, int]] = None) -> bool:
+    """`$((` ở `i` là số học `$((…))`: ngoặc trong đóng (trong `ARITH_SCAN_MAX` ký tự) ngay trước ngoặc ngoài. Không thì
+    bash lùi về thay lệnh có subshell (`"$((gh … -F -) < f)"`) — thân phải được quét như lệnh (AUD-SEC-180). `pairs` =
+    `_paren_pairs(cmd)` tính sẵn."""
+    if not cmd.startswith("$((", i):
+        return False
+    j = (_paren_pairs(cmd) if pairs is None else pairs).get(i + 2, len(cmd))
+    return j < i + ARITH_SCAN_MAX and cmd.startswith(")", j + 1)
+
+
 def _dollar_spans(cmd: str) -> List[Span]:
     out: List[Span] = []
+    pairs = _paren_pairs(cmd) if "$((" in cmd else {}
     quote, i = "", 0
     while i < len(cmd):
         c = cmd[i]
@@ -5196,7 +6072,7 @@ def _dollar_spans(cmd: str) -> List[Span]:
             continue
         if c in "'\"" and quote in ("", c) and (c == '"' or quote != '"'):
             quote = "" if quote == c else c
-        elif quote != "'" and cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+        elif quote != "'" and cmd.startswith("$(", i) and not _arith_at(cmd, i, pairs):
             depth, j = 1, i + 2
             while j < len(cmd) and depth:
                 depth += {"(": 1, ")": -1}.get(cmd[j], 0)
@@ -5210,20 +6086,7 @@ def _dollar_spans(cmd: str) -> List[Span]:
 
 def _expanded_heredocs(cmd: str) -> List[str]:
     """Thân heredoc có dấu kết KHÔNG nháy (`<<A`): bash thay `$(…)`/backtick trong thân trước khi đưa vào lệnh."""
-    out: List[str] = []
-    lines = join_continuations(cmd).split("\n")
-    i = 0
-    while i < len(lines):
-        opener, i = lines[i], i + 1
-        for m in HEREDOC_RE.finditer(opener):
-            body: List[str] = []
-            while i < len(lines) and lines[i].strip() != m.group(2):
-                body.append(lines[i])
-                i += 1
-            i += 1
-            if not m.group(1):
-                out.append("\n".join(body))
-    return out
+    return ["\n".join(body) for _, m, body in _heredocs(join_continuations(cmd)) if not _heredoc_word(m)[1]]
 
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
@@ -5247,7 +6110,9 @@ SPAN_MARK = "$__xt_span_{}_"  # có `$`: `cd "$(…)"` thành đích không bi�
 SPAN_MARK_RE = re.compile(r"\$__xt_span_(\d+)_")
 
 
-def _nested_pairs(cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str]) -> Placed:
+def _nested_pairs(
+    cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str], budget: Optional[ScanBudget] = None
+) -> Placed:
     """Lệnh chạy lồng (AUD-SEC-017) kèm thư mục nó chạy (AUD-SEC-094): `sh -c '…'`, `eval '…'`, backtick, `$(…)`,
     `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell."""
     moved = any(here != start for _, here in placed)
@@ -5263,7 +6128,7 @@ def _nested_pairs(cmd: str, tokens: List[str], placed: PlacedCmds, start: Option
     out += _shell_feeds(tokens, placed)
     out += [(s, here) for c, here in placed for s in _here_strings(c)]
     shells = dict.fromkeys([start, *(here for c, here in placed if _stdin_shell(c))])
-    return out + [(body, d) for body in _heredoc_scripts(cmd) for d in shells]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, budget=budget) for d in shells]
 
 
 def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
@@ -5962,9 +6827,10 @@ def _nested_sources(
     rewritten += [(s, here) for c, here in placed for s in _runner_scripts(c)]
     rewritten += [(s, start) for s in _lifted_scripts(cmd)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
-    nested = _nested_pairs(cmd, tokens, placed, start)
+    nested = _nested_pairs(cmd, tokens, placed, start, budget)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
-    nested += [(s, here) for raw, here in _interp_scripts_at(cmd, tokens, start) for s in _exec_api_scripts([raw])]
+    interp = _interp_scripts_at(cmd, tokens, start, budget)
+    nested += [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
     jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
@@ -6364,7 +7230,9 @@ def _eval_subcmd(n: List[str]) -> Optional[int]:
     return k if sub and n[k : k + 1] == [sub] else None
 
 
-def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+def _interp_scripts_at(
+    cmd: str, tokens: List[str], cwd: Optional[str], budget: Optional[ScanBudget] = None
+) -> List[Tuple[str, Optional[str]]]:
     """(script, thư mục nó chạy) — `cd .claude && python3 -c '…'` chạy trong `.claude` (AUD-SEC-085). Thân heredoc gắn
     với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`). Script qua stdin bằng
     here-string (`python3 <<< '…'`) hay ống (`echo '…' | node`) cũng tính (D-105)."""
@@ -6378,13 +7246,13 @@ def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[
         if _stdin_interp(c):
             stdin_dirs.append(here)
             out += [(c[i + 1], here) for i, a in enumerate(c[:-1]) if a == "<<<"]
-    i = 0
+    i, places = 0, [d for _, d in placed]  # dựng một lần: dựng lại mỗi pipeline từng bậc hai (review #361 lượt 2)
     for pipe in pipelines(tokens):
-        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], [d for _, d in placed][i + 1 :]):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], places[i + 1 : i + len(pipe)]):
             out += [(s, here) for s in feed or [] if _stdin_interp(down)]
         i += len(pipe)
     dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
-    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp) for d in dirs]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp, budget) for d in dirs]
 
 
 # Lời gọi chạy lệnh shell từ trình thông dịch (`os.system('…')`, `subprocess.run(['rm','-rf','~'])`, `execSync('…')`):
@@ -7470,7 +8338,26 @@ def bash_decision(
 ) -> Dict[str, object]:
     """Quyết định cho một lệnh Bash: deny/ask/"" kèm cờ `commit`, `no_verify`, `commit_dir` cho hook cổng commit.
     `cwd` = thư mục lệnh bắt đầu chạy (payload hook); `cd <dir>` trong lệnh dời nó để biết commit rơi vào repo nào.
-    `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét."""
+    `depth` = độ sâu shell lồng (`sh -c`, heredoc/pipe vào shell) đang quét. Guard không phân định được cách bash đọc
+    lệnh (`ScanTooComplex`) → chặn, không đoán."""
+    try:
+        return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
+    except ScanTooComplex as e:
+        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}"
+        return {
+            "decision": "deny",
+            "reason": reason,
+            "commit": False,
+            "no_verify": False,
+            "commit_dir": "",
+            "code": BUDGET,
+        }
+
+
+def _bash_decision(
+    cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
+) -> Dict[str, object]:
+    whole = budget is None and depth == 0  # lệnh agent gửi nguyên vẹn (không phải mảnh/lệnh lồng guard cắt ra)
     if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
         cwd = cwd or root
     budget = budget or ScanBudget(nested=depth > 0)
@@ -7483,6 +8370,8 @@ def bash_decision(
             code=BUDGET,
         )
         return res
+    _shell_precheck(cmd)
+    _heredoc_precheck(cmd, whole)
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)
     if rx:
@@ -7496,7 +8385,7 @@ def bash_decision(
         res.update(decision="deny", reason=f"Lệnh bị khung chặn ({leak}): {cmd[:300]}")
         return res
     asks: List[str] = interp_write_asks(cmd, tokens, root, cwd)
-    asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd) else []
+    asks += [REVIEW_FORGE_WHY] if _review_forge_hit(cmd, tokens, cwd, budget) else []
     asks += [STAGE_APPROVE_WHY] if any(_approves_stage(c) for c in split_commands(tokens)) else []
     braces = brace_variants(cmd)
     nested_deny = (
