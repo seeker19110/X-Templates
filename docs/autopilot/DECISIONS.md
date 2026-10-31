@@ -1902,3 +1902,10 @@
 - Chọn: Danh sách cho phép: heredoc chỉ hiểu dạng đơn giản (dấu kết [A-Za-z0-9_.-]+ trần, hoặc bọc trọn '…'/"…", hoặc một \ đầu; <<, <<-; dòng mở cân nháy/ngoặc; << không nằm trong $((, $[, ${, ((, <((, >((); mọi dạng khác → ScanTooComplex (chặn); che thân heredoc có nháy trước _ShellScan (🟠6)
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): chặn khi không chắc thay cho mô phỏng bash; đóng cả 🔴 mới lẫn có từ trước cùng lớp bằng một luật; dạng agent thực dùng (cat <<'EOF', <<EOF, <<-EOF, git commit -F - <<EOF) vẫn chạy — bench đối chứng giữ; đơn giản, test được (tiêu chí 3). Revert mất bản sửa R1–R4/AUD-SEC-190
 - Đường lùi: Revert commit của lượt này về 9ee24d2; chặn oan lộ ra → thêm dạng vào danh sách cho phép kèm test
+
+### D-271 · 2026-10-31T07:07:12+00:00 · PR #361: review sau D-270 còn 2 🔴 (luật bash 5.2 'dấu kết + )' trong $(…) kết heredoc; case đóng khung $( làm taint không chặn)
+
+- Phương án: (1) Một lần sửa nữa đúng hai chỗ reviewer chỉ: op trong $( có dòng thân bắt đầu bằng dấu kết rồi ')' → ScanTooComplex; taint + có '<<' (không phải '<<<') → ScanTooComplex; ghi sổ 2 🔴 + 1 🟠 có từ trước · (2) Revert guard #361 về main
+- Chọn: Một lần sửa nữa đúng hai chỗ reviewer chỉ: op trong $( có dòng thân bắt đầu bằng dấu kết rồi ')' → ScanTooComplex; taint + có '<<' (không phải '<<<') → ScanTooComplex; ghi sổ 2 🔴 + 1 🟠 có từ trước
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: lượt D-270 đóng 15 lỗ, còn 2 chỗ hẹp đã chỉ rõ cách sửa fail-closed; revert mở lại các lỗ đã đóng
+- Đường lùi: Revert commit lượt này về 6fe090e
