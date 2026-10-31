@@ -1348,7 +1348,7 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
 # Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
 CD_FLAG_RE = re.compile(r"-[LPe@]+")
 # `~+`/`~-` đứng đầu: bash mở thành `$PWD`/`$OLDPWD` (biến gán lại được) — `cd` tới đó như `cd $PWD`: không biết
-TILDE_DIR_RE = re.compile(r"~[+-](?=/|$)")
+TILDE_DIR_RE = re.compile(r"~(?:[+-][0-9]*|[0-9]+)(?=/|$)")  # cả `~N`/`~+N`/`~-N` (ngăn xếp thư mục, AUD-SEC-232)
 
 
 def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
@@ -3369,10 +3369,12 @@ class _ShellScan:
     ở dấu nối cấp ngoài (`;`, `&&`, `||`, `|`, `&`, xuống dòng, ngoặc subshell) và lấy thân thay lệnh ngoài cùng của mỗi
     đoạn. Backtick ghép tuần tự theo ngữ cảnh nháy, không theo chữ thô: backtick nguyên văn đứng trước không làm lệch cặp
     (AUD-SEC-181); `#` trong `$'…'` không mở comment (review #361). `heredoc`: chữ là thân heredoc không nháy — như
-    trong nháy kép mà `"` là chữ. `open`: còn nháy/thay lệnh chưa đóng — không phân tích được."""
+    trong nháy kép mà `"` là chữ. `raw_tick`: thân backtick đọc nguyên văn tới backtick đóng như bash (chỉ `\\` thoát —
+    `#`, nháy trong đó là chữ; D-279, chỉ bộ đọc thân heredoc dùng). `open`: còn nháy/thay lệnh chưa đóng — không phân
+    tích được."""
 
-    def __init__(self, text: str, heredoc: bool = False) -> None:
-        self.text, self.start, self.param = text, 0, False
+    def __init__(self, text: str, heredoc: bool = False, raw_tick: bool = False) -> None:
+        self.text, self.start, self.param, self.raw_tick = text, 0, False, raw_tick
         self.stack: List[Tuple[str, int]] = [("h", 0)] if heredoc else []  # (loại ngữ cảnh, vị trí thân)
         self.base, self.subs = len(self.stack), 0  # `subs` = số thay lệnh đang mở trong `stack`
         self.stages: List[Stage] = []
@@ -3396,6 +3398,8 @@ class _ShellScan:
         c, top = self.text[i], (self.stack[-1][0] if self.stack else "")
         if c == "\\":
             return i + 2
+        if top == "`" and self.raw_tick:
+            return self._close(i) or i + 1
         self.param = self.param or bool(PARAM_RE.match(self.text, i))
         if top in ('"', "h"):
             return self._quoted(i, top)
@@ -5199,9 +5203,10 @@ def _at(target: str, cwd: Optional[str]) -> str:
 EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
 
 
-# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106)
-PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+)(?=/|$)")
-OLDPWD_REF_RE = re.compile(r"^(~-|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
+# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106).
+# `~N`/`~+N`/`~-N` là phần tử ngăn xếp thư mục (`dirs +N`/`-N`): `~0`/`~+0` = `$PWD`, số khác không biết (AUD-SEC-232)
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+|~\+?0+)(?=/|$)")
+OLDPWD_REF_RE = re.compile(r"^(~-[0-9]*|~\+?0*[1-9][0-9]*|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
 PROJECT_REF_RE = re.compile(r"^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})(?=/|$)")
 
 
@@ -5296,7 +5301,60 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         for t, k in restored
         if k == "secret" and not build_local_secret(t, root, cwd)
     ]
+    asks += _ledger_asks(n, root, cwd)
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
+
+
+# sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)
+LEDGER_PATHS = tuple(STAGE_LEDGER.rsplit("/", i)[0] for i in range(STAGE_LEDGER.count("/") + 1))
+COPY_DEST_OPTS = ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix")
+
+
+def _ledger_hit(rel: str) -> bool:
+    """`rel` (có thể là glob, khớp từng cấp như shell — `docs/*` gồm `docs/autopilot`, `docs/*.md` thì không) là sổ giai
+    đoạn hay thư mục tổ tiên của nó: xoá/dời/khôi phục/chép đè là ghi tay sổ (AUD-HAR-154)."""
+    parts = rel.split("/")
+    return any(
+        len(p.split("/")) == len(parts) and all(map(fnmatch.fnmatchcase, p.split("/"), parts)) for p in LEDGER_PATHS
+    )
+
+
+def _removed_targets(n: List[str]) -> List[str]:
+    """Đích bị xoá/dời đi/ghi đè cả cây: `rm`/`unlink`/`shred`, nguồn của `mv`/`git mv`, `git rm`, `find … -delete`,
+    pathspec của `git checkout <rev> --`/`git restore -s`."""
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name == "git" and args[:1] in (["rm"], ["mv"]):
+        pos = _positionals(args[1:])
+        return pos if args[0] == "rm" else pos[:-1]
+    if name == "mv":
+        pos = _positionals(args, MV_VALUE_OPTS)
+        return pos if _flag_value(args, "-t") or _flag_value(args, "--target-directory") else pos[:-1]
+    if name in ("rm", "unlink", "shred"):
+        return _positionals(args)
+    return _find_ledger_roots(args) if name == "find" else _git_file_targets(n)
+
+
+def _find_ledger_roots(args: List[str]) -> List[str]:
+    """Gốc của `find … -delete` có thể trúng sổ: không bộ lọc tên, bộ lọc phủ định, hay mẫu tên/đường khớp một cấp của sổ
+    (`-name '*.json'`, `-path '*autopilot*'`) — `find docs -name evidence -delete` không đụng sổ."""
+    expr = args[_find_parts(args)[1] :]
+    vals = [expr[k + 1].lower() for k, a in enumerate(expr[:-1]) if a in FIND_NAME_TESTS]
+    names = [p.rsplit("/", 1)[-1].lower() for p in LEDGER_PATHS]
+    hit = not vals or bool({"!", "-not"} & set(expr))
+    hit = hit or any(fnmatch.fnmatchcase(m, posixpath.basename(v) or v) or m in v for v in vals for m in names)
+    return _find_delete_roots(args) if hit else []
+
+
+def _ledger_asks(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Ghi tay sổ giai đoạn qua thư mục: xoá/dời thư mục tổ tiên (`rm -r docs/autopilot`, `git mv docs …`), hay chép/dời/
+    liên kết vào thư mục có sẵn mà tên nguồn là tên sổ (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
+    hits = [x for t in _removed_targets(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
+    pos = _positionals(n[1:], COPY_DEST_OPTS) if n[:1] and n[0] in ("cp", "mv", "install", "ln") else []
+    for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
+        if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
+            joined = [posixpath.join(d, posixpath.basename(s.rstrip("/"))) for s in pos[:-1]]
+            hits += [j for j in joined if _ledger_hit(_rel_dir(j, root))]
+    return [EVIDENCE_WHY.format(h) for h in hits]
 
 
 def _rel_dir(target: str, root: str) -> str:
@@ -5514,6 +5572,8 @@ def _xt_yaml_for(d: str) -> str:
 # `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
 GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|new|edit|merge)\b")
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
+# cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `merge -sdb x` (AUD-SEC-188)
+GH_PR_BOOL_SHORT = {"create": "dfw", "new": "dfw", "edit": "", "merge": "smrd"}
 
 
 def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
@@ -5523,16 +5583,19 @@ def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
         rest = rest[2:] if rest[0] in ("-R", "--repo") else rest[1:]
     if rest[:1] not in (["create"], ["new"], ["edit"], ["merge"]):  # `new`: alias của `create`
         return None
+    bools = GH_PR_BOOL_SHORT[rest[0]]
+    short = re.compile(f"-{f'[{bools}]*' if bools else ''}([tbF])(=?)(.*)", re.S)
     out: List[Tuple[str, str]] = []
     for i, x in enumerate(rest[1:], 1):
         nxt = rest[i + 1] if i + 1 < len(rest) else ""
         key, sep, val = x.partition("=")
-        if x in GH_PR_TEXT_OPTS:
-            out.append((GH_PR_TEXT_OPTS[x], nxt))
-        elif sep and key in GH_PR_TEXT_OPTS:
+        m = short.fullmatch(x)
+        if x in GH_PR_TEXT_OPTS or (m and not m.group(2) and not m.group(3)):  # `-t x`, `-dt x`
+            out.append((GH_PR_TEXT_OPTS["-" + m.group(1)] if m else GH_PR_TEXT_OPTS[x], nxt))
+        elif sep and key in GH_PR_TEXT_OPTS and key[:2] == "--":
             out.append((GH_PR_TEXT_OPTS[key], val))
-        elif x[:2] in ("-t", "-b", "-F") and len(x) > 2:  # `-tfeat: x` (pflag)
-            out.append((GH_PR_TEXT_OPTS[x[:2]], x[2:]))
+        elif m:  # `-tfeat: x`, `-t=x`, `-dbX`, `-dF=f` (pflag)
+            out.append((GH_PR_TEXT_OPTS["-" + m.group(1)], m.group(3)))
     return out
 
 
@@ -6004,16 +6067,38 @@ Span = Tuple[int, int, str]  # (đầu, sau cuối, thân) của một thay lệ
 
 def _backtick_scripts(cmd: str) -> List[str]:
     """Thân `` `…` `` (thay lệnh kiểu cũ) ngoài nháy đơn — shlex không tách backtick nên lệnh bên trong từng lọt."""
-    return [body for _, _, body in _backtick_spans(cmd)]
+    return list(dict.fromkeys(body for spans in _span_readings(cmd, _backtick_spans) for _, _, body in spans))
 
 
-def _backtick_spans(cmd: str) -> List[Span]:
+def _span_readings(cmd: str, finder: Callable[..., List[Span]]) -> List[List[Span]]:
+    """Các cách đọc thay lệnh của `cmd`: đọc `$'…'` như bash (AUD-SEC-233) và, khi khác, cách đọc cũ (`$'` = `$` + nháy
+    đơn). Bộ tìm không biết comment: `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách đọc cũ thấy (hai cái lệch bù nhau) — dùng
+    cả hai, chỉ thêm, không bớt so với bản cũ (D-279)."""
+    spans = finder(cmd)
+    if "$'" not in cmd and "$$" not in cmd:
+        return [spans]
+    old = finder(cmd, ansi=False)
+    return [spans] if old == spans else [spans, old]
+
+
+def _dollar_quote_end(cmd: str, i: int) -> int:
+    """Ngoài nháy: `$'…'` (ANSI-C, `\\'` không đóng) ở `i` → vị trí sau nó; `$$` trước `'`/`$` → vị trí sau `$$`
+    (`$$'…'` là `$$` + nháy đơn, `$$$'…'` là `$$` + ANSI-C); khác → 0. Bộ tìm thay lệnh từng đọc `$'\\''` như `'\\'` +
+    `'` mở nháy nên bỏ qua thay lệnh sau đó (AUD-SEC-233)."""
+    if cmd.startswith("$$", i) and cmd[i + 2 : i + 3] in ("'", "$"):
+        return i + 2
+    return _skip_single(cmd, i) if cmd.startswith("$'", i) else 0
+
+
+def _backtick_spans(cmd: str, ansi: bool = True) -> List[Span]:
+    """Backtick ngoài nháy đơn; `ansi=False`: cách đọc cũ, `$'…'` như nháy đơn thường (`_span_readings`)."""
     out: List[Span] = []
     quote, start, i = "", -1, 0
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and quote != "'":
-            i += 2
+        skip = 0 if quote or start >= 0 or not ansi else _dollar_quote_end(cmd, i)
+        if skip or c == "\\" and quote != "'":
+            i = skip or i + 2
             continue
         if c == "'" and start < 0 and quote != '"':
             quote = "" if quote == "'" else "'"
@@ -6032,7 +6117,7 @@ def _backtick_spans(cmd: str) -> List[Span]:
 def _dollar_scripts(cmd: str) -> List[str]:
     """Thân `$(…)` ngoài nháy đơn — kể cả trong nháy kép (`git commit -m "$(rm -rf ~)"`), nơi shlex coi là chữ; bỏ
     `$((…))` (số học)."""
-    return [body for _, _, body in _dollar_spans(cmd)]
+    return list(dict.fromkeys(body for spans in _span_readings(cmd, _dollar_spans) for _, _, body in spans))
 
 
 ARITH_SCAN_MAX = 4096  # `$((` chưa thấy ngoặc đóng trong chừng này ký tự → coi là thay lệnh (quét, không bỏ qua)
@@ -6061,14 +6146,16 @@ def _arith_at(cmd: str, i: int, pairs: Optional[Dict[int, int]] = None) -> bool:
     return j < i + ARITH_SCAN_MAX and cmd.startswith(")", j + 1)
 
 
-def _dollar_spans(cmd: str) -> List[Span]:
+def _dollar_spans(cmd: str, ansi: bool = True) -> List[Span]:
+    """`$(…)` ngoài nháy đơn; `ansi=False`: cách đọc cũ, `$'…'` như nháy đơn thường (`_span_readings`)."""
     out: List[Span] = []
     pairs = _paren_pairs(cmd) if "$((" in cmd else {}
     quote, i = "", 0
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and quote != "'":
-            i += 2
+        skip = 0 if quote or not ansi else _dollar_quote_end(cmd, i)
+        if skip or c == "\\" and quote != "'":
+            i = skip or i + 2
             continue
         if c in "'\"" and quote in ("", c) and (c == '"' or quote != '"'):
             quote = "" if quote == c else c
@@ -6087,6 +6174,28 @@ def _dollar_spans(cmd: str) -> List[Span]:
 def _expanded_heredocs(cmd: str) -> List[str]:
     """Thân heredoc có dấu kết KHÔNG nháy (`<<A`): bash thay `$(…)`/backtick trong thân trước khi đưa vào lệnh."""
     return ["\n".join(body) for _, m, body in _heredocs(join_continuations(cmd)) if not _heredoc_word(m)[1]]
+
+
+def _heredoc_body_scripts(body: str) -> List[str]:
+    """Thân thay lệnh (`$(…)`, backtick) trong thân heredoc dấu kết không nháy, đọc như bash: `'`/`"` trong thân là chữ,
+    không mở nháy (AUD-SEC-196: `it's $(rm -rf ~)`); thân backtick đọc nguyên văn (`` `echo #` ``, `` `: '` `` không
+    nuốt backtick sau). Thay lệnh không đóng → phần từ thân nó tới hết là script (chiều chặt). `$((…))` là số học nhưng
+    thay lệnh trong nó vẫn chạy → quét thân nó như thân heredoc. Hợp với bộ tìm cũ (`_dollar_scripts`,
+    `_backtick_scripts`): chỉ thêm script, không bớt (D-279 — bản thay thế từng cho lọt 123 lệnh bản cũ chặn)."""
+    out = _dollar_scripts(body) + _backtick_scripts(body)
+    todo = [body]
+    while todo:
+        text = todo.pop()
+        scan = _ShellScan(text, heredoc=True, raw_tick=True)
+        for st in scan.stages:
+            for k, b, _, _ in st.spans:
+                if k == "$" and _arith_at(f"$({b})", 0):
+                    todo.append(b[1:-1])
+                else:
+                    out.append(b)
+        if scan.open:
+            out.append(text[scan.stack[scan.base][1] :])
+    return list(dict.fromkeys(out))
 
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
@@ -6123,7 +6232,7 @@ def _nested_pairs(
     out += [(b, here) for sc, here in list(out) for b in _cat_heredoc_bodies(sc)]
     out += _procsub_scripts(tokens, _token_dirs(tokens, placed))
     visited = list(dict.fromkeys([start, *(here for _, here in placed)]))
-    bodies = [s for body in _expanded_heredocs(cmd) for s in _dollar_scripts(body) + _backtick_scripts(body)]
+    bodies = [s for body in _expanded_heredocs(cmd) for s in _heredoc_body_scripts(body)]
     out += [(s, d) for s in bodies for d in visited]  # thân heredoc mở rộng: thư mục mọi lệnh (chiều chặt)
     out += _shell_feeds(tokens, placed)
     out += [(s, here) for c, here in placed for s in _here_strings(c)]
@@ -6134,9 +6243,11 @@ def _nested_pairs(
 def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
     """Thân thay lệnh (`finder` = `_dollar_spans`/`_backtick_spans`) kèm thư mục lệnh chứa nó; không lệnh nào dời thư
     mục → mọi thân ở `start`."""
-    spans = finder(text)
-    dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
-    return [(body, d) for (_, _, body), d in zip(spans, dirs)]
+    out: Placed = []
+    for spans in _span_readings(text, finder):
+        dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
+        out += [(body, d) for (_, _, body), d in zip(spans, dirs)]
+    return list(dict.fromkeys(out))
 
 
 def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optional[str]]:
@@ -6284,13 +6395,16 @@ def _subst_words(body: str) -> List[str]:
 
 def _subst_variants(base: str) -> List[str]:
     """Dòng lệnh với mỗi thay lệnh ngoài cùng đổi thành giá trị của nó (`_subst_words`) — tối đa LIFT_PICKS² bản."""
-    spans = sorted(_dollar_spans(base) + _backtick_spans(base))
-    outer = [sp for k, sp in enumerate(spans) if not any(o[0] <= sp[0] and sp[1] <= o[1] for o in spans[:k])]
-    variants = [base]
-    for start, end, body in reversed(outer):
-        vals = _subst_words(body)
-        variants = [v[:start] + val + v[end:] for v in variants for val in vals][: LIFT_PICKS * LIFT_PICKS]
-    return variants if outer else []
+    out: List[str] = []
+    for ansi in (True, False) if "$'" in base or "$$" in base else (True,):  # hai cách đọc `$'` (`_span_readings`)
+        spans = sorted(_dollar_spans(base, ansi) + _backtick_spans(base, ansi))
+        outer = [sp for k, sp in enumerate(spans) if not any(o[0] <= sp[0] and sp[1] <= o[1] for o in spans[:k])]
+        variants = [base]
+        for start, end, body in reversed(outer):
+            vals = _subst_words(body)
+            variants = [v[:start] + val + v[end:] for v in variants for val in vals][: LIFT_PICKS * LIFT_PICKS]
+        out += variants if outer else []
+    return list(dict.fromkeys(out))
 
 
 def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
@@ -8162,7 +8276,7 @@ def _fd_ref(target: str) -> str:
 def _subst_secrets(args: List[str], root: str) -> List[str]:
     """File bí mật đọc trong thay lệnh của đối số (`printf %s "$(cat .env)" >/dev/tcp/…`, `curl -d "\\`cat .env\\`"`)."""
     line = " ".join(args)  # thay lệnh không nháy bị tách thành nhiều token (`` echo `cat .env` ``)
-    bodies = [sp[2] for sp in (*_dollar_spans(line), *_backtick_spans(line))] if "$(" in line or "`" in line else []
+    bodies = _dollar_scripts(line) + _backtick_scripts(line) if "$(" in line or "`" in line else []
     return [w for body in bodies for w in tokenize(body) if _is_secret_file(w, root)]
 
 

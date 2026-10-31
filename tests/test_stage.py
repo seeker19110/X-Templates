@@ -960,6 +960,55 @@ class StageGuardTest(unittest.TestCase):
         self.assertFalse(self.g._approves_stage(argv))
         self.assertLess(time.monotonic() - start, 2.0)
 
+    def test_stage_ledger_parent_dir(self):
+        """AUD-HAR-154: xoá/dời/khôi phục thư mục tổ tiên của sổ (`docs/autopilot`, `docs`) là ghi tay sổ; chép/dời/liên
+        kết VÀO thư mục có sẵn thì đích là thư mục nối tên nguồn (`cp x/STAGE.json docs/autopilot/`)."""
+        for cmd in (
+            "rm -r docs/autopilot",
+            "rm -rf docs/autopilot/",
+            "rm -rf docs",
+            "rm -rf ./docs",
+            "rm -r docs/auto*",
+            "rm docs/autopilot/*.json",
+            "git rm -r docs/autopilot",
+            "git rm -rq docs",
+            "mv docs/autopilot /tmp/x",
+            "mv -t /tmp docs/autopilot",
+            "git mv docs/autopilot docs/x",
+            "git checkout HEAD~1 -- docs/autopilot",
+            "git restore -s HEAD~2 docs",
+            "find docs -delete",
+            "find docs -name '*.json' -delete",
+            "find docs -path '*autopilot*' -delete",
+            "find docs ! -name x.md -delete",
+            "cp /tmp/STAGE.json docs/autopilot/",
+            "cp /tmp/STAGE.json docs/autopilot",
+            "mv /tmp/STAGE.json docs/autopilot",
+            "ln -sf /tmp/STAGE.json docs/autopilot/",
+            "install -m 644 /tmp/STAGE.json docs/autopilot/",
+            "cd docs && rm -r autopilot",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+        for cmd in (
+            "cp /tmp/notes.md docs/",
+            "mv /tmp/a.md docs/autopilot/",
+            "cp /tmp/x.md docs/autopilot/PLAN-x.md",
+            "rm docs/autopilot/PLAN-old.md",
+            "rm -r docs/ops/old",
+            "git mv docs/autopilot/PLAN-a.md docs/autopilot/PLAN-b.md",
+            "git rm docs/old.md",
+            "mkdir -p docs/autopilot/x",
+            "ls docs docs/autopilot",
+            "cp -r docs /tmp/docs-copy",
+            "git checkout -- docs/README.md",
+            "mv docs/a.md docs/b.md",
+            "find docs -name evidence -delete",
+            "find docs -name '*.tmp' -delete",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.decide(cmd), "deny")
+
     def test_handwrite_ledger_denied(self):
         self.assertEqual(self.g.classify_path(xt.STAGE_LEDGER), "evidence")
         self.assertEqual(self.g.STAGE_LEDGER, xt.STAGE_LEDGER)
