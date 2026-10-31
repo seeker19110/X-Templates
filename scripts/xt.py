@@ -11599,13 +11599,15 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
 def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Optional[str], List[str], str]:
     """(lỗi đọc git, file mã đổi từ review `last` tới `head`, sổ audit ở head) — so cây `--no-renames`; miễn sổ audit và file
     giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) trừ file PR đã đổi lúc review: trả nó về bản nhánh đích hay
-    xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135)."""
+    xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135). Dự án
+    ở thư mục con (`apps/web`): sổ đọc từ dự án (`./`), miễn theo tiền tố dự án; file ngoài dự án vẫn tính (AUD-HAR-155)."""
     since = _git(base, "diff", "--no-renames", "--name-only", last, head)
     other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
     fork = _git(base, "merge-base", f"origin/{target}", last)
-    show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
+    prefix = _git(base, "rev-parse", "--show-prefix")
+    show = _git(base, "show", f"{head}:./{AUDIT_STATUS_DEFAULT}")
     reviewed = _git(base, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
-    bad = next((r for r in (since, other, fork, show, reviewed) if r.returncode), None)
+    bad = next((r for r in (since, other, fork, prefix, show, reviewed) if r.returncode), None)
     if bad is not None:
         return (
             f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
@@ -11615,7 +11617,8 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
             "",
         )
     mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
-    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT}), show.stdout
+    book = prefix.stdout.strip() + AUDIT_STATUS_DEFAULT
+    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {book}), show.stdout
 
 
 def _debt_problem(
