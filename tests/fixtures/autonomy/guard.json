@@ -13089,6 +13089,58 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec195-paren-hash-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "true $(true)#; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec225-locale-quote-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-225"
+   ],
+   "input": {
+    "command": "$\"rm\" -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec226-trap-body-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-226"
+   ],
+   "input": {
+    "command": "trap 'rm -rf ~' EXIT"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec226-trap-benign",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-226"
+   ],
+   "input": {
+    "command": "trap 'echo bye' EXIT"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
