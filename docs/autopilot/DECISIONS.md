@@ -1972,3 +1972,10 @@
 - Chọn: Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa lượt 4 đo được (255 test guard, 300 hooks, bench 997 ca xanh) và các lớp còn lại có từ trước (base cũng lọt, fuzz: base 400 ca lọt, head giảm mạnh, không ca nào lọt ở head mà base chặn); gộp vào sổ riêng tránh phình PR
 - Đường lùi: Hoàn nguyên commit sửa; đưa AUD-SEC-195 về mở
+
+### D-284 · 2026-10-31T22:05:12+00:00 · PR #372: một lượt sửa nữa sau 2 lượt review chưa sạch (ADR-0059/0053)
+
+- Phương án: (1) Áp sửa một dòng của reviewer (nháy xen giữa biến IFS và dấu thăng), ghi lớp mới vào sổ, mở thêm một lượt rà · (2) Dừng PR, đưa AUD-SEC-232 về mở
+- Chọn: Áp sửa một dòng của reviewer (nháy xen giữa biến IFS và dấu thăng), ghi lớp mới vào sổ, mở thêm một lượt rà
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: sửa đã được reviewer thử, đóng 15 ca và không lệch quyết định nào trên 10035 chuỗi test; lớp mới tìm thêm vào sổ riêng, không gánh vào PR
+- Đường lùi: Hoàn nguyên commit sửa, đưa AUD-SEC-232 về mở
