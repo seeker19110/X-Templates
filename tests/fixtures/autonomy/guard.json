@@ -13515,13 +13515,273 @@
   }
  },
  {
-  "id": "guard-control-sec233-quoted-backtick-ok",
-  "origin": "control",
+  "id": "guard-d279-here-tick-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n`echo #`\n`rm -rf ~`\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-tick-apos-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n`: '` `rm -rf ~`\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-tick-hash-push",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n`echo #`\n`git push --force origin main`\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-arith-comsub-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n$(( $(rm -rf ~) ))\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-arith-tick-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n$(( `rm -rf ~` ))\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-apos-tick-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's `echo #`\n`rm -rf ~`\nEOF"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-sample-tick-apos",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<-E\n`echo '``sudo true`\n<<'E'<<'E' true | x | \nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-sample-tick-hash",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<-E\n`echo a # b`\n<<'E' && #<<E`sudo true`$(true)echo a\n$$';\nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-sample-brace",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<E\n\\#;${x:-)}\n`echo '` && echo a;`sudo true`\nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-sample-case",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<-E\nf() | `echo '`\n'#'\n$(case x in x) true;; esac)\n`sudo true`true | \nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-here-sample-dq",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<E\n`echo \"` && true`sudo true` && \nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-ansi-brace-comment-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo ${x:-$'\\''} '} # '; $'rm' -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-tick-hash-apos-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo `true #'`\nrm -rf ~\n'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-tick-hash-apos-ansi-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo `true #'`\n$'rm' -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-array-syntax-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "a=((1))#'\nrm -rf ~\n'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-array-syntax-hash-rm2",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "a+=(;)#'\nrm -rf ~\n'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-ansi-comment-tick-rm",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-233"
   ],
   "input": {
-   "command": "echo $'\\'' '`rm -rf ~`'"
+   "command": "$'\\''\n# c@(x);'\n`rm -rf ~`"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-pid-ansi-tick-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $$$'\\'' `rm -rf ~`"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-d279-pid-ansi-comsub-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $$$'\\'' \"$(rm -rf ~)\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-d279-here-tick-hash-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\n`echo #` $(date)\nEOF"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-control-d279-here-arith-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-196"
+  ],
+  "input": {
+   "command": "cat <<EOF\nit's $((1 + 2)) `date`\nEOF"
   },
   "expect": {
    "allowed": true

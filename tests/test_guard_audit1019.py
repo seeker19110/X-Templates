@@ -2445,7 +2445,8 @@ class TildeDirStackNumberTest(unittest.TestCase):
 class AnsiQuoteThenBacktickTest(unittest.TestCase):
     """AUD-SEC-233: `$'\\''` là MỘT ký tự `'` (ANSI-C, `\\'` không đóng nháy); bộ tìm backtick từng đọc nó như `'…'` rồi
     một `'` mở nháy, nên backtick sau đó (`` `rm -rf ~` ``) nằm "trong nháy" và không được quét. `$$'…'` là `$$` + nháy
-    đơn (không phải ANSI-C); trong nháy kép `$'` không phải ANSI-C."""
+    đơn (không phải ANSI-C), `$$$'…'` là `$$` + ANSI-C; trong nháy kép `$'` không phải ANSI-C. Cách đọc cũ (`$'` = `$` +
+    nháy đơn) vẫn được dùng thêm (D-279): bộ tìm không biết comment nên `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách cũ thấy."""
 
     def test_ansi_quote_then_backtick(self):
         for cmd in (
@@ -2456,14 +2457,75 @@ class AnsiQuoteThenBacktickTest(unittest.TestCase):
             "echo $'\\'' `git push --force origin main`",
             "echo $'\\'' \"$(rm -rf ~)\"",  # cùng lỗi ở bộ tìm `$(…)`
             "x=$'\\''\"$(rm -rf ~)\"",
+            "echo $$$'\\'' `rm -rf ~`",  # `$$` + `$'\\''`
+            "echo $$$'\\'' \"$(rm -rf ~)\"",
+            "$'\\''\n# c@(x);'\n`rm -rf ~`",  # comment có nháy lẻ: chỉ cách đọc cũ thấy backtick
+            "echo $'\\'' '`rm -rf ~`'",  # bash: chữ trong nháy đơn; cách đọc cũ (như main) vẫn chặn — chiều chặt
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
-        for cmd in ("echo $'\\'' '`rm -rf ~`'", 'echo "$\'" `date` "\'"', "echo $'\\'' `date`"):
+        for cmd in ('echo "$\'" `date` "\'"', "echo $'\\'' `date`", "echo $$ $'a' `date`"):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
-        self.assertEqual(guard._backtick_scripts("echo $'\\'' `a` $$'`b`'"), ["a"])
-        self.assertEqual(guard._dollar_scripts("echo $'\\'' \"$(a)\" $$'$(b)' $$$(c)"), ["a", "c"])
+        self.assertEqual(guard._backtick_spans("echo $'\\'' `a` $$'`b`'"), [(11, 14, "a")])
+        self.assertEqual(guard._backtick_spans("echo $$$'\\'' `a`"), [(13, 16, "a")])
+        self.assertEqual([b for _, _, b in guard._dollar_spans("echo $'\\'' \"$(a)\" $$'$(b)' $$$(c)")], ["a", "c"])
+        # hợp hai cách đọc: không bớt thân nào cách cũ thấy
+        self.assertEqual(guard._backtick_scripts("echo $'\\'' `a` $$'`b`'"), ["a", "b"])
+        self.assertEqual(guard._backtick_scripts("echo `a`"), ["a"])
+
+
+class HeredocBacktickRegressionTest(unittest.TestCase):
+    """D-279 (review #363 lượt 1): bản đọc thân heredoc mới (AUD-SEC-196) từng cho lọt lệnh main chặn — thân backtick
+    có `#`/`'` (bash đọc nguyên văn tới backtick đóng), `$((…))` chứa thay lệnh. Thân backtick nay đọc nguyên văn, số
+    học được quét bên trong, và bộ tìm cũ vẫn chạy song song (chỉ thêm, không bớt). Các ca dưới đây bash chạy thật."""
+
+    def test_heredoc_backtick_regressions(self):
+        for cmd in (
+            "cat <<EOF\n`echo #`\n`rm -rf ~`\nEOF",
+            "cat <<EOF\n`: '` `rm -rf ~`\nEOF",
+            "cat <<EOF\n`echo #`\n`git push --force origin main`\nEOF",
+            "cat <<EOF\n$(( $(rm -rf ~) ))\nEOF",
+            "cat <<EOF\n$(( `rm -rf ~` ))\nEOF",
+            "cat <<EOF\nit's `echo #`\n`rm -rf ~`\nEOF",  # cả bộ tìm cũ lẫn bản trước đều sót
+            "cat <<EOF\n`echo '`\n`rm -rf ~`\nEOF",
+            "x=$(cat <<EOF\n`echo #` $(( `rm -rf ~` ))\nEOF\n)",
+            # mẫu từ 123 ca main chặn mà bản trước cho qua (payload gốc `sudo true`)
+            "cat <<-E\n`echo '``sudo true`\n<<'E'<<'E' true | x | \nE",
+            "cat <<-E\n`echo a # b`\n<<'E' && #<<E`sudo true`$(true)echo a\n$$';\nE",
+            "cat <<E\n\\#;${x:-)}\n`echo '` && echo a;`sudo true`\nE",
+            "cat <<-E\n`echo '` \\\" && `true``sudo true`\nE",
+            "cat <<-E\nf() | `echo '`\n'#'\n$(case x in x) true;; esac)\n`sudo true`true | \nE",
+            "cat <<-E\n# && `echo '` |  #true`sudo true`;\nE",
+            'cat <<-E\na=b && <<E | `echo a # b``echo "``sudo true`((1));\nE',
+            'cat <<E\n`echo "` && true`sudo true` && \nE',
+            "cat <<-E\n`true`# c | \";echo a\n`echo '``sudo true` \nE",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "cat <<EOF\n`echo #` $(date)\nEOF",
+            "cat <<EOF\nit's $((1 + 2)) `date`\nEOF",
+            "cat <<'EOF'\n`echo #`\n`rm -rf ~`\nEOF",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        self.assertEqual(guard._heredoc_body_scripts("`echo #`\n`rm -rf ~`"), ["echo #", "rm -rf ~"])
+        self.assertEqual(guard._heredoc_body_scripts("$(( $(a) + `b` ))"), ["a", "b"])
+        self.assertIn("a", guard._heredoc_body_scripts("x $(( 1 + $(( $(a) )) ))"))
+
+    def test_comment_reader_regressions_stay_denied(self):
+        """Ca main chặn mà bản `_CommentStrip` (AUD-SEC-195, đã gỡ) từng cho qua — khoá để bản sửa sau không lặp."""
+        for cmd in (
+            "echo ${x:-$'\\''} '} # '; $'rm' -rf ~",
+            "echo `true #'`\nrm -rf ~\n'",
+            "echo `true #'`\n$'rm' -rf ~",
+            "a=((1))#'\nrm -rf ~\n'",
+            "a+=(;)#'\nrm -rf ~\n'",
+            "a=((1))#'\ngit push --force origin main\n'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
 
 
 if __name__ == "__main__":

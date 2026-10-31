@@ -3369,10 +3369,12 @@ class _ShellScan:
     ở dấu nối cấp ngoài (`;`, `&&`, `||`, `|`, `&`, xuống dòng, ngoặc subshell) và lấy thân thay lệnh ngoài cùng của mỗi
     đoạn. Backtick ghép tuần tự theo ngữ cảnh nháy, không theo chữ thô: backtick nguyên văn đứng trước không làm lệch cặp
     (AUD-SEC-181); `#` trong `$'…'` không mở comment (review #361). `heredoc`: chữ là thân heredoc không nháy — như
-    trong nháy kép mà `"` là chữ. `open`: còn nháy/thay lệnh chưa đóng — không phân tích được."""
+    trong nháy kép mà `"` là chữ. `raw_tick`: thân backtick đọc nguyên văn tới backtick đóng như bash (chỉ `\\` thoát —
+    `#`, nháy trong đó là chữ; D-279, chỉ bộ đọc thân heredoc dùng). `open`: còn nháy/thay lệnh chưa đóng — không phân
+    tích được."""
 
-    def __init__(self, text: str, heredoc: bool = False) -> None:
-        self.text, self.start, self.param = text, 0, False
+    def __init__(self, text: str, heredoc: bool = False, raw_tick: bool = False) -> None:
+        self.text, self.start, self.param, self.raw_tick = text, 0, False, raw_tick
         self.stack: List[Tuple[str, int]] = [("h", 0)] if heredoc else []  # (loại ngữ cảnh, vị trí thân)
         self.base, self.subs = len(self.stack), 0  # `subs` = số thay lệnh đang mở trong `stack`
         self.stages: List[Stage] = []
@@ -3396,6 +3398,8 @@ class _ShellScan:
         c, top = self.text[i], (self.stack[-1][0] if self.stack else "")
         if c == "\\":
             return i + 2
+        if top == "`" and self.raw_tick:
+            return self._close(i) or i + 1
         self.param = self.param or bool(PARAM_RE.match(self.text, i))
         if top in ('"', "h"):
             return self._quoted(i, top)
@@ -6063,24 +6067,36 @@ Span = Tuple[int, int, str]  # (đầu, sau cuối, thân) của một thay lệ
 
 def _backtick_scripts(cmd: str) -> List[str]:
     """Thân `` `…` `` (thay lệnh kiểu cũ) ngoài nháy đơn — shlex không tách backtick nên lệnh bên trong từng lọt."""
-    return [body for _, _, body in _backtick_spans(cmd)]
+    return list(dict.fromkeys(body for spans in _span_readings(cmd, _backtick_spans) for _, _, body in spans))
+
+
+def _span_readings(cmd: str, finder: Callable[..., List[Span]]) -> List[List[Span]]:
+    """Các cách đọc thay lệnh của `cmd`: đọc `$'…'` như bash (AUD-SEC-233) và, khi khác, cách đọc cũ (`$'` = `$` + nháy
+    đơn). Bộ tìm không biết comment: `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách đọc cũ thấy (hai cái lệch bù nhau) — dùng
+    cả hai, chỉ thêm, không bớt so với bản cũ (D-279)."""
+    spans = finder(cmd)
+    if "$'" not in cmd and "$$" not in cmd:
+        return [spans]
+    old = finder(cmd, ansi=False)
+    return [spans] if old == spans else [spans, old]
 
 
 def _dollar_quote_end(cmd: str, i: int) -> int:
-    """Ngoài nháy: `$'…'` (ANSI-C, `\\'` không đóng) ở `i` → vị trí sau nó; `$$'` → vị trí của `'` (`$$'…'` là `$$` +
-    nháy đơn); khác → 0. Bộ tìm thay lệnh từng đọc `$'\\''` như `'\\'` + `'` mở nháy nên bỏ qua thay lệnh sau đó
-    (AUD-SEC-233)."""
-    if cmd.startswith("$$'", i):
+    """Ngoài nháy: `$'…'` (ANSI-C, `\\'` không đóng) ở `i` → vị trí sau nó; `$$` trước `'`/`$` → vị trí sau `$$`
+    (`$$'…'` là `$$` + nháy đơn, `$$$'…'` là `$$` + ANSI-C); khác → 0. Bộ tìm thay lệnh từng đọc `$'\\''` như `'\\'` +
+    `'` mở nháy nên bỏ qua thay lệnh sau đó (AUD-SEC-233)."""
+    if cmd.startswith("$$", i) and cmd[i + 2 : i + 3] in ("'", "$"):
         return i + 2
     return _skip_single(cmd, i) if cmd.startswith("$'", i) else 0
 
 
-def _backtick_spans(cmd: str) -> List[Span]:
+def _backtick_spans(cmd: str, ansi: bool = True) -> List[Span]:
+    """Backtick ngoài nháy đơn; `ansi=False`: cách đọc cũ, `$'…'` như nháy đơn thường (`_span_readings`)."""
     out: List[Span] = []
     quote, start, i = "", -1, 0
     while i < len(cmd):
         c = cmd[i]
-        skip = 0 if quote or start >= 0 else _dollar_quote_end(cmd, i)
+        skip = 0 if quote or start >= 0 or not ansi else _dollar_quote_end(cmd, i)
         if skip or c == "\\" and quote != "'":
             i = skip or i + 2
             continue
@@ -6101,7 +6117,7 @@ def _backtick_spans(cmd: str) -> List[Span]:
 def _dollar_scripts(cmd: str) -> List[str]:
     """Thân `$(…)` ngoài nháy đơn — kể cả trong nháy kép (`git commit -m "$(rm -rf ~)"`), nơi shlex coi là chữ; bỏ
     `$((…))` (số học)."""
-    return [body for _, _, body in _dollar_spans(cmd)]
+    return list(dict.fromkeys(body for spans in _span_readings(cmd, _dollar_spans) for _, _, body in spans))
 
 
 ARITH_SCAN_MAX = 4096  # `$((` chưa thấy ngoặc đóng trong chừng này ký tự → coi là thay lệnh (quét, không bỏ qua)
@@ -6130,13 +6146,14 @@ def _arith_at(cmd: str, i: int, pairs: Optional[Dict[int, int]] = None) -> bool:
     return j < i + ARITH_SCAN_MAX and cmd.startswith(")", j + 1)
 
 
-def _dollar_spans(cmd: str) -> List[Span]:
+def _dollar_spans(cmd: str, ansi: bool = True) -> List[Span]:
+    """`$(…)` ngoài nháy đơn; `ansi=False`: cách đọc cũ, `$'…'` như nháy đơn thường (`_span_readings`)."""
     out: List[Span] = []
     pairs = _paren_pairs(cmd) if "$((" in cmd else {}
     quote, i = "", 0
     while i < len(cmd):
         c = cmd[i]
-        skip = 0 if quote else _dollar_quote_end(cmd, i)
+        skip = 0 if quote or not ansi else _dollar_quote_end(cmd, i)
         if skip or c == "\\" and quote != "'":
             i = skip or i + 2
             continue
@@ -6161,11 +6178,24 @@ def _expanded_heredocs(cmd: str) -> List[str]:
 
 def _heredoc_body_scripts(body: str) -> List[str]:
     """Thân thay lệnh (`$(…)`, backtick) trong thân heredoc dấu kết không nháy, đọc như bash: `'`/`"` trong thân là chữ,
-    không mở nháy (AUD-SEC-196: `it's $(rm -rf ~)`). Thay lệnh không đóng → phần từ thân nó tới hết là script (chiều
-    chặt). `$((…))` là số học, không phải thay lệnh (như `_dollar_spans`)."""
-    scan = _ShellScan(body, heredoc=True)
-    spans = [b for st in scan.stages for k, b, _, _ in st.spans if not (k == "$" and _arith_at(f"$({b})", 0))]
-    return spans + [body[scan.stack[scan.base][1] :]] if scan.open else spans
+    không mở nháy (AUD-SEC-196: `it's $(rm -rf ~)`); thân backtick đọc nguyên văn (`` `echo #` ``, `` `: '` `` không
+    nuốt backtick sau). Thay lệnh không đóng → phần từ thân nó tới hết là script (chiều chặt). `$((…))` là số học nhưng
+    thay lệnh trong nó vẫn chạy → quét thân nó như thân heredoc. Hợp với bộ tìm cũ (`_dollar_scripts`,
+    `_backtick_scripts`): chỉ thêm script, không bớt (D-279 — bản thay thế từng cho lọt 123 lệnh bản cũ chặn)."""
+    out = _dollar_scripts(body) + _backtick_scripts(body)
+    todo = [body]
+    while todo:
+        text = todo.pop()
+        scan = _ShellScan(text, heredoc=True, raw_tick=True)
+        for st in scan.stages:
+            for k, b, _, _ in st.spans:
+                if k == "$" and _arith_at(f"$({b})", 0):
+                    todo.append(b[1:-1])
+                else:
+                    out.append(b)
+        if scan.open:
+            out.append(text[scan.stack[scan.base][1] :])
+    return list(dict.fromkeys(out))
 
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
@@ -6213,9 +6243,11 @@ def _nested_pairs(
 def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
     """Thân thay lệnh (`finder` = `_dollar_spans`/`_backtick_spans`) kèm thư mục lệnh chứa nó; không lệnh nào dời thư
     mục → mọi thân ở `start`."""
-    spans = finder(text)
-    dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
-    return [(body, d) for (_, _, body), d in zip(spans, dirs)]
+    out: Placed = []
+    for spans in _span_readings(text, finder):
+        dirs = _span_dirs(text, spans, start) if moved and spans else [start] * len(spans)
+        out += [(body, d) for (_, _, body), d in zip(spans, dirs)]
+    return list(dict.fromkeys(out))
 
 
 def _span_dirs(text: str, spans: List[Span], start: Optional[str]) -> List[Optional[str]]:
@@ -6363,13 +6395,16 @@ def _subst_words(body: str) -> List[str]:
 
 def _subst_variants(base: str) -> List[str]:
     """Dòng lệnh với mỗi thay lệnh ngoài cùng đổi thành giá trị của nó (`_subst_words`) — tối đa LIFT_PICKS² bản."""
-    spans = sorted(_dollar_spans(base) + _backtick_spans(base))
-    outer = [sp for k, sp in enumerate(spans) if not any(o[0] <= sp[0] and sp[1] <= o[1] for o in spans[:k])]
-    variants = [base]
-    for start, end, body in reversed(outer):
-        vals = _subst_words(body)
-        variants = [v[:start] + val + v[end:] for v in variants for val in vals][: LIFT_PICKS * LIFT_PICKS]
-    return variants if outer else []
+    out: List[str] = []
+    for ansi in (True, False) if "$'" in base or "$$" in base else (True,):  # hai cách đọc `$'` (`_span_readings`)
+        spans = sorted(_dollar_spans(base, ansi) + _backtick_spans(base, ansi))
+        outer = [sp for k, sp in enumerate(spans) if not any(o[0] <= sp[0] and sp[1] <= o[1] for o in spans[:k])]
+        variants = [base]
+        for start, end, body in reversed(outer):
+            vals = _subst_words(body)
+            variants = [v[:start] + val + v[end:] for v in variants for val in vals][: LIFT_PICKS * LIFT_PICKS]
+        out += variants if outer else []
+    return list(dict.fromkeys(out))
 
 
 def _push_subst_rule(cmd: str, root: str, cwd: str) -> Tuple[str, List[str]]:
@@ -8241,7 +8276,7 @@ def _fd_ref(target: str) -> str:
 def _subst_secrets(args: List[str], root: str) -> List[str]:
     """File bí mật đọc trong thay lệnh của đối số (`printf %s "$(cat .env)" >/dev/tcp/…`, `curl -d "\\`cat .env\\`"`)."""
     line = " ".join(args)  # thay lệnh không nháy bị tách thành nhiều token (`` echo `cat .env` ``)
-    bodies = [sp[2] for sp in (*_dollar_spans(line), *_backtick_spans(line))] if "$(" in line or "`" in line else []
+    bodies = _dollar_scripts(line) + _backtick_scripts(line) if "$(" in line or "`" in line else []
     return [w for body in bodies for w in tokenize(body) if _is_secret_file(w, root)]
 
 
