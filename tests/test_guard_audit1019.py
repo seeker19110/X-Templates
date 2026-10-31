@@ -2395,6 +2395,19 @@ class ShellParseGapsTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
 
+    def test_ifs_hash_denied(self) -> None:
+        # `$IFS` thành khoảng trắng trước khi bỏ comment → `#` sau nó mở comment ở guard mà bash đọc là nối từ (AUD-SEC-232)
+        for cmd in (
+            "echo $IFS#; rm -rf ~",
+            "echo ${IFS}#; git push --force origin main",
+            "true $(true)$IFS#; rm -rf ~",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("echo $IFSx#y", "echo $IFS # ghi chú", "printf '%s' \"$IFS\""):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
     def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
         for cmd in (
             "echo 'a)#b'",

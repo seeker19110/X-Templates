@@ -925,6 +925,9 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
 ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
 ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
 IFS_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")
+IFS_HASH_RE = re.compile(
+    r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))#"
+)  # `$IFS#`: guard thấy khoảng trắng + comment, bash một từ
 
 
 def _ansi_c_char(m: "re.Match[str]") -> str:
@@ -1132,6 +1135,10 @@ PWD_SUBST_RE = re.compile(
 def tokenize(cmd: str) -> List[str]:
     cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
     strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
+    if IFS_HASH_RE.search(cmd):
+        raise ScanTooComplex(
+            "`$IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
+        )
     cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")

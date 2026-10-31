@@ -13169,6 +13169,19 @@
    }
   },
   {
+   "id": "guard-sec232-ifs-hash-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-232"
+   ],
+   "input": {
+    "command": "echo $IFS#; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
    "id": "guard-sec226-trap-benign",
    "origin": "audit",
    "refs": [
