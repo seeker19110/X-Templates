@@ -2390,7 +2390,16 @@ class ShellParseGapsTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "deny")
 
     def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
-        for cmd in ("echo 'a)#b'", 'echo "a)#b"', "echo a\\)#b", "(true) # ghi chú", "cat <<'EOF'\nissue (x)#12\nEOF"):
+        for cmd in (
+            "echo 'a)#b'",
+            'echo "a)#b"',
+            "echo a\\)#b",
+            "(true) # ghi chú",
+            "cat <<'EOF'\nissue (x)#12\nEOF",
+            "ls # xem f()#1",  # `)#` trong comment (review #368 lượt 3: chặn oan)
+            "printf '%s\\n' $'it\\'s ok $(date)#tag'",  # `)#` trong chuỗi ANSI-C có `\\'`
+            'git commit -m "$(cat <<EOF\nfix: say "hi (x)#12\nEOF\n)"',  # nháy lẻ trong thân heredoc không nháy
+        ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
 

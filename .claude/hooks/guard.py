@@ -746,31 +746,8 @@ def _shell_precheck(cmd: str) -> None:
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
     if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
-    if "#" in cmd and _paren_hash_ambiguous(cmd):
-        raise ScanTooComplex(PAREN_HASH_WHY)
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
-
-
-def _paren_hash_ambiguous(cmd: str) -> bool:
-    """AUD-SEC-195: `)` ngoài nháy liền `#` — `#` là comment (sau `(…)`/`case x)`) hay nối từ (sau `$(…)`)? Phụ thuộc cách
-    bash ghép ngoặc (case, backtick, `${…}`, extglob) nên đoán bằng ngăn xếp từng lệch (review #368) → chặn, không đoán.
-    Xét trên dòng đã nối `\\`↵ và gấp thân heredoc có nháy (dữ liệu: thân commit/PR có `)#` vẫn chạy)."""
-    text = _fold_heredocs(join_continuations(cmd), True)
-    q, i = "", 0
-    while i < len(text):
-        c = text[i]
-        if c == "\\" and q != "'":
-            i += 2
-            continue
-        if q:
-            q = "" if c == q else q
-        elif c in "'\"":
-            q = c
-        elif c == ")" and text.startswith("#", i + 1):
-            return True
-        i += 1
-    return False
 
 
 def _may_be_alias(head: str) -> bool:
@@ -914,15 +891,17 @@ def _fold_heredocs(cmd: str, subst: bool, escape: bool = False) -> str:
     return "\n".join(line for line, k in zip(lines, keep) if k)
 
 
-def strip_comments(cmd: str) -> str:
+def strip_comments(cmd: str, strict: bool = False) -> str:
     """Bỏ comment kiểu bash: `#` ở ĐẦU một từ (đầu chuỗi, sau khoảng trắng hoặc toán tử), ngoài nháy, tới hết dòng.
-    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
+    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt).
+    `strict` (đường `tokenize`, chữ đã giải ANSI-C): `)#` không khoảng trắng → `ScanTooComplex` (AUD-SEC-195); đường
+    `brace_variants` đọc chuỗi thô (nháy `$'\\''` lệch) nên không chặn ở đó — chặn oan."""
     out: List[str] = []
     quote, word_start, i = "", True, 0
     while i < len(cmd):
         c = cmd[i]
         if c == "#" and word_start and not quote:
-            if i and cmd[i - 1] == ")":
+            if strict and i and cmd[i - 1] == ")":
                 raise ScanTooComplex(PAREN_HASH_WHY)
             eol = cmd.find("\n", i)
             i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
@@ -1151,7 +1130,7 @@ PWD_SUBST_RE = re.compile(
 def tokenize(cmd: str) -> List[str]:
     cmd = IFS_RE.sub(" ", expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)))
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
-    lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
+    lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
