@@ -1533,6 +1533,8 @@ class HeredocRound4Test(unittest.TestCase):
         with mock.patch.object(guard, "tokenize", side_effect=lambda s: calls.append(len(s)) or real(s)):
             guard._heredoc_scripts(cmd)
         self.assertLessEqual(sum(calls), 2 * len(cmd))
+        # thân heredoc của commit: nhiều heredoc một dòng mở, dấu nối tìm một lần
+        self.assertEqual(guard._heredoc_bodies("git commit -F - <<A <<B; ls <<C\nx\nA\ny\nB\nz\nC"), ["x", "y"])
 
     def test_heredoc_scripts_budget_exhausted_denied(self):
         budget = guard.ScanBudget()
