@@ -7,3 +7,5 @@ c295f4818229e5ea59054d91f8a37c9b9aff1ae1:tests/test_xt.py:generic-api-key:454
 a147b8aa805a0f2ae94bfb988e74d326992f5134:tests/test_xt_cli.py:private-key:2944
 # Khoá PEM giả trong test che đuôi log (tests/test_stage.py) ở commit 5069c92 (PR #336) — quét toàn lịch sử đỏ; CI quét theo dải nên không thấy (review #342).
 5069c9279bf11e34abeb52cc501411ed4810ffe3:tests/test_stage.py:private-key:377
+# Header PEM viết nguyên văn trong bằng chứng phát hiện AUD-SEC-184 (docs/ops/AUDIT-STATUS.md) ở commit 44409f4 (PR #360) — không phải khoá; đã thay bằng `‹PEM-BEGIN …›`; giữ để quét dải commit của PR không đỏ.
+44409f426320dc0f687870e840e4d8a8e93422a0:docs/ops/AUDIT-STATUS.md:private-key:622
