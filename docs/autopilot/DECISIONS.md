@@ -1909,3 +1909,10 @@
 - Chọn: Một lần sửa nữa đúng hai chỗ reviewer chỉ: op trong $( có dòng thân bắt đầu bằng dấu kết rồi ')' → ScanTooComplex; taint + có '<<' (không phải '<<<') → ScanTooComplex; ghi sổ 2 🔴 + 1 🟠 có từ trước
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn: lượt D-270 đóng 15 lỗ, còn 2 chỗ hẹp đã chỉ rõ cách sửa fail-closed; revert mở lại các lỗ đã đóng
 - Đường lùi: Revert commit lượt này về 6fe090e
+
+### D-272 · 2026-10-31T08:09:36+00:00 · PR #361: review sau D-271 còn 1 🔴 (\ nối dòng né luật EOF) trong $(…)) + alias: Claude Code bật sẵn expand_aliases
+
+- Phương án: (1) Một lần sửa: áp bản nguyên mẫu reviewer (kiểm << trên chuỗi đã nối dòng, từ gợi ý dấu kết từ cả hai chuỗi, _joined_terminator bắt dòng sau \ lẻ bắt đầu bằng dấu kết rồi ')'); chặn mọi định nghĩa 'alias NAME=' (mọi dạng né: ${}, \ nối, printf) · (2) Ghi 🔴 thành nợ
+- Chọn: Một lần sửa: áp bản nguyên mẫu reviewer (kiểm << trên chuỗi đã nối dòng, từ gợi ý dấu kết từ cả hai chuỗi, _joined_terminator bắt dòng sau \ lẻ bắt đầu bằng dấu kết rồi ')'); chặn mọi định nghĩa 'alias NAME=' (mọi dạng né: ${}, \ nối, printf)
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); bản vá đã được reviewer thử 0 hồi quy/489 ca; alias: snapshot shell của Claude Code đã bật expand_aliases nên luật hiện tại vô tác dụng — chặn định nghĩa alias là fail-closed, agent hiếm khi cần alias
+- Đường lùi: Revert commit lượt này về 51b54a3
