@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import bisect
 import contextlib
 import fnmatch
 import itertools
@@ -365,8 +366,70 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
 # --------------------------------------------------------------------------- tách lệnh
 
 
-# `<<<` là here-string (không có thân, không có dấu kết) — chỉ `<<`/`<<-` đứng riêng mới là heredoc.
-HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# `<<<` là here-string (không có thân, không có dấu kết) — chỉ `<<`/`<<-` đứng riêng mới là heredoc. Dấu kết là CẢ từ
+# sau `<<` (nhóm 1: đoạn nháy đơn/kép/ANSI-C, ký tự thoát, ký tự thường ghép liền) — `<<"E"F` kết ở `EF` như bash, không
+# ở `E` (AUD-SEC-190); `_heredoc_word` bỏ nháy.
+HEREDOC_RE = re.compile(
+    r"(?<!<)<<(?!<)-?[ \t]*((?:\$'(?:[^'\\]|\\.)*'|'[^']*'|\"(?:[^\"\\]|\\.)*\"|\\.|[^\s;&|()<>'\"\\`])+)"
+)
+HEREDOC_PART_RE = re.compile(r"\$'((?:[^'\\]|\\.)*)'|'([^']*)'|\"((?:[^\"\\]|\\.)*)\"|\\(.)|(.)", re.S)
+DQ_ESCAPE_RE = re.compile(r'\\([\\"$`])')  # trong nháy kép `\` chỉ thoát `\`, `"`, `$`, backtick
+
+
+def _heredoc_part(m: "re.Match[str]") -> str:
+    ansi, single, double, escaped, plain = m.groups()
+    if ansi is not None:
+        return ANSI_ESCAPE_RE.sub(_ansi_c_char, ansi)
+    if double is not None:
+        return DQ_ESCAPE_RE.sub(r"\1", double)
+    return single if single is not None else escaped if escaped is not None else plain
+
+
+def _heredoc_word(m: "re.Match[str]") -> Tuple[str, bool]:
+    """(dấu kết, có nháy) của heredoc khớp `HEREDOC_RE`: từ sau `<<` đã bỏ nháy như bash; có đoạn nháy hay `\\` → thân
+    là chữ (không thay `$(…)`/backtick)."""
+    word = m.group(1)
+    return HEREDOC_PART_RE.sub(_heredoc_part, word), any(c in word for c in "'\"\\")
+
+
+def _arith_mask(line: str, states: List[str]) -> List[bool]:
+    """Từng vị trí của dòng có nằm trong số học `$((…))`/`((…))` không (`<<` ở đó là dịch bit, không phải heredoc): còn
+    `((` ngoài nháy chưa đóng trước nó trên dòng. Một lượt; đếm thô — nhận nhầm số học thì thân heredoc bị quét như lệnh
+    (chiều chặt)."""
+    out: List[bool] = []
+    depth, j = 0, 0
+    while j < len(line):
+        pair = line[j : j + 2] if j < len(states) and not states[j] else ""
+        out += [depth > 0] * (2 if pair in ("((", "))") else 1)
+        depth = depth + 1 if pair == "((" else max(depth - 1, 0) if pair == "))" else depth
+        j += 2 if pair in ("((", "))") else 1
+    return out
+
+
+def _heredoc_matches(line: str, states: List[str]) -> List["re.Match[str]"]:
+    """`<<` trên dòng có thể mở heredoc — bỏ `<<` trong số học (`$((1<<y))`: dòng `y` sau đó không phải dấu kết)."""
+    found = list(HEREDOC_RE.finditer(line))
+    if found and "((" in line:
+        arith = _arith_mask(line, states)
+        found = [m for m in found if not arith[m.start()]]
+    return found
+
+
+def _line_index(lines: List[str]) -> Dict[str, List[int]]:
+    """Dòng (đã bỏ khoảng trắng hai đầu) → các chỉ số của nó: tìm dấu kết heredoc không quét lại mọi dòng mỗi lần."""
+    out: Dict[str, List[int]] = {}
+    for j, line in enumerate(lines):
+        out.setdefault(line.strip(), []).append(j)
+    return out
+
+
+def _heredoc_end(index: Dict[str, List[int]], m: "re.Match[str]", start: int) -> Optional[int]:
+    """Chỉ số dòng dấu kết đầu tiên từ `start` của heredoc `m`; không có → None (heredoc không đóng)."""
+    rows = index.get(_heredoc_word(m)[0], [])
+    k = bisect.bisect_left(rows, start)
+    return rows[k] if k < len(rows) else None
+
+
 # Ký tự kết thúc một từ trong bash: `#` đứng ngay sau chúng (hoặc đầu chuỗi) mới mở comment.
 WORD_END = set(" \t\r\n;&|()<>")
 
@@ -377,19 +440,25 @@ def _quote_states(line: str, q: str) -> Tuple[List[str], str]:
     out: List[str] = []
     i = 0
     while i < len(line):
-        c = line[i]
+        c, st = line[i], ("'" if q == "$'" else q)  # `$'…'` (ANSI-C) là nháy đơn mà `\\'` không đóng (AUD-SEC-190)
         if not q and c == "#" and (i == 0 or line[i - 1] in WORD_END):  # comment: `# don't` không mở nháy
             out += ["#"] * (len(line) - i)
             break
-        out.append(q)
-        if q == "'":
-            q = "" if c == "'" else q
-        elif c == "\\":
-            out.append(q)
+        out.append(st)
+        if st == "'" and c == "'":
+            q = ""
+        elif c == "\\" and q != "'":
+            out.append(st)
             i += 2
             continue
+        elif st == "'":
+            pass
         elif q:
             q = "" if c == q else q
+        elif line.startswith("$'", i):
+            out.append("'")
+            q, i = "$'", i + 2
+            continue
         elif c in "'\"`":
             q = c
         i += 1
@@ -441,24 +510,26 @@ def literal_bodies_masked(cmd: str) -> str:
     """Dòng lệnh bỏ thân heredoc có dấu kết trong nháy (`<<'EOF'`): bash không thay `` `…` ``/`$(…)` trong thân đó —
     code span trong message commit (`-m "$(cat <<'EOF'` ↵ ``chặn `rm -rf ~` `` ↵ `EOF`) là chữ, không phải lệnh."""
     lines = cmd.split("\n")
-    drop = {j for _, m, a, b in _heredoc_spans(lines) if m.group(1) for j in range(a, b)}  # giữ dòng dấu kết
+    # giữ dòng dấu kết; heredoc không đóng: phần còn lại vẫn quét như lệnh (AUD-SEC-190)
+    drop = {j for _, m, a, b in _heredoc_spans(lines) if _heredoc_word(m)[1] and b < len(lines) for j in range(a, b)}
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
 def _heredoc_spans(lines: List[str]) -> List[Tuple[int, "re.Match[str]", int, int]]:
     """(chỉ số dòng mở, match, đầu thân, cuối thân) — xem `_heredocs`."""
     out: List[Tuple[int, "re.Match[str]", int, int]] = []
-    q, i, carried = "", 0, 0
+    q, i, carried, index = "", 0, 0, _line_index(lines)
     while i < len(lines):
         line, opener, i = lines[i], i, i + 1
         states, q = _quote_states(line, q)
-        for m in HEREDOC_RE.finditer(line):
+        for m in _heredoc_matches(line, states):
             if states[m.start()] in ("#", "'") or (
                 states[m.start()] in ('"', "`") and not _opens_body(line, states, m, carried)
             ):
                 continue
             # không thấy dấu kết: như bash, thân là phần còn lại (`bash <<E` ↵ `rm -rf ~` vẫn chạy)
-            end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), len(lines))
+            end = _heredoc_end(index, m, i)
+            end = len(lines) if end is None else end
             out.append((opener, m, i, end))
             i = end + 1
         run = _dq_run_start(states, len(states))
@@ -490,18 +561,18 @@ def join_continuations(cmd: str) -> str:
 
 def strip_heredocs(cmd: str) -> str:
     """Bỏ thân heredoc (dữ liệu, không phải lệnh) — giữ dòng mở heredoc. Chỉ `<<` ngoài nháy/backtick mở heredoc của
-    lệnh ngoài; `<<` trong chuỗi lồng (`sh -c "bash <<E …"`) giữ nguyên để script lồng được quét cả thân."""
+    lệnh ngoài; `<<` trong chuỗi lồng (`sh -c "bash <<E …"`) giữ nguyên để script lồng được quét cả thân. Heredoc không
+    đóng tới cuối lệnh: phần còn lại giữ lại như lệnh — guard đọc sai dấu kết thì không nuốt lệnh thật (AUD-SEC-190)."""
     out: List[str] = []
-    pending: List[str] = []
-    q = ""
-    for line in cmd.split("\n"):
-        if pending:
-            if line.strip() == pending[0]:
-                pending.pop(0)
-            continue
+    lines = cmd.split("\n")
+    q, i, index = "", 0, _line_index(lines)
+    while i < len(lines):
+        line, i = lines[i], i + 1
         out.append(line)
-        free, q = _unquoted_positions(line, q)
-        pending = [m.group(2) for m in HEREDOC_RE.finditer(line) if free[m.start()]]
+        states, q = _quote_states(line, q)
+        for m in _heredoc_matches(line, states):
+            end = None if states[m.start()] else _heredoc_end(index, m, i)
+            i = i if end is None else end + 1
     return "\n".join(out)
 
 
@@ -5413,12 +5484,13 @@ def _expanded_heredocs(cmd: str) -> List[str]:
     while i < len(lines):
         opener, i = lines[i], i + 1
         for m in HEREDOC_RE.finditer(opener):
+            delim, quoted = _heredoc_word(m)
             body: List[str] = []
-            while i < len(lines) and lines[i].strip() != m.group(2):
+            while i < len(lines) and lines[i].strip() != delim:
                 body.append(lines[i])
                 i += 1
             i += 1
-            if not m.group(1):
+            if not quoted:
                 out.append("\n".join(body))
     return out
 

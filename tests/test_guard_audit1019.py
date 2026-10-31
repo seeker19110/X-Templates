@@ -780,6 +780,36 @@ class ReviewMarkerForgeTest(unittest.TestCase):
         self.assertEqual(final("gh pr create -t 'fix: x' -b 'dấu `xt-review v1` bị chặn'"), "")
 
 
+class HeredocDelimiterTest(unittest.TestCase):
+    """AUD-SEC-190 (review #361): dấu kết heredoc là CẢ từ sau `<<` đã bỏ nháy (`<<"E"F` → `EF`, như bash); `<<` trong
+    `$'…'` hay số học `$((…))` không mở heredoc; heredoc không đóng tới cuối lệnh → phần còn lại quét như lệnh."""
+
+    def test_heredoc_delimiter_quote_split(self):
+        for cmd in (
+            'cat <<"E"F\nx\nEF\nrm -rf ~',
+            'cat <<"E"F\nx\nEF\ngit push --force origin main',
+            "cat <<E'F'\nx\nEF\nrm -rf ~",
+            "cat <<$'E'\nx\nE\nrm -rf ~",
+            "echo $'\\'<<E'\nrm -rf ~",
+            "echo $((1<<y))\nrm -rf ~\ny",
+            "x=$((a <<b))\nrm -rf ~\nb",
+            "cat <<E\nrm -rf ~",  # không đóng: bash coi là thân, guard quét như lệnh (chiều chặt)
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            for cmd in ('cat <<"E"F\nx\nEF\ngh pr comment 5 -F b.md', "echo $'\\'<<E'\ngh pr comment 5 -F b.md"):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, Path(d)), "deny")
+        for cmd in ('cat <<"E"F\nrm -rf ~\nEF', "cat <<'EOF'\nrm -rf ~\nEOF", "cat <<E$x\nE\nrm -rf ~\nE$x"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        self.assertEqual(guard.strip_heredocs('cat <<"E"F\nx\nEF\nls'), 'cat <<"E"F\nls')
+        self.assertEqual(guard.strip_heredocs("cat <<E\nrm -rf ~"), "cat <<E\nrm -rf ~")
+        self.assertEqual(guard.literal_bodies_masked("cat <<'E'\n`rm -rf ~`"), "cat <<'E'\n`rm -rf ~`")
+
+
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""
 
