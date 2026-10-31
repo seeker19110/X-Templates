@@ -10,6 +10,7 @@ from __future__ import annotations
 import collections
 import math
 import re
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -42,7 +43,8 @@ PROMPTS = {
 
 
 def tokens(text: str) -> list[str]:
-    return [w for w in re.findall(r"[^\W\d_]+", text.lower()) if len(w) > 1 and w not in STOP]
+    text = unicodedata.normalize("NFC", text).lower()  # chữ Việt dạng NFD (dấu tách rời) không bị cắt vụn
+    return [w for w in re.findall(r"[^\W\d_]+", text) if len(w) > 1 and w not in STOP]
 
 
 def skill_docs() -> dict[str, list[str]]:
@@ -90,6 +92,10 @@ class SkillRoutingTest(unittest.TestCase):
                     misses.append(f"{skill}: {q!r} → {top}")
         self.assertGreater(total, 0)
         self.assertGreaterEqual((total - len(misses)) / total, MIN_RANK1, "\n".join(misses))
+
+    def test_tokens_ignore_unicode_form(self) -> None:
+        nfc = "kiểm giao diện"
+        self.assertEqual(tokens(unicodedata.normalize("NFD", nfc)), tokens(nfc))
 
     def test_descriptions_do_not_collide(self) -> None:
         names = sorted(self.vecs)

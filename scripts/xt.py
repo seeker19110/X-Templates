@@ -4944,6 +4944,16 @@ AGENT_TEAMS_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 AGENT_MODEL_RE = re.compile(r"\A---\s*\n(?:(?!---\s*\n).*\n)*?model:[ \t]*['\"]?([^'\"\s#]+)", re.M)
 
 
+def _read_text_or_empty(p: Path) -> str:
+    """Đọc file văn bản cho kiểm fail-open: không phải file thường hoặc không đọc được → chuỗi rỗng."""
+    if not p.is_file():
+        return ""
+    try:
+        return p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def _doctor_orchestration(base: Path) -> List[Finding]:
     """LOOP-ORCH-021: Agent Teams tắt trừ khi có ADR nhắc biến; LOOP-ORCH-022: agent ngoài bộ của khung không ghim
     model. Fail-open: settings/agent hỏng thì bỏ qua; chỉ in tên file, không in giá trị cấu hình khác."""
@@ -4955,7 +4965,7 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
             where.append(f".claude/{name}")
     adrs = sorted((base / "docs" / "adr").glob("*.md"))
     out = []
-    if where and not any(AGENT_TEAMS_ENV in p.read_text(encoding="utf-8", errors="replace") for p in adrs):
+    if where and not any(AGENT_TEAMS_ENV in _read_text_or_empty(p) for p in adrs):
         msg = f"{AGENT_TEAMS_ENV}=1 ở {', '.join(where)} mà chưa có ADR nhắc biến này — subagent có tên thành teammate"
         out.append(
             Finding(
@@ -4966,7 +4976,7 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
         )
     pinned = []
     for p in sorted((claude / "agents").glob("*.md")):
-        m = AGENT_MODEL_RE.search(p.read_text(encoding="utf-8", errors="replace"))
+        m = AGENT_MODEL_RE.search(_read_text_or_empty(p))
         if p.stem not in DOCTOR_AGENTS and m and m.group(1) != "inherit":
             pinned.append(f"{p.name} ({m.group(1)})")
     if pinned:

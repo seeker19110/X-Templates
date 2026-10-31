@@ -726,6 +726,11 @@ class DoctorOrchestrationTest(DoctorCase):
 
     ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 
+    def setUp(self):
+        super().setUp()
+        # biến của shell máy chạy test không lọt vào kết quả; test cần giá trị khác tự patch đè
+        self.enterContext(unittest.mock.patch.dict(os.environ, {self.ENV: "0"}))
+
     def orch(self) -> list[xt.Finding]:
         return [f for f in self.findings(deep=False) if f.code == "orchestration"]
 
@@ -775,6 +780,22 @@ class DoctorOrchestrationTest(DoctorCase):
         self.assertIn("LOOP-ORCH-022", f.msg)
         for name in ("kept.md", "bare.md", "plain.md", "executor-deep.md", "reviewer.md"):
             self.assertNotIn(name, f.msg)  # agent của khung ghim tầng (ADR-0029) — không báo
+
+    def test_unreadable_entries_fail_open(self):
+        (self.base / ".claude" / "agents" / "weird.md").mkdir(parents=True)  # thư mục mang tên .md
+        (self.base / "docs" / "adr" / "0002-dir.md").mkdir(parents=True)
+        self.settings_env(".claude/settings.json", {self.ENV: "1"})
+        self.write(".claude/agents/locked.md", "---\nmodel: opus\n---\n")
+        real = Path.read_text
+
+        def flaky(p: Path, *a: object, **k: object) -> str:
+            if p.name == "locked.md":
+                raise PermissionError(p)
+            return real(p, *a, **k)  # type: ignore[arg-type]
+
+        with unittest.mock.patch.object(Path, "read_text", flaky):
+            [f] = self.orch()  # chỉ cảnh báo Agent Teams; agent không đọc được thì bỏ qua, doctor không vỡ
+        self.assertIn("LOOP-ORCH-021", f.msg)
 
 
 class DoctorGuardAndClaudeVersionTest(DoctorCase):
