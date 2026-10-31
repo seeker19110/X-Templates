@@ -585,6 +585,45 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
 
+    def test_review_marker_backtick_skew(self):
+        """AUD-SEC-181: backtick nguyên văn (thoát `\\``, trong nháy, `$'\\x60'`, comment, heredoc của lệnh khác) đứng
+        trước không làm lệch cặp backtick thật; không ghép được thì nguồn không đọc được → chặn. AUD-SEC-182: chỉ thay lệnh
+        sống của lệnh `gh` (và nguồn stdin của nó) được quét — chữ thô của lệnh khác không chặn oan."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            for cmd in (
+                "gh pr comment 5 -F - <<< \\``cat b.md`",
+                "gh pr comment 5 -F - <<< '`'`cat b.md;`",
+                "gh pr comment 5 --title '`' -F - <<< `cat b.md`",
+                "echo '`'; gh pr comment 5 -F - <<< `cat b.md;`",
+                'echo "a\\`b"; gh pr comment 5 -F - <<< `cat b.md`',
+                "echo x # it`s\ngh pr comment 5 -F - <<< `cat b.md;`",
+                "cat > m.md <<'E'\na`b\nE\ngh pr comment 5 -F - <<< `cat b.md;`",
+                'gh pr comment 5 --body "x\\` `cat b.md`"',
+                "IFS=; gh pr comment 5 --body $'\\x60'`cat b.md`",
+                "{ gh pr comment 5 -F -; } <<< `cat b.md`",
+                'gh pr comment 5 --body "`echo \\`cat b.md\\``"',
+                'gh pr comment 5 --body "$(echo `cat b.md`)"',
+                "gh api repos/o/r/issues/5/comments --input - <<< '`'`cat b.md;`",
+                "gh pr comment 5 -F - <<< `cat b.md",  # backtick không đóng: không phân tích được
+                'gh pr comment 5 --body "`echo \\`cat b.md`"',  # backtick lồng không đóng
+                'gh pr comment 5 --body "$(echo $(echo $(echo $(echo $(echo x)))))"',  # lồng quá sâu
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                "echo \"tong: $(cat a*.log | wc -l)\"; gh pr comment 5 --body 'dau ` le'",
+                "cat > x.md <<'EOF'\n$(cat *.md)\nEOF\ngh pr comment 5 --body 'dau ` le'",
+                "# $(cat $F)\ngh pr comment 5 --body 'dau ` le'",
+                "gh pr comment 5 --body 'dùng `xt.py` và `cat b.md` để kiểm'",  # backtick trong nháy đơn là chữ
+                'gh pr comment 5 -F - <<< "`cat n.md`"',
+                "echo '`'; gh pr comment 5 --body `date`",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+
     def test_review_marker_shell_stdin(self):
         """AUD-SEC-180: stdin của `gh` đăng chữ chuyển hướng ở cấp shell (`exec < f`), nhóm lệnh (`{ …; } < f`,
         `(…) < f`, `done < f`), trước tên lệnh (`< f gh …`) hay qua shell lồng (`sh -c '…' < f`) là nguồn thân."""
