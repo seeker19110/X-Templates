@@ -3,7 +3,7 @@ title: Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
 kind: module
 prefix: SEC-SUPPLY
 applies_to: [all]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Chuỗi cung ứng: ghim, SBOM, chữ ký, SLSA, Scorecard, Dependabot
@@ -88,6 +88,7 @@ updated: 2026-10-30
 9. **Trivy/scanner tải từ `install.sh` không checksum** → chính công cụ bảo mật là vector tấn công. Tránh: `SEC-SUPPLY-005`.
 10. **Ký nhưng không verify.** `cosign sign` xong mà deploy không `cosign verify` → chữ ký chỉ để trang trí. Tránh: `SEC-SUPPLY-013` phần admission.
 11. **Coi action quét mã là "mã nguồn mở" vì công cụ bên dưới MIT.** `gitleaks-action` theo **EULA độc quyền**, không phải MIT như gitleaks CLI: repo thuộc Organization Account phải có secret `GITLEAKS_LICENSE`, cấm dùng như một phần dịch vụ; gitleaks CLI đã "feature complete" (chỉ vá bảo mật). Mẫu `framework/templates/secret-scan.yml` dùng action này — dự án đích thuộc tổ chức cấp license hoặc thay bằng CLI (MIT) tải binary ghim phiên bản + SHA256 (`SEC-SUPPLY-005`). Chi tiết license: [`../16-compliance-privacy/licensing-and-ip.md`](../16-compliance-privacy/licensing-and-ip.md) (xác minh 2026-10-21: research §4.2).
+12. **Coi plugin từ marketplace chính thức là bản đứng yên.** `anthropics/claude-plugins-official` có bot **bump SHA plugin bên thứ ba hằng đêm** sau `claude plugin validate` + scan chính sách tự động: "đã qua kiểm duyệt" không có nghĩa là không đổi giữa hai phiên. Repo cần hành vi ổn định ghim phiên bản hoặc vendor (`SEC-SUPPLY-016`).
 
 ## Cổng tự động
 
@@ -133,3 +134,4 @@ updated: 2026-10-30
 - EPSS ước xác suất CVE bị khai thác trong 30 ngày, cập nhật hằng ngày (`SEC-SUPPLY-030`): <https://www.first.org/epss/> — chưa đọc trọn trang 2026-10-30 (chưa xác minh trọn).
 - OpenVEX v0.2.0 có trạng thái not_affected, affected, fixed, under_investigation. not_affected MUST có justification hoặc impact_statement (khuyến nghị justification máy đọc). Các justification: component_not_present, vulnerable_code_not_present, vulnerable_code_not_in_execute_path, vulnerable_code_cannot_be_controlled_by_adversary, inline_mitigations_already_exist (`SEC-SUPPLY-031`): <https://github.com/openvex/spec/blob/main/OPENVEX-SPEC.md> — xác minh 2026-10-30.
 - CISA công bố 'Minimum Requirements for VEX' ngày 2023-04-21 (`SEC-SUPPLY-031`): <https://www.cisa.gov/resources-tools/resources/minimum-requirements-vulnerability-exploitability-exchange-vex> — xác minh 2026-10-30.
+- Catalog `seeker19110/stored` 20 §3q.1 (`claude-plugins-official`: 315 entry, 262 repo ngoài ghim `sha`, workflow `bump-plugin-shas` hằng đêm) — rà 2026-10-31

@@ -3,7 +3,7 @@ title: License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu
 kind: module
 prefix: CMP-LIC
 applies_to: [all]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # License mã nguồn mở, IP, dữ liệu huấn luyện, thương hiệu, điều khoản dịch vụ
@@ -83,6 +83,7 @@ updated: 2026-10-30
 - **Font "free for personal use"** trong sản phẩm thương mại; **font hệ điều hành commit vào repo** (Segoe UI ghi "Microsoft supplied font" — chỉ dùng theo điều khoản sản phẩm đi kèm, không phân phối lại) → dùng font OFL.
 - **License của mã ≠ license của weights:** README ghi Apache-2.0 nhưng weights từng kích thước/revision theo license riêng (trần doanh thu, cấm lãnh thổ/đầu ra); cùng họ model, bản v2 đổi MIT → AGPL-3.0. Đọc model card đúng repo + revision (`CMP-LIC-020`).
 - **Action CI "miễn phí" nhưng theo EULA độc quyền:** `gitleaks-action` (khác gitleaks CLI MIT) buộc repo thuộc Organization Account có `GITLEAKS_LICENSE` và cấm dùng như một phần dịch vụ; repo cá nhân không cần. Mẫu `framework/templates/secret-scan.yml` cài sang dự án đích dùng action này → dự án thuộc tổ chức cấp license hoặc chạy CLI (MIT) ghim phiên bản + SHA256 ([`../12-security/supply-chain.md`](../12-security/supply-chain.md) `SEC-SUPPLY-005`). Đọc LICENSE của chính action, không chỉ của công cụ bên dưới (xác minh 2026-10-21: research §4.2).
+- **Đọc LICENSE ở gốc repo skill rồi vendor cả thư mục con:** `anthropics/skills` có 15 skill Apache-2.0, 4 skill tài liệu (`docx`, `pdf`, `pptx`, `xlsx`) "© Anthropic, All rights reserved" và một skill không có file license — kiểm LICENSE **từng thư mục skill** khi vendor.
 
 ## Cổng tự động
 
@@ -114,3 +115,4 @@ updated: 2026-10-30
 - Catalog `seeker19110/stored` 14 §3b (Audio8 0.1B Community License), §5b (Hunyuan3D — (chưa xác minh)), 18 §4c (PhoBERT base MIT vs base-v2 AGPL-3.0) — đọc 2026-10-16; model card từng repo chưa tra lại trực tiếp (chưa xác minh).
 - SPDX 3.0.1 (profiles AI, Dataset): <https://spdx.github.io/spdx-spec/v3.0.1/> · CycloneDX 1.7 ML-BOM: <https://cyclonedx.org/capabilities/mlbom/> — xác minh 2026-10-18. Catalog `seeker19110/stored` 10 §4b (license tầng dưới: agentmemory Apache-2.0, engine iii ELv2) — rà 2026-10-18.
 - MIT License (văn bản OSI): <https://opensource.org/license/mit> — xác minh 2026-10-28. Catalog `seeker19110/stored` 19 §1f (fork thay dòng copyright của tác giả gốc; repo không LICENSE nhưng huy hiệu MIT; font Segoe UI commit vào repo) — đọc 2026-10-28.
+- Catalog `seeker19110/stored` 20 §3s.4 (`anthropics/skills`: license theo từng skill) — rà 2026-10-31
