@@ -1895,3 +1895,10 @@
 - Chọn: rethink: một lần sửa hết A–I và P-1…P-4 theo bản vá reviewer đã thử, mọi ca tái hiện của hai lượt review vào bench/test, rồi review lại
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): lượt 1 đã đóng R1–R4 và AUD-SEC-190 (base để lọt); revert mất các bản sửa đó. Phương án 3 trái ADR-0059 (🔴 không ghi nợ). Bản vá A+B+D+E đã được reviewer thử: 0 chặn oan trên ~250 ca
 - Đường lùi: Revert các commit guard của #361 về origin/main; mở lại AUD-SEC-180/181/186/190
+
+### D-270 · 2026-10-31T05:08:22+00:00 · PR #361: sau rethink D-269 review vẫn 5 🔴 mới trong bộ đọc heredoc/số học chính xác như bash + 5 🔴 có từ trước cùng lớp — đổi cách làm thế nào
+
+- Phương án: (1) Danh sách cho phép: heredoc chỉ hiểu dạng đơn giản (dấu kết [A-Za-z0-9_.-]+ trần, hoặc bọc trọn '…'/"…", hoặc một \ đầu; <<, <<-; dòng mở cân nháy/ngoặc; << không nằm trong $((, $[, ${, ((, <((, >((); mọi dạng khác → ScanTooComplex (chặn); che thân heredoc có nháy trước _ShellScan (🟠6) · (2) Tiếp tục vá chính xác từng trường hợp bash (đã 3 lượt không hội tụ) · (3) Revert toàn bộ thay đổi guard của #361 về main
+- Chọn: Danh sách cho phép: heredoc chỉ hiểu dạng đơn giản (dấu kết [A-Za-z0-9_.-]+ trần, hoặc bọc trọn '…'/"…", hoặc một \ đầu; <<, <<-; dòng mở cân nháy/ngoặc; << không nằm trong $((, $[, ${, ((, <((, >((); mọi dạng khác → ScanTooComplex (chặn); che thân heredoc có nháy trước _ShellScan (🟠6)
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): chặn khi không chắc thay cho mô phỏng bash; đóng cả 🔴 mới lẫn có từ trước cùng lớp bằng một luật; dạng agent thực dùng (cat <<'EOF', <<EOF, <<-EOF, git commit -F - <<EOF) vẫn chạy — bench đối chứng giữ; đơn giản, test được (tiêu chí 3). Revert mất bản sửa R1–R4/AUD-SEC-190
+- Đường lùi: Revert commit của lượt này về 9ee24d2; chặn oan lộ ra → thêm dạng vào danh sách cho phép kèm test
