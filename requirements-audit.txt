@@ -1,5 +1,5 @@
 # Công cụ quét lỗ hổng phụ thuộc (pip-audit) cho job dep-audit — KHOÁ kèm hash, tách khỏi requirements-dev.txt để cổng nhẹ.
-# Sinh lại: printf 'pip-audit==X\nzizmor==Y\n' > audit.in && uv pip compile --python-version 3.11 --generate-hashes --universal --no-header audit.in -o requirements-audit.txt
+# Sinh lại: printf 'pip-audit==X\nzizmor==Y\n' > audit.in && uv pip compile --python-version 3.11 --generate-hashes --universal --no-header --exclude-newer <ngày−3>T00:00:00Z audit.in -o requirements-audit.txt
 # pip-audit 2.10.1 (Apache-2.0, xác minh PyPI 2026-10-14); chỉ chạy trên runner CI, không phân phối kèm.
 # zizmor 1.31.1 (MIT, wheel PyPI; xác minh 2026-10-21, research §4.3): lint workflow GitHub Actions (T-1833).
 boolean-py==5.0 \

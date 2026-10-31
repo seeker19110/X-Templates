@@ -1,5 +1,5 @@
 # Công cụ cổng của repo khung (ruff, mypy, coverage, shellcheck-py) — KHOÁ kèm hash, CI cài bằng: pip install --require-hashes -r requirements-dev.txt
-# Sinh lại: printf 'ruff==X\nmypy==Y\ncoverage==Z\nshellcheck-py==W\n' > req.in && uv pip compile --python-version 3.11 --generate-hashes --universal --no-header req.in -o requirements-dev.txt
+# Sinh lại: printf 'ruff==X\nmypy==Y\ncoverage==Z\nshellcheck-py==W\n' > req.in && uv pip compile --python-version 3.11 --generate-hashes --universal --no-header --exclude-newer <ngày−3>T00:00:00Z req.in -o requirements-dev.txt
 # Dependabot (ecosystem pip) đề xuất nâng; không sửa tay hash.
 # License (xác minh PyPI 2026-10-14): ruff, mypy, mypy-extensions, librt, ast-serialize — MIT; coverage — Apache-2.0; typing-extensions — PSF-2.0;
 # pathspec — MPL-2.0 (copyleft yếu, theo file); shellcheck-py — MIT, gói kèm binary shellcheck GPL-3.0 (2026-10-21). Quyết định: chấp nhận — gói chỉ chạy trên runner CI/máy dev, không sửa,
