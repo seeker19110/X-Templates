@@ -886,6 +886,16 @@ class MonorepoFingerprintTest(unittest.TestCase):
         self.assertNotEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
         self.assertEqual(xt._stage_changed(self.web, sub), ["app.py"])
 
+    def test_release_freshness_sees_decisions(self) -> None:
+        """AUD-HAR-151 (nửa thứ hai): DECISIONS.md nằm ngoài vân tay gói nhưng hàng `prod_switch` của `release-check` đọc
+        nó — đổi DECISIONS.md sau lần chạy làm kết quả `release-check` hết tươi, gói vẫn còn hiệu lực."""
+        sha = self.git("rev-parse", "HEAD").strip()
+        (self.web / "docs" / "autopilot" / "DECISIONS.md").write_text("## D-001\n", encoding="utf-8")
+        self.commit("quyết định mới")
+        facts = xt.signoff_facts(self.web, {}, release={"head": sha}, package={"candidate_head": sha})
+        self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
+        self.assertEqual(facts["package_changed"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

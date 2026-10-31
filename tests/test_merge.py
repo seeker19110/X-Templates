@@ -2244,9 +2244,15 @@ class PrNextCliTest(unittest.TestCase):
 
     def test_debt_monorepo(self):
         """AUD-HAR-155: dự án ở thư mục con của repo (`apps/web`) — `pr debt` đọc sổ của dự án ở head (`head:./…`) và miễn
-        đúng sổ đó (tiền tố dự án): commit chỉ sổ sau review cuối → rc 0; sửa mã, kể cả ngoài dự án → rc 2."""
+        đúng sổ đó (tiền tố dự án): commit chỉ sổ sau review cuối → rc 0; sửa mã, kể cả ngoài dự án → rc 2. Tên thư mục có
+        dấu (`apps/wéb`): `git diff` không bọc nháy đường dẫn (`core.quotePath=false`) nên vẫn miễn đúng sổ."""
+        for name in ("web", "wéb"):
+            with self.subTest(name):
+                self._debt_monorepo(name)
+
+    def _debt_monorepo(self, name: str) -> None:
         root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
-        self.base = root / "apps" / "web"
+        self.base = root / "apps" / name
         self.base.mkdir(parents=True)
         self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
         subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
@@ -2264,7 +2270,7 @@ class PrNextCliTest(unittest.TestCase):
             return run_main(*args, stdin=json.dumps(p))
 
         self.assertEqual(debt(head)[::2], (0, ""))
-        for path, rel in (("apps/web/src/a.py", "src/a.py"), ("apps/api/b.py", "../api/b.py")):
+        for path, rel in ((f"apps/{name}/src/a.py", "src/a.py"), ("apps/api/b.py", "../api/b.py")):
             with self.subTest(path):
                 self.git("checkout", "-q", "-b", f"x{len(rel)}", head)
                 rc, _, err = debt(self.commit({rel: "z = 3\n"}))
