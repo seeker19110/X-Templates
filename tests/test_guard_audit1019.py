@@ -1001,6 +1001,123 @@ class HeredocDelimiterTest(unittest.TestCase):
         self.assertEqual(guard.literal_bodies_masked("cat <<'E'\n`rm -rf ~`"), "cat <<'E'\n`rm -rf ~`")
 
 
+# Lệnh nguy hiểm đặt sau chỗ guard từng đọc lệch heredoc (review #361 lượt 2): bash chạy chúng (đã thử bash 5.2).
+DANGER = (
+    "rm -rf ~",
+    "git push --force origin main",
+    "echo x > .autopilot/state.json",
+    "echo '{}' > docs/autopilot/STAGE.json",
+    "gh pr comment 5 -F b.md",
+    "gh pr comment 5 --body '" + MARK + "'",
+)
+
+
+class HeredocRound2Test(unittest.TestCase):
+    """Review #361 lượt 2: guard đọc heredoc như bash — số học chỉ khi `((…))` đóng bằng `))` (cả qua dòng; chưa phân
+    định → chặn), `$[…]`, `$"…"`, `$$'`, dấu kết là cả từ (backtick, `$(…)`, `${…}` thuộc từ; AUD-SEC-199), so dòng kết
+    nguyên văn (`<<-` chỉ bỏ tab đầu; AUD-SEC-200), `$$'` trong `expand_ansi_c` (AUD-SEC-198)."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        Path(self.root, "b.md").write_text(MARK + "\n", encoding="utf-8")
+        Path(self.root, "n.md").write_text("thường\n", encoding="utf-8")
+
+    def assert_all(self, want, templates):
+        for tpl in templates:
+            for x in DANGER if "{x}" in tpl else ("",):
+                cmd = tpl.replace("{x}", x)
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(final(cmd, self.root), want)
+
+    def test_arith_only_when_closed_by_double_paren(self):
+        self.assert_all(
+            "deny",
+            (
+                "((true) ); cat <<EOF\n<<'X'\nEOF\n{x}\nX",  # `((…) )` là subshell lồng: `<<EOF` là heredoc thật
+                "x=$((cat <<EOF\n<<'X'\nEOF\n) )\n{x}\nX",
+                "((true; cat <<EOF\n) )\n<<'X'\nEOF\n{x}\nX",  # chưa đóng trên dòng: không phân định → chặn
+                "echo $((1<<y\n))\n{x}\ny",  # số học qua dòng: `<<y` là dịch bit
+                "((x=1<<y\n))\n{x}\ny",
+                "echo $((1) + (1<<y))\n{x}\ny",  # `$((…))`: số học khi thân kết bằng `)` (như bash)
+                "((1 \"((\" )) ; cat <<EOF\n<<'X'\nEOF\n{x}\nX\n))",  # ngoặc trong nháy không tính
+                'echo "$(echo $((1<<y\n)))"\n{x}\ny',
+                "echo `((1<<y\n))`\n{x}\ny",
+                "echo $[1<<2]\n{x}\n2]",  # `$[…]` số học kiểu cũ
+                "echo $[1<<y\n]\n{x}\ny",
+                "echo $((1 +\n[x] 2<<y))\n{x}\ny",  # ngoặc vuông không làm cân ngoặc tròn mang từ dòng trước
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                "echo $((1<<2)) <<EOF\nhello\nEOF",
+                "for ((i=0; i<3; i++)); do echo $((i<<1)); done",
+                "gh pr create --title 'docs: x' --body \"$(cat <<'EOF'\n## Summary\n- a $((1<<2)) b\nEOF\n)\"",
+                "echo $[1<<2]; echo $(( (1<<2) + 1 )); (( (1) )) && echo ok",
+                "echo $((1 +\n2))\ncat <<EOF\nrm -rf ~\nEOF",
+                "(cd docs && cat <<EOF\nrm -rf ~\nEOF\n)",
+                "echo '((' <<EOF\nrm -rf ~\nEOF",
+            ),
+        )
+
+    def test_delimiter_whole_word(self):
+        self.assert_all(
+            "deny",
+            (
+                'cat <<$"EF"\nEF\n{x}\n$EF',
+                "cat <<E`x`F\nE\ncat <<'Y'\nE`x`F\n{x}\nY",
+                "cat <<E$(x)F\nE$\ncat <<'Y'\nE$(x)F\n{x}\nY",
+                "cat <<E$(x)F\nE\ncat <<'Y'\nE$(x)F\n{x}\nY",
+                "cat <<E${x:-a b}F\nE${x:-a\ncat <<'Y'\nE${x:-a b}F\n{x}\nY",
+                "cat <<E$((1 + 2))F\nE$((1\ncat <<'Y'\nE$((1 + 2))F\n{x}\nY",
+                "cat <<E$(x\n{x}",  # từ chưa đóng trên dòng: không phân định → chặn
+                'cat <<E"x\n{x}',
+                "cat <<E`x #`F\nE\n{x}",
+                "cat <<E$(x 'y')F\nE$(x 'y')F\n{x}",  # nháy trong thay lệnh của từ: không đọc chắc → chặn
+            ),
+        )
+        self.assert_all(
+            "",
+            (
+                'cat <<$"EF"\nrm -rf ~\nEF',
+                "cat <<E`x`F\nrm -rf ~\nE`x`F",
+                "cat <<E$(x)F\nrm -rf ~\nE$(x)F",
+                "cat <<E${x:-a b}F\nrm -rf ~\nE${x:-a b}F",
+                "echo '<<E$(x'; echo \"<<E'x\"",  # trong nháy: không phải heredoc, không đọc từ
+            ),
+        )
+        self.assertEqual(guard.strip_heredocs("echo <<\nls"), "echo <<\nls")  # `<<` không có từ: lỗi cú pháp của bash
+        lines = ["cat <<E`x`F", "body", "E`x`F"]
+        self.assertEqual([(o, a, b) for o, _, a, b in guard._heredoc_spans(lines)], [(0, 1, 2)])
+        self.assertEqual(guard.strip_heredocs("cat <<E$(x)F\nbody\nE$(x)F\nls"), "cat <<E$(x)F\nls")
+
+    def test_terminator_exact_line(self):
+        self.assert_all(
+            "deny",
+            (
+                "cat <<EOF\nEOF \ncat <<'Y'\nEOF\n{x}\nY",  # khoảng trắng cuối: không phải dấu kết
+                "cat <<EOF\nEOF \ncat <<'Y'\nEOF\n{x}\nY",
+                "cat <<-EOF\n  EOF\ncat <<'Y'\nEOF\n{x}\nY",  # `<<-` chỉ bỏ tab đầu dòng
+                "cat <<EOF\n\tEOF\ncat <<'Y'\nEOF\n{x}\nY",
+            ),
+        )
+        self.assert_all("", ("cat <<-EOF\n\trm -rf ~\n\tEOF\necho ok", "cat <<EOF\nrm -rf ~\nEOF\necho ok"))
+
+    def test_dollar_dollar_before_quote(self):
+        self.assert_all("deny", ("echo $$'\\' '<<EOF'\n{x}\nEOF", "echo $$$$'\\' '<<EOF'\n{x}\nEOF"))
+        self.assert_all("", ('echo $$; gh pr comment 5 --body "pid $$"', "echo $$$'a b' ok"))
+        self.assertEqual(guard.expand_ansi_c("echo $$'\\' x'"), "echo $$'\\' x'")
+        self.assertEqual(guard.expand_ansi_c("$$$'\\x41'"), "$$'A'")
+        self.assertEqual(guard._quote_states("$$'a", "")[1], "'")
+        self.assertEqual([j for j, _ in guard._unquoted("$$'a'b")], [0, 1, 5])
+
+    def test_ambiguous_heredoc_denied_with_budget_code(self):
+        res = guard.bash_decision("((true; cat <<EOF\n) )\nls", str(self.root))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+        with self.assertRaises(guard.ScanTooComplex):
+            guard.strip_heredocs("cat <<E$(x\nls")
+
+
 class ReviewForgeRound2Test(unittest.TestCase):
     """Review #361 lượt 2: `gh` đăng chữ nhận ra ở token (đã bỏ nháy, `${IFS}`) vẫn được quét nguồn — chữ thô không khớp
     regex không làm bỏ qua; file thân do chính chuỗi lệnh ghi ra thì nguồn là mọi file chuỗi đó đọc."""
@@ -1057,6 +1174,44 @@ class ReviewForgeRound2Test(unittest.TestCase):
                 "gh pr comment 5 -F khong-co.md",
             ),
         )
+
+
+class HeredocScanWorkTest(unittest.TestCase):
+    """Review #361 lượt 2 (AUD-SEC-201): đọc heredoc tuyến tính — đếm việc (không đo giờ): mỗi dòng dựng bảng nháy kép một lần,
+    `_subst_depth` không quét lại dòng cho mỗi `<<`; dir của lệnh trong pipeline không dựng lại mỗi pipeline."""
+
+    def test_dq_heredocs_linear_work(self):
+        for cmd in (
+            'gh pr comment 5 -F - <<"x' + '<<\\"' * 3000,
+            'echo "' + "<<x" * 4000 + '"',
+            'x="$(cat ' + "<<x" * 4000,
+        ):
+            seen = []
+            real = guard._subst_depth
+            with (
+                self.subTest(cmd=cmd[:30]),
+                mock.patch.object(guard, "_subst_depth", side_effect=lambda t, d: seen.append(len(t)) or real(t, d)),
+            ):
+                try:
+                    guard.strip_heredocs(cmd)
+                    guard._heredocs(cmd)
+                except guard.ScanTooComplex:
+                    pass
+                self.assertLessEqual(sum(seen), 4 * len(cmd))  # cũ: mỗi `<<` quét lại đầu dãy nháy → bậc hai
+
+    def test_pipeline_dirs_linear_work(self):
+        cmd = "echo $((1<<2)) <<A\n" * 200
+        real = guard._commands_with_cwd
+        iters = []
+
+        class Counted(list):
+            def __iter__(self):
+                iters.append(1)
+                return super().__iter__()
+
+        with mock.patch.object(guard, "_commands_with_cwd", side_effect=lambda *a: Counted(real(*a))):
+            guard._interp_scripts_at(cmd, guard.tokenize(cmd), str(ROOT))
+        self.assertLessEqual(len(iters), 2)  # cũ: dựng lại danh sách thư mục cho mỗi pipeline (200 lần)
 
 
 class BraceSequenceMiddleTest(unittest.TestCase):
