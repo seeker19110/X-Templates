@@ -5296,7 +5296,60 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         for t, k in restored
         if k == "secret" and not build_local_secret(t, root, cwd)
     ]
+    asks += _ledger_asks(n, root, cwd)
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
+
+
+# sổ giai đoạn và thư mục tổ tiên của nó (`docs/autopilot`, `docs`)
+LEDGER_PATHS = tuple(STAGE_LEDGER.rsplit("/", i)[0] for i in range(STAGE_LEDGER.count("/") + 1))
+COPY_DEST_OPTS = ("-t", "--target-directory", "-m", "--mode", "-S", "--suffix")
+
+
+def _ledger_hit(rel: str) -> bool:
+    """`rel` (có thể là glob, khớp từng cấp như shell — `docs/*` gồm `docs/autopilot`, `docs/*.md` thì không) là sổ giai
+    đoạn hay thư mục tổ tiên của nó: xoá/dời/khôi phục/chép đè là ghi tay sổ (AUD-HAR-154)."""
+    parts = rel.split("/")
+    return any(
+        len(p.split("/")) == len(parts) and all(map(fnmatch.fnmatchcase, p.split("/"), parts)) for p in LEDGER_PATHS
+    )
+
+
+def _removed_targets(n: List[str]) -> List[str]:
+    """Đích bị xoá/dời đi/ghi đè cả cây: `rm`/`unlink`/`shred`, nguồn của `mv`/`git mv`, `git rm`, `find … -delete`,
+    pathspec của `git checkout <rev> --`/`git restore -s`."""
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name == "git" and args[:1] in (["rm"], ["mv"]):
+        pos = _positionals(args[1:])
+        return pos if args[0] == "rm" else pos[:-1]
+    if name == "mv":
+        pos = _positionals(args, MV_VALUE_OPTS)
+        return pos if _flag_value(args, "-t") or _flag_value(args, "--target-directory") else pos[:-1]
+    if name in ("rm", "unlink", "shred"):
+        return _positionals(args)
+    return _find_ledger_roots(args) if name == "find" else _git_file_targets(n)
+
+
+def _find_ledger_roots(args: List[str]) -> List[str]:
+    """Gốc của `find … -delete` có thể trúng sổ: không bộ lọc tên, bộ lọc phủ định, hay mẫu tên/đường khớp một cấp của sổ
+    (`-name '*.json'`, `-path '*autopilot*'`) — `find docs -name evidence -delete` không đụng sổ."""
+    expr = args[_find_parts(args)[1] :]
+    vals = [expr[k + 1].lower() for k, a in enumerate(expr[:-1]) if a in FIND_NAME_TESTS]
+    names = [p.rsplit("/", 1)[-1].lower() for p in LEDGER_PATHS]
+    hit = not vals or bool({"!", "-not"} & set(expr))
+    hit = hit or any(fnmatch.fnmatchcase(m, posixpath.basename(v) or v) or m in v for v in vals for m in names)
+    return _find_delete_roots(args) if hit else []
+
+
+def _ledger_asks(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Ghi tay sổ giai đoạn qua thư mục: xoá/dời thư mục tổ tiên (`rm -r docs/autopilot`, `git mv docs …`), hay chép/dời/
+    liên kết vào thư mục có sẵn mà tên nguồn là tên sổ (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
+    hits = [x for t in _removed_targets(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
+    pos = _positionals(n[1:], COPY_DEST_OPTS) if n[:1] and n[0] in ("cp", "mv", "install", "ln") else []
+    for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
+        if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
+            joined = [posixpath.join(d, posixpath.basename(s.rstrip("/"))) for s in pos[:-1]]
+            hits += [j for j in joined if _ledger_hit(_rel_dir(j, root))]
+    return [EVIDENCE_WHY.format(h) for h in hits]
 
 
 def _rel_dir(target: str, root: str) -> str:

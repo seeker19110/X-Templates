@@ -165,6 +165,9 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-rev361b-oldarith-ap": ".autopilot/state.json tương đối",
     "guard-rev361c-dq-body-ap": ".autopilot/state.json tương đối",
     "guard-rev361c-dq-body-stage": "docs/autopilot/STAGE.json tương đối",
+    "guard-har154-rm-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
+    "guard-har154-git-mv-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
+    "guard-har154-cp-into-ledger-dir": "docs/autopilot/ tương đối → /tmp/docs/autopilot",
 }
 
 

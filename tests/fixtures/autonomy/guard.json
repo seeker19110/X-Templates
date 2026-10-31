@@ -13089,6 +13089,70 @@
    "expect": {
     "allowed": true
    }
+  },
+ {
+  "id": "guard-har154-rm-ledger-dir",
+  "origin": "audit",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "rm -r docs/autopilot",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": false
   }
+ },
+ {
+  "id": "guard-har154-git-mv-ledger-dir",
+  "origin": "audit",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git mv docs/autopilot docs/x",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-cp-into-ledger-dir",
+  "origin": "audit",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "cp /tmp/STAGE.json docs/autopilot/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-har154-cp-into-docs",
+  "origin": "control",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "cp /tmp/notes.md docs/autopilot/",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  }
+ }
  ]
 }
