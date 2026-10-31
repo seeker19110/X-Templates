@@ -379,6 +379,7 @@ HEREDOC_RE = re.compile(
     rf"<<-?[ \t]*(?:({HERE_WORD})|'({HERE_WORD})'|\"({HERE_WORD})\"|\\({HERE_WORD}))(?=[ \t;&|()<>]|$)"
 )
 HERE_WORD_HINT_RE = re.compile(r"<<-?[ \t'\"\\]*([A-Za-z0-9_.-]+)")  # từ có thể là dấu kết, kể cả trong chuỗi lồng
+HERE_WORD_RUN_RE = re.compile(r"[A-Za-z0-9_.-]+")  # dãy ký tự có thể của dấu kết ở đầu dòng (`_paren_terminator`)
 CODE_PLAIN_RE = re.compile(r"[^\\'\"`$()<>#]+")
 CASE_WORD_RE = re.compile(r"(?:^|[\s;&|])case(?=\s|$)")
 ARRAY_BAD_RE = re.compile(r"[;|&<>]|(?<!\$)\(")  # trần trong gán mảng `x=(…)`: bash báo lỗi rồi bỏ cả dòng
@@ -663,10 +664,15 @@ def _here_scan_cached(cmd: str) -> Tuple[HereSpan, ...]:
 def _joined_terminator(cmd: str) -> bool:
     """Có chuỗi dòng nối bằng `\\` lẻ mà dòng thô cuối chuỗi, hay cả chuỗi đã nối, trông như dấu kết heredoc của
     lệnh không: bash không nối dòng trong thân heredoc có nháy (`foo\\` ↵ `X`: `X` là dòng kết; `X\\` ↵ ``: không) mà
-    guard đọc trên chữ đã nối — hai cách đọc lệch nhau đúng ở dòng kết."""
-    words = set(HERE_WORD_HINT_RE.findall(cmd))
+    guard đọc trên chữ đã nối — hai cách đọc lệch nhau đúng ở dòng kết. Từ gợi ý lấy từ cả chuỗi thô lẫn chuỗi đã nối
+    (`<\\` ↵ `<'EOF'`, `$\\` ↵ `(cat <<'EOF'`: chỉ chuỗi đã nối có `<<EOF`); dòng thô ngay sau `\\` lẻ bắt đầu bằng dấu
+    kết rồi `)` (`foo\\` ↵ `EOF)"; rm -rf ~` — luật `EOF)` của `$(…)` mà guard không thấy vì đã nối) cũng tính (D-272)."""
+    words = set(HERE_WORD_HINT_RE.findall(cmd)) | set(HERE_WORD_HINT_RE.findall(join_continuations(cmd)))
+    lens = {len(w) for w in words}
     chain: List[str] = []
     for line in cmd.split("\n"):
+        if chain and _paren_terminator(line.lstrip("\t"), words, lens):
+            return True
         chain.append(line)
         if (len(line) - len(line.rstrip("\\"))) % 2:
             continue  # dòng giữa chuỗi kết bằng `\\` lẻ: không thể bằng dấu kết (chỉ `[A-Za-z0-9_.-]`)
@@ -676,14 +682,24 @@ def _joined_terminator(cmd: str) -> bool:
     return False
 
 
+def _paren_terminator(line: str, words: Set[str], lens: Set[int]) -> bool:
+    """`line` bắt đầu bằng một từ trong `words` (tiền tố của dãy `[A-Za-z0-9_.-]` đầu dòng) rồi sau đó có `)`. Chỉ xét
+    độ dài có trong `lens` (không cắt chuỗi mọi độ dài: dòng dài không bậc hai)."""
+    run = HERE_WORD_RUN_RE.match(line)
+    if not run:
+        return False
+    end = min(run.end(), line.rfind(")"))
+    return any(k <= end and line[:k] in words for k in lens)
+
+
 def _heredoc_precheck(cmd: str, root: bool) -> None:
     """Trước khi quét (D-270): dòng nối bằng `\\` chạm dấu kết heredoc (`_joined_terminator`) → chặn; lời gọi gốc
     (`root`): heredoc không có dòng kết → chặn (lệnh lồng/mảnh do guard cắt: thân là phần còn lại như bash)."""
-    if "<<" not in cmd:
+    joined = join_continuations(cmd)
+    if "<<" not in joined:  # `<\\` ↵ `<'EOF'`: chỉ chuỗi đã nối có `<<` (D-272)
         return
     if _joined_terminator(cmd):
         raise ScanTooComplex("dòng nối `\\` chạm dòng kết heredoc")
-    joined = join_continuations(cmd)
     last = joined.count("\n")  # chỉ số dòng cuối: thân kết ở sau nó = không có dòng kết
     if root and any(b > last for *_, b, _ in _here_scan(joined)):
         raise ScanTooComplex("heredoc không có dòng kết")

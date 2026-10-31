@@ -1561,6 +1561,91 @@ class HeredocRound4Test(unittest.TestCase):
         self.assertEqual(got, [want for _, want in cmds])
 
 
+class HeredocRound5Test(unittest.TestCase):
+    """D-272 (review #361 sau D-271, đã thử bash 5.2): `\\` nối dòng tách `$(`/`<<` né luật `EOF)` của AUD-SEC-217 và
+    luật dòng nối chạm dấu kết (cấp ngoài, có từ trước: `cat <\\` ↵ `<'EOF'` ↵ `foo\\` ↵ `EOF` ↵ `rm -rf ~`)."""
+
+    setUp = HeredocAllowlistTest.setUp
+    assert_all = HeredocAllowlistTest.assert_all
+
+    def test_split_comsub_terminator_denied(self):
+        """AUD-SEC-217 qua `$\\` ↵ `(` hay `<\\` ↵ `<`: bash nối dòng trước khi đọc, dòng `EOF)` vẫn kết heredoc."""
+        self.assert_all(
+            "deny",
+            (
+                'git commit -m "$\\\n(cat <<\'EOF\'\nfix(x): y\\\nEOF)"; {x}\nEOF\n)"',
+                'git commit -m "$(cat <\\\n<\'EOF\'\nfix(x): y\\\nEOF)"; {x}\nEOF\n)"',
+                "gh pr create --title 'fix(x): y' --body \"$\\\n(cat <<'EOF'\nbody\\\nEOF)\"\n{x}\nEOF\n)\"",
+                "x=$\\\n(cat <<'X'\nfoo\\\nX); {x}\nX\n)",
+                'x="$\\\n(cat <<\'EOF\'\nbody\\\nEOF)"\n{x}\nEOF\n)"',
+                "x=$(cat <\\\n<'X'\nfoo\\\nX); {x}\nX\n)",
+                "x=$(cat <<-\\\n'X'\n\tfoo\\\n\tX); {x}\nX\n)",  # `<<-` tách khỏi dấu kết, tab đầu dòng
+                "x=$\\\n(cat <<'X'\nfoo\\\nX)\\\n; {x}\nX\n)",
+            ),
+        )
+        res = guard.bash_decision("x=$\\\n(cat <<'X'\nfoo\\\nX); rm -rf ~\nX\n)", str(self.root))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+
+    def test_split_heredoc_top_level_denied(self):
+        """Cấp ngoài (có từ trước): `<\\` ↵ `<'EOF'` — dòng nối `foo\\` ↵ `EOF` chạm dấu kết; bash kết ở `EOF` thô."""
+        self.assert_all(
+            "deny",
+            (
+                "cat <\\\n<'EOF'\nfoo\\\nEOF\n{x}\nEOF",
+                "git commit -F - <\\\n<'EOF'\nfix(x): y\\\nEOF\n{x}\nEOF",
+                "python3 - <\\\n<'PY'\nprint(1)\\\nPY\n{x}\nPY",
+                "cat <\\\n<-'EOF'\n\tfoo\\\n\tEOF\n{x}\nEOF",
+                'git commit -m "$(cat <\\\n<\'EOF\'\nfix(x): y\\\nEOF\n)"\n{x}\nEOF\n)"',
+            ),
+        )
+
+    def test_split_heredoc_controls_allowed(self):
+        self.assert_all(
+            "",
+            (
+                "cat <\\\n<'EOF'\nhello\nEOF",
+                "x=$\\\n(cat <<'EOF'\nhello\nEOF\n)",
+                "git commit -m \"$(cat <<'EOF'\nfix(x): y\nEOF\n)\"",
+                "cat <<'EOF'\nhi\nEOF\nx=$(echo a \\\n  b)",  # dòng sau `\\` có `)` nhưng không bắt đầu bằng dấu kết
+                "cat <<'EOF'\nhi\nEOF\necho a \\\n  EOFX",
+                "x=$(printf '%s' \\\n  a)",
+            ),
+        )
+
+    def test_paren_terminator_unit(self):
+        """Dòng thô ngay sau dòng kết bằng `\\` lẻ: bắt đầu bằng dấu kết (tiền tố của từ đầu dòng) rồi có `)`."""
+        words = {"EOF", "X"}
+        for line, want in (
+            ("EOF)", True),
+            ("EOF; ls)", True),
+            ("Xa)", True),  # tiền tố là dấu kết, `)` ở sau — như `_check_subst_body`
+            ("EOFX)", True),
+            ("\tX)", False),  # tab đầu dòng bỏ ở nơi gọi
+            ("EOF", False),
+            (")EOF", False),
+            ("Y)", False),
+            ("", False),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(guard._paren_terminator(line, words, {len(w) for w in words}), want)
+
+    def test_concurrent_round5_decisions(self):
+        import concurrent.futures
+
+        cmds = [
+            ('git commit -m "$\\\n(cat <<\'EOF\'\nfix(x): y\\\nEOF)"; rm -rf ~\nEOF\n)"', "deny"),
+            ("cat <\\\n<'EOF'\nfoo\\\nEOF\nrm -rf ~\nEOF", "deny"),
+            ("cat <\\\n<'EOF'\nhello\nEOF", ""),
+        ] * 6
+        root = str(self.root)
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": root, "XT_GUARD_POLICY": ""}),
+            concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            got = list(pool.map(lambda c: str(guard.apply_policy(guard.bash_decision(c[0], root))["decision"]), cmds))
+        self.assertEqual(got, [want for _, want in cmds])
+
+
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""
 
