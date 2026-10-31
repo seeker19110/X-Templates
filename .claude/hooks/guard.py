@@ -728,9 +728,8 @@ def _letter_forms(cmd: str) -> List[str]:
     không phụ thuộc trạng thái nháy/comment/heredoc, nên ghép `$''`, `\\E`, `"$x"`, `$'\\x45'`, `{ES,}` sau nháy lẻ
     hay `$'` trong comment đều không che được tên (review #361 sau D-273)."""
     j = join_continuations(cmd)
-    esc = ANSI_ESCAPE_RE.sub(_ansi_c_char, j)  # mọi escape ANSI-C (cả `\\u`/`\\U`), không cần đúng cặp `$'…'`
-    forms = (j, HEAD_EXPANSION_RE.sub("", j), expand_ansi_c(j), esc)  # `esc`: giải `\\xHH`/`\\NNN` mọi nơi, không cần
-    return [re.sub(r"[^A-Za-z0-9]", "", x) for x in forms]  # đúng cặp `$'…'` (nháy lẻ phía trước làm lệch cặp)
+    bases = (j, expand_ansi_c(j), ANSI_ESCAPE_RE.sub(_ansi_c_char, j), re.sub(r"\\(.)", r"\1", j))
+    return [re.sub(r"[^A-Za-z0-9]", "", y) for x in bases for y in (x, HEAD_EXPANSION_RE.sub("", x))]  # 8 dạng (D-276)
 
 
 def _shell_precheck(cmd: str) -> None:
@@ -742,7 +741,7 @@ def _shell_precheck(cmd: str) -> None:
       không thấy. Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272/D-274)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
-    if "\n" in cmd and ("#" in cmd or "$'" in cmd) and _comment_desyncs_ansi(cmd.split("\n")):
+    if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
@@ -767,20 +766,18 @@ def _alias_rule(argv: List[str]) -> None:
         raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
 
 
-def _comment_desyncs_ansi(lines: List[str]) -> bool:
-    """D-274/D-275: `expand_ansi_c` chạy trước `strip_comments` nên nháy trong comment làm lệch cặp `$'…'` của các dòng
-    sau (`true # $'` ↵ `r\\m -rf ~`; `true # it's` ↵ `$'\\x72m' -rf ~`). Chặn khi comment có `$'`, khi có `` `# `` (comment
-    trong backtick nuốt dấu đóng), hoặc khi một dòng có số nháy lẻ đứng trước dòng có `$'`. Comment thường (`# it's
-    fine`) không có `$'` phía sau thì cho chạy."""
-    for i, line in enumerate(lines[:-1]):
-        m = COMMENT_START_RE.search(line)
-        if m is None:
-            continue
-        tail = line[m.start() :]
-        if "$'" in tail or "`#" in line:
+def _comment_desyncs_ansi(cmd: str) -> bool:
+    """D-274…D-276: `$'` trong comment (một dòng sau đó) hoặc `` `# `` (comment trong backtick nuốt dấu đóng) → chặn.
+    Xét trên dòng đã nối `\\`↵ và đã gấp thân heredoc có nháy (dữ liệu, không phải lệnh: thân commit/PR có `` `#` ``
+    vẫn chạy). `expand_ansi_c` bỏ qua comment nên nháy trong comment không còn làm lệch `$'…'` của dòng sau."""
+    lines = _fold_heredocs(join_continuations(cmd), True).split("\n")
+    for line in lines[:-1]:
+        if "`#" in line:
             return True
-    later = [i for i, x in enumerate(lines) if "$'" in x]  # nháy lẻ (comment, thân heredoc `it's`) trước dòng có `$'`
-    return bool(later) and any((x.count("'") + x.count('"')) % 2 for x in lines[: later[-1]])
+        m = COMMENT_START_RE.search(line)
+        if m is not None and "$'" in line[m.start() :]:
+            return True
+    return False
 
 
 def _comment_continued(line: str) -> bool:
@@ -937,7 +934,12 @@ def expand_ansi_c(cmd: str) -> str:
     i, q = 0, ""
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
+        if not q and c == "#" and (i == 0 or cmd[i - 1] in WORD_END):  # comment: chép nguyên tới hết dòng (D-276) —
+            e = cmd.find("\n", i)  # nháy trong comment không làm lệch `$'…'` của dòng sau
+            e = len(cmd) if e < 0 else e
+            out.append(cmd[i:e])
+            i = e
+        elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
             i += 2
         elif not q and cmd.startswith("$'", i):
@@ -1126,7 +1128,8 @@ def tokenize(cmd: str) -> List[str]:
         return list(lex)
     except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
         # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
-        return re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
+        raw = re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
+        return [t if _is_punct(t) else re.sub(r"[\\'\"]", "", t) for t in raw]  # bỏ nháy/`\\`: `\\rm`, `'r'm` (D-276)
 
 
 PUNCT = set("();<>|&\n")

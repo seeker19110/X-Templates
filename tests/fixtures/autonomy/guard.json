@@ -12985,6 +12985,84 @@
    "expect": {
     "allowed": false
    }
+  },
+  {
+   "id": "guard-d276-p1-cmt-apos-dq",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "true # it's \"\n$'\\x72'm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d276-p5-cont-split",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "true # it's\n$\\\n'\\x72'm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d276-z1-ansi-hex-trail-dq",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "$'\\x72m' -rf ~\n\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d276-control-f3-commit-hd-apos-then-printf",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"\nprintf $'done\\n'"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d276-control-f4-commit-hd-tickhash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nfix(guard): gợi ý tránh `#` trước `\\`\n\nBody.\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d276-control-f12-cmt-apos-grep-anchor",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "# check there's no trailing space\ngrep -n ' $' README.md"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

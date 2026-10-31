@@ -1869,11 +1869,8 @@ class AliasDefinitionTest(unittest.TestCase):
             ("T6_extglob_at", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias @(c=*)\nc"),
             ("T9_extglob_plus", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias c+(=*)\nc"),
             ("T10_extglob_q", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias c?(=*)\nc"),
-            ("D1_cmt_apos_hexrm", "true # it's\n$'\\x74ouch' PWNED\n# '"),
             ("D1_cmt_apos_hexrm_1", "true # it's\n$'\\x72m' -rf ~\n# '"),
-            ("D2_cmt_dq_hexrm", "true # \"\n$'\\x74ouch' PWNED\n# \""),
             ("D2_cmt_dq_hexrm_1", "true # \"\n$'\\x72m' -rf ~\n# \""),
-            ("D3_hd_apos_hexrm", "cat <<'EOF'\nit's\nEOF\n$'\\x74ouch' PWNED"),
             ("D3_hd_apos_hexrm_1", "cat <<'EOF'\nit's\nEOF\n$'\\x72m' -rf ~"),
         ):
             with self.subTest(name=name):
@@ -1887,6 +1884,98 @@ class AliasDefinitionTest(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(final(cmd, self.root), "")
+
+    def test_comment_aware_ansi_d276(self):
+        """D-276 (review #361 lượt 9): `expand_ansi_c` bỏ qua comment (luật đầu-từ như `strip_comments`) nên nháy trong
+        comment không lệch `$'…'` dòng sau; `` `# `` xét trên dòng đã nối/gấp heredoc; `BASH_ALIASES` 8 dạng chỉ-chữ;
+        tách thô khi shlex lỗi bỏ nháy (`\\rm`, `'r'm`). Thân commit/PR có `` `#` ``/`$'` vẫn chạy (chặn oan lượt 9)."""
+        for name, cmd in (
+            ("P1_cmt_apos_dq", "true # it's \"\n$'\\x72'm -rf ~\n# '"),
+            ("P2_sq_dq_cmt_apos", "echo '\"' # it's\n$'\\x72'm -rf ~\n# '"),
+            ("P3_cmt_dq_apos", "true # \"it's\n$'\\x72'm -rf ~\n# \""),
+            ("P4_cmt_apos_dq_noclose", "true # it's \"\n$'\\x72'm -rf ~"),
+            ("P5_cont_split", "true # it's\n$\\\n'\\x72'm -rf ~\n# '"),
+            ("P6_cont_split_dq", "true # \"\n$\\\n'\\x72'm -rf ~\n# \""),
+            ("P7_cont_split_noclose", "true # it's\n$\\\n'\\x72'm -rf ~"),
+            ("P8_two_apos_lines_even", "true # it's\ntrue # it's \"\n$'\\x72'm -rf ~\n# '"),
+            ("L1_var_hex", "declare BASH_ALIASE${x}$'\\x53'[c]='rm -rf ~'\nc"),
+            ("L2_var_hexE", "declare BASH_ALIAS$x$'\\x45'S[c]='rm -rf ~'\nc"),
+            ("L3_printf_var_hex", "printf -v BASH_ALIASE${x}$'\\x53'[c] %s 'rm -rf ~'\nc"),
+            ("L4_cmdsub_hex", "declare BASH_ALIASE$(true)$'\\x53'[c]='rm -rf ~'\nc"),
+            ("L5_var_bsE_hex", "declare BASH_ALIAS${x}\\E$'\\x53'[c]='rm -rf ~'\nc"),
+            ("L6_dqvar_oct", "declare BASH_ALIASE\"$x\"$'\\123'[c]='rm -rf ~'\nc"),
+            ("L7_eval_var_hex", "eval \"BASH_ALIASE${x}\"$'\\x53'\"[c]='rm -rf ~'\"\nc"),
+            ("L8_typeset_u", "typeset BASH_ALIASE${x}$'\\u0053'[c]='rm -rf ~'\nc"),
+            ("L9_backtick_hex", "declare BASH_ALIASE`true`$'\\x53'[c]='rm -rf ~'\nc"),
+            ("L10_bsE_hex_ctl", "declare BASH_ALIAS\\E$'\\x53'[c]='rm -rf ~'\nc"),
+            ("L11_var_hex_oneline", "declare BASH_ALIASE${x}$'\\x53'[c]='rm -rf ~'; c"),
+            ("A1_time_alias", "time alias c='rm -rf ~'\nc"),
+            ("A2_bang_alias", "! alias c='rm -rf ~'\nc"),
+            ("A3_group_alias", "{ alias c='rm -rf ~'; }\nc"),
+            ("A4_if_alias", "if alias c='rm -rf ~'; then :; fi\nc"),
+            ("A5_default_alias", "${x:-alias} c='rm -rf ~'\nc"),
+            ("A6_parity_alias", "true # it's \"\n$'\\x61'lias c='rm -rf ~'\nc"),
+            ("A8_alias_dashdash", "alias -- c='rm -rf ~'\nc"),
+            ("A9_while_alias", "while alias c='rm -rf ~'; do break; done\nc"),
+            ("A10_cont_split_alias", "true # it's\n$\\\n'\\x61'lias c='rm -rf ~'\nc"),
+            ("B1_tick_sp_cmt", "echo ` #'`\nrm -rf ~\n# '"),
+            ("B2_tick_cont_cmt", "echo `\\\n#'`\nrm -rf ~\n# '"),
+            ("B5_tick_cont_cmt_dollar", "echo `\\\n#$'`\nrm -rf ~\n# '"),
+            ("B6_tick_tab_cmt", "echo `\t#'`\nrm -rf ~\n# '"),
+            ("B7_tick_cont_cmt_dq", 'echo `\\\n#"`\nrm -rf ~\n# "'),
+            ("U16_cmt_even_hex", "true # it's \"\ndeclare BASH_ALIAS$'\\x45'S[c]='rm -rf ~'\nc"),
+            ("U17_hd_even_hex", "cat <<'EOF'\nit's \"x\nEOF\ndeclare BASH_ALI$'\\x41'SES[c]='rm -rf ~'\nc"),
+            ("Z1_ansi_hex_trail_dq", "$'\\x72m' -rf ~\n\""),
+            ("Z2_sq_name_trail_dq", "'r'm -rf ~\n\""),
+            ("Z3_empty_sq_trail_sq", "r''m -rf ~\n'"),
+            ("Z4_bs_name_trail_dq", '\\rm -rf ~\n"'),
+            ("Z5_oct_trail_dq", "$'\\162'm -rf ~\n\""),
+            ("Z6_plain_trail_dq", 'rm -rf ~\n"'),
+            ("Z7_ansi_trail_dq_cmt_ok", "true # a\n$'\\162'm -rf ~\n\""),
+            ("Z8_sq_name_trail_sq_same_line", "'r'm -rf ~; echo '"),
+            ("Z9_dq_name_trail_dq", '"r"m -rf ~\n"'),
+            ("R1_cmt_dollar_dq_apos", "true # $\"'\n$'\\x72'm -rf ~\n# \""),
+            ("R2_cmt_dollar_dq_apos_noclose", "true # $\"'\n$'\\x72'm -rf ~"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(final(cmd, self.root), "deny")
+        for name, cmd in (
+            ("F1_echo_apos_printf", "echo \"it's ok\"\nprintf $'a\\tb\\n'"),
+            ("F2_cmt_apos_ifs", "# don't split on spaces\nIFS=$'\\n'\nfor f in $(ls); do echo \"$f\"; done"),
+            (
+                "F3_commit_hd_apos_then_printf",
+                "git commit -m \"$(cat <<'EOF'\nfix: don't break\nEOF\n)\"\nprintf $'done\\n'",
+            ),
+            (
+                "F4_commit_hd_tickhash",
+                "git commit -m \"$(cat <<'EOF'\nfix(guard): gợi ý tránh `#` trước `\\`\n\nBody.\nEOF\n)\"",
+            ),
+            (
+                "F5_pr_body_tickhash",
+                'gh pr create --title "fix: x" --body "$(cat <<\'EOF\'\n## Summary\n- Handle `#include` lines\nEOF\n)"',
+            ),
+            (
+                "F6_pr_body_ansi",
+                "gh pr create --title \"fix: x\" --body \"$(cat <<'EOF'\nFixed: `$'\\x72m'` no longer bypasses.\nEOF\n)\"",
+            ),
+            ("F7_commit_hd_ansi_body", "git commit -m \"$(cat <<'EOF'\nfix(guard): giải `$'\\x45'` mọi nơi\nEOF\n)\""),
+            ("F8_commit_F_hd_ansi", "git commit -F - <<'EOF'\nfix: handle $'\\n' in names\nEOF"),
+            ("F9_same_line", "echo \"it's\" $'\\n'\necho ok"),
+            ("F11_heredoc_md_file", "cat > notes.md <<'EOF'\nUse `#` for comments\nEOF"),
+            ("F12_cmt_apos_grep_anchor", "# check there's no trailing space\ngrep -n ' $' README.md"),
+            ("F13_echo_apos_grep_anchor", "echo \"Checking it's ok\"\ngrep -c 'error$' log.txt"),
+            ("F14_commit_hd_regex", "git commit -m \"$(cat <<'EOF'\nfix: match '^v[0-9]+$' tags\nEOF\n)\""),
+            ("F15_cmt_apos_ok_no_ansi", "# it's fine\necho ok"),
+            ("F16_tick_hash_last_line", "git status\necho '`#x`'"),
+            ("F17_python_hd", "python3 - <<'EOF'\nprint(\"it's\")\nx = '$'\nEOF"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(final(cmd, self.root), "")
+
+    def test_known_false_block_backtick_hash_comment(self):
+        """Chặn oan chấp nhận (D-276): `` `# `` trong comment của lệnh nhiều dòng (`# see `#361``) — bash đọc `` `# `` trong
+        backtick là mở comment, guard không phân biệt được với comment ngoài nên chặn."""
+        self.assertEqual(final("# see `#361`\ngit status", self.root), "deny")
 
     def test_comment_continuation_reason_suggests_fix(self):
         """Chặn oan đã biết (AUD-SEC-219, chấp nhận): `#12` trên dòng kết bằng `\\` — lý do chỉ cách tránh."""

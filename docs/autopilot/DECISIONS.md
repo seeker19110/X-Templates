@@ -1937,3 +1937,10 @@
 - Chọn: Áp bản vá 4 chỗ reviewer đã thử (danh sách cho phép đối số alias, giải mọi escape ANSI-C, backtick mở comment) + luật hẹp: comment có nháy mà dòng sau có $' → chặn; bỏ nhánh $" (chặn oan, không thêm an toàn)
 - Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ; bản vá đã thử: 917 ca chỉ chặn thêm đúng ca né; luật hẹp đóng thêm 🔴 có từ trước cùng gốc mà không chặn oan comment thường
 - Đường lùi: Revert commit lượt này về ecebc98
+
+### D-276 · 2026-10-31T11:08:48+00:00 · PR #361: lượt 9 vẫn 4 🔴 né các lớp 'comment/ANSI-C lệch', 'ghép tên BASH_ALIASES', 'tách thô khi shlex lỗi' + 🟠 chặn oan ~5% commit — dừng vòng vá vô hạn thế nào
+
+- Phương án: (1) Áp một lần cách sửa tổng hợp reviewer đã thử (expand_ansi_c bỏ qua comment theo luật đầu-từ, bỏ luật đếm nháy; `# xét trên dòng đã nối và gấp heredoc; _letter_forms 8 dạng; tách thô bỏ nháy) rồi ghi sổ trung thực các lớp này là 'đã giảm, còn mở' (không 'đã sửa'); lượt review cuối chỉ chặn khi hồi quy so với main hoặc chặn oan · (2) Tiếp tục vá theo từng lượt review · (3) Revert toàn bộ guard #361
+- Chọn: Áp một lần cách sửa tổng hợp reviewer đã thử (expand_ansi_c bỏ qua comment theo luật đầu-từ, bỏ luật đếm nháy; `# xét trên dòng đã nối và gấp heredoc; _letter_forms 8 dạng; tách thô bỏ nháy) rồi ghi sổ trung thực các lớp này là 'đã giảm, còn mở' (không 'đã sửa'); lượt review cuối chỉ chặn khi hồi quy so với main hoặc chặn oan
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: PR mạnh hơn main (0 hồi quy/1673 ca), guard regex không thể đóng tuyệt đối các lớp này (guard không phải sandbox — LOOP-HARNESS-022); ghi 'còn mở' là trung thực, giữ đường đến sửa tiếp; chặn oan 5% commit là hồi quy trải nghiệm phải bỏ; vòng vá vô hạn trái tiêu chí bền/đơn giản
+- Đường lùi: Revert commit lượt này về 69947b5; sổ đổi lại
