@@ -13201,6 +13201,227 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec195-comsub-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "true $(true)#; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-procsub-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo <(true)#x; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-array-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "a=(1 2)#x; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-assign-hash-rm",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "a=b#c; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-arith-hash-rm",
+  "origin": "adversarial-author",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo $((1))#x; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-backtick-hash-rm",
+  "origin": "adversarial-author",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo `echo a # b`; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-comsub-hash-push",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "true $(true)#; git push --force origin main"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-subshell-comment-heredoc-rm",
+  "origin": "adversarial-author",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "(true)#<<E\nrm -rf ~\nE"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-real-comment-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "ls # rm -rf ~"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec195-subshell-comment-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "(ls)# rm -rf ~"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec195-case-comment-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "case x in x) # rm -rf ~\n;; esac"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec195-comsub-word-heredoc-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "true $(true)#<<E\nrm -rf ~\nE"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec195-comsub-hash-heredoc-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-ansi-after-comsub-hash",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "true $(true)#; $'\\x72m' -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec195-extglob-hash-heredoc-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "!(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-sec195-subshell-comment-apos-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "(ls)# it's fine\necho ok"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-control-sec195-comsub-heredoc-body-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-195"
+  ],
+  "input": {
+   "command": "echo $(date)#<<X\nrm -rf ~\nX"
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }

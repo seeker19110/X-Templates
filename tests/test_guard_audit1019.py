@@ -2350,5 +2350,97 @@ class SecretExfilOtherChannelsDelta2Test(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class CommentAfterParenTest(unittest.TestCase):
+    """AUD-SEC-195: `#` mở comment chỉ ở ĐẦU một từ (bash). `)` đóng thay lệnh/thay tiến trình/số học/mảng (`$(…)`,
+    `<(…)`, `$((…))`, `a=(…)`) là một phần của từ — `#` ngay sau nó là chữ, phần sau vẫn là lệnh; `)` đóng subshell,
+    `((…))`, mẫu `case`, `f()` là toán tử — `#` sau nó là comment. Kỳ vọng đối chiếu bash thật (thay `rm` bằng `echo`)."""
+
+    def test_comment_after_paren(self):
+        for cmd in (
+            "true $(true)#; rm -rf ~",
+            "echo $(echo a)#b; rm -rf ~",
+            "echo <(true)#x; rm -rf ~",
+            "echo >(true)#x; rm -rf ~",
+            "echo $((1))#x; rm -rf ~",
+            "a=(1 2)#x; rm -rf ~",
+            "a+=(1)#x; rm -rf ~",
+            "a=b#c; rm -rf ~",
+            "echo x$(true)#y; rm -rf ~",
+            "x=$(\ntrue)#; rm -rf ~",  # thay lệnh qua nhiều dòng
+            'x=$(echo "$(echo ")")")#; rm -rf ~',  # `)` trong nháy kép lồng không đóng thay lệnh ngoài
+            "x=$(echo `echo )`)#; rm -rf ~",  # `)` trong backtick không đóng thay lệnh ngoài
+            'echo "$(true)"$(true)#; rm -rf ~',
+            "echo ${x:-)}$(true)#; rm -rf ~",
+            "echo `echo a # b`; rm -rf ~",  # `#` trong backtick là comment của lệnh trong, không nuốt lệnh ngoài
+            "bash -c 'true $(true)#; rm -rf ~'",
+            "true $(true)#; git push --force origin main",
+            "true $(true)#'\ncat <<E\n'\nrm -rf ~\nE",  # `'` sau `)#` là nháy thật: `<<E` không mở heredoc
+            "(true)#<<E\nrm -rf ~\nE",  # comment thật: `<<E` trong comment không mở heredoc
+            "(true)#'\nrm -rf ~\n#'",
+            "!(true)#'\nrm -rf ~\n#'",  # extglob tắt: `! (true)` + comment; bật: một từ — mơ hồ → chặn
+            "x=$(case x in x) echo;; esac)#; rm -rf ~",  # `)` của mẫu `case` không đóng thay lệnh
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "ls # rm -rf ~",
+            "ls;# rm -rf ~",
+            "(ls)# rm -rf ~",
+            "((1))# rm -rf ~",
+            "echo $(echo a) # rm -rf ~",
+            "case x in x) # rm -rf ~\n;; esac",
+            "f()# rm -rf ~\n{ :; }",
+            "true $(true)#<<E\nrm -rf ~\nE",  # `#` là chữ nên `<<E` mở heredoc thật: `rm` là thân
+            "(cd .)# don't rm -rf ~",  # comment một dòng: `'` không còn gì để nuốt
+            "echo a=b#c",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        # có `case`: `)` toán tử có thể là mẫu hay đóng nhầm thay lệnh — `#` dính sau nó đọc như chữ (chiều chặt)
+        self.assertEqual(guard.strip_comments("case x in x)#y\n;; esac"), "case x in x)#y\n;; esac")
+        self.assertEqual(guard.strip_comments("echo $(a)#b # c"), "echo $(a)#b ")
+        self.assertEqual(guard.strip_comments("echo ${x:-'#)'}#y # z"), "echo ${x:-'#)'}#y ")
+        self.assertEqual(guard.strip_comments('echo "${x:-"a)"}`b`"#y # z'), 'echo "${x:-"a)"}`b`"#y ')
+        self.assertEqual(guard.strip_comments("(a)#b\nc"), "(a)\nc")
+        self.assertEqual(guard.strip_comments('"$(echo a # x\n)"#y'), '"$(echo a \n)"#y')
+        self.assertEqual(
+            guard.strip_comments("echo ${#a} ${x#y} $'#' \\# '#' \"#\""), "echo ${#a} ${x#y} $'#' \\# '#' \"#\""
+        )
+
+    def test_comment_after_paren_every_reader(self):
+        """Cùng luật ở mọi bộ đọc: `expand_ansi_c` (giải `$'…'` sau `)#`), bộ đọc heredoc (`$(x)#<<X` mở heredoc thật —
+        `cat <<Y` là thân, `rm` là lệnh), bộ quét đoạn lệnh (`(a)#x; b` là comment, `$(a)#x; b` thì không)."""
+        rm = "$'\\x72m' -rf ~"
+        for cmd in (
+            "true $(true)#; " + rm,
+            "echo $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo $((1))#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo <(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "a=(1)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo x$(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "!(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",  # extglob: bash đọc tuỳ `shopt` — mơ hồ → chặn
+            "echo !(x)#'\nrm -rf ~\n'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "(true)#<<X\necho ok",
+            "(ls)# it's fine\necho ok",
+            "echo $(date)#<<X\nrm -rf ~\nX",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        self.assertEqual(guard.expand_ansi_c("true $(a)#; $'\\x72m' # $'\\x72m'"), "true $(a)#; 'rm' # $'\\x72m'")
+        self.assertEqual(guard.expand_ansi_c("(a)#$'\\x72m'"), "(a)#$'\\x72m'")
+        self.assertEqual([st.text for st in guard._ShellScan("(a)#x; b").stages], ["", "a", "#x; b"])
+        self.assertEqual([st.text for st in guard._ShellScan("$(a)#x; b").stages], ["$(a)#x", " b"])
+        self.assertEqual([st.text for st in guard._ShellScan("$((1))#x; b").stages], ["$((1))#x", " b"])
+        self.assertTrue(guard.comment_ambiguous("echo !(x)#'\nls"))
+        self.assertFalse(guard.comment_ambiguous("echo !(x)#'"))
+        self.assertFalse(guard.comment_ambiguous("echo !(x)# ok\nls"))
+        self.assertEqual(guard.strip_comments("echo $$'\\'#x # y"), "echo $$'\\'#x ")  # `$$'` không phải ANSI-C
+        self.assertEqual(guard.strip_comments("echo a"), "echo a")
+
+
 if __name__ == "__main__":
     unittest.main()
