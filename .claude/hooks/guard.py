@@ -900,6 +900,8 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
     quote, word_start, i = "", True, 0
     while i < len(cmd):
         c = cmd[i]
+        if strict and c == "#" and not quote and _ifs_before(cmd, i):
+            raise ScanTooComplex(IFS_HASH_WHY)
         if c == "#" and word_start and not quote:
             if strict and i and cmd[i - 1] == ")":
                 raise ScanTooComplex(PAREN_HASH_WHY)
@@ -924,10 +926,18 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
 
 ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
 ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
-IFS_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")
-IFS_HASH_RE = re.compile(
-    r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))#"
-)  # `$IFS#`: guard thấy khoảng trắng + comment, bash một từ
+# `IFS` liền `#` không viết lại: giữ nguyên để kiểm strict của script lồng (`bash -c '…'`) còn thấy (AUD-SEC-232)
+IFS_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))(?!#)")
+IFS_HASH_WHY = "`IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
+
+
+def _ifs_before(cmd: str, i: int) -> bool:
+    """`cmd[:i]` kết thúc bằng `$IFS`/`${IFS}` không bị `\\` thoát (`\\$IFS#` là chữ thường)."""
+    for tail in ("$IFS", "${IFS}"):
+        start = i - len(tail)
+        if start >= 0 and cmd.startswith(tail, start) and (start == 0 or cmd[start - 1] != "\\"):
+            return True
+    return False
 
 
 def _ansi_c_char(m: "re.Match[str]") -> str:
@@ -1134,11 +1144,7 @@ PWD_SUBST_RE = re.compile(
 
 def tokenize(cmd: str) -> List[str]:
     cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
-    strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
-    if IFS_HASH_RE.search(cmd):
-        raise ScanTooComplex(
-            "`$IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
-        )
+    strip_comments(cmd, True)  # `)#`, `$IFS#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (AUD-SEC-195/232)
     cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
@@ -6770,7 +6776,9 @@ def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Option
     for script, dests in ctr:
         sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
         why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
-        why = why or _wipes_bind(script, dests)
+        why = (
+            _wipes_bind(script, dests) or why
+        )  # luôn tính: lỗi BUDGET của script lồng không che xoá thư mục gắn (#372)
         out += [f"lệnh trong container: {why}"] if why else []
     return out
 

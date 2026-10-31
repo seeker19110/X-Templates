@@ -2401,12 +2401,39 @@ class ShellParseGapsTest(unittest.TestCase):
             "echo $IFS#; rm -rf ~",
             "echo ${IFS}#; git push --force origin main",
             "true $(true)$IFS#; rm -rf ~",
+            "x=${y:-$IFS#}; rm -rf ~",
+            "x=$IFS#; rm -rf ~",
+            "a=($IFS#); rm -rf ~",
+            "echo hi >$IFS#; rm -rf ~",
+            "bash -c 'echo $IFS#; rm -rf ~'",  # script lồng: `IFS_RE` từng viết lại trong nháy đơn → mất dấu `#`
+            'sh -c "echo ${IFS}#; git push --force origin main"',
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
-        for cmd in ("echo $IFSx#y", "echo $IFS # ghi chú", "printf '%s' \"$IFS\""):
+        for cmd in (
+            "echo $IFSx#y",
+            "echo $IFS # ghi chú",
+            "printf '%s' \"$IFS\"",
+            # `IFS#` làm dữ liệu (nháy, comment, thoát, thân heredoc có nháy) là chữ thường: không chặn oan (review #372)
+            "echo '$IFS#'",
+            'echo "$IFS#"',
+            "true # xem $IFS#",
+            "echo \\$IFS#",
+            "grep -n '$IFS#' CHANGELOG.md",
+            "git commit -m \"$(cat <<'EOF'\nfix: chan $IFS# bug\nEOF\n)\"",
+        ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
+
+    def test_container_script_budget_error_does_not_mask_bind_wipe(self) -> None:
+        # script lồng trong container ném ScanTooComplex (BUDGET) → bị hạ thành "hỏi" và từng che `_wipes_bind` (review #372)
+        for cmd in (
+            "docker run --rm -v $PWD:/w alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /w'",
+            "docker run --rm -v /srv/data:/d alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /d'",
+            "docker run --rm -v $PWD:/w alpine sh -c 'true $(true)#'$'\\n''rm -rf /w'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
 
     def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
         for cmd in (
