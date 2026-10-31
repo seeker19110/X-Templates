@@ -1916,3 +1916,10 @@
 - Chọn: Một lần sửa: áp bản nguyên mẫu reviewer (kiểm << trên chuỗi đã nối dòng, từ gợi ý dấu kết từ cả hai chuỗi, _joined_terminator bắt dòng sau \ lẻ bắt đầu bằng dấu kết rồi ')'); chặn mọi định nghĩa 'alias NAME=' (mọi dạng né: ${}, \ nối, printf)
 - Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ (ADR-0059); bản vá đã được reviewer thử 0 hồi quy/489 ca; alias: snapshot shell của Claude Code đã bật expand_aliases nên luật hiện tại vô tác dụng — chặn định nghĩa alias là fail-closed, agent hiếm khi cần alias
 - Đường lùi: Revert commit lượt này về 51b54a3
+
+### D-273 · 2026-10-31T09:25:02+00:00 · PR #361: review sau D-272 còn 2 🔴 trong mã alias mới (fnmatch bậc hai; BASH_ALIAS$''ES né luật) + 2 🔴 có từ trước ($"rm", trap)
+
+- Phương án: (1) Áp đúng hai bản vá reviewer đã thử + test; ghi sổ 2 🔴 có từ trước để sửa ở lát B · (2) Gỡ luật alias khỏi PR này
+- Chọn: Áp đúng hai bản vá reviewer đã thử + test; ghi sổ 2 🔴 có từ trước để sửa ở lát B
+- Lý do (tiêu chí chất lượng cuối): Bản vá hai dòng đã thử: 549 ca không đổi, V9 chặn sau 1,6 s; gỡ luật alias mở lại AUD-SEC-220/224
+- Đường lùi: Revert commit lượt này về 5948c3f

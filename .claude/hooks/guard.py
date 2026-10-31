@@ -731,7 +731,9 @@ def _shell_precheck(cmd: str) -> None:
       Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
-    norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
+    norm = re.sub(
+        r"[\"'\\]", "", expand_ansi_c(join_continuations(cmd)).replace('$"', '"')
+    )  # `$''`/`$""` ghép tên (D-273)
     if "expand_aliases" in norm and ALIAS_WORD_RE.search(norm):
         raise ScanTooComplex("alias khi bật `expand_aliases`")
     if ALIAS_TABLE in norm or ALIAS_TABLE in HEAD_EXPANSION_RE.sub("", norm):
@@ -743,13 +745,17 @@ def _may_be_alias(head: str) -> bool:
     (`al${v}ias`, `al?as`). Đường dẫn → không (dựng sẵn không gọi qua đường dẫn); tên hoàn toàn động (`$x`, `$(…)`) →
     không: giới hạn chung của phân tích tĩnh (`r${v}m -rf ~` cũng vậy), biến gán trong lệnh đã được viết lại thành chữ."""
     pat = HEAD_EXPANSION_RE.sub("*", head)
-    return "/" not in pat and bool(pat.strip("*")) and fnmatch.fnmatchcase("alias", pat)
+    if "/" in pat or not pat.strip("*"):
+        return False
+    if not any(c in pat for c in "*?["):
+        return pat == "alias"
+    return len(pat) > 64 or fnmatch.fnmatchcase("alias", pat)  # `fnmatch` bậc hai với nhiều `[` không đóng (D-273)
 
 
 def _alias_rule(argv: List[str]) -> None:
     """Lệnh đơn định nghĩa alias (tên lệnh có thể là `alias`, đối số không phải tên trơn: `c=…`, `$d`, glob) → chặn."""
     a = _strip_prefixes(argv)
-    if a and _may_be_alias(a[0]) and not all(ALIAS_LIST_ARG_RE.fullmatch(x) for x in a[1:]):
+    if a and _may_be_alias(a[0]) and not all(ALIAS_LIST_ARG_RE.fullmatch(x) for x in _drop_redirects(a[1:])):
         raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
 
 

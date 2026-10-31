@@ -1735,6 +1735,43 @@ class AliasDefinitionTest(unittest.TestCase):
             with self.subTest(head=head):
                 self.assertEqual(guard._may_be_alias(head), want)
 
+    def test_bash_aliases_quote_splice_denied(self):
+        """D-273 (review #361 sau D-272): `$''`/`$""` và escape ANSI-C ghép giữa tên `BASH_ALIASES` — bash nối thành
+        tên mảng thật, nên phải giải trước khi so (AUD-SEC-224)."""
+        for cmd in (
+            "declare BASH_ALIAS$''ES[c]='git push --force origin main'\nc",
+            "printf -v BASH_ALIAS$''ES[c] %s 'rm -rf ~'\nc",
+            "read -r BASH_ALIAS$''ES[c] <<< 'rm -rf ~'",
+            'declare BASH_ALIAS$""ES[c]=ls',
+            "declare -n r=BASH_ALIAS$''ES; r[c]=ls",
+            "declare BASH_ALI$'\\x41'SES[c]=ls",
+            "declare BASH_ALIASE$'\\123'[c]=ls",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), "deny")
+
+    def test_alias_listing_with_redirects_allowed(self):
+        """Liệt kê alias kèm chuyển hướng không phải định nghĩa; định nghĩa kèm chuyển hướng vẫn chặn."""
+        for cmd, want in (
+            ("alias ll 2>/dev/null || echo none", ""),
+            ("alias > a.txt", ""),
+            ("alias 2>&1 | head", ""),
+            ("alias c=ls 2>/dev/null", "deny"),
+            ("alias 2>/dev/null c=ls", "deny"),
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), want)
+
+    def test_may_be_alias_linear_on_brackets(self):
+        """D-273: `fnmatch` dịch mẫu có nhiều `[` không đóng theo bậc hai — tên lệnh dài/nhiều `[` không được gọi
+        `fnmatch` (đếm số lần gọi, không đo giờ tường)."""
+        with mock.patch.object(guard.fnmatch, "fnmatchcase", wraps=guard.fnmatch.fnmatchcase) as fm:
+            self.assertTrue(guard._may_be_alias("[" * 5000))
+            self.assertFalse(guard._may_be_alias("x" * 5000))
+            self.assertTrue(guard._may_be_alias("alias"))
+        self.assertEqual(fm.call_count, 0)
+        self.assertEqual(final("[" * 20000 + " c=x\ngit push --force origin main", self.root), "deny")
+
     def test_comment_continuation_reason_suggests_fix(self):
         """Chặn oan đã biết (AUD-SEC-219, chấp nhận): `#12` trên dòng kết bằng `\\` — lý do chỉ cách tránh."""
         for cmd in (
