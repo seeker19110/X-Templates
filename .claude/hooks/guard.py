@@ -5369,9 +5369,9 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
     """Ghi tay sổ giai đoạn qua thư mục: xoá/dời thư mục tổ tiên (`rm -r docs/autopilot`, `git mv docs …`, cả qua
     `git -C docs`/`--work-tree=docs`), hay chép/dời/liên kết vào thư mục có sẵn mà tên nguồn là tên sổ
     (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
-    removed = _removed_targets(n)
-    hits = [x for d in _git_path_dirs(n, argv, cwd) for t in removed for x in _where(t, root, d)]
-    hits = list(dict.fromkeys(x for x in hits if _ledger_hit(_rel_dir(x, root))))
+    removed = dict.fromkeys(_removed_targets(n))  # đích trùng chỉ giải một lần (`realpath` tốn theo độ sâu thư mục)
+    found = dict.fromkeys(x for d in _git_path_dirs(n, argv, cwd) for t in removed for x in _where(t, root, d))
+    hits = [x for x in found if _ledger_hit(_rel_dir(x, root))]
     pos = _positionals(n[1:], COPY_DEST_OPTS) if n[:1] and n[0] in ("cp", "mv", "install", "ln") else []
     for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
         if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
