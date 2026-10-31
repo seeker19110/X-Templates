@@ -12475,6 +12475,191 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d272-split-comsub-commit-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "git commit -m \"$\\\n(cat <<'EOF'\nfix(x): y\\\nEOF)\"; rm -rf ~\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-split-lt-commit-state",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "git commit -m \"$(cat <\\\n<'EOF'\nfix(x): y\\\nEOF)\"; echo x > .autopilot/state.json\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-split-pr-body-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-217"
+   ],
+   "input": {
+    "command": "gh pr create --title 'fix(x): y' --body \"$\\\n(cat <<'EOF'\nbody\\\nEOF)\"\ngit push --force origin main\nEOF\n)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-split-heredoc-top-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-223"
+   ],
+   "input": {
+    "command": "cat <\\\n<'EOF'\nfoo\\\nEOF\nrm -rf ~\nEOF"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-split-heredoc-commit-stdin-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-223"
+   ],
+   "input": {
+    "command": "git commit -F - <\\\n<'EOF'\nfix(x): y\\\nEOF\ngit push --force origin main\nEOF"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-control-split-heredoc",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-223"
+   ],
+   "input": {
+    "command": "cat <\\\n<'EOF'\nhello\nEOF"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d272-alias-no-enable-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "alias c='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-alias-dollar-split-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "al${v}ias c='rm -rf ~'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-alias-continuation-builtin-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "builtin al\\\nias c='rm -rf ~'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-alias-posix-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-222"
+   ],
+   "input": {
+    "command": "set -o posix\nalias c='rm -rf ~'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-bash-aliases-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "BASH_ALIASES[c]='rm -rf ~'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-control-alias-mention",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-220",
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "grep -n 'alias ll=' ~/.bashrc; echo \"alias x=y\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d272-known-block-issue-hash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "note": "chặn oan đã biết, chấp nhận (AUD-SEC-219, D-271): `#` trên dòng kết bằng `\\` — bash không nối dòng trong comment, guard không phân định nháy; lý do chặn chỉ cách tránh: đưa `#NN` sang dòng không kết bằng `\\`",
+   "input": {
+    "command": "gh issue comment 12 --body 'Fixes #34' \\\n  --repo o/r"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d272-known-block-commit-hash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "note": "chặn oan đã biết, chấp nhận (AUD-SEC-219, D-271): `#` trên dòng kết bằng `\\` — bash không nối dòng trong comment, guard không phân định nháy; lý do chặn chỉ cách tránh: đưa `#NN` sang dòng không kết bằng `\\`",
+   "input": {
+    "command": "git commit -m 'fix(x): handle #12' \\\n  -m 'body'"
+   },
+   "expect": {
+    "allowed": false
+   }
   }
  ]
 }
