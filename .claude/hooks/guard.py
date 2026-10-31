@@ -743,8 +743,33 @@ def _shell_precheck(cmd: str) -> None:
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
     if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
+    if "#" in cmd and _paren_hash_ambiguous(cmd):
+        raise ScanTooComplex(
+            "`)#` không khoảng trắng: guard và bash có thể đọc `#` khác nhau — thêm khoảng trắng trước `#`"
+        )
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
+
+
+def _paren_hash_ambiguous(cmd: str) -> bool:
+    """AUD-SEC-195: `)` ngoài nháy liền `#` — `#` là comment (sau `(…)`/`case x)`) hay nối từ (sau `$(…)`)? Phụ thuộc cách
+    bash ghép ngoặc (case, backtick, `${…}`, extglob) nên đoán bằng ngăn xếp từng lệch (review #368) → chặn, không đoán.
+    Xét trên dòng đã nối `\\`↵ và gấp thân heredoc có nháy (dữ liệu: thân commit/PR có `)#` vẫn chạy)."""
+    text = _fold_heredocs(join_continuations(cmd), True)
+    q, i = "", 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and q != "'":
+            i += 2
+            continue
+        if q:
+            q = "" if c == q else q
+        elif c in "'\"":
+            q = c
+        elif c == ")" and text.startswith("#", i + 1):
+            return True
+        i += 1
+    return False
 
 
 def _may_be_alias(head: str) -> bool:
@@ -893,7 +918,6 @@ def strip_comments(cmd: str) -> str:
     `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
     out: List[str] = []
     quote, word_start, i = "", True, 0
-    parens: List[bool] = []  # mỗi `(` ngoài nháy: True nếu nó nối từ (`$(`, `<(`, `>(`, `=(`)
     while i < len(cmd):
         c = cmd[i]
         if c == "#" and word_start and not quote:
@@ -909,12 +933,7 @@ def strip_comments(cmd: str) -> str:
         elif c in "'\"":
             quote = c
         out.append(c)
-        joins = False
-        if not quote and c == "(":
-            parens.append(i > 0 and cmd[i - 1] in "$<>=")
-        elif not quote and c == ")":
-            joins = parens.pop() if parens else False  # `$(…)#`: `#` nối từ (AUD-SEC-195); `(…)#` là toán tử
-        word_start = not quote and c in WORD_END and not joins
+        word_start = not quote and c in WORD_END  # `)#` không khoảng trắng đã bị `_shell_precheck` chặn (AUD-SEC-195)
         i += 1
     return "".join(out)
 
@@ -938,7 +957,6 @@ def expand_ansi_c(cmd: str) -> str:
     giữ nguyên chuỗi nên lệnh bên trong lọt). `$$'…'` là `$$` + nháy đơn, không phải ANSI-C (AUD-SEC-198)."""
     out: List[str] = []
     i, q, ws = 0, "", True
-    parens: List[bool] = []
     while i < len(cmd):
         c = cmd[i]
         if not q and c == "#" and ws:  # comment: chép nguyên tới hết dòng (D-276) —
@@ -962,12 +980,7 @@ def expand_ansi_c(cmd: str) -> str:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
-            joins = False
-            if not q and c == "(":
-                parens.append(i > 0 and cmd[i - 1] in "$<>=")
-            elif not q and c == ")":
-                joins = parens.pop() if parens else False  # như `strip_comments`: chỉ `)` đóng `$(…)` nối từ
-            ws = not q and c in WORD_END and not joins
+            ws = not q and c in WORD_END
             i += 1
     return "".join(out)
 

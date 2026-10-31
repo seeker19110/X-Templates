@@ -821,7 +821,7 @@ class ReviewMarkerReview361Test(unittest.TestCase):
             (
                 "echo $'\\' #'; gh pr comment 5 -F n.md",
                 "echo hi # gh pr comment 5 -F b.md",
-                "echo $(date)#x; gh pr comment 5 --body ok",
+                'echo "$(date)#x"; gh pr comment 5 --body ok',  # `)#` trần bị chặn (AUD-SEC-195); có nháy thì cho qua
             ),
         )
         with mock.patch.object(guard, "_scan", return_value=guard._ShellScan("true")):
@@ -2357,12 +2357,25 @@ class ShellParseGapsTest(unittest.TestCase):
         self.assertEqual(final("true $(true)#; rm -rf ~"), "deny")
         self.assertEqual(final("(true) # ghi chú; rm -rf ~"), "")  # comment thật vẫn bị bỏ
 
-    def test_comment_after_subshell_paren_still_comment(self) -> None:
-        # `)` đóng subshell là toán tử: `#` sau nó mở comment (bash chạy `touch`) — nháy trong comment không nuốt dòng sau
-        for cmd in ("(true)#it's\nrm -rf ~\n# '", "true; (true)#'\nrm -rf ~\n#'", "( true )#x\nrm -rf ~"):
+    def test_paren_hash_is_ambiguous_and_denied(self) -> None:
+        # `#` sau `)` là comment hay nối từ tuỳ cách bash ghép ngoặc (review #368): chặn mọi `)#` không nháy
+        for cmd in (
+            "(true)#it's\nrm -rf ~\n# '",
+            "true; (true)#'\nrm -rf ~\n#'",
+            "x=$(case a in a)#'\n;; esac)\nrm -rf ~\n#'",
+            "echo $(case x in x)#'\ntrue;; esac)\nrm -rf ~\n#'",
+            'cat <(case x in x)#"\ntrue;; esac)\ngit push --force origin main\n#"',
+            "( echo ${x#=(} )#'\nrm -rf ~\n#'",
+            "echo $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo @(x)#; rm -rf ~",
+        ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
-        self.assertEqual(final("echo $(true)#x"), "")  # `)` đóng `$(…)` nối từ: không phải comment
+
+    def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
+        for cmd in ("echo 'a)#b'", 'echo "a)#b"', "echo a\\)#b", "(true) # ghi chú", "cat <<'EOF'\nissue (x)#12\nEOF"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
 
     def test_locale_string_dollar_double_quote(self) -> None:
         for cmd in ('$"rm" -rf ~', '$"git" push --force origin main', 'eval $"rm -rf ~"', '$"bash" -c "rm -rf ~"'):
