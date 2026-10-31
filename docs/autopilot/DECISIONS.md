@@ -1958,3 +1958,10 @@
 - Chọn: Chỉ thư mục dự án (ls-tree/diff --relative từ thư mục đó): commit app khác không làm gói hết hạn; mã dùng chung ngoài thư mục (vd packages/ui) cũng không
 - Lý do (tiêu chí chất lượng cuối): (3) bền/đơn giản/test được: phạm vi khớp đơn vị cài khung (.xtemplates/ trong thư mục dự án) và khớp release-check vốn chạy trong thư mục đó; (1) an toàn: phương án 2 khiến luồng ký kẹt vô hạn ở monorepo nên người sẽ bỏ qua máy; rủi ro mã dùng chung ngoài thư mục là có thật nhưng CI của monorepo vẫn chạy cổng — ghi thành nợ hướng phương án 3 (khai đường phụ thuộc) thay vì làm ngay
 - Đường lùi: Bỏ tham số './' + --relative trong evidence_fingerprint/_changed_since (scripts/xt.py) để quay về vân tay toàn repo; test MonorepoFingerprintTest đổi kỳ vọng
+
+### D-279 · 2026-10-31T13:43:00+00:00 · PR #363 review lượt 1: 123 hồi quy 🔴 (main chặn, HEAD cho qua, bash chạy thật — chủ yếu heredoc có backtick), biến thể chưa đóng của AUD-SEC-195/233, và quét comment bậc hai (114 s ở 256 KiB). Sửa thế nào trong một lần sửa còn lại?
+
+- Phương án: (1) Vá từng ca trên thiết kế mới (_CommentStrip chung, _heredoc_body_scripts) đến khi 0 hồi quy · (2) Bisect từng commit; commit nào gây hồi quy mà không đóng được trọn lớp trong lần sửa này thì gỡ hành vi đó (giữ ID ở mở, ghi lý do), chỉ giữ phần đã chứng minh 0 hồi quy trên toàn bộ ma trận + confirmed.json + fuzz · (3) Đóng PR, làm lại lát B từ đầu
+- Chọn: Bisect từng commit; commit nào gây hồi quy mà không đóng được trọn lớp trong lần sửa này thì gỡ hành vi đó (giữ ID ở mở, ghi lý do), chỉ giữ phần đã chứng minh 0 hồi quy trên toàn bộ ma trận + confirmed.json + fuzz
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: guard là hàng rào, hồi quy cho qua lệnh phá huỷ tệ hơn để ID mở; phương án 1 đã lặp nhiều lượt ở #361 mà vẫn sinh hồi quy mới; (2) giữ đường lùi: phần an toàn (AUD-HAR-154, AUD-SEC-188, ~N) vẫn vào được; (3) test được: tiêu chí máy đo — 0 ca main-deny-head-allow trên confirmed.json/final_verify/ma trận, thời gian ≤ main ×3 ở 256 KiB
+- Đường lùi: Cherry-pick lại commit đã gỡ từ nhánh worktree wt-guard3 (6088900 và tổ tiên) khi có thiết kế đóng trọn lớp
