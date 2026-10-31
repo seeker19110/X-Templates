@@ -1986,3 +1986,10 @@
 - Chọn: Mở thêm một lượt rà ở head đã áp sửa của reviewer
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa đã được reviewer thử đóng 15 ca không lệch quyết định nào trên 10035 chuỗi; lớp mới ghi sổ riêng AUD-SEC-238
 - Đường lùi: Hoàn nguyên commit sửa, đưa AUD-SEC-232 về mở
+
+### D-286 · 2026-10-31T22:35:49+00:00 · PR #372: lượt sửa thứ ba sau review chưa sạch (ADR-0053/0059)
+
+- Phương án: (1) Áp bản sửa reviewer đã đo (chặn IFS nháy-xen-thăng ngoài nháy) và mở thêm một lượt rà · (2) Dừng PR, đưa AUD-SEC-232 về mở
+- Chọn: Áp bản sửa reviewer đã đo (chặn IFS nháy-xen-thăng ngoài nháy) và mở thêm một lượt rà
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: lỗi do bản sửa trước gây ra phải sửa, không để head tệ hơn base; bản sửa đo 0 lệch trên 14713 chuỗi và đóng 19 ca hồi quy
+- Đường lùi: Hoàn nguyên commit sửa, đưa AUD-SEC-232 về mở
