@@ -2414,6 +2414,12 @@ class ShellParseGapsTest(unittest.TestCase):
             "bash -c 'echo $IFS'$'#; rm -rf ~'",
             "x=$IFS''#; rm -rf ~",
             "docker run --rm -v $PWD:/w alpine sh -c 'echo $IFS''#; rm -rf /w'",
+            # đích xoá đứng trước biến IFS: `~/$IFS''#` bash tách `$HOME/` và `#`; guard thấy một token (review #372 lượt 3)
+            "rm -rf ~/$IFS''#",
+            'rm -rf "$HOME"$IFS\\#',
+            "rm -rf ~/${IFS}'#'",
+            "docker run --rm -v $PWD:/w alpine rm -rf /w$IFS''#",
+            "bash -c 'rm -rf ~/$IFS'\"''\"'#'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

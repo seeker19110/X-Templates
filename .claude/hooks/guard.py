@@ -900,7 +900,9 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
     quote, word_start, i = "", True, 0
     while i < len(cmd):
         c = cmd[i]
-        if strict and c == "#" and not quote and _ifs_before(cmd, i):
+        if (
+            strict and c == "$" and not quote and IFS_HASH_RE.match(cmd, i)
+        ):  # `\$` đã bị nhánh `\\` dưới nuốt: không tới đây
             raise ScanTooComplex(IFS_HASH_WHY)
         if c == "#" and word_start and not quote:
             if strict and i and cmd[i - 1] == ")":
@@ -929,15 +931,8 @@ ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f
 # `IFS` liền `#` không viết lại: giữ nguyên để kiểm strict của script lồng (`bash -c '…'`) còn thấy (AUD-SEC-232)
 IFS_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))(?![\\'\"]*#)")  # cả khi nháy/`\` xen giữa (`$IFS''#`)
 IFS_HASH_WHY = "`IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
-
-
-def _ifs_before(cmd: str, i: int) -> bool:
-    """`cmd[:i]` kết thúc bằng `$IFS`/`${IFS}` không bị `\\` thoát (`\\$IFS#` là chữ thường)."""
-    for tail in ("$IFS", "${IFS}"):
-        start = i - len(tail)
-        if start >= 0 and cmd.startswith(tail, start) and (start == 0 or cmd[start - 1] != "\\"):
-            return True
-    return False
+# Biến IFS ngoài nháy liền (có thể xen nháy/`\`) dấu thăng: `~/$IFS''#` bash tách hai trường, guard thấy một token (#372)
+IFS_HASH_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))[\\'\"]*#")
 
 
 def _ansi_c_char(m: "re.Match[str]") -> str:
