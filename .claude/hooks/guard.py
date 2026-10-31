@@ -931,28 +931,29 @@ def expand_ansi_c(cmd: str) -> str:
     """`$'…'` (ANSI-C quoting) ngoài nháy → chuỗi nháy đơn đã giải mã (`sh -c $'rm -rf ~'`: shlex đọc `$` là chữ và
     giữ nguyên chuỗi nên lệnh bên trong lọt). `$$'…'` là `$$` + nháy đơn, không phải ANSI-C (AUD-SEC-198)."""
     out: List[str] = []
-    i, q = 0, ""
+    i, q, ws = 0, "", True
     while i < len(cmd):
         c = cmd[i]
-        if not q and c == "#" and (i == 0 or cmd[i - 1] in WORD_END):  # comment: chép nguyên tới hết dòng (D-276) —
+        if not q and c == "#" and ws:  # comment: chép nguyên tới hết dòng (D-276) —
             e = cmd.find("\n", i)  # nháy trong comment không làm lệch `$'…'` của dòng sau
             e = len(cmd) if e < 0 else e
             out.append(cmd[i:e])
             i = e
         elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
-            i += 2
+            i, ws = i + 2, False
         elif not q and cmd.startswith("$'", i):
             j = i + 2
             while j < len(cmd) and cmd[j] != "'":
                 j += 2 if cmd[j] == "\\" else 1
             body = ANSI_ESCAPE_RE.sub(_ansi_c_char, cmd[i + 2 : j])
             out.append("'" + body.replace("'", "'\\''") + "'")
-            i = j + 1
+            i, ws = j + 1, False
         else:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
+            ws = not q and c in WORD_END
             i += 1
     return "".join(out)
 

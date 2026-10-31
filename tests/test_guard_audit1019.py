@@ -1972,6 +1972,21 @@ class AliasDefinitionTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(final(cmd, self.root), "")
 
+    def test_escaped_char_before_hash_is_not_comment_d277(self):
+        """D-277 (review #361 cuối): `#` sau ký tự đã thoát (`a\\ #`) không mở comment (bash: giữa từ) — `expand_ansi_c`
+        theo cờ đầu-từ như `strip_comments`, không bỏ qua `$'…'` phía sau."""
+        for cmd in (
+            "echo a\\ #; $'\\x72m' -rf ~",
+            "echo a\\ #; $'\\x67it' push --force origin main",
+            "echo a\\;#; $'\\x72m' -rf ~",
+            "echo a\\|#; $'\\x72m' -rf ~",
+            "echo hi\necho a\\ #; $'\\x72m' -rf ~",
+            "echo a\\ # && eval $'\\x72m -rf ~'",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), "deny")
+        self.assertEqual(final("echo a\\ #b", self.root), "")
+
     def test_known_false_block_backtick_hash_comment(self):
         """Chặn oan chấp nhận (D-276): `` `# `` trong comment của lệnh nhiều dòng (`# see `#361``) — bash đọc `` `# `` trong
         backtick là mở comment, guard không phân biệt được với comment ngoài nên chặn."""

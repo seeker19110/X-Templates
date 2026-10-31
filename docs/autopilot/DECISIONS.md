@@ -1944,3 +1944,10 @@
 - Chọn: Áp một lần cách sửa tổng hợp reviewer đã thử (expand_ansi_c bỏ qua comment theo luật đầu-từ, bỏ luật đếm nháy; `# xét trên dòng đã nối và gấp heredoc; _letter_forms 8 dạng; tách thô bỏ nháy) rồi ghi sổ trung thực các lớp này là 'đã giảm, còn mở' (không 'đã sửa'); lượt review cuối chỉ chặn khi hồi quy so với main hoặc chặn oan
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: PR mạnh hơn main (0 hồi quy/1673 ca), guard regex không thể đóng tuyệt đối các lớp này (guard không phải sandbox — LOOP-HARNESS-022); ghi 'còn mở' là trung thực, giữ đường đến sửa tiếp; chặn oan 5% commit là hồi quy trải nghiệm phải bỏ; vòng vá vô hạn trái tiêu chí bền/đơn giản
 - Đường lùi: Revert commit lượt này về 69947b5; sổ đổi lại
+
+### D-277 · 2026-10-31T11:42:22+00:00 · PR #361: review cuối D-276 tìm 1 hồi quy (# sau ký tự đã thoát bị expand_ansi_c coi là comment)
+
+- Phương án: (1) Áp bản sửa cờ đầu-từ reviewer đã thử (0 hồi quy/1314 ca, replay 400 commit giống hệt) · (2) Revert D-276
+- Chọn: Áp bản sửa cờ đầu-từ reviewer đã thử (0 hồi quy/1314 ca, replay 400 commit giống hệt)
+- Lý do (tiêu chí chất lượng cuối): Hồi quy so với main phải sửa; bản sửa 5 dòng khớp strip_comments, đã thử
+- Đường lùi: Revert commit lượt này về e2988da

@@ -13063,6 +13063,32 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d277-escaped-hash-ansi-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "echo a\\ #; $'\\x72m' -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d277-control-escaped-hash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "echo a\\ #b"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
