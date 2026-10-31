@@ -17,7 +17,7 @@ argument-hint: "<mô tả lỗi | lệnh đang đỏ | link issue>"
 ## Pha 2 — Khoanh vùng
 4. Đọc lỗi đầy đủ (stack, log liền trước) và diff gần nhất chạm vùng đó (`git log -p -- <file>`).
 5. Lập **3–5 giả thuyết bác bỏ được**, mỗi cái kèm một phép thử rẻ cho kết quả khác nhau nếu giả thuyết sai.
-6. Thử rẻ trước: hồi quy → `git bisect run <lệnh đỏ>`; dữ liệu → thu nhỏ đầu vào tới ca nhỏ nhất còn đỏ; tích hợp → gọi thẳng từng tầng.
+6. Thử rẻ trước: hồi quy → `git bisect start <bad> <good> && git bisect run <lệnh đỏ>` (lệnh thoát 125 = bỏ qua commit); dữ liệu → thu nhỏ đầu vào tới ca nhỏ nhất còn đỏ; tích hợp → gọi thẳng từng tầng.
    Thêm log tạm có tiền tố `DEBUG:` một dòng, xoá trước commit.
 7. Ghi giả thuyết đã loại và bằng chứng; dừng khi **một** giả thuyết giải thích hết triệu chứng (kể cả vì sao trước đây không lỗi).
 

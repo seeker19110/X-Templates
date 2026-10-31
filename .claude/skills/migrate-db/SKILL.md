@@ -28,7 +28,7 @@ backup `DB-BACKUP-008`. Migration đã áp lên môi trường chung **không s�
    trước và sau từng bước expand/contract.
 10. Có dữ liệu mẫu cỡ thật: đo thời gian và khoá (`pg_locks`/`EXPLAIN`) trên bản sao; vượt ngưỡng → chia nhỏ hơn.
 11. Trước khi chạm dữ liệu production: backup/snapshot mới hoặc PITR đã kiểm (`DB-MIG-011`, `DB-BACKUP-008`). Áp lên dữ liệu
-    người dùng thật là điểm dừng (`LOOP-STOP-005`): `xt.py loop defer` kèm kế hoạch, không tự chạy.
+    người dùng thật là điểm dừng (§Điểm dừng bắt buộc về hành động, `LOOP-STOP-021`): `xt.py loop defer` kèm kế hoạch, không tự chạy.
 
 ## Báo cáo
 Các bước expand/contract và PR tương ứng · lệnh kiểm + exit code (up, up lần 2, down→up) · thời gian/khoá đo được · đường lùi · việc chờ người.

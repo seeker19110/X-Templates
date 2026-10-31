@@ -23,7 +23,7 @@ argument-hint: "<URL localhost | trang/luồng cần kiểm>"
 7. A11y nhanh: điều hướng bằng bàn phím tới mọi điều khiển, focus nhìn thấy, nhãn form, tương phản; có axe thì chạy.
 
 ## Chuyển thành test
-8. Mỗi luồng đã kiểm tay thành test Playwright trong repo (agent **tạo** test, không làm cổng — `QA-E2E-027`): locator theo vai trò,
+8. Mỗi luồng đã kiểm tay thành test Playwright tất định trong repo (không đưa bước agent sống vào job required — `QA-E2E-027`): locator theo vai trò,
    assert kết quả người dùng thấy, chạy ở cả hai bề rộng. Lỗi tìm được → test đỏ trước, sửa, xanh sau (`FE-TEST-006`).
 9. Chạy test mới bằng lệnh `e2e` của `xt.yaml`; `xt.py loop record` với exit code.
 

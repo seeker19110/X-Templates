@@ -40,5 +40,5 @@ skill tốt cho migration CSDL, nâng phụ thuộc, sự cố/RCA.
 
 - (+) Agent có quy trình cụ thể cho sáu tác vụ thường gặp nhất, cùng cổng bằng chứng (`loop record`) và điểm dừng của khung.
 - (+) Tự chủ cao hơn có kiểm soát: PR nâng major đi trọn trong vòng khi chủ dự án đã chọn L3.
-- (−) Thêm sáu `description` vào listing skill mỗi phiên (~2,4 KB); bù lại `AGENTS.md`/template rút gọn danh sách để giữ trần byte.
+- (−) Thêm sáu `description` vào listing skill mỗi phiên (~2,9 KB UTF-8); bù lại `AGENTS.md`/template rút gọn danh sách để giữ trần byte.
 - (−) Chưa có số đo hiệu quả từng skill; đo bằng `claude plugin eval --ablation with-without` khi có ngân sách (research note §3).

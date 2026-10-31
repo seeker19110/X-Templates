@@ -8,7 +8,7 @@ argument-hint: "<triệu chứng | cảnh báo | link sự cố>"
 
 `<FW>` = `.xtemplates/framework` ở dự án đích, `framework` ở repo khung. Luật: `<FW>/15-operations/incident-response.md`
 (`OPS-IR-001…008`); mẫu `<FW>/templates/POST-MORTEM.md`, `RUNBOOK.md`. Chạm dữ liệu thật, tiền thật, khoá/dịch vụ trả phí là
-điểm dừng (`LOOP-STOP-005`): đề xuất lệnh, `xt.py loop defer`, không tự chạy.
+điểm dừng (§Điểm dừng bắt buộc về hành động, `LOOP-STOP-021`): đề xuất lệnh, `xt.py loop defer`, không tự chạy.
 
 ## 1. Phân loại và mở bản ghi (≤ 5 phút)
 1. Mức độ theo định nghĩa SEV của dự án (`OPS-IR-001`); phạm vi: ai bị ảnh hưởng, từ lúc nào, còn tiếp diễn không.
