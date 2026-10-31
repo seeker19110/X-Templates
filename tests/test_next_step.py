@@ -300,8 +300,17 @@ class NextStepPureTest(unittest.TestCase):
         self.assertEqual(out["package"]["human_pending"], ["prod_switch"])
         self.assertIn("người xác nhận prod_switch", out["missing"])
         self.assertIn("chờ người: prod_switch", out["reason"])
-        stale = self.step(objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": ["app.py"]})
-        self.assertEqual((stale["action"], stale["package"]["human_pending"]), ("signoff-package", []))
+        # review #362: gói khớp mà kết quả cũ hơn cây (chỉ DECISIONS.md đổi) → chạy lại, kể cả kết quả cũ FAIL (ca C)
+        # hay đề xuất `--prod` mới chưa được xét (ca B) — không trình gói "chờ người: không"
+        dec = ["docs/autopilot/DECISIONS.md"]
+        for old in (rel, {**rel, "human": [], "fails": ["review_debt"], "verdict": "NO-GO"}):
+            with self.subTest(old["verdict"]):
+                stale = self.step(objective=HARDEN, signoff={"package": pkg, "release": old, "release_changed": dec})
+                self.assertEqual((stale["action"], stale["package"]), ("release-check", None))
+                self.assertIn("còn khớp vân tay nhưng kết quả `release-check` cũ hơn cây", stale["reason"])
+                self.assertIn("DECISIONS.md", stale["reason"])
+        alone = self.step(objective=HARDEN, signoff={"package": pkg})
+        self.assertEqual(alone["action"], "signoff-package")
 
     def test_expired_package_with_fresh_release(self) -> None:
         """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →

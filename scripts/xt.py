@@ -7446,6 +7446,25 @@ def _signoff_rerun(f: Dict[str, Any], pkg: Optional[Dict[str, Any]], rel: Option
     }
 
 
+def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Gói còn khớp vân tay. Có `--release` mà lệch cây (chỉ DECISIONS.md đổi — ngoài vân tay gói) → chạy lại, không trình
+    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151)."""
+    s = f["signoff"]
+    if s["release"] is not None and fresh_rel is None:
+        note = _changed_note(s["release_changed"], s["release"]["head"])
+        return {
+            "action": "release-check",
+            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng kết quả `release-check` cũ hơn"
+            f" cây ({note}) — chạy lại trên HEAD trước khi trình ký",
+            "missing": ["`release-check --json` trên HEAD"],
+        }
+    # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
+    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
+    later = set(fresh_rel["human"]) if fresh_rel else set()
+    pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
+    return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+
+
 def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
     """Harden hết việc gom được (T-3549): gói đã dựng còn khớp vân tay → `signoff-package` (chờ người); lệch → hết hạn,
     nêu file đổi (FLOW-17); chưa có gói: cần `release-check` trên cây này — `fails` còn → `replan`, rỗng → dựng gói nháp
@@ -7463,11 +7482,7 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
             "missing": [f"`{x}` PASS" for x in rel["fails"]],
         }
     if pkg is not None and pkg["evidence_fp"] == fp:
-        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
-        # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
-        later = set(rel["human"]) if fresh else set()
-        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
-        return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+        return _signoff_kept(f, pkg, rel if fresh else None)
     if not fresh:
         return _signoff_rerun(f, pkg, rel)
     pkg = {
