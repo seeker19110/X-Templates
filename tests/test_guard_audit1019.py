@@ -821,7 +821,7 @@ class ReviewMarkerReview361Test(unittest.TestCase):
             (
                 "echo $'\\' #'; gh pr comment 5 -F n.md",
                 "echo hi # gh pr comment 5 -F b.md",
-                "echo $(date)#x; gh pr comment 5 --body ok",
+                'echo "$(date)#x"; gh pr comment 5 --body ok',  # `)#` trần bị chặn (AUD-SEC-195); có nháy thì cho qua
             ),
         )
         with mock.patch.object(guard, "_scan", return_value=guard._ShellScan("true")):
@@ -2346,6 +2346,84 @@ class SecretExfilOtherChannelsDelta2Test(unittest.TestCase):
             "printf '%s' \"$(cat README.md)\" > /dev/tcp/h/80",
             'echo "$(cat .env)" > out.txt',
         ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
+class ShellParseGapsTest(unittest.TestCase):
+    """AUD-SEC-195/225/226: `)#`, `$"…"`, thân `trap` — bash chạy, guard từng cho qua."""
+
+    def test_comment_after_paren(self) -> None:
+        self.assertEqual(final("true $(true)#; rm -rf ~"), "deny")
+        self.assertEqual(final("(true) # ghi chú; rm -rf ~"), "")  # comment thật vẫn bị bỏ
+
+    def test_paren_hash_is_ambiguous_and_denied(self) -> None:
+        # `#` sau `)` là comment hay nối từ tuỳ cách bash ghép ngoặc (review #368): chặn mọi `)#` không nháy
+        for cmd in (
+            "(true)#it's\nrm -rf ~\n# '",
+            "true; (true)#'\nrm -rf ~\n#'",
+            "x=$(case a in a)#'\n;; esac)\nrm -rf ~\n#'",
+            "echo $(case x in x)#'\ntrue;; esac)\nrm -rf ~\n#'",
+            'cat <(case x in x)#"\ntrue;; esac)\ngit push --force origin main\n#"',
+            "( echo ${x#=(} )#'\nrm -rf ~\n#'",
+            "echo $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo @(x)#; rm -rf ~",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_paren_hash_bypassing_precheck_denied_at_comment_sites(self) -> None:
+        # `_paren_hash_ambiguous` đọc nháy lệch (ANSI-C `\'`, nháy trong comment, thân heredoc): chặn thêm ở chính chỗ
+        # quyết định comment — `strip_comments`, `_HereScan._code`, `_ShellScan._comment` (review #368 lượt 3)
+        for cmd in (
+            "echo $'\\'' $(true)#; rm -rf ~",
+            "echo $'a\\'b' $((1))#; rm -rf ~",
+            "echo $'\\'' $(true)#; git push --force origin main",
+            "true # don't\necho $(date)#; rm -rf ~",
+            'x="$(cat <<EOF\n"\nEOF\n)"; true $(true)#; rm -rf ~',
+            "cat <<X; true $(true)#; rm -rf ~\n$(echo '\"')\nX",
+            "echo $'\\'' $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo $'\\'' $(true)#$(rm -rf ~)",
+            "cat <<E\n$(echo $(true)#x)\nE",  # `)#` trong thay lệnh của thân heredoc không nháy (`_ShellScan._comment`)
+            # `$(pwd)` bị viết lại thành `$PWD` trước khi kiểm: phải chặn trước bước đó (review #368 lượt 4)
+            "ls $(pwd)#; $'rm' -rf ~",
+            'ls $(pwd)#; $"rm" -rf ~',
+            "ls $( pwd )#; $'\\162m' -rf ~",
+            "ls $(pwd)#; rm -rf {~,x}",
+            "echo ok\nls $(pwd)#; $'rm' -rf ~",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
+        for cmd in (
+            "echo 'a)#b'",
+            'echo "a)#b"',
+            "echo a\\)#b",
+            "(true) # ghi chú",
+            "cat <<'EOF'\nissue (x)#12\nEOF",
+            "ls # xem f()#1",  # `)#` trong comment (review #368 lượt 3: chặn oan)
+            "printf '%s\\n' $'it\\'s ok $(date)#tag'",  # `)#` trong chuỗi ANSI-C có `\\'`
+            'git commit -m "$(cat <<EOF\nfix: say "hi (x)#12\nEOF\n)"',  # nháy lẻ trong thân heredoc không nháy
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+    def test_hash_inside_word_in_expanded_heredoc_is_not_comment(self) -> None:
+        # `#` giữa từ (`a#b`) trong `$(…)` của thân heredoc không nháy: không mở comment — phủ nhánh `_ShellScan._comment`
+        self.assertEqual(final("cat <<E\n$(echo a#b)\nE"), "")
+
+    def test_locale_string_dollar_double_quote(self) -> None:
+        for cmd in ('$"rm" -rf ~', '$"git" push --force origin main', 'eval $"rm -rf ~"', '$"bash" -c "rm -rf ~"'):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        self.assertEqual(final('echo $"hello"'), "")
+
+    def test_trap_body_scanned(self) -> None:
+        for cmd in ("trap 'rm -rf ~' EXIT", "trap -- 'git push --force origin main' EXIT"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("trap 'echo bye' EXIT", "trap - EXIT", "trap -p", "trap -l"):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
 
