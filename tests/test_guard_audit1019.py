@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import json
 import re
@@ -985,6 +986,8 @@ class HeredocDelimiterTest(unittest.TestCase):
             "echo $((1<<y))\nrm -rf ~\ny",
             "x=$((a <<b))\nrm -rf ~\nb",
             "cat <<E\nrm -rf ~",  # không đóng: bash coi là thân, guard quét như lệnh (chiều chặt)
+            'cat <<"E"F\nrm -rf ~\nEF',  # dấu kết nháy pha: ngoài danh sách cho phép (D-270)
+            "cat <<E$x\nE\nrm -rf ~\nE$x",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -993,10 +996,11 @@ class HeredocDelimiterTest(unittest.TestCase):
             for cmd in ('cat <<"E"F\nx\nEF\ngh pr comment 5 -F b.md', "echo $'\\'<<E'\ngh pr comment 5 -F b.md"):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, Path(d)), "deny")
-        for cmd in ('cat <<"E"F\nrm -rf ~\nEF', "cat <<'EOF'\nrm -rf ~\nEOF", "cat <<E$x\nE\nrm -rf ~\nE$x"):
+        for cmd in ("cat <<'EOF'\nrm -rf ~\nEOF", "cat <<\\EOF\nrm -rf ~\nEOF"):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
-        self.assertEqual(guard.strip_heredocs('cat <<"E"F\nx\nEF\nls'), 'cat <<"E"F\nls')
+        with self.assertRaises(guard.ScanTooComplex):
+            guard.strip_heredocs('cat <<"E"F\nx\nEF\nls')
         self.assertEqual(guard.strip_heredocs("cat <<E\nrm -rf ~"), "cat <<E\nrm -rf ~")
         self.assertEqual(guard.literal_bodies_masked("cat <<'E'\n`rm -rf ~`"), "cat <<'E'\n`rm -rf ~`")
 
@@ -1013,9 +1017,9 @@ DANGER = (
 
 
 class HeredocRound2Test(unittest.TestCase):
-    """Review #361 lượt 2: guard đọc heredoc như bash — số học chỉ khi `((…))` đóng bằng `))` (cả qua dòng; chưa phân
-    định → chặn), `$[…]`, `$"…"`, `$$'`, dấu kết là cả từ (backtick, `$(…)`, `${…}` thuộc từ; AUD-SEC-199), so dòng kết
-    nguyên văn (`<<-` chỉ bỏ tab đầu; AUD-SEC-200), `$$'` trong `expand_ansi_c` (AUD-SEC-198)."""
+    """Review #361 lượt 2 (giữ dưới danh sách cho phép D-270): `<<` trong số học đơn giản là dịch bit, số học khác/qua dòng
+    có `<<` → chặn; `$[…]`, `$$'`; dấu kết ngoài danh sách cho phép (backtick, `$(…)`, `${…}`, `$"…"`; AUD-SEC-199) →
+    chặn; so dòng kết nguyên văn (`<<-` chỉ bỏ tab đầu; AUD-SEC-200), `$$'` trong `expand_ansi_c` (AUD-SEC-198)."""
 
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1074,22 +1078,18 @@ class HeredocRound2Test(unittest.TestCase):
                 'cat <<E"x\n{x}',
                 "cat <<E`x #`F\nE\n{x}",
                 "cat <<E$(x 'y')F\nE$(x 'y')F\n{x}",  # nháy trong thay lệnh của từ: không đọc chắc → chặn
+                'cat <<$"EF"\n{x}\nEF',  # D-270: dấu kết ngoài danh sách cho phép → chặn cả khi bash coi là thân
+                "cat <<E`x`F\n{x}\nE`x`F",
+                "cat <<E$(x)F\n{x}\nE$(x)F",
+                "cat <<E${x:-a b}F\n{x}\nE${x:-a b}F",
             ),
         )
-        self.assert_all(
-            "",
-            (
-                'cat <<$"EF"\nrm -rf ~\nEF',
-                "cat <<E`x`F\nrm -rf ~\nE`x`F",
-                "cat <<E$(x)F\nrm -rf ~\nE$(x)F",
-                "cat <<E${x:-a b}F\nrm -rf ~\nE${x:-a b}F",
-                "echo '<<E$(x'; echo \"<<E'x\"",  # trong nháy: không phải heredoc, không đọc từ
-            ),
-        )
-        self.assertEqual(guard.strip_heredocs("echo <<\nls"), "echo <<\nls")  # `<<` không có từ: lỗi cú pháp của bash
-        lines = ["cat <<E`x`F", "body", "E`x`F"]
+        self.assert_all("", ("echo '<<E$(x'; echo \"<<E'x\"",))  # trong nháy: không phải heredoc, không đọc từ
+        for cmd in ("echo <<\nls", "cat <<E`x`F\nbody\nE`x`F", "cat <<E$(x)F\nbody\nE$(x)F\nls"):
+            with self.subTest(cmd=cmd), self.assertRaises(guard.ScanTooComplex):
+                guard.strip_heredocs(cmd)
+        lines = ["cat <<'E'", "body", "E"]
         self.assertEqual([(o, a, b) for o, _, a, b in guard._heredoc_spans(lines)], [(0, 1, 2)])
-        self.assertEqual(guard.strip_heredocs("cat <<E$(x)F\nbody\nE$(x)F\nls"), "cat <<E$(x)F\nls")
 
     def test_terminator_exact_line(self):
         self.assert_all(
@@ -1108,7 +1108,7 @@ class HeredocRound2Test(unittest.TestCase):
         self.assert_all("", ('echo $$; gh pr comment 5 --body "pid $$"', "echo $$$'a b' ok"))
         self.assertEqual(guard.expand_ansi_c("echo $$'\\' x'"), "echo $$'\\' x'")
         self.assertEqual(guard.expand_ansi_c("$$$'\\x41'"), "$$'A'")
-        self.assertEqual(guard._quote_states("$$'a", "")[1], "'")
+        self.assertEqual(guard.strip_heredocs("$$'<<a'\nls"), "$$'<<a'\nls")  # `$$` + nháy đơn: `<<` là chữ
         self.assertEqual([j for j, _ in guard._unquoted("$$'a'b")], [0, 1, 5])
 
     def test_ambiguous_heredoc_denied_with_budget_code(self):
@@ -1177,8 +1177,8 @@ class ReviewForgeRound2Test(unittest.TestCase):
 
 
 class HeredocScanWorkTest(unittest.TestCase):
-    """Review #361 lượt 2 (AUD-SEC-201): đọc heredoc tuyến tính — đếm việc (không đo giờ): mỗi dòng dựng bảng nháy kép một lần,
-    `_subst_depth` không quét lại dòng cho mỗi `<<`; dir của lệnh trong pipeline không dựng lại mỗi pipeline."""
+    """Review #361 lượt 2 (AUD-SEC-201): đọc heredoc tuyến tính — đếm việc (không đo giờ): `_HereScan` một lượt, không quét
+    lại dòng cho mỗi `<<`; dir của lệnh trong pipeline không dựng lại mỗi pipeline."""
 
     def test_dq_heredocs_linear_work(self):
         for cmd in (
@@ -1187,17 +1187,23 @@ class HeredocScanWorkTest(unittest.TestCase):
             'x="$(cat ' + "<<x" * 4000,
         ):
             seen = []
-            real = guard._subst_depth
-            with (
-                self.subTest(cmd=cmd[:30]),
-                mock.patch.object(guard, "_subst_depth", side_effect=lambda t, d: seen.append(len(t)) or real(t, d)),
-            ):
+            with self.subTest(cmd=cmd[:30]), contextlib.ExitStack() as stack:
+                for name in ("_code", "_dq", "_lt"):
+                    real = getattr(guard._HereScan, name)
+                    stack.enter_context(
+                        mock.patch.object(
+                            guard._HereScan,
+                            name,
+                            autospec=True,
+                            side_effect=lambda *a, real=real: seen.append(1) or real(*a),
+                        )
+                    )
                 try:
                     guard.strip_heredocs(cmd)
                     guard._heredocs(cmd)
                 except guard.ScanTooComplex:
-                    pass
-                self.assertLessEqual(sum(seen), 4 * len(cmd))  # cũ: mỗi `<<` quét lại đầu dãy nháy → bậc hai
+                    pass  # dạng ngoài danh sách cho phép: chặn ngay ở `<<` đầu — vẫn đếm việc tới đó
+                self.assertLessEqual(len(seen), 2 * len(cmd))  # một lượt mỗi lần đọc (cũ `_DqLine`: bậc hai)
 
     def test_pipeline_dirs_linear_work(self):
         cmd = "echo $((1<<2)) <<A\n" * 200
@@ -1212,6 +1218,207 @@ class HeredocScanWorkTest(unittest.TestCase):
         with mock.patch.object(guard, "_commands_with_cwd", side_effect=lambda *a: Counted(real(*a))):
             guard._interp_scripts_at(cmd, guard.tokenize(cmd), str(ROOT))
         self.assertLessEqual(len(iters), 2)  # cũ: dựng lại danh sách thư mục cho mỗi pipeline (200 lần)
+
+
+class HeredocAllowlistTest(unittest.TestCase):
+    """D-270 (review #361 lượt 3): guard chỉ hiểu heredoc dạng đơn giản — `<<`/`<<-`, dấu kết `[A-Za-z0-9_.-]+` trần,
+    bọc trọn `'…'`/`"…"` hay một `\\` đầu, ngoài nháy/số học/`${…}`/backtick/`<(…)`, dòng mở cân nháy/ngoặc (trừ dạng
+    `"$(cat <<'EOF'`). `<<` mà bash có thể đọc là heredoc ở dạng khác → chặn (BUDGET), không mô phỏng bash."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        Path(self.root, "b.md").write_text(MARK + "\n", encoding="utf-8")
+        Path(self.root, "n.md").write_text("thường\n", encoding="utf-8")
+
+    def assert_all(self, want, templates):
+        for tpl in templates:
+            for x in DANGER if "{x}" in tpl else ("",):
+                cmd = tpl.replace("{x}", x)
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(final(cmd, self.root), want)
+
+    def test_round3_regressions_denied(self):
+        """Năm lớp 🔴 lượt 3 (bash 5.2 chạy dòng sau; guard cũ coi là thân heredoc)."""
+        self.assert_all(
+            "deny",
+            (
+                "echo $((cat <<\\X) )\n{x}\nX",  # `$((…) )` là thay lệnh + subshell, không phải số học
+                "cat <((cat <<\\X) )\n{x}\nX",
+                "((1\\)<<\\X))\n{x}\nX",  # `\)`/backtick trong `((…))`: không đọc chắc
+                "((1+`echo )`<<\\X))\n{x}\nX",
+                "echo $((1\\)<<\\X))\n{x}\nX",
+                "echo $[1\\]<<\\X]\n{x}\nX]",
+                "cat <<$(  true  )F\n$(true)F\n{x}\n$(  true  )F",  # dấu kết có thay lệnh
+                "cat <<$(true|true)F\n$(true | true)F\n{x}\n$(true|true)F",
+                'cat <<$$"EF"\n$$EF\n{x}\n$EF',  # `$$` + nháy
+                "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\n{x}\n$x'yz'w",
+                "cat <<$'A\\qB'\nA\\qB\n{x}\nAqB",  # ANSI-C
+                "cat <<$'A\\8B'\nA\\8B\n{x}\nA8B",
+            ),
+        )
+
+    def test_preexisting_forms_denied(self):
+        """Năm lớp 🔴 có từ trước (base cũng cho chạy)."""
+        self.assert_all(
+            "deny",
+            (
+                "cat \\<<'X'\n{x}\nX",  # `\<` là chữ: `<'X'` đọc file, không phải heredoc
+                "echo ${x:1<<'X'}\n{x}\nX}",
+                "cat <<'EOF' \"\n$({x})\"\nEOF",  # dòng mở còn nháy kép mở
+                "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\n{x}\nX",  # `<<` trong thân không mở heredoc
+                "cat <<'X'\nfoo\\\nX\n{x}\nX",  # thân nháy: `\` cuối dòng không nối dòng kết
+                "bash <<'E'\ncat <<'X'\nfoo\\\nX\n{x}\nX\nE",
+                "cat <<'X'\nX\\\n\n'\nX\n{x}\n'",  # `X\` ↵ `` nối thành `X` chỉ ở chữ đã nối
+                'echo "$(cat <<\'EOF\'\na "\nEOF\n)"\n{x} "x"\n"',  # `"` lẻ trong thân: shlex không lệch
+                'echo "$(cat <<EOF\na "\nEOF\n)"\n{x} "x"\n"',
+            ),
+        )
+
+    def test_exotic_forms_denied_with_budget_code(self):
+        for cmd in (
+            'cat <<"E"F\nrm -rf ~\nEF',
+            "cat <<E'F'\nx\nEF",
+            "cat <<E$x\nx\nE$x",
+            "cat <<E`x`F\nx\nE`x`F",
+            "cat <<EOF\u00a0\nx\nEOF\u00a0",
+            "cat <<ÉOF\nx\nÉOF",
+            "cat <<\\E\\F\nx\nEF",
+            "echo `cat <<E`\nx\nE",
+            "echo $((1<<y\n))\nls\ny",
+            "(cat <<E)\nx\nE",
+            "cat <<E; (cat <<F\nx\nE\ny\nF\n)",
+            'echo "a\nb" <<E\nx\nE',
+            "cat <<E\nx",  # không dòng kết
+            "case a in a) cat <<E;; esac\nx\nE",
+            "cat <<\nls",
+        ):
+            with self.subTest(cmd=cmd):
+                res = guard.bash_decision(cmd, str(self.root))
+                self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+
+    def test_simple_forms_allowed(self):
+        self.assert_all(
+            "",
+            (
+                "cat <<'EOF' > f.txt\nrm -rf ~\nEOF",
+                "cat <<EOF\n$HOME\nEOF",
+                "cat <<-EOF\n\tx\n\tEOF",
+                "cat << EOF\n x\nEOF",
+                'cat <<"END_OF_TEXT"\nsome $text\nEND_OF_TEXT',
+                "cat <<\\EOF\nx $y\nEOF",
+                "cat <<EOF1 <<EOF2\na\nEOF1\nb\nEOF2",
+                "git commit -F - <<'EOF'\nfeat(x): y\n\nbody (partial\nEOF",
+                "git commit -m \"$(cat <<'EOF'\nfix: x (partial\nEOF\n)\"",
+                "gh pr comment 5 --body \"$(cat <<'EOF'\nFixed (partially, see #3\nEOF\n)\"",
+                'gh pr create --title "fix(guard): y" --body "$(cat <<\'EOF\'\n- handles \\`((…)\\` (round 2\nEOF\n)"',
+                'sql=$(cat <<SQL\nSELECT 1;\nSQL\n)\necho "$sql"',
+                "(cd docs && cat <<EOF\nx\nEOF\n)",
+                "echo $((i+1)); for ((i=0;i<3;i++)); do echo $i; done",
+                'echo $((1<<2)); x=$[1+2]; echo $x; echo "$((1<<2))" <<EOF\nx\nEOF',
+                "total=$((a +\n b))\ncat <<EOF\n$total\nEOF",
+                'while read -r l; do echo "$l"; done <<< "$(ls)"',
+                "echo '<<x' \"<<y\" # <<z",
+                "echo a\\ #b <<E\nx\nE",
+            ),
+        )
+
+    def test_review_marker_in_quoted_comsub_body_still_denied(self):
+        self.assert_all(
+            "deny",
+            (
+                "gh pr comment 5 --body \"$(cat <<'EOF'\n" + MARK + '\nEOF\n)"',
+                'gh pr comment 5 --body "$(cat <<EOF\n$(cat b.md)\nEOF\n)"',
+                "gh pr comment 5 --body \"$(cat <<'EOF'\nFixed (partially\nEOF\n)\"; {x}",
+            ),
+        )
+
+    def test_scanner_units(self):
+        word = guard.HEREDOC_RE.match("<<'EOF'")
+        self.assertEqual(guard._heredoc_word(word), ("EOF", True))
+        self.assertEqual(guard._heredoc_word(guard.HEREDOC_RE.match("<<- EOF")), ("EOF", False))
+        self.assertEqual(guard.strip_heredocs("echo $$'<<E'\nls"), "echo $$'<<E'\nls")
+        self.assertEqual(guard.strip_heredocs("cat <<E\nrm -rf ~"), "cat <<E\nrm -rf ~")  # mảnh: giữ phần sau
+        self.assertEqual(
+            guard.strip_heredocs('x="$(cat <<\'E\'\nb "\nE\n)"\nls'), 'x="$(cat <<\'E\'\nb "\nE\n)"\nls'
+        )  # thân trong `"$(`: giữ (quét chặt), không đọc `"` của thân như nháy
+        self.assertEqual(
+            guard._fold_heredocs("x \"$(cat <<'E'\nb (\nE\n)\"", True), "x \"$(cat <<'E'\n\nE\n)\""
+        )  # `_ShellScan`: thân có nháy trong `"$(` che đi
+        self.assertEqual(guard._fold_heredocs('x "$(cat <<E\nb (\nE\n)"', True), 'x "$(cat <<E\nb (\nE\n)"')
+        self.assertEqual(guard.strip_heredocs("echo )\ncat <<E\nx\nE"), "echo )\ncat <<E")  # `)` lẻ: lỗi cú pháp
+        self.assertEqual(guard.strip_heredocs('echo $"<<E"\nls'), 'echo $"<<E"\nls')  # `$"…"` là nháy kép
+        self.assertEqual(guard.strip_heredocs("echo ${x:-$y} <<E\nb\nE"), "echo ${x:-$y} <<E")  # `$tên` trong `${…}`
+        for cmd in (
+            "cat \\<<E\nls",
+            "echo ${a:1<<E}",
+            "cat <<E$x",
+            "echo `cat <<E`",
+            "x=$(case a in a) cat <<E;; esac)\nx\nE",
+        ):
+            with self.subTest(cmd=cmd), self.assertRaises(guard.ScanTooComplex):
+                guard.strip_heredocs(cmd)
+
+    def test_body_continuation_before_terminator(self):
+        guard._heredoc_precheck("cat <<'X'\nfoo \\\\\nX", False)  # `\\` chẵn: không nối dòng
+        guard._heredoc_precheck("echo a\\\nb", False)
+        for cmd in ("cat <<'X'\nfoo\\\nX\nls\nX", "cat <<-X\nfoo\\\n\tX\nls\nX"):
+            with self.subTest(cmd=cmd), self.assertRaises(guard.ScanTooComplex):
+                guard._heredoc_precheck(cmd, False)
+        with self.assertRaises(guard.ScanTooComplex):
+            guard._heredoc_precheck("cat <<E\nx", True)
+        guard._heredoc_precheck("cat <<E\nx", False)  # lệnh lồng: thân là phần còn lại như bash
+        with self.assertRaises(guard.ScanTooComplex):
+            guard._heredoc_precheck("cat <<'X'\nX\\\n\nls\nX", False)
+        with self.assertRaises(guard.ScanTooComplex):
+            guard._heredoc_precheck("cat <<'X'\na\\\nb\\\nX\nls\nX", False)  # chuỗi nối nhiều dòng
+        guard._heredoc_precheck("cat <<'X'\nfoo\\\nbar\nX", False)
+        self.assertEqual(guard.tokenize('x "$(cat <<\'E\'\na "b\\c\nE\n)" y')[:2], ["x", "$(cat <<'E'\na \"b\\c\nE\n)"])
+
+    def test_array_assignment_syntax_error_denied(self):
+        """`(`/`;`/`|`/`&`/`<`/`>` trần trong gán mảng: bash -c báo lỗi cú pháp, bỏ phần còn lại của dòng (cả `<<`) rồi
+        chạy tiếp dòng sau — thân heredoc thành lệnh (đã thử bash 5.2)."""
+        self.assert_all(
+            "deny",
+            (
+                "x=((1)) <<X\n{x}\nX",
+                "x=( (1) ) <<X\n{x}\nX",
+                "x=((1)); cat <<X\n{x}\nX",
+                "declare -a x=((1)) <<X\n{x}\nX",
+                "x=(a;b) <<X\n{x}\nX",
+                "x=(a\n;) <<X\n{x}\nX",
+                "x=(a|b) <<X\n{x}\nX",
+            ),
+        )
+        self.assert_all("", ("x=(a) <<X\nrm -rf ~\nX", "x=( $(echo) ) <<X\nrm -rf ~\nX", "arr=(1 2); echo ${arr[0]}"))
+
+    def test_unclosed_quote_fallback_splits_lines(self):
+        """Nháy không đóng ở cuối (bash chạy các dòng trước rồi mới báo lỗi cú pháp): tách thô vẫn coi xuống dòng là ranh
+        giới lệnh — trước đây cả chuỗi thành một lệnh `echo hi rm -rf ~ '` và lọt."""
+        self.assert_all("deny", ("echo hi\n{x}\n'", 'echo hi\n{x}\n"', "cat <<X\n'\nX\n{x}\n'"))
+        self.assertEqual(guard.tokenize("echo hi\nls '")[:3], ["echo", "hi", "\n"])
+
+    def test_concurrent_decisions_independent(self):
+        """Quyết định chạy song song (nhiều luồng) không lẫn trạng thái bộ đọc heredoc."""
+        import concurrent.futures
+
+        cmds = [
+            ("cat <<'EOF'\nrm -rf ~\nEOF", ""),
+            ("cat \\<<'X'\nrm -rf ~\nX", "deny"),
+            ("git commit -m \"$(cat <<'EOF'\nfix: x (partial\nEOF\n)\"", ""),
+            ("echo $((cat <<\\X) )\nrm -rf ~\nX", "deny"),
+        ] * 8
+        root = str(self.root)
+
+        def decide(cmd: str) -> str:
+            return str(guard.apply_policy(guard.bash_decision(cmd, root))["decision"])
+
+        # vá môi trường MỘT lần ngoài các luồng: `mock.patch.dict(os.environ)` song song không an toàn luồng
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": root, "XT_GUARD_POLICY": ""}),
+            concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            got = list(pool.map(lambda c: decide(c[0]), cmds))
+        self.assertEqual(got, [want for _, want in cmds])
 
 
 class BraceSequenceMiddleTest(unittest.TestCase):

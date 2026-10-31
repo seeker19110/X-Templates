@@ -7165,19 +7165,6 @@
   }
  },
  {
-  "id": "guard-control-sec190-heredoc-quote-split-body",
-  "origin": "control",
-  "refs": [
-   "AUD-SEC-190"
-  ],
-  "input": {
-   "command": "cat <<\"E\"F\nrm -rf ~\nEF"
-  },
-  "expect": {
-   "allowed": true
-  }
- },
- {
   "id": "guard-rev361-comment-in-ansi-c",
   "origin": "adversarial-reviewer",
   "refs": [
@@ -9138,51 +9125,6 @@
    }
   },
   {
-   "id": "guard-control-rev361b-ok-locale-delim-body",
-   "origin": "control",
-   "refs": [],
-   "input": {
-    "command": "cat <<$\"EF\"\nrm -rf ~\nEF",
-    "files": {
-     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
-     "n.md": "thường\n"
-    }
-   },
-   "expect": {
-    "allowed": true
-   }
-  },
-  {
-   "id": "guard-control-rev361b-ok-bt-delim-body",
-   "origin": "control",
-   "refs": [],
-   "input": {
-    "command": "cat <<E`x`F\nrm -rf ~\nE`x`F",
-    "files": {
-     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
-     "n.md": "thường\n"
-    }
-   },
-   "expect": {
-    "allowed": true
-   }
-  },
-  {
-   "id": "guard-control-rev361b-ok-cs-delim-body",
-   "origin": "control",
-   "refs": [],
-   "input": {
-    "command": "cat <<E$(x)F\nrm -rf ~\nE$(x)F",
-    "files": {
-     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
-     "n.md": "thường\n"
-    }
-   },
-   "expect": {
-    "allowed": true
-   }
-  },
-  {
    "id": "guard-control-rev361b-ok-dash-tab-terminator",
    "origin": "control",
    "refs": [],
@@ -9240,6 +9182,3018 @@
     "files": {
      "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
      "n.md": "thường\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-exotic-dq-split",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "cat <<\"E\"F\nrm -rf ~\nEF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   }
+  },
+  {
+   "id": "guard-d270-exotic-locale",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "cat <<$\"EF\"\nrm -rf ~\nEF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   }
+  },
+  {
+   "id": "guard-d270-exotic-backtick",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "cat <<E`x`F\nrm -rf ~\nE`x`F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   }
+  },
+  {
+   "id": "guard-d270-exotic-comsub",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "cat <<E$(x)F\nrm -rf ~\nE$(x)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false,
+    "code": "BUDGET"
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "echo $((cat <<\\X) )\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "echo $((cat <<\\X) )\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "echo $((cat <<\\X) )\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "echo $((cat <<\\X) )\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "echo $((cat <<\\X) )\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-procsub-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "cat <((cat <<\\X) )\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-procsub-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "cat <((cat <<\\X) )\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-procsub-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "cat <((cat <<\\X) )\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-procsub-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "cat <((cat <<\\X) )\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-procsub-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-203"
+   ],
+   "input": {
+    "command": "cat <((cat <<\\X) )\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-esc-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1\\)<<\\X))\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-esc-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1\\)<<\\X))\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-esc-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1\\)<<\\X))\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-esc-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1\\)<<\\X))\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-esc-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1\\)<<\\X))\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-tick-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1+`echo )`<<\\X))\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-tick-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1+`echo )`<<\\X))\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-tick-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1+`echo )`<<\\X))\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-tick-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1+`echo )`<<\\X))\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dp-tick-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "((1+`echo )`<<\\X))\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-esc-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $((1\\)<<\\X))\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-esc-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $((1\\)<<\\X))\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-esc-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $((1\\)<<\\X))\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-esc-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $((1\\)<<\\X))\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ddp-esc-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $((1\\)<<\\X))\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dbr-esc-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $[1\\]<<\\X]\nrm -rf ~\nX]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dbr-esc-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $[1\\]<<\\X]\necho x > .autopilot/state.json\nX]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dbr-esc-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $[1\\]<<\\X]\necho '{}' > docs/autopilot/STAGE.json\nX]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dbr-esc-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $[1\\]<<\\X]\ngit push --force origin main\nX]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dbr-esc-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-204"
+   ],
+   "input": {
+    "command": "echo $[1\\]<<\\X]\ngh pr comment 5 -F b.md\nX]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-space-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(  true  )F\n$(true)F\nrm -rf ~\n$(  true  )F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-space-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(  true  )F\n$(true)F\necho x > .autopilot/state.json\n$(  true  )F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-space-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(  true  )F\n$(true)F\necho '{}' > docs/autopilot/STAGE.json\n$(  true  )F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-space-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(  true  )F\n$(true)F\ngit push --force origin main\n$(  true  )F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-space-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(  true  )F\n$(true)F\ngh pr comment 5 -F b.md\n$(  true  )F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-pipe-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(true|true)F\n$(true | true)F\nrm -rf ~\n$(true|true)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-pipe-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(true|true)F\n$(true | true)F\necho x > .autopilot/state.json\n$(true|true)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-pipe-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(true|true)F\n$(true | true)F\necho '{}' > docs/autopilot/STAGE.json\n$(true|true)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-pipe-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(true|true)F\n$(true | true)F\ngit push --force origin main\n$(true|true)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-cs-pipe-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-205"
+   ],
+   "input": {
+    "command": "cat <<$(true|true)F\n$(true | true)F\ngh pr comment 5 -F b.md\n$(true|true)F",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-dq-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$\"EF\"\n$$EF\nrm -rf ~\n$EF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-dq-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$\"EF\"\n$$EF\necho x > .autopilot/state.json\n$EF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-dq-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$\"EF\"\n$$EF\necho '{}' > docs/autopilot/STAGE.json\n$EF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-dq-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$\"EF\"\n$$EF\ngit push --force origin main\n$EF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-dq-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$\"EF\"\n$$EF\ngh pr comment 5 -F b.md\n$EF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-sq-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\nrm -rf ~\n$x'yz'w",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-sq-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\necho x > .autopilot/state.json\n$x'yz'w",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-sq-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\necho '{}' > docs/autopilot/STAGE.json\n$x'yz'w",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-sq-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\ngit push --force origin main\n$x'yz'w",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dd-sq-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-206"
+   ],
+   "input": {
+    "command": "cat <<$$'x\\'y'z\\'w\n$$x\\yz\\w\ngh pr comment 5 -F b.md\n$x'yz'w",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-q-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\qB'\nA\\qB\nrm -rf ~\nAqB",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-q-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\qB'\nA\\qB\necho x > .autopilot/state.json\nAqB",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-q-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\qB'\nA\\qB\necho '{}' > docs/autopilot/STAGE.json\nAqB",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-q-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\qB'\nA\\qB\ngit push --force origin main\nAqB",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-q-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\qB'\nA\\qB\ngh pr comment 5 -F b.md\nAqB",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-8-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\8B'\nA\\8B\nrm -rf ~\nA8B",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-8-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\8B'\nA\\8B\necho x > .autopilot/state.json\nA8B",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-8-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\8B'\nA\\8B\necho '{}' > docs/autopilot/STAGE.json\nA8B",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-8-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\8B'\nA\\8B\ngit push --force origin main\nA8B",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-ansi-8-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-207"
+   ],
+   "input": {
+    "command": "cat <<$'A\\8B'\nA\\8B\ngh pr comment 5 -F b.md\nA8B",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-bs-lt-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-208"
+   ],
+   "input": {
+    "command": "cat \\<<'X'\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-bs-lt-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-208"
+   ],
+   "input": {
+    "command": "cat \\<<'X'\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-bs-lt-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-208"
+   ],
+   "input": {
+    "command": "cat \\<<'X'\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-bs-lt-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-208"
+   ],
+   "input": {
+    "command": "cat \\<<'X'\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-bs-lt-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-208"
+   ],
+   "input": {
+    "command": "cat \\<<'X'\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-brace-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-209"
+   ],
+   "input": {
+    "command": "echo ${x:1<<'X'}\nrm -rf ~\nX}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-brace-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-209"
+   ],
+   "input": {
+    "command": "echo ${x:1<<'X'}\necho x > .autopilot/state.json\nX}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-brace-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-209"
+   ],
+   "input": {
+    "command": "echo ${x:1<<'X'}\necho '{}' > docs/autopilot/STAGE.json\nX}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-brace-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-209"
+   ],
+   "input": {
+    "command": "echo ${x:1<<'X'}\ngit push --force origin main\nX}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-brace-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-209"
+   ],
+   "input": {
+    "command": "echo ${x:1<<'X'}\ngh pr comment 5 -F b.md\nX}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-open-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-210"
+   ],
+   "input": {
+    "command": "cat <<'EOF' \"\n$(rm -rf ~)\"\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-open-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-210"
+   ],
+   "input": {
+    "command": "cat <<'EOF' \"\n$(echo x > .autopilot/state.json)\"\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-open-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-210"
+   ],
+   "input": {
+    "command": "cat <<'EOF' \"\n$(echo '{}' > docs/autopilot/STAGE.json)\"\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-open-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-210"
+   ],
+   "input": {
+    "command": "cat <<'EOF' \"\n$(git push --force origin main)\"\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-open-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-210"
+   ],
+   "input": {
+    "command": "cat <<'EOF' \"\n$(gh pr comment 5 -F b.md)\"\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-body-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-211"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-body-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-211"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-body-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-211"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-body-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-211"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-dq-body-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-211"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\nfix: y \"<<'X'\nEOF\n)\"\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-body-cont-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nfoo\\\nX\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-body-cont-ap",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nfoo\\\nX\necho x > .autopilot/state.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-body-cont-stage",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nfoo\\\nX\necho '{}' > docs/autopilot/STAGE.json\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-body-cont-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nfoo\\\nX\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-rev361c-body-cont-mark",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nfoo\\\nX\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-q-file",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<'EOF' > notes.txt\nhello\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-uq-file",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<EOF > notes.txt\nhello $USER $(date)\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-inc",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo $((i+1))",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-for-ar",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "for ((i=0;i<3;i++)); do echo $i; done",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-commit-F-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git commit -F - <<EOF\nfeat(guard): x\n\nbody\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-commit-m-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nfix(guard): x\n\nbody with $((1<<2)) and ((x)\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-py-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "python3 - <<'PY'\nprint((1<<3))\nPY",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-space",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "x=$(( (a+b) * 2 )); echo $x",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-cmd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "(( count++ )); echo $count",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-shift",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo $(( 1 << 4 ))",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-if-ar",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "if (( x > 3 )); then echo big; fi",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-herestr",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "while read -r l; do echo \"$l\"; done <<< \"$(ls)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-tab",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<-EOF\n\tindented\n\tEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-pr-create",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "gh pr create --title \"feat(x): y\" --body \"$(cat <<'EOF'\n## Summary\n- a ((b) $((c<<d))\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-sql-sub",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "sql=$(cat <<SQL\nSELECT 1;\nSQL\n)\necho \"$sql\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-kubectl",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "kubectl apply --dry-run=client -f - <<EOF\napiVersion: v1\nkind: ConfigMap\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-dq-word",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<\"END_OF_TEXT\"\nsome $text\nEND_OF_TEXT",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-space",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat << EOF\n x\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-procsub",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "diff <(sort a.txt) <(sort b.txt)",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-old-ar",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo $[1+2]",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-arr-idx",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "arr=(1 2 3); echo ${arr[$((i+1))]}",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-awk-shift",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "awk 'BEGIN{print 1<<2}'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-body-ar",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<EOF\n$((1<<2))\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ml-ar-then-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "total=$((a +\n b))\ncat <<EOF\n$total\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-then-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "n=$((x+1)); cat <<EOF\n$n\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-pipe-py",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<'EOF' | python3\nprint(1)\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-two-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<EOF1 <<EOF2\na\nEOF1\nb\nEOF2",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-script",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<'EOF' > s.sh\nfor ((i=0; i<3; i++)); do\n  echo $((i << 1))\ndone\nEOF\nbash s.sh",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-sub",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo \"$(( $(wc -l < notes.txt) + 1 ))\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-or",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "((i++)) || true",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-jq-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "jq '.[] | select(.a)' <<EOF\n[{\"a\":1}]\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-node-e",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "node -e 'console.log((1<<2))'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-in-sub-ar",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "x=$(cat <<EOF\n$((2<<3))\nEOF\n); echo $x",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-after-dparen-dq",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo \"$((1+2))\" <<EOF\nx\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-ml-open",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "if ((\n  a > 1\n)); then echo y; fi",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-tee-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "tee notes.txt >/dev/null <<'EOF'\nline (( with parens\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-word-dash",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<END-OF-FILE\nx\nEND-OF-FILE",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-word-dot",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<eof.txt\nx\neof.txt",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-bs",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<\\EOF\nx $y\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-bracket-test",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "[ $((n % 2)) -eq 0 ] && echo even",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-let-q",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "let 'x = 1 << 2'; echo $x",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-pytest",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "python3 -m pytest -q tests/test_guard_audit1019.py 2>&1 | tail -3",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-body-file-hd",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat > pr.md <<'EOF'\n## Summary\n- x (see #12\nEOF\ngh pr create --title \"feat(x): y\" --body-file pr.md",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-cp-then-F",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cp template.md body.md && gh pr comment 5 -F body.md",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-echo-then-F",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo \"LGTM\" > c.md; gh pr comment 5 -F c.md",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-tmp-F",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "printf 'ok\\n' > /tmp/c.md && gh pr comment 5 -F /tmp/c.md",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-commit-mentions-gh",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git commit -m \"docs(x): explain g''h pr comment usage\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-grep-gh",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "grep -rn \"gh pr comment\" docs | head",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-pr-body-paren",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "gh pr create --title \"fix(guard): y\" --body \"$(cat <<'EOF'\n## Summary\n- handles \\`((…)\\` subshell (round 2\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-comment-body-paren",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "gh pr comment 5 --body \"$(cat <<'EOF'\nFixed (partially, see #3\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-hd-home",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "cat <<EOF\n$HOME\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-commit-F-q",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git commit -F - <<'EOF'\nfeat(guard): x\n\nbody (partial\nEOF",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-commit-m-partial",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "git commit -m \"$(cat <<'EOF'\nfix: x (partial\nEOF\n)\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-ar-shift-nospace",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "echo $((1<<2))",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-control-d270-old-ar-assign",
+   "origin": "control",
+   "refs": [],
+   "input": {
+    "command": "x=$[1+2]; echo $x",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d270-trail-sq-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\nrm -rf ~\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-trail-dq-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\nrm -rf ~\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\na \"\nEOF\n)\"\nrm -rf ~ \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-uq-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<EOF\na \"\nEOF\n)\"\nrm -rf ~ \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-join-empty-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nX\\\n\n'\nX\nrm -rf ~\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-bs-space-hash-rm",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "echo a\\ #<<X\n'\nX\nrm -rf ~\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-brace-group-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "{ cat <<X; }\n'\nX\nrm -rf ~\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-trail-sq-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\ngit push --force origin main\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-trail-dq-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\ngit push --force origin main\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\na \"\nEOF\n)\"\ngit push --force origin main \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-uq-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<EOF\na \"\nEOF\n)\"\ngit push --force origin main \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-join-empty-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nX\\\n\n'\nX\ngit push --force origin main\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-bs-space-hash-push",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "echo a\\ #<<X\n'\nX\ngit push --force origin main\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-brace-group-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "{ cat <<X; }\n'\nX\ngit push --force origin main\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-trail-sq-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\ngh pr comment 5 -F b.md\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-trail-dq-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "echo hi\ngh pr comment 5 -F b.md\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<'EOF'\na \"\nEOF\n)\"\ngh pr comment 5 -F b.md \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-dq-body-parity-uq-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-215"
+   ],
+   "input": {
+    "command": "echo \"$(cat <<EOF\na \"\nEOF\n)\"\ngh pr comment 5 -F b.md \"x\"\n\"",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-join-empty-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-212"
+   ],
+   "input": {
+    "command": "cat <<'X'\nX\\\n\n'\nX\ngh pr comment 5 -F b.md\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-bs-space-hash-mark",
+   "origin": "adversarial-author",
+   "refs": [],
+   "input": {
+    "command": "echo a\\ #<<X\n'\nX\ngh pr comment 5 -F b.md\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-brace-group-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-214"
+   ],
+   "input": {
+    "command": "{ cat <<X; }\n'\nX\ngh pr comment 5 -F b.md\n'",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-dparen-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)) <<X\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=(a;b) <<X\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-line-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)); cat <<X\nrm -rf ~\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-dparen-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)) <<X\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=(a;b) <<X\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-line-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)); cat <<X\ngit push --force origin main\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-dparen-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)) <<X\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=(a;b) <<X\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d270-array-semi-line-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-216"
+   ],
+   "input": {
+    "command": "x=((1)); cat <<X\ngh pr comment 5 -F b.md\nX",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
     }
    },
    "expect": {

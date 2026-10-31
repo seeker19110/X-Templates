@@ -26,6 +26,7 @@ import binascii
 import bisect
 import contextlib
 import fnmatch
+import functools
 import itertools
 import json
 import os
@@ -367,201 +368,305 @@ def edit_decision(path: str, root: str, tool_input: Optional[Dict[str, object]] 
 
 
 class ScanTooComplex(Exception):
-    """Guard không phân định được bash đọc lệnh thế nào (`<<` trong số học chưa đóng trên dòng, từ dấu kết heredoc chưa
-    đóng) → `bash_decision` chặn (fail-closed), không đoán (review #361 lượt 2)."""
+    """Guard không phân định được bash đọc lệnh thế nào → `bash_decision` chặn (fail-closed, mã BUDGET), không đoán.
+    Heredoc theo danh sách cho phép (D-270): `<<` mà bash có thể đọc là heredoc nhưng ngoài dạng guard hiểu → lỗi này."""
 
 
-# `<<`/`<<-` đứng riêng (`<<<` là here-string: không thân, không dấu kết) rồi khoảng trắng. Dấu kết là CẢ từ sau nó như
-# bash đọc một từ (`_word_end`): `<<"E"F` → `EF` (AUD-SEC-190), `` <<E`x`F `` → `` E`x`F ``, `<<E$(x)F` → `E$(x)F` —
-# bash không thay gì trong từ, chỉ bỏ nháy (`_heredoc_word`; AUD-SEC-199).
-HEREDOC_OP_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*")
-HEREDOC_RE = re.compile(r"<<-?[ \t]*(.+)")  # khớp trong [đầu `<<`, cuối từ): nhóm 1 = từ dấu kết nguyên văn
-HEREDOC_PART_RE = re.compile(r"\$'((?:[^'\\]|\\.)*)'|'([^']*)'|\$?\"((?:[^\"\\]|\\.)*)\"|\\(.)|(.)", re.S)
-DQ_ESCAPE_RE = re.compile(r'\\([\\"$`])')  # trong nháy kép `\` chỉ thoát `\`, `"`, `$`, backtick
-HERE_WORD_STOP = frozenset(" \t\n;&|()<>")  # ký tự meta của bash: hết từ
-HERE_WORD_MAX = 256  # từ dấu kết dài hơn → không phân định (từ thật ngắn; mỗi `<<` tốn tối đa chừng này)
-HERE_WORD_RUN_RE = re.compile(r"[^ \t\n;&|()<>'\"\\`$]+")
-HERE_WORD_PART_RE = re.compile(
-    r"'[^']*'|\$'(?:[^'\\]|\\.)*'|\$?\"(?:[^\"\\$`]|\\.|\$(?![({\[]))*\"|`[^`\\]*`|\\.",
-)  # nháy đơn · ANSI-C · nháy kép/`$"…"` (không thay lệnh bên trong) · backtick không thoát · ký tự thoát
-NEST_CLOSE = {"(": ")", "{": "}", "[": "]"}
-NEST_PLAIN_RE = {  # trong `$(…)`/`${…}`/`$[…]` của từ dấu kết: ngoặc loại khác, nháy, `\`, backtick (và `#` của `$(`)
-    "(": re.compile(r"[^(){}\[\]'\"\\`#]+"),  # → không phân định
-    "{": re.compile(r"[^(){}\[\]'\"\\`]+"),
-    "[": re.compile(r"[^(){}\[\]'\"\\`]+"),
-}
-
-
-def _heredoc_part(m: "re.Match[str]") -> str:
-    ansi, single, double, escaped, plain = m.groups()
-    if ansi is not None:
-        return ANSI_ESCAPE_RE.sub(_ansi_c_char, ansi)
-    if double is not None:
-        return DQ_ESCAPE_RE.sub(r"\1", double)
-    return single if single is not None else escaped if escaped is not None else plain
+# Heredoc guard hiểu (D-270): `<<`/`<<-`, khoảng trắng, dấu kết `[A-Za-z0-9_.-]+` trần, bọc trọn `'…'`/`"…"` hay một
+# `\` đầu, rồi hết từ (ký tự meta hay cuối dòng). Dạng khác (`$`, backtick, nháy pha, `\` giữa từ, Unicode…) → chặn.
+HERE_WORD = r"[A-Za-z0-9_.-]+"
+HEREDOC_RE = re.compile(
+    rf"<<-?[ \t]*(?:({HERE_WORD})|'({HERE_WORD})'|\"({HERE_WORD})\"|\\({HERE_WORD}))(?=[ \t;&|()<>]|$)"
+)
+HERE_WORD_HINT_RE = re.compile(r"<<-?[ \t'\"\\]*([A-Za-z0-9_.-]+)")  # từ có thể là dấu kết, kể cả trong chuỗi lồng
+CODE_PLAIN_RE = re.compile(r"[^\\'\"`$()<>#]+")
+CASE_WORD_RE = re.compile(r"(?:^|[\s;&|])case(?=\s|$)")
+ARRAY_BAD_RE = re.compile(r"[;|&<>]|(?<!\$)\(")  # trần trong gán mảng `x=(…)`: bash báo lỗi rồi bỏ cả dòng
+DQ_PLAIN_RE = re.compile(r'[^"\\$`]+')
+ANSI_PLAIN_RE = re.compile(r"[^'\\]+")
+TICK_PLAIN_RE = re.compile(r"[^`\\'\"$<]+")
+BRACE_PLAIN_RE = re.compile(r"[^}{\\'\"`$<]+")
+ARITH_PLAIN_RE = {"A(": re.compile(r"[^'\"\\`$()<{}]+"), "A[": re.compile(r"[^'\"\\`$\[\]<{}]+")}
+ARITH_PAIR = {"A(": ("(", ")"), "A[": ("[", "]")}
+SIMPLE_VAR_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9#@?*!$-])")
+Frame = Tuple[str, int]  # (loại: `(` `$(` `<(` `"` `'` `$'` backtick `${` `A(` `A[`, số ngoặc còn mở của `A…`)
+HereSpan = Tuple[int, "re.Match[str]", int, int, bool]  # (dòng mở, match, đầu thân, cuối thân, nằm trong `"$(`)
 
 
 def _heredoc_word(m: "re.Match[str]") -> Tuple[str, bool]:
-    """(dấu kết, có nháy) của heredoc khớp `HEREDOC_RE`: từ sau `<<` đã bỏ nháy như bash; có đoạn nháy hay `\\` → thân
-    là chữ (không thay `$(…)`/backtick)."""
-    word = m.group(1)
-    return HEREDOC_PART_RE.sub(_heredoc_part, word), any(c in word for c in "'\"\\")
+    """(dấu kết, có nháy/`\\`) của heredoc khớp `HEREDOC_RE` — có nháy: thân là chữ (không thay `$(…)`/backtick)."""
+    return m.group(cast(int, m.lastindex)), m.lastindex != 1
 
 
-def _word_end(line: str, i: int) -> int:
-    """Cuối từ shell bắt đầu ở `line[i]` (như bash đọc một từ trên một dòng): nháy, `\\x`, backtick, `$(…)`/`${…}`/
-    `$[…]` thuộc từ. Chưa đóng trên dòng, dài quá `HERE_WORD_MAX`, hay dạng guard không đọc chắc (nháy/backtick/comment
-    trong thay lệnh, thay lệnh trong nháy kép) → -1 (không phân định)."""
-    stop = min(len(line), i + HERE_WORD_MAX)
-    while i < len(line) and line[i] not in HERE_WORD_STOP:
-        i = _word_part_end(line, i, stop) if i < stop else -1
-        if i < 0:
-            return -1
-    return i
-
-
-def _word_part_end(line: str, i: int, stop: int) -> int:
-    run = HERE_WORD_RUN_RE.match(line, i, stop)
-    if run:
-        return run.end()
-    if line.startswith(("$(", "${", "$["), i):
-        return _nested_end(line, i + 1, stop)
-    part = HERE_WORD_PART_RE.match(line, i, stop)
-    if part:
-        return part.end()
-    return i + 1 if line[i] == "$" else -1
-
-
-def _nested_end(line: str, i: int, stop: int) -> int:
-    """Vị trí sau `(…)`/`{…}`/`[…]` mở ở `line[i]` (lồng cùng loại); không đóng trước `stop` hay gặp ký tự `NEST_PLAIN_RE`
-    loại ra → -1."""
-    opener, closer, depth = line[i], NEST_CLOSE[line[i]], 0
-    while i < stop:
-        if line[i] in (opener, closer):
-            depth += 1 if line[i] == opener else -1
-            i += 1
-            if not depth:
-                return i
+def _arith_end(line: str, k: int, kind: str) -> int:
+    """Cuối vùng số học bắt đầu ở `line[k]` (sau `((`/`$((`/`$[`) khi nó đơn giản và đóng trên dòng: chỉ chữ/toán tử/
+    `$tên`, ngoặc cân, `((…))` đóng bằng `))` liền (như bash) — `<<` trong đó là dịch bit. Không đơn giản → 0."""
+    opener, closer = ARITH_PAIR[kind]
+    depth = 0
+    while k < len(line):
+        var = SIMPLE_VAR_RE.match(line, k)
+        run = ARITH_PLAIN_RE[kind].match(line, k) or var
+        c = line[k]
+        if run or c == "<":
+            k = run.end() if run else k + 1
             continue
-        plain = NEST_PLAIN_RE[opener].match(line, i, stop)
-        if not plain:
-            return -1
-        i = plain.end()
-    return -1
+        if c == opener:
+            depth += 1
+        elif c != closer:
+            return 0
+        elif depth:
+            depth -= 1
+        else:
+            return k + 1 if kind == "A[" else (k + 2 if line.startswith("))", k) else 0)
+        k += 1
+    return 0
 
 
-ARITH_TOKEN_RE = re.compile(r"\$\(\(|\(\(|\$\[|[()\[\]]")
-ARITH, AMBIGUOUS = 1, 2  # loại vùng của `_Arith.zones`
-Bracket = Tuple[int, str, str]  # (vị trí, chữ, lớp: `q` trong nháy kép, `c` là mã)
+class _HereScan:
+    """Đọc heredoc theo danh sách cho phép (D-270), một lượt trên mọi dòng: ngăn xếp ngữ cảnh (nháy, `$(`, `(`,
+    backtick, `${`, số học) mang qua dòng; thân heredoc bỏ qua theo dòng kết. `<<` trong nháy đơn/kép, comment hay số
+    học đơn giản là chữ/dịch bit; `<<` ở chỗ khác ngoài dạng cho phép → `ScanTooComplex`. Gặp chỗ không đọc chắc
+    (`case`, gán mảng lỗi cú pháp, nháy/`\\`/thay lệnh trong backtick, `${…}`, số học không đơn giản) → `taint`: lệnh có
+    heredoc thì chặn."""
 
+    def __init__(self, lines: List[str]) -> None:
+        self.lines = lines
+        self.stack: List[Frame] = []
+        # `struct[i]`: ngăn xếp tới khung i là ngữ cảnh guard hiểu cho heredoc — cấp ngoài, subshell `(`, thay lệnh `$(`,
+        # nháy kép chỉ khi ngay trong nó là `$(` (`-m "$(cat <<'EOF'`); giữ theo push/pop để mỗi lần hỏi O(1)
+        self.struct: List[bool] = []
+        self.dq = 0  # số khung nháy kép đang mở
+        self.taint = False
+        self.ops: List[Tuple["re.Match[str]", int]] = []
+        self.low = 0  # độ sâu ngăn xếp thấp nhất từ heredoc đầu tiên của dòng
+        self.esc = -1  # vị trí ngay sau ký tự thoát `\x` gần nhất
+        self.handlers: Dict[str, Callable[[str, int], int]] = {
+            "": self._code,
+            "(": self._code,
+            "$(": self._code,
+            "<(": self._code,
+            "=(": self._array,
+            '"': self._dq,
+            "'": self._sq,
+            "$'": self._ansi,
+            "`": self._tick,
+            "${": self._brace,
+            "A(": self._arith,
+            "A[": self._arith,
+        }
 
-def _arith_tokens(line: str, states: List[str]) -> Tuple[List[Bracket], List[Bracket]]:
-    """(ngoặc, chỗ mở số học) ngoài nháy đơn/comment của dòng. `((` trong nháy kép là chữ, không mở số học."""
-    brackets: List[Bracket] = []
-    openers: List[Bracket] = []
-    for m in ARITH_TOKEN_RE.finditer(line):
-        p, tok, st = m.start(), m.group(), states[m.start()]
-        if st in ("'", "#"):
-            continue
-        cls = "q" if st == '"' else "c"
-        if len(tok) > 1 and (tok != "((" or cls == "c"):
-            openers.append((p, tok, cls))
-        brackets += [(p + k, ch, cls) for k, ch in enumerate(tok) if ch != "$"]
-    return brackets, openers
-
-
-def _bracket_pairs(brackets: List[Bracket]) -> Tuple[Dict[int, int], Dict[Tuple[str, str], List[int]]]:
-    """(ngoặc mở → ngoặc đóng khớp, ngoặc mở còn mở theo (lớp, loại)) — `(`/`[` khớp riêng, ngoặc trong nháy kép khớp
-    riêng ngoặc mã (`((1 "((" ))`: ngoặc trong nháy không làm lệch cặp)."""
-    pairs: Dict[int, int] = {}
-    stacks: Dict[Tuple[str, str], List[int]] = {}
-    for p, ch, cls in brackets:
-        stack = stacks.setdefault((cls, "(" if ch in "()" else "["), [])
-        if ch in "([":
-            stack.append(p)
-        elif stack:
-            pairs[stack.pop()] = p
-    return pairs, stacks
-
-
-def _arith_end(line: str, tok: str, p: int, close: int, pairs: Dict[int, int]) -> int:
-    """Cuối vùng số học mở ở `p` (ngoặc quyết định ở `p + 1` khớp `close`), 0 nếu bash đọc là subshell/thay lệnh: `((`
-    — ngoặc trong đóng ngay trước `)` (`parse_arith_cmd`); `$((` — thân kết bằng `)`; `$[` — luôn số học."""
-    if tok == "((":
-        return close + 2 if pairs.get(p) == close + 1 else 0
-    return close + 1 if tok == "$[" or line[close - 1] == ")" else 0
-
-
-class _Arith:
-    """Vùng số học trên từng dòng (`<<` trong đó là dịch bit, không mở heredoc); chỗ mở chưa đóng trên dòng → vùng không
-    phân định tới khi ngoặc của nó cân (mang sang dòng sau: `carry` = (lớp, ngoặc, số còn mở))."""
-
-    def __init__(self) -> None:
-        self.carry: Optional[Tuple[str, str, int]] = None
-
-    def zones(self, line: str, states: List[str]) -> List[Tuple[int, int, int]]:
-        """(đầu, sau cuối, `ARITH`/`AMBIGUOUS`) theo thứ tự, không chồng nhau."""
-        if self.carry is None and "((" not in line and "$[" not in line:
-            return []
-        brackets, openers = _arith_tokens(line, states)
-        out, cursor = self._carried(brackets, len(line))
-        if self.carry is not None:
-            return out
-        pairs, stacks = _bracket_pairs([b for b in brackets if b[0] >= cursor])
-        for p, tok, cls in openers:
-            close = pairs.get(p + 1) if p >= cursor else -1
-            if close is None:
-                kind = "[" if tok == "$[" else "("
-                self.carry = (cls, kind, sum(q >= p + 1 for q in stacks[cls, kind]))
-                return out + [(p, len(line), AMBIGUOUS)]
-            end = _arith_end(line, tok, p, close, pairs) if close >= 0 else 0
-            if end:
-                out.append((p, end, ARITH))
-                cursor = end
+    def spans(self) -> List[HereSpan]:
+        out: List[HereSpan] = []
+        i, ends = 0, _HereEnds(self.lines)
+        while i < len(self.lines):
+            line, opener, i = self.lines[i], i, i + 1
+            start_ok, self.ops, self.esc = self._structural(), [], -1
+            j = 0
+            while j < len(line):
+                j = self.handlers[self.stack[-1][0] if self.stack else ""](line, j)
+            self._check_opener(line, start_ok)
+            in_dq = self.dq > 0
+            for m, _ in self.ops:
+                end = ends.find(m, i)
+                end = len(self.lines) if end is None else end
+                out.append((opener, m, i, end, in_dq))
+                i = end + 1
+        if out and self.taint:
+            raise ScanTooComplex("heredoc cùng chỗ guard không đọc chắc (`case`, gán mảng, backtick, `${…}`, số học)")
         return out
 
-    def _carried(self, brackets: List[Bracket], n: int) -> Tuple[List[Tuple[int, int, int]], int]:
-        """Vùng không phân định từ đầu dòng tới khi chỗ mở của dòng trước cân ngoặc; (vùng, vị trí sau nó)."""
-        if self.carry is None:
-            return [], 0
-        cls, kind, depth = self.carry
-        for p, ch, k in brackets:
-            if k == cls and ch in (kind, NEST_CLOSE[kind]):
-                depth += 1 if ch == kind else -1
-                if not depth:
-                    self.carry = None
-                    return [(0, p + 1, AMBIGUOUS)], p + 1
-        self.carry = (cls, kind, depth)
-        return [(0, n, AMBIGUOUS)], n
+    def _check_opener(self, line: str, start_ok: bool) -> None:
+        """Dòng mở heredoc phải trọn: đầu dòng, chỗ `<<` và cuối dòng cùng ngữ cảnh cho phép, ngữ cảnh chứa `<<` không
+        đóng trên dòng (`(cat <<E)`, `<<E "` → chặn)."""
+        depth = len(self.stack)
+        if self.ops and (not start_ok or self.low < depth or any(d != depth for _, d in self.ops)):
+            raise ScanTooComplex(f"dòng mở heredoc chưa trọn: {line[:80]}")
+
+    def _structural(self) -> bool:
+        return not self.struct or self.struct[-1]
+
+    def _push(self, kind: str, j: int, depth: int = 0) -> int:
+        dq_below = bool(self.stack) and self.stack[-1][0] == '"'
+        below = self.struct[-2] if dq_below and len(self.struct) > 1 else (dq_below or self._structural())
+        self.struct.append(kind in ("(", "$(") and below and (kind == "$(" or not dq_below))
+        self.stack.append((kind, depth))
+        self.dq += kind == '"'
+        return j
+
+    def _pop(self, j: int) -> int:
+        self.dq -= self.stack.pop()[0] == '"'
+        self.struct.pop()
+        self.low = min(self.low, len(self.stack))
+        return j
+
+    def _code(self, line: str, j: int) -> int:
+        run = CODE_PLAIN_RE.match(line, j)
+        if run:  # `case`: mẫu `a)` đóng ngoặc lẻ — ngăn xếp lệch so với bash
+            self.taint = self.taint or bool(CASE_WORD_RE.search(run.group()))
+            return run.end()
+        c = line[j]
+        if c == "\\":
+            if line.startswith("<<", j + 1):
+                raise ScanTooComplex(f"`\\<<` không phân định: {line[j : j + 80]}")
+            self.esc = j + 2
+            return j + 2
+        if c == "#":
+            word_start = j == 0 or (line[j - 1] in WORD_END and self.esc != j)
+            return len(line) if word_start else j + 1
+        if c == "<":
+            return self._lt(line, j)
+        if c == "$":
+            return self._dollar(line, j, True)
+        if c == ">":
+            return self._push("<(", j + 2) if line.startswith(">(", j) else j + 1
+        if c in "()":
+            return self._paren(line, j)
+        return self._push(c, j + 1)  # `'`, `"`, backtick
+
+    def _lt(self, line: str, j: int) -> int:
+        if line.startswith("<<<", j):
+            return j + 3
+        if line.startswith("<<", j):
+            m = HEREDOC_RE.match(line, j)
+            if not m or not self._structural():
+                raise ScanTooComplex(f"heredoc ngoài danh sách cho phép: {line[j : j + 80]}")
+            if not self.ops:
+                self.low = len(self.stack)
+            self.ops.append((m, len(self.stack)))
+            return m.end()
+        return self._push("<(", j + 2) if line.startswith("<(", j) else j + 1
+
+    def _paren(self, line: str, j: int) -> int:
+        if line[j] == ")":  # `)` lẻ ở cấp ngoài: lỗi cú pháp, bash dừng ở đó (mẫu `case` đã `taint` ở `_code`)
+            return self._pop(j + 1) if self.stack else j + 1
+        if j and line[j - 1] == "=":
+            return self._push("=(", j + 1)
+        if line.startswith("((", j):
+            return self._arith_open(line, j, 2, "A(")
+        return self._push("(", j + 1)
+
+    def _array(self, line: str, j: int) -> int:
+        """Gán mảng `x=(…)`, `declare -a x=(…)`: đọc như mã; `(`, `;`, `|`, `&`, `<`, `>` trần trong đó là lỗi cú pháp
+        mà bash -c báo rồi bỏ phần còn lại của dòng — kể cả `<<` sau đó, thân heredoc thành lệnh (`x=((1)) <<X` ↵
+        `rm -rf ~` ↵ `X`) → `taint`."""
+        end = self._code(line, j)
+        self.taint = self.taint or bool(ARRAY_BAD_RE.search(line, j, end))
+        return end
+
+    def _arith_open(self, line: str, j: int, n: int, kind: str) -> int:
+        end = _arith_end(line, j + n, kind)
+        return end or self._push(kind, j + n, 1 if kind == "A[" else 2)
+
+    def _dollar(self, line: str, j: int, code: bool) -> int:
+        if line.startswith("$((", j):
+            return self._arith_open(line, j, 3, "A(")
+        two = line[j : j + 2]
+        if two == "$[":
+            return self._arith_open(line, j, 2, "A[")
+        if two in ("$(", "${") or (code and two == "$'"):
+            return self._push(two, j + 2)
+        if code and two == '$"':
+            return self._push('"', j + 2)
+        return j + (2 if two == "$$" else 1)
+
+    def _dq(self, line: str, j: int) -> int:
+        run = DQ_PLAIN_RE.match(line, j)
+        if run:
+            return run.end()
+        c = line[j]
+        if c == '"':
+            return self._pop(j + 1)
+        if c == "\\":
+            return j + 2
+        if c == "`":
+            return self._push("`", j + 1)
+        return self._dollar(line, j, False)
+
+    def _sq(self, line: str, j: int) -> int:
+        k = line.find("'", j)
+        return len(line) if k < 0 else self._pop(k + 1)
+
+    def _ansi(self, line: str, j: int) -> int:
+        run = ANSI_PLAIN_RE.match(line, j)
+        if run:
+            return run.end()
+        return j + 2 if line[j] == "\\" else self._pop(j + 1)
+
+    def _opaque(self, line: str, j: int, closer: str) -> int:
+        """Trong backtick/`${…}`/số học không đơn giản: `closer` đóng; `<<` → chặn; `$tên` được; nháy, `\\`, thay lệnh
+        lồng → `taint`."""
+        c = line[j]
+        if c == closer:
+            return self._pop(j + 1)
+        if line.startswith("<<", j):
+            raise ScanTooComplex(f"`<<` trong backtick/`${{…}}`/số học không đơn giản: {line[j : j + 80]}")
+        var = SIMPLE_VAR_RE.match(line, j)
+        if var:
+            return var.end()
+        self.taint = self.taint or c != "<"
+        return j + (2 if c == "\\" else 1)
+
+    def _tick(self, line: str, j: int) -> int:
+        run = TICK_PLAIN_RE.match(line, j)
+        return run.end() if run else self._opaque(line, j, "`")
+
+    def _brace(self, line: str, j: int) -> int:
+        run = BRACE_PLAIN_RE.match(line, j)
+        return run.end() if run else self._opaque(line, j, "}")
+
+    def _arith(self, line: str, j: int) -> int:
+        """Số học không đơn giản/nhiều dòng: đếm ngoặc tới khi đóng; `<<` trong đó → chặn."""
+        kind, depth = self.stack[-1]
+        run = ARITH_PLAIN_RE[kind].match(line, j)
+        if run:
+            return run.end()
+        opener, closer = ARITH_PAIR[kind]
+        c = line[j]
+        if c in (opener, closer):
+            depth += 1 if c == opener else -1
+            self.stack[-1] = (kind, depth)
+            return j + 1 if depth else self._pop(j + 1)
+        return self._opaque(line, j, opener)  # `opener` đã xét ở trên: chỉ còn `<<`, `$tên`, ký tự làm `taint`
 
 
-def _no_body(start: int, end: int) -> bool:
-    """`<<` trong nháy kép/backtick không mở thân (bỏ thân heredoc của lệnh ngoài: chỉ `<<` ngoài nháy)."""
+def _here_scan(cmd: str) -> Tuple[HereSpan, ...]:
+    """Heredoc của chuỗi lệnh (`_HereScan`); một quyết định đọc cùng chuỗi nhiều lần (tách token, nguồn thân, lệnh lồng)
+    → nhớ vài chuỗi gần nhất."""
+    return _here_scan_cached(cmd) if "<<" in cmd else ()
+
+
+@functools.lru_cache(maxsize=16)
+def _here_scan_cached(cmd: str) -> Tuple[HereSpan, ...]:
+    return tuple(_HereScan(cmd.split("\n")).spans())
+
+
+def _joined_terminator(cmd: str) -> bool:
+    """Có chuỗi dòng nối bằng `\\` lẻ mà dòng thô cuối chuỗi, hay cả chuỗi đã nối, trông như dấu kết heredoc của
+    lệnh không: bash không nối dòng trong thân heredoc có nháy (`foo\\` ↵ `X`: `X` là dòng kết; `X\\` ↵ ``: không) mà
+    guard đọc trên chữ đã nối — hai cách đọc lệch nhau đúng ở dòng kết."""
+    words = set(HERE_WORD_HINT_RE.findall(cmd))
+    chain: List[str] = []
+    for line in cmd.split("\n"):
+        chain.append(line)
+        if (len(line) - len(line.rstrip("\\"))) % 2:
+            continue  # dòng giữa chuỗi kết bằng `\\` lẻ: không thể bằng dấu kết (chỉ `[A-Za-z0-9_.-]`)
+        if len(chain) > 1 and any(c.lstrip("\t") in words for c in (line, join_continuations("\n".join(chain)))):
+            return True
+        chain = []
     return False
 
 
-def _heredoc_matches(
-    line: str, states: List[str], arith: _Arith, opens: Callable[[int, int], bool]
-) -> List["re.Match[str]"]:
-    """`<<` trên dòng thật sự mở heredoc: ngoài nháy — trong nháy kép/backtick khi `opens(đầu, cuối toán tử)` —, ngoài
-    số học (`$((1<<y))`: dòng `y` sau đó không phải dấu kết). `<<` trong vùng số học chưa phân định hay từ dấu kết
-    không đọc chắc → `ScanTooComplex`. Mỗi `<<` đọc từ tối đa `HERE_WORD_MAX` ký tự, từ không chồng nhau: tuyến tính."""
-    zones, z, out, pos = arith.zones(line, states), 0, [], 0
-    while op := HEREDOC_OP_RE.search(line, pos):
-        p, pos = op.start(), op.end()
-        while z < len(zones) and zones[z][1] <= p:
-            z += 1
-        zone = zones[z][2] if z < len(zones) and zones[z][0] <= p else 0
-        if zone == ARITH or states[p] in ("#", "'") or (states[p] and not opens(p, pos)):
-            continue
-        end = _word_end(line, pos)
-        if end == pos:  # `<<` không có từ: không phải heredoc
-            continue
-        if end < 0 or zone:
-            raise ScanTooComplex(f"heredoc không phân định: {line[p : p + 80]}")
-        out.append(cast("re.Match[str]", HEREDOC_RE.match(line, p, end)))
-        pos = end
-    return out
+def _heredoc_precheck(cmd: str, root: bool) -> None:
+    """Trước khi quét (D-270): dòng nối bằng `\\` chạm dấu kết heredoc (`_joined_terminator`) → chặn; lời gọi gốc
+    (`root`): heredoc không có dòng kết → chặn (lệnh lồng/mảnh do guard cắt: thân là phần còn lại như bash)."""
+    if "<<" not in cmd:
+        return
+    if _joined_terminator(cmd):
+        raise ScanTooComplex("dòng nối `\\` chạm dòng kết heredoc")
+    joined = join_continuations(cmd)
+    last = joined.count("\n")  # chỉ số dòng cuối: thân kết ở sau nó = không có dòng kết
+    if root and any(b > last for *_, b, _ in _here_scan(joined)):
+        raise ScanTooComplex("heredoc không có dòng kết")
 
 
 def _line_index(lines: List[str], tabs: bool) -> Dict[str, List[int]]:
@@ -590,120 +695,11 @@ class _HereEnds:
         return rows[k] if k < len(rows) else None
 
 
-# Ký tự kết thúc một từ trong bash: `#` đứng ngay sau chúng (hoặc đầu chuỗi) mới mở comment.
-WORD_END = set(" \t\r\n;&|()<>")
-# Theo trạng thái nháy của `_quote_states`: dãy ký tự không đổi trạng thái (không mở/đóng nháy, comment, thoát)
-QUOTE_RUN_RE = {
-    "": re.compile(r"[^#\\'\"`$]+"),
-    "'": re.compile(r"[^']+"),
-    "$'": re.compile(r"[^'\\]+"),
-    '"': re.compile(r'[^"\\]+'),
-    "`": re.compile(r"[^`\\]+"),
-}
-
-
-def _quote_states(line: str, q: str) -> Tuple[List[str], str]:
-    """Trạng thái từng ký tự của dòng: "" ngoài nháy, `'`/`"`/`` ` `` trong nháy/backtick, `#` trong comment; `q` = trạng
-    thái mang từ dòng trước, trả trạng thái cuối dòng (comment hết ở cuối dòng)."""
-    out: List[str] = []
-    i = 0
-    while i < len(line):
-        c, st = line[i], ("'" if q == "$'" else q)  # `$'…'` (ANSI-C) là nháy đơn mà `\'` không đóng (AUD-SEC-190)
-        run = QUOTE_RUN_RE[q].match(line, i)  # dãy ký tự không đổi trạng thái: ghi một lần (dòng dài không chậm)
-        if run:
-            out += [st] * (run.end() - i)
-            i = run.end()
-            continue
-        if not q and c == "#" and (i == 0 or line[i - 1] in WORD_END):  # comment: `# don't` không mở nháy
-            out += ["#"] * (len(line) - i)
-            break
-        out.append(st)
-        if st == "'" and c == "'":
-            q = ""
-        elif c == "\\" and q != "'":
-            out.append(st)
-            i += 2
-            continue
-        elif q:  # trong nháy: chỉ dấu đóng đổi trạng thái (`\` trong nháy đơn là chữ)
-            q = "" if c == q else q
-        elif line.startswith("$$", i):  # `$$` là một tham số: `$$'…'` là `$$` + nháy đơn, không phải ANSI-C
-            out.append(st)
-            i += 2
-            continue
-        elif line.startswith("$'", i):
-            out.append("'")
-            q, i = "$'", i + 2
-            continue
-        elif c in "'\"`":
-            q = c
-        i += 1
-    return out, q
-
-
-SUBST_OPEN_RE = re.compile(r"\$\((?!\()")
-
-
-def _subst_depth(text: str, depth: int) -> int:
-    """Độ sâu `$(…)` sau khi đọc `text` (xuất phát từ `depth`); `$((…))` là số học, không tính."""
-    return depth + len(SUBST_OPEN_RE.findall(text)) - text.count(")")
-
-
-def _dq_run_start(states: List[str], pos: int) -> int:
-    start = pos
-    while start > 0 and states[start - 1] == '"':
-        start -= 1
-    return start
-
-
-class _DqLine:
-    """Bảng một lượt của một dòng cho `opens_body`: đầu dãy nháy kép chứa mỗi vị trí, số `$(` (không `$((`) và `)` đứng
-    trước mỗi vị trí, backtick cuối — mỗi `<<` trong nháy hỏi O(1). Quét lại dòng cho mỗi `<<` từng bậc hai: 60 000
-    `<<` trong một nháy kép > 600 s, quá timeout hook (AUD-SEC-201)."""
-
-    def __init__(self, line: str, states: List[str]) -> None:
-        self.states, self.n, self.last_tick = states, len(line), line.rfind("`")
-        self.run = list(range(len(line)))
-        for i in range(1, len(line)):
-            self.run[i] = self.run[i - 1] if states[i - 1] == '"' else i
-        marks = [0] * (len(line) + 1)
-        for m in SUBST_OPEN_RE.finditer(line):
-            marks[m.start() + 1] = 1
-        self.opens = list(itertools.accumulate(marks))  # số `$(` bắt đầu trước vị trí k
-        self.closes = list(itertools.accumulate([0] + [c == ")" for c in line]))
-
-    def depth(self, a: int, b: int, depth: int) -> int:
-        """`_subst_depth(line[a:b], depth)` (`$(` phải trọn trong đoạn)."""
-        return depth + self.opens[max(b - 1, a)] - self.opens[a] - self.closes[b] + self.closes[a]
-
-    def opens_body(self, a: int, b: int, carried: int) -> bool:
-        """`<<` ở [a, b) nằm TRONG nháy kép/backtick: có thật sự mở heredoc (thân ở các dòng sau) không? Trong `"…"` chỉ
-        khi nó nằm trong `$(…)` còn mở sau cả dòng (`-m "$(cat <<'EOF'`); trong backtick chỉ khi backtick chưa đóng cùng
-        dòng (bash phân tích riêng thân backtick: `` echo `cat <<E` `` đóng ngay thì thân rỗng, dòng sau là lệnh thật).
-        `echo "<<E"` chỉ là chữ."""
-        if self.states[a] == "`":
-            return self.last_tick < b
-        start = self.run[a]
-        depth = self.depth(start, a, carried if start == 0 else 0)
-        return depth > 0 and self.depth(b, self.n, depth) > 0
-
-
-def _body_opener(line: str, states: List[str], carried: int) -> Callable[[int, int], bool]:
-    """`opens` cho `_heredoc_matches`: bảng `_DqLine` dựng khi dòng có `<<` trong nháy đầu tiên, một lần mỗi dòng."""
-    table: List[_DqLine] = []
-
-    def opens(a: int, b: int) -> bool:
-        if not table:
-            table.append(_DqLine(line, states))
-        return table[0].opens_body(a, b, carried)
-
-    return opens
-
-
 def _heredocs(cmd: str) -> List[Tuple[str, "re.Match[str]", List[str]]]:
-    """(dòng mở, match, thân) của mọi heredoc có thể thật: bỏ `<<` trong comment/nháy đơn và trong nháy kép ngoài `$(…)`
-    (không mở heredoc); giữ trong `$(…)`/backtick (`-m "$(cat <<'EOF'`). Không thấy dấu kết → thân là phần còn lại."""
+    """(dòng mở, match, thân) của mọi heredoc (cả trong `$(…)`/`"$(…)"`: `-m "$(cat <<'EOF'`). Không thấy dấu kết → thân
+    là phần còn lại."""
     lines = cmd.split("\n")
-    return [(lines[o], m, lines[a:b]) for o, m, a, b in _heredoc_spans(lines)]
+    return [(lines[o], m, lines[a:b]) for o, m, a, b, _ in _here_scan(cmd)]
 
 
 def literal_bodies_masked(cmd: str) -> str:
@@ -711,26 +707,13 @@ def literal_bodies_masked(cmd: str) -> str:
     code span trong message commit (`-m "$(cat <<'EOF'` ↵ ``chặn `rm -rf ~` `` ↵ `EOF`) là chữ, không phải lệnh."""
     lines = cmd.split("\n")
     # giữ dòng dấu kết; heredoc không đóng: phần còn lại vẫn quét như lệnh (AUD-SEC-190)
-    drop = {j for _, m, a, b in _heredoc_spans(lines) if _heredoc_word(m)[1] and b < len(lines) for j in range(a, b)}
+    drop = {j for _, m, a, b, _ in _here_scan(cmd) if _heredoc_word(m)[1] and b < len(lines) for j in range(a, b)}
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
 def _heredoc_spans(lines: List[str]) -> List[Tuple[int, "re.Match[str]", int, int]]:
     """(chỉ số dòng mở, match, đầu thân, cuối thân) — xem `_heredocs`."""
-    out: List[Tuple[int, "re.Match[str]", int, int]] = []
-    q, i, carried, ends, arith = "", 0, 0, _HereEnds(lines), _Arith()
-    while i < len(lines):
-        line, opener, i = lines[i], i, i + 1
-        states, q = _quote_states(line, q)
-        for m in _heredoc_matches(line, states, arith, _body_opener(line, states, carried)):
-            # không thấy dấu kết: như bash, thân là phần còn lại (`bash <<E` ↵ `rm -rf ~` vẫn chạy)
-            end = ends.find(m, i)
-            end = len(lines) if end is None else end
-            out.append((opener, m, i, end))
-            i = end + 1
-        run = _dq_run_start(states, len(states))
-        carried = _subst_depth(line[run:], carried if run == 0 else 0) if q == '"' else 0
-    return out
+    return [(o, m, a, b) for o, m, a, b, _ in _here_scan("\n".join(lines))]
 
 
 def join_continuations(cmd: str) -> str:
@@ -756,31 +739,38 @@ def join_continuations(cmd: str) -> str:
 
 
 def strip_heredocs(cmd: str) -> str:
-    """Bỏ thân heredoc (dữ liệu, không phải lệnh) — giữ dòng mở heredoc. Chỉ `<<` ngoài nháy/backtick mở heredoc của
-    lệnh ngoài; `<<` trong chuỗi lồng (`sh -c "bash <<E …"`) giữ nguyên để script lồng được quét cả thân. Heredoc không
-    đóng tới cuối lệnh: phần còn lại giữ lại như lệnh — guard đọc sai dấu kết thì không nuốt lệnh thật (AUD-SEC-190)."""
+    """Bỏ thân heredoc (dữ liệu, không phải lệnh) cùng dòng kết — giữ dòng mở. Thân heredoc trong `"$(…)"` giữ lại (quét
+    chặt như chữ của thay lệnh; bộ đọc heredoc không lấy `"`/`<<` trong thân làm nháy/heredoc — review #361 lượt 3).
+    Heredoc không đóng tới cuối lệnh: phần còn lại giữ như lệnh — đọc sai dấu kết không nuốt lệnh thật (AUD-SEC-190)."""
     return _fold_heredocs(cmd, False)
 
 
-def _fold_heredocs(cmd: str, subst: bool) -> str:
-    """`strip_heredocs`; `subst`: thay lệnh/mở rộng tham số trong thân heredoc dấu kết không nháy (bash thay trước khi
-    đưa vào lệnh) ghép vào ngay sau `<<TAG` của dòng mở (`_heredoc_feed`) — nguồn thân của chính lệnh đó (review #361)."""
-    out: List[str] = []
+def _fold_heredocs(cmd: str, subst: bool, escape: bool = False) -> str:
+    """`strip_heredocs`; `subst` (cho `_ShellScan`): thay lệnh/mở rộng tham số trong thân heredoc dấu kết không nháy
+    (bash thay trước khi đưa vào lệnh) ghép vào ngay sau `<<TAG` của dòng mở (`_heredoc_feed`, review #361); thân CÓ nháy
+    trong `"$(…)"` thành dòng trống — chữ, không phải lệnh (`--body "$(cat <<'EOF'` ↵ `Fixed (partially` …; D-270).
+    `escape` (cho `tokenize`): thân trong `"$(…)"` thoát `\\`/`"` — shlex đọc thân như chữ trong nháy kép, giữ nguyên
+    nội dung (`bash -c "$(cat <<'E'` …), `"` lẻ trong thân không làm lệnh sau đó lọt vào một chuỗi."""
     lines = cmd.split("\n")
-    q, i, ends, arith = "", 0, _HereEnds(lines), _Arith()
-    while i < len(lines):
-        line, i = lines[i], i + 1
-        states, q = _quote_states(line, q)
-        adds: List[Tuple[int, str]] = []
-        for m in _heredoc_matches(line, states, arith, _no_body):
-            end = ends.find(m, i)
-            if end is not None and subst and not _heredoc_word(m)[1]:
-                adds.append((m.end(), _heredoc_feed("\n".join(lines[i:end]))))
-            i = i if end is None else end + 1
-        for pos, extra in reversed(adds):
-            line = line[:pos] + extra + line[pos:]
-        out.append(line)
-    return "\n".join(out)
+    keep = [True] * len(lines)
+    adds: Dict[int, List[Tuple[int, str]]] = {}
+    for o, m, a, b, in_dq in _here_scan(cmd):
+        quoted = _heredoc_word(m)[1]
+        if b >= len(lines):
+            continue
+        if in_dq:
+            if subst and quoted:
+                lines[a:b] = [""] * (b - a)
+            elif escape:
+                lines[a:b] = [line.replace("\\", "\\\\").replace('"', '\\"') for line in lines[a:b]]
+            continue
+        if subst and not quoted:
+            adds.setdefault(o, []).append((m.end(), _heredoc_feed("\n".join(lines[a:b]))))
+        keep[a : b + 1] = [False] * (b + 1 - a)
+    for o, extra in adds.items():
+        for pos, text in reversed(extra):
+            lines[o] = lines[o][:pos] + text + lines[o][pos:]
+    return "\n".join(line for line, k in zip(lines, keep) if k)
 
 
 def strip_comments(cmd: str) -> str:
@@ -1008,7 +998,7 @@ PWD_SUBST_RE = re.compile(
 
 
 def tokenize(cmd: str) -> List[str]:
-    cmd = IFS_RE.sub(" ", expand_ansi_c(strip_heredocs(join_continuations(cmd))))
+    cmd = IFS_RE.sub(" ", expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)))
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
@@ -1016,8 +1006,9 @@ def tokenize(cmd: str) -> List[str]:
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
     try:
         return list(lex)
-    except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ)
-        return re.split(r"\s+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
+    except ValueError:  # nháy không đóng: tách thô để vẫn kiểm được (bảo thủ) — xuống dòng là ranh giới lệnh như bash,
+        # không phải khoảng trắng (`"` lẻ trong thân heredoc của `"$(cat <<'EOF'` làm shlex lệch; review #361 lượt 3)
+        return re.split(r"[ \t\r]+|(?=[;&|\n])|(?<=[;&|\n])", cmd)
 
 
 PUNCT = set("();<>|&\n")
@@ -8217,6 +8208,7 @@ def bash_decision(
 def _bash_decision(
     cmd: str, root: str, cwd: Optional[str], depth: int, budget: Optional[ScanBudget], rewrites: int
 ) -> Dict[str, object]:
+    whole = budget is None and depth == 0  # lệnh agent gửi nguyên vẹn (không phải mảnh/lệnh lồng guard cắt ra)
     if budget is None:  # lời gọi gốc: không có `cwd` = gốc dự án; lệnh lồng nhận None = thư mục không biết (D-106)
         cwd = cwd or root
     budget = budget or ScanBudget(nested=depth > 0)
@@ -8229,6 +8221,7 @@ def _bash_decision(
             code=BUDGET,
         )
         return res
+    _heredoc_precheck(cmd, whole)
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)
     if rx:

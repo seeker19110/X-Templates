@@ -134,7 +134,12 @@ WRAPS: Dict[str, Wrap] = {
 HARMLESS = ("env", "command", "nice", "timeout", "seq", "and")
 
 # Biến thể đỏ đã biết: id biến thể → lý do (ID sổ audit). Phải khớp tests/fixtures/autonomy/pending/guard.json.
-KNOWN_RED: Dict[str, str] = {}
+KNOWN_RED: Dict[str, str] = {
+    "fuzz-guard-rev361c-dp-tick-mark--bash-c+subst+and": (
+        "`$(bash -c '…`echo )`…')` trong nháy kép: `_dollar_spans` đếm ngoặc thô trong nháy đơn, cắt thay lệnh sớm nên "
+        "script `bash -c` lồng không được quét (AUD-SEC-202, có từ trước)"
+    ),
+}
 
 # Loại trừ có lý do (không phải lỗ của guard): ca gốc chặn vì ĐÍCH TƯƠNG ĐỐI theo thư mục dự án (`.autopilot/…`,
 # `tests/…`, `.claude/hooks` viết không `/` đầu, `~+` = `$PWD`). Sau `cd /tmp &&` lệnh ghi vào `/tmp/…`, không chạm dự
@@ -157,14 +162,14 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-rev361b-dd-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-dddd-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-arith-semi-ap": ".autopilot/state.json tương đối",
-    "guard-rev361b-locale-delim-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-trail-sp-ap": ".autopilot/state.json tương đối",
     "guard-rev361b-dd-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-dddd-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-arith-semi-stage": "docs/autopilot/STAGE.json tương đối",
-    "guard-rev361b-locale-delim-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-trail-sp-stage": "docs/autopilot/STAGE.json tương đối",
     "guard-rev361b-oldarith-ap": ".autopilot/state.json tương đối",
+    "guard-rev361c-dq-body-ap": ".autopilot/state.json tương đối",
+    "guard-rev361c-dq-body-stage": "docs/autopilot/STAGE.json tương đối",
 }
 
 
