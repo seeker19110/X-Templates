@@ -522,6 +522,8 @@ class _HereScan:
             return j + 2
         if c == "#":
             word_start = j == 0 or (line[j - 1] in WORD_END and self.esc != j)
+            if word_start and j and line[j - 1] == ")":
+                raise ScanTooComplex(PAREN_HASH_WHY)
             return len(line) if word_start else j + 1
         if c == "<":
             return self._lt(line, j)
@@ -707,6 +709,7 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
 COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>`])#")  # backtick mở từ (D-275)
+PAREN_HASH_WHY = "`)#` không khoảng trắng: guard và bash có thể đọc `#` khác nhau — thêm khoảng trắng trước `#`"
 COMMENT_CONTINUED_WHY = (
     "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
     " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
@@ -744,9 +747,7 @@ def _shell_precheck(cmd: str) -> None:
     if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
     if "#" in cmd and _paren_hash_ambiguous(cmd):
-        raise ScanTooComplex(
-            "`)#` không khoảng trắng: guard và bash có thể đọc `#` khác nhau — thêm khoảng trắng trước `#`"
-        )
+        raise ScanTooComplex(PAREN_HASH_WHY)
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
 
@@ -921,6 +922,8 @@ def strip_comments(cmd: str) -> str:
     while i < len(cmd):
         c = cmd[i]
         if c == "#" and word_start and not quote:
+            if i and cmd[i - 1] == ")":
+                raise ScanTooComplex(PAREN_HASH_WHY)
             eol = cmd.find("\n", i)
             i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
             continue
@@ -3441,6 +3444,8 @@ class _ShellScan:
         return self._open(i, True) or i + 1
 
     def _comment(self, i: int) -> int:
+        if i and self.text[i - 1] == ")":
+            raise ScanTooComplex(PAREN_HASH_WHY)
         if i and self.text[i - 1] not in COMMENT_AFTER:
             return i + 1
         eol = self.text.find("\n", i)

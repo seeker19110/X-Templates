@@ -2372,6 +2372,23 @@ class ShellParseGapsTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
 
+    def test_paren_hash_bypassing_precheck_denied_at_comment_sites(self) -> None:
+        # `_paren_hash_ambiguous` đọc nháy lệch (ANSI-C `\'`, nháy trong comment, thân heredoc): chặn thêm ở chính chỗ
+        # quyết định comment — `strip_comments`, `_HereScan._code`, `_ShellScan._comment` (review #368 lượt 3)
+        for cmd in (
+            "echo $'\\'' $(true)#; rm -rf ~",
+            "echo $'a\\'b' $((1))#; rm -rf ~",
+            "echo $'\\'' $(true)#; git push --force origin main",
+            "true # don't\necho $(date)#; rm -rf ~",
+            'x="$(cat <<EOF\n"\nEOF\n)"; true $(true)#; rm -rf ~',
+            "cat <<X; true $(true)#; rm -rf ~\n$(echo '\"')\nX",
+            "echo $'\\'' $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
+            "echo $'\\'' $(true)#$(rm -rf ~)",
+            "cat <<E\n$(echo $(true)#x)\nE",  # `)#` trong thay lệnh của thân heredoc không nháy (`_ShellScan._comment`)
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
     def test_paren_hash_in_quotes_or_data_allowed(self) -> None:
         for cmd in ("echo 'a)#b'", 'echo "a)#b"', "echo a\\)#b", "(true) # ghi chú", "cat <<'EOF'\nissue (x)#12\nEOF"):
             with self.subTest(cmd):

@@ -13156,6 +13156,19 @@
    }
   },
   {
+   "id": "guard-sec195-ansi-c-then-paren-hash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "echo $'\\'' $(true)#; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
    "id": "guard-sec226-trap-benign",
    "origin": "audit",
    "refs": [
