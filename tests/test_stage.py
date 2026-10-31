@@ -1042,7 +1042,9 @@ class StageGuardTest(unittest.TestCase):
         ):
             with self.subTest(cmd=cmd):
                 self.assertNotEqual(self.decide(cmd), "deny")
-        self.assertEqual(self.g._git_work_trees(["git", "--work-tree", "a", "-C", "b", "--work-tree=c", "rm"]), ["a", "c"])
+        self.assertEqual(
+            self.g._git_work_trees(["git", "--work-tree", "a", "-C", "b", "--work-tree=c", "rm"]), ["a", "c"]
+        )
         self.assertEqual(self.g._git_path_dirs(["rm"], ["rm", "x"], "/r"), ["/r"])
         self.assertEqual(self.g._git_path_dirs(["git", "rm"], ["git", "-C", "$D", "rm"], "/r"), [None])
         self.assertEqual(self.g._git_path_dirs(["git", "rm"], ["git", "--work-tree=$W", "rm"], "/r"), ["/r", None])
