@@ -960,6 +960,90 @@ class StageGuardTest(unittest.TestCase):
         self.assertFalse(self.g._approves_stage(argv))
         self.assertLess(time.monotonic() - start, 2.0)
 
+    def test_stage_ledger_parent_dir(self):
+        """AUD-HAR-154: xoá/dời/khôi phục thư mục tổ tiên của sổ (`docs/autopilot`, `docs`) là ghi tay sổ; chép/dời/liên
+        kết VÀO thư mục có sẵn thì đích là thư mục nối tên nguồn (`cp x/STAGE.json docs/autopilot/`)."""
+        for cmd in (
+            "rm -r docs/autopilot",
+            "rm -rf docs/autopilot/",
+            "rm -rf docs",
+            "rm -rf ./docs",
+            "rm -r docs/auto*",
+            "rm docs/autopilot/*.json",
+            "git rm -r docs/autopilot",
+            "git rm -rq docs",
+            "mv docs/autopilot /tmp/x",
+            "mv -t /tmp docs/autopilot",
+            "git mv docs/autopilot docs/x",
+            "git checkout HEAD~1 -- docs/autopilot",
+            "git restore -s HEAD~2 docs",
+            "find docs -delete",
+            "find docs -name '*.json' -delete",
+            "find docs -path '*autopilot*' -delete",
+            "find docs ! -name x.md -delete",
+            "cp /tmp/STAGE.json docs/autopilot/",
+            "cp /tmp/STAGE.json docs/autopilot",
+            "mv /tmp/STAGE.json docs/autopilot",
+            "ln -sf /tmp/STAGE.json docs/autopilot/",
+            "install -m 644 /tmp/STAGE.json docs/autopilot/",
+            "cd docs && rm -r autopilot",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+        for cmd in (
+            "cp /tmp/notes.md docs/",
+            "mv /tmp/a.md docs/autopilot/",
+            "cp /tmp/x.md docs/autopilot/PLAN-x.md",
+            "rm docs/autopilot/PLAN-old.md",
+            "rm -r docs/ops/old",
+            "git mv docs/autopilot/PLAN-a.md docs/autopilot/PLAN-b.md",
+            "git rm docs/old.md",
+            "mkdir -p docs/autopilot/x",
+            "ls docs docs/autopilot",
+            "cp -r docs /tmp/docs-copy",
+            "git checkout -- docs/README.md",
+            "mv docs/a.md docs/b.md",
+            "find docs -name evidence -delete",
+            "find docs -name '*.tmp' -delete",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.decide(cmd), "deny")
+
+    def test_stage_ledger_git_dir_opts(self):
+        """AUD-HAR-154 (review #363 lượt 2): pathspec của `git -C <d>` tính từ `<d>` — xoá/dời/khôi phục thư mục tổ tiên
+        của sổ qua `-C` vẫn là ghi tay sổ. `--work-tree` giữ như trước (D-281: git khớp pathspec theo đường chỉ mục từ gốc
+        cây — `git --work-tree=docs rm -r autopilot` không khớp gì, git trả 128)."""
+        for cmd in (
+            "git -C docs rm -r autopilot",
+            "git -C docs mv autopilot x",
+            "git -C docs/autopilot rm STAGE.json",
+            "git -C docs checkout origin/main -- autopilot",
+            "git -C docs restore -s HEAD~1 autopilot",
+            "git -C docs -C .. rm -r docs",
+            f"git -C {ROOT}/docs rm -r autopilot",
+            "git --no-pager -c x.y=1 -C docs rm -r autopilot",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.decide(cmd), "deny")
+        for cmd in (
+            "git -C docs rm -r old",
+            "git -C docs mv a.md b.md",
+            "git --work-tree=docs rm x.md",
+            "git -C scripts rm -r autopilot",
+            "git --work-tree=build rm -r autopilot",
+            "git --work-tree=docs --work-tree=build rm -r autopilot",
+            "git -C docs status",
+            "git -C docs log -- autopilot",
+            "git -C docs diff autopilot",
+            "git --work-tree=docs add autopilot",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertNotEqual(self.decide(cmd), "deny")
+        self.assertEqual(self.g._git_path_dir(["rm"], ["rm", "x"], "/r"), "/r")
+        self.assertIsNone(self.g._git_path_dir(["git", "rm"], ["git", "-C", "$D", "rm"], "/r"))
+        self.assertEqual(self.g._git_path_dir(["git", "rm"], ["git", "--work-tree=$W", "rm"], "/r"), "/r")
+        self.assertEqual(self.g._git_path_dir(["git", "rm"], ["git", "-C", "a", "-C"], "/r"), "/r/a")  # `-C` cuối
+
     def test_handwrite_ledger_denied(self):
         self.assertEqual(self.g.classify_path(xt.STAGE_LEDGER), "evidence")
         self.assertEqual(self.g.STAGE_LEDGER, xt.STAGE_LEDGER)
