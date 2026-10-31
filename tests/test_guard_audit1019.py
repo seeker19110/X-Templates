@@ -1519,6 +1519,45 @@ class HeredocRound4Test(unittest.TestCase):
         self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
         self.assert_all("", ("alias ll='ls -l'", "shopt -s expand_aliases", "alias", "grep -n alias= README.md"))
 
+    def test_many_heredocs_one_line_linear(self):
+        """`cat <<A <<A …` ↵ `A` × n: dòng mở tách token một lần (cũ: mỗi heredoc một lần — bậc hai, n=2000 ~58 s)."""
+        n = 300
+        cmd = "cat " + "<<A " * n + "\n" + "A\n" * n + "ls"
+        calls = []
+        real = guard.tokenize
+        with mock.patch.object(guard, "tokenize", side_effect=lambda s: calls.append(len(s)) or real(s)):
+            guard._heredoc_scripts(cmd)
+        self.assertLessEqual(sum(calls), 2 * len(cmd))
+        cmd = "".join(f"cat <<A{i}; " for i in range(n)) + "\n" + "".join(f"A{i}\n" for i in range(n))
+        calls.clear()
+        with mock.patch.object(guard, "tokenize", side_effect=lambda s: calls.append(len(s)) or real(s)):
+            guard._heredoc_scripts(cmd)
+        self.assertLessEqual(sum(calls), 2 * len(cmd))
+
+    def test_heredoc_scripts_budget_exhausted_denied(self):
+        budget = guard.ScanBudget()
+        budget.deadline = 0.0
+        with self.assertRaises(guard.ScanTooComplex):
+            guard._heredoc_scripts("bash <<A\nls\nA", budget=budget)
+
+    def test_concurrent_round4_decisions(self):
+        import concurrent.futures
+
+        cmds = [
+            ('git commit -m "$(cat <<\'EOF\'\nmsg\nEOF)"; rm -rf ~\nEOF\n)"', "deny"),
+            ("git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\"", ""),
+            ("true # \\\ngit push --force origin main", "deny"),
+            ("echo a \\\n  b # note", ""),
+            ("shopt -s expand_aliases\nalias c='rm -rf ~'\nc", "deny"),
+        ] * 6
+        root = str(self.root)
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": root, "XT_GUARD_POLICY": ""}),
+            concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            got = list(pool.map(lambda c: str(guard.apply_policy(guard.bash_decision(c[0], root))["decision"]), cmds))
+        self.assertEqual(got, [want for _, want in cmds])
+
 
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""

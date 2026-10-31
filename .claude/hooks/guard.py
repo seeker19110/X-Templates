@@ -5391,9 +5391,10 @@ def _unquoted_seps(line: str) -> List[Tuple[int, int]]:
 
 def _segment_at(line: str, pos: int, seps: List[Tuple[int, int]]) -> Tuple[int, int]:
     """(đầu, cuối) của pipeline chứa `pos`, tách theo dấu nối ngoài nháy/escape (`seps` từ `_unquoted_seps`)."""
-    start = max((e for s, e in seps if e <= pos), default=0)
-    end = min((s for s, e in seps if s >= pos), default=len(line))
-    return start, end
+    k = bisect.bisect_right(seps, pos, key=lambda se: se[1])  # `seps` theo thứ tự, không chồng: tìm nhị phân
+    start = seps[k - 1][1] if k else 0
+    k = bisect.bisect_left(seps, pos, key=lambda se: se[0])
+    return start, seps[k][0] if k < len(seps) else len(line)
 
 
 def _commit_window(line: str, pos: int, seps: List[Tuple[int, int]]) -> str:
@@ -5408,8 +5409,11 @@ def _heredoc_bodies(cmd: str, pat: "re.Pattern[str]" = GIT_COMMIT_TEXT_RE) -> Li
     — hay lệnh khớp `pat` (`gh pr create --body-file - <<E`); heredoc của lệnh khác trong cùng chuỗi
     (`python3 - <<E …; git commit`) là dữ liệu của lệnh đó, không quét."""
     out: List[str] = []
+    seps: Dict[str, List[Tuple[int, int]]] = {}  # dòng mở → dấu nối: nhiều heredoc một dòng không quét lại dòng
     for opener, m, body in _heredocs(join_continuations(cmd)):  # nối dòng `\` như shell (`git commit \` ↵ `-F - <<E`)
-        if pat.search(_commit_window(opener, m.start(), _unquoted_seps(opener))):
+        if opener not in seps:
+            seps[opener] = _unquoted_seps(opener)
+        if pat.search(_commit_window(opener, m.start(), seps[opener])):
             out.append("\n".join(body))
     return out
 
@@ -5782,7 +5786,11 @@ class ScanBudget:
 
     def exhausted(self) -> bool:
         self.calls -= 1
-        return self.calls < 0 or time.monotonic() > self.deadline
+        return self.calls < 0 or self.overdue()
+
+    def overdue(self) -> bool:
+        """Quá hạn giờ (không tiêu lượt gọi) — cho vòng lặp dài trong một lượt quét."""
+        return time.monotonic() > self.deadline
 
 
 # Độ sâu shell lồng được quét (`bash -c "bash -c '…'"`); sâu hơn → hỏi (mặc định: chặn — AUD-SEC-063). 4: `find -exec`
@@ -5866,12 +5874,25 @@ def _shell_c_script(argv: List[str]) -> Optional[str]:
     return script if has_c else None
 
 
-def _heredoc_scripts(cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell) -> List[str]:
-    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`; `pred` chọn lệnh nhận) — là lệnh, không phải dữ liệu."""
+def _heredoc_scripts(
+    cmd: str, pred: Callable[[List[str]], bool] = _stdin_shell, budget: Optional[ScanBudget] = None
+) -> List[str]:
+    """Thân heredoc đưa vào shell (`bash <<'E'` … `E`; `pred` chọn lệnh nhận) — là lệnh, không phải dữ liệu. Mỗi dòng mở
+    tìm dấu nối một lần, mỗi pipeline tách token một lần (`cat <<A <<A …` × n: cũ tách lại mỗi heredoc — bậc hai, n=2000
+    ~58 s); quá hạn `budget` → chặn (D-271)."""
     out: List[str] = []
+    seps: Dict[str, List[Tuple[int, int]]] = {}
+    hits: Dict[Tuple[str, int, int], bool] = {}
     for opener, m, body in _heredocs(join_continuations(cmd)):
-        start, end = _segment_at(opener, m.start(), _unquoted_seps(opener))
-        if any(pred(c) for c in split_commands(tokenize(opener[start:end]))):
+        if budget is not None and budget.overdue():
+            raise ScanTooComplex("quá hạn khi đọc heredoc vào shell/trình thông dịch")
+        if opener not in seps:
+            seps[opener] = _unquoted_seps(opener)
+        start, end = _segment_at(opener, m.start(), seps[opener])
+        key = (opener, start, end)
+        if key not in hits:
+            hits[key] = any(pred(c) for c in split_commands(tokenize(opener[start:end])))
+        if hits[key]:
             out.append("\n".join(body))
     return out
 
@@ -6009,7 +6030,9 @@ SPAN_MARK = "$__xt_span_{}_"  # có `$`: `cd "$(…)"` thành đích không bi�
 SPAN_MARK_RE = re.compile(r"\$__xt_span_(\d+)_")
 
 
-def _nested_pairs(cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str]) -> Placed:
+def _nested_pairs(
+    cmd: str, tokens: List[str], placed: PlacedCmds, start: Optional[str], budget: Optional[ScanBudget] = None
+) -> Placed:
     """Lệnh chạy lồng (AUD-SEC-017) kèm thư mục nó chạy (AUD-SEC-094): `sh -c '…'`, `eval '…'`, backtick, `$(…)`,
     `$(cat <<E …)`, `<( )`, thân heredoc mở rộng, `echo/printf '…' | sh`, here-string/heredoc vào shell."""
     moved = any(here != start for _, here in placed)
@@ -6025,7 +6048,7 @@ def _nested_pairs(cmd: str, tokens: List[str], placed: PlacedCmds, start: Option
     out += _shell_feeds(tokens, placed)
     out += [(s, here) for c, here in placed for s in _here_strings(c)]
     shells = dict.fromkeys([start, *(here for c, here in placed if _stdin_shell(c))])
-    return out + [(body, d) for body in _heredoc_scripts(cmd) for d in shells]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, budget=budget) for d in shells]
 
 
 def _span_pairs(text: str, finder: Callable[[str], List[Span]], start: Optional[str], moved: bool) -> Placed:
@@ -6724,9 +6747,10 @@ def _nested_sources(
     rewritten += [(s, here) for c, here in placed for s in _runner_scripts(c)]
     rewritten += [(s, start) for s in _lifted_scripts(cmd)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
-    nested = _nested_pairs(cmd, tokens, placed, start)
+    nested = _nested_pairs(cmd, tokens, placed, start, budget)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
-    nested += [(s, here) for raw, here in _interp_scripts_at(cmd, tokens, start) for s in _exec_api_scripts([raw])]
+    interp = _interp_scripts_at(cmd, tokens, start, budget)
+    nested += [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
     jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
@@ -7126,7 +7150,9 @@ def _eval_subcmd(n: List[str]) -> Optional[int]:
     return k if sub and n[k : k + 1] == [sub] else None
 
 
-def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+def _interp_scripts_at(
+    cmd: str, tokens: List[str], cwd: Optional[str], budget: Optional[ScanBudget] = None
+) -> List[Tuple[str, Optional[str]]]:
     """(script, thư mục nó chạy) — `cd .claude && python3 -c '…'` chạy trong `.claude` (AUD-SEC-085). Thân heredoc gắn
     với thư mục của mọi lệnh trình thông dịch đọc stdin trong lệnh (không có thì `cwd`). Script qua stdin bằng
     here-string (`python3 <<< '…'`) hay ống (`echo '…' | node`) cũng tính (D-105)."""
@@ -7146,7 +7172,7 @@ def _interp_scripts_at(cmd: str, tokens: List[str], cwd: Optional[str]) -> List[
             out += [(s, here) for s in feed or [] if _stdin_interp(down)]
         i += len(pipe)
     dirs = list(dict.fromkeys(stdin_dirs)) or [cwd]
-    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp) for d in dirs]
+    return out + [(body, d) for body in _heredoc_scripts(cmd, _stdin_interp, budget) for d in dirs]
 
 
 # Lời gọi chạy lệnh shell từ trình thông dịch (`os.system('…')`, `subprocess.run(['rm','-rf','~'])`, `execSync('…')`):
