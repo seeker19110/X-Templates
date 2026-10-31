@@ -13404,10 +13404,10 @@
   }
  },
  {
-  "id": "guard-sec233-ansi-quote-backtick-rm",
+  "id": "guard-sec241-ansi-quote-backtick-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "echo $'\\'' `rm -rf ~`"
@@ -13417,10 +13417,10 @@
   }
  },
  {
-  "id": "guard-sec233-assign-ansi-quote-backtick-rm",
+  "id": "guard-sec241-assign-ansi-quote-backtick-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "x=$'\\''`rm -rf ~`"
@@ -13430,10 +13430,10 @@
   }
  },
  {
-  "id": "guard-sec233-ansi-quote-dq-comsub-rm",
+  "id": "guard-sec241-ansi-quote-dq-comsub-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "echo $'\\'' \"$(rm -rf ~)\""
@@ -13443,10 +13443,10 @@
   }
  },
  {
-  "id": "guard-control-sec233-ansi-quote-backtick-ok",
+  "id": "guard-control-sec241-ansi-quote-backtick-ok",
   "origin": "control",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "echo $'\\'' `date`"
@@ -13654,7 +13654,7 @@
   "id": "guard-d279-ansi-comment-tick-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "$'\\''\n# c@(x);'\n`rm -rf ~`"
@@ -13667,7 +13667,7 @@
   "id": "guard-d279-pid-ansi-tick-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "echo $$$'\\'' `rm -rf ~`"
@@ -13680,7 +13680,7 @@
   "id": "guard-d279-pid-ansi-comsub-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-233"
+   "AUD-SEC-241"
   ],
   "input": {
    "command": "echo $$$'\\'' \"$(rm -rf ~)\""

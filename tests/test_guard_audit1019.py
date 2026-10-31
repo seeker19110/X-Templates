@@ -2385,7 +2385,7 @@ class CommentAfterParenTest(unittest.TestCase):
 
 
 class AnsiQuoteThenBacktickTest(unittest.TestCase):
-    """AUD-SEC-233: `$'\\''` là MỘT ký tự `'` (ANSI-C, `\\'` không đóng nháy); bộ tìm backtick từng đọc nó như `'…'` rồi
+    """AUD-SEC-241: `$'\\''` là MỘT ký tự `'` (ANSI-C, `\\'` không đóng nháy); bộ tìm backtick từng đọc nó như `'…'` rồi
     một `'` mở nháy, nên backtick sau đó (`` `rm -rf ~` ``) nằm "trong nháy" và không được quét. `$$'…'` là `$$` + nháy
     đơn (không phải ANSI-C), `$$$'…'` là `$$` + ANSI-C; trong nháy kép `$'` không phải ANSI-C. Cách đọc cũ (`$'` = `$` +
     nháy đơn) vẫn được dùng thêm (D-279): bộ tìm không biết comment nên `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách cũ thấy."""

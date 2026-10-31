@@ -6078,7 +6078,7 @@ def _backtick_scripts(cmd: str) -> List[str]:
 
 
 def _span_readings(cmd: str, finder: Callable[..., List[Span]]) -> List[List[Span]]:
-    """Các cách đọc thay lệnh của `cmd`: đọc `$'…'` như bash (AUD-SEC-233) và, khi khác, cách đọc cũ (`$'` = `$` + nháy
+    """Các cách đọc thay lệnh của `cmd`: đọc `$'…'` như bash (AUD-SEC-241) và, khi khác, cách đọc cũ (`$'` = `$` + nháy
     đơn). Bộ tìm không biết comment: `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách đọc cũ thấy (hai cái lệch bù nhau) — dùng
     cả hai, chỉ thêm, không bớt so với bản cũ (D-279)."""
     spans = finder(cmd)
@@ -6091,7 +6091,7 @@ def _span_readings(cmd: str, finder: Callable[..., List[Span]]) -> List[List[Spa
 def _dollar_quote_end(cmd: str, i: int) -> int:
     """Ngoài nháy: `$'…'` (ANSI-C, `\\'` không đóng) ở `i` → vị trí sau nó; `$$` trước `'`/`$` → vị trí sau `$$`
     (`$$'…'` là `$$` + nháy đơn, `$$$'…'` là `$$` + ANSI-C); khác → 0. Bộ tìm thay lệnh từng đọc `$'\\''` như `'\\'` +
-    `'` mở nháy nên bỏ qua thay lệnh sau đó (AUD-SEC-233)."""
+    `'` mở nháy nên bỏ qua thay lệnh sau đó (AUD-SEC-241)."""
     if cmd.startswith("$$", i) and cmd[i + 2 : i + 3] in ("'", "$"):
         return i + 2
     return _skip_single(cmd, i) if cmd.startswith("$'", i) else 0
