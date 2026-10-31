@@ -1,12 +1,12 @@
 # PROGRESS.md — Khung X-Templates
 
-> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-10-30 · Nhánh: main
+> Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-10-31 · Nhánh: main
 
 ## Đang làm
-- 2026-10-30 **3.29.0** (ADR-0058/0059, D-257/259) đã phát hành; GO chờ người `prod_switch`. Audit delta `6799550..28c2089` (#351, D-262): 5 🟠 đã sửa — AUD-SEC-155 (#352, D-263/265), 158 (#353), 156/157/168 (#354, D-266/267), XFEAT-030 (#355); 8 nhóm `chưa quét` (T-3557). Nợ review mở: AUD-SEC-174…179 (`nợ-review: #354`, 3 🟠 — sửa đầu gói cuối pha). Kế: gói nợ cuối pha → T-3557 → lát 3 `perf trial` → 3.30.0 (D-258).
+- 2026-10-31 **PLAN-harden-2026-10-31** (D-268…D-280, nhánh `seeker/exciting-tesla-ogcb3p`): #358–#362 merge (khung mới, audit delta, guard #361, xt monorepo #362). **#363 lát B (guard) mở**: sau hai lượt review đã gỡ SEC-195/196/232 (D-279/280), còn đang chờ review lần sửa cuối; lát E (tài liệu AUD-DOC-123…129) sẵn ở worktree `wt-doc` nhánh `slice-e`, mở PR sau #363. `release-check` NO-GO ở 94f6405: `audit --strict`, `verify --all`, `review_debt` (guard/xt.py đổi sau SHA quét) — cần audit delta rồi mới cắt **3.30.0**. 🔴 mở chấp nhận rủi ro dư (người quyết): AUD-SEC-195, 232, 235 + họ 191…231.
+- 2026-10-30 **3.29.0** đã phát hành (ADR-0058/0059, D-257/259); GO chờ người `prod_switch`. Nợ review mở: AUD-SEC-174…179 (`nợ-review: #354`). Kế: T-3557 → lát 3 `perf trial` → 3.30.0 (D-258).
 - 2026-10-28 **ADR-0056** (#312, D-221, `research/2026-10-28-velocity.md`): lỗi có từ trước không chặn PR, CI là cổng đầy đủ, `loop decide` đánh số qua nhánh remote, `xt.yaml` `setup`. **ADR-0054/0055** (#311, D-219/D-220): khoá/guard hỏng → chặn; `install.py --preset`. 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
 - 2026-10-27 **PLAN-harden-2026-10-27-loops** (ADR-0051/0052): lát 0–2 merge (lát 2 vào **3.29.0**); kế lát 3 `perf trial` + T-3557 audit delta (D-261) → 3.30.0.
-- 2026-10-27 **ADR-0053** (#297 kế hoạch + kiểm bổ sung, #298 code; D-209…D-211): `pr next` trả `rethink` sau 2 review chưa sạch; thêm lượt qua `pr rethink --decision D-NNN` (D mới, nhắc #N). #300 dùng `rethink` thật (D-213). 🟢 treo của #298 vào sổ: AUD-DOC-095/096, AUD-HAR-117…119.
 - PLAN-3.23-delegation-rate (D-171/172): chờ ≥ 10 task/nhóm × ≥ 2 vòng rồi mới xét đổi mặc định giao việc.
 - Đo lại `pr stats --days 7` 2026-10-30 (ADR-0043). Phản hồi dự án đích: 10 nhóm `cong-cu` chờ phân loại ([TARGETS](docs/ops/TARGETS.md)).
 - Hoãn tới harden: T-1690/T-1691 (quét lại SEC-091…099).
@@ -34,6 +34,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17 theo chủ repo). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `08b62c5` (#351–#355). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge` — chủ dự án yêu cầu 2026-10-30; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ để không yếu hơn `main` (bài học #352).
+- `main` `0b90230` (#362). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge` — chủ dự án yêu cầu 2026-10-30; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ để không yếu hơn `main` (bài học #352).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Lý do `loop defer` viết ngắn (SessionStart gần trần 12 KB).
