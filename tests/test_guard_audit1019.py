@@ -2357,6 +2357,13 @@ class ShellParseGapsTest(unittest.TestCase):
         self.assertEqual(final("true $(true)#; rm -rf ~"), "deny")
         self.assertEqual(final("(true) # ghi chú; rm -rf ~"), "")  # comment thật vẫn bị bỏ
 
+    def test_comment_after_subshell_paren_still_comment(self) -> None:
+        # `)` đóng subshell là toán tử: `#` sau nó mở comment (bash chạy `touch`) — nháy trong comment không nuốt dòng sau
+        for cmd in ("(true)#it's\nrm -rf ~\n# '", "true; (true)#'\nrm -rf ~\n#'", "( true )#x\nrm -rf ~"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        self.assertEqual(final("echo $(true)#x"), "")  # `)` đóng `$(…)` nối từ: không phải comment
+
     def test_locale_string_dollar_double_quote(self) -> None:
         for cmd in ('$"rm" -rf ~', '$"git" push --force origin main', 'eval $"rm -rf ~"', '$"bash" -c "rm -rf ~"'):
             with self.subTest(cmd):

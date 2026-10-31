@@ -13130,6 +13130,32 @@
    }
   },
   {
+   "id": "guard-sec195-subshell-paren-hash-quote",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "(true)#it's\nrm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec195-dollar-paren-hash-word",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "echo $(true)#x"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
    "id": "guard-sec226-trap-benign",
    "origin": "audit",
    "refs": [

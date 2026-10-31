@@ -893,6 +893,7 @@ def strip_comments(cmd: str) -> str:
     `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
     out: List[str] = []
     quote, word_start, i = "", True, 0
+    parens: List[bool] = []  # mỗi `(` ngoài nháy: True nếu nó nối từ (`$(`, `<(`, `>(`, `=(`)
     while i < len(cmd):
         c = cmd[i]
         if c == "#" and word_start and not quote:
@@ -908,7 +909,12 @@ def strip_comments(cmd: str) -> str:
         elif c in "'\"":
             quote = c
         out.append(c)
-        word_start = not quote and c in WORD_END and c != ")"  # `$(…)#`: `#` nối từ, không mở comment (AUD-SEC-195)
+        joins = False
+        if not quote and c == "(":
+            parens.append(i > 0 and cmd[i - 1] in "$<>=")
+        elif not quote and c == ")":
+            joins = parens.pop() if parens else False  # `$(…)#`: `#` nối từ (AUD-SEC-195); `(…)#` là toán tử
+        word_start = not quote and c in WORD_END and not joins
         i += 1
     return "".join(out)
 
@@ -932,6 +938,7 @@ def expand_ansi_c(cmd: str) -> str:
     giữ nguyên chuỗi nên lệnh bên trong lọt). `$$'…'` là `$$` + nháy đơn, không phải ANSI-C (AUD-SEC-198)."""
     out: List[str] = []
     i, q, ws = 0, "", True
+    parens: List[bool] = []
     while i < len(cmd):
         c = cmd[i]
         if not q and c == "#" and ws:  # comment: chép nguyên tới hết dòng (D-276) —
@@ -955,7 +962,12 @@ def expand_ansi_c(cmd: str) -> str:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
-            ws = not q and c in WORD_END and c != ")"
+            joins = False
+            if not q and c == "(":
+                parens.append(i > 0 and cmd[i - 1] in "$<>=")
+            elif not q and c == ")":
+                joins = parens.pop() if parens else False  # như `strip_comments`: chỉ `)` đóng `$(…)` nối từ
+            ws = not q and c in WORD_END and not joins
             i += 1
     return "".join(out)
 
