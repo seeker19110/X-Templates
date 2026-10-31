@@ -2385,6 +2385,12 @@ class ShellParseGapsTest(unittest.TestCase):
             "echo $'\\'' $(true)#<<X\ncat <<Y\nX\nrm -rf ~\nY",
             "echo $'\\'' $(true)#$(rm -rf ~)",
             "cat <<E\n$(echo $(true)#x)\nE",  # `)#` trong thay lệnh của thân heredoc không nháy (`_ShellScan._comment`)
+            # `$(pwd)` bị viết lại thành `$PWD` trước khi kiểm: phải chặn trước bước đó (review #368 lượt 4)
+            "ls $(pwd)#; $'rm' -rf ~",
+            'ls $(pwd)#; $"rm" -rf ~',
+            "ls $( pwd )#; $'\\162m' -rf ~",
+            "ls $(pwd)#; rm -rf {~,x}",
+            "echo ok\nls $(pwd)#; $'rm' -rf ~",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

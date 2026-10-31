@@ -915,7 +915,9 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
         elif c in "'\"":
             quote = c
         out.append(c)
-        word_start = not quote and c in WORD_END  # `)#` không khoảng trắng đã bị `_shell_precheck` chặn (AUD-SEC-195)
+        word_start = (
+            not quote and c in WORD_END
+        )  # `)#` không khoảng trắng: `strict` chặn ở đường `tokenize` (AUD-SEC-195)
         i += 1
     return "".join(out)
 
@@ -1128,7 +1130,9 @@ PWD_SUBST_RE = re.compile(
 
 
 def tokenize(cmd: str) -> List[str]:
-    cmd = IFS_RE.sub(" ", expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)))
+    cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
+    strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
+    cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
