@@ -4939,6 +4939,54 @@ def _doctor_memory(base: Path) -> List[Finding]:
     return out
 
 
+AGENT_TEAMS_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+# `model:` trong khối frontmatter của định nghĩa agent (agent ngoài có khoá gạch nối mà `parse_frontmatter` không nhận).
+AGENT_MODEL_RE = re.compile(r"\A---\s*\n(?:(?!---\s*\n).*\n)*?model:[ \t]*['\"]?([^'\"\s#]+)", re.M)
+
+
+def _read_text_or_empty(p: Path) -> str:
+    """Đọc file văn bản cho kiểm fail-open: không phải file thường hoặc không đọc được → chuỗi rỗng."""
+    if not p.is_file():
+        return ""
+    try:
+        return p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _doctor_orchestration(base: Path) -> List[Finding]:
+    """LOOP-ORCH-021: Agent Teams tắt trừ khi có ADR nhắc biến; LOOP-ORCH-022: agent ngoài bộ của khung không ghim
+    model. Fail-open: settings/agent hỏng thì bỏ qua; chỉ in tên file, không in giá trị cấu hình khác."""
+    claude = base / ".claude"
+    where = ["môi trường phiên"] if os.environ.get(AGENT_TEAMS_ENV, "").strip() == "1" else []
+    for name in ("settings.json", "settings.local.json"):
+        env = (_read_json_obj(claude / name) or {}).get("env")
+        if isinstance(env, dict) and str(env.get(AGENT_TEAMS_ENV, "")).strip() == "1":
+            where.append(f".claude/{name}")
+    adrs = sorted((base / "docs" / "adr").glob("*.md"))
+    out = []
+    if where and not any(AGENT_TEAMS_ENV in _read_text_or_empty(p) for p in adrs):
+        msg = f"{AGENT_TEAMS_ENV}=1 ở {', '.join(where)} mà chưa có ADR nhắc biến này — subagent có tên thành teammate"
+        out.append(
+            Finding(
+                "orchestration",
+                "warn",
+                msg + " không hỏi, teammate kế thừa quyền lead; tắt biến hoặc ghi ADR (LOOP-ORCH-021)",
+            )
+        )
+    pinned = []
+    for p in sorted((claude / "agents").glob("*.md")):
+        m = AGENT_MODEL_RE.search(_read_text_or_empty(p))
+        if p.stem not in DOCTOR_AGENTS and m and m.group(1) != "inherit":
+            pinned.append(f"{p.name} ({m.group(1)})")
+    if pinned:
+        msg = f"agent ngoài bộ của khung ghim model: {', '.join(pinned)} — chạy model đó dù phiên chính rẻ hơn"
+        out.append(
+            Finding("orchestration", "warn", msg + "; đổi `model:` thành `inherit` hoặc tầng của khung (LOOP-ORCH-022)")
+        )
+    return out
+
+
 FRAMEWORK_REPO = "seeker19110/X-Templates"  # nguồn bản phát hành của khung; fork đặt XT_FRAMEWORK_REPO=chủ/repo
 # Đầu nhãn `.xtemplates/VERSION`: "3.0.0 (abc1234)"; đuôi pre-release ("3.0.0-rc1") nhỏ hơn bản cùng số (SemVer §11).
 SEMVER_PREFIX_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?")
@@ -5148,6 +5196,7 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
+    out += _doctor_orchestration(base)
     if deep:
         out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base) + _doctor_guard_canary(base)
         out += _doctor_claude_version(base)

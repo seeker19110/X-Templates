@@ -16,6 +16,7 @@ import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -719,6 +720,83 @@ class DoctorMemoryTest(DoctorCase):
         [f] = self.memory()
         self.assertIn("`.engram/`", f.msg)
         self.assertIn("gitleaks", f.msg)
+
+
+class DoctorOrchestrationTest(DoctorCase):
+    """LOOP-ORCH-021 (Agent Teams tắt trừ khi có ADR) và LOOP-ORCH-022 (agent ngoài bộ khung không ghim model)."""
+
+    ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+
+    def setUp(self):
+        super().setUp()
+        # biến của shell máy chạy test không lọt vào kết quả; test cần giá trị khác tự patch đè
+        self.enterContext(unittest.mock.patch.dict(os.environ, {self.ENV: "0"}))
+
+    def orch(self) -> list[xt.Finding]:
+        return [f for f in self.findings(deep=False) if f.code == "orchestration"]
+
+    def settings_env(self, rel: str, env: object) -> None:
+        p = self.base / rel
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        data["env"] = env
+        self.write(rel, json.dumps(data))
+
+    def test_fresh_install_is_clean(self):
+        with unittest.mock.patch.dict(os.environ, {self.ENV: "0"}):
+            self.assertEqual(self.orch(), [])
+
+    def test_agent_teams_from_session_env_and_settings_warn(self):
+        self.settings_env(".claude/settings.local.json", {self.ENV: "1", "K": "bí-mật"})
+        self.settings_env(".claude/settings.json", {self.ENV: 1})
+        with unittest.mock.patch.dict(os.environ, {self.ENV: " 1 "}):
+            [f] = self.orch()
+        self.assertEqual((f.level, f.fix), ("warn", None))
+        for part in ("môi trường phiên", ".claude/settings.json", ".claude/settings.local.json", "LOOP-ORCH-021"):
+            self.assertIn(part, f.msg)
+        self.assertNotIn("bí-mật", f.msg)
+
+    def test_agent_teams_with_adr_or_disabled_is_fine(self):
+        self.settings_env(".claude/settings.json", {self.ENV: "1"})
+        self.write("docs/adr/0001-teams.md", f"# ADR-0001\nBật `{self.ENV}` cho review song song.\n")
+        self.assertEqual(self.orch(), [])
+        self.settings_env(".claude/settings.json", {self.ENV: "0"})
+        self.write("docs/adr/0001-teams.md", "# ADR-0001\nkhông nhắc\n")
+        self.assertEqual(self.orch(), [])
+
+    def test_malformed_settings_env_fail_open(self):
+        self.settings_env(".claude/settings.json", ["không phải object"])
+        self.write(".claude/settings.local.json", "{hỏng")
+        with unittest.mock.patch.dict(os.environ, {self.ENV: ""}):
+            self.assertEqual(self.orch(), [])
+
+    def test_third_party_agent_pinned_model_warns(self):
+        self.write(".claude/agents/perf.md", "---\nname: perf\ndisallowed-tools: Bash\nmodel: opus\n---\nbody\n")
+        self.write(".claude/agents/kept.md", "---\nname: kept\nmodel: 'inherit'\n---\nmodel: opus\n")
+        self.write(".claude/agents/bare.md", "không có frontmatter\nmodel: opus\n")
+        self.write(".claude/agents/plain.md", "---\nname: plain\n---\n")
+        with unittest.mock.patch.dict(os.environ, {self.ENV: "0"}):
+            [f] = self.orch()
+        self.assertEqual(f.level, "warn")
+        self.assertIn("perf.md (opus)", f.msg)
+        self.assertIn("LOOP-ORCH-022", f.msg)
+        for name in ("kept.md", "bare.md", "plain.md", "executor-deep.md", "reviewer.md"):
+            self.assertNotIn(name, f.msg)  # agent của khung ghim tầng (ADR-0029) — không báo
+
+    def test_unreadable_entries_fail_open(self):
+        (self.base / ".claude" / "agents" / "weird.md").mkdir(parents=True)  # thư mục mang tên .md
+        (self.base / "docs" / "adr" / "0002-dir.md").mkdir(parents=True)
+        self.settings_env(".claude/settings.json", {self.ENV: "1"})
+        self.write(".claude/agents/locked.md", "---\nmodel: opus\n---\n")
+        real = Path.read_text
+
+        def flaky(p: Path, *a: Any, **k: Any) -> str:
+            if p.name == "locked.md":
+                raise PermissionError(p)
+            return real(p, *a, **k)
+
+        with unittest.mock.patch.object(Path, "read_text", flaky):
+            [f] = self.orch()  # chỉ cảnh báo Agent Teams; agent không đọc được thì bỏ qua, doctor không vỡ
+        self.assertIn("LOOP-ORCH-021", f.msg)
 
 
 class DoctorGuardAndClaudeVersionTest(DoctorCase):

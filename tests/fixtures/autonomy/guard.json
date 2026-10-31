@@ -13365,8 +13365,8 @@
   }
  },
  {
-  "id": "guard-sec195-subshell-comment-ok",
-  "origin": "control",
+  "id": "guard-sec195-subshell-comment-denied",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-195"
   ],
@@ -13374,7 +13374,7 @@
    "command": "(ls)# rm -rf ~"
   },
   "expect": {
-   "allowed": true
+   "allowed": false
   }
  },
  {
@@ -13391,8 +13391,8 @@
   }
  },
  {
-  "id": "guard-control-sec195-subshell-comment-apos-ok",
-  "origin": "control",
+  "id": "guard-sec195-subshell-comment-apos-denied",
+  "origin": "audit",
   "refs": [
    "AUD-SEC-195"
   ],
@@ -13400,14 +13400,14 @@
    "command": "(ls)# it's fine\necho ok"
   },
   "expect": {
-   "allowed": true
+   "allowed": false
   }
  },
  {
-  "id": "guard-sec241-ansi-quote-backtick-rm",
+  "id": "guard-sec233-ansi-quote-backtick-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "echo $'\\'' `rm -rf ~`"
@@ -13417,10 +13417,10 @@
   }
  },
  {
-  "id": "guard-sec241-assign-ansi-quote-backtick-rm",
+  "id": "guard-sec233-assign-ansi-quote-backtick-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "x=$'\\''`rm -rf ~`"
@@ -13430,10 +13430,10 @@
   }
  },
  {
-  "id": "guard-sec241-ansi-quote-dq-comsub-rm",
+  "id": "guard-sec233-ansi-quote-dq-comsub-rm",
   "origin": "adversarial-reviewer",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "echo $'\\'' \"$(rm -rf ~)\""
@@ -13443,10 +13443,10 @@
   }
  },
  {
-  "id": "guard-control-sec241-ansi-quote-backtick-ok",
+  "id": "guard-control-sec233-ansi-quote-backtick-ok",
   "origin": "control",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "echo $'\\'' `date`"
@@ -13654,7 +13654,7 @@
   "id": "guard-d279-ansi-comment-tick-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "$'\\''\n# c@(x);'\n`rm -rf ~`"
@@ -13667,7 +13667,7 @@
   "id": "guard-d279-pid-ansi-tick-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "echo $$$'\\'' `rm -rf ~`"
@@ -13680,7 +13680,7 @@
   "id": "guard-d279-pid-ansi-comsub-rm",
   "origin": "audit",
   "refs": [
-   "AUD-SEC-241"
+   "AUD-SEC-233"
   ],
   "input": {
    "command": "echo $$$'\\'' \"$(rm -rf ~)\""
@@ -13714,6 +13714,97 @@
   "expect": {
    "allowed": true
   }
- }
+ },
+  {
+   "id": "guard-sec195-paren-hash-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "true $(true)#; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec225-locale-quote-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-225"
+   ],
+   "input": {
+    "command": "$\"rm\" -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec226-trap-body-rm",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-226"
+   ],
+   "input": {
+    "command": "trap 'rm -rf ~' EXIT"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec195-subshell-paren-hash-quote",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "(true)#it's\nrm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec195-quoted-paren-hash-word",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "echo \"a)#b\""
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec195-ansi-c-then-paren-hash",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-195"
+   ],
+   "input": {
+    "command": "echo $'\\'' $(true)#; rm -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec226-trap-benign",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-226"
+   ],
+   "input": {
+    "command": "trap 'echo bye' EXIT"
+   },
+   "expect": {
+    "allowed": true
+   }
+  }
  ]
 }

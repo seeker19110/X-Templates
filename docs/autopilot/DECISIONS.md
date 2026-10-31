@@ -1979,3 +1979,16 @@
 - Chọn: Sửa F-A bằng kiểm biên (i + 1 < len) và chỉ gọi _git_path_dirs khi có đích xoá; bỏ phần --work-tree (F-B) về đúng main vì đọc sai git; thêm dòng CHANGELOG (F-D); F-C và các ca có từ trước ghi sổ
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn: F-A là một dòng, reviewer đã chạy bản sửa trên 31 ca crash + fuzz 6000 (0 ngoại lệ, 0 main-chặn-HEAD-qua) và nó đóng luôn lỗi có từ trước xargs git -C; --work-tree hiểu sai nên bỏ để không khẳng định sai (về đúng main); (2) giữ phần -C đã đúng với git thật (12 ca deny, sandbox xác nhận); (3) phương án 3 mở rộng bề mặt đúng chỗ vừa sinh hồi quy; phương án 2 bỏ cả phần đúng
 - Đường lùi: Cherry-pick lại 1671e16 nếu có thiết kế --work-tree đúng (xét P từ gốc dự án và rel(cwd,W)/P)
+### D-282 · 2026-10-31T19:40:10+00:00 · PR #368: thêm một lần sửa hết phát hiện sau 2 lượt review chưa sạch (ADR-0059/0053)
+
+- Phương án: (1) Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan · (2) Giữ AUD-SEC-195 ở trạng thái đã giảm còn mở, hạ giọng tài liệu, ghi nợ
+- Chọn: Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): phương án 1 đóng cả 11 ca lách và 3 ca chặn oan, đo bằng 23 ca lách bị chặn và 17 ca hợp lệ chạy, coverage 100 phần trăm; phương án 2 để hở lỗ đã tái hiện được
+- Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-195 về mở trong sổ audit
+
+### D-283 · 2026-10-31T20:20:15+00:00 · PR #368: lượt rà thứ 5 sau khi đóng họ pwd# (reviewer lượt 4 báo 1 đỏ: kiểm strict chạy sau khi thay pwd)
+
+- Phương án: (1) Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR · (2) Dừng PR, bỏ AUD-SEC-195 về mở
+- Chọn: Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa lượt 4 đo được (255 test guard, 300 hooks, bench 997 ca xanh) và các lớp còn lại có từ trước (base cũng lọt, fuzz: base 400 ca lọt, head giảm mạnh, không ca nào lọt ở head mà base chặn); gộp vào sổ riêng tránh phình PR
+- Đường lùi: Hoàn nguyên commit sửa; đưa AUD-SEC-195 về mở

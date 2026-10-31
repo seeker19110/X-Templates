@@ -522,6 +522,8 @@ class _HereScan:
             return j + 2
         if c == "#":
             word_start = j == 0 or (line[j - 1] in WORD_END and self.esc != j)
+            if word_start and j and line[j - 1] == ")":
+                raise ScanTooComplex(PAREN_HASH_WHY)
             return len(line) if word_start else j + 1
         if c == "<":
             return self._lt(line, j)
@@ -707,6 +709,7 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
 COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>`])#")  # backtick mở từ (D-275)
+PAREN_HASH_WHY = "`)#` không khoảng trắng: guard và bash có thể đọc `#` khác nhau — thêm khoảng trắng trước `#`"
 COMMENT_CONTINUED_WHY = (
     "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
     " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
@@ -888,14 +891,18 @@ def _fold_heredocs(cmd: str, subst: bool, escape: bool = False) -> str:
     return "\n".join(line for line, k in zip(lines, keep) if k)
 
 
-def strip_comments(cmd: str) -> str:
+def strip_comments(cmd: str, strict: bool = False) -> str:
     """Bỏ comment kiểu bash: `#` ở ĐẦU một từ (đầu chuỗi, sau khoảng trắng hoặc toán tử), ngoài nháy, tới hết dòng.
-    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
+    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt).
+    `strict` (đường `tokenize`, chữ đã giải ANSI-C): `)#` không khoảng trắng → `ScanTooComplex` (AUD-SEC-195); đường
+    `brace_variants` đọc chuỗi thô (nháy `$'\\''` lệch) nên không chặn ở đó — chặn oan."""
     out: List[str] = []
     quote, word_start, i = "", True, 0
     while i < len(cmd):
         c = cmd[i]
         if c == "#" and word_start and not quote:
+            if strict and i and cmd[i - 1] == ")":
+                raise ScanTooComplex(PAREN_HASH_WHY)
             eol = cmd.find("\n", i)
             i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
             continue
@@ -908,7 +915,9 @@ def strip_comments(cmd: str) -> str:
         elif c in "'\"":
             quote = c
         out.append(c)
-        word_start = not quote and c in WORD_END
+        word_start = (
+            not quote and c in WORD_END
+        )  # `)#` không khoảng trắng: `strict` chặn ở đường `tokenize` (AUD-SEC-195)
         i += 1
     return "".join(out)
 
@@ -942,6 +951,8 @@ def expand_ansi_c(cmd: str) -> str:
         elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
             i, ws = i + 2, False
+        elif not q and cmd.startswith('$"', i):  # `$"…"` (dịch locale) = `"…"`; bỏ `$` (AUD-SEC-225)
+            i, ws = i + 1, False
         elif not q and cmd.startswith("$'", i):
             j = i + 2
             while j < len(cmd) and cmd[j] != "'":
@@ -1119,9 +1130,11 @@ PWD_SUBST_RE = re.compile(
 
 
 def tokenize(cmd: str) -> List[str]:
-    cmd = IFS_RE.sub(" ", expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)))
+    cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
+    strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
+    cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
-    lex = shlex.shlex(strip_comments(cmd), posix=True, punctuation_chars="();<>|&\n")
+    lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""  # comment đã bỏ ở strip_comments; mặc định của shlex là "#" (mở comment cả giữa từ)
@@ -3414,6 +3427,8 @@ class _ShellScan:
         return self._open(i, True) or i + 1
 
     def _comment(self, i: int) -> int:
+        if i and self.text[i - 1] == ")":
+            raise ScanTooComplex(PAREN_HASH_WHY)
         if i and self.text[i - 1] not in COMMENT_AFTER:
             return i + 1
         eol = self.text.find("\n", i)
@@ -6185,7 +6200,12 @@ def _expanded_heredocs(cmd: str) -> List[str]:
 
 def _eval_scripts(tokens: List[str]) -> List[str]:
     """`eval '<lệnh>'`: shell ghép các đối số rồi chạy như một dòng lệnh."""
-    return [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    out = [" ".join(n[1:]) for c in split_commands(tokens) for n in [normalize(c)] if n[:1] == ["eval"] and n[1:]]
+    for c in split_commands(tokens):  # `trap '<lệnh>' SIGNAL`: bash chạy thân như `eval` (AUD-SEC-226)
+        n = [a for a in normalize(c) if a != "--"]
+        if n[:1] == ["trap"] and len(n) > 1 and n[1] not in ("-", "-p", "-l"):
+            out.append(n[1])
+    return out
 
 
 def _cat_heredoc_bodies(script: str) -> List[str]:
