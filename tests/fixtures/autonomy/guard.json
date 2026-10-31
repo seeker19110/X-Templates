@@ -12352,6 +12352,102 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d271-comment-continuation-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "input": {
+    "command": "true # \\\ngit push --force origin main"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-comment-continuation-mark",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "input": {
+    "command": "echo hi # \\\ngh pr comment 5 -F b.md",
+    "files": {
+     "b.md": "<!-- xt-review v1 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=clean -->\n",
+     "n.md": "thường\n",
+     "template.md": "Mẫu nhận xét\n"
+    }
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-comment-continuation-comsub-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "input": {
+    "command": "echo \"$(true # \\\nrm -rf ~)\""
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-control-continuation-then-comment",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-219"
+   ],
+   "input": {
+    "command": "echo a \\\n  b # note"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d271-alias-expand-push",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "shopt -s expand_aliases\nalias c='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-alias-heredoc-rm",
+   "origin": "adversarial-author",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "shopt -s expand_aliases\nalias c='cat <<X'\nc\ncat <<Y\nX\nrm -rf ~\nY"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d271-control-alias-no-expand",
+   "origin": "control",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "alias ll='ls -l'"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }

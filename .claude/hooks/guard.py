@@ -689,6 +689,29 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
         raise ScanTooComplex("heredoc không có dòng kết")
 
 
+# `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
+COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>])#")
+ALIAS_WORD_RE = re.compile(r"(?<![\w-])alias(?![\w-])")
+
+
+def _shell_precheck(cmd: str) -> None:
+    """Trước khi quét (D-271), chỗ guard không đọc như bash → chặn:
+    - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
+      `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
+      lẻ trong thân heredoc) — không đoán;
+    - `expand_aliases` cùng từ `alias` (sau khi bỏ nháy/`\\`): thân alias thành lệnh mà guard không thấy
+      (`alias c='git push --force origin main'` ↵ `c`, `alias c='cat <<X'`)."""
+    if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
+        raise ScanTooComplex("`\\` cuối dòng sau `#` (bash không nối dòng trong comment)")
+    norm = re.sub(r"[\"'\\]", "", cmd)
+    if "expand_aliases" in norm and ALIAS_WORD_RE.search(norm):
+        raise ScanTooComplex("alias khi bật `expand_aliases`")
+
+
+def _comment_continued(line: str) -> bool:
+    return bool((len(line) - len(line.rstrip("\\"))) % 2 and COMMENT_START_RE.search(line))
+
+
 def _line_index(lines: List[str], tabs: bool) -> Dict[str, List[int]]:
     """Dòng (nguyên văn; `tabs`: bỏ tab đầu dòng như `<<-`) → các chỉ số của nó: tìm dấu kết không quét lại mọi dòng."""
     out: Dict[str, List[int]] = {}
@@ -8241,6 +8264,7 @@ def _bash_decision(
             code=BUDGET,
         )
         return res
+    _shell_precheck(cmd)
     _heredoc_precheck(cmd, whole)
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)

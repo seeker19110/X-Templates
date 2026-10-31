@@ -1473,6 +1473,52 @@ class HeredocRound4Test(unittest.TestCase):
         with self.assertRaises(guard.ScanTooComplex):
             guard.strip_heredocs('x="$(case a in a) cat <<X;; esac)"')
 
+    def test_comment_continuation_not_joined(self):
+        """bash không nối `\\` + xuống dòng trong comment: dòng sau là lệnh. Đọc nháy để biết `#` có mở comment không
+        cũng lệch bash (`"$(true # \\` ↵ `cmd)"` chạy `cmd`; nháy lẻ trong thân heredoc) → `#` đầu từ (bất kể nháy) trên
+        dòng kết bằng `\\` lẻ: chặn."""
+        self.assert_all(
+            "deny",
+            (
+                "true # \\\n{x}",
+                "echo hi # \\\n{x}",
+                "echo a \\\n# c \\\n{x}",
+                "#\\\n{x}",
+                'echo "$(true # \\\n{x})"',  # trong `$(` của nháy kép: bash vẫn là comment
+                "echo $'a\\'' # \\\n{x}",
+                "cat <<'E'\n\"\nE\ntrue # \\\n{x}\n\"",  # nháy lẻ trong thân heredoc
+                "true #\\\\\\\n{x}",  # `\\` lẻ dài
+            ),
+        )
+        res = guard.bash_decision("true # \\\ngit push --force origin main", str(self.root))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+        self.assert_all(
+            "",
+            (
+                "echo a \\\n  b # note",
+                "echo '# x' \\\n  ok",
+                "echo a\\#b \\\n c",
+                "curl https://x/#/a \\\n -o f",
+                "# a \\\\",
+            ),
+        )
+        for line, want in (("x # a \\", True), ("x # a \\\\", False), ("x#a \\", False), ("#", False), ("(#\\", True)):
+            with self.subTest(line=line):
+                self.assertEqual(guard._comment_continued(line), want)
+
+    def test_alias_with_expand_aliases_denied(self):
+        self.assert_all(
+            "deny",
+            (
+                "shopt -s expand_aliases\nalias c='{x}'\nc",
+                "shopt -s expand_aliases\nalias c='cat <<X'\nc\ncat <<Y\nX\n{x}\nY",
+                "bash -O expand_aliases -c \"alias c='{x}'\nc\"",
+            ),
+        )
+        res = guard.bash_decision("shopt -s expand_aliases\nalias c='git push --force origin main'\nc", str(self.root))
+        self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+        self.assert_all("", ("alias ll='ls -l'", "shopt -s expand_aliases", "alias", "grep -n alias= README.md"))
+
 
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""
