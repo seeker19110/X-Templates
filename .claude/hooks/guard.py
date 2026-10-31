@@ -1481,7 +1481,7 @@ def _git_dir(argv: List[str], cwd: Optional[str]) -> Optional[str]:
 # Cờ của `cd`/`pushd` không đổi đích (AUD-SEC-088), cả dạng ghép `-LP`, `-Pe@` (review #186, D-106)
 CD_FLAG_RE = re.compile(r"-[LPe@]+")
 # `~+`/`~-` đứng đầu: bash mở thành `$PWD`/`$OLDPWD` (biến gán lại được) — `cd` tới đó như `cd $PWD`: không biết
-TILDE_DIR_RE = re.compile(r"~[+-](?=/|$)")
+TILDE_DIR_RE = re.compile(r"~(?:[+-][0-9]*|[0-9]+)(?=/|$)")  # cả `~N`/`~+N`/`~-N` (ngăn xếp thư mục, AUD-SEC-232)
 
 
 def _cd_operands(args: List[str]) -> Tuple[List[str], bool]:
@@ -5336,9 +5336,10 @@ def _at(target: str, cwd: Optional[str]) -> str:
 EVIDENCE_WHY = "ghi/xoá tay bằng chứng autopilot qua Bash ({}) — chỉ `xt.py loop …` được ghi (P1)"
 
 
-# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106)
-PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+)(?=/|$)")
-OLDPWD_REF_RE = re.compile(r"^(~-|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
+# `~+` là `$PWD` với bash (tilde expansion — AUD-SEC-097); `~-` là `$OLDPWD`: thư mục trước đó, guard không biết (D-106).
+# `~N`/`~+N`/`~-N` là phần tử ngăn xếp thư mục (`dirs +N`/`-N`): `~0`/`~+0` = `$PWD`, số khác không biết (AUD-SEC-232)
+PWD_REF_RE = re.compile(r"^(\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`|~\+|~\+?0+)(?=/|$)")
+OLDPWD_REF_RE = re.compile(r"^(~-[0-9]*|~\+?0*[1-9][0-9]*|\$OLDPWD|\$\{OLDPWD\})(?=/|$)")
 PROJECT_REF_RE = re.compile(r"^(\$CLAUDE_PROJECT_DIR|\$\{CLAUDE_PROJECT_DIR\})(?=/|$)")
 
 
@@ -6202,13 +6203,23 @@ def _backtick_scripts(cmd: str) -> List[str]:
     return [body for _, _, body in _backtick_spans(cmd)]
 
 
+def _dollar_quote_end(cmd: str, i: int) -> int:
+    """Ngoài nháy: `$'…'` (ANSI-C, `\\'` không đóng) ở `i` → vị trí sau nó; `$$'` → vị trí của `'` (`$$'…'` là `$$` +
+    nháy đơn); khác → 0. Bộ tìm thay lệnh từng đọc `$'\\''` như `'\\'` + `'` mở nháy nên bỏ qua thay lệnh sau đó
+    (AUD-SEC-233)."""
+    if cmd.startswith("$$'", i):
+        return i + 2
+    return _skip_single(cmd, i) if cmd.startswith("$'", i) else 0
+
+
 def _backtick_spans(cmd: str) -> List[Span]:
     out: List[Span] = []
     quote, start, i = "", -1, 0
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and quote != "'":
-            i += 2
+        skip = 0 if quote or start >= 0 else _dollar_quote_end(cmd, i)
+        if skip or c == "\\" and quote != "'":
+            i = skip or i + 2
             continue
         if c == "'" and start < 0 and quote != '"':
             quote = "" if quote == "'" else "'"
@@ -6262,8 +6273,9 @@ def _dollar_spans(cmd: str) -> List[Span]:
     quote, i = "", 0
     while i < len(cmd):
         c = cmd[i]
-        if c == "\\" and quote != "'":
-            i += 2
+        skip = 0 if quote else _dollar_quote_end(cmd, i)
+        if skip or c == "\\" and quote != "'":
+            i = skip or i + 2
             continue
         if c in "'\"" and quote in ("", c) and (c == '"' or quote != '"'):
             quote = "" if quote == c else c

@@ -2471,5 +2471,58 @@ class HeredocBodyApostropheTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class TildeDirStackNumberTest(unittest.TestCase):
+    """AUD-SEC-232: bash mở `~N`/`~+N`/`~-N` thành phần tử ngăn xếp thư mục (`dirs +N`/`-N`); `~0`/`~+0`/`~00` là
+    `$PWD` như `~+`, số khác là thư mục guard không biết như `~-` (`$OLDPWD`). `~0x` không phải dạng ngăn xếp: bash để
+    nguyên chữ (tên file trong thư mục đang đứng)."""
+
+    def test_tilde_dirstack_number(self):
+        for cmd in (
+            "rm -rf ~0",
+            "rm -rf ~+0",
+            "rm -rf ~-0",
+            "rm -rf ~00",
+            "rm -rf ~0/",
+            "rm -rf ~1",
+            "rm -rf ~+2",
+            "rm -rf ~-1",
+            "rm -r ~1/x",
+            "rm -rf ~0/.git",
+            "echo x > ~0/.autopilot/state.json",
+            "echo x > ~1/.autopilot/state.json",
+            "cd ~1 && echo x > .autopilot/state.json",
+            "cd ~+0 && rm -rf .",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("rm -rf ~0x", "rm -rf ~0/build", "rm ~0/a.txt", "ls ~0 ~1 ~-2", "echo x > ~0/out.txt"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
+class AnsiQuoteThenBacktickTest(unittest.TestCase):
+    """AUD-SEC-233: `$'\\''` là MỘT ký tự `'` (ANSI-C, `\\'` không đóng nháy); bộ tìm backtick từng đọc nó như `'…'` rồi
+    một `'` mở nháy, nên backtick sau đó (`` `rm -rf ~` ``) nằm "trong nháy" và không được quét. `$$'…'` là `$$` + nháy
+    đơn (không phải ANSI-C); trong nháy kép `$'` không phải ANSI-C."""
+
+    def test_ansi_quote_then_backtick(self):
+        for cmd in (
+            "echo $'\\'' `rm -rf ~`",
+            "x=$'\\''`rm -rf ~`",
+            "echo $'a\\'b' `rm -rf ~`",
+            "echo $'\\'' \"`rm -rf ~`\"",
+            "echo $'\\'' `git push --force origin main`",
+            "echo $'\\'' \"$(rm -rf ~)\"",  # cùng lỗi ở bộ tìm `$(…)`
+            "x=$'\\''\"$(rm -rf ~)\"",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("echo $'\\'' '`rm -rf ~`'", 'echo "$\'" `date` "\'"', "echo $'\\'' `date`"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        self.assertEqual(guard._backtick_scripts("echo $'\\'' `a` $$'`b`'"), ["a"])
+        self.assertEqual(guard._dollar_scripts("echo $'\\'' \"$(a)\" $$'$(b)' $$$(c)"), ["a", "c"])
+
+
 if __name__ == "__main__":
     unittest.main()

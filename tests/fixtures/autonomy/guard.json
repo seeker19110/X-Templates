@@ -13500,6 +13500,162 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec232-rm-tilde-zero",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~0"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec232-rm-tilde-plus-zero",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~+0"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec232-rm-tilde-minus-zero",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~-0"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec232-rm-tilde-double-zero",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~00"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec232-evidence-tilde-stack",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "echo x > ~1/.autopilot/state.json"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-sec232-tilde-zero-subdir-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~0/build"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-control-sec232-tilde-name-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-232"
+  ],
+  "input": {
+   "command": "rm -rf ~0x"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec233-ansi-quote-backtick-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $'\\'' `rm -rf ~`"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec233-assign-ansi-quote-backtick-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "x=$'\\''`rm -rf ~`"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec233-ansi-quote-dq-comsub-rm",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $'\\'' \"$(rm -rf ~)\""
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-sec233-ansi-quote-backtick-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $'\\'' `date`"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-control-sec233-quoted-backtick-ok",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-233"
+  ],
+  "input": {
+   "command": "echo $'\\'' '`rm -rf ~`'"
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }
