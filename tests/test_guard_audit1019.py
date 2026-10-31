@@ -585,6 +585,46 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
 
+    def test_review_marker_shell_stdin(self):
+        """AUD-SEC-180: stdin của `gh` đăng chữ chuyển hướng ở cấp shell (`exec < f`), nhóm lệnh (`{ …; } < f`,
+        `(…) < f`, `done < f`), trước tên lệnh (`< f gh …`) hay qua shell lồng (`sh -c '…' < f`) là nguồn thân."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            for cmd in (
+                "exec < b.md; gh pr comment 5 -F -",
+                "exec 0< b.md; gh pr comment 5 -F -",
+                "exec 0<b.md\ngh pr comment 5 --body-file -",
+                "exec <> b.md; gh pr comment 5 -F -",
+                "{ gh pr comment 5 -F -; } < b.md",
+                '{ gh pr comment 5 --body "$(cat)"; } < b.md',
+                "(gh pr comment 5 -F -) < b.md",
+                "while read -r x; do gh pr comment 5 -F -; done < b.md",
+                "if true; then gh pr comment 5 -F -; fi < b.md",
+                "< b.md gh pr comment 5 -F -",
+                "0<b.md gh pr comment 5 -F -",
+                "sh -c 'gh pr comment 5 -F -' < b.md",
+                'echo "$((gh pr comment 5 -F -) < b.md\n)"',  # `$((` không đóng bằng `))`: thay lệnh có subshell
+                "exec < b.md; gh api repos/o/r/issues/5/comments --input -",
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                "exec < n.md; gh pr comment 5 -F -",
+                "{ gh pr comment 5 -F -; } < n.md",
+                "{ echo hi; } < b.md; gh pr comment 5 --body ok",  # gh không đọc stdin
+                "exec 2>/dev/null; gh pr comment 5 --body ok",
+                "exec < b.md; gh pr view 5",  # gh chỉ đọc
+                "(gh pr comment 5 --body ok) < /dev/null",
+                'echo "$((1 + (2 * 3)))"',
+                'while read -r x; do echo "$x"; done < b.md',
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+        self.assertFalse(guard._arith_at("$((" + "1+" * 3000, 0))  # chưa đóng trong cửa sổ: quét như thay lệnh
+        self.assertTrue(guard._arith_at("$((1))", 0))
+
     def test_review_marker_forge_mcp_control_chars_denied(self):
         """AUD-SEC-156: ký tự điều khiển sau `<!--` bị `json.dumps` thoát nên regex trên JSON không khớp — quét chuỗi thô,
         cả chuỗi lồng trong danh sách/đối tượng (`comments[].body`)."""

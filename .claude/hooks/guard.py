@@ -2888,11 +2888,26 @@ def _body_sources(argv: List[str], cats: List[str]) -> List[str]:
         own = _gh_api_files(args)
     else:
         own = _gh_flag_files(args, split_at=False)
-    own += _stdin_redirects(args)
+    own += _stdin_redirects(argv)  # cả chuyển hướng đặt trước tên lệnh (`< f gh …`, AUD-SEC-180)
     # backtick không nháy bị tách thành nhiều token — quét cả đối số ghép lại (`<<< \`cat f\``, AUD-SEC-175)
     own += [f for t in [*args, " ".join(args)] for f in _subst_files(t)]
     piped = any(f in STDIN_PATHS for f in own) or "$" in args or any(t.count("`") % 2 for t in args)
     return [f for f in own if f not in STDIN_PATHS] + (cats if piped else [])
+
+
+SHELL_LEVEL_WORDS = {"exec", "}", "done", "fi", "esac"}  # chuyển hướng của chúng đổi stdin của lệnh khác
+
+
+def _shell_stdin(argv: List[str]) -> List[str]:
+    """Đích stdin đặt ở cấp shell hay nhóm lệnh — `exec < f`, `exec 0< f`, `{ …; } < f`, `(…) < f`, `done < f`: lệnh
+    `gh` bên trong/phía sau đọc stdin từ đó (AUD-SEC-180)."""
+    return _stdin_redirects(argv) if set(_no_redirects(argv)) <= SHELL_LEVEL_WORDS else []
+
+
+def _gh_wrapped(argv: List[str]) -> bool:
+    """Lệnh khác bọc `gh` đăng chữ trong chuỗi của nó (`sh -c 'gh … -F -' < f`) — guard không biết `gh` đọc stdin hay
+    không, nên coi như đọc (AUD-SEC-180)."""
+    return not _gh_posts(argv) and bool(GH_POST_RE.search(" ".join(argv)))
 
 
 def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
@@ -2902,12 +2917,13 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str]) -> bool:
     nhắc tên (`--body "xem docs/ops/AUDIT-STATUS.md"`) không phải nguồn thân."""
     cmds = split_commands(tokens)
     posts = [c for c in cmds if _gh_posts(c)]
-    if not posts:
+    wrapped = [f for c in cmds if _gh_wrapped(c) for f in _stdin_redirects(c)]
+    if not posts and not wrapped:
         return False
-    if REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts):
+    if posts and (REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts)):
         return True
-    cats = [f for c in cmds for f in _reader_files(c)]
-    srcs = [f for c in posts for f in _body_sources(c, cats)]
+    cats = [f for c in cmds for f in _reader_files(c) + _shell_stdin(c)]
+    srcs = wrapped + [f for c in posts for f in _body_sources(c, cats)]
     # backtick lẻ ở đối số `gh`: thay lệnh không nháy bị tách lệnh ở `;`/`|`/xuống dòng (`<<< \`cat f;\``) — đọc nó
     # trên chữ thô của cả chuỗi lệnh (review #357)
     srcs += _subst_files(cmd) if any(t.count("`") % 2 for c in posts for t in c) else []
@@ -5186,6 +5202,22 @@ def _dollar_scripts(cmd: str) -> List[str]:
     return [body for _, _, body in _dollar_spans(cmd)]
 
 
+ARITH_SCAN_MAX = 4096  # `$((` chưa thấy ngoặc đóng trong chừng này ký tự → coi là thay lệnh (quét, không bỏ qua)
+
+
+def _arith_at(cmd: str, i: int) -> bool:
+    """`$((` ở `i` là số học `$((…))`: ngoặc trong đóng ngay trước ngoặc ngoài. Không thì bash lùi về thay lệnh có
+    subshell (`"$((gh … -F -) < f)"`) — thân phải được quét như lệnh (AUD-SEC-180)."""
+    if not cmd.startswith("$((", i):
+        return False
+    depth = 0
+    for j in range(i + 2, min(len(cmd), i + ARITH_SCAN_MAX)):
+        depth += {"(": 1, ")": -1}.get(cmd[j], 0)
+        if not depth:
+            return cmd.startswith(")", j + 1)
+    return False
+
+
 def _dollar_spans(cmd: str) -> List[Span]:
     out: List[Span] = []
     quote, i = "", 0
@@ -5196,7 +5228,7 @@ def _dollar_spans(cmd: str) -> List[Span]:
             continue
         if c in "'\"" and quote in ("", c) and (c == '"' or quote != '"'):
             quote = "" if quote == c else c
-        elif quote != "'" and cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+        elif quote != "'" and cmd.startswith("$(", i) and not _arith_at(cmd, i):
             depth, j = 1, i + 2
             while j < len(cmd) and depth:
                 depth += {"(": 1, ")": -1}.get(cmd[j], 0)
