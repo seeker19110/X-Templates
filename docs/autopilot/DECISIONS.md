@@ -1979,3 +1979,10 @@
 - Chọn: Áp sửa một dòng của reviewer (nháy xen giữa biến IFS và dấu thăng), ghi lớp mới vào sổ, mở thêm một lượt rà
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: sửa đã được reviewer thử, đóng 15 ca và không lệch quyết định nào trên 10035 chuỗi test; lớp mới tìm thêm vào sổ riêng, không gánh vào PR
 - Đường lùi: Hoàn nguyên commit sửa, đưa AUD-SEC-232 về mở
+
+### D-285 · 2026-10-31T22:07:12+00:00 · PR #372: mở lượt sửa nữa sau 2 lượt review chưa sạch (ghi lại sau review, ADR-0053)
+
+- Phương án: (1) Mở thêm một lượt rà ở head đã áp sửa của reviewer · (2) Dừng PR, đưa AUD-SEC-232 về mở
+- Chọn: Mở thêm một lượt rà ở head đã áp sửa của reviewer
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa đã được reviewer thử đóng 15 ca không lệch quyết định nào trên 10035 chuỗi; lớp mới ghi sổ riêng AUD-SEC-238
+- Đường lùi: Hoàn nguyên commit sửa, đưa AUD-SEC-232 về mở
