@@ -721,6 +721,62 @@ class DoctorMemoryTest(DoctorCase):
         self.assertIn("gitleaks", f.msg)
 
 
+class DoctorOrchestrationTest(DoctorCase):
+    """LOOP-ORCH-021 (Agent Teams tắt trừ khi có ADR) và LOOP-ORCH-022 (agent ngoài bộ khung không ghim model)."""
+
+    ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+
+    def orch(self) -> list[xt.Finding]:
+        return [f for f in self.findings(deep=False) if f.code == "orchestration"]
+
+    def settings_env(self, rel: str, env: object) -> None:
+        p = self.base / rel
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        data["env"] = env
+        self.write(rel, json.dumps(data))
+
+    def test_fresh_install_is_clean(self):
+        with unittest.mock.patch.dict(os.environ, {self.ENV: "0"}):
+            self.assertEqual(self.orch(), [])
+
+    def test_agent_teams_from_session_env_and_settings_warn(self):
+        self.settings_env(".claude/settings.local.json", {self.ENV: "1", "K": "bí-mật"})
+        self.settings_env(".claude/settings.json", {self.ENV: 1})
+        with unittest.mock.patch.dict(os.environ, {self.ENV: " 1 "}):
+            [f] = self.orch()
+        self.assertEqual((f.level, f.fix), ("warn", None))
+        for part in ("môi trường phiên", ".claude/settings.json", ".claude/settings.local.json", "LOOP-ORCH-021"):
+            self.assertIn(part, f.msg)
+        self.assertNotIn("bí-mật", f.msg)
+
+    def test_agent_teams_with_adr_or_disabled_is_fine(self):
+        self.settings_env(".claude/settings.json", {self.ENV: "1"})
+        self.write("docs/adr/0001-teams.md", f"# ADR-0001\nBật `{self.ENV}` cho review song song.\n")
+        self.assertEqual(self.orch(), [])
+        self.settings_env(".claude/settings.json", {self.ENV: "0"})
+        self.write("docs/adr/0001-teams.md", "# ADR-0001\nkhông nhắc\n")
+        self.assertEqual(self.orch(), [])
+
+    def test_malformed_settings_env_fail_open(self):
+        self.settings_env(".claude/settings.json", ["không phải object"])
+        self.write(".claude/settings.local.json", "{hỏng")
+        with unittest.mock.patch.dict(os.environ, {self.ENV: ""}):
+            self.assertEqual(self.orch(), [])
+
+    def test_third_party_agent_pinned_model_warns(self):
+        self.write(".claude/agents/perf.md", "---\nname: perf\ndisallowed-tools: Bash\nmodel: opus\n---\nbody\n")
+        self.write(".claude/agents/kept.md", "---\nname: kept\nmodel: 'inherit'\n---\nmodel: opus\n")
+        self.write(".claude/agents/bare.md", "không có frontmatter\nmodel: opus\n")
+        self.write(".claude/agents/plain.md", "---\nname: plain\n---\n")
+        with unittest.mock.patch.dict(os.environ, {self.ENV: "0"}):
+            [f] = self.orch()
+        self.assertEqual(f.level, "warn")
+        self.assertIn("perf.md (opus)", f.msg)
+        self.assertIn("LOOP-ORCH-022", f.msg)
+        for name in ("kept.md", "bare.md", "plain.md", "executor-deep.md", "reviewer.md"):
+            self.assertNotIn(name, f.msg)  # agent của khung ghim tầng (ADR-0029) — không báo
+
+
 class DoctorGuardAndClaudeVersionTest(DoctorCase):
     """LOOP-HARNESS-025 (guard chặn lệnh mẫu) và LOOP-HARNESS-026 (`claude_min_version`) — rà stored 2026-10-18."""
 
