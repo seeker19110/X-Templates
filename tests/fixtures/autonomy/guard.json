@@ -13155,6 +13155,54 @@
   }
  },
  {
+  "id": "guard-har154-git-C-rm-ledger-dir",
+  "origin": "audit",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git -C docs rm -r autopilot",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-git-worktree-mv-ledger-dir",
+  "origin": "audit",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git --work-tree=docs mv autopilot x",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-har154-git-C-rm-other",
+  "origin": "control",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git -C docs rm -r old",
+   "files": {
+    "docs/autopilot/STAGE.json": "{}\n"
+   }
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
   "id": "guard-sec188-pr-create-combined-title",
   "origin": "audit",
   "refs": [

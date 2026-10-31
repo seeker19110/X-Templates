@@ -5296,7 +5296,7 @@ def _write_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str] = N
         for t, k in restored
         if k == "secret" and not build_local_secret(t, root, cwd)
     ]
-    asks += _ledger_asks(n, root, cwd)
+    asks += _ledger_asks(n, argv, root, cwd)
     return asks + [EVIDENCE_WHY.format(f"git {n[1]} {t}") for t, k in restored if k == "evidence"]
 
 
@@ -5340,10 +5340,38 @@ def _find_ledger_roots(args: List[str]) -> List[str]:
     return _find_delete_roots(args) if hit else []
 
 
-def _ledger_asks(n: List[str], root: str, cwd: Optional[str]) -> List[str]:
-    """Ghi tay sổ giai đoạn qua thư mục: xoá/dời thư mục tổ tiên (`rm -r docs/autopilot`, `git mv docs …`), hay chép/dời/
-    liên kết vào thư mục có sẵn mà tên nguồn là tên sổ (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
-    hits = [x for t in _removed_targets(n) for x in _where(t, root, cwd) if _ledger_hit(_rel_dir(x, root))]
+def _git_path_dirs(n: List[str], argv: List[str], cwd: Optional[str]) -> List[Optional[str]]:
+    """Thư mục mà pathspec của lệnh git tính từ: thư mục đang đứng qua các `-C` (`_git_dir`) và, khi có `--work-tree`,
+    cả gốc cây đó (đứng ngoài cây thì git tính pathspec từ gốc cây) — lấy cả hai, chiều chặt; không biết → None. Lệnh
+    khác git → `[cwd]`."""
+    if n[:1] != ["git"]:
+        return [cwd]
+    a = _strip_prefixes(argv)
+    base, trees = _git_dir(a, cwd), _git_work_trees(a)[-1:]  # git dùng `--work-tree` cuối
+    known = [w for w in trees if (base or w.startswith("/")) and "$" not in w and not TILDE_DIR_RE.match(w)]
+    tops = [posixpath.normpath(posixpath.join(base or "/", posixpath.expanduser(w))) for w in known]
+    return list(dict.fromkeys([base, *tops, *([None] if len(known) < len(trees) else [])]))
+
+
+def _git_work_trees(a: List[str]) -> List[str]:
+    """Giá trị `--work-tree <d>`/`--work-tree=<d>` trong tuỳ chọn toàn cục của `git` (`a` đã bỏ tiền tố)."""
+    rest, out, i = a[1:], [], 0
+    while i < len(rest) and rest[i].startswith("-"):
+        if rest[i] == "--work-tree" and i + 1 < len(rest):
+            out.append(rest[i + 1])
+        elif rest[i].startswith("--work-tree="):
+            out.append(rest[i].split("=", 1)[1])
+        i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
+    return out
+
+
+def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -> List[str]:
+    """Ghi tay sổ giai đoạn qua thư mục: xoá/dời thư mục tổ tiên (`rm -r docs/autopilot`, `git mv docs …`, cả qua
+    `git -C docs`/`--work-tree=docs`), hay chép/dời/liên kết vào thư mục có sẵn mà tên nguồn là tên sổ
+    (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
+    removed = _removed_targets(n)
+    hits = [x for d in _git_path_dirs(n, argv, cwd) for t in removed for x in _where(t, root, d)]
+    hits = list(dict.fromkeys(x for x in hits if _ledger_hit(_rel_dir(x, root))))
     pos = _positionals(n[1:], COPY_DEST_OPTS) if n[:1] and n[0] in ("cp", "mv", "install", "ln") else []
     for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
         if pos[-1].endswith("/") or os.path.isdir(os.path.join(root, d)):
