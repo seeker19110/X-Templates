@@ -651,8 +651,10 @@ class GuardMatrixTest(unittest.TestCase):
         self.assertLess(len(out), 2000)
 
     def test_guard_tokenize_unclosed_quote_is_conservative(self):
-        # Nháy không đóng: shlex lỗi → tách thô, vẫn nhận ra lệnh nguy hiểm thay vì bỏ qua.
-        self.assertEqual(self.g.tokenize("echo 'abc"), ["echo", "'abc"])
+        # Nháy không đóng: shlex lỗi → tách thô, vẫn nhận ra lệnh nguy hiểm thay vì bỏ qua; D-276: token bỏ nháy/`\\`
+        # (`\\rm -rf ~` ↵ `"`, `'r'm -rf ~` ↵ `"` từng lọt vì tên lệnh giữ nháy).
+        self.assertEqual(self.g.tokenize("echo 'abc"), ["echo", "abc"])
+        self.assertIn("rm", self.g.tokenize('\\rm -rf ~\n"'))
         self.assertIn("sudo", self.g.tokenize('sudo apt "x'))
         self.check("deny", ["sudo apt install 'x", "git reset --hard \\"])
 
