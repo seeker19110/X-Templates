@@ -448,7 +448,7 @@ def _quote_states(line: str, q: str) -> Tuple[List[str], str]:
     out: List[str] = []
     i = 0
     while i < len(line):
-        c, st = line[i], ("'" if q == "$'" else q)  # `$'…'` (ANSI-C) là nháy đơn mà `\\'` không đóng (AUD-SEC-190)
+        c, st = line[i], ("'" if q == "$'" else q)  # `$'…'` (ANSI-C) là nháy đơn mà `\'` không đóng (AUD-SEC-190)
         run = QUOTE_RUN_RE[q].match(line, i)  # dãy ký tự không đổi trạng thái: ghi một lần (dòng dài không chậm)
         if run:
             out += [st] * (run.end() - i)
@@ -464,9 +464,7 @@ def _quote_states(line: str, q: str) -> Tuple[List[str], str]:
             out.append(st)
             i += 2
             continue
-        elif st == "'":
-            pass
-        elif q:
+        elif q:  # trong nháy: chỉ dấu đóng đổi trạng thái (`\` trong nháy đơn là chữ)
             q = "" if c == q else q
         elif line.startswith("$'", i):
             out.append("'")
