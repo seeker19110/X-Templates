@@ -2377,6 +2377,10 @@ class ShellParseGapsTest(unittest.TestCase):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
 
+    def test_hash_inside_word_in_expanded_heredoc_is_not_comment(self) -> None:
+        # `#` giữa từ (`a#b`) trong `$(…)` của thân heredoc không nháy: không mở comment — phủ nhánh `_ShellScan._comment`
+        self.assertEqual(final("cat <<E\n$(echo a#b)\nE"), "")
+
     def test_locale_string_dollar_double_quote(self) -> None:
         for cmd in ('$"rm" -rf ~', '$"git" push --force origin main', 'eval $"rm -rf ~"', '$"bash" -c "rm -rf ~"'):
             with self.subTest(cmd):
