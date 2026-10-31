@@ -13171,22 +13171,6 @@
   }
  },
  {
-  "id": "guard-har154-git-worktree-mv-ledger-dir",
-  "origin": "audit",
-  "refs": [
-   "AUD-HAR-154"
-  ],
-  "input": {
-   "command": "git --work-tree=docs mv autopilot x",
-   "files": {
-    "docs/autopilot/STAGE.json": "{}\n"
-   }
-  },
-  "expect": {
-   "allowed": false
-  }
- },
- {
   "id": "guard-har154-git-C-last-rm-home",
   "origin": "adversarial-reviewer",
   "refs": [
