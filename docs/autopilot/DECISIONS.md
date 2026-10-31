@@ -1888,3 +1888,10 @@
 - Chọn: Sửa theo 5 lát A–E trong PLAN, mỗi lát một PR, executor-deep viết + reviewer-alt rà, rồi cắt 3.30.0
 - Lý do (tiêu chí chất lượng cuối): Đúng và an toàn trước (tiêu chí 1): release-check FAIL khi còn 🟠 mở; lát nhỏ giữ đường lùi (revert từng PR); test tái hiện đỏ trước khi sửa
 - Đường lùi: Revert PR của lát; PLAN đánh [~] kèm lý do
+
+### D-269 · 2026-10-31T03:47:26+00:00 · PR #361: review lượt 2 còn 5 🔴 mới (g''h, ((…), $[…], $"…", $$') + 🔴 có từ trước cùng lớp — xử lý thế nào
+
+- Phương án: (1) rethink: một lần sửa hết A–I và P-1…P-4 theo bản vá reviewer đã thử, mọi ca tái hiện của hai lượt review vào bench/test, rồi review lại · (2) Bỏ toàn bộ thay đổi guard của #361 (revert về origin/main), làm lại lát A sau với thiết kế khác · (3) Giữ thay đổi, ghi 🔴 thành nợ
+- Chọn: rethink: một lần sửa hết A–I và P-1…P-4 theo bản vá reviewer đã thử, mọi ca tái hiện của hai lượt review vào bench/test, rồi review lại
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn (tiêu chí 1): lượt 1 đã đóng R1–R4 và AUD-SEC-190 (base để lọt); revert mất các bản sửa đó. Phương án 3 trái ADR-0059 (🔴 không ghi nợ). Bản vá A+B+D+E đã được reviewer thử: 0 chặn oan trên ~250 ca
+- Đường lùi: Revert các commit guard của #361 về origin/main; mở lại AUD-SEC-180/181/186/190
