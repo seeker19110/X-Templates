@@ -97,6 +97,32 @@ class PreBashGuardTest(unittest.TestCase):
         self.assertEqual(self.d("git clean -fdx"), "deny")
         self.assertEqual(self.d("git commit --allow-empty -m 'kick ci'"), "deny")
 
+    def test_git_global_opt_last_no_crash(self):
+        """Review #363 (F-A): tuỳ chọn toàn cục có giá trị đứng cuối (`git -C`) không được làm guard ném ngoại lệ — main()
+        fail-open khi ngoại lệ nên mọi luật sau bị bỏ (`git -C; rm -rf ~` từng cho chạy). Gọi thẳng `bash_decision` để
+        ngoại lệ không bị nuốt; một ca qua hook thật."""
+        g = _guard()
+        self.assertEqual(self.d("git -C; rm -rf ~", via_hook=True), "deny")
+        for cmd in (
+            "git -C; rm -rf ~",
+            "\\git -C; rm -rf ~",
+            "env X=1 git -C; rm -rf ~",
+            "echo $(git -C); rm -rf ~",
+            "git --no-pager -C; rm -rf ~",
+            "git -C || rm -rf ~",
+            "xargs git -C || rm -rf ~",  # có từ trước: `_git_alias_sources` cũng đọc `-C`
+            "git -c; rm -rf ~",
+            "git --git-dir; rm -rf ~",
+            "git --work-tree; rm -rf ~",
+            "git -C docs -C; rm -rf ~",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(g.bash_decision(cmd, str(ROOT))["decision"], "deny")
+        for cmd in ("git -C", "git -C /tmp status", "git --no-pager -C"):
+            with self.subTest(ok=cmd):
+                self.assertNotEqual(g.bash_decision(cmd, str(ROOT))["decision"], "deny")
+        self.assertEqual(g._git_C_dirs(["git", "-C", "a", "-C"]), ["a"])
+
     def test_ask_external_actions(self):
         self.assertEqual(self.d("cd infra && terraform apply", via_hook=True), "ask")
         self.assertEqual(self.d("npm publish"), "ask")

@@ -13187,6 +13187,84 @@
   }
  },
  {
+  "id": "guard-har154-git-C-last-rm-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git -C; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-xargs-git-C-last-rm-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "xargs git -C || rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-git-c-last-rm-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git -c; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-git-git-dir-last-rm-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git --git-dir; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-har154-git-work-tree-last-rm-home",
+  "origin": "adversarial-reviewer",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git --work-tree; rm -rf ~"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-control-har154-git-C-abs-status",
+  "origin": "control",
+  "refs": [
+   "AUD-HAR-154"
+  ],
+  "input": {
+   "command": "git -C /tmp status"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
   "id": "guard-control-har154-git-C-rm-other",
   "origin": "control",
   "refs": [

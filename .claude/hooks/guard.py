@@ -1329,7 +1329,7 @@ def _git_C_dirs(argv: List[str]) -> List[str]:
     a = _strip_prefixes(argv)
     rest, dirs, i = a[1:], [], 0
     while i < len(rest) and rest[i].startswith("-"):
-        if rest[i] == "-C":  # chỉ gọi khi lệnh là `git … commit`: sau `-C` luôn còn token
+        if rest[i] == "-C" and i + 1 < len(rest):  # gọi cho mọi lệnh git (`_ledger_asks`): `git -C` có thể đứng cuối
             dirs.append(rest[i + 1])
         i += 2 if rest[i] in GIT_OPTS_WITH_VALUE else 1
     return dirs
@@ -5370,7 +5370,8 @@ def _ledger_asks(n: List[str], argv: List[str], root: str, cwd: Optional[str]) -
     `git -C docs`/`--work-tree=docs`), hay chép/dời/liên kết vào thư mục có sẵn mà tên nguồn là tên sổ
     (`cp x/STAGE.json docs/autopilot/`) — AUD-HAR-154."""
     removed = dict.fromkeys(_removed_targets(n))  # đích trùng chỉ giải một lần (`realpath` tốn theo độ sâu thư mục)
-    found = dict.fromkeys(x for d in _git_path_dirs(n, argv, cwd) for t in removed for x in _where(t, root, d))
+    dirs = _git_path_dirs(n, argv, cwd) if removed else [cwd]  # chỉ đọc tuỳ chọn git khi có đích xoá/dời
+    found = dict.fromkeys(x for d in dirs for t in removed for x in _where(t, root, d))
     hits = [x for x in found if _ledger_hit(_rel_dir(x, root))]
     pos = _positionals(n[1:], COPY_DEST_OPTS) if n[:1] and n[0] in ("cp", "mv", "install", "ln") else []
     for d in _where(pos[-1], root, cwd) if len(pos) > 1 else []:
