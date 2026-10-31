@@ -1958,3 +1958,10 @@
 - Chọn: Chỉ thư mục dự án (ls-tree/diff --relative từ thư mục đó): commit app khác không làm gói hết hạn; mã dùng chung ngoài thư mục (vd packages/ui) cũng không
 - Lý do (tiêu chí chất lượng cuối): (3) bền/đơn giản/test được: phạm vi khớp đơn vị cài khung (.xtemplates/ trong thư mục dự án) và khớp release-check vốn chạy trong thư mục đó; (1) an toàn: phương án 2 khiến luồng ký kẹt vô hạn ở monorepo nên người sẽ bỏ qua máy; rủi ro mã dùng chung ngoài thư mục là có thật nhưng CI của monorepo vẫn chạy cổng — ghi thành nợ hướng phương án 3 (khai đường phụ thuộc) thay vì làm ngay
 - Đường lùi: Bỏ tham số './' + --relative trong evidence_fingerprint/_changed_since (scripts/xt.py) để quay về vân tay toàn repo; test MonorepoFingerprintTest đổi kỳ vọng
+
+### D-282 · 2026-10-31T19:40:10+00:00 · PR #368: thêm một lần sửa hết phát hiện sau 2 lượt review chưa sạch (ADR-0059/0053)
+
+- Phương án: (1) Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan · (2) Giữ AUD-SEC-195 ở trạng thái đã giảm còn mở, hạ giọng tài liệu, ghi nợ
+- Chọn: Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): phương án 1 đóng cả 11 ca lách và 3 ca chặn oan, đo bằng 23 ca lách bị chặn và 17 ca hợp lệ chạy, coverage 100 phần trăm; phương án 2 để hở lỗ đã tái hiện được
+- Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-195 về mở trong sổ audit
