@@ -1517,7 +1517,7 @@ class HeredocRound4Test(unittest.TestCase):
         )
         res = guard.bash_decision("shopt -s expand_aliases\nalias c='git push --force origin main'\nc", str(self.root))
         self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
-        self.assert_all("", ("alias ll='ls -l'", "shopt -s expand_aliases", "alias", "grep -n alias= README.md"))
+        self.assert_all("", ("shopt -s expand_aliases", "alias", "grep -n alias= README.md"))
 
     def test_many_heredocs_one_line_linear(self):
         """`cat <<A <<A …` ↵ `A` × n: dòng mở tách token một lần (cũ: mỗi heredoc một lần — bậc hai, n=2000 ~58 s)."""
@@ -1636,6 +1636,125 @@ class HeredocRound5Test(unittest.TestCase):
             ('git commit -m "$\\\n(cat <<\'EOF\'\nfix(x): y\\\nEOF)"; rm -rf ~\nEOF\n)"', "deny"),
             ("cat <\\\n<'EOF'\nfoo\\\nEOF\nrm -rf ~\nEOF", "deny"),
             ("cat <\\\n<'EOF'\nhello\nEOF", ""),
+        ] * 6
+        root = str(self.root)
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": root, "XT_GUARD_POLICY": ""}),
+            concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool,
+        ):
+            got = list(pool.map(lambda c: str(guard.apply_policy(guard.bash_decision(c[0], root))["decision"]), cmds))
+        self.assertEqual(got, [want for _, want in cmds])
+
+
+class AliasDefinitionTest(unittest.TestCase):
+    """D-272 (review #361 sau D-271): snapshot shell của Claude Code đã `shopt -s expand_aliases` nên luật
+    `expand_aliases` + `alias` (AUD-SEC-220) không đủ — định nghĩa alias nào cũng bị chặn, kể cả dạng né (`al${v}ias`,
+    `al\\` ↵ `ias`, nháy, `builtin`/`command`/`eval`, `BASH_ALIASES`); liệt kê và chữ trong đối số lệnh khác cho chạy.
+    Lý do chặn `#` trên dòng kết bằng `\\` (AUD-SEC-219) chỉ cách tránh."""
+
+    setUp = HeredocAllowlistTest.setUp
+    assert_all = HeredocAllowlistTest.assert_all
+
+    def test_alias_definition_denied(self):
+        """Claude Code bật `expand_aliases` (snapshot shell): định nghĩa alias nào cũng đổi nghĩa lệnh sau mà guard không
+        thấy → chặn (BUDGET), không đoán thân alias."""
+        for cmd in (
+            "alias c='ls -l'",
+            "alias c='git push --force origin main'\nc",
+            "alias -- c=ls",
+            "alias -p c=ls",
+            "alias 'c=rm -rf ~'\nc",
+            "al${v}ias c='rm -rf ~'\nc",
+            "al\\\nias c='rm -rf ~'\nc",
+            'a"li"as c=ls',
+            "al\\ias c=ls",
+            "\\alias c=ls",
+            "$'al'ias c=ls",
+            "builtin alias c='rm -rf ~'\nc",
+            "command alias c='rm -rf ~'\nc",
+            "eval 'alias c=ls'",
+            'bash -c "alias c=ls; c"',
+            'echo "$(alias c=ls)"',
+            "f() { alias c=ls; }; f",
+            "x=alias; $x c=ls",  # biến gán trong lệnh: bản viết lại
+            "${v:-alias} c=ls",
+            "al?as c=ls",
+            "printf -v n 'expand_%s' aliases\nshopt -s $n\nalias c='rm -rf ~'\nc",
+            "set -o posix\nalias c='rm -rf ~'\nc",
+            "BASH_ALIASES[c]='rm -rf ~'\nc",
+            "printf -v 'BASH_ALIASES[c]' ls",
+            'read "BASH_ALIASES[c]" <<< ls',
+            "declare -n r=BASH_ALI\\\nASES",
+            'printf -v "BASH_ALI${v}ASES[c]" ls',
+        ):
+            with self.subTest(cmd=cmd):
+                res = guard.bash_decision(cmd, str(self.root))
+                self.assertEqual(res["decision"], "deny")
+        res = guard.bash_decision("alias c='git push --force origin main'\nc", str(self.root))
+        self.assertEqual(res.get("code"), guard.BUDGET)
+        self.assertIn("alias", str(res["reason"]))
+
+    def test_alias_listing_and_mentions_allowed(self):
+        self.assert_all(
+            "",
+            (
+                "alias",
+                "alias -p",
+                "alias ll",
+                "unalias ll",
+                "type alias",
+                "grep 'alias ll=' ~/.bashrc",
+                'echo "alias x=y"',
+                "grep -n alias= README.md",
+                "$PYTHON -m pip install a==1",  # tên lệnh chỉ là biến: giới hạn chung (`$x -rf ~`), không riêng alias
+                '"$(git rev-parse --show-toplevel)"/scripts/x.sh FOO=1',
+                "aliases x=1",
+                "echo BASH_ALIAS",
+            ),
+        )
+
+    def test_alias_head_unit(self):
+        for head, want in (
+            ("alias", True),
+            ("al${v}ias", True),
+            ("a$(x)", True),
+            ("`x`s", True),
+            ("$(echo alias)", False),  # tên hoàn toàn động: giới hạn chung (`$(echo rm) -rf ~` cũng vậy)
+            ("`x`", False),
+            ("${v:-x}", False),
+            ("al?as", True),
+            ("[a]lias", True),
+            ("$x", False),
+            ("${x}", False),
+            ("$x$y", False),
+            ("aliases", False),
+            ("$x/alias", False),  # đường dẫn: không phải lệnh dựng sẵn
+            ("*/x.sh", False),
+            ("", False),
+        ):
+            with self.subTest(head=head):
+                self.assertEqual(guard._may_be_alias(head), want)
+
+    def test_comment_continuation_reason_suggests_fix(self):
+        """Chặn oan đã biết (AUD-SEC-219, chấp nhận): `#12` trên dòng kết bằng `\\` — lý do chỉ cách tránh."""
+        for cmd in (
+            "gh issue comment 12 --body 'Fixes #34' \\\n  --repo o/r",
+            "git commit -m 'fix(x): handle #12' \\\n  -m 'body'",
+        ):
+            with self.subTest(cmd=cmd):
+                res = guard.bash_decision(cmd, str(self.root))
+                self.assertEqual((res["decision"], res.get("code")), ("deny", guard.BUDGET))
+                self.assertIn("#NN", str(res["reason"]))
+                self.assertIn("không kết bằng `\\`", str(res["reason"]))
+
+    def test_concurrent_alias_decisions(self):
+        import concurrent.futures
+
+        cmds = [
+            ("gh issue comment 12 --body 'Fixes #34' \\\n  --repo o/r", "deny"),
+            ("al${v}ias c='rm -rf ~'\nc", "deny"),
+            ("alias", ""),
+            ("grep 'alias ll=' ~/.bashrc", ""),
         ] * 6
         root = str(self.root)
         with (

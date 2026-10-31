@@ -708,6 +708,17 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
 COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>])#")
 ALIAS_WORD_RE = re.compile(r"(?<![\w-])alias(?![\w-])")
+COMMENT_CONTINUED_WHY = (
+    "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
+    " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
+)
+# D-272: Claude Code chạy lệnh trong snapshot shell đã `shopt -s expand_aliases` → định nghĩa alias nào cũng đổi nghĩa
+# lệnh sau mà guard không thấy (AUD-SEC-220/222). Tên lệnh có thể thành `alias` sau mở rộng (`al${v}ias`, glob `al?as`)
+# cũng tính; tên hoàn toàn động (`$x`, `$(…)`) là giới hạn chung của phân tích tĩnh (biến gán trong cùng lệnh đã được
+# viết lại thành chữ). Đối số chỉ là tên trơn (`alias`, `alias -p`, `alias ll`: in) thì cho chạy.
+HEAD_EXPANSION_RE = re.compile(r"\$\{[^}]*\}?|\$\((?:[^()]|\([^()]*\))*\)?|`[^`]*`?|\$[A-Za-z_]\w*|\$.?")
+ALIAS_LIST_ARG_RE = re.compile(r"[\w.:@%+,-]+")
+ALIAS_TABLE = "BASH_ALIASES"  # gán phần tử mảng này (`BASH_ALIASES[c]=…`, `printf -v`, `read`) = định nghĩa alias
 
 
 def _shell_precheck(cmd: str) -> None:
@@ -715,13 +726,31 @@ def _shell_precheck(cmd: str) -> None:
     - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
       `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
       lẻ trong thân heredoc) — không đoán;
-    - `expand_aliases` cùng từ `alias` (sau khi bỏ nháy/`\\`): thân alias thành lệnh mà guard không thấy
-      (`alias c='git push --force origin main'` ↵ `c`, `alias c='cat <<X'`)."""
+    - `expand_aliases` cùng từ `alias`, hay `BASH_ALIASES` ở đâu cũng vậy (sau khi nối dòng, bỏ nháy/`\\`/biến): thân
+      alias thành lệnh mà guard không thấy (`alias c='git push --force origin main'` ↵ `c`, `alias c='cat <<X'`).
+      Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
-        raise ScanTooComplex("`\\` cuối dòng sau `#` (bash không nối dòng trong comment)")
-    norm = re.sub(r"[\"'\\]", "", cmd)
+        raise ScanTooComplex(COMMENT_CONTINUED_WHY)
+    norm = re.sub(r"[\"'\\]", "", join_continuations(cmd))
     if "expand_aliases" in norm and ALIAS_WORD_RE.search(norm):
         raise ScanTooComplex("alias khi bật `expand_aliases`")
+    if ALIAS_TABLE in norm or ALIAS_TABLE in HEAD_EXPANSION_RE.sub("", norm):
+        raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
+
+
+def _may_be_alias(head: str) -> bool:
+    """Tên lệnh `head` (đã bỏ nháy, chưa bỏ thư mục) có chữ cho thấy có thể thành `alias` sau mở rộng của bash không
+    (`al${v}ias`, `al?as`). Đường dẫn → không (dựng sẵn không gọi qua đường dẫn); tên hoàn toàn động (`$x`, `$(…)`) →
+    không: giới hạn chung của phân tích tĩnh (`r${v}m -rf ~` cũng vậy), biến gán trong lệnh đã được viết lại thành chữ."""
+    pat = HEAD_EXPANSION_RE.sub("*", head)
+    return "/" not in pat and bool(pat.strip("*")) and fnmatch.fnmatchcase("alias", pat)
+
+
+def _alias_rule(argv: List[str]) -> None:
+    """Lệnh đơn định nghĩa alias (tên lệnh có thể là `alias`, đối số không phải tên trơn: `c=…`, `$d`, glob) → chặn."""
+    a = _strip_prefixes(argv)
+    if a and _may_be_alias(a[0]) and not all(ALIAS_LIST_ARG_RE.fullmatch(x) for x in a[1:]):
+        raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
 
 
 def _comment_continued(line: str) -> bool:
@@ -5742,6 +5771,7 @@ def _scan_command(
     if not n:  # chỉ chuyển hướng: `exec 3> .env`, `> .env` (review #186 lần 2) — vẫn là ghi
         asks.extend(_write_asks(n, argv, root, cwd))
         return None
+    _alias_rule(argv)
     asks.extend(_unknown_git_opt_asks(n, argv))
     # `commit`/`push` tác động lên repo ở `cd …`/`git -C …`; thư mục không rõ → push dùng gốc dự án (hỏi > cho qua).
     # Lệnh git ghi ref (AUD-SEC-119) cũng cần repo thật để đọc tên remote của nó.

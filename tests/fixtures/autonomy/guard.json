@@ -12442,8 +12442,9 @@
    "refs": [
     "AUD-SEC-220"
    ],
+   "note": "D-272: định nghĩa alias nào cũng chặn (Claude Code bật sẵn expand_aliases) — đối chứng còn lại là liệt kê",
    "input": {
-    "command": "alias ll='ls -l'"
+    "command": "alias"
    },
    "expect": {
     "allowed": true
