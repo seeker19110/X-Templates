@@ -3,7 +3,7 @@ title: File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
 kind: module
 prefix: LOOP-HARNESS
 applies_to: [all]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state
@@ -50,6 +50,9 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   `flock` → exit 2, không gọi mutator/ghi state; Stop/PreCompact vẫn cho dừng/compaction và ghi log lỗi khóa.
   Dự án chưa cài harness giữ tương thích. Cài mới có thể chọn chính sách merge/review `--preset safe`
   (ADR-0055); preset không tạo sandbox hoặc thay cấu hình dự án đã có.
+- **Guard chỉ hiểu dạng heredoc đơn giản; dạng khác bị chặn (BUDGET)** (D-270): dấu kết `[A-Za-z0-9_.-]+` trần, bọc trọn
+  nháy hay một `\` đầu, ở cấp ngoài/`(…)`/`$(…)`/`"$(…)"`, dòng mở cân nháy/ngoặc — `<<` khác mà bash có thể đọc là
+  heredoc (dấu kết có `$`/backtick/nháy pha, `\<<`, trong backtick/`${…}`/`<(…)`/số học không đơn giản…) không được đoán.
 - **Guard không xét gửi bí mật ra mạng bằng thư viện của trình thông dịch** (AUD-SEC-086): luật "gửi file bí mật/biến môi
   trường ra mạng" chỉ nhận CLI (`curl`/`wget`, `scp`/`rsync`, `nc`/`socat`/`ssh`, `gh gist|release upload`) và `/dev/tcp`.
   `python3 -c` dùng `urllib`/`http.client`/`socket`, `node -e` dùng `fetch`/`http`/`net` gửi bí mật đi thì không bị xét
