@@ -1772,6 +1772,64 @@ class AliasDefinitionTest(unittest.TestCase):
         self.assertEqual(fm.call_count, 0)
         self.assertEqual(final("[" * 20000 + " c=x\ngit push --force origin main", self.root), "deny")
 
+    def test_alias_letter_forms_d274(self):
+        """D-274 (review #361 sau D-273): luật alias/`BASH_ALIASES` không phụ thuộc trạng thái nháy — toán tử có nháy
+        (`alias '>' c=…`), `$'` trong comment/heredoc, nháy lẻ phía trước, biến rỗng ghép tên, `\\x45` đều bị chặn;
+        `$'`/`$"` sau `#` của lệnh nhiều dòng bị chặn (guard giải ANSI-C trước khi bỏ comment)."""
+        for name, cmd in (
+            ("A1_sq_gt", "alias '>' c='git push --force origin main'\nc"),
+            ("A2_dq_gt", "alias \">\" c='git push --force origin main'\nc"),
+            ("A3_bs_gt", "alias \\> c='git push --force origin main'\nc"),
+            ("A4_sq_lt", "alias '<' c='git push --force origin main'\nc"),
+            ("A5_sq_ampgt", "alias '&>' c='git push --force origin main'\nc"),
+            ("A6_sq_gtgt", "alias '>>' c='git push --force origin main'\nc"),
+            ("A7_builtin", "builtin alias '>' c='git push --force origin main'\nc"),
+            ("A8_gt_sqdef", "alias '>' 'c=git push --force origin main'\nc"),
+            ("A9_digit", "alias 1 '>' c='git push --force origin main'\nc"),
+            ("A10_lt_gt", "alias '<>' c='git push --force origin main'\nc"),
+            ("B1_comment", "true # $'\ndeclare BASH_ALIAS\\ES[c]='git push --force origin main'\nc"),
+            ("B2_heredoc", "cat <<'EOF'\n$'\nEOF\ndeclare BASH_ALIAS\\ES[c]='git push --force origin main'\nc"),
+            ("B3_printf", "true # $'\nprintf -v BASH_ALIAS\\ES[c] %s 'git push --force origin main'\nc"),
+            ("B4_read", "true # $'\nIFS= read -r BASH_ALIAS\\ES[c] <<< 'git push --force origin main'\nc"),
+            ("C1_dq_var", "declare BASH_ALIAS\"$x\"ES[c]='git push --force origin main'\nc"),
+            ("C2_var_bs", "declare BASH_ALIAS$x\\ES[c]='git push --force origin main'\nc"),
+            ("C3_var_sq", "declare BASH_ALIAS$x''ES[c]='git push --force origin main'\nc"),
+            ("C4_printf", "printf -v BASH_ALIAS\"$x\"ES[c] %s 'git push --force origin main'\nc"),
+            ("D1_brace", "declare BASH_ALIAS{ES,}[c]='git push --force origin main'\nc"),
+            ("E1_desync_hexsplice", "true # $'\ndeclare BASH_ALIAS$'\\x45'S[c]='git push --force origin main'\nc"),
+            ("E2_desync_push", "true # $'\ntouch PWN\\ED"),
+            ("E2_desync_push_1", "true # $'\ngit push --forc\\e origin main"),
+            ("E3_desync_rm", "true # $'\ntouch PWN\\ED"),
+            ("E3_desync_rm_1", "true # $'\nr\\m -rf ~"),
+            ("E4_desync_alias_bel", "true # $'\n\\alias c=git push --force origin main\nc"),
+            ("E4_desync_alias_bel_1", "true # $'\n\\alias c=git\\ push\\ --force\\ origin\\ main\nc"),
+            ("E5_hd_desync_alias", "cat <<'EOF'\n$'\nEOF\n\\alias c=git push --force origin main\nc"),
+            ("E5_hd_desync_alias_1", "cat <<'EOF'\n$'\nEOF\n\\alias c=git\\ push\\ --force\\ origin\\ main\nc"),
+            ("P2_cmt_ansi_rm", "# $'\ngit push --force origin main"),
+            ("F1_cmt_apos_splice", "true # it's\ndeclare BASH_ALIAS$''ES[c]='git push --force origin main'\nc"),
+            (
+                "F2_hd_apos_splice",
+                "cat <<'EOF'\nit's\nEOF\ndeclare BASH_ALIAS$''ES[c]='git push --force origin main'\nc",
+            ),
+            (
+                "F3_hd_apos_hex",
+                "cat <<'EOF'\nit's\nEOF\ndeclare BASH_ALI$'\\x41'SES[c]='git push --force origin main'\nc",
+            ),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(final(cmd, self.root), "deny")
+        for cmd in (
+            "alias",
+            "alias -p",
+            "alias ll 2>/dev/null || echo none",
+            "grep 'alias ll=' ~/.bashrc",
+            'echo "alias x=y"',
+            "ls  # note it's fine\necho ok",
+            "git commit -m 'x' # $'y'",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), "")
+
     def test_comment_continuation_reason_suggests_fix(self):
         """Chặn oan đã biết (AUD-SEC-219, chấp nhận): `#12` trên dòng kết bằng `\\` — lý do chỉ cách tránh."""
         for cmd in (

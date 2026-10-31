@@ -1923,3 +1923,10 @@
 - Chọn: Áp đúng hai bản vá reviewer đã thử + test; ghi sổ 2 🔴 có từ trước để sửa ở lát B
 - Lý do (tiêu chí chất lượng cuối): Bản vá hai dòng đã thử: 549 ca không đổi, V9 chặn sau 1,6 s; gỡ luật alias mở lại AUD-SEC-220/224
 - Đường lùi: Revert commit lượt này về 5948c3f
+
+### D-274 · 2026-10-31T09:55:22+00:00 · PR #361: luật alias/BASH_ALIASES bị né lặp lại qua nháy/ANSI-C/comment (3 🔴 sau D-273) — đổi cách
+
+- Phương án: (1) Chuẩn hoá thô không phụ thuộc nháy: bỏ mở rộng $name/${…}, rồi chỉ giữ chữ-số; 'bashaliases' xuất hiện → chặn; token mà phần chữ của nó là 'alias' và lệnh có đối số chứa '=' → chặn (liệt kê không '=' cho chạy) · (2) Áp bản vá reviewer (_alias_norms ba cách đọc) · (3) Gỡ luật alias khỏi PR, ghi sổ
+- Chọn: Chuẩn hoá thô không phụ thuộc nháy: bỏ mở rộng $name/${…}, rồi chỉ giữ chữ-số; 'bashaliases' xuất hiện → chặn; token mà phần chữ của nó là 'alias' và lệnh có đối số chứa '=' → chặn (liệt kê không '=' cho chạy)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: không phụ thuộc trạng thái nháy nên các lớp né (nháy lẻ, $'' trong comment, ANSI-C, toán tử có nháy) cùng đóng; đơn giản, test được; chặn oan chỉ ở chuỗi nhắc BASH_ALIASES/alias kèm '=' (đã chấp nhận ở D-272)
+- Đường lùi: Revert commit lượt này về e4db80e

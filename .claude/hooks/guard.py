@@ -707,7 +707,6 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
 COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>])#")
-ALIAS_WORD_RE = re.compile(r"(?<![\w-])alias(?![\w-])")
 COMMENT_CONTINUED_WHY = (
     "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
     " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
@@ -717,8 +716,22 @@ COMMENT_CONTINUED_WHY = (
 # cũng tính; tên hoàn toàn động (`$x`, `$(…)`) là giới hạn chung của phân tích tĩnh (biến gán trong cùng lệnh đã được
 # viết lại thành chữ). Đối số chỉ là tên trơn (`alias`, `alias -p`, `alias ll`: in) thì cho chạy.
 HEAD_EXPANSION_RE = re.compile(r"\$\{[^}]*\}?|\$\((?:[^()]|\([^()]*\))*\)?|`[^`]*`?|\$[A-Za-z_]\w*|\$.?")
-ALIAS_LIST_ARG_RE = re.compile(r"[\w.:@%+,-]+")
+# D-274: định nghĩa alias cần `=` (hoặc mở rộng/glob tạo ra nó); liệt kê (`alias ll`, kèm chuyển hướng) không có — xét
+# trên token đã bỏ nháy nên `'>'` có nháy không che được `c=…` như phép bỏ chuyển hướng cũ (review #361 sau D-273).
+ALIAS_DEF_HINT_RE = re.compile(r"[=$`*?\[{]")
 ALIAS_TABLE = "BASH_ALIASES"  # gán phần tử mảng này (`BASH_ALIASES[c]=…`, `printf -v`, `read`) = định nghĩa alias
+ALIAS_TABLE_LETTERS = "BASHALIASES"
+ESCAPE_NUM_RE = re.compile(r"\\x([0-9A-Fa-f]{1,2})|\\([0-7]{1,3})")
+
+
+def _letter_forms(cmd: str) -> List[str]:
+    """D-274: các dạng chỉ-chữ-số của lệnh (đã nối dòng) — thô, bỏ mở rộng `$x`/`${…}`/`$(…)`, và sau giải ANSI-C:
+    không phụ thuộc trạng thái nháy/comment/heredoc, nên ghép `$''`, `\\E`, `"$x"`, `$'\\x45'`, `{ES,}` sau nháy lẻ
+    hay `$'` trong comment đều không che được tên (review #361 sau D-273)."""
+    j = join_continuations(cmd)
+    esc = ESCAPE_NUM_RE.sub(lambda m: chr(int(m.group(1), 16) if m.group(1) else int(m.group(2), 8) % 256), j)
+    forms = (j, HEAD_EXPANSION_RE.sub("", j), expand_ansi_c(j), esc)  # `esc`: giải `\\xHH`/`\\NNN` mọi nơi, không cần
+    return [re.sub(r"[^A-Za-z0-9]", "", x) for x in forms]  # đúng cặp `$'…'` (nháy lẻ phía trước làm lệch cặp)
 
 
 def _shell_precheck(cmd: str) -> None:
@@ -726,17 +739,13 @@ def _shell_precheck(cmd: str) -> None:
     - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
       `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
       lẻ trong thân heredoc) — không đoán;
-    - `expand_aliases` cùng từ `alias`, hay `BASH_ALIASES` ở đâu cũng vậy (sau khi nối dòng, bỏ nháy/`\\`/biến): thân
-      alias thành lệnh mà guard không thấy (`alias c='git push --force origin main'` ↵ `c`, `alias c='cat <<X'`).
-      Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272)."""
+    - `BASH_ALIASES` ở đâu cũng vậy, so trên dạng chỉ-chữ-số (`_letter_forms`, D-274): thân alias thành lệnh mà guard
+      không thấy. Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272/D-274)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
-    norm = re.sub(
-        r"[\"'\\]", "", expand_ansi_c(join_continuations(cmd)).replace('$"', '"')
-    )  # `$''`/`$""` ghép tên (D-273)
-    if "expand_aliases" in norm and ALIAS_WORD_RE.search(norm):
-        raise ScanTooComplex("alias khi bật `expand_aliases`")
-    if ALIAS_TABLE in norm or ALIAS_TABLE in HEAD_EXPANSION_RE.sub("", norm):
+    if "#" in cmd and "\n" in cmd and any(_comment_quotes_dollar(line) for line in cmd.split("\n")[:-1]):
+        raise ScanTooComplex("`$'`/`$\"` trong comment của lệnh nhiều dòng — guard giải ANSI-C trước khi bỏ comment")
+    if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
 
 
@@ -755,8 +764,15 @@ def _may_be_alias(head: str) -> bool:
 def _alias_rule(argv: List[str]) -> None:
     """Lệnh đơn định nghĩa alias (tên lệnh có thể là `alias`, đối số không phải tên trơn: `c=…`, `$d`, glob) → chặn."""
     a = _strip_prefixes(argv)
-    if a and _may_be_alias(a[0]) and not all(ALIAS_LIST_ARG_RE.fullmatch(x) for x in _drop_redirects(a[1:])):
+    if a and _may_be_alias(a[0]) and any(ALIAS_DEF_HINT_RE.search(x) for x in a[1:]):
         raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
+
+
+def _comment_quotes_dollar(line: str) -> bool:
+    """D-274: `$'`/`$"` sau chỗ có thể mở comment — `expand_ansi_c` chạy trước `strip_comments` nên nuốt các dòng sau
+    như chuỗi ANSI-C (`true # $'` ↵ `r\\m -rf ~`; review #361 sau D-273). Không đoán nháy: chặn."""
+    m = COMMENT_START_RE.search(line)
+    return bool(m) and ("$'" in line[m.start() :] or '$"' in line[m.start() :])
 
 
 def _comment_continued(line: str) -> bool:

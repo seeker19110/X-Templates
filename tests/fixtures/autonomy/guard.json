@@ -12790,6 +12790,110 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d274-alias-quoted-op",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "alias '>' c='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-aliases-comment-desync",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "true # $'\ndeclare BASH_ALIAS\\ES[c]='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-aliases-var-splice",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "declare BASH_ALIAS\"$x\"ES[c]='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-aliases-hex-after-apos",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "cat <<'EOF'\nit's\nEOF\ndeclare BASH_ALI$'\\x41'SES[c]='git push --force origin main'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-comment-ansi-desync-push",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "true # $'\ngit push --forc\\e origin main"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-comment-ansi-desync-rm",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "true # $'\nr\\m -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d274-control-grep-alias",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "grep 'alias ll=' ~/.bashrc"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-d274-control-comment-apos",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "ls  # note it's fine\necho ok"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
