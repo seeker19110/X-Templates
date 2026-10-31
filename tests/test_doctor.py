@@ -16,6 +16,7 @@ import unittest
 import unittest.mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -788,10 +789,10 @@ class DoctorOrchestrationTest(DoctorCase):
         self.write(".claude/agents/locked.md", "---\nmodel: opus\n---\n")
         real = Path.read_text
 
-        def flaky(p: Path, *a: object, **k: object) -> str:
+        def flaky(p: Path, *a: Any, **k: Any) -> str:
             if p.name == "locked.md":
                 raise PermissionError(p)
-            return real(p, *a, **k)  # type: ignore[arg-type]
+            return real(p, *a, **k)
 
         with unittest.mock.patch.object(Path, "read_text", flaky):
             [f] = self.orch()  # chỉ cảnh báo Agent Teams; agent không đọc được thì bỏ qua, doctor không vỡ
