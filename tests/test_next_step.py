@@ -290,6 +290,19 @@ class NextStepPureTest(unittest.TestCase):
                 self.assertEqual((out["action"], out["package"]), ("release-check", None))
                 self.assertIn(f"gói nghiệm thu hết hạn: {note}", out["reason"])
 
+    def test_signoff_fresh_release_human(self) -> None:
+        """AUD-HAR-151: gói còn khớp vân tay + `release-check` mới đúng cây (`release_changed == []`) → việc chờ người mới
+        của kết quả đó (`prod_switch` sau khi DECISIONS.md đổi — ngoài vân tay) vẫn hiện; kết quả lệch cây thì không hợp."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        rel = {"head": "b" * 40, "fails": [], "human": ["prod_switch"], "verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": []})
+        self.assertEqual(out["action"], "signoff-package")
+        self.assertEqual(out["package"]["human_pending"], ["prod_switch"])
+        self.assertIn("người xác nhận prod_switch", out["missing"])
+        self.assertIn("chờ người: prod_switch", out["reason"])
+        stale = self.step(objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": ["app.py"]})
+        self.assertEqual((stale["action"], stale["package"]["human_pending"]), ("signoff-package", []))
+
     def test_expired_package_with_fresh_release(self) -> None:
         """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →
         `replan`; `release-check` mới FAIL thắng cả gói còn hiệu lực cùng nội dung (kết quả chặt hơn)."""

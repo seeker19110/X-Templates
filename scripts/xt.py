@@ -7461,8 +7461,10 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
             "missing": [f"`{x}` PASS" for x in rel["fails"]],
         }
     if pkg is not None and pkg["evidence_fp"] == fp:
-        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326)
-        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]))}
+        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
+        # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
+        later = set(rel["human"]) if fresh else set()
+        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
         return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
     if not fresh:
         return _signoff_rerun(f, pkg, rel)
