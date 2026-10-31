@@ -1881,3 +1881,10 @@
 - Chọn: Thêm một lần sửa hết O1 + G1–G7 (cục bộ trong khối nguồn thân), giới hạn byte đọc
 - Lý do (tiêu chí chất lượng cuối): Lượt có 🔴 thì sửa hết (ADR-0059); 🔴 chỉ là test, thiết kế đã đúng — các sửa còn lại nhỏ, cục bộ, có test; thu hẹp sẽ mất bảo vệ đã review
 - Đường lùi: Revert squash PR; guard về bản main
+
+### D-268 · 2026-10-31T00:46:17+00:00 · Duyệt PLAN-harden-2026-10-31 (sửa 10 🟠 audit delta 6799550..78fb359 + nợ #357 trước 3.30.0)
+
+- Phương án: (1) Sửa theo 5 lát A–E trong PLAN, mỗi lát một PR, executor-deep viết + reviewer-alt rà, rồi cắt 3.30.0 · (2) Cắt 3.30.0 ngay, ghi 🟠 thành nợ sau phát hành · (3) Chỉ sửa 🟠 guard (lát A–B), để lát C–E sau 3.30.0
+- Chọn: Sửa theo 5 lát A–E trong PLAN, mỗi lát một PR, executor-deep viết + reviewer-alt rà, rồi cắt 3.30.0
+- Lý do (tiêu chí chất lượng cuối): Đúng và an toàn trước (tiêu chí 1): release-check FAIL khi còn 🟠 mở; lát nhỏ giữ đường lùi (revert từng PR); test tái hiện đỏ trước khi sửa
+- Đường lùi: Revert PR của lát; PLAN đánh [~] kèm lý do
