@@ -134,12 +134,7 @@ WRAPS: Dict[str, Wrap] = {
 HARMLESS = ("env", "command", "nice", "timeout", "seq", "and")
 
 # Biến thể đỏ đã biết: id biến thể → lý do (ID sổ audit). Phải khớp tests/fixtures/autonomy/pending/guard.json.
-KNOWN_RED: Dict[str, str] = {
-    "fuzz-guard-rev361c-dp-tick-mark--bash-c+subst+and": (
-        "`$(bash -c '…`echo )`…')` trong nháy kép: `_dollar_spans` đếm ngoặc thô trong nháy đơn, cắt thay lệnh sớm nên "
-        "script `bash -c` lồng không được quét (AUD-SEC-202, có từ trước)"
-    ),
-}
+KNOWN_RED: Dict[str, str] = {}  # biến thể AUD-SEC-202 cũ nay bị chặn bởi luật D-275 (`` `# ``/nháy lẻ trước `$'`)
 
 # Loại trừ có lý do (không phải lỗ của guard): ca gốc chặn vì ĐÍCH TƯƠNG ĐỐI theo thư mục dự án (`.autopilot/…`,
 # `tests/…`, `.claude/hooks` viết không `/` đầu, `~+` = `$PWD`). Sau `cd /tmp &&` lệnh ghi vào `/tmp/…`, không chạm dự

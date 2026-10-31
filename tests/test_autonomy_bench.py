@@ -115,16 +115,9 @@ class AutonomyBenchRepoTest(unittest.TestCase):
 
     def test_autonomy_bench_pending_reproduces_open_gaps(self):
         """`pending/`: false-green mới phát hiện, chưa sửa (không vào cổng). T-1523 sửa guard cho cả 5 ca → chuyển sang
-        tests/fixtures/autonomy/guard.json (đạt, trong cổng). Ca pending mới (biến thể fuzz `KNOWN_RED` kèm ID sổ audit)
-        phải tái hiện false-green (exit 1) ở `--corpus …/pending` cho tới khi sửa."""
-        names = {p.name for p in (CORPUS / "pending").glob("*.json")}
-        self.assertLessEqual(names, {"guard.json"})  # chỉ nhóm guard (khớp `KNOWN_RED` của tests/test_guard_fuzz.py)
-        if names:
-            pending, _ = xt.autonomy_corpus(CORPUS / "pending")
-            rc, out, _ = bench("--corpus", str(CORPUS / "pending"), "--json")
-            self.assertEqual(rc, 1)
-            greens = [r["id"] for r in json.loads(out)["failures"] if r["status"] == "false_green"]
-            self.assertEqual(sorted(greens), sorted(c["id"] for c in pending))
+        tests/fixtures/autonomy/guard.json (đạt, trong cổng); `pending/` trống. Ca pending mới phải tái hiện false-green
+        (exit 1) ở `--corpus …/pending` cho tới khi sửa."""
+        self.assertEqual(sorted((CORPUS / "pending").glob("*.json")), [])
         moved = {
             "guard-adv-xargs-push-main": "echo main | xargs git push origin",
             "guard-adv-cmdsub-push-main": "git push origin $(echo main)",
