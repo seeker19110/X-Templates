@@ -388,15 +388,11 @@ ANSI_PLAIN_RE = re.compile(r"[^'\\]+")
 TICK_PLAIN_RE = re.compile(r"[^`\\'\"$<]+")
 BRACE_PLAIN_RE = re.compile(r"[^}{\\'\"`$<]+")
 ARITH_PLAIN_RE = {"A(": re.compile(r"[^'\"\\`$()<{}]+"), "A[": re.compile(r"[^'\"\\`$\[\]<{}]+")}
-ARITH_PLAIN_RE["$A("] = ARITH_PLAIN_RE["A("]  # `$((…))` (một phần của từ) đọc như `((…))` (lệnh)
-ARITH_PAIR = {"A(": ("(", ")"), "$A(": ("(", ")"), "A[": ("[", "]")}
-# Ngoặc của TỪ (bash): `#` ngay sau `)` đóng chúng là chữ, không mở comment (AUD-SEC-195)
-WORD_CLOSE_KINDS = ("$(", "<(", "=(", "$A(")
+ARITH_PAIR = {"A(": ("(", ")"), "A[": ("[", "]")}
 SIMPLE_VAR_RE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9#@?*!$-])")
 HERE_OP_RE = re.compile(r"(?<!<)<<(?!<)")  # `<<`/`<<-` có thể là heredoc (không phải `<<<`)
 SUBST_KINDS = ("$(", "<(")  # thay lệnh/thay tiến trình: bash đọc heredoc trong đó theo luật tương thích cũ (D-271)
-# (loại: `(` `$(` `<(` `"` `'` `$'` backtick `${` `A(` `$A(` `A[`; số ngoặc còn mở của `A…`, `(` extglob: 1)
-Frame = Tuple[str, int]
+Frame = Tuple[str, int]  # (loại: `(` `$(` `<(` `"` `'` `$'` backtick `${` `A(` `A[`, số ngoặc còn mở của `A…`)
 HereSpan = Tuple[int, "re.Match[str]", int, int, bool]  # (dòng mở, match, đầu thân, cuối thân, nằm trong `"$(`)
 
 
@@ -448,8 +444,6 @@ class _HereScan:
         self.ops: List[Tuple["re.Match[str]", int]] = []
         self.low = 0  # độ sâu ngăn xếp thấp nhất từ heredoc đầu tiên của dòng
         self.esc = -1  # vị trí ngay sau ký tự thoát `\x` gần nhất
-        self.word_close = -1  # vị trí ngay sau `)` đóng ngoặc của từ (`$(…)`, `<(…)`, `a=(…)`, `$((…))`) gần nhất
-        self.glob_close = -1  # vị trí ngay sau `)` đóng `(` extglob (`!(x)`) gần nhất
         self.handlers: Dict[str, Callable[[str, int], int]] = {
             "": self._code,
             "(": self._code,
@@ -462,7 +456,6 @@ class _HereScan:
             "`": self._tick,
             "${": self._brace,
             "A(": self._arith,
-            "$A(": self._arith,
             "A[": self._arith,
         }
 
@@ -471,7 +464,7 @@ class _HereScan:
         i, ends = 0, _HereEnds(self.lines)
         while i < len(self.lines):
             line, opener, i = self.lines[i], i, i + 1
-            start_ok, self.ops, self.esc, self.word_close, self.glob_close = self._structural(), [], -1, -1, -1
+            start_ok, self.ops, self.esc = self._structural(), [], -1
             j = 0
             while j < len(line):
                 j = self.handlers[self.stack[-1][0] if self.stack else ""](line, j)
@@ -509,11 +502,7 @@ class _HereScan:
         return j
 
     def _pop(self, j: int) -> int:
-        kind, flag = self.stack.pop()
-        if kind in WORD_CLOSE_KINDS:
-            self.word_close = j
-        elif kind == "(" and flag:
-            self.glob_close = j
+        kind = self.stack.pop()[0]
         self.dq -= kind == '"'
         self.subst -= kind in SUBST_KINDS
         self.struct.pop()
@@ -532,7 +521,8 @@ class _HereScan:
             self.esc = j + 2
             return j + 2
         if c == "#":
-            return self._hash(line, j)
+            word_start = j == 0 or (line[j - 1] in WORD_END and self.esc != j)
+            return len(line) if word_start else j + 1
         if c == "<":
             return self._lt(line, j)
         if c == "$":
@@ -542,13 +532,6 @@ class _HereScan:
         if c in "()":
             return self._paren(line, j)
         return self._push(c, j + 1)  # `'`, `"`, backtick
-
-    def _hash(self, line: str, j: int) -> int:
-        """`#` mở comment ở đầu từ — không sau `\\x`, không sau `)` của từ (`$(x)#<<E`: `<<E` là heredoc thật,
-        AUD-SEC-195); sau `)` extglob bash đọc tuỳ `extglob` → `taint`."""
-        self.taint = self.taint or self.glob_close == j
-        word_start = j == 0 or (line[j - 1] in WORD_END and j not in (self.esc, self.word_close))
-        return len(line) if word_start else j + 1
 
     def _lt(self, line: str, j: int) -> int:
         if line.startswith("<<<", j):
@@ -570,7 +553,7 @@ class _HereScan:
             return self._push("=(", j + 1)
         if line.startswith("((", j):
             return self._arith_open(line, j, 2, "A(")
-        return self._push("(", j + 1, int(j > 0 and line[j - 1] in EXTGLOB_CHARS))
+        return self._push("(", j + 1)
 
     def _array(self, line: str, j: int) -> int:
         """Gán mảng `x=(…)`, `declare -a x=(…)`: đọc như mã; `(`, `;`, `|`, `&`, `<`, `>` trần trong đó là lỗi cú pháp
@@ -582,13 +565,11 @@ class _HereScan:
 
     def _arith_open(self, line: str, j: int, n: int, kind: str) -> int:
         end = _arith_end(line, j + n, kind)
-        if end and kind == "$A(":
-            self.word_close = end
         return end or self._push(kind, j + n, 1 if kind == "A[" else 2)
 
     def _dollar(self, line: str, j: int, code: bool) -> int:
         if line.startswith("$((", j):
-            return self._arith_open(line, j, 3, "$A(")
+            return self._arith_open(line, j, 3, "A(")
         two = line[j : j + 2]
         if two == "$[":
             return self._arith_open(line, j, 2, "A[")
@@ -726,10 +707,6 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
 COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>`])#")  # backtick mở từ (D-275)
-COMMENT_AMBIGUOUS_WHY = (
-    "`#` dính sau `)` của extglob/mẫu `case` mở phần có nháy/`\\`/`<` mà guard và bash có thể đọc khác các dòng sau"
-    " (AUD-SEC-195) — thêm khoảng trắng trước `#`"
-)
 COMMENT_CONTINUED_WHY = (
     "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
     " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
@@ -760,15 +737,12 @@ def _shell_precheck(cmd: str) -> None:
     - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
       `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
       lẻ trong thân heredoc) — không đoán;
-    - `#` dính sau `)` mơ hồ (extglob, mẫu `case`) mở phần có nháy/`\\`/`<` trong lệnh nhiều dòng (`comment_ambiguous`);
     - `BASH_ALIASES` ở đâu cũng vậy, so trên dạng chỉ-chữ-số (`_letter_forms`, D-274): thân alias thành lệnh mà guard
       không thấy. Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272/D-274)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
     if "\n" in cmd and "#" in cmd and _comment_desyncs_ansi(cmd):
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
-    if "\n" in cmd and "#" in cmd and comment_ambiguous(cmd):
-        raise ScanTooComplex(COMMENT_AMBIGUOUS_WHY)
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
 
@@ -916,134 +890,27 @@ def _fold_heredocs(cmd: str, subst: bool, escape: bool = False) -> str:
 
 def strip_comments(cmd: str) -> str:
     """Bỏ comment kiểu bash: `#` ở ĐẦU một từ (đầu chuỗi, sau khoảng trắng hoặc toán tử), ngoài nháy, tới hết dòng.
-    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`, `$(x)#y`), trong nháy hoặc sau `\\` là chữ thường (shlex không
-    phân biệt) — xem `_CommentStrip`."""
-    return _CommentStrip(cmd).text if "#" in cmd else cmd
-
-
-def comment_ambiguous(cmd: str) -> bool:
-    """`#` ngay sau `)` mà guard không chắc là comment hay chữ (`_CommentStrip.ambiguous`: extglob, mẫu `case`) trên lệnh
-    đã nối dòng, khi lệnh còn dòng sau: nháy/`\\`/`<` trong phần đó đổi cách đọc các dòng sau (`!(x)#'` ↵ `rm -rf ~` ↵
-    `#'`) — AUD-SEC-195."""
-    folded = _fold_heredocs(join_continuations(cmd), True)  # thân heredoc có nháy là dữ liệu
-    return "\n" in folded and _CommentStrip(folded).ambiguous
-
-
-# Ký tự đứng ngay trước `(` làm ngoặc thành MỘT PHẦN CỦA TỪ (bash): `$(`, `<(`, `>(`, gán mảng `=(` → "w"; extglob
-# `@( !( +( *( ?(` chỉ là từ khi bật `extglob` (tắt: `!(x)` là `! (x)`) → "x" mơ hồ. Ngoặc khác là toán tử ("o").
-WORD_PAREN = {"$": "w", "<": "w", ">": "w", "=": "w", "@": "x", "!": "x", "+": "x", "*": "x", "?": "x"}
-EXTGLOB_CHARS = "@!+*?"
-# Comment sau `)` mơ hồ có ký tự đổi trạng thái nháy/heredoc của các dòng sau → chặn (`comment_ambiguous`)
-COMMENT_STATE_RE = re.compile(r"[\"'`\\<]")
-# Dãy ký tự không đổi trạng thái theo ngữ cảnh của `_CommentStrip` ("" = code: ngoài nháy, trong `$(…)`/ngoặc); ở
-# code thêm dãy ký tự kết thúc từ (không có ngoặc): sau chúng `#` mở comment.
-STRIP_RUN_RE = {
-    "": re.compile(r"[^\\'\"`$#() \t\n;&|<>]+"),
-    '"': re.compile(r'[^\\"`$]+'),
-    "`": re.compile(r"[^\\`]+"),
-    "{": re.compile(r"[^\\'\"`$}]+"),
-    "{q": re.compile(r"[^\\'\"`$}]+"),
-}
-STRIP_END_RE = re.compile(r"[ \t\n;&|<>]+")
-CASE_RE = re.compile(r"\bcase\b")
-
-
-class _CommentStrip:
-    """Bỏ comment theo luật từ của bash với ngữ cảnh lồng (AUD-SEC-195): nháy đơn/`$'…'` bỏ qua nguyên khối (`$$'` là
-    `$$` + nháy đơn); nháy kép, backtick, `${…}` (`{q`: trong nháy kép — `'` là chữ), ngoặc là tầng của `stack`. `#` mở
-    comment chỉ ở đầu từ trong ngữ cảnh code (ngoài nháy, kể cả trong `$(…)`). `)` đóng ngoặc từ ("w": `$(…)`, `<(…)`,
-    `$((…))`, `a=(…)`) → `#` sau nó là chữ; đóng ngoặc toán tử ("o": subshell, `((…))`, `f()`, mẫu `case`) → comment;
-    extglob ("x") → chữ (chiều chặt). Thân backtick đọc nguyên khối (`#`, `)` trong đó không nuốt lệnh ngoài).
-    `starts`: vị trí mở comment (`expand_ansi_c` dùng cùng luật). `ambiguous`: comment sau `)` mơ hồ có ký tự đổi trạng
-    thái nháy/heredoc (`comment_ambiguous`). Lệnh có `case`: `)` của mẫu không có `(` mở nên có thể đóng nhầm `$(…)`
-    (`$(case x in x) …;; esac)#; rm`) — mọi `)` toán tử tính là "x" (chiều chặt)."""
-
-    def __init__(self, cmd: str) -> None:
-        self.cmd = cmd
-        self.out: List[str] = []
-        self.stack: List[str] = []
-        self.starts: Set[int] = set()
-        self.word_start, self.closed, self.ambiguous = True, "", False
-        self.case = bool(CASE_RE.search(cmd))
-        i = 0
-        while i < len(cmd):
-            i = self._step(i)
-        self.text = "".join(self.out)
-
-    def _emit(self, a: int, b: int, word_start: bool = False, closed: str = "") -> int:
-        self.out.append(self.cmd[a:b])
-        self.word_start, self.closed = word_start, closed
-        return b
-
-    def _step(self, i: int) -> int:
-        top = self.stack[-1] if self.stack else ""
-        ctx = "" if top in ("", "w", "x", "o") else top
-        run = STRIP_RUN_RE[ctx].match(self.cmd, i)
-        if run:
-            return self._emit(i, run.end())
-        if self.cmd[i] == "\\":
-            return self._emit(i, i + 2)
-        if ctx == "`":
-            return self._pop(i) if self.cmd[i] == "`" else self._emit(i, i + 1)
-        if self.cmd.startswith("${", i):
-            return self._push(i, "{" if ctx in ("", "{") else "{q", 2)
-        if self.cmd.startswith("$(", i):
-            return self._push(i, "w", 2)
-        return self._quoted(i, ctx) if ctx else self._code(i)
-
-    def _push(self, i: int, kind: str, width: int = 1) -> int:
-        self.stack.append(kind)
-        return self._emit(i, i + width, word_start=kind in ("w", "x", "o"))
-
-    def _pop(self, i: int) -> int:
-        kind = self.stack.pop()
-        return self._close(i, kind) if kind in ("w", "x", "o") else self._emit(i, i + 1)
-
-    def _close(self, i: int, kind: str) -> int:
-        """`)` đóng ngoặc `kind` (lẻ: "o" — mẫu `case`); có `case` thì ngoặc toán tử là mơ hồ ("x")."""
-        kind = "x" if kind == "o" and self.case else kind
-        return self._emit(i, i + 1, word_start=kind == "o", closed=kind)
-
-    def _quoted(self, i: int, ctx: str) -> int:
-        """Trong nháy kép/`${…}`: dấu đóng, backtick, nháy kép lồng (trong `${…}`), nháy đơn (`${…}` ngoài nháy kép)."""
-        c = self.cmd[i]
-        if c == ("}" if ctx[0] == "{" else '"'):
-            return self._pop(i)
-        if c == "`" or c == '"' and ctx[0] == "{":
-            return self._push(i, c)
-        if c == "'" and ctx == "{":
-            return self._emit(i, _skip_single(self.cmd, i))
-        return self._emit(i, i + 1)
-
-    def _code(self, i: int) -> int:
-        c = self.cmd[i]
-        end = STRIP_END_RE.match(self.cmd, i)
-        if end:
-            return self._emit(i, end.end(), word_start=True)
-        if c == "#":
-            return self._comment(i)
-        if self.cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn, không phải ANSI-C
-            return self._emit(i, i + 2)
-        if c == "'" or self.cmd.startswith("$'", i):
-            return self._emit(i, _skip_single(self.cmd, i))
-        if c in '"`':
-            return self._push(i, c)
-        if c == "(":
-            return self._push(i, WORD_PAREN.get(self.cmd[i - 1 : i], "o"))
-        if c == ")":
-            return self._pop(i) if self.stack else self._close(i, "o")
-        return self._emit(i, i + 1)
-
-    def _comment(self, i: int) -> int:
-        eol = self.cmd.find("\n", i)
-        end = len(self.cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
-        if self.closed == "x" and COMMENT_STATE_RE.search(self.cmd, i, end):
-            self.ambiguous = True
-        if not self.word_start:
-            return self._emit(i, i + 1)
-        self.starts.add(i)
-        self.closed = ""
-        return end
+    `#` giữa từ (`${#A[@]}`, `$#`, `/#/rooms`, `a#b.ts`), trong nháy hoặc sau `\\` là chữ thường (shlex không phân biệt)."""
+    out: List[str] = []
+    quote, word_start, i = "", True, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "#" and word_start and not quote:
+            eol = cmd.find("\n", i)
+            i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
+            continue
+        if c == "\\" and quote != "'" and i + 1 < len(cmd):
+            out.append(cmd[i : i + 2])
+            word_start, i = False, i + 2
+            continue
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        out.append(c)
+        word_start = not quote and c in WORD_END
+        i += 1
+    return "".join(out)
 
 
 ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
@@ -1064,29 +931,29 @@ def expand_ansi_c(cmd: str) -> str:
     """`$'…'` (ANSI-C quoting) ngoài nháy → chuỗi nháy đơn đã giải mã (`sh -c $'rm -rf ~'`: shlex đọc `$` là chữ và
     giữ nguyên chuỗi nên lệnh bên trong lọt). `$$'…'` là `$$` + nháy đơn, không phải ANSI-C (AUD-SEC-198)."""
     out: List[str] = []
-    starts = _CommentStrip(cmd).starts if "#" in cmd else set()  # comment theo cùng luật `strip_comments` (AUD-SEC-195)
-    i, q = 0, ""
+    i, q, ws = 0, "", True
     while i < len(cmd):
         c = cmd[i]
-        if i in starts:  # comment: chép nguyên tới hết dòng (D-276) —
+        if not q and c == "#" and ws:  # comment: chép nguyên tới hết dòng (D-276) —
             e = cmd.find("\n", i)  # nháy trong comment không làm lệch `$'…'` của dòng sau
             e = len(cmd) if e < 0 else e
             out.append(cmd[i:e])
             i = e
         elif c == "\\" and q != "'" or not q and cmd.startswith("$$", i):  # `$$'…'` = `$$` + nháy đơn
             out.append(cmd[i : i + 2])
-            i += 2
+            i, ws = i + 2, False
         elif not q and cmd.startswith("$'", i):
             j = i + 2
             while j < len(cmd) and cmd[j] != "'":
                 j += 2 if cmd[j] == "\\" else 1
             body = ANSI_ESCAPE_RE.sub(_ansi_c_char, cmd[i + 2 : j])
             out.append("'" + body.replace("'", "'\\''") + "'")
-            i = j + 1
+            i, ws = j + 1, False
         else:
             if c == "'" and q in ("", "'") or c == '"' and q in ("", '"'):
                 q = "" if q else c
             out.append(c)
+            ws = not q and c in WORD_END
             i += 1
     return "".join(out)
 
@@ -3484,8 +3351,7 @@ def _any_reader_files(argv: List[str]) -> List[str]:
 
 ScanSpan = Tuple[str, str, int, int]  # (loại: `$` thay lệnh, backtick, `<`/`>` thay tiến trình; thân; đầu; sau cuối)
 PARAM_RE = re.compile(r"\$[A-Za-z_0-9{@*#?$!-]")  # mở rộng tham số (`$x`, `${a[0]}`, `$1`) — không `$(`/`$'`
-# `#` sau chúng mở comment; sau `)` chỉ khi nó đóng ngoặc toán tử (subshell, `f()`) — `$(x)#y` là một từ (AUD-SEC-195)
-COMMENT_AFTER = frozenset(" \t\n;&|<>(")
+COMMENT_AFTER = frozenset(" \t\n;&|<>(")  # `#` sau chúng mở comment; sau `)` thì không (`$(x)#y` là một từ)
 
 
 class Stage(NamedTuple):
@@ -3507,7 +3373,6 @@ class _ShellScan:
 
     def __init__(self, text: str, heredoc: bool = False) -> None:
         self.text, self.start, self.param = text, 0, False
-        self.op_close = -1  # vị trí ngay sau `)` toán tử gần nhất (`#` ngay đó mở comment)
         self.stack: List[Tuple[str, int]] = [("h", 0)] if heredoc else []  # (loại ngữ cảnh, vị trí thân)
         self.base, self.subs = len(self.stack), 0  # `subs` = số thay lệnh đang mở trong `stack`
         self.stages: List[Stage] = []
@@ -3549,7 +3414,7 @@ class _ShellScan:
         return self._open(i, True) or i + 1
 
     def _comment(self, i: int) -> int:
-        if i and self.text[i - 1] not in COMMENT_AFTER and i != self.op_close:
+        if i and self.text[i - 1] not in COMMENT_AFTER:
             return i + 1
         eol = self.text.find("\n", i)
         return len(self.text) if eol < 0 else eol  # giữ `\n`: vẫn là ranh giới đoạn
@@ -3571,7 +3436,6 @@ class _ShellScan:
             return 0
         kind, body = self.stack.pop()
         self.subs -= kind != "("
-        self.op_close = i + 1 if kind == "(" else self.op_close
         if kind != "(" and not self.subs:
             self.spans.append((kind, self.text[body:i], body - (1 if kind == "`" else 2), i + 1))
         return i + 1
@@ -3584,7 +3448,6 @@ class _ShellScan:
         sep = None if self.stack else SEG_SEP_RE.match(self.text, i)
         if sep:
             self._cut(i, sep.end(), sep.group())
-            self.op_close = sep.end() if sep.group() == ")" else self.op_close
             return sep.end()
         return i + 1
 
