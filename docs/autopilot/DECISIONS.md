@@ -1951,3 +1951,10 @@
 - Chọn: Áp bản sửa cờ đầu-từ reviewer đã thử (0 hồi quy/1314 ca, replay 400 commit giống hệt)
 - Lý do (tiêu chí chất lượng cuối): Hồi quy so với main phải sửa; bản sửa 5 dòng khớp strip_comments, đã thử
 - Đường lùi: Revert commit lượt này về e2988da
+
+### D-278 · 2026-10-31T12:21:26+00:00 · AUD-HAR-149 (review #362 🟢4): dự án ở thư mục con của monorepo — vân tay bằng chứng/gói nghiệm thu tính trên cả repo hay chỉ thư mục dự án?
+
+- Phương án: (1) Chỉ thư mục dự án (ls-tree/diff --relative từ thư mục đó): commit app khác không làm gói hết hạn; mã dùng chung ngoài thư mục (vd packages/ui) cũng không · (2) Cả repo: mọi commit ở bất kỳ app nào làm gói/bản trình hết hạn — dự án con trong monorepo bận không bao giờ ký được · (3) Thư mục dự án cộng danh sách đường phụ thuộc khai trong xt.yaml
+- Chọn: Chỉ thư mục dự án (ls-tree/diff --relative từ thư mục đó): commit app khác không làm gói hết hạn; mã dùng chung ngoài thư mục (vd packages/ui) cũng không
+- Lý do (tiêu chí chất lượng cuối): (3) bền/đơn giản/test được: phạm vi khớp đơn vị cài khung (.xtemplates/ trong thư mục dự án) và khớp release-check vốn chạy trong thư mục đó; (1) an toàn: phương án 2 khiến luồng ký kẹt vô hạn ở monorepo nên người sẽ bỏ qua máy; rủi ro mã dùng chung ngoài thư mục là có thật nhưng CI của monorepo vẫn chạy cổng — ghi thành nợ hướng phương án 3 (khai đường phụ thuộc) thay vì làm ngay
+- Đường lùi: Bỏ tham số './' + --relative trong evidence_fingerprint/_changed_since (scripts/xt.py) để quay về vân tay toàn repo; test MonorepoFingerprintTest đổi kỳ vọng

@@ -7206,7 +7206,8 @@ def harden_work(base: Path, st: Dict[str, Any], status: str) -> List[Dict[str, A
 
 # Gói nghiệm thu nháp (ADR-0052 §5, nghiên cứu §6.2, T-3549): vân tay bằng chứng theo NỘI DUNG cây (không theo SHA HEAD),
 # trừ GO-NO-GO/DECISIONS — commit chỉ ghi chữ ký/quyết định không làm gói hết hạn (FLOW-17).
-SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", ":(exclude,glob)**/DECISIONS.md", ":(exclude)PROGRESS.md"]
+DECISIONS_EXCLUDE = ":(exclude,glob)**/DECISIONS.md"
+SIGNOFF_EXCLUDE = [":(exclude,glob)**/GO-NO-GO*.md", DECISIONS_EXCLUDE, ":(exclude)PROGRESS.md"]
 COMMIT_SHA_RE = re.compile(
     r"[0-9a-f]{40}|[0-9a-f]{64}"
 )  # SHA commit đầy đủ: SHA-1 hoặc SHA-256 (`--object-format=sha256`)
@@ -7225,8 +7226,9 @@ def _signoff_excluded(path: str) -> bool:
 
 def evidence_fingerprint(base: Path, skip: Tuple[str, ...] = ()) -> Optional[str]:
     """sha256 nội dung cây làm việc trừ GO-NO-GO/DECISIONS/PROGRESS/thư mục trạng thái (và đường dẫn `skip`): blob của
-    HEAD (`ls-tree`, không SHA commit) + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None."""
-    tree = _git(base, "ls-tree", "-r", "-z", "--full-tree", "HEAD")
+    HEAD (`ls-tree`, không SHA commit) + diff so HEAD + file chưa track. Không phải repo git/chưa commit → None. Chỉ cây
+    dự án, đường dẫn tính từ dự án — dự án ở thư mục con (`apps/web`) không lệch `skip`/app khác (AUD-HAR-149)."""
+    tree = _git(base, "ls-tree", "-r", "-z", "HEAD", "--", ".")
     if tree.returncode != 0:
         return None
     paths = ((e, e.partition("\t")[2]) for e in tree.stdout.split("\0") if e)
@@ -7235,13 +7237,14 @@ def evidence_fingerprint(base: Path, skip: Tuple[str, ...] = ()) -> Optional[str
     return tree_hash(base, kept, lambda *a: _git(base, *a).stdout, [*SIGNOFF_EXCLUDE, *extra])[0]
 
 
-def _changed_since(base: Path, sha: str) -> Optional[List[str]]:
-    """File khác giữa commit `sha` và cây làm việc (cả file chưa track), trừ GO-NO-GO/DECISIONS/thư mục trạng thái; `sha`
-    không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
+def _changed_since(base: Path, sha: str, keep: str = "") -> Optional[List[str]]:
+    """File khác giữa commit `sha` và cây làm việc (cả file chưa track), trừ GO-NO-GO/DECISIONS/thư mục trạng thái — `keep`
+    giữ lại một mẫu trong số đó (kết quả `release-check` đọc DECISIONS.md cho hàng `prod_switch`: đổi nó là kết quả hết
+    tươi, AUD-HAR-151); `sha` không phải commit có trong repo → None (không biết phần nào đổi = hết hạn toàn bộ)."""
     if not COMMIT_SHA_RE.fullmatch(sha) or _git(base, "cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         return None
-    spec = ["--", ".", ":(exclude).autopilot", *SIGNOFF_EXCLUDE]
-    diff = _git(base, "diff", "-z", "--no-renames", "--name-only", sha, *spec).stdout
+    spec = ["--", ".", ":(exclude).autopilot", *(x for x in SIGNOFF_EXCLUDE if x != keep)]
+    diff = _git(base, "diff", "-z", "--no-renames", "--name-only", "--relative", sha, *spec).stdout  # AUD-HAR-149
     new = _git(base, "ls-files", "--others", "--exclude-standard", "-z", *spec).stdout
     return sorted({n for n in f"{diff}\0{new}".split("\0") if n})
 
@@ -7253,7 +7256,7 @@ def signoff_facts(
     chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người."""
     return {
         "release": release,
-        "release_changed": _changed_since(base, release["head"]) if release else None,
+        "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
         "package": package,
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
@@ -7443,6 +7446,25 @@ def _signoff_rerun(f: Dict[str, Any], pkg: Optional[Dict[str, Any]], rel: Option
     }
 
 
+def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Gói còn khớp vân tay. Có `--release` mà lệch cây (chỉ DECISIONS.md đổi — ngoài vân tay gói) → chạy lại, không trình
+    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151)."""
+    s = f["signoff"]
+    if s["release"] is not None and fresh_rel is None:
+        note = _changed_note(s["release_changed"], s["release"]["head"])
+        return {
+            "action": "release-check",
+            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng kết quả `release-check` cũ hơn"
+            f" cây ({note}) — chạy lại trên HEAD trước khi trình ký",
+            "missing": ["`release-check --json` trên HEAD"],
+        }
+    # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
+    # `release-check` mới đúng cây: việc chờ người của nó (vd `prod_switch` do DECISIONS.md đổi) cũng hiện (AUD-HAR-151)
+    later = set(fresh_rel["human"]) if fresh_rel else set()
+    pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]) | later)}
+    return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+
+
 def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
     """Harden hết việc gom được (T-3549): gói đã dựng còn khớp vân tay → `signoff-package` (chờ người); lệch → hết hạn,
     nêu file đổi (FLOW-17); chưa có gói: cần `release-check` trên cây này — `fails` còn → `replan`, rỗng → dựng gói nháp
@@ -7460,9 +7482,7 @@ def _step_signoff(f: Dict[str, Any]) -> Dict[str, Any]:
             "missing": [f"`{x}` PASS" for x in rel["fails"]],
         }
     if pkg is not None and pkg["evidence_fp"] == fp:
-        # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326)
-        pkg = {**pkg, "human_pending": sorted(set(pkg["human_pending"]) | set(s["deferred"]))}
-        return _signoff_part(pkg, f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn hiệu lực (vân tay khớp)")
+        return _signoff_kept(f, pkg, rel if fresh else None)
     if not fresh:
         return _signoff_rerun(f, pkg, rel)
     pkg = {
@@ -11595,16 +11615,22 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     return 0
 
 
+QP_OFF = ("-c", "core.quotePath=false")  # tên file có dấu không bị bọc nháy/escape trong `--name-only`
+
+
 def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Optional[str], List[str], str]:
     """(lỗi đọc git, file mã đổi từ review `last` tới `head`, sổ audit ở head) — so cây `--no-renames`; miễn sổ audit và file
     giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) trừ file PR đã đổi lúc review: trả nó về bản nhánh đích hay
-    xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135)."""
-    since = _git(base, "diff", "--no-renames", "--name-only", last, head)
-    other = _git(base, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
+    xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135). Dự án
+    ở thư mục con (`apps/web`): sổ đọc từ dự án (`./`), miễn theo tiền tố dự án (thô, nên diff tắt quotePath); file ngoài
+    dự án vẫn tính (AUD-HAR-155)."""
+    since = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", last, head)
+    other = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
     fork = _git(base, "merge-base", f"origin/{target}", last)
-    show = _git(base, "show", f"{head}:{AUDIT_STATUS_DEFAULT}")
-    reviewed = _git(base, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
-    bad = next((r for r in (since, other, fork, show, reviewed) if r.returncode), None)
+    prefix = _git(base, "rev-parse", "--show-prefix")
+    show = _git(base, "show", f"{head}:./{AUDIT_STATUS_DEFAULT}")
+    reviewed = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
+    bad = next((r for r in (since, other, fork, prefix, show, reviewed) if r.returncode), None)
     if bad is not None:
         return (
             f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
@@ -11614,7 +11640,8 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
             "",
         )
     mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
-    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {AUDIT_STATUS_DEFAULT}), show.stdout
+    book = prefix.stdout.strip() + AUDIT_STATUS_DEFAULT
+    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {book}), show.stdout
 
 
 def _debt_problem(

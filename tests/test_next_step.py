@@ -8,6 +8,7 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -288,6 +289,28 @@ class NextStepPureTest(unittest.TestCase):
                 out = self.step(objective=HARDEN, signoff={"package": old, "package_changed": changed})
                 self.assertEqual((out["action"], out["package"]), ("release-check", None))
                 self.assertIn(f"gói nghiệm thu hết hạn: {note}", out["reason"])
+
+    def test_signoff_fresh_release_human(self) -> None:
+        """AUD-HAR-151: gói còn khớp vân tay + `release-check` mới đúng cây (`release_changed == []`) → việc chờ người mới
+        của kết quả đó (`prod_switch` sau khi DECISIONS.md đổi — ngoài vân tay) vẫn hiện; kết quả lệch cây thì không hợp."""
+        pkg = {"candidate_head": "c" * 40, "evidence_fp": FP, "human_pending": [], "release_verdict": "GO"}
+        rel = {"head": "b" * 40, "fails": [], "human": ["prod_switch"], "verdict": "GO"}
+        out = self.step(objective=HARDEN, signoff={"package": pkg, "release": rel, "release_changed": []})
+        self.assertEqual(out["action"], "signoff-package")
+        self.assertEqual(out["package"]["human_pending"], ["prod_switch"])
+        self.assertIn("người xác nhận prod_switch", out["missing"])
+        self.assertIn("chờ người: prod_switch", out["reason"])
+        # review #362: gói khớp mà kết quả cũ hơn cây (chỉ DECISIONS.md đổi) → chạy lại, kể cả kết quả cũ FAIL (ca C)
+        # hay đề xuất `--prod` mới chưa được xét (ca B) — không trình gói "chờ người: không"
+        dec = ["docs/autopilot/DECISIONS.md"]
+        for old in (rel, {**rel, "human": [], "fails": ["review_debt"], "verdict": "NO-GO"}):
+            with self.subTest(old["verdict"]):
+                stale = self.step(objective=HARDEN, signoff={"package": pkg, "release": old, "release_changed": dec})
+                self.assertEqual((stale["action"], stale["package"]), ("release-check", None))
+                self.assertIn("còn khớp vân tay nhưng kết quả `release-check` cũ hơn cây", stale["reason"])
+                self.assertIn("DECISIONS.md", stale["reason"])
+        alone = self.step(objective=HARDEN, signoff={"package": pkg})
+        self.assertEqual(alone["action"], "signoff-package")
 
     def test_expired_package_with_fresh_release(self) -> None:
         """Review #326 lượt 3: gói hết hạn + `--release` mới đúng cây → không kẹt ở `release-check`: GO → gói mới, NO-GO →
@@ -826,6 +849,61 @@ class NextStepCliTest(StateCase):
         a = xt.next_step_facts(self.base, self.st(), "S.md", [])["audit"]
         self.assertEqual((a["exists"], a["open"], a["sha256"]), (True, 0, ""))
         self.assertTrue(a["errors"][0].startswith("không đọc được sổ: "), a["errors"])
+
+
+class MonorepoFingerprintTest(unittest.TestCase):
+    """AUD-HAR-149: dự án ở thư mục con của repo (monorepo `apps/web`) — vân tay và file đổi tính theo đường dẫn từ dự án:
+    commit chỉ sổ giai đoạn/PROGRESS của dự án, hay chỉ app khác, không làm bản trình/gói hết hạn."""
+
+    def setUp(self) -> None:
+        self.repo = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.web = self.repo / "apps" / "web"
+        (self.web / "docs" / "autopilot").mkdir(parents=True)
+        (self.repo / "apps" / "api").mkdir()
+        (self.web / "app.py").write_text("x = 1\n", encoding="utf-8")
+        (self.repo / "apps" / "api" / "b.py").write_text("y = 1\n", encoding="utf-8")
+        self.git("init", "-q")
+        self.commit("khởi tạo")
+
+    def git(self, *args: str) -> str:
+        cfg = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *cfg, *args], check=True, capture_output=True, text=True
+        ).stdout
+
+    def commit(self, msg: str) -> str:
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", msg)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def test_monorepo_fingerprint(self) -> None:
+        sha = self.git("rev-parse", "HEAD").strip()
+        fp = xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,))
+        sub = {"sha": sha, "tree": fp}
+        (self.web / xt.STAGE_LEDGER).write_text("{}\n", encoding="utf-8")
+        (self.web / "PROGRESS.md").write_text("tiến độ\n", encoding="utf-8")
+        self.commit("sổ: trình MVP")  # chỉ sổ giai đoạn + PROGRESS của dự án
+        self.assertEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), [])
+        self.assertEqual(xt._changed_since(self.web, sha), [xt.STAGE_LEDGER])  # đường dẫn tính từ dự án
+        (self.repo / "apps" / "api" / "b.py").write_text("y = 2\n", encoding="utf-8")
+        self.commit("app khác")
+        self.assertEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), [])
+        (self.web / "app.py").write_text("x = 2\n", encoding="utf-8")
+        self.commit("mã dự án")
+        self.assertNotEqual(xt.evidence_fingerprint(self.web, (xt.STAGE_LEDGER,)), fp)
+        self.assertEqual(xt._stage_changed(self.web, sub), ["app.py"])
+
+    def test_release_freshness_sees_decisions(self) -> None:
+        """AUD-HAR-151 (nửa thứ hai): DECISIONS.md nằm ngoài vân tay gói nhưng hàng `prod_switch` của `release-check` đọc
+        nó — đổi DECISIONS.md sau lần chạy làm kết quả `release-check` hết tươi, gói vẫn còn hiệu lực."""
+        sha = self.git("rev-parse", "HEAD").strip()
+        (self.web / "docs" / "autopilot" / "DECISIONS.md").write_text("## D-001\n", encoding="utf-8")
+        self.commit("quyết định mới")
+        facts = xt.signoff_facts(self.web, {}, release={"head": sha}, package={"candidate_head": sha})
+        self.assertEqual(facts["release_changed"], ["docs/autopilot/DECISIONS.md"])
+        self.assertEqual(facts["package_changed"], [])
 
 
 if __name__ == "__main__":

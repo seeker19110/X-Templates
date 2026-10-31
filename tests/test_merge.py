@@ -2242,6 +2242,41 @@ class PrNextCliTest(unittest.TestCase):
         self.git("commit", "-qm", "drop")
         refused(self.git("rev-parse", "HEAD"), "src/a.py")
 
+    def test_debt_monorepo(self):
+        """AUD-HAR-155: dự án ở thư mục con của repo (`apps/web`) — `pr debt` đọc sổ của dự án ở head (`head:./…`) và miễn
+        đúng sổ đó (tiền tố dự án): commit chỉ sổ sau review cuối → rc 0; sửa mã, kể cả ngoài dự án → rc 2. Tên thư mục có
+        dấu (`apps/wéb`): `git diff` không bọc nháy đường dẫn (`core.quotePath=false`) nên vẫn miễn đúng sổ."""
+        for name in ("web", "wéb"):
+            with self.subTest(name):
+                self._debt_monorepo(name)
+
+    def _debt_monorepo(self, name: str) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.base = root / "apps" / name
+        self.base.mkdir(parents=True)
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.base)}))
+        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+        self.commit({"xt.yaml": "merge_autonomy: L3\n", "../api/b.py": "y = 1\n"})
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        reviewed = self.commit({"src/a.py": "x = 1\n"})
+        ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Ghi chú |\n|---|---|---|---|\n| AUD-SEC-001 | 🟢 | mở | nợ-review: #7 |\n"
+        head = self.commit({xt.AUDIT_STATUS_DEFAULT: ledger})
+        r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
+        r2 = {"head": reviewed, "clean": False, "at": "2026-10-27T02:00:00Z"}
+
+        def debt(sha: str) -> tuple[int, str, str]:
+            p = {**self.big, "headRefOid": sha, "xtReviews": [r1, r2]}
+            args = ("pr", "debt", "--pr-json", "-", "--findings", "AUD-SEC-001", "--no-publish")
+            return run_main(*args, stdin=json.dumps(p))
+
+        self.assertEqual(debt(head)[::2], (0, ""))
+        for path, rel in ((f"apps/{name}/src/a.py", "src/a.py"), ("apps/api/b.py", "../api/b.py")):
+            with self.subTest(path):
+                self.git("checkout", "-q", "-b", f"x{len(rel)}", head)
+                rc, _, err = debt(self.commit({rel: "z = 3\n"}))
+                self.assertEqual(rc, 2)
+                self.assertIn(f"đã đổi {path} — review 2 lần, sửa 1 lần", err)
+
     def test_pr_next_remembers_base_merges_and_unshallow_hint(self):
         """AUD-HAR-136: `pr next` nhớ head cập nhật nhánh (`baseMergeOf`) vào sổ cục bộ, giữ tối đa MERGES_KEEP; AUD-TEST-028:
         nhánh đích không có tổ tiên chung (clone nông) → `pr debt` gợi ý `--unshallow`."""
