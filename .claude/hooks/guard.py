@@ -2871,6 +2871,32 @@ def _reader_files(argv: List[str]) -> List[str]:
     return out + _stdin_redirects(argv) or ["-"]
 
 
+NO_FILE_READ = frozenset({"echo", "printf"})  # đối số là chữ, không phải file
+# không đối số thì cũng không đọc stdin (`$(date)`, `$(git log -1)`) — lệnh khác không file → đọc stdin
+NO_STDIN_READ = frozenset({"date", "git", "gh", "pwd", "ls", "whoami", "hostname", "uname", "id", "nproc", "true"})
+SCRIPT_FIRST = frozenset({"grep", "egrep", "fgrep", "rg", "sed", "awk", "gawk", "mawk", "nawk", "jq"})
+SCRIPT_OPT_RE = re.compile(r"-[A-Za-z]*[ef].*|--(?:regexp|file|expression|from-file)(?:=.*)?")  # mẫu/script qua cờ
+
+
+def _any_reader_files(argv: List[str]) -> List[str]:
+    """File mà lệnh bất kỳ có thể đọc ra stdout (AUD-SEC-186, chiều chặt): `cat`/`head`… như `_reader_files`; lệnh khác
+    — mọi đối số không phải tuỳ chọn (bỏ mẫu/script đầu của `grep`/`sed`/`awk`/`jq` khi không qua `-e`/`-f`) cộng đích
+    `< f`; tên không có trên đĩa thì `_file_has_mark` bỏ qua. `echo`/`printf` không đọc file; lệnh chạy qua `xargs`/
+    `parallel` đọc tên từ stdin → nguồn mờ; không file → đọc stdin (`-`), trừ `NO_STDIN_READ`."""
+    n = normalize(_no_redirects(argv))
+    if not n or n[0] in NO_FILE_READ:
+        return []
+    if any(posixpath.basename(t) in STDIN_FEEDERS for t in argv):
+        return ["$"]
+    if n[0] in STDIN_READERS:
+        return _reader_files(argv)
+    pos = [t for t in n[1:] if t == "-" or t[:1] != "-"]  # cả `''` (script rỗng của `sed ''`)
+    if n[0] in SCRIPT_FIRST and not any(SCRIPT_OPT_RE.fullmatch(t) for t in n[1:]):
+        pos = pos[1:]
+    out = [t for t in pos if t] + _stdin_redirects(argv)
+    return out or ([] if n[0] in NO_STDIN_READ else ["-"])
+
+
 Stage = Tuple[str, str, List[Tuple[str, str]]]  # (chữ đoạn lệnh, toán tử nối sau nó, thay lệnh ngoài cùng (loại, thân))
 
 
@@ -2975,7 +3001,7 @@ def _span_files(span: Tuple[str, str], depth: int) -> List[str]:
         return ["`"]
     toks = tokenize(body)
     out = [toks[i + 1] for i, t in enumerate(toks[:-1]) if t == "<"]
-    out += [f for c in split_commands(toks) for f in _reader_files(c)]
+    out += [f for c in split_commands(toks) for f in _any_reader_files(c)]
     out += [f for st in scan.stages for sp in st[2] for f in _span_files(sp, depth + 1)]
     return out + _gh_sources(scan, depth + 1)
 
@@ -3017,7 +3043,7 @@ def _feed_sources(st: Stage, depth: int) -> List[str]:
     level = {t for t in _no_redirects(argv) if "`" not in t} <= SHELL_LEVEL_WORDS  # mảnh backtick bị tách token
     if op not in ("|", "|&") and not level:
         return []
-    out = _stdin_redirects(argv) if level else _reader_files(argv)
+    out = _stdin_redirects(argv) if level else _any_reader_files(argv)
     return out + [f for sp in spans for f in _span_files(sp, depth)]
 
 

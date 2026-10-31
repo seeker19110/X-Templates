@@ -585,6 +585,46 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
 
+    def test_review_marker_any_reader(self):
+        """AUD-SEC-186: mọi file là đối số (không phải tuỳ chọn) của lệnh trong thay lệnh của `gh` đăng chữ, hay của lệnh
+        nối ống vào nó, là nguồn thân — không chỉ `cat`/`head`/`tail`/`tac`; mẫu/script đầu của `grep`/`sed`/`awk` không
+        phải file; tên không có trên đĩa bỏ qua; `echo`/`printf` không đọc file; tên do `xargs` điền là nguồn mờ."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            Path(d, "b.md").write_text(MARK, encoding="utf-8")
+            Path(d, "n.md").write_text("thường\n", encoding="utf-8")
+            for cmd in (
+                'gh pr comment 5 --body "$(grep . b.md)"',
+                "gh pr comment 5 --body \"$(sed '' b.md)\"",
+                'gh pr comment 5 --body "$(sed -n p b.md)"',
+                'gh pr comment 5 --body "$(sed -e p b.md)"',
+                'gh pr comment 5 --body "$(awk 1 b.md)"',
+                'gh pr comment 5 --body "$(cut -c1- b.md)"',
+                'gh pr comment 5 --body "$(more b.md)"',
+                "gh pr comment 5 --body `grep -h . b.md`",
+                'gh pr comment 5 --body "$(grep -h . $F)"',
+                'gh pr comment 5 --body "$(grep -rh xt-review .)"',  # thư mục: không đọc được
+                'gh pr comment 5 --body "$(ls | xargs cat)"',
+                "grep . b.md | gh pr comment 5 -F -",
+                "tr a a < b.md | gh pr comment 5 -F -",
+                'cat b.md | gh pr comment 5 --body "$(grep .)"',  # lệnh lọc không file đọc stdin
+                'gh api repos/o/r/issues/5/comments -f body="$(awk 1 b.md)"',
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "deny")
+            for cmd in (
+                'gh pr comment 5 --body "$(grep . n.md)"',
+                'gh pr comment 5 --body "$(awk 1 n.md)"',
+                'gh pr comment 5 --body "Sửa ở $(git rev-parse --short HEAD)"',
+                'gh pr comment 5 --body "$(git log -1 --format=%s) $(date +%F)"',
+                'gh pr comment 5 --body "$(echo $X) $(printf %s "$Y")"',
+                'gh pr comment 5 --body "$(wc -l < n.md) dòng, $(grep -c x khong-co.md)"',
+                "grep . n.md | gh pr comment 5 -F -",
+                "grep -c x b.md; gh pr comment 5 --body ok",  # không nối vào gh
+            ):
+                with self.subTest(cmd):
+                    self.assertEqual(final(cmd, root), "")
+
     def test_review_marker_backtick_skew(self):
         """AUD-SEC-181: backtick nguyên văn (thoát `\\``, trong nháy, `$'\\x60'`, comment, heredoc của lệnh khác) đứng
         trước không làm lệch cặp backtick thật; không ghép được thì nguồn không đọc được → chặn. AUD-SEC-182: chỉ thay lệnh
