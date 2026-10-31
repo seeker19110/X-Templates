@@ -2350,6 +2350,128 @@ class SecretExfilOtherChannelsDelta2Test(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class CommentAfterParenTest(unittest.TestCase):
+    """AUD-SEC-195/242 (đã sửa bởi #368/D-282): `#` ngay sau `)` — comment (sau `(…)`) hay nối từ (sau `$(…)`, `a=(…)`)
+    tuỳ cách bash ghép ngoặc — nên mọi `)#` liền nhau ngoài nháy bị chặn (fail-closed). Class này giữ bộ ca hồi quy D-279
+    (bản sửa `_CommentStrip` từng bị gỡ vì hồi quy, review #363) cùng chính sách chặn mặc định; comment có khoảng trắng
+    vẫn chạy."""
+
+    def test_paren_hash_kept_d279(self):
+        for cmd in (
+            "a=b#c; rm -rf ~",
+            "true $(true)#; git push --force origin main",
+            "(true)#<<E\nrm -rf ~\nE",
+            "(true)#'\nrm -rf ~\n#'",
+            "!(true)#'\nrm -rf ~\n#'",
+            "echo !(x)#'\nrm -rf ~\n'",
+            "true $(true)#<<E\nrm -rf ~\nE",  # bash: `<<E` mở heredoc — `rm` là thân; guard chặn (chiều chặt)
+            # `)#` liền nhau chặn hết (fail-closed, D-282 của #368): comment hay nối từ tuỳ cách bash ghép ngoặc
+            "(ls)# rm -rf ~",
+            "((1))# rm -rf ~",
+            "f()# rm -rf ~\n{ :; }",
+            "(cd .)# don't rm -rf ~",
+            "(true)#<<X\necho ok",
+            "(ls)# it's fine\necho ok",
+            # AUD-SEC-242: `#` sau `)` của từ ở vị trí gán/chỉ số
+            "x=$(true)# rm -rf ~",
+            "a=(1)# rm -rf ~",
+            "declare -A a; a[(1)#]=x; rm -rf ~",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "ls # rm -rf ~",
+            "ls;# rm -rf ~",
+            "echo $(echo a) # rm -rf ~",
+            "case x in x) # rm -rf ~\n;; esac",
+            "echo a=b#c",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
+class AnsiQuoteThenBacktickTest(unittest.TestCase):
+    """AUD-SEC-241: `$'\\''` là MỘT ký tự `'` (ANSI-C, `\\'` không đóng nháy); bộ tìm backtick từng đọc nó như `'…'` rồi
+    một `'` mở nháy, nên backtick sau đó (`` `rm -rf ~` ``) nằm "trong nháy" và không được quét. `$$'…'` là `$$` + nháy
+    đơn (không phải ANSI-C), `$$$'…'` là `$$` + ANSI-C; trong nháy kép `$'` không phải ANSI-C. Cách đọc cũ (`$'` = `$` +
+    nháy đơn) vẫn được dùng thêm (D-279): bộ tìm không biết comment nên `$'\\''` ↵ `# c'` ↵ `` `rm` `` chỉ cách cũ thấy."""
+
+    def test_ansi_quote_then_backtick(self):
+        for cmd in (
+            "echo $'\\'' `rm -rf ~`",
+            "x=$'\\''`rm -rf ~`",
+            "echo $'a\\'b' `rm -rf ~`",
+            "echo $'\\'' \"`rm -rf ~`\"",
+            "echo $'\\'' `git push --force origin main`",
+            "echo $'\\'' \"$(rm -rf ~)\"",  # cùng lỗi ở bộ tìm `$(…)`
+            "x=$'\\''\"$(rm -rf ~)\"",
+            "echo $$$'\\'' `rm -rf ~`",  # `$$` + `$'\\''`
+            "echo $$$'\\'' \"$(rm -rf ~)\"",
+            "$'\\''\n# c@(x);'\n`rm -rf ~`",  # comment có nháy lẻ: chỉ cách đọc cũ thấy backtick
+            "echo $'\\'' '`rm -rf ~`'",  # bash: chữ trong nháy đơn; cách đọc cũ (như main) vẫn chặn — chiều chặt
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ('echo "$\'" `date` "\'"', "echo $'\\'' `date`", "echo $$ $'a' `date`"):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+        self.assertEqual(guard._backtick_spans("echo $'\\'' `a` $$'`b`'"), [(11, 14, "a")])
+        self.assertEqual(guard._backtick_spans("echo $$$'\\'' `a`"), [(13, 16, "a")])
+        self.assertEqual([b for _, _, b in guard._dollar_spans("echo $'\\'' \"$(a)\" $$'$(b)' $$$(c)")], ["a", "c"])
+        # hợp hai cách đọc: không bớt thân nào cách cũ thấy
+        self.assertEqual(guard._backtick_scripts("echo $'\\'' `a` $$'`b`'"), ["a", "b"])
+        self.assertEqual(guard._backtick_scripts("echo `a`"), ["a"])
+
+
+class HeredocBacktickRegressionTest(unittest.TestCase):
+    """D-279/D-280 (review #363): bản đọc thân heredoc mới của AUD-SEC-196 (đã gỡ, D-280) từng cho lọt lệnh guard chặn
+    — thân backtick có `#`/`'` (bash đọc nguyên văn tới backtick đóng), `$((…))` chứa thay lệnh. Khoá các ca guard đang
+    chặn để bản sửa AUD-SEC-196 sau không lặp lại. Các ca dưới đây bash chạy thật."""
+
+    def test_heredoc_backtick_regressions(self):
+        for cmd in (
+            "cat <<EOF\n`echo #`\n`rm -rf ~`\nEOF",
+            "cat <<EOF\n`: '` `rm -rf ~`\nEOF",
+            "cat <<EOF\n`echo #`\n`git push --force origin main`\nEOF",
+            "cat <<EOF\n$(( $(rm -rf ~) ))\nEOF",
+            "cat <<EOF\n$(( `rm -rf ~` ))\nEOF",
+            "cat <<EOF\n`echo '`\n`rm -rf ~`\nEOF",
+            "x=$(cat <<EOF\n`echo #` $(( `rm -rf ~` ))\nEOF\n)",
+            # mẫu từ 123 ca guard chặn mà bản đọc thân heredoc đầu tiên cho qua (payload gốc `sudo true`)
+            "cat <<-E\n`echo '``sudo true`\n<<'E'<<'E' true | x | \nE",
+            "cat <<-E\n`echo a # b`\n<<'E' && #<<E`sudo true`$(true)echo a\n$$';\nE",
+            "cat <<E\n\\#;${x:-)}\n`echo '` && echo a;`sudo true`\nE",
+            "cat <<-E\n`echo '` \\\" && `true``sudo true`\nE",
+            "cat <<-E\nf() | `echo '`\n'#'\n$(case x in x) true;; esac)\n`sudo true`true | \nE",
+            "cat <<-E\n# && `echo '` |  #true`sudo true`;\nE",
+            'cat <<-E\na=b && <<E | `echo a # b``echo "``sudo true`((1));\nE',
+            'cat <<E\n`echo "` && true`sudo true` && \nE',
+            "cat <<-E\n`true`# c | \";echo a\n`echo '``sudo true` \nE",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+        for cmd in (
+            "cat <<EOF\n`echo #` $(date)\nEOF",
+            "cat <<EOF\nit's $((1 + 2)) `date`\nEOF",
+            "cat <<'EOF'\n`echo #`\n`rm -rf ~`\nEOF",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+    def test_comment_reader_regressions_stay_denied(self):
+        """Ca main chặn mà bản `_CommentStrip` (AUD-SEC-195, đã gỡ) từng cho qua — khoá để bản sửa sau không lặp."""
+        for cmd in (
+            "echo ${x:-$'\\''} '} # '; $'rm' -rf ~",
+            "echo `true #'`\nrm -rf ~\n'",
+            "echo `true #'`\n$'rm' -rf ~",
+            "a=((1))#'\nrm -rf ~\n'",
+            "a+=(;)#'\nrm -rf ~\n'",
+            "a=((1))#'\ngit push --force origin main\n'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+
 class ShellParseGapsTest(unittest.TestCase):
     """AUD-SEC-195/225/226: `)#`, `$"…"`, thân `trap` — bash chạy, guard từng cho qua."""
 
@@ -2420,6 +2542,12 @@ class ShellParseGapsTest(unittest.TestCase):
             "rm -rf ~/${IFS}'#'",
             "docker run --rm -v $PWD:/w alpine rm -rf /w$IFS''#",
             "bash -c 'rm -rf ~/$IFS'\"''\"'#'",
+            # thân trong nháy kép: bash bỏ `\` trước `$` nên `\$IFS''#` thành biến IFS liền dấu thăng (review #372 lượt 4)
+            "bash -c \"rm -rf ~/\\$IFS''#\"",
+            "eval \"rm -rf ~/\\$IFS''#\"",
+            "bash -c \"rm -rf ~/\\$IFS'#'\"",
+            "bash -c \"rm -rf ~/\\${IFS}''#\"",
+            "trap \"rm -rf ~/\\$IFS''#\" EXIT",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
