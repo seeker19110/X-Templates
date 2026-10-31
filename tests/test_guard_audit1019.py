@@ -1830,6 +1830,64 @@ class AliasDefinitionTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(final(cmd, self.root), "")
 
+    def test_alias_and_comment_desync_d275(self):
+        """D-275 (review #361 sau D-274): đối số alias theo danh sách cho phép (tilde `~+`, extglob `!(x)` không che);
+        giải mọi escape ANSI-C (`\\u0045`) khi so `BASH_ALIASES`; `` `# `` và nháy lẻ trước dòng có `$'` → chặn. Tên dựng
+        lúc chạy (`$(echo E)`, `${x^^}`) là giới hạn chung, không có ở đây."""
+        for name, cmd in (
+            ("T1_tilde_pwd", "PWD='c=rm -rf ~'; alias ~+\nc"),
+            ("T2_tilde_oldpwd", "OLDPWD='c=rm -rf ~'; alias ~-\nc"),
+            ("T3_tilde_home", "HOME='c=rm -rf ~'; alias ~\nc"),
+            ("T4_tilde_pwd_2l", "PWD='c=rm -rf ~'\nalias ~+\nc"),
+            ("T5_extglob_not", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias !(x)\nc"),
+            ("T6_extglob_at", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias @(c)+(=)!(x)\nc"),
+            ("U1_brace_seq", "declare BASH_ALIAS{E..E}S[c]='rm -rf ~'\nc"),
+            ("U2_brace_dup", "declare BASH_ALIAS{E,E}S[c]='rm -rf ~'\nc"),
+            ("U3_brace_printf", "printf -v BASH_ALIAS{E..E}S[c] %s 'rm -rf ~'\nc"),
+            ("U4_cmt_apos_u", "true # it's\ndeclare BASH_ALIAS$'\\u0045'S[c]='rm -rf ~'\nc"),
+            ("U5_hd_apos_u", "cat <<'EOF'\nit's\nEOF\ndeclare BASH_ALI$'\\u0041'SES[c]='rm -rf ~'\nc"),
+            ("U6_cmt_dq_u", "true # \"\ndeclare BASH_ALIAS$'\\u0045'S[c]='rm -rf ~'\nc"),
+            ("U7_default", "declare BASH_ALIAS${x:-E}S[c]='rm -rf ~'\nc"),
+            ("U10_U_plain", "declare BASH_ALIAS$'\\U00000045'S[c]='rm -rf ~'\nc"),
+            ("U11_nameref_brace", "declare -n r=BASH_ALIAS{E..E}S\nr[c]='rm -rf ~'\nc"),
+            ("U12_cmt_apos_U", "true # it's\ndeclare BASH_ALIAS$'\\U00000045'S[c]='rm -rf ~'\nc"),
+            ("V1_tick_cmt", "echo `#$'`\nrm -rf ~\n# '"),
+            ("V2_tick_cmt_assign", "x=`#$'`\nrm -rf ~\n# '"),
+            ("V3_nested_ansi", "bash -c $'true # $\\'\\nrm -rf ~\\n# \\''"),
+            ("V4_eval_ansi", "eval $'true # $\\'\\nrm -rf ~\\n# \\''"),
+            ("V5_tick_dq", 'echo `#$"`\nrm -rf ~\n# "'),
+            ("V6_tick_mid", "echo a`#$'`b\nrm -rf ~\n# '"),
+            ("V7_tick_cmt_sq", "echo `#'`\nrm -rf ~\n# '"),
+            ("V8_tick_cmt_bs", "echo `#\\\nrm -rf ~\n`"),
+            ("V9_tick_cmt_dq_plain", 'echo `#"`\nrm -rf ~\n# "'),
+            ("U13_cmt_apos_brace", "true # it's\ndeclare BASH_ALIAS{E..E}S[c]='rm -rf ~'\nc"),
+            ("U14_cmt_dq_brace", "true # \"\ndeclare BASH_ALIAS{E..E}S[c]='rm -rf ~'\nc"),
+            ("U15_hd_apos_U", "cat <<'EOF'\nit's\nEOF\ndeclare BASH_ALIAS$'\\U45'S[c]='rm -rf ~'\nc"),
+            ("T7_tilde_dirstack", "pushd . >/dev/null; DIRSTACK[1]='c=rm -rf ~'; alias ~1\nc"),
+            ("T8_builtin_tilde", "PWD='c=rm -rf ~'; builtin alias ~+\nc"),
+            ("C1_ctl_alias_list", "alias ll 2>/dev/null; alias -p >/dev/null\nrm -rf ~"),
+            ("T6_extglob_at", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias @(c=*)\nc"),
+            ("T9_extglob_plus", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias c+(=*)\nc"),
+            ("T10_extglob_q", "shopt -s extglob\n: > 'c=rm -rf ~'\nalias c?(=*)\nc"),
+            ("D1_cmt_apos_hexrm", "true # it's\n$'\\x74ouch' PWNED\n# '"),
+            ("D1_cmt_apos_hexrm_1", "true # it's\n$'\\x72m' -rf ~\n# '"),
+            ("D2_cmt_dq_hexrm", "true # \"\n$'\\x74ouch' PWNED\n# \""),
+            ("D2_cmt_dq_hexrm_1", "true # \"\n$'\\x72m' -rf ~\n# \""),
+            ("D3_hd_apos_hexrm", "cat <<'EOF'\nit's\nEOF\n$'\\x74ouch' PWNED"),
+            ("D3_hd_apos_hexrm_1", "cat <<'EOF'\nit's\nEOF\n$'\\x72m' -rf ~"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(final(cmd, self.root), "deny")
+        for cmd in (
+            "ls  # note it's fine\necho ok",
+            'git commit -m "fix #12" -m "cost 5$"\ngit log -1',
+            "alias -p | grep ll",
+            "printf $'a\\tb\\n'",
+            "echo `date`",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), "")
+
     def test_comment_continuation_reason_suggests_fix(self):
         """Chặn oan đã biết (AUD-SEC-219, chấp nhận): `#12` trên dòng kết bằng `\\` — lý do chỉ cách tránh."""
         for cmd in (

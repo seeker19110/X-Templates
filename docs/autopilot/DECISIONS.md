@@ -1930,3 +1930,10 @@
 - Chọn: Chuẩn hoá thô không phụ thuộc nháy: bỏ mở rộng $name/${…}, rồi chỉ giữ chữ-số; 'bashaliases' xuất hiện → chặn; token mà phần chữ của nó là 'alias' và lệnh có đối số chứa '=' → chặn (liệt kê không '=' cho chạy)
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: không phụ thuộc trạng thái nháy nên các lớp né (nháy lẻ, $'' trong comment, ANSI-C, toán tử có nháy) cùng đóng; đơn giản, test được; chặn oan chỉ ở chuỗi nhắc BASH_ALIASES/alias kèm '=' (đã chấp nhận ở D-272)
 - Đường lùi: Revert commit lượt này về e4db80e
+
+### D-275 · 2026-10-31T10:31:44+00:00 · PR #361: review sau D-274 — 0 hồi quy so với main; 3 🔴 né luật đã ghi 'đã sửa' (tilde/extglob alias; \u sau nháy lẻ; comment sau backtick) + 🔴 có từ trước nháy trong comment lệch ANSI-C
+
+- Phương án: (1) Áp bản vá 4 chỗ reviewer đã thử (danh sách cho phép đối số alias, giải mọi escape ANSI-C, backtick mở comment) + luật hẹp: comment có nháy mà dòng sau có $' → chặn; bỏ nhánh $" (chặn oan, không thêm an toàn) · (2) Ghi 🔴 thành nợ
+- Chọn: Áp bản vá 4 chỗ reviewer đã thử (danh sách cho phép đối số alias, giải mọi escape ANSI-C, backtick mở comment) + luật hẹp: comment có nháy mà dòng sau có $' → chặn; bỏ nhánh $" (chặn oan, không thêm an toàn)
+- Lý do (tiêu chí chất lượng cuối): 🔴 không ghi nợ; bản vá đã thử: 917 ca chỉ chặn thêm đúng ca né; luật hẹp đóng thêm 🔴 có từ trước cùng gốc mà không chặn oan comment thường
+- Đường lùi: Revert commit lượt này về ecebc98

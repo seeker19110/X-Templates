@@ -12894,6 +12894,97 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-d275-t1-tilde-pwd",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "PWD='c=rm -rf ~'; alias ~+\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-t5-extglob-not",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-220"
+   ],
+   "input": {
+    "command": "shopt -s extglob\n: > 'c=rm -rf ~'\nalias !(x)\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-u4-cmt-apos-u",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-224"
+   ],
+   "input": {
+    "command": "true # it's\ndeclare BASH_ALIAS$'\\u0045'S[c]='rm -rf ~'\nc"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-v1-tick-cmt",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-229"
+   ],
+   "input": {
+    "command": "echo `#$'`\nrm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-v7-tick-cmt-sq",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "echo `#'`\nrm -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-d1-cmt-apos-hexrm-1",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "true # it's\n$'\\x72m' -rf ~\n# '"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-d275-d3-hd-apos-hexrm-1",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "AUD-SEC-230"
+   ],
+   "input": {
+    "command": "cat <<'EOF'\nit's\nEOF\n$'\\x72m' -rf ~"
+   },
+   "expect": {
+    "allowed": false
+   }
   }
  ]
 }

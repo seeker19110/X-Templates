@@ -706,7 +706,7 @@ def _heredoc_precheck(cmd: str, root: bool) -> None:
 
 
 # `#` có thể mở comment (đầu dòng hay sau ký tự kết từ — bất kể nháy) trên dòng kết bằng `\\` lẻ (D-271)
-COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>])#")
+COMMENT_START_RE = re.compile(r"(?:^|[\s;&|()<>`])#")  # backtick mở từ (D-275)
 COMMENT_CONTINUED_WHY = (
     "`\\` cuối dòng sau `#` (bash không nối dòng trong comment) — đưa `#NN`/`#…` sang dòng không kết bằng `\\`"
     " (đặt cuối lệnh hay bỏ `\\` nối dòng)"
@@ -718,10 +718,9 @@ COMMENT_CONTINUED_WHY = (
 HEAD_EXPANSION_RE = re.compile(r"\$\{[^}]*\}?|\$\((?:[^()]|\([^()]*\))*\)?|`[^`]*`?|\$[A-Za-z_]\w*|\$.?")
 # D-274: định nghĩa alias cần `=` (hoặc mở rộng/glob tạo ra nó); liệt kê (`alias ll`, kèm chuyển hướng) không có — xét
 # trên token đã bỏ nháy nên `'>'` có nháy không che được `c=…` như phép bỏ chuyển hướng cũ (review #361 sau D-273).
-ALIAS_DEF_HINT_RE = re.compile(r"[=$`*?\[{]")
+ALIAS_ARG_OK_RE = re.compile(r"[\w.:%,/<>&-]+")  # danh sách cho phép (D-275): ngoài ra = tilde/glob/mở rộng/`=`
 ALIAS_TABLE = "BASH_ALIASES"  # gán phần tử mảng này (`BASH_ALIASES[c]=…`, `printf -v`, `read`) = định nghĩa alias
 ALIAS_TABLE_LETTERS = "BASHALIASES"
-ESCAPE_NUM_RE = re.compile(r"\\x([0-9A-Fa-f]{1,2})|\\([0-7]{1,3})")
 
 
 def _letter_forms(cmd: str) -> List[str]:
@@ -729,7 +728,7 @@ def _letter_forms(cmd: str) -> List[str]:
     không phụ thuộc trạng thái nháy/comment/heredoc, nên ghép `$''`, `\\E`, `"$x"`, `$'\\x45'`, `{ES,}` sau nháy lẻ
     hay `$'` trong comment đều không che được tên (review #361 sau D-273)."""
     j = join_continuations(cmd)
-    esc = ESCAPE_NUM_RE.sub(lambda m: chr(int(m.group(1), 16) if m.group(1) else int(m.group(2), 8) % 256), j)
+    esc = ANSI_ESCAPE_RE.sub(_ansi_c_char, j)  # mọi escape ANSI-C (cả `\\u`/`\\U`), không cần đúng cặp `$'…'`
     forms = (j, HEAD_EXPANSION_RE.sub("", j), expand_ansi_c(j), esc)  # `esc`: giải `\\xHH`/`\\NNN` mọi nơi, không cần
     return [re.sub(r"[^A-Za-z0-9]", "", x) for x in forms]  # đúng cặp `$'…'` (nháy lẻ phía trước làm lệch cặp)
 
@@ -743,8 +742,8 @@ def _shell_precheck(cmd: str) -> None:
       không thấy. Định nghĩa `alias NAME=…` xét theo từng lệnh (`_alias_rule`, D-272/D-274)."""
     if "\\" in cmd and "#" in cmd and any(_comment_continued(line) for line in cmd.split("\n")):
         raise ScanTooComplex(COMMENT_CONTINUED_WHY)
-    if "#" in cmd and "\n" in cmd and any(_comment_quotes_dollar(line) for line in cmd.split("\n")[:-1]):
-        raise ScanTooComplex("`$'`/`$\"` trong comment của lệnh nhiều dòng — guard giải ANSI-C trước khi bỏ comment")
+    if "\n" in cmd and ("#" in cmd or "$'" in cmd) and _comment_desyncs_ansi(cmd.split("\n")):
+        raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
 
@@ -764,18 +763,24 @@ def _may_be_alias(head: str) -> bool:
 def _alias_rule(argv: List[str]) -> None:
     """Lệnh đơn định nghĩa alias (tên lệnh có thể là `alias`, đối số không phải tên trơn: `c=…`, `$d`, glob) → chặn."""
     a = _strip_prefixes(argv)
-    if a and _may_be_alias(a[0]) and any(ALIAS_DEF_HINT_RE.search(x) for x in a[1:]):
+    if a and _may_be_alias(a[0]) and not all(ALIAS_ARG_OK_RE.fullmatch(x) for x in a[1:]):
         raise ScanTooComplex(f"định nghĩa alias (Claude Code bật `expand_aliases`): {' '.join(a)[:80]}")
 
 
-def _comment_quotes_dollar(line: str) -> bool:
-    """D-274: `$'`/`$"` sau chỗ có thể mở comment — `expand_ansi_c` chạy trước `strip_comments` nên nuốt các dòng sau
-    như chuỗi ANSI-C (`true # $'` ↵ `r\\m -rf ~`; review #361 sau D-273). Không đoán nháy: chặn."""
-    m = COMMENT_START_RE.search(line)
-    if m is None:
-        return False
-    tail = line[m.start() :]
-    return "$'" in tail or '$"' in tail
+def _comment_desyncs_ansi(lines: List[str]) -> bool:
+    """D-274/D-275: `expand_ansi_c` chạy trước `strip_comments` nên nháy trong comment làm lệch cặp `$'…'` của các dòng
+    sau (`true # $'` ↵ `r\\m -rf ~`; `true # it's` ↵ `$'\\x72m' -rf ~`). Chặn khi comment có `$'`, khi có `` `# `` (comment
+    trong backtick nuốt dấu đóng), hoặc khi một dòng có số nháy lẻ đứng trước dòng có `$'`. Comment thường (`# it's
+    fine`) không có `$'` phía sau thì cho chạy."""
+    for i, line in enumerate(lines[:-1]):
+        m = COMMENT_START_RE.search(line)
+        if m is None:
+            continue
+        tail = line[m.start() :]
+        if "$'" in tail or "`#" in line:
+            return True
+    later = [i for i, x in enumerate(lines) if "$'" in x]  # nháy lẻ (comment, thân heredoc `it's`) trước dòng có `$'`
+    return bool(later) and any((x.count("'") + x.count('"')) % 2 for x in lines[: later[-1]])
 
 
 def _comment_continued(line: str) -> bool:
