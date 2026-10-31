@@ -772,7 +772,10 @@ def _comment_quotes_dollar(line: str) -> bool:
     """D-274: `$'`/`$"` sau chỗ có thể mở comment — `expand_ansi_c` chạy trước `strip_comments` nên nuốt các dòng sau
     như chuỗi ANSI-C (`true # $'` ↵ `r\\m -rf ~`; review #361 sau D-273). Không đoán nháy: chặn."""
     m = COMMENT_START_RE.search(line)
-    return bool(m) and ("$'" in line[m.start() :] or '$"' in line[m.start() :])
+    if m is None:
+        return False
+    tail = line[m.start() :]
+    return "$'" in tail or '$"' in tail
 
 
 def _comment_continued(line: str) -> bool:
