@@ -1001,6 +1001,64 @@ class HeredocDelimiterTest(unittest.TestCase):
         self.assertEqual(guard.literal_bodies_masked("cat <<'E'\n`rm -rf ~`"), "cat <<'E'\n`rm -rf ~`")
 
 
+class ReviewForgeRound2Test(unittest.TestCase):
+    """Review #361 lượt 2: `gh` đăng chữ nhận ra ở token (đã bỏ nháy, `${IFS}`) vẫn được quét nguồn — chữ thô không khớp
+    regex không làm bỏ qua; file thân do chính chuỗi lệnh ghi ra thì nguồn là mọi file chuỗi đó đọc."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        Path(self.root, "b.md").write_text(MARK + "\n", encoding="utf-8")
+        Path(self.root, "n.md").write_text("thường\n", encoding="utf-8")
+        Path(self.root, "old.md").write_text("cũ\n", encoding="utf-8")
+
+    def check(self, want, cmds):
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(final(cmd, self.root), want)
+
+    def test_dequoted_gh_scanned(self):
+        self.check(
+            "deny",
+            (
+                "g''h pr comment 5 -F b.md",
+                "g\\h pr comment 5 -F b.md",
+                "gh pr co''mment 5 -F b.md",
+                "gh p\\r comment 5 -F b.md",
+                "gh${IFS}pr${IFS}comment 5 -F b.md",
+                "gh pr${IFS}comment 5 -F b.md",
+                'g""h pr comment 5 --body "$(cat b.md)"',
+                "cat b.md | g''h pr comment 5 -F -",
+                "g''h api repos/o/r/issues/5/comments -F body=@b.md",
+                "gh pr cr''eate --title 'docs: x' --body-file b.md",
+                "x=$(cat b.md); gh pr comm''ent 5 --body \"$x\"",
+                "gh pr comment 5 --body ok; g''h pr comment 5 -F b.md",
+                "x=$(g''h pr comment 5 -F b.md)",
+            ),
+        )
+        self.check("", ("g''h pr comment 5 --body ok", "gh pr view 5", "echo \"g''h pr comment\""))
+
+    def test_body_file_written_by_chain(self):
+        self.check(
+            "deny",
+            (
+                "cat b.md > x.md; gh pr comment 5 -F - < x.md",
+                "cat b.md > x.md; gh pr comment 5 -F x.md",
+                "cat b.md > old.md; gh pr comment 5 --body-file old.md",  # file có sẵn bị ghi đè trước khi đọc
+                "cp b.md x.md && gh pr comment 5 -F x.md",
+                "cat b.md >> ./old.md; gh pr comment 5 -F old.md",
+            ),
+        )
+        self.check(
+            "",
+            (
+                "echo hi > x.md; gh pr comment 5 -F x.md",
+                "cat n.md > x.md; gh pr comment 5 -F - < x.md",
+                "cat b.md > y.md; gh pr comment 5 -F n.md",
+                "gh pr comment 5 -F khong-co.md",
+            ),
+        )
+
+
 class BraceSequenceMiddleTest(unittest.TestCase):
     """AUD-SEC-073: dãy `{x..y}` bung đủ như bash, không chỉ hai đầu mút (`mai{m..o}` → `maim main maio`)."""
 

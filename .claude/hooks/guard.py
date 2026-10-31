@@ -2736,6 +2736,15 @@ GH_POST_RE = re.compile(
     r"|api\b.*?(?:\s-[fF]\b|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
     re.S,
 )
+GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
+
+
+def _gh_post_text(text: str) -> bool:
+    """Chữ thô có thể chứa `gh` đăng chữ — cả sau khi bỏ nháy/`\\` và thay `${IFS}` (`g''h pr co\\mment`): lọc nhanh
+    trước khi quét không được bỏ qua dạng mà token (đã bỏ nháy) thấy là `gh` đăng chữ (review #361 lượt 2)."""
+    return bool(GH_POST_RE.search(text) or GH_POST_RE.search(IFS_RE.sub(" ", GH_TEXT_NOISE_RE.sub("", text))))
+
+
 # Tool MCP đăng chữ lên PR/issue mà steward đọc dấu từ đó (commit file nhắc dấu thì không — review #159).
 MCP_REVIEW_POST_RE = re.compile(
     r"mcp__.+__\w*(?:issue_comment|pull_request_review_write|comment_to_pending_review|reply_to_pull_request_comment"
@@ -3298,7 +3307,7 @@ def _nested_gh(ctx: _BodyScan, st: Stage, argv: List[str], depth: int) -> Tuple[
     đọc stdin của đoạn; trong `>(…)` stdin của nó là đầu ra của chính đoạn — nguồn là file đoạn đó đọc (review #361)."""
     out, stdin = _Sources(), False
     for sp in st.spans:
-        if not GH_POST_RE.search(sp[1]):
+        if not _gh_post_text(sp[1]):
             continue
         sub = _span_gh(ctx, sp, depth)
         piped = sub.stdin()
@@ -3400,7 +3409,7 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str], budget: 
     posts = [c for c in split_commands(tokens) if _gh_posts(c)]
     if posts and (REVIEW_MARK_RE.search(cmd) or any(_forges_review(c) for c in posts)):
         return True
-    if not GH_POST_RE.search(cmd):
+    if not posts and not _gh_post_text(cmd):
         return False
     ctx, scan = _BodyScan(budget), _scan(cmd)
     if scan.open:
@@ -3408,9 +3417,18 @@ def _forges_review_cmd(cmd: str, tokens: List[str], cwd: Optional[str], budget: 
     found = _gh_sources(ctx, scan, 0)
     if posts and not found.posts:
         return True
-    if found.param:
+    if found.param or _own_written(found, tokens, cwd):
         found.add(_scan_reads(ctx, scan, 0))
     return _sources_marked(ctx, found, cwd)
+
+
+def _own_written(found: _Sources, tokens: List[str], cwd: Optional[str]) -> bool:
+    """File thân của `gh` do chính chuỗi lệnh ghi ra (`cat f > x.md; gh … -F - < x.md`, `cp f x.md`, `>> x.md`) hay chưa
+    có trên đĩa (lệnh trước sẽ tạo): file đọc lúc kiểm không phải thân thật → nguồn là mọi file chuỗi lệnh đọc (review
+    #361 lượt 2)."""
+    own = {posixpath.normpath(f) for f in found.own if f not in STDIN_PATHS}
+    written = {posixpath.normpath(t) for c in split_commands(tokens) for t in write_targets(normalize(c), c)}
+    return bool(own & written) or not all(_present(f, cwd) for f in own)
 
 
 def _review_forge_hit(cmd: str, tokens: List[str], cwd: Optional[str], budget: Optional["ScanBudget"] = None) -> bool:
