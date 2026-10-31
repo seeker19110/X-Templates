@@ -168,6 +168,8 @@ CWD_RELATIVE: Dict[str, str] = {
     "guard-har154-rm-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
     "guard-har154-git-mv-ledger-dir": "docs/autopilot tương đối → /tmp/docs/autopilot",
     "guard-har154-cp-into-ledger-dir": "docs/autopilot/ tương đối → /tmp/docs/autopilot",
+    "guard-sec188-pr-create-combined-title": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
+    "guard-sec188-pr-create-combined-body": "`ai_attribution: forbid` ở xt.yaml của repo ca; /tmp không khai",
 }
 
 

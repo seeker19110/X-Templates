@@ -5567,6 +5567,8 @@ def _xt_yaml_for(d: str) -> str:
 # `gh pr create|edit|merge` (D-057): tiêu đề/thân PR và tiêu đề/thân commit squash (`merge --subject/--body`).
 GH_PR_TEXT_RE = re.compile(r"(?<![\w-])gh\s+pr(?:\s+(?:-R|--repo)(?:\s+|=)\S+)?\s+(?:create|new|edit|merge)\b")
 GH_PR_TEXT_OPTS = {"-t": "m", "--title": "m", "--subject": "m", "-b": "m", "--body": "m", "-F": "F", "--body-file": "F"}
+# cờ bool ngắn đứng trước `-t/-b/-F` gộp kiểu pflag: `create -dt x`, `-fdbX`, `merge -sdb x` (AUD-SEC-188)
+GH_PR_BOOL_SHORT = {"create": "dfw", "new": "dfw", "edit": "", "merge": "smrd"}
 
 
 def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
@@ -5576,16 +5578,19 @@ def _gh_pr_text_args(args: List[str]) -> Optional[List[Tuple[str, str]]]:
         rest = rest[2:] if rest[0] in ("-R", "--repo") else rest[1:]
     if rest[:1] not in (["create"], ["new"], ["edit"], ["merge"]):  # `new`: alias của `create`
         return None
+    bools = GH_PR_BOOL_SHORT[rest[0]]
+    short = re.compile(f"-{f'[{bools}]*' if bools else ''}([tbF])(=?)(.*)", re.S)
     out: List[Tuple[str, str]] = []
     for i, x in enumerate(rest[1:], 1):
         nxt = rest[i + 1] if i + 1 < len(rest) else ""
         key, sep, val = x.partition("=")
-        if x in GH_PR_TEXT_OPTS:
-            out.append((GH_PR_TEXT_OPTS[x], nxt))
-        elif sep and key in GH_PR_TEXT_OPTS:
+        m = short.fullmatch(x)
+        if x in GH_PR_TEXT_OPTS or (m and not m.group(2) and not m.group(3)):  # `-t x`, `-dt x`
+            out.append((GH_PR_TEXT_OPTS["-" + m.group(1)] if m else GH_PR_TEXT_OPTS[x], nxt))
+        elif sep and key in GH_PR_TEXT_OPTS and key[:2] == "--":
             out.append((GH_PR_TEXT_OPTS[key], val))
-        elif x[:2] in ("-t", "-b", "-F") and len(x) > 2:  # `-tfeat: x` (pflag)
-            out.append((GH_PR_TEXT_OPTS[x[:2]], x[2:]))
+        elif m:  # `-tfeat: x`, `-t=x`, `-dbX`, `-dF=f` (pflag)
+            out.append((GH_PR_TEXT_OPTS["-" + m.group(1)], m.group(3)))
     return out
 
 
