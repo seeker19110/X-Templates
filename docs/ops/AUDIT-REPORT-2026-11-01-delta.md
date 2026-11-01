@@ -1,7 +1,7 @@
 # AUDIT-REPORT — delta sau PLAN-harden-2026-10-31, 2026-11-01
 
 > Commit quét: `e09f776` (`main` sau #377; delta `78fb359..e09f776`, #359–#377) · Phạm vi: `delta` — 11 nhóm `audit plan` liệt kê "Quét lại" (DATA N/A; A11Y không đổi UI) · Người quét: 3 cụm `reviewer` read-only (SEC/CFG/DEP/CI · ARCH/CODE/TEST/PERF · DOC/HAR/XFEAT), phiên chính chạy cổng chuẩn · Xác minh đối kháng: `reviewer-alt` (khác người tìm, effort cao) cho 6 phát hiện 🔴/🟠 nhóm SEC — 6/6 tái hiện, 2 hạ mức, 1 biến thể bác bỏ.
-> `xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 (lúc ghi sổ, HEAD `291d45d`).
+> `xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 (lúc ghi sổ, HEAD `291d45d`). Báo cáo là ảnh chụp lúc quét; **trạng thái sống của từng phát hiện xem sổ** `docs/ops/AUDIT-STATUS.md` (AUD-HAR-171, AUD-CODE-032, AUD-TEST-037…039, AUD-XFEAT-038, AUD-DOC-131…135 đã sửa ở #382).
 
 ## 1. Tóm tắt
 
@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | 🔴 | 1 (AUD-SEC-251) | | | |
 | 🟠 | 6 (AUD-SEC-248, 249, 250, 252, 253; AUD-HAR-171) | | | 1 biến thể (AUD-SEC-253 base64 — ngoài phạm vi guard tự khai) |
-| 🟢 | 11 (AUD-ARCH-007, AUD-CODE-032, AUD-TEST-037/038/039, AUD-XFEAT-038, AUD-DOC-131…135, AUD-HAR-172) | 2 (AUD-DOC-130 #378, AUD-HAR-173 #377) | | |
+| 🟢 | 12 (AUD-ARCH-007, AUD-CODE-032, AUD-TEST-037/038/039, AUD-XFEAT-038, AUD-DOC-131…135, AUD-HAR-172) | 2 (AUD-DOC-130 #378, AUD-HAR-173 #377) | | |
 
 Kết luận: **không có hồi quy do delta** — cả 6 phát hiện SEC đều tái hiện y hệt trên `78fb359` (có từ trước); #359–#377 không mở lỗ mới. Cắt bản 3.30.0 còn chặn bởi `audit --strict` (🔴 mở: AUD-SEC-251 + họ 191…247 đã ghi) và `review_debt`; kế hoạch sửa ở `PLAN-upgrade-2026-11-01.md` lát 6 (D-292).
 

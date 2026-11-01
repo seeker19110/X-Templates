@@ -115,7 +115,7 @@
    ]
   },
   {
-   "reason": "Công cụ khác (perf guard, contrast, vendor-check) — không thuộc đường merge/guard",
+   "reason": "Công cụ khác (perf guard, contrast, vendor-check, doctor) — không thuộc đường merge/guard",
    "ids": [
     "AUD-XFEAT-005",
     "AUD-XFEAT-006",
