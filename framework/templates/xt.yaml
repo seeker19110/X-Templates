@@ -45,6 +45,9 @@ audit: ""             # audit phụ thuộc (npm audit · pip-audit …)
 # Trước phát hành (pha harden, `release-check` chạy — ADR-0042): đỏ = NO-GO; trống ở M/L = người ký lý do không áp.
 attack: ""            # tấn công thử: DAST (ZAP baseline/API scan) · fuzz API (schemathesis run …) trên bản chạy cục bộ/staging
 perf: ""              # kiểm tải có ngưỡng, đỏ khi vượt ngân sách (vd k6 run với thresholds)
+migration_check: ""   # cổng production (ADR-0062): migration tiến + lùi trên bản sao dữ liệu/staging
+rollback: ""          # cổng production: diễn tập quay về bản trước (tag/artifact cũ + migration lùi)
+acceptance: ""        # cổng production: kiểm thử nghiệm thu theo tiêu chí chấp nhận (UAT tự động)
 preview: ""           # cách chạy thử bản trình người duyệt (`xt.py stage submit` ghi lại — ADR-0058); vd npm run preview
 preview_smoke: ""     # Gate bản trình: `stage submit` chạy (qua guard), exit ≠ 0 → không trình (D-247); vd npm run build && npx playwright test smoke
 claude_min_version: ""   # doctor cảnh báo khi Claude Code thấp hơn (LOOP-HARNESS-026)
