@@ -232,6 +232,13 @@ class MergeDecisionTest(unittest.TestCase):
         for ok in ("fix(guard): a", "feat!: b", "chore(release/x.y): 3.5.0", "fix: " + "a" * 67):
             with self.subTest(ok):
                 self.assertEqual(xt.merge_decision(pr(title=ok), autonomy=2)["verdict"], "merge")
+        # AUD-TEST-037: biên đúng trần PR_TITLE_MAX (100) qua, 101 chặn — cùng hằng với `pr_title_problems`
+        exact, over = "fix: " + "a" * (xt.PR_TITLE_MAX - 5), "fix: " + "a" * (xt.PR_TITLE_MAX - 4)
+        self.assertEqual((len(exact), len(over)), (100, 101))
+        self.assertIsNone(xt._pr_shape_blocker(pr(title=exact)))
+        self.assertEqual(xt._pr_shape_blocker(pr(title=over))[0], "fix")
+        self.assertEqual((xt.pr_title_problems(exact), len(xt.pr_title_problems(over))), ([], 1))
+        self.assertEqual(xt.pr_title_problems('Revert "feat: x"'), [])  # AUD-XFEAT-038: miễn như guard/merge-check
         # `update` bằng git (gh pr update-branch cần GraphQL — phiên Claude Code chặn)
         self.assertEqual(
             xt.merge_decision(pr(mergeStateStatus="BEHIND", baseRefName="dev"), 2)["next"],

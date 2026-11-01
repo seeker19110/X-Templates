@@ -5674,8 +5674,11 @@ def _pr_title_suggest(title: str) -> str:
 
 def pr_title_problems(title: str) -> List[str]:
     """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật workflow `pr-title` và `merge-check` (D-056): Conventional Commits
-    (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự. Rỗng = hợp lệ."""
+    (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự; `Revert "…"` (nút Revert của GitHub) miễn như guard/merge-check/CI
+    (AUD-XFEAT-038). Rỗng = hợp lệ."""
     out: List[str] = []
+    if title.startswith('Revert "'):
+        return out
     if len(title) > PR_TITLE_MAX:
         out.append(f"dài {len(title)} ký tự > {PR_TITLE_MAX} — rút gọn mô tả (tiêu đề thành subject commit squash)")
     if not PR_TITLE_RE.fullmatch(title):
