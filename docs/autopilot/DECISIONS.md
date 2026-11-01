@@ -1999,3 +1999,10 @@
 - Chọn: Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: nội dung sửa của PR đã có 4 lượt review; thay đổi mới chỉ là đổi số ID và đồng bộ chính sách với main, đo bằng bench 1043 ca xanh; đóng PR bỏ sửa guard đã kiểm
 - Đường lùi: Hoàn nguyên commit gộp và đổi số; đưa PR về head 0486151
+
+### D-292 · 2026-11-01T03:17:20+00:00 · Duyệt PLAN-upgrade-2026-11-01 (ADR-0061 Adaptive Agent theo nhận định chủ dự án; stored ưu tiên 1-3; sửa batch audit delta) và cách máy hoá ADR-0061
+
+- Phương án: (1) Bảng topology máy đọc, mặc định self, giữ hai tầng executor cho parallel, đợt 4, rethink tối đa 1 mỗi PR, thêm KPI thời gian vào loop stats; 7 lát mỗi lát một PR, tự làm (topo self), lát chạm harness topo review · (2) Giữ mặc định giao executor và chờ số đo LOOP-ORCH-020 như ADR-0045 · (3) Bỏ hẳn executor và executor-deep, chỉ một agent cộng reviewer
+- Chọn: Bảng topology máy đọc, mặc định self, giữ hai tầng executor cho parallel, đợt 4, rethink tối đa 1 mỗi PR, thêm KPI thời gian vào loop stats; 7 lát mỗi lát một PR, tự làm (topo self), lát chạm harness topo review
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: khớp thực tế vận hành phiên 2026-10-31 và dữ kiện sống 2026-11-01 (Harness design: đơn giản nhất, chỉ tăng khi cần; ROI: cost per task, PR cycle time); tiêu chí 2: đường lùi một dòng topo parallel trả hành vi cũ; tiêu chí 3: số đo LOOP-ORCH-020 vẫn chạy và có thêm trục thời gian; chủ dự án có quyền cuối, số 4 và 1 rethink ghi là khởi điểm tự đặt; phương án 2 không bao giờ có số, phương án 3 mất chuyển cấp ADR-0029
+- Đường lùi: Revert PR từng lát; PLAN ghi topo parallel cho mọi task; max_rethink 0

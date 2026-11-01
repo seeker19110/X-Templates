@@ -250,10 +250,14 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0051](docs/adr/0051-split-session-attach-from-resume.md): tách "gắn phiên mới" khỏi "giải quyết việc chờ / mở block" — `loop attach`, `loop resolve`, `loop unblock`; `loop resume` giữ nghĩa cũ và in cảnh báo (D-201; lát 1 của nghiên cứu ba vòng, chưa triển khai).
 - [ADR-0052](docs/adr/0052-loop-state-rev-progress-perf-v2-next-step.md): state có `rev`, chặn không-tiến-triển theo task, mẫu perf v2, `loop next-step` chỉ đọc — lát 0–2 của nghiên cứu ba vòng; `perf trial` hoãn sang ADR riêng (D-202, D-203; lát 0–1 ở 3.28.0, lát 2 đang làm).
 - [ADR-0053](docs/adr/0053-review-round-budget-per-pr.md): ngân sách review mỗi PR — hai lượt chưa sạch rồi `pr next` trả `rethink`, thêm lượt qua `pr rethink --decision D-NNN`; review trước PR dùng cho đúng head (D-209; phần duyệt của PLAN-phase-gated-review). Quyết định 2 thay bởi ADR-0059.
+- [ADR-0054](docs/adr/0054-fail-closed-unavailable-state-lock-and-guard-loader.md): không ghi state khi thiếu khoá, không thực thi khi guard lỗi nạp (fail-closed).
+- [ADR-0055](docs/adr/0055-optional-install-policy-presets.md): preset chính sách cài đặt tuỳ chọn (`install.py --preset`).
 - [ADR-0056](docs/adr/0056-delivery-speed-review-scope-ci-gate-ids.md): tốc độ giao hàng — lỗi có từ trước không chặn PR (sổ audit chặn phát hành), CI là cổng đầy đủ mọi pha, `loop decide` đánh số qua nhánh remote (D-221).
 - [ADR-0057](docs/adr/0057-merged-review-covers-release-debt.md): `release-check` coi nợ review là đã phủ khi mọi commit chạm file là squash của PR có review sạch ở head (dấu `xt-review` trên GitHub) — bớt PR sổ chỉ để dời SHA sau squash-merge (D-222).
 - [ADR-0058](docs/adr/0058-product-stages-machine-lock.md): ba giai đoạn sản phẩm MVP → hoàn thiện → tối ưu khoá bằng máy (`xt.py stage`, sổ `docs/autopilot/STAGE.json`); chỉ người duyệt (`stage approve`), PLAN khai giai đoạn, `release-check` hàng `stage` (D-239).
 - [ADR-0059](docs/adr/0059-review-twice-fix-once-debt.md): review 2 lần, sửa 1 lần — hết lượt thì `pr next` trả `debt`, phát hiện 🟠/🟢 còn lại ghi nợ ở sổ audit (`nợ-review: #N`, `pr debt`) rồi tiếp tục, 🔴 vẫn `pr rethink`; nợ trả cuối pha (`audit check --strict`) (luật chủ dự án 2026-10-30, D-257).
+- [ADR-0060](docs/adr/0060-task-skills.md): sáu skill theo tác vụ phát triển (`/debug`, `/tdd`, `/ui-verify`, `/upgrade`, `/migrate-db`, `/incident`), tuỳ chọn cho dự án đích.
+- [ADR-0061](docs/adr/0061-adaptive-agent-topology.md): cấu hình agent theo loại việc — mặc định một agent chính tự làm (`topo: self`), `review`/`parallel`/`audit` theo độ độc lập; đợt song song ≤ 4; `rethink` ≤ 1/PR; KPI thời gian trong `loop stats` (nhận định chủ dự án 2026-11-01).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
