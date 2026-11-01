@@ -5101,6 +5101,8 @@ def _doctor_settings_local(base: Path) -> List[Finding]:
                 " install.py hoặc thêm dòng (LOOP-HARNESS-032)",
             )
         )
+    if not shutil.which("git"):  # AUD-HAR-178: thiếu git trên PATH → chỉ kiểm dòng, không sập (như `_doctor_git`)
+        return out
     tracked = _git(base, "ls-files", "--", SETTINGS_LOCAL_REL)
     if tracked.returncode == 0 and tracked.stdout.strip():
         out.append(
