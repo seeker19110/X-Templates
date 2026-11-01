@@ -2040,3 +2040,10 @@
 - Chọn: Lượt hai đọc IFS đúng như main bên trong tokenize qua cờ (tương đương main theo cấu trúc, phương án reviewer gọi là chắc hơn); mở thêm một lượt rà
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: lỗ lần này do điều kiện kích và viết lại chuỗi thô lệch thứ tự nối dòng với main; đọc IFS trong tokenize sau nối dòng và giải ANSI-C đồng nhất với main theo cấu trúc, không còn xấp xỉ; người dùng yêu cầu tiếp tục merge
 - Đường lùi: Hoàn nguyên commit sửa; đóng PR, AUD-SEC-232 về mở
+
+### D-291 · 2026-11-01T01:16:15+00:00 · PR #372: thu hẹp về chỉ thêm điểm chặn sau review lượt 7 chưa sạch (ADR-0053/0059)
+
+- Phương án: (1) Gỡ hợp hai lượt, giữ IFS_RE nguyên bản, chỉ giữ điểm chặn thêm và sửa container; AUD-SEC-232 thành đã giảm còn mở; mở lượt rà cuối ngắn · (2) Đóng PR
+- Chọn: Gỡ hợp hai lượt, giữ IFS_RE nguyên bản, chỉ giữ điểm chặn thêm và sửa container; AUD-SEC-232 thành đã giảm còn mở; mở lượt rà cuối ngắn
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: bản chỉ thêm điểm chặn không thể yếu hơn main theo cấu trúc, loại hẳn lớp lỗi lệch cách đọc đã gây bảy lượt; mất độ phủ lồng trong nháy đơn nhưng main cũng hở và đã ghi sổ; đóng PR bỏ các điểm chặn đã kiểm
+- Đường lùi: Hoàn nguyên commit thu hẹp; đóng PR
