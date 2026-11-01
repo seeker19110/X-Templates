@@ -2026,3 +2026,10 @@
 - Chọn: Áp bản sửa reviewer đã đo (chặn dấu thoát trước biến IFS trong thân nháy kép), mở thêm lượt rà; lớp có từ trước ghi sổ riêng
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: lỗi do bản sửa gây ra phải đóng, bản sửa đo 831/831 ca và 0 đổi quyết định trên kho literal; lớp mới không thuộc PR ghi AUD-SEC-245
 - Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-232 về mở
+
+### D-289 · 2026-10-31T23:58:41+00:00 · PR #372: lượt rà cuối sau review lượt 5 chưa sạch (ADR-0053/0059)
+
+- Phương án: (1) Hợp hai cách đọc IFS (cách hiện tại và cách cũ của main), sàn là main; mở lượt rà cuối, nếu còn đỏ thì đóng PR · (2) Đóng PR ngay, đưa AUD-SEC-232 về mở
+- Chọn: Hợp hai cách đọc IFS (cách hiện tại và cách cũ của main), sàn là main; mở lượt rà cuối, nếu còn đỏ thì đóng PR
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: nguyên nhân gốc của chuỗi lỗi là head khác main ở cách đọc IFS; hợp chặt hơn bảo đảm không yếu hơn main theo cấu trúc, không còn vá từng ngữ cảnh; đo 13 biến thể reviewer + 8 lệnh vô hại
+- Đường lùi: Hoàn nguyên commit hợp; đóng PR, AUD-SEC-232 về mở
