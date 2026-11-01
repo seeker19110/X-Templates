@@ -2555,6 +2555,12 @@ class ShellParseGapsTest(unittest.TestCase):
             "bash <<EOF\nrm -rf ~/\\$IFS''#\nEOF",
             "cat <<EOF | bash\nrm -rf ~/\\$IFS''#\nEOF",
             "echo \"`: '\"'`\"; rm -rf ~/$IFS''#",
+            # tên biến IFS bị tách bằng `\` + xuống dòng: bash/main nối dòng trước khi đọc (review #372 lượt cuối)
+            "echo `rm -rf ~/\\$IF\\\nS''#`",
+            "echo `rm -rf ~/\\${IF\\\nS}#`",
+            "x=`rm -rf ~/\\$\\\nIFS''#`",
+            "echo \"`: '\"'`\"; rm -rf ~/$IF\\\nS''#",
+            'echo "`: \'"\'`"; rm -rf ~/$IF\\\nS#',
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

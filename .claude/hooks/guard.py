@@ -933,6 +933,8 @@ ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1
 ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
 # `IFS` liền `#` không viết lại: giữ nguyên để kiểm strict của script lồng (`bash -c '…'`) còn thấy (AUD-SEC-232)
 IFS_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))(?![\\'\"]*#)")  # cả khi nháy/`\` xen giữa (`$IFS''#`)
+IFS_LEGACY_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")  # cách đọc cũ của main: mọi biến IFS thành khoảng trắng
+_IFS_LEGACY = [False]  # True trong lượt hai của `bash_decision`: `tokenize` đọc IFS bằng `IFS_LEGACY_RE`
 IFS_HASH_WHY = "`IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
 # Biến IFS ngoài nháy liền (có thể xen nháy/`\`) dấu thăng: `~/$IFS''#` bash tách hai trường, guard thấy một token (#372)
 IFS_HASH_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))[\\'\"]*#")
@@ -1143,7 +1145,8 @@ PWD_SUBST_RE = re.compile(
 def tokenize(cmd: str) -> List[str]:
     cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
     strip_comments(cmd, True)  # `)#`, `$IFS#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (AUD-SEC-195/232)
-    cmd = IFS_RE.sub(" ", cmd)
+    # Lượt đọc cũ của main (`bash_decision`, cờ `_IFS_LEGACY`): mọi biến IFS thành khoảng trắng, đúng thứ tự nối dòng/ANSI-C
+    cmd = (IFS_LEGACY_RE if _IFS_LEGACY[0] else IFS_RE).sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
@@ -8461,7 +8464,6 @@ def _glob_rewrites(cmd: str, tokens: List[str], heads: Dict[str, List[str]]) -> 
 
 
 IFS_ANY_RE = re.compile(r"\$\{?IFS")
-IFS_LEGACY_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")  # cách đọc cũ của main: mọi biến IFS thành khoảng trắng
 _DECISION_RANK = {"": 0, "ask": 1, "deny": 2}
 
 
@@ -8477,12 +8479,14 @@ def bash_decision(
     thành khoảng trắng). Chỉ thêm, không bớt so với main — mỗi bản sửa riêng lẻ cho `IFS#` từng để lọt một ngữ cảnh mới
     (backtick, heredoc, nháy lệch) mà main chặn (AUD-SEC-232, review #372 lượt 1…5)."""
     out = _decide_once(cmd, root, cwd, depth, budget, rewrites)
-    if IFS_ANY_RE.search(cmd):
-        legacy = IFS_LEGACY_RE.sub(" ", cmd)
-        if legacy != cmd:
-            alt = _decide_once(legacy, root, cwd, depth, budget, rewrites)
-            if _DECISION_RANK.get(str(alt["decision"]), 0) > _DECISION_RANK.get(str(out["decision"]), 0):
-                return alt
+    if out["decision"] != "deny" and IFS_ANY_RE.search(join_continuations(cmd)):  # nối dòng: `$IF\` ↵ `S` vẫn là IFS
+        prev, _IFS_LEGACY[0] = _IFS_LEGACY[0], True  # lượt hai đọc IFS như main TRONG `tokenize` (không viết chuỗi thô)
+        try:
+            alt = _decide_once(cmd, root, cwd, depth, budget, rewrites)
+        finally:
+            _IFS_LEGACY[0] = prev
+        if _DECISION_RANK.get(str(alt["decision"]), 0) > _DECISION_RANK.get(str(out["decision"]), 0):
+            return alt
     return out
 
 
