@@ -141,17 +141,23 @@ class CiTemplateTest(unittest.TestCase):
             self.assertIn("pr_title_check", body)
             self.assertIn("persist-credentials: false", body)
             script = step_run(body, "Tiêu đề PR")
+            lc = re.search(
+                r"LC_ALL: (\S+)", body
+            )  # `env:` của bước đặt locale UTF-8: `${#TITLE}` đếm ký tự, không byte
+            self.assertIsNotNone(lc, path.name)
             for title, author, rc in (
                 ("feat(ci): gộp job ngắn vào gate", "dev", 0),
                 ("fix!: đổi giao ước", "dev", 0),
                 ("gộp job", "dev", 1),
                 ("feat: " + "x" * 98, "dev", 1),
+                ("feat: " + "ệ" * 94, "dev", 0),  # đúng 100 ký tự (288 byte): chỉ đạt khi đếm ký tự
+                ("feat: " + "ệ" * 95, "dev", 1),  # 101 ký tự
                 ("bất kỳ", "dependabot[bot]", 0),
                 ("chore(deps): bump " + "x" * 120, "dependabot[bot]", 0),  # tiêu đề Dependabot dài hơn 100 (AUD-CI-021)
                 ('Revert "feat: x"', "dev", 0),
             ):
                 with self.subTest(path=path.name, title=title):
-                    env = dict(os.environ, TITLE=title, AUTHOR=author)
+                    env = dict(os.environ, LC_ALL=lc.group(1), TITLE=title, AUTHOR=author)
                     r = subprocess.run(
                         ["bash", "-c", script], capture_output=True, text=True, env=env, cwd=tempfile.gettempdir()
                     )
