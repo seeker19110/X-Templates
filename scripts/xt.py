@@ -5036,6 +5036,50 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
         out.append(
             Finding("orchestration", "warn", msg + "; đổi `model:` thành `inherit` hoặc tầng của khung (LOOP-ORCH-022)")
         )
+    return out + _doctor_harness_settings(base)
+
+
+SETTINGS_LOCAL_REL = ".claude/settings.local.json"  # quyền/đường dẫn máy cá nhân — không commit (LOOP-HARNESS-032)
+MCP_ALL_KEY = "enableAllProjectMcpServers"
+
+
+def _doctor_harness_settings(base: Path) -> List[Finding]:
+    """LOOP-HARNESS-032 (stored XT-H-021): settings dự án không bật mọi MCP server của `.mcp.json` không hỏi; khoá
+    `model` khai trong settings thuộc họ của khung (`MODEL_TIER`); `settings.local.json` có thì `.gitignore` phải chặn.
+    Fail-open: JSON hỏng bỏ qua; chỉ in tên file và khoá, không in giá trị."""
+    out: List[Finding] = []
+    for name in ("settings.json", "settings.local.json"):
+        data = _read_json_obj(base / ".claude" / name) or {}
+        if data.get(MCP_ALL_KEY) is True:
+            out.append(
+                Finding(
+                    "orchestration",
+                    "warn",
+                    f".claude/{name}: `{MCP_ALL_KEY}: true` bật mọi MCP server trong `.mcp.json` không hỏi — bỏ khoá,"
+                    " liệt kê `enabledMcpjsonServers` (LOOP-HARNESS-032, LOOP-STOP-023)",
+                )
+            )
+        model = data.get("model")
+        if isinstance(model, str) and model.strip() and model_family(model) not in MODEL_TIER:
+            out.append(
+                Finding(
+                    "orchestration",
+                    "warn",
+                    f".claude/{name}: `model` ngoài họ của khung ({', '.join(MODEL_TIER)}) — bỏ khoá hoặc dùng tầng"
+                    " của khung (LOOP-HARNESS-032, LOOP-ORCH-019)",
+                )
+            )
+    if (base / SETTINGS_LOCAL_REL).is_file() and SETTINGS_LOCAL_REL not in _read_text_or_empty(
+        base / ".gitignore"
+    ).splitlines():
+        out.append(
+            Finding(
+                "orchestration",
+                "warn",
+                f"{SETTINGS_LOCAL_REL} có mà `.gitignore` không chặn — file chứa quyền/đường dẫn máy cá nhân; chạy lại"
+                " install.py hoặc thêm dòng (LOOP-HARNESS-032)",
+            )
+        )
     return out
 
 

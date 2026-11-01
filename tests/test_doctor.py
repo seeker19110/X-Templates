@@ -763,6 +763,31 @@ class DoctorOrchestrationTest(DoctorCase):
         self.write("docs/adr/0001-teams.md", "# ADR-0001\nkhông nhắc\n")
         self.assertEqual(self.orch(), [])
 
+    def test_harness_settings_mcp_all_model_and_gitignore_warn(self):
+        """LOOP-HARNESS-032 (stored XT-H-021): settings dự án bật mọi MCP server hoặc ghim `model` ngoài họ của khung →
+        cảnh báo (không in giá trị); `settings.local.json` có mà `.gitignore` không chặn → cảnh báo; JSON hỏng → bỏ qua."""
+        self.write(".claude/settings.json", json.dumps({"enableAllProjectMcpServers": True, "model": "gpt-5"}))
+        msgs = [f.msg for f in self.orch()]
+        self.assertEqual(len(msgs), 2, msgs)
+        self.assertTrue(any("`enableAllProjectMcpServers: true`" in m and "LOOP-HARNESS-032" in m for m in msgs))
+        self.assertTrue(any("`model` ngoài họ của khung" in m and "LOOP-ORCH-019" in m for m in msgs))
+        self.assertFalse(any("gpt-5" in m for m in msgs))
+        self.write(
+            ".claude/settings.json", json.dumps({"enableAllProjectMcpServers": False, "model": "claude-opus-5-5"})
+        )
+        self.assertEqual(self.orch(), [])
+        gi = self.base / ".gitignore"
+        gi.write_text("node_modules/\n", encoding="utf-8")
+        self.write(".claude/settings.local.json", json.dumps({"model": "sonnet[1m]"}))
+        [f] = self.orch()
+        self.assertIn(".claude/settings.local.json có mà `.gitignore` không chặn", f.msg)
+        gi.write_text(".autopilot/\n.claude/settings.local.json\n", encoding="utf-8")
+        self.assertEqual(self.orch(), [])
+        self.write(".claude/settings.local.json", "{hỏng")
+        self.assertEqual(self.orch(), [])  # fail-open
+        self.write(".claude/settings.local.json", json.dumps({"enableAllProjectMcpServers": "true", "model": " "}))
+        self.assertEqual(self.orch(), [])  # chỉ `true` boolean và `model` có chữ mới tính
+
     def test_malformed_settings_env_fail_open(self):
         self.settings_env(".claude/settings.json", ["không phải object"])
         self.write(".claude/settings.local.json", "{hỏng")

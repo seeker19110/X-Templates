@@ -827,10 +827,17 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             gi.read_text(encoding="utf-8"),
-            "node_modules/\n\n# X-Templates: trạng thái autopilot cục bộ\n.autopilot/\n",
+            "node_modules/\n\n# X-Templates: trạng thái autopilot cục bộ, settings cá nhân\n.autopilot/\n"
+            ".claude/settings.local.json\n",
         )
-        self.assertIn("thêm .autopilot/", err)
+        self.assertIn("thêm .autopilot/, .claude/settings.local.json", err)
         self.install_quiet()  # chạy lại: đã có dòng → không nhân đôi
+        self.assertEqual(gi.read_text(encoding="utf-8").count(".autopilot/"), 1)
+        self.assertEqual(gi.read_text(encoding="utf-8").count("settings.local.json"), 1)
+        # LOOP-HARNESS-032: dự án đã có `.autopilot/` (bản cũ) → chỉ thêm dòng còn thiếu
+        gi.write_text("node_modules/\n.autopilot/\n", encoding="utf-8")
+        _, err = self.install_quiet()
+        self.assertIn("thêm .claude/settings.local.json", err)
         self.assertEqual(gi.read_text(encoding="utf-8").count(".autopilot/"), 1)
 
     def test_minimal_framework_without_research_templates_or_version(self):

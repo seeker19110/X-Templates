@@ -968,20 +968,30 @@ def install_github(target: Path) -> None:
         )
 
 
+GITIGNORE_LINES = (
+    ".autopilot/",
+    ".claude/settings.local.json",
+)  # trạng thái autopilot; quyền/đường dẫn máy cá nhân (LOOP-HARNESS-032)
+
+
 def ensure_gitignore(target: Path) -> None:
-    """Bước 4: .gitignore thêm `.autopilot/` nếu thiếu (tạo mới nếu chưa có file)."""
+    """Bước 4: .gitignore thêm `.autopilot/` và `.claude/settings.local.json` nếu thiếu (tạo mới nếu chưa có file)."""
     gi = target / ".gitignore"
-    line = ".autopilot/"
     if gi.is_symlink():  # file của dự án (không phải bản khung): không ghi qua liên kết, không gỡ (AUD-CFG-003)
-        log(f"  ⚠ bỏ qua symlink {gi} — tự thêm dòng `{line}` vào file thật")
+        log(f"  ⚠ bỏ qua symlink {gi} — tự thêm dòng `{'`, `'.join(GITIGNORE_LINES)}` vào file thật")
         return
     if gi.exists():
-        if line not in gi.read_text(encoding="utf-8").splitlines():
+        missing = [ln for ln in GITIGNORE_LINES if ln not in gi.read_text(encoding="utf-8").splitlines()]
+        if missing:
             with gi.open("a", encoding="utf-8") as fh:
-                fh.write(f"\n# X-Templates: trạng thái autopilot cục bộ\n{line}\n")
-            log("  .gitignore: thêm .autopilot/")
+                fh.write(
+                    "\n# X-Templates: trạng thái autopilot cục bộ, settings cá nhân\n"
+                    + "".join(f"{ln}\n" for ln in missing)
+                )
+            log("  .gitignore: thêm " + ", ".join(missing))
     else:
-        gi.write_text(f"# X-Templates: trạng thái autopilot cục bộ\n{line}\n", encoding="utf-8")
+        body = "".join(f"{ln}\n" for ln in GITIGNORE_LINES)
+        gi.write_text(f"# X-Templates: trạng thái autopilot cục bộ, settings cá nhân\n{body}", encoding="utf-8")
         log("  .gitignore: tạo mới")
 
 
