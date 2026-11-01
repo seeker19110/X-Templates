@@ -2048,3 +2048,17 @@
 - Chọn: Dừng đợt: không quét delta lặp các PR sửa (đã review 1 lần theo ADR-0062); audit tổng thể kế tiếp ở đầu đợt /complete trước khi cắt 3.30.0, gom nợ còn lại (🟠 SEC-276/287/288/290/291/292, HAR-182 phần còn lại + 🔴 guard có từ trước) thành PLAN mới
 - Lý do (tiêu chí chất lượng cuối): Cấu hình chủ dự án 2026-11-01: audit tổng thể MỘT lần cuối mỗi giai đoạn + review 1 lần mỗi PR; quét lặp các bản sửa đã cho thấy mỗi lượt sinh 🟠 mới ở chính bản sửa (vòng không hội tụ, chi phí lớn); nợ đã có ID ở sổ, release-check vẫn NO-GO nên không phát hành mang nợ
 - Đường lùi: Chạy /audit delta 457a69e..HEAD bất kỳ lúc nào
+
+### D-299 · 2026-11-01T23:29:52+00:00 · Đầu /complete trước 3.30.0: sổ còn 18 🔴 + 26 🟠 lách bộ phân tích bash của guard (AUD-SEC-180…292) — sửa thế nào?
+
+- Phương án: (1) Vá từng phát hiện như các đợt trước (mỗi ca một luật nhận dạng) · (2) Tập con chuẩn: guard chặn (BUDGET, fail-closed) mọi cấu trúc nó không mô phỏng chắc ở vùng mã (backtick, comment có nháy, IFS mở rộng, bảng alias, ~N, PID-rồi-ngoặc, brace có thăng, nháy không đóng, bash -c/eval thân động, ghi biến prompt, ống vào shell) + lệnh gh đăng nội dung chỉ nhận thân chữ nguyên văn/file chữ — ADR-0063 · (3) Chấp nhận rủi ro các 🔴 lách cố ý (chủ + hạn), dựa vào bộ phân loại Auto
+- Chọn: Tập con chuẩn: guard chặn (BUDGET, fail-closed) mọi cấu trúc nó không mô phỏng chắc ở vùng mã (backtick, comment có nháy, IFS mở rộng, bảng alias, ~N, PID-rồi-ngoặc, brace có thăng, nháy không đóng, bash -c/eval thân động, ghi biến prompt, ống vào shell) + lệnh gh đăng nội dung chỉ nhận thân chữ nguyên văn/file chữ — ADR-0063
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: đóng theo lớp thay vì từng ca — #372 cho thấy vá từng ca không hội tụ (7 lượt review, mỗi lượt lộ ca mới); (3) đơn giản, test được: luật cấu trúc ngắn, mỗi lớp một test; đo trên 1567 lệnh Bash thật của các phiên: vùng mã chạm luật mới ~24 lệnh (đều là backtick trong message commit nháy kép — bash thực thi thật, tức lỗi) → chặn oan ~0; PA3 để 🔴 an toàn vào bản phát hành (vi phạm tiêu chí 1)
+- Đường lùi: Revert PR của từng lớp; luật mới OR với luật cũ nên gỡ một lớp không mở lại lớp khác
+
+### D-300 · 2026-11-01T23:53:42+00:00 · Duyệt PLAN-harden-2026-11-01 (/complete trước 3.30.0): 7 lát — A–D guard theo ADR-0063, E xt.py, F sổ (🟢 nợ review), G release-check
+
+- Phương án: (1) Duyệt nguyên PLAN, mỗi lát một PR, lát guard một review tập trung trước merge · (2) Gộp lát A–D thành một PR guard lớn
+- Chọn: Duyệt nguyên PLAN, mỗi lát một PR, lát guard một review tập trung trước merge
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn + (2) đường lùi: mỗi lớp một PR revert được độc lập; PR ≤ ~150 dòng mã theo luật harden; (3) test được: mỗi lát có mẫu tái hiện của sổ làm test đỏ trước; PA2 vượt trần dòng và khó review
+- Đường lùi: Sửa PLAN (bỏ/tách task) bằng D mới; loop init lại
