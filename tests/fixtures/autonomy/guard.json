@@ -14183,6 +14183,58 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec284-sed-expression-eq-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-284"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed --expression='s/^//e'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec284-sed-bundled-ee-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-284"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed -ee"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec285-sed-attached-e-program",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-285"
+  ],
+  "input": {
+   "command": "sed '-e1e rm -rf ~' f"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec286-awk-heredoc-system",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-286"
+  ],
+  "input": {
+   "command": "awk '{system($0)}' <<'E'\nrm -rf ~\nE"
+  },
+  "expect": {
+   "allowed": false
+  }
  }
  ]
 }

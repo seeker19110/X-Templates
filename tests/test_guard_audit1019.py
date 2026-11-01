@@ -2697,6 +2697,20 @@ class AuditRescan1101GuardTest(unittest.TestCase):
             'php -r \'pcntl_exec("/bin/sh", ["-c", "rm -rf ~"]);\'',
             "printf -v PS4 '%s' '$(rm -rf ~)'; set -x; true",
             "printf -vPS4 '$(rm -rf ~)'; set -x; true",
+            # review #392 🔴 + quét lại HAR: chương trình sed/awk ở mọi dạng cờ (`--expression=`, viết tắt, dính `-e…`)
+            "echo 'rm -rf ~' | sed --expression='s/^//e'",
+            "echo 'rm -rf ~' | sed --expression=e",
+            "echo 'rm -rf ~' | sed -es/^//e",
+            "echo 'rm -rf ~' | sed -nes/^//ep",
+            "echo 'rm -rf ~' | sed -ee",
+            "echo 'rm -rf ~' | gawk --source='{system($0)}'",
+            "echo 'rm -rf ~' | awk -e'{system($0)}'",
+            "sed '-e1e rm -rf ~' f",
+            "sed -n '-e1e rm -rf ~' f",
+            "sed --e='1e rm -rf ~' f",
+            # review #392 🟠: heredoc vào awk/sed chạy lệnh từ đầu vào
+            "awk '{system($0)}' <<'E'\nrm -rf ~\nE",
+            "sed 's/^//e' <<'E'\nrm -rf ~\nE",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
