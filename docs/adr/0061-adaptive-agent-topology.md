@@ -24,7 +24,7 @@
   audit read-only, song song ≤ 3, không giao `executor` lần nào.
 - Vòng review không có trần thật: ADR-0053 cho thêm lượt qua `pr rethink --decision D-NNN` không giới hạn số lần → PR #372
   (guard `$IFS#`) 7 lượt review đăng dấu (REST: 7 `xt-review … verdict=blocking`), mỗi lượt sửa lại mở lỗ mới, đóng không
-  merge (D-284…D-291 ghi trên nhánh `seeker/wizardly-tesla-amsxmp` của PR đóng, không có trong sổ `main`). Chủ dự án yêu
+  merge (D-284…D-286, D-288…D-291 ghi trên nhánh `seeker/wizardly-tesla-amsxmp` của PR đóng, không có trong sổ `main`). Chủ dự án yêu
   cầu "giới hạn vòng review, ưu tiên test tự động liên tục".
 - Chủ dự án đưa bảng **loại việc → cấu hình** (sửa lỗi/tính năng nhỏ → 1 agent; xuyên module → agent chính + reviewer
   chuyên biệt; nhiều module độc lập → agent triển khai song song; audit lớn → một lượt audit rồi sửa batch) và 6 KPI
@@ -64,7 +64,7 @@
    xung đột). Điều kiện tăng số agent: theo `LOOP-ORCH-020` (≥ 10 task/nhóm × 2 vòng) **và** thời gian tới xanh/lead time giảm
    mà xanh lần đầu không giảm, `reverts`/`do #N` không tăng.
 4. **Không đổi**: `LOOP-ORCH-001/003/005/008/009` (điều phối một tầng, quyền ⊆, reviewer cao hơn người viết, ≤ 5, không giao
-   hành động đối ngoại); ADR-0037 (pha build không reviewer); `/audit`, `/complete`; ba giai đoạn (ADR-0058).
+   hành động đối ngoại); ADR-0037 (pha build: `pr next` không đòi review; `(topo: review)` là review tự giao theo §Hệ quả ADR-0037); `/audit`, `/complete`; ba giai đoạn (ADR-0058).
 
 ## Hệ quả
 
@@ -83,7 +83,7 @@
 
 - Nhận định của chủ dự án 2026-11-01 (nguyên văn trong phiên; tóm tắt ở research note).
 - `research/2026-11-01-adaptive-agent-topology.md` (đối chiếu đề xuất ↔ khung; KPI ↔ harness; nguồn sống đọc 2026-11-01).
-- `research/2026-10-24-single-agent-loop.md`, ADR-0045, ADR-0029, ADR-0053, ADR-0059; PR #372 đóng không merge (D-284…D-291
+- `research/2026-10-24-single-agent-loop.md`, ADR-0045, ADR-0029, ADR-0053, ADR-0059; PR #372 đóng không merge (D-284…D-286, D-288…D-291
   trên nhánh `seeker/wizardly-tesla-amsxmp`) — bằng chứng vòng review không trần.
 - Nguồn sống (đọc 2026-11-01, chi tiết §3 của research note): Anthropic *Harness design for long-running application development*
   (2026-03-24: "find the simplest solution possible, and only increase complexity when needed"; evaluator chỉ đáng khi việc vượt khả

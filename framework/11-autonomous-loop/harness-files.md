@@ -54,7 +54,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
   nháy hay một `\` đầu, ở cấp ngoài/`(…)`/`$(…)`/`"$(…)"`, dòng mở cân nháy/ngoặc — `<<` khác mà bộ đọc nhận ra là có
   thể là heredoc (dấu kết có `$`/backtick/nháy pha, `\<<`, trong backtick/`${…}`/`<(…)`/số học không đơn giản, lệnh có
   `case`…) không được đoán. Dòng kết so nguyên văn, trừ heredoc trong `$(…)`/`<(…)`: dòng thân bắt đầu bằng dấu kết rồi
-  có `)` (bash 5.2 kết heredoc ở đó) → chặn (D-271), kể cả khi `\` nối dòng tách `$(`/`<<` (D-272). `)#` không khoảng trắng ngoài nháy bị chặn (AUD-SEC-195, review #368).
+  có `)` (bash 5.2 kết heredoc ở đó) → chặn (D-271), kể cả khi `\` nối dòng tách `$(`/`<<` (D-272). `)#` không khoảng trắng ngoài nháy bị chặn (AUD-SEC-195, review #368) — giới hạn: biến thể `x=$(true)# …`, `a=(1)# …` (AUD-SEC-242) và AUD-SEC-235/247 còn mở trong sổ.
 - **Guard chặn `\` cuối dòng sau `#` và mọi định nghĩa alias** (D-271, D-272): bash không nối dòng trong comment, đọc
   nháy để phân định `#` cũng lệch — dòng có `#` đầu từ (bất kể nháy) kết bằng `\` lẻ bị chặn (đưa `#NN` sang dòng không
   kết bằng `\`). Snapshot shell của Claude Code đã bật `expand_aliases`, nên định nghĩa alias (tên lệnh có thể thành

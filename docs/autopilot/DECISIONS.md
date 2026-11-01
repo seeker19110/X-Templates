@@ -2013,3 +2013,10 @@
 - Chọn: Tài liệu trước: SEC-AI-018 thêm luật XT-H-024 (lời bỏ xác nhận/không từ chối, gói không ghim, quét README/docs), CMP-LIC-024 mới cho XT-H-026; scanner thành T-3613 đợt kế (lát ≤ 150 dòng, mỗi lát một PR)
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn ngang nhau (luật đã có nhà, scanner là công cụ cưỡng chế); phương án 1 nhỏ, đảo ngược được, đúng trần lát của ADR-0061; scanner là feature riêng cần spec miễn trừ + fixture, ghi task T-3613 kèm Gate test
 - Đường lùi: Bỏ T-3613, sửa lại chữ SEC-AI-018/CMP-LIC-024 về bản trước (giữ ID)
+
+### D-294 · 2026-11-01T04:46:03+00:00 · ADR-0060 (sáu skill theo tác vụ, #365) chưa có D-NNN — ghi hồi tố cách nào? (AUD-DOC-133)
+
+- Phương án: (1) Ghi D-NNN hồi tố 2026-11-01 xác nhận phiên chính đã tự duyệt ADR-0060 theo tiêu chí chất lượng cuối; dòng Trạng thái ADR-0060 dẫn D-NNN kèm chữ 'hồi tố' · (2) Để trống, coi ADR-0060 là quyết định của chủ repo (yêu cầu 2026-10-31) không cần D-NNN
+- Chọn: Ghi D-NNN hồi tố 2026-11-01 xác nhận phiên chính đã tự duyệt ADR-0060 theo tiêu chí chất lượng cuối; dòng Trạng thái ADR-0060 dẫn D-NNN kèm chữ 'hồi tố'
+- Lý do (tiêu chí chất lượng cuối): AGENTS.md §4: quyết định chuyên môn phiên chính tự duyệt phải có D-NNN; ADR-0060 là thiết kế (chọn 6 skill, mẫu) dù yêu cầu từ chủ repo; ghi hồi tố giữ dấu vết, không sửa lịch sử
+- Đường lùi: Xoá câu dẫn D-NNN ở ADR-0060 (giữ mục D trong sổ)
