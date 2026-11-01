@@ -2027,3 +2027,10 @@
 - Chọn: ADR-0062 thay ADR-0059 §1-2: review 1 lần; 🔴 sửa trong 1 commit rồi pr debt --fixed (không review lại), 🟠/🟢 ghi nợ; rủi ro thấp = làn nhanh (CI + tự rà diff, máy merge ghim head); trung bình = làn chuẩn, 1 review logic/phạm vi/test; cao = ngoại lệ cứng + schema/migration, review độc lập bắt buộc kể cả pha build; release-check thêm hàng migration/rollback/acceptance
 - Lý do (tiêu chí chất lượng cuối): Đúng chữ chủ dự án (người có quyền cuối, ADR-0008): 'chỉ review 1 lần: nghiêm trọng thì sửa, cam/xanh ghi nợ cho merge'. An toàn: 🔴 vẫn không ghi nợ (phải sửa, ghi đã sửa ở sổ tại head), cao rủi ro không hoãn review ở pha build (chặt hơn ADR-0037), audit cuối pha quét lại diff là lưới đỡ cho bản sửa không review lại; giữ đường lùi (revert ADR + REVIEW_ROUNDS). PA2 trái luật mới (PR vẫn đứng ở lượt 2); PA3 trái 'chỉ review 1 lần'.
 - Đường lùi: Revert PR của ADR-0062: REVIEW_ROUNDS=2 và _debt_problem cũ (ADR-0059), bỏ hàng release-check mới; dự án đích nâng khung bản kế
+
+### D-296 · 2026-11-01T14:49:58+00:00 · Kế hoạch sửa audit cuối pha 2026-11-01 (0 🔴, 6 🟠 mới, 7 🟢; 4 🟠 là hồi quy của đợt)?
+
+- Phương án: (1) Ba đợt theo nhà file: guard (SEC-270/271, PERF-004, + nợ SEC-254/256) · xt.py (SEC-272, CODE-034, HAR-181/182 + 🟢 scanner rẻ) · tài liệu (DOC-162…165, XFEAT-043, HAR-185/187); mỗi đợt 1 PR, test đỏ trước, review 1 lần theo ADR-0062; rồi audit delta lại 7 nhóm chưa quét · (2) Một PR gộp mọi 🟠 · (3) Ghi nợ hết, sang đợt kế
+- Chọn: Ba đợt theo nhà file: guard (SEC-270/271, PERF-004, + nợ SEC-254/256) · xt.py (SEC-272, CODE-034, HAR-181/182 + 🟢 scanner rẻ) · tài liệu (DOC-162…165, XFEAT-043, HAR-185/187); mỗi đợt 1 PR, test đỏ trước, review 1 lần theo ADR-0062; rồi audit delta lại 7 nhóm chưa quét
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: hồi quy guard (perf treo hook, sed/+= lọt) sửa trước; PR theo nhà file nhỏ, review 1 lần đủ tập trung; PA2 quá lớn (>150 dòng, nhiều nhà); PA3 để lỗ bảo mật đã tái hiện
+- Đường lùi: Revert PR từng đợt
