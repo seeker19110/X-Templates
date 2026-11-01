@@ -2673,10 +2673,53 @@ class AuditPhase1101GuardTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
     def test_quote_like_repeat_not_cubic(self) -> None:
+        # AUD-TEST-044: dưới trần thì không bậc hai; trên trần thì CHẶN (bỏ trần → n=400 cho chạy sau ~9 s → đỏ)
         def work(n: int) -> None:
             final("perl -e 'system 1;" + "%(" * n + "'")
 
-        cpu_budget.assert_not_quadratic(self, work, 100)
+        cpu_budget.assert_not_quadratic(self, work, 8)
+        self.assertEqual(final("perl -e 'system 1;" + "%(" * 400 + "'"), "deny")
+
+
+class AuditRescan1101GuardTest(unittest.TestCase):
+    """Quét lại T-3623 (D-297): AUD-SEC-279 (awk/sed lấy lệnh từ stdin), AUD-SEC-280 (readpipe/Open3/pcntl_exec),
+    AUD-SEC-281 (`printf -v PS4`), AUD-PERF-005 (sed bậc hai với dấu phân cách riêng)."""
+
+    def test_variants_denied(self) -> None:
+        for cmd in (
+            "echo 'rm -rf ~' | awk '{system($0)}'",
+            "echo 'rm -rf ~' | awk '{print | \"sh\"}'",
+            "awk '{system($0)}' <<< 'rm -rf ~'",
+            "echo 'rm -rf ~' | sed 's/^//e'",
+            "echo 'rm -rf ~' | sed e",
+            "perl -e 'readpipe(\"rm -rf ~\")'",
+            'ruby -e \'require "open3"; Open3.capture2("rm -rf ~")\'',
+            'php -r \'pcntl_exec("/bin/sh", ["-c", "rm -rf ~"]);\'',
+            "printf -v PS4 '%s' '$(rm -rf ~)'; set -x; true",
+            "printf -vPS4 '$(rm -rf ~)'; set -x; true",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_benign_allowed(self) -> None:
+        for cmd in (
+            "echo 'a b' | awk '{print $1}'",
+            "echo ls | awk '{system($0)}'",
+            "echo 'rm -rf ~' | sed 's/rm/x/'",
+            "printf -v x '%s' y",
+            "perl -e 'print readline(STDIN)'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+    def test_sed_distinct_delimiters_bounded(self) -> None:
+        chars = [chr(c) for c in range(0x2010, 0x2010 + 6000) if not chr(c).isalnum() and not chr(c).isspace()]
+
+        def work(n: int) -> None:
+            final("sed '" + "".join("s" + c for c in chars[:n]) + "' f.txt")
+
+        cpu_budget.assert_not_quadratic(self, work, 300)
+        self.assertEqual(final("sed '" + "".join("s" + c for c in chars[:5000]) + "' f.txt"), "deny")
 
 
 if __name__ == "__main__":

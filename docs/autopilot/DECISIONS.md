@@ -2034,3 +2034,10 @@
 - Chọn: Ba đợt theo nhà file: guard (SEC-270/271, PERF-004, + nợ SEC-254/256) · xt.py (SEC-272, CODE-034, HAR-181/182 + 🟢 scanner rẻ) · tài liệu (DOC-162…165, XFEAT-043, HAR-185/187); mỗi đợt 1 PR, test đỏ trước, review 1 lần theo ADR-0062; rồi audit delta lại 7 nhóm chưa quét
 - Lý do (tiêu chí chất lượng cuối): Đúng/an toàn: hồi quy guard (perf treo hook, sed/+= lọt) sửa trước; PR theo nhà file nhỏ, review 1 lần đủ tập trung; PA2 quá lớn (>150 dòng, nhiều nhà); PA3 để lỗ bảo mật đã tái hiện
 - Đường lùi: Revert PR từng đợt
+
+### D-297 · 2026-11-01T16:50:34+00:00 · Quét lại T-3623: 5 🟠 mới (guard sed bậc hai, awk stdin, API shell Perl/Ruby/PHP, printf -v PS4; test perf xanh giả) — làm gì?
+
+- Phương án: (1) Đợt 5 một PR guard sửa cả 5 (test đỏ trước, OR với luật cũ, bench), rồi Đợt 6 quét lại DOC/XFEAT/HAR cụm nhỏ · (2) Ghi nợ hết, sang cắt bản
+- Chọn: Đợt 5 một PR guard sửa cả 5 (test đỏ trước, OR với luật cũ, bench), rồi Đợt 6 quét lại DOC/XFEAT/HAR cụm nhỏ
+- Lý do (tiêu chí chất lượng cuối): 4/5 là lỗ guard đã tái hiện chạy thật (lệnh nguy hiểm lọt) — tiêu chí (1) an toàn; cùng nhà file nên một PR; PA2 để lỗ bảo mật vào bản phát hành
+- Đường lùi: Revert PR đợt 5
