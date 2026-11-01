@@ -10,7 +10,7 @@ description: Chạy cổng chất lượng đầy đủ (build · typecheck · l
 ## Cổng commit (hook tự chạy — không gọi `/gate` trước mỗi commit)
 1. Hook PreToolUse chạy `<DT> gate-fast` (hoặc `gate` theo `commit_gate` trong `xt.yaml`) trước `git commit`; đỏ thì commit không chạy — sửa rồi commit lại.
 2. Tự review diff: đúng mục tiêu, không sửa nhầm, không console.log/code chết, không bí mật (`git diff --cached | grep -iE "api[_-]?key|secret|password|token"`), input đã validate, nhánh lỗi đã xử lý.
-3. Commit message conventional (`feat|fix|refactor|docs|test|chore|perf|ci|build(scope): ...`), ≤ 72 ký tự dòng đầu.
+3. Commit message conventional (`feat|fix|refactor|docs|test|chore|perf|ci|build(scope): ...`), ≤ 100 ký tự dòng đầu.
 
 ## Trước khi đẩy/mở PR (`/gate`)
 4. Có CI chạy đúng các khoá `xt.yaml` và merge đòi CI xanh: đẩy ngay — mỗi commit đã qua `gate-fast` (format · lint · typecheck · test liên quan file đổi, hook cổng commit); **CI là cổng đầy đủ** (song song, nhanh hơn chạy nối tiếp ở máy; lọt lỗi chỉ tốn một lượt CI — ADR-0056). Không có CI, lần đẩy cuối trước cắt bản, hoặc người dùng gõ `/gate`: `<DT> gate` (build → typecheck → lint → test; đỏ một cái là dừng), đọc output thật. Nhánh cập nhật/xung đột/CI do `xt.py merge-check` quyết sau khi mở PR.

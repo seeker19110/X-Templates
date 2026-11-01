@@ -5030,10 +5030,10 @@ class GuardAiAttributionTest(unittest.TestCase):
 
 
 class GuardTitleRuleTest(unittest.TestCase):
-    """LOOP-HARNESS-029 (D-255): tiêu đề PR sai luật `pr-title` và subject commit > 72 ký tự bị chặn LÚC ĐẶT; subject
+    """LOOP-HARNESS-029 (D-255): tiêu đề PR sai luật `pr-title` và subject commit > 100 ký tự bị chặn LÚC ĐẶT; subject
     squash tường minh (`--subject`, `commit_title`) bị chặn vì đè `squash_merge_commit_title: PR_TITLE` (AUD-HAR-128)."""
 
-    LONG = "fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)"  # #340: 83 ký tự
+    LONG = "fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu, README, CHANGELOG, test (D-252)"  # 108 ký tự (giới hạn 100)
 
     @classmethod
     def setUpClass(cls):
@@ -5083,7 +5083,7 @@ class GuardTitleRuleTest(unittest.TestCase):
                 dec, why = self.decide(cmd, d)
                 self.assertEqual(dec, "deny")
                 self.assertIn("LOOP-HARNESS-029", why)
-        self.assertIn("83 ký tự > 72", self.decide(f"gh pr create -t '{self.LONG}'", d)[1])
+        self.assertIn("108 ký tự > 100", self.decide(f"gh pr create -t '{self.LONG}'", d)[1])
 
     def test_good_or_unreadable_pr_title_passes(self):
         d, off = self.repo(), self.repo("pr_title_check: off  # dự án không squash\n")
@@ -5117,7 +5117,7 @@ class GuardTitleRuleTest(unittest.TestCase):
             with self.subTest(cmd):
                 dec, why = self.decide(cmd, d)
                 self.assertEqual(dec, "deny")
-                self.assertIn("subject dài 83 ký tự > 72", why)
+                self.assertIn("subject dài 108 ký tự > 100", why)
 
     def test_short_or_unreadable_commit_subject_passes(self):
         d = self.repo()

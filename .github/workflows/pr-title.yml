@@ -1,7 +1,7 @@
 name: pr-title
 
 # Kiểm tiêu đề PR tách khỏi CI nặng (T-2401): `edited` (sửa tiêu đề/thân PR) chỉ chạy workflow vài giây này, không chạy lại
-# `ci.yml` cùng SHA. Tiêu đề thành tiêu đề squash nên phải Conventional Commits, ≤ 72 ký tự. Không checkout: không cần mã.
+# `ci.yml` cùng SHA. Tiêu đề thành tiêu đề squash nên phải Conventional Commits, ≤ 100 ký tự. Không checkout: không cần mã.
 on:
   pull_request:
     branches: [main]
@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Tiêu đề PR theo Conventional Commits, ≤ 72 ký tự (thành tiêu đề squash)
+      - name: Tiêu đề PR theo Conventional Commits, ≤ 100 ký tự (thành tiêu đề squash)
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
           printf '%s' "$TITLE" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+$' \
-            && [ "${#TITLE}" -le 72 ] || { echo "::error::Tiêu đề PR phải dạng '<type>(scope): mô tả' và ≤ 72 ký tự: $TITLE"; exit 1; }
+            && [ "${#TITLE}" -le 100 ] || { echo "::error::Tiêu đề PR phải dạng '<type>(scope): mô tả' và ≤ 100 ký tự: $TITLE"; exit 1; }
