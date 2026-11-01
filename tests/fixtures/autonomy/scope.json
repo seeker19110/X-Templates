@@ -117,12 +117,13 @@
    ]
   },
   {
-   "reason": "Công cụ khác (perf guard, contrast, vendor-check, doctor) — không thuộc đường merge/guard",
+   "reason": "Công cụ khác (perf guard, contrast, vendor-check, doctor, prompt-assets-scan) — không thuộc đường merge/guard",
    "ids": [
     "AUD-XFEAT-005",
     "AUD-XFEAT-006",
     "AUD-XFEAT-007",
-    "AUD-HAR-178"
+    "AUD-HAR-178",
+    "AUD-SEC-258"
    ]
   },
   {
