@@ -10640,12 +10640,20 @@ RELEASE_ROWS = (
     "review_debt",
     "attack",
     "perf",
+    "migration_check",
+    "rollback",
+    "acceptance",
     "unchecked_must",
 )
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
 RELEASE_RUN_KEYS = (
     ("attack", "tấn công thử: DAST/fuzz/kịch bản khai thác trên bản chạy cục bộ hay staging"),
     ("perf", "kiểm tải/ngân sách hiệu năng có ngưỡng, đỏ khi vượt"),
+    # Cổng production (ADR-0062 §6, chủ dự án 2026-11-01): migration tiến + lùi trên bản sao dữ liệu, diễn tập quay về bản
+    # trước, kiểm thử nghiệm thu — cùng luật chạy/N/A như attack/perf.
+    ("migration_check", "migration tiến + lùi trên bản sao dữ liệu/staging, đỏ khi lỗi hoặc mất dữ liệu"),
+    ("rollback", "diễn tập quay về bản trước (artifact/tag cũ + migration lùi), đỏ khi không về được"),
+    ("acceptance", "kiểm thử nghiệm thu theo tiêu chí chấp nhận của giai đoạn, đỏ khi ca nào hỏng"),
 )
 
 

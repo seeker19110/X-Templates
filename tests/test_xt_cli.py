@@ -2595,8 +2595,10 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)
         self.assertEqual(
             [r[k]["result"] for k in xt.RELEASE_ROWS],
-            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "N/A", "PASS"],
+            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "PASS"],
         )
+        levels = [r[k]["level"] for k in ("migration_check", "rollback", "acceptance")]
+        self.assertEqual(levels, ["SHOULD"] * 3)  # quy mô S: cổng production không bắt buộc
         self.assertEqual((r["attack"]["level"], r["perf"]["level"]), ("SHOULD", "SHOULD"))  # quy mô S
         self.assertIn("1 lệnh kiểm xanh", r["blueprint"]["evidence"])
         self.assertTrue(r["tree"]["evidence"].startswith("cây sạch, HEAD "))
@@ -2655,13 +2657,22 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)
         self.assertEqual((r["attack"]["result"], r["attack"]["level"]), ("N/A", "BLOCKER"))
         self.assertIn("attack", d["human"])
+        # ADR-0062 §6: cổng production — chưa khai ở M/L = BLOCKER việc người, như attack/perf
+        for key in ("migration_check", "rollback", "acceptance"):
+            self.assertEqual((r[key]["result"], r[key]["level"]), ("N/A", "BLOCKER"))
+            self.assertIn(key, d["human"])
         (self.repo / "xt.yaml").write_text(
-            "delivery_phase: harden\nattack: sh -c 'echo lo-hong; exit 4'\nperf: sh -c 'exit 0'\n", encoding="utf-8"
+            "delivery_phase: harden\nattack: sh -c 'echo lo-hong; exit 4'\nperf: sh -c 'exit 0'\n"
+            "migration_check: sh -c 'exit 0'\nrollback: sh -c 'echo khong-ve; exit 3'\nacceptance: sh -c 'exit 0'\n",
+            encoding="utf-8",
         )
         self.git("commit", "-q", "-am", "k")
         rc, d = self.rows()
         r = self.by_id(d)
         self.assertEqual((rc, r["attack"]["result"], r["perf"]["result"]), (1, "FAIL", "PASS"))
+        got = [r[k]["result"] for k in ("migration_check", "rollback", "acceptance")]
+        self.assertEqual(got, ["PASS", "FAIL", "PASS"])
+        self.assertIn("exit 3: khong-ve", r["rollback"]["evidence"])
         self.assertIn("exit 4: lo-hong", r["attack"]["evidence"])
         self.assertIn("attack", d["fails"])
         # review #217: lệnh ghi báo cáo vào cây → hàng `tree` thấy; bí mật trong log bị che; timeout âm → mặc định
