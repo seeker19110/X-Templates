@@ -41,7 +41,7 @@
 2. **Bỏ hẳn `executor`/`executor-deep`, chỉ một agent + reviewer.** Tốt: đơn giản nhất. Xấu: mất hàng "nhiều module độc
    lập" (chính đề xuất cũng giữ "agent triển khai" song song); mất chuyển cấp ADR-0029; đổi lớn không đo.
 3. **(Chọn) Bảng topology máy đọc, mặc định `self`, giữ hai tầng cho `parallel`, trần đợt 4, `rethink` ≤ 1, thêm KPI thời
-   gian.** Tốt: khớp đề xuất và thực tế vận hành; giữ đường lùi (một dòng `(topo: parallel)`/`(exec: deep)` trong PLAN đưa
+   gian.** Tốt: khớp đề xuất và thực tế vận hành; giữ đường lùi (một dòng `(topo: parallel; exec: deep)` trong PLAN đưa
    task về mặc định cũ); phép đo của `LOOP-ORCH-020` vẫn chạy (`executor: null` = nhóm tự làm) và có thêm trục thời gian để
    "chỉ tăng số agent khi thời gian giảm mà lỗi không tăng". Xấu: `topo:` là lời khai của người lập PLAN; số "4" và "1 lượt
    rethink" là khởi điểm do chủ dự án đặt, không có nguồn ngoài (ghi rõ, đo rồi chỉnh).

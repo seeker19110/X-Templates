@@ -1391,6 +1391,11 @@ def update_loop_state(base: Path, fn: StateFn, retries: int = 3) -> Optional[Dic
 
 
 EXEC_TIER_RE = re.compile(r"\bexec:\s*(default|deep)\b")  # `(exec: deep)` trong dòng task → tầng executor (ADR-0029)
+TOPO_RE = re.compile(
+    r"\btopo:\s*(self|review|parallel|audit)\b"
+)  # `(topo: …)` → cấu hình agent (ADR-0061, LOOP-ORCH-024)
+TOPO_DEFAULT = "self"  # thiếu `topo:` = phiên chính tự làm, không giao executor
+WAVE_MAX_DEFAULT = 4  # `plan waves --max` mặc định (ADR-0061); trần cứng 5 là LOOP-ORCH-008
 EXECUTOR_AGENTS = {
     "default": "executor",
     "deep": "executor-deep",
@@ -1413,6 +1418,7 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
         g = GATE_RE.search(m["rest"])
         head = m["rest"][: g.start()] if g else m["rest"]  # không đọc trong lệnh Gate (review #169)
         tier = EXEC_TIER_RE.search(head)
+        topo = TOPO_RE.search(head)
         links, bad_links = _plan_link_parse(head)
         tasks.append(
             {
@@ -1422,6 +1428,7 @@ def parse_plan(path: Path) -> List[Dict[str, Any]]:
                 "title": m["rest"].strip(" —-")[:120],
                 "rest": m["rest"],
                 "tier": tier[1] if tier else "default",
+                "topology": topo[1] if topo else TOPO_DEFAULT,
                 "section": section,
                 "after": links["sau"],
                 "files": links["files"],
@@ -1674,7 +1681,9 @@ def _pack_level(level_tasks: List[Dict[str, Any]], max_parallel: int) -> List[Li
     return groups
 
 
-def plan_waves(tasks: List[Dict[str, Any]], deferred: Dict[str, Any], max_parallel: int = 5) -> Dict[str, Any]:
+def plan_waves(
+    tasks: List[Dict[str, Any]], deferred: Dict[str, Any], max_parallel: int = WAVE_MAX_DEFAULT
+) -> Dict[str, Any]:
     """Chia task `[ ]` thành đợt song song: mỗi `sau:` trong file đã đóng hoặc thuộc đợt trước; trong đợt, nhóm có
     `files:` không giao (task thiếu `files:` đứng riêng), ≤ max_parallel. Task chu trình/bad_links/defer → `blocked`."""
     opens = [t for t in tasks if t["state"] in PLAN_OPEN_STATES]
@@ -1713,16 +1722,29 @@ def open_dependencies(task: str, base: Path, st: Dict[str, Any]) -> List[str]:
 
 
 def executor_choice(t: Dict[str, Any], base: Path, st: Dict[str, Any]) -> Dict[str, Any]:
-    """Tầng executor cho task kế (ADR-0029): `(exec: deep)` trong PLAN → sâu ngay; tầng mặc định đỏ ≥ ESCALATE_AFTER lần
-    cùng task trong vòng này (runs.jsonl, lần chạy không phải của `executor-deep`) → chuyển cấp lên sâu. Tên trả về là
-    agent trong `.claude/agents/` — model thật nằm trong frontmatter của agent, không ở PLAN (LOOP-HARNESS-027)."""
+    """Cấu hình agent + tầng executor cho task kế (ADR-0061, ADR-0029): `topology` từ `(topo: …)` (thiếu = `self`);
+    `executor` chỉ khi `parallel` (`(exec: deep)` → sâu ngay), các cấu hình khác trả `None` = phiên chính tự làm; tầng
+    mặc định đỏ ≥ ESCALATE_AFTER lần cùng task trong vòng này (runs.jsonl, lần chạy không phải của `executor-deep`) →
+    chuyển cấp lên sâu bất kể topology. Tên trả về là agent trong `.claude/agents/` — model thật nằm trong frontmatter
+    của agent, không ở PLAN (LOOP-HARNESS-027)."""
     runs = [r for r in read_runs(base) if r["task"] == t["id"] and r.get("loop") == st.get("started")]
     greens = [i for i, r in enumerate(runs) if r["exit_code"] == 0]
     since_green = runs[greens[-1] + 1 :] if greens else runs  # chỉ chuỗi đỏ sau lần xanh cuối (review #169)
     fails = [r for r in since_green if r.get("executor") != EXECUTOR_AGENTS["deep"]]
-    escalated = t.get("tier", "default") == "default" and len(fails) >= ESCALATE_AFTER
+    topology = str(t.get("topology") or TOPO_DEFAULT)
+    # `exec: deep` chỉ có nghĩa khi `parallel` (đã ở tầng sâu → không chuyển cấp); task tự làm ghi `exec: deep` vẫn
+    # chuyển cấp sau 2 lần đỏ như task thường (review #379)
+    deep_already = topology == "parallel" and t.get("tier", "default") == "deep"
+    escalated = not deep_already and len(fails) >= ESCALATE_AFTER
     tier = "deep" if escalated else str(t.get("tier", "default"))
-    return {"tier": tier, "executor": EXECUTOR_AGENTS[tier], "escalated": escalated, "default_failures": len(fails)}
+    executor = EXECUTOR_AGENTS[tier] if escalated or topology == "parallel" else None
+    return {
+        "topology": topology,
+        "tier": tier,
+        "executor": executor,
+        "escalated": escalated,
+        "default_failures": len(fails),
+    }
 
 
 def milestone_done(
@@ -1927,15 +1949,19 @@ def _verdict_plan(base: Path, st: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def _with_dispatch(
     v: Dict[str, Any], t: Dict[str, Any], tasks: List[Dict[str, Any]], base: Path, st: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Thêm tầng executor (chuyển cấp nếu có) và mốc vừa xong vào verdict `continue` (ADR-0029)."""
+    """Thêm cấu hình agent (ADR-0061), tầng executor (chuyển cấp nếu có, ADR-0029) và mốc vừa xong vào verdict `continue`."""
     v.update(executor_choice(t, base, st))
     if v["escalated"]:
         v["reason"] += (
             f" — chuyển cấp: tầng mặc định đỏ {v['default_failures']} lần → giao `{v['executor']}` kèm diff + evidence lỗi"
             " + giả thuyết đã loại (LOOP-ORCH-014)"
         )
-    elif v["tier"] == "deep":
+    elif v["executor"] and v["tier"] == "deep":
         v["reason"] += f" — tầng sâu theo PLAN (`exec: deep`): giao `{v['executor']}`"
+    elif v["executor"]:
+        v["reason"] += f" — `topo: parallel`: giao `{v['executor']}`"
+    elif v["topology"] != TOPO_DEFAULT:
+        v["reason"] += f" — `topo: {v['topology']}`: phiên chính tự làm (LOOP-ORCH-024)"
     done = milestone_done(tasks, t, _deferred(st))
     if done:
         v["milestone_done"] = done
@@ -6964,7 +6990,7 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
     unknown = plan_unknown_after(tasks)
     bad = plan_bad_links(tasks)
     out = {
-        "ready": [{k: t[k] for k in ("id", "title", "tier", "after", "files")} for t in ready],
+        "ready": [{k: t[k] for k in ("id", "title", "tier", "topology", "after", "files")} for t in ready],
         "overlaps": plan_overlaps(ready),
         "unscoped": [t["id"] for t in ready if not t["files"]],
         "cycles": plan_cycle_nodes(tasks),
@@ -14080,7 +14106,12 @@ def build_parser() -> argparse.ArgumentParser:
     ppsub = ppl.add_subparsers(dest="plan_cmd", required=True)
     pw = ppsub.add_parser("waves", help="xếp task `[ ]` thành đợt song song (không cần vòng đang bật)")
     pw.add_argument("--plan", help="PLAN đọc (mặc định: PLAN của vòng, rồi docs/autopilot/PLAN.md)")
-    pw.add_argument("--max", type=int, default=5, help="số task tối đa mỗi đợt (mặc định 5)")
+    pw.add_argument(
+        "--max",
+        type=int,
+        default=WAVE_MAX_DEFAULT,
+        help=f"số task tối đa mỗi đợt (mặc định {WAVE_MAX_DEFAULT}, ADR-0061)",
+    )
     pw.add_argument("--json", action="store_true")
     pw.set_defaults(fn=cmd_plan)
     plp = sub.add_parser("loop")

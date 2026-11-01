@@ -67,7 +67,7 @@ updated: 2026-11-01
 
 ### Lát 1 — Walking skeleton (F-<NNN>)
 - [ ] `T-001` Dựng khung repo + CI + điền lệnh thật ở `xt.yaml` (lint/test rỗng làm cổng đỏ — ADR-0011 của khung) (F-000) — Gate: `.xtemplates/scripts/dev-task.sh gate`
-- [ ] `T-002` Luồng mỏng nhất UI → API → DB cho <luồng A> (F-<NNN>, S-001; exec: deep) — Gate: `npm test -- --run tests/slice-a.test.ts`
+- [ ] `T-002` Luồng mỏng nhất UI → API → DB cho <luồng A> (F-<NNN>, S-001; topo: parallel; exec: deep) — Gate: `npm test -- --run tests/slice-a.test.ts`
 - [ ] `T-003` Deploy staging + smoke (F-000) — Gate: `scripts/smoke.sh https://staging.<domain>`
 
 ### Lát 2 — <tên lát> (F-<NNN>)

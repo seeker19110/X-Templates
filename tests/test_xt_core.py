@@ -1527,13 +1527,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
 
     def test_executor_tier_escalation_and_stats(self):
         """ADR-0029: `(exec: deep)` → tầng sâu ngay; tầng mặc định đỏ 2 lần cùng task trong vòng này → `loop status`
-        chuyển cấp lên `executor-deep`; `--executor` ghi vào evidence + runs.jsonl; `loop stats` đếm task đã chuyển cấp."""
+        chuyển cấp lên `executor-deep`; `--executor` ghi vào evidence + runs.jsonl; `loop stats` đếm task đã chuyển cấp.
+        Từ ADR-0061 tầng chỉ thành `executor` khi task `(topo: parallel)`."""
         write(
             self.base / "docs" / "autopilot" / "PLAN.md",
             """
             ### Lát 1 — nền
-            - [ ] `T-001` việc (exec: deep) — Gate: `true`
-            - [ ] `T-002` việc thường — Gate: `true`
+            - [ ] `T-001` việc (topo: parallel; exec: deep) — Gate: `true`
+            - [ ] `T-002` việc thường (topo: parallel) — Gate: `true`
             """,
         )
         st = xt.read_state(self.base)
@@ -1549,12 +1550,14 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             self.base / "docs" / "autopilot" / "PLAN.md",
             """
             ### Lát 1 — nền
-            - [x] `T-001` việc (exec: deep) — Gate: `true`
-            - [ ] `T-002` việc thường — Gate: `true`
+            - [x] `T-001` việc (topo: parallel; exec: deep) — Gate: `true`
+            - [ ] `T-002` việc thường (topo: parallel) — Gate: `true`
             """,
         )
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["task"], v["tier"], v["executor"], v["escalated"]), ("T-002", "default", "executor", False))
+        self.assertEqual(v["topology"], "parallel")
+        self.assertIn("`topo: parallel`: giao `executor`", v["reason"])
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             xt.loop_record("T-002", ["sh -c 'echo ea; exit 1'"], self.base, "executor")
@@ -1593,6 +1596,62 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         with self.assertRaises(SystemExit):
             with redirect_stderr(err):
                 xt.main(["loop", "record", "--task", "T-002", "--executor", "opus", "--", "true"])
+
+    def test_topology_default_self_executor_null(self):
+        """ADR-0061 / LOOP-ORCH-024: thiếu `topo:` = `self`, `executor: null` (kể cả khi có `exec: deep` mà không
+        `parallel`); `review`/`audit` cũng `null`; task `self` đỏ 2 lần vẫn chuyển cấp lên `executor-deep` (ADR-0029);
+        `loop status --json` và `loop next --json` mang `topology`."""
+        plan = self.base / "docs" / "autopilot" / "PLAN.md"
+        write(
+            plan,
+            """
+            ### Lát 1 — nền
+            - [ ] `T-001` việc thường (files: a) — Gate: `true`
+            - [ ] `T-002` việc xuyên module (topo: review; files: b) — Gate: `true`
+            - [ ] `T-003` việc sâu không song song (exec: deep; files: c) — Gate: `true`
+            - [ ] `T-004` audit (topo: audit; files: d) — Gate: `true`
+            - [ ] `T-005` song song (sau: T-001; topo: parallel; files: e) — Gate: `true`
+            """,
+        )
+        st = xt.read_state(self.base)
+        st["started"] = "2026-11-01T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        tasks = xt.parse_plan(plan)
+        self.assertEqual([t["topology"] for t in tasks], ["self", "review", "self", "audit", "parallel"])
+        self.assertEqual([t["tier"] for t in tasks], ["default", "default", "deep", "default", "default"])
+        choices = [xt.executor_choice(t, self.base, st) for t in tasks]
+        self.assertEqual([c["executor"] for c in choices], [None, None, None, None, "executor"])
+        self.assertEqual([c["tier"] for c in choices], ["default", "default", "deep", "default", "default"])
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["task"], v["topology"], v["executor"], v["escalated"]), ("T-001", "self", None, False))
+        self.assertNotIn("giao `", v["reason"])
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(xt.main(["loop", "status", "--json"]), 0)
+        self.assertEqual(json.loads(out.getvalue())["topology"], "self")
+        self.assertIsNone(json.loads(out.getvalue())["executor"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(xt.main(["loop", "next", "--json"]), 0)
+        ready = json.loads(out.getvalue())["ready"]
+        self.assertEqual({r["id"]: r["topology"] for r in ready}["T-002"], "review")
+        with redirect_stdout(out), redirect_stderr(err):  # self đỏ 2 lần → chuyển cấp (ADR-0029 giữ nguyên)
+            xt.loop_record("T-001", ["sh -c 'echo ta; exit 1'"], self.base)
+            xt.loop_record("T-001", ["sh -c 'echo tb; exit 1'"], self.base)
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["topology"], v["executor"], v["escalated"]), ("self", "executor-deep", True))
+        with redirect_stdout(out), redirect_stderr(err):  # review #379: self + `exec: deep` đỏ 2 lần vẫn chuyển cấp
+            xt.loop_record("T-003", ["sh -c 'echo tc; exit 1'"], self.base)
+            xt.loop_record("T-003", ["sh -c 'echo td; exit 1'"], self.base)
+        c = xt.executor_choice(tasks[2], self.base, st)
+        self.assertEqual(
+            (c["topology"], c["tier"], c["executor"], c["escalated"]), ("self", "deep", "executor-deep", True)
+        )
+        self.record(["true"], "T-001")
+        write(plan, plan.read_text(encoding="utf-8").replace("- [ ] `T-001`", "- [x] `T-001`"))
+        v = xt.loop_verdict(self.base)
+        self.assertEqual((v["task"], v["topology"], v["executor"]), ("T-002", "review", None))
+        self.assertIn("`topo: review`: phiên chính tự làm (LOOP-ORCH-024)", v["reason"])
 
     def test_milestone_done_marks_section_transition(self):
         """Task kế là task đầu của mục mới và mọi task trước đã đóng → `milestone_done` = mục trước (audit delta theo mốc)."""
