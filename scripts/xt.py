@@ -3041,18 +3041,33 @@ def _pct(x: Optional[float]) -> str:
     return "—" if x is None else f"{x:.0%}"
 
 
+def _hours_to_green(first_started: Optional[_dt.datetime], green_finished: str) -> Optional[float]:
+    """Giờ từ `started` lần chạy đầu của task tới `finished` lần xanh đầu (KPI thời gian, ADR-0061 / LOOP-DESIGN-024);
+    thiếu/không đọc được thời điểm hoặc kết thúc trước bắt đầu (đồng hồ lệch) → None, không bịa số."""
+    fin = _parse_iso(green_finished)
+    if first_started is None or fin is None or fin < first_started:
+        return None
+    return round((fin - first_started).total_seconds() / 3600, 3)
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
-    ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
+    ≥ 3 lần, thời gian tới xanh (giờ, trung vị/P95 — ADR-0061), vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng
+    hiện tại (`loop` = `started` của state)."""
     st = read_state(base) or {}
     rows = [r for r in read_runs(base) if all_loops or r.get("loop") == st.get("started")]
     per: Dict[str, Dict[str, Any]] = {}
+    starts: Dict[str, Optional[_dt.datetime]] = {}
     for r in rows:
-        t = per.setdefault(r["task"], {"runs": 0, "failed": 0, "runs_to_green": None, "executors": []})
+        t = per.setdefault(
+            r["task"], {"runs": 0, "failed": 0, "runs_to_green": None, "time_to_green_hours": None, "executors": []}
+        )
+        starts.setdefault(r["task"], _parse_iso(str(r.get("started") or "")))
         t["runs"] += 1
         t["failed"] += r["exit_code"] != 0
         if r["exit_code"] == 0 and t["runs_to_green"] is None:
             t["runs_to_green"] = t["runs"]
+            t["time_to_green_hours"] = _hours_to_green(starts[r["task"]], str(r.get("finished") or ""))
         ex = r.get("executor")
         if isinstance(ex, str) and ex not in t["executors"]:
             t["executors"].append(ex)  # thứ tự xuất hiện: [executor, executor-deep] = đã chuyển cấp (ADR-0029)
@@ -3074,6 +3089,9 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         "escalated": escalated,
         "escalation_rate": round(len(escalated) / len(per), 3) if per else None,
         "never_green": sorted(k for k, t in per.items() if t["runs_to_green"] is None),
+        "time_to_green_hours": _quantiles(
+            [t["time_to_green_hours"] for t in per.values() if t["time_to_green_hours"] is not None]
+        ),
         "iterations": st.get("iterations", 0),
         "max_iterations": st.get("max_iterations"),
         "deferred": sorted(_deferred(st)),
@@ -3092,6 +3110,12 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     )
     print(
         f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    ttg = s["time_to_green_hours"]
+    print(
+        "Thời gian tới xanh (giờ): "
+        + ("chưa đo" if ttg["median"] is None else f"trung vị {ttg['median']} · P95 {ttg['p95']}")
+        + " (ADR-0061)"
     )
     print(
         f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
