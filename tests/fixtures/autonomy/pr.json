@@ -948,7 +948,9 @@
   {
    "id": "pr-phase-build-hard-waived-needs-review",
    "origin": "adversarial-author",
-   "refs": [],
+   "refs": [
+    "ADR-0062"
+   ],
    "input": {
     "delivery_phase": "build",
     "hard_auto": true,
@@ -968,13 +970,47 @@
     }
    },
    "expect": {
-    "eligible": true,
-    "auto_merge_ok": true,
+    "eligible": false,
+    "auto_merge_ok": false,
     "hard": false,
-    "review": "deferred",
-    "review_deferred": true
+    "review": "missing",
+    "review_deferred": false
    },
-   "note": "ADR-0037 (D-124, chủ repo 2026-10-21): reviewer chỉ ở pha harden — ngoại lệ cứng đã miễn ở pha build thành nợ review; harden lại đòi review sạch"
+   "note": "ADR-0062 (D-295, thay D-124 cho rủi ro cao): ngoại lệ cứng đã miễn vẫn là rủi ro cao — pha build không hoãn review, cần một review độc lập ở head"
+  },
+  {
+   "id": "pr-adr0062-build-schema-not-deferred",
+   "origin": "adversarial-author",
+   "refs": [
+    "ADR-0062"
+   ],
+   "input": {
+    "delivery_phase": "build",
+    "pr": {
+     "files": [
+      {
+       "path": "migrations/0001.sql",
+       "additions": 5,
+       "deletions": 0
+      },
+      {
+       "path": "tests/test_a.py",
+       "additions": 4,
+       "deletions": 0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "verdict": "review",
+    "lane": "chuẩn",
+    "review": "missing",
+    "review_deferred": false,
+    "hard": false
+   },
+   "note": "ADR-0062: migration/schema là rủi ro cao (không phải ngoại lệ cứng) — pha build vẫn đòi review ở head, không hoãn thành nợ"
   },
   {
    "id": "pr-phase-build-blocking-review",
