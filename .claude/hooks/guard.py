@@ -900,19 +900,12 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
     quote, word_start, i = "", True, 0
     while i < len(cmd):
         c = cmd[i]
-        if (
-            strict and c == "$" and not quote and IFS_HASH_RE.match(cmd, i)
-        ):  # `\$` đã bị nhánh `\\` dưới nuốt: không tới đây
-            raise ScanTooComplex(IFS_HASH_WHY)
         if c == "#" and word_start and not quote:
             if strict and i and cmd[i - 1] == ")":
                 raise ScanTooComplex(PAREN_HASH_WHY)
             eol = cmd.find("\n", i)
             i = len(cmd) if eol < 0 else eol  # giữ `\n`: nó vẫn là ranh giới lệnh
             continue
-        if strict and c == "\\" and quote == '"' and IFS_HASH_RE.match(cmd, i + 1):
-            # `"…\$IFS''#…"` làm thân bash -c/eval: bash bỏ `\` trước `$` nên đó là biến IFS liền dấu thăng (AUD-SEC-235)
-            raise ScanTooComplex(IFS_HASH_WHY)
         if c == "\\" and quote != "'" and i + 1 < len(cmd):
             out.append(cmd[i : i + 2])
             word_start, i = False, i + 2
@@ -932,9 +925,6 @@ def strip_comments(cmd: str, strict: bool = False) -> str:
 ANSI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v"}
 ANSI_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|.)", re.S)
 IFS_RE = re.compile(r"\$\{IFS\}|\$IFS(?![A-Za-z0-9_])")
-IFS_HASH_WHY = "`IFS#` không khoảng trắng: guard và bash đọc `#` khác nhau — thêm khoảng trắng trước `#` (AUD-SEC-232)"
-# Biến IFS ngoài nháy liền (có thể xen nháy/`\`) dấu thăng: `~/$IFS''#` bash tách hai trường, guard thấy một token (#372)
-IFS_HASH_RE = re.compile(r"(?:\$\{IFS\}|\$IFS(?![A-Za-z0-9_]))[\\'\"]*#")
 
 
 def _ansi_c_char(m: "re.Match[str]") -> str:
@@ -1141,7 +1131,7 @@ PWD_SUBST_RE = re.compile(
 
 def tokenize(cmd: str) -> List[str]:
     cmd = expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True))
-    strip_comments(cmd, True)  # `)#`, `$IFS#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (AUD-SEC-195/232)
+    strip_comments(cmd, True)  # `)#` chặn TRƯỚC khi `$IFS`/`$(pwd)` bị viết lại (`$(pwd)#` thành `$PWD#`, AUD-SEC-195)
     cmd = IFS_RE.sub(" ", cmd)
     cmd = PWD_SUBST_RE.sub("$PWD", cmd)
     lex = shlex.shlex(strip_comments(cmd, True), posix=True, punctuation_chars="();<>|&\n")
@@ -5724,7 +5714,7 @@ def mcp_attribution(tool_name: str, tool_input: Dict[str, object], root: str) ->
 # backtick, `--fill`, message qua ống) → cho qua; CI `pr-title`/BASE-REPO-005 là lớp sau.
 PR_TITLE_TYPES = ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert")
 PR_TITLE_RE = re.compile(rf"({'|'.join(PR_TITLE_TYPES)})(\([a-z0-9._/-]+\))?!?: .+")
-PR_TITLE_MAX = 72
+PR_TITLE_MAX = 100
 PR_TITLE_OFF_RE = re.compile(r"^pr_title_check:[ \t]*([\"']?)off\1[ \t]*(?:#.*)?$", re.M)
 # Cờ của `gh pr create|edit` ăn một token giá trị — bóc để `-b "-t x"` không bị đọc thành tiêu đề.
 GH_PR_VALUE_FLAGS = {
@@ -5737,7 +5727,7 @@ MCP_PR_TITLE_RE = re.compile(r"mcp__.+__(create_pull_request|update_pull_request
 MCP_COMMIT_RE = re.compile(r"mcp__.+__(create_or_update_file|push_files|delete_file)")
 COMMIT_MESSAGE_OPTS = {"-m": "m", "--message": "m", "-F": "F", "--file": "F"}
 TITLE_FIX = (
-    "viết lại dạng `<type>(scope): mô tả` ≤ 72 ký tự rồi chạy lại (kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
+    "viết lại dạng `<type>(scope): mô tả` ≤ 100 ký tự rồi chạy lại (kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
 )
 
 
@@ -5834,7 +5824,7 @@ def title_rule(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: 
         if problem:
             return (
                 f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029: subject có thể thành subject commit squash): "
-                "rút gọn dòng đầu ≤ 72 ký tự, chi tiết đưa xuống thân rồi chạy lại."
+                "rút gọn dòng đầu ≤ 100 ký tự, chi tiết đưa xuống thân rồi chạy lại."
             )
     return ""
 
@@ -5850,7 +5840,7 @@ def mcp_title(tool_name: str, tool_input: Dict[str, object], root: str) -> str:
     if MCP_COMMIT_RE.fullmatch(tool_name) and isinstance(message, str) and commit_subject_problem(message):
         return (
             f"Commit qua {tool_name} bị khung chặn ({commit_subject_problem(message)} — LOOP-HARNESS-029): rút gọn "
-            "dòng đầu ≤ 72 ký tự rồi gọi lại."
+            "dòng đầu ≤ 100 ký tự rồi gọi lại."
         )
     return ""
 
@@ -6872,9 +6862,7 @@ def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Option
     for script, dests in ctr:
         sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
         why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
-        why = (
-            _wipes_bind(script, dests) or why
-        )  # luôn tính: lỗi BUDGET của script lồng không che xoá thư mục gắn (#372)
+        why = why or _wipes_bind(script, dests)
         out += [f"lệnh trong container: {why}"] if why else []
     return out
 

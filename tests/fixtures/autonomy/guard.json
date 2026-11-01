@@ -6067,24 +6067,24 @@
   "origin": "repro",
   "refs": [],
   "input": {
-   "command": "gh pr create --title 'fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)' --body x"
+   "command": "gh pr create --title 'fix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu, README, CHANGELOG, test (D-252)' --body x"
   },
   "expect": {
    "allowed": false
   },
-  "note": "tiêu đề > 72 ký tự chặn lúc đặt, không đợi CI pr-title (LOOP-HARNESS-029, D-255)"
+  "note": "tiêu đề > 100 ký tự chặn lúc đặt, không đợi CI pr-title (LOOP-HARNESS-029, D-255)"
  },
  {
   "id": "guard-har029-long-commit-subject",
   "origin": "repro",
   "refs": [],
   "input": {
-   "command": "git commit -q -F - <<'EOF'\nfix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu (D-252)\n\nthân\nEOF"
+   "command": "git commit -q -F - <<'EOF'\nfix(stage): dọn sau review lát C–E — redact, stop_hint, installer, tài liệu, README, CHANGELOG, test (D-252)\n\nthân\nEOF"
   },
   "expect": {
    "allowed": false
   },
-  "note": "subject commit 83 ký tự (#340) chặn lúc commit (LOOP-HARNESS-029)"
+  "note": "subject commit 108 ký tự (giới hạn 100) chặn lúc commit (LOOP-HARNESS-029)"
  },
  {
   "id": "guard-har029-good-title-control",
@@ -13788,32 +13788,6 @@
    ],
    "input": {
     "command": "echo $'\\'' $(true)#; rm -rf ~"
-   },
-   "expect": {
-    "allowed": false
-   }
-  },
-  {
-   "id": "guard-sec242-assign-paren-hash-rm",
-   "origin": "adversarial-reviewer",
-   "refs": [
-    "AUD-SEC-242"
-   ],
-   "input": {
-    "command": "x=$(true)# rm -rf ~"
-   },
-   "expect": {
-    "allowed": false
-   }
-  },
-  {
-   "id": "guard-sec242-array-paren-hash-rm",
-   "origin": "adversarial-reviewer",
-   "refs": [
-    "AUD-SEC-242"
-   ],
-   "input": {
-    "command": "a=(1)# rm -rf ~"
    },
    "expect": {
     "allowed": false

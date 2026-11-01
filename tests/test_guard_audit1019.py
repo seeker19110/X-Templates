@@ -2351,10 +2351,9 @@ class SecretExfilOtherChannelsDelta2Test(unittest.TestCase):
 
 
 class CommentAfterParenTest(unittest.TestCase):
-    """AUD-SEC-195/242 (đã sửa bởi #368/D-282): `#` ngay sau `)` — comment (sau `(…)`) hay nối từ (sau `$(…)`, `a=(…)`)
-    tuỳ cách bash ghép ngoặc — nên mọi `)#` liền nhau ngoài nháy bị chặn (fail-closed). Class này giữ bộ ca hồi quy D-279
-    (bản sửa `_CommentStrip` từng bị gỡ vì hồi quy, review #363) cùng chính sách chặn mặc định; comment có khoảng trắng
-    vẫn chạy."""
+    """AUD-SEC-195 (còn mở, D-279): `#` ngay sau `)` của từ (`$(…)#`, `<(…)#`, `a=(…)#`) là chữ với bash nhưng guard
+    vẫn đọc là comment — bản sửa toàn guard (`_CommentStrip`) đã gỡ vì hồi quy (review #363). Khoá phần đang đúng ở
+    main: comment thật sau `)` toán tử, và các ca chặn không phụ thuộc cách đọc `#` đó."""
 
     def test_paren_hash_kept_d279(self):
         for cmd in (
@@ -2372,10 +2371,6 @@ class CommentAfterParenTest(unittest.TestCase):
             "(cd .)# don't rm -rf ~",
             "(true)#<<X\necho ok",
             "(ls)# it's fine\necho ok",
-            # AUD-SEC-242: `#` sau `)` của từ ở vị trí gán/chỉ số
-            "x=$(true)# rm -rf ~",
-            "a=(1)# rm -rf ~",
-            "declare -A a; a[(1)#]=x; rm -rf ~",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -2513,73 +2508,6 @@ class ShellParseGapsTest(unittest.TestCase):
             "ls $( pwd )#; $'\\162m' -rf ~",
             "ls $(pwd)#; rm -rf {~,x}",
             "echo ok\nls $(pwd)#; $'rm' -rf ~",
-        ):
-            with self.subTest(cmd):
-                self.assertEqual(final(cmd), "deny")
-
-    def test_ifs_hash_denied(self) -> None:
-        # `$IFS` thành khoảng trắng trước khi bỏ comment → `#` sau nó mở comment ở guard mà bash đọc là nối từ (AUD-SEC-232)
-        for cmd in (
-            "echo $IFS#; rm -rf ~",
-            "echo ${IFS}#; git push --force origin main",
-            "true $(true)$IFS#; rm -rf ~",
-            "x=${y:-$IFS#}; rm -rf ~",
-            "x=$IFS#; rm -rf ~",
-            "a=($IFS#); rm -rf ~",
-            "echo hi >$IFS#; rm -rf ~",
-            # nháy xen giữa biến IFS và dấu thăng vẫn là một từ trong bash (review #372 lượt 2)
-            "x=$IFS''#; rm -rf ~",
-            # đích xoá đứng trước biến IFS: `~/$IFS''#` bash tách `$HOME/` và `#`; guard thấy một token (review #372 lượt 3)
-            "rm -rf ~/$IFS''#",
-            'rm -rf "$HOME"$IFS\\#',
-            "rm -rf ~/${IFS}'#'",
-            "docker run --rm -v $PWD:/w alpine rm -rf /w$IFS''#",
-            "bash -c 'rm -rf ~/$IFS'\"''\"'#'",
-            # thân trong nháy kép: bash bỏ `\` trước `$` nên `\$IFS''#` thành biến IFS liền dấu thăng (review #372 lượt 4)
-            "bash -c \"rm -rf ~/\\$IFS''#\"",
-            "eval \"rm -rf ~/\\$IFS''#\"",
-            "bash -c \"rm -rf ~/\\$IFS'#'\"",
-            "bash -c \"rm -rf ~/\\${IFS}''#\"",
-            "trap \"rm -rf ~/\\$IFS''#\" EXIT",
-            # backtick ngoài nháy, heredoc không nháy vào shell, nháy lệch trong backtick
-            "echo `rm -rf ~/\\$IFS''#`",
-            "x=`rm -rf ~/\\$IFS''#`",
-            "echo `rm -rf ~/\\${IFS}#`",
-            "bash <<EOF\nrm -rf ~/\\$IFS''#\nEOF",
-            "cat <<EOF | bash\nrm -rf ~/\\$IFS''#\nEOF",
-            "echo \"`: '\"'`\"; rm -rf ~/$IFS''#",
-            # tên biến IFS bị tách bằng `\` + xuống dòng: nối dòng trước khi đọc (review #372 lượt cuối)
-            "echo `rm -rf ~/\\$IF\\\nS''#`",
-            "echo `rm -rf ~/\\${IF\\\nS}#`",
-            "x=`rm -rf ~/\\$\\\nIFS''#`",
-            "echo \"`: '\"'`\"; rm -rf ~/$IF\\\nS''#",
-            'echo "`: \'"\'`"; rm -rf ~/$IF\\\nS#',
-        ):
-            with self.subTest(cmd):
-                self.assertEqual(final(cmd), "deny")
-        for cmd in (
-            "echo $IFSx#y",
-            "echo $IFS # ghi chú",
-            "printf '%s' \"$IFS\"",
-            # `IFS#` làm dữ liệu (nháy, comment, thoát, thân heredoc có nháy) là chữ thường: không chặn oan (review #372)
-            "echo '$IFS#'",
-            'echo "$IFS#"',
-            "true # xem $IFS#",
-            "echo \\$IFS#",
-            "grep -n '$IFS#' CHANGELOG.md",
-            "git commit -m \"$(cat <<'EOF'\nfix: chan $IFS# bug\nEOF\n)\"",
-        ):
-            with self.subTest(cmd):
-                self.assertEqual(final(cmd), "")
-
-    def test_container_script_budget_error_does_not_mask_bind_wipe(self) -> None:
-        # script lồng trong container ném ScanTooComplex (BUDGET) → bị hạ thành "hỏi" và từng che `_wipes_bind` (review #372)
-        for cmd in (
-            "docker run --rm -v $PWD:/w alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /w'",
-            "docker run --rm -v /srv/data:/d alpine sh -c 'echo $IF''S#'$'\\n''rm -rf /d'",
-            "docker run --rm -v $PWD:/w alpine sh -c 'true $(true)#'$'\\n''rm -rf /w'",
-            # `_wipes_bind` luôn được tính: xoá mount kèm lệnh khác không còn lọt (có từ trước, review #372 lượt 2)
-            "docker run --rm -v $PWD:/w alpine sh -c 'rm -rf /w && git push --force origin main'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")

@@ -141,7 +141,7 @@ class CiTemplateTest(unittest.TestCase):
             ("feat(ci): gộp job ngắn vào gate", "dev", 0),
             ("fix!: đổi giao ước", "dev", 0),
             ("gộp job", "dev", 1),
-            ("feat: " + "x" * 70, "dev", 1),
+            ("feat: " + "x" * 98, "dev", 1),
             ("bất kỳ", "dependabot[bot]", 0),
             ('Revert "feat: x"', "dev", 0),
         ):
@@ -257,7 +257,7 @@ class CiTemplateTest(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertRegex(text, r"types:\s*\[opened, edited, synchronize, reopened\]")
-                self.assertRegex(text, r'\[ "\$\{#TITLE\}" -(le|gt) 72 \]')
+                self.assertRegex(text, r'\[ "\$\{#TITLE\}" -(le|gt) 100 \]')
                 self.assertRegex(text, r"(?m)^permissions:\n  contents: read\n")
                 self.assertIn("cancel-in-progress: true", text)
                 self.assertIn("github.event.pull_request.number", text)
