@@ -6210,8 +6210,10 @@ def _eval_scripts(tokens: List[str]) -> List[str]:
 SED_NAMES = {"sed", "gsed"}
 AWK_NAMES = {"awk", "gawk", "mawk", "nawk"}
 TAR_NAMES = {"tar", "gtar", "bsdtar"}
-# `e command` của GNU sed ăn hết dòng (cả `;` — đo GNU sed 4.9); đứng sau địa chỉ/`;`/`{`/`!`/đầu chương trình.
-SED_EXEC_CMD_RE = re.compile(r"(?:^|[;{}!\n\d$/])[ \t]*e[ \t]+([^\n]+)")
+# `e command` của GNU sed ăn hết dòng (cả `;` — đo GNU sed 4.9), khoảng trắng sau `e` không bắt buộc (`erm …`); đứng sau
+# MỌI ký tự không phải chữ (địa chỉ `/re/`, `\%re%`, `\,re,`, `$`, số, `;{}!`) hoặc sau cờ địa chỉ `I`/`M` (`/x/Ie …`) —
+# AUD-SEC-270. Chiều chặt: khớp thừa trong chỗ thay chỉ chặn khi phần sau là lệnh nguy hiểm.
+SED_EXEC_CMD_RE = re.compile(r"(?:(?<![A-Za-z])|(?<=[^A-Za-z][IM]))e[ \t]*([^\n]*\S)")
 # `s<d>…<d>thay<d>cờ` có cờ `e`: chỗ thay thành lệnh; thử ở MỌI vị trí `s` (lookahead) để một khớp thừa không nuốt khớp thật.
 SED_SUBST_RE = re.compile(r"(?=s([^\\\n\w\s])((?:\\.|(?!\1)[^\\\n])*)\1((?:\\.|(?!\1)[^\\\n])*)\1([A-Za-z0-9]*))")
 AWK_PIPE_RE = re.compile(r'\|&?\s*"((?:[^"\\]|\\.)*)"|"((?:[^"\\]|\\.)*)"\s*\|&?\s*getline')
@@ -6227,9 +6229,11 @@ BACKTICK_BODY_RE = re.compile(r"`([^`]*)`")
 # AUD-SEC-250: bash tự mở rộng giá trị prompt (`set -x` mở rộng PS4, `${x@P}`), gọi lại lệnh (`mapfile -C`,
 # `compgen -C`, `compgen -W` mở rộng danh sách từ), nạp file `BASH_ENV` ở mọi bash không tương tác. `ENV` chỉ nạp ở shell
 # tương tác (đo dash/bash 2026-11-01) nên không xét.
-PROMPT_ASSIGN_RE = re.compile(r"(?:PS[0-4]|PROMPT_COMMAND)=(.*)", re.S)
-ANY_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^]]*\])?=(.*)", re.S)
-BASH_ENV_RE = re.compile(r"BASH_ENV=(.+)", re.S)
+PROMPT_ASSIGN_RE = re.compile(r"(?:PS[0-4]|PROMPT_COMMAND)\+?=(.*)", re.S)  # cả `+=` (AUD-SEC-271)
+ANY_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^]]*\])?\+?=(.*)", re.S)
+BASH_ENV_RE = re.compile(r"BASH_ENV\+?=(.+)", re.S)
+ASSIGN_BUILTINS = {"export", "declare", "typeset", "readonly", "local", "env"}  # đối số là phép gán biến môi trường
+QUOTE_SCAN_MAX = 16384  # tổng ký tự chuỗi/thân trích của script Perl/Ruby/PHP được quét (AUD-PERF-004); vượt → chặn
 BASH_ENV_MARK = "bash con nạp file guard không quét"  # mã OPAQUE_EXEC (REASON_CODES)
 CALLBACK_OPTS = {"mapfile": "C", "readarray": "C", "compgen": "CW", "complete": "CW"}
 
@@ -6258,6 +6262,7 @@ def _sed_exec_scripts(args: List[str]) -> List[str]:
 def _awk_exec_scripts(args: List[str]) -> List[str]:
     """Chương trình awk có `system(`/ống: mọi chuỗi nguyên văn (lệnh có thể qua biến) và chuỗi ghép của chúng."""
     out: List[str] = []
+    out += [v.split("=", 1)[-1] for v in _bundled_values(args, "v")]  # `-v c='lệnh'` → `system(c)` (AUD-SEC-256)
     for prog in args:
         if AWK_EXEC_HINT_RE.search(prog):
             lits = [_literal(m) for m in LITERAL_RE.finditer(prog)]
@@ -6270,6 +6275,8 @@ def _tar_exec_scripts(args: List[str]) -> List[str]:
     """Giá trị các tuỳ chọn tar chạy lệnh: `--to-command`, `-I/--use-compress-program`, `-F/--info-script`,
     `--checkpoint-action=exec=…` (tên dài viết tắt ≥ 4 ký tự như getopt)."""
     out = _bundled_values(args, "IF")
+    if args[:1] and re.fullmatch(r"[A-Za-z]+", args[0]) and set(args[0]) & set("IF"):
+        out += args[1:]  # cụm cờ kiểu cũ không gạch (`tar xIf 'lệnh' a.tar`) — giá trị theo thứ tự cờ (AUD-SEC-256)
     for i, a in enumerate(args):
         key, eq, val = a.partition("=")
         val = val if eq else (args[i + 1] if i + 1 < len(args) else "")
@@ -6302,9 +6309,18 @@ def _prompt_scripts(cmd: str, tokens: List[str]) -> List[str]:
     return out
 
 
+def _assign_tokens(argv: List[str]) -> List[str]:
+    """Token là phép gán thật của một lệnh: tiền tố `X=… cmd`, đối số của `export`/`declare`/`typeset`/`readonly`/
+    `local`/`env` (AUD-SEC-254: `grep 'BASH_ENV=f'`, `echo "BASH_ENV=…"` là dữ liệu)."""
+    lead = list(itertools.takewhile(lambda t: bool(ANY_ASSIGN_RE.fullmatch(t)), argv))
+    rest = argv[len(lead) :]
+    return lead + (rest[1:] if rest[:1] and posixpath.basename(rest[0]) in ASSIGN_BUILTINS else [])
+
+
 def _bash_env_asks(tokens: List[str]) -> List[str]:
-    """`BASH_ENV=<file>`: mọi bash không tương tác về sau nạp file đó — guard không đọc nội dung → chặn."""
-    return [f"BASH_ENV: {BASH_ENV_MARK} ({t[:120]})" for t in tokens if BASH_ENV_RE.fullmatch(t)]
+    """`BASH_ENV=<file>`/`+=` ở vị trí gán: mọi bash không tương tác về sau nạp file đó — guard không đọc nội dung → chặn."""
+    found = [t for c in split_commands(tokens) for t in _assign_tokens(c) if BASH_ENV_RE.fullmatch(t)]
+    return [f"BASH_ENV: {BASH_ENV_MARK} ({t[:120]})" for t in found]
 
 
 def _quote_body(script: str, m: "re.Match[str]") -> str:
@@ -6325,7 +6341,10 @@ def _quote_exec_scripts(script: str) -> List[str]:
     lits = [_literal(m) for m in LITERAL_RE.finditer(script)]
     lits += [_quote_body(script, m) for m in QUOTE_LIKE_RE.finditer(script)]
     lits += BACKTICK_BODY_RE.findall(script)
-    return lits + ["".join(lits)]
+    lits = list(dict.fromkeys(lits))
+    if sum(map(len, lits)) > QUOTE_SCAN_MAX:  # thân `%(`/`q(` lồng chồng lấn: quét từng cái gần n³ (AUD-PERF-004)
+        raise ScanTooComplex("script Perl/Ruby/PHP có quá nhiều chuỗi/thân trích để quét lệnh shell")
+    return ["\n".join(lits), "".join(lits)]  # hai lần quét: mỗi chuỗi một dòng lệnh, và chuỗi ghép
 
 
 def _m4_exec_scripts(text: str) -> List[str]:

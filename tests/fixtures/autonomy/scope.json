@@ -195,6 +195,12 @@
     "AUD-SEC-175",
     "AUD-SEC-176"
    ]
+  },
+  {
+   "reason": "Hiệu năng quyết định guard (thời gian, không phải cho/chặn) — đỡ bằng Gate unittest `cpu_budget.assert_not_quadratic` trong tests.test_guard_audit1019 (AuditPhase1101GuardTest.test_quote_like_repeat_not_cubic)",
+   "ids": [
+    "AUD-PERF-004"
+   ]
   }
  ]
 }
