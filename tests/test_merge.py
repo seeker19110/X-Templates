@@ -1851,6 +1851,31 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual(self.act(rec={"reviews": [b1, b2x, b3], "rethinks": at_head})["action"], "debt")
         rough = [{"at": "x", "head": self.H}, "rác"]
         self.assertEqual(self.act(rec={"reviews": [b1, b2x], "rethinks": rough})["action"], "debt")
+        # ADR-0061 (T-3603): trần `max_rethink` theo PR (mặc định 1) — hết trần thì không mở thêm lượt: `rethink` →
+        # `split-or-close`; `debt` còn 🔴 không trỏ `pr rethink`; 0 = không trần; PR cắt bản miễn (ADR-0059 §6)
+        b3i = {**b3, "inconclusive": True}
+        capped = self.act(rec={"reviews": [b1, b2x, b3i], "rethinks": after})
+        self.assertEqual(capped["action"], "split-or-close")
+        self.assertIn("đã hết trần `pr rethink` (max_rethink — ADR-0061)", capped["why"])
+        self.assertIn("tách PR #7 thành PR nhỏ hơn (mỗi lát một PR, ≤ 150 dòng) hoặc đóng", capped["do"])
+        self.assertIn("xt.py loop decide --question 'PR #7: tách hay đóng?'", capped["do"])
+        self.assertNotIn("pr rethink --pr", capped["do"])
+        ident_cap = self.act(rec={"reviews": [b1, b2x, b3], "rethinks": after, "published_only": True})
+        self.assertEqual(ident_cap["action"], "split-or-close")
+        debt_cap = self.act(rec={"reviews": [b1, b2x, b3], "rethinks": after})
+        self.assertEqual(debt_cap["action"], "debt")
+        self.assertIn("Còn 🔴: không ghi nợ — hết trần rethink: tách PR #7", debt_cap["do"])
+        self.assertNotIn("pr rethink --pr", debt_cap["do"])
+        rec_cap = {"reviews": [b1, b2x, b3i], "rethinks": after}
+        self.assertEqual(xt.pr_next(self.d(), False, rec_cap, 0)["action"], "rethink")  # 0 = không trần
+        self.assertEqual(xt.pr_next(self.d(), False, rec_cap, 2)["action"], "rethink")  # còn lượt
+        self.assertEqual(xt.pr_next(self.d(release=True), False, rec_cap)["action"], "rethink")  # PR cắt bản miễn
+        self.assertEqual(self.act(rec={"reviews": [b1, b2x, b3i], "rethinks": rough})["action"], "split-or-close")
+        self.assertEqual(self.act(True, rec=rec_cap)["action"], "disable-auto-merge")  # tắt auto-merge vẫn trước
+        self.assertEqual(xt.rethink_cap({}), 1)
+        self.assertEqual((xt.rethink_cap({"max_rethink": "0"}), xt.rethink_cap({"max_rethink": "3"})), (0, 3))
+        self.assertEqual((xt.rethink_cap({"max_rethink": "x"}), xt.rethink_cap({"max_rethink": "-1"})), (1, 1))
+        self.assertEqual((xt.rethink_count(after), xt.rethink_count(rough), xt.rethink_count("rác")), (1, 1, 0))
         # head chỉ là cập nhật nhánh đích của head đã rà (`base_merge_of`): chưa phải lần sửa → sửa, không ghi nợ
         self.assertEqual(self.act(rec={"reviews": [b1, b2]}, base_merge_of=[self.H2])["action"], "fix")
         # AUD-HAR-136: head cập nhật nhánh đã rà (`merges` nhớ lúc `pr next` thấy) gộp với head nguồn — bản sửa ở head mới
@@ -2002,6 +2027,24 @@ class PrNextCliTest(unittest.TestCase):
         )
         self.assertEqual(xt.read_reviews(self.base)["7"]["rethinks"][0]["decision"], "D-005")
         self.assertNotIn("head", xt.read_reviews(self.base)["7"]["rethinks"][0])  # SHA giả: không so được cây
+        # ADR-0061 (T-3603): đã dùng 1/1 lượt (max_rethink mặc định) → hai review chưa sạch nữa thì `pr rethink` từ chối,
+        # `pr next` nói tách/đóng; `max_rethink: 0` ở xt.yaml mở lại hành vi cũ
+        r3 = {"head": "f" * 40, "clean": False, "at": self.soon(60)}  # hai lượt mới sau mốc rethink
+        r4 = {**r3, "head": self.head, "at": self.soon(120)}
+        p2 = {**self.big, "xtReviews": [*self.marks(), r3, r4]}
+        r = json.loads(self.nxt(p2, "--json")[1])
+        self.assertEqual(r["action"], "debt")
+        self.assertIn("hết trần rethink: tách PR #7", r["do"])
+        self.assertNotIn("pr rethink --pr", r["do"])
+        self.decisions(self.base, f"### D-008 · {self.soon(200)} · PR #7 tách hay đóng?")
+        rc, _, err = self.rethink("D-008", p2)
+        self.assertEqual(rc, 2)
+        self.assertIn(
+            "PR #7 đã dùng 1/1 lần `pr rethink` (xt.yaml max_rethink, ADR-0061) — tách PR nhỏ hơn hoặc đóng", err
+        )
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmax_rethink: 0\n", encoding="utf-8")  # đường lùi
+        self.assertIn("xt.py pr rethink --pr 7", json.loads(self.nxt(p2, "--json")[1])["do"])
+        self.assertEqual(self.rethink("D-008", p2)[0], 0)
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
         rc, _, err = self.rethink("D-005")
         self.assertEqual(rc, 2)
@@ -2106,6 +2149,9 @@ class PrNextCliTest(unittest.TestCase):
     def test_rethink_reads_decision_of_worktree(self):
         """Review #298 🟠1: `loop decide` gõ trong worktree khác của cùng repo ghi sổ của worktree (`loop_root`) —
         `pr rethink` phải thấy quyết định đó; quyết định ở sổ của dự án vẫn được tra khi đứng trong worktree."""
+        commit_base_xt(
+            self.base, "merge_autonomy: L3\nmax_rethink: 0\n"
+        )  # test cần hai lần rethink (ADR-0061: 0 = không trần)
         run_main("pr", "reviewed", "--pr", "7", "--head", "d" * 40, "--blocking")
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking")
         wt = Path(self.enterContext(tempfile.TemporaryDirectory())) / "wt"

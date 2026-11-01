@@ -56,6 +56,8 @@ merge_hard_exceptions: auto
 # Pha giao hàng (ADR-0031): repo khung LUÔN là production — chủ repo 2026-10-22 (D-136, thay D-109) → `harden`: PR làn
 # chuẩn cần review sạch ở head bởi reviewer năng lực cao hơn người viết; guard không nới việc cục bộ (ADR-0040 chỉ áp pha build).
 delivery_phase: harden
+# Trần `pr rethink` mỗi PR (ADR-0061, bài học #372): hết → `pr next` trả `split-or-close`; 0 = không trần; PR cắt bản miễn.
+max_rethink: 1
 # Ghi công AI trong commit (AGENTS.md §3, AUD-HAR-017): forbid = guard chặn commit có tên model/URL phiên AI
 # (LOOP-HARNESS-027).
 ai_attribution: forbid
