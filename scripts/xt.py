@@ -5036,6 +5036,81 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
         out.append(
             Finding("orchestration", "warn", msg + "; đổi `model:` thành `inherit` hoặc tầng của khung (LOOP-ORCH-022)")
         )
+    return out + _doctor_harness_settings(base)
+
+
+SETTINGS_LOCAL_REL = ".claude/settings.local.json"  # quyền/đường dẫn máy cá nhân — không commit (LOOP-HARNESS-032)
+# Dòng `.gitignore` tương đương (so sau `strip()`, như `AUTOPILOT_IGNORES`; install.py giữ cùng tập — review #381)
+SETTINGS_LOCAL_IGNORES = (
+    ".claude/settings.local.json",
+    "/.claude/settings.local.json",
+    "**/.claude/settings.local.json",
+    "settings.local.json",
+    "**/settings.local.json",
+    ".claude/*.local.json",
+    "*.local.json",
+)
+MODEL_ALIASES_OK = (
+    "best",
+    "default",
+)  # alias Claude Code không mang họ: `best` = bậc cao nhất có, `default` = xoá ghi đè
+MCP_ALL_KEY = "enableAllProjectMcpServers"
+
+
+def _doctor_harness_settings(base: Path) -> List[Finding]:
+    """LOOP-HARNESS-032 (stored XT-H-021): settings dự án không bật mọi MCP server của `.mcp.json` không hỏi; khoá
+    `model` khai trong settings thuộc họ của khung (`MODEL_TIER`); `settings.local.json` có thì `.gitignore` phải chặn.
+    Fail-open: JSON hỏng bỏ qua; chỉ in tên file và khoá, không in giá trị."""
+    out: List[Finding] = []
+    for name in ("settings.json", "settings.local.json"):
+        data = _read_json_obj(base / ".claude" / name) or {}
+        if data.get(MCP_ALL_KEY) is True:
+            out.append(
+                Finding(
+                    "orchestration",
+                    "warn",
+                    f".claude/{name}: `{MCP_ALL_KEY}: true` bật mọi MCP server trong `.mcp.json` không hỏi — bỏ khoá,"
+                    " liệt kê `enabledMcpjsonServers` (LOOP-HARNESS-032, LOOP-STOP-023)",
+                )
+            )
+        model = data.get("model")
+        alias = isinstance(model, str) and model.strip().lower() in MODEL_ALIASES_OK
+        if isinstance(model, str) and model.strip() and not alias and model_family(model) not in MODEL_TIER:
+            out.append(
+                Finding(
+                    "orchestration",
+                    "warn",
+                    f".claude/{name}: `model` ngoài họ của khung ({', '.join(MODEL_TIER)}) — bỏ khoá hoặc dùng tầng"
+                    " của khung (LOOP-HARNESS-032, LOOP-ORCH-019)",
+                )
+            )
+    return out + _doctor_settings_local(base)
+
+
+def _doctor_settings_local(base: Path) -> List[Finding]:
+    """`.claude/settings.local.json` có mà `.gitignore` không chặn (dòng tương đương nào cũng được), hoặc đã bị track
+    (dòng gitignore không gỡ track — ca XT-H-021). Không có git → chỉ kiểm dòng (fail-open)."""
+    out: List[Finding] = []
+    lines = {ln.strip() for ln in _read_text_or_empty(base / ".gitignore").splitlines()}
+    if (base / SETTINGS_LOCAL_REL).is_file() and not lines & set(SETTINGS_LOCAL_IGNORES):
+        out.append(
+            Finding(
+                "orchestration",
+                "warn",
+                f"{SETTINGS_LOCAL_REL} có mà `.gitignore` không chặn — file chứa quyền/đường dẫn máy cá nhân; chạy lại"
+                " install.py hoặc thêm dòng (LOOP-HARNESS-032)",
+            )
+        )
+    tracked = _git(base, "ls-files", "--", SETTINGS_LOCAL_REL)
+    if tracked.returncode == 0 and tracked.stdout.strip():
+        out.append(
+            Finding(
+                "orchestration",
+                "warn",
+                f"{SETTINGS_LOCAL_REL} đang được git track — dòng .gitignore không gỡ track: `git rm --cached` rồi xoay"
+                " quyền/đường dẫn đã lộ trong lịch sử (LOOP-HARNESS-032)",
+            )
+        )
     return out
 
 
