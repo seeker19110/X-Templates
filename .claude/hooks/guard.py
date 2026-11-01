@@ -6232,7 +6232,8 @@ BACKTICK_BODY_RE = re.compile(r"`([^`]*)`")
 PROMPT_ASSIGN_RE = re.compile(r"(?:PS[0-4]|PROMPT_COMMAND)\+?=(.*)", re.S)  # cả `+=` (AUD-SEC-271)
 ANY_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^]]*\])?\+?=(.*)", re.S)
 BASH_ENV_RE = re.compile(r"BASH_ENV\+?=(.+)", re.S)
-ASSIGN_BUILTINS = {"export", "declare", "typeset", "readonly", "local", "env"}  # đối số là phép gán biến môi trường
+# Chương trình chỉ đọc/in dữ liệu, không chạy lệnh từ đối số: `BASH_ENV=…` trong đối số của chúng là chữ (AUD-SEC-254).
+BASH_ENV_DATA_CMDS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "ag", "git", "cat", "head", "tail", "wc", "jq"}
 QUOTE_SCAN_MAX = 16384  # tổng ký tự chuỗi/thân trích của script Perl/Ruby/PHP được quét (AUD-PERF-004); vượt → chặn
 BASH_ENV_MARK = "bash con nạp file guard không quét"  # mã OPAQUE_EXEC (REASON_CODES)
 CALLBACK_OPTS = {"mapfile": "C", "readarray": "C", "compgen": "CW", "complete": "CW"}
@@ -6262,7 +6263,8 @@ def _sed_exec_scripts(args: List[str]) -> List[str]:
 def _awk_exec_scripts(args: List[str]) -> List[str]:
     """Chương trình awk có `system(`/ống: mọi chuỗi nguyên văn (lệnh có thể qua biến) và chuỗi ghép của chúng."""
     out: List[str] = []
-    out += [v.split("=", 1)[-1] for v in _bundled_values(args, "v")]  # `-v c='lệnh'` → `system(c)` (AUD-SEC-256)
+    if any(AWK_EXEC_HINT_RE.search(a) for a in args):  # `-v c='lệnh'` → `system(c)` (AUD-SEC-256); chỉ in → không quét
+        out += [v.split("=", 1)[-1] for v in _bundled_values(args, "v")]
     for prog in args:
         if AWK_EXEC_HINT_RE.search(prog):
             lits = [_literal(m) for m in LITERAL_RE.finditer(prog)]
@@ -6309,17 +6311,19 @@ def _prompt_scripts(cmd: str, tokens: List[str]) -> List[str]:
     return out
 
 
-def _assign_tokens(argv: List[str]) -> List[str]:
-    """Token là phép gán thật của một lệnh: tiền tố `X=… cmd`, đối số của `export`/`declare`/`typeset`/`readonly`/
-    `local`/`env` (AUD-SEC-254: `grep 'BASH_ENV=f'`, `echo "BASH_ENV=…"` là dữ liệu)."""
-    lead = list(itertools.takewhile(lambda t: bool(ANY_ASSIGN_RE.fullmatch(t)), argv))
-    rest = argv[len(lead) :]
-    return lead + (rest[1:] if rest[:1] and posixpath.basename(rest[0]) in ASSIGN_BUILTINS else [])
+def _env_scan_tokens(argv: List[str]) -> List[str]:
+    """Token có thể là phép gán `BASH_ENV`: MỌI token như luật cũ (lệnh bọc `command`/`nohup`/`timeout`/`xargs env …` —
+    review #389 🔴), trừ đối số của chương trình cuối khi nó chỉ đọc/in dữ liệu (`grep 'BASH_ENV=f'`, `echo`, thân
+    `git commit` — AUD-SEC-254): khi đó chỉ phần đứng trước chương trình (tiền tố gán, lệnh bọc) được xét."""
+    n = normalize(argv)
+    if n and posixpath.basename(n[0]) in BASH_ENV_DATA_CMDS:
+        return argv[: len(argv) - len(n)]
+    return argv
 
 
 def _bash_env_asks(tokens: List[str]) -> List[str]:
-    """`BASH_ENV=<file>`/`+=` ở vị trí gán: mọi bash không tương tác về sau nạp file đó — guard không đọc nội dung → chặn."""
-    found = [t for c in split_commands(tokens) for t in _assign_tokens(c) if BASH_ENV_RE.fullmatch(t)]
+    """`BASH_ENV=<file>`/`+=`: mọi bash không tương tác về sau nạp file đó — guard không đọc nội dung → chặn."""
+    found = [t for c in split_commands(tokens) for t in _env_scan_tokens(c) if BASH_ENV_RE.fullmatch(t)]
     return [f"BASH_ENV: {BASH_ENV_MARK} ({t[:120]})" for t in found]
 
 

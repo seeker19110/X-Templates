@@ -14053,6 +14053,45 @@
   "expect": {
    "allowed": false
   }
+ },
+ {
+  "id": "guard-sec274-wrapper-env-bash-env",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-274"
+  ],
+  "input": {
+   "command": "command env BASH_ENV=f bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec274-nohup-env-bash-env",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-274"
+  ],
+  "input": {
+   "command": "nohup env BASH_ENV=f bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec275-awk-v-print-allowed",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-275"
+  ],
+  "input": {
+   "command": "awk -v x='rm -rf ~' 'BEGIN{print x}'"
+  },
+  "expect": {
+   "allowed": true
+  }
  }
  ]
 }

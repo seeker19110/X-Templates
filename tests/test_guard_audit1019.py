@@ -2645,6 +2645,13 @@ class AuditPhase1101GuardTest(unittest.TestCase):
             "awk -v c='rm -rf ~' 'BEGIN{system(c)}'",
             "awk -vc='rm -rf ~' 'BEGIN{system(c)}'",
             "tar xIf 'rm -rf ~;cat' a.tar",
+            # review #389 🔴: lệnh bọc trước `env` (luật cũ quét mọi token — không được yếu hơn)
+            "command env BASH_ENV=f bash -c true",
+            "nohup env BASH_ENV=f bash -c true",
+            "timeout 5 env BASH_ENV=f bash -c true",
+            "nice -n 5 env BASH_ENV=f bash -c true",
+            "xargs env BASH_ENV=f bash -c true",
+            "BASH_ENV=f grep x f",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
@@ -2658,6 +2665,7 @@ class AuditPhase1101GuardTest(unittest.TestCase):
             "sed -n '/error/p' f",
             "sed -e 's/a/b/' -e 's/c/d/' f.txt e.md",
             "awk -v n=3 '{print $n}' f",
+            "awk -v x='rm -rf ~' 'BEGIN{print x}'",  # review #389 🟠: chỉ in, không chạy lệnh
             "tar xzf a.tar.gz",
             "perl -e 'system q(echo hi)'",
         ):
