@@ -2673,6 +2673,10 @@ class ReleaseCheckTest(TmpRepoCase):
         got = [r[k]["result"] for k in ("migration_check", "rollback", "acceptance")]
         self.assertEqual(got, ["PASS", "FAIL", "PASS"])
         self.assertIn("exit 3: khong-ve", r["rollback"]["evidence"])
+        self.assertIn("rollback", d["fails"])  # AUD-HAR-190: đỏ của hàng mới vào `fails`
+        self.assertNotIn("acceptance", d["fails"])
+        order = list(xt.RELEASE_ROWS)
+        self.assertLess(order.index("acceptance"), order.index("rollback"))  # AUD-HAR-189: nghiệm thu trước diễn tập
         self.assertIn("exit 4: lo-hong", r["attack"]["evidence"])
         self.assertIn("attack", d["fails"])
         # review #217: lệnh ghi báo cáo vào cây → hàng `tree` thấy; bí mật trong log bị che; timeout âm → mặc định
@@ -3526,6 +3530,27 @@ class PromptAssetsScanTest(TmpDirCase):
         self.assertIn("danger", self.rules(".claude/settings.json"))
         self.write(".claude/settings.json", '["git push --force"]')  # không có `permissions` dạng object: nguyên văn
         self.assertIn("danger", self.rules(".claude/settings.json"))
+
+    def test_settings_exemption_scoped_to_harness_deny_danger(self):
+        """AUD-SEC-272: miễn trừ chỉ cho `.claude/settings*.json` và chỉ luật `danger` trên mục `deny` — `vendor/**/
+        settings.json` quét đủ; bí mật/injection trong `deny` vẫn báo (dòng 0); `ask` quét đủ. AUD-CODE-034: `--patterns`
+        rỗng là lỗi cấu hình (exit 2), không tắt luật injection."""
+        tok = "gh" + "p_" + "A" * 36
+        perms = {"permissions": {"deny": ["Bash(git push --force *)", tok], "ask": ["Bash(git push --force *)"]}}
+        self.write("vendor/pack/settings.json", json.dumps(perms, indent=2))
+        self.assertEqual(self.rules("vendor"), ["danger", "secret"])
+        self.write(".claude/" + "settings.json", json.dumps(perms, indent=2))
+        found, _ = xt.prompt_assets_scan([".claude"])
+        got = sorted((f["rule"], f["line"]) for f in found)
+        self.assertIn(("secret", 0), got)  # bí mật trong `deny`: vẫn báo
+        self.assertIn("danger", [r for r, n in got if n])  # `ask` không được miễn
+        self.assertNotIn(("danger", 0), got)  # `deny`: miễn đúng luật `danger`
+        self.write("empty.txt", "\n  \n")
+        rc, _, err = run_main("prompt-assets-scan", "--patterns", "empty.txt", ".claude")
+        self.assertEqual(rc, 2)
+        self.assertIn("không có mẫu nào", err)
+        self.write("bad.txt", "(\n")
+        self.assertEqual(run_main("prompt-assets-scan", "--patterns", "bad.txt", ".claude")[0], 2)
 
     def test_leak_only_under_vendor_and_skill_dirs(self):
         self.write("vendor/x/notes.md", "You are Claude Code, an assistant")
