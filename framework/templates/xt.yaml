@@ -31,6 +31,7 @@ merge_risk_paths: ""          # glob thêm vào đường dẫn nhạy cảm (ng
 merge_hard_exceptions: auto
 # delivery_phase: build = CI xanh là merge, không reviewer, review ghi nợ · harden (chỉ khi lên production) = review sạch ở head (ADR-0031/0037)
 delivery_phase: build
+# max_rethink: 1              # trần `pr rethink` mỗi PR (ADR-0061): hết → `pr next` trả `split-or-close`; 0 = không trần; PR cắt bản miễn; lấy mức chặt hơn với nhánh đích
 # review_identity: ""         # chỉ dấu review của tài khoản này mở được merge (T-1508)
 # author_model_family: ""     # reviewer năng lực cao hơn tác giả: bậc model cao hơn, cùng họ thì effort cao hơn (ci-check kiểm)
 # reviewer_model_family: ""

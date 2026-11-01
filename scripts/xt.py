@@ -28,7 +28,8 @@ Lệnh:
   loop unblock --reason TEXT    Người xem rồi: mở BLOCKED/đã dừng, đặt lại đếm lỗi; giữ việc chờ, số vòng/bằng chứng.
   loop resume [--reason TEXT]   Lệnh cũ (làm cả bốn việc trên, in cảnh báo) — dùng attach/resolve/unblock.
   loop stop [--reason TEXT]     Tắt vòng lặp.
-  loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
+  loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần,
+                                thời gian tới xanh (giờ, trung vị/P95 — ADR-0061).
   pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (tắt auto-merge người bật, rà, merge ghim head…).
   pr stats [--days 30] [--repo R] [--json]
                                 Số đo PR đã merge trong N ngày (REST): lead time trung vị/P95, run CI `pull_request` mỗi PR,
@@ -43,7 +44,8 @@ Lệnh:
   pr rethink [--pr N] --decision D-NNN
                                 PR hết lượt review (`pr next` = debt mà còn 🔴 — thêm một lần sửa hết; hoặc = rethink: review
                                 cuối chưa kết luận, `review_identity`): mở thêm một lần sửa theo D-NNN mới, câu hỏi nhắc #N, ghi sau
-                                review chưa sạch cuối (ADR-0053/0059, D-210).
+                                review chưa sạch cuối (ADR-0053/0059, D-210); tối đa `max_rethink` lần/PR (mức chặt hơn
+                                giữa cây và nhánh đích; PR cắt bản miễn) — hết trần `pr next` trả split-or-close (ADR-0061).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -3041,18 +3043,33 @@ def _pct(x: Optional[float]) -> str:
     return "—" if x is None else f"{x:.0%}"
 
 
+def _hours_to_green(first_started: Optional[_dt.datetime], green_finished: str) -> Optional[float]:
+    """Giờ từ `started` lần chạy đầu của task tới `finished` lần xanh đầu (KPI thời gian, ADR-0061 / LOOP-DESIGN-024);
+    thiếu/không đọc được thời điểm hoặc kết thúc trước bắt đầu (đồng hồ lệch) → None, không bịa số."""
+    fin = _parse_iso(green_finished)
+    if first_started is None or fin is None or fin < first_started:
+        return None
+    return round((fin - first_started).total_seconds() / 3600, 3)
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
-    ≥ 3 lần, vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng hiện tại (`loop` = `started` của state)."""
+    ≥ 3 lần, thời gian tới xanh (giờ, trung vị/P95 — ADR-0061), vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng
+    hiện tại (`loop` = `started` của state)."""
     st = read_state(base) or {}
     rows = [r for r in read_runs(base) if all_loops or r.get("loop") == st.get("started")]
     per: Dict[str, Dict[str, Any]] = {}
+    starts: Dict[str, Optional[_dt.datetime]] = {}
     for r in rows:
-        t = per.setdefault(r["task"], {"runs": 0, "failed": 0, "runs_to_green": None, "executors": []})
+        t = per.setdefault(
+            r["task"], {"runs": 0, "failed": 0, "runs_to_green": None, "time_to_green_hours": None, "executors": []}
+        )
+        starts.setdefault(r["task"], _parse_iso(str(r.get("started") or "")))
         t["runs"] += 1
         t["failed"] += r["exit_code"] != 0
         if r["exit_code"] == 0 and t["runs_to_green"] is None:
             t["runs_to_green"] = t["runs"]
+            t["time_to_green_hours"] = _hours_to_green(starts[r["task"]], str(r.get("finished") or ""))
         ex = r.get("executor")
         if isinstance(ex, str) and ex not in t["executors"]:
             t["executors"].append(ex)  # thứ tự xuất hiện: [executor, executor-deep] = đã chuyển cấp (ADR-0029)
@@ -3074,6 +3091,9 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         "escalated": escalated,
         "escalation_rate": round(len(escalated) / len(per), 3) if per else None,
         "never_green": sorted(k for k, t in per.items() if t["runs_to_green"] is None),
+        "time_to_green_hours": _quantiles(
+            [t["time_to_green_hours"] for t in per.values() if t["time_to_green_hours"] is not None]
+        ),
         "iterations": st.get("iterations", 0),
         "max_iterations": st.get("max_iterations"),
         "deferred": sorted(_deferred(st)),
@@ -3092,6 +3112,12 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     )
     print(
         f"Vòng: {s['iterations']}/{s['max_iterations'] or '—'} · chờ người: {len(s['deferred'])} · blocked: {s['blocked']}"
+    )
+    ttg = s["time_to_green_hours"]
+    print(
+        "Thời gian tới xanh (giờ): "
+        + ("chưa đo" if ttg["median"] is None else f"trung vị {ttg['median']} · P95 {ttg['p95']}")
+        + " (ADR-0061)"
     )
     print(
         f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
@@ -11037,6 +11063,31 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
 # trần → `debt` (ghi nợ phát hiện còn lại, tiếp tục; 🔴 → `pr rethink`), không review lần ba — trừ PR cắt bản: `rethink`,
 # sửa hết, review lại tới khi sạch (ADR-0059 §6).
 REVIEW_ROUNDS = 2
+# Trần số lần `pr rethink` mỗi PR (ADR-0061, bài học #372: 7 lượt review vẫn đỏ): xt.yaml `max_rethink` (mặc định 1;
+# 0 = không trần = hành vi ADR-0053/0059). Hết trần → `pr next` trả `split-or-close` thay `rethink`; PR cắt bản miễn
+# (ADR-0059 §6: rà tới sạch).
+MAX_RETHINK_DEFAULT = 1
+MAX_RETHINK_KEY = "max_rethink"
+
+
+def rethink_cap(keys: Dict[str, str]) -> int:
+    """`max_rethink` của xt.yaml → số nguyên ≥ 0; thiếu/lạ → mặc định (không nới: giá trị hỏng không tắt trần)."""
+    raw = keys.get(MAX_RETHINK_KEY, "")
+    return int(raw) if re.fullmatch(r"\d+", raw) else MAX_RETHINK_DEFAULT
+
+
+def pr_rethink_cap(base: Path, pr: Dict[str, Any]) -> int:
+    """Trần `max_rethink` CHẶT hơn giữa cây làm việc và xt.yaml đã commit ở nhánh đích của PR (như `merge_autonomy_level`):
+    sửa tại chỗ chỉ siết được, nới (kể cả `0` = không trần) phải qua PR đã merge (review #380). `0` là lỏng nhất."""
+    work = rethink_cap(_xt_keys(base))
+    committed = rethink_cap(_committed_xt_keys(base, f"origin/{pr.get('baseRefName') or 'main'}"))
+    caps = [c for c in (work, committed) if c > 0]
+    return min(caps) if caps else 0
+
+
+def rethink_count(rethinks: object) -> int:
+    """Số lần `pr rethink` đã ghi ở sổ của PR (mọi lần, không theo cửa sổ review — trần là theo PR)."""
+    return sum(isinstance(r, dict) for r in rethinks) if isinstance(rethinks, list) else 0
 
 
 def _iso_time(at: object) -> Optional[_dt.datetime]:
@@ -11106,16 +11157,30 @@ def _pr_next_review(
     unsure: bool = False,
     identity: bool = False,
     fixed: bool = True,
+    capped: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
     review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
     luận (`unsure`: không biết còn 🔴 hay không — ADR-0029) hoặc dấu chỉ tính của danh tính reviewer (`identity`: tác giả
     không đăng được dấu `debt`) hoặc PR cắt bản (`release`, ADR-0059 §6): `rethink` như ADR-0053. `fixed` = trong ngân sách có review đã kết luận ở ≥ 2 head (đã có
-    một lần sửa được rà); chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131)."""
+    một lần sửa được rà); chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131).
+    `capped` = PR đã hết trần `max_rethink` (ADR-0061, không phải PR cắt bản): thay `rethink` bằng `split-or-close`."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
+    split = (
+        f"tách PR #{n} thành PR nhỏ hơn (mỗi lát một PR, ≤ 150 dòng) hoặc đóng, ghi sổ phần đã học"
+        f" ({AUDIT_STATUS_DEFAULT} / DECISIONS.md): xt.py loop decide --question 'PR #{n}: tách hay đóng?' — không"
+        " `pr rethink` nữa (max_rethink, ADR-0061)"
+    )
     if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and (unsure or identity or fixed):
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
+        if capped and (unsure or identity):
+            return act(
+                "split-or-close",
+                f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}) và đã hết trần `pr rethink` (max_rethink —"
+                " ADR-0061): mỗi lượt sửa lại mở việc mới, không mở thêm lượt",
+                split,
+            )
         if unsure or identity or d.get("release"):
             why = (
                 "review chưa sạch cuối chưa kết luận — chưa biết còn 🔴, không ghi nợ được (ADR-0029/0059)"
@@ -11131,14 +11196,18 @@ def _pr_next_review(
                 f"xt.py loop decide --question 'PR #{n}: …' (review khác, tách/thu hẹp PR) → xt.py pr rethink --pr {n}"
                 " --decision D-NNN",
             )
+        more = (
+            f"Còn 🔴: không ghi nợ — hết trần rethink: {split}"
+            if capped
+            else f"Còn 🔴: không ghi nợ — thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢): xt.py loop decide --question"
+            f" 'PR #{n}: …' → xt.py pr rethink --pr {n} --decision D-NNN"
+        )
         return act(
             "debt",
             f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: review 2 lần, sửa 1 lần — ADR-0059) — không sửa nữa,"
             " ghi nợ phát hiện còn lại rồi tiếp tục; nợ sửa cuối pha",
             f"mỗi phát hiện 🟠/🟢 còn lại → một dòng `mở` ở {AUDIT_STATUS_DEFAULT} có `{REVIEW_DEBT_TAG} #{n}` ở Ghi chú;"
-            f" commit chỉ sổ, push → xt.py pr debt --pr {n} --findings AUD-…[,AUD-…]. Còn 🔴: không ghi nợ — thêm một"
-            f" lần sửa, sửa HẾT phát hiện (cả 🟠/🟢): xt.py loop decide --question 'PR #{n}: …' → xt.py pr rethink --pr"
-            f" {n} --decision D-NNN",
+            f" commit chỉ sổ, push → xt.py pr debt --pr {n} --findings AUD-…[,AUD-…]. {more}",
         )
     if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
@@ -11359,14 +11428,19 @@ def merge_eligibility(d: Dict[str, Any], reviews: List[Dict[str, Any]], standard
     }
 
 
-def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[str, Any]:
+def pr_next(
+    d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any], max_rethink: int = MAX_RETHINK_DEFAULT
+) -> Dict[str, Any]:
     """MỘT hành động kế tiếp cho PR theo "merge theo làn" (ADR-0024 → ADR-0025), hàm thuần.
 
-    `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR. Không gọi
-    GitHub: agent làm đúng `do`. Hành động: done · closed · disable-auto-merge · defer-human · retarget · update · fix ·
-    republish-review · review · debt (hết lượt review: ghi nợ — ADR-0059) · rethink (hết lượt mà review cuối chưa kết luận
-    hoặc có `review_identity` — ADR-0053; PR cắt bản — ADR-0059 §6) · merge (ghim head) · wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
+    `d` = quyết định `merge-check`, `auto_merge` = PR đang bật auto-merge của GitHub, `rec` = sổ review của PR,
+    `max_rethink` = trần `pr rethink` mỗi PR (xt.yaml; 0 = không trần). Không gọi GitHub: agent làm đúng `do`. Hành động:
+    done · closed · disable-auto-merge · defer-human · retarget · update · fix · republish-review · review · debt (hết lượt
+    review: ghi nợ — ADR-0059) · rethink (hết lượt mà review cuối chưa kết luận hoặc có `review_identity` — ADR-0053; PR cắt
+    bản — ADR-0059 §6) · split-or-close (như `rethink` nhưng PR đã hết trần `max_rethink` — ADR-0061) · merge (ghim head) ·
+    wait. Máy không bật auto-merge của GitHub (ADR-0036)."""
     n, head = d.get("pr", ""), str(d.get("head", ""))
+    capped = 0 < max_rethink <= rethink_count(rec.get("rethinks")) and not d.get("release")
     reviews = [r for r in rec.get("reviews", []) if isinstance(r, dict)]
     # Từng vào làn chuẩn hoặc từng có review báo lỗi chặn → chỉ merge khi review sạch ở head, bất kể làn hiện tại (bước 3).
     gate = review_gate(d, reviews, bool(rec.get("standard_seen")))
@@ -11408,7 +11482,7 @@ def pr_next(d: Dict[str, Any], auto_merge: bool, rec: Dict[str, Any]) -> Dict[st
                 "sửa hết phát hiện của review cuối, push, chạy lại pr next",
             )
         else:
-            early = _pr_next_review(d, auto_merge, gate, act, disable, len(window), unsure, identity, fixed)
+            early = _pr_next_review(d, auto_merge, gate, act, disable, len(window), unsure, identity, fixed, capped)
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -11661,7 +11735,8 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, data, rec = _pr_next_state(pr, base)
-    key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec)["action"]
+    cap = pr_rethink_cap(base, pr)
+    key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec, cap)["action"]
     if action not in ("debt", "rethink"):  # ADR-0059: hết lượt → `debt` (còn 🔴 thì thêm lần sửa ở đây) hoặc `rethink`
         print(
             f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt`/`rethink` — làm bước đó trước", file=sys.stderr
@@ -11670,6 +11745,15 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     local = _pr_record(data, key)
     old = local.get("rethinks")
     rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
+    # PR cắt bản miễn (ADR-0059 §6)
+    if 0 < cap <= len(rethinks) and not d.get("release"):
+        print(
+            f"✗ PR #{key} đã dùng {len(rethinks)}/{cap} lần `pr rethink` (xt.yaml {MAX_RETHINK_KEY}, ADR-0061) — tách PR"
+            " nhỏ hơn hoặc đóng, ghi sổ phần đã học; không mở thêm lượt",
+            file=sys.stderr,
+        )
+        return 2
     problem = _rethink_problem(base, args.decision, key, rec, rethinks)
     if problem:
         print(f"✗ {problem}", file=sys.stderr)
@@ -11720,7 +11804,13 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
 
 
 def _debt_problem(
-    base: Path, key: str, head: str, rec: Dict[str, Any], ids: List[str], target: str = "main"
+    base: Path,
+    key: str,
+    head: str,
+    rec: Dict[str, Any],
+    ids: List[str],
+    target: str = "main",
+    capped: bool = False,
 ) -> Optional[str]:
     """Lý do `pr debt` từ chối (ADR-0059): sửa 1 lần — cây ở head khác cây ở review chưa sạch cuối CHỈ ở sổ audit, hoặc ở
     file mà head giống hệt nhánh đích `origin/<target>` (cập nhật nhánh); so cây, không đổi tên (`--no-renames`) — merge
@@ -11748,9 +11838,12 @@ def _debt_problem(
                 f" GitHub cập nhật rồi chạy lại), Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
             )
         if r.get("Mức") == "🔴":
-            return (
-                f"{i} là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide"
-                f" --question 'PR #{key}: …' → xt.py pr rethink --pr {key} --decision D-NNN"
+            return f"{i} là 🔴 — không ghi nợ: " + (
+                f"đã hết trần `pr rethink` ({MAX_RETHINK_KEY}, ADR-0061) — tách PR #{key} nhỏ hơn hoặc đóng, ghi sổ phần"
+                " đã học"
+                if capped
+                else f"thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide --question 'PR #{key}: …' →"
+                f" xt.py pr rethink --pr {key} --decision D-NNN"
             )
     return None
 
@@ -11770,11 +11863,13 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     reviews = _ledger_reviews(local)
     again = bool(reviews) and reviews[-1].get("head") == head and reviews[-1].get("debt") == ids
     if not again:
-        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec)["action"]
+        cap = pr_rethink_cap(base, pr)
+        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec, cap)["action"]
+        capped = 0 < cap <= rethink_count(rec.get("rethinks")) and not d.get("release")
         problem = (
             f"`pr next` của PR #{key} là `{action}`, không phải `debt` — làm bước đó trước"
             if action != "debt"
-            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"))
+            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"), capped)
         )
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
@@ -11957,7 +12052,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     )
     if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
         rec = {**rec, "standard_seen": True}
-    out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec), "applied": False}
+    out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr)), "applied": False}
     why_not = steward_untrusted(pr)
     if why_not and out["action"] not in ("done", "closed", "disable-auto-merge"):
         return {**out, "action": "defer-human", "why": why_not}
@@ -12422,7 +12517,7 @@ def cmd_pr(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, _, rec = _pr_next_state(pr, base)
-    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec)
+    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr))
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0
@@ -12827,7 +12922,7 @@ def _bench_review(inp: Dict[str, Any], env: BenchEnv) -> Dict[str, Any]:
     reviews = [r for r in rec["reviews"] if isinstance(r, dict)]
     d = inp["decision"]
     elig = merge_eligibility(d, reviews, rec["standard_seen"])
-    nxt = pr_next(d, bool(inp.get("auto_merge")), rec)
+    nxt = pr_next(d, bool(inp.get("auto_merge")), rec, int(inp.get("max_rethink", MAX_RETHINK_DEFAULT)))
     return {
         "eligible": elig["eligible"],
         "auto_merge_ok": elig["auto_merge_ok"],

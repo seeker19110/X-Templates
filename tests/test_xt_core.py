@@ -1477,7 +1477,11 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertIsNone(rows[2]["signature"])
         self.assertEqual(len(rows[0]["signature"]), 16)
         s = xt.loop_stats(self.base)
+        ttg = s["tasks"]["T-001"].pop("time_to_green_hours")  # chạy thật trong test: vài giây → ≥ 0, không ghim số
+        self.assertTrue(0 <= ttg < 1, ttg)
         self.assertEqual(s["tasks"]["T-001"], {"runs": 3, "failed": 2, "runs_to_green": 3, "executors": []})
+        self.assertIsNone(s["tasks"]["T-003"]["time_to_green_hours"])  # chưa xanh
+        self.assertIsNotNone(s["time_to_green_hours"]["median"])
         self.assertEqual((s["escalated"], s["escalation_rate"]), ([], 0.0))
         self.assertEqual((s["task_count"], s["runs"], s["failed_runs"]), (3, 5, 3))
         self.assertEqual(s["first_pass_rate"], 0.333)
@@ -1497,6 +1501,53 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         with redirect_stdout(out):
             xt._loop_stats(argparse.Namespace(json=False, all=False), empty)
         self.assertIn("Giao việc: — (0/0) · xanh lần đầu: giao — · tự làm —", out.getvalue())
+        self.assertIn("Thời gian tới xanh (giờ): chưa đo", out.getvalue())
+        self.assertEqual(e["time_to_green_hours"], {"median": None, "p95": None})
+
+    def test_time_to_green_hours(self):
+        """ADR-0061 / LOOP-DESIGN-024: `time_to_green_hours` mỗi task = `started` lần chạy đầu → `finished` lần xanh
+        đầu (không phải lần xanh sau); thiếu thời điểm, không đọc được hay kết thúc trước bắt đầu → None; tổng hợp trung
+        vị/P95 chỉ trên task có số; in ở bảng chữ."""
+        st = xt.read_state(self.base)
+        st["started"] = "2026-11-01T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        rows = [
+            ("T-001", 1, "2026-11-01T01:00:00+00:00", "2026-11-01T01:10:00+00:00"),
+            ("T-001", 0, "2026-11-01T02:00:00+00:00", "2026-11-01T03:30:00+00:00"),  # 2,5 h kể từ lần đầu
+            ("T-001", 0, "2026-11-01T09:00:00+00:00", "2026-11-01T09:05:00+00:00"),  # xanh lại: không đếm
+            ("T-002", 0, "2026-11-01T00:00:00Z", "2026-11-01T00:30:00Z"),  # 0,5 h; dạng Z
+            ("T-003", 0, "", "2026-11-01T00:30:00+00:00"),  # thiếu started → None
+            ("T-004", 0, "2026-11-01T05:00:00+00:00", "2026-11-01T04:00:00+00:00"),  # kết thúc trước bắt đầu → None
+            ("T-005", 1, "2026-11-01T05:00:00+00:00", "2026-11-01T06:00:00+00:00"),  # chưa xanh → None
+            ("T-006", 0, "hỏng", "2026-11-01T06:00:00+00:00"),  # không đọc được → None
+        ]
+        (self.base / ".autopilot").mkdir(exist_ok=True)
+        with open(self.base / ".autopilot" / xt.RUNS_FILE, "w", encoding="utf-8") as fh:
+            for task, code, started, finished in rows:
+                fh.write(
+                    json.dumps(
+                        {
+                            "task": task,
+                            "exit_code": code,
+                            "started": started,
+                            "finished": finished,
+                            "loop": st["started"],
+                        }
+                    )
+                    + "\n"
+                )
+        s = xt.loop_stats(self.base)
+        got = {k: t["time_to_green_hours"] for k, t in s["tasks"].items()}
+        self.assertEqual(got, {"T-001": 2.5, "T-002": 0.5, "T-003": None, "T-004": None, "T-005": None, "T-006": None})
+        self.assertEqual(s["time_to_green_hours"], {"median": 1.5, "p95": 2.5})
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(xt.main(["loop", "stats"]), 0)
+        self.assertIn("Thời gian tới xanh (giờ): trung vị 1.5 · P95 2.5 (ADR-0061)", out.getvalue())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(xt.main(["loop", "stats", "--json"]), 0)
+        self.assertEqual(json.loads(out.getvalue())["time_to_green_hours"], {"median": 1.5, "p95": 2.5})
 
     def test_delegation_groups_by_first_run(self):
         """LOOP-ORCH-020 (review #253): nhóm giao/tự làm theo executor của LẦN CHẠY ĐẦU — task tự làm đỏ rồi chuyển cấp

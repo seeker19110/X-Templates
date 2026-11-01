@@ -1039,6 +1039,133 @@
     "action": "rethink"
    },
    "note": "PR cắt bản (đổi VERSION) hết lượt review: không ghi nợ — tag gắn lúc merge sẽ phát hành mang nợ; rethink, sửa hết (D-259)"
+  },
+  {
+   "id": "review-adr0061-rethink-cap-split-or-close",
+   "origin": "control",
+   "refs": [
+    "ADR-0061"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     },
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "inconclusive": true,
+      "at": "2026-10-27T13:00:00+00:00"
+     }
+    ],
+    "rethinks": [
+     {
+      "decision": "D-001",
+      "at": "2026-10-27T12:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "split-or-close"
+   },
+   "note": "Đã dùng 1/1 lượt rethink (max_rethink mặc định), sau lần sửa thêm review vẫn chưa kết luận → không mở lượt nữa: tách PR nhỏ hơn hoặc đóng (ADR-0061, bài học #372)"
+  },
+  {
+   "id": "review-adr0061-rethink-cap-off",
+   "origin": "control",
+   "refs": [
+    "ADR-0061"
+   ],
+   "input": {
+    "max_rethink": 0,
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     },
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "inconclusive": true,
+      "at": "2026-10-27T13:00:00+00:00"
+     }
+    ],
+    "rethinks": [
+     {
+      "decision": "D-001",
+      "at": "2026-10-27T12:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "rethink"
+   },
+   "note": "max_rethink: 0 = không trần (đường lùi ADR-0061): hành vi ADR-0053/0059 như cũ"
+  },
+  {
+   "id": "review-adr0061-rethink-cap-release-exempt",
+   "origin": "control",
+   "refs": [
+    "ADR-0061",
+    "ADR-0059"
+   ],
+   "input": {
+    "decision": {
+     "release": true
+    },
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-10-27T10:00:00+00:00"
+     },
+     {
+      "head": "3333333333333333333333333333333333333333",
+      "clean": false,
+      "at": "2026-10-27T11:00:00+00:00"
+     },
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "at": "2026-10-27T13:00:00+00:00"
+     }
+    ],
+    "rethinks": [
+     {
+      "decision": "D-001",
+      "at": "2026-10-27T12:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "blocking",
+    "action": "rethink"
+   },
+   "note": "PR cắt bản miễn trần rethink: rà tới sạch, mỗi lượt một D-NNN (ADR-0059 §6, giữ ở ADR-0061)"
   }
  ]
 }
