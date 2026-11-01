@@ -3511,6 +3511,22 @@ class PromptAssetsScanTest(TmpDirCase):
             ],
         )
 
+    def test_framework_harness_settings_deny_list_not_flagged(self):
+        """Review #387 🔴: `permissions.deny`/`ask` của `.claude/settings*.json` là danh sách lệnh bị CẤM (khung chép vào
+        mọi dự án đích) — không phải chỉ dẫn chạy; bật cổng với `[]` phải xanh. Mục `allow` nguy hiểm vẫn bị báo."""
+        real = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.write(".claude/settings.json", json.dumps(real, indent=2))
+        self.write("prompt-assets-exempt.json", "[]")
+        self.assertEqual(xt.prompt_assets_scan([".claude"], exempt="prompt-assets-exempt.json"), ([], []))
+        bad = {"permissions": {"allow": ["Bash(git push --force *)"], "deny": ["Bash(rm -rf ~*)"]}}
+        self.write(".claude/settings.local.json", json.dumps(bad, indent=2))
+        found, _ = xt.prompt_assets_scan([".claude"])
+        self.assertEqual([(f["path"], f["rule"]) for f in found], [(".claude/settings.local.json", "danger")])
+        self.write(".claude/settings.json", "{không phải json\ngit push --force\n")  # JSON hỏng: quét nguyên văn
+        self.assertIn("danger", self.rules(".claude/settings.json"))
+        self.write(".claude/settings.json", '["git push --force"]')  # không có `permissions` dạng object: nguyên văn
+        self.assertIn("danger", self.rules(".claude/settings.json"))
+
     def test_leak_only_under_vendor_and_skill_dirs(self):
         self.write("vendor/x/notes.md", "You are Claude Code, an assistant")
         self.write("prompts/system_prompt.txt", "hello")

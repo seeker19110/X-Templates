@@ -9262,7 +9262,26 @@ def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
-    return out + _pa_line_findings(rel, text, injection)
+    return out + _pa_line_findings(rel, _pa_without_deny(path, text), injection)
+
+
+PA_SETTINGS_RE = re.compile(r"settings(\.local)?\.json")
+
+
+def _pa_without_deny(path: Path, text: str) -> str:
+    """`settings*.json` của harness: bỏ `permissions.deny`/`ask` — danh sách lệnh bị CẤM mà khung chép vào mọi dự án đích,
+    không phải chỉ dẫn chạy (review #387); phần còn lại (cả `allow`) vẫn quét. JSON hỏng → quét nguyên văn (chiều chặt)."""
+    if not PA_SETTINGS_RE.fullmatch(path.name):
+        return text
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    perms = data.get("permissions") if isinstance(data, dict) else None
+    if not isinstance(perms, dict):
+        return text
+    data["permissions"] = {k: v for k, v in perms.items() if k not in ("deny", "ask")}
+    return json.dumps(data, indent=1, ensure_ascii=False)
 
 
 def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
