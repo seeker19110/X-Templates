@@ -972,6 +972,19 @@ GITIGNORE_LINES = (
     ".autopilot/",
     ".claude/settings.local.json",
 )  # trạng thái autopilot; quyền/đường dẫn máy cá nhân (LOOP-HARNESS-032)
+# Dòng tương đương đã có thì không thêm (cùng tập với `AUTOPILOT_IGNORES`/`SETTINGS_LOCAL_IGNORES` của xt.py — review #381)
+GITIGNORE_EQUIV = {
+    ".autopilot/": (".autopilot/", ".autopilot", "/.autopilot/", "/.autopilot"),
+    ".claude/settings.local.json": (
+        ".claude/settings.local.json",
+        "/.claude/settings.local.json",
+        "**/.claude/settings.local.json",
+        "settings.local.json",
+        "**/settings.local.json",
+        ".claude/*.local.json",
+        "*.local.json",
+    ),
+}
 
 
 def ensure_gitignore(target: Path) -> None:
@@ -981,7 +994,8 @@ def ensure_gitignore(target: Path) -> None:
         log(f"  ⚠ bỏ qua symlink {gi} — tự thêm dòng `{'`, `'.join(GITIGNORE_LINES)}` vào file thật")
         return
     if gi.exists():
-        missing = [ln for ln in GITIGNORE_LINES if ln not in gi.read_text(encoding="utf-8").splitlines()]
+        have = {ln.strip() for ln in gi.read_text(encoding="utf-8").splitlines()}
+        missing = [ln for ln in GITIGNORE_LINES if not have & set(GITIGNORE_EQUIV[ln])]
         if missing:
             with gi.open("a", encoding="utf-8") as fh:
                 fh.write(

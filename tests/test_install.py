@@ -839,6 +839,14 @@ class InstallEdgeTest(unittest.TestCase):
         _, err = self.install_quiet()
         self.assertIn("thêm .claude/settings.local.json", err)
         self.assertEqual(gi.read_text(encoding="utf-8").count(".autopilot/"), 1)
+        # review #381: dòng tương đương (có `/` đầu, glob, khoảng trắng cuối) → không nối dòng trùng nghĩa
+        for same in ("/.autopilot\n**/.claude/settings.local.json  \n", ".autopilot \n*.local.json\n"):
+            with self.subTest(same=same):
+                gi.write_text(same, encoding="utf-8")
+                self.install_quiet()
+                self.assertEqual(gi.read_text(encoding="utf-8"), same)
+        self.assertEqual(set(install.GITIGNORE_EQUIV[".claude/settings.local.json"]), set(xt.SETTINGS_LOCAL_IGNORES))
+        self.assertEqual(set(install.GITIGNORE_EQUIV[".autopilot/"]), set(xt.AUTOPILOT_IGNORES))
 
     def test_minimal_framework_without_research_templates_or_version(self):
         with mock.patch.object(install, "SRC", make_fake_src(self.tmp)):

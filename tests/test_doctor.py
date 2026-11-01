@@ -787,6 +787,23 @@ class DoctorOrchestrationTest(DoctorCase):
         self.assertEqual(self.orch(), [])  # fail-open
         self.write(".claude/settings.local.json", json.dumps({"enableAllProjectMcpServers": "true", "model": " "}))
         self.assertEqual(self.orch(), [])  # chỉ `true` boolean và `model` có chữ mới tính
+        # review #381: alias Claude Code `best`/`default`/`opusplan` không bị cảnh báo oan
+        for model in ("best", "Default", "opusplan"):
+            with self.subTest(model=model):
+                self.write(".claude/settings.json", json.dumps({"model": model}))
+                self.assertEqual(self.orch(), [])
+        # dòng gitignore tương đương (glob, `/` đầu, khoảng trắng cuối) cũng chặn
+        for line in ("/.claude/settings.local.json", "**/settings.local.json  ", "*.local.json"):
+            with self.subTest(line=line):
+                gi.write_text(line + "\n", encoding="utf-8")
+                self.write(".claude/settings.local.json", "{}")
+                self.assertEqual(self.orch(), [])
+        # đã bị git track → cảnh báo dù .gitignore có dòng (XT-H-021: file đã commit)
+        git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "add", "-f", ".claude/settings.local.json"], check=True, capture_output=True)
+        [f] = self.orch()
+        self.assertIn("đang được git track", f.msg)
+        self.assertIn("git rm --cached", f.msg)
 
     def test_malformed_settings_env_fail_open(self):
         self.settings_env(".claude/settings.json", ["không phải object"])

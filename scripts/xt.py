@@ -5040,6 +5040,20 @@ def _doctor_orchestration(base: Path) -> List[Finding]:
 
 
 SETTINGS_LOCAL_REL = ".claude/settings.local.json"  # quyền/đường dẫn máy cá nhân — không commit (LOOP-HARNESS-032)
+# Dòng `.gitignore` tương đương (so sau `strip()`, như `AUTOPILOT_IGNORES`; install.py giữ cùng tập — review #381)
+SETTINGS_LOCAL_IGNORES = (
+    ".claude/settings.local.json",
+    "/.claude/settings.local.json",
+    "**/.claude/settings.local.json",
+    "settings.local.json",
+    "**/settings.local.json",
+    ".claude/*.local.json",
+    "*.local.json",
+)
+MODEL_ALIASES_OK = (
+    "best",
+    "default",
+)  # alias Claude Code không mang họ: `best` = bậc cao nhất có, `default` = xoá ghi đè
 MCP_ALL_KEY = "enableAllProjectMcpServers"
 
 
@@ -5060,7 +5074,8 @@ def _doctor_harness_settings(base: Path) -> List[Finding]:
                 )
             )
         model = data.get("model")
-        if isinstance(model, str) and model.strip() and model_family(model) not in MODEL_TIER:
+        alias = isinstance(model, str) and model.strip().lower() in MODEL_ALIASES_OK
+        if isinstance(model, str) and model.strip() and not alias and model_family(model) not in MODEL_TIER:
             out.append(
                 Finding(
                     "orchestration",
@@ -5069,15 +5084,31 @@ def _doctor_harness_settings(base: Path) -> List[Finding]:
                     " của khung (LOOP-HARNESS-032, LOOP-ORCH-019)",
                 )
             )
-    if (base / SETTINGS_LOCAL_REL).is_file() and SETTINGS_LOCAL_REL not in _read_text_or_empty(
-        base / ".gitignore"
-    ).splitlines():
+    return out + _doctor_settings_local(base)
+
+
+def _doctor_settings_local(base: Path) -> List[Finding]:
+    """`.claude/settings.local.json` có mà `.gitignore` không chặn (dòng tương đương nào cũng được), hoặc đã bị track
+    (dòng gitignore không gỡ track — ca XT-H-021). Không có git → chỉ kiểm dòng (fail-open)."""
+    out: List[Finding] = []
+    lines = {ln.strip() for ln in _read_text_or_empty(base / ".gitignore").splitlines()}
+    if (base / SETTINGS_LOCAL_REL).is_file() and not lines & set(SETTINGS_LOCAL_IGNORES):
         out.append(
             Finding(
                 "orchestration",
                 "warn",
                 f"{SETTINGS_LOCAL_REL} có mà `.gitignore` không chặn — file chứa quyền/đường dẫn máy cá nhân; chạy lại"
                 " install.py hoặc thêm dòng (LOOP-HARNESS-032)",
+            )
+        )
+    tracked = _git(base, "ls-files", "--", SETTINGS_LOCAL_REL)
+    if tracked.returncode == 0 and tracked.stdout.strip():
+        out.append(
+            Finding(
+                "orchestration",
+                "warn",
+                f"{SETTINGS_LOCAL_REL} đang được git track — dòng .gitignore không gỡ track: `git rm --cached` rồi xoay"
+                " quyền/đường dẫn đã lộ trong lịch sử (LOOP-HARNESS-032)",
             )
         )
     return out
