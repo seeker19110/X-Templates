@@ -3214,7 +3214,7 @@ class PrTitleCheckTest(TmpDirCase):
         ci = (ROOT / ".github" / "workflows" / "pr-title.yml").read_text(encoding="utf-8")
         step = ci.split("Tiêu đề PR theo Conventional Commits", 1)[1].split("\n      - name:", 1)[0]
         self.assertEqual(re.search(r"grep -Eq '([^']+)'", step).group(1), f"^{xt.PR_TITLE_RE.pattern}$")
-        self.assertIn(f'[ "${{#TITLE}}" -le {xt.PR_TITLE_MAX} ]', step)
+        self.assertRegex(step, rf'\[ "\$\{{#TITLE\}}" -(le|gt) {xt.PR_TITLE_MAX} \]')
 
     def test_title_check_valid_titles(self):
         for title in ("feat(xt): pr title-check", "fix: a", "ci(ci.yml/x-1)!: đổi", "docs: " + "é" * 94):

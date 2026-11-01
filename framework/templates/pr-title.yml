@@ -28,6 +28,7 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
+          LC_ALL: C.UTF-8 # `${#TITLE}` đếm ký tự, không phải byte (tiêu đề tiếng Việt)
         run: |
           if grep -Eq "^pr_title_check:[[:space:]]*[\"']?off" xt.yaml 2>/dev/null || [[ "$AUTHOR" == *"[bot]" ]] || [[ "$TITLE" == 'Revert "'* ]]; then
             echo "Bỏ qua kiểm tiêu đề (pr_title_check: off / bot / revert)."; exit 0
