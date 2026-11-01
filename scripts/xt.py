@@ -5980,7 +5980,7 @@ def review_deferrable(d: Dict[str, Any]) -> bool:
     """Review của PR được hoãn thành nợ (ADR-0031, ADR-0037): pha build VÀ PR không rủi ro cao (ADR-0062, D-295 — thay
     D-124 "reviewer chỉ chạy ở harden"): ngoại lệ cứng (kể cả đã miễn `hard_waived`, ADR-0020) hay schema/migration →
     review độc lập bắt buộc ở mọi pha; rủi ro trung bình hoãn thành nợ, trả ở harden (`release-check` hàng `review_debt`)."""
-    return d.get(PHASE_KEY) == "build" and not d.get("hard") and not d.get("high_risk")
+    return d.get(PHASE_KEY) == "build" and not (d.get("hard") or d.get("hard_waived") or d.get("high_risk"))
 
 
 def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:

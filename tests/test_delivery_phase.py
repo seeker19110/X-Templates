@@ -128,10 +128,10 @@ class DeliveryPhaseMergeTest(unittest.TestCase):
             (bool(hard["hard"]), hard["review_deferred"], hard["eligible"], hard["auto_merge_ok"]),
             (True, False, False, False),
         )
-        # auto (ADR-0020): máy merge được; pha build hoãn review thành nợ cả với ngoại lệ cứng đã miễn (ADR-0037, D-124)
+        # auto (ADR-0020): máy merge được; ngoại lệ cứng đã miễn là rủi ro cao — pha build KHÔNG hoãn review (ADR-0062)
         waived = self.result(AUTH, "build", hard_auto=True)
-        self.assertEqual((waived["hard"], bool(waived["hard_waived"]), waived["verdict"]), ([], True, "merge"))
-        self.assertEqual((waived["review"], waived["review_deferred"], waived["eligible"]), ("deferred", True, True))
+        self.assertEqual((waived["hard"], bool(waived["hard_waived"]), waived["verdict"]), ([], True, "review"))
+        self.assertEqual((waived["review"], waived["review_deferred"], waived["eligible"]), ("missing", False, False))
         harden = self.result(AUTH, "harden", hard_auto=True)  # harden: lại cần review sạch
         self.assertEqual((harden["review"], harden["eligible"], harden["verdict"]), ("missing", False, "review"))
         ok = self.result(AUTH, "build", hard_auto=True, xtReviews=[mark(True)])
@@ -214,7 +214,11 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         self.assertTrue(r["why"].startswith("review sạch ở head — merge-check = merge — merge ghim head"))
 
     def test_delivery_phase_build_pr_next_hard_and_blocking(self):
-        r = xt.pr_next(self.d(hard_waived=["auth"]), False, {})  # ngoại lệ cứng đã miễn: pha build ghi nợ (ADR-0037)
+        r = xt.pr_next(
+            self.d(hard_waived=["auth"]), False, {}
+        )  # ngoại lệ cứng đã miễn = rủi ro cao: đòi review (ADR-0062)
+        self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
+        r = xt.pr_next(self.d(), False, {})  # rủi ro trung bình: pha build vẫn hoãn thành nợ (ADR-0037)
         self.assertEqual((r["action"], r["review_deferred"]), ("merge", True))
         r = xt.pr_next(self.d(hard_waived=["auth"], delivery_phase="harden"), False, {})  # harden: đòi review
         self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
@@ -223,12 +227,12 @@ class DeliveryPhasePrNextTest(unittest.TestCase):
         r = xt.pr_next(self.d(), True, {"reviews": [mark(False, self.H)]})  # lỗi chặn ở head: tắt auto-merge trước
         self.assertEqual((r["action"], r["review_deferred"]), ("disable-auto-merge", False))
         r = xt.pr_next(self.d(), False, {"reviews": [mark(False, self.H)]})
-        self.assertEqual(r["action"], "fix")
+        self.assertEqual(r["action"], "debt")  # review 1 lần (ADR-0062): 🔴 sửa + `--fixed`, 🟠/🟢 ghi nợ
 
     def test_delivery_phase_blocking_washed_pr_next_asks_review(self):
-        old = [mark(False, "b" * 40)]  # lỗi chặn ở head cũ: sau push cần review lại head hiện tại, không merge
+        old = [mark(False, "b" * 40)]  # lỗi chặn ở head cũ không bị "rửa" bằng push: không hoãn, không merge
         r = xt.pr_next(self.d(), False, {"reviews": old})
-        self.assertEqual((r["action"], r["review_deferred"]), ("review", False))
+        self.assertEqual((r["action"], r["review_deferred"]), ("debt", False))  # review 1 lần (ADR-0062)
         r = xt.pr_next(self.d(), True, {"reviews": old})
         self.assertEqual(r["action"], "disable-auto-merge")
         r = xt.pr_next(self.d(risk_labels=["risk:perf"]), False, {})  # pha build: risk: thành nợ (ADR-0037)
