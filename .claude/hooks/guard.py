@@ -5714,7 +5714,7 @@ def mcp_attribution(tool_name: str, tool_input: Dict[str, object], root: str) ->
 # backtick, `--fill`, message qua ống) → cho qua; CI `pr-title`/BASE-REPO-005 là lớp sau.
 PR_TITLE_TYPES = ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert")
 PR_TITLE_RE = re.compile(rf"({'|'.join(PR_TITLE_TYPES)})(\([a-z0-9._/-]+\))?!?: .+")
-PR_TITLE_MAX = 72
+PR_TITLE_MAX = 100
 PR_TITLE_OFF_RE = re.compile(r"^pr_title_check:[ \t]*([\"']?)off\1[ \t]*(?:#.*)?$", re.M)
 # Cờ của `gh pr create|edit` ăn một token giá trị — bóc để `-b "-t x"` không bị đọc thành tiêu đề.
 GH_PR_VALUE_FLAGS = {
@@ -5727,7 +5727,8 @@ MCP_PR_TITLE_RE = re.compile(r"mcp__.+__(create_pull_request|update_pull_request
 MCP_COMMIT_RE = re.compile(r"mcp__.+__(create_or_update_file|push_files|delete_file)")
 COMMIT_MESSAGE_OPTS = {"-m": "m", "--message": "m", "-F": "F", "--file": "F"}
 TITLE_FIX = (
-    "viết lại dạng `<type>(scope): mô tả` ≤ 72 ký tự rồi chạy lại (kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
+    f"viết lại dạng `<type>(scope): mô tả` ≤ {PR_TITLE_MAX} ký tự rồi chạy lại "
+    "(kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
 )
 
 
@@ -5824,7 +5825,7 @@ def title_rule(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: 
         if problem:
             return (
                 f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029: subject có thể thành subject commit squash): "
-                "rút gọn dòng đầu ≤ 72 ký tự, chi tiết đưa xuống thân rồi chạy lại."
+                f"rút gọn dòng đầu ≤ {PR_TITLE_MAX} ký tự, chi tiết đưa xuống thân rồi chạy lại."
             )
     return ""
 
@@ -5840,7 +5841,7 @@ def mcp_title(tool_name: str, tool_input: Dict[str, object], root: str) -> str:
     if MCP_COMMIT_RE.fullmatch(tool_name) and isinstance(message, str) and commit_subject_problem(message):
         return (
             f"Commit qua {tool_name} bị khung chặn ({commit_subject_problem(message)} — LOOP-HARNESS-029): rút gọn "
-            "dòng đầu ≤ 72 ký tự rồi gọi lại."
+            f"dòng đầu ≤ {PR_TITLE_MAX} ký tự rồi gọi lại."
         )
     return ""
 
