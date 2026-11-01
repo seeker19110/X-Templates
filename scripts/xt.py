@@ -37,13 +37,13 @@ Lệnh:
   pr reviewed --pr N --head SHA (--clean|--blocking) --reviewer-model M --author-model M
               [--reviewer-effort E --author-effort E]
                                 Ghi kết quả review ở commit đã rà vào .autopilot/reviews.json (ADR-0025).
-  pr debt [--pr N] --findings AUD-…[,AUD-…]
-                                PR hết lượt review (`pr next` = debt — review 2 lần, sửa 1 lần): phát hiện còn lại đã ghi
-                                `mở` + `nợ-review: #N` ở sổ audit, sau review cuối chỉ sổ đổi → review `debt` ở head, đăng
-                                dấu; nợ làm `audit check --strict` đỏ tới khi trả cuối pha (ADR-0059).
+  pr debt [--pr N] [--findings AUD-…[,AUD-…]] [--fixed AUD-…]
+                                Sau một review đã kết luận (`pr next` = debt — review 1 lần, ADR-0062): 🟠/🟢 ghi `mở` +
+                                `nợ-review: #N` ở sổ (--findings); 🔴 sửa trong một commit kèm test, ghi `đã sửa` (--fixed);
+                                → review `debt` ở head, đăng dấu; nợ làm `audit check --strict` đỏ tới khi trả cuối pha.
   pr rethink [--pr N] --decision D-NNN
-                                PR hết lượt review (`pr next` = debt mà còn 🔴 — thêm một lần sửa hết; hoặc = rethink: review
-                                cuối chưa kết luận, `review_identity`): mở thêm một lần sửa theo D-NNN mới, câu hỏi nhắc #N, ghi sau
+                                `pr next` = rethink (PR cắt bản, `review_identity`, review cuối chưa kết luận sau lượt đã kết
+                                luận): mở thêm một lần sửa theo D-NNN mới, câu hỏi nhắc #N, ghi sau
                                 review chưa sạch cuối (ADR-0053/0059, D-210); tối đa `max_rethink` lần/PR (mức chặt hơn
                                 giữa cây và nhánh đích; PR cắt bản miễn) — hết trần `pr next` trả split-or-close (ADR-0061).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
@@ -11415,10 +11415,10 @@ def _pr_next_review(
     reopened: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
-    review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
+    review (ADR-0062: review 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
     luận (`unsure`: không biết còn 🔴 hay không — ADR-0029) hoặc dấu chỉ tính của danh tính reviewer (`identity`: tác giả
-    không đăng được dấu `debt`) hoặc PR cắt bản (`release`, ADR-0059 §6): `rethink` như ADR-0053. `fixed` = trong ngân sách có review đã kết luận ở ≥ 2 head (đã có
-    một lần sửa được rà); chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131).
+    không đăng được dấu `debt`) hoặc PR cắt bản (`release`, ADR-0059 §6): `rethink` như ADR-0053. `fixed` = trong ngân sách có ≥ `REVIEW_ROUNDS` head có review đã
+    kết luận; chưa thì sửa/rà tiếp như thường — `inconclusive` lượt đầu không đốt lần sửa (AUD-HAR-131).
     `capped` = PR đã hết trần `max_rethink` (ADR-0061, không phải PR cắt bản): thay `rethink` bằng `split-or-close`."""
     n, head, last = d.get("pr", ""), str(d.get("head", "")), gate["last"]
     split = (
@@ -14399,7 +14399,8 @@ def build_parser() -> argparse.ArgumentParser:
     ppr.set_defaults(fn=cmd_pr)
     prc = sub.add_parser(
         "release-check",
-        help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch → GO/NO-GO (ADR-0029)",
+        help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch, attack/perf,"
+        " cổng production migration_check/acceptance/rollback → GO/NO-GO (ADR-0029, ADR-0062)",
     )
     prc.add_argument("--blueprint", default="BLUEPRINT.md")
     prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")

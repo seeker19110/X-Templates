@@ -17,7 +17,7 @@ description: Chạy cổng chất lượng đầy đủ (build · typecheck · l
 5. Đối chiếu tiêu chí chấp nhận trong SPEC + mục blueprint liên quan (tick kèm bằng chứng).
 6. Nếu đổi schema: migration có phiên bản + đường lùi. Nếu đổi API: hợp đồng + CHANGELOG.
 7. Rà bảo mật nhanh: quyền kiểm ở server, không lộ dữ liệu, không nới cấu hình cổng.
-8. Sau khi mở PR: `xt.py pr next --pr <N>` quyết bước kế (CI, review khi máy đòi — `LOOP-STOP-022`, pha build hoãn review).
+8. Sau khi mở PR: `xt.py pr next --pr <N>` quyết bước kế (CI, review khi máy đòi — `LOOP-STOP-022`, pha build hoãn review trừ rủi ro cao — ADR-0062).
 
 ## Báo cáo xác thực (xuất nguyên dạng khi người dùng gọi `/gate`; trong autopilot chỉ cần exit code)
 ```

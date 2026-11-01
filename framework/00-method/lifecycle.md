@@ -40,7 +40,7 @@ updated: 2026-11-01
    — `attack`/`perf` của `xt.yaml`, ADR-0042; cổng production `migration_check`/`rollback`/`acceptance`, ADR-0062 → GO/NO-GO máy đọc;
    người ký `GO-NO-GO.md`). Chỉ G7 mới đòi E2E đầy đủ, kiểm tải, diễn tập rollback/khôi phục. Không phải hạ chuẩn:
    cùng tiêu chí cuối, khác **thời điểm** kiểm. Máy merge theo pha bằng khoá `delivery_phase: build|harden` của `xt.yaml`
-   — build hoãn review thành nợ, G7 đòi harden và hết nợ (ADR-0031 của repo khung). **Pha build (`/autopilot`, ADR-0046) dùng đầu
+   — build hoãn review thành nợ (trừ PR rủi ro cao — ADR-0062), G7 đòi harden và hết nợ (ADR-0031 của repo khung). **Pha build (`/autopilot`, ADR-0046) dùng đầu
    ra mức S cho G0–G4 ở mọi quy mô** (đọc repo, `compose` không tick, PLAN có Gate + Given/When/Then ngắn; `PROJECT.md`/SPEC
    riêng/research chỉ khi thêm phụ thuộc, dịch vụ, luật ngành hoặc nghiệp vụ không tầm thường); mỗi đợt xong (task xanh, MUST
    blueprint còn mở ghi số, không chặn) → audit delta → sửa/đợt kế, lặp tới khi **hết việc** (PLAN hết task, 0 MUST mở ngoài việc chờ người, 0 🔴/🟠) và audit toàn diện sạch, rồi đề xuất `/complete` (ADR-0047); phần đầy đủ theo quy mô thật (C4, hợp đồng API, threat model, SPEC đủ
