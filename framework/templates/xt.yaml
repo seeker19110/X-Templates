@@ -29,7 +29,7 @@ merge_risk_paths: ""          # glob thêm vào đường dẫn nhạy cảm (ng
 # human = người merge ngoại lệ cứng (ADR-0016). Dự án có tiền thật/dữ liệu người dùng thật: đặt human, hoặc ghi D-NNN/ADR
 # của dự án chấp nhận rủi ro khi giữ auto (LOOP-STOP-005). Thiếu khoá = human; PR đổi khoá luôn người merge
 merge_hard_exceptions: auto
-# delivery_phase: build = CI xanh là merge, không reviewer, review ghi nợ · harden (chỉ khi lên production) = review sạch ở head (ADR-0031/0037)
+# delivery_phase: build = CI xanh là merge, review ghi nợ (trừ rủi ro cao: auth/thanh toán/bí mật/migration — ADR-0062) · harden (chỉ khi lên production) = review sạch ở head (ADR-0031/0037)
 delivery_phase: build
 # max_rethink: 1              # trần `pr rethink` mỗi PR (ADR-0061): hết → `pr next` trả `split-or-close`; 0 = không trần; PR cắt bản miễn; lấy mức chặt hơn với nhánh đích
 # review_identity: ""         # chỉ dấu review của tài khoản này mở được merge (T-1508)

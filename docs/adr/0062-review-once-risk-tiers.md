@@ -5,7 +5,7 @@
   ro cao · [ON] Auto-merge PR rủi ro thấp khi đạt điều kiện · [ON] Audit tổng thể cuối mỗi giai đoạn · [ON] Chặn Production
   nếu chưa đạt quality gates — chỉ review 1 lần: lỗi nghiêm trọng thì sửa, lỗi cam và xanh thì ghi nợ cho merge"; phiên chính
   tự duyệt cách máy hoá theo tiêu chí chất lượng cuối, ADR-0008 — D-295)
-- **Trạng thái triển khai:** Đang triển khai — `scripts/xt.py`: `REVIEW_ROUNDS = 1`, `_pr_next_review` (`debt` sau một review
+- **Trạng thái triển khai:** Đã triển khai (#385 máy review 1 lần, #386 cổng production — khoá thật `migration_check`, thứ tự `acceptance` trước `rollback` từ PLAN-fix-2026-11-01) — bản mô tả lúc lập: `scripts/xt.py`: `REVIEW_ROUNDS = 1`, `_pr_next_review` (`debt` sau một review
   đã kết luận), `pr debt --fixed` (`_debt_problem`, `_debt_row_problem`), `merge_decision` khoá `high_risk`,
   `review_deferrable`; `release-check` hàng `migration`/`rollback`/`acceptance` (lát kế); tài liệu ở AGENTS.md (cả mẫu),
   `LOOP-STOP-022`, skill `/review`, `/complete`.
