@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng
@@ -51,6 +51,23 @@ updated: 2026-10-31
 | Điểm dừng bắt buộc về hành động | **Không tách** — phiên chính + người | Hành động không đảo ngược/đối ngoại |
 | Việc nhỏ (< 10 phút, vài file phiên chính đã đọc trong phiên — ngưỡng vận hành tự đặt) hoặc task mà SPEC đã là nội dung cuối (PLAN, SPEC, ADR, research note — `LOOP-ORCH-019`; giao chỉ là chép lại) | Làm trực tiếp; `loop record` **không** `--executor` (`"executor": null` trong `runs.jsonl`); báo cáo cuối lát liệt kê task tự làm kèm lý do | Chi phí giao việc (handoff + đọc lại repo) lớn hơn việc; handoff mất thông tin; là nhóm đo của `LOOP-ORCH-020` |
 
+### Cấu hình theo loại việc (topology — ADR-0061)
+
+Software Factory tự chọn cấu hình theo **độ độc lập của việc**, không cố định một agent hay luôn dùng đội subagent. Mặc
+định là `self`; PLAN ghi `(topo: …)` trong ngoặc của dòng task như `(exec: deep)`; `loop status --json` trả `topology` và
+`executor` (`null` khi `self`). Bốn hàng, chỉ tăng số agent khi số đo chứng minh (`LOOP-ORCH-020`):
+
+| `topo:` | Loại việc | Cấu hình | Gồm |
+|---|---|---|---|
+| `self` (mặc định) | Sửa lỗi, tính năng nhỏ, task mà SPEC đã là nội dung cuối | **Một** agent (phiên chính) sở hữu code và tích hợp; CI là cổng đầy đủ (ADR-0056); review theo làn của `pr next` | `loop record` không `--executor`; `researcher` chỉ khi đọc dài (`LOOP-ORCH-012`) |
+| `review` | Tính năng xuyên nhiều module; chạm bảo mật/kiến trúc/dữ liệu | Phiên chính viết; `reviewer-alt` rà **trước khi mở PR** (góc nhìn độc lập — `LOOP-ORCH-005`); không `executor` | Ghi `pr reviewed --head <SHA đã rà>` theo `/complete` bước 4 |
+| `parallel` | Nhiều module độc lập về file, hợp đồng giao diện đã chốt (`LOOP-ORCH-007`) | Phiên chính điều phối; mỗi module một `executor`/`executor-deep` (`exec:`), đợt ≤ 4 (`plan waves --max 4`; trần cứng 5 — `LOOP-ORCH-008`), worktree mỗi task (mô hình B) | `plan waves` xác nhận `files:` đôi một không giao; thiếu `files:` → task đứng riêng |
+| `audit` | Audit lớn, kiểm thử độc lập sau một pha | Một lượt: reviewer read-only theo cụm độc lập file (≤ 4 đồng thời) + xác minh đối kháng 🔴/🟠 bằng reviewer **khác** (`/audit` §3–4); sửa theo **batch** = PLAN có Gate, mỗi lát một PR | Không sửa trong lúc audit; kết quả là dữ liệu (`LOOP-ORCH-004`) |
+
+Chọn hàng: hỏi theo thứ tự — việc có tách được thành module **độc lập file** với hợp đồng đầu ra rõ không (`parallel`)? →
+có chạm bảo mật/kiến trúc/dữ liệu hay xuyên module (`review`)? → là audit/kiểm thử độc lập (`audit`)? → còn lại `self`.
+Tầng mặc định đỏ 2 lần vẫn chuyển cấp `executor-deep` (ADR-0029) ở mọi hàng.
+
 ### Mô hình nhánh khi song song
 
 | Mô hình | Cách làm | Dùng khi |
@@ -87,7 +104,7 @@ Thiếu `acceptance_criteria` → không giao.
 - [ ] `LOOP-ORCH-007` **MUST@L** Trước khi chạy song song, hợp đồng giao diện (OpenAPI/schema/type) đã commit và có test contract. → Kiểm: `API-CONTRACT.md` hoặc file schema trong `git log` trước commit đầu của nhánh song song. · Nguồn: [`../08-backend/api-design.md`](../08-backend/api-design.md)
 - [ ] `LOOP-ORCH-008` **MUST@L** Số subagent đồng thời ≤ 5 và mỗi subagent có `maxTurns`. → Kiểm: `.claude/agents/*.md` đều có `maxTurns:`; PLAN ghi số song song tối đa. · Nguồn: stored 23 §4.5
 - [ ] `LOOP-ORCH-009` **MUST** Hành động đối ngoại (push, publish, gửi thông báo) không giao cho subagent; chỉ phiên chính làm; guard chặn hành động không đảo ngược, không hỏi (ADR-0018). → Kiểm: prompt subagent không chứa lệnh push/publish; `pre-bash-guard.sh` chặn (không `ask`) ở phiên chính. · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
-- [ ] `LOOP-ORCH-010` **SHOULD** Dùng mô hình nhánh A (một nhánh, task = commit) mặc định; chỉ chuyển sang worktree (`isolation: worktree`) khi task độc lập file và cần ≥ 2 executor đồng thời. · Nguồn: stored 23 §4.5
+- [ ] `LOOP-ORCH-010` **SHOULD** Dùng mô hình nhánh A (một nhánh, task = commit) mặc định; chỉ chuyển sang worktree (`isolation: worktree`) khi task độc lập file và cần ≥ 2 executor đồng thời (`topo: parallel`, đợt ≤ 4 — ADR-0061). · Nguồn: stored 23 §4.5
 - [ ] `LOOP-ORCH-011` **SHOULD** Subagent trả báo cáo ≤ 25 dòng theo khuôn: đã làm · lệnh + exit code · còn treo · đề xuất; không trả transcript dài về phiên chính.
 - [ ] `LOOP-ORCH-012` **SHOULD** Việc đọc dài (tài liệu, log, repo lạ) giao `researcher` để giữ context phiên chính; phiên chính chỉ nhận tóm tắt có URL/đường dẫn. · Nguồn: [`context-and-token-budget.md`](context-and-token-budget.md)
 - [ ] `LOOP-ORCH-013` **SHOULD** Nhiều PR mở cùng lúc merge theo FIFO (tạo trước merge trước), cập nhật nhánh sau với `main` rồi mới merge tiếp. · Nguồn: [`../10-workflow/git-and-branching.md`](../10-workflow/git-and-branching.md)
@@ -100,6 +117,7 @@ Thiếu `acceptance_criteria` → không giao.
 - [ ] `LOOP-ORCH-020` **SHOULD** Mặc định giao việc của harness giữ nguyên (`loop status` trả tầng, ADR-0029; skill `/autopilot` bước 5) **cho tới khi có số**. Nhóm tự làm = task ở hàng "Làm trực tiếp" của bảng trên: phiên chính làm, `loop record` **không** `--executor`, báo cáo cuối lát liệt kê ID task tự làm kèm lý do (`loop stats` nhóm theo executor của LẦN CHẠY ĐẦU của task — `self_done` phải khớp danh sách; lệch là "quên cờ", không tính); nhóm giao = còn lại. Báo cáo cuối lát/phiên ghi: tỉ lệ giao (`delegation_rate`), tỉ lệ xanh lần đầu mỗi nhóm (`runs_to_green == 1`), tỉ lệ bác (`LOOP-ORCH-017`); đây là quan sát trên hai tập task khác nhau (không cặp, có thiên lệch chọn); chi phí/token mỗi task harness chưa ghi → ADR nêu ước lượng hoặc "chưa đo". Mở rộng nhóm tự làm, đổi mặc định giao việc hay thêm/bỏ tầng chỉ sau ≥ 10 task mỗi nhóm qua ≥ 2 vòng — khởi điểm tự đặt (mượn cỡ bộ eval khởi đầu của kit; task phát triển không lặp lại được nên không đo nhiễu kiểu rep; báo khoảng tin cậy Wilson theo [`AI-EVAL-018`](../13-ai-engineering/evaluation.md)) — rồi ghi research note + ADR. Task tự làm đỏ 2 lần → harness chuyển `executor-deep` như thường (ADR-0029) và vẫn là tự làm (nhóm theo lần chạy đầu); `escalation_rate` không thấy trường hợp này — đếm tay từ `tasks`. Lưu ý phép đo: `--all` gộp task theo ID — dự án đánh lại `T-001` ở đợt sau thì đo từng đợt (không `--all`). → Kiểm: `xt.py loop stats --all` in dòng "Giao việc"; `--json` có `delegation_rate`, `delegated`, `self_done`, `first_pass_rate_delegated`, `first_pass_rate_self` (nhóm theo executor của lần chạy đầu trong `runs.jsonl`; `tasks.<T>.runs_to_green`); `grep -c '"executor": null' .autopilot/runs.jsonl` đếm theo LẦN CHẠY (ghi rõ đơn vị); báo cáo cuối lát/`PROGRESS.md` ghi số hai nhóm; ADR đổi mặc định dẫn bảng so sánh. · Nguồn: claude.com *When to fold subagents* (2026-10-22, "measure, change one thing at a time, and keep what holds up"); kit `anthropics/single-agent-loop-kit` README ("It measures."), `skill/steps/01-baseline.md` ("Ten good tasks is enough to start"; c437962, 2026-10-21); ADR-0045
 - [ ] `LOOP-ORCH-021` **SHOULD** Vòng tự động **không bật Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) trừ khi có ADR: khi bật, mọi lần gọi Agent tool có `name` thành teammate mà không hỏi, teammate **kế thừa chế độ quyền của lead** (kể cả `--dangerously-skip-permissions`), plan của teammate được tự duyệt và teammate nhắn nhau trực tiếp — đi vòng qua `LOOP-ORCH-001`/`003`/`009`. ADR cho bật thì: hook `TaskCompleted`/`TeammateIdle` chạy Gate, ≤ 5 teammate (`LOOP-ORCH-008`), mỗi teammate sở hữu tập file riêng. → Kiểm: `xt.py doctor` không có cảnh báo `orchestration` (đọc môi trường phiên và khối `env` của `.claude/settings*.json`; có ADR nhắc biến thì không báo). · Nguồn: Claude Code docs *agent-teams* (2026-10-31)
 - [ ] `LOOP-ORCH-022` **SHOULD** Định nghĩa agent lấy từ bên thứ ba khai `model:` là `inherit` hoặc một tầng của khung (`LOOP-ORCH-019`), không ghim ID/họ model cứng (`model: opus`): agent ghim cứng chạy model đắt dù phiên chính rẻ, chi phí không đoán được. → Kiểm: `xt.py doctor` không có cảnh báo `orchestration` (agent ngoài bộ của khung có `model:` là `inherit` hoặc không khai).
+- [ ] `LOOP-ORCH-024` **SHOULD** Cấu hình agent chọn theo **loại việc** (bảng topology, ADR-0061): mặc định một agent chính (phiên chính) sở hữu code và tích hợp — `loop status` trả `topology: self`, `executor: null`; `review` khi xuyên module/chạm bảo mật-kiến trúc-dữ liệu (reviewer độc lập trước PR); `parallel` chỉ khi các module độc lập file với hợp đồng đầu ra rõ, đợt ≤ 4; `audit` = một lượt sau pha lớn rồi sửa batch. Tăng số agent (đổi mặc định sang giao, nới đợt) chỉ khi số đo `LOOP-ORCH-020` + KPI thời gian (`LOOP-DESIGN-024`: `time_to_green_hours`, `pr stats.lead_time_hours`) cho thấy thời gian giảm mà tỉ lệ xanh lần đầu/`reverts` không xấu đi. → Kiểm: `xt.py loop status --json` có `topology`; task không ghi `topo:` trả `self` và `executor: null`; `(topo: parallel)` trả tầng theo `exec:`; `plan waves` mặc định `--max 4`. · Nguồn: chủ dự án 2026-11-01 (`research/2026-11-01-adaptive-agent-topology.md`); ADR-0045 (đo trước khi đổi)
 - [ ] `LOOP-ORCH-023` **MAY** Bật **Advisor Tool** (`/advisor`, `advisorModel`) cho phiên chính ở hai điểm: duyệt PLAN và trước `/complete`; advisor đọc transcript nhưng **không có tool** và không độc lập về dữ kiện, nên **không thay** `reviewer` (`LOOP-ORCH-005`); chỉ bật mặc định sau eval bật/tắt (`LOOP-DESIGN-025`). Đặt `DISABLE_TELEMETRY` làm advisor tắt (feature flag không tải được). → Kiểm: D-NNN ghi cặp model, số eval và chi phí đo bằng `/usage`. · Nguồn: Claude Code docs *advisor*; Claude API *advisor tool* (beta `advisor-tool-2026-03-01`) — đọc 2026-10-31
 
 ## Bẫy thường gặp
@@ -117,6 +135,7 @@ Thiếu `acceptance_criteria` → không giao.
 | Giao mọi task spec kín cho `executor` "vì rẻ", hay tự làm mọi thứ "vì model đã mạnh" | Không có số để so; handoff + đọc lại repo tốn hơn việc, hoặc context phiên chính phình | Giữ mặc định, mở nhóm "Làm trực tiếp" có ghi `executor: null`, đo rồi mới đổi (`LOOP-ORCH-020`) |
 | Bật Agent Teams "cho nhanh" trong phiên autopilot | Subagent có tên thành teammate không hỏi; teammate kế thừa quyền lead, plan tự duyệt | Giữ biến tắt; bật chỉ qua ADR + hook Gate (`LOOP-ORCH-021`) |
 | Cài bộ agent ngoài có `model: opus` | Subagent luôn chạy model đắt nhất, chi phí vọt | Đổi `model:` về `inherit`/tầng khung khi cài (`LOOP-ORCH-022`) |
+| Giao mọi task cho `executor` "cho chuẩn quy trình", hay mở `rethink` nhiều lượt để "sửa cho sạch" | Handoff + đọc lại repo tốn hơn việc; PR #372 (2026-11-01) 8 lượt review vẫn đỏ, đóng không merge | `topo: self` mặc định; `rethink` ≤ 1 lần/PR (`max_rethink`), hết thì tách PR hoặc đóng (`LOOP-ORCH-024`, ADR-0061) |
 
 ## Cổng tự động
 
@@ -141,3 +160,4 @@ Thiếu `acceptance_criteria` → không giao.
 - Claude Code docs — agent teams (biến bật, teammate kế thừa quyền lead, plan tự duyệt, hook `TaskCompleted`/`TeammateIdle`, giới hạn): <https://code.claude.com/docs/en/agent-teams> — xác minh 2026-10-31
 - Claude Code docs — advisor (cặp model, không cache phía advisor, `DISABLE_TELEMETRY` tắt advisor): <https://code.claude.com/docs/en/advisor> · Claude API advisor tool: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> — xác minh 2026-10-31
 - Catalog `seeker19110/stored` 03 §8e–§8f (kiểm docs Advisor/Agent Teams), 20 §3q.2 (54/202 agent của wshobson/agents ghim `model: opus`), `X-TEMPLATES.md` XT-H-001/007/009 — rà 2026-10-31
+- Chủ dự án, nhận định "Adaptive Agent" 2026-11-01 (bảng loại việc → cấu hình, 6 KPI, "1 agent chính + tối đa 2–4 subagent"): `research/2026-11-01-adaptive-agent-topology.md`; ADR-0061
