@@ -103,7 +103,7 @@ updated: 2026-11-01
 | Adversarial/red-team CI | promptfoo (MIT) red-team theo OWASP LLM/Agentic; hoặc bộ ca tự viết | `promptfoo redteam run` với plugin injection/exfil/privilege; record/replay để không gọi model trong PR | CI (replay) + lịch tuần (live, `workflow_dispatch`) | ca chặn mới thất bại = đỏ |
 | Quét skill/MCP | NVIDIA SkillSpector, cisco skill-scanner (Apache-2.0), snyk agent-scan | chạy trong container không secret, không mạng | trước khi cài + CI khi lock đổi | finding high = không cài |
 | Hash lock skill/tool | xem cổng "Hash skill/MCP" ở [`supply-chain.md`](supply-chain.md) | — | — | — |
-| Tài sản prompt | script 4 luật (injection, ký tự ẩn, lệnh nguy hiểm, secret) | `python3 scripts/prompt-assets-scan.py prompts/ skills/` | CI | vi phạm không miễn trừ = đỏ |
+| Tài sản prompt | `xt.py prompt-assets-scan` 8 luật (injection, ký tự ẩn/không UTF-8, lệnh nguy hiểm, bí mật, bỏ hàng rào, gói không ghim, URL nhánh không ghim, system prompt rò rỉ) | `python3 .xtemplates/scripts/xt.py prompt-assets-scan --exempt prompt-assets-exempt.json [--patterns <file bộ lọc runtime>]` (mặc định quét `.claude` `prompts` `skills` `vendor` `docs` `README.md` `AGENTS.md` `CLAUDE.md`); bước mẫu `ci.yml` bật khi có file miễn trừ | CI | vi phạm không miễn trừ hoặc miễn trừ hết hạn = đỏ |
 | Ngân sách & vòng lặp | test tích hợp | mô phỏng vượt 100% / không tiến triển | job test | không dừng = đỏ |
 | Kill switch | diễn tập staging | đo thời gian dừng + token thu hồi | trước release + hàng quý | > 10 s = NO-GO |
 | Redact trace/log | unit test + gitleaks trên mẫu trace | — | job test | lộ = đỏ |
