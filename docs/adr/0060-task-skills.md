@@ -1,6 +1,6 @@
 # ADR-0060: Sáu skill theo tác vụ phát triển (debug, tdd, ui-verify, upgrade, migrate-db, incident)
 
-- **Trạng thái:** Đã chấp nhận (chủ repo yêu cầu 2026-10-31: "nhiều kỹ năng xuất sắc hơn, giỏi hơn trong từng tác vụ phát triển phần
+- **Trạng thái:** Đã chấp nhận (D-294 ghi hồi tố 2026-11-01 — AUD-DOC-133; chủ repo yêu cầu 2026-10-31: "nhiều kỹ năng xuất sắc hơn, giỏi hơn trong từng tác vụ phát triển phần
   mềm", "tự động nâng nền phần mềm ổn định nhất", "tự chủ ở mức cao nhất"; phiên chính tự duyệt thiết kế theo tiêu chí chất lượng cuối, ADR-0008)
 - **Trạng thái triển khai:** Đã triển khai — `.claude/skills/{debug,tdd,ui-verify,upgrade,migrate-db,incident}/SKILL.md`; danh sách
   skill ở `AGENTS.md` §8, `CLAUDE.md`, `framework/templates/AGENTS.md`.

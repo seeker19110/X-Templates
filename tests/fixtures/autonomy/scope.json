@@ -28,7 +28,11 @@
     "AUD-HAR-095",
     "AUD-DOC-112",
     "AUD-DOC-113",
-    "AUD-DOC-114"
+    "AUD-DOC-114",
+    "AUD-DOC-136",
+    "AUD-DOC-137",
+    "AUD-HAR-171",
+    "AUD-DOC-155"
    ]
   },
   {
@@ -111,11 +115,12 @@
    ]
   },
   {
-   "reason": "Công cụ khác (perf guard, contrast, vendor-check) — không thuộc đường merge/guard",
+   "reason": "Công cụ khác (perf guard, contrast, vendor-check, doctor) — không thuộc đường merge/guard",
    "ids": [
     "AUD-XFEAT-005",
     "AUD-XFEAT-006",
-    "AUD-XFEAT-007"
+    "AUD-XFEAT-007",
+    "AUD-HAR-178"
    ]
   },
   {

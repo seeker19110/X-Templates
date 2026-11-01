@@ -804,6 +804,9 @@ class DoctorOrchestrationTest(DoctorCase):
         [f] = self.orch()
         self.assertIn("đang được git track", f.msg)
         self.assertIn("git rm --cached", f.msg)
+        # AUD-HAR-178: thiếu git trên PATH → không sập, chỉ bỏ kiểm track (fail-open như `_doctor_git`)
+        with unittest.mock.patch.object(xt.shutil, "which", return_value=None):
+            self.assertEqual(self.orch(), [])
 
     def test_malformed_settings_env_fail_open(self):
         self.settings_env(".claude/settings.json", ["không phải object"])

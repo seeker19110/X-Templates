@@ -5101,6 +5101,8 @@ def _doctor_settings_local(base: Path) -> List[Finding]:
                 " install.py hoặc thêm dòng (LOOP-HARNESS-032)",
             )
         )
+    if not shutil.which("git"):  # AUD-HAR-178: thiếu git trên PATH → chỉ kiểm dòng, không sập (như `_doctor_git`)
+        return out
     tracked = _git(base, "ls-files", "--", SETTINGS_LOCAL_REL)
     if tracked.returncode == 0 and tracked.stdout.strip():
         out.append(
@@ -5674,8 +5676,11 @@ def _pr_title_suggest(title: str) -> str:
 
 def pr_title_problems(title: str) -> List[str]:
     """Lỗi + gợi ý sửa của tiêu đề PR theo ĐÚNG luật workflow `pr-title` và `merge-check` (D-056): Conventional Commits
-    (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự. Rỗng = hợp lệ."""
+    (`PR_TITLE_RE`), ≤ `PR_TITLE_MAX` ký tự; `Revert "…"` (nút Revert của GitHub) miễn như guard/merge-check/CI
+    (AUD-XFEAT-038). Rỗng = hợp lệ."""
     out: List[str] = []
+    if title.startswith('Revert "'):
+        return out
     if len(title) > PR_TITLE_MAX:
         out.append(f"dài {len(title)} ký tự > {PR_TITLE_MAX} — rút gọn mô tả (tiêu đề thành subject commit squash)")
     if not PR_TITLE_RE.fullmatch(title):

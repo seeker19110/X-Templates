@@ -27,7 +27,7 @@ updated: 2026-11-01
    quyền, tool, ngân sách, mức tin cậy của subagent ⊆ của người giao; subagent không tự nâng tier T0–T4.
 3. **Tách vì context, chọn tầng theo spec**: tách khi có lý do context (`AI-AGENTIC-011` — suy từ nguồn về agent sản phẩm,
    **giả định cho vòng lặp phát triển, đo ở `LOOP-ORCH-020`**: `researcher` ≈ lý do 1 · `reviewer` ≈ lý do 2, kiểm mà không
-   thấy cách làm · `executor` = tầng mặc định của harness, ADR-0029), không vì "cho chắc"; đã tách thì chọn tầng theo độ
+   thấy cách làm · `executor` = tầng mặc định của hàng `parallel`, ADR-0029/0061), không vì "cho chắc"; đã tách thì chọn tầng theo độ
    phức tạp × độ khép kín của spec (stored 23 §4.3). Spec hở → không giao; phiên chính quyết tường minh (D-NNN,
    [`LOOP-STOP-018`](stop-points-and-escalation.md)) rồi mới giao.
 4. **Người review không phải người viết**: `reviewer` năng lực cao hơn người viết, chỉ đọc + chạy lệnh kiểm, chỉ nhận
@@ -82,7 +82,7 @@ Xếp đợt bằng máy: `xt.py plan waves [--plan P] [--max N] [--json]` chia 
 đứng riêng; task trên chu trình, ghi chú hỏng hoặc đã defer vào mục bị chặn kèm lý do. Không cần vòng đang chạy; đợt
 nhiều task chạy theo mô hình B, đợt một task theo mô hình A.
 
-Giới hạn: ≤ 5 subagent đồng thời (stored 23 §4.5; RAM/IO máy và ngân sách context phiên chính), độ sâu lồng = 1
+Giới hạn: ≤ 5 subagent đồng thời (stored 23 §2, 03 §5; RAM/IO máy và ngân sách context phiên chính), độ sâu lồng = 1
 (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` hoặc không cấp tool `Agent` cho subagent — cách thứ hai là cách repo
 này đang dùng: `tools:` của năm agent trong `.claude/agents/` không có `Agent`).
 
@@ -91,7 +91,7 @@ này đang dùng: `tools:` của năm agent trong `.claude/agents/` không có `
 `goal` · `acceptance_criteria` (= Gate lệnh máy) · `files_in_scope` · `budget` (maxTurns, thời gian) · `depth` ·
 `granted_scopes` ⊆ phiên chính · `trust_level: untrusted` cho dữ liệu subagent mang về · `report_format` (đã làm ·
 lệnh + exit code · còn treo) · `context_reason` (1/2/3 theo [`AI-AGENTIC-011`](../13-ai-engineering/agentic-systems.md), hoặc
-"tầng mặc định" cho `executor`; không có → làm trực tiếp, `LOOP-ORCH-020`) · `executor_tier` (mặc định/sâu + lý do theo 4 khía cạnh) · `escalation_condition` (mặc định: đỏ 2 lần →
+`topo: parallel` cho `executor`; không có → tự làm (`topo: self`, `LOOP-ORCH-024`)) · `executor_tier` (mặc định/sâu + lý do theo 4 khía cạnh) · `escalation_condition` (mặc định: đỏ 2 lần →
 tầng sâu; chạm bảo mật/toàn vẹn dữ liệu/đồng thời → tầng sâu ngay; cần quyết định phạm vi/kiến trúc → trả về phiên chính).
 Thiếu `acceptance_criteria` → không giao.
 
@@ -104,7 +104,7 @@ Thiếu `acceptance_criteria` → không giao.
 - [ ] `LOOP-ORCH-005` **MUST@L** Reviewer có **năng lực cao hơn** người viết — agent năng lực cao nhất đã góp vào diff (kể cả `executor-deep` và phiên chính): model bậc cao hơn (Haiku < Sonnet < Opus < Fable), hoặc cùng họ với effort cao hơn (low < medium < high < xhigh < max); khác nhà cung cấp (máy không xếp hạng được) nhận như khác họ; chỉ có tool đọc + Bash kiểm, không sửa file; reviewer không kết luận được (diff bị cắt, hết ngân sách, thiếu file) trả INCONCLUSIVE, phiên chính ghi `pr reviewed --inconclusive` và giao reviewer khác — không ghi sạch. → Kiểm: `.claude/agents/reviewer.md` có `model:` bậc cao hơn `executor.md`, `reviewer-alt.md` cao hơn `executor-deep.md` (cùng họ thì `effort:` cao hơn), cả hai `tools:` không chứa `Edit`/`Write`; `pr reviewed --clean` với reviewer không cao hơn người viết exit 2 (D-161, ADR-0044 — thay "khác họ" của D-045).
 - [ ] `LOOP-ORCH-006` **MUST@L** Hai task chạm cùng file, migration, port hoặc biến môi trường không chạy song song. → Kiểm: `PLAN.md` ghi `files:`/`depends_on:` cho task song song; script kiểm giao nhau tập file trước khi tách. · Nguồn: stored 21 §6
 - [ ] `LOOP-ORCH-007` **MUST@L** Trước khi chạy song song, hợp đồng giao diện (OpenAPI/schema/type) đã commit và có test contract. → Kiểm: `API-CONTRACT.md` hoặc file schema trong `git log` trước commit đầu của nhánh song song. · Nguồn: [`../08-backend/api-design.md`](../08-backend/api-design.md)
-- [ ] `LOOP-ORCH-008` **MUST@L** Số subagent đồng thời ≤ 5 và mỗi subagent có `maxTurns`. → Kiểm: `.claude/agents/*.md` đều có `maxTurns:`; PLAN ghi số song song tối đa. · Nguồn: stored 23 §4.5
+- [ ] `LOOP-ORCH-008` **MUST@L** Số subagent đồng thời ≤ 5 và mỗi subagent có `maxTurns`. → Kiểm: `.claude/agents/*.md` đều có `maxTurns:`; PLAN ghi số song song tối đa. · Nguồn: stored 23 §2 (dòng 72, trích ADR-0011 projects-template) và 03 §5 — trích dẫn cũ "23 §4.5" lệch, sửa 2026-11-01 (AUD-DOC-137)
 - [ ] `LOOP-ORCH-009` **MUST** Hành động đối ngoại (push, publish, gửi thông báo) không giao cho subagent; chỉ phiên chính làm; guard chặn hành động không đảo ngược, không hỏi (ADR-0018). → Kiểm: prompt subagent không chứa lệnh push/publish; `pre-bash-guard.sh` chặn (không `ask`) ở phiên chính. · Nguồn: [`stop-points-and-escalation.md`](stop-points-and-escalation.md)
 - [ ] `LOOP-ORCH-010` **SHOULD** Dùng mô hình nhánh A (một nhánh, task = commit) mặc định; chỉ chuyển sang worktree (`isolation: worktree`) khi task độc lập file và cần ≥ 2 executor đồng thời (`topo: parallel`, đợt ≤ 4 — ADR-0061). · Nguồn: stored 23 §4.5
 - [ ] `LOOP-ORCH-011` **SHOULD** Subagent trả báo cáo ≤ 25 dòng theo khuôn: đã làm · lệnh + exit code · còn treo · đề xuất; không trả transcript dài về phiên chính.

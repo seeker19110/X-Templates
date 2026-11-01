@@ -829,11 +829,6 @@ def literal_bodies_masked(cmd: str) -> str:
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
-def _heredoc_spans(lines: List[str]) -> List[Tuple[int, "re.Match[str]", int, int]]:
-    """(chỉ số dòng mở, match, đầu thân, cuối thân) — xem `_heredocs`."""
-    return [(o, m, a, b) for o, m, a, b, _ in _here_scan("\n".join(lines))]
-
-
 def join_continuations(cmd: str) -> str:
     """Nối dòng như bash: `\\` + xuống dòng chỉ là nối dòng khi dãy `\\` liền trước dài LẺ — `\\\\` + xuống dòng là
     gạch chéo đã escape rồi xuống dòng thật (`sh -c "docker \\\\` ↵ `run …"`: shell trong mới nối thành `docker run`).

@@ -3217,7 +3217,13 @@ class PrTitleCheckTest(TmpDirCase):
         self.assertRegex(step, rf'\[ "\$\{{#TITLE\}}" -(le|gt) {xt.PR_TITLE_MAX} \]')
 
     def test_title_check_valid_titles(self):
-        for title in ("feat(xt): pr title-check", "fix: a", "ci(ci.yml/x-1)!: đổi", "docs: " + "é" * 94):
+        for title in (
+            "feat(xt): pr title-check",
+            "fix: a",
+            "ci(ci.yml/x-1)!: đổi",
+            "docs: " + "é" * 94,
+            'Revert "feat: x"',  # AUD-XFEAT-038: nút Revert của GitHub — miễn như guard/merge-check/CI
+        ):
             with self.subTest(title=title):
                 rc, out, err = run_main("pr", "title-check", title)
                 self.assertEqual((rc, err), (0, ""))

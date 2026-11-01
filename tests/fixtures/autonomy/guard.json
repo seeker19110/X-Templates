@@ -783,19 +783,6 @@
    }
   },
   {
-   "id": "guard-sec019-mv-guard",
-   "origin": "audit",
-   "refs": [
-    "AUD-SEC-019"
-   ],
-   "input": {
-    "command": "mv .claude/hooks/guard.py /tmp/x"
-   },
-   "expect": {
-    "allowed": false
-   }
-  },
-  {
    "id": "guard-sec019-git-rm-guard",
    "origin": "audit",
    "refs": [
@@ -5598,7 +5585,8 @@
    "origin": "adversarial-reviewer",
    "refs": [
     "AUD-SEC-108",
-    "AUD-SEC-046"
+    "AUD-SEC-046",
+    "AUD-SEC-019"
    ],
    "input": {
     "command": "mv .claude/hooks/guard.py /tmp/x"
