@@ -130,27 +130,32 @@ class CiTemplateTest(unittest.TestCase):
 
     def test_pr_title_step(self):
         self.assertNotIn("pull_request.title", self.text)  # không còn ở CI nặng (T-2401)
-        text = PR_TITLE.read_text(encoding="utf-8")
-        body = ci_jobs(text)["title"]
-        self.assertIn("TITLE: ${{ github.event.pull_request.title }}", body)  # qua env, không chèn thẳng vào shell
-        self.assertNotIn('${{ github.event.pull_request.title }}"', body)
-        self.assertIn("pr_title_check", body)
-        self.assertIn("persist-credentials: false", body)
-        script = step_run(body, "Tiêu đề PR")
-        for title, author, rc in (
-            ("feat(ci): gộp job ngắn vào gate", "dev", 0),
-            ("fix!: đổi giao ước", "dev", 0),
-            ("gộp job", "dev", 1),
-            ("feat: " + "x" * 98, "dev", 1),
-            ("bất kỳ", "dependabot[bot]", 0),
-            ('Revert "feat: x"', "dev", 0),
-        ):
-            with self.subTest(title=title):
-                env = dict(os.environ, TITLE=title, AUTHOR=author)
-                r = subprocess.run(
-                    ["bash", "-c", script], capture_output=True, text=True, env=env, cwd=tempfile.gettempdir()
-                )
-                self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
+        for path in (
+            PR_TITLE,
+            ROOT / ".github" / "workflows" / "pr-title.yml",
+        ):  # mẫu dự án đích và workflow repo khung
+            text = path.read_text(encoding="utf-8")
+            body = ci_jobs(text)["title"]
+            self.assertIn("TITLE: ${{ github.event.pull_request.title }}", body)  # qua env, không chèn thẳng vào shell
+            self.assertNotIn('${{ github.event.pull_request.title }}"', body)
+            self.assertIn("pr_title_check", body)
+            self.assertIn("persist-credentials: false", body)
+            script = step_run(body, "Tiêu đề PR")
+            for title, author, rc in (
+                ("feat(ci): gộp job ngắn vào gate", "dev", 0),
+                ("fix!: đổi giao ước", "dev", 0),
+                ("gộp job", "dev", 1),
+                ("feat: " + "x" * 98, "dev", 1),
+                ("bất kỳ", "dependabot[bot]", 0),
+                ("chore(deps): bump " + "x" * 120, "dependabot[bot]", 0),  # tiêu đề Dependabot dài hơn 100 (AUD-CI-021)
+                ('Revert "feat: x"', "dev", 0),
+            ):
+                with self.subTest(path=path.name, title=title):
+                    env = dict(os.environ, TITLE=title, AUTHOR=author)
+                    r = subprocess.run(
+                        ["bash", "-c", script], capture_output=True, text=True, env=env, cwd=tempfile.gettempdir()
+                    )
+                    self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
 
     def test_e2e_single_shard_mode_driven(self):
         e2e = self.jobs["e2e"]
