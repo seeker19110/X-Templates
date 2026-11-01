@@ -1245,53 +1245,6 @@
     "review_deferred": false
    },
    "note": "pha build: PR rủi ro cao (schema/migration hoặc ngoại lệ cứng) không hoãn review thành nợ — cần một review độc lập ở head"
-  },
- {
-  "id": "review-har181-release-rethink-before-push-fix",
-  "origin": "audit",
-  "refs": [
-   "AUD-HAR-181"
-  ],
-  "input": {
-   "decision": {
-    "pr": 7,
-    "head": "2222222222222222222222222222222222222222",
-    "verdict": "merge",
-    "lane": "chuẩn",
-    "autonomy": 3,
-    "hard": [],
-    "stacked": false,
-    "base_merge_of": [],
-    "reasons": [
-     "L3"
-    ],
-    "next": "gh pr merge 7 --squash --match-head-commit 2222222222222222222222222222222222222222",
-    "next_rest": "",
-    "release": true
-   },
-   "reviews": [
-    {
-     "head": "2222222222222222222222222222222222222222",
-     "clean": false,
-     "at": "2026-11-01T01:00:00+00:00"
-    }
-   ],
-   "rethinks": [
-    {
-     "decision": "D-009",
-     "at": "2026-11-01T02:00:00+00:00"
-    }
-   ],
-   "max_rethink": 1
-  },
-  "expect": {
-   "eligible": false,
-   "auto_merge_ok": false,
-   "proceed": false,
-   "review": "blocking",
-   "action": "fix"
-  },
-  "note": "PR cắt bản đã `pr rethink` (mốc không có head) mà chưa push bản sửa: `fix`, không `rethink` lặp (AUD-HAR-181)"
- }
+  }
  ]
 }
