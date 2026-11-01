@@ -9240,15 +9240,19 @@ def _pa_files(targets: Sequence[str]) -> List[Path]:
     return list(dict.fromkeys(out))
 
 
-def _pa_line_findings(rel: str, text: str, injection: Sequence[str]) -> List[Dict[str, object]]:
-    """Vi phạm theo dòng: ký tự ẩn, injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục vendor/skill)."""
+def _pa_line_findings(
+    rel: str, text: str, injection: Sequence[str], skip: Sequence[str] = (), line0: bool = False
+) -> List[Dict[str, object]]:
+    """Vi phạm theo dòng: ký tự ẩn, injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục vendor/skill); bỏ
+    luật trong `skip`; `line0` = chữ không phải dòng thật của file (báo dòng 0)."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
+    rules = [r for r in rules if r[0] not in skip]
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
     out: List[Dict[str, object]] = []
     for n, line in enumerate(text.splitlines(), 1):
         hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if PA_HIDDEN_RE.search(line) else []
         hits += [(r, m) for r, m, pats in rules if any(re.search(p, line) for p in pats)]
-        out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
+        out += [{"path": rel, "line": 0 if line0 else n, "rule": r, "msg": m} for r, m in hits]
     return out
 
 
@@ -9262,26 +9266,29 @@ def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
-    return out + _pa_line_findings(rel, _pa_without_deny(path, text), injection)
+    rest, deny = _pa_split_deny(rel, text)
+    return out + _pa_line_findings(rel, rest, injection) + _pa_line_findings(rel, deny, injection, ("danger",), True)
 
 
-PA_SETTINGS_RE = re.compile(r"settings(\.local)?\.json")
+PA_SETTINGS_RE = re.compile(r"(?:^|.*/)\.claude/settings(?:\.local)?\.json")
 
 
-def _pa_without_deny(path: Path, text: str) -> str:
-    """`settings*.json` của harness: bỏ `permissions.deny`/`ask` — danh sách lệnh bị CẤM mà khung chép vào mọi dự án đích,
-    không phải chỉ dẫn chạy (review #387); phần còn lại (cả `allow`) vẫn quét. JSON hỏng → quét nguyên văn (chiều chặt)."""
-    if not PA_SETTINGS_RE.fullmatch(path.name):
-        return text
+def _pa_split_deny(rel: str, text: str) -> Tuple[str, str]:
+    """(phần quét đủ luật, các mục `permissions.deny`) của `.claude/settings*.json` harness: `deny` là danh sách lệnh bị
+    CẤM khung chép vào mọi dự án đích — chỉ miễn luật `danger` cho các mục đó (review #387, AUD-SEC-272); `ask`, `allow`
+    và file khác (kể cả `vendor/**/settings.json`) quét đủ. JSON hỏng/không có `deny` dạng mảng → quét nguyên văn."""
+    if not PA_SETTINGS_RE.fullmatch(rel):
+        return text, ""
     try:
         data = json.loads(text)
     except ValueError:
-        return text
+        return text, ""
     perms = data.get("permissions") if isinstance(data, dict) else None
-    if not isinstance(perms, dict):
-        return text
-    data["permissions"] = {k: v for k, v in perms.items() if k not in ("deny", "ask")}
-    return json.dumps(data, indent=1, ensure_ascii=False)
+    deny = perms.get("deny") if isinstance(perms, dict) else None
+    if not isinstance(deny, list) or not isinstance(perms, dict):
+        return text, ""
+    data["permissions"] = {k: v for k, v in perms.items() if k != "deny"}
+    return json.dumps(data, indent=1, ensure_ascii=False), "\n".join(map(str, deny))
 
 
 def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
@@ -9312,6 +9319,8 @@ def prompt_assets_scan(
     injection: Sequence[str] = PA_INJECTION
     if patterns:
         injection = [ln.strip() for ln in Path(patterns).read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not injection:  # file rỗng tắt luật injection mà cổng vẫn xanh (AUD-CODE-034)
+            raise ValueError(f"--patterns {patterns}: không có mẫu nào — luật injection sẽ tắt")
     rules, errors = _pa_exemptions(exempt, today or _dt.date.today().isoformat())
     found = [f for p in _pa_files(targets) for f in _pa_scan_file(p, injection)]
     keep = [
@@ -9323,7 +9332,11 @@ def prompt_assets_scan(
 
 
 def cmd_prompt_assets_scan(args: argparse.Namespace) -> int:
-    found, errors = prompt_assets_scan(args.paths or PA_DIRS, args.exempt, args.patterns, args.today)
+    try:
+        found, errors = prompt_assets_scan(args.paths or PA_DIRS, args.exempt, args.patterns, args.today)
+    except (ValueError, re.error) as exc:  # mẫu/miễn trừ hỏng: lỗi cấu hình, không phải "có vi phạm" (AUD-SEC-264)
+        print(f"✗ prompt-assets-scan: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps({"findings": found, "errors": errors}, ensure_ascii=False, indent=2))
         return 1 if found or errors else 0
@@ -10800,8 +10813,8 @@ RELEASE_ROWS = (
     "attack",
     "perf",
     "migration_check",
-    "rollback",
     "acceptance",
+    "rollback",
     "unchecked_must",
 )
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
@@ -10811,8 +10824,8 @@ RELEASE_RUN_KEYS = (
     # Cổng production (ADR-0062 §6, chủ dự án 2026-11-01): migration tiến + lùi trên bản sao dữ liệu, diễn tập quay về bản
     # trước, kiểm thử nghiệm thu — cùng luật chạy/N/A như attack/perf.
     ("migration_check", "migration tiến + lùi trên bản sao dữ liệu/staging, đỏ khi lỗi hoặc mất dữ liệu"),
-    ("rollback", "diễn tập quay về bản trước (artifact/tag cũ + migration lùi), đỏ khi không về được"),
     ("acceptance", "kiểm thử nghiệm thu theo tiêu chí chấp nhận của giai đoạn, đỏ khi ca nào hỏng"),
+    ("rollback", "diễn tập quay về bản trước (artifact/tag cũ + migration lùi), đỏ khi không về được"),
 )
 
 
@@ -11427,7 +11440,7 @@ def _pr_next_review(
         " `pr rethink` nữa (max_rethink, ADR-0061)"
     )
     # PR cắt bản/`review_identity` đã sửa sau `rethink` (head chưa được rà) → rà lại tới sạch (ADR-0059 §6), không `rethink` lặp.
-    redo = reopened and gate["state"] == "missing" and (identity or bool(d.get("release")))
+    redo = reopened and (identity or bool(d.get("release")))  # cả trước khi push bản sửa (AUD-HAR-181) → `fix`/`review`
     if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and fixed and not redo:
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
@@ -12098,6 +12111,11 @@ def _debt_problem(
     error, extra, ledger = _review_drift(base, last, head, target)
     if error:
         return error
+    if fixed and not any(_is_test_path(p) for p in extra):  # ADR-0062 §2: bản sửa 🔴 kèm test hồi quy (AUD-HAR-182)
+        return (
+            f"--fixed cần bản sửa sau review ở {last[:7]} có đổi ít nhất một file test (test hồi quy cho 🔴) — đã đổi:"
+            f" {', '.join(extra[:5]) or 'không có file mã/test nào'}"
+        )
     if extra and not fixed:
         return (
             f"sau review ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 1 lần (ADR-0062): chỉ commit sổ"

@@ -2045,6 +2045,18 @@ class PrNextTest(unittest.TestCase):
         self.assertFalse(xt._rethink_after_reviews([{**old, "at": "hỏng"}], mark))  # review không rõ giờ: chặt
         self.assertTrue(xt._rethink_after_reviews([old], mark))
 
+    def test_rethink_before_push_is_fix_for_identity_and_release(self):
+        """AUD-HAR-181: `pr rethink` của PR `review_identity` (không ghi `head`) hoặc PR cắt bản mà entry rethink không có
+        head, chạy `pr next` TRƯỚC khi push bản sửa → `fix` (không `split-or-close`/`rethink` lặp), với mọi trần."""
+        blk = {"head": self.H, "clean": False, "at": "2026-11-01T01:00:00Z"}
+        mark = [{"decision": "D-009", "at": "2026-11-01T02:00:00+00:00"}]
+        for cap in (0, 1):
+            with self.subTest(cap=cap):
+                ident = {"reviews": [blk], "rethinks": mark, "published_only": True}
+                self.assertEqual(xt.pr_next(self.d(), False, ident, cap)["action"], "fix")
+                rel = {"reviews": [blk], "rethinks": mark}
+                self.assertEqual(xt.pr_next(self.d(release=True), False, rel, cap)["action"], "fix")
+
     def test_inconclusive_first_does_not_burn_review(self):
         """ADR-0062 §4 (ADR-0029): review `inconclusive` khi chưa có review đã kết luận trong cửa sổ không tính lượt — không
         `debt` (chưa biết còn 🔴), đi tiếp như thường: head thiếu review hợp lệ → `review` (reviewer khác)."""
@@ -2454,7 +2466,8 @@ class PrNextCliTest(unittest.TestCase):
         )
         table = "".join(f"| {i} | {lv} | {st} | x | {note} |\n" for i, lv, st, note in rows)
         ledger = "## Phát hiện\n\n| ID | Mức | Trạng thái | Tóm tắt | Ghi chú |\n|---|---|---|---|---|\n" + table
-        head = self.commit({"src/a.py": "x = 2\n", xt.AUDIT_STATUS_DEFAULT: ledger})  # bản sửa 🔴 + sổ, MỘT commit
+        # bản sửa 🔴 KÈM test hồi quy + sổ, MỘT commit (AUD-HAR-182)
+        head = self.commit({"src/a.py": "x = 2\n", "tests/test_a.py": "assert 2\n", xt.AUDIT_STATUS_DEFAULT: ledger})
         r1 = {"head": reviewed, "clean": False, "at": "2026-11-01T01:00:00Z"}  # MỘT review kết luận chặn
         p = {**self.big, "headRefOid": head, "xtReviews": [r1]}
         self.assertEqual(json.loads(self.nxt(p, "--json")[1])["action"], "debt")
@@ -2463,7 +2476,10 @@ class PrNextCliTest(unittest.TestCase):
             return run_main("pr", "debt", "--pr-json", "-", *args, stdin=json.dumps(q or p))
 
         refused = {
-            ("--findings", "AUD-SEC-001"): "đã đổi src/a.py — review 1 lần (ADR-0062)",  # đổi mã mà không khai bản sửa
+            (
+                "--findings",
+                "AUD-SEC-001",
+            ): "đã đổi src/a.py, tests/test_a.py — review 1 lần (ADR-0062)",  # đổi mã mà không khai bản sửa
             ("--fixed", "AUD-SEC-003"): "AUD-SEC-003 không phải 🔴 — `--fixed` chỉ cho 🔴 đã sửa",
             ("--fixed", "AUD-SEC-004"): f"AUD-SEC-004: cần dòng `đã sửa` trong {xt.AUDIT_STATUS_DEFAULT} ở head",
             ("--fixed", "AUD-SEC-005"): "AUD-SEC-005: cần dòng `đã sửa`",  # tag của PR khác
@@ -2514,15 +2530,27 @@ class PrNextCliTest(unittest.TestCase):
         rc, _, err = debt("--findings", "AUD-SEC-001", "--no-publish", q={**p, "xtReviews": [r1, mark]})
         self.assertEqual(rc, 2)
         self.assertIn("không phải `debt`", err)  # head đã có review hợp lệ (dấu `debt`) → `pr next` = merge
-        # `--fixed` khi head chỉ đổi sổ (bản sửa 🔴 đã nằm trong lượt review) vẫn nhận; bản ghi không có `fixed` khi rỗng
+        # head chỉ đổi sổ: nợ nhận (bản ghi không có `fixed` khi rỗng); `--fixed` bị từ chối — không có bản sửa kèm test
+        # nào sau review (AUD-HAR-182: khai 🔴 `đã sửa` mà không đổi mã/test)
         xt._write_reviews(self.base, {})
         booked = self.commit({xt.AUDIT_STATUS_DEFAULT: ledger + "\n"})
         q = {**p, "headRefOid": booked, "xtReviews": [{**r1, "head": head}]}
+        rc, _, err = debt("--fixed", "AUD-SEC-002", "--no-publish", q=q)
+        self.assertEqual(rc, 2)
+        self.assertIn("--fixed cần bản sửa sau review", err)
+        self.assertIn("không có file mã/test nào", err)
         self.assertEqual(debt("--findings", "AUD-SEC-001", "--no-publish", q=q)[0], 0)
         self.assertNotIn("fixed", xt.read_reviews(self.base)["7"]["reviews"][-1])
+        # bản sửa mã KHÔNG kèm test → `--fixed` bị từ chối, nêu file đã đổi
+        xt._write_reviews(self.base, {})
+        no_test = self.commit({"src/a.py": "x = 3\n"})
+        rc, _, err = debt("--fixed", "AUD-SEC-002", "--no-publish", q={**q, "headRefOid": no_test})
+        self.assertEqual(rc, 2)
+        self.assertIn("đổi ít nhất một file test", err)
+        self.assertIn("src/a.py", err)
         # chỉ `--fixed` (không nợ): bản ghi hợp lệ (`_ledger_clean_valid`), lệnh đăng lại mang `--fixed` (review #ADR-0062)
         xt._write_reviews(self.base, {})
-        self.assertEqual(debt("--fixed", "AUD-SEC-002", "--no-publish", q=q)[0], 0)
+        self.assertEqual(debt("--fixed", "AUD-SEC-002", "--no-publish")[0], 0)
         rec = xt.read_reviews(self.base)["7"]["reviews"][-1]
         self.assertEqual((rec["debt"], rec["fixed"]), ([], ["AUD-SEC-002"]))
         self.assertTrue(xt._ledger_clean_valid(rec))
