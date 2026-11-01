@@ -537,23 +537,26 @@
   {
    "id": "review-phase-build-hard-waived-asks-review",
    "origin": "adversarial-author",
-   "refs": [],
+   "refs": [
+    "ADR-0062"
+   ],
    "input": {
     "decision": {
      "delivery_phase": "build",
      "hard_waived": [
       "đường dẫn nhạy cảm (auth): src/auth/x.py"
-     ]
+     ],
+     "high_risk": true
     }
    },
    "expect": {
-    "eligible": true,
-    "auto_merge_ok": true,
-    "proceed": true,
-    "review": "deferred",
-    "action": "merge"
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
    },
-   "note": "ADR-0037 (D-124, chủ repo 2026-10-21): reviewer chỉ ở pha harden — ngoại lệ cứng đã miễn ở pha build thành nợ review; harden lại đòi review sạch"
+   "note": "ADR-0062 (D-295, thay D-124 cho rủi ro cao): ngoại lệ cứng đã miễn là rủi ro cao (merge_decision high_risk) — pha build vẫn đòi một review độc lập ở head, không hoãn thành nợ"
   },
   {
    "id": "review-phase-blocking-oldhead",
@@ -711,7 +714,8 @@
    "id": "review-test014-verdict-review-blocking",
    "origin": "audit",
    "refs": [
-    "AUD-XFEAT-010"
+    "AUD-XFEAT-010",
+    "ADR-0062"
    ],
    "input": {
     "decision": {
@@ -731,9 +735,9 @@
     "auto_merge_ok": false,
     "proceed": false,
     "review": "blocking",
-    "action": "fix"
+    "action": "debt"
    },
-   "note": "verdict review với lỗi chặn ở head: pr next đòi sửa, không merge"
+   "note": "verdict review với lỗi chặn ở head: không merge; review 1 lần (ADR-0062) — pr next về debt (🔴 sửa + --fixed, 🟠/🟢 ghi nợ), không fix rồi rà lại"
   },
   {
    "id": "review-adr0053-rethink-after-two-rounds",
@@ -769,7 +773,8 @@
    "id": "review-adr0053-rethink-reopens-budget",
    "origin": "control",
    "refs": [
-    "ADR-0053"
+    "ADR-0053",
+    "ADR-0062"
    ],
    "input": {
     "reviews": [
@@ -781,7 +786,8 @@
      {
       "head": "3333333333333333333333333333333333333333",
       "clean": false,
-      "at": "2026-10-27T11:00:00+00:00"
+      "at": "2026-10-27T11:00:00+00:00",
+      "inconclusive": true
      }
     ],
     "rethinks": [
@@ -798,7 +804,7 @@
     "review": "missing",
     "action": "review"
    },
-   "note": "pr rethink theo D-NNN mở thêm lượt: pr next lại đòi review ở head, vẫn không merge khi chưa sạch"
+   "note": "review kết luận rồi review chưa kết luận → rethink; pr rethink theo D-NNN mở lại lượt: review chưa kết luận trước mốc không tính lượt (ADR-0062) — pr next đòi review khác ở head, vẫn không merge khi chưa sạch"
   },
   {
    "id": "review-adr0059-debt-mark-at-head",
@@ -870,7 +876,7 @@
    "origin": "adversarial-reviewer",
    "refs": [
     "AUD-HAR-131",
-    "ADR-0059"
+    "ADR-0062"
    ],
    "input": {
     "reviews": [
@@ -892,9 +898,9 @@
     "auto_merge_ok": false,
     "proceed": false,
     "review": "blocking",
-    "action": "fix"
+    "action": "debt"
    },
-   "note": "lượt đầu chưa kết luận rồi lượt hai chặn ở cùng head: chưa có lần sửa nào — được sửa một lần, không ghi nợ ngay"
+   "note": "lượt đầu chưa kết luận không tính (ADR-0062 §4); lượt hai kết luận chặn ở cùng head là MỘT review đã kết luận → debt (review 1 lần), không fix rồi rà lại"
   },
   {
    "id": "review-har132-rethink-one-more-fix",
@@ -941,7 +947,8 @@
    "id": "review-har136-base-update-not-a-fix",
    "origin": "adversarial-reviewer",
    "refs": [
-    "AUD-HAR-136"
+    "AUD-HAR-136",
+    "ADR-0062"
    ],
    "input": {
     "reviews": [
@@ -967,9 +974,9 @@
     "auto_merge_ok": false,
     "proceed": false,
     "review": "missing",
-    "action": "review"
+    "action": "debt"
    },
-   "note": "lượt 2 ở head chỉ là cập nhật nhánh của head lượt 1 (cùng nội dung): chưa có lần sửa được rà — rà bản sửa ở head mới, không ghi nợ"
+   "note": "head lượt 2 chỉ là cập nhật nhánh của head lượt 1: vẫn đã có review kết luận chặn → debt, không mở review lại (ADR-0062); pr debt miễn phần cập nhật nhánh (giống hệt nhánh đích)"
   },
   {
    "id": "review-har137-rethink-fix-disables-auto-merge",
@@ -1166,6 +1173,78 @@
     "action": "rethink"
    },
    "note": "PR cắt bản miễn trần rethink: rà tới sạch, mỗi lượt một D-NNN (ADR-0059 §6, giữ ở ADR-0061)"
+  },
+  {
+   "id": "review-adr0062-one-review-blocking-debt",
+   "origin": "control",
+   "refs": [
+    "ADR-0062"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "1111111111111111111111111111111111111111",
+      "clean": false,
+      "at": "2026-11-01T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "debt"
+   },
+   "note": "review 1 lần: một review đã kết luận chặn ở head trước, head mới (bản sửa 🔴) chưa rà → debt ngay (pr debt --fixed), không giao review lần hai"
+  },
+  {
+   "id": "review-adr0062-inconclusive-only-no-debt",
+   "origin": "adversarial-reviewer",
+   "refs": [
+    "ADR-0062",
+    "ADR-0029"
+   ],
+   "input": {
+    "reviews": [
+     {
+      "head": "2222222222222222222222222222222222222222",
+      "clean": false,
+      "inconclusive": true,
+      "at": "2026-11-01T10:00:00+00:00"
+     }
+    ]
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review"
+   },
+   "note": "review chỉ có inconclusive: không đốt lượt, không debt (chưa biết còn 🔴) — cần review khác ở head"
+  },
+  {
+   "id": "review-adr0062-build-high-risk-not-deferred",
+   "origin": "adversarial-author",
+   "refs": [
+    "ADR-0062"
+   ],
+   "input": {
+    "decision": {
+     "delivery_phase": "build",
+     "high_risk": true
+    }
+   },
+   "expect": {
+    "eligible": false,
+    "auto_merge_ok": false,
+    "proceed": false,
+    "review": "missing",
+    "action": "review",
+    "review_deferred": false
+   },
+   "note": "pha build: PR rủi ro cao (schema/migration hoặc ngoại lệ cứng) không hoãn review thành nợ — cần một review độc lập ở head"
   }
  ]
 }

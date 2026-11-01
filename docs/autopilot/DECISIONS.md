@@ -2020,3 +2020,10 @@
 - Chọn: Ghi D-NNN hồi tố 2026-11-01 xác nhận phiên chính đã tự duyệt ADR-0060 theo tiêu chí chất lượng cuối; dòng Trạng thái ADR-0060 dẫn D-NNN kèm chữ 'hồi tố'
 - Lý do (tiêu chí chất lượng cuối): AGENTS.md §4: quyết định chuyên môn phiên chính tự duyệt phải có D-NNN; ADR-0060 là thiết kế (chọn 6 skill, mẫu) dù yêu cầu từ chủ repo; ghi hồi tố giữ dấu vết, không sửa lịch sử
 - Đường lùi: Xoá câu dẫn D-NNN ở ADR-0060 (giữ mục D trong sổ)
+
+### D-295 · 2026-11-01T11:05:35+00:00 · Máy hoá cấu hình review/merge mới của chủ dự án 2026-11-01 (review 1 lần, 3 mức rủi ro, cổng production) cho khung và dự án đích thế nào?
+
+- Phương án: (1) ADR-0062 thay ADR-0059 §1-2: review 1 lần; 🔴 sửa trong 1 commit rồi pr debt --fixed (không review lại), 🟠/🟢 ghi nợ; rủi ro thấp = làn nhanh (CI + tự rà diff, máy merge ghim head); trung bình = làn chuẩn, 1 review logic/phạm vi/test; cao = ngoại lệ cứng + schema/migration, review độc lập bắt buộc kể cả pha build; release-check thêm hàng migration/rollback/acceptance · (2) Chỉ sửa tài liệu/skill, giữ máy ADR-0059 (review 2 lần) — kỷ luật thay máy · (3) Review 1 lần nhưng 🔴 vẫn cần review lại delta sau sửa (giữ một phần ADR-0059)
+- Chọn: ADR-0062 thay ADR-0059 §1-2: review 1 lần; 🔴 sửa trong 1 commit rồi pr debt --fixed (không review lại), 🟠/🟢 ghi nợ; rủi ro thấp = làn nhanh (CI + tự rà diff, máy merge ghim head); trung bình = làn chuẩn, 1 review logic/phạm vi/test; cao = ngoại lệ cứng + schema/migration, review độc lập bắt buộc kể cả pha build; release-check thêm hàng migration/rollback/acceptance
+- Lý do (tiêu chí chất lượng cuối): Đúng chữ chủ dự án (người có quyền cuối, ADR-0008): 'chỉ review 1 lần: nghiêm trọng thì sửa, cam/xanh ghi nợ cho merge'. An toàn: 🔴 vẫn không ghi nợ (phải sửa, ghi đã sửa ở sổ tại head), cao rủi ro không hoãn review ở pha build (chặt hơn ADR-0037), audit cuối pha quét lại diff là lưới đỡ cho bản sửa không review lại; giữ đường lùi (revert ADR + REVIEW_ROUNDS). PA2 trái luật mới (PR vẫn đứng ở lượt 2); PA3 trái 'chỉ review 1 lần'.
+- Đường lùi: Revert PR của ADR-0062: REVIEW_ROUNDS=2 và _debt_problem cũ (ADR-0059), bỏ hàng release-check mới; dự án đích nâng khung bản kế

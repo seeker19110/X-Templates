@@ -5824,6 +5824,8 @@ def merge_decision(
     n = pr.get("number", "")
     lane_reasons = merge_lane_reasons(pr, risk_paths or [])
     hard = merge_hard_reasons(pr, risk_paths or [])
+    # Rủi ro cao (ADR-0062): ngoại lệ cứng (kể cả đã miễn) hoặc schema/migration — review độc lập bắt buộc, kể cả pha build.
+    high = bool(hard) or any(rx.search(p) for tag, rx in RISK_PATH_RES if tag == "schema" for p in _risky_paths(pr))
     # Khoá tự miễn cho chính PR đổi nó thì chốt vô nghĩa — lý do này không miễn được.
     waived = [r for r in hard if r not in UNWAIVABLE] if hard_auto else []
     hard = [r for r in hard if r not in waived]
@@ -5875,6 +5877,7 @@ def merge_decision(
         "release": is_release_pr(pr),
         "hard": hard,  # ngoại lệ cứng: máy không merge (ADR-0016)
         "hard_waived": waived,  # ngoại lệ cứng chủ dự án cho máy merge (ADR-0020) — chỉ để người đọc lại
+        "high_risk": high,  # rủi ro cao (ADR-0062): pha build không hoãn review
         "risk_labels": _risk_labels(
             pr
         ),  # nhãn `risk:` (phanh thủ công, ADR-0025): pha build hoãn review thành nợ (ADR-0037)
@@ -5974,10 +5977,10 @@ def delivery_phase(base: Path, ref: str) -> Tuple[str, List[str]]:
 
 
 def review_deferrable(d: Dict[str, Any]) -> bool:
-    """Review của PR được hoãn thành nợ (ADR-0031, ADR-0037): pha build VÀ PR không thuộc ngoại lệ cứng giữ người (`hard`
-    — người merge). Reviewer chỉ chạy ở pha harden (chủ repo 2026-10-21, D-124): ngoại lệ cứng đã miễn (`hard_waived`,
-    ADR-0020) cũng thành nợ, trả ở harden trước phát hành (`release-check` hàng `review_debt`)."""
-    return d.get(PHASE_KEY) == "build" and not d.get("hard")
+    """Review của PR được hoãn thành nợ (ADR-0031, ADR-0037): pha build VÀ PR không rủi ro cao (ADR-0062, D-295 — thay
+    D-124 "reviewer chỉ chạy ở harden"): ngoại lệ cứng (kể cả đã miễn `hard_waived`, ADR-0020) hay schema/migration →
+    review độc lập bắt buộc ở mọi pha; rủi ro trung bình hoãn thành nợ, trả ở harden (`release-check` hàng `review_debt`)."""
+    return d.get(PHASE_KEY) == "build" and not (d.get("hard") or d.get("hard_waived") or d.get("high_risk"))
 
 
 def review_deferred(d: Dict[str, Any], reviews: List[Dict[str, Any]], state: str) -> bool:
@@ -11139,10 +11142,10 @@ def _pr_next_blocked(d: Dict[str, Any], auto_merge: bool, act: PrAct, disable: s
     return None
 
 
-# Ngân sách review mỗi PR (ADR-0053 → ADR-0059, D-257): review 2 lần, sửa 1 lần — một lượt toàn PR + một lượt delta; quá
-# trần → `debt` (ghi nợ phát hiện còn lại, tiếp tục; 🔴 → `pr rethink`), không review lần ba — trừ PR cắt bản: `rethink`,
-# sửa hết, review lại tới khi sạch (ADR-0059 §6).
-REVIEW_ROUNDS = 2
+# Ngân sách review mỗi PR (ADR-0053 → ADR-0059 → ADR-0062, D-295): review 1 lần — một review đã kết luận còn lỗi →
+# `debt`: 🟠/🟢 ghi nợ, 🔴 sửa trong một commit rồi `pr debt --fixed` (không review lại); review `inconclusive` không tính
+# lượt — cần review khác. PR cắt bản: `rethink`, sửa hết, review lại tới khi sạch (ADR-0059 §6).
+REVIEW_ROUNDS = 1
 # Trần số lần `pr rethink` mỗi PR (ADR-0061, bài học #372: 7 lượt review vẫn đỏ): xt.yaml `max_rethink` (mặc định 1;
 # 0 = không trần = hành vi ADR-0053/0059). Hết trần → `pr next` trả `split-or-close` thay `rethink`; PR cắt bản miễn
 # (ADR-0059 §6: rà tới sạch).
@@ -11198,6 +11201,13 @@ def review_window(reviews: List[Dict[str, Any]], rethinks: object = None) -> Lis
     return carry + window
 
 
+def _rethink_after_reviews(reviews: List[Dict[str, Any]], rethinks: object) -> bool:
+    """Có `pr rethink` ghi SAU mọi review (mọi head): lần sửa thêm đã được mở — head mới chưa rà thì rà lại (ADR-0059 §6)."""
+    rows = [r for r in rethinks if isinstance(r, dict)] if isinstance(rethinks, list) else []
+    since = max((t for t in (_iso_time(r.get("at")) for r in rows) if t), default=None)
+    return since is not None and all((t is not None and t < since) for t in (_iso_time(r.get("at")) for r in reviews))
+
+
 def _rethink_pending(reviews: List[Dict[str, Any]], rethinks: object, head: str) -> bool:
     """`pr rethink` cuối ghi ở đúng head hiện tại và chưa có review nào sau nó: lần sửa thêm chưa push — `fix`, không
     `review` (review head chưa sửa sẽ đốt lần sửa — review #346)."""
@@ -11238,6 +11248,7 @@ def _pr_next_review(
     identity: bool = False,
     fixed: bool = True,
     capped: bool = False,
+    reopened: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Làn chuẩn (1)/(4)/(6): chỉ đi tiếp khi review sạch (hoặc ghi nợ) ở đúng head hiện tại (`review_gate`); hết lượt
     review (ADR-0059: review 2 lần, sửa 1 lần) → `debt` thay `review`/`fix` — trừ khi review chưa sạch cuối chưa kết
@@ -11251,7 +11262,9 @@ def _pr_next_review(
         f" ({AUDIT_STATUS_DEFAULT} / DECISIONS.md): xt.py loop decide --question 'PR #{n}: tách hay đóng?' — không"
         " `pr rethink` nữa (max_rethink, ADR-0061)"
     )
-    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and (unsure or identity or fixed):
+    # PR cắt bản/`review_identity` đã sửa sau `rethink` (head chưa được rà) → rà lại tới sạch (ADR-0059 §6), không `rethink` lặp.
+    redo = reopened and gate["state"] == "missing" and (identity or bool(d.get("release")))
+    if gate["state"] in ("missing", "blocking") and rounds >= REVIEW_ROUNDS and fixed and not redo:
         if auto_merge:
             return act("disable-auto-merge", "PR quá ngân sách review mà auto-merge đang bật", disable)
         if capped and (unsure or identity):
@@ -11276,18 +11289,13 @@ def _pr_next_review(
                 f"xt.py loop decide --question 'PR #{n}: …' (review khác, tách/thu hẹp PR) → xt.py pr rethink --pr {n}"
                 " --decision D-NNN",
             )
-        more = (
-            f"Còn 🔴: không ghi nợ — hết trần rethink: {split}"
-            if capped
-            else f"Còn 🔴: không ghi nợ — thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢): xt.py loop decide --question"
-            f" 'PR #{n}: …' → xt.py pr rethink --pr {n} --decision D-NNN"
-        )
         return act(
             "debt",
-            f"{rounds} lượt review chưa sạch (trần {REVIEW_ROUNDS}: review 2 lần, sửa 1 lần — ADR-0059) — không sửa nữa,"
-            " ghi nợ phát hiện còn lại rồi tiếp tục; nợ sửa cuối pha",
-            f"mỗi phát hiện 🟠/🟢 còn lại → một dòng `mở` ở {AUDIT_STATUS_DEFAULT} có `{REVIEW_DEBT_TAG} #{n}` ở Ghi chú;"
-            f" commit chỉ sổ, push → xt.py pr debt --pr {n} --findings AUD-…[,AUD-…]. {more}",
+            f"đã review {rounds} lần (trần {REVIEW_ROUNDS}: review 1 lần — ADR-0062) — không review lại: 🔴 sửa,"
+            " 🟠/🟢 ghi nợ rồi merge; nợ sửa cuối pha",
+            f"mỗi phát hiện 🟠/🟢 → một dòng `mở` ở {AUDIT_STATUS_DEFAULT} có `{REVIEW_DEBT_TAG} #{n}` ở Ghi chú; mỗi 🔴 →"
+            f" sửa trong MỘT commit (kèm test) và dòng `đã sửa` có `{REVIEW_DEBT_TAG} #{n}`; commit, push → xt.py pr debt"
+            f" --pr {n} --findings AUD-…[,AUD-…] [--fixed AUD-🔴…]",
         )
     if gate["state"] == "missing":
         since = f"{last.get('head')}..{head}" if last else "cả PR"
@@ -11447,9 +11455,10 @@ def unpublished_review(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
     """Bản ghi sạch của sổ còn qua `_review_models_error` (luật hiện hành, không cấu hình) — tức lệnh đăng lại chạy được;
-    bản ghi nợ (`pr debt`, ADR-0059) không mang model — hợp lệ khi có danh sách ID."""
+    bản ghi nợ (`pr debt`, ADR-0059/0062) không mang model — hợp lệ khi có ID nợ hoặc ID 🔴 đã sửa (`fixed`)."""
     if "debt" in r:
-        return isinstance(r["debt"], list) and bool(r["debt"]) and all(isinstance(i, str) for i in r["debt"])
+        ids = [*(r["debt"] if isinstance(r["debt"], list) else [None]), *(r.get("fixed") or [])]
+        return bool(ids) and all(isinstance(i, str) for i in ids)
     vals = {k: r.get(k) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
     if not all(v is None or isinstance(v, str) for v in vals.values()):
         return False
@@ -11458,8 +11467,10 @@ def _ledger_clean_valid(r: Dict[str, Any]) -> bool:
 
 def _republish_cmd(n: object, r: Dict[str, Any]) -> str:
     """Lệnh đăng lại; bản ghi sạch đã qua `_ledger_clean_valid` nên luôn có đủ hai model (hoặc là bản ghi nợ)."""
-    if r.get("debt"):
-        return f"xt.py pr debt --pr {n} --findings {shlex.quote(','.join(r['debt']))}"
+    if "debt" in r:
+        fixed = f" --fixed {shlex.quote(','.join(r['fixed']))}" if r.get("fixed") else ""
+        found = f" --findings {shlex.quote(','.join(r['debt']))}" if r["debt"] else ""
+        return f"xt.py pr debt --pr {n}{found}{fixed}"
     flag = "--inconclusive" if r.get("inconclusive") else "--clean" if r.get("clean") else "--blocking"
     q = {k: shlex.quote(str(r.get(k))) for k in ("reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)}
     efforts = "".join(f" --{k.replace('_', '-')} {q[k]}" for k in REVIEW_EFFORT_KEYS if r.get(k))
@@ -11550,7 +11561,7 @@ def pr_next(
         unclean = [r for r in reviews if not r.get("clean")]
         unsure = bool(unclean) and bool(unclean[-1].get("inconclusive"))
         window = review_window(reviews, rec.get("rethinks"))
-        fixed = len(_reviewed_contents(window, rec.get("merges"), head, d.get("base_merge_of"))) >= 2
+        fixed = len(_reviewed_contents(window, rec.get("merges"), head, d.get("base_merge_of"))) >= REVIEW_ROUNDS
         identity = bool(rec.get("published_only"))
         pending = gate["state"] in ("missing", "blocking") and _rethink_pending(reviews, rec.get("rethinks"), head)
         if pending and auto_merge:  # cần push: tắt auto-merge người bật TRƯỚC (AUD-HAR-137)
@@ -11562,7 +11573,10 @@ def pr_next(
                 "sửa hết phát hiện của review cuối, push, chạy lại pr next",
             )
         else:
-            early = _pr_next_review(d, auto_merge, gate, act, disable, len(window), unsure, identity, fixed, capped)
+            reopened = _rethink_after_reviews(reviews, rec.get("rethinks"))
+            early = _pr_next_review(
+                d, auto_merge, gate, act, disable, len(window), unsure, identity, fixed, capped, reopened
+            )
     if early is not None:
         return early
     label = f"làn {d.get('lane')}" if deferred else "review sạch ở head" if strict else "làn nhanh"
@@ -11883,6 +11897,24 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
     return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {book}), show.stdout
 
 
+def _debt_row_problem(rows: Dict[str, Dict[str, str]], key: str, head: str, i: str, fixed: bool) -> Optional[str]:
+    """Lý do dòng sổ `i` không hợp lệ cho `pr debt`: nợ = `mở` không 🔴; sửa (`--fixed`) = 🔴 `đã sửa`; cả hai mang Ghi chú
+    `nợ-review: #N` của đúng PR, trong sổ ở head (ADR-0062)."""
+    r = rows.get(i)
+    tag = REVIEW_DEBT_RE.search(r.get("Ghi chú", "")) if r else None
+    want = "đã sửa" if fixed else "mở"
+    if r is None or r.get("Trạng thái") != want or not tag or tag[1] != key:
+        return (
+            f"{i}: cần dòng `{want}` trong {AUDIT_STATUS_DEFAULT} ở head {head[:7]} (head theo GitHub — vừa push thì đợi"
+            f" GitHub cập nhật rồi chạy lại), Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
+        )
+    if fixed and r.get("Mức") != "🔴":
+        return f"{i} không phải 🔴 — `--fixed` chỉ cho 🔴 đã sửa; 🟠/🟢 ghi nợ qua --findings (dòng `mở`)"
+    if not fixed and r.get("Mức") == "🔴":
+        return f"{i} là 🔴 — không ghi nợ: sửa trong một commit (kèm test), dòng sổ `đã sửa`, rồi khai --fixed {i}"
+    return None
+
+
 def _debt_problem(
     base: Path,
     key: str,
@@ -11890,42 +11922,28 @@ def _debt_problem(
     rec: Dict[str, Any],
     ids: List[str],
     target: str = "main",
-    capped: bool = False,
+    fixed: Sequence[str] = (),
 ) -> Optional[str]:
-    """Lý do `pr debt` từ chối (ADR-0059): sửa 1 lần — cây ở head khác cây ở review chưa sạch cuối CHỈ ở sổ audit, hoặc ở
-    file mà head giống hệt nhánh đích `origin/<target>` (cập nhật nhánh); so cây, không đổi tên (`--no-renames`) — merge
-    sửa thêm mã hay `git mv` mã thành sổ không lọt (review #345); mỗi ID là dòng `mở`, không 🔴, Ghi chú `nợ-review: #N`
-    của đúng PR, trong sổ ở head."""
-    if not ids or any(not REQ_ID_RE.fullmatch(i) for i in ids):
-        return "--findings cần ≥ 1 ID sổ audit (AUD-…), cách nhau bằng dấu phẩy"
+    """Lý do `pr debt` từ chối (ADR-0062, review 1 lần): cây ở head khác cây ở review chưa sạch cuối CHỈ ở sổ audit, hoặc
+    ở file mà head giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) — trừ khi khai `--fixed` (bản sửa 🔴, không
+    review lại); so cây, không đổi tên (`--no-renames`) — `git mv` mã thành sổ không lọt (review #345); mỗi ID nợ là dòng
+    `mở` không 🔴, mỗi ID sửa là 🔴 `đã sửa`, Ghi chú `nợ-review: #N` của đúng PR, trong sổ ở head."""
+    if not (ids or fixed) or any(not REQ_ID_RE.fullmatch(i) for i in [*ids, *fixed]):
+        return "--findings/--fixed cần ≥ 1 ID sổ audit (AUD-…), cách nhau bằng dấu phẩy"
     last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))  # `pr next` = debt: blocking kết luận
     error, extra, ledger = _review_drift(base, last, head, target)
     if error:
         return error
-    if extra:
+    if extra and not fixed:
         return (
-            f"sau review cuối ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 2 lần, sửa 1 lần:"
-            f" chỉ commit sổ {AUDIT_STATUS_DEFAULT}; sửa thêm thì cần lượt review mới (`pr rethink`) — nếu đó là cập nhật"
-            f" nhánh mà origin/{target} cục bộ cũ: `git fetch origin {target}` rồi chạy lại (AUD-HAR-133)"
+            f"sau review ở {last[:7]} đã đổi {', '.join(extra[:5])} — review 1 lần (ADR-0062): chỉ commit sổ"
+            f" {AUDIT_STATUS_DEFAULT}, hoặc bản sửa 🔴 thì khai --fixed <ID 🔴 `đã sửa`> — nếu đó là cập nhật nhánh mà"
+            f" origin/{target} cục bộ cũ: `git fetch origin {target}` rồi chạy lại (AUD-HAR-133)"
         )
     rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
-    for i in ids:
-        r = rows.get(i)
-        tag = REVIEW_DEBT_RE.search(r.get("Ghi chú", "")) if r else None
-        if r is None or r.get("Trạng thái") != "mở" or not tag or tag[1] != key:
-            return (
-                f"{i}: cần dòng `mở` trong {AUDIT_STATUS_DEFAULT} ở head {head[:7]} (head theo GitHub — vừa push thì đợi"
-                f" GitHub cập nhật rồi chạy lại), Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
-            )
-        if r.get("Mức") == "🔴":
-            return f"{i} là 🔴 — không ghi nợ: " + (
-                f"đã hết trần `pr rethink` ({MAX_RETHINK_KEY}, ADR-0061) — tách PR #{key} nhỏ hơn hoặc đóng, ghi sổ phần"
-                " đã học"
-                if capped
-                else f"thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide --question 'PR #{key}: …' →"
-                f" xt.py pr rethink --pr {key} --decision D-NNN"
-            )
-    return None
+    probs = [_debt_row_problem(rows, key, head, i, False) for i in ids]
+    probs += [_debt_row_problem(rows, key, head, i, True) for i in fixed]
+    return next((p for p in probs if p), None)
 
 
 def _pr_debt(args: argparse.Namespace, base: Path) -> int:
@@ -11939,32 +11957,36 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     d, data, rec = _pr_next_state(pr, base)
     key, head = str(d["pr"]), str(d.get("head", ""))
     ids = sorted({i.strip() for i in args.findings.split(",") if i.strip()})
+    fixed = sorted({i.strip() for i in args.fixed.split(",") if i.strip()})
     local = _pr_record(data, key)
     reviews = _ledger_reviews(local)
-    again = bool(reviews) and reviews[-1].get("head") == head and reviews[-1].get("debt") == ids
+    last = reviews[-1] if reviews else {}
+    again = last.get("head") == head and last.get("debt") == ids and last.get("fixed", []) == fixed
     if not again:
-        cap = pr_rethink_cap(base, pr)
-        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec, cap)["action"]
-        capped = 0 < cap <= rethink_count(rec.get("rethinks")) and not d.get("release")
+        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr))["action"]
         problem = (
             f"`pr next` của PR #{key} là `{action}`, không phải `debt` — làm bước đó trước"
             if action != "debt"
-            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"), capped)
+            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"), fixed)
         )
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
             return 2
-        reviews.append({"head": head, "clean": True, "debt": ids, "at": now_iso()})
+        reviews.append(
+            {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
+        )
         data[key] = {**local, "reviews": reviews}
         _write_reviews(base, data)
     entry = reviews[-1]
     print(
-        f"✓ PR #{key}: ghi nợ review ở {head[:7]} ({', '.join(ids)}) — sửa cuối pha"
+        f"✓ PR #{key}: ghi nợ review ở {head[:7]} ({', '.join(ids) or '—'}"
+        + (f"; 🔴 đã sửa: {', '.join(fixed)}" if fixed else "")
+        + ") — nợ sửa cuối pha"
         + (" (đã ghi trước đó — không ghi thêm)" if again else "")
     )
     if args.no_publish or entry.get("published"):
         return 0
-    rc = _publish_review(str(args.pr or key), key, head, True, debt=ids)
+    rc = _publish_review(str(args.pr or key), key, head, True, debt=[*ids, *fixed])
     if rc == 0:
         entry["published"] = True
         data[key] = {**local, "reviews": reviews}
@@ -14182,7 +14204,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pdb.add_argument("--pr", help="số/URL/nhánh của PR (mặc định PR của nhánh hiện tại)")
     pdb.add_argument("--pr-json", help="đọc JSON PR từ FILE hoặc - như merge-check")
-    pdb.add_argument("--findings", required=True, help="ID sổ audit đã ghi nợ (`nợ-review: #N`), cách nhau dấu phẩy")
+    pdb.add_argument("--findings", default="", help="ID sổ audit đã ghi nợ (`nợ-review: #N`), cách nhau dấu phẩy")
+    pdb.add_argument("--fixed", default="", help="ID 🔴 đã sửa sau review (dòng `đã sửa`, `nợ-review: #N`) — ADR-0062")
     pdb.add_argument("--no-publish", action="store_true", help="chỉ ghi sổ cục bộ, không đăng dấu lên PR")
     pst = prsub.add_parser(
         "steward", help="mọi PR mở → pr next; --apply tự merge ghim head/tắt auto-merge (workflow pr-steward, ADR-0027)"

@@ -436,7 +436,7 @@ class ReviewSourceTest(unittest.TestCase):
         # review cục bộ CŨ hơn dấu đã đăng mới nhất (phiên khác đã rà lại sau): dấu đã đăng quyết, không đăng lại
         later = {**mark(False), "at": "2026-10-20T12:00:00Z"}
         r = xt.pr_next(d, False, xt.with_published({"reviews": [clean]}, [later]))
-        self.assertEqual(r["action"], "fix")
+        self.assertEqual(r["action"], "debt")  # review 1 lần (ADR-0062)
         self.assertIsNone(xt.unpublished_review(xt.with_published({"reviews": [clean]}, [later])))
         inc = {**mark(False), "inconclusive": True}
         self.assertIn("--inconclusive", xt.pr_next(d, False, xt.with_published({"reviews": [inc]}, []))["do"])
