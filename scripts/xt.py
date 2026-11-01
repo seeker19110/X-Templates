@@ -28,7 +28,8 @@ Lệnh:
   loop unblock --reason TEXT    Người xem rồi: mở BLOCKED/đã dừng, đặt lại đếm lỗi; giữ việc chờ, số vòng/bằng chứng.
   loop resume [--reason TEXT]   Lệnh cũ (làm cả bốn việc trên, in cảnh báo) — dùng attach/resolve/unblock.
   loop stop [--reason TEXT]     Tắt vòng lặp.
-  loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần.
+  loop stats [--json] [--all]   Số đo vòng từ .autopilot/runs.jsonl: lần chạy/task, xanh lần đầu, task cần ≥ 3 lần,
+                                thời gian tới xanh (giờ, trung vị/P95 — ADR-0061).
   pr next [--pr N] [--json]     Merge theo làn: MỘT bước kế cho PR đã mở (tắt auto-merge người bật, rà, merge ghim head…).
   pr stats [--days 30] [--repo R] [--json]
                                 Số đo PR đã merge trong N ngày (REST): lead time trung vị/P95, run CI `pull_request` mỗi PR,
@@ -43,7 +44,8 @@ Lệnh:
   pr rethink [--pr N] --decision D-NNN
                                 PR hết lượt review (`pr next` = debt mà còn 🔴 — thêm một lần sửa hết; hoặc = rethink: review
                                 cuối chưa kết luận, `review_identity`): mở thêm một lần sửa theo D-NNN mới, câu hỏi nhắc #N, ghi sau
-                                review chưa sạch cuối (ADR-0053/0059, D-210).
+                                review chưa sạch cuối (ADR-0053/0059, D-210); tối đa `max_rethink` lần/PR (mức chặt hơn
+                                giữa cây và nhánh đích; PR cắt bản miễn) — hết trần `pr next` trả split-or-close (ADR-0061).
   loop hook-stop                Dùng cho Stop hook của Claude Code: đọc JSON stdin, quyết định cho dừng hay chạy tiếp.
   loop triage-local             Dùng cho hook PostToolUseFailure: lệnh Bash cổng/Gate đỏ → ≤ 20 dòng lỗi đã che bí mật
                                 (bộ phân loại của ci-triage) làm additionalContext; không khớp/lỗi → im lặng, exit 0.
@@ -11074,6 +11076,15 @@ def rethink_cap(keys: Dict[str, str]) -> int:
     return int(raw) if re.fullmatch(r"\d+", raw) else MAX_RETHINK_DEFAULT
 
 
+def pr_rethink_cap(base: Path, pr: Dict[str, Any]) -> int:
+    """Trần `max_rethink` CHẶT hơn giữa cây làm việc và xt.yaml đã commit ở nhánh đích của PR (như `merge_autonomy_level`):
+    sửa tại chỗ chỉ siết được, nới (kể cả `0` = không trần) phải qua PR đã merge (review #380). `0` là lỏng nhất."""
+    work = rethink_cap(_xt_keys(base))
+    committed = rethink_cap(_committed_xt_keys(base, f"origin/{pr.get('baseRefName') or 'main'}"))
+    caps = [c for c in (work, committed) if c > 0]
+    return min(caps) if caps else 0
+
+
 def rethink_count(rethinks: object) -> int:
     """Số lần `pr rethink` đã ghi ở sổ của PR (mọi lần, không theo cửa sổ review — trần là theo PR)."""
     return sum(isinstance(r, dict) for r in rethinks) if isinstance(rethinks, list) else 0
@@ -11724,7 +11735,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, data, rec = _pr_next_state(pr, base)
-    cap = rethink_cap(_xt_keys(base))
+    cap = pr_rethink_cap(base, pr)
     key, action = str(d["pr"]), pr_next(d, bool(pr.get("autoMergeRequest")), rec, cap)["action"]
     if action not in ("debt", "rethink"):  # ADR-0059: hết lượt → `debt` (còn 🔴 thì thêm lần sửa ở đây) hoặc `rethink`
         print(
@@ -11734,16 +11745,18 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     local = _pr_record(data, key)
     old = local.get("rethinks")
     rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
-    problem = _rethink_problem(base, args.decision, key, rec, rethinks)
-    if problem:
-        print(f"✗ {problem}", file=sys.stderr)
-        return 2
-    if 0 < cap <= len(rethinks) and not d.get("release"):  # ADR-0061: trần theo PR; PR cắt bản miễn (ADR-0059 §6)
+    # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
+    # PR cắt bản miễn (ADR-0059 §6)
+    if 0 < cap <= len(rethinks) and not d.get("release"):
         print(
             f"✗ PR #{key} đã dùng {len(rethinks)}/{cap} lần `pr rethink` (xt.yaml {MAX_RETHINK_KEY}, ADR-0061) — tách PR"
             " nhỏ hơn hoặc đóng, ghi sổ phần đã học; không mở thêm lượt",
             file=sys.stderr,
         )
+        return 2
+    problem = _rethink_problem(base, args.decision, key, rec, rethinks)
+    if problem:
+        print(f"✗ {problem}", file=sys.stderr)
         return 2
     entry = {"decision": args.decision, "at": now_iso()}
     head = str(d.get("head", ""))
@@ -11791,7 +11804,13 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
 
 
 def _debt_problem(
-    base: Path, key: str, head: str, rec: Dict[str, Any], ids: List[str], target: str = "main"
+    base: Path,
+    key: str,
+    head: str,
+    rec: Dict[str, Any],
+    ids: List[str],
+    target: str = "main",
+    capped: bool = False,
 ) -> Optional[str]:
     """Lý do `pr debt` từ chối (ADR-0059): sửa 1 lần — cây ở head khác cây ở review chưa sạch cuối CHỈ ở sổ audit, hoặc ở
     file mà head giống hệt nhánh đích `origin/<target>` (cập nhật nhánh); so cây, không đổi tên (`--no-renames`) — merge
@@ -11819,9 +11838,12 @@ def _debt_problem(
                 f" GitHub cập nhật rồi chạy lại), Ghi chú `{REVIEW_DEBT_TAG} #{key}`"
             )
         if r.get("Mức") == "🔴":
-            return (
-                f"{i} là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide"
-                f" --question 'PR #{key}: …' → xt.py pr rethink --pr {key} --decision D-NNN"
+            return f"{i} là 🔴 — không ghi nợ: " + (
+                f"đã hết trần `pr rethink` ({MAX_RETHINK_KEY}, ADR-0061) — tách PR #{key} nhỏ hơn hoặc đóng, ghi sổ phần"
+                " đã học"
+                if capped
+                else f"thêm một lần sửa, sửa HẾT phát hiện (cả 🟠/🟢) — xt.py loop decide --question 'PR #{key}: …' →"
+                f" xt.py pr rethink --pr {key} --decision D-NNN"
             )
     return None
 
@@ -11841,11 +11863,13 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     reviews = _ledger_reviews(local)
     again = bool(reviews) and reviews[-1].get("head") == head and reviews[-1].get("debt") == ids
     if not again:
-        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec, rethink_cap(_xt_keys(base)))["action"]
+        cap = pr_rethink_cap(base, pr)
+        action = pr_next(d, bool(pr.get("autoMergeRequest")), rec, cap)["action"]
+        capped = 0 < cap <= rethink_count(rec.get("rethinks")) and not d.get("release")
         problem = (
             f"`pr next` của PR #{key} là `{action}`, không phải `debt` — làm bước đó trước"
             if action != "debt"
-            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"))
+            else _debt_problem(base, key, head, rec, ids, str(pr.get("baseRefName") or "main"), capped)
         )
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
@@ -12028,7 +12052,7 @@ def _steward_one(pr_arg: str, repo: str, base: Path, apply: bool, gh_repo: List[
     )
     if _standard_seen(pr):  # từng vào làn chuẩn (nhãn bền): push sau đó không hạ PR về làn nhanh
         rec = {**rec, "standard_seen": True}
-    out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec, rethink_cap(_xt_keys(base))), "applied": False}
+    out = {**pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr)), "applied": False}
     why_not = steward_untrusted(pr)
     if why_not and out["action"] not in ("done", "closed", "disable-auto-merge"):
         return {**out, "action": "defer-human", "why": why_not}
@@ -12493,7 +12517,7 @@ def cmd_pr(args: argparse.Namespace) -> int:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
     d, _, rec = _pr_next_state(pr, base)
-    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec, rethink_cap(_xt_keys(base)))
+    out = pr_next(d, bool(pr.get("autoMergeRequest")), rec, pr_rethink_cap(base, pr))
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
         return 0

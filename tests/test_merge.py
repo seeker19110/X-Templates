@@ -1876,6 +1876,18 @@ class PrNextTest(unittest.TestCase):
         self.assertEqual((xt.rethink_cap({"max_rethink": "0"}), xt.rethink_cap({"max_rethink": "3"})), (0, 3))
         self.assertEqual((xt.rethink_cap({"max_rethink": "x"}), xt.rethink_cap({"max_rethink": "-1"})), (1, 1))
         self.assertEqual((xt.rethink_count(after), xt.rethink_count(rough), xt.rethink_count("rác")), (1, 1, 0))
+        # review #380: trần = mức CHẶT hơn giữa cây làm việc và xt.yaml đã commit ở nhánh đích; 0 là lỏng nhất
+        # thiếu khoá ở cây = mặc định 1 (chặt hơn 3 ở nhánh đích)
+        for work, committed, want in ((None, 3, 1), ("0", "3", 3), ("2", "0", 2), ("0", "0", 0), ("4", "2", 2)):
+            with (
+                self.subTest(work=work, committed=committed),
+                unittest.mock.patch.object(xt, "_xt_keys", return_value={} if work is None else {"max_rethink": work}),
+                unittest.mock.patch.object(
+                    xt, "_committed_xt_keys", return_value={"max_rethink": str(committed)}
+                ) as ck,
+            ):
+                self.assertEqual(xt.pr_rethink_cap(Path("."), {"baseRefName": "dev"}), want)
+                self.assertEqual(ck.call_args.args[1], "origin/dev")
         # head chỉ là cập nhật nhánh đích của head đã rà (`base_merge_of`): chưa phải lần sửa → sửa, không ghi nợ
         self.assertEqual(self.act(rec={"reviews": [b1, b2]}, base_merge_of=[self.H2])["action"], "fix")
         # AUD-HAR-136: head cập nhật nhánh đã rà (`merges` nhớ lúc `pr next` thấy) gộp với head nguồn — bản sửa ở head mới
@@ -2042,7 +2054,12 @@ class PrNextCliTest(unittest.TestCase):
         self.assertIn(
             "PR #7 đã dùng 1/1 lần `pr rethink` (xt.yaml max_rethink, ADR-0061) — tách PR nhỏ hơn hoặc đóng", err
         )
-        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmax_rethink: 0\n", encoding="utf-8")  # đường lùi
+        self.assertIn("đã dùng 1/1", self.rethink("D-999", p2)[2])  # trần kiểm trước D-NNN (review #380)
+        # review #380: sửa xt.yaml tại chỗ không nới được trần (lấy mức chặt hơn với nhánh đích) — phải qua PR đã merge
+        (self.base / "xt.yaml").write_text("merge_autonomy: L3\nmax_rethink: 0\n", encoding="utf-8")
+        self.assertEqual(json.loads(self.nxt(p2, "--json")[1])["do"].count("hết trần rethink"), 1)
+        self.assertEqual(self.rethink("D-008", p2)[0], 2)
+        commit_base_xt(self.base, "merge_autonomy: L3\nmax_rethink: 0\n")  # đường lùi đã ở nhánh đích
         self.assertIn("xt.py pr rethink --pr 7", json.loads(self.nxt(p2, "--json")[1])["do"])
         self.assertEqual(self.rethink("D-008", p2)[0], 0)
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "fix")
@@ -2054,6 +2071,9 @@ class PrNextCliTest(unittest.TestCase):
     def test_rethink_decision_must_follow_every_unclean_review(self):
         """Review #298 lượt 2: quyết định ghi GIỮA hai review chưa sạch (cũ hơn review cuối) không mở được trần; một D-NNN
         không mở trần hai lần cho cùng PR (kể cả khi mốc của nó sau các review mới, trong độ lệch giờ cho phép)."""
+        commit_base_xt(
+            self.base, "merge_autonomy: L3\nmax_rethink: 0\n"
+        )  # luật D-NNN cần ≥ 2 lượt (ADR-0061: 0 = không trần)
         r1 = {"head": "d" * 40, "clean": False, "at": "2026-10-27T01:00:00Z"}
         r2 = {"head": self.head, "clean": False, "at": "2026-10-27T03:00:00Z"}
         p = {**self.big, "xtReviews": [r1, r2]}
@@ -2210,6 +2230,20 @@ class PrNextCliTest(unittest.TestCase):
         rc, _, err = debt("AUD-SEC-001,AUD-SEC-002")
         self.assertEqual(rc, 2)
         self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ: thêm một lần sửa, sửa HẾT phát hiện", err)
+        # review #380: đã hết trần `pr rethink` → thông điệp 🔴 chỉ tách/đóng, không trỏ `pr rethink` (exit 2 ở đó)
+        led = self.base / ".autopilot" / "reviews.json"
+        saved = led.read_text(encoding="utf-8") if led.is_file() else None
+        data = json.loads(saved) if saved else {}
+        data.setdefault("7", {})["rethinks"] = [{"decision": "D-001", "at": "2026-10-27T01:30:00+00:00"}]
+        led.parent.mkdir(parents=True, exist_ok=True)
+        led.write_text(json.dumps(data), encoding="utf-8")
+        err = debt("AUD-SEC-001,AUD-SEC-002")[2]
+        self.assertIn("AUD-SEC-002 là 🔴 — không ghi nợ: đã hết trần `pr rethink` (max_rethink, ADR-0061)", err)
+        self.assertNotIn("pr rethink --pr", err)
+        if saved is None:
+            led.unlink()
+        else:
+            led.write_text(saved, encoding="utf-8")
         lost = {**p, "xtReviews": [r1, {**r2, "head": "e" * 40}]}
         self.assertIn("không đọc được cây eeeeeee", debt("AUD-SEC-001", lost)[2])
         fixed = self.commit({"src/a.py": "x = 2\n"})  # sửa lần hai sau review cuối → không ghi nợ được
