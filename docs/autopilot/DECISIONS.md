@@ -2006,3 +2006,10 @@
 - Chọn: Bảng topology máy đọc, mặc định self, giữ hai tầng executor cho parallel, đợt 4, rethink tối đa 1 mỗi PR, thêm KPI thời gian vào loop stats; 7 lát mỗi lát một PR, tự làm (topo self), lát chạm harness topo review
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: khớp thực tế vận hành phiên 2026-10-31 và dữ kiện sống 2026-11-01 (Harness design: đơn giản nhất, chỉ tăng khi cần; ROI: cost per task, PR cycle time); tiêu chí 2: đường lùi một dòng topo parallel trả hành vi cũ; tiêu chí 3: số đo LOOP-ORCH-020 vẫn chạy và có thêm trục thời gian; chủ dự án có quyền cuối, số 4 và 1 rethink ghi là khởi điểm tự đặt; phương án 2 không bao giờ có số, phương án 3 mất chuyển cấp ADR-0029
 - Đường lùi: Revert PR từng lát; PLAN ghi topo parallel cho mọi task; max_rethink 0
+
+### D-293 · 2026-11-01T04:33:04+00:00 · T-3606: khung chưa có scanner prompt-assets-scan (chỉ bảng ai-security.md:106 trỏ script dự án đích) — lát này làm gì?
+
+- Phương án: (1) Tài liệu trước: SEC-AI-018 thêm luật XT-H-024 (lời bỏ xác nhận/không từ chối, gói không ghim, quét README/docs), CMP-LIC-024 mới cho XT-H-026; scanner thành T-3613 đợt kế (lát ≤ 150 dòng, mỗi lát một PR) · (2) Hiện thực xt.py prompt-assets-scan ngay (4 luật cũ + 2 mới + miễn trừ + test, ~300 dòng) trong lát này
+- Chọn: Tài liệu trước: SEC-AI-018 thêm luật XT-H-024 (lời bỏ xác nhận/không từ chối, gói không ghim, quét README/docs), CMP-LIC-024 mới cho XT-H-026; scanner thành T-3613 đợt kế (lát ≤ 150 dòng, mỗi lát một PR)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn ngang nhau (luật đã có nhà, scanner là công cụ cưỡng chế); phương án 1 nhỏ, đảo ngược được, đúng trần lát của ADR-0061; scanner là feature riêng cần spec miễn trừ + fixture, ghi task T-3613 kèm Gate test
+- Đường lùi: Bỏ T-3613, sửa lại chữ SEC-AI-018/CMP-LIC-024 về bản trước (giữ ID)
