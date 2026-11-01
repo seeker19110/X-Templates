@@ -59,6 +59,9 @@ Lệnh:
                                 License gói đã cài của file requirements ghim (mặc định requirements-dev.txt) đối chiếu
                                 allowlist license-allow.json; vi phạm/ngoại lệ quá hạn → exit 1 (BASE-DEP-005).
   progress-check [FILE]         PROGRESS.md: ≤ 8 KB, đúng 4 mục, SHA ở Bàn giao phiên là tổ tiên HEAD và có trên nhánh chính.
+  prompt-assets-scan [PATH…] [--exempt F] [--patterns F] [--json]
+                                Tài sản prompt: injection, ký tự ẩn, lệnh nguy hiểm, bí mật, bỏ hàng rào, gói/URL không ghim,
+                                system prompt rò rỉ; miễn trừ có reason + expires (SEC-AI-018/028, CMP-LIC-024).
   ci-check [DIR]                Fitness function cho workflow CI (permissions, ghim SHA, timeout, continue-on-error, secret trên PR).
   checks                        validate · progress-check · changelog-check · ci-check · license-check (đối số mặc định) trong MỘT
                                 tiến trình, gom lỗi: mục xanh một dòng, mục đỏ kèm chi tiết, không chặn mục sau; exit 1 khi bất kỳ
@@ -9180,6 +9183,140 @@ def cmd_progress_check(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+# --- prompt-assets-scan: cổng quét tài sản prompt (SEC-AI-018 ≥ 6 luật, SEC-AI-028, CMP-LIC-024) ---------------
+# Mẫu injection mặc định; dự án có bộ lọc runtime truyền `--patterns <file>` (mỗi dòng một regex) để hai nơi dùng CHUNG
+# một nguồn sự thật (SEC-AI-018). Quét cả README/docs vì agent đọc chúng như chỉ dẫn.
+PA_DIRS = (".claude", "prompts", "skills", "vendor", "docs", "README.md", "AGENTS.md", "CLAUDE.md")
+PA_EXTS = {".md", ".mdc", ".txt", ".prompt", ".yaml", ".yml", ".json", ".toml", ".j2"}
+PA_INJECTION = (
+    r"ignore (?:all |any )?(?:the )?(?:previous|prior|above|earlier) (?:instructions|prompts|rules)",
+    r"disregard (?:all |the )?(?:previous|prior|above|system) (?:instructions|prompt|rules)",
+    r"you are now (?:in )?(?:DAN|developer mode|jailbroken)",
+    r"<\|im_start\|>|<\|im_end\|>|\[INST\]",
+    r"(?:reveal|print|output) (?:your|the) (?:system prompt|hidden instructions)",
+)
+PA_DANGER = (
+    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b",
+    r"\brm\s+-[a-z]*r[a-z]*\s+(?:/|~|\$HOME)(?:\s|$)",
+    r"\bchmod\s+(?:-R\s+)?777\b|--dangerously-skip-permissions|\bgit\s+push\s+(?:-f|--force)\b",
+)
+PA_SECRET = (
+    r"\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bgithub_pat_\w{22,}|\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}",
+    r"\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+)
+PA_BYPASS = (
+    r"(?i)\b(?:do not|don't|never) ask (?:for |the user for )?(?:confirmation|permission|approval)",
+    r"(?i)\bnever refuse\b|\bskip (?:the |all )?permission|\bquestion authori[sz]ation\b|không cần (?:hỏi|xác nhận)",
+)
+PA_UNPINNED = (
+    r"\bnpx\s+(?:-y|--yes)\s+(?:@[\w.-]+/)?[\w.-]+(?![\w.-]*@)(?=[\s`]|$)",
+    r"\buvx\s+(?!-)[\w.-]+(?![\w.-]*==)(?=[\s`]|$)",
+    r"\bpip3?\s+install\s+(?!-)[A-Za-z][\w.-]*(?![\w.-]*==)(?=[\s`]|$)",
+)
+PA_URL = (
+    r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(?:main|master|HEAD)/",
+    r"(?i)fetch the latest (?:guidelines|instructions)",
+)
+PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+    ("danger", "lệnh nguy hiểm", PA_DANGER),
+    ("secret", "chuỗi giống bí mật", PA_SECRET),
+    ("bypass", "lời bảo agent bỏ hàng rào", PA_BYPASS),
+    ("unpinned", "chạy gói không ghim", PA_UNPINNED),
+    ("unpinned-url", "chỉ dẫn từ URL nhánh không ghim (SEC-AI-028)", PA_URL),
+)
+PA_HIDDEN_RE = re.compile("[​⁠-⁤‪-‮⁦-⁩\U000e0000-\U000e007f]|(?<!^)﻿")
+PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
+PA_LEAK_DIRS = ("vendor/", ".claude/skills/", "prompts/", "skills/")
+
+
+def _pa_files(targets: Sequence[str]) -> List[Path]:
+    """File tài sản prompt dưới các đích (thư mục: theo đuôi `PA_EXTS`; file chỉ định: luôn quét); đích không có → bỏ qua."""
+    out: List[Path] = []
+    for t in map(Path, targets):
+        if t.is_file():
+            out.append(t)
+        elif t.is_dir():
+            out += sorted(p for p in t.rglob("*") if p.is_file() and p.suffix.lower() in PA_EXTS)
+    return list(dict.fromkeys(out))
+
+
+def _pa_line_findings(rel: str, text: str, injection: Sequence[str]) -> List[Dict[str, object]]:
+    """Vi phạm theo dòng: ký tự ẩn, injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục vendor/skill)."""
+    rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
+    rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
+    out: List[Dict[str, object]] = []
+    for n, line in enumerate(text.splitlines(), 1):
+        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if PA_HIDDEN_RE.search(line) else []
+        hits += [(r, m) for r, m, pats in rules if any(re.search(p, line) for p in pats)]
+        out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
+    return out
+
+
+def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object]]:
+    """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill, không UTF-8, rồi theo dòng."""
+    rel = path.as_posix()
+    out: List[Dict[str, object]] = []
+    if rel.startswith(PA_LEAK_DIRS) and re.search(r"system[_ -]?prompt", path.name, re.I):
+        out.append({"path": rel, "line": 0, "rule": "leak", "msg": "tên file system prompt (CMP-LIC-024)"})
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
+    return out + _pa_line_findings(rel, text, injection)
+
+
+def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
+    """(miễn trừ hiệu lực, lỗi) từ file JSON `[{"path": glob, "rule": id|"*", "reason", "expires": "YYYY-MM-DD"}]`:
+    thiếu path/reason/expires hoặc quá hạn → lỗi, miễn trừ đó không có hiệu lực."""
+    if not path:
+        return [], []
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        return [], ["file miễn trừ phải là mảng JSON"]
+    ok: List[Dict[str, str]] = []
+    errors: List[str] = []
+    for i, item in enumerate(raw):
+        e = {k: str(v) for k, v in item.items()} if isinstance(item, dict) else {}
+        if not (e.get("path") and e.get("reason") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", e.get("expires", ""))):
+            errors.append(f"miễn trừ #{i}: cần path, reason, expires YYYY-MM-DD")
+        elif e["expires"] < today:
+            errors.append(f"miễn trừ #{i} ({e['path']}) hết hạn {e['expires']}")
+        else:
+            ok.append(e)
+    return ok, errors
+
+
+def prompt_assets_scan(
+    targets: Sequence[str], exempt: Optional[str] = None, patterns: Optional[str] = None, today: str = ""
+) -> Tuple[List[Dict[str, object]], List[str]]:
+    """(vi phạm chưa miễn trừ, lỗi file miễn trừ) của tài sản prompt dưới `targets`."""
+    injection: Sequence[str] = PA_INJECTION
+    if patterns:
+        injection = [ln.strip() for ln in Path(patterns).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    rules, errors = _pa_exemptions(exempt, today or _dt.date.today().isoformat())
+    found = [f for p in _pa_files(targets) for f in _pa_scan_file(p, injection)]
+    keep = [
+        f
+        for f in found
+        if not any(fnmatch.fnmatch(str(f["path"]), e["path"]) and e.get("rule", "*") in ("*", f["rule"]) for e in rules)
+    ]
+    return keep, errors
+
+
+def cmd_prompt_assets_scan(args: argparse.Namespace) -> int:
+    found, errors = prompt_assets_scan(args.paths or PA_DIRS, args.exempt, args.patterns, args.today)
+    if args.json:
+        print(json.dumps({"findings": found, "errors": errors}, ensure_ascii=False, indent=2))
+        return 1 if found or errors else 0
+    for f in found:
+        print(f"✗ {f['path']}:{f['line']}: [{f['rule']}] {f['msg']}")
+    for e in errors:
+        print(f"✗ {e}")
+    if not found and not errors:
+        print("✓ Tài sản prompt: không vi phạm (SEC-AI-018/028, CMP-LIC-024).")
+    return 1 if found or errors else 0
+
+
 def cmd_ci_check(args: argparse.Namespace) -> int:
     d = Path(args.dir or ".github/workflows")
     if not d.is_dir():
@@ -14461,6 +14598,13 @@ def build_parser() -> argparse.ArgumentParser:
     pfl.add_argument("--strict", action="store_true", help="thiếu khoá sàn cũng exit 1 (mặc định chỉ cảnh báo)")
     pfl.add_argument("--json", action="store_true")
     pfl.set_defaults(fn=cmd_floor)
+    ppa = sub.add_parser("prompt-assets-scan", help="quét tài sản prompt (SEC-AI-018/028, CMP-LIC-024)")
+    ppa.add_argument("paths", nargs="*", help=f"thư mục/file (mặc định {' '.join(PA_DIRS)})")
+    ppa.add_argument("--exempt", help="file JSON miễn trừ: path, rule, reason, expires")
+    ppa.add_argument("--patterns", help="file regex injection dùng chung với bộ lọc runtime (mỗi dòng một mẫu)")
+    ppa.add_argument("--today", default="", help="ngày ISO thay hôm nay (test hạn miễn trừ)")
+    ppa.add_argument("--json", action="store_true")
+    ppa.set_defaults(fn=cmd_prompt_assets_scan)
     pci = sub.add_parser("ci-check")
     pci.add_argument("dir", nargs="?", help="thư mục workflow (mặc định .github/workflows, không có thì bỏ qua)")
     pci.set_defaults(fn=cmd_ci_check)

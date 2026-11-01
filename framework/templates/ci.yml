@@ -65,6 +65,11 @@ jobs:
         run: python3 .xtemplates/scripts/xt.py doctor
       - name: Workflow (ghim SHA, quyền, timeout, secret trên PR) + cấu hình xt.yaml — `xt.py ci-check`
         run: python3 .xtemplates/scripts/xt.py ci-check
+      # SEC-AI-018 (MUST@L)/SEC-AI-028/CMP-LIC-024: bật bằng cách tạo `prompt-assets-exempt.json` (`[]` hoặc miễn trừ có
+      # `reason` + `expires`); bộ lọc injection runtime có file mẫu riêng thì thêm `--patterns <file>` (cùng nguồn sự thật).
+      - name: Tài sản prompt (injection, ký tự ẩn, lệnh nguy hiểm, bí mật, bỏ hàng rào, gói/URL không ghim) — `xt.py prompt-assets-scan`
+        if: hashFiles('prompt-assets-exempt.json') != ''
+        run: python3 .xtemplates/scripts/xt.py prompt-assets-scan --exempt prompt-assets-exempt.json
 
   # E2E (QA-E2E-001, QA-E2E-029): chạy CÙNG LÚC với `gate`, không `needs` — lệnh `e2e` tự build và phục vụ (vd `webServer`
   # của Playwright). `e2e-mode`: `off` (chưa khai `e2e`) → bỏ qua; `shard` (lệnh dùng $XT_SHARD, vd
