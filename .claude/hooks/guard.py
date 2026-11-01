@@ -6204,6 +6204,169 @@ def _eval_scripts(tokens: List[str]) -> List[str]:
     return out
 
 
+# AUD-SEC-251: công cụ không phải shell nhưng tự chạy lệnh shell — chuỗi lệnh ở các chỗ này quét như `sh -c`. Chiều
+# chặt: xét mọi đối số (chương trình sed/awk có thể ở `-e`, `--expression=`, vị trí đầu); khớp thừa chỉ chặn khi chữ
+# khớp là lệnh nguy hiểm. Ngoài phạm vi: chương trình trong file (`sed -f`, `awk -f`, đầu vào m4 từ file).
+SED_NAMES = {"sed", "gsed"}
+AWK_NAMES = {"awk", "gawk", "mawk", "nawk"}
+TAR_NAMES = {"tar", "gtar", "bsdtar"}
+# `e command` của GNU sed ăn hết dòng (cả `;` — đo GNU sed 4.9); đứng sau địa chỉ/`;`/`{`/`!`/đầu chương trình.
+SED_EXEC_CMD_RE = re.compile(r"(?:^|[;{}!\n\d$/])[ \t]*e[ \t]+([^\n]+)")
+# `s<d>…<d>thay<d>cờ` có cờ `e`: chỗ thay thành lệnh; thử ở MỌI vị trí `s` (lookahead) để một khớp thừa không nuốt khớp thật.
+SED_SUBST_RE = re.compile(r"(?=s([^\\\n\w\s])((?:\\.|(?!\1)[^\\\n])*)\1((?:\\.|(?!\1)[^\\\n])*)\1([A-Za-z0-9]*))")
+AWK_PIPE_RE = re.compile(r'\|&?\s*"((?:[^"\\]|\\.)*)"|"((?:[^"\\]|\\.)*)"\s*\|&?\s*getline')
+AWK_EXEC_HINT_RE = re.compile(r"\bsystem\s*\(|\|")
+TAR_CMD_LONG = ("--to-command", "--use-compress-program", "--info-script", "--new-volume-script", "--rsh-command")
+M4_EXEC_RE = re.compile(r"\be?syscmd\s*\(")
+# Perl/Ruby/PHP chạy shell không cần ngoặc: `system q(…)`, `exec "…"`, backtick, `qx{…}`, `%x(…)`, `open(F, "cmd|")`.
+QUOTE_EXEC_FAMILIES = {"perl", "ruby", "php"}
+QUOTE_EXEC_HINT_RE = re.compile(r"\b(?:system|exec|qx|open|popen|shell_exec|passthru|proc_open|spawn)\b|`|%x")
+QUOTE_LIKE_RE = re.compile(r"(?:\b(?:qq|qx|q)|%[xqQ]?)\s*([^\w\s])")
+QUOTE_PAIRS = {"(": ")", "[": "]", "{": "}", "<": ">"}
+BACKTICK_BODY_RE = re.compile(r"`([^`]*)`")
+# AUD-SEC-250: bash tự mở rộng giá trị prompt (`set -x` mở rộng PS4, `${x@P}`), gọi lại lệnh (`mapfile -C`,
+# `compgen -C`, `compgen -W` mở rộng danh sách từ), nạp file `BASH_ENV` ở mọi bash không tương tác. `ENV` chỉ nạp ở shell
+# tương tác (đo dash/bash 2026-11-01) nên không xét.
+PROMPT_ASSIGN_RE = re.compile(r"(?:PS[0-4]|PROMPT_COMMAND)=(.*)", re.S)
+ANY_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^]]*\])?=(.*)", re.S)
+BASH_ENV_RE = re.compile(r"BASH_ENV=(.+)", re.S)
+BASH_ENV_MARK = "bash con nạp file guard không quét"  # mã OPAQUE_EXEC (REASON_CODES)
+CALLBACK_OPTS = {"mapfile": "C", "readarray": "C", "compgen": "CW", "complete": "CW"}
+
+
+def _bundled_values(args: List[str], letters: str) -> List[str]:
+    """Giá trị của cờ ngắn `letters` kể cả dính/gộp (`-C x`, `-Cx`, `-tC x`); cờ dài bỏ qua."""
+    out: List[str] = []
+    for i, a in enumerate(args):
+        if a[:1] != "-" or a.startswith("--"):
+            continue
+        k = next((k for k, ch in enumerate(a[1:], 1) if ch in letters), 0)
+        if k:
+            out.append(a[k + 1 :] or (args[i + 1] if i + 1 < len(args) else ""))
+    return out
+
+
+def _sed_exec_scripts(args: List[str]) -> List[str]:
+    """Lệnh mà chương trình sed chạy: `e lệnh` và chỗ thay của `s///e` (bỏ `\\` thoát)."""
+    out: List[str] = []
+    for prog in (a.split("=", 1)[1] if a.startswith("--expression=") else a for a in args):
+        out += [m[1] for m in SED_EXEC_CMD_RE.finditer(prog)]
+        out += [re.sub(r"\\(.)", r"\1", m[3]) for m in SED_SUBST_RE.finditer(prog) if "e" in m[4]]
+    return out
+
+
+def _awk_exec_scripts(args: List[str]) -> List[str]:
+    """Chương trình awk có `system(`/ống: mọi chuỗi nguyên văn (lệnh có thể qua biến) và chuỗi ghép của chúng."""
+    out: List[str] = []
+    for prog in args:
+        if AWK_EXEC_HINT_RE.search(prog):
+            lits = [_literal(m) for m in LITERAL_RE.finditer(prog)]
+            out += lits + ["".join(lits)] + _exec_api_scripts([prog])
+            out += [m[1] if m[1] is not None else m[2] for m in AWK_PIPE_RE.finditer(prog)]
+    return out
+
+
+def _tar_exec_scripts(args: List[str]) -> List[str]:
+    """Giá trị các tuỳ chọn tar chạy lệnh: `--to-command`, `-I/--use-compress-program`, `-F/--info-script`,
+    `--checkpoint-action=exec=…` (tên dài viết tắt ≥ 4 ký tự như getopt)."""
+    out = _bundled_values(args, "IF")
+    for i, a in enumerate(args):
+        key, eq, val = a.partition("=")
+        val = val if eq else (args[i + 1] if i + 1 < len(args) else "")
+        if len(key) >= 4 and any(o.startswith(key) for o in TAR_CMD_LONG):
+            out.append(val)
+        elif len(key) >= 4 and "--checkpoint-action".startswith(key):
+            out += [val, val.split("=", 1)[-1]]
+    return out
+
+
+def _tool_exec_scripts(argv: List[str]) -> List[str]:
+    """Lệnh shell mà sed/awk/tar hoặc builtin gọi lại (`mapfile -C`, `compgen -C/-W`) chạy (AUD-SEC-250/251)."""
+    n = normalize(argv)
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name in SED_NAMES:
+        return _sed_exec_scripts(args)
+    if name in AWK_NAMES:
+        return _awk_exec_scripts(args)
+    if name in TAR_NAMES:
+        return _tar_exec_scripts(args)
+    return _bundled_values(args, CALLBACK_OPTS[name]) if name in CALLBACK_OPTS else []
+
+
+def _prompt_scripts(cmd: str, tokens: List[str]) -> List[str]:
+    """Giá trị bash mở rộng như prompt: gán `PS0…PS4`/`PROMPT_COMMAND` (cả sau `export`/`declare`); có `${…@P}` → mọi
+    giá trị gán trong lệnh (biến nào được mở rộng không theo dõi — chiều chặt)."""
+    out = [m[1] for t in tokens for m in [PROMPT_ASSIGN_RE.fullmatch(t)] if m]
+    if re.search(r"@P\}", cmd):
+        out += [m[1] for t in tokens for m in [ANY_ASSIGN_RE.fullmatch(t)] if m]
+    return out
+
+
+def _bash_env_asks(tokens: List[str]) -> List[str]:
+    """`BASH_ENV=<file>`: mọi bash không tương tác về sau nạp file đó — guard không đọc nội dung → chặn."""
+    return [f"BASH_ENV: {BASH_ENV_MARK} ({t[:120]})" for t in tokens if BASH_ENV_RE.fullmatch(t)]
+
+
+def _quote_body(script: str, m: "re.Match[str]") -> str:
+    """Thân của toán tử trích kiểu Perl/Ruby (`q(…)`, `qx{…}`, `%x[…]`, `q!…!`) bắt đầu ở `m`."""
+    opener = m[1]
+    closer = QUOTE_PAIRS.get(opener)
+    if closer:
+        return _balanced(script, m.end(), opener, closer)
+    end = script.find(opener, m.end())
+    return script[m.end() : end if end >= 0 else len(script)]
+
+
+def _quote_exec_scripts(script: str) -> List[str]:
+    """Script Perl/Ruby/PHP có dấu chạy shell: mọi chuỗi nguyên văn, thân `q…`/`%x…`, thân backtick, và chuỗi ghép."""
+    script = _nfkc(script)
+    if not QUOTE_EXEC_HINT_RE.search(script):
+        return []
+    lits = [_literal(m) for m in LITERAL_RE.finditer(script)]
+    lits += [_quote_body(script, m) for m in QUOTE_LIKE_RE.finditer(script)]
+    lits += BACKTICK_BODY_RE.findall(script)
+    return lits + ["".join(lits)]
+
+
+def _m4_exec_scripts(text: str) -> List[str]:
+    """Đối số `syscmd(…)`/`esyscmd(…)` trong đầu vào m4, bỏ dấu trích của m4 (`` ` `` và `'`)."""
+    out = [_balanced(text, m.end(), "(", ")") for m in M4_EXEC_RE.finditer(text)]
+    return [s.replace("`", "").replace("'", "") for s in out]
+
+
+def _is_m4(argv: List[str]) -> bool:
+    return normalize(argv)[:1] == ["m4"]
+
+
+def _m4_inputs(cmd: str, tokens: List[str], placed: PlacedCmds, budget: Optional[ScanBudget]) -> Placed:
+    """Lệnh m4 chạy từ đầu vào thấy được: here-string, `-D` giá trị, ống vào m4, heredoc vào m4."""
+    out: Placed = []
+    for c, here in placed:
+        if _is_m4(c):
+            texts = [c[i + 1] for i, a in enumerate(c[:-1]) if a == "<<<"] + [a for a in c[1:] if a.startswith("-D")]
+            out += [(s, here) for t in texts for s in _m4_exec_scripts(t)]
+    dirs, i = [here for _, here in placed], 0
+    for pipe in pipelines(tokens):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 : i + len(pipe)]):
+            out += [(s, here) for t in feed or [] if _is_m4(down) for s in _m4_exec_scripts(t)]
+        i += len(pipe)
+    m4_dirs = list(dict.fromkeys(here for c, here in placed if _is_m4(c)))
+    bodies = _heredoc_scripts(cmd, _is_m4, budget) if m4_dirs else []
+    return out + [(s, d) for body in bodies for s in _m4_exec_scripts(body) for d in m4_dirs]
+
+
+def _tool_exec_sources(
+    cmd: str, tokens: List[str], placed: PlacedCmds, interp: Placed, start: Optional[str], budget: Optional[ScanBudget]
+) -> Tuple[Placed, List[str]]:
+    """(lệnh lồng, câu hỏi chặn) từ công cụ tự chạy lệnh và chỗ bash tự mở rộng (AUD-SEC-250/251)."""
+    out: Placed = [(s, here) for c, here in placed for s in _tool_exec_scripts(c)]
+    out += [(s, start) for s in _prompt_scripts(cmd, tokens)]
+    if _interp_families(tokens, start) & QUOTE_EXEC_FAMILIES:
+        out += [(s, here) for raw, here in interp for s in _quote_exec_scripts(raw)]
+    out += _m4_inputs(cmd, tokens, placed, budget)
+    return [(s, d) for s, d in out if s.strip()], _bash_env_asks(tokens)
+
+
 def _cat_heredoc_bodies(script: str) -> List[str]:
     """`bash -c "$(cat <<'E'` ↵ … ↵ `E` ↵ `)"`, `eval "$(cat <<E …)"`: chuỗi lệnh là thân heredoc mà `cat` in ra."""
     out: List[str] = []
@@ -6946,6 +7109,9 @@ def _nested_sources(
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
     interp = _interp_scripts_at(cmd, tokens, start, budget)
     nested += [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
+    tool_nested, tool_asks = _tool_exec_sources(cmd, tokens, placed, interp, start, budget)
+    nested += tool_nested
+    opaque += tool_asks
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
     jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
@@ -8573,6 +8739,7 @@ REASON_CODES: Tuple[Tuple[str, str], ...] = (
     ("duyệt giai đoạn sản phẩm", "STAGE_APPROVE"),  # chỉ người duyệt giai đoạn (ADR-0058)
     ("tay bằng chứng", "EVIDENCE_HANDWRITE"),  # ghi/xoá tay `.autopilot/` = bằng chứng giả (ADR-0026)
     ("lệnh đã mã hoá/nén", "OPAQUE_EXEC"),  # `… | base64 -d | sh` từ nguồn guard không giải được
+    (BASH_ENV_MARK, "OPAQUE_EXEC"),  # `BASH_ENV=f bash -c true`: bash nạp file guard không đọc (AUD-SEC-250)
     (NEST_ASK, NEST_TOO_DEEP),  # lớp lồng không quét được có thể chứa bất kỳ lệnh nào (AUD-SEC-063)
     (UNRESOLVED_PUSH_WHY, UNRESOLVED_TARGET),  # `xargs git push`, `git push origin $(…)` (T-1523)
     (UNRESOLVED_REF_MARK, UNRESOLVED_TARGET),  # `git update-ref --stdin` (AUD-SEC-119)

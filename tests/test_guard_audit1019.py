@@ -2545,5 +2545,87 @@ class ShellParseGapsTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class ToolExecSitesTest(unittest.TestCase):
+    """AUD-SEC-251: công cụ không phải shell tự chạy lệnh (sed `e`, awk `system`/ống, perl không ngoặc, tar, m4)."""
+
+    def test_tool_exec_payload_denied(self) -> None:
+        for cmd in (
+            "sed -n '1e rm -rf ~' f",
+            "sed 's/.*/rm -rf ~/e' f",
+            "sed -e 'p' --expression='1e git push --force origin main' f",
+            "sed -n 's|x|rm -rf ~|ge' f",
+            "sed -n '/a/{e rm -rf ~\n}' f",
+            "awk 'BEGIN{system(\"rm -rf ~\")}'",
+            "awk 'BEGIN{print | \"rm -rf ~\"}'",
+            "awk 'BEGIN{\"rm -rf ~\" | getline x}'",
+            "perl -e 'system q(rm -rf ~)'",
+            "perl -e 'exec \"rm -rf ~\"'",
+            "perl -e 'qx{rm -rf ~}'",
+            "perl -e '`rm -rf ~`'",
+            "perl -e 'system q!rm -rf ~!'",
+            "ruby -e '%x(rm -rf ~)'",
+            "php -r '`rm -rf ~`;'",
+            "tar -xf a.tar --to-command='rm -rf ~'",
+            "tar -xf a.tar --to-command 'rm -rf ~'",
+            "tar -cf a.tar -I 'rm -rf ~;cat' f",
+            "tar -cf a.tar --use-compress-program='rm -rf ~;cat' f",
+            "tar -cf a.tar --checkpoint-action=exec='rm -rf ~' f",
+            "m4 <<< 'syscmd(rm -rf ~)'",
+            "echo 'esyscmd(git push --force origin main)' | m4",
+            "m4 <<'E'\nsyscmd(`rm -rf ~')\nE",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_tool_without_exec_allowed(self) -> None:
+        for cmd in (
+            "sed -n '1p' f",
+            "sed 's/rm -rf ~/x/g' f",
+            "sed -i 's/a/b/' f",
+            "awk '{print $1}' f",
+            "awk 'BEGIN{system(\"echo hi\")}'",
+            "perl -ne 'print if /x/' f",
+            "perl -e 'system q(echo hi)'",
+            "tar -xf a.tar",
+            "tar -I zstd -cf a.tar.zst f",
+            "m4 <<< 'define(x,1)x'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
+class BashHookSitesTest(unittest.TestCase):
+    """AUD-SEC-250: chỗ bash tự mở rộng/gọi lại lệnh — `PS4`, `${x@P}`, `mapfile -C`, `compgen -C`, `BASH_ENV`."""
+
+    def test_hook_payload_denied(self) -> None:
+        for cmd in (
+            "PS4='$(rm -rf ~)'; set -x; true",
+            "export PS4='$(rm -rf ~)'; set -x; true",
+            "x='$(rm -rf ~)'; echo ${x@P}",
+            "mapfile -C 'rm -rf ~;:' -c 1 < f",
+            "readarray -tC 'rm -rf ~;:' -c 1 < f",
+            "complete -C 'rm -rf ~' x",
+            "compgen -C 'rm -rf ~' x",
+            "compgen -W '$(rm -rf ~)' x",
+            "echo 'rm -rf ~' > f; BASH_ENV=f bash -c true",
+            "export BASH_ENV=f; bash -c true",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_hook_benign_allowed(self) -> None:
+        for cmd in (
+            "PS4='+ '; set -x; true",
+            "x='a'; echo ${x@P}",
+            "mapfile -t arr < f",
+            "compgen -W 'a b' a",
+            "complete -F _f x",
+            "ENV=production make build",  # `ENV` chỉ nạp ở shell tương tác (dash/bash posix) — đo 2026-11-01
+            "BASH_ENV= bash -c true",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13793,6 +13793,149 @@
    "expect": {
     "allowed": true
    }
+  },
+  {
+   "id": "guard-sec251-sed-e-command",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "sed -n '1e rm -rf ~' f"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-sed-subst-e-flag",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "sed 's/.*/rm -rf ~/e' f"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-awk-system",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "awk 'BEGIN{system(\"rm -rf ~\")}'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-perl-system-no-paren",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "perl -e 'system q(rm -rf ~)'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-tar-to-command",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "tar -xf a.tar --to-command='rm -rf ~'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-m4-syscmd",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "m4 <<< 'syscmd(rm -rf ~)'"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec251-benign-tools",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-251"
+   ],
+   "input": {
+    "command": "sed 's/rm -rf ~/x/g' f && awk '{print $1}' f && tar -I zstd -cf a.tar.zst f"
+   },
+   "expect": {
+    "allowed": true
+   }
+  },
+  {
+   "id": "guard-sec250-ps4-xtrace",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-250"
+   ],
+   "input": {
+    "command": "PS4='$(rm -rf ~)'; set -x; true"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec250-mapfile-callback",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-250"
+   ],
+   "input": {
+    "command": "mapfile -C 'rm -rf ~;:' -c 1 < f"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec250-bash-env",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-250"
+   ],
+   "input": {
+    "command": "echo 'rm -rf ~' > f; BASH_ENV=f bash -c true"
+   },
+   "expect": {
+    "allowed": false
+   }
+  },
+  {
+   "id": "guard-sec250-benign",
+   "origin": "audit",
+   "refs": [
+    "AUD-SEC-250"
+   ],
+   "input": {
+    "command": "PS4='+ '; set -x; ENV=production make build"
+   },
+   "expect": {
+    "allowed": true
+   }
   }
  ]
 }
