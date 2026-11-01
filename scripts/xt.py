@@ -1731,9 +1731,12 @@ def executor_choice(t: Dict[str, Any], base: Path, st: Dict[str, Any]) -> Dict[s
     greens = [i for i, r in enumerate(runs) if r["exit_code"] == 0]
     since_green = runs[greens[-1] + 1 :] if greens else runs  # chỉ chuỗi đỏ sau lần xanh cuối (review #169)
     fails = [r for r in since_green if r.get("executor") != EXECUTOR_AGENTS["deep"]]
-    escalated = t.get("tier", "default") == "default" and len(fails) >= ESCALATE_AFTER
-    tier = "deep" if escalated else str(t.get("tier", "default"))
     topology = str(t.get("topology") or TOPO_DEFAULT)
+    # `exec: deep` chỉ có nghĩa khi `parallel` (đã ở tầng sâu → không chuyển cấp); task tự làm ghi `exec: deep` vẫn
+    # chuyển cấp sau 2 lần đỏ như task thường (review #379)
+    deep_already = topology == "parallel" and t.get("tier", "default") == "deep"
+    escalated = not deep_already and len(fails) >= ESCALATE_AFTER
+    tier = "deep" if escalated else str(t.get("tier", "default"))
     executor = EXECUTOR_AGENTS[tier] if escalated or topology == "parallel" else None
     return {
         "topology": topology,

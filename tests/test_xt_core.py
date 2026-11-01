@@ -1640,6 +1640,13 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
             xt.loop_record("T-001", ["sh -c 'echo tb; exit 1'"], self.base)
         v = xt.loop_verdict(self.base)
         self.assertEqual((v["topology"], v["executor"], v["escalated"]), ("self", "executor-deep", True))
+        with redirect_stdout(out), redirect_stderr(err):  # review #379: self + `exec: deep` đỏ 2 lần vẫn chuyển cấp
+            xt.loop_record("T-003", ["sh -c 'echo tc; exit 1'"], self.base)
+            xt.loop_record("T-003", ["sh -c 'echo td; exit 1'"], self.base)
+        c = xt.executor_choice(tasks[2], self.base, st)
+        self.assertEqual(
+            (c["topology"], c["tier"], c["executor"], c["escalated"]), ("self", "deep", "executor-deep", True)
+        )
         self.record(["true"], "T-001")
         write(plan, plan.read_text(encoding="utf-8").replace("- [ ] `T-001`", "- [x] `T-001`"))
         v = xt.loop_verdict(self.base)
