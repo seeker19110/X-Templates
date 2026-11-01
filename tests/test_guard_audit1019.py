@@ -2627,5 +2627,49 @@ class BashHookSitesTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
 
+class AuditPhase1101GuardTest(unittest.TestCase):
+    """Audit cuối pha 2026-11-01 (D-296): AUD-SEC-270 (sed `e` còn lọt), AUD-SEC-271 (`+=`), AUD-SEC-254 (`BASH_ENV=` ở
+    vị trí dữ liệu chặn oan), AUD-SEC-256 (awk `-v`, tar cờ kiểu cũ), AUD-PERF-004 (`%(` lặp gần n³)."""
+
+    def test_variants_denied(self) -> None:
+        for cmd in (
+            "sed '/x/Ie rm -rf ~' f",
+            "sed '/x/M e rm -rf ~' f",
+            "sed '\\%x%e rm -rf ~' f",
+            "sed '\\,x, e rm -rf ~' f",
+            "sed -n 'erm -rf ~' f",
+            "PS4+='$(rm -rf ~)'; set -x; true",
+            "BASH_ENV+=f bash -c true",
+            "declare -x BASH_ENV+=f",
+            "env -i BASH_ENV=f bash -c true",
+            "awk -v c='rm -rf ~' 'BEGIN{system(c)}'",
+            "awk -vc='rm -rf ~' 'BEGIN{system(c)}'",
+            "tar xIf 'rm -rf ~;cat' a.tar",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "deny")
+
+    def test_benign_allowed(self) -> None:
+        for cmd in (
+            "grep -rn 'BASH_ENV=f' tests/",
+            'echo "BASH_ENV=/dev/null"',
+            "git commit -q -m 'fix: x' -m 'BASH_ENV=f giờ bị chặn'",
+            "sed -i 's/(e.g.)/ví dụ/' f",
+            "sed -n '/error/p' f",
+            "sed -e 's/a/b/' -e 's/c/d/' f.txt e.md",
+            "awk -v n=3 '{print $n}' f",
+            "tar xzf a.tar.gz",
+            "perl -e 'system q(echo hi)'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(final(cmd), "")
+
+    def test_quote_like_repeat_not_cubic(self) -> None:
+        def work(n: int) -> None:
+            final("perl -e 'system 1;" + "%(" * n + "'")
+
+        cpu_budget.assert_not_quadratic(self, work, 100)
+
+
 if __name__ == "__main__":
     unittest.main()
