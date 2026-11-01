@@ -3,7 +3,7 @@
 > Giai đoạn hiện tại: G8 Vận hành & tiến hoá (khung 3.29.0, pha `harden` — D-136) · Cập nhật: 2026-11-01 · Nhánh: main
 
 ## Đang làm
-- 2026-11-01 **ADR-0062 review 1 lần** (cấu hình chủ dự án, khung + dự án đích, D-295): #385 merge — 🔴 sửa rồi `pr debt --fixed`, 🟠/🟢 ghi nợ; rủi ro cao (ngoại lệ cứng kể cả đã miễn, schema) không hoãn review ở build; #386 cổng production `migration_check`/`rollback`/`acceptance`. PLAN-upgrade xong: #383 (T-3611 guard SEC-250/251), #384 (T-3612), #387 (T-3613 `prompt-assets-scan`). `loop verify --all` XANH. Nợ review mở: AUD-SEC-254…257, AUD-HAR-181…190 (🟠: HAR-181 hồi quy `pr next` sau rethink chưa push, HAR-182 `--fixed` không đòi test, SEC-254, SEC-256) → audit cuối pha + sửa theo nhóm.
+- 2026-11-01 **ADR-0062 review 1 lần** (D-295): #385/#386 + PLAN-upgrade #383/#384/#387. **Audit cuối pha** #388 (D-296) → PLAN-fix-2026-11-01 xong: #389 guard (SEC-270/271/254, PERF-004), #390 xt.py (SEC-272, CODE-034, HAR-181/182/189), #391 tài liệu, #392 guard lượt 2 (SEC-279…286, PERF-005); quét lại đủ 12 nhóm (T-3623/3625). `loop verify --all` XANH. D-298: không quét delta lặp các PR sửa; nợ 🟠 SEC-276/287/288/290/291/292, HAR-182 (phần còn lại) + 🔴 guard có từ trước → audit đầu `/complete` rồi PLAN mới trước 3.30.0.
 - 2026-10-31 **PLAN-harden-2026-10-31** (D-268…D-291): #358–#371 (#369/#370 Dependabot), #373, #375–#377 merge; #372 (guard `$IFS#`) đóng không merge sau 7 lượt review — bài học thành `max_rethink` (ADR-0061); #374 đóng (mở lại thành #375). `release-check` NO-GO: `audit --strict` (🔴 mở AUD-SEC-251 + họ 191…247), `review_debt` → sửa T-3610/T-3611 rồi mới cắt **3.30.0**. #370 (Dependabot) đã review sạch nhưng `pr reviewed` không nhận tác giả bot (AUD-XFEAT-039) → steward merge.
 - 2026-10-30 **3.29.0** đã phát hành (ADR-0058/0059, D-257/259); GO chờ người `prod_switch`. Kế: T-3557 → lát 3 `perf trial` → 3.30.0 (D-258).
 - 2026-10-28 **ADR-0056** (#312): lỗi có từ trước không chặn PR, CI là cổng đầy đủ. **ADR-0054/0055** (#311). 🟢 treo: AUD-DOC-100, AUD-HAR-122/123, AUD-SEC-131.
@@ -22,7 +22,7 @@
 7. Hàng rào (hook + `settings.json`, cần Claude Code ≥ 2.1.295 — `claude_min_version`): **xét lại hàng rào 2027-01-21** hoặc khi đổi model (LOOP-DESIGN-014).
 
 ## Quyết định
-> Chi tiết ở `docs/adr/` (ADR-0001…0061) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
+> Chi tiết ở `docs/adr/` (ADR-0001…0062) và `docs/autopilot/DECISIONS.md` (D-NNN); ở đây chỉ giữ điều chưa có nhà khác.
 - Khung = thư viện yêu cầu có ID + ghép blueprint + máy kiểm "xong" (ADR-0001); hook fail-open về luồng, fail-closed về hành động nguy hiểm (ADR-0002); blueprint theo quy mô S/M (ADR-0003/0004/0012).
 - Luật VN: Luật 91/2025/QH15 + NĐ 356/2025 (thay NĐ 13/2023 từ 01/01/2026); Luật ANM 116/2025 (01/07/2026). OWASP LLM Top 10 2026; EU AI Act Đ.50 áp dụng 02/08/2026. Mặc định OSI: OpenTofu, Valkey.
 - Repo khung: Python ≥ 3.11; `mypy --strict`; coverage 100 % (cả subprocess); `changelog-check`/`progress-check` trong `lint`; PROGRESS chỉ ghi SHA trên `main` (squash-merge). Tên: X-stored → X-Templates (ADR-0006/0007).
@@ -33,6 +33,6 @@
 - CI không còn kiểm macOS (gỡ `portability.yml` 2026-10-17). Nợ chấp nhận: 4 MUST/module là phán đoán; số điều NĐ 356/2025 chưa đối chiếu bản gốc. Không làm (D-142): tách `xt.py`, song song worktree, merge queue, reviewer LLM mọi PR, thu nhỏ guard.
 
 ## Bàn giao phiên
-- `main` `bde7f10` (#381). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
+- `main` `5b78368` (#392). Merge: chạy đúng `do` của `pr next` (REST ghim head) ngay khi `merge`; steward hay merge trước (`405 Merge already in progress` = đã merge). `release-check` chạy trên worktree của `main`. Sửa guard: test đỏ trước, ca `autonomy-bench` cho mỗi 🟠; luật mới OR với luật cũ (bài học #352, #372).
 - Chờ người: T-1834 gỡ `merge-gate` ở ruleset hai dự án đích rồi xoá stub; `prod_switch` 3.29.0.
 - Container mới: `scripts/dev-task.sh setup`; trước khi đẩy `gate-fast`, CI là cổng đầy đủ. Subagent dùng thư mục scratch riêng (bài học audit 2026-11-01).

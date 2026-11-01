@@ -2041,3 +2041,10 @@
 - Chọn: Đợt 5 một PR guard sửa cả 5 (test đỏ trước, OR với luật cũ, bench), rồi Đợt 6 quét lại DOC/XFEAT/HAR cụm nhỏ
 - Lý do (tiêu chí chất lượng cuối): 4/5 là lỗ guard đã tái hiện chạy thật (lệnh nguy hiểm lọt) — tiêu chí (1) an toàn; cùng nhà file nên một PR; PA2 để lỗ bảo mật vào bản phát hành
 - Đường lùi: Revert PR đợt 5
+
+### D-298 · 2026-11-01T17:44:20+00:00 · Sau PLAN-fix-2026-11-01 (#389–#392), máy đòi audit delta lại các PR sửa — làm tiếp hay dừng đợt?
+
+- Phương án: (1) Dừng đợt: không quét delta lặp các PR sửa (đã review 1 lần theo ADR-0062); audit tổng thể kế tiếp ở đầu đợt /complete trước khi cắt 3.30.0, gom nợ còn lại (🟠 SEC-276/287/288/290/291/292, HAR-182 phần còn lại + 🔴 guard có từ trước) thành PLAN mới · (2) Quét delta tiếp sau mỗi đợt sửa
+- Chọn: Dừng đợt: không quét delta lặp các PR sửa (đã review 1 lần theo ADR-0062); audit tổng thể kế tiếp ở đầu đợt /complete trước khi cắt 3.30.0, gom nợ còn lại (🟠 SEC-276/287/288/290/291/292, HAR-182 phần còn lại + 🔴 guard có từ trước) thành PLAN mới
+- Lý do (tiêu chí chất lượng cuối): Cấu hình chủ dự án 2026-11-01: audit tổng thể MỘT lần cuối mỗi giai đoạn + review 1 lần mỗi PR; quét lặp các bản sửa đã cho thấy mỗi lượt sinh 🟠 mới ở chính bản sửa (vòng không hội tụ, chi phí lớn); nợ đã có ID ở sổ, release-check vẫn NO-GO nên không phát hành mang nợ
+- Đường lùi: Chạy /audit delta 457a69e..HEAD bất kỳ lúc nào
