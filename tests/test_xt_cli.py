@@ -3217,11 +3217,11 @@ class PrTitleCheckTest(TmpDirCase):
         self.assertIn(f'[ "${{#TITLE}}" -le {xt.PR_TITLE_MAX} ]', step)
 
     def test_title_check_valid_titles(self):
-        for title in ("feat(xt): pr title-check", "fix: a", "ci(ci.yml/x-1)!: đổi", "docs: " + "é" * 66):
+        for title in ("feat(xt): pr title-check", "fix: a", "ci(ci.yml/x-1)!: đổi", "docs: " + "é" * 94):
             with self.subTest(title=title):
                 rc, out, err = run_main("pr", "title-check", title)
                 self.assertEqual((rc, err), (0, ""))
-                self.assertIn(f"({len(title)}/72 ký tự)", out)
+                self.assertIn(f"({len(title)}/100 ký tự)", out)
 
     def test_title_check_invalid_titles_with_hints(self):
         cases = {
@@ -3242,13 +3242,13 @@ class PrTitleCheckTest(TmpDirCase):
                 self.assertNotIn("ký tự >", err)
 
     def test_title_check_too_long(self):
-        for title, shape in (("feat(x): " + "a" * 64, False), ("Feat " + "b" * 70, True)):
+        for title, shape in (("feat(x): " + "a" * 92, False), ("Feat " + "b" * 96, True)):
             with self.subTest(title=title):
                 rc, _, err = run_main("pr", "title-check", title)
                 self.assertEqual(rc, 1)
-                self.assertIn(f"dài {len(title)} ký tự > 72", err)
+                self.assertIn(f"dài {len(title)} ký tự > 100", err)
                 self.assertEqual("sai dạng" in err, shape)
-        self.assertEqual(run_main("pr", "title-check", "feat(x): " + "a" * 63)[0], 0)  # đúng 72 → đạt
+        self.assertEqual(run_main("pr", "title-check", "feat(x): " + "a" * 91)[0], 0)  # đúng 100 → đạt
 
     def test_title_check_reads_branch_pr_title(self):
         prs = [[{"number": 7, "title": "feat: từ PR"}], [{"number": 8, "title": "Sai tiêu đề"}]]

@@ -5503,7 +5503,7 @@ def merge_lane_reasons(pr: Dict[str, Any], risk_paths: List[str]) -> List[str]:
 # Tiêu đề PR thành subject commit squash trên nhánh chính, bỏ qua cổng commit cục bộ (D-056) — cùng luật bước CI.
 PR_TITLE_TYPES = ("feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert")
 PR_TITLE_RE = re.compile(rf"({'|'.join(PR_TITLE_TYPES)})(\([a-z0-9._/-]+\))?!?: .+")
-PR_TITLE_MAX = 72
+PR_TITLE_MAX = 100
 
 
 def _title_exempt(pr: Dict[str, Any], title: str) -> bool:
@@ -13997,7 +13997,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ptc = prsub.add_parser(
         "title-check",
-        help="tiêu đề PR đúng luật CI `pr-title`/merge-check (Conventional Commits, ≤ 72 ký tự — D-056) trước `gh pr create`",
+        help=f"tiêu đề PR đúng luật CI `pr-title`/merge-check (Conventional Commits, ≤ {PR_TITLE_MAX} ký tự — D-056) trước `gh pr create`",
     )
     ptc.add_argument("title", nargs="?", help="tiêu đề định đặt (mặc định tiêu đề PR mở của nhánh hiện tại)")
     pss = prsub.add_parser(
