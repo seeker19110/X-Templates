@@ -215,7 +215,7 @@ class MergeDecisionTest(unittest.TestCase):
             "đóng": (pr(state="MERGED"), "closed", "PR đã MERGED"),
             "nháp": (pr(isDraft=True), "wait", "PR nháp"),
             "tiêu đề không conventional": (pr(title="Sửa guard", mergeable="CONFLICTING"), "fix", "tiêu đề PR phải"),
-            "tiêu đề > 72": (pr(title="fix: " + "a" * 68), "fix", "≤ 72 ký tự"),
+            "tiêu đề > 100": (pr(title="fix: " + "a" * 96), "fix", "≤ 100 ký tự"),
             "tiêu đề nhiều dòng": (pr(title="fix: a\nb"), "fix", "gh pr edit 7 --title"),
             "xung đột": (pr(mergeable="CONFLICTING"), "fix", "xung đột với nhánh đích"),
             "dirty": (pr(mergeStateStatus="DIRTY"), "fix", "xung đột với nhánh đích"),

@@ -1958,3 +1958,44 @@
 - Chọn: Chỉ thư mục dự án (ls-tree/diff --relative từ thư mục đó): commit app khác không làm gói hết hạn; mã dùng chung ngoài thư mục (vd packages/ui) cũng không
 - Lý do (tiêu chí chất lượng cuối): (3) bền/đơn giản/test được: phạm vi khớp đơn vị cài khung (.xtemplates/ trong thư mục dự án) và khớp release-check vốn chạy trong thư mục đó; (1) an toàn: phương án 2 khiến luồng ký kẹt vô hạn ở monorepo nên người sẽ bỏ qua máy; rủi ro mã dùng chung ngoài thư mục là có thật nhưng CI của monorepo vẫn chạy cổng — ghi thành nợ hướng phương án 3 (khai đường phụ thuộc) thay vì làm ngay
 - Đường lùi: Bỏ tham số './' + --relative trong evidence_fingerprint/_changed_since (scripts/xt.py) để quay về vân tay toàn repo; test MonorepoFingerprintTest đổi kỳ vọng
+
+### D-279 · 2026-10-31T13:43:00+00:00 · PR #363 review lượt 1: 123 hồi quy 🔴 (main chặn, HEAD cho qua, bash chạy thật — chủ yếu heredoc có backtick), biến thể chưa đóng của AUD-SEC-195/233, và quét comment bậc hai (114 s ở 256 KiB). Sửa thế nào trong một lần sửa còn lại?
+
+- Phương án: (1) Vá từng ca trên thiết kế mới (_CommentStrip chung, _heredoc_body_scripts) đến khi 0 hồi quy · (2) Bisect từng commit; commit nào gây hồi quy mà không đóng được trọn lớp trong lần sửa này thì gỡ hành vi đó (giữ ID ở mở, ghi lý do), chỉ giữ phần đã chứng minh 0 hồi quy trên toàn bộ ma trận + confirmed.json + fuzz · (3) Đóng PR, làm lại lát B từ đầu
+- Chọn: Bisect từng commit; commit nào gây hồi quy mà không đóng được trọn lớp trong lần sửa này thì gỡ hành vi đó (giữ ID ở mở, ghi lý do), chỉ giữ phần đã chứng minh 0 hồi quy trên toàn bộ ma trận + confirmed.json + fuzz
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: guard là hàng rào, hồi quy cho qua lệnh phá huỷ tệ hơn để ID mở; phương án 1 đã lặp nhiều lượt ở #361 mà vẫn sinh hồi quy mới; (2) giữ đường lùi: phần an toàn (AUD-HAR-154, AUD-SEC-188, ~N) vẫn vào được; (3) test được: tiêu chí máy đo — 0 ca main-deny-head-allow trên confirmed.json/final_verify/ma trận, thời gian ≤ main ×3 ở 256 KiB
+- Đường lùi: Cherry-pick lại commit đã gỡ từ nhánh worktree wt-guard3 (6088900 và tổ tiên) khi có thiết kế đóng trọn lớp
+
+### D-280 · 2026-10-31T15:19:41+00:00 · PR #363: review lượt 2 còn 🔴 F1 (~N/.. làm lọt ghi tay bằng chứng — do AUD-SEC-240), 🟠 F2 chặn oan và 🟠 F3 chậm 14–46× main (do _heredoc_body_scripts của AUD-SEC-196), 🟢 F4–F6. Lần sửa thêm (pr rethink) làm gì?
+
+- Phương án: (1) Vá F1–F6 trên thiết kế hiện tại (đọc hai cách cho ~N, sửa bản viết lại heredoc, quét số học một lượt) · (2) Gỡ hành vi của AUD-SEC-240 (~N) và AUD-SEC-196 (_heredoc_body_scripts) — nguồn của F1/F2/F3 — đưa hai ID về mở kèm thiết kế đề xuất của reviewer; giữ AUD-HAR-154, AUD-SEC-188, AUD-SEC-241; sửa F4 (cờ -e), F5 (git -C/--work-tree cho luật tổ tiên sổ), F6 (dòng Hệ quả CHANGELOG); ghi sổ lỗ có từ trước $$( · (3) Đóng PR, tách thành PR nhỏ từng ID
+- Chọn: Gỡ hành vi của AUD-SEC-240 (~N) và AUD-SEC-196 (_heredoc_body_scripts) — nguồn của F1/F2/F3 — đưa hai ID về mở kèm thiết kế đề xuất của reviewer; giữ AUD-HAR-154, AUD-SEC-188, AUD-SEC-241; sửa F4 (cờ -e), F5 (git -C/--work-tree cho luật tổ tiên sổ), F6 (dòng Hệ quả CHANGELOG); ghi sổ lỗ có từ trước $$(
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: hai lớp 232/196 đã sinh hồi quy ở cả hai lượt review, vá tiếp trên guard là lặp lại #361; gỡ đưa guard về đúng main ở các lớp đó (0 hồi quy bằng cấu tạo) mà vẫn giữ ba sửa đã sạch qua hai lượt; (2) giữ đường lùi: mã gỡ còn ở lịch sử nhánh và wt-guard3; (3) đơn giản, test được; phương án 3 tốn thêm vòng review mà không an toàn hơn
+- Đường lùi: Cherry-pick lại c1b2ac9 (phần ~N) và 08ad726/b40ef1f (phần heredoc) khi có thiết kế đọc hai cách đã fuzz đủ
+
+### D-281 · 2026-10-31T16:48:28+00:00 · PR #363: review lần sửa D-280 còn 🔴 F-A (git -C đứng cuối → IndexError → guard fail-open; do 1671e16), 🟠 F-B (--work-tree hiểu sai, test khẳng định ngược git thật), 🟢 F-C (-C với $PWD/~+ — có từ trước), 🟢 F-D (CHANGELOG thiếu ca git checkout docs với nhánh tên docs). Lần sửa thêm cuối làm gì?
+
+- Phương án: (1) Sửa F-A bằng kiểm biên (i + 1 < len) và chỉ gọi _git_path_dirs khi có đích xoá; bỏ phần --work-tree (F-B) về đúng main vì đọc sai git; thêm dòng CHANGELOG (F-D); F-C và các ca có từ trước ghi sổ · (2) Gỡ cả F5 (1671e16): -C và --work-tree về đúng main, AUD-HAR-154 chỉ giữ phần thư mục tổ tiên không -C · (3) Giữ F5 nguyên và vá cả F-B/F-C trong lần này
+- Chọn: Sửa F-A bằng kiểm biên (i + 1 < len) và chỉ gọi _git_path_dirs khi có đích xoá; bỏ phần --work-tree (F-B) về đúng main vì đọc sai git; thêm dòng CHANGELOG (F-D); F-C và các ca có từ trước ghi sổ
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: F-A là một dòng, reviewer đã chạy bản sửa trên 31 ca crash + fuzz 6000 (0 ngoại lệ, 0 main-chặn-HEAD-qua) và nó đóng luôn lỗi có từ trước xargs git -C; --work-tree hiểu sai nên bỏ để không khẳng định sai (về đúng main); (2) giữ phần -C đã đúng với git thật (12 ca deny, sandbox xác nhận); (3) phương án 3 mở rộng bề mặt đúng chỗ vừa sinh hồi quy; phương án 2 bỏ cả phần đúng
+- Đường lùi: Cherry-pick lại 1671e16 nếu có thiết kế --work-tree đúng (xét P từ gốc dự án và rel(cwd,W)/P)
+### D-282 · 2026-10-31T19:40:10+00:00 · PR #368: thêm một lần sửa hết phát hiện sau 2 lượt review chưa sạch (ADR-0059/0053)
+
+- Phương án: (1) Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan · (2) Giữ AUD-SEC-195 ở trạng thái đã giảm còn mở, hạ giọng tài liệu, ghi nợ
+- Chọn: Chặn )# ở ba chỗ quyết định comment, bỏ kiểm trước trên chuỗi thô, sửa cả 3 ca chặn oan
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 (đúng và an toàn): phương án 1 đóng cả 11 ca lách và 3 ca chặn oan, đo bằng 23 ca lách bị chặn và 17 ca hợp lệ chạy, coverage 100 phần trăm; phương án 2 để hở lỗ đã tái hiện được
+- Đường lùi: Hoàn nguyên commit sửa; AUD-SEC-195 về mở trong sổ audit
+
+### D-283 · 2026-10-31T20:20:15+00:00 · PR #368: lượt rà thứ 5 sau khi đóng họ pwd# (reviewer lượt 4 báo 1 đỏ: kiểm strict chạy sau khi thay pwd)
+
+- Phương án: (1) Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR · (2) Dừng PR, bỏ AUD-SEC-195 về mở
+- Chọn: Mở thêm một lượt rà ở head đã sửa; các lớp riêng tìm thêm vào sổ AUD-SEC-232 đến 236, không gánh vào PR
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: bản sửa lượt 4 đo được (255 test guard, 300 hooks, bench 997 ca xanh) và các lớp còn lại có từ trước (base cũng lọt, fuzz: base 400 ca lọt, head giảm mạnh, không ca nào lọt ở head mà base chặn); gộp vào sổ riêng tránh phình PR
+- Đường lùi: Hoàn nguyên commit sửa; đưa AUD-SEC-195 về mở
+
+### D-287 · 2026-10-31T22:49:32+00:00 · PR #363: mở lượt rà mới sau khi đổi số ID trùng và gộp main (nhánh đã đổi sau review cuối)
+
+- Phương án: (1) Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại · (2) Đóng PR
+- Chọn: Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: nội dung sửa của PR đã có 4 lượt review; thay đổi mới chỉ là đổi số ID và đồng bộ chính sách với main, đo bằng bench 1043 ca xanh; đóng PR bỏ sửa guard đã kiểm
+- Đường lùi: Hoàn nguyên commit gộp và đổi số; đưa PR về head 0486151
