@@ -222,10 +222,12 @@ class PlanWavesTest(unittest.TestCase):
 
     # (2) bảng 12 đợt
     def test_plan_314_table(self):
-        """Tái hiện bảng "Phân chia việc" của PLAN-3.14-app (mọi task `[ ]`)."""
+        """Tái hiện bảng "Phân chia việc" của PLAN-3.14-app (mọi task `[ ]`) — bảng lập ở trần 5 (trước ADR-0061)."""
         path = self.base / "p314.md"
         write(path, PLAN_314)
-        out = xt.plan_waves(xt.parse_plan(path), {})
+        out = xt.plan_waves(xt.parse_plan(path), {}, 5)
+        self.assertEqual(xt.WAVE_MAX_DEFAULT, 4)  # ADR-0061: mặc định mới 4, trần cứng 5 vẫn là LOOP-ORCH-008
+        self.assertTrue(all(len(w["tasks"]) <= 4 for w in xt.plan_waves(xt.parse_plan(path), {})["waves"]))
         self.assertEqual(self.ids(out), EXPECTED_314)
         self.assertEqual(out["blocked"], [])
         self.assertEqual([w["wave"] for w in out["waves"]], list(range(1, 13)))
@@ -269,6 +271,11 @@ class PlanWavesTest(unittest.TestCase):
         self.assertEqual(data["blocked"], [])
         rc, out, _ = self.run_main("plan", "waves", "--plan", "docs/autopilot/PLAN.md", "--json")
         self.assertEqual(self.ids(json.loads(out)), [["T-009"]])
+        write(self.base / "five.md", "\n".join(task(f"T-10{i}", files=[f"f{i}"]) for i in range(5)))
+        rc, out, _ = self.run_main("plan", "waves", "--plan", "five.md", "--json")  # mặc định 4 (ADR-0061)
+        self.assertEqual([len(w) for w in self.ids(json.loads(out))], [4, 1])
+        rc, out, _ = self.run_main("plan", "waves", "--plan", "five.md", "--json", "--max", "5")
+        self.assertEqual([len(w) for w in self.ids(json.loads(out))], [5])
 
     def test_cli_errors(self):
         """--max < 1 và PLAN thiếu → stderr, exit 2."""

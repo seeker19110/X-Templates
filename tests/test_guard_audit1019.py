@@ -1088,8 +1088,8 @@ class HeredocRound2Test(unittest.TestCase):
         for cmd in ("echo <<\nls", "cat <<E`x`F\nbody\nE`x`F", "cat <<E$(x)F\nbody\nE$(x)F\nls"):
             with self.subTest(cmd=cmd), self.assertRaises(guard.ScanTooComplex):
                 guard.strip_heredocs(cmd)
-        lines = ["cat <<'E'", "body", "E"]
-        self.assertEqual([(o, a, b) for o, _, a, b in guard._heredoc_spans(lines)], [(0, 1, 2)])
+        lines = ["cat <<'E'", "body", "E"]  # AUD-CODE-032: gọi thẳng `_here_scan` (wrapper `_heredoc_spans` đã xoá)
+        self.assertEqual([(o, a, b) for o, _, a, b, _ in guard._here_scan("\n".join(lines))], [(0, 1, 2)])
 
     def test_terminator_exact_line(self):
         self.assert_all(

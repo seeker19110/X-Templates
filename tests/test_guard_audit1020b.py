@@ -132,7 +132,9 @@ class RmPwdParentTest(unittest.TestCase):
             "rm -rf `pwd`/..",
             "cd docs && rm -rf $(pwd)/..",
         ):
-            with self.subTest(cmd=cmd):
+            # AUD-TEST-038: cây làm việc dưới /tmp (worktree phiên cloud) làm `$PWD/../other-project` rơi vào miễn trừ
+            # thư mục tạm (ADR-0040) — test kiểm đích ngoài dự án, nên gỡ phụ thuộc vị trí cây bằng thư mục tạm giả
+            with self.subTest(cmd=cmd), mock.patch.object(guard, "_temp_roots", return_value=["/xt-khong-co-tmp"]):
                 self.assertEqual(policy(cmd)["decision"], "deny", cmd)
 
     def test_guard_rm_pwd_inside_passes(self):

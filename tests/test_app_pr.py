@@ -255,6 +255,16 @@ class PrsTest(unittest.TestCase):
         self.assertEqual(row["action"], want["action"])
         self.assertEqual(row["reasons"][0], want["why"])
 
+    def test_passes_rethink_cap_like_cli(self) -> None:
+        """Review #380: màn PR truyền trần `max_rethink` (chặt hơn giữa cây và nhánh đích) như `pr next` — không mặc định."""
+        real = xt.pr_next
+        with Sandbox(gh=GhSpy()) as sb, mock.patch.object(xt, "pr_rethink_cap", return_value=7) as cap:
+            with mock.patch.object(xt, "pr_next", side_effect=real) as spy:
+                sb.call("/api/prs")
+        self.assertTrue(cap.called)
+        self.assertTrue(spy.call_args_list)
+        self.assertTrue(all(c.args[3] == 7 for c in spy.call_args_list))
+
     def test_ledger_is_read_not_written(self) -> None:
         with Sandbox(gh=GhSpy()) as sb:
             led = sb.base / ".autopilot" / "reviews.json"

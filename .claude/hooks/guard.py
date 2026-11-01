@@ -829,11 +829,6 @@ def literal_bodies_masked(cmd: str) -> str:
     return "\n".join(line for j, line in enumerate(lines) if j not in drop)
 
 
-def _heredoc_spans(lines: List[str]) -> List[Tuple[int, "re.Match[str]", int, int]]:
-    """(chỉ số dòng mở, match, đầu thân, cuối thân) — xem `_heredocs`."""
-    return [(o, m, a, b) for o, m, a, b, _ in _here_scan("\n".join(lines))]
-
-
 def join_continuations(cmd: str) -> str:
     """Nối dòng như bash: `\\` + xuống dòng chỉ là nối dòng khi dãy `\\` liền trước dài LẺ — `\\\\` + xuống dòng là
     gạch chéo đã escape rồi xuống dòng thật (`sh -c "docker \\\\` ↵ `run …"`: shell trong mới nối thành `docker run`).
@@ -5727,7 +5722,8 @@ MCP_PR_TITLE_RE = re.compile(r"mcp__.+__(create_pull_request|update_pull_request
 MCP_COMMIT_RE = re.compile(r"mcp__.+__(create_or_update_file|push_files|delete_file)")
 COMMIT_MESSAGE_OPTS = {"-m": "m", "--message": "m", "-F": "F", "--file": "F"}
 TITLE_FIX = (
-    "viết lại dạng `<type>(scope): mô tả` ≤ 100 ký tự rồi chạy lại (kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
+    f"viết lại dạng `<type>(scope): mô tả` ≤ {PR_TITLE_MAX} ký tự rồi chạy lại "
+    "(kiểm trước: `xt.py pr title-check '<tiêu đề>'`)"
 )
 
 
@@ -5824,7 +5820,7 @@ def title_rule(cmd: str, commands: List[Tuple[List[str], Optional[str]]], root: 
         if problem:
             return (
                 f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029: subject có thể thành subject commit squash): "
-                "rút gọn dòng đầu ≤ 100 ký tự, chi tiết đưa xuống thân rồi chạy lại."
+                f"rút gọn dòng đầu ≤ {PR_TITLE_MAX} ký tự, chi tiết đưa xuống thân rồi chạy lại."
             )
     return ""
 
@@ -5840,7 +5836,7 @@ def mcp_title(tool_name: str, tool_input: Dict[str, object], root: str) -> str:
     if MCP_COMMIT_RE.fullmatch(tool_name) and isinstance(message, str) and commit_subject_problem(message):
         return (
             f"Commit qua {tool_name} bị khung chặn ({commit_subject_problem(message)} — LOOP-HARNESS-029): rút gọn "
-            "dòng đầu ≤ 100 ký tự rồi gọi lại."
+            f"dòng đầu ≤ {PR_TITLE_MAX} ký tự rồi gọi lại."
         )
     return ""
 

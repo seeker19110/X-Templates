@@ -54,6 +54,7 @@ def _pr_row(ctx: Ctx, item: Dict[str, Any]) -> Dict[str, Any]:
             d,
             bool(pr.get("autoMergeRequest")),
             xt.with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity"))),
+            xt.pr_rethink_cap(ctx.base, pr),  # cùng trần với `pr next` (ADR-0061, review #380)
         )
     except (xt.PrInputError, *_DATA_ERRORS) as exc:
         return {**row, "lane": "", "action": "error", "reasons": [_one_line(exc)]}

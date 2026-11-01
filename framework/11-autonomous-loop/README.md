@@ -1,7 +1,7 @@
 ---
 title: Vòng lặp tự động (autopilot)
 kind: index
-updated: 2026-10-27
+updated: 2026-11-01
 ---
 
 # 11 — Vòng lặp tự động (autopilot)
@@ -16,7 +16,7 @@ updated: 2026-10-27
 | [`loop-design.md`](loop-design.md) | Thiết kế vòng lặp: 4 con số, tiêu chí dừng máy kiểm, bằng chứng; vòng bảo trì kích hoạt theo ngưỡng | Trước khi bật autopilot lần đầu; khi chọn tầng vòng lặp (hook/`/loop`/headless/ngưỡng) |
 | [`harness-files.md`](harness-files.md) | File harness: PLAN · PROGRESS · BLUEPRINT · evidence · state | Khi viết PLAN.md, PROGRESS.md; khi hỏi "file nào commit, file nào không" |
 | [`stop-points-and-escalation.md`](stop-points-and-escalation.md) | Điểm quyết định tự duyệt (tiêu chí chất lượng cuối), điểm dừng bắt buộc, mức tin cậy T0–T4, leo thang | Khi cần quyết định; khi quyết hành động nào agent được tự làm; khi cấu hình allow/ask/deny |
-| [`orchestration-and-subagents.md`](orchestration-and-subagents.md) | Điều phối: subagent, worktree, song song, không lồng | Khi quyết tách hay tự làm (ba lý do context, hàng "Làm trực tiếp", `LOOP-ORCH-020`); khi muốn chạy song song |
+| [`orchestration-and-subagents.md`](orchestration-and-subagents.md) | Điều phối: subagent, worktree, song song, không lồng | Khi quyết tách hay tự làm (ba lý do context, `LOOP-ORCH-024`, `LOOP-ORCH-020`); khi muốn chạy song song |
 | [`self-healing-ci.md`](self-healing-ci.md) | Agent tự sửa CI/review: giới hạn, cấm (kể cả làm yếu test, tự gắn `@flaky`), bằng chứng | Khi CI đỏ trong autopilot; khi cấu hình workflow có agent là tác giả |
 | [`optimization-loop.md`](optimization-loop.md) | Vòng tối ưu hiệu năng: bộ đo khoá, profile, một thay đổi, máy quyết giữ/hoàn tác, chống gian lận số đo; `xt.py perf` | Khi PLAN có task tối ưu hiệu năng; trước G7 |
 | [`context-and-token-budget.md`](context-and-token-budget.md) | Ngân sách context/token, compaction, bàn giao phiên | Khi phiên dài, gần hết ngân sách; khi viết bàn giao |
@@ -67,7 +67,7 @@ template và `AGENTS.md` chỉ tóm tắt và liên kết, không chép bảng/n
    **Một phiên đến khi xong** (ADR-0009). Lệnh `loop` gõ trong một git worktree khác của cùng repo dùng gốc worktree đó
    (Gate, tick PLAN, `.autopilot/` riêng); `hook-stop`/`checkpoint` luôn theo `CLAUDE_PROJECT_DIR` — vòng ở worktree thì mở phiên
    Claude với thư mục dự án là worktree đó (`loop init` cảnh báo khi khác).
-10. **Mỗi vòng**: `<XT> loop status --json` → `continue` kèm `task`, `executor` (tầng giao việc, ADR-0029; `escalated` =
+10. **Mỗi vòng**: `<XT> loop status --json` → `continue` kèm `task`, `executor` (ADR-0029/0061; `null` = tự làm; `escalated` =
     chuyển cấp kèm diff + evidence lỗi + giả thuyết đã loại), `milestone_done` + `milestone_audit` (`now` → audit delta theo
     [`../00-method/audit.md`](../00-method/audit.md) §1 trước task kế, 🔴/🟠 thành task mới; `g7` ở pha build → làm tiếp —
     ADR-0033) → làm task → Gate **y nguyên** qua `<XT> loop record --task T-NNN [--executor <agent>] -- '<Gate>'` (Gate là MỘT đối số

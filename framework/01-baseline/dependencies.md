@@ -3,7 +3,7 @@ title: Phụ thuộc: lockfile, cập nhật, license, lỗ hổng
 kind: baseline
 prefix: BASE-DEP
 applies_to: [all]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Phụ thuộc: lockfile, cập nhật, license, lỗ hổng
@@ -53,8 +53,8 @@ updated: 2026-10-31
 - [ ] `BASE-DEP-016` **MAY** `cooldown` cho cập nhật tự động (vd 3–7 ngày sau khi upstream phát hành) để tránh nhận bản vừa bị rút/tiêm mã. → Kiểm: `dependabot.yml` có `cooldown.default-days` hoặc Renovate `minimumReleaseAge`. · Nguồn: Dependabot `cooldown`
 - [ ] `BASE-DEP-017` **MAY** Vendor (sao chép có lock: ghim commit, sha256 từng file, ghi lý do `rejected` cho phần bỏ) phụ thuộc nhỏ hoặc nhạy cảm của **mã ứng dụng**. Skill/MCP server/plugin của agent không thuộc mục này — bắt buộc theo [`SEC-SUPPLY-016`](../12-security/supply-chain.md). → Kiểm: `docs/integrations/*.lock.json` có commit + sha256; script `verify-vendor` chạy trong CI. · Nguồn: catalog 23 §3.1, 20 §3b (vendor-with-lock)
 - [ ] `BASE-DEP-018` **MAY** Kiểm điểm **Scorecard** của phụ thuộc quan trọng (`scorecard --repo=github.com/<o>/<r>`) trước khi thêm; điểm Maintained/Vulnerabilities thấp là tín hiệu cân nhắc. → Kiểm: ghi điểm trong PR thêm phụ thuộc. · Nguồn: OpenSSF Scorecard
-- [ ] `BASE-DEP-019` **SHOULD** Cập nhật tự động chỉ đưa vào **bản ổn định** (không alpha/beta/rc/canary/nightly) và theo dõi cả **toolchain** chứ không riêng gói: phiên bản runtime (`.python-version`, `.nvmrc`/`engines`, `go` directive, `rust-toolchain`), base image, action CI; dùng bản pre-release phải có ADR nêu lý do và ngày bỏ. → Kiểm: `dependabot.yml`/`renovate.json` có ecosystem cho toolchain; grep lockfile/manifest không thấy `-alpha`/`-beta`/`-rc`/`-canary` ngoài danh sách ADR.
-- [ ] `BASE-DEP-020` **SHOULD** Khi `xt.yaml` đặt `merge_autonomy: L3` và `merge_hard_exceptions: auto` (chủ dự án đã chọn tự chủ cao), PR nâng **major** (`BASE-DEP-012`) do autopilot làm trọn qua skill `/upgrade`: đọc changelog/hướng dẫn migration của upstream, sửa code theo breaking change, Gate đầy đủ xanh, reviewer năng lực cao hơn duyệt sạch ở head, D-NNN ghi rủi ro và đường lùi (revert PR). Runtime, engine cơ sở dữ liệu và thư viện auth/mật mã vẫn theo `BASE-DEP-012`. → Kiểm: PR major có D-NNN, link changelog upstream và review sạch ở head.
+- [ ] `BASE-DEP-019` **SHOULD** Cập nhật tự động chỉ đưa vào **bản ổn định** (không alpha/beta/rc/canary/nightly) và theo dõi cả **toolchain** chứ không riêng gói: phiên bản runtime (`.python-version`, `.nvmrc`/`engines`, `go` directive, `rust-toolchain`), base image, action CI; dùng bản pre-release phải có ADR nêu lý do và ngày bỏ. → Kiểm: `dependabot.yml`/`renovate.json` có ecosystem cho toolchain; grep lockfile/manifest không thấy `-alpha`/`-beta`/`-rc`/`-canary` ngoài danh sách ADR. · Nguồn: chủ dự án 2026-10-31 (`research/2026-10-31-stored-delta-autonomy.md` §XT-H); Dependabot docs *cooldown* (chưa xác minh ngày đọc)
+- [ ] `BASE-DEP-020` **SHOULD** Khi `xt.yaml` đặt `merge_autonomy: L3` và `merge_hard_exceptions: auto` (chủ dự án đã chọn tự chủ cao), PR nâng **major** (`BASE-DEP-012`) do autopilot làm trọn qua skill `/upgrade`: đọc changelog/hướng dẫn migration của upstream, sửa code theo breaking change, Gate đầy đủ xanh, reviewer năng lực cao hơn duyệt sạch ở head, D-NNN ghi rủi ro và đường lùi (revert PR). Runtime, engine cơ sở dữ liệu và thư viện auth/mật mã vẫn theo `BASE-DEP-012`. → Kiểm: PR major có D-NNN, link changelog upstream và review sạch ở head. · Nguồn: chủ dự án 2026-10-31 (`research/2026-10-31-stored-delta-autonomy.md`); ADR-0047, ADR-0056 của khung
 
 ## Bẫy thường gặp
 

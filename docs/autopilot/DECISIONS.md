@@ -1999,3 +1999,24 @@
 - Chọn: Mở lượt rà ở head hiện tại (đổi ID 232..236 thành 240..244, chuyển ca test và corpus theo chính sách chặn dấu thăng liền ngoặc của main), rồi ghi nợ phát hiện còn lại
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1 và 2: nội dung sửa của PR đã có 4 lượt review; thay đổi mới chỉ là đổi số ID và đồng bộ chính sách với main, đo bằng bench 1043 ca xanh; đóng PR bỏ sửa guard đã kiểm
 - Đường lùi: Hoàn nguyên commit gộp và đổi số; đưa PR về head 0486151
+
+### D-292 · 2026-11-01T03:17:20+00:00 · Duyệt PLAN-upgrade-2026-11-01 (ADR-0061 Adaptive Agent theo nhận định chủ dự án; stored ưu tiên 1-3; sửa batch audit delta) và cách máy hoá ADR-0061
+
+- Phương án: (1) Bảng topology máy đọc, mặc định self, giữ hai tầng executor cho parallel, đợt 4, rethink tối đa 1 mỗi PR, thêm KPI thời gian vào loop stats; 7 lát mỗi lát một PR, tự làm (topo self), lát chạm harness topo review · (2) Giữ mặc định giao executor và chờ số đo LOOP-ORCH-020 như ADR-0045 · (3) Bỏ hẳn executor và executor-deep, chỉ một agent cộng reviewer
+- Chọn: Bảng topology máy đọc, mặc định self, giữ hai tầng executor cho parallel, đợt 4, rethink tối đa 1 mỗi PR, thêm KPI thời gian vào loop stats; 7 lát mỗi lát một PR, tự làm (topo self), lát chạm harness topo review
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: khớp thực tế vận hành phiên 2026-10-31 và dữ kiện sống 2026-11-01 (Harness design: đơn giản nhất, chỉ tăng khi cần; ROI: cost per task, PR cycle time); tiêu chí 2: đường lùi một dòng topo parallel trả hành vi cũ; tiêu chí 3: số đo LOOP-ORCH-020 vẫn chạy và có thêm trục thời gian; chủ dự án có quyền cuối, số 4 và 1 rethink ghi là khởi điểm tự đặt; phương án 2 không bao giờ có số, phương án 3 mất chuyển cấp ADR-0029
+- Đường lùi: Revert PR từng lát; PLAN ghi topo parallel cho mọi task; max_rethink 0
+
+### D-293 · 2026-11-01T04:33:04+00:00 · T-3606: khung chưa có scanner prompt-assets-scan (chỉ bảng ai-security.md:106 trỏ script dự án đích) — lát này làm gì?
+
+- Phương án: (1) Tài liệu trước: SEC-AI-018 thêm luật XT-H-024 (lời bỏ xác nhận/không từ chối, gói không ghim, quét README/docs), CMP-LIC-024 mới cho XT-H-026; scanner thành T-3613 đợt kế (lát ≤ 150 dòng, mỗi lát một PR) · (2) Hiện thực xt.py prompt-assets-scan ngay (4 luật cũ + 2 mới + miễn trừ + test, ~300 dòng) trong lát này
+- Chọn: Tài liệu trước: SEC-AI-018 thêm luật XT-H-024 (lời bỏ xác nhận/không từ chối, gói không ghim, quét README/docs), CMP-LIC-024 mới cho XT-H-026; scanner thành T-3613 đợt kế (lát ≤ 150 dòng, mỗi lát một PR)
+- Lý do (tiêu chí chất lượng cuối): Đúng/an toàn ngang nhau (luật đã có nhà, scanner là công cụ cưỡng chế); phương án 1 nhỏ, đảo ngược được, đúng trần lát của ADR-0061; scanner là feature riêng cần spec miễn trừ + fixture, ghi task T-3613 kèm Gate test
+- Đường lùi: Bỏ T-3613, sửa lại chữ SEC-AI-018/CMP-LIC-024 về bản trước (giữ ID)
+
+### D-294 · 2026-11-01T04:46:03+00:00 · ADR-0060 (sáu skill theo tác vụ, #365) chưa có D-NNN — ghi hồi tố cách nào? (AUD-DOC-133)
+
+- Phương án: (1) Ghi D-NNN hồi tố 2026-11-01 xác nhận phiên chính đã tự duyệt ADR-0060 theo tiêu chí chất lượng cuối; dòng Trạng thái ADR-0060 dẫn D-NNN kèm chữ 'hồi tố' · (2) Để trống, coi ADR-0060 là quyết định của chủ repo (yêu cầu 2026-10-31) không cần D-NNN
+- Chọn: Ghi D-NNN hồi tố 2026-11-01 xác nhận phiên chính đã tự duyệt ADR-0060 theo tiêu chí chất lượng cuối; dòng Trạng thái ADR-0060 dẫn D-NNN kèm chữ 'hồi tố'
+- Lý do (tiêu chí chất lượng cuối): AGENTS.md §4: quyết định chuyên môn phiên chính tự duyệt phải có D-NNN; ADR-0060 là thiết kế (chọn 6 skill, mẫu) dù yêu cầu từ chủ repo; ghi hồi tố giữ dấu vết, không sửa lịch sử
+- Đường lùi: Xoá câu dẫn D-NNN ở ADR-0060 (giữ mục D trong sổ)
