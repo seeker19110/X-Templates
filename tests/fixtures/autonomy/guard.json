@@ -13936,6 +13936,162 @@
    "expect": {
     "allowed": true
    }
+  },
+ {
+  "id": "guard-sec270-sed-flag-I-e",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-270"
+  ],
+  "input": {
+   "command": "sed '/x/Ie rm -rf ~' f"
+  },
+  "expect": {
+   "allowed": false
   }
+ },
+ {
+  "id": "guard-sec270-sed-custom-delim-e",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-270"
+  ],
+  "input": {
+   "command": "sed '\\%x%e rm -rf ~' f"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec270-sed-e-glued",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-270"
+  ],
+  "input": {
+   "command": "sed -n 'erm -rf ~' f"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec270-sed-benign",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-270"
+  ],
+  "input": {
+   "command": "sed -i 's/(e.g.)/vi du/' f && sed -n '/error/p' f"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec271-ps4-append",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-271"
+  ],
+  "input": {
+   "command": "PS4+='$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec271-bash-env-append",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-271"
+  ],
+  "input": {
+   "command": "BASH_ENV+=f bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec254-bash-env-data-allowed",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-254"
+  ],
+  "input": {
+   "command": "grep -rn 'BASH_ENV=f' tests/ && echo \"BASH_ENV=/dev/null\""
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec256-awk-v-system",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-256"
+  ],
+  "input": {
+   "command": "awk -v c='rm -rf ~' 'BEGIN{system(c)}'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec256-tar-oldstyle-I",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-256"
+  ],
+  "input": {
+   "command": "tar xIf 'rm -rf ~;cat' a.tar"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec274-wrapper-env-bash-env",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-274"
+  ],
+  "input": {
+   "command": "command env BASH_ENV=f bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec274-nohup-env-bash-env",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-274"
+  ],
+  "input": {
+   "command": "nohup env BASH_ENV=f bash -c true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec275-awk-v-print-allowed",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-275"
+  ],
+  "input": {
+   "command": "awk -v x='rm -rf ~' 'BEGIN{print x}'"
+  },
+  "expect": {
+   "allowed": true
+  }
+ }
  ]
 }
