@@ -2033,3 +2033,10 @@
 - Chọn: Hợp hai cách đọc IFS (cách hiện tại và cách cũ của main), sàn là main; mở lượt rà cuối, nếu còn đỏ thì đóng PR
 - Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: nguyên nhân gốc của chuỗi lỗi là head khác main ở cách đọc IFS; hợp chặt hơn bảo đảm không yếu hơn main theo cấu trúc, không còn vá từng ngữ cảnh; đo 13 biến thể reviewer + 8 lệnh vô hại
 - Đường lùi: Hoàn nguyên commit hợp; đóng PR, AUD-SEC-232 về mở
+
+### D-290 · 2026-11-01T00:35:38+00:00 · PR #372: thêm một lượt rà nữa sau review cuối chưa sạch (ADR-0053/0059)
+
+- Phương án: (1) Lượt hai đọc IFS đúng như main bên trong tokenize qua cờ (tương đương main theo cấu trúc, phương án reviewer gọi là chắc hơn); mở thêm một lượt rà · (2) Đóng PR, đưa AUD-SEC-232 về đã giảm còn mở
+- Chọn: Lượt hai đọc IFS đúng như main bên trong tokenize qua cờ (tương đương main theo cấu trúc, phương án reviewer gọi là chắc hơn); mở thêm một lượt rà
+- Lý do (tiêu chí chất lượng cuối): Tiêu chí 1: lỗ lần này do điều kiện kích và viết lại chuỗi thô lệch thứ tự nối dòng với main; đọc IFS trong tokenize sau nối dòng và giải ANSI-C đồng nhất với main theo cấu trúc, không còn xấp xỉ; người dùng yêu cầu tiếp tục merge
+- Đường lùi: Hoàn nguyên commit sửa; đóng PR, AUD-SEC-232 về mở
