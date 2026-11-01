@@ -14092,6 +14092,149 @@
   "expect": {
    "allowed": true
   }
+ },
+ {
+  "id": "guard-sec279-awk-stdin-system",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-279"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | awk '{system($0)}'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec279-sed-stdin-e",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-279"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed 's/^//e'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec279-awk-stdin-benign",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-279"
+  ],
+  "input": {
+   "command": "echo 'a b' | awk '{print $1}'"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec280-perl-readpipe",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-280"
+  ],
+  "input": {
+   "command": "perl -e 'readpipe(\"rm -rf ~\")'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec280-ruby-open3",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-280"
+  ],
+  "input": {
+   "command": "ruby -e 'require \"open3\"; Open3.capture2(\"rm -rf ~\")'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec281-printf-v-ps4",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-281"
+  ],
+  "input": {
+   "command": "printf -v PS4 '%s' '$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec281-printf-v-benign",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-281"
+  ],
+  "input": {
+   "command": "printf -v x '%s' y"
+  },
+  "expect": {
+   "allowed": true
+  }
+ },
+ {
+  "id": "guard-sec284-sed-expression-eq-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-284"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed --expression='s/^//e'"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec284-sed-bundled-ee-stdin",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-284"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed -ee"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec285-sed-attached-e-program",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-285"
+  ],
+  "input": {
+   "command": "sed '-e1e rm -rf ~' f"
+  },
+  "expect": {
+   "allowed": false
+  }
+ },
+ {
+  "id": "guard-sec286-awk-heredoc-system",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-286"
+  ],
+  "input": {
+   "command": "awk '{system($0)}' <<'E'\nrm -rf ~\nE"
+  },
+  "expect": {
+   "allowed": false
+  }
  }
  ]
 }

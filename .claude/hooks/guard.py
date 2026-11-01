@@ -6222,7 +6222,15 @@ TAR_CMD_LONG = ("--to-command", "--use-compress-program", "--info-script", "--ne
 M4_EXEC_RE = re.compile(r"\be?syscmd\s*\(")
 # Perl/Ruby/PHP chạy shell không cần ngoặc: `system q(…)`, `exec "…"`, backtick, `qx{…}`, `%x(…)`, `open(F, "cmd|")`.
 QUOTE_EXEC_FAMILIES = {"perl", "ruby", "php"}
-QUOTE_EXEC_HINT_RE = re.compile(r"\b(?:system|exec|qx|open|popen|shell_exec|passthru|proc_open|spawn)\b|`|%x")
+QUOTE_EXEC_HINT_RE = re.compile(
+    r"\b(?:system|exec|qx|open|popen|shell_exec|passthru|proc_open|spawn|readpipe|pcntl_exec|Open3|capture[23]e?"
+    r"|popen[23]e?)\b|`|%x"  # readpipe/Open3/pcntl_exec: AUD-SEC-280
+)
+SED_SCAN_MAX = 4096  # chương trình sed dài hơn mà có `s<dấu>` → chặn "quá phức tạp" (AUD-PERF-005)
+SED_S_HINT_RE = re.compile(r"s[^\\\n\w\s]")
+SED_PROG_LONG = ("--expression",)  # tên dài nhận chương trình sed (viết tắt `--e`, `--expr` như getopt)
+AWK_PROG_LONG = ("--source",)  # gawk `--source=…`
+PROMPT_VAR_RE = re.compile(r"PS[0-4]|PROMPT_COMMAND")
 QUOTE_LIKE_RE = re.compile(r"(?:\b(?:qq|qx|q)|%[xqQ]?)\s*([^\w\s])")
 QUOTE_PAIRS = {"(": ")", "[": "]", "{": "}", "<": ">"}
 BACKTICK_BODY_RE = re.compile(r"`([^`]*)`")
@@ -6234,7 +6242,7 @@ ANY_ASSIGN_RE = re.compile(r"[A-Za-z_]\w*(?:\[[^]]*\])?\+?=(.*)", re.S)
 BASH_ENV_RE = re.compile(r"BASH_ENV\+?=(.+)", re.S)
 # Chương trình chỉ đọc/in dữ liệu, không chạy lệnh từ đối số: `BASH_ENV=…` trong đối số của chúng là chữ (AUD-SEC-254).
 BASH_ENV_DATA_CMDS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "ag", "git", "cat", "head", "tail", "wc", "jq"}
-QUOTE_SCAN_MAX = 16384  # tổng ký tự chuỗi/thân trích của script Perl/Ruby/PHP được quét (AUD-PERF-004); vượt → chặn
+QUOTE_SCAN_MAX = 4096  # tổng ký tự chuỗi/thân trích Perl/Ruby/PHP được quét (AUD-PERF-004/007); vượt → chặn
 BASH_ENV_MARK = "bash con nạp file guard không quét"  # mã OPAQUE_EXEC (REASON_CODES)
 CALLBACK_OPTS = {"mapfile": "C", "readarray": "C", "compgen": "CW", "complete": "CW"}
 
@@ -6254,10 +6262,66 @@ def _bundled_values(args: List[str], letters: str) -> List[str]:
 def _sed_exec_scripts(args: List[str]) -> List[str]:
     """Lệnh mà chương trình sed chạy: `e lệnh` và chỗ thay của `s///e` (bỏ `\\` thoát)."""
     out: List[str] = []
-    for prog in (a.split("=", 1)[1] if a.startswith("--expression=") else a for a in args):
+    for prog in dict.fromkeys([*args, *_tool_programs(args, SED_PROG_LONG, "e")]):  # thô (luật cũ) + chương trình tách
+        if len(prog) > SED_SCAN_MAX and SED_S_HINT_RE.search(prog):  # lookahead mọi `s` bậc hai (AUD-PERF-005)
+            raise ScanTooComplex("chương trình sed quá dài để quét lệnh `e`/`s///e`")
         out += [m[1] for m in SED_EXEC_CMD_RE.finditer(prog)]
         out += [re.sub(r"\\(.)", r"\1", m[3]) for m in SED_SUBST_RE.finditer(prog) if "e" in m[4]]
     return out
+
+
+def _tool_programs(args: List[str], long_opts: Tuple[str, ...], short: str) -> List[str]:
+    """Chương trình sed/awk ở MỌI dạng cờ (review #392 🔴): đối số trần, `-e X`, dính/gộp `-eX`/`-neX`, `--expression=X`/
+    `--expression X` và tên dài viết tắt ≥ 3 ký tự như getopt (`--e=…`), gawk `--source`. Chiều chặt: giá trị cờ khác
+    (tên file `-f`) cũng có thể lọt vào danh sách — chỉ chặn khi chữ đó là lệnh nguy hiểm."""
+    out: List[str] = []
+    i = 0
+    while i < len(args):
+        a, nxt = args[i], (args[i + 1] if i + 1 < len(args) else "")
+        key, eq, val = a.partition("=")
+        if a.startswith("--") and len(key) >= 3 and any(o.startswith(key) for o in long_opts):
+            out.append(val if eq else nxt)
+            i += 1 if eq else 2
+            continue
+        k = a.find(short, 1) if a[:1] == "-" and not a.startswith("--") else -1
+        if k > 0:
+            out.append(a[k + 1 :] or nxt)
+            i += 1 if a[k + 1 :] else 2
+            continue
+        out += [] if a[:1] == "-" else [a]
+        i += 1
+    return out
+
+
+def _sed_runs_input(args: List[str]) -> bool:
+    """Chương trình sed chạy pattern space như lệnh: `e` trần (không đối số) hoặc `s///` có cờ `e` (AUD-SEC-256/279)."""
+    progs = _tool_programs(args, SED_PROG_LONG, "e")
+    bare = any(re.search(r"(?:^|[^A-Za-z])e[ \t]*(?:$|[;}\n])", p) for p in progs)
+    return bare or any("e" in m[4] for p in progs for m in SED_SUBST_RE.finditer(p))
+
+
+def _tool_runs_stdin(argv: List[str]) -> bool:
+    """Lệnh lấy chữ từ stdin làm lệnh shell: awk có `system(`/ống, sed có `e`/`s///e` (AUD-SEC-279)."""
+    n = normalize(argv)
+    name, args = (n[0], n[1:]) if n else ("", [])
+    if name in AWK_NAMES:
+        return any(AWK_EXEC_HINT_RE.search(a) for a in _tool_programs(args, AWK_PROG_LONG, "e"))
+    return name in SED_NAMES and _sed_runs_input(args)
+
+
+def _stdin_exec_inputs(cmd: str, tokens: List[str], placed: PlacedCmds, budget: Optional[ScanBudget]) -> Placed:
+    """Chữ thấy được đi vào stdin của awk/sed chạy lệnh từ đầu vào: here-string, ống từ echo/printf (AUD-SEC-279)."""
+    out: Placed = [
+        (c[i + 1], here) for c, here in placed if _tool_runs_stdin(c) for i, a in enumerate(c[:-1]) if a == "<<<"
+    ]
+    dirs, i = [here for _, here in placed], 0
+    for pipe in pipelines(tokens):
+        for feed, down, here in zip(_pipe_feeds(pipe), pipe[1:], dirs[i + 1 : i + len(pipe)]):
+            out += [(t, here) for t in feed or [] if _tool_runs_stdin(down)]
+        i += len(pipe)
+    runs = list(dict.fromkeys(here for c, here in placed if _tool_runs_stdin(c)))  # heredoc vào awk/sed (review #392)
+    bodies = _heredoc_scripts(cmd, _tool_runs_stdin, budget) if runs else []
+    return out + [(body, d) for body in bodies for d in runs]
 
 
 def _awk_exec_scripts(args: List[str]) -> List[str]:
@@ -6306,6 +6370,12 @@ def _prompt_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Giá trị bash mở rộng như prompt: gán `PS0…PS4`/`PROMPT_COMMAND` (cả sau `export`/`declare`); có `${…@P}` → mọi
     giá trị gán trong lệnh (biến nào được mở rộng không theo dõi — chiều chặt)."""
     out = [m[1] for t in tokens for m in [PROMPT_ASSIGN_RE.fullmatch(t)] if m]
+    for c in split_commands(tokens):  # `printf -v PS4 '%s' '$(…)'` (AUD-SEC-281): định dạng + đối số là giá trị
+        n = normalize(c)
+        for i, a in enumerate(n[:-1] if n[:1] == ["printf"] else []):
+            name = a[2:] if a.startswith("-v") and len(a) > 2 else n[i + 1] if a == "-v" else ""
+            if PROMPT_VAR_RE.fullmatch(name):
+                out += n[i + (1 if len(a) > 2 else 2) :]
     if re.search(r"@P\}", cmd):
         out += [m[1] for t in tokens for m in [ANY_ASSIGN_RE.fullmatch(t)] if m]
     return out
@@ -6387,6 +6457,7 @@ def _tool_exec_sources(
     if _interp_families(tokens, start) & QUOTE_EXEC_FAMILIES:
         out += [(s, here) for raw, here in interp for s in _quote_exec_scripts(raw)]
     out += _m4_inputs(cmd, tokens, placed, budget)
+    out += _stdin_exec_inputs(cmd, tokens, placed, budget)
     return [(s, d) for s, d in out if s.strip()], _bash_env_asks(tokens)
 
 
