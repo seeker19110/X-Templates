@@ -9,26 +9,29 @@
   README); lát 2–3 harness (`loop status.topology`, `executor: null` mặc định, `plan waves --max 4`, `loop stats
   time_to_green_hours`, `pr rethink` trần 1/PR) theo PLAN-upgrade-2026-11-01.
 - **Ngày:** 2026-11-01
-- **Làm rõ:** ADR-0045 (tách agent chỉ vì context; đo trước khi đổi — **giữ**, điều kiện đo của `LOOP-ORCH-020` nay là điều
-  kiện cho lần đổi **kế tiếp**, không phải cho lần đổi này do chủ dự án quyết); ADR-0029 (hai tầng executor — **giữ** cho hàng
-  `parallel` và chuyển cấp); ADR-0053/0059 (ngân sách review — **siết**: `rethink` ≤ 1/PR); ADR-0031/0033/0056/0058 (audit
-  theo mốc, CI là cổng đầy đủ, ba giai đoạn — không đổi). Không thay ADR nào.
+- **Thay một phần / làm rõ:** ADR-0045 — **thay** phần "harness giữ mặc định giao việc tới khi có số" (mặc định nay là
+  `self` theo chỉ thị chủ dự án; dòng trạng thái ADR-0045 ghi); **giữ** tách agent chỉ vì context và phép đo của
+  `LOOP-ORCH-020`, nay là điều kiện cho lần đổi **kế tiếp**. ADR-0029 (hai tầng executor — **giữ** cho hàng `parallel` và
+  chuyển cấp); ADR-0053/0059 (ngân sách review — **siết**: `rethink` ≤ 1/PR, **trừ** PR cắt bản theo ADR-0059 §6/D-259);
+  ADR-0031/0033/0056/0058 (audit theo mốc, CI là cổng đầy đủ, ba giai đoạn — không đổi).
 
 ## Bối cảnh
 
 - Khung đang có hai mặc định trái với cách phiên thật vận hành: `loop status` trả `executor: executor` cho mọi task (giao
   subagent là mặc định), và `LOOP-ORCH-020` giữ mặc định đó "cho tới khi có ≥ 10 task/nhóm × 2 vòng" — điều kiện đặt ngày
   2026-10-24 chưa bao giờ tích luỹ được (`runs.jsonl` của clone = 0; PROGRESS "chờ" từ 2026-10-25). Trong khi đó phiên
-  2026-10-31/11-01 (7 PR merge) vận hành đúng mô hình đề xuất: phiên chính tự viết mọi diff, chỉ giao `reviewer`/`researcher`/
+  2026-10-31/11-01 (9 PR merge) vận hành đúng mô hình đề xuất: phiên chính tự viết mọi diff, chỉ giao `reviewer`/`researcher`/
   audit read-only, song song ≤ 3, không giao `executor` lần nào.
 - Vòng review không có trần thật: ADR-0053 cho thêm lượt qua `pr rethink --decision D-NNN` không giới hạn số lần → PR #372
-  (guard `$IFS#`) 8 lượt review, mỗi lượt sửa lại mở lỗ mới, đóng không merge (D-282…D-291). Chủ dự án yêu cầu "giới hạn
-  vòng review, ưu tiên test tự động liên tục".
+  (guard `$IFS#`) 7 lượt review đăng dấu (REST: 7 `xt-review … verdict=blocking`), mỗi lượt sửa lại mở lỗ mới, đóng không
+  merge (D-284…D-291 ghi trên nhánh `seeker/wizardly-tesla-amsxmp` của PR đóng, không có trong sổ `main`). Chủ dự án yêu
+  cầu "giới hạn vòng review, ưu tiên test tự động liên tục".
 - Chủ dự án đưa bảng **loại việc → cấu hình** (sửa lỗi/tính năng nhỏ → 1 agent; xuyên module → agent chính + reviewer
   chuyên biệt; nhiều module độc lập → agent triển khai song song; audit lớn → một lượt audit rồi sửa batch) và 6 KPI
   (thời gian đến PR đạt CI · token/tính năng · số lần sửa lại · lỗi sau merge · tỉ lệ xong lần đầu · xung đột tích hợp).
   Khung đo được 4/6 bằng `loop stats` + `pr stats` + sổ audit (`do #N`); 2 KPI (token, xung đột) harness không thấy.
-- Ràng buộc: `AGENTS.md` 7168/7168 B (không thêm chữ); `LOOP-ORCH-008` ≤ 5 là MUST@L có nguồn (stored 23 §4.5); không
+- Ràng buộc: `AGENTS.md` 7168/7168 B (không thêm chữ); `LOOP-ORCH-008` ≤ 5 là MUST@L có nguồn stored (trích dẫn `23 §4.5`
+  hiện lệch — số ở 23 §2/03 §5, research §3 dòng 12; sửa ở T-3609, giữ ID); không
   tên model trong artefact (LOOP-HARNESS-027); mỗi PR pha harden ≤ ~150 dòng, review làn chuẩn.
 
 ## Phương án đã xét
@@ -53,7 +56,8 @@
    task `self` đỏ 2 lần → `executor-deep` (vẫn nhóm tự làm theo lần chạy đầu, D-172). `plan waves --max` mặc định 4
    (`LOOP-ORCH-008` giữ trần cứng 5). `loop stats` thêm `time_to_green_hours` (trung vị/P95, từ `started` lần chạy đầu tới
    `finished` lần xanh đầu của task). `pr rethink` tối đa `max_rethink` lần/PR (xt.yaml, mặc định 1); hết → `pr next` trả
-   `split-or-close` (tách PR nhỏ hơn hoặc đóng, ghi sổ phần đã học).
+   `split-or-close` (tách PR nhỏ hơn hoặc đóng, ghi sổ phần đã học). **Không áp** cho PR cắt bản (`is_release_pr`): giữ
+   ADR-0059 §6/D-259 — rà tới sạch, mỗi lượt thêm một D-NNN.
 3. **KPI** (`research/2026-11-01-adaptive-agent-topology.md` §4): báo cáo cuối lát ghi 6 KPI — 4 từ máy (`loop stats`:
    `first_pass_rate_*`, `runs_to_green`, `time_to_green_hours`; `pr stats`: `lead_time_hours`, `first_push_green`, `pushes`,
    `reverts`; sổ audit: phát hiện `do #N`), 2 ghi tay có nhãn "chưa đo bằng máy" (token từ `/usage`; số lần `update-branch`/
@@ -79,8 +83,8 @@
 
 - Nhận định của chủ dự án 2026-11-01 (nguyên văn trong phiên; tóm tắt ở research note).
 - `research/2026-11-01-adaptive-agent-topology.md` (đối chiếu đề xuất ↔ khung; KPI ↔ harness; nguồn sống đọc 2026-11-01).
-- `research/2026-10-24-single-agent-loop.md`, ADR-0045, ADR-0029, ADR-0053, ADR-0059; PR #372 (D-282…D-291) — bằng chứng
-  vòng review không trần.
+- `research/2026-10-24-single-agent-loop.md`, ADR-0045, ADR-0029, ADR-0053, ADR-0059; PR #372 đóng không merge (D-284…D-291
+  trên nhánh `seeker/wizardly-tesla-amsxmp`) — bằng chứng vòng review không trần.
 - Nguồn sống (đọc 2026-11-01, chi tiết §3 của research note): Anthropic *Harness design for long-running application development*
   (2026-03-24: "find the simplest solution possible, and only increase complexity when needed"; evaluator chỉ đáng khi việc vượt khả
   năng solo); claude.com ROI Claude Code (2026-10-27: "cost per task", PR cycle time, review iterations/rework per PR); Claude Code docs

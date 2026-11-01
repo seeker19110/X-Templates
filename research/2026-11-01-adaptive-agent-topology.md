@@ -22,7 +22,7 @@ updated: 2026-11-01
   theo "độ phức tạp × độ khép kín" + 3 lý do context, chưa có bảng **loại việc → cấu hình** (topology) máy đọc được.
 - Số đo của `LOOP-ORCH-020` **chưa bao giờ có** (PROGRESS 2026-10-25 → 2026-11-01: "chờ ≥ 10 task/nhóm"; `runs.jsonl` của
   clone = 0 dòng) — điều kiện đổi mặc định đặt ra 8 ngày trước không tích luỹ được vì không dự án nào chạy autopilot đủ dài.
-  Trong khi đó phiên 2026-10-31/11-01 (7 PR merge, 1 PR đóng) **thực tế** đã vận hành đúng mô hình đề xuất: phiên chính tự
+  Trong khi đó phiên 2026-10-31/11-01 (9 PR merge, 1 PR đóng) **thực tế** đã vận hành đúng mô hình đề xuất: phiên chính tự
   viết mọi diff (guard, title 100, CI), chỉ giao `reviewer`/`researcher`/audit read-only, song song ≤ 3 — không giao `executor`
   lần nào. Chủ dự án có quyền cuối (AGENTS.md §1): đổi mặc định theo quyết định có ghi (D-NNN, ADR) là hợp lệ; điều kiện đo
   của `LOOP-ORCH-020` chuyển thành điều kiện cho **lần đổi kế tiếp** (tăng số agent) — đúng câu 5 của đề xuất.
@@ -30,7 +30,8 @@ updated: 2026-11-01
   module độc lập · audit một lượt + sửa batch), mặc định `self`; PLAN ghi `(topo: …)` như `(exec: deep)`; `loop status` trả
   `topology`, `executor: null` khi `self`; (2) trần đợt song song mặc định 4 (`plan waves --max 4`; `LOOP-ORCH-008` giữ ≤ 5
   là trần cứng); (3) KPI: ghép 6 KPI của đề xuất vào số đo harness (§4) — 4 đo được ngay, 2 ghi "chưa đo" có cách đo;
-  (4) trần `pr rethink` 1 lần/PR — bài học #372 (8 lượt review, đóng không merge, D-282…D-291); (5) không bỏ `executor`/
+  (4) trần `pr rethink` 1 lần/PR, trừ PR cắt bản (ADR-0059 §6) — bài học #372 (7 lượt review đăng dấu, đóng không merge,
+  D-284…D-291 trên nhánh PR, không trong sổ `main`); (5) không bỏ `executor`/
   `executor-deep`: giữ cho hàng "song song" và chuyển cấp (ADR-0029).
 - Không áp: đội 5–10 agent thường trực (đề xuất cũng không chọn); Agent Teams (`LOOP-ORCH-021`); so sánh cặp "cùng bộ tác vụ
   hai cách thực thi" cho vòng phát triển — task phát triển không lặp lại được (ghi ở `LOOP-ORCH-020`), chỉ đo quan sát hai nhóm +
@@ -46,7 +47,7 @@ updated: 2026-11-01
 | 4 | Một lượt audit sau pha lớn, sửa theo batch | ADR-0031/0033 (audit theo mốc), `/complete`, `audit delta` | Đã có | Hàng "audit" trong bảng topology: reviewer read-only song song theo cụm + xác minh đối kháng, sửa = PLAN batch |
 | 5 | Tăng số agent chỉ khi số đo chứng minh thời gian giảm, lỗi không tăng | `LOOP-ORCH-017/020`, `AI-AGENTIC-001` | Đã có (điều kiện 10 task × 2 vòng) | Giữ; thêm 2 KPI thời gian (§4) để "thời gian giảm" đo được |
 | 6 | Giữ MVP → Hoàn thiện → Tối ưu | ADR-0031 build/harden, ADR-0048 optimize, ADR-0058 giai đoạn | Đã có | — |
-| 7 | 1 agent chính mạnh + tối đa 2–4 subagent khi cần | `LOOP-ORCH-019` (Fable → Opus → Sonnet), `LOOP-ORCH-008` ≤ 5 | Gần: trần 5 | `plan waves --max` mặc định 4; trần cứng 5 giữ (nguồn stored 23 §4.5) |
+| 7 | 1 agent chính mạnh + tối đa 2–4 subagent khi cần | `LOOP-ORCH-019` (Fable → Opus → Sonnet), `LOOP-ORCH-008` ≤ 5 | Gần: trần 5 | `plan waves --max` mặc định 4; trần cứng 5 giữ (nguồn stored — trích dẫn `23 §4.5` lệch, xem §3 dòng 12) |
 | 8 | Bảng loại việc → cấu hình (adaptive) | Bảng "Khi nào tách subagent" theo tình huống | **Thiếu** dạng máy đọc | `LOOP-ORCH-024` + `(topo:)` trong PLAN + `loop status.topology` |
 | 9 | 6 KPI | `loop stats` (xanh lần đầu, runs_to_green, escalation, delegation), `pr stats` (lead time, runs/PR, first_push_green, reverts) | 4/6 đo được | §4 |
 
@@ -91,7 +92,7 @@ Chưa xác minh: nội dung đổi của ba bài Anthropic có `modified` 2026-1
 
 ## 6. Không áp và vì sao
 
-- Không hạ `LOOP-ORCH-008` xuống 4 (MUST@L có nguồn stored 23 §4.5 = 5); chỉ đổi mặc định đợt. Không bỏ hai tầng executor
+- Không hạ `LOOP-ORCH-008` xuống 4 (MUST@L có nguồn stored = 5; trích dẫn `23 §4.5` lệch — §3 dòng 12, sửa ở T-3609); chỉ đổi mặc định đợt. Không bỏ hai tầng executor
   (ADR-0029): "song song theo module" cần chúng; chuyển cấp đỏ 2 lần vẫn dùng `executor-deep`.
 - Không đổi `AGENTS.md` dài hơn: đang 7168/7168 B (trần `tests/test_docs_budget.py`); chỉ đổi chữ cùng độ dài hoặc ngắn hơn.
 
@@ -106,5 +107,5 @@ Chưa xác minh: nội dung đổi của ba bài Anthropic có `modified` 2026-1
 - Nhận định của chủ dự án, phiên 2026-11-01 (nguyên văn trong lịch sử phiên; tóm tắt ở đầu file).
 - `research/2026-10-24-single-agent-loop.md`, ADR-0045, `LOOP-ORCH-017/019/020`, `LOOP-DESIGN-024` — đọc 2026-11-01.
 - `scripts/xt.py`: `loop_stats`/`_delegation_stats`, `pr_stats`, `plan_waves(max_parallel=5)`, `review_window`/`_rethink_pending` — đọc 2026-11-01.
-- Số đo phiên 2026-10-31/11-01: PR #363, #365–#368, #371, #375–#377 merge; #372 đóng sau 8 lượt review (D-282…D-291).
+- Số đo phiên 2026-10-31/11-01: PR #363, #365–#368, #371, #375–#377 merge (9); #372 đóng sau 7 lượt review đăng dấu (REST, 2026-11-01; D-284…D-291 trên nhánh `seeker/wizardly-tesla-amsxmp`, không trong sổ `main`).
 - Nguồn sống §3 (đọc 2026-11-01): claude.com/blog *fold subagents* (2026-10-22); anthropic.com/engineering *harness-design-long-running-apps* (2026-03-24), *effective-harnesses-for-long-running-agents* (2025-11-26), *multi-agent-research-system* (2025-06-13); claude.com *how-to-manage-costs-and-demonstrate-roi-for-claude-code-on-google-cloud* (2026-10-27); code.claude.com/docs *sub-agents*, *env-vars*, *agent-teams*, *costs*, *advisor*; learn.chatgpt.com/docs *agent-configuration/subagents*; dora.dev/guides/dora-metrics (2026-01-05), DORA 2025 (2025-09-23); metr.org *2026-02-24-uplift-update*; arXiv 2608.16801; `seeker19110/stored` `7b63146` mục 01/03/23.

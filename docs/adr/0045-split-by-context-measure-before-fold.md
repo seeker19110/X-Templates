@@ -1,7 +1,8 @@
 # ADR-0045: Tách agent chỉ vì context, đổi kiến trúc agent chỉ qua eval so sánh; vòng lặp phát triển giữ harness và đo trước khi đổi mặc định giao việc
 
 - **Trạng thái:** Đã chấp nhận (phiên chính tự duyệt theo tiêu chí chất lượng cuối, ADR-0008 — D-168; chủ repo chốt phạm vi
-  "mục 1 và 2" 2026-10-24)
+  "mục 1 và 2" 2026-10-24); mặc định giao việc của harness thay bởi [ADR-0061](0061-adaptive-agent-topology.md) (D-292:
+  `topo: self`); phép đo và điều kiện đổi của `LOOP-ORCH-020` giữ cho lần đổi kế
 - **Trạng thái triển khai:** Đã triển khai — chỉ tài liệu: `framework/13-ai-engineering/agentic-systems.md` (`AI-AGENTIC-001`,
   `011` đổi chữ giữ ID; `019` mới; Nguyên tắc 1–2, 5; bảng Pattern; mục "Kết luận cho từng agent con đang có"; §Handoff; bẫy;
   cổng; Nguồn), `framework/11-autonomous-loop/orchestration-and-subagents.md` (header; Nguyên tắc 3; bảng "Khi nào tách
