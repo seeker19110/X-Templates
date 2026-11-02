@@ -2138,3 +2138,10 @@
 - Chọn: Miễn khi tác giả PR và MỌI commit không phải merge là bot tin cậy (TRUSTED_BOTS), kiểm qua REST đúng PR/head mà sổ ghi; reviewer chỉ cần họ model rõ
 - Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ dự án 2026-11-02 (mọi PR tự kiểm + tự merge). (1) an toàn: review #401 cho thấy phương án 3 né được bằng URL ghép/chữ số Unicode và commit người đẩy thêm; phương án 2 đóng cả hai. (3) đơn giản: dùng lại TRUSTED_BOTS của steward.
 - Đường lùi: Bỏ nhánh TRUSTED_BOTS trong _review_models_error và _bot_author_error (scripts/xt.py), bỏ cờ trong pr-review.yml
+
+### D-312 · 2026-11-02T16:17:51+00:00 · PR 401: sau review chặn ở 4b3ff99, mã đã đổi (bản sửa 🟠 AUD-SEC-353/354 ở 6886950 + gộp main xung đột _pr_reviewed với khoá sổ T-3648) — pr debt từ chối vì không có 🔴; đi tiếp thế nào? (#401)
+
+- Phương án: (1) pr rethink: mở một lượt review mới ở head hiện tại (max_rethink 1), reviewer-alt rà toàn diff rồi pr reviewed · (2) Đổi mức hai dòng 🟠 thành 🔴 để pr debt --fixed nhận · (3) Để steward/người merge, phiên không đi tiếp
+- Chọn: pr rethink: mở một lượt review mới ở head hiện tại (max_rethink 1), reviewer-alt rà toàn diff rồi pr reviewed
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: mã sau review đổi thật ở đúng hàm vừa giải xung đột (_pr_reviewed + update_reviews) — cần một lượt rà độc lập ở head mới, không ghi nợ được; đổi mức để máy nhận là sửa lời khai cho khớp máy (phương án 2 sai P1); (2) giữ đường lùi: rethink dùng đúng trần max_rethink 1 (ADR-0061); chủ dự án yêu cầu 2026-11-02 giải xung đột và merge PR 401
+- Đường lùi: Không review lại: đóng PR 401, mở PR mới từ main với cùng thay đổi và review một lần
