@@ -213,6 +213,18 @@
     "AUD-SEC-320",
     "AUD-PERF-012"
    ]
+  },
+  {
+   "reason": "Ghi sổ `.autopilot/reviews.json` đồng thời (đọc–sửa–ghi trong khoá `state.lock`) — toàn vẹn khi hai tiến trình cùng ghi, không phải quyết định cho/chặn; corpus chạy một tiến trình; đỡ bằng Gate unittest tests.test_merge -k reviews_ledger_concurrent",
+   "ids": [
+    "AUD-CODE-036"
+   ]
+  },
+  {
+   "reason": "Hàng `release-check` của cổng phát hành G7 (`go_no_go`: GO-NO-GO khớp VERSION, đã ký) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_cli -k go_no_go",
+   "ids": [
+    "AUD-HAR-197"
+   ]
   }
  ]
 }
