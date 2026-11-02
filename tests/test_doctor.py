@@ -335,7 +335,8 @@ class DoctorHooksTest(DoctorCase):
         self.assertTrue(any("matcher" in f.msg for f in self.findings() if f.code == "hooks"))
 
     def test_pretool_matcher_invalid_regex_counts_as_none(self):
-        """Matcher không phải regex hợp lệ thì Claude Code không khớp tool nào — doctor coi như không phủ, không sập."""
+        """Matcher không phải regex hợp lệ: doctor coi như không phủ (chiều bảo thủ — cách Claude Code xử lý chưa xác minh)
+        và không sập."""
         found = xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash|(NotebookEdit"}]})
         self.assertEqual([f.level for f in found], ["warn"])
         self.assertIn("NotebookEdit", found[0].msg)
