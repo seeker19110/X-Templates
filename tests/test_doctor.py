@@ -288,7 +288,7 @@ class DoctorHooksTest(DoctorCase):
     def test_sandbox_group(self):
         """LOOP-HARNESS-022 (T-3641, ADR-0064 lát E): không thấy sandbox → cảnh báo `sandbox`; vòng một phiên đang chạy mà
         không có sandbox → lỗi; sandbox khai ở công cụ (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini
-        `tools.sandbox`, Cursor `sandbox.json`, devcontainer) hay đang chạy trong container → không phát hiện; OpenCode
+        `tools.sandbox`, Cursor `sandbox.json` có nội dung) hay đang chạy trong container → không phát hiện; OpenCode
         (không có sandbox chính chủ) → cảnh báo riêng; Codex `danger-full-access` không tính."""
         none = unittest.mock.patch.object(xt, "_in_container", return_value=False)
         with none:
@@ -298,14 +298,14 @@ class DoctorHooksTest(DoctorCase):
             self.assertIn("sandbox", self.codes("error", deep=False))
             settings = self.base / ".claude" / "settings.json"
             data = json.loads(settings.read_text(encoding="utf-8"))
-            settings.write_text(json.dumps({**data, "sandbox": {"enabled": True}}), encoding="utf-8")
+            strict = {"enabled": True, "failIfUnavailable": True}
+            settings.write_text(json.dumps({**data, "sandbox": strict}), encoding="utf-8")
             self.assertNotIn("sandbox", self.codes("error", deep=False) + self.codes("warn", deep=False))
             settings.write_text(json.dumps(data), encoding="utf-8")
             for rel, text in (
                 (".codex/config.toml", 'sandbox_mode = "workspace-write"\n'),
                 (".gemini/settings.json", '{"tools": {"sandbox": "docker"}}'),
-                (".cursor/sandbox.json", "{}"),
-                (".devcontainer/devcontainer.json", "{}"),
+                (".cursor/sandbox.json", '{"networkPolicy": {"default": "deny"}}'),
             ):
                 with self.subTest(rel):
                     p = self.write(rel, text)
@@ -334,6 +334,108 @@ class DoctorHooksTest(DoctorCase):
                     self.assertTrue(self.real_in_container())
                 with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
                     self.assertFalse(self.real_in_container())
+
+    def unattended_sandbox(self) -> list[tuple[str, str]]:
+        """(mức, lời) của nhóm `sandbox` khi vòng một phiên đang chạy ngoài container."""
+        xt.write_state({"active": True, "single_session": True}, self.base)
+        with unittest.mock.patch.object(xt, "_in_container", return_value=False):
+            return [(f.level, f.msg) for f in self.findings(deep=False) if f.code == "sandbox"]
+
+    def levels_with(self, rel: str, text: str) -> list[str]:
+        """Mức nhóm `sandbox` (vòng một phiên) khi chỉ thêm file `rel`; gỡ file trước khi trả để subTest đỏ không lây."""
+        p = self.write(rel, text)
+        try:
+            return [lv for lv, _ in self.unattended_sandbox()]
+        finally:
+            p.unlink()
+
+    def test_sandbox_presence_files_do_not_count(self):
+        """AUD-HAR-202: devcontainer.json trong repo không phải sandbox của tiến trình đang chạy (container thật đã có
+        `_in_container`); Cursor `sandbox.json` rỗng/`{}`/hỏng không tính — vòng một phiên vẫn lỗi."""
+        for rel, text in (
+            (".devcontainer/devcontainer.json", ""),
+            (".devcontainer/devcontainer.json", '{"image": "python:3.12"}'),
+            (".cursor/sandbox.json", ""),
+            (".cursor/sandbox.json", "{}"),
+            (".cursor/sandbox.json", "[1]"),
+            (".cursor/sandbox.json", "{hỏng"),
+        ):
+            with self.subTest(rel=rel, text=text):
+                self.assertEqual(self.levels_with(rel, text), ["error"])
+
+    def test_claude_sandbox_local_overrides_project(self):
+        """AUD-HAR-203: `settings.local.json` đè `settings.json` (project local > shared project) trước khi xét
+        `sandbox.enabled`; vòng một phiên có `enabled` mà thiếu `failIfUnavailable: true` → cảnh báo (thiếu bubblewrap
+        thì Claude chạy trần)."""
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        local = self.base / ".claude" / "settings.local.json"
+        strict = {"enabled": True, "failIfUnavailable": True}
+        settings.write_text(json.dumps({**data, "sandbox": strict}), encoding="utf-8")
+        local.write_text(json.dumps({"sandbox": {"enabled": False}}), encoding="utf-8")
+        self.assertEqual([lv for lv, _ in self.unattended_sandbox()], ["error"])  # local tắt thắng project bật
+        local.write_text(json.dumps({"sandbox": {"network": {}}}), encoding="utf-8")  # local không nói `enabled`
+        self.assertEqual(self.unattended_sandbox(), [])
+        settings.write_text(json.dumps({**data, "sandbox": {"enabled": False}}), encoding="utf-8")
+        local.write_text(json.dumps({"sandbox": strict}), encoding="utf-8")
+        self.assertEqual(self.unattended_sandbox(), [])  # local bật thắng project tắt
+        local.write_text(json.dumps({"sandbox": "lạ"}), encoding="utf-8")
+        self.assertEqual([lv for lv, _ in self.unattended_sandbox()], ["error"])
+        local.write_text(json.dumps({"sandbox": {"enabled": True}}), encoding="utf-8")
+        found = self.unattended_sandbox()
+        self.assertEqual([lv for lv, _ in found], ["warn"], found)
+        self.assertIn("failIfUnavailable", found[0][1])
+        xt.write_state({"active": False}, self.base)  # không phải vòng một phiên: không đòi failIfUnavailable
+        with unittest.mock.patch.object(xt, "_in_container", return_value=False):
+            self.assertNotIn("sandbox", [f.code for f in self.findings(deep=False)])
+        with unittest.mock.patch.object(xt, "_in_container", return_value=True):  # đã trong container: không cảnh báo
+            xt.write_state({"active": True, "single_session": True}, self.base)
+            self.assertNotIn("sandbox", [f.code for f in self.findings(deep=False)])
+
+    def test_codex_and_gemini_sandbox_parsed(self):
+        """AUD-CODE-042: Codex đọc bằng TOML — `sandbox_mode` chỉ trong `[profiles.x]` không kích hoạt thì không tính,
+        `profile` chọn profile đè giá trị gốc, nháy đơn khớp, giá trị lạ không tính; Gemini `tools.sandbox` chuỗi
+        "false"/"0"/rỗng không tính. AUD-CODE-041: `config.toml` không đọc được/hỏng → fail-open (không sập)."""
+        cases = (
+            ("sandbox_mode = 'workspace-write'\n", True),
+            ('sandbox_mode = "read-only"\n', True),
+            ('sandbox_mode = "lạ"\n', False),
+            ("sandbox_mode = 1\n", False),
+            ('[profiles.x]\nsandbox_mode = "workspace-write"\n', False),
+            ('profile = "x"\n[profiles.x]\nsandbox_mode = "workspace-write"\n', True),
+            (
+                'profile = "x"\nsandbox_mode = "workspace-write"\n[profiles.x]\nsandbox_mode = "danger-full-access"\n',
+                False,
+            ),
+            (
+                'profile = "x"\nsandbox_mode = "workspace-write"\n[profiles.y]\nsandbox_mode = "danger-full-access"\n',
+                True,
+            ),
+            ('profile = "x"\nsandbox_mode = "workspace-write"\nprofiles = 1\n', True),
+            (
+                'profile = [1]\nsandbox_mode = "workspace-write"\n[profiles.x]\nsandbox_mode = "danger-full-access"\n',
+                True,
+            ),
+            ('sandbox_mode = "workspace-write"\n[[hỏng', False),
+        )
+        for text, ok in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.levels_with(".codex/config.toml", text), [] if ok else ["error"])
+        gemini: tuple[tuple[Any, bool], ...] = (("docker", True), (True, True), ("false", False), (" FALSE ", False))
+        for value, ok in gemini + (("0", False), ("", False), (False, False), (1, False)):
+            with self.subTest(gemini=value):
+                found = self.levels_with(".gemini/settings.json", json.dumps({"tools": {"sandbox": value}}))
+                self.assertEqual(found, [] if ok else ["error"])
+        codex = self.write(".codex/config.toml", 'sandbox_mode = "workspace-write"\n')
+        real = Path.read_bytes
+
+        def deny(path: Path) -> bytes:
+            if path == codex:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path)
+
+        with unittest.mock.patch.object(Path, "read_bytes", deny):
+            self.assertEqual([lv for lv, _ in self.unattended_sandbox()], ["error"])
 
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,

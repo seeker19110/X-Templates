@@ -5454,7 +5454,8 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
 
 
 CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")  # docker, podman — phiên cloud cũng chạy trong container
-CODEX_SANDBOX_RE = re.compile(r'^\s*sandbox_mode\s*=\s*"([\w-]+)"', re.M)
+CODEX_SANDBOX_MODES = ("read-only", "workspace-write")  # `danger-full-access` hay giá trị lạ không phải sandbox
+GEMINI_SANDBOX_OFF = ("", "false", "0")  # `tools.sandbox` chuỗi tắt (như biến `GEMINI_SANDBOX`)
 
 
 def _in_container() -> bool:
@@ -5466,40 +5467,83 @@ def _in_container() -> bool:
     return any(os.path.exists(p) for p in CONTAINER_MARKS)
 
 
-def _sandbox_sources(base: Path) -> List[str]:
-    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled`, Codex
-    `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor `.cursor/sandbox.json`, devcontainer."""
-    found: List[str] = []
+def _read_toml(p: Path) -> Dict[str, Any]:
+    """Đọc file TOML; thiếu, không đọc được (EACCES), hỏng hay không phải UTF-8 → {} (fail-open, AUD-CODE-041)."""
+    import tomllib  # stdlib 3.11: nạp muộn để `doctor` trên Python cũ vẫn báo được lỗi `runtime`
+
+    try:
+        return tomllib.loads(p.read_bytes().decode("utf-8")) if p.is_file() else {}
+    except (OSError, ValueError):  # ValueError gồm TOMLDecodeError và UnicodeDecodeError
+        return {}
+
+
+def _claude_sandbox(base: Path) -> Dict[str, Any]:
+    """`sandbox` của Claude Code gộp theo ưu tiên local > project (AUD-HAR-203): khoá của `settings.local.json` đè khoá
+    cùng tên của `settings.json`; giá trị không phải object thì bỏ."""
+    merged: Dict[str, Any] = {}
     for rel in (".claude/settings.json", ".claude/settings.local.json"):
         sb = (_read_json_obj(base / rel) or {}).get("sandbox")
-        if isinstance(sb, dict) and sb.get("enabled") is True:
-            found.append(f"{rel} sandbox.enabled")
-    codex = base / ".codex" / "config.toml"
-    m = CODEX_SANDBOX_RE.search(codex.read_text(encoding="utf-8", errors="replace")) if codex.is_file() else None
-    if m and m.group(1) != "danger-full-access":
-        found.append(f".codex/config.toml sandbox_mode={m.group(1)}")
+        merged |= sb if isinstance(sb, dict) else {}
+    return merged
+
+
+def _codex_sandbox_mode(base: Path) -> Optional[str]:
+    """`sandbox_mode` Codex có hiệu lực: `[profiles.<profile>]` của profile đang chọn đè giá trị gốc; bảng profile không
+    chọn không tính (AUD-CODE-042)."""
+    conf = _read_toml(base / ".codex" / "config.toml")
+    name, profiles = conf.get("profile"), conf.get("profiles")
+    active = profiles.get(name) if isinstance(profiles, dict) and isinstance(name, str) else None
+    mode = (active if isinstance(active, dict) else {}).get("sandbox_mode", conf.get("sandbox_mode"))
+    return mode if isinstance(mode, str) else None
+
+
+def _gemini_sandbox_on(base: Path) -> bool:
+    """Gemini `tools.sandbox`: `true` hay tên/đường dẫn sandbox; chuỗi "false"/"0"/rỗng là tắt (AUD-CODE-042)."""
     tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
-    if isinstance(tools, dict) and tools.get("sandbox"):
+    sb = tools.get("sandbox") if isinstance(tools, dict) else None
+    return sb is True or (isinstance(sb, str) and sb.strip().lower() not in GEMINI_SANDBOX_OFF)
+
+
+def _sandbox_sources(base: Path) -> List[str]:
+    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled` (đã gộp
+    local > project), Codex `sandbox_mode` read-only/workspace-write, Gemini `tools.sandbox`, Cursor `.cursor/sandbox.json`
+    có nội dung. `.devcontainer/devcontainer.json` không tính (AUD-HAR-202): file có trong repo không nói tiến trình này
+    chạy trong đó — container thật đã có `_in_container`."""
+    found: List[str] = []
+    if _claude_sandbox(base).get("enabled") is True:
+        found.append(".claude/settings*.json sandbox.enabled")
+    mode = _codex_sandbox_mode(base)
+    if mode in CODEX_SANDBOX_MODES:
+        found.append(f".codex/config.toml sandbox_mode={mode}")
+    if _gemini_sandbox_on(base):
         found.append(".gemini/settings.json tools.sandbox")
-    found += [rel for rel in (".cursor/sandbox.json", ".devcontainer/devcontainer.json") if (base / rel).is_file()]
+    if _read_json_obj(base / ".cursor" / "sandbox.json"):  # rỗng/`{}`/hỏng không tính
+        found.append(".cursor/sandbox.json")
     return found
 
 
 def _doctor_sandbox(base: Path) -> List[Finding]:
     """`LOOP-HARNESS-022`: guard không phải sandbox — phiên autopilot không người trực cần sandbox OS/devcontainer có egress
-    allowlist. Không thấy → cảnh báo; vòng một phiên đang chạy (`loop init --single-session`) mà không thấy → lỗi.
+    allowlist. Không thấy → cảnh báo; vòng một phiên đang chạy (`loop init --single-session`) mà không thấy → lỗi, có
+    Claude `sandbox.enabled` mà thiếu `failIfUnavailable: true` → cảnh báo (thiếu bubblewrap thì chạy trần, AUD-HAR-203).
     OpenCode không có sandbox chính chủ → cảnh báo riêng."""
     out: List[Finding] = []
     if (base / "opencode.json").is_file() or (base / ".opencode").is_dir():
         msg = "OpenCode không có sandbox chính chủ — chạy trong devcontainer/VM hay `srt` có egress allowlist"
         out.append(Finding("sandbox", "warn", f"{msg} (LOOP-HARNESS-022)"))
-    if _in_container() or _sandbox_sources(base):
+    if _in_container():
         return out
     st = read_state(base) or {}
     unattended = bool(st.get("active") and st.get("single_session"))
+    claude = _claude_sandbox(base)
+    if unattended and claude.get("enabled") is True and claude.get("failIfUnavailable") is not True:
+        msg = "Claude `sandbox.enabled` mà thiếu `sandbox.failIfUnavailable: true` — thiếu sandbox (Linux: bubblewrap,"
+        out.append(Finding("sandbox", "warn", f"{msg} socat) thì lệnh chạy trần (LOOP-HARNESS-022)"))
+    if _sandbox_sources(base):
+        return out
     msg = (
         "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`, Cursor "
-        "`sandbox.json`, devcontainer) và không chạy trong container — guard không chặn tiến trình con hay mạng "
+        "`sandbox.json`) và không chạy trong container/devcontainer — guard không chặn tiến trình con hay mạng "
         "(LOOP-HARNESS-022)"
     )
     return out + [
