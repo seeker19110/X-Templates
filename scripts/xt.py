@@ -11556,9 +11556,20 @@ def _go_no_go_signed(text: str) -> bool:
     return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
 
 
+def _go_no_go_for(name: str, text: str, version: str) -> bool:
+    """GO-NO-GO là của `version` (AUD-HAR-200): tên file đuôi `-v<VERSION>.md`, hoặc dòng tiêu đề `# ` đầu tiên có
+    `v?<VERSION>` đứng riêng — không quét toàn văn (ô "v1.2.0" trong bảng của bản v1.1.0 không tính), `-rc1`/`v11.2.0`
+    không khớp 1.2.0."""
+    ver = re.escape(version)
+    if re.search(rf"(?:^|[-_])v?{ver}\.md$", name):
+        return True
+    head = next((ln for ln in text.splitlines() if ln.startswith("# ")), "")
+    return re.search(rf"(?<![\w.-])v?{ver}(?![\w-]|\.\w)", head) is not None
+
+
 def _release_go_no_go(base: Path) -> Dict[str, str]:
-    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` nhắc `v<VERSION>` ở
-    `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
+    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` của `v<VERSION>`
+    (`_go_no_go_for`) ở `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
     người ký); không có VERSION → N/A SHOULD; không đọc được → FAIL (có thể giấu bản ký)."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
@@ -11574,7 +11585,7 @@ def _release_go_no_go(base: Path) -> Dict[str, str]:
                 text = p.read_text(encoding="utf-8")
             except (OSError, ValueError) as exc:
                 return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
-            if f"v{version}" in p.name or f"v{version}" in text:
+            if _go_no_go_for(p.name, text, version):
                 if _go_no_go_signed(text):
                     return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
                 found.append(rel)
@@ -15071,7 +15082,8 @@ def build_parser() -> argparse.ArgumentParser:
     prc = sub.add_parser(
         "release-check",
         help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch, attack/perf,"
-        " cổng production migration_check/acceptance/rollback → GO/NO-GO (ADR-0029, ADR-0062)",
+        " cổng production migration_check/acceptance/rollback, go_no_go (GO-NO-GO khớp VERSION đã ký §5 — BLOCKER mọi"
+        " quy mô) → GO/NO-GO (ADR-0029, ADR-0062)",
     )
     prc.add_argument("--blueprint", default="BLUEPRINT.md")
     prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")
