@@ -2,7 +2,7 @@
  "note": "ID bắt buộc (REC §2 + 🔴/🟠 đã sửa) mà corpus autonomy-bench không phủ, kèm lý do; thêm ca thì gỡ ID khỏi đây.",
  "out_of_scope": [
   {
-   "reason": "Tài liệu / bằng chứng blueprint — đỡ bằng `validate`, `check-links`, `audit plan`; không phải quyết định cho/chặn của PR, rollup, review hay guard",
+   "reason": "Tài liệu / bằng chứng blueprint — đỡ bằng `validate`, `check-links`, `audit plan`; không phải quyết định cho/chặn của PR, rollup, review hay guard; PLAN của repo đọc được bằng máy (AUD-HAR-192/193): `tests.test_plan_files`",
    "ids": [
     "AUD-DOC-001",
     "AUD-DOC-002",
@@ -35,7 +35,10 @@
     "AUD-DOC-155",
     "AUD-DOC-123",
     "AUD-DOC-124",
-    "AUD-DOC-162"
+    "AUD-DOC-162",
+    "AUD-HAR-192",
+    "AUD-HAR-193",
+    "AUD-DOC-172"
    ]
   },
   {

@@ -260,6 +260,7 @@ python3 -m unittest discover -s tests    # chỉ test (cổng test còn đòi co
 - [ADR-0060](docs/adr/0060-task-skills.md): sáu skill theo tác vụ phát triển (`/debug`, `/tdd`, `/ui-verify`, `/upgrade`, `/migrate-db`, `/incident`), tuỳ chọn cho dự án đích.
 - [ADR-0061](docs/adr/0061-adaptive-agent-topology.md): cấu hình agent theo loại việc — mặc định một agent chính tự làm (`topo: self`), `review`/`parallel`/`audit` theo độ độc lập; đợt song song ≤ 4; `rethink` ≤ 1/PR; KPI thời gian trong `loop stats` (nhận định chủ dự án 2026-11-01).
 - [ADR-0062](docs/adr/0062-review-once-risk-tiers.md): review 1 lần theo ba mức rủi ro — thấp = làn nhanh (CI + tự rà diff, máy merge ghim head), trung bình = một review logic/phạm vi/test, cao (ngoại lệ cứng kể cả đã miễn, schema/migration) = một review độc lập bắt buộc cả ở pha build; 🔴 sửa rồi `pr debt --fixed`, 🟠/🟢 ghi nợ rồi merge; `release-check` thêm migration/rollback/nghiệm thu (cấu hình chủ dự án 2026-11-01, D-295).
+- [ADR-0063](docs/adr/0063-guard-canonical-subset.md): guard chỉ cho chạy tập con bash nó đọc chắc (backtick, nháy/ngoặc không đóng, `$IFS`, `~N`, brace bung `#`, mã động, đăng dấu review…) — ngoài tập con thì chặn (`BUDGET`) thay vì vá từng ca lách (D-299).
 
 Nghiên cứu nền ngày 2026-10-13 ở [`research/`](research/): phân tích khung cũ, trích xuất catalog `seeker19110/stored`,
 AI agent và giao thức, cơ chế Claude Code. Khung cũ khôi phục được bằng `git archive 1b80fe4`.
