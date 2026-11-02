@@ -9443,18 +9443,20 @@ PA_INJECTION = (
     r"<\|im_start\|>|<\|im_end\|>|\[INST\]",
     r"(?:reveal|print|output) (?:your|the) (?:system prompt|hidden instructions)",
 )
-# AUD-SEC-261/263: mọi lượng từ có thể chồng nhau là possessive (`*+`/`++`) và một đoạn ống không vượt `|` lẫn lần gọi
-# curl/wget kế tiếp — mỗi ký tự của dòng chỉ được quét từ một điểm bắt đầu, nên tuyến tính trên dòng dài.
+# AUD-SEC-261/263: mọi lượng từ có thể chồng nhau là possessive (`*+`/`++`), một đoạn ống không vượt `|` lẫn lần gọi
+# curl/wget kế tiếp, và `rm` chỉ là từ lệnh (không đứng sau chữ/`-`, nên `rm` trong cờ `-rm`/`--rm` không là điểm bắt
+# đầu) — chuỗi cờ phía sau mỗi `rm` thuộc về đúng một điểm bắt đầu, nên tuyến tính trên dòng dài. `\\?["']?`: ngoặc có
+# thể là escape JSON (`\\"`) khi lệnh nằm trong chuỗi JSON chép vào tài liệu.
 _PA_SH = r"(?:ba|z|da|k)?sh\b"
 _PA_FETCH = r"\b(?:curl|wget)\b"
 _PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
 _PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--recursive\b))"
-_PA_RM_TARGET = r"""["']?(?:/|~|\$\{?HOME\}?)/?\*?["']?(?![\w.~$/-])"""
+_PA_RM_TARGET = r"""\\?["']?(?:/|~|\$\{?HOME\}?)/?\*?\\?["']?(?![\w.~$/-])"""
 PA_DANGER = (
     _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+(?:sudo(?:\s++-[\w-]++)*+\s++)?" + _PA_SH,
     r"\b(?:" + _PA_SH + r"|source)\s*+<\(\s*+" + _PA_FETCH,
-    r"\b(?:" + _PA_SH + r"\s++-c|eval)\s++[\"']?\$\(\s*+" + _PA_FETCH,
-    r"\brm" + _PA_RM_RECURSIVE + r"(?:\s++-[\w-]++)*+\s++" + _PA_RM_TARGET,
+    r"\b(?:" + _PA_SH + r"\s++-c|eval)\s++\\?[\"']?\$\(\s*+" + _PA_FETCH,
+    r"(?<![\w-])rm" + _PA_RM_RECURSIVE + r"(?:\s++-[\w-]++)*+\s++" + _PA_RM_TARGET,
     r"\bchmod\s++(?:-R\s++)?777\b|--dangerously-skip-permissions|\bgit\s++push\s++(?:-f|--force)\b",
 )
 PA_SECRET = (
@@ -9509,10 +9511,39 @@ def _pa_files(targets: Sequence[str]) -> List[Path]:
 PA_TEXT_RULES = ("hidden", "injection", "leak") + tuple(r[0] for r in PA_RULES if r[0] != "danger")  # trừ `danger`
 
 
+# Ký tự vô hình ngoài `Cf` (Default_Ignorable_Code_Point của Unicode — Python không có thuộc tính này — cộng U+2800
+# ô chữ nổi trống): gỡ cùng `Cf` trước luật văn bản (review T-3634).
+_PA_IGNORABLE_RE = re.compile(
+    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\uffa0\ufff0-\ufff8\U0001bca0-\U0001bca3"
+    "\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+)
+# Một chuỗi JSON trên dòng: đóng bằng `"` hoặc chạy tới cuối dòng (kể cả `\` lẻ cuối dòng) — mọi lần thử từ một `"` đều
+# khớp nên `finditer` không quét lại phần đã qua (tuyến tính, AUD-SEC-263).
+_PA_JSON_STR_RE = re.compile(r'"(?:[^"\\]|\\.)*+(?:"|\\?$)')
+
+
 def _pa_visible(line: str) -> str:
-    """`line` đã gỡ ký tự định dạng (Unicode `Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) — chèn giữa từ không lách được luật văn
-    bản (AUD-SEC-260); dòng ASCII không có `Cf` nên giữ nguyên."""
-    return line if line.isascii() else "".join(c for c in line if unicodedata.category(c) != "Cf")
+    """`line` đã gỡ ký tự định dạng (Unicode `Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) và ký tự vô hình khác
+    (`_PA_IGNORABLE_RE`) — chèn giữa từ không lách được luật văn bản (AUD-SEC-260); dòng ASCII giữ nguyên."""
+    if line.isascii():
+        return line
+    return _PA_IGNORABLE_RE.sub("", "".join(c for c in line if unicodedata.category(c) != "Cf"))
+
+
+def _pa_json_literal(m: "re.Match[str]") -> str:
+    """Giá trị đã giải mã của một chuỗi JSON; chuỗi hỏng/không đóng → nguyên văn."""
+    try:
+        return str(json.loads(m[0], strict=False))
+    except ValueError:
+        return m[0]
+
+
+def _pa_views(line: str, json_file: bool) -> List[str]:
+    """Các dạng của dòng để chạy luật: dòng gốc, và với file `.json` có escape thì thêm bản đã giải mã từng chuỗi JSON
+    trên dòng (`\\uXXXX`, `\\"` — review T-3634: escape không lách được luật, số dòng giữ nguyên)."""
+    if not json_file or "\\" not in line:
+        return [line]
+    return [line, _PA_JSON_STR_RE.sub(_pa_json_literal, line)]
 
 
 def _pa_line_findings(
@@ -9524,11 +9555,14 @@ def _pa_line_findings(
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
     rules = [r for r in rules if r[0] not in skip]
     hidden = "hidden" not in skip
+    json_file = rel.endswith(".json")
     out: List[Dict[str, object]] = []
     for n, line in enumerate(text.splitlines(), 1):
-        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden and PA_HIDDEN_RE.search(line) else []
-        seen = _pa_visible(line)
-        hits += [(r, m) for r, m, pats in rules if any(re.search(p, seen) for p in pats)]
+        views = _pa_views(line, json_file)
+        hidden_hit = hidden and any(PA_HIDDEN_RE.search(v) for v in views)
+        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden_hit else []
+        seen = [_pa_visible(v) for v in views]
+        hits += [(r, m) for r, m, pats in rules if any(re.search(p, v) for p in pats for v in seen)]
         out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
     return out
 
