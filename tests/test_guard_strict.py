@@ -218,6 +218,7 @@ class DynamicCodeDenyTest(unittest.TestCase):
             with self.subTest(cmd=cmd[:40]):
                 self.assertEqual(guard.bash_decision(cmd, str(ROOT))["decision"], "deny")
         self.assertEqual(decide("BASH_ENV= bash -c true")["decision"], "")
+        self.assertEqual(decide('git commit -m "nhắc BASH_ENV, PS4, bash -c và set -x"')["decision"], "")
 
     def test_list_form_exec_scanned(self):
         """AUD-SEC-292/298: lời gọi dạng danh sách đối số và API Open2/3, `IO.read("|…")` của Perl/Ruby/PHP."""

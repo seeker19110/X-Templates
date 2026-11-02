@@ -948,8 +948,8 @@ def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
         return 'lệnh là `"$@"`/`$N` (AUD-SEC-252)'
     if STRICT_PIPE_SHELL_RE.search(bare):
         return "shell đọc script từ ống/`>(…)` (AUD-SEC-290/301)"
-    text = STRICT_SAFE_PROMPT_RE.sub("", v.s)
-    hit = any(name.search(text) and ctx.search(text) for name, ctx in STRICT_SPECIAL)
+    text = STRICT_SAFE_PROMPT_RE.sub("", v.s)  # tên: cả trong nháy (`env 'BASH_FUNC_x%%=…'`); ngữ cảnh: chỉ mã
+    hit = any(name.search(text) and ctx.search(bare) for name, ctx in STRICT_SPECIAL)
     return "biến bash tự chạy cùng ngữ cảnh kích hoạt (AUD-SEC-287/291/299/300)" if hit else ""
 
 
