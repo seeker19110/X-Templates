@@ -9570,20 +9570,44 @@ PA_INJECTION = (
 _PA_SH = r"(?:ba|z|da|k)?sh\b"
 _PA_FETCH = r"\b(?:curl|wget)\b"
 _PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
-_PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--recursive\b))"
-# Đích `rm` là chính gốc/HOME (`/`, `~`, `$HOME`, `${HOME}`, `${HOME:?}`, kèm `/`, `/*`, nháy đóng trước hoặc sau `/`):
-# mọi phần possessive nên nháy đóng không "nhả" để lookahead đứng trước nó — đường dẫn con (`"$HOME"/.cache`,
-# `~/"Old Stuff"`, `"${HOME:?}/.config"`) không bị báo (review #414, AUD-SEC-362).
-_PA_RM_QUOTE = r"""(?:\\?["'])?+"""
-_PA_RM_HOME = r"\$(?:HOME|\{HOME(?::?[?-][^}\s]*+)?\})"
-_PA_RM_TARGET = (
-    _PA_RM_QUOTE + r"(?:/|~|" + _PA_RM_HOME + r")/?+\*?+" + _PA_RM_QUOTE + r"""/?+\*?+(?![\w.~$/-]|(?<=/)\\?["'])"""
+# AUD-SEC-363: shell sau ống có thể gọi qua đường dẫn (`/bin/bash`) và lớp bọc `sudo`/`doas`/`env` — cờ, cờ nhận giá
+# trị (`sudo -u root`, `env -u X`), `VAR=giá trị`; lần lặp lớp bọc không khớp thì bỏ cả lần đó (nhóm possessive).
+_PA_WORD = r"[^\s|;&`()<>]++"
+_PA_PATH = r"(?:[\w.~-]*+/)*+"
+_PA_WRAP_ARG = r"|-[\w-]++(?:=[^\s|;&`()<>]*+)?|[A-Za-z_]\w*+=[^\s|;&`()<>]*+"
+_PA_WRAP = (
+    r"(?:"
+    + _PA_PATH
+    + r"(?:(?:sudo|doas)(?:\s++(?:-[A-Za-z]*?[CDgpRrtTUu]\s++"
+    + _PA_WORD
+    + r"|--(?:user|group|role|type|chdir|chroot|prompt|host|other-user|close-from|command-timeout)\s++"
+    + _PA_WORD
+    + _PA_WRAP_ARG
+    + r"))*+|env(?:\s++(?:-[A-Za-z]*?[uCS]\s++"
+    + _PA_WORD
+    + r"|--(?:unset|chdir|split-string)\s++"
+    + _PA_WORD
+    + _PA_WRAP_ARG
+    + r"))*+)\s++)*+"
 )
+# GNU `rm` nhận viết tắt tuỳ chọn dài (`--r`, `--rec` = `--recursive`).
+_PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--r(?:e(?:c(?:u(?:r(?:s(?:i(?:ve?)?)?)?)?)?)?)?\b))"
+# Đích `rm` là chính gốc/HOME (`/`, `~`, `$HOME`, `${HOME}`, `${HOME<toán tử>…}` trừ `:+` — AUD-SEC-367) kèm hậu tố
+# chỉ gồm `/`, `*`, nháy, `/.*` (AUD-SEC-368/372); hậu tố possessive nên nháy không "nhả" để lookahead đứng trước nó —
+# đường dẫn con (`"$HOME"/.cache`, `~/"Old Stuff"`, `"${HOME:?}/.config"`) không bị báo (AUD-SEC-362). Phần sau toán
+# tử không chứa `$`/nháy: lần thử từ mỗi toán hạng dừng ở `${` kế tiếp (tuyến tính).
+_PA_RM_QUOTE = r"""(?:\\?["'])?+"""
+_PA_RM_HOME = r"""\$(?:HOME|\{HOME(?:(?!:\+)[:?=#%/,^-][^}"'`\n$]*+)?\})"""
+_PA_RM_TARGET = _PA_RM_QUOTE + r"(?:/|~|" + _PA_RM_HOME + r""")(?:[/*]|\\?["']|(?<=/)\.\*)*+(?![\w.~$-])"""
+# AUD-SEC-363: mọi toán hạng của `rm` được xét (`rm -rf /tmp/x /`); toán hạng không vượt dấu tách lệnh, chú thích `#`,
+# hay một `rm ` khác — mỗi đoạn dòng thuộc về đúng một điểm bắt đầu (tuyến tính).
+_PA_RM_OPERAND = r"(?!#|" + _PA_RM_TARGET + r")(?:[^\s;|&`()<>r]|(?<=[\w-])r|r(?!m\s))++"
 PA_DANGER = (
-    _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+(?:sudo(?:\s++-[\w-]++)*+\s++)?" + _PA_SH,
-    r"\b(?:" + _PA_SH + r"|source)\s*+<\(\s*+" + _PA_FETCH,
-    r"\b(?:" + _PA_SH + r"\s++-c|eval)\s++\\?[\"']?\$\(\s*+" + _PA_FETCH,
-    r"(?<![\w-])rm" + _PA_RM_RECURSIVE + r"(?:\s++-[\w-]++)*+\s++" + _PA_RM_TARGET,
+    _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+" + _PA_WRAP + _PA_PATH + _PA_SH,
+    r"(?:\b(?:" + _PA_SH + r"|source)|(?<![^\s;&|({`\"'])\.)\s*+(?:<\s*+)?<\(\s*+" + _PA_FETCH,
+    r"(?:\b" + _PA_SH + r"(?:\s++-(?!" + _PA_SH + r")[A-Za-z]++)*?\s++-[A-Za-z]*?c[A-Za-z]*+|\beval)\s++"
+    r"\\?[\"']?(?:\$\(|\\?`)\s*+" + _PA_FETCH,
+    r"(?<![\w-])rm" + _PA_RM_RECURSIVE + r"(?:\s++" + _PA_RM_OPERAND + r")*+\s++" + _PA_RM_TARGET,
     r"\bchmod\s++(?:-R\s++)?777\b|--dangerously-skip-permissions|\bgit\s++push\s++(?:-f|--force)\b",
 )
 PA_SECRET = (
@@ -9605,29 +9629,51 @@ _PA_SEMVER = r"[0-9]++\.[0-9]++\.[0-9]++(?:-[0-9A-Za-z.-]++)?(?:\+[0-9A-Za-z.-]+
 _PA_PEP440_TAG = r"(?:alpha|beta|preview|pre|post|rev|rc|dev|a|b|c|r)"
 _PA_PEP440 = r"[0-9]++(?:\.[0-9]++)*+(?:[-+.]?" + _PA_PEP440_TAG + r"[0-9.]*+)*+" + _PA_PIN_END
 _PA_EXTRAS = r"(?:\[[\w,.-]*+\])?+"
-# Không liệt kê tuỳ chọn chọn nhà cung cấp khoá của pip (Kiểm PRF-CLI-010 cấm tên đó trong scripts/): giá trị của nó
-# bị coi là tên gói → báo `unpinned` oan theo hướng chặt (hiếm gặp).
+
+
+def _pa_abbrev(name: str, n: int) -> str:
+    """Regex khớp `name` và mọi tiền tố dài ≥ `n` ký tự của nó (optparse nhận viết tắt duy nhất của tuỳ chọn dài)."""
+    return re.escape(name[:n]) + "".join("(?:" + re.escape(c) for c in name[n:]) + ")?" * (len(name) - n)
+
+
+# AUD-SEC-370: tuỳ chọn dài nhận giá trị của `pip install` (pip 24.0 `InstallCommand().parser`, `takes_value()`,
+# 2026-11-02) kèm độ dài tiền tố duy nhất ngắn nhất — `--targ` = `--target`, `--log-file`/`--local-log` = `--log`. Tuỳ
+# chọn chọn nhà cung cấp khoá (Kiểm PRF-CLI-010 cấm tên đó trong scripts/) là tuỳ chọn duy nhất bắt đầu bằng `--k`.
+_PA_PIP_VALUE_OPTS = (
+    ("abi", 1), ("cache-dir", 2), ("cert", 2), ("client-cert", 2), ("config-settings", 4), ("constraint", 4),
+    ("default-timeout", 3), ("editable", 2), ("exists-action", 3), ("extra-index-url", 3), ("find-links", 2),
+    ("global-option", 1), ("implementation", 2), ("index-url", 2), ("local-log", 3), ("log", 3), ("log-file", 4),
+    ("no-binary", 5), ("only-binary", 1), ("platform", 2), ("prefix", 5), ("progress-bar", 4), ("proxy", 4),
+    ("pypi-url", 3), ("python", 6), ("python-version", 7), ("report", 3), ("requirement", 8), ("retries", 3),
+    ("root", 4), ("root-user-action", 5), ("source", 6), ("source-dir", 10), ("source-directory", 11), ("src", 2),
+    ("target", 2), ("timeout", 2), ("trusted-host", 2), ("upgrade-strategy", 8), ("use-deprecated", 5),
+    ("use-feature", 5),
+)  # fmt: skip
 _PA_PIP_ARG = (
-    r"(?:-[tifC]|--(?:target|platform|python-version|implementation|abi|root|prefix|src|upgrade-strategy"
-    r"|config-settings|global-option|no-binary|only-binary|progress-bar|root-user-action|report|index-url"
-    r"|extra-index-url|find-links|python|log|proxy|retries|timeout|exists-action|trusted-host|cert"
-    r"|client-cert|cache-dir|use-feature|use-deprecated))(?=\s)\s++[^\s`-][^\s`]*+"
+    r"(?:-[UIhvVq]*+[rcetCif]|--(?:" + "|".join(_pa_abbrev(o, n) for o, n in _PA_PIP_VALUE_OPTS) + r"|k[\w-]*+))"
+    r"(?=\s)\s++[^\s`-][^\s`]*+"
 )
-_PA_PIP_OPT = (
-    r"(?:\s++(?!-[rce]\b|--(?:requirement|constraint|editable)\b)(?:" + _PA_PIP_ARG + r"|-[\w-]*+(?:=[^\s`]*+)?))*+"
-)
+# AUD-SEC-369: `.whl`/`@<SHA>` xét ở đường dẫn/revision pip dùng — dừng ở `?`/`#` (pip 24.0 `Link.is_wheel`,
+# `Git.get_url_rev_and_auth`).
 _PA_PIP_PINNED = "|".join(
     (
         r"[A-Za-z][\w.-]*+" + _PA_EXTRAS + "===?" + _PA_PEP440,
-        r"git\+[a-z]++://[^\s\"'`#]*+(?<=@[0-9a-fA-F]{40})",
-        r"[^\s\"'`]*+(?<=\.whl)",
+        r"git\+[a-z]++://[^\s\"'`#?]*+(?<=@[0-9a-fA-F]{40})",
+        r"[^\s\"'`#?]*+(?<=\.whl)",
         r"[^\s\"'`:/]*+/[^\s\"'`:]*+(?!:)",
     )
 )
+# AUD-SEC-359/371: mọi đối số được xét — bỏ qua tuỳ chọn (kèm giá trị, `-r`/`-c`/`-e` cũng là tuỳ chọn nhận giá trị),
+# token bắt đầu bằng chữ số (giá trị như `-p 3.11`; tên gói đầu số chưa từng bị xét) và gói đã ghim; dừng ở token khác
+# (gói không ghim → báo; dấu câu, `#`, `&&` → hết lệnh).
+_PA_PIP_OPT = (
+    r"(?:\s++(?:" + _PA_PIP_ARG + r"|-[^\s`]*+|[0-9][^\s`]*+|[\"']?(?:" + _PA_PIP_PINNED + r")[^\s\"'`,;]*+[\"']?"
+    r"(?=\s)))*+"
+)
 PA_UNPINNED = (
-    r"\bnpx\s++(?:-y|--yes)\s++(?!github:[\w.-]++/[\w.-]++#[0-9a-fA-F]{40}(?![\w-]))(?:@[\w.-]++/)?[\w.-]++"
+    r"\bnpx\s++(?:-y|--yes)\s++[\"']?(?!github:[\w.-]++/[\w.-]++#[0-9a-fA-F]{40}(?![\w-]))(?:@[\w.-]++/)?[\w.-]++"
     r"(?!@v?" + _PA_SEMVER + ")",
-    r"\buvx\s++(?!-)[\w.-]++" + _PA_EXTRAS + "(?!(?:===?|@)" + _PA_PEP440 + ")",
+    r"\buvx\s++[\"']?(?!-)[\w.-]++" + _PA_EXTRAS + "(?!(?:===?|@)" + _PA_PEP440 + ")",
     r"\bpip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?(?!" + _PA_PIP_PINNED + ")[A-Za-z]",
 )
 PA_URL = (
@@ -9642,9 +9688,11 @@ PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("unpinned-url", "chỉ dẫn từ URL nhánh không ghim (SEC-AI-028)", PA_URL),
 )
 # Mỗi dải ngoài BMP một lớp `[…]` riêng (AUD-CODE-046: CodeQL `py/overly-large-range` đọc nhầm khi trộn với dải BMP).
+# AUD-SEC-357: k\u00fd t\u1ef1 `str.splitlines()` coi l\u00e0 xu\u1ed1ng d\u00f2ng ngo\u00e0i `\n`/`\r` (VT, FF, FS/GS/RS, NEL, U+2028/U+2029) c\u0169ng l\u00e0
+# k\u00fd t\u1ef1 \u1ea9n \u2014 ch\u1ec9 `\n` t\u00e1ch d\u00f2ng.
 PA_HIDDEN_RE = re.compile(
-    "[\u00ad\u200b\u200e\u200f\u2060-\u2064\u202a-\u202e\u2066-\u2069]|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]"
-    "|(?<!^)\ufeff"
+    "[\x0b\x0c\x1c-\x1e\x85\u00ad\u200b\u200e\u200f\u2028\u2029\u2060-\u2064\u202a-\u202e\u2066-\u2069]"
+    "|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]|(?<!^)\ufeff"
 )
 PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
 PA_LEAK_DIRS = ("vendor/", ".claude/skills/", "prompts/", "skills/")
@@ -9675,12 +9723,23 @@ _PA_IGNORABLE_RE = re.compile(
 _PA_JSON_STR_RE = re.compile(r'"(?:[^"\\]|\\.)*+(?:"|\\?$)')
 
 
-def _pa_visible(line: str) -> str:
-    """`line` đã gỡ ký tự định dạng (Unicode `Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) và ký tự vô hình khác
-    (`_PA_IGNORABLE_RE`) — chèn giữa từ không lách được luật văn bản (AUD-SEC-260); dòng ASCII giữ nguyên."""
+_PA_SPACE_RE = re.compile(r"\s++")
+
+
+def _pa_strip(line: str, repl: str) -> str:
+    """`line` với ký tự định dạng (Unicode `Cf`) và ký tự vô hình khác (`_PA_IGNORABLE_RE`) thay bằng `repl`."""
+    return _PA_IGNORABLE_RE.sub(repl, "".join(repl if unicodedata.category(c) == "Cf" else c for c in line))
+
+
+def _pa_visible(line: str) -> List[str]:
+    """Các dạng nhìn thấy của `line` cho luật văn bản: ký tự định dạng (`Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) và vô hình
+    khác vừa gỡ (chèn giữa từ — AUD-SEC-260) vừa thay bằng dấu cách (đứng ở chỗ dấu cách — AUD-SEC-366); mọi dãy khoảng
+    trắng Unicode (hai dấu cách, tab, NBSP, U+2028…) gom thành một dấu cách (AUD-SEC-366)."""
     if line.isascii():
-        return line
-    return _PA_IGNORABLE_RE.sub("", "".join(c for c in line if unicodedata.category(c) != "Cf"))
+        return [_PA_SPACE_RE.sub(" ", line)]
+    gone = _pa_strip(line, "")
+    forms = [gone] if len(gone) == len(line) else [gone, _pa_strip(line, " ")]
+    return [_PA_SPACE_RE.sub(" ", f) for f in forms]
 
 
 def _pa_json_literal(m: "re.Match[str]") -> str:
@@ -9691,30 +9750,62 @@ def _pa_json_literal(m: "re.Match[str]") -> str:
         return m[0]
 
 
-def _pa_views(line: str, json_file: bool) -> List[str]:
-    """Các dạng của dòng để chạy luật: dòng gốc, và với file `.json` có escape thì thêm bản đã giải mã từng chuỗi JSON
-    trên dòng (`\\uXXXX`, `\\"` — review T-3634: escape không lách được luật, số dòng giữ nguyên)."""
-    if not json_file or "\\" not in line:
+# AUD-SEC-365: escape trong chuỗi nháy kép YAML 1.2 (`\xXX`, `\uXXXX`, `\UXXXXXXXX`, ký tự đơn) và TOML (tập con);
+# escape ký tự ESC giữ nguyên văn (không luật nào dựa vào nó; PRF-CLI-004 cấm mã thoát ANSI trong scripts/).
+_PA_ESC_RE = re.compile(r"\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))")
+_PA_ESC_CHARS = {
+    "0": "\0", "a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v",
+    " ": " ", "/": "/", '"': '"', "\\": "\\", "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029",
+}  # fmt: skip
+
+
+def _pa_esc_char(m: "re.Match[str]") -> str:
+    """Một escape YAML/TOML đã giải mã; escape lạ hoặc mã ngoài Unicode → nguyên văn."""
+    code = m[1] or m[2] or m[3]
+    if code:
+        return chr(int(code, 16)) if int(code, 16) <= 0x10FFFF else m[0]
+    return _PA_ESC_CHARS.get(m[4], m[0])
+
+
+def _pa_esc_literal(m: "re.Match[str]") -> str:
+    """Chuỗi nháy kép YAML/TOML với các escape đã giải mã (`_pa_esc_char`)."""
+    return _PA_ESC_RE.sub(_pa_esc_char, m[0])
+
+
+_PA_DECODERS: Dict[str, Callable[["re.Match[str]"], str]] = {
+    ".json": _pa_json_literal,
+    ".yaml": _pa_esc_literal,
+    ".yml": _pa_esc_literal,
+    ".toml": _pa_esc_literal,
+}
+
+
+def _pa_views(line: str, decode: Optional[Callable[["re.Match[str]"], str]]) -> List[str]:
+    """Các dạng của dòng để chạy luật: dòng gốc, và với file có bộ giải mã (`_PA_DECODERS`: `.json`, `.yaml`/`.yml`/
+    `.toml`) mà dòng có escape thì thêm bản đã giải mã từng chuỗi nháy kép trên dòng (`\\uXXXX`, `\\"` — review
+    T-3634, AUD-SEC-365: escape không lách được luật, số dòng giữ nguyên)."""
+    if decode is None or "\\" not in line:
         return [line]
-    return [line, _PA_JSON_STR_RE.sub(_pa_json_literal, line)]
+    return [line, _PA_JSON_STR_RE.sub(decode, line)]
 
 
 def _pa_line_findings(
     rel: str, text: str, injection: Sequence[str], skip: Sequence[str] = ()
 ) -> List[Dict[str, object]]:
-    """Vi phạm theo dòng: ký tự ẩn (trên dòng gốc), injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục
-    vendor/skill) — các luật regex chạy trên dòng đã gỡ `Cf` (AUD-SEC-260); bỏ luật trong `skip`."""
+    """Vi phạm theo dòng (chỉ `\\n` tách dòng — AUD-SEC-357): ký tự ẩn (trên dòng gốc), injection, năm luật regex,
+    system prompt rò rỉ (chỉ dưới thư mục vendor/skill) — các luật regex chạy trên các dạng nhìn thấy của dòng
+    (`_pa_visible`); bỏ luật trong `skip`."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
     rules = [r for r in rules if r[0] not in skip]
     hidden = "hidden" not in skip
-    json_file = rel.endswith(".json")
+    decode = next((d for ext, d in _PA_DECODERS.items() if rel.lower().endswith(ext)), None)
     out: List[Dict[str, object]] = []
-    for n, line in enumerate(text.splitlines(), 1):
-        views = _pa_views(line, json_file)
+    for n, line in enumerate(text.split("\n"), 1):
+        views = _pa_views(line, decode)
         hidden_hit = hidden and any(PA_HIDDEN_RE.search(v) for v in views)
         hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden_hit else []
-        seen = [_pa_visible(v) for v in views]
+        seen = [s for v in views for s in _pa_visible(v)]
         hits += [(r, m) for r, m, pats in rules if any(re.search(p, v) for p in pats for v in seen)]
         out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
     return out
@@ -9722,7 +9813,8 @@ def _pa_line_findings(
 
 def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object]]:
     """Vi phạm của một file: tên file system prompt dưới thư mục vendor/skill, không UTF-8, rồi theo dòng. Mọi luật
-    chạy trên văn bản gốc; riêng `danger` của `.claude/settings*.json` chạy trên bản đã bỏ `permissions.deny`."""
+    chạy trên văn bản gốc; riêng `danger` của `.claude/settings*.json` chạy trên bản đã che chuỗi trong
+    `permissions.deny` (cùng số dòng — AUD-SEC-273)."""
     rel = path.as_posix()
     out: List[Dict[str, object]] = []
     if rel.startswith(PA_LEAK_DIRS) and re.search(r"system[_ -]?prompt", path.name, re.I):
@@ -9749,11 +9841,42 @@ def _pa_json_unique(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
     return dict(pairs)
 
 
+# Token của JSON hợp lệ: chuỗi, một ký tự cấu trúc, hoặc một đoạn khác (khoảng trắng, số, `true`/`false`/`null`).
+_PA_JSON_TOK_RE = re.compile(r'"(?:[^"\\]|\\.)*+"|[^"{}\[\]:,]++|.', re.S)
+
+
+def _pa_json_step(stack: List[List[Any]], tok: str) -> None:
+    """Cập nhật ngăn xếp khung `[loại "{"/"[", khoá hiện tại, đang chờ khoá]` của JSON hợp lệ theo một token."""
+    c = tok[0]
+    if c in "{[":
+        stack.append([c, None, c == "{"])
+    elif c in "}]":
+        stack.pop()
+    elif c == ",":
+        stack[-1][2] = stack[-1][0] == "{"
+    elif c == ":":
+        stack[-1][2] = False
+    elif c == '"' and stack[-1][2]:
+        stack[-1][1] = json.loads(tok)
+
+
+def _pa_mask_deny(text: str) -> str:
+    """`text` (JSON hợp lệ, object gốc có `permissions` là object) với mọi chuỗi nằm trong giá trị `permissions.deny`
+    thay bằng `""` — chuỗi JSON không chứa xuống dòng nên số dòng giữ nguyên (AUD-SEC-273)."""
+    stack: List[List[Any]] = []
+    out: List[str] = []
+    for m in _PA_JSON_TOK_RE.finditer(text):
+        inside = len(stack) > 2 and stack[0][1] == "permissions" and stack[1][1] == "deny"
+        out.append('""' if inside and m[0][0] == '"' else m[0])
+        _pa_json_step(stack, m[0])
+    return "".join(out)
+
+
 def _pa_without_deny(rel: str, text: str) -> Optional[str]:
-    """Bản JSON đã bỏ `permissions.deny` của `.claude/settings*.json` harness để chạy luật `danger`: `deny` là danh sách
-    lệnh bị CẤM khung chép vào mọi dự án đích — chỉ miễn luật `danger` cho các mục đó (review #387, AUD-SEC-272); luật
-    khác quét văn bản gốc (AUD-SEC-276). File khác (kể cả `vendor/**/settings.json`), JSON hỏng, khoá trùng, không có
-    `deny` dạng mảng → None (quét nguyên văn mọi luật)."""
+    """Văn bản `.claude/settings*.json` harness đã che chuỗi trong `permissions.deny` (`_pa_mask_deny`, giữ số dòng —
+    AUD-SEC-273) để chạy luật `danger`: `deny` là danh sách lệnh bị CẤM khung chép vào mọi dự án đích — chỉ miễn luật
+    `danger` cho các mục đó (review #387, AUD-SEC-272); luật khác quét văn bản gốc (AUD-SEC-276). File khác (kể cả
+    `vendor/**/settings.json`), JSON hỏng, khoá trùng, không có `deny` dạng mảng → None (quét nguyên văn mọi luật)."""
     if not PA_SETTINGS_RE.fullmatch(rel):
         return None
     try:
@@ -9764,17 +9887,19 @@ def _pa_without_deny(rel: str, text: str) -> Optional[str]:
     deny = perms.get("deny") if isinstance(perms, dict) else None
     if not isinstance(deny, list) or not isinstance(perms, dict):
         return None
-    data["permissions"] = {k: v for k, v in perms.items() if k != "deny"}
-    return json.dumps(data, indent=1, ensure_ascii=False)
+    return _pa_mask_deny(text)
 
 
 PA_EXEMPT_KEYS = ("path", "rule", "reason", "expires")
 
 
 def _pa_exemption(item: object) -> Optional[Dict[str, str]]:
-    """Miễn trừ hợp lệ hoặc None: path/reason là chuỗi khác khoảng trắng, `rule` (nếu có) là chuỗi, expires là ngày có
-    thật dạng YYYY-MM-DD chữ số ASCII (AUD-SEC-259: `null`/`false`/`" "`, `２０２６-…`, `2026-13-45` không qua)."""
-    if not isinstance(item, dict) or not all(isinstance(item.get(k, ""), str) for k in PA_EXEMPT_KEYS):
+    """Miễn trừ hợp lệ hoặc None: chỉ có khoá trong `PA_EXEMPT_KEYS` (khoá gõ nhầm `"Rule"` không được nới thành miễn
+    mọi luật — AUD-SEC-364), path/reason là chuỗi khác khoảng trắng, `rule` (nếu có) là chuỗi, expires là ngày có thật
+    dạng YYYY-MM-DD chữ số ASCII (AUD-SEC-259: `null`/`false`/`" "`, `２０２６-…`, `2026-13-45` không qua)."""
+    if not isinstance(item, dict) or set(item) - set(PA_EXEMPT_KEYS):
+        return None
+    if not all(isinstance(item.get(k, ""), str) for k in PA_EXEMPT_KEYS):
         return None
     e: Dict[str, str] = {k: item[k] for k in PA_EXEMPT_KEYS if k in item}
     exp = e.get("expires", "")
@@ -9802,7 +9927,10 @@ def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]
     for i, item in enumerate(raw):
         e = _pa_exemption(item)
         if e is None:
-            errors.append(f"miễn trừ #{i}: cần path, reason (chuỗi), expires YYYY-MM-DD là ngày có thật")
+            errors.append(
+                f"miễn trừ #{i}: chỉ nhận khoá {'/'.join(PA_EXEMPT_KEYS)}; cần path, reason (chuỗi), expires YYYY-MM-DD"
+                " là ngày có thật"
+            )
         elif e["expires"] < today:
             errors.append(f"miễn trừ #{i} ({e['path']}) hết hạn {e['expires']}")
         else:
