@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # 3.11 = sàn hỗ trợ (3.10 hết hạn 2026-10-01); 3.14 = mặc định (3.13 chỉ còn vá bảo mật từ 2026-10-01; xác minh 2026-10-21,
@@ -63,6 +64,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: |
@@ -81,6 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: |
@@ -105,6 +108,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: |
@@ -138,6 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: |
@@ -167,6 +172,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: |
@@ -195,6 +201,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # `xt.py progress-check` cần lịch sử để kiểm SHA bàn giao là tổ tiên HEAD
+          persist-credentials: false # job không push; token không nằm lại trong .git/config (AUD-CI-028)
 
       # Python cố định như các job khác (trước đây job này dùng python hệ thống của runner).
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -259,6 +266,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # AUD-CI-028
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
@@ -305,6 +314,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # AUD-CI-028 — bước API dùng GH_TOKEN qua env
       - name: Required check trong ruleset ↔ job có thật
         run: |
           set -euo pipefail

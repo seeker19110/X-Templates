@@ -4483,7 +4483,38 @@ def _doctor_settings(base: Path, deep: bool) -> List[Finding]:
         for ev, lv in DOCTOR_HOOK_EVENTS.items()
         if not hooks.get(ev)
     ]
-    return out + _doctor_hook_files(base, hooks, deep)
+    return out + _doctor_matchers(hooks) + _doctor_hook_files(base, hooks, deep)
+
+
+# Tool phải qua hook PreToolUse của khung (AUD-HAR-036/198): sửa notebook như sửa file, tool MCP ghi ra GitHub.
+DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
+    "NotebookEdit",
+    "mcp__github__create_branch",
+    "mcp__github__create_repository",
+    "mcp__github__fork_repository",
+    "mcp__github__issue_write",
+    "mcp__github__sub_issue_write",
+)
+
+
+def _doctor_matchers(hooks: Dict[str, Any]) -> List[Finding]:
+    """Matcher PreToolUse (regex của Claude Code) có phủ các tool phải qua guard không — bản cài cũ thiếu thì cảnh báo."""
+    entries = hooks.get("PreToolUse")
+    pats = [e.get("matcher") for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    regs = [re.compile(p) for p in pats if isinstance(p, str) and _regex_ok(p)]
+    miss = [t for t in DOCTOR_PRETOOL_TOOLS if not any(r.fullmatch(t) for r in regs)]
+    if not miss:
+        return []
+    msg = f"matcher PreToolUse không phủ {', '.join(miss)} — tool đó chạy không qua guard; {INSTALL_HINT}"
+    return [Finding("hooks", "warn", msg)]
+
+
+def _regex_ok(p: str) -> bool:
+    try:
+        re.compile(p)
+    except re.error:
+        return False
+    return True
 
 
 def _doctor_harness_parts(base: Path) -> List[Finding]:
@@ -10816,6 +10847,7 @@ RELEASE_ROWS = (
     "acceptance",
     "rollback",
     "unchecked_must",
+    "go_no_go",
 )
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
 RELEASE_RUN_KEYS = (
@@ -11125,6 +11157,51 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 
+GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khung: docs/ops; mẫu dự án đích: gốc)
+# Dòng ký của bảng §5: `| vai trò | tên | quyết định | YYYY-MM-DD |` — tên và ngày khác rỗng (mẫu để trống hai ô này).
+GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+
+
+def _go_no_go_signed(text: str) -> bool:
+    """§5 (Ký) của GO-NO-GO có ít nhất một dòng ký có tên và ngày."""
+    part = re.split(r"^## 5\b.*$", text, maxsplit=1, flags=re.M)
+    return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
+
+
+def _release_go_no_go(base: Path) -> Dict[str, str]:
+    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` nhắc `v<VERSION>` ở
+    `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
+    người ký); không có VERSION → N/A SHOULD; không đọc được → FAIL (có thể giấu bản ký)."""
+    try:
+        version = (base / "VERSION").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return _release_row("go_no_go", "N/A", "không có VERSION — chưa có bản phát hành để ký", "SHOULD")
+    except (OSError, ValueError) as exc:
+        return _release_row("go_no_go", "FAIL", f"không đọc được VERSION: {exc}")
+    found: List[str] = []
+    for d in GO_NO_GO_DIRS:
+        for p in sorted((base / d).glob("GO-NO-GO*.md")):
+            rel = p.relative_to(base).as_posix()
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
+            if f"v{version}" in p.name or f"v{version}" in text:
+                if _go_no_go_signed(text):
+                    return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
+                found.append(rel)
+    if found:
+        return _release_row(
+            "go_no_go", "N/A", f"{', '.join(found)}: §5 chưa có chữ ký (tên + ngày) — người ký", "BLOCKER"
+        )
+    return _release_row(
+        "go_no_go",
+        "N/A",
+        f"chưa có GO-NO-GO cho v{version} — lập theo mẫu GO-NO-GO.md từ `release-check --json`, người ký §5",
+        "BLOCKER",
+    )
+
+
 def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, str]:
     """Số + tỉ lệ MUST tick `[x]` không có `— Kiểm:` (cùng nguồn `blueprint-status`/hàng `blueprint`). `warn` (mặc định):
     hàng ⚠ SHOULD, không đổi GO/NO-GO; `fail` (dự án đích bật ở harden): count > 0 là FAIL BLOCKER = NO-GO."""
@@ -11166,6 +11243,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_review_debt(base, status),
         *runs.values(),
         _release_unchecked_must(base, blueprint, unchecked_must),
+        _release_go_no_go(base),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]
@@ -11277,6 +11355,38 @@ def _write_reviews(base: Path, data: Dict[str, Any]) -> None:
 def _pr_record(data: Dict[str, Any], pr: str) -> Dict[str, Any]:
     rec = data.get(pr)
     return rec if isinstance(rec, dict) else {}
+
+
+RecFn = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
+
+
+def update_reviews(base: Path, key: str, fn: RecFn) -> Dict[str, Any]:
+    """Đọc–sửa–ghi bản ghi PR `key` của `reviews.json` trong khoá `state.lock` (AUD-CODE-036, như `update_state`): đọc
+    lại sổ TRONG khoá, `fn(bản sao bản ghi)` → bản ghi mới (None = không ghi), ghi cả sổ. Không gọi mạng trong `fn` —
+    đăng lên GitHub ở ngoài khoá rồi gọi lại hàm này để đánh dấu. Trả bản ghi sau cùng."""
+    with _state_lock(base):
+        data = read_reviews(base)
+        rec = _pr_record(data, key)
+        new = fn(copy.deepcopy(rec))
+        if new is None:
+            return rec
+        data[key] = new
+        _write_reviews(base, data)
+        return new
+
+
+def _mark_published(at: str) -> RecFn:
+    """`fn` cho `update_reviews`: đánh dấu đã đăng bản ghi review có thời điểm `at` (bản ghi khác giữ nguyên)."""
+
+    def fn(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)
+        hit = [r for r in reviews if r.get("at") == at]
+        if not hit:
+            return None
+        hit[-1]["published"] = True
+        return {**rec, "reviews": reviews}
+
+    return fn
 
 
 def _ledger_reviews(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -11996,6 +12106,12 @@ def _rethink_problem(
     return None
 
 
+def _rec_rethinks(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`rethinks[]` của bản ghi PR (sổ hỏng → rỗng)."""
+    old = rec.get("rethinks")
+    return [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+
+
 def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
     """`pr rethink` (ADR-0053/0059): mở thêm đúng một lần sửa (review chưa sạch cuối giữ làm lượt 1) — chỉ khi `pr next`
     đang trả `debt` (còn 🔴:
@@ -12013,9 +12129,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
             f"✗ `pr next` của PR #{key} là `{action}`, không phải `debt`/`rethink` — làm bước đó trước", file=sys.stderr
         )
         return 2
-    local = _pr_record(data, key)
-    old = local.get("rethinks")
-    rethinks = [r for r in old if isinstance(r, dict)] if isinstance(old, list) else []
+    rethinks = _rec_rethinks(_pr_record(data, key))
     # ADR-0061: trần theo PR, kiểm TRƯỚC D-NNN (không bắt ghi quyết định vĩnh viễn rồi mới báo hết trần — review #380);
     # PR cắt bản miễn (ADR-0059 §6)
     if 0 < cap <= len(rethinks) and not d.get("release"):
@@ -12039,8 +12153,7 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
         error, extra, _ = _review_drift(base, last, head, str(pr.get("baseRefName") or "main"))
         if not error and not extra:
             entry["head"] = head
-    data[key] = {**local, "rethinks": [*rethinks, entry]}
-    _write_reviews(base, data)
+    update_reviews(base, key, lambda r: {**r, "rethinks": [*_rec_rethinks(r), entry]})
     print(f"✓ PR #{key}: mở thêm một lần sửa theo {args.decision} — sửa hết, push, chạy lại `xt.py pr next --pr {key}`")
     return 0
 
@@ -12154,11 +12267,8 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         if problem:
             print(f"✗ {problem}", file=sys.stderr)
             return 2
-        reviews.append(
-            {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
-        )
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        new = {"head": head, "clean": True, "debt": ids, "at": now_iso(), **({"fixed": fixed} if fixed else {})}
+        reviews = _ledger_reviews(update_reviews(base, key, lambda r: {**r, "reviews": [*_ledger_reviews(r), new]}))
     entry = reviews[-1]
     print(
         f"✓ PR #{key}: ghi nợ review ở {head[:7]} ({', '.join(ids) or '—'}"
@@ -12170,9 +12280,7 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
         return 0
     rc = _publish_review(str(args.pr or key), key, head, True, debt=[*ids, *fixed])
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**local, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(entry.get("at"))))
     return rc
 
 
@@ -12189,12 +12297,9 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2
-    data = read_reviews(base)
     key = _pr_key(args.pr)
     if key is None:
         return 2
-    rec = _pr_record(data, key)
-    reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
     if args.inconclusive:
         entry["inconclusive"] = True
@@ -12208,22 +12313,24 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     # Idempotent (AUD-HAR-071, BASE-DATA-008): chạy lại cùng kết quả ở cùng head không thêm bản ghi, đã đăng thì không
     # đăng trùng; chỉ so bản ghi CUỐI — đổi kết quả rồi đổi lại vẫn là bản ghi mới.
     same = ("head", "clean", "inconclusive", "reviewer_model", "author_model", *REVIEW_EFFORT_KEYS)
-    again = bool(reviews) and all(reviews[-1].get(k) == entry.get(k) for k in same)
-    if again:
-        entry = reviews[-1]
-    else:
-        reviews.append(entry)
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+    seen: List[Dict[str, Any]] = []
+
+    def add(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
+        if reviews and all(reviews[-1].get(k) == entry.get(k) for k in same):
+            seen.append(reviews[-1])
+            return None
+        return {**rec, "reviews": [*reviews, entry]}
+
+    update_reviews(base, key, add)
+    cur = seen[0] if seen else entry
     word = "chưa kết luận (cần review khác)" if args.inconclusive else "sạch" if args.clean else "còn lỗi chặn"
-    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if again else ""))
-    if args.no_publish or entry.get("published"):
+    print(f"✓ PR #{key}: review {word} ở {args.head[:7]}" + (" (đã ghi trước đó — không ghi thêm)" if seen else ""))
+    if args.no_publish or cur.get("published"):
         return 0
     rc = _publish_review(str(args.pr), key, args.head, args.clean, bool(args.inconclusive))
     if rc == 0:
-        entry["published"] = True
-        data[key] = {**rec, "reviews": reviews}
-        _write_reviews(base, data)
+        update_reviews(base, key, _mark_published(str(cur.get("at"))))
     return rc
 
 
@@ -12764,22 +12871,35 @@ def cmd_pr_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remember_problem(d: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    """Sổ cục bộ cần nhớ thêm: làn chuẩn (push sau đó không hạ PR về làn nhanh) hay head cập nhật nhánh (AUD-HAR-136)."""
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    lane = d["lane"] == "chuẩn" and not rec.get("standard_seen")
+    return lane or bool(d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"])
+
+
+def _remember(d: Dict[str, Any], rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """`fn` cho `update_reviews`: ghi `standard_seen`/`merges` vào bản ghi đọc lại trong khoá (None = không đổi)."""
+    if not _remember_problem(d, rec):
+        return None
+    if d["lane"] == "chuẩn":
+        rec = {**rec, "standard_seen": True}
+    old = rec.get("merges")
+    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
+    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:
+        rec = {**rec, "merges": dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])}
+    return rec
+
+
 def _pr_next_state(pr: Dict[str, Any], base: Path) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """(quyết định `merge-check`, sổ review cục bộ cả file, sổ của PR gộp dấu đã đăng) cho `pr next`/`pr rethink`."""
     d, _ = _merge_eval(pr)
     data = read_reviews(base)
     rec = _pr_record(data, str(d["pr"]))
-    if d["lane"] == "chuẩn" and not rec.get("standard_seen"):  # nhớ làn chuẩn: push sau đó không hạ PR về làn nhanh
-        rec = {**rec, "standard_seen": True}
+    if _remember_problem(d, rec):
+        rec = update_reviews(base, str(d["pr"]), lambda r: _remember(d, r))
         data[str(d["pr"])] = rec
-        _write_reviews(base, data)
-    old = rec.get("merges")
-    merges: Dict[str, Any] = old if isinstance(old, dict) else {}
-    if d["base_merge_of"] and merges.get(d["head"]) != d["base_merge_of"]:  # nhớ head cập nhật nhánh (AUD-HAR-136)
-        keep = dict(list({**merges, d["head"]: d["base_merge_of"]}.items())[-MERGES_KEEP:])
-        rec = {**rec, "merges": keep}
-        data[str(d["pr"])] = rec
-        _write_reviews(base, data)
     rec = {**rec, "standard_seen": True} if _standard_seen(pr) else rec
     return d, data, with_published(rec, pr.get("xtReviews"), bool(pr.get("reviewIdentity")))
 

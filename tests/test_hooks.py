@@ -1375,6 +1375,14 @@ class PreEditGuardTest(unittest.TestCase):
         self.assertIsNone(self.d("framework/README.md", via_hook=True))
         self.assertIsNone(self.d("src/app.ts"))
 
+    def test_notebook_edit_path(self):
+        """AUD-HAR-036 (T-3650): `NotebookEdit` gửi `notebook_path` (không `file_path`) — guard đọc như sửa file."""
+        nb = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(ROOT / ".autopilot" / "x.ipynb")}}
+        code, out, _ = run_hook("pre-edit-guard.sh", nb, ROOT)
+        self.assertEqual((code, decision(out)), (0, "ask"))
+        ok = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(ROOT / "notes" / "a.ipynb")}}
+        self.assertIsNone(decision(run_hook("pre-edit-guard.sh", ok, ROOT)[1]))
+
 
 @unittest.skipIf(shutil.which("bash") is None, "cần bash")
 class StopAndSessionTest(unittest.TestCase):
@@ -5274,6 +5282,7 @@ class TypedDecisionTest(unittest.TestCase):
         g = self.g
         self.assertEqual(g.permission_mode("mcp__github__merge_pull_request"), "mcp")
         self.assertEqual(g.permission_mode("MultiEdit"), "edit")
+        self.assertEqual(g.permission_mode("NotebookEdit"), "edit")  # AUD-HAR-036
         self.assertEqual(
             g.permission_output({"decision": "allow", "reason": "ok"}),
             json.dumps(

@@ -9939,7 +9939,7 @@ def apply_policy(out: Dict[str, object]) -> Dict[str, object]:
     return res
 
 
-PERMISSION_MODES = {"Bash": "bash", "Edit": "edit", "Write": "edit", "MultiEdit": "edit"}
+PERMISSION_MODES = {"Bash": "bash", "Edit": "edit", "Write": "edit", "MultiEdit": "edit", "NotebookEdit": "edit"}
 
 
 def permission_mode(tool: object) -> str:
@@ -10004,7 +10004,7 @@ def _rule_decision(mode: str, payload: Any, root: str) -> Dict[str, object]:
         cwd = cwd if isinstance(cwd, str) and posixpath.isabs(cwd) else None
         return bash_decision(cmd, root, cwd) if isinstance(cmd, str) and cmd else {"decision": ""}
     if mode == "edit":
-        path = tool_input.get("file_path")
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")  # NotebookEdit (AUD-HAR-036)
         d, r = edit_decision(path, root, tool_input) if isinstance(path, str) and path else ("", "")
         return {"decision": d, "reason": r}
     if mode == "mcp":

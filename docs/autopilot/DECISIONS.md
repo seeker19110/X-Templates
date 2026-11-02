@@ -2096,3 +2096,17 @@
 - Chọn: dùng cpu_budget.assert_not_quadratic ratio 40 ở cỡ 16 (đồng hồ process_time) — chỉ canh bậc ba trở lên
 - Lý do (tiêu chí chất lượng cuối): đo (review #405 R10): main và HEAD cùng bậc hai (n=16→64: 0,068→1,18 s CPU) do thân trích Θ(n²) theo đầu vào — có từ trước, không phải hồi quy; ngưỡng cũ chỉ xanh nhờ SLACK; tên test canh bậc ba và cpu_budget cho phép ratio 40 cho test canh hàm mũ; bậc ba vẫn bị bắt. Phương án 3 là việc tối ưu riêng, không thuộc lát sửa
 - Đường lùi: trả ratio mặc định trong test_quote_like_repeat_not_cubic khi _quote_exec_scripts tuyến tính (mở task PERF)
+
+### D-306 · 2026-11-02T08:59:29+00:00 · T-3653/AUD-CODE-038: gộp 4 runner subprocess (run_gate_shell, _git, _floor_run, _perf_run) thành một _run(cmd, cwd, timeout, env)?
+
+- Phương án: (1) gộp thành một _run theo PLAN · (2) giữ 4 runner (mỗi cái một giao ước riêng), chỉ gộp đường GET REST: latest_framework_tag qua _gh_api
+- Chọn: giữ 4 runner (mỗi cái một giao ước riêng), chỉ gộp đường GET REST: latest_framework_tag qua _gh_api
+- Lý do (tiêu chí chất lượng cuối): đọc mã 2026-11-02: _floor_run đã gọi run_gate_shell (không phải biến thể); run_gate_shell = bash pipefail + guard (LOOP-STOP-027) + nhóm tiến trình + output qua file tạm (review #220); _git = GIT_SAFE_READ + không grafts (AUD-SEC-158) + errors=replace; _perf_run = đo không lượng tử bằng thread waitpid (AUD-PERF-003). Gộp phải mang cờ cho từng giao ước — thêm nhánh, dễ làm mất bảo đảm an toàn đã sửa (tiêu chí 1 > 3); xác minh đối kháng của audit cũng ghi PARTIAL. Đường REST trùng thật nên gộp
+- Đường lùi: tách hàm chung khi có runner thứ năm cùng giao ước; phần AUD-CODE-038 về runner ghi bác bỏ kèm D này
+
+### D-307 · 2026-11-02T09:22:29+00:00 · T-3652/AUD-PERF-013: cache bytecode guard.py khoá theo sha256 nguồn để bớt ~0,13 s mỗi lệnh Bash?
+
+- Phương án: (1) cache marshal khoá sha256 nguồn trong thư mục do install/doctor tạo (theo PLAN) · (2) không cache; giữ compile từ nguồn (AUD-SEC-074), sổ ghi chấp nhận chi phí; tăng tốc thật đi qua tách guard/nạp lười (AUD-ARCH-008, cần ADR) · (3) tiến trình guard thường trú (daemon) giữ module đã nạp
+- Chọn: không cache; giữ compile từ nguồn (AUD-SEC-074), sổ ghi chấp nhận chi phí; tăng tốc thật đi qua tách guard/nạp lười (AUD-ARCH-008, cần ADR)
+- Lý do (tiêu chí chất lượng cuối): đọc mã + mô hình đe doạ 2026-11-02: khoá sha256 chỉ ràng buộc NGUỒN, không ràng buộc bytecode — ai ghi được file cache (đặt tên theo sha256 nguồn công khai) thì thay mã guard mà git diff không thấy (cache bị gitignore), đúng lớp lỗi AUD-SEC-074 (pyc giả khớp header). Không có bí mật nào để ký trong máy agent. Sửa thẳng guard.py thì hiện trong diff và review. Tiêu chí 1 (an toàn) > 5 (tốc độ): ~0,13 s × ~1.500 lệnh ≈ 3–4 phút/phiên được chấp nhận. Daemon thêm bề mặt tấn công và trạng thái sống lâu
+- Đường lùi: nếu có nơi lưu agent không ghi được (thư mục người dùng chỉ đọc, ký bằng khoá ngoài máy agent) thì làm phương án 1 qua ADR mới

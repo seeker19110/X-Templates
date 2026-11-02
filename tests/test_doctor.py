@@ -273,6 +273,30 @@ class DoctorHooksTest(DoctorCase):
             found, [("error", "settings.json thiếu hook Stop"), ("warn", "settings.json thiếu hook PostToolUse")]
         )
 
+    def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
+        """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,
+        issue); matcher cũ (thiếu) → cảnh báo `hooks`, nêu tên thiếu."""
+        self.assertNotIn("matcher", " ".join(f.msg for f in self.findings() if f.code == "hooks"))
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        for entry in data["hooks"]["PreToolUse"]:
+            entry["matcher"] = entry["matcher"].replace("|NotebookEdit", "").replace("create_branch|", "")
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        found = [(f.level, f.msg) for f in self.findings() if f.code == "hooks" and "matcher" in f.msg]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0][0], "warn")
+        self.assertIn("NotebookEdit", found[0][1])
+        self.assertIn("create_branch", found[0][1])
+        data["hooks"]["PreToolUse"] = "lạ"  # cấu trúc lạ: không phải danh sách → coi như không matcher nào
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        self.assertTrue(any("matcher" in f.msg for f in self.findings() if f.code == "hooks"))
+
+    def test_pretool_matcher_invalid_regex_counts_as_none(self):
+        """Matcher không phải regex hợp lệ thì Claude Code không khớp tool nào — doctor coi như không phủ, không sập."""
+        found = xt._doctor_matchers({"PreToolUse": [{"matcher": "Bash|(NotebookEdit"}]})
+        self.assertEqual([f.level for f in found], ["warn"])
+        self.assertIn("NotebookEdit", found[0].msg)
+
     def test_shell_syntax_and_other_suffixes(self):
         self.write(".claude/hooks/stop-guard.sh", "if then\n")
         self.write(".claude/hooks/sub/note.txt", "x")
