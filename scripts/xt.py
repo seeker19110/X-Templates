@@ -4483,7 +4483,38 @@ def _doctor_settings(base: Path, deep: bool) -> List[Finding]:
         for ev, lv in DOCTOR_HOOK_EVENTS.items()
         if not hooks.get(ev)
     ]
-    return out + _doctor_hook_files(base, hooks, deep)
+    return out + _doctor_matchers(hooks) + _doctor_hook_files(base, hooks, deep)
+
+
+# Tool phải qua hook PreToolUse của khung (AUD-HAR-036/198): sửa notebook như sửa file, tool MCP ghi ra GitHub.
+DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
+    "NotebookEdit",
+    "mcp__github__create_branch",
+    "mcp__github__create_repository",
+    "mcp__github__fork_repository",
+    "mcp__github__issue_write",
+    "mcp__github__sub_issue_write",
+)
+
+
+def _doctor_matchers(hooks: Dict[str, Any]) -> List[Finding]:
+    """Matcher PreToolUse (regex của Claude Code) có phủ các tool phải qua guard không — bản cài cũ thiếu thì cảnh báo."""
+    entries = hooks.get("PreToolUse")
+    pats = [e.get("matcher") for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    regs = [re.compile(p) for p in pats if isinstance(p, str) and _regex_ok(p)]
+    miss = [t for t in DOCTOR_PRETOOL_TOOLS if not any(r.fullmatch(t) for r in regs)]
+    if not miss:
+        return []
+    msg = f"matcher PreToolUse không phủ {', '.join(miss)} — tool đó chạy không qua guard; {INSTALL_HINT}"
+    return [Finding("hooks", "warn", msg)]
+
+
+def _regex_ok(p: str) -> bool:
+    try:
+        re.compile(p)
+    except re.error:
+        return False
+    return True
 
 
 def _doctor_harness_parts(base: Path) -> List[Finding]:
