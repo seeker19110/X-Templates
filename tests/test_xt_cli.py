@@ -3766,6 +3766,15 @@ class PromptAssetsScanTest(TmpDirCase):
         "/bin/rm -rf /",
         "x;rm -rf ~/",
         "sudo \\rm -rf /",
+        # Review #414 (AUD-SEC-362): đích là chính HOME/gốc dù nháy đóng ở đâu vẫn xấu.
+        'rm -rf "$HOME"/*',
+        'rm -rf "$HOME/"',
+        'rm -rf "$HOME"/',
+        "rm -rf ~",
+        "rm -rf ${HOME}",
+        'rm -rf "${HOME:?}"',
+        'rm -rf "${HOME:?}"/*',
+        "rm -rf '~/'",
     )
     DANGER_GOOD = (
         "rm -rf /tmp/build",
@@ -3774,6 +3783,14 @@ class PromptAssetsScanTest(TmpDirCase):
         "curl -fsSL https://x.example/a.json | jq .",
         "curl -fsSL https://x.example/i.sh || bash fallback.sh",
         "curl -o i.sh https://x.example/i.sh | tee log | grep ok",
+        # Review #414 (AUD-SEC-362): đường dẫn con của HOME không là đích nguy hiểm.
+        'rm -rf "$HOME"/.cache/pip',
+        'rm -rf "${HOME}"/.local/share/app',
+        'rm -rf ~/"Old Stuff"',
+        'rm -rf "${HOME:?}/.config/app"',
+        "rm -rf ~/'Old Stuff'",
+        "rm -rf $HOMEDIR",
+        'rm -rf "$HOME"/"Old Stuff"',
     )
     UNPINNED_BAD = (
         "npx -y create-thing@latest",
@@ -3788,6 +3805,22 @@ class PromptAssetsScanTest(TmpDirCase):
         'pip install "requests>=2"',
         "pip install --upgrade requests~=2.32",
         "pip install requests==2.*",
+        # Review #414 (AUD-SEC-361): giá trị tuỳ chọn được nuốt, gói sau nó vẫn xét; URL VCS không ghim SHA vẫn xấu.
+        "pip install -U pip",
+        "pip install --upgrade pip",
+        "pip install --index-url https://pypi.example/simple requests",
+        "pip install -i https://pypi.example/simple requests>=2",
+        "pip install --index-url=https://pypi.example/simple requests",
+        "pip install --progress-bar off -U requests",
+        'pip install "requests[socks]>=2"',
+        "pip install git+https://github.com/u/r",
+        "pip install git+https://github.com/u/r@main",
+        "pip install https://github.com/u/r/archive/main.zip",
+        "npx -y pkg@v1",
+        "npx -y github:user/repo",
+        "npx -y github:user/repo#main",
+        "uvx pkg[cli]",
+        "uvx pkg[cli]>=1.2",
     )
     UNPINNED_GOOD = (
         "npx -y create-thing@1.2.3",
@@ -3798,6 +3831,32 @@ class PromptAssetsScanTest(TmpDirCase):
         'pip install "requests==2.32.3"',
         "pip install -r req.txt -c constraints.txt",
         "pip install --upgrade pip==24.0rc1",
+        # Review #414 (AUD-SEC-361): lệnh đã ghim không bị báo oan.
+        "pip install --index-url https://pypi.example/simple requests==2.32.3",
+        "pip install -i https://pypi.example/simple requests==2.32.3",
+        "pip install --extra-index-url https://x.example/simple requests==2.32.3",
+        "pip install -t vendor requests==2.32.3",
+        "pip install --target vendor requests==2.32.3",
+        "pip install -f https://x.example/wheels requests==2.32.3",
+        "pip install --find-links ./wheels requests==2.32.3",
+        "pip install --progress-bar off requests==2.32.3",
+        "pip install --index-url=https://pypi.example/simple requests==2.32.3",
+        "pip install --no-binary :all: requests==2.32.3",
+        "pip install git+https://github.com/u/r@0123456789abcdef0123456789abcdef01234567",
+        "pip install git+https://github.com/u/r@0123456789abcdef0123456789abcdef01234567#egg=r",
+        "pip install https://x.example/pkg-1.0-py3-none-any.whl",
+        "pip install dist/pkg-1.0-py3-none-any.whl",
+        "pip install requests===2.32.3",
+        "pip install pkg==1.0alpha1",
+        "pip install pkg==1.0beta2",
+        "pip install pkg==1.0alpha",  # PEP 440: số tiền phát hành ngầm định 0
+        'pip install "requests[socks]==2.32.3"',
+        "npx -y pkg@v1.2.3",
+        "npx -y github:user/repo#0123456789abcdef0123456789abcdef01234567",
+        "uvx pkg[cli]==1.2.3",
+        "uvx pkg===1.2.3",
+        "pip install --require-hashes`, rồi",  # tuỳ chọn không giá trị đứng cuối đoạn mã trong văn xuôi
+        "pip install --target vendor` và",
     )
 
     def test_danger_and_unpinned_evasions_flagged(self):
@@ -3826,6 +3885,16 @@ class PromptAssetsScanTest(TmpDirCase):
             lambda n: "rm" + " -rm" * (n // 4),  # `rm` trong cờ `-rm`/`--rm` không là điểm bắt đầu (review T-3634)
             lambda n: " --rm" * (n // 5),
             lambda n: "rm" + " -f-rm" * (n // 6),
+            # Review #414: tuỳ chọn pip nhận giá trị, token URL/đường dẫn dài, đích `rm` dạng `${HOME:…}`.
+            lambda n: "pip install" + " --index-url x" * (n // 14),
+            lambda n: "pip install --target=" + "a" * n,
+            lambda n: "pip install git+https://" + "a" * n + "!",
+            lambda n: "pip install " + "a/" * (n // 2) + ":",
+            lambda n: "pip install " + "a" * n + ".whl!",
+            lambda n: "npx -y github:" + "a" * n + "!",
+            lambda n: "uvx " + "a" * n + "[" + "b" * n,
+            lambda n: 'rm -rf "${HOME:?' + "a" * n,
+            lambda n: "rm -rf " + '"$HOME"' * (n // 7),
         )
         for i, make in enumerate(lines):
             with self.subTest(i):
@@ -3895,6 +3964,26 @@ class PromptAssetsScanTest(TmpDirCase):
             with self.subTest(text):
                 self.write(f"docs/{i}.md", text + "\n")
                 self.assertEqual(self.rules(f"docs/{i}.md"), want)
+
+    def test_hidden_ranges_outside_bmp_in_own_class(self):
+        """AUD-CODE-046: mỗi dải ngoài BMP của `PA_HIDDEN_RE`/`_PA_IGNORABLE_RE` là một lớp `[…]` riêng (CodeQL
+        `py/overly-large-range` đọc nhầm khi trộn với dải BMP); tập ký tự khớp không đổi."""
+        for rx in (xt.PA_HIDDEN_RE, xt._PA_IGNORABLE_RE):
+            for cls in re.findall(r"\[[^\]]*\]", rx.pattern):
+                if any(ord(c) > 0xFFFF for c in cls):
+                    with self.subTest(cls):
+                        self.assertRegex(cls, r"^\[[\U00010000-\U0010ffff]-[\U00010000-\U0010ffff]\]$")
+        hidden = [(0xAD, 0xAD), (0x200B, 0x200B), (0x200E, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064)]
+        hidden += [(0x2066, 0x2069), (0xE0000, 0xE007F), (0xE0100, 0xE01EF)]
+        ignorable = [(0x34F, 0x34F), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F), (0x2060, 0x206F)]
+        ignorable += [(0x2800, 0x2800), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8)]
+        ignorable += [(0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF)]
+        for rx, ranges in ((xt.PA_HIDDEN_RE, hidden), (xt._PA_IGNORABLE_RE, ignorable)):
+            want = {c for lo, hi in ranges for c in range(lo, hi + 1)}
+            got = {c for c in range(0x110000) if rx.match(chr(c))}
+            self.assertEqual(got, want)
+        self.assertIsNotNone(xt.PA_HIDDEN_RE.search("x\ufeff"))
+        self.assertIsNone(xt.PA_HIDDEN_RE.search("\ufeffx"))
 
     def test_settings_duplicate_keys_scanned_on_original_text(self):
         """AUD-SEC-276: `.claude/settings*.json` có khoá trùng — `json.loads` giữ giá trị sau, bí mật/ký tự ẩn/lệnh nguy

@@ -9451,7 +9451,14 @@ _PA_SH = r"(?:ba|z|da|k)?sh\b"
 _PA_FETCH = r"\b(?:curl|wget)\b"
 _PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
 _PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--recursive\b))"
-_PA_RM_TARGET = r"""\\?["']?(?:/|~|\$\{?HOME\}?)/?\*?\\?["']?(?![\w.~$/-])"""
+# Đích `rm` là chính gốc/HOME (`/`, `~`, `$HOME`, `${HOME}`, `${HOME:?}`, kèm `/`, `/*`, nháy đóng trước hoặc sau `/`):
+# mọi phần possessive nên nháy đóng không "nhả" để lookahead đứng trước nó — đường dẫn con (`"$HOME"/.cache`,
+# `~/"Old Stuff"`, `"${HOME:?}/.config"`) không bị báo (review #414, AUD-SEC-362).
+_PA_RM_QUOTE = r"""(?:\\?["'])?+"""
+_PA_RM_HOME = r"\$(?:HOME|\{HOME(?::?[?-][^}\s]*+)?\})"
+_PA_RM_TARGET = (
+    _PA_RM_QUOTE + r"(?:/|~|" + _PA_RM_HOME + r")/?+\*?+" + _PA_RM_QUOTE + r"""/?+\*?+(?![\w.~$/-]|(?<=/)\\?["'])"""
+)
 PA_DANGER = (
     _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+(?:sudo(?:\s++-[\w-]++)*+\s++)?" + _PA_SH,
     r"\b(?:" + _PA_SH + r"|source)\s*+<\(\s*+" + _PA_FETCH,
@@ -9471,12 +9478,37 @@ PA_BYPASS = (
 # `.*`), `-U` không ghim, tên trong ngoặc kép vẫn là tên gói. Lượng từ possessive (AUD-SEC-263).
 _PA_PIN_END = r"(?![\w*^~<>=|-]|\.[\w*])"
 _PA_SEMVER = r"[0-9]++\.[0-9]++\.[0-9]++(?:-[0-9A-Za-z.-]++)?(?:\+[0-9A-Za-z.-]++)?" + _PA_PIN_END
-_PA_PEP440 = r"[0-9]++(?:\.[0-9]++)*+(?:[-+.]?(?:a|b|c|rc|alpha|beta|pre|dev|post)[0-9.]*+)*+" + _PA_PIN_END
-_PA_PIP_OPT = r"(?:\s++(?!-[rce]\b|--(?:requirement|constraint|editable)\b)-[\w-]++)*+"
+# Review #414 (AUD-SEC-361): nhãn PEP 440 dài đứng trước nhãn ngắn (nhóm possessive không quay lui `a` → `alpha`);
+# `===` là ghim; tuỳ chọn pip nhận giá trị (`pip install --help`, pip 24.0, 2026-11-02) nuốt cả giá trị (`--opt val`,
+# `--opt=val`); token ghim: tên `==`/`===` phiên bản, URL VCS `git+…@<SHA 40 hex>`, file `.whl`, đường dẫn cục bộ (có
+# `/`, không `:`). URL VCS/lưu trữ không ghim SHA vẫn bị báo; npx nhận `@v1.2.3` và `github:u/r#<SHA 40 hex>`.
+_PA_PEP440_TAG = r"(?:alpha|beta|preview|pre|post|rev|rc|dev|a|b|c|r)"
+_PA_PEP440 = r"[0-9]++(?:\.[0-9]++)*+(?:[-+.]?" + _PA_PEP440_TAG + r"[0-9.]*+)*+" + _PA_PIN_END
+_PA_EXTRAS = r"(?:\[[\w,.-]*+\])?+"
+# Không liệt kê tuỳ chọn chọn nhà cung cấp khoá của pip (Kiểm PRF-CLI-010 cấm tên đó trong scripts/): giá trị của nó
+# bị coi là tên gói → báo `unpinned` oan theo hướng chặt (hiếm gặp).
+_PA_PIP_ARG = (
+    r"(?:-[tifC]|--(?:target|platform|python-version|implementation|abi|root|prefix|src|upgrade-strategy"
+    r"|config-settings|global-option|no-binary|only-binary|progress-bar|root-user-action|report|index-url"
+    r"|extra-index-url|find-links|python|log|proxy|retries|timeout|exists-action|trusted-host|cert"
+    r"|client-cert|cache-dir|use-feature|use-deprecated))(?=\s)\s++[^\s`-][^\s`]*+"
+)
+_PA_PIP_OPT = (
+    r"(?:\s++(?!-[rce]\b|--(?:requirement|constraint|editable)\b)(?:" + _PA_PIP_ARG + r"|-[\w-]*+(?:=[^\s`]*+)?))*+"
+)
+_PA_PIP_PINNED = "|".join(
+    (
+        r"[A-Za-z][\w.-]*+" + _PA_EXTRAS + "===?" + _PA_PEP440,
+        r"git\+[a-z]++://[^\s\"'`#]*+(?<=@[0-9a-fA-F]{40})",
+        r"[^\s\"'`]*+(?<=\.whl)",
+        r"[^\s\"'`:/]*+/[^\s\"'`:]*+(?!:)",
+    )
+)
 PA_UNPINNED = (
-    r"\bnpx\s++(?:-y|--yes)\s++(?:@[\w.-]++/)?[\w.-]++(?!@" + _PA_SEMVER + ")",
-    r"\buvx\s++(?!-)[\w.-]++(?!(?:==|@)" + _PA_PEP440 + ")",
-    r"\bpip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?[A-Za-z][\w.-]*+(?:\[[\w,.-]*+\])?(?!==" + _PA_PEP440 + ")",
+    r"\bnpx\s++(?:-y|--yes)\s++(?!github:[\w.-]++/[\w.-]++#[0-9a-fA-F]{40}(?![\w-]))(?:@[\w.-]++/)?[\w.-]++"
+    r"(?!@v?" + _PA_SEMVER + ")",
+    r"\buvx\s++(?!-)[\w.-]++" + _PA_EXTRAS + "(?!(?:===?|@)" + _PA_PEP440 + ")",
+    r"\bpip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?(?!" + _PA_PIP_PINNED + ")[A-Za-z]",
 )
 PA_URL = (
     r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(?:main|master|HEAD)/",
@@ -9489,8 +9521,9 @@ PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("unpinned", "chạy gói không ghim", PA_UNPINNED),
     ("unpinned-url", "chỉ dẫn từ URL nhánh không ghim (SEC-AI-028)", PA_URL),
 )
+# Mỗi dải ngoài BMP một lớp `[…]` riêng (AUD-CODE-046: CodeQL `py/overly-large-range` đọc nhầm khi trộn với dải BMP).
 PA_HIDDEN_RE = re.compile(
-    "[\u00ad\u200b\u200e\u200f\u2060-\u2064\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    "[\u00ad\u200b\u200e\u200f\u2060-\u2064\u202a-\u202e\u2066-\u2069]|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]"
     "|(?<!^)\ufeff"
 )
 PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
@@ -9514,8 +9547,8 @@ PA_TEXT_RULES = ("hidden", "injection", "leak") + tuple(r[0] for r in PA_RULES i
 # Ký tự vô hình ngoài `Cf` (Default_Ignorable_Code_Point của Unicode — Python không có thuộc tính này — cộng U+2800
 # ô chữ nổi trống): gỡ cùng `Cf` trước luật văn bản (review T-3634).
 _PA_IGNORABLE_RE = re.compile(
-    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\uffa0\ufff0-\ufff8\U0001bca0-\U0001bca3"
-    "\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+    "[\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\uffa0\ufff0-\ufff8]"
+    "|[\U0001bca0-\U0001bca3]|[\U0001d173-\U0001d17a]|[\U000e0000-\U000e0fff]"
 )
 # Một chuỗi JSON trên dòng: đóng bằng `"` hoặc chạy tới cuối dòng (kể cả `\` lẻ cuối dòng) — mọi lần thử từ một `"` đều
 # khớp nên `finditer` không quét lại phần đã qua (tuyến tính, AUD-SEC-263).
