@@ -15768,6 +15768,94 @@
    "allowed": true
   },
   "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "r404-330-decoy-echo-eval",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "echo eval; \"bash\" -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-decoy-ansi",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "true eval; $'bash' -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-control-quoted-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "\"bash\" -c 'echo $(date)'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-echo-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-printf-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "source <(printf \"%s\" \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-control-procsub-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo 'echo hi')"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
  }
  ]
 }
