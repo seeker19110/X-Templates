@@ -4608,6 +4608,7 @@ DOCTOR_PRETOOL_TOOLS: Tuple[str, ...] = (
     "mcp__github__fork_repository",
     "mcp__github__issue_write",
     "mcp__github__sub_issue_write",
+    "mcp__github__actions_run_trigger",  # AUD-SEC-344
 )
 
 

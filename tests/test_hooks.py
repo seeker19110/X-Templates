@@ -5194,6 +5194,48 @@ class GuardTitleRuleTest(unittest.TestCase):
             with self.subTest(ok=tool):
                 self.assertEqual(self.g.mcp_decision(tool, inp, d), ("", ""))
 
+    def test_mcp_issue_write_pr_text_and_actions_trigger(self):
+        """AUD-SEC-344 (nợ review #406): `issue_write {method: update}` PATCH issue — số issue có thể là PR — nên tiêu đề
+        sai luật, ghi công AI, dấu review bị chặn như `update_pull_request`; `create` tạo issue (không phải PR) chỉ còn
+        luật dấu review. `actions_run_trigger` qua matcher và hỏi khi chạy workflow như `gh workflow run`."""
+        d, forbid = self.repo(), self.repo("ai_attribution: forbid\n")
+        mark = "<!-- xt-review v1 head=" + "a" * 40 + " verdict=clean -->"
+        for tool, inp, root, code in (
+            ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "title": "Sửa lỗi"}, d, "029"),
+            ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "title": self.LONG}, d, "029"),
+            ("mcp__github__issue_write", {"issue_number": 7, "title": "Sửa lỗi"}, d, "029"),  # thiếu method: chặt
+            ("mcp__github__issue_write", {"method": "update", "body": "Claude-Session: x"}, forbid, "027"),
+            ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "body": mark}, d, "xt-review"),
+            ("mcp__github__issue_write", {"method": "create", "body": mark}, d, "xt-review"),
+            ("mcp__github__sub_issue_write", {"method": "add", "body": mark}, d, "xt-review"),
+        ):
+            with self.subTest(tool=tool, inp=inp):
+                dec, why = self.g.mcp_decision(tool, inp, root)
+                self.assertEqual(dec, "deny", why)
+                self.assertIn(code, why)
+        for tool, inp in (
+            ("mcp__github__issue_write", {"method": "create", "title": "Bug: lỗi đăng nhập", "body": "x"}),
+            ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "title": "fix: a", "body": "x"}),
+            ("mcp__github__issue_write", {"method": "update", "issue_number": 7, "state": "closed"}),
+            ("mcp__github__sub_issue_write", {"method": "add", "issue_number": 7, "sub_issue_id": 9}),
+            ("mcp__github__actions_run_trigger", {"method": "rerun_failed_jobs", "run_id": 1}),
+            ("mcp__github__actions_run_trigger", {"method": "cancel_workflow_run", "run_id": 1}),
+        ):
+            with self.subTest(ok=tool, inp=inp):
+                self.assertEqual(self.g.mcp_decision(tool, inp, d), ("", ""))
+        self.assertEqual(self.g.mcp_decision("mcp__github__issue_write", {"method": "create"}, forbid), ("", ""))
+        for method in ("run_workflow", "delete_workflow_run_logs", None):
+            with self.subTest(method=method):
+                dec, why = self.g.mcp_decision("mcp__github__actions_run_trigger", {"method": method}, d)
+                self.assertEqual(dec, "ask", why)
+                self.assertIn(self.g.EXTERNAL_ASK, why)
+                out = self.g.apply_policy({"decision": dec, "reason": why})
+                self.assertEqual(out["decision"], "")  # mặc định cho chạy như `gh workflow run` (ADR-0018)
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        matcher = next(e["matcher"] for e in settings["hooks"]["PreToolUse"] if "pre-mcp-guard" in json.dumps(e))
+        for t in ("issue_write", "sub_issue_write", "actions_run_trigger"):
+            self.assertTrue(re.fullmatch(matcher, f"mcp__github__{t}"), t)
+
 
 class TypedDecisionTest(unittest.TestCase):
     """REC-04: quyết định có kiểu (action, code, confidence, missing); chính sách theo mã; cùng hành động qua

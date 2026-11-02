@@ -2776,5 +2776,34 @@ class AuditRescan1101GuardTest(unittest.TestCase):
         self.assertEqual(final("sed '" + "".join("s" + c for c in chars[:5000]) + "' f.txt"), "deny")
 
 
+class ExecVerbatimBudgetTest(unittest.TestCase):
+    """AUD-PERF-015 (nợ review #405): chuỗi `sh -c` nguyên văn trong lời gọi thực thi đã quét CHẶT thì lượt lỏng của cùng
+    chuỗi ở cùng thư mục (con của argv ghép) không tốn thêm ngân sách — 200 lời gọi `subprocess.run(["bash","-c","ls
+    i"])` từng hết `SCAN_CALLS` (deny BUDGET) mà trước #405 cho chạy."""
+
+    @staticmethod
+    def script(n: int) -> str:
+        body = "\n".join(f'subprocess.run(["bash","-c","ls {i}"])' for i in range(n))
+        return "python3 -c 'import subprocess\n" + body + "'"
+
+    def test_budget_not_spent_twice_on_verbatim(self) -> None:
+        self.assertEqual(final(self.script(200)), "")
+        calls = []
+        orig = guard.ScanBudget.exhausted
+
+        def counting(b: object) -> bool:
+            calls.append(1)
+            return bool(orig(b))
+
+        with mock.patch.object(guard.ScanBudget, "exhausted", counting):
+            final(self.script(100))
+        self.assertLessEqual(len(calls), 2 * 100 + 1)  # lượt gốc + mỗi lời gọi: chặt `ls i`, lỏng `bash -c 'ls i'`
+
+    def test_budget_strict_after_loose_still_scanned(self) -> None:
+        # chặt và lỏng cùng chuỗi: tập con chuẩn chỉ áp ở lượt chặt — lượt chặt không bị bỏ (review lát A 🔴)
+        cmd = 'python3 -c \'import subprocess; subprocess.run(["bash", "-c", "echo {#,a}; rm -rf {~,x}"])\''
+        self.assertEqual(final(cmd), "deny")
+
+
 if __name__ == "__main__":
     unittest.main()
