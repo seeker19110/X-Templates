@@ -799,6 +799,8 @@ class _CodeView:
         m = STRICT_PLAIN.get(ctx, STRICT_PLAIN["c"]).match(s, i)
         if m:
             self.kind[i : m.end()] = [{'"': "d", "${": "p"}.get(ctx, "c")] * (m.end() - i)
+            if ctx in ("$(", "(") and CASE_WORD_RE.search(m[0]):  # `)` của mẫu `case` đóng ngoặc sớm (review lát A 🔴)
+                self.why = "`case` trong `$(…)`/`(…)` — dùng `if`/`[[ ]]` hoặc tách lệnh"
             return m.end()
         if s[i] == "`":
             self.why = "backtick — dùng `$(…)` (AUD-SEC-181/231/245)"
@@ -818,8 +820,9 @@ class _CodeView:
         return i + 1
 
     def _paren_check(self, body: str) -> None:
-        """Chuỗi nháy bên trong `$(…)` có ngoặc không cân: bộ tìm thay lệnh của guard đếm ngoặc thô (AUD-SEC-202)."""
-        if "$(" in self.stack and body.count("(") != body.count(")"):
+        """Chuỗi nháy bên trong `$(…)` có `)` thừa: bộ tìm thay lệnh của guard đếm ngoặc thô nên đóng `$(` sớm (AUD-SEC-202);
+        `(` thừa (`grep 'fix('`) chỉ làm bộ đếm cũ quét rộng hơn — không chặn."""
+        if "$(" in self.stack and body.count(")") > body.count("("):
             self.why = "ngoặc lẻ trong chuỗi nháy bên trong `$(…)` (AUD-SEC-202)"
 
     def _in_param(self, i: int) -> int:
@@ -833,6 +836,9 @@ class _CodeView:
 
     def _in_code(self, i: int) -> int:
         s, c = self.s, self.s[i]
+        if s.startswith("$$", i):  # PID — `$$'…'` là PID + nháy đơn thường, không phải ANSI-C (review lát A 🔴)
+            self.kind[i : i + 2] = ["c", "c"]
+            return i + 2
         if c == "'" or s.startswith("$'", i):
             return self._quoted(i, c == "$")
         if c == "#":
@@ -6083,10 +6089,13 @@ class ScanBudget:
     def __init__(self, nested: bool = False) -> None:
         self.calls = SCAN_CALLS
         self.deadline = time.monotonic() + SCAN_SECONDS
-        self.seen: Set[Tuple[str, Optional[str]]] = set()  # (script, thư mục chạy): cùng chuỗi ở thư mục khác vẫn quét
-        # Chữ trích theo chiều chặt từ chương trình khác (sed/awk/perl/m4, lời gọi thực thi trong Python/Node): bash không
-        # đọc nó như lệnh gốc nên tập con chuẩn (ADR-0063) không áp — luật nguy hiểm vẫn áp đủ.
+        self.seen: Set[Tuple[str, Optional[str], bool]] = set()  # (script, thư mục chạy, lỏng): khác thư mục vẫn quét
+        # ADR-0063, lỏng theo NGUỒN (review lát A 🔴): bản guard tự dựng (thay biến, alias git, `read <<<`) và chữ trích
+        # chiều chặt từ chương trình khác (sed/awk/perl/m4, lời gọi thực thi) không qua tập con chuẩn — luật nguy hiểm vẫn
+        # áp đủ. Chỉ con của chữ TRÍCH (`extracted`) mới lỏng theo; script lấy nguyên văn (`sh -c`, `eval`, lệnh bọc)
+        # luôn chặt, cùng chuỗi ở hai nguồn thì chặt thắng.
         self.loose: Set[str] = set()
+        self.extracted: Set[str] = set()
         # Đọc bảng alias: ngân sách TỔNG của quyết định gốc — lệnh con của `find -exec` được quét bằng quyết định mới
         # (nested) vẫn tiêu chung, không được thêm ALIAS_SECONDS mỗi lần.
         if not nested or ScanBudget.current_alias is None:
@@ -7287,13 +7296,12 @@ def _scan_scripts(
             break
         if not deeper and rewrites >= MAX_REWRITE:  # chỉ HỎI thì chính sách mặc định cho qua (reviewer #136)
             return "Lệnh quá phức tạp để guard quét hết (lệnh bọc/thay biến lồng quá sâu): chia nhỏ lệnh."
-        if (script, cwd) in budget.seen:
+        key = (script, cwd, script in budget.loose)  # lượt chặt và lượt lỏng cùng chuỗi là hai lượt (review lát A 🔴)
+        if key in budget.seen:
             continue
         if not deeper and len(script) > REWRITE_MAX_CHARS:
             return f"Lệnh quá phức tạp để guard quét hết (bản thay biến dài {len(script)} ký tự): chia nhỏ lệnh."
-        budget.seen.add((script, cwd))
-        if not deeper:  # bản guard ghép lại từ token (nháy heredoc mất): lệnh gốc đã qua tập con chuẩn (ADR-0063)
-            budget.loose.add(script)
+        budget.seen.add(key)
         sub = bash_decision(script, root, cwd, depth + deeper, budget, 0 if deeper else rewrites + 1)
         if sub["decision"] == "deny":
             return str(sub["reason"])
@@ -7345,9 +7353,8 @@ def _nested_sources(
     git `!`. `root`: repo đọc alias bền khi thư mục lệnh không biết; `budget`: ngân sách đọc alias của quyết định."""
     placed = _commands_with_cwd(tokens, start)
     alias_rw, alias_ns, alias_asks = _git_alias_sources(placed, root, budget)
-    rewritten: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw
-    rewritten += [(s, here) for c, here in placed for s in _runner_scripts(c)]
-    rewritten += [(s, start) for s in _lifted_scripts(cmd)]
+    built: Placed = [(s, start) for s in _var_scripts(tokens)] + alias_rw + [(s, start) for s in _lifted_scripts(cmd)]
+    runner = [(s, here) for c, here in placed for s in _runner_scripts(c)]
     decoded, opaque = _decoded_pipes(tokens, [here for _, here in placed])
     nested = _nested_pairs(cmd, tokens, placed, start, budget)
     nested += [(s, here) for c, here in placed for s in _wrapped_scripts(c)[0]]
@@ -7355,16 +7362,24 @@ def _nested_sources(
     loose = [(s, here) for raw, here in interp for s in _exec_api_scripts([raw])]
     tool_nested, tool_asks = _tool_exec_sources(cmd, tokens, placed, interp, start, budget)
     loose += tool_nested
-    nested += loose
     opaque += tool_asks
     nested += decoded + [(s, here) for c, here in placed for s in _ssh_local_scripts(c)]
     jobs = [(c, here, *_parallel_jobs(c)) for c, here in placed]
     nested += [(s, here) for _, here, scripts, _ in jobs for s in scripts]
     opaque += [f"{why}: {' '.join(c)[:200]}" for c, _, _, why in jobs if why]
     nested += _ipython_nested(cmd, tokens, start) + alias_ns
-    if budget is not None:  # ADR-0063: chữ trích chiều chặt, và mọi con của chữ lỏng, không qua tập con chuẩn
-        budget.loose.update(s for s, _ in (nested if cmd in budget.loose else loose))
-    return rewritten, nested, opaque + alias_asks
+    if budget is not None:
+        _mark_loose(budget, cmd, built, loose, runner + nested)
+    return built + runner, nested + loose, opaque + alias_asks
+
+
+def _mark_loose(budget: ScanBudget, cmd: str, built: Placed, extracted: Placed, verbatim: Placed) -> None:
+    """ADR-0063: ghi nguồn lỏng (bản guard dựng, chữ trích) — con của chữ trích lỏng theo; chữ bash đọc nguyên văn
+    (`verbatim`) luôn chặt, kể cả khi trùng chuỗi với chữ lỏng hay cha lỏng (review lát A 🔴)."""
+    inherited = verbatim if cmd in budget.extracted else []
+    budget.extracted.update(s for s, _ in extracted + inherited)
+    budget.loose.update(s for s, _ in built + extracted + inherited)
+    budget.loose.difference_update(s for s, _ in ([] if inherited else verbatim))
 
 
 def _assign_values(tokens: List[str]) -> Dict[str, str]:
@@ -8887,9 +8902,12 @@ def _clean_strict(cmd: str, budget: ScanBudget) -> Tuple[str, bool]:
     """(`clean_text(cmd)`, có áp tập con chuẩn không — ADR-0063). Chữ lỏng giữ lỏng sau khi làm sạch để script con của
     nó cũng lỏng (`_nested_sources`)."""
     strict = cmd not in budget.loose
+    extracted = cmd in budget.extracted
     cmd = clean_text(cmd)
     if not strict:
         budget.loose.add(cmd)
+    if extracted:
+        budget.extracted.add(cmd)
     return cmd, strict
 
 

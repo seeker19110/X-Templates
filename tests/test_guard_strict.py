@@ -63,6 +63,27 @@ class StrictSubsetDenyTest(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertIn("ADR-0063", str(decide(cmd)["reason"]))
 
+    def test_review_lot_a_bypasses(self):
+        """Review lát A 🔴: lệnh bọc/gán biến/chuỗi trùng không làm script nguyên văn thành lỏng; `$$'` là PID + nháy
+        đơn; `case` trong `$(…)`."""
+        p = "echo " + BT + "rm -rf ~" + BT
+        for cmd in (
+            f"x=$(echo hi); bash -c '{p}'",
+            f"x=1; bash -c '{p}' $x",
+            f"flock /tmp/l bash -c '{p}'",
+            f"script -qc '{p}' /dev/null",
+            f"su -c '{p}' root",
+            f"bash -c '{p}'; flock /tmp/l bash -c '{p}'",
+            "python3 -c 'import os; os.system(\"echo {#,a}; true\")'; bash -c 'echo {#,a}; true'",
+            "x=1; bash -c 'rm -rf ~0' $x",
+            "echo $$'\\'; rm -rf ~0; #'",
+            "echo $$$$'\\'; rm -rf ~0; #'",
+            'echo "$(case x in x) rm -rf ~0;; esac)"',
+            "(case x in x) echo {#,a};; esac)",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny")
+
 
 class StrictSubsetAllowTest(unittest.TestCase):
     """Lệnh hợp lệ gần các lớp trên vẫn chạy (đo 2026-11-01 trên 1567 lệnh thật: chỉ backtick lỗi bị chặn thêm)."""
@@ -80,6 +101,9 @@ class StrictSubsetAllowTest(unittest.TestCase):
         "sed -i '70s/S-001; exec: deep)/S-001; topo: parallel; exec: deep)/' docs/x.md",
         "L=docs/x.md; python3 - <<'EOF'\nprint('$(a)', \"it's\")\nEOF",
         "echo )",
+        "n=$(git log --oneline -5 | grep -c 'fix(')",
+        "for f in $(grep -rl 'os.system(' scripts); do echo $f; done",
+        'for a in x; do case "$a" in x) echo $(date);; esac; done',
     ]
 
     def test_allowed(self):
