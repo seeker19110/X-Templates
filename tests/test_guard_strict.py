@@ -595,13 +595,44 @@ class ReasonCodeLockTest(unittest.TestCase):
         for code, const in self.MERGE_ONLY.items():
             self.assertIn(getattr(guard, const), markers, code)
 
-    def core(self, payload: dict) -> tuple[int, dict]:
+    def core(self, payload: object, env: dict | None = None) -> tuple[int, dict]:
         out = io.StringIO()
         argv = ["guard.py", "core"]
+        env = {"CLAUDE_PROJECT_DIR": str(ROOT)} if env is None else env
         with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))):
-            with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
-                rc = guard.main()
+            with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, env, clear=env == {}):
+                with mock.patch.object(sys, "stderr", io.StringIO()):
+                    rc = guard.main()
         return rc, json.loads(out.getvalue())
+
+    def test_core_tool_names_and_unparsed(self):
+        """AUD-SEC-346 (review #407): tên tool kiểu Claude/host khác được chuẩn hoá; payload có lệnh/đường mà không suy ra
+        chế độ, hay `command` không phải chuỗi → deny UNPARSED (lời gọi tool thật, không phải stdin rác)."""
+        for tool in ("Bash", "BASH", "shell", "run_shell_command", "run_terminal_command", " bash "):
+            with self.subTest(tool=tool):
+                rc, out = self.core({"tool": tool, "command": "git push origin main"})
+                self.assertEqual((rc, out["code"]), (2, "PUSH_MAIN"))
+        for tool in ("Edit", "Write", "write_file", "replace", "MultiEdit"):
+            with self.subTest(tool=tool):
+                self.assertEqual(self.core({"tool": tool, "path": str(ROOT / ".env")})[0], 2)
+        for payload in (
+            {"command": "git push origin main"},
+            {"tool": "lạ", "path": "x"},
+            {"tool": "bash", "command": ["rm"]},
+        ):
+            with self.subTest(payload=payload):
+                rc, out = self.core(payload)
+                self.assertEqual((rc, out["code"]), (2, "UNPARSED"))
+        self.assertEqual(self.core({"tool": "lạ"})[0], 0)  # không lệnh, không đường: không có gì để chặn
+        self.assertEqual(self.core([1, 2])[0], 0)  # stdin rác (LOOP-HARNESS-018)
+
+    def test_core_project_dir(self):
+        """AUD-HAR-201 (review #407): gốc dự án lấy từ `project_dir` tuyệt đối của payload trước env/cwd — host khác Claude
+        không đặt `CLAUDE_PROJECT_DIR`."""
+        ledger = {"tool": "write", "path": str(ROOT / ".autopilot" / "state.json")}
+        with mock.patch.object(os, "getcwd", return_value=tempfile.gettempdir()):
+            self.assertEqual(self.core({**ledger, "project_dir": str(ROOT)}, env={})[0], 2)
+            self.assertEqual(self.core({**ledger, "project_dir": "tương/đối"}, env={})[0], 0)  # không tuyệt đối: bỏ
 
     def test_core_mode_neutral_schema(self):
         """ADR-0064 lát A: `guard.py core` nhận schema trung lập, trả `{decision: allow|deny, code, reason}` đã qua chính
@@ -846,6 +877,42 @@ class PolicyContractTest(unittest.TestCase):
             with self.subTest(out=out):
                 r = guard.apply_policy(out)
                 self.assertEqual((r["decision"], r["reason"]), want)
+
+
+class CommitMsgModeTest(unittest.TestCase):
+    """`guard.py commit-msg <file>` cho git hook (ADR-0064 lát C, T-3645): subject dài, ghi công AI khi xt.yaml cấm."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / ".git").mkdir()
+        self.msg = self.root / "MSG"
+
+    def check(self, text: str) -> str:
+        self.msg.write_text(text, encoding="utf-8")
+        return guard.commit_msg_problem(str(self.msg), str(self.root))
+
+    def test_rules(self):
+        self.assertEqual(self.check("feat: ngắn\n\n# chú thích " + "x" * 200), "")
+        self.assertIn("LOOP-HARNESS-029", self.check("feat: " + "x" * 120))
+        self.assertEqual(self.check("feat: a\n\nClaude-Session: x"), "")  # xt.yaml không cấm → cho qua
+        (self.root / "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        self.assertIn("LOOP-HARNESS-027", self.check("feat: a\n\nClaude-Session: x"))
+        self.assertEqual(self.check("feat: a\n\n# Claude-Session: chỉ trong chú thích"), "")
+        self.assertEqual(guard.commit_msg_problem(str(self.root / "khong-co"), str(self.root)), "")
+
+    def test_main_exit_codes(self):
+        self.msg.write_text("feat: " + "x" * 120, encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg", str(self.msg)]), mock.patch("sys.stderr", err):
+            self.assertEqual(guard.main(), 1)
+        self.assertIn("✗ Commit bị khung chặn", err.getvalue())
+        self.msg.write_text("feat: ổn", encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg", str(self.msg)]), mock.patch("sys.stderr", err):
+            self.assertEqual(guard.main(), 0)
+        self.assertEqual(err.getvalue(), "")
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg"]), mock.patch("sys.stderr", io.StringIO()):
+            self.assertEqual(guard.main(), 0)  # thiếu file → không đọc được → cho qua
 
 
 if __name__ == "__main__":

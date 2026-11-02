@@ -237,3 +237,27 @@ google-gemini/gemini-cli @`6814e00` (shell-utils.ts, shellExecutionService.ts, d
 docs.github.com/en/copilot/reference/hooks-configuration, /hooks-reference, /tutorials/copilot-cli-hooks · raw
 github/copilot-cli changelog.md (đọc 100 000/290 368 ký tự) · github.com/anomalyco/opencode @`ff90ed9`
 (packages/cli/src/run/noninteractive.ts) · docs.x.ai/build/cli/headless-scripting.
+
+## 9. Hợp đồng hook cho adapter (T-3642…3644, đọc 2026-11-02)
+
+> 1 `researcher`; docs chính chủ dạng raw, mã/schema ở SHA ghi dưới, registry npm. Dùng cho `scripts/xt_adapter.py` và
+> `framework/templates/harness/`. Mục chưa xác minh giữ nhãn.
+
+| Host (bản npm, license) | File dự án · sự kiện · matcher | Tool (shell · sửa file · MCP) | Payload stdin | Chặn | Lỗi khác · hết giờ | Đọc `.claude/settings.json`? |
+|---|---|---|---|---|---|---|
+| Codex 0.166.0, Apache-2.0 | `.codex/hooks.json` · `PreToolUse` · regex | `Bash` · `apply_patch` (thân patch ở `tool_input.command`) · `mcp__<server>__<tool>` | `tool_name`, `tool_input`, `cwd`, `session_id` (schema `pre-tool-use.command.input`, `additionalProperties:false`) | JSON `hookSpecificOutput.permissionDecision: deny`; hoặc exit 2 + lý do stderr (exit 2 stderr rỗng = KHÔNG chặn) | cho chạy (fail-open); `ask` không hỗ trợ; hook dự án cần `/hooks` tin cậy theo hash | không nêu trong docs |
+| Gemini CLI 0.66.0, Apache-2.0 | `.gemini/settings.json` `hooks` · `BeforeTool` · regex | `run_shell_command` · `write_file`, `replace` (`file_path`) · `mcp_<server>_<tool>` | `tool_name`, `tool_input`, `cwd`, `session_id`, `timestamp` | stdout `{"decision":"deny","reason"}` exit 0; hoặc exit 2 | exit khác: cảnh báo rồi chạy; hết giờ: (chưa xác minh); hook dự án có fingerprint | không thấy |
+| Cursor (proprietary) | `.cursor/hooks.json` `version:1` · `preToolUse` · regex | `Shell` · `Write`, `Delete` · `MCP:<tool>` | `tool_name`, `tool_input`, `cwd`, `conversation_id`, `workspace_roots` | `{"permission":"deny","user_message","agent_message"}`; exit 2 | fail-open trừ `failClosed:true`; JSON hỏng = chặn | có — Third-Party Imports bật mặc định, không khử trùng |
+| Copilot CLI 1.0.105, license riêng | `.github/hooks/*.json` `version:1` · `preToolUse` (camelCase) | `bash`/`powershell` · `create`/`edit` · (tên MCP: chưa xác minh) | `toolName`, `toolArgs`, `cwd`, `sessionId` | `{"permissionDecision":"deny","permissionDecisionReason"}`; exit 2 | exit khác 0 = chặn; hết giờ = cho qua; JSON hỏng = mặc định | có — chạy mọi nguồn, không khử trùng |
+| Grok Build 1.0.70, Apache-2.0 | `.grok/hooks/*.json` · `PreToolUse` · regex (bí danh tên Claude) | `run_terminal_command` · `search_replace` (+ `write_file`: chưa xác minh bí danh) · `server__tool` | `toolName`, `toolInput`, `cwd`, `sessionId`, `workspaceRoot` | `{"decision":"deny","reason"}` (mọi mã thoát); exit 2 | mọi lỗi/hết giờ/JSON hỏng = cho qua; hook dự án cần `/hooks-trust` | có (khi đã tin cậy), khử trùng handler giống hệt |
+| OpenCode 1.19.5, MIT | `.opencode/plugins/*.ts` · `tool.execute.before` · lọc trong mã | `bash` · `edit`/`write`/`apply_patch` (`filePath`, `patchText`) · `<server>_<tool>` | đối số hàm `(input:{tool,sessionID,callID}, output:{args})` | `throw new Error(…)` | không định nghĩa; hook có thể không chạy ở `opencode run` (issue #41422, thứ cấp) | không (chỉ CLAUDE.md, skills) |
+
+Nguồn (2026-11-02): learn.chatgpt.com/docs/hooks.md · raw openai/codex @`3026a8e5` (`codex-rs/hooks/src/events/pre_tool_use.rs`,
+`engine/command_runner.rs`, `hooks/schema/generated/pre-tool-use.command.{input,output}.schema.json`) · raw
+google-gemini/gemini-cli `main` @`6814e00` (`docs/hooks/{index,reference,best-practices}.md`, `docs/reference/tools.md`) ·
+cursor.com/docs/hooks.md, /docs/reference/third-party-hooks.md · docs.github.com/en/copilot/reference/hooks-reference,
+/copilot-cli-reference/cli-config-dir-reference · docs.x.ai/build/features/hooks.md, raw xai-org/grok-build @`2bdd1d6a`
+(`docs/user-guide/{05,10,22,26}-*.md`) · raw anomalyco/opencode @`ff90ed91` (`packages/web/src/content/docs/{plugins,
+tools,mcp-servers,rules}.mdx`), `@opencode-ai/plugin@1.19.5` `dist/index.d.ts` · registry.npmjs.org (bản/ngày/license).
+Chưa xác minh: payload PreToolUse nguyên văn của Codex/Gemini/Cursor (dựng từ schema/bảng trường); bản docs theo tag
+phát hành (đọc `main`); tên MCP trong hook của Copilot; Cursor `preToolUse` ở `-p`.

@@ -2117,3 +2117,17 @@
 - Chọn: giữ REASON_CODES; ReasonCodeLockTest: mỗi mã trong REASON_CODES có ≥ 1 lệnh thật chạy end-to-end và khẳng định mã — đổi câu chữ lý do làm test đỏ thay vì âm thầm cho qua
 - Lý do (tiêu chí chất lượng cuối): rủi ro của AUD-SEC-329 là đổi câu chữ làm deny thành cho qua MÀ KHÔNG AI BIẾT; test khoá biến lỗi im lặng thành CI đỏ với diff nhỏ (66 dòng test, 31 dòng guard cho chế độ core), tái hiện của sổ ('push thẳng nhánh chính' → 'đẩy thẳng…') nay đỏ ở ca PUSH_MAIN. Sửa 100+ luật chạm toàn guard 9,4k dòng — rủi ro hồi quy cao hơn lợi ích khi đã có khoá (tiêu chí 1–3). ADR-0017 §2 (AUD-DOC-181) chưa làm, giữ nợ
 - Đường lùi: khi đổi lớn bộ luật guard (tách guard_core) thì chuyển sang code tường minh từng luật, giữ ReasonCodeLockTest làm hàng rào
+
+### D-309 · 2026-11-02T11:12:12+00:00 · T-3645: git hook pre-commit chạy lại cổng commit trong phiên Claude Code (hook Bash của khung đã chạy cổng trước git commit) — chạy hai lần hay bỏ qua?
+
+- Phương án: (1) luôn chạy (cổng chạy hai lần mỗi commit trong phiên Claude) · (2) bỏ qua khi CLAUDECODE đặt VÀ dự án có .claude/hooks/pre-bash-guard.sh · (3) dấu tem (cây chỉ mục đã qua cổng) do hook Claude ghi, pre-commit so tem
+- Chọn: bỏ qua khi CLAUDECODE đặt VÀ dự án có .claude/hooks/pre-bash-guard.sh
+- Lý do (tiêu chí chất lượng cuối): Claude Code đặt CLAUDECODE cho shell của nó (kiểm 2026-11-02 trong phiên); hook Bash của khung đã chạy đúng cổng ngay trước commit, chạy lại chỉ tốn thời gian (gate-fast có thể vài phút). Tem trong .git cũng giả được như biến môi trường mà phức tạp hơn. Sàn git hook nhắm sai sót của công cụ không có hook chặn, không phải agent cố lách: agent đặt CLAUDECODE=1 để lách là hành vi lách (LOOP-STOP-025) — ghi giới hạn
+- Đường lùi: bỏ điều kiện trong pre-commit (luôn chạy) nếu thấy công cụ khác đặt CLAUDECODE hay bị lách
+
+### D-310 · 2026-11-02T11:25:40+00:00 · T-3642…3644 adapter: kiểm bằng gì và xử lý host tự đọc .claude/settings.json (Copilot, Cursor, Grok) thế nào?
+
+- Phương án: (1) theo PLAN: ≥ 10 ca autonomy-bench mỗi công cụ (nhóm bench mới) + tránh nạp hai lần · (2) test bảng tests/test_adapters.py (≥ 10 ca/host qua hàm thật, giao thức chặn từng host, plugin OpenCode chạy thật bằng bun) + chấp nhận hook Claude chạy thêm ở Copilot/Cursor/Grok
+- Chọn: test bảng tests/test_adapters.py (≥ 10 ca/host qua hàm thật, giao thức chặn từng host, plugin OpenCode chạy thật bằng bun) + chấp nhận hook Claude chạy thêm ở Copilot/Cursor/Grok
+- Lý do (tiêu chí chất lượng cuối): bench cần nhóm ca mới trong engine autonomy-bench (đọc payload từng host) — nhiều mã hơn cho cùng bảo đảm mà test bảng cho; test chạy đúng hàm của adapter và guard thật. Hai lần chạy không đổi quyết định (cùng một guard, deny thắng); Copilot/Cursor không có cơ chế khử trùng theo nguồn, công tắc duy nhất là tắt toàn cục (disableAllHooks, Third-Party Imports) sẽ tắt luôn hook của khung — tiêu chí 1 > 5
+- Đường lùi: thêm nhóm 'adapter' vào autonomy-bench khi số host/ca tăng; bỏ hook adapter của host nào đọc .claude/settings.json nếu đo được hook Claude chặn đúng ở host đó

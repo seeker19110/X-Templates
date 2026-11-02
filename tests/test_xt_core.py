@@ -1145,11 +1145,12 @@ def real_autopilot_dirs() -> list[Path]:
 
 def autopilot_snapshot(dirs: list[Path]) -> dict:
     """{đường dẫn: (mtime_ns, cỡ)} của mọi file trong `dirs` — so trước/sau để bắt test ghi vào sổ thật (hook không còn
-    cache bytecode ở `.autopilot/pycache` — review PR #182 — nên không bỏ qua thư mục nào)."""
+    cache bytecode ở `.autopilot/pycache` — review PR #182 — nên không bỏ qua thư mục nào). Bỏ `xt.GUARD_LOG` ở gốc mỗi
+    thư mục: hook guard của MỌI phiên cùng dự án nối file này ở mỗi lệnh tool, không phải bằng chứng (AUD-TEST-054)."""
     snap: dict = {}
     for d in dirs:
         for p in d.rglob("*") if d.exists() else ():
-            if p.is_file():
+            if p.is_file() and p != d / xt.GUARD_LOG:
                 st = p.stat()
                 snap[str(p)] = (st.st_mtime_ns, st.st_size)
     return snap
@@ -1190,7 +1191,9 @@ class RealAutopilotGuardTest(TmpMixin, unittest.TestCase):
         before = autopilot_snapshot([d])
         self.assertEqual(autopilot_changes(before, [d]), [])
         write(d / "runs.jsonl", "{}\n")
-        self.assertEqual(autopilot_changes(before, [d]), [str(d / "runs.jsonl")])
+        write(d / xt.GUARD_LOG, "{}\n")  # nhật ký hook của phiên khác ghi song song: không tính (AUD-TEST-054)
+        write(d / "evidence" / xt.GUARD_LOG, "{}\n")  # cùng tên mà ở thư mục con: vẫn tính
+        self.assertEqual(autopilot_changes(before, [d]), [str(d / "evidence" / xt.GUARD_LOG), str(d / "runs.jsonl")])
         write(d / "evidence" / "T-002.json", "{} ")  # ghi đè bằng chứng có sẵn
         self.assertIn(str(d / "evidence" / "T-002.json"), autopilot_changes(before, [d]))
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(d.parent)}):

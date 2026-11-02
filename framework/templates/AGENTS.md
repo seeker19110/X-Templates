@@ -42,7 +42,7 @@ Quyết định chuyên môn (spec hở, công nghệ/thiết kế, phạm vi, b
 Máy chia ba nhóm, không hỏi người: **máy chặn** (không đảo ngược, tắt hook, ghi tay `.autopilot/`/`STAGE.json`, merge chưa đủ điều kiện) · **cho chạy** (deploy/publish, sửa cổng/CI/hook kèm lý do, thêm phụ thuộc, ra ngoài máy dev) · **vẫn cần người** (tiền thật, dữ liệu người dùng thật, dịch vụ trả phí/khoá thật, bế tắc máy, duyệt giai đoạn; ngoại lệ cứng khi `merge_hard_exceptions: human` — trừ việc trong mục Ủy quyền production của PLAN và `<XT> grant-check` exit 0). Autopilot: `<XT> loop defer --task <ID> --reason …` rồi làm tiếp; mọi việc còn lại phụ thuộc → `loop block`. Autopilot: `<XT> doctor --fix` đầu tiên, **một phiên đến khi xong**, quyền Auto. [ĐIỀN điểm dừng riêng của dự án — mặc định: không.]
 
 ## 7. Cổng (lệnh thật ở `xt.yaml`)
-- **Trước commit:** hook chạy `.xtemplates/scripts/dev-task.sh gate-fast` theo `commit_gate`; tự review diff; conventional commit.
+- **Trước commit:** hook/git hook (sàn chung) chạy `dev-task.sh gate-fast` theo `commit_gate`; tự review diff; conventional commit.
 - **Trước khi đẩy/mở PR:** `gate-fast`; cổng đầy đủ = CI (cắt bản/không CI: `gate`).
 - **PR đã mở:** `<XT> pr next --pr <N>` → làm đúng `do` (`review` → reviewer theo §8; `debt` → 🔴 sửa, 🟠/🟢 nợ, ADR-0062); `merge-watch --pr <N>` nền. Luật làn: `LOOP-STOP-022`/`029`; `pr-steward` (`install.py --with-github`) làm thay khi hết phiên.
 - **Phát hành (G7):** `<XT> release-check` không NO-GO + `GO-NO-GO.md` không còn BLOCKER + chủ dự án đã quyết các đề xuất "Khi chạy thật". Pha harden = `/complete` (ADR-0046).

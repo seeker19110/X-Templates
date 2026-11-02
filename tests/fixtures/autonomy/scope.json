@@ -230,6 +230,21 @@
    "ids": [
     "AUD-HAR-197"
    ]
+  },
+  {
+   "reason": "Cô lập test khỏi `.autopilot/` thật (snapshot bỏ nhật ký hook `guard-log.jsonl` mà phiên khác ghi song song) — hạ tầng test, không phải quyết định cho/chặn; đỡ bằng Gate unittest `tests.test_xt_core.RealAutopilotGuardTest`",
+   "ids": [
+    "AUD-TEST-054"
+   ]
+  },
+  {
+   "reason": "Hình payload chế độ `guard.py core` (tên tool không chuẩn, `project_dir`) — corpus guard chỉ có lệnh bash; đỡ bằng Gate unittest `tests.test_guard_strict.ReasonCodeLockTest` (ca core) và `tests.test_adapters`",
+   "ids": [
+    "AUD-SEC-346",
+    "AUD-HAR-201",
+    "AUD-SEC-349",
+    "AUD-SEC-350"
+   ]
   }
  ]
 }

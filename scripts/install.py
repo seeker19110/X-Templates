@@ -599,8 +599,10 @@ def install_framework(xt_dir: Path, label: str | None) -> str:
         copy_tree_replace(SRC / "research", xt_dir / "research")
     drop_symlink(xt_dir / "scripts")
     (xt_dir / "scripts").mkdir(exist_ok=True)
-    for f in ("xt.py", "dev-task.sh", "check-links.py"):
+    for f in ("xt.py", "dev-task.sh", "check-links.py", "xt_adapter.py"):
         drop_symlink(xt_dir / "scripts" / f)
+        if f == "xt_adapter.py" and not (SRC / "scripts" / f).is_file():  # khung tối giản/bản cũ: không có adapter
+            continue
         shutil.copy2(SRC / "scripts" / f, xt_dir / "scripts" / f)
     (xt_dir / "scripts" / "dev-task.sh").chmod(0o755)
     # App cục bộ `xt.py app` (ADR-0038): gói máy chủ + giao diện tĩnh cạnh xt.py, luôn thay như xt.py.
@@ -806,6 +808,97 @@ ROOT_MESSAGES = {
 YAML_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):")  # dòng khoá cấp 1 của mẫu xt.yaml (cùng dạng `YAML_KEY_RE` của xt.py)
 YAML_HAS_KEY_RE = re.compile(r"^(?:#[ \t]*)?([A-Za-z_][\w-]*):", re.M)  # dự án đã có: `khoá:` hoặc `# khoá:`
 YAML_MARKER = '# Khoá mới của khung (bản {label}) — bật bằng cách bỏ "# "; vắng khoá = hành vi cũ'
+
+
+GIT_HOOKS = ("pre-commit", "commit-msg", "pre-push")
+GIT_HOOK_MARK = "# xtemplates-git-hook"  # dòng 2 của hook khung — hook không có dấu là của dự án, không đè
+
+
+def git_hooks_dir(target: Path) -> Path | None:
+    """Thư mục hook git của repo chứa `target` (`git rev-parse --git-path hooks` — theo `core.hooksPath`); không phải
+    repo git hay không chạy được git → None."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--git-path", "hooks"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    if r.returncode != 0 or not out:
+        return None
+    return Path(out) if Path(out).is_absolute() else target / out
+
+
+def install_git_hooks(target: Path) -> None:
+    """Sàn chung không phụ thuộc hook của công cụ (ADR-0064 lát C): `pre-commit` (cổng commit), `commit-msg` (subject,
+    ghi công AI), `pre-push` (nhánh chính, force). Hook đã có mà không mang dấu khung (của dự án, husky, pre-commit…)
+    giữ nguyên và báo để gộp tay; hook của khung thì cập nhật."""
+    hooks = git_hooks_dir(target)
+    if hooks is None:
+        log("  git hook: không phải repo git — bỏ qua (chạy lại install.py sau `git init`)")
+        return
+    hooks.mkdir(parents=True, exist_ok=True)
+    for name in GIT_HOOKS:
+        dst = hooks / name
+        own = dst.is_symlink() or (
+            dst.exists() and GIT_HOOK_MARK not in dst.read_text(encoding="utf-8", errors="replace")
+        )
+        if own:
+            log(
+                f"  git hook {name}: dự án đã có hook riêng — giữ nguyên; gộp tay `.xtemplates/framework/templates/git-hooks/{name}`"
+            )
+            continue
+        shutil.copy2(SRC / "framework" / "templates" / "git-hooks" / name, dst)
+        dst.chmod(0o755)
+        log(f"  git hook {name}: cài ({dst})")
+
+
+# Adapter hook cho công cụ agent khác (ADR-0064 lát B): host → (mẫu trong framework/templates/harness/, đích ở dự án).
+ADAPTERS = {
+    "codex": ("codex-hooks.json", ".codex/hooks.json"),
+    "gemini": ("gemini-settings.json", ".gemini/settings.json"),
+    "cursor": ("cursor-hooks.json", ".cursor/hooks.json"),
+    "copilot": ("copilot-xt.json", ".github/hooks/xt.json"),
+    "grok": ("grok-xt.json", ".grok/hooks/xt.json"),
+    "opencode": ("opencode-xt.ts", ".opencode/plugins/xt.ts"),
+}
+GEMINI_HOOK_NAME = "xt-guard"
+
+
+def merge_gemini_settings(dst: Path, src: Path) -> str:
+    """Gộp hook `BeforeTool` của khung (tên `xt-guard`) vào `.gemini/settings.json` có sẵn — giữ mọi khoá khác, thay bản
+    cũ của khung; file không đọc được dạng object JSON → giữ nguyên, báo. Trả 'merged' | 'kept'."""
+    ours = json.loads(src.read_text(encoding="utf-8"))["hooks"]["BeforeTool"]
+    try:
+        data = json.loads(dst.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or not isinstance(hooks, (dict, type(None))):
+        return "kept"
+    entries = (hooks or {}).get("BeforeTool")
+    keep = [e for e in entries if GEMINI_HOOK_NAME not in json.dumps(e)] if isinstance(entries, list) else []
+    data["hooks"] = {**(hooks or {}), "BeforeTool": keep + ours}
+    dst.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return "merged"
+
+
+def install_adapters(target: Path, hosts: list[str]) -> None:
+    """Chép cấu hình hook của từng host (copy-if-absent; Gemini gộp vào settings có sẵn). Adapter gọi guard của harness
+    `.claude/` — không có harness thì hook của host cho qua (báo ở đây để người biết)."""
+    if hosts and not (target / ".claude" / "hooks" / "guard.py").is_file():
+        log("  ⚠ adapter cần harness `.claude/hooks/guard.py` (cài không `--no-harness`) — chưa có thì hook cho qua")
+    base = SRC / "framework" / "templates" / "harness"
+    for host in hosts:
+        name, rel = ADAPTERS[host]
+        dst = target / rel
+        if host == "gemini" and dst.is_file():
+            status = merge_gemini_settings(dst, base / name)
+        else:
+            status = copy_if_absent(base / name, dst)
+        log(
+            f"  adapter {host}: {rel} ({status}) — công cụ cần tin cậy hook dự án một lần (xem templates/harness/README.md)"
+        )
 
 
 def install_root_templates(
@@ -1333,6 +1426,7 @@ def install(
     with_github: bool = False,
     preset: str | None = None,
     stage_init: bool = False,
+    adapters: list[str] | None = None,
 ) -> int:
     target = target.resolve()
     error = target_error(target, with_github)
@@ -1351,6 +1445,8 @@ def install(
     version = install_framework(xt_dir, label)
     if not no_harness:
         install_harness(target, force_harness)
+        install_git_hooks(target)
+    install_adapters(target, adapters or [])
     install_root_templates(target, version, inferred, selected)
     if with_github:
         install_github(target)
@@ -1394,10 +1490,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="dự án mới: tạo sổ giai đoạn sản phẩm ở giai đoạn 1 (ADR-0058) khi chưa có; dự án đã chạy dùng `stage init --adopt`",
     )
+    p.add_argument(
+        "--harness",
+        default="",
+        help=f"adapter hook cho công cụ khác, cách nhau dấu phẩy: {','.join(ADAPTERS)} (ADR-0064 lát B)",
+    )
     a = p.parse_args(argv)
+    hosts = [h for h in a.harness.split(",") if h]
+    bad = [h for h in hosts if h not in ADAPTERS]
+    if bad:
+        log(f"✗ --harness: không biết {', '.join(bad)} — chọn trong {', '.join(ADAPTERS)}")
+        return 2
     if a.plan:
         return install_plan(Path(a.target), a.force_harness, a.no_harness, a.with_github, a.preset, a.stage_init)
-    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset, a.stage_init)
+    return install(Path(a.target), a.force_harness, a.no_harness, a.label, a.with_github, a.preset, a.stage_init, hosts)
 
 
 if __name__ == "__main__":
