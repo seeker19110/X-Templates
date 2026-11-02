@@ -1,6 +1,6 @@
 # PLAN-harden-2026-11-01.md — Khung X-Templates · /complete trước 3.30.0 (D-299, D-300)
 
-> Lập ngày 2026-11-01 ở đầu `/complete`. Duyệt: D-300 (phiên chính tự duyệt). Pha `harden`; review 1 lần theo ADR-0062.
+> **Thay bởi** `PLAN-upgrade-2026-11-02.md` (D-304) từ 2026-11-02: 5 task còn mở chép sang đó cùng ID. Lập ngày 2026-11-01 ở đầu `/complete`. Duyệt: D-300 (phiên chính tự duyệt). Pha `harden`; review 1 lần theo ADR-0062.
 > Nguồn việc: `release-check` NO-GO (`audit --strict` 100 lỗi: 18 🔴 + 28 🟠 + 54 🟢 nợ review; `review_debt` 5 file; `verify`)
 > và audit delta `d3e3e77..HEAD` (`docs/ops/AUDIT-REPORT-2026-11-01-complete.md`). Hướng sửa họ lách guard: ADR-0063 (D-299).
 >

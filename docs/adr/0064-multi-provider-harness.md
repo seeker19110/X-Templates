@@ -1,8 +1,9 @@
 # ADR-0064: Harness đa nhà cung cấp — một lõi chính sách, adapter theo công cụ, vòng lặp ngoài, sandbox là ranh giới
 
-- **Trạng thái:** **Đề xuất (nháp)** — chờ chủ dự án duyệt; chưa ghi D-NNN vì đổi cấu trúc harness (AGENTS.md §4: kiến
-  trúc thêm ADR; chủ dự án yêu cầu "viết ADR nháp, research trước" 2026-11-02).
-- **Trạng thái triển khai:** Chưa bắt đầu. Khi duyệt → PLAN riêng, mỗi lát một PR (§Quyết định, lát A–E).
+- **Trạng thái:** Đã chấp nhận 2026-11-02 — chủ dự án trả lời ba câu hỏi (§Thông tin thêm); phiên chính chốt cách làm
+  theo tiêu chí chất lượng cuối, **D-303**. Bản nháp cùng ngày (cùng PR) chỉ khác ở trạng thái và ba lựa chọn này.
+- **Trạng thái triển khai:** Chưa bắt đầu — kế hoạch [`PLAN-upgrade-2026-11-02.md`](../autopilot/PLAN-upgrade-2026-11-02.md) (lát 3 và 5)
+  (T-3640…T-3647 trong kế hoạch gộp mọi đề xuất 2026-11-02, D-304; mỗi lát một PR).
 - **Ngày:** 2026-11-02.
 - **Nghiên cứu:** [`research/2026-11-02-multi-provider-harness.md`](../../research/2026-11-02-multi-provider-harness.md)
   (7 công cụ + chuẩn AGENTS.md + sandbox độc lập; mọi dữ kiện ghi ngày 2026-11-02, mục chưa xác minh ở §6 của file đó).
@@ -55,17 +56,23 @@ không giả vờ guard là sandbox?
    ánh xạ và không kiểm.
 4. **Proxy/MCP đứng giữa agent và mọi tool**: một tiến trình trung gian nhận mọi lời gọi tool rồi áp luật.
 
-## Quyết định (đề xuất)
+## Quyết định
 
-Chọn **phương án 2**, triển khai theo năm lát độc lập, mỗi lát một PR, lát sau không phụ thuộc lát trước trừ A:
+Chọn **phương án 2**, triển khai theo năm lát độc lập, mỗi lát một PR, lát sau không phụ thuộc lát trước trừ A. Ba lựa chọn
+chủ dự án quyết 2026-11-02 (D-303): (1) lát B làm **cả 6** adapter, thứ tự OSI trước (Codex, Gemini CLI → Cursor, Copilot CLI
+→ Grok Build, OpenCode); (2) `LOOP-HARNESS-022` nâng SHOULD → **MUST@L** (trần 4 MUST/module ở M đã đầy — ADR-0004 — nên
+không đặt MUST@M; điều kiện "không làm chậm code" thoả vì chỉ áp phiên không người trực, chi phí là cài một lần + allowlist
+registry/git; phiên tương tác không bị ép); (3) **giữ `.claude/hooks/guard.py` là nhà vật lý duy nhất của luật** trong 3.x,
+thêm chế độ `core`, adapter chỉ là shim — không dời thư mục (đụng `DIR_CAPS`, `harness.sha256.json`, hàng trăm tham chiếu
+test và ba công cụ đang nạp `.claude/settings.json`); xét dời ở 4.0 cùng mốc 2027-01-21.
 
 - **Lát A — Lõi trung lập.** `guard.py` (giữ tên, vẫn một file stdlib) nhận **schema trung lập** `{"tool": "bash|edit|write|
   mcp", "command"|"path"|"tool_name", "input": {...}, "cwd", "project_dir"}` qua chế độ mới `guard.py core`, trả
   `{"decision": "allow|deny", "code", "reason"}`; mỗi luật trả `code` tường minh (đóng AUD-SEC-329); chế độ `bash|edit|mcp|
   permission` hiện có trở thành adapter Claude gọi lõi. Hợp đồng lõi là **nhà** của chính sách; `xt.py guard-check` dùng lõi.
   Đầu ra deny luôn in JSON tường minh và exit 2 cùng lúc (hai công cụ đọc theo hai cách).
-- **Lát B — Adapter theo công cụ** trong `.xtemplates/harness/<tool>/`, mỗi adapter ≤ ~60 dòng Python hoặc JSON cấu hình, chỉ
-  dịch: Codex (`.codex/hooks.json`, `permissionDecision: deny`; `ask` → `deny` vì Codex không hỗ trợ `ask`), Gemini CLI
+- **Lát B — Adapter theo công cụ**: nguồn ở `framework/templates/harness/<tool>/` của khung, `install.py` chép thành
+  `.xtemplates/harness/<tool>/` ở dự án đích; mỗi adapter ≤ ~60 dòng Python hoặc JSON cấu hình, chỉ dịch: Codex (`.codex/hooks.json`, `permissionDecision: deny`; `ask` → `deny` vì Codex không hỗ trợ `ask`), Gemini CLI
   (`hooks` trong `.gemini/settings.json`, `BeforeTool`, `decision: deny`), Cursor (`.cursor/hooks.json` `version: 1`,
   `beforeShellExecution` `permission`, `failClosed: true`), Copilot CLI (`.github/hooks/xt.json`, `preToolUse`
   `permissionDecision` + `permissionDecisionReason` bắt buộc), Grok Build (`.grok/hooks/xt.json`, khoá camelCase
@@ -86,8 +93,8 @@ Chọn **phương án 2**, triển khai theo năm lát độc lập, mỗi lát 
 - **Lát E — Sandbox kiểm bằng máy.** `doctor` nhóm `sandbox` đọc cấu hình theo công cụ (Claude `sandbox.enabled` +
   `allowedDomains`; Codex `sandbox_mode` ≠ `danger-full-access`; Gemini `tools.sandbox`; Cursor `sandbox.json` + chế độ;
   Copilot `/sandbox`; Grok `--sandbox` profile; OpenCode: không có → cảnh báo đỏ "cần devcontainer/`srt`") và cảnh báo đỏ khi
-  autopilot không người trực chạy ngoài sandbox; `LOOP-HARNESS-022` nâng **SHOULD → MUST@M** cho phiên không người trực
-  (giữ ID). Khuyến nghị tham chiếu độc lập công cụ: `@anthropic-ai/sandbox-runtime` (`srt`, Apache-2.0, allowlist domain) hoặc
+  autopilot không người trực chạy ngoài sandbox; `LOOP-HARNESS-022` nâng **SHOULD → MUST@L** (giữ ID; đã đổi chữ cùng PR
+  này — ở S/M máy hạ thành SHOULD, `doctor` là lớp cưỡng chế thật cho phiên không người trực). Khuyến nghị tham chiếu độc lập công cụ: `@anthropic-ai/sandbox-runtime` (`srt`, Apache-2.0, allowlist domain) hoặc
   devcontainer có egress allowlist — ghi là tham chiếu, không bắt buộc công cụ cụ thể.
 
 Thứ tự đề xuất: A → E → B (Codex, Gemini trước vì OSI và có sandbox/hook rõ; Cursor/Copilot/Grok sau; OpenCode cuối vì cần
@@ -148,7 +155,7 @@ Chưa xác minh: shell tool tôn trọng `SHELL`/`PATH`; hook Cursor trong CLI; 
 
 - Nguồn: toàn bộ ở [`research/2026-11-02-multi-provider-harness.md`](../../research/2026-11-02-multi-provider-harness.md) §3
   (docs chính chủ 7 công cụ, registry npm, `git ls-remote`, agents.md, docs.kernel.org — xác minh 2026-11-02).
-- Câu hỏi cho chủ dự án trước khi duyệt: (1) phạm vi lát B đợt đầu — Codex + Gemini (OSI, sandbox/hook rõ) hay cả 6; (2) có nâng
-  `LOOP-HARNESS-022` lên MUST@M cho phiên không người trực không; (3) `.claude/` giữ là "bản Claude" hay dời luật sang
-  `.xtemplates/harness/` và để `.claude/hooks` chỉ còn shim.
+- Ba câu hỏi đặt cho chủ dự án ở bản nháp và trả lời 2026-11-02: (1) phạm vi lát B — "cả 6"; (2) nâng `LOOP-HARNESS-022` —
+  "nếu không làm chậm tiến độ code thì nâng" → nâng (MUST@L, lý do ở §Quyết định); (3) vị trí luật — "cái nào tốt thì làm" →
+  phiên chính chọn giữ `.claude/hooks/guard.py` (D-303, ≥ 2 phương án, đường lùi ghi trong D).
 - Thời điểm xem lại: 2027-01-21 (cùng `LOOP-DESIGN-014`) hoặc khi fixture adapter đỏ.
