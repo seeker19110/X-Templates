@@ -12179,15 +12179,32 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     return rc
 
 
-def _bot_author_error(pr_arg: str, bot: str) -> str:
-    """`--author-model <bot>` chỉ nhận khi tác giả PR trên GitHub đúng là bot đó (không khai bừa để né luật năng lực)."""
+def _login(obj: object) -> str:
+    return str(obj.get("login") or "") if isinstance(obj, dict) else ""
+
+
+def _bot_author_error(pr_arg: str, key: str, head: str, bot: str) -> str:
+    """`--author-model <bot>` chỉ nhận khi PR đúng số `key` (cùng PR mà sổ ghi và dấu đăng — review #401: URL ghép,
+    chữ số Unicode) do bot mở, head đúng `head`, và MỌI commit không phải merge do bot viết: người/agent đẩy thêm
+    commit lên nhánh bot thì phải khai model của họ (LOOP-ORCH-005: so với người góp vào diff)."""
     try:
-        repo, n = _pr_target(pr_arg)
-        user = _gh_one(f"{repo}/pulls/{n}").get("user")
+        repo, _ = _pr_target(pr_arg if PR_URL_RE.search(pr_arg) else key)  # cùng repo với `_publish_review`
+        pr = _gh_one(f"{repo}/pulls/{key}")
+        commits = _gh_items(f"{repo}/pulls/{key}/commits?per_page=100")
     except PrInputError as exc:
         return f"không kiểm được tác giả PR: {exc}"
-    login = user.get("login") if isinstance(user, dict) else None
-    return "" if login == bot else f"--author-model {bot}: tác giả PR #{n} là {login or '?'}, không phải {bot}"
+    raw_head = pr.get("head")
+    pr_head = str(raw_head.get("sha") or "") if isinstance(raw_head, dict) else ""
+    if str(pr.get("number")) != key or pr_head != head:
+        return f"--author-model {bot}: GitHub trả PR #{pr.get('number')} head {pr_head[:7] or '?'}, không phải #{key} {head[:7]}"
+    if _login(pr.get("user")) != bot:
+        return f"--author-model {bot}: tác giả PR #{key} là {_login(pr.get('user')) or '?'}, không phải {bot}"
+    others = sorted(
+        {_login(c.get("author")) or "?" for c in commits if len(c.get("parents") or []) < 2} - {bot}
+    )  # fmt: skip
+    if others or not commits:
+        return f"--author-model {bot}: PR #{key} có commit của {', '.join(others) or '?'} — khai model của người góp"
+    return ""
 
 
 def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
@@ -12200,15 +12217,19 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if args.inconclusive:
         args.clean = False
     err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
-    if not err and args.author_model in TRUSTED_BOTS:
-        err = _bot_author_error(str(args.pr), args.author_model)
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2
-    data = read_reviews(base)
     key = _pr_key(args.pr)
     if key is None:
         return 2
+    # chỉ review sạch cần miễn trừ bot (lỗi chặn/không kết luận không mở merge — không để REST lỗi làm mất chúng)
+    bot = args.clean and args.author_model in TRUSTED_BOTS
+    bot_err = _bot_author_error(str(args.pr), key, args.head, args.author_model) if bot else ""
+    if bot_err:
+        print(f"✗ {bot_err}", file=sys.stderr)
+        return 2
+    data = read_reviews(base)
     rec = _pr_record(data, key)
     reviews = _ledger_reviews(rec)  # sổ hỏng → ghi lại từ đầu (AUD-CODE-019)
     entry: Dict[str, Any] = {"head": args.head, "clean": args.clean, "at": now_iso()}
@@ -14375,7 +14396,11 @@ def build_parser() -> argparse.ArgumentParser:
     prv.add_argument(
         "--reviewer-model", help="model đã review (vd opus) — bắt buộc với --clean; năng lực cao hơn người viết"
     )
-    prv.add_argument("--author-model", help="model viết PR/phiên chính (vd sonnet) — bắt buộc với --clean")
+    prv.add_argument(
+        "--author-model",
+        help="model viết PR/phiên chính (vd sonnet) — bắt buộc với --clean; PR chỉ có commit của bot tin cậy: "
+        "login bot (dependabot[bot]), kiểm trên GitHub",
+    )
     prv.add_argument(
         "--reviewer-effort",
         choices=EFFORTS,

@@ -2069,3 +2069,10 @@
 - Chọn: Danh sách trắng (ADR-0063 lát C): thân chỉ là chữ nguyên văn, $(cat <<'EOF'…), $(cat tệp nguyên văn), tệp/stdin-chuyển-hướng trên chính gh ở thư mục biết; endpoint api đọc dấu; 17 ca đối chứng cũ thành chặn
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: dấu đi qua được tên tệp (ls), thông điệp commit (guard không chặn commit mang dấu: git log --oneline/%s, show --stat), tr/printf — danh sách đen không hội tụ (ADR-0063, #372). Đo 1567 lệnh Bash thật: luật gh mới đổi 0 quyết định; đường thay thế cho agent: ghi thân ra tệp rồi --body-file (lệnh riêng).
 - Đường lùi: Trả _gh_strict_why về a41e64c và expect của 17 ca guard-control-* trong tests/fixtures/autonomy/guard.json
+
+### D-302 · 2026-11-02T04:56:37+00:00 · AUD-XFEAT-039 (#401): PR Dependabot không ghi được review sạch — miễn luật năng lực cho tác giả bot thế nào?
+
+- Phương án: (1) Không miễn: steward/người merge PR bot · (2) Miễn khi tác giả PR và MỌI commit không phải merge là bot tin cậy (TRUSTED_BOTS), kiểm qua REST đúng PR/head mà sổ ghi; reviewer chỉ cần họ model rõ · (3) Miễn theo login người mở PR
+- Chọn: Miễn khi tác giả PR và MỌI commit không phải merge là bot tin cậy (TRUSTED_BOTS), kiểm qua REST đúng PR/head mà sổ ghi; reviewer chỉ cần họ model rõ
+- Lý do (tiêu chí chất lượng cuối): Yêu cầu chủ dự án 2026-11-02 (mọi PR tự kiểm + tự merge). (1) an toàn: review #401 cho thấy phương án 3 né được bằng URL ghép/chữ số Unicode và commit người đẩy thêm; phương án 2 đóng cả hai. (3) đơn giản: dùng lại TRUSTED_BOTS của steward.
+- Đường lùi: Bỏ nhánh TRUSTED_BOTS trong _review_models_error và _bot_author_error (scripts/xt.py), bỏ cờ trong pr-review.yml

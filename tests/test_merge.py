@@ -2765,31 +2765,59 @@ class PrNextCliTest(unittest.TestCase):
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "merge")
 
     def test_clean_review_of_bot_pr(self):
-        """AUD-XFEAT-039: PR của bot tin cậy (`dependabot[bot]`) ghi được review sạch — diff tất định, chỉ đòi reviewer
-        có họ model rõ; tác giả PR được kiểm trên GitHub nên không khai bừa `--author-model dependabot[bot]` được."""
+        """AUD-XFEAT-039: PR chỉ có commit của bot tin cậy (`dependabot[bot]`) ghi được review sạch — chỉ đòi reviewer có
+        họ model rõ. Kiểm trên GitHub đúng PR mà sổ ghi/dấu đăng (review #401: URL ghép, chữ số Unicode), đúng head, tác
+        giả PR và mọi commit không phải merge là bot; commit người/agent đẩy thêm → khai model của họ."""
+        bot = {"login": "dependabot[bot]"}
+        human = {"login": "someone"}
+        one = {"number": 7, "head": {"sha": self.head}, "user": bot}
+        commits = [{"author": bot, "parents": [{}]}, {"author": human, "parents": [{}, {}]}]  # merge từ main: bỏ qua
 
-        def run(login: object, *reviewer: str) -> tuple:
-            with unittest.mock.patch.object(xt, "_gh_one", return_value={"user": login}):
-                return run_main(
-                    "pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", "--no-publish",
-                    "--author-model", "dependabot[bot]", "--reviewer-model", *(reviewer or ("claude-opus-5-5",)),
+        def run(pr: object = None, items: object = None, *extra: str, target: str = "7") -> tuple:
+            with (
+                unittest.mock.patch.object(xt, "_gh_one", return_value=one if pr is None else pr) as g1,
+                unittest.mock.patch.object(xt, "_gh_items", return_value=commits if items is None else items),
+            ):
+                out = run_main(
+                    "pr", "reviewed", "--pr", target, "--head", self.head, "--clean", "--no-publish",
+                    "--author-model", "dependabot[bot]", "--reviewer-model", "claude-opus-5-5", *extra,
                 )  # fmt: skip
+            self.calls = [c.args[0] for c in g1.call_args_list]
+            return out
 
-        rc, _, err = run({"login": "someone"})
+        rc, _, err = run({**one, "user": human})
         self.assertEqual(rc, 2)
-        self.assertIn("không phải dependabot[bot]", err)
+        self.assertIn("tác giả PR #7 là someone", err)
         self.assertNotIn("7", xt.read_reviews(self.base))
-        self.assertIn("là ?", run(None)[2])
-        self.assertIn("không nhận diện được họ model", run({"login": "dependabot[bot]"}, "claude")[2])
-        with unittest.mock.patch.object(xt, "_pr_target", side_effect=xt.PrInputError("không có repo")):
-            rc, _, err = run_main(
-                "pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking", "--author-model", "dependabot[bot]"
-            )
-        self.assertEqual(rc, 2)
-        self.assertIn("không kiểm được tác giả PR", err)
-        self.assertEqual(run({"login": "dependabot[bot]"})[0], 0)
+        self.assertIn("là ?", run({**one, "user": None})[2])
+        self.assertIn("có commit của someone", run(None, [{"author": human, "parents": [{}]}])[2])  # người đẩy thêm
+        self.assertIn("có commit của ?", run(None, [])[2])
+        self.assertIn("không phải #7", run({**one, "number": 70})[2])  # GitHub trả PR khác số sổ ghi
+        self.assertIn("không phải #7", run({**one, "head": {"sha": "f" * 40}})[2])
+        self.assertIn("không phải #7", run({**one, "head": None})[2])
+        url = "https://h/pull/7/github.com/o/r/pull/370"  # URL ghép: kiểm PR 7 — đúng số sổ ghi và dấu đăng
+        self.assertEqual(run(target=url)[0], 0)
+        self.assertEqual(self.calls, ["repos/o/r/pulls/7"])
+        self.assertEqual(run(target="7")[0], 0)
+        self.assertEqual(self.calls, ["repos/{owner}/{repo}/pulls/7"])
+        self.assertEqual(run(target="7\u0665")[0], 2)  # chữ số Unicode: `_pr_key` từ chối trước khi gọi GitHub
         last = xt.read_reviews(self.base)["7"]["reviews"][-1]
         self.assertEqual((last["clean"], last["author_model"]), (True, "dependabot[bot]"))
+        rc, _, err = run_main(  # bot không tin cậy: luật họ model thường
+            "pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", "--author-model", "evil[bot]",
+            "--reviewer-model", "claude-opus-5-5",
+        )  # fmt: skip
+        self.assertEqual(rc, 2)
+        self.assertIn("không nhận diện được họ model", err)
+        self.assertIn("không nhận diện được họ model", run(None, None, "--reviewer-model", "claude")[2])
+        with unittest.mock.patch.object(xt, "_pr_target", side_effect=xt.PrInputError("không có repo")):
+            self.assertIn("không kiểm được tác giả PR", run()[2])
+        with unittest.mock.patch.object(xt, "_gh_one", side_effect=AssertionError("không gọi GitHub")):
+            rc, _, _ = run_main(  # lỗi chặn với tác giả bot: không cần kiểm (REST lỗi không làm mất kết luận)
+                "pr", "reviewed", "--pr", "8", "--head", self.head, "--blocking", "--no-publish",
+                "--author-model", "dependabot[bot]",
+            )  # fmt: skip
+        self.assertEqual(rc, 0)
 
     def test_clean_review_needs_valid_models(self):
         def run(*extra: str) -> tuple:
