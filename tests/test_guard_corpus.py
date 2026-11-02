@@ -200,7 +200,7 @@ ALLOW = (
     "chmod +x scripts/new.sh",
     "sh -c 'echo hi'",
     "bash -c 'npm test'",
-    "echo `date`",
+    "echo $(date)",
     "find src -name '*.py' -exec python3 -m black {} +",
     "find .autopilot -name '*.json'",
     "find .autopilot -type f -exec cat {} \\;",
@@ -760,10 +760,10 @@ class GuardGaps341Test(unittest.TestCase):
                 "x=$(echo hi); echo $x",
                 'read -r name <<< "$1"; echo $name',
                 "v=${VERSION:-dev}; echo $v",
-                "x=$(echo 'unterminated); echo $x",
                 "x=$(echo ''); $x",
             ),
         )
+        self.assert_all("deny", ("x=$(echo 'unterminated); echo $x",))  # ADR-0063: nháy không đóng (bash lỗi cú pháp)
 
     def test_lift_helpers(self) -> None:
         self.assertEqual(guard._lifted_scripts("echo hi"), [])

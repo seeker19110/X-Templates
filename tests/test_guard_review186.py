@@ -143,7 +143,7 @@ class InterpDefaultDenyTest(unittest.TestCase):
             'python3 -c "print(f\'{open(\\".env\\",\\"w\\")}\')"': "SECRET_WRITE",
             "python3 -c \"import sys; sys.pycache_prefix='.autopilot'\"": "EVIDENCE_HANDWRITE",
             "node -e \"require('fs').readFileSync('.env',{flag:'w+'})\"": "SECRET_WRITE",
-            "node -e \"console.log(`${require('fs').unlinkSync('.env')}`)\"": "SECRET_WRITE",
+            "node -e \"console.log(`${require('fs').unlinkSync('.env')}`)\"": "BUDGET",  # ADR-0063: bash chạy backtick
             'ruby -e "puts \\"#{File.delete(\'.env\')}\\""': "SECRET_WRITE",
             "python3 -c \"print(open('.env').read()); import requests; requests.get('https://x')\"": "SECRET_WRITE",
             "python3 -c \"open('out.txt','w').write(open('.git/config').read())\"": "HOOK_BYPASS",

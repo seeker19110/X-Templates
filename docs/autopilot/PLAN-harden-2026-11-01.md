@@ -20,7 +20,7 @@
 
 ## Task
 ### Lát A — guard: tập con từ vựng + mở rộng
-- [ ] `T-3630` ADR-0063 lớp từ vựng/mở rộng: AUD-SEC-196, 202, 214, 231–234, 238–240, 242, 243, 245, 246, 249 (+181 phần backtick); xác minh lại và đóng AUD-SEC-224/229/230 mà D-274…D-276 đã chặn (topo: review; files: .claude/hooks/guard.py, tests/test_guard_strict.py, tests/, tests/fixtures/autonomy/) — Gate: `python3 -m unittest -q tests.test_guard_strict && python3 scripts/xt.py autonomy-bench`
+- [x] `T-3630` ADR-0063 lớp từ vựng/mở rộng: AUD-SEC-196, 202, 214, 231–234, 238–240, 242, 243, 245, 246, 249 (+181 phần backtick); xác minh lại và đóng AUD-SEC-224/229/230 mà D-274…D-276 đã chặn (topo: review; files: .claude/hooks/guard.py, tests/test_guard_strict.py, tests/, tests/fixtures/autonomy/) — Gate: `python3 -m unittest -q tests.test_guard_strict && python3 scripts/xt.py autonomy-bench`
 ### Lát B — guard: mã động
 - [ ] `T-3631` `bash -c`/`eval` thân động, lệnh `"$@"`, ống/`>(…)` vào shell, sed `e`/`s///e` mọi dấu phân cách, awk `system()`/ống, `-f -`, gọi lệnh dạng danh sách của Perl/Ruby/PHP, ghi `BASH_ENV`/biến prompt qua `printf -v`/`mapfile`: AUD-SEC-235, 237, 252, 287, 288, 290–292, 294–301 (+🟢 302) (sau: T-3630; topo: review; files: .claude/hooks/guard.py, tests/test_guard_strict.py, tests/fixtures/autonomy/) — Gate: `python3 -m unittest -q tests.test_guard_strict && python3 scripts/xt.py autonomy-bench`
 ### Lát C — guard: đăng dấu review

@@ -1211,7 +1211,7 @@ class GuardStoredScanTest(unittest.TestCase):
         self.check("ask", ["rm -rf ~/projects", "rm -r $HOME/x", "rm -r ${HOME}/x", "cd ~ && rm -rf projects"])
         self.check("ask", ["rm -rf /opt/data"])
         self.assertTrue(self.g._outside_project("../khac", "/home/u/proj", None))
-        self.check("", ["rm -rf build", "rm -rf /tmp/abc", 'rm -rf "$d"', "rm -rf `pwd`/x", "rm ~/a.txt"])
+        self.check("", ["rm -rf build", "rm -rf /tmp/abc", 'rm -rf "$d"', "rm -rf $(pwd)/x", "rm ~/a.txt"])
         self.check("", [f"rm -rf {tempfile.gettempdir()}/x", f"rm -rf {self.root}/dist", "cd /tmp && rm -rf x"])
         self.assertFalse(self.g._outside_project("$OTHER/x", self.root, None))
 

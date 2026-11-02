@@ -217,7 +217,7 @@ class NestedCwdRunnersTest(unittest.TestCase):
         for cmd in (
             'cd docs && echo "$(date)" > out.txt',
             "cd tests && flock /tmp/l python3 -m unittest -q",
-            "cd docs && echo `date` > out.txt",
+            "cd docs && echo $(date) > out.txt",
             "cd docs && script -qc 'echo x > out.txt' /dev/null",
             "cd docs && bash <(echo 'echo x > settings.json')",
             'echo "$(cd .claude && pwd)"; echo "$(echo x > settings.json)"',

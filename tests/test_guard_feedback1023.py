@@ -411,14 +411,15 @@ class CommitAfterWriteTest(unittest.TestCase):
             "cat > f.txt <<'EOF' && git commit -m 'fix: x'\nx\nEOF",
             "echo x | tee f.txt && git commit -m 'fix: x'",
             "git commit -m 'fix: a' && sed -i s/a/b/ f.txt && git commit -m 'fix: b'",
-            "echo `touch f` && git commit -m 'fix: x'",  # review 5ef1a14 M2: backtick như `$(…)`
             "echo $(touch f) && git commit -m 'fix: x'",
-            "git add \"`touch f`\" && git commit -m 'fix: x'",
         ):
             with self.subTest(cmd=cmd):
                 res = policy(cmd)
                 self.assertEqual(res["decision"], "deny", res)
                 self.assertIn("Tách lệnh", str(res["reason"]), res)
+        for cmd in ("echo `touch f` && git commit -m 'fix: x'", "git add \"`touch f`\" && git commit -m 'fix: x'"):
+            with self.subTest(cmd=cmd):  # review 5ef1a14 M2; ADR-0063: backtick chặn trước (tập con chuẩn)
+                self.assertEqual(policy(cmd)["decision"], "deny")
 
     def test_guard_commit_after_write_allowed(self):
         for cmd in (

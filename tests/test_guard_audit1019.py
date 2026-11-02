@@ -622,7 +622,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 'gh pr comment 5 --body "$(head -n 3 n.md)"',
                 "cat -n n.md | gh pr comment 5 -F -",
                 "gh pr comment 5 -F - < n.md",
-                "gh pr comment 5 --body `date`",
+                "gh pr comment 5 --body $(date)",
                 "gh pr comment 5 -F - <&-",
                 "gh pr comment 5 --body x < /dev/null",
                 "gh pr comment 5 --body 'dùng `xt.py` để kiểm'",
@@ -704,11 +704,12 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 "cat > x.md <<'EOF'\n$(cat *.md)\nEOF\ngh pr comment 5 --body 'dau ` le'",
                 "# $(cat $F)\ngh pr comment 5 --body 'dau ` le'",
                 "gh pr comment 5 --body 'dùng `xt.py` và `cat b.md` để kiểm'",  # backtick trong nháy đơn là chữ
-                'gh pr comment 5 -F - <<< "`cat n.md`"',
-                "echo '`'; gh pr comment 5 --body `date`",
             ):
                 with self.subTest(cmd):
                     self.assertEqual(final(cmd, root), "")
+            for cmd in ('gh pr comment 5 -F - <<< "`cat n.md`"', "echo '`'; gh pr comment 5 --body `date`"):
+                with self.subTest(cmd):  # ADR-0063: backtick ngoài nháy đơn → chặn (tập con chuẩn)
+                    self.assertEqual(final(cmd, root), "deny")
 
     def test_review_marker_shell_stdin(self):
         """AUD-SEC-180: stdin của `gh` đăng chữ chuyển hướng ở cấp shell (`exec < f`), nhóm lệnh (`{ …; } < f`,
@@ -869,6 +870,7 @@ class ReviewMarkerReview361Test(unittest.TestCase):
                 'gh pr create --title "fix: x" --body "$(cat <<EOF\n## Summary\n$(cat b.md)\nEOF\n)"',
                 "gh pr comment 5 -F - <<EOF\n$(cat b.md)\nEOF",
                 "gh pr comment 5 -F - <<EOF\nit's $(cat b.md)\nEOF",
+                "gh pr comment 5 -F - <<EOF\nit's $(cat n.md)\nEOF",  # ADR-0063: `'` + thay lệnh trong thân không nháy
                 "gh pr comment 5 -F - <<EOF; echo hi\n$(cat b.md)\nEOF",
                 "cat <<EOF | gh pr comment 5 -F -\n$(cat b.md)\nEOF",
                 "gh pr comment 5 -F - <<EOF\n$(cat b.md\nEOF",  # thay lệnh không đóng trong thân: mờ
@@ -879,7 +881,6 @@ class ReviewMarkerReview361Test(unittest.TestCase):
             (
                 'gh pr create --title "fix: x" --body "$(cat <<EOF\n## Tóm tắt\n$(git log -1 --format=%s)\nEOF\n)"',
                 "gh pr comment 5 -F - <<'EOF'\n$(cat b.md)\nEOF",
-                "gh pr comment 5 -F - <<EOF\nit's $(cat n.md)\nEOF",
                 "cat <<EOF > x.md\n$(cat b.md)\nEOF\ngh pr comment 5 --body ok",
             ),
         )
@@ -916,7 +917,7 @@ class ReviewMarkerReview361Test(unittest.TestCase):
                 ' $(git diff --name-only a1 b1 c1 d1)"',
                 'cat docmark.md | wc -l; gh pr comment 5 --body "$(echo x | grep x)"',
                 'cat docmark.md | wc -l; gh pr create --title "fix: x" --body "$(cat <<\'EOF\'\nthân\nEOF\n)"',
-                'gh pr comment 5 --body "$(cat n.md)$(cat n.md)`cat n.md`" -F n.md',
+                'gh pr comment 5 --body "$(cat n.md)$(cat n.md)$(cat n.md)" -F n.md',
             ),
         )
         self.assertFalse(guard._present(guard.DIR_OK + "docs", str(self.root)))  # thư mục với lệnh không đệ quy
@@ -1880,7 +1881,7 @@ class AliasDefinitionTest(unittest.TestCase):
             'git commit -m "fix #12" -m "cost 5$"\ngit log -1',
             "alias -p | grep ll",
             "printf $'a\\tb\\n'",
-            "echo `date`",
+            "echo $(date)",
         ):
             with self.subTest(cmd=cmd):
                 self.assertEqual(final(cmd, self.root), "")
@@ -2407,9 +2408,12 @@ class AnsiQuoteThenBacktickTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
-        for cmd in ('echo "$\'" `date` "\'"', "echo $'\\'' `date`", "echo $$ $'a' `date`"):
+        for cmd in ('echo "$\'" $(date) "\'"', "echo $'\\'' $(date)", "echo $$ $'a' $(date)"):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
+        for cmd in ('echo "$\'" `date` "\'"', "echo $'\\'' `date`", "echo $$ $'a' `date`"):
+            with self.subTest(cmd):  # ADR-0063: backtick → chặn
+                self.assertEqual(final(cmd), "deny")
         self.assertEqual(guard._backtick_spans("echo $'\\'' `a` $$'`b`'"), [(11, 14, "a")])
         self.assertEqual(guard._backtick_spans("echo $$$'\\'' `a`"), [(13, 16, "a")])
         self.assertEqual([b for _, _, b in guard._dollar_spans("echo $'\\'' \"$(a)\" $$'$(b)' $$$(c)")], ["a", "c"])
@@ -2445,11 +2449,10 @@ class HeredocBacktickRegressionTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "deny")
-        for cmd in (
-            "cat <<EOF\n`echo #` $(date)\nEOF",
-            "cat <<EOF\nit's $((1 + 2)) `date`\nEOF",
-            "cat <<'EOF'\n`echo #`\n`rm -rf ~`\nEOF",
-        ):
+        for cmd in ("cat <<EOF\n`echo #` $(date)\nEOF", "cat <<EOF\nit's $((1 + 2)) `date`\nEOF"):
+            with self.subTest(cmd):  # ADR-0063: backtick trong thân heredoc không nháy → chặn
+                self.assertEqual(final(cmd), "deny")
+        for cmd in ("cat <<EOF\nits $((1 + 2)) $(date)\nEOF", "cat <<'EOF'\n`echo #`\n`rm -rf ~`\nEOF"):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
 
