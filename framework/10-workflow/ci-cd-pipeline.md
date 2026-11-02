@@ -3,7 +3,7 @@ title: CI/CD: job gate, required check, cache, bảo mật pipeline
 kind: module
 prefix: WF-CI
 applies_to: [all]
-updated: 2026-10-30
+updated: 2026-11-02
 ---
 
 # CI/CD: job gate, required check, cache, bảo mật pipeline
@@ -105,7 +105,7 @@ trình duyệt — thêm khi số đo đòi, không thêm từ đầu.
 - [ ] `WF-CI-008` **MUST@L** `concurrency` theo workflow + ref với `cancel-in-progress: true` cho PR (không cho `main`/release). → Kiểm: `concurrency.group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}`. · Nguồn: GitHub Control the concurrency of workflows
 - [ ] `WF-CI-009` **MUST@L** Mỗi job có `timeout-minutes` (mặc định 360 phút là quá dài); cổng commit tổng < 10–15 phút, đo và theo dõi. → Kiểm: mọi job có `timeout-minutes`; metric thời gian job. · Nguồn: P10
 - [ ] `WF-CI-010` **MUST@L** Cache dependency theo hash lockfile (`setup-*` built-in hoặc `actions/cache` với `key: ${{ runner.os }}-<tool>-${{ hashFiles('**/lockfile') }}` + `restore-keys`); cache browser/tool nặng (Playwright) theo phiên bản. → Kiểm: log CI có `Cache restored`; thời gian cài < 1 phút khi hit. · Nguồn: GitHub Caching dependencies (10 GB/repo, dọn sau 7 ngày không dùng)
-- [ ] `WF-CI-011` **MUST@L** Secrets: dùng OIDC (`id-token: write`) để lấy credential cloud ngắn hạn; không khoá dài hạn trong repo secrets khi nền tảng hỗ trợ OIDC; secrets deploy prod đặt trong `environment` có required reviewers. → Kiểm: workflow deploy có `id-token: write` + `aws-actions/configure-aws-credentials`/tương đương role; environment `production` có reviewer. · Nguồn: GitHub Security hardening (OIDC), Managing environments
+- [ ] `WF-CI-011` **MUST@L** Secrets của pipeline: credential cloud ngắn hạn qua OIDC theo `SEC-SECRET-009` ([`../12-security/secrets-management.md`](../12-security/secrets-management.md), nhà); góc riêng của CI: secrets deploy prod đặt trong `environment` có required reviewers. → Kiểm: workflow deploy có `id-token: write` + `aws-actions/configure-aws-credentials`/tương đương role; environment `production` có reviewer. · Nguồn: GitHub Security hardening (OIDC), Managing environments
 - [ ] `WF-CI-012` **MUST@L** Pipeline CD tách khỏi CI: staging tự động sau merge `main`; production qua environment gate (reviewer, deployment branches chỉ `main`/tag); migration chạy có kiểm soát theo [`../09-database/migrations.md`](../09-database/migrations.md). → Kiểm: `deploy.yml` dùng `environment: production` với protection rules; log deploy có người duyệt. · Nguồn: GitHub Managing environments for deployment
 - [ ] `WF-CI-013` **MUST@L** Build artefact một lần, dùng lại cho test/deploy (không build lại ở mỗi môi trường); artefact có checksum/SBOM và tag theo commit SHA. → Kiểm: `upload-artifact`/registry image tag = `sha-<commit>`; deploy kéo đúng tag. · Nguồn: 12-factor V Build, release, run
 - [ ] `WF-CI-014` **MUST@L** Workflow `schedule` (audit tuần, dọn dẹp) đặt phút lệch (không `0 * * * *`), có `timeout`, và tạo **một** issue có marker thay vì spam. → Kiểm: cron expr phút ≠ 0/30; job tìm issue có marker trước khi tạo. · Nguồn: GitHub schedule (trễ đầu giờ), catalog 23 §2.5 (jitter 02:29/03:17…)

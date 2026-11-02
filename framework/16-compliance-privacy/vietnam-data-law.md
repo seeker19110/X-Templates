@@ -3,7 +3,7 @@ title: Pháp luật dữ liệu Việt Nam: PDPL 2025, NĐ 356/2025, Luật ANM 
 kind: module
 prefix: CMP-VN
 applies_to: [all]
-updated: 2026-10-14
+updated: 2026-11-02
 ---
 
 # Pháp luật dữ liệu Việt Nam: PDPL 2025, NĐ 356/2025, Luật ANM 2025, Luật Dữ liệu, lưu trữ trong nước
@@ -73,7 +73,7 @@ updated: 2026-10-14
 - [ ] `CMP-VN-012` **MUST@L** Dữ liệu cốt lõi/dữ liệu quan trọng (theo danh mục Nhà nước) chỉ chuyển/xử lý xuyên biên giới sau đánh giá rủi ro theo NĐ 165/2025; sử dụng nền tảng ở nước ngoài để xử lý cũng tính là chuyển. → Kiểm: data map phân loại theo Luật Dữ liệu Đ.13; ADR nêu nền tảng xử lý và kết luận đánh giá. · Nguồn: Luật Dữ liệu 60/2024/QH15 Đ.13, Đ.23; NĐ 165/2025/NĐ-CP
 - [ ] `CMP-VN-013` **MUST@L** Hệ thống phục vụ cơ quan nhà nước hoặc hạ tầng quan trọng xác định cấp độ (1–5) và áp dụng biện pháp theo cấp độ; cấp độ đã xác định theo luật cũ giữ nguyên nhưng phải đáp ứng điều kiện mới trong 12 tháng từ 01/07/2026. → Kiểm: `docs/security/cap-do.md` có quyết định phê duyệt cấp độ + ma trận biện pháp; hạn hoàn thành ≤ 01/07/2027. · Nguồn: Luật ANM 116/2025/QH15 Đ.8, Đ.45; NĐ 85/2016/NĐ-CP; TT 12/2022/TT-BTTTT
 - [ ] `CMP-VN-014` **MUST@L** Nhật ký hệ thống phục vụ định danh IP/điều tra (thời gian theo chuẩn thời gian quốc gia, IP, phiên) lưu đầy đủ, liên tục ≥ 12 tháng, toàn vẹn, truy xuất được. → Kiểm: cấu hình retention log ≥ 12 tháng, log ở kho chỉ ghi thêm (WORM/immutable); đồng bộ NTP. · Nguồn: NĐ 333/2026/NĐ-CP Đ.22–23
-- [ ] `CMP-VN-015` **MUST@L** Hợp đồng với bên xử lý (cloud, SaaS, agency, LLM API) có điều khoản xử lý dữ liệu cá nhân theo Luật 91/2025 (mục đích, biện pháp bảo vệ, xoá/trả dữ liệu khi kết thúc, thông báo vi phạm). → Kiểm: `docs/privacy/processors.md` link hợp đồng/DPA cho từng bên; CI chặn thêm SDK mới chưa có dòng. · Nguồn: Luật 91/2025/QH15 Đ.17, Đ.37
+- [ ] `CMP-VN-015` **MUST@L** Hợp đồng với bên xử lý (cloud, SaaS, agency, LLM API) có điều khoản xử lý dữ liệu cá nhân theo Luật 91/2025 (mục đích, biện pháp bảo vệ, xoá/trả dữ liệu khi kết thúc, thông báo vi phạm). → Kiểm: `docs/privacy/processors.md` link hợp đồng/DPA cho từng bên; CI chặn thêm SDK mới chưa có dòng. · Nguồn: Luật 91/2025/QH15 Đ.17, Đ.37 · Mẫu: [`../templates/PRIVACY-DATA-MAP.md`](../templates/PRIVACY-DATA-MAP.md)
 - [ ] `CMP-VN-016` **SHOULD** Thông báo xử lý dữ liệu (privacy notice) sinh từ data map, có phiên bản, hiển thị trước khi thu thập; lưu phiên bản người dùng đã đồng ý. → Kiểm: `policy_version` trong bảng consent khớp phiên bản notice đang hiển thị. · Nguồn: Luật 91/2025/QH15 Đ.9, Đ.11
 - [ ] `CMP-VN-017` **SHOULD** Lĩnh vực tài chính–ngân hàng: không dùng thông tin tín dụng để chấm điểm/xếp hạng khi chưa có đồng ý; thông báo khách hàng khi lộ thông tin tài khoản/tín dụng. → Kiểm: feature flag chấm điểm chỉ bật khi có consent `credit-scoring`; runbook lộ dữ liệu có bước thông báo khách hàng. · Nguồn: Luật 91/2025/QH15 Đ.27
 - [ ] `CMP-VN-018` **SHOULD** Lĩnh vực y tế/bảo hiểm: không cung cấp dữ liệu sức khoẻ cho bên thứ ba (bảo hiểm…) trừ khi có yêu cầu bằng văn bản của chủ thể hoặc thuộc Đ.19. → Kiểm: API chia sẻ hồ sơ sức khoẻ yêu cầu `consent_document_id`; log truy cập. · Nguồn: Luật 91/2025/QH15 Đ.26

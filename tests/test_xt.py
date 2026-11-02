@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import io
 import json
 import os
@@ -287,6 +288,35 @@ class ValidateTest(unittest.TestCase):
         docs, _ = xt.load_docs(self.fw)
         ids = {it.id for d in docs for it in d.items}
         self.assertNotIn("BE-API-999", ids)
+
+    def _insert(self, text: str) -> None:
+        p = self.fw / "08-backend" / "api.md"
+        p.write_text(p.read_text(encoding="utf-8").replace("## Nguồn", text + "\n\n## Nguồn", 1), encoding="utf-8")
+
+    def test_dangling_id_reference(self):  # AUD-DOC-182 (T-3658): ID được trỏ phải có mục định nghĩa
+        self._insert("Xem `BE-API-777`, `BE-API-001` và sổ `AUD-SEC-001`.\n\n```md\n`BE-API-888` trong fence\n```")
+        errs = [e for e in xt.validate(self.fw) if "không có mục nào định nghĩa" in e]
+        self.assertEqual(len(errs), 1, errs)
+        self.assertRegex(errs[0], r"^08-backend/api\.md:\d+: trỏ BE-API-777 ")
+
+    def test_stale_verifications(self):  # AUD-DOC-177 (T-3658): ngày "xác minh" quá hạn → cảnh báo, không lỗi
+        self._insert(
+            "- Một nguồn cũ (xác minh 2026-01-02); nguồn mới xác minh 2026-10-30; ngày hỏng xác minh 2026-13-45."
+        )
+        today = datetime.date(2026, 11, 2)
+        old = xt.stale_verifications(self.fw, 180, today)
+        self.assertEqual([d for _, d in old if d.startswith("2026-01")], ["2026-01-02"])
+        self.assertFalse([d for _, d in old if d == "2026-10-30"])
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = xt.main(["--framework", str(self.fw), "validate", "--stale", "180", "--today", "2026-11-02"])
+        self.assertEqual(rc, 0)
+        self.assertRegex(out.getvalue(), r"⚠ 08-backend/api\.md:\d+: xác minh 2026-01-02 — 304 ngày")
+        self.assertIn("ngày xác minh quá 180 ngày", out.getvalue())
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                xt.main(["--framework", str(self.fw), "validate", "--today", "hôm qua", "--stale", "1"]), 2
+            )
 
     def test_duplicate_id(self):
         p = self.fw / "08-backend" / "api.md"

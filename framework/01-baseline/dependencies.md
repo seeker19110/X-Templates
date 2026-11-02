@@ -3,7 +3,7 @@ title: Phụ thuộc: lockfile, cập nhật, license, lỗ hổng
 kind: baseline
 prefix: BASE-DEP
 applies_to: [all]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Phụ thuộc: lockfile, cập nhật, license, lỗ hổng
@@ -47,7 +47,7 @@ updated: 2026-11-01
 - [ ] `BASE-DEP-010` **SHOULD** Phụ thuộc không dùng được **gỡ** định kỳ; dependency trùng vai (hai thư viện HTTP, hai thư viện ngày) bị cấm trừ khi có lý do. → Kiểm: `knip`/`depcheck` (JS), `deptry` (Python), `go mod tidy && git diff --exit-code`, `cargo machete` = 0 gói thừa trong CI. · Nguồn: [`../14-testing-quality/static-analysis-and-code-quality.md`](../14-testing-quality/static-analysis-and-code-quality.md)
 - [ ] `BASE-DEP-011` **SHOULD** Phụ thuộc có **kiểm tra toàn vẹn** khi cài: npm `integrity` trong lockfile, pip `--require-hashes`, `go.sum` + `GOSUMDB`, Cargo checksum; registry riêng cấu hình tường minh, không "fallback" ra public khi gói nội bộ không có (dependency confusion). → Kiểm: `.npmrc`/`pip.conf`/`GOPRIVATE` khai báo scope nội bộ; tên gói nội bộ được đăng ký giữ chỗ trên registry public hoặc dùng scope riêng. · Nguồn: pip secure installs; Go modules (`GOSUMDB`, `GOPRIVATE`)
 - [ ] `BASE-DEP-012` **SHOULD** Cập nhật **major** đi PR riêng do người duyệt, có ghi chú breaking từ CHANGELOG upstream và test đầy đủ; không gom major vào nhóm tự merge. → Kiểm: cấu hình bot có `ignore: update-types: ["version-update:semver-major"]` hoặc nhóm riêng; PR major có nhãn và review. · Nguồn: Dependabot `groups`/`ignore`; catalog 23 §2.5
-- [ ] `BASE-DEP-013` **SHOULD** Bản phát hành gói công khai (npm/PyPI/crates/NuGet) dùng **trusted publishing/OIDC** + 2FA bắt buộc trên tài khoản registry; token dài hạn không nằm trong CI. → Kiểm: workflow publish có `id-token: write`, không có `NPM_TOKEN`/`PYPI_TOKEN` tĩnh; cấu hình registry bật 2FA. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
+- [ ] `BASE-DEP-013` **SHOULD** Tài khoản registry phát hành gói công khai (npm/PyPI/crates/NuGet) bắt buộc 2FA; trusted publishing/OIDC, không token dài hạn trong CI theo `SEC-SUPPLY-021` (nhà). → Kiểm: workflow publish có `id-token: write`, không có `NPM_TOKEN`/`PYPI_TOKEN` tĩnh; cấu hình registry bật 2FA. · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
 - [ ] `BASE-DEP-014` **SHOULD** Có **danh sách phụ thuộc có chủ** (ít nhất SBOM sinh tự động CycloneDX/SPDX mỗi bản phát hành) để trả lời "có dùng gói X phiên bản Y không" trong vài phút khi có CVE. → Kiểm: artefact `sbom.cdx.json`/`sbom.spdx.json` kèm mỗi release (syft 1.54.x). · Nguồn: [`../12-security/supply-chain.md`](../12-security/supply-chain.md)
 - [ ] `BASE-DEP-015` **SHOULD** Cài phụ thuộc trong CI có **cache theo hash lockfile** để nhanh nhưng không bao giờ cache thay cho lockfile (cache hỏng → cài lại, không đổi kết quả). → Kiểm: `actions/cache`/`setup-*` `cache-dependency-path` trỏ lockfile; job vẫn xanh khi xoá cache. · Nguồn: [`quality-gates.md`](quality-gates.md) BASE-GATE-011
 - [ ] `BASE-DEP-016` **MAY** `cooldown` cho cập nhật tự động (vd 3–7 ngày sau khi upstream phát hành) để tránh nhận bản vừa bị rút/tiêm mã. → Kiểm: `dependabot.yml` có `cooldown.default-days` hoặc Renovate `minimumReleaseAge`. · Nguồn: Dependabot `cooldown`
