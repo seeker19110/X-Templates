@@ -2062,3 +2062,10 @@
 - Chọn: Duyệt nguyên PLAN, mỗi lát một PR, lát guard một review tập trung trước merge
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn + (2) đường lùi: mỗi lớp một PR revert được độc lập; PR ≤ ~150 dòng mã theo luật harden; (3) test được: mỗi lát có mẫu tái hiện của sổ làm test đỏ trước; PA2 vượt trần dòng và khó review
 - Đường lùi: Sửa PLAN (bỏ/tách task) bằng D mới; loop init lại
+
+### D-301 · 2026-11-02T04:20:53+00:00 · Kế hoạch sửa sau audit toàn bộ 2026-11-02 (AUDIT-REPORT-2026-11-02-full.md): 3 🟠 mới + 22 🟢, 4 🔴 guard có từ trước — chủ dự án triển khai sau
+
+- Phương án: (1) Ba đợt theo tác động/chi phí: P0 trước 3.30.0 (4 🔴 guard lát C ADR-0063 + SEC-248 tiền tố docs/autopilot, CODE-036 khoá reviews.json, HAR-197 hàng go_no_go_file, HAR-036/198 matcher hook, CI-027 schedule secret-scan, DOC-174 PROGRESS); P1 2–4 tuần (DOC-179 lưu trữ sổ + trần docs, SEC-323 mã lý do làm khoá chính, PERF-012 cache guard kiểm sha256, HAR-199 đo chặn oan, CODE-037/038, CI-028, DEP-010, TEST-050); P2 cần ADR (sandbox/egress bắt buộc cho autopilot, tách xt.py theo lát, nội dung DOC-175…178/181, XFEAT-046) · (2) Gộp tất cả vào PLAN-harden-2026-11-01 đang chạy, không phân đợt · (3) Chỉ sửa 🔴 rồi cắt 3.30.0, hoãn toàn bộ 🟠/🟢
+- Chọn: Ba đợt theo tác động/chi phí: P0 trước 3.30.0 (4 🔴 guard lát C ADR-0063 + SEC-248 tiền tố docs/autopilot, CODE-036 khoá reviews.json, HAR-197 hàng go_no_go_file, HAR-036/198 matcher hook, CI-027 schedule secret-scan, DOC-174 PROGRESS); P1 2–4 tuần (DOC-179 lưu trữ sổ + trần docs, SEC-323 mã lý do làm khoá chính, PERF-012 cache guard kiểm sha256, HAR-199 đo chặn oan, CODE-037/038, CI-028, DEP-010, TEST-050); P2 cần ADR (sandbox/egress bắt buộc cho autopilot, tách xt.py theo lát, nội dung DOC-175…178/181, XFEAT-046)
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: 🔴 và 🟠 chạm merge/hàng rào đi trước, mỗi đợt một PR nhỏ đảo ngược được; (3) bền và test được: 🟠 có Gate đỏ trước; P2 đổi cấu trúc nên cần ADR riêng thay vì chèn vào PLAN đang chạy (PA2 phình phạm vi lát guard, PA3 để lại 🟠 CODE-036/HAR-197 làm lệch G7 lặp lại)
+- Đường lùi: Sửa thứ tự/đợt bằng D mới; mỗi PR revert độc lập
