@@ -2131,3 +2131,17 @@
 - Chọn: test bảng tests/test_adapters.py (≥ 10 ca/host qua hàm thật, giao thức chặn từng host, plugin OpenCode chạy thật bằng bun) + chấp nhận hook Claude chạy thêm ở Copilot/Cursor/Grok
 - Lý do (tiêu chí chất lượng cuối): bench cần nhóm ca mới trong engine autonomy-bench (đọc payload từng host) — nhiều mã hơn cho cùng bảo đảm mà test bảng cho; test chạy đúng hàm của adapter và guard thật. Hai lần chạy không đổi quyết định (cùng một guard, deny thắng); Copilot/Cursor không có cơ chế khử trùng theo nguồn, công tắc duy nhất là tắt toàn cục (disableAllHooks, Third-Party Imports) sẽ tắt luôn hook của khung — tiêu chí 1 > 5
 - Đường lùi: thêm nhóm 'adapter' vào autonomy-bench khi số host/ca tăng; bỏ hook adapter của host nào đọc .claude/settings.json nếu đo được hook Claude chặn đúng ở host đó
+
+### D-311 · 2026-11-02T12:20:55+00:00 · AUD-DOC-183: D-303 ghi LOOP-HARNESS-022 → MUST@M nhưng ADR-0064, harness-files.md và CHANGELOG ghi MUST@L — mức nào là đúng?
+
+- Phương án: (1) MUST@L như ADR-0064 đã chấp nhận và mục khung đang ghi; D-303 được đính chính bằng quyết định này · (2) Hạ mục khung về MUST@M theo chữ của D-303
+- Chọn: MUST@L như ADR-0064 đã chấp nhận và mục khung đang ghi; D-303 được đính chính bằng quyết định này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mục khung, ADR-0064 và CHANGELOG đã thống nhất MUST@L từ #403, dự án S/M không bị buộc cài sandbox — chặt đúng chỗ rủi ro cao; đổi về @M là đổi hành vi dự án đích không có lý do mới. D-303 không sửa (lịch sử), quyết định này là nhà của mức @L
+- Đường lùi: loop decide mới hạ về MUST@M kèm cắt bản sớm (đổi buộc dự án đích)
+
+### D-312 · 2026-11-02T12:20:56+00:00 · AUD-DOC-194: T-3649 làm hàng release-check go_no_go BLOCKER ở mọi quy mô, trong khi PLAN ghi go_no_go_file, BLOCKER ở M/L và S = SHOULD — giữ bản đã làm hay sửa theo PLAN?
+
+- Phương án: (1) Giữ bản đã làm: hàng go_no_go, BLOCKER mọi quy mô; README, mẫu GO-NO-GO và --help ghi hàng này · (2) Sửa về PLAN: S chỉ SHOULD, tên go_no_go_file
+- Chọn: Giữ bản đã làm: hàng go_no_go, BLOCKER mọi quy mô; README, mẫu GO-NO-GO và --help ghi hàng này
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: GO-NO-GO sai phiên bản hay chưa ký là lỗi phát hành ở mọi quy mô, chặt hơn thắng; tên ngắn go_no_go thống nhất với các hàng khác của release-check; (3) đơn giản: một luật cho mọi quy mô
+- Đường lùi: hạ mức theo quy mô trong _release_go_no_go và ghi CHANGELOG

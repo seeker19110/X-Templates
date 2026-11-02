@@ -1,7 +1,7 @@
 # AUDIT-REPORT — delta sau PLAN-harden-2026-10-31, 2026-11-01
 
 > Commit quét: `e09f776` (`main` sau #377; delta `78fb359..e09f776`, #359–#377) · Phạm vi: `delta` — 11 nhóm `audit plan` liệt kê "Quét lại" (DATA N/A; A11Y không đổi UI) · Người quét: 3 cụm `reviewer` read-only (SEC/CFG/DEP/CI · ARCH/CODE/TEST/PERF · DOC/HAR/XFEAT), phiên chính chạy cổng chuẩn · Xác minh đối kháng: `reviewer-alt` (khác người tìm, effort cao) cho 6 phát hiện 🔴/🟠 nhóm SEC — 6/6 tái hiện, 2 hạ mức, 1 biến thể bác bỏ.
-> `xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 (lúc ghi sổ, HEAD `291d45d`). Báo cáo là ảnh chụp lúc quét; **trạng thái sống của từng phát hiện xem sổ** `docs/ops/AUDIT-STATUS.md` (AUD-HAR-171, AUD-CODE-032, AUD-TEST-037…039, AUD-XFEAT-038, AUD-DOC-131…135 đã sửa ở #382).
+> `xt.py audit check docs/ops/AUDIT-STATUS.md` → exit 0 (lúc ghi sổ, HEAD `291d45d`). Báo cáo là ảnh chụp lúc quét; **trạng thái sống của từng phát hiện xem sổ** `docs/ops/AUDIT-STATUS.md` (AUD-HAR-171, AUD-CODE-032, AUD-TEST-037…039, AUD-XFEAT-038, AUD-DOC-131…133, 135 đã sửa ở #382 (AUD-DOC-134 xem sổ)).
 
 ## 1. Tóm tắt
 
