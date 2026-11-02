@@ -877,6 +877,8 @@ class PolicyContractTest(unittest.TestCase):
             with self.subTest(out=out):
                 r = guard.apply_policy(out)
                 self.assertEqual((r["decision"], r["reason"]), want)
+
+
 class CommitMsgModeTest(unittest.TestCase):
     """`guard.py commit-msg <file>` cho git hook (ADR-0064 lát C, T-3645): subject dài, ghi công AI khi xt.yaml cấm."""
 

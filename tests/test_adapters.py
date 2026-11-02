@@ -27,62 +27,67 @@ LEDGER = ROOT / ".autopilot" / "state.json"
 NOTES = ROOT / "docs" / "notes-khong-co.md"
 
 
+# Hình payload theo host (nghiên cứu 2026-11-02 §9): (khoá tên tool, khoá tham số), tên tool shell/ghi/MCP, khoá phiên.
+KEYS = {"copilot": ("toolName", "toolArgs"), "grok": ("toolName", "toolInput"), "opencode": ("tool", "args")}
+SHELL_NAME = {
+    "gemini": "run_shell_command",
+    "cursor": "Shell",
+    "copilot": "bash",
+    "grok": "run_terminal_command",
+    "opencode": "bash",
+}
+WRITE_NAME = {
+    "gemini": "write_file",
+    "cursor": "Write",
+    "copilot": "create",
+    "grok": "search_replace",
+    "opencode": "write",
+}
+MCP_NAME = {"gemini": "mcp_github_{}", "cursor": "MCP:{}", "grok": "github__{}", "copilot": "github__{}"}
+SESSION_KEY = {"codex": "session_id", "copilot": "sessionId", "grok": "sessionId", "opencode": "sessionID"}
+
+
+def _event(host: str, name: str, args: dict, cwd: str) -> dict:
+    tool_key, args_key = KEYS.get(host, ("tool_name", "tool_input"))
+    return {tool_key: name, args_key: args, "cwd": cwd}
+
+
+def _shell(host: str, cmd: str, cwd: str) -> dict:
+    args = {"command": cmd} | ({"working_directory": cwd} if host == "cursor" else {})
+    ev = _event(host, SHELL_NAME.get(host, "Bash"), args, cwd)
+    if host in SESSION_KEY:
+        ev[SESSION_KEY[host]] = "s"
+    return ev
+
+
+def _write(host: str, path: Path, cwd: str) -> dict:
+    if host == "codex":
+        patch = f"*** Begin Patch\n*** Add File: {path.relative_to(ROOT)}\n+x\n*** End Patch\n"
+        return _event(host, "apply_patch", {"command": patch}, cwd)
+    key = "filePath" if host == "opencode" else "file_path"
+    return _event(host, WRITE_NAME.get(host, "Write"), {key: str(path), "content": "x"}, cwd)
+
+
+def _mcp(host: str, tool: str, cwd: str) -> dict:
+    name = MCP_NAME.get(host, "mcp__github__{}").format(tool)
+    return _event(host, name, {"owner": "o", "repo": "r", "pullNumber": 1}, cwd)
+
+
 def payloads(host: str) -> list[tuple[str, dict, bool]]:
     """(tên ca, payload của host, phải chặn?) — ≥ 10 ca mỗi host: lệnh nguy hiểm, ghi bí mật/sổ, MCP merge, và đối chứng."""
     cwd = str(ROOT)
-
-    def shell(cmd: str) -> dict:
-        if host == "gemini":
-            return {"tool_name": "run_shell_command", "tool_input": {"command": cmd}, "cwd": cwd}
-        if host == "cursor":
-            return {"tool_name": "Shell", "tool_input": {"command": cmd, "working_directory": cwd}, "cwd": cwd}
-        if host == "copilot":
-            return {"toolName": "bash", "toolArgs": {"command": cmd}, "cwd": cwd, "sessionId": "s"}
-        if host == "grok":
-            return {"toolName": "run_terminal_command", "toolInput": {"command": cmd}, "cwd": cwd, "sessionId": "s"}
-        if host == "opencode":
-            return {"tool": "bash", "args": {"command": cmd}, "cwd": cwd, "sessionID": "s"}
-        return {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd, "session_id": "s"}
-
-    def write(path: Path) -> dict:
-        name = {"gemini": "write_file", "cursor": "Write", "copilot": "create", "grok": "search_replace"}.get(
-            host, "Write"
-        )
-        if host == "opencode":
-            return {"tool": "write", "args": {"filePath": str(path), "content": "x"}, "cwd": cwd}
-        if host == "codex":
-            patch = f"*** Begin Patch\n*** Add File: {path.relative_to(ROOT)}\n+x\n*** End Patch\n"
-            return {"tool_name": "apply_patch", "tool_input": {"command": patch}, "cwd": cwd}
-        key = "toolArgs" if host == "copilot" else "toolInput" if host == "grok" else "tool_input"
-        tool_key = "toolName" if host in ("copilot", "grok") else "tool_name"
-        return {tool_key: name, key: {"file_path": str(path), "content": "x"}, "cwd": cwd}
-
-    def mcp(tool: str) -> dict:
-        name = {
-            "gemini": f"mcp_github_{tool}",
-            "cursor": f"MCP:{tool}",
-            "grok": f"github__{tool}",
-            "copilot": f"github__{tool}",
-            "opencode": f"mcp__github__{tool}",
-        }.get(host, f"mcp__github__{tool}")
-        if host == "opencode":
-            return {"tool": name, "args": {"owner": "o", "repo": "r", "pullNumber": 1}, "cwd": cwd}
-        tool_key = "toolName" if host in ("copilot", "grok") else "tool_name"
-        key = "toolArgs" if host == "copilot" else "toolInput" if host == "grok" else "tool_input"
-        return {tool_key: name, key: {"owner": "o", "repo": "r", "pullNumber": 1}, "cwd": cwd}
-
     return [
-        ("push main", shell("git push origin main"), True),
-        ("rm home", shell("rm -rf ~"), True),
-        ("no-verify", shell("git commit --no-verify -m x"), True),
-        ("auto-merge", shell("gh pr merge 5 --auto"), True),
-        ("ghi .env", write(ENV), True),
-        ("ghi sổ autopilot", write(LEDGER), True),
-        ("mcp merge", mcp("merge_pull_request"), True),
-        ("ls", shell("ls -la"), False),
-        ("git status", shell("git status"), False),
-        ("ghi tài liệu", write(NOTES), False),
-        ("mcp đọc", mcp("get_file_contents"), False),
+        ("push main", _shell(host, "git push origin main", cwd), True),
+        ("rm home", _shell(host, "rm -rf ~", cwd), True),
+        ("no-verify", _shell(host, "git commit --no-verify -m x", cwd), True),
+        ("auto-merge", _shell(host, "gh pr merge 5 --auto", cwd), True),
+        ("ghi .env", _write(host, ENV, cwd), True),
+        ("ghi sổ autopilot", _write(host, LEDGER, cwd), True),
+        ("mcp merge", _mcp(host, "merge_pull_request", cwd), True),
+        ("ls", _shell(host, "ls -la", cwd), False),
+        ("git status", _shell(host, "git status", cwd), False),
+        ("ghi tài liệu", _write(host, NOTES, cwd), False),
+        ("mcp đọc", _mcp(host, "get_file_contents", cwd), False),
     ]
 
 
