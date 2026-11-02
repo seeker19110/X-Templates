@@ -103,11 +103,11 @@
    ]
   },
   {
-   "reason": "Luật năng lực reviewer đọc ở cờ `pr reviewed --reviewer-model/--author-model` và `xt.yaml` (`_review_models_error`, `review_family_config_error`) — corpus review chưa có kiểu ca nhận tên model; đỡ bằng `tests.test_merge -k clean_review_judges_name_tail`; PR bot (AUD-SEC-329/330): `-k clean_review_of_bot_pr`",
+   "reason": "Luật năng lực reviewer đọc ở cờ `pr reviewed --reviewer-model/--author-model` và `xt.yaml` (`_review_models_error`, `review_family_config_error`) — corpus review chưa có kiểu ca nhận tên model; đỡ bằng `tests.test_merge -k clean_review_judges_name_tail`; PR bot (AUD-SEC-353/354): `-k clean_review_of_bot_pr`",
    "ids": [
     "AUD-SEC-105",
-    "AUD-SEC-329",
-    "AUD-SEC-330"
+    "AUD-SEC-353",
+    "AUD-SEC-354"
    ]
   },
   {
