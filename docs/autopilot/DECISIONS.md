@@ -155,3 +155,10 @@
 - Chọn: PR thay thế từ main: một commit = diff ròng của PR 401 (đã gộp main), review một lần ở head mới, đóng PR 401 kèm liên kết
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: bản sửa 🟠 và phần giải xung đột ở _pr_reviewed chưa được rà — PR mới cho đúng một lượt review độc lập trên toàn diff; phương án 2 sửa lời khai cho khớp máy (sai P1); phương án 3 bỏ bản sửa an toàn đã có test. (2) đường lùi: PR 401 đóng chứ không xoá, mở lại được; chủ dự án yêu cầu 2026-11-02 giải xung đột và merge PR 401
 - Đường lùi: Mở lại PR 401, đóng PR thay thế
+
+### D-314 · 2026-11-02T19:44:29+00:00 · T-3651 DIR_CAPS cho docs/ops và docs/autopilot: có đếm file lưu trữ (AUDIT-STATUS-ARCHIVE.md, DECISIONS-YYYY-MM.md) vào trần không?
+
+- Phương án: (1) Đếm cả file lưu trữ (trần = tổng sau lưu trữ + 5 %) · (2) Loại file lưu trữ khỏi pathspec; trần = file đang dùng + 5 %; lưu trữ đóng băng, không trần
+- Chọn: Loại file lưu trữ khỏi pathspec; trần = file đang dùng + 5 %; lưu trữ đóng băng, không trần
+- Lý do (tiêu chí chất lượng cuối): (1) đúng: mục tiêu AUD-DOC-180 là chặn sổ ĐANG ĐỌC/GHI phình (lint, audit check parse mỗi PR); đếm lưu trữ làm việc lưu trữ không bao giờ hạ tổng → trần chạm sau ~20 PR mà không có đường hợp lệ nào xuống dưới trừ xoá lịch sử (trái P1). (3) đơn giản: một pathspec loại trừ. Lưu trữ chỉ thêm khi chạy đợt lưu trữ có PR riêng
+- Đường lùi: Bỏ hai pathspec :(exclude) và đặt trần theo tổng gồm lưu trữ
