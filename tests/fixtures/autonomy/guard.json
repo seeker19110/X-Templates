@@ -16311,6 +16311,50 @@
    "allowed": true
   },
   "note": "review #405"
+ },
+ {
+  "id": "t407-329-push-main-code",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git push origin main"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "PUSH_MAIN"
+  },
+  "note": "T-3640 (D-308)"
+ },
+ {
+  "id": "t407-329-stash-drop-code",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git stash drop"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "STASH_DROP"
+  },
+  "note": "T-3640 (D-308)"
+ },
+ {
+  "id": "t407-329-control-push-branch",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-329"
+  ],
+  "input": {
+   "command": "git push origin feature/x"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3640 (D-308)"
  }
  ]
 }

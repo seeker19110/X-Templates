@@ -170,6 +170,10 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 
 ## 6. Chưa xác minh (ghi để lần sau tra)
 
+> Cập nhật 2026-11-02: bốn mục — `SHELL`/`PATH` của shell tool, mã thoát headless, hook Cursor trong CLI/`-p`, Copilot
+> đọc `.claude/settings.json` và payload stdin — đã xác minh lại ở **§8** (phần còn mở ghi rõ ở đó). Các dòng dưới giữ
+> nguyên để thấy lịch sử.
+
 - Mọi công cụ: shell tool có tôn trọng `SHELL`/`PATH` để bọc lệnh; mã thoát của chế độ headless (trừ Gemini: 0/1/42/53);
   cờ `archived`/`pushed_at` qua API GitHub (403 trong phiên — không vượt rào); chưa chạy validator/test nào; hook có chạy
   trong sandbox hay ngoài (chỉ Claude Code nói rõ: ngoài).
@@ -193,3 +197,43 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 - sandbox-runtime "Beta Research Preview": API/cấu hình có thể đổi; `sandbox-exec` đã DEPRECATED theo Apple.
 - Tốc độ đổi API hook rất nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026): mọi adapter cần mốc xét lại —
   trùng mốc hàng rào 2027-01-21 (`LOOP-DESIGN-014`).
+
+## 8. Bổ sung 2026-11-02 — xác minh lại bốn mục chưa xác minh (T-3647)
+
+> 4 `researcher` + 1 đối chiếu chéo; nguồn chính chủ và mã nguồn mở đọc bằng `git grep`/`git show` hay bản raw ở SHA ghi
+> dưới (không chạy mã). Mục còn chưa chắc giữ nhãn **(chưa xác minh)**; nguồn diễn đàn ghi **thứ cấp**.
+
+**Shell tool và `SHELL`/`PATH` (wrapper trên PATH có chặn được lệnh không):**
+- Claude Code: `CLAUDE_CODE_SHELL` nhận bash/zsh; tự dò dùng `$SHELL` nếu là bash/zsh, không thì zsh rồi bash trên `PATH`;
+  `CLAUDE_CODE_SHELL_PREFIX` bọc lệnh Bash tool, hook, MCP stdio (docs ghi "logging or auditing", hook PowerShell và dạng
+  exec không qua prefix) — code.claude.com/docs/en/env-vars.
+- Codex CLI (SHA `05c08d7`, `codex-rs/shell-command/src/shell_detect.rs`): **không đọc `SHELL`**; lấy shell từ `passwd`
+  (`getpwuid_r`) theo đường tuyệt đối, chỉ tra `PATH` khi không có → wrapper trên `PATH` thường **không** được gọi.
+- Gemini CLI (SHA `6814e00`, `packages/core/src/utils/shell-utils.ts`): Unix gọi `bash -c` bằng tên trần (tra theo `PATH`
+  của tiến trình con); `PATH` có còn sau `sanitizeEnvironment` không: (chưa xác minh).
+- Copilot CLI (changelog thứ cấp): lệnh `!` dùng `$SHELL`; shell của tool nội bộ: (chưa xác minh). Cursor, Grok Build,
+  OpenCode: cơ chế chọn shell (chưa xác minh; OpenCode có khoá `shell` trong `opencode.json`).
+- **Hệ quả dữ kiện:** wrapper trên `PATH` không phải lớp chặn chung (Codex bỏ qua) — khớp quyết định ADR-0064 lát C.
+
+**Hook của Cursor trong CLI và `-p`:** docs chính thức (cursor.com/docs/hooks, /docs/cli/*) **không** có bảng hook theo
+CLI; chỉ `workspaceOpen` ghi chạy ở CLI. Diễn đàn (thứ cấp, nhân viên Cursor): CLI chạy hook mức tool (`postToolUse`,
+`afterFileEdit`, `before/afterShellExecution`); ở `-p` **không phát** `beforeSubmitPrompt`, `afterAgentResponse`, `stop`
+(21/8/2026, "known gap"); `preToolUse` trong CLI/`-p`: (chưa xác minh). → Cursor headless cần vòng lặp ngoài và sàn git hook.
+
+**Copilot CLI:** payload hook là JSON, ví dụ chính thức đọc bằng `INPUT="$(cat)"` (stdin suy ra từ ví dụ, không có câu quy
+định); **đọc cả `.claude/settings.json` và `.claude/settings.local.json` của repo** ("Cross-tool … are also read" —
+hooks-configuration, hooks-reference); tên sự kiện PascalCase (`PreToolUse`) nhận payload kiểu Claude (`tool_name`,
+`tool_input`); `preToolUse` exit 2 = deny kể cả JSON ghi allow; exit khác 0 = deny; timeout = fail-open. → hook Claude
+của khung **đã chạy** dưới Copilot: adapter Copilot (T-3643) phải tránh chạy guard hai lần.
+
+**Mã thoát headless:** `claude -p` 0/khác 0 (SIGTERM 143); `codex exec` 1 khi lỗi hay bị từ chối duyệt quyền (mã nguồn);
+`gemini -p` 0 · 1 · 42 (đầu vào) · 53 (vượt lượt), thêm 41/44/52/54/55/130 chỉ thấy ở mã; `opencode run` đặt 1 khi lỗi,
+bị từ chối quyền thì model tiếp tục (không đổi mã); Cursor `agent -p`, `copilot -p`, `grok -p`: docs không nêu (chưa xác
+minh). → khớp ADR-0064 lát D: vòng ngoài tin `loop verify`, không tin mã thoát của agent.
+
+Nguồn (2026-11-02): code.claude.com/docs/en/env-vars, /headless · github.com/openai/codex @`05c08d7` · raw
+google-gemini/gemini-cli @`6814e00` (shell-utils.ts, shellExecutionService.ts, docs/cli/headless.md) · cursor.com/docs/hooks,
+/docs/cli/overview, /docs/cli/headless, cursor.com/changelog/cli-jan-08-2026, forum.cursor.com (thứ cấp) ·
+docs.github.com/en/copilot/reference/hooks-configuration, /hooks-reference, /tutorials/copilot-cli-hooks · raw
+github/copilot-cli changelog.md (đọc 100 000/290 368 ký tự) · github.com/anomalyco/opencode @`ff90ed9`
+(packages/cli/src/run/noninteractive.ts) · docs.x.ai/build/cli/headless-scripting.

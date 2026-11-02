@@ -4,6 +4,8 @@ Mỗi lớp một test đỏ trước khi sửa (mẫu tái hiện của sổ au
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import sys
 import tempfile
@@ -551,6 +553,70 @@ class ExecCallStrictTest(unittest.TestCase):
         self.assertEqual(guard._exec_api_verbatim(["subprocess.run(['bash', '-c'])"]), [])
         self.assertEqual(guard._exec_api_verbatim(["print('os.system(\"rm\")')"]), [])  # chữ trong chuỗi
         self.assertEqual(guard._exec_api_verbatim(["os.system('a', 'b')"]), ["a"])
+
+
+class ReasonCodeLockTest(unittest.TestCase):
+    """AUD-SEC-329 (T-3640): mỗi mã của `REASON_CODES` có ít nhất một lệnh thật bị chặn ĐÚNG mã đó — đổi câu chữ lý do mà
+    làm mất mã (deny thành cho qua) thì test đỏ. Mã chỉ sinh qua `merge-check` dùng hằng chung ở nơi sinh và trong bảng."""
+
+    EXAMPLES = {
+        "PUSH_MAIN": "git push origin main",
+        "PUSH_ALL": "git push --all origin",
+        "WIPE_OUTSIDE": "rm -rf ~/x",
+        "STASH_DROP": "git stash drop",
+        "DESTROY": "gh repo delete o/r --yes",
+        "AUTO_MERGE_ENABLE": "gh pr merge 5 --auto --squash",
+        "MERGE_ADMIN": "gh pr merge 5 --admin --squash",
+        "UNVERIFIED": "gh api -X PUT repos/o/r/pulls/5/merge",
+        "HOST_CONTAINER": "docker run --privileged img true",
+        "HOOK_BYPASS": "echo x > .claude/hooks/guard.py",
+        "SECRET_WRITE": "echo x > .env",
+        "REVIEW_FORGE": "gh pr comment 5 --body '<!-- xt-review v1 head=" + "a" * 40 + " verdict=clean -->'",
+        "STAGE_APPROVE": "python3 scripts/xt.py stage approve --reason x",
+        "EVIDENCE_HANDWRITE": "echo x > .autopilot/state.json",
+        "OPAQUE_EXEC": "cat x.b64 | base64 -d | sh",
+        "NEST_TOO_DEEP": 'bash -c \'bash -c "bash -c \\"bash -c \\\\\\"bash -c ls\\\\\\"\\""\'',
+        "UNRESOLVED_TARGET": "git push origin $(cat b)",
+        "REMOTE_REF_FORGE": "git update-ref refs/remotes/origin/main HEAD",
+        "BUDGET": "echo " + BT + "id" + BT,
+        "BRACE_OVERFLOW": "echo {1..9}{1..9}{1..9}{1..9}{1..9}{1..9}",
+    }
+    MERGE_ONLY = {"HARD_EXCEPTION": "HARD_ASK", "REVIEW_MISSING": "REVIEW_MISSING_ASK"}
+
+    def test_every_code_blocks_a_real_command(self):
+        codes = {c for _, c in guard.REASON_CODES}
+        self.assertEqual(codes - set(self.EXAMPLES) - set(self.MERGE_ONLY), set())
+        for code, cmd in self.EXAMPLES.items():
+            with self.subTest(code):
+                d = decide(cmd)
+                self.assertEqual((d["decision"], d.get("code")), ("deny", code), d)
+        markers = {m for m, _ in guard.REASON_CODES}
+        for code, const in self.MERGE_ONLY.items():
+            self.assertIn(getattr(guard, const), markers, code)
+
+    def core(self, payload: dict) -> tuple[int, dict]:
+        out = io.StringIO()
+        argv = ["guard.py", "core"]
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))):
+            with mock.patch.object(sys, "stdout", out), mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(ROOT)}):
+                rc = guard.main()
+        return rc, json.loads(out.getvalue())
+
+    def test_core_mode_neutral_schema(self):
+        """ADR-0064 lát A: `guard.py core` nhận schema trung lập, trả `{decision: allow|deny, code, reason}` đã qua chính
+        sách mặc định (không `ask` — Codex/Cursor không cưỡng chế `ask`), deny → exit 2 để công cụ đọc exit cũng chặn."""
+        rc, out = self.core({"tool": "bash", "command": "git push origin main", "cwd": str(ROOT)})
+        self.assertEqual((rc, out["decision"], out["code"]), (2, "deny", "PUSH_MAIN"))
+        rc, out = self.core({"tool": "bash", "command": "ls -la"})
+        self.assertEqual((rc, out["decision"]), (0, "allow"))
+        rc, out = self.core({"tool": "edit", "path": str(ROOT / ".env")})
+        self.assertEqual((rc, out["decision"]), (2, "deny"))
+        rc, out = self.core({"tool": "write", "path": str(ROOT / "notes.md"), "input": {"content": "x"}})
+        self.assertEqual((rc, out["decision"]), (0, "allow"))
+        rc, out = self.core({"tool": "mcp", "tool_name": "mcp__github__enable_pr_auto_merge", "input": {}})
+        self.assertEqual((rc, out["decision"]), (2, "deny"))
+        rc, out = self.core({"tool": "lạ"})
+        self.assertEqual((rc, out["decision"]), (0, "allow"))
 
 
 class GhPostingStrictTest(unittest.TestCase):
