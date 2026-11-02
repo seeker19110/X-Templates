@@ -9485,10 +9485,12 @@ _PA_SEMVER = r"[0-9]++\.[0-9]++\.[0-9]++(?:-[0-9A-Za-z.-]++)?(?:\+[0-9A-Za-z.-]+
 _PA_PEP440_TAG = r"(?:alpha|beta|preview|pre|post|rev|rc|dev|a|b|c|r)"
 _PA_PEP440 = r"[0-9]++(?:\.[0-9]++)*+(?:[-+.]?" + _PA_PEP440_TAG + r"[0-9.]*+)*+" + _PA_PIN_END
 _PA_EXTRAS = r"(?:\[[\w,.-]*+\])?+"
+# Không liệt kê tuỳ chọn chọn nhà cung cấp khoá của pip (Kiểm PRF-CLI-010 cấm tên đó trong scripts/): giá trị của nó
+# bị coi là tên gói → báo `unpinned` oan theo hướng chặt (hiếm gặp).
 _PA_PIP_ARG = (
     r"(?:-[tifC]|--(?:target|platform|python-version|implementation|abi|root|prefix|src|upgrade-strategy"
     r"|config-settings|global-option|no-binary|only-binary|progress-bar|root-user-action|report|index-url"
-    r"|extra-index-url|find-links|python|log|keyring-provider|proxy|retries|timeout|exists-action|trusted-host|cert"
+    r"|extra-index-url|find-links|python|log|proxy|retries|timeout|exists-action|trusted-host|cert"
     r"|client-cert|cache-dir|use-feature|use-deprecated))(?=\s)\s++[^\s`-][^\s`]*+"
 )
 _PA_PIP_OPT = (
