@@ -2089,3 +2089,10 @@
 - Chọn: Một PLAN-upgrade-2026-11-02 thay PLAN-harden-2026-11-01: 5 task mở của harden chép cùng ID + P0/P1/P2 của D-302 + lát A–E ADR-0064 (D-303), gộp việc trùng (SEC-329↔lát A, DOC-181↔lát A, HAR-036/198↔CI-027/028, TEST-051↔HAR-199), xếp 🔴 guard → 🟠 audit → lõi/sandbox → P1 → adapter → nội dung → sổ/phát hành; để ngoài ARCH-008, DOC-179, PERF-014
 - Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: 🔴 guard vẫn đi đầu, không task nào làm yếu cổng; một sổ máy đọc (loop status) thay ba; (3) đơn giản, test được: gộp 4 cặp trùng bớt ~4 PR, phụ thuộc sau: rõ trong một file; PA2 ba vòng loop init chồng nhau, PA3 trì hoãn 🟠 CODE-036/HAR-197 làm lệch G7 ngay ở lần cắt 3.30.0; việc để ngoài cần ADR/research riêng (D-142, đợt nội dung)
 - Đường lùi: Tách lại PLAN bằng D mới; task giữ ID nên loop init mang bằng chứng theo
+
+### D-305 · 2026-11-02T08:39:37+00:00 · AUD-TEST-052: test_quote_like_repeat_not_cubic đỏ ngẫu nhiên khi cổng chạy song song — sửa test thế nào?
+
+- Phương án: (1) giữ ngưỡng tỉ lệ mặc định, chỉ đổi đồng hồ sang process_time · (2) dùng cpu_budget.assert_not_quadratic ratio 40 ở cỡ 16 (đồng hồ process_time) — chỉ canh bậc ba trở lên · (3) sửa _quote_exec_scripts thành tuyến tính rồi giữ ngưỡng cũ
+- Chọn: dùng cpu_budget.assert_not_quadratic ratio 40 ở cỡ 16 (đồng hồ process_time) — chỉ canh bậc ba trở lên
+- Lý do (tiêu chí chất lượng cuối): đo (review #405 R10): main và HEAD cùng bậc hai (n=16→64: 0,068→1,18 s CPU) do thân trích Θ(n²) theo đầu vào — có từ trước, không phải hồi quy; ngưỡng cũ chỉ xanh nhờ SLACK; tên test canh bậc ba và cpu_budget cho phép ratio 40 cho test canh hàm mũ; bậc ba vẫn bị bắt. Phương án 3 là việc tối ưu riêng, không thuộc lát sửa
+- Đường lùi: trả ratio mặc định trong test_quote_like_repeat_not_cubic khi _quote_exec_scripts tuyến tính (mở task PERF)

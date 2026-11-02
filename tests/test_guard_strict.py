@@ -398,6 +398,161 @@ class NestedShellArgvTest(unittest.TestCase):
         self.assertEqual(decide("docker run img sh -c 'echo ok'")["decision"], "")
 
 
+class NestedShellDebtTest(unittest.TestCase):
+    """T-3633 — nợ review #404 cùng lớp shell lồng: tên shell ít gặp, `eval <(…)`, `xargs -I{} sh -c {}`."""
+
+    DENY = {
+        "AUD-SEC-332 mksh": "cat f.sh | mksh",
+        "AUD-SEC-332 busybox sh": "cat f.sh | busybox sh",
+        "AUD-SEC-332 busybox ash": "cat f.sh | busybox ash",
+        "AUD-SEC-332 ash": "cat f.sh | ash",
+        "AUD-SEC-333 eval": "eval <(cat f)",
+        "AUD-SEC-333 command eval": "command eval <(cat f)",
+        "AUD-SEC-334 -I{}": "cat f.sh | xargs -I{} bash -c {}",
+        "AUD-SEC-334 -IX": "cat f.sh | xargs -IX sh -c X",
+        "AUD-SEC-334 -n 1 -I{}": "cat f.sh | xargs -n 1 -I{} sh -c {}",
+        "AUD-SEC-334 -i": "cat f.sh | xargs -i sh -c '{}'",
+        "AUD-SEC-334 --replace": "cat f.sh | xargs --replace=@ sh -c 'echo; @'",
+        "review #405 R2 --replace trần": "cat f.sh | xargs --replace sh -c {}",
+        "review #405 R2 -0I{}": "cat f.sh | xargs -0I{} sh -c {}",
+        "review #405 R2 -tI{}": "cat f.sh | xargs -tI{} sh -c {}",
+        "review #405 R2 -rI{}": "cat f.sh | xargs -rI{} sh -c {}",
+    }
+    ALLOW = (
+        "echo 'ls' | busybox sh",
+        "busybox ls -la",
+        "printf 'a\\nb\\n' | xargs -I{} echo {}",
+        "cat list.txt | xargs -I{} bash -c 'echo hi'",
+    )
+
+    def test_denied(self):
+        for name, cmd in self.DENY.items():
+            with self.subTest(name):
+                d = guard.bash_decision(cmd, str(ROOT))
+                self.assertEqual((d["decision"], d.get("code")), ("deny", guard.BUDGET), d)
+
+    def test_echo_fed_replace_scanned(self):  # review #405 R2: chữ echo thay vào `{}` là lệnh `sh -c` chạy
+        for cmd in ("echo 'rm -rf ~' | xargs -I{} sh -c {}", "echo 'rm -rf ~' | xargs -I@ bash -c 'cd /; @'"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+        self.assertEqual(decide("echo 'ls' | xargs -I{} sh -c {}")["decision"], "")
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
+class StageLedgerDirTest(unittest.TestCase):
+    """AUD-SEC-248 (T-3633): ghi đè sổ giai đoạn `docs/autopilot/STAGE.json` qua thao tác mức thư mục/glob — cùng chặn
+    như `echo > docs/autopilot/STAGE.json` (EVIDENCE_HANDWRITE); sửa file khác trong `docs/autopilot/` vẫn chạy."""
+
+    DENY = (
+        "cp -rT src docs/autopilot",
+        "cp -r --no-target-directory src docs/autopilot",
+        "cd docs && cp -rT ../src autopilot",
+        "cp -r src/. docs/autopilot",
+        "rsync -a src/ docs/autopilot/",
+        "rsync -a src/ docs/",
+        "tar -xf flat.tar -C docs/autopilot",
+        "tar -C docs -xf src.tar",
+        "tar -Cdocs -xf src.tar",
+        "tar --extract --file=a.tar --directory=docs/autopilot",
+        "tar xf a.tar -C docs",
+        'python3 -c \'import shutil; shutil.copytree("src", "docs/autopilot", dirs_exist_ok=True)\'',
+        'python3 -c \'import shutil; shutil.unpack_archive("a.zip", "docs")\'',
+        "sed -i s/a/b/ docs/autopilot/*",
+        "cp x docs/autopilot/STAGE.jso?",
+        "cp -r -t docs/autopilot src/.",  # review #405 R1
+        "cp -r --target-directory=docs/autopilot src/.",
+        "cp -r --target-directory docs/autopilot src/.",
+        "tar -xC docs -f a.tar",
+        "tar xC docs -f a.tar",
+        "tar xfC a.tar docs",
+        "tar -xf flat.tar -C docs -C autopilot",
+        "tar -xf flat.tar -C docs -C .",
+        "tar --one-top-level=docs/autopilot -xf flat.tar",
+        "tar --one-top-level -xf docs.tar.gz",
+        "tar -xf a.tar --dir=docs",
+        "tar --extract --file a.tar --directory docs/autopilot",
+        "rsync -a src/. docs/autopilot",
+        "rsync -a src/ docs/autopilot --exclude .git",
+    )
+    ALLOW = (
+        "cp notes.md docs/autopilot/PLAN-a.md",
+        "sed -i s/a/b/ docs/autopilot/PLAN-*.md",
+        "tar -xf a.tar -C /tmp/x",
+        "tar xf a.tar",  # gốc dự án không là tổ tiên được bảo vệ (`LEDGER_PATHS`, như `rm -r .` xét ở luật khác)
+        "tar -tf a.tar",
+        "tar -czf out.tgz docs",
+        "cp -r src out/",
+        "rsync -a src/ build/",
+        'python3 -c \'import shutil; shutil.copytree("src", "build")\'',
+        'python3 -c \'import shutil; shutil.copytree("docs/autopilot", "/tmp/bak")\'',  # review #405 R4: nguồn
+        'python3 -c \'import shutil; shutil.copytree("docs", "build/docs")\'',
+        'python3 -c \'import shutil; shutil.copytree("src", "/tmp/x"); print("docs")\'',
+        "tar -xf a.tar -C /tmp -C x",
+        "tar -tvf a.tar -C docs",
+        "tar --extract --file docs.tar --directory /tmp/x",
+        "cp -r -t build src/.",
+        "rsync -a src/ build --exclude .git",
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual(d["decision"], "deny", d)
+                self.assertEqual(d.get("code"), "EVIDENCE_HANDWRITE", d)
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+
+class ExecCallStrictTest(unittest.TestCase):
+    """AUD-SEC-307 (T-3633): chuỗi trong lời gọi thực thi mà sh/bash đọc NGUYÊN VĂN (`os.system('…')`, `subprocess.run(
+    ["bash", "-c", "…"])`) qua tập con chuẩn như lệnh agent gõ; chuỗi guard tự ghép (nối `+`, danh sách argv) giữ lỏng."""
+
+    DENY = (
+        'python3 -c \'import subprocess; subprocess.run(["bash","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        "python3 -c 'import os; os.system(\"echo {#,a}; rm -rf {~,x}\")'",
+        "python3 -c 'import os; os.system(\"x=$(true)# rm -rf ~\")'",
+        'python3 -c \'import subprocess; subprocess.run(["/bin/sh", "-c", "echo `id`"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["bash","-lc","echo {#,a}; rm -rf {~,x}"])\'',  # review #405 R3
+        'python3 -c \'import subprocess; subprocess.run(["bash","-ec","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["bash","-c","-x","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["/usr/bin/env","bash","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["timeout","5","bash","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["busybox","sh","-c","echo {#,a}; rm -rf {~,x}"])\'',
+        'python3 -c \'import os; os.system("""echo {#,a}; rm -rf {~,x}""")\'',
+        'python3 -c \'import subprocess; subprocess.run("""echo {#,a}\nrm -rf {~,x}""", shell=True)\'',
+    )
+    ALLOW = (
+        "python3 -c 'import os; os.system(\"ls -la\")'",
+        'python3 -c \'import subprocess; subprocess.run(["git", "status"])\'',
+        'python3 -c \'import subprocess; subprocess.run(["bash", "-c", "echo hi"])\'',
+    )
+
+    def test_denied(self):
+        for cmd in self.DENY:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny", decide(cmd))
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_verbatim_only_plain_literals(self):
+        self.assertEqual(guard._exec_api_verbatim(["os.system('ls ' + x)"]), [])  # ghép: không phải chữ nguyên văn
+        self.assertEqual(guard._exec_api_verbatim(["os.system(f'ls {x}')"]), [])
+        self.assertEqual(guard._exec_api_verbatim(["subprocess.run(['bash', '-c'])"]), [])
+        self.assertEqual(guard._exec_api_verbatim(["print('os.system(\"rm\")')"]), [])  # chữ trong chuỗi
+        self.assertEqual(guard._exec_api_verbatim(["os.system('a', 'b')"]), ["a"])
+
+
 class GhPostingStrictTest(unittest.TestCase):
     """ADR-0063 lát C: danh sách trắng nguồn thân của `gh` có thể đăng — chữ nguyên văn, `$(cat <<'EOF' …)`, tệp nguyên
     văn ở thư mục biết; còn lại → chặn. Tệp mang dấu thật trong thư mục tạm (bộ đọc nguồn cũ đọc tệp có thật).

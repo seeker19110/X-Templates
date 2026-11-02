@@ -2708,11 +2708,15 @@ class AuditPhase1101GuardTest(unittest.TestCase):
                 self.assertEqual(final(cmd), "")
 
     def test_quote_like_repeat_not_cubic(self) -> None:
-        # AUD-TEST-044: dưới trần thì không bậc hai; trên trần thì CHẶN (bỏ trần → n=400 cho chạy sau ~9 s → đỏ)
+        # AUD-TEST-044: dưới trần thì không bậc BA; trên trần thì CHẶN (bỏ trần → n=400 cho chạy sau ~9 s → đỏ).
+        # AUD-TEST-052: n lần `%(` sinh ~n²/2 ký tự thân trích (mỗi thân chạy tới cuối) — chi phí bậc hai THEO n là do
+        # đầu vào (tuyến tính theo chữ quét); tỉ lệ 10 chỉ xanh nhờ SLACK và đỏ khi cổng chạy song song (đo 14×). Tỉ lệ 40
+        # (cpu_budget: test canh ngân sách) vẫn bắt bậc ba (64×) — đúng tên test; cỡ 16 (không 8) để lần đo nhỏ (~0,07 s)
+        # vượt hẳn FLOOR: bậc ba ở cỡ 64 ~4,5 s > 40 × 0,07 + 0,5.
         def work(n: int) -> None:
             final("perl -e 'system 1;" + "%(" * n + "'")
 
-        cpu_budget.assert_not_quadratic(self, work, 8)
+        cpu_budget.assert_not_quadratic(self, work, 16, ratio=40)
         self.assertEqual(final("perl -e 'system 1;" + "%(" * 400 + "'"), "deny")
 
 

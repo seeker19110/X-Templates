@@ -141,6 +141,17 @@ KNOWN_RED: Dict[str, str] = {}  # biến thể AUD-SEC-202 cũ nay bị chặn b
 # án — guard cho chạy là đúng, nên bất biến deny đơn điệu không áp cho biến thể có bộ bọc `cd-tmp` của các ca này.
 # Ca chặn vì đích tuyệt đối/`~`/mạng (`rm -rf ~`, push main, merge…) vẫn bị đòi deny sau `cd /tmp`.
 CWD_RELATIVE: Dict[str, str] = {
+    "t3633-248-cp-T": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-248)",
+    "t3633-248-tar-C": "docs tương đối → /tmp/docs (AUD-SEC-248)",
+    "t3633-248-glob": "docs/autopilot/* tương đối (AUD-SEC-248)",
+    "t3633-248-copytree": "docs/autopilot tương đối trong script (AUD-SEC-248)",
+    "t405-336-cp-t": "-t docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    "t405-336-tar-cluster": "-C docs tương đối → /tmp/docs (AUD-SEC-336)",
+    "t405-336-tar-oldstyle": "C docs tương đối → /tmp/docs (AUD-SEC-336)",
+    "t405-336-tar-cumulative": "-C docs -C autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    "t405-336-tar-one-top-level": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    "t405-336-rsync-exclude": "docs/autopilot tương đối → /tmp/docs/autopilot (AUD-SEC-336)",
+    "t405-339-copytree-dest": "docs/autopilot tương đối trong script (AUD-SEC-339)",
     "guard-audit1020c-cd-autopilot-script": "cd .autopilot → /tmp/.autopilot",
     "guard-audit1020c-tilde-plus-evidence": "~+ là $PWD = /tmp sau cd",
     "guard-har024-bash-state": ".autopilot/state.json tương đối",
