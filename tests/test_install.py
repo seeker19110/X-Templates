@@ -1890,12 +1890,36 @@ class InstallUpgradeTest(unittest.TestCase):
 
     def test_upgrade_steps_real_changelog_has_no_repeated_clause(self):
         """CHANGELOG thật của khung: không mệnh đề nào xuất hiện hai lần, dù nâng từ bản rất cũ."""
-        text = (install.SRC / "CHANGELOG.md").read_text(encoding="utf-8")
+        text = install.read_changelog(install.SRC)  # cả CHANGELOG-ARCHIVE.md (T-3651)
+        self.assertIn("## [3.0.0]", text)
         clauses = [c for _, cs in install.upgrade_steps(text, (0, 0, 0)) for c in cs]
         self.assertEqual(len(clauses), len(set(clauses)))
 
-    def report(self, previous: str | None, version: str | None, changelog: bytes | None) -> str:
-        """`report_upgrade_steps` với khung giả chỉ có VERSION/CHANGELOG (None = không có file)."""
+    def test_upgrade_steps_read_changelog_archive(self):
+        """T-3651: bản < 3.20.0 dời sang CHANGELOG-ARCHIVE.md — nâng từ bản cũ vẫn in bước "Dự án đích" của bản trong lưu
+        trữ (sau CHANGELOG, đúng thứ tự); lưu trữ không đọc được → một dòng, không lỗi (fail-open)."""
+        main = "## [Unreleased]\n## [3.20.0] - 2026-10-24\n- a Dự án đích: chạy lại.\n".encode()
+        arch = "# lưu trữ\n> Dự án đích: phần đầu — không lấy.\n\n## [3.19.0] - 2026-10-24\n- b Dự án đích: cài lại hook.\n## [3.5.0] - 2026-10-01\n- c Dự án đích: cũ.\n"
+        out = self.report("3.10.0", "3.20.0", main, arch.encode())
+        self.assertEqual(
+            out.splitlines()[1:],
+            [
+                "[install]   [3.20.0]",
+                "[install]   - Dự án đích: chạy lại.",
+                "[install]   [3.19.0]",
+                "[install]   - Dự án đích: cài lại hook.",
+            ],
+        )
+        out = self.report("3.10.0", "3.20.0", main, "# lưu trữ\n> Dự án đích: phần đầu — không lấy.\n".encode())
+        self.assertEqual(out.splitlines()[1:], ["[install]   [3.20.0]", "[install]   - Dự án đích: chạy lại."])
+        out = self.report("3.10.0", "3.20.0", main, b"\xff\xfe")
+        self.assertEqual(len(out.splitlines()), 1, out)
+        self.assertIn("không đọc được CHANGELOG.md của khung", out)
+
+    def report(
+        self, previous: str | None, version: str | None, changelog: bytes | None, archive: bytes | None = None
+    ) -> str:
+        """`report_upgrade_steps` với khung giả chỉ có VERSION/CHANGELOG/CHANGELOG-ARCHIVE (None = không có file)."""
         src = self.tmp / "khung-gia"
         shutil.rmtree(src, ignore_errors=True)
         src.mkdir()
@@ -1903,6 +1927,8 @@ class InstallUpgradeTest(unittest.TestCase):
             (src / "VERSION").write_text(version, encoding="utf-8")
         if changelog is not None:
             (src / "CHANGELOG.md").write_bytes(changelog)
+        if archive is not None:
+            (src / "CHANGELOG-ARCHIVE.md").write_bytes(archive)
         err = io.StringIO()
         with mock.patch.object(install, "SRC", src), redirect_stderr(err):
             install.report_upgrade_steps(previous, "mới")

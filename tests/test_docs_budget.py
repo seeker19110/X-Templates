@@ -22,6 +22,10 @@ DIR_CAPS = {  # nhóm → (pathspec git, trần byte); đo: `git ls-files -z -- 
     "scripts (xt.py, install.py, xt_app)": (("scripts/*.py", "scripts/xt_app/"), 711855 + 1048576),  # 677958 B
     ".claude/hooks": ((".claude/hooks/",), 369393 + 1048576),  # 351803 B
     "framework/11-autonomous-loop": (("framework/11-autonomous-loop/",), 232307 + 1048576),  # 221245 B
+    # Sổ sách (T-3651, AUD-DOC-180, D-302): kích thước sau lưu trữ + 5 %, không cộng 1 MiB — đo 2026-11-02 trên nhánh
+    # t3651-archive (gồm file lưu trữ cùng thư mục: AUDIT-STATUS-ARCHIVE.md, DECISIONS-2026-10.md)
+    "docs/ops": (("docs/ops/",), 1023278),  # 974551 B
+    "docs/autopilot": (("docs/autopilot/",), 720939),  # 686609 B
 }
 
 

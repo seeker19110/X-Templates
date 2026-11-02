@@ -2159,6 +2159,177 @@ class BaseSec002SelfMatchTest(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+FINDING_HEAD = "| ID | Mức | Trạng thái | Tóm tắt | Bằng chứng | Gate | Ghi chú |\n|---|---|---|---|---|---|---|\n"
+
+
+def archive_text(rows=(), table=True):
+    """Sổ lưu trữ (T-3651): chỉ bảng `## Phát hiện` cùng cột với sổ."""
+    body = "## Phát hiện\n\n" + FINDING_HEAD + "".join(f"| {r} |\n" for r in rows) if table else "không có bảng\n"
+    return "# AUDIT-STATUS — lưu trữ\n\n> dòng `đã sửa` cũ, nguyên văn\n\n" + body
+
+
+class LedgerArchiveTest(unittest.TestCase):
+    """T-3651 (AUD-DOC-180): dòng `đã sửa` cũ dời sang `<sổ>-ARCHIVE.md` cạnh sổ — mọi máy đọc sổ đọc cả hai file: ID
+    duy nhất XUYÊN hai file, đếm cả hai, lưu trữ chỉ nhận `đã sửa`; `autonomy-bench` không mất ID 🔴/🟠 đã sửa."""
+
+    FIXED = "AUD-SEC-001 | 🔴 | đã sửa | a | đo được: x | `t` | #12"
+    OPEN = "AUD-SEC-002 | 🟠 | mở | b | đo được: x | `t` | "
+
+    def setUp(self):
+        self.d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.status = self.d / "AUDIT-STATUS.md"
+
+    def books(self, main=(), archive=None, table=True):
+        self.status.write_text(audit_status_text(findings=main), encoding="utf-8")
+        if archive is not None:
+            (self.d / "AUDIT-STATUS-ARCHIVE.md").write_text(archive_text(archive, table), encoding="utf-8")
+
+    def check(self):
+        return xt.audit_check(self.status, today=xt._dt.date(2026, 10, 14))
+
+    def test_archive_path_next_to_ledger(self):
+        self.assertEqual(xt.audit_archive(Path("docs/ops/AUDIT-STATUS.md")), Path("docs/ops/AUDIT-STATUS-ARCHIVE.md"))
+        self.assertEqual(xt.AUDIT_ARCHIVE_DEFAULT, "docs/ops/AUDIT-STATUS-ARCHIVE.md")
+
+    def test_check_counts_both_files_and_ids_unique_across(self):
+        self.books([self.OPEN], [self.FIXED])
+        errors, counts = self.check()
+        self.assertEqual(errors, [])
+        self.assertEqual((counts["🔴 đã sửa"], counts["🟠 mở"], counts["lưu trữ"]), (1, 1, 1))
+        self.books([self.OPEN, self.FIXED.replace("🔴 | đã sửa", "🟢 | mở")], [self.FIXED])
+        self.assertEqual(self.check()[0], ["AUD-SEC-001: ID trùng 2 lần"])
+
+    def test_archive_takes_only_fixed_rows_with_table(self):
+        self.books([], [self.OPEN, "AUD-SEC-004 | 🟢 | đã sửa | c | đo được: x |  | xong"])
+        self.assertEqual(
+            self.check()[0],
+            [
+                "AUD-SEC-002: sổ lưu trữ AUDIT-STATUS-ARCHIVE.md chỉ nhận dòng `đã sửa` (đang `mở`)",
+                "AUD-SEC-004: `đã sửa` phải ghi PR (#N) hoặc SHA ở Ghi chú",
+            ],
+        )
+        self.books([], [], table=False)
+        self.assertEqual(self.check()[0], ["AUDIT-STATUS-ARCHIVE.md: thiếu bảng `## Phát hiện`"])
+
+    def test_no_archive_keeps_counts(self):
+        self.books([self.FIXED])
+        errors, counts = self.check()
+        self.assertEqual((errors, "lưu trữ" in counts), ([], False))
+        (self.d / "AUDIT-STATUS-ARCHIVE.md").mkdir()  # thư mục trùng tên không phải sổ
+        self.assertEqual(self.check()[0], [])
+
+    def test_unreadable_archive_raises_like_ledger(self):
+        self.books([self.FIXED])
+        (self.d / "AUDIT-STATUS-ARCHIVE.md").write_bytes(b"\xff\xfe")
+        with self.assertRaises(ValueError):
+            self.check()
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(xt.main(["audit", "check", str(self.status)]), 2)  # báo gọn, không traceback
+        self.assertIn("không đọc được sổ", err.getvalue())
+
+    def test_open_count_harden_and_bench_read_archive(self):
+        bench_fixed = "AUD-HAR-009 | 🟠 | đã sửa | d | đo được: x | `t` | #3"
+        self.books([self.FIXED], [bench_fixed, self.OPEN])
+        self.assertEqual(xt.audit_open_count(self.status), 1)  # dòng `mở` lọt vào lưu trữ vẫn đếm (check báo lỗi)
+        self.assertEqual([s["ref"] for s in xt._harden_sources(self.d, {}, "AUDIT-STATUS.md")], ["AUD-SEC-002"])
+        need = xt.autonomy_required(self.d, "không-có.md", "AUDIT-STATUS.md")
+        self.assertEqual(need["audit"], ["AUD-SEC-001", "AUD-HAR-009"])
+        self.assertEqual(
+            [r["ID"] for r in xt.audit_findings(self.status)], ["AUD-SEC-001", "AUD-HAR-009", "AUD-SEC-002"]
+        )
+
+
+class ChangelogArchiveTest(unittest.TestCase):
+    """T-3651: bản < 3.20.0 ở `CHANGELOG-ARCHIVE.md` cạnh CHANGELOG — `changelog-check` kiểm tiếp phần lưu trữ như đuôi
+    của CHANGELOG (giảm dần, ngày, nhóm), không nhận `[Unreleased]` trong lưu trữ; bản mới nhất vẫn so VERSION."""
+
+    MAIN = "# Changelog\n\n## [Unreleased]\n\n## [3.20.0] - 2026-10-24\n\n### Added\n- a\n"
+    ARCH = "# Changelog — lưu trữ\n\n> bản < 3.20.0\n\n## [3.19.2] - 2026-10-24\n\n### Fixed\n- b\n\n## [3.0.0] - 2026-10-18\n"
+
+    def test_check_continues_into_archive(self):
+        self.assertEqual(xt.changelog_check(self.MAIN, "3.20.0", self.ARCH), [])
+        newer = xt.changelog_check(self.MAIN, "3.20.0", self.ARCH.replace("3.19.2", "3.21.0"))
+        self.assertEqual(newer, ["`## [3.21.0] - 2026-10-24`: phiên bản phải giảm dần (bản mới nhất trước)"])
+        later = self.ARCH.replace("[3.19.2] - 2026-10-24", "[3.19.2] - 2026-10-25")
+        self.assertEqual(
+            xt.changelog_check(self.MAIN, "3.20.0", later),
+            ["`## [3.19.2] - 2026-10-25`: ngày phải giảm dần theo bản (bản cũ không mới hơn bản mới)"],
+        )
+        errs = xt.changelog_check(self.MAIN, None, "## [Unreleased]\n\n## [3.1.0] - 2026-10-01\n\n### Misc\n")
+        self.assertEqual(len(errs), 2, errs)
+        self.assertIn("`## [Unreleased]`: phải dạng `## [X.Y.Z] - YYYY-MM-DD`", errs[0])
+        self.assertIn("nhóm `### Misc` không thuộc", errs[1])
+        self.assertEqual(xt.changelog_check("## [Unreleased]\n", "3.19.2", self.ARCH), [])  # mới nhất ở lưu trữ
+
+    def test_cli_reads_archive_next_to_file(self):
+        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (d / "CHANGELOG.md").write_text(self.MAIN, encoding="utf-8")
+        (d / "VERSION").write_text("3.20.0\n", encoding="utf-8")
+
+        def run() -> tuple[int, str]:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = xt.main(["changelog-check", str(d / "CHANGELOG.md")])
+            return rc, out.getvalue()
+
+        self.assertEqual(run()[0], 0)
+        (d / "CHANGELOG-ARCHIVE.md").write_text(self.ARCH.replace("3.19.2", "3.21.0"), encoding="utf-8")
+        rc, out = run()
+        self.assertEqual(rc, 1)
+        self.assertIn("[3.21.0] - 2026-10-24`: phiên bản phải giảm dần", out)
+        (d / "CHANGELOG-ARCHIVE.md").write_text(self.ARCH, encoding="utf-8")
+        self.assertEqual(run()[0], 0)
+
+    def test_real_changelog_and_archive_pass(self):
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        archive = (ROOT / "CHANGELOG-ARCHIVE.md").read_text(encoding="utf-8")
+        self.assertEqual(xt.changelog_check((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), version, archive), [])
+        self.assertNotIn("## [3.20.0]", archive)
+        self.assertIn("## [3.19.2]", archive)
+
+
+class DecisionLogsTest(unittest.TestCase):
+    """T-3651: DECISIONS.md tách theo tháng (`DECISIONS-YYYY-MM.md` cạnh sổ) — `prod_switch` (release-check/next-step) và
+    tra D-NNN đọc cả bản tháng; `loop decide` vẫn ghi DECISIONS.md."""
+
+    def setUp(self):
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.dir = self.base / "docs" / "autopilot"
+        self.dir.mkdir(parents=True)
+        (self.dir / "DECISIONS.md").write_text("# Nhật ký\n\n### D-003 · t · c\n", encoding="utf-8")
+
+    def test_decision_logs_month_files_then_current(self):
+        for name in ("DECISIONS-2026-10.md", "DECISIONS-2026-09.md", "DECISIONS-old.md", "DECISIONS-2026-1.md"):
+            (self.dir / name).write_text("x\n", encoding="utf-8")
+        (self.dir / "DECISIONS-2026-11.md").mkdir()
+        got = [p.name for p in xt.decision_logs(self.dir / "DECISIONS.md")]
+        self.assertEqual(got, ["DECISIONS-2026-09.md", "DECISIONS-2026-10.md", "DECISIONS.md"])
+        odd = self.base / "n[a]" / "D.md"  # tên sổ có ký tự glob: chỉ khớp nguyên văn
+        odd.parent.mkdir()
+        (odd.parent / "D-2026-10.md").write_text("x\n", encoding="utf-8")
+        self.assertEqual([p.name for p in xt.decision_logs(odd)], ["D-2026-10.md", "D.md"])
+
+    def test_prod_switch_counts_month_files(self):
+        label = f"- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n"
+        (self.dir / "DECISIONS-2026-10.md").write_text("### D-001 · t · q\n" + label, encoding="utf-8")
+        row = xt._release_prod_switch(self.base)
+        self.assertEqual((row["result"], row["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("1 đề xuất", row["evidence"])
+        (self.dir / "DECISIONS-2026-10.md").write_bytes(b"\xff\xfe")
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "FAIL")
+        (self.dir / "DECISIONS-2026-10.md").unlink()
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "PASS")
+
+    def test_decision_at_reads_month_files(self):
+        (self.dir / "DECISIONS-2026-10.md").write_text(
+            "### D-002 · 2026-10-30T01:00:00+00:00 · PR #7: tách hay đóng?\n", encoding="utf-8"
+        )
+        with unittest.mock.patch.object(xt, "loop_root", return_value=self.base):
+            when = xt._decision_at(self.base, "D-002", "7")
+        self.assertEqual(when, datetime.datetime(2026, 10, 30, 1, tzinfo=datetime.timezone.utc))
+
+
 class RebaseLinksAnchorTest(unittest.TestCase):
     """Phản hồi dự án đích: anchor nội trang `(#x)` của mục module giữ nguyên khi sang BLUEPRINT → link gãy."""
 
