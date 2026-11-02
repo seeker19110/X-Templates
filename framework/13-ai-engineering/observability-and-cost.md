@@ -3,7 +3,7 @@ title: Quan sát & chi phí: trace OTel GenAI, token, gateway, failover
 kind: module
 prefix: AI-OBS
 applies_to: [ai-agent, agentic-system, data-ml, api-service, web-app]
-updated: 2026-10-16
+updated: 2026-11-02
 ---
 
 # Quan sát & chi phí: trace OTel GenAI, token, gateway, failover
@@ -58,7 +58,7 @@ instrumentation đang dùng trong ADR và kiểm lại khi nâng.
 - [ ] `AI-OBS-001` **MUST** Mỗi lời gọi model có span với `gen_ai.provider.name`, `gen_ai.operation.name`, `gen_ai.request.model`, model phản hồi thực tế, `gen_ai.usage.input_tokens`/`output_tokens` (và token cache nếu có). → Kiểm: trace mẫu trong staging có đủ thuộc tính; test instrumentation. · Nguồn: OTel GenAI semconv
 - [ ] `AI-OBS-002` **MUST@L** Chi phí tính từ `usage` × bảng giá theo model thực tế đã phục vụ, lưu theo request với `tenant_id`, `feature`, `trace_id`. → Kiểm: truy vấn chi phí theo tenant/ngày khớp hoá đơn nhà cung cấp ±5%.
 - [ ] `AI-OBS-003` **MUST** Ngân sách token/tiền theo tenant và theo tính năng có cảnh báo ở 80% và chặn ở 100% (trả lỗi có mã), cấu hình được. → Kiểm: test vượt hạn mức; dashboard ngân sách. · Nguồn: [`llm-app-foundations.md`](llm-app-foundations.md)
-- [ ] `AI-OBS-004` **MUST** Nội dung prompt/response không ghi vào trace/log mặc định; bật Opt-In theo môi trường, có che PII, thời hạn lưu và quyền xem. → Kiểm: config mặc định tắt; log production không chứa prompt thô. · Nguồn: OTel GenAI semconv (content capture Opt-In); [`../16-compliance-privacy/privacy-by-design.md`](../16-compliance-privacy/privacy-by-design.md)
+- [ ] `AI-OBS-004` **MUST** Nội dung prompt/response không ghi vào trace/log mặc định; bật Opt-In theo môi trường, có che PII (danh mục: `BASE-ERR-007`), thời hạn lưu và quyền xem. → Kiểm: config mặc định tắt; log production không chứa prompt thô. · Nguồn: OTel GenAI semconv (content capture Opt-In); [`../16-compliance-privacy/privacy-by-design.md`](../16-compliance-privacy/privacy-by-design.md)
 - [ ] `AI-OBS-005` **MUST@L** Failover sang nhà cung cấp khác chỉ trên 401/403/429/quota (và sau khi retry tại chỗ thất bại với 5xx); không failover trên 400; stream đã gửi chunk không failover. → Kiểm: test bảng tín hiệu → hành động; log model/provider thực tế. · Nguồn: stored 10
 - [ ] `AI-OBS-006` **MUST@L** Nhà cung cấp bị lỗi có cooldown (401 → 300 s; 402/403/429 → 3600 s; `Retry-After` ưu tiên) và endpoint `/health` trả 503 khi không còn nhà cung cấp khả dụng. → Kiểm: test cooldown; probe `/health`. · Nguồn: stored 10
 - [ ] `AI-OBS-007` **MUST@L** Fallback đổi model/nhà cung cấp được ghi trong span (`gen_ai.response.model` khác request) và có cảnh báo khi tỉ lệ fallback > ngưỡng (vd 5%/giờ). → Kiểm: dashboard tỉ lệ fallback; alert rule.
