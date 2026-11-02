@@ -325,8 +325,15 @@ class DoctorHooksTest(DoctorCase):
                 self.assertFalse(self.real_in_container())
             with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/.dockerenv"):
                 self.assertTrue(self.real_in_container())
-            with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+            with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/run/.containerenv"):
                 self.assertTrue(self.real_in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_CONTAINER_ID": "c-1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
+                    self.assertFalse(self.real_in_container())
 
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,
