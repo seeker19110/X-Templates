@@ -735,7 +735,7 @@ def _letter_forms(cmd: str) -> List[str]:
     return [re.sub(r"[^A-Za-z0-9]", "", y) for x in bases for y in (x, HEAD_EXPANSION_RE.sub("", x))]  # 8 dạng (D-276)
 
 
-def _shell_precheck(cmd: str, strict: bool = True) -> None:
+def _shell_precheck(cmd: str, strict: bool = True, cwd: Optional[str] = None) -> None:
     """Trước khi quét (D-271), chỗ guard không đọc như bash → chặn:
     - dòng có `#` có thể mở comment mà kết bằng `\\` lẻ: bash KHÔNG nối dòng trong comment (`true # \\` ↵
       `git push --force origin main` chạy `push`) còn guard nối; đọc nháy để phân định cũng lệch (`"$(true # \\`, nháy
@@ -748,7 +748,7 @@ def _shell_precheck(cmd: str, strict: bool = True) -> None:
         raise ScanTooComplex("comment/nháy lẻ làm lệch `$'…'` của dòng sau (guard giải ANSI-C trước khi bỏ comment)")
     if any(ALIAS_TABLE_LETTERS in f for f in _letter_forms(cmd)):
         raise ScanTooComplex(f"`{ALIAS_TABLE}` định nghĩa alias")
-    why = _strict_why(cmd) if strict else ""
+    why = _strict_why(cmd, cwd) if strict else ""
     if why:
         raise ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
 
@@ -908,7 +908,7 @@ class _CodeView:
         return end
 
 
-def _strict_why(cmd: str) -> str:
+def _strict_why(cmd: str, cwd: Optional[str] = None) -> str:
     """ADR-0063: lý do lệnh ra ngoài tập con guard đọc chắc như bash (rỗng = trong tập con)."""
     lines = join_continuations(cmd).split("\n")
     for _, m, a, b, _ in _here_scan("\n".join(lines)):
@@ -929,7 +929,7 @@ def _strict_why(cmd: str) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _dyn_text_why(v, live, bare)
+    return why or _dyn_text_why(v, live, bare) or _gh_strict_why(v.s, live, cwd)
 
 
 def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
@@ -971,6 +971,259 @@ def _word_end(v: _CodeView, i: int, whole_command: bool) -> int:
     while i < len(v.s) and not (v.kind[i] == "c" and v.top[i] and v.s[i] in stops):
         i += 1
     return i
+
+
+# ADR-0063 lớp đăng review — DANH SÁCH TRẮNG nguồn thân của `gh` có thể đăng (review lát C trước PR: vá từng dạng
+# không hội tụ). Thân chỉ được là chữ nguyên văn (`-b/--body/-c/--comment/-f '…'`), `$(cat <<'EOF' … EOF)`, hoặc tệp
+# (`-F`/`--body-file`/`--input`/`-F k=@tệp`) là đường dẫn nguyên văn mà guard biết thư mục; còn lại → chặn: stdin
+# (`-`, `/dev/*`, `/proc/*`, `@-`), `$(…)`/backtick/`$biến` trong thân, `-e/--editor`, hàm/`coproc`/`xargs` bọc `gh`,
+# đường tương đối sau khi đổi thư mục (`cd`, `env -C`), `~` khi gán `HOME`, `gh alias`/`extension`/lệnh con lạ (alias
+# người dùng), tên `gh` dựng lúc chạy (AUD-SEC-180/186/191/192/193/244/253). Dấu nguyên văn: luật cũ (`REVIEW_MARK_RE`).
+GH_TOPICS = frozenset({"pr", "issue", "api", "alias", "extension", "ext", "release", "repo", "gist", "label"})
+GH_BUILTINS = GH_TOPICS | {
+    "a11y", "accessibility", "agent-task", "attestation", "auth", "browse", "cache", "co", "codespace", "completion",
+    "config", "copilot", "gpg-key", "help", "licenses", "org", "preview", "project", "ruleset", "run", "search",
+    "secret", "skill", "ssh-key", "status", "variable", "version", "workflow",
+}  # fmt: skip
+GH_POST_VERBS = frozenset({"comment", "review", "create", "edit", "close", "reopen"})
+GH_API_WRITE = ("-f", "--raw-field", "-F", "--field", "--input")
+GH_TEXT_FLAGS = ("-b", "--body", "-c", "--comment", "--body-file") + GH_API_WRITE
+GH_SAFE_SUB = {"alias": ("list", "ls"), "extension": ("list", "ls", "search", "browse")}
+GH_CAT_HEREDOC_RE = re.compile(r"\$\(\s*cat\s+<<-?\s*(['\"])(\w+)\1[ \t]*\n.*\n[ \t]*\2[ \t]*\n\s*\)", re.S)
+GH_DYN_RE = re.compile(r"\$[A-Za-z_{(]|`")
+# Khâu sinh chữ guard thấy được (trong `$(…)` của thân, hoặc trước `gh -F -` trong ống): đọc tệp nguyên văn và lọc
+# dòng/đếm (luật cũ đọc tệp thật, bắt dấu trong đó), chữ nguyên văn, ngày, `git rev-parse`. KHÔNG (D-301): liệt kê tên
+# tệp (`ls`/`find`/`du`/`git status` — tên tệp mang được dấu), thông điệp commit (`git log/show`), biến đổi chữ
+# (`awk`/`sed`/`tr`/`printf '\x…'`), trình thông dịch/`pytest`/`make`, `$biến`.
+GH_READERS = frozenset({"cat", "head", "tail", "grep", "wc", "sort", "uniq"})
+GH_LITERALS = frozenset({"echo", "printf", "date", "true", "nproc"})
+GH_API_MARK_RE = re.compile(r"(?:^|/)(?:comments|reviews)(?:/|$|\?)|^/?graphql$|[$`]")
+GH_FUNC_RE = re.compile(r"\(\s*\)\s*[{(]|\bfunction\s+\S")
+GH_CWD = "\0xt-cwd"  # thư mục đầu khi không biết `cwd`: khác nó = lệnh chạy sau khi đổi thư mục
+GH_STDIN_PATHS = ("-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0")
+
+
+def _gh_flag_values(args: List[str], flags: Tuple[str, ...]) -> List[Tuple[str, str]]:
+    """(cờ, giá trị) của các cờ trong `flags`: `-F v`, `-Fv`, `-F=v`, `--body-file=v`."""
+    out = []
+    for i, x in enumerate(args):
+        for f in flags:
+            if x == f:
+                out.append((f, args[i + 1] if i + 1 < len(args) else ""))
+            elif x.startswith(f + "=") or (len(f) == 2 and x.startswith(f) and len(x) > 2):
+                out.append((f, x[len(f) :].removeprefix("=")))
+    return out
+
+
+def _gh_kind(n: List[str], line: "_GhLine") -> str:
+    """`deny` (alias/extension/lệnh con lạ), `post` (`gh` có thể đăng thân), rỗng (chỉ đọc/khác)."""
+    topic = n[1]
+    topic = "extension" if topic == "ext" else topic
+    if topic in GH_SAFE_SUB:
+        return "" if n[2:3] and n[2] in GH_SAFE_SUB[topic] else "deny"
+    if topic[:1] != "-" and topic not in GH_BUILTINS:
+        return "deny"
+    if topic == "api":
+        return "post" if _gh_api_posts(n[2:], line) else ""
+    if topic not in ("pr", "issue"):
+        return ""
+    return "post" if _gh_verb(n[2:]) in GH_POST_VERBS else ""
+
+
+def _gh_api_posts(args: List[str], line: "_GhLine") -> bool:
+    """`gh api` ghi vào endpoint đọc dấu (comment/review, graphql) hoặc endpoint dựng lúc chạy — releases/rulesets/merge
+    để luật cũ. graphql chỉ đọc (trường `query` là chữ nguyên văn không `mutation`, không phương thức/`--input`) thì
+    biến khác (`-F n=$N`) không biến nó thành ghi."""
+    method = [v.upper() for _, v in _gh_flag_values(args, ("-X", "--method"))]
+    fields = _gh_flag_values(args, GH_API_WRITE)
+    if not (fields or {"POST", "PATCH", "PUT"} & set(method)):
+        return False
+    if not any(GH_API_MARK_RE.search(x) for x in args if x[:1] != "-"):
+        return False
+    queries = [v for f, v in fields if v.startswith("query=")]
+    read_gql = "graphql" in args and not method and all(f != "--input" for f, _ in fields)
+    read_gql = (
+        read_gql
+        and bool(queries)
+        and not any("mutation" in q or "=@" in q or any(m in q for m in line.live_dyn) for q in queries)
+    )
+    return not read_gql
+
+
+def _gh_verb(args: List[str]) -> str:
+    """Lệnh con sau nhóm `pr`/`issue`, bỏ cờ toàn cục `-R/--repo <repo>` (`gh pr -R o/r comment`)."""
+    skip = False
+    for x in args:
+        if skip or x in ("-R", "--repo"):
+            skip = not skip
+        elif x[:1] != "-":
+            return x
+    return ""
+
+
+class _GhLine(NamedTuple):
+    """Ngữ cảnh cả dòng lệnh cho luật `gh`: gán `HOME`, có định nghĩa hàm, dạng mở rộng ngoài nháy đơn."""
+
+    home: bool
+    func: bool
+    live_dyn: Set[str]
+
+
+class _GhCmd(NamedTuple):
+    """Một lệnh `gh` có thể đăng: argv chuẩn hoá, chạy sau khi đổi thư mục, các khâu trước nó trong ống."""
+
+    n: List[str]
+    moved: bool
+    up: List[List[str]]
+    line: _GhLine
+
+
+def _gh_path_bad(path: str, moved: bool, home: bool) -> bool:
+    """Tệp guard không lần được: stdin, `/dev`/`/proc`, đường tương đối sau khi đổi thư mục, `~` khi gán `HOME`, rỗng."""
+    return (
+        not path
+        or path in GH_STDIN_PATHS
+        or path.startswith(("/dev/", "/proc/"))
+        or (moved and not path.startswith("/"))
+        or (home and path.startswith("~"))
+    )
+
+
+def _gh_operands(args: List[str]) -> List[str]:
+    """Đối số không phải cờ và đích `<` của một khâu (đích `>`/`>&` bỏ) — những thứ khâu đọc như tệp."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif _is_redirect(a):
+            skip = "<" not in a
+        elif a[:1] != "-" or a == "-":
+            out.append(a)
+    return out
+
+
+def _gh_stage_seen(n: List[str], moved: bool, home: bool, first: bool) -> bool:
+    """Khâu sinh chữ guard thấy được (`GH_READERS`/`GH_LITERALS`, `git rev-parse`); khâu lọc không tệp chỉ khi không
+    đứng đầu (đầu ống đọc stdin của shell — `exec < f`)."""
+    if not n:
+        return True
+    if any(GH_DYN_RE.search(a) for a in n[1:]):
+        return False
+    if n[0] in GH_READERS:
+        files = _gh_operands(n[1:])
+        return bool(files or not first) and not any(_gh_path_bad(f, moved, home) for f in files)
+    if n[0] in GH_LITERALS:
+        return not any("\\" in a or "%b" in a for a in n[1:]) and "-e" not in n
+    return n[:2] == ["git", "rev-parse"]
+
+
+def _gh_text_seen(script: str, moved: bool, home: bool) -> bool:
+    for pipe in pipelines(tokenize(script)):
+        stages = [normalize(s) for s in pipe if s]
+        if not all(_gh_stage_seen(st, moved, home, i == 0) for i, st in enumerate(stages)):
+            return False
+    return True
+
+
+def _gh_substs(s: str) -> Optional[Tuple[str, List[str]]]:
+    """(chữ ngoài `$(…)`, các script trong `$(…)`) của thân; ngoặc không cân → None."""
+    rest, inner, i = [], [], 0
+    while (j := s.find("$(", i)) >= 0:
+        depth, k = 0, j + 1
+        while k < len(s):
+            depth += {"(": 1, ")": -1}.get(s[k], 0)
+            if depth == 0:
+                break
+            k += 1
+        if k >= len(s):
+            return None
+        rest.append(s[i:j])
+        inner.append(s[j + 2 : k])
+        i = k + 1
+    rest.append(s[i:])
+    return "".join(rest), inner
+
+
+def _gh_body_dynamic(val: str, c: _GhCmd) -> bool:
+    """Thân dựng lúc chạy: có dạng mở rộng mà chữ ngoài nháy đơn cũng có (`'query($n: …)'` là chữ), trừ
+    `$(cat <<'EOF' …)` và `$(…)` chỉ gồm khâu thấy chữ (`_gh_stage_seen`)."""
+    if not any(m in val for m in c.line.live_dyn):
+        return False
+    body = val.strip().split("=", 1)[1] if c.n[1] == "api" and "=" in val else val.strip()
+    if GH_CAT_HEREDOC_RE.fullmatch(body):
+        return False
+    parts = _gh_substs(body)
+    if parts is None or GH_DYN_RE.search(parts[0]):
+        return True
+    return not all(_gh_text_seen(x, c.moved, c.line.home) for x in parts[1])
+
+
+def _gh_stdin_seen(c: _GhCmd) -> bool:
+    """stdin của `gh`: chuyển hướng trên chính `gh` (heredoc gập — thân thay lệnh để lại `<<< $(…)` —, `< tệp` nguyên
+    văn ở thư mục biết, `<&-`), hoặc ống mà mọi khâu trước thấy chữ; nhóm/hàm/`exec <`/`>(…)` → không."""
+    n = c.n
+    redirs = [(op, w) for op, w in zip(n, n[1:]) if op in ("<", "<<", "<<-", "<<<", "<&")]
+    for op, w in redirs:
+        dyn = bool(GH_DYN_RE.search(w))
+        if (op == "<" and _gh_path_bad(w, c.moved, c.line.home)) or (op == "<<<" and dyn) or (op == "<&" and w != "-"):
+            return False
+    if redirs:
+        return True
+    return bool(c.up) and all(_gh_stage_seen(normalize(s), c.moved, c.line.home, i == 0) for i, s in enumerate(c.up))
+
+
+def _gh_body_why(c: _GhCmd) -> str:
+    n = c.n
+    if "-e" in n or "--editor" in n:
+        return "`gh … --editor`: thân do lệnh editor sinh"
+    for f, val in _gh_flag_values(n[2:], GH_TEXT_FLAGS):
+        if _gh_body_dynamic(val, c):
+            return f"thân `{f}` dựng lúc chạy bằng khâu guard không thấy chữ (`$(…)`/backtick/`$biến`)"
+        path = None
+        if f in ("--body-file", "--input") or (f == "-F" and n[1] != "api"):
+            path = val
+        elif f in ("-F", "--field") and "=@" in val:
+            path = val.split("=@", 1)[1]
+        if path is None:
+            continue
+        bad = not _gh_stdin_seen(c) if path in GH_STDIN_PATHS else _gh_path_bad(path, c.moved, c.line.home)
+        if bad:
+            return f"thân `{f} {path}` từ stdin/tệp guard không lần được (ống, đổi thư mục, `HOME`)"
+    return ""
+
+
+def _gh_cmd_why(raw: List[str], moved: bool, line: _GhLine, up: List[List[str]]) -> str:
+    n = normalize(raw)
+    wrapped = line.func or any(posixpath.basename(t) == "xargs" for t in raw[: len(raw) - len(n)])
+    if n[:1] in (["coproc"], ["function"], ["{"]) and "gh" in n:  # `function f { gh …`: thân hàm cùng lệnh đơn
+        n, wrapped = n[n.index("gh") :], True
+    if len(n) < 2:
+        return ""
+    if n[0] != "gh":
+        return "tên `gh` dựng lúc chạy (AUD-SEC-192)" if GH_DYN_RE.search(n[0]) and n[1] in GH_TOPICS else ""
+    kind = _gh_kind(n, line)
+    if kind == "deny":
+        return "`gh alias`/`extension`/lệnh con lạ — có thể đăng thân guard không thấy (AUD-SEC-193)"
+    if kind and wrapped:
+        return "`gh` đăng qua hàm/`coproc`/`xargs` — guard không thấy thân (AUD-SEC-191/192)"
+    return _gh_body_why(_GhCmd(n, moved, up, line)) if kind else ""
+
+
+def _gh_strict_why(folded: str, live: str, cwd: Optional[str]) -> str:
+    if not re.search(r"gh|\b(?:pr|issue|api|alias|ext)\b", folded):
+        return ""
+    line = _GhLine(bool(re.search(r"\bHOME=", live)), bool(GH_FUNC_RE.search(live)), set(GH_DYN_RE.findall(live)))
+    start = posixpath.normpath(cwd) if cwd else GH_CWD  # `cd <thư mục đang đứng> && …` không tính là đổi thư mục
+    toks = tokenize(folded)
+    cmds = _commands_with_cwd(toks, start)
+    # khâu trước mỗi lệnh đơn trong ống của nó; hai cách chia lệch nhau (không nên xảy ra) → coi như không có ống
+    ups = [[s for s in pipe[:k] if s] for pipe in pipelines(toks) for k, st in enumerate(pipe) if st]
+    ups = ups if len(ups) == len(cmds) else [[] for _ in cmds]
+    for (raw, d), up in zip(cmds, ups):
+        why = _gh_cmd_why(raw, d is None or posixpath.normpath(d) != start, line, up)
+        if why:
+            return f"{why} — chỉ `xt.py pr reviewed` đăng dấu review (ADR-0063, AUD-SEC-191/192/193/253)"
+    return ""
 
 
 def _may_be_alias(head: str) -> bool:
@@ -3272,8 +3525,10 @@ REVIEW_MARK_RE = re.compile(
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
-    r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)\b"
-    r"|api\b.*?(?:\s-[fF]\b|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
+    # cờ toàn cục giữa nhóm và lệnh con (`gh pr -R o/r comment`), cờ trường dính (`-fbody=…`), `close/reopen -c` —
+    # AUD-SEC-193; tên cờ `-{1,2}\w[\w-]*` khớp một cách duy nhất (`[\w-]+` sau `-{1,2}` là ReDoS 2^n — review lát C)
+    r"\bgh\b.*?\b(?:(?:pr|issue)(?:\s+-{1,2}\w[\w-]*(?:[=\s]+[^\s-]\S*)?)*\s+(?:comment|review|create|edit|close|reopen)\b"
+    r"|api\b.*?(?:\s-[fF]|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
     re.S,
 )
 GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
@@ -4204,7 +4459,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
         return gh_pr_merge_rule(args[2:], root)
     if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
         return _pr_flag_merge_rule(args, root)
-    if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
+    if name == "gh" and args[:2] == ["alias", "import"]:  # `alias set`: ADR-0063 lát C chặn trước
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)
@@ -9114,7 +9369,7 @@ def _bash_decision(
             code=BUDGET,
         )
         return res
-    _shell_precheck(cmd, strict)
+    _shell_precheck(cmd, strict, cwd)
     _heredoc_precheck(cmd, whole)
     tokens = tokenize(cmd)
     rx = remote_exec(cmd, tokens)

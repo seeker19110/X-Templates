@@ -1,6 +1,6 @@
 # AUDIT-REPORT — Khung X-Templates · 2026-11-02 (toàn bộ)
 
-> Commit: `1e3c060` (#398, `main`) · Phạm vi: toàn bộ 13 nhóm (A11Y chỉ smoke, DATA N/A) · Người quét: phiên chính + 4 cụm
+> Commit quét: `1e3c060` (#398, `main`); sau quét merge #399 (lát C guard, `c346bdb`) — 7 🟠 dấu review đã sửa, 4 🔴 và AUD-SEC-248 kiểm lại ở `c346bdb` vẫn tái hiện · Phạm vi: toàn bộ 13 nhóm (A11Y chỉ smoke, DATA N/A) · Người quét: phiên chính + 4 cụm
 > song song (mã `xt.py`/`install.py`/`xt_app` · harness `.claude/` + guard · nội dung `framework/` · CI/vận hành/sổ) ·
 > Xác minh đối kháng: 15 phát hiện quan trọng nhất, mỗi phát hiện một agent độc lập cố bác bỏ bằng lệnh thật →
 > 9 CONFIRMED · 6 PARTIAL (số liệu đính chính, ghi ở §4) · 0 REFUTED.
@@ -11,8 +11,8 @@
 | Mức | Mở (mới hôm nay) | Mở có từ trước | Ghi chú |
 |---|---|---|---|
 | 🔴 | 0 | 4 (AUD-SEC-247, 309, 310, 311) | cùng lớp "shell dựng lúc chạy" — tái hiện lại ở HEAD: `cat f.sh \| sh 2>&1` → quyết định rỗng |
-| 🟠 | 3 (AUD-CODE-036, AUD-HAR-197, AUD-SEC-323) | 20 | 🟠 có từ trước tái hiện: AUD-SEC-248 (`cp -rT scripts docs/autopilot` cho qua) |
-| 🟢 | 22 (AUD-HAR-198/199, CODE-037/038, ARCH-008, PERF-012/013, TEST-049/050, CI-027/028, DEP-010, DOC-174…181, XFEAT-046) | 304 | AUD-HAR-036 (NotebookEdit) xác nhận còn đúng |
+| 🟠 | 3 (AUD-CODE-036, AUD-HAR-197, AUD-SEC-329) | 13 (sau #399) | 🟠 có từ trước tái hiện: AUD-SEC-248 (`cp -rT scripts docs/autopilot` cho qua) |
+| 🟢 | 21 (AUD-HAR-198/199, CODE-037/038, ARCH-008, PERF-013/013, TEST-050/050, CI-027/028, DEP-010, DOC-175…181, XFEAT-046) | 305 | AUD-HAR-036 (NotebookEdit) xác nhận còn đúng |
 
 Kết luận một câu: **3.30.0 vẫn NO-GO** vì 4 🔴 guard có từ trước; ba 🟠 mới không chặn phát hành nhưng hai trong đó (sổ review mất bản ghi khi chạy song song, G7 không ép GO-NO-GO) làm bằng chứng của quy trình kém tin cậy nên sửa trước khi cắt bản.
 
@@ -54,11 +54,11 @@ Số đo nền (hôm nay): `xt.py` 14.774 dòng / 828 hàm · `guard.py` 9.392 d
 - **Xác minh đối kháng:** CONFIRMED.
 - **Đề xuất sửa:** hàng `go_no_go_file` (BLOCKER ở M/L: `docs/ops/GO-NO-GO-*-v<VERSION>.md` tồn tại, không còn `[ ]` BLOCKER); bổ sung GO-NO-GO 3.29.0 hồi tố có ghi chú. **Gate:** `python3 scripts/xt.py release-check`
 
-### AUD-SEC-323 🟠 Chính sách guard suy từ chuỗi lý do tiếng Việt; đổi câu chữ biến deny thành cho qua
+### AUD-SEC-329 🟠 Chính sách guard suy từ chuỗi lý do tiếng Việt; đổi câu chữ biến deny thành cho qua
 - **Bằng chứng:** đo được — `.claude/hooks/guard.py:9169-9224` `REASON_CODES`/`DANGER_MARKERS` khớp cụm chữ trong lý do; `:9248` `reason_code` dò `m in reason` khi nơi sinh chưa đặt `code` (chỉ 2 nơi đặt tường minh: `:9084` BUDGET, `:9324` UNPARSED); 20/34 dấu là chuỗi literal (vd `:1829` "push thẳng nhánh chính"). Test `:5223` chỉ kiểm `DANGER_MARKERS == REASON_CODES` (tautology); end-to-end ~10 lệnh nguy hiểm + `assert_code` cho HOOK_BYPASS/REMOTE_REF_FORGE/PUSH_MAIN; STASH_DROP, HOST_CONTAINER, SECRET_WRITE, STAGE_APPROVE không có test khoá. ADR-0018 §Hệ quả (dòng 43) thừa nhận.
 - **Tái hiện:** 1. `apply_policy` với ask "push thẳng nhánh chính…" → deny/PUSH_MAIN. 2. Đổi chữ thành "đẩy thẳng lên nhánh chính…" → `''` OTHER_ASK (cho qua).
 - **Xác minh đối kháng:** PARTIAL — đúng cốt lõi; chiều rủi ro chủ yếu deny → cho qua; 14/34 dấu dùng hằng chung nên bền.
-- **Đề xuất sửa:** mỗi luật trả `code` tường minh, `REASON_CODES` chỉ còn fallback; test duyệt mọi mã có ≥ 1 ca end-to-end; cập nhật ADR-0017 §2 cho khớp mã (AUD-DOC-180). **Gate:** `python3 -m unittest -q tests.test_hooks -k reason_code`
+- **Đề xuất sửa:** mỗi luật trả `code` tường minh, `REASON_CODES` chỉ còn fallback; test duyệt mọi mã có ≥ 1 ca end-to-end; cập nhật ADR-0017 §2 cho khớp mã (AUD-DOC-181). **Gate:** `python3 -m unittest -q tests.test_hooks -k reason_code`
 
 ### Đính chính sau xác minh đối kháng (so với báo cáo của các cụm quét)
 - `uses:` trong `ci.yml` là 19 (không phải 33); checkout không `persist-credentials` là 9 (không 7); 6 job cài cả 3.11 + 3.14 là chủ ý ghi ở dòng 49.
@@ -69,7 +69,7 @@ Số đo nền (hôm nay): `xt.py` 14.774 dòng / 828 hàm · `guard.py` 9.392 d
 - `OPS-OBS-008` và `AI-OBS-004` chỉ chung một vế; `BASE-DEP-013`/`PRF-LIB-005` lặp `SEC-SUPPLY-021` (không phải `SEC-SECRET-009`).
 - `yaml_scalar` có test gián tiếp qua `_yaml_keys`/`commit_gate`, thiếu test trực tiếp và ca biên.
 
-## 5. Kế hoạch sửa theo đợt (tự duyệt — D-301; chủ dự án triển khai)
+## 5. Kế hoạch sửa theo đợt (tự duyệt — D-302; chủ dự án triển khai)
 
 | Đợt | Phát hiện | PR dự kiến | Gate của đợt |
 |---|---|---|---|
@@ -77,12 +77,12 @@ Số đo nền (hôm nay): `xt.py` 14.774 dòng / 828 hàm · `guard.py` 9.392 d
 | P0 | AUD-SEC-248 (bảo vệ `docs/autopilot/` theo tiền tố như `.autopilot/`) | `fix(guard): docs/autopilot theo tiền tố thư mục` | `python3 -m unittest -q tests.test_hooks -k ledger` |
 | P0 | AUD-CODE-036 (khoá `reviews.json`) | `fix(xt): khoá đọc–ghi reviews.json như state.json` | `python3 -m unittest -q tests.test_merge -k reviews_lock` |
 | P0 | AUD-HAR-197 (hàng `go_no_go_file` + GO-NO-GO 3.29.0 hồi tố) | `feat(release-check): hàng go_no_go_file` | `python3 scripts/xt.py release-check` |
-| P0 | AUD-HAR-036/198 (matcher `NotebookEdit` + MCP ghi), AUD-CI-027 (`schedule` secret-scan), AUD-DOC-174 (PROGRESS) | `fix(harness): phủ NotebookEdit và MCP ghi; ci: lịch gitleaks` | `python3 -m unittest -q tests.test_hooks tests.test_ci` |
-| P1 (2–4 tuần) | AUD-DOC-179 (lưu trữ sổ + trần docs/ops, docs/autopilot), AUD-SEC-323 (mã lý do), AUD-PERF-012 (cache guard kiểm sha256), AUD-HAR-199 (đo chặn oan trong `runs.jsonl`), AUD-CODE-037/038, AUD-CI-028, AUD-DEP-010 (SBOM + attestation), AUD-TEST-049/050 | mỗi mục một PR | theo Gate từng dòng sổ |
-| P2 (cần ADR) | Sandbox/egress bắt buộc cho autopilot không người trực (guard dừng mở rộng luật lớp xoá/ghi/mạng); tách `xt.py` thành gói theo lát (AUD-ARCH-008, trả lời D-142 bằng số đo); nội dung AUD-DOC-175…178/181; AUD-XFEAT-046 (không copy `research/`) | ADR mới + PLAN riêng | `python3 scripts/xt.py validate` · `release-check` |
+| P0 | AUD-HAR-036/198 (matcher `NotebookEdit` + MCP ghi), AUD-CI-027 (`schedule` secret-scan), AUD-DOC-175 (PROGRESS) | `fix(harness): phủ NotebookEdit và MCP ghi; ci: lịch gitleaks` | `python3 -m unittest -q tests.test_hooks tests.test_ci` |
+| P1 (2–4 tuần) | AUD-DOC-180 (lưu trữ sổ + trần docs/ops, docs/autopilot), AUD-SEC-329 (mã lý do), AUD-PERF-013 (cache guard kiểm sha256), AUD-HAR-199 (đo chặn oan trong `runs.jsonl`), AUD-CODE-037/038, AUD-CI-028, AUD-DEP-010 (SBOM + attestation), AUD-TEST-050/050 | mỗi mục một PR | theo Gate từng dòng sổ |
+| P2 (cần ADR) | Sandbox/egress bắt buộc cho autopilot không người trực (guard dừng mở rộng luật lớp xoá/ghi/mạng); tách `xt.py` thành gói theo lát (AUD-ARCH-008, trả lời D-142 bằng số đo); nội dung AUD-DOC-176…178/181; AUD-XFEAT-046 (không copy `research/`) | ADR mới + PLAN riêng | `python3 scripts/xt.py validate` · `release-check` |
 
 ## 6. Nợ 🟢 giữ lại
 
 | ID | Chủ | Hạn | Lý do chưa sửa |
 |---|---|---|---|
-| AUD-HAR-198, CODE-037, CODE-038, ARCH-008, PERF-012, PERF-013, TEST-049, TEST-050, CI-027, CI-028, DEP-010, DOC-174…181, XFEAT-046, HAR-199 | chủ dự án | theo đợt P0/P1/P2 (D-301) | ghi `mở`, chưa `chấp nhận` — chủ dự án triển khai sau audit này |
+| AUD-HAR-198, CODE-037, CODE-038, ARCH-008, PERF-013, PERF-014, TEST-050, TEST-051, CI-027, CI-028, DEP-010, DOC-175…181, XFEAT-046, HAR-199 | chủ dự án | theo đợt P0/P1/P2 (D-302) | ghi `mở`, chưa `chấp nhận` — chủ dự án triển khai sau audit này |
