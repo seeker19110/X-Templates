@@ -499,9 +499,12 @@ class GuardRemainingGapsTest(GuardRemainingGapsBase):
                 "flock /tmp/l make build",
                 "su -c 'ls -la'",
                 "diff <(git show HEAD:a) a",
-                "bash <(cat scripts/run.sh)",  # nguồn không phải echo/printf: guard không thấy script (cho qua, ADR-0018)
+                "bash scripts/run.sh",  # dạng thay cho `bash <(cat scripts/run.sh)` (nay chặn — AUD-SEC-310, ADR-0063)
             ),
         )
+        # Đổi kỳ vọng có chủ đích (T-3637): shell đọc script từ `<(…)` guard không thấy chữ → chặn theo tập con chuẩn
+        # (ADR-0063 thay "cho qua, ADR-0018" của danh sách cũ); viết `bash <tệp>` thay.
+        self.assert_all("deny", ("bash <(cat scripts/run.sh)",))
 
     def test_ansi_c_decoding(self) -> None:
         self.assertEqual(guard.expand_ansi_c("a $'x\\ty' b"), "a 'x\ty' b")

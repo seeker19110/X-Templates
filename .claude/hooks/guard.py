@@ -775,8 +775,11 @@ STRICT_RAW = ((re.compile(r"\w\[[^\]\n]*\$\((?!\()"), "thay lệnh trong chỉ s
 STRICT_IFS_RE = re.compile(r"(?<!\\)\$\{?[!#]?IFS\b")
 STRICT_SHELL_RE = re.compile(r"(?:^|[^\w.-])(?:(?:ba|da|z|k|mk)?sh|eval|source)(?![\w.-])")
 STRICT_SH = r"(?:\S*/)?(?:ba|da|z|k|mk)?sh"
+# `-o pipefail`/`-eo pipefail` (cờ gộp kết bằng `o` ăn giá trị — như `_shell_opt_width`), `--norc`, `-e`, `+x` (AUD-SEC-309)
+STRICT_SH_OPT = r"(?:[-+][A-Za-z]*[oO]\s+\S+|--[\w-]+(?:=\S*)?|[-+][A-Za-z]+)"
 STRICT_DYN_HEAD_RE = re.compile(
-    rf"(?:^|[\s;&|(])(?:{STRICT_SH}(?:\s+-[A-Za-z]+)*?\s+-[A-Za-z]*c[A-Za-z]*|(?P<eval>eval))\s+"
+    rf"(?:^|[\s;&|(])(?:{STRICT_SH}(?:\s+{STRICT_SH_OPT})*?\s+-[A-Za-z]*c[A-Za-z]*(?:\s+(?:--|[-+][A-Za-z]+))*"
+    r"|(?P<eval>eval))(?:\s+|(?=[;&|)\n])|$)"  # đầu đứng cuối lệnh (`eval`, `xargs bash -c`) vẫn là một đầu
 )
 STRICT_ARGV_CMD_RE = re.compile(r"(?:^|[;&|{(\n]|\b(?:then|do|else|elif)\b)\s*\"?\$\{?[@*0-9]")
 # Shell đọc script từ ống mà bên ghi là nhóm `{…}`/subshell `(…)` (guard không ghép được chữ — AUD-SEC-290) hoặc từ
@@ -951,6 +954,221 @@ def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
     text = STRICT_SAFE_PROMPT_RE.sub("", v.s)  # tên: cả trong nháy (`env 'BASH_FUNC_x%%=…'`); ngữ cảnh: chỉ mã
     hit = any(name.search(text) and ctx.search(bare) for name, ctx in STRICT_SPECIAL)
     return "biến bash tự chạy cùng ngữ cảnh kích hoạt (AUD-SEC-287/291/299/300)" if hit else ""
+
+
+# ADR-0063 T-3637 — shell lồng theo argv đã chuẩn hoá (AUD-SEC-309…311): chữ và argv là hai cách đọc cùng lệnh; guard
+# chỉ cho chạy khi hai cách đọc khớp nhau. Lớp này chạy SAU luật cũ nên lệnh luật cũ đã chặn giữ mã của luật cũ.
+STRICT_DYN_HERE_RE = re.compile(r"\$[({\w]|`")  # mở rộng trong thân heredoc/here-string không nháy
+
+
+def _argv_shell_why(cmd: str, tokens: List[str]) -> str:
+    """Lý do chặn (rỗng = qua): (a) một đầu `sh -c`/`eval` theo argv đã chuẩn hoá (cả tên có nháy/thoát `\\bash`,
+    `"bash"`, `$'bash'`, `'eval'`) có thân dựng lúc chạy — xét TỪNG đầu trên token còn giữ nháy (`_raw_heads_why`), không so
+    tổng số đầu (đầu mồi `echo eval; "bash" -c …` — review #404 🔴); (b) shell đọc script từ `<(…)`, here-string hay heredoc
+    không nháy có mở rộng; (c) ống vào shell (`| sh 2>&1`, `| command sh`, `| cat | sh`, `g | sh`, `| xargs sh -c`) mà
+    guard không biết chữ đi vào."""
+    for argv in split_commands(tokens):
+        if _stdin_shell(argv) and "<<<" in argv[:-1] and STRICT_DYN_HERE_RE.search(argv[argv.index("<<<") + 1]):
+            return "shell đọc here-string có mở rộng (AUD-SEC-310)"
+    return _raw_heads_why(cmd) or _procsub_shell_why(tokens) or _heredoc_shell_why(cmd) or _pipe_shell_why(tokens)
+
+
+def _raw_tokens(cmd: str) -> Optional[List[str]]:
+    """Token GIỮ nháy/thoát (shlex không POSIX) của chữ đã nối dòng, gấp heredoc, giải `$'…'` thành chữ nháy, bỏ comment
+    — cùng tiền xử lý `tokenize` trừ viết lại `$IFS`/`$(pwd)`; nháy không đóng → None."""
+    s = strip_comments(expand_ansi_c(_fold_heredocs(join_continuations(cmd), False, True)), True)
+    out: List[str] = []
+    word: List[str] = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c in " \t\r" or c in PUNCT:
+            out += ["".join(word)] if word else []
+            word = []
+            j = i
+            while j < len(s) and s[j] in PUNCT:  # dãy dấu liền nhau là một token (như shlex `punctuation_chars`)
+                j += 1
+            out += [s[i:j]] if j > i else []
+            i = max(j, i + 1)
+            continue
+        j = _raw_word_part(s, i)
+        if j < 0:
+            return None
+        word.append(s[i:j])
+        i = j
+    return out + (["".join(word)] if word else [])
+
+
+def _raw_word_part(s: str, i: int) -> int:
+    """Cuối một mảnh từ bắt đầu ở `s[i]`: `\\x`, `'…'`, `"…"` (có `\\` và `$(…)` bên trong), `$(…)`/`${…}` cân ngoặc, hay
+    một ký tự; không đóng → -1."""
+    c = s[i]
+    if c == "\\":
+        return min(i + 2, len(s))
+    if c == "'":
+        j = s.find("'", i + 1)
+        return j + 1 if j >= 0 else -1
+    if c == '"':
+        return _raw_dq_end(s, i + 1)
+    if s.startswith(("$(", "${"), i):
+        return _raw_group_end(s, i + 2, "(" if s[i + 1] == "(" else "{")
+    return i + 1
+
+
+def _raw_dq_end(s: str, i: int) -> int:
+    """Vị trí ngay sau `"` đóng của chuỗi nháy kép bắt đầu ở `s[i]` (sau `"` mở); không đóng → -1."""
+    while i < len(s):
+        if s[i] == "\\":
+            i += 2
+        elif s[i] == '"':
+            return i + 1
+        elif s.startswith(("$(", "${"), i):
+            i = _raw_group_end(s, i + 2, "(" if s[i + 1] == "(" else "{")
+            if i < 0:
+                return -1
+        else:
+            i += 1
+    return -1
+
+
+def _raw_group_end(s: str, i: int, opener: str) -> int:
+    """Vị trí ngay sau ngoặc đóng của `$(`/`${` (đã qua phần mở): đếm ngoặc cùng loại, bỏ qua nháy và `\\`; không đóng → -1."""
+    closer, depth = ")" if opener == "(" else "}", 1
+    while i < len(s):
+        c = s[i]
+        if c in "\\'\"" or s.startswith(("$(", "${"), i):
+            i = _raw_word_part(s, i)
+            if i < 0:
+                return -1
+            continue
+        depth += (c == opener) - (c == closer)
+        i += 1
+        if not depth:
+            return i
+    return -1
+
+
+def _dequote(t: str) -> str:
+    """Từ bash sau khi bỏ nháy/thoát (`"bash"`, `\\bash`, `$'bash'`, `ev"al"` → tên lệnh)."""
+    try:
+        return "".join(shlex.split(expand_ansi_c(t)))
+    except ValueError:
+        return t
+
+
+def _raw_heads_why(cmd: str) -> str:
+    """AUD-SEC-309: mỗi lệnh đơn mà đầu (sau lệnh bọc/gán) là shell có `-c` hay `eval` — thân (chuỗi lệnh của `-c`; mọi
+    đối số của `eval`) đọc trên token còn nháy: thay lệnh/`$'…'`/backtick/biến gán từ thay lệnh ngoài nháy đơn → chặn."""
+    raw = _raw_tokens(cmd)
+    if raw is None:
+        return "nháy không tách được để xét đầu `sh -c`/`eval` (AUD-SEC-309)" if STRICT_SHELL_RE.search(cmd) else ""
+    for argv in split_commands(raw):
+        plain = [_dequote(t) for t in argv]
+        n = normalize(plain)
+        at = len(argv) - len(_strip_prefixes(plain))
+        if not n or not (n[0] == "eval" or (n[0] in SHELLS and _shell_script_arg(n)[0])):
+            continue
+        body = argv[at + 1 :] if n[0] == "eval" else argv[at + _shell_c_index(n) : at + _shell_c_index(n) + 1]
+        if any(_raw_word_dynamic(w, cmd) for w in body):
+            return "thân `sh -c`/`eval` dựng lúc chạy (đầu theo argv, tên có nháy/thoát) (AUD-SEC-309)"
+    return ""
+
+
+def _shell_c_index(n: List[str]) -> int:
+    """Vị trí chuỗi lệnh của `sh -c` trong argv đã chuẩn hoá (cùng cách duyệt cờ của `_shell_script_arg`)."""
+    i = 1
+    while i < len(n) and n[i] not in ("--", "-") and _shell_opt_width(n[i]):
+        i += _shell_opt_width(n[i])
+    return i + (i < len(n) and n[i] in ("--", "-"))
+
+
+def _raw_word_dynamic(word: str, whole: str) -> bool:
+    """Từ còn nháy là chữ dựng lúc chạy: ngoài nháy đơn có thay lệnh/`$'…'`/backtick, `\\$(` trong nháy kép, hay biến gán
+    từ thay lệnh trong lệnh này (`_dyn_word`). `$(cat <<'X' … X)` (thân heredoc có nháy) là chữ thấy được — như lớp chữ."""
+    v = _CodeView(STRICT_CAT_HEREDOC_RE.sub(lambda m: " " * len(m.group()), word))
+    live = "".join(ch if k != "q" else " " for ch, k in zip(v.s, v.kind))
+    return bool(v.why) or bool(STRICT_DYN_ESC_RE.search(word)) or _dyn_word(live, whole)
+
+
+def _argv_shell_check(cmd: str, tokens: List[str], strict: bool, asks: List[str]) -> None:
+    """Chặn (BUDGET) khi `_argv_shell_why` có lý do — trừ khi câu hỏi nguy hiểm của luật cũ đã làm lệnh bị chặn (giữ mã
+    của luật cũ: HOOK_BYPASS…). Chữ lỏng (guard tự dựng) không qua tập con."""
+    why = _argv_shell_why(cmd, tokens) if strict else ""
+    if why and not _asks_denied(asks):
+        raise ScanTooComplex(f"ngoài tập con guard đọc chắc — {why} (ADR-0063)")
+
+
+def _asks_denied(asks: List[str]) -> bool:
+    """Các câu hỏi đã gom mà chính sách mặc định biến thành chặn (ask nguy hiểm/unsure)."""
+    return (
+        bool(asks) and apply_policy({"decision": "ask", "reason": ASK_PREFIX + "; ".join(asks)})["decision"] == "deny"
+    )
+
+
+def _drop_fd_words(argv: List[str]) -> List[str]:
+    """Bỏ số fd đứng trước chuyển hướng (`2>&1` tách thành `2`, `>&`, `1`): không thì `2` bị đọc là tên script."""
+    return [a for i, a in enumerate(argv) if not (a.isdigit() and i + 1 < len(argv) and _is_redirect(argv[i + 1]))]
+
+
+def _procsub_shell_why(tokens: List[str]) -> str:
+    """Shell/`source` đọc script từ thay tiến trình: `bash <(…)`, `bash < <(…)`, `source <(…)`, `. <(…)`."""
+    start = 0
+    for i, t in enumerate(tokens):
+        if t != "<(":
+            start = i + 1 if _is_punct(t) and not _is_redirect(t) else start
+            continue
+        n = normalize(_drop_fd_words([a for a in tokens[start:i] if a != "<"]))
+        if _procsub_known(tokens, i):  # `bash <(echo '…')`: chữ guard thấy, luật cũ đã quét
+            start = i + 1
+            continue
+        if n[:1] in (["source"], ["."]) and len(n) == 1:
+            return "`source`/`.` đọc script từ `<(…)` (AUD-SEC-310)"
+        if n and n[0] in SHELLS and _shell_script_arg(n) == (False, None):
+            return "shell đọc script từ `<(…)` (AUD-SEC-310)"
+        start = i + 1
+    return ""
+
+
+def _procsub_known(tokens: List[str], i: int) -> bool:
+    """Thay tiến trình mở ở `tokens[i]` chỉ là MỘT lệnh ra chữ guard biết (`echo`/`printf` chữ — `_pipe_feed`)."""
+    depth, inner = 1, []
+    for t in tokens[i + 1 :]:
+        depth += t.endswith("(") - (t == ")")
+        if not depth:
+            break
+        inner.append(t)
+    cmds = split_commands(inner)
+    literal = not any(STRICT_DYN_HERE_RE.search(t) for t in inner)  # `<(echo "$(cat f)")`: chữ động (review #404 🔴)
+    return (
+        depth == 0
+        and literal
+        and len(cmds) == 1
+        and len(pipelines(inner)) == 1
+        and _pipe_feed(cmds[0], None) is not None
+    )
+
+
+def _heredoc_shell_why(cmd: str) -> str:
+    """Heredoc KHÔNG nháy vào shell mà thân có mở rộng (`$(…)`, `$X`, `${…}`, backtick): bash dựng script lúc chạy."""
+    lines = join_continuations(cmd).split("\n")
+    for opener, m, a, b, _ in _here_scan("\n".join(lines)):
+        if _heredoc_word(m)[1] or not STRICT_DYN_HERE_RE.search("\n".join(lines[a:b])):
+            continue
+        if any(_stdin_shell(c) for c in split_commands(tokenize(lines[opener][: m.start()]))):
+            return "shell đọc heredoc không nháy có mở rộng — dùng `<<'X'` (AUD-SEC-310)"
+    return ""
+
+
+def _pipe_shell_why(tokens: List[str]) -> str:
+    """Ống vào shell (stdin hay `xargs sh -c` không chuỗi lệnh) mà khâu trước không ra chữ guard biết (`_pipe_feeds`)."""
+    for pipe in pipelines(tokens):
+        feeds = _pipe_feeds(pipe)
+        for k in range(1, len(pipe)):
+            down = _drop_fd_words(pipe[k])
+            known = feeds[k - 1] is not None or _decoded_feed([*pipe[:k], down], k)[1] is not None  # giải mã: đã quét
+            if not known and (_stdin_shell(down) or _argless_shell_c(down)):
+                return "ống vào shell mà guard không biết chữ đi vào — chạy `bash <tệp>` (AUD-SEC-311)"
+    return ""
 
 
 def _dyn_word(word: str, whole: str) -> bool:
@@ -7713,6 +7931,8 @@ def _container_asks(ctr: List[Tuple[str, List[str]]], depth: int, budget: Option
     out: List[str] = []
     for script, dests in ctr:
         sub = bash_decision(script, CONTAINER_ROOT, CONTAINER_ROOT, depth + 1, budget)
+        if sub["decision"] == "deny" and sub.get("code") in (BUDGET, UNPARSED):  # không đọc chắc: không hạ thành hỏi
+            raise ScanTooComplex(f"lệnh trong container: {sub['reason']} (AUD-SEC-247)")
         why = str(sub["reason"]).removeprefix(ASK_PREFIX) if sub["decision"] in ("deny", "ask") else ""
         why = why or _wipes_bind(script, dests)
         out += [f"lệnh trong container: {why}"] if why else []
@@ -9409,6 +9629,7 @@ def _bash_decision(
         res.update(decision="deny", reason=deny_reason)
         return res
     res.pop("exported", None)
+    _argv_shell_check(cmd, tokens, strict, asks)
     allow = res.pop("allow", "")
     # `allow` bỏ hỏi cho CẢ lệnh Bash → chỉ khi merge đứng một mình và trơn (không gì shell còn mở rộng/chạy thêm).
     if allow and (len(commands) > 1 or not PLAIN_MERGE_RE.fullmatch(cmd.strip())):

@@ -3076,9 +3076,11 @@ class GuardDeltaAuditTest(unittest.TestCase):
         ):
             with self.subTest(cmd):
                 self.assertEqual(self.dec(cmd), "deny")
+        # Đổi kỳ vọng có chủ đích (T-3637, AUD-SEC-311): `cat run.sh | bash` — ống vào shell mà guard không biết chữ — nay
+        # chặn theo tập con chuẩn (ADR-0063); viết `bash run.sh`.
+        self.assertEqual(self.dec("cat run.sh | bash"), "deny")
         for cmd in (
             "bash -c -e 'gh pr merge 7 --body-file b.md'",
-            "cat run.sh | bash",
             "echo x | xargs -0 bash -c",
         ):
             with self.subTest(cmd):
@@ -5700,11 +5702,13 @@ class GuardFalseGreenBenchTest(unittest.TestCase):
             (
                 "echo ls | tee /dev/null | bash",
                 "echo hi | tee out.txt",
-                "cat run.sh | bash",  # file script: như `bash run.sh` (guard không đọc file) — giữ hành vi cũ
-                "echo 'rm -rf ~' | cat notes.txt | bash",  # cat có file: ống ra là nội dung file, không phải chữ echo
+                "bash run.sh",  # dạng thay cho `cat run.sh | bash`
                 "echo 'rm -rf ~' | tee /dev/null | wc -l",
             ),
         )
+        # Đổi kỳ vọng có chủ đích (T-3637, AUD-SEC-311): trước "giữ hành vi cũ" (cho qua) — ống vào shell mà guard không
+        # biết chữ (nội dung tệp qua `cat <tệp>`) nay chặn theo tập con chuẩn (ADR-0063).
+        self.assert_policy("deny", ("cat run.sh | bash", "echo 'rm -rf ~' | cat notes.txt | bash"))
 
     def test_guard_false_green_ssh_loopback_runs_here(self):
         self.assert_policy(

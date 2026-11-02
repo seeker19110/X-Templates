@@ -15562,6 +15562,300 @@
    "allowed": true
   },
   "note": "D-301 review #399 (lát C)"
+ },
+ {
+  "id": "t3637-309-opt",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "bash -o pipefail -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-309-quoted-name",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "\"bash\" -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-309-escaped-eval",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "\\eval \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-herestring",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<< \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-heredoc",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<X\n$(cat f)\nX"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-310-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "source <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-fd",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | sh 2>&1"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-wrapper",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | timeout 9 sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-311-middle",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "cat f.sh | cat | sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-247-container",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-247"
+  ],
+  "input": {
+   "command": "docker run -v /h:/w img sh -c 'gh pr merge --auto 5; echo \"$(true $(true)#)\"'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-literal-c",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-309"
+  ],
+  "input": {
+   "command": "bash -o pipefail -c 'make test'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-quoted-heredoc",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-310"
+  ],
+  "input": {
+   "command": "bash <<'X'\necho $HOME\nX"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-echo-pipe",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "echo 'ls' | sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "t3637-control-base64",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-311"
+  ],
+  "input": {
+   "command": "echo bHMK | base64 -d | sh"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3637 (ADR-0063, shell lồng theo argv)"
+ },
+ {
+  "id": "r404-330-decoy-echo-eval",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "echo eval; \"bash\" -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-decoy-ansi",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "true eval; $'bash' -c \"$(cat f)\""
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-330-control-quoted-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-330"
+  ],
+  "input": {
+   "command": "\"bash\" -c 'echo $(date)'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-echo-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-procsub-printf-dyn",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "source <(printf \"%s\" \"$(cat f)\")"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "r404-331-control-procsub-literal",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-331"
+  ],
+  "input": {
+   "command": "bash <(echo 'echo hi')"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #404 (T-3637)"
  }
  ]
 }
