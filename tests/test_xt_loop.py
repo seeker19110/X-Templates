@@ -1559,6 +1559,19 @@ class LoopRunTest(TmpRepoCase):
         for bad in ("--dangerously-skip-permissions", "bypassPermissions", "--bare"):
             self.assertNotIn(bad, cmd)
 
+    def test_agent_args_passed_before_prompt(self) -> None:
+        """AUD-HAR-205 phần còn (D-318): host khác Claude không có cờ quyền đã xác minh — người chạy truyền cờ của mình qua
+        `--agent-args` (tách theo shell), đặt sau lệnh của bảng, trước prompt; bảng lệnh không tự thêm cờ tự duyệt."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out, _ = run_main("loop", "run", "--agent", "codex", "--agent-args", "--model x -c 'a b'", "--dry-run")
+        self.assertEqual(rc, 0)
+        cmd = shlex.split(out.splitlines()[-1])
+        self.assertEqual(cmd[:6], ["codex", "exec", "--model", "x", "-c", "a b"])
+        self.assertIn("loop record --task T-001", cmd[6])
+        rc, _, err = run_main("loop", "run", "--agent", "codex", "--agent-args", "'không đóng", "--dry-run")
+        self.assertEqual(rc, 2)
+        self.assertIn("--agent-args", err)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -183,3 +183,10 @@
 - Chọn: (c) chấp nhận có hạn — --stale chỉ tham khảo, không ở cổng
 - Lý do (tiêu chí chất lượng cuối): (1) đúng: --stale không thuộc gate/CI nên không có xanh giả ở cổng; (a) đổi nghĩa 'xác minh' theo chữ tự do dễ đếm sai lần nữa (AUD-DOC-216), (b) chạm ~248 dòng ở nhiều module — làm cùng đợt nội dung AUD-DOC-179 (PLAN riêng). (5) chi phí: phá hoà
 - Đường lùi: Làm (b) trong PLAN nội dung kế; hoặc (a) nếu đưa --stale vào cổng
+
+### D-318 · 2026-11-02T23:50:44+00:00 · AUD-HAR-205 phần còn: loop run --agent host khác Claude chưa có cờ chế độ quyền — thêm cờ tự duyệt từng host hay mở --agent-args?
+
+- Phương án: (1) Thêm cờ tự duyệt từng host (codex --full-auto, gemini --yolo, …) vào bảng lệnh · (2) Mở --agent-args cho người dùng tự truyền cờ; bảng lệnh không thêm cờ bỏ qua quyền; research cờ từng host rồi mới thêm · (3) Chấp nhận nợ, không làm
+- Chọn: Mở --agent-args cho người dùng tự truyền cờ; bảng lệnh không thêm cờ bỏ qua quyền; research cờ từng host rồi mới thêm
+- Lý do (tiêu chí chất lượng cuối): (1) an toàn: cờ tự duyệt chưa xác minh có thể là chế độ bỏ qua quyền (LOOP-STOP-028 cấm khung tự bật); cờ do người chạy truyền vào là quyết định của họ. (2) giữ đường lùi: thêm cờ đã research sau. Phần Claude đã sửa (--permission-mode auto). Việc này cần /research từng host nên làm sau PLAN này
+- Đường lùi: Bỏ --agent-args

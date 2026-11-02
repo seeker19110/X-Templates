@@ -9177,10 +9177,25 @@ LOOP_RUN_PROMPT = (
 )
 
 
+def _loop_agent_cmd(args: argparse.Namespace) -> Optional[List[str]]:
+    """Lệnh agent của bảng + `--agent-args` (tách theo shell, D-318: cờ quyền của host khác do người chạy truyền, khung
+    không tự thêm cờ tự duyệt); chuỗi tách không được → None (exit 2)."""
+    try:
+        extra = shlex.split(args.agent_args or "")
+    except ValueError as exc:
+        print(f"✗ --agent-args: {exc}", file=sys.stderr)
+        return None
+    return [*LOOP_AGENTS[args.agent], *extra]
+
+
 def _loop_run(args: argparse.Namespace, base: Path) -> int:
-    """`loop run --agent X [--max-turns N] [--timeout S] [--dry-run]`: mỗi lượt đọc verdict từ bằng chứng, gọi agent headless
-    cho đúng task đó, rồi đọc lại verdict. Exit 0 khi xong (`done`/`done-pending-human`), 3 khi vòng không chạy được
-    (chưa `loop init`, blocked, …), 1 khi agent không tiến triển LOOP_RUN_STALL lượt hay hết lượt."""
+    """`loop run --agent X [--agent-args S] [--max-turns N] [--timeout S] [--dry-run]`: mỗi lượt đọc verdict từ bằng chứng,
+    gọi agent headless cho đúng task đó, rồi đọc lại verdict. Exit 0 khi xong (`done`/`done-pending-human`), 3 khi vòng
+    không chạy được (chưa `loop init`, blocked, …), 1 khi agent không tiến triển LOOP_RUN_STALL lượt hay hết lượt, 2 khi
+    `--agent-args` sai cú pháp."""
+    agent = _loop_agent_cmd(args)
+    if agent is None:
+        return 2
     seen: Optional[Tuple[Any, ...]] = None
     stall = 0
     for turn in range(1, args.max_turns + 1):
@@ -9194,7 +9209,7 @@ def _loop_run(args: argparse.Namespace, base: Path) -> int:
         if stall >= LOOP_RUN_STALL:
             print(f"loop run: {LOOP_RUN_STALL} lượt không tiến triển ở {v.get('task')} — dừng: {v.get('reason', '')}")
             return 1
-        cmd = [*LOOP_AGENTS[args.agent], LOOP_RUN_PROMPT.format(task=v.get("task") or "", reason=v.get("reason", ""))]
+        cmd = [*agent, LOOP_RUN_PROMPT.format(task=v.get("task") or "", reason=v.get("reason", ""))]
         print(f"[lượt {turn}] {args.agent} → {v.get('task')}: {v.get('reason', '')}", flush=True)
         if args.dry_run:
             print(shlex.join(cmd))
@@ -15372,6 +15387,9 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="vòng lặp ngoài: gọi agent headless từng task, tiến triển đọc từ bằng chứng (ADR-0064)"
     )
     lru.add_argument("--agent", required=True, choices=list(LOOP_AGENTS))
+    lru.add_argument(
+        "--agent-args", help="cờ thêm cho agent (tách theo shell), đặt trước prompt — vd. cờ quyền của host (D-318)"
+    )
     lru.add_argument("--max-turns", type=int, default=20, help="số lượt tối đa (mặc định 20)")
     lru.add_argument("--timeout", type=float, default=3600, help="giây tối đa mỗi lượt agent (mặc định 3600)")
     lru.add_argument("--dry-run", action="store_true", help="in lệnh của lượt đầu, không chạy agent")
