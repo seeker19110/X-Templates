@@ -7621,9 +7621,11 @@ def signoff_facts(
 ) -> Dict[str, Any]:
     """Dữ kiện cho `signoff-package`: kết quả `release-check --json` và gói đã dựng (nếu có) kèm file đổi sau head của
     chúng, vân tay bằng chứng hiện tại, việc `loop defer` còn chờ người, và hàng `prod_switch` tính trực tiếp trên cây
-    (AUD-HAR-169: chỉ `--package` thì DECISIONS.md — ngoài vân tay gói — không ai xét): BLOCKER chưa PASS (đề xuất `loop
-    decide --prod` chờ quyết, hay không đọc được — fail-closed) → ["prod_switch"]."""
+    (AUD-HAR-169: chỉ `--package` thì DECISIONS.md — ngoài vân tay gói — không ai xét): N/A BLOCKER (đề xuất `loop decide
+    --prod` chờ quyết) → `prod_switch` = ["prod_switch"], việc chờ người; FAIL (không đọc được) → `prod_switch_fail`, không
+    phải việc chờ người — `release-check` trên cây này sẽ NO-GO."""
     row = _release_prod_switch(base)
+    blocker = row["level"] == "BLOCKER"
     return {
         "release": release,
         "release_changed": _changed_since(base, release["head"], DECISIONS_EXCLUDE) if release else None,
@@ -7631,7 +7633,8 @@ def signoff_facts(
         "package_changed": _changed_since(base, package["candidate_head"]) if package else None,
         "evidence_fp": evidence_fingerprint(base),
         "deferred": sorted(_deferred(st)),
-        "prod_switch": [row["id"]] if row["level"] == "BLOCKER" and row["result"] != "PASS" else [],
+        "prod_switch": [row["id"]] if blocker and row["result"] == "N/A" else [],
+        "prod_switch_fail": blocker and row["result"] == "FAIL",
     }
 
 
@@ -7819,14 +7822,20 @@ def _signoff_rerun(f: Dict[str, Any], pkg: Optional[Dict[str, Any]], rel: Option
 
 def _signoff_kept(f: Dict[str, Any], pkg: Dict[str, Any], fresh_rel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Gói còn khớp vân tay. Có `--release` mà lệch cây (chỉ DECISIONS.md đổi — ngoài vân tay gói) → chạy lại, không trình
-    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151)."""
+    gói với kết quả cũ: FAIL hay việc chờ người mới (`prod_switch`) của cây này chưa được xét (review #362, AUD-HAR-151).
+    Không có `--release` mà hàng `prod_switch` tính trực tiếp FAIL → cũng chạy lại (sẽ NO-GO → `replan`), không trình gói
+    với FAIL như việc chờ người (review AUD-HAR-169)."""
     s = f["signoff"]
-    if s["release"] is not None and fresh_rel is None:
-        note = _changed_note(s["release_changed"], s["release"]["head"])
+    if fresh_rel is None and (s["release"] is not None or s.get("prod_switch_fail")):
+        why = (
+            f"kết quả `release-check` cũ hơn cây ({_changed_note(s['release_changed'], s['release']['head'])})"
+            if s["release"] is not None
+            else "hàng `prod_switch` FAIL trên cây này (DECISIONS.md không đọc được — có thể giấu đề xuất `--prod`)"
+        )
         return {
             "action": "release-check",
-            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng kết quả `release-check` cũ hơn"
-            f" cây ({note}) — chạy lại trên HEAD trước khi trình ký",
+            "reason": f"gói nghiệm thu ở {pkg['candidate_head'][:12]} còn khớp vân tay nhưng {why} — chạy lại trên HEAD"
+            " trước khi trình ký",
             "missing": ["`release-check --json` trên HEAD"],
         }
     # `loop defer` thêm sau khi dựng gói nằm trong state (ngoài vân tay) — vẫn phải hiện là việc chờ người (review #326);
