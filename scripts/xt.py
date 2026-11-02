@@ -9571,19 +9571,21 @@ _PA_SH = r"(?:ba|z|da|k)?sh\b"
 _PA_FETCH = r"\b(?:curl|wget)\b"
 _PA_SEG = r"(?:(?!" + _PA_FETCH + r")[^|\n])*+"
 # AUD-SEC-363: shell sau ống có thể gọi qua đường dẫn (`/bin/bash`) và lớp bọc `sudo`/`doas`/`env` — cờ, cờ nhận giá
-# trị (`sudo -u root`, `env -u X`), `VAR=giá trị`; lần lặp lớp bọc không khớp thì bỏ cả lần đó (nhóm possessive).
+# trị (`sudo -u root`, `env -u X`), `VAR=giá trị`; lần lặp lớp bọc không khớp thì bỏ cả lần đó (nhóm possessive). Chữ
+# nhận giá trị là chữ nhận giá trị ĐẦU TIÊN của cụm (getopt): `-Eu root` nhận `root`, `-uroot` dính liền là một cờ trọn
+# (nợ review PR-PA: chữ cuối `t` của `-uroot` không được nuốt `bash` làm giá trị).
 _PA_WORD = r"[^\s|;&`()<>]++"
 _PA_PATH = r"(?:[\w.~-]*+/)*+"
 _PA_WRAP_ARG = r"|-[\w-]++(?:=[^\s|;&`()<>]*+)?|[A-Za-z_]\w*+=[^\s|;&`()<>]*+"
 _PA_WRAP = (
     r"(?:"
     + _PA_PATH
-    + r"(?:(?:sudo|doas)(?:\s++(?:-[A-Za-z]*?[CDgpRrtTUu]\s++"
+    + r"(?:(?:sudo|doas)(?:\s++(?:-[AbEeHhiKklNnPSsVv]*+[CDgpRrtTUu]\s++"
     + _PA_WORD
     + r"|--(?:user|group|role|type|chdir|chroot|prompt|host|other-user|close-from|command-timeout)\s++"
     + _PA_WORD
     + _PA_WRAP_ARG
-    + r"))*+|env(?:\s++(?:-[A-Za-z]*?[uCS]\s++"
+    + r"))*+|env(?:\s++(?:-[iv0]*+[uCS]\s++"
     + _PA_WORD
     + r"|--(?:unset|chdir|split-string)\s++"
     + _PA_WORD
@@ -9595,17 +9597,22 @@ _PA_RM_RECURSIVE = r"(?=(?:\s++-[\w-]++)*?\s++(?:-[a-zA-Z]*?[rR]|--r(?:e(?:c(?:u
 # Đích `rm` là chính gốc/HOME (`/`, `~`, `$HOME`, `${HOME}`, `${HOME<toán tử>…}` trừ `:+` — AUD-SEC-367) kèm hậu tố
 # chỉ gồm `/`, `*`, nháy, `/.*` (AUD-SEC-368/372); hậu tố possessive nên nháy không "nhả" để lookahead đứng trước nó —
 # đường dẫn con (`"$HOME"/.cache`, `~/"Old Stuff"`, `"${HOME:?}/.config"`) không bị báo (AUD-SEC-362). Phần sau toán
-# tử không chứa `$`/nháy: lần thử từ mỗi toán hạng dừng ở `${` kế tiếp (tuyến tính).
+# tử là hợp ba nhánh possessive: không chứa `$`/nháy (có dấu cách — `${HOME:?must be set}`), không chứa khoảng trắng
+# (có `$`/nháy/`${…}` lồng — `${HOME:-$PWD}`, nợ review PR-PA), hoặc một chuỗi trong nháy (`${HOME:?"HOME unset"}`);
+# mỗi nhánh dừng ở `$`/nháy/dấu cách kế tiếp (tuyến tính).
 _PA_RM_QUOTE = r"""(?:\\?["'])?+"""
-_PA_RM_HOME = r"""\$(?:HOME|\{HOME(?:(?!:\+)[:?=#%/,^-][^}"'`\n$]*+)?\})"""
+_PA_RM_HOME = (
+    r"""\$(?:HOME|\{HOME(?:(?!:\+)[:?=#%/,^-](?:[^}"'`\n$]*+|[^}\s]*+|[^}"'`\s$]*+["'][^}"'`\n$]*+["']))?\})"""
+)
 _PA_RM_TARGET = _PA_RM_QUOTE + r"(?:/|~|" + _PA_RM_HOME + r""")(?:[/*]|\\?["']|(?<=/)\.\*)*+(?![\w.~$-])"""
 # AUD-SEC-363: mọi toán hạng của `rm` được xét (`rm -rf /tmp/x /`); toán hạng không vượt dấu tách lệnh, chú thích `#`,
 # hay một `rm ` khác — mỗi đoạn dòng thuộc về đúng một điểm bắt đầu (tuyến tính).
 _PA_RM_OPERAND = r"(?!#|" + _PA_RM_TARGET + r")(?:[^\s;|&`()<>r]|(?<=[\w-])r|r(?!m\s))++"
+# Cụm cờ gộp của shell (`-lc`, `-xec`): phần trước `c` đầu tiên possessive — không quay lui qua từng chữ (tuyến tính).
 PA_DANGER = (
     _PA_FETCH + _PA_SEG + r"(?:\|\s*+tee\b" + _PA_SEG + r")*+\|\s*+" + _PA_WRAP + _PA_PATH + _PA_SH,
     r"(?:\b(?:" + _PA_SH + r"|source)|(?<![^\s;&|({`\"'])\.)\s*+(?:<\s*+)?<\(\s*+" + _PA_FETCH,
-    r"(?:\b" + _PA_SH + r"(?:\s++-(?!" + _PA_SH + r")[A-Za-z]++)*?\s++-[A-Za-z]*?c[A-Za-z]*+|\beval)\s++"
+    r"(?:\b" + _PA_SH + r"(?:\s++-(?!" + _PA_SH + r")[A-Za-z]++)*?\s++-[A-Za-bd-z]*+c[A-Za-z]*+|\beval)\s++"
     r"\\?[\"']?(?:\$\(|\\?`)\s*+" + _PA_FETCH,
     r"(?<![\w-])rm" + _PA_RM_RECURSIVE + r"(?:\s++" + _PA_RM_OPERAND + r")*+\s++" + _PA_RM_TARGET,
     r"\bchmod\s++(?:-R\s++)?777\b|--dangerously-skip-permissions|\bgit\s++push\s++(?:-f|--force)\b",
@@ -9649,32 +9656,41 @@ _PA_PIP_VALUE_OPTS = (
     ("target", 2), ("timeout", 2), ("trusted-host", 2), ("upgrade-strategy", 8), ("use-deprecated", 5),
     ("use-feature", 5),
 )  # fmt: skip
+# Token của lệnh pip không vượt dấu tách lệnh/chuyển hướng (`;|&()<>` — nợ review PR-PA: `-r req.txt; pytest`,
+# `Bash(pip install -e .), Read`); giá trị tuỳ chọn nhận nháy bao quanh, không vượt nháy đóng (`"pip install -r r.txt",`).
+_PA_PIP_CH = r"[^\s`;|&()<>"
+_PA_PIP_VALUE = r"[\"']?" + _PA_PIP_CH + r"\"'-]" + _PA_PIP_CH + r"\"']*+[\"']?"
 _PA_PIP_ARG = (
     r"(?:-[UIhvVq]*+[rcetCif]|--(?:" + "|".join(_pa_abbrev(o, n) for o, n in _PA_PIP_VALUE_OPTS) + r"|k[\w-]*+))"
-    r"(?=\s)\s++[^\s`-][^\s`]*+"
+    r"(?=\s)\s++" + _PA_PIP_VALUE
 )
 # AUD-SEC-369: `.whl`/`@<SHA>` xét ở đường dẫn/revision pip dùng — dừng ở `?`/`#` (pip 24.0 `Link.is_wheel`,
 # `Git.get_url_rev_and_auth`).
 _PA_PIP_PINNED = "|".join(
     (
         r"[A-Za-z][\w.-]*+" + _PA_EXTRAS + "===?" + _PA_PEP440,
-        r"git\+[a-z]++://[^\s\"'`#?]*+(?<=@[0-9a-fA-F]{40})",
-        r"[^\s\"'`#?]*+(?<=\.whl)",
-        r"[^\s\"'`:/]*+/[^\s\"'`:]*+(?!:)",
+        r"git\+[a-z]++://" + _PA_PIP_CH + r"\"'#?]*+(?<=@[0-9a-fA-F]{40})",
+        _PA_PIP_CH + r"\"'#?]*+(?<=\.whl)",
+        _PA_PIP_CH + r"\"':/]*+/" + _PA_PIP_CH + r"\"':]*+(?!:)",
     )
 )
 # AUD-SEC-359/371: mọi đối số được xét — bỏ qua tuỳ chọn (kèm giá trị, `-r`/`-c`/`-e` cũng là tuỳ chọn nhận giá trị),
 # token bắt đầu bằng chữ số (giá trị như `-p 3.11`; tên gói đầu số chưa từng bị xét) và gói đã ghim; dừng ở token khác
-# (gói không ghim → báo; dấu câu, `#`, `&&` → hết lệnh).
-_PA_PIP_OPT = (
-    r"(?:\s++(?:" + _PA_PIP_ARG + r"|-[^\s`]*+|[0-9][^\s`]*+|[\"']?(?:" + _PA_PIP_PINNED + r")[^\s\"'`,;]*+[\"']?"
-    r"(?=\s)))*+"
+# (gói không ghim → báo; dấu câu, `#`, `&&`, `;`, `|`, `)` → hết lệnh). Chuyển hướng (`>/dev/null`, `2>&1`, `> log`)
+# kèm đích được bỏ qua — đứng trước nhánh chữ số để `2>&1` không dừng ở `2`.
+_PA_PIP_TOKENS = (
+    _PA_PIP_ARG,
+    r"[0-9]*+[<>]++&?+\s*+" + _PA_PIP_CH + r"]++",
+    r"-" + _PA_PIP_CH + r"=\"']*+(?:=" + _PA_PIP_CH + r"]*+)?",
+    r"[0-9]" + _PA_PIP_CH + r"]*+",
+    r"[\"']?(?:" + _PA_PIP_PINNED + r")" + _PA_PIP_CH + r"\"',]*+[\"']?(?=\s)",
 )
+_PA_PIP_OPT = r"(?:\s++(?:" + "|".join(_PA_PIP_TOKENS) + r"))*+"
 PA_UNPINNED = (
     r"\bnpx\s++(?:-y|--yes)\s++[\"']?(?!github:[\w.-]++/[\w.-]++#[0-9a-fA-F]{40}(?![\w-]))(?:@[\w.-]++/)?[\w.-]++"
     r"(?!@v?" + _PA_SEMVER + ")",
     r"\buvx\s++[\"']?(?!-)[\w.-]++" + _PA_EXTRAS + "(?!(?:===?|@)" + _PA_PEP440 + ")",
-    r"\bpip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?(?!" + _PA_PIP_PINNED + ")[A-Za-z]",
+    r"(?<![\w-])pip3?\s++install" + _PA_PIP_OPT + r"\s++[\"']?(?!" + _PA_PIP_PINNED + ")[A-Za-z]",
 )
 PA_URL = (
     r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(?:main|master|HEAD)/",
@@ -9719,27 +9735,33 @@ _PA_IGNORABLE_RE = re.compile(
     "|[\U0001bca0-\U0001bca3]|[\U0001d173-\U0001d17a]|[\U000e0000-\U000e0fff]"
 )
 # Một chuỗi JSON trên dòng: đóng bằng `"` hoặc chạy tới cuối dòng (kể cả `\` lẻ cuối dòng) — mọi lần thử từ một `"` đều
-# khớp nên `finditer` không quét lại phần đã qua (tuyến tính, AUD-SEC-263).
-_PA_JSON_STR_RE = re.compile(r'"(?:[^"\\]|\\.)*+(?:"|\\?$)')
+# khớp nên `finditer` không quét lại phần đã qua (tuyến tính, AUD-SEC-263). Nhóm 1 là nháy đóng: không có → chuỗi còn mở
+# sang dòng sau (TOML `"""`, YAML nháy kép gãy dòng).
+_PA_JSON_STR_RE = re.compile(r'"(?:[^"\\]|\\.)*+(?:(")|\\?$)')
 
 
 _PA_SPACE_RE = re.compile(r"\s++")
+# Ký tự vô hình nhưng hiển thị như ô trống (Hangul filler, chữ nổi trống) — đứng ở chỗ dấu cách thì đọc là dấu cách.
+_PA_BLANK_RE = re.compile("[ᅟᅠ⠀ㅤﾠ]")
 
 
-def _pa_strip(line: str, repl: str) -> str:
-    """`line` với ký tự định dạng (Unicode `Cf`) và ký tự vô hình khác (`_PA_IGNORABLE_RE`) thay bằng `repl`."""
+def _pa_strip(line: str, repl: str, blank: str) -> str:
+    """`line` với ký tự trống hiển thị (`_PA_BLANK_RE`) thay bằng `blank`, rồi ký tự định dạng (Unicode `Cf`) và ký tự
+    vô hình khác (`_PA_IGNORABLE_RE`) thay bằng `repl`."""
+    line = _PA_BLANK_RE.sub(blank, line)
     return _PA_IGNORABLE_RE.sub(repl, "".join(repl if unicodedata.category(c) == "Cf" else c for c in line))
 
 
 def _pa_visible(line: str) -> List[str]:
     """Các dạng nhìn thấy của `line` cho luật văn bản: ký tự định dạng (`Cf`: ZWJ/ZWNJ/bidi/soft hyphen/tag) và vô hình
-    khác vừa gỡ (chèn giữa từ — AUD-SEC-260) vừa thay bằng dấu cách (đứng ở chỗ dấu cách — AUD-SEC-366); mọi dãy khoảng
-    trắng Unicode (hai dấu cách, tab, NBSP, U+2028…) gom thành một dấu cách (AUD-SEC-366)."""
+    khác vừa gỡ (chèn giữa từ — AUD-SEC-260) vừa thay bằng dấu cách (đứng ở chỗ dấu cách — AUD-SEC-366), thêm dạng trộn:
+    ký tự rộng 0 gỡ, ký tự trống hiển thị (`_PA_BLANK_RE`) thay bằng dấu cách (nợ review PR-PA); mọi dãy khoảng trắng
+    Unicode (hai dấu cách, tab, NBSP, U+2028…) gom thành một dấu cách (AUD-SEC-366)."""
     if line.isascii():
         return [_PA_SPACE_RE.sub(" ", line)]
-    gone = _pa_strip(line, "")
-    forms = [gone] if len(gone) == len(line) else [gone, _pa_strip(line, " ")]
-    return [_PA_SPACE_RE.sub(" ", f) for f in forms]
+    gone = _pa_strip(line, "", "")
+    forms = [gone] if len(gone) == len(line) else [gone, _pa_strip(line, " ", " "), _pa_strip(line, "", " ")]
+    return list(dict.fromkeys(_PA_SPACE_RE.sub(" ", f) for f in forms))
 
 
 def _pa_json_literal(m: "re.Match[str]") -> str:
@@ -9780,13 +9802,26 @@ _PA_DECODERS: Dict[str, Callable[["re.Match[str]"], str]] = {
 }
 
 
-def _pa_views(line: str, decode: Optional[Callable[["re.Match[str]"], str]]) -> List[str]:
-    """Các dạng của dòng để chạy luật: dòng gốc, và với file có bộ giải mã (`_PA_DECODERS`: `.json`, `.yaml`/`.yml`/
+# Chỉ `\n` tách dòng (AUD-SEC-357); `\r` của CRLF không thuộc dòng (mẫu `$` của `--patterns` — nợ review PR-PA).
+_PA_NEWLINE_RE = re.compile(r"\r?\n")
+
+
+def _pa_views(text: str, decode: Optional[Callable[["re.Match[str]"], str]]) -> Iterator[List[str]]:
+    """Các dạng của từng dòng để chạy luật: dòng gốc, và với file có bộ giải mã (`_PA_DECODERS`: `.json`, `.yaml`/`.yml`/
     `.toml`) mà dòng có escape thì thêm bản đã giải mã từng chuỗi nháy kép trên dòng (`\\uXXXX`, `\\"` — review
-    T-3634, AUD-SEC-365: escape không lách được luật, số dòng giữ nguyên)."""
-    if decode is None or "\\" not in line:
-        return [line]
-    return [line, _PA_JSON_STR_RE.sub(decode, line)]
+    T-3634, AUD-SEC-365: escape không lách được luật, số dòng giữ nguyên). Dòng bắt đầu bên trong chuỗi nháy kép chưa
+    đóng ở dòng trước (TOML `\"\"\"`, YAML gãy dòng) thêm bản giải mã như thể có `"` mở ở đầu dòng (nợ review PR-PA)."""
+    inside = False
+    for line in _PA_NEWLINE_RE.split(text):
+        if decode is None:
+            yield [line]
+            continue
+        cont = '"' + line if inside else line
+        inside = any(m[1] is None for m in _PA_JSON_STR_RE.finditer(cont))
+        if "\\" not in line:
+            yield [line]
+            continue
+        yield list(dict.fromkeys((line, _PA_JSON_STR_RE.sub(decode, line), _PA_JSON_STR_RE.sub(decode, cont))))
 
 
 def _pa_line_findings(
@@ -9794,18 +9829,18 @@ def _pa_line_findings(
 ) -> List[Dict[str, object]]:
     """Vi phạm theo dòng (chỉ `\\n` tách dòng — AUD-SEC-357): ký tự ẩn (trên dòng gốc), injection, năm luật regex,
     system prompt rò rỉ (chỉ dưới thư mục vendor/skill) — các luật regex chạy trên các dạng nhìn thấy của dòng
-    (`_pa_visible`); bỏ luật trong `skip`."""
+    (`_pa_views`) cùng các dạng nhìn thấy của chúng (`_pa_visible`) — hợp các dạng chỉ thêm khớp; bỏ luật trong
+    `skip`."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
     rules = [r for r in rules if r[0] not in skip]
     hidden = "hidden" not in skip
     decode = next((d for ext, d in _PA_DECODERS.items() if rel.lower().endswith(ext)), None)
     out: List[Dict[str, object]] = []
-    for n, line in enumerate(text.split("\n"), 1):
-        views = _pa_views(line, decode)
+    for n, views in enumerate(_pa_views(text, decode), 1):
         hidden_hit = hidden and any(PA_HIDDEN_RE.search(v) for v in views)
         hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if hidden_hit else []
-        seen = [s for v in views for s in _pa_visible(v)]
+        seen = list(dict.fromkeys(views + [s for v in views for s in _pa_visible(v)]))
         hits += [(r, m) for r, m, pats in rules if any(re.search(p, v) for p in pats for v in seen)]
         out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
     return out
