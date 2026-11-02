@@ -10020,18 +10020,47 @@ def _payload_cmd(payload: Any) -> object:
     return ti.get("command") if isinstance(ti, dict) else None
 
 
+# ADR-0064 lát A: schema trung lập cho adapter của công cụ khác — `tool` → chế độ của bộ luật.
+CORE_MODES = {"bash": "bash", "edit": "edit", "write": "edit", "mcp": "mcp"}
+
+
+def _core_payload(raw: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """`{tool, command|path|tool_name, input, cwd}` (ADR-0064) → (chế độ, payload kiểu PreToolUse) cho `_rule_decision`."""
+    mode = CORE_MODES.get(str(raw.get("tool")), "")
+    tool_input = dict(raw.get("input") or {}) if isinstance(raw.get("input"), dict) else {}
+    tool_input.setdefault("command", raw.get("command"))
+    tool_input.setdefault("file_path", raw.get("path"))
+    return mode, {"tool_name": raw.get("tool_name"), "tool_input": tool_input, "cwd": raw.get("cwd")}
+
+
+def _core_output(out: Dict[str, object]) -> int:
+    """Đầu ra `core`: JSON `{decision: allow|deny, code, reason}` đã qua chính sách mặc định (không `ask` — Codex/Cursor không
+    cưỡng chế `ask`); deny → exit 2 (công cụ đọc exit chặn được) và lý do ở stderr."""
+    out = apply_policy(out)
+    deny = out.get("decision") == "deny"
+    doc = {"decision": "deny" if deny else "allow", "code": out.get("code"), "reason": out.get("reason") or ""}
+    sys.stdout.write(json.dumps(doc, ensure_ascii=False))
+    if deny:
+        sys.stderr.write(str(doc["reason"]) + "\n")
+    return 2 if deny else 0
+
+
 def main() -> int:
     """`guard.py bash|edit|mcp [nul]` cho PreToolUse; `guard.py permission` cho PermissionRequest (chế độ suy từ
-    `tool_name`; in JSON của hook hoặc không in gì)."""
+    `tool_name`; in JSON của hook hoặc không in gì); `guard.py core` cho adapter trung lập (ADR-0064)."""
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     payload: Any = None
     try:
         payload = json.loads(sys.stdin.read() or "{}")
+        if mode == "core":
+            mode, payload = _core_payload(payload)
         if mode == "permission":
             mode = permission_mode(payload.get("tool_name"))
         out = _rule_decision(mode, payload, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     except Exception:  # fail-open về luồng: lỗi của hook không được kẹt phiên — trừ merge (AUD-SEC-032)
         out = _failure_decision(mode, payload, _payload_cmd(payload))
+    if sys.argv[1:2] == ["core"]:
+        return _core_output(out)
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
