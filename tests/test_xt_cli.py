@@ -950,6 +950,96 @@ class BlueprintStatusTextTest(TmpDirCase):
         self.assertEqual(doc["unchecked_must"], [])
 
 
+class RepoBlueprintKiemTest(TmpRepoCase):
+    """Lệnh `— Kiểm:` của chính BLUEPRINT.md repo khung, chạy trên repo tạm qua đúng đường máy chạy
+    (`blueprint-status --run`: guard của khung → `bash -o pipefail -c`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_repo()
+        self.enterContext(unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}))
+
+    def kiem(self, item: str) -> list:
+        """Ghi dòng mục `item` của BLUEPRINT.md thật vào repo tạm, chạy `blueprint-status --run` → failed_checks."""
+        line = next(
+            ln for ln in (ROOT / "BLUEPRINT.md").read_text(encoding="utf-8").splitlines() if f"`{item}`" in ln[:40]
+        )
+        (self.repo / "BLUEPRINT.md").write_text(line + "\n", encoding="utf-8")
+        rc, out, _ = run_main("blueprint-status", self.repo / "BLUEPRINT.md", "--run", "--json")
+        self.assertEqual(rc, 0, out)
+        doc = json.loads(out)
+        self.assertEqual([c["id"] for c in doc["checks"]], [item])
+        self.assertNotIn("guard chặn", doc["checks"][0]["output_tail"])
+        return doc["failed_checks"]
+
+    def link_scripts(self) -> None:
+        (self.repo / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)  # không track: git grep bỏ qua
+
+    def commit_as(self, name: str, subject: str) -> None:
+        env = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": "x@example.invalid"}
+        self.git("commit", "-q", "--allow-empty", "-m", subject, env=env)
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def test_base_repo_005_exempts_bot_author_not_sha(self):
+        """AUD-CI-024: tiêu đề > 100 ký tự của `dependabot[bot]` được miễn theo tác giả (như merge-check/CI `pr-title`);
+        người viết tiêu đề dài → đỏ; tên chỉ chứa `[bot]` ở giữa không được miễn."""
+        self.link_scripts()
+        self.commit_as("t", "chore: gốc")
+        self.git("tag", "v3.20.0")
+        self.commit_as("t", "feat(xt): thêm lệnh (#1)")
+        self.commit_as("dependabot[bot]", "chore(deps): bump " + "x" * 120 + " (#2)")
+        self.commit_as("t", "fix: " + "ệ" * 95 + " (#3)")  # 100 ký tự sau khi bỏ ` (#3)`
+        self.assertEqual(self.kiem("BASE-REPO-005"), [])
+        self.commit_as("[bot] t", "chore(deps): bump " + "x" * 120 + " (#4)")
+        self.assertEqual(self.kiem("BASE-REPO-005"), ["BASE-REPO-005"])
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.commit_as("t", "gộp job (#5)")  # sai dạng Conventional Commits
+        self.assertEqual(self.kiem("BASE-REPO-005"), ["BASE-REPO-005"])
+
+    def test_base_repo_005_has_no_sha_exemption_list(self):
+        line = next(
+            ln for ln in (ROOT / "BLUEPRINT.md").read_text(encoding="utf-8").splitlines() if "`BASE-REPO-005`" in ln
+        )
+        kiem = xt._check_cmd(line)
+        self.assertIn("%an", kiem)
+        self.assertIsNone(re.search(r"\b[0-9a-f]{12,40}\b", kiem))
+
+    def test_base_sec_006_dockerfile_red_under_pipefail(self):
+        """AUD-CI-026: `! git ls-files | grep -q…` xanh giả khi grep thoát sớm và `git ls-files` nhận SIGPIPE (pipefail).
+        Repo ~4000 tệp có Dockerfile phải đỏ mọi lần; không Dockerfile → xanh (đỏ đúng lý do)."""
+        for i in range(4000):
+            (self.repo / "src" / "module_with_long_name" / f"file_{i:04d}.txt").parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            (self.repo / "src" / "module_with_long_name" / f"file_{i:04d}.txt").write_text("", encoding="utf-8")
+        self.git("add", "-A")
+        self.link_scripts()
+        self.assertEqual(self.kiem("BASE-SEC-006"), [])
+        (self.repo / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        self.git("add", "Dockerfile")
+        for _ in range(10):
+            self.assertEqual(self.kiem("BASE-SEC-006"), ["BASE-SEC-006"])
+
+    def test_prf_cli_004_escape_red_under_pipefail(self):
+        """Cùng lớp AUD-CI-026 ở PRF-CLI-004: `! python3 … --help | grep -q $'\\x1b'` — grep thoát ở dòng đầu, python nhận
+        EPIPE → khâu đầu khác 0 → `!` xanh giả. `--help` lỗi cũng phải đỏ."""
+        hooks = self.repo / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        shutil.copy(ROOT / ".claude" / "hooks" / "guard.py", hooks / "guard.py")
+        stub = self.repo / "scripts" / "xt.py"
+        stub.parent.mkdir()
+        body = "import sys\nsys.stdout.write({!r} + 'x' * 2000 + '\\n')\nfor _ in range(500): sys.stdout.write('y' * 2000 + '\\n')\n"
+        stub.write_text(body.format("ok"), encoding="utf-8")
+        self.git("add", "-A")
+        self.assertEqual(self.kiem("PRF-CLI-004"), [])
+        stub.write_text("import sys\nsys.stdout.write(chr(27))\n" + body.format("[0m"), encoding="utf-8")
+        for _ in range(5):
+            self.assertEqual(self.kiem("PRF-CLI-004"), ["PRF-CLI-004"])
+        stub.write_text("raise SystemExit(3)\n", encoding="utf-8")
+        self.assertEqual(self.kiem("PRF-CLI-004"), ["PRF-CLI-004"])
+
+
 # --------------------------------------------------------------------------- loop
 
 
