@@ -136,6 +136,22 @@ class InstallTest(unittest.TestCase):
         self.assertIn("ra ngoài repo", r.stdout)
         self.assertEqual(r.stdout.count("✗"), 2)
 
+    def test_research_only_files_linked_from_framework(self):
+        """AUD-XFEAT-046 (T-3660): `.xtemplates/research/` chỉ chứa file mà module của khung trỏ tới — nhật ký nghiên cứu
+        khác của repo khung không vào dự án đích; liên kết của khung vẫn đúng (check-links trên `.xtemplates`)."""
+        self.assertEqual(self.run_install(), 0)
+        got = sorted(p.name for p in (self.target / ".xtemplates" / "research").rglob("*") if p.is_file())
+        want = sorted(p.name for p in install.linked_research(install.SRC))
+        self.assertEqual(got, want)
+        self.assertIn("2026-10-13-stored-catalog-extraction.md", got)
+        self.assertLess(len(got), len([p for p in (install.SRC / "research").rglob("*") if p.is_file()]))
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "check-links.py"), str(self.target / ".xtemplates")],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, 0, r.stdout[-2000:])
+
     def test_installed_check_links_uses_project_root(self):
         self.run_install()
         (self.target / "doc.md").write_text("[hỏng](khong-co.md)\n", encoding="utf-8")

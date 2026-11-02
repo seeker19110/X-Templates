@@ -3,7 +3,7 @@
 
 Kết quả trong dự án đích:
   .xtemplates/framework/        bản sao thư viện yêu cầu (chỉ đọc; cập nhật bằng cách chạy lại install)
-  .xtemplates/research/         bản nghiên cứu nền mà module trích dẫn
+  .xtemplates/research/         bản nghiên cứu nền mà module trỏ tới (chỉ file được trỏ)
   .xtemplates/scripts/xt.py     công cụ compose / blueprint-status / loop
   .xtemplates/scripts/dev-task.sh
   .xtemplates/scripts/{xt_app,app}/  app cục bộ `xt.py app` (ADR-0038)
@@ -134,6 +134,42 @@ def copy_tree_replace(src: Path, dst: Path) -> None:
     drop_symlink(tmp)
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(src, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    drop_symlink(dst)
+    if dst.exists():
+        shutil.rmtree(dst)
+    tmp.rename(dst)
+
+
+MD_LINK_RE = re.compile(r"\]\(([^)#\s]+)")
+
+
+def linked_research(src: Path) -> list[Path]:
+    """Đường dẫn (tương đối từ `research/`) của mọi FILE trong `src/research` mà tài liệu ở `src/framework` trỏ tới bằng
+    liên kết Markdown tương đối — kể cả gián tiếp (file research trỏ sang file research khác); liên kết tới thư mục, URL
+    hay ra ngoài `research/` bị bỏ qua."""
+    root = (src / "research").resolve()
+    found: set[Path] = set()
+    todo = sorted((src / "framework").rglob("*.md"))
+    while todo:
+        md = todo.pop()
+        for link in MD_LINK_RE.findall(md.read_text(encoding="utf-8")):
+            target = (md.parent / link).resolve()
+            rel = target.relative_to(root) if target.is_file() and target.is_relative_to(root) else None
+            if rel is not None and rel not in found:
+                found.add(rel)
+                todo += [target] if target.suffix == ".md" else []
+    return sorted(found)
+
+
+def copy_files_replace(src: Path, rels: list[Path], dst: Path) -> None:
+    """Như `copy_tree_replace` nhưng chỉ các file `rels` (tương đối từ `src`): dựng ở thư mục tạm rồi mới thay."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    drop_symlink(tmp)
+    shutil.rmtree(tmp, ignore_errors=True)
+    for rel in rels:
+        (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src / rel, tmp / rel)
+    tmp.mkdir(exist_ok=True)
     drop_symlink(dst)
     if dst.exists():
         shutil.rmtree(dst)
@@ -594,9 +630,10 @@ def install_framework(xt_dir: Path, label: str | None) -> str:
     """Bước 1: framework + research + scripts + VERSION + README vào .xtemplates/ — thay thế toàn bộ (bản chỉ đọc).
     Trả nhãn đã ghi vào VERSION."""
     copy_tree_replace(SRC / "framework", xt_dir / "framework")
-    # research/ đi kèm vì module trong framework/ trỏ tới nguồn nghiên cứu bằng đường dẫn tương đối.
+    # research/: chỉ file module trong framework/ trỏ tới bằng đường dẫn tương đối (AUD-XFEAT-046) — nhật ký nghiên cứu
+    # khác của repo khung không phải của dự án đích.
     if (SRC / "research").is_dir():
-        copy_tree_replace(SRC / "research", xt_dir / "research")
+        copy_files_replace(SRC / "research", linked_research(SRC), xt_dir / "research")
     drop_symlink(xt_dir / "scripts")
     (xt_dir / "scripts").mkdir(exist_ok=True)
     for f in ("xt.py", "dev-task.sh", "check-links.py", "xt_adapter.py"):
