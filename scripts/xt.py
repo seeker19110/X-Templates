@@ -8998,12 +8998,65 @@ def _loop_hook_stop(args: argparse.Namespace, base: Path) -> int:
 
 
 # Bảng tra `loop <lệnh con>` -> hàm xử lý (args, thư mục dự án) -> exit code.
+# Vòng lặp ngoài (ADR-0064 lát D, T-3646): lệnh headless của từng công cụ; prompt nối vào cuối. Mã thoát của agent KHÔNG
+# được tin (research §8: `opencode run` giữ mã khi bị từ chối quyền) — tiến triển chỉ đọc từ `loop_verdict` (bằng chứng).
+LOOP_AGENTS: Dict[str, List[str]] = {
+    "claude": ["claude", "-p"],
+    "codex": ["codex", "exec"],
+    "gemini": ["gemini", "-p"],
+    "cursor": ["agent", "-p", "--force"],
+    "copilot": ["copilot", "-p"],
+    "grok": ["grok", "-p"],
+    "opencode": ["opencode", "run"],
+}
+LOOP_RUN_STALL = 3  # lượt liền nhau mà verdict máy không đổi → dừng (agent không tiến triển)
+LOOP_RUN_PROMPT = (
+    "Dự án dùng khung X-Templates — đọc AGENTS.md. Việc kế tiếp do máy chọn: {reason}. Chỉ làm đúng task {task}; chạy "
+    "Gate qua `python3 .xtemplates/scripts/xt.py loop record --task {task} -- '<lệnh Gate trong PLAN>'`; việc cần người "
+    "→ `xt.py loop defer --task {task} --reason …`. Không làm task khác, không hỏi người."
+)
+
+
+def _loop_run(args: argparse.Namespace, base: Path) -> int:
+    """`loop run --agent X [--max-turns N] [--timeout S] [--dry-run]`: mỗi lượt đọc verdict từ bằng chứng, gọi agent headless
+    cho đúng task đó, rồi đọc lại verdict. Exit 0 khi xong (`done`/`done-pending-human`), 3 khi vòng không chạy được
+    (chưa `loop init`, blocked, …), 1 khi agent không tiến triển LOOP_RUN_STALL lượt hay hết lượt."""
+    seen: Optional[Tuple[Any, ...]] = None
+    stall = 0
+    for turn in range(1, args.max_turns + 1):
+        v = loop_verdict(base)
+        if v["verdict"] not in ("continue", "verify"):
+            print(f"loop run: dừng — {v['verdict']}: {v.get('reason', '')}")
+            return 0 if str(v["verdict"]).startswith("done") else 3
+        key = (v["verdict"], v.get("task"), v.get("reason"))
+        stall = stall + 1 if key == seen else 0
+        seen = key
+        if stall >= LOOP_RUN_STALL:
+            print(f"loop run: {LOOP_RUN_STALL} lượt không tiến triển ở {v.get('task')} — dừng: {v.get('reason', '')}")
+            return 1
+        cmd = [*LOOP_AGENTS[args.agent], LOOP_RUN_PROMPT.format(task=v.get("task") or "", reason=v.get("reason", ""))]
+        print(f"[lượt {turn}] {args.agent} → {v.get('task')}: {v.get('reason', '')}", flush=True)
+        if args.dry_run:
+            print(shlex.join(cmd))
+            return 0
+        try:
+            subprocess.run(cmd, cwd=base, timeout=args.timeout, check=False)
+        except (
+            OSError,
+            subprocess.TimeoutExpired,
+        ) as exc:  # agent không chạy được/quá giờ: lượt sau vẫn xét bằng chứng
+            print(f"  ⚠ agent: {exc}", file=sys.stderr)
+    print(f"loop run: hết {args.max_turns} lượt — chưa xong")
+    return 1
+
+
 LOOP_HANDLERS: Dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "init": _loop_init,
     "status": _loop_status,
     "record": _loop_record,
     "next": _loop_next,
     "next-step": _loop_next_step,
+    "run": _loop_run,
     "block": _loop_block,
     "decide": _loop_decide,
     "defer": _loop_defer,
@@ -14883,6 +14936,13 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--json", action="store_true")
     lne = lsub.add_parser("next", help="task sẵn sàng theo `sau:` và cặp giao nhau `files:` (T-1511)")
     lne.add_argument("--json", action="store_true")
+    lru = lsub.add_parser(
+        "run", help="vòng lặp ngoài: gọi agent headless từng task, tiến triển đọc từ bằng chứng (ADR-0064)"
+    )
+    lru.add_argument("--agent", required=True, choices=list(LOOP_AGENTS))
+    lru.add_argument("--max-turns", type=int, default=20, help="số lượt tối đa (mặc định 20)")
+    lru.add_argument("--timeout", type=float, default=3600, help="giây tối đa mỗi lượt agent (mặc định 3600)")
+    lru.add_argument("--dry-run", action="store_true", help="in lệnh của lượt đầu, không chạy agent")
     lns = lsub.add_parser("next-step", help="bước kế của mục tiêu, chỉ đọc (ADR-0052 §5)")
     lns.add_argument("--objective", choices=NEXT_STEP_OBJECTIVES, default=NEXT_STEP_OBJECTIVES[0])
     lns.add_argument(

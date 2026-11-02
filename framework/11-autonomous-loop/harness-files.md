@@ -180,7 +180,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 Lõi chặn là `guard.py` chế độ trung lập (`guard.py core`: JSON `{tool, command|path|tool_name, input, cwd}` vào, `{decision,
 code, reason}` ra, exit 2 khi deny); mỗi công cụ một adapter mỏng. Ma trận đầy đủ, nguồn và ngày:
 `research/2026-11-02-multi-provider-harness.md` §2 và §8. Adapter, sàn git hook và vòng lặp ngoài `loop run --agent` làm
-theo lát của ADR-0064 — đã/chưa xem dòng *Trạng thái triển khai* của ADR. Điều harness dựa vào:
+theo lát của ADR-0064 — trạng thái ở dòng *Trạng thái triển khai* của ADR. Điều harness dựa vào:
 
 | Công cụ | Lớp chặn trước tool | Cuối lượt khi headless | Lưu ý cho adapter |
 |---|---|---|---|
@@ -194,6 +194,11 @@ theo lát của ADR-0064 — đã/chưa xem dòng *Trạng thái triển khai* c
 
 Mã thoát headless không phản ánh việc bị từ chối quyền ở mọi công cụ (`opencode run` giữ mã khi quyền bị từ chối; Cursor,
 Copilot, Grok chưa xác minh) → vòng lặp ngoài tin `loop verify`, không tin mã thoát của agent.
+
+Cài và chạy (lát B–D đã làm): `install.py --harness codex,gemini,cursor,copilot,grok,opencode` chép cấu hình hook mẫu
+([`../templates/harness/`](../templates/harness/README.md)) gọi `xt_adapter.py`; git hook sàn ([`../templates/git-hooks/`](../templates/git-hooks/README.md)) cài
+mặc định; công cụ không có Stop hook chặn (Gemini, Grok, OpenCode, Cursor `-p`) chạy vòng ngoài `xt.py loop run --agent
+<host>` — mỗi lượt một task do `loop_verdict` chọn, dừng khi xong/chặn hay 3 lượt không tiến triển.
 
 ### Khoá của `xt.yaml` (nhà — mẫu: [`../templates/xt.yaml`](../templates/xt.yaml) chỉ còn một dòng chú thích mỗi khoá)
 

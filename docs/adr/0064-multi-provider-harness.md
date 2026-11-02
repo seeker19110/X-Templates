@@ -2,10 +2,12 @@
 
 - **Trạng thái:** Đã chấp nhận 2026-11-02 — chủ dự án trả lời ba câu hỏi (§Thông tin thêm); phiên chính chốt cách làm
   theo tiêu chí chất lượng cuối, **D-303**. Bản nháp cùng ngày (cùng PR) chỉ khác ở trạng thái và ba lựa chọn này.
-- **Trạng thái triển khai:** Đang làm — lát A (`guard.py core`, mã lý do khoá bằng test; T-3640), lát E (`xt.py doctor`
-  nhóm `sandbox`; T-3641) và xác minh lại bốn mục chưa xác minh (research §8; T-3647) ở PR lát 3 của
-  [`PLAN-upgrade-2026-11-02.md`](../autopilot/PLAN-upgrade-2026-11-02.md); lát B (adapter), C (sàn git hook), D (vòng lặp
-  ngoài) chưa — lát 5 (T-3642…T-3646, D-304; mỗi lát một PR).
+- **Trạng thái triển khai:** Đã làm cả năm lát, kèm nợ ghi ở sổ — lát A (`guard.py core`; T-3640, D-308; chuẩn hoá tên
+  tool + `project_dir`: AUD-SEC-346/HAR-201), lát E (`doctor` nhóm `sandbox`; T-3641; nợ AUD-HAR-202/203) và research §8
+  ở PR lát 3 (#407); lát B (adapter 6 host, `scripts/xt_adapter.py` + `framework/templates/harness/`; T-3642…3644, D-310;
+  research §9), C (git hook sàn; T-3645, D-309), D (`xt.py loop run --agent`; T-3646) ở PR lát 5 của
+  [`PLAN-upgrade-2026-11-02.md`](../autopilot/PLAN-upgrade-2026-11-02.md). Chưa chạy thật với từng công cụ (chỉ payload
+  theo docs và agent giả) — fixture payload thật là việc sau.
 - **Ngày:** 2026-11-02.
 - **Nghiên cứu:** [`research/2026-11-02-multi-provider-harness.md`](../../research/2026-11-02-multi-provider-harness.md)
   (7 công cụ + chuẩn AGENTS.md + sandbox độc lập; mọi dữ kiện ghi ngày 2026-11-02, mục chưa xác minh ở §6 của file đó).
