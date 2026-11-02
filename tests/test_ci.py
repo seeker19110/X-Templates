@@ -212,6 +212,18 @@ class GateFanOutTest(unittest.TestCase):
         self.assertIn("COVERAGE_CORE: sysmon", self.jobs["coverage"])
         self.assertNotIn("COVERAGE_CORE", self.jobs["py311"])  # 3.11 không có sys.monitoring, và không đo coverage
 
+    def test_test_job_installs_pinned_bun_and_requires_it(self):
+        """AUD-TEST-056: test plugin OpenCode chạy thật trên CI — job `test` cài bun ghim phiên bản + sha256 (kiểm trước
+        khi giải nén) TRƯỚC bước test, và đặt `XT_REQUIRE_BUN` để thiếu bun là đỏ, không skip im lặng."""
+        body = self.jobs["test"]
+        self.assertRegex(body, r"BUN_VERSION: \d+\.\d+\.\d+\n")
+        self.assertRegex(body, r"BUN_SHA256: [0-9a-f]{64}\n")
+        install = body.index("sha256sum -c -")
+        self.assertLess(install, body.index("tar -xzf"))
+        self.assertLess(body.index('>> "$GITHUB_PATH"'), body.index("scripts/dev-task.sh test-shard"))
+        self.assertIn('XT_REQUIRE_BUN: "1"', body)
+        self.assertNotIn("XT_REQUIRE_BUN", self.jobs["py311"])  # sàn 3.11 không cài bun — một job chạy thật là đủ
+
     def test_min_tests_declared_once(self):
         text = CI.read_text(encoding="utf-8")
         self.assertEqual(len(re.findall(r"XT_MIN_TESTS:", text)), 1)

@@ -124,12 +124,26 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
+      # bun cho test plugin OpenCode (`tests.test_adapters`, AUD-TEST-056 — trước đây CI luôn skip). Gói npm
+      # `@oven/bun-linux-x64` 1.4.4 (phát hành 2026-10-22, qua cooldown BASE-DEP-019); sha256 tính 2026-11-02 trên tarball
+      # tải từ registry, khớp `dist.integrity` sha512 của registry. Kiểm hash TRƯỚC khi giải nén; không chạy script cài.
+      - name: Cài bun ghim phiên bản + sha256 (test plugin OpenCode)
+        env:
+          BUN_VERSION: 1.4.4
+          BUN_SHA256: 93ca5a2abe45f3bcac6dd55baff8bb06c4ac824b70f89650b54e5c8b80dbef18
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun.tgz" "https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-$BUN_VERSION.tgz"
+          echo "$BUN_SHA256  $RUNNER_TEMP/bun.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/bun.tgz" -C "$RUNNER_TEMP" package/bin/bun
+          echo "$RUNNER_TEMP/package/bin" >> "$GITHUB_PATH"
       # COVERAGE_CORE=sysmon (sys.monitoring, Python ≥ 3.12): đo thử T-1831; đã chạy `dev-task.sh test` trên 3.14.6 cục bộ
       # vẫn 100 % dòng + nhánh. Job `coverage` đỏ dưới 100 % → bỏ biến này (ghi D-NNN).
       - name: Test shard (coverage ghi vào thư mục tạm của runner)
         env:
           SHARD: ${{ matrix.shard }}
           COVERAGE_CORE: sysmon
+          XT_REQUIRE_BUN: "1" # thiếu bun → test plugin OpenCode đỏ thay vì skip (AUD-TEST-056)
         run: scripts/dev-task.sh test-shard "$SHARD" 4 "$RUNNER_TEMP/cov"
       # actions/upload-artifact, actions/download-artifact: tag mới nhất giải ra SHA commit bằng `git ls-remote` (tag nhẹ),
       # xác minh 2026-10-20. File dữ liệu coverage bắt đầu bằng `.` → cần `include-hidden-files`.

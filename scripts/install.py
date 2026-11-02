@@ -141,19 +141,29 @@ def copy_tree_replace(src: Path, dst: Path) -> None:
 
 
 MD_LINK_RE = re.compile(r"\]\(([^)#\s]+)")
+# Trích dẫn trong backtick: `research/x.md` (từ gốc repo khung) hay `../../research/x.md` (từ file) — AUD-XFEAT-047.
+TICK_RESEARCH_RE = re.compile(r"`((?:\.\./)*research/[^`#\s]+)")
+
+
+def _research_refs(md: Path, src: Path) -> list[Path]:
+    """Đích có thể của mọi tham chiếu trong `md`: liên kết Markdown (từ thư mục của file), trích dẫn backtick (từ thư mục
+    của file, rồi từ gốc `src`)."""
+    text = md.read_text(encoding="utf-8")
+    refs = [md.parent / link for link in MD_LINK_RE.findall(text)]
+    return refs + [base / tick for tick in TICK_RESEARCH_RE.findall(text) for base in (md.parent, src)]
 
 
 def linked_research(src: Path) -> list[Path]:
     """Đường dẫn (tương đối từ `research/`) của mọi FILE trong `src/research` mà tài liệu ở `src/framework` trỏ tới bằng
-    liên kết Markdown tương đối — kể cả gián tiếp (file research trỏ sang file research khác); liên kết tới thư mục, URL
-    hay ra ngoài `research/` bị bỏ qua."""
+    liên kết Markdown tương đối hoặc trích dẫn backtick — kể cả gián tiếp (file research trỏ sang file research khác);
+    liên kết tới thư mục, URL hay ra ngoài `research/` bị bỏ qua."""
     root = (src / "research").resolve()
     found: set[Path] = set()
     todo = sorted((src / "framework").rglob("*.md"))
     while todo:
         md = todo.pop()
-        for link in MD_LINK_RE.findall(md.read_text(encoding="utf-8")):
-            target = (md.parent / link).resolve()
+        for ref in _research_refs(md, src):
+            target = ref.resolve()
             rel = target.relative_to(root) if target.is_file() and target.is_relative_to(root) else None
             if rel is not None and rel not in found:
                 found.add(rel)

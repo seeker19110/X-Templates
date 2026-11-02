@@ -4,7 +4,7 @@ kind: template
 updated: 2026-11-02
 ---
 
-# Mẫu docs/ops/slo.md
+# Mẫu docs/ops/SLO.md
 
 > **Ai viết:** chủ dịch vụ + người trực; chủ sản phẩm duyệt mục tiêu. **Giai đoạn:** G4 (bản đầu, trước khi có người dùng
 > thật), G8 (đối chiếu số thật). **Cổng dùng:** `OPS-SLO-001`, `OPS-SLO-010` ([`../15-operations/slo-and-alerting.md`](../15-operations/slo-and-alerting.md)),

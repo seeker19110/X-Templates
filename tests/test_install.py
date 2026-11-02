@@ -144,6 +144,9 @@ class InstallTest(unittest.TestCase):
         want = sorted(p.name for p in install.linked_research(install.SRC))
         self.assertEqual(got, want)
         self.assertIn("2026-10-13-stored-catalog-extraction.md", got)
+        # AUD-XFEAT-047: file chỉ được trích trong backtick (`research/…`) cũng phải có mặt
+        for name in ("2026-10-24-single-agent-loop.md", "2026-11-02-multi-provider-harness.md"):
+            self.assertIn(name, got)
         self.assertLess(len(got), len([p for p in (install.SRC / "research").rglob("*") if p.is_file()]))
         r = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "check-links.py"), str(self.target / ".xtemplates")],
@@ -151,6 +154,23 @@ class InstallTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(r.returncode, 0, r.stdout[-2000:])
+
+    def test_linked_research_follows_backtick_paths(self):
+        """AUD-XFEAT-047: trích dẫn trong backtick — `research/x.md` (từ gốc repo khung) và `../../research/x.md` (từ file)
+        — cũng được chép (bỏ `#…`), kể cả gián tiếp; đường không trỏ file trong research/ (skill, thư mục, file vắng) bị bỏ."""
+        src = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (src / "framework" / "m").mkdir(parents=True)
+        (src / "research" / "sub").mkdir(parents=True)
+        for name in ("a.md", "b.md", "c.md", "d.md", "e.md", "khong-tro.md"):
+            (src / "research" / name).write_text("x\n", encoding="utf-8")
+        (src / "research" / "b.md").write_text("Xem `research/d.md`.\n", encoding="utf-8")
+        (src / "framework" / "m" / "x.md").write_text(
+            "Nguồn `research/a.md`, `../../research/b.md`, [c](../../research/c.md), `research/e.md#muc`,"
+            " `.claude/skills/research/SKILL.md`, `research/sub`, `research/vang.md`, `../research/khong-tro.md`.\n",
+            encoding="utf-8",
+        )
+        got = [p.as_posix() for p in install.linked_research(src)]
+        self.assertEqual(got, ["a.md", "b.md", "c.md", "d.md", "e.md"])
 
     def test_installed_check_links_uses_project_root(self):
         self.run_install()

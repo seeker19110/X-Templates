@@ -653,7 +653,8 @@ def _check_refs(docs: List[Doc], ids: Dict[str, str]) -> List[str]:
     return errors
 
 
-VERIFIED_AT_RE = re.compile(r"xác minh(?: lại)?[^\d\n]{0,12}(\d{4}-\d{2}-\d{2})")
+# Không phân biệt hoa/thường: bảng stack của hồ sơ ghi "Xác minh ngày …" đầu câu (AUD-DOC-216).
+VERIFIED_AT_RE = re.compile(r"xác minh(?: lại)?[^\d\n]{0,12}(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 
 
 def stale_verifications(root: Path, days: int, today: _dt.date) -> List[Tuple[str, str]]:
@@ -15167,7 +15168,8 @@ def build_parser() -> argparse.ArgumentParser:
     prc = sub.add_parser(
         "release-check",
         help="cổng G7 máy đọc: blueprint --strict --run, audit check --strict, kiểm lại cuối, cây git sạch, attack/perf,"
-        " cổng production migration_check/acceptance/rollback → GO/NO-GO (ADR-0029, ADR-0062)",
+        " cổng production migration_check/acceptance/rollback, GO-NO-GO*.md của v<VERSION> đã ký §5 (go_no_go)"
+        " → GO/NO-GO (ADR-0029, ADR-0062)",
     )
     prc.add_argument("--blueprint", default="BLUEPRINT.md")
     prc.add_argument("--status", default="docs/ops/AUDIT-STATUS.md", help="sổ audit (templates/AUDIT-STATUS.md)")
