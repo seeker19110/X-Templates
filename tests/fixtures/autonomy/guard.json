@@ -14510,6 +14510,80 @@
    "allowed": true
   },
   "note": "ADR-0063 (D-299): tập con chuẩn của guard — đối chứng hợp lệ"
+ },
+ {
+  "id": "guard-adr63-sec303-runner-verbatim",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-303"
+  ],
+  "input": {
+   "command": "flock /tmp/l bash -c 'echo {#,a}; rm -rf {~,x}'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #395 (ADR-0063 lát A)"
+ },
+ {
+  "id": "guard-adr63-sec303-var-rewrite",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-303"
+  ],
+  "input": {
+   "command": "x=1; bash -c 'rm -rf ~0' $x"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review #395 (ADR-0063 lát A)"
+ },
+ {
+  "id": "guard-adr63-sec304-pid-ansi",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-304"
+  ],
+  "input": {
+   "command": "echo $$'\\'; rm -rf ~0; #'"
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "review #395 (ADR-0063 lát A)"
+ },
+ {
+  "id": "guard-adr63-sec305-case-subst",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-305"
+  ],
+  "input": {
+   "command": "echo \"$(case x in x) rm -rf ~0;; esac)\""
+  },
+  "expect": {
+   "allowed": false,
+   "decision": "deny",
+   "code": "BUDGET"
+  },
+  "note": "review #395 (ADR-0063 lát A)"
+ },
+ {
+  "id": "guard-adr63-control-sec306-grep-paren",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-306"
+  ],
+  "input": {
+   "command": "n=$(git log --oneline -5 | grep -c 'fix(')"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review #395 (ADR-0063 lát A)"
  }
  ]
 }
