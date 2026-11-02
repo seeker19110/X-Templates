@@ -59,14 +59,18 @@ def load_guard(root: str) -> Optional[types.ModuleType]:
 
 def mcp_name(host: str, name: str) -> Optional[str]:
     """Tên MCP của host → `mcp__<server>__<tool>` mà luật MCP của guard đọc; không phải MCP → None. Gemini
-    `mcp_<server>_<tool>` tách ở `_` đầu (server có `_` thì tách sai — giới hạn đã biết); Cursor `MCP:<tool>` không nêu
-    server; Grok `server__tool` không tiền tố."""
+    `mcp_<server>_<tool>` và OpenCode `<server>_<tool>` (docs OpenCode mcp-servers, đọc 2026-11-02) tách ở `_` đầu
+    (server có `_` thì tách sai — giới hạn đã biết; shell/ghi/patch đã xét trước nên tool dựng sẵn không tới đây); Cursor
+    `MCP:<tool>` không nêu server; Grok `server__tool` không tiền tố."""
     if name.startswith("mcp__"):
         return name
     if name.startswith("MCP:"):
         return f"mcp__{host}__{name[4:]}"
     if host == "gemini" and name.startswith("mcp_") and "_" in name[4:]:
         server, _, tool = name[4:].partition("_")
+        return f"mcp__{server}__{tool}"
+    if host == "opencode" and "_" in name.strip("_"):  # review #411 🔴: merge qua MCP từng không được xét
+        server, _, tool = name.strip("_").partition("_")
         return f"mcp__{server}__{tool}"
     if host in ("grok", "copilot") and "__" in name.strip("_"):
         return f"mcp__{name}"
@@ -152,10 +156,16 @@ def render(host: str, deny: bool, reason: str) -> Tuple[str, int]:
 def run(host: str, raw: Any, loader: Callable[[str], Optional[types.ModuleType]] = load_guard) -> Tuple[str, int]:
     tool, args, cwd, _ = parse(host, raw)
     root = project_root(cwd)
-    guard = loader(root)
-    if guard is None:  # dự án chưa cài harness của khung: không có luật để áp
-        return render(host, False, "")
-    deny, code, reason = decide(guard, to_core(host, tool, args, cwd, root))
+    try:
+        guard = loader(root)
+        if guard is None:  # dự án chưa cài harness của khung: không có luật để áp
+            return render(host, False, "")
+        deny, code, reason = decide(guard, to_core(host, tool, args, cwd, root))
+    except (
+        Exception
+    ) as exc:  # review #411 🔴: guard hỏng/không nạp được — 4/6 host coi lỗi hook là cho qua (research §9)
+        why = f"guard của khung không nạp/chạy được ({type(exc).__name__}) — khôi phục .claude/hooks/guard.py [BROKEN_GUARD]"
+        return render(host, True, why)
     return render(host, deny, f"{reason} [{code}]" if deny and code else reason)
 
 

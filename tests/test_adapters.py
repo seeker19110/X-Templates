@@ -43,7 +43,15 @@ WRITE_NAME = {
     "grok": "search_replace",
     "opencode": "write",
 }
-MCP_NAME = {"gemini": "mcp_github_{}", "cursor": "MCP:{}", "grok": "github__{}", "copilot": "github__{}"}
+# OpenCode đặt tên MCP `<server>_<tool>` (docs OpenCode mcp-servers, đọc 2026-11-02) — review #411: bảng cũ dùng
+# `mcp__github__…` mà OpenCode không phát nên ca "mcp merge" xanh không chứng minh gì.
+MCP_NAME = {
+    "gemini": "mcp_github_{}",
+    "cursor": "MCP:{}",
+    "grok": "github__{}",
+    "copilot": "github__{}",
+    "opencode": "github_{}",
+}
 SESSION_KEY = {"codex": "session_id", "copilot": "sessionId", "grok": "sessionId", "opencode": "sessionID"}
 
 
@@ -150,6 +158,33 @@ class AdapterHostTest(unittest.TestCase):
             self.assertFalse(ad.decide(g, [{"tool": "bash", "command": "ls"}])[0])
             self.assertTrue(ad.decide(g, [{"tool": "bash", "command": "gh pr merge 5"}])[0])
         self.assertIsNone(ad.load_guard(tempfile.gettempdir()))
+
+    def test_broken_guard_denies_on_every_host(self):
+        """Review #411 🔴: guard của dự án không nạp được (SyntaxError, ImportError…) hay lõi ném lỗi ngoài luật → deny
+        tường minh theo giao thức host (Codex/Gemini/Grok/OpenCode coi lỗi hook là cho qua), không traceback."""
+
+        def broken(_root: str) -> None:
+            raise SyntaxError("guard.py hỏng")
+
+        for host in ad.HOSTS:
+            with self.subTest(host=host):
+                raw = payloads(host)[7][1]  # "ls": lệnh vô hại vẫn bị chặn khi không có luật để áp
+                out, code = ad.run(host, raw, broken)
+                self.assertTrue(verdict(host, out, code), (host, out))
+                self.assertIn("BROKEN_GUARD", out)
+        g = ad.load_guard(str(ROOT))
+        assert g is not None
+        with (
+            mock.patch.object(g, "_failure_decision", side_effect=RuntimeError("hỏng nốt")),
+            mock.patch.object(g, "_core_decision", side_effect=RuntimeError("hỏng")),
+        ):
+            out, code = ad.run("codex", payloads("codex")[7][1], lambda r: g)
+        self.assertTrue(verdict("codex", out, code), out)
+
+    def test_opencode_mcp_names(self):
+        self.assertEqual(ad.mcp_name("opencode", "github_merge_pull_request"), "mcp__github__merge_pull_request")
+        self.assertEqual(ad.mcp_name("opencode", "_github_get_me_"), "mcp__github__get_me")
+        self.assertIsNone(ad.mcp_name("opencode", "todowrite"))
 
     def test_project_root_outside_git(self):
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
