@@ -265,6 +265,21 @@
     "AUD-HAR-169",
     "AUD-HAR-182"
    ]
+  },
+  {
+   "reason": "Nợ review nhóm tài liệu 2026-11-02 (#382/#403/#409/#411/#412) — tài liệu/sổ/PLAN/mẫu, `validate --stale`, `install.py` chọn file research, bước cài bun của CI: không phải quyết định cho/chặn của PR, rollup, review hay guard; đỡ bằng Gate unittest tests.test_xt -k stale_verifications, tests.test_install -k research, tests.test_template_contracts, tests.test_ci -k pinned_bun, tests.test_plan_files và `changelog-check`",
+   "ids": [
+    "AUD-DOC-159",
+    "AUD-DOC-184",
+    "AUD-DOC-185",
+    "AUD-DOC-209",
+    "AUD-DOC-211",
+    "AUD-DOC-216",
+    "AUD-DOC-217",
+    "AUD-DOC-218",
+    "AUD-TEST-056",
+    "AUD-XFEAT-047"
+   ]
   }
  ]
 }
