@@ -632,7 +632,40 @@ def validate(root: Path) -> List[str]:
         errors += _check_applies_to(d, where, profile_slugs)
         errors += _check_slug_modules(d, where, slugs, by_rel)
         errors += _check_links(d, where, links)
-    return errors + _check_readmes(root)
+    return errors + _check_refs(docs, ids) + _check_readmes(root)
+
+
+# ID trỏ tới trong văn bản (AUD-DOC-182): dạng ID checklist; `AUD-…` là ID sổ audit của repo (docs/ops), không phải mục khung.
+ID_REF_RE = re.compile(r"\b[A-Z]{2,5}-[A-Z0-9]{2,8}-\d{3}\b")
+REF_SKIP_PREFIXES = ("AUD-",)
+
+
+def _check_refs(docs: List[Doc], ids: Dict[str, str]) -> List[str]:
+    """ID mục checklist được nhắc (ngoài code fence, trừ chính dòng định nghĩa) phải có mục định nghĩa ở đâu đó trong khung."""
+    errors: List[str] = []
+    own = {(d.rel, it.line): it.id for d in docs for it in d.items}
+    for d in docs:
+        for n, line in _lines_outside_fences(d.body, d.body_offset + 1):
+            for ref in dict.fromkeys(ID_REF_RE.findall(line)):
+                if ref not in ids and not ref.startswith(REF_SKIP_PREFIXES) and own.get((d.rel, n)) != ref:
+                    errors.append(f"{d.rel}.md:{n}: trỏ {ref} không có mục nào định nghĩa")
+    return errors
+
+
+VERIFIED_AT_RE = re.compile(r"xác minh(?: lại)?[^\d\n]{0,12}(\d{4}-\d{2}-\d{2})")
+
+
+def stale_verifications(root: Path, days: int, today: _dt.date) -> List[Tuple[str, str]]:
+    """(vị trí, ngày) của mọi "xác minh YYYY-MM-DD" cũ hơn `days` ngày so với `today` (AUD-DOC-177) — nguồn cần tra lại."""
+    docs, _ = load_docs(root)
+    out: List[Tuple[str, str]] = []
+    for d in docs:
+        for n, line in _lines_outside_fences(d.body, d.body_offset + 1):
+            for day in VERIFIED_AT_RE.findall(line):
+                with contextlib.suppress(ValueError):
+                    if (today - _dt.date.fromisoformat(day)).days > days:
+                        out.append((f"{d.rel}.md:{n}", day))
+    return out
 
 
 # --------------------------------------------------------------------------- compose
@@ -6708,6 +6741,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
     docs, _ = load_docs(args.framework)
     n_items = sum(len(d.items) for d in docs)
     print(f"✓ Khung hợp lệ: {len(docs)} file, {n_items} mục checklist.")
+    if args.stale is not None:
+        try:
+            today = _dt.date.fromisoformat(args.today) if args.today else _dt.date.today()
+        except ValueError:
+            print(f"✗ --today phải là YYYY-MM-DD: {args.today}", file=sys.stderr)
+            return 2
+        old = stale_verifications(args.framework, args.stale, today)
+        for where, day in old:
+            print(f"⚠ {where}: xác minh {day} — {(today - _dt.date.fromisoformat(day)).days} ngày")
+        print(f"{len(old)} ngày xác minh quá {args.stale} ngày (cảnh báo, không đổi mã thoát — tra lại nguồn).")
     return 0
 
 
@@ -14682,7 +14725,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="thư mục framework/ (mặc định: cạnh scripts/)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("validate").set_defaults(fn=cmd_validate)
+    pv = sub.add_parser("validate")
+    pv.add_argument(
+        "--stale", type=int, metavar="N", help="cảnh báo mọi 'xác minh YYYY-MM-DD' cũ hơn N ngày (AUD-DOC-177)"
+    )
+    pv.add_argument("--today", help="ngày so cho --stale (YYYY-MM-DD; mặc định hôm nay)")
+    pv.set_defaults(fn=cmd_validate)
     pl = sub.add_parser("list")
     pl.add_argument("what", choices=["profiles", "industries", "modules"])
     pl.set_defaults(fn=cmd_list)

@@ -3,7 +3,7 @@ title: Phản hồi về khung từ dự án đích
 kind: module
 prefix: LOOP-FB
 applies_to: [all]
-updated: 2026-10-24
+updated: 2026-11-02
 ---
 
 # Phản hồi về khung từ dự án đích
@@ -36,7 +36,7 @@ updated: 2026-10-24
 | `cong-cu` | `xt.py`/`install.py`/`dev-task.sh` crash, sai kết quả, thiếu tính năng chặn việc | tên lệnh, vd `xt.py loop record` |
 | `hook-chan-nham` | Hook `deny`/`ask` một lệnh hoặc file vô hại | tên hook, vd `pre-bash-guard` |
 | `hook-lot` | Hook để lọt hành động lẽ ra phải chặn/hỏi | tên hook |
-| `muc-sai` | Mục checklist sai, mơ hồ, *Kiểm* không chạy được, mức không hợp quy mô | ID mục, vd `SEC-AUTH-001` |
+| `muc-sai` | Mục checklist sai, mơ hồ, *Kiểm* không chạy được, mức không hợp quy mô | ID mục, vd `SEC-WEB-001` |
 | `tai-lieu` | Tài liệu/mẫu/skill thiếu hoặc dẫn sai | đường dẫn file |
 | `mien-tru` | (máy gom) MUST bị miễn trong `BLUEPRINT.md` | ID mục |
 | `bi-chan` | (máy gom) autopilot `blocked` | task hoặc `loop` |

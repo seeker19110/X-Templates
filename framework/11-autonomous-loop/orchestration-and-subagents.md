@@ -3,7 +3,7 @@ title: Điều phối: subagent, worktree, song song, không lồng
 kind: module
 prefix: LOOP-ORCH
 applies_to: [all]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Điều phối: subagent, worktree, song song, không lồng
@@ -160,5 +160,5 @@ Thiếu `acceptance_criteria` → không giao.
 - claude.com, *Building agents: When to fold subagents into your main agent loop* (2026-10-22): <https://claude.com/blog/building-agents-when-to-fold-subagents-into-your-main-agent-loop> · kit single-agent-loop-kit (`c437962`, 2026-10-21; "It measures."): <https://github.com/anthropics/single-agent-loop-kit> — xác minh 2026-10-24 (`research/2026-10-24-single-agent-loop.md`, ADR-0045); nhà luật sản phẩm: [`AI-AGENTIC-011`](../13-ai-engineering/agentic-systems.md), `AI-AGENTIC-019`.
 - Claude Code docs — agent teams (biến bật, teammate kế thừa quyền lead, plan tự duyệt, hook `TaskCompleted`/`TeammateIdle`, giới hạn): <https://code.claude.com/docs/en/agent-teams> — xác minh 2026-10-31
 - Claude Code docs — advisor (cặp model, không cache phía advisor, `DISABLE_TELEMETRY` tắt advisor): <https://code.claude.com/docs/en/advisor> · Claude API advisor tool: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool> — xác minh 2026-10-31
-- Catalog `seeker19110/stored` 03 §8e–§8f (kiểm docs Advisor/Agent Teams), 20 §3q.2 (54/202 agent của wshobson/agents ghim `model: opus`), `X-TEMPLATES.md` XT-H-001/007/009 — rà 2026-10-31
+- Catalog `seeker19110/stored` 03 §8e–§8f (kiểm docs Advisor/Agent Teams), 20 §3q.2 (54/202 agent của wshobson/agents ghim `model: opus`), `X-TEMPLATES.md` stored§XT-H-001/007/009 — rà 2026-10-31
 - Chủ dự án, nhận định "Adaptive Agent" 2026-11-01 (bảng loại việc → cấu hình, 6 KPI, "1 agent chính + tối đa 2–4 subagent"): `research/2026-11-01-adaptive-agent-topology.md`; ADR-0061
