@@ -11932,6 +11932,9 @@ def _review_models_error(args: argparse.Namespace, cfg: Optional[Dict[str, str]]
         args.author_effort = args.author_effort or cfg.get("author_effort")
     if not (args.reviewer_model and args.author_model):
         return "--clean cần --reviewer-model và --author-model (LOOP-ORCH-005: reviewer năng lực cao hơn người viết)"
+    if args.author_model in TRUSTED_BOTS:  # AUD-XFEAT-039: diff bot sinh tất định — chỉ đòi reviewer có họ model rõ
+        ok = _names_family(args.reviewer_model)
+        return None if ok else f"không nhận diện được họ model của '{args.reviewer_model}' — ghi tên đủ"
     if not model_family(args.reviewer_model) or not model_family(args.author_model):
         return "không nhận diện được tên model (cần chữ, vd sonnet, claude-opus-5-5)"
     vague = [m for m in (args.reviewer_model, args.author_model) if not _names_family(m)]
@@ -12176,6 +12179,17 @@ def _pr_debt(args: argparse.Namespace, base: Path) -> int:
     return rc
 
 
+def _bot_author_error(pr_arg: str, bot: str) -> str:
+    """`--author-model <bot>` chỉ nhận khi tác giả PR trên GitHub đúng là bot đó (không khai bừa để né luật năng lực)."""
+    try:
+        repo, n = _pr_target(pr_arg)
+        user = _gh_one(f"{repo}/pulls/{n}").get("user")
+    except PrInputError as exc:
+        return f"không kiểm được tác giả PR: {exc}"
+    login = user.get("login") if isinstance(user, dict) else None
+    return "" if login == bot else f"--author-model {bot}: tác giả PR #{n} là {login or '?'}, không phải {bot}"
+
+
 def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if not FULL_SHA_RE.fullmatch(args.head):
         print(
@@ -12186,6 +12200,8 @@ def _pr_reviewed(args: argparse.Namespace, base: Path) -> int:
     if args.inconclusive:
         args.clean = False
     err = _review_models_error(args, {k: v for k, v in _xt_keys(base).items() if k in REVIEW_KEYS})
+    if not err and args.author_model in TRUSTED_BOTS:
+        err = _bot_author_error(str(args.pr), args.author_model)
     if err:
         print(f"✗ {err}", file=sys.stderr)
         return 2

@@ -2764,6 +2764,33 @@ class PrNextCliTest(unittest.TestCase):
         run_main("pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", *MODELS)
         self.assertEqual(json.loads(self.nxt(self.big, "--json")[1])["action"], "merge")
 
+    def test_clean_review_of_bot_pr(self):
+        """AUD-XFEAT-039: PR của bot tin cậy (`dependabot[bot]`) ghi được review sạch — diff tất định, chỉ đòi reviewer
+        có họ model rõ; tác giả PR được kiểm trên GitHub nên không khai bừa `--author-model dependabot[bot]` được."""
+
+        def run(login: object, *reviewer: str) -> tuple:
+            with unittest.mock.patch.object(xt, "_gh_one", return_value={"user": login}):
+                return run_main(
+                    "pr", "reviewed", "--pr", "7", "--head", self.head, "--clean", "--no-publish",
+                    "--author-model", "dependabot[bot]", "--reviewer-model", *(reviewer or ("claude-opus-5-5",)),
+                )  # fmt: skip
+
+        rc, _, err = run({"login": "someone"})
+        self.assertEqual(rc, 2)
+        self.assertIn("không phải dependabot[bot]", err)
+        self.assertNotIn("7", xt.read_reviews(self.base))
+        self.assertIn("là ?", run(None)[2])
+        self.assertIn("không nhận diện được họ model", run({"login": "dependabot[bot]"}, "claude")[2])
+        with unittest.mock.patch.object(xt, "_pr_target", side_effect=xt.PrInputError("không có repo")):
+            rc, _, err = run_main(
+                "pr", "reviewed", "--pr", "7", "--head", self.head, "--blocking", "--author-model", "dependabot[bot]"
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("không kiểm được tác giả PR", err)
+        self.assertEqual(run({"login": "dependabot[bot]"})[0], 0)
+        last = xt.read_reviews(self.base)["7"]["reviews"][-1]
+        self.assertEqual((last["clean"], last["author_model"]), (True, "dependabot[bot]"))
+
     def test_clean_review_needs_valid_models(self):
         def run(*extra: str) -> tuple:
             return run_main("pr", "reviewed", "--pr", "7", "--head", self.head, *extra)
