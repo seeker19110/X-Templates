@@ -929,7 +929,7 @@ def _strict_why(cmd: str) -> str:
     why = next((why for rules, text in checks for rx, why in rules if rx.search(text)), "")
     if not why and STRICT_IFS_RE.search(v.s) and STRICT_SHELL_RE.search(v.s):
         why = "`$IFS` trong script của shell lồng (AUD-SEC-239)"
-    return why or _dyn_text_why(v, live, bare)
+    return why or _dyn_text_why(v, live, bare) or _gh_strict_why(cmd, v.s, live)
 
 
 def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
@@ -971,6 +971,50 @@ def _word_end(v: _CodeView, i: int, whole_command: bool) -> int:
     while i < len(v.s) and not (v.kind[i] == "c" and v.top[i] and v.s[i] in stops):
         i += 1
     return i
+
+
+# ADR-0063 lớp đăng review: lệnh `gh` đăng nội dung mà guard không lần được nguồn thân (bộ đọc nguồn cũ chỉ hiểu
+# `cat/head/tail`, chuyển hướng trên chính `gh`, tệp ở thư mục đang đứng) → chặn: dấu `xt-review` ở dạng chữ nào cũng
+# vậy; stdin qua chuyển hướng cấp shell/nhóm/hàm/`eval`/`xargs`/`>(…)`; `cd` trước `-F tệp`; tên `gh` dựng lúc chạy;
+# `gh alias set`; `$(…)` bằng công cụ đọc khác; biến thân đọc từ tệp (AUD-SEC-180/186/191/192/193/244/253).
+STRICT_GH_VERBS = {"comment", "review", "api", "alias", "create", "edit"}
+STRICT_GH_STDIN_RE = re.compile(r"(?:^|\s)(?:-F|--body-file|--input)(?:=|\s+)(?:-|/dev/stdin)(?=[\s;&|)}]|$)")
+STRICT_GH_FUNC_RE = re.compile(r"\(\s*\)\s*\{[^}]*\bgh\b")  # hàm bọc `gh` đọc stdin: `f() { gh … -F -; }; f < b.md`
+STRICT_GH_FILE_RE = re.compile(r"(?:^|\s)(?:-F|--body-file)(?:=|\s+)(?!-(?=[\s;&|)}]|$))\S")
+
+
+def _gh_posting(folded: str) -> str:
+    """`dyn` khi tên `gh` dựng lúc chạy (`"$(echo gh)"`), `alias` cho `gh alias set`, `post` cho `gh` đăng/sửa nội dung,
+    rỗng nếu không có."""
+    if "gh" not in folded:
+        return ""
+    kinds = []
+    for c, _ in _commands_with_cwd(tokenize(folded), None):
+        n = normalize(c)
+        if not n or not (n[0] == "gh" or ("$" in n[0] and "gh" in n[0])) or not STRICT_GH_VERBS & set(n[1:]):
+            continue
+        if n[0] != "gh":
+            kinds.append("dyn")
+        elif n[1:3] == ["alias", "set"]:
+            kinds.append("alias")
+        elif GH_POST_RE.search(" ".join(n)):  # `gh api … --jq` chỉ đọc: không phải đăng
+            kinds.append("post")
+    return min(kinds, default="")  # `alias` < `dyn` < `post`: dạng chặn thẳng thắng
+
+
+def _gh_strict_why(cmd: str, folded: str, live: str) -> str:
+    kind = _gh_posting(folded)
+    if not kind:
+        return ""
+    # dấu ở dạng chữ mà regex dấu của luật cũ không khớp (`printf '\x3c!--…'`, ghép nháy) — dạng nguyên văn để luật cũ báo
+    marker = "xtreviewv1head" in re.sub(r"[^a-z0-9]", "", cmd.lower()) and not REVIEW_MARK_RE.search(cmd)
+    if kind != "post" or marker:
+        return "`gh` mang dấu `xt-review`/tên dựng lúc chạy/`alias set` (chỉ `xt.py pr reviewed` đăng — AUD-SEC-192/193/253)"
+    func_stdin = STRICT_GH_STDIN_RE.search(folded) and STRICT_GH_FUNC_RE.search(live)
+    cd_file = re.search(r"\b(?:cd|pushd)\b", live) and STRICT_GH_FILE_RE.search(folded)
+    if func_stdin or cd_file:
+        return "`gh` đăng thân guard không lần được nguồn (hàm bọc, `cd` rồi `-F tệp`) — AUD-SEC-191/192"
+    return ""
 
 
 def _may_be_alias(head: str) -> bool:
@@ -3272,8 +3316,9 @@ REVIEW_MARK_RE = re.compile(
 )
 # `gh api` chỉ khi GHI (cờ trường/`--input`/phương thức ghi) — `gh api … --jq` đọc comment không bị chặn (review #159).
 GH_POST_RE = re.compile(
-    r"\bgh\b.*?\b(?:(?:pr|issue)\s+(?:comment|review|create|edit)\b"
-    r"|api\b.*?(?:\s-[fF]\b|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
+    # cờ toàn cục giữa nhóm và lệnh con (`gh pr -R o/r comment`), cờ trường dính (`-fbody=…`) — AUD-SEC-193
+    r"\bgh\b.*?\b(?:(?:pr|issue)(?:\s+-{1,2}[\w-]+(?:[=\s]+[^\s-]\S*)?)*\s+(?:comment|review|create|edit)\b"
+    r"|api\b.*?(?:\s-[fF]|\s--(?:field|raw-field|input)\b|\s(?:-X\s*|--method[=\s]+)(?:POST|PATCH|PUT)\b))",
     re.S,
 )
 GH_TEXT_NOISE_RE = re.compile(r"['\"\\]")
@@ -4204,7 +4249,7 @@ def _external_rule(name: str, args: List[str], root: str) -> Tuple[str, str]:
         return gh_pr_merge_rule(args[2:], root)
     if name == "gh" and args[:1] == ["pr"] and "merge" in args[2:4]:  # `gh pr -R o/r merge`: cờ repo của `pr`
         return _pr_flag_merge_rule(args, root)
-    if name == "gh" and args[:2] in (["alias", "set"], ["alias", "import"]):
+    if name == "gh" and args[:2] == ["alias", "import"]:  # `alias set`: ADR-0063 lát C chặn trước
         return "ask", "gh alias đặt lệnh tắt — guard không thấy lệnh thật khi alias chạy"
     if name == "gh" and args[:1] == ["api"] and _gh_api_writes(args[1:]):
         return ("ask", DESTROY_ASK) if _gh_api_destroy(args[1:]) else _gh_api_merge_rule(args[1:], root)

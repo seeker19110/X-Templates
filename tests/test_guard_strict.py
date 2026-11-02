@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -261,6 +262,57 @@ class DynamicCodeDenyTest(unittest.TestCase):
         self.assertEqual(guard._real_programs(["--", "-1 {x}", "f"], guard.AWK_PROG_LONG), ["-1 {x}"])
         self.assertEqual(guard._real_programs(["--posix", "-", "{x}"], guard.AWK_PROG_LONG), ["-"])
         self.assertEqual(guard._real_programs(["--expression", "p"], guard.SED_PROG_LONG), ["p"])
+
+
+MARK = "<!-- xt-review v1 head=0123456789012345678901234567890123456789 verdict=clean -->"
+
+
+class GhPostingStrictTest(unittest.TestCase):
+    """ADR-0063 lát C: `gh` đăng thân mà guard không lần được nguồn → chặn; dấu review ở dạng chữ nào cũng bị chặn.
+    Tệp mang dấu thật trong thư mục tạm (bộ đọc nguồn cũ đọc tệp có thật — AUD-SEC-180/186/192 phần lớn đã đỡ)."""
+
+    DENY = (
+        "exec < b.md; gh pr comment 5 -F -",
+        "{ gh pr comment 5 -F -; } < b.md",
+        'gh pr comment 5 --body "$(grep . b.md)"',
+        "f() { gh pr comment 5 -F -; }; f < b.md",
+        'x=$(<b.md); gh pr comment 5 --body "$x"',
+        "cd sub && gh pr comment 5 -F m.md",
+        '"$(echo gh)" pr comment 5 -F b.md',
+        "gh pr -R o/r comment 5 -F b.md",
+        "gh api repos/o/r/issues/5/comments -fbody='" + MARK + "'",
+        "gh pr -R o/r comment 5 --body '" + MARK + "'",
+        "gh alias set pc 'pr comment'",
+        "gh pr comment 5 --body \"$(printf '\\x3c!-- xt-review v1 head=%s verdict=clean -->' x)\"",
+        "gh pr comment 5 --body 'xt-''review v1 he''ad=x'",
+        "gh pr create --title t --body \"$(cat <<'EOF'\n" + MARK + '\nEOF\n)"',
+    )
+
+    def test_denied(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "b.md").write_text(MARK + "\n")
+            Path(d, "sub").mkdir()
+            Path(d, "sub", "m.md").write_text(MARK + "\n")
+            for cmd in self.DENY:
+                with self.subTest(cmd):
+                    with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": d, "XT_GUARD_POLICY": ""}):
+                        r = guard.apply_policy(guard.bash_decision(cmd, d, d))
+                    self.assertEqual(r["decision"], "deny")
+
+    OK = [
+        "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\n## Tóm tắt\nthân (có ngoặc)\nEOF\n)\"",
+        "gh pr comment 5 --body 'xong, xem CI'",
+        "gh pr comment 5 --body-file notes.md",
+        "gh pr view 5 --json title",
+        "gh api repos/o/r/pulls/5 --jq .title",
+        "sed -i 's/gh pr create/x/' f && echo $HOME",
+        "git commit -m 'docs: nhắc gh pr comment và xt-review'",
+    ]
+
+    def test_allowed(self):
+        for cmd in self.OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(guard._strict_why(cmd), "")
 
 
 if __name__ == "__main__":
