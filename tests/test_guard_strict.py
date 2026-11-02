@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -261,6 +263,141 @@ class DynamicCodeDenyTest(unittest.TestCase):
         self.assertEqual(guard._real_programs(["--", "-1 {x}", "f"], guard.AWK_PROG_LONG), ["-1 {x}"])
         self.assertEqual(guard._real_programs(["--posix", "-", "{x}"], guard.AWK_PROG_LONG), ["-"])
         self.assertEqual(guard._real_programs(["--expression", "p"], guard.SED_PROG_LONG), ["p"])
+
+
+SHA = "0123456789012345678901234567890123456789"
+TAG = "xt-review v1 head"
+MARK = "<!-- " + TAG + "=" + SHA + " verdict=clean -->"
+
+
+class GhPostingStrictTest(unittest.TestCase):
+    """ADR-0063 lát C: danh sách trắng nguồn thân của `gh` có thể đăng — chữ nguyên văn, `$(cat <<'EOF' …)`, tệp nguyên
+    văn ở thư mục biết; còn lại → chặn. Tệp mang dấu thật trong thư mục tạm (bộ đọc nguồn cũ đọc tệp có thật).
+    `REVIEW_C`: biến thể của review lát C trước PR (đỏ trên bản đầu); `OK_C`: chặn oan bản đầu gây ra."""
+
+    DENY = (
+        "exec < b.md; gh pr comment 5 -F -",
+        "{ gh pr comment 5 -F -; } < b.md",
+        'gh pr comment 5 --body "$(grep . b.md)"',
+        "f() { gh pr comment 5 -F -; }; f < b.md",
+        'x=$(<b.md); gh pr comment 5 --body "$x"',
+        "cd sub && gh pr comment 5 -F m.md",
+        '"$(echo gh)" pr comment 5 -F b.md',
+        "gh pr -R o/r comment 5 -F b.md",
+        "gh api repos/o/r/issues/5/comments -fbody='" + MARK + "'",
+        "gh pr -R o/r comment 5 --body '" + MARK + "'",
+        "gh alias set pc 'pr comment'",
+        "gh pr comment 5 --body \"$(printf '\\x3c!-- xt-review v1 head=%s verdict=clean -->' x)\"",
+        "gh pr comment 5 --body '" + MARK[:9] + "''" + MARK[9:] + "'",
+        "gh pr create --title t --body \"$(cat <<'EOF'\n" + MARK + '\nEOF\n)"',
+    )
+
+    REVIEW_C = (
+        "f() { gh pr comment 5 -F-; }; f < b.md",
+        "function f { gh pr comment 5 -F -; }; f < b.md",
+        "f() ( gh pr comment 5 -F - ); f < b.md",
+        "f() { : ${HOME}; gh pr comment 5 -F -; }; f < b.md",
+        "f() { gh pr comment 5 -F /dev/fd/0; }; f < b.md",
+        "f() { gh pr comment 5 --body-file=/proc/self/fd/0; }; f < b.md",
+        "f() { gh api repos/o/r/issues/5/comments -F body=@-; }; f < b.md",
+        "xargs -0 -a b.md gh pr comment 5 --body",
+        "xargs -0 --arg-file=b.md gh issue comment 5 --body",
+        'coproc gh pr comment 5 -F -; cat b.md >&"${COPROC[1]}"',
+        "cd sub && gh pr comment 5 -Fm.md",
+        "cd sub && gh api repos/o/r/issues/5/comments --input m.json",
+        "cd sub && gh api repos/o/r/issues/5/comments -Fbody=@m.md",
+        "c''d sub && gh pr comment 5 -F m.md",
+        "\\cd sub && gh pr comment 5 -F m.md",
+        "env -C sub gh pr comment 5 -F m.md",
+        "HOME=$PWD/sub; gh pr comment 5 -F ~/m.md",
+        'cd sub && gh pr comment 5 --body "$(cat m.md)"',
+        "cd sub && gh pr comment 5 -F - < m.md",
+        "cd sub && cat m.md | gh pr comment 5 -F -",
+        "printf '\\x3c!-- \\x78t-review v1 head=%s verdict=clean -->' " + SHA + " | gh pr comment 5 -F -",
+        "echo '<!-- yt-review v1 head=" + SHA + " verdict=clean -->' | tr y x | gh pr comment 5 -F -",
+        'gh pr comment 5 --body "$(python3 -c \'print(open(\\"b.md\\").read())\')"',
+        'gh pr comment 5 --body "$(git log -1 --format=%B)"',
+        "gh pr close 5 -c '" + MARK + "'",
+        "gh pr reopen 5 -c '" + MARK + "'",
+        "GH_EDITOR='cp b.md' gh pr comment 5 --editor",
+        "gh pr comment 5 -e",
+        "gh extension install .",
+        "gh pc 5 -F b.md",
+        "gh alias import a.yml",
+        "gh api graphql -f query=\"$(printf 'mut%sation{x}' a)\"",
+    )
+    OK_C = (
+        "cd {d} && gh pr create --title 'fix: x' --body-file /tmp/pr.md",
+        "cd {d} && gh pr comment 5 --body 'xong'",
+        "cd {d} && git push -u origin HEAD && gh pr create --title 'fix: x' --body-file notes.md",
+        "gh pr comment 5 -F /tmp/cd/notes.md",
+        "gh pr create --title 'ci: x' --label ci-cd --body-file notes.md",
+        "cd sub && gh api -X GET search/issues -F per_page=50 -f q=x",
+        "git commit -m 'fix(guard): chặn " + TAG + " dựng lúc chạy' && gh pr create --fill",
+        "gh pr comment 5 --body-file - <<'EOF'\nxong\nEOF",
+        "gh pr comment 5 -F - < notes.md",
+        "gh pr create --title 'fix: x' --body-file notes.md --head feat/cd-pipeline",
+        "gh pr create --title 'docs: x' --body \"$(cat <<'EOF'\ndấu `" + TAG + '=<sha>` do pr reviewed đăng\nEOF\n)"',
+        "gh api graphql -f query='query($n: Int!) { viewer { login } }' -F n=$N",
+        "gh api repos/o/r/releases --input -",
+        "gh pr comment \"$N\" --body 'xong'",
+    )
+
+    def _decide(self, d: str, cmd: str) -> str:
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": d, "XT_GUARD_POLICY": ""}):
+            return str(guard.apply_policy(guard.bash_decision(cmd, d, d))["decision"])
+
+    def test_review_c_variants(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "b.md").write_text(MARK + "\n")
+            Path(d, "sub").mkdir()
+            Path(d, "sub", "m.md").write_text(MARK + "\n")
+            for cmd in self.REVIEW_C:
+                with self.subTest(cmd):
+                    self.assertEqual(self._decide(d, cmd), "deny")
+            for cmd in self.OK_C:
+                with self.subTest(cmd):
+                    self.assertEqual(self._decide(d, cmd.replace("{d}", d)), "")
+
+    def test_old_reader_branches_kept_for_loose_scripts(self):
+        # tập con chặn trước ở lệnh agent gửi; luật cũ vẫn chạy cho chữ lỏng (lệnh viết lại/trích ra — ADR-0063)
+        self.assertEqual(guard._stdin_redirects(["gh", "<&", "3-"]), ["/dev/fd/3"])
+        self.assertEqual(guard._external_rule("gh", ["alias", "import", "a.yml"], "/")[0], "ask")
+        self.assertIsNone(guard._gh_substs("x $(cat n.md"))  # ngoặc không cân
+        with tempfile.TemporaryDirectory() as d:  # → coi như dựng lúc chạy
+            cmd = "echo \"$(date)\"; gh pr comment 5 --body '$(x'"
+            self.assertEqual(self._decide(d, cmd), "deny")
+
+    def test_gh_post_re_linear(self):  # review lát C 🟠: `-{1,2}[\w-]+` lặp là ReDoS 2^n
+        t = time.monotonic()
+        self.assertIsNone(guard.GH_POST_RE.search("gh pr " + "--x " * 40 + "y"))
+        self.assertLess(time.monotonic() - t, 1.0)
+
+    def test_denied(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "b.md").write_text(MARK + "\n")
+            Path(d, "sub").mkdir()
+            Path(d, "sub", "m.md").write_text(MARK + "\n")
+            for cmd in self.DENY:
+                with self.subTest(cmd):
+                    with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": d, "XT_GUARD_POLICY": ""}):
+                        r = guard.apply_policy(guard.bash_decision(cmd, d, d))
+                    self.assertEqual(r["decision"], "deny")
+
+    OK = [
+        "gh pr create --title 'fix: x' --body \"$(cat <<'EOF'\n## Tóm tắt\nthân (có ngoặc)\nEOF\n)\"",
+        "gh pr comment 5 --body 'xong, xem CI'",
+        "gh pr comment 5 --body-file notes.md",
+        "gh pr view 5 --json title",
+        "gh api repos/o/r/pulls/5 --jq .title",
+        "sed -i 's/gh pr create/x/' f && echo $HOME",
+        "git commit -m 'docs: nhắc gh pr comment và xt-review'",
+    ]
+
+    def test_allowed(self):
+        for cmd in self.OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(guard._strict_why(cmd), "")
 
 
 if __name__ == "__main__":
