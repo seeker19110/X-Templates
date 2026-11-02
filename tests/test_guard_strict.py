@@ -129,5 +129,139 @@ class StrictSubsetAllowTest(unittest.TestCase):
         self.assertIn("echo hi", [s for s, _ in nested])
 
 
+class DynamicCodeDenyTest(unittest.TestCase):
+    """ADR-0063 lát B: mã guard không thấy được lúc quét (thân dựng lúc chạy, dữ liệu thành lệnh) → chặn."""
+
+    CASES = {
+        "AUD-SEC-235": "bash -c \"\\$'rm' -rf ~\"",
+        "AUD-SEC-237": "bash -c \"$(echo 'rm -rf ~')\"",
+        "AUD-SEC-237 biến": 'L=$(cat f); bash -c "$L"',
+        "AUD-SEC-252": "eval \"$(echo 'rm -rf ~')\"",
+        "AUD-SEC-252 hàm": "f() { \"$@\"; }; f bash -c 'rm -rf ~'",
+        "AUD-SEC-252 số": "g() { $1; }; g ls",
+        "AUD-SEC-288": "echo ' -rf ~' | sed 's/^/rm/e'",
+        "AUD-SEC-290": "{ echo 'rm -rf ~'; } | sh",
+        "AUD-SEC-290 subshell": "(echo 'rm -rf ~') | bash -s",
+        "AUD-SEC-291": "PS4[0]='$(rm -rf ~)'; set -x; true",
+        "AUD-SEC-287": "printf -v PS4 '\\x24(rm -rf ~)'; set -x; true",
+        "AUD-SEC-294": "echo 'rm -rf ~' | sed 'sx^xxe'",
+        "AUD-SEC-294 địa chỉ": "sed -n '1,$ sX^XXe' f",
+        "AUD-SEC-295": "echo 'rm -rf ~' | sed '/r/Ie'",
+        "AUD-SEC-296": "echo 'rm -rf ~' | awk -- '-1 {system($0)}'",
+        "AUD-SEC-297": "awk '{system($0)}' < <(echo 'rm -rf ~')",
+        "AUD-SEC-297 ống": "awk '{ print | $1 }' f",
+        "AUD-SEC-297 getline": "awk '{ $0 | getline x }' f",
+        "AUD-SEC-299": "printf -v BASH_ENV '%s' f.sh; export BASH_ENV; bash -c true",
+        "AUD-SEC-300": "mapfile -t PS4 <<< '$(rm -rf ~)'; set -x; true",
+        "AUD-SEC-301": "echo 'rm -rf ~' | tee >(bash)",
+        "AUD-SEC-302": "echo 'BEGIN{system(\"rm -rf ~\")}' | awk -f -",
+        "AUD-SEC-302 sed": "echo '1e rm -rf ~' | sed -n --file=/dev/stdin f",
+        "AUD-SEC-302 dính": "awk -f/dev/stdin < p.awk",
+        "AUD-SEC-302 dài": "awk --file - < p.awk",
+    }
+
+    def test_denied(self):
+        for name, cmd in self.CASES.items():
+            with self.subTest(name):
+                d = decide(cmd)
+                self.assertEqual(d["decision"], "deny")
+                self.assertIn("ADR-0063", str(d["reason"]))
+
+    REVIEW_B = (
+        "echo 'rm -rf ~' | sed '1~1s/^//ge'",
+        "echo 'rm -rf ~' | sed '1,+2s/.*/&/ge'",
+        "sed -i.prev 's/.*/&/e' f",
+        "sed --line-length 5 's/.*/&/e' f",
+        "awk -F ' ' '{system($0)}' f",
+        "sed '/x/IMe' f",
+        "awk '{system(\"\" $0)}' f",
+        "awk '{print | \"sh\"}' f",
+        "printf '1e rm -rf ~' | sed -n --fi /dev/stdin f",
+        "awk -f /dev//stdin < p",
+        "printf -vPS4 '\\x24(rm -rf ~)'; set -x; true",
+        "declare -n r=PS4; r='$(rm -rf ~)'; set -x; true",
+        "IFS= read -raPS4 <<< '$(rm -rf ~)'; set -x; true",
+        "unset PS4; : ${PS4:=\\$\\(rm\\ -rf\\ ~\\)}; set -x; true",
+        "env 'BASH_FUNC_ls%%=() { rm -rf ~; }' bash -c ls",
+        'perl -e \'system "rm", "-rf", "/"\'',
+        'ruby -e \'spawn "rm", "-rf", "/"\'',
+        "perl -e 'system(qw(rm -rf /))'",
+        'php -r \'pcntl_exec ("/bin/rm", ["-rf", "/"]);\'',
+        "bash -c \"x='$(cat f)'\"",
+        'L+=$(cat f); bash -c "$L"',
+        "bash -c \"$(cat <<'X' f\nX\n)\"",
+    )
+    REVIEW_B_OK = (
+        'docker exec c sh -c "echo \\$HOME"',
+        'bash -c "for f in *.txt; do wc -l \\$f; done"',
+        "PS4='+ '; set -x; true",
+        "sed -i -e 's/a/b/g' -e 's|x|y|' f",
+    )
+
+    def test_review_lot_b(self):
+        """Review lát B 🔴 (trước PR): địa chỉ GNU của sed, cờ sed/awk lạ, `IMe`, awk `system("" $0)`/`| "sh"`, `--fi`,
+        `/dev//stdin`, biến tự chạy theo ngữ cảnh, Perl/Ruby/PHP không ngoặc, `'…'` trong nháy kép, `+=`, heredoc `cat` có
+        tệp; `\\$HOME` trong `sh -c "…"` vẫn chạy."""
+        for cmd in self.REVIEW_B:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny")
+        for cmd in self.REVIEW_B_OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "")
+
+    def test_dynamic_caps(self):
+        """Trần hiệu năng (review lát B 🟠): quá nhiều `eval`, biến trong thân, chuỗi Perl → chặn, không quét bậc cao."""
+        many_eval = "eval true" + "; eval x" * (guard.STRICT_DYN_MAX + 1)
+        many_vars = 'bash -c "' + " ".join(f"$a{i}" for i in range(guard.STRICT_DYN_MAX + 1)) + '"'
+        many_strs = "perl -e 'system(" + ", ".join(f'"a{i}"' for i in range(guard.QUOTE_JOIN_MAX + 1)) + ")'"
+        for cmd in (many_eval, many_vars, many_strs):
+            with self.subTest(cmd=cmd[:40]):
+                self.assertEqual(guard.bash_decision(cmd, str(ROOT))["decision"], "deny")
+        self.assertEqual(decide("BASH_ENV= bash -c true")["decision"], "")
+        self.assertEqual(decide('git commit -m "nhắc BASH_ENV, PS4, bash -c và set -x"')["decision"], "")
+
+    def test_list_form_exec_scanned(self):
+        """AUD-SEC-292/298: lời gọi dạng danh sách đối số và API Open2/3, `IO.read("|…")` của Perl/Ruby/PHP."""
+        for cmd in (
+            'perl -e \'system("rm", "-rf", "/")\'',
+            'ruby -e \'system("rm", "-rf", "/")\'',
+            'php -r \'pcntl_exec("/bin/rm", ["-rf", "/"]);\'',
+            "perl -MIPC::Open3 -e 'open3(my $i, my $o, undef, \"rm -rf ~\")'",
+            "ruby -e 'IO.read(\"|rm -rf ~\")'",
+        ):
+            with self.subTest(cmd):
+                self.assertEqual(decide(cmd)["decision"], "deny")
+
+    OK = [
+        "awk '/a|b/ {print $1}' f",
+        "awk 'BEGIN{system(\"date\")}'",
+        "awk -F, -v x=1 '{print $2}' f",
+        "sed -n '1,5p' f",
+        "sed -i -e 's/a/b/g' -e 's|x|y|' f",
+        "sed -E 's/(foo)/\\1-bar/' f",
+        'sed -n "${n},${e}p" f',
+        "bash -c 'echo hi'",
+        "sh -c 'npm test' && echo ok",
+        "eval 'echo hi'",
+        "cat x.sh | sh script.sh",
+        "printf -v x '%s' y; read -r name < f; declare -a arr",
+        "python3 -c \"print('PS4=1')\"",
+        "grep -n 'PS4=' f; echo BASH_ENV",
+        "awk -- '{print}' f",
+    ]
+
+    def test_allowed(self):
+        for cmd in self.OK:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(decide(cmd)["decision"], "")
+
+    def test_program_parsing(self):
+        self.assertEqual(guard._real_programs(["-n", "--expr=p", "f"], guard.SED_PROG_LONG), ["p"])
+        self.assertEqual(guard._real_programs(["-l", "5", "-ne", "p", "f"], guard.SED_PROG_LONG), ["p"])
+        self.assertEqual(guard._real_programs(["--", "-1 {x}", "f"], guard.AWK_PROG_LONG), ["-1 {x}"])
+        self.assertEqual(guard._real_programs(["--posix", "-", "{x}"], guard.AWK_PROG_LONG), ["-"])
+        self.assertEqual(guard._real_programs(["--expression", "p"], guard.SED_PROG_LONG), ["p"])
+
+
 if __name__ == "__main__":
     unittest.main()

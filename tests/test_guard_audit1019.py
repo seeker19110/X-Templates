@@ -2721,13 +2721,14 @@ class AuditRescan1101GuardTest(unittest.TestCase):
     def test_benign_allowed(self) -> None:
         for cmd in (
             "echo 'a b' | awk '{print $1}'",
-            "echo ls | awk '{system($0)}'",
             "echo 'rm -rf ~' | sed 's/rm/x/'",
             "printf -v x '%s' y",
             "perl -e 'print readline(STDIN)'",
         ):
             with self.subTest(cmd):
                 self.assertEqual(final(cmd), "")
+        # ADR-0063 lát B: awk chạy chữ đầu vào (`system($0)`) bị chặn kể cả khi đầu vào thấy được (AUD-SEC-297)
+        self.assertEqual(final("echo ls | awk '{system($0)}'"), "deny")
 
     def test_sed_distinct_delimiters_bounded(self) -> None:
         chars = [chr(c) for c in range(0x2010, 0x2010 + 6000) if not chr(c).isalnum() and not chr(c).isspace()]
