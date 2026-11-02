@@ -784,10 +784,23 @@ STRICT_ARGV_CMD_RE = re.compile(r"(?:^|[;&|{(\n]|\b(?:then|do|else|elif)\b)\s*\"
 STRICT_PIPE_SHELL_RE = re.compile(
     rf"(?:[}})]\s*\|&?|>\()\s*(?:env\s+(?:-\S+\s+|\w+=\S*\s+)*)?{STRICT_SH}(?:\s+-[A-Za-z]*)*\s*(?:$|[;&|)\n]|-[A-Za-z]*s\b)"
 )
-STRICT_DYN_WORD_RE = re.compile(r"\$\(|\\\$|\$'|`")
-STRICT_CAT_HEREDOC_RE = re.compile(
-    r"\$\(\s*(?:cat|tee)\s+<<-?\s*(['\"])\w+\1[^)]*\)"
-)  # thân heredoc có nháy: thấy được
+STRICT_DYN_WORD_RE = re.compile(r"\$\(|\$'|`")  # trên vùng sống của từ (nháy đơn thật đã trống)
+STRICT_DYN_ESC_RE = re.compile(r"\\\$['({]")  # `\$'…'`, `\$(…)` trong nháy kép: shell trong mở rộng lại (AUD-SEC-235)
+# thân heredoc có nháy, `cat`/`tee` không đối số tệp (`$(cat <<'X' f` đọc f — review lát B): thấy được
+STRICT_CAT_HEREDOC_RE = re.compile(r"\$\(\s*(?:cat|tee)\s+<<-?\s*(['\"])\w+\1[ \t]*\n[^)]*\)")
+STRICT_DYN_MAX = 64  # số đầu `sh -c`/`eval` và số tên biến xét tối đa mỗi lệnh; vượt → chặn (review lát B, hiệu năng)
+# Biến bash tự chạy cùng ngữ cảnh kích hoạt nó trong lệnh này (review lát B 🔴: `printf -vPS4`, `declare -n`,
+# `read -aPS4`, `${PS4:=…}`, `BASH_FUNC_x%%`): PS4 + xtrace; BASH_ENV/ENV/BASH_FUNC_ + gọi shell; PS0/PS1/PROMPT_COMMAND
+# + shell tương tác. Gán chữ nguyên văn (`PS4='+ '`) không tính.
+STRICT_SAFE_PROMPT_RE = re.compile(
+    r"\bPS[0-4]=(?:'[^'$`\\]*'|\"[^\"$`\\]*\"|[^\s;&|$`\\'\"]*)(?=[\s;&|]|$)|\b(?:BASH_ENV|ENV)=(?=[\s;&|]|$)"
+)  # gán chữ nguyên văn cho prompt, gán RỖNG cho BASH_ENV/ENV (`BASH_ENV= bash -c true`)
+STRICT_SPECIAL = (
+    # tên không đòi ranh giới trước: `read -raPS4`
+    (re.compile(r"PS4\b"), re.compile(r"\bset\s+[-+]\w*x|\bxtrace\b|\bSHELLOPTS\b|\b(?:ba)?sh\s+(?:-\w+\s+)*-\w*x")),
+    (re.compile(r"\b(?:BASH_ENV|ENV|BASH_FUNC_\w*)"), STRICT_SHELL_RE),
+    (re.compile(r"(?:PS[0-3]|PROMPT_COMMAND)\b"), re.compile(r"\s-\w*i\b")),
+)
 STRICT_BARE = (
     (re.compile(r"(?:^|[\s=:;&|(<>])~[+-]?\d"), "`~N` ngăn xếp thư mục (AUD-SEC-240)"),  # `~+`/`~-`: guard đã giải
     (re.compile(r"[{,]#|#[,}]"), "brace bung ra `#` (AUD-SEC-233)"),
@@ -922,22 +935,34 @@ def _strict_why(cmd: str) -> str:
 def _dyn_text_why(v: _CodeView, live: str, bare: str) -> str:
     """ADR-0063 lớp mã động trên chữ: thân `sh -c`/`eval` không phải chữ nguyên văn (thay lệnh, biến, `\\`), lệnh
     `"$@"`/`$N`, shell đọc script từ ống hay `>(…)` (AUD-SEC-235/237/246/252/290/301)."""
-    for m in STRICT_DYN_HEAD_RE.finditer(bare):
-        word = STRICT_CAT_HEREDOC_RE.sub("", v.s[m.end() : _word_end(v, m.end(), m["eval"] is not None)])
-        if _dyn_word(re.sub(r"'[^']*'", "", word), v.s):
+    heads = list(STRICT_DYN_HEAD_RE.finditer(bare))
+    if len(heads) > STRICT_DYN_MAX:
+        raise ScanTooComplex(f"hơn {STRICT_DYN_MAX} lời gọi `sh -c`/`eval` trong một lệnh")
+    for m in heads:
+        a, b = m.end(), _word_end(v, m.end(), m["eval"] is not None)
+        cut = [h.span() for h in STRICT_CAT_HEREDOC_RE.finditer(v.s, a, b)]
+        word = "".join(" " if any(x <= i < y for x, y in cut) else live[i] for i in range(a, b))
+        if STRICT_DYN_ESC_RE.search(v.s, a, b) or _dyn_word(word, v.s):
             return "thân `sh -c`/`eval` dựng lúc chạy (AUD-SEC-235/237/246/252)"
     if STRICT_ARGV_CMD_RE.search(live):
         return 'lệnh là `"$@"`/`$N` (AUD-SEC-252)'
-    return "shell đọc script từ ống/`>(…)` (AUD-SEC-290/301)" if STRICT_PIPE_SHELL_RE.search(bare) else ""
+    if STRICT_PIPE_SHELL_RE.search(bare):
+        return "shell đọc script từ ống/`>(…)` (AUD-SEC-290/301)"
+    text = STRICT_SAFE_PROMPT_RE.sub("", v.s)
+    hit = any(name.search(text) and ctx.search(text) for name, ctx in STRICT_SPECIAL)
+    return "biến bash tự chạy cùng ngữ cảnh kích hoạt (AUD-SEC-287/291/299/300)" if hit else ""
 
 
 def _dyn_word(word: str, whole: str) -> bool:
-    """Thân `sh -c`/`eval` dựng lúc chạy: thay lệnh, `\\$`/`$'…'` (shell trong mở rộng lại), hoặc biến được gán từ thay
-    lệnh ngay trong lệnh này (`L=$(…); bash -c "$L"`). Biến khác (`$f` của vòng lặp) là giới hạn chung (D-051)."""
+    """Thân `sh -c`/`eval` dựng lúc chạy (vùng sống — nháy đơn thật đã trống): thay lệnh, `$'…'`, hoặc biến được gán
+    (`=`/`+=`) từ thay lệnh ngay trong lệnh này (`L=$(…); bash -c "$L"`). Biến khác (`$f` của vòng lặp) là giới hạn
+    chung (D-051)."""
     if STRICT_DYN_WORD_RE.search(word):
         return True
     names = {a or b for a, b in re.findall(r"\$\{(\w+)\}|\$(\w+)", word)}
-    return any(re.search(rf"(?:^|[\s;&|(]){re.escape(n)}=(?:\$\(|`)", whole) for n in names)
+    if len(names) > STRICT_DYN_MAX:
+        raise ScanTooComplex(f"thân `sh -c`/`eval` có hơn {STRICT_DYN_MAX} biến")
+    return any(re.search(rf"(?:^|[\s;&|(]){re.escape(n)}\+?=(?:\$\(|`)", whole) for n in names)
 
 
 def _word_end(v: _CodeView, i: int, whole_command: bool) -> int:
@@ -6433,21 +6458,24 @@ QUOTE_EXEC_HINT_RE = re.compile(
 )
 SED_SCAN_MAX = 4096  # chương trình sed dài hơn mà có `s<dấu>` → chặn "quá phức tạp" (AUD-PERF-005)
 # ADR-0063 lớp mã động. GNU sed nhận MỌI ký tự (cả chữ) làm dấu của `s` (AUD-SEC-294); `e` trần cả sau cờ `I`/`M`.
-SED_ADDR = r"(?:\d+|\$|/(?:\\.|[^/\\\n])*/[IM]*)"
+SED_ADDR = r"(?:\d+(?:~\d+)?|\$|/(?:\\.|[^/\\\n])*/[IM]*|[+~]\d+)"  # + GNU `first~step`, `,+N`, `,~N`
 SED_ANY_SUBST_RE = re.compile(  # `s` ở vị trí lệnh (đầu, sau `;`/xuống dòng/`{}`, sau địa chỉ) — không quét chữ thay
     rf"(?:^|[;\n{{}}])\s*(?:{SED_ADDR}(?:\s*,\s*{SED_ADDR})?)?\s*!?\s*"
     r"s([^\\\n])((?:\\.|(?!\1)[^\\\n])*)\1((?:\\.|(?!\1)[^\\\n])*)\1([A-Za-z0-9]*)"
 )
 SED_BARE_E_RE = re.compile(r"(?:^|[^A-Za-z]|(?<=[^A-Za-z][IM]))(?<!\$\{)e[ \t]*(?:$|[;}\n])")  # `${e}`: biến shell
 # awk chạy lệnh mà chữ lệnh không phải chuỗi nguyên văn: `system($0)`, `print … | cmd`, `x | getline`.
-AWK_DYN_EXEC_RE = re.compile(r'\bsystem\s*\(\s*[^"\s)]|\bprintf?\b[^;}\n]*\|&?\s*[^"\s|&]|[^"\s|]\s*\|&?\s*getline\b')
+# + `system("" $0)` (ghép chuỗi), `print | "sh"` (ống tới shell) — review lát B
+AWK_DYN_EXEC_RE = re.compile(
+    r'\bsystem\s*\((?!\s*"[^"]*"\s*\))|\bprintf?\b[^;}\n]*\|&?\s*(?:[^"\s|&]|"(?:\S*/)?(?:ba|da|z|k|mk)?sh\b)'
+    r'|[^"\s|]\s*\|&?\s*getline\b'
+)
 VAR_WRITER_CMDS = {"mapfile", "readarray", "read", "declare", "typeset", "local", "export", "readonly", "let"}
 SPECIAL_VAR_TOKEN_RE = re.compile(r"(?:BASH_ENV|PS[0-4]|PROMPT_COMMAND)(?:\[[^\]]*\])?(?:\+?=.*)?", re.S)
 SED_S_HINT_RE = re.compile(r"s[^\\\n\w\s]")
 SED_PROG_LONG = ("--expression",)  # tên dài nhận chương trình sed (viết tắt `--e`, `--expr` như getopt)
 AWK_PROG_LONG = ("--source",)  # gawk `--source=…`
-PROMPT_VAR_RE = re.compile(r"PS[0-4]|PROMPT_COMMAND")
-QUOTE_LIKE_RE = re.compile(r"(?:\b(?:qq|qx|q)|%[xqQ]?)\s*([^\w\s])")
+QUOTE_LIKE_RE = re.compile(r"(?:\b(?:qq|qx|qw|q)|%[xqQwW]?)\s*([^\w\s])")  # + `qw(rm -rf /)` (review lát B)
 QUOTE_PAIRS = {"(": ")", "[": "]", "{": "}", "<": ">"}
 BACKTICK_BODY_RE = re.compile(r"`([^`]*)`")
 # AUD-SEC-250: bash tự mở rộng giá trị prompt (`set -x` mở rộng PS4, `${x@P}`), gọi lại lệnh (`mapfile -C`,
@@ -6459,6 +6487,7 @@ BASH_ENV_RE = re.compile(r"BASH_ENV\+?=(.+)", re.S)
 # Chương trình chỉ đọc/in dữ liệu, không chạy lệnh từ đối số: `BASH_ENV=…` trong đối số của chúng là chữ (AUD-SEC-254).
 BASH_ENV_DATA_CMDS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "ag", "git", "cat", "head", "tail", "wc", "jq"}
 QUOTE_SCAN_MAX = 4096  # tổng ký tự chuỗi/thân trích Perl/Ruby/PHP được quét (AUD-PERF-004/007); vượt → chặn
+QUOTE_JOIN_MAX = 64  # số chuỗi tối đa nối khoảng trắng để quét lời gọi dạng danh sách; vượt → chặn
 BASH_ENV_MARK = "bash con nạp file guard không quét"  # mã OPAQUE_EXEC (REASON_CODES)
 CALLBACK_OPTS = {"mapfile": "C", "readarray": "C", "compgen": "CW", "complete": "CW"}
 
@@ -6513,9 +6542,17 @@ def _tool_programs(args: List[str], long_opts: Tuple[str, ...], short: str) -> L
 
 def _sed_runs_input(args: List[str]) -> bool:
     """Chương trình sed chạy pattern space như lệnh: `e` trần (không đối số) hoặc `s///` có cờ `e` (AUD-SEC-256/279)."""
-    progs = _tool_programs(args, SED_PROG_LONG, "e")
-    bare = any(SED_BARE_E_RE.search(p) for p in progs)  # cả sau cờ địa chỉ `I`/`M` (AUD-SEC-295)
-    return bare or any("e" in m[4] for p in progs for m in SED_ANY_SUBST_RE.finditer(p))  # dấu chữ (AUD-SEC-294)
+    return any(_sed_exec_prog(p) for p in _tool_programs(args, SED_PROG_LONG, "e"))
+
+
+def _sed_exec_prog(p: str, anchored: bool = False) -> bool:
+    """Chữ `p` có thể là chương trình sed chạy pattern space: `e` trần (cả sau cờ địa chỉ `I`/`M` nhiều chữ — AUD-SEC-295,
+    review lát B), `s///e` mọi dấu ở vị trí lệnh (AUD-SEC-294) HOẶC — trừ khi `anchored` (đối số có thể là tên tệp) —
+    theo luật cũ ở mọi `s` (giữ luật cũ: địa chỉ GNU lạ — review lát B 🔴)."""
+    if SED_BARE_E_RE.search(re.sub(r"/[IM]+", "/", p)):
+        return True
+    rules = (SED_ANY_SUBST_RE,) if anchored else (SED_ANY_SUBST_RE, SED_SUBST_RE)
+    return any("e" in m[4] for rx in rules for m in rx.finditer(p))
 
 
 def _dyn_exec_check(placed: "PlacedCmds") -> None:
@@ -6535,11 +6572,14 @@ def _dyn_exec_why(name: str, args: List[str]) -> str:
         return ""
     if _stdin_program(args):
         return "chương trình sed/awk đọc từ stdin (AUD-SEC-302)"
-    progs = _real_programs(args, SED_PROG_LONG if name in SED_NAMES else AWK_PROG_LONG)
+    # chương trình thật CỘNG mọi đối số (bảng cờ không đủ: `-i.prev`, `--line-length 5`, `-F ' '` — review lát B 🔴)
+    real = _real_programs(args, SED_PROG_LONG if name in SED_NAMES else AWK_PROG_LONG)
+    loose = [a for a in args if a[:1] != "-"]  # bảng cờ không đủ (`-i.prev`, `--line-length 5`, `-F ' '`): mọi đối số
     if name in SED_NAMES:
-        hit = any(SED_BARE_E_RE.search(p) or any("e" in m[4] for m in SED_ANY_SUBST_RE.finditer(p)) for p in progs)
+        hit = any(_sed_exec_prog(p, anchored=True) for p in real + loose)  # luật cũ (mọi `s`) chỉ ở `_sed_runs_input`
         return "sed chạy pattern space bằng `e` (AUD-SEC-288/294/295)" if hit else ""
-    return "awk chạy lệnh dựng từ dữ liệu (AUD-SEC-296/297)" if any(AWK_DYN_EXEC_RE.search(p) for p in progs) else ""
+    hit = any(AWK_DYN_EXEC_RE.search(p) for p in real + loose)
+    return "awk chạy lệnh dựng từ dữ liệu (AUD-SEC-296/297)" if hit else ""
 
 
 def _real_programs(args: List[str], long_opts: Tuple[str, ...]) -> List[str]:
@@ -6577,9 +6617,10 @@ def _program_opt(a: str, nxt: str, long_opts: Tuple[str, ...]) -> Tuple[int, Opt
 
 def _stdin_program(args: List[str]) -> bool:
     """`-f -`, `-f/dev/stdin`, `--file=-`: chương trình đến từ stdin."""
-    vals = _bundled_values(args, "f") + [a.partition("=")[2] for a in args if a.startswith("--file=")]
-    vals += [args[i + 1] for i, a in enumerate(args[:-1]) if a == "--file"]
-    return any(v in STDIN_PATHS for v in vals)
+    long_file = [i for i, a in enumerate(args) if len(a) >= 4 and "--file".startswith(a.partition("=")[0])]  # `--fi`
+    vals = _bundled_values(args, "f") + [args[i].partition("=")[2] for i in long_file if "=" in args[i]]
+    vals += [args[i + 1] for i in long_file if "=" not in args[i] and i + 1 < len(args)]
+    return any(v and posixpath.normpath(v) in STDIN_PATHS for v in vals)  # `/dev//stdin` (review lát B)
 
 
 def _special_var_why(c: List[str], name: str, args: List[str]) -> str:
@@ -6671,12 +6712,7 @@ def _prompt_scripts(cmd: str, tokens: List[str]) -> List[str]:
     """Giá trị bash mở rộng như prompt: gán `PS0…PS4`/`PROMPT_COMMAND` (cả sau `export`/`declare`); có `${…@P}` → mọi
     giá trị gán trong lệnh (biến nào được mở rộng không theo dõi — chiều chặt)."""
     out = [m[1] for t in tokens for m in [PROMPT_ASSIGN_RE.fullmatch(t)] if m]
-    for c in split_commands(tokens):  # `printf -v PS4 '%s' '$(…)'` (AUD-SEC-281): định dạng + đối số là giá trị
-        n = normalize(c)
-        for i, a in enumerate(n[:-1] if n[:1] == ["printf"] else []):
-            name = a[2:] if a.startswith("-v") and len(a) > 2 else n[i + 1] if a == "-v" else ""
-            if PROMPT_VAR_RE.fullmatch(name):
-                out += n[i + (1 if len(a) > 2 else 2) :]
+    # `printf -v PS4 …` (AUD-SEC-281): `_special_var_why` chặn thẳng (ADR-0063 lát B), không cần quét giá trị
     if re.search(r"@P\}", cmd):
         out += [m[1] for t in tokens for m in [ANY_ASSIGN_RE.fullmatch(t)] if m]
     return out
@@ -6721,12 +6757,11 @@ def _quote_exec_scripts(script: str) -> List[str]:
         raise ScanTooComplex("script Perl/Ruby/PHP có quá nhiều chuỗi/thân trích để quét lệnh shell")
     # ba lần quét: mỗi chuỗi một dòng lệnh, chuỗi ghép, và chuỗi nối khoảng trắng — lời gọi dạng danh sách đối số
     # `system("rm", "-rf", "/")`, `pcntl_exec("/bin/rm", ["-rf", "/"])` (AUD-SEC-298)
-    calls = [
-        " ".join(_literal(x).lstrip("| ") for x in LITERAL_RE.finditer(_balanced(script, m.end() + 1, "(", ")")))
-        for m in QUOTE_EXEC_HINT_RE.finditer(script)
-        if script[m.end() : m.end() + 1] == "("
-    ]  # đối số chuỗi của TỪNG lời gọi nối khoảng trắng; `"|lệnh"` của Ruby `IO.read`
-    return ["\n".join(lits), "".join(lits), *calls]
+    if len(lits) > QUOTE_JOIN_MAX:  # nối mọi chuỗi bằng khoảng trắng tốn theo số chuỗi (review lát B, perf)
+        raise ScanTooComplex(f"script Perl/Ruby/PHP có hơn {QUOTE_JOIN_MAX} chuỗi cùng dấu chạy lệnh")
+    # nối khoảng trắng: lời gọi dạng danh sách đối số có/không ngoặc (`system "rm", "-rf", "/"`, `exec {…} …`,
+    # `pcntl_exec ("/bin/rm", [...])` — review lát B 🔴); `"|lệnh"` của Ruby `IO.read`
+    return ["\n".join(lits), "".join(lits), " ".join(x.lstrip("| ") for x in lits)]
 
 
 def _m4_exec_scripts(text: str) -> List[str]:

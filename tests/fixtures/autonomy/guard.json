@@ -14878,6 +14878,342 @@
    "allowed": true
   },
   "note": "ADR-0063 lát B (mã động)"
+ },
+ {
+  "id": "guard-adr63-rvb-00-sec312",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-312"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed '1~1s/^//ge'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-01-sec312",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-312"
+  ],
+  "input": {
+   "command": "echo 'rm -rf ~' | sed '1,+2s/.*/&/ge'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-02-sec313",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-313"
+  ],
+  "input": {
+   "command": "sed -i.prev 's/.*/&/e' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-03-sec313",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-313"
+  ],
+  "input": {
+   "command": "sed --line-length 5 's/.*/&/e' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-04-sec313",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-313"
+  ],
+  "input": {
+   "command": "awk -F ' ' '{system($0)}' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-05-sec314",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-314"
+  ],
+  "input": {
+   "command": "sed '/x/IMe' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-06-sec315",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-315"
+  ],
+  "input": {
+   "command": "awk '{system(\"\" $0)}' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-07-sec315",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-315"
+  ],
+  "input": {
+   "command": "awk '{print | \"sh\"}' f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-08-sec316",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-316"
+  ],
+  "input": {
+   "command": "printf '1e rm -rf ~' | sed -n --fi /dev/stdin f"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-09-sec316",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-316"
+  ],
+  "input": {
+   "command": "awk -f /dev//stdin < p"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-10-sec317",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-317"
+  ],
+  "input": {
+   "command": "printf -vPS4 '\\x24(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-11-sec317",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-317"
+  ],
+  "input": {
+   "command": "declare -n r=PS4; r='$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-12-sec317",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-317"
+  ],
+  "input": {
+   "command": "IFS= read -raPS4 <<< '$(rm -rf ~)'; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-13-sec317",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-317"
+  ],
+  "input": {
+   "command": "unset PS4; : ${PS4:=\\$\\(rm\\ -rf\\ ~\\)}; set -x; true"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-14-sec317",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-317"
+  ],
+  "input": {
+   "command": "env 'BASH_FUNC_ls%%=() { rm -rf ~; }' bash -c ls"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-15-sec318",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-318"
+  ],
+  "input": {
+   "command": "perl -e 'system \"rm\", \"-rf\", \"/\"'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-16-sec318",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-318"
+  ],
+  "input": {
+   "command": "ruby -e 'spawn \"rm\", \"-rf\", \"/\"'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-17-sec318",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-318"
+  ],
+  "input": {
+   "command": "perl -e 'system(qw(rm -rf /))'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-18-sec318",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-318"
+  ],
+  "input": {
+   "command": "php -r 'pcntl_exec (\"/bin/rm\", [\"-rf\", \"/\"]);'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-19-sec319",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-319"
+  ],
+  "input": {
+   "command": "bash -c \"x='$(cat f)'\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-20-sec319",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-319"
+  ],
+  "input": {
+   "command": "L+=$(cat f); bash -c \"$L\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-21-sec319",
+  "origin": "audit",
+  "refs": [
+   "AUD-SEC-319"
+  ],
+  "input": {
+   "command": "bash -c \"$(cat <<'X' f\nX\n)\""
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-22-sec321",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-321"
+  ],
+  "input": {
+   "command": "docker exec c sh -c \"echo \\$HOME\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lát B trước PR (ADR-0063)"
+ },
+ {
+  "id": "guard-adr63-rvb-23-sec321",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-321"
+  ],
+  "input": {
+   "command": "bash -c \"for f in *.txt; do wc -l \\$f; done\""
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "review lát B trước PR (ADR-0063)"
  }
  ]
 }
