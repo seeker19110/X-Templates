@@ -3251,7 +3251,8 @@ class HookRunnerTest(unittest.TestCase):
         )
         self.assertEqual(decision(r.stdout), "deny", r.stderr)
         self.assertFalse((self.hooks / "__pycache__").exists())
-        self.assertEqual(list((self.tmp / ".autopilot").iterdir()), [])  # AUD-SEC-065/074
+        # AUD-SEC-065/074: không bytecode nào trong .autopilot/ — chỉ nhật ký quyết định của hook (AUD-HAR-199, T-3655)
+        self.assertEqual([p.name for p in (self.tmp / ".autopilot").rglob("*")], ["guard-log.jsonl"])
         self.assertFalse((self.cache / "xtemplates").exists())  # không cache ở chỗ agent ghi được
 
     def test_guard_fields_reads_every_field(self):

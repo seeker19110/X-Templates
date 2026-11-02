@@ -11,6 +11,7 @@ import io
 import datetime as _dt
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -450,6 +451,46 @@ class ComposeBranchesTest(TmpMixin, unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- JSON / write_atomic
+
+
+class YamlScalarTest(TmpMixin, unittest.TestCase):
+    """AUD-CODE-037 (T-3653): `yaml_scalar` (xt.py) và `yaml_get` (dev-task.sh) chỉ bỏ nháy khi giá trị là MỘT chuỗi
+    nháy trọn vẹn; `''` trong nháy đơn là `'` (YAML); hai bên cho cùng lệnh."""
+
+    CASES = {
+        '"x"': "x",
+        "'x'": "x",
+        '""': "",
+        "''": "",
+        '"a" "b"': '"a" "b"',  # hai chuỗi: không phải một scalar nháy — giữ nguyên cho bash
+        "'a' 'b'": "'a' 'b'",
+        "'it''s'": "it's",
+        '"a\\"b"': '"a\\"b"'[1:-1],  # thoát `\"` giữ nguyên chữ (như trước — không giải escape YAML)
+        '"a"b"': '"a"b"',
+        "x # c": "x",
+        '"a # b"': "a # b",
+        "plain value": "plain value",
+    }
+
+    def test_yaml_scalar_cases(self):
+        for raw, want in self.CASES.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(xt.yaml_scalar(raw), want)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_dev_task_yaml_get_matches(self):
+        d = self.tmpdir()
+        (d / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", d / "scripts" / "dev-task.sh")
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(d)}
+        for raw in ("'echo \"it''s\"'", '"echo" "x  y"', '"echo a"', "echo plain # c"):
+            with self.subTest(raw=raw):
+                (d / "xt.yaml").write_text(f"lint: {raw}\n", encoding="utf-8")
+                got = subprocess.run(
+                    ["bash", str(d / "scripts" / "dev-task.sh"), "lint"], capture_output=True, text=True, env=env
+                )
+                want = subprocess.run(["bash", "-c", xt.yaml_scalar(raw)], capture_output=True, text=True)
+                self.assertEqual((got.returncode, got.stdout), (0, want.stdout), got.stderr)
 
 
 class JsonAndAtomicTest(TmpMixin, unittest.TestCase):
@@ -1459,6 +1500,32 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertEqual(code, 127)
         self.assertIn("cần bash", out)
         self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 127)
+
+    def test_guard_log_stats(self):  # AUD-HAR-199 (T-3655): tỉ lệ chặn/BUDGET của hook theo vòng
+        st = xt.read_state(self.base)
+        st["started"] = "2026-10-18T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        t0 = int(_dt.datetime(2026, 10, 18, tzinfo=_dt.timezone.utc).timestamp())
+        rows = [
+            {"ts": t0 - 60, "session": "cũ", "mode": "bash", "decision": "deny", "code": "BUDGET"},  # vòng trước
+            {"ts": t0 + 1, "session": "a", "mode": "bash", "decision": "", "code": "NONE"},
+            {"ts": t0 + 2, "session": "a", "mode": "bash", "decision": "deny", "code": "BUDGET"},
+            {"ts": t0 + 3, "session": "b", "mode": "edit", "decision": "deny", "code": "EVIDENCE_HANDWRITE"},
+            {"ts": t0 + 4, "session": "b", "mode": "mcp", "decision": "", "code": "NONE"},
+        ]
+        log = self.base / ".autopilot" / xt.GUARD_LOG
+        log.write_text("\n".join(map(json.dumps, rows)) + '\n{hỏng\n[1]\n{"ts": "x"}\n', encoding="utf-8")
+        g = xt.loop_stats(self.base)["guard"]
+        self.assertEqual(
+            g, {"decisions": 4, "deny": 2, "budget": 1, "deny_rate": 0.5, "budget_rate": 0.25, "sessions": 2}
+        )
+        self.assertEqual(xt.loop_stats(self.base, all_loops=True)["guard"]["decisions"], 5)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(all=False, json=False), self.base)
+        self.assertIn("Guard: 4 quyết định · chặn 2 (50%) · BUDGET 1 (25%) · 2 phiên", out.getvalue())
+        empty = self.tmpdir()
+        self.assertEqual(xt.loop_stats(empty)["guard"]["deny_rate"], None)
 
     def test_runs_log_and_stats(self):
         # LOOP-DESIGN-024: evidence bị ghi đè, runs.jsonl giữ mọi lần chạy → loop stats đếm được lần đỏ trước khi xanh.

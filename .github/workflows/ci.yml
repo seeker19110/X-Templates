@@ -51,6 +51,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       - name: build — đúng lệnh trong xt.yaml
@@ -70,6 +72,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       - name: typecheck — đúng lệnh trong xt.yaml
@@ -89,6 +93,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       - name: lint — đúng lệnh trong xt.yaml (validate · link · progress · changelog · ci-check · ruff · shellcheck · JSON)
@@ -114,6 +120,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       # COVERAGE_CORE=sysmon (sys.monitoring, Python ≥ 3.12): đo thử T-1831; đã chạy `dev-task.sh test` trên 3.14.6 cục bộ
@@ -148,6 +156,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -178,6 +188,8 @@ jobs:
           python-version: |
             3.11
             3.14
+          cache: pip # khoá = hash requirements-dev.txt (setup-python băm file khai ở dưới); đổi khoá → cài lại (AUD-CI-028)
+          cache-dependency-path: requirements-dev.txt
       - name: Công cụ ghim kèm hash (requirements-dev.txt — khớp xt.yaml)
         run: pip install --quiet --require-hashes -r requirements-dev.txt
       # Job `test` chạy trên checkout của PR (HEAD tách rời); test lại trên nhánh tên `main` như CI sau merge — test phụ
@@ -207,6 +219,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+          cache: pip # AUD-CI-028
+          cache-dependency-path: requirements-dev.txt
 
       # Corpus PR/rollup/review/guard/log CI qua hàm thật của khung (AUTO-07, docs/ops/AUTONOMY-BASELINE.md): exit 1 khi
       # có false-green (máy cho merge/chạy/tính xanh ở ca phải chặn), exit 2 khi corpus hỏng.
@@ -271,6 +285,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+          cache: pip # AUD-CI-028
+          cache-dependency-path: requirements-e2e.txt
       - name: Playwright ghim kèm hash (requirements-e2e.txt)
         run: pip install --quiet --require-hashes -r requirements-e2e.txt
       - name: Chrome Headless Shell + thư viện hệ thống

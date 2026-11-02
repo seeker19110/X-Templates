@@ -4266,7 +4266,9 @@ class PrStatsTest(unittest.TestCase):
         ):
             xt_calls: list[str] = []
             orig = xt._gh_api_once
-            with unittest.mock.patch.object(xt, "_gh_api_once", side_effect=lambda p: xt_calls.append(p) or orig(p)):
+            with unittest.mock.patch.object(
+                xt, "_gh_api_once", side_effect=lambda p, *a: xt_calls.append(p) or orig(p, *a)
+            ):
                 prs_, runs_, cut = xt._pr_stats_fetch("repos/o/r", now - xt._dt.timedelta(days=1))
         self.assertTrue(cut)
         self.assertEqual(len(runs_), 1)

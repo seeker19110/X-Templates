@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -747,6 +748,104 @@ class GhPostingStrictTest(unittest.TestCase):
         for cmd in self.OK:
             with self.subTest(cmd=cmd):
                 self.assertEqual(guard._strict_why(cmd), "")
+
+
+class GuardLogTest(unittest.TestCase):
+    """AUD-HAR-199 (T-3655): mỗi quyết định của hook nối một dòng vào `.autopilot/guard-log.jsonl` (chỉ khi dự án đang
+    có `.autopilot/`) cho `loop stats` đo tỉ lệ chặn; ghi lỗi không làm hook đổi quyết định. Lý do BUDGET kèm gợi ý
+    viết lại."""
+
+    def run_guard(self, root: Path, cmd: str, mode: str = "bash") -> "subprocess.CompletedProcess[str]":
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
+        env.pop("XT_GUARD_POLICY", None)
+        payload = json.dumps({"session_id": "s-1", "tool_input": {"command": cmd}, "cwd": str(root)})
+        return subprocess.run(
+            [sys.executable, str(ROOT / ".claude" / "hooks" / "guard.py"), mode],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_logs_only_inside_autopilot_project(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.assertEqual(self.run_guard(root, "ls").returncode, 0)
+        self.assertFalse((root / ".autopilot").exists())
+        (root / ".autopilot").mkdir()
+        self.run_guard(root, "ls")
+        self.assertIn('"decision": "deny"', self.run_guard(root, "cat f.sh | mksh").stdout)
+        rows = [json.loads(x) for x in (root / ".autopilot" / guard.GUARD_LOG).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(
+            [(r["mode"], r["decision"], r["code"], r["session"]) for r in rows],
+            [
+                ("bash", "", "NONE", "s-1"),
+                ("bash", "deny", "BUDGET", "s-1"),
+            ],
+        )
+        self.assertTrue(all(isinstance(r["ts"], int) for r in rows))
+
+    def test_log_write_error_keeps_decision(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / ".autopilot" / guard.GUARD_LOG).mkdir(parents=True)  # đường log là thư mục → mở để ghi lỗi
+        r = self.run_guard(root, "cat f.sh | mksh")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('"decision": "deny"', r.stdout)
+
+    def test_log_name_matches_xt(self):  # `loop stats` đọc đúng file guard ghi
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        self.assertEqual(guard.GUARD_LOG, xt.GUARD_LOG)
+
+    def test_budget_reason_suggests_rewrite(self):
+        d = guard.bash_decision("cat f.sh | mksh", str(ROOT))
+        self.assertEqual(d.get("code"), guard.BUDGET)
+        self.assertIn("viết lại:", str(d["reason"]))
+
+
+class PolicyContractTest(unittest.TestCase):
+    """T-3655 (AUD-TEST-051): hợp đồng của `decide`/`policy_action`/`apply_policy` mà `xt.py mutate-guard` chỉ ra chưa
+    test nào khoá (15/37 mutant sống ở lượt đầu): lý do mặc định, unsure theo mã HOẶC khai báo, mã lạ → cho qua, lý do
+    viết lại khi ask thành deny và xoá khi ask thành cho qua — deny/allow/rỗng giữ nguyên lý do."""
+
+    def test_decide_defaults_and_unsure(self):
+        d = guard.decide({"decision": "ask"})
+        self.assertEqual((d.reason, d.code, d.confidence, d.missing), ("", "OTHER_ASK", "sure", ()))
+        d = guard.decide({"decision": "ask", "code": "BUDGET"})  # mã thuộc UNSURE_CODES, không khai confidence
+        self.assertEqual((d.confidence, d.missing), ("unsure", ("BUDGET",)))
+        d = guard.decide({"decision": "ask", "code": "DESTROY", "confidence": "unsure"})  # khai unsure, mã thường
+        self.assertEqual((d.confidence, d.missing), ("unsure", ("DESTROY",)))
+        self.assertEqual(guard.decide({"decision": "ask", "code": "DESTROY"}).confidence, "sure")
+
+    def test_policy_action_table(self):
+        cases = (
+            ({"decision": "", "code": "BUDGET"}, ""),  # unsure chỉ đổi nhóm chặn (ask/deny), không biến "" thành deny
+            ({"decision": "allow", "confidence": "unsure"}, "allow"),
+            ({"decision": "ask", "code": "KHONG_CO_MA_NAY"}, ""),  # mã lạ → cho qua (POLICY không có)
+            ({"decision": "ask", "code": "DESTROY"}, "deny"),
+            ({"decision": "ask", "code": "OTHER_ASK"}, ""),
+            ({"decision": "ask", "code": "OTHER_ASK", "confidence": "unsure"}, "deny"),
+            ({"decision": "deny", "code": "BUDGET"}, "deny"),
+        )
+        for out, want in cases:
+            with self.subTest(out=out):
+                self.assertEqual(guard.policy_action(guard.decide(out)), want)
+
+    def test_apply_policy_reason(self):
+        cases = (
+            (
+                {"decision": "ask", "code": "DESTROY", "reason": "xoá x"},
+                ("deny", "Lệnh bị khung chặn (nguy hiểm — DESTROY): xoá x"),
+            ),
+            ({"decision": "ask", "code": "OTHER_ASK", "reason": "hỏi"}, ("", "")),
+            ({"decision": "deny", "code": "DESTROY", "reason": "cấm"}, ("deny", "cấm")),
+            ({"decision": "", "reason": "ghi chú"}, ("", "ghi chú")),
+            ({"decision": "allow", "reason": "ok"}, ("allow", "ok")),
+        )
+        for out, want in cases:
+            with self.subTest(out=out):
+                r = guard.apply_policy(out)
+                self.assertEqual((r["decision"], r["reason"]), want)
 
 
 if __name__ == "__main__":

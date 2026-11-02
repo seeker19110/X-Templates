@@ -133,6 +133,14 @@ class DoctorHealthyTest(DoctorCase):
         msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
         self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
 
+    def test_xt_yaml_indented_key_warns(self):  # AUD-CODE-037: xt.yaml phẳng — khoá thụt lề bị bỏ im lặng
+        self.write("xt.yaml", FILLED_YAML + "  test: pytest -x\n\ttypecheck: mypy .\n# lint: x\n")
+        warns = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "warn" and "thụt lề" in f.msg]
+        self.assertEqual(len(warns), 1, warns)
+        self.assertIn("test, typecheck", warns[0])
+        self.write("xt.yaml", FILLED_YAML)
+        self.assertFalse([f for f in self.findings() if "thụt lề" in f.msg])
+
     def test_xt_yaml_duplicate_key_is_error(self):  # AUD-XFEAT-002
         self.write("xt.yaml", FILLED_YAML + "lint: true\n")
         errs = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "error"]
@@ -317,8 +325,15 @@ class DoctorHooksTest(DoctorCase):
                 self.assertFalse(self.real_in_container())
             with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/.dockerenv"):
                 self.assertTrue(self.real_in_container())
-            with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+            with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/run/.containerenv"):
                 self.assertTrue(self.real_in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_CONTAINER_ID": "c-1"}):
+                    self.assertTrue(self.real_in_container())
+                with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
+                    self.assertFalse(self.real_in_container())
 
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,

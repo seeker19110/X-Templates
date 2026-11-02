@@ -9729,7 +9729,7 @@ def bash_decision(
     try:
         return _bash_decision(cmd, root, cwd, depth, budget, rewrites)
     except ScanTooComplex as e:
-        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}"
+        reason = f"Lệnh quá phức tạp để guard quét hết ({e}): {clean_text(cmd)[:200]}{BUDGET_REWRITE}"
         return {
             "decision": "deny",
             "reason": reason,
@@ -9830,6 +9830,34 @@ NO_OBJECTION = "NONE"  # guard không phản đối
 RULE_ALLOW = "RULE_ALLOW"  # allow rõ ràng (merge đã qua merge-check)
 UNPARSED = "UNPARSED"  # guard lỗi giữa chừng với hành động phải kiểm
 BUDGET = "BUDGET"
+# Lý do BUDGET kèm cách viết lại (AUD-HAR-199): agent bị chặn biết dạng nào guard đọc chắc thay vì thử lách (LOOP-STOP-025).
+BUDGET_REWRITE = (
+    " — viết lại: tách thành nhiều lệnh đơn; không lồng shell/heredoc có mở rộng; nội dung dài → ghi file bằng công cụ "
+    "Write rồi chạy file"
+)
+# Nhật ký quyết định của hook cho `xt.py loop stats` (AUD-HAR-199): chỉ ghi khi dự án có `.autopilot/` (vòng autopilot).
+GUARD_LOG = "guard-log.jsonl"
+LOGGED_MODES = ("bash", "edit", "mcp")
+
+
+def _log_decision(mode: str, payload: Any, out: Dict[str, object], root: str) -> None:
+    """Nối `{ts, session, mode, decision, code}` vào `.autopilot/guard-log.jsonl`. Không có `.autopilot/` → không ghi;
+    lỗi ghi bỏ qua — đếm không được đổi quyết định hay làm kẹt hook (fail-open về luồng, ADR-0002)."""
+    d = os.path.join(root, ".autopilot")
+    if mode not in LOGGED_MODES or not os.path.isdir(d):
+        return
+    session = payload.get("session_id") if isinstance(payload, dict) else None
+    rec = {
+        "ts": int(time.time()),
+        "session": str(session or "")[:80],
+        "mode": mode,
+        "decision": str(out.get("decision") or ""),
+        "code": str(out.get("code") or ""),
+    }
+    with contextlib.suppress(OSError), open(os.path.join(d, GUARD_LOG), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
 BRACE_OVERFLOW = "BRACE_OVERFLOW"
 NEST_TOO_DEEP = "NEST_TOO_DEEP"
 UNRESOLVED_TARGET = "UNRESOLVED_TARGET"  # đích của hành động không đảo ngược guard không giải được (T-1523)
@@ -10064,6 +10092,8 @@ def main() -> int:
     # strict = hành vi cũ (hỏi): chỉ chặt hơn, không phải công tắc tắt hook.
     if os.environ.get("XT_GUARD_POLICY") != "strict":
         out = apply_policy(out)
+    if sys.argv[1:2] != ["permission"]:  # PermissionRequest lặp lại quyết định PreToolUse — đếm một lần
+        _log_decision(mode, payload, out, os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     if sys.argv[1:2] == ["permission"]:
         sys.stdout.write(permission_output(out))
     elif sys.argv[2:3] == ["nul"]:
