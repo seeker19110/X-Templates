@@ -285,6 +285,19 @@ class NestedShellArgvTest(unittest.TestCase):
         "AUD-SEC-309 ansi": "$'bash' -c \"$(cat f)\"",
         "AUD-SEC-309 \\eval": '\\eval "$(cat f)"',
         "AUD-SEC-309 'eval'": "'eval' \"$(cat f)\"",
+        # review #404 🔴 R1: đầu mồi làm khớp phép đếm cũ
+        "AUD-SEC-309 mồi echo eval": 'echo eval; "bash" -c "$(cat f)"',
+        "AUD-SEC-309 mồi :": ': eval ; "bash" -c "$(cat f)"',
+        "AUD-SEC-309 mồi \\bash": 'echo eval foo; \\bash -c "$(cat f)"',
+        'AUD-SEC-309 mồi ev"al"': 'printf eval; ev"al" "$(cat f)"',
+        "AUD-SEC-309 mồi sh -c": 'echo sh -c x; "bash" -c "$(cat f)"',
+        "AUD-SEC-309 mồi ansi": "true eval; $'bash' -c \"$(cat f)\"",
+        "AUD-SEC-309 biến gán": 'L=$(cat f); "bash" -c "$L"',
+        "AUD-SEC-309 \\$( trong nháy kép": '"bash" -c "echo \\$(id)"',
+        # review #404 🔴 R2: `<(echo …)` với đối số động
+        "AUD-SEC-310 <(echo động)": 'bash <(echo "$(cat f)")',
+        "AUD-SEC-310 source <(echo động)": 'source <(echo "$(cat f)")',
+        "AUD-SEC-310 <(printf động)": 'bash <(printf "%s" "$(cat f)")',
         "AUD-SEC-310 here-string": 'bash <<< "$(cat f)"',
         "AUD-SEC-310 heredoc": "bash <<X\n$(cat f)\nX",
         "AUD-SEC-310 biến heredoc": "sh <<X\n$CMD\nX",
@@ -313,6 +326,10 @@ class NestedShellArgvTest(unittest.TestCase):
         "bash -eo pipefail -c 'make test'",
         "eval",
         "eval; ls",
+        "\"bash\" -c 'echo $(date)'",
+        "echo eval; bash -c 'ls'",
+        'grep -rn "eval" scripts',
+        'bash -c "echo $HOME" -- x',
         "bash -c 'echo $(date)'",
         'sh -c "echo $HOME"',
         "bash scripts/dev-task.sh gate-fast",
@@ -346,6 +363,20 @@ class NestedShellArgvTest(unittest.TestCase):
         for cmd in self.ALLOW:
             with self.subTest(cmd=cmd):
                 self.assertEqual(decide(cmd)["decision"], "", decide(cmd))
+
+    def test_raw_tokens_keep_quotes(self):
+        """Bộ tách giữ nháy (review #404): `\\"` trong nháy kép, `$(…)`/`${…}` lồng nháy là một từ như bash; không đóng →
+        None (lớp tập con đã chặn trước khi tới đây — gọi thẳng để phủ)."""
+        self.assertEqual(
+            guard._raw_tokens('bash -c "a \\"b\\" $(echo ")") ${x:-y}" && ls'),
+            ["bash", "-c", '"a \\"b\\" $(echo ")") ${x:-y}"', "&&", "ls"],
+        )
+        for bad in ('a "b', "a 'b", 'a "$(x', "a $(x 'y", "a $(x", 'a "x\\'):
+            with self.subTest(bad=bad):
+                self.assertIsNone(guard._raw_tokens(bad))
+        self.assertEqual(guard._dequote('"a'), '"a')
+        self.assertIn("AUD-SEC-309", guard._raw_heads_why('bash -c "x'))
+        self.assertEqual(guard._raw_heads_why('ls "x'), "")
 
     def test_old_codes_kept(self):
         """Luật cũ chặn trước giữ mã của nó (luật mới chạy sau, chỉ thêm chặn): `curl | sh` vẫn là chạy script tải về."""
