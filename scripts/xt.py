@@ -9429,10 +9429,10 @@ PA_INJECTION = (
     r"(?:reveal|print|output) (?:your|the) (?:system prompt|hidden instructions)",
 )
 PA_DANGER = (
-    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b",
-    r"\brm\s+-[a-z]*r[a-z]*\s+(?:/|~|\$HOME)(?:\s|$)",
     r"\bchmod\s+(?:-R\s+)?777\b|--dangerously-skip-permissions|\bgit\s+push\s+(?:-f|--force)\b",
-)
+    r"\b(?:ba|z|da)?sh\s+<\(\s*(?:curl|wget)\b",  # `bash <(curl …)` (AUD-SEC-261)
+    r"""\b(?:ba|z|da)?sh\s+-c\s+["']?\$\(\s*(?:curl|wget)\b""",  # `sh -c "$(curl …)"`
+)  # rm đệ quy và ống tải-chạy xét theo token (`_pa_danger_tokens`): regex cũ bậc hai trên dòng dài (AUD-SEC-263)
 PA_SECRET = (
     r"\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36}\b|\bgithub_pat_\w{22,}|\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}",
     r"\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
@@ -9441,11 +9441,105 @@ PA_BYPASS = (
     r"(?i)\b(?:do not|don't|never) ask (?:for |the user for )?(?:confirmation|permission|approval)",
     r"(?i)\bnever refuse\b|\bskip (?:the |all )?permission|\bquestion authori[sz]ation\b|không cần (?:hỏi|xác nhận)",
 )
-PA_UNPINNED = (
-    r"\bnpx\s+(?:-y|--yes)\s+(?:@[\w.-]+/)?[\w.-]+(?![\w.-]*@)(?=[\s`]|$)",
-    r"\buvx\s+(?!-)[\w.-]+(?![\w.-]*==)(?=[\s`]|$)",
-    r"\bpip3?\s+install\s+(?!-)[A-Za-z][\w.-]*(?![\w.-]*==)(?=[\s`]|$)",
-)
+PA_UNPINNED: Tuple[str, ...] = ()  # xét theo token (`_pa_unpinned_tokens`, AUD-SEC-262/263)
+PA_TOKEN_PUNCT = "`\"',;.)]}[{"
+PA_RM_TARGET_RE = re.compile(r"/\*?|~/?|\$HOME/?|\$\{HOME\}/?")
+PA_NPM_EXACT_RE = re.compile(r"(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:[-+][\w.-]+)?")
+PA_PIP_VALUE_OPTS = {
+    "-r",
+    "-c",
+    "-e",
+    "-i",
+    "--requirement",
+    "--constraint",
+    "--editable",
+    "--index-url",
+    "-t",
+    "--target",
+}
+PA_SHELL_WORDS = {"sh", "bash", "zsh", "dash"}
+PA_SEPARATORS = {"&&", "||", ";", "|"}
+
+
+def _pa_words(line: str) -> List[str]:
+    """Token của một dòng (tách khoảng trắng, `(`/backtick là ranh giới; bỏ dấu câu hai đầu; `,`/`;` cuối token thành
+    token `;` — "pip install a==1, pip install b" là hai lệnh) — tuyến tính theo độ dài."""
+    out: List[str] = []
+    for w in line.replace("(", " ( ").replace("`", " ").split():
+        out.append(w.strip(PA_TOKEN_PUNCT))
+        out += [";"] if w.rstrip("`\"')]}").endswith((",", ";")) else []
+    return out
+
+
+def _pa_rm_danger(words: List[str]) -> bool:
+    """`rm` đệ quy (`-r`/`-R` trong cụm cờ, `--recursive`, cờ tách rời) mà đích là `/`, `/*`, `~`, `~/`, `$HOME`."""
+    for i, w in enumerate(words):
+        if w != "rm":
+            continue
+        j, recursive = i + 1, False
+        while j < len(words) and words[j].startswith("-"):
+            f = words[j]
+            recursive = recursive or f == "--recursive" or (not f.startswith("--") and ("r" in f or "R" in f))
+            j += 1
+        if recursive and j < len(words) and PA_RM_TARGET_RE.fullmatch(words[j]):
+            return True
+    return False
+
+
+def _pa_pipe_danger(line: str) -> bool:
+    """Ống tải-chạy: khâu có `curl`/`wget` rồi một khâu SAU bắt đầu bằng shell (bỏ `sudo` và cờ của nó, `tee f | bash`)."""
+    fetched = False
+    for seg in line.split("|"):
+        words = seg.split()
+        k = 0
+        while k < len(words) and (words[k] in ("sudo", "env") or words[k].startswith("-")):
+            k += 1
+        if fetched and k < len(words) and words[k] in PA_SHELL_WORDS:
+            return True
+        fetched = fetched or any(w in ("curl", "wget") for w in words)
+    return False
+
+
+def _pa_unpinned_tokens(words: List[str]) -> bool:
+    """Chạy gói không ghim: `npx -y <gói>` không `@x.y.z` (cả `@latest`, `@^1`), `uvx <gói>` không `==`, `pip install`
+    có gói không `==` (bỏ cờ, `-r`/`-c`/`-e` và giá trị của chúng; dừng ở `&&`/`;`/`|`)."""
+    for i, w in enumerate(words):
+        nxt = words[i + 1 : i + 3]
+        if (
+            w == "npx"
+            and nxt[:1]
+            and nxt[0] in ("-y", "--yes")
+            and len(nxt) > 1
+            and not PA_NPM_EXACT_RE.fullmatch(nxt[1])
+        ):
+            return True
+        if w == "uvx" and nxt[:1] and not nxt[0].startswith("-") and "==" not in nxt[0]:
+            return True
+        if w in ("pip", "pip3") and nxt[:1] == ["install"] and _pa_pip_unpinned(words[i + 2 :]):
+            return True
+    return False
+
+
+def _pa_pip_unpinned(args: List[str]) -> bool:
+    skip = False
+    for a in args:
+        if a in PA_SEPARATORS:
+            return False
+        if skip or a.startswith("-"):
+            skip = not skip and a in PA_PIP_VALUE_OPTS
+            continue
+        if a and "==" not in a:
+            return True
+    return False
+
+
+def _pa_token_rules(line: str) -> List[str]:
+    """Luật xét theo token của một dòng (tuyến tính — AUD-SEC-263)."""
+    words = _pa_words(line)
+    hits = ["danger"] if _pa_rm_danger(words) or _pa_pipe_danger(line) else []
+    return hits + (["unpinned"] if _pa_unpinned_tokens(words) else [])
+
+
 PA_URL = (
     r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(?:main|master|HEAD)/",
     r"(?i)fetch the latest (?:guidelines|instructions)",
@@ -9457,7 +9551,10 @@ PA_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("unpinned", "chạy gói không ghim", PA_UNPINNED),
     ("unpinned-url", "chỉ dẫn từ URL nhánh không ghim (SEC-AI-028)", PA_URL),
 )
-PA_HIDDEN_RE = re.compile("[​⁠-⁤‪-‮⁦-⁩\U000e0000-\U000e007f]|(?<!^)﻿")
+PA_HIDDEN_RE = re.compile(  # zero-width/bidi/tag/soft hyphen/VS bổ sung; ZWJ/ZWNJ hợp lệ (emoji, tiếng Ba Tư): không báo, chỉ bỏ trước luật
+    "[\u200b\u200e\u200f\u00ad\u2060-\u2064\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    "|(?<!^)\ufeff"
+)
 PA_LEAK = (r"You are Claude Code|Claude Design|You are ChatGPT|You are Codex",)
 PA_LEAK_DIRS = ("vendor/", ".claude/skills/", "prompts/", "skills/")
 
@@ -9473,19 +9570,31 @@ def _pa_files(targets: Sequence[str]) -> List[Path]:
     return list(dict.fromkeys(out))
 
 
+PA_RULE_MSG = {r: m for r, m, _ in PA_RULES}
+
+
+def _pa_visible(line: str) -> str:
+    """Dòng bỏ ký tự định dạng (Unicode Cf: zero-width, bidi, soft hyphen, tag) để luật văn bản không bị lách bằng ký tự ẩn
+    chen giữa từ (AUD-SEC-260) — ký tự ẩn tự nó đã báo `hidden`."""
+    return line if line.isascii() else "".join(c for c in line if unicodedata.category(c) != "Cf")
+
+
 def _pa_line_findings(
-    rel: str, text: str, injection: Sequence[str], skip: Sequence[str] = (), line0: bool = False
+    rel: str, text: str, injection: Sequence[str], exempt_danger: Optional[Set[int]] = None
 ) -> List[Dict[str, object]]:
-    """Vi phạm theo dòng: ký tự ẩn, injection, năm luật regex, system prompt rò rỉ (chỉ dưới thư mục vendor/skill); bỏ
-    luật trong `skip`; `line0` = chữ không phải dòng thật của file (báo dòng 0)."""
+    """Vi phạm theo dòng: ký tự ẩn, injection, luật regex + luật token, system prompt rò rỉ (chỉ dưới thư mục
+    vendor/skill). `exempt_danger`: số dòng là mục `permissions.deny` → không báo `danger` ở dòng đó (AUD-SEC-272/276)."""
     rules = [("injection", "mẫu injection", tuple("(?i)" + p for p in injection))] + list(PA_RULES)
-    rules = [r for r in rules if r[0] not in skip]
     rules += [("leak", "system prompt rò rỉ (CMP-LIC-024)", PA_LEAK)] if rel.startswith(PA_LEAK_DIRS) else []
     out: List[Dict[str, object]] = []
-    for n, line in enumerate(text.splitlines(), 1):
-        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag)")] if PA_HIDDEN_RE.search(line) else []
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = _pa_visible(raw)
+        hits = [("hidden", "ký tự ẩn (zero-width/bidi/tag/soft hyphen)")] if PA_HIDDEN_RE.search(raw) else []
         hits += [(r, m) for r, m, pats in rules if any(re.search(p, line) for p in pats)]
-        out += [{"path": rel, "line": 0 if line0 else n, "rule": r, "msg": m} for r, m in hits]
+        hits += [(r, PA_RULE_MSG[r]) for r in _pa_token_rules(line) if (r, PA_RULE_MSG[r]) not in hits]
+        if exempt_danger and n in exempt_danger:
+            hits = [h for h in hits if h[0] != "danger"]
+        out += [{"path": rel, "line": n, "rule": r, "msg": m} for r, m in hits]
     return out
 
 
@@ -9499,29 +9608,54 @@ def _pa_scan_file(path: Path, injection: Sequence[str]) -> List[Dict[str, object
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         return out + [{"path": rel, "line": 0, "rule": "hidden", "msg": "không phải UTF-8"}]
-    rest, deny = _pa_split_deny(rel, text)
-    return out + _pa_line_findings(rel, rest, injection) + _pa_line_findings(rel, deny, injection, ("danger",), True)
+    return out + _pa_line_findings(rel, text, injection, _pa_deny_entries(rel, text))
 
 
 PA_SETTINGS_RE = re.compile(r"(?:^|.*/)\.claude/settings(?:\.local)?\.json")
 
 
-def _pa_split_deny(rel: str, text: str) -> Tuple[str, str]:
-    """(phần quét đủ luật, các mục `permissions.deny`) của `.claude/settings*.json` harness: `deny` là danh sách lệnh bị
-    CẤM khung chép vào mọi dự án đích — chỉ miễn luật `danger` cho các mục đó (review #387, AUD-SEC-272); `ask`, `allow`
-    và file khác (kể cả `vendor/**/settings.json`) quét đủ. JSON hỏng/không có `deny` dạng mảng → quét nguyên văn."""
+PA_DENY_KEY_RE = re.compile(r'"deny"\s*:\s*\[')
+
+
+def _pa_deny_entries(rel: str, text: str) -> Set[int]:
+    """Số dòng của các mục `permissions.deny` trong `.claude/settings*.json` harness: danh sách lệnh bị CẤM khung chép vào
+    mọi dự án đích — chỉ miễn luật `danger` cho các dòng nằm TRONG mảng `deny` mà nội dung là đúng một mục (review #387,
+    AUD-SEC-272). Mọi luật khác quét VĂN BẢN GỐC: khoá trùng bị `json.loads` bỏ vẫn được quét (AUD-SEC-276). JSON hỏng,
+    không có `deny` dạng mảng, hay không tìm được mảng trong văn bản → không miễn gì."""
     if not PA_SETTINGS_RE.fullmatch(rel):
-        return text, ""
+        return set()
     try:
         data = json.loads(text)
     except ValueError:
-        return text, ""
+        return set()
     perms = data.get("permissions") if isinstance(data, dict) else None
     deny = perms.get("deny") if isinstance(perms, dict) else None
-    if not isinstance(deny, list) or not isinstance(perms, dict):
-        return text, ""
-    data["permissions"] = {k: v for k, v in perms.items() if k != "deny"}
-    return json.dumps(data, indent=1, ensure_ascii=False), "\n".join(map(str, deny))
+    entries = (
+        {json.dumps(x, ensure_ascii=False) for x in deny if isinstance(x, str)} if isinstance(deny, list) else set()
+    )
+    m = PA_DENY_KEY_RE.search(text)
+    if not entries or m is None:
+        return set()
+    end = text.find(
+        "]", m.end()
+    )  # mục là chuỗi lệnh: `]` thật đầu tiên đóng mảng (chuỗi có `]` → dừng sớm, chỉ miễn ít hơn)
+    first = text.count("\n", 0, m.end()) + 1
+    span = text[m.end() : end if end >= 0 else len(text)].split("\n")
+    return {first + i for i, ln in enumerate(span) if ln.strip().rstrip(",").strip() in entries}
+
+
+PA_EXEMPT_KEYS = ("path", "reason", "expires")
+
+
+def _pa_iso_date(s: str) -> bool:
+    """Ngày `YYYY-MM-DD` thật (chữ số ASCII, tháng/ngày hợp lệ)."""
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", s):
+        return False
+    try:
+        _dt.date.fromisoformat(s)
+    except ValueError:
+        return False
+    return True
 
 
 def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]], List[str]]:
@@ -9535,8 +9669,11 @@ def _pa_exemptions(path: Optional[str], today: str) -> Tuple[List[Dict[str, str]
     ok: List[Dict[str, str]] = []
     errors: List[str] = []
     for i, item in enumerate(raw):
-        e = {k: str(v) for k, v in item.items()} if isinstance(item, dict) else {}
-        if not (e.get("path") and e.get("reason") and re.fullmatch(r"\d{4}-\d{2}-\d{2}", e.get("expires", ""))):
+        ok_fields = isinstance(item, dict) and all(
+            isinstance(item.get(k), str) and item[k].strip() for k in PA_EXEMPT_KEYS
+        )
+        e = {k: str(v) for k, v in item.items()} if ok_fields else {}
+        if not (ok_fields and _pa_iso_date(e["expires"])):  # AUD-SEC-259: `reason: null/" "`, chữ số Unicode, ngày sai
             errors.append(f"miễn trừ #{i}: cần path, reason, expires YYYY-MM-DD")
         elif e["expires"] < today:
             errors.append(f"miễn trừ #{i} ({e['path']}) hết hạn {e['expires']}")
