@@ -5359,11 +5359,67 @@ def doctor_findings(base: Path, fw: Path, deep: bool = True) -> List[Finding]:
     out = _doctor_runtime() + _doctor_scripts() + _doctor_settings(base, deep) + _doctor_harness_parts(base)
     out += _doctor_docs(base, fw) + _doctor_xt_yaml(base, fw) + _doctor_gate_floor(base) + _doctor_gitignore(base)
     out += _doctor_state(base) + _doctor_legacy(base) + _doctor_git(base) + _doctor_merge(base) + _doctor_memory(base)
-    out += _doctor_orchestration(base)
+    out += _doctor_orchestration(base) + _doctor_sandbox(base)
     if deep:
         out += _doctor_framework(fw) + _doctor_progress(base) + _doctor_version(base) + _doctor_guard_canary(base)
         out += _doctor_claude_version(base)
     return out
+
+
+CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")  # docker, podman — phiên cloud cũng chạy trong container
+CODEX_SANDBOX_RE = re.compile(r'^\s*sandbox_mode\s*=\s*"([\w-]+)"', re.M)
+
+
+def _in_container() -> bool:
+    """Phiên đang chạy trong container/VM cô lập: dấu của docker/podman, hay biến môi trường của phiên Claude Code trên
+    cloud (`CLAUDE_CODE_CONTAINER_ID`, `IS_SANDBOX=1` — máy ảo dùng một lần, mạng qua proxy). Biến môi trường là lời khai
+    của tiến trình cha: doctor chỉ khuyên, không phải cổng chặn."""
+    if os.environ.get("CLAUDE_CODE_CONTAINER_ID") or os.environ.get("IS_SANDBOX") == "1":
+        return True
+    return any(os.path.exists(p) for p in CONTAINER_MARKS)
+
+
+def _sandbox_sources(base: Path) -> List[str]:
+    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled`, Codex
+    `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor `.cursor/sandbox.json`, devcontainer."""
+    found: List[str] = []
+    for rel in (".claude/settings.json", ".claude/settings.local.json"):
+        sb = (_read_json_obj(base / rel) or {}).get("sandbox")
+        if isinstance(sb, dict) and sb.get("enabled") is True:
+            found.append(f"{rel} sandbox.enabled")
+    codex = base / ".codex" / "config.toml"
+    m = CODEX_SANDBOX_RE.search(codex.read_text(encoding="utf-8", errors="replace")) if codex.is_file() else None
+    if m and m.group(1) != "danger-full-access":
+        found.append(f".codex/config.toml sandbox_mode={m.group(1)}")
+    tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
+    if isinstance(tools, dict) and tools.get("sandbox"):
+        found.append(".gemini/settings.json tools.sandbox")
+    found += [rel for rel in (".cursor/sandbox.json", ".devcontainer/devcontainer.json") if (base / rel).is_file()]
+    return found
+
+
+def _doctor_sandbox(base: Path) -> List[Finding]:
+    """`LOOP-HARNESS-022`: guard không phải sandbox — phiên autopilot không người trực cần sandbox OS/devcontainer có egress
+    allowlist. Không thấy → cảnh báo; vòng một phiên đang chạy (`loop init --single-session`) mà không thấy → lỗi.
+    OpenCode không có sandbox chính chủ → cảnh báo riêng."""
+    out: List[Finding] = []
+    if (base / "opencode.json").is_file() or (base / ".opencode").is_dir():
+        msg = "OpenCode không có sandbox chính chủ — chạy trong devcontainer/VM hay `srt` có egress allowlist"
+        out.append(Finding("sandbox", "warn", f"{msg} (LOOP-HARNESS-022)"))
+    if _in_container() or _sandbox_sources(base):
+        return out
+    st = read_state(base) or {}
+    unattended = bool(st.get("active") and st.get("single_session"))
+    msg = (
+        "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`, Cursor "
+        "`sandbox.json`, devcontainer) và không chạy trong container — guard không chặn tiến trình con hay mạng "
+        "(LOOP-HARNESS-022)"
+    )
+    return out + [
+        Finding(
+            "sandbox", "error" if unattended else "warn", msg + (" — vòng một phiên đang chạy" if unattended else "")
+        )
+    ]
 
 
 def doctor_fix(findings: List[Finding]) -> Tuple[List[str], List[Finding]]:

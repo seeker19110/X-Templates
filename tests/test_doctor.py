@@ -273,6 +273,49 @@ class DoctorHooksTest(DoctorCase):
             found, [("error", "settings.json thiếu hook Stop"), ("warn", "settings.json thiếu hook PostToolUse")]
         )
 
+    def test_sandbox_group(self):
+        """LOOP-HARNESS-022 (T-3641, ADR-0064 lát E): không thấy sandbox → cảnh báo `sandbox`; vòng một phiên đang chạy mà
+        không có sandbox → lỗi; sandbox khai ở công cụ (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini
+        `tools.sandbox`, Cursor `sandbox.json`, devcontainer) hay đang chạy trong container → không phát hiện; OpenCode
+        (không có sandbox chính chủ) → cảnh báo riêng; Codex `danger-full-access` không tính."""
+        none = unittest.mock.patch.object(xt, "_in_container", return_value=False)
+        with none:
+            self.assertIn("sandbox", self.codes("warn", deep=False))
+            self.assertNotIn("sandbox", self.codes("error", deep=False))
+            xt.write_state({"active": True, "single_session": True}, self.base)
+            self.assertIn("sandbox", self.codes("error", deep=False))
+            settings = self.base / ".claude" / "settings.json"
+            data = json.loads(settings.read_text(encoding="utf-8"))
+            settings.write_text(json.dumps({**data, "sandbox": {"enabled": True}}), encoding="utf-8")
+            self.assertNotIn("sandbox", self.codes("error", deep=False) + self.codes("warn", deep=False))
+            settings.write_text(json.dumps(data), encoding="utf-8")
+            for rel, text in (
+                (".codex/config.toml", 'sandbox_mode = "workspace-write"\n'),
+                (".gemini/settings.json", '{"tools": {"sandbox": "docker"}}'),
+                (".cursor/sandbox.json", "{}"),
+                (".devcontainer/devcontainer.json", "{}"),
+            ):
+                with self.subTest(rel):
+                    p = self.write(rel, text)
+                    self.assertNotIn("sandbox", self.codes("error", deep=False))
+                    p.unlink()
+            p = self.write(".codex/config.toml", 'sandbox_mode = "danger-full-access"\n')
+            self.assertIn("sandbox", self.codes("error", deep=False))
+            p.unlink()
+            self.write("opencode.json", "{}")
+            msgs = [f.msg for f in self.findings(deep=False) if f.code == "sandbox"]
+            self.assertTrue(any("OpenCode" in m for m in msgs), msgs)
+        with unittest.mock.patch.object(xt, "_in_container", return_value=True):
+            self.assertNotIn("sandbox", self.codes("error", deep=False))
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_CONTAINER_ID", "IS_SANDBOX")}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            with unittest.mock.patch.object(xt.os.path, "exists", return_value=False):
+                self.assertFalse(xt._in_container())
+            with unittest.mock.patch.object(xt.os.path, "exists", side_effect=lambda p: p == "/.dockerenv"):
+                self.assertTrue(xt._in_container())
+            with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "1"}):
+                self.assertTrue(xt._in_container())
+
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,
         issue); matcher cũ (thiếu) → cảnh báo `hooks`, nêu tên thiếu."""
