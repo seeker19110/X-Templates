@@ -2062,3 +2062,10 @@
 - Chọn: Duyệt nguyên PLAN, mỗi lát một PR, lát guard một review tập trung trước merge
 - Lý do (tiêu chí chất lượng cuối): (1) an toàn + (2) đường lùi: mỗi lớp một PR revert được độc lập; PR ≤ ~150 dòng mã theo luật harden; (3) test được: mỗi lát có mẫu tái hiện của sổ làm test đỏ trước; PA2 vượt trần dòng và khó review
 - Đường lùi: Sửa PLAN (bỏ/tách task) bằng D mới; loop init lại
+
+### D-301 · 2026-11-02T03:21:39+00:00 · Lát C (T-3632) sau review trước PR (4 🔴): nguồn thân của gh đăng được — danh sách đen từng dạng hay danh sách trắng?
+
+- Phương án: (1) Vá thêm từng dạng reviewer nêu, giữ 17 ca đối chứng cũ ($(ls|wc), $(git log --oneline), xargs -I{}, nhóm < tệp) · (2) Danh sách trắng (ADR-0063 lát C): thân chỉ là chữ nguyên văn, $(cat <<'EOF'…), $(cat tệp nguyên văn), tệp/stdin-chuyển-hướng trên chính gh ở thư mục biết; endpoint api đọc dấu; 17 ca đối chứng cũ thành chặn
+- Chọn: Danh sách trắng (ADR-0063 lát C): thân chỉ là chữ nguyên văn, $(cat <<'EOF'…), $(cat tệp nguyên văn), tệp/stdin-chuyển-hướng trên chính gh ở thư mục biết; endpoint api đọc dấu; 17 ca đối chứng cũ thành chặn
+- Lý do (tiêu chí chất lượng cuối): (1) đúng và an toàn: dấu đi qua được tên tệp (ls), thông điệp commit (guard không chặn commit mang dấu: git log --oneline/%s, show --stat), tr/printf — danh sách đen không hội tụ (ADR-0063, #372). Đo 1567 lệnh Bash thật: luật gh mới đổi 0 quyết định; đường thay thế cho agent: ghi thân ra tệp rồi --body-file (lệnh riêng).
+- Đường lùi: Trả _gh_strict_why về a41e64c và expect của 17 ca guard-control-* trong tests/fixtures/autonomy/guard.json

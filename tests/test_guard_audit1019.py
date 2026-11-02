@@ -358,6 +358,38 @@ class DeleteOutsideProjectTest(unittest.TestCase):
 
 MARK = "<!-- xt-review v1 head=" + "a" * 40 + " verdict=clean -->"
 
+# D-301 (review lát C, ADR-0063): nguồn thân `gh` theo danh sách trắng — các lệnh dưới từng là đối chứng "không chặn oan"
+# nhưng đi qua kênh guard không thấy chữ (tên tệp, thông điệp commit, biến đổi chữ, `$biến`, `xargs`, stdin cấp shell,
+# `>(…)`, trình thông dịch) → nay bị chặn.
+D301_DENIED = frozenset(
+    {
+        'gh pr comment 5 --body "$(awk 1 n.md)"',
+        'gh pr comment 5 --body "$(git log -1 --format=%s) $(date +%F)"',
+        'gh pr comment 5 --body "$(echo $X) $(printf %s "$Y")"',
+        'gh pr comment 5 --body "$(head -n "$N" n.md)"',
+        "echo 5 | xargs -I{} gh pr comment {} --body ok",
+        "exec < n.md; gh pr comment 5 -F -",
+        "{ gh pr comment 5 -F -; } < n.md",
+        'gh pr comment 5 --body "Tests: $(python3 -m pytest -q tests 2>&1 | tail -1)"',
+        'gh pr comment 5 --body "$(ls docs | wc -l) files"',
+        'gh pr comment 5 --body "$(ls -la .)"',
+        'gh pr comment 5 --body "$(git log --oneline -3 -- docs)"',
+        "gh pr comment 5 --body \"$(find . -name '*.py' | wc -l)\"",
+        'gh pr comment 5 --body "$(du -sh docs)"',
+        'gh pr comment 5 --body "$(git status --short .)"',
+        'gh pr comment 5 --body "$(make -C docs lint 2>&1 | tail -3)"',
+        'gh pr comment 5 --body "$(git ls-files | xargs wc -l | tail -1)"',
+        'gh pr comment 5 --body "$(git show --stat HEAD) $(git log -1 --format=%s main) $(git diff --name-only a1 b1 c1 d1)"',
+        "cat n.md > >(gh pr comment 5 -F -)",
+        "echo hi > >(gh pr comment 5 -F -)",
+        'x=$(cat n.md); gh pr comment 5 --body "$x"',
+    }
+)
+
+
+def _d301(cmd: str) -> str:
+    return "deny" if cmd in D301_DENIED else ""
+
 
 class ReviewMarkerForgeTest(unittest.TestCase):
     """AUD-SEC-069: dấu review mà steward/`pr next` tin (ADR-0027) chỉ do `xt.py pr reviewed` đăng, không đăng tay."""
@@ -532,7 +564,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 'gh pr comment 5 --body "$(tail --lines=3 n.md)"',
             ):
                 with self.subTest(cmd):
-                    self.assertEqual(final(cmd, root), "")
+                    self.assertEqual(final(cmd, root), _d301(cmd))
             with mock.patch.object(guard.os, "lstat", side_effect=OSError(36, "File name too long")):
                 self.assertTrue(guard._file_has_mark("b.md", d))
             with mock.patch.object(guard.os, "O_NONBLOCK", 0, create=True):  # Windows: không có O_NONBLOCK
@@ -569,7 +601,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 "echo 5 | xargs -I{} gh pr comment {} --body ok",
             ):
                 with self.subTest(cmd):
-                    self.assertEqual(final(cmd, root), "")
+                    self.assertEqual(final(cmd, root), _d301(cmd))
             with mock.patch.object(guard, "REVIEW_READ_BYTES", 1000):  # quá trần đọc → không đọc được → chặn
                 self.assertEqual(final('gh pr comment 5 --body "$(head -40 big.md)"', root), "deny")
         real_stat = os.stat
@@ -669,7 +701,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 "grep -c x b.md; gh pr comment 5 --body ok",  # không nối vào gh
             ):
                 with self.subTest(cmd):
-                    self.assertEqual(final(cmd, root), "")
+                    self.assertEqual(final(cmd, root), _d301(cmd))
 
     def test_review_marker_backtick_skew(self):
         """AUD-SEC-181: backtick nguyên văn (thoát `\\``, trong nháy, `$'\\x60'`, comment, heredoc của lệnh khác) đứng
@@ -747,7 +779,7 @@ class ReviewMarkerForgeTest(unittest.TestCase):
                 'while read -r x; do echo "$x"; done < b.md',
             ):
                 with self.subTest(cmd):
-                    self.assertEqual(final(cmd, root), "")
+                    self.assertEqual(final(cmd, root), _d301(cmd))
         self.assertFalse(guard._arith_at("$((" + "1+" * 3000, 0))  # chưa đóng trong cửa sổ: quét như thay lệnh
         self.assertTrue(guard._arith_at("$((1))", 0))
 
@@ -803,7 +835,7 @@ class ReviewMarkerReview361Test(unittest.TestCase):
     def check(self, want, cmds):
         for cmd in cmds:
             with self.subTest(cmd):
-                self.assertEqual(final(cmd, self.root), want)
+                self.assertEqual(final(cmd, self.root), want or _d301(cmd))
 
     def test_review_marker_361_comment_in_ansi_c(self):
         """R1: `#` trong `$'…'` không mở comment — đoạn `gh` sau nó vẫn được quét; `gh` mà bộ quét không thấy → mờ."""

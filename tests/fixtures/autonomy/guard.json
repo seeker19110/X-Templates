@@ -6882,8 +6882,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-sec181-quoted-backtick-skew",
@@ -7068,8 +7069,9 @@
    "command": "echo 5 | xargs -I{} gh pr comment {} --body ok"
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-sec190-heredoc-quote-split-rm",
@@ -7263,8 +7265,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-ls-dir-wc",
@@ -7281,8 +7284,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-ls-dot",
@@ -7299,8 +7303,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-git-log-dir",
@@ -7317,8 +7322,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-find-name-wc",
@@ -7335,8 +7341,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-du-dir",
@@ -7353,8 +7360,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-git-status-dot",
@@ -7371,8 +7379,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-make-dir-tail",
@@ -7389,8 +7398,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-xargs-wc",
@@ -7407,8 +7417,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-many-names",
@@ -7425,8 +7436,9 @@
    }
   },
   "expect": {
-   "allowed": true
-  }
+   "allowed": false
+  },
+  "note": "D-301: danh sách trắng nguồn thân `gh` (review lát C trước PR) — trước là đối chứng cho qua"
  },
  {
   "id": "guard-control-rev361-inner-pipe-stdin",
@@ -8319,7 +8331,7 @@
     }
    },
    "expect": {
-    "allowed": true
+    "allowed": false
    }
   },
   {
@@ -8334,7 +8346,7 @@
     }
    },
    "expect": {
-    "allowed": true
+    "allowed": false
    }
   },
   {
@@ -8349,7 +8361,7 @@
     }
    },
    "expect": {
-    "allowed": true
+    "allowed": false
    }
   },
   {

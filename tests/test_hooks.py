@@ -2388,7 +2388,7 @@ class MergeGuardPinnedMergeTest(MergeGuardBase):
             with self.subTest(cmd):
                 self.assertEqual(self.d(cmd)[0], "ask")
         self.assertEqual(self.d("gh alias set m 'pr merge --admin'")[0], "deny")  # ADR-0063 lát C: `gh alias set` chặn
-        self.assertEqual(self.d("gh alias import a.yml")[0], "ask")
+        self.assertEqual(self.d("gh alias import a.yml")[0], "deny")  # review lát C: alias người dùng đăng thân
         for cmd in (
             "gh api repos/o/r/pulls/5",
             "gh api -X GET repos/o/r/pulls",
