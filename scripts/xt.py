@@ -10816,6 +10816,7 @@ RELEASE_ROWS = (
     "acceptance",
     "rollback",
     "unchecked_must",
+    "go_no_go",
 )
 # ADR-0042: kiểm chỉ chạy trước phát hành (pha harden) — khoá xt.yaml của dự án, lệnh đỏ = NO-GO.
 RELEASE_RUN_KEYS = (
@@ -11125,6 +11126,51 @@ def _release_run(base: Path, blueprint: str, key: str, what: str) -> Dict[str, s
     return _release_row(key, "PASS", f"`{redact(cmd)}` exit 0")
 
 
+GO_NO_GO_DIRS = ("docs/ops", "docs", ".")  # nơi tìm `GO-NO-GO*.md` (repo khung: docs/ops; mẫu dự án đích: gốc)
+# Dòng ký của bảng §5: `| vai trò | tên | quyết định | YYYY-MM-DD |` — tên và ngày khác rỗng (mẫu để trống hai ô này).
+GO_SIGN_ROW_RE = re.compile(r"^\|[^|\n]*\|\s*[^|\s][^|\n]*\|[^|\n]*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*$", re.M)
+
+
+def _go_no_go_signed(text: str) -> bool:
+    """§5 (Ký) của GO-NO-GO có ít nhất một dòng ký có tên và ngày."""
+    part = re.split(r"^## 5\b.*$", text, maxsplit=1, flags=re.M)
+    return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
+
+
+def _release_go_no_go(base: Path) -> Dict[str, str]:
+    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` nhắc `v<VERSION>` ở
+    `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
+    người ký); không có VERSION → N/A SHOULD; không đọc được → FAIL (có thể giấu bản ký)."""
+    try:
+        version = (base / "VERSION").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return _release_row("go_no_go", "N/A", "không có VERSION — chưa có bản phát hành để ký", "SHOULD")
+    except (OSError, ValueError) as exc:
+        return _release_row("go_no_go", "FAIL", f"không đọc được VERSION: {exc}")
+    found: List[str] = []
+    for d in GO_NO_GO_DIRS:
+        for p in sorted((base / d).glob("GO-NO-GO*.md")):
+            rel = p.relative_to(base).as_posix()
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
+            if f"v{version}" in p.name or f"v{version}" in text:
+                if _go_no_go_signed(text):
+                    return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
+                found.append(rel)
+    if found:
+        return _release_row(
+            "go_no_go", "N/A", f"{', '.join(found)}: §5 chưa có chữ ký (tên + ngày) — người ký", "BLOCKER"
+        )
+    return _release_row(
+        "go_no_go",
+        "N/A",
+        f"chưa có GO-NO-GO cho v{version} — lập theo mẫu GO-NO-GO.md từ `release-check --json`, người ký §5",
+        "BLOCKER",
+    )
+
+
 def _release_unchecked_must(base: Path, blueprint: str, mode: str) -> Dict[str, str]:
     """Số + tỉ lệ MUST tick `[x]` không có `— Kiểm:` (cùng nguồn `blueprint-status`/hàng `blueprint`). `warn` (mặc định):
     hàng ⚠ SHOULD, không đổi GO/NO-GO; `fail` (dự án đích bật ở harden): count > 0 là FAIL BLOCKER = NO-GO."""
@@ -11166,6 +11212,7 @@ def release_check(base: Path, blueprint: str, status: str, unchecked_must: str =
         _release_review_debt(base, status),
         *runs.values(),
         _release_unchecked_must(base, blueprint, unchecked_must),
+        _release_go_no_go(base),
     ]
     fails = [r["id"] for r in rows if r["result"] == "FAIL" and r["level"] == "BLOCKER"]
     human = [r["id"] for r in rows if r["result"] == "N/A" and r["level"] == "BLOCKER"]

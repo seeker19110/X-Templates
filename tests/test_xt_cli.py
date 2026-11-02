@@ -2549,6 +2549,44 @@ class ReleaseCheckTest(TmpRepoCase):
         rec = {"ok": True, "mode": "all", "fingerprint": xt.tree_fingerprint(self.repo)}
         xt.write_atomic(self.repo / ".autopilot" / xt.VERIFIED_FILE, json.dumps(rec) + "\n")
 
+    def test_go_no_go_file_matches_version(self):
+        """AUD-HAR-197: hàng `go_no_go` — không VERSION → N/A SHOULD; có VERSION mà chưa có GO-NO-GO nhắc `v<VERSION>` → N/A
+        BLOCKER (việc của người: lập + ký); có mà §5 chưa ký → N/A BLOCKER; §5 có tên + ngày → PASS; không đọc được → FAIL."""
+
+        def row() -> dict:
+            return self.by_id(self.rows()[1])["go_no_go"]
+
+        self.assertEqual((row()["result"], row()["level"]), ("N/A", "SHOULD"))
+        (self.repo / "VERSION").write_text("1.2.0\n", encoding="utf-8")
+        r = row()
+        self.assertEqual((r["result"], r["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("chưa có GO-NO-GO cho v1.2.0", r["evidence"])
+        self.assertIn("go_no_go", self.rows()[1]["human"])
+        ops = self.repo / "docs" / "ops"
+        (ops / "GO-NO-GO-2026-01-01-v1.1.0.md").write_text("# GO/NO-GO — phát hành `v1.1.0`\n", encoding="utf-8")
+        self.assertIn("chưa có GO-NO-GO cho v1.2.0", row()["evidence"])  # bản cũ không tính
+        sign = "## 5. Ký (con người, không phải agent)\n\n| Vai trò | Tên | Quyết định | Ngày |\n|---|---|---|---|\n"
+        doc = ops / "GO-NO-GO-2026-01-02-v1.2.0.md"
+        doc.write_text(
+            "# GO/NO-GO — X · phát hành `v1.2.0`\n\n" + sign + "| Chủ sản phẩm | | GO / NO-GO | |\n", "utf-8"
+        )
+        r = row()
+        self.assertEqual((r["result"], r["level"]), ("N/A", "BLOCKER"))
+        self.assertIn("§5 chưa có chữ ký", r["evidence"])
+        doc.write_text(doc.read_text("utf-8") + "| Chủ repo | An | GO v1.2.0 | 2026-01-02 |\n", "utf-8")
+        r = row()
+        self.assertEqual(r["result"], "PASS")
+        self.assertIn("docs/ops/GO-NO-GO-2026-01-02-v1.2.0.md", r["evidence"])
+        (self.repo / "GO-NO-GO.md").write_text(
+            "bản gốc v1.2.0 không ký\n", encoding="utf-8"
+        )  # nhiều file: có một bản ký là đủ
+        self.assertEqual(row()["result"], "PASS")
+        doc.write_bytes(b"\xff v1.2.0")
+        self.assertEqual(row()["result"], "FAIL")
+        doc.unlink()
+        (self.repo / "VERSION").write_bytes(b"\xff")
+        self.assertEqual(row()["result"], "FAIL")
+
     def test_release_reuses_loop_verify_all_blueprint_checks(self):
         """T-1720: `loop verify --all` xanh trên đúng cây và đúng blueprint → hàng `blueprint` dùng lại kết quả `— Kiểm:`
         đã ghi, không chạy lại; kết quả đỏ đã ghi → FAIL; cây đổi hoặc verify một phần → chạy lại như cũ."""
@@ -2595,7 +2633,23 @@ class ReleaseCheckTest(TmpRepoCase):
         r = self.by_id(d)
         self.assertEqual(
             [r[k]["result"] for k in xt.RELEASE_ROWS],
-            ["PASS", "PASS", "N/A", "PASS", "N/A", "PASS", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "PASS"],
+            [
+                "PASS",
+                "PASS",
+                "N/A",
+                "PASS",
+                "N/A",
+                "PASS",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                "PASS",
+                "N/A",
+            ],
         )
         levels = [r[k]["level"] for k in ("migration_check", "rollback", "acceptance")]
         self.assertEqual(levels, ["SHOULD"] * 3)  # quy mô S: cổng production không bắt buộc
