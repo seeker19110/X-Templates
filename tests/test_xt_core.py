@@ -1501,6 +1501,32 @@ class LoopRecordBranchesTest(TmpMixin, RealAutopilotUntouchedMixin, unittest.Tes
         self.assertIn("cần bash", out)
         self.assertEqual(xt.read_evidence("T-001", self.base)["exit_code"], 127)
 
+    def test_guard_log_stats(self):  # AUD-HAR-199 (T-3655): tỉ lệ chặn/BUDGET của hook theo vòng
+        st = xt.read_state(self.base)
+        st["started"] = "2026-10-18T00:00:00+00:00"
+        xt.write_state(st, self.base)
+        t0 = int(_dt.datetime(2026, 10, 18, tzinfo=_dt.timezone.utc).timestamp())
+        rows = [
+            {"ts": t0 - 60, "session": "cũ", "mode": "bash", "decision": "deny", "code": "BUDGET"},  # vòng trước
+            {"ts": t0 + 1, "session": "a", "mode": "bash", "decision": "", "code": "NONE"},
+            {"ts": t0 + 2, "session": "a", "mode": "bash", "decision": "deny", "code": "BUDGET"},
+            {"ts": t0 + 3, "session": "b", "mode": "edit", "decision": "deny", "code": "EVIDENCE_HANDWRITE"},
+            {"ts": t0 + 4, "session": "b", "mode": "mcp", "decision": "", "code": "NONE"},
+        ]
+        log = self.base / ".autopilot" / xt.GUARD_LOG
+        log.write_text("\n".join(map(json.dumps, rows)) + '\n{hỏng\n[1]\n{"ts": "x"}\n', encoding="utf-8")
+        g = xt.loop_stats(self.base)["guard"]
+        self.assertEqual(
+            g, {"decisions": 4, "deny": 2, "budget": 1, "deny_rate": 0.5, "budget_rate": 0.25, "sessions": 2}
+        )
+        self.assertEqual(xt.loop_stats(self.base, all_loops=True)["guard"]["decisions"], 5)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            xt._loop_stats(argparse.Namespace(all=False, json=False), self.base)
+        self.assertIn("Guard: 4 quyết định · chặn 2 (50%) · BUDGET 1 (25%) · 2 phiên", out.getvalue())
+        empty = self.tmpdir()
+        self.assertEqual(xt.loop_stats(empty)["guard"]["deny_rate"], None)
+
     def test_runs_log_and_stats(self):
         # LOOP-DESIGN-024: evidence bị ghi đè, runs.jsonl giữ mọi lần chạy → loop stats đếm được lần đỏ trước khi xanh.
         st = xt.read_state(self.base)

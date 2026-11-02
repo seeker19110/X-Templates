@@ -3057,6 +3057,35 @@ def _hours_to_green(first_started: Optional[_dt.datetime], green_finished: str) 
     return round((fin - first_started).total_seconds() / 3600, 3)
 
 
+GUARD_LOG = "guard-log.jsonl"  # hook guard nối mỗi quyết định (AUD-HAR-199) — tên giữ GIỐNG `guard.GUARD_LOG`
+
+
+def guard_stats(base: Path, since: Optional[_dt.datetime]) -> Dict[str, Any]:
+    """Tỉ lệ chặn của hook từ `.autopilot/guard-log.jsonl` (dòng hỏng bỏ qua; `since` = mốc bắt đầu vòng, None = mọi
+    dòng): số quyết định, số deny, số BUDGET (ngoài tập con guard đọc chắc — ADR-0063), số phiên. Tỉ lệ chặn cao là
+    dấu hiệu chặn oan (AUD-HAR-199) — so với 1/1.567 của ADR-0063."""
+    p = base / ".autopilot" / GUARD_LOG
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
+    floor = since.timestamp() if since else float("-inf")
+    rows = []
+    for line in lines:
+        with contextlib.suppress(ValueError):
+            r = json.loads(line)
+            if isinstance(r, dict) and isinstance(r.get("ts"), int) and r["ts"] >= floor:
+                rows.append(r)
+    deny = sum(r.get("decision") == "deny" for r in rows)
+    budget = sum(r.get("code") == "BUDGET" for r in rows)
+    n = len(rows)
+    return {
+        "decisions": n,
+        "deny": deny,
+        "budget": budget,
+        "deny_rate": round(deny / n, 4) if n else None,
+        "budget_rate": round(budget / n, 4) if n else None,
+        "sessions": len({r.get("session") for r in rows}),
+    }
+
+
 def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
     """Số đo vòng (LOOP-DESIGN-024): mỗi task bao nhiêu lần chạy Gate tới lần xanh đầu, tỉ lệ xanh lần đầu, task cần
     ≥ 3 lần, thời gian tới xanh (giờ, trung vị/P95 — ADR-0061), vòng đã dùng, việc chờ người. Mặc định chỉ tính vòng
@@ -3103,6 +3132,7 @@ def loop_stats(base: Path, all_loops: bool = False) -> Dict[str, Any]:
         "max_iterations": st.get("max_iterations"),
         "deferred": sorted(_deferred(st)),
         "blocked": bool(st.get("blocked")),
+        "guard": guard_stats(base, None if all_loops else _parse_iso(str(st.get("started") or ""))),
     }
 
 
@@ -3127,6 +3157,11 @@ def _loop_stats(args: argparse.Namespace, base: Path) -> int:
     print(
         f"Giao việc: {_pct(s['delegation_rate'])} ({len(s['delegated'])}/{s['task_count']}) · "
         f"xanh lần đầu: giao {_pct(s['first_pass_rate_delegated'])} · tự làm {_pct(s['first_pass_rate_self'])}"
+    )
+    g = s["guard"]
+    print(
+        f"Guard: {g['decisions']} quyết định · chặn {g['deny']} ({_pct(g['deny_rate'])}) · "
+        f"BUDGET {g['budget']} ({_pct(g['budget_rate'])}) · {g['sessions']} phiên (AUD-HAR-199)"
     )
     for k, t in sorted(s["tasks"].items()):
         green = f"xanh ở lần {t['runs_to_green']}" if t["runs_to_green"] else "chưa xanh"

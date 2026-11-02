@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -747,6 +748,59 @@ class GhPostingStrictTest(unittest.TestCase):
         for cmd in self.OK:
             with self.subTest(cmd=cmd):
                 self.assertEqual(guard._strict_why(cmd), "")
+
+
+class GuardLogTest(unittest.TestCase):
+    """AUD-HAR-199 (T-3655): mỗi quyết định của hook nối một dòng vào `.autopilot/guard-log.jsonl` (chỉ khi dự án đang
+    có `.autopilot/`) cho `loop stats` đo tỉ lệ chặn; ghi lỗi không làm hook đổi quyết định. Lý do BUDGET kèm gợi ý
+    viết lại."""
+
+    def run_guard(self, root: Path, cmd: str, mode: str = "bash") -> "subprocess.CompletedProcess[str]":
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
+        env.pop("XT_GUARD_POLICY", None)
+        payload = json.dumps({"session_id": "s-1", "tool_input": {"command": cmd}, "cwd": str(root)})
+        return subprocess.run(
+            [sys.executable, str(ROOT / ".claude" / "hooks" / "guard.py"), mode],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_logs_only_inside_autopilot_project(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.assertEqual(self.run_guard(root, "ls").returncode, 0)
+        self.assertFalse((root / ".autopilot").exists())
+        (root / ".autopilot").mkdir()
+        self.run_guard(root, "ls")
+        self.assertIn('"decision": "deny"', self.run_guard(root, "cat f.sh | mksh").stdout)
+        rows = [json.loads(x) for x in (root / ".autopilot" / guard.GUARD_LOG).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(
+            [(r["mode"], r["decision"], r["code"], r["session"]) for r in rows],
+            [
+                ("bash", "", "NONE", "s-1"),
+                ("bash", "deny", "BUDGET", "s-1"),
+            ],
+        )
+        self.assertTrue(all(isinstance(r["ts"], int) for r in rows))
+
+    def test_log_write_error_keeps_decision(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (root / ".autopilot" / guard.GUARD_LOG).mkdir(parents=True)  # đường log là thư mục → mở để ghi lỗi
+        r = self.run_guard(root, "cat f.sh | mksh")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('"decision": "deny"', r.stdout)
+
+    def test_log_name_matches_xt(self):  # `loop stats` đọc đúng file guard ghi
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import xt
+
+        self.assertEqual(guard.GUARD_LOG, xt.GUARD_LOG)
+
+    def test_budget_reason_suggests_rewrite(self):
+        d = guard.bash_decision("cat f.sh | mksh", str(ROOT))
+        self.assertEqual(d.get("code"), guard.BUDGET)
+        self.assertIn("viết lại:", str(d["reason"]))
 
 
 class PolicyContractTest(unittest.TestCase):
