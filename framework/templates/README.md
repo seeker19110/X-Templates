@@ -27,7 +27,7 @@ updated: 2026-11-02
 | [`AUDIT-REPORT.md`](AUDIT-REPORT.md) | `docs/ops/AUDIT-REPORT-<ngày>.md` — báo cáo một lần audit: lệnh đã chạy, phát hiện có đường tái hiện + xác minh đối kháng, kế hoạch sửa theo đợt do phiên chính tự duyệt (ADR-0008) | Như trên · `/audit` bước 6 |
 | [`GO-NO-GO.md`](GO-NO-GO.md) | `docs/GO-NO-GO-<v>.md` — BLOCKER/SHOULD/NICE, mỗi mục PASS/FAIL/N/A + bằng chứng file:dòng, "Evidence or FAIL", con người ký | G7 · cổng G7; `PM-HANDOVER-006` |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | `docs/RELEASE-NOTES-<v>.md` — cho người dùng: cần làm gì, mới/thay đổi/sửa/bảo mật/ngừng hỗ trợ, lỗi đã biết | G7 · mỗi phát hành; `WF-REL-*` |
-| [`SLO.md`](SLO.md) | `docs/ops/slo.md` — SLI tốt/tổng có query, mục tiêu, cửa sổ, ngân sách lỗi, cảnh báo theo tốc độ đốt, chính sách khi hết ngân sách | G4, G8 · `OPS-SLO-001`, `IND-SAAS-013` |
+| [`SLO.md`](SLO.md) | `docs/ops/SLO.md` — SLI tốt/tổng có query, mục tiêu, cửa sổ, ngân sách lỗi, cảnh báo theo tốc độ đốt, chính sách khi hết ngân sách | G4, G8 · `OPS-SLO-001`, `IND-SAAS-013` |
 | [`RPO-RTO.md`](RPO-RTO.md) | `docs/ops/RPO-RTO.md` — RPO/RTO từng kho và dịch vụ, cách đạt, lần thử khôi phục có ngày + thời gian đo | G4, G8 · `DB-BACKUP-001`, `OPS-DR-001` |
 | [`RISKS.md`](RISKS.md) | `docs/RISKS.md` — sổ rủi ro "nếu … thì …", điểm, chủ, biện pháp, dấu hiệu kích hoạt, ngày rà; phụ thuộc bên thứ ba | G1, mỗi mốc · `PM-RISK-001/006` |
 | [`LIMITATIONS.md`](LIMITATIONS.md) | `docs/limitations.md` — giới hạn đã biết có số đo, cách lách, kế hoạch, phiên bản | G5–G7 · `BASE-DOC-018` |

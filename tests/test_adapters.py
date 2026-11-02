@@ -214,7 +214,10 @@ class AdapterHostTest(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["xt_adapter.py"]), redirect_stderr(io.StringIO()):
             self.assertEqual(ad.main(), 2)
 
-    @unittest.skipIf(shutil.which("bun") is None, "cần bun để chạy plugin OpenCode")
+    # CI đặt XT_REQUIRE_BUN=1 (job `test` cài bun ghim sha256): thiếu bun ở đó là đỏ, không skip (AUD-TEST-056).
+    @unittest.skipIf(
+        shutil.which("bun") is None and not os.environ.get("XT_REQUIRE_BUN"), "cần bun để chạy plugin OpenCode"
+    )
     def test_opencode_plugin_throws_on_deny(self):
         work = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (work / ".xtemplates" / "scripts").mkdir(parents=True)

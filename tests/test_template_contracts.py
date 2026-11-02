@@ -11,12 +11,15 @@ ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "framework"
 
 
-def template_block(name: str) -> str:
-    """Khối ````markdown đầu tiên của mẫu — phần dự án chép sang."""
+def template_block(name: str, lang: str = "markdown") -> str:
+    """Khối ````<lang> đầu tiên của mẫu — phần dự án chép sang."""
     text = (FW / "templates" / name).read_text(encoding="utf-8")
-    m = re.search(r"^````markdown\n(.*?)^````$", text, re.M | re.S)
-    assert m, f"{name}: không có khối ````markdown"
+    m = re.search(rf"^````{lang}\n(.*?)^````$", text, re.M | re.S)
+    assert m, f"{name}: không có khối ````{lang}"
     return m.group(1)
+
+
+ISO_DURATION_RE = re.compile(r"P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?")
 
 
 def item_line(item_id: str) -> str:
@@ -35,6 +38,30 @@ class TemplateContractTest(unittest.TestCase):
         rows = template_block("RISKS.md").splitlines()
         self.assertTrue([r for r in rows if re.match(r"^\| RK-[0-9]{3}", r)])
         self.assertFalse([r for r in rows if re.match(r"^\| R-[0-9]{3}", r)])
+
+    def test_privacy_data_map_matches_cmp_priv_001_002(self):
+        """AUD-DOC-218: `retention` của mẫu theo đúng lint `CMP-PRIV-002` (ISO 8601 duration hoặc `until-account-deleted`)
+        và mẫu có trường "nơi sao chép" (`copies`) mà `CMP-PRIV-001` đòi."""
+        self.assertIn("ISO 8601 duration hoặc `until-account-deleted`", item_line("CMP-PRIV-002"))
+        self.assertIn("nơi sao chép", item_line("CMP-PRIV-001"))
+        block = template_block("PRIVACY-DATA-MAP.md", "yaml")
+        retention = re.findall(r"^\s*retention:\s*<([^>]*)>", block, re.M)
+        self.assertTrue(retention, block)
+        for value in retention:
+            for choice in (c.strip() for c in value.split("|")):
+                self.assertTrue(choice == "until-account-deleted" or ISO_DURATION_RE.fullmatch(choice), choice)
+        self.assertRegex(block, r"(?m)^\s*copies:\s*\[")
+
+    def test_slo_file_name_is_one(self):
+        """AUD-DOC-217: một tên file SLO ở `OPS-SLO-001` (nhà), mẫu, chỉ mục mẫu và mục ngành — `slo.md` ≠ `SLO.md` trên
+        Linux."""
+        want = "`docs/ops/SLO.md`"
+        for item in ("OPS-SLO-001", "IND-SAAS-013", "IND-GOV-018"):
+            self.assertIn(want, item_line(item), item)
+        self.assertIn("# Mẫu docs/ops/SLO.md\n", (FW / "templates" / "SLO.md").read_text(encoding="utf-8"))
+        index = (FW / "templates" / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"| [`SLO.md`](SLO.md) | {want} ", index)
+        self.assertNotIn("docs/ops/slo.md", "\n".join(p.read_text(encoding="utf-8") for p in FW.rglob("*.md")))
 
 
 if __name__ == "__main__":

@@ -26,8 +26,9 @@ systems:
             category: <thuong>             # thuong | nhay_cam | tre_em
             purpose: <đăng nhập, gửi thông báo đơn hàng>
             legal_basis: <đồng ý | hợp đồng | nghĩa vụ pháp lý — theo module 16>
-            retention: <xoá 30 ngày sau khi đóng tài khoản>
+            retention: <P30D | until-account-deleted>  # ISO 8601 duration hoặc until-account-deleted (CMP-PRIV-002)
             access: <role:support (xem che một phần)>
+            copies: [<backup-s3>, <replica-doc>, <kho-phan-tich>]  # nơi sao chép: bản sao lưu, replica, kho phân tích, log
             shared_with: [<sendgrid>]      # tên ở processors.md
 ````
 

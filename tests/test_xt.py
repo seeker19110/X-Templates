@@ -307,6 +307,11 @@ class ValidateTest(unittest.TestCase):
         old = xt.stale_verifications(self.fw, 180, today)
         self.assertEqual([d for _, d in old if d.startswith("2026-01")], ["2026-01-02"])
         self.assertFalse([d for _, d in old if d == "2026-10-30"])
+        # AUD-DOC-216: chữ hoa đầu câu (bảng stack của hồ sơ, conventions §5) và in hoa toàn bộ cũng là ngày xác minh
+        self._insert("Xác minh ngày **2026-01-03** — **xác minh lại trước khi dùng**. XÁC MINH LẠI 2026-01-04.")
+        upper = [d for _, d in xt.stale_verifications(self.fw, 180, today)]
+        self.assertIn("2026-01-03", upper)
+        self.assertIn("2026-01-04", upper)
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             rc = xt.main(["--framework", str(self.fw), "validate", "--stale", "180", "--today", "2026-11-02"])
