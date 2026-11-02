@@ -298,14 +298,14 @@ class DoctorHooksTest(DoctorCase):
             self.assertIn("sandbox", self.codes("error", deep=False))
             settings = self.base / ".claude" / "settings.json"
             data = json.loads(settings.read_text(encoding="utf-8"))
-            settings.write_text(json.dumps({**data, "sandbox": {"enabled": True}}), encoding="utf-8")
+            sandbox = {"enabled": True, "failIfUnavailable": True}
+            settings.write_text(json.dumps({**data, "sandbox": sandbox}), encoding="utf-8")
             self.assertNotIn("sandbox", self.codes("error", deep=False) + self.codes("warn", deep=False))
             settings.write_text(json.dumps(data), encoding="utf-8")
             for rel, text in (
                 (".codex/config.toml", 'sandbox_mode = "workspace-write"\n'),
                 (".gemini/settings.json", '{"tools": {"sandbox": "docker"}}'),
                 (".cursor/sandbox.json", "{}"),
-                (".devcontainer/devcontainer.json", "{}"),
             ):
                 with self.subTest(rel):
                     p = self.write(rel, text)
@@ -334,6 +334,43 @@ class DoctorHooksTest(DoctorCase):
                     self.assertTrue(self.real_in_container())
                 with unittest.mock.patch.dict(os.environ, {"IS_SANDBOX": "0"}):
                     self.assertFalse(self.real_in_container())
+
+    def test_sandbox_devcontainer_and_settings_precedence(self):
+        """AUD-HAR-202: `.devcontainer/devcontainer.json` có trong repo không chứng minh tiến trình chạy trong container
+        (container thật do `_in_container` thấy) → vẫn báo, kèm gợi ý mở trong devcontainer. AUD-HAR-203: `sandbox` của
+        `.claude/settings.local.json` đè `settings.json` (local > project) trước khi xét; `enabled` mà không
+        `failIfUnavailable: true` → cảnh báo riêng (thiếu bubblewrap/socat thì chạy trần)."""
+        settings = self.base / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        local = self.base / ".claude" / "settings.local.json"
+
+        def sandbox(project: object, here: object = None) -> list[tuple[str, str]]:
+            settings.write_text(json.dumps({**data, "sandbox": project}), encoding="utf-8")
+            if here is None:
+                local.unlink(missing_ok=True)
+            else:
+                local.write_text(json.dumps({"sandbox": here}), encoding="utf-8")
+            return [(f.level, f.msg) for f in self.findings(deep=False) if f.code == "sandbox"]
+
+        safe = {"enabled": True, "failIfUnavailable": True}
+        with unittest.mock.patch.object(xt, "_in_container", return_value=False):
+            xt.write_state({"active": True, "single_session": True}, self.base)
+            dev = self.write(".devcontainer/devcontainer.json", "{}")
+            found = sandbox(None)
+            self.assertEqual([lv for lv, _ in found], ["error"])
+            self.assertIn("devcontainer.json có trong repo nhưng tiến trình không chạy trong container", found[0][1])
+            dev.unlink()
+            self.assertNotIn("devcontainer.json có", sandbox(None)[0][1])
+            self.assertEqual([lv for lv, _ in sandbox(safe, {"enabled": False})], ["error"])  # local tắt đè project
+            self.assertEqual(sandbox({"enabled": False}, safe), [])  # local bật đè project tắt
+            self.assertEqual(sandbox(safe, "không phải object"), [])  # local hỏng: bỏ, giữ project
+            self.assertEqual(sandbox(safe, {"network": {}}), [])  # local không nói `enabled`: project giữ
+            found = sandbox({"enabled": True})
+            self.assertEqual([lv for lv, _ in found], ["warn"])
+            self.assertIn("failIfUnavailable", found[0][1])
+            self.assertEqual(sandbox({"enabled": True}, {"failIfUnavailable": True}), [])
+        with unittest.mock.patch.object(xt, "_in_container", return_value=True):
+            self.assertEqual(sandbox({"enabled": True}), [])  # trong container: sandbox công cụ là lớp thêm
 
     def test_pretool_matchers_cover_notebook_and_mcp_writes(self):
         """AUD-HAR-036/198 (T-3650): bản cài phủ `NotebookEdit` ở hook sửa file và các tool MCP ghi (tạo nhánh/repo, fork,

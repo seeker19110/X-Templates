@@ -105,11 +105,12 @@
    ]
   },
   {
-   "reason": "Luật năng lực reviewer đọc ở cờ `pr reviewed --reviewer-model/--author-model` và `xt.yaml` (`_review_models_error`, `review_family_config_error`) — corpus review chưa có kiểu ca nhận tên model; đỡ bằng `tests.test_merge -k clean_review_judges_name_tail`; PR bot (AUD-SEC-353/354): `-k clean_review_of_bot_pr`",
+   "reason": "Luật năng lực reviewer đọc ở cờ `pr reviewed --reviewer-model/--author-model` và `xt.yaml` (`_review_models_error`, `review_family_config_error`) — corpus review chưa có kiểu ca nhận tên model; đỡ bằng `tests.test_merge -k clean_review_judges_name_tail`; PR bot (AUD-SEC-353/354/355 — commit đọc từ REST `pulls/{n}/commits`, corpus review chưa có kiểu ca REST): `-k clean_review_of_bot_pr`",
    "ids": [
     "AUD-SEC-105",
     "AUD-SEC-353",
-    "AUD-SEC-354"
+    "AUD-SEC-354",
+    "AUD-SEC-355"
    ]
   },
   {
@@ -243,7 +244,33 @@
   {
    "reason": "Hàng `release-check` của cổng phát hành G7 (`go_no_go`: GO-NO-GO khớp VERSION, đã ký) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_cli -k go_no_go",
    "ids": [
-    "AUD-HAR-197"
+    "AUD-HAR-197",
+    "AUD-HAR-200"
+   ]
+  },
+  {
+   "reason": "Hàng `release-check` `prod_switch` đọc sổ quyết định và bản tháng trên đĩa (sổ chính vắng) — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt -k prod_switch",
+   "ids": [
+    "AUD-HAR-214"
+   ]
+  },
+  {
+   "reason": "`doctor` nhóm `sandbox` đọc settings Claude (local đè project), file devcontainer và môi trường container của máy — công cụ khuyên, không phải quyết định cho/chặn; đỡ bằng Gate unittest tests.test_doctor -k sandbox",
+   "ids": [
+    "AUD-HAR-202",
+    "AUD-HAR-203"
+   ]
+  },
+  {
+   "reason": "`install.py --plan`/cài thật: git hook, adapter, manifest.json — đường cài đặt có repo git thật; đỡ bằng Gate unittest tests.test_install -k plan_lists_git_hooks",
+   "ids": [
+    "AUD-HAR-204"
+   ]
+  },
+  {
+   "reason": "`loop run` (vòng lặp ngoài): lệnh headless của công cụ agent — không thuộc nhóm ca PR/rollup/review/guard; đỡ bằng Gate unittest tests.test_xt_loop -k claude_runs_in_auto_permission_mode",
+   "ids": [
+    "AUD-HAR-205"
    ]
   },
   {

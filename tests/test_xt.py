@@ -2326,6 +2326,24 @@ class DecisionLogsTest(unittest.TestCase):
         (self.dir / "DECISIONS-2026-10.md").unlink()
         self.assertEqual(xt._release_prod_switch(self.base)["result"], "PASS")
 
+    def test_prod_switch_month_files_without_current_log(self):
+        """AUD-HAR-214: sổ chính vắng (dời hết sang bản tháng, chưa có quyết định mới) — vẫn đếm đề xuất "Khi chạy thật"
+        ở bản tháng (không N/A SHOULD "không có"); không file nào → N/A SHOULD; sổ chính là thư mục → FAIL."""
+        (self.dir / "DECISIONS.md").unlink()
+        month = self.dir / "DECISIONS-2026-10.md"
+        month.write_text(f"### D-001 · t · q\n- {xt.PROD_SWITCH_LABEL} dịch vụ trả phí\n", encoding="utf-8")
+        row = xt._release_prod_switch(self.base)
+        self.assertEqual((row["result"], row["level"]), ("N/A", "BLOCKER"))
+        self.assertEqual(xt.signoff_facts(self.base, {})["prod_switch"], ["prod_switch"])
+        month.write_text("### D-001 · t · q\n", encoding="utf-8")
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "PASS")
+        month.unlink()
+        row = xt._release_prod_switch(self.base)
+        self.assertEqual((row["result"], row["level"]), ("N/A", "SHOULD"))
+        self.assertIn("không có docs/autopilot/DECISIONS.md", row["evidence"])
+        (self.dir / "DECISIONS.md").mkdir()  # không đọc được (thư mục): có thể giấu đề xuất → FAIL như trước
+        self.assertEqual(xt._release_prod_switch(self.base)["result"], "FAIL")
+
     def test_decision_at_reads_month_files(self):
         (self.dir / "DECISIONS-2026-10.md").write_text(
             "### D-002 · 2026-10-30T01:00:00+00:00 · PR #7: tách hay đóng?\n", encoding="utf-8"

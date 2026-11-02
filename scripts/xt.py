@@ -5510,14 +5510,29 @@ def _in_container() -> bool:
     return any(os.path.exists(p) for p in CONTAINER_MARKS)
 
 
-def _sandbox_sources(base: Path) -> List[str]:
-    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled`, Codex
-    `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor `.cursor/sandbox.json`, devcontainer."""
-    found: List[str] = []
-    for rel in (".claude/settings.json", ".claude/settings.local.json"):
+CLAUDE_SETTINGS_ORDER = (".claude/settings.json", ".claude/settings.local.json")  # sau đè trước (local > project)
+DEVCONTAINER = ".devcontainer/devcontainer.json"
+
+
+def _claude_sandbox(base: Path) -> Dict[str, Any]:
+    """`sandbox` hiệu lực của Claude Code trong dự án: khoá của `settings.local.json` đè `settings.json` (AUD-HAR-203 —
+    local `enabled: false` tắt sandbox mà project bật); giá trị không phải object bỏ qua."""
+    merged: Dict[str, Any] = {}
+    for rel in CLAUDE_SETTINGS_ORDER:
         sb = (_read_json_obj(base / rel) or {}).get("sandbox")
-        if isinstance(sb, dict) and sb.get("enabled") is True:
-            found.append(f"{rel} sandbox.enabled")
+        if isinstance(sb, dict):
+            merged.update(sb)
+    return merged
+
+
+def _sandbox_sources(base: Path) -> List[str]:
+    """Sandbox khai ở công cụ agent trong dự án (ADR-0064 lát E, nghiên cứu 2026-11-02): Claude `sandbox.enabled` (sau khi
+    gộp local > project), Codex `sandbox_mode` khác `danger-full-access`, Gemini `tools.sandbox`, Cursor
+    `.cursor/sandbox.json`. Devcontainer KHÔNG tính (AUD-HAR-202: file trong repo không chứng minh tiến trình chạy trong
+    container — container thật do `_in_container` thấy)."""
+    found: List[str] = []
+    if _claude_sandbox(base).get("enabled") is True:
+        found.append(".claude/settings(.local).json sandbox.enabled")
     codex = base / ".codex" / "config.toml"
     m = CODEX_SANDBOX_RE.search(codex.read_text(encoding="utf-8", errors="replace")) if codex.is_file() else None
     if m and m.group(1) != "danger-full-access":
@@ -5525,8 +5540,22 @@ def _sandbox_sources(base: Path) -> List[str]:
     tools = (_read_json_obj(base / ".gemini" / "settings.json") or {}).get("tools")
     if isinstance(tools, dict) and tools.get("sandbox"):
         found.append(".gemini/settings.json tools.sandbox")
-    found += [rel for rel in (".cursor/sandbox.json", ".devcontainer/devcontainer.json") if (base / rel).is_file()]
+    if (base / ".cursor" / "sandbox.json").is_file():
+        found.append(".cursor/sandbox.json")
     return found
+
+
+def _claude_sandbox_fail_open(base: Path) -> List[Finding]:
+    """AUD-HAR-203: Claude `sandbox.enabled` mà không `failIfUnavailable: true` — máy thiếu sandbox (Linux: bubblewrap,
+    socat) thì phiên chạy trần, không báo."""
+    sb = _claude_sandbox(base)
+    if sb.get("enabled") is not True or sb.get("failIfUnavailable") is True:
+        return []
+    msg = (
+        "Claude `sandbox.enabled` mà không `sandbox.failIfUnavailable: true` — thiếu bubblewrap/socat thì phiên chạy "
+        "ngoài sandbox (LOOP-HARNESS-022)"
+    )
+    return [Finding("sandbox", "warn", msg)]
 
 
 def _doctor_sandbox(base: Path) -> List[Finding]:
@@ -5537,15 +5566,21 @@ def _doctor_sandbox(base: Path) -> List[Finding]:
     if (base / "opencode.json").is_file() or (base / ".opencode").is_dir():
         msg = "OpenCode không có sandbox chính chủ — chạy trong devcontainer/VM hay `srt` có egress allowlist"
         out.append(Finding("sandbox", "warn", f"{msg} (LOOP-HARNESS-022)"))
-    if _in_container() or _sandbox_sources(base):
+    if _in_container():
         return out
+    if _sandbox_sources(base):
+        return out + _claude_sandbox_fail_open(base)
     st = read_state(base) or {}
     unattended = bool(st.get("active") and st.get("single_session"))
     msg = (
         "không thấy sandbox (Claude `sandbox.enabled`, Codex `sandbox_mode`, Gemini `tools.sandbox`, Cursor "
-        "`sandbox.json`, devcontainer) và không chạy trong container — guard không chặn tiến trình con hay mạng "
+        "`sandbox.json`) và không chạy trong container/devcontainer — guard không chặn tiến trình con hay mạng "
         "(LOOP-HARNESS-022)"
     )
+    if (base / DEVCONTAINER).is_file():
+        msg += (
+            f"; {DEVCONTAINER} có trong repo nhưng tiến trình không chạy trong container — mở dự án trong devcontainer"
+        )
     return out + [
         Finding(
             "sandbox", "error" if unattended else "warn", msg + (" — vòng một phiên đang chạy" if unattended else "")
@@ -9119,8 +9154,10 @@ def _loop_hook_stop(args: argparse.Namespace, base: Path) -> int:
 # Bảng tra `loop <lệnh con>` -> hàm xử lý (args, thư mục dự án) -> exit code.
 # Vòng lặp ngoài (ADR-0064 lát D, T-3646): lệnh headless của từng công cụ; prompt nối vào cuối. Mã thoát của agent KHÔNG
 # được tin (research §8: `opencode run` giữ mã khi bị từ chối quyền) — tiến triển chỉ đọc từ `loop_verdict` (bằng chứng).
+# Claude: chế độ Auto (AUD-HAR-205; `--permission-mode auto`, docs CLI đọc 2026-11-02) — `-p` không cờ chạy chế độ hỏi,
+# tool cần quyền bị từ chối; không bypassPermissions (bỏ cả bộ phân loại). Cờ tự duyệt của host khác: chưa xác minh.
 LOOP_AGENTS: Dict[str, List[str]] = {
-    "claude": ["claude", "-p"],
+    "claude": ["claude", "-p", "--permission-mode", "auto"],
     "codex": ["codex", "exec"],
     "gemini": ["gemini", "-p"],
     "cursor": ["agent", "-p", "--force"],
@@ -11376,17 +11413,21 @@ def _release_tree(base: Path) -> Dict[str, str]:
 
 def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -> Dict[str, str]:
     """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm, trên sổ
-    và các bản tháng của nó (T-3651)."""
+    và các bản tháng của nó (T-3651). File vắng bỏ qua từng file (AUD-HAR-214: sổ chính dời hết sang bản tháng vẫn đếm
+    bản tháng); N/A "không có" chỉ khi không file nào tồn tại."""
+    texts: List[str] = []
     try:
-        text = "".join(p.read_text(encoding="utf-8") for p in decision_logs(base / log))
-    except FileNotFoundError:
-        return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
+        for p in decision_logs(base / log):
+            with contextlib.suppress(FileNotFoundError):
+                texts.append(p.read_text(encoding="utf-8"))
     except (
         OSError,
         ValueError,
     ) as exc:  # thư mục/thiếu quyền/không phải UTF-8: có thể giấu đề xuất → FAIL (review #321)
         return _release_row("prod_switch", "FAIL", f"không đọc được {log}: {exc}")
-    n = text.count(PROD_SWITCH_LABEL)
+    if not texts:
+        return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
+    n = "".join(texts).count(PROD_SWITCH_LABEL)
     if n:
         return _release_row(
             "prod_switch",
@@ -11580,9 +11621,22 @@ def _go_no_go_signed(text: str) -> bool:
     return len(part) == 2 and bool(GO_SIGN_ROW_RE.search(re.split(r"^## ", part[1], maxsplit=1, flags=re.M)[0]))
 
 
+GO_FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)  # frontmatter: không phải tiêu đề
+
+
+def _go_no_go_names_version(name: str, text: str, version: str) -> bool:
+    """GO-NO-GO này của `version` (AUD-HAR-200): đuôi tên file `-v<VERSION>.md` hay dòng tiêu đề `# ` đầu tiên chứa
+    `v?<VERSION>` nguyên token (`-rc1`, `.1`, `11.2.0` không khớp) — không quét toàn văn (bảng nhắc bản khác)."""
+    ver = re.escape(version)
+    if re.search(rf"(?<![\w.])v?{ver}\.md$", name):
+        return True
+    title = re.search(r"^# .*$", GO_FRONT_RE.sub("", text, count=1), re.M)
+    return bool(title and re.search(rf"(?<![\w.])v?{ver}(?![\w-]|\.\w)", title[0]))
+
+
 def _release_go_no_go(base: Path) -> Dict[str, str]:
-    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` nhắc `v<VERSION>` ở
-    `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
+    """GO-NO-GO khớp `VERSION` (AUD-HAR-197, 3.29.0 phát hành không có file): tìm `GO-NO-GO*.md` của `v<VERSION>`
+    (`_go_no_go_names_version`) ở `GO_NO_GO_DIRS`; có bản đã ký §5 → PASS; thiếu/chưa ký → N/A BLOCKER (việc của người: lập từ `release-check --json`,
     người ký); không có VERSION → N/A SHOULD; không đọc được → FAIL (có thể giấu bản ký)."""
     try:
         version = (base / "VERSION").read_text(encoding="utf-8").strip()
@@ -11598,7 +11652,7 @@ def _release_go_no_go(base: Path) -> Dict[str, str]:
                 text = p.read_text(encoding="utf-8")
             except (OSError, ValueError) as exc:
                 return _release_row("go_no_go", "FAIL", f"không đọc được {rel}: {exc}")
-            if f"v{version}" in p.name or f"v{version}" in text:
+            if _go_no_go_names_version(p.name, text, version):
                 if _go_no_go_signed(text):
                     return _release_row("go_no_go", "PASS", f"{rel}: GO-NO-GO v{version} đã ký §5")
                 found.append(rel)
@@ -12742,10 +12796,42 @@ def _login(obj: object) -> str:
     return str(obj.get("login") or "") if isinstance(obj, dict) else ""
 
 
+GITHUB_COMMITTER = "web-flow"  # `committer.login` của commit GitHub tạo và ký (Dependabot, nút "Update branch")
+
+
+def _github_made(c: Dict[str, Any]) -> bool:
+    """Commit do GitHub tạo: committer `web-flow` và chữ ký hợp lệ (committer chỉ suy từ email — tự khai được — nên phải
+    kèm `verified`; agent ký bằng khoá của mình thì committer là agent)."""
+    commit = c.get("commit")
+    ver = commit.get("verification") if isinstance(commit, dict) else None
+    return _login(c.get("committer")) == GITHUB_COMMITTER and isinstance(ver, dict) and ver.get("verified") is True
+
+
+def _bot_commits_error(pr: Dict[str, Any], commits: List[Dict[str, Any]], key: str, bot: str) -> str:
+    """Miễn trừ bot chỉ khi đọc đủ commit (REST trả tối đa 250 — AUD-HAR-212), mọi commit do GitHub tạo, commit thường
+    có tác giả là bot (AUD-SEC-356: tác giả git giữ khi rebase/cherry-pick/khai email) và có ít nhất một commit thường
+    của bot (AUD-SEC-355: merge giải xung đột do agent đẩy hay PR chỉ có merge không được miễn)."""
+    total = pr.get("commits")
+    if type(total) is not int or total != len(commits):
+        shown = total if type(total) is int else "?"
+        return f"--author-model {bot}: đọc được {len(commits)}/{shown} commit của PR #{key} — không kiểm đủ tác giả"
+    plain = [len(c.get("parents") or []) < 2 for c in commits]
+    bad = [c for c, p in zip(commits, plain) if not _github_made(c) or (p and _login(c.get("author")) != bot)]
+    if bad:
+        who = ", ".join(sorted({_login(c.get("author")) or "?" for c in bad}))
+        return (
+            f"--author-model {bot}: PR #{key} có commit của {who} không do {bot}/GitHub tạo (committer"
+            f" {GITHUB_COMMITTER}, ký hợp lệ) — khai model của người góp"
+        )
+    if not any(plain):
+        return f"--author-model {bot}: PR #{key} không có commit nào của {bot} — khai model của người viết"
+    return ""
+
+
 def _bot_author_error(pr_arg: str, key: str, head: str, bot: str) -> str:
     """`--author-model <bot>` chỉ nhận khi PR đúng số `key` (cùng PR mà sổ ghi và dấu đăng — review #401: URL ghép,
-    chữ số Unicode) do bot mở, head đúng `head`, và MỌI commit không phải merge do bot viết: người/agent đẩy thêm
-    commit lên nhánh bot thì phải khai model của họ (LOOP-ORCH-005: so với người góp vào diff)."""
+    chữ số Unicode) do bot mở, head đúng `head`, và commit đạt `_bot_commits_error`: người/agent đẩy thêm commit (kể cả
+    merge) lên nhánh bot thì phải khai model của họ (LOOP-ORCH-005: so với người góp vào diff)."""
     try:
         repo, _ = _pr_target(pr_arg if PR_URL_RE.search(pr_arg) else key)  # cùng repo với `_publish_review`
         pr = _gh_one(f"{repo}/pulls/{key}")
@@ -12758,12 +12844,7 @@ def _bot_author_error(pr_arg: str, key: str, head: str, bot: str) -> str:
         return f"--author-model {bot}: GitHub trả PR #{pr.get('number')} head {pr_head[:7] or '?'}, không phải #{key} {head[:7]}"
     if _login(pr.get("user")) != bot:
         return f"--author-model {bot}: tác giả PR #{key} là {_login(pr.get('user')) or '?'}, không phải {bot}"
-    others = sorted(
-        {_login(c.get("author")) or "?" for c in commits if len(c.get("parents") or []) < 2} - {bot}
-    )  # fmt: skip
-    if others or not commits:
-        return f"--author-model {bot}: PR #{key} có commit của {', '.join(others) or '?'} — khai model của người góp"
-    return ""
+    return _bot_commits_error(pr, commits, key, bot)
 
 
 def _pr_reviewed_key(args: argparse.Namespace, base: Path) -> Optional[str]:

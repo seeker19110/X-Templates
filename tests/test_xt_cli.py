@@ -2682,6 +2682,41 @@ class ReleaseCheckTest(TmpRepoCase):
         (self.repo / "VERSION").write_bytes(b"\xff")
         self.assertEqual(row()["result"], "FAIL")
 
+    def test_go_no_go_version_in_name_or_title(self):
+        """AUD-HAR-200: phiên bản khớp ở đuôi tên file (`-v<VERSION>.md`) hay dòng tiêu đề `# `, nguyên token — không quét
+        toàn văn (ô "v1.2.0" trong bảng của GO-NO-GO v1.1.0 đã ký không PASS cho 1.2.0), `-rc1`/`1.2.0.1`/`11.2.0` không
+        khớp, tiêu đề ghi `1.2.0` không có `v` vẫn khớp."""
+        (self.repo / "VERSION").write_text("1.2.0\n", encoding="utf-8")
+        ops = self.repo / "docs" / "ops"
+        signed = "\n## 5. Ký\n\n| Vai trò | Tên | Quyết định | Ngày |\n|---|---|---|---|\n| Chủ repo | An | GO | 2026-01-02 |\n"
+
+        def result(name: str, title: str, body: str = "") -> str:
+            doc = ops / name
+            doc.write_text(f"---\nx: v1.2.0\n---\n# {title}\n{body}{signed}", encoding="utf-8")
+            try:
+                return xt._release_go_no_go(self.repo)["result"]
+            finally:
+                doc.unlink()
+
+        for name, title, body in (
+            ("GO-NO-GO-2026-01-01-v1.1.0.md", "GO/NO-GO — phát hành `v1.1.0`", "| bản kế | v1.2.0 |\n"),
+            ("GO-NO-GO-2026-01-02-v1.2.0-rc1.md", "GO/NO-GO — phát hành `v1.2.0-rc1`", ""),
+            ("GO-NO-GO-2026-01-02.md", "GO/NO-GO — phát hành v1.2.0.1", ""),
+            ("GO-NO-GO-2026-01-03.md", "GO/NO-GO — phát hành v11.2.0", ""),
+            ("GO-NO-GO-2026-01-04.md", "GO/NO-GO — phát hành x1.2.0", ""),
+            ("GO-NO-GO-v11.2.0.md", "GO/NO-GO", ""),
+        ):
+            with self.subTest(name=name, title=title):
+                self.assertEqual(result(name, title, body), "N/A")
+        for name, title in (
+            ("GO-NO-GO-2026-01-02.md", "GO/NO-GO — X · phát hành 1.2.0 · 2026-01-02"),
+            ("GO-NO-GO-2026-01-02.md", "GO/NO-GO — phát hành `v1.2.0`."),
+            ("GO-NO-GO-2026-01-02-v1.2.0.md", "GO/NO-GO"),
+            ("GO-NO-GO-1.2.0.md", "GO/NO-GO"),
+        ):
+            with self.subTest(name=name, title=title):
+                self.assertEqual(result(name, title), "PASS")
+
     def test_release_reuses_loop_verify_all_blueprint_checks(self):
         """T-1720: `loop verify --all` xanh trên đúng cây và đúng blueprint → hàng `blueprint` dùng lại kết quả `— Kiểm:`
         đã ghi, không chạy lại; kết quả đỏ đã ghi → FAIL; cây đổi hoặc verify một phần → chạy lại như cũ."""

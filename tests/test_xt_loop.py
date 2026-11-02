@@ -9,6 +9,7 @@ import contextlib
 import errno
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -1544,6 +1545,19 @@ class LoopRunTest(TmpRepoCase):
             rc, out, err = run_main("loop", "run", "--agent", "codex", "--max-turns", "1")
         self.assertEqual(rc, 1)
         self.assertIn("⚠ agent:", err)
+
+    def test_claude_runs_in_auto_permission_mode(self) -> None:
+        """AUD-HAR-205: `claude -p` không cờ chạy ở chế độ hỏi — tool cần quyền bị từ chối, vòng ngoài dừng "không tiến
+        triển"; autopilot cần Auto (CLAUDE.md, ADR-0009; `--permission-mode auto`, docs CLI đọc 2026-11-02). Không
+        `--dangerously-skip-permissions`/`bypassPermissions` (bỏ cả bộ phân loại), không `--bare` (mất hook)."""
+        self.assertEqual(run_main("loop", "init")[0], 0)
+        rc, out, _ = run_main("loop", "run", "--agent", "claude", "--dry-run")
+        self.assertEqual(rc, 0)
+        cmd = shlex.split(out.splitlines()[-1])
+        self.assertEqual(cmd[:4], ["claude", "-p", "--permission-mode", "auto"])
+        self.assertIn("loop record --task T-001", cmd[4])
+        for bad in ("--dangerously-skip-permissions", "bypassPermissions", "--bare"):
+            self.assertNotIn(bad, cmd)
 
 
 if __name__ == "__main__":
