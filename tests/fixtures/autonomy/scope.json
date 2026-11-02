@@ -236,6 +236,13 @@
    "ids": [
     "AUD-TEST-054"
    ]
+  },
+  {
+   "reason": "Hình payload chế độ `guard.py core` (tên tool không chuẩn, `project_dir`) — corpus guard chỉ có lệnh bash; đỡ bằng Gate unittest `tests.test_guard_strict.ReasonCodeLockTest` (ca core) và `tests.test_adapters`",
+   "ids": [
+    "AUD-SEC-346",
+    "AUD-HAR-201"
+   ]
   }
  ]
 }
