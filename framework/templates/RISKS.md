@@ -17,10 +17,10 @@ updated: 2026-11-02
 
 Thang: khả năng 1–5 × tác động 1–5 = điểm; ≥ 15 rà mỗi tuần, ≥ 8 rà mỗi mốc.
 
-| ID | Rủi ro (nếu … thì …) | Loại | Khả năng | Tác động | Điểm | Chủ | Biện pháp (giảm/chuyển/chấp nhận) | Dấu hiệu kích hoạt | Ngày rà | Trạng thái |
+| ID (`RK-NNN`) | Rủi ro (nếu … thì …) | Loại | Khả năng | Tác động | Điểm | Chủ | Biện pháp (giảm/chuyển/chấp nhận) | Dấu hiệu kích hoạt | Ngày rà | Trạng thái |
 |---|---|---|---|---|---|---|---|---|---|---|
-| R-001 | <Nếu nhà cung cấp SMS đổi giá thì chi phí OTP vượt ngân sách> | phụ thuộc bên thứ ba | 3 | 4 | 12 | <tên> | <có nhà cung cấp dự phòng, giới hạn gửi/phút> | <hoá đơn tháng > X> | <YYYY-MM-DD> | mở |
-| R-002 | <Nếu chỉ một người hiểu module thanh toán thì nghỉ phép làm dừng sửa lỗi> | con người (bus factor) | 4 | 4 | 16 | <tên> | <pair, RUNBOOK, người thứ hai review> | <PR thanh toán chỉ một người duyệt> | <YYYY-MM-DD> | mở |
+| RK-001 | <Nếu nhà cung cấp SMS đổi giá thì chi phí OTP vượt ngân sách> | phụ thuộc bên thứ ba | 3 | 4 | 12 | <tên> | <có nhà cung cấp dự phòng, giới hạn gửi/phút> | <hoá đơn tháng > X> | <YYYY-MM-DD> | mở |
+| RK-002 | <Nếu chỉ một người hiểu module thanh toán thì nghỉ phép làm dừng sửa lỗi> | con người (bus factor) | 4 | 4 | 16 | <tên> | <pair, RUNBOOK, người thứ hai review> | <PR thanh toán chỉ một người duyệt> | <YYYY-MM-DD> | mở |
 
 ## Phụ thuộc bên thứ ba quan trọng (`PM-RISK-006`)
 | Dịch vụ | Dùng cho | Hợp đồng/SLA | Phương án khi ngừng | Dữ liệu xuất ra được? |
