@@ -808,6 +808,49 @@ YAML_HAS_KEY_RE = re.compile(r"^(?:#[ \t]*)?([A-Za-z_][\w-]*):", re.M)  # dự �
 YAML_MARKER = '# Khoá mới của khung (bản {label}) — bật bằng cách bỏ "# "; vắng khoá = hành vi cũ'
 
 
+GIT_HOOKS = ("pre-commit", "commit-msg", "pre-push")
+GIT_HOOK_MARK = "# xtemplates-git-hook"  # dòng 2 của hook khung — hook không có dấu là của dự án, không đè
+
+
+def git_hooks_dir(target: Path) -> Path | None:
+    """Thư mục hook git của repo chứa `target` (`git rev-parse --git-path hooks` — theo `core.hooksPath`); không phải
+    repo git hay không chạy được git → None."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--git-path", "hooks"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    if r.returncode != 0 or not out:
+        return None
+    return Path(out) if Path(out).is_absolute() else target / out
+
+
+def install_git_hooks(target: Path) -> None:
+    """Sàn chung không phụ thuộc hook của công cụ (ADR-0064 lát C): `pre-commit` (cổng commit), `commit-msg` (subject,
+    ghi công AI), `pre-push` (nhánh chính, force). Hook đã có mà không mang dấu khung (của dự án, husky, pre-commit…)
+    giữ nguyên và báo để gộp tay; hook của khung thì cập nhật."""
+    hooks = git_hooks_dir(target)
+    if hooks is None:
+        log("  git hook: không phải repo git — bỏ qua (chạy lại install.py sau `git init`)")
+        return
+    hooks.mkdir(parents=True, exist_ok=True)
+    for name in GIT_HOOKS:
+        dst = hooks / name
+        own = dst.is_symlink() or (
+            dst.exists() and GIT_HOOK_MARK not in dst.read_text(encoding="utf-8", errors="replace")
+        )
+        if own:
+            log(
+                f"  git hook {name}: dự án đã có hook riêng — giữ nguyên; gộp tay `.xtemplates/framework/templates/git-hooks/{name}`"
+            )
+            continue
+        shutil.copy2(SRC / "framework" / "templates" / "git-hooks" / name, dst)
+        dst.chmod(0o755)
+        log(f"  git hook {name}: cài ({dst})")
+
+
 def install_root_templates(
     target: Path, label: str, inferred: dict[str, str] | None = None, preset: str | None = None
 ) -> None:
@@ -1351,6 +1394,7 @@ def install(
     version = install_framework(xt_dir, label)
     if not no_harness:
         install_harness(target, force_harness)
+        install_git_hooks(target)
     install_root_templates(target, version, inferred, selected)
     if with_github:
         install_github(target)

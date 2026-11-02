@@ -6565,6 +6565,23 @@ def commit_subject_problem(message: str) -> str:
     return f"subject dài {len(subject)} ký tự > {PR_TITLE_MAX}"
 
 
+def commit_msg_problem(path: str, root: str) -> str:
+    """Lý do chặn cho git hook `commit-msg` (ADR-0064 lát C — sàn cho công cụ không có hook chặn): subject quá
+    PR_TITLE_MAX (LOOP-HARNESS-029); ghi công AI khi xt.yaml khai `ai_attribution: forbid` (LOOP-HARNESS-027). Dòng `#`
+    bị bỏ như git dọn message. '' = cho qua."""
+    text = "\n".join(ln for ln in _read_head(path).splitlines() if not ln.startswith("#"))
+    problem = commit_subject_problem(text)
+    if problem:
+        return f"Commit bị khung chặn ({problem} — LOOP-HARNESS-029): rút gọn dòng đầu ≤ {PR_TITLE_MAX} ký tự."
+    hit = AI_ATTRIBUTION_RE.search(text) if AI_ATTRIBUTION_KEY_RE.search(_read_head(_xt_yaml_for(root))) else None
+    if hit:
+        return (
+            f"Commit ghi công AI bị khung chặn (`{hit.group(0)}` — xt.yaml `ai_attribution: forbid`, LOOP-HARNESS-027): "
+            "bỏ dòng tên model/URL phiên."
+        )
+    return ""
+
+
 def _gh_pr_titles(args: List[str]) -> List[str]:
     """Giá trị `-t/--title` của `gh pr create|edit` (sau `pr`, bỏ `-R/--repo x`); lệnh khác → []."""
     rest = list(args)
@@ -10075,8 +10092,13 @@ def _core_output(out: Dict[str, object]) -> int:
 
 def main() -> int:
     """`guard.py bash|edit|mcp [nul]` cho PreToolUse; `guard.py permission` cho PermissionRequest (chế độ suy từ
-    `tool_name`; in JSON của hook hoặc không in gì); `guard.py core` cho adapter trung lập (ADR-0064)."""
+    `tool_name`; in JSON của hook hoặc không in gì); `guard.py core` cho adapter trung lập (ADR-0064); `guard.py
+    commit-msg <file>` cho git hook `commit-msg` (sàn ADR-0064 lát C)."""
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "commit-msg":  # git hook `commit-msg <file>` (ADR-0064 lát C): exit 1 + lý do ở stderr khi chặn
+        why = commit_msg_problem(sys.argv[2] if len(sys.argv) > 2 else "", os.getcwd())
+        sys.stderr.write(f"✗ {why}\n" if why else "")
+        return 1 if why else 0
     payload: Any = None
     try:
         payload = json.loads(sys.stdin.read() or "{}")

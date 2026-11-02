@@ -2136,5 +2136,118 @@ class InstallStageTest(unittest.TestCase):
         self.assertFalse(set(hook) & set(run.call_args.kwargs["env"]))
 
 
+@unittest.skipIf(shutil.which("git") is None or shutil.which("bash") is None, "cần git + bash")
+class GitHooksTest(unittest.TestCase):
+    """Sàn git hook (ADR-0064 lát C, T-3645): `install.py` cài `pre-commit`/`commit-msg`/`pre-push` khi dự án chưa có hook
+    riêng; hook chạy được với mọi công cụ (không cần hook của Claude Code)."""
+
+    GATES = "format_check: true\nlint: {lint}\ntypecheck: true\ntest: true\nbuild: true\ncommit_gate: fast\n"
+
+    def setUp(self):
+        self.target = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "XT_MAIN_BRANCH")}
+        self.env.update(GIT_CONFIG_NOSYSTEM="1", HOME=str(self.target), CLAUDE_PROJECT_DIR=str(self.target))
+
+    def git(self, *args: str, env: dict | None = None, inp: str | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(self.target), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            capture_output=True,
+            text=True,
+            env=env or self.env,
+            input=inp,
+            timeout=300,
+        )
+
+    def install(self) -> str:
+        err = io.StringIO()
+        with redirect_stderr(err), mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(install.install(self.target, False, False, "t"), 0)
+        return err.getvalue()
+
+    def init_repo(self) -> Path:
+        self.assertEqual(self.git("init", "-q", "-b", "work").returncode, 0)
+        return self.target / ".git" / "hooks"
+
+    def commit(self, msg: str, env: dict | None = None) -> subprocess.CompletedProcess[str]:
+        (self.target / "f.txt").write_text(msg, encoding="utf-8")
+        self.git("add", "-A")
+        return self.git("commit", "-q", "-m", msg, env=env)
+
+    def test_installs_hooks_and_keeps_project_hooks(self):
+        hooks = self.init_repo()
+        hooks.mkdir(exist_ok=True)
+        (hooks / "pre-push").write_text("#!/bin/sh\necho của dự án\n", encoding="utf-8")
+        out = self.install()
+        self.assertIn("git hook pre-push: dự án đã có hook riêng — giữ nguyên", out)
+        self.assertEqual((hooks / "pre-push").read_text(encoding="utf-8"), "#!/bin/sh\necho của dự án\n")
+        for name in ("pre-commit", "commit-msg"):
+            self.assertIn(install.GIT_HOOK_MARK, (hooks / name).read_text(encoding="utf-8"))
+            self.assertTrue(os.access(hooks / name, os.X_OK))
+        (hooks / "commit-msg").write_text("#!/bin/sh\n# xtemplates-git-hook v0\n", encoding="utf-8")
+        self.install()  # hook của khung (bản cũ) thì cập nhật
+        self.assertIn("guard.py", (hooks / "commit-msg").read_text(encoding="utf-8"))
+
+    def test_not_a_git_repo_is_skipped(self):
+        self.assertIn("git hook: không phải repo git", self.install())
+        self.assertFalse((self.target / ".git").exists())
+        with mock.patch.object(install.subprocess, "run", side_effect=OSError("không có git")):
+            self.assertIsNone(install.git_hooks_dir(self.target))
+
+    def test_pre_commit_runs_gate_and_commit_msg_checks(self):
+        self.init_repo()
+        self.install()
+        xt_yaml = self.target / "xt.yaml"
+        xt_yaml.write_text(self.GATES.format(lint="false"), encoding="utf-8")
+        self.assertNotEqual(self.commit("feat: thử").returncode, 0)  # lint đỏ → pre-commit chặn
+        xt_yaml.write_text(self.GATES.format(lint="true") + "ai_attribution: forbid\n", encoding="utf-8")
+        r = self.commit("feat: " + "x" * 120)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("LOOP-HARNESS-029", r.stderr)
+        r = self.commit("feat: thử\n\nClaude-Session: https://claude.ai/code/session_x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("LOOP-HARNESS-027", r.stderr)
+        self.assertEqual(self.commit("feat: thử\n\n# dòng chú thích dài " + "y" * 120).returncode, 0)
+        # Claude Code có hook Bash của khung đã chạy cổng → pre-commit bỏ qua (D-309)
+        xt_yaml.write_text(self.GATES.format(lint="false"), encoding="utf-8")
+        self.assertEqual(self.commit("fix: hai", env={**self.env, "CLAUDECODE": "1"}).returncode, 0)
+
+    def test_pre_push_blocks_main_force_and_delete(self):
+        self.init_repo()
+        self.install()
+        hook = self.target / ".git" / "hooks" / "pre-push"
+        self.git("commit", "-q", "--allow-empty", "-m", "a")
+        a = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("commit", "-q", "--allow-empty", "-m", "b")
+        b = self.git("rev-parse", "HEAD").stdout.strip()
+        zero = "0" * 40
+
+        def push(line: str, **env: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["bash", str(hook), "origin", "x"],
+                input=line + "\n",
+                capture_output=True,
+                text=True,
+                cwd=self.target,
+                env={**self.env, **env},
+            )
+
+        self.assertEqual(push(f"refs/heads/work {b} refs/heads/feat {a}").returncode, 0)  # fast-forward
+        self.assertEqual(push(f"refs/heads/work {b} refs/heads/feat {zero}").returncode, 0)  # nhánh mới
+        for line, why in (
+            (f"refs/heads/work {b} refs/heads/main {a}", "không đẩy thẳng main"),
+            (f"refs/heads/work {b} refs/heads/master {zero}", "không đẩy thẳng master"),
+            (f"refs/heads/work {a} refs/heads/feat {b}", "đẩy đè feat"),
+            (f"(delete) {zero} refs/heads/feat {a}", "không xoá nhánh"),
+            (f"refs/heads/work {b} refs/heads/feat {'1' * 40}", "git fetch"),
+        ):
+            with self.subTest(line=line):
+                r = push(line)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn(why, r.stderr)
+        r = push(f"refs/heads/work {b} refs/heads/trunk {a}", XT_MAIN_BRANCH="trunk")
+        self.assertIn("không đẩy thẳng trunk", r.stderr)
+        self.assertEqual(push(f"refs/heads/work {b} refs/heads/main {a}", XT_MAIN_BRANCH="trunk").returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
