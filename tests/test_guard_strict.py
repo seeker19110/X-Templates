@@ -846,6 +846,40 @@ class PolicyContractTest(unittest.TestCase):
             with self.subTest(out=out):
                 r = guard.apply_policy(out)
                 self.assertEqual((r["decision"], r["reason"]), want)
+class CommitMsgModeTest(unittest.TestCase):
+    """`guard.py commit-msg <file>` cho git hook (ADR-0064 lát C, T-3645): subject dài, ghi công AI khi xt.yaml cấm."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / ".git").mkdir()
+        self.msg = self.root / "MSG"
+
+    def check(self, text: str) -> str:
+        self.msg.write_text(text, encoding="utf-8")
+        return guard.commit_msg_problem(str(self.msg), str(self.root))
+
+    def test_rules(self):
+        self.assertEqual(self.check("feat: ngắn\n\n# chú thích " + "x" * 200), "")
+        self.assertIn("LOOP-HARNESS-029", self.check("feat: " + "x" * 120))
+        self.assertEqual(self.check("feat: a\n\nClaude-Session: x"), "")  # xt.yaml không cấm → cho qua
+        (self.root / "xt.yaml").write_text("ai_attribution: forbid\n", encoding="utf-8")
+        self.assertIn("LOOP-HARNESS-027", self.check("feat: a\n\nClaude-Session: x"))
+        self.assertEqual(self.check("feat: a\n\n# Claude-Session: chỉ trong chú thích"), "")
+        self.assertEqual(guard.commit_msg_problem(str(self.root / "khong-co"), str(self.root)), "")
+
+    def test_main_exit_codes(self):
+        self.msg.write_text("feat: " + "x" * 120, encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg", str(self.msg)]), mock.patch("sys.stderr", err):
+            self.assertEqual(guard.main(), 1)
+        self.assertIn("✗ Commit bị khung chặn", err.getvalue())
+        self.msg.write_text("feat: ổn", encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg", str(self.msg)]), mock.patch("sys.stderr", err):
+            self.assertEqual(guard.main(), 0)
+        self.assertEqual(err.getvalue(), "")
+        with mock.patch.object(sys, "argv", ["guard.py", "commit-msg"]), mock.patch("sys.stderr", io.StringIO()):
+            self.assertEqual(guard.main(), 0)  # thiếu file → không đọc được → cho qua
 
 
 if __name__ == "__main__":
