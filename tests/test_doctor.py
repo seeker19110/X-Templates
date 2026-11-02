@@ -133,6 +133,14 @@ class DoctorHealthyTest(DoctorCase):
         msgs = [f.msg for f in self.findings() if f.code == "xt-yaml"]
         self.assertEqual(msgs, ["xt.yaml thiếu khoá typecheck, build — khai đủ, chuỗi rỗng nếu không áp dụng"])
 
+    def test_xt_yaml_indented_key_warns(self):  # AUD-CODE-037: xt.yaml phẳng — khoá thụt lề bị bỏ im lặng
+        self.write("xt.yaml", FILLED_YAML + "  test: pytest -x\n\ttypecheck: mypy .\n# lint: x\n")
+        warns = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "warn" and "thụt lề" in f.msg]
+        self.assertEqual(len(warns), 1, warns)
+        self.assertIn("test, typecheck", warns[0])
+        self.write("xt.yaml", FILLED_YAML)
+        self.assertFalse([f for f in self.findings() if "thụt lề" in f.msg])
+
     def test_xt_yaml_duplicate_key_is_error(self):  # AUD-XFEAT-002
         self.write("xt.yaml", FILLED_YAML + "lint: true\n")
         errs = [f.msg for f in self.findings() if f.code == "xt-yaml" and f.level == "error"]

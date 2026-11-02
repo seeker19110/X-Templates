@@ -11,6 +11,7 @@ import io
 import datetime as _dt
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -450,6 +451,46 @@ class ComposeBranchesTest(TmpMixin, unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- JSON / write_atomic
+
+
+class YamlScalarTest(TmpMixin, unittest.TestCase):
+    """AUD-CODE-037 (T-3653): `yaml_scalar` (xt.py) và `yaml_get` (dev-task.sh) chỉ bỏ nháy khi giá trị là MỘT chuỗi
+    nháy trọn vẹn; `''` trong nháy đơn là `'` (YAML); hai bên cho cùng lệnh."""
+
+    CASES = {
+        '"x"': "x",
+        "'x'": "x",
+        '""': "",
+        "''": "",
+        '"a" "b"': '"a" "b"',  # hai chuỗi: không phải một scalar nháy — giữ nguyên cho bash
+        "'a' 'b'": "'a' 'b'",
+        "'it''s'": "it's",
+        '"a\\"b"': '"a\\"b"'[1:-1],  # thoát `\"` giữ nguyên chữ (như trước — không giải escape YAML)
+        '"a"b"': '"a"b"',
+        "x # c": "x",
+        '"a # b"': "a # b",
+        "plain value": "plain value",
+    }
+
+    def test_yaml_scalar_cases(self):
+        for raw, want in self.CASES.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(xt.yaml_scalar(raw), want)
+
+    @unittest.skipIf(shutil.which("bash") is None, "cần bash")
+    def test_dev_task_yaml_get_matches(self):
+        d = self.tmpdir()
+        (d / "scripts").mkdir()
+        shutil.copy(ROOT / "scripts" / "dev-task.sh", d / "scripts" / "dev-task.sh")
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(d)}
+        for raw in ("'echo \"it''s\"'", '"echo" "x  y"', '"echo a"', "echo plain # c"):
+            with self.subTest(raw=raw):
+                (d / "xt.yaml").write_text(f"lint: {raw}\n", encoding="utf-8")
+                got = subprocess.run(
+                    ["bash", str(d / "scripts" / "dev-task.sh"), "lint"], capture_output=True, text=True, env=env
+                )
+                want = subprocess.run(["bash", "-c", xt.yaml_scalar(raw)], capture_output=True, text=True)
+                self.assertEqual((got.returncode, got.stdout), (0, want.stdout), got.stderr)
 
 
 class JsonAndAtomicTest(TmpMixin, unittest.TestCase):

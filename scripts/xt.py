@@ -4595,9 +4595,14 @@ def gate_noop_keys(base: Path) -> List[str]:
     return [k for k, v in vals.items() if gate_noop(v)]
 
 
+YAML_DQ_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')  # MỘT chuỗi nháy kép trọn giá trị (`\"` bên trong giữ nguyên chữ)
+YAML_SQ_RE = re.compile(r"'((?:[^']|'')*)'")  # MỘT chuỗi nháy đơn; `''` là `'` (YAML)
+
+
 def yaml_scalar(raw: str) -> str:
     """Giá trị YAML phẳng như dev-task.sh `yaml_get`: bỏ comment `#` (đầu giá trị hoặc sau khoảng trắng, ngoài nháy —
-    AUD-HAR-025), rồi bỏ nháy khi bọc cả hai đầu."""
+    AUD-HAR-025), rồi bỏ nháy chỉ khi cả giá trị là MỘT chuỗi nháy (`"a" "b"` giữ nguyên cho bash; `'it''s'` → `it's`
+    — AUD-CODE-037)."""
     out, quote, prev = [], "", " "
     for c in raw:
         if c == "#" and not quote and prev in " \t":
@@ -4606,7 +4611,11 @@ def yaml_scalar(raw: str) -> str:
             quote = "" if quote else c
         out.append(c)
         prev = c
-    return re.sub(r"^([\"'])(.*)\1$", r"\2", "".join(out).strip())
+    val = "".join(out).strip()
+    if m := YAML_DQ_RE.fullmatch(val):
+        return m[1]
+    m = YAML_SQ_RE.fullmatch(val)
+    return m[1].replace("''", "'") if m else val
 
 
 # Sàn Gate theo quy mô (LOOP-HARNESS-023, D-035): ở M/L, cổng do agent tự khai phải đạt mức tối thiểu — ADR-0011 chỉ chặn
@@ -4795,6 +4804,23 @@ def _doctor_gate_floor(base: Path) -> List[Finding]:
     return [Finding("gate-floor", "warn", f"{i} — sàn Gate M/L (LOOP-HARNESS-023)") for i in gate_floor_issues(base)]
 
 
+YAML_INDENTED_KEY_RE = re.compile(r"^[ \t]+([A-Za-z_][\w-]*):")
+
+
+def _doctor_yaml_layout(text: str, lines: List["re.Match[str]"]) -> List[Finding]:
+    """Khoá trùng (AUD-XFEAT-002: dev-task.sh và xt.py đều lấy dòng cuối, người đọc dễ hiểu nhầm dòng đầu) và khoá thụt
+    lề — xt.yaml phẳng, cả xt.py lẫn dev-task.sh chỉ đọc khoá ở cột 0 nên khoá thụt lề bị bỏ im lặng (AUD-CODE-037)."""
+    out: List[Finding] = []
+    dup = sorted(k for k, n in Counter(m[1] for m in lines).items() if n > 1)
+    if dup:
+        out.append(Finding("xt-yaml", "error", f"xt.yaml có khoá trùng: {', '.join(dup)} — giữ một dòng mỗi khoá"))
+    indented = list(dict.fromkeys(m[1] for m in map(YAML_INDENTED_KEY_RE.match, text.splitlines()) if m))
+    if indented:
+        msg = f"xt.yaml có khoá thụt lề bị bỏ qua: {', '.join(indented)} — xt.yaml phẳng, viết khoá ở đầu dòng"
+        out.append(Finding("xt-yaml", "warn", msg))
+    return out
+
+
 def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
     p, legacy = base / "xt.yaml", base / "xs.yaml"
     if not p.is_file():
@@ -4805,12 +4831,10 @@ def _doctor_xt_yaml(base: Path, fw: Path) -> List[Finding]:
         )
         msg = "thiếu xt.yaml — dev-task.sh/cổng commit không có lệnh khai báo (LOOP-HARNESS-008)"
         return [Finding("xt-yaml", "error", msg, fix)]
-    lines = [m for m in map(YAML_KEY_RE.match, p.read_text(encoding="utf-8").splitlines()) if m]
+    text = p.read_text(encoding="utf-8")
+    lines = [m for m in map(YAML_KEY_RE.match, text.splitlines()) if m]
     keys = {m[1]: m[2] for m in lines}
-    out = _doctor_gate_tools(keys)
-    dup = sorted(k for k, n in Counter(m[1] for m in lines).items() if n > 1)
-    if dup:  # AUD-XFEAT-002: dev-task.sh và xt.py đều lấy dòng cuối, nhưng người đọc file dễ hiểu nhầm dòng đầu
-        out.append(Finding("xt-yaml", "error", f"xt.yaml có khoá trùng: {', '.join(dup)} — giữ một dòng mỗi khoá"))
+    out = _doctor_gate_tools(keys) + _doctor_yaml_layout(text, lines)
     scalars = {k: yaml_scalar(v) for k, v in keys.items()}
     phase_err = delivery_phase_error(scalars)
     if phase_err:
@@ -5171,16 +5195,9 @@ def latest_framework_tag() -> Optional[Tuple[int, int, int]]:
     """Tag `vX.Y.Z` mới nhất của repo khung qua `gh api` (REST, mọi trang, host github.com). Fail-open: không có gh, lỗi
     mạng/quyền, thân không phải UTF-8/JSON (trang chặn của proxy) → None — `doctor` là bước đầu của `/autopilot`."""
     repo = os.environ.get("XT_FRAMEWORK_REPO") or FRAMEWORK_REPO
-    pages: List[Any] = []
-    try:  # phân trang tự làm bằng `page=N` (FB-001: `--paginate` đi theo Link tới `repositories/{id}` bị proxy chặn)
-        for n in range(1, GH_MAX_PAGES + 1):
-            cmd = ["gh", "api", "--hostname", "github.com", f"repos/{repo}/tags?per_page=100&page={n}"]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=VERSION_CHECK_TIMEOUT)
-            got = _json_values(r.stdout) if r.returncode == 0 else []
-            pages.extend(got)
-            if not got or _gh_page_len(got[-1]) < 100:
-                break
-    except (OSError, subprocess.SubprocessError, ValueError):  # ValueError gồm UnicodeDecodeError, JSONDecodeError
+    try:  # cùng đường REST phân trang `page=N` với `merge-check` (`_gh_api`, AUD-CODE-038), timeout ngắn của doctor
+        pages = _gh_api(f"repos/{repo}/tags?per_page=100", True, VERSION_CHECK_TIMEOUT, "github.com")
+    except (PrInputError, ValueError):  # ValueError gồm UnicodeDecodeError (trang chặn của proxy), JSONDecodeError
         return None
     tags = [t for page in pages if isinstance(page, list) for t in page]
     names = [t.get("name") for t in tags if isinstance(t, dict)]
@@ -6276,22 +6293,17 @@ def _touches_hard_key(
     return False
 
 
-def _gh_api_once(path: str) -> List[Any]:
+def _gh_api_once(path: str, timeout: float = 0, host: str = "") -> List[Any]:
     """Một lần `gh api` (REST, không GraphQL — phiên Claude Code chặn GraphQL) → danh sách giá trị JSON liền nhau.
-    `{owner}`/`{repo}`/`{branch}` do gh thay theo repo hiện tại."""
-    cmd = ["gh", "api", path]
+    `{owner}`/`{repo}`/`{branch}` do gh thay theo repo hiện tại; `host` → `--hostname`; `timeout` 0 = `GH_TIMEOUT`."""
+    cmd = ["gh", "api", *(["--hostname", host] if host else []), path]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=GH_TIMEOUT)
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout or GH_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PrInputError(f"không chạy được gh ({exc}) — cài/đăng nhập gh hoặc dùng --pr-json") from exc
     if r.returncode != 0:
         raise PrInputError(f"gh api {path} lỗi: {_one_line(r.stderr)}")
-    dec, rest, out = json.JSONDecoder(), r.stdout.strip(), []
-    while rest:
-        val, end = dec.raw_decode(rest)
-        out.append(val)
-        rest = rest[end:].lstrip()
-    return out
+    return _json_values(r.stdout)
 
 
 GH_MAX_PAGES = 50  # trần an toàn: 50 trang × per_page — API lặp trang cũng không thành vòng vô hạn
@@ -6306,19 +6318,20 @@ def _gh_page_len(val: Any) -> int:
     return 0
 
 
-def _gh_api(path: str, paginate: bool = False) -> List[Any]:
+def _gh_api(path: str, paginate: bool = False, timeout: float = 0, host: str = "") -> List[Any]:
     """REST qua `gh api` → danh sách giá trị JSON (mỗi trang một giá trị). Phân trang TỰ LÀM bằng `page=N` trên chính
     đường `repos/<chủ>/<repo>/…` (FB-001 của X-Company): `gh api --paginate` đi theo header Link tới
     `repositories/{id}/…` mà proxy của phiên Claude Code từ chối (403) nên `merge-check` hỏng với PR > 30 check/commit.
-    Dừng khi trang ngắn hơn `per_page` (30 mặc định của GitHub hoặc giá trị trong `path`) hoặc rỗng."""
+    Dừng khi trang ngắn hơn `per_page` (30 mặc định của GitHub hoặc giá trị trong `path`) hoặc rỗng. Lỗi → PrInputError
+    (hay ValueError khi thân không phải JSON/UTF-8)."""
     if not paginate:
-        return _gh_api_once(path)
+        return _gh_api_once(path, timeout, host)
     m = re.search(r"[?&]per_page=(\d+)", path)
     per_page = int(m.group(1)) if m else 30
     sep = "&" if "?" in path else "?"
     pages: List[Any] = []
     for n in range(1, GH_MAX_PAGES + 1):
-        got = _gh_api_once(f"{path}{sep}page={n}")
+        got = _gh_api_once(f"{path}{sep}page={n}", timeout, host)
         pages.extend(got)
         if not got or _gh_page_len(got[-1]) < per_page:
             break
