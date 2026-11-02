@@ -1,7 +1,7 @@
 # ADR-0064: Harness đa nhà cung cấp — một lõi chính sách, adapter theo công cụ, vòng lặp ngoài, sandbox là ranh giới
 
 - **Trạng thái:** Đã chấp nhận 2026-11-02 — chủ dự án trả lời ba câu hỏi (§Thông tin thêm); phiên chính chốt cách làm
-  theo tiêu chí chất lượng cuối, **D-303**. Bản nháp cùng ngày (cùng PR) chỉ khác ở trạng thái và ba lựa chọn này.
+  theo tiêu chí chất lượng cuối, **D-303**. Bản nháp cùng ngày (cùng PR) khác ở trạng thái, ba lựa chọn này và nguồn adapter (`framework/templates/harness/`).
 - **Trạng thái triển khai:** Đã làm cả năm lát, kèm nợ ghi ở sổ — lát A (`guard.py core`; T-3640, D-308; chuẩn hoá tên
   tool + `project_dir`: AUD-SEC-346/HAR-201), lát E (`doctor` nhóm `sandbox`; T-3641; nợ AUD-HAR-202/203) và research §8
   ở PR lát 3 (#407); lát B (adapter 6 host, `scripts/xt_adapter.py` + `framework/templates/harness/`; T-3642…3644, D-310;
@@ -49,7 +49,7 @@ không giả vờ guard là sandbox?
    theo giấy phép/giá (Codex, Gemini, Grok Build, OpenCode là OSI; Claude Code, Cursor, Copilot proprietary).
 5. **Guard không phải sandbox** (`LOOP-HARNESS-022`, ADR-0054): mở rộng ra nhiều công cụ càng phải đặt ranh giới hậu quả ở
    sandbox/egress, không ở thêm luật regex (bài học AUD-SEC-180…311, ADR-0063).
-6. **Chi phí bảo trì**: API hook đổi nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026) → adapter phải mỏng, có
+6. **Chi phí bảo trì**: API hook đổi nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026 — chưa xác minh) → adapter phải mỏng, có
    fixture payload theo phiên bản và mốc xét lại.
 
 ## Các phương án đã cân nhắc

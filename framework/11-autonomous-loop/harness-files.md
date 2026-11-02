@@ -177,7 +177,7 @@ OS/devcontainer có egress allowlist (`LOOP-HARNESS-022`) và việc phiên chí
 
 ### Agent khác Claude Code (ADR-0064)
 
-Lõi chặn là `guard.py` chế độ trung lập (`guard.py core`: JSON `{tool, command|path|tool_name, input, cwd}` vào, `{decision,
+Lõi chặn là `guard.py` chế độ trung lập (`guard.py core`: JSON `{tool, command|path|tool_name, input, cwd, project_dir}` vào, `{decision,
 code, reason}` ra, exit 2 khi deny); mỗi công cụ một adapter mỏng. Ma trận đầy đủ, nguồn và ngày:
 `research/2026-11-02-multi-provider-harness.md` §2 và §8. Adapter, sàn git hook và vòng lặp ngoài `loop run --agent` làm
 theo lát của ADR-0064 — trạng thái ở dòng *Trạng thái triển khai* của ADR. Điều harness dựa vào:

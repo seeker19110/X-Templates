@@ -195,7 +195,7 @@ cổng TCP/UDP, không lọc tên miền), `sandbox-exec` (Apple đánh dấu DE
 - Gemini CLI README ghi gói cá nhân chuyển sang Antigravity CLI (`agy`) từ 2026-06-18 — tên lệnh/đường dẫn cấu hình có thể đổi.
 - Grok Build: auto-update bật mặc định, `install.sh` `curl | bash`; xung đột tên lệnh `grok` với gói cộng đồng.
 - sandbox-runtime "Beta Research Preview": API/cấu hình có thể đổi; `sandbox-exec` đã DEPRECATED theo Apple.
-- Tốc độ đổi API hook rất nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026): mọi adapter cần mốc xét lại —
+- Tốc độ đổi API hook rất nhanh (Claude 33 sự kiện, Copilot GA 02/2026, Grok beta 05/2026 — hai mốc chưa xác minh): mọi adapter cần mốc xét lại —
   trùng mốc hàng rào 2027-01-21 (`LOOP-DESIGN-014`).
 
 ## 8. Bổ sung 2026-11-02 — xác minh lại bốn mục chưa xác minh (T-3647)

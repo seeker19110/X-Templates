@@ -20,7 +20,7 @@
 - Khung đang có hai mặc định trái với cách phiên thật vận hành: `loop status` trả `executor: executor` cho mọi task (giao
   subagent là mặc định), và `LOOP-ORCH-020` giữ mặc định đó "cho tới khi có ≥ 10 task/nhóm × 2 vòng" — điều kiện đặt ngày
   2026-10-24 chưa bao giờ tích luỹ được (`runs.jsonl` của clone = 0; PROGRESS "chờ" từ 2026-10-25). Trong khi đó phiên
-  2026-10-31/11-01 (9 PR merge) vận hành đúng mô hình đề xuất: phiên chính tự viết mọi diff, chỉ giao `reviewer`/`researcher`/
+  2026-10-31/11-01 (9 PR merge, danh sách ở research 2026-11-01 §Nguồn) vận hành đúng mô hình đề xuất: phiên chính tự viết mọi diff, chỉ giao `reviewer`/`researcher`/
   audit read-only, song song ≤ 3, không giao `executor` lần nào.
 - Vòng review không có trần thật: ADR-0053 cho thêm lượt qua `pr rethink --decision D-NNN` không giới hạn số lần → PR #372
   (guard `$IFS#`) 7 lượt review đăng dấu (REST: 7 `xt-review … verdict=blocking`), mỗi lượt sửa lại mở lỗ mới, đóng không
