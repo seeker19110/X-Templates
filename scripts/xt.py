@@ -12577,7 +12577,22 @@ def _debt_problem(
     rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
     probs = [_debt_row_problem(rows, key, head, i, False) for i in ids]
     probs += [_debt_row_problem(rows, key, head, i, True) for i in fixed]
+    probs += _debt_reused_fixed(base, last, fixed)
     return next((p for p in probs if p), None)
+
+
+def _debt_reused_fixed(base: Path, last: str, fixed: Sequence[str]) -> List[str]:
+    """`--fixed` trỏ dòng 🔴 đã `đã sửa` ở sổ TẠI head review cuối → bản sửa không phải cho phát hiện của lần review đó
+    (dùng lại dòng cũ — AUD-HAR-182). Sổ không có ở head đó → không dòng nào đã sửa."""
+    if not fixed:
+        return []
+    r = _git(base, "show", f"{last}:{AUDIT_STATUS_DEFAULT}")
+    then = {x.get("ID", ""): x for x in md_tables(r.stdout).get("Phát hiện", [])} if r.returncode == 0 else {}
+    return [
+        f"{i} đã `đã sửa` ở sổ tại head review {last[:7]} — `--fixed` chỉ cho 🔴 của chính lần review đó (AUD-HAR-182)"
+        for i in fixed
+        if then.get(i, {}).get("Trạng thái") == "đã sửa"
+    ]
 
 
 def _pr_debt(args: argparse.Namespace, base: Path) -> int:

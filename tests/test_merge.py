@@ -2450,6 +2450,31 @@ class PrNextCliTest(unittest.TestCase):
         self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": "AUD-SEC-001"}))
         self.assertFalse(xt._ledger_clean_valid({"head": head, "clean": True, "debt": [1]}))
 
+    def test_debt_fixed_rejects_row_already_fixed_at_review(self):
+        """AUD-HAR-182 phần còn lại (T-3634): `--fixed` không dùng lại dòng 🔴 đã `đã sửa` ở sổ TẠI head review cuối — bản
+        sửa phải cho phát hiện của chính lần review đó."""
+        head_row = (
+            "| AUD-SEC-007 | 🔴 | đã sửa | x | nợ-review: #7 |\n| AUD-SEC-008 | 🔴 | đã sửa | x | nợ-review: #7 |\n"
+        )
+        hdr = "## Phát hiện\n\n| ID | Mức | Trạng thái | Tóm tắt | Ghi chú |\n|---|---|---|---|---|\n"
+        old = hdr + "| AUD-SEC-007 | 🔴 | đã sửa | x | nợ-review: #7 |\n| AUD-SEC-008 | 🔴 | mở | x | nợ-review: #7 |\n"
+        reviewed = self.commit({"src/a.py": "x = 1\n", xt.AUDIT_STATUS_DEFAULT: old})
+        head = self.commit(
+            {"src/a.py": "x = 2\n", "tests/test_a.py": "assert 2\n", xt.AUDIT_STATUS_DEFAULT: hdr + head_row}
+        )
+        p = {
+            **self.big,
+            "headRefOid": head,
+            "xtReviews": [{"head": reviewed, "clean": False, "at": "2026-11-01T01:00:00Z"}],
+        }
+        rc, _, err = run_main("pr", "debt", "--pr-json", "-", "--fixed", "AUD-SEC-007", stdin=json.dumps(p))
+        self.assertEqual(rc, 2)
+        self.assertIn("AUD-SEC-007 đã `đã sửa` ở sổ tại head review", err)
+        rc, _, err = run_main(
+            "pr", "debt", "--pr-json", "-", "--fixed", "AUD-SEC-008", "--no-publish", stdin=json.dumps(p)
+        )
+        self.assertEqual((rc, err), (0, ""))  # dòng còn `mở` lúc review, sửa sau review: nhận
+
     def test_debt_fixed_red_once_without_second_review(self):
         """ADR-0062 §3 (D-295): review 1 lần — 🔴 sửa trong một commit, dòng sổ 🔴 `đã sửa` có `nợ-review: #N`, rồi `pr debt
         --fixed` (không review lại): cây đổi mã chỉ được nhận khi có `--fixed`; `--fixed` chỉ trỏ dòng 🔴 `đã sửa` đúng PR;
