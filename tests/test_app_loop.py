@@ -202,8 +202,23 @@ class DecisionsTest(unittest.TestCase):
             self.assertEqual((len(body["decisions"]), body["truncated"]), (200, truncated))
             self.assertEqual(body["decisions"][0]["id"], f"D-{n:03d}")
 
+    def test_month_files_read_before_current(self) -> None:
+        """T-3651: DECISIONS.md tách theo tháng — màn quyết định đọc cả `DECISIONS-YYYY-MM.md`, mới nhất trước; bản tháng
+        không đọc được thì bỏ, vẫn hiện sổ hiện tại."""
+        self.write("# Nhật ký\n\n### D-005 · t · mới\n\n- Chọn: x\n")
+        month = self.base / "docs" / "autopilot" / "DECISIONS-2026-10.md"
+        month.write_text("### D-004 · t · cũ\n\n- Chọn: y\n", encoding="utf-8")
+
+        def ids() -> List[str]:
+            return [d["id"] for d in api_loop._decisions(ctx(self.base))[1]["decisions"]]
+
+        self.assertEqual(ids(), ["D-005", "D-004"])
+        month.write_bytes(b"\xff\xfe")
+        self.assertEqual(ids(), ["D-005"])
+
     def test_real_repo_decisions(self) -> None:
-        text = (ROOT / api_loop.DECISIONS_FILE).read_text(encoding="utf-8")
+        logs = xt.decision_logs(ROOT / api_loop.DECISIONS_FILE)
+        text = "".join(p.read_text(encoding="utf-8") for p in logs)
         headings = len(re.findall(r"^### D-", text, re.M))
         self.assertGreater(headings, 100)
         _, body = api_loop._decisions(ctx(ROOT))

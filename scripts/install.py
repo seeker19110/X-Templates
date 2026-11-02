@@ -1286,6 +1286,22 @@ def upgrade_steps(text: str, since: tuple[int, int, int]) -> list[tuple[str, lis
     return out
 
 
+CHANGELOG_ARCHIVE = "CHANGELOG-ARCHIVE.md"  # T-3651: bản < 3.20.0 dời khỏi CHANGELOG.md, cùng định dạng
+
+
+def read_changelog(src: Path) -> str:
+    """CHANGELOG.md của khung nối tiếp các mục `## ` của CHANGELOG-ARCHIVE.md (bản cũ hơn, nếu có) — thứ tự mới → cũ như
+    một file; phần đầu file lưu trữ (trước mục đầu) bỏ, không dính vào mục cuối của CHANGELOG. Ném
+    OSError/UnicodeDecodeError khi không đọc được."""
+    text = (src / "CHANGELOG.md").read_text(encoding="utf-8")
+    archive = src / CHANGELOG_ARCHIVE
+    if not archive.is_file():
+        return text
+    old = archive.read_text(encoding="utf-8")
+    first = re.search(r"^## ", old, re.M)
+    return text + "\n" + (old[first.start() :] if first else "")
+
+
 def report_upgrade_steps(previous: str | None, label: str) -> None:
     """Nâng bản (`previous` = nhãn VERSION trước khi cài, đọc được X.Y.Z): in các bước "Dự án đích" của CHANGELOG khung
     từ bản đó. Cài mới/nhãn lạ → bỏ qua; hạ bản → một dòng; CHANGELOG không đọc được → một dòng, không lỗi (fail-open)."""
@@ -1298,7 +1314,7 @@ def report_upgrade_steps(previous: str | None, label: str) -> None:
         log(f"{title} bỏ qua — bản khung {'.'.join(map(str, now))} cũ hơn bản đã cài (hạ bản)")
         return
     try:
-        text = (SRC / "CHANGELOG.md").read_text(encoding="utf-8")
+        text = read_changelog(SRC)
     except (OSError, UnicodeDecodeError) as exc:
         log(f"{title} không đọc được CHANGELOG.md của khung ({exc}) — xem mục 'Dự án đích' ở CHANGELOG bản mới")
         return

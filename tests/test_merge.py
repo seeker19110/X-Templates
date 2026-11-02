@@ -2617,6 +2617,51 @@ class PrNextCliTest(unittest.TestCase):
         git = ["git", "-C", str(self.base), "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
         return subprocess.run([*git, *args], check=True, capture_output=True, text=True).stdout.strip()
 
+    def test_debt_reads_ledger_archive(self):
+        """T-3651: sổ audit dời dòng `đã sửa` cũ sang `AUDIT-STATUS-ARCHIVE.md` — `pr debt` đọc cả hai file: `--fixed` không
+        dùng lại dòng đã `đã sửa` trong lưu trữ lúc review; dòng 🔴 vừa sửa ghi thẳng vào lưu trữ ở head được nhận; commit
+        chỉ sổ + lưu trữ sau review là "chỉ sổ" (không cần `--fixed`)."""
+        head_cols = "## Phát hiện\n\n| ID | Mức | Trạng thái | Tóm tắt | Ghi chú |\n|---|---|---|---|---|\n"
+
+        def book(*rows: tuple[str, str, str]) -> str:
+            return head_cols + "".join(f"| {i} | {lv} | {st} | x | nợ-review: #7 |\n" for i, lv, st in rows)
+
+        archive = xt.AUDIT_ARCHIVE_DEFAULT
+        reviewed = self.commit(
+            {
+                "src/a.py": "x = 1\n",
+                xt.AUDIT_STATUS_DEFAULT: book(("AUD-SEC-004", "🔴", "mở")),
+                archive: book(("AUD-SEC-002", "🔴", "đã sửa")),
+            }
+        )
+        head = self.commit(
+            {
+                "src/a.py": "x = 2\n",
+                "tests/test_a.py": "assert 2\n",
+                xt.AUDIT_STATUS_DEFAULT: book(("AUD-SEC-001", "🟢", "mở")),
+                archive: book(("AUD-SEC-002", "🔴", "đã sửa"), ("AUD-SEC-004", "🔴", "đã sửa")),
+            }
+        )
+        r1 = {"head": reviewed, "clean": False, "at": "2026-11-02T01:00:00Z"}
+
+        def debt(sha: str, *args: str) -> tuple[int, str, str]:
+            p = {**self.big, "headRefOid": sha, "xtReviews": [r1]}
+            return run_main("pr", "debt", "--pr-json", "-", *args, "--no-publish", stdin=json.dumps(p))
+
+        rc, _, err = debt(head, "--fixed", "AUD-SEC-002")
+        self.assertEqual(rc, 2)
+        self.assertIn(f"AUD-SEC-002 đã `đã sửa` ở {xt.AUDIT_STATUS_DEFAULT} tại review {reviewed[:7]}", err)
+        self.assertEqual(debt(head, "--fixed", "AUD-SEC-004")[::2], (0, ""))  # 🔴 sửa sau review, dòng ở lưu trữ
+        xt._write_reviews(self.base, {})
+        self.git("checkout", "-q", "-b", "chi-so", reviewed)
+        booked = self.commit(
+            {
+                xt.AUDIT_STATUS_DEFAULT: book(("AUD-SEC-001", "🟢", "mở"), ("AUD-SEC-004", "🔴", "mở")),
+                archive: book(("AUD-SEC-002", "🔴", "đã sửa"), ("AUD-SEC-003", "🟢", "đã sửa")),
+            }
+        )
+        self.assertEqual(debt(booked, "--findings", "AUD-SEC-001")[::2], (0, ""))  # chỉ sổ + lưu trữ đổi
+
     def test_debt_tree_check_base_update_merge_and_rename(self):
         """Review #345 🟠 + AUD-TEST-027/AUD-SEC-154: "chỉ sổ đổi sau review cuối" so CÂY (`--no-renames`) với nhánh đích
         của PR (`baseRefName`) — cập nhật nhánh (file giống hệt nhánh đích) được nhận; commit MERGE sửa thêm mã, đổi tên

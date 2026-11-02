@@ -621,6 +621,45 @@ class DecideWorktreesTest(TmpRepoCase):
         with unittest.mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(cfg)}):
             self.assertIn("D-008", self.decide(self.main))
 
+    def test_decide_numbers_span_month_files(self) -> None:
+        """T-3651: DECISIONS.md tách theo tháng (`DECISIONS-YYYY-MM.md`) — số kế tiếp tính trên MỌI file (cây này, worktree
+        khác, nhánh remote), không cấp trùng; mục mới vẫn ghi vào DECISIONS.md, không vào bản tháng."""
+        logs = self.main / "docs" / "autopilot"
+        logs.mkdir(parents=True)
+        (logs / "DECISIONS.md").write_text(xt.DECISIONS_HEADER, encoding="utf-8")  # tháng mới: chưa có mục nào
+        (logs / "DECISIONS-2026-10.md").write_text("# x\n\n### D-003 · t · q\n", encoding="utf-8")
+        self.assertIn("D-004", self.decide(self.main))
+        self.assertIn("### D-004", (logs / "DECISIONS.md").read_text(encoding="utf-8"))
+        self.assertNotIn("D-004", (logs / "DECISIONS-2026-10.md").read_text(encoding="utf-8"))
+        other = self.wt / "docs" / "autopilot"
+        other.mkdir(parents=True)
+        (other / "DECISIONS-2026-09.md").write_text("### D-010 · t · q\n", encoding="utf-8")  # worktree khác
+        self.assertIn("D-011", self.decide(self.main))
+        (other / "DECISIONS-2026-09.md").unlink()
+        (other / "DECISIONS-2026-08.md").write_text("### D-020 · t · q\n", encoding="utf-8")
+        self.git("-C", str(self.wt), "add", "-A")
+        self.git("-C", str(self.wt), "commit", "-q", "-m", "d20")
+        self.git("update-ref", "refs/remotes/origin/b", "b")
+        self.git("-C", str(self.wt), "reset", "-q", "--hard", "HEAD~1")  # chỉ ref remote giữ bản tháng D-020
+        self.assertIn("D-021", self.decide(self.main))
+
+    def test_decide_remote_month_files_path_is_literal(self) -> None:
+        """T-3651 + review #312: bản tháng ở ref remote khớp nguyên văn thư mục `--log` (`[a]` không thành `a`)."""
+        for rel, n in (("notes/a/D-2026-10.md", 500), ("notes/[a]/D-2026-10.md", 600), ("notes/[a]/D-x.md", 700)):
+            f = self.wt / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(f"### D-{n} · t · q\n", encoding="utf-8")
+        self.git("-C", str(self.wt), "add", "-A")
+        self.git("-C", str(self.wt), "commit", "-q", "-m", "d")
+        self.git("update-ref", "refs/remotes/origin/b", "b")
+        with chdir(self.main):
+            rc, out, err = run_main(
+                "loop", "decide", "--question", "q", "--option", "a", "--option", "b", "--choice", "1",
+                "--why", "w", "--revert", "r", "--log", "notes/[a]/D.md",
+            )  # fmt: skip
+        self.assertEqual(rc, 0, err)
+        self.assertIn("D-601", out)
+
     def test_decide_remote_log_path_is_literal(self) -> None:
         """Review #312: `--log` có ký tự glob/magic không được khớp sổ khác ở ref remote (`[a]` → `a`)."""
         other = self.wt / "notes" / "a" / "D.md"

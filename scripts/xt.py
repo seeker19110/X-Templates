@@ -105,6 +105,7 @@ import copy
 import datetime as _dt
 import errno
 import fnmatch
+import glob
 import hashlib
 import importlib.util
 import io
@@ -4042,6 +4043,24 @@ def _path_groups(path: str) -> List[int]:
     return sorted(set(g))
 
 
+ARCHIVE_SUFFIX = "-ARCHIVE"  # T-3651: file lưu trữ cạnh sổ (`AUDIT-STATUS-ARCHIVE.md`, `CHANGELOG-ARCHIVE.md`)
+
+
+def audit_archive(status: Path) -> Path:
+    """Sổ lưu trữ của sổ audit `status` (T-3651, AUD-DOC-180): cùng thư mục, tên `<tên>-ARCHIVE<đuôi>`."""
+    return status.with_name(f"{status.stem}{ARCHIVE_SUFFIX}{status.suffix}")
+
+
+def audit_findings(status: Path) -> List[Dict[str, str]]:
+    """Dòng `## Phát hiện` của sổ rồi của sổ lưu trữ (vắng → chỉ sổ) — mọi máy đọc phát hiện đi qua đây. Ném
+    OSError/ValueError khi không đọc được file nào."""
+    rows = md_tables(status.read_text(encoding="utf-8")).get("Phát hiện", [])
+    archive = audit_archive(status)
+    if archive.is_file():
+        rows = rows + md_tables(archive.read_text(encoding="utf-8")).get("Phát hiện", [])
+    return rows
+
+
 def audit_status_groups(status: Path) -> Dict[int, Dict[str, str]]:
     rows = md_tables(status.read_text(encoding="utf-8")).get("Nhóm", [])
     out: Dict[int, Dict[str, str]] = {}
@@ -4308,10 +4327,31 @@ def _audit_na_errors(tables: Dict[str, List[Dict[str, str]]], strict: bool, root
     ]
 
 
+def _audit_archive_rows(status: Path, errors: List[str], counts: Dict[str, int]) -> List[Dict[str, str]]:
+    """Dòng sổ lưu trữ (T-3651) để kiểm chung với sổ (ID duy nhất XUYÊN hai file, đếm cả hai); lưu trữ phải có bảng
+    `## Phát hiện` và chỉ nhận dòng `đã sửa` — lỗi ghi vào `errors`. Không có lưu trữ → [] và không đếm."""
+    archive = audit_archive(status)
+    if not archive.is_file():
+        return []
+    tables = md_tables(archive.read_text(encoding="utf-8"))
+    if "Phát hiện" not in tables:
+        errors.append(f"{archive.name}: thiếu bảng `## Phát hiện`")
+    rows = tables.get("Phát hiện", [])
+    counts["lưu trữ"] = len(rows)
+    errors += [
+        f"{r.get('ID') or '(dòng thiếu ID)'}: sổ lưu trữ {archive.name} chỉ nhận dòng `đã sửa`"
+        f" (đang `{r.get('Trạng thái', '')}`)"
+        for r in rows
+        if r.get("Trạng thái") != "đã sửa"
+    ]
+    return rows
+
+
 def audit_check(
     status: Path, strict: bool = False, today: Optional[_dt.date] = None
 ) -> Tuple[List[str], Dict[str, int]]:
-    """Kiểm sổ AUDIT-STATUS.md theo templates/AUDIT-STATUS.md. Trả (lỗi, đếm). Ném OSError khi không đọc được."""
+    """Kiểm sổ AUDIT-STATUS.md theo templates/AUDIT-STATUS.md, kèm sổ lưu trữ cạnh nó (T-3651). Trả (lỗi, đếm). Ném
+    OSError/ValueError khi không đọc được."""
     today = today or _dt.date.today()
     tables = md_tables(status.read_text(encoding="utf-8"))
     # Gốc = gốc repo chứa sổ (AUD-HAR-078: sổ ở docs/ops/ thì `git ls-files` trong docs/ops không thấy UI/CSDL).
@@ -4324,6 +4364,9 @@ def audit_check(
     errors = [f"thiếu bảng `## {name}`" for name in ("Nhóm", "Phát hiện") if name not in tables]
     errors += _audit_group_errors(tables, strict, root, in_git, counts, progress_base_ref(root) if in_git else None)
     errors += _audit_na_errors(tables, strict, root)
+    archived = _audit_archive_rows(status, errors, counts)
+    if archived:
+        tables = {**tables, "Phát hiện": [*tables.get("Phát hiện", []), *archived]}
     errors += _audit_finding_errors(tables, strict, today, counts)
     return errors, counts
 
@@ -7304,6 +7347,7 @@ def _loop_next(args: argparse.Namespace, base: Path) -> int:
 
 NEXT_STEP_OBJECTIVES = ("build-until-clean", "harden-to-signoff")  # `optimize-budget` sau `perf trial`
 AUDIT_STATUS_DEFAULT = "docs/ops/AUDIT-STATUS.md"
+AUDIT_ARCHIVE_DEFAULT = "docs/ops/AUDIT-STATUS-ARCHIVE.md"  # = audit_archive(AUDIT_STATUS_DEFAULT), đường dẫn trong cây
 PR_SETTLED = ("done", "closed")  # `pr next` không còn việc cho PR
 OBJECTIVE_BATCHES_KEEP = 20  # mốc đầu đợt giữ trong `objective.batches` (FLOW-13 chỉ cần hai mốc cuối)
 LOOP_TO_STEP = {"continue": "task", "verify": "verify", "blocked": "blocked", "budget": "budget"}
@@ -7313,7 +7357,7 @@ def audit_open_count(status: Path) -> int:
     """🔴/🟠 còn `mở` và nợ review mọi mức (ADR-0059) trong bảng `## Phát hiện` của sổ; không có sổ → 0."""
     if not status.is_file():
         return 0
-    rows = md_tables(status.read_text(encoding="utf-8")).get("Phát hiện", [])
+    rows = audit_findings(status)
     return sum((r.get("Mức") in ("🔴", "🟠") or is_review_debt(r)) and r.get("Trạng thái") == "mở" for r in rows)
 
 
@@ -7502,7 +7546,7 @@ def _harden_sources(base: Path, st: Dict[str, Any], status: str) -> List[Dict[st
     (`_step_audit` báo)."""
     out: List[Dict[str, Any]] = []
     try:
-        rows = md_tables((base / status).read_text(encoding="utf-8")).get("Phát hiện", [])
+        rows = audit_findings(base / status)
     except (OSError, ValueError):
         rows = []
     for r in rows:
@@ -8237,34 +8281,50 @@ def _decision_choice(options: List[str], choice: str) -> Optional[str]:
 
 
 DECISION_REMOTE_REFS = 100  # số nhánh remote mới nhất đọc sổ khi đánh số D-NNN (T-3577)
+DECISION_MONTH_GLOB = "-[0-9][0-9][0-9][0-9]-[0-9][0-9]"  # T-3651: bản tháng `DECISIONS-YYYY-MM.md` cạnh sổ
+
+
+def decision_logs(log: Path) -> List[Path]:
+    """Bản tháng của sổ quyết định (`<tên>-YYYY-MM<đuôi>` cùng thư mục, cũ trước — T-3651) rồi chính sổ `log` (có hay
+    không). Tên sổ có ký tự glob (`[a]`) khớp nguyên văn. Mọi chỗ đọc DECISIONS đi qua đây; `loop decide` chỉ ghi `log`."""
+    pattern = glob.escape(log.stem) + DECISION_MONTH_GLOB + glob.escape(log.suffix)
+    return [*sorted(p for p in log.parent.glob(pattern) if p.is_file()), log]
+
+
+def _git_glob_escape(text: str) -> str:
+    """Thoát ký tự đặc biệt của pathspec `:(glob)` (wildmatch): `\\`, `*`, `?`, `[` thành nguyên văn."""
+    return re.sub(r"([\\*?\[])", r"\\\1", text)
 
 
 def _remote_decisions(base: Path, rel: Path) -> str:
     """Dòng tiêu đề D-NNN của sổ `rel` ở các nhánh remote-tracking mới nhất (T-3577): phiên song song ở container khác
     (nhánh chưa merge) từng cùng lấy D-219 — chỉ thấy được qua ref đã fetch. Một lần `git grep` trên mọi ref; tắt số
-    dòng/cột/màu do cấu hình người dùng bật (tiền tố làm `^### D-` không khớp — review #312) và đọc `rel` nguyên văn."""
+    dòng/cột/màu do cấu hình người dùng bật (tiền tố làm `^### D-` không khớp — review #312) và đọc `rel` nguyên văn,
+    kèm bản tháng cạnh nó (T-3651, thư mục/tên nguyên văn)."""
     refs = _git(
         base, "for-each-ref", "--sort=-committerdate", f"--count={DECISION_REMOTE_REFS}", "--format=%(refname)",
         "refs/remotes", env=_perf_env(),
     ).stdout.split()  # fmt: skip
     if not refs:
         return ""
+    month = _git_glob_escape((rel.parent / rel.stem).as_posix()) + DECISION_MONTH_GLOB + _git_glob_escape(rel.suffix)
     return _git(
-        base, "--literal-pathspecs", "grep", "--no-line-number", "--no-column", "--no-color", "-h", "-E",
-        r"^### D-[0-9]{3,}", *refs, "--", rel.as_posix(), env=_perf_env(),
+        base, "grep", "--no-line-number", "--no-column", "--no-color", "-h", "-E",
+        r"^### D-[0-9]{3,}", *refs, "--", f":(literal){rel.as_posix()}", f":(glob){month}", env=_perf_env(),
     ).stdout  # fmt: skip
 
 
 def _last_decision(text: str, base: Path, rel: Path) -> int:
     """Số D-NNN lớn nhất trong sổ này, sổ cùng đường dẫn ở mọi worktree khác của repo (T-2612 — hai worktree ghi
-    quyết định song song từng cùng ra D-001) và ở các nhánh remote đã fetch (T-3577). Chỉ đọc để đánh số; không phải
-    repo git → chỉ sổ này."""
+    quyết định song song từng cùng ra D-001) và ở các nhánh remote đã fetch (T-3577) — mỗi nơi kèm bản tháng
+    (`decision_logs`, T-3651: tách tháng không làm cấp lại số đã dời đi). Chỉ đọc để đánh số; không phải repo git → chỉ
+    sổ này và bản tháng của nó."""
     r = _git(base, "worktree", "list", "--porcelain", env=_perf_env())
     trees = [Path(ln[9:]) for ln in r.stdout.splitlines() if ln.startswith("worktree ")] if r.returncode == 0 else []
     texts = [text, _remote_decisions(base, rel)]
-    for tree in trees:
-        other = tree / rel
-        if other.resolve() != (base / rel).resolve() and other.is_file():
+    here = (base / rel).resolve()
+    for other in dict.fromkeys(f.resolve() for tree in (base, *trees) for f in decision_logs(tree / rel)):
+        if other != here and other.is_file():
             try:
                 texts.append(other.read_text(encoding="utf-8", errors="replace"))
             except OSError:  # sổ worktree khác không đọc được: bỏ qua, không làm hỏng `loop decide`
@@ -9223,16 +9283,17 @@ def _changelog_date_errors(head: str, raw: str, dates: List[_dt.date]) -> List[s
     return errs
 
 
-def changelog_check(text: str, version: Optional[str]) -> List[str]:
+def changelog_check(text: str, version: Optional[str], archive: str = "") -> List[str]:
     """Keep a Changelog 1.1.0 (BASE-REPO-007): `## [Unreleased]` đầu tiên, bản có ngày ISO 8601, giảm dần,
-    nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` (nếu có)."""
+    nhóm chuẩn, không trùng nhóm trong Unreleased; bản mới nhất == `VERSION` (nếu có). `archive` = nội dung
+    CHANGELOG-ARCHIVE.md (T-3651, bản cũ dời ra): kiểm như đuôi của CHANGELOG — mục nào cũng phải là bản có ngày."""
     sections = _changelog_sections(text)
     if not sections or sections[0][0] != "## [Unreleased]":
         return ["mục `## ` đầu tiên phải là `## [Unreleased]`"]
     errors = _changelog_group_errors(*sections[0], unreleased=True)
     versions: List[Tuple[int, ...]] = []
     dates: List[_dt.date] = []
-    for head, groups in sections[1:]:
+    for head, groups in sections[1:] + _changelog_sections(archive):
         m = CHANGELOG_VERSION_RE.fullmatch(head)
         if not m:
             errors.append(f"`{head}`: phải dạng `## [X.Y.Z] - YYYY-MM-DD` (X.Y.Z không pre-release, ngày ISO 8601)")
@@ -9253,7 +9314,9 @@ def cmd_changelog_check(args: argparse.Namespace) -> int:
     path = Path(args.file)
     vfile = path.parent / "VERSION"
     version = vfile.read_text(encoding="utf-8").strip() if vfile.is_file() else None
-    errors = changelog_check(path.read_text(encoding="utf-8"), version)
+    archive = path.with_name(f"{path.stem}{ARCHIVE_SUFFIX}{path.suffix}")  # CHANGELOG-ARCHIVE.md (T-3651)
+    old = archive.read_text(encoding="utf-8") if archive.is_file() else ""
+    errors = changelog_check(path.read_text(encoding="utf-8"), version, old)
     for e in errors:
         print(f"✗ {args.file}: {e}")
     if not errors:
@@ -11311,9 +11374,10 @@ def _release_tree(base: Path) -> Dict[str, str]:
 
 
 def _release_prod_switch(base: Path, log: str = "docs/autopilot/DECISIONS.md") -> Dict[str, str]:
-    """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm."""
+    """Đề xuất "Khi chạy thật" (`loop decide --prod`) là việc chủ dự án quyết ở G7 (GO-NO-GO #18) — máy chỉ đếm, trên sổ
+    và các bản tháng của nó (T-3651)."""
     try:
-        text = (base / log).read_text(encoding="utf-8")
+        text = "".join(p.read_text(encoding="utf-8") for p in decision_logs(base / log))
     except FileNotFoundError:
         return _release_row("prod_switch", "N/A", f"không có {log}", "SHOULD")
     except (
@@ -12416,8 +12480,8 @@ def _decision_at(base: Path, did: str, pr: str) -> Optional[_dt.datetime]:
     tìm ở sổ của worktree đang sửa (`loop decide` ghi ở `loop_root`, review #298) rồi sổ của dự án; không có → None."""
     head = re.compile(rf"^### {re.escape(did)} · (\S+) · (.*)$", re.M)
     for root in dict.fromkeys((loop_root(base), base.resolve())):
-        log = root / "docs/autopilot/DECISIONS.md"
-        text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        logs = decision_logs(root / "docs/autopilot/DECISIONS.md")  # kèm bản tháng (T-3651)
+        text = "\n".join(log.read_text(encoding="utf-8", errors="replace") for log in logs if log.is_file())
         for m in head.finditer(text):
             if re.search(rf"#{re.escape(pr)}(?!\d)", m[2]):
                 return _iso_time(m[1])
@@ -12511,8 +12575,23 @@ def _pr_rethink(args: argparse.Namespace, base: Path) -> int:
 QP_OFF = ("-c", "core.quotePath=false")  # tên file có dấu không bị bọc nháy/escape trong `--name-only`
 
 
-def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Optional[str], List[str], str]:
-    """(lỗi đọc git, file mã đổi từ review `last` tới `head`, sổ audit ở head) — so cây `--no-renames`; miễn sổ audit và file
+def _book_rows_at(base: Path, rev: str, need: bool) -> Tuple[Optional[str], List[Dict[str, str]]]:
+    """(lỗi git, dòng `## Phát hiện` của sổ audit rồi sổ lưu trữ ở commit `rev`) — đường dẫn tính từ dự án (`./`,
+    AUD-HAR-155). File vắng ở `rev` thì bỏ (T-3651: lưu trữ là tuỳ chọn), trừ sổ khi `need` (vắng → lỗi `git show`)."""
+    books = (AUDIT_STATUS_DEFAULT, AUDIT_ARCHIVE_DEFAULT)
+    listed = _git(base, "ls-tree", "--name-only", rev, "--", *books)
+    have = set(listed.stdout.splitlines()) | ({AUDIT_STATUS_DEFAULT} if need else set())
+    shows = [_git(base, "show", f"{rev}:./{b}") for b in books if b in have]
+    bad = next((r for r in (listed, *shows) if r.returncode), None)
+    if bad is not None:
+        return _one_line(bad.stderr), []
+    return None, [r for s in shows for r in md_tables(s.stdout).get("Phát hiện", [])]
+
+
+def _review_drift(
+    base: Path, last: str, head: str, target: str
+) -> Tuple[Optional[str], List[str], List[Dict[str, str]]]:
+    """(lỗi đọc git, file mã đổi từ review `last` tới `head`, dòng sổ audit + lưu trữ ở head) — so cây `--no-renames`; miễn sổ audit, sổ lưu trữ (T-3651) và file
     giống hệt nhánh đích `origin/<target>` (cập nhật nhánh) trừ file PR đã đổi lúc review: trả nó về bản nhánh đích hay
     xoá file PR thêm là sửa thêm chưa ai rà (AUD-SEC-154). Dùng chung cho `pr debt` và `pr rethink` (AUD-HAR-135). Dự án
     ở thư mục con (`apps/web`): sổ đọc từ dự án (`./`), miễn theo tiền tố dự án (thô, nên diff tắt quotePath); file ngoài
@@ -12521,20 +12600,23 @@ def _review_drift(base: Path, last: str, head: str, target: str) -> Tuple[Option
     other = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", f"origin/{target}", head)
     fork = _git(base, "merge-base", f"origin/{target}", last)
     prefix = _git(base, "rev-parse", "--show-prefix")
-    show = _git(base, "show", f"{head}:./{AUDIT_STATUS_DEFAULT}")
     reviewed = _git(base, *QP_OFF, "diff", "--no-renames", "--name-only", fork.stdout.strip() or last, last)
-    bad = next((r for r in (since, other, fork, prefix, show, reviewed) if r.returncode), None)
-    if bad is not None:
+    bad = next((r for r in (since, other, fork, prefix, reviewed) if r.returncode), None)
+    why, rows = (
+        (_one_line(bad.stderr) or "không có tổ tiên chung — clone nông? `git fetch --unshallow`", [])
+        if bad is not None
+        else _book_rows_at(base, head, True)
+    )
+    if why is not None:
         return (
-            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head"
-            f" ({_one_line(bad.stderr) or 'không có tổ tiên chung — clone nông? `git fetch --unshallow`'})"
+            f"không đọc được cây {last[:7]}, {head[:7]}, origin/{target} hoặc sổ ở head ({why})"
             " — fetch nhánh PR và nhánh đích rồi chạy lại",
             [],
-            "",
+            [],
         )
     mine = set(other.stdout.splitlines()) | set(reviewed.stdout.splitlines())
-    book = prefix.stdout.strip() + AUDIT_STATUS_DEFAULT
-    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - {book}), show.stdout
+    books = {prefix.stdout.strip() + b for b in (AUDIT_STATUS_DEFAULT, AUDIT_ARCHIVE_DEFAULT)}
+    return None, sorted({f for f in since.stdout.splitlines() if f in mine} - books), rows
 
 
 def _debt_row_problem(rows: Dict[str, Dict[str, str]], key: str, head: str, i: str, fixed: bool) -> Optional[str]:
@@ -12571,7 +12653,7 @@ def _debt_problem(
     if not (ids or fixed) or any(not REQ_ID_RE.fullmatch(i) for i in [*ids, *fixed]):
         return "--findings/--fixed cần ≥ 1 ID sổ audit (AUD-…), cách nhau bằng dấu phẩy"
     last = str([r for r in rec["reviews"] if not r.get("clean")][-1].get("head"))  # `pr next` = debt: blocking kết luận
-    error, extra, ledger = _review_drift(base, last, head, target)
+    error, extra, ledger = _review_drift(base, last, head, target)  # dòng sổ + lưu trữ ở head (T-3651)
     if error:
         return error
     if fixed and not any(_is_test_path(p) for p in extra):  # ADR-0062 §2: bản sửa 🔴 kèm test hồi quy (AUD-HAR-182)
@@ -12585,7 +12667,7 @@ def _debt_problem(
             f" {AUDIT_STATUS_DEFAULT}, hoặc bản sửa 🔴 thì khai --fixed <ID 🔴 `đã sửa`> — nếu đó là cập nhật nhánh mà"
             f" origin/{target} cục bộ cũ: `git fetch origin {target}` rồi chạy lại (AUD-HAR-133)"
         )
-    rows = {r.get("ID", ""): r for r in md_tables(ledger).get("Phát hiện", [])}
+    rows = {r.get("ID", ""): r for r in ledger}
     probs = [_debt_row_problem(rows, key, head, i, False) for i in ids]
     probs += [_debt_row_problem(rows, key, head, i, True) for i in fixed]
     return next((p for p in probs if p), None) or (_debt_fixed_reused(base, last, fixed) if fixed else None)
@@ -12594,16 +12676,15 @@ def _debt_problem(
 def _debt_fixed_reused(base: Path, last: str, fixed: Sequence[str]) -> Optional[str]:
     """AUD-HAR-182: dòng 🔴 khai `--fixed` phải CHƯA `đã sửa` ở sổ tại head review không sạch cuối `last` — dòng đã sửa từ
     trước (lượt/PR khác) không phải bản sửa sau review này. Sổ chưa có ở `last` → không dòng nào cũ; không đọc được cây/sổ
-    ở `last` → từ chối (fail-closed). Đường dẫn sổ tính từ dự án (`./`, như `_review_drift`)."""
-    listed = _git(base, "ls-tree", "--name-only", last, "--", AUDIT_STATUS_DEFAULT)
-    show = _git(base, "show", f"{last}:./{AUDIT_STATUS_DEFAULT}") if listed.stdout.strip() else listed
-    bad = next((r for r in (listed, show) if r.returncode), None)
-    if bad is not None:
+    ở `last` → từ chối (fail-closed). Đọc cả sổ lưu trữ (T-3651): dòng đã sửa dời sang đó vẫn là dòng cũ. Đường dẫn sổ
+    tính từ dự án (`./`, như `_review_drift`)."""
+    why, found = _book_rows_at(base, last, False)
+    if why is not None:
         return (
-            f"không đọc được {AUDIT_STATUS_DEFAULT} ở review {last[:7]} ({_one_line(bad.stderr)}) — không kiểm được"
+            f"không đọc được {AUDIT_STATUS_DEFAULT} ở review {last[:7]} ({why}) — không kiểm được"
             " dòng --fixed chưa `đã sửa` lúc review; fetch nhánh PR rồi chạy lại"
         )
-    rows = {r.get("ID", ""): r for r in md_tables(show.stdout).get("Phát hiện", [])}
+    rows = {r.get("ID", ""): r for r in found}
     old = [i for i in fixed if rows.get(i, {}).get("Trạng thái") == "đã sửa"]
     if old:
         return (
@@ -13941,7 +14022,7 @@ def autonomy_required(base: Path, remediation: str, status: str) -> Dict[str, Li
         text = ""
     sec2 = text.split("\n## 2.", 1)[-1].split("\n## 3.", 1)[0] if "\n## 2." in text else ""
     try:
-        rows = md_tables((base / status).read_text(encoding="utf-8")).get("Phát hiện", [])
+        rows = audit_findings(base / status)  # cả sổ lưu trữ: ID 🔴/🟠 đã sửa dời đi không mất phủ (T-3651)
     except OSError:
         rows = []
     fixed = [r["ID"] for r in rows if r.get("Mức") in ("🔴", "🟠") and r.get("Trạng thái") == "đã sửa" and r.get("ID")]
