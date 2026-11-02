@@ -601,6 +601,8 @@ def install_framework(xt_dir: Path, label: str | None) -> str:
     (xt_dir / "scripts").mkdir(exist_ok=True)
     for f in ("xt.py", "dev-task.sh", "check-links.py", "xt_adapter.py"):
         drop_symlink(xt_dir / "scripts" / f)
+        if f == "xt_adapter.py" and not (SRC / "scripts" / f).is_file():  # khung tối giản/bản cũ: không có adapter
+            continue
         shutil.copy2(SRC / "scripts" / f, xt_dir / "scripts" / f)
     (xt_dir / "scripts" / "dev-task.sh").chmod(0o755)
     # App cục bộ `xt.py app` (ADR-0038): gói máy chủ + giao diện tĩnh cạnh xt.py, luôn thay như xt.py.

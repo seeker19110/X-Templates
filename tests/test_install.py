@@ -38,6 +38,9 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.run_install(), 0)
         self.assertTrue((self.target / ".xtemplates" / "framework" / "00-method" / "conventions.md").exists())
         self.assertTrue((self.target / ".xtemplates" / "scripts" / "xt.py").exists())
+        self.assertTrue(
+            (self.target / ".xtemplates" / "scripts" / "xt_adapter.py").is_file()
+        )  # adapter host khác (ADR-0064)
         self.assertEqual((self.target / ".xtemplates" / "VERSION").read_text(encoding="utf-8").strip(), "test")
         self.assertTrue((self.target / ".claude" / "settings.json").exists())
         self.assertTrue((self.target / ".claude" / "hooks" / "stop-guard.sh").exists())
@@ -854,6 +857,7 @@ class InstallEdgeTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         xt_dir = self.target / ".xtemplates"
         self.assertFalse((xt_dir / "research").exists())
+        self.assertFalse((xt_dir / "scripts" / "xt_adapter.py").exists())  # khung tối giản không có adapter
         self.assertTrue((xt_dir / "framework" / "x.md").exists())
         self.assertEqual((xt_dir / "VERSION").read_text(encoding="utf-8"), "t\n")
         self.assertFalse((self.target / "AGENTS.md").exists())  # không có mẫu → không tạo
