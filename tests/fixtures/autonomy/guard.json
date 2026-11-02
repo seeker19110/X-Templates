@@ -15856,6 +15856,182 @@
    "allowed": true
   },
   "note": "review #404 (T-3637)"
+ },
+ {
+  "id": "t3633-248-cp-T",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "cp -rT src docs/autopilot"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-tar-C",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "tar -C docs -xf src.tar"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-glob",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "sed -i s/a/b/ docs/autopilot/*"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-copytree",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "python3 -c 'import shutil; shutil.copytree(\"src\", \"docs/autopilot\", dirs_exist_ok=True)'"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "EVIDENCE_HANDWRITE"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-248-control-plan",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-248"
+  ],
+  "input": {
+   "command": "sed -i s/a/b/ docs/autopilot/PLAN-*.md"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-307-subprocess-c",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-307"
+  ],
+  "input": {
+   "command": "python3 -c 'import subprocess; subprocess.run([\"bash\",\"-c\",\"echo {#,a}; rm -rf {~,x}\"])'"
+  },
+  "expect": {
+   "allowed": false
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-307-control-system",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-307"
+  ],
+  "input": {
+   "command": "python3 -c 'import os; os.system(\"ls -la\")'"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-332-mksh",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-332"
+  ],
+  "input": {
+   "command": "cat f.sh | mksh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-332-busybox",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-332"
+  ],
+  "input": {
+   "command": "cat f.sh | busybox sh"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-333-eval-procsub",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-333"
+  ],
+  "input": {
+   "command": "eval <(cat f)"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-334-xargs-I",
+  "origin": "repro",
+  "refs": [
+   "AUD-SEC-334"
+  ],
+  "input": {
+   "command": "cat f.sh | xargs -I{} bash -c {}"
+  },
+  "expect": {
+   "allowed": false,
+   "code": "BUDGET"
+  },
+  "note": "T-3633"
+ },
+ {
+  "id": "t3633-334-control-xargs-echo",
+  "origin": "control",
+  "refs": [
+   "AUD-SEC-334"
+  ],
+  "input": {
+   "command": "printf 'a\\nb\\n' | xargs -I{} echo {}"
+  },
+  "expect": {
+   "allowed": true
+  },
+  "note": "T-3633"
  }
  ]
 }
